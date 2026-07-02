@@ -1,0 +1,286 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  min-height: 100%;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Thin scrollbar for horizontal tag list */
+.ncs-thin-scrollbar::-webkit-scrollbar {
+  height: 4px;
+}
+.ncs-thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ncs-thin-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+}
+.ncs-thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Placeholder for contenteditable */
+.tc-agent-composer-editor:empty::before {
+  content: attr(data-placeholder);
+  color: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  display: block;
+  white-space: pre-wrap;
+}
+
+/* AI image tab editor placeholder */
+.tc-agent-image-editor:empty::before {
+  content: attr(data-placeholder);
+  color: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  display: block;
+  white-space: pre-wrap;
+}
+
+/* Skill panel switch */
+.tc-agent-skill-row__switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 44px;
+  height: 24px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.12);
+  padding: 2px;
+  border: none;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.tc-agent-skill-row__switch[aria-checked="true"] {
+  background: #22c55e;
+}
+
+.tc-agent-skill-row__switch-label {
+  position: absolute;
+  left: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  color: white;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.tc-agent-skill-row__switch[aria-checked="true"] .tc-agent-skill-row__switch-label {
+  opacity: 1;
+}
+
+.tc-agent-skill-row__switch-thumb {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transform: translateX(0);
+  transition: transform 150ms ease;
+}
+
+.tc-agent-skill-row__switch[aria-checked="true"] .tc-agent-skill-row__switch-thumb {
+  transform: translateX(20px);
+}
+
+.tc-agent-skill-panel__tab--selected {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.tc-agent-skill-create__mode-btn--active {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+/* Canvas page tokens */
+:root {
+  --tc-bg: #000000;
+  --tc-bg-surface: #1a1a1a;
+  --tc-bg-elevated: #2a2a2a;
+  --tc-bg-overlay: rgba(0, 0, 0, 0.72);
+
+  --tc-text-primary: #ffffff;
+  --tc-text-secondary: rgba(255, 255, 255, 0.7);
+  --tc-text-muted: rgba(255, 255, 255, 0.4);
+  --tc-text-tertiary: rgba(255, 255, 255, 0.55);
+
+  --tc-border: rgba(255, 255, 255, 0.1);
+  --tc-border-subtle: rgba(255, 255, 255, 0.08);
+  --tc-border-active: rgba(255, 255, 255, 0.16);
+
+  --tc-ring: rgba(59, 130, 246, 0.5);
+  --tc-accent: #3b82f6;
+  --tc-destructive: #ef4444;
+
+  --tc-card-hover-stroke: rgba(156, 156, 156, 0.58);
+  --tc-card-hover-shadow: 0 0 0 3px rgba(142, 142, 142, 0.12), 0 12px 32px rgba(0, 0, 0, 0.34);
+  --tc-card-selected-stroke: rgba(235, 235, 235, 0.88);
+  --tc-card-selected-shadow: 0 0 0 1px rgba(0, 0, 0, 0.72), 0 0 0 5px rgba(210, 210, 210, 0.18), 0 14px 38px rgba(0, 0, 0, 0.42);
+
+  --tc-menu-pill-bg: #171717;
+  --tc-menu-pill-border: rgba(255, 255, 255, 0.04);
+  --tc-menu-pill-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --tc-menu-item-hover: rgba(255, 255, 255, 0.08);
+  --tc-menu-item-label: rgba(255, 255, 255, 0.9);
+
+  --tc-dock-control-bg: transparent;
+  --tc-dock-control-hover-bg: rgba(255, 255, 255, 0.12);
+  --tc-dock-control-active-bg: rgba(255, 255, 255, 0.12);
+
+  --tc-ease-enter: cubic-bezier(0.23, 1, 0.32, 1);
+  --tc-enter-distance-chrome: 24px;
+  --tc-enter-distance-agent: 32px;
+  --tc-enter-duration-chrome: 380ms;
+  --tc-enter-duration-agent: 400ms;
+  --tc-enter-duration-settle: 600ms;
+  --tc-flow-zoom: 1;
+  --tc-node-toolbar-scale: 1;
+  --tc-node-toolbar-offset: 28px;
+  --tc-canvas-right-occupied: 484px;
+  --tc-agent-panel-width: 468px;
+  --tc-agent-composer-width: 460px;
+}
+
+/* Toolbar enter animations */
+@keyframes tc-enter-left {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.tc-enter {
+  animation-fill-mode: both;
+}
+
+.tc-enter--left {
+  animation-name: tc-enter-left;
+  animation-duration: 450ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tc-enter-d3 {
+  animation-delay: 300ms;
+}
+
+/* Toolbar button hover */
+.tc-ui-glow-btn {
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+/* Canvas textarea scrollbar */
+.tc-panel-textarea-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.tc-panel-textarea-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.tc-panel-textarea-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+.tc-panel-textarea-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Agent thinking block */
+.tc-agent-thinking-content-wrap {
+  position: relative;
+  max-height: 240px;
+  overflow: hidden;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  display: flex;
+  gap: 8px;
+}
+
+.tc-agent-thinking-content {
+  flex: 1 1 0%;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.8);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.tc-agent-thinking-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.tc-agent-thinking-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tc-agent-thinking-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+
+.tc-agent-thinking-scrollbar {
+  position: absolute;
+  top: 8px;
+  right: 4px;
+  width: 4px;
+  bottom: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.tc-agent-thinking-scrollbar__thumb {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+/* Simple tooltip for data-tooltip */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::before {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%) translateY(-4px);
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.85);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  z-index: 100;
+}
+
+[data-tooltip]:hover::before {
+  opacity: 1;
+}
