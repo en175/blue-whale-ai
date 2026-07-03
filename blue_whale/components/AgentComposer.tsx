@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import SkillPanel from "./SkillPanel";
+import { AspectRatioIcon } from "./icons/AspectRatioIcon";
 
 const TABS = [
   { id: "agent", label: "视频智能体", hasCanvas: true },
@@ -80,29 +81,6 @@ const VIDEO_ASPECT_RATIOS = [
   { id: "9:16", label: "9:16" },
   { id: "21:9", label: "21:9" },
 ];
-
-function AspectRatioIcon({ ratio }: { ratio: string }) {
-  const rect = {
-    "16:9": { x: 1, y: 4.5, width: 16, height: 9, rx: 1.5 },
-    "4:3": { x: 1.75, y: 3.5, width: 14.5, height: 11, rx: 1.5 },
-    "1:1": { x: 3, y: 3, width: 12, height: 12, rx: 1.5 },
-    "3:4": { x: 3.5, y: 1.75, width: 11, height: 14.5, rx: 1.5 },
-    "9:16": { x: 4.5, y: 1, width: 9, height: 16, rx: 1.5 },
-    "2:3": { x: 3, y: 3, width: 12, height: 12, rx: 1.5 },
-    "3:2": { x: 3, y: 3, width: 12, height: 12, rx: 1.5 },
-    "5:4": { x: 3, y: 3, width: 12, height: 12, rx: 1.5 },
-    "4:5": { x: 3, y: 3, width: 12, height: 12, rx: 1.5 },
-    "21:9": { x: 3, y: 3, width: 12, height: 12, rx: 1.5 },
-    "9:21": { x: 3, y: 3, width: 12, height: 12, rx: 1.5 },
-    "1:2": { x: 3, y: 3, width: 12, height: 12, rx: 1.5 },
-    "2:1": { x: 3, y: 3, width: 12, height: 12, rx: 1.5 },
-  }[ratio];
-  return (
-    <svg width={16} height={16} viewBox="0 0 18 18" fill="none" className="shrink-0">
-      <rect {...rect} stroke="currentColor" strokeWidth={1.4} fill="currentColor" fillOpacity={0.12} />
-    </svg>
-  );
-}
 
 const RESOLUTIONS = [
   { id: "480p", label: "480p" },

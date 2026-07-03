@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect, useId, Suspense } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
+  ArrowLeftRight,
   AtSign,
   AudioLines,
   BookOpenText,
@@ -38,6 +40,8 @@ import {
 } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import SkillPanel from "@/components/SkillPanel";
+import { ImageModelSettingsPopover, IMAGE_MODELS, IMAGE_RESOLUTIONS, IMAGE_ASPECT_RATIOS } from "@/components/ImageModelSettingsPopover";
+import { AspectRatioIcon } from "@/components/icons/AspectRatioIcon";
 
 // ---------- Types ----------
 
@@ -60,6 +64,14 @@ type NodeItem = {
   content?: string;
   imageUrl?: string;
   selected?: boolean;
+};
+
+// 画布素材带入 Dock 时使用的素材形状
+type DockMediaItem = {
+  id: string;
+  type: "image" | "video" | "audio";
+  name: string;
+  src?: string;
 };
 
 type Viewport = {
@@ -1092,6 +1104,7 @@ function NodeToolbar({ node, onAction }: { node: NodeItem; onAction?: (id: strin
     <div
       className="tc-node-toolbar absolute z-[120] -translate-x-1/2 -translate-y-full rounded-[14px] bg-[#1a1a1a]/95 px-2 py-1.5 flex items-center gap-1 border border-white/[0.08] backdrop-blur-md"
       style={{ left: node.x + node.width / 2, top: node.y - 8 }}
+      onPointerDown={(e) => e.stopPropagation()}
     >
       {NODE_TOOLBAR_ACTIONS.map((action) => {
         if (action.id.startsWith("divider")) {
@@ -1108,8 +1121,9 @@ function NodeToolbar({ node, onAction }: { node: NodeItem; onAction?: (id: strin
             />
           );
         }
+        if (action.hidden) return null;
         return (
-          <div key={action.id} className="tc-node-toolbar-action" style={{ position: "relative", ...(action.hidden ? { display: "none" } : {}) }}>
+          <div key={action.id} className="tc-node-toolbar-action" style={{ position: "relative" }}>
             <button
               type="button"
               aria-label={action.label}
@@ -1136,6 +1150,7 @@ function CanvasSurface({
   setViewport,
   setNodes,
   setSelectedId,
+  onNodeAction,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   viewport: Viewport;
@@ -1144,6 +1159,7 @@ function CanvasSurface({
   setViewport: React.Dispatch<React.SetStateAction<Viewport>>;
   setNodes: React.Dispatch<React.SetStateAction<NodeItem[]>>;
   setSelectedId: (id: string | null) => void;
+  onNodeAction?: (node: NodeItem, actionId: string) => void;
 }) {
   const dragRef = useRef<{
     mode: "pan" | "node" | null;
@@ -1267,11 +1283,16 @@ function CanvasSurface({
   const handleToolbarAction = useCallback(
     (actionId: string) => {
       if (actionId === "delete" && selectedId) {
-        setNodes((prev) => prev.filter((n) => n.id !== selectedId));
+        setNodes((prev) => prev.filter((n) => n.id === selectedId));
         setSelectedId(null);
+        return;
+      }
+      // 其它动作上抛到顶层（带当前选中节点），由 CanvasPageInner 统一分发
+      if (selectedNode && onNodeAction) {
+        onNodeAction(selectedNode, actionId);
       }
     },
-    [selectedId, setNodes, setSelectedId]
+    [selectedId, setNodes, setSelectedId, selectedNode, onNodeAction]
   );
 
   return (
@@ -1335,28 +1356,62 @@ const VIDEO_RESOLUTIONS = [
   { id: "2160p", label: "2160p" },
 ];
 
-const VIDEO_DURATIONS = [
-  { id: "5s", label: "5s" },
-  { id: "10s", label: "10s" },
-  { id: "15s", label: "15s" },
-];
+const VIDEO_DURATION_MIN = 4;
+const VIDEO_DURATION_MAX = 15;
+const VIDEO_DURATION_STEP = 1;
+const VIDEO_DURATION_TICKS = Array.from(
+  { length: (VIDEO_DURATION_MAX - VIDEO_DURATION_MIN) / VIDEO_DURATION_STEP + 1 },
+  (_, i) => VIDEO_DURATION_MIN + i * VIDEO_DURATION_STEP,
+);
 
 const REF_MODES = [
   { id: "omni", label: "全能参考" },
   { id: "first-last", label: "首尾帧" },
-  { id: "text-to-video", label: "Text to Video" },
 ];
 
-const QUANTITIES = ["1x", "2x", "4x"];
+const QUANTITIES = ["1x", "2x", "3x", "4x"];
 
 type ImageDockContentProps = {
   editorRef: React.RefObject<HTMLDivElement | null>;
   isEmpty: boolean;
   onInput: () => void;
   onClose: () => void;
+  media?: DockMediaItem[];
+  onRemoveMedia?: (id: string) => void;
 };
 
-function ImageDockContent({ editorRef, isEmpty, onInput, onClose }: ImageDockContentProps) {
+function ImageDockContent({ editorRef, isEmpty, onInput, onClose, media = [], onRemoveMedia }: ImageDockContentProps) {
+  const settingsRef = useRef<HTMLButtonElement>(null);
+  const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
+  const [selectedModel, setSelectedModel] = useState(IMAGE_MODELS[0]);
+  const [selectedResolution, setSelectedResolution] = useState(IMAGE_RESOLUTIONS[0]);
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState(IMAGE_ASPECT_RATIOS[2]);
+
+  const quantityRef = useRef<HTMLButtonElement>(null);
+  const quantityMenuRef = useRef<HTMLDivElement>(null);
+  const [quantityOpen, setQuantityOpen] = useState(false);
+  const [quantity, setQuantity] = useState("1x");
+  const [quantityPos, setQuantityPos] = useState<{ left: number; bottom: number }>({ left: 0, bottom: 0 });
+
+  useEffect(() => {
+    if (quantityOpen && quantityRef.current) {
+      const rect = quantityRef.current.getBoundingClientRect();
+      setQuantityPos({ left: rect.left, bottom: window.innerHeight - rect.top + 8 });
+    }
+  }, [quantityOpen]);
+
+  useEffect(() => {
+    if (!quantityOpen) return;
+    const handle = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (quantityRef.current?.contains(t)) return;
+      if (quantityMenuRef.current?.contains(t)) return;
+      setQuantityOpen(false);
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [quantityOpen]);
+
   return (
     <>
       <div
@@ -1408,32 +1463,36 @@ function ImageDockContent({ editorRef, isEmpty, onInput, onClose }: ImageDockCon
                 </div>
 
                 <div style={{ display: "flex", alignItems: "flex-start", flexWrap: "wrap", gap: 6, paddingLeft: 4 }}>
-                  <div style={{ position: "relative", flexShrink: 0 }}>
-                    <button
-                      type="button"
-                      aria-label="Upload reference image"
-                      style={{
-                        position: "relative",
-                        width: 44,
-                        height: 44,
-                        padding: 0,
-                        borderRadius: 9,
-                        border: "1px solid rgba(255, 255, 255, 0.02)",
-                        background: "rgba(255, 255, 255, 0.043)",
-                        color: "rgba(255, 255, 255, 0.62)",
-                        cursor: "pointer",
-                        opacity: 1,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        overflow: "hidden",
-                        transition: "background 120ms, color 120ms",
-                        flexShrink: 0,
-                      }}
-                    >
-                      <ImageIcon width={18} height={18} stroke="currentColor" strokeWidth={1.8} aria-hidden="true" />
-                    </button>
-                  </div>
+                  {media.length > 0
+                    ? media.map((m) => <DockMediaThumb key={m.id} item={m} onRemove={onRemoveMedia} />)
+                    : (
+                      <div style={{ position: "relative", flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          aria-label="Upload reference image"
+                          style={{
+                            position: "relative",
+                            width: 44,
+                            height: 44,
+                            padding: 0,
+                            borderRadius: 9,
+                            border: "1px solid rgba(255, 255, 255, 0.02)",
+                            background: "rgba(255, 255, 255, 0.043)",
+                            color: "rgba(255, 255, 255, 0.62)",
+                            cursor: "pointer",
+                            opacity: 1,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            overflow: "hidden",
+                            transition: "background 120ms, color 120ms",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <ImageIcon width={18} height={18} stroke="currentColor" strokeWidth={1.8} aria-hidden="true" />
+                        </button>
+                      </div>
+                    )}
                 </div>
 
                 <div style={{ position: "relative", flex: "1 1 0%", minWidth: 0 }}>
@@ -1525,7 +1584,10 @@ function ImageDockContent({ editorRef, isEmpty, onInput, onClose }: ImageDockCon
         </div>
 
         <button
+          ref={settingsRef}
           type="button"
+          onClick={() => setModelSettingsOpen((v) => !v)}
+          aria-label="图像模型设置"
           style={{
             height: 32,
             borderRadius: 8,
@@ -1562,28 +1624,42 @@ function ImageDockContent({ editorRef, isEmpty, onInput, onClose }: ImageDockCon
           >
             <Settings2 width={14} height={14} stroke="currentColor" strokeWidth={2} aria-hidden="true" />
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textAlign: "left", fontSize: 12 }}>
-              GPT Image 2
+              {selectedModel.label}
             </span>
           </div>
           <span
             aria-hidden="true"
             style={{ width: 1, height: 8, flexShrink: 0, alignSelf: "center", background: "rgba(255, 255, 255, 0.08)", borderRadius: 1 }}
           />
-          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "0px 8px" }}>1:1</div>
+          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "0px 8px" }}>{selectedAspectRatio.label}</div>
           <span
             aria-hidden="true"
             style={{ width: 1, height: 8, flexShrink: 0, alignSelf: "center", background: "rgba(255, 255, 255, 0.08)", borderRadius: 1 }}
           />
-          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "0px 8px" }}>1K</div>
+          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "0px 8px" }}>{selectedResolution.label}</div>
         </button>
+
+        <ImageModelSettingsPopover
+          triggerRef={settingsRef}
+          open={modelSettingsOpen}
+          onClose={() => setModelSettingsOpen(false)}
+          selectedModel={selectedModel}
+          onModelChange={setSelectedModel}
+          selectedResolution={selectedResolution}
+          onResolutionChange={setSelectedResolution}
+          selectedAspectRatio={selectedAspectRatio}
+          onAspectRatioChange={setSelectedAspectRatio}
+        />
 
         <div style={{ flex: "1 1 0%" }} />
 
         <button
+          ref={quantityRef}
           type="button"
           aria-haspopup="listbox"
-          aria-expanded={false}
+          aria-expanded={quantityOpen}
           aria-label="生成数量"
+          onClick={() => setQuantityOpen((v) => !v)}
           style={{
             height: 32,
             borderRadius: 8,
@@ -1609,8 +1685,78 @@ function ImageDockContent({ editorRef, isEmpty, onInput, onClose }: ImageDockCon
             overflow: "hidden",
           }}
         >
-          <span style={{ fontSize: 12, lineHeight: "16px", fontWeight: 600 }}>1x</span>
+          <span style={{ fontSize: 12, lineHeight: "16px", fontWeight: 600 }}>{quantity}</span>
         </button>
+
+        {quantityOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              ref={quantityMenuRef}
+              data-tc-dock-popover=""
+              role="listbox"
+              aria-label="选择生成数量"
+              style={{
+                position: "fixed",
+                left: quantityPos.left,
+                bottom: quantityPos.bottom,
+                width: "max-content",
+                minWidth: 120,
+                padding: "4px 8px",
+                borderRadius: 8,
+                background: "rgb(30, 30, 30)",
+                border: "1px solid rgba(255, 255, 255, 0.04)",
+                boxShadow: "rgba(0, 0, 0, 0.25) 0px 4px 16px",
+                zIndex: 2147483602,
+                display: "flex",
+                flexDirection: "column",
+                gap: 0,
+                boxSizing: "border-box",
+                opacity: 1,
+                transform: "scale(1) translateY(0px)",
+                transformOrigin: "left bottom",
+                transition:
+                  "opacity 250ms cubic-bezier(0.16, 1, 0.3, 1), transform 250ms cubic-bezier(0.16, 1, 0.3, 1)",
+              }}
+            >
+              {QUANTITIES.map((q) => {
+                const selected = quantity === q;
+                return (
+                  <button
+                    key={q}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onClick={() => {
+                      setQuantity(q);
+                      setQuantityOpen(false);
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "7px 10px",
+                      border: 0,
+                      borderRadius: 6,
+                      background: selected ? "rgba(255, 255, 255, 0.08)" : "transparent",
+                      color: selected ? "rgba(255, 255, 255, 0.85)" : "rgba(255, 255, 255, 0.45)",
+                      fontSize: 12,
+                      lineHeight: "16px",
+                      fontWeight: selected ? 500 : 400,
+                      cursor: "pointer",
+                      textAlign: "left",
+                      whiteSpace: "nowrap",
+                      transition: "background 80ms",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    {q}
+                  </button>
+                );
+              })}
+            </div>,
+            document.body,
+          )}
 
         <div style={{ display: "flex", alignItems: "center" }}>
           <div style={{ position: "relative", display: "inline-flex" }}>
@@ -1709,6 +1855,94 @@ function MediaUploadButton({
   );
 }
 
+function FrameUploadButton({ label }: { label: string }) {
+  return (
+    <div style={{ position: "relative", flexShrink: 0 }}>
+      <input type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" aria-hidden="true" style={{ display: "none" }} />
+      <button
+        type="button"
+        aria-label={label}
+        style={{
+          width: 48,
+          height: 48,
+          aspectRatio: "1 / 1",
+          padding: 0,
+          boxSizing: "border-box",
+          borderRadius: 12,
+          flexShrink: 0,
+          border: "1.5px dashed rgba(255, 255, 255, 0.08)",
+          background: "rgba(255, 255, 255, 0.04)",
+          color: "rgba(255, 255, 255, 0.3)",
+          cursor: "pointer",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 2,
+          fontSize: 9,
+          fontWeight: 500,
+          transition: "120ms",
+        }}
+      >
+        <span style={{ opacity: 0.4, flexShrink: 0 }}>
+          <IconPlus size={14} />
+        </span>
+        <span style={{ color: "rgba(255, 255, 255, 0.25)" }}>{label}</span>
+      </button>
+    </div>
+  );
+}
+
+// 底部 Dock 里的素材缩略图，带右上角删除按钮
+function DockMediaThumb({ item, onRemove }: { item: DockMediaItem; onRemove?: (id: string) => void }) {
+  return (
+    <div style={{ position: "relative", flexShrink: 0 }}>
+      <img
+        src={item.src}
+        alt={item.name}
+        title={item.name}
+        draggable={false}
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: 9,
+          objectFit: "cover",
+          flexShrink: 0,
+          display: "block",
+          border: "1px solid rgba(255, 255, 255, 0.08)",
+        }}
+      />
+      {onRemove && (
+        <button
+          type="button"
+          aria-label={`移除 ${item.name}`}
+          onClick={() => onRemove(item.id)}
+          style={{
+            position: "absolute",
+            top: -6,
+            right: -6,
+            width: 16,
+            height: 16,
+            borderRadius: "50%",
+            border: 0,
+            background: "rgba(0, 0, 0, 0.7)",
+            color: "rgba(255, 255, 255, 0.85)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 0,
+            zIndex: 1,
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          <X width={10} height={10} strokeWidth={2.5} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 type VideoDockContentProps = {
   editorRef: React.RefObject<HTMLDivElement | null>;
   isEmpty: boolean;
@@ -1726,8 +1960,8 @@ type VideoDockContentProps = {
   setAspectRatio: (r: { id: string; label: string }) => void;
   resolution: { id: string; label: string };
   setResolution: (r: { id: string; label: string }) => void;
-  duration: { id: string; label: string };
-  setDuration: (d: { id: string; label: string }) => void;
+  duration: number;
+  setDuration: (d: number) => void;
   quantity: string;
   setQuantity: (q: string) => void;
   quantityOpen: boolean;
@@ -1736,6 +1970,8 @@ type VideoDockContentProps = {
   setAdvancedOpen: (v: boolean) => void;
   internetSearch: boolean;
   setInternetSearch: (v: boolean) => void;
+  media?: DockMediaItem[];
+  onRemoveMedia?: (id: string) => void;
 };
 
 function VideoDockContent(props: VideoDockContentProps) {
@@ -1766,16 +2002,51 @@ function VideoDockContent(props: VideoDockContentProps) {
     setAdvancedOpen,
     internetSearch,
     setInternetSearch,
+    media = [],
+    onRemoveMedia,
   } = props;
 
   const refModeRef = useRef<HTMLDivElement>(null);
-  const modelSettingsRef = useRef<HTMLDivElement>(null);
+  const refModeMenuRef = useRef<HTMLDivElement>(null);
+  const modelSettingsRef = useRef<HTMLButtonElement>(null);
+  const modelSettingsMenuRef = useRef<HTMLDivElement>(null);
   const quantityRef = useRef<HTMLDivElement>(null);
+  const quantityMenuRef = useRef<HTMLDivElement>(null);
+
+  const [refModePos, setRefModePos] = useState<{ left: number; bottom: number }>({ left: 0, bottom: 0 });
+  const [modelSettingsPos, setModelSettingsPos] = useState<{ left: number; bottom: number }>({ left: 0, bottom: 0 });
+  const [quantityPos, setQuantityPos] = useState<{ left: number; bottom: number }>({ left: 0, bottom: 0 });
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [resolutionDropdownOpen, setResolutionDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    if (refModeOpen && refModeRef.current) {
+      const rect = refModeRef.current.getBoundingClientRect();
+      setRefModePos({ left: rect.left, bottom: window.innerHeight - rect.top + 8 });
+    }
+  }, [refModeOpen]);
+
+  useEffect(() => {
+    if (modelSettingsOpen && modelSettingsRef.current) {
+      const rect = modelSettingsRef.current.getBoundingClientRect();
+      setModelSettingsPos({ left: rect.left, bottom: window.innerHeight - rect.top + 8 });
+    }
+  }, [modelSettingsOpen]);
+
+  useEffect(() => {
+    if (quantityOpen && quantityRef.current) {
+      const rect = quantityRef.current.getBoundingClientRect();
+      setQuantityPos({ left: rect.left, bottom: window.innerHeight - rect.top + 8 });
+    }
+  }, [quantityOpen]);
 
   useEffect(() => {
     if (!refModeOpen) return;
     const handle = (e: MouseEvent) => {
-      if (!refModeRef.current?.contains(e.target as Node)) setRefModeOpen(false);
+      const t = e.target as Node;
+      if (refModeRef.current?.contains(t)) return;
+      if (refModeMenuRef.current?.contains(t)) return;
+      setRefModeOpen(false);
     };
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
@@ -1784,7 +2055,12 @@ function VideoDockContent(props: VideoDockContentProps) {
   useEffect(() => {
     if (!modelSettingsOpen) return;
     const handle = (e: MouseEvent) => {
-      if (!modelSettingsRef.current?.contains(e.target as Node)) setModelSettingsOpen(false);
+      const t = e.target as Node;
+      if (modelSettingsRef.current?.contains(t)) return;
+      if (modelSettingsMenuRef.current?.contains(t)) return;
+      setModelSettingsOpen(false);
+      setModelDropdownOpen(false);
+      setResolutionDropdownOpen(false);
     };
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
@@ -1793,7 +2069,10 @@ function VideoDockContent(props: VideoDockContentProps) {
   useEffect(() => {
     if (!quantityOpen) return;
     const handle = (e: MouseEvent) => {
-      if (!quantityRef.current?.contains(e.target as Node)) setQuantityOpen(false);
+      const t = e.target as Node;
+      if (quantityRef.current?.contains(t)) return;
+      if (quantityMenuRef.current?.contains(t)) return;
+      setQuantityOpen(false);
     };
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
@@ -1863,37 +2142,80 @@ function VideoDockContent(props: VideoDockContentProps) {
                 </button>
               </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  paddingLeft: 4,
-                  paddingRight: 32,
-                  minHeight: 44,
-                  width: "100%",
-                  boxSizing: "border-box",
-                  flexWrap: "wrap",
-                }}
-              >
-                <MediaUploadButton
-                  label="参考图片"
-                  accept=".jpg,.jpeg,.png,image/jpeg,image/png"
-                  icon={<ImageIcon width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />}
-                />
-                <span style={{ color: "rgba(255, 255, 255, 0.22)", fontSize: 14, lineHeight: 1 }}>·</span>
-                <MediaUploadButton
-                  label="视频"
-                  accept=".mp4,video/mp4"
-                  icon={<Video width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />}
-                />
-                <span style={{ color: "rgba(255, 255, 255, 0.22)", fontSize: 14, lineHeight: 1 }}>·</span>
-                <MediaUploadButton
-                  label="音频"
-                  accept=".mp3,.wav,.m4a,audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/mp4,audio/x-m4a"
-                  icon={<AudioLines width={15} height={15} stroke="currentColor" strokeWidth={1.8} aria-hidden="true" />}
-                />
-              </div>
+              {refMode.id === "first-last" ? (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 8,
+                    padding: "0px 32px 0px 4px",
+                    width: "100%",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 0%", minWidth: 0 }}>
+                    <FrameUploadButton label="首帧" />
+                    <button
+                      type="button"
+                      aria-label="交换首尾帧"
+                      style={{
+                        width: 26,
+                        height: 26,
+                        borderRadius: "50%",
+                        border: 0,
+                        outline: "none",
+                        background: "rgba(255, 255, 255, 0.08)",
+                        color: "rgba(255, 255, 255, 0.7)",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                        transition: "background 120ms, color 120ms",
+                      }}
+                    >
+                      <ArrowLeftRight width={13} height={13} strokeWidth={2} aria-hidden="true" />
+                    </button>
+                    <FrameUploadButton label="尾帧" />
+                  </div>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    paddingLeft: 4,
+                    paddingRight: 32,
+                    minHeight: 44,
+                    width: "100%",
+                    boxSizing: "border-box",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {media.length > 0
+                    ? media.map((m) => <DockMediaThumb key={m.id} item={m} onRemove={onRemoveMedia} />)
+                    : (
+                      <MediaUploadButton
+                        label="参考图片"
+                        accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                        icon={<ImageIcon width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />}
+                      />
+                    )}
+                  <span style={{ color: "rgba(255, 255, 255, 0.22)", fontSize: 14, lineHeight: 1 }}>·</span>
+                  <MediaUploadButton
+                    label="视频"
+                    accept=".mp4,video/mp4"
+                    icon={<Video width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />}
+                  />
+                  <span style={{ color: "rgba(255, 255, 255, 0.22)", fontSize: 14, lineHeight: 1 }}>·</span>
+                  <MediaUploadButton
+                    label="音频"
+                    accept=".mp3,.wav,.m4a,audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/mp4,audio/x-m4a"
+                    icon={<AudioLines width={15} height={15} stroke="currentColor" strokeWidth={1.8} aria-hidden="true" />}
+                  />
+                </div>
+              )}
 
               <div style={{ position: "relative", flex: "1 1 0%", minWidth: 0 }}>
                 <div
@@ -1937,7 +2259,9 @@ function VideoDockContent(props: VideoDockContentProps) {
                       right: 36,
                     }}
                   >
-                    上传 3-10 秒视频片段，并结合文本或图片轻松修改内容、改变镜头角度或重塑原视频风格。可使用 @ 快速插入已添加资源。
+                    {refMode.id === "first-last"
+                      ? "请描述你想生成的视频内容。"
+                      : "上传 3-10 秒视频片段，并结合文本或图片轻松修改内容、改变镜头角度或重塑原视频风格。可使用 @ 快速插入已添加资源。"}
                   </div>
                 )}
               </div>
@@ -2005,7 +2329,7 @@ function VideoDockContent(props: VideoDockContentProps) {
               whiteSpace: "nowrap",
             }}
           >
-            全能参考
+            {refMode.label}
             <ChevronDown
               width={12}
               height={12}
@@ -2021,6 +2345,7 @@ function VideoDockContent(props: VideoDockContentProps) {
         </div>
 
         <button
+          ref={modelSettingsRef}
           type="button"
           onClick={() => setModelSettingsOpen(!modelSettingsOpen)}
           style={{
@@ -2141,7 +2466,7 @@ function VideoDockContent(props: VideoDockContentProps) {
               padding: "0px 8px",
             }}
           >
-            {duration.label}
+            {duration}s
           </div>
         </button>
 
@@ -2262,143 +2587,477 @@ function VideoDockContent(props: VideoDockContentProps) {
         </div>
       </div>
 
-      {refModeOpen && (
-        <div ref={refModeRef} style={{ padding: "0px 8px 8px", position: "relative" }}>
+      {refModeOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
           <div
+            ref={refModeMenuRef}
+            data-tc-tab-dropdown-menu="true"
             style={{
-              borderRadius: 12,
-              border: "1px solid rgba(255, 255, 255, 0.1)",
-              background: "rgb(35, 35, 35)",
-              padding: 6,
-              boxShadow: "0 14px 40px rgba(0, 0, 0, 0.32)",
+              position: "fixed",
+              left: refModePos.left,
+              bottom: refModePos.bottom,
+              minWidth: 168,
+              height: "fit-content",
+              background: "rgba(41, 41, 41, 0.92)",
+              backdropFilter: "blur(40px)",
+              border: "1px solid rgba(255, 255, 255, 0.04)",
+              borderRadius: 8,
+              padding: "8px 4px",
+              zIndex: 2147483602,
+              boxShadow: "rgba(0, 0, 0, 0.6) 0px 8px 24px",
+              opacity: 1,
+              transform: "scale(1) translateY(0px)",
+              transformOrigin: "left bottom",
+              transition:
+                "opacity 250ms cubic-bezier(0.16, 1, 0.3, 1), transform 250ms cubic-bezier(0.16, 1, 0.3, 1)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 0,
             }}
           >
-            {REF_MODES.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => {
-                  setRefMode(m);
-                  setRefModeOpen(false);
-                }}
-                style={optionButtonStyle(refMode.id === m.id)}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+            {REF_MODES.map((m) => {
+              const selected = refMode.id === m.id;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    setRefMode(m);
+                    setRefModeOpen(false);
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    width: "100%",
+                    padding: "8px 16px",
+                    border: 0,
+                    borderRadius: 4,
+                    background: selected ? "rgba(255, 255, 255, 0.08)" : "transparent",
+                    color: selected ? "rgb(255, 255, 255)" : "rgba(255, 255, 255, 0.7)",
+                    fontSize: 12,
+                    fontWeight: selected ? 600 : 500,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    transition: selected
+                      ? "background 180ms cubic-bezier(0.16, 1, 0.3, 1)"
+                      : "background 100ms ease-in",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
 
-      {modelSettingsOpen && (
-        <div ref={modelSettingsRef} style={{ padding: "0px 8px 8px", position: "relative" }}>
+      {modelSettingsOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
           <div
+            ref={modelSettingsMenuRef}
+            data-tc-dock-popover=""
             style={{
-              borderRadius: 12,
-              border: "1px solid rgba(255, 255, 255, 0.1)",
-              background: "rgb(35, 35, 35)",
-              padding: 12,
-              boxShadow: "0 14px 40px rgba(0, 0, 0, 0.32)",
+              position: "fixed",
+              left: modelSettingsPos.left,
+              bottom: modelSettingsPos.bottom,
+              width: "max-content",
+              minWidth: 320,
+              padding: "4px 8px",
+              borderRadius: 8,
+              background: "rgb(30, 30, 30)",
+              border: "1px solid rgba(255, 255, 255, 0.04)",
+              boxShadow: "rgba(0, 0, 0, 0.25) 0px 4px 16px",
+              zIndex: 2147483602,
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              opacity: 1,
+              transform: "scale(1) translateY(0px)",
+              transformOrigin: "left bottom",
+              transition:
+                "opacity 250ms cubic-bezier(0.16, 1, 0.3, 1), transform 250ms cubic-bezier(0.16, 1, 0.3, 1)",
             }}
           >
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 11, color: "rgba(255, 255, 255, 0.45)", padding: "4px 6px", fontWeight: 500 }}>模型</div>
-                {VIDEO_MODELS.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedModel(m);
-                      setModelSettingsOpen(false);
-                    }}
-                    style={optionButtonStyle(selectedModel.id === m.id)}
-                  >
-                    {m.label}
-                  </button>
-                ))}
+            {/* 模型与质量 */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "4px 0" }}>
+              <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.45)", fontWeight: 500, padding: "0px 4px" }}>
+                模型与质量
               </div>
-              <div>
-                <div style={{ fontSize: 11, color: "rgba(255, 255, 255, 0.45)", padding: "4px 6px", fontWeight: 500 }}>比例</div>
-                {VIDEO_ASPECT_RATIOS.map((r) => (
+              <div style={{ display: "flex", gap: 12 }}>
+                {/* 模型下拉 */}
+                <div style={{ width: 224, flexShrink: 0, position: "relative" }}>
                   <button
-                    key={r.id}
                     type="button"
                     onClick={() => {
-                      setAspectRatio(r);
-                      setModelSettingsOpen(false);
+                      setModelDropdownOpen((v) => !v);
+                      setResolutionDropdownOpen(false);
                     }}
-                    style={optionButtonStyle(aspectRatio.id === r.id)}
+                    style={{
+                      height: 36,
+                      padding: "0px 8px",
+                      borderRadius: 8,
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      background: "rgba(255, 255, 255, 0.04)",
+                      color: "rgb(255, 255, 255)",
+                      fontSize: 12,
+                      lineHeight: "16px",
+                      fontWeight: 400,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      transition: "background 100ms",
+                      whiteSpace: "nowrap",
+                      maxWidth: "none",
+                      width: 224,
+                      justifyContent: "space-between",
+                      boxSizing: "border-box",
+                    }}
                   >
-                    {r.label}
+                    <span
+                      style={{
+                        color: "rgb(255, 255, 255)",
+                        fontSize: 12,
+                        lineHeight: "16px",
+                        fontWeight: 600,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {selectedModel.label}
+                    </span>
+                    <ChevronDown width={14} height={14} style={{ opacity: 0.6, marginLeft: "auto" }} />
                   </button>
-                ))}
-              </div>
-              <div>
-                <div style={{ fontSize: 11, color: "rgba(255, 255, 255, 0.45)", padding: "4px 6px", fontWeight: 500 }}>分辨率</div>
-                {VIDEO_RESOLUTIONS.map((r) => (
+                  {modelDropdownOpen && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "calc(100% + 6px)",
+                        left: 0,
+                        zIndex: 10,
+                        background: "rgb(30, 30, 30)",
+                        border: "1px solid rgba(255, 255, 255, 0.04)",
+                        borderRadius: 8,
+                        padding: 4,
+                        boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
+                        minWidth: 224,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 2,
+                      }}
+                    >
+                      {VIDEO_MODELS.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedModel(m);
+                            setModelDropdownOpen(false);
+                          }}
+                          style={{
+                            height: 32,
+                            padding: "0px 8px",
+                            borderRadius: 6,
+                            border: 0,
+                            background:
+                              selectedModel.id === m.id ? "rgba(255, 255, 255, 0.08)" : "transparent",
+                            color: "rgb(255, 255, 255)",
+                            fontSize: 12,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 12,
+                            transition: "background 100ms",
+                            whiteSpace: "nowrap",
+                            textAlign: "left",
+                          }}
+                        >
+                          <span style={{ fontWeight: 600 }}>{m.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 分辨率下拉 */}
+                <div
+                  style={{
+                    flex: "1 1 0%",
+                    minWidth: 224,
+                    position: "relative",
+                    display: "block",
+                    width: "100%",
+                    boxSizing: "border-box",
+                    verticalAlign: "middle",
+                  }}
+                >
                   <button
-                    key={r.id}
                     type="button"
                     onClick={() => {
-                      setResolution(r);
-                      setModelSettingsOpen(false);
+                      setResolutionDropdownOpen((v) => !v);
+                      setModelDropdownOpen(false);
                     }}
-                    style={optionButtonStyle(resolution.id === r.id)}
-                  >
-                    {r.label}
-                  </button>
-                ))}
-              </div>
-              <div>
-                <div style={{ fontSize: 11, color: "rgba(255, 255, 255, 0.45)", padding: "4px 6px", fontWeight: 500 }}>时长</div>
-                {VIDEO_DURATIONS.map((d) => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => {
-                      setDuration(d);
-                      setModelSettingsOpen(false);
+                    style={{
+                      height: 36,
+                      padding: "0px 8px",
+                      borderRadius: 8,
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      background: "rgba(255, 255, 255, 0.04)",
+                      color: "rgb(255, 255, 255)",
+                      fontSize: 12,
+                      lineHeight: "16px",
+                      fontWeight: 400,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      transition: "background 100ms",
+                      whiteSpace: "nowrap",
+                      width: "100%",
+                      boxSizing: "border-box",
+                      justifyContent: "space-between",
                     }}
-                    style={optionButtonStyle(duration.id === d.id)}
                   >
-                    {d.label}
+                    <span
+                      style={{
+                        color: "rgb(255, 255, 255)",
+                        fontSize: 12,
+                        lineHeight: "16px",
+                        fontWeight: 600,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        flex: "1 1 0%",
+                        textAlign: "left",
+                      }}
+                    >
+                      {resolution.label}
+                    </span>
+                    <ChevronDown width={14} height={14} style={{ opacity: 0.6, marginLeft: "auto" }} />
                   </button>
-                ))}
+                  {resolutionDropdownOpen && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "calc(100% + 6px)",
+                        left: 0,
+                        zIndex: 10,
+                        background: "rgb(30, 30, 30)",
+                        border: "1px solid rgba(255, 255, 255, 0.04)",
+                        borderRadius: 8,
+                        padding: 4,
+                        boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
+                        minWidth: 224,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 2,
+                      }}
+                    >
+                      {VIDEO_RESOLUTIONS.map((r) => (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => {
+                            setResolution(r);
+                            setResolutionDropdownOpen(false);
+                          }}
+                          style={{
+                            height: 32,
+                            padding: "0px 8px",
+                            borderRadius: 6,
+                            border: 0,
+                            background:
+                              resolution.id === r.id ? "rgba(255, 255, 255, 0.08)" : "transparent",
+                            color: "rgb(255, 255, 255)",
+                            fontSize: 12,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            transition: "background 100ms",
+                            whiteSpace: "nowrap",
+                            width: "100%",
+                            boxSizing: "border-box",
+                          }}
+                        >
+                          <span style={{ fontWeight: 600 }}>{r.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      )}
 
-      {quantityOpen && (
-        <div ref={quantityRef} style={{ padding: "0px 8px 8px", display: "flex", justifyContent: "flex-end" }}>
+            {/* 时长滑块 */}
+            <div className="tc-duration-slider">
+              <div className="tc-duration-slider__header">
+                <span className="tc-duration-slider__label">时长</span>
+                <span className="tc-duration-slider__value">{duration}s</span>
+              </div>
+              <input
+                className="tc-duration-slider__input"
+                min={VIDEO_DURATION_MIN}
+                max={VIDEO_DURATION_MAX}
+                step={VIDEO_DURATION_STEP}
+                aria-label="时长"
+                aria-valuetext={`${duration}s`}
+                type="range"
+                value={duration}
+                onChange={(e) => setDuration(Number(e.target.value))}
+                style={{
+                  ["--tc-duration-slider-progress" as string]: `${
+                    ((duration - VIDEO_DURATION_MIN) / (VIDEO_DURATION_MAX - VIDEO_DURATION_MIN)) * 100
+                  }%`,
+                }}
+              />
+              <div className="tc-duration-slider__ticks" aria-hidden="true">
+                <div className="tc-duration-slider__tick-track">
+                  {VIDEO_DURATION_TICKS.map((t) => (
+                    <span
+                      key={t}
+                      className={`tc-duration-slider__tick${t === duration ? " tc-duration-slider__tick--active" : ""}`}
+                      style={{
+                        ["--tc-duration-slider-tick-position" as string]: `${
+                          ((t - VIDEO_DURATION_MIN) / (VIDEO_DURATION_MAX - VIDEO_DURATION_MIN)) * 100
+                        }%`,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="tc-duration-slider__limits" aria-hidden="true">
+                <span>{VIDEO_DURATION_MIN}s</span>
+                <span>{VIDEO_DURATION_MAX}s</span>
+              </div>
+            </div>
+
+            {/* 宽高比 */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "4px 0" }}>
+              <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.45)", fontWeight: 500, padding: "0px 4px" }}>
+                宽高比
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  background: "rgba(255, 255, 255, 0.04)",
+                  borderRadius: 8,
+                  padding: 4,
+                  gap: 2,
+                }}
+              >
+                {VIDEO_ASPECT_RATIOS.map((r) => {
+                  const selected = aspectRatio.id === r.id;
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => setAspectRatio(r)}
+                      style={{
+                        flex: "1 1 0%",
+                        height: 44,
+                        border: 0,
+                        borderRadius: 6,
+                        background: selected ? "rgba(255, 255, 255, 0.08)" : "transparent",
+                        color: selected ? "rgb(255, 255, 255)" : "rgba(255, 255, 255, 0.45)",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 4,
+                        cursor: "pointer",
+                        transition: "150ms",
+                        padding: 0,
+                      }}
+                    >
+                      <span style={{ opacity: selected ? 1 : 0.6, flexShrink: 0 }}>
+                        <AspectRatioIcon ratio={r.id} width={14} height={14} filled={false} />
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: selected ? 600 : 500, lineHeight: "12px" }}>
+                        {r.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {quantityOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
           <div
+            ref={quantityMenuRef}
+            data-tc-dock-popover=""
+            role="listbox"
+            aria-label="选择生成数量"
             style={{
-              borderRadius: 12,
-              border: "1px solid rgba(255, 255, 255, 0.1)",
-              background: "rgb(35, 35, 35)",
-              padding: 6,
-              width: 80,
-              boxShadow: "0 14px 40px rgba(0, 0, 0, 0.32)",
+              position: "fixed",
+              left: quantityPos.left,
+              bottom: quantityPos.bottom,
+              width: "max-content",
+              minWidth: 120,
+              padding: "4px 8px",
+              borderRadius: 8,
+              background: "rgb(30, 30, 30)",
+              border: "1px solid rgba(255, 255, 255, 0.04)",
+              boxShadow: "rgba(0, 0, 0, 0.25) 0px 4px 16px",
+              zIndex: 2147483602,
+              display: "flex",
+              flexDirection: "column",
+              gap: 0,
+              boxSizing: "border-box",
+              opacity: 1,
+              transform: "scale(1) translateY(0px)",
+              transformOrigin: "left bottom",
+              transition:
+                "opacity 250ms cubic-bezier(0.16, 1, 0.3, 1), transform 250ms cubic-bezier(0.16, 1, 0.3, 1)",
             }}
           >
-            {QUANTITIES.map((q) => (
-              <button
-                key={q}
-                type="button"
-                onClick={() => {
-                  setQuantity(q);
-                  setQuantityOpen(false);
-                }}
-                style={optionButtonStyle(quantity === q)}
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+            {QUANTITIES.map((q) => {
+              const selected = quantity === q;
+              return (
+                <button
+                  key={q}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => {
+                    setQuantity(q);
+                    setQuantityOpen(false);
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "7px 10px",
+                    border: 0,
+                    borderRadius: 6,
+                    background: selected ? "rgba(255, 255, 255, 0.08)" : "transparent",
+                    color: selected ? "rgba(255, 255, 255, 0.85)" : "rgba(255, 255, 255, 0.45)",
+                    fontSize: 12,
+                    lineHeight: "16px",
+                    fontWeight: selected ? 500 : 400,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    whiteSpace: "nowrap",
+                    transition: "background 80ms",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  {q}
+                </button>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
 
       <div
         style={{
@@ -2469,9 +3128,17 @@ function VideoDockContent(props: VideoDockContentProps) {
 function BottomDock({
   mode,
   onClose,
+  imageMedia = [],
+  videoMedia = [],
+  onRemoveImageMedia,
+  onRemoveVideoMedia,
 }: {
   mode: "image" | "video";
   onClose: () => void;
+  imageMedia?: DockMediaItem[];
+  videoMedia?: DockMediaItem[];
+  onRemoveImageMedia?: (id: string) => void;
+  onRemoveVideoMedia?: (id: string) => void;
 }) {
   const [input, setInput] = useState("");
   const [dockSize, setDockSize] = useState({ w: 680, h: 164 });
@@ -2484,7 +3151,7 @@ function BottomDock({
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [aspectRatio, setAspectRatio] = useState(VIDEO_ASPECT_RATIOS[0]);
   const [resolution, setResolution] = useState(VIDEO_RESOLUTIONS[1]);
-  const [duration, setDuration] = useState(VIDEO_DURATIONS[2]);
+  const [duration, setDuration] = useState(10);
   const [quantity, setQuantity] = useState("1x");
   const [quantityOpen, setQuantityOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -2550,7 +3217,7 @@ function BottomDock({
               style={{ width: 680, background: "transparent", display: "flex", flexDirection: "column" }}
             >
               {mode === "image" ? (
-                <ImageDockContent editorRef={editorRef} isEmpty={isEmpty} onInput={handleInput} onClose={onClose} />
+                <ImageDockContent editorRef={editorRef} isEmpty={isEmpty} onInput={handleInput} onClose={onClose} media={imageMedia} onRemoveMedia={onRemoveImageMedia} />
               ) : (
                 <VideoDockContent
                   editorRef={editorRef}
@@ -2579,6 +3246,8 @@ function BottomDock({
                   setAdvancedOpen={setAdvancedOpen}
                   internetSearch={internetSearch}
                   setInternetSearch={setInternetSearch}
+                  media={videoMedia}
+                  onRemoveMedia={onRemoveVideoMedia}
                 />
               )}
             </div>
@@ -2802,10 +3471,14 @@ function AgentChatPanel({
   prompt,
   isOpen,
   onClose,
+  pendingMention,
+  onMentionConsumed,
 }: {
   prompt: string;
   isOpen: boolean;
   onClose: () => void;
+  pendingMention?: { name: string; nonce: number } | null;
+  onMentionConsumed?: () => void;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     { id: 1, type: "user", text: prompt || "生成一个小猫" },
@@ -2936,6 +3609,14 @@ function AgentChatPanel({
     handleComposerInput();
     setSkillPanelOpen(false);
   }, []);
+
+  // 外部（如画布节点操作面板）请求把素材名 @ 插入输入框
+  useEffect(() => {
+    if (!pendingMention) return;
+    insertSkillIntoComposer(pendingMention.name);
+    onMentionConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingMention?.nonce]);
 
   const handleSend = () => {
     const text = composerRef.current?.innerText.trim() || "";
@@ -3296,6 +3977,69 @@ function CanvasPageInner() {
   const [isAgentOpen, setIsAgentOpen] = useState(true);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
   const [bottomDockMode, setBottomDockMode] = useState<"image" | "video">("image");
+  const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
+  const [videoDockMedia, setVideoDockMedia] = useState<DockMediaItem[]>([]);
+  const [agentPendingMention, setAgentPendingMention] = useState<{ name: string; nonce: number } | null>(null);
+
+  // 画布素材节点操作面板的统一动作分发
+  const handleNodeAction = useCallback(
+    (node: NodeItem, actionId: string) => {
+      const name = node.content || "未命名素材";
+      switch (actionId) {
+        case "refresh": {
+          // 重新编辑：唤起底部图片 Dock（不带素材）
+          setBottomDockMode("image");
+          setIsBottomDockOpen(true);
+          break;
+        }
+        case "shuffle": {
+          // 再创作：带入参考图占位 + 唤起图片 Dock
+          if (node.imageUrl) {
+            setImageDockMedia([{ id: node.id, type: "image", name, src: node.imageUrl }]);
+          }
+          setBottomDockMode("image");
+          setIsBottomDockOpen(true);
+          break;
+        }
+        case "mention": {
+          // 添加到对话：打开右侧面板并 @ 素材名
+          setIsAgentOpen(true);
+          setAgentPendingMention({ name, nonce: Date.now() });
+          break;
+        }
+        case "video": {
+          // 生成视频：带入参考图占位 + 唤起视频 Dock
+          if (node.imageUrl) {
+            setVideoDockMedia([{ id: node.id, type: "image", name, src: node.imageUrl }]);
+          }
+          setBottomDockMode("video");
+          setIsBottomDockOpen(true);
+          break;
+        }
+        case "info": {
+          // 详情信息：暂忽略，后续补充
+          break;
+        }
+        case "download": {
+          // 下载：仅图片素材
+          if (node.imageUrl) {
+            const a = document.createElement("a");
+            a.href = node.imageUrl;
+            a.download = name || "image";
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -3433,14 +4177,26 @@ function CanvasPageInner() {
         setViewport={setViewport}
         setNodes={setNodes}
         setSelectedId={setSelectedId}
+        onNodeAction={handleNodeAction}
       />
 
       <LeftToolbar onToolClick={handleToolClick} />
-      {isBottomDockOpen && <BottomDock mode={bottomDockMode} onClose={() => setIsBottomDockOpen(false)} />}
+      {isBottomDockOpen && (
+        <BottomDock
+          mode={bottomDockMode}
+          onClose={() => setIsBottomDockOpen(false)}
+          imageMedia={imageDockMedia}
+          videoMedia={videoDockMedia}
+          onRemoveImageMedia={(id) => setImageDockMedia((prev) => prev.filter((m) => m.id !== id))}
+          onRemoveVideoMedia={(id) => setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))}
+        />
+      )}
       <AgentChatPanel
         prompt={prompt}
         isOpen={isAgentOpen}
         onClose={() => setIsAgentOpen(false)}
+        pendingMention={agentPendingMention}
+        onMentionConsumed={() => setAgentPendingMention(null)}
       />
       <ZoomControls
         containerRef={containerRef}

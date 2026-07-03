@@ -9,7 +9,7 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        outfit: ["var(--font-outfit)", "Outfit", "sans-serif"],
+        outfit: ["Outfit", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       animation: {
         "caret-blink": "caret-blink 1.25s ease-out infinite",
