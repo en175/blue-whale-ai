@@ -89,12 +89,6 @@ const RESOLUTIONS = [
   { id: "2160p", label: "2160p" },
 ];
 
-const DURATIONS = [
-  { id: "5s", label: "5s" },
-  { id: "10s", label: "10s" },
-  { id: "15s", label: "15s" },
-];
-
 const VIDEO_REF_MODES = [
   { id: "omni", label: "Omni Reference" },
   { id: "first-last", label: "首尾帧" },
@@ -108,22 +102,6 @@ interface MediaItem {
   src: string;
   duration?: string;
 }
-
-const DEMO_MEDIA: MediaItem[] = [
-  {
-    id: "1",
-    type: "image",
-    name: "Image 1",
-    src: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=120&h=120&fit=crop",
-  },
-  {
-    id: "2",
-    type: "video",
-    name: "Video 1",
-    src: "https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=120&h=120&fit=crop",
-    duration: "6s",
-  },
-];
 
 export default function AgentComposer() {
   const [activeTab, setActiveTab] = useState("agent");
@@ -143,7 +121,7 @@ export default function AgentComposer() {
   const [selectedAgentModel, setSelectedAgentModel] = useState(
     AGENT_MODELS[3]
   );
-  const [mediaList, setMediaList] = useState<MediaItem[]>(DEMO_MEDIA);
+  const [mediaList, setMediaList] = useState<MediaItem[]>([]);
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
 
   const router = useRouter();
@@ -401,8 +379,6 @@ export default function AgentComposer() {
     setSkillPanelOpen(false);
   }, []);
 
-  const canSubmit = content.trim().length > 0 || mediaList.length > 0;
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -426,8 +402,25 @@ export default function AgentComposer() {
   };
 
   const removeMedia = (id: string) => {
-    setMediaList((prev) => prev.filter((item) => item.id !== id));
+    // 释放被移除素材的对象 URL，避免 blob 内存泄漏（仅清理 blob: 协议，跳过 demo/远程 URL）
+    setMediaList((prev) => {
+      const removed = prev.find((item) => item.id === id);
+      if (removed?.src?.startsWith("blob:")) URL.revokeObjectURL(removed.src);
+      return prev.filter((item) => item.id !== id);
+    });
   };
+
+  // 仅在组件卸载时统一释放尚未移除的 blob: 对象 URL。
+  // 通过 ref 读取最新的 mediaList，且 effect 依赖为空，确保不会在更新时误释放正在显示的 URL。
+  const mediaListRef = useRef(mediaList);
+  mediaListRef.current = mediaList;
+  useEffect(() => {
+    return () => {
+      mediaListRef.current.forEach((item) => {
+        if (item.src?.startsWith("blob:")) URL.revokeObjectURL(item.src);
+      });
+    };
+  }, []);
 
   const isVideoTab = activeTab === "video";
   const isImageTab = activeTab === "image";
