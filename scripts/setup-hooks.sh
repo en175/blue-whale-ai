@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Blue-Whale — 一键初始化本地开发环境（git hooks + Claude guardrails）
+# clone 后跑一次：bash scripts/setup-hooks.sh
+# 零依赖，macOS/Linux 通用。
+
+set -euo pipefail
+
+# 定位仓库根（脚本可能在子目录被调用）
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+echo "=== Blue-Whale 开发环境初始化 ==="
+echo ""
+
+# ------------------------------------------------------------
+# 1. 配置 git hooks 路径（项目级 core.hooksPath 覆盖全局，指向仓库内 .githooks/）
+#    本项仅作用于 Blue-Whale 仓库；其他仓库仍用各自全局/项目配置。
+# ------------------------------------------------------------
+git config core.hooksPath .githooks
+echo "✅ git hooks 已配置：core.hooksPath = .githooks（仅本项目）"
+echo "   生效的 hook："
+echo "   - pre-commit：禁提交生成物 + 前端 lint 软提醒 + 后端 py_compile 软提醒 + 工单分支落后软提醒"
+echo "   - commit-msg：Conventional Commits 规范校验"
+echo "   - pre-push：禁直推 master/main + 工单分支落后 origin/master 硬拦"
+echo "   - post-commit/post-checkout：graphify 知识图谱自动重建"
+echo ""
+
+# ------------------------------------------------------------
+# 2. 确保 hook 脚本可执行（clone 后权限偶发丢失）
+# ------------------------------------------------------------
+chmod +x .githooks/* .claude/hooks/*.sh 2>/dev/null || true
+echo "✅ hook 脚本权限已就绪"
+echo ""
+
+# ------------------------------------------------------------
+# 3. Claude Code guardrails 说明
+#    .claude/hooks/block-*.sh + .claude/settings.json 已随仓库提供（进版本控制），
+#    Claude Code 自动加载，无需本脚本生成。个人本机配置请放 .claude/settings.local.json。
+# ------------------------------------------------------------
+echo "✅ Claude guardrails 已随仓库就绪（.claude/settings.json + .claude/hooks/）"
+echo "   - block-dangerous-git.sh：拦 AI 破坏性 git（裸 --force / reset --hard / branch -D / checkout . 等）"
+echo "   - block-squash-merge.sh：拦 AI 用 squash/rebase 合并 PR（强制 merge）"
+echo "   个人配置请放 .claude/settings.local.json"
+echo ""
+
+# ------------------------------------------------------------
+# 4. Gitee 凭证提示（.mcp.json 引用环境变量，需本机配置一次）
+# ------------------------------------------------------------
+echo "=== 后续步骤（按需执行）==="
+echo "  export GITEE_ACCESS_TOKEN=<你的 Gitee 私人令牌>   # 写进 ~/.zshrc 持久化"
+echo "  cd blue_whale_web && npm install                  # 前端依赖（首次必装）"
+echo "  cd blue_whale_server && pip install -r requirements.txt  # 后端依赖（首次必装）"
+echo ""
+echo "=== 完成。提交/推送时 hook 自动生效 ==="
