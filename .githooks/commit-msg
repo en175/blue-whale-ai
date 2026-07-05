@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# commit-msg hook — Blue-Whale
+# 纯 shell，零依赖。功能：
+#   校验 commit message 符合 Conventional Commits。
+# 退出码非 0 = 拦截提交。
+# 参数 $1 = commit message 文件路径
+
+set -u
+
+msg_file="$1"
+
+# 去掉注释行（git 自带的 # 注释）和空行，取第一行有效内容
+first_line=$(grep -v '^#' "$msg_file" | sed '/^\s*$/d' | head -n 1)
+
+# ============================================================
+# Conventional Commits 校验
+# ============================================================
+# 格式：<type>(<scope>): <描述> 或 <type>: <描述>
+# 合法 type：feat fix docs style refactor perf test chore build ci revert
+types_re='^(feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert)(\([^)]+\))?!?: .+'
+
+if ! [[ "$first_line" =~ $types_re ]]; then
+  echo "❌ commit-msg: 不符合 Conventional Commits 规范" >&2
+  echo "" >&2
+  echo "  第一行: $first_line" >&2
+  echo "" >&2
+  echo "  要求格式: <type>: <描述>  或  <type>(<scope>): <描述>" >&2
+  echo "  合法 type: feat / fix / docs / refactor / chore / style / test / perf / build / ci / revert" >&2
+  echo "  示例: feat: 新增画布节点批量导出" >&2
+  echo "        fix(chat): 修复消息列表滚动" >&2
+  exit 1
+fi
+
+exit 0

@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# pre-push hook — Blue-Whale
+# 纯 shell，零依赖。功能：
+#   拦截「落后的工单分支 push」——push 前检查分支是否已 rebase 到最新 origin/master。
+#
+# 触发式同步策略的「出口铁闸」：哪怕 Agent 忘了 fetch/rebase，push 时也会被拦下，
+# 强制先同步，避免把基于陈旧 master 的改动推上去。
+#
+# 规则：
+#   - master/main 保护分支：**任何本地直推一律拦截**（合并只在 Gitee 服务端走 PR）。
+#   - feature/* fix/* hotfix/* docs/* chore/* 工单分支：若 origin/master 有提交不在本地推送分支祖先里
+#     （即本地落后于 master）→ 拦截，提示先 fetch + rebase。
+#
+# 退出码非 0 = 拦截 push。
+# 注意：rebase/merge 进行中时此 hook 不应误触发，但 pre-push 正常不会在 rebase 中触发。
+
+set -uo pipefail
+
+# pre-push 从 stdin 读取多行，每行：<local ref> <local sha> <remote ref> <remote sha>
+# 零哈希（删除远程分支时 local sha=0000）的行跳过。
+# 我们只关心第一个被推送的本地分支 HEAD 是否落后于 origin/master。
+
+# 先取最新 origin/master（fetch 一次，确保判断基于最新远程）
+# 静默 fetch，失败不阻断（网络问题不该卡住 push；落后判断失败时放行，由人兜底）
+git fetch origin master >/dev/null 2>&1 || true
+
+upstream=$(git rev-parse origin/master 2>/dev/null || echo "")
+if [ -z "$upstream" ]; then
+  # 取不到 origin/master（如离线 / 远程未配置），放行，不阻断 push
+  exit 0
+fi
+
+blocked=0
+reason=""
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # 跳过删除操作（全零 local sha）
+  case "$local_sha" in
+    0000000000000000000000000000000000000000) continue ;;
+  esac
+
+  # 第一道：禁直推 master/main（合并只在 Gitee 服务端走 PR）
+  case "$remote_ref" in
+    refs/heads/master|refs/heads/main)
+      blocked=1
+      reason="${reason}  直推 ${remote_ref#refs/heads/}：禁本地 push master/main\n"
+      ;;
+  esac
+
+  # 只管工单分支（落后判断仅对这些分支生效，前缀见 docs/agents/branch-naming.md）
+  case "$remote_ref" in
+    refs/heads/feature/*|refs/heads/fix/*|refs/heads/hotfix/*|refs/heads/docs/*|refs/heads/chore/*) : ;;
+    *) continue ;;
+  esac
+
+  # 落后判断：origin/master 是否已是 local_sha 的祖先？
+  # 是祖先 → 本地已包含 master 最新（已 rebase）→ 放行
+  # 不是祖先 → 本地落后于 master → 拦截
+  if ! git merge-base --is-ancestor "$upstream" "$local_sha" 2>/dev/null; then
+    branch=${remote_ref#refs/heads/}
+    # 计算落后多少个提交，给提示
+    behind=$(git rev-list --count "$local_sha".."$upstream" 2>/dev/null || echo "?")
+    blocked=1
+    reason="${reason}  ${branch} 落后 origin/master 约 ${behind} 个提交（未 rebase）\n"
+  fi
+done
+
+if [ "$blocked" -ne 0 ]; then
+  # 区分两种拦截：直推 master / 工单分支落后
+  if printf '%b' "$reason" | grep -q "禁本地 push master/main"; then
+    cat >&2 <<EOF
+❌ pre-push: 禁止直推 master/main（已拦截）。
+`printf '%b' "$reason"`
+
+合并只在 Gitee 服务端走 PR。所有进 master 的改动统一走：
+
+  git checkout -b <分支名>          # 开工单分支（feature/fix/hotfix/docs/chore，见 docs/agents/branch-naming.md）
+  git push -u origin <分支名>        # 推分支
+  # → Gitee 建 PR → 服务端合并（低风险可 MCP merge_pull 自审合）
+
+"自审合"只免互审，不免流程。详见 CLAUDE.md「提交与审查」红线
+与 docs/adr/0003-no-direct-push-to-master.md。
+EOF
+  else
+    cat >&2 <<EOF
+❌ pre-push: 工单分支落后于 origin/master，已拦截 push。
+`printf '%b' "$reason"`
+
+你的分支基于陈旧 master，远程已有新提交合并。直接 push 会把过时代码推上去、
+PR 审核也会基于落后 diff。请先同步：
+
+  git fetch origin
+  git rebase origin/master
+  # 撞冲突 → 解 → npm run lint（改前端 blue_whale_web 时）/ pytest（改后端 blue_whale_server 时）
+  git push --force-with-lease origin <分支名>
+
+解不动时随时退回：git rebase --abort
+详见 CLAUDE.md「提交与审查」。
+EOF
+  fi
+  exit 1
+fi
+
+exit 0
