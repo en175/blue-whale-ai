@@ -7,3 +7,7 @@
 
 # MCP
 .mcp.json
+
+# 本地私人配置（codex CLI 等，勿入库）
+.codex/
+.agents/
