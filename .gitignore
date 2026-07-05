@@ -10,4 +10,11 @@
 
 # 本地私人配置（codex CLI 等，勿入库）
 .codex/
-.agents/
+.agents/graphify-out/
+.agents/skills/
+
+graphify-out/
+
+# Node / 前端
+node_modules/
+.next/
