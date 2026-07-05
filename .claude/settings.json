@@ -29,7 +29,7 @@
         ]
       },
       {
-        "matcher": "mcp__gitee__merge_pull",
+        "matcher": "mcp__gitee__merge_enterprise_pull",
         "hooks": [
           {
             "type": "command",
