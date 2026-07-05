@@ -29,9 +29,10 @@ npm run build      # next build
 npm run start      # next start
 npm run start:lan  # next start -H 0.0.0.0
 npm run lint       # eslint
+npm test           # vitest run
 ```
 
-- **没有 test / format 脚本。** 类型检查用 `npx tsc --noEmit`。
+- **没有 format 脚本。** 测试用 `npm test`（vitest）；类型检查用 `npx tsc --noEmit`。
 - **无 CI、无 pre-commit hook、无格式化器**（仅 Next 默认 ESLint flat config）。
 
 ## 两个有意保留的巨石文件
@@ -44,9 +45,12 @@ npm run lint       # eslint
 
 ## 协作：用 Gitee，不用 GitHub
 
-- Issue/PRD 在 Gitee 仓库 `hangzhou_xuanfu_1/blue-whale-ai`，通过 **Gitee MCP**（`mcp__gitee__*`）读写，**不要用 `gh` CLI**。
+- Issue/PRD 在 Gitee 仓库 `hangzhou-xuanfu_1/blue-whale-ai`，通过 **Gitee MCP**（`mcp__gitee__*`）读写，**不要用 `gh` CLI**。
 - 外部 PR 不是 triage 入口，只 triage issue。5 个 triage 标签：`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`（需通过 Gitee MCP 验证是否已预创建）。
 - `.mcp.json` 已 gitignore，新环境需手动配置 Gitee MCP 并自备 `GITEE_ACCESS_TOKEN`。
+- **`@gitee/mcp-gitee` native binary 多处 `404 Not Found Project` bug**（Go 编译、源码不可读；REST 直连正常）：
+  - **owner 必须用连字符 `hangzhou-xuanfu_1`**（仓库实际路径）。下划线写法在 `list_repo_issues` 不报错，但在 `get_repo_issue_detail` / `list_comments` / `create_comment` / `update_issue` 上 404——凡操作单个 issue 都必须用连字符。
+  - **`list_repo_issues({ state: "open" })`** 直接 404。**Workaround**：传 `state: "all"` 客户端按 `i.state === "open"` 过滤；或 `node blue_whale/scripts/gitee-issues.mjs list open` 走直连 wrapper。其它 state 值正常。
 
 ## 后端未定
 
