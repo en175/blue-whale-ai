@@ -1,43 +1,91 @@
 #!/usr/bin/env bash
-# Claude Code PreToolUse hook — 拦截创建 issue 时不关联仓库（project_id 缺失或为 0）
+# Claude Code PreToolUse hook — 拦截 issue 不关联仓库，或子 issue 未继承父项归属
 # 零依赖（grep/sed 解析 JSON，同 block-squash-merge.sh）。
 #
-# 拦截：mcp__gitee-ent__create_enterprise_issue 的 project_id 缺失 / 为空 / = 0
-# 放行：project_id 非空且非 0（不校验是否等于具体仓库 ID —— 见 ADR-0007 D3）
+# 拦截：
+#   - create_enterprise_issue 的 project_id 缺失 / 为空 / = 0
+#   - create_enterprise_issue / update_enterprise_issue 带 parent_id，
+#     但 project_id 或 program_id 缺失 / 为空 / = 0
+#   - update_enterprise_issue 显式 project_id=0
+# 放行：
+#   - 根 issue 创建时 project_id 非空且非 0
+#   - 普通 update 不要求重复传 project_id
+#   - 不校验 project_id 是否等于具体仓库 ID（见 ADR-0007 D3）
 #
 # 为什么：project_id 在 MCP schema 里是 number；Gitee 用 0 表示「无关联」。
-# 不关联仓库的 issue 只出现在企业工作项列表，仓库 Issues 页看不到（见 ADR-0007，
-# 触发事件 IJZ5WA）。故 0 和缺失语义等价，都拦。
+# 不关联仓库的 issue 只出现在企业工作项列表，仓库 Issues 页看不到（见 ADR-0007）。
+# 子工作项如果只传 parent_id 而不继承 project_id/program_id，也会出现在企业工作台
+# 的父项下，但仓库 Issues/MCP 仓库过滤查不到（见 ADR-0008）。
 #
-# 配套：settings.json PreToolUse matcher = mcp__gitee-ent__create_enterprise_issue。
+# 配套：settings.json PreToolUse matcher = mcp__gitee-ent__create_enterprise_issue /
+#      mcp__gitee-ent__update_enterprise_issue。
 # 退出码 2 = 阻断 Claude 执行该工具调用。
 
-# 从 stdin 读 PreToolUse 的 JSON 输入
 INPUT=$(cat)
-# 提取 tool_input.project_id 的值（同时支持 number 无引号 / string 带引号两种形态）。
-# grep 两种形态："project_id": "..."（string）或 "project_id": <digits>（number）。
-# sed 去掉键名和可能的引号，留下纯值。jq 不可用时的零依赖兜底。
-PROJECT_ID=$(printf '%s' "$INPUT" \
-  | grep -oE '"project_id"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+)' \
-  | head -n1 \
-  | sed -E 's/.*"project_id"[[:space:]]*:[[:space:]]*"?([^"]*)"?\s*$/\1/')
 
-# project_id 缺失 / 空字符串 / 等于 0（Gitee 无关联哨兵）→ 拦截
-if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "0" ]; then
+extract_json_value() {
+  key="$1"
+  printf '%s' "$INPUT" \
+    | grep -oE "\"${key}\"[[:space:]]*:[[:space:]]*(\"[^\"]*\"|[0-9]+)" \
+    | head -n1 \
+    | sed -E "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"?([^\"]*)\"?.*/\\1/"
+}
+
+TOOL_NAME=$(extract_json_value "tool_name")
+PROJECT_ID=$(extract_json_value "project_id")
+PROGRAM_ID=$(extract_json_value "program_id")
+PARENT_ID=$(extract_json_value "parent_id")
+
+IS_UPDATE=0
+[ "$TOOL_NAME" = "mcp__gitee-ent__update_enterprise_issue" ] && IS_UPDATE=1
+
+HAS_PARENT=0
+[ -n "$PARENT_ID" ] && [ "$PARENT_ID" != "0" ] && HAS_PARENT=1
+
+block() {
+  reason="$1"
   cat >&2 <<EOF
-BLOCKED: 创建 issue 未关联仓库（project_id 缺失或为 0）。
+BLOCKED: ${reason}
+  tool_name: ${TOOL_NAME:-（未知，按 create 规则处理）}
+  parent_id: ${PARENT_ID:-（空）}
   project_id: ${PROJECT_ID:-（空）}
+  program_id: ${PROGRAM_ID:-（空）}
 
 本项目所有 issue 必须关联到 blue-whale-ai 仓库：
 - 不关联的 issue（project_id=0）只出现在企业工作项列表，仓库 Issues 页看不到
-- 团队按仓库 Issues 查工单时会漏掉它（历史事件 IJZ5WA）
+- 子工作项还必须继承父项的 project_id/program_id，否则父项页可见但仓库 Issues/MCP 仓库过滤查不到
+- 团队按仓库 Issues 查工单时会漏掉它（历史事件 IJZ5WA / IJZ74J-N）
 
-改法：创建时传 project_id（blue-whale-ai 仓库的 ID，
-用 mcp__gitee-ent__list_enterprise_repositories 查）。
+改法：
+- 根 issue：创建时传 project_id（blue-whale-ai 仓库的 ID，用 list_enterprise_repositories 查）
+- 子 issue：先 get 父 issue，创建/更新时传 parent_id=父项 id、project_id=父项 project_id、program_id=父项 program_id
+- 发布后用 list_enterprise_issues(project_id, search=ident) 反查确认仓库可见
+
 详见 docs/agents/issue-tracker.md「创建 issue」。
-决策见 docs/adr/0007-issue-must-link-repo.md。
+决策见 docs/adr/0007-issue-must-link-repo.md 与 docs/adr/0008-sub-issues-must-inherit-repo.md。
 EOF
   exit 2
+}
+
+# 任何显式 project_id=0 都是无仓库关联，create/update 都拦。
+if [ "$PROJECT_ID" = "0" ]; then
+  block "issue 的 project_id 为 0（未关联仓库）。"
+fi
+
+# 子 issue：只要传 parent_id，就必须同时带有效 project_id/program_id。
+if [ "$HAS_PARENT" -eq 1 ]; then
+  if [ -z "$PROJECT_ID" ]; then
+    block "子 issue 缺少 project_id，无法保证仓库 Issues 可见。"
+  fi
+  if [ -z "$PROGRAM_ID" ] || [ "$PROGRAM_ID" = "0" ]; then
+    block "子 issue 缺少 program_id，未继承父项项目归属。"
+  fi
+fi
+
+# create 根 issue：project_id 缺失 / 空字符串 / = 0 → 拦截。
+# update 普通字段不要求重复传 project_id，避免拦状态/标签/标题更新。
+if [ "$IS_UPDATE" -eq 0 ] && [ -z "$PROJECT_ID" ]; then
+  block "创建 issue 未关联仓库（project_id 缺失或为空）。"
 fi
 
 exit 0

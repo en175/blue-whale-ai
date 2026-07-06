@@ -13,7 +13,7 @@
 | `block-dangerous-git.sh` | `Bash` | `PreToolUse` | 拦裸 `--force`、`reset --hard`、`clean -f`、`branch -D`、`checkout .`、`restore .` | CLAUDE.md「提交与审查」 |
 | `block-push-to-master.sh` | `Bash` | `PreToolUse` | 拦任何对 `master`/`main` 的 push（显式 + 隐式） | [ADR-0003](../../adr/0003-no-direct-push-to-master.md) |
 | `block-squash-merge.sh` | `mcp__gitee-ent__merge_enterprise_pull` | `PreToolUse` | 拦 `merge_method=squash`/`rebase`，强制走 `merge` | CLAUDE.md「合并方法」 |
-| `block-issue-without-repo.sh` | `mcp__gitee-ent__create_enterprise_issue` | `PreToolUse` | 拦 `project_id` 缺失，强制 issue 关联仓库 | [ADR-0007](../../adr/0007-issue-must-link-repo.md) |
+| `block-issue-without-repo.sh` | `mcp__gitee-ent__create_enterprise_issue` / `mcp__gitee-ent__update_enterprise_issue` | `PreToolUse` | 拦 `project_id` 缺失/为 0；拦子 issue 未带 `project_id/program_id`，强制仓库可见 | [ADR-0007](../../adr/0007-issue-must-link-repo.md) / [ADR-0008](../../adr/0008-sub-issues-must-inherit-repo.md) |
 
 > `settings.json` 里还有 2 条**纯提醒**型 hook（grep 触发提示用 graphify、Read/Glob 触发提示先查图谱），它们不阻断执行，仅通过 `additionalContext` 注入提示。详见 `.claude/settings.json` 注释。
 
@@ -103,8 +103,9 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 写测试输入时，**JSON 字段类型以 MCP `tools/list` 返回的 schema 为准**，不要凭直觉只写字符串值。血泪：
 
-- `project_id` 在 `mcp__gitee-ent__create_enterprise_issue` 的 schema 里是 **number**（`"project_id":48854568`），不是 string。
+- `project_id`、`program_id`、`parent_id` 在 `mcp__gitee-ent__create_enterprise_issue` / `mcp__gitee-ent__update_enterprise_issue` 的 schema 里是 **number**（`"project_id":48854568`），不是 string。
 - PR #11 的 `block-issue-without-repo.sh` 首版正则只匹配 string 形态（`"project_id":"..."`），漏了 number；手写「三场景空跑」又都凭直觉写了字符串 → **假绿**，上线即瘫痪（IJZ5WA 复现），靠 code review 才抓出。
+- 子 issue 的父子关系也走 number 字段：`parent_id` 非 0 时必须同时带有效 `project_id/program_id`，否则仓库 Issues/MCP 仓库过滤查不到（IJZ74J-N 复现）。
 
 夹具里的回归基线（`string-only 正则在 number 形态下漏检`）就是防这个：把 hook 正则退回 string-only 再跑，number 用例必须报红。新增 hook 用到 MCP 字段时，照此同时覆盖 schema 的所有原生类型形态。
 
@@ -126,7 +127,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 - [ ] `chmod +x` 已执行
 - [ ] `.claude/settings.json` 同步更新（matcher + command 路径）
 - [ ] 至少 1 个**应当被拦**的测试用例 + 1 个**应当放行**的测试用例跑过
-- [ ] **输入 JSON 字段类型以 MCP `tools/list` schema 为准**（不要凭直觉只写字符串值——`project_id` 在 schema 里是 number，PR #11 / IJZ5WA 复现过 string-only 正则漏 number 形态的假绿）
+- [ ] **输入 JSON 字段类型以 MCP `tools/list` schema 为准**（不要凭直觉只写字符串值——`project_id` / `program_id` / `parent_id` 在 schema 里是 number，PR #11 / IJZ5WA 复现过 string-only 正则漏 number 形态的假绿）
 - [ ] 跑 `bash scripts/test-hooks.sh`，全绿才提交（退出码 0 = 通过）
 - [ ] 本文档表格里的「现有拦截器清单」同步更新
 

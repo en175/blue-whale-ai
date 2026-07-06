@@ -41,6 +41,7 @@ echo "✅ Claude guardrails 已随仓库就绪（.claude/settings.json + .claude
 echo "   - block-dangerous-git.sh：拦 AI 破坏性 git（裸 --force / reset --hard / branch -D / checkout . 等）"
 echo "   - block-push-to-master.sh：拦 AI 直推 master/main（与 .githooks/pre-push 形成双层防护，AI 走 MCP 合并 / 本地 git push 都挡）"
 echo "   - block-squash-merge.sh：拦 AI 用 squash/rebase 合并 PR（强制 merge）"
+echo "   - block-issue-without-repo.sh：拦 AI 创建仓库不可见 issue / 子 issue 未继承父项归属"
 echo "   个人配置请放 .claude/settings.local.json"
 echo ""
 

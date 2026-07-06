@@ -136,6 +136,36 @@ assert_exit 0 "issue: project_id=string 放行"
 run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":"0"}}'
 assert_exit 2 "issue: project_id=string \"0\" 拦截"
 
+# 子 issue 只传 parent_id、不传 project_id → 拦
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_input":{"parent_id":33553306}}'
+assert_exit 2 "issue: 子 issue 缺 project_id 拦截"
+assert_stderr_has "子 issue 缺少 project_id" "issue: 子 issue 缺 project_id 提示"
+
+# 子 issue 有 parent_id/project_id，但缺 program_id → 拦
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_input":{"parent_id":33553306,"project_id":48854568}}'
+assert_exit 2 "issue: 子 issue 缺 program_id 拦截"
+assert_stderr_has "子 issue 缺少 program_id" "issue: 子 issue 缺 program_id 提示"
+
+# 子 issue 同时继承 parent_id/project_id/program_id → 放行
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_input":{"parent_id":33553306,"project_id":48854568,"program_id":883843}}'
+assert_exit 0 "issue: 子 issue 继承父项归属放行"
+
+# update 只改状态/标签，不要求重复传 project_id → 放行
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_input":{"issue_id":"IJZ5WA","issue_state_id":123,"label_ids":"342812299"}}'
+assert_exit 0 "issue: 普通 update 放行"
+
+# update 显式 project_id=0 → 拦
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_input":{"issue_id":"IJZ5WA","project_id":0}}'
+assert_exit 2 "issue: update project_id=0 拦截"
+
+# update 子 issue 时只传 parent_id、不补 project_id/program_id → 拦
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_input":{"issue_id":"IJZ74J","parent_id":33553306}}'
+assert_exit 2 "issue: update 子 issue 缺归属拦截"
+
+# update 子 issue 补齐 parent_id/project_id/program_id → 放行
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_input":{"issue_id":"IJZ74J","parent_id":33553306,"project_id":48854568,"program_id":883843}}'
+assert_exit 0 "issue: update 子 issue 继承父项归属放行"
+
 # ── 回归基线：string-only 正则在 number 形态下漏检 ──
 # 直接验证「如果正则退回 string-only，number 输入会漏」这一事实，
 # 不依赖 hook 当前实现。失败即说明回归防护失效（夹具本身坏了）。
