@@ -5,10 +5,26 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, MessageSquare, Pencil, Settings, Trash2 } from "lucide-react";
-import { PROJECTS } from "../constants";
+import type { Project } from "../types";
 import { IconPlus, TopviewLogo } from "../icons";
 
-export function ProjectMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function ProjectMenu({
+  open,
+  onClose,
+  projects,
+  activeProjectId,
+  onSwitch,
+  onCreate,
+  onDelete,
+}: {
+  open: boolean;
+  onClose: () => void;
+  projects: Project[];
+  activeProjectId: string;
+  onSwitch: (id: string) => void;
+  onCreate: () => void;
+  onDelete: (id: string) => void;
+}) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -51,18 +67,24 @@ export function ProjectMenu({ open, onClose }: { open: boolean; onClose: () => v
         Projects
       </div>
       <div style={{ maxHeight: 240, overflowY: "auto", margin: "4px 0" }}>
-        {PROJECTS.map((p) => (
+        {projects.map((p) => {
+          const isActive = p.id === activeProjectId;
+          return (
           <div
             key={p.id}
             className="group/project relative flex items-center"
             style={{
               padding: "6px 16px",
               borderRadius: 6,
-              background: p.active ? "rgba(255, 255, 255, 0.12)" : "transparent",
+              background: isActive ? "rgba(255, 255, 255, 0.12)" : "transparent",
             }}
           >
             <button
               type="button"
+              onClick={() => {
+                onSwitch(p.id);
+                onClose();
+              }}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -75,7 +97,7 @@ export function ProjectMenu({ open, onClose }: { open: boolean; onClose: () => v
                 outline: "none",
                 cursor: "pointer",
                 textAlign: "left",
-                color: p.active ? "rgb(255, 255, 255)" : "rgba(255, 255, 255, 0.7)",
+                color: isActive ? "rgb(255, 255, 255)" : "rgba(255, 255, 255, 0.7)",
                 fontSize: 14,
               }}
             >
@@ -123,7 +145,7 @@ export function ProjectMenu({ open, onClose }: { open: boolean; onClose: () => v
                   minWidth: 0,
                   overflow: "hidden",
                   whiteSpace: "nowrap",
-                  fontWeight: p.active ? 600 : 400,
+                  fontWeight: isActive ? 600 : 400,
                   WebkitMaskImage:
                     "linear-gradient(to right, black calc(100% - 12px), transparent calc(100% + 0px))",
                   maskImage:
@@ -137,6 +159,7 @@ export function ProjectMenu({ open, onClose }: { open: boolean; onClose: () => v
             <button
               type="button"
               aria-label="Delete project"
+              onClick={() => onDelete(p.id)}
               className="opacity-0 pointer-events-none group-hover/project:opacity-100 group-hover/project:pointer-events-auto"
               style={{
                 position: "absolute",
@@ -161,7 +184,8 @@ export function ProjectMenu({ open, onClose }: { open: boolean; onClose: () => v
               <Trash2 width={14} height={14} aria-hidden="true" />
             </button>
           </div>
-        ))}
+          );
+        })}
       </div>
       <div style={{ height: 1, background: "rgba(255, 255, 255, 0.06)", margin: "8px 0" }} />
       <button
@@ -199,6 +223,10 @@ export function ProjectMenu({ open, onClose }: { open: boolean; onClose: () => v
       </button>
       <button
         type="button"
+        onClick={() => {
+          onCreate();
+          onClose();
+        }}
         style={{
           display: "flex",
           alignItems: "center",
@@ -234,7 +262,19 @@ export function ProjectMenu({ open, onClose }: { open: boolean; onClose: () => v
   );
 }
 
-export function TopBar() {
+export function TopBar({
+  activeProject,
+  projects,
+  onSwitch,
+  onCreate,
+  onDelete,
+}: {
+  activeProject: Project;
+  projects: Project[];
+  onSwitch: (id: string) => void;
+  onCreate: () => void;
+  onDelete: (id: string) => void;
+}) {
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
 
   return (
@@ -328,7 +368,7 @@ export function TopBar() {
               textAlign: "left",
             }}
           >
-            2026-06-30 09:54
+            {activeProject.name}
           </span>
           <ChevronDown
             width={14}
@@ -341,7 +381,15 @@ export function TopBar() {
             style={{ flexShrink: 0 }}
           />
         </button>
-        <ProjectMenu open={projectMenuOpen} onClose={() => setProjectMenuOpen(false)} />
+        <ProjectMenu
+          open={projectMenuOpen}
+          onClose={() => setProjectMenuOpen(false)}
+          projects={projects}
+          activeProjectId={activeProject.id}
+          onSwitch={onSwitch}
+          onCreate={onCreate}
+          onDelete={onDelete}
+        />
       </div>
       <div style={{ position: "relative", display: "inline-flex" }}>
         <button

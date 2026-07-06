@@ -12,43 +12,32 @@ import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
 import { ComposerShell, ModelSettingsMenu } from "./Composer";
 import { UserMessageBubble, AgentMessageBubble, ThinkingBlock, AgentCard } from "./ChatBubbles";
 import type { ChatMessage } from "../types";
+import type { CardStatus } from "../cardStatus";
 import { buildMockReplyForMode } from "../messages";
 import type { CardMessage } from "../nodeFromCard";
 
 export function AgentChatPanel({
-  prompt,
+  messages,
   isOpen,
   onClose,
   pendingMention,
   onMentionConsumed,
   onCardGenerated,
+  onAppendMessages,
+  onSetCardStatus,
 }: {
-  prompt: string;
+  /** 受控消息流：来自当前 Project.messages（切换项目随 key remount 更换） */
+  messages: ChatMessage[];
   isOpen: boolean;
   onClose: () => void;
   pendingMention?: { name: string; nonce: number } | null;
   onMentionConsumed?: () => void;
   onCardGenerated?: (card: CardMessage) => void;
+  /** 追加消息到当前项目（user 消息 + 逐条生成的 agent 回复均经此上抛） */
+  onAppendMessages?: (messages: ChatMessage[]) => void;
+  /** 设置当前项目内某 card 的状态（重试链推进） */
+  onSetCardStatus?: (cardId: number | string, status: CardStatus) => void;
 }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: 1, type: "user", text: prompt || "生成一个小猫" },
-    {
-      id: 2,
-      type: "thinking",
-      text: "思考过程",
-      content: "The user wants to generate an image of a kitten. This is a simple, direct image generation request in Instant mode. Let me follow the workflow:\n\n1. This is a direct final prompt for image generation - \"生成一个小猫\" (generate a kitten)\n2. I need to load the direct workflow and output-card-image skill\n3. For image requests, I create ImageCard task cards directly without preview/confirmation\n\nLet me first set the display language (user is writing in Chinese), then view the necessary skills, and create the image card directly.\n\nThe user's language is zh-CN based on \"生成一个小猫\".\n\nLet me view the workflow and output skill, then create the image card.\nThe user wants to generate an image of a kitten (\"生成一个小猫\"). This is a direct image generation request in Instant mode. According to the workflow, ImageCards skip preview and approval - I should create the card directly.\n\nLet me call plan_output_kinds and then image_card_output_fn directly.",
-    },
-    { id: 3, type: "agent", text: "正在为你生成一张可爱的小猫图片 🐱\n\n\n\n" },
-    {
-      id: 4,
-      type: "card",
-      text: "一只毛茸茸的小猫咪，大大的圆眼睛，柔软的毛发，表情呆萌可爱，自然光线柔和，浅景深特写，温暖治愈的氛围，高清细节",
-      meta: "1:1",
-      collapsed: false,
-      status: "failed",
-    },
-  ]);
-
   const [composerEmpty, setComposerEmpty] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [panelSize, setPanelSize] = useState({ w: 468, h: 600 });
@@ -184,7 +173,7 @@ export function AgentChatPanel({
     pendingTimers.current = [];
 
     const userMsg: ChatMessage = { id: Date.now(), type: "user", text };
-    setMessages((prev) => [...prev, userMsg]);
+    onAppendMessages?.([userMsg]);
     if (composerRef.current) composerRef.current.innerText = "";
     setComposerEmpty(true);
 
@@ -196,7 +185,7 @@ export function AgentChatPanel({
     );
     reply.forEach((msg, index) => {
       const timer = window.setTimeout(() => {
-        setMessages((prev) => [...prev, msg]);
+        onAppendMessages?.([msg]);
         // card 出现的同一 tick 触发回调：对话出 card ⇔ 画布出 NodeItem，原子同步
         if (msg.type === "card") onCardGenerated?.(msg);
         bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: "smooth" });
@@ -221,15 +210,11 @@ export function AgentChatPanel({
     for (const id of pendingTimers.current) clearTimeout(id);
     pendingTimers.current = [];
 
-    setMessages((prev) =>
-      prev.map((m) => (m.id === card.id && m.type === "card" ? { ...m, status: "generating" } : m))
-    );
+    onSetCardStatus?.(card.id, "generating");
 
     // DEMO 固定成功：generating 800ms 后落到终态 normal（状态机不变量由 cardStatus.test.ts 覆盖）
     const timer = window.setTimeout(() => {
-      setMessages((prev) =>
-        prev.map((m) => (m.id === card.id && m.type === "card" ? { ...m, status: "normal" } : m))
-      );
+      onSetCardStatus?.(card.id, "normal");
     }, 800);
     pendingTimers.current.push(timer);
   };

@@ -46,10 +46,26 @@ export type ChatMessage =
   | { id: number | string; type: "agent"; text: string }
   | { id: number | string; type: "thinking"; text: string; content: string }
   | { id: number | string; type: "card"; text: string; meta: string; collapsed?: boolean; status?: CardStatus };
+/**
+ * Canvas —— 画布聚合（提为具名类型）。
+ * 节点集合 + 视口，归属于 Project（见 CONTEXT.md L44–50）。
+ */
+export type Canvas = {
+  nodes: NodeItem[];
+  viewport: Viewport;
+};
+
 export type Project = {
   id: string;
   name: string;
   thumb: string | null;
+  /** 画布聚合：节点集合 + 视口。切换 Project 即更换此集合。 */
+  canvas: Canvas;
+  /**
+   * 对话消息流。归属 Project 不归属 Canvas（领域决策，CONTEXT.md L50）——
+   * 切换项目同时更换对话历史。
+   */
+  messages: ChatMessage[];
   active?: boolean;
 };
 export type ImageDockContentProps = {
