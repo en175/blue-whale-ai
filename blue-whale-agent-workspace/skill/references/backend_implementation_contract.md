@@ -1,0 +1,309 @@
+# Backend Implementation Contract
+
+这份文件把 Agent 编排规则翻译成后端工程需要实现的数据契约。
+
+目标：后端可以按这个契约实现 Video Agent Canvas，而不是重新猜 Agent 应该怎么工作。
+
+## 核心对象
+
+### Agent Turn
+
+每次用户输入或系统推进，都会产生一个 Agent Turn。
+
+```text
+turn_id
+canvas_id
+workflow_run_id
+stage_id
+user_message
+intent
+visible_reasoning
+user_message_out
+canvas_updates
+trace_event
+forced_skill_id
+created_at
+```
+
+字段说明(补充):
+
+| 字段 | 用户可见 | 说明 |
+|---|---|---|
+| `forced_skill_id` | 否(仅后端消费) | 用户在 Skill 面板点 `Use` 时携带;**仅决定 skill 选择那一步,不锁后续 Stage**;一次性指令,**不持久化为 `auto`**。详见 `AGENT-CONVERSATION-PRD.md` §2 / §5。 |
+
+字段说明：
+
+| 字段 | 用户可见 | 说明 |
+|---|---|---|
+| `visible_reasoning` | 是 | 产品化思考过程摘要 |
+| `user_message_out` | 是 | Agent 给用户看的正式回复 |
+| `canvas_updates` | 是 | 本轮新增或更新的画布节点 |
+| `trace_event` | 否 | 内部调试日志，不给普通用户展示 |
+
+## visible_reasoning
+
+前端“思考过程”区域展示这个字段。
+
+格式建议：
+
+```json
+{
+  "title": "思考过程",
+  "items": [
+    "我看到画布里已有一张保温杯产品图。",
+    "这个需求更适合使用电商产品图 Skill。",
+    "我会先生成 3 个商品图方向供你确认。"
+  ]
+}
+```
+
+如果前端只支持文本：
+
+```text
+我看到画布里已有一张保温杯产品图。这个需求更适合使用电商产品图 Skill。我会先生成 3 个商品图方向供你确认。
+```
+
+禁止放入：
+
+- prompt
+- worker 文件名
+- tool call
+- JSON 参数
+- 文件路径
+- 模型真实推理链
+
+## trace_event
+
+后端内部保存，默认不展示给普通用户。
+
+格式建议：
+
+```json
+{
+  "agent": "director",
+  "worker": "skill_selector",
+  "tool": "select_skill",
+  "input_summary": "...",
+  "output_summary": "...",
+  "raw_error": null
+}
+```
+
+用途：
+
+- 排查 Agent 为什么选错 Skill
+- 排查确认门为什么没有推进
+- 排查生成失败
+- 开发者模式复盘
+
+## Canvas Node
+
+画布节点只表示用户能看到的图片 / 视频素材结果。生成任务本身由 GenerationJob 承载，brief / skill / 分镜 / review 等过程内容由 ChatMessage 承载。
+
+```text
+node_id
+canvas_id
+stage_id
+type
+status
+title
+content
+asset_refs
+source
+visible_reasoning
+created_at
+updated_at
+```
+
+### node.type（画布节点,仅素材）
+
+画布只承载素材节点,生成中与已完成的区分用 `status`(queued / generating / ready / ...),
+不拆 task / result type:
+
+- `image`  （图片:中间结果或最终结果）
+- `video`  （视频:中间结果或最终结果）
+
+### 对话消息类型(ChatMessage variant)
+
+过程性内容在对话流展示,**不进画布**:
+
+- `visible_reasoning`  （思考过程,可折叠）
+- `brief`  （需求摘要）
+- `skill_recommendation`  （Skill 推荐）
+- `asset_understanding`  （图片理解摘要）
+- `stage_plan`  （阶段计划）
+- `script` / `storyboard`  （脚本 / 分镜）
+- `prompt_draft` / `optimized_prompt`  （提示词草稿 / 优化后,**默认不展示给用户**;`optimized_prompt` 是发给 Provider 的原始版,含系统指令/格式 token)
+- `optimized_prompt_preview`  （优化后提示词的**用户友好版**,中文可读、可展示;区别于原始 `optimized_prompt`,直生链路用它给用户看"我帮你优化成了这样")
+- `review`  （审核结论）
+- `plain_text`  （普通文字回复）
+- `image_card` / `video_card`  （结果卡,引用画布上的 asset node）
+- `error`  （错误说明,可展示给用户)
+
+### node.status
+
+建议值：
+
+- `queued`
+- `generating`
+- `ready`
+- `awaiting_confirm`
+- `confirmed`
+- `rejected`
+- `failed`
+
+确认门只允许对 `ready` 或 `awaiting_confirm` 的素材节点生效。`queued` / `generating` / `failed` 节点不能被确认。
+
+## Workflow Run
+
+```text
+workflow_run_id
+canvas_id
+workflow_name
+current_stage_id
+status
+selected_skill
+brief
+stage_plan
+created_at
+updated_at
+```
+
+### workflow.status
+
+建议值：
+
+- `idle`
+- `collecting`
+- `running`
+- `awaiting_confirm`
+- `completed`
+- `failed`
+
+### workflow_name
+
+建议值：
+
+- `direct_generation`
+- `image_generation_prompt`
+- `image_understanding`
+- `video_agent_canvas`
+
+## Stage
+
+```text
+stage_id
+workflow_run_id
+name
+status
+required_inputs
+outputs
+confirmation_required
+confirmed_at
+```
+
+### stage.status
+
+建议值：
+
+- `pending`
+- `running`
+- `awaiting_confirm`
+- `confirmed`
+- `failed`
+- `skipped`
+
+## API 返回结构建议
+
+每次用户发消息后，后端返回：
+
+```json
+{
+  "canvas": {},
+  "workflow_run": {},
+  "agent_turn": {
+    "visible_reasoning": {},
+    "user_message_out": "",
+    "message_updates": [],
+    "canvas_updates": []
+  },
+  "requires_user_action": true,
+  "allowed_actions": ["confirm", "revise", "retry"]
+}
+```
+
+字段说明：
+
+- `message_updates`:本轮新增/更新的**对话消息**(brief / skill / 分镜 / review /
+  visible_reasoning / 结果卡等)。对话区只从这里取内容。
+- `canvas_updates`:本轮新增/更新的**画布素材节点**(仅 image / video)。
+  画布只从这里取内容;过程内容不得放进 canvas_updates。
+- `requires_user_action` / `allowed_actions`:后端组织确认话术的依据,
+  前端**不据此渲染按钮**,而是在对话里用文字提示"可以确认 / 修改 / 重做"。
+
+## 用户确认动作
+
+确认采用**对话式**:前端不增加确认按钮,也不发送结构化 action。
+用户在对话里用自然语言表达,后端按 `rules/confirmation_gate.md` 的四分类处理
+(明确确认 / 弱继续 / 修改意图 / 等待中)。
+
+后端职责:
+
+1. 从用户消息推断意图类别。
+2. 结合当前 workflow stage 与 canvas node 的 status 判断能否推进。
+3. 只有「当前阶段存在 ready 节点」+「用户明确确认」同时满足,才 `advance_stage`。
+
+- 弱继续("继续/好了/下一步")不推进,后端回复二次确认话术。
+- 修改意图("改一下/换风格")进入 revise,可带自然语言 instruction
+  (如"保留构图,换成清晨桌面风格")。
+- 重试也通过对话表达("重新生成这版")。
+
+`stage_id`、`node_ids` 由后端从 canvas 状态自行解析,**不要求前端传递**。
+返回结构中的 `requires_user_action` / `allowed_actions` 字段保留,但语义是
+「后端组织确认话术的依据」,前端**不据此渲染按钮**,而是在对话里用文字
+提示用户可以确认 / 修改 / 重做。
+
+## 后端必须实现的硬约束
+
+1. 没有 ready node，不允许确认。
+2. 用户只说“继续”，不能自动推进。
+3. stage 未确认，不能进入后续生成阶段。
+4. confirmed node 默认不覆盖。
+5. 生成失败必须写入 failed node，而不是静默失败。
+6. `visible_reasoning` 必须经过过滤后再返回前端。
+7. `trace_event` 默认不返回普通用户端。
+8. 图生图或图片转视频前必须存在 `asset_understanding`。
+9. 主 LLM 不支持多模态时，不能声称已识别图片，必须调用视觉模型或请求用户补充。
+10. Provider 调用前必须存在 `optimized_prompt`。
+11. 轻量 direct generation 不应强制创建完整广告 stage plan。
+12. 完整广告/UGC/短剧视频不能绕过脚本分镜直接发给 Provider。
+
+## 前端展示建议
+
+一个 Agent Turn 可以展示为：
+
+```text
+[思考过程]
+我看到...
+我判断...
+我接下来...
+
+[正式回复]
+当前阶段结果已生成，请确认是否满意。
+
+[画布]
+展示新增节点
+```
+
+确认走对话:用户用自然语言表达确认 / 修改 / 重做(详见 `rules/confirmation_gate.md`),
+此处**不渲染按钮**。
+
+## 工程验收标准
+
+实现完成后，至少验证：
+
+1. 用户说“继续”但当前结果未明确确认时，不推进。
+2. 画布没有 ready node 时，不允许确认。
+3. Agent 选择 Skill 后，返回可见选择理由。
+4. Seedance 生成提示词不会覆盖已确认 Skill。
+5. trace_event 不出现在普通用户响应里。
