@@ -7,6 +7,7 @@ Rules:
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- 在 task worktree 中需要 Graphify 时，先运行 `scripts/ensure-graphify-worktree.sh`；不得使用主 checkout 的 `graphify-out/` 代替当前 worktree 图谱。
 
 ## 设计系统 (DESIGN.md)
 
@@ -28,6 +29,8 @@ Rules:
 - **禁直推 master（最高红线）**：AI（及所有人）**禁止任何** `git push origin master`。所有进 master 的改动统一走 **开分支 → 推分支 → Gitee 建 PR → 服务端合并**。"自审合"只免互审，**不免流程**——自审通过后仍须自己走完分支→PR→合并。合并触发：低风险 PR 可用 Gitee MCP `merge_enterprise_pull` 自审合（秒级，不卡人）；**高风险 PR 禁 AI 用 MCP 合，必须人手动合**。`hotfix/*` 无特权，同样走分支→PR。根因与决策见 [`docs/adr/0003-no-direct-push-to-master.md`](docs/adr/0003-no-direct-push-to-master.md)；hook 兜底见下「远程-本地同步」。
 - **合并只用 merge（禁 squash/rebase）**：AI 用 Gitee MCP `merge_enterprise_pull` 时 `merge_method=merge`（或不传，Gitee 默认 merge）。传 `squash`/`rebase` 会被 `.claude/hooks/block-squash-merge.sh` 拦。人在 Gitee 网页手动合并同样选 merge。合并即删源分支：**MCP 无 `prune_source_branch` 参数、Gitee merge 默认也不删**（踩坑见 [`docs/agents/hooks/README.md`](docs/agents/hooks/README.md)），AI 用 `git push origin --delete <branch>` 删，或人在 Gitee 界面勾「删除源分支」。
 - **分支命名遵循强制白名单**：开分支前缀必须是工单分支前缀（hook 强制——不在白名单则 `--force-with-lease` 被拦、落后 `origin/master` 时 push 被拦）。前缀清单、标题格式、生命周期、保护分支规则见 [`docs/agents/branch-naming.md`](docs/agents/branch-naming.md)；决策见 [`docs/adr/0004-branch-naming.md`](docs/adr/0004-branch-naming.md)。
+- **并行可写任务必须用 task worktree**：`master` 只做只读调查和可刷新镜像；改文件前必须在主 checkout 运行 `scripts/start-task-worktree.sh <branch> <worktree-dir>`，task worktree 固定在 `../blue-whale-worktrees/`。发布分支用 `scripts/publish-task-branch.sh`；PR 合并后用 `scripts/cleanup-task-worktree.sh`；巡检用 `scripts/list-task-worktrees.sh`。完整流程见 [`docs/agents/worktree-workflow.md`](docs/agents/worktree-workflow.md)，决策见 [`docs/adr/0009-parallel-agent-worktrees.md`](docs/adr/0009-parallel-agent-worktrees.md)。
+- **Codebase Memory MCP 准入**：创建 task worktree 后、代码检索或修改前，必须对该 worktree 执行 Codebase Memory MCP `index_repository(repo_path=<task-worktree>)` 并确认 `index_status=ready`；不得用主 checkout 索引替代任务 worktree 索引。
 - **禁碰生成物**：`graphify-out/`、`dist/`、`target/`、`.next/`、`__pycache__/`、`node_modules/` 等自动生成的目录/文件，AI 不得改动（改了下次生成即冲突）。
 - **远程-本地同步（动 git 前先 fetch）**：执行任何 git 写操作（`checkout -b` / `commit` / `push`）前，必须先 `git fetch origin`，无例外。本仓库多人（含 AI）协作，远程 master 可能有新合并。同步用 `rebase`（不用 merge，保 PR diff 干净）：`git rebase origin/master`。落后的工单分支 push 会被 pre-push hook 拦。rebase 撞冲突 → AI 先解 → 改了前端跑 `npm run lint`（blue_whale_web）/ 改了后端跑 `pytest`（blue_whale_server）→ 解不动 `git rebase --abort`。rebase 后强推用 `git push --force-with-lease`（仅工单分支放行；裸 `--force`、对 `master`/`main` 强推被 AI guardrails 拦）。心智：动手前先同步。**机制兜底（不靠记忆）**：`pre-commit` 软提醒落后、`pre-push` 硬拦落后（铁闸），见 [`docs/adr/0006-sync-mechanism-auto-block.md`](docs/adr/0006-sync-mechanism-auto-block.md)。
 - **Commit message 用 Conventional Commits**：`<type>: <描述>`，type 用 `feat` / `fix` / `docs` / `refactor` / `chore`。一次提交只干一件事。`feat`（commit type）与 `feature`（分支前缀）刻意不统一——前者遵 Conventional Commits 标准，后者遵业界分支惯例，详见 [`docs/agents/branch-naming.md`](docs/agents/branch-naming.md)。
@@ -36,6 +39,7 @@ Rules:
 ### 命中以下情况 → 必查 `docs/agents/commit-and-review.md`
 
 - **开 PR** → 模板见 `.gitee/PULL_REQUEST_TEMPLATE.md`（Gitee 自动加载），风险等级字段必填。
+- **并行任务 / task worktree 生命周期** → 开工、发布、清理、dirty master SOP 见 `docs/agents/worktree-workflow.md`。
 
 > Hook 违规时会拦截并在错误信息里指路到该文档。
 

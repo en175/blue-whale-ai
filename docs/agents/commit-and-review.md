@@ -137,6 +137,7 @@ ________
 | 检查项 | 类型 | 说明 |
 |---|---|---|
 | 禁提交生成物 | 🔴 硬挡 | `graphify-out/` `dist*` `.next/` `__pycache__/` `*.pyc` `.pytest_cache/`（`.claude/` 进仓共享，仅 `settings.local.json` 由 `.gitignore` 忽略，非 hook 拦） |
+| 禁 master/main 提交 | 🔴 硬挡 | pre-commit：禁止在 `master`/`main` 上提交。可写任务必须先用 [worktree-workflow.md](worktree-workflow.md) 创建 task worktree + 工单分支 |
 | commit 规范 | 🔴 硬挡 | Conventional Commits，格式不符拦截 |
 | 前端 lint | 🟡 软提醒 | 改 `blue_whale_web/` 时跑 `npm run lint`，失败只警告不拦 |
 | 后端 py_compile | 🟡 软提醒 | 改 `blue_whale_server/` 下 `.py` 时跑 `python -m py_compile`，失败只警告不拦 |

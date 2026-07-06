@@ -27,7 +27,7 @@
 
 所有改动从最新 `origin/master` 切工单分支后才开始写代码。**禁止**在本地 `master` 工作区改代码、再 `checkout -b` 把 dirty 改动带走（hook 不拦这种操作，但违反流程精神）。
 
-理由：本地 `master` 是 `origin/master` 的镜像，须随时能 `fetch + rebase`。在 master 工作区留 dirty 改动，rebase 会撞冲突或拒绝，堵死同步生命线。流程已载于 `README.md` §1（切分支是第 1 步、写代码是第 2 步）。
+理由：本地 `master` 是 `origin/master` 的镜像，须随时能 `fetch + rebase`。在 master 工作区留 dirty 改动，rebase 会撞冲突或拒绝，堵死同步生命线。并行任务的开工流程见 [`docs/agents/worktree-workflow.md`](../agents/worktree-workflow.md)。
 
 ### D2. 同步 = 自动阻断（B），非自动同步（A）
 
