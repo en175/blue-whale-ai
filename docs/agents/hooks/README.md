@@ -87,6 +87,29 @@ Hook 触发记录在 `~/.claude/logs/` 或本会话 transcript 里搜 `hookSpeci
 
 ---
 
+## 测试夹具（`scripts/test-hooks.sh`）
+
+> 纯 bash 黑盒夹具，对每个 hook 喂 stdin JSON、断言 exit code（0/2）+ stderr 含关键串，一键跑，退出码反映通过/失败。**改 hook 前先跑它。**
+
+```bash
+bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
+```
+
+### 测试边界（seam）
+
+4 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stderr** 黑盒。夹具不测内部实现，只测这条边界。唯一外部依赖 `git rev-parse`（push-to-master / dangerous-git 的「无显式 refspec → 查当前分支」分支用）由夹具用 PATH 注入的临时 fake git 隔离（响应 `rev-parse --abbrev-ref HEAD` → `$FAKE_BRANCH`），不碰真实仓库。
+
+### 字段类型以 MCP schema 为准（核心教训）
+
+写测试输入时，**JSON 字段类型以 MCP `tools/list` 返回的 schema 为准**，不要凭直觉只写字符串值。血泪：
+
+- `project_id` 在 `mcp__gitee-ent__create_enterprise_issue` 的 schema 里是 **number**（`"project_id":48854568`），不是 string。
+- PR #11 的 `block-issue-without-repo.sh` 首版正则只匹配 string 形态（`"project_id":"..."`），漏了 number；手写「三场景空跑」又都凭直觉写了字符串 → **假绿**，上线即瘫痪（IJZ5WA 复现），靠 code review 才抓出。
+
+夹具里的回归基线（`string-only 正则在 number 形态下漏检`）就是防这个：把 hook 正则退回 string-only 再跑，number 用例必须报红。新增 hook 用到 MCP 字段时，照此同时覆盖 schema 的所有原生类型形态。
+
+---
+
 ## Hook 失效的 3 个常见原因
 
 | 症状 | 原因 | 排查命令 |
@@ -103,6 +126,8 @@ Hook 触发记录在 `~/.claude/logs/` 或本会话 transcript 里搜 `hookSpeci
 - [ ] `chmod +x` 已执行
 - [ ] `.claude/settings.json` 同步更新（matcher + command 路径）
 - [ ] 至少 1 个**应当被拦**的测试用例 + 1 个**应当放行**的测试用例跑过
+- [ ] **输入 JSON 字段类型以 MCP `tools/list` schema 为准**（不要凭直觉只写字符串值——`project_id` 在 schema 里是 number，PR #11 / IJZ5WA 复现过 string-only 正则漏 number 形态的假绿）
+- [ ] 跑 `bash scripts/test-hooks.sh`，全绿才提交（退出码 0 = 通过）
 - [ ] 本文档表格里的「现有拦截器清单」同步更新
 
 ---
