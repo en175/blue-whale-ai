@@ -48,7 +48,7 @@ Issues 追踪在 Gitee 仓库的 Issues（远程见 `git remote -v`，本仓库�
 - **创建 issue**：`mcp__gitee-ent__create_enterprise_issue`（**必传 `project_id` 关联仓库**，值用 `mcp__gitee-ent__list_enterprise_repositories` 查；不传则工单只出现在企业工作项、仓库 Issues 页看不到，hook `block-issue-without-repo.sh` 硬拦。详见 `docs/agents/issue-tracker.md` 与 ADR-0007）。
 - **加/移除标签**：`mcp__gitee-ent__update_enterprise_issue`（`label_ids` 为逗号分隔的**标签数字 ID**，ID 用 `mcp__gitee-ent__list_enterprise_labels` 查；Gitee 标签要求长度 2–20、非特殊字符）。注意：`create_enterprise_issue` 对企业私有仓库的 labels 会静默忽略，需紧跟一次 `update_enterprise_issue` 补 `label_ids`。
 - **关闭**：`mcp__gitee-ent__update_enterprise_issue`（`issue_state_id`，**不是 `state`**——该工具无 `state` 入参。先 `mcp__gitee-ent__list_issue_type_states` 查该 issue 工作项类型的合法状态枚举，传「已完成」对应的 id）。
-- **合并 PR**：`mcp__gitee-ent__merge_enterprise_pull`（`merge_method=merge`）。**删源分支**：该 MCP 工具**无 `prune_source_branch` 参数**（Gitee REST API 有，但未暴露给此 MCP），且 Gitee merge **默认不删**源分支（实战踩坑见 [`docs/agents/hooks/README.md`](docs/agents/hooks/README.md)）。AI 删源分支用 `git push origin --delete <branch>`，或请人在 Gitee 网页勾「删除源分支」。
+- **合并 PR**：`mcp__gitee-ent__merge_enterprise_pull`（`merge_method=merge`）。**删源分支**：该 MCP 工具**无 `prune_source_branch` 参数**（Gitee REST API 有，但未暴露给此 MCP），且 Gitee merge **默认不删**源分支（实战踩坑见 [`docs/agents/hooks/README.md`](docs/agents/hooks/README.md)）。AI 删源分支用 `git push origin --delete <branch>`，或人在 Gitee 网页勾「删除源分支」。
 
 ### Triage labels
 

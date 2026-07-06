@@ -12,6 +12,8 @@
 
 为何没传 `project_id`：[`docs/agents/issue-tracker.md`](../agents/issue-tracker.md) 的「创建 issue」步骤只写了传 `enterprise_id` + `title/body/labels`，**规则从未要求传 `project_id`**。操作者（AI/人）照规则走，必然漏发。
 
+> 订正注（2026-07-06，PR !13）：本段 `body/labels` 为当时的文档原文；issue-tracker.md 后已修正为 `description`/`label_ids`（MCP 实际入参）。本 ADR 的决策（必传 `project_id`）不受影响。
+
 ### 命名不一致（本 ADR 顺带修）
 
 排查根因时发现：仓库内文档与 `.claude/settings.json` 全部用 MCP 前缀 `mcp__gitee__*`，但 `.mcp.json` 注册的 server 实际名为 `gitee-ent`，真实工具前缀是 `mcp__gitee-ent__*`。
