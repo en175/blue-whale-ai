@@ -2,14 +2,14 @@
 # Claude Code PreToolUse hook — 拦截 AI 用 squash/rebase 合并 PR
 # 零依赖（grep/sed 解析 JSON，同 block-dangerous-git.sh）。
 #
-# 拦截：mcp__gitee__merge_pull 的 merge_method 为 squash / rebase
+# 拦截：mcp__gitee__merge_enterprise_pull 的 merge_method 为 squash / rebase
 # 放行：merge（或缺省，Gitee 默认 merge）
 #
 # 为什么：squash/rebase 合并改写 commit sha → 本地 git branch -d 误判"未合并"
 # → 叠加 block-dangerous-git.sh 拦 -D → AI 无法清理本地分支（死锁）。
 # merge 保留原 sha，-d 正常工作。项目合并惯例 = merge（实证 master 历史全 2-parent merge commit）。
 #
-# 配套：settings.json PreToolUse matcher = mcp__gitee__merge_pull。
+# 配套：settings.json PreToolUse matcher = mcp__gitee__merge_enterprise_pull。
 # 退出码 2 = 阻断 Claude 执行该工具调用。
 
 # 从 stdin 读 PreToolUse 的 JSON 输入

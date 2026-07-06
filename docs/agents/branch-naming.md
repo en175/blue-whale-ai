@@ -56,7 +56,7 @@
 
 ## 生命周期
 
-- **合并即删源分支**：Gitee 合并界面勾「删除源分支」，或 MCP `merge_pull` 后 `git push origin --delete <分支>`。
+- **合并即删源分支**：Gitee 合并界面勾「删除源分支」，或 MCP `merge_enterprise_pull` 后 `git push origin --delete <分支>`。
 - **本地清理**：`git branch -d <分支>` + `git fetch --prune`。
 - **废弃分支**（开了不提 PR）：作者自删，不留 stale。
 - **不设保留期**：代码历史在 git log + PR 记录里，删分支不丢历史。
