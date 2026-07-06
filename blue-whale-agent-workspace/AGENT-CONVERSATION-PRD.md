@@ -46,13 +46,14 @@ Agent runtime(CEO 路由 + workers)在 P0 必须把以下三条链路做透:
 
 ### `POST /api/projects/{project_id}/agent/turn`
 
-用户在 AgentChatPanel 发一句话。后端 CEO 路由按 `generation_route_decision.md` 判定链路(direct / image-to-video / full canvas),逐段流式返回;必要时启动 GenerationJob。
+用户在 AgentChatPanel 发一句话。后端 L1 意图识别按 `generation_route_decision.md` 分流(轻量编排 / Full Canvas / 非生成),逐段流式返回;必要时启动 GenerationJob。
 
 ```json
 // req
 {
   "text": "用户的自然语言",
-  "forced_skill_id": "skl_xxx"    // optional
+  "forced_skill_id": "skl_xxx",          // optional，用户在 Skill 面板点 Use
+  "reference_asset_ids": ["ast_xxx"]     // optional，用户 @ 引用的画布素材
 }
 ```
 
@@ -62,6 +63,7 @@ Agent runtime(CEO 路由 + workers)在 P0 必须把以下三条链路做透:
 |---|---|---|
 | `text` | 是 | 用户的自然语言输入。 |
 | `forced_skill_id` | 否 | 仅当用户在 Skill 面板点 `Use` 时携带。**仅决定 skill 选择那一步,不锁后续 Stage**;一次性指令,**不改变用户的 `auto` 状态**(不持久化)。权威定义见 `backend_implementation_contract.md` Agent Turn 字段。 |
+| `reference_asset_ids` | 否 | 用户在对话框打 `@` 引用的画布素材。Agent 拿到 asset_id 后:若该 asset `understanding_status != ready`,先补做 `asset_understanding`(visible_reasoning 兜「我先看一下这张图」),再进图生图 / 图生视频链路。复用 `BACKEND-API-PRD.md` §5.4 直生入口的同名字段语义。 |
 
 **`forced_skill_id` 与 auto 候选池的关系**(详见 §5 接入点):
 
@@ -110,6 +112,8 @@ event: turn_done
 data: {"requires_user_action":true,"allowed_actions":["confirm","revise","retry"],"current_stage_id":"stg_xxx","active_job_ids":[]}
 ```
 
+> 上面的序列是**轻量编排**形态(一个 turn 内:追问 → 优化提示词 → 生成 → 出结果)。**Full Canvas** 形态不同:跨多个 turn,每个「硬停 stage」(Brief / 分镜 / 视觉 / 视频)切一次 turn,用户确认后才开下一个 turn;「软过 stage」(Skill / 阶段计划 / 审核)在同一 turn 内自动推进。两种形态都**必有 `optimized_prompt_preview`**(Agent 永远优化提示词,区别于 Dock 裸直生)。
+
 ### 事件清单
 
 | 事件 | payload | 说明 |
@@ -136,7 +140,7 @@ data: {"requires_user_action":true,"allowed_actions":["confirm","revise","retry"
 | `script` / `storyboard` | 是 | 脚本 / 分镜(P0 文字气泡,P1 可美化成分镜表)。 |
 | `prompt_draft` | **否** | 提示词草稿,默认不展示。 |
 | `optimized_prompt` | **否** | 发给 Provider 的原始版,含系统指令/格式 token,**永不进 `message`**。 |
-| `optimized_prompt_preview` | **是** | 用户友好版,中文可读,"我帮你优化成了这样",可在对话展示。直生链路用它给用户看优化后的提示词。 |
+| `optimized_prompt_preview` | **是** | 用户友好版,中文可读,"我帮你优化成了这样",可在对话展示。**Agent 链路必有**(轻量编排 + Full Canvas 都走;Dock 直生不产生此消息)。 |
 | `review` | 是 | 审核结论。 |
 | `plain_text` | 是 | 普通文字回复。 |
 | `image_card` / `video_card` | 是 | 结果卡,引用画布上的 asset node。 |

@@ -32,7 +32,9 @@
 
 ## 当前四条生成链路
 
-### 1. Direct Image
+> **2026-07-06 重构**：Direct Image / Direct Video / Image-to-Video 归 **BottomDock 直生**（纯参数透传，零优化零 understanding）；**Agent 对话**只走对话编排（L1 意图识别 → 轻量编排 / Full Canvas），永远走 Prompt Optimizer，不裸直接生成。下述四链路的链路细节仍有效，但归属入口按重构调整。详见 `generation_route_decision.md`。
+
+### 1. Direct Image（Dock 直生）
 
 适合用户直接要图片：
 
@@ -279,11 +281,11 @@ Seedance / 生图规则负责：
 
 两者不能互相覆盖。
 
-### 4. 提示词优化是中间层
+### 4. 提示词优化是中间层（Agent 链路）
 
-Provider 前必须有 Prompt Optimizer。
+**Agent 链路** Provider 前必须经过 Prompt Optimizer（技术规整 + 创意优化），不把用户原话直接发 Provider。
 
-不应该直接把用户原话发给生成模型。
+**Dock 直生豁免**——Dock 是纯参数透传管道（用户自负责 prompt 质量），不经过 Prompt Optimizer。两条入口的区分见 `BACKEND-API-PRD.md` §6。
 
 ### 5. 用户可以看到思考过程，但不能看到内部链路
 

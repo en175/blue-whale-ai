@@ -1,82 +1,57 @@
 # Generation Route Decision Rule
 
-本规则定义用户要生成图片或视频时，CEO 应该选择哪条链路。
+本规则定义用户要生成图片或视频时，**走 Dock 直生还是 Agent 对话**，以及 Agent 内部如何分流。
 
 ## 一句话规则
 
-先判断用户要的是“直接生成一个结果”，还是“做一个可分阶段创作的视频项目”。
+先按「要快 / 要好」选入口：**Dock = 直接生成（要快，用户自负责 prompt），Agent = 对话编排（要好，Agent 帮优化）**。Agent 内部再由 L1 意图识别分流到轻量编排或 Full Canvas。
 
-## 四条生成链路
+## 两条入口
 
-| 链路 | 适用 | Workflow |
+| 入口 | 承担 | 定位 |
 |---|---|---|
-| Direct Image | 直接生成图片、商品图、风格图 | `image_generation_prompt.md` |
-| Direct Video | 直接生成轻量视频 | `direct_generation.md` |
-| Image-to-Video | 让上传图动起来、简单图转视频 | `direct_generation.md` + `image_understanding.md` |
-| Full Video Canvas | 广告片、UGC、短剧、复杂营销视频 | `video_agent_canvas.md` |
+| **BottomDock 直生** | 所有直接生成：Direct Image / Direct Video / Image-to-Video | 要快——用户手填参数 + prompt，零优化、零 understanding，直传 Provider |
+| **Agent 对话** | L1 意图识别 → 轻量编排 / Full Canvas / 非生成回复 | 要好——永远走 Prompt Optimizer，图推理前做 understanding |
 
-## 路由判断
+> Image-to-Video 两条入口都能做：Dock = 图 + prompt 直传 Provider；Agent = understanding + 优化 + 生成。用户按要快 / 要编排选。
 
-### 走 Direct Image
+## Dock 直生（无路由判定）
 
-用户说：
+Dock 不判链路——用户在 Dock 选 type（image / video）、填参数 + prompt、选 reference_asset，直传 Provider。零优化、零 understanding（Provider 自己消费图）。详见 `BACKEND-API-PRD.md` §5.4 / §6。
 
-- 生成一张图
-- 做一张产品图
-- 换背景
-- 做海报图
-- 做关键帧
-- 做风格参考图
+## Agent 对话：L1 意图识别（统一入口）
 
-并且不要求完整视频编排。
+用户消息进 Agent，**先过 L1 意图识别**（Director / CEO 路由），分流到三条：
 
-### 走 Direct Video
+| 分流 | 触发 | 链路 |
+|---|---|---|
+| **轻量编排** | 简单图 / 轻量视频（「生成一张猫图」「5 秒小猫视频」） | 追问补全（仅方向歧义）+ Skill（有匹配才用）+ 优化提示词（硬停确认）+ 生成 |
+| **Full Canvas** | 广告 / UGC / 短剧 / 品牌片 / 需要脚本分镜 | Brief → Skill → 分镜 → 视觉 → 视频（4 硬停 + 3 软过，见 `video_agent_canvas.md`） |
+| **非生成** | 咨询 / 修改 / 确认 / 切换 Skill | 对话回复（不启动 GenerationJob） |
 
-用户说：
+### 判定信号
 
-- 生成一个小猫跑步的视频
-- 做一个女孩跳舞的视频
-- 生成一个赛博朋克城市镜头
-- 做一个 5 秒产品旋转视频
+- **强信号（触发 Full Canvas）**：「广告 / UGC / 短剧 / 品牌片 / 脚本 / 分镜」
+- **强信号（触发轻量）**：「生成一张图 / X 秒视频 / 单个镜头」
+- **弱信号（歧义）** → 默认轻量编排
 
-特点：
+### 判定必须暴露 + 可推翻
 
-- 主体和动作较清楚
-- 不需要广告策略
-- 不需要多阶段脚本
-- 可以一次生成后确认
+L1 判定结果必须进 `visible_reasoning`，说人话，且在 Job 启动**前**暴露（推翻不烧生成资源）。用户可对话推翻（「不，我要完整编排」）→ Agent 切分流，已生成结果作为参考素材保留。
 
-### 走 Image-to-Video
+visible_reasoning 示例：
 
-用户说：
+**轻量编排**：
 
-- 让这张图动起来
-- 让图片里的产品旋转
-- 让这个人物眨眼
-- 把这张图做成 5 秒视频
+```text
+我理解你想直接生成一个轻量视频，不需要完整广告编排。我会先整理主体、动作和场景，再优化成模型可执行提示词。如果你想要完整脚本+分镜的广告片，告诉我。
+```
 
-要求：
+**Full Canvas**：
 
-- 必须先有 `asset_understanding`
-- 如果不能识别图片，先问用户补充
-
-### 走 Full Video Canvas
-
-用户说：
-
-- 做一个产品广告视频
-- 做一个 UGC 种草视频
-- 做一个短剧广告
-- 做一条品牌宣传片
-- 需要脚本、分镜、素材、视频
-- 需要多版本、多阶段确认
-
-特点：
-
-- 涉及营销策略
-- 涉及 Skill 选择
-- 需要脚本/分镜
-- 需要关键视觉和确认门
+```text
+这个需求更像完整视频创作，需要先确认 Brief、选择 Skill，再进入脚本分镜和生成阶段。
+```
 
 ## Prompt-only 链路
 
@@ -90,9 +65,7 @@
 
 ## 用户上传图片但没说用途
 
-不要自动生成。
-
-应该问：
+不要自动生成。应该问：
 
 ```text
 我看到你上传了图片。你想用它做什么？
@@ -102,23 +75,10 @@
 4. 只分析图片内容
 ```
 
-## visible_reasoning 示例
-
-### Direct Video
-
-```text
-我理解你想直接生成一个轻量视频，不需要完整广告编排。我会先整理主体、动作和场景，再优化成模型可执行提示词。
-```
-
-### Full Video Canvas
-
-```text
-这个需求更像完整视频创作，需要先确认 Brief、选择 Skill，再进入脚本分镜和生成阶段。
-```
-
 ## 禁止
 
-- 禁止把所有视频需求都强制走完整广告链路。
-- 禁止把复杂广告视频当成一句 prompt 直接发给 Provider。
+- 禁止 Agent 裸直接生成（Direct 已移到 Dock；Agent 永远走 Prompt Optimizer）。
+- 禁止把复杂广告视频当成一句 prompt 直接发 Provider（Full Canvas 必须走编排）。
 - 禁止用户上传图后自动假设用途。
-- 禁止跳过图片理解做图转视频。
+- 禁止跳过图片理解做图转视频（Agent 链路；Dock 直传 Provider 不在此列）。
+- 禁止 L1 判定不暴露（用户必须能看到 Agent 判走哪条分流）。

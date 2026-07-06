@@ -4,16 +4,19 @@
 
 ## 阶段总览
 
-| 阶段 | 名称 | 主要 Agent | 产物 | 是否需要确认 |
+| 阶段 | 名称 | 主要 Agent | 产物 | 确认类型 |
 |---|---|---|---|---|
-| 0 | 意图识别 | Director | 任务类型 | 否 |
-| 1 | Brief 收集 | Brief | 最小创作 Brief | 是 |
-| 2 | Skill 匹配 | Skill Selector | 创作套路 / Skill | 是 |
-| 3 | 阶段计划 | Director | canvas stage plan | 是 |
-| 4 | 脚本分镜 | Storyboard | 脚本、分镜、镜头表 | 是 |
-| 5 | 首批视觉 | Generation | 关键帧 / 风格图 / 商品图 | 是 |
-| 6 | 视频生成 | Generation | 视频任务或视频结果 | 是 |
-| 7 | 审核完成 | Review | 质量检查、交付摘要 | 是 |
+| 0 | 意图识别（L2） | Director | 任务类型 | 否 |
+| 1 | Brief 收集 | Brief | 最小创作 Brief | **硬停** |
+| 2 | Skill 匹配 | Skill Selector | 创作套路 / Skill | 软过 |
+| 3 | 阶段计划 | Director | canvas stage plan | 软过 |
+| 4 | 脚本分镜 | Storyboard | 脚本、分镜、镜头表 | **硬停** |
+| 5 | 首批视觉 | Generation | 关键帧 / 风格图 / 商品图 | **硬停** |
+| 6 | 视频生成 | Generation | 视频任务或视频结果 | **硬停** |
+| 7 | 审核完成 | Review | 质量检查、交付摘要 | 软过 |
+
+> **硬停** = turn 边界，必须用户明确确认才推进；**软过** = turn 内自动推进，用户可随时打断。详见 `confirmation_gate.md`。
+> **Stage 0 是 L2 意图识别**（Full Canvas 进来后判「新建 / 修改 / 确认 / 切换 Skill / 咨询」），与 Agent 入口的 **L1 意图识别**（判「轻量编排 / Full Canvas / 非生成」，见 `generation_route_decision.md`）区分。
 
 ## Stage 0：意图识别
 

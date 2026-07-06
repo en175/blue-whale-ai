@@ -31,13 +31,11 @@
 
 > **产出记录(2026-07-05)**:从 `BACKEND-API-PRD.md` §5.6 抽出 `AGENT-CONVERSATION-PRD.md`,闭合 Skill ↔ Agent 接入点的文档断头路。BACKEND-API-PRD 重定位为核心基础设施文档(§5.6/§5.8 抽空成指针)。
 
-### 🔲 2. BottomDock 直生闭环(P0,最大缺口)
-- **缺口**:参数填完无处可发,无 `onGenerate`;与 Agent 路径关系未定义
-- **待 PM 拍板**:
-  - 点"生成"后,直生结果**进对话还是只上画布**?(后端 PRD §6 表格:直生只产 Asset,Agent 产对话消息+Asset——直生要不要在对话留痕?)
-  - 直生进行中,用户能否切去 Agent 对话?两条路径并行怎么处理?
-  - 直生入口触发 `POST /projects/{id}/generate`,需要先有 project_id(与模块 5 耦合)
-- **关联**:`BACKEND-API-PRD.md` §5.4 / §6;`app/canvas/_canvas/components/dock/BottomDock.tsx`
+### ✅ 2. BottomDock 直生闭环(已完成 — 决策 1-6+13-14)
+- **产出**:Dock = 纯参数透传(零优化零 understanding),产物落画布不进对话流;Agent 通过 `@` 引用画布素材;Image-to-Video 两边都能做(Dock 直传 Provider / Agent understanding+优化)。详见文末「已锁定产品决策」。
+- **已锁定的原待拍板**:直生只上画布不进对话流;并行入口允许(同一 Project 两条路径可并行 Job);project_id 由模块 5 解决(进画布即有)。
+- **实现侧待办**:`BottomDock.tsx` 的 `onGenerate` 接通 `POST /generate`(前端代码,文档侧已闭合)。
+- **关联**:`BACKEND-API-PRD.md` §5.4 / §6;`generation_route_decision.md`;`app/canvas/_canvas/components/dock/BottomDock.tsx`
 
 ### 🔲 3. SSE 事件 → 前端渲染映射表(P0)
 - **缺口**:`AGENT-CONVERSATION-PRD.md` §3 列了 SSE 全事件序列,前端如何消费/断线兜底/事件→UI 翻译表未定义。现有 contract 只写"消息怎么展示",没写"事件流怎么消费"
@@ -57,13 +55,10 @@
   - 多 Job 并行时阶段状态怎么呈现
 - **关联**:`BACKEND-API-PRD.md` §8 / §10(验收第 2 条);`AGENT-CONVERSATION-PRD.md` §5.2 / §7
 
-### 🔲 5. Project 管理 UX(P0)
-- **缺口**:TopBar 三按钮空 onClick,首页裸跳路由
-- **待 PM 拍板**:
-  - 首页点生成 → 先建空 project 还是带 prompt 建
-  - 自动保存触发时机(每次节点变动?防抖多久?)、保存冲突处理
-  - Project 列表排序、删除二次确认文案、重命名流程
-- **关联**:`BACKEND-API-PRD.md` §5.5;`app/canvas/_canvas/components/TopBar.tsx`;`components/AgentComposer.tsx:129-134`
+### ✅ 5. Project 管理 UX(已完成 — 决策 7-9)
+- **产出**:首页输入 → 立即建 Project(带 `initial_prompt`)→ 跳画布;`initial_prompt` 预填 AgentChatPanel(不自动开跑);自动保存(结构 2s / viewport 5s / beforeunload flush / 多 tab 不处理);列表 updated_at DESC;删除二次确认;双击重命名;新建入口(首页 + 列表页空 project)。详见文末「已锁定产品决策」。
+- **实现侧待办**:TopBar 三按钮 + 首页跳转接通 `POST /projects`(前端代码,文档侧已闭合)。
+- **关联**:`BACKEND-API-PRD.md` §5.5;`app/canvas/_canvas/components/TopBar.tsx`;`components/AgentComposer.tsx`
 
 ### 🔲 6. 匿名身份与设备识别(P0)
 - **缺口**:contract 完全没提"用户是谁"
@@ -127,7 +122,31 @@
 - Skill 面板 P0;创建 tab 隐藏;库 ⊃ 我的;引用非副本(跟随更新);Use 一次性不改 auto;auto 候选池后端自读不前端传;forced > auto > 未指定。
 - **Agent 对话(2026-07-05 锁定)**:后端 P0 三链路全做(Direct / Image-to-Video / Full Canvas,避免返工);前端无分阶段,过程消息(brief/skill/storyboard/review/visible_reasoning)P0 全展示(文字气泡),P1 仅可选美化;新增 `optimized_prompt_preview` 消息类型(用户友好版,可展示),区别于原始 `optimized_prompt`(发给 Provider,永不进 message);`forced_skill_id` 仅决定 skill 选择那一步,不锁后续 Stage;Agent turn 结束后未完成 Job 由 `active_jobs` + 独立 `/api/jobs/{id}/stream` 接管,重连失败再轮询 `GET /api/jobs/{id}`。
 - **产品切换 P0 边界(2026-07-05 锁定)**:P0 先支持同一 Agent 对话内两个产品方向切换;不做完整内容版本系统。完全不同品类或目标时,用户侧只问"继续在当前项目中进行,还是新建一个项目?",不说替换/覆盖,不暴露 workflow。完整状态持久化、历史摘要、版本索引放 P1 评估。
-- 错误码、目录、身份、上传、Project、直生、Job 生命周期等模块的决策**尚未锁定**。
+- 错误码、目录、身份、上传、Job 生命周期等模块的决策**尚未锁定**(Project、直生于 2026-07-06 锁定,见下)。
+
+### 2026-07-06 锁定:Dock 直生 ↔ Agent 编排重构(决策 1-15)
+
+**核心重构**:职责按「要快 / 要好」重划——Dock = 所有直接生成(纯参数透传,零优化零 understanding);Agent = 单链路对话编排(L1 意图识别 → 轻量编排 / Full Canvas),永远走 Prompt Optimizer。Direct 链路从 Agent 移除。
+
+| # | 决策 |
+|---|---|
+| 1 | Dock 直生 = 无上下文独立链路,产物落画布;Agent 引用画布节点 |
+| 2 | `@` 引用素材(P0),自然语言指代放 P1,复用 `reference_asset_ids` |
+| 3 | understanding 触发 = 仅 `@` 引用(Agent 链路);数据挂 asset 表(`understanding_status`+`understanding_data`);ChatMessage variant 降为派生展示;lazy+缓存。修了 contract/canvas_state_rules/image_understanding 三处冲突 |
+| 4 | Agent 每轮拿画布**文本元数据**(active 产品方向),不扫视觉 |
+| 5 | Agent 不主动推断隐式指代,反问带候选 |
+| 6 | title 三位一体(prompt 派生 / 文件名 / `understanding.subject` 覆盖)+ 可变 + 可手改(`is_user_titled`) |
+| 7 | 首页输入 → 立即建 Project(带 `initial_prompt`)→ 跳画布 |
+| 8 | `initial_prompt` 预填输入框,不自动开跑 |
+| 9 | UX 默认值(自动保存 2s / viewport 5s / beforeunload flush / 多 tab 不处理;列表 updated_at DESC;删除二次确认;双击重命名;新建入口) |
+| 10 | Full Canvas = **4 硬停**(Brief / 分镜 / 视觉 / 视频)+ **3 软过**(Skill / 阶段计划 / 审核) |
+| 11 | L1 意图识别判定暴露 + 可对话推翻(范围从「4 链路」缩小到「3 分流」) |
+| 12 | L1 歧义默认轻量编排(Full Canvas 必须显式触发) |
+| 13 | Dock = 纯参数透传,**零优化**(连技术规整都不做);提示词优化只在 Agent。`README` 原则 4 限定 Agent 链路 |
+| 14 | Dock **零 understanding**(图直传 Provider,Provider 自己消费);understanding 硬约束限定 Agent;Image-to-Video 两边都能做(机制不同) |
+| 15 | Agent 轻量编排 = 追问(仅方向歧义)+ 优化提示词(硬停)+ 生成;Skill 有匹配才用(无匹配跳过);L1 意图识别分流(轻量 / Full Canvas / 非生成) |
+
+**受影响文档(均已本次落盘)**:`backend_implementation_contract.md` / `BACKEND-API-PRD.md` / `confirmation_gate.md` / `generation_route_decision.md` / `progressive_disclosure.md` / `skill_generation_priority.md` / `canvas_state_rules.md` / `video_agent_canvas.md` / `image_understanding.md` / `AGENT-CONVERSATION-PRD.md` / `README.md`。
 
 ## 建议推进顺序
 

@@ -107,6 +107,7 @@ stage_id
 type
 status
 title
+is_user_titled
 content
 asset_refs
 source
@@ -114,6 +115,8 @@ visible_reasoning
 created_at
 updated_at
 ```
+
+> `title` 命名（三位一体：prompt 派生 / 文件名 / `understanding.subject` 覆盖）与 `is_user_titled`（用户手改标记，置 true 后 understanding 不再覆盖 title）的完整规则见 `canvas_state_rules.md`。
 
 ### node.type（画布节点,仅素材）
 
@@ -130,7 +133,7 @@ updated_at
 - `visible_reasoning`  （思考过程,可折叠）
 - `brief`  （需求摘要）
 - `skill_recommendation`  （Skill 推荐）
-- `asset_understanding`  （图片理解摘要）
+- `asset_understanding`  （图片理解摘要；**派生展示消息**：从 `assets.understanding_data` 派生给用户读的摘要，数据本体挂 asset 表，见 `BACKEND-API-PRD.md` §7）
 - `stage_plan`  （阶段计划）
 - `script` / `storyboard`  （脚本 / 分镜）
 - `prompt_draft` / `optimized_prompt`  （提示词草稿 / 优化后,**默认不展示给用户**;`optimized_prompt` 是发给 Provider 的原始版,含系统指令/格式 token)
@@ -272,7 +275,7 @@ confirmed_at
 5. 生成失败必须写入 failed node，而不是静默失败。
 6. `visible_reasoning` 必须经过过滤后再返回前端。
 7. `trace_event` 默认不返回普通用户端。
-8. 图生图或图片转视频前必须存在 `asset_understanding`。
+8. **Agent 链路**基于图推理前必须存在 `asset_understanding`；Provider 直接消费图（Dock 直生 / 图生图 / 图生视频）不需要——Provider 是多模态生成模型，直接吃图像素，不存在「假装识别」。
 9. 主 LLM 不支持多模态时，不能声称已识别图片，必须调用视觉模型或请求用户补充。
 10. Provider 调用前必须存在 `optimized_prompt`。
 11. 轻量 direct generation 不应强制创建完整广告 stage plan。
