@@ -9,7 +9,10 @@
  * nodes/viewport/messages。切换项目 = 更换画布节点集合 + 对话历史（CONTEXT.md L44–50）。
  */
 import { Suspense, useState, useRef, useEffect, useCallback, useReducer } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { useAuth } from "@/components/auth/AuthContext";
+import { loadUser } from "@/components/auth/authStorage";
 import { ArrowLeft } from "lucide-react";
 import {
   TopBar,
@@ -26,7 +29,20 @@ import { nodeFromCard, projectReducer, initialProjectState } from "./_canvas";
 import { PROJECTS } from "./_canvas";
 
 function CanvasPageInner() {
+  const searchParams = useSearchParams();
+  const prompt = searchParams.get("prompt") || "";
+  const { openLogin } = useAuth();
+  const guardRouter = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // gating：未登录直访 /canvas → 踢回首页并弹登录（loadUser 直读避免与 Provider 顺序耦合）
+  useEffect(() => {
+    if (!loadUser()) {
+      guardRouter.replace("/");
+      openLogin();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Project 聚合根：多项目画布+对话的单一真相源
   const [projectState, dispatch] = useReducer(projectReducer, PROJECTS, initialProjectState);
   const activeProject =
@@ -396,6 +412,7 @@ function CanvasPageInner() {
       )}
       <AgentChatPanel
         key={activeProject.id}
+        prompt={prompt}
         messages={messages}
         isOpen={isAgentOpen}
         onClose={() => setIsAgentOpen(false)}

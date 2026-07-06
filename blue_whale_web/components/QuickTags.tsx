@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { Megaphone, Clapperboard, Copy, Share2, Image } from "lucide-react";
 
 const TAGS = [
@@ -11,9 +10,13 @@ const TAGS = [
   { id: "image", label: "图片设计", icon: Image },
 ];
 
-export default function QuickTags() {
-  const [active, setActive] = useState("marketing");
-
+export default function QuickTags({
+  active,
+  onSelect,
+}: {
+  active: string;
+  onSelect: (id: string) => void;
+}) {
   return (
     <div className="ncs-thin-scrollbar flex w-full items-center justify-center gap-1.5 overflow-x-auto">
       {TAGS.map((tag) => {
@@ -23,7 +26,7 @@ export default function QuickTags() {
           <button
             key={tag.id}
             type="button"
-            onClick={() => setActive(tag.id)}
+            onClick={() => onSelect(tag.id)}
             className={`group inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-all duration-200 ${
               isActive
                 ? "bg-white/[0.09] text-white/90"
@@ -44,3 +47,4 @@ export default function QuickTags() {
     </div>
   );
 }
+

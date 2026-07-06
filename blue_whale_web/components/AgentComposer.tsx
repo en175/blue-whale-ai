@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
+import { useAuth } from "./auth/AuthContext";
 import {
   Plus,
   BookOpenText,
@@ -125,13 +126,15 @@ export default function AgentComposer() {
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
 
   const router = useRouter();
+  const { requireAuth } = useAuth();
 
   const handleGenerate = useCallback(() => {
-    const query = content.trim()
-      ? `?prompt=${encodeURIComponent(content.trim())}`
-      : "";
-    router.push(`/canvas${query}`);
-  }, [router, content]);
+    const prompt = content.trim();
+    const query = prompt ? `?prompt=${encodeURIComponent(prompt)}` : "";
+    requireAuth({ kind: "home-generate", prompt }, () =>
+      router.push(`/canvas${query}`),
+    );
+  }, [router, content, requireAuth]);
 
   // AI 视频 tab params
   const [refMode, setRefMode] = useState(VIDEO_REF_MODES[1]);
