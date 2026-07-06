@@ -17,7 +17,7 @@
 - `skill/references/backend_implementation_contract.md` —— Agent 编排的数据契约(Agent Turn / Canvas Node / Workflow Run / Stage / 对话消息类型,本文不再重复字段定义)
 - `skill/references/frontend_canvas_interaction_contract.md` —— 前端展示边界与验收标准
 - `skill/rules/confirmation_gate.md` —— 确认门四分类
-- `skill/rules/generation_route_decision.md` —— 四条生成链路的路由判定
+- `skill/rules/generation_route_decision.md` —— 两条入口（Dock 直生 / Agent 对话）的路由判定
 
 ---
 

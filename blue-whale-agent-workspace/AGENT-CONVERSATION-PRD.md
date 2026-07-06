@@ -11,7 +11,7 @@
 - `skill/rules/decision_layer.md` —— **判定分层架构**。三层分工(硬状态代码 / L1 轻量 classifier / 主 Agent)+ `decision_context` + `decision_branch` switch 表。turn 前置算 `decision_context` 的权威。
 - `skill/references/frontend_canvas_interaction_contract.md` —— 前端展示边界(画布 = 素材,对话 = 过程)与验收颗粒度。
 - `skill/rules/confirmation_gate.md` —— 确认门四分类(明确确认 / 弱继续 / 修改意图 / 等待中)。
-- `skill/rules/generation_route_decision.md` —— 四条生成链路的路由判定。
+- `skill/rules/generation_route_decision.md` —— 两条入口（Dock 直生 / Agent 对话）的路由判定。
 
 本文定义 backend contract **未覆盖**的部分:
 
@@ -175,7 +175,7 @@ data: {"requires_user_action":true,"allowed_actions":["confirm","revise","retry"
 6. `trace_event` / `prompt_draft` / `optimized_prompt` / worker 名 / 文件路径 **不进** `message` / `visible_reasoning`。
 7. **`advance_stage` 铁闸**:推进 stage 必须独立校验 `has_ready_node`,与主 Agent 判定解耦——主 Agent 误判要推进也拦(呼应 `backend_implementation_contract.md` 硬约束 13、`decision_layer.md`、`confirmation_gate.md`)。`confirm_pending` branch 由 `decision_context` 算出,主 Agent 只在命中时判四分类。
 
-> 规则全文见 `skill/rules/confirmation_gate.md`(四分类)与 `skill/rules/generation_route_decision.md`(四链路路由判定)。本文不复制规则全文,只声明 Agent 对话链路必须遵守。
+> 规则全文见 `skill/rules/confirmation_gate.md`(四分类)与 `skill/rules/generation_route_decision.md`(两条入口路由判定)。本文不复制规则全文,只声明 Agent 对话链路必须遵守。
 
 ---
 
