@@ -26,7 +26,7 @@ Rules:
 ### 高频硬约束（每次都遵守）
 
 - **禁直推 master（最高红线）**：AI（及所有人）**禁止任何** `git push origin master`。所有进 master 的改动统一走 **开分支 → 推分支 → Gitee 建 PR → 服务端合并**。"自审合"只免互审，**不免流程**——自审通过后仍须自己走完分支→PR→合并。合并触发：低风险 PR 可用 Gitee MCP `merge_enterprise_pull` 自审合（秒级，不卡人）；**高风险 PR 禁 AI 用 MCP 合，必须人手动合**。`hotfix/*` 无特权，同样走分支→PR。根因与决策见 [`docs/adr/0003-no-direct-push-to-master.md`](docs/adr/0003-no-direct-push-to-master.md)；hook 兜底见下「远程-本地同步」。
-- **合并只用 merge（禁 squash/rebase）**：AI 用 Gitee MCP `merge_enterprise_pull` 时 `merge_method=merge`（或不传，Gitee 默认 merge）。传 `squash`/`rebase` 会被 `.claude/hooks/block-squash-merge.sh` 拦。人在 Gitee 网页手动合并同样选 merge。合并即删源分支：MCP 传 `prune_source_branch=true`，或 Gitee 界面勾「删除源分支」。
+- **合并只用 merge（禁 squash/rebase）**：AI 用 Gitee MCP `merge_enterprise_pull` 时 `merge_method=merge`（或不传，Gitee 默认 merge）。传 `squash`/`rebase` 会被 `.claude/hooks/block-squash-merge.sh` 拦。人在 Gitee 网页手动合并同样选 merge。合并即删源分支：**MCP 无 `prune_source_branch` 参数、Gitee merge 默认也不删**（踩坑见 [`docs/agents/hooks/README.md`](docs/agents/hooks/README.md)），AI 用 `git push origin --delete <branch>` 删，或人在 Gitee 界面勾「删除源分支」。
 - **分支命名遵循强制白名单**：开分支前缀必须是工单分支前缀（hook 强制——不在白名单则 `--force-with-lease` 被拦、落后 `origin/master` 时 push 被拦）。前缀清单、标题格式、生命周期、保护分支规则见 [`docs/agents/branch-naming.md`](docs/agents/branch-naming.md)；决策见 [`docs/adr/0004-branch-naming.md`](docs/adr/0004-branch-naming.md)。
 - **禁碰生成物**：`graphify-out/`、`dist/`、`target/`、`.next/`、`__pycache__/`、`node_modules/` 等自动生成的目录/文件，AI 不得改动（改了下次生成即冲突）。
 - **远程-本地同步（动 git 前先 fetch）**：执行任何 git 写操作（`checkout -b` / `commit` / `push`）前，必须先 `git fetch origin`，无例外。本仓库多人（含 AI）协作，远程 master 可能有新合并。同步用 `rebase`（不用 merge，保 PR diff 干净）：`git rebase origin/master`。落后的工单分支 push 会被 pre-push hook 拦。rebase 撞冲突 → AI 先解 → 改了前端跑 `npm run lint`（blue_whale_web）/ 改了后端跑 `pytest`（blue_whale_server）→ 解不动 `git rebase --abort`。rebase 后强推用 `git push --force-with-lease`（仅工单分支放行；裸 `--force`、对 `master`/`main` 强推被 AI guardrails 拦）。心智：动手前先同步。**机制兜底（不靠记忆）**：`pre-commit` 软提醒落后、`pre-push` 硬拦落后（铁闸），见 [`docs/adr/0006-sync-mechanism-auto-block.md`](docs/adr/0006-sync-mechanism-auto-block.md)。
@@ -46,9 +46,9 @@ Rules:
 Issues 追踪在 Gitee 仓库的 Issues（远程见 `git remote -v`，本仓库为 `git@gitee.com:hangzhou_xuanfu_1/blue-whale-ai.git`）。Gitee 不在 gh/glab CLI 支持范围内，技能以自由文本工作流记录。详见 `docs/agents/issue-tracker.md`。
 
 - **创建 issue**：`mcp__gitee-ent__create_enterprise_issue`（**必传 `project_id` 关联仓库**，值用 `mcp__gitee-ent__list_enterprise_repositories` 查；不传则工单只出现在企业工作项、仓库 Issues 页看不到，hook `block-issue-without-repo.sh` 硬拦。详见 `docs/agents/issue-tracker.md` 与 ADR-0007）。
-- **加/移除标签**：`mcp__gitee-ent__update_enterprise_issue`（`labels` 为逗号分隔标签名；Gitee 标签要求长度 2–20、非特殊字符）。
-- **关闭**：`mcp__gitee-ent__update_enterprise_issue`（`state="closed"`）。
-- **合并 PR**：`mcp__gitee-ent__merge_enterprise_pull`（`merge_method=merge`、`prune_source_branch=true`）。
+- **加/移除标签**：`mcp__gitee-ent__update_enterprise_issue`（`label_ids` 为逗号分隔的**标签数字 ID**，ID 用 `mcp__gitee-ent__list_enterprise_labels` 查；Gitee 标签要求长度 2–20、非特殊字符）。注意：`create_enterprise_issue` 对企业私有仓库的 labels 会静默忽略，需紧跟一次 `update_enterprise_issue` 补 `label_ids`。
+- **关闭**：`mcp__gitee-ent__update_enterprise_issue`（`issue_state_id`，**不是 `state`**——该工具无 `state` 入参。先 `mcp__gitee-ent__list_issue_type_states` 查该 issue 工作项类型的合法状态枚举，传「已完成」对应的 id）。
+- **合并 PR**：`mcp__gitee-ent__merge_enterprise_pull`（`merge_method=merge`）。**删源分支**：该 MCP 工具**无 `prune_source_branch` 参数**（Gitee REST API 有，但未暴露给此 MCP），且 Gitee merge **默认不删**源分支（实战踩坑见 [`docs/agents/hooks/README.md`](docs/agents/hooks/README.md)）。AI 删源分支用 `git push origin --delete <branch>`，或请人在 Gitee 网页勾「删除源分支」。
 
 ### Triage labels
 

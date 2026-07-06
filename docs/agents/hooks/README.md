@@ -118,7 +118,7 @@ Hook 触发记录在 `~/.claude/logs/` 或本会话 transcript 里搜 `hookSpeci
 
 ### 坑点
 
-`merge_enterprise_pull` 工具签名里虽有 `prune_source_branch` 参数，但**实际可能不生效**（Gitee MCP 服务端兼容性存疑）。表现：
+`merge_enterprise_pull` 工具**当前签名无 `prune_source_branch` 参数**（Gitee REST API 有，但未暴露给此 MCP），且 Gitee merge **默认不删**源分支。表现：
 
 ```bash
 # 合完 PR #7，git branch -a 应只看到 master，实际：
