@@ -4,6 +4,7 @@
  * 仅承载类型，不包含任何运行时逻辑，供其他模块以 type 方式导入复用。
  */
 import type React from "react";
+import type { CardStatus } from "./cardStatus";
 
 export type ToolDef = {
   id: string;
@@ -44,7 +45,7 @@ export type ChatMessage =
   | { id: number | string; type: "user"; text: string }
   | { id: number | string; type: "agent"; text: string }
   | { id: number | string; type: "thinking"; text: string; content: string }
-  | { id: number | string; type: "card"; text: string; meta: string; collapsed?: boolean; status?: "failed" | "normal" };
+  | { id: number | string; type: "card"; text: string; meta: string; collapsed?: boolean; status?: CardStatus };
 export type Project = {
   id: string;
   name: string;

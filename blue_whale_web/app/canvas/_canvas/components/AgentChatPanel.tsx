@@ -205,6 +205,35 @@ export function AgentChatPanel({
     });
   };
 
+  /**
+   * 手动应用 / 重试：用户点 card 主按钮的统一入口。
+   * 按 card 当前 status 分发：
+   *   failed/generating → 走重试状态机 failed→generating→normal（DEMO 固定成功，不创建画布节点）
+   *   normal            → 把 card 作为 NodeItem 应用到画布（复用既有 onCardGenerated，page.tsx 零改）
+   */
+  const handleReapply = (card: CardMessage) => {
+    const current = card.status ?? "normal";
+    if (current === "normal") {
+      onCardGenerated?.(card);
+      return;
+    }
+    // 重试链：清掉上一轮残留 timer，立即进入 generating，再排一步推进到终态 normal
+    for (const id of pendingTimers.current) clearTimeout(id);
+    pendingTimers.current = [];
+
+    setMessages((prev) =>
+      prev.map((m) => (m.id === card.id && m.type === "card" ? { ...m, status: "generating" } : m))
+    );
+
+    // DEMO 固定成功：generating 800ms 后落到终态 normal（状态机不变量由 cardStatus.test.ts 覆盖）
+    const timer = window.setTimeout(() => {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === card.id && m.type === "card" ? { ...m, status: "normal" } : m))
+      );
+    }, 800);
+    pendingTimers.current.push(timer);
+  };
+
   const handleScrollToBottom = () => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: "smooth" });
   };
@@ -323,7 +352,7 @@ export function AgentChatPanel({
             {messages.map((msg) => {
               if (msg.type === "user") return <UserMessageBubble key={msg.id} text={msg.text} />;
               if (msg.type === "thinking") return <ThinkingBlock key={msg.id} msg={msg} />;
-              if (msg.type === "card") return <AgentCard key={msg.id} msg={msg} />;
+              if (msg.type === "card") return <AgentCard key={msg.id} msg={msg} onReapply={handleReapply} />;
               return <AgentMessageBubble key={msg.id} text={msg.text} />;
             })}
           </div>
