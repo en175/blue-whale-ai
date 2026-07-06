@@ -1115,8 +1115,8 @@
       <section class="hero" aria-labelledby="page-title">
         <div class="enter">
           <div class="eyebrow">Agent router and workflow map</div>
-          <h1 id="page-title">主 Agent 如何把需求分流到正确工作流</h1>
-          <p class="lead">这张页面讲清楚三件事：Director / CEO 如何识别意图，如何路由到不同 workflow，每条 workflow 会调用哪些 Worker、Skill 和数据对象。</p>
+          <h1 id="page-title">一条消息怎么落到正确的链路</h1>
+          <p class="lead">判定分层后，一条消息怎么落到正确链路：后端算硬状态铁闸（零 LLM），L1 给意图软建议，主 Agent switch 收口。两条入口——BottomDock 直生（要快）vs Agent 对话编排（要好）。</p>
           <div class="hero-actions">
             <a class="button primary" href="#director">看主 Agent 路由</a>
             <a class="button secondary" href="#workflows">看具体 workflow</a>
@@ -1125,27 +1125,29 @@
 
         <div class="route-board enter delay-1">
           <div class="board-head">
-            <span>Director / CEO first turn</span>
+            <span>一轮 Turn 的判定分层</span>
             <div class="dots" aria-hidden="true"><span></span><span></span><span></span></div>
           </div>
           <div class="director">
             <div class="director-card">
-              <h3>先识别意图，不先生成</h3>
-              <p>每轮都先看用户消息、Canvas 状态、Workflow Run、当前 Stage、节点状态，再决定是新建、修改、确认，还是普通咨询。</p>
+              <h3>三层判定，主 Agent 只收口</h3>
+              <p>不再自读状态、自识别意图——后端算 decision_context 硬事实，L1 给 decision_branch 软建议，主 Agent 只做 switch 收口。</p>
             </div>
             <div class="intent-grid">
-              <div class="intent"><b>咨询 / 讨论</b><span>直接回答，不启动生成 workflow。</span></div>
-              <div class="intent"><b>新建图片</b><span>路由到 image_generation_prompt。</span></div>
-              <div class="intent"><b>轻量视频</b><span>路由到 direct_generation。</span></div>
-              <div class="intent"><b>上传图动起来</b><span>先 image_understanding，再 direct_generation。</span></div>
-              <div class="intent"><b>完整广告视频</b><span>进入 video_agent_canvas。</span></div>
-              <div class="intent"><b>修改 / 确认</b><span>先走 revise 或 confirmation_gate。</span></div>
+              <div class="intent"><b>铁闸 · generation_in_progress</b><span>生成中禁重入，后端锁定。</span></div>
+              <div class="intent"><b>铁闸 · generation_failed</b><span>失败先恢复，不盲目重试。</span></div>
+              <div class="intent"><b>铁闸 · confirm_pending</b><span>确认门四分类，advance_stage 后端铁闸。</span></div>
+              <div class="intent"><b>L1 · new_task</b><span>按 suggested_route 进轻量编排或 Full Canvas。</span></div>
+              <div class="intent"><b>L1 · product_switch</b><span>换产品 / Skill，读 product_switch_p0。</span></div>
+              <div class="intent"><b>L1 · revise_canvas</b><span>局部改画布，不覆盖原节点。</span></div>
+              <div class="intent"><b>L1 · consult</b><span>咨询直接答，不启 Job。</span></div>
+              <div class="intent"><b>L1 · clarify</b><span>意图不明，先澄清。</span></div>
             </div>
           </div>
           <div class="hero-flow">
-            <div class="box"><strong>1. 状态优先</strong><p>awaiting_confirm、generating、failed、pending stage 的优先级高于用户最新一句话。</p></div>
-            <div class="box"><strong>2. 路由分流</strong><p>Direct Image / Direct Video / Image-to-Video / Full Canvas / Prompt-only。</p></div>
-            <div class="box"><strong>3. 调用执行</strong><p>Worker 产出过程消息，Provider 任务进入 GenerationJob，素材进入 Canvas。</p></div>
+            <div class="box"><strong>① 后端算 context</strong><p>读 canvas / stage / nodes / job 算硬事实，铁闸先判，零 LLM。</p></div>
+            <div class="box"><strong>② L1 给软建议</strong><p>haiku 级 classifier 产 decision_branch，主 Agent 可推翻。</p></div>
+            <div class="box"><strong>③ 主 Agent switch</strong><p>8 枚举收口，铁闸不可推翻，L1 可推翻。</p></div>
           </div>
         </div>
       </section>
@@ -1153,59 +1155,147 @@
       <section id="director" aria-labelledby="director-title">
         <div class="section-head">
           <h2 id="director-title">主 Agent 的决策层</h2>
-          <p>Director / CEO 不直接写脚本、不直接写提示词、不直接调用 Provider。它负责判断当前应该走哪条路径，并确保确认门和画布状态不被绕过。</p>
+          <p>判定分层后，主 Agent 不再自读状态、自识别意图——后端算 <code>decision_context</code> 硬事实，L1 给 <code>decision_branch</code> 软建议，主 Agent 只在 switch 里收口、守住确认门与 advance_stage 铁闸。</p>
         </div>
+
+        <article class="flow-card" style="--accent: var(--blue); max-width: 720px; margin: 0 auto 22px;">
+          <div class="flow-head">
+            <span class="label">Turn 主流程</span>
+            <div>
+              <h3>一轮请求的判定主干</h3>
+              <p>判定分层后的工程顺序：后端算硬事实 → L1 给软建议 → 主 Agent switch 收口 → 铁闸或意图出口。下行↓是推进，◇是判断收口；下层卡片拆三层分工与 8 个 branch 细节。</p>
+            </div>
+          </div>
+          <div class="flow">
+            <div class="fn fn-start"><b>用户新一轮消息</b><span>+ canvas / stage / nodes / job</span></div>
+            <div class="arrow">↓</div>
+            <div class="fn fn-job"><b>① 后端代码 · 算 decision_context</b><span>读状态算硬事实，零 LLM · 铁闸在此先判</span></div>
+            <div class="arrow">↓</div>
+            <div class="fn fn-agent" style="--accent: var(--violet)"><b>② L1 classifier · 给软建议</b><span>haiku 级 → decision_branch，可被主 Agent 推翻</span></div>
+            <div class="arrow">↓</div>
+            <div class="fn fn-decision"><b>③ 主 Agent · switch(decision_branch) 收口</b><span>8 枚举之一</span></div>
+            <div class="arrow">↓</div>
+            <div class="fork">
+              <div class="fork-col" style="--accent: var(--blue)">
+                <span class="fork-label">硬状态铁闸 · 不可推翻</span>
+                <div class="fn fn-job"><b>generation_in_progress</b><span>禁重入，等 job</span></div>
+                <div class="fn fn-job"><b>generation_failed</b><span>给恢复路径</span></div>
+                <div class="fn fn-job"><b>confirm_pending</b><span>has_ready_node + 确认 → advance_stage</span></div>
+              </div>
+              <div class="fork-col" style="--accent: var(--gold)">
+                <span class="fork-label">L1 意图 · 可推翻</span>
+                <div class="fn fn-agent"><b>product_switch · revise_canvas</b><span>切 Skill / 改画布</span></div>
+                <div class="fn fn-agent"><b>new_task · consult · clarify</b><span>新建 / 答复 / 澄清</span></div>
+              </div>
+            </div>
+            <div class="arrow">↓</div>
+            <div class="fn fn-done"><b>落执行：BottomDock 直生 / Agent 对话 / 直接答复</b></div>
+          </div>
+        </article>
+
+        <article class="flow-card" style="--accent: var(--violet); max-width: 760px; margin: 0 auto 22px;">
+          <div class="flow-head">
+            <span class="label">判定树</span>
+            <div>
+              <h3>decision_branch 怎么算出来</h3>
+              <p>两条铁律：① 硬状态铁闸先判、命中即短路（不跑 L1、不可推翻）；② 铁闸空才进 L1 意图，主 Agent 可推翻 L1、推翻不了铁闸。</p>
+            </div>
+          </div>
+          <div class="flow">
+            <div class="fn fn-start"><b>新消息 + canvas / stage / nodes / job</b></div>
+            <div class="arrow">↓</div>
+            <div class="fn fn-job"><b>后端算 decision_context（硬事实 · 零 LLM）</b><span>先查铁闸三态</span></div>
+            <div class="arrow">↓</div>
+            <div class="fn fn-decision"><b>◇ 硬状态铁闸命中？</b></div>
+            <div class="fork" style="max-width: 720px;">
+              <div class="fork-col" style="--accent: var(--blue)">
+                <span class="fork-label">命中 · 短路锁死</span>
+                <div class="fn fn-job"><b>generation_in_progress</b><span>active job → 禁重入</span></div>
+                <div class="fn fn-job"><b>generation_failed</b><span>上次失败 → 恢复</span></div>
+                <div class="fn fn-job"><b>confirm_pending</b><span>ready 待确认 → advance_stage 铁闸</span></div>
+                <div class="fn fn-skip" style="margin-top:12px">branch 由后端锁定，主 Agent 不可推翻，L1 跳过</div>
+              </div>
+              <div class="fork-col" style="--accent: var(--violet)">
+                <span class="fork-label">未命中 · 进 L1 意图</span>
+                <div class="fn fn-agent"><b>L1 classifier（haiku 级）</b><span>软建议：product_switch / new_task / consult / revise_canvas / clarify</span></div>
+                <div class="arrow">↓</div>
+                <div class="fn fn-decision"><b>◇ 主 Agent switch 收口</b></div>
+                <div class="fn fn-skip" style="margin-top:12px">可推翻 L1 建议（改写 branch），仅限意图类；铁闸改不动</div>
+              </div>
+            </div>
+          </div>
+        </article>
+
         <div class="router-map">
           <aside class="router-core">
             <div>
-              <h3>Director / CEO</h3>
-              <p>输入：用户最新消息 + Canvas 状态 + Workflow Run + Stage + Nodes + Skill 候选。</p>
+              <h3>三层判定</h3>
+              <p>状态与意图的判定权下沉：硬事实归后端，软建议归 L1，主 Agent 只在 switch 里收口。</p>
               <div class="core-stack">
-                <div class="core-item">先看状态</div>
-                <div class="core-item">识别意图</div>
-                <div class="core-item">选择 workflow</div>
-                <div class="core-item">调度 worker / skill</div>
-                <div class="core-item">执行确认门</div>
+                <div class="core-item" style="border-left:5px solid var(--blue)">
+                  ① 后端代码 · 算 context
+                  <p style="font-weight:400;color:var(--muted);margin:7px 0 0;font-size:13px;line-height:1.5">读 canvas / stage / nodes / job 算 <code>decision_context</code>。零 LLM，硬事实。</p>
+                </div>
+                <div class="core-item" style="border-left:5px solid var(--violet)">
+                  ② L1 classifier · 给建议
+                  <p style="font-weight:400;color:var(--muted);margin:7px 0 0;font-size:13px;line-height:1.5">haiku 级轻量分类，产 <code>decision_branch</code> 软建议。主 Agent 可推翻。</p>
+                </div>
+                <div class="core-item" style="border-left:5px solid var(--gold)">
+                  ③ 主 Agent · switch 收口
+                  <p style="font-weight:400;color:var(--muted);margin:7px 0 0;font-size:13px;line-height:1.5">switch(decision_branch) 走 8 枚举之一。硬状态类不可推翻。</p>
+                </div>
               </div>
             </div>
           </aside>
 
           <div class="branches">
-            <article class="branch" style="--accent: var(--gold)">
-              <span class="pill">Step 1</span>
-              <h3>咨询 / 讨论</h3>
-              <p>用户只问方法、架构、规则、建议。</p>
-              <ul><li>直接回答</li><li>不创建 workflow_run</li><li>不写 Canvas</li></ul>
-            </article>
-            <article class="branch" style="--accent: var(--green)">
-              <span class="pill">Step 2</span>
-              <h3>新建生成任务</h3>
-              <p>根据目标是图片、轻量视频、图转视频还是完整广告，进入不同 workflow。</p>
-              <ul><li>Route Decision</li><li>必要时补问</li><li>必要时图片理解</li></ul>
-            </article>
             <article class="branch" style="--accent: var(--blue)">
-              <span class="pill">Step 3</span>
-              <h3>修改当前画布</h3>
-              <p>用户说改一下、重做、换风格、保留 A 重做 B。</p>
-              <ul><li>进入 revise flow</li><li>不覆盖原节点</li><li>局部重跑</li></ul>
+              <span class="pill">铁闸 · generation_in_progress</span>
+              <h3>生成中，禁重入</h3>
+              <p>后端检测到 active GenerationJob。主 Agent 不开新任务、不重复触发。</p>
+              <ul><li>读 job 状态</li><li>等待或追问</li><li>不可推翻</li></ul>
             </article>
             <article class="branch" style="--accent: var(--coral)">
-              <span class="pill">Step 4</span>
-              <h3>确认当前结果</h3>
-              <p>确认不是文本匹配，而是状态约束。</p>
-              <ul><li>ready 节点</li><li>明确确认</li><li>才 advance_stage</li></ul>
+              <span class="pill">铁闸 · generation_failed</span>
+              <h3>失败，先恢复</h3>
+              <p>上次 job 失败。主 Agent 不盲目重试，先给恢复路径。</p>
+              <ul><li>读失败原因</li><li>重试或改参数</li><li>不静默跳过</li></ul>
+            </article>
+            <article class="branch" style="--accent: var(--green)">
+              <span class="pill">铁闸 · confirm_pending</span>
+              <h3>等确认，卡 advance_stage</h3>
+              <p>有 ready 节点待确认。advance_stage 由后端铁闸守，主 Agent 不能口头推进。</p>
+              <ul><li>has_ready_node 校验</li><li>用户明确确认</li><li>后端才 advance</li></ul>
             </article>
             <article class="branch" style="--accent: var(--violet)">
-              <span class="pill">Step 5</span>
-              <h3>切换 Skill</h3>
-              <p>用户指定某个 Skill、Use、换套路、UGC、品牌广告、短剧。</p>
-              <ul><li>forced 优先</li><li>auto 候选其次</li><li>低置信度反问</li></ul>
+              <span class="pill">L1 · product_switch</span>
+              <h3>切换产品 / Skill</h3>
+              <p>用户要换 Skill、换套路（UGC / 品牌 / 短剧）。</p>
+              <ul><li>forced 优先</li><li>auto 候选其次</li><li>低置信反问</li></ul>
             </article>
             <article class="branch" style="--accent: var(--gold)">
-              <span class="pill">Step 6</span>
-              <h3>意图不明</h3>
+              <span class="pill">L1 · new_task</span>
+              <h3>新建生成任务</h3>
+              <p>新需求。按目标判 BottomDock 直生 还是 Agent 对话链路。</p>
+              <ul><li>判直生 vs 对话</li><li>建 workflow_run</li><li>必要时补问</li></ul>
+            </article>
+            <article class="branch" style="--accent: var(--gold)">
+              <span class="pill">L1 · consult</span>
+              <h3>咨询 / 讨论</h3>
+              <p>只问方法、规则、建议。</p>
+              <ul><li>直接答</li><li>不建 workflow_run</li><li>不写 Canvas</li></ul>
+            </article>
+            <article class="branch" style="--accent: var(--violet)">
+              <span class="pill">L1 · revise_canvas</span>
+              <h3>修改当前画布</h3>
+              <p>改一下、重做、换风格、保留 A 重做 B。</p>
+              <ul><li>进 revise flow</li><li>不覆盖原节点</li><li>局部重跑</li></ul>
+            </article>
+            <article class="branch" style="--accent: var(--gold)">
+              <span class="pill">L1 · clarify</span>
+              <h3>意图不明，先澄清</h3>
               <p>不猜测、不硬跑生成。</p>
-              <ul><li>问一句关键问题</li><li>确认目标</li><li>再进入路由</li></ul>
+              <ul><li>问关键问题</li><li>确认目标</li><li>再进路由</li></ul>
             </article>
           </div>
         </div>
@@ -1213,199 +1303,93 @@
 
       <section id="workflows" aria-labelledby="workflows-title">
         <div class="section-head">
-          <h2 id="workflows-title">具体 Workflow 分流</h2>
-          <p>每条 workflow 都有不同触发条件、Worker 调用链、Skill 使用方式和数据落点。这里是工程实现时最需要对齐的部分。</p>
+          <h2 id="workflows-title">两条入口怎么分流</h2>
+          <p>判定分层后不再有 6 条平级 workflow——按「要快 / 要好」分两条入口：BottomDock 直生（用户自负责 prompt，零 Agent）承担所有直接生成；Agent 对话（L1 → 主 Agent switch）做编排，永远走 Prompt Optimizer。老的 Confirm / Revise / Prompt-only 降为 branch 出口，不是独立 workflow。</p>
         </div>
 
         <div class="workflow-grid">
           <article class="workflow-card" style="--accent: var(--gold)">
             <div class="workflow-title">
-              <span class="label">Direct Image</span>
-              <h3>直接生成图片</h3>
-              <p>商品图、海报、关键帧、换背景、风格图。</p>
+              <span class="label">BottomDock 直生</span>
+              <h3>直接生成（要快）</h3>
+              <p>用户手填参数 + prompt，直传 Provider。承担 Direct Image / Direct Video / Image-to-Video。</p>
             </div>
             <div class="steps">
-              <div class="step"><i>1</i><div><b>Director 识别图片任务</b><span>判断 image_task_type：产品图、图生图、关键帧等。</span></div></div>
-              <div class="step"><i>2</i><div><b>Image Understanding</b><span>如果依赖上传图，先得到 asset_understanding。</span></div></div>
-              <div class="step"><i>3</i><div><b>Image Prompt Agent</b><span>生成主体、场景、构图、光影、必须保留。</span></div></div>
-              <div class="step"><i>4</i><div><b>Prompt Optimizer</b><span>适配图片模型语法，生成 optimized_prompt。</span></div></div>
-              <div class="step"><i>5</i><div><b>GenerationJob</b><span>创建 image job，同步 image canvas node。</span></div></div>
+              <div class="step"><i>1</i><div><b>Dock 选 type + 填参数</b><span>image / video / image-to-video，附 prompt + reference_asset。</span></div></div>
+              <div class="step"><i>2</i><div><b>零 Agent 编排</b><span>不判链路、不跑 understanding、不跑 Prompt Optimizer。</span></div></div>
+              <div class="step"><i>3</i><div><b>直传 Provider</b><span>Provider 自消费图，纯参数透传。</span></div></div>
+              <div class="step"><i>4</i><div><b>Canvas 写结果</b><span>image_result / video_result 占位 → ready。</span></div></div>
+              <div class="step"><i>5</i><div><b>confirm_pending 确认</b><span>has_ready_node + 明确确认 → advance_stage 铁闸。</span></div></div>
             </div>
             <div class="callout">
-              <h4>Skill 使用</h4>
+              <h4>边界（零 Agent）</h4>
               <ul>
-                <li>可调用 E-Commerce Product Image</li>
-                <li>可叠加行业 Skill：美妆、3C、食品、家居</li>
-                <li>Skill 决定画面策略，不替代图片模型语法</li>
-              </ul>
-            </div>
-          </article>
-
-          <article class="workflow-card" style="--accent: var(--green)">
-            <div class="workflow-title">
-              <span class="label">Direct Video</span>
-              <h3>轻量直接视频</h3>
-              <p>主体和动作清楚，不需要广告策略或多阶段分镜。</p>
-            </div>
-            <div class="steps">
-              <div class="step"><i>1</i><div><b>Director 识别轻量视频</b><span>例如小猫跑步、女孩跳舞、城市镜头。</span></div></div>
-              <div class="step"><i>2</i><div><b>Brief 轻量补全</b><span>默认时长、风格、画幅、稳定约束；关键缺失才追问。</span></div></div>
-              <div class="step"><i>3</i><div><b>Generation Agent</b><span>整理视频提示词草案。</span></div></div>
-              <div class="step"><i>4</i><div><b>Prompt Optimizer</b><span>Seedance 等模型语法适配。</span></div></div>
-              <div class="step"><i>5</i><div><b>GenerationJob</b><span>创建 video job，同步 video canvas node。</span></div></div>
-            </div>
-            <div class="callout">
-              <h4>Skill 使用</h4>
-              <ul>
-                <li>通常不调用复杂创作 Skill</li>
-                <li>可调用镜头/导演辅助 Skill</li>
-                <li>不进入 Storyboard Agent</li>
-              </ul>
-            </div>
-          </article>
-
-          <article class="workflow-card" style="--accent: var(--blue)">
-            <div class="workflow-title">
-              <span class="label">Image-to-Video</span>
-              <h3>上传图转视频</h3>
-              <p>让图片里的产品、人物或场景动起来。</p>
-            </div>
-            <div class="steps">
-              <div class="step"><i>1</i><div><b>Director 识别“这张图”</b><span>判断用户想让图片动起来，而不是只分析图片。</span></div></div>
-              <div class="step"><i>2</i><div><b>Multimodal Capability</b><span>主模型视觉 / 视觉模型 / 请用户补充三选一。</span></div></div>
-              <div class="step"><i>3</i><div><b>Image Understanding Agent</b><span>产出 subject、visual_traits、must_keep、usage_intent。</span></div></div>
-              <div class="step"><i>4</i><div><b>Direct Generation</b><span>引用 asset_understanding 组织图转视频动作。</span></div></div>
-              <div class="step"><i>5</i><div><b>Prompt Optimizer + Job</b><span>绑定 @图片N / &lt;主体N&gt;，进入 video job。</span></div></div>
-            </div>
-            <div class="callout">
-              <h4>Skill 使用</h4>
-              <ul>
-                <li>产品转动可用产品展示 Skill</li>
-                <li>人物动作可用导演/镜头 Skill</li>
-                <li>没有 asset_understanding 不能调用 Provider</li>
-              </ul>
-            </div>
-          </article>
-
-          <article class="workflow-card" style="--accent: var(--coral)">
-            <div class="workflow-title">
-              <span class="label">Full Video Canvas</span>
-              <h3>完整广告视频</h3>
-              <p>产品广告、UGC、短剧、品牌片、多阶段创作。</p>
-            </div>
-            <div class="steps">
-              <div class="step"><i>1</i><div><b>Brief Agent</b><span>收集目标、主体、平台、素材、卖点。</span></div></div>
-              <div class="step"><i>2</i><div><b>Skill Selector</b><span>选择主创作 Skill，并说明理由和风险。</span></div></div>
-              <div class="step"><i>3</i><div><b>Director 生成阶段计划</b><span>脚本分镜、首批视觉、视频生成、审核。</span></div></div>
-              <div class="step"><i>4</i><div><b>Storyboard Agent</b><span>生成脚本、镜头表、关键帧清单。</span></div></div>
-              <div class="step"><i>5</i><div><b>Generation + Review</b><span>首批视觉、视频生成、质量检查和修改建议。</span></div></div>
-            </div>
-            <div class="callout">
-              <h4>Skill 使用</h4>
-              <ul>
-                <li>必须选择主创作 Skill：UGC / TVC / 短剧 / 测评等</li>
-                <li>可叠加行业 Skill 和镜头 Skill</li>
-                <li>Skill 确认后，Prompt Optimizer 不能改创意方向</li>
+                <li>零优化、零 understanding（要快，用户自负责 prompt）</li>
+                <li>不经 L1 / 主 Agent，无路由判定</li>
+                <li>Image-to-Video：图 + prompt 直传，Provider 自消费</li>
               </ul>
             </div>
           </article>
 
           <article class="workflow-card" style="--accent: var(--violet)">
             <div class="workflow-title">
-              <span class="label">Confirm / Revise</span>
-              <h3>确认或修改</h3>
-              <p>用户不是每句话都代表新任务，很多时候是在操作当前画布。</p>
+              <span class="label">Agent 对话</span>
+              <h3>对话编排（要好）</h3>
+              <p>L1 给 suggested_route，主 Agent switch 收口。永远走 Prompt Optimizer，有图时先 understanding。</p>
             </div>
             <div class="steps">
-              <div class="step"><i>1</i><div><b>先检查 current_stage</b><span>是否 awaiting_confirm、generating、failed。</span></div></div>
-              <div class="step"><i>2</i><div><b>Confirmation Gate</b><span>ready 节点 + 明确确认，才允许推进。</span></div></div>
-              <div class="step"><i>3</i><div><b>弱继续二次确认</b><span>“继续 / 好了 / 下一步”不能自动 advance_stage。</span></div></div>
-              <div class="step"><i>4</i><div><b>Revise Flow</b><span>保留原节点，不覆盖已确认资产。</span></div></div>
-              <div class="step"><i>5</i><div><b>局部重跑</b><span>带 revise instruction 创建新的 GenerationJob。</span></div></div>
+              <div class="step"><i>1</i><div><b>后端算 decision_context</b><span>硬状态铁闸先判（has_generating 短路），零 LLM。</span></div></div>
+              <div class="step"><i>2</i><div><b>L1 classifier（haiku 级）</b><span>给 intent_direction + suggested_route 软建议。</span></div></div>
+              <div class="step"><i>3</i><div><b>主 Agent switch(decision_branch)</b><span>8 枚举收口，可推翻 L1、推翻不了铁闸。</span></div></div>
+              <div class="step"><i>4</i><div><b>new_task + lightweight</b><span>轻量编排：Brief 补全 → understanding（有图）→ Optimizer → Job。</span></div></div>
+              <div class="step"><i>5</i><div><b>new_task + full_canvas</b><span>Full Canvas：Brief → Skill → 分镜 → 视觉 → 视频，4 硬停。</span></div></div>
             </div>
             <div class="callout">
-              <h4>Skill 使用</h4>
+              <h4>branch 出口（非生成）</h4>
               <ul>
-                <li>修改方向不变：沿用已确认 Skill</li>
-                <li>用户要求换风格：回到 Skill 或阶段计划</li>
-                <li>已确认结果默认不重写</li>
+                <li>confirm_pending：确认门四分类，advance_stage 铁闸</li>
+                <li>revise_canvas：局部修改，保留原节点不覆盖</li>
+                <li>consult / clarify：直接答 / 澄清，不启 Job</li>
+                <li>Prompt-only：只走 Optimizer，不调 Provider</li>
+                <li>generation_in_progress / failed：硬状态铁闸</li>
               </ul>
             </div>
-          </article>
-
-          <article class="workflow-card" style="--accent: var(--gold)">
-            <div class="workflow-title">
-              <span class="label">Prompt-only</span>
-              <h3>只优化提示词</h3>
-              <p>用户只想把一段 prompt 改成 Seedance 或图片模型可用。</p>
-            </div>
-            <div class="steps">
-              <div class="step"><i>1</i><div><b>Director 识别 prompt-only</b><span>不创建 GenerationJob，不调用 Provider。</span></div></div>
-              <div class="step"><i>2</i><div><b>Prompt Optimizer</b><span>根据目标模型改写提示词。</span></div></div>
-              <div class="step"><i>3</i><div><b>Skill Priority Rule</b><span>保留用户指定创意结构，只做语法级优化。</span></div></div>
-              <div class="step"><i>4</i><div><b>输出 preview</b><span>展示 optimized_prompt_preview，不展示原始内部 prompt。</span></div></div>
-            </div>
-            <div class="callout">
-              <h4>Skill 使用</h4>
-              <ul>
-                <li>可参考已选 Skill</li>
-                <li>不调用图片 / 视频 Provider</li>
-                <li>不写 Canvas Node</li>
-              </ul>
-            </div>
-          </article>
-        </div>
+          </article>        </div>
       </section>
 
       <section id="flow" aria-labelledby="flow-title">
         <div class="section-head">
-          <h2 id="flow-title">每条链路在 Agent 中如何跑</h2>
-          <p>从用户输入到 Canvas 结果的完整路径：含判断分支、Canvas 写入、GenerationJob 和确认门。分叉是判断，主线下行是推进。</p>
+          <h2 id="flow-title">生成链路怎么跑：Dock 直生 vs Agent 编排</h2>
+          <p>两条入口：BottomDock 直生（要快——用户自负责 prompt，零 Agent、零优化、零 understanding，直传 Provider）vs Agent 对话（要好——L1 给 suggested_route，主 Agent 路由到轻量编排或 Full Canvas，永远走 Prompt Optimizer）。分叉是判断，主线下行是推进。</p>
         </div>
         <div class="flow-list">
 
           <article class="flow-card" style="--accent: var(--gold)">
             <div class="flow-head">
-              <span class="label">Direct Image</span>
+              <span class="label">BottomDock 直生</span>
               <div>
-                <h3>直接生成图片</h3>
-                <p>商品图 / 海报 / 关键帧 / 换背景 — 从一句话到 Canvas 结果</p>
+                <h3>直接生成（要快）</h3>
+                <p>Direct Image / Direct Video / Image-to-Video 都走这里——用户手填参数 + prompt，直传 Provider，零 Agent 编排。</p>
               </div>
             </div>
             <div class="flow">
-              <div class="fn fn-start"><b>用户：做一张产品图</b></div>
+              <div class="fn fn-start"><b>Dock：选 type + 填参数 + prompt（+ reference_asset）</b></div>
               <div class="arrow">↓</div>
-              <div class="fn fn-decision"><b>◇ 依赖上传图？</b></div>
-              <div class="fork">
-                <div class="fork-col">
-                  <span class="fork-label">是</span>
-                  <div class="fn fn-agent"><b>Image Understanding Agent</b><span>识别主体 / 必留元素</span></div>
-                  <div class="arrow">↓</div>
-                  <div class="fn fn-canvas"><b>asset_understanding</b><span>Canvas 写入</span></div>
-                </div>
-                <div class="fork-col">
-                  <span class="fork-label">否</span>
-                  <div class="fn fn-skip">跳过识别，直接进入提示词</div>
-                </div>
-              </div>
+              <div class="fn"><b>零 Agent · 零 understanding · 零优化</b><span>Provider 自消费图，不判链路</span></div>
               <div class="arrow">↓</div>
-              <div class="fn fn-agent"><b>Image Prompt Agent</b><span>主体 / 场景 / 构图 / 光影 / 必须保留</span></div>
+              <div class="fn fn-job"><b>直传 Provider</b><span>image / video / image-to-video</span></div>
               <div class="arrow">↓</div>
-              <div class="fn fn-agent"><b>Prompt Optimizer</b><span>适配图片模型语法 → optimized_prompt（内部）</span></div>
+              <div class="fn fn-canvas"><b>Canvas：image_result / video_result</b></div>
               <div class="arrow">↓</div>
-              <div class="fn fn-job"><b>GenerationJob（image）</b></div>
-              <div class="arrow">↓</div>
-              <div class="fn fn-canvas"><b>Canvas：image_result</b></div>
-              <div class="arrow">↓</div>
-              <div class="fn fn-gate"><b>◇ 用户确认</b></div>
+              <div class="fn fn-gate"><b>◇ confirm_pending 用户确认</b></div>
               <div class="fork">
                 <div class="fork-col">
                   <span class="fork-label">改</span>
-                  <div class="fn fn-agent"><b>Revise（局部重跑）</b><span>带 revise instruction 新建 Job</span></div>
+                  <div class="fn fn-agent"><b>回 Dock 改参数 / 换图</b><span>重发 Provider</span></div>
                 </div>
                 <div class="fork-col">
-                  <span class="fork-label">确认</span>
-                  <div class="fn fn-done"><b>✓ 完成</b></div>
+                  <span class="fork-label">确认 + has_ready_node</span>
+                  <div class="fn fn-done"><b>✓ advance_stage（后端铁闸）</b></div>
                 </div>
               </div>
             </div>
@@ -1413,93 +1397,56 @@
 
           <article class="flow-card" style="--accent: var(--green)">
             <div class="flow-head">
-              <span class="label">Direct Video</span>
+              <span class="label">Agent 轻量编排</span>
               <div>
-                <h3>轻量直接视频</h3>
-                <p>主体和动作清楚，不需要广告策略或多阶段分镜</p>
+                <h3>对话轻量生成（要好）</h3>
+                <p>decision_branch=new_task + suggested_route=lightweight。简单图 / 轻量视频——永远走 Prompt Optimizer，有图时先 understanding。</p>
               </div>
             </div>
             <div class="flow">
-              <div class="fn fn-start"><b>用户：生成小猫跑步视频</b></div>
+              <div class="fn fn-start"><b>decision_branch=new_task · suggested_route=lightweight</b></div>
               <div class="arrow">↓</div>
-              <div class="fn fn-decision"><b>◇ 关键信息足够？</b></div>
+              <div class="fn fn-decision"><b>◇ 方向歧义？</b></div>
               <div class="fork">
-                <div class="fork-col">
-                  <span class="fork-label">否</span>
-                  <div class="fn fn-agent"><b>Brief 轻量补全</b><span>默认时长 / 风格 / 画幅 / 稳定约束</span></div>
-                </div>
                 <div class="fork-col">
                   <span class="fork-label">是</span>
-                  <div class="fn fn-skip">关键缺失才追问，否则默认补全</div>
+                  <div class="fn fn-agent"><b>Brief 轻量补全</b><span>默认时长 / 风格 / 画幅</span></div>
                 </div>
-              </div>
-              <div class="arrow">↓</div>
-              <div class="fn fn-agent"><b>Generation Agent</b><span>整理视频提示词草案</span></div>
-              <div class="arrow">↓</div>
-              <div class="fn fn-agent"><b>Prompt Optimizer</b><span>Seedance 等模型语法适配</span></div>
-              <div class="arrow">↓</div>
-              <div class="fn fn-job"><b>GenerationJob（video）</b></div>
-              <div class="arrow">↓</div>
-              <div class="fn fn-canvas"><b>Canvas：video_result</b></div>
-              <div class="arrow">↓</div>
-              <div class="fn fn-gate"><b>◇ 用户确认</b></div>
-              <div class="fork">
-                <div class="fork-col">
-                  <span class="fork-label">改</span>
-                  <div class="fn fn-agent"><b>Revise（局部重跑）</b></div>
-                </div>
-                <div class="fork-col">
-                  <span class="fork-label">确认</span>
-                  <div class="fn fn-done"><b>✓ 完成</b></div>
-                </div>
-              </div>
-            </div>
-          </article>
-
-          <article class="flow-card" style="--accent: var(--blue)">
-            <div class="flow-head">
-              <span class="label">Image-to-Video</span>
-              <div>
-                <h3>上传图转视频</h3>
-                <p>让图片里的产品 / 人物 / 场景动起来。没有 asset_understanding 不能调 Provider</p>
-              </div>
-            </div>
-            <div class="flow">
-              <div class="fn fn-start"><b>用户：让这张图动起来</b></div>
-              <div class="arrow">↓</div>
-              <div class="fn fn-decision"><b>◇ 主模型有视觉能力？</b></div>
-              <div class="fork">
                 <div class="fork-col">
                   <span class="fork-label">否</span>
-                  <div class="fn fn-agent"><b>视觉模型 / 请用户补充</b><span>不能假装看懂图片</span></div>
-                </div>
-                <div class="fork-col">
-                  <span class="fork-label">是</span>
-                  <div class="fn fn-skip">直接用主模型识别</div>
+                  <div class="fn fn-skip">默认补全，不打断</div>
                 </div>
               </div>
               <div class="arrow">↓</div>
-              <div class="fn fn-agent"><b>Image Understanding Agent</b><span>subject / visual_traits / must_keep / usage_intent</span></div>
-              <div class="arrow">↓</div>
-              <div class="fn fn-canvas"><b>asset_understanding</b><span>Canvas 写入</span></div>
-              <div class="arrow">↓</div>
-              <div class="fn fn-agent"><b>Direct Generation</b><span>引用 asset 组织图转视频动作</span></div>
-              <div class="arrow">↓</div>
-              <div class="fn fn-agent"><b>Prompt Optimizer</b><span>绑定 @图片N / &lt;主体N&gt;</span></div>
-              <div class="arrow">↓</div>
-              <div class="fn fn-job"><b>GenerationJob（video）</b></div>
-              <div class="arrow">↓</div>
-              <div class="fn fn-canvas"><b>Canvas：video_result</b></div>
-              <div class="arrow">↓</div>
-              <div class="fn fn-gate"><b>◇ 用户确认</b></div>
+              <div class="fn fn-decision"><b>◇ 有上传图？</b></div>
               <div class="fork">
                 <div class="fork-col">
-                  <span class="fork-label">改</span>
-                  <div class="fn fn-agent"><b>Revise（局部重跑）</b></div>
+                  <span class="fork-label">是</span>
+                  <div class="fn fn-agent"><b>Image Understanding</b><span>subject / must_keep / usage_intent</span></div>
+                  <div class="arrow">↓</div>
+                  <div class="fn fn-canvas"><b>asset_understanding</b></div>
                 </div>
                 <div class="fork-col">
-                  <span class="fork-label">确认</span>
-                  <div class="fn fn-done"><b>✓ 完成</b></div>
+                  <span class="fork-label">否</span>
+                  <div class="fn fn-skip">跳过理解</div>
+                </div>
+              </div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-agent"><b>Prompt Optimizer（铁律）</b><span>Agent 链路永远走 → optimized_prompt</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-job"><b>GenerationJob（image / video）</b></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-canvas"><b>Canvas：image_result / video_result</b></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-gate"><b>◇ confirm_pending 四分类</b></div>
+              <div class="fork">
+                <div class="fork-col">
+                  <span class="fork-label">明确确认 + has_ready_node</span>
+                  <div class="fn fn-done"><b>✓ advance_stage（铁闸）</b></div>
+                </div>
+                <div class="fork-col">
+                  <span class="fork-label">弱继续 / 修改 / 无 ready</span>
+                  <div class="fn fn-agent"><b>二次确认 / revise_canvas / 铁闸拦</b></div>
                 </div>
               </div>
             </div>
@@ -1507,14 +1454,14 @@
 
           <article class="flow-card" style="--accent: var(--coral)">
             <div class="flow-head">
-              <span class="label">Full Video Canvas</span>
+              <span class="label">Agent Full Canvas</span>
               <div>
-                <h3>完整广告视频</h3>
-                <p>产品广告 / UGC / 短剧 / 品牌片 — 多阶段创作，两次确认门</p>
+                <h3>完整广告视频（要好）</h3>
+                <p>decision_branch=new_task + suggested_route=full_canvas。广告 / UGC / 短剧 / 品牌片——多阶段创作，4 硬停 + 3 软过，每个硬停 advance_stage 后端铁闸。</p>
               </div>
             </div>
             <div class="flow">
-              <div class="fn fn-start"><b>用户：做一个产品广告视频</b></div>
+              <div class="fn fn-start"><b>decision_branch=new_task · suggested_route=full_canvas</b></div>
               <div class="arrow">↓</div>
               <div class="fn fn-agent"><b>Brief Agent</b><span>目标 / 主体 / 平台 / 素材 / 卖点</span></div>
               <div class="arrow">↓</div>
@@ -1538,15 +1485,15 @@
               <div class="arrow">↓</div>
               <div class="fn fn-canvas"><b>Canvas：storyboard</b><span>脚本节点</span></div>
               <div class="arrow">↓</div>
-              <div class="fn fn-gate"><b>◇ 用户确认脚本</b></div>
+              <div class="fn fn-gate"><b>◇ 硬停 1：确认脚本（confirm_pending）</b></div>
               <div class="fork">
                 <div class="fork-col">
                   <span class="fork-label">改</span>
                   <div class="fn fn-agent"><b>局部重写镜头</b><span>只改对应镜头，不重写全部</span></div>
                 </div>
                 <div class="fork-col">
-                  <span class="fork-label">确认</span>
-                  <div class="fn fn-skip">进入生成阶段</div>
+                  <span class="fork-label">确认 + has_ready_node</span>
+                  <div class="fn fn-done"><b>✓ advance_stage → 生成阶段</b></div>
                 </div>
               </div>
               <div class="arrow">↓</div>
@@ -1558,15 +1505,15 @@
               <div class="arrow">↓</div>
               <div class="fn fn-canvas"><b>Canvas：video_result</b></div>
               <div class="arrow">↓</div>
-              <div class="fn fn-gate"><b>◇ 用户确认成片</b></div>
+              <div class="fn fn-gate"><b>◇ 硬停：确认成片（confirm_pending 四分类）</b></div>
               <div class="fork">
                 <div class="fork-col">
-                  <span class="fork-label">改</span>
-                  <div class="fn fn-agent"><b>Revise（局部重跑）</b></div>
+                  <span class="fork-label">明确确认 + has_ready_node</span>
+                  <div class="fn fn-done"><b>✓ advance_stage → 完成</b></div>
                 </div>
                 <div class="fork-col">
-                  <span class="fork-label">确认</span>
-                  <div class="fn fn-done"><b>✓ 完成</b></div>
+                  <span class="fork-label">弱继续 / 修改 / 无 ready</span>
+                  <div class="fn fn-agent"><b>二次确认 / revise_canvas / 铁闸拦</b></div>
                 </div>
               </div>
             </div>
@@ -1578,7 +1525,7 @@
       <section id="full-canvas" aria-labelledby="full-title">
         <div class="section-head">
           <h2 id="full-title">Full Video Canvas 阶段链</h2>
-          <p>完整视频项目必须经过这些确认点。每个过程产物在 ChatMessage 中展示，只有图片/视频素材进入 Canvas。</p>
+          <p>完整视频项目必须经过这些确认点，每个硬停由 advance_stage 后端铁闸独立校验 has_ready_node——主 Agent 误判也拦。每个过程产物在 ChatMessage 中展示，只有图片/视频素材进入 Canvas。</p>
         </div>
         <div class="tabs" role="tablist" aria-label="Full Canvas 阶段">
           <button class="tab active" type="button" data-panel="0">1 Brief</button>
@@ -1611,7 +1558,7 @@
           <div class="steps">
             <div class="step" style="--accent: var(--blue)"><i>1</i><div><b>Director</b><span>生成阶段计划：脚本分镜、首批视觉、视频生成、审核修改。</span></div></div>
             <div class="step" style="--accent: var(--blue)"><i>2</i><div><b>Storyboard Agent</b><span>脚本、分镜表、关键帧清单、每镜头提示方向。</span></div></div>
-            <div class="step" style="--accent: var(--blue)"><i>3</i><div><b>确认门</b><span>用户确认脚本/分镜后，才进入视觉生成。</span></div></div>
+            <div class="step" style="--accent: var(--blue)"><i>3</i><div><b>确认门（confirm_pending）</b><span>明确确认 + has_ready_node → advance_stage 铁闸；弱继续二次确认。</span></div></div>
           </div>
         </article>
 
@@ -1620,7 +1567,7 @@
           <div class="steps">
             <div class="step" style="--accent: var(--green)"><i>1</i><div><b>Image Understanding</b><span>如有图，先得到 asset_understanding。</span></div></div>
             <div class="step" style="--accent: var(--green)"><i>2</i><div><b>Image Prompt + Optimizer</b><span>生成可执行的首批视觉提示词。</span></div></div>
-            <div class="step" style="--accent: var(--green)"><i>3</i><div><b>Canvas</b><span>写入 image 节点，ready 后等待确认。</span></div></div>
+            <div class="step" style="--accent: var(--green)"><i>3</i><div><b>Canvas</b><span>写入 image 节点，ready 后进确认门（advance_stage 铁闸校验 has_ready_node）。</span></div></div>
           </div>
         </article>
 
@@ -1693,6 +1640,7 @@
             <div class="tree-line">│  │  ├─ image_understanding.md</div>
             <div class="tree-line">│  │  └─ video_agent_canvas.md</div>
             <div class="tree-line hot">│  ├─ rules/</div>
+            <div class="tree-line">│  │  ├─ decision_layer.md</div>
             <div class="tree-line">│  │  ├─ generation_route_decision.md</div>
             <div class="tree-line">│  │  ├─ confirmation_gate.md</div>
             <div class="tree-line">│  │  ├─ canvas_state_rules.md</div>
@@ -1735,9 +1683,9 @@
           </div>
 
           <div class="file-notes">
-            <div class="file-note"><b>workers/director_agent.md</b><span>主 Agent 唯一权威。定义 Director / CEO 的职责边界 + 运行时决策:识别意图、状态机、选择 workflow、调度 worker、控制确认门,不直接生成最终资产。</span></div>
+            <div class="file-note"><b>workers/director_agent.md</b><span>主 Agent 唯一权威。判定分层后只做 switch(decision_branch) 收口 + 确认门四分类——不再自判硬状态、不再自识别意图，硬事实归后端、软建议归 L1。</span></div>
             <div class="file-note"><b>workflows/*.md</b><span>被路由命中后读取。它们定义每条链路的阶段、输入、输出、确认点和阻断条件。</span></div>
-            <div class="file-note"><b>rules/*.md</b><span>全局硬规则。Director 每轮先读状态和路由规则；确认、图片理解、Skill 优先级、Prompt 优化、产品切换都由这里约束。</span></div>
+            <div class="file-note"><b>rules/*.md</b><span>全局硬规则。decision_layer.md 是判定分层权威（三层分工 + 8 branch + 铁闸）；Director 每轮先读它和路由/状态规则。</span></div>
             <div class="file-note"><b>workers/*.md</b><span>具体子 Agent 的角色说明。只有命中的 workflow 才调对应 worker，例如完整广告才调 Brief / Skill Selector / Storyboard。</span></div>
             <div class="file-note"><b>library/_index.md</b><span>Skill Selector 的候选索引。先按品类、目标、表达方式筛 1-3 个候选，再读取 raw 下的完整 Skill。</span></div>
             <div class="file-note"><b>references/*.md</b><span>工程和模型契约。后端、前端、输出格式、Seedance 语法、图片提示词格式都在这里对齐。</span></div>
@@ -1749,6 +1697,7 @@
           <article class="timing-card">
             <h3>第一轮必读</h3>
             <ul>
+              <li>rules/decision_layer.md（判定分层权威）</li>
               <li>workers/director_agent.md</li>
               <li>rules/canvas_state_rules.md</li>
               <li>rules/generation_route_decision.md</li>
@@ -1759,10 +1708,10 @@
           <article class="timing-card">
             <h3>路由命中后读</h3>
             <ul>
-              <li>Direct Image → image_generation_prompt.md</li>
-              <li>Direct Video → direct_generation.md</li>
-              <li>Image-to-Video → image_understanding.md + direct_generation.md</li>
-              <li>Full Canvas → video_agent_canvas.md</li>
+              <li>new_task + lightweight → direct_generation.md / image_generation_prompt.md</li>
+              <li>new_task + full_canvas → video_agent_canvas.md</li>
+              <li>有上传图 → image_understanding.md 前置（Agent 链路）</li>
+              <li>Dock 直生不读 workflow（零 Agent）</li>
             </ul>
           </article>
           <article class="timing-card">
@@ -1787,7 +1736,7 @@
             <span class="tag">ChatMessage</span>
             <h3>过程内容</h3>
             <ul>
-              <li>visible_reasoning</li>
+              <li>visible_reasoning（含 decision_branch + 可推翻理由）</li>
               <li>brief / skill_recommendation</li>
               <li>asset_understanding</li>
               <li>stage_plan / storyboard / review</li>
@@ -1824,6 +1773,16 @@
               <li>awaiting_confirm / completed / failed</li>
             </ul>
           </article>
+          <article class="data-card" style="--accent: var(--violet)">
+            <span class="tag">decision_context</span>
+            <h3>每轮判定上下文</h3>
+            <ul>
+              <li>硬事实：has_generating / has_ready_node / has_failed / awaiting_confirm</li>
+              <li>L1 软建议：intent_direction + suggested_route</li>
+              <li>组合结果：decision_branch（8 枚举之一）</li>
+              <li>后端每轮算好整体喂主 Agent</li>
+            </ul>
+          </article>
         </div>
       </section>
 
@@ -1834,11 +1793,14 @@
         </div>
         <div class="rules">
           <article class="rule" style="--accent: var(--gold)"><span class="tag">Canvas</span><h3>画布只放素材</h3><p>Brief、Skill、分镜、Review、思考过程都进对话消息，Canvas 只展示图片/视频节点。</p></article>
-          <article class="rule" style="--accent: var(--green)"><span class="tag">Gate</span><h3>没有 ready 不能确认</h3><p>用户明确确认 + 当前阶段有 ready 节点，才允许推进。</p></article>
+          <article class="rule" style="--accent: var(--green)"><span class="tag">Gate</span><h3>advance_stage 后端铁闸</h3><p>明确确认 + has_ready_node 才推进；铁闸独立校验，主 Agent 误判也拦。弱继续只二次确认。</p></article>
           <article class="rule" style="--accent: var(--blue)"><span class="tag">Weak continue</span><h3>“继续”不自动推进</h3><p>继续、好了、下一步属于弱继续，只能二次确认。</p></article>
-          <article class="rule" style="--accent: var(--coral)"><span class="tag">Vision</span><h3>上传图必须先理解</h3><p>没有 asset_understanding，不能做图生图或图转视频。</p></article>
+          <article class="rule" style="--accent: var(--coral)"><span class="tag">Vision</span><h3>Agent 链路才走 understanding</h3><p>Agent 链路有图必先 asset_understanding；Dock 直生零 understanding（Provider 自消费图）。</p></article>
           <article class="rule" style="--accent: var(--violet)"><span class="tag">Prompt</span><h3>内部 Prompt 不泄露</h3><p>只展示 optimized_prompt_preview，不展示原始 prompt、trace_event、worker 名或工具参数。</p></article>
           <article class="rule" style="--accent: var(--gold)"><span class="tag">Skill</span><h3>Skill 不被语法覆盖</h3><p>Seedance / 生图规则只做模型适配，不能改变已确认的创意结构。</p></article>
+          <article class="rule" style="--accent: var(--violet)"><span class="tag">L1</span><h3>L1 软建议可推翻</h3><p>主 Agent 可推翻 L1 的 decision_branch，推翻必在 visible_reasoning 说理由；铁闸三条不可推翻。</p></article>
+          <article class="rule" style="--accent: var(--blue)"><span class="tag">Dock</span><h3>直生零优化</h3><p>BottomDock 直生零 understanding 零 Optimizer，纯参数透传；Agent 链路永远走 Prompt Optimizer。</p></article>
+          <article class="rule" style="--accent: var(--coral)"><span class="tag">Branch</span><h3>铁闸不可二次推翻</h3><p>generation_in_progress / failed / confirm_pending 由后端硬状态算出，主 Agent 只能细判、不能改写 branch。</p></article>
         </div>
       </section>
     </main>
