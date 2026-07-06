@@ -57,7 +57,7 @@ PR 合并用 **merge**，**禁用 squash / rebase**。
 
 - AI 用 Gitee MCP `merge_enterprise_pull` 时 `merge_method=merge`（或不传，Gitee 默认 merge）。传 `squash`/`rebase` 会被 `.claude/hooks/block-squash-merge.sh`（PreToolUse）拦（`exit 2`）。
 - 人在 Gitee 网页手动合并同样选 **merge**——hook 拦不到服务端人操作，靠自觉 + 本文档约束。
-- 合并即删源分支：MCP 传 `prune_source_branch=true`，或 Gitee 界面勾「删除源分支」。
+- 合并即删源分支：**MCP `merge_enterprise_pull` 无 `prune_source_branch` 参数、Gitee merge 默认也不删**（踩坑见 [`hooks/README.md`](hooks/README.md)）。AI 用 `git push origin --delete <branch>` 删，或人在 Gitee 界面勾「删除源分支」。
 
 ---
 
