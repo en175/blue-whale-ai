@@ -39,21 +39,28 @@ if ! git -C "$ROOT" merge-base --is-ancestor HEAD origin/master; then
   fail "当前分支尚未被 origin/master 包含。请等待 PR 合并，或继续处理审查反馈。"
 fi
 
-main_root="$(git -C "$ROOT" worktree list --porcelain | awk '
-  $1 == "worktree" { path=$2 }
-  $1 == "branch" && $2 == "refs/heads/master" { print path; exit }
+# 主 checkout = 不在 $WORKTREE_BASE 下的那个 worktree。
+# 不依赖主 checkout 当前的分支状态（它可能 detached 或临时切到别的分支）；
+# 用 substr 整行截取路径，兼容含空格的路径（awk 按字段切会把空格后的路径截断）。
+main_root="$(git -C "$ROOT" worktree list --porcelain | awk -v base="$WORKTREE_BASE/" '
+  /^worktree / {
+    path = substr($0, 10)
+    if (substr(path, 1, length(base)) != base) { print path; exit }
+  }
 ')"
 
-[ -n "$main_root" ] || fail "找不到 master 主 checkout，不能安全删除当前 worktree。"
-
-if git -C "$ROOT" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
-  git -C "$ROOT" push origin --delete "$branch"
-fi
+[ -n "$main_root" ] || fail "找不到主 checkout（不在 $WORKTREE_BASE 下的 worktree），不能安全删除。"
 
 cd "$main_root"
 "$main_root/scripts/sync-master.sh"
 git worktree remove "$ROOT"
 git branch -d "$branch"
+
+# 远程源分支删除不可逆，放在本地全部清理成功之后：本地失败时尚可重试，远程不受影响。
+if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+  git push origin --delete "$branch"
+fi
+
 git fetch --prune
 
 echo "✅ 已清理任务 worktree 和分支：$branch"
