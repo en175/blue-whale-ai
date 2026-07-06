@@ -36,6 +36,8 @@ function CanvasPageInner() {
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
   const [videoDockMedia, setVideoDockMedia] = useState<DockMediaItem[]>([]);
   const [agentPendingMention, setAgentPendingMention] = useState<{ name: string; nonce: number } | null>(null);
+  // 「从画布选择」模式：非 null 表示正在为哪个 Dock 挑图（image/video）
+  const [pickingFor, setPickingFor] = useState<"image" | "video" | null>(null);
 
   // 画布素材节点操作面板的统一动作分发
   const handleNodeAction = useCallback(
@@ -99,6 +101,10 @@ function CanvasPageInner() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && pickingFor) {
+        setPickingFor(null);
+        return;
+      }
       if (e.key !== "Delete" && e.key !== "Backspace") return;
       const target = e.target as HTMLElement | null;
       if (!target) return;
@@ -110,7 +116,7 @@ function CanvasPageInner() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedId]);
+  }, [selectedId, pickingFor]);
 
   useEffect(() => {
     const rect = containerRef.current?.getBoundingClientRect();
@@ -151,6 +157,7 @@ function CanvasPageInner() {
       const node: NodeItem = { ...base, ...extra, id: base.id };
       setNodes((prev) => [...prev, node]);
       setSelectedId(id);
+      return id;
     },
     [viewport]
   );
@@ -190,6 +197,53 @@ function CanvasPageInner() {
     },
     [addNode]
   );
+
+  // Dock「本地上传」：既建画布节点，又把同一资产塞进对应 Dock 的参考 media（共享 id/src）
+  const handleDockLocalUpload = useCallback(
+    (file: File, mode: "image" | "video") => {
+      const url = URL.createObjectURL(file);
+      const id = addNode("image", { content: file.name, imageUrl: url });
+      const item: DockMediaItem = { id, type: "image", name: file.name, src: url };
+      if (mode === "image") {
+        setImageDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
+      } else {
+        setVideoDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
+      }
+    },
+    [addNode]
+  );
+
+  // 进入/退出「从画布选择」模式
+  const handleRequestPick = useCallback((mode: "image" | "video") => {
+    setPickingFor(mode);
+  }, []);
+  const handleExitPick = useCallback(() => setPickingFor(null), []);
+
+  // 选择模式下点中合格图片节点 → 单选即带回对应 Dock media，并退出模式
+  const handlePickNode = useCallback(
+    (node: NodeItem) => {
+      if (!node.imageUrl) {
+        setPickingFor(null);
+        return;
+      }
+      const item: DockMediaItem = {
+        id: node.id,
+        type: "image",
+        name: node.content || "图片",
+        src: node.imageUrl,
+      };
+      if (pickingFor === "image") {
+        setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+      } else if (pickingFor === "video") {
+        setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+      }
+      setPickingFor(null);
+    },
+    [pickingFor]
+  );
+
+  // 可选图片节点数（带 imageUrl），用于胶囊空态提示
+  const pickableCount = nodes.filter((n) => n.type === "image" && n.imageUrl).length;
 
   const handleToolClick = useCallback(
     (id: string) => {
@@ -244,9 +298,56 @@ function CanvasPageInner() {
         setNodes={setNodes}
         setSelectedId={setSelectedId}
         onNodeAction={handleNodeAction}
+        picking={pickingFor !== null}
+        onPickNode={handlePickNode}
+        onExitPick={handleExitPick}
       />
 
       <LeftToolbar onToolClick={handleToolClick} />
+      {pickingFor && (
+        <div
+          style={{
+            position: "fixed",
+            top: 16,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 2147483603,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px 8px 6px 14px",
+            borderRadius: 9999,
+            background: "rgba(26, 26, 26, 0.92)",
+            border: "1px solid rgba(255, 255, 255, 0.08)",
+            boxShadow: "0 8px 24px rgba(0, 0, 0, 0.5)",
+            backdropFilter: "blur(12px)",
+            color: "rgba(255, 255, 255, 0.85)",
+            fontSize: 12,
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span style={{ color: "var(--tc-accent, #3b82f6)", fontWeight: 600 }}>从画布选择</span>
+          <span style={{ color: "rgba(255, 255, 255, 0.55)" }}>
+            {pickableCount === 0 ? "画布上还没有可用的图片" : "点击画布中的图片加入"}
+          </span>
+          <span style={{ color: "rgba(255, 255, 255, 0.22)" }}>·</span>
+          <button
+            type="button"
+            onClick={handleExitPick}
+            style={{
+              padding: "2px 10px",
+              borderRadius: 9999,
+              border: 0,
+              background: "rgba(255, 255, 255, 0.08)",
+              color: "rgba(255, 255, 255, 0.8)",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            取消 · Esc
+          </button>
+        </div>
+      )}
       {isBottomDockOpen && (
         <BottomDock
           mode={bottomDockMode}
@@ -255,6 +356,10 @@ function CanvasPageInner() {
           videoMedia={videoDockMedia}
           onRemoveImageMedia={(id) => setImageDockMedia((prev) => prev.filter((m) => m.id !== id))}
           onRemoveVideoMedia={(id) => setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))}
+          onLocalUpload={(file) => handleDockLocalUpload(file, bottomDockMode)}
+          onPickFromCanvas={() => handleRequestPick(bottomDockMode)}
+          onExitPick={handleExitPick}
+          isPicking={pickingFor === bottomDockMode}
         />
       )}
       <AgentChatPanel

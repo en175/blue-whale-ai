@@ -16,13 +16,51 @@ import { CreditIcon } from "../../icons";
 import { QUANTITIES } from "../../constants";
 import type { ImageDockContentProps } from "../../types";
 import { DockMediaThumb } from "./parts";
+import { UploadSourceMenu } from "./UploadSourceMenu";
 
-export function ImageDockContent({ editorRef, isEmpty, onInput, onClose, media = [], onRemoveMedia }: ImageDockContentProps) {
+export function ImageDockContent({
+  editorRef,
+  isEmpty,
+  onInput,
+  onClose,
+  media = [],
+  onRemoveMedia,
+  onLocalUpload,
+  onPickFromCanvas,
+  onExitPick,
+  isPicking = false,
+}: ImageDockContentProps) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState(IMAGE_MODELS[0]);
   const [selectedResolution, setSelectedResolution] = useState(IMAGE_RESOLUTIONS[0]);
   const [selectedAspectRatio, setSelectedAspectRatio] = useState(IMAGE_ASPECT_RATIOS[2]);
+
+  // 上传来源菜单（占位按钮 + 加号共用）
+  const localFileRef = useRef<HTMLInputElement>(null);
+  const placeholderRef = useRef<HTMLButtonElement>(null);
+  const plusRef = useRef<HTMLButtonElement>(null);
+  const uploadTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
+
+  const openUploadMenuFrom = (ref: React.RefObject<HTMLButtonElement | null>) => {
+    uploadTriggerRef.current = ref.current;
+    setUploadMenuOpen(true);
+  };
+
+  const handleTriggerClick = (ref: React.RefObject<HTMLButtonElement | null>) => {
+    if (isPicking) {
+      onExitPick?.();
+      return;
+    }
+    openUploadMenuFrom(ref);
+  };
+
+  const handleLocalFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) onLocalUpload?.(file);
+    e.target.value = "";
+  };
 
   const quantityRef = useRef<HTMLButtonElement>(null);
   const quantityMenuRef = useRef<HTMLDivElement>(null);
@@ -51,6 +89,21 @@ export function ImageDockContent({ editorRef, isEmpty, onInput, onClose, media =
 
   return (
     <>
+      <input
+        ref={localFileRef}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        aria-hidden="true"
+        onChange={handleLocalFileChange}
+      />
+      <UploadSourceMenu
+        triggerRef={uploadTriggerRef}
+        open={uploadMenuOpen}
+        onClose={() => setUploadMenuOpen(false)}
+        onLocalUpload={() => localFileRef.current?.click()}
+        onPickFromCanvas={() => onPickFromCanvas?.()}
+      />
       <div
         style={{
           flex: "1 1 0%",
@@ -105,8 +158,12 @@ export function ImageDockContent({ editorRef, isEmpty, onInput, onClose, media =
                     : (
                       <div style={{ position: "relative", flexShrink: 0 }}>
                         <button
+                          ref={placeholderRef}
                           type="button"
                           aria-label="Upload reference image"
+                          aria-haspopup="menu"
+                          aria-expanded={uploadMenuOpen}
+                          onClick={() => handleTriggerClick(placeholderRef)}
                           style={{
                             position: "relative",
                             width: 44,
@@ -198,8 +255,12 @@ export function ImageDockContent({ editorRef, isEmpty, onInput, onClose, media =
       >
         <div style={{ position: "relative", flexShrink: 0 }}>
           <button
+            ref={plusRef}
             type="button"
             aria-label="上传图片"
+            aria-haspopup="menu"
+            aria-expanded={uploadMenuOpen}
+            onClick={() => handleTriggerClick(plusRef)}
             style={{
               width: 24,
               height: 24,
