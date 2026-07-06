@@ -45,10 +45,10 @@ Rules:
 
 Issues 追踪在 Gitee 仓库的 Issues（远程见 `git remote -v`，本仓库为 `git@gitee.com:hangzhou_xuanfu_1/blue-whale-ai.git`）。Gitee 不在 gh/glab CLI 支持范围内，技能以自由文本工作流记录。详见 `docs/agents/issue-tracker.md`。
 
-- **创建 issue**：`mcp__gitee__create_enterprise_issue`（owner/repo 从 `git remote -v` 推断）。
-- **加/移除标签**：`mcp__gitee__update_enterprise_issue`（`labels` 为逗号分隔标签名；Gitee 标签要求长度 2–20、非特殊字符）。
-- **关闭**：`mcp__gitee__update_enterprise_issue`（`state="closed"`）。
-- **合并 PR**：`mcp__gitee__merge_enterprise_pull`（`merge_method=merge`、`prune_source_branch=true`）。
+- **创建 issue**：`mcp__gitee-ent__create_enterprise_issue`（**必传 `project_id` 关联仓库**，值用 `mcp__gitee-ent__list_enterprise_repositories` 查；不传则工单只出现在企业工作项、仓库 Issues 页看不到，hook `block-issue-without-repo.sh` 硬拦。详见 `docs/agents/issue-tracker.md` 与 ADR-0007）。
+- **加/移除标签**：`mcp__gitee-ent__update_enterprise_issue`（`labels` 为逗号分隔标签名；Gitee 标签要求长度 2–20、非特殊字符）。
+- **关闭**：`mcp__gitee-ent__update_enterprise_issue`（`state="closed"`）。
+- **合并 PR**：`mcp__gitee-ent__merge_enterprise_pull`（`merge_method=merge`、`prune_source_branch=true`）。
 
 ### Triage labels
 

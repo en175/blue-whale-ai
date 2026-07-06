@@ -34,11 +34,20 @@
         ]
       },
       {
-        "matcher": "mcp__gitee__merge_enterprise_pull",
+        "matcher": "mcp__gitee-ent__merge_enterprise_pull",
         "hooks": [
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-squash-merge.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__gitee-ent__create_enterprise_issue",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-issue-without-repo.sh"
           }
         ]
       }

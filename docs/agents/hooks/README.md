@@ -12,7 +12,8 @@
 |---|---|---|---|---|
 | `block-dangerous-git.sh` | `Bash` | `PreToolUse` | 拦裸 `--force`、`reset --hard`、`clean -f`、`branch -D`、`checkout .`、`restore .` | CLAUDE.md「提交与审查」 |
 | `block-push-to-master.sh` | `Bash` | `PreToolUse` | 拦任何对 `master`/`main` 的 push（显式 + 隐式） | [ADR-0003](../../adr/0003-no-direct-push-to-master.md) |
-| `block-squash-merge.sh` | `mcp__gitee__merge_enterprise_pull` | `PreToolUse` | 拦 `merge_method=squash`/`rebase`，强制走 `merge` | CLAUDE.md「合并方法」 |
+| `block-squash-merge.sh` | `mcp__gitee-ent__merge_enterprise_pull` | `PreToolUse` | 拦 `merge_method=squash`/`rebase`，强制走 `merge` | CLAUDE.md「合并方法」 |
+| `block-issue-without-repo.sh` | `mcp__gitee-ent__create_enterprise_issue` | `PreToolUse` | 拦 `project_id` 缺失，强制 issue 关联仓库 | [ADR-0007](../../adr/0007-issue-must-link-repo.md) |
 
 > `settings.json` 里还有 2 条**纯提醒**型 hook（grep 触发提示用 graphify、Read/Glob 触发提示先查图谱），它们不阻断执行，仅通过 `additionalContext` 注入提示。详见 `.claude/settings.json` 注释。
 
@@ -44,7 +45,7 @@ chmod +x .claude/hooks/<name>.sh
 
 ```json
 {
-  "matcher": "Bash|mcp__gitee__merge_enterprise_pull|Read|Glob",
+  "matcher": "Bash|mcp__gitee-ent__merge_enterprise_pull|Read|Glob",
   "hooks": [
     { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/<name>.sh" }
   ]
