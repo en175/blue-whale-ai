@@ -4,9 +4,11 @@
  * Canvas Page —— 画布路由页面（编排层 / 状态管理）
  * 仅承载页面级状态与交互编排：视口变换、节点增删、Dock 开关、Agent 面板联动等。
  * 所有 UI 子模块（顶栏、工具条、画布节点、Dock、Agent 面板、缩放控件）经统一出口 ./_canvas 引入。
+ *
+ * Project 聚合根：useReducer(projectReducer) 管理多项目的画布+对话，active 项目派生
+ * nodes/viewport/messages。切换项目 = 更换画布节点集合 + 对话历史（CONTEXT.md L44–50）。
  */
-import { Suspense, useState, useRef, useEffect, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useState, useRef, useEffect, useCallback, useReducer } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import {
@@ -19,16 +21,20 @@ import {
   AgentChatPanel,
   ZoomControls,
 } from "./_canvas";
-import type { Viewport, NodeItem, NodeType, DockMediaItem, CardMessage } from "./_canvas";
-import { nodeFromCard } from "./_canvas";
+import type { Viewport, NodeItem, NodeType, DockMediaItem, CardMessage, ChatMessage } from "./_canvas";
+import { nodeFromCard, projectReducer, initialProjectState } from "./_canvas";
+import { PROJECTS } from "./_canvas";
 
 function CanvasPageInner() {
-  const searchParams = useSearchParams();
-  const prompt = searchParams.get("prompt") || "";
-
   const containerRef = useRef<HTMLDivElement>(null);
-  const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, scale: 1 });
-  const [nodes, setNodes] = useState<NodeItem[]>([]);
+  // Project 聚合根：多项目画布+对话的单一真相源
+  const [projectState, dispatch] = useReducer(projectReducer, PROJECTS, initialProjectState);
+  const activeProject =
+    projectState.projects.find((p) => p.id === projectState.activeProjectId) ?? projectState.projects[0];
+  // 派生：当前项目的画布与对话（读取走 active，写入走 dispatch）
+  const { nodes, viewport } = activeProject.canvas;
+  const messages = activeProject.messages;
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isAgentOpen, setIsAgentOpen] = useState(true);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
@@ -38,6 +44,25 @@ function CanvasPageInner() {
   const [agentPendingMention, setAgentPendingMention] = useState<{ name: string; nonce: number } | null>(null);
   // 「从画布选择」模式：非 null 表示正在为哪个 Dock 挑图（image/video）
   const [pickingFor, setPickingFor] = useState<"image" | "video" | null>(null);
+
+  // CanvasSurface 期望 Dispatch<SetStateAction<...>> 类型的 setter（高频拖拽/缩放内部用）。
+  // 适配为对当前 active project 的 dispatch：解析值或 updater 后整体写回画布。
+  const setViewport = useCallback(
+    (next: Viewport | ((prev: Viewport) => Viewport)) => {
+      const resolved =
+        typeof next === "function" ? (next as (prev: Viewport) => Viewport)(activeProject.canvas.viewport) : next;
+      dispatch({ type: "set-viewport", projectId: activeProject.id, viewport: resolved });
+    },
+    [activeProject.id, activeProject.canvas.viewport]
+  );
+  const setNodes = useCallback(
+    (next: NodeItem[] | ((prev: NodeItem[]) => NodeItem[])) => {
+      const resolved =
+        typeof next === "function" ? (next as (prev: NodeItem[]) => NodeItem[])(activeProject.canvas.nodes) : next;
+      dispatch({ type: "set-nodes", projectId: activeProject.id, nodes: resolved });
+    },
+    [activeProject.id, activeProject.canvas.nodes]
+  );
 
   // 画布素材节点操作面板的统一动作分发
   const handleNodeAction = useCallback(
@@ -155,11 +180,12 @@ function CanvasPageInner() {
               content: "占位图片节点",
             };
       const node: NodeItem = { ...base, ...extra, id: base.id };
-      setNodes((prev) => [...prev, node]);
+      // 写入走 reducer：节点归属当前 active project（位置在此算好作为 x/y 传入）
+      dispatch({ type: "add-node", projectId: activeProject.id, node });
       setSelectedId(id);
       return id;
     },
-    [viewport]
+    [viewport, activeProject.id]
   );
 
   // 对话流出现 card 的同一时刻，在画布同步创建对应图片 NodeItem（同一生成结果两种视图）。
@@ -282,7 +308,13 @@ function CanvasPageInner() {
         onChange={handleFileChange}
         aria-hidden="true"
       />
-      <TopBar />
+      <TopBar
+        activeProject={activeProject}
+        projects={projectState.projects}
+        onSwitch={(id) => dispatch({ type: "switch", projectId: id })}
+        onCreate={() => dispatch({ type: "create", name: `项目 ${Date.now().toString().slice(-4)}`, idGen: () => `p-${Date.now()}` })}
+        onDelete={(id) => dispatch({ type: "delete", projectId: id })}
+      />
       <TopBarCenter />
       <TopBarRight
         isAgentOpen={isAgentOpen}
@@ -363,12 +395,19 @@ function CanvasPageInner() {
         />
       )}
       <AgentChatPanel
-        prompt={prompt}
+        key={activeProject.id}
+        messages={messages}
         isOpen={isAgentOpen}
         onClose={() => setIsAgentOpen(false)}
         pendingMention={agentPendingMention}
         onMentionConsumed={() => setAgentPendingMention(null)}
         onCardGenerated={handleCardGenerated}
+        onAppendMessages={(msgs: ChatMessage[]) =>
+          dispatch({ type: "append-messages", projectId: activeProject.id, messages: msgs })
+        }
+        onSetCardStatus={(cardId, status) =>
+          dispatch({ type: "set-card-status", projectId: activeProject.id, cardId, status })
+        }
       />
       <ZoomControls
         containerRef={containerRef}

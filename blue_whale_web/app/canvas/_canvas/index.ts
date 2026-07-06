@@ -11,6 +11,7 @@ export * from "./config";
 export * from "./aspectRatio";
 export * from "./nodeFromCard";
 export * from "./cardStatus";
+export * from "./projectReducer";
 export * from "./components/ChatBubbles";
 export * from "./components/TopBar";
 export * from "./components/LeftToolbar";
