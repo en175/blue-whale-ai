@@ -64,7 +64,7 @@ hook 拦截时 stderr 输出 `BLOCKED:` + 根因 + 改法，指路 [`docs/agents
 
 [`docs/agents/issue-tracker.md`](../agents/issue-tracker.md) 不硬编码 `48854568`，写「blue-whale-ai 仓库的 ID，用 `mcp__gitee-ent__list_enterprise_repositories` 查」。
 
-理由：文档不持有易腐的数字 ID，只持有获取方法。与既有 `enterprise_id=16660949` 硬编码（[`issue-tracker.md`](../agents/issue-tracker.md) §末段）不一致——但 `enterprise_id` 是既有事实，本 ADR 不卷入「动相邻既有代码」（`CLAUDE.md`「Surgical Changes」），仅标注不一致，不强行统一。
+理由：文档不持有易腐的数字 ID，只持有获取方法。~~与既有 `enterprise_id` 硬编码不一致~~ 此前 `enterprise_id` 曾硬编码 `16660949`，与本决策不一致；该不一致已由 [issue IJZ6XD](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IJZ6XD) 统一为动态查（`enterprise_id` 也改用 `list_enterprises` 查，见 [`issue-tracker.md`](../agents/issue-tracker.md) §末段），取值方式现已全文一致。
 
 ## 考虑过的备选
 
@@ -77,7 +77,7 @@ hook 拦截时 stderr 输出 `BLOCKED:` + 根因 + 改法，指路 [`docs/agents
 - **正面**：issue 创建即关联仓库，仓库 Issues 页不再漏工单；防御机制化（不靠记忆）；顺带修活 squash 合并铁闸（死代码上线）。
 - **负面 / 代价**：
   - 每次 `create_enterprise_issue` 调用多一次 hook 校验（纯 JSON 解析，毫秒级）。
-  - `enterprise_id`（硬编码）与 `project_id`（动态查）取值方式不一致——已知技术债，待后续统一。
+  - ~~`enterprise_id`（硬编码）与 `project_id`（动态查）取值方式不一致——已知技术债，待后续统一。~~ 已由 [IJZ6XD](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IJZ6XD) 统一为动态查，技术债已还。
   - 将来若拆多仓库，hook 的「非空且非 0」语义仍成立，无需改；但文档需补多仓库 project_id 取值说明。
 
 ## 参考

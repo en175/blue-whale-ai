@@ -18,7 +18,7 @@ Gitee 不像 GitHub/GitLab 有成熟的 `gh`/`glab` 官方 CLI，因此本工作
 - **加/移除标签**：`mcp__gitee-ent__update_enterprise_issue`（`label_ids` 为逗号分隔的**标签数字 ID**；ID 用 `mcp__gitee-ent__list_enterprise_labels` 查。Gitee 标签要求长度 2–20、非特殊字符）。
 - **关闭**：`mcp__gitee-ent__update_enterprise_issue`（**`issue_state_id`**，不是 `state`——`update_enterprise_issue` 无 `state` 入参）。合法状态枚举按 issue 所属「工作项类型」不同而不同：先 `mcp__gitee-ent__list_issue_type_states(enterprise_id, issue_type_id)` 查（本仓「需求」类型 = 意向/进行中/已完成/已拒绝，**无 closed/open**），完成 = 传「已完成」对应的 id；`issue_type_id` 从 `get_enterprise_issue_detail` 返回的 `issue_type.id` 取。设完成后 issue 的 `state` 字段会变成 `"closed"`。
 
-企业版 MCP 工具用 `enterprise_id`（本企业 `16660949`）+ `issue_id` 定位，**非 owner/repo**；各工具确切参数以 MCP schema 为准。远程地址从 `git remote -v` 读。
+企业版 MCP 工具用 `enterprise_id`（本企业 ID，用 `mcp__gitee-ent__list_enterprises` 查，按 `path == "hangzhou_xuanfu_1"` 匹配取 `id`）+ `issue_id` 定位，**非 owner/repo**；各工具确切参数以 MCP schema 为准。远程地址从 `git remote -v` 读。
 
 ## Pull requests as a triage surface
 
