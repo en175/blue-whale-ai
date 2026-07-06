@@ -18,6 +18,10 @@ export function BottomDock({
   videoMedia = [],
   onRemoveImageMedia,
   onRemoveVideoMedia,
+  onLocalUpload,
+  onPickFromCanvas,
+  onExitPick,
+  isPicking = false,
 }: {
   mode: "image" | "video";
   onClose: () => void;
@@ -25,6 +29,14 @@ export function BottomDock({
   videoMedia?: DockMediaItem[];
   onRemoveImageMedia?: (id: string) => void;
   onRemoveVideoMedia?: (id: string) => void;
+  /** 本地上传（建画布节点 + 入对应 Dock media） */
+  onLocalUpload?: (file: File) => void;
+  /** 进入画布选择模式 */
+  onPickFromCanvas?: () => void;
+  /** 退出画布选择模式 */
+  onExitPick?: () => void;
+  /** 当前 Dock 是否处于选择模式 */
+  isPicking?: boolean;
 }) {
   const [input, setInput] = useState("");
   const [dockSize, setDockSize] = useState({ w: 680, h: 164 });
@@ -103,7 +115,18 @@ export function BottomDock({
               style={{ width: 680, background: "transparent", display: "flex", flexDirection: "column" }}
             >
               {mode === "image" ? (
-                <ImageDockContent editorRef={editorRef} isEmpty={isEmpty} onInput={handleInput} onClose={onClose} media={imageMedia} onRemoveMedia={onRemoveImageMedia} />
+                <ImageDockContent
+                  editorRef={editorRef}
+                  isEmpty={isEmpty}
+                  onInput={handleInput}
+                  onClose={onClose}
+                  media={imageMedia}
+                  onRemoveMedia={onRemoveImageMedia}
+                  onLocalUpload={onLocalUpload}
+                  onPickFromCanvas={onPickFromCanvas}
+                  onExitPick={onExitPick}
+                  isPicking={isPicking}
+                />
               ) : (
                 <VideoDockContent
                   editorRef={editorRef}
@@ -134,6 +157,10 @@ export function BottomDock({
                   setInternetSearch={setInternetSearch}
                   media={videoMedia}
                   onRemoveMedia={onRemoveVideoMedia}
+                  onLocalUpload={onLocalUpload}
+                  onPickFromCanvas={onPickFromCanvas}
+                  onExitPick={onExitPick}
+                  isPicking={isPicking}
                 />
               )}
             </div>

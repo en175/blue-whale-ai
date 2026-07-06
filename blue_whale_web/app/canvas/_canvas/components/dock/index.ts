@@ -6,3 +6,4 @@ export { BottomDock } from "./BottomDock";
 export { ImageDockContent } from "./ImageDockContent";
 export { VideoDockContent } from "./VideoDockContent";
 export { MediaUploadButton, FrameUploadButton, DockMediaThumb } from "./parts";
+export { UploadSourceMenu } from "./UploadSourceMenu";

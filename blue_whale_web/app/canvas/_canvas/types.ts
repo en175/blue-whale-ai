@@ -58,6 +58,14 @@ export type ImageDockContentProps = {
   onClose: () => void;
   media?: DockMediaItem[];
   onRemoveMedia?: (id: string) => void;
+  /** 本地上传：Dock 内 file input 选定文件后上抛，由页面层建画布节点 + 入 media */
+  onLocalUpload?: (file: File) => void;
+  /** 从画布选择：进入画布选择模式 */
+  onPickFromCanvas?: () => void;
+  /** 退出画布选择模式（再次点触发按钮时 toggle） */
+  onExitPick?: () => void;
+  /** 当前是否处于「从画布选择」模式（本 Dock 维度） */
+  isPicking?: boolean;
 };
 
 export type VideoDockContentProps = {
@@ -89,4 +97,12 @@ export type VideoDockContentProps = {
   setInternetSearch: (v: boolean) => void;
   media?: DockMediaItem[];
   onRemoveMedia?: (id: string) => void;
+  /** 本地上传：Dock 内 file input 选定文件后上抛，由页面层建画布节点 + 入 media */
+  onLocalUpload?: (file: File) => void;
+  /** 从画布选择：进入画布选择模式 */
+  onPickFromCanvas?: () => void;
+  /** 退出画布选择模式（再次点触发按钮时 toggle） */
+  onExitPick?: () => void;
+  /** 当前是否处于「从画布选择」模式（本 Dock 维度） */
+  isPicking?: boolean;
 };

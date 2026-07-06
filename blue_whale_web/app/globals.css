@@ -356,3 +356,34 @@ body {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.35);
 }
+
+/* 画布「从画布选择」模式下，可选图片节点的呼吸描边与角标 */
+@keyframes tc-pickable-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px var(--tc-accent), 0 0 0 6px rgba(59, 130, 246, 0.18);
+  }
+  50% {
+    box-shadow: 0 0 0 2px var(--tc-accent), 0 0 0 10px rgba(59, 130, 246, 0.04);
+  }
+}
+.tc-canvas-pickable {
+  cursor: pointer !important;
+  animation: tc-pickable-pulse 1.6s ease-in-out infinite;
+}
+.tc-canvas-pickable-badge {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--tc-accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 12;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}

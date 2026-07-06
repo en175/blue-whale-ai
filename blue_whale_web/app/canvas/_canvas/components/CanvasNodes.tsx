@@ -4,7 +4,7 @@
  * NodeToolbar：节点操作浮层；CanvasSurface：统一承载视口变换、节点渲染与交互（拖拽/缩放/选中）。
  */
 import { useCallback, useMemo, useRef } from "react";
-import { Image as ImageIcon } from "lucide-react";
+import { Image as ImageIcon, Plus } from "lucide-react";
 import { NODE_TOOLBAR_ACTIONS } from "../config";
 import type { NodeItem, Viewport } from "../types";
 
@@ -29,25 +29,30 @@ export function ImageNode({
   node,
   selected,
   onPointerDown,
+  pickable,
 }: {
   node: NodeItem;
   selected?: boolean;
   onPointerDown?: (e: React.PointerEvent<HTMLDivElement>, node: NodeItem) => void;
+  pickable?: boolean;
 }) {
   return (
     <div
       className={[
         "tc-canvas-card-node tc-image-node__media absolute overflow-visible rounded-lg",
         selected ? "z-[110]" : "z-[100]",
+        pickable ? "tc-canvas-pickable" : "",
       ].join(" ")}
       style={{
         left: node.x,
         top: node.y,
         width: node.width,
         height: node.height,
-        outline: selected
-          ? "2px solid var(--tc-card-selected-stroke, rgba(235, 235, 235, 0.88))"
-          : "2px solid transparent",
+        outline: pickable
+          ? "2px solid transparent"
+          : selected
+            ? "2px solid var(--tc-card-selected-stroke, rgba(235, 235, 235, 0.88))"
+            : "2px solid transparent",
         outlineOffset: 0,
         backgroundImage:
           "linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 50%, #2a2a2a 100%)",
@@ -56,6 +61,11 @@ export function ImageNode({
       aria-label="图片"
       onPointerDown={(e) => onPointerDown?.(e, node)}
     >
+      {pickable && (
+        <span className="tc-canvas-pickable-badge" aria-hidden="true">
+          <Plus width={13} height={13} strokeWidth={2.5} />
+        </span>
+      )}
       <div className="absolute -top-6 left-0 flex items-center text-xs font-normal leading-4 select-none" style={{ width: node.width }}>
         <div className="flex min-w-0 flex-1 items-center gap-[5px] text-white/70">
           <ImageIcon width={13} height={13} stroke="currentColor" />
@@ -192,6 +202,9 @@ export function CanvasSurface({
   setNodes,
   setSelectedId,
   onNodeAction,
+  picking,
+  onPickNode,
+  onExitPick,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   viewport: Viewport;
@@ -201,6 +214,12 @@ export function CanvasSurface({
   setNodes: React.Dispatch<React.SetStateAction<NodeItem[]>>;
   setSelectedId: (id: string | null) => void;
   onNodeAction?: (node: NodeItem, actionId: string) => void;
+  /** 是否处于「从画布选择」模式 */
+  picking?: boolean;
+  /** 选择模式下点击合格节点回调（单选即带回） */
+  onPickNode?: (node: NodeItem) => void;
+  /** 选择模式下点击空白回调（退出） */
+  onExitPick?: () => void;
 }) {
   const dragRef = useRef<{
     mode: "pan" | "node" | null;
@@ -258,6 +277,11 @@ export function CanvasSurface({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
+    if (picking) {
+      // 选择模式：点空白即退出，不进入平移
+      onExitPick?.();
+      return;
+    }
     setSelectedId(null);
     dragRef.current = {
       mode: "pan",
@@ -278,6 +302,13 @@ export function CanvasSurface({
     node: NodeItem
   ) => {
     e.stopPropagation();
+    if (picking) {
+      // 选择模式：合格图片节点（带 imageUrl）单选即带回，否则忽略
+      if (node.type === "image" && node.imageUrl) {
+        onPickNode?.(node);
+      }
+      return;
+    }
     setSelectedId(node.id);
     dragRef.current = {
       mode: "node",
@@ -366,6 +397,7 @@ export function CanvasSurface({
               node={node}
               selected={node.id === selectedId}
               onPointerDown={handleNodePointerDown}
+              pickable={picking && node.type === "image" && !!node.imageUrl}
             />
           )
         )}

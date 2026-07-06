@@ -30,6 +30,7 @@ import {
 } from "../../constants";
 import type { VideoDockContentProps } from "../../types";
 import { DockMediaThumb, FrameUploadButton, MediaUploadButton } from "./parts";
+import { UploadSourceMenu } from "./UploadSourceMenu";
 
 export function VideoDockContent(props: VideoDockContentProps) {
   const {
@@ -61,7 +62,35 @@ export function VideoDockContent(props: VideoDockContentProps) {
     setInternetSearch,
     media = [],
     onRemoveMedia,
+    onLocalUpload,
+    onPickFromCanvas,
+    onExitPick,
+    isPicking = false,
   } = props;
+
+  // 上传来源菜单（参考图占位 + 加号共用）
+  const localFileRef = useRef<HTMLInputElement>(null);
+  const placeholderRef = useRef<HTMLButtonElement>(null);
+  const plusRef = useRef<HTMLButtonElement>(null);
+  const uploadTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
+
+  const openUploadMenuFrom = (ref: React.RefObject<HTMLButtonElement | null>) => {
+    uploadTriggerRef.current = ref.current;
+    setUploadMenuOpen(true);
+  };
+  const handleTriggerClick = (ref: React.RefObject<HTMLButtonElement | null>) => {
+    if (isPicking) {
+      onExitPick?.();
+      return;
+    }
+    openUploadMenuFrom(ref);
+  };
+  const handleLocalFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) onLocalUpload?.(file);
+    e.target.value = "";
+  };
 
   const refModeRef = useRef<HTMLDivElement>(null);
   const refModeMenuRef = useRef<HTMLDivElement>(null);
@@ -137,6 +166,21 @@ export function VideoDockContent(props: VideoDockContentProps) {
 
   return (
     <>
+      <input
+        ref={localFileRef}
+        type="file"
+        accept="image/*,video/*"
+        className="sr-only"
+        aria-hidden="true"
+        onChange={handleLocalFileChange}
+      />
+      <UploadSourceMenu
+        triggerRef={uploadTriggerRef}
+        open={uploadMenuOpen}
+        onClose={() => setUploadMenuOpen(false)}
+        onLocalUpload={() => localFileRef.current?.click()}
+        onPickFromCanvas={() => onPickFromCanvas?.()}
+      />
       <div
         style={{
           flex: "1 1 0%",
@@ -238,11 +282,35 @@ export function VideoDockContent(props: VideoDockContentProps) {
                   {media.length > 0
                     ? media.map((m) => <DockMediaThumb key={m.id} item={m} onRemove={onRemoveMedia} />)
                     : (
-                      <MediaUploadButton
-                        label="参考图片"
-                        accept=".jpg,.jpeg,.png,image/jpeg,image/png"
-                        icon={<ImageIcon width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />}
-                      />
+                      <div style={{ position: "relative", flexShrink: 0 }}>
+                        <button
+                          ref={placeholderRef}
+                          type="button"
+                          aria-label="参考图片"
+                          aria-haspopup="menu"
+                          aria-expanded={uploadMenuOpen}
+                          onClick={() => handleTriggerClick(placeholderRef)}
+                          style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 9,
+                            border: "1px solid rgba(255, 255, 255, 0.02)",
+                            background: "rgba(255, 255, 255, 0.043)",
+                            color: "rgba(255, 255, 255, 0.62)",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 6,
+                            padding: 0,
+                            cursor: "pointer",
+                            opacity: 1,
+                            transition: "background 120ms, color 120ms",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <ImageIcon width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />
+                        </button>
+                      </div>
                     )}
                   <span style={{ color: "rgba(255, 255, 255, 0.22)", fontSize: 14, lineHeight: 1 }}>·</span>
                   <MediaUploadButton
@@ -327,8 +395,12 @@ export function VideoDockContent(props: VideoDockContentProps) {
       >
         <div style={{ position: "relative", flexShrink: 0 }}>
           <button
+            ref={plusRef}
             type="button"
             aria-label="上传"
+            aria-haspopup="menu"
+            aria-expanded={uploadMenuOpen}
+            onClick={() => handleTriggerClick(plusRef)}
             style={{
               width: 24,
               height: 24,
