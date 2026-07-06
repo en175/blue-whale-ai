@@ -107,3 +107,52 @@ Hook 触发记录在 `~/.claude/logs/` 或本会话 transcript 里搜 `hookSpeci
 ---
 
 **怎么知道 hook 真的在工作？** —— 故意触发一次被拦的命令，看到 stderr 输出"BLOCKED: …"且 exit=2，就说明整条链路通了。
+
+---
+
+## MCP 合并后清理源分支 SOP
+
+> 适用：用 `mcp__gitee-ent__merge_enterprise_pull` 自审合（低风险 PR）后。
+> 来源：实战踩坑 —— PR #7 合并后源分支未自动删除。
+
+### 坑点
+
+`merge_enterprise_pull` 工具签名里虽有 `prune_source_branch` 参数，但**实际可能不生效**（Gitee MCP 服务端兼容性存疑）。表现：
+
+```bash
+# 合完 PR #7，git branch -a 应只看到 master，实际：
+$ git branch -a
+* master
+  remotes/origin/master
+  remotes/origin/feature/docs-hooks-manual   # ← 还挂着
+```
+
+### 清理（2 行，30 秒）
+
+```bash
+# 1. 删远程源分支
+git push origin :feature/<branch-name>
+
+# 2. 删本地追踪分支（已合并可安全 -d，未合并才需 -D）
+git branch -d feature/<branch-name>
+```
+
+### 判断用 `-d` 还是 `-D`
+
+| 情况 | 命令 | 原因 |
+|---|---|---|
+| 分支已合并到 master | `git branch -d` | safe deletion，git 校验过合并历史 |
+| 分支未合并就删 | `git branch -D` | 强删 —— 但本项目 AI **禁**用 `-D`（`block-dangerous-git.sh` 会拦） |
+
+> 反过来用：`-d` 报"未合并" = 提醒你"这个分支可能漏合了，先 review 再决定"。
+
+### 防忘窍门
+
+把上面 2 行命令加进你的合并后模板：
+
+```bash
+# 合并后必跑（MCP 合并源分支不自动删）
+git push origin :<merged-branch> && git branch -d <merged-branch>
+```
+
+> 长期方案（可选 follow-up）：写个 `scripts/cleanup-merged-branches.sh`，列出已合并但未删的本地/远程分支，一键清理。暂缓 —— 1 周清一次的频率不值得脚本化。
