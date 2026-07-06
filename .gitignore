@@ -18,3 +18,5 @@ graphify-out/
 # Node / 前端
 node_modules/
 .next/
+next-env.d.ts
+*.tsbuildinfo
