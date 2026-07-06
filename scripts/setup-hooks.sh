@@ -19,7 +19,7 @@ echo ""
 git config core.hooksPath .githooks
 echo "✅ git hooks 已配置：core.hooksPath = .githooks（仅本项目）"
 echo "   生效的 hook："
-echo "   - pre-commit：禁提交生成物 + 前端 lint 软提醒 + 后端 py_compile 软提醒 + 工单分支落后软提醒"
+echo "   - pre-commit：禁 master/main 提交 + 禁提交生成物 + 前端 lint 软提醒 + 后端 py_compile 软提醒 + 工单分支落后软提醒"
 echo "   - commit-msg：Conventional Commits 规范校验"
 echo "   - pre-push：禁直推 master/main + 工单分支落后 origin/master 硬拦"
 echo "   - post-commit/post-checkout：graphify 知识图谱自动重建"
@@ -28,8 +28,8 @@ echo ""
 # ------------------------------------------------------------
 # 2. 确保 hook 脚本可执行（clone 后权限偶发丢失）
 # ------------------------------------------------------------
-chmod +x .githooks/* .claude/hooks/*.sh 2>/dev/null || true
-echo "✅ hook 脚本权限已就绪"
+chmod +x .githooks/* .claude/hooks/*.sh scripts/*.sh 2>/dev/null || true
+echo "✅ hook / workflow 脚本权限已就绪"
 echo ""
 
 # ------------------------------------------------------------

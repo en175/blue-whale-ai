@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
 # pre-commit hook — Blue-Whale
 # 纯 shell，零依赖。功能：
-#   1. 禁提交生成物（graphify-out/ dist/ target/ .next/ __pycache__/ node_modules/ 等）
-#   2. 前端改动时跑 lint（软提醒，不拦提交）
-#   3. 后端改动时跑 py_compile（软提醒，不拦提交）
-#   4. 远程落后软提醒（工单分支落后 origin/master）
+#   1. 禁 master/main 提交
+#   2. 禁提交生成物（graphify-out/ dist/ target/ .next/ __pycache__/ node_modules/ 等）
+#   3. 前端改动时跑 lint（软提醒，不拦提交）
+#   4. 后端改动时跑 py_compile（软提醒，不拦提交）
+#   5. 远程落后软提醒（工单分支落后 origin/master）
 # 退出码非 0 = 拦截提交。
 
 set -uo pipefail
+
+_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+case "$_branch" in
+  master|main)
+    echo "❌ pre-commit: 禁止在 master/main 上提交。" >&2
+    echo "请先使用 scripts/start-task-worktree.sh 创建任务 worktree + 工单分支。" >&2
+    exit 1
+    ;;
+esac
 
 # 只检查本次暂存（staged）的文件
 staged_files=$(git diff --cached --name-only --diff-filter=ACMR)
@@ -84,7 +94,6 @@ fi
 # ============================================================
 git fetch origin master >/dev/null 2>&1 || true   # 静默 fetch，失败放行
 _upstream=$(git rev-parse origin/master 2>/dev/null || echo "")
-_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
 case "$_branch" in
   feature/*|fix/*|hotfix/*|docs/*|chore*)
     # 本地 HEAD 是否已包含 origin/master 最新？不是祖先 = 落后
