@@ -4,7 +4,7 @@
 
 ## 一句话规则
 
-先按「要快 / 要好」选入口：**Dock = 直接生成（要快，用户自负责 prompt），Agent = 对话编排（要好，Agent 帮优化）**。Agent 内部再由 L1 意图识别分流到轻量编排或 Full Canvas。
+先按「要快 / 要好」选入口：**Dock = 直接生成（要快，用户自负责 prompt），Agent = 对话编排（要好，Agent 帮优化）**。Agent 内部再由 **L1 轻量 classifier（haiku 级，独立模型，非主 Agent 自判）** 给出意图方向与 `suggested_route` 软建议，主 Agent 据此路由到轻量编排或 Full Canvas。判定分层架构见 `decision_layer.md`。
 
 ## 两条入口
 
@@ -19,15 +19,15 @@
 
 Dock 不判链路——用户在 Dock 选 type（image / video）、填参数 + prompt、选 reference_asset，直传 Provider。零优化、零 understanding（Provider 自己消费图）。详见 `BACKEND-API-PRD.md` §5.4 / §6。
 
-## Agent 对话：L1 意图识别（统一入口）
+## Agent 对话：L1 轻量 classifier（统一入口）
 
-用户消息进 Agent，**先过 L1 意图识别**（Director / CEO 路由），分流到三条：
+用户消息进 Agent,turn 前置先过 **L1 轻量 classifier**(独立 haiku 级模型,**不是主 Agent 自判**;硬状态由后端代码先算,`has_generating` 直接短路)。L1 输出 `intent_direction` + 仅 `new_task` 带 `suggested_route`(软建议),主 Agent 在 `new_task` branch 按建议路由到三条:
 
-| 分流 | 触发 | 链路 |
-|---|---|---|
-| **轻量编排** | 简单图 / 轻量视频（「生成一张猫图」「5 秒小猫视频」） | 追问补全（仅方向歧义）+ Skill（有匹配才用）+ 优化提示词（硬停确认）+ 生成 |
-| **Full Canvas** | 广告 / UGC / 短剧 / 品牌片 / 需要脚本分镜 | Brief → Skill → 分镜 → 视觉 → 视频（4 硬停 + 3 软过，见 `video_agent_canvas.md`） |
-| **非生成** | 咨询 / 修改 / 确认 / 切换 Skill | 对话回复（不启动 GenerationJob） |
+| 分流 | L1 输出 | 触发 | 链路 |
+|---|---|---|---|
+| **轻量编排** | `new_task` + `suggested_route=lightweight` | 简单图 / 轻量视频（「生成一张猫图」「5 秒小猫视频」） | 追问补全（仅方向歧义）+ Skill（有匹配才用）+ 优化提示词（硬停确认）+ 生成 |
+| **Full Canvas** | `new_task` + `suggested_route=full_canvas` | 广告 / UGC / 短剧 / 品牌片 / 需要脚本分镜 | Brief → Skill → 分镜 → 视觉 → 视频（4 硬停 + 3 软过，见 `video_agent_canvas.md`） |
+| **非生成** | `consult` / `revise` / `product_switch` / `confirm_pending` 等 | 咨询 / 修改 / 确认 / 切换 Skill | 对话回复（不启动 GenerationJob） |
 
 ### 判定信号
 
@@ -37,7 +37,7 @@ Dock 不判链路——用户在 Dock 选 type（image / video）、填参数 + 
 
 ### 判定必须暴露 + 可推翻
 
-L1 判定结果必须进 `visible_reasoning`，说人话，且在 Job 启动**前**暴露（推翻不烧生成资源）。用户可对话推翻（「不，我要完整编排」）→ Agent 切分流，已生成结果作为参考素材保留。
+L1 判定结果必须进 `visible_reasoning`，说人话，且在 Job 启动**前**暴露（推翻不烧生成资源）。用户可对话推翻（「不，我要完整编排」）→ 主 Agent 推翻 L1 软建议切分流（推翻规则见 `decision_layer.md`），已生成结果作为参考素材保留。
 
 visible_reasoning 示例：
 

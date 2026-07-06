@@ -88,7 +88,9 @@ Full Canvas 的 stage 分两类：**硬停**（必须用户明确确认才推进
 
 ## 后端实现含义
 
-确认门不是模型建议，而是状态约束。
+确认门不是模型建议,而是状态约束。
+
+**confirm_pending branch 由 `decision_context` 算出**(`awaiting_confirm=true`,见 `decision_layer.md`):主 Agent 只在命中 `confirm_pending` branch 时判四分类,不再自行决定「现在要不要走确认门」。
 
 必须检查：
 
@@ -98,6 +100,8 @@ Full Canvas 的 stage 分两类：**硬停**（必须用户明确确认才推进
 - 用户表达是否为明确确认
 
 只有全部满足，才允许 `advance_stage`。
+
+**`advance_stage` 铁闸**:推进必须独立校验 `has_ready_node`,与主 Agent 判定解耦——主 Agent 误判要推进也拦(呼应 `backend_implementation_contract.md` 硬约束 13 与 `decision_layer.md` confirm_pending 后端铁闸)。
 
 ## 禁止
 

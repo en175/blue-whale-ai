@@ -32,7 +32,7 @@
 
 ## 当前四条生成链路
 
-> **2026-07-06 重构**：Direct Image / Direct Video / Image-to-Video 归 **BottomDock 直生**（纯参数透传，零优化零 understanding）；**Agent 对话**只走对话编排（L1 意图识别 → 轻量编排 / Full Canvas），永远走 Prompt Optimizer，不裸直接生成。下述四链路的链路细节仍有效，但归属入口按重构调整。详见 `generation_route_decision.md`。
+> **2026-07-06 重构**：Direct Image / Direct Video / Image-to-Video 归 **BottomDock 直生**（纯参数透传，零优化零 understanding）；**Agent 对话**只走对话编排（L1 轻量 classifier → 轻量编排 / Full Canvas），永远走 Prompt Optimizer，不裸直接生成。下述四链路的链路细节仍有效，但归属入口按重构调整。判定分层见 `skill/rules/decision_layer.md`，详见 `generation_route_decision.md`。
 
 ### 1. Direct Image（Dock 直生）
 

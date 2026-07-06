@@ -12,14 +12,16 @@
 
 | 阶段 | 名称 | Agent | 产物 | 是否需要确认 |
 |---|---|---|---|---|
-| 1 | 图片任务识别 | Director | image_task_type | 否 |
+| 1 | 读 decision_context | Director | image_task_type(来自 decision_context) | 否 |
 | 2 | 资产理解检查 | Image Understanding | asset_understanding | 必要时 |
 | 3 | 生图提示词草案 | Image Prompt | prompt_draft | 否 |
 | 4 | 提示词优化 | Prompt Optimizer | optimized_prompt | 否 |
 | 5 | 生成任务 | Generation | GenerationJob + image canvas node | 否 |
 | 6 | 图片结果确认 | Provider | ready image canvas node | 是 |
 
-## Stage 1：图片任务识别
+## Stage 1：读 decision_context
+
+进入条件:`decision_context.decision_branch=new_task` 且生图意图(turn 前置已算好,见 `decision_layer.md`)。Director 不再自判,只判断图片任务类型:
 
 判断任务类型：
 

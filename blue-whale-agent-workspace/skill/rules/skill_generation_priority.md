@@ -44,7 +44,7 @@ Agent 在判定这一条 turn 用哪个创作 Skill 时,按以下来源与优先
 
 ### 未指定时的分流（轻量 vs Full Canvas）
 
-Skill 库目前 60 个全是视频广告 / 电商向,**无通用生图 Skill**。因此未指定时按 Agent L1 意图识别的分流区别处理:
+Skill 库目前 60 个全是视频广告 / 电商向,**无通用生图 Skill**。因此未指定时按 Agent L1 轻量 classifier(haiku 级,见 `decision_layer.md`)的分流区别处理:
 
 | 分流 | Skill 处理 |
 |---|---|

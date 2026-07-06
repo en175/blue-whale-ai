@@ -1,7 +1,7 @@
 # 前端接通后端 PRD 模块路线图
 
 > 跨 session 的进度索引。新 session 读此文件即可接上,不依赖对话记忆。
-> 最后更新:2026-07-05
+> 最后更新:2026-07-06
 
 ## 怎么用这份文件
 
@@ -147,6 +147,32 @@
 | 15 | Agent 轻量编排 = 追问(仅方向歧义)+ 优化提示词(硬停)+ 生成;Skill 有匹配才用(无匹配跳过);L1 意图识别分流(轻量 / Full Canvas / 非生成) |
 
 **受影响文档(均已本次落盘)**:`backend_implementation_contract.md` / `BACKEND-API-PRD.md` / `confirmation_gate.md` / `generation_route_decision.md` / `progressive_disclosure.md` / `skill_generation_priority.md` / `canvas_state_rules.md` / `video_agent_canvas.md` / `image_understanding.md` / `AGENT-CONVERSATION-PRD.md` / `README.md`。
+
+### 2026-07-06 锁定:Agent 判定分层重构(决策 16-20)
+
+**核心重构**:判定分层——硬状态下沉后端代码(铁闸),意图方向+路由甩 L1 轻量 classifier(haiku 级,软建议),主 Agent 瘦到「读 `decision_context` → `switch(decision_branch)` → 确认门细判」。废除 Full Canvas 内部独立 L2,全场景统一 `decision_branch`。
+
+| # | 决策 |
+|---|---|
+| 16 | **判定分层**:硬状态→后端代码;意图方向+路由→L1 classifier(haiku 级,软建议);确认门四分类+输出+调度→主 Agent |
+| 17 | **decision_context**:后端算好单一 `decision_branch` + L1 软建议 + 硬事实,整体喂主 Agent |
+| 18 | **主 Agent 瘦身**:删 7 级优先级排序 + 语义分流大段,改 `switch(decision_branch)` |
+| 19 | **优先级**:`generating` 物理最高 → L1 意图优先(product_switch > new_task > consult > revise > responding_to_confirm > ambiguous)→ 硬状态 tiebreak |
+| 20 | **confirm_pending 后端铁闸 + L1/L2 统一**:`advance_stage` 必须独立校验 `has_ready_node`;废除 L2,全场景统一 `decision_branch` |
+
+**与决策 11/12/15 的关系**:那三条已锁「L1 暴露可推翻 + 歧义默认轻量 + L1 分流」。本轮(16-20)把它们工程化——L1 = 独立轻量 classifier(不是主 Agent 自判),硬状态下沉后端代码,主 Agent 瘦身到 switch 收口。是落地细化,不冲突。
+
+**受影响文档(均已本次落盘)**:
+- 新增 `skill/rules/decision_layer.md`(判定分层权威:三层分工 + `decision_context` + `decision_branch` switch 表 + 组合器优先级 + 推翻规则 + L1/L2 统一)
+- 改 `skill/workers/director_agent.md`(删 Step1/4/5/6/7,改 `switch(decision_branch)` + 推翻规则 + confirm_pending 四分类;必读规则加 decision_layer;总流程图加「后端算 decision_context」前置)
+- 改 `skill/references/backend_implementation_contract.md`(`decision_context` 字段+数据结构节、硬约束 13 `advance_stage` 铁闸、L1 调用时机)
+- 改 `AGENT-CONVERSATION-PRD.md`(§0 必读加 decision_layer、§2 turn 前置算 decision_context、§4 硬约束 7 铁闸)
+- 改 `skill/workflows/video_agent_canvas.md`(Stage 0 承接 `decision_branch`,删 L2)
+- 改 `skill/workflows/direct_generation.md` / `image_generation_prompt.md`(Stage 1 读 `decision_context`)
+- 改 `skill/rules/generation_route_decision.md`(L1 明确为独立轻量 classifier,路由判定移到 L1)
+- 改 `skill/rules/confirmation_gate.md`(confirm_pending branch 由 decision_context 算出 + `advance_stage` 铁闸呼应)
+- 轻量呼应:`BACKEND-API-PRD.md` §6 / `skill/rules/skill_generation_priority.md` / `README.md`(L1 描述微调为「轻量 classifier」)
+- 记录:`skill/memory/workflow_decisions.md`(判定分层 + L1/L2 统一)
 
 ## 建议推进顺序
 

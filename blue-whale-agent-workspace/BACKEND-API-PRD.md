@@ -175,7 +175,7 @@
 两条入口,共用同一套 GenerationJob:
 
 - **BottomDock 直生**:用户手填参数 + prompt,**零优化、零图理解**——原话 + 参数 + reference_asset_ids 直传 Provider,Provider 自己消费图,结果落画布(不进对话流)。质量用户自负责。
-- **Agent 对话**:L1 意图识别分流(轻量编排 / Full Canvas),永远走 Prompt Optimizer(出 `optimized_prompt_preview` 让用户确认),图推理前做 `asset_understanding`。详见 `AGENT-CONVERSATION-PRD.md`。
+- **Agent 对话**:L1 轻量 classifier(haiku 级,独立模型)分流(轻量编排 / Full Canvas),永远走 Prompt Optimizer(出 `optimized_prompt_preview` 让用户确认),图推理前做 `asset_understanding`。判定分层见 `skill/rules/decision_layer.md`,交付见 `AGENT-CONVERSATION-PRD.md`。
 
 #### `POST /api/projects/{project_id}/generate`(BottomDock 直生入口)
 ```json
@@ -299,11 +299,11 @@ data: {"job_id":"job_xxx","status":"succeeded","output_asset_ids":["ast_yyy"]}
 | 维度 | BottomDock(`/generate`)| Agent(`/agent/turn`)|
 |---|---|---|
 | 定位 | **要快**——用户自负责 prompt 质量 | **要好**——Agent 帮优化 |
-| 承担 | **所有直接生成**(Direct Image / Direct Video / Image-to-Video) | **单链路**:L1 意图识别 → 轻量编排 / Full Canvas |
+| 承担 | **所有直接生成**(Direct Image / Direct Video / Image-to-Video) | **单链路**:L1 轻量 classifier(haiku 级)→ 轻量编排 / Full Canvas |
 | 入参 | 完整参数 + prompt + reference_asset_ids | 自然语言意图 |
 | 提示词处理 | **零处理**(原话 + 参数直传 Provider,不做任何优化;质量用户自负责) | **永远有 Prompt Optimizer**(技术规整 + 创意优化,出 `optimized_prompt_preview` 用户确认) |
 | 图理解 | **零 understanding**(图随 reference_asset_ids 直传 Provider,Provider 自己消费图像素) | 图推理前必须 `asset_understanding`(见 `backend_implementation_contract.md` 硬约束 8) |
-| 编排 | 无,直接 GenerationJob | L1 意图识别 + worker 编排 |
+| 编排 | 无,直接 GenerationJob | L1 轻量 classifier + worker 编排 |
 | 产物 | Asset → 画布节点(不进对话流) | 对话消息 + Asset → 画布节点 |
 | 复用 | 共用 `/api/jobs` 状态查询 | 内部启动 Job,进度走 turn 的 SSE |
 | 详见 | 本文 §5.4 | **`AGENT-CONVERSATION-PRD.md` §5.2** |

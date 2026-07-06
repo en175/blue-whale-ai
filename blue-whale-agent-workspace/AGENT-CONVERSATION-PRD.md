@@ -8,6 +8,7 @@
 实现前**必读** workspace 三份契约 + 两份规则:
 
 - `skill/references/backend_implementation_contract.md` —— **权威定义层**。Agent Turn 字段、Canvas Node、ChatMessage variant(对话消息类型)、Stage、Workflow Run 都在这里定义,本文不重复字段定义,只引用。
+- `skill/rules/decision_layer.md` —— **判定分层架构**。三层分工(硬状态代码 / L1 轻量 classifier / 主 Agent)+ `decision_context` + `decision_branch` switch 表。turn 前置算 `decision_context` 的权威。
 - `skill/references/frontend_canvas_interaction_contract.md` —— 前端展示边界(画布 = 素材,对话 = 过程)与验收颗粒度。
 - `skill/rules/confirmation_gate.md` —— 确认门四分类(明确确认 / 弱继续 / 修改意图 / 等待中)。
 - `skill/rules/generation_route_decision.md` —— 四条生成链路的路由判定。
@@ -70,6 +71,18 @@ Agent runtime(CEO 路由 + workers)在 P0 必须把以下三条链路做透:
 - 不传 `forced_skill_id` = 用户未手动指定,Agent 按既定规则(见 `skill/rules/skill_generation_priority.md`「Skill 来源与选择」)从 auto 候选池决定。
 - **auto 候选池不在请求里传**。后端 Agent runtime 直接从 `/api/skills/mine?auto=true` 自读,保证与 Skill 面板状态同源。
 - 冲突仲裁优先级:**`forced_skill_id`(Use)> auto 候选池 > 未指定**。
+
+### turn 前置:算 decision_context
+
+后端收到 `text` 后、主 Agent 开跑前,先算 `decision_context`(见 `backend_implementation_contract.md` + `skill/rules/decision_layer.md`):
+
+1. 硬状态代码每轮必跑(零成本):`has_generating` / `has_ready_node` / `has_failed` / `awaiting_confirm` / `pending_workflow` / `current_stage` / `active_product_context` / `previous_product_context`。
+2. `has_generating=true` 直接短路到 `decision_branch=generation_in_progress`,**跳过 L1**。
+3. 其余情况调 L1 轻量 classifier(haiku 级),得 `intent_direction` + 仅 `new_task` 带 `suggested_route`。
+4. 后端代码按组合器优先级算出单一 `decision_branch`。
+5. 整个 `decision_context` 喂主 Agent,主 Agent `switch(decision_branch)` 收口。
+
+**`decision_context` 是后端 turn 内部,不进 SSE**——前端看到的仍是 §3 的事件序列(`visible_reasoning` / `message` / `canvas_update` / `job_*` / `turn_done`)。主 Agent 的分支判定体现在 `visible_reasoning` 与 `turn_done.requires_user_action` / `allowed_actions` 里。
 
 ---
 
@@ -160,6 +173,7 @@ data: {"requires_user_action":true,"allowed_actions":["confirm","revise","retry"
 4. Provider 调用前必须存在 `optimized_prompt`。
 5. 生成失败必须写入 `failed` 节点 + `error` 消息,**不静默失败**。
 6. `trace_event` / `prompt_draft` / `optimized_prompt` / worker 名 / 文件路径 **不进** `message` / `visible_reasoning`。
+7. **`advance_stage` 铁闸**:推进 stage 必须独立校验 `has_ready_node`,与主 Agent 判定解耦——主 Agent 误判要推进也拦(呼应 `backend_implementation_contract.md` 硬约束 13、`decision_layer.md`、`confirmation_gate.md`)。`confirm_pending` branch 由 `decision_context` 算出,主 Agent 只在命中时判四分类。
 
 > 规则全文见 `skill/rules/confirmation_gate.md`(四分类)与 `skill/rules/generation_route_decision.md`(四链路路由判定)。本文不复制规则全文,只声明 Agent 对话链路必须遵守。
 

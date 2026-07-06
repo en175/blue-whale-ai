@@ -58,7 +58,7 @@ Direct Generation 是独立链路，不强制走完整 Video Agent Canvas。
 
 | 阶段 | 名称 | Agent | 产物 | 是否确认 |
 |---|---|---|---|---|
-| 1 | 任务识别 | Director | generation_intent | 否 |
+| 1 | 读 decision_context | Director | generation_intent(来自 decision_context) | 否 |
 | 2 | 轻量补问 | Brief | minimal_brief | 视情况 |
 | 3 | 图片理解 | Image Understanding | asset_understanding | 有图时 |
 | 4 | 提示词草案 | Image Prompt / Generation | prompt_draft | 否 |
@@ -66,7 +66,9 @@ Direct Generation 是独立链路，不强制走完整 Video Agent Canvas。
 | 6 | 生成任务 | Generation | GenerationJob + image/video canvas node | 否 |
 | 7 | 结果确认 | Confirmation Gate | image/video result | 是 |
 
-## Stage 1：任务识别
+## Stage 1：读 decision_context
+
+进入条件:`decision_context.decision_branch=new_task` 且 `suggested_route=lightweight`(turn 前置已算好,见 `decision_layer.md`)。Director 不再自判链路,只从用户消息补全生成维度:
 
 识别：
 
