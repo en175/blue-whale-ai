@@ -1,0 +1,1860 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blue-Whale Agent Workflow Visual</title>
+  <style>
+    :root {
+      --paper: oklch(97% 0.014 82);
+      --paper-2: oklch(93% 0.018 82);
+      --surface: oklch(99% 0.008 82);
+      --surface-2: oklch(95% 0.014 82);
+      --ink: oklch(19% 0.025 248);
+      --muted: oklch(43% 0.026 248);
+      --soft: oklch(61% 0.025 248);
+      --line: oklch(84% 0.018 82);
+      --gold: oklch(76% 0.13 78);
+      --green: oklch(68% 0.12 155);
+      --blue: oklch(64% 0.1 236);
+      --coral: oklch(68% 0.14 31);
+      --violet: oklch(64% 0.11 305);
+      --shadow: 0 18px 45px rgba(33, 28, 18, 0.12);
+      --small-shadow: 0 8px 22px rgba(33, 28, 18, 0.09);
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--paper);
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Avenir Next", "Gill Sans", "Trebuchet MS", Arial, sans-serif;
+      background:
+        radial-gradient(circle at 12% 5%, oklch(91% 0.065 78), transparent 28rem),
+        radial-gradient(circle at 90% 10%, oklch(91% 0.05 155), transparent 30rem),
+        linear-gradient(135deg, var(--paper), oklch(95% 0.014 95) 52%, oklch(92% 0.02 82));
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.48;
+      background-image:
+        linear-gradient(rgba(27, 33, 43, 0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(27, 33, 43, 0.038) 1px, transparent 1px);
+      background-size: 34px 34px;
+      mask-image: linear-gradient(to bottom, black, transparent 78%);
+    }
+
+    a { color: inherit; text-decoration: none; }
+    button, a { touch-action: manipulation; }
+
+    .shell {
+      width: min(1520px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 22px 0 72px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 14px;
+      z-index: 30;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 16px;
+      align-items: center;
+      padding: 12px 14px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: var(--small-shadow);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .mark {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 11px;
+      color: var(--ink);
+      background: var(--gold);
+      font-weight: 900;
+      box-shadow: 0 8px 20px oklch(76% 0.13 78 / 0.28);
+    }
+
+    .brand strong,
+    h1,
+    h2,
+    h3 {
+      font-family: Georgia, "Times New Roman", serif;
+      letter-spacing: 0;
+      text-wrap: balance;
+    }
+
+    .brand strong {
+      font-size: 18px;
+      white-space: nowrap;
+    }
+
+    .nav {
+      display: flex;
+      justify-content: center;
+      gap: 4px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .nav::-webkit-scrollbar { display: none; }
+
+    .nav a,
+    .print-button,
+    .tab {
+      border: 0;
+      border-radius: 13px;
+      min-height: 40px;
+      padding: 0 12px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+      white-space: nowrap;
+      cursor: pointer;
+      transition-property: transform, background-color, color, box-shadow;
+      transition-duration: 170ms;
+      transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .nav a:hover,
+    .print-button:hover,
+    .tab:hover {
+      background: var(--surface-2);
+      color: var(--ink);
+    }
+
+    .nav a:active,
+    .print-button:active,
+    .tab:active,
+    .button:active {
+      transform: scale(0.96);
+    }
+
+    a:focus-visible,
+    button:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 3px;
+    }
+
+    .hero {
+      min-height: calc(100vh - 78px);
+      display: grid;
+      grid-template-columns: minmax(0, 0.78fr) minmax(560px, 1.22fr);
+      gap: 28px;
+      align-items: center;
+      padding: 54px 0 44px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      color: oklch(42% 0.11 78);
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--gold);
+      box-shadow: 0 0 0 7px oklch(76% 0.13 78 / 0.18);
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 11ch;
+      font-size: clamp(44px, 7vw, 94px);
+      line-height: 0.94;
+      font-weight: 700;
+    }
+
+    .lead {
+      margin: 24px 0 0;
+      max-width: 640px;
+      color: var(--muted);
+      font-size: clamp(17px, 2vw, 21px);
+      line-height: 1.55;
+      text-wrap: pretty;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 30px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 0 18px;
+      border-radius: 14px;
+      font-size: 14px;
+      font-weight: 900;
+      transition-property: transform, background-color, box-shadow;
+      transition-duration: 170ms;
+      transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .button.primary {
+      color: var(--ink);
+      background: var(--gold);
+      box-shadow: 0 12px 28px oklch(76% 0.13 78 / 0.25);
+    }
+
+    .button.secondary {
+      color: var(--ink);
+      background: var(--surface);
+      box-shadow: var(--small-shadow);
+    }
+
+    .route-board {
+      padding: 18px;
+      border-radius: 30px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      outline: 1px solid rgba(36, 42, 54, 0.08);
+    }
+
+    .board-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 16px;
+      color: var(--soft);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .dots {
+      display: flex;
+      gap: 5px;
+    }
+
+    .dots span {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--green);
+    }
+
+    .director {
+      display: grid;
+      grid-template-columns: 1fr 1.12fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .director-card {
+      padding: 20px;
+      border-radius: 22px;
+      color: var(--ink);
+      background: linear-gradient(135deg, oklch(96% 0.035 78), oklch(91% 0.055 78));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+    }
+
+    .director-card h3 {
+      margin: 0 0 10px;
+      font-size: 32px;
+    }
+
+    .director-card p {
+      margin: 0;
+      color: oklch(36% 0.04 78);
+      line-height: 1.55;
+      font-weight: 700;
+    }
+
+    .intent-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .intent {
+      padding: 13px;
+      border-radius: 16px;
+      background: var(--paper-2);
+      min-height: 84px;
+    }
+
+    .intent b {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+
+    .intent span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .hero-flow {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .hero-flow .box {
+      padding: 14px;
+      border-radius: 17px;
+      background: var(--paper-2);
+      min-height: 110px;
+    }
+
+    .box strong {
+      display: block;
+      font-size: 16px;
+      margin-bottom: 8px;
+    }
+
+    .box p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    section {
+      scroll-margin-top: 110px;
+      padding: 66px 0;
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 0.7fr) minmax(340px, 0.3fr);
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 28px;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-size: clamp(34px, 5vw, 64px);
+      line-height: 1;
+    }
+
+    .section-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.6;
+      text-wrap: pretty;
+    }
+
+    .router-map {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .router-core {
+      padding: 22px;
+      border-radius: 26px;
+      color: var(--ink);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 520px;
+    }
+
+    .router-core h3 {
+      margin: 0 0 14px;
+      font-size: 34px;
+    }
+
+    .router-core p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .core-stack {
+      display: grid;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .core-item {
+      padding: 13px;
+      border-radius: 15px;
+      background: var(--paper-2);
+      font-weight: 900;
+      color: var(--ink);
+    }
+
+    .branches {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .branch {
+      padding: 18px;
+      border-radius: 22px;
+      background: var(--surface);
+      box-shadow: var(--small-shadow);
+      outline: 1px solid rgba(36, 42, 54, 0.06);
+      min-height: 250px;
+    }
+
+    .branch .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      color: var(--ink);
+      background: var(--accent);
+      font-size: 12px;
+      font-weight: 900;
+      margin-bottom: 14px;
+    }
+
+    .branch h3 {
+      margin: 0 0 9px;
+      font-size: 24px;
+    }
+
+    .branch p,
+    .branch li {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .branch ul {
+      margin: 12px 0 0;
+      padding-left: 18px;
+    }
+
+    .workflow-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .workflow-card {
+      display: grid;
+      grid-template-columns: 260px 1fr 300px;
+      gap: 16px;
+      padding: 18px;
+      border-radius: 26px;
+      background: var(--surface);
+      box-shadow: var(--small-shadow);
+      outline: 1px solid rgba(36, 42, 54, 0.06);
+    }
+
+    .workflow-title {
+      padding: 18px;
+      border-radius: 20px;
+      background: color-mix(in oklch, var(--accent) 22%, white);
+    }
+
+    .workflow-title .label {
+      display: inline-flex;
+      min-height: 28px;
+      align-items: center;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: var(--accent);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .workflow-title h3 {
+      margin: 20px 0 10px;
+      font-size: 30px;
+    }
+
+    .workflow-title p {
+      margin: 0;
+      color: oklch(34% 0.035 248);
+      line-height: 1.5;
+      font-weight: 700;
+    }
+
+    .steps {
+      display: grid;
+      gap: 9px;
+      align-content: start;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 11px;
+      border-radius: 15px;
+      background: var(--paper-2);
+    }
+
+    .step i {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border-radius: 11px;
+      color: var(--ink);
+      background: var(--accent);
+      font-style: normal;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .step b {
+      display: block;
+      font-size: 14px;
+    }
+
+    .step span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .callout {
+      padding: 16px;
+      border-radius: 20px;
+      background: var(--paper-2);
+    }
+
+    .callout h4 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--soft);
+    }
+
+    .callout ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      line-height: 1.55;
+      font-size: 14px;
+    }
+
+    .skill-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 0.92fr) minmax(480px, 1.08fr);
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .skill-thesis {
+      padding: 24px;
+      border-radius: 28px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .skill-thesis h3 {
+      margin: 0 0 12px;
+      font-size: 36px;
+    }
+
+    .skill-thesis p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.58;
+    }
+
+    .source-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .source {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 12px;
+      padding: 13px;
+      border-radius: 15px;
+      background: var(--paper-2);
+    }
+
+    .source b {
+      color: oklch(38% 0.09 78);
+    }
+
+    .source span {
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .skill-types {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .skill-type {
+      padding: 18px;
+      border-radius: 22px;
+      background: var(--surface);
+      box-shadow: var(--small-shadow);
+    }
+
+    .skill-type h3 {
+      margin: 0 0 8px;
+      font-size: 22px;
+    }
+
+    .skill-type p {
+      margin: 0 0 12px;
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: color-mix(in oklch, var(--accent, var(--gold)) 28%, white);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .data-map {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+    }
+
+    .file-system {
+      display: grid;
+      grid-template-columns: minmax(360px, 0.88fr) minmax(0, 1.12fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .file-tree {
+      padding: 22px;
+      border-radius: 28px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      outline: 1px solid rgba(36, 42, 54, 0.06);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+      line-height: 1.52;
+      color: oklch(30% 0.03 248);
+      overflow-x: auto;
+    }
+
+    .file-tree strong {
+      display: block;
+      margin-bottom: 10px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 26px;
+      color: var(--ink);
+    }
+
+    .tree-line {
+      white-space: nowrap;
+    }
+
+    .tree-line.folder {
+      color: oklch(36% 0.09 78);
+      font-weight: 900;
+    }
+
+    .tree-line.hot {
+      color: oklch(40% 0.11 236);
+      font-weight: 900;
+    }
+
+    .file-notes {
+      display: grid;
+      gap: 12px;
+    }
+
+    .file-note {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 14px;
+      padding: 16px;
+      border-radius: 20px;
+      background: var(--surface);
+      box-shadow: var(--small-shadow);
+      outline: 1px solid rgba(36, 42, 54, 0.06);
+    }
+
+    .file-note b {
+      color: var(--ink);
+      font-size: 15px;
+    }
+
+    .file-note span {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .route-timing {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .timing-card {
+      padding: 16px;
+      border-radius: 20px;
+      background: var(--surface);
+      box-shadow: var(--small-shadow);
+    }
+
+    .timing-card h3 {
+      margin: 0 0 10px;
+      font-size: 22px;
+    }
+
+    .timing-card ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .data-card,
+    .rule {
+      padding: 20px;
+      border-radius: 24px;
+      background: var(--surface);
+      box-shadow: var(--small-shadow);
+      outline: 1px solid rgba(36, 42, 54, 0.06);
+    }
+
+    .data-card .tag,
+    .rule .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 900;
+      margin-bottom: 16px;
+    }
+
+    .data-card h3,
+    .rule h3 {
+      margin: 0 0 10px;
+      font-size: 25px;
+    }
+
+    .data-card ul,
+    .rule p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+      font-size: 14px;
+    }
+
+    .data-card ul {
+      padding-left: 18px;
+    }
+
+    .rules {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+
+    .tab.active {
+      background: var(--gold);
+      color: var(--ink);
+      box-shadow: var(--small-shadow);
+    }
+
+    .detail-panel {
+      display: none;
+      padding: 20px;
+      border-radius: 26px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .detail-panel.active {
+      display: grid;
+      grid-template-columns: 0.8fr 1.2fr;
+      gap: 16px;
+      animation: rise 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .detail-panel h3 {
+      margin: 0 0 10px;
+      font-size: 34px;
+    }
+
+    .detail-panel p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.58;
+    }
+
+    .detail-panel .steps {
+      align-content: stretch;
+    }
+
+    .enter {
+      animation: rise 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .enter.delay-1 { animation-delay: 90ms; }
+
+    @keyframes rise {
+      from {
+        opacity: 0;
+        transform: translateY(14px);
+        filter: blur(3px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+        filter: blur(0);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after {
+        animation-duration: 1ms !important;
+        transition-duration: 1ms !important;
+      }
+    }
+
+    @media (max-width: 1180px) {
+      .hero,
+      .router-map,
+      .skill-layout,
+      .file-system,
+      .detail-panel.active {
+        grid-template-columns: 1fr;
+      }
+
+      .workflow-card {
+        grid-template-columns: 1fr;
+      }
+
+      .branches,
+      .route-timing,
+      .data-map {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 760px) {
+      .shell {
+        width: min(100% - 24px, 1520px);
+        padding-bottom: 44px;
+      }
+
+      .topbar {
+        grid-template-columns: 1fr;
+        top: 8px;
+      }
+
+      .nav {
+        justify-content: flex-start;
+      }
+
+      .print-button {
+        justify-self: start;
+      }
+
+      .hero {
+        min-height: auto;
+        padding-top: 36px;
+      }
+
+      h1 {
+        max-width: 12ch;
+      }
+
+      .director,
+      .intent-grid,
+      .hero-flow,
+      .branches,
+      .skill-types,
+      .route-timing,
+      .data-map,
+      .rules {
+        grid-template-columns: 1fr;
+      }
+
+      .section-head {
+        grid-template-columns: 1fr;
+      }
+
+      .source {
+        grid-template-columns: 1fr;
+      }
+
+      .file-note {
+        grid-template-columns: 1fr;
+      }
+    }
+    /* ===== 链路流程图 ===== */
+    .flow-list { display: grid; gap: 18px; }
+
+    .flow-card {
+      padding: 24px;
+      border-radius: 26px;
+      background: var(--surface);
+      box-shadow: var(--small-shadow);
+      outline: 1px solid rgba(36, 42, 54, 0.06);
+    }
+
+    .flow-head {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px dashed var(--line);
+    }
+
+    .flow-head .label {
+      display: inline-flex;
+      min-height: 28px;
+      align-items: center;
+      padding: 0 12px;
+      border-radius: 999px;
+      background: var(--accent);
+      font-size: 12px;
+      font-weight: 900;
+      flex-shrink: 0;
+    }
+
+    .flow-head h3 { margin: 0 0 4px; font-size: 22px; }
+    .flow-head p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+    .flow {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .fn {
+      padding: 11px 18px;
+      border-radius: 14px;
+      background: var(--paper-2);
+      font-size: 13px;
+      text-align: center;
+      min-width: 240px;
+      max-width: 360px;
+      margin: 5px 0;
+    }
+    .fn b { display: block; font-size: 14px; }
+    .fn span { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+
+    .fn-start { background: var(--accent); color: var(--ink); font-weight: 900; border-radius: 999px; }
+
+    .fn-agent {
+      background: color-mix(in oklch, var(--accent) 14%, white);
+      border-left: 4px solid var(--accent);
+      text-align: left;
+    }
+
+    .fn-canvas {
+      background: var(--surface-2);
+      border: 1.5px dashed var(--accent);
+      border-radius: 10px;
+    }
+
+    .fn-job { background: var(--ink); color: var(--paper); }
+    .fn-job span { color: oklch(78% 0.02 248); }
+
+    .fn-decision {
+      background: color-mix(in oklch, var(--gold) 22%, white);
+      border: 2px solid var(--gold);
+      font-weight: 900;
+    }
+
+    .fn-gate {
+      background: color-mix(in oklch, var(--violet) 20%, white);
+      border: 2px solid var(--violet);
+      font-weight: 900;
+    }
+
+    .fn-done { background: var(--green); color: var(--ink); font-weight: 900; border-radius: 999px; }
+
+    .arrow {
+      color: var(--soft);
+      font-size: 16px;
+      font-weight: 900;
+      line-height: 1;
+      margin: 2px 0;
+    }
+
+    .fork {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 28px;
+      width: 100%;
+      max-width: 580px;
+      margin: 4px 0;
+    }
+    .fork-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .fork-col .fn { min-width: 0; max-width: none; width: 100%; }
+    .fork-label {
+      font-size: 11px;
+      font-weight: 900;
+      color: var(--accent);
+      margin-bottom: 4px;
+      letter-spacing: 0.06em;
+    }
+
+    .fn-skip {
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 28px;
+    }
+
+    @media (max-width: 720px) {
+      .fork { grid-template-columns: 1fr; gap: 8px; }
+      .fn { min-width: 0; max-width: none; width: 100%; }
+    }
+
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar" aria-label="页面导航">
+      <a class="brand" href="#top" aria-label="回到顶部">
+        <span class="mark">T</span>
+        <strong>Blue-Whale Agent Workflow</strong>
+      </a>
+      <nav class="nav">
+        <a href="#director">主 Agent</a>
+        <a href="#workflows">Workflow 分流</a>
+        <a href="#flow">链路流程图</a>
+        <a href="#full-canvas">完整画布流程</a>
+        <a href="#skills">Skill 调用</a>
+        <a href="#files">文件树</a>
+        <a href="#data">数据落点</a>
+        <a href="#rules">硬规则</a>
+      </nav>
+      <button class="print-button" type="button" onclick="window.print()">导出 / 打印</button>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="page-title">
+        <div class="enter">
+          <div class="eyebrow">Agent router and workflow map</div>
+          <h1 id="page-title">主 Agent 如何把需求分流到正确工作流</h1>
+          <p class="lead">这张页面讲清楚三件事：Director / CEO 如何识别意图，如何路由到不同 workflow，每条 workflow 会调用哪些 Worker、Skill 和数据对象。</p>
+          <div class="hero-actions">
+            <a class="button primary" href="#director">看主 Agent 路由</a>
+            <a class="button secondary" href="#workflows">看具体 workflow</a>
+          </div>
+        </div>
+
+        <div class="route-board enter delay-1">
+          <div class="board-head">
+            <span>Director / CEO first turn</span>
+            <div class="dots" aria-hidden="true"><span></span><span></span><span></span></div>
+          </div>
+          <div class="director">
+            <div class="director-card">
+              <h3>先识别意图，不先生成</h3>
+              <p>每轮都先看用户消息、Canvas 状态、Workflow Run、当前 Stage、节点状态，再决定是新建、修改、确认，还是普通咨询。</p>
+            </div>
+            <div class="intent-grid">
+              <div class="intent"><b>咨询 / 讨论</b><span>直接回答，不启动生成 workflow。</span></div>
+              <div class="intent"><b>新建图片</b><span>路由到 image_generation_prompt。</span></div>
+              <div class="intent"><b>轻量视频</b><span>路由到 direct_generation。</span></div>
+              <div class="intent"><b>上传图动起来</b><span>先 image_understanding，再 direct_generation。</span></div>
+              <div class="intent"><b>完整广告视频</b><span>进入 video_agent_canvas。</span></div>
+              <div class="intent"><b>修改 / 确认</b><span>先走 revise 或 confirmation_gate。</span></div>
+            </div>
+          </div>
+          <div class="hero-flow">
+            <div class="box"><strong>1. 状态优先</strong><p>awaiting_confirm、generating、failed、pending stage 的优先级高于用户最新一句话。</p></div>
+            <div class="box"><strong>2. 路由分流</strong><p>Direct Image / Direct Video / Image-to-Video / Full Canvas / Prompt-only。</p></div>
+            <div class="box"><strong>3. 调用执行</strong><p>Worker 产出过程消息，Provider 任务进入 GenerationJob，素材进入 Canvas。</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="director" aria-labelledby="director-title">
+        <div class="section-head">
+          <h2 id="director-title">主 Agent 的决策层</h2>
+          <p>Director / CEO 不直接写脚本、不直接写提示词、不直接调用 Provider。它负责判断当前应该走哪条路径，并确保确认门和画布状态不被绕过。</p>
+        </div>
+        <div class="router-map">
+          <aside class="router-core">
+            <div>
+              <h3>Director / CEO</h3>
+              <p>输入：用户最新消息 + Canvas 状态 + Workflow Run + Stage + Nodes + Skill 候选。</p>
+              <div class="core-stack">
+                <div class="core-item">先看状态</div>
+                <div class="core-item">识别意图</div>
+                <div class="core-item">选择 workflow</div>
+                <div class="core-item">调度 worker / skill</div>
+                <div class="core-item">执行确认门</div>
+              </div>
+            </div>
+          </aside>
+
+          <div class="branches">
+            <article class="branch" style="--accent: var(--gold)">
+              <span class="pill">Step 1</span>
+              <h3>咨询 / 讨论</h3>
+              <p>用户只问方法、架构、规则、建议。</p>
+              <ul><li>直接回答</li><li>不创建 workflow_run</li><li>不写 Canvas</li></ul>
+            </article>
+            <article class="branch" style="--accent: var(--green)">
+              <span class="pill">Step 2</span>
+              <h3>新建生成任务</h3>
+              <p>根据目标是图片、轻量视频、图转视频还是完整广告，进入不同 workflow。</p>
+              <ul><li>Route Decision</li><li>必要时补问</li><li>必要时图片理解</li></ul>
+            </article>
+            <article class="branch" style="--accent: var(--blue)">
+              <span class="pill">Step 3</span>
+              <h3>修改当前画布</h3>
+              <p>用户说改一下、重做、换风格、保留 A 重做 B。</p>
+              <ul><li>进入 revise flow</li><li>不覆盖原节点</li><li>局部重跑</li></ul>
+            </article>
+            <article class="branch" style="--accent: var(--coral)">
+              <span class="pill">Step 4</span>
+              <h3>确认当前结果</h3>
+              <p>确认不是文本匹配，而是状态约束。</p>
+              <ul><li>ready 节点</li><li>明确确认</li><li>才 advance_stage</li></ul>
+            </article>
+            <article class="branch" style="--accent: var(--violet)">
+              <span class="pill">Step 5</span>
+              <h3>切换 Skill</h3>
+              <p>用户指定某个 Skill、Use、换套路、UGC、品牌广告、短剧。</p>
+              <ul><li>forced 优先</li><li>auto 候选其次</li><li>低置信度反问</li></ul>
+            </article>
+            <article class="branch" style="--accent: var(--gold)">
+              <span class="pill">Step 6</span>
+              <h3>意图不明</h3>
+              <p>不猜测、不硬跑生成。</p>
+              <ul><li>问一句关键问题</li><li>确认目标</li><li>再进入路由</li></ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflows" aria-labelledby="workflows-title">
+        <div class="section-head">
+          <h2 id="workflows-title">具体 Workflow 分流</h2>
+          <p>每条 workflow 都有不同触发条件、Worker 调用链、Skill 使用方式和数据落点。这里是工程实现时最需要对齐的部分。</p>
+        </div>
+
+        <div class="workflow-grid">
+          <article class="workflow-card" style="--accent: var(--gold)">
+            <div class="workflow-title">
+              <span class="label">Direct Image</span>
+              <h3>直接生成图片</h3>
+              <p>商品图、海报、关键帧、换背景、风格图。</p>
+            </div>
+            <div class="steps">
+              <div class="step"><i>1</i><div><b>Director 识别图片任务</b><span>判断 image_task_type：产品图、图生图、关键帧等。</span></div></div>
+              <div class="step"><i>2</i><div><b>Image Understanding</b><span>如果依赖上传图，先得到 asset_understanding。</span></div></div>
+              <div class="step"><i>3</i><div><b>Image Prompt Agent</b><span>生成主体、场景、构图、光影、必须保留。</span></div></div>
+              <div class="step"><i>4</i><div><b>Prompt Optimizer</b><span>适配图片模型语法，生成 optimized_prompt。</span></div></div>
+              <div class="step"><i>5</i><div><b>GenerationJob</b><span>创建 image job，同步 image canvas node。</span></div></div>
+            </div>
+            <div class="callout">
+              <h4>Skill 使用</h4>
+              <ul>
+                <li>可调用 E-Commerce Product Image</li>
+                <li>可叠加行业 Skill：美妆、3C、食品、家居</li>
+                <li>Skill 决定画面策略，不替代图片模型语法</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="workflow-card" style="--accent: var(--green)">
+            <div class="workflow-title">
+              <span class="label">Direct Video</span>
+              <h3>轻量直接视频</h3>
+              <p>主体和动作清楚，不需要广告策略或多阶段分镜。</p>
+            </div>
+            <div class="steps">
+              <div class="step"><i>1</i><div><b>Director 识别轻量视频</b><span>例如小猫跑步、女孩跳舞、城市镜头。</span></div></div>
+              <div class="step"><i>2</i><div><b>Brief 轻量补全</b><span>默认时长、风格、画幅、稳定约束；关键缺失才追问。</span></div></div>
+              <div class="step"><i>3</i><div><b>Generation Agent</b><span>整理视频提示词草案。</span></div></div>
+              <div class="step"><i>4</i><div><b>Prompt Optimizer</b><span>Seedance 等模型语法适配。</span></div></div>
+              <div class="step"><i>5</i><div><b>GenerationJob</b><span>创建 video job，同步 video canvas node。</span></div></div>
+            </div>
+            <div class="callout">
+              <h4>Skill 使用</h4>
+              <ul>
+                <li>通常不调用复杂创作 Skill</li>
+                <li>可调用镜头/导演辅助 Skill</li>
+                <li>不进入 Storyboard Agent</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="workflow-card" style="--accent: var(--blue)">
+            <div class="workflow-title">
+              <span class="label">Image-to-Video</span>
+              <h3>上传图转视频</h3>
+              <p>让图片里的产品、人物或场景动起来。</p>
+            </div>
+            <div class="steps">
+              <div class="step"><i>1</i><div><b>Director 识别“这张图”</b><span>判断用户想让图片动起来，而不是只分析图片。</span></div></div>
+              <div class="step"><i>2</i><div><b>Multimodal Capability</b><span>主模型视觉 / 视觉模型 / 请用户补充三选一。</span></div></div>
+              <div class="step"><i>3</i><div><b>Image Understanding Agent</b><span>产出 subject、visual_traits、must_keep、usage_intent。</span></div></div>
+              <div class="step"><i>4</i><div><b>Direct Generation</b><span>引用 asset_understanding 组织图转视频动作。</span></div></div>
+              <div class="step"><i>5</i><div><b>Prompt Optimizer + Job</b><span>绑定 @图片N / &lt;主体N&gt;，进入 video job。</span></div></div>
+            </div>
+            <div class="callout">
+              <h4>Skill 使用</h4>
+              <ul>
+                <li>产品转动可用产品展示 Skill</li>
+                <li>人物动作可用导演/镜头 Skill</li>
+                <li>没有 asset_understanding 不能调用 Provider</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="workflow-card" style="--accent: var(--coral)">
+            <div class="workflow-title">
+              <span class="label">Full Video Canvas</span>
+              <h3>完整广告视频</h3>
+              <p>产品广告、UGC、短剧、品牌片、多阶段创作。</p>
+            </div>
+            <div class="steps">
+              <div class="step"><i>1</i><div><b>Brief Agent</b><span>收集目标、主体、平台、素材、卖点。</span></div></div>
+              <div class="step"><i>2</i><div><b>Skill Selector</b><span>选择主创作 Skill，并说明理由和风险。</span></div></div>
+              <div class="step"><i>3</i><div><b>Director 生成阶段计划</b><span>脚本分镜、首批视觉、视频生成、审核。</span></div></div>
+              <div class="step"><i>4</i><div><b>Storyboard Agent</b><span>生成脚本、镜头表、关键帧清单。</span></div></div>
+              <div class="step"><i>5</i><div><b>Generation + Review</b><span>首批视觉、视频生成、质量检查和修改建议。</span></div></div>
+            </div>
+            <div class="callout">
+              <h4>Skill 使用</h4>
+              <ul>
+                <li>必须选择主创作 Skill：UGC / TVC / 短剧 / 测评等</li>
+                <li>可叠加行业 Skill 和镜头 Skill</li>
+                <li>Skill 确认后，Prompt Optimizer 不能改创意方向</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="workflow-card" style="--accent: var(--violet)">
+            <div class="workflow-title">
+              <span class="label">Confirm / Revise</span>
+              <h3>确认或修改</h3>
+              <p>用户不是每句话都代表新任务，很多时候是在操作当前画布。</p>
+            </div>
+            <div class="steps">
+              <div class="step"><i>1</i><div><b>先检查 current_stage</b><span>是否 awaiting_confirm、generating、failed。</span></div></div>
+              <div class="step"><i>2</i><div><b>Confirmation Gate</b><span>ready 节点 + 明确确认，才允许推进。</span></div></div>
+              <div class="step"><i>3</i><div><b>弱继续二次确认</b><span>“继续 / 好了 / 下一步”不能自动 advance_stage。</span></div></div>
+              <div class="step"><i>4</i><div><b>Revise Flow</b><span>保留原节点，不覆盖已确认资产。</span></div></div>
+              <div class="step"><i>5</i><div><b>局部重跑</b><span>带 revise instruction 创建新的 GenerationJob。</span></div></div>
+            </div>
+            <div class="callout">
+              <h4>Skill 使用</h4>
+              <ul>
+                <li>修改方向不变：沿用已确认 Skill</li>
+                <li>用户要求换风格：回到 Skill 或阶段计划</li>
+                <li>已确认结果默认不重写</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="workflow-card" style="--accent: var(--gold)">
+            <div class="workflow-title">
+              <span class="label">Prompt-only</span>
+              <h3>只优化提示词</h3>
+              <p>用户只想把一段 prompt 改成 Seedance 或图片模型可用。</p>
+            </div>
+            <div class="steps">
+              <div class="step"><i>1</i><div><b>Director 识别 prompt-only</b><span>不创建 GenerationJob，不调用 Provider。</span></div></div>
+              <div class="step"><i>2</i><div><b>Prompt Optimizer</b><span>根据目标模型改写提示词。</span></div></div>
+              <div class="step"><i>3</i><div><b>Skill Priority Rule</b><span>保留用户指定创意结构，只做语法级优化。</span></div></div>
+              <div class="step"><i>4</i><div><b>输出 preview</b><span>展示 optimized_prompt_preview，不展示原始内部 prompt。</span></div></div>
+            </div>
+            <div class="callout">
+              <h4>Skill 使用</h4>
+              <ul>
+                <li>可参考已选 Skill</li>
+                <li>不调用图片 / 视频 Provider</li>
+                <li>不写 Canvas Node</li>
+              </ul>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="flow" aria-labelledby="flow-title">
+        <div class="section-head">
+          <h2 id="flow-title">每条链路在 Agent 中如何跑</h2>
+          <p>从用户输入到 Canvas 结果的完整路径：含判断分支、Canvas 写入、GenerationJob 和确认门。分叉是判断，主线下行是推进。</p>
+        </div>
+        <div class="flow-list">
+
+          <article class="flow-card" style="--accent: var(--gold)">
+            <div class="flow-head">
+              <span class="label">Direct Image</span>
+              <div>
+                <h3>直接生成图片</h3>
+                <p>商品图 / 海报 / 关键帧 / 换背景 — 从一句话到 Canvas 结果</p>
+              </div>
+            </div>
+            <div class="flow">
+              <div class="fn fn-start"><b>用户：做一张产品图</b></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-decision"><b>◇ 依赖上传图？</b></div>
+              <div class="fork">
+                <div class="fork-col">
+                  <span class="fork-label">是</span>
+                  <div class="fn fn-agent"><b>Image Understanding Agent</b><span>识别主体 / 必留元素</span></div>
+                  <div class="arrow">↓</div>
+                  <div class="fn fn-canvas"><b>asset_understanding</b><span>Canvas 写入</span></div>
+                </div>
+                <div class="fork-col">
+                  <span class="fork-label">否</span>
+                  <div class="fn fn-skip">跳过识别，直接进入提示词</div>
+                </div>
+              </div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-agent"><b>Image Prompt Agent</b><span>主体 / 场景 / 构图 / 光影 / 必须保留</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-agent"><b>Prompt Optimizer</b><span>适配图片模型语法 → optimized_prompt（内部）</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-job"><b>GenerationJob（image）</b></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-canvas"><b>Canvas：image_result</b></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-gate"><b>◇ 用户确认</b></div>
+              <div class="fork">
+                <div class="fork-col">
+                  <span class="fork-label">改</span>
+                  <div class="fn fn-agent"><b>Revise（局部重跑）</b><span>带 revise instruction 新建 Job</span></div>
+                </div>
+                <div class="fork-col">
+                  <span class="fork-label">确认</span>
+                  <div class="fn fn-done"><b>✓ 完成</b></div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="flow-card" style="--accent: var(--green)">
+            <div class="flow-head">
+              <span class="label">Direct Video</span>
+              <div>
+                <h3>轻量直接视频</h3>
+                <p>主体和动作清楚，不需要广告策略或多阶段分镜</p>
+              </div>
+            </div>
+            <div class="flow">
+              <div class="fn fn-start"><b>用户：生成小猫跑步视频</b></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-decision"><b>◇ 关键信息足够？</b></div>
+              <div class="fork">
+                <div class="fork-col">
+                  <span class="fork-label">否</span>
+                  <div class="fn fn-agent"><b>Brief 轻量补全</b><span>默认时长 / 风格 / 画幅 / 稳定约束</span></div>
+                </div>
+                <div class="fork-col">
+                  <span class="fork-label">是</span>
+                  <div class="fn fn-skip">关键缺失才追问，否则默认补全</div>
+                </div>
+              </div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-agent"><b>Generation Agent</b><span>整理视频提示词草案</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-agent"><b>Prompt Optimizer</b><span>Seedance 等模型语法适配</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-job"><b>GenerationJob（video）</b></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-canvas"><b>Canvas：video_result</b></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-gate"><b>◇ 用户确认</b></div>
+              <div class="fork">
+                <div class="fork-col">
+                  <span class="fork-label">改</span>
+                  <div class="fn fn-agent"><b>Revise（局部重跑）</b></div>
+                </div>
+                <div class="fork-col">
+                  <span class="fork-label">确认</span>
+                  <div class="fn fn-done"><b>✓ 完成</b></div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="flow-card" style="--accent: var(--blue)">
+            <div class="flow-head">
+              <span class="label">Image-to-Video</span>
+              <div>
+                <h3>上传图转视频</h3>
+                <p>让图片里的产品 / 人物 / 场景动起来。没有 asset_understanding 不能调 Provider</p>
+              </div>
+            </div>
+            <div class="flow">
+              <div class="fn fn-start"><b>用户：让这张图动起来</b></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-decision"><b>◇ 主模型有视觉能力？</b></div>
+              <div class="fork">
+                <div class="fork-col">
+                  <span class="fork-label">否</span>
+                  <div class="fn fn-agent"><b>视觉模型 / 请用户补充</b><span>不能假装看懂图片</span></div>
+                </div>
+                <div class="fork-col">
+                  <span class="fork-label">是</span>
+                  <div class="fn fn-skip">直接用主模型识别</div>
+                </div>
+              </div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-agent"><b>Image Understanding Agent</b><span>subject / visual_traits / must_keep / usage_intent</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-canvas"><b>asset_understanding</b><span>Canvas 写入</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-agent"><b>Direct Generation</b><span>引用 asset 组织图转视频动作</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-agent"><b>Prompt Optimizer</b><span>绑定 @图片N / &lt;主体N&gt;</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-job"><b>GenerationJob（video）</b></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-canvas"><b>Canvas：video_result</b></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-gate"><b>◇ 用户确认</b></div>
+              <div class="fork">
+                <div class="fork-col">
+                  <span class="fork-label">改</span>
+                  <div class="fn fn-agent"><b>Revise（局部重跑）</b></div>
+                </div>
+                <div class="fork-col">
+                  <span class="fork-label">确认</span>
+                  <div class="fn fn-done"><b>✓ 完成</b></div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="flow-card" style="--accent: var(--coral)">
+            <div class="flow-head">
+              <span class="label">Full Video Canvas</span>
+              <div>
+                <h3>完整广告视频</h3>
+                <p>产品广告 / UGC / 短剧 / 品牌片 — 多阶段创作，两次确认门</p>
+              </div>
+            </div>
+            <div class="flow">
+              <div class="fn fn-start"><b>用户：做一个产品广告视频</b></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-agent"><b>Brief Agent</b><span>目标 / 主体 / 平台 / 素材 / 卖点</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-agent"><b>Skill Selector</b><span>选主创作 Skill + 说明理由</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-decision"><b>◇ Skill 置信度低？</b></div>
+              <div class="fork">
+                <div class="fork-col">
+                  <span class="fork-label">是</span>
+                  <div class="fn fn-agent"><b>反问用户</b><span>不默认兜底成固定 Skill</span></div>
+                </div>
+                <div class="fork-col">
+                  <span class="fork-label">否</span>
+                  <div class="fn fn-skip">沿用候选 Skill</div>
+                </div>
+              </div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-agent"><b>Director 生成阶段计划</b><span>脚本分镜 / 首批视觉 / 视频生成 / 审核</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-agent"><b>Storyboard Agent</b><span>脚本 / 镜头表 / 关键帧清单</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-canvas"><b>Canvas：storyboard</b><span>脚本节点</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-gate"><b>◇ 用户确认脚本</b></div>
+              <div class="fork">
+                <div class="fork-col">
+                  <span class="fork-label">改</span>
+                  <div class="fn fn-agent"><b>局部重写镜头</b><span>只改对应镜头，不重写全部</span></div>
+                </div>
+                <div class="fork-col">
+                  <span class="fork-label">确认</span>
+                  <div class="fn fn-skip">进入生成阶段</div>
+                </div>
+              </div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-agent"><b>Prompt Optimizer</b><span>首批视觉 + 视频提示词</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-job"><b>GenerationJob（首批视觉 → video）</b></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-agent"><b>Review Agent</b><span>质量检查 / 修改建议</span></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-canvas"><b>Canvas：video_result</b></div>
+              <div class="arrow">↓</div>
+              <div class="fn fn-gate"><b>◇ 用户确认成片</b></div>
+              <div class="fork">
+                <div class="fork-col">
+                  <span class="fork-label">改</span>
+                  <div class="fn fn-agent"><b>Revise（局部重跑）</b></div>
+                </div>
+                <div class="fork-col">
+                  <span class="fork-label">确认</span>
+                  <div class="fn fn-done"><b>✓ 完成</b></div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+        </div>
+      </section>
+
+      <section id="full-canvas" aria-labelledby="full-title">
+        <div class="section-head">
+          <h2 id="full-title">Full Video Canvas 阶段链</h2>
+          <p>完整视频项目必须经过这些确认点。每个过程产物在 ChatMessage 中展示，只有图片/视频素材进入 Canvas。</p>
+        </div>
+        <div class="tabs" role="tablist" aria-label="Full Canvas 阶段">
+          <button class="tab active" type="button" data-panel="0">1 Brief</button>
+          <button class="tab" type="button" data-panel="1">2 Skill</button>
+          <button class="tab" type="button" data-panel="2">3 分镜</button>
+          <button class="tab" type="button" data-panel="3">4 首批视觉</button>
+          <button class="tab" type="button" data-panel="4">5 视频与审核</button>
+        </div>
+
+        <article class="detail-panel active" data-detail="0">
+          <div><h3>Brief 收集</h3><p>只收集启动创作必须的信息，不一次性抛长问卷。目标是把模糊需求变成可确认的最小 Brief。</p></div>
+          <div class="steps">
+            <div class="step" style="--accent: var(--gold)"><i>1</i><div><b>输入</b><span>视频目标、主体、平台/时长、素材、卖点或情绪方向。</span></div></div>
+            <div class="step" style="--accent: var(--gold)"><i>2</i><div><b>Worker</b><span>Brief Agent。</span></div></div>
+            <div class="step" style="--accent: var(--gold)"><i>3</i><div><b>输出</b><span>brief ChatMessage + missing_fields + assumptions。</span></div></div>
+          </div>
+        </article>
+
+        <article class="detail-panel" data-detail="1">
+          <div><h3>Skill 匹配</h3><p>Skill Selector 从用户指定、auto 候选池或 Brief 推断中选择主 Skill。低置信度时反问，不默认兜底成固定 Skill。</p></div>
+          <div class="steps">
+            <div class="step" style="--accent: var(--coral)"><i>1</i><div><b>forced_skill_id</b><span>用户点 Use，本 turn 最高优先级。</span></div></div>
+            <div class="step" style="--accent: var(--coral)"><i>2</i><div><b>auto 候选池</b><span>后端自读我的 Skills 中 auto=true 的 Skill。</span></div></div>
+            <div class="step" style="--accent: var(--coral)"><i>3</i><div><b>输出</b><span>skill_recommendation ChatMessage，等待用户确认。</span></div></div>
+          </div>
+        </article>
+
+        <article class="detail-panel" data-detail="2">
+          <div><h3>阶段计划与脚本分镜</h3><p>先完成内容结构，不直接烧生成资源。用户只改局部时，只重写对应镜头。</p></div>
+          <div class="steps">
+            <div class="step" style="--accent: var(--blue)"><i>1</i><div><b>Director</b><span>生成阶段计划：脚本分镜、首批视觉、视频生成、审核修改。</span></div></div>
+            <div class="step" style="--accent: var(--blue)"><i>2</i><div><b>Storyboard Agent</b><span>脚本、分镜表、关键帧清单、每镜头提示方向。</span></div></div>
+            <div class="step" style="--accent: var(--blue)"><i>3</i><div><b>确认门</b><span>用户确认脚本/分镜后，才进入视觉生成。</span></div></div>
+          </div>
+        </article>
+
+        <article class="detail-panel" data-detail="3">
+          <div><h3>首批视觉</h3><p>先生成最关键的视觉锚点，而不是直接生成整条视频。如果依赖上传图，必须先完成图片理解。</p></div>
+          <div class="steps">
+            <div class="step" style="--accent: var(--green)"><i>1</i><div><b>Image Understanding</b><span>如有图，先得到 asset_understanding。</span></div></div>
+            <div class="step" style="--accent: var(--green)"><i>2</i><div><b>Image Prompt + Optimizer</b><span>生成可执行的首批视觉提示词。</span></div></div>
+            <div class="step" style="--accent: var(--green)"><i>3</i><div><b>Canvas</b><span>写入 image 节点，ready 后等待确认。</span></div></div>
+          </div>
+        </article>
+
+        <article class="detail-panel" data-detail="4">
+          <div><h3>视频生成与审核</h3><p>基于已确认脚本、分镜和视觉锚点生成视频，再由 Review Agent 做质量检查和修改建议。</p></div>
+          <div class="steps">
+            <div class="step" style="--accent: var(--violet)"><i>1</i><div><b>Generation Agent</b><span>组织视频任务，Seedance 语法只做模型适配。</span></div></div>
+            <div class="step" style="--accent: var(--violet)"><i>2</i><div><b>GenerationJob</b><span>创建 video job，完成后绑定 video asset。</span></div></div>
+            <div class="step" style="--accent: var(--violet)"><i>3</i><div><b>Review Agent</b><span>检查是否符合 Brief、Skill、镜头结构和质量要求。</span></div></div>
+          </div>
+        </article>
+      </section>
+
+      <section id="skills" aria-labelledby="skills-title">
+        <div class="section-head">
+          <h2 id="skills-title">Skill 如何被调用</h2>
+          <p>Skill 不是提示词模板。它决定内容结构、表达方式和广告策略；Prompt Optimizer 只把已确认内容翻译成模型语法。</p>
+        </div>
+        <div class="skill-layout">
+          <div class="skill-thesis">
+            <h3>Skill Selector 的输入来源</h3>
+            <p>Agent 在 Skill 匹配阶段按优先级选择：用户手动 Use 最高，auto 候选池其次，最后才由 Brief 推断。无法确定时必须反问。</p>
+            <div class="source-list">
+              <div class="source"><b>forced_skill_id</b><span>用户点 Use，本 turn 必须使用，不改变 auto 状态。</span></div>
+              <div class="source"><b>auto 候选池</b><span>后端从我的 Skills 中读取 auto=true，作为可选范围。</span></div>
+              <div class="source"><b>Brief 推断</b><span>没有指定时，根据目标、品类、平台、卖点匹配。</span></div>
+              <div class="source"><b>用户确认</b><span>推荐 Skill 后必须允许用户改选或调整方向。</span></div>
+            </div>
+          </div>
+          <div class="skill-types">
+            <article class="skill-type" style="--accent: var(--gold)">
+              <h3>主创作 Skill</h3>
+              <p>决定广告怎么讲、怎么卖，用什么结构承接 Brief。</p>
+              <div class="chips"><span class="chip">UGC</span><span class="chip">TVC</span><span class="chip">短剧</span><span class="chip">测评</span></div>
+            </article>
+            <article class="skill-type" style="--accent: var(--green)">
+              <h3>行业 Skill</h3>
+              <p>按品类补足画面重点、合规边界和用户语境。</p>
+              <div class="chips"><span class="chip">美妆</span><span class="chip">3C</span><span class="chip">食品</span><span class="chip">家居</span></div>
+            </article>
+            <article class="skill-type" style="--accent: var(--blue)">
+              <h3>镜头 Skill</h3>
+              <p>在主 Skill 之外补强镜头运动、转场、构图和导演语言。</p>
+              <div class="chips"><span class="chip">Camera Movement</span><span class="chip">Cinematic Technique</span><span class="chip">AI Director</span></div>
+            </article>
+            <article class="skill-type" style="--accent: var(--coral)">
+              <h3>审核 Skill</h3>
+              <p>用于生成前风险评估、生成后故障分析和优化建议。</p>
+              <div class="chips"><span class="chip">Review Expert</span><span class="chip">Content Planner</span><span class="chip">Optimization</span></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="files" aria-labelledby="files-title">
+        <div class="section-head">
+          <h2 id="files-title">文件树与路由依据</h2>
+          <p>这套工作流不是单个 prompt，而是一组 md 文件协作。Director 先读路由和状态规则，再按命中的 workflow 读取对应 worker、skill、reference 和测试场景。</p>
+        </div>
+
+        <div class="file-system">
+          <div class="file-tree" aria-label="工作流文件树">
+            <strong>blue-whale-agent-workspace</strong>
+            <div class="tree-line folder">├─ CLAUDE.md</div>
+            <div class="tree-line">│  └─ workspace 顶层入口(路标 → director_agent.md / skill/SKILL.md)</div>
+            <div class="tree-line folder">├─ skill/</div>
+            <div class="tree-line hot">│  ├─ workflows/</div>
+            <div class="tree-line">│  │  ├─ direct_generation.md</div>
+            <div class="tree-line">│  │  ├─ image_generation_prompt.md</div>
+            <div class="tree-line">│  │  ├─ image_understanding.md</div>
+            <div class="tree-line">│  │  └─ video_agent_canvas.md</div>
+            <div class="tree-line hot">│  ├─ rules/</div>
+            <div class="tree-line">│  │  ├─ generation_route_decision.md</div>
+            <div class="tree-line">│  │  ├─ confirmation_gate.md</div>
+            <div class="tree-line">│  │  ├─ canvas_state_rules.md</div>
+            <div class="tree-line">│  │  ├─ skill_generation_priority.md</div>
+            <div class="tree-line">│  │  ├─ multimodal_capability.md</div>
+            <div class="tree-line">│  │  ├─ prompt_optimization_chain.md</div>
+            <div class="tree-line">│  │  ├─ product_switch_p0.md</div>
+            <div class="tree-line">│  │  ├─ progressive_disclosure.md</div>
+            <div class="tree-line">│  │  └─ visible_reasoning.md</div>
+            <div class="tree-line hot">│  ├─ workers/</div>
+            <div class="tree-line">│  │  ├─ director_agent.md</div>
+            <div class="tree-line">│  │  ├─ brief_agent.md</div>
+            <div class="tree-line">│  │  ├─ skill_selector.md</div>
+            <div class="tree-line">│  │  ├─ storyboard_agent.md</div>
+            <div class="tree-line">│  │  ├─ image_understanding_agent.md</div>
+            <div class="tree-line">│  │  ├─ image_prompt_agent.md</div>
+            <div class="tree-line">│  │  ├─ prompt_optimizer_agent.md</div>
+            <div class="tree-line">│  │  ├─ generation_agent.md</div>
+            <div class="tree-line">│  │  └─ review_agent.md</div>
+            <div class="tree-line hot">│  ├─ library/</div>
+            <div class="tree-line">│  │  ├─ _index.md</div>
+            <div class="tree-line">│  │  └─ raw/cn01...cn60.md</div>
+            <div class="tree-line hot">│  ├─ references/</div>
+            <div class="tree-line">│  │  ├─ backend_implementation_contract.md</div>
+            <div class="tree-line">│  │  ├─ frontend_canvas_interaction_contract.md</div>
+            <div class="tree-line">│  │  ├─ seedance_prompt_optimizer.md</div>
+            <div class="tree-line">│  │  ├─ output_contract.md</div>
+            <div class="tree-line">│  │  ├─ image_prompt_contract.md</div>
+            <div class="tree-line">│  │  ├─ blue_whale_architecture.md</div>
+            <div class="tree-line">│  │  ├─ worker_authoring_standard.md</div>
+            <div class="tree-line">│  │  └─ foundry_style_orchestration_notes.md</div>
+            <div class="tree-line">│  └─ memory/</div>
+            <div class="tree-line folder">└─ tests/scenarios/</div>
+            <div class="tree-line">   ├─ acceptance_criteria.md</div>
+            <div class="tree-line">   ├─ route_decision_scenarios.md</div>
+            <div class="tree-line">   ├─ confirmation_gate_scenarios.md</div>
+            <div class="tree-line">   ├─ multimodal_scenarios.md</div>
+            <div class="tree-line">   ├─ prompt_optimization_scenarios.md</div>
+            <div class="tree-line">   └─ product_switch_p0_scenarios.md</div>
+          </div>
+
+          <div class="file-notes">
+            <div class="file-note"><b>workers/director_agent.md</b><span>主 Agent 唯一权威。定义 Director / CEO 的职责边界 + 运行时决策:识别意图、状态机、选择 workflow、调度 worker、控制确认门,不直接生成最终资产。</span></div>
+            <div class="file-note"><b>workflows/*.md</b><span>被路由命中后读取。它们定义每条链路的阶段、输入、输出、确认点和阻断条件。</span></div>
+            <div class="file-note"><b>rules/*.md</b><span>全局硬规则。Director 每轮先读状态和路由规则；确认、图片理解、Skill 优先级、Prompt 优化、产品切换都由这里约束。</span></div>
+            <div class="file-note"><b>workers/*.md</b><span>具体子 Agent 的角色说明。只有命中的 workflow 才调对应 worker，例如完整广告才调 Brief / Skill Selector / Storyboard。</span></div>
+            <div class="file-note"><b>library/_index.md</b><span>Skill Selector 的候选索引。先按品类、目标、表达方式筛 1-3 个候选，再读取 raw 下的完整 Skill。</span></div>
+            <div class="file-note"><b>references/*.md</b><span>工程和模型契约。后端、前端、输出格式、Seedance 语法、图片提示词格式都在这里对齐。</span></div>
+            <div class="file-note"><b>tests/scenarios/*.md</b><span>验收场景。把“路由是否正确、确认门是否阻断、图片理解是否前置、Prompt 是否泄露”转成可检查断言。</span></div>
+          </div>
+        </div>
+
+        <div class="route-timing">
+          <article class="timing-card">
+            <h3>第一轮必读</h3>
+            <ul>
+              <li>workers/director_agent.md</li>
+              <li>rules/canvas_state_rules.md</li>
+              <li>rules/generation_route_decision.md</li>
+              <li>rules/confirmation_gate.md</li>
+              <li>有产品切换语义时读 rules/product_switch_p0.md</li>
+            </ul>
+          </article>
+          <article class="timing-card">
+            <h3>路由命中后读</h3>
+            <ul>
+              <li>Direct Image → image_generation_prompt.md</li>
+              <li>Direct Video → direct_generation.md</li>
+              <li>Image-to-Video → image_understanding.md + direct_generation.md</li>
+              <li>Full Canvas → video_agent_canvas.md</li>
+            </ul>
+          </article>
+          <article class="timing-card">
+            <h3>Skill 调用时读</h3>
+            <ul>
+              <li>先读 library/_index.md 找候选</li>
+              <li>再读 raw/cnXX 完整 Skill</li>
+              <li>生成前读 prompt / Seedance reference</li>
+              <li>落地时按 backend / frontend contract</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="data" aria-labelledby="data-title">
+        <div class="section-head">
+          <h2 id="data-title">每一步产物落到哪里</h2>
+          <p>这部分是前后端最容易混乱的地方：过程内容不进画布，任务不是节点，素材节点只表示图片或视频事实。</p>
+        </div>
+        <div class="data-map">
+          <article class="data-card" style="--accent: var(--gold)">
+            <span class="tag">ChatMessage</span>
+            <h3>过程内容</h3>
+            <ul>
+              <li>visible_reasoning</li>
+              <li>brief / skill_recommendation</li>
+              <li>asset_understanding</li>
+              <li>stage_plan / storyboard / review</li>
+              <li>optimized_prompt_preview</li>
+            </ul>
+          </article>
+          <article class="data-card" style="--accent: var(--green)">
+            <span class="tag">Canvas Node</span>
+            <h3>素材节点</h3>
+            <ul>
+              <li>type 只能是 image / video</li>
+              <li>status: queued / generating / ready / failed</li>
+              <li>绑定 stage_id 和 asset_ref</li>
+              <li>ready 后才能确认</li>
+            </ul>
+          </article>
+          <article class="data-card" style="--accent: var(--blue)">
+            <span class="tag">GenerationJob</span>
+            <h3>生成任务</h3>
+            <ul>
+              <li>承载 prompt / model / params</li>
+              <li>queued → processing → succeeded / failed</li>
+              <li>输出 Asset</li>
+              <li>任务不作为 canvas node</li>
+            </ul>
+          </article>
+          <article class="data-card" style="--accent: var(--coral)">
+            <span class="tag">Workflow Run</span>
+            <h3>阶段状态</h3>
+            <ul>
+              <li>current_stage_id</li>
+              <li>selected_skill</li>
+              <li>brief / stage_plan</li>
+              <li>awaiting_confirm / completed / failed</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="rules" aria-labelledby="rules-title">
+        <div class="section-head">
+          <h2 id="rules-title">压缩后的硬规则</h2>
+          <p>这些是实现时不能破的护栏。它们决定系统是否稳定、是否可控、是否不会泄露内部信息。</p>
+        </div>
+        <div class="rules">
+          <article class="rule" style="--accent: var(--gold)"><span class="tag">Canvas</span><h3>画布只放素材</h3><p>Brief、Skill、分镜、Review、思考过程都进对话消息，Canvas 只展示图片/视频节点。</p></article>
+          <article class="rule" style="--accent: var(--green)"><span class="tag">Gate</span><h3>没有 ready 不能确认</h3><p>用户明确确认 + 当前阶段有 ready 节点，才允许推进。</p></article>
+          <article class="rule" style="--accent: var(--blue)"><span class="tag">Weak continue</span><h3>“继续”不自动推进</h3><p>继续、好了、下一步属于弱继续，只能二次确认。</p></article>
+          <article class="rule" style="--accent: var(--coral)"><span class="tag">Vision</span><h3>上传图必须先理解</h3><p>没有 asset_understanding，不能做图生图或图转视频。</p></article>
+          <article class="rule" style="--accent: var(--violet)"><span class="tag">Prompt</span><h3>内部 Prompt 不泄露</h3><p>只展示 optimized_prompt_preview，不展示原始 prompt、trace_event、worker 名或工具参数。</p></article>
+          <article class="rule" style="--accent: var(--gold)"><span class="tag">Skill</span><h3>Skill 不被语法覆盖</h3><p>Seedance / 生图规则只做模型适配，不能改变已确认的创意结构。</p></article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const tabs = document.querySelectorAll(".tab");
+    const panels = document.querySelectorAll(".detail-panel");
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const index = tab.dataset.panel;
+        tabs.forEach((item) => item.classList.toggle("active", item === tab));
+        panels.forEach((panel) => panel.classList.toggle("active", panel.dataset.detail === index));
+      });
+    });
+  </script>
+</body>
+</html>
