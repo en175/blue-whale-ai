@@ -29,7 +29,7 @@ flowchart TD
     SW -- product_switch --> A3[product_switch_p0 5 类]
     SW -- new_task --> A4["按 suggested_route 路由 workflow"]
     SW -- consult --> A5[直接回答]
-    SW -- revise_canvas --> A6[局部 revise]
+    SW -- revise_canvas --> A6[revise_canvas 局部修改]
     SW -- confirm_pending --> CG
     SW -- clarify --> A8[追问一句]
 
