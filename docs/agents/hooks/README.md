@@ -12,6 +12,7 @@
 |---|---|---|---|---|
 | `block-dangerous-git.sh` | `Bash` | `PreToolUse` | 拦裸 `--force`、`reset --hard`、`clean -f`、`branch -D`、`checkout .`、`restore .` | CLAUDE.md「提交与审查」 |
 | `block-push-to-master.sh` | `Bash` | `PreToolUse` | 拦任何对 `master`/`main` 的 push（显式 + 隐式） | [ADR-0003](../../adr/0003-no-direct-push-to-master.md) |
+| `confirm-release-action.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` / `mcp__gitee-ent__create_enterprise_repo_release` | `PreToolUse` | `git push`、发布/清理脚本、建 PR、合并 PR、创建 release 前触发用户确认；非 draft PR 直接拦截 | CLAUDE.md「发布动作必须先获用户授权」 |
 | `block-squash-merge.sh` | `mcp__gitee-ent__merge_enterprise_pull` | `PreToolUse` | 拦 `merge_method=squash`/`rebase`，强制走 `merge` | CLAUDE.md「合并方法」 |
 | `block-issue-without-repo.sh` | `mcp__gitee-ent__create_enterprise_issue` / `mcp__gitee-ent__update_enterprise_issue` | `PreToolUse` | 拦 `project_id` 缺失/为 0；拦子 issue 未带 `project_id/program_id`，强制仓库可见 | [ADR-0007](../../adr/0007-issue-must-link-repo.md) / [ADR-0008](../../adr/0008-sub-issues-must-inherit-repo.md) |
 
@@ -23,7 +24,7 @@
 
 ### 1. 写脚本到 `.claude/hooks/<name>.sh`
 
-- **零依赖**：用 `grep`/`sed` 解析 JSON，禁止引 `jq` / `python3 -c` 复杂表达式（部分 hook 在 `python3` 不可用环境要兜底）。
+- **解析策略**：普通校验 hook 可用 `grep`/`sed` 做轻量解析；发布、删除、强推、合并这类安全敏感 hook 必须使用真实 JSON 解析和 shell token 解析，优先复用 `.claude/hooks/lib/pretool.py`，避免转义引号或 `git -C ...` 这类形式绕过。
 - **stdin 读 JSON**：PreToolUse 会把 `{tool_input, tool_name, ...}` 喂到 stdin，先 `INPUT=$(cat)`，再提取 `tool_input.command` 或 `tool_input.merge_method` 等。
 - **退出码语义**：
   - `exit 0` = 放行
@@ -97,7 +98,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 ### 测试边界（seam）
 
-4 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stderr** 黑盒。夹具不测内部实现，只测这条边界。唯一外部依赖 `git rev-parse`（push-to-master / dangerous-git 的「无显式 refspec → 查当前分支」分支用）由夹具用 PATH 注入的临时 fake git 隔离（响应 `rev-parse --abbrev-ref HEAD` → `$FAKE_BRANCH`），不碰真实仓库。
+5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现，只测这条边界。`confirm-release-action.sh` 的确认型用例断言 stdout 含 `permissionDecision":"ask"`；阻断型用例仍断言 exit code + stderr。唯一外部依赖 `git rev-parse`（push-to-master / dangerous-git 的「无显式 refspec → 查当前分支」分支用）由夹具用 PATH 注入的临时 fake git 隔离（响应 `rev-parse --abbrev-ref HEAD` → `$FAKE_BRANCH`），不碰真实仓库。
 
 ### 字段类型以 MCP schema 为准（核心教训）
 
@@ -123,7 +124,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 ## 变更检查清单（改 hooks/ 前必过）
 
-- [ ] 新脚本遵循零依赖、stdin 读 JSON、`exit 0/2` 语义
+- [ ] 新脚本遵循解析策略、stdin 读 JSON、`exit 0/2` 语义
 - [ ] `chmod +x` 已执行
 - [ ] `.claude/settings.json` 同步更新（matcher + command 路径）
 - [ ] 至少 1 个**应当被拦**的测试用例 + 1 个**应当放行**的测试用例跑过
@@ -139,7 +140,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 ## MCP 合并后清理源分支 SOP
 
-> 适用：用 `mcp__gitee-ent__merge_enterprise_pull` 自审合（低风险 PR）后。
+> 适用：用户明确授权后，用 `mcp__gitee-ent__merge_enterprise_pull` 合并低风险 PR 后。
 > 来源：实战踩坑 —— PR #7 合并后源分支未自动删除。
 
 ### 坑点

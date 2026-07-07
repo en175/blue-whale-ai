@@ -76,7 +76,7 @@ scripts/ensure-graphify-worktree.sh
 
 ## 发布分支
 
-开发完成、准备开 PR 时，在 task worktree 内执行：
+开发完成后，Agent 先报告本地验证结果和待发布分支，等待用户明确授权发布审查包。获得授权后，在 task worktree 内执行：
 
 ```bash
 scripts/publish-task-branch.sh
@@ -89,7 +89,7 @@ scripts/publish-task-branch.sh
 - 当前分支必须包含最新 `origin/master`。
 - 推送当前分支到远程。
 
-脚本不创建 Gitee PR。推送后按 `.gitee/PULL_REQUEST_TEMPLATE.md` 在 Gitee 创建 PR，目标分支为 `master`。
+脚本不创建 Gitee PR。推送后按 `.gitee/PULL_REQUEST_TEMPLATE.md` 在 Gitee 创建 **draft PR**，目标分支为 `master`。创建 PR 后必须停下来交给开发者审查；发布审查包授权不覆盖合并。
 
 PR 未合并前，本地分支、远程源分支和 task worktree 都保留，以便处理审查反馈。
 
