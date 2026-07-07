@@ -30,6 +30,12 @@ echo ""
 # ------------------------------------------------------------
 chmod +x .githooks/* .claude/hooks/*.sh scripts/*.sh 2>/dev/null || true
 echo "✅ hook / workflow 脚本权限已就绪"
+mode_changes="$(git diff --summary -- .githooks .claude/hooks scripts | sed -n '/mode change/p' || true)"
+if [ -n "$mode_changes" ]; then
+  echo "⚠️  初始化后发现可执行权限未提交到仓库，当前工作区会显示 mode change："
+  printf '%s\n' "$mode_changes" | sed 's/^/   /'
+  echo "   请在 chore 分支提交这些权限位，避免后续初始化反复产生 dirty 状态。"
+fi
 echo ""
 
 # ------------------------------------------------------------
@@ -51,6 +57,6 @@ echo ""
 echo "=== 后续步骤（按需执行）==="
 echo "  export GITEE_ACCESS_TOKEN=<你的 Gitee 私人令牌>   # 写进 ~/.zshrc 持久化"
 echo "  cd blue_whale_web && npm install                  # 前端依赖（首次必装）"
-echo "  cd blue_whale_server && pip install -r requirements.txt  # 后端依赖（首次必装）"
+echo "  cd blue_whale_server && pip install -r requirements-dev.txt  # 后端开发依赖（首次必装）"
 echo ""
 echo "=== 完成。提交/推送时 hook 自动生效 ==="
