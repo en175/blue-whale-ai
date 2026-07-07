@@ -152,6 +152,17 @@ remove_publish_marker() {
   rm -f "$(publish_marker_path)"
 }
 
+assert_stdout_not_has() {
+  local needle="$1"; shift
+  local label="$1"; shift
+  if printf '%s' "$RUN_STDOUT" | grep -qF -- "$needle"; then
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] stdout 不应含 \"${needle}\" 实际=${RUN_STDOUT}")
+  else
+    PASS=$((PASS + 1))
+  fi
+}
+
 assert_file_exists() {
   local path="$1"; shift
   local label="$1"; shift
@@ -427,51 +438,57 @@ assert_exit 0 "release: 复合验证命令放行"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"cd /Users/jj.reno/Blue-Whale\nscripts/cleanup-task-worktree.sh 2>&1; echo \"exit=$?\"\necho \"---\"\nscripts/ensure-graphify-worktree.sh 2>&1; echo \"exit=$?\""}}'
 assert_exit 0 "release: 非发布验证复合命令放行"
 
-# 创建合法 draft PR → 只校验形态，不二次确认
+# 创建合法普通 PR（缺 draft）→ 只校验形态，不二次确认
 write_publish_marker "feature/x"
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"true","title":"test"}}'
-assert_exit 0 "release: draft PR 放行不二次确认"
-assert_file_missing "$(publish_marker_path)" "release: draft PR 消费发布审查包标记"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
+assert_exit 0 "release: 普通 PR 放行不二次确认"
+assert_stdout_not_has '"permissionDecision":"ask"' "release: 普通 PR 不二次确认"
+assert_file_missing "$(publish_marker_path)" "release: 普通 PR 消费发布审查包标记"
 
-# 直接创建合法形态 draft PR 但缺少发布审查包标记 → 阻断
+# 创建显式非 draft PR → 只校验形态，不二次确认
+write_publish_marker "feature/x"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"false","title":"test"}}'
+assert_exit 0 "release: 非 draft PR 放行不二次确认"
+assert_stdout_not_has '"permissionDecision":"ask"' "release: 非 draft PR 不二次确认"
+assert_file_missing "$(publish_marker_path)" "release: 非 draft PR 消费发布审查包标记"
+
+# 直接创建合法形态普通 PR 但缺少发布审查包标记 → 阻断
 remove_publish_marker
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"true","title":"test"}}'
-assert_exit 2 "release: draft PR 缺发布标记拦截"
-assert_stderr_has "publish-review-package.sh --user-authorized" "release: draft PR 缺发布标记提示标准入口"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
+assert_exit 2 "release: 普通 PR 缺发布标记拦截"
+assert_stderr_has "publish-review-package.sh --user-authorized" "release: 普通 PR 缺发布标记提示标准入口"
 
 # 发布标记分支与 PR source_branch 不匹配 → 阻断
 write_publish_marker "feature/other"
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"true","title":"test"}}'
-assert_exit 2 "release: draft PR 分支与发布标记不匹配"
-assert_stderr_has "不匹配" "release: draft PR 分支不匹配提示"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
+assert_exit 2 "release: 普通 PR 分支与发布标记不匹配"
+assert_stderr_has "不匹配" "release: 普通 PR 分支不匹配提示"
 remove_publish_marker
 
 # 过期发布标记 → 阻断并消费标记
 write_publish_marker "feature/x" "master" "1"
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"true","title":"test"}}'
-assert_exit 2 "release: draft PR 发布标记过期"
-assert_stderr_has "已过期" "release: draft PR 发布标记过期提示"
-assert_file_missing "$(publish_marker_path)" "release: draft PR 过期标记被清理"
-
-# 创建非 draft PR → 阻断
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"false","title":"test"}}'
-assert_exit 2 "release: 非 draft PR 拦截"
-assert_stderr_has "draft=true" "release: 非 draft PR 提示 draft=true"
-
-# 创建 PR 缺 draft → 阻断
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
-assert_exit 2 "release: 缺 draft PR 拦截"
+assert_exit 2 "release: 普通 PR 发布标记过期"
+assert_stderr_has "已过期" "release: 普通 PR 发布标记过期提示"
+assert_file_missing "$(publish_marker_path)" "release: 普通 PR 过期标记被清理"
+
+# 创建 draft PR → 阻断
+write_publish_marker "feature/x"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"true","title":"test"}}'
+assert_exit 2 "release: draft PR 拦截"
+assert_stderr_has "不使用 draft PR" "release: draft PR 提示普通 PR"
+remove_publish_marker
 
 # 创建 PR 缺 target_branch → 阻断
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","draft":"true","title":"test"}}'
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","title":"test"}}'
 assert_exit 2 "release: 缺 target_branch PR 拦截"
 
 # 创建 PR 缺 source_branch → 阻断
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"target_branch":"master","draft":"true","title":"test"}}'
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"target_branch":"master","title":"test"}}'
 assert_exit 2 "release: 缺 source_branch PR 拦截"
 
 # 创建非 master 目标 PR → 阻断
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"develop","draft":"true","title":"test"}}'
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"develop","draft":"false","title":"test"}}'
 assert_exit 2 "release: 非 master 目标 PR 拦截"
 
 # 合并 PR → 单独触发用户确认
@@ -671,8 +688,9 @@ assert_exit 0 "codex: 普通 update issue 放行"
 run_command_hook "$CODEX_ISSUE_CMD" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_input":{"issue_id":"IJZ74J","parent_id":33553306}}'
 assert_exit 2 "codex: update 子 issue 缺归属拦截"
 
-run_command_hook "$CODEX_RELEASE_CMD" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"false","title":"test"}}'
-assert_exit 2 "codex: 非 draft PR 包装命令拦截"
+run_command_hook "$CODEX_RELEASE_CMD" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"true","title":"test"}}'
+assert_exit 2 "codex: draft PR 包装命令拦截"
+assert_stderr_has "不使用 draft PR" "codex: draft PR 包装命令提示普通 PR"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"git push -u origin feature/x"}}'
 assert_exit 2 "codex: 直接 git push 包装命令拦截"

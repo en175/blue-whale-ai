@@ -12,7 +12,7 @@
 # 规则：
 #   - 发布审查包只允许通过标准入口触发，并在入口处 ask 一次。
 #   - 直接 git push 是绕过标准入口，直接阻断。
-#   - 创建 PR 必须消费标准入口写入的短期标记，并校验 target=master/draft/source_branch。
+#   - 创建 PR 必须消费标准入口写入的短期标记，并校验 target=master/source_branch/no draft。
 #   - 发布审查包授权不覆盖合并；合并仍会单独触发确认。
 #
 # 输出契约：
@@ -45,9 +45,9 @@ block() {
 BLOCKED: ${reason}
 
 本项目发布动作必须遵守：
-- 发布审查包 = 推送当前工单分支 + 创建指向 master 的 draft PR
+- 发布审查包 = 推送当前工单分支 + 创建指向 master 的 PR
 - 发布审查包必须使用 scripts/publish-review-package.sh --user-authorized
-- 创建 PR 必须传 draft=true
+- 创建 PR 不使用 draft=true
 - 合并 PR 必须另获用户授权，不能复用发布审查包授权
 
 详见 CLAUDE.md「发布动作必须先获用户授权」。
@@ -76,7 +76,7 @@ validate_publish_marker() {
   marker_created_at="$(read_publish_marker created_at || true)"
 
   if [ -z "$marker_branch" ] || [ -z "$marker_target" ] || [ -z "$marker_created_at" ]; then
-    block "创建 draft PR 前必须先通过 scripts/publish-review-package.sh --user-authorized 推送当前工单分支。"
+    block "创建 PR 前必须先通过 scripts/publish-review-package.sh --user-authorized 推送当前工单分支。"
   fi
 
   now="$(date +%s)"
@@ -109,7 +109,7 @@ if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes publ
   if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes publish-review-package.sh --user-authorized; then
     block "发布审查包入口缺少 --user-authorized。必须先获得用户明确授权。"
   fi
-  ask_permission "确认用户已授权发布审查包：推送当前工单分支并创建 target=master 的 draft PR。"
+  ask_permission "确认用户已授权发布审查包：推送当前工单分支并创建 target=master 的 PR。"
 fi
 
 # Bash: cleanup-task-worktree.sh 不在这里 ask。脚本自身校验 PR 已进 origin/master、工作区干净、路径正确。
@@ -121,12 +121,11 @@ if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
   SOURCE_BRANCH=$(extract_json_value "source_branch")
 
   case "$DRAFT" in
-    true|TRUE|True|1) ;;
-    *) block "创建 Gitee PR 时缺少 draft=true，或 draft=false。" ;;
+    true|TRUE|True|1) block "本项目不使用 draft PR；创建 Gitee PR 时请省略 draft 字段或传 draft=false。" ;;
   esac
 
   if [ "$TARGET_BRANCH" != "master" ]; then
-    block "发布审查包只允许创建指向 master 的 draft PR。"
+    block "发布审查包只允许创建指向 master 的 PR。"
   fi
 
   case "$SOURCE_BRANCH" in
