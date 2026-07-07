@@ -1084,6 +1084,85 @@
       margin-top: 28px;
     }
 
+    .decision-tree .flow {
+      gap: 2px;
+    }
+
+    .decision-tree .fn {
+      width: min(100%, 342px);
+    }
+
+    .decision-tree .fork {
+      align-items: start;
+      gap: 22px;
+      margin: 10px 0 0;
+      max-width: 660px !important;
+    }
+
+    .decision-tree .fork-col {
+      align-items: stretch;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .decision-tree .fork-label {
+      align-self: center;
+      min-height: 16px;
+      margin-bottom: 2px;
+      text-align: center;
+    }
+
+    .decision-tree .fork-col > .fn,
+    .decision-tree .fork-col > .fn-agent,
+    .decision-tree .fork-col > .fn-decision,
+    .decision-tree .fork-col > .fn-job {
+      width: 100%;
+      margin: 0;
+    }
+
+    .decision-tree .fork-col > .arrow {
+      align-self: center;
+      margin: 4px 0;
+    }
+
+    .decision-tree .fork .fork {
+      gap: 12px;
+      margin-top: 6px;
+      max-width: none !important;
+    }
+
+    .decision-tree .fork .fork .fork-col {
+      padding: 10px;
+      border-radius: 16px;
+      background: color-mix(in oklch, var(--paper-2) 70%, white);
+      outline: 1px solid rgba(36, 42, 54, 0.06);
+    }
+
+    .decision-tree .fn-skip {
+      width: 100%;
+      margin: 0;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--muted);
+      text-align: left;
+      line-height: 1.35;
+    }
+
+    .decision-tree .tiebreak-results {
+      display: grid;
+      gap: 6px;
+      width: 100%;
+    }
+
+    @media (max-width: 720px) {
+      .decision-tree .fork,
+      .decision-tree .fork .fork {
+        grid-template-columns: 1fr;
+        max-width: 420px !important;
+      }
+    }
+
     @media (max-width: 720px) {
       .fork { grid-template-columns: 1fr; gap: 8px; }
       .fn { min-width: 0; max-width: none; width: 100%; }
@@ -1138,6 +1217,7 @@
               <div class="intent"><b>铁闸 · generation_failed</b><span>失败先恢复，不盲目重试。</span></div>
               <div class="intent"><b>铁闸 · confirm_pending</b><span>确认门四分类，advance_stage 后端铁闸。</span></div>
               <div class="intent"><b>L1 · new_task</b><span>按 suggested_route 进轻量编排或 Full Canvas。</span></div>
+              <div class="intent"><b>L1 · prompt_only</b><span>只优化提示词，不启 Job、不写 Canvas。</span></div>
               <div class="intent"><b>L1 · product_switch</b><span>换产品 / Skill，读 product_switch_p0。</span></div>
               <div class="intent"><b>L1 · revise_canvas</b><span>局部改画布，不覆盖原节点。</span></div>
               <div class="intent"><b>L1 · consult</b><span>咨询直接答，不启 Job。</span></div>
@@ -1147,7 +1227,7 @@
           <div class="hero-flow">
             <div class="box"><strong>① 后端算 context</strong><p>读 canvas / stage / nodes / job 算硬事实，铁闸先判，零 LLM。</p></div>
             <div class="box"><strong>② L1 给软建议</strong><p>haiku 级 classifier 产 decision_branch，主 Agent 可推翻。</p></div>
-            <div class="box"><strong>③ 主 Agent switch</strong><p>8 枚举收口，铁闸不可推翻，L1 可推翻。</p></div>
+            <div class="box"><strong>③ 主 Agent switch</strong><p>9 枚举收口，铁闸不可推翻，L1 可推翻。</p></div>
           </div>
         </div>
       </section>
@@ -1158,42 +1238,8 @@
           <p>判定分层后，主 Agent 不再自读状态、自识别意图——后端算 <code>decision_context</code> 硬事实，L1 给 <code>decision_branch</code> 软建议，主 Agent 只在 switch 里收口、守住确认门与 advance_stage 铁闸。</p>
         </div>
 
-        <article class="flow-card" style="--accent: var(--blue); max-width: 720px; margin: 0 auto 22px;">
-          <div class="flow-head">
-            <span class="label">Turn 主流程</span>
-            <div>
-              <h3>一轮请求的判定主干</h3>
-              <p>判定分层后的工程顺序：后端算硬事实 → L1 给软建议 → 主 Agent switch 收口 → 铁闸或意图出口。下行↓是推进，◇是判断收口；下层卡片拆三层分工与 8 个 branch 细节。</p>
-            </div>
-          </div>
-          <div class="flow">
-            <div class="fn fn-start"><b>用户新一轮消息</b><span>+ canvas / stage / nodes / job</span></div>
-            <div class="arrow">↓</div>
-            <div class="fn fn-job"><b>① 后端代码 · 算 decision_context</b><span>读状态算硬事实，零 LLM · 铁闸在此先判</span></div>
-            <div class="arrow">↓</div>
-            <div class="fn fn-agent" style="--accent: var(--violet)"><b>② L1 classifier · 给软建议</b><span>haiku 级 → decision_branch，可被主 Agent 推翻</span></div>
-            <div class="arrow">↓</div>
-            <div class="fn fn-decision"><b>③ 主 Agent · switch(decision_branch) 收口</b><span>8 枚举之一</span></div>
-            <div class="arrow">↓</div>
-            <div class="fork">
-              <div class="fork-col" style="--accent: var(--blue)">
-                <span class="fork-label">硬状态铁闸 · 不可推翻</span>
-                <div class="fn fn-job"><b>generation_in_progress</b><span>禁重入，等 job</span></div>
-                <div class="fn fn-job"><b>generation_failed</b><span>给恢复路径</span></div>
-                <div class="fn fn-job"><b>confirm_pending</b><span>has_ready_node + 确认 → advance_stage</span></div>
-              </div>
-              <div class="fork-col" style="--accent: var(--gold)">
-                <span class="fork-label">L1 意图 · 可推翻</span>
-                <div class="fn fn-agent"><b>product_switch · revise_canvas</b><span>切 Skill / 改画布</span></div>
-                <div class="fn fn-agent"><b>new_task · consult · clarify</b><span>新建 / 答复 / 澄清</span></div>
-              </div>
-            </div>
-            <div class="arrow">↓</div>
-            <div class="fn fn-done"><b>落执行：BottomDock 直生 / Agent 对话 / 直接答复</b></div>
-          </div>
-        </article>
 
-        <article class="flow-card" style="--accent: var(--violet); max-width: 760px; margin: 0 auto 22px;">
+        <article class="flow-card decision-tree" style="--accent: var(--violet); max-width: 760px; margin: 0 auto 22px;">
           <div class="flow-head">
             <span class="label">判定树</span>
             <div>
@@ -1220,14 +1266,16 @@
                 <div class="fork" style="max-width: 100%;">
                   <div class="fork-col" style="--accent: var(--gold)">
                     <span class="fork-label">明确 · 直接出口</span>
-                    <div class="fn fn-agent"><b>product_switch / new_task / consult / revise_canvas</b><span>主 Agent 可推翻（说理由）</span></div>
+                    <div class="fn fn-agent"><b>product_switch / new_task / prompt_only / consult / revise_canvas</b><span>主 Agent 可推翻（说理由）</span></div>
                   </div>
                   <div class="fork-col" style="--accent: var(--coral)">
                     <span class="fork-label">responding_to_confirm / ambiguous</span>
                     <div class="fn fn-decision"><b>③ STEP 2 tiebreak</b></div>
-                    <div class="fn fn-skip">awaiting_confirm → confirm_pending</div>
-                    <div class="fn fn-skip">elif has_failed → generation_failed</div>
-                    <div class="fn fn-skip">else → clarify</div>
+                    <div class="tiebreak-results">
+                      <div class="fn fn-skip">awaiting_confirm → confirm_pending</div>
+                      <div class="fn fn-skip">elif has_failed → generation_failed</div>
+                      <div class="fn fn-skip">else → clarify</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1251,7 +1299,7 @@
                 </div>
                 <div class="core-item" style="border-left:5px solid var(--gold)">
                   ③ 主 Agent · switch 收口
-                  <p style="font-weight:400;color:var(--muted);margin:7px 0 0;font-size:13px;line-height:1.5">switch(decision_branch) 走 8 枚举之一。硬状态类不可推翻。</p>
+                  <p style="font-weight:400;color:var(--muted);margin:7px 0 0;font-size:13px;line-height:1.5">switch(decision_branch) 走 9 枚举之一。硬状态类不可推翻。</p>
                 </div>
               </div>
             </div>
@@ -1288,6 +1336,12 @@
               <p>新需求。按目标判 BottomDock 直生 还是 Agent 对话链路。</p>
               <ul><li>判直生 vs 对话</li><li>建 workflow_run</li><li>必要时补问</li></ul>
             </article>
+            <article class="branch" style="--accent: var(--green)">
+              <span class="pill">L1 · prompt_only</span>
+              <h3>只优化提示词</h3>
+              <p>用户只要改写 prompt，不要生成。</p>
+              <ul><li>只走 Optimizer</li><li>不启 GenerationJob</li><li>不写 Canvas</li></ul>
+            </article>
             <article class="branch" style="--accent: var(--gold)">
               <span class="pill">L1 · consult</span>
               <h3>咨询 / 讨论</h3>
@@ -1313,7 +1367,7 @@
       <section id="workflows" aria-labelledby="workflows-title">
         <div class="section-head">
           <h2 id="workflows-title">两条入口怎么分流</h2>
-          <p>判定分层后不再有 6 条平级 workflow——按「要快 / 要好」分两条入口：BottomDock 直生（用户自负责 prompt，零 Agent）承担所有直接生成；Agent 对话（L1 → 主 Agent switch）做编排，永远走 Prompt Optimizer。老的 Confirm / Revise / Prompt-only 降为 branch 出口，不是独立 workflow。</p>
+          <p>这里只看入口边界：BottomDock 负责快速直生，Agent 对话负责高质量编排；Prompt-only、Confirm、Revise、Consult、Clarify 都是分支出口，不再当成独立 workflow。</p>
         </div>
 
         <div class="workflow-grid">
@@ -1349,7 +1403,7 @@
             <div class="steps">
               <div class="step"><i>1</i><div><b>后端算 decision_context</b><span>硬状态铁闸先判（has_generating 短路），零 LLM。</span></div></div>
               <div class="step"><i>2</i><div><b>L1 classifier（haiku 级）</b><span>给 intent_direction + suggested_route 软建议。</span></div></div>
-              <div class="step"><i>3</i><div><b>主 Agent switch(decision_branch)</b><span>8 枚举收口，可推翻 L1、推翻不了铁闸。</span></div></div>
+              <div class="step"><i>3</i><div><b>主 Agent switch(decision_branch)</b><span>9 枚举收口，可推翻 L1、推翻不了铁闸。</span></div></div>
               <div class="step"><i>4</i><div><b>new_task + lightweight</b><span>轻量编排：Brief 补全 → understanding（有图）→ Optimizer → Job。</span></div></div>
               <div class="step"><i>5</i><div><b>new_task + full_canvas</b><span>Full Canvas：Brief → Skill → 分镜 → 视觉 → 视频，4 硬停。</span></div></div>
             </div>
@@ -1358,18 +1412,19 @@
               <ul>
                 <li>confirm_pending：确认门四分类，advance_stage 铁闸</li>
                 <li>revise_canvas：局部修改，保留原节点不覆盖</li>
+                <li>prompt_only：只走 Optimizer，不启 Job、不写 Canvas</li>
                 <li>consult / clarify：直接答 / 澄清，不启 Job</li>
-                <li>Prompt-only：只走 Optimizer，不调 Provider</li>
                 <li>generation_in_progress / failed：硬状态铁闸</li>
               </ul>
             </div>
-          </article>        </div>
+          </article>
+        </div>
       </section>
 
       <section id="flow" aria-labelledby="flow-title">
         <div class="section-head">
           <h2 id="flow-title">生成链路怎么跑：Dock 直生 vs Agent 编排</h2>
-          <p>两条入口：BottomDock 直生（要快——用户自负责 prompt，零 Agent、零优化、零 understanding，直传 Provider）vs Agent 对话（要好——L1 给 suggested_route，主 Agent 路由到轻量编排或 Full Canvas，永远走 Prompt Optimizer）。分叉是判断，主线下行是推进。</p>
+          <p>这里展开执行路径：直生链路走参数透传；Agent 链路按轻量编排或 Full Canvas 继续推进。分叉是判断，主线下行是推进。</p>
         </div>
         <div class="flow-list">
 
@@ -1534,7 +1589,7 @@
       <section id="full-canvas" aria-labelledby="full-title">
         <div class="section-head">
           <h2 id="full-title">Full Video Canvas 阶段链</h2>
-          <p>完整视频项目必须经过这些确认点，每个硬停由 advance_stage 后端铁闸独立校验 has_ready_node——主 Agent 误判也拦。每个过程产物在 ChatMessage 中展示，只有图片/视频素材进入 Canvas。</p>
+          <p>这里只展开完整视频项目的阶段详情：Brief、Skill、分镜、首批视觉、视频与审核。</p>
         </div>
         <div class="tabs" role="tablist" aria-label="Full Canvas 阶段">
           <button class="tab active" type="button" data-panel="0">1 Brief</button>
@@ -1790,7 +1845,7 @@
             <ul>
               <li>硬事实：has_generating / has_ready_node / has_failed / awaiting_confirm</li>
               <li>L1 软建议：intent_direction + suggested_route</li>
-              <li>组合结果：decision_branch（8 枚举之一）</li>
+              <li>组合结果：decision_branch（9 枚举之一）</li>
               <li>后端每轮算好整体喂主 Agent</li>
             </ul>
           </article>

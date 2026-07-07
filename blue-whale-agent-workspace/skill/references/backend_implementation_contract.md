@@ -117,12 +117,12 @@ decision_context:
   previous_product_context: object? # 前一个产品方向(无则 null)
 
   # L1 输出(独立轻量 classifier,软建议)
-  intent_direction: enum            # product_switch / new_task / consult / revise / responding_to_confirm / ambiguous
+  intent_direction: enum            # product_switch / new_task / prompt_only / consult / revise / responding_to_confirm / ambiguous
   suggested_route: enum?            # 仅 new_task 带:lightweight / full_canvas
   route_signals: string[]           # L1 判定信号,供主 Agent 评估推翻
 
   # 组合结果(后端代码按优先级算出,单一值)
-  decision_branch: enum             # generation_in_progress / product_switch / new_task / consult / revise_canvas / confirm_pending / generation_failed / clarify
+  decision_branch: enum             # generation_in_progress / product_switch / new_task / prompt_only / consult / revise_canvas / confirm_pending / generation_failed / clarify
 ```
 
 **L1 classifier 调用时机**:硬状态代码每轮必跑(零成本);`has_generating=true` 直接短路到 `generation_in_progress`,**跳过 L1**;其余情况才调 L1(独立轻量模型,haiku 级)。L1 是软建议,主 Agent 可推翻(见 `decision_layer.md` 推翻规则)。`decision_context` 是后端 turn 内部,不暴露新 API,不进 SSE。
@@ -168,7 +168,7 @@ updated_at
 - `stage_plan`  （阶段计划）
 - `script` / `storyboard`  （脚本 / 分镜）
 - `prompt_draft` / `optimized_prompt`  （提示词草稿 / 优化后,**默认不展示给用户**;`optimized_prompt` 是发给 Provider 的原始版,含系统指令/格式 token)
-- `optimized_prompt_preview`  （优化后提示词的**用户友好版**,中文可读、可展示;区别于原始 `optimized_prompt`,直生链路用它给用户看"我帮你优化成了这样")
+- `optimized_prompt_preview`  （优化后提示词的**用户友好版**,中文可读、可展示;区别于原始 `optimized_prompt`;`prompt_only` 分支只输出它,不启动 GenerationJob / 不写 Canvas）
 - `review`  （审核结论）
 - `plain_text`  （普通文字回复）
 - `image_card` / `video_card`  （结果卡,引用画布上的 asset node）

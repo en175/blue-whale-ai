@@ -21,18 +21,20 @@ Dock 不判链路——用户在 Dock 选 type（image / video）、填参数 + 
 
 ## Agent 对话：L1 轻量 classifier（统一入口）
 
-用户消息进 Agent,turn 前置先过 **L1 轻量 classifier**(独立 haiku 级模型,**不是主 Agent 自判**;硬状态由后端代码先算,`has_generating` 直接短路)。L1 输出 `intent_direction` + 仅 `new_task` 带 `suggested_route`(软建议),主 Agent 在 `new_task` branch 按建议路由到三条:
+用户消息进 Agent,turn 前置先过 **L1 轻量 classifier**(独立 haiku 级模型,**不是主 Agent 自判**;硬状态由后端代码先算,`has_generating` 直接短路)。L1 输出 `intent_direction` + 仅 `new_task` 带 `suggested_route`(软建议),主 Agent 按 `decision_branch` 收口到以下分支:
 
 | 分流 | L1 输出 | 触发 | 链路 |
 |---|---|---|---|
 | **轻量编排** | `new_task` + `suggested_route=lightweight` | 简单图 / 轻量视频（「生成一张猫图」「5 秒小猫视频」） | 追问补全（仅方向歧义）+ Skill（有匹配才用）+ 优化提示词（硬停确认）+ 生成 |
 | **Full Canvas** | `new_task` + `suggested_route=full_canvas` | 广告 / UGC / 短剧 / 品牌片 / 需要脚本分镜 | Brief → Skill → 分镜 → 视觉 → 视频（4 硬停 + 3 软过，见 `video_agent_canvas.md`） |
+| **Prompt-only** | `prompt_only` | 只要求优化 / 改写提示词 | 只走 Prompt Optimizer，输出 `optimized_prompt_preview`，不启动 GenerationJob / 不写 Canvas |
 | **非生成** | `consult` / `revise` / `product_switch` / `confirm_pending` 等 | 咨询 / 修改 / 确认 / 切换 Skill | 对话回复（不启动 GenerationJob） |
 
 ### 判定信号
 
 - **强信号（触发 Full Canvas）**：「广告 / UGC / 短剧 / 品牌片 / 脚本 / 分镜」
 - **强信号（触发轻量）**：「生成一张图 / X 秒视频 / 单个镜头」
+- **Prompt-only 强信号**：「优化提示词 / 改成 Seedance 能用 / 只写 prompt / 润色 prompt」
 - **弱信号（歧义）** → 默认轻量编排
 
 ### 判定必须暴露 + 可推翻
@@ -61,7 +63,7 @@ visible_reasoning 示例：
 - 帮我改成 Seedance 能用的提示词
 - 帮我把这个图生视频 prompt 写好
 
-则只走 Prompt Optimizer，不调用 Provider。
+则只走 Prompt Optimizer，输出用户友好的 `optimized_prompt_preview`；不调用 Provider，不创建 GenerationJob，不写 Canvas Node。
 
 ## 用户上传图片但没说用途
 

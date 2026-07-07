@@ -30,12 +30,12 @@ skill/ 下增删改文件时,以下 **3 处索引要一起更新**:
 - **P1 才是结构化历史系统**:messages 与 agent_events 分离、conversation_summary、content_versions、version_index、历史资产引用、版本恢复。见 `FRONTEND-INTEGRATION-ROADMAP.md` 模块 10。
 - 别再误以为「P0 不存对话」或「P1 只是前端美化」。
 
-## 生成路径口径(三链路 / 四链路 / 两入口,不同维度不矛盾)
+## 生成路径口径(两入口为主口径)
 
-- **三链路**(后端 P0 编排骨架):Direct(含 Direct Image + Direct Video)/ Image-to-Video / Full Canvas。见 ROADMAP「已锁定产品决策」。
-- **四链路**(产品形态):Direct Image / Direct Video / Image-to-Video / Full Video Canvas。见 `README.md`「当前四条生成链路」。
-- **两入口**(API 路径):Dock 直生 / Agent 对话。路由判定见 `skill/rules/generation_route_decision.md`(该文件讲两入口路由,不展开四链路)。
-- 三者是不同维度(入口 / 编排骨架 / 产品形态),文档里要注明关系,别把入口写成链路、别让 BACKEND-API-PRD 又自相矛盾。
+- **两入口**是当前主口径:BottomDock 直生 / Agent 对话。路由判定见 `skill/rules/generation_route_decision.md`。
+- **BottomDock 直生**承担 Direct Image / Direct Video / Image-to-Video:纯参数透传,零 Prompt Optimizer,零 understanding。
+- **Agent 对话**按 `decision_branch` 收口:lightweight / full_canvas / prompt_only / revise_canvas / product_switch / consult / confirm_pending / generation_in_progress / generation_failed / clarify。
+- 旧的“三链路 / 四链路”只能作为历史产品形态说明,不能再作为运行时主口径。
 
 ## 文档间权威关系(避免循环引用)
 

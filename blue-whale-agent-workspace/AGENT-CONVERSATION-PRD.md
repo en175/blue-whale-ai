@@ -24,13 +24,12 @@
 
 ## 1. 范围(P0)
 
-### 后端 P0 —— 三条链路全做(避免返工)
+### 后端 P0 —— 两入口 + Agent 内部分支
 
-Agent runtime(CEO 路由 + workers)在 P0 必须把以下三条链路做透:
+P0 按两条入口落地，避免把 Dock 直生和 Agent 编排混成一条链路：
 
-1. **Direct**(直接生成图/视频)
-2. **Image-to-Video**(上传图 → 生视频,前置 `asset_understanding`)
-3. **Full Canvas**(brief → skill → 分镜 → 视觉 → 视频 的完整 worker 协作)
+1. **BottomDock 直生**：Direct Image / Direct Video / Image-to-Video，纯参数透传，零 Prompt Optimizer，零 understanding。
+2. **Agent 对话**：后端先算 `decision_context`，主 Agent 按 `decision_branch` 收口。Agent 内部分支包括 `new_task + lightweight`、`new_task + full_canvas`、`prompt_only`、`revise_canvas`、`product_switch`、`consult`、`confirm_pending` 等。
 
 > Full Canvas 的**前端**过程消息展示(brief / skill / storyboard 等对话卡)见 §6 P0/P1 边界。
 
@@ -47,7 +46,7 @@ Agent runtime(CEO 路由 + workers)在 P0 必须把以下三条链路做透:
 
 ### `POST /api/projects/{project_id}/agent/turn`
 
-用户在 AgentChatPanel 发一句话。后端 L1 意图识别按 `generation_route_decision.md` 分流(轻量编排 / Full Canvas / 非生成),逐段流式返回;必要时启动 GenerationJob。
+用户在 AgentChatPanel 发一句话。后端先算 `decision_context`,主 Agent 按 `decision_branch` 分流(轻量编排 / Full Canvas / prompt_only / 非生成等),逐段流式返回;必要时启动 GenerationJob。
 
 ```json
 // req
@@ -245,7 +244,7 @@ BottomDock 直生(`/api/projects/{project_id}/generate`)与 Agent 对话(`/agent
 
 | 层 | P0 | P1 |
 |---|---|---|
-| 后端 runtime | **三链路全做**(Direct / Image-to-Video / Full Canvas) | — |
+| 后端 runtime | **两入口 + Agent 分支**:Dock 直生;Agent `decision_branch` 覆盖 lightweight / full_canvas / prompt_only / revise / product_switch / confirm / consult 等 | — |
 | 前端过程消息 | **全展示**(文字气泡):brief / skill / storyboard / review / optimized_prompt_preview / visible_reasoning | 可选:过程消息结构化美化(如 storyboard 分镜表、brief 卡片化) |
 | 前端结果 | 结果卡(`image_card` / `video_card`) + 画布素材节点 | — |
 | 对话历史 / 状态持久化 | 最小持久化:当前 + 上一个产品方向的结构化摘要(见 ROADMAP 模块 10 P0 边界);完整 `messages` / `agent_events` 历史**不做** | 状态持久化(`project_state`)+ 内容版本(`content_versions`)+ 完整历史 + 历史摘要(`conversation_summary`)+ 版本索引 + 历史资产引用 + 版本恢复(见 ROADMAP 模块 10) |
@@ -260,7 +259,7 @@ BottomDock 直生(`/api/projects/{project_id}/generate`)与 Agent 对话(`/agent
 (由 `BACKEND-API-PRD.md` §10 演化而来;该 §10 现已收敛为核心基建 4 条,Agent 对话验收迁至本文):
 
 1. **自然语言流式**:用户在 AgentChatPanel 发自然语言,流式看到 `visible_reasoning` + 过程消息(brief/skill/storyboard/review/optimized_prompt_preview)+ 结果卡(`image_card`/`video_card`);画布出现对应素材节点。
-2. **Image-to-Video 前置理解**:上传图 → Agent/直生生视频,前置 `asset_understanding` 存在(主 LLM 不多模态时调视觉模型或请用户补充,不假装识别)。
+2. **Image-to-Video 前置理解**:Agent 对话里的图转视频必须有 `asset_understanding`;Dock 直生则把图随 `reference_asset_ids` 直传 Provider,不做 understanding。
 3. **刷新不丢**:生成中刷新页面或切走再回来,**画布 + 对话消息 + 进行中任务**都恢复(`GET /api/projects/{id}` 返回整 Project 快照:canvas nodes + messages + active_jobs);Job 走 `active_jobs` 兜底重连或独立 `/api/jobs/{id}/stream`,完成时翻 `ready`。**完整历史系统(摘要 / 内容版本 / messages 与 agent_events 分离 / 版本索引)不在 P0,见 ROADMAP 模块 10。**
 4. **"继续"不推进**:用户只说"继续"时不推进;`ready` 节点 + 明确确认才推进(确认门四分类)。
 5. **不泄露内部信息**:`trace_event` / `optimized_prompt`(原始)/ `prompt_draft` / worker 名 / 文件路径不出现在任何用户可见响应;对话里给用户看的是 `optimized_prompt_preview`(友好版)。
@@ -269,6 +268,6 @@ BottomDock 直生(`/api/projects/{project_id}/generate`)与 Agent 对话(`/agent
 
 ## 8. 风险
 
-- **Agent runtime 复杂度**:Full Video Canvas 编排是多 worker 协作,后端实现成本高。P0 接口和消息链路一次到位,联调时可按 Direct / Image-to-Video / Full Canvas 的顺序逐条验收。
+- **Agent runtime 复杂度**:Full Video Canvas 编排是多 worker 协作,后端实现成本高。P0 接口和消息链路一次到位,联调时按入口验收:先 Dock 直生,再 Agent lightweight / prompt_only / full_canvas。
 - **URL 签名过期**:Skill 封面用 CloudFront Signed URL,会集体 403;由 Skill 面板的 `signed-cover` 接口兜底,详见 `FRONTEND-SKILL-PANEL-PRD.md` §9。
 - **匿名身份迁移**:P2 引入登录时,需把 `anonymous_id` 名下的 Project/Asset/对话合并到正式账户,后端需预留合并路径(详见 `BACKEND-API-PRD.md` §11)。

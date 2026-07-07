@@ -6,7 +6,7 @@
 
 ## 一句话规则
 
-后端每轮算好单一 `decision_branch`（+ L1 软建议 + 硬事实）整体喂主 Agent；主 Agent 只做 `switch(decision_branch)` + 确认门四分类 + 调度输出。
+后端每轮算好单一 `decision_branch`（+ L1 软建议 + 硬事实）整体喂主 Agent；主 Agent 只做 `switch(decision_branch)` + 确认门四分类 + prompt-only 收口 + 调度输出。
 
 ## 流程总览（Turn 主流程）
 
@@ -28,6 +28,7 @@ flowchart TD
     SW -- generation_failed --> A2[重试 / 修改 / 取消]
     SW -- product_switch --> A3[product_switch_p0 5 类]
     SW -- new_task --> A4["按 suggested_route 路由 workflow"]
+    SW -- prompt_only --> A9[只优化提示词，不启 Job]
     SW -- consult --> A5[直接回答]
     SW -- revise_canvas --> A6[revise_canvas 局部修改]
     SW -- confirm_pending --> CG
@@ -43,6 +44,7 @@ flowchart TD
     A2 --> OUT
     A3 --> OUT
     A4 --> OUT
+    A9 --> OUT
     A5 --> OUT
     A6 --> OUT
     A8 --> OUT
@@ -81,7 +83,7 @@ decision_context:
   previous_product_context: object? # 前一个产品方向（无则 null）
 
   # L1 输出（轻量 classifier，软建议）
-  intent_direction: enum            # product_switch / new_task / consult / revise / responding_to_confirm / ambiguous
+  intent_direction: enum            # product_switch / new_task / prompt_only / consult / revise / responding_to_confirm / ambiguous
   suggested_route: enum?            # 仅 new_task 带：lightweight / full_canvas
   route_signals: string[]           # L1 判定用的信号（强/弱），供主 Agent 评估是否推翻
 
@@ -89,7 +91,7 @@ decision_context:
   decision_branch: enum             # 见下「decision_branch 枚举」
 ```
 
-## `decision_branch` 枚举（8）
+## `decision_branch` 枚举（9）
 
 | branch | 触发 | 主 Agent 动作 |
 |---|---|---|
@@ -97,6 +99,7 @@ decision_context:
 | `generation_failed` | tiebreak 命中 `has_failed` | 读 failed node 错误，提供重试 / 修改 / 取消 |
 | `product_switch` | L1 `intent_direction=product_switch` | 读 `product_switch_p0.md` 分类处理（5 类） |
 | `new_task` | L1 `intent_direction=new_task` | 按 `suggested_route` 路由：lightweight → `direct_generation.md` / `image_generation_prompt.md`；full_canvas → `video_agent_canvas.md` |
+| `prompt_only` | L1 `intent_direction=prompt_only` | 只走 Prompt Optimizer，输出 `optimized_prompt_preview`，不启 GenerationJob / 不写 Canvas |
 | `consult` | L1 `intent_direction=consult` | 直接回答，不启 workflow / GenerationJob |
 | `revise_canvas` | L1 `intent_direction=revise` | 读 `rules/revise_canvas.md`（局部修改当前画布，非产品切换） |
 | `confirm_pending` | tiebreak 命中 `awaiting_confirm` | 判确认门四分类（见 `confirmation_gate.md`） |
@@ -111,6 +114,7 @@ STEP 0（物理最高）：if has_generating  → generation_in_progress   # 连
 STEP 1：            else switch(intent_direction):
                        product_switch → product_switch
                        new_task       → new_task                 # 带 suggested_route
+                       prompt_only    → prompt_only              # 只优化提示词，不生成
                        consult        → consult
                        revise         → revise_canvas
                        responding_to_confirm | ambiguous → STEP 2
@@ -120,7 +124,7 @@ STEP 2（硬状态 tiebreak，仅 responding_to_confirm / ambiguous 进）:
                        else                → clarify
 ```
 
-优先级（决策 19）：`has_generating` 物理最高 → L1 意图优先（`product_switch` > `new_task` > `consult` > `revise` > `responding_to_confirm` > `ambiguous`）→ 硬状态 tiebreak。
+优先级（决策 19）：`has_generating` 物理最高 → L1 意图优先（`product_switch` > `new_task` > `prompt_only` > `consult` > `revise` > `responding_to_confirm` > `ambiguous`）→ 硬状态 tiebreak。
 
 ### 判定树（可视化）
 
@@ -133,6 +137,7 @@ flowchart TD
 
     SW -- product_switch --> R1[product_switch]
     SW -- new_task --> R2["new_task（+ suggested_route）"]
+    SW -- prompt_only --> R9[prompt_only]
     SW -- consult --> R3[consult]
     SW -- revise --> R4[revise_canvas]
     SW -- responding_to_confirm --> TB
@@ -156,7 +161,7 @@ L1 是**独立轻量 classifier**（haiku 级），不是主 Agent 自判。
 - 硬事实快照（`has_generating` / `has_failed` / `awaiting_confirm` / `pending_workflow` / `active_product_context` 是否存在 / `previous_product_context` 是否存在）
 
 **输出**：
-- `intent_direction`（6 选 1）
+- `intent_direction`（7 选 1）
 - `suggested_route`（**仅** `new_task` 带，`lightweight` / `full_canvas`）
 - `route_signals`（判定信号，供主 Agent 评估推翻）
 
@@ -168,6 +173,7 @@ L1 是**独立轻量 classifier**（haiku 级），不是主 Agent 自判。
 **判定信号**（沿用 `generation_route_decision.md`）：
 - 强信号（`new_task` + `full_canvas`）：广告 / UGC / 短剧 / 品牌片 / 脚本 / 分镜
 - 强信号（`new_task` + `lightweight`）：生成一张图 / X 秒视频 / 单镜头
+- `prompt_only` 强信号：优化这个提示词 / 改成 Seedance 能用的提示词 / 只写 prompt / 帮我润色 prompt
 - `product_switch` 强信号：换产品 / 换主体 / 用前面的产品 / 回到刚才那个
 - `revise` 强信号：改一下 / 重做 / 换风格 / 这张不行 / 脚本不对 / 保留这个
 - `consult` 强信号：问方法 / 架构 / 规则 / 对比 / 建议
@@ -186,6 +192,7 @@ switch(decision_branch):
   generation_failed      → 读 failed node，提供「重试 / 修改 / 取消」
   product_switch         → 读 product_switch_p0.md，按 5 类处理
   new_task               → 按 suggested_route 路由到 lightweight / full_canvas workflow
+  prompt_only            → 只走 Prompt Optimizer，输出 optimized_prompt_preview，不启 GenerationJob / 不写 Canvas
   consult                → 直接回答，不启 workflow
   revise_canvas          → 读 rules/revise_canvas.md（局部修改当前画布）
   confirm_pending        → 读 confirmation_gate.md，判四分类

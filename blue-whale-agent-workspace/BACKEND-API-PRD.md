@@ -299,7 +299,7 @@ data: {"job_id":"job_xxx","status":"succeeded","output_asset_ids":["ast_yyy"]}
 | 维度 | BottomDock(`/generate`)| Agent(`/agent/turn`)|
 |---|---|---|
 | 定位 | **要快**——用户自负责 prompt 质量 | **要好**——Agent 帮优化 |
-| 承担 | **所有直接生成**(Direct Image / Direct Video / Image-to-Video) | **单链路**:L1 轻量 classifier(haiku 级)→ 轻量编排 / Full Canvas |
+| 承担 | **所有直接生成**(Direct Image / Direct Video / Image-to-Video) | **单入口多分支**:L1 轻量 classifier(haiku 级)→ lightweight / full_canvas / prompt_only / revise / product_switch / consult / confirm 等 |
 | 入参 | 完整参数 + prompt + reference_asset_ids | 自然语言意图 |
 | 提示词处理 | **零处理**(原话 + 参数直传 Provider,不做任何优化;质量用户自负责) | **永远有 Prompt Optimizer**(技术规整 + 创意优化,出 `optimized_prompt_preview` 用户确认) |
 | 图理解 | **零 understanding**(图随 reference_asset_ids 直传 Provider,Provider 自己消费图像素) | 图推理前必须 `asset_understanding`(见 `backend_implementation_contract.md` 硬约束 8) |

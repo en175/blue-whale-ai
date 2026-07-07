@@ -32,6 +32,7 @@
 | `generation_failed` | 读 failed node 错误,提供「重试 / 修改 / 取消」 |
 | `product_switch` | 读 `rules/product_switch_p0.md` 按五类处理 |
 | `new_task` | 按 `suggested_route` 路由:lightweight → `workflows/direct_generation.md` 或 `image_generation_prompt.md`;full_canvas → `video_agent_canvas.md` |
+| `prompt_only` | 只走 Prompt Optimizer,输出用户友好的 `optimized_prompt_preview`,不启 GenerationJob / 不写 Canvas |
 | `consult` | 直接回答,不启 workflow / GenerationJob |
 | `revise_canvas` | 读 `rules/revise_canvas.md`(局部修改当前画布,非产品切换) |
 | `confirm_pending` | 判确认门四分类(见下) |
@@ -70,6 +71,7 @@ L1 是软建议,可推翻,推翻时 `visible_reasoning` 必须说理由(例:用�
 - 推翻 L1 时是否在 `visible_reasoning` 说了理由
 - `confirm_pending` 是否按四分类处理,没把弱继续当明确确认
 - 是否把轻量任务误路由到完整广告 workflow(校验 `suggested_route`)
+- `prompt_only` 是否没有启动 GenerationJob / 没有写 Canvas
 - 是否暴露内部信息 / 替用户确认了结果
 
 ## 缺信息 / 失败处理

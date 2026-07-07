@@ -120,7 +120,7 @@
 ## 已锁定产品决策(全模块共享,别再问)
 
 - Skill 面板 P0;创建 tab 隐藏;库 ⊃ 我的;引用非副本(跟随更新);Use 一次性不改 auto;auto 候选池后端自读不前端传;forced > auto > 未指定。
-- **Agent 对话(2026-07-05 锁定)**:后端 P0 三链路全做(Direct / Image-to-Video / Full Canvas,避免返工);前端无分阶段,过程消息(brief/skill/storyboard/review/visible_reasoning)P0 全展示(文字气泡),P1 仅可选美化;新增 `optimized_prompt_preview` 消息类型(用户友好版,可展示),区别于原始 `optimized_prompt`(发给 Provider,永不进 message);`forced_skill_id` 仅决定 skill 选择那一步,不锁后续 Stage;Agent turn 结束后未完成 Job 由 `active_jobs` + 独立 `/api/jobs/{id}/stream` 接管,重连失败再轮询 `GET /api/jobs/{id}`。
+- **Agent 对话(2026-07-05 锁定,2026-07-06 收口)**:P0 按两入口落地——Dock 直生负责 Direct Image / Direct Video / Image-to-Video;Agent 对话按 `decision_branch` 覆盖 lightweight / full_canvas / prompt_only / revise / product_switch / confirm / consult 等分支。前端无分阶段,过程消息(brief/skill/storyboard/review/visible_reasoning)P0 全展示(文字气泡),P1 仅可选美化;新增 `optimized_prompt_preview` 消息类型(用户友好版,可展示),区别于原始 `optimized_prompt`(发给 Provider,永不进 message);`forced_skill_id` 仅决定 skill 选择那一步,不锁后续 Stage;Agent turn 结束后未完成 Job 由 `active_jobs` + 独立 `/api/jobs/{id}/stream` 接管,重连失败再轮询 `GET /api/jobs/{id}`。
 - **产品切换 P0 边界(2026-07-05 锁定)**:P0 先支持同一 Agent 对话内两个产品方向切换;不做完整内容版本系统。完全不同品类或目标时,用户侧只问"继续在当前项目中进行,还是新建一个项目?",不说替换/覆盖,不暴露 workflow。完整状态持久化、历史摘要、版本索引放 P1 评估。
 - 错误码、目录、身份、上传、Job 生命周期等模块的决策**尚未锁定**(Project、直生于 2026-07-06 锁定,见下)。
 
@@ -140,7 +140,7 @@
 | 8 | `initial_prompt` 预填输入框,不自动开跑 |
 | 9 | UX 默认值(自动保存 2s / viewport 5s / beforeunload flush / 多 tab 不处理;列表 updated_at DESC;删除二次确认;双击重命名;新建入口) |
 | 10 | Full Canvas = **4 硬停**(Brief / 分镜 / 视觉 / 视频)+ **3 软过**(Skill / 阶段计划 / 审核) |
-| 11 | L1 意图识别判定暴露 + 可对话推翻(范围从「4 链路」缩小到「3 分流」) |
+| 11 | L1 意图识别判定暴露 + 可对话推翻(范围从旧链路缩小到 Agent 分支:lightweight / full_canvas / prompt_only / 非生成) |
 | 12 | L1 歧义默认轻量编排(Full Canvas 必须显式触发) |
 | 13 | Dock = 纯参数透传,**零优化**(连技术规整都不做);提示词优化只在 Agent。`README` 原则 4 限定 Agent 链路 |
 | 14 | Dock **零 understanding**(图直传 Provider,Provider 自己消费);understanding 硬约束限定 Agent;Image-to-Video 两边都能做(机制不同) |
@@ -157,7 +157,7 @@
 | 16 | **判定分层**:硬状态→后端代码;意图方向+路由→L1 classifier(haiku 级,软建议);确认门四分类+输出+调度→主 Agent |
 | 17 | **decision_context**:后端算好单一 `decision_branch` + L1 软建议 + 硬事实,整体喂主 Agent |
 | 18 | **主 Agent 瘦身**:删 7 级优先级排序 + 语义分流大段,改 `switch(decision_branch)` |
-| 19 | **优先级**:`generating` 物理最高 → L1 意图优先(product_switch > new_task > consult > revise > responding_to_confirm > ambiguous)→ 硬状态 tiebreak |
+| 19 | **优先级**:`generating` 物理最高 → L1 意图优先(product_switch > new_task > prompt_only > consult > revise > responding_to_confirm > ambiguous)→ 硬状态 tiebreak |
 | 20 | **confirm_pending 后端铁闸 + L1/L2 统一**:`advance_stage` 必须独立校验 `has_ready_node`;废除 L2,全场景统一 `decision_branch` |
 
 **与决策 11/12/15 的关系**:那三条已锁「L1 暴露可推翻 + 歧义默认轻量 + L1 分流」。本轮(16-20)把它们工程化——L1 = 独立轻量 classifier(不是主 Agent 自判),硬状态下沉后端代码,主 Agent 瘦身到 switch 收口。是落地细化,不冲突。

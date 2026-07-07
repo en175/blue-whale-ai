@@ -30,127 +30,59 @@
 - 什么时候只做提示词优化
 - 什么时候必须停下来等用户确认
 
-## 当前四条生成链路
+## 当前入口与 Agent 分支
 
-> **2026-07-06 重构**：Direct Image / Direct Video / Image-to-Video 归 **BottomDock 直生**（纯参数透传，零优化零 understanding）；**Agent 对话**只走对话编排（L1 轻量 classifier → 轻量编排 / Full Canvas），永远走 Prompt Optimizer，不裸直接生成。下述四链路的链路细节仍有效，但归属入口按重构调整。判定分层见 `skill/rules/decision_layer.md`；两入口（Dock 直生 / Agent 对话）路由见 `skill/rules/generation_route_decision.md`。
+系统现在按入口分层，而不是按旧的 Direct / Image-to-Video / Full Canvas 三链路做主口径。
 
-### 1. Direct Image（Dock 直生）
+### 1. BottomDock 直生（要快）
 
-适合用户直接要图片：
-
-```text
-做一张保温杯商品图
-生成一张赛博朋克城市图
-给这个产品换背景
-```
-
-链路：
+用户在 Dock 里选择 image / video / image-to-video，填写参数和 prompt，直接交给 Provider。
 
 ```text
-Image Understanding（如有图）
-  -> Image Prompt Agent
-  -> Prompt Optimizer
-  -> Image Provider
-  -> Canvas image_result
-  -> 用户确认
+Dock 参数 + prompt + reference_asset
+  -> Provider
+  -> Asset
+  -> Canvas image / video node
 ```
 
-对应文件：
+边界：
 
-- `skill/workflows/image_generation_prompt.md`
-- `skill/workers/image_prompt_agent.md`
-- `skill/references/image_prompt_contract.md`
+- 零 Agent 编排
+- 零 Prompt Optimizer
+- 零 Image Understanding
+- Provider 自己消费图片像素
 
-### 2. Direct Video
+### 2. Agent 对话（要好）
 
-适合轻量直接生成视频：
+用户从 AgentChatPanel 发自然语言时，先走判定分层：
 
 ```text
-生成一个小猫跑步的视频
-做一个女孩在雨中跳舞的视频
-生成一个赛博朋克城市镜头
+后端 decision_context
+  -> L1 轻量 classifier
+  -> decision_branch
+  -> 主 Agent switch 收口
 ```
 
-链路：
+Agent 内部分支：
 
-```text
-Direct Generation
-  -> 轻量补全
-  -> Prompt Optimizer
-  -> Video Provider
-  -> Canvas video_result
-  -> 用户确认
-```
+| 分支 | 适合场景 | 结果 |
+|---|---|---|
+| `new_task + lightweight` | 简单图 / 轻量视频 / 图转视频编排 | Brief 轻量补全 -> understanding（有图）-> Prompt Optimizer -> GenerationJob |
+| `new_task + full_canvas` | UGC / 广告 / 短剧 / 品牌片 / 需要脚本分镜 | Brief -> Skill -> 分镜 -> 首批视觉 -> 视频 |
+| `prompt_only` | 只要求优化 / 改写提示词 | 只输出 `optimized_prompt_preview`，不启 GenerationJob，不写 Canvas |
+| `revise_canvas` | 修改当前画布结果 | 复用当前 workflow 重生，结果回确认门 |
+| `product_switch` | 换产品 / 回到前一个产品 | 更新 active / previous 产品上下文后重新确认 Brief / Skill |
+| `consult` / `clarify` | 咨询或意图不明 | 直接答复或追问，不启 Job |
 
-对应文件：
+对应权威文件：
 
-- `skill/workflows/direct_generation.md`
+- `skill/rules/decision_layer.md`
 - `skill/rules/generation_route_decision.md`
-
-### 3. Image-to-Video
-
-适合用户上传图后让它动起来：
-
-```text
-让这张图动起来
-让图片里的产品旋转
-把这个人物做成 5 秒视频
-```
-
-链路：
-
-```text
-Image Understanding
-  -> Direct Generation
-  -> Prompt Optimizer
-  -> Video Provider
-  -> Canvas video_result
-  -> 用户确认
-```
-
-关键规则：
-
-- 上传图片不等于 Agent 看懂图片。
-- 如果主模型没有多模态能力，必须用视觉模型或让用户补充描述。
-- 没有 `asset_understanding`，不能做图生图或图转视频。
-
-对应文件：
-
-- `skill/workflows/image_understanding.md`
-- `skill/workers/image_understanding_agent.md`
-- `skill/rules/multimodal_capability.md`
-
-### 4. Full Video Canvas
-
-适合复杂视频项目：
-
-```text
-做一个产品广告视频
-做一个 UGC 种草视频
-做一条短剧广告
-做一个品牌宣传片
-```
-
-链路：
-
-```text
-Brief
-  -> Skill Selector
-  -> Stage Plan
-  -> Storyboard
-  -> 首批关键视觉
-  -> Prompt Optimizer
-  -> Video Provider
-  -> Canvas video_result
-  -> 用户确认
-```
-
-对应文件：
-
+- `skill/workers/director_agent.md`
+- `skill/workflows/direct_generation.md`
 - `skill/workflows/video_agent_canvas.md`
-- `skill/workers/storyboard_agent.md`
-- `skill/workers/skill_selector.md`
-- `skill/library/_index.md`
+- `skill/workflows/image_generation_prompt.md`
+- `skill/workflows/image_understanding.md`
 
 ## 目录结构
 
@@ -266,7 +198,7 @@ skill/library/
 
 ### 1. 不是所有视频都走完整视频链路
 
-“生成一个小猫跑步的视频”应该走 Direct Video。
+“生成一个小猫跑步的视频”如果来自 Agent 对话，应该走 `new_task + lightweight`；如果来自 Dock，则走 BottomDock 直生。
 
 “做一个保温杯 UGC 广告视频”才走 Full Video Canvas。
 
@@ -380,13 +312,13 @@ Seedance / 生图规则负责：
 当前工作台已经具备：
 
 - CEO 路由器
-- 四条生成链路
+- 两入口路由（BottomDock 直生 / Agent 对话）
 - 多 Agent 分工
 - 中文 Skill 库
 - 图像识别中间层
 - 生图提示词链路
 - Seedance 视频提示词参考
-- Prompt Optimizer 中间层
+- Prompt Optimizer 中间层（含 prompt_only 分支）
 - 确认门
 - 用户可见思考过程
 - 后端数据契约
