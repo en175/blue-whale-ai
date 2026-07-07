@@ -61,7 +61,7 @@ Full Canvas 的 stage 分两类：**硬停**（必须用户明确确认才推进
 
 ### 修改意图
 
-不能推进，进入 revise：
+不能推进，进入 revise（见 `rules/revise_canvas.md`）：
 
 - 改一下
 - 重做

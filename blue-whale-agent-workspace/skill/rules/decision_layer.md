@@ -98,7 +98,7 @@ decision_context:
 | `product_switch` | L1 `intent_direction=product_switch` | 读 `product_switch_p0.md` 分类处理（5 类） |
 | `new_task` | L1 `intent_direction=new_task` | 按 `suggested_route` 路由：lightweight → `direct_generation.md` / `image_generation_prompt.md`；full_canvas → `video_agent_canvas.md` |
 | `consult` | L1 `intent_direction=consult` | 直接回答，不启 workflow / GenerationJob |
-| `revise_canvas` | L1 `intent_direction=revise` | 读当前 canvas 状态，进入 revise flow（局部修改，非产品切换） |
+| `revise_canvas` | L1 `intent_direction=revise` | 读 `rules/revise_canvas.md`（局部修改当前画布，非产品切换） |
 | `confirm_pending` | tiebreak 命中 `awaiting_confirm` | 判确认门四分类（见 `confirmation_gate.md`） |
 | `clarify` | tiebreak 无硬状态命中 | 问一句澄清目标 |
 
@@ -187,7 +187,7 @@ switch(decision_branch):
   product_switch         → 读 product_switch_p0.md，按 5 类处理
   new_task               → 按 suggested_route 路由到 lightweight / full_canvas workflow
   consult                → 直接回答，不启 workflow
-  revise_canvas          → 读当前 canvas 状态，进入局部 revise flow
+  revise_canvas          → 读 rules/revise_canvas.md（局部修改当前画布）
   confirm_pending        → 读 confirmation_gate.md，判四分类
   clarify                → 问一句「新建视频 / 修改当前画布 / 选 Skill」
 ```

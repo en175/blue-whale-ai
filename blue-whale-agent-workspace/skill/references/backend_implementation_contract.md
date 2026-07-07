@@ -288,7 +288,7 @@ confirmed_at
 3. 只有「当前阶段存在 ready 节点」+「用户明确确认」同时满足,才 `advance_stage`。
 
 - 弱继续("继续/好了/下一步")不推进,后端回复二次确认话术。
-- 修改意图("改一下/换风格")进入 revise,可带自然语言 instruction
+- 修改意图("改一下/换风格")进入 revise(见 `rules/revise_canvas.md`),可带自然语言 instruction
   (如"保留构图,换成清晨桌面风格")。
 - 重试也通过对话表达("重新生成这版")。
 

@@ -33,7 +33,7 @@
 | `product_switch` | 读 `rules/product_switch_p0.md` 按五类处理 |
 | `new_task` | 按 `suggested_route` 路由:lightweight → `workflows/direct_generation.md` 或 `image_generation_prompt.md`;full_canvas → `video_agent_canvas.md` |
 | `consult` | 直接回答,不启 workflow / GenerationJob |
-| `revise_canvas` | 读当前 canvas 状态,进入局部 revise flow(非产品切换) |
+| `revise_canvas` | 读 `rules/revise_canvas.md`(局部修改当前画布,非产品切换) |
 | `confirm_pending` | 判确认门四分类(见下) |
 | `clarify` | 问一句「新建视频 / 修改当前画布 / 选 Skill」 |
 

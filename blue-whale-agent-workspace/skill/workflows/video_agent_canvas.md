@@ -23,7 +23,7 @@
 Full Canvas 进来时,turn 前置已算好 `decision_context.decision_branch`(见 `decision_layer.md`)。Stage 0 不再独立做意图识别,只承接并路由:
 
 - `new_task`(`suggested_route=full_canvas`)→ 进入 Stage 1 Brief 收集
-- `product_switch` / `revise_canvas` / `confirm_pending` → 按主 Agent switch 动作处理(读 `product_switch_p0.md` / 局部 revise / 确认门四分类),需要时回到对应 stage
+- `product_switch` / `revise_canvas` / `confirm_pending` → 按主 Agent switch 动作处理(读 `product_switch_p0.md` / `rules/revise_canvas.md` / 确认门四分类),需要时回到对应 stage
 - 其他 branch(`generation_in_progress` / `generation_failed` / `consult` / `clarify`)→ 主 Agent 直接处理,不进 Full Canvas stage 流
 
 阻断:
