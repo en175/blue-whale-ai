@@ -10,6 +10,6 @@ cat >&2 <<EOF
   scripts/publish-review-package.sh --user-authorized
 
 该入口会在 Claude Code Hook 中触发一次用户确认；确认后推送当前工单分支，
-随后创建 target=master 的 draft PR。
+随后创建 target=master 的 PR。
 EOF
 exit 2

@@ -91,7 +91,7 @@ scripts/publish-review-package.sh --user-authorized
 
 禁止直接执行 `git push` 绕过该入口；直接 push 会被 Hook 硬拦。旧脚本 `scripts/publish-task-branch.sh` 已废弃，只会提示改用标准入口。
 
-脚本不创建 Gitee PR。推送成功后会写入短期发布标记；随后按 `.gitee/PULL_REQUEST_TEMPLATE.md` 在 Gitee 创建 **draft PR**，目标分支为 `master`。创建 PR Hook 会校验并消费该标记，同时要求 `draft=true`、`target_branch=master`、`source_branch` 与发布标记一致，不二次确认。PR 创建后必须停下来交给开发者审查；发布审查包授权不覆盖合并。
+脚本不创建 Gitee PR。推送成功后会写入短期发布标记；随后按 `.gitee/PULL_REQUEST_TEMPLATE.md` 在 Gitee 创建 PR，目标分支为 `master`。创建 PR Hook 会校验并消费该标记，同时要求 `draft` 非 true、`target_branch=master`、`source_branch` 与发布标记一致，不二次确认。PR 创建后必须停下来交给开发者审查；发布审查包授权不覆盖合并。
 
 PR 未合并前，本地分支、远程源分支和 task worktree 都保留，以便处理审查反馈。
 

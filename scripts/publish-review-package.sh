@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Publish the current task branch as the first half of a review package.
 # The matching Claude Code hook requires --user-authorized and asks once before
-# this script runs. Creating the draft PR remains a separate Gitee MCP action.
+# this script runs. Creating the PR remains a separate Gitee MCP action.
 
 set -euo pipefail
 
@@ -19,7 +19,7 @@ for arg in "$@"; do
   1. 校验当前 task worktree 和工单分支
   2. 校验工作区干净且包含最新 origin/master
   3. 推送当前工单分支
-  4. 由 Agent 随后创建 target=master 的 draft PR，并停下来等待开发者审查
+  4. 由 Agent 随后创建 target=master 的 PR，并停下来等待开发者审查
 EOF
       exit 0
       ;;
@@ -87,7 +87,7 @@ cat <<EOF
 ✅ 分支已推送：$branch
 
 下一步：
-  1. 创建 Gitee draft PR：$branch → master
+  1. 创建 Gitee PR：$branch → master
   2. 按 .gitee/PULL_REQUEST_TEMPLATE.md 填写实现范围、风险、测试结果和审查重点
   3. PR 创建后停下来，等待开发者审查
   4. PR 合并后回到本 worktree 运行 scripts/cleanup-task-worktree.sh
