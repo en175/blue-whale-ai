@@ -30,6 +30,19 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-push-to-master.sh"
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/confirm-release-action.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__gitee-ent__create_enterprise_repo_pull",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/confirm-release-action.sh"
           }
         ]
       },
@@ -39,6 +52,19 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-squash-merge.sh"
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/confirm-release-action.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__gitee-ent__create_enterprise_repo_release",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/confirm-release-action.sh"
           }
         ]
       },

@@ -26,7 +26,8 @@ Rules:
 
 ### 高频硬约束（每次都遵守）
 
-- **禁直推 master（最高红线）**：AI（及所有人）**禁止任何** `git push origin master`。所有进 master 的改动统一走 **开分支 → 推分支 → Gitee 建 PR → 服务端合并**。"自审合"只免互审，**不免流程**——自审通过后仍须自己走完分支→PR→合并。合并触发：低风险 PR 可用 Gitee MCP `merge_enterprise_pull` 自审合（秒级，不卡人）；**高风险 PR 禁 AI 用 MCP 合，必须人手动合**。`hotfix/*` 无特权，同样走分支→PR。根因与决策见 [`docs/adr/0003-no-direct-push-to-master.md`](docs/adr/0003-no-direct-push-to-master.md)；hook 兜底见下「远程-本地同步」。
+- **发布动作必须先获用户授权（最高红线）**：Agent 开发完成后的默认终点是**本地实现 + 验证 + 提交 + 报告待审查**；未经用户明确授权，禁止执行任何发布动作：`git push`、发布分支、创建 PR、合并 PR、创建 release、删除远程源分支。授权使用自然语言即可，但必须明确包含发布/推送/开 PR/合并意图；“继续”“可以”“你处理吧”“完成后走流程”这类泛化许可不算发布授权。**发布审查包**一次授权覆盖“推送当前工单分支 + 创建指向 `master` 的 draft PR”，不覆盖合并；PR 创建后必须停下来交给开发者审查。**合并 PR**必须另获授权，且仍只能用 merge 方法。Hook 会在发布类工具执行前弹出确认，作为兜底，不代替 Agent 主动遵守规则。
+- **禁直推 master（最高红线）**：AI（及所有人）**禁止任何** `git push origin master`。所有进 master 的改动统一走 **开分支 → 推分支 → Gitee 建 draft PR → 服务端合并**。低风险 PR 可在用户明确授权后由 Agent 用 Gitee MCP `merge_enterprise_pull` 合并；**高风险 PR 禁 AI 用 MCP 合，必须人手动合**。`hotfix/*` 无特权，同样走分支→PR。根因与决策见 [`docs/adr/0003-no-direct-push-to-master.md`](docs/adr/0003-no-direct-push-to-master.md)；hook 兜底见下「远程-本地同步」。
 - **合并只用 merge（禁 squash/rebase）**：AI 用 Gitee MCP `merge_enterprise_pull` 时 `merge_method=merge`（或不传，Gitee 默认 merge）。传 `squash`/`rebase` 会被 `.claude/hooks/block-squash-merge.sh` 拦。人在 Gitee 网页手动合并同样选 merge。合并即删源分支：**MCP 无 `prune_source_branch` 参数、Gitee merge 默认也不删**（踩坑见 [`docs/agents/hooks/README.md`](docs/agents/hooks/README.md)），AI 用 `git push origin --delete <branch>` 删，或人在 Gitee 界面勾「删除源分支」。
 - **分支命名遵循强制白名单**：开分支前缀必须是工单分支前缀（hook 强制——不在白名单则 `--force-with-lease` 被拦、落后 `origin/master` 时 push 被拦）。前缀清单、标题格式、生命周期、保护分支规则见 [`docs/agents/branch-naming.md`](docs/agents/branch-naming.md)；决策见 [`docs/adr/0004-branch-naming.md`](docs/adr/0004-branch-naming.md)。
 - **并行可写任务必须用 task worktree**：`master` 只做只读调查和可刷新镜像；改文件前必须在主 checkout 运行 `scripts/start-task-worktree.sh <branch> <worktree-dir>`，task worktree 固定在 `../blue-whale-worktrees/`。发布分支用 `scripts/publish-task-branch.sh`；PR 合并后用 `scripts/cleanup-task-worktree.sh`；巡检用 `scripts/list-task-worktrees.sh`。完整流程见 [`docs/agents/worktree-workflow.md`](docs/agents/worktree-workflow.md)，决策见 [`docs/adr/0009-parallel-agent-worktrees.md`](docs/adr/0009-parallel-agent-worktrees.md)。
@@ -38,7 +39,7 @@ Rules:
 
 ### 命中以下情况 → 必查 `docs/agents/commit-and-review.md`
 
-- **开 PR** → 模板见 `.gitee/PULL_REQUEST_TEMPLATE.md`（Gitee 自动加载），风险等级字段必填。
+- **开 PR** → 必须已有用户发布授权；PR 必须是 draft；模板见 `.gitee/PULL_REQUEST_TEMPLATE.md`（Gitee 自动加载），风险等级字段必填。
 - **并行任务 / task worktree 生命周期** → 开工、发布、清理、dirty master SOP 见 `docs/agents/worktree-workflow.md`。
 
 > Hook 违规时会拦截并在错误信息里指路到该文档。

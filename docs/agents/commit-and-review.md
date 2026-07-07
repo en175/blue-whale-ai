@@ -39,9 +39,21 @@
 
 ---
 
-## 审查门槛（PR 合并）
+## 发布授权与审查门槛
 
-日常改动**自审即可合并**（不强制互审，不阻塞）。低风险改动直接自审合；改动较大或跨模块时建议拉队友过一眼，但不强制。
+Agent 开发完成后的默认终点是**本地实现 + 验证 + 提交 + 报告待审查**。未经用户明确授权，Agent 禁止执行发布动作：
+
+- `git push`
+- 创建 PR
+- 合并 PR
+- 创建 release
+- 删除远程源分支
+
+用户授权使用自然语言即可，不要求固定口令；但必须明确包含发布/推送/开 PR/合并意图。“继续”“可以”“你处理吧”“完成后走流程”这类泛化许可不算发布授权。
+
+**发布审查包**一次授权覆盖“推送当前工单分支 + 创建指向 `master` 的 draft PR”。PR 创建后，Agent 必须停下来交给开发者审查；该授权不覆盖合并。
+
+**合并 PR**必须另获授权。低风险 PR 可在用户明确授权后由 Agent 用 Gitee MCP 合并；高风险 PR 禁 AI 合并，必须人手动合并。
 
 ---
 
@@ -55,15 +67,15 @@ PR 合并用 **merge**，**禁用 squash / rebase**。
 
 **约束**：
 
-- AI 用 Gitee MCP `merge_enterprise_pull` 时 `merge_method=merge`（或不传，Gitee 默认 merge）。传 `squash`/`rebase` 会被 `.claude/hooks/block-squash-merge.sh`（PreToolUse）拦（`exit 2`）。
+- AI 用 Gitee MCP `merge_enterprise_pull` 时必须先获得用户合并授权，并使用 `merge_method=merge`（或不传，Gitee 默认 merge）。传 `squash`/`rebase` 会被 `.claude/hooks/block-squash-merge.sh`（PreToolUse）拦（`exit 2`）。
 - 人在 Gitee 网页手动合并同样选 **merge**——hook 拦不到服务端人操作，靠自觉 + 本文档约束。
-- 合并即删源分支：**MCP `merge_enterprise_pull` 无 `prune_source_branch` 参数、Gitee merge 默认也不删**（踩坑见 [`hooks/README.md`](hooks/README.md)）。AI 用 `git push origin --delete <branch>` 删，或人在 Gitee 界面勾「删除源分支」。
+- 合并即删源分支：**MCP `merge_enterprise_pull` 无 `prune_source_branch` 参数、Gitee merge 默认也不删**（踩坑见 [`hooks/README.md`](hooks/README.md)）。删除远程源分支属于发布后清理动作，同样必须在用户授权后执行；AI 用 `git push origin --delete <branch>` 删，或人在 Gitee 界面勾「删除源分支」。
 
 ---
 
 ## PR 模板
 
-开 PR 时描述按此填好（AI 填，人审）。模板文件：`.gitee/PULL_REQUEST_TEMPLATE.md`（Gitee 自动加载）。
+开 PR 前必须先获得用户发布审查包授权。PR 默认创建为 **draft**，描述按此填好（AI 填，人审）。模板文件：`.gitee/PULL_REQUEST_TEMPLATE.md`（Gitee 自动加载）。
 
 ```markdown
 ## 对应开发分支
@@ -94,9 +106,9 @@ ________
 
 ## 风险等级（必填）
 <!-- 低=局部改动；中=影响交互/数据流；高=影响核心逻辑/鉴权/数据完整性 -->
-- [ ] 低风险（自审合并）
+- [ ] 低风险（用户授权后可由 Agent 合并）
 - [ ] 中风险（建议互审）
-- [ ] 高风险（须人审，禁 AI 自审合）
+- [ ] 高风险（须人审，禁 AI 合并）
 
 ## 已知风险
 <!-- 已知未解决的问题/潜在影响。无则填「无：<理由>」 -->
@@ -146,6 +158,7 @@ ________
 | AI 破坏性 git 操作 | 🔴 硬挡 | 裸 `--force`/`-f`、对 `master`/`main` 强推、`reset --hard` / `clean -f` / `branch -D` / `checkout .` / `restore .` 均拦；工单分支上的 `--force-with-lease` 放行（前缀见 [branch-naming.md](branch-naming.md)） |
 | 工单分支落后软提醒 | 🟡 软提醒 | pre-commit：工单分支（前缀见 [branch-naming.md](branch-naming.md)）落后 `origin/master` 时 `echo` 提示落后提交数，**不拦 commit**（硬拦在 pre-push）。每次 commit 静默 `fetch`。见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md) |
 | squash/rebase 合并拦截 | 🔴 硬挡 | Claude PreToolUse（`block-squash-merge.sh`）：AI 调 `mcp__gitee-ent__merge_enterprise_pull` 时 `merge_method=squash`/`rebase` 一律拦，强制 **merge**（免改写 sha 致 `git branch -d` 失败 + 拦 `-D` 死锁，见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md)）。人网页操作拦不到，靠自觉 |
+| 发布动作授权确认 | 🟡 用户确认 | Claude PreToolUse（`confirm-release-action.sh`）：AI 执行 `git push`、发布/清理脚本、创建 Gitee PR、合并 Gitee PR、创建 Gitee release 前触发用户确认；非 draft PR 直接拦截，要求改为 draft |
 
 > 本表与项目 README 的「Hook 兜底清单」（如有）**同源**——改一处须同步另一处，避免漂移。权威实现以 `.githooks/` + `.claude/hooks/block-dangerous-git.sh` 代码为准。
 
