@@ -3,7 +3,6 @@
  * ComposerShell：自适应尺寸的输入容器外壳；ModelSettingsMenu：生成模型参数设置浮层。
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Check } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import { squirclePath } from "../utils";
 
@@ -59,21 +58,15 @@ export function ComposerShell({ children }: { children: React.ReactNode }) {
 }
 
 export function ModelSettingsMenu({
-  mode,
   model,
-  modes,
   models,
-  onModeChange,
   onModelChange,
   onClose,
   menuRef,
   triggerRef,
 }: {
-  mode: { id: string; label: string; description: string };
   model: { id: string; label: string; costMultiplier: string };
-  modes: { id: string; label: string; description: string }[];
   models: { id: string; label: string; costMultiplier: string }[];
-  onModeChange: (mode: { id: string; label: string; description: string }) => void;
   onModelChange: (model: { id: string; label: string; costMultiplier: string }) => void;
   onClose: () => void;
   menuRef: React.RefObject<HTMLDivElement | null>;
@@ -101,7 +94,7 @@ export function ModelSettingsMenu({
       ref={menuRef}
       className="tc-model-settings-menu"
       role="dialog"
-      aria-label="模式与模型"
+      aria-label="模型"
       style={{
         position: "fixed",
         boxSizing: "border-box",
@@ -123,50 +116,6 @@ export function ModelSettingsMenu({
         visibility: isVisible ? "visible" : "hidden",
       }}
     >
-      <section className="tc-model-settings-section" aria-label="创作模式">
-        <div className="tc-model-settings-section__title px-2 py-1.5 text-[11px] font-medium text-white/45">
-          创作模式
-        </div>
-        {modes.map((m) => {
-          const selected = m.id === mode.id;
-          return (
-            <button
-              key={m.id}
-              type="button"
-              role="option"
-              aria-selected={selected}
-              onClick={() => {
-                onModeChange(m);
-                onClose();
-              }}
-              className={`tc-creation-mode-option flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left transition-colors ${
-                selected
-                  ? "tc-creation-mode-option--selected bg-white/[0.08]"
-                  : "hover:bg-white/[0.05]"
-              }`}
-            >
-              <span className="tc-creation-mode-option__content flex min-w-0 flex-col">
-                <span className="tc-creation-mode-option__label text-[13px] font-medium text-white/90">
-                  {m.label}
-                </span>
-                <span className="tc-creation-mode-option__description text-[11px] leading-4 text-white/45">
-                  {m.description}
-                </span>
-              </span>
-              {selected && (
-                <Check
-                  size={14}
-                  className="tc-creation-mode-option__check shrink-0 text-white/80"
-                  aria-hidden="true"
-                />
-              )}
-            </button>
-          );
-        })}
-      </section>
-
-      <div className="tc-model-settings-divider mx-1 my-1 h-px bg-white/[0.08]" aria-hidden="true" />
-
       <section className="tc-model-settings-section" aria-label="Agent 模型">
         <div className="tc-model-settings-section__title px-2 py-1.5 text-[11px] font-medium text-white/45">
           Agent 模型

@@ -67,7 +67,7 @@ export function AgentChatPanel({
     []
   );
 
-  const [selectedMode, setSelectedMode] = useState(CREATION_MODES[0]);
+  const [selectedMode] = useState(CREATION_MODES[0]);
   const [selectedModel, setSelectedModel] = useState(AGENT_MODELS[3]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
 
@@ -434,19 +434,16 @@ export function AgentChatPanel({
                           className="tc-model-settings-trigger tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/[0.08]"
                           aria-haspopup="dialog"
                           aria-expanded={modelSettingsOpen}
-                          aria-label={`模式与模型: ${selectedMode.label} · ${selectedModel.label}`}
-                          title="模式与模型"
+                          aria-label={`模型: ${selectedModel.label}`}
+                          title="模型"
                         >
                           <Box size={16} />
                         </button>
 
                         {modelSettingsOpen && (
                           <ModelSettingsMenu
-                            mode={selectedMode}
                             model={selectedModel}
-                            modes={CREATION_MODES}
                             models={AGENT_MODELS}
-                            onModeChange={setSelectedMode}
                             onModelChange={setSelectedModel}
                             onClose={() => setModelSettingsOpen(false)}
                             menuRef={modelSettingsMenuRef}
