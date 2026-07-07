@@ -1,7 +1,8 @@
 # Hooks 维护手册
 
-> `.claude/hooks/` 下 PreToolUse 拦截器的**单一权威源**。
-> 脚本 + `.claude/settings.json` 挂载点**同源维护**——改任何一处必须同步改另一处。
+> `.claude/hooks/` 下 PreToolUse 拦截器脚本是**单一权威源**。
+> Claude Code 通过 `.claude/settings.json` 挂载；Codex 通过 `.codex/hooks.json` 挂载到同一批脚本。
+> 脚本 + 两端挂载点**同源维护**——改任何一处必须同步改另一处。
 > 决策背景：补齐 CLAUDE.md「Gitee 工作流」高频硬约束的执行末梢（让红线在 hook 层落地，不只靠文档纪律）。
 
 ---
@@ -16,7 +17,7 @@
 | `block-squash-merge.sh` | `mcp__gitee-ent__merge_enterprise_pull` | `PreToolUse` | 拦 `merge_method=squash`/`rebase`，强制走 `merge` | CLAUDE.md「合并方法」 |
 | `block-issue-without-repo.sh` | `mcp__gitee-ent__create_enterprise_issue` / `mcp__gitee-ent__update_enterprise_issue` | `PreToolUse` | 拦 `project_id` 缺失/为 0；拦子 issue 未带 `project_id/program_id`，强制仓库可见 | [ADR-0007](../../adr/0007-issue-must-link-repo.md) / [ADR-0008](../../adr/0008-sub-issues-must-inherit-repo.md) |
 
-> `settings.json` 里还有 2 条**纯提醒**型 hook（grep 触发提示用 graphify、Read/Glob 触发提示先查图谱），它们不阻断执行，仅通过 `additionalContext` 注入提示。详见 `.claude/settings.json` 注释。
+> `settings.json` / `hooks.json` 里还有 2 条**纯提醒**型 hook（grep 触发提示用 graphify、Read/Glob 触发提示先查图谱），它们不阻断执行，仅通过 `additionalContext` 注入提示。
 
 ---
 
@@ -40,7 +41,7 @@ chmod +x .claude/hooks/<name>.sh
 
 > **未执行可执行权限** = hook 静默失效（`type: command` 不带 `bash` 前缀时，Claude Code 不会自动加执行位）。这是 90% 的"hook 不工作"故障的根因。
 
-### 3. 挂到 `.claude/settings.json`
+### 3. 挂到 `.claude/settings.json` 和 `.codex/hooks.json`
 
 在 `hooks.PreToolUse[]` 加一条：
 
@@ -57,6 +58,21 @@ chmod +x .claude/hooks/<name>.sh
 - **`$CLAUDE_PROJECT_DIR`** 必须用，路径才在不同项目根下都对。
 - **matcher 精确**：要拦某个 MCP 工具就写完整 `mcp__server__tool_name`，别偷懒写 `mcp__*`（通配不一定生效）。
 - **同 matcher 多 hook 用数组**：可以挂多条，独立 exit code（一条拦了不影响另一条放行）。
+
+Codex 挂载点写在 `.codex/hooks.json`，但**不要复制脚本实现到 `.codex/hooks/`**。Codex command 统一通过薄 wrapper 定位 `.claude/hooks`：
+
+```json
+{
+  "type": "command",
+  "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" <name>.sh"
+}
+```
+
+原因：
+- `.claude/hooks` 是唯一脚本源，避免 Claude/Codex 两套实现漂移。
+- `.codex/hooks/run-claude-pretool.sh` 只做平台适配：Claude Code 支持的 `permissionDecision=ask` 在 Codex `PreToolUse` 里不支持，wrapper 会把它转换成 `exit 2` 硬阻断，避免发布/合并/推送确认失效后继续执行。
+- `.codex/config.toml` 属于本机私密配置，可能含 token，不进仓；项目共享的只有 `.codex/hooks.json`。
+- Codex 首次拉取或 hook 变更后，用户需要在 Codex 里运行 `/hooks` review/trust 项目 hook，否则新挂载点不会执行。
 
 ---
 
@@ -100,6 +116,15 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现，只测这条边界。`confirm-release-action.sh` 的确认型用例断言 stdout 含 `permissionDecision":"ask"`；阻断型用例仍断言 exit code + stderr。唯一外部依赖 `git rev-parse`（push-to-master / dangerous-git 的「无显式 refspec → 查当前分支」分支用）由夹具用 PATH 注入的临时 fake git 隔离（响应 `rev-parse --abbrev-ref HEAD` → `$FAKE_BRANCH`），不碰真实仓库。
 
+夹具还校验 Codex 挂载层：
+- `.codex/hooks.json` 必须存在。
+- `hooks.PreToolUse` 的 matcher + hook 数量必须与 `.claude/settings.json` 一致。
+- 所有 Codex 脚本 command 必须通过 `.codex/hooks/run-claude-pretool.sh`，不得直接指向 `.claude/hooks/` 或复制出来的 `.codex/hooks/` 实现。
+- 每个 Codex 包装命令必须和同位置 Claude hook 挂载的脚本名一致。
+- 代表性 Codex 包装命令必须从 `.codex/hooks.json` 读取，并能从 repo root 调到权威脚本得到相同拦截/放行结果。
+- `permissionDecision=ask` 的确认型输出在 Codex 包装层必须转换为硬阻断。
+- `.gitignore` 必须只放行 `.codex/hooks.json` 和 `.codex/hooks/run-claude-pretool.sh`；`.codex/config.toml`、其它 `.codex/*`、其它 `.codex/hooks/*` 均保持忽略。
+
 ### 字段类型以 MCP schema 为准（核心教训）
 
 写测试输入时，**JSON 字段类型以 MCP `tools/list` 返回的 schema 为准**，不要凭直觉只写字符串值。血泪：
@@ -119,6 +144,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 | 触发后无任何反应 | 脚本没 `+x` | `ls -la .claude/hooks/<name>.sh` |
 | stderr 有报错但工具仍执行 | exit code 不是 0/2 | 在脚本末尾加 `echo "DEBUG exit=$?" >&2` |
 | 提醒型 hook 不响应 | 激活条件不满足（如 `graphify-out/graph.json` 缺失） | `[ -f graphify-out/graph.json ] && echo OK` |
+| Codex hook 不响应 | `.codex/hooks.json` 未被信任 | 在 Codex 里运行 `/hooks`，review 并 trust 项目 hook |
 
 ---
 
@@ -127,6 +153,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 - [ ] 新脚本遵循解析策略、stdin 读 JSON、`exit 0/2` 语义
 - [ ] `chmod +x` 已执行
 - [ ] `.claude/settings.json` 同步更新（matcher + command 路径）
+- [ ] `.codex/hooks.json` 同步更新（matcher + command 路径，脚本 command 指向 `.claude/hooks/`）
 - [ ] 至少 1 个**应当被拦**的测试用例 + 1 个**应当放行**的测试用例跑过
 - [ ] **输入 JSON 字段类型以 MCP `tools/list` schema 为准**（不要凭直觉只写字符串值——`project_id` / `program_id` / `parent_id` 在 schema 里是 number，PR #11 / IJZ5WA 复现过 string-only 正则漏 number 形态的假绿）
 - [ ] 跑 `bash scripts/test-hooks.sh`，全绿才提交（退出码 0 = 通过）

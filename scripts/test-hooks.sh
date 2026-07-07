@@ -7,6 +7,7 @@
 #   - 退出码：全用例过 → 0；任一失败 → 非 0。CI/手测一键判过。
 #
 # 跑法：bash scripts/test-hooks.sh
+# 可选：HOOK_DIR=/path/to/hooks bash scripts/test-hooks.sh
 #
 # 为什么存在：PR #11 的 block-issue-without-repo.sh 首版正则只匹配 string，
 # 漏了 MCP schema 里 project_id 的 number 形态，「三场景空跑通过」是假绿
@@ -15,7 +16,10 @@
 
 set -u
 
-HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.claude/hooks" && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HOOK_DIR="${HOOK_DIR:-"$REPO_ROOT/.claude/hooks"}"
+HOOK_DIR="$(cd "$HOOK_DIR" && pwd)"
+CODEX_HOOKS_JSON="$REPO_ROOT/.codex/hooks.json"
 
 # ── git stub（隔离 git rev-parse，不碰真实仓库）────────────────
 # push-to-master / dangerous-git 的「无显式 refspec → 查当前分支」分支，
@@ -30,6 +34,10 @@ setup_git_stub() {
 # fake git：仅响应 rev-parse --abbrev-ref HEAD（返回 $FAKE_BRANCH）。
 if [ "$1" = "rev-parse" ] && [ "$2" = "--abbrev-ref" ] && [ "$3" = "HEAD" ]; then
   echo "${FAKE_BRANCH:-master}"
+  exit 0
+fi
+if [ "$1" = "rev-parse" ] && [ "$2" = "--show-toplevel" ]; then
+  echo "${FAKE_GIT_TOPLEVEL:-$PWD}"
   exit 0
 fi
 # 其它子命令不归本 stub 管，exit 0 空输出（hook 不依赖）
@@ -63,6 +71,23 @@ run_hook() {
   tmp_out="$(mktemp)"
   tmp_err="$(mktemp)"
   printf '%s' "$json" | bash "${HOOK_DIR}/${hook}" >"$tmp_out" 2>"$tmp_err"
+  RUN_EXIT=$?
+  RUN_STDOUT="$(cat "$tmp_out")"
+  RUN_STDERR="$(cat "$tmp_err")"
+  rm -f "$tmp_out"
+  rm -f "$tmp_err"
+}
+
+# run_command_hook <command> <json>
+# 喂 stdin JSON 到 settings/hooks.json 中的 command 字符串，捕获边界输出。
+run_command_hook() {
+  local command="$1"; shift
+  local json="$1"; shift
+  local tmp_out
+  local tmp_err
+  tmp_out="$(mktemp)"
+  tmp_err="$(mktemp)"
+  printf '%s' "$json" | eval "$command" >"$tmp_out" 2>"$tmp_err"
   RUN_EXIT=$?
   RUN_STDOUT="$(cat "$tmp_out")"
   RUN_STDERR="$(cat "$tmp_err")"
@@ -104,6 +129,176 @@ assert_stdout_has() {
     FAILURES+=("[${label}] stdout 未含 \"${needle}\" 实际=${RUN_STDOUT}")
   fi
 }
+
+assert_file_exists() {
+  local path="$1"; shift
+  local label="$1"; shift
+  if [ -f "$path" ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] 文件不存在：${path}")
+  fi
+}
+
+assert_git_ignored() {
+  local path="$1"; shift
+  local label="$1"; shift
+  if git check-ignore -q --no-index "$path"; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] 应被 gitignore 忽略但未被忽略：${path}")
+  fi
+}
+
+assert_git_not_ignored() {
+  local path="$1"; shift
+  local label="$1"; shift
+  if git check-ignore -q --no-index "$path"; then
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] 不应被 gitignore 忽略但已被忽略：${path}")
+  else
+    PASS=$((PASS + 1))
+  fi
+}
+
+assert_codex_hooks_valid() {
+  local label="$1"; shift
+  local tmp_err
+  tmp_err="$(mktemp)"
+  python3 - "$REPO_ROOT/.claude/settings.json" "$CODEX_HOOKS_JSON" > /dev/null 2>"$tmp_err" <<'PY'
+import json
+import os
+import re
+import shlex
+import sys
+from pathlib import Path
+
+claude_path = Path(sys.argv[1])
+codex_path = Path(sys.argv[2])
+claude = json.loads(claude_path.read_text())
+codex = json.loads(codex_path.read_text())
+
+claude_items = claude["hooks"]["PreToolUse"]
+codex_items = codex["hooks"]["PreToolUse"]
+
+def shape(items):
+    return [(item["matcher"], len(item.get("hooks", []))) for item in items]
+
+if shape(claude_items) != shape(codex_items):
+    raise SystemExit(f"matcher/hook shape mismatch: claude={shape(claude_items)} codex={shape(codex_items)}")
+
+matchers = [item["matcher"] for item in codex_items]
+required = {
+    "Bash",
+    "Read|Glob",
+    "mcp__gitee-ent__create_enterprise_repo_pull",
+    "mcp__gitee-ent__merge_enterprise_pull",
+    "mcp__gitee-ent__create_enterprise_repo_release",
+    "mcp__gitee-ent__create_enterprise_issue",
+    "mcp__gitee-ent__update_enterprise_issue",
+}
+missing = sorted(required - set(matchers))
+if missing:
+    raise SystemExit(f"missing Codex matcher(s): {missing}")
+
+def claude_script(command):
+    match = re.search(r"\.claude/hooks/([^\"'\s]+\.sh)", command)
+    return match.group(1) if match else None
+
+def codex_script(command):
+    if "run-claude-pretool.sh" not in command:
+        if ".codex/hooks/" in command:
+            raise SystemExit(f"Codex command points at copied .codex/hooks implementation: {command}")
+        if ".claude/hooks/" in command:
+            raise SystemExit(f"Codex command bypasses wrapper: {command}")
+        return None
+    parts = shlex.split(command)
+    scripts = [
+        os.path.basename(part)
+        for part in parts
+        if part.endswith(".sh") and os.path.basename(part) != "run-claude-pretool.sh"
+    ]
+    if len(scripts) != 1:
+        raise SystemExit(f"Codex wrapper command must name exactly one hook script: {command}")
+    return scripts[0]
+
+script_count = 0
+for index, (claude_item, codex_item) in enumerate(zip(claude_items, codex_items)):
+    claude_scripts = [
+        script
+        for hook in claude_item.get("hooks", [])
+        if hook.get("type") == "command"
+        for script in [claude_script(hook["command"])]
+        if script
+    ]
+    codex_scripts = [
+        script
+        for hook in codex_item.get("hooks", [])
+        if hook.get("type") == "command"
+        for script in [codex_script(hook["command"])]
+        if script
+    ]
+    if claude_scripts != codex_scripts:
+        raise SystemExit(
+            f"script mismatch at PreToolUse[{index}] matcher={claude_item['matcher']}: "
+            f"claude={claude_scripts} codex={codex_scripts}"
+        )
+    script_count += len(codex_scripts)
+
+if script_count == 0:
+    raise SystemExit("no Codex script hook commands found")
+PY
+  local exit_code=$?
+  if [ "$exit_code" = 0 ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] Codex hooks JSON 校验失败：$(cat "$tmp_err")")
+  fi
+  rm -f "$tmp_err"
+}
+
+codex_command_for() {
+  local script="$1"; shift
+  python3 - "$CODEX_HOOKS_JSON" "$script" <<'PY'
+import json
+import os
+import shlex
+import sys
+from pathlib import Path
+
+codex = json.loads(Path(sys.argv[1]).read_text())
+wanted = sys.argv[2]
+matches = []
+for item in codex["hooks"]["PreToolUse"]:
+    for hook in item.get("hooks", []):
+        command = hook.get("command", "")
+        if hook.get("type") != "command" or "run-claude-pretool.sh" not in command:
+            continue
+        parts = shlex.split(command)
+        scripts = [
+            os.path.basename(part)
+            for part in parts
+            if part.endswith(".sh") and os.path.basename(part) != "run-claude-pretool.sh"
+        ]
+        if scripts == [wanted]:
+            matches.append(command)
+
+if not matches:
+    raise SystemExit(f"missing Codex command for {wanted}")
+if len(set(matches)) != 1:
+    raise SystemExit(f"ambiguous Codex commands for {wanted}: {matches}")
+print(matches[0])
+PY
+}
+
+CODEX_BLOCK_PUSH_CMD="$(codex_command_for block-push-to-master.sh)"
+CODEX_DANGER_CMD="$(codex_command_for block-dangerous-git.sh)"
+CODEX_SQUASH_CMD="$(codex_command_for block-squash-merge.sh)"
+CODEX_ISSUE_CMD="$(codex_command_for block-issue-without-repo.sh)"
+CODEX_RELEASE_CMD="$(codex_command_for confirm-release-action.sh)"
 
 # ── 用例 ────────────────────────────────────────────────────────
 
@@ -336,6 +531,49 @@ assert_exit 2 "danger: checkout . 拦截"
 # git restore . → 拦
 run_hook "$DANGER_HOOK" '{"tool_input":{"command":"git restore ."}}'
 assert_exit 2 "danger: restore . 拦截"
+
+teardown_git_stub
+unset FAKE_BRANCH
+
+# Slice 5 — Codex project hook layer
+assert_file_exists "$CODEX_HOOKS_JSON" "codex: hooks.json 存在"
+assert_codex_hooks_valid "codex: hooks.json 与 Claude matcher 同步"
+assert_git_not_ignored ".codex/hooks.json" "codex: hooks.json 可提交"
+assert_git_not_ignored ".codex/hooks/run-claude-pretool.sh" "codex: wrapper 可提交"
+assert_git_ignored ".codex/config.toml" "codex: config.toml 保持私密"
+assert_git_ignored ".codex/local.json" "codex: 其它本机配置保持私密"
+assert_git_ignored ".codex/hooks/other.sh" "codex: 禁止提交复制出来的 hook 实现"
+
+setup_git_stub
+export FAKE_BRANCH=feature/x
+
+# Codex 包装命令必须能从 repo root 调到 .claude/hooks 权威脚本。
+run_command_hook "$CODEX_BLOCK_PUSH_CMD" '{"tool_input":{"command":"git push origin master"}}'
+assert_exit 2 "codex: push master 包装命令拦截"
+assert_stderr_has "master" "codex: push master 包装命令提示"
+
+run_command_hook "$CODEX_DANGER_CMD" '{"tool_input":{"command":"git push --force origin feature/x"}}'
+assert_exit 2 "codex: dangerous git 包装命令拦截"
+assert_stderr_has "--force" "codex: dangerous git 包装命令提示"
+
+run_command_hook "$CODEX_DANGER_CMD" '{"tool_input":{"command":"git push --force-with-lease origin feature/x"}}'
+assert_exit 0 "codex: force-with-lease 工单分支放行"
+
+run_command_hook "$CODEX_SQUASH_CMD" '{"tool_input":{"merge_method":"squash"}}'
+assert_exit 2 "codex: squash merge 包装命令拦截"
+
+run_command_hook "$CODEX_ISSUE_CMD" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_input":{"issue_id":"IJZ5WA","issue_state_id":123,"label_ids":"342812299"}}'
+assert_exit 0 "codex: 普通 update issue 放行"
+
+run_command_hook "$CODEX_ISSUE_CMD" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_input":{"issue_id":"IJZ74J","parent_id":33553306}}'
+assert_exit 2 "codex: update 子 issue 缺归属拦截"
+
+run_command_hook "$CODEX_RELEASE_CMD" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"false","title":"test"}}'
+assert_exit 2 "codex: 非 draft PR 包装命令拦截"
+
+run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"git push -u origin feature/x"}}'
+assert_exit 2 "codex: release ask 转硬阻断"
+assert_stderr_has "requires explicit user confirmation" "codex: release ask 转硬阻断提示"
 
 teardown_git_stub
 unset FAKE_BRANCH
