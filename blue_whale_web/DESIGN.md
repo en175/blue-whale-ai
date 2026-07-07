@@ -24,6 +24,8 @@ colors:
   success: "#22c55e"
   destructive: "#ef4444"
   on-accent: "#ffffff"
+  # 登录主色（豁免：与 accent 并列的登录专用强调色，复刻 topview.ai 登录主色，仅 LoginModal 登录按钮使用，项目内孤例）
+  login-primary: "#4e40f3"
 typography:
   body-md:
     fontFamily: Outfit
@@ -162,3 +164,4 @@ Canvas 工作台采用绝对定位的三区布局：左侧工具栏、底部生�
 - ❌ 不要引入第二个品牌强调色（保持单色强调）。
 - ❌ 不要用纯白之外的浅色作为大块背景（破坏黑底基调）。
 - ❌ 不要在组件里硬编码 hex/rgba 值，所有值走 token。
+- ⚠️ 豁免：`login-primary (#4e40f3)` 是与 `accent` 并列的登录专用强调色，仅用于 `LoginModal` 的「登录」按钮（复刻 topview.ai 风格）。这是项目内唯一允许的第二品牌色，且仅此一处；其他场景仍坚持单色强调（accent）。

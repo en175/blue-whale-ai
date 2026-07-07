@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, MessageSquare, Pencil, Settings, Trash2 } from "lucide-react";
 import type { Project } from "../types";
 import { IconPlus, TopviewLogo } from "../icons";
+import { UserMenu } from "@/components/auth/UserMenu";
 
 export function ProjectMenu({
   open,
@@ -441,6 +442,7 @@ export function TopBarRight({
   return (
     <div className="tc-top-bar-right absolute top-4 right-4 z-[100] flex items-center">
       <div className="tc-top-bar-right__actions flex items-center gap-2">
+        <UserMenu />
         <button
           type="button"
           onClick={onAgentToggle}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
+import { useAuth } from "./auth/AuthContext";
 import {
   Plus,
   BookOpenText,
@@ -11,7 +12,6 @@ import {
   Sparkle,
   Crown,
   Clock,
-  Check,
   ArrowRight,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -28,11 +28,6 @@ const MODELS = [
   { id: "seedance-2", label: "Seedance 2.0", premium: true },
   { id: "seedance-mini", label: "Seedance 2.0 Mini" },
   { id: "seedance-fast", label: "Seedance 2.0 Fast" },
-];
-
-const MODES = [
-  { id: "agent", label: "Agent", description: "对话式逐步规划与打磨。" },
-  { id: "direct", label: "Direct Gen", description: "根据提示词直接生成图片或视频卡片。" },
 ];
 
 const AGENT_MODELS = [
@@ -115,8 +110,6 @@ export default function AgentComposer() {
   const [resolutionOpen, setResolutionOpen] = useState(false);
   const [aspectRatioOpen, setAspectRatioOpen] = useState(false);
   const [durationOpen, setDurationOpen] = useState(false);
-  const [modeOpen, setModeOpen] = useState(false);
-  const [selectedMode, setSelectedMode] = useState(MODES[1]);
   const [agentModelOpen, setAgentModelOpen] = useState(false);
   const [selectedAgentModel, setSelectedAgentModel] = useState(
     AGENT_MODELS[3]
@@ -125,13 +118,15 @@ export default function AgentComposer() {
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
 
   const router = useRouter();
+  const { requireAuth } = useAuth();
 
   const handleGenerate = useCallback(() => {
-    const query = content.trim()
-      ? `?prompt=${encodeURIComponent(content.trim())}`
-      : "";
-    router.push(`/canvas${query}`);
-  }, [router, content]);
+    const prompt = content.trim();
+    const query = prompt ? `?prompt=${encodeURIComponent(prompt)}` : "";
+    requireAuth({ kind: "home-generate", prompt }, () =>
+      router.push(`/canvas${query}`),
+    );
+  }, [router, content, requireAuth]);
 
   // AI 视频 tab params
   const [refMode, setRefMode] = useState(VIDEO_REF_MODES[1]);
@@ -157,7 +152,6 @@ export default function AgentComposer() {
   const resolutionContainerRef = useRef<HTMLDivElement>(null);
   const aspectRatioContainerRef = useRef<HTMLDivElement>(null);
   const durationContainerRef = useRef<HTMLDivElement>(null);
-  const modeContainerRef = useRef<HTMLDivElement>(null);
   const agentModelContainerRef = useRef<HTMLDivElement>(null);
   const imageModelContainerRef = useRef<HTMLDivElement>(null);
   const imageAspectRatioContainerRef = useRef<HTMLDivElement>(null);
@@ -270,21 +264,6 @@ export default function AgentComposer() {
     }
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [durationOpen]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        modeContainerRef.current &&
-        !modeContainerRef.current.contains(event.target as Node)
-      ) {
-        setModeOpen(false);
-      }
-    };
-    if (modeOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [modeOpen]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -1371,72 +1350,6 @@ export default function AgentComposer() {
 
                   <div className="relative ml-auto flex items-center gap-3">
                     <div className="flex items-center gap-0.5">
-                      <div className="relative" ref={modeContainerRef}>
-                        <button
-                          type="button"
-                          onClick={() => setModeOpen((v) => !v)}
-                          className="inline-flex items-center gap-1 h-8 text-[13px] font-medium px-3 rounded-lg bg-transparent cursor-pointer transition-colors duration-150 whitespace-nowrap hover:text-white/60 pr-2 text-white/60"
-                          aria-haspopup="listbox"
-                          aria-expanded={modeOpen}
-                          aria-label={`模式: ${selectedMode.label}`}
-                        >
-                          <span className="whitespace-nowrap">{selectedMode.label}</span>
-                          <ChevronDown
-                            width={11}
-                            height={11}
-                            className={`transition-transform duration-150 ${
-                              modeOpen ? "rotate-180" : ""
-                            }`}
-                          />
-                        </button>
-                        {modeOpen && (
-                          <div className="absolute bottom-[calc(100%+8px)] z-[100] w-[252px] left-1/2 -translate-x-1/2">
-                            <div
-                              className="ncs-thin-scrollbar overflow-y-auto rounded-xl border border-white/10 bg-[rgba(32,32,32,0.96)] p-1.5 shadow-[0_14px_40px_rgba(0,0,0,0.32)] backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150 origin-bottom"
-                              role="listbox"
-                              aria-label="模式"
-                            >
-                              {MODES.map((mode) => {
-                                const selected = selectedMode.id === mode.id;
-                                return (
-                                  <button
-                                    key={mode.id}
-                                    type="button"
-                                    role="option"
-                                    aria-selected={selected}
-                                    onClick={() => {
-                                      setSelectedMode(mode);
-                                      setModeOpen(false);
-                                    }}
-                                    className={`flex w-full cursor-pointer items-start gap-2 rounded-lg border-0 px-2.5 py-2 text-left font-[inherit] transition-colors duration-150 hover:bg-white/10 hover:text-white ${
-                                      selected
-                                        ? "bg-white/10 text-white"
-                                        : "bg-transparent text-white/80"
-                                    }`}
-                                  >
-                                    <span className="min-w-0 flex-1">
-                                      <span className="block text-[13px] font-semibold">
-                                        {mode.label}
-                                      </span>
-                                      <span className="mt-0.5 block text-[11px] leading-[1.35] text-white/60">
-                                        {mode.description}
-                                      </span>
-                                    </span>
-                                    {selected && (
-                                      <Check
-                                        width={14}
-                                        height={14}
-                                        className="mt-0.5 shrink-0 text-white/80"
-                                        aria-hidden="true"
-                                      />
-                                    )}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
                       <div className="relative" ref={agentModelContainerRef}>
                         <button
                           type="button"

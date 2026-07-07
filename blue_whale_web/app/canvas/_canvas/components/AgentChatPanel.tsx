@@ -14,6 +14,7 @@ import { UserMessageBubble, AgentMessageBubble, ThinkingBlock, AgentCard } from 
 import type { ChatMessage } from "../types";
 import type { CardStatus } from "../cardStatus";
 import { buildMockReplyForMode } from "../messages";
+import { useAuth } from "@/components/auth/AuthContext";
 import type { CardMessage } from "../nodeFromCard";
 
 export function AgentChatPanel({
@@ -25,6 +26,7 @@ export function AgentChatPanel({
   onCardGenerated,
   onAppendMessages,
   onSetCardStatus,
+  prompt,
 }: {
   /** 受控消息流：来自当前 Project.messages（切换项目随 key remount 更换） */
   messages: ChatMessage[];
@@ -37,6 +39,8 @@ export function AgentChatPanel({
   onAppendMessages?: (messages: ChatMessage[]) => void;
   /** 设置当前项目内某 card 的状态（重试链推进） */
   onSetCardStatus?: (cardId: number | string, status: CardStatus) => void;
+  /** 首页续上 / 模板卡点击带入的 prompt，填入 composer（可编辑后发送） */
+  prompt?: string;
 }) {
   const [composerEmpty, setComposerEmpty] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -63,13 +67,24 @@ export function AgentChatPanel({
     []
   );
 
-  const [selectedMode, setSelectedMode] = useState(CREATION_MODES[0]);
+  const [selectedMode] = useState(CREATION_MODES[0]);
   const [selectedModel, setSelectedModel] = useState(AGENT_MODELS[3]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
+
+  // prompt 带入 composer（首页续上 / 模板卡点击），可编辑后发送
+  useEffect(() => {
+    if (prompt && composerRef.current) {
+      composerRef.current.innerText = prompt;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setComposerEmpty(false);
+    }
+  }, [prompt]);
+
+  const { requireAuth } = useAuth();
   const modelSettingsTriggerRef = useRef<HTMLButtonElement>(null);
   const modelSettingsMenuRef = useRef<HTMLDivElement>(null);
   const pendingTimers = useRef<number[]>([]);
@@ -168,29 +183,31 @@ export function AgentChatPanel({
     const text = composerRef.current?.innerText.trim() || "";
     if (!text) return;
 
-    // 重新发送前清掉上一轮尚未触发的逐条追加定时器
-    for (const id of pendingTimers.current) clearTimeout(id);
-    pendingTimers.current = [];
+    requireAuth({ kind: "canvas-send", text }, () => {
+      // 重新发送前清掉上一轮尚未触发的逐条追加定时器
+      for (const id of pendingTimers.current) clearTimeout(id);
+      pendingTimers.current = [];
 
-    const userMsg: ChatMessage = { id: Date.now(), type: "user", text };
-    onAppendMessages?.([userMsg]);
-    if (composerRef.current) composerRef.current.innerText = "";
-    setComposerEmpty(true);
+      const userMsg: ChatMessage = { id: Date.now(), type: "user", text };
+      onAppendMessages?.([userMsg]);
+      if (composerRef.current) composerRef.current.innerText = "";
+      setComposerEmpty(true);
 
-    // 按当前创作模式生成 mock 回复，错开逐条追加模拟逐步生成
-    const reply = buildMockReplyForMode(
-      selectedMode.id as "agent" | "direct",
-      text,
-      () => Date.now()
-    );
-    reply.forEach((msg, index) => {
-      const timer = window.setTimeout(() => {
-        onAppendMessages?.([msg]);
-        // card 出现的同一 tick 触发回调：对话出 card ⇔ 画布出 NodeItem，原子同步
-        if (msg.type === "card") onCardGenerated?.(msg);
-        bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: "smooth" });
-      }, (index + 1) * 400);
-      pendingTimers.current.push(timer);
+      // 按当前创作模式生成 mock 回复，错开逐条追加模拟逐步生成
+      const reply = buildMockReplyForMode(
+        selectedMode.id as "agent" | "direct",
+        text,
+        () => Date.now()
+      );
+      reply.forEach((msg, index) => {
+        const timer = window.setTimeout(() => {
+          onAppendMessages?.([msg]);
+          // card 出现的同一 tick 触发回调：对话出 card ⇔ 画布出 NodeItem，原子同步
+          if (msg.type === "card") onCardGenerated?.(msg);
+          bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: "smooth" });
+        }, (index + 1) * 400);
+        pendingTimers.current.push(timer);
+      });
     });
   };
 
@@ -417,19 +434,16 @@ export function AgentChatPanel({
                           className="tc-model-settings-trigger tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/[0.08]"
                           aria-haspopup="dialog"
                           aria-expanded={modelSettingsOpen}
-                          aria-label={`模式与模型: ${selectedMode.label} · ${selectedModel.label}`}
-                          title="模式与模型"
+                          aria-label={`模型: ${selectedModel.label}`}
+                          title="模型"
                         >
                           <Box size={16} />
                         </button>
 
                         {modelSettingsOpen && (
                           <ModelSettingsMenu
-                            mode={selectedMode}
                             model={selectedModel}
-                            modes={CREATION_MODES}
                             models={AGENT_MODELS}
-                            onModeChange={setSelectedMode}
                             onModelChange={setSelectedModel}
                             onClose={() => setModelSettingsOpen(false)}
                             menuRef={modelSettingsMenuRef}
