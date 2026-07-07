@@ -157,8 +157,9 @@ Brief
 ```text
 blue-whale-agent-workspace/
   README.md
-  CLAUDE.md
-  skill/
+  AGENTS.md              # 跨工具协作入口（@CLAUDE.md，给非 Claude Code 的 Agent 读）
+  CLAUDE.md              # 工作台协作规则（不是 Skill 入口）
+  skill/                 # ← 对外 Skill 包，安装 = 复制这整个目录
     SKILL.md
     workers/
     workflows/
@@ -166,14 +167,30 @@ blue-whale-agent-workspace/
     references/
     library/
     memory/
+  *-PRD.md               # 产品/接口需求（工作台内部，不进 Skill 包）
+  tests/                 # 编排验证场景（工作台内部）
 ```
+
+### 对外分层（谁是发布单元）
+
+工作台里有四类东西，对外职责不同：
+
+| 层 | 目录 / 文件 | 定位 | 进 Skill 包？ |
+|---|---|---|---|
+| 工作台入口 | `AGENTS.md` / `CLAUDE.md` | 在这个工作台里怎么协作（给人 / AI 看） | 否 |
+| **Skill 包** | `skill/` | 可安装的编排 Skill，**对外发布单元** | **是** |
+| 产品 / 接口设计 | `*-PRD.md`、`FRONTEND-INTEGRATION-ROADMAP.md` | 给前后端实现看的需求 | 否 |
+| 测试 | `tests/` | 验证编排路由的场景 | 否 |
+
+**装这个 Skill = 复制 `skill/` 目录**，其余都是工作台内部产物。
 
 ### 顶层文件
 
 | 文件 | 用途 |
 |---|---|
 | `README.md` | 给人看的项目总览 |
-| `CLAUDE.md` | workspace 顶层入口(项目级工作规则 + 入口路标) |
+| `AGENTS.md` | 跨工具协作入口（`@CLAUDE.md`，给 Codex / Cursor 等非 Claude Code 的 Agent 读） |
+| `CLAUDE.md` | 工作台协作规则（角色 / 七大原则 / 工作方式），不是 Skill 入口 |
 
 ### skill/workers
 

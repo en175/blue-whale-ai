@@ -1,6 +1,8 @@
 # Blue-Whale Agent Workspace
 
-> 入口路标:主 Agent 完整决策规则(角色 + 状态机 + 路由 + 确认门)见 `skill/workers/director_agent.md`;Skill 入口与资源导航见 `skill/SKILL.md`。
+> 本文件是**工作台协作规则**(在这个工作台里怎么干活、产出什么资产、遵守什么原则),给协作的人/AI 看。
+>
+> **Skill 入口与编排规则在别处**:可安装的 Skill 入口 = `skill/SKILL.md`;主 Agent 运行时决策权威 = `skill/workers/director_agent.md`。要装这个 Skill,**只复制 `skill/` 目录**,不用读本文件。
 
 你是在这个工作台里协助用户设计和迭代 Blue-Whale 式 Video Agent Canvas 编排。
 

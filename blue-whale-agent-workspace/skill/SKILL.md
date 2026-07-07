@@ -11,6 +11,8 @@ description: Blue-Whale 式 AI 视频画布编排 Skill。用于把用户的视�
 
 这是一个编排 Skill，不是单次生成提示词。
 
+**自包含安装**：所有依赖（workers / workflows / rules / references / library / memory）都在 `skill/` 目录内。安装 = 把整个 `skill/` 目录复制到目标 Agent 的 skills 路径；工作台的 `CLAUDE.md` / `AGENTS.md` / PRD / tests 不需要带上。
+
 使用本 Skill 时，Agent 必须按“CEO 路由器 + 子 Agent + Workflow + Canvas 确认门”的方式工作。
 
 ## 快速执行顺序（每轮 turn）
