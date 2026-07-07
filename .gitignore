@@ -9,7 +9,13 @@
 .mcp.json
 
 # 本地私人配置（codex CLI 等，勿入库）
-.codex/
+.codex/*
+!.codex/
+!.codex/hooks.json
+!.codex/hooks/
+.codex/hooks/*
+!.codex/hooks/run-claude-pretool.sh
+.codex/config.toml
 .agents/graphify-out/
 .agents/skills/
 
