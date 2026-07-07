@@ -74,22 +74,24 @@ scripts/ensure-graphify-worktree.sh
 
 禁止用主 checkout 的 `graphify-out/` 替代 task worktree 图谱。
 
-## 发布分支
+## 发布审查包
 
 开发完成后，Agent 先报告本地验证结果和待发布分支，等待用户明确授权发布审查包。获得授权后，在 task worktree 内执行：
 
 ```bash
-scripts/publish-task-branch.sh
+scripts/publish-review-package.sh --user-authorized
 ```
 
-脚本只做 Git 安全检查和推分支：
+脚本是发布审查包的唯一标准入口，会在 Claude Code Hook 中触发一次用户确认。它只做 Git 安全检查和推分支：
 
 - 当前必须是工单分支。
 - 工作区必须干净。
 - 当前分支必须包含最新 `origin/master`。
-- 推送当前分支到远程。
+- 推送当前分支到远程；远程分支已存在时使用 `--force-with-lease` 安全更新。
 
-脚本不创建 Gitee PR。推送后按 `.gitee/PULL_REQUEST_TEMPLATE.md` 在 Gitee 创建 **draft PR**，目标分支为 `master`。创建 PR 后必须停下来交给开发者审查；发布审查包授权不覆盖合并。
+禁止直接执行 `git push` 绕过该入口；直接 push 会被 Hook 硬拦。旧脚本 `scripts/publish-task-branch.sh` 已废弃，只会提示改用标准入口。
+
+脚本不创建 Gitee PR。推送成功后会写入短期发布标记；随后按 `.gitee/PULL_REQUEST_TEMPLATE.md` 在 Gitee 创建 **draft PR**，目标分支为 `master`。创建 PR Hook 会校验并消费该标记，同时要求 `draft=true`、`target_branch=master`、`source_branch` 与发布标记一致，不二次确认。PR 创建后必须停下来交给开发者审查；发布审查包授权不覆盖合并。
 
 PR 未合并前，本地分支、远程源分支和 task worktree 都保留，以便处理审查反馈。
 

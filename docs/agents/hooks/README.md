@@ -13,7 +13,7 @@
 |---|---|---|---|---|
 | `block-dangerous-git.sh` | `Bash` | `PreToolUse` | 拦裸 `--force`、`reset --hard`、`clean -f`、`branch -D`、`checkout .`、`restore .` | CLAUDE.md「提交与审查」 |
 | `block-push-to-master.sh` | `Bash` | `PreToolUse` | 拦任何对 `master`/`main` 的 push（显式 + 隐式） | [ADR-0003](../../adr/0003-no-direct-push-to-master.md) |
-| `confirm-release-action.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` / `mcp__gitee-ent__create_enterprise_repo_release` | `PreToolUse` | `git push`、发布/清理脚本、建 PR、合并 PR、创建 release 前触发用户确认；非 draft PR 直接拦截 | CLAUDE.md「发布动作必须先获用户授权」 |
+| `confirm-release-action.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` / `mcp__gitee-ent__create_enterprise_repo_release` | `PreToolUse` | 直接 `git push` 硬拦；`scripts/publish-review-package.sh --user-authorized` 触发一次确认；PR 必须消费发布入口写入的短期标记，并校验 `draft=true`、`target_branch=master`、`source_branch` 匹配；合并 PR / 创建 release 单独确认 | CLAUDE.md「发布动作必须先获用户授权」 |
 | `block-squash-merge.sh` | `mcp__gitee-ent__merge_enterprise_pull` | `PreToolUse` | 拦 `merge_method=squash`/`rebase`，强制走 `merge` | CLAUDE.md「合并方法」 |
 | `block-issue-without-repo.sh` | `mcp__gitee-ent__create_enterprise_issue` / `mcp__gitee-ent__update_enterprise_issue` | `PreToolUse` | 拦 `project_id` 缺失/为 0；拦子 issue 未带 `project_id/program_id`，强制仓库可见 | [ADR-0007](../../adr/0007-issue-must-link-repo.md) / [ADR-0008](../../adr/0008-sub-issues-must-inherit-repo.md) |
 
@@ -114,7 +114,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 ### 测试边界（seam）
 
-5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现，只测这条边界。`confirm-release-action.sh` 的确认型用例断言 stdout 含 `permissionDecision":"ask"`；阻断型用例仍断言 exit code + stderr。唯一外部依赖 `git rev-parse`（push-to-master / dangerous-git 的「无显式 refspec → 查当前分支」分支用）由夹具用 PATH 注入的临时 fake git 隔离（响应 `rev-parse --abbrev-ref HEAD` → `$FAKE_BRANCH`），不碰真实仓库。
+5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现，只测这条边界。`confirm-release-action.sh` 的确认型用例只保留在标准发布审查包入口、合并和 release 这些低频边界；直接 `git push`、非 draft PR、非 master 目标 PR 是阻断型用例。唯一外部依赖 `git rev-parse`（push-to-master / dangerous-git 的「无显式 refspec → 查当前分支」分支用）由夹具用 PATH 注入的临时 fake git 隔离（响应 `rev-parse --abbrev-ref HEAD` → `$FAKE_BRANCH`），不碰真实仓库。
 
 夹具还校验 Codex 挂载层：
 - `.codex/hooks.json` 必须存在。
@@ -122,7 +122,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 - 所有 Codex 脚本 command 必须通过 `.codex/hooks/run-claude-pretool.sh`，不得直接指向 `.claude/hooks/` 或复制出来的 `.codex/hooks/` 实现。
 - 每个 Codex 包装命令必须和同位置 Claude hook 挂载的脚本名一致。
 - 代表性 Codex 包装命令必须从 `.codex/hooks.json` 读取，并能从 repo root 调到权威脚本得到相同拦截/放行结果。
-- `permissionDecision=ask` 的确认型输出在 Codex 包装层必须转换为硬阻断。
+- `permissionDecision=ask` 的确认型输出在 Codex 包装层必须转换为硬阻断。Codex 当前不支持交互式确认弹窗，因此发布审查包入口、合并和 release 在 Codex 中会停住，避免失败放行；需要用户手动执行或换用支持确认的 Claude Code 环境。
 - `.gitignore` 必须只放行 `.codex/hooks.json` 和 `.codex/hooks/run-claude-pretool.sh`；`.codex/config.toml`、其它 `.codex/*`、其它 `.codex/hooks/*` 均保持忽略。
 
 ### 字段类型以 MCP schema 为准（核心教训）
@@ -182,15 +182,13 @@ $ git branch -a
   remotes/origin/feature/docs-hooks-manual   # ← 还挂着
 ```
 
-### 清理（2 行，30 秒）
+### 清理
 
 ```bash
-# 1. 删远程源分支
-git push origin :feature/<branch-name>
-
-# 2. 删本地追踪分支（已合并可安全 -d，未合并才需 -D）
-git branch -d feature/<branch-name>
+scripts/cleanup-task-worktree.sh
 ```
+
+Agent 必须在对应 task worktree 内执行清理脚本。脚本会先证明当前分支已被 `origin/master` 包含、工作区干净、路径位于 task worktree，再删除远程源分支、本地分支和 worktree。
 
 ### 判断用 `-d` 还是 `-D`
 
@@ -203,11 +201,11 @@ git branch -d feature/<branch-name>
 
 ### 防忘窍门
 
-把上面 2 行命令加进你的合并后模板：
+把清理脚本加进你的合并后模板：
 
 ```bash
 # 合并后必跑（MCP 合并源分支不自动删）
-git push origin :<merged-branch> && git branch -d <merged-branch>
+scripts/cleanup-task-worktree.sh
 ```
 
-> 长期方案（可选 follow-up）：写个 `scripts/cleanup-merged-branches.sh`，列出已合并但未删的本地/远程分支，一键清理。暂缓 —— 1 周清一次的频率不值得脚本化。
+> 人在 Gitee 网页手动合并时，也可以直接勾「删除源分支」。
