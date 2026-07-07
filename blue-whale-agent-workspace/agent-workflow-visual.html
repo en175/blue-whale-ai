@@ -1198,29 +1198,38 @@
             <span class="label">判定树</span>
             <div>
               <h3>decision_branch 怎么算出来</h3>
-              <p>两条铁律：① 硬状态铁闸先判、命中即短路（不跑 L1、不可推翻）；② 铁闸空才进 L1 意图，主 Agent 可推翻 L1、推翻不了铁闸。</p>
+              <p>三段优先级：① STEP 0 <code>has_generating</code> 物理最高，命中短路（连 L1 都不调）；② STEP 1 调 L1 给意图，明确意图直接出 branch；③ STEP 2 仅 <code>responding_to_confirm / ambiguous</code> 才 tiebreak 查 <code>awaiting_confirm / has_failed</code>。主 Agent 可推翻 L1、推翻不了铁闸。</p>
             </div>
           </div>
           <div class="flow">
             <div class="fn fn-start"><b>新消息 + canvas / stage / nodes / job</b></div>
             <div class="arrow">↓</div>
-            <div class="fn fn-job"><b>后端算 decision_context（硬事实 · 零 LLM）</b><span>先查铁闸三态</span></div>
+            <div class="fn fn-job"><b>① 后端算 decision_context（硬事实 · 零 LLM）</b><span>读 canvas / stage / nodes / job</span></div>
             <div class="arrow">↓</div>
-            <div class="fn fn-decision"><b>◇ 硬状态铁闸命中？</b></div>
+            <div class="fn fn-decision"><b>◇ STEP 0：has_generating？</b><span>物理最高优先级</span></div>
             <div class="fork" style="max-width: 720px;">
               <div class="fork-col" style="--accent: var(--blue)">
-                <span class="fork-label">命中 · 短路锁死</span>
-                <div class="fn fn-job"><b>generation_in_progress</b><span>active job → 禁重入</span></div>
-                <div class="fn fn-job"><b>generation_failed</b><span>上次失败 → 恢复</span></div>
-                <div class="fn fn-job"><b>confirm_pending</b><span>ready 待确认 → advance_stage 铁闸</span></div>
-                <div class="fn fn-skip" style="margin-top:12px">branch 由后端锁定，主 Agent 不可推翻，L1 跳过</div>
+                <span class="fork-label">true · 短路</span>
+                <div class="fn fn-job"><b>generation_in_progress</b><span>连 L1 都不调 · 禁重入</span></div>
               </div>
               <div class="fork-col" style="--accent: var(--violet)">
-                <span class="fork-label">未命中 · 进 L1 意图</span>
-                <div class="fn fn-agent"><b>L1 classifier（haiku 级）</b><span>软建议：product_switch / new_task / consult / revise_canvas / clarify</span></div>
+                <span class="fork-label">false · 调 L1</span>
+                <div class="fn fn-agent"><b>② STEP 1：L1 classifier（haiku 级）</b><span>给 intent_direction 软建议</span></div>
                 <div class="arrow">↓</div>
-                <div class="fn fn-decision"><b>◇ 主 Agent switch 收口</b></div>
-                <div class="fn fn-skip" style="margin-top:12px">可推翻 L1 建议（改写 branch），仅限意图类；铁闸改不动</div>
+                <div class="fn fn-decision"><b>◇ L1 意图明确？</b></div>
+                <div class="fork" style="max-width: 100%;">
+                  <div class="fork-col" style="--accent: var(--gold)">
+                    <span class="fork-label">明确 · 直接出口</span>
+                    <div class="fn fn-agent"><b>product_switch / new_task / consult / revise_canvas</b><span>主 Agent 可推翻（说理由）</span></div>
+                  </div>
+                  <div class="fork-col" style="--accent: var(--coral)">
+                    <span class="fork-label">responding_to_confirm / ambiguous</span>
+                    <div class="fn fn-decision"><b>③ STEP 2 tiebreak</b></div>
+                    <div class="fn fn-skip">awaiting_confirm → confirm_pending</div>
+                    <div class="fn fn-skip">elif has_failed → generation_failed</div>
+                    <div class="fn fn-skip">else → clarify</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1631,8 +1640,10 @@
         <div class="file-system">
           <div class="file-tree" aria-label="工作流文件树">
             <strong>blue-whale-agent-workspace</strong>
+            <div class="tree-line folder">├─ AGENTS.md</div>
+            <div class="tree-line">│  └─ 跨工具协作入口（@CLAUDE.md，给非 Claude Code 的 Agent 读）</div>
             <div class="tree-line folder">├─ CLAUDE.md</div>
-            <div class="tree-line">│  └─ workspace 顶层入口(路标 → director_agent.md / skill/SKILL.md)</div>
+            <div class="tree-line">│  └─ 工作台协作规则（角色 / 七大原则 / 工作方式，非 Skill 入口）</div>
             <div class="tree-line folder">├─ skill/</div>
             <div class="tree-line hot">│  ├─ workflows/</div>
             <div class="tree-line">│  │  ├─ direct_generation.md</div>
