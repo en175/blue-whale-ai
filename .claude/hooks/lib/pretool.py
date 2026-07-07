@@ -46,6 +46,12 @@ class GitInvocation:
     cwd: str | None
 
 
+@dataclass
+class CommandInvocation:
+    executable: str
+    args: list[str]
+
+
 def load_pretool() -> dict[str, Any]:
     try:
         data = json.load(sys.stdin)
@@ -86,6 +92,13 @@ def is_git_token(token: str) -> bool:
     return posixpath.basename(token) == "git"
 
 
+def is_assignment(token: str) -> bool:
+    if "=" not in token:
+        return False
+    name, _ = token.split("=", 1)
+    return bool(name) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name) is not None
+
+
 def skip_option_with_optional_inline_arg(tokens: list[str], index: int, opts_with_arg: set[str]) -> int:
     token = tokens[index]
     if token in opts_with_arg:
@@ -98,6 +111,139 @@ def skip_option_with_optional_inline_arg(tokens: list[str], index: int, opts_wit
     if token.startswith("-c") and token != "-c":
         return index + 1
     return index + 1
+
+
+def split_shell_segments(tokens: list[str]) -> list[list[str]]:
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if is_separator(token):
+            if current:
+                segments.append(current)
+                current = []
+            continue
+        current.append(token)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def parse_command_segment(segment: list[str]) -> CommandInvocation | None:
+    index = 0
+    while index < len(segment) and is_assignment(segment[index]):
+        index += 1
+    if index >= len(segment):
+        return None
+
+    if posixpath.basename(segment[index]) == "env":
+        index += 1
+        while index < len(segment):
+            token = segment[index]
+            if is_assignment(token):
+                index += 1
+                continue
+            if token in {"-i", "-0"}:
+                index += 1
+                continue
+            if token in {"-u", "-C", "-S"}:
+                index += 2
+                continue
+            if token.startswith("-"):
+                index += 1
+                continue
+            break
+        if index >= len(segment):
+            return None
+
+    return CommandInvocation(executable=segment[index], args=segment[index + 1 :])
+
+
+def shell_c_argument(invocation: CommandInvocation) -> str | None:
+    if posixpath.basename(invocation.executable) not in {"bash", "sh", "zsh"}:
+        return None
+    args = invocation.args
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "-c":
+            return args[index + 1] if index + 1 < len(args) else None
+        if arg.startswith("-") and "c" in arg[1:]:
+            return args[index + 1] if index + 1 < len(args) else None
+        if not arg.startswith("-"):
+            return None
+        index += 1
+    return None
+
+
+def shell_script_invocation(invocation: CommandInvocation) -> CommandInvocation | None:
+    if posixpath.basename(invocation.executable) not in {"bash", "sh", "zsh"}:
+        return None
+    args = invocation.args
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "-c" or (arg.startswith("-") and "c" in arg[1:]):
+            return None
+        if arg == "--":
+            index += 1
+            break
+        if not arg.startswith("-"):
+            break
+        if arg in {"-O", "+O"}:
+            index += 2
+        else:
+            index += 1
+    if index >= len(args):
+        return None
+    return CommandInvocation(executable=args[index], args=args[index + 1 :])
+
+
+def command_invocations(command: str) -> list[CommandInvocation]:
+    try:
+        tokens = shell_tokens(command)
+    except ValueError:
+        return []
+
+    invocations: list[CommandInvocation] = []
+    for segment in split_shell_segments(tokens):
+        invocation = parse_command_segment(segment)
+        if invocation is None:
+            continue
+        invocations.append(invocation)
+        nested = shell_c_argument(invocation)
+        if nested:
+            invocations.extend(command_invocations(nested))
+        script_invocation = shell_script_invocation(invocation)
+        if script_invocation:
+            invocations.append(script_invocation)
+    return invocations
+
+
+def invokes_command(command: str, executable_name: str, required_arg: str | None = None) -> bool:
+    for invocation in command_invocations(command):
+        if posixpath.basename(invocation.executable) != executable_name:
+            continue
+        if required_arg is None or required_arg in invocation.args:
+            return True
+    return False
+
+
+def nested_shell_commands(command: str) -> list[str]:
+    try:
+        tokens = shell_tokens(command)
+    except ValueError:
+        return []
+
+    result: list[str] = []
+    for segment in split_shell_segments(tokens):
+        invocation = parse_command_segment(segment)
+        if invocation is None:
+            continue
+        nested = shell_c_argument(invocation)
+        if nested:
+            result.append(nested)
+            result.extend(nested_shell_commands(nested))
+    return result
 
 
 def git_invocations(command: str) -> list[GitInvocation]:
@@ -157,6 +303,9 @@ def git_invocations(command: str) -> list[GitInvocation]:
                 index += 1
                 break
             index += 1
+
+    for nested in nested_shell_commands(command):
+        invocations.extend(git_invocations(nested))
 
     return invocations
 
@@ -289,6 +438,10 @@ def mode_dangerous_pattern(command: str) -> int:
     return 1
 
 
+def mode_invokes(command: str, executable_name: str, required_arg: str | None = None) -> int:
+    return 0 if invokes_command(command, executable_name, required_arg) else 1
+
+
 def command_from_stdin() -> str:
     return sys.stdin.read()
 
@@ -313,6 +466,11 @@ def main() -> int:
         return mode_force_lease_non_work(command)
     if mode == "dangerous-pattern":
         return mode_dangerous_pattern(command)
+    if mode == "invokes":
+        if len(sys.argv) not in {3, 4}:
+            return 2
+        required_arg = sys.argv[3] if len(sys.argv) == 4 else None
+        return mode_invokes(command, sys.argv[2], required_arg)
     return 2
 
 

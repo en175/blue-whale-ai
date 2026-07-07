@@ -130,6 +130,28 @@ assert_stdout_has() {
   fi
 }
 
+publish_marker_path() {
+  git -C "$REPO_ROOT" rev-parse --git-path agent-release-review-package
+}
+
+write_publish_marker() {
+  local branch="$1"; shift
+  local target="${1:-master}"; shift || true
+  local created_at="${1:-$(date +%s)}"; shift || true
+  local marker
+  marker="$(publish_marker_path)"
+  mkdir -p "$(dirname "$marker")"
+  cat >"$marker" <<EOF
+branch=$branch
+target=$target
+created_at=$created_at
+EOF
+}
+
+remove_publish_marker() {
+  rm -f "$(publish_marker_path)"
+}
+
 assert_file_exists() {
   local path="$1"; shift
   local label="$1"; shift
@@ -138,6 +160,17 @@ assert_file_exists() {
   else
     FAIL=$((FAIL + 1))
     FAILURES+=("[${label}] 文件不存在：${path}")
+  fi
+}
+
+assert_file_missing() {
+  local path="$1"; shift
+  local label="$1"; shift
+  if [ ! -e "$path" ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] 文件仍存在：${path}")
   fi
 }
 
@@ -328,35 +361,97 @@ RELEASE_HOOK=confirm-release-action.sh
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git status --short"}}'
 assert_exit 0 "release: 非发布 git status 放行"
 
-# git push 修改远程 → 触发用户确认
+# git push 修改远程 → 硬拦，必须走标准发布审查包入口
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git push -u origin feature/x"}}'
-assert_exit 0 "release: git push 触发确认"
-assert_stdout_has '"permissionDecision":"ask"' "release: git push stdout 含 ask"
+assert_exit 2 "release: 直接 git push 被拦截"
+assert_stderr_has "publish-review-package.sh --user-authorized" "release: 直接 git push 提示标准入口"
 
-# git 全局选项形式也应触发确认
+# git 全局选项形式也应硬拦
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git -C ../blue-whale-worktrees/task push origin feature/x"}}'
-assert_exit 0 "release: git -C push 触发确认"
-assert_stdout_has '"permissionDecision":"ask"' "release: git -C push stdout 含 ask"
+assert_exit 2 "release: git -C push 被拦截"
+assert_stderr_has "直接 git push" "release: git -C push 提示直接 push"
 
 # JSON 转义引号不能截断 command 后绕过 push 检测
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"echo \"ready\"; git push origin feature/x"}}'
-assert_exit 0 "release: 转义引号后 git push 触发确认"
-assert_stdout_has '"permissionDecision":"ask"' "release: 转义引号后 git push stdout 含 ask"
+assert_exit 2 "release: 转义引号后 git push 被拦截"
+assert_stderr_has "直接 git push" "release: 转义引号后 git push 提示直接 push"
 
-# 项目发布脚本内部会 push → 触发用户确认
+# bash -lc 嵌套 push 也不能绕过标准入口
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash -lc \"git push origin feature/x\""}}'
+assert_exit 2 "release: bash -lc git push 被拦截"
+assert_stderr_has "直接 git push" "release: bash -lc git push 提示直接 push"
+
+# 直接 force-with-lease 也必须走标准入口，避免 PR 反馈后绕过发布确认
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git push --force-with-lease origin feature/x"}}'
+assert_exit 2 "release: 直接 force-with-lease push 被拦截"
+assert_stderr_has "直接 git push" "release: 直接 force-with-lease push 提示直接 push"
+
+# 旧项目发布脚本不由 Hook 弹窗；脚本自身会失败并提示新入口
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-task-branch.sh"}}'
-assert_exit 0 "release: publish-task-branch 触发确认"
-assert_stdout_has '"permissionDecision":"ask"' "release: publish-task-branch stdout 含 ask"
+assert_exit 0 "release: publish-task-branch hook 放行"
 
-# 项目清理脚本可能删除远程源分支 → 触发用户确认
+# 新发布审查包入口缺授权参数 → 硬拦
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh"}}'
+assert_exit 2 "release: publish-review-package 缺参数被拦截"
+assert_stderr_has "--user-authorized" "release: publish-review-package 缺参数提示授权参数"
+
+# bash 包裹新发布审查包入口缺参数 → 仍应硬拦
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash scripts/publish-review-package.sh"}}'
+assert_exit 2 "release: bash publish-review-package 缺参数被拦截"
+assert_stderr_has "--user-authorized" "release: bash publish-review-package 缺参数提示授权参数"
+
+# 新发布审查包入口带授权参数 → 只触发一次确认
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized"}}'
+assert_exit 0 "release: publish-review-package 授权入口触发确认"
+assert_stdout_has '"permissionDecision":"ask"' "release: publish-review-package stdout 含 ask"
+
+# bash 包裹新发布审查包入口带授权参数 → 仍应触发确认
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash scripts/publish-review-package.sh --user-authorized"}}'
+assert_exit 0 "release: bash publish-review-package 授权入口触发确认"
+assert_stdout_has '"permissionDecision":"ask"' "release: bash publish-review-package stdout 含 ask"
+
+# bash -lc 包裹标准入口仍应识别
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash -lc \"scripts/publish-review-package.sh --user-authorized\""}}'
+assert_exit 0 "release: bash -lc publish-review-package 授权入口触发确认"
+assert_stdout_has '"permissionDecision":"ask"' "release: bash -lc publish-review-package stdout 含 ask"
+
+# 项目清理脚本依靠自身校验，不在发布 Hook 中弹确认
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/cleanup-task-worktree.sh"}}'
-assert_exit 0 "release: cleanup-task-worktree 触发确认"
-assert_stdout_has '"permissionDecision":"ask"' "release: cleanup-task-worktree stdout 含 ask"
+assert_exit 0 "release: cleanup-task-worktree 放行"
 
-# 创建 draft PR → 触发用户确认
+# 主 checkout 验证 worktree 脚本硬停的复合命令不应误触发发布确认
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"cd /Users/jj.reno/Blue-Whale\n# 主 checkout 跑 worktree 脚本应硬停\nscripts/cleanup-task-worktree.sh 2>&1; echo \"exit=$?\"\necho \"---\"\nscripts/publish-task-branch.sh 2>&1; echo \"exit=$?\"\necho \"---\"\nscripts/ensure-graphify-worktree.sh 2>&1; echo \"exit=$?\""}}'
+assert_exit 0 "release: 复合验证命令放行"
+
+# 只验证清理/graphify 脚本时不应误触发发布确认
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"cd /Users/jj.reno/Blue-Whale\nscripts/cleanup-task-worktree.sh 2>&1; echo \"exit=$?\"\necho \"---\"\nscripts/ensure-graphify-worktree.sh 2>&1; echo \"exit=$?\""}}'
+assert_exit 0 "release: 非发布验证复合命令放行"
+
+# 创建合法 draft PR → 只校验形态，不二次确认
+write_publish_marker "feature/x"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"true","title":"test"}}'
-assert_exit 0 "release: draft PR 触发确认"
-assert_stdout_has '"permissionDecision":"ask"' "release: draft PR stdout 含 ask"
+assert_exit 0 "release: draft PR 放行不二次确认"
+assert_file_missing "$(publish_marker_path)" "release: draft PR 消费发布审查包标记"
+
+# 直接创建合法形态 draft PR 但缺少发布审查包标记 → 阻断
+remove_publish_marker
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"true","title":"test"}}'
+assert_exit 2 "release: draft PR 缺发布标记拦截"
+assert_stderr_has "publish-review-package.sh --user-authorized" "release: draft PR 缺发布标记提示标准入口"
+
+# 发布标记分支与 PR source_branch 不匹配 → 阻断
+write_publish_marker "feature/other"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"true","title":"test"}}'
+assert_exit 2 "release: draft PR 分支与发布标记不匹配"
+assert_stderr_has "不匹配" "release: draft PR 分支不匹配提示"
+remove_publish_marker
+
+# 过期发布标记 → 阻断并消费标记
+write_publish_marker "feature/x" "master" "1"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"true","title":"test"}}'
+assert_exit 2 "release: draft PR 发布标记过期"
+assert_stderr_has "已过期" "release: draft PR 发布标记过期提示"
+assert_file_missing "$(publish_marker_path)" "release: draft PR 过期标记被清理"
 
 # 创建非 draft PR → 阻断
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"false","title":"test"}}'
@@ -366,6 +461,14 @@ assert_stderr_has "draft=true" "release: 非 draft PR 提示 draft=true"
 # 创建 PR 缺 draft → 阻断
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
 assert_exit 2 "release: 缺 draft PR 拦截"
+
+# 创建 PR 缺 target_branch → 阻断
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","draft":"true","title":"test"}}'
+assert_exit 2 "release: 缺 target_branch PR 拦截"
+
+# 创建 PR 缺 source_branch → 阻断
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"target_branch":"master","draft":"true","title":"test"}}'
+assert_exit 2 "release: 缺 source_branch PR 拦截"
 
 # 创建非 master 目标 PR → 阻断
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"develop","draft":"true","title":"test"}}'
@@ -572,6 +675,10 @@ run_command_hook "$CODEX_RELEASE_CMD" '{"tool_name":"mcp__gitee-ent__create_ente
 assert_exit 2 "codex: 非 draft PR 包装命令拦截"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"git push -u origin feature/x"}}'
+assert_exit 2 "codex: 直接 git push 包装命令拦截"
+assert_stderr_has "直接 git push" "codex: 直接 git push 包装命令提示"
+
+run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized"}}'
 assert_exit 2 "codex: release ask 转硬阻断"
 assert_stderr_has "requires explicit user confirmation" "codex: release ask 转硬阻断提示"
 

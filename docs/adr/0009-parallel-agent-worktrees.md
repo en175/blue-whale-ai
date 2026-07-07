@@ -45,7 +45,7 @@ scripts/sync-master.sh
 任务完成后先发布分支：
 
 ```bash
-scripts/publish-task-branch.sh
+scripts/publish-review-package.sh --user-authorized
 ```
 
 该脚本只推送分支，不创建 PR，不删除本地 worktree。
