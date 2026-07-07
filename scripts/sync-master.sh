@@ -4,12 +4,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ROOT_PARENT="$(cd "$ROOT/.." && pwd)"
-if [ "$(basename "$ROOT_PARENT")" = "blue-whale-worktrees" ]; then
-  WORKTREE_BASE="$ROOT_PARENT"
-else
-  WORKTREE_BASE="$ROOT_PARENT/blue-whale-worktrees"
-fi
+# shellcheck source=lib/worktree-paths.sh
+source "$ROOT/scripts/lib/worktree-paths.sh"
+WORKTREE_BASE="$(worktree_paths_resolve_base "$ROOT")"
 
 fail() {
   echo "❌ sync-master: $*" >&2
