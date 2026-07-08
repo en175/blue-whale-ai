@@ -20,6 +20,10 @@ export interface ImageModelSettingsPopoverProps {
   onResolutionChange: (resolution: ImageResolution) => void;
   selectedAspectRatio: ImageAspectRatio;
   onAspectRatioChange: (ratio: ImageAspectRatio) => void;
+  /** 外部预加载的模型能力；未传入时 Popover 自己拉取。 */
+  capabilities?: ImageModelCapability[] | null;
+  /** 能力是否正在加载；仅在外部传入 capabilities 时使用。 */
+  loading?: boolean;
 }
 
 export function ImageModelSettingsPopover({
@@ -32,24 +36,30 @@ export function ImageModelSettingsPopover({
   onResolutionChange,
   selectedAspectRatio,
   onAspectRatioChange,
+  capabilities: capabilitiesProp,
+  loading: loadingProp,
 }: ImageModelSettingsPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: 16, bottom: 64 });
   const [modelOpen, setModelOpen] = useState(false);
   const [resolutionOpen, setResolutionOpen] = useState(false);
 
-  const [capabilities, setCapabilities] = useState<ImageModelCapability[] | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [internalCapabilities, setInternalCapabilities] = useState<ImageModelCapability[] | null>(null);
+  const [internalLoading, setInternalLoading] = useState(false);
+
+  const capabilities = capabilitiesProp ?? internalCapabilities;
+  const loading = loadingProp ?? internalLoading;
 
   useEffect(() => {
+    if (capabilitiesProp !== undefined) return;
     if (!open) return;
-    if (capabilities) return;
-    setLoading(true);
+    if (internalCapabilities) return;
+    setInternalLoading(true);
     getImageModels()
-      .then((data) => setCapabilities(data))
-      .catch(() => setCapabilities([]))
-      .finally(() => setLoading(false));
-  }, [open, capabilities]);
+      .then((data) => setInternalCapabilities(data))
+      .catch(() => setInternalCapabilities([]))
+      .finally(() => setInternalLoading(false));
+  }, [open, internalCapabilities, capabilitiesProp]);
 
   const currentCapability = capabilities?.find((c) => c.model_id === selectedModel.id);
 
