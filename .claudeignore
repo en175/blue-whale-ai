@@ -1,0 +1,4 @@
+# Prevent graphify output from invalidating Claude Code prompt cache.
+# (graphify writes these on every build; not ignored => full re-upload next turn)
+graph.json
+graphify-out/
