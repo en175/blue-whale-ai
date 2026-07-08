@@ -35,14 +35,19 @@ function CanvasPageInner() {
   const guardRouter = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // gating：未登录直访 /canvas → 踢回首页并弹登录（loadUser 直读避免与 Provider 顺序耦合）
+  // gating：未登录直访 /canvas 时，先空白守卫再决定渲染或跳转，避免画布内容首帧闪烁。
+  // TODO: 接真实数据后改为路由守卫（middleware 或 server component 检查登录态）。
+  const [gated, setGated] = useState(true);
   useEffect(() => {
     if (!loadUser()) {
       guardRouter.replace("/");
       openLogin();
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setGated(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
   // Project 聚合根：多项目画布+对话的单一真相源
   const [projectState, dispatch] = useReducer(projectReducer, PROJECTS, initialProjectState);
   const activeProject =
@@ -313,6 +318,10 @@ function CanvasPageInner() {
     },
     [addNode, bottomDockMode, handleUploadClick]
   );
+
+  if (gated) {
+    return null;
+  }
 
   return (
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-black text-white">

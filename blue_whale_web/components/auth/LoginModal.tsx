@@ -31,7 +31,7 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
   const [agreed, setAgreed] = useState(false);
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [codeError, setCodeError] = useState<string | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ESC 关闭（mount 即监听，卸载即清——组件仅在 open 时 mount）
   useEffect(() => {
@@ -42,21 +42,21 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // 倒计时
+  // 倒计时：用 setTimeout 递归替代 setInterval，避免每秒清理/重建 interval
   useEffect(() => {
     if (countdown <= 0) {
       if (timerRef.current) {
-        clearInterval(timerRef.current);
+        clearTimeout(timerRef.current);
         timerRef.current = null;
       }
       return;
     }
-    timerRef.current = setInterval(() => {
+    timerRef.current = setTimeout(() => {
       setCountdown((c) => Math.max(0, c - 1));
     }, 1000);
     return () => {
       if (timerRef.current) {
-        clearInterval(timerRef.current);
+        clearTimeout(timerRef.current);
         timerRef.current = null;
       }
     };
@@ -98,7 +98,7 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
       onClick={onClose}
     >
       <div
-        className="bg-[#141414] border border-white/[0.12] rounded-xl shadow-[0_24px_80px_rgba(0,0,0,0.5)] w-[420px] max-w-[calc(100vw-32px)] p-10 px-8 relative animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none"
+        className="bg-[var(--tc-login-modal-bg)] border border-white/[0.12] rounded-xl shadow-[0_24px_80px_rgba(0,0,0,0.5)] w-[420px] max-w-[calc(100vw-32px)] p-10 px-8 relative animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none"
         role="dialog"
         aria-modal="true"
         aria-label="登录"
@@ -163,6 +163,7 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
           </button>
 
           {/* 协议勾选 */}
+          {/* TODO: 协议链接当前为 mock 占位（href="#" + preventDefault），接真实法务链路后替换 */}
           <label className="flex items-start gap-2 text-[12px] text-white/55 leading-relaxed mt-1 select-none cursor-pointer">
             <input
               type="checkbox"
@@ -195,7 +196,7 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
             type="button"
             disabled={loginDisabled}
             onClick={() => !loginDisabled && onSuccess(phone)}
-            className="h-11 w-full rounded-lg bg-[#4e40f3] text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-[#3d33d1] mt-2"
+            className="h-11 w-full rounded-lg bg-[#4e40f3] text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-[var(--tc-login-primary-hover)] mt-2"
           >
             登录
           </button>
