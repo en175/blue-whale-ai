@@ -55,25 +55,40 @@ EOF
   exit 2
 }
 
+# 发布标记路径：git common dir（主 checkout 与所有 worktree 共享同一物理路径）
+# + branch slug 文件名。common dir 对称 → session 在主 checkout 或 worktree 启动均能命中；
+# branch slug → 并行发布任务标记不互相覆盖。与 publish-review-package.sh 写入路径同源。
+marker_path_for_branch() {
+  br="$1"
+  slug="$(printf '%s' "$br" | tr '/' '%')"
+  common="$(git -C "$PROJECT_DIR" rev-parse --git-common-dir 2>/dev/null || true)"
+  case "$common" in
+    "") common="$PROJECT_DIR/.git" ;;
+    /*) ;;
+    *)  common="$PROJECT_DIR/$common" ;;
+  esac
+  printf '%s/agent-release-review-package-%s' "$common" "$slug"
+}
+
 read_publish_marker() {
-  key="$1"
-  marker_path="$(git -C "$PROJECT_DIR" rev-parse --git-path agent-release-review-package 2>/dev/null || true)"
+  key="$1"; marker_path="$2"
   [ -n "$marker_path" ] && [ -f "$marker_path" ] || return 1
   awk -F= -v key="$key" '$1 == key { print substr($0, length(key) + 2); exit }' "$marker_path"
 }
 
 consume_publish_marker() {
-  marker_path="$(git -C "$PROJECT_DIR" rev-parse --git-path agent-release-review-package 2>/dev/null || true)"
+  marker_path="$1"
   [ -n "$marker_path" ] && rm -f "$marker_path"
 }
 
 validate_publish_marker() {
   source_branch="$1"
   target_branch="$2"
+  marker_path="$(marker_path_for_branch "$source_branch")"
 
-  marker_branch="$(read_publish_marker branch || true)"
-  marker_target="$(read_publish_marker target || true)"
-  marker_created_at="$(read_publish_marker created_at || true)"
+  marker_branch="$(read_publish_marker branch "$marker_path" || true)"
+  marker_target="$(read_publish_marker target "$marker_path" || true)"
+  marker_created_at="$(read_publish_marker created_at "$marker_path" || true)"
 
   if [ -z "$marker_branch" ] || [ -z "$marker_target" ] || [ -z "$marker_created_at" ]; then
     block "创建 PR 前必须先通过 scripts/publish-review-package.sh --user-authorized 推送当前工单分支。"
@@ -85,7 +100,7 @@ validate_publish_marker() {
   esac
 
   if [ $((now - marker_created_at)) -gt "$MARKER_TTL_SECONDS" ]; then
-    consume_publish_marker
+    consume_publish_marker "$marker_path"
     block "发布审查包授权标记已过期。请重新执行 scripts/publish-review-package.sh --user-authorized。"
   fi
 
@@ -93,7 +108,7 @@ validate_publish_marker() {
     block "PR 分支与发布审查包授权标记不匹配。请重新执行 scripts/publish-review-package.sh --user-authorized。"
   fi
 
-  consume_publish_marker
+  consume_publish_marker "$marker_path"
 }
 
 TOOL_NAME=$(extract_json_value "tool_name")

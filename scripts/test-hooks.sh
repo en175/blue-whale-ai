@@ -131,7 +131,15 @@ assert_stdout_has() {
 }
 
 publish_marker_path() {
-  git -C "$REPO_ROOT" rev-parse --git-path agent-release-review-package
+  local branch="${1:-feature/x}"
+  local slug="$(printf '%s' "$branch" | tr '/' '%')"
+  local common="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null || true)"
+  case "$common" in
+    "") common="$REPO_ROOT/.git" ;;
+    /*) ;;
+    *)  common="$REPO_ROOT/$common" ;;
+  esac
+  printf '%s/agent-release-review-package-%s' "$common" "$slug"
 }
 
 write_publish_marker() {
@@ -139,7 +147,7 @@ write_publish_marker() {
   local target="${1:-master}"; shift || true
   local created_at="${1:-$(date +%s)}"; shift || true
   local marker
-  marker="$(publish_marker_path)"
+  marker="$(publish_marker_path "$branch")"
   mkdir -p "$(dirname "$marker")"
   cat >"$marker" <<EOF
 branch=$branch
@@ -149,7 +157,8 @@ EOF
 }
 
 remove_publish_marker() {
-  rm -f "$(publish_marker_path)"
+  local branch="${1:-feature/x}"
+  rm -f "$(publish_marker_path "$branch")"
 }
 
 assert_stdout_not_has() {
@@ -443,41 +452,43 @@ write_publish_marker "feature/x"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
 assert_exit 0 "release: 普通 PR 放行不二次确认"
 assert_stdout_not_has '"permissionDecision":"ask"' "release: 普通 PR 不二次确认"
-assert_file_missing "$(publish_marker_path)" "release: 普通 PR 消费发布审查包标记"
+assert_file_missing "$(publish_marker_path feature/x)" "release: 普通 PR 消费发布审查包标记"
 
 # 创建显式非 draft PR → 只校验形态，不二次确认
 write_publish_marker "feature/x"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"false","title":"test"}}'
 assert_exit 0 "release: 非 draft PR 放行不二次确认"
 assert_stdout_not_has '"permissionDecision":"ask"' "release: 非 draft PR 不二次确认"
-assert_file_missing "$(publish_marker_path)" "release: 非 draft PR 消费发布审查包标记"
+assert_file_missing "$(publish_marker_path feature/x)" "release: 非 draft PR 消费发布审查包标记"
 
 # 直接创建合法形态普通 PR 但缺少发布审查包标记 → 阻断
-remove_publish_marker
+remove_publish_marker feature/x
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
 assert_exit 2 "release: 普通 PR 缺发布标记拦截"
 assert_stderr_has "publish-review-package.sh --user-authorized" "release: 普通 PR 缺发布标记提示标准入口"
 
-# 发布标记分支与 PR source_branch 不匹配 → 阻断
+# G+ 标记按分支隔离：写 feature/other 标记，PR 用 source=feature/x 只找 feature%x 文件，
+# 找不到 → 落到「缺标记」阻断（等效防伪造消费授权，失败模式从「不匹配」变为「缺标记」，
+# 因标记路径本身含分支 slug，结构性消除了「找到别人标记」的可能）。
 write_publish_marker "feature/other"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
-assert_exit 2 "release: 普通 PR 分支与发布标记不匹配"
-assert_stderr_has "不匹配" "release: 普通 PR 分支不匹配提示"
-remove_publish_marker
+assert_exit 2 "release: 跨分支 PR 找不到对应标记拦截"
+assert_stderr_has "publish-review-package.sh --user-authorized" "release: 跨分支 PR 缺标记提示"
+remove_publish_marker feature/other
 
 # 过期发布标记 → 阻断并消费标记
 write_publish_marker "feature/x" "master" "1"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
 assert_exit 2 "release: 普通 PR 发布标记过期"
 assert_stderr_has "已过期" "release: 普通 PR 发布标记过期提示"
-assert_file_missing "$(publish_marker_path)" "release: 普通 PR 过期标记被清理"
+assert_file_missing "$(publish_marker_path feature/x)" "release: 普通 PR 过期标记被清理"
 
 # 创建 draft PR → 阻断
 write_publish_marker "feature/x"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"true","title":"test"}}'
 assert_exit 2 "release: draft PR 拦截"
 assert_stderr_has "不使用 draft PR" "release: draft PR 提示普通 PR"
-remove_publish_marker
+remove_publish_marker feature/x
 
 # 创建 PR 缺 target_branch → 阻断
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","title":"test"}}'
@@ -500,6 +511,19 @@ assert_stdout_has '"permissionDecision":"ask"' "release: merge PR stdout 含 ask
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_release","tool_input":{"release_tag_version":"v1.0.0","release_title":"v1.0.0","release_description":"test"}}'
 assert_exit 0 "release: create release 触发确认"
 assert_stdout_has '"permissionDecision":"ask"' "release: create release stdout 含 ask"
+
+# 回归（G+）：标记按 branch 隔离，不同分支标记互不覆盖。
+# 防本次缺陷复发——publish 在 worktree 写、hook 在主仓读，common dir 对称使其命中；
+# 且并行多分支发布时，一条分支的 PR 消费不应误删另一分支标记。
+write_publish_marker "feature/aaa"
+write_publish_marker "feature/bbb"
+assert_file_exists "$(publish_marker_path feature/aaa)" "release: G+ 并行 aaa 标记独立存在"
+assert_file_exists "$(publish_marker_path feature/bbb)" "release: G+ 并行 bbb 标记独立存在"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/aaa","target_branch":"master","title":"test"}}'
+assert_exit 0 "release: G+ 并行场景 aaa PR 放行"
+assert_file_missing "$(publish_marker_path feature/aaa)" "release: G+ aaa 标记被消费"
+assert_file_exists "$(publish_marker_path feature/bbb)" "release: G+ bbb 标记不受 aaa 消费影响"
+remove_publish_marker "feature/bbb"
 
 # Slice 2 — block-issue-without-repo（核心：project_id 类型漂移回归基线）
 # MCP schema: project_id 为 number。本组同时喂 number 与 string 两种形态，

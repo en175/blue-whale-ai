@@ -74,8 +74,18 @@ else
   git -C "$ROOT" push -u origin "$branch"
 fi
 
-marker_path="$(git -C "$ROOT" rev-parse --git-path agent-release-review-package)"
-mkdir -p "$(dirname "$marker_path")"
+# 标记写到 git common dir + branch slug，与 confirm-release-action.sh 查找路径对称：
+# common dir 对主 checkout 与所有 worktree 是同一物理路径 → 不依赖 Claude session 启动位置；
+# branch slug → 并行发布任务标记不互相覆盖。
+slug="$(printf '%s' "$branch" | tr '/' '%')"
+common="$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null || true)"
+case "$common" in
+  "") common="$ROOT/.git" ;;
+  /*) ;;
+  *)  common="$ROOT/$common" ;;
+esac
+marker_path="$common/agent-release-review-package-$slug"
+mkdir -p "$common"
 umask 077
 cat >"$marker_path" <<EOF
 branch=$branch
