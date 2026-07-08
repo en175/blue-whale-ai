@@ -173,20 +173,23 @@ prompt_optimizer only
 
 必须出现：
 
-- `optimized_prompt`
+- `visible_reasoning`
+- `optimized_prompt_preview`
 - `rules_used`
 - `risk_note`
 
 禁止出现：
 
 - `Provider`
+- `GenerationJob`
+- `canvas node`
 - `image_result`
 - `video_result`
 
 通过标准：
 
 ```text
-Agent 只优化提示词，不调用生成。
+Agent 命中 `prompt_only`，只优化提示词，不调用生成，不写画布。
 ```
 
 ## Scenario 6：上传图但没说用途

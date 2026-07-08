@@ -28,9 +28,21 @@ review / 思考)不在画布,见下方"对话消息"。
 - `type`: image / video  （画布只承载素材）
 - `stage_id`
 - `status`: queued / generating / ready / failed / confirmed / rejected
+- `title`  （节点显示名；命名规则见下「Node title 三位一体」）
+- `is_user_titled`  （用户是否手改过 title；true 后 understanding 不再覆盖）
 - `asset_ref`  （引用 Asset）
 - `source_agent`
 - `created_from`
+
+### Node title 三位一体
+
+`title` 自动生成，按来源分三种、按生命周期覆盖：
+
+1. **直生 / Agent 产出**：初始 = prompt 派生（前 ~15 字）
+2. **用户上传**：初始 = 文件名去扩展名
+3. **被 @ 引用做 `asset_understanding` 后**：title 覆盖为 `understanding_data.subject`（understanding 的副产品，最准）
+
+`title` 可变：`asset_understanding` 完成时走 `canvas_update` 推前端。用户手改后置 `is_user_titled=true`，后续 understanding 不再覆盖。
 
 ### 对话消息(ChatMessage)
 
@@ -39,7 +51,7 @@ review / 思考)不在画布,见下方"对话消息"。
 - `visible_reasoning`  （思考过程摘要,可折叠）
 - `brief`  （需求摘要）
 - `skill_recommendation`  （Skill 推荐）
-- `asset_understanding`  （图片理解摘要）
+- `asset_understanding`  （图片理解摘要；**派生展示消息**——数据本体挂 asset 表 `understanding_data`，这里只是给用户读的摘要）
 - `stage_plan`  （阶段计划）
 - `script` / `storyboard`  （脚本 / 分镜）
 - `review`  （审核结论）
@@ -104,6 +116,7 @@ awaiting_confirm
 
 - 只有图片 / 视频素材结果写成 canvas node。
 - brief / skill / 分镜 / review / asset_understanding / visible_reasoning 等过程内容必须写成 ChatMessage，不进画布。
+- `asset_understanding` 的**数据本体**挂 asset 表（`understanding_data`），既不进画布也不作为 ChatMessage 字段；ChatMessage 里的 `asset_understanding` 只是从数据本体派生的展示摘要。
 - node 必须绑定 `stage_id`。
 - 生成任务不作为 canvas node；任务状态由 GenerationJob 承载，画布节点只通过 `status` 映射为 queued / generating / ready / failed / confirmed / rejected。
 - ready 结果才能进入确认门。

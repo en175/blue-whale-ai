@@ -129,7 +129,7 @@
 
 - 明确确认（「确认 / 满意 / 就这个」）→ 推进下一步
 - 弱继续（「继续 / 好了 / 下一步」）→ 不推进，二次确认
-- 修改意图（「改一下 / 换风格」）→ 进入 revise
+- 修改意图（「改一下 / 换风格」）→ 进入 revise（见 `rules/revise_canvas.md`）
 - 等待中（节点 generating）→ 拦住
 
 前端唯一要做的是：把后端返回的 `visible_reasoning`、`user_message_out`、

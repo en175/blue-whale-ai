@@ -17,7 +17,7 @@
 - `skill/references/backend_implementation_contract.md` —— Agent 编排的数据契约(Agent Turn / Canvas Node / Workflow Run / Stage / 对话消息类型,本文不再重复字段定义)
 - `skill/references/frontend_canvas_interaction_contract.md` —— 前端展示边界与验收标准
 - `skill/rules/confirmation_gate.md` —— 确认门四分类
-- `skill/rules/generation_route_decision.md` —— 四条生成链路的路由判定
+- `skill/rules/generation_route_decision.md` —— 两条入口（Dock 直生 / Agent 对话）的路由判定
 
 ---
 
@@ -174,8 +174,8 @@
 
 两条入口,共用同一套 GenerationJob:
 
-- **BottomDock 直生**:用户手填参数,无对话上下文。
-- **Agent 对话**:Agent runtime 内部判定链路后启动 GenerationJob。
+- **BottomDock 直生**:用户手填参数 + prompt,**零优化、零图理解**——原话 + 参数 + reference_asset_ids 直传 Provider,Provider 自己消费图,结果落画布(不进对话流)。质量用户自负责。
+- **Agent 对话**:L1 轻量 classifier(haiku 级,独立模型)分流(轻量编排 / Full Canvas),永远走 Prompt Optimizer(出 `optimized_prompt_preview` 让用户确认),图推理前做 `asset_understanding`。判定分层见 `skill/rules/decision_layer.md`,交付见 `AGENT-CONVERSATION-PRD.md`。
 
 #### `POST /api/projects/{project_id}/generate`(BottomDock 直生入口)
 ```json
@@ -294,15 +294,21 @@ data: {"job_id":"job_xxx","status":"succeeded","output_asset_ids":["ast_yyy"]}
 
 ## 6. BottomDock 直生 vs Agent 对话(职责边界)
 
-按 `CONTEXT.md`:**两条独立生成路径,不合并为同一 API**。二者底层共用 GenerationJob + Asset,保证计费/状态/资产管理统一。
+按 `CONTEXT.md`:**两条独立生成路径,不合并为同一 API**。职责按「要快 / 要好」划分,二者底层共用 GenerationJob + Asset,保证计费/状态/资产管理统一。
 
 | 维度 | BottomDock(`/generate`)| Agent(`/agent/turn`)|
 |---|---|---|
-| 入参 | 完整参数(模型/比例/分辨率/时长/参考) | 自然语言意图 |
-| 编排 | 无,直接 GenerationJob | CEO 路由 + worker 编排 |
-| 产物 | Asset → 画布节点 | 对话消息 + Asset → 画布节点 |
+| 定位 | **要快**——用户自负责 prompt 质量 | **要好**——Agent 帮优化 |
+| 承担 | **所有直接生成**(Direct Image / Direct Video / Image-to-Video) | **单入口多分支**:L1 轻量 classifier(haiku 级)→ lightweight / full_canvas / prompt_only / revise / product_switch / consult / confirm 等 |
+| 入参 | 完整参数 + prompt + reference_asset_ids | 自然语言意图 |
+| 提示词处理 | **零处理**(原话 + 参数直传 Provider,不做任何优化;质量用户自负责) | **永远有 Prompt Optimizer**(技术规整 + 创意优化,出 `optimized_prompt_preview` 用户确认) |
+| 图理解 | **零 understanding**(图随 reference_asset_ids 直传 Provider,Provider 自己消费图像素) | 图推理前必须 `asset_understanding`(见 `backend_implementation_contract.md` 硬约束 8) |
+| 编排 | 无,直接 GenerationJob | L1 轻量 classifier + worker 编排 |
+| 产物 | Asset → 画布节点(不进对话流) | 对话消息 + Asset → 画布节点 |
 | 复用 | 共用 `/api/jobs` 状态查询 | 内部启动 Job,进度走 turn 的 SSE |
 | 详见 | 本文 §5.4 | **`AGENT-CONVERSATION-PRD.md` §5.2** |
+
+> Image-to-Video 两条路径都能做,机制不同:Dock = 图 + prompt 直传 Provider(零中间步);Agent = understanding + 优化 + 生成。用户按「要快 / 要编排」选入口。
 
 ## 7. 数据模型(补充 backend contract 未覆盖的表)
 
@@ -324,6 +330,8 @@ assets
   width, height, duration
   source          -- upload | generated
   status          -- uploading | ready | failed
+  understanding_status  -- none | processing | ready | failed（仅 Agent 链路消费图前触发；Provider 直消图不需要）
+  understanding_data     -- jsonb: subject/visual_traits/scene/text_or_logo/usage_intent/must_keep/can_change/uncertainties/source；数据本体，跨链路复用
   created_at
 
 projects

@@ -4,6 +4,8 @@
 
 这是 Video Agent Canvas 的中间层，不是最终创作阶段。
 
+> **归属 Agent 链路**：understanding 是给 Agent 的 LLM 推理用的（Agent 基于图做 brief / skill / 分镜）。**Dock 直生不经过本 workflow**——Dock 把图随 `reference_asset_ids` 直传 Provider，Provider 自己消费图像素。详见 `backend_implementation_contract.md` 硬约束 8。
+
 ## 触发条件
 
 - 用户上传图片
@@ -18,7 +20,7 @@
 | 1 | 能力判断 | multimodal_status | 否 |
 | 2 | 图片识别 | asset_understanding | 视情况 |
 | 3 | 缺口补充 | user_asset_description | 是 |
-| 4 | 写入画布 | asset_understanding node | 否 |
+| 4 | 持久化 | asset.understanding_data（写 asset 表，非画布节点） | 否 |
 
 ## Stage 1：能力判断
 
@@ -62,16 +64,13 @@ multimodal_status:
 3. 这张图是产品参考、风格参考，还是构图参考？
 ```
 
-## Stage 4：写入画布
+## Stage 4：持久化到 asset 表
 
-生成 `asset_understanding` 节点。
+把 understanding 写入 `assets.understanding_data`（数据本体），`understanding_status` 翻 `ready`。**不是画布节点**——画布只承载 image / video 素材，understanding 数据挂 asset 表（见 `BACKEND-API-PRD.md` §7）。
 
-节点内容：
+`understanding_data` 字段：
 
 ```text
-asset_id
-asset_type
-understanding_status
 subject
 visual_traits
 scene
@@ -82,6 +81,8 @@ can_change
 uncertainties
 source: direct_vision / vision_adapter / user_description
 ```
+
+> ChatMessage 的 `asset_understanding` variant 是从这份数据**派生**的展示摘要（给用户读），不是数据本体。
 
 ## 阻断规则
 

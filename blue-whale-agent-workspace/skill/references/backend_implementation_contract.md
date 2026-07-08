@@ -22,6 +22,7 @@ user_message_out
 canvas_updates
 trace_event
 forced_skill_id
+decision_context
 created_at
 ```
 
@@ -30,6 +31,7 @@ created_at
 | 字段 | 用户可见 | 说明 |
 |---|---|---|
 | `forced_skill_id` | 否(仅后端消费) | 用户在 Skill 面板点 `Use` 时携带;**仅决定 skill 选择那一步,不锁后续 Stage**;一次性指令,**不持久化为 `auto`**。详见 `AGENT-CONVERSATION-PRD.md` §2 / §5。 |
+| `decision_context` | 否(仅后端消费) | 每轮前置算好的判定上下文(硬事实 + L1 软建议 + 组合 `decision_branch`),主 Agent 据此 `switch(decision_branch)` 收口,不再自行扫状态自判。字段全集见本文 `decision_context` 节,语义权威见 `skill/rules/decision_layer.md`。 |
 
 字段说明：
 
@@ -96,6 +98,35 @@ created_at
 - 排查生成失败
 - 开发者模式复盘
 
+## decision_context
+
+每轮 Agent Turn 前置算好的判定上下文,整体喂主 Agent。主 Agent 据此 `switch(decision_branch)` 收口,不再自行扫状态、不再自判硬状态。
+
+权威定义(三层分工 / `decision_branch` 枚举 / 组合器优先级 / L1 classifier 契约 / 推翻规则)见 `skill/rules/decision_layer.md`,本文件只列字段全集。
+
+```text
+decision_context:
+  # 硬事实(后端代码算,零 LLM)
+  has_generating: bool              # 是否有 generating 节点
+  has_ready_node: bool              # 当前 stage 是否有 ready/awaiting_confirm 节点
+  has_failed: bool                  # 是否有 failed 节点
+  awaiting_confirm: bool            # 当前 stage 是否在等确认
+  pending_workflow: bool            # 是否有未完成 workflow
+  current_stage: stage_ref          # 当前 stage(id + name + status)
+  active_product_context: object    # 当前产品方向(见 product_switch_p0.md)
+  previous_product_context: object? # 前一个产品方向(无则 null)
+
+  # L1 输出(独立轻量 classifier,软建议)
+  intent_direction: enum            # product_switch / new_task / prompt_only / consult / revise / responding_to_confirm / ambiguous
+  suggested_route: enum?            # 仅 new_task 带:lightweight / full_canvas
+  route_signals: string[]           # L1 判定信号,供主 Agent 评估推翻
+
+  # 组合结果(后端代码按优先级算出,单一值)
+  decision_branch: enum             # generation_in_progress / product_switch / new_task / prompt_only / consult / revise_canvas / confirm_pending / generation_failed / clarify
+```
+
+**L1 classifier 调用时机**:硬状态代码每轮必跑(零成本);`has_generating=true` 直接短路到 `generation_in_progress`,**跳过 L1**;其余情况才调 L1(独立轻量模型,haiku 级)。L1 是软建议,主 Agent 可推翻(见 `decision_layer.md` 推翻规则)。`decision_context` 是后端 turn 内部,不暴露新 API,不进 SSE。
+
 ## Canvas Node
 
 画布节点只表示用户能看到的图片 / 视频素材结果。生成任务本身由 GenerationJob 承载，brief / skill / 分镜 / review 等过程内容由 ChatMessage 承载。
@@ -107,6 +138,7 @@ stage_id
 type
 status
 title
+is_user_titled
 content
 asset_refs
 source
@@ -114,6 +146,8 @@ visible_reasoning
 created_at
 updated_at
 ```
+
+> `title` 命名（三位一体：prompt 派生 / 文件名 / `understanding.subject` 覆盖）与 `is_user_titled`（用户手改标记，置 true 后 understanding 不再覆盖 title）的完整规则见 `canvas_state_rules.md`。
 
 ### node.type（画布节点,仅素材）
 
@@ -130,11 +164,11 @@ updated_at
 - `visible_reasoning`  （思考过程,可折叠）
 - `brief`  （需求摘要）
 - `skill_recommendation`  （Skill 推荐）
-- `asset_understanding`  （图片理解摘要）
+- `asset_understanding`  （图片理解摘要；**派生展示消息**：从 `assets.understanding_data` 派生给用户读的摘要，数据本体挂 asset 表，见 `BACKEND-API-PRD.md` §7）
 - `stage_plan`  （阶段计划）
 - `script` / `storyboard`  （脚本 / 分镜）
 - `prompt_draft` / `optimized_prompt`  （提示词草稿 / 优化后,**默认不展示给用户**;`optimized_prompt` 是发给 Provider 的原始版,含系统指令/格式 token)
-- `optimized_prompt_preview`  （优化后提示词的**用户友好版**,中文可读、可展示;区别于原始 `optimized_prompt`,直生链路用它给用户看"我帮你优化成了这样")
+- `optimized_prompt_preview`  （优化后提示词的**用户友好版**,中文可读、可展示;区别于原始 `optimized_prompt`;`prompt_only` 分支只输出它,不启动 GenerationJob / 不写 Canvas）
 - `review`  （审核结论）
 - `plain_text`  （普通文字回复）
 - `image_card` / `video_card`  （结果卡,引用画布上的 asset node）
@@ -254,7 +288,7 @@ confirmed_at
 3. 只有「当前阶段存在 ready 节点」+「用户明确确认」同时满足,才 `advance_stage`。
 
 - 弱继续("继续/好了/下一步")不推进,后端回复二次确认话术。
-- 修改意图("改一下/换风格")进入 revise,可带自然语言 instruction
+- 修改意图("改一下/换风格")进入 revise(见 `rules/revise_canvas.md`),可带自然语言 instruction
   (如"保留构图,换成清晨桌面风格")。
 - 重试也通过对话表达("重新生成这版")。
 
@@ -272,11 +306,12 @@ confirmed_at
 5. 生成失败必须写入 failed node，而不是静默失败。
 6. `visible_reasoning` 必须经过过滤后再返回前端。
 7. `trace_event` 默认不返回普通用户端。
-8. 图生图或图片转视频前必须存在 `asset_understanding`。
+8. **Agent 链路**基于图推理前必须存在 `asset_understanding`；Provider 直接消费图（Dock 直生 / 图生图 / 图生视频）不需要——Provider 是多模态生成模型，直接吃图像素，不存在「假装识别」。
 9. 主 LLM 不支持多模态时，不能声称已识别图片，必须调用视觉模型或请求用户补充。
 10. Provider 调用前必须存在 `optimized_prompt`。
 11. 轻量 direct generation 不应强制创建完整广告 stage plan。
 12. 完整广告/UGC/短剧视频不能绕过脚本分镜直接发给 Provider。
+13. **`advance_stage` 铁闸(confirm_pending)**:推进 stage 必须独立校验当前 stage 存在 `has_ready_node`,与主 Agent 判定**解耦**——主 Agent 误判要推进也拦。呼应 `decision_layer.md` confirm_pending 后端铁闸与 `confirmation_gate.md`。
 
 ## 前端展示建议
 

@@ -4,38 +4,30 @@
 
 ## 阶段总览
 
-| 阶段 | 名称 | 主要 Agent | 产物 | 是否需要确认 |
+| 阶段 | 名称 | 主要 Agent | 产物 | 确认类型 |
 |---|---|---|---|---|
-| 0 | 意图识别 | Director | 任务类型 | 否 |
-| 1 | Brief 收集 | Brief | 最小创作 Brief | 是 |
-| 2 | Skill 匹配 | Skill Selector | 创作套路 / Skill | 是 |
-| 3 | 阶段计划 | Director | canvas stage plan | 是 |
-| 4 | 脚本分镜 | Storyboard | 脚本、分镜、镜头表 | 是 |
-| 5 | 首批视觉 | Generation | 关键帧 / 风格图 / 商品图 | 是 |
-| 6 | 视频生成 | Generation | 视频任务或视频结果 | 是 |
-| 7 | 审核完成 | Review | 质量检查、交付摘要 | 是 |
+| 0 | 承接 decision_branch | Director | 路由到对应 stage | 否 |
+| 1 | Brief 收集 | Brief | 最小创作 Brief | **硬停** |
+| 2 | Skill 匹配 | Skill Selector | 创作套路 / Skill | 软过 |
+| 3 | 阶段计划 | Director | canvas stage plan | 软过 |
+| 4 | 脚本分镜 | Storyboard | 脚本、分镜、镜头表 | **硬停** |
+| 5 | 首批视觉 | Generation | 关键帧 / 风格图 / 商品图 | **硬停** |
+| 6 | 视频生成 | Generation | 视频任务或视频结果 | **硬停** |
+| 7 | 审核完成 | Review | 质量检查、交付摘要 | 软过 |
 
-## Stage 0：意图识别
+> **硬停** = turn 边界，必须用户明确确认才推进；**软过** = turn 内自动推进，用户可随时打断。详见 `confirmation_gate.md`。
+> **Stage 0 承接 `decision_context.decision_branch`**(turn 前置已由后端算好,见 `decision_layer.md`),按 branch 路由到对应 stage。原「L2 意图识别」概念已废除——全场景(轻量编排 + Full Canvas)复用同一套 `decision_branch`,L1/L2 统一。
 
-输入：
-- 用户原话
-- 当前 canvas 状态
-- 是否已有未完成 workflow
+## Stage 0：承接 decision_branch
 
-判断：
-- 新建视频
-- 修改当前结果
-- 确认当前结果
-- 切换 Skill
-- 普通咨询
+Full Canvas 进来时,turn 前置已算好 `decision_context.decision_branch`(见 `decision_layer.md`)。Stage 0 不再独立做意图识别,只承接并路由:
 
-输出：
-- `intent`
-- `target_canvas_id`
-- `next_stage`
+- `new_task`(`suggested_route=full_canvas`)→ 进入 Stage 1 Brief 收集
+- `product_switch` / `revise_canvas` / `confirm_pending` → 按主 Agent switch 动作处理(读 `product_switch_p0.md` / `rules/revise_canvas.md` / 确认门四分类),需要时回到对应 stage
+- 其他 branch(`generation_in_progress` / `generation_failed` / `consult` / `clarify`)→ 主 Agent 直接处理,不进 Full Canvas stage 流
 
-阻断：
-- 意图不清时，不启 workflow，先问一句确认。
+阻断:
+- `decision_branch=clarify` 时,不启 workflow,先问一句确认。
 
 ## Stage 1：Brief 收集
 

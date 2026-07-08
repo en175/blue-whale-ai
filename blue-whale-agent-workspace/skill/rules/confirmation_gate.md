@@ -8,15 +8,24 @@
 
 ## 确认门触发点
 
-以下阶段必须停住：
+Full Canvas 的 stage 分两类：**硬停**（必须用户明确确认才推进，= turn 边界）和**软过**（Agent turn 内自动推进，用户可随时打断）。
+
+**硬停（4 个，= turn 边界）：**
 
 - Brief 摘要完成
-- Skill 推荐完成
-- 阶段计划完成
 - 脚本分镜完成
 - 首批视觉 ready
 - 视频结果 ready
-- 最终审核完成
+
+**软过（3 个，turn 内自动推进）：**
+
+- Skill 推荐（Skill Selector 出推荐 + 理由，用户不改则默认走；想改随时说）
+- 阶段计划（Director 出 stage plan，meta 信息，用户大多不关心）
+- 最终审核（Review 出交付摘要，不构成阻断）
+
+> 轻量编排链路（简单图/视频）只有 1 个硬停：优化提示词（`optimized_prompt_preview`）用户确认才生成。详见 `AGENT-CONVERSATION-PRD.md`。
+
+> 一个 Agent turn 内可跨「软过 stage」推多条 message；遇「硬停 stage」必须 `turn_done` 停下等用户确认。
 
 ## 用户表达分类
 
@@ -52,7 +61,7 @@
 
 ### 修改意图
 
-不能推进，进入 revise：
+不能推进，进入 revise（见 `rules/revise_canvas.md`）：
 
 - 改一下
 - 重做
@@ -79,7 +88,9 @@
 
 ## 后端实现含义
 
-确认门不是模型建议，而是状态约束。
+确认门不是模型建议,而是状态约束。
+
+**confirm_pending branch 由 `decision_context` 算出**(`awaiting_confirm=true`,见 `decision_layer.md`):主 Agent 只在命中 `confirm_pending` branch 时判四分类,不再自行决定「现在要不要走确认门」。
 
 必须检查：
 
@@ -89,6 +100,8 @@
 - 用户表达是否为明确确认
 
 只有全部满足，才允许 `advance_stage`。
+
+**`advance_stage` 铁闸**:推进必须独立校验 `has_ready_node`,与主 Agent 判定解耦——主 Agent 误判要推进也拦(呼应 `backend_implementation_contract.md` 硬约束 13 与 `decision_layer.md` confirm_pending 后端铁闸)。
 
 ## 禁止
 
