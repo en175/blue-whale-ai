@@ -4,17 +4,17 @@ spring:
   application:
     name: blue-whale-gateway
   profiles:
-    active: oa-dev
+    active: blue-whale-dev
   cloud:
     nacos:
-      server-addr: 127.0.0.1:8884
+      server-addr: 110.42.233.109:8848
       discovery:
         namespace: ${spring.profiles.active}
-        ip: 127.0.0.1
+        ip: 110.42.233.109
       config:
         namespace: ${spring.profiles.active}
         file-extension: yml
-        group: SWEET_OA
+        group: BLUE_WHALE
     gateway:
       discovery:
         locator:
