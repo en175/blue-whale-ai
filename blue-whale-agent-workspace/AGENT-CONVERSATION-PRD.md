@@ -8,9 +8,10 @@
 实现前**必读** workspace 三份契约 + 两份规则:
 
 - `skill/references/backend_implementation_contract.md` —— **权威定义层**。Agent Turn 字段、Canvas Node、ChatMessage variant(对话消息类型)、Stage、Workflow Run 都在这里定义,本文不重复字段定义,只引用。
+- `skill/rules/decision_layer.md` —— **判定分层架构**。三层分工(硬状态代码 / L1 轻量 classifier / 主 Agent)+ `decision_context` + `decision_branch` switch 表。turn 前置算 `decision_context` 的权威。
 - `skill/references/frontend_canvas_interaction_contract.md` —— 前端展示边界(画布 = 素材,对话 = 过程)与验收颗粒度。
 - `skill/rules/confirmation_gate.md` —— 确认门四分类(明确确认 / 弱继续 / 修改意图 / 等待中)。
-- `skill/rules/generation_route_decision.md` —— 四条生成链路的路由判定。
+- `skill/rules/generation_route_decision.md` —— 两条入口（Dock 直生 / Agent 对话）的路由判定。
 
 本文定义 backend contract **未覆盖**的部分:
 
@@ -23,13 +24,12 @@
 
 ## 1. 范围(P0)
 
-### 后端 P0 —— 三条链路全做(避免返工)
+### 后端 P0 —— 两入口 + Agent 内部分支
 
-Agent runtime(CEO 路由 + workers)在 P0 必须把以下三条链路做透:
+P0 按两条入口落地，避免把 Dock 直生和 Agent 编排混成一条链路：
 
-1. **Direct**(直接生成图/视频)
-2. **Image-to-Video**(上传图 → 生视频,前置 `asset_understanding`)
-3. **Full Canvas**(brief → skill → 分镜 → 视觉 → 视频 的完整 worker 协作)
+1. **BottomDock 直生**：Direct Image / Direct Video / Image-to-Video，纯参数透传，零 Prompt Optimizer，零 understanding。
+2. **Agent 对话**：后端先算 `decision_context`，主 Agent 按 `decision_branch` 收口。Agent 内部分支包括 `new_task + lightweight`、`new_task + full_canvas`、`prompt_only`、`revise_canvas`、`product_switch`、`consult`、`confirm_pending` 等。
 
 > Full Canvas 的**前端**过程消息展示(brief / skill / storyboard 等对话卡)见 §6 P0/P1 边界。
 
@@ -46,13 +46,14 @@ Agent runtime(CEO 路由 + workers)在 P0 必须把以下三条链路做透:
 
 ### `POST /api/projects/{project_id}/agent/turn`
 
-用户在 AgentChatPanel 发一句话。后端 CEO 路由按 `generation_route_decision.md` 判定链路(direct / image-to-video / full canvas),逐段流式返回;必要时启动 GenerationJob。
+用户在 AgentChatPanel 发一句话。后端先算 `decision_context`,主 Agent 按 `decision_branch` 分流(轻量编排 / Full Canvas / prompt_only / 非生成等),逐段流式返回;必要时启动 GenerationJob。
 
 ```json
 // req
 {
   "text": "用户的自然语言",
-  "forced_skill_id": "skl_xxx"    // optional
+  "forced_skill_id": "skl_xxx",          // optional，用户在 Skill 面板点 Use
+  "reference_asset_ids": ["ast_xxx"]     // optional，用户 @ 引用的画布素材
 }
 ```
 
@@ -62,12 +63,25 @@ Agent runtime(CEO 路由 + workers)在 P0 必须把以下三条链路做透:
 |---|---|---|
 | `text` | 是 | 用户的自然语言输入。 |
 | `forced_skill_id` | 否 | 仅当用户在 Skill 面板点 `Use` 时携带。**仅决定 skill 选择那一步,不锁后续 Stage**;一次性指令,**不改变用户的 `auto` 状态**(不持久化)。权威定义见 `backend_implementation_contract.md` Agent Turn 字段。 |
+| `reference_asset_ids` | 否 | 用户在对话框打 `@` 引用的画布素材。Agent 拿到 asset_id 后:若该 asset `understanding_status != ready`,先补做 `asset_understanding`(visible_reasoning 兜「我先看一下这张图」),再进图生图 / 图生视频链路。复用 `BACKEND-API-PRD.md` §5.4 直生入口的同名字段语义。 |
 
 **`forced_skill_id` 与 auto 候选池的关系**(详见 §5 接入点):
 
 - 不传 `forced_skill_id` = 用户未手动指定,Agent 按既定规则(见 `skill/rules/skill_generation_priority.md`「Skill 来源与选择」)从 auto 候选池决定。
 - **auto 候选池不在请求里传**。后端 Agent runtime 直接从 `/api/skills/mine?auto=true` 自读,保证与 Skill 面板状态同源。
 - 冲突仲裁优先级:**`forced_skill_id`(Use)> auto 候选池 > 未指定**。
+
+### turn 前置:算 decision_context
+
+后端收到 `text` 后、主 Agent 开跑前,先算 `decision_context`(见 `backend_implementation_contract.md` + `skill/rules/decision_layer.md`):
+
+1. 硬状态代码每轮必跑(零成本):`has_generating` / `has_ready_node` / `has_failed` / `awaiting_confirm` / `pending_workflow` / `current_stage` / `active_product_context` / `previous_product_context`。
+2. `has_generating=true` 直接短路到 `decision_branch=generation_in_progress`,**跳过 L1**。
+3. 其余情况调 L1 轻量 classifier(haiku 级),得 `intent_direction` + 仅 `new_task` 带 `suggested_route`。
+4. 后端代码按组合器优先级算出单一 `decision_branch`。
+5. 整个 `decision_context` 喂主 Agent,主 Agent `switch(decision_branch)` 收口。
+
+**`decision_context` 是后端 turn 内部,不进 SSE**——前端看到的仍是 §3 的事件序列(`visible_reasoning` / `message` / `canvas_update` / `job_*` / `turn_done`)。主 Agent 的分支判定体现在 `visible_reasoning` 与 `turn_done.requires_user_action` / `allowed_actions` 里。
 
 ---
 
@@ -110,6 +124,8 @@ event: turn_done
 data: {"requires_user_action":true,"allowed_actions":["confirm","revise","retry"],"current_stage_id":"stg_xxx","active_job_ids":[]}
 ```
 
+> 上面的序列是**轻量编排**形态(一个 turn 内:追问 → 优化提示词 → 生成 → 出结果)。**Full Canvas** 形态不同:跨多个 turn,每个「硬停 stage」(Brief / 分镜 / 视觉 / 视频)切一次 turn,用户确认后才开下一个 turn;「软过 stage」(Skill / 阶段计划 / 审核)在同一 turn 内自动推进。两种形态都**必有 `optimized_prompt_preview`**(Agent 永远优化提示词,区别于 Dock 裸直生)。
+
 ### 事件清单
 
 | 事件 | payload | 说明 |
@@ -136,7 +152,7 @@ data: {"requires_user_action":true,"allowed_actions":["confirm","revise","retry"
 | `script` / `storyboard` | 是 | 脚本 / 分镜(P0 文字气泡,P1 可美化成分镜表)。 |
 | `prompt_draft` | **否** | 提示词草稿,默认不展示。 |
 | `optimized_prompt` | **否** | 发给 Provider 的原始版,含系统指令/格式 token,**永不进 `message`**。 |
-| `optimized_prompt_preview` | **是** | 用户友好版,中文可读,"我帮你优化成了这样",可在对话展示。直生链路用它给用户看优化后的提示词。 |
+| `optimized_prompt_preview` | **是** | 用户友好版,中文可读,"我帮你优化成了这样",可在对话展示。**Agent 链路必有**(轻量编排 + Full Canvas 都走;Dock 直生不产生此消息)。 |
 | `review` | 是 | 审核结论。 |
 | `plain_text` | 是 | 普通文字回复。 |
 | `image_card` / `video_card` | 是 | 结果卡,引用画布上的 asset node。 |
@@ -156,8 +172,9 @@ data: {"requires_user_action":true,"allowed_actions":["confirm","revise","retry"
 4. Provider 调用前必须存在 `optimized_prompt`。
 5. 生成失败必须写入 `failed` 节点 + `error` 消息,**不静默失败**。
 6. `trace_event` / `prompt_draft` / `optimized_prompt` / worker 名 / 文件路径 **不进** `message` / `visible_reasoning`。
+7. **`advance_stage` 铁闸**:推进 stage 必须独立校验 `has_ready_node`,与主 Agent 判定解耦——主 Agent 误判要推进也拦(呼应 `backend_implementation_contract.md` 硬约束 13、`decision_layer.md`、`confirmation_gate.md`)。`confirm_pending` branch 由 `decision_context` 算出,主 Agent 只在命中时判四分类。
 
-> 规则全文见 `skill/rules/confirmation_gate.md`(四分类)与 `skill/rules/generation_route_decision.md`(四链路路由判定)。本文不复制规则全文,只声明 Agent 对话链路必须遵守。
+> 规则全文见 `skill/rules/confirmation_gate.md`(四分类)与 `skill/rules/generation_route_decision.md`(两条入口路由判定)。本文不复制规则全文,只声明 Agent 对话链路必须遵守。
 
 ---
 
@@ -227,7 +244,7 @@ BottomDock 直生(`/api/projects/{project_id}/generate`)与 Agent 对话(`/agent
 
 | 层 | P0 | P1 |
 |---|---|---|
-| 后端 runtime | **三链路全做**(Direct / Image-to-Video / Full Canvas) | — |
+| 后端 runtime | **两入口 + Agent 分支**:Dock 直生;Agent `decision_branch` 覆盖 lightweight / full_canvas / prompt_only / revise / product_switch / confirm / consult 等 | — |
 | 前端过程消息 | **全展示**(文字气泡):brief / skill / storyboard / review / optimized_prompt_preview / visible_reasoning | 可选:过程消息结构化美化(如 storyboard 分镜表、brief 卡片化) |
 | 前端结果 | 结果卡(`image_card` / `video_card`) + 画布素材节点 | — |
 | 对话历史 / 状态持久化 | 最小持久化:当前 + 上一个产品方向的结构化摘要(见 ROADMAP 模块 10 P0 边界);完整 `messages` / `agent_events` 历史**不做** | 状态持久化(`project_state`)+ 内容版本(`content_versions`)+ 完整历史 + 历史摘要(`conversation_summary`)+ 版本索引 + 历史资产引用 + 版本恢复(见 ROADMAP 模块 10) |
@@ -242,7 +259,7 @@ BottomDock 直生(`/api/projects/{project_id}/generate`)与 Agent 对话(`/agent
 (由 `BACKEND-API-PRD.md` §10 演化而来;该 §10 现已收敛为核心基建 4 条,Agent 对话验收迁至本文):
 
 1. **自然语言流式**:用户在 AgentChatPanel 发自然语言,流式看到 `visible_reasoning` + 过程消息(brief/skill/storyboard/review/optimized_prompt_preview)+ 结果卡(`image_card`/`video_card`);画布出现对应素材节点。
-2. **Image-to-Video 前置理解**:上传图 → Agent/直生生视频,前置 `asset_understanding` 存在(主 LLM 不多模态时调视觉模型或请用户补充,不假装识别)。
+2. **Image-to-Video 前置理解**:Agent 对话里的图转视频必须有 `asset_understanding`;Dock 直生则把图随 `reference_asset_ids` 直传 Provider,不做 understanding。
 3. **刷新不丢**:生成中刷新页面或切走再回来,**画布 + 对话消息 + 进行中任务**都恢复(`GET /api/projects/{id}` 返回整 Project 快照:canvas nodes + messages + active_jobs);Job 走 `active_jobs` 兜底重连或独立 `/api/jobs/{id}/stream`,完成时翻 `ready`。**完整历史系统(摘要 / 内容版本 / messages 与 agent_events 分离 / 版本索引)不在 P0,见 ROADMAP 模块 10。**
 4. **"继续"不推进**:用户只说"继续"时不推进;`ready` 节点 + 明确确认才推进(确认门四分类)。
 5. **不泄露内部信息**:`trace_event` / `optimized_prompt`(原始)/ `prompt_draft` / worker 名 / 文件路径不出现在任何用户可见响应;对话里给用户看的是 `optimized_prompt_preview`(友好版)。
@@ -251,6 +268,6 @@ BottomDock 直生(`/api/projects/{project_id}/generate`)与 Agent 对话(`/agent
 
 ## 8. 风险
 
-- **Agent runtime 复杂度**:Full Video Canvas 编排是多 worker 协作,后端实现成本高。P0 接口和消息链路一次到位,联调时可按 Direct / Image-to-Video / Full Canvas 的顺序逐条验收。
+- **Agent runtime 复杂度**:Full Video Canvas 编排是多 worker 协作,后端实现成本高。P0 接口和消息链路一次到位,联调时按入口验收:先 Dock 直生,再 Agent lightweight / prompt_only / full_canvas。
 - **URL 签名过期**:Skill 封面用 CloudFront Signed URL,会集体 403;由 Skill 面板的 `signed-cover` 接口兜底,详见 `FRONTEND-SKILL-PANEL-PRD.md` §9。
 - **匿名身份迁移**:P2 引入登录时,需把 `anonymous_id` 名下的 Project/Asset/对话合并到正式账户,后端需预留合并路径(详见 `BACKEND-API-PRD.md` §11)。

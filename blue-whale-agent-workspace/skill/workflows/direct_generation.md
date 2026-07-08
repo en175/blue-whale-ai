@@ -1,16 +1,23 @@
-# Direct Generation Workflow
+# 轻量生成编排（Lightweight Generation Workflow）
 
-目标：处理用户直接要求生成图片或视频的轻量任务。
+> 这是 Agent 对话里的**轻量编排链路**（`decision_branch=new_task` + `suggested_route=lightweight`），**不是 BottomDock 直生**。
+>
+> - 用户要快、自负责 prompt → **Dock 直生**（零优化、零 understanding，直传 Provider），见 `BACKEND-API-PRD.md` §5.4 / §6
+> - 用户要好、要 Agent 帮优化与追问 → **本链路**（永远走 Prompt Optimizer，图推理前做 understanding）
+
+目标：在 Agent 对话里处理用户要「要好」的直接生成——简单图 / 轻量视频，Agent 帮补全维度、优化提示词、生成后停住确认。
 
 适用于：
 
-- “生成一个小猫跑步的视频”
-- “做一张赛博朋克城市图”
-- “让这张图动起来”
-- “生成一个女孩在雨中跳舞的视频”
-- “做一张保温杯产品图”
+- 「生成一个小猫跑步的视频」
+- 「做一张赛博朋克城市图」
+- 「让这张图动起来」
+- 「生成一个女孩在雨中跳舞的视频」
+- 「做一张保温杯产品图」
 
-不适用于：
+> 以上场景 Dock 直生也能做。区别在入口选择：要快走 Dock，要 Agent 编排走本链路。
+
+不适用于（→ Full Canvas，见 `video_agent_canvas.md`）：
 
 - 需要完整广告策略的视频
 - 需要多阶段脚本/分镜/关键视觉的营销视频
@@ -19,12 +26,12 @@
 
 ## 核心原则
 
-Direct Generation 是独立链路，不强制走完整 Video Agent Canvas。
+本链路是 Agent `new_task` 分支的轻量分流（vs Full Canvas 重编排），不强制走完整 Video Agent Canvas。
 
-但它仍然必须遵守：
+但它仍必须遵守：
 
-- 图片理解
-- 提示词优化
+- 图推理前做图片理解（Agent 链路特征；Dock 直生不做）
+- 提示词优化（Agent 永远走 Prompt Optimizer；Dock 直生零优化）
 - 模型能力判断
 - 画布写入
 - 结果确认门
@@ -32,7 +39,9 @@ Direct Generation 是独立链路，不强制走完整 Video Agent Canvas。
 
 ## 路由判断
 
-用户输入符合以下特征时，优先走 direct_generation：
+进入条件：`decision_context.decision_branch=new_task` 且 `suggested_route=lightweight`（turn 前置已由 L1 classifier 算好，见 `decision_layer.md` / `generation_route_decision.md`）。Director 不再自判链路，只从用户消息补全生成维度。
+
+L1 在以下特征时给 `lightweight`：
 
 - 目标清楚
 - 不涉及复杂营销策略
@@ -58,7 +67,7 @@ Direct Generation 是独立链路，不强制走完整 Video Agent Canvas。
 
 | 阶段 | 名称 | Agent | 产物 | 是否确认 |
 |---|---|---|---|---|
-| 1 | 任务识别 | Director | generation_intent | 否 |
+| 1 | 读 decision_context | Director | generation_intent(来自 decision_context) | 否 |
 | 2 | 轻量补问 | Brief | minimal_brief | 视情况 |
 | 3 | 图片理解 | Image Understanding | asset_understanding | 有图时 |
 | 4 | 提示词草案 | Image Prompt / Generation | prompt_draft | 否 |
@@ -66,7 +75,9 @@ Direct Generation 是独立链路，不强制走完整 Video Agent Canvas。
 | 6 | 生成任务 | Generation | GenerationJob + image/video canvas node | 否 |
 | 7 | 结果确认 | Confirmation Gate | image/video result | 是 |
 
-## Stage 1：任务识别
+## Stage 1：读 decision_context
+
+进入条件已由 L1 前置算好（见上「路由判断」）。Director 只从用户消息补全生成维度：
 
 识别：
 
@@ -103,9 +114,9 @@ Direct Generation 是独立链路，不强制走完整 Video Agent Canvas。
 
 ## Stage 3：图片理解
 
-如果用户上传图片或说“这张图”，必须先进入 `image_understanding.md`。
+Agent 链路里，用户上传图片或说「这张图」，必须先进入 `image_understanding.md`。
 
-没有 `asset_understanding`，不能做图生图或图转视频。
+没有 `asset_understanding`，不能做图生图或图转视频。（Dock 直生不在此列——Dock 直传 Provider，由 Provider 消费图。）
 
 ## Stage 4：提示词草案
 
@@ -139,6 +150,8 @@ Direct Generation 是独立链路，不强制走完整 Video Agent Canvas。
 - 是否保留背景
 
 ## Stage 5：提示词优化
+
+Agent 链路永远走 Prompt Optimizer（这是与 Dock 直生零优化的本质区别）。
 
 Prompt Optimizer 根据目标模型优化。
 
@@ -221,7 +234,8 @@ visible_reasoning：
 
 ## 禁止
 
-- 不把简单直接生成任务强制升级成完整广告 workflow。
-- 不跳过 Prompt Optimizer。
-- 不在缺少图片理解时做图转视频。
+- 不把简单生成任务强制升级成完整广告 workflow（Full Canvas）。
+- 不跳过 Prompt Optimizer（Agent 链路铁律；Dock 直生零优化不在此列）。
+- 不在缺少图片理解时做图转视频（Agent 链路；Dock 直传 Provider 不在此列）。
 - 不把生成成功自动当成用户确认。
+- 不与 Dock 直生混淆——Dock 直传 Provider、零优化、零 understanding；本链路永远走 Optimizer + 图推理前 understanding。

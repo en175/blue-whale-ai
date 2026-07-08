@@ -5,23 +5,23 @@ description: Blue-Whale 式 AI 视频画布编排 Skill。用于把用户的视�
 
 # Blue-Whale Video Agent Canvas
 
-> 主 Agent 完整决策规则(角色 + 状态机 + 路由 + 确认门)的唯一权威:`workers/director_agent.md`。本文件是 Skill 入口与资源导航。
+> **用本 Skill 时，你就是主 Agent（Director）。** 第一步读 `workers/director_agent.md` 拿运行时决策：读 `decision_context` → `switch(decision_branch)` → 按分支动作收口。判定分层架构（硬状态后端算 / L1 轻量 classifier / 主 Agent 收口）见 `rules/decision_layer.md`。
+>
+> 本文件是入口与导航，主 Agent 决策权威 = `director_agent.md`，本文不重复。
 
 这是一个编排 Skill，不是单次生成提示词。
 
+**自包含安装**：所有依赖（workers / workflows / rules / references / library / memory）都在 `skill/` 目录内。安装 = 把整个 `skill/` 目录复制到目标 Agent 的 skills 路径；工作台的 `CLAUDE.md` / `AGENTS.md` / PRD / tests 不需要带上。
+
 使用本 Skill 时，Agent 必须按“CEO 路由器 + 子 Agent + Workflow + Canvas 确认门”的方式工作。
 
-## 快速执行顺序
+## 快速执行顺序（每轮 turn）
 
-1. 读取当前用户意图。
-2. 读取或建立 canvas 状态。
-3. 如果是新任务，按 `workflows/video_agent_canvas.md` 执行。
-4. 如果信息不足，按 `rules/progressive_disclosure.md` 追问。
-5. 如果需要创作套路，调度 `workers/skill_selector.md`。
-6. 如果要生成脚本/分镜，调度 `workers/storyboard_agent.md`。
-7. 如果要生成图片/视频任务，调度 `workers/generation_agent.md`。
-8. 每个关键结果写入 canvas 后，按 `rules/confirmation_gate.md` 停住。
-9. 用户确认后才推进下一阶段。
+1. 读后端算好的 `decision_context`（硬事实 + L1 软建议 + 组合 `decision_branch`）。
+2. `switch(decision_branch)` 收口——动作表见 `workers/director_agent.md`。
+3. 按分支路由：新任务 → workflow；确认门 → 四分类；产品切换 → `rules/product_switch_p0.md`；信息不足 → `rules/progressive_disclosure.md` 追问。
+4. 关键结果写 canvas 后，按 `rules/confirmation_gate.md` 停住等确认。
+5. 用户明确确认才推进。
 
 ## 资源导航
 
@@ -46,6 +46,7 @@ description: Blue-Whale 式 AI 视频画布编排 Skill。用于把用户的视�
 | 画布状态 | `rules/canvas_state_rules.md` |
 | 用户可见思考过程 | `rules/visible_reasoning.md` |
 | Skill 与生成规则优先级 | `rules/skill_generation_priority.md` |
+| 判定分层架构（decision_context + switch） | `rules/decision_layer.md` |
 | 生成链路路由 | `rules/generation_route_decision.md` |
 | P0 产品切换 / 回到前一个产品 | `rules/product_switch_p0.md` |
 | 多模态能力判断 | `rules/multimodal_capability.md` |

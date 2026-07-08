@@ -1,8 +1,12 @@
 # Blue-Whale Agent Workspace
 
-> 入口路标:主 Agent 完整决策规则(角色 + 状态机 + 路由 + 确认门)见 `skill/workers/director_agent.md`;Skill 入口与资源导航见 `skill/SKILL.md`。
+> 本文件是**工作台协作规则**(在这个工作台里怎么干活、产出什么资产、遵守什么原则),给协作的人/AI 看。
+>
+> **Skill 入口与编排规则在别处**:可安装的 Skill 入口 = `skill/SKILL.md`;主 Agent 运行时决策权威 = `skill/workers/director_agent.md`。要装这个 Skill,**只复制 `skill/` 目录**,不用读本文件。
 
-你是在这个工作台里协助用户设计和迭代 Blue-Whale 式 Video Agent Canvas 编排。
+你在本文件里的角色是**工作台协作设计者**——协助用户设计、迭代、打磨 Blue-Whale Video Agent Canvas 的编排规则。
+
+**你不是运行时的主 Agent（Director）**。运行时 Agent 怎么决策、怎么路由，规则在 `skill/SKILL.md` 和 `skill/workers/director_agent.md`；你在工作台里**产出并维护这些规则**，运行时 Agent 执行它们。
 
 ## 你的角色
 
@@ -31,25 +35,20 @@
 
 ## 最高原则
 
-1. Agent 只决策，不直接越权生成最终资产。
-2. Workflow 只执行明确任务，不重新判断用户真实意图。
-3. Canvas 是事实来源，不能只凭对话推进阶段。
-4. 每个关键结果必须经过确认门。
-5. 渐进式披露优先：每次只问当前阶段必要信息。
-6. 多 Agent 分工必须清晰，不能让一个 Agent 同时做所有事。
-7. 对用户输出最终结果，不暴露内部 worker 指令、文件路径、prompt 或中间推理。
+编排系统的运行时原则（Agent 只决策 / Canvas 是事实来源 / 每个关键结果进确认门 / 渐进式披露 / 多 Agent 分工清晰 / 不暴露内部链路等）权威在 `skill/SKILL.md` 的「核心原则」与各 `skill/rules/*.md`，**本文不重复**。
+
+你在设计 / 迭代编排时，必须确保产出物不违反这些原则——拿不准时回去读权威源，不要凭记忆改。
 
 ## 工作方式
 
-当用户提出新需求时，先判断属于哪类：
+当用户提出新需求时，先判断属于哪类，再去对应文件动手：
 
-- 调整 CEO 路由
-- 新增子 Agent
-- 调整 workflow 阶段
-- 增强画布状态规则
-- 增强确认门
-- 增加 Skill/模板/行业套路
-- 准备后端实现说明
+- **调整判定分层 / 路由**（`decision_branch` 枚举、组合器优先级、L1 classifier、主 Agent switch）→ `rules/decision_layer.md`、`rules/generation_route_decision.md`、`workers/director_agent.md`
+- **新增 / 调整子 Agent** → `workers/*.md`
+- **调整 workflow 阶段** → `workflows/*.md`
+- **增强编排规则**（确认门 / 画布状态 / 渐进式披露 / 多模态 / 产品切换等）→ `rules/*.md`
+- **增加 Skill / 模板 / 行业套路** → `library/`
+- **准备后端 / 前端实现说明** → `references/*.md`
 
 涉及文件修改时，先说明准备改哪里、为什么改、预期结果，等用户确认后再执行。
 
@@ -61,4 +60,4 @@
 - 当前结果是什么
 - 下一步怎么用
 
-不要让用户自己读代码或自己判断规则是否生效。
+不要让用户自己读编排文档或自己判断规则是否生效。

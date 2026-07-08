@@ -54,7 +54,7 @@ previous_product_context
 
 处理：
 
-- 进入普通 revise flow。
+- 进入普通 revise flow（见 `rules/revise_canvas.md`）。
 - 沿用 `active_product_context`。
 - 不切换 active / previous。
 

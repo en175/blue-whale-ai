@@ -40,7 +40,16 @@ Agent 在判定这一条 turn 用哪个创作 Skill 时,按以下来源与优先
 |---|---|---|
 | 1(最高) | `forced_skill_id`(用户手动 Use) | 必须使用此 skill,跳过候选筛选 |
 | 2 | auto 候选池(`auto=true` 的已添加 skill) | Agent 按上下文 + Brief 匹配度自选最合适的一个 |
-| 3 | 未指定 | CEO 路由按 Brief 推断;无法确定时反问用户,不擅自选 |
+| 3 | 未指定 | 见下方「未指定时的分流」 |
+
+### 未指定时的分流（轻量 vs Full Canvas）
+
+Skill 库目前 60 个全是视频广告 / 电商向,**无通用生图 Skill**。因此未指定时按 Agent L1 轻量 classifier(haiku 级,见 `decision_layer.md`)的分流区别处理:
+
+| 分流 | Skill 处理 |
+|---|---|
+| **轻量编排**(简单图 / 轻量视频) | **有匹配则用,无匹配跳过 Skill 直接优化提示词**——不强依赖 Skill,不反问。例:「生成一张猫图」无匹配 Skill,跳过,直接优化提示词生成。 |
+| **Full Canvas**(广告 / UGC / 短剧) | CEO 路由按 Brief 推断 Skill;推断置信度低时反问用户,不擅自选、不默认兜底。 |
 
 ### forced 与 auto 共存
 
@@ -50,7 +59,7 @@ Agent 在判定这一条 turn 用哪个创作 Skill 时,按以下来源与优先
 
 ### auto 候选池为空
 
-- 用户既没 Use、auto 池也空:Agent 按 Brief 自行推断 skill;推断置信度低时必须反问,不默认兜底成某个固定 skill。
+- 用户既没 Use、auto 池也空:按上方「未指定时的分流」处理——轻量编排无匹配 Skill 时跳过直接优化提示词;Full Canvas 推断置信度低时反问,不默认兜底成某个固定 skill。
 
 ## 冲突处理
 

@@ -9,6 +9,19 @@ Gitee 不像 GitHub/GitLab 有成熟的 `gh`/`glab` 官方 CLI，因此本工作
 1. **Gitee MCP 工具**（如本会话中可用）：`mcp__gitee-ent__create_enterprise_issue`、`mcp__gitee-ent__list_enterprise_issues`、`mcp__gitee-ent__get_enterprise_issue_detail`、`mcp__gitee-ent__update_enterprise_issue`、`mcp__gitee-ent__comment_enterprise_issue`、`mcp__gitee-ent__list_enterprise_issue_comments`。
 2. **Gitee 网页**（MCP 工具不可用时的回退）：通过上述网页地址手动创建/查看/评论。
 
+## 普通版 MCP 实测（本会话环境）
+
+> 本会话环境只有普通版 `mcp__gitee__*`（无企业版 `mcp__gitee-ent__*`）。下文「约定」全按企业版写，实际操作用普通版，差异如下（2026-07-07 建 IJZ7Z7 / IJZ7Z8 / IJZ7Z9 验证）：
+
+- **创建**：`mcp__gitee__create_issue(owner, repo, title, body, labels)`，用 owner/repo 定位（owner=`hangzhou-xuanfu_1`，**连字符**）。
+- **labels 在 create 时被静默忽略**（返回 `labels:[]`），必须紧跟 `mcp__gitee__update_issue(number, labels="ready-for-agent")` 补——标签传**名字字符串**，不是数字 ID。
+- **不传 program / project_id 也仓库可见**：普通版用 owner/repo 天然关联仓库，不像企业版不传 project_id 则仓库 Issues 页看不到。
+- **issue_type 自动 "需求"**，无需显式传。
+- **建后反查**：`mcp__gitee__list_repo_issues(owner, repo, state="open")` 确认仓库可见 + label 落位。
+- **未实测**：关闭/状态枚举（普通版 `update_issue` 的 `state` 入参语义）、program 关联——用到时再补。
+
+> 注：本文档上方「远程地址」里的下划线 owner `hangzhou_xuanfu_1` 是历史误写——`git push` 容忍重定向，但 **MCP API + 网页 URL 严格匹配**，全下划线会 404。正确拼写 `hangzhou-xuanfu_1`（hangzhou-连字符-xuanfu_下划线-1）。
+
 ## 约定（按操作）
 
 - **创建 issue**：调用 `mcp__gitee-ent__create_enterprise_issue`（用 `enterprise_id` 定位本企业，传入 `title`/`description`；正文多行直接作为字符串传入 `description`）。**必须传 `project_id` 关联仓库**——blue-whale-ai 仓库的 ID 用 `mcp__gitee-ent__list_enterprise_repositories` 查。不传则工单只出现在企业工作项列表、仓库 Issues 页看不到（历史事件 IJZ5WA），PreToolUse hook `block-issue-without-repo.sh` 会硬拦。决策见 [ADR-0007](../adr/0007-issue-must-link-repo.md)。**打标签用 `label_ids`（逗号分隔的标签数字 ID，见下「加/移除标签」），不是 `labels`**——`create_enterprise_issue` 对企业私有仓库的 labels 会静默忽略，需紧跟一次 `update_enterprise_issue` 补 `label_ids`（见 [[gitee-collab-facts]] 第 4 条历史）。

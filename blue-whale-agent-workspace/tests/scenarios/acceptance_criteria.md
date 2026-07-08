@@ -8,13 +8,12 @@
 
 ### 1. 路由正确
 
-Agent 必须先判断用户要的是：
+Agent 路由按判定分层（见 `skill/rules/decision_layer.md`）：后端算好 `decision_branch`，主 Agent `switch(decision_branch)` 收口。新任务按 L1 给的 `suggested_route` 分流：
 
-- Direct Image
-- Direct Video
-- Image-to-Video
-- Full Video Canvas
-- Prompt-only
+- `new_task` + `lightweight` → 轻量编排（简单图 / 轻量视频）
+- `new_task` + `full_canvas` → Full Canvas（广告 / UGC / 短剧）
+- Direct Image / Direct Video / Image-to-Video → BottomDock 直生，不进 Agent
+- `prompt_only` → 只走 Prompt Optimizer，不启 GenerationJob，不写 Canvas Node
 
 不能把所有视频请求都强制走完整广告链路。
 
@@ -38,7 +37,7 @@ Provider 调用前必须存在：
 optimized_prompt
 ```
 
-不能直接把用户原话发给图片或视频生成模型。
+不能直接把用户原话发给图片或视频生成模型。Prompt-only 分支只返回 `optimized_prompt_preview`，不调用 Provider。
 
 ### 4. 确认门有效
 
