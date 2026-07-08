@@ -1,8 +1,18 @@
-# 开发环境数据源。本地 MySQL 地址/账号/密码按实际调整。
-# 注意：脚手架不建业务表；运行 spring-boot:run 需本地可连通的 MySQL（测试不依赖数据库）。
+# 开发环境 profile（进仓共享）。
+# datasource 用 ${ENV:本地默认} 占位：默认连本地 Docker MySQL（root/root），他人可通过 export MYSQL_URL / MYSQL_USER / MYSQL_PASSWORD 覆盖。
+# 真 ARK_API_KEY 走环境变量（不进仓）：export ARK_API_KEY=...；未配则 /api/generation/* 返「ARK_API_KEY 未配置」，/health 不受影响。
+# 业务接口需可连通 MySQL + 已执行 resources/schema.sql 建表；裸 GET /health 不依赖数据库（HikariCP 懒建池）。
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/blue_whale?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true
-    username: root
-    password: root
+    url: ${MYSQL_URL:jdbc:mysql://localhost:3306/blue_whale?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true}
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:root}
     driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl  # dev 打印 SQL
+
+logging:
+  level:
+    com.bluewhale.agent: debug

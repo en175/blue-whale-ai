@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import { squirclePath } from "../../utils";
 import { VIDEO_MODELS, VIDEO_ASPECT_RATIOS, VIDEO_RESOLUTIONS, REF_MODES } from "../../constants";
-import type { DockMediaItem } from "../../types";
+import type { DockMediaItem, GenerateArgs } from "../../types";
 import { ImageDockContent } from "./ImageDockContent";
 import { VideoDockContent } from "./VideoDockContent";
 
@@ -22,6 +22,8 @@ export function BottomDock({
   onPickFromCanvas,
   onExitPick,
   isPicking = false,
+  onGenerate,
+  generating = false,
 }: {
   mode: "image" | "video";
   onClose: () => void;
@@ -37,6 +39,10 @@ export function BottomDock({
   onExitPick?: () => void;
   /** 当前 Dock 是否处于选择模式 */
   isPicking?: boolean;
+  /** 生成：prompt 由本组件 input state 取，settings 由各 Dock Content 拼 */
+  onGenerate?: (prompt: string, args: GenerateArgs) => void;
+  /** 生成进行中（禁用按钮防重复提交） */
+  generating?: boolean;
 }) {
   const [input, setInput] = useState("");
   const [dockSize, setDockSize] = useState({ w: 680, h: 164 });
@@ -126,6 +132,8 @@ export function BottomDock({
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
+                  onGenerate={(s) => onGenerate?.(input, { mode: "image", settings: s })}
+                  generating={generating}
                 />
               ) : (
                 <VideoDockContent
@@ -161,6 +169,8 @@ export function BottomDock({
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
+                  onGenerate={(s) => onGenerate?.(input, { mode: "video", settings: s })}
+                  generating={generating}
                 />
               )}
             </div>

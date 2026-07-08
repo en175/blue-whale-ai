@@ -1,0 +1,24 @@
+# 生产环境 profile：datasource 与密钥强制环境变量注入（无默认，缺失即启动失败，避免误用本地值）。
+spring:
+  datasource:
+    url: ${MYSQL_URL}
+    username: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+
+volcengine:
+  ark:
+    api-key: ${ARK_API_KEY}
+
+mybatis-plus:
+  configuration:
+    # 生产关闭 SQL stdout 打印
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
+springdoc:
+  api-docs:
+    # 生产关闭 OpenAPI spec 暴露，避免接口结构外泄
+    enabled: false
+
+logging:
+  level:
+    com.bluewhale.agent: info

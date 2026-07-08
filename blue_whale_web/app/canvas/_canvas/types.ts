@@ -68,6 +68,33 @@ export type Project = {
   messages: ChatMessage[];
   active?: boolean;
 };
+
+/** 生成设置选项（id+label 形状，与 constants 里的 VIDEO_MODELS 等一致）。 */
+export type SelectOption = { id: string; label: string };
+
+/** 图片 Dock 生成设置（model/resolution/aspectRatio/quantity 在 ImageDockContent 本地 state）。 */
+export type ImageGenerateSettings = {
+  model: SelectOption;
+  resolution: SelectOption;
+  aspectRatio: SelectOption;
+  quantity: string;
+};
+
+/** 视频 Dock 生成设置（BottomDock 自持 state 透传）。 */
+export type VideoGenerateSettings = {
+  model: SelectOption;
+  resolution: SelectOption;
+  aspectRatio: SelectOption;
+  duration: number;
+  quantity: string;
+  refMode: SelectOption;
+};
+
+/** 生成请求参数：discriminated union，按 mode narrow settings。 */
+export type GenerateArgs =
+  | { mode: "image"; settings: ImageGenerateSettings }
+  | { mode: "video"; settings: VideoGenerateSettings };
+
 export type ImageDockContentProps = {
   editorRef: React.RefObject<HTMLDivElement | null>;
   isEmpty: boolean;
@@ -83,6 +110,10 @@ export type ImageDockContentProps = {
   onExitPick?: () => void;
   /** 当前是否处于「从画布选择」模式（本 Dock 维度） */
   isPicking?: boolean;
+  /** 生成：Dock 内拼装本地 settings 上抛，prompt 由 BottomDock 从 input 取 */
+  onGenerate?: (settings: ImageGenerateSettings) => void;
+  /** 生成进行中（禁用按钮防重复提交） */
+  generating?: boolean;
 };
 
 export type VideoDockContentProps = {
@@ -122,4 +153,8 @@ export type VideoDockContentProps = {
   onExitPick?: () => void;
   /** 当前是否处于「从画布选择」模式（本 Dock 维度） */
   isPicking?: boolean;
+  /** 生成：Dock 内拼装本地 settings 上抛，prompt 由 BottomDock 从 input 取 */
+  onGenerate?: (settings: VideoGenerateSettings) => void;
+  /** 生成进行中（禁用按钮防重复提交） */
+  generating?: boolean;
 };

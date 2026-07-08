@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextRetryStatus } from "./cardStatus";
+import { nextRetryStatus, fromJobStatus } from "./cardStatus";
 import type { CardStatus } from "./cardStatus";
 
 describe("nextRetryStatus", () => {
@@ -36,5 +36,25 @@ describe("nextRetryStatus", () => {
 
     expect(trajectory.map((s) => s.next)).toEqual(["generating", "normal"]);
     expect(trajectory[1].isTerminal).toBe(true);
+  });
+});
+
+describe("fromJobStatus", () => {
+  it("succeeded 映射 normal（终态）", () => {
+    expect(fromJobStatus("succeeded")).toBe("normal");
+  });
+
+  it("failed 映射 failed", () => {
+    expect(fromJobStatus("failed")).toBe("failed");
+  });
+
+  it("queued / processing 映射 generating（过渡态）", () => {
+    expect(fromJobStatus("queued")).toBe("generating");
+    expect(fromJobStatus("processing")).toBe("generating");
+  });
+
+  it("未知状态保守映射 generating（等下一轮轮询）", () => {
+    expect(fromJobStatus("unknown")).toBe("generating");
+    expect(fromJobStatus("")).toBe("generating");
   });
 });

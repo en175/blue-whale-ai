@@ -39,6 +39,12 @@ public enum SystemCode implements IResultCode {
     DATA_DELETE_FAILED(SystemCode.DATA_DELETE_FAILED_CODE, "数据删除失败"),
     /** 无权限操作数据 */
     DATA_NO_PERMISSION_OPERATE(SystemCode.DATA_NO_PERMISSION_OPERATE_CODE, "无权限操作数据"),
+    /** 上游处理超时 */
+    UPSTREAM_TIMEOUT(SystemCode.UPSTREAM_TIMEOUT_CODE, "上游处理超时"),
+    /** 内容审核未通过 */
+    CONTENT_MODERATION_REJECTED(SystemCode.CONTENT_MODERATION_REJECTED_CODE, "内容审核未通过"),
+    /** 资源不可用 */
+    ASSET_UNAVAILABLE(SystemCode.ASSET_UNAVAILABLE_CODE, "资源不可用"),
     ;
 
     /** 通用 code */
@@ -60,6 +66,11 @@ public enum SystemCode implements IResultCode {
     public static final int DATA_UPDATE_FAILED_CODE = 100103;
     public static final int DATA_DELETE_FAILED_CODE = 100104;
     public static final int DATA_NO_PERMISSION_OPERATE_CODE = 100105;
+
+    /** 上游/资源 code */
+    public static final int UPSTREAM_TIMEOUT_CODE = 100200;
+    public static final int CONTENT_MODERATION_REJECTED_CODE = 100201;
+    public static final int ASSET_UNAVAILABLE_CODE = 100202;
 
     final int code;
     final String msg;

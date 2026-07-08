@@ -29,6 +29,8 @@ export function ImageDockContent({
   onPickFromCanvas,
   onExitPick,
   isPicking = false,
+  onGenerate,
+  generating = false,
 }: ImageDockContentProps) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
@@ -460,7 +462,15 @@ export function ImageDockContent({
           <div style={{ position: "relative", display: "inline-flex" }}>
             <button
               type="button"
-              disabled
+              disabled={isEmpty || generating}
+              onClick={() =>
+                onGenerate?.({
+                  model: selectedModel,
+                  resolution: selectedResolution,
+                  aspectRatio: selectedAspectRatio,
+                  quantity,
+                })
+              }
               style={{
                 height: 32,
                 padding: "0px 12px",
@@ -473,9 +483,9 @@ export function ImageDockContent({
                 justifyContent: "center",
                 gap: 6,
                 transition: "120ms",
-                background: "rgba(255, 255, 255, 0.06)",
-                color: "rgba(255, 255, 255, 0.32)",
-                cursor: "default",
+                background: isEmpty || generating ? "rgba(255, 255, 255, 0.06)" : "var(--tc-accent)",
+                color: isEmpty || generating ? "rgba(255, 255, 255, 0.32)" : "rgb(255, 255, 255)",
+                cursor: isEmpty || generating ? "default" : "pointer",
                 opacity: 1,
               }}
             >

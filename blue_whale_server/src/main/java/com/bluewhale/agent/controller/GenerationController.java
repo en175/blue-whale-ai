@@ -1,0 +1,55 @@
+package com.bluewhale.agent.controller;
+
+import com.bluewhale.agent.common.exception.GlobalException;
+import com.bluewhale.agent.common.resp.Result;
+import com.bluewhale.agent.common.resp.SystemCode;
+import com.bluewhale.agent.model.dto.CreateJobResponse;
+import com.bluewhale.agent.model.dto.ImageGenerateRequest;
+import com.bluewhale.agent.model.dto.ImageResult;
+import com.bluewhale.agent.model.dto.VideoGenerateRequest;
+import com.bluewhale.agent.service.GenerationJobService;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * 生成接口：文生图（Seedream）同步、图文生视频（Seedance 2.0）异步。
+ *
+ * <p>用户身份走 {@code X-User-Id} 请求头（MVP 无鉴权，前端直传）。
+ * 响应统一 {@link Result} 包装；异常由 {@code RestExceptionConfig} 转 Result。
+ * JSON 字段 snake_case（全局 Jackson SNAKE_CASE）。
+ */
+@Tag(name = "生成接口", description = "文生图（Seedream 同步）、图文生视频（Seedance 异步）")
+@RestController
+@RequestMapping("/api/generation")
+@RequiredArgsConstructor
+public class GenerationController {
+
+    private final GenerationJobService generationJobService;
+
+    /** 文生图同步生成，返回 asset id + url。 */
+    @PostMapping("/image")
+    public Result<ImageResult> generateImage(@RequestHeader(value = "X-User-Id", required = false) Long userId,
+                                             @RequestBody @Valid ImageGenerateRequest req) {
+        return Result.ok(generationJobService.createImageJob(req, requireUserId(userId)));
+    }
+
+    /** 图文生视频异步提交，立即返回 jobId，前端轮询查状态。 */
+    @PostMapping("/video")
+    public Result<CreateJobResponse> generateVideo(@RequestHeader(value = "X-User-Id", required = false) Long userId,
+                                                   @RequestBody @Valid VideoGenerateRequest req) {
+        return Result.ok(generationJobService.createVideoJob(req, requireUserId(userId)));
+    }
+
+    private Long requireUserId(Long userId) {
+        if (userId == null) {
+            throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "缺少 X-User-Id 请求头");
+        }
+        return userId;
+    }
+}
