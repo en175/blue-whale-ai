@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.blue-whale.parent</groupId>
+        <artifactId>blue-whale-parent</artifactId>
+        <version>2025.3</version>
+    </parent>
+
+    <groupId>com.blue-whale.user</groupId>
+    <artifactId>blue-whale-user</artifactId>
+    <version>2025.3</version>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.blue-whale.tool.log</groupId>
+            <artifactId>blue-whale-common-log</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.blue-whale.global</groupId>
+            <artifactId>blue-whale-global</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

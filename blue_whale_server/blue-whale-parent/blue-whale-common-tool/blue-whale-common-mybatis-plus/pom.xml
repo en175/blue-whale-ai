@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.blue-whale.tool</groupId>
+        <artifactId>blue-whale-common-tool</artifactId>
+        <version>2025.3</version>
+    </parent>
+
+    <groupId>com.blue-whale.tool.mp</groupId>
+    <artifactId>blue-whale-common-mybatis-plus</artifactId>
+    <version>2025.3</version>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-annotation</artifactId>
+            <version>${mybatis-plus.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-boot-starter</artifactId>
+        </dependency>
+        <!-- 自动装配 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.blue-whale.tool.fastjson2</groupId>
+            <artifactId>blue-whale-common-fastjson2</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.blue-whale.security.resource</groupId>
+            <artifactId>blue-whale-security-resource</artifactId>
+        </dependency>
+    </dependencies>
+</project>

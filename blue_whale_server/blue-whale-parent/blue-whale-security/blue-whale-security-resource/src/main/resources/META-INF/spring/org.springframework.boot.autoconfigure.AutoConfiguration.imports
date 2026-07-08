@@ -1,0 +1,3 @@
+com.blue.whale.security.resource.config.ResourceTokenConfig
+com.blue.whale.security.resource.config.ResourceServerConfig
+com.blue.whale.security.resource.ResourceServerAutoConfigure

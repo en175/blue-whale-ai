@@ -1,0 +1,34 @@
+server:
+  port: 8686
+spring:
+  application:
+    name: blue-whale-gateway
+  profiles:
+    active: oa-dev
+  cloud:
+    nacos:
+      server-addr: 127.0.0.1:8884
+      discovery:
+        namespace: ${spring.profiles.active}
+        ip: 127.0.0.1
+      config:
+        namespace: ${spring.profiles.active}
+        file-extension: yml
+        group: SWEET_OA
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+    loadbalancer:
+      retry:
+        enabled: true
+sentinel:
+  nacos:
+    namespace: ${spring.profiles.active}
+    serverAddr: ${spring.cloud.nacos.server-addr}
+    groupId: SENTINEL_GROUP
+    dataId:
+      flowPostfix: -flow-rules
+      degradePostfix: -degrade-rules
+      gwApiPostfix: -gw-api-group-rules
+      gwFlowPostfix: -gw-flow-rules
