@@ -26,6 +26,9 @@ colors:
   on-accent: "#ffffff"
   # 登录主色（豁免：与 accent 并列的登录专用强调色，复刻 topview.ai 登录主色，仅 LoginModal 登录按钮使用，项目内孤例）
   login-primary: "#4e40f3"
+  # 登录弹窗专用色
+  login-modal-bg: "#141414"
+  login-primary-hover: "#3d33d1"
 typography:
   body-md:
     fontFamily: Outfit
@@ -111,6 +114,8 @@ Blue-Whale 是一个面向 AI Agent / Canvas 交互的纯客户端工作台。�
 - **bg-canvas (#000000)**：画布最底层，纯黑，承载素材节点。
 - **background (#0a0a0a)**：页面默认背景。
 - **bg-surface (#1a1a1a) / bg-elevated (#2a2a2a)**：浮层、面板、Dock 的两级灰阶抬升。
+- **login-modal-bg (#141414)**：登录弹窗卡片背景，介于 background 与 bg-surface 之间。
+- **login-primary-hover (#3d33d1)**：登录按钮 hover 态，与 login-primary 同源。
 - **primary (#ffffff) → muted (rgba 0.4)**：四级文字透明度，对应主/次/三级/弱化语义。
 - **accent (#3b82f6)**：全局唯一交互强调色，用于主按钮、选中态、焦点环。
 - **success (#22c55e) / destructive (#ef4444)**：仅用于状态语义（开关启用、销毁动作），不作装饰。

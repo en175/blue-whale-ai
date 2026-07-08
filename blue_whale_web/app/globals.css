@@ -128,6 +128,9 @@ body {
   --tc-accent: #3b82f6;
   --tc-destructive: #ef4444;
 
+  --tc-login-modal-bg: #141414;
+  --tc-login-primary-hover: #3d33d1;
+
   --tc-card-hover-stroke: rgba(156, 156, 156, 0.58);
   --tc-card-hover-shadow: 0 0 0 3px rgba(142, 142, 142, 0.12), 0 12px 32px rgba(0, 0, 0, 0.34);
   --tc-card-selected-stroke: rgba(235, 235, 235, 0.88);

@@ -5,10 +5,11 @@ import PromoCapsule from "@/components/PromoCapsule";
 import { UserMenu } from "@/components/auth/UserMenu";
 import AgentComposer from "@/components/AgentComposer";
 import QuickTags from "@/components/QuickTags";
-import TemplateCards from "@/components/TemplateCards";
+import TemplateCards, { TAG_CONFIG } from "@/components/TemplateCards";
 
 export default function Home() {
   const [activeTag, setActiveTag] = useState("short");
+  const { wrapMaxWidth } = TAG_CONFIG[activeTag] ?? TAG_CONFIG.marketing;
 
   return (
     <main className="relative z-[1] flex flex-col items-center min-h-screen bg-[#0a0a0a]">
@@ -28,13 +29,7 @@ export default function Home() {
           <AgentComposer />
 
           <div
-            className={`mt-3 flex w-full flex-col gap-3 ${
-              activeTag === "social"
-                ? ""
-                : activeTag === "short" || activeTag === "replicate" || activeTag === "image"
-                  ? "max-w-[848px]"
-                  : "max-w-[1135px]"
-            }`}
+            className={`mt-3 flex w-full flex-col gap-3 ${wrapMaxWidth}`}
           >
             <QuickTags active={activeTag} onSelect={setActiveTag} />
             <TemplateCards activeTag={activeTag} />

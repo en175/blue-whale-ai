@@ -61,12 +61,12 @@ const IMAGE_CARDS: Card[] = [
   { title: "创作现代品牌 logo", layout: "image", images: ["https://dj5nb01yl89hl.cloudfront.net/media/images/xEPEqZnU1gZoAVHx.webp", "https://dj5nb01yl89hl.cloudfront.net/media/images/Hy89VuSzZW12qIJQ.webp", "https://dj5nb01yl89hl.cloudfront.net/media/images/_Y4JcvCCrrkZD5SF.webp"] },
 ];
 
-const TAG_CONFIG: Record<string, { cards: Card[]; container: Container }> = {
-  marketing: { cards: MARKETING_CARDS, container: { type: "grid", cols: "md:grid-cols-4" } },
-  short: { cards: SHORT_CARDS, container: { type: "grid", cols: "md:grid-cols-3" } },
-  replicate: { cards: REPLICATE_CARDS, container: { type: "grid", cols: "md:grid-cols-3" } },
-  social: { cards: SOCIAL_CARDS, container: { type: "scroll" } },
-  image: { cards: IMAGE_CARDS, container: { type: "grid", cols: "md:grid-cols-3" } },
+const TAG_CONFIG: Record<string, { cards: Card[]; container: Container; wrapMaxWidth: string }> = {
+  marketing: { cards: MARKETING_CARDS, container: { type: "grid", cols: "md:grid-cols-4" }, wrapMaxWidth: "max-w-[1135px]" },
+  short: { cards: SHORT_CARDS, container: { type: "grid", cols: "md:grid-cols-3" }, wrapMaxWidth: "max-w-[848px]" },
+  replicate: { cards: REPLICATE_CARDS, container: { type: "grid", cols: "md:grid-cols-3" }, wrapMaxWidth: "max-w-[848px]" },
+  social: { cards: SOCIAL_CARDS, container: { type: "scroll" }, wrapMaxWidth: "" },
+  image: { cards: IMAGE_CARDS, container: { type: "grid", cols: "md:grid-cols-3" }, wrapMaxWidth: "max-w-[848px]" },
 };
 
 function TemplateCard({ card, index }: { card: Card; index: number }) {
@@ -179,6 +179,7 @@ function TemplateCard({ card, index }: { card: Card; index: number }) {
   );
 }
 
+export { TAG_CONFIG };
 export default function TemplateCards({ activeTag }: { activeTag: string }) {
   const config = TAG_CONFIG[activeTag] ?? TAG_CONFIG.marketing;
   if (config.container.type === "scroll") {
