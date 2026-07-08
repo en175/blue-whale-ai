@@ -1,0 +1,27 @@
+package com.bluewhale.agent.controller;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.test.web.servlet.MockMvc;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * {@link HealthController} 切片测试：仅装配 Web 层，不依赖 MySQL。
+ */
+@WebMvcTest(HealthController.class)
+class HealthControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Test
+    void healthReturnsOk() throws Exception {
+        mockMvc.perform(get("/health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ok"));
+    }
+}

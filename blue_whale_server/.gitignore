@@ -1,18 +1,13 @@
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
+target/
+!.mvn/wrapper/maven-wrapper.jar
 
-# 虚拟环境
-.venv/
-venv/
-env/
+### IDE ###
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+HELP.md
 
-# 测试与覆盖率
-.pytest_cache/
-.coverage
-htmlcov/
-
-# 环境变量（API key 等敏感信息勿入库）
-.env
-.env.local
+### OS ###
+.DS_Store
