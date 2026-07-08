@@ -10,6 +10,14 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  async rewrites() {
+    return [
+      {
+        source: "/api/templates/:path*",
+        destination: "http://localhost:8080/api/templates/:path*",
+      },
+    ];
+  },
 };
 
 export default nextConfig;
