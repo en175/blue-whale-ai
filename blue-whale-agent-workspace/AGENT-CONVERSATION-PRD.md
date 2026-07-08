@@ -12,6 +12,7 @@
 - `skill/references/frontend_canvas_interaction_contract.md` —— 前端展示边界(画布 = 素材,对话 = 过程)与验收颗粒度。
 - `skill/rules/confirmation_gate.md` —— 确认门四分类(明确确认 / 弱继续 / 修改意图 / 等待中)。
 - `skill/rules/generation_route_decision.md` —— 两条入口（Dock 直生 / Agent 对话）的路由判定。
+- `skill/workflows/image_understanding.md` —— 候选图消歧（`@` 引用解析阶段，画布多图未指明时反问带候选）。
 
 本文定义 backend contract **未覆盖**的部分:
 
@@ -53,7 +54,8 @@ P0 按两条入口落地，避免把 Dock 直生和 Agent 编排混成一条链�
 {
   "text": "用户的自然语言",
   "forced_skill_id": "skl_xxx",          // optional，用户在 Skill 面板点 Use
-  "reference_asset_ids": ["ast_xxx"]     // optional，用户 @ 引用的画布素材
+  "reference_asset_ids": ["ast_xxx"],    // optional，用户 @ 引用的画布素材
+  "active_asset_id": "ast_xxx"           // optional，用户画布选中（选中即识别，跳过消歧）
 }
 ```
 
@@ -64,6 +66,7 @@ P0 按两条入口落地，避免把 Dock 直生和 Agent 编排混成一条链�
 | `text` | 是 | 用户的自然语言输入。 |
 | `forced_skill_id` | 否 | 仅当用户在 Skill 面板点 `Use` 时携带。**仅决定 skill 选择那一步,不锁后续 Stage**;一次性指令,**不改变用户的 `auto` 状态**(不持久化)。权威定义见 `backend_implementation_contract.md` Agent Turn 字段。 |
 | `reference_asset_ids` | 否 | 用户在对话框打 `@` 引用的画布素材。Agent 拿到 asset_id 后:若该 asset `understanding_status != ready`,先补做 `asset_understanding`(visible_reasoning 兜「我先看一下这张图」),再进图生图 / 图生视频链路。复用 `BACKEND-API-PRD.md` §5.4 直生入口的同名字段语义。 |
+| `active_asset_id` | 否 | 用户画布**选中**的素材。**选中即识别,跳过候选图消歧反问**;与 `reference_asset_ids` 一样,asset 若 `understanding_status != ready` 先补做 `asset_understanding`。优先级:`reference_asset_ids`(@) > `active_asset_id`(选中) > 候选=1 唯一张 > 候选≥2 消歧反问。 |
 
 **`forced_skill_id` 与 auto 候选池的关系**(详见 §5 接入点):
 
@@ -75,7 +78,7 @@ P0 按两条入口落地，避免把 Dock 直生和 Agent 编排混成一条链�
 
 后端收到 `text` 后、主 Agent 开跑前,先算 `decision_context`(见 `backend_implementation_contract.md` + `skill/rules/decision_layer.md`):
 
-1. 硬状态代码每轮必跑(零成本):`has_generating` / `has_ready_node` / `has_failed` / `awaiting_confirm` / `pending_workflow` / `current_stage` / `active_product_context` / `previous_product_context`。
+1. 硬状态代码每轮必跑(零成本):`has_generating` / `has_ready_node` / `has_failed` / `awaiting_confirm` / `pending_workflow` / `current_stage` / `active_product_context` / `previous_product_context` / `active_asset_id` / `candidate_asset_ids`。
 2. `has_generating=true` 直接短路到 `decision_branch=generation_in_progress`,**跳过 L1**。
 3. 其余情况调 L1 轻量 classifier(haiku 级),得 `intent_direction` + 仅 `new_task` 带 `suggested_route`。
 4. 后端代码按组合器优先级算出单一 `decision_branch`。
@@ -173,6 +176,7 @@ data: {"requires_user_action":true,"allowed_actions":["confirm","revise","retry"
 5. 生成失败必须写入 `failed` 节点 + `error` 消息,**不静默失败**。
 6. `trace_event` / `prompt_draft` / `optimized_prompt` / worker 名 / 文件路径 **不进** `message` / `visible_reasoning`。
 7. **`advance_stage` 铁闸**:推进 stage 必须独立校验 `has_ready_node`,与主 Agent 判定解耦——主 Agent 误判要推进也拦(呼应 `backend_implementation_contract.md` 硬约束 13、`decision_layer.md`、`confirmation_gate.md`)。`confirm_pending` branch 由 `decision_context` 算出,主 Agent 只在命中时判四分类。
+8. **候选图消歧铁闸**(呼应 `backend_implementation_contract.md` 硬约束 14):`@` 引用解析阶段,任务需要图 + `candidate_asset_ids` ≥ 2 + 无 `reference_asset_ids` / `active_asset_id` 时,必须消歧反问(画布高亮 + 文字引导),**禁止**主 Agent 靠「最近 ready / 第一张 / 刚生成」猜自然语言指代。`active_asset_id`(用户画布选中)视为明确指向,选中即识别不追问。详见 `image_understanding.md` 候选图消歧。
 
 > 规则全文见 `skill/rules/confirmation_gate.md`(四分类)与 `skill/rules/generation_route_decision.md`(两条入口路由判定)。本文不复制规则全文,只声明 Agent 对话链路必须遵守。
 
@@ -263,6 +267,7 @@ BottomDock 直生(`/api/projects/{project_id}/generate`)与 Agent 对话(`/agent
 3. **刷新不丢**:生成中刷新页面或切走再回来,**画布 + 对话消息 + 进行中任务**都恢复(`GET /api/projects/{id}` 返回整 Project 快照:canvas nodes + messages + active_jobs);Job 走 `active_jobs` 兜底重连或独立 `/api/jobs/{id}/stream`,完成时翻 `ready`。**完整历史系统(摘要 / 内容版本 / messages 与 agent_events 分离 / 版本索引)不在 P0,见 ROADMAP 模块 10。**
 4. **"继续"不推进**:用户只说"继续"时不推进;`ready` 节点 + 明确确认才推进(确认门四分类)。
 5. **不泄露内部信息**:`trace_event` / `optimized_prompt`(原始)/ `prompt_draft` / worker 名 / 文件路径不出现在任何用户可见响应;对话里给用户看的是 `optimized_prompt_preview`(友好版)。
+6. **画布多图消歧**:任务需要图、画布有 ≥2 张候选、用户未 @ 未选中时,Agent 反问带候选(画布高亮 + 文字引导),不靠「最近 ready」猜;用户画布选中(`active_asset_id`)即识别,不追问;纯文字「第3张」不认。
 
 ---
 

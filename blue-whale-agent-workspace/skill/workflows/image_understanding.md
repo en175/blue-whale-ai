@@ -8,10 +8,47 @@
 
 ## 触发条件
 
-- 用户上传图片
-- 画布已有图片节点
-- 用户说“用这张图”“参考这个图片”“把这个产品做成图/视频”
-- 图生图或图片转视频任务开始前
+本 workflow **仅对已指向的 asset 做 understanding**（对齐决策 3：understanding 仅 @ 引用触发，lazy + 缓存）：
+
+- 用户 @ 引用画布图（`reference_asset_ids`）→ 该 asset 若 `understanding_status != ready` 补做
+- 用户选中画布图（`active_asset_id`）→ 同上
+- 用户上传新图 → 上传时或引用时补做
+- 图生图 / 图转视频前，目标 asset 必须已有 understanding
+
+纯文生不进本 workflow。**画布多图 + 用户未指明用哪张时，先在 `@` 引用解析阶段消歧**（见下），确定指向后才进本 workflow。
+
+## 候选图消歧（@ 引用解析阶段，画布多图未指明时）
+
+**挂载点**：消歧发生在 `@` 引用解析阶段（对齐决策 3/5），**不是** understanding workflow 内部。用户要引画布图但没指明哪张时，先消歧定指向，确定 asset 后才进 understanding。
+
+判定（字段由后端算好进 `decision_context`，见 `rules/decision_layer.md`；本轮 @ 引用指向 = 请求体 `reference_asset_ids`）：
+
+```text
+本轮指向解析：
+  ├ reference_asset_ids 非空（@ 引用）         → 用那些
+  ├ active_asset_id 非空（前端选中态）         → 用那个（选中即识别，不追问）
+  └ 都没有：
+       candidate_asset_ids（active_product_context 内 ready/confirmed image）
+       ├ count = 0  → 无候选，按无图处理
+       ├ count = 1  → 用唯一张
+       └ count ≥ 2  → 消歧反问（画布高亮 + 文字引导）
+```
+
+**候选范围** = 当前 `active_product_context` 内、`ready` / `confirmed` 的 image。不含其他产品图（跨产品引用必须用户显式，见 `product_switch_p0.md` 第 4/5 类），不含 `generating` / `queued` / `failed`。
+
+**消歧执行**（决策 5：反问带候选）：
+
+- 主 Agent 输出：「我看到 N 张候选 [列出 title]，点画布上高亮的图，或 @ 某张 / 上传新图」
+- 前端画布高亮候选，其他淡化（见 `frontend_canvas_interaction_contract.md`）
+- 用户下一轮答（三条硬路径）：
+  - 点选画布高亮图 → `active_asset_id`（硬，**选中即识别，不追问**）
+  - @某张图 → `reference_asset_ids`（硬）
+  - 上传新图 → 新 asset（硬，覆盖消歧走新路）
+  - 纯文字「第3张」→ **不认**（主 Agent 不猜编号映射）
+
+**多图引用**（`@A @B`）：每张 asset 各自 `asset_understanding`；`usage_intent` 优先复用历史 → 无则主 Agent 推断（产品特征→主体，风格特征→风格）→ `optimized_prompt_preview` 暴露 → 用户可改。仅当推断不出才追问。
+
+**铁律**：主 Agent 多图时**禁止**靠「最近 ready / 第一张 / 刚生成」猜自然语言指代——猜 = 默认扫描变体。`active_asset_id`（用户画布选中）视为明确指向，不追问；不定义过期（纯文生不进本 workflow，自动兜底）。
 
 ## 阶段
 

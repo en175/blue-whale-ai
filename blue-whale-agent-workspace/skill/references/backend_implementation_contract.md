@@ -115,6 +115,9 @@ decision_context:
   current_stage: stage_ref          # 当前 stage(id + name + status)
   active_product_context: object    # 当前产品方向(见 product_switch_p0.md)
   previous_product_context: object? # 前一个产品方向(无则 null)
+  active_asset_id: asset_id?       # 前端选中态透传(用户当前选中画布节点的 asset),无则 null
+  candidate_asset_ids: asset_id[]  # active_product_context 内 ready/confirmed image node(消歧候选)
+  # 注:本轮 @ 引用指向复用请求体的 reference_asset_ids,不在此重复
 
   # L1 输出(独立轻量 classifier,软建议)
   intent_direction: enum            # product_switch / new_task / prompt_only / consult / revise / responding_to_confirm / ambiguous
@@ -312,6 +315,8 @@ confirmed_at
 11. 轻量 direct generation 不应强制创建完整广告 stage plan。
 12. 完整广告/UGC/短剧视频不能绕过脚本分镜直接发给 Provider。
 13. **`advance_stage` 铁闸(confirm_pending)**:推进 stage 必须独立校验当前 stage 存在 `has_ready_node`,与主 Agent 判定**解耦**——主 Agent 误判要推进也拦。呼应 `decision_layer.md` confirm_pending 后端铁闸与 `confirmation_gate.md`。
+14. **候选图消歧铁闸**：`@` 引用解析阶段，任务需要图 + `candidate_asset_ids` ≥ 2 + 无 `reference_asset_ids` / `active_asset_id` 时，必须消歧反问（画布高亮 + 文字引导），**禁止**主 Agent 靠「最近 ready / 第一张 / 刚生成」猜自然语言指代。`active_asset_id`（用户画布选中）视为明确指向，选中即识别不追问。详见 `image_understanding.md` 候选图消歧。
+15. **id 全部后端生成**：画布 node_id / asset_id 由后端创建/列表接口返回，前端不得本地 mint；`active_asset_id` / `candidate_asset_ids`（及请求体 `reference_asset_ids`）必须是后端认识的 id。
 
 ## 前端展示建议
 
