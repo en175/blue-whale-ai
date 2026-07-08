@@ -79,7 +79,7 @@ function CanvasPageInner() {
   const messages = activeProject.messages;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [isAgentOpen, setIsAgentOpen] = useState(true);
+  const [isAgentOpen, setIsAgentOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
   const [bottomDockMode, setBottomDockMode] = useState<"image" | "video">("image");
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
