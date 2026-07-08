@@ -161,6 +161,9 @@ public class AuthService {
                     .setUsername(generateUsername())
                     .setStatus("NORMAL");
             user.setGmtCreate(LocalDateTime.now());
+            user.setGmtModified(LocalDateTime.now());
+            user.setVersion(1);
+            user.setDeleted(false);
             userMapper.insert(user);
             log.info("新用户注册: id={}, phone={}, username={}", user.getId(), phone, user.getUsername());
         } else {

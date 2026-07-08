@@ -17,6 +17,9 @@ spring:
     password: root1024
     driver-class-name: com.mysql.cj.jdbc.Driver
 
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+
   sql:
     init:
       mode: always

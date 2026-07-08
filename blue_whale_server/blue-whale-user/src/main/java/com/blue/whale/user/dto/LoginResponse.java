@@ -1,5 +1,6 @@
 package com.blue.whale.user.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
 import lombok.Builder;
 import lombok.Data;
 
@@ -14,6 +15,7 @@ public class LoginResponse {
     private String token;
 
     /** 用户ID */
+    @JSONField(name = "user_id")
     private Long userId;
 
     /** 用户名 */
@@ -23,5 +25,6 @@ public class LoginResponse {
     private String phone;
 
     /** 是否新注册 */
+    @JSONField(name = "is_new_user")
     private Boolean isNewUser;
 }
