@@ -37,6 +37,19 @@ function parseQuantity(q: string): number {
   return Number.isNaN(n) ? 1 : n;
 }
 
+/** 把后端/网络错误映射为用户友好提示，避免暴露内部配置。 */
+function userFriendlyErrorMessage(e: unknown): string {
+  if (!(e instanceof Error)) return "生成失败，请稍后重试";
+  const msg = e.message;
+  if (msg.includes("后端未启动") || msg.includes("无法连接")) {
+    return "无法连接到服务，请检查网络或稍后重试";
+  }
+  if (msg.includes("ARK_API_KEY") || msg.includes("数据库")) {
+    return "服务暂时不可用，请稍后重试";
+  }
+  return "生成失败，请稍后重试";
+}
+
 function CanvasPageInner() {
   const searchParams = useSearchParams();
   const prompt = searchParams.get("prompt") || "";
@@ -77,6 +90,7 @@ function CanvasPageInner() {
   // 生成：视频异步轮询 hook + 生成中状态 + 待落节点的 prompt
   const { state: jobState, start: startJob, reset: resetJob } = useJobStatus();
   const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const pendingVideoPromptRef = useRef<string>("");
 
   // CanvasSurface 期望 Dispatch<SetStateAction<...>> 类型的 setter（高频拖拽/缩放内部用）。
@@ -292,6 +306,7 @@ function CanvasPageInner() {
           });
           addNode("image", { content: trimmed, imageUrl: result.url });
           setGenerating(false);
+          setGenerateError(null);
         } else {
           const result = await createVideoJob({
             prompt: trimmed,
@@ -306,6 +321,7 @@ function CanvasPageInner() {
         }
       } catch (e) {
         console.error("generate failed", e);
+        setGenerateError(userFriendlyErrorMessage(e));
         setGenerating(false);
       }
     },
@@ -484,6 +500,8 @@ function CanvasPageInner() {
           isPicking={pickingFor === bottomDockMode}
           onGenerate={handleGenerate}
           generating={generating}
+          generateError={generateError}
+          onClearGenerateError={() => setGenerateError(null)}
         />
       )}
       <AgentChatPanel

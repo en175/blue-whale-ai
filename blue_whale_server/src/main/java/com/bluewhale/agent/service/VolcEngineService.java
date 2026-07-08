@@ -122,7 +122,7 @@ public class VolcEngineService {
     private ArkService requireArk() {
         ArkService arkService = arkServiceProvider.getIfAvailable();
         if (arkService == null) {
-            throw new GlobalException(SystemCode.FAILURE_CODE, "ARK_API_KEY 未配置");
+            throw new GlobalException("ARK_API_KEY 未配置");
         }
         return arkService;
     }

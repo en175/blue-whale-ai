@@ -9,7 +9,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.transaction.TransactionException;
 import org.springframework.validation.BindException;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
@@ -68,6 +70,18 @@ public class RestExceptionConfig {
     public Result<Object> handleError(ConstraintViolationException e) {
         log.debug("param valid error", e);
         return handleError(e.getConstraintViolations());
+    }
+
+    @ExceptionHandler(DataAccessException.class)
+    public Result<Object> handleError(DataAccessException e) {
+        log.error("data access error", e);
+        return Result.failed(500, "数据库未连接，请检查本地 MySQL");
+    }
+
+    @ExceptionHandler(TransactionException.class)
+    public Result<Object> handleError(TransactionException e) {
+        log.error("transaction error", e);
+        return Result.failed(500, "数据库未连接，请检查本地 MySQL");
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

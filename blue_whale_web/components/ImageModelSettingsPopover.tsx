@@ -33,8 +33,8 @@ export const IMAGE_ASPECT_RATIOS = [
 ];
 
 export const IMAGE_RESOLUTIONS = [
-  { id: "1k", label: "1K" },
   { id: "2k", label: "2K" },
+  { id: "3k", label: "3K" },
   { id: "4k", label: "4K" },
 ];
 

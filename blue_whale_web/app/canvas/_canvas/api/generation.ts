@@ -43,14 +43,19 @@ function userIdHeader(): string {
 }
 
 async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      "X-User-Id": userIdHeader(),
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "X-User-Id": userIdHeader(),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new Error("后端未启动或无法连接");
+  }
   let json: { code: number; msg?: string; data?: T };
   try {
     json = await res.json();

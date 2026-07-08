@@ -19,9 +19,9 @@ class HealthControllerTest {
     private MockMvc mockMvc;
 
     @Test
-    void healthReturnsOk() throws Exception {
+    void healthReturnsUp() throws Exception {
         mockMvc.perform(get("/health"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("ok"));
+                .andExpect(jsonPath("$.status").value("UP"));
     }
 }

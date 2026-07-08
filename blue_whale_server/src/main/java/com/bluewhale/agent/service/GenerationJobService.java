@@ -14,6 +14,7 @@ import com.bluewhale.agent.model.entity.Asset;
 import com.bluewhale.agent.model.entity.GenerationJob;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,13 +50,16 @@ public class GenerationJobService {
         GenerationJob job = newGenerationJob(userId, GenerationJob.TYPE_IMAGE, buildImageInput(req));
         jobMapper.insert(job);
         try {
-            String imageUrl = volcEngineService.generateImage(req.prompt(), req.resolution(), false);
+            String imageUrl = volcEngineService.generateImage(req.prompt(), mapImageSize(req.resolution()), false);
             Asset asset = assetStorageService.downloadAndStore(imageUrl, userId, Asset.TYPE_IMAGE, "image/png");
             job.setStatus(GenerationJob.STATUS_SUCCEEDED)
                     .setProgress(100)
                     .setOutputAssetIds(List.of(asset.getId()));
             jobMapper.updateById(job);
             return new ImageResult(asset.getId(), asset.getUrl());
+        } catch (DataAccessException e) {
+            markFailed(job, 500, "数据库未连接，请检查本地 MySQL");
+            throw new GlobalException("数据库未连接，请检查本地 MySQL");
         } catch (Exception e) {
             markFailed(job, SystemCode.FAILURE_CODE, e.getMessage());
             throw e instanceof GlobalException ge ? ge : new GlobalException(SystemCode.FAILURE_CODE, e.getMessage());
@@ -178,6 +182,25 @@ public class GenerationJobService {
         err.put("message", message == null ? "" : message);
         job.setError(err);
         jobMapper.updateById(job);
+    }
+
+    /** 前端 resolution 字符串 → 火山方舟 images 接口支持的 size。 */
+    private String mapImageSize(String resolution) {
+        if (resolution == null || resolution.isBlank()) {
+            return "2K";
+        }
+        String lower = resolution.toLowerCase();
+        // 像素格式（如 1024x1024）直接透传
+        if (lower.matches("\\d+x\\d+")) {
+            return resolution;
+        }
+        return switch (lower) {
+            case "1k" -> "2K";
+            case "2k" -> "2K";
+            case "3k" -> "3K";
+            case "4k" -> "4K";
+            default -> "2K";
+        };
     }
 
     /** 火山 status → 本地状态机。 */

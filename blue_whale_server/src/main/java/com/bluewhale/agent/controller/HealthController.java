@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 /**
- * 健康检查端点。对齐前端/部署探活契约：{@code GET /health} -> {@code {"status":"ok"}}。
+ * 健康检查端点。对齐前端/部署探活契约：{@code GET /health} -> {@code {"status":"UP"}}。
  *
  * <p>裸返回，不包裹统一 {@code Result}；不引入 actuator。
  */
@@ -17,6 +17,6 @@ public class HealthController {
 
     @GetMapping
     public Map<String, String> health() {
-        return Map.of("status", "ok");
+        return Map.of("status", "UP");
     }
 }
