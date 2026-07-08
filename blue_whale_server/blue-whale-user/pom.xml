@@ -77,6 +77,14 @@
             <artifactId>blue-whale-global</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.blue-whale.tool.redis</groupId>
+            <artifactId>blue-whale-common-redis</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.blue-whale.web</groupId>
             <artifactId>blue-whale-common-web</artifactId>
         </dependency>
@@ -95,6 +103,11 @@
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-inline</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

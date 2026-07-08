@@ -2,7 +2,9 @@ package com.blue.whale.user.config;
 
 import com.blue.whale.user.sms.ConsoleSmsProvider;
 import com.blue.whale.user.sms.SmsProvider;
+import com.blue.whale.user.sms.VolcengineProperties;
 import com.blue.whale.user.sms.VolcengineSmsProvider;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -13,7 +15,10 @@ import org.springframework.context.annotation.Configuration;
  */
 @Slf4j
 @Configuration
+@RequiredArgsConstructor
 public class SmsConfig {
+
+    private final VolcengineProperties volcengineProperties;
 
     @Bean
     @ConditionalOnProperty(name = "sms.provider", havingValue = "console", matchIfMissing = true)
@@ -26,6 +31,6 @@ public class SmsConfig {
     @ConditionalOnProperty(name = "sms.provider", havingValue = "volcengine")
     public SmsProvider volcengineSmsProvider() {
         log.info("短信服务: 火山引擎");
-        return new VolcengineSmsProvider();
+        return new VolcengineSmsProvider(volcengineProperties.getSms());
     }
 }

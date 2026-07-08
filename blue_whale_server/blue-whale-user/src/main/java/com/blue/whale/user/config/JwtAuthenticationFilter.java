@@ -1,5 +1,6 @@
 package com.blue.whale.user.config;
 
+import com.blue.whale.user.service.AuthService;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
@@ -45,6 +46,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         try {
             String token = header.substring(7);
+
+            // 黑名单检查
+            if (AuthService.isTokenBlacklisted(token)) {
+                log.debug("Token 已被登出");
+                SecurityContextHolder.clearContext();
+                chain.doFilter(request, response);
+                return;
+            }
+
             Claims claims = jwtUtil.parse(token);
 
             // 构建认证对象，principal 存 user_id（Long）

@@ -2,6 +2,9 @@ server:
   port: 8080
 
 spring:
+  application:
+    name: blue-whale-user
+
   web:
     encoding:
       charset: UTF-8
@@ -10,6 +13,7 @@ spring:
   autoconfigure:
     exclude:
       - com.baomidou.dynamic.datasource.spring.boot.autoconfigure.DynamicDataSourceAutoConfiguration
+      - org.redisson.spring.starter.RedissonAutoConfiguration
 
   datasource:
     url: jdbc:mysql://110.42.233.109:3306/blue_whale?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
@@ -24,6 +28,12 @@ spring:
     init:
       mode: always
       schema-locations: classpath:schema.sql
+
+  redis:
+    host: 110.42.233.109
+    port: 9079
+    password:
+    database: 0
 
 mybatis-plus:
   configuration:
@@ -40,4 +50,13 @@ jwt:
   expiration: 604800
 
 sms:
-  provider: console
+  provider: volcengine
+
+# 火山引擎短信（切换 provider=volcengine 后生效）
+volcengine:
+  sms:
+    access-key-id: AKLTYjI2ZjM3NDU1NTBiNDQwMDkwNjFhZmQxOWVhOGYyODg
+    secret-access-key: WVdVMU9UTmhaREppTWpSa05EWmlOVGxoT1RNMFlqVTVOR00xWkRKalpqaw==
+    sms-account: 8c04a6b6
+    sign: 玄浮科技
+    template-id: S1T_1y2pbbfa2t4oy

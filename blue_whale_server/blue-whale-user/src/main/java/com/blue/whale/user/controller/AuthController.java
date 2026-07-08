@@ -47,4 +47,17 @@ public class AuthController {
         LoginResponse resp = authService.login(req.getPhone(), req.getCode());
         return Result.ok(resp);
     }
+
+    /**
+     * 登出
+     * POST /api/auth/logout
+     */
+    @PostMapping("/logout")
+    public Result<Void> logout(HttpServletRequest request) {
+        String header = request.getHeader("Authorization");
+        if (header != null && header.startsWith("Bearer ")) {
+            authService.logout(header.substring(7));
+        }
+        return Result.ok();
+    }
 }
