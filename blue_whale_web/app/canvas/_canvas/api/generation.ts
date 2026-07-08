@@ -7,11 +7,36 @@
  * 字段全 snake_case 对齐后端 Jackson SNAKE_CASE 序列化（见 application.yml）。
  * MVP 无鉴权，X-User-Id 头写死（localStorage 可覆盖）。
  */
+
+export type ImageModelCapability = {
+  model_id: string;
+  provider_id: string;
+  model_label: string;
+  icon: string | null;
+  supported_sizes: { id: string; label: string; api_value: string; width?: number; height?: number }[];
+  supported_aspect_ratios: string[];
+  supported_formats: string[];
+  default_size: string;
+  default_format: string | null;
+  default_aspect_ratio: string;
+  features: {
+    reference_image: boolean;
+    watermark: boolean;
+    quantity_max: number;
+    sequential_image_generation: boolean;
+    stream: boolean;
+    tools: boolean;
+  };
+};
+
 export type ImageGeneratePayload = {
   prompt: string;
-  resolution?: string;
+  model_id: string;
+  size_id: string;
   aspect_ratio?: string;
+  format?: string;
   quantity?: number;
+  watermark?: boolean;
   reference_images?: string[];
 };
 
@@ -66,6 +91,11 @@ async function request<T>(path: string, method: string, body?: unknown): Promise
     throw new Error(json.msg || `上游错误 ${json.code}`);
   }
   return json.data as T;
+}
+
+/** 获取当前启用的图片生成模型能力列表。 */
+export function getImageModels(): Promise<ImageModelCapability[]> {
+  return request<ImageModelCapability[]>("/generation/models?capability=image", "GET");
 }
 
 /** 文生图同步生成，返回 asset id + url。 */

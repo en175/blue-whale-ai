@@ -3,14 +3,19 @@ package com.bluewhale.agent.service;
 import com.bluewhale.agent.common.exception.GlobalException;
 import com.bluewhale.agent.mapper.AssetMapper;
 import com.bluewhale.agent.mapper.GenerationJobMapper;
+import com.bluewhale.agent.mapper.GenerationModelCapabilityMapper;
 import com.bluewhale.agent.model.dto.CreateJobResponse;
 import com.bluewhale.agent.model.dto.ImageGenerateRequest;
+import com.bluewhale.agent.model.dto.ImageGenerationResult;
 import com.bluewhale.agent.model.dto.ImageResult;
 import com.bluewhale.agent.model.dto.JobStatusResponse;
+import com.bluewhale.agent.model.dto.ProviderImageGenerationRequest;
 import com.bluewhale.agent.model.dto.VideoGenerateRequest;
 import com.bluewhale.agent.model.dto.VideoTaskResult;
 import com.bluewhale.agent.model.entity.Asset;
 import com.bluewhale.agent.model.entity.GenerationJob;
+import com.bluewhale.agent.model.entity.GenerationModelCapability;
+import com.bluewhale.agent.service.provider.ImageGenerationProviderRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,6 +27,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,7 +40,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * {@link GenerationJobService} 测试：mock mapper + VolcEngineService + AssetStorageService，
+ * {@link GenerationJobService} 测试：mock mapper + Provider registry + AssetStorageService，
  * 覆盖文生图同步、视频异步提交、状态查询、poller 状态机推进（succeeded/failed/timeout/running）。
  */
 @ExtendWith(MockitoExtension.class)
@@ -49,9 +55,15 @@ class GenerationJobServiceTest {
     private VolcEngineService volcEngineService;
     @Mock
     private AssetStorageService assetStorageService;
+    @Mock
+    private GenerationModelCapabilityMapper capabilityMapper;
+    @Mock
+    private ImageGenerationProviderRegistry providerRegistry;
 
     @InjectMocks
     private GenerationJobService service;
+
+    private static final String MODEL_ID = "doubao-seedream-5-0-lite-250723";
 
     @BeforeEach
     void setUp() {
@@ -59,6 +71,38 @@ class GenerationJobServiceTest {
             ((GenerationJob) inv.getArgument(0)).setId(1L);
             return 1;
         });
+        GenerationModelCapability cap = imageCapability();
+        when(capabilityMapper.selectEnabledByModelId(MODEL_ID)).thenReturn(Optional.of(cap));
+        when(providerRegistry.getProvider("volcengine")).thenReturn(volcEngineService);
+    }
+
+    private GenerationModelCapability imageCapability() {
+        GenerationModelCapability.SizeOption size = new GenerationModelCapability.SizeOption();
+        size.setId("2k");
+        size.setLabel("2K");
+        size.setApiValue("2K");
+
+        GenerationModelCapability.Features features = new GenerationModelCapability.Features();
+        features.setReferenceImage(true);
+        features.setWatermark(true);
+        features.setQuantityMax(15);
+        features.setSequentialImageGeneration(false);
+        features.setStream(false);
+        features.setTools(false);
+
+        return new GenerationModelCapability()
+                .setProviderId("volcengine")
+                .setModelId(MODEL_ID)
+                .setCapabilityType(GenerationModelCapability.CAPABILITY_IMAGE)
+                .setModelLabel("Seedream 5.0 Lite")
+                .setSupportedSizes(List.of(size))
+                .setSupportedAspectRatios(List.of("1:1", "16:9"))
+                .setSupportedFormats(List.of("png", "jpeg"))
+                .setDefaultSize("2k")
+                .setDefaultFormat("jpeg")
+                .setDefaultAspectRatio("1:1")
+                .setFeatures(features)
+                .setEnabled(true);
     }
 
     private Asset imageAsset(long id, String url) {
@@ -67,11 +111,16 @@ class GenerationJobServiceTest {
         return a;
     }
 
+    private ImageGenerateRequest imageReq(String prompt) {
+        return new ImageGenerateRequest(prompt, MODEL_ID, "2k", "1:1", null, 1, null, null);
+    }
+
     @Test
     void createImageJobSuccessReturnsAsset() {
-        ImageGenerateRequest req = new ImageGenerateRequest("cat", "1024x1024", "1:1", 1, null);
-        when(volcEngineService.generateImage("cat", "1024x1024", false)).thenReturn("https://ark/img.png");
-        when(assetStorageService.downloadAndStore("https://ark/img.png", 7L, Asset.TYPE_IMAGE, "image/png"))
+        ImageGenerateRequest req = imageReq("cat");
+        when(volcEngineService.generate(any(ProviderImageGenerationRequest.class)))
+                .thenReturn(new ImageGenerationResult("https://ark/img.png"));
+        when(assetStorageService.downloadAndStore("https://ark/img.png", 7L, Asset.TYPE_IMAGE, null))
                 .thenReturn(imageAsset(9L, "/assets/x.png"));
 
         ImageResult r = service.createImageJob(req, 7L);
@@ -85,12 +134,31 @@ class GenerationJobServiceTest {
 
     @Test
     void createImageJobFailureMarksFailedAndThrows() {
-        ImageGenerateRequest req = new ImageGenerateRequest("cat", "1024x1024", null, 1, null);
-        when(volcEngineService.generateImage(any(), any(), any()))
+        ImageGenerateRequest req = imageReq("cat");
+        when(volcEngineService.generate(any()))
                 .thenThrow(new GlobalException(400, "上游生成失败: boom"));
 
         assertThatThrownBy(() -> service.createImageJob(req, 7L)).isInstanceOf(GlobalException.class);
         assertThat(captureUpdate().getStatus()).isEqualTo(GenerationJob.STATUS_FAILED);
+    }
+
+    @Test
+    void createImageJobUnsupportedModel() {
+        ImageGenerateRequest req = new ImageGenerateRequest("cat", "unknown", "2k", "1:1", null, 1, null, null);
+        when(capabilityMapper.selectEnabledByModelId("unknown")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.createImageJob(req, 7L))
+                .isInstanceOf(GlobalException.class)
+                .hasMessageContaining("不支持的模型");
+    }
+
+    @Test
+    void createImageJobUnsupportedSize() {
+        ImageGenerateRequest req = new ImageGenerateRequest("cat", MODEL_ID, "8k", "1:1", null, 1, null, null);
+
+        assertThatThrownBy(() -> service.createImageJob(req, 7L))
+                .isInstanceOf(GlobalException.class)
+                .hasMessageContaining("模型不支持该尺寸");
     }
 
     @Test
@@ -215,8 +283,8 @@ class GenerationJobServiceTest {
 
     @Test
     void createImageJobInsertsQueuedBeforeGeneration() {
-        ImageGenerateRequest req = new ImageGenerateRequest("cat", null, null, null, null);
-        when(volcEngineService.generateImage(any(), any(), any())).thenReturn("https://ark/img.png");
+        ImageGenerateRequest req = imageReq("cat");
+        when(volcEngineService.generate(any())).thenReturn(new ImageGenerationResult("https://ark/img.png"));
         when(assetStorageService.downloadAndStore(any(), any(), any(), any())).thenReturn(imageAsset(1L, "/assets/a.png"));
 
         // insert 与 updateById 共用同一 job 引用，事后捕获会被 setStatus(succeeded) 覆盖；

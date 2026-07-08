@@ -5,17 +5,23 @@ import com.bluewhale.agent.common.resp.Result;
 import com.bluewhale.agent.common.resp.SystemCode;
 import com.bluewhale.agent.model.dto.CreateJobResponse;
 import com.bluewhale.agent.model.dto.ImageGenerateRequest;
+import com.bluewhale.agent.model.dto.ImageModelCapabilityResponse;
 import com.bluewhale.agent.model.dto.ImageResult;
 import com.bluewhale.agent.model.dto.VideoGenerateRequest;
 import com.bluewhale.agent.service.GenerationJobService;
+import com.bluewhale.agent.service.GenerationModelCapabilityService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * 生成接口：文生图（Seedream）同步、图文生视频（Seedance 2.0）异步。
@@ -31,6 +37,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class GenerationController {
 
     private final GenerationJobService generationJobService;
+    private final GenerationModelCapabilityService capabilityService;
+
+    /** 查询当前启用的图片生成模型及其能力。 */
+    @GetMapping("/models")
+    public Result<List<ImageModelCapabilityResponse>> listModels(
+            @RequestParam(name = "capability", defaultValue = "image") String capability) {
+        return Result.ok(capabilityService.listCapabilities(capability));
+    }
 
     /** 文生图同步生成，返回 asset id + url。 */
     @PostMapping("/image")

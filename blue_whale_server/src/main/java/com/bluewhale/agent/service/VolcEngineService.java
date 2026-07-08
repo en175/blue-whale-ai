@@ -3,7 +3,10 @@ package com.bluewhale.agent.service;
 import com.bluewhale.agent.common.exception.GlobalException;
 import com.bluewhale.agent.common.resp.SystemCode;
 import com.bluewhale.agent.config.VolcEngineConfig;
+import com.bluewhale.agent.model.dto.ImageGenerationResult;
+import com.bluewhale.agent.model.dto.ProviderImageGenerationRequest;
 import com.bluewhale.agent.model.dto.VideoTaskResult;
+import com.bluewhale.agent.service.provider.ImageGenerationProvider;
 import com.volcengine.ApiException;
 import com.volcengine.ark.runtime.model.content.generation.CreateContentGenerationTaskRequest;
 import com.volcengine.ark.runtime.model.content.generation.CreateContentGenerationTaskResult;
@@ -19,36 +22,65 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
  * 火山方舟 Ark 调用封装：文生图同步 + 视频任务创建/查询。
  *
- * <p>ArkService 方法签名不 throws（内部 RxJava 阻塞，异常以 RuntimeException 透传），统一用
- * {@code catch(Exception)} 兜底，{@code instanceof ApiException} 取 code/body 记日志，转 {@link GlobalException}。
- * 通过 {@code ObjectProvider<ArkService>} 懒获取——无 ARK_API_KEY 时 bean 不存在，调用 {@link #requireArk()}
- * 抛配置缺失错误（不暴露 key）；裸启动不失败。model id 从配置读取，不硬编码。
+ * <p>当前类同时实现 {@link ImageGenerationProvider}，作为多模型 Provider 架构中火山的具体实现。
+ * 文生图参数（model、size、format 等）均来自调用方，不再依赖 {@code ark.image-model} 单一配置；
+ * 视频生成仍使用 {@code ark.video-model} 配置。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class VolcEngineService {
+public class VolcEngineService implements ImageGenerationProvider {
+
+    public static final String PROVIDER_ID = "volcengine";
 
     private final ObjectProvider<ArkService> arkServiceProvider;
     private final VolcEngineConfig.ArkProperties arkProperties;
 
-    /** 文生图同步生成，返回图片 url。 */
-    public String generateImage(String prompt, String size, Boolean watermark) {
+    @Override
+    public String getProviderId() {
+        return PROVIDER_ID;
+    }
+
+    /** 文生图同步生成，按模型能力透传支持的字段。 */
+    @Override
+    public ImageGenerationResult generate(ProviderImageGenerationRequest req) {
         ArkService arkService = requireArk();
-        GenerateImagesRequest req = GenerateImagesRequest.builder()
-                .model(arkProperties.getImageModel())
-                .prompt(prompt)
+        GenerateImagesRequest.Builder builder = GenerateImagesRequest.builder()
+                .model(req.getModelId())
+                .prompt(req.getPrompt())
                 .responseFormat(ResponseFormat.Url)
-                .size(size)
-                .watermark(watermark)
-                .build();
+                .size(req.getSize());
+
+        if (req.getOutputFormat() != null && !req.getOutputFormat().isBlank()) {
+            builder.outputFormat(req.getOutputFormat());
+        }
+        if (req.getReferenceImages() != null && !req.getReferenceImages().isEmpty()) {
+            builder.image(req.getReferenceImages());
+        }
+        if (req.getWatermark() != null) {
+            builder.watermark(req.getWatermark());
+        }
+        if (req.getSequentialImageGeneration() != null && req.getSequentialImageGeneration()) {
+            builder.sequentialImageGeneration("auto");
+        }
+        if (req.getStream() != null) {
+            builder.stream(req.getStream());
+        }
+        if (req.getTools() != null && req.getTools()) {
+            GenerateImagesRequest.ContentGenerationTool tool = new GenerateImagesRequest.ContentGenerationTool();
+            tool.setType("web_search");
+            builder.tools(Collections.singletonList(tool));
+        }
+
+        GenerateImagesRequest request = builder.build();
         try {
-            ImagesResponse resp = arkService.generateImages(req);
+            ImagesResponse resp = arkService.generateImages(request);
             if (resp.getError() != null && resp.getError().getCode() != null) {
                 log.warn("ark image moderation rejected: code={}, msg={}",
                         resp.getError().getCode(), resp.getError().getMessage());
@@ -57,7 +89,7 @@ public class VolcEngineService {
             if (resp.getData() == null || resp.getData().isEmpty()) {
                 throw new GlobalException(SystemCode.FAILURE_CODE, "文生图返回空数据");
             }
-            return resp.getData().get(0).getUrl();
+            return new ImageGenerationResult(resp.getData().get(0).getUrl());
         } catch (GlobalException e) {
             throw e;
         } catch (Exception e) {

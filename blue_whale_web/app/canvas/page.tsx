@@ -297,7 +297,8 @@ function CanvasPageInner() {
         if (args.mode === "image") {
           const result = await generateImage({
             prompt: trimmed,
-            resolution: args.settings.resolution.id,
+            model_id: args.settings.model.id,
+            size_id: args.settings.resolution.id,
             aspect_ratio: args.settings.aspectRatio.id,
             quantity: parseQuantity(args.settings.quantity),
             reference_images: imageDockMedia

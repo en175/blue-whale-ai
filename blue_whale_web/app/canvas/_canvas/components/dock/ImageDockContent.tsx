@@ -8,9 +8,9 @@ import { createPortal } from "react-dom";
 import { ChevronUp, Image as ImageIcon, Plus, Settings2, X } from "lucide-react";
 import {
   ImageModelSettingsPopover,
-  IMAGE_MODELS,
-  IMAGE_RESOLUTIONS,
-  IMAGE_ASPECT_RATIOS,
+  type ImageModel,
+  type ImageResolution,
+  type ImageAspectRatio,
 } from "@/components/ImageModelSettingsPopover";
 import { CreditIcon } from "../../icons";
 import { QUANTITIES } from "../../constants";
@@ -34,9 +34,18 @@ export function ImageDockContent({
 }: ImageDockContentProps) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState(IMAGE_MODELS[0]);
-  const [selectedResolution, setSelectedResolution] = useState(IMAGE_RESOLUTIONS[0]);
-  const [selectedAspectRatio, setSelectedAspectRatio] = useState(IMAGE_ASPECT_RATIOS[2]);
+  const [selectedModel, setSelectedModel] = useState<ImageModel>({
+    id: "",
+    label: "加载中...",
+  });
+  const [selectedResolution, setSelectedResolution] = useState<ImageResolution>({
+    id: "",
+    label: "-",
+  });
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState<ImageAspectRatio>({
+    id: "",
+    label: "-",
+  });
 
   // 上传来源菜单（占位按钮 + 加号共用）
   const localFileRef = useRef<HTMLInputElement>(null);
@@ -462,7 +471,7 @@ export function ImageDockContent({
           <div style={{ position: "relative", display: "inline-flex" }}>
             <button
               type="button"
-              disabled={isEmpty || generating}
+              disabled={isEmpty || generating || !selectedModel.id || !selectedResolution.id || !selectedAspectRatio.id}
               onClick={() =>
                 onGenerate?.({
                   model: selectedModel,

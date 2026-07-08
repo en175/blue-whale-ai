@@ -2,6 +2,8 @@ package com.bluewhale.agent.service;
 
 import com.bluewhale.agent.common.exception.GlobalException;
 import com.bluewhale.agent.config.VolcEngineConfig;
+import com.bluewhale.agent.model.dto.ImageGenerationResult;
+import com.bluewhale.agent.model.dto.ProviderImageGenerationRequest;
 import com.bluewhale.agent.model.dto.VideoTaskResult;
 import com.volcengine.ark.runtime.model.content.generation.CreateContentGenerationTaskResult;
 import com.volcengine.ark.runtime.model.content.generation.GetContentGenerationTaskResponse;
@@ -45,8 +47,15 @@ class VolcEngineServiceTest {
     @BeforeEach
     void setUp() {
         when(arkServiceProvider.getIfAvailable()).thenReturn(arkService);
-        when(arkProperties.getImageModel()).thenReturn("img-model");
         when(arkProperties.getVideoModel()).thenReturn("vid-model");
+    }
+
+    private ProviderImageGenerationRequest imageReq(String prompt, String size) {
+        return ProviderImageGenerationRequest.builder()
+                .modelId("img-model")
+                .prompt(prompt)
+                .size(size)
+                .build();
     }
 
     @Test
@@ -57,8 +66,8 @@ class VolcEngineServiceTest {
         resp.setData(List.of(img));
         when(arkService.generateImages(any())).thenReturn(resp);
 
-        assertThat(service.generateImage("a cat", "1024x1024", false))
-                .isEqualTo("https://ark/img.png");
+        ImageGenerationResult result = service.generate(imageReq("a cat", "1024x1024"));
+        assertThat(result.getImageUrl()).isEqualTo("https://ark/img.png");
     }
 
     @Test
@@ -70,7 +79,7 @@ class VolcEngineServiceTest {
         resp.setError(err);
         when(arkService.generateImages(any())).thenReturn(resp);
 
-        assertThatThrownBy(() -> service.generateImage("xxx", "1024x1024", false))
+        assertThatThrownBy(() -> service.generate(imageReq("xxx", "1024x1024")))
                 .isInstanceOf(GlobalException.class)
                 .hasMessageContaining("内容违规");
     }
@@ -81,7 +90,7 @@ class VolcEngineServiceTest {
         resp.setData(List.of());
         when(arkService.generateImages(any())).thenReturn(resp);
 
-        assertThatThrownBy(() -> service.generateImage("x", "1x1", false))
+        assertThatThrownBy(() -> service.generate(imageReq("x", "1x1")))
                 .isInstanceOf(GlobalException.class)
                 .hasMessageContaining("空数据");
     }
@@ -90,7 +99,7 @@ class VolcEngineServiceTest {
     void generateImageUpstreamExceptionWrapped() {
         when(arkService.generateImages(any())).thenThrow(new RuntimeException("boom"));
 
-        assertThatThrownBy(() -> service.generateImage("x", "1x1", false))
+        assertThatThrownBy(() -> service.generate(imageReq("x", "1x1")))
                 .isInstanceOf(GlobalException.class)
                 .hasMessageContaining("上游生成失败")
                 .hasMessageContaining("boom");
@@ -100,7 +109,7 @@ class VolcEngineServiceTest {
     void apiKeyMissingThrowsConfigError() {
         when(arkServiceProvider.getIfAvailable()).thenReturn(null);
 
-        assertThatThrownBy(() -> service.generateImage("x", "1x1", false))
+        assertThatThrownBy(() -> service.generate(imageReq("x", "1x1")))
                 .isInstanceOf(GlobalException.class)
                 .hasMessageContaining("ARK_API_KEY");
     }

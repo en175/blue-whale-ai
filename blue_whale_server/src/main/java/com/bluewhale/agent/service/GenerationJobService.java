@@ -4,14 +4,20 @@ import com.bluewhale.agent.common.exception.GlobalException;
 import com.bluewhale.agent.common.resp.SystemCode;
 import com.bluewhale.agent.mapper.AssetMapper;
 import com.bluewhale.agent.mapper.GenerationJobMapper;
+import com.bluewhale.agent.mapper.GenerationModelCapabilityMapper;
 import com.bluewhale.agent.model.dto.CreateJobResponse;
 import com.bluewhale.agent.model.dto.ImageGenerateRequest;
+import com.bluewhale.agent.model.dto.ImageGenerationResult;
 import com.bluewhale.agent.model.dto.ImageResult;
 import com.bluewhale.agent.model.dto.JobStatusResponse;
+import com.bluewhale.agent.model.dto.ProviderImageGenerationRequest;
 import com.bluewhale.agent.model.dto.VideoGenerateRequest;
 import com.bluewhale.agent.model.dto.VideoTaskResult;
 import com.bluewhale.agent.model.entity.Asset;
 import com.bluewhale.agent.model.entity.GenerationJob;
+import com.bluewhale.agent.model.entity.GenerationModelCapability;
+import com.bluewhale.agent.service.provider.ImageGenerationProvider;
+import com.bluewhale.agent.service.provider.ImageGenerationProviderRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
@@ -26,7 +32,7 @@ import java.util.Map;
 /**
  * 生成任务服务：状态机 {@code queued → processing → succeeded | failed}（沿用 PRD §5.4）。
  *
- * <p>文生图同步：insert job → 调 Ark → 转存 asset → update succeeded。
+ * <p>文生图同步：insert job → 按 model_id 查能力表并路由 Provider → 转存 asset → update succeeded。
  * 图文生视频异步：insert job(queued) → 调 Ark 创建任务 → update processing + providerTaskId + nextPollAt → 返 jobId。
  * poller 调 {@link #pollJob(GenerationJob)} 查 Ark 推进状态，succeeded 时下载转存。
  */
@@ -38,20 +44,28 @@ public class GenerationJobService {
     /** poller 单任务最大轮询次数，超限判 upstream_timeout。 */
     public static final int MAX_POLL_COUNT = 120;
     private static final long POLL_INTERVAL_SECONDS = 5;
+    private static final int MAX_REFERENCE_IMAGES = 14;
 
     private final GenerationJobMapper jobMapper;
     private final AssetMapper assetMapper;
     private final VolcEngineService volcEngineService;
     private final AssetStorageService assetStorageService;
+    private final GenerationModelCapabilityMapper capabilityMapper;
+    private final ImageGenerationProviderRegistry providerRegistry;
 
     /** 文生图同步生成。 */
     @Transactional
     public ImageResult createImageJob(ImageGenerateRequest req, Long userId) {
-        GenerationJob job = newGenerationJob(userId, GenerationJob.TYPE_IMAGE, buildImageInput(req));
+        GenerationModelCapability capability = capabilityMapper.selectEnabledByModelId(req.modelId())
+                .orElseThrow(() -> new GlobalException(SystemCode.FAILURE_CODE, "不支持的模型: " + req.modelId()));
+
+        ProviderImageGenerationRequest providerReq = buildProviderRequest(req, capability);
+        GenerationJob job = newGenerationJob(userId, GenerationJob.TYPE_IMAGE, capability.getProviderId(), buildImageInput(req));
         jobMapper.insert(job);
         try {
-            String imageUrl = volcEngineService.generateImage(req.prompt(), mapImageSize(req.resolution()), false);
-            Asset asset = assetStorageService.downloadAndStore(imageUrl, userId, Asset.TYPE_IMAGE, "image/png");
+            ImageGenerationProvider provider = providerRegistry.getProvider(capability.getProviderId());
+            ImageGenerationResult result = provider.generate(providerReq);
+            Asset asset = assetStorageService.downloadAndStore(result.getImageUrl(), userId, Asset.TYPE_IMAGE, null);
             job.setStatus(GenerationJob.STATUS_SUCCEEDED)
                     .setProgress(100)
                     .setOutputAssetIds(List.of(asset.getId()));
@@ -69,7 +83,7 @@ public class GenerationJobService {
     /** 图文生视频异步提交，立即返 jobId。 */
     @Transactional
     public CreateJobResponse createVideoJob(VideoGenerateRequest req, Long userId) {
-        GenerationJob job = newGenerationJob(userId, GenerationJob.TYPE_VIDEO, buildVideoInput(req));
+        GenerationJob job = newGenerationJob(userId, GenerationJob.TYPE_VIDEO, "volcengine", buildVideoInput(req));
         jobMapper.insert(job);
         try {
             String taskId = volcEngineService.createVideoTask(req.prompt(), req.firstFrameUrl(),
@@ -145,7 +159,26 @@ public class GenerationJobService {
         }
     }
 
-    private GenerationJob newGenerationJob(Long userId, String type, Map<String, Object> input) {
+    private ProviderImageGenerationRequest buildProviderRequest(ImageGenerateRequest req,
+                                                                 GenerationModelCapability capability) {
+        String size = resolveApiSize(req.sizeId(), capability);
+        String outputFormat = resolveOutputFormat(req.format(), capability);
+        List<String> referenceImages = resolveReferenceImages(req.referenceImages(), capability);
+        int quantity = resolveQuantity(req.quantity(), capability);
+
+        return ProviderImageGenerationRequest.builder()
+                .modelId(capability.getModelId())
+                .prompt(req.prompt())
+                .size(size)
+                .aspectRatio(req.aspectRatio())
+                .outputFormat(outputFormat)
+                .quantity(quantity)
+                .referenceImages(referenceImages)
+                .watermark(req.watermark())
+                .build();
+    }
+
+    private GenerationJob newGenerationJob(Long userId, String type, String provider, Map<String, Object> input) {
         return new GenerationJob()
                 .setUserId(userId)
                 .setType(type)
@@ -153,15 +186,19 @@ public class GenerationJobService {
                 .setInput(input)
                 .setStatus(GenerationJob.STATUS_QUEUED)
                 .setProgress(0)
-                .setProvider("volcengine");
+                .setProvider(provider);
     }
 
     private Map<String, Object> buildImageInput(ImageGenerateRequest req) {
         Map<String, Object> input = new HashMap<>();
         input.put("prompt", req.prompt());
-        input.put("resolution", req.resolution());
-        input.put("aspectRatio", req.aspectRatio());
+        input.put("model_id", req.modelId());
+        input.put("size_id", req.sizeId());
+        input.put("aspect_ratio", req.aspectRatio());
+        input.put("format", req.format());
         input.put("quantity", req.quantity());
+        input.put("reference_images", req.referenceImages());
+        input.put("watermark", req.watermark());
         return input;
     }
 
@@ -184,23 +221,62 @@ public class GenerationJobService {
         jobMapper.updateById(job);
     }
 
-    /** 前端 resolution 字符串 → 火山方舟 images 接口支持的 size。 */
-    private String mapImageSize(String resolution) {
-        if (resolution == null || resolution.isBlank()) {
-            return "2K";
+    /** 前端 resolution(size_id) → 上游 API 需要的 size 值。 */
+    private String resolveApiSize(String resolution, GenerationModelCapability capability) {
+        String sizeId = (resolution == null || resolution.isBlank()) ? capability.getDefaultSize() : resolution;
+        List<GenerationModelCapability.SizeOption> sizes = capability.getSupportedSizes();
+        if (sizes == null || sizes.isEmpty()) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "模型未配置可用尺寸");
         }
-        String lower = resolution.toLowerCase();
-        // 像素格式（如 1024x1024）直接透传
-        if (lower.matches("\\d+x\\d+")) {
-            return resolution;
+        for (GenerationModelCapability.SizeOption option : sizes) {
+            if (option.getId().equalsIgnoreCase(sizeId)) {
+                return option.getApiValue();
+            }
         }
-        return switch (lower) {
-            case "1k" -> "2K";
-            case "2k" -> "2K";
-            case "3k" -> "3K";
-            case "4k" -> "4K";
-            default -> "2K";
-        };
+        throw new GlobalException(SystemCode.FAILURE_CODE,
+                "模型不支持该尺寸: " + sizeId + "，可用: " + sizes.stream().map(GenerationModelCapability.SizeOption::getId).toList());
+    }
+
+    /** 按模型能力校验/兜底输出格式。 */
+    private String resolveOutputFormat(String format, GenerationModelCapability capability) {
+        List<String> supported = capability.getSupportedFormats();
+        if (format == null || format.isBlank()) {
+            return capability.getDefaultFormat();
+        }
+        if (supported == null || !supported.contains(format)) {
+            throw new GlobalException(SystemCode.FAILURE_CODE,
+                    "模型不支持该格式: " + format + "，可用: " + supported);
+        }
+        return format;
+    }
+
+    /** 按模型能力校验参考图。 */
+    private List<String> resolveReferenceImages(List<String> referenceImages, GenerationModelCapability capability) {
+        if (referenceImages == null || referenceImages.isEmpty()) {
+            return null;
+        }
+        GenerationModelCapability.Features features = capability.getFeatures();
+        if (features == null || !Boolean.TRUE.equals(features.getReferenceImage())) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "当前模型不支持参考图");
+        }
+        if (referenceImages.size() > MAX_REFERENCE_IMAGES) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "参考图最多 " + MAX_REFERENCE_IMAGES + " 张");
+        }
+        return referenceImages;
+    }
+
+    /** 按模型能力校验生成数量。 */
+    private int resolveQuantity(Integer quantity, GenerationModelCapability capability) {
+        int value = quantity == null ? 1 : quantity;
+        GenerationModelCapability.Features features = capability.getFeatures();
+        int max = (features != null && features.getQuantityMax() != null) ? features.getQuantityMax() : 1;
+        if (value < 1) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "生成数量不能小于 1");
+        }
+        if (value > max) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "生成数量超过该模型限制（最大 " + max + "）");
+        }
+        return value;
     }
 
     /** 火山 status → 本地状态机。 */

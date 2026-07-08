@@ -1,46 +1,14 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 import { AspectRatioIcon } from "./icons/AspectRatioIcon";
+import { getImageModels, type ImageModelCapability } from "@/app/canvas/_canvas/api/generation";
 
-export const IMAGE_MODELS = [
-  {
-    id: "gpt-image-2",
-    label: "GPT Image 2",
-    icon: "https://d1735p3aqhycef.cloudfront.net/aigc-web/public/ai-image-creation/models/openai.png",
-  },
-  { id: "nano-banana-2", label: "Nano Banana 2" },
-  { id: "nano-banana-pro", label: "Nano Banana Pro" },
-  { id: "seedream-5", label: "Seedream 5.0" },
-];
-
-export const IMAGE_ASPECT_RATIOS = [
-  { id: "9:16", label: "9:16" },
-  { id: "3:4", label: "3:4" },
-  { id: "1:1", label: "1:1" },
-  { id: "4:3", label: "4:3" },
-  { id: "16:9", label: "16:9" },
-  { id: "2:3", label: "2:3" },
-  { id: "3:2", label: "3:2" },
-  { id: "5:4", label: "5:4" },
-  { id: "4:5", label: "4:5" },
-  { id: "21:9", label: "21:9" },
-  { id: "9:21", label: "9:21" },
-  { id: "1:2", label: "1:2" },
-  { id: "2:1", label: "2:1" },
-];
-
-export const IMAGE_RESOLUTIONS = [
-  { id: "2k", label: "2K" },
-  { id: "3k", label: "3K" },
-  { id: "4k", label: "4K" },
-];
-
-export type ImageModel = (typeof IMAGE_MODELS)[number];
-export type ImageResolution = (typeof IMAGE_RESOLUTIONS)[number];
-export type ImageAspectRatio = (typeof IMAGE_ASPECT_RATIOS)[number];
+export type ImageModel = { id: string; label: string; icon?: string };
+export type ImageResolution = { id: string; label: string };
+export type ImageAspectRatio = { id: string; label: string };
 
 export interface ImageModelSettingsPopoverProps {
   triggerRef: React.RefObject<HTMLElement | null>;
@@ -69,6 +37,58 @@ export function ImageModelSettingsPopover({
   const [position, setPosition] = useState({ left: 16, bottom: 64 });
   const [modelOpen, setModelOpen] = useState(false);
   const [resolutionOpen, setResolutionOpen] = useState(false);
+
+  const [capabilities, setCapabilities] = useState<ImageModelCapability[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    if (capabilities) return;
+    setLoading(true);
+    getImageModels()
+      .then((data) => setCapabilities(data))
+      .catch(() => setCapabilities([]))
+      .finally(() => setLoading(false));
+  }, [open, capabilities]);
+
+  const currentCapability = capabilities?.find((c) => c.model_id === selectedModel.id);
+
+  // 模型兜底：若当前选择不在能力列表中，默认选中第一个启用模型
+  useEffect(() => {
+    if (!capabilities || capabilities.length === 0) return;
+    if (!capabilities.some((c) => c.model_id === selectedModel.id)) {
+      const first = capabilities[0];
+      onModelChange({
+        id: first.model_id,
+        label: first.model_label,
+        icon: first.icon ?? undefined,
+      });
+    }
+  }, [capabilities, selectedModel.id, onModelChange]);
+
+  // 分辨率兜底：切换模型后若当前分辨率不可用，重置为模型默认值
+  useEffect(() => {
+    if (!currentCapability) return;
+    const sizes = currentCapability.supported_sizes;
+    if (sizes.length === 0) return;
+    if (!sizes.some((s) => s.id === selectedResolution.id)) {
+      const def = sizes.find((s) => s.id === currentCapability.default_size) ?? sizes[0];
+      onResolutionChange({ id: def.id, label: def.label });
+    }
+  }, [currentCapability, selectedResolution.id, onResolutionChange]);
+
+  // 宽高比兜底：切换模型后若当前宽高比不可用，重置为模型默认值
+  useEffect(() => {
+    if (!currentCapability) return;
+    const ratios = currentCapability.supported_aspect_ratios;
+    if (ratios.length === 0) return;
+    if (!ratios.includes(selectedAspectRatio.id)) {
+      const def = ratios.includes(currentCapability.default_aspect_ratio)
+        ? currentCapability.default_aspect_ratio
+        : ratios[0];
+      onAspectRatioChange({ id: def, label: def });
+    }
+  }, [currentCapability, selectedAspectRatio.id, onAspectRatioChange]);
 
   useEffect(() => {
     if (open && triggerRef.current) {
@@ -101,6 +121,15 @@ export function ImageModelSettingsPopover({
 
   const body = typeof document !== "undefined" ? document.body : null;
   if (!body) return null;
+
+  const models: ImageModel[] =
+    capabilities?.map((c) => ({ id: c.model_id, label: c.model_label, icon: c.icon ?? undefined })) ?? [];
+  const resolutions: ImageResolution[] = currentCapability?.supported_sizes.map((s) => ({
+    id: s.id,
+    label: s.label,
+  })) ?? [];
+  const aspectRatios: ImageAspectRatio[] =
+    currentCapability?.supported_aspect_ratios.map((r) => ({ id: r, label: r })) ?? [];
 
   return createPortal(
     <div
@@ -211,7 +240,7 @@ export function ImageModelSettingsPopover({
                   textOverflow: "ellipsis",
                 }}
               >
-                {selectedModel.label}
+                {loading ? "加载中..." : selectedModel.label}
               </span>
               <ChevronDown
                 width={14}
@@ -237,7 +266,7 @@ export function ImageModelSettingsPopover({
                   gap: 2,
                 }}
               >
-                {IMAGE_MODELS.map((model) => (
+                {models.map((model) => (
                   <button
                     key={model.id}
                     type="button"
@@ -322,7 +351,7 @@ export function ImageModelSettingsPopover({
                 fontSize: 12,
                 lineHeight: "16px",
                 fontWeight: 400,
-                cursor: "pointer",
+                cursor: resolutions.length === 0 ? "default" : "pointer",
                 display: "flex",
                 alignItems: "center",
                 gap: 8,
@@ -332,6 +361,7 @@ export function ImageModelSettingsPopover({
                 boxSizing: "border-box",
                 justifyContent: "space-between",
               }}
+              disabled={resolutions.length === 0}
             >
               <span
                 style={{
@@ -354,7 +384,7 @@ export function ImageModelSettingsPopover({
                 style={{ opacity: 0.6, marginLeft: "auto" }}
               />
             </button>
-            {resolutionOpen && (
+            {resolutionOpen && resolutions.length > 0 && (
               <div
                 style={{
                   position: "absolute",
@@ -372,7 +402,7 @@ export function ImageModelSettingsPopover({
                   gap: 2,
                 }}
               >
-                {IMAGE_RESOLUTIONS.map((res) => (
+                {resolutions.map((res) => (
                   <button
                     key={res.id}
                     type="button"
@@ -438,7 +468,7 @@ export function ImageModelSettingsPopover({
             gap: 2,
           }}
         >
-          {IMAGE_ASPECT_RATIOS.map((ratio) => {
+          {aspectRatios.map((ratio) => {
             const selected = selectedAspectRatio.id === ratio.id;
             return (
               <button
