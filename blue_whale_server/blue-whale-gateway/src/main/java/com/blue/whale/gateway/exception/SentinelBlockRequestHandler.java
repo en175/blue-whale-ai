@@ -29,25 +29,25 @@ public class SentinelBlockRequestHandler implements BlockRequestHandler {
 
         Result result = Result.failed(SystemCode.SYSTEM_BUSY.getCode(), SystemCode.SYSTEM_BUSY.getMsg());
 
-        if(throwable instanceof FlowException){
-            result = Result.failed(SystemCode.SENTINEL_FLOW_BLOCK.getCode(), SystemCode.SENTINEL_FLOW_BLOCK.getMsg());
-        }
-
-        if(throwable instanceof DegradeException){
-            result =  Result.failed(SystemCode.SENTINEL_DEGRADE_BLOCK.getCode(), SystemCode.SENTINEL_DEGRADE_BLOCK.getMsg());
-        }
-
-        if(throwable instanceof ParamFlowException){
-            result = Result.failed(SystemCode.SENTINEL_PARAM_FLOW_BLOCK.getCode(), SystemCode.SENTINEL_PARAM_FLOW_BLOCK.getMsg());
-        }
-
-        if(throwable instanceof SystemBlockException){
-           result = Result.failed(SystemCode.SENTINEL_SYSTEM_BLOCK.getCode(), SystemCode.SENTINEL_SYSTEM_BLOCK.getMsg());
-        }
-
-        if(throwable instanceof AuthorityException){
-            result = Result.failed(SystemCode.SENTINEL_AUTHORITY_BLOCK.getCode(), SystemCode.SENTINEL_AUTHORITY_BLOCK.getMsg());
-        }
+//        if(throwable instanceof FlowException){
+//            result = Result.failed(SystemCode.SENTINEL_FLOW_BLOCK.getCode(), SystemCode.SENTINEL_FLOW_BLOCK.getMsg());
+//        }
+//
+//        if(throwable instanceof DegradeException){
+//            result =  Result.failed(SystemCode.SENTINEL_DEGRADE_BLOCK.getCode(), SystemCode.SENTINEL_DEGRADE_BLOCK.getMsg());
+//        }
+//
+//        if(throwable instanceof ParamFlowException){
+//            result = Result.failed(SystemCode.SENTINEL_PARAM_FLOW_BLOCK.getCode(), SystemCode.SENTINEL_PARAM_FLOW_BLOCK.getMsg());
+//        }
+//
+//        if(throwable instanceof SystemBlockException){
+//           result = Result.failed(SystemCode.SENTINEL_SYSTEM_BLOCK.getCode(), SystemCode.SENTINEL_SYSTEM_BLOCK.getMsg());
+//        }
+//
+//        if(throwable instanceof AuthorityException){
+//            result = Result.failed(SystemCode.SENTINEL_AUTHORITY_BLOCK.getCode(), SystemCode.SENTINEL_AUTHORITY_BLOCK.getMsg());
+//        }
 
         return ServerResponse.status(HttpStatus.TOO_MANY_REQUESTS)
                 .contentType(MediaType.APPLICATION_JSON)
