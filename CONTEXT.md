@@ -94,3 +94,38 @@ _Avoid_: 把 Brief / Skill / 分镜 / Review 做成画布节点;在画布或对�
 **Spike**:
 为验证某个高风险点而做的最小可运行验证，**不是正式功能交付**。
 _Avoid_: 原型、demo、试验（这些含义更宽）
+
+### Agent 协作语言
+
+**用户本地集成区**:
+由用户控制的本地 `master`。用户可以在这里开发、commit、整理或集成本地改动；
+Agent 不把它当作任务写入区，也不自动清理、发布或假定它必须干净。进入“合入任务
+验收分支”动作前，用户本地集成区必须是干净工作区；若不干净，Agent 只报告状态并
+等待用户决定。用户授权合入后若发生 merge conflict，Agent 可以在用户本地集成区
+解决冲突并验证；解决后停在本地集成区汇报结果，不继续远程发布。
+_Avoid_: 本地镜像、只读 master、Agent 任务区
+
+**Agent 任务区**:
+Agent 执行写入任务时使用的独立 task worktree 和工单分支。默认从 `origin/master`
+创建，除非用户明确要求基于用户本地集成区当前状态创建。
+_Avoid_: 直接在用户本地集成区写入任务
+
+**任务验收分支**:
+Agent 完成子 issue 后停留的 worktree 分支，用于用户 review 或微调。默认终点是
+worktree 分支上的未提交 diff 与验证结果汇报；只有用户确认该任务分支无问题后，
+才进入 commit 并合并到用户本地集成区的阶段。确认后通过
+`scripts/commit-task-for-review.sh --user-authorized -m "<message>"` 提交任务分支，
+再由用户本地集成区通过 `scripts/merge-task-to-local-master.sh --user-authorized <任务分支>`
+以 `git merge --no-ff` 合入，以保留子任务边界。该本地合入默认可由 Agent 在用户
+明确确认后执行；用户也可以选择手动合入。
+_Avoid_: 子 issue 完成后自动发布 PR、自动合并到 master
+
+**发布包装分支**:
+用户明确要求把本地 `master` 的当前修改发布为 PR 时，由 Agent 基于用户本地集成区
+创建的工单分支。Agent 可以读取并包装这些改动，但发布前若需要修复、补测或解冲突，
+后续写入发生在发布包装分支或其 worktree 中，不回写用户本地集成区。多个子 issue
+先由用户确认后合入用户本地集成区；用户决定发布时，再从用户本地集成区当前状态
+创建发布包装分支并推 PR 到 `origin/master`。若发布包装分支与 `origin/master` 冲突
+或测试失败，修复只发生在发布包装分支，不回写用户本地集成区。PR 合并进远程
+`master` 必须单独获得用户授权，不能由本地合入授权或推 PR 授权覆盖。
+_Avoid_: 在用户本地集成区继续修补后再发布

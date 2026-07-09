@@ -130,6 +130,20 @@ assert_stdout_has() {
   fi
 }
 
+assert_stdout_starts_with() {
+  local prefix="$1"; shift
+  local label="$1"; shift
+  case "$RUN_STDOUT" in
+    "$prefix"*)
+      PASS=$((PASS + 1))
+      ;;
+    *)
+      FAIL=$((FAIL + 1))
+      FAILURES+=("[${label}] stdout 未以 \"${prefix}\" 开头 实际=${RUN_STDOUT}")
+      ;;
+  esac
+}
+
 publish_marker_path() {
   local branch="${1:-feature/x}"
   local slug="$(printf '%s' "$branch" | tr '/' '%')"
@@ -191,6 +205,30 @@ assert_file_missing() {
   else
     FAIL=$((FAIL + 1))
     FAILURES+=("[${label}] 文件仍存在：${path}")
+  fi
+}
+
+assert_file_has_text() {
+  local path="$1"; shift
+  local needle="$1"; shift
+  local label="$1"; shift
+  if grep -qF -- "$needle" "$path"; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] ${path} 未含 \"${needle}\"")
+  fi
+}
+
+assert_file_not_has_text() {
+  local path="$1"; shift
+  local needle="$1"; shift
+  local label="$1"; shift
+  if grep -qF -- "$needle" "$path"; then
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] ${path} 不应含 \"${needle}\"")
+  else
+    PASS=$((PASS + 1))
   fi
 }
 
@@ -424,6 +462,43 @@ assert_stderr_has "--user-authorized" "release: bash publish-review-package 缺�
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized"}}'
 assert_exit 0 "release: publish-review-package 授权入口触发确认"
 assert_stdout_has '"permissionDecision":"ask"' "release: publish-review-package stdout 含 ask"
+
+# 直接本地 commit / merge --no-ff 也必须经过本地验收授权门。
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git commit -m \"feat: task slice\""}}'
+assert_exit 0 "release: 直接 git commit 触发确认"
+assert_stdout_starts_with '{"hookSpecificOutput"' "release: 直接 git commit stdout 为纯 JSON"
+assert_stdout_has '"permissionDecision":"ask"' "release: 直接 git commit stdout 含 ask"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge --no-ff feature/x"}}'
+assert_exit 0 "release: 直接 git merge --no-ff 触发确认"
+assert_stdout_starts_with '{"hookSpecificOutput"' "release: 直接 git merge --no-ff stdout 为纯 JSON"
+assert_stdout_has '"permissionDecision":"ask"' "release: 直接 git merge --no-ff stdout 含 ask"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge feature/x"}}'
+assert_exit 0 "release: 直接 git merge 工单分支触发确认"
+assert_stdout_starts_with '{"hookSpecificOutput"' "release: 直接 git merge 工单分支 stdout 为纯 JSON"
+assert_stdout_has '"permissionDecision":"ask"' "release: 直接 git merge 工单分支 stdout 含 ask"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge --ff-only origin/master"}}'
+assert_exit 0 "release: git merge --ff-only 同步放行"
+assert_stdout_not_has '"permissionDecision":"ask"' "release: git merge --ff-only 不触发确认"
+
+# 标准本地验收入口缺授权参数 → 硬拦；带授权参数 → 触发确认。
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/commit-task-for-review.sh -m \"feat: task slice\""}}'
+assert_exit 2 "release: commit-task-for-review 缺参数被拦截"
+assert_stderr_has "--user-authorized" "release: commit-task-for-review 缺参数提示授权参数"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/commit-task-for-review.sh --user-authorized -m \"feat: task slice\""}}'
+assert_exit 0 "release: commit-task-for-review 授权入口触发确认"
+assert_stdout_has '"permissionDecision":"ask"' "release: commit-task-for-review stdout 含 ask"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh feature/x"}}'
+assert_exit 2 "release: merge-task-to-local-master 缺参数被拦截"
+assert_stderr_has "--user-authorized" "release: merge-task-to-local-master 缺参数提示授权参数"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh --user-authorized feature/x"}}'
+assert_exit 0 "release: merge-task-to-local-master 授权入口触发确认"
+assert_stdout_has '"permissionDecision":"ask"' "release: merge-task-to-local-master stdout 含 ask"
 
 # bash 包裹新发布审查包入口带授权参数 → 仍应触发确认
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash scripts/publish-review-package.sh --user-authorized"}}'
@@ -688,6 +763,13 @@ assert_git_ignored ".codex/config.toml" "codex: config.toml 保持私密"
 assert_git_ignored ".codex/local.json" "codex: 其它本机配置保持私密"
 assert_git_ignored ".codex/hooks/other.sh" "codex: 禁止提交复制出来的 hook 实现"
 
+# Slice 5.5 — 用户本地集成区 / Agent 任务区边界
+assert_file_not_has_text ".githooks/pre-commit" "禁止在 master/main 上提交" "workflow: pre-commit 不再拦用户本地 master commit"
+assert_file_not_has_text "scripts/start-task-worktree.sh" "sync-master.sh" "workflow: start-task-worktree 不再要求同步本地 master"
+assert_file_not_has_text "scripts/cleanup-task-worktree.sh" "sync-master.sh" "workflow: cleanup-task-worktree 不再同步用户本地 master"
+assert_file_not_has_text "scripts/publish-review-package.sh" "任务 worktree 内执行" "workflow: publish-review-package 支持发布包装分支"
+assert_file_has_text "scripts/start-task-worktree.sh" 'worktree add "$target" -b "$branch" origin/master' "workflow: task worktree 默认基于 origin/master"
+
 setup_git_stub
 export FAKE_BRANCH=feature/x
 
@@ -723,6 +805,14 @@ assert_stderr_has "直接 git push" "codex: 直接 git push 包装命令提示"
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized"}}'
 assert_exit 2 "codex: release ask 转硬阻断"
 assert_stderr_has "requires explicit user confirmation" "codex: release ask 转硬阻断提示"
+
+run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"git commit -m \"feat: task slice\""}}'
+assert_exit 2 "codex: direct commit ask 转硬阻断"
+assert_stderr_has "requires explicit user confirmation" "codex: direct commit ask 转硬阻断提示"
+
+run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh --user-authorized feature/x"}}'
+assert_exit 2 "codex: local merge ask 转硬阻断"
+assert_stderr_has "requires explicit user confirmation" "codex: local merge ask 转硬阻断提示"
 
 teardown_git_stub
 unset FAKE_BRANCH

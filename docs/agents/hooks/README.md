@@ -13,7 +13,7 @@
 |---|---|---|---|---|
 | `block-dangerous-git.sh` | `Bash` | `PreToolUse` | 拦裸 `--force`、`reset --hard`、`clean -f`、`branch -D`、`checkout .`、`restore .` | CLAUDE.md「提交与审查」 |
 | `block-push-to-master.sh` | `Bash` | `PreToolUse` | 拦任何对 `master`/`main` 的 push（显式 + 隐式） | [ADR-0003](../../adr/0003-no-direct-push-to-master.md) |
-| `confirm-release-action.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` / `mcp__gitee-ent__create_enterprise_repo_release` | `PreToolUse` | 直接 `git push` 硬拦；`scripts/publish-review-package.sh --user-authorized` 触发一次确认；PR 必须消费发布入口写入的短期标记，并校验 `draft` 非 true、`target_branch=master`、`source_branch` 匹配；合并 PR / 创建 release 单独确认 | CLAUDE.md「发布动作必须先获用户授权」 |
+| `confirm-release-action.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` / `mcp__gitee-ent__create_enterprise_repo_release` | `PreToolUse` | 直接 `git push` 硬拦；`scripts/publish-review-package.sh --user-authorized` 触发一次确认；本地任务验收 commit / 非 `--ff-only` merge 及其标准入口触发确认；PR 必须消费发布入口写入的短期标记，并校验 `draft` 非 true、`target_branch=master`、`source_branch` 匹配；合并 PR / 创建 release 单独确认 | CLAUDE.md「发布动作必须先获用户授权」 / [ADR-0010](../../adr/0010-local-master-is-user-integration-zone.md) |
 | `block-squash-merge.sh` | `mcp__gitee-ent__merge_enterprise_pull` | `PreToolUse` | 拦 `merge_method=squash`/`rebase`，强制走 `merge` | CLAUDE.md「合并方法」 |
 | `block-issue-without-repo.sh` | `mcp__gitee-ent__create_enterprise_issue` / `mcp__gitee-ent__update_enterprise_issue` | `PreToolUse` | 拦 `project_id` 缺失/为 0；拦子 issue 未带 `project_id/program_id`，强制仓库可见 | [ADR-0007](../../adr/0007-issue-must-link-repo.md) / [ADR-0008](../../adr/0008-sub-issues-must-inherit-repo.md) |
 

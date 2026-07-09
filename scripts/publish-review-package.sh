@@ -16,7 +16,7 @@ for arg in "$@"; do
 用法: scripts/publish-review-package.sh --user-authorized
 
 发布审查包入口：
-  1. 校验当前 task worktree 和工单分支
+  1. 校验当前工单分支
   2. 校验工作区干净且包含最新 origin/master
   3. 推送当前工单分支
   4. 由 Agent 随后创建 target=master 的 PR，并停下来等待开发者审查
@@ -36,19 +36,11 @@ if [ "$AUTHORIZED" != 1 ]; then
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
-# shellcheck source=lib/worktree-paths.sh
-source "$ROOT/scripts/lib/worktree-paths.sh"
-WORKTREE_BASE="$(worktree_paths_resolve_base "$ROOT")"
 
 fail() {
   echo "❌ publish-review-package: $*" >&2
   exit 1
 }
-
-case "$ROOT" in
-  "$WORKTREE_BASE"/*) ;;
-  *) fail "请在 $WORKTREE_BASE 下的任务 worktree 内执行。" ;;
-esac
 
 branch="$(git -C "$ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
 case "$branch" in
@@ -100,5 +92,5 @@ cat <<EOF
   1. 创建 Gitee PR：$branch → master
   2. 按 .gitee/PULL_REQUEST_TEMPLATE.md 填写实现范围、风险、测试结果和审查重点
   3. PR 创建后停下来，等待开发者审查
-  4. PR 合并后回到本 worktree 运行 scripts/cleanup-task-worktree.sh
+  4. PR 合并后按分支位置清理：task worktree 运行 scripts/cleanup-task-worktree.sh；主 checkout 发布包装分支则切回 master 后删除本地发布分支
 EOF
