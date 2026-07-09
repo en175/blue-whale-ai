@@ -1,9 +1,19 @@
 server:
-  port: 8080
+  port: 8082
 
 spring:
   application:
     name: blue-whale-agent
+  profiles:
+    active: blue-whale-dev
+  cloud:
+    nacos:
+      server-addr: 127.0.0.1:8848
+      discovery:
+        register-enabled: true
+        # namespace 必须用 Nacos 的 namespace ID（UUID），用名字会注册到 console 看不见的隐式命名空间
+        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
+        timeout: 10000
   datasource:
     dynamic:
       primary: master
