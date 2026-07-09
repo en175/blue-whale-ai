@@ -199,7 +199,7 @@ export default function GeneratePage() {
 
   return (
     <main className="flex min-h-screen flex-col bg-[var(--background)]">
-      <div className="mx-auto flex w-full max-w-[920px] flex-1 flex-col gap-4 px-4 pb-44 pt-8">
+      <div className="mx-auto flex w-full max-w-[920px] flex-1 flex-col gap-4 px-4 pb-72 pt-8">
         <h1 className="font-outfit text-2xl font-semibold text-[var(--tc-text-primary)]">生成</h1>
         {error && <p className="text-sm text-[var(--tc-destructive)]">{error}</p>}
         {genError && <p className="text-sm text-[var(--tc-destructive)]">{genError}</p>}
@@ -222,6 +222,7 @@ export default function GeneratePage() {
           onGenerate={handleGenerate}
           disabledTabs={["video", "agent"]}
           defaultPrompt={initialPrompt}
+          dropUp
         />
       </div>
     </main>
