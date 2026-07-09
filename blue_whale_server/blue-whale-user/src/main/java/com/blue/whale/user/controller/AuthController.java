@@ -60,4 +60,5 @@ public class AuthController {
         }
         return Result.ok();
     }
+
 }

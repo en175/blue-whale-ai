@@ -173,6 +173,89 @@ public class AuthService {
         return RedisUtil.getCacheObject(TOKEN_BLACKLIST_PREFIX + token.hashCode()) != null;
     }
 
+    // ==================== 换绑手机号 ====================
+
+    private static final String CHANGE_PHONE_CODE_PREFIX = "bw:sms:code:change:";
+
+    /**
+     * 向新手机号发送验证码（用于换绑）
+     */
+    public void sendChangePhoneCode(String userId, String newPhone, String ip,
+                                     String captchaToken, String captchaAnswer) {
+        // 图形验证码
+        captchaService.verify(captchaToken, captchaAnswer);
+
+        if (!newPhone.matches("1[3-9]\\d{9}")) {
+            throw new GlobalException(400, "手机号格式不正确");
+        }
+
+        // 检查新手机号是否已被占用
+        Long count = userMapper.selectCount(
+                new LambdaQueryWrapper<User>()
+                        .eq(User::getPhone, newPhone)
+                        .ne(User::getId, Long.valueOf(userId))
+        );
+        if (count > 0) {
+            throw new GlobalException(400, "该手机号已被其他账号绑定");
+        }
+
+        // 60s 限流
+        String intervalKey = SMS_LIMIT_60S_PREFIX + newPhone;
+        if (RedisUtil.getCacheObject(intervalKey) != null) {
+            throw new GlobalException(429, "发送过于频繁，请60秒后再试");
+        }
+        RedisUtil.setCacheObject(intervalKey, "1", (int) SEND_INTERVAL_SEC, TimeUnit.SECONDS);
+
+        // IP 小时限流
+        String ipKey = SMS_LIMIT_IP_PREFIX + ip;
+        Long ipCount = incrWithTTL(ipKey, 3600);
+        if (ipCount > IP_HOURLY_LIMIT) {
+            throw new GlobalException(429, "操作过于频繁，请稍后再试");
+        }
+
+        String code = generateCode();
+        log.info("换绑手机号验证码: oldUserId={}, newPhone={}, code={}", userId, newPhone, code);
+
+        RedisUtil.setCacheObject(CHANGE_PHONE_CODE_PREFIX + newPhone, code,
+                CODE_EXPIRE_SEC, TimeUnit.SECONDS);
+
+        smsProvider.send(newPhone, code);
+    }
+
+    /**
+     * 校验验证码并更换手机号
+     */
+    public void changePhone(String userId, String newPhone, String code) {
+        String stored = RedisUtil.getCacheObject(CHANGE_PHONE_CODE_PREFIX + newPhone);
+        if (stored == null) {
+            throw new GlobalException(401, "验证码已过期，请重新获取");
+        }
+        if (!stored.equals(code)) {
+            throw new GlobalException(401, "验证码错误");
+        }
+        RedisUtil.delete(CHANGE_PHONE_CODE_PREFIX + newPhone);
+
+        // 检查占用
+        Long count = userMapper.selectCount(
+                new LambdaQueryWrapper<User>()
+                        .eq(User::getPhone, newPhone)
+                        .ne(User::getId, Long.valueOf(userId))
+        );
+        if (count > 0) {
+            throw new GlobalException(400, "该手机号已被其他账号绑定");
+        }
+
+        User user = userMapper.selectById(Long.valueOf(userId));
+        if (user == null) {
+            throw new GlobalException(404, "用户不存在");
+        }
+        user.setPhone(newPhone);
+        user.setGmtModified(LocalDateTime.now());
+        userMapper.updateById(user);
+
+        log.info("手机号更换成功: userId={}, newPhone={}", userId, newPhone);
+    }
+
     // ==================== 内部方法 ====================
 
     private String generateCode() {
