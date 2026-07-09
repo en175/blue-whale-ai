@@ -1,39 +1,34 @@
 "use client";
-/**
- * LoginModal —— 手机号登录弹窗。
- *
- * 外壳复刻 topview.ai modal（深色卡 / 420px / 12px 圆角 / 居中 / 右上 X），
- * 内容换手机号流程：+86 手机号 → 获取验证码（60s 倒计时）→ 验证码（写死 1234）
- * → 协议勾选（未勾禁用登录）→ 紫色登录按钮（DESIGN.md login-primary 豁免）。
- *
- * 仅在 open 时由 AuthContext 条件 mount，故 state 自然为初值，无需关闭重置 effect。
- * modal 范式抄 SkillPanel；z 抬到 2147483610（盖过画布层 2147483600+）。
- */
+
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
-import {
-  LOGIN_CODE,
-  isValidCode,
-  isValidPhone,
-  sanitizePhone,
-} from "./phoneValidation";
+import { isValidPhone, sanitizePhone } from "./phoneValidation";
+import { fetchCaptcha, sendVerificationCode, ApiError } from "@/lib/auth";
+import { useAuth } from "./AuthContext";
 
 interface LoginModalProps {
   onClose: () => void;
-  onSuccess: (phone: string) => void;
 }
 
-export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
+export function LoginModal({ onClose }: LoginModalProps) {
+  const { signIn } = useAuth();
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
-  const [codeSent, setCodeSent] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [agreed, setAgreed] = useState(false);
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [codeError, setCodeError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // 图形验证码
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaImage, setCaptchaImage] = useState<string | null>(null);
+  const [captchaAnswer, setCaptchaAnswer] = useState("");
+  const [showCaptcha, setShowCaptcha] = useState(false);
+  const [captchaError, setCaptchaError] = useState<string | null>(null);
+
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ESC 关闭（mount 即监听，卸载即清——组件仅在 open 时 mount）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -42,39 +37,78 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // 倒计时：用 setTimeout 递归替代 setInterval，避免每秒清理/重建 interval
+  // 倒计时
   useEffect(() => {
     if (countdown <= 0) {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
+      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
       return;
     }
-    timerRef.current = setTimeout(() => {
-      setCountdown((c) => Math.max(0, c - 1));
-    }, 1000);
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-    };
+    timerRef.current = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } };
   }, [countdown]);
 
   const phoneValid = isValidPhone(phone);
-  const loginDisabled = !phoneValid || code !== LOGIN_CODE || !agreed;
-  const sendDisabled = !phoneValid || countdown > 0;
+  const loginDisabled = !phoneValid || code.length !== 6 || !agreed || loading;
 
-  const handleSendCode = () => {
-    if (!phoneValid) {
-      setPhoneError("请输入正确的手机号");
-      return;
-    }
+  // ===== 获取验证码 =====
+  const handleSendCode = async () => {
+    if (!phoneValid) { setPhoneError("请输入正确的手机号"); return; }
     setPhoneError(null);
-    setCodeSent(true);
-    setCountdown(60);
-    // L1 mock：验证码 = LOGIN_CODE ("1234")，不真发短信
+    setLoading(true);
+
+    try {
+      // Step 1: 获取图形验证码
+      const captcha = await fetchCaptcha();
+      setCaptchaToken(captcha.captcha_token);
+      setCaptchaImage(captcha.captcha_image);
+      setCaptchaAnswer("");
+      setCaptchaError(null);
+      setShowCaptcha(true);
+    } catch (e) {
+      setPhoneError(e instanceof ApiError ? e.message : "获取验证码失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ===== 提交图形验证码 → 发短信 =====
+  const handleCaptchaSubmit = async () => {
+    if (!captchaAnswer || !captchaToken) return;
+    setLoading(true);
+    setCaptchaError(null);
+
+    try {
+      await sendVerificationCode(phone, captchaToken, captchaAnswer);
+      setShowCaptcha(false);
+      setCountdown(60);
+    } catch (e) {
+      setCaptchaError(e instanceof ApiError ? e.message : "验证失败，请重试");
+      // 刷新验证码
+      try {
+        const captcha = await fetchCaptcha();
+        setCaptchaToken(captcha.captcha_token);
+        setCaptchaImage(captcha.captcha_image);
+        setCaptchaAnswer("");
+      } catch { /* ignore */ }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ===== 登录 =====
+  const handleLogin = async () => {
+    if (loginDisabled) return;
+    setLoading(true);
+    setCodeError(null);
+
+    try {
+      await signIn(phone, code);
+      // signIn 成功后自动关 modal + 回放 gating action
+    } catch (e) {
+      setCodeError(e instanceof ApiError ? e.message : "登录失败");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handlePhoneChange = (raw: string) => {
@@ -83,33 +117,23 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
   };
 
   const handleCodeChange = (raw: string) => {
-    const clean = raw.replace(/\D/g, "").slice(0, 4);
-    setCode(clean);
-    if (clean.length === 4 && !isValidCode(clean)) {
-      setCodeError("验证码错误");
-    } else if (codeError) {
-      setCodeError(null);
-    }
+    setCode(raw.replace(/\D/g, "").slice(0, 6));
+    if (codeError) setCodeError(null);
   };
 
   return (
     <div
-      className="tc-login-modal-backdrop fixed inset-0 z-[2147483610] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 motion-reduce:animate-none"
+      className="tc-login-modal-backdrop fixed inset-0 z-[2147483610] flex items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="bg-[var(--tc-login-modal-bg)] border border-white/[0.12] rounded-xl shadow-[0_24px_80px_rgba(0,0,0,0.5)] w-[420px] max-w-[calc(100vw-32px)] p-10 px-8 relative animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none"
-        role="dialog"
-        aria-modal="true"
-        aria-label="登录"
+        className="bg-[#141414] border border-white/[0.12] rounded-xl shadow-[0_24px_80px_rgba(0,0,0,0.5)] w-[420px] max-w-[calc(100vw-32px)] p-10 px-8 relative"
+        role="dialog" aria-modal="true" aria-label="登录"
         onClick={(e) => e.stopPropagation()}
       >
-        <button
-          type="button"
-          className="absolute top-3 right-3 inline-flex w-8 h-8 items-center justify-center rounded-lg text-white/45 hover:text-white/80 hover:bg-white/[0.06] transition-colors duration-150"
-          aria-label="关闭登录"
-          onClick={onClose}
-        >
+        <button type="button"
+          className="absolute top-3 right-3 inline-flex w-8 h-8 items-center justify-center rounded-lg text-white/45 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
+          aria-label="关闭登录" onClick={onClose}>
           <X size={16} />
         </button>
 
@@ -119,86 +143,79 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
           {/* 手机号 */}
           <div>
             <div className="flex items-center bg-white/[0.05] rounded-lg px-3 border border-white/[0.06] focus-within:border-white/20 transition-colors">
-              <span className="inline-flex items-center text-sm text-white/55 border-r border-white/[0.06] pr-2 mr-1 select-none">
-                +86
-              </span>
-              <input
-                className="h-10 bg-transparent outline-none text-sm text-white/90 placeholder:text-white/30 w-full"
-                inputMode="numeric"
-                placeholder="请输入手机号"
-                value={phone}
-                onChange={(e) => handlePhoneChange(e.target.value)}
-                autoFocus
-              />
+              <span className="inline-flex items-center text-sm text-white/55 border-r border-white/[0.06] pr-2 mr-1 select-none">+86</span>
+              <input className="h-10 bg-transparent outline-none text-sm text-white/90 placeholder:text-white/30 w-full"
+                inputMode="numeric" placeholder="请输入手机号" value={phone}
+                onChange={(e) => handlePhoneChange(e.target.value)} autoFocus />
             </div>
-            {phoneError && (
-              <p className="mt-1 text-[12px] text-[#ef4444]">{phoneError}</p>
-            )}
+            {phoneError && <p className="mt-1 text-[12px] text-[#ef4444]">{phoneError}</p>}
           </div>
 
-          {/* 验证码 */}
-          <div>
-            <div className="flex items-center bg-white/[0.05] rounded-lg px-3 border border-white/[0.06] focus-within:border-white/20 transition-colors">
-              <input
-                className="h-10 bg-transparent outline-none text-sm text-white/90 placeholder:text-white/30 w-full tracking-[0.3em]"
-                inputMode="numeric"
-                placeholder="验证码"
-                value={code}
-                onChange={(e) => handleCodeChange(e.target.value)}
-              />
+          {/* 图形验证码 */}
+          {showCaptcha && (
+            <div>
+              <div className="flex items-center gap-2">
+                {captchaImage && (
+                  <img src={captchaImage} alt="验证码" className="h-10 rounded cursor-pointer"
+                    onClick={async () => {
+                      try {
+                        const c = await fetchCaptcha();
+                        setCaptchaToken(c.captcha_token);
+                        setCaptchaImage(c.captcha_image);
+                      } catch { /* ignore */ }
+                    }} />
+                )}
+                <input className="h-10 flex-1 bg-white/[0.05] rounded-lg px-3 border border-white/[0.06] focus-within:border-white/20 outline-none text-sm text-white/90"
+                  placeholder="图形验证码" value={captchaAnswer} maxLength={6}
+                  onChange={(e) => setCaptchaAnswer(e.target.value.toUpperCase().slice(0, 6))} />
+              </div>
+              {captchaError && <p className="mt-1 text-[12px] text-[#ef4444]">{captchaError}</p>}
+              <button type="button" disabled={!captchaAnswer || loading}
+                onClick={handleCaptchaSubmit}
+                className="mt-2 h-10 w-full rounded-lg bg-[#4e40f3] text-white text-sm font-medium disabled:opacity-40">
+                {loading ? "发送中..." : "发送验证码"}
+              </button>
             </div>
-            {codeError && (
-              <p className="mt-1 text-[12px] text-[#ef4444]">{codeError}</p>
-            )}
-          </div>
+          )}
 
-          {/* 获取验证码 */}
-          <button
-            type="button"
-            disabled={sendDisabled}
-            onClick={handleSendCode}
-            className="h-10 inline-flex items-center justify-center rounded-lg text-[13px] font-medium border border-white/[0.08] text-white/70 hover:bg-white/[0.05] hover:text-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {countdown > 0 ? `${countdown}s 后重发` : "获取验证码"}
-          </button>
+          {/* 短信验证码 */}
+          {!showCaptcha && (
+            <>
+              <div>
+                <div className="flex items-center bg-white/[0.05] rounded-lg px-3 border border-white/[0.06] focus-within:border-white/20 transition-colors">
+                  <input className="h-10 bg-transparent outline-none text-sm text-white/90 placeholder:text-white/30 w-full"
+                    inputMode="numeric" placeholder="短信验证码" value={code}
+                    onChange={(e) => handleCodeChange(e.target.value)} />
+                </div>
+                {codeError && <p className="mt-1 text-[12px] text-[#ef4444]">{codeError}</p>}
+              </div>
 
-          {/* 协议勾选 */}
-          {/* TODO: 协议链接当前为 mock 占位（href="#" + preventDefault），接真实法务链路后替换 */}
+              {/* 获取验证码 */}
+              <button type="button" disabled={!phoneValid || countdown > 0 || loading}
+                onClick={handleSendCode}
+                className="h-10 inline-flex items-center justify-center rounded-lg text-[13px] font-medium border border-white/[0.08] text-white/70 hover:bg-white/[0.05] hover:text-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                {countdown > 0 ? `${countdown}s 后重发` : "获取验证码"}
+              </button>
+            </>
+          )}
+
+          {/* 协议 */}
           <label className="flex items-start gap-2 text-[12px] text-white/55 leading-relaxed mt-1 select-none cursor-pointer">
-            <input
-              type="checkbox"
-              checked={agreed}
-              onChange={(e) => setAgreed(e.target.checked)}
-              className="mt-0.5 accent-[#4e40f3]"
-            />
+            <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)}
+              className="mt-0.5 accent-[#4e40f3]" />
             <span>
               我已阅读并同意
-              <a
-                href="#"
-                className="text-white/80 hover:text-white underline mx-0.5"
-                onClick={(e) => e.preventDefault()}
-              >
-                《用户协议》
-              </a>
+              <a href="#" className="text-white/80 hover:text-white underline mx-0.5" onClick={(e) => e.preventDefault()}>《用户协议》</a>
               和
-              <a
-                href="#"
-                className="text-white/80 hover:text-white underline mx-0.5"
-                onClick={(e) => e.preventDefault()}
-              >
-                《隐私政策》
-              </a>
+              <a href="#" className="text-white/80 hover:text-white underline mx-0.5" onClick={(e) => e.preventDefault()}>《隐私政策》</a>
             </span>
           </label>
 
-          {/* 登录按钮（紫色 login-primary，DESIGN.md 豁免） */}
-          <button
-            type="button"
-            disabled={loginDisabled}
-            onClick={() => !loginDisabled && onSuccess(phone)}
-            className="h-11 w-full rounded-lg bg-[#4e40f3] text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-[var(--tc-login-primary-hover)] mt-2"
-          >
-            登录
+          {/* 登录 */}
+          <button type="button" disabled={loginDisabled}
+            onClick={handleLogin}
+            className="h-11 w-full rounded-lg bg-[#4e40f3] text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-[#3d33d1] mt-2">
+            {loading ? "登录中..." : "登录"}
           </button>
         </div>
       </div>

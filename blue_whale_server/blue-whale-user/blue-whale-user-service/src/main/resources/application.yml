@@ -6,10 +6,9 @@ spring:
     name: blue-whale-user
   cloud:
     nacos:
-      server-addr: 192.168.10.81:8848
+      server-addr: 10.211.238.186:8848
       discovery:
-        register-enabled: true
-        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
+        enabled: true
 
   web:
     encoding:
