@@ -174,6 +174,18 @@
 - 轻量呼应:`BACKEND-API-PRD.md` §6 / `skill/rules/skill_generation_priority.md` / `README.md`(L1 描述微调为「轻量 classifier」)
 - 记录:`skill/memory/workflow_decisions.md`(判定分层 + L1/L2 统一)
 
+### 2026-07-08 锁定:候选图消歧(决策 21)
+
+**核心**:画布多图 + 用户未指明时不默认扫描/不猜,在 `@` 引用解析阶段反问带候选(对齐已锁决策 3/5)。`active_asset_id`(画布选中)视为明确指向,P0 选中即识别不追问。
+
+| # | 决策 |
+|---|---|
+| 21 | 候选范围 = `active_product_context` 内 `ready`/`confirmed` image(不取全部图,跨产品引用必须显式,见 `product_switch_p0.md` 第 4/5 类);消歧挂 `@` 引用解析阶段,不挂 understanding workflow 内;优先级 `reference_asset_ids`(@) > `active_asset_id`(选中) > 候选=1 > 候选≥2 反问;`active_asset_id` P0 选中即识别不追问;不认纯文字编号;id 统一 asset_id(pointed 复用 `reference_asset_ids`,删 pointed_node_ids);多图引用留 @ 各 asset understanding;前端 node_id/asset_id 全后端生成 |
+
+**与决策 3/5 的关系**:决策 3(understanding 仅 @ 触发)+ 决策 5(反问带候选)已隐含消歧。本轮(21)细化候选范围、优先级、active 选中态、id 统一、答法——是决策 3/5 的落地细化,不冲突。
+
+**受影响文档(均已本次落盘)**:`image_understanding.md` / `image_understanding_agent.md` / `decision_layer.md` / `backend_implementation_contract.md` / `revise_canvas.md` / `progressive_disclosure.md` / `frontend_canvas_interaction_contract.md`(skill/ 7 处)+ `AGENT-CONVERSATION-PRD.md`(§0/§2/§4/§7)+ `BACKEND-API-PRD.md`(确认对齐决策 3,未改)+ 本 ROADMAP + `workflow_decisions.md`。
+
 ## 建议推进顺序
 
 P0 主链路优先:**模块 5(Project)→ 模块 2(BottomDock)→ 模块 3(SSE 映射)→ 模块 4(Job 生命周期)→ 模块 7(上传)→ 模块 6(身份)→ 模块 8(目录)→ 模块 9(错误码)**。Project 和 BottomDock 强耦合(直生需要 project_id),建议先一起定。
