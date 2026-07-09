@@ -7,18 +7,25 @@ spring:
     active: blue-whale-dev
   cloud:
     nacos:
-      server-addr: 110.42.233.109:8848
+      server-addr: 192.168.10.81:8848
       discovery:
-        namespace: ${spring.profiles.active}
-        ip: 110.42.233.109
+        # namespace 用 Nacos namespace ID（UUID），非名字；与 agent-service 一致才能发现彼此
+        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
       config:
-        namespace: ${spring.profiles.active}
+        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
         file-extension: yml
         group: BLUE_WHALE
     gateway:
       discovery:
         locator:
           enabled: true
+      routes:
+        - id: blue-whale-agent
+          uri: lb://blue-whale-agent
+          predicates:
+            - Path=/api/agent/**
+          filters:
+            - StripPrefix=2
     loadbalancer:
       retry:
         enabled: true

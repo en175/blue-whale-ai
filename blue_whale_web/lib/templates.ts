@@ -1,6 +1,6 @@
 import type { ApiResult, TemplatePage, TemplateTag } from "@/types/template";
 
-const API_URL = process.env.NEXT_PUBLIC_TEMPLATE_API_URL ?? "/api/templates";
+const API_URL = process.env.NEXT_PUBLIC_TEMPLATE_API_URL ?? "/api/agent/templates";
 const FETCH_TIMEOUT = 8000;
 
 export class TemplateApiError extends Error {

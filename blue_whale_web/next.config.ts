@@ -13,8 +13,8 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
-        source: "/api/templates/:path*",
-        destination: "http://localhost:8080/api/templates/:path*",
+        source: "/api/agent/templates/:path*",
+        destination: "http://localhost:8686/api/agent/templates/:path*",
       },
     ];
   },

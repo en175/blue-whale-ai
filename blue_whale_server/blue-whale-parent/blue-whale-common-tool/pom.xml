@@ -13,7 +13,6 @@
     <artifactId>blue-whale-common-tool</artifactId>
     <packaging>pom</packaging>
     <modules>
-        <module>generate-code</module>
         <module>blue-whale-common-mybatis-plus</module>
         <module>blue-whale-common-log</module>
         <module>blue-whale-common-fastjson2</module>

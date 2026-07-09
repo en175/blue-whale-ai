@@ -20,7 +20,7 @@ import java.util.List;
  * 模板卡片接口
  */
 @RestController
-@RequestMapping("/api/templates")
+@RequestMapping("/templates")
 @CrossOrigin(origins = "http://localhost:3000")
 public class TemplateController {
 

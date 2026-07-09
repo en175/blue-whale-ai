@@ -8,11 +8,10 @@
         <groupId>com.blue-whale.parent</groupId>
         <artifactId>blue-whale-parent</artifactId>
         <version>2025.3</version>
-        <relativePath>../blue-whale-parent/pom.xml</relativePath>
     </parent>
 
     <groupId>com.blue-whale.agent</groupId>
-    <artifactId>blue-whale-agent</artifactId>
+    <artifactId>blue-whale-agent-service</artifactId>
     <version>2025.3</version>
 
     <dependencies>
@@ -43,6 +42,23 @@
             <groupId>mysql</groupId>
             <artifactId>mysql-connector-java</artifactId>
             <version>8.0.31</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.blue-whale.agent</groupId>
+            <artifactId>blue-whale-agent-api</artifactId>
+            <version>2025.3</version>
+        </dependency>
+
+        <!-- Nacos 注册中心 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+        <!-- bootstrap 引导配置 -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-bootstrap</artifactId>
         </dependency>
     </dependencies>
 

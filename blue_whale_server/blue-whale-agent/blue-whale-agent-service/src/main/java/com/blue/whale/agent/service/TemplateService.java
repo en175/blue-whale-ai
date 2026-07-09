@@ -10,7 +10,6 @@ import com.blue.whale.agent.mapper.TemplateCardMapper;
 import com.blue.whale.agent.model.TemplateCardDto;
 import com.blue.whale.agent.model.TemplateTagDto;
 import com.blue.whale.agent.model.TemplateTagEnum;
-import com.blue.whale.agent.vo.TemplatePageVo;
 import com.blue.whale.global.base.resp.PageVo;
 import org.springframework.stereotype.Service;
 
