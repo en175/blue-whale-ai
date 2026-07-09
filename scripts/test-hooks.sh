@@ -817,6 +817,185 @@ assert_stderr_has "requires explicit user confirmation" "codex: local merge ask 
 teardown_git_stub
 unset FAKE_BRANCH
 
+# Slice 6 — cleanup-release-branch.sh（真实临时 git 仓库集成测试）
+# 现有夹具只做 hook 层黑盒；本组用真实裸 origin + clone 仓库驱动
+# cleanup-release-branch.sh 的公共 CLI 行为（exit code + git 副作用）。
+# 夹具：mktemp 临时仓库，cp 真实 scripts/lib/worktree-paths.sh + 待测脚本进去，
+# ROOT 取到临时仓库、lib 能 source 到、git 操作隔离（不碰真实仓库）。
+
+# run_repo_script <cwd> <script-and-args...>
+# 在 cwd 下跑脚本，捕获 exit→RUN_EXIT / stdout→RUN_STDOUT / stderr→RUN_STDERR（与 run_hook 同口径）。
+run_repo_script() {
+  local cwd="$1"; shift
+  local out err
+  out="$(mktemp)"; err="$(mktemp)"
+  ( cd "$cwd" && bash "$@" ) >"$out" 2>"$err"
+  RUN_EXIT=$?
+  RUN_STDOUT="$(cat "$out")"
+  RUN_STDERR="$(cat "$err")"
+  rm -f "$out" "$err"
+}
+
+# build_repo_at <repo-path> <origin-path>
+# 在指定路径建一个干净的 master 仓库（含待测脚本 + lib），远端推一个 bare origin。
+build_repo_at() {
+  local repo="$1" origin="$2"
+  git init --bare "$origin" >/dev/null 2>&1
+  git init "$repo" >/dev/null 2>&1
+  mkdir -p "$repo/scripts/lib"
+  cp "$REPO_ROOT/scripts/lib/worktree-paths.sh" "$repo/scripts/lib/"
+  cp "$REPO_ROOT/scripts/cleanup-release-branch.sh" "$repo/scripts/"
+  (
+    cd "$repo"
+    git config user.email t@t
+    git config user.name t
+    git config core.editor true
+    git commit --allow-empty -m init >/dev/null 2>&1
+    git add scripts
+    git commit -m "add scripts" >/dev/null 2>&1
+    git branch -M master
+    git remote add origin "$origin"
+    git push -q origin master >/dev/null 2>&1
+  )
+}
+
+RELEASE_TMP_LIST=()
+# setup_release_repo：建一个标准主 checkout 形态仓库（非 worktree），路径存 RELEASE_TMP 供子测试用。
+setup_release_repo() {
+  RELEASE_TMP="$(mktemp -d)"
+  RELEASE_TMP_LIST+=("$RELEASE_TMP")
+  build_repo_at "$RELEASE_TMP/main" "$RELEASE_TMP/origin.git"
+}
+teardown_release_repos() {
+  for t in "${RELEASE_TMP_LIST[@]}"; do rm -rf "$t"; done
+}
+
+# L1 — 参数层
+setup_release_repo
+run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh
+assert_exit 1 "release-cleanup: 缺 --user-authorized 拦截"
+assert_stderr_has "缺少 --user-authorized" "release-cleanup: 缺授权提示"
+
+setup_release_repo
+run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --user-authorized
+assert_exit 1 "release-cleanup: 缺分支名拦截"
+assert_stderr_has "缺少发布包装分支名" "release-cleanup: 缺分支名提示"
+
+setup_release_repo
+run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh -h
+assert_exit 2 "release-cleanup: -h 走 usage exit 2"
+
+setup_release_repo
+run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --bogus
+assert_exit 2 "release-cleanup: 未知参数走 usage exit 2"
+
+# L2 — 校验层（任一失败 exit 1，分支不动）
+# 在 worktree 形态路径内执行 → 拦（worktree-paths.sh 把父名 blue-whale-worktrees 识别为 worktree 区）
+WT_TMP="$(mktemp -d)"; RELEASE_TMP_LIST+=("$WT_TMP")
+build_repo_at "$WT_TMP/blue-whale-worktrees/main" "$WT_TMP/origin.git"
+run_repo_script "$WT_TMP/blue-whale-worktrees/main" scripts/cleanup-release-branch.sh --user-authorized feature/x-release
+assert_exit 1 "release-cleanup: 在 worktree 内拦截"
+assert_stderr_has "任务 worktree" "release-cleanup: worktree 提示"
+
+# 当前非 master → 拦
+setup_release_repo
+git -C "$RELEASE_TMP/main" checkout -b feature/other >/dev/null 2>&1
+run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --user-authorized feature/x-release
+assert_exit 1 "release-cleanup: 非 master 当前分支拦截"
+assert_stderr_has "切回本地 master" "release-cleanup: 非 master 提示"
+
+# 工作区不干净 → 拦（HEAD 仍在 master，制造未跟踪文件）
+setup_release_repo
+echo dirty > "$RELEASE_TMP/main/dirty.txt"
+run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --user-authorized feature/x-release
+assert_exit 1 "release-cleanup: 工作区不干净拦截"
+assert_stderr_has "工作区不干净" "release-cleanup: 不干净提示"
+
+# 非白名单前缀 → 拦
+setup_release_repo
+run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --user-authorized release/x
+assert_exit 1 "release-cleanup: 非白名单前缀拦截"
+assert_stderr_has "白名单前缀" "release-cleanup: 白名单提示"
+
+# L3 — 合并守卫：未合并进 origin/master → 拦且分支不删
+setup_release_repo
+git -C "$RELEASE_TMP/main" checkout -b feature/y-release >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" commit --allow-empty -m "release work" >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" checkout master >/dev/null 2>&1
+run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --user-authorized feature/y-release
+assert_exit 1 "release-cleanup: 未合并分支拦截"
+assert_stderr_has "尚未被 origin/master 包含" "release-cleanup: 未合并提示"
+if git -C "$RELEASE_TMP/main" show-ref --verify --quiet refs/heads/feature/y-release; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1)); FAILURES+=("[release-cleanup: 未合并分支应留存] feature/y-release 被误删")
+fi
+
+# L4 — 删除层：happy path（已合并 + 远程也有）→ exit 0，本地/远程双删
+setup_release_repo
+git -C "$RELEASE_TMP/main" checkout -b feature/x-release >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" commit --allow-empty -m "release content" >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" checkout master >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" merge --no-ff --no-edit feature/x-release >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" push -q origin master >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" push -q origin feature/x-release >/dev/null 2>&1
+run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --user-authorized feature/x-release
+assert_exit 0 "release-cleanup: happy path 成功"
+if git -C "$RELEASE_TMP/main" show-ref --verify --quiet refs/heads/feature/x-release; then
+  FAIL=$((FAIL + 1)); FAILURES+=("[release-cleanup: 本地分支应删] feature/x-release 仍存在")
+else
+  PASS=$((PASS + 1))
+fi
+if git -C "$RELEASE_TMP/main" ls-remote --exit-code --heads origin feature/x-release >/dev/null 2>&1; then
+  FAIL=$((FAIL + 1)); FAILURES+=("[release-cleanup: 远程分支应删] origin feature/x-release 仍存在")
+else
+  PASS=$((PASS + 1))
+fi
+
+# lag：本地 master 落后 origin/master（PR 已合远端、本地未拉）→ 仍能清理。
+# ADR-0010 核心：本地 master 是用户集成区，未必含 origin/master。
+# 此用例锁定「用 update-ref -d 而非 branch -d」——后者在本地 master 落后时会误判未合并而拒绝。
+setup_release_repo
+git -C "$RELEASE_TMP/main" checkout -b feature/lag-release >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" commit --allow-empty -m "lagged release" >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" checkout master >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" push -q origin feature/lag-release >/dev/null 2>&1
+# 模拟 PR 合并：fast-forward 推 origin/master 到该分支（本地 master 不动）
+git -C "$RELEASE_TMP/main" push -q origin feature/lag-release:master >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" fetch -q origin >/dev/null 2>&1
+run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --user-authorized feature/lag-release
+assert_exit 0 "release-cleanup: 本地 master 落后仍能清理"
+if git -C "$RELEASE_TMP/main" show-ref --verify --quiet refs/heads/feature/lag-release; then
+  FAIL=$((FAIL + 1)); FAILURES+=("[release-cleanup: lag 本地分支应删] feature/lag-release 仍存在")
+else
+  PASS=$((PASS + 1))
+fi
+if git -C "$RELEASE_TMP/main" ls-remote --exit-code --heads origin feature/lag-release >/dev/null 2>&1; then
+  FAIL=$((FAIL + 1)); FAILURES+=("[release-cleanup: lag 远程分支应删] origin feature/lag-release 仍存在")
+else
+  PASS=$((PASS + 1))
+fi
+
+# 幂等：远程源分支已不存在（他处已删 / 仅本地残留），本地仍存在 → 仍清本地且 exit 0。
+# 锁定 L65 ls-remote --exit-code 返回 2（远程无）时跳过 push、不报错、本地照删。
+# 本脚本相对 cleanup-task-worktree 的差异价值：远程已无时不因探活非零而失败。
+setup_release_repo
+git -C "$RELEASE_TMP/main" checkout -b feature/idem-release >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" commit --allow-empty -m "idem release" >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" checkout master >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" merge --no-ff --no-edit feature/idem-release >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" push -q origin master >/dev/null 2>&1
+# 不 push feature/idem-release：远程无此分支，模拟「他处已删远程、本地残留」
+run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --user-authorized feature/idem-release
+assert_exit 0 "release-cleanup: 远程已无时仍清本地（幂等）"
+if git -C "$RELEASE_TMP/main" show-ref --verify --quiet refs/heads/feature/idem-release; then
+  FAIL=$((FAIL + 1)); FAILURES+=("[release-cleanup: 幂等本地分支应删] feature/idem-release 仍存在")
+else
+  PASS=$((PASS + 1))
+fi
+
+teardown_release_repos
+
 # ── summary ────────────────────────────────────────────────────
 TOTAL=$((PASS + FAIL))
 echo "────────────────────────────────────────"
