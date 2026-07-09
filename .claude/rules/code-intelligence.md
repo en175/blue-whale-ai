@@ -56,8 +56,9 @@ CBM 二进制和 MCP 配置在用户级，clone 后没有。首次接入：
      "env": { "CBM_SEMANTIC_ENABLED": "1" }
    }
    ```
-3. 建索引：`index_repository(repo_path=., mode=full)` → 确认 `index_status=ready`。
-4. task worktree 另建独立索引（不得用主 checkout 索引替代）。
+3. **重启 Claude Code**：MCP server 在启动时加载配置，改 `.mcp.json` / `~/.claude.json` 后必须重启才生效（不重启 CBM 工具不可用）。
+4. 建索引：`index_repository(repo_path=., mode=full)` → 确认 `index_status=ready`。
+5. task worktree 另建独立索引（不得用主 checkout 索引替代）。
 
 > CBM 重装会抹 `CBM_SEMANTIC_ENABLED` env：重加 + 重启 MCP + 重跑 `index_repository(mode=full)` 才恢复语义搜索。
 

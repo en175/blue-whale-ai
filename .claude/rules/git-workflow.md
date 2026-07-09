@@ -23,7 +23,7 @@
 
 ## 分支命名
 
-- 前缀必须在白名单内（hook 强制）。不在白名单 → `--force-with-lease` 被拦；落后 `origin/master` → push 被拦。
+- 前缀必须在白名单内（hook 强制）：`feature/` / `fix/` / `hotfix/` / `docs/` / `chore/`。不在白名单 → `--force-with-lease` 被拦；落后 `origin/master` → push 被拦。
 - 完整规则：`docs/agents/branch-naming.md`，决策：`docs/adr/0004-branch-naming.md`
 
 ## Task Worktree
