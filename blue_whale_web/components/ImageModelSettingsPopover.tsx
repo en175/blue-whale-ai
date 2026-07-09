@@ -4,11 +4,43 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 import { AspectRatioIcon } from "./icons/AspectRatioIcon";
-import { getImageModels, type ImageModelCapability } from "@/app/canvas/_canvas/api/generation";
 
-export type ImageModel = { id: string; label: string; icon?: string };
-export type ImageResolution = { id: string; label: string };
-export type ImageAspectRatio = { id: string; label: string };
+export const IMAGE_MODELS = [
+  { id: "doubao-seedream-5-0-lite-250723", label: "Seedream 5.0 Lite" },
+  { id: "doubao-seedream-4-5-251128", label: "Seedream 4.5" },
+  { id: "doubao-seedream-4-0-250615", label: "Seedream 4.0" },
+  { id: "doubao-seedream-3-0-t2i-250415", label: "Seedream 3.0 T2I" },
+];
+
+export const IMAGE_ASPECT_RATIOS = [
+  { id: "9:16", label: "9:16" },
+  { id: "3:4", label: "3:4" },
+  { id: "1:1", label: "1:1" },
+  { id: "4:3", label: "4:3" },
+  { id: "16:9", label: "16:9" },
+  { id: "2:3", label: "2:3" },
+  { id: "3:2", label: "3:2" },
+  { id: "5:4", label: "5:4" },
+  { id: "4:5", label: "4:5" },
+  { id: "21:9", label: "21:9" },
+  { id: "9:21", label: "9:21" },
+  { id: "1:2", label: "1:2" },
+  { id: "2:1", label: "2:1" },
+];
+
+export const IMAGE_RESOLUTIONS = [
+  { id: "1k", label: "1K" },
+  { id: "2k", label: "2K" },
+  { id: "3k", label: "3K" },
+  { id: "4k", label: "4K" },
+  { id: "512x512", label: "512 × 512" },
+  { id: "1024x1024", label: "1024 × 1024" },
+  { id: "2048x2048", label: "2048 × 2048" },
+];
+
+export type ImageModel = (typeof IMAGE_MODELS)[number];
+export type ImageResolution = (typeof IMAGE_RESOLUTIONS)[number];
+export type ImageAspectRatio = (typeof IMAGE_ASPECT_RATIOS)[number];
 
 export interface ImageModelSettingsPopoverProps {
   triggerRef: React.RefObject<HTMLElement | null>;
@@ -20,10 +52,6 @@ export interface ImageModelSettingsPopoverProps {
   onResolutionChange: (resolution: ImageResolution) => void;
   selectedAspectRatio: ImageAspectRatio;
   onAspectRatioChange: (ratio: ImageAspectRatio) => void;
-  /** 外部预加载的模型能力；未传入时 Popover 自己拉取。 */
-  capabilities?: ImageModelCapability[] | null;
-  /** 能力是否正在加载；仅在外部传入 capabilities 时使用。 */
-  loading?: boolean;
 }
 
 export function ImageModelSettingsPopover({
@@ -36,69 +64,11 @@ export function ImageModelSettingsPopover({
   onResolutionChange,
   selectedAspectRatio,
   onAspectRatioChange,
-  capabilities: capabilitiesProp,
-  loading: loadingProp,
 }: ImageModelSettingsPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: 16, bottom: 64 });
   const [modelOpen, setModelOpen] = useState(false);
   const [resolutionOpen, setResolutionOpen] = useState(false);
-
-  const [internalCapabilities, setInternalCapabilities] = useState<ImageModelCapability[] | null>(null);
-  const [internalLoading, setInternalLoading] = useState(false);
-
-  const capabilities = capabilitiesProp ?? internalCapabilities;
-  const loading = loadingProp ?? internalLoading;
-
-  useEffect(() => {
-    if (capabilitiesProp !== undefined) return;
-    if (!open) return;
-    if (internalCapabilities) return;
-    setInternalLoading(true);
-    getImageModels()
-      .then((data) => setInternalCapabilities(data))
-      .catch(() => setInternalCapabilities([]))
-      .finally(() => setInternalLoading(false));
-  }, [open, internalCapabilities, capabilitiesProp]);
-
-  const currentCapability = capabilities?.find((c) => c.model_id === selectedModel.id);
-
-  // 模型兜底：若当前选择不在能力列表中，默认选中第一个启用模型
-  useEffect(() => {
-    if (!capabilities || capabilities.length === 0) return;
-    if (!capabilities.some((c) => c.model_id === selectedModel.id)) {
-      const first = capabilities[0];
-      onModelChange({
-        id: first.model_id,
-        label: first.model_label,
-        icon: first.icon ?? undefined,
-      });
-    }
-  }, [capabilities, selectedModel.id, onModelChange]);
-
-  // 分辨率兜底：切换模型后若当前分辨率不可用，重置为模型默认值
-  useEffect(() => {
-    if (!currentCapability) return;
-    const sizes = currentCapability.supported_sizes;
-    if (sizes.length === 0) return;
-    if (!sizes.some((s) => s.id === selectedResolution.id)) {
-      const def = sizes.find((s) => s.id === currentCapability.default_size) ?? sizes[0];
-      onResolutionChange({ id: def.id, label: def.label });
-    }
-  }, [currentCapability, selectedResolution.id, onResolutionChange]);
-
-  // 宽高比兜底：切换模型后若当前宽高比不可用，重置为模型默认值
-  useEffect(() => {
-    if (!currentCapability) return;
-    const ratios = currentCapability.supported_aspect_ratios;
-    if (ratios.length === 0) return;
-    if (!ratios.includes(selectedAspectRatio.id)) {
-      const def = ratios.includes(currentCapability.default_aspect_ratio)
-        ? currentCapability.default_aspect_ratio
-        : ratios[0];
-      onAspectRatioChange({ id: def, label: def });
-    }
-  }, [currentCapability, selectedAspectRatio.id, onAspectRatioChange]);
 
   useEffect(() => {
     if (open && triggerRef.current) {
@@ -131,15 +101,6 @@ export function ImageModelSettingsPopover({
 
   const body = typeof document !== "undefined" ? document.body : null;
   if (!body) return null;
-
-  const models: ImageModel[] =
-    capabilities?.map((c) => ({ id: c.model_id, label: c.model_label, icon: c.icon ?? undefined })) ?? [];
-  const resolutions: ImageResolution[] = currentCapability?.supported_sizes.map((s) => ({
-    id: s.id,
-    label: s.label,
-  })) ?? [];
-  const aspectRatios: ImageAspectRatio[] =
-    currentCapability?.supported_aspect_ratios.map((r) => ({ id: r, label: r })) ?? [];
 
   return createPortal(
     <div
@@ -214,32 +175,6 @@ export function ImageModelSettingsPopover({
                 boxSizing: "border-box",
               }}
             >
-              {selectedModel.icon ? (
-                <img
-                  alt=""
-                  width={16}
-                  height={16}
-                  src={selectedModel.icon}
-                  style={{
-                    width: 16,
-                    height: 16,
-                    borderRadius: 4,
-                    objectFit: "cover",
-                    flexShrink: 0,
-                  }}
-                />
-              ) : (
-                <span
-                  style={{
-                    width: 16,
-                    height: 16,
-                    borderRadius: 4,
-                    background: "rgba(255,255,255,0.1)",
-                    flexShrink: 0,
-                    display: "inline-block",
-                  }}
-                />
-              )}
               <span
                 style={{
                   color: "rgb(255, 255, 255)",
@@ -250,7 +185,7 @@ export function ImageModelSettingsPopover({
                   textOverflow: "ellipsis",
                 }}
               >
-                {loading ? "加载中..." : selectedModel.label}
+                {selectedModel.label}
               </span>
               <ChevronDown
                 width={14}
@@ -276,7 +211,7 @@ export function ImageModelSettingsPopover({
                   gap: 2,
                 }}
               >
-                {models.map((model) => (
+                {IMAGE_MODELS.map((model) => (
                   <button
                     key={model.id}
                     type="button"
@@ -303,32 +238,6 @@ export function ImageModelSettingsPopover({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {model.icon ? (
-                      <img
-                        alt=""
-                        width={16}
-                        height={16}
-                        src={model.icon}
-                        style={{
-                          width: 16,
-                          height: 16,
-                          borderRadius: 4,
-                          objectFit: "cover",
-                          flexShrink: 0,
-                        }}
-                      />
-                    ) : (
-                      <span
-                        style={{
-                          width: 16,
-                          height: 16,
-                          borderRadius: 4,
-                          background: "rgba(255,255,255,0.1)",
-                          flexShrink: 0,
-                          display: "inline-block",
-                        }}
-                      />
-                    )}
                     <span style={{ fontWeight: 600 }}>{model.label}</span>
                   </button>
                 ))}
@@ -361,7 +270,7 @@ export function ImageModelSettingsPopover({
                 fontSize: 12,
                 lineHeight: "16px",
                 fontWeight: 400,
-                cursor: resolutions.length === 0 ? "default" : "pointer",
+                cursor: "pointer",
                 display: "flex",
                 alignItems: "center",
                 gap: 8,
@@ -371,7 +280,6 @@ export function ImageModelSettingsPopover({
                 boxSizing: "border-box",
                 justifyContent: "space-between",
               }}
-              disabled={resolutions.length === 0}
             >
               <span
                 style={{
@@ -394,7 +302,7 @@ export function ImageModelSettingsPopover({
                 style={{ opacity: 0.6, marginLeft: "auto" }}
               />
             </button>
-            {resolutionOpen && resolutions.length > 0 && (
+            {resolutionOpen && (
               <div
                 style={{
                   position: "absolute",
@@ -412,7 +320,7 @@ export function ImageModelSettingsPopover({
                   gap: 2,
                 }}
               >
-                {resolutions.map((res) => (
+                {IMAGE_RESOLUTIONS.map((res) => (
                   <button
                     key={res.id}
                     type="button"
@@ -478,7 +386,7 @@ export function ImageModelSettingsPopover({
             gap: 2,
           }}
         >
-          {aspectRatios.map((ratio) => {
+          {IMAGE_ASPECT_RATIOS.map((ratio) => {
             const selected = selectedAspectRatio.id === ratio.id;
             return (
               <button

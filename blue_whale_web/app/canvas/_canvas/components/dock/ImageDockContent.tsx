@@ -8,11 +8,13 @@ import { createPortal } from "react-dom";
 import { ChevronUp, Image as ImageIcon, Plus, Settings2, X } from "lucide-react";
 import {
   ImageModelSettingsPopover,
+  IMAGE_MODELS,
+  IMAGE_RESOLUTIONS,
+  IMAGE_ASPECT_RATIOS,
   type ImageModel,
   type ImageResolution,
   type ImageAspectRatio,
 } from "@/components/ImageModelSettingsPopover";
-import { getImageModels, type ImageModelCapability } from "@/app/canvas/_canvas/api/generation";
 import { CreditIcon } from "../../icons";
 import { QUANTITIES } from "../../constants";
 import type { ImageDockContentProps } from "../../types";
@@ -35,51 +37,9 @@ export function ImageDockContent({
 }: ImageDockContentProps) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<ImageModel>({
-    id: "",
-    label: "加载中...",
-  });
-  const [selectedResolution, setSelectedResolution] = useState<ImageResolution>({
-    id: "",
-    label: "-",
-  });
-  const [selectedAspectRatio, setSelectedAspectRatio] = useState<ImageAspectRatio>({
-    id: "",
-    label: "-",
-  });
-  const [capabilities, setCapabilities] = useState<ImageModelCapability[] | null>(null);
-  const [capabilitiesLoading, setCapabilitiesLoading] = useState(true);
-
-  // 预加载模型能力并初始化默认值，避免 Dock 一打开显示"加载中..."
-  useEffect(() => {
-    getImageModels()
-      .then((data) => {
-        if (data.length === 0) return;
-        const first = data[0];
-        setCapabilities(data);
-        setSelectedModel({
-          id: first.model_id,
-          label: first.model_label,
-          icon: first.icon ?? undefined,
-        });
-        const defSize = first.supported_sizes.find((s) => s.id === first.default_size) ?? first.supported_sizes[0];
-        if (defSize) {
-          setSelectedResolution({ id: defSize.id, label: defSize.label });
-        }
-        const ratios = first.supported_aspect_ratios;
-        const defRatio = ratios.includes(first.default_aspect_ratio)
-          ? first.default_aspect_ratio
-          : ratios[0];
-        if (defRatio) {
-          setSelectedAspectRatio({ id: defRatio, label: defRatio });
-        }
-      })
-      .catch(() => {
-        // 失败时保持占位，避免崩溃；Popover 仍可尝试自己拉取
-        setCapabilities([]);
-      })
-      .finally(() => setCapabilitiesLoading(false));
-  }, []);
+  const [selectedModel, setSelectedModel] = useState<ImageModel>(IMAGE_MODELS[0]);
+  const [selectedResolution, setSelectedResolution] = useState<ImageResolution>(IMAGE_RESOLUTIONS[1]);
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState<ImageAspectRatio>(IMAGE_ASPECT_RATIOS[2]);
 
   // 上传来源菜单（占位按钮 + 加号共用）
   const localFileRef = useRef<HTMLInputElement>(null);
@@ -392,8 +352,6 @@ export function ImageDockContent({
           onResolutionChange={setSelectedResolution}
           selectedAspectRatio={selectedAspectRatio}
           onAspectRatioChange={setSelectedAspectRatio}
-          capabilities={capabilities}
-          loading={capabilitiesLoading}
         />
 
         <div style={{ flex: "1 1 0%" }} />
@@ -507,7 +465,7 @@ export function ImageDockContent({
           <div style={{ position: "relative", display: "inline-flex" }}>
             <button
               type="button"
-              disabled={isEmpty || generating || !selectedModel.id || !selectedResolution.id || !selectedAspectRatio.id}
+              disabled={isEmpty || generating}
               onClick={() =>
                 onGenerate?.({
                   model: selectedModel,
