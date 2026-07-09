@@ -1,6 +1,7 @@
 package com.blue.whale.user.controller;
 
 import com.blue.whale.global.base.resp.Result;
+import com.blue.whale.global.exception.GlobalException;
 import com.blue.whale.user.dto.LoginRequest;
 import com.blue.whale.user.dto.LoginResponse;
 import com.blue.whale.user.dto.SendCodeRequest;
@@ -16,9 +17,6 @@ import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
 import java.util.Map;
 
-/**
- * 认证接口：发验证码 + 登录
- */
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
@@ -26,10 +24,6 @@ public class AuthController {
 
     private final AuthService authService;
 
-    /**
-     * 发送短信验证码
-     * POST /api/auth/send-code
-     */
     @PostMapping("/send-code")
     public Result<Map<String, Object>> sendCode(@Valid @RequestBody SendCodeRequest req,
                                                  HttpServletRequest request) {
@@ -38,20 +32,20 @@ public class AuthController {
         return Result.ok(Map.of("success", true, "expires_in", 300));
     }
 
-    /**
-     * 登录/注册
-     * POST /api/auth/login
-     */
     @PostMapping("/login")
     public Result<LoginResponse> login(@Valid @RequestBody LoginRequest req) {
-        LoginResponse resp = authService.login(req.getPhone(), req.getCode());
-        return Result.ok(resp);
+        return Result.ok(authService.login(req.getPhone(), req.getCode()));
     }
 
-    /**
-     * 登出
-     * POST /api/auth/logout
-     */
+    @PostMapping("/refresh")
+    public Result<LoginResponse> refresh(HttpServletRequest request) {
+        String header = request.getHeader("Authorization");
+        if (header == null || !header.startsWith("Bearer ")) {
+            throw new GlobalException(401, "缺少 refresh_token");
+        }
+        return Result.ok(authService.refresh(header.substring(7)));
+    }
+
     @PostMapping("/logout")
     public Result<Void> logout(HttpServletRequest request) {
         String header = request.getHeader("Authorization");
@@ -60,5 +54,4 @@ public class AuthController {
         }
         return Result.ok();
     }
-
 }

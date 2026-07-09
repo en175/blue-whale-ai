@@ -11,10 +11,8 @@ import org.springframework.stereotype.Component;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.UUID;
 
-/**
- * JWT 工具类：生成 / 解析
- */
 @Slf4j
 @Component
 public class JwtUtil {
@@ -22,39 +20,45 @@ public class JwtUtil {
     private final JwtConfig jwtConfig;
     private final SecretKey secretKey;
 
+    /** access_token 有效期（秒），默认 15 分钟 */
+    private static final long ACCESS_EXPIRATION = 900;
+    /** refresh_token 有效期（秒），默认 30 天 */
+    private static final long REFRESH_EXPIRATION = 2_592_000;
+
     public JwtUtil(JwtConfig jwtConfig) {
         this.jwtConfig = jwtConfig;
         this.secretKey = Keys.hmacShaKeyFor(jwtConfig.getSecret().getBytes(StandardCharsets.UTF_8));
     }
 
-    /**
-     * 生成 JWT
-     *
-     * @param userId 用户ID
-     * @param phone  手机号
-     * @return token
-     */
-    public String generate(String userId, String phone) {
+    /** 生成 access_token（短，15分钟） */
+    public String generateAccessToken(String userId, String phone) {
         Date now = new Date();
-        Date exp = new Date(now.getTime() + jwtConfig.getExpiration() * 1000L);
-
         return Jwts.builder()
                 .subject(userId)
                 .claim("phone", phone)
+                .claim("type", "access")
                 .issuedAt(now)
-                .expiration(exp)
+                .expiration(new Date(now.getTime() + ACCESS_EXPIRATION * 1000L))
                 .signWith(secretKey)
                 .compact();
     }
 
-    /**
-     * 解析 JWT
-     *
-     * @param token token
-     * @return Claims
-     * @throws ExpiredJwtException token 过期
-     * @throws JwtException       token 无效
-     */
+    /** 生成 refresh_token（长，30天），含 jti 用于 Redis 追踪 */
+    public String generateRefreshToken(String userId) {
+        Date now = new Date();
+        return Jwts.builder()
+                .subject(userId)
+                .id(UUID.randomUUID().toString())
+                .claim("type", "refresh")
+                .issuedAt(now)
+                .expiration(new Date(now.getTime() + REFRESH_EXPIRATION * 1000L))
+                .signWith(secretKey)
+                .compact();
+    }
+
+    public long getAccessExpiration() { return ACCESS_EXPIRATION; }
+
+    /** 解析 token */
     public Claims parse(String token) {
         return Jwts.parser()
                 .verifyWith(secretKey)

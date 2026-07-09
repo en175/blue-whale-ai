@@ -16,6 +16,14 @@ spring:
         file-extension: yml
         group: BLUE_WHALE
     gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOriginPatterns: "*"
+            allowedMethods: "*"
+            allowedHeaders: "*"
+            exposedHeaders: "Authorization"
+            allowCredentials: true
       discovery:
         locator:
           enabled: true

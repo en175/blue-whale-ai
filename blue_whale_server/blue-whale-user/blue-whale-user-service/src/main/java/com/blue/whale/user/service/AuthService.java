@@ -9,6 +9,7 @@ import com.blue.whale.user.dto.LoginResponse;
 import com.blue.whale.user.entity.User;
 import com.blue.whale.user.mapper.UserMapper;
 import com.blue.whale.user.sms.SmsProvider;
+import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.ValueOperations;
@@ -135,11 +136,24 @@ public class AuthService {
             log.info("用户登录: id={}, phone={}", user.getId(), phone);
         }
 
-        // 生成 JWT
-        String token = jwtUtil.generate(String.valueOf(user.getId()), phone);
+        // 生成双 token
+        String userIdStr = String.valueOf(user.getId());
+        String accessToken = jwtUtil.generateAccessToken(userIdStr, phone);
+        String refreshToken = jwtUtil.generateRefreshToken(userIdStr);
+
+        // refresh_token 存 Redis（key: jti → userId），30天过期
+        var claims = jwtUtil.parse(refreshToken);
+        RedisUtil.setCacheObject(
+                REFRESH_TOKEN_PREFIX + claims.getId(),
+                userIdStr,
+                2_592_000,  // 30 天
+                TimeUnit.SECONDS
+        );
 
         return LoginResponse.builder()
-                .token(token)
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .expiresIn(jwtUtil.getAccessExpiration())
                 .userId(user.getId())
                 .username(user.getUsername())
                 .phone(user.getPhone())
@@ -147,31 +161,66 @@ public class AuthService {
                 .build();
     }
 
+    // ==================== 刷新 Token ====================
+
+    private static final String REFRESH_TOKEN_PREFIX = "bw:refresh:";
+
+    public LoginResponse refresh(String refreshToken) {
+        Claims claims;
+        try {
+            claims = jwtUtil.parse(refreshToken);
+        } catch (Exception e) {
+            throw new GlobalException(401, "refresh_token 无效或已过期");
+        }
+
+        // 校验 Redis 中是否存在
+        String userId = RedisUtil.getCacheObject(REFRESH_TOKEN_PREFIX + claims.getId());
+        if (userId == null) {
+            throw new GlobalException(401, "refresh_token 已失效，请重新登录");
+        }
+
+        // 删旧 refresh_token
+        RedisUtil.delete(REFRESH_TOKEN_PREFIX + claims.getId());
+
+        // 查用户
+        User user = userMapper.selectById(Long.valueOf(userId));
+        if (user == null) {
+            throw new GlobalException(401, "用户不存在");
+        }
+
+        // 发新双 token
+        String newAccess = jwtUtil.generateAccessToken(userId, user.getPhone());
+        String newRefresh = jwtUtil.generateRefreshToken(userId);
+        var newClaims = jwtUtil.parse(newRefresh);
+        RedisUtil.setCacheObject(
+                REFRESH_TOKEN_PREFIX + newClaims.getId(),
+                userId,
+                2_592_000,  // 30 天
+                TimeUnit.SECONDS
+        );
+
+        return LoginResponse.builder()
+                .accessToken(newAccess)
+                .refreshToken(newRefresh)
+                .expiresIn(jwtUtil.getAccessExpiration())
+                .userId(user.getId())
+                .username(user.getUsername())
+                .phone(user.getPhone())
+                .isNewUser(false)
+                .build();
+    }
+
     // ==================== 登出 ====================
 
-    /** token 黑名单 key */
-    public static final String TOKEN_BLACKLIST_PREFIX = "bw:token:blacklist:";
-
-    public void logout(String token) {
-        // 存到黑名单，TTL 对齐 JWT 剩余有效期
+    /** 登出：删 refresh_token */
+    public void logout(String refreshToken) {
         try {
-            var claims = jwtUtil.parse(token);
-            long remaining = claims.getExpiration().getTime() - System.currentTimeMillis();
-            if (remaining > 0) {
-                RedisUtil.setCacheObject(
-                        TOKEN_BLACKLIST_PREFIX + token.hashCode(),
-                        "1",
-                        (int) (remaining / 1000),
-                        TimeUnit.SECONDS
-                );
-            }
+            var claims = jwtUtil.parse(refreshToken);
+            RedisUtil.delete(REFRESH_TOKEN_PREFIX + claims.getId());
+            log.debug("登出成功: jti={}", claims.getId());
         } catch (Exception e) {
             log.debug("登出时 token 已过期或无效: {}", e.getMessage());
         }
-    }
-
-    public static boolean isTokenBlacklisted(String token) {
-        return RedisUtil.getCacheObject(TOKEN_BLACKLIST_PREFIX + token.hashCode()) != null;
     }
 
     // ==================== 换绑手机号 ====================

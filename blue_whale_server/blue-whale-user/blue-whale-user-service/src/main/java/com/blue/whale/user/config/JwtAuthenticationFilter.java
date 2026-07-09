@@ -1,6 +1,5 @@
 package com.blue.whale.user.config;
 
-import com.blue.whale.user.service.AuthService;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
@@ -19,7 +18,8 @@ import java.io.IOException;
 import java.util.Collections;
 
 /**
- * JWT 认证过滤器：解析 token → 写入 SecurityContext
+ * 认证过滤器。
+ * 优先信任网关传的 X-User-Id；未经过网关时回退到 JWT 解析。
  */
 @Slf4j
 @Component
@@ -37,8 +37,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     FilterChain chain)
             throws ServletException, IOException {
 
-        String header = request.getHeader("Authorization");
+        // 优先信任网关传的 X-User-Id
+        String gatewayUserId = request.getHeader("X-User-Id");
+        if (gatewayUserId != null && !gatewayUserId.isEmpty()) {
+            UsernamePasswordAuthenticationToken authentication =
+                    new UsernamePasswordAuthenticationToken(
+                            gatewayUserId, null,
+                            Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER"))
+                    );
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+            chain.doFilter(request, response);
+            return;
+        }
 
+        // 回退：直接解析 JWT（开发/调试）
+        String header = request.getHeader("Authorization");
         if (header == null || !header.startsWith("Bearer ")) {
             chain.doFilter(request, response);
             return;
@@ -46,33 +59,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         try {
             String token = header.substring(7);
-
-            // 黑名单检查
-            if (AuthService.isTokenBlacklisted(token)) {
-                log.debug("Token 已被登出");
-                SecurityContextHolder.clearContext();
-                chain.doFilter(request, response);
-                return;
-            }
-
             Claims claims = jwtUtil.parse(token);
 
-            // 构建认证对象，principal 存 user_id
             UsernamePasswordAuthenticationToken authentication =
                     new UsernamePasswordAuthenticationToken(
-                            claims.getSubject(),
-                            null,
+                            claims.getSubject(), null,
                             Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER"))
                     );
-
             SecurityContextHolder.getContext().setAuthentication(authentication);
-
-            // 滑动过期：每次有效请求签发新 token
-            String newToken = jwtUtil.generate(
-                    claims.getSubject(),
-                    claims.get("phone", String.class)
-            );
-            response.setHeader("Authorization", "Bearer " + newToken);
 
         } catch (ExpiredJwtException e) {
             log.debug("JWT 已过期: {}", e.getMessage());

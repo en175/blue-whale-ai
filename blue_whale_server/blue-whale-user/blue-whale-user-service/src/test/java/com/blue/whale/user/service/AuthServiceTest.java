@@ -111,7 +111,8 @@ class AuthServiceTest {
 
         assertThat(resp.getPhone()).isEqualTo("13800138000");
         assertThat(resp.getIsNewUser()).isTrue();
-        assertThat(resp.getToken()).isNotBlank();
+        assertThat(resp.getAccessToken()).isNotBlank();
+        assertThat(resp.getRefreshToken()).isNotBlank();
         verify(userMapper).insert(any(User.class));
     }
 
