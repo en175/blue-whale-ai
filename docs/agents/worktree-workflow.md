@@ -108,6 +108,23 @@ git checkout -b feature/<PRD-or-module>-release
 
 发布包装分支负责适配远程 `origin/master`。若它与 `origin/master` 冲突或测试失败，修复只发生在发布包装分支，不回写用户本地 `master`。
 
+### 发布包装分支合并后清理
+
+发布包装分支合并进 `origin/master` 后，其形态是「主 checkout 上的本地分支」（不在 task worktree 内），`cleanup-task-worktree.sh` 只认 worktree 路径形态、在此 fail。用专用入口清理：
+
+```bash
+scripts/cleanup-release-branch.sh --user-authorized <发布包装分支>
+```
+
+脚本在主 checkout 的本地 `master` 上执行，会：
+
+- 校验在主 checkout（非 task worktree）、当前在 `master`、工作区干净
+- 校验分支名命中白名单前缀（`feature/ fix/ hotfix/ docs/ chore/`）、本地分支存在
+- `fetch origin master` 并用 `merge-base --is-ancestor` 确认已合并进 `origin/master`
+- 删本地分支 + 删远程源分支（`ls-remote` 探活后才删）+ `git fetch --prune`
+
+与 `## PR 合并后清理 task worktree` 的区别：那个入口管 **task worktree 形态**（删 worktree + 任务分支 + 远程源分支），本入口管 **主 checkout 发布包装分支形态**（只删分支，无 worktree）。两者按形态分流，不要混用。本地分支删除用 `update-ref -d`（非 `branch -d`），因为本地 `master` 作为用户集成区可能落后 `origin/master`，`branch -d` 的「已合入当前 HEAD」判定会误拒已合并分支。
+
 ## 发布审查包
 
 用户明确授权发布审查包后，在待发布工单分支执行：
