@@ -11,7 +11,7 @@
     </parent>
 
     <groupId>com.blue-whale.user</groupId>
-    <artifactId>blue-whale-user</artifactId>
+    <artifactId>blue-whale-user-service</artifactId>
     <version>2025.3</version>
 
     <dependencies>
@@ -28,7 +28,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
-
+        <dependency>
+            <groupId>com.blue-whale.user</groupId>
+            <artifactId>blue-whale-user-api</artifactId>
+            <version>2025.3</version>
+        </dependency>
         <!-- MyBatis Plus -->
         <dependency>
             <groupId>com.baomidou</groupId>
