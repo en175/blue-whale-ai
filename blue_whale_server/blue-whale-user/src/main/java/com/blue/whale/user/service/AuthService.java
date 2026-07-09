@@ -1,6 +1,7 @@
 package com.blue.whale.user.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.blue.whale.global.exception.GlobalException;
 import com.blue.whale.tool.redis.utils.RedisUtil;
 import com.blue.whale.user.config.JwtUtil;
@@ -245,13 +246,12 @@ public class AuthService {
             throw new GlobalException(400, "该手机号已被其他账号绑定");
         }
 
-        User user = userMapper.selectById(Long.valueOf(userId));
-        if (user == null) {
-            throw new GlobalException(404, "用户不存在");
-        }
-        user.setPhone(newPhone);
-        user.setGmtModified(LocalDateTime.now());
-        userMapper.updateById(user);
+        userMapper.update(null,
+                new LambdaUpdateWrapper<User>()
+                        .eq(User::getId, Long.valueOf(userId))
+                        .set(User::getPhone, newPhone)
+                        .set(User::getGmtModified, LocalDateTime.now())
+        );
 
         log.info("手机号更换成功: userId={}, newPhone={}", userId, newPhone);
     }

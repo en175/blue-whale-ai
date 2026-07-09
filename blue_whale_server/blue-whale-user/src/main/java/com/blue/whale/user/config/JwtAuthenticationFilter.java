@@ -57,7 +57,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             Claims claims = jwtUtil.parse(token);
 
-            // 构建认证对象，principal 存 user_id（Long）
+            // 构建认证对象，principal 存 user_id
             UsernamePasswordAuthenticationToken authentication =
                     new UsernamePasswordAuthenticationToken(
                             claims.getSubject(),
@@ -66,6 +66,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     );
 
             SecurityContextHolder.getContext().setAuthentication(authentication);
+
+            // 滑动过期：每次有效请求签发新 token
+            String newToken = jwtUtil.generate(
+                    claims.getSubject(),
+                    claims.get("phone", String.class)
+            );
+            response.setHeader("Authorization", "Bearer " + newToken);
 
         } catch (ExpiredJwtException e) {
             log.debug("JWT 已过期: {}", e.getMessage());
