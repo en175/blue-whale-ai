@@ -29,7 +29,10 @@ fail() { echo "❌ cleanup-release-branch: $*" >&2; exit 1; }
 [ "$AUTHORIZED" = 1 ] || fail "缺少 --user-authorized。必须先获得用户明确授权清理发布包装分支。"
 [ -n "$BRANCH" ] || fail "缺少发布包装分支名。"
 
-ROOT="$(git rev-parse --show-toplevel)"
+# ROOT 用 BASH_SOURCE 而非 git rev-parse --show-toplevel：本脚本是主 checkout 脚本
+# （lib/worktree-paths.sh 注释约定），运行时可能 cwd 在任意处；BASH_SOURCE 派生的 ROOT
+# 稳定指向主 checkout scripts/ 的父目录，不依赖 worktree 上下文。
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/worktree-paths.sh
 source "$ROOT/scripts/lib/worktree-paths.sh"
 WORKTREE_BASE="$(worktree_paths_resolve_base "$ROOT")"

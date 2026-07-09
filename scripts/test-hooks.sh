@@ -889,6 +889,16 @@ setup_release_repo
 run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --bogus
 assert_exit 2 "release-cleanup: 未知参数走 usage exit 2"
 
+# L1b — ROOT 推导锁定：从非 git 目录用绝对路径调用带授权+白名单分支，
+# BASH_SOURCE 正确解析 ROOT → 走到「本地分支不存在」校验 exit 1；
+# rev-parse 在非 git cwd 赋值吞 git exit 128 → set -e 崩在 ROOT 行（exit 128，stderr 是 git fatal）。
+# 本用例锁住 BASH_SOURCE 写法，防回退 rev-parse。
+setup_release_repo
+empty_cwd="$(mktemp -d)"; RELEASE_TMP_LIST+=("$empty_cwd")
+run_repo_script "$empty_cwd" "$RELEASE_TMP/main/scripts/cleanup-release-branch.sh" --user-authorized feature/never-exists
+assert_exit 1 "release-cleanup: 非 repo cwd 绝对路径调用仍解析 ROOT 走到分支校验"
+assert_stderr_has "本地分支不存在" "release-cleanup: 绝对路径调用走到分支存在校验（非 rev-parse 崩）"
+
 # L2 — 校验层（任一失败 exit 1，分支不动）
 # 在 worktree 形态路径内执行 → 拦（worktree-paths.sh 把父名 blue-whale-worktrees 识别为 worktree 区）
 WT_TMP="$(mktemp -d)"; RELEASE_TMP_LIST+=("$WT_TMP")
