@@ -9,8 +9,8 @@ import { ChevronUp, Image as ImageIcon, Plus, Settings2, X } from "lucide-react"
 import {
   ImageModelSettingsPopover,
   IMAGE_MODELS,
-  IMAGE_RESOLUTIONS,
   IMAGE_ASPECT_RATIOS,
+  defaultResolutionOf,
   type ImageModel,
   type ImageResolution,
   type ImageAspectRatio,
@@ -38,8 +38,18 @@ export function ImageDockContent({
   const settingsRef = useRef<HTMLButtonElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState<ImageModel>(IMAGE_MODELS[0]);
-  const [selectedResolution, setSelectedResolution] = useState<ImageResolution>(IMAGE_RESOLUTIONS[1]);
+  const [selectedResolution, setSelectedResolution] = useState<ImageResolution>(
+    defaultResolutionOf(IMAGE_MODELS[0]),
+  );
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<ImageAspectRatio>(IMAGE_ASPECT_RATIOS[2]);
+
+  // 切模型联动：新模型不支持当前分辨率则重置到该模型默认
+  const handleModelChange = (model: ImageModel) => {
+    setSelectedModel(model);
+    if (!model.resolutions.some((r) => r.id === selectedResolution.id)) {
+      setSelectedResolution(defaultResolutionOf(model));
+    }
+  };
 
   // 上传来源菜单（占位按钮 + 加号共用）
   const localFileRef = useRef<HTMLInputElement>(null);
@@ -347,7 +357,7 @@ export function ImageDockContent({
           open={modelSettingsOpen}
           onClose={() => setModelSettingsOpen(false)}
           selectedModel={selectedModel}
-          onModelChange={setSelectedModel}
+          onModelChange={handleModelChange}
           selectedResolution={selectedResolution}
           onResolutionChange={setSelectedResolution}
           selectedAspectRatio={selectedAspectRatio}

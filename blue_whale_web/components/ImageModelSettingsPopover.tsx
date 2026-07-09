@@ -6,10 +6,45 @@ import { ChevronDown } from "lucide-react";
 import { AspectRatioIcon } from "./icons/AspectRatioIcon";
 
 export const IMAGE_MODELS = [
-  { id: "doubao-seedream-5-0-lite-250723", label: "Seedream 5.0 Lite" },
-  { id: "doubao-seedream-4-5-251128", label: "Seedream 4.5" },
-  { id: "doubao-seedream-4-0-250615", label: "Seedream 4.0" },
-  { id: "doubao-seedream-3-0-t2i-250415", label: "Seedream 3.0 T2I" },
+  {
+    id: "doubao-seedream-5-0-lite-250723",
+    label: "Seedream 5.0 Lite",
+    defaultResolutionId: "2k",
+    resolutions: [
+      { id: "2k", label: "2K" },
+      { id: "3k", label: "3K" },
+      { id: "4k", label: "4K" },
+    ],
+  },
+  {
+    id: "doubao-seedream-4-5-251128",
+    label: "Seedream 4.5",
+    defaultResolutionId: "2k",
+    resolutions: [
+      { id: "2k", label: "2K" },
+      { id: "4k", label: "4K" },
+    ],
+  },
+  {
+    id: "doubao-seedream-4-0-250615",
+    label: "Seedream 4.0",
+    defaultResolutionId: "2k",
+    resolutions: [
+      { id: "1k", label: "1K" },
+      { id: "2k", label: "2K" },
+      { id: "4k", label: "4K" },
+    ],
+  },
+  {
+    id: "doubao-seedream-3-0-t2i-250415",
+    label: "Seedream 3.0 T2I",
+    defaultResolutionId: "1024x1024",
+    resolutions: [
+      { id: "512x512", label: "512 × 512" },
+      { id: "1024x1024", label: "1024 × 1024" },
+      { id: "2048x2048", label: "2048 × 2048" },
+    ],
+  },
 ];
 
 export const IMAGE_ASPECT_RATIOS = [
@@ -28,19 +63,17 @@ export const IMAGE_ASPECT_RATIOS = [
   { id: "2:1", label: "2:1" },
 ];
 
-export const IMAGE_RESOLUTIONS = [
-  { id: "1k", label: "1K" },
-  { id: "2k", label: "2K" },
-  { id: "3k", label: "3K" },
-  { id: "4k", label: "4K" },
-  { id: "512x512", label: "512 × 512" },
-  { id: "1024x1024", label: "1024 × 1024" },
-  { id: "2048x2048", label: "2048 × 2048" },
-];
-
 export type ImageModel = (typeof IMAGE_MODELS)[number];
-export type ImageResolution = (typeof IMAGE_RESOLUTIONS)[number];
+export type ImageResolution = ImageModel["resolutions"][number];
 export type ImageAspectRatio = (typeof IMAGE_ASPECT_RATIOS)[number];
+
+/** 取模型默认分辨率；缺省回退到第一个。 */
+export function defaultResolutionOf(model: ImageModel): ImageResolution {
+  return (
+    model.resolutions.find((r) => r.id === model.defaultResolutionId) ??
+    model.resolutions[0]
+  );
+}
 
 export interface ImageModelSettingsPopoverProps {
   triggerRef: React.RefObject<HTMLElement | null>;
@@ -320,7 +353,7 @@ export function ImageModelSettingsPopover({
                   gap: 2,
                 }}
               >
-                {IMAGE_RESOLUTIONS.map((res) => (
+                {selectedModel.resolutions.map((res) => (
                   <button
                     key={res.id}
                     type="button"
