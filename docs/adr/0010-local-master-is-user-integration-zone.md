@@ -21,3 +21,4 @@ Agent 完成子 issue 后停在任务验收分支，默认交付未提交 diff �
 - `scripts/start-task-worktree.sh` 不再同步或要求本地 `master` 干净；`.githooks/pre-commit` 不再禁止本地 `master` commit。
 - 本地任务验收 commit 与本地 `master` 合入也有标准入口和 hook 确认，避免 Agent 擅自越过未提交 diff 的默认终点。
 - 发布和远程合并仍受发布授权 hook 约束，禁止 Agent 擅自 push、开 PR 或合并 PR。
+- 主 checkout 发布包装分支合并进 `origin/master` 后，有标准清理入口 `scripts/cleanup-release-branch.sh --user-authorized <branch>`，删本地分支 + 远程源分支 + `fetch --prune`，填补 `cleanup-task-worktree.sh` 只认 task worktree 路径形态的 gap。
