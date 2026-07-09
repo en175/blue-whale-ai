@@ -98,7 +98,32 @@ interface MediaItem {
   duration?: string;
 }
 
-export default function AgentComposer() {
+export interface GenerateImageParams {
+  modelId: string;
+  aspectRatioId: string;
+  resolutionId: string;
+}
+
+export interface GenerateContext {
+  tab: string;
+  prompt: string;
+  image: GenerateImageParams;
+}
+
+export interface AgentComposerProps {
+  /** 真生成回调（提供则真生成，否则首页默认跳转 /generate?prompt）。 */
+  onGenerate?: (ctx: GenerateContext) => void;
+  /** 占位禁用的 tab id（生成静默不触发），首页默认空。 */
+  disabledTabs?: string[];
+  /** 初始预填 prompt（/generate 读 ?prompt 传入，首页不传）。 */
+  defaultPrompt?: string;
+}
+
+export default function AgentComposer({
+  onGenerate,
+  disabledTabs = [],
+  defaultPrompt,
+}: AgentComposerProps = {}) {
   const [activeTab, setActiveTab] = useState("agent");
   const [content, setContent] = useState("");
   const [isFocused, setIsFocused] = useState(false);
@@ -120,13 +145,7 @@ export default function AgentComposer() {
   const router = useRouter();
   const { requireAuth } = useAuth();
 
-  const handleGenerate = useCallback(() => {
-    const prompt = content.trim();
-    const query = prompt ? `?prompt=${encodeURIComponent(prompt)}` : "";
-    requireAuth({ kind: "home-generate", prompt }, () =>
-      router.push(`/canvas${query}`),
-    );
-  }, [router, content, requireAuth]);
+  const tabDisabled = disabledTabs.includes(activeTab);
 
   // AI 视频 tab params
   const [refMode, setRefMode] = useState(VIDEO_REF_MODES[1]);
@@ -142,6 +161,48 @@ export default function AgentComposer() {
   const [imageAspectRatioOpen, setImageAspectRatioOpen] = useState(false);
   const [imageResolution, setImageResolution] = useState(IMAGE_RESOLUTIONS.find((r) => r.id === "2k")!);
   const [imageResolutionOpen, setImageResolutionOpen] = useState(false);
+
+  const handleGenerate = useCallback(() => {
+    // 视频/agent tab 后端未就绪：占位静默（仅图片 tab 真生成）。
+    if (tabDisabled) return;
+    const prompt = content.trim();
+    requireAuth({ kind: "home-generate", prompt }, () => {
+      if (onGenerate) {
+        onGenerate({
+          tab: activeTab,
+          prompt,
+          image: {
+            modelId: selectedImageModel.id,
+            aspectRatioId: imageAspectRatio.id,
+            resolutionId: imageResolution.id,
+          },
+        });
+        return;
+      }
+      const query = prompt ? `?prompt=${encodeURIComponent(prompt)}` : "";
+      router.push(`/generate${query}`);
+    });
+  }, [
+    tabDisabled,
+    content,
+    requireAuth,
+    onGenerate,
+    activeTab,
+    selectedImageModel,
+    imageAspectRatio,
+    imageResolution,
+    router,
+  ]);
+
+  // 预填 prompt（/generate 读 ?prompt 传入；首页不传跳过）。contentEditable 写入需 ref 就绪。
+  useEffect(() => {
+    if (!defaultPrompt || !editorRef.current) return;
+    if (editorRef.current.innerText.trim() === defaultPrompt.trim()) return;
+    editorRef.current.innerText = defaultPrompt;
+    // 一次性 URL 预填是官方认可模式；set-state-in-effect 规则对此误报。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setContent(defaultPrompt);
+  }, [defaultPrompt]);
 
   const tabRefs = useRef<(HTMLElement | null)[]>([]);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -392,7 +453,10 @@ export default function AgentComposer() {
   // 仅在组件卸载时统一释放尚未移除的 blob: 对象 URL。
   // 通过 ref 读取最新的 mediaList，且 effect 依赖为空，确保不会在更新时误释放正在显示的 URL。
   const mediaListRef = useRef(mediaList);
-  mediaListRef.current = mediaList;
+  // ref 写入须在 effect 内（render 期间写 ref 触发 react-hooks/refs），保持「最新 mediaList」语义。
+  useEffect(() => {
+    mediaListRef.current = mediaList;
+  });
   useEffect(() => {
     return () => {
       mediaListRef.current.forEach((item) => {

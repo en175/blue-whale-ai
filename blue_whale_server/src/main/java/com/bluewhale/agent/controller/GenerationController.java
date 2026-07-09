@@ -6,7 +6,7 @@ import com.bluewhale.agent.common.resp.SystemCode;
 import com.bluewhale.agent.model.dto.CreateJobResponse;
 import com.bluewhale.agent.model.dto.ImageGenerateRequest;
 import com.bluewhale.agent.model.dto.ImageModelCapabilityResponse;
-import com.bluewhale.agent.model.dto.ImageResult;
+import com.bluewhale.agent.model.dto.ImageGenerateResponse;
 import com.bluewhale.agent.model.dto.VideoGenerateRequest;
 import com.bluewhale.agent.service.GenerationJobService;
 import com.bluewhale.agent.service.GenerationModelCapabilityService;
@@ -46,10 +46,10 @@ public class GenerationController {
         return Result.ok(capabilityService.listCapabilities(capability));
     }
 
-    /** 文生图同步生成，返回 asset id + url。 */
+    /** 文生图：流式模型返 job_id（前端 EventSource 订阅逐张），非流式返 asset_id+url。 */
     @PostMapping("/image")
-    public Result<ImageResult> generateImage(@RequestHeader(value = "X-User-Id", required = false) Long userId,
-                                             @RequestBody @Valid ImageGenerateRequest req) {
+    public Result<ImageGenerateResponse> generateImage(@RequestHeader(value = "X-User-Id", required = false) Long userId,
+                                                       @RequestBody @Valid ImageGenerateRequest req) {
         return Result.ok(generationJobService.createImageJob(req, requireUserId(userId)));
     }
 

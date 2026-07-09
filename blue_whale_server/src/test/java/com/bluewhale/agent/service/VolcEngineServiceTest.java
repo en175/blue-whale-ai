@@ -7,8 +7,10 @@ import com.bluewhale.agent.model.dto.ProviderImageGenerationRequest;
 import com.bluewhale.agent.model.dto.VideoTaskResult;
 import com.volcengine.ark.runtime.model.content.generation.CreateContentGenerationTaskResult;
 import com.volcengine.ark.runtime.model.content.generation.GetContentGenerationTaskResponse;
+import com.volcengine.ark.runtime.model.images.generation.ImageGenStreamEvent;
 import com.volcengine.ark.runtime.model.images.generation.ImagesResponse;
 import com.volcengine.ark.runtime.service.ArkService;
+import io.reactivex.Flowable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.beans.factory.ObjectProvider;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,7 +50,6 @@ class VolcEngineServiceTest {
     @BeforeEach
     void setUp() {
         when(arkServiceProvider.getIfAvailable()).thenReturn(arkService);
-        when(arkProperties.getVideoModel()).thenReturn("vid-model");
     }
 
     private ProviderImageGenerationRequest imageReq(String prompt, String size) {
@@ -119,7 +121,7 @@ class VolcEngineServiceTest {
         when(arkService.createContentGenerationTask(any()))
                 .thenReturn(new CreateContentGenerationTaskResult("task-123"));
 
-        assertThat(service.createVideoTask("prompt", null, "16:9", "720p", 5L))
+        assertThat(service.createVideoTask("vid-model", "prompt", null, "16:9", "720p", 5L))
                 .isEqualTo("task-123");
     }
 
@@ -128,7 +130,7 @@ class VolcEngineServiceTest {
         when(arkService.createContentGenerationTask(any()))
                 .thenReturn(new CreateContentGenerationTaskResult("task-img"));
 
-        assertThat(service.createVideoTask("prompt", "https://img/x.png", "16:9", null, null))
+        assertThat(service.createVideoTask("vid-model", "prompt", "https://img/x.png", "16:9", null, null))
                 .isEqualTo("task-img");
     }
 
@@ -136,7 +138,7 @@ class VolcEngineServiceTest {
     void createVideoTaskUpstreamExceptionWrapped() {
         when(arkService.createContentGenerationTask(any())).thenThrow(new RuntimeException("create-fail"));
 
-        assertThatThrownBy(() -> service.createVideoTask("p", null, null, null, null))
+        assertThatThrownBy(() -> service.createVideoTask("vid-model", "p", null, null, null, null))
                 .isInstanceOf(GlobalException.class)
                 .hasMessageContaining("上游创建任务失败");
     }
@@ -181,5 +183,28 @@ class VolcEngineServiceTest {
         assertThat(r.status()).isEqualTo("failed");
         assertThat(r.errorCode()).isEqualTo("balance_insufficient");
         assertThat(r.errorMsg()).isEqualTo("余额不足");
+    }
+
+    @Test
+    void streamGenerateImagesReturnsEvents() {
+        when(arkService.streamGenerateImages(any())).thenReturn(Flowable.just(
+                streamEvent("image_generation.partial_succeeded", "https://ark/1.png"),
+                streamEvent("image_generation.partial_succeeded", "https://ark/2.png")));
+
+        List<String> urls = new ArrayList<>();
+        service.streamGenerateImages(imageReq("cat", "2K")).blockingForEach(e -> {
+            if (e.getUrl() != null) {
+                urls.add(e.getUrl());
+            }
+        });
+
+        assertThat(urls).containsExactly("https://ark/1.png", "https://ark/2.png");
+    }
+
+    private ImageGenStreamEvent streamEvent(String type, String url) {
+        ImageGenStreamEvent e = new ImageGenStreamEvent();
+        e.setType(type);
+        e.setUrl(url);
+        return e;
     }
 }

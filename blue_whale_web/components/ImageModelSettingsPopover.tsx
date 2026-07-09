@@ -7,9 +7,10 @@ import { AspectRatioIcon } from "./icons/AspectRatioIcon";
 
 export const IMAGE_MODELS = [
   {
-    id: "doubao-seedream-5-0-lite-250723",
+    id: "doubao-seedream-5-0-260128",
     label: "Seedream 5.0 Lite",
     defaultResolutionId: "2k",
+    stream: true,
     resolutions: [
       { id: "2k", label: "2K" },
       { id: "3k", label: "3K" },
@@ -20,6 +21,7 @@ export const IMAGE_MODELS = [
     id: "doubao-seedream-4-5-251128",
     label: "Seedream 4.5",
     defaultResolutionId: "2k",
+    stream: true,
     resolutions: [
       { id: "2k", label: "2K" },
       { id: "4k", label: "4K" },
@@ -29,6 +31,7 @@ export const IMAGE_MODELS = [
     id: "doubao-seedream-4-0-250615",
     label: "Seedream 4.0",
     defaultResolutionId: "2k",
+    stream: true,
     resolutions: [
       { id: "1k", label: "1K" },
       { id: "2k", label: "2K" },
@@ -39,6 +42,7 @@ export const IMAGE_MODELS = [
     id: "doubao-seedream-3-0-t2i-250415",
     label: "Seedream 3.0 T2I",
     defaultResolutionId: "1024x1024",
+    stream: false,
     resolutions: [
       { id: "512x512", label: "512 × 512" },
       { id: "1024x1024", label: "1024 × 1024" },

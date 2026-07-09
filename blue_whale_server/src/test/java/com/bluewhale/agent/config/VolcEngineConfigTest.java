@@ -13,9 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest(classes = VolcEngineConfig.class, properties = {
         "volcengine.ark.api-key=test-key",
-        "volcengine.ark.base-url=https://ark.test/api/v3",
-        "volcengine.ark.image-model=test-image",
-        "volcengine.ark.video-model=test-video"
+        "volcengine.ark.base-url=https://ark.test/api/v3"
 })
 class VolcEngineConfigTest {
 
@@ -34,8 +32,6 @@ class VolcEngineConfigTest {
     void propertiesBoundFromEnvironment() {
         assertThat(arkProperties.getApiKey()).isEqualTo("test-key");
         assertThat(arkProperties.getBaseUrl()).isEqualTo("https://ark.test/api/v3");
-        assertThat(arkProperties.getImageModel()).isEqualTo("test-image");
-        assertThat(arkProperties.getVideoModel()).isEqualTo("test-video");
     }
 
     @Test

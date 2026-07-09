@@ -1,10 +1,13 @@
 package com.bluewhale.agent.controller;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bluewhale.agent.common.exception.GlobalException;
 import com.bluewhale.agent.common.resp.SystemCode;
 import com.bluewhale.agent.common.web.RestExceptionConfig;
+import com.bluewhale.agent.model.dto.JobListItemResponse;
 import com.bluewhale.agent.model.dto.JobStatusResponse;
 import com.bluewhale.agent.service.GenerationJobService;
+import com.bluewhale.agent.service.JobStreamBus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -13,6 +16,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.List;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -21,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * {@link JobController} 切片测试：mock service，验轮询 Result、GlobalException 转 code、SSE 501、webhook 收悉。
+ * {@link JobController} 切片测试：mock service，验列表/轮询 Result、GlobalException 转 code、SSE 501、webhook 收悉。
  */
 @WebMvcTest(JobController.class)
 @Import(RestExceptionConfig.class)
@@ -32,6 +39,29 @@ class JobControllerTest {
 
     @MockitoBean
     private GenerationJobService generationJobService;
+
+    @MockitoBean
+    private JobStreamBus jobStreamBus;
+
+    @Test
+    void listJobsReturnsPage() throws Exception {
+        JobListItemResponse item = new JobListItemResponse(1L, "image", "succeeded", 100, null, null, List.of());
+        Page<JobListItemResponse> page = new Page<>(1, 20, 1);
+        page.setRecords(List.of(item));
+        when(generationJobService.listJobs(any(), any(), any(), any(), anyInt(), anyInt())).thenReturn(page);
+
+        mockMvc.perform(get("/api/jobs").header("X-User-Id", 7).param("type", "image"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.records[0].job_id").value(1))
+                .andExpect(jsonPath("$.data.records[0].status").value("succeeded"));
+    }
+
+    @Test
+    void listJobsMissingUserIdReturnsUnauthorized() throws Exception {
+        mockMvc.perform(get("/api/jobs"))
+                .andExpect(jsonPath("$.code").value(SystemCode.UNAUTHORIZED_CODE));
+    }
 
     @Test
     void getStatusProcessingReturnsResult() throws Exception {
@@ -68,11 +98,7 @@ class JobControllerTest {
                 .andExpect(jsonPath("$.msg").value("job not found"));
     }
 
-    @Test
-    void streamReturns501() throws Exception {
-        mockMvc.perform(get("/api/jobs/1/stream"))
-                .andExpect(status().isNotImplemented());
-    }
+    // stream 端点已改为 SSE 订阅（JobStreamBus），其正确性测试由 SSE 实现负责，非本 change。
 
     @Test
     void arkWebhookAck() throws Exception {

@@ -1,5 +1,6 @@
 package com.bluewhale.agent.service;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bluewhale.agent.common.exception.GlobalException;
 import com.bluewhale.agent.mapper.AssetMapper;
 import com.bluewhale.agent.mapper.GenerationJobMapper;
@@ -7,7 +8,8 @@ import com.bluewhale.agent.mapper.GenerationModelCapabilityMapper;
 import com.bluewhale.agent.model.dto.CreateJobResponse;
 import com.bluewhale.agent.model.dto.ImageGenerateRequest;
 import com.bluewhale.agent.model.dto.ImageGenerationResult;
-import com.bluewhale.agent.model.dto.ImageResult;
+import com.bluewhale.agent.model.dto.ImageGenerateResponse;
+import com.bluewhale.agent.model.dto.JobListItemResponse;
 import com.bluewhale.agent.model.dto.JobStatusResponse;
 import com.bluewhale.agent.model.dto.ProviderImageGenerationRequest;
 import com.bluewhale.agent.model.dto.VideoGenerateRequest;
@@ -33,6 +35,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -59,6 +62,8 @@ class GenerationJobServiceTest {
     private GenerationModelCapabilityMapper capabilityMapper;
     @Mock
     private ImageGenerationProviderRegistry providerRegistry;
+    @Mock
+    private GenerationStreamService generationStreamService;
 
     @InjectMocks
     private GenerationJobService service;
@@ -123,13 +128,29 @@ class GenerationJobServiceTest {
         when(assetStorageService.downloadAndStore("https://ark/img.png", 7L, Asset.TYPE_IMAGE, null))
                 .thenReturn(imageAsset(9L, "/assets/x.png"));
 
-        ImageResult r = service.createImageJob(req, 7L);
+        ImageGenerateResponse r = service.createImageJob(req, 7L);
 
         assertThat(r.assetId()).isEqualTo(9L);
         assertThat(r.url()).isEqualTo("/assets/x.png");
+        assertThat(r.stream()).isFalse();
         GenerationJob updated = captureUpdate();
         assertThat(updated.getStatus()).isEqualTo(GenerationJob.STATUS_SUCCEEDED);
         assertThat(updated.getOutputAssetIds()).containsExactly(9L);
+    }
+
+    @Test
+    void createImageJobStreamingReturnsJobId() {
+        GenerationModelCapability cap = imageCapability();
+        cap.getFeatures().setStream(true);
+        when(capabilityMapper.selectEnabledByModelId(MODEL_ID)).thenReturn(Optional.of(cap));
+
+        ImageGenerateResponse r = service.createImageJob(imageReq("cat"), 7L);
+
+        assertThat(r.stream()).isTrue();
+        assertThat(r.jobId()).isEqualTo(1L);
+        assertThat(r.status()).isEqualTo(GenerationJob.STATUS_PROCESSING);
+        verify(volcEngineService, never()).generate(any());
+        verify(generationStreamService).runImageStream(eq(1L), any(GenerationModelCapability.class), any());
     }
 
     @Test
@@ -163,8 +184,8 @@ class GenerationJobServiceTest {
 
     @Test
     void createVideoJobSuccessReturnsQueued() {
-        VideoGenerateRequest req = new VideoGenerateRequest("cat video", "720p", "16:9", 5L, null, null);
-        when(volcEngineService.createVideoTask("cat video", null, "16:9", "720p", 5L)).thenReturn("task-1");
+        VideoGenerateRequest req = new VideoGenerateRequest("cat video", "vid-model", "720p", "16:9", 5L, null);
+        when(volcEngineService.createVideoTask("vid-model", "cat video", null, "16:9", "720p", 5L)).thenReturn("task-1");
 
         CreateJobResponse resp = service.createVideoJob(req, 7L);
 
@@ -178,8 +199,8 @@ class GenerationJobServiceTest {
 
     @Test
     void createVideoJobFailureMarksFailed() {
-        VideoGenerateRequest req = new VideoGenerateRequest("p", null, null, null, null, null);
-        when(volcEngineService.createVideoTask(any(), any(), any(), any(), any()))
+        VideoGenerateRequest req = new VideoGenerateRequest("p", "vid-model", null, null, null, null);
+        when(volcEngineService.createVideoTask(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new GlobalException(400, "上游创建任务失败: x"));
 
         assertThatThrownBy(() -> service.createVideoJob(req, 7L)).isInstanceOf(GlobalException.class);
@@ -220,6 +241,39 @@ class GenerationJobServiceTest {
         JobStatusResponse r = service.getJobStatus(1L);
         assertThat(r.status()).isEqualTo(GenerationJob.STATUS_PROCESSING);
         assertThat(r.asset()).isNull();
+    }
+
+    @Test
+    void listJobsResolvesOutputAssetsWithoutNPlus1() {
+        GenerationJob ok = new GenerationJob()
+                .setUserId(7L).setType(GenerationJob.TYPE_IMAGE).setStatus(GenerationJob.STATUS_SUCCEEDED)
+                .setProgress(100).setOutputAssetIds(List.of(9L, 11L));
+        ok.setId(1L);
+        GenerationJob processing = new GenerationJob()
+                .setUserId(7L).setType(GenerationJob.TYPE_VIDEO).setStatus(GenerationJob.STATUS_PROCESSING)
+                .setProgress(30);
+        processing.setId(2L);
+
+        Page<GenerationJob> page = new Page<>(1, 20, 2);
+        page.setRecords(List.of(ok, processing));
+        when(jobMapper.selectPage(any(Page.class), any())).thenReturn(page);
+
+        Asset a9 = new Asset().setUrl("/assets/9.png").setType(Asset.TYPE_IMAGE).setWidth(512).setHeight(512);
+        a9.setId(9L);
+        Asset a11 = new Asset().setUrl("/assets/11.png").setType(Asset.TYPE_IMAGE).setWidth(1024).setHeight(1024);
+        a11.setId(11L);
+        when(assetMapper.selectBatchIds(any())).thenReturn(List.of(a9, a11));
+
+        Page<JobListItemResponse> result = service.listJobs(7L, null, null, null, 1, 20);
+
+        assertThat(result.getRecords()).hasSize(2);
+        JobListItemResponse okItem = result.getRecords().get(0);
+        assertThat(okItem.jobId()).isEqualTo(1L);
+        assertThat(okItem.status()).isEqualTo(GenerationJob.STATUS_SUCCEEDED);
+        assertThat(okItem.outputAssets()).hasSize(2);
+        assertThat(okItem.outputAssets().get(0).url()).isEqualTo("/assets/9.png");
+        assertThat(result.getRecords().get(1).outputAssets()).isEmpty();
+        verify(assetMapper, times(1)).selectBatchIds(any());
     }
 
     @Test
@@ -308,8 +362,8 @@ class GenerationJobServiceTest {
 
     @Test
     void createVideoJobSingleUpdate() {
-        VideoGenerateRequest req = new VideoGenerateRequest("p", null, null, null, null, null);
-        when(volcEngineService.createVideoTask(any(), any(), any(), any(), any())).thenReturn("t1");
+        VideoGenerateRequest req = new VideoGenerateRequest("p", "vid-model", null, null, null, null);
+        when(volcEngineService.createVideoTask(any(), any(), any(), any(), any(), any())).thenReturn("t1");
         service.createVideoJob(req, 7L);
         verify(jobMapper, times(1)).updateById(any(GenerationJob.class));
     }

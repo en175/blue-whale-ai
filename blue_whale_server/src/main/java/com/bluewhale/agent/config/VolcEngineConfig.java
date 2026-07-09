@@ -28,8 +28,7 @@ public class VolcEngineConfig {
     @Bean(destroyMethod = "shutdownExecutor")
     @ConditionalOnExpression("!'${volcengine.ark.api-key:}'.isEmpty()")
     public ArkService arkService(ArkProperties props) {
-        log.info("init ArkService: baseUrl={}, imageModel={}, videoModel={}",
-                props.getBaseUrl(), props.getImageModel(), props.getVideoModel());
+        log.info("init ArkService: baseUrl={}", props.getBaseUrl());
         return ArkService.builder()
                 .apiKey(props.getApiKey())
                 .baseUrl(props.getBaseUrl())
@@ -46,9 +45,5 @@ public class VolcEngineConfig {
         private String baseUrl = "https://ark.cn-beijing.volces.com/api/v3";
         /** Ark API key，环境变量 ARK_API_KEY 注入；缺失时不创建 ArkService bean，service 调用时抛配置缺失错误。 */
         private String apiKey;
-        /** 文生图模型 id（Seedream）。 */
-        private String imageModel = "doubao-seedream-5-0-lite-250723";
-        /** 图文生视频模型 id（Seedance 2.0）。 */
-        private String videoModel = "doubao-seedance-2-0-260128";
     }
 }

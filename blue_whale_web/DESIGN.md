@@ -137,6 +137,7 @@ Blue-Whale 是一个面向 AI Agent / Canvas 交互的纯客户端工作台。�
 Canvas 工作台采用绝对定位的三区布局：左侧工具栏、底部生成 Dock、
 右侧 AgentChatPanel。关键尺寸 token 已在 `globals.css` 中以
 `--tc-agent-panel-width: 468px` 等形式定义，UI 实现应直接引用这些 CSS 变量。
+全局左侧导航栏（`Sidebar.tsx`，canvas 路由自隐藏）宽度 token：`--tc-sidebar-width: 76px`（对标即梦窄图标栏：图标在上、小字在下垂直排列）。
 
 间距采用 4 的倍数尺度（4 / 8 / 12 / 16 / 24）。
 

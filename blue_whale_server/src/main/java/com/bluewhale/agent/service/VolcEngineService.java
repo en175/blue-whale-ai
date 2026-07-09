@@ -13,9 +13,11 @@ import com.volcengine.ark.runtime.model.content.generation.CreateContentGenerati
 import com.volcengine.ark.runtime.model.content.generation.GetContentGenerationTaskRequest;
 import com.volcengine.ark.runtime.model.content.generation.GetContentGenerationTaskResponse;
 import com.volcengine.ark.runtime.model.images.generation.GenerateImagesRequest;
+import com.volcengine.ark.runtime.model.images.generation.ImageGenStreamEvent;
 import com.volcengine.ark.runtime.model.images.generation.ImagesResponse;
 import com.volcengine.ark.runtime.model.images.generation.ResponseFormat;
 import com.volcengine.ark.runtime.service.ArkService;
+import io.reactivex.Flowable;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -29,8 +31,7 @@ import java.util.List;
  * 火山方舟 Ark 调用封装：文生图同步 + 视频任务创建/查询。
  *
  * <p>当前类同时实现 {@link ImageGenerationProvider}，作为多模型 Provider 架构中火山的具体实现。
- * 文生图参数（model、size、format 等）均来自调用方，不再依赖 {@code ark.image-model} 单一配置；
- * 视频生成仍使用 {@code ark.video-model} 配置。
+ * 文生图/视频的 model 均由调用方传入；配置仅保留 base-url 与 api-key。
  */
 @Slf4j
 @Service
@@ -47,10 +48,45 @@ public class VolcEngineService implements ImageGenerationProvider {
         return PROVIDER_ID;
     }
 
+    /** 火山图片生成支持流式。 */
+    @Override
+    public boolean supportsStreaming() {
+        return true;
+    }
+
     /** 文生图同步生成，按模型能力透传支持的字段。 */
     @Override
     public ImageGenerationResult generate(ProviderImageGenerationRequest req) {
         ArkService arkService = requireArk();
+        GenerateImagesRequest request = buildArkRequest(req);
+        try {
+            ImagesResponse resp = arkService.generateImages(request);
+            if (resp.getError() != null && resp.getError().getCode() != null) {
+                log.warn("ark image moderation rejected: code={}, msg={}",
+                        resp.getError().getCode(), resp.getError().getMessage());
+                throw new GlobalException(SystemCode.CONTENT_MODERATION_REJECTED_CODE, resp.getError().getMessage());
+            }
+            if (resp.getData() == null || resp.getData().isEmpty()) {
+                throw new GlobalException(SystemCode.FAILURE_CODE, "文生图返回空数据");
+            }
+            return new ImageGenerationResult(resp.getData().get(0).getUrl());
+        } catch (GlobalException e) {
+            throw e;
+        } catch (Exception e) {
+            logArkError("generateImages", e);
+            throw new GlobalException(SystemCode.FAILURE_CODE, "上游生成失败: " + rootMessage(e));
+        }
+    }
+
+    /** 流式文生图，返回事件流；Ark SDK 内部 setStream(true)。 */
+    @Override
+    public Flowable<ImageGenStreamEvent> streamGenerateImages(ProviderImageGenerationRequest req) {
+        ArkService arkService = requireArk();
+        return arkService.streamGenerateImages(buildArkRequest(req));
+    }
+
+    /** 构建火山 Ark 图片生成请求，同步与流式两条路径复用。 */
+    private GenerateImagesRequest buildArkRequest(ProviderImageGenerationRequest req) {
         GenerateImagesRequest.Builder builder = GenerateImagesRequest.builder()
                 .model(req.getModelId())
                 .prompt(req.getPrompt())
@@ -77,29 +113,11 @@ public class VolcEngineService implements ImageGenerationProvider {
             tool.setType("web_search");
             builder.tools(Collections.singletonList(tool));
         }
-
-        GenerateImagesRequest request = builder.build();
-        try {
-            ImagesResponse resp = arkService.generateImages(request);
-            if (resp.getError() != null && resp.getError().getCode() != null) {
-                log.warn("ark image moderation rejected: code={}, msg={}",
-                        resp.getError().getCode(), resp.getError().getMessage());
-                throw new GlobalException(SystemCode.CONTENT_MODERATION_REJECTED_CODE, resp.getError().getMessage());
-            }
-            if (resp.getData() == null || resp.getData().isEmpty()) {
-                throw new GlobalException(SystemCode.FAILURE_CODE, "文生图返回空数据");
-            }
-            return new ImageGenerationResult(resp.getData().get(0).getUrl());
-        } catch (GlobalException e) {
-            throw e;
-        } catch (Exception e) {
-            logArkError("generateImages", e);
-            throw new GlobalException(SystemCode.FAILURE_CODE, "上游生成失败: " + rootMessage(e));
-        }
+        return builder.build();
     }
 
     /** 创建视频生成任务，返回火山 task id。 */
-    public String createVideoTask(String prompt, String imageUrl, String ratio, String resolution, Long duration) {
+    public String createVideoTask(String model, String prompt, String imageUrl, String ratio, String resolution, Long duration) {
         ArkService arkService = requireArk();
         List<CreateContentGenerationTaskRequest.Content> contents = new ArrayList<>();
         contents.add(CreateContentGenerationTaskRequest.Content.builder()
@@ -113,7 +131,7 @@ public class VolcEngineService implements ImageGenerationProvider {
                     .build());
         }
         CreateContentGenerationTaskRequest.Builder builder = CreateContentGenerationTaskRequest.builder()
-                .model(arkProperties.getVideoModel())
+                .model(model)
                 .content(contents);
         if (ratio != null && !ratio.isBlank()) {
             builder.ratio(ratio);

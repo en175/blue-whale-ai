@@ -24,6 +24,13 @@ const nextConfig: NextConfig = {
         source: "/api/:path*",
         destination: `${BACKEND_API_BASE_URL}/api/:path*`,
       },
+      {
+        // 静态资源（生成图片等）同源代理 → 后端。
+        // 后端 assets.url 存的是 /assets/<file>，由后端 :8000 的 /assets/** handler 提供服务。
+        // 不代理则前端 <img src="/assets/..."> 落到 Next 源 404，图片显示黑块。
+        source: "/assets/:path*",
+        destination: `${BACKEND_API_BASE_URL}/assets/:path*`,
+      },
     ];
   },
 };

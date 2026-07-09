@@ -4,7 +4,7 @@ import com.bluewhale.agent.common.resp.SystemCode;
 import com.bluewhale.agent.common.web.RestExceptionConfig;
 import com.bluewhale.agent.model.dto.CreateJobResponse;
 import com.bluewhale.agent.model.dto.ImageGenerateRequest;
-import com.bluewhale.agent.model.dto.ImageResult;
+import com.bluewhale.agent.model.dto.ImageGenerateResponse;
 import com.bluewhale.agent.service.GenerationJobService;
 import com.bluewhale.agent.service.GenerationModelCapabilityService;
 import org.junit.jupiter.api.Test;
@@ -46,7 +46,7 @@ class GenerationControllerTest {
     @Test
     void generateImageReturnsResult() throws Exception {
         when(generationJobService.createImageJob(any(), eq(7L)))
-                .thenReturn(new ImageResult(9L, "/assets/x.png"));
+                .thenReturn(ImageGenerateResponse.sync(9L, "/assets/x.png"));
         mockMvc.perform(post("/api/generation/image")
                         .header("X-User-Id", "7")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -76,7 +76,7 @@ class GenerationControllerTest {
 
     @Test
     void generateImageParsesSnakeCase() throws Exception {
-        when(generationJobService.createImageJob(any(), eq(7L))).thenReturn(new ImageResult(1L, "/x"));
+        when(generationJobService.createImageJob(any(), eq(7L))).thenReturn(ImageGenerateResponse.sync(1L, "/x"));
         mockMvc.perform(post("/api/generation/image")
                         .header("X-User-Id", "7")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -105,7 +105,7 @@ class GenerationControllerTest {
         mockMvc.perform(post("/api/generation/video")
                         .header("X-User-Id", "7")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"prompt\":\"cat video\"}"))
+                        .content("{\"prompt\":\"cat video\",\"model_id\":\"vid-model\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.job_id").value(1))

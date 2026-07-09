@@ -1,5 +1,7 @@
 package com.bluewhale.agent.service;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bluewhale.agent.common.exception.GlobalException;
 import com.bluewhale.agent.common.resp.SystemCode;
 import com.bluewhale.agent.mapper.AssetMapper;
@@ -7,8 +9,9 @@ import com.bluewhale.agent.mapper.GenerationJobMapper;
 import com.bluewhale.agent.mapper.GenerationModelCapabilityMapper;
 import com.bluewhale.agent.model.dto.CreateJobResponse;
 import com.bluewhale.agent.model.dto.ImageGenerateRequest;
+import com.bluewhale.agent.model.dto.ImageGenerateResponse;
 import com.bluewhale.agent.model.dto.ImageGenerationResult;
-import com.bluewhale.agent.model.dto.ImageResult;
+import com.bluewhale.agent.model.dto.JobListItemResponse;
 import com.bluewhale.agent.model.dto.JobStatusResponse;
 import com.bluewhale.agent.model.dto.ProviderImageGenerationRequest;
 import com.bluewhale.agent.model.dto.VideoGenerateRequest;
@@ -23,6 +26,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -52,16 +57,25 @@ public class GenerationJobService {
     private final AssetStorageService assetStorageService;
     private final GenerationModelCapabilityMapper capabilityMapper;
     private final ImageGenerationProviderRegistry providerRegistry;
+    private final GenerationStreamService generationStreamService;
 
-    /** 文生图同步生成。 */
+    /** 文生图：流式模型建 job 异步逐张生成（返 job_id）；非流式模型同步一次性返回（返 asset_id+url）。 */
     @Transactional
-    public ImageResult createImageJob(ImageGenerateRequest req, Long userId) {
+    public ImageGenerateResponse createImageJob(ImageGenerateRequest req, Long userId) {
         GenerationModelCapability capability = capabilityMapper.selectEnabledByModelId(req.modelId())
                 .orElseThrow(() -> new GlobalException(SystemCode.FAILURE_CODE, "不支持的模型: " + req.modelId()));
 
         ProviderImageGenerationRequest providerReq = buildProviderRequest(req, capability);
         GenerationJob job = newGenerationJob(userId, GenerationJob.TYPE_IMAGE, capability.getProviderId(), buildImageInput(req));
         jobMapper.insert(job);
+
+        if (streamFlag(capability)) {
+            job.setStatus(GenerationJob.STATUS_PROCESSING);
+            jobMapper.updateById(job);
+            triggerStreamAfterCommit(job.getId(), capability, providerReq);
+            return ImageGenerateResponse.streaming(job.getId());
+        }
+
         try {
             ImageGenerationProvider provider = providerRegistry.getProvider(capability.getProviderId());
             ImageGenerationResult result = provider.generate(providerReq);
@@ -70,13 +84,38 @@ public class GenerationJobService {
                     .setProgress(100)
                     .setOutputAssetIds(List.of(asset.getId()));
             jobMapper.updateById(job);
-            return new ImageResult(asset.getId(), asset.getUrl());
+            return ImageGenerateResponse.sync(asset.getId(), asset.getUrl());
         } catch (DataAccessException e) {
-            markFailed(job, 500, "数据库未连接，请检查本地 MySQL");
-            throw new GlobalException("数据库未连接，请检查本地 MySQL");
+            // 暴露真实根因（最内层异常 message），避免笼统的“数据库未连接”掩盖问题
+            log.error("createImageJob 数据库操作异常", e);
+            Throwable root = e.getMostSpecificCause() != null ? e.getMostSpecificCause() : e;
+            String rootMsg = root.getMessage() != null ? root.getMessage() : e.getMessage();
+            markFailed(job, 500, "数据库错误: " + rootMsg);
+            throw new GlobalException("数据库错误: " + rootMsg);
         } catch (Exception e) {
             markFailed(job, SystemCode.FAILURE_CODE, e.getMessage());
             throw e instanceof GlobalException ge ? ge : new GlobalException(SystemCode.FAILURE_CODE, e.getMessage());
+        }
+    }
+
+    /** 模型能力 features.stream=true 走流式路径。 */
+    private boolean streamFlag(GenerationModelCapability capability) {
+        GenerationModelCapability.Features features = capability.getFeatures();
+        return features != null && Boolean.TRUE.equals(features.getStream());
+    }
+
+    /** 事务提交后才触发 @Async（保证 insert 已可见）；无事务上下文则直接调。 */
+    private void triggerStreamAfterCommit(Long jobId, GenerationModelCapability capability,
+                                          ProviderImageGenerationRequest req) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    generationStreamService.runImageStream(jobId, capability, req);
+                }
+            });
+        } else {
+            generationStreamService.runImageStream(jobId, capability, req);
         }
     }
 
@@ -86,7 +125,7 @@ public class GenerationJobService {
         GenerationJob job = newGenerationJob(userId, GenerationJob.TYPE_VIDEO, "volcengine", buildVideoInput(req));
         jobMapper.insert(job);
         try {
-            String taskId = volcEngineService.createVideoTask(req.prompt(), req.firstFrameUrl(),
+            String taskId = volcEngineService.createVideoTask(req.modelId(), req.prompt(), req.firstFrameUrl(),
                     req.aspectRatio(), req.resolution(), req.duration());
             job.setStatus(GenerationJob.STATUS_PROCESSING)
                     .setProviderTaskId(taskId)
@@ -116,6 +155,52 @@ public class GenerationJobService {
             }
         }
         return new JobStatusResponse(job.getId(), job.getStatus(), job.getProgress(), assetDto);
+    }
+
+    /**
+     * 任务列表（生成流页）：按 {@code userId} + {@code type/status/projectId} 过滤，分页，按创建时间倒序。
+     * 产出资源（outputAssets）一次性按 outputAssetIds 批量查 assets 补 url，避免 N+1。
+     */
+    public Page<JobListItemResponse> listJobs(Long userId, String type, String status, Long projectId, int page, int size) {
+        Page<GenerationJob> jobPage = jobMapper.selectPage(new Page<>(page, size),
+                Wrappers.<GenerationJob>lambdaQuery()
+                        .eq(GenerationJob::getUserId, userId)
+                        .eq(type != null && !type.isBlank(), GenerationJob::getType, type)
+                        .eq(status != null && !status.isBlank(), GenerationJob::getStatus, status)
+                        .eq(projectId != null, GenerationJob::getProjectId, projectId)
+                        .orderByDesc(GenerationJob::getGmtCreate));
+
+        List<Long> assetIds = jobPage.getRecords().stream()
+                .filter(j -> j.getOutputAssetIds() != null)
+                .flatMap(j -> j.getOutputAssetIds().stream())
+                .distinct()
+                .toList();
+        Map<Long, Asset> assetMap = new HashMap<>();
+        if (!assetIds.isEmpty()) {
+            for (Asset a : assetMapper.selectBatchIds(assetIds)) {
+                assetMap.put(a.getId(), a);
+            }
+        }
+
+        List<JobListItemResponse> items = jobPage.getRecords().stream()
+                .map(j -> new JobListItemResponse(j.getId(), j.getType(), j.getStatus(), j.getProgress(),
+                        j.getInput(), j.getGmtCreate(), resolveOutputAssets(j, assetMap)))
+                .toList();
+
+        Page<JobListItemResponse> result = new Page<>(jobPage.getCurrent(), jobPage.getSize(), jobPage.getTotal());
+        result.setRecords(items);
+        return result;
+    }
+
+    private List<JobListItemResponse.OutputAsset> resolveOutputAssets(GenerationJob job, Map<Long, Asset> assetMap) {
+        if (job.getOutputAssetIds() == null) {
+            return List.of();
+        }
+        return job.getOutputAssetIds().stream()
+                .map(assetMap::get)
+                .filter(a -> a != null)
+                .map(a -> new JobListItemResponse.OutputAsset(a.getId(), a.getUrl(), a.getType(), a.getWidth(), a.getHeight()))
+                .toList();
     }
 
     /** poller 调：查 Ark 更新状态，succeeded 时下载转存视频。 */
@@ -204,6 +289,7 @@ public class GenerationJobService {
 
     private Map<String, Object> buildVideoInput(VideoGenerateRequest req) {
         Map<String, Object> input = new HashMap<>();
+        input.put("model_id", req.modelId());
         input.put("prompt", req.prompt());
         input.put("resolution", req.resolution());
         input.put("aspectRatio", req.aspectRatio());

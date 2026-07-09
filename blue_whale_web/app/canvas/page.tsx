@@ -28,7 +28,7 @@ import type { Viewport, NodeItem, NodeType, DockMediaItem, CardMessage, ChatMess
 import { nodeFromCard, projectReducer, initialProjectState } from "./_canvas";
 import { PROJECTS } from "./_canvas";
 import type { GenerateArgs } from "./_canvas";
-import { generateImage, createVideoJob } from "./_canvas/api/generation";
+import { generateImage, createVideoJob, streamJob } from "./_canvas/api/generation";
 import { useJobStatus } from "./_canvas/hooks/useJobStatus";
 
 /** "1x"/"2x" → 数字；解析失败回落 1。 */
@@ -305,9 +305,27 @@ function CanvasPageInner() {
               .map((m) => m.src)
               .filter((s): s is string => Boolean(s)),
           });
-          addNode("image", { content: trimmed, imageUrl: result.url });
-          setGenerating(false);
-          setGenerateError(null);
+          if (result.stream && result.job_id != null) {
+            // 流式模型：原生 EventSource 订阅，逐张上屏
+            streamJob(result.job_id, {
+              onImage: (url) => addNode("image", { content: trimmed, imageUrl: url }),
+              onDone: () => {
+                setGenerating(false);
+                setGenerateError(null);
+              },
+              onError: (message) => {
+                setGenerateError(message);
+                setGenerating(false);
+              },
+            });
+          } else {
+            // 非流式模型：同步单图上屏
+            if (result.url) {
+              addNode("image", { content: trimmed, imageUrl: result.url });
+            }
+            setGenerating(false);
+            setGenerateError(null);
+          }
         } else {
           const result = await createVideoJob({
             prompt: trimmed,

@@ -75,13 +75,17 @@ public class RestExceptionConfig {
     @ExceptionHandler(DataAccessException.class)
     public Result<Object> handleError(DataAccessException e) {
         log.error("data access error", e);
-        return Result.failed(500, "数据库未连接，请检查本地 MySQL");
+        Throwable root = e.getMostSpecificCause() != null ? e.getMostSpecificCause() : e;
+        String rootMsg = root.getMessage() != null ? root.getMessage() : e.getMessage();
+        return Result.failed(500, "数据库错误: " + rootMsg);
     }
 
     @ExceptionHandler(TransactionException.class)
     public Result<Object> handleError(TransactionException e) {
         log.error("transaction error", e);
-        return Result.failed(500, "数据库未连接，请检查本地 MySQL");
+        Throwable root = e.getMostSpecificCause() != null ? e.getMostSpecificCause() : e;
+        String rootMsg = root.getMessage() != null ? root.getMessage() : e.getMessage();
+        return Result.failed(500, "数据库错误: " + rootMsg);
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

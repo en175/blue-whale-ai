@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS generation_model_capability (
 INSERT INTO generation_model_capability
 (provider_id, model_id, capability_type, model_label, icon, supported_sizes, supported_aspect_ratios, supported_formats, default_size, default_format, default_aspect_ratio, features, enabled)
 VALUES
-('volcengine', 'doubao-seedream-5-0-lite-250723', 'image', 'Seedream 5.0 Lite', NULL,
+('volcengine', 'doubao-seedream-5-0-260128', 'image', 'Seedream 5.0 Lite', NULL,
  '[{"id":"2k","label":"2K","api_value":"2K"},{"id":"3k","label":"3K","api_value":"3K"},{"id":"4k","label":"4K","api_value":"4K"}]',
  '["1:1","4:3","3:4","16:9","9:16","3:2","2:3","21:9"]',
  '["png","jpeg"]',
@@ -109,4 +109,16 @@ VALUES
  '[]',
  '1024x1024', NULL, '1:1',
  '{"reference_image":false,"watermark":true,"quantity_max":1,"sequential_image_generation":false,"stream":false,"tools":false}',
+ 1);
+
+-- 火山 Seedance 视频生成能力种子数据（MVP，按 docs/agent/视频生成api 录入）
+INSERT INTO generation_model_capability
+(provider_id, model_id, capability_type, model_label, icon, supported_sizes, supported_aspect_ratios, supported_formats, default_size, default_format, default_aspect_ratio, features, enabled)
+VALUES
+('volcengine', 'doubao-seedance-2-0-260128', 'video', 'Seedance 2.0', NULL,
+ '[{"id":"480p","label":"480P","api_value":"480p"},{"id":"720p","label":"720P","api_value":"720p"},{"id":"1080p","label":"1080P","api_value":"1080p"}]',
+ '["16:9","9:16","1:1"]',
+ '[]',
+ '720p', NULL, '16:9',
+ '{"reference_image":true,"watermark":false,"quantity_max":1,"sequential_image_generation":false,"stream":false,"tools":false}',
  1);
