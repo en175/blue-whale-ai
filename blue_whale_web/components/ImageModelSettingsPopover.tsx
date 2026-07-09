@@ -55,12 +55,7 @@ export const IMAGE_ASPECT_RATIOS = [
   { id: "16:9", label: "16:9" },
   { id: "2:3", label: "2:3" },
   { id: "3:2", label: "3:2" },
-  { id: "5:4", label: "5:4" },
-  { id: "4:5", label: "4:5" },
   { id: "21:9", label: "21:9" },
-  { id: "9:21", label: "9:21" },
-  { id: "1:2", label: "1:2" },
-  { id: "2:1", label: "2:1" },
 ];
 
 export type ImageModel = (typeof IMAGE_MODELS)[number];
