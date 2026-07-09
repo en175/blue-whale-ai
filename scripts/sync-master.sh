@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sync the main checkout's master mirror with origin/master.
+# Fast-forward a clean local master to origin/master when the user wants to refresh it.
 
 set -euo pipefail
 
@@ -27,11 +27,11 @@ if [ "$current_branch" != "master" ]; then
 fi
 
 if [ -n "$(git status --porcelain)" ]; then
-  echo "❌ sync-master: 本地 master 不是干净镜像，已停止同步。" >&2
+  echo "❌ sync-master: 本地 master 工作区不干净，已停止同步。" >&2
   echo "" >&2
   git status --short >&2
   echo "" >&2
-  echo "请先确认这些改动归属：任务改动迁移到任务 worktree；误改/生成物确认后清理；用户未完成工作则保留并换干净 checkout 开任务。" >&2
+  echo "请先确认这些改动归属；本脚本只在用户本地集成区干净时做 fast-forward 同步。" >&2
   exit 1
 fi
 
@@ -53,7 +53,7 @@ if [ "$merge_base" = "$local_master" ]; then
 fi
 
 if [ "$merge_base" = "$origin_master" ]; then
-  fail "本地 master ahead origin/master。禁止从含本地提交的 master 开新任务，请先处理这些提交。"
+  fail "本地 master ahead origin/master。保留用户本地集成区，不自动改写或发布。"
 fi
 
-fail "本地 master 与 origin/master 已分叉。请人工处理后再开任务 worktree。"
+fail "本地 master 与 origin/master 已分叉。请人工处理用户本地集成区。"

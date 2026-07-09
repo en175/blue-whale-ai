@@ -417,6 +417,17 @@ def mode_force_lease_non_work(command: str) -> int:
     return 1
 
 
+def mode_task_acceptance_git(command: str) -> int:
+    for invocation in git_invocations(command):
+        if invocation.subcommand == "commit":
+            print("git commit")
+            return 0
+        if invocation.subcommand == "merge" and "--ff-only" not in invocation.args:
+            print("git merge")
+            return 0
+    return 1
+
+
 def mode_dangerous_pattern(command: str) -> int:
     for invocation in git_invocations(command):
         args = invocation.args
@@ -464,6 +475,8 @@ def main() -> int:
         return mode_push_has_bare_force(command)
     if mode == "force-lease-non-work":
         return mode_force_lease_non_work(command)
+    if mode == "task-acceptance-git":
+        return mode_task_acceptance_git(command)
     if mode == "dangerous-pattern":
         return mode_dangerous_pattern(command)
     if mode == "invokes":

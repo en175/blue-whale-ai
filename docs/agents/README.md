@@ -12,7 +12,7 @@
 |---|---|
 | **开 PR / 提交代码** | [commit-and-review.md](commit-and-review.md) |
 | **开新分支** | [branch-naming.md](branch-naming.md) |
-| **并行任务 / task worktree 生命周期** | [worktree-workflow.md](worktree-workflow.md) |
+| **Agent 任务区 / 本地集成 / task worktree 生命周期** | [worktree-workflow.md](worktree-workflow.md) |
 | **创建 / 跟进 Issue** | [issue-tracker.md](issue-tracker.md) |
 | **打 / 改标签** | [triage-labels.md](triage-labels.md) |
 | **维护 / 新增 Claude Code 拦截器** | [hooks/README.md](hooks/README.md) |
@@ -23,6 +23,7 @@
 
 - [branch-naming.md](branch-naming.md) ↔ [commit-and-review.md](commit-and-review.md):分支前缀 vs Conventional Commits type 区分(刻意不统一,见 branch-naming.md)
 - [worktree-workflow.md](worktree-workflow.md) → [ADR-0009](../../adr/0009-parallel-agent-worktrees.md):并行 Agent Session 的 task worktree 隔离
+- [worktree-workflow.md](worktree-workflow.md) → [ADR-0010](../../adr/0010-local-master-is-user-integration-zone.md):用户本地集成区与 Agent 任务区边界
 - [hooks/README.md](hooks/README.md) → [commit-and-review.md](commit-and-review.md):「合并方法」一节
 - [hooks/README.md](hooks/README.md) → [ADR-0003](../../adr/0003-no-direct-push-to-master.md):「禁止直推 master」决策
 - [branch-naming.md](branch-naming.md) → [ADR-0004](../../adr/0004-branch-naming.md):分支命名决策

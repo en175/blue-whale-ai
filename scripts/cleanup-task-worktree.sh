@@ -49,9 +49,11 @@ main_root="$(git -C "$ROOT" worktree list --porcelain | awk -v base="$WORKTREE_B
 [ -n "$main_root" ] || fail "找不到主 checkout（不在 $WORKTREE_BASE 下的 worktree），不能安全删除。"
 
 cd "$main_root"
-"$main_root/scripts/sync-master.sh"
 git worktree remove "$ROOT"
-git branch -d "$branch"
+
+# 本地 master 可能是用户本地集成区，未必包含 origin/master。
+# 前面已经证明任务分支 HEAD 被 origin/master 包含，因此直接删除本地 ref 是安全清理。
+git update-ref -d "refs/heads/$branch"
 
 # 远程源分支删除不可逆，放在本地全部清理成功之后：本地失败时尚可重试，远程不受影响。
 if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then

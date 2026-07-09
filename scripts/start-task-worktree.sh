@@ -46,7 +46,7 @@ if [ -e "$target" ]; then
   fail "目标 worktree 已存在：$target"
 fi
 
-"$ROOT/scripts/sync-master.sh"
+git -C "$ROOT" fetch origin master
 
 mkdir -p "$WORKTREE_BASE"
 git -C "$ROOT" worktree add "$target" -b "$branch" origin/master

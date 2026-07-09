@@ -5,6 +5,7 @@
 # 兜底对象：
 #   - Bash: 直接 git push（硬拦，必须走标准入口）
 #   - Bash: scripts/publish-review-package.sh --user-authorized（一次确认）
+#   - Bash: 本地验收 commit / 非 --ff-only merge（一次确认，或走标准本地入口）
 #   - mcp__gitee-ent__create_enterprise_repo_pull: 创建 Gitee PR
 #   - mcp__gitee-ent__merge_enterprise_pull: 合并 Gitee PR
 #   - mcp__gitee-ent__create_enterprise_repo_release: 创建 Gitee release
@@ -14,6 +15,7 @@
 #   - 直接 git push 是绕过标准入口，直接阻断。
 #   - 创建 PR 必须消费标准入口写入的短期标记，并校验 target=master/source_branch/no draft。
 #   - 发布审查包授权不覆盖合并；合并仍会单独触发确认。
+#   - 本地任务验收授权不覆盖远程发布；commit 与本地 merge 都需要确认。
 #
 # 输出契约：
 #   - stdout 仅输出 Claude Code 结构化 JSON 决策
@@ -45,10 +47,11 @@ block() {
 BLOCKED: ${reason}
 
 本项目发布动作必须遵守：
-- 发布审查包 = 推送当前工单分支 + 创建指向 master 的 PR
-- 发布审查包必须使用 scripts/publish-review-package.sh --user-authorized
-- 创建 PR 不使用 draft=true
-- 合并 PR 必须另获用户授权，不能复用发布审查包授权
+	- 发布审查包 = 推送当前工单分支 + 创建指向 master 的 PR
+	- 发布审查包必须使用 scripts/publish-review-package.sh --user-authorized
+	- 本地任务验收必须先获得用户确认，再 commit 或 merge 到本地 master
+	- 创建 PR 不使用 draft=true
+	- 合并 PR 必须另获用户授权，不能复用发布审查包授权
 
 详见 CLAUDE.md「发布动作必须先获用户授权」。
 EOF
@@ -125,6 +128,26 @@ if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes publ
     block "发布审查包入口缺少 --user-authorized。必须先获得用户明确授权。"
   fi
   ask_permission "确认用户已授权发布审查包：推送当前工单分支并创建 target=master 的 PR。"
+fi
+
+# Bash: 标准本地任务验收入口。缺少 --user-authorized 时硬拦；带参数时 ask 一次。
+if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes commit-task-for-review.sh; then
+  if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes commit-task-for-review.sh --user-authorized; then
+    block "任务验收提交入口缺少 --user-authorized。必须先获得用户明确授权。"
+  fi
+  ask_permission "确认用户已授权提交任务验收分支。该授权不覆盖合入本地 master 或远程发布。"
+fi
+
+if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes merge-task-to-local-master.sh; then
+  if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes merge-task-to-local-master.sh --user-authorized; then
+    block "合入用户本地 master 入口缺少 --user-authorized。必须先获得用户明确授权。"
+  fi
+  ask_permission "确认用户已授权将任务分支合入本地 master。该授权不覆盖远程发布或 PR 合并。"
+fi
+
+# Bash: 直接 git commit / 非 --ff-only git merge 也需要确认，防止绕过任务验收边界。
+if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" task-acceptance-git >/dev/null; then
+  ask_permission "确认用户已授权本地任务验收 git 操作。子 issue 默认终点仍是未提交 diff + 验证结果。"
 fi
 
 # Bash: cleanup-task-worktree.sh 不在这里 ask。脚本自身校验 PR 已进 origin/master、工作区干净、路径正确。
