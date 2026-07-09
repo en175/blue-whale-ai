@@ -2,9 +2,10 @@
 # pre-commit hook — Blue-Whale
 # 纯 shell，零依赖。功能：
 #   1. 禁提交生成物（graphify-out/ dist/ target/ .next/ __pycache__/ node_modules/ 等）
-#   2. 前端改动时跑 lint（软提醒，不拦提交）
-#   3. 后端改动时跑 py_compile（软提醒，不拦提交）
-#   4. 远程落后软提醒（工单分支落后 origin/master）
+#   2. 前端改动时跑 lint-staged（prettier --write + eslint --fix），lint error 不可修时硬拦
+#   3. 前端改动全量 lint 兜底软提醒（不拦提交）
+#   4. 后端改动时跑 py_compile（软提醒，不拦提交）
+#   5. 远程落后软提醒（工单分支落后 origin/master）
 # 退出码非 0 = 拦截提交。
 
 set -uo pipefail
@@ -49,13 +50,31 @@ if [ -n "$block_hit" ]; then
 fi
 
 # ============================================================
-# 2. 前端 lint（软提醒，不拦提交；仅当本次改了 blue_whale_web/）
-#    失败时仅警告，由人判断是否需修复。
+# 2. 前端改动 → lint-staged 自动修（prettier + eslint --fix）
+#    仅处理本次暂存的 blue_whale_web/ 文件，限定模块范围避免误改后端/scripts。
+#    失败（lint error 无法自动修）→ 硬拦；要求修复后再 commit。
+#    紧接着的 npm run lint 兜底跑全量 lint，发现累积 warning 时软提醒。
 # ============================================================
 if grep -q '^blue_whale_web/' <<< "$staged_files"; then
-  echo "ℹ️  pre-commit: 检测到前端改动，运行 npm run lint（软提醒，不拦截）..." >&2
+  echo "ℹ️  pre-commit: 检测到前端改动，跑 lint-staged（prettier --write + eslint --fix）..." >&2
+  # 在 worktree 根跑 lint-staged（不在 blue_whale_web 子目录跑）—— lint-staged 从 cwd 解析 git root，
+  # 子目录跑会"could not find any staged files matching configured tasks"。npm CLI --prefix 让命令
+  # 复用 blue_whale_web/node_modules，但 cwd 仍是 git root。
+  _lint_log=$(mktemp 2>/dev/null || echo "$(pwd)/.lint-staged.log")
+  if ! npx --no --prefix blue_whale_web --no-install lint-staged >"$_lint_log" 2>&1; then
+    echo "❌ pre-commit: lint-staged 失败（lint error 无法自动修或 formatter 异常）。已拦截提交。" >&2
+    echo "--- lint-staged 输出 ---" >&2
+    cat "$_lint_log" >&2
+    echo "--- 修复后再 commit。可手动跑 npm run format && npm run lint 看具体错误。 ---" >&2
+    rm -f "$_lint_log"
+    exit 1
+  fi
+  rm -f "$_lint_log"
+  echo "✅ lint-staged 通过" >&2
+
+  echo "ℹ️  pre-commit: 跑 npm run lint（兜底软提醒，不拦截）..." >&2
   if ! (cd blue_whale_web && npm run lint) >/dev/null 2>&1; then
-    echo "⚠️  pre-commit: lint 有错误（npm run lint）。本次不拦截，请判断是否需修复。" >&2
+    echo "⚠️  pre-commit: lint 有错误。本次不拦截，请判断是否需修复。注意：警告也请查看 stderr。⚠️" >&2
   else
     echo "✅ lint 通过" >&2
   fi

@@ -10,12 +10,24 @@
     "start": "next start",
     "start:lan": "next start -H 0.0.0.0",
     "lint": "eslint",
+    "lint:fix": "eslint --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
     "design:lint": "designmd lint DESIGN.md",
     "design:diff": "designmd diff DESIGN.md DESIGN-v2.md",
     "design:export:tw": "designmd export --format css-tailwind DESIGN.md",
     "design:spec": "designmd spec --rules"
+  },
+  "lint-staged": {
+    "blue_whale_web/**/*.{ts,tsx,js,jsx,mjs}": [
+      "prettier --config blue_whale_web/.prettierrc --write",
+      "eslint --config blue_whale_web/eslint.config.mjs --fix"
+    ],
+    "blue_whale_web/**/*.{css,md,json}": [
+      "prettier --config blue_whale_web/.prettierrc --write"
+    ]
   },
   "dependencies": {
     "framer-motion": "^12.42.0",
@@ -37,8 +49,10 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "jsdom": "^29.1.1",
+    "lint-staged": "^17.0.8",
     "patch-package": "^8.0.1",
     "postcss": "^8.5.16",
+    "prettier": "^3.9.4",
     "tailwindcss": "^3.4.0",
     "typescript": "^5",
     "vitest": "^2.1.8"
