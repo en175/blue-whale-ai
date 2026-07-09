@@ -1,0 +1,47 @@
+# 生产环境 profile：完整配置，无 application.yml 依赖。
+# 激活方式：--spring.profiles.active=prod 或环境变量 SPRING_PROFILES_ACTIVE=prod
+# datasource 与 ARK key 强制环境变量注入（无默认，缺失即启动失败，避免误用本地值）。
+
+server:
+  port: 8000
+
+spring:
+  application:
+    name: blue-whale-agent
+  jackson:
+    time-zone: GMT+8
+    date-format: yyyy-MM-dd HH:mm:ss
+    # 前后端 JSON 字段统一 snake_case，对齐 PRD
+    property-naming-strategy: SNAKE_CASE
+  datasource:
+    url: ${MYSQL_URL}
+    username: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl  # 生产关闭 SQL 打印
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+volcengine:
+  ark:
+    # 火山方舟 Ark：单一 Bearer API Key，文生图 + 图生视频共用；model 由前端请求带入
+    base-url: https://ark.cn-beijing.volces.com/api/v3
+    api-key: ${ARK_API_KEY}  # 生产走环境变量，禁写死进仓
+
+springdoc:
+  api-docs:
+    # 生产关闭 OpenAPI spec 暴露，避免接口结构外泄
+    enabled: false
+    path: /v3/api-docs
+
+logging:
+  level:
+    com.bluewhale.agent: info

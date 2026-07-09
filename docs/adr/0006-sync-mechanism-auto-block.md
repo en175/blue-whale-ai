@@ -44,7 +44,7 @@
 
 1. **职责分层**：pre-commit 管「commit 本身合不合规」（生成物、前后端契约——拦）；pre-push 管「能不能上远程」（落后——铁闸）。两层不重叠。
 2. **commit 是存档行为**，不该被远程状态打断。落后状态不影响 commit 本身正确性。
-3. **一致性**：与 pre-commit 现有的 `npm run lint`（前端 `blue_whale_web`）/ `pytest`（后端 `blue_whale_server`）同档，皆软提醒。
+3. **一致性**：与 pre-commit 现有的 `npm run lint`（前端 `blue_whale_web`）/ `mvn test`（后端 `blue_whale_server`）同档，皆软提醒。
 4. 铁闸在 pre-push，软提醒漏掉不会事故。
 
 ### D4. pre-push 硬拦（出口铁闸，已实现）

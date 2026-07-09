@@ -27,6 +27,28 @@ import {
 import type { Viewport, NodeItem, NodeType, DockMediaItem, CardMessage, ChatMessage } from "./_canvas";
 import { nodeFromCard, projectReducer, initialProjectState } from "./_canvas";
 import { PROJECTS } from "./_canvas";
+import type { GenerateArgs } from "./_canvas";
+import { generateImage, createVideoJob, streamJob } from "./_canvas/api/generation";
+import { useJobStatus } from "./_canvas/hooks/useJobStatus";
+
+/** "1x"/"2x" → 数字；解析失败回落 1。 */
+function parseQuantity(q: string): number {
+  const n = parseInt(q, 10);
+  return Number.isNaN(n) ? 1 : n;
+}
+
+/** 把后端/网络错误映射为用户友好提示，避免暴露内部配置。 */
+function userFriendlyErrorMessage(e: unknown): string {
+  if (!(e instanceof Error)) return "生成失败，请稍后重试";
+  const msg = e.message;
+  if (msg.includes("后端未启动") || msg.includes("无法连接")) {
+    return "无法连接到服务，请检查网络或稍后重试";
+  }
+  if (msg.includes("ARK_API_KEY") || msg.includes("数据库")) {
+    return "服务暂时不可用，请稍后重试";
+  }
+  return "生成失败，请稍后重试";
+}
 
 function CanvasPageInner() {
   const searchParams = useSearchParams();
@@ -57,7 +79,7 @@ function CanvasPageInner() {
   const messages = activeProject.messages;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [isAgentOpen, setIsAgentOpen] = useState(true);
+  const [isAgentOpen, setIsAgentOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
   const [bottomDockMode, setBottomDockMode] = useState<"image" | "video">("image");
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
@@ -65,6 +87,11 @@ function CanvasPageInner() {
   const [agentPendingMention, setAgentPendingMention] = useState<{ name: string; nonce: number } | null>(null);
   // 「从画布选择」模式：非 null 表示正在为哪个 Dock 挑图（image/video）
   const [pickingFor, setPickingFor] = useState<"image" | "video" | null>(null);
+  // 生成：视频异步轮询 hook + 生成中状态 + 待落节点的 prompt
+  const { state: jobState, start: startJob, reset: resetJob } = useJobStatus();
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const pendingVideoPromptRef = useRef<string>("");
 
   // CanvasSurface 期望 Dispatch<SetStateAction<...>> 类型的 setter（高频拖拽/缩放内部用）。
   // 适配为对当前 active project 的 dispatch：解析值或 updater 后整体写回画布。
@@ -260,6 +287,79 @@ function CanvasPageInner() {
     [addNode]
   );
 
+  // 生成：图片同步落节点；视频异步提交后由 useJobStatus 轮询，succeeded 落节点
+  const handleGenerate = useCallback(
+    async (promptText: string, args: GenerateArgs) => {
+      const trimmed = promptText.trim();
+      if (!trimmed) return;
+      setGenerating(true);
+      try {
+        if (args.mode === "image") {
+          const result = await generateImage({
+            prompt: trimmed,
+            model_id: args.settings.model.id,
+            size_id: args.settings.resolution.id,
+            aspect_ratio: args.settings.aspectRatio.id,
+            quantity: parseQuantity(args.settings.quantity),
+            reference_images: imageDockMedia
+              .map((m) => m.src)
+              .filter((s): s is string => Boolean(s)),
+          });
+          if (result.stream && result.job_id != null) {
+            // 流式模型：原生 EventSource 订阅，逐张上屏
+            streamJob(result.job_id, {
+              onImage: (url) => addNode("image", { content: trimmed, imageUrl: url }),
+              onDone: () => {
+                setGenerating(false);
+                setGenerateError(null);
+              },
+              onError: (message) => {
+                setGenerateError(message);
+                setGenerating(false);
+              },
+            });
+          } else {
+            // 非流式模型：同步单图上屏
+            if (result.url) {
+              addNode("image", { content: trimmed, imageUrl: result.url });
+            }
+            setGenerating(false);
+            setGenerateError(null);
+          }
+        } else {
+          const result = await createVideoJob({
+            prompt: trimmed,
+            resolution: args.settings.resolution.id,
+            aspect_ratio: args.settings.aspectRatio.id,
+            duration: args.settings.duration,
+            first_frame_url: videoDockMedia[0]?.src,
+          });
+          pendingVideoPromptRef.current = trimmed;
+          startJob(result.job_id);
+          // generating 在 jobState 终态时由 effect 复位
+        }
+      } catch (e) {
+        console.error("generate failed", e);
+        setGenerateError(userFriendlyErrorMessage(e));
+        setGenerating(false);
+      }
+    },
+    [addNode, imageDockMedia, videoDockMedia, startJob]
+  );
+
+  // 视频任务轮询终态：succeeded 落节点，failed/超时复位 generating
+  useEffect(() => {
+    if (jobState.status === "succeeded") {
+      addNode("image", { content: pendingVideoPromptRef.current, imageUrl: jobState.assetUrl });
+      setGenerating(false);
+      resetJob();
+    } else if (jobState.status === "failed") {
+      console.error("video generate failed:", jobState.message);
+      setGenerating(false);
+      resetJob();
+    }
+  }, [jobState, addNode, resetJob]);
+
   // 进入/退出「从画布选择」模式
   const handleRequestPick = useCallback((mode: "image" | "video") => {
     setPickingFor(mode);
@@ -417,6 +517,10 @@ function CanvasPageInner() {
           onPickFromCanvas={() => handleRequestPick(bottomDockMode)}
           onExitPick={handleExitPick}
           isPicking={pickingFor === bottomDockMode}
+          onGenerate={handleGenerate}
+          generating={generating}
+          generateError={generateError}
+          onClearGenerateError={() => setGenerateError(null)}
         />
       )}
       <AgentChatPanel

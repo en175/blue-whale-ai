@@ -22,3 +22,16 @@ export function nextRetryStatus(current: CardStatus): {
   if (current === "generating") return { next: "normal", isTerminal: true };
   return { next: "normal", isTerminal: true };
 }
+
+/**
+ * 后端 job status → CardStatus 映射。
+ *
+ * 后端状态机（GenerationJobService）：queued / processing / succeeded / failed。
+ * 映射：queued/processing → generating（过渡态）；succeeded → normal（终态）；
+ * failed → failed。未知状态保守当 generating（等下一轮轮询）。
+ */
+export function fromJobStatus(jobStatus: string): CardStatus {
+  if (jobStatus === "succeeded") return "normal";
+  if (jobStatus === "failed") return "failed";
+  return "generating";
+}

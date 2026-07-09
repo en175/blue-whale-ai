@@ -66,6 +66,8 @@ export function VideoDockContent(props: VideoDockContentProps) {
     onPickFromCanvas,
     onExitPick,
     isPicking = false,
+    onGenerate,
+    generating = false,
   } = props;
 
   // 上传来源菜单（参考图占位 + 加号共用）
@@ -648,7 +650,17 @@ export function VideoDockContent(props: VideoDockContentProps) {
           <div style={{ position: "relative", display: "inline-flex" }}>
             <button
               type="button"
-              disabled
+              disabled={isEmpty || generating}
+              onClick={() =>
+                onGenerate?.({
+                  model: selectedModel,
+                  resolution,
+                  aspectRatio,
+                  duration,
+                  quantity,
+                  refMode,
+                })
+              }
               style={{
                 height: 32,
                 padding: "0px 12px",
@@ -661,9 +673,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
                 justifyContent: "center",
                 gap: 6,
                 transition: "120ms",
-                background: "rgba(255, 255, 255, 0.06)",
-                color: "rgba(255, 255, 255, 0.32)",
-                cursor: "default",
+                background: isEmpty || generating ? "rgba(255, 255, 255, 0.06)" : "var(--tc-accent)",
+                color: isEmpty || generating ? "rgba(255, 255, 255, 0.32)" : "rgb(255, 255, 255)",
+                cursor: isEmpty || generating ? "default" : "pointer",
                 opacity: 1,
               }}
             >

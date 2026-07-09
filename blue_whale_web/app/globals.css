@@ -158,6 +158,9 @@ body {
   --tc-canvas-right-occupied: 484px;
   --tc-agent-panel-width: 468px;
   --tc-agent-composer-width: 460px;
+
+  /* 全局左侧导航栏宽度（首页/生成/资产/画布），Sidebar.tsx 引用；对标即梦窄图标栏 */
+  --tc-sidebar-width: 76px;
 }
 
 /* Toolbar enter animations */
