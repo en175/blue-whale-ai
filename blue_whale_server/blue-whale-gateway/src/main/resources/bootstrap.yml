@@ -26,6 +26,10 @@ spring:
             - Path=/api/agent/**
           filters:
             - StripPrefix=2
+        - id: blue-whale-user
+          uri: lb://blue-whale-user
+          predicates:
+            - Path=/api/auth/**, /api/me, /api/user/**
     loadbalancer:
       retry:
         enabled: true

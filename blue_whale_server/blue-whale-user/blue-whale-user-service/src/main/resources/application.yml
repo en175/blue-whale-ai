@@ -1,9 +1,15 @@
 server:
-  port: 8080
+  port: 8081
 
 spring:
   application:
     name: blue-whale-user
+  cloud:
+    nacos:
+      server-addr: 192.168.10.81:8848
+      discovery:
+        register-enabled: true
+        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
 
   web:
     encoding:
