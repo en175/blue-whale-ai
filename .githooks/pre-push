@@ -91,7 +91,7 @@ PR 审核也会基于落后 diff。请先同步：
 
   git fetch origin
   git rebase origin/master
-  # 撞冲突 → 解 → npm run lint（改前端 blue_whale_web 时）/ pytest（改后端 blue_whale_server 时）
+  # 撞冲突 → 解 → npm run lint（改前端 blue_whale_web 时）/ mvn test（改后端 blue_whale_server 时）
   git push --force-with-lease origin <分支名>
 
 解不动时随时退回：git rebase --abort

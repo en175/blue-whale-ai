@@ -33,7 +33,7 @@
 
 ## 禁提交清单（hook 会挡）
 
-- **生成物**：`graphify-out/`、`dist*`、`.next/`（前端构建产物）、`__pycache__/`、`*.pyc`、`.pytest_cache/`（后端 Python 缓存）
+- **生成物**：`graphify-out/`、`dist*`、`.next/`（前端构建产物）、`target/`、`*.iml`（后端 Java 构建产物 / IDE）
 - **个人本机配置**：`.claude/settings.local.json`（`.gitignore` 忽略；其余 `.claude/` 进仓共享，见根 `CLAUDE.md`）
 - **密钥凭证**：`.env`、`*.key`、`*.pem`、含明文密码的配置文件（敏感配置走环境变量，不进仓）
 
@@ -162,7 +162,7 @@ ________
 | 本地 master 提交 | 🟢 放行 | pre-commit：允许用户在本地 `master` 上提交，作为用户本地集成区。Agent 不得把本地 `master` 当任务写入区；Agent 写入任务必须先用 [worktree-workflow.md](worktree-workflow.md) 创建 task worktree + 工单分支 |
 | commit 规范 | 🔴 硬挡 | Conventional Commits，格式不符拦截 |
 | 前端 lint | 🟡 软提醒 | 改 `blue_whale_web/` 时跑 `npm run lint`，失败只警告不拦 |
-| 后端 py_compile | 🟡 软提醒 | 改 `blue_whale_server/` 下 `.py` 时跑 `python -m py_compile`，失败只警告不拦 |
+| 后端 mvn compile | 🟡 软提醒 | 改 `blue_whale_server/` 下 `.java` 时跑 `./mvnw compile`，失败只警告不拦 |
 | 禁直推 master/main | 🔴 硬挡 | pre-push：任何本地直推 `master`/`main` 一律拦，合并只在 Gitee 服务端走 PR |
 | 工单分支落后拦截 | 🔴 硬挡 | pre-push：工单分支（前缀见 [branch-naming.md](branch-naming.md)）落后于 `origin/master` 时拒绝 push，强制先 rebase |
 | AI 破坏性 git 操作 | 🔴 硬挡 | 裸 `--force`/`-f`、对 `master`/`main` 强推、`reset --hard` / `clean -f` / `branch -D` / `checkout .` / `restore .` 均拦；工单分支上的 `--force-with-lease` 放行（前缀见 [branch-naming.md](branch-naming.md)） |

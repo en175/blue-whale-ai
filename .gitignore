@@ -20,9 +20,27 @@
 .agents/skills/
 
 graphify-out/
+.codebase-memory/
+
+# 运行时生成物（asset 转存的 mp4/图片）
+data/
+
+# OpenSpec 规划文档（本地工具，不入库）
+openspec/
+
+# agent 本地参考文档（视频/图片生成 API、todos 等，不入库；注意是 docs/agent 单数，勿与 docs/agents 团队文档混淆）
+docs/agent/
 
 # Node / 前端
 node_modules/
 .next/
 next-env.d.ts
 *.tsbuildinfo
+
+# Java / Maven
+target/
+*.class
+
+# 运行日志
+logs/
+

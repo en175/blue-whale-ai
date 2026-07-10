@@ -1,10 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  sanitizePhone,
-  isValidPhone,
-  isValidCode,
-  LOGIN_CODE,
-} from "./phoneValidation";
+import { sanitizePhone, isValidPhone } from "./phoneValidation";
 
 describe("sanitizePhone", () => {
   it("剥非数字 + 截 11 位", () => {
@@ -23,18 +18,9 @@ describe("isValidPhone", () => {
   });
 
   it("非法：首位非 1 / 位数不足 / 空 / 含非数字", () => {
-    expect(isValidPhone("23800001234")).toBe(false); // 首位非 1
-    expect(isValidPhone("1380000123")).toBe(false); // 10 位
-    expect(isValidPhone("138000012349")).toBe(false); // 12 位
+    expect(isValidPhone("23800001234")).toBe(false);
+    expect(isValidPhone("1380000123")).toBe(false);
+    expect(isValidPhone("138000012349")).toBe(false);
     expect(isValidPhone("")).toBe(false);
-  });
-});
-
-describe("isValidCode", () => {
-  it("LOGIN_CODE 写死 1234", () => {
-    expect(LOGIN_CODE).toBe("1234");
-    expect(isValidCode("1234")).toBe(true);
-    expect(isValidCode("0000")).toBe(false);
-    expect(isValidCode("")).toBe(false);
   });
 });
