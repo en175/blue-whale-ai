@@ -8,7 +8,7 @@ spring:
     nacos:
       server-addr: 115.190.244.91:8848
       discovery:
-        enabled: false
+        enabled: true
         namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
 
   web:
@@ -52,7 +52,7 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 jwt:
-  secret: ${JWT_SECRET:blue-whale-dev-secret-key-at-least-256-bits!!}
+  secret: "${JWT_SECRET:blue-whale-dev-secret-key-at-least-256-bits!!}"
   expiration: 604800
 
 sms:

@@ -20,27 +20,10 @@ const nextConfig: NextConfig = {
   },
   async rewrites() {
     return [
-      // 特定服务直连（本地开发不用网关）
-      {
-        source: "/api/agent/templates/:path*",
-        destination: "http://localhost:8686/api/agent/templates/:path*",
-      },
-      {
-        source: "/api/auth/:path*",
-        destination: "http://localhost:8081/api/auth/:path*",
-      },
-      {
-        source: "/api/me",
-        destination: "http://localhost:8081/api/me",
-      },
-      {
-        source: "/api/user/:path*",
-        destination: "http://localhost:8081/api/user/:path*",
-      },
-      // 其余 /api/* → 网关（或后端统一入口）
+      // 全走网关（Nacos 服务发现）
       {
         source: "/api/:path*",
-        destination: `${BACKEND_API_BASE_URL}/api/:path*`,
+        destination: "http://localhost:8686/api/:path*",
       },
       // 静态资源（生成图片等）同源代理 → 后端
       {
