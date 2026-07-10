@@ -4,15 +4,20 @@
 # 拦截对象：
 #   - Edit 工具（agent 编辑文件时触发）
 #   - Write 工具（agent 创建文件时触发）
-#   当当前 git 分支为 master 时一律拦截。
+#   当 Edit/Write 目标文件所属工作树的 git 分支为 master 时拦截。
 #
 # 放行：
-#   - 非 master 分支（含 detached HEAD / worktree 工单分支）
+#   - 目标文件在非 master 分支的工作树（工单分支 worktree / detached HEAD）
+#   - 目标文件不在任何 git 工作树内（仓库外 dotfile，如 ~/.codex/config.toml）
 #   - 非 Edit/Write 工具
 #
 # 为什么拦：Agent 不得在本地 master 直接修改文件。
 #   所有改动必须在工单分支 worktree 中完成，走分支→PR→合并流程。
 #   决策见 docs/adr/0010-local-master-is-user-integration-zone.md
+#
+# 分支判定按 file_path 所属工作树（git -C），不看 cwd：
+#   主 checkout session（cwd=master）编辑 worktree 工单分支文件时，
+#   按 file_path 解析得到工单分支 → 放行，不依赖「worktree 必在主 toplevel 外」的布局假设。
 #
 # 退出码 2 = 阻断 Claude 执行该工具调用。
 
@@ -27,26 +32,26 @@ case "$TOOL_NAME" in
   *) exit 0 ;;
 esac
 
-# 获取当前分支（symbolic-ref 在 detached HEAD 时返回空，比 rev-parse --abbrev-ref 更安全）
-BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+# 取 Edit/Write 目标文件路径
+FILE_PATH=$(printf '%s' "$INPUT" | python3 "$PRETOOL" value file_path 2>/dev/null || true)
 
-# 非 master → 放行
+# 按目标文件所属工作树解析分支与 toplevel（不看 cwd，去 worktree 路径布局假设）
+#   dirname("")="."：file_path 缺失时退化为 cwd 分支判定（保留旧行为）
+FILE_DIR="$(dirname "$FILE_PATH")"
+BRANCH=$(git -C "$FILE_DIR" symbolic-ref --short HEAD 2>/dev/null || echo "")
+TOPLEVEL=$(git -C "$FILE_DIR" rev-parse --show-toplevel 2>/dev/null || echo "")
+
+# 目标文件不在任何 git 工作树内（仓库外）→ 放行
+if [ -z "$TOPLEVEL" ]; then
+  exit 0
+fi
+
+# 非 master 分支（工单分支 worktree / detached HEAD）→ 放行
 if [ "$BRANCH" != "master" ]; then
   exit 0
 fi
 
-# 仓库外文件不触发 master 红线（如 ~/.codex/config.toml 等 dotfile）
-FILE_PATH=$(printf '%s' "$INPUT" | python3 "$PRETOOL" value file_path 2>/dev/null || true)
-TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
-if [ -n "$FILE_PATH" ] && [ -n "$TOPLEVEL" ]; then
-  case "$FILE_PATH" in
-    "$TOPLEVEL"/*) ;;  # 仓库内 → 继续拦
-    *) exit 0 ;;       # 仓库外 → 放行
-  esac
-fi
-# FILE_PATH/TOPLEVEL 为空 → fail-closed，沿用下方拦截
-
-# 在 master 上执行 Edit/Write → 硬拦
+# master 分支 + 仓库内 Edit/Write → 硬拦
 cat >&2 <<EOF
 BLOCKED: 禁止在 master 分支直接 Edit/Write 文件。
   工具: $TOOL_NAME
