@@ -159,15 +159,23 @@ function CanvasPageInner() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedId, pickingFor, setNodes]);
+    // setNodes 不进 deps：setNodes 引用 churn（activeProject.canvas.nodes 变），
+    // 重拆 listener 浪费。handler 闭包持有当前 setNodes；selectedId/pickingFor
+    // 变时才需要重绑。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, pickingFor]);
 
+  // mount 时把画布视口居中到容器中央。deps=[] 一次性：IJZYWD 改 useCallback deps
+// 含 viewport 会让 setViewport 引用 churn（dispatch 改 viewport → setViewport
+// 重生成），与 deps=[setViewport] 组合会死循环。保持 mount-only。
   useEffect(() => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const cx = rect.width / 2;
     const cy = rect.height / 2;
     setViewport({ x: cx, y: cy, scale: 1 });
-  }, [setViewport]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const addNode = useCallback(
     (type: NodeType, extra?: Partial<NodeItem>) => {

@@ -68,10 +68,41 @@ spec 原文「至少返回 `{ state, dispatch, ...派生选择器 }」是下限�
 - **`npx next build`**：✓ Compiled successfully，3 routes prerender
 - **`npx eslint .`**：IJZYWD 自己 4 个改动文件 0 error / 0 warning（既有预存 lint 噪音不动）
 
-## `/review` 双轴复查
+## `/review` 双轴复查（fixed-point: c3639e9 = IJZYVQ merge）
 
-- **Standards**：（待 review 完成补）
-- **Spec**：（待 review 完成补）
+### Standards
+
+- **Hard violation**：无。Branch prefix / Conventional Commits / single-purpose commit / no master writes（CLAUDE.md + ADR 0010）/ no forbidden artifacts。Hooks 兜底。
+- **Boundary tension（CLAUDE.md §2 Simplicity First）**：
+  1. `dispatch` 仍暴露但当前无裸 dispatch 调用 —— 列为已知设计决策（见 §1）
+  2. `createProject` 同 handler 内 `Date.now()` 算 name vs id —— 漂移窗口极小可接受
+  3. `setViewport`/`setNodes` setter 身份依赖 `activeProject.canvas.viewport`/`.nodes`，每 dispatch churn → **⚠️ 生产 mount 暴露「Maximum update depth exceeded」死循环**（page.tsx useEffect 写错 deps）。修复：page.tsx mount setViewport useEffect 改回 `[]`（mount-only）；setNodes keydown useEffect 改回 `[selectedId, pickingFor]`（去掉 setNodes 避免 listener churn）。**回归测试**：`useProject.test.ts` 加「setViewport 连续 dispatch 风暴」pin 死 N 次连续调用落盘正确
+- **Surgical changes（CLAUDE.md §3）**：diff `+40/-46` 严格围绕 reducer→hook 迁移 + 2 处 useEffect dep 更新 + doc-comment 移位，无顺手重构
+- **Test gaps（CLAUDE.md §4）**：
+  - L122 死三元已修（`initialLen > 0 ? 2 : 2` → `toHaveLength(2)`）
+  - L172–175 isolation 断言已补（`expect(p1.messages.length).toBe(p1Before)` + `p1.messages.at(-1)?.id !== "m-p3"`）
+- **Bottom line**：ship-able；must-fix 已修；setter churn 风险已文档化 + 回归测试
+
+### Spec
+
+- **AC6 partial → 已修**：原 imports `NodeItem / Project / Viewport / ChatMessage` 来自 `../types`（compat re-export 层）→ 现统一从 `@/types/domain` 取（依赖 IJZYVQ ARCH-5）
+- **API 不对称 → 已修**：原 hook 暴露 `setNodes` 但缺 `addNode`，page.tsx 仍走裸 dispatch `{type: "add-node"}` → 新增 `addNode(node: NodeItem)` helper，page 改用 `addProjectNode(node)`，hook API 对称（8 个便捷 action 覆盖 page 全部写入路径）
+- **AC1/AC2 over-implementation → 保留**：「7 个 mutation wrapper」实为 8 个；spec "至少" 是下限，hook 边界统一封装是 spec 「组件消费 `useProject()` 替代裸 reducer 调用」字面意图的实现，**已在 §1 写明理由**
+- **AC3 测试冗余 → 不重写**：hook 单测聚焦「便捷 action 路由 + 派生读」；reducer 单测聚焦「单 action 不可变性回归」—— 两件事，不重叠。文件头注释（test.ts L9–17）已写明边界
+- **pickableCount 派生遗漏 → 不补**：spec 没要求 hook 暴露该派生；page.tsx 仍可内联 `nodes.filter(...)`（属消费派生，spec 字面允许）
+
+### 双轴合并
+
+| 项 | Standards | Spec | 处理 |
+| --- | --- | --- | --- |
+| 7 wrappers scope creep | — | judgement | 保留（spec 下限之上扩） |
+| hook tests 与 reducer 重叠 | — | judgement | 保留（不同观察对象） |
+| AC6 跨模块领域类型 | — | AC6 partial | **已修** |
+| API 不对称 addNode | judgement | judgement | **已修**（8 helpers 对称） |
+| L122 死三元 | must-fix | — | **已修** |
+| L172–175 isolation 断言 | must-fix | — | **已修** |
+| dispatch 仍暴露 | judgement | — | 已文档化 |
+| setter 身份 churn + page useEffect 死循环 | must-fix | — | **已修**（回归 deps=[]）+ 回归测试 |
 
 ## 状态时间线
 
@@ -83,16 +114,26 @@ spec 原文「至少返回 `{ state, dispatch, ...派生选择器 }」是下限�
 | 2026-07-10 16:11 | 三件套绿（89/89 / build pass / IJZYWD 自己 0 lint）   |
 | 2026-07-10 16:13 | impl commit `4cd002c`                                 |
 | 2026-07-10 16:14 | /review 双轴并行                                      |
+| 2026-07-10 16:38 | review 反馈应用：@/types/domain 导入 + addNode helper + isolation 断言 + 死三元 |
+| 2026-07-10 16:40 | 三件套重跑绿（89/89 / build pass / IJZYWD 自己 0 lint）|
+| 2026-07-10 16:42 | docs commit d614739                                   |
+| 2026-07-10 17:00 | rebase origin/master（master 进了 ba401c0 skill raw 镜像同步）无冲突 |
+| 2026-07-10 17:01 | 三件套重跑绿                                          |
+| 2026-07-10 17:15 | push 分支（owner hangzhou-xuanfu_1 而非全下划线，404 root cause）|
+| 2026-07-10 17:23 | Gitee MCP create_pull → PR #44（无冲突）              |
+| 2026-07-10 17:30 | ⚠️ 生产 mount 暴露 setViewport effect 死循环          |
+| 2026-07-10 17:35 | hotfix：page.tsx mount setViewport deps 回归 []，setNodes keydown deps 回归 [selectedId, pickingFor]；useProject.test.ts 加「setViewport 连续 dispatch 风暴」回归测试（90/90 pass）|
 
 ## 备注
 
-- 本次提交含 **IJZYWD 实现 + 本 docs**（按 IJZYUL 约定：「每一个子issue完成的时候,把记录的一起提交到分支里去当做记录」）
-- 4 个 impl 文件全部围绕 hook 抽离，无顺手"重构相邻代码"
+- 本次提交含 **IJZYWD 实现 + 本 docs + hotfix**（按 IJZYUL 约定：「每一个子issue完成的时候,把记录的一起提交到分支里去当做记录」）
+- impl 文件围绕 hook 抽离 + 死循环 hotfix 修复，无顺手"重构相邻代码"
 - 父 issue IJZYUL 总进度 IJZYWD 完成 → 6/8 完成（README 待 IJZYUL 全结束更新）
-- 测试用 `// @vitest-environment jsdom` 指令，未改 vitest.config.ts（项目现有 config 不指定 environment，非 React 测试默认 node）
+- 测试用 `// @vitest-environment jsdom` 指令，未改 vitest.config.ts
+- **setter 身份 churn 教训**：useCallback 依赖 state 子树 → setter 引用变 → 消费方 useEffect deps 含 setter 会死循环。修法：消费方 mount-only 用 `[]` + `eslint-disable-next-line`；或 hook 内部用 `useRef` 同步 state（标准 useEvent 模式，复杂度上升，本 IJZYWD 不引）
 
 ---
 
 完成项（已落到分支）：
-1. /review Standards + Spec 反馈应用（AC6 / API 不对称 / 死三元 / isolation 断言）
-2. docs commit + impl + 推送 + 建 PR → 等用户发布授权
+1. /review Standards + Spec 反馈应用（AC6 / API 不对称 / 死三元 / isolation 断言 / setter 死循环 + 回归测试）
+2. docs commit + impl + 推送 + 建 PR #44 → 等用户发布授权（merge）

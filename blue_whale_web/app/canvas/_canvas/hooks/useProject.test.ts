@@ -175,4 +175,26 @@ describe("useProject / 便捷 action 路由到 dispatch", () => {
     expect(p1.messages.length).toBe(p1Before);
     expect(p1.messages.at(-1)?.id).not.toBe("m-p3");
   });
+
+  it("setViewport 连续 dispatch 风暴：N 次调用都落盘（不死循环、不漏 dispatch、不重复）", () => {
+    // 回归：IJZYWD 首次合入时 page.tsx useEffect 写 [setViewport] deps + useCallback deps 含
+    // activeProject.canvas.viewport → dispatch 改 viewport → setViewport 引用 churn →
+    // effect 重跑 → 「Maximum update depth exceeded」 死循环。修复：page.tsx 该 useEffect
+    // 改回 deps=[]（mount-only 视口居中），本测试 pin 死 setViewport 自身在连续调用下行为正确。
+    const { result } = renderHook(() => useProject());
+    const N = 5;
+    for (let i = 0; i < N; i += 1) {
+      act(() =>
+        result.current.setViewport((prev) => ({
+          x: prev.x + 1,
+          y: prev.y + 1,
+          scale: prev.scale,
+        })),
+      );
+    }
+    const start = initialProjectState(PROJECTS).projects.find((p) => p.active)!.canvas.viewport;
+    expect(result.current.viewport.x).toBe(start.x + N);
+    expect(result.current.viewport.y).toBe(start.y + N);
+    expect(result.current.viewport.scale).toBe(start.scale);
+  });
 });
