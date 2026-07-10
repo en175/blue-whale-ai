@@ -3,13 +3,13 @@ package com.blue.whale.agent.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.blue.whale.agent.entity.TemplateCardEntity;
-import com.blue.whale.agent.entity.TemplateCardImageEntity;
+import com.blue.whale.agent.model.entity.TemplateCard;
+import com.blue.whale.agent.model.entity.TemplateCardImage;
 import com.blue.whale.agent.mapper.TemplateCardImageMapper;
 import com.blue.whale.agent.mapper.TemplateCardMapper;
-import com.blue.whale.agent.model.TemplateCardDto;
-import com.blue.whale.agent.model.TemplateTagDto;
-import com.blue.whale.agent.model.TemplateTagEnum;
+import com.blue.whale.agent.model.dto.TemplateCardDto;
+import com.blue.whale.agent.model.dto.TemplateTagDto;
+import com.blue.whale.agent.model.enums.TemplateTagEnum;
 import com.blue.whale.global.base.resp.PageVo;
 import org.springframework.stereotype.Service;
 
@@ -60,29 +60,29 @@ public class TemplateService {
      * @return 分页结果
      */
     public PageVo<TemplateCardDto> pageByTagCode(String tagCode, long current, long size) {
-        Page<TemplateCardEntity> page = new Page<>(current, size);
-        QueryWrapper<TemplateCardEntity> wrapper = new QueryWrapper<TemplateCardEntity>()
+        Page<TemplateCard> page = new Page<>(current, size);
+        QueryWrapper<TemplateCard> wrapper = new QueryWrapper<TemplateCard>()
                 .eq("tag_code", tagCode)
                 .orderByAsc("sort_order");
         // 分页查询卡片主数据
-        IPage<TemplateCardEntity> cardPage = cardMapper.selectPage(page, wrapper);
+        IPage<TemplateCard> cardPage = cardMapper.selectPage(page, wrapper);
 
-        List<TemplateCardEntity> cards = cardPage.getRecords();
+        List<TemplateCard> cards = cardPage.getRecords();
         List<Long> cardIds = cards.stream()
-                .map(TemplateCardEntity::getId)
+                .map(TemplateCard::getId)
                 .collect(Collectors.toList());
 
         // 批量查询这些卡片的图片，并按 cardId 分组映射
         Map<Long, List<String>> imagesByCard = cardIds.isEmpty()
                 ? Map.of()
                 : imageMapper.selectList(
-                                new QueryWrapper<TemplateCardImageEntity>()
+                                new QueryWrapper<TemplateCardImage>()
                                         .in("card_id", cardIds)
                                         .orderByAsc("sort_order")
                         ).stream()
                         .collect(Collectors.groupingBy(
-                                TemplateCardImageEntity::getCardId,
-                                Collectors.mapping(TemplateCardImageEntity::getImageUrl, Collectors.toList())
+                                TemplateCardImage::getCardId,
+                                Collectors.mapping(TemplateCardImage::getImageUrl, Collectors.toList())
                         ));
 
         // 组装为 DTO

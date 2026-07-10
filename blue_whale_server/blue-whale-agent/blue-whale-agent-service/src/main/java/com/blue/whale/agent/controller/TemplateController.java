@@ -1,8 +1,8 @@
 package com.blue.whale.agent.controller;
 
-import com.blue.whale.agent.model.TemplateCardDto;
-import com.blue.whale.agent.model.TemplateTagDto;
-import com.blue.whale.agent.model.TemplateTagEnum;
+import com.blue.whale.agent.model.dto.TemplateCardDto;
+import com.blue.whale.agent.model.dto.TemplateTagDto;
+import com.blue.whale.agent.model.enums.TemplateTagEnum;
 import com.blue.whale.agent.service.TemplateService;
 import com.blue.whale.global.base.resp.PageVo;
 import com.blue.whale.global.base.resp.Result;

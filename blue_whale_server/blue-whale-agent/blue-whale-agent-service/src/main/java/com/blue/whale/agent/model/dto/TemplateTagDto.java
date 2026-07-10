@@ -1,4 +1,4 @@
-package com.blue.whale.agent.model;
+package com.blue.whale.agent.model.dto;
 
 /**
  * 模板标签 DTO
