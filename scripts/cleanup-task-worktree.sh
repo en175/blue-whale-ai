@@ -49,16 +49,28 @@ main_root="$(git -C "$ROOT" worktree list --porcelain | awk -v base="$WORKTREE_B
 [ -n "$main_root" ] || fail "找不到主 checkout（不在 $WORKTREE_BASE 下的 worktree），不能安全删除。"
 
 cd "$main_root"
+
+# 删除顺序（IK00BP 修复）：先 ls-remote 探活 + 删远程（网络操作），确认后再删本地
+# （worktree + ref）。不变式：网络操作必须最先且在本地删除之前。ls-remote --exit-code 三态：
+#   exit 0=远程存在 → push --delete；exit 2=远程不存在 → 幂等跳过；
+#   其他（1/128 等：网络瞬断/认证失败）→ 远程状态未知，报错且不动本地（worktree+ref+远程全未变），可安全重试。
+# 旧逻辑先删 worktree+本地 ref 再探活，网络瞬断返回非0非2被当「不存在」跳过删远程，
+# 留下「本地删、远程留」终态且 worktree 已无，重跑入口校验卡死。worktree remove / update-ref
+# 为本地操作放最后——若它们失败，远程已正确清理，无残留源分支，仅需本地重试或手动 prune。
+probe_rc=0
+git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1 || probe_rc=$?
+if [ "$probe_rc" = 0 ]; then
+  git push origin --delete "$branch"
+elif [ "$probe_rc" != 2 ]; then
+  fail "ls-remote 探活失败（exit ${probe_rc}），远程状态未知，未删本地分支：${branch}。网络恢复后重试即可。"
+fi
+
+# 远程已处理：删 worktree（本地，可重建）。
 git worktree remove "$ROOT"
 
 # 本地 master 可能是用户本地集成区，未必包含 origin/master。
 # 前面已经证明任务分支 HEAD 被 origin/master 包含，因此直接删除本地 ref 是安全清理。
 git update-ref -d "refs/heads/$branch"
-
-# 远程源分支删除不可逆，放在本地全部清理成功之后：本地失败时尚可重试，远程不受影响。
-if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
-  git push origin --delete "$branch"
-fi
 
 git fetch --prune
 
