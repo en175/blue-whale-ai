@@ -522,19 +522,19 @@ assert_exit 0 "release: 复合验证命令放行"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"cd /Users/jj.reno/Blue-Whale\nscripts/cleanup-task-worktree.sh 2>&1; echo \"exit=$?\"\necho \"---\"\nscripts/ensure-graphify-worktree.sh 2>&1; echo \"exit=$?\""}}'
 assert_exit 0 "release: 非发布验证复合命令放行"
 
-# 创建合法普通 PR（缺 draft）→ 只校验形态，不二次确认
+# 创建合法普通 PR（缺 draft）→ Pre 只校验形态放行，不消费标记（消费延后到 Post，见 ADR-0011）
 write_publish_marker "feature/x"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
 assert_exit 0 "release: 普通 PR 放行不二次确认"
 assert_stdout_not_has '"permissionDecision":"ask"' "release: 普通 PR 不二次确认"
-assert_file_missing "$(publish_marker_path feature/x)" "release: 普通 PR 消费发布审查包标记"
+assert_file_exists "$(publish_marker_path feature/x)" "release: 普通 PR Pre 阶段不消费标记（延后到 Post）"
 
-# 创建显式非 draft PR → 只校验形态，不二次确认
+# 创建显式非 draft PR → Pre 只校验形态放行，不消费标记（消费延后到 Post，见 ADR-0011）
 write_publish_marker "feature/x"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"false","title":"test"}}'
 assert_exit 0 "release: 非 draft PR 放行不二次确认"
 assert_stdout_not_has '"permissionDecision":"ask"' "release: 非 draft PR 不二次确认"
-assert_file_missing "$(publish_marker_path feature/x)" "release: 非 draft PR 消费发布审查包标记"
+assert_file_exists "$(publish_marker_path feature/x)" "release: 非 draft PR Pre 阶段不消费标记（延后到 Post）"
 
 # 直接创建合法形态普通 PR 但缺少发布审查包标记 → 阻断
 remove_publish_marker feature/x
@@ -589,16 +589,42 @@ assert_stdout_has '"permissionDecision":"ask"' "release: create release stdout �
 
 # 回归（G+）：标记按 branch 隔离，不同分支标记互不覆盖。
 # 防本次缺陷复发——publish 在 worktree 写、hook 在主仓读，common dir 对称使其命中；
-# 且并行多分支发布时，一条分支的 PR 消费不应误删另一分支标记。
+# 且并行多分支发布时，一条分支的 PR 消费（Post 撕票）不应误删另一分支标记。
 write_publish_marker "feature/aaa"
 write_publish_marker "feature/bbb"
 assert_file_exists "$(publish_marker_path feature/aaa)" "release: G+ 并行 aaa 标记独立存在"
 assert_file_exists "$(publish_marker_path feature/bbb)" "release: G+ 并行 bbb 标记独立存在"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/aaa","target_branch":"master","title":"test"}}'
 assert_exit 0 "release: G+ 并行场景 aaa PR 放行"
-assert_file_missing "$(publish_marker_path feature/aaa)" "release: G+ aaa 标记被消费"
-assert_file_exists "$(publish_marker_path feature/bbb)" "release: G+ bbb 标记不受 aaa 消费影响"
+assert_file_exists "$(publish_marker_path feature/aaa)" "release: G+ aaa Pre 阶段不消费（延后到 Post）"
+assert_file_exists "$(publish_marker_path feature/bbb)" "release: G+ bbb 标记不受 aaa 影响"
+remove_publish_marker "feature/aaa"
 remove_publish_marker "feature/bbb"
+
+# G+ Post 隔离回归：Post 消费 aaa 不应误删 bbb（恢复跨分支隔离守卫意图）。
+write_publish_marker "feature/aaa"
+write_publish_marker "feature/bbb"
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/aaa","target_branch":"master","title":"test"}}'
+assert_exit 0 "release: G+ Post aaa 放行"
+assert_file_missing "$(publish_marker_path feature/aaa)" "release: G+ Post aaa 被消费"
+assert_file_exists "$(publish_marker_path feature/bbb)" "release: G+ Post aaa 消费不误删 bbb"
+remove_publish_marker "feature/aaa"
+remove_publish_marker "feature/bbb"
+
+# PostToolUse 消费标记：PR 创建成功（PostToolUse）后撕票（ADR-0011）。
+# PostToolUse 只在工具成功时触发（失败走 PostToolUseFailure），Post 分支直接 consume。
+write_publish_marker "feature/x"
+assert_file_exists "$(publish_marker_path feature/x)" "release: Post 消费前标记存在"
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
+assert_exit 0 "release: Post create PR 放行（不阻断已执行工具）"
+assert_file_missing "$(publish_marker_path feature/x)" "release: Post 创建成功消费标记"
+
+# Post 缺 source_branch 不 consume（guard）：撕票需 source_branch 算路径，缺失则不动标记。
+write_publish_marker "feature/x"
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"target_branch":"master","title":"test"}}'
+assert_exit 0 "release: Post 缺 source_branch 放行不阻断"
+assert_file_exists "$(publish_marker_path feature/x)" "release: Post 缺 source_branch 不消费标记"
+remove_publish_marker feature/x
 
 # Slice 2 — block-issue-without-repo（核心：project_id 类型漂移回归基线）
 # MCP schema: project_id 为 number。本组同时喂 number 与 string 两种形态，
