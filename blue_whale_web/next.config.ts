@@ -20,6 +20,7 @@ const nextConfig: NextConfig = {
   },
   async rewrites() {
     return [
+      // 特定服务直连（本地开发不用网关）
       {
         source: "/api/agent/templates/:path*",
         destination: "http://localhost:8686/api/agent/templates/:path*",
@@ -36,18 +37,13 @@ const nextConfig: NextConfig = {
         source: "/api/user/:path*",
         destination: "http://localhost:8081/api/user/:path*",
       },
-    ];
-  },
-  async rewrites() {
-    return [
+      // 其余 /api/* → 网关（或后端统一入口）
       {
         source: "/api/:path*",
         destination: `${BACKEND_API_BASE_URL}/api/:path*`,
       },
+      // 静态资源（生成图片等）同源代理 → 后端
       {
-        // 静态资源（生成图片等）同源代理 → 后端。
-        // 后端 assets.url 存的是 /assets/<file>，由后端 :8000 的 /assets/** handler 提供服务。
-        // 不代理则前端 <img src="/assets/..."> 落到 Next 源 404，图片显示黑块。
         source: "/assets/:path*",
         destination: `${BACKEND_API_BASE_URL}/assets/:path*`,
       },

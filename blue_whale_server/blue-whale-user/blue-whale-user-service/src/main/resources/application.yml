@@ -8,7 +8,7 @@ spring:
     nacos:
       server-addr: 115.190.244.91:8848
       discovery:
-        enabled: true
+        enabled: false
         namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
 
   web:

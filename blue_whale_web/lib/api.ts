@@ -1,12 +1,12 @@
 /**
  * api —— 新页面（generate / assets）共享的后端请求层。
  *
- * 走 Next rewrite /api/* → blue_whale_server:8000（见 next.config.ts），浏览器同源无 CORS。
+ * 走 Next rewrite /api/* → 后端服务（见 next.config.ts），浏览器同源无 CORS。
  * 统一 Result{code,msg,data} 拆包：code!==200 抛 Error(msg)，否则返 data。
- *
- * canvas 的 app/canvas/_canvas/api/generation.ts 维持其私有 request——本 change 约束「不动 canvas」，
- * 故此处另起共享 client，二者短期并存，后续可统一收口。
+ * 通过 api-client 实现 Bearer token 自动附送 + 401 自动刷新。
  */
+
+import { apiFetch } from "./api-client";
 
 /** 后端 MyBatis-Plus Page 经 Jackson SNAKE_CASE 序列化后的分页结构。 */
 export type Paged<T> = {
@@ -17,24 +17,13 @@ export type Paged<T> = {
 };
 
 const API_BASE = "/api";
-const DEFAULT_USER_ID = "1";
 
-/** MVP 无鉴权：X-User-Id 头默认 1，localStorage `bw_user_id` 可覆盖。 */
-export function userIdHeader(): string {
-  if (typeof window === "undefined") return DEFAULT_USER_ID;
-  return window.localStorage.getItem("bw_user_id") || DEFAULT_USER_ID;
-}
-
-/** 统一 GET/POST 请求：拆 Result 包，code!==200 抛错。 */
+/** 统一 GET/POST 请求：apiFetch 自动带 Authorization 头 + 401 拦截刷新。 */
 export async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    res = await apiFetch(`${API_BASE}${path}`, {
       method,
-      headers: {
-        "Content-Type": "application/json",
-        "X-User-Id": userIdHeader(),
-      },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {

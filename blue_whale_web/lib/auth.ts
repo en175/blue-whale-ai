@@ -1,3 +1,5 @@
+import { apiRequest } from "./api-client";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 const FETCH_TIMEOUT = 10000;
 
@@ -48,6 +50,7 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: nu
   }
 }
 
+/** 仅用于 auth 端点（login/refresh/captcha/send-code），不走 401 拦截。 */
 async function getResult<T>(url: string, options: RequestInit = {}): Promise<T> {
   const res = await fetchWithTimeout(`${API_BASE}${url}`, options, FETCH_TIMEOUT);
   if (!res.ok) {
@@ -60,11 +63,9 @@ async function getResult<T>(url: string, options: RequestInit = {}): Promise<T> 
   return result.data;
 }
 
-function authHeaders(token?: string): HeadersInit {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  return headers;
-}
+// ---------------------------------------------------------------------------
+// 公开 auth 端点（不走 401 拦截，避免无限循环）
+// ---------------------------------------------------------------------------
 
 /** 获取图形验证码 */
 export function fetchCaptcha(): Promise<CaptchaResult> {
@@ -75,7 +76,6 @@ export function fetchCaptcha(): Promise<CaptchaResult> {
 export function sendVerificationCode(phone: string, captchaToken: string, captchaAnswer: string): Promise<SendCodeResult> {
   return getResult<SendCodeResult>("/api/auth/send-code", {
     method: "POST",
-    headers: authHeaders(),
     body: JSON.stringify({ phone, captcha_token: captchaToken, captcha_answer: captchaAnswer }),
   });
 }
@@ -84,23 +84,15 @@ export function sendVerificationCode(phone: string, captchaToken: string, captch
 export function loginWithCode(phone: string, code: string): Promise<LoginData> {
   return getResult<LoginData>("/api/auth/login", {
     method: "POST",
-    headers: authHeaders(),
     body: JSON.stringify({ phone, code }),
   });
 }
 
-/** 获取当前用户 */
-export function fetchMe(accessToken: string): Promise<UserInfo> {
-  return getResult<UserInfo>("/api/me", {
-    headers: authHeaders(accessToken),
-  });
-}
-
-/** 刷新 token */
+/** 刷新 token（由 api-client 内部直接 fetch，外部一般不直接调）。 */
 export function refreshToken(refreshToken: string): Promise<LoginData> {
   return getResult<LoginData>("/api/auth/refresh", {
     method: "POST",
-    headers: authHeaders(refreshToken),
+    headers: { Authorization: `Bearer ${refreshToken}` },
   });
 }
 
@@ -108,33 +100,39 @@ export function refreshToken(refreshToken: string): Promise<LoginData> {
 export function logoutApi(refreshToken: string): Promise<void> {
   return getResult<void>("/api/auth/logout", {
     method: "POST",
-    headers: authHeaders(refreshToken),
+    headers: { Authorization: `Bearer ${refreshToken}` },
   });
 }
 
+// ---------------------------------------------------------------------------
+// 需鉴权的端点（走 apiRequest → 401 自动刷新 → 自动重试）
+// ---------------------------------------------------------------------------
+
+/** 获取当前用户 */
+export function fetchMe(): Promise<UserInfo> {
+  return apiRequest<UserInfo>("/api/me");
+}
+
 /** 更换手机号——发验证码 */
-export function sendChangePhoneCode(accessToken: string, newPhone: string, captchaToken: string, captchaAnswer: string): Promise<SendCodeResult> {
-  return getResult<SendCodeResult>("/api/user/phone/send-code", {
+export function sendChangePhoneCode(newPhone: string, captchaToken: string, captchaAnswer: string): Promise<SendCodeResult> {
+  return apiRequest<SendCodeResult>("/api/user/phone/send-code", {
     method: "POST",
-    headers: authHeaders(accessToken),
     body: JSON.stringify({ new_phone: newPhone, captcha_token: captchaToken, captcha_answer: captchaAnswer }),
   });
 }
 
 /** 更换手机号——校验验证码 */
-export function changePhone(accessToken: string, newPhone: string, code: string): Promise<void> {
-  return getResult<void>("/api/user/phone", {
+export function changePhone(newPhone: string, code: string): Promise<void> {
+  return apiRequest<void>("/api/user/phone", {
     method: "PUT",
-    headers: authHeaders(accessToken),
     body: JSON.stringify({ new_phone: newPhone, code }),
   });
 }
 
 /** 更新用户名 */
-export function updateUsername(accessToken: string, username: string): Promise<void> {
-  return getResult<void>("/api/user/username", {
+export function updateUsername(username: string): Promise<void> {
+  return apiRequest<void>("/api/user/username", {
     method: "PUT",
-    headers: authHeaders(accessToken),
     body: JSON.stringify({ username }),
   });
 }

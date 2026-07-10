@@ -61,9 +61,14 @@ function CanvasPageInner() {
   // TODO: 接真实数据后改为路由守卫（middleware 或 server component 检查登录态）。
   const [gated, setGated] = useState(true);
   useEffect(() => {
-    if (!loadUser()) {
+    const storedUser = loadUser();
+    if (!storedUser) {
+      console.warn("[Canvas] gate: loadUser()=null → 踢回首页 + 弹登录。localStorage keys:",
+        Object.keys(localStorage).filter(k => k.startsWith("bw-")));
       guardRouter.replace("/");
       openLogin();
+    } else {
+      console.log("[Canvas] gate: loadUser() 成功，user:", storedUser.username);
     }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setGated(false);

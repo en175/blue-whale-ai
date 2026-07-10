@@ -50,6 +50,13 @@ mybatis-plus:
       logic-delete-value: 1
       logic-not-delete-value: 0
 
+oss:
+  volcengine:
+    access-key: ${TOS_ACCESS_KEY}
+    secret-key: ${TOS_SECRET_KEY}
+    bucket-name: ${TOS_BUCKET_NAME}
+    domain: ${TOS_DOMAIN:https://sweet-oa.tos-cn-beijing.volces.com}
+
 logging:
   level:
     com.blue.whale.agent.mapper: debug

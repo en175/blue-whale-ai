@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import type { PendingAction, User } from "./types";
 import { clearUser, clearTokens, loadAccessToken, loadRefreshToken, loadUser, saveTokens, saveUser } from "./authStorage";
 import { loginWithCode, logoutApi, refreshToken, ApiError } from "@/lib/auth";
+import { subscribeToAuthFailure, getAccessTokenSilently } from "@/lib/api-client";
 import { LoginModal } from "./LoginModal";
 
 interface AuthContextValue {
@@ -34,27 +35,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
   const executorRef = useRef<(() => void) | null>(null);
+  const hasMountedRef = useRef(false); // StrictMode 下 useEffect 双重火守卫
 
-  // mount 恢复
+  // mount: 尝试用 refresh_token 恢复完整 session
   useEffect(() => {
     const u = loadUser();
-    if (u) {
-      // 尝试用 refresh_token 恢复 session
-      const rt = loadRefreshToken();
-      if (rt) {
-        refreshToken(rt).then((data) => {
-          saveTokens(data.access_token, data.refresh_token);
-          saveUser({ userId: data.user_id, username: data.username, phone: data.phone });
-          setUser({ userId: data.user_id, username: data.username, phone: data.phone });
-        }).catch(() => {
-          // refresh 失败，清掉
-          clearUser();
-          clearTokens();
-        });
-      } else {
-        setUser(u);
-      }
+
+    // 乐观：有 user 数据立刻恢复 UI 登录态，不等刷新结果
+    if (u) setUser(u);
+
+    // 如果 ref 已标记（StrictMode 双重火），跳过第二次 refresh 请求
+    const rt = u ? loadRefreshToken() : null;
+    if (!u || !rt) return;
+    if (hasMountedRef.current) {
+      console.log("[Auth] mount: hasMountedRef=true，跳过重复 refresh");
+      return;
     }
+    hasMountedRef.current = true;
+    console.log("[Auth] mount: 发送 refresh 请求...");
+
+    // 后台静默换新 token
+    refreshToken(rt)
+      .then((data) => {
+        saveTokens(data.access_token, data.refresh_token);
+        saveUser({ userId: data.user_id, username: data.username, phone: data.phone });
+        setUser({ userId: data.user_id, username: data.username, phone: data.phone });
+      })
+      .catch((e) => {
+        // 仅当存储中 RT 仍是同一份时才处理，避免竞态误伤新登录
+        const currentRt = loadRefreshToken();
+        if (currentRt !== rt) return;
+
+        // 只有后端明确 401（token 无效/已轮换）才清 tokens
+        // 网络错误 / 后端未启动 → 保留本地登录态，下次操作时 api-client 自动重试
+        if (e instanceof ApiError && e.code === 401) {
+          console.warn("[Auth] mount refresh → 后端 401，清理 tokens", e.message);
+          clearTokens();
+        } else {
+          console.warn("[Auth] mount refresh 失败但保留登录态", e instanceof Error ? e.message : e);
+        }
+        // 无论如何，user 保留（乐观恢复的 UI 仍可展示）
+      });
+  }, []);
+
+  // 订阅 API 层通知：401 后 refresh 也失败 → 清空状态，弹出登录
+  useEffect(() => {
+    return subscribeToAuthFailure(() => {
+      console.warn("[Auth] onAuthFailure 触发 → 清空全部状态 + 弹登录");
+      setUser(null);
+      clearTokens();
+      clearUser();
+      setLoginOpen(true);
+    });
   }, []);
 
   const openLogin = useCallback(() => setLoginOpen(true), []);
@@ -65,16 +97,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const requireAuth = useCallback(
-    (action: PendingAction, run: () => void) => {
+    async (action: PendingAction, run: () => void) => {
+      // 已在内存中有 user → 直接放行
       if (user) { run(); return; }
+
+      // 尝试从 storage 恢复 + 静默刷新 token
       const stored = loadUser();
-      const at = loadAccessToken();
-      if (stored && at) { setUser(stored); run(); return; }
+      if (stored) {
+        const at = loadAccessToken();
+        if (at) { setUser(stored); run(); return; }
+        // 无 access token → 尝试 refresh
+        const token = await getAccessTokenSilently();
+        if (token) { setUser(stored); run(); return; }
+      }
+
+      // 兜底：弹出登录
       setPendingAction(action);
       executorRef.current = run;
       setLoginOpen(true);
     },
-    [user]
+    [user],
   );
 
   const signIn = useCallback(async (phone: string, code: string) => {

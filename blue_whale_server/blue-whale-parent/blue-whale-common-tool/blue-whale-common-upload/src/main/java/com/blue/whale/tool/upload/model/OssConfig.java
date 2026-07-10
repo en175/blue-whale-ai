@@ -17,34 +17,9 @@ import java.io.Serializable;
 public class OssConfig implements Serializable {
     private static final long serialVersionUID = 1L;
     /**
-     * 当前使用类型 1：阿里云 2火山 引擎
+     * 当前使用类型 1：阿里云 2 火山引擎
      */
     private StorageType type = StorageType.VOLCENGINE;
-
-//    /**
-//     * 阿里云绑定的域名
-//     */
-//    private String aliyunDomain = "https://bwpn.oss-cn-hangzhou.aliyuncs.com";
-//    /**
-//     * 阿里云路径前缀
-//     */
-//    private String aliyunPrefix = "blue-whole-butler";
-//    /**
-//     * 阿里云EndPoint
-//     */
-//    private String aliyunEndPoint = "https://oss-cn-hangzhou.aliyuncs.com";
-//    /**
-//     * 阿里云AccessKeyId
-//     */
-//    private String aliyunAccessKeyId = "LTAI5t7CTnGeKAnRujq6S9hY";
-//    /**
-//     * 阿里云AccessKeySecret
-//     */
-//    private String aliyunAccessKeySecret = "EivJhcY5dV6BfekAuAOeOafNK4zIN6";
-//    /**
-//     * 阿里云BucketName
-//     */
-//    private String aliyunBucketName = "bwpn";
 
     /**
      * 火山引擎绑定的域名
@@ -65,13 +40,13 @@ public class OssConfig implements Serializable {
     /**
      * 火山引擎AccessKey
      */
-    private String veTosAccessKey = "AKLTODYwMzRhMjAzNzcxNGY1ZDhiNGMyMWMyNzEzYmIxM2M";
+    private String veTosAccessKey = System.getenv("TOS_ACCESS_KEY");
     /**
      * 火山引擎SecretKey
      */
-    private String veTosSecretKey = "TlRSak5HSXdaVEZrWTJFMU5ESmxaRGt3Tnprek5qYzRNRFF4WW1GbE16SQ==";
+    private String veTosSecretKey = System.getenv("TOS_SECRET_KEY");
     /**
      * 火山引擎BucketName
      */
-    private String veTosBucketName = "sweet-oa";
+    private String veTosBucketName = System.getenv("TOS_BUCKET_NAME");
 }

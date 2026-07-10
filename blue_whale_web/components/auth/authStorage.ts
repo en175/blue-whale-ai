@@ -11,11 +11,15 @@ export function loadUser(): User | null {
   try {
     const raw = localStorage.getItem(USER_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<User>;
-    if (parsed && typeof parsed.username === "string" && typeof parsed.phone === "string" && typeof parsed.userId === "number") {
-      return { username: parsed.username, phone: parsed.phone, userId: parsed.userId };
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed.username !== "string" || typeof parsed.phone !== "string") {
+      return null;
     }
-    return null;
+    // userId 兼容 number 和 string（Fastjson2 可能将 Long 序列化为字符串）
+    const uid = parsed.userId;
+    const userId = typeof uid === "number" ? uid : typeof uid === "string" ? Number(uid) : null;
+    if (userId == null || Number.isNaN(userId)) return null;
+    return { username: parsed.username as string, phone: parsed.phone as string, userId };
   } catch {
     return null;
   }
@@ -24,7 +28,8 @@ export function loadUser(): User | null {
 export function saveUser(u: User): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(USER_KEY, JSON.stringify(u));
+    // 归一化 userId 为 number（Fastjson2 可能序列化 Long 为字符串）
+    localStorage.setItem(USER_KEY, JSON.stringify({ ...u, userId: Number(u.userId) }));
   } catch { /* ignore */ }
 }
 
