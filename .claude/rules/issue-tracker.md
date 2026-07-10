@@ -7,6 +7,11 @@ Issues 追踪在 Gitee 仓库 `git@gitee.com:hangzhou_xuanfu_1/blue-whale-ai.git
 - `mcp__gitee-ent__create_enterprise_issue` — **必传 `project_id`**（值用 `list_enterprise_repositories` 查），否则工单只在企业工作项可见、仓库 Issues 页看不到。
 - `create` 对企业私有仓库的 `labels` 会静默忽略 → 紧跟 `update_enterprise_issue` 补 `label_ids`。
 
+## 创建 PR
+
+- `mcp__gitee-ent__create_enterprise_repo_pull` — **必传数字 `project_id`**（值用 `list_enterprise_repositories` 查）。工具描述写「Project ID or PathWithNamespace」，**实际传 PathWithNamespace（如 `hangzhou_xuanfu_1/blue-whale-ai`）会 404「仓库不存在」**，勿被误导。
+- 查询方式：`list_enterprise_repositories(enterprise_id, search=...)` → 取返回结果中的数字 `id`。
+
 ## 子 Issue
 
 - 创建前先读父项，继承 `project_id` / `program_id`。
