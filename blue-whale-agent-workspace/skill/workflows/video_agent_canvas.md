@@ -16,6 +16,7 @@
 | 7 | 审核完成 | Review | 质量检查、交付摘要 | 软过 |
 
 > **硬停** = turn 边界，必须用户明确确认才推进；**软过** = turn 内自动推进，用户可随时打断。详见 `confirmation_gate.md`。
+> **硬停成本等级**（决策 10）：Brief / 脚本分镜 / 首批视觉 = 低成本硬停（弱继续直接推进）；视频生成 = 高成本硬停（弱继续二次确认）。详见 `confirmation_gate.md` 弱继续。
 > **Stage 0 承接 `decision_context.decision_branch`**(turn 前置已由后端算好,见 `decision_layer.md`),按 branch 路由到对应 stage。原「L2 意图识别」概念已废除——全场景(轻量编排 + Full Canvas)复用同一套 `decision_branch`,L1/L2 统一。
 
 ## Stage 0：承接 decision_branch

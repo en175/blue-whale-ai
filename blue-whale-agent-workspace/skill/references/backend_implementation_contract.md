@@ -317,6 +317,10 @@ confirmed_at
 13. **`advance_stage` 铁闸(confirm_pending)**:推进 stage 必须独立校验当前 stage 存在 `has_ready_node`,与主 Agent 判定**解耦**——主 Agent 误判要推进也拦。呼应 `decision_layer.md` confirm_pending 后端铁闸与 `confirmation_gate.md`。
 14. **候选图消歧铁闸**：`@` 引用解析阶段，任务需要图 + `candidate_asset_ids` ≥ 2 + 无 `reference_asset_ids`（@ 引用）/ `active_asset_id`（选中态）时，必须触发消歧（画布高亮 + 文字引导），**禁止**主 Agent 靠「最近 ready / 第一张 / 刚生成」猜自然语言指代。`active_asset_id`（用户画布选中）视为明确指向，不追问。详见 `image_understanding.md` 候选图消歧。
 15. **id 全部后端生成**：画布 node_id / asset_id 由后端创建/列表接口返回，前端不得本地 mint；`active_asset_id` / `candidate_asset_ids`（及请求体 `reference_asset_ids`）必须是后端认识的 id。
+16. **asset 归属 product_context**（决策 3）：asset 必须带 `product_context` 归属字段，供 revise 节点定位、引用匹配、前端选中态透传时按产品过滤。
+17. **asset 两态**（决策 5）：未引用态 asset 只有上传元信息（id / 文件名 / title / 尺寸），已理解态带 `understanding_data`。`previous_product_context` 的 asset 按引用状态分层带 understanding。
+18. **内容相同去重**（决策 6）：上传图按内容去重（看内容不看文件名），同图视为同一 asset，不重复展示、复用已有 `understanding_data` 不重算。
+19. **optimized_prompt 复用**（决策 9）：`prompt_only` 后用户说「生成」走生成链路时，`optimized_prompt_preview` 对应的 `optimized_prompt` 复用为 GenerationJob input，不重新走 Prompt Optimizer。
 
 ## 前端展示建议
 

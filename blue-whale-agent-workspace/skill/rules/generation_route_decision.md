@@ -65,6 +65,8 @@ visible_reasoning 示例：
 
 则只走 Prompt Optimizer，输出用户友好的 `optimized_prompt_preview`；不调用 Provider，不创建 GenerationJob，不写 Canvas Node。
 
+**转生成**（决策 9）：用户在 `prompt_only` 后说「就用它生成 / 出图吧 / 按这个做」→ 走生成链路，已优化的 prompt 作为参数传给生图/视频模型，**不重新走 Optimizer**。生成链路内部「要不要走 Optimizer」由后端判断（有优化好的就用，没有才走）。详见 `PRD/ORCHESTRATION-DECISIONS.md` 决策 9。
+
 ## 用户上传图片但没说用途
 
 不要自动生成。应该问：
