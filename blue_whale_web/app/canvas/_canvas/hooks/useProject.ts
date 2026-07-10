@@ -9,16 +9,16 @@
  * 边界：
  * - 本 hook 只挂 ProjectState（多项目集合 + active 指针）；UI 层状态
  *   （selectedId / BottomDock 开关 / 选择模式等）属页面交互态，留在 page.tsx。
- * - DOM 依赖（containerRef getBoundingClientRect）不到本 hook —— 节点 add-node
- *   的 x/y 位置由 page.tsx 在 dispatch 前算好传入，hook 只负责 dispatch。
+ * - DOM 依赖（containerRef getBoundingClientRect）不到本 hook —— 节点 x/y
+ *   由 page.tsx 在调 `addNode(node)` 前算好作为入参传入，hook 只负责 dispatch。
  * - 跨模块领域类型（Project / NodeItem / Viewport / ChatMessage / CardStatus）
  *   全部从 `@/types/domain` 取（依赖 IJZYVQ ARCH-5）。
  *
  * 派生选择器解读（满足 spec「至少返回 { state, dispatch, ...派生选择器 }」）：
- *   state, dispatch —— 完整状态机入口
+ *   state, dispatch —— 完整状态机入口（dispatch 暴露给 page.tsx 走无法合成的 reducer 动作）
  *   projects, activeProject, activeProjectId, nodes, viewport, messages —— 派生读
  *   selectProject / createProject / deleteProject / setViewport / setNodes /
- *   appendMessages / setCardStatus —— 由 dispatch 衍生的高频便捷 action，
+ *   addNode / appendMessages / setCardStatus —— 由 dispatch 衍生的高频便捷 action，
  *     避免 page.tsx 每个动作写 `dispatch({ type, ... })` boilerplate
  */
 
@@ -28,9 +28,13 @@ import type { Dispatch } from "react";
 import { PROJECTS } from "../constants";
 import { projectReducer, initialProjectState } from "../projectReducer";
 import type { ProjectAction, ProjectState } from "../projectReducer";
-import type { NodeItem, Project, Viewport } from "../types";
-import type { ChatMessage } from "../types";
-import type { CardStatus } from "@/types/domain";
+import type {
+  CardStatus,
+  ChatMessage,
+  NodeItem,
+  Project,
+  Viewport,
+} from "@/types/domain";
 
 export type UseProject = {
   // 状态机入口
@@ -49,6 +53,8 @@ export type UseProject = {
   deleteProject: (projectId: string) => void;
   setViewport: (next: Viewport | ((prev: Viewport) => Viewport)) => void;
   setNodes: (next: NodeItem[] | ((prev: NodeItem[]) => NodeItem[])) => void;
+  /** 添加单个节点（位置由调用方算好；hook 不接 DOM） */
+  addNode: (node: NodeItem) => void;
   appendMessages: (messages: ChatMessage[]) => void;
   setCardStatus: (cardId: number | string, status: CardStatus) => void;
 };
@@ -116,6 +122,12 @@ export function useProject(opts?: {
     [activeProject.id, activeProject.canvas.nodes],
   );
 
+  const addNode = useCallback(
+    (node: NodeItem) =>
+      dispatch({ type: "add-node", projectId: activeProject.id, node }),
+    [activeProject.id],
+  );
+
   const appendMessages = useCallback(
     (messages: ChatMessage[]) =>
       dispatch({
@@ -152,6 +164,7 @@ export function useProject(opts?: {
       deleteProject,
       setViewport,
       setNodes,
+      addNode,
       appendMessages,
       setCardStatus,
     }),
@@ -163,6 +176,7 @@ export function useProject(opts?: {
       deleteProject,
       setViewport,
       setNodes,
+      addNode,
       appendMessages,
       setCardStatus,
     ],

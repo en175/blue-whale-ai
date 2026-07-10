@@ -6,8 +6,9 @@
  * 所有 UI 子模块（顶栏、工具条、画布节点、Dock、Agent 面板、缩放控件）经统一出口 ./_canvas 引入。
  *
  * Project 聚合根：IJZYWD ARCH-6 起，page 不再裸 useReducer，改用 `_canvas/hooks/useProject`
- * 暴露的 { state, dispatch, ...派生选择器 }。切换项目 = 更换画布节点集合 + 对话历史
- * （CONTEXT.md L44–50）。
+ * 暴露的 { state, dispatch, ...派生选择器, ...便捷 action }。page 唯一一次 dispatch
+ * 在 addNode（DOM 上下文算 x/y），现统一收口到 hook `addNode(node)` helper。
+ * 切换项目 = 更换画布节点集合 + 对话历史（CONTEXT.md L44–50）。
  */
 import { Suspense, useState, useRef, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -66,9 +67,9 @@ function CanvasPageInner() {
     deleteProject,
     setViewport,
     setNodes,
+    addNode: addProjectNode,
     appendMessages,
     setCardStatus,
-    dispatch,
   } = useProject();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -197,14 +198,13 @@ function CanvasPageInner() {
               content: "占位图片节点",
             };
       const node: NodeItem = { ...base, ...extra, id: base.id };
-      // 写入走 reducer：节点归属当前 active project（位置在此算好作为 x/y 传入）
-      // IJZYWD：addNode 的 dispatch 留在 page —— x/y 算在 DOM（containerRef）上下文，
-      // hook 不接 DOM。
-      dispatch({ type: "add-node", projectId: activeProject.id, node });
+      // 写入走 hook 便捷 action：节点归属当前 active project（位置在此算好作为 x/y 传入）
+      // IJZYWD：x/y 在 DOM（containerRef）上下文算，hook 不接 DOM。
+      addProjectNode(node);
       setSelectedId(id);
       return id;
     },
-    [viewport, activeProject.id, dispatch]
+    [viewport, addProjectNode]
   );
 
   // 对话流出现 card 的同一时刻，在画布同步创建对应图片 NodeItem（同一生成结果两种视图）。

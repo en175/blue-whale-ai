@@ -103,7 +103,6 @@ describe("useProject / 便捷 action 路由到 dispatch", () => {
 
   it("setNodes([...]) 与 setNodes((prev) => [...prev, n]) 都写入 activeProject.canvas.nodes", () => {
     const { result } = renderHook(() => useProject());
-    const initialLen = result.current.nodes.length;
 
     act(() =>
       result.current.setNodes([
@@ -119,7 +118,7 @@ describe("useProject / 便捷 action 路由到 dispatch", () => {
         { id: "n2", type: "text", x: 1, y: 1, width: 20, height: 20, content: "t" },
       ]),
     );
-    expect(result.current.nodes).toHaveLength(initialLen > 0 ? 2 : 2);
+    expect(result.current.nodes).toHaveLength(2);
     expect(result.current.nodes.map((n) => n.id)).toEqual(["n1", "n2"]);
   });
 
@@ -158,6 +157,8 @@ describe("useProject / 便捷 action 路由到 dispatch", () => {
 
   it("切到别的 project 后，appendMessages/setCardStatus 路由到新的 active project", () => {
     const { result } = renderHook(() => useProject());
+    // 切走前先记下项目 1 的消息数，作为 isolation 基线
+    const p1Before = result.current.projects.find((p) => p.id === "1")!.messages.length;
     act(() => result.current.selectProject("3"));
     const p3Before = result.current.messages.length;
 
@@ -169,8 +170,9 @@ describe("useProject / 便捷 action 路由到 dispatch", () => {
 
     expect(result.current.activeProjectId).toBe("3");
     expect(result.current.messages.length).toBe(p3Before + 1);
-    // 回看全局 state：项目 1 的消息数不应被污染
-    const p1 = result.current.projects.find((p) => p.id === "1");
-    expect(p1).toBeDefined();
+    // isolation：项目 1 的消息数不应被 p3 的写入污染
+    const p1 = result.current.projects.find((p) => p.id === "1")!;
+    expect(p1.messages.length).toBe(p1Before);
+    expect(p1.messages.at(-1)?.id).not.toBe("m-p3");
   });
 });
