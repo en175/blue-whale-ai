@@ -98,6 +98,10 @@ components:
   status-destructive:
     backgroundColor: "{colors.destructive}"
     textColor: "{colors.on-accent}"
+  button-login-primary:
+    backgroundColor: "{colors.login-primary}"
+    textColor: "{colors.on-accent}"
+    rounded: "{rounded.lg}"
 ---
 
 ## Overview
