@@ -1,14 +1,16 @@
 "use client";
 
 /**
- * Canvas Page —— 画布路由页面（编排层 / 状态管理）
+ * Canvas Page —— 画布路由页面（编排层 / 状态消费）
  * 仅承载页面级状态与交互编排：视口变换、节点增删、Dock 开关、Agent 面板联动等。
  * 所有 UI 子模块（顶栏、工具条、画布节点、Dock、Agent 面板、缩放控件）经统一出口 ./_canvas 引入。
  *
- * Project 聚合根：useReducer(projectReducer) 管理多项目的画布+对话，active 项目派生
- * nodes/viewport/messages。切换项目 = 更换画布节点集合 + 对话历史（CONTEXT.md L44–50）。
+ * Project 聚合根：IJZYWD ARCH-6 起，page 不再裸 useReducer，改用 `_canvas/hooks/useProject`
+ * 暴露的 { state, dispatch, ...派生选择器, ...便捷 action }。page 唯一一次 dispatch
+ * 在 addNode（DOM 上下文算 x/y），现统一收口到 hook `addNode(node)` helper。
+ * 切换项目 = 更换画布节点集合 + 对话历史（CONTEXT.md L44–50）。
  */
-import { Suspense, useState, useRef, useEffect, useCallback, useReducer } from "react";
+import { Suspense, useState, useRef, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/auth/AuthContext";
@@ -23,10 +25,15 @@ import {
   BottomDock,
   AgentChatPanel,
   ZoomControls,
+  useProject,
 } from "./_canvas";
-import type { Viewport, NodeItem, NodeType, DockMediaItem, CardMessage, ChatMessage } from "./_canvas";
-import { nodeFromCard, projectReducer, initialProjectState } from "./_canvas";
-import { PROJECTS } from "./_canvas";
+import type {
+  NodeItem,
+  NodeType,
+  DockMediaItem,
+  CardMessage,
+} from "./_canvas";
+import { nodeFromCard } from "./_canvas";
 
 function CanvasPageInner() {
   const searchParams = useSearchParams();
@@ -48,13 +55,22 @@ function CanvasPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Project 聚合根：多项目画布+对话的单一真相源
-  const [projectState, dispatch] = useReducer(projectReducer, PROJECTS, initialProjectState);
-  const activeProject =
-    projectState.projects.find((p) => p.id === projectState.activeProjectId) ?? projectState.projects[0];
-  // 派生：当前项目的画布与对话（读取走 active，写入走 dispatch）
-  const { nodes, viewport } = activeProject.canvas;
-  const messages = activeProject.messages;
+  // Project 聚合根：多项目画布+对话的单一真相源（IJZYWD 改为走 useProject hook）
+  const {
+    projects,
+    activeProject,
+    nodes,
+    viewport,
+    messages,
+    selectProject,
+    createProject,
+    deleteProject,
+    setViewport,
+    setNodes,
+    addNode: addProjectNode,
+    appendMessages,
+    setCardStatus,
+  } = useProject();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isAgentOpen, setIsAgentOpen] = useState(true);
@@ -65,25 +81,6 @@ function CanvasPageInner() {
   const [agentPendingMention, setAgentPendingMention] = useState<{ name: string; nonce: number } | null>(null);
   // 「从画布选择」模式：非 null 表示正在为哪个 Dock 挑图（image/video）
   const [pickingFor, setPickingFor] = useState<"image" | "video" | null>(null);
-
-  // CanvasSurface 期望 Dispatch<SetStateAction<...>> 类型的 setter（高频拖拽/缩放内部用）。
-  // 适配为对当前 active project 的 dispatch：解析值或 updater 后整体写回画布。
-  const setViewport = useCallback(
-    (next: Viewport | ((prev: Viewport) => Viewport)) => {
-      const resolved =
-        typeof next === "function" ? (next as (prev: Viewport) => Viewport)(activeProject.canvas.viewport) : next;
-      dispatch({ type: "set-viewport", projectId: activeProject.id, viewport: resolved });
-    },
-    [activeProject.id, activeProject.canvas.viewport]
-  );
-  const setNodes = useCallback(
-    (next: NodeItem[] | ((prev: NodeItem[]) => NodeItem[])) => {
-      const resolved =
-        typeof next === "function" ? (next as (prev: NodeItem[]) => NodeItem[])(activeProject.canvas.nodes) : next;
-      dispatch({ type: "set-nodes", projectId: activeProject.id, nodes: resolved });
-    },
-    [activeProject.id, activeProject.canvas.nodes]
-  );
 
   // 画布素材节点操作面板的统一动作分发
   const handleNodeAction = useCallback(
@@ -162,14 +159,22 @@ function CanvasPageInner() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
+    // setNodes 不进 deps：setNodes 引用 churn（activeProject.canvas.nodes 变），
+    // 重拆 listener 浪费。handler 闭包持有当前 setNodes；selectedId/pickingFor
+    // 变时才需要重绑。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, pickingFor]);
 
+  // mount 时把画布视口居中到容器中央。deps=[] 一次性：IJZYWD 改 useCallback deps
+// 含 viewport 会让 setViewport 引用 churn（dispatch 改 viewport → setViewport
+// 重生成），与 deps=[setViewport] 组合会死循环。保持 mount-only。
   useEffect(() => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const cx = rect.width / 2;
     const cy = rect.height / 2;
     setViewport({ x: cx, y: cy, scale: 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const addNode = useCallback(
@@ -201,12 +206,13 @@ function CanvasPageInner() {
               content: "占位图片节点",
             };
       const node: NodeItem = { ...base, ...extra, id: base.id };
-      // 写入走 reducer：节点归属当前 active project（位置在此算好作为 x/y 传入）
-      dispatch({ type: "add-node", projectId: activeProject.id, node });
+      // 写入走 hook 便捷 action：节点归属当前 active project（位置在此算好作为 x/y 传入）
+      // IJZYWD：x/y 在 DOM（containerRef）上下文算，hook 不接 DOM。
+      addProjectNode(node);
       setSelectedId(id);
       return id;
     },
-    [viewport, activeProject.id]
+    [viewport, addProjectNode]
   );
 
   // 对话流出现 card 的同一时刻，在画布同步创建对应图片 NodeItem（同一生成结果两种视图）。
@@ -335,10 +341,10 @@ function CanvasPageInner() {
       />
       <TopBar
         activeProject={activeProject}
-        projects={projectState.projects}
-        onSwitch={(id) => dispatch({ type: "switch", projectId: id })}
-        onCreate={() => dispatch({ type: "create", name: `项目 ${Date.now().toString().slice(-4)}`, idGen: () => `p-${Date.now()}` })}
-        onDelete={(id) => dispatch({ type: "delete", projectId: id })}
+        projects={projects}
+        onSwitch={selectProject}
+        onCreate={() => createProject(`项目 ${Date.now().toString().slice(-4)}`)}
+        onDelete={deleteProject}
       />
       <TopBarCenter />
       <TopBarRight
@@ -428,12 +434,8 @@ function CanvasPageInner() {
         pendingMention={agentPendingMention}
         onMentionConsumed={() => setAgentPendingMention(null)}
         onCardGenerated={handleCardGenerated}
-        onAppendMessages={(msgs: ChatMessage[]) =>
-          dispatch({ type: "append-messages", projectId: activeProject.id, messages: msgs })
-        }
-        onSetCardStatus={(cardId, status) =>
-          dispatch({ type: "set-card-status", projectId: activeProject.id, cardId, status })
-        }
+        onAppendMessages={appendMessages}
+        onSetCardStatus={setCardStatus}
       />
       <ZoomControls
         containerRef={containerRef}
