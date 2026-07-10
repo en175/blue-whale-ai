@@ -30,7 +30,7 @@ import {
 import type { NodeItem, NodeType, DockMediaItem, CardMessage } from "./_canvas";
 import { nodeFromCard } from "./_canvas";
 
-function CanvasPageInner() {
+export function CanvasPageInner() {
   const searchParams = useSearchParams();
   const prompt = searchParams.get("prompt") || "";
   const { openLogin } = useAuth();
@@ -44,6 +44,7 @@ function CanvasPageInner() {
     if (!loadUser()) {
       guardRouter.replace("/");
       openLogin();
+      return;
     }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setGated(false);
