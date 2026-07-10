@@ -7,7 +7,7 @@
 ## 部署说明
 
 - 官方约定路径：`.claude/skills/<skill-name>/SKILL.md`，自动发现，无需在 `settings.json` 注册。
-- 项目级 skill 会覆盖同名的内置/插件 skill（本项目已覆盖：`tdd`、`code-review`、`qa`、`diagnosing-bugs`、`grilling`、`domain-modeling`、`codebase-design`、`design-an-interface`、`prototype`、`resolving-merge-conflicts` 等）。
+- 项目级 skill 会覆盖同名的内置/插件 skill（本项目已覆盖：`tdd`、`code-review`、`diagnosing-bugs`、`grilling`、`domain-modeling`、`codebase-design`、`prototype`、`resolving-merge-conflicts` 等）。
 - 如需临时禁用某个 skill，在 `/skills` 菜单中调整其 `skillOverrides` 状态（写入 `.claude/settings.local.json`）。
 
 ---
@@ -21,8 +21,9 @@
 - **[triage](./triage/SKILL.md)** — 在一组 triage 角色的状态机里推动 issue 流转。
 - **[improve-codebase-architecture](./improve-codebase-architecture/SKILL.md)** — 扫描代码库寻找深化机会，以可视化 HTML 报告呈现，再逐一盘问你选定的那项。
 - **[setup-matt-pocock-skills](./setup-matt-pocock-skills/SKILL.md)** — 为本仓库配置工程 skills（issue tracker、triage labels、领域文档布局），每个仓库运行一次。
-- **[to-issues](./to-issues/SKILL.md)** — 把任意 plan/spec/PRD 拆成可独立认领的垂直切片 issue。
-- **[to-prd](./to-prd/SKILL.md)** — 把当前对话转为 PRD 并发布到 issue tracker。
+- **[to-tickets](./to-tickets/SKILL.md)** — 把任意 plan/spec 或当前对话拆成一组 tracer-bullet ticket，每个声明其阻塞边，发布到配置的 tracker（本地 tracker 为手写有序 `tickets.md`，真实 tracker 为原生阻塞链接，故任一阻塞完成的 ticket 都可被认领）。
+- **[to-spec](./to-spec/SKILL.md)** — 把当前对话转为 spec 并发布到 issue tracker，不做访谈，只综合已讨论内容。
+- **[wayfinder](./wayfinder/SKILL.md)** — 规划超出单个 agent 会话容量的庞大工作：作为 issue tracker 上的调查工单共享地图，逐一解决直到通往目的地的路径清晰。产出的是决策而非交付物。
 
 ### Model-invoked（模型或用户均可触发）
 
@@ -63,17 +64,9 @@
 
 仍处于开发中，可能有粗糙边缘、破坏性改动或被废弃的实验。使用时预期不稳定。
 
-- **[wayfinder](./wayfinder/SKILL.md)** — 在模糊问题中规划路线：把松散想法变成调查工单地图，逐一解决直到通往目标的路径清晰。User-invoked。
 - **[loop-me](./loop-me/SKILL.md)** — 跨多个会话把自己盘问成可实施的工作流规范，以当前目录作为有状态工作区。User-invoked。
 - **[wizard](./wizard/SKILL.md)** — 生成一个交互式 bash 向导，引导人类完成手动流程（初始化、一次性迁移、状态转换）——打开 URL、采集值、写入 `.env` 与 GitHub Actions secrets。User-invoked。
 - **[writing-beats](./writing-beats/SKILL.md)** — 以「节拍之旅」塑造文章，choose-your-own-adventure 风格。选定起始节拍，只写那一拍，再转向下一拍，直到文章自然收尾。
 - **[writing-fragments](./writing-fragments/SKILL.md)** — 盘问式会话，挖掘你的写作碎片（异质写作素材），追加到单个文档作为未来文章的原材料。
 - **[writing-shape](./writing-shape/SKILL.md)** — 拿一份原材料 Markdown，逐段塑造成文章，每一步都为格式选择辩护。
 - **[claude-handoff](./claude-handoff/SKILL.md)** — 把当前对话交接给一个新启动的后台 agent，通过 `claude --bg` 以交接摘要播种并立即接手工作。User-invoked。
-
-## Deprecated（已废弃，作者不再使用）
-
-- **[design-an-interface](./design-an-interface/SKILL.md)** — 用并行子 agent 为一个模块生成多套截然不同的接口设计。
-- **[qa](./qa/SKILL.md)** — 用户以对话方式报告 bug 的交互式 QA 会话，agent 据此创建 GitHub issue。
-- **[request-refactor-plan](./request-refactor-plan/SKILL.md)** — 通过用户访谈产出带细粒度提交的重构计划，并以 GitHub issue 归档。
-- **[ubiquitous-language](./ubiquitous-language/SKILL.md)** — 从当前对话中提取 DDD 风格的统一语言词汇表。
