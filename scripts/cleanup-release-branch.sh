@@ -61,12 +61,24 @@ git -C "$ROOT" fetch origin master
 git -C "$ROOT" merge-base --is-ancestor "$BRANCH" origin/master \
   || fail "$BRANCH 尚未被 origin/master 包含。请等待 PR 合并后再清理。"
 
-# 删除：本地先（update-ref -d 直接删 ref；本地 master 可能落后 origin/master，
-# 故不用 branch -d——其「已合入当前 HEAD」判定在本地集成区落后时会误拒；
-# ancestor 已证明分支在 origin/master 内，删 ref 安全），再远程（ls-remote 探活），最后 prune。
-git -C "$ROOT" update-ref -d "refs/heads/$BRANCH"
-if git -C "$ROOT" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+# 删除顺序（IK00BP 修复）：先 ls-remote 探活 + 删远程，确认后再删本地 ref。
+# 不变式：删本地必须在远程状态确定之后。ls-remote --exit-code 三态：
+#   exit 0=远程存在 → push --delete + 删本地
+#   exit 2=远程不存在 → 幂等跳过，仅删本地（如已被网页删除）
+#   其他（1/128 等：网络瞬断/认证失败）→ 远程状态未知，报错且不删本地
+# 旧逻辑先 update-ref -d 再探活，网络瞬断返回非0非2被当「不存在」跳过删远程，
+# 留下「本地删、远程留」不一致终态，重跑因本地已无分支而卡死。
+# update-ref -d 直接删 ref（本地 master 可能落后 origin/master，故不用 branch -d——
+# 其「已合入当前 HEAD」判定在集成区落后时会误拒；ancestor 已证明分支在 origin/master 内，删 ref 安全）。
+probe_rc=0
+git -C "$ROOT" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1 || probe_rc=$?
+if [ "$probe_rc" = 0 ]; then
   git -C "$ROOT" push origin --delete "$BRANCH"
+  git -C "$ROOT" update-ref -d "refs/heads/$BRANCH"
+elif [ "$probe_rc" = 2 ]; then
+  git -C "$ROOT" update-ref -d "refs/heads/$BRANCH"
+else
+  fail "ls-remote 探活失败（exit ${probe_rc}），远程状态未知，未删本地分支：${BRANCH}。网络恢复后重试即可。"
 fi
 git -C "$ROOT" fetch --prune
 

@@ -44,7 +44,11 @@ fail() {
 [ "$AUTHORIZED" = 1 ] || fail "缺少 --user-authorized。必须先获得用户明确授权合入本地 master。"
 [ -n "$TASK_BRANCH" ] || fail "缺少任务分支名。"
 
-ROOT="$(git rev-parse --show-toplevel)"
+# ROOT 用 BASH_SOURCE 而非 git rev-parse --show-toplevel：本脚本是主 checkout 脚本
+# （lib/worktree-paths.sh 注释约定），运行时可能 cwd 在任意处；BASH_SOURCE 派生的 ROOT
+# 稳定指向主 checkout scripts/ 的父目录，不依赖 cwd/worktree 上下文。IK00BP follow-up：
+# 对齐 cleanup-release-branch.sh 的同款推导（旧 rev-parse --show-toplevel 依赖 cwd，不符约定）。
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/worktree-paths.sh
 source "$ROOT/scripts/lib/worktree-paths.sh"
 WORKTREE_BASE="$(worktree_paths_resolve_base "$ROOT")"
