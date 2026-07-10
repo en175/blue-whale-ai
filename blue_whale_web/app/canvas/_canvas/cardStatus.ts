@@ -3,8 +3,10 @@
  *
  * Card 的重试生命周期：failed → generating → normal。
  * 重试是单步推进：调用方拿到 next 后渲染，再用 next 排下一步直到 isTerminal。
+ *
+ * IJZYVQ ARCH-5：CardStatus 类型迁至 `@/types/domain`
  */
-export type CardStatus = "failed" | "generating" | "normal";
+import type { CardStatus } from "@/types/domain";
 
 /**
  * 重试的单步状态转移。返回下一态 + 是否终态。
