@@ -16,10 +16,12 @@
 .codex/hooks/*
 !.codex/hooks/run-claude-pretool.sh
 .codex/config.toml
-.agents/graphify-out/
 .agents/skills/
 
-graphify-out/
+# Graphify team graph is committed; local cost/cache files are not.
+graphify-out/cost.json
+graphify-out/cache/
+graphify-out/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
 
 # Node / 前端
 node_modules/
