@@ -25,3 +25,17 @@
 3. **合并只用 merge** — 禁 squash/rebase。合并不自动删源分支，事后手动清理。
 4. **Agent 写入用 task worktree** — 不写本地 `master`。`scripts/start-task-worktree.sh` 开工。
 5. **动 git 前先 fetch** — `git fetch origin` 后操作，落后 push 会被 hook 硬拦。
+
+## Agent skills
+
+### Issue tracker
+
+Gitee Issues（`mcp__gitee-ent__*` MCP 工具，外部 PR 非请求面）。见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+五角色全默认名（needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix）。见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+单上下文（根 `CONTEXT.md` + `docs/adr/`）。见 `docs/agents/domain.md`。
