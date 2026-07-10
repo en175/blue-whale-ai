@@ -35,6 +35,17 @@ if [ "$BRANCH" != "master" ]; then
   exit 0
 fi
 
+# 仓库外文件不触发 master 红线（如 ~/.codex/config.toml 等 dotfile）
+FILE_PATH=$(printf '%s' "$INPUT" | python3 "$PRETOOL" value file_path 2>/dev/null || true)
+TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+if [ -n "$FILE_PATH" ] && [ -n "$TOPLEVEL" ]; then
+  case "$FILE_PATH" in
+    "$TOPLEVEL"/*) ;;  # 仓库内 → 继续拦
+    *) exit 0 ;;       # 仓库外 → 放行
+  esac
+fi
+# FILE_PATH/TOPLEVEL 为空 → fail-closed，沿用下方拦截
+
 # 在 master 上执行 Edit/Write → 硬拦
 cat >&2 <<EOF
 BLOCKED: 禁止在 master 分支直接 Edit/Write 文件。

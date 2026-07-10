@@ -17,7 +17,7 @@
 | `block-squash-merge.sh` | `mcp__gitee-ent__merge_enterprise_pull` | `PreToolUse` | 拦 `merge_method=squash`/`rebase`，强制走 `merge` | CLAUDE.md「合并方法」 |
 | `block-issue-without-repo.sh` | `mcp__gitee-ent__create_enterprise_issue` / `mcp__gitee-ent__update_enterprise_issue` | `PreToolUse` | 拦 `project_id` 缺失/为 0；拦子 issue 未带 `project_id/program_id`，强制仓库可见 | [ADR-0007](../../adr/0007-issue-must-link-repo.md) / [ADR-0008](../../adr/0008-sub-issues-must-inherit-repo.md) |
 
-> `settings.json` / `hooks.json` 里还有 2 条**纯提醒**型 hook（grep 触发提示用 graphify、Read/Glob 触发提示先查图谱），它们不阻断执行，仅通过 `additionalContext` 注入提示。
+> `settings.json` 里有 1 条**纯提醒**型 hook（`Grep|Glob` → `cbm-discovery-gate.sh`，提示先查 CBM 图谱），不阻断执行、仅注入 context；Codex 无对应 MCP，`.codex/hooks.json` 不挂此 gate（允许缺失，见下「测试边界」）。
 
 ---
 
@@ -118,7 +118,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 夹具还校验 Codex 挂载层：
 - `.codex/hooks.json` 必须存在。
-- `hooks.PreToolUse` 的 matcher + hook 数量必须与 `.claude/settings.json` 一致。
+- `hooks.PreToolUse` 的**阻断型** gate 的 matcher + hook 数量必须与 `.claude/settings.json` 一致；提醒型 gate（只注入 context、exit 0 不阻断，如 `cbm-discovery-gate.sh`）允许 Codex 缺失（Codex 无对应 MCP 时注入无意义）。
 - 所有 Codex 脚本 command 必须通过 `.codex/hooks/run-claude-pretool.sh`，不得直接指向 `.claude/hooks/` 或复制出来的 `.codex/hooks/` 实现。
 - 每个 Codex 包装命令必须和同位置 Claude hook 挂载的脚本名一致。
 - 代表性 Codex 包装命令必须从 `.codex/hooks.json` 读取，并能从 repo root 调到权威脚本得到相同拦截/放行结果。
@@ -153,7 +153,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 - [ ] 新脚本遵循解析策略、stdin 读 JSON、`exit 0/2` 语义
 - [ ] `chmod +x` 已执行
 - [ ] `.claude/settings.json` 同步更新（matcher + command 路径）
-- [ ] `.codex/hooks.json` 同步更新（matcher + command 路径，脚本 command 指向 `.claude/hooks/`）
+- [ ] `.codex/hooks.json` 同步更新（matcher + command 路径，脚本 command 指向 `.claude/hooks/`）；**阻断型 gate 必须双系统同步**，提醒型 gate（`cbm-discovery-gate.sh`）允许 Codex 缺失
 - [ ] 至少 1 个**应当被拦**的测试用例 + 1 个**应当放行**的测试用例跑过
 - [ ] **输入 JSON 字段类型以 MCP `tools/list` schema 为准**（不要凭直觉只写字符串值——`project_id` / `program_id` / `parent_id` 在 schema 里是 number，PR #11 / IJZ5WA 复现过 string-only 正则漏 number 形态的假绿）
 - [ ] 跑 `bash scripts/test-hooks.sh`，全绿才提交（退出码 0 = 通过）
