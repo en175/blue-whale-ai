@@ -81,6 +81,9 @@ decision_context:
   current_stage: stage_ref          # 当前 stage（id + name + status）
   active_product_context: object    # 当前产品方向（见 product_switch_p0.md）
   previous_product_context: object? # 前一个产品方向（无则 null）
+  active_asset_id: asset_id?       # 前端选中态透传（用户当前选中画布节点的 asset），无则 null
+  candidate_asset_ids: asset_id[]  # active_product_context 内 ready/confirmed image node（消歧候选）
+  # 注：本轮 @ 引用指向复用请求体的 reference_asset_ids，不在此重复
 
   # L1 输出（轻量 classifier，软建议）
   intent_direction: enum            # product_switch / new_task / prompt_only / consult / revise / responding_to_confirm / ambiguous

@@ -21,6 +21,9 @@ from typing import Any
 
 SEPARATORS = {";", "&", "&&", "|", "||", "(", ")"}
 WORK_BRANCH_PREFIXES = ("feature/", "fix/", "hotfix/", "docs/", "chore/")
+# 顶层 key 白名单：命中则读 data 顶层元数据，其余 key 只读 tool_input。
+# 最小权限——避免让任意 key 误读顶层元数据。tool_name 仍保留 tool_input 回退以兼容旧测试夹具。
+TOP_LEVEL_KEYS = {"tool_name", "hook_event_name"}
 GIT_GLOBAL_OPTS_WITH_ARG = {
     "-C",
     "-c",
@@ -65,8 +68,12 @@ def value(key: str) -> int:
     tool_input = data.get("tool_input")
     if not isinstance(tool_input, dict):
         tool_input = data
-    if key == "tool_name":
-        result = data.get("tool_name", tool_input.get("tool_name"))
+    if key in TOP_LEVEL_KEYS:
+        # tool_name 保留 tool_input 回退以兼容旧测试夹具。
+        if key == "tool_name":
+            result = data.get("tool_name", tool_input.get("tool_name"))
+        else:
+            result = data.get(key)
     else:
         result = tool_input.get(key)
     if result is None:

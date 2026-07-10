@@ -142,7 +142,7 @@ scripts/publish-review-package.sh --user-authorized
 
 禁止直接执行 `git push` 绕过该入口；直接 push 会被 Hook 硬拦。旧脚本 `scripts/publish-task-branch.sh` 已废弃，只会提示改用标准入口。
 
-脚本不创建 Gitee PR。推送成功后会写入短期发布标记；随后按 `.gitee/PULL_REQUEST_TEMPLATE.md` 在 Gitee 创建 PR，目标分支为 `master`。创建 PR Hook 会校验并消费该标记，同时要求 `draft` 非 true、`target_branch=master`、`source_branch` 与发布标记一致，不二次确认。PR 创建后必须停下来交给开发者审查；发布审查包授权不覆盖合并。
+脚本不创建 Gitee PR。推送成功后会写入短期发布标记；随后按 `.gitee/PULL_REQUEST_TEMPLATE.md` 在 Gitee 创建 PR，目标分支为 `master`。创建 PR Hook 在 PreToolUse 校验该标记（`draft` 非 true、`target_branch=master`、`source_branch` 与发布标记一致），PostToolUse 创建成功后消费，不二次确认。PR 创建失败（404 / 网络 / 参数错）不消耗标记，可原地重试（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)）。PR 创建后必须停下来交给开发者审查；发布审查包授权不覆盖合并。
 
 **标记位置契约**：发布标记按来源分支隔离，存于 git common dir（`<repo>/.git/agent-release-review-package-<branch-slug>`，分支名中的 `/` 转义为 `%`）。common dir 对主 checkout 与所有 task worktree 是**同一物理路径**，因此 **Claude session 在主 checkout 还是 worktree 启动均对称生效**——标记读写不依赖 session 启动位置。此契约修复了「主 checkout session + cd worktree 跑发布」时建 PR 被误拦的缺陷（标记写在 worktree git path、hook 在主仓 git path 找不到）。
 
