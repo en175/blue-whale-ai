@@ -129,3 +129,8 @@ _Avoid_: 子 issue 完成后自动发布 PR、自动合并到 master
 或测试失败，修复只发生在发布包装分支，不回写用户本地集成区。PR 合并进远程
 `master` 必须单独获得用户授权，不能由本地合入授权或推 PR 授权覆盖。
 _Avoid_: 在用户本地集成区继续修补后再发布
+
+**发布标记（release marker）**:
+发布审查包标准入口（`scripts/publish-review-package.sh --user-authorized`）推送分支成功后写入的短期授权凭据。**TTL 900s**、**绑定分支 + target**（`branch` / `target` / `created_at` 三字段），按分支 slug 隔离（并行发布任务标记互不覆盖），写到 git common dir（主 checkout 与所有 worktree 共享同一物理路径）。
+**单次授权语义 = 一次成功的 PR 创建**：`mcp__gitee-ent__create_enterprise_repo_pull` 在 PreToolUse 校验标记存在 / TTL / 分支匹配并放行（纯校验，不撕票）；PR **创建成功**后在 PostToolUse 消费（撕票，`rm -f`）。失败（404 / 网络 / 参数错）不消耗标记，可原地重试；漏撕靠 TTL 自然过期兜底，TTL 到则 Pre 的过期分支 consume + block。
+_Avoid_: 把「发布审查包授权」理解为「一次 PR 创建尝试」（失败的尝试不消耗）；在 Pre 阶段就删标记（消费时机见 [ADR-0011](docs/adr/0011-release-marker-consume-after-pr-success.md)）

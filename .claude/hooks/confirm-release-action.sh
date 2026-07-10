@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Claude Code PreToolUse hook — 发布动作标准入口兜底（仅本项目）
+# Claude Code PreToolUse / PostToolUse hook — 发布动作标准入口兜底（仅本项目）
 # JSON 与 shell 命令解析委托给 lib/pretool.py，避免转义引号和 git 全局选项绕过。
 #
 # 兜底对象：
@@ -13,7 +13,8 @@
 # 规则：
 #   - 发布审查包只允许通过标准入口触发，并在入口处 ask 一次。
 #   - 直接 git push 是绕过标准入口，直接阻断。
-#   - 创建 PR 必须消费标准入口写入的短期标记，并校验 target=master/source_branch/no draft。
+#   - 创建 PR 校验标准入口写入的短期标记（target=master/source_branch/no draft）；
+#     Pre 放行、PostToolUse 成功后消费标记（失败可重试，见 ADR-0011）。
 #   - 发布审查包授权不覆盖合并；合并仍会单独触发确认。
 #   - 本地任务验收授权不覆盖远程发布；commit 与本地 merge 都需要确认。
 #
@@ -111,11 +112,30 @@ validate_publish_marker() {
     block "PR 分支与发布审查包授权标记不匹配。请重新执行 scripts/publish-review-package.sh --user-authorized。"
   fi
 
-  consume_publish_marker "$marker_path"
+  # 成功路径不在此消费：消费延后到 PostToolUse（PR 创建成功后），见 ADR-0011。
+  # 失败（404 / 网络 / 参数错）不消耗标记，可原地重试；TTL 过期分支的 consume 见上方。
+}
+
+# PostToolUse 分流：PR 创建成功后消费发布标记（撕票）。
+# PostToolUse 只在工具成功时触发（失败走 PostToolUseFailure），故直接撕票无需判 isError。见 ADR-0011。
+# Post 阶段不能阻断已执行的工具，始终 exit 0。
+handle_post_tool_use() {
+  [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ] || exit 0
+  local source_branch
+  source_branch="$(extract_json_value "source_branch")"
+  [ -n "$source_branch" ] || exit 0
+  consume_publish_marker "$(marker_path_for_branch "$source_branch")"
+  exit 0
 }
 
 TOOL_NAME=$(extract_json_value "tool_name")
 COMMAND=$(extract_json_value "command")
+HOOK_EVENT_NAME=$(extract_json_value "hook_event_name")
+
+# PostToolUse 分流：PR 创建成功后撕票。Pre 阶段（无 hook_event_name）跳过，走下方 Pre 逻辑。
+if [ "$HOOK_EVENT_NAME" = "PostToolUse" ]; then
+  handle_post_tool_use
+fi
 
 # Bash: 直接 git push 属于绕过标准入口，硬拦。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" has-git-push; then

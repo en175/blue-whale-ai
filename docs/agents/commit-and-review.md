@@ -59,9 +59,9 @@ Agent 完成子 issue 后的默认终点是**任务验收分支上的未提交 d
 scripts/publish-review-package.sh --user-authorized
 ```
 
-该入口负责推送当前工单分支；远程分支已存在时会用 `--force-with-lease` 安全更新。Hook 会在入口处要求一次用户确认。禁止直接执行 `git push` 绕过入口；直接 `git push` 会被 Hook 硬拦。脚本成功后会写入短期发布标记，Agent 随后创建 `target_branch=master` 且 `draft` 非 true 的 Gitee PR；PR Hook 会校验并消费该标记，不再二次确认。没有发布标记、标记过期、分支不匹配、缺 `source_branch` / `target_branch` 都会被拦截。发布包装分支上的冲突修复、补测试只留在发布包装分支，不回写用户本地 `master`。
+该入口负责推送当前工单分支；远程分支已存在时会用 `--force-with-lease` 安全更新。Hook 会在入口处要求一次用户确认。禁止直接执行 `git push` 绕过入口；直接 `git push` 会被 Hook 硬拦。脚本成功后会写入短期发布标记，Agent 随后创建 `target_branch=master` 且 `draft` 非 true 的 Gitee PR；PR Hook（PreToolUse）校验标记存在 / TTL / 分支匹配并放行，**PR 创建成功后**在 PostToolUse 消费（撕票），不再二次确认。失败（404 / 网络 / 参数错）不消耗标记，可原地重试（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)）。没有发布标记、标记过期、分支不匹配、缺 `source_branch` / `target_branch` 都会被拦截。发布包装分支上的冲突修复、补测试只留在发布包装分支，不回写用户本地 `master`。
 
-Codex 项目 hook 通过 `.codex/hooks/run-claude-pretool.sh` 复用 Claude hook；Codex PreToolUse 不支持 `permissionDecision=ask`，所以标准发布入口在 Codex 中会被转换为硬停，避免失败放行。Codex 中的发布动作需要用户手动执行，或切到支持确认弹窗的 Claude Code 环境执行。
+Codex 项目 hook 通过 `.codex/hooks/run-claude-pretool.sh` 复用 Claude hook；Codex PreToolUse 不支持 `permissionDecision=ask`，所以标准发布入口在 Codex 中会被转换为硬停，避免失败放行。Codex 不挂 PostToolUse（wrapper 仅适配 PreToolUse），故发布标记在 Codex 环境下不被消费，仅靠 TTL 900s 清理——这是可接受降级（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)）。Codex 中的发布动作需要用户手动执行，或切到支持确认弹窗的 Claude Code 环境执行。
 
 **合并 PR**必须另获授权。低风险 PR 可在用户明确授权后由 Agent 用 Gitee MCP 合并；高风险 PR 禁 AI 合并，必须人手动合并。
 
@@ -169,7 +169,7 @@ ________
 | 本地任务验收入口 | 🟡 用户确认 | Claude PreToolUse（`confirm-release-action.sh`）：直接 `git commit`、非 `--ff-only` 的直接 `git merge`、`scripts/commit-task-for-review.sh --user-authorized`、`scripts/merge-task-to-local-master.sh --user-authorized` 都需要确认；缺 `--user-authorized` 的标准入口硬拦。Codex 会把确认转换为硬停，避免失败放行 |
 | 工单分支落后软提醒 | 🟡 软提醒 | pre-commit：工单分支（前缀见 [branch-naming.md](branch-naming.md)）落后 `origin/master` 时 `echo` 提示落后提交数，**不拦 commit**（硬拦在 pre-push）。本地 `master` 不做落后提醒，它是用户本地集成区。见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md) |
 | squash/rebase 合并拦截 | 🔴 硬挡 | Claude PreToolUse（`block-squash-merge.sh`）：AI 调 `mcp__gitee-ent__merge_enterprise_pull` 时 `merge_method=squash`/`rebase` 一律拦，强制 **merge**（免改写 sha 致 `git branch -d` 失败 + 拦 `-D` 死锁，见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md)）。人网页操作拦不到，靠自觉 |
-| 发布动作标准入口 | 🔴 阻断 / 🟡 用户确认 | Claude PreToolUse（`confirm-release-action.sh`）：直接 `git push` 硬拦；`scripts/publish-review-package.sh` 缺 `--user-authorized` 硬拦；标准入口带 `--user-authorized` 时触发一次确认，脚本推送成功后写入短期发布标记；合法 PR 必须消费该标记且 `draft` 非 true / `target_branch=master`；合并 PR / 创建 release 单独确认 |
+| 发布动作标准入口 | 🔴 阻断 / 🟡 用户确认 | Claude PreToolUse/PostToolUse（`confirm-release-action.sh`）：直接 `git push` 硬拦；`scripts/publish-review-package.sh` 缺 `--user-authorized` 硬拦；标准入口带 `--user-authorized` 时触发一次确认，脚本推送成功后写入短期发布标记；合法 PR 在 Pre 校验该标记（`draft` 非 true / `target_branch=master` / 分支匹配）、PostToolUse 创建成功后消费（失败可重试，见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)）；合并 PR / 创建 release 单独确认 |
 
 > 本表与项目 README 的「Hook 兜底清单」（如有）**同源**——改一处须同步另一处，避免漂移。权威实现以 `.githooks/` + `.claude/hooks/block-dangerous-git.sh` 代码为准。
 
