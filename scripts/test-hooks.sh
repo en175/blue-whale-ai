@@ -31,17 +31,35 @@ setup_git_stub() {
   STUB_DIR="$(mktemp -d)"
   cat >"${STUB_DIR}/git" <<'EOF'
 #!/usr/bin/env bash
-# fake git：响应 rev-parse --abbrev-ref HEAD 与 symbolic-ref --short HEAD（→ $FAKE_BRANCH）、rev-parse --show-toplevel（→ $FAKE_GIT_TOPLEVEL）。
-if [ "$1" = "rev-parse" ] && [ "$2" = "--abbrev-ref" ] && [ "$3" = "HEAD" ]; then
+# fake git：解析可选 -C <dir>。无 -C 走全局 fallback（保 push-to-master 等旧 slice 兼容）；
+# 有 -C 按 FAKE_BRANCH_MAP / FAKE_TOPLEVEL_MAP（每行 prefix<TAB>value，路径前缀匹配）返回；
+# 有 -C 但未命中 MAP → 空输出 exit 1（模拟该目录不属任何工作树 / 无分支，供 hook 走仓库外放行）。
+git_dir=""
+if [ "$1" = "-C" ]; then
+  git_dir="$2"; shift 2
+fi
+# lookup_map <map-text> <query-dir>：每行 prefix<TAB>value，query 前缀命中 prefix → echo value 返回 0
+lookup_map() {
+  while IFS=$'\t' read -r prefix value; do
+    [ -z "$prefix" ] && continue
+    case "$2" in "$prefix"*) echo "$value"; return 0 ;; esac
+  done < <(printf '%s\n' "$1")
+  return 1
+}
+if [ -z "$git_dir" ] && [ "$1" = "rev-parse" ] && [ "$2" = "--abbrev-ref" ] && [ "$3" = "HEAD" ]; then
+  echo "${FAKE_BRANCH:-master}"
+  exit 0
+fi
+if [ "$1" = "symbolic-ref" ] && [ "$2" = "--short" ] && [ "$3" = "HEAD" ]; then
+  if [ -n "$git_dir" ] && [ -n "${FAKE_BRANCH_MAP:-}" ] && lookup_map "$FAKE_BRANCH_MAP" "$git_dir"; then exit 0; fi
+  if [ -n "$git_dir" ]; then exit 1; fi
   echo "${FAKE_BRANCH:-master}"
   exit 0
 fi
 if [ "$1" = "rev-parse" ] && [ "$2" = "--show-toplevel" ]; then
+  if [ -n "$git_dir" ] && [ -n "${FAKE_TOPLEVEL_MAP:-}" ] && lookup_map "$FAKE_TOPLEVEL_MAP" "$git_dir"; then exit 0; fi
+  if [ -n "$git_dir" ]; then exit 1; fi
   echo "${FAKE_GIT_TOPLEVEL:-$PWD}"
-  exit 0
-fi
-if [ "$1" = "symbolic-ref" ] && [ "$2" = "--short" ] && [ "$3" = "HEAD" ]; then
-  echo "${FAKE_BRANCH:-master}"
   exit 0
 fi
 # 其它子命令不归本 stub 管，exit 0 空输出（hook 不依赖）
@@ -789,33 +807,69 @@ assert_exit 2 "danger: restore . 拦截"
 teardown_git_stub
 unset FAKE_BRANCH
 
-# Slice 4.5 — block-master-edit（git stub 隔离当前分支 + 仓库边界）
+# Slice 4.5 — block-master-edit（按 file_path 所属工作树判分支 + 仓库边界）
 MASTER_EDIT_HOOK=block-master-edit.sh
 
 setup_git_stub
-export FAKE_BRANCH=master
-export FAKE_GIT_TOPLEVEL=/tmp/repo
+# 两个工作树共存：主 checkout（master）+ worktree（工单分支）
+export FAKE_BRANCH_MAP=$'/tmp/repo\tmaster\n/tmp/worktree\tfeature/ik096s'
+export FAKE_TOPLEVEL_MAP=$'/tmp/repo\t/tmp/repo\n/tmp/worktree\t/tmp/worktree'
 
-# master + 仓库内 Edit → 拦
+# 主 checkout master，Edit 主 checkout 内文件 → 拦
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/repo/src/a.py"}}'
-assert_exit 2 "master-edit: master+仓库内拦截"
+assert_exit 2 "master-edit: 主 checkout master 文件拦截"
 
-# master + 仓库外 Edit → 放行（核心：dotfile 等仓库外文件不触发 master 红线）
+# 主 checkout session（cwd=master），Edit worktree 工单分支文件 → 放行
+# 核心：按 file_path 所属工作树解析得工单分支，不靠「worktree 路径不在主 toplevel 前缀内」的布局假设
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/worktree/src/b.py"}}'
+assert_exit 0 "master-edit: cwd=master 编辑 worktree 工单分支文件放行"
+
+# 主 checkout session，Edit 仓库外 dotfile → 放行（-C 目录未命中 MAP → 非工作树）
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"/Users/x/.codex/config.toml"}}'
-assert_exit 0 "master-edit: master+仓库外放行"
+assert_exit 0 "master-edit: 仓库外 dotfile 放行"
 
-# 工单分支 → 放行
-export FAKE_BRANCH=feature/x
-run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/repo/src/a.py"}}'
-assert_exit 0 "master-edit: 工单分支放行"
-
-# 非 Edit 工具 → 放行
-export FAKE_BRANCH=master
+# 非 Edit 工具 → 放行（无论 file_path 在哪个工作树）
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Read","tool_input":{"file_path":"/tmp/repo/src/a.py"}}'
-assert_exit 0 "master-edit: 非 Edit 放行"
+assert_exit 0 "master-edit: 非 Edit 工具放行"
+
+# detached HEAD worktree（分支解析为空）→ 放行
+export FAKE_BRANCH_MAP=$'/tmp/detached\t'
+export FAKE_TOPLEVEL_MAP=$'/tmp/detached\t/tmp/detached'
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/detached/src/c.py"}}'
+assert_exit 0 "master-edit: detached HEAD worktree 放行"
 
 teardown_git_stub
-unset FAKE_BRANCH FAKE_GIT_TOPLEVEL
+unset FAKE_BRANCH FAKE_GIT_TOPLEVEL FAKE_BRANCH_MAP FAKE_TOPLEVEL_MAP
+
+# Slice 4.6 — block-master-edit 真实 git 端到端
+# stub 的 git -C 用纯前缀匹配，不模拟「目录不存在→失败」与「git -C . 退化 cwd」，
+# 故 fail-open 回归（#1）与 file_path 缺失 fallback（#2）只能用真实 git 覆盖。
+REAL_REPO="$(mktemp -d)"
+git -C "$REAL_REPO" init -q
+git -C "$REAL_REPO" symbolic-ref HEAD refs/heads/master  # 强制 master（防 git 默认 main）
+
+# #1: master 仓库内 Write 全新子目录文件（父目录链不存在）→ 向上遍历应解析到 master → 拦
+#     修复前：git -C <不存在目录> 失败 → BRANCH/TOPLEVEL 空 → 误判仓库外放行（fail-open）
+run_hook "$MASTER_EDIT_HOOK" "$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/brand/new/sub/file.ts"}}' "$REAL_REPO")"
+assert_exit 2 "master-edit(real): master 仓库内不存在子目录 Write 拦截（#1 fail-open 回归）"
+
+# #2: file_path 缺失 → dirname("")="." → git -C "." 退化 cwd（=临时 master 仓库）→ 拦
+#     锁定 fallback，防未来重构静默破坏
+( cd "$REAL_REPO" && printf '%s' '{"tool_name":"Edit","tool_input":{}}' | bash "${HOOK_DIR}/${MASTER_EDIT_HOOK}" ) 2>/dev/null
+RUN_EXIT=$?
+assert_exit 2 "master-edit(real): file_path 缺失 cwd=master 退化拦截（#2 fallback 锁定）"
+
+rm -rf "$REAL_REPO"
+
+# 非 master 分支 + 不存在子目录 Write → 向上遍历解析得非 master → 放行
+# 锁定 walk 不过度阻塞（与 #1 对称的 must-not-regress，stub 屏蔽 walk 故走真实 git）
+FEATURE_REPO="$(mktemp -d)"
+git -C "$FEATURE_REPO" init -q
+git -C "$FEATURE_REPO" symbolic-ref HEAD refs/heads/feature/x
+run_hook "$MASTER_EDIT_HOOK" "$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/brand/new/sub/f.ts"}}' "$FEATURE_REPO")"
+assert_exit 0 "master-edit(real): 非 master 仓库不存在子目录 Write 放行（walk 不过度阻塞）"
+rm -rf "$FEATURE_REPO"
+unset REAL_REPO FEATURE_REPO
 
 # Slice 5 — Codex project hook layer
 assert_file_exists "$CODEX_HOOKS_JSON" "codex: hooks.json 存在"
