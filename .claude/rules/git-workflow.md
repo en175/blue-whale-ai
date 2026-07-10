@@ -58,3 +58,9 @@
 - 不碰生成物：`graphify-out/`、`dist/`、`target/`、`.next/`、`__pycache__/`、`node_modules/`
 - 不提交：生成物、`.claude/settings.local.json`、密钥凭证（`.env`、`*.key`、`*.pem`）
 - `.claude/` 团队协作目录进仓（`settings.json` + `hooks/`），仅 `settings.local.json` 不进。
+
+## Hook 改动同步检查
+
+- 改 `.claude/hooks/*.sh` 或 `.claude/settings.json` 的 PreToolUse gate 时，必须同步检查 `.codex/hooks.json` 对应项（Codex 经 `.codex/hooks/run-claude-pretool.sh` shim 复用同一批脚本）。
+- 不同步须有显式降级理由：提醒型 gate（只注入 context、exit 0 不阻断，如 `cbm-discovery-gate.sh`）允许 Codex 缺失（Codex 无对应 MCP 时注入无意义）；阻断型 gate 必须双系统同步。
+- 机制兜底：`bash scripts/test-hooks.sh` 的 `assert_codex_hooks_valid` 校验双系统一致。深读见 `docs/agents/hooks/README.md`「变更检查清单」。
