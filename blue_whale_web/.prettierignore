@@ -1,0 +1,19 @@
+# 生成物与依赖
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+coverage/
+
+# 锁文件（不要手动格式化）
+package-lock.json
+
+# Patches（patch-package 维护，禁止改）
+patches/
+
+# graphify 与 codemod 自动产物
+graphify-out/
+.codex/
