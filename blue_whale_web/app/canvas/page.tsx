@@ -27,15 +27,10 @@ import {
   ZoomControls,
   useProject,
 } from "./_canvas";
-import type {
-  NodeItem,
-  NodeType,
-  DockMediaItem,
-  CardMessage,
-} from "./_canvas";
+import type { NodeItem, NodeType, DockMediaItem, CardMessage } from "./_canvas";
 import { nodeFromCard } from "./_canvas";
 
-function CanvasPageInner() {
+export function CanvasPageInner() {
   const searchParams = useSearchParams();
   const prompt = searchParams.get("prompt") || "";
   const { openLogin } = useAuth();
@@ -49,6 +44,7 @@ function CanvasPageInner() {
     if (!loadUser()) {
       guardRouter.replace("/");
       openLogin();
+      return;
     }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setGated(false);
@@ -75,72 +71,78 @@ function CanvasPageInner() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isAgentOpen, setIsAgentOpen] = useState(true);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
-  const [bottomDockMode, setBottomDockMode] = useState<"image" | "video">("image");
+  const [bottomDockMode, setBottomDockMode] = useState<"image" | "video">(
+    "image",
+  );
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
   const [videoDockMedia, setVideoDockMedia] = useState<DockMediaItem[]>([]);
-  const [agentPendingMention, setAgentPendingMention] = useState<{ name: string; nonce: number } | null>(null);
+  const [agentPendingMention, setAgentPendingMention] = useState<{
+    name: string;
+    nonce: number;
+  } | null>(null);
   // 「从画布选择」模式：非 null 表示正在为哪个 Dock 挑图（image/video）
   const [pickingFor, setPickingFor] = useState<"image" | "video" | null>(null);
 
   // 画布素材节点操作面板的统一动作分发
-  const handleNodeAction = useCallback(
-    (node: NodeItem, actionId: string) => {
-      const name = node.content || "未命名素材";
-      switch (actionId) {
-        case "refresh": {
-          // 重新编辑：唤起底部图片 Dock（不带素材）
-          setBottomDockMode("image");
-          setIsBottomDockOpen(true);
-          break;
-        }
-        case "shuffle": {
-          // 再创作：带入参考图占位 + 唤起图片 Dock
-          if (node.imageUrl) {
-            setImageDockMedia([{ id: node.id, type: "image", name, src: node.imageUrl }]);
-          }
-          setBottomDockMode("image");
-          setIsBottomDockOpen(true);
-          break;
-        }
-        case "mention": {
-          // 添加到对话：打开右侧面板并 @ 素材名
-          setIsAgentOpen(true);
-          setAgentPendingMention({ name, nonce: Date.now() });
-          break;
-        }
-        case "video": {
-          // 生成视频：带入参考图占位 + 唤起视频 Dock
-          if (node.imageUrl) {
-            setVideoDockMedia([{ id: node.id, type: "image", name, src: node.imageUrl }]);
-          }
-          setBottomDockMode("video");
-          setIsBottomDockOpen(true);
-          break;
-        }
-        case "info": {
-          // 详情信息：暂忽略，后续补充
-          break;
-        }
-        case "download": {
-          // 下载：仅图片素材
-          if (node.imageUrl) {
-            const a = document.createElement("a");
-            a.href = node.imageUrl;
-            a.download = name || "image";
-            a.target = "_blank";
-            a.rel = "noopener noreferrer";
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-          }
-          break;
-        }
-        default:
-          break;
+  const handleNodeAction = useCallback((node: NodeItem, actionId: string) => {
+    const name = node.content || "未命名素材";
+    switch (actionId) {
+      case "refresh": {
+        // 重新编辑：唤起底部图片 Dock（不带素材）
+        setBottomDockMode("image");
+        setIsBottomDockOpen(true);
+        break;
       }
-    },
-    []
-  );
+      case "shuffle": {
+        // 再创作：带入参考图占位 + 唤起图片 Dock
+        if (node.imageUrl) {
+          setImageDockMedia([
+            { id: node.id, type: "image", name, src: node.imageUrl },
+          ]);
+        }
+        setBottomDockMode("image");
+        setIsBottomDockOpen(true);
+        break;
+      }
+      case "mention": {
+        // 添加到对话：打开右侧面板并 @ 素材名
+        setIsAgentOpen(true);
+        setAgentPendingMention({ name, nonce: Date.now() });
+        break;
+      }
+      case "video": {
+        // 生成视频：带入参考图占位 + 唤起视频 Dock
+        if (node.imageUrl) {
+          setVideoDockMedia([
+            { id: node.id, type: "image", name, src: node.imageUrl },
+          ]);
+        }
+        setBottomDockMode("video");
+        setIsBottomDockOpen(true);
+        break;
+      }
+      case "info": {
+        // 详情信息：暂忽略，后续补充
+        break;
+      }
+      case "download": {
+        // 下载：仅图片素材
+        if (node.imageUrl) {
+          const a = document.createElement("a");
+          a.href = node.imageUrl;
+          a.download = name || "image";
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -151,7 +153,12 @@ function CanvasPageInner() {
       if (e.key !== "Delete" && e.key !== "Backspace") return;
       const target = e.target as HTMLElement | null;
       if (!target) return;
-      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      )
+        return;
       if (!selectedId) return;
       e.preventDefault();
       setNodes((prev) => prev.filter((n) => n.id !== selectedId));
@@ -166,8 +173,8 @@ function CanvasPageInner() {
   }, [selectedId, pickingFor]);
 
   // mount 时把画布视口居中到容器中央。deps=[] 一次性：IJZYWD 改 useCallback deps
-// 含 viewport 会让 setViewport 引用 churn（dispatch 改 viewport → setViewport
-// 重生成），与 deps=[setViewport] 组合会死循环。保持 mount-only。
+  // 含 viewport 会让 setViewport 引用 churn（dispatch 改 viewport → setViewport
+  // 重生成），与 deps=[setViewport] 组合会死循环。保持 mount-only。
   useEffect(() => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -212,7 +219,7 @@ function CanvasPageInner() {
       setSelectedId(id);
       return id;
     },
-    [viewport, addProjectNode]
+    [viewport, addProjectNode],
   );
 
   // 对话流出现 card 的同一时刻，在画布同步创建对应图片 NodeItem（同一生成结果两种视图）。
@@ -220,9 +227,13 @@ function CanvasPageInner() {
   const handleCardGenerated = useCallback(
     (card: CardMessage) => {
       const partial = nodeFromCard(card, () => 0);
-      addNode("image", { content: partial.content, width: partial.width, height: partial.height });
+      addNode("image", {
+        content: partial.content,
+        width: partial.width,
+        height: partial.height,
+      });
     },
-    [addNode]
+    [addNode],
   );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -248,7 +259,7 @@ function CanvasPageInner() {
       reader.readAsDataURL(file);
       e.target.value = "";
     },
-    [addNode]
+    [addNode],
   );
 
   // Dock「本地上传」：既建画布节点，又把同一资产塞进对应 Dock 的参考 media（共享 id/src）
@@ -256,14 +267,23 @@ function CanvasPageInner() {
     (file: File, mode: "image" | "video") => {
       const url = URL.createObjectURL(file);
       const id = addNode("image", { content: file.name, imageUrl: url });
-      const item: DockMediaItem = { id, type: "image", name: file.name, src: url };
+      const item: DockMediaItem = {
+        id,
+        type: "image",
+        name: file.name,
+        src: url,
+      };
       if (mode === "image") {
-        setImageDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
+        setImageDockMedia((prev) =>
+          prev.some((m) => m.id === id) ? prev : [...prev, item],
+        );
       } else {
-        setVideoDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
+        setVideoDockMedia((prev) =>
+          prev.some((m) => m.id === id) ? prev : [...prev, item],
+        );
       }
     },
-    [addNode]
+    [addNode],
   );
 
   // 进入/退出「从画布选择」模式
@@ -286,17 +306,23 @@ function CanvasPageInner() {
         src: node.imageUrl,
       };
       if (pickingFor === "image") {
-        setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+        setImageDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
       } else if (pickingFor === "video") {
-        setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+        setVideoDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
       }
       setPickingFor(null);
     },
-    [pickingFor]
+    [pickingFor],
   );
 
   // 可选图片节点数（带 imageUrl），用于胶囊空态提示
-  const pickableCount = nodes.filter((n) => n.type === "image" && n.imageUrl).length;
+  const pickableCount = nodes.filter(
+    (n) => n.type === "image" && n.imageUrl,
+  ).length;
 
   const handleToolClick = useCallback(
     (id: string) => {
@@ -322,7 +348,7 @@ function CanvasPageInner() {
         addNode("text");
       }
     },
-    [addNode, bottomDockMode, handleUploadClick]
+    [addNode, bottomDockMode, handleUploadClick],
   );
 
   if (gated) {
@@ -343,7 +369,9 @@ function CanvasPageInner() {
         activeProject={activeProject}
         projects={projects}
         onSwitch={selectProject}
-        onCreate={() => createProject(`项目 ${Date.now().toString().slice(-4)}`)}
+        onCreate={() =>
+          createProject(`项目 ${Date.now().toString().slice(-4)}`)
+        }
         onDelete={deleteProject}
       />
       <TopBarCenter />
@@ -389,9 +417,13 @@ function CanvasPageInner() {
             whiteSpace: "nowrap",
           }}
         >
-          <span style={{ color: "var(--tc-accent, #3b82f6)", fontWeight: 600 }}>从画布选择</span>
+          <span style={{ color: "var(--tc-accent, #3b82f6)", fontWeight: 600 }}>
+            从画布选择
+          </span>
           <span style={{ color: "rgba(255, 255, 255, 0.55)" }}>
-            {pickableCount === 0 ? "画布上还没有可用的图片" : "点击画布中的图片加入"}
+            {pickableCount === 0
+              ? "画布上还没有可用的图片"
+              : "点击画布中的图片加入"}
           </span>
           <span style={{ color: "rgba(255, 255, 255, 0.22)" }}>·</span>
           <button
@@ -417,8 +449,12 @@ function CanvasPageInner() {
           onClose={() => setIsBottomDockOpen(false)}
           imageMedia={imageDockMedia}
           videoMedia={videoDockMedia}
-          onRemoveImageMedia={(id) => setImageDockMedia((prev) => prev.filter((m) => m.id !== id))}
-          onRemoveVideoMedia={(id) => setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))}
+          onRemoveImageMedia={(id) =>
+            setImageDockMedia((prev) => prev.filter((m) => m.id !== id))
+          }
+          onRemoveVideoMedia={(id) =>
+            setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))
+          }
           onLocalUpload={(file) => handleDockLocalUpload(file, bottomDockMode)}
           onPickFromCanvas={() => handleRequestPick(bottomDockMode)}
           onExitPick={handleExitPick}
