@@ -29,9 +29,14 @@
 
 ## 节点定位
 
-- **默认**：当前 stage 的最近 `ready` / `awaiting_confirm` 节点
-- **用户 @ 指定**：引用节点
+按优先级定位 revise 对象（优先级与 `workflows/image_understanding.md` 候选图消歧一致，统一 `asset_id`）：
+
+- **pointed（本轮 `@` 引用 `reference_asset_ids` / 上传新 asset）**：最高优先，用用户本轮明示的
+- **active_asset（前端选中态透传 `active_asset_id`）**：用户当前选中的画布节点（后端反查 `node.asset_ref == active_asset_id` 定位 node）
+- **默认**：当前 stage 的最近 `ready` / `awaiting_confirm` 节点（以上都没有时）
 - **「保留 A 重做 B」**：识别保留集 + 重做集——保留的节点不动，只对重做集生成变体
+
+> 本轮显式（pointed）压倒历史隐式（active_asset），active_asset 压倒默认最近。用户选中或 @ 优先于「最近 ready」默认。
 
 后端从 canvas 状态自解析 `stage_id` / `node_ids`，**不要求前端传递**（呼应 `backend_implementation_contract.md`）。
 

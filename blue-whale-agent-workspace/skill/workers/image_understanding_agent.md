@@ -39,6 +39,21 @@
 - 当前 canvas 状态
 - 当前模型能力配置
 - 已有 Brief / selected_skill（如有）
+- `decision_context` 消歧字段（后端算好）：
+  - `active_asset_id`：前端选中态透传的画布节点 asset（无则 null）
+  - `candidate_asset_ids`：当前 `active_product_context` 内 `ready` / `confirmed` 的 image（消歧候选）
+  - 注：本轮 @ 引用指向 = 请求体的 `reference_asset_ids`（不在 decision_context 重复）
+
+## 候选图消歧前置（@ 引用解析阶段，识别前）
+
+understanding 仅对**已指向的 asset** 做（对齐决策 3）。识别前先在 `@` 引用解析阶段定指向（见 `workflows/image_understanding.md` 候选图消歧）：
+
+- `reference_asset_ids` 非空（@ 引用）→ 识别那些（多图各自识别 + 标 `usage_intent`）
+- 否则 `active_asset_id` 非空（选中态）→ 识别那个（**选中即识别，不追问**）
+- 否则候选 = 1 → 识别唯一张
+- 否则候选 ≥ 2 → **不识别、不猜**，输出消歧话术 + 高亮指令，停住等用户点选 / @ / 上传
+
+多图引用时，每个 asset 单独走 Step 1-4，产出各自的 `asset_understanding`；`usage_intent` 优先复用历史，无则推断并在 `optimized_prompt_preview` 暴露。
 
 ## 模式
 
