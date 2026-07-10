@@ -8,7 +8,7 @@ spring:
     active: blue-whale-dev
   cloud:
     nacos:
-      server-addr: 127.0.0.1:8848
+      server-addr: 115.190.244.91:8848
       discovery:
         register-enabled: true
         # namespace 必须用 Nacos 的 namespace ID（UUID），用名字会注册到 console 看不见的隐式命名空间
@@ -20,9 +20,9 @@ spring:
       strict: false
       datasource:
         master:
-          url: jdbc:mysql://110.42.233.109:3306/blue_whale?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+          url: jdbc:mysql://115.190.244.91:3306/blue_whale?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
           username: root
-          password: root1024
+          password: weitian1024
           driver-class-name: com.mysql.cj.jdbc.Driver
           type: com.zaxxer.hikari.HikariDataSource
           hikari:
@@ -31,6 +31,11 @@ spring:
             connection-timeout: 20000
             idle-timeout: 300000
             max-lifetime: 1200000
+  redis:
+    host: 115.190.244.91
+    port: 6379
+    password: weitian1024
+    database: 0
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml

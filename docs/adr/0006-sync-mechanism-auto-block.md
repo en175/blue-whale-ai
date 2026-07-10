@@ -3,6 +3,7 @@
 - **状态**：Accepted
 - **日期**：2026-07-05
 - **决策者**：JJNNReno（与 Claude Code 经 `/grill-with-docs` 会话共同得出）
+- **更新**：D1 中“本地 master 是 origin/master 镜像”的前提已被 [ADR-0010](0010-local-master-is-user-integration-zone.md) 取代；pre-commit 软提醒和 pre-push 硬拦仍适用于工单分支发布。
 
 ## 背景
 
@@ -25,9 +26,9 @@
 
 ### D1. 先建分支，后写代码（非先改再开分支）
 
-所有改动从最新 `origin/master` 切工单分支后才开始写代码。**禁止**在本地 `master` 工作区改代码、再 `checkout -b` 把 dirty 改动带走（hook 不拦这种操作，但违反流程精神）。
+Agent 写入任务仍然从最新 `origin/master` 切工单分支后才开始写代码。用户可以在本地 `master` 工作区开发、commit、整理；Agent 不把本地 `master` 当任务写入区。若用户明确要求把本地 `master` 当前状态发布为 PR，则创建发布包装分支处理。
 
-理由：本地 `master` 是 `origin/master` 的镜像，须随时能 `fetch + rebase`。在 master 工作区留 dirty 改动，rebase 会撞冲突或拒绝，堵死同步生命线。并行任务的开工流程见 [`docs/agents/worktree-workflow.md`](../agents/worktree-workflow.md)。
+理由：Agent 任务区需要可重复、可隔离的远程基线；用户本地集成区需要保留人的自由度。并行任务的开工流程见 [`docs/agents/worktree-workflow.md`](../agents/worktree-workflow.md)。
 
 ### D2. 同步 = 自动阻断（B），非自动同步（A）
 

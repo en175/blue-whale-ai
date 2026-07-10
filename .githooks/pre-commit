@@ -1,23 +1,15 @@
 #!/usr/bin/env bash
 # pre-commit hook — Blue-Whale
 # 纯 shell，零依赖。功能：
-#   1. 禁 master/main 提交
-#   2. 禁提交生成物（graphify-out/ dist/ target/ .next/ __pycache__/ node_modules/ 等）
-#   3. 前端改动时跑 lint（软提醒，不拦提交）
-#   4. 后端改动时跑 mvn compile（软提醒，不拦提交）
-#   5. 远程落后软提醒（工单分支落后 origin/master）
+#   1. 禁提交生成物（graphify-out/ dist/ target/ .next/ __pycache__/ node_modules/ 等）
+#   2. 前端改动时跑 lint（软提醒，不拦提交）
+#   3. 后端改动时跑 py_compile（软提醒，不拦提交）
+#   4. 远程落后软提醒（工单分支落后 origin/master）
 # 退出码非 0 = 拦截提交。
 
 set -uo pipefail
 
 _branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
-case "$_branch" in
-  master|main)
-    echo "❌ pre-commit: 禁止在 master/main 上提交。" >&2
-    echo "请先使用 scripts/start-task-worktree.sh 创建任务 worktree + 工单分支。" >&2
-    exit 1
-    ;;
-esac
 
 # 只检查本次暂存（staged）的文件
 staged_files=$(git diff --cached --name-only --diff-filter=ACMR)
@@ -70,16 +62,20 @@ if grep -q '^blue_whale_web/' <<< "$staged_files"; then
 fi
 
 # ============================================================
-# 3. 后端编译检查（软提醒，不拦提交；仅当本次改了 blue_whale_server/ 下 .java）
-#    用 Maven 编译整个模块（等价于"只 compile 不跑测试"），经 mvnw 不依赖全局 mvn。
+# 3. 后端语法检查（软提醒，不拦提交；仅当本次改了 blue_whale_server/ 下 .py）
+#    用 python -m py_compile 做轻量语法检查（等价于"只 compile 不跑测试"）。
 # ============================================================
-if grep -q '^blue_whale_server/.*\.java$' <<< "$staged_files"; then
-  echo "ℹ️  pre-commit: 检测到后端 Java 改动，运行 mvn compile（软提醒，不拦截）..." >&2
-  if ! (cd blue_whale_server && ./mvnw -q compile) >/dev/null 2>&1; then
-    echo "⚠️  pre-commit: 后端编译失败（./mvnw compile）。本次不拦截，请判断是否需修复。" >&2
-  else
-    echo "✅ 后端编译检查通过" >&2
-  fi
+if grep -q '^blue_whale_server/.*\.py$' <<< "$staged_files"; then
+  echo "ℹ️  pre-commit: 检测到后端 Python 改动，运行 py_compile（软提醒，不拦截）..." >&2
+  fail=0
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    if ! python3 -m py_compile "$f" 2>/dev/null; then
+      echo "⚠️  pre-commit: $f 语法检查失败。本次不拦截，请判断是否需修复。" >&2
+      fail=1
+    fi
+  done <<< "$(printf '%s\n' "$staged_files" | grep '^blue_whale_server/.*\.py$')"
+  [ "$fail" -eq 0 ] && echo "✅ 后端语法检查通过" >&2
 fi
 
 # ============================================================

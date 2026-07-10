@@ -6,9 +6,10 @@ spring:
     name: blue-whale-user
   cloud:
     nacos:
-      server-addr: 10.211.238.186:8848
+      server-addr: 115.190.244.91:8848
       discovery:
         enabled: true
+        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
 
   web:
     encoding:
@@ -21,9 +22,9 @@ spring:
       - org.redisson.spring.starter.RedissonAutoConfiguration
 
   datasource:
-    url: jdbc:mysql://110.42.233.109:3306/blue_whale?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
+    url: jdbc:mysql://115.190.244.91:3306/blue_whale?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
     username: root
-    password: root1024
+    password: weitian1024
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jackson:
@@ -35,9 +36,9 @@ spring:
       schema-locations: classpath:schema.sql
 
   redis:
-    host: 110.42.233.109
-    port: 9079
-    password:
+    host: 115.190.244.91
+    port: 6379
+    password: weitian1024
     database: 0
 
 mybatis-plus:

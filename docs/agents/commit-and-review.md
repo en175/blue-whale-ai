@@ -41,7 +41,7 @@
 
 ## 发布授权与审查门槛
 
-Agent 开发完成后的默认终点是**本地实现 + 验证 + 提交 + 报告待审查**。未经用户明确授权，Agent 禁止执行发布动作：
+Agent 完成子 issue 后的默认终点是**任务验收分支上的未提交 diff + 验证结果汇报**。用户确认任务分支无问题后，Agent 才能通过 `scripts/commit-task-for-review.sh --user-authorized -m "<message>"` 执行本地 commit，并通过 `scripts/merge-task-to-local-master.sh --user-authorized <branch>` 将该任务分支以 `merge --no-ff` 合入用户本地 `master`。未经用户明确授权，Agent 禁止执行发布动作：
 
 - `git push`
 - 创建 PR
@@ -51,7 +51,7 @@ Agent 开发完成后的默认终点是**本地实现 + 验证 + 提交 + 报告
 
 用户授权使用自然语言即可，不要求固定口令；但必须明确包含发布/推送/开 PR/合并意图。“继续”“可以”“你处理吧”“完成后走流程”这类泛化许可不算发布授权。
 
-**发布审查包**一次授权覆盖“推送当前工单分支 + 创建指向 `master` 的 PR”。PR 创建后，Agent 必须停下来交给开发者审查；该授权不覆盖合并。
+**发布审查包**一次授权覆盖“推送当前工单分支 + 创建指向 `master` 的 PR”。这里的工单分支可以是 task worktree 分支，也可以是用户明确要求从本地 `master` 当前状态创建的发布包装分支。PR 创建后，Agent 必须停下来交给开发者审查；该授权不覆盖合并。
 
 发布审查包必须使用唯一入口：
 
@@ -59,7 +59,7 @@ Agent 开发完成后的默认终点是**本地实现 + 验证 + 提交 + 报告
 scripts/publish-review-package.sh --user-authorized
 ```
 
-该入口负责推送当前工单分支；远程分支已存在时会用 `--force-with-lease` 安全更新。Hook 会在入口处要求一次用户确认。禁止直接执行 `git push` 绕过入口；直接 `git push` 会被 Hook 硬拦。脚本成功后会写入短期发布标记，Agent 随后创建 `target_branch=master` 且 `draft` 非 true 的 Gitee PR；PR Hook 会校验并消费该标记，不再二次确认。没有发布标记、标记过期、分支不匹配、缺 `source_branch` / `target_branch` 都会被拦截。
+该入口负责推送当前工单分支；远程分支已存在时会用 `--force-with-lease` 安全更新。Hook 会在入口处要求一次用户确认。禁止直接执行 `git push` 绕过入口；直接 `git push` 会被 Hook 硬拦。脚本成功后会写入短期发布标记，Agent 随后创建 `target_branch=master` 且 `draft` 非 true 的 Gitee PR；PR Hook 会校验并消费该标记，不再二次确认。没有发布标记、标记过期、分支不匹配、缺 `source_branch` / `target_branch` 都会被拦截。发布包装分支上的冲突修复、补测试只留在发布包装分支，不回写用户本地 `master`。
 
 Codex 项目 hook 通过 `.codex/hooks/run-claude-pretool.sh` 复用 Claude hook；Codex PreToolUse 不支持 `permissionDecision=ask`，所以标准发布入口在 Codex 中会被转换为硬停，避免失败放行。Codex 中的发布动作需要用户手动执行，或切到支持确认弹窗的 Claude Code 环境执行。
 
@@ -159,14 +159,15 @@ ________
 | 检查项 | 类型 | 说明 |
 |---|---|---|
 | 禁提交生成物 | 🔴 硬挡 | `graphify-out/` `dist*` `.next/` `__pycache__/` `*.pyc` `.pytest_cache/`（`.claude/` 进仓共享，仅 `settings.local.json` 由 `.gitignore` 忽略，非 hook 拦） |
-| 禁 master/main 提交 | 🔴 硬挡 | pre-commit：禁止在 `master`/`main` 上提交。可写任务必须先用 [worktree-workflow.md](worktree-workflow.md) 创建 task worktree + 工单分支 |
+| 本地 master 提交 | 🟢 放行 | pre-commit：允许用户在本地 `master` 上提交，作为用户本地集成区。Agent 不得把本地 `master` 当任务写入区；Agent 写入任务必须先用 [worktree-workflow.md](worktree-workflow.md) 创建 task worktree + 工单分支 |
 | commit 规范 | 🔴 硬挡 | Conventional Commits，格式不符拦截 |
 | 前端 lint | 🟡 软提醒 | 改 `blue_whale_web/` 时跑 `npm run lint`，失败只警告不拦 |
 | 后端 mvn compile | 🟡 软提醒 | 改 `blue_whale_server/` 下 `.java` 时跑 `./mvnw compile`，失败只警告不拦 |
 | 禁直推 master/main | 🔴 硬挡 | pre-push：任何本地直推 `master`/`main` 一律拦，合并只在 Gitee 服务端走 PR |
 | 工单分支落后拦截 | 🔴 硬挡 | pre-push：工单分支（前缀见 [branch-naming.md](branch-naming.md)）落后于 `origin/master` 时拒绝 push，强制先 rebase |
 | AI 破坏性 git 操作 | 🔴 硬挡 | 裸 `--force`/`-f`、对 `master`/`main` 强推、`reset --hard` / `clean -f` / `branch -D` / `checkout .` / `restore .` 均拦；工单分支上的 `--force-with-lease` 放行（前缀见 [branch-naming.md](branch-naming.md)） |
-| 工单分支落后软提醒 | 🟡 软提醒 | pre-commit：工单分支（前缀见 [branch-naming.md](branch-naming.md)）落后 `origin/master` 时 `echo` 提示落后提交数，**不拦 commit**（硬拦在 pre-push）。每次 commit 静默 `fetch`。见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md) |
+| 本地任务验收入口 | 🟡 用户确认 | Claude PreToolUse（`confirm-release-action.sh`）：直接 `git commit`、非 `--ff-only` 的直接 `git merge`、`scripts/commit-task-for-review.sh --user-authorized`、`scripts/merge-task-to-local-master.sh --user-authorized` 都需要确认；缺 `--user-authorized` 的标准入口硬拦。Codex 会把确认转换为硬停，避免失败放行 |
+| 工单分支落后软提醒 | 🟡 软提醒 | pre-commit：工单分支（前缀见 [branch-naming.md](branch-naming.md)）落后 `origin/master` 时 `echo` 提示落后提交数，**不拦 commit**（硬拦在 pre-push）。本地 `master` 不做落后提醒，它是用户本地集成区。见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md) |
 | squash/rebase 合并拦截 | 🔴 硬挡 | Claude PreToolUse（`block-squash-merge.sh`）：AI 调 `mcp__gitee-ent__merge_enterprise_pull` 时 `merge_method=squash`/`rebase` 一律拦，强制 **merge**（免改写 sha 致 `git branch -d` 失败 + 拦 `-D` 死锁，见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md)）。人网页操作拦不到，靠自觉 |
 | 发布动作标准入口 | 🔴 阻断 / 🟡 用户确认 | Claude PreToolUse（`confirm-release-action.sh`）：直接 `git push` 硬拦；`scripts/publish-review-package.sh` 缺 `--user-authorized` 硬拦；标准入口带 `--user-authorized` 时触发一次确认，脚本推送成功后写入短期发布标记；合法 PR 必须消费该标记且 `draft` 非 true / `target_branch=master`；合并 PR / 创建 release 单独确认 |
 
