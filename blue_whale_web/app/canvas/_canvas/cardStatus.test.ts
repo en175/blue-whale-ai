@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { nextRetryStatus } from "./cardStatus";
-import type { CardStatus } from "./cardStatus";
+import type { CardStatus } from "@/types/domain";
 
 describe("nextRetryStatus", () => {
   it("failed 态重试首步进入 generating（过渡，非直接成功）", () => {

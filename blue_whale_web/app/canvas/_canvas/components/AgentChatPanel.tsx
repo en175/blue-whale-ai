@@ -12,7 +12,7 @@ import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
 import { ComposerShell, ModelSettingsMenu } from "./Composer";
 import { UserMessageBubble, AgentMessageBubble, ThinkingBlock, AgentCard } from "./ChatBubbles";
 import type { ChatMessage } from "../types";
-import type { CardStatus } from "../cardStatus";
+import type { CardStatus } from "@/types/domain";
 import { buildMockReplyForMode } from "../messages";
 import { useAuth } from "@/components/auth/AuthContext";
 import type { CardMessage } from "../nodeFromCard";

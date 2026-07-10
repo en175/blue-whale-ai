@@ -14,7 +14,7 @@
  * 不可变性：reducer 返回新 state，绝不原地改原 state/原 project（A9 回归覆盖）。
  */
 import type { ChatMessage, NodeItem, Project, Viewport } from "./types";
-import type { CardStatus } from "./cardStatus";
+import type { CardStatus } from "@/types/domain";
 import type { IdGenerator } from "./messages";
 
 export type ProjectState = {
