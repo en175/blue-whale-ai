@@ -31,13 +31,17 @@ setup_git_stub() {
   STUB_DIR="$(mktemp -d)"
   cat >"${STUB_DIR}/git" <<'EOF'
 #!/usr/bin/env bash
-# fake git：仅响应 rev-parse --abbrev-ref HEAD（返回 $FAKE_BRANCH）。
+# fake git：响应 rev-parse --abbrev-ref HEAD 与 symbolic-ref --short HEAD（→ $FAKE_BRANCH）、rev-parse --show-toplevel（→ $FAKE_GIT_TOPLEVEL）。
 if [ "$1" = "rev-parse" ] && [ "$2" = "--abbrev-ref" ] && [ "$3" = "HEAD" ]; then
   echo "${FAKE_BRANCH:-master}"
   exit 0
 fi
 if [ "$1" = "rev-parse" ] && [ "$2" = "--show-toplevel" ]; then
   echo "${FAKE_GIT_TOPLEVEL:-$PWD}"
+  exit 0
+fi
+if [ "$1" = "symbolic-ref" ] && [ "$2" = "--short" ] && [ "$3" = "HEAD" ]; then
+  echo "${FAKE_BRANCH:-master}"
   exit 0
 fi
 # 其它子命令不归本 stub 管，exit 0 空输出（hook 不依赖）
@@ -274,16 +278,21 @@ codex = json.loads(codex_path.read_text())
 claude_items = claude["hooks"]["PreToolUse"]
 codex_items = codex["hooks"]["PreToolUse"]
 
+# 提醒型 gate 只注入 context、exit 0 不阻断；Codex 无对应 MCP 时注入无意义，允许缺失。
+# 当前唯一提醒型 gate 是 cbm-discovery-gate.sh（Grep|Glob）。未来新增手动维护此集合，
+# 漏加会让 shape 闸门 fail-loud 暴露。
+REMINDER_MATCHERS = {"Grep|Glob"}
+claude_items_strict = [it for it in claude_items if it["matcher"] not in REMINDER_MATCHERS]
+
 def shape(items):
     return [(item["matcher"], len(item.get("hooks", []))) for item in items]
 
-if shape(claude_items) != shape(codex_items):
-    raise SystemExit(f"matcher/hook shape mismatch: claude={shape(claude_items)} codex={shape(codex_items)}")
+if shape(claude_items_strict) != shape(codex_items):
+    raise SystemExit(f"matcher/hook shape mismatch: claude={shape(claude_items_strict)} codex={shape(codex_items)}")
 
 matchers = [item["matcher"] for item in codex_items]
 required = {
     "Bash",
-    "Read|Glob",
     "mcp__gitee-ent__create_enterprise_repo_pull",
     "mcp__gitee-ent__merge_enterprise_pull",
     "mcp__gitee-ent__create_enterprise_repo_release",
@@ -316,7 +325,7 @@ def codex_script(command):
     return scripts[0]
 
 script_count = 0
-for index, (claude_item, codex_item) in enumerate(zip(claude_items, codex_items)):
+for index, (claude_item, codex_item) in enumerate(zip(claude_items_strict, codex_items)):
     claude_scripts = [
         script
         for hook in claude_item.get("hooks", [])
@@ -779,6 +788,34 @@ assert_exit 2 "danger: restore . 拦截"
 
 teardown_git_stub
 unset FAKE_BRANCH
+
+# Slice 4.5 — block-master-edit（git stub 隔离当前分支 + 仓库边界）
+MASTER_EDIT_HOOK=block-master-edit.sh
+
+setup_git_stub
+export FAKE_BRANCH=master
+export FAKE_GIT_TOPLEVEL=/tmp/repo
+
+# master + 仓库内 Edit → 拦
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/repo/src/a.py"}}'
+assert_exit 2 "master-edit: master+仓库内拦截"
+
+# master + 仓库外 Edit → 放行（核心：dotfile 等仓库外文件不触发 master 红线）
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"/Users/x/.codex/config.toml"}}'
+assert_exit 0 "master-edit: master+仓库外放行"
+
+# 工单分支 → 放行
+export FAKE_BRANCH=feature/x
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/repo/src/a.py"}}'
+assert_exit 0 "master-edit: 工单分支放行"
+
+# 非 Edit 工具 → 放行
+export FAKE_BRANCH=master
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Read","tool_input":{"file_path":"/tmp/repo/src/a.py"}}'
+assert_exit 0 "master-edit: 非 Edit 放行"
+
+teardown_git_stub
+unset FAKE_BRANCH FAKE_GIT_TOPLEVEL
 
 # Slice 5 — Codex project hook layer
 assert_file_exists "$CODEX_HOOKS_JSON" "codex: hooks.json 存在"
