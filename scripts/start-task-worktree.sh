@@ -29,10 +29,32 @@ case "$ROOT" in
     ;;
 esac
 
+# 1. 前缀白名单
 case "$branch" in
   feature/*|fix/*|hotfix/*|docs/*|chore/*) ;;
   *) fail "分支名必须使用白名单前缀：feature/ fix/ hotfix/ docs/ chore/" ;;
 esac
+
+# 2. 前缀后段不能为空（拒绝 feature/）
+_suffix="${branch#*/}"
+if [ -z "$_suffix" ]; then
+  fail "分支名前缀后不能为空。格式：<prefix>/<ticket-id>-<summary>，如 feature/IJZ5WA-add-canvas-node"
+fi
+
+# 3. 拒绝含空格
+case "$branch" in
+  *\ *) fail "分支名不允许含空格：$branch" ;;
+esac
+
+# 4. 拒绝含下划线（项目约定用连字符）
+case "$branch" in
+  *_*) fail "分支名不允许含下划线，请用连字符：$branch" ;;
+esac
+
+# 5. 拒绝非 ASCII 字符
+if printf '%s' "$branch" | LC_ALL=C grep -q '[^ -~]'; then
+  fail "分支名不允许含非 ASCII 字符（如中文）：$branch"
+fi
 
 case "$dir_name" in
   ""|"."|".."|/*|*/*)
