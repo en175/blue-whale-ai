@@ -41,6 +41,19 @@ FILE_DIR="$(dirname "$FILE_PATH")"
 BRANCH=$(git -C "$FILE_DIR" symbolic-ref --short HEAD 2>/dev/null || echo "")
 TOPLEVEL=$(git -C "$FILE_DIR" rev-parse --show-toplevel 2>/dev/null || echo "")
 
+# file_path 父目录尚不存在（如 Write 全新子目录文件）→ git -C 失败、BRANCH/TOPLEVEL 空。
+# 向上遍历到最近存在的祖先目录重试，否则误判「仓库外」放行，master 内新文件漏拦。
+if [ -z "$BRANCH" ] && [ -z "$TOPLEVEL" ] && [ -n "$FILE_DIR" ] && [ "$FILE_DIR" != "/" ]; then
+  ancestor="$FILE_DIR"
+  while [ "$ancestor" != "/" ] && [ ! -d "$ancestor" ]; do
+    ancestor="$(dirname "$ancestor")"
+  done
+  if [ "$ancestor" != "/" ] && [ -d "$ancestor" ] && [ "$ancestor" != "$FILE_DIR" ]; then
+    BRANCH=$(git -C "$ancestor" symbolic-ref --short HEAD 2>/dev/null || echo "")
+    TOPLEVEL=$(git -C "$ancestor" rev-parse --show-toplevel 2>/dev/null || echo "")
+  fi
+fi
+
 # 目标文件不在任何 git 工作树内（仓库外）→ 放行
 if [ -z "$TOPLEVEL" ]; then
   exit 0

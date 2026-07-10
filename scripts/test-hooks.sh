@@ -841,6 +841,36 @@ assert_exit 0 "master-edit: detached HEAD worktree 放行"
 teardown_git_stub
 unset FAKE_BRANCH FAKE_GIT_TOPLEVEL FAKE_BRANCH_MAP FAKE_TOPLEVEL_MAP
 
+# Slice 4.6 — block-master-edit 真实 git 端到端
+# stub 的 git -C 用纯前缀匹配，不模拟「目录不存在→失败」与「git -C . 退化 cwd」，
+# 故 fail-open 回归（#1）与 file_path 缺失 fallback（#2）只能用真实 git 覆盖。
+REAL_REPO="$(mktemp -d)"
+git -C "$REAL_REPO" init -q
+git -C "$REAL_REPO" symbolic-ref HEAD refs/heads/master  # 强制 master（防 git 默认 main）
+
+# #1: master 仓库内 Write 全新子目录文件（父目录链不存在）→ 向上遍历应解析到 master → 拦
+#     修复前：git -C <不存在目录> 失败 → BRANCH/TOPLEVEL 空 → 误判仓库外放行（fail-open）
+run_hook "$MASTER_EDIT_HOOK" "$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/brand/new/sub/file.ts"}}' "$REAL_REPO")"
+assert_exit 2 "master-edit(real): master 仓库内不存在子目录 Write 拦截（#1 fail-open 回归）"
+
+# #2: file_path 缺失 → dirname("")="." → git -C "." 退化 cwd（=临时 master 仓库）→ 拦
+#     锁定 fallback，防未来重构静默破坏
+( cd "$REAL_REPO" && printf '%s' '{"tool_name":"Edit","tool_input":{}}' | bash "${HOOK_DIR}/${MASTER_EDIT_HOOK}" ) 2>/dev/null
+RUN_EXIT=$?
+assert_exit 2 "master-edit(real): file_path 缺失 cwd=master 退化拦截（#2 fallback 锁定）"
+
+rm -rf "$REAL_REPO"
+
+# 非 master 分支 + 不存在子目录 Write → 向上遍历解析得非 master → 放行
+# 锁定 walk 不过度阻塞（与 #1 对称的 must-not-regress，stub 屏蔽 walk 故走真实 git）
+FEATURE_REPO="$(mktemp -d)"
+git -C "$FEATURE_REPO" init -q
+git -C "$FEATURE_REPO" symbolic-ref HEAD refs/heads/feature/x
+run_hook "$MASTER_EDIT_HOOK" "$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/brand/new/sub/f.ts"}}' "$FEATURE_REPO")"
+assert_exit 0 "master-edit(real): 非 master 仓库不存在子目录 Write 放行（walk 不过度阻塞）"
+rm -rf "$FEATURE_REPO"
+unset REAL_REPO FEATURE_REPO
+
 # Slice 5 — Codex project hook layer
 assert_file_exists "$CODEX_HOOKS_JSON" "codex: hooks.json 存在"
 assert_codex_hooks_valid "codex: hooks.json 与 Claude matcher 同步"
