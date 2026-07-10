@@ -34,13 +34,8 @@
         </dependency>
         <!-- MyBatis-Plus -->
         <dependency>
-            <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus-boot-starter</artifactId>
-        </dependency>
-        <!-- 多数据源（自动装配 MyBatis-Plus 配置） -->
-        <dependency>
-            <groupId>com.baomidou</groupId>
-            <artifactId>dynamic-datasource-spring-boot-starter</artifactId>
+            <groupId>com.blue-whale.tool.mp</groupId>
+            <artifactId>blue-whale-common-mybatis-plus</artifactId>
         </dependency>
         <!-- MySQL -->
         <dependency>
