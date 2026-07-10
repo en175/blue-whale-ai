@@ -1,6 +1,6 @@
 package com.blue.whale.agent.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.blue.whale.agent.model.entity.TemplateCard;
@@ -61,9 +61,9 @@ public class TemplateService {
      */
     public PageVo<TemplateCardDto> pageByTagCode(String tagCode, long current, long size) {
         Page<TemplateCard> page = new Page<>(current, size);
-        QueryWrapper<TemplateCard> wrapper = new QueryWrapper<TemplateCard>()
-                .eq("tag_code", tagCode)
-                .orderByAsc("sort_order");
+        LambdaQueryWrapper<TemplateCard> wrapper = new LambdaQueryWrapper<TemplateCard>()
+                .eq(TemplateCard::getTagCode, tagCode)
+                .orderByAsc(TemplateCard::getSortOrder);
         // 分页查询卡片主数据
         IPage<TemplateCard> cardPage = cardMapper.selectPage(page, wrapper);
 
@@ -76,9 +76,9 @@ public class TemplateService {
         Map<Long, List<String>> imagesByCard = cardIds.isEmpty()
                 ? Map.of()
                 : imageMapper.selectList(
-                                new QueryWrapper<TemplateCardImage>()
-                                        .in("card_id", cardIds)
-                                        .orderByAsc("sort_order")
+                                new LambdaQueryWrapper<TemplateCardImage>()
+                                        .in(TemplateCardImage::getCardId, cardIds)
+                                        .orderByAsc(TemplateCardImage::getSortOrder)
                         ).stream()
                         .collect(Collectors.groupingBy(
                                 TemplateCardImage::getCardId,

@@ -34,3 +34,44 @@ CREATE TABLE template_card_image
     INDEX idx_card_sort (card_id, sort_order)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='卡片图片';
+
+-- ============ Skill 面板（IJZ7Z8） ============
+-- skill：技能库（权威内容），列名对齐 BaseEntity（gmt_create/gmt_modified/version/is_delete）
+-- seed 来源 blue-whale-agent-workspace/skill/library/raw/*.md（60 条），见 data.sql
+
+DROP TABLE IF EXISTS user_skill;
+DROP TABLE IF EXISTS skill;
+
+CREATE TABLE skill
+(
+    id          BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    name        VARCHAR(255) NOT NULL COMMENT '展示名（文件名生成）',
+    description TEXT         NULL COMMENT 'raw frontmatter description',
+    content     LONGTEXT     NULL COMMENT 'md 全文（frontmatter + 正文）',
+    source      VARCHAR(32)  NOT NULL DEFAULT 'official' COMMENT 'official/community',
+    sort_order  INT          NOT NULL DEFAULT 0 COMMENT '排序：cn 编号',
+    cover_url   VARCHAR(512) NULL COMMENT '封面 URL（P0 留空，走占位）',
+    gmt_create  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    gmt_modified DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    version     INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本',
+    is_delete   TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删 1已删',
+    UNIQUE INDEX uk_name (name),
+    INDEX idx_sort (sort_order)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='技能库';
+
+CREATE TABLE user_skill
+(
+    id          BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    user_id     BIGINT       NOT NULL COMMENT '用户ID（X-User-Id）',
+    skill_id    BIGINT       NOT NULL COMMENT '技能ID（→ skill.id）',
+    auto        TINYINT      NOT NULL DEFAULT 0 COMMENT 'auto 开关：关系属性，0关 1开',
+    gmt_create  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    gmt_modified DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    version     INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本',
+    is_delete   TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删 1已删',
+    UNIQUE INDEX uk_user_skill (user_id, skill_id),
+    INDEX idx_user (user_id),
+    INDEX idx_skill (skill_id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='用户技能引用关系（auto 挂关系上）';

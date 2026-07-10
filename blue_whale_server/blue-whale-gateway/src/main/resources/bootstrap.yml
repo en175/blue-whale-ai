@@ -32,8 +32,6 @@ spring:
           uri: lb://blue-whale-agent
           predicates:
             - Path=/api/agent/**
-          filters:
-            - StripPrefix=2
         - id: blue-whale-user
           uri: lb://blue-whale-user
           predicates:
