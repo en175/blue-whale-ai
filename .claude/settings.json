@@ -95,6 +95,24 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/confirm-release-action.sh"
           }
         ]
+      },
+      {
+        "matcher": "mcp__gitee-ent__merge_enterprise_pull",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/confirm-release-action.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__gitee-ent__create_enterprise_repo_release",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/confirm-release-action.sh"
+          }
+        ]
       }
     ],
     "SessionStart": [

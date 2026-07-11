@@ -76,6 +76,35 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__gitee-ent__create_enterprise_repo_pull",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" confirm-release-action.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__gitee-ent__merge_enterprise_pull",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" confirm-release-action.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__gitee-ent__create_enterprise_repo_release",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" confirm-release-action.sh"
+          }
+        ]
+      }
     ]
   }
 }

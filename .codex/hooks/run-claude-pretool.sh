@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Codex PreToolUse wrapper for the shared Claude hook scripts.
+# Codex lifecycle wrapper for the shared Claude hook scripts.
 #
-# .claude/hooks remains the policy authority. This wrapper only adapts output
-# that Claude Code supports but Codex PreToolUse currently does not.
+# .claude/hooks remains the policy authority. Shared hooks use the common
+# no-output allow / exit-2 block contract, so this wrapper is intentionally
+# transparent for both PreToolUse and PostToolUse.
 
 set -u
 
@@ -27,36 +28,4 @@ if [ ! -f "$script" ]; then
   exit 2
 fi
 
-tmp_out="$(mktemp)"
-tmp_err="$(mktemp)"
-cleanup() {
-  rm -f "$tmp_out" "$tmp_err"
-}
-trap cleanup EXIT
-
-bash "$script" >"$tmp_out" 2>"$tmp_err"
-exit_code=$?
-
-stdout="$(cat "$tmp_out")"
-stderr="$(cat "$tmp_err")"
-
-if [ "$exit_code" -eq 0 ] && printf '%s' "$stdout" | grep -qE '"permissionDecision"[[:space:]]*:[[:space:]]*"ask"'; then
-  cat >&2 <<EOF
-BLOCKED: this action requires explicit user confirmation.
-
-Codex PreToolUse does not support permissionDecision=ask, so the shared Claude
-confirmation hook is converted to a hard stop instead of failing open.
-
-Run the action manually after confirming it is intended.
-EOF
-  exit 2
-fi
-
-if [ -n "$stdout" ]; then
-  printf '%s' "$stdout"
-fi
-if [ -n "$stderr" ]; then
-  printf '%s' "$stderr" >&2
-fi
-
-exit "$exit_code"
+exec bash "$script"

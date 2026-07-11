@@ -20,6 +20,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOOK_DIR="${HOOK_DIR:-"$REPO_ROOT/.claude/hooks"}"
 HOOK_DIR="$(cd "$HOOK_DIR" && pwd)"
 CODEX_HOOKS_JSON="$REPO_ROOT/.codex/hooks.json"
+AUTH_SCRIPT="$REPO_ROOT/scripts/manage-agent-authorization.sh"
+REAL_GIT="$(command -v git)"
+ACTION_TEST_ROOT=""
+PUBLISH_TEST_ROOT=""
+SAVED_CLAUDE_PROJECT_DIR=""
 
 # ── git stub（隔离 git rev-parse，不碰真实仓库）────────────────
 # push-to-master / dangerous-git 的「无显式 refspec → 查当前分支」分支，
@@ -117,6 +122,29 @@ run_command_hook() {
   rm -f "$tmp_err"
 }
 
+run_authorization() {
+  local tmp_out
+  local tmp_err
+  tmp_out="$(mktemp)"
+  tmp_err="$(mktemp)"
+  bash "$AUTH_SCRIPT" "$@" >"$tmp_out" 2>"$tmp_err"
+  RUN_EXIT=$?
+  RUN_STDOUT="$(cat "$tmp_out")"
+  RUN_STDERR="$(cat "$tmp_err")"
+  rm -f "$tmp_out" "$tmp_err"
+}
+
+run_authorization_helper() {
+  local tmp_out tmp_err
+  tmp_out="$(mktemp)"
+  tmp_err="$(mktemp)"
+  python3 "$REPO_ROOT/.claude/hooks/lib/authorization.py" "$@" >"$tmp_out" 2>"$tmp_err"
+  RUN_EXIT=$?
+  RUN_STDOUT="$(cat "$tmp_out")"
+  RUN_STDERR="$(cat "$tmp_err")"
+  rm -f "$tmp_out" "$tmp_err"
+}
+
 # assert_exit <expected_exit> <label>
 assert_exit() {
   local expect="$1"; shift
@@ -166,14 +194,25 @@ assert_stdout_starts_with() {
   esac
 }
 
+assert_stdout_empty() {
+  local label="$1"; shift
+  if [ -z "$RUN_STDOUT" ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] stdout 应为空，实际=${RUN_STDOUT}")
+  fi
+}
+
 publish_marker_path() {
   local branch="${1:-feature/x}"
   local slug="$(printf '%s' "$branch" | tr '/' '%')"
-  local common="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null || true)"
+  local root="${PUBLISH_TEST_ROOT:-$REPO_ROOT}"
+  local common="$("$REAL_GIT" -C "$root" rev-parse --git-common-dir 2>/dev/null || true)"
   case "$common" in
-    "") common="$REPO_ROOT/.git" ;;
+    "") common="$root/.git" ;;
     /*) ;;
-    *)  common="$REPO_ROOT/$common" ;;
+    *)  common="$root/$common" ;;
   esac
   printf '%s/agent-release-review-package-%s' "$common" "$slug"
 }
@@ -195,6 +234,90 @@ EOF
 remove_publish_marker() {
   local branch="${1:-feature/x}"
   rm -f "$(publish_marker_path "$branch")"
+}
+
+authorization_marker_path() {
+  local action="$1"
+  local enterprise_id="$2"
+  local project_id="$3"
+  local subject="$4"
+  local root common digest
+  root="${ACTION_TEST_ROOT:-$REPO_ROOT}"
+  common="$("$REAL_GIT" -C "$root" rev-parse --git-common-dir)"
+  case "$common" in /*) ;; *) common="$root/$common" ;; esac
+  digest="$(printf '%s\n%s\n%s\n%s\n' "$action" "$enterprise_id" "$project_id" "$subject" | "$REAL_GIT" -C "$root" hash-object --stdin)"
+  printf '%s/agent-action-authorizations/%s' "$common" "$digest"
+}
+
+authorization_claim_path() {
+  printf '%s.claim' "$(authorization_marker_path "$@")"
+}
+
+write_action_marker() {
+  local action="$1"
+  local enterprise_id="$2"
+  local project_id="$3"
+  local subject="$4"
+  local created_at="${5:-$(date +%s)}"
+  local marker
+  marker="$(authorization_marker_path "$action" "$enterprise_id" "$project_id" "$subject")"
+  mkdir -p "$(dirname "$marker")"
+  cat >"$marker" <<EOF
+version=1
+action=$action
+enterprise_id=$enterprise_id
+project_id=$project_id
+subject=$subject
+created_at=$created_at
+EOF
+  chmod 600 "$marker"
+}
+
+remove_all_action_markers() {
+  local marker
+  marker="$(authorization_marker_path _ _ _ _)"
+  rm -rf "$(dirname "$marker")"
+}
+
+setup_action_test_repo() {
+  SAVED_CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-}"
+  ACTION_TEST_ROOT="$(mktemp -d)"
+  "$REAL_GIT" -C "$ACTION_TEST_ROOT" init -q
+  mkdir -p "$ACTION_TEST_ROOT/.claude/hooks/lib" "$ACTION_TEST_ROOT/scripts"
+  cp "$REPO_ROOT/.claude/hooks/lib/authorization.py" "$ACTION_TEST_ROOT/.claude/hooks/lib/authorization.py"
+  cp "$REPO_ROOT/scripts/manage-agent-authorization.sh" "$ACTION_TEST_ROOT/scripts/manage-agent-authorization.sh"
+  chmod +x "$ACTION_TEST_ROOT/.claude/hooks/lib/authorization.py" "$ACTION_TEST_ROOT/scripts/manage-agent-authorization.sh"
+  AUTH_SCRIPT="$ACTION_TEST_ROOT/scripts/manage-agent-authorization.sh"
+  CLAUDE_PROJECT_DIR="$ACTION_TEST_ROOT"
+  export ACTION_TEST_ROOT AUTH_SCRIPT CLAUDE_PROJECT_DIR
+}
+
+teardown_action_test_repo() {
+  if [ -n "$SAVED_CLAUDE_PROJECT_DIR" ]; then
+    CLAUDE_PROJECT_DIR="$SAVED_CLAUDE_PROJECT_DIR"
+    export CLAUDE_PROJECT_DIR
+  else
+    unset CLAUDE_PROJECT_DIR
+  fi
+  AUTH_SCRIPT="$REPO_ROOT/scripts/manage-agent-authorization.sh"
+  rm -rf "$ACTION_TEST_ROOT"
+  ACTION_TEST_ROOT=""
+  SAVED_CLAUDE_PROJECT_DIR=""
+  export ACTION_TEST_ROOT AUTH_SCRIPT SAVED_CLAUDE_PROJECT_DIR
+}
+
+setup_publish_test_repo() {
+  PUBLISH_TEST_ROOT="$(mktemp -d)"
+  "$REAL_GIT" -C "$PUBLISH_TEST_ROOT" init -q
+  CLAUDE_PROJECT_DIR="$PUBLISH_TEST_ROOT"
+  export PUBLISH_TEST_ROOT CLAUDE_PROJECT_DIR
+}
+
+teardown_publish_test_repo() {
+  unset CLAUDE_PROJECT_DIR
+  rm -rf "$PUBLISH_TEST_ROOT"
+  PUBLISH_TEST_ROOT=""
+  export PUBLISH_TEST_ROOT
 }
 
 assert_stdout_not_has() {
@@ -230,6 +353,23 @@ assert_file_missing() {
   fi
 }
 
+assert_file_mode_600() {
+  local path="$1"; shift
+  local label="$1"; shift
+  local mode
+  mode="$(python3 - "$path" <<'PY'
+import os, stat, sys
+print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))
+PY
+)"
+  if [ "$mode" = "0o600" ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] 文件权限=${mode} 期望=0o600：${path}")
+  fi
+}
+
 assert_file_has_text() {
   local path="$1"; shift
   local needle="$1"; shift
@@ -249,6 +389,18 @@ assert_file_not_has_text() {
   if grep -qF -- "$needle" "$path"; then
     FAIL=$((FAIL + 1))
     FAILURES+=("[${label}] ${path} 不应含 \"${needle}\"")
+  else
+    PASS=$((PASS + 1))
+  fi
+}
+
+assert_file_not_matches() {
+  local path="$1"; shift
+  local pattern="$1"; shift
+  local label="$1"; shift
+  if grep -qE -- "$pattern" "$path"; then
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] ${path} 不应匹配正则 ${pattern}")
   else
     PASS=$((PASS + 1))
   fi
@@ -293,33 +445,8 @@ codex_path = Path(sys.argv[2])
 claude = json.loads(claude_path.read_text())
 codex = json.loads(codex_path.read_text())
 
-claude_items = claude["hooks"]["PreToolUse"]
-codex_items = codex["hooks"]["PreToolUse"]
-
-# 提醒型 gate 只注入 context、exit 0 不阻断；Codex 无对应 MCP 时注入无意义，允许缺失。
-# 当前唯一提醒型 gate 是 cbm-discovery-gate.sh（Grep|Glob）。未来新增手动维护此集合，
-# 漏加会让 shape 闸门 fail-loud 暴露。
-REMINDER_MATCHERS = {"Grep|Glob"}
-claude_items_strict = [it for it in claude_items if it["matcher"] not in REMINDER_MATCHERS]
-
 def shape(items):
     return [(item["matcher"], len(item.get("hooks", []))) for item in items]
-
-if shape(claude_items_strict) != shape(codex_items):
-    raise SystemExit(f"matcher/hook shape mismatch: claude={shape(claude_items_strict)} codex={shape(codex_items)}")
-
-matchers = [item["matcher"] for item in codex_items]
-required = {
-    "Bash",
-    "mcp__gitee-ent__create_enterprise_repo_pull",
-    "mcp__gitee-ent__merge_enterprise_pull",
-    "mcp__gitee-ent__create_enterprise_repo_release",
-    "mcp__gitee-ent__create_enterprise_issue",
-    "mcp__gitee-ent__update_enterprise_issue",
-}
-missing = sorted(required - set(matchers))
-if missing:
-    raise SystemExit(f"missing Codex matcher(s): {missing}")
 
 def claude_script(command):
     match = re.search(r"\.claude/hooks/([^\"'\s]+\.sh)", command)
@@ -343,27 +470,60 @@ def codex_script(command):
     return scripts[0]
 
 script_count = 0
-for index, (claude_item, codex_item) in enumerate(zip(claude_items_strict, codex_items)):
-    claude_scripts = [
-        script
-        for hook in claude_item.get("hooks", [])
-        if hook.get("type") == "command"
-        for script in [claude_script(hook["command"])]
-        if script
-    ]
-    codex_scripts = [
-        script
-        for hook in codex_item.get("hooks", [])
-        if hook.get("type") == "command"
-        for script in [codex_script(hook["command"])]
-        if script
-    ]
-    if claude_scripts != codex_scripts:
+for event in ("PreToolUse", "PostToolUse"):
+    claude_items = claude["hooks"].get(event, [])
+    codex_items = codex["hooks"].get(event, [])
+    if event == "PreToolUse":
+        # 提醒型 gate 只注入 context、exit 0 不阻断；Codex 无对应 MCP 时允许缺失。
+        claude_items = [it for it in claude_items if it["matcher"] != "Grep|Glob"]
+    if shape(claude_items) != shape(codex_items):
         raise SystemExit(
-            f"script mismatch at PreToolUse[{index}] matcher={claude_item['matcher']}: "
-            f"claude={claude_scripts} codex={codex_scripts}"
+            f"{event} matcher/hook shape mismatch: claude={shape(claude_items)} codex={shape(codex_items)}"
         )
-    script_count += len(codex_scripts)
+    for index, (claude_item, codex_item) in enumerate(zip(claude_items, codex_items)):
+        claude_scripts = [
+            script
+            for hook in claude_item.get("hooks", [])
+            if hook.get("type") == "command"
+            for script in [claude_script(hook["command"])]
+            if script
+        ]
+        codex_scripts = [
+            script
+            for hook in codex_item.get("hooks", [])
+            if hook.get("type") == "command"
+            for script in [codex_script(hook["command"])]
+            if script
+        ]
+        if claude_scripts != codex_scripts:
+            raise SystemExit(
+                f"script mismatch at {event}[{index}] matcher={claude_item['matcher']}: "
+                f"claude={claude_scripts} codex={codex_scripts}"
+            )
+        script_count += len(codex_scripts)
+
+pre_matchers = [item["matcher"] for item in codex["hooks"]["PreToolUse"]]
+required_pre = {
+    "Bash",
+    "mcp__gitee-ent__create_enterprise_repo_pull",
+    "mcp__gitee-ent__merge_enterprise_pull",
+    "mcp__gitee-ent__create_enterprise_repo_release",
+    "mcp__gitee-ent__create_enterprise_issue",
+    "mcp__gitee-ent__update_enterprise_issue",
+}
+missing = sorted(required_pre - set(pre_matchers))
+if missing:
+    raise SystemExit(f"missing Codex PreToolUse matcher(s): {missing}")
+
+post_matchers = {item["matcher"] for item in codex["hooks"].get("PostToolUse", [])}
+required_post = {
+    "mcp__gitee-ent__create_enterprise_repo_pull",
+    "mcp__gitee-ent__merge_enterprise_pull",
+    "mcp__gitee-ent__create_enterprise_repo_release",
+}
+missing = sorted(required_post - post_matchers)
+if missing:
+    raise SystemExit(f"missing Codex PostToolUse matcher(s): {missing}")
 
 if script_count == 0:
     raise SystemExit("no Codex script hook commands found")
@@ -380,7 +540,8 @@ PY
 
 codex_command_for() {
   local script="$1"; shift
-  python3 - "$CODEX_HOOKS_JSON" "$script" <<'PY'
+  local event="${1:-PreToolUse}"
+  python3 - "$CODEX_HOOKS_JSON" "$script" "$event" <<'PY'
 import json
 import os
 import shlex
@@ -389,8 +550,9 @@ from pathlib import Path
 
 codex = json.loads(Path(sys.argv[1]).read_text())
 wanted = sys.argv[2]
+event = sys.argv[3]
 matches = []
-for item in codex["hooks"]["PreToolUse"]:
+for item in codex["hooks"][event]:
     for hook in item.get("hooks", []):
         command = hook.get("command", "")
         if hook.get("type") != "command" or "run-claude-pretool.sh" not in command:
@@ -417,6 +579,7 @@ CODEX_DANGER_CMD="$(codex_command_for block-dangerous-git.sh)"
 CODEX_SQUASH_CMD="$(codex_command_for block-squash-merge.sh)"
 CODEX_ISSUE_CMD="$(codex_command_for block-issue-without-repo.sh)"
 CODEX_RELEASE_CMD="$(codex_command_for confirm-release-action.sh)"
+CODEX_RELEASE_POST_CMD="$(codex_command_for confirm-release-action.sh PostToolUse)"
 
 # ── 用例 ────────────────────────────────────────────────────────
 
@@ -485,57 +648,92 @@ run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash scripts/publish-review-
 assert_exit 2 "release: bash publish-review-package 缺参数被拦截"
 assert_stderr_has "--user-authorized" "release: bash publish-review-package 缺参数提示授权参数"
 
-# 新发布审查包入口带授权参数 → 只触发一次确认
+# 新发布审查包入口带授权参数 → 无交互放行
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized"}}'
-assert_exit 0 "release: publish-review-package 授权入口触发确认"
-assert_stdout_has '"permissionDecision":"ask"' "release: publish-review-package stdout 含 ask"
+assert_exit 0 "release: publish-review-package 授权入口放行"
+assert_stdout_empty "release: publish-review-package 无交互输出"
 
-# 直接本地 commit / merge --no-ff 也必须经过本地验收授权门。
+# 直接本地 commit / merge --no-ff 硬拦，要求改走标准入口。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git commit -m \"feat: task slice\""}}'
-assert_exit 0 "release: 直接 git commit 触发确认"
-assert_stdout_starts_with '{"hookSpecificOutput"' "release: 直接 git commit stdout 为纯 JSON"
-assert_stdout_has '"permissionDecision":"ask"' "release: 直接 git commit stdout 含 ask"
+assert_exit 2 "release: 直接 git commit 硬拦"
+assert_stderr_has "commit-task-for-review.sh --user-authorized" "release: 直接 git commit 指向标准入口"
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge --no-ff feature/x"}}'
-assert_exit 0 "release: 直接 git merge --no-ff 触发确认"
-assert_stdout_starts_with '{"hookSpecificOutput"' "release: 直接 git merge --no-ff stdout 为纯 JSON"
-assert_stdout_has '"permissionDecision":"ask"' "release: 直接 git merge --no-ff stdout 含 ask"
+assert_exit 2 "release: 直接 git merge --no-ff 硬拦"
+assert_stderr_has "merge-task-to-local-master.sh --user-authorized" "release: 直接 git merge --no-ff 指向标准入口"
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge feature/x"}}'
-assert_exit 0 "release: 直接 git merge 工单分支触发确认"
-assert_stdout_starts_with '{"hookSpecificOutput"' "release: 直接 git merge 工单分支 stdout 为纯 JSON"
-assert_stdout_has '"permissionDecision":"ask"' "release: 直接 git merge 工单分支 stdout 含 ask"
+assert_exit 2 "release: 直接 git merge 工单分支硬拦"
+assert_stderr_has "merge-task-to-local-master.sh --user-authorized" "release: 直接 git merge 工单分支指向标准入口"
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge --ff-only origin/master"}}'
 assert_exit 0 "release: git merge --ff-only 同步放行"
 assert_stdout_not_has '"permissionDecision":"ask"' "release: git merge --ff-only 不触发确认"
 
-# 标准本地验收入口缺授权参数 → 硬拦；带授权参数 → 触发确认。
+# 标准本地验收入口缺授权参数 → 硬拦；带授权参数 → 无交互放行。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/commit-task-for-review.sh -m \"feat: task slice\""}}'
 assert_exit 2 "release: commit-task-for-review 缺参数被拦截"
 assert_stderr_has "--user-authorized" "release: commit-task-for-review 缺参数提示授权参数"
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/commit-task-for-review.sh --user-authorized -m \"feat: task slice\""}}'
-assert_exit 0 "release: commit-task-for-review 授权入口触发确认"
-assert_stdout_has '"permissionDecision":"ask"' "release: commit-task-for-review stdout 含 ask"
+assert_exit 0 "release: commit-task-for-review 授权入口放行"
+assert_stdout_empty "release: commit-task-for-review 无交互输出"
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh feature/x"}}'
 assert_exit 2 "release: merge-task-to-local-master 缺参数被拦截"
 assert_stderr_has "--user-authorized" "release: merge-task-to-local-master 缺参数提示授权参数"
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh --user-authorized feature/x"}}'
-assert_exit 0 "release: merge-task-to-local-master 授权入口触发确认"
-assert_stdout_has '"permissionDecision":"ask"' "release: merge-task-to-local-master stdout 含 ask"
+assert_exit 0 "release: merge-task-to-local-master 授权入口放行"
+assert_stdout_empty "release: merge-task-to-local-master 无交互输出"
 
-# bash 包裹新发布审查包入口带授权参数 → 仍应触发确认
+# bash 包裹新发布审查包入口带授权参数 → 仍应无交互放行
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash scripts/publish-review-package.sh --user-authorized"}}'
-assert_exit 0 "release: bash publish-review-package 授权入口触发确认"
-assert_stdout_has '"permissionDecision":"ask"' "release: bash publish-review-package stdout 含 ask"
+assert_exit 0 "release: bash publish-review-package 授权入口放行"
+assert_stdout_empty "release: bash publish-review-package 无交互输出"
 
 # bash -lc 包裹标准入口仍应识别
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash -lc \"scripts/publish-review-package.sh --user-authorized\""}}'
-assert_exit 0 "release: bash -lc publish-review-package 授权入口触发确认"
-assert_stdout_has '"permissionDecision":"ask"' "release: bash -lc publish-review-package stdout 含 ask"
+assert_exit 0 "release: bash -lc publish-review-package 授权入口放行"
+assert_stdout_empty "release: bash -lc publish-review-package 无交互输出"
+
+# 标准入口不能掩盖同一复合命令中的裸 Git 操作。
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/commit-task-for-review.sh --user-authorized -m \"feat: x\" && git commit -m \"bypass\""}}'
+assert_exit 2 "release: 标准 commit 入口后裸 commit 仍硬拦"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh --user-authorized feature/x && git merge --no-ff feature/y"}}'
+assert_exit 2 "release: 标准 merge 入口后裸 merge 仍硬拦"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized && git commit -m \"bypass\""}}'
+assert_exit 2 "release: 标准 publish 入口后裸 commit 仍硬拦"
+
+# 内联和仓库 Git alias 不能绕过 push / commit / merge 分类。
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git -c alias.ship=push ship origin feature/x"}}'
+assert_exit 2 "release: inline alias push 硬拦"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git -c alias.save=commit save -m \"bypass\""}}'
+assert_exit 2 "release: inline alias commit 硬拦"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git -c alias.integrate=\"merge --no-ff\" integrate feature/x"}}'
+assert_exit 2 "release: inline alias merge 硬拦"
+
+ALIAS_TEST_ROOT="$(mktemp -d)"
+"$REAL_GIT" -C "$ALIAS_TEST_ROOT" init -q
+"$REAL_GIT" -C "$ALIAS_TEST_ROOT" config alias.ship push
+"$REAL_GIT" -C "$ALIAS_TEST_ROOT" config alias.save commit
+"$REAL_GIT" -C "$ALIAS_TEST_ROOT" config alias.integrate 'merge --no-ff'
+"$REAL_GIT" -C "$ALIAS_TEST_ROOT" config alias.option-ship '-c foo.bar=baz push'
+"$REAL_GIT" -C "$ALIAS_TEST_ROOT" config alias.option-save '-c foo.bar=baz commit'
+"$REAL_GIT" -C "$ALIAS_TEST_ROOT" config alias.option-integrate '-c foo.bar=baz merge --no-ff'
+run_hook "$RELEASE_HOOK" "$(printf '{\"tool_input\":{\"command\":\"git -C %s ship origin feature/x\"}}' "$ALIAS_TEST_ROOT")"
+assert_exit 2 "release: configured alias push 硬拦"
+run_hook "$RELEASE_HOOK" "$(printf '{\"tool_input\":{\"command\":\"git -C %s save -m bypass\"}}' "$ALIAS_TEST_ROOT")"
+assert_exit 2 "release: configured alias commit 硬拦"
+run_hook "$RELEASE_HOOK" "$(printf '{\"tool_input\":{\"command\":\"git -C %s integrate feature/x\"}}' "$ALIAS_TEST_ROOT")"
+assert_exit 2 "release: configured alias merge 硬拦"
+run_hook "$RELEASE_HOOK" "$(printf '{\"tool_input\":{\"command\":\"git -C %s option-ship origin feature/x\"}}' "$ALIAS_TEST_ROOT")"
+assert_exit 2 "release: configured alias with global option push 硬拦"
+run_hook "$RELEASE_HOOK" "$(printf '{\"tool_input\":{\"command\":\"git -C %s option-save -m bypass\"}}' "$ALIAS_TEST_ROOT")"
+assert_exit 2 "release: configured alias with global option commit 硬拦"
+run_hook "$RELEASE_HOOK" "$(printf '{\"tool_input\":{\"command\":\"git -C %s option-integrate feature/x\"}}' "$ALIAS_TEST_ROOT")"
+assert_exit 2 "release: configured alias with global option merge 硬拦"
+rm -rf "$ALIAS_TEST_ROOT"
 
 # 项目清理脚本依靠自身校验，不在发布 Hook 中弹确认
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/cleanup-task-worktree.sh"}}'
@@ -550,6 +748,7 @@ run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"cd /Users/jj.reno/Blue-Whale
 assert_exit 0 "release: 非发布验证复合命令放行"
 
 # 创建合法普通 PR（缺 draft）→ Pre 只校验形态放行，不消费标记（消费延后到 Post，见 ADR-0011）
+setup_publish_test_repo
 write_publish_marker "feature/x"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
 assert_exit 0 "release: 普通 PR 放行不二次确认"
@@ -604,15 +803,103 @@ assert_exit 2 "release: 缺 source_branch PR 拦截"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"develop","draft":"false","title":"test"}}'
 assert_exit 2 "release: 非 master 目标 PR 拦截"
 
-# 合并 PR → 单独触发用户确认
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"pull_request_id":12,"merge_method":"merge"}}'
-assert_exit 0 "release: merge PR 触发确认"
-assert_stdout_has '"permissionDecision":"ask"' "release: merge PR stdout 含 ask"
+# 合并 PR → 必须持有绑定企业/仓库/PR 的一次性凭证。
+setup_action_test_repo
+remove_all_action_markers
+run_hook "$RELEASE_HOOK" '{"tool_use_id":"merge-12-missing","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":12,"merge_method":"merge"}}'
+assert_exit 2 "release: merge PR 缺凭证拦截"
+assert_stderr_has "manage-agent-authorization.sh grant" "release: merge PR 缺凭证提示自动授权入口"
 
-# 创建 release → 单独触发用户确认
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_release","tool_input":{"release_tag_version":"v1.0.0","release_title":"v1.0.0","release_description":"test"}}'
-assert_exit 0 "release: create release 触发确认"
-assert_stdout_has '"permissionDecision":"ask"' "release: create release stdout 含 ask"
+write_action_marker merge-pr 16660949 48854568 12
+run_hook "$RELEASE_HOOK" '{"tool_use_id":"merge-12-a","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":12,"merge_method":"merge"}}'
+assert_exit 0 "release: merge PR 有效凭证首次 claim 放行"
+assert_stdout_empty "release: merge PR 无交互输出"
+assert_file_exists "$(authorization_marker_path merge-pr 16660949 48854568 12)" "release: merge PR Pre 不消费凭证"
+assert_file_exists "$(authorization_claim_path merge-pr 16660949 48854568 12)" "release: merge PR Pre 原子占用凭证"
+
+run_hook "$RELEASE_HOOK" '{"tool_use_id":"merge-12-b","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":12,"merge_method":"merge"}}'
+assert_exit 2 "release: merge PR 同凭证并发 claim 拦截"
+assert_stderr_has "已被另一个工具调用占用" "release: merge PR 并发占用提示"
+
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_use_id":"merge-12-a","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":12,"merge_method":"merge"},"tool_response":{"isError":true}}'
+assert_exit 0 "release: merge PR 失败 Post 放行"
+assert_file_exists "$(authorization_marker_path merge-pr 16660949 48854568 12)" "release: merge PR 失败 Post 保留凭证"
+assert_file_missing "$(authorization_claim_path merge-pr 16660949 48854568 12)" "release: merge PR 失败 Post 释放占用"
+
+run_hook "$RELEASE_HOOK" '{"tool_use_id":"merge-12-b","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":12,"merge_method":"merge"}}'
+assert_exit 0 "release: merge PR 失败释放后可重试"
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_use_id":"merge-12-b","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":12,"merge_method":"merge"},"tool_response":{"isError":false}}'
+assert_exit 0 "release: merge PR 成功 Post 放行"
+assert_file_missing "$(authorization_marker_path merge-pr 16660949 48854568 12)" "release: merge PR 成功 Post 消费凭证"
+assert_file_missing "$(authorization_claim_path merge-pr 16660949 48854568 12)" "release: merge PR 成功 Post 清理占用"
+
+write_action_marker merge-pr 16660949 48854568 17
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":17,"merge_method":"merge"}}'
+assert_exit 2 "release: merge PR 缺 tool_use_id 拦截"
+assert_stderr_has "tool_use_id" "release: merge PR 缺 tool_use_id 提示"
+
+write_action_marker merge-pr 16660949 48854568 13 1
+run_hook "$RELEASE_HOOK" '{"tool_use_id":"merge-13","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":13,"merge_method":"merge"}}'
+assert_exit 2 "release: merge PR 过期凭证拦截"
+assert_stderr_has "已过期" "release: merge PR 过期凭证提示"
+assert_file_missing "$(authorization_marker_path merge-pr 16660949 48854568 13)" "release: merge PR 过期凭证清理"
+
+write_action_marker merge-pr 16660949 48854568 14
+run_hook "$RELEASE_HOOK" '{"tool_use_id":"merge-15","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":15,"merge_method":"merge"}}'
+assert_exit 2 "release: merge PR 对象错配拦截"
+assert_file_exists "$(authorization_marker_path merge-pr 16660949 48854568 14)" "release: merge PR 对象错配不消费其他凭证"
+
+malformed_marker="$(authorization_marker_path merge-pr 16660949 48854568 16)"
+mkdir -p "$(dirname "$malformed_marker")"
+printf 'version=1\naction=merge-pr\n' >"$malformed_marker"
+run_hook "$RELEASE_HOOK" '{"tool_use_id":"merge-16","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":16,"merge_method":"merge"}}'
+assert_exit 2 "release: merge PR 非法凭证拦截"
+assert_stderr_has "凭证无效" "release: merge PR 非法凭证提示"
+assert_file_missing "$malformed_marker" "release: merge PR 非法凭证清理"
+
+# 创建 release → 使用绑定 tag 的一次性凭证，失败保留、成功消费。
+write_action_marker create-release 16660949 48854568 v1.0.0
+run_hook "$RELEASE_HOOK" '{"tool_use_id":"release-v1","tool_name":"mcp__gitee-ent__create_enterprise_repo_release","tool_input":{"enterprise_id":16660949,"project_id":"48854568","release_tag_version":"v1.0.0","release_title":"v1.0.0","release_description":"test"}}'
+assert_exit 0 "release: create release 有效凭证放行"
+assert_stdout_empty "release: create release 无交互输出"
+assert_file_exists "$(authorization_marker_path create-release 16660949 48854568 v1.0.0)" "release: create release Pre 不消费凭证"
+
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_use_id":"release-v1","tool_name":"mcp__gitee-ent__create_enterprise_repo_release","tool_input":{"enterprise_id":16660949,"project_id":"48854568","release_tag_version":"v1.0.0","release_title":"v1.0.0","release_description":"test"},"tool_response":{"isError":false}}'
+assert_exit 0 "release: create release 成功 Post 放行"
+assert_file_missing "$(authorization_marker_path create-release 16660949 48854568 v1.0.0)" "release: create release 成功 Post 消费凭证"
+
+write_action_marker create-release 16660949 48854568 v1.1.0
+run_hook "$RELEASE_HOOK" '{"tool_use_id":"release-v1-ambiguous","tool_name":"mcp__gitee-ent__create_enterprise_repo_release","tool_input":{"enterprise_id":16660949,"project_id":"48854568","release_tag_version":"v1.1.0","release_title":"v1.1.0","release_description":"test"}}'
+assert_exit 0 "release: create release 歧义 Post 前 claim 放行"
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_use_id":"release-v1-ambiguous","tool_name":"mcp__gitee-ent__create_enterprise_repo_release","tool_input":{"enterprise_id":16660949,"project_id":"48854568","release_tag_version":"v1.1.0"},"tool_response":{"isError":"false"}}'
+assert_exit 0 "release: create release 畸形 Post 放行"
+assert_file_exists "$(authorization_marker_path create-release 16660949 48854568 v1.1.0)" "release: create release 畸形 Post 保留凭证"
+assert_file_missing "$(authorization_claim_path create-release 16660949 48854568 v1.1.0)" "release: create release 畸形 Post 释放占用"
+
+# AI 管理入口：grant/revoke/revoke --all 全自动管理，不需要人类处理文件。
+run_authorization grant --user-authorized merge-pr --enterprise-id 16660949 --project-id 48854568 --pull-request-id 21
+assert_exit 0 "authorization: grant merge-pr 成功"
+assert_file_exists "$(authorization_marker_path merge-pr 16660949 48854568 21)" "authorization: grant 写入 merge-pr 凭证"
+assert_file_mode_600 "$(authorization_marker_path merge-pr 16660949 48854568 21)" "authorization: grant 凭证权限 0600"
+
+run_authorization revoke merge-pr --enterprise-id 16660949 --project-id 48854568 --pull-request-id 21
+assert_exit 0 "authorization: revoke merge-pr 成功"
+assert_file_missing "$(authorization_marker_path merge-pr 16660949 48854568 21)" "authorization: revoke 删除 merge-pr 凭证"
+
+run_authorization grant --user-authorized create-release --enterprise-id 16660949 --project-id 48854568 --release-tag-version v2.0.0
+assert_exit 0 "authorization: grant create-release 成功"
+run_authorization revoke --all
+assert_exit 0 "authorization: revoke --all 成功"
+assert_file_missing "$(authorization_marker_path create-release 16660949 48854568 v2.0.0)" "authorization: revoke --all 删除全部凭证"
+
+run_authorization grant merge-pr --enterprise-id 16660949 --project-id 48854568 --pull-request-id 22
+assert_exit 2 "authorization: grant 缺 user-authorized 拦截"
+assert_stderr_has "--user-authorized" "authorization: grant 缺授权提示"
+
+run_authorization_helper grant "$ACTION_TEST_ROOT" merge-pr 16660949 48854568 23
+assert_exit 2 "authorization: helper direct grant 缺授权声明拦截"
+assert_stderr_has "--user-authorized" "authorization: helper direct grant 缺授权提示"
+teardown_action_test_repo
 
 # 回归（G+）：标记按 branch 隔离，不同分支标记互不覆盖。
 # 防本次缺陷复发——publish 在 worktree 写、hook 在主仓读，common dir 对称使其命中；
@@ -631,27 +918,34 @@ remove_publish_marker "feature/bbb"
 # G+ Post 隔离回归：Post 消费 aaa 不应误删 bbb（恢复跨分支隔离守卫意图）。
 write_publish_marker "feature/aaa"
 write_publish_marker "feature/bbb"
-run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/aaa","target_branch":"master","title":"test"}}'
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/aaa","target_branch":"master","title":"test"},"tool_response":{"isError":false}}'
 assert_exit 0 "release: G+ Post aaa 放行"
 assert_file_missing "$(publish_marker_path feature/aaa)" "release: G+ Post aaa 被消费"
 assert_file_exists "$(publish_marker_path feature/bbb)" "release: G+ Post aaa 消费不误删 bbb"
 remove_publish_marker "feature/aaa"
 remove_publish_marker "feature/bbb"
 
-# PostToolUse 消费标记：PR 创建成功（PostToolUse）后撕票（ADR-0011）。
-# PostToolUse 只在工具成功时触发（失败走 PostToolUseFailure），Post 分支直接 consume。
+# PostToolUse 消费标记：只有 tool_response.isError=false 明确证明 PR 创建成功才撕票（ADR-0011）。
 write_publish_marker "feature/x"
 assert_file_exists "$(publish_marker_path feature/x)" "release: Post 消费前标记存在"
-run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"},"tool_response":{"isError":false}}'
 assert_exit 0 "release: Post create PR 放行（不阻断已执行工具）"
 assert_file_missing "$(publish_marker_path feature/x)" "release: Post 创建成功消费标记"
 
+# Post 响应缺失或类型畸形时不能证明成功，保留发布标记等待明确结果或 TTL。
+write_publish_marker "feature/x"
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master"},"tool_response":{"isError":"false"}}'
+assert_exit 0 "release: Post 畸形 isError 放行不阻断"
+assert_file_exists "$(publish_marker_path feature/x)" "release: Post 畸形 isError 保留标记"
+remove_publish_marker feature/x
+
 # Post 缺 source_branch 不 consume（guard）：撕票需 source_branch 算路径，缺失则不动标记。
 write_publish_marker "feature/x"
-run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"target_branch":"master","title":"test"}}'
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"target_branch":"master","title":"test"},"tool_response":{"isError":false}}'
 assert_exit 0 "release: Post 缺 source_branch 放行不阻断"
 assert_file_exists "$(publish_marker_path feature/x)" "release: Post 缺 source_branch 不消费标记"
 remove_publish_marker feature/x
+teardown_publish_test_repo
 
 # Slice 2 — block-issue-without-repo（核心：project_id 类型漂移回归基线）
 # MCP schema: project_id 为 number。本组同时喂 number 与 string 两种形态，
@@ -874,6 +1168,12 @@ unset REAL_REPO FEATURE_REPO
 # Slice 5 — Codex project hook layer
 assert_file_exists "$CODEX_HOOKS_JSON" "codex: hooks.json 存在"
 assert_codex_hooks_valid "codex: hooks.json 与 Claude matcher 同步"
+for runtime_hook in .claude/hooks/*.sh .codex/hooks/*.sh .claude/settings.json .codex/hooks.json; do
+  assert_file_not_matches "$runtime_hook" 'permissionDecision[^[:alnum:]]*[=:][^[:alnum:]]*ask' "hooks: $runtime_hook 不包含 ask 运行机制"
+done
+for active_doc in CLAUDE.md CONTEXT.md .claude/rules/git-workflow.md docs/agents/commit-and-review.md docs/agents/worktree-workflow.md docs/agents/hooks/README.md; do
+  assert_file_not_has_text "$active_doc" 'permissionDecision=ask' "docs: $active_doc 不再描述 ask 为活跃机制"
+done
 assert_git_not_ignored ".codex/hooks.json" "codex: hooks.json 可提交"
 assert_git_not_ignored ".codex/hooks/run-claude-pretool.sh" "codex: wrapper 可提交"
 assert_git_ignored ".codex/config.toml" "codex: config.toml 保持私密"
@@ -920,19 +1220,31 @@ assert_exit 2 "codex: 直接 git push 包装命令拦截"
 assert_stderr_has "直接 git push" "codex: 直接 git push 包装命令提示"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized"}}'
-assert_exit 2 "codex: release ask 转硬阻断"
-assert_stderr_has "requires explicit user confirmation" "codex: release ask 转硬阻断提示"
+assert_exit 0 "codex: release 授权入口无交互放行"
+assert_stdout_empty "codex: release 授权入口无输出"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"git commit -m \"feat: task slice\""}}'
-assert_exit 2 "codex: direct commit ask 转硬阻断"
-assert_stderr_has "requires explicit user confirmation" "codex: direct commit ask 转硬阻断提示"
+assert_exit 2 "codex: direct commit 硬阻断"
+assert_stderr_has "commit-task-for-review.sh --user-authorized" "codex: direct commit 指向标准入口"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh --user-authorized feature/x"}}'
-assert_exit 2 "codex: local merge ask 转硬阻断"
-assert_stderr_has "requires explicit user confirmation" "codex: local merge ask 转硬阻断提示"
+assert_exit 0 "codex: local merge 授权入口无交互放行"
+assert_stdout_empty "codex: local merge 授权入口无输出"
 
+# 一次性凭证依赖真实 git common-dir/hash-object；前面的 fake git 只用于分支查询型 gate。
 teardown_git_stub
 unset FAKE_BRANCH
+
+setup_action_test_repo
+write_action_marker merge-pr 16660949 48854568 31
+run_command_hook "$CODEX_RELEASE_CMD" '{"tool_use_id":"codex-merge-31","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":31,"merge_method":"merge"}}'
+assert_exit 0 "codex: merge PR 有凭证放行"
+assert_file_exists "$(authorization_marker_path merge-pr 16660949 48854568 31)" "codex: merge PR Pre 保留凭证"
+
+run_command_hook "$CODEX_RELEASE_POST_CMD" '{"hook_event_name":"PostToolUse","tool_use_id":"codex-merge-31","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":31,"merge_method":"merge"},"tool_response":{"isError":false}}'
+assert_exit 0 "codex: merge PR Post 放行"
+assert_file_missing "$(authorization_marker_path merge-pr 16660949 48854568 31)" "codex: merge PR Post 消费凭证"
+teardown_action_test_repo
 
 # Slice 6 — cleanup-release-branch.sh（真实临时 git 仓库集成测试）
 # 现有夹具只做 hook 层黑盒；本组用真实裸 origin + clone 仓库驱动
