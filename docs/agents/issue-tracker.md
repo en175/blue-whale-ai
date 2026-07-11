@@ -9,18 +9,11 @@ Gitee 不像 GitHub/GitLab 有成熟的 `gh`/`glab` 官方 CLI，因此本工作
 1. **Gitee MCP 工具**（如本会话中可用）：`mcp__gitee-ent__create_enterprise_issue`、`mcp__gitee-ent__list_enterprise_issues`、`mcp__gitee-ent__get_enterprise_issue_detail`、`mcp__gitee-ent__update_enterprise_issue`、`mcp__gitee-ent__comment_enterprise_issue`、`mcp__gitee-ent__list_enterprise_issue_comments`。
 2. **Gitee 网页**（MCP 工具不可用时的回退）：通过上述网页地址手动创建/查看/评论。
 
-## 普通版 MCP 实测（本会话环境）
+## 历史：曾用普通版 MCP（已废弃）
 
-> 本会话环境只有普通版 `mcp__gitee__*`（无企业版 `mcp__gitee-ent__*`）。下文「约定」全按企业版写，实际操作用普通版，差异如下（2026-07-07 建 IJZ7Z7 / IJZ7Z8 / IJZ7Z9 验证）：
+> 早期本环境只有普通版 `mcp__gitee__*`，操作差异曾记于此。**现已统一企业版 `mcp__gitee-ent__*`**（与官方 [mcp-gitee-ent](https://gitee.com/oschina/mcp-gitee-ent) 工具集一致），下文「约定」全按企业版写。普通版操作细节已删除，需要时查 git 历史（2026-07-11 清理）。
 
-- **创建**：`mcp__gitee__create_issue(owner, repo, title, body, labels)`，用 owner/repo 定位（owner=`hangzhou-xuanfu_1`，**连字符**）。
-- **labels 在 create 时被静默忽略**（返回 `labels:[]`），必须紧跟 `mcp__gitee__update_issue(number, labels="ready-for-agent")` 补——标签传**名字字符串**，不是数字 ID。
-- **不传 program / project_id 也仓库可见**：普通版用 owner/repo 天然关联仓库，不像企业版不传 project_id 则仓库 Issues 页看不到。
-- **issue_type 自动 "需求"**，无需显式传。
-- **建后反查**：`mcp__gitee__list_repo_issues(owner, repo, state="open")` 确认仓库可见 + label 落位。
-- **未实测**：关闭/状态枚举（普通版 `update_issue` 的 `state` 入参语义）、program 关联——用到时再补。
-
-> 注：本文档上方「远程地址」里的下划线 owner `hangzhou_xuanfu_1` 是历史误写——`git push` 容忍重定向，但 **MCP API + 网页 URL 严格匹配**，全下划线会 404。正确拼写 `hangzhou-xuanfu_1`（hangzhou-连字符-xuanfu_下划线-1）。
+> 注：仓库 owner 拼写 `hangzhou-xuanfu_1`（hangzhou-连字符-xuanfu_下划线-1）。上方「远程地址」全下划线 `hangzhou_xuanfu_1` 是历史误写——`git push` 容忍重定向，但 **MCP API + 网页 URL 严格匹配**，全下划线 404。
 
 ## 约定（按操作）
 
