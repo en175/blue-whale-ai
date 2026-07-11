@@ -98,7 +98,7 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
       onClick={onClose}
     >
       <div
-        className="bg-[var(--tc-login-modal-bg)] border border-white/[0.12] rounded-xl shadow-[0_24px_80px_rgba(0,0,0,0.5)] w-[420px] max-w-[calc(100vw-32px)] p-10 px-8 relative animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none"
+        className="bg-[var(--tc-login-modal-bg)] border border-white/[0.12] rounded-xl shadow-[var(--tc-modal-shadow)] w-[420px] max-w-[calc(100vw-32px)] p-10 px-8 relative animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none"
         role="dialog"
         aria-modal="true"
         aria-label="登录"

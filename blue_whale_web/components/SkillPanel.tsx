@@ -75,7 +75,7 @@ export default function SkillPanel({
     >
       <div
         id="home-canvas-skill-panel"
-        className="tc-agent-skill-panel bg-[#141414] border border-white/[0.12] rounded-2xl shadow-[0_24px_80px_rgba(0,0,0,0.5)] w-[calc(100vw-56px)] max-w-[1440px] h-[calc(100vh-56px)] max-h-[920px] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none"
+        className="tc-agent-skill-panel bg-[#141414] border border-white/[0.12] rounded-2xl shadow-[var(--tc-modal-shadow)] w-[calc(100vw-56px)] max-w-[1440px] h-[calc(100vh-56px)] max-h-[920px] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none"
         role="dialog"
         aria-modal="true"
         aria-label="Skills"
