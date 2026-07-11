@@ -1,26 +1,23 @@
 #!/usr/bin/env bash
-# Commit an accepted task worktree diff after explicit user authorization.
+# Commit a task worktree diff as a reviewable, revertable checkpoint.
+# worktree 工单分支上的 commit 是本地可逆动作（不碰 master、不 push、不 PR），
+# 不属发布红线，无需用户授权门槛。用户确认环节落在 merge 本地 master 前。
 
 set -euo pipefail
 
-AUTHORIZED=0
 MESSAGE=""
 
 usage() {
   cat >&2 <<EOF
-用法: scripts/commit-task-for-review.sh --user-authorized -m "<commit-message>"
+用法: scripts/commit-task-for-review.sh -m "<commit-message>"
 
-在任务 worktree 内提交用户已确认的任务验收 diff。
+在任务 worktree 工单分支内提交已完成的子 issue diff，落成可 review、可 revert 的检查点。
 EOF
   exit 2
 }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --user-authorized)
-      AUTHORIZED=1
-      shift
-      ;;
     -m|--message)
       [ "$#" -ge 2 ] || usage
       MESSAGE="$2"
@@ -41,7 +38,6 @@ fail() {
   exit 1
 }
 
-[ "$AUTHORIZED" = 1 ] || fail "缺少 --user-authorized。必须先获得用户明确授权提交任务验收分支。"
 [ -n "$MESSAGE" ] || fail "缺少 commit message。请用 -m \"<message>\"。"
 
 ROOT="$(git rev-parse --show-toplevel)"

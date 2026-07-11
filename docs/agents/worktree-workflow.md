@@ -71,35 +71,29 @@ scripts/ensure-graphify-worktree.sh
 
 ## 子 issue 完成
 
-Agent 完成子 issue 后停在任务 worktree 分支上，默认交付：
+Agent 完成子 issue 后直接走提交入口落盘 commit（无需用户先确认/授权），停在 commit 等 review。默认交付：
 
-- 未提交 diff
+- 子 issue 的一个 commit（稳定可 review、可 revert 的检查点）
 - 验证结果
 - 用户 review / 微调入口
 
-Agent 不自动 commit、不自动合入本地 `master`、不自动推送、不自动开 PR。
+Agent 不自动合入本地 `master`、不自动推送、不自动开 PR。
 
 ## 合入用户本地集成区
 
-用户确认任务验收分支无问题后，Agent 可以在明确确认下执行本地合入；用户也可以手动合入。Agent 执行时：
+用户确认任务验收分支上的 commit 无问题后，Agent 可以在明确确认下执行本地合入；用户也可以手动合入。Agent 执行时：
 
 1. 确认本地 `master` 工作区干净；不干净则报告状态并停止。
-2. 在任务验收分支上创建本地 commit：
-
-```bash
-scripts/commit-task-for-review.sh --user-authorized -m "<commit-message>"
-```
-
-3. 切回本地 `master`。
-4. 合入任务分支，保留子 issue 边界：
+2. 切回本地 `master`。
+3. 合入任务分支，保留子 issue 边界：
 
 ```bash
 scripts/merge-task-to-local-master.sh --user-authorized <任务分支>
 ```
 
-5. 如有 merge conflict，Agent 可在本次合入授权范围内解决并运行验证；解决后停在本地 `master` 汇报结果，不继续远程发布。
+4. 如有 merge conflict，Agent 可在本次合入授权范围内解决并运行验证；解决后停在本地 `master` 汇报结果，不继续远程发布。
 
-Claude/Codex hook 会硬拦直接 `git commit`、非 `--ff-only` 的直接 `git merge` 以及缺少 `--user-authorized` 的本地验收入口，并指引 Agent 在已有授权覆盖时自动改走标准入口；带授权参数的标准入口无交互放行。
+Claude/Codex hook 会硬拦直接 `git commit`、非 `--ff-only` 的直接 `git merge` 以及缺少 `--user-authorized` 的合入本地 master 入口，并指引 Agent 改走标准入口；提交入口出现即放行，合入入口带授权参数无交互放行。
 
 ## 发布包装 Work Tree
 
