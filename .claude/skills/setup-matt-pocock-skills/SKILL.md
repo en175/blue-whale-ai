@@ -37,14 +37,15 @@ Assume the user does not know what these terms mean. Each section starts with a 
 
 > Explainer: The "issue tracker" is where issues live for this repo. Skills like `to-tickets`, `triage`, `to-spec`, and `qa` read from and write to it — they need to know whether to call `gh issue create`, write a markdown file under `.scratch/`, or follow some other workflow you describe. Pick the place you actually track work for this repo.
 
-Default posture: these skills were designed for GitHub. If a `git remote` points at GitHub, propose that. If a `git remote` points at GitLab (`gitlab.com` or a self-hosted host), propose GitLab. Otherwise (or if the user prefers), offer:
+Default posture: these skills were designed for GitHub. If a `git remote` points at GitHub, propose that. If a `git remote` points at GitLab (`gitlab.com` or a self-hosted host), propose GitLab. If a `git remote` points at Gitee (`gitee.com`), propose Gitee. Otherwise (or if the user prefers), offer:
 
 - **GitHub** — issues live in the repo's GitHub Issues (uses the `gh` CLI)
 - **GitLab** — issues live in the repo's GitLab Issues (uses the [`glab`](https://gitlab.com/gitlab-org/cli) CLI)
+- **Gitee** — issues live in the repo's Gitee Issues (Gitee MCP tools; no official CLI)
 - **Local markdown** — issues live as files under `.scratch/<feature>/` in this repo (good for solo projects or repos without a remote)
 - **Other** (Jira, Linear, etc.) — ask the user to describe the workflow in one paragraph; the skill will record it as freeform prose
 
-If — and only if — the user picked **GitHub** or **GitLab**, ask one follow-up:
+If — and only if — the user picked **GitHub**, **GitLab**, or **Gitee**, ask one follow-up:
 
 > Explainer: Open-source repos often receive feature requests as pull requests, not just issues — a PR is an issue with attached code. If you turn this on, `/triage` pulls *external* PRs into the same queue and runs them through the same labels and states as issues (collaborators' in-flight PRs are left alone). Leave it off if PRs aren't a request surface for you.
 
@@ -116,9 +117,12 @@ Then write the three docs files using the seed templates in this skill folder as
 
 - [issue-tracker-github.md](./issue-tracker-github.md) — GitHub issue tracker
 - [issue-tracker-gitlab.md](./issue-tracker-gitlab.md) — GitLab issue tracker
+- [issue-tracker-gitee.md](./issue-tracker-gitee.md) — Gitee issue tracker
 - [issue-tracker-local.md](./issue-tracker-local.md) — local-markdown issue tracker
 - [triage-labels.md](./triage-labels.md) — label mapping
 - [domain.md](./domain.md) — domain doc consumer rules + layout
+
+Whatever the tracker, `issue-tracker.md` carries these sections (some conditional): **Conventions** (create/read/list/comment/label/close), **PRs/MRs as a triage surface** (only where the tracker has PRs/MRs — local-markdown has none), **When a skill says "publish to the issue tracker"**, **When a skill says "fetch the relevant ticket"**, and **Wayfinding operations** (used by `/wayfinder`). The seed templates (github/gitlab/local/gitee) show the shape; for "other" trackers, write the sections that apply from the user's description. In Wayfinding, label separators are tracker-specific — GitHub/GitLab use colons (`wayfinder:map`); trackers that forbid colons (Gitee) use hyphens (`wayfinder-map`).
 
 For "other" issue trackers, write `docs/agents/issue-tracker.md` from scratch using the user's description.
 
