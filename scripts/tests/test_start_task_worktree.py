@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Black-box tests for the cross-platform task worktree entrypoint."""
 
+import os
 import shutil
 import subprocess
 import sys
@@ -298,6 +299,56 @@ class StartTaskWorktreeTest(unittest.TestCase):
         self.assertIn("冲突", result.stderr)
         self.assertEqual(local_sha, run("git", "rev-parse", "master", cwd=self.repo).stdout.strip())
         self.assertEqual("", run("git", "status", "--porcelain", cwd=self.repo).stdout)
+        self.assertFalse((self.root / "blue-whale-worktrees").exists())
+
+    def test_conflict_abort_failure_reports_honestly_without_claiming_success(self):
+        # 与上一用例同样的分叉冲突，但通过 PATH 注入假 git，让 merge --abort
+        # 强制失败，其余 git 调用透传真实 git，验证文案如实、不误报成功。
+        self.commit(self.repo, "shared.txt", "local\n", "fix: 修改本地共享内容")
+        self.commit(self.actor, "shared.txt", "remote\n", "fix: 修改远程共享内容")
+        run("git", "push", "origin", "master", cwd=self.actor)
+
+        fake_dir = self.root / "fake-git-bin"
+        fake_dir.mkdir()
+        real_git = shutil.which("git")
+        fake_git = fake_dir / "git"
+        fake_git.write_text(
+            "#!/usr/bin/env bash\n"
+            "prev=\n"
+            'for arg in "$@"; do\n'
+            '  if [ "$prev" = "merge" ] && [ "$arg" = "--abort" ]; then\n'
+            '    echo "fatal: simulated abort failure (index lock)" >&2\n'
+            "    exit 1\n"
+            "  fi\n"
+            '  prev="$arg"\n'
+            "done\n"
+            'exec "{real}" "$@"\n'.format(real=real_git),
+            encoding="utf-8",
+        )
+        fake_git.chmod(0o755)
+
+        env = dict(os.environ)
+        env["PATH"] = "{fake}{sep}{path}".format(
+            fake=fake_dir, sep=os.pathsep, path=env["PATH"]
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(self.repo / "scripts/start-task-worktree.py"),
+                "--type", "fix", "--no-issue", "--summary", "处理共享内容冲突",
+            ],
+            cwd=str(self.repo),
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertNotEqual(0, result.returncode, result.stderr)
+        self.assertIn("冲突", result.stderr)
+        self.assertNotIn("已自动 abort", result.stderr)
+        self.assertIn("手动", result.stderr)
         self.assertFalse((self.root / "blue-whale-worktrees").exists())
 
 

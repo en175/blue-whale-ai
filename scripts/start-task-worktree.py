@@ -168,13 +168,20 @@ def synchronize_master(root):
             check=False,
         )
         if merge.returncode != 0:
-            git(root, "merge", "--abort", check=False)
+            abort = git(root, "merge", "--abort", check=False)
             detail = (merge.stderr or merge.stdout).strip()
-            raise WorkflowError(
-                "本地 master 与 origin/master 合并发生冲突，已自动 abort；未创建 Work Tree。\n{}".format(
+            if abort.returncode == 0:
+                message = "本地 master 与 origin/master 合并发生冲突，已自动 abort；未创建 Work Tree。\n{}".format(
                     detail
                 )
-            )
+            else:
+                abort_detail = (abort.stderr or abort.stdout).strip()
+                message = (
+                    "本地 master 与 origin/master 合并发生冲突，自动 abort 未成功；"
+                    "请手动执行 git merge --abort 后重试。未创建 Work Tree。\n"
+                    "合并输出：{}\nabort 输出：{}".format(detail, abort_detail)
+                )
+            raise WorkflowError(message)
         action = "本地 master 已合并 origin/master，并保留双方提交"
 
     if git(root, "status", "--porcelain").stdout:
