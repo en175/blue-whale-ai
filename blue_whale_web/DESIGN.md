@@ -162,12 +162,13 @@ Canvas 工作台采用绝对定位的三区布局：左侧工具栏、底部生�
 | Token | 语义 | 值（`globals.css` `:root`） | 典型用途 |
 |---|---|---|---|
 | `--tc-menu-pill-shadow` | 顶部菜单胶囊 | `0 8px 24px rgba(0,0,0,0.4)` | TopBar menu-pill |
-| `--tc-dropdown-shadow` | 下拉 / 弹出菜单 | `0 12px 32px rgba(0,0,0,0.4)` | popover、下拉菜单（AgentComposer） |
+| `--tc-dropdown-shadow` | 下拉 / 弹出菜单（向下） | `0 12px 32px rgba(0,0,0,0.4)` | popover、下拉菜单（AgentComposer） |
+| `--tc-dropdown-shadow-up` | 向上弹出下拉（底部触发） | `0 -12px 32px rgba(0,0,0,0.4)` | AgentComposer 向上 popover |
 | `--tc-modal-shadow` | 全屏遮罩浮层 | `0 24px 80px rgba(0,0,0,0.5)` | modal、大面板（LoginModal / SkillPanel） |
 | `--tc-card-hover-shadow` | 卡片 hover 抬升 | 多层 ring + 投影 | 卡片网格 hover |
 | `--tc-card-selected-shadow` | 卡片选中态 | 多层 ring + 投影 | 卡片网格选中 |
 
-> dropdown 向上弹出（底部触发的菜单）方向相反，替换时以负 y 偏移变体处理（`0 -12px 32px ...`）；`--tc-dropdown-shadow` 仅定义向下基础值。
+> dropdown 向上弹出（底部触发的菜单）方向相反，用独立变体 token `--tc-dropdown-shadow-up`（`0 -12px 32px ...`）；`--tc-dropdown-shadow` 仅定义向下基础值。
 
 新增浮层 shadow：先在语义层级表登记语义名 + 值，再在 `globals.css` `:root` 注册，最后组件引用。
 
@@ -178,7 +179,7 @@ Canvas 工作台采用绝对定位的三区布局：左侧工具栏、底部生�
 | 簇 | 现状锚点 | 判定 | 归属 |
 |---|---|---|---|
 | 全屏 modal / 大面板 | LoginModal / SkillPanel `0 24px 80px rgba(0,0,0,0.5)` × 2 | 重复 + 语义 → token | T2 → `--tc-modal-shadow` |
-| 下拉 / popover | AgentComposer `0 12px 32px rgba(0,0,0,0.4)` × 8 向下 + 1 向上变体 | 高重复 → token | T3 → `--tc-dropdown-shadow` |
+| 下拉 / popover | AgentComposer `0 12px 32px rgba(0,0,0,0.4)` × 8 向下 → `--tc-dropdown-shadow`；1 向上变体 → `--tc-dropdown-shadow-up` | 高重复 → token | T3 |
 | 卡片 hover / 选中 | `--tc-card-hover-shadow` / `--tc-card-selected-shadow` | 已 token，纳入文档不改值 | — |
 | 顶部菜单胶囊 | TopBar `var(--tc-menu-pill-shadow)` | 已 token 引用 | — |
 | 旋转图片阴影 | TemplateCards 多处配 `rotate`，值各异 | 装饰性一次性 → 豁免 | T4 |
