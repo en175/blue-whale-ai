@@ -9,14 +9,13 @@
 
 ## 路由表：按场景查对应规则文件
 
-| 场景 | 文件 |
-|------|------|
-| 代码理解（查结构 / 调用链 / 架构） | `.claude/rules/code-intelligence.md`（自动加载） |
-| Gitee 工作流（提交/分支/PR/发布/worktree） | `.claude/rules/git-workflow.md`（自动加载） |
-| Gitee Issue / MCP 工具操作 | `.claude/rules/issue-tracker.md`（自动加载） |
-| 前端 UI 修改（`blue_whale_web/`） | `.claude/rules/frontend.md`（路径作用域，改前端文件时自动加载，无需手动查） |
-| PR 模板 / Hook 兜底清单 / 低频细节 | `docs/agents/commit-and-review.md` |
-| ADR（架构决策记录） | `docs/adr/` |
+| 场景                              | 文件                                                  |
+| ------------------------------- | --------------------------------------------------- |
+| 代码理解（查结构 / 调用链 / 架构）            | `.claude/rules/code-intelligence.md`                |
+| Gitee 工作流（提交/分支/PR/发布/worktree） | `.claude/rules/git-workflow.md`                     |
+| Gitee Issue / MCP 工具操作          | `.claude/rules/issue-tracker.md`                    |
+| 前端 UI 修改（`blue_whale_web/`）     | `.claude/rules/frontend.md`（路径作用域，改前端文件时自动加载，无需手动查） |
+| PR 模板 / Hook 兜底清单 / 低频细节        | `docs/agents/commit-and-review.md`                  |
 
 ## 最高红线（摘要，细节见 rules 文件）
 
