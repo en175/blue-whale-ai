@@ -1,13 +1,35 @@
 # Domain docs
 
-本仓库是**单上下文**（single-context）布局。
+本仓库是**单上下文**（single-context）布局。工程技能消费领域文档的规则如下。
 
-- `CONTEXT.md`（仓库根）：项目领域语言 / ubiquitous language 单一权威源。
-- `docs/adr/`：架构决策记录（ADR），过去架构决策的历史（最新 0010）。
+## 探索前先读
 
-技能读领域文档时：
+- 根 `CONTEXT.md` —— 项目领域语言 / ubiquitous language 单一权威源。
+- `docs/adr/` —— 读触及你即将改动区域的 ADR。（单上下文，无 `src/<context>/docs/adr/`。）
 
-- 涉及领域术语 / 概念 → 读根 `CONTEXT.md`。
-- 理解过去架构决策 → 读 `docs/adr/`（按编号）。
+上述文件不存在时**静默继续**——不报告缺失、不预先建议创建。`/domain-modeling`（经 `/grill-with-docs`、`/improve-codebase-architecture` 触达）会在术语 / 决策真正落地时惰性创建它们。
+
+## 文件结构
+
+单上下文（多数仓库）：
+
+```
+/
+├── CONTEXT.md
+├── docs/adr/        ← 架构决策记录，最高编号 0012
+└── ...
+```
 
 无 `CONTEXT-MAP.md`，非 monorepo 多上下文。
+
+## 用 glossary 的词汇
+
+输出（issue 标题、重构提案、假设、测试名）命名领域概念时，用 `CONTEXT.md` 定义的术语，不漂移到 glossary 明确回避的同义词。
+
+需要用的概念不在 glossary 里，是信号——你在发明项目不用的语言（重新考虑），或真实缺口（记下给 `/domain-modeling`）。
+
+## 标注与 ADR 的冲突
+
+输出与现有 ADR 矛盾时显式指出，不静默覆盖：
+
+> _与 ADR-0003（禁直推 master）冲突——但值得重开，因为……_

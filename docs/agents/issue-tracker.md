@@ -56,3 +56,15 @@ Gitee 不像 GitHub/GitLab 有成熟的 `gh`/`glab` 官方 CLI，因此本工作
 ## 当技能说"fetch the relevant ticket"
 
 用 `mcp__gitee-ent__get_enterprise_issue_detail` + `mcp__gitee-ent__list_enterprise_issue_comments` 读取该 issue 及其评论。
+
+## Wayfinding operations
+
+供 `/wayfinder` 用。**map** = 单个 Gitee issue，**child** = map 的子 issue。操作语义见 `/wayfinder` SKILL.md，本节只定义它们在 Gitee（企业版 MCP）的物理实现。
+
+- **标签命名（Gitee 不支持冒号）**：`/wayfinder` 文本写的是 `wayfinder:map` / `wayfinder:<type>`（GitHub 冒号习惯）。**Gitee 标签实测不支持冒号**，本仓统一用连字符——map 标签 `wayfinder-map`；type 标签 = `wayfinder-` + `<type>`，即 `wayfinder-research` / `wayfinder-prototype` / `wayfinder-grilling` / `wayfinder-task`。先在 Gitee「标签管理」建齐这 5 个。
+- **Map**：单个 Gitee issue，标签 `wayfinder-map`。`create_enterprise_issue(title=<map 名>, project_id=<仓库 id>, program_id=<可选>)` 创建，紧跟 `update_enterprise_issue(label_ids=<wayfinder-map 数字 id>)` 补标签（create 对企业私有仓库 labels 静默忽略，见上方「加/移除标签」）。body 填 Destination / Notes / Decisions-so-far / Not yet specified / Out of scope（模板见 `/wayfinder` SKILL.md）。
+- **Child ticket**：map 的子 issue。`create_enterprise_issue(parent_id=<map issue id>, project_id=<继承 map>, program_id=<继承 map>, issue_type_id=<继承 map>)`，紧跟 `update_enterprise_issue(label_ids=<对应 type 标签的数字 id>)`（type 标签见上）。`<type>` ∈ research / prototype / grilling / task。完整继承流程见上方「创建可交给 Agent 的子 issue」。
+- **Blocking**：**Gitee MCP 工具层无 native issue dependencies endpoint**——`update_enterprise_issue` 只有 `link_issue_id` 建弱「关联」（UI 可见关系，但非阻塞语义）。按 `/wayfinder` 规则「缺 native blocking 才回退 body convention」→ 回退：ticket body 顶部写 `Blocked by: <ticket 标题> (<ident>)`，每行一个 blocker。一个 ticket **unblocked** 当且仅当它列出的每个 blocker issue 都已 closed——执行时逐个 `get_enterprise_issue_detail` 查 `state == "closed"` 判定。`link_issue_id` 可作辅助（让 Gitee UI 可见关联），可选。
+- **Frontier query**：`list_enterprise_issues(project_id=<map project_id>, state="open")` 拉开放 issue，客户端筛 `parent.id == <map issue id>`（list 无 parent_id 过滤参数）；剔除有 `assignee` 的（已认领）；剔除 body 含未全闭环 `Blocked by:` 的；按创建顺序取第一个。
+- **Claim**：`update_enterprise_issue(issue_id=<ticket>, assignee_id=<自己 user id>)`。自己的 user id 用 `list_enterprise_members` 查。开放未分配 = 未认领。**任何实质工作前先 claim**，避免并发会话抢同一 ticket。
+- **Resolve**：① `comment_enterprise_issue(issue_id=<ticket>, body=<answer>)` 发 resolution 评论；② `update_enterprise_issue(issue_id=<ticket>, issue_state_id=<「已完成」对应 id>)` 关闭（状态枚举先 `list_issue_type_states` 查，见上方「关闭」）；③ 往 map body 的 `## Decisions so far` 追加一行（`- [<ticket 标题>](<url>) — <一句话 gist>`）——`update_enterprise_issue` 的 `description` 是**整体替换**非 append，先 `get_enterprise_issue_detail(map)` 取当前 body，拼接新行，再整体写回。
