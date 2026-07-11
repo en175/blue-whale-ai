@@ -146,11 +146,44 @@ Canvas 工作台采用绝对定位的三区布局：左侧工具栏、底部生�
 
 ## Elevation & Depth
 
-无传统阴影系统；**层次靠背景明度差与边框透明度表达**：
+层次由**三个互补手段**表达：背景明度差、边框透明度递进、以及 shadow token 体系（浮层投影）。前两者承载常规层级；shadow token 专供需要脱离背景的浮层（modal、dropdown、卡片态等）。
+
+### 明度与边框层级
 
 - 提升一级 = 背景从 `bg-canvas` → `bg-surface` → `bg-elevated`。
 - 边框透明度从 `border-subtle (0.08)` → `border (0.1)` → `border-active (0.16)` 递进。
-- 选中态用 `ring` 描边 + 多层 box-shadow（见 `--tc-card-selected-shadow`）。
+
+### Shadow token 体系
+
+浮层投影统一走 `--tc-<context>-shadow` 命名模式的 CSS 变量（定义在 `globals.css` `:root`，组件以 Tailwind 任意值 `shadow-[var(--tc-xxx-shadow)]` 引用，禁止内联 rgba）。`<context>` 表语义场景，不表数值。
+
+语义层级表（投影强度由浅到深）：
+
+| Token | 语义 | 值（`globals.css` `:root`） | 典型用途 |
+|---|---|---|---|
+| `--tc-menu-pill-shadow` | 顶部菜单胶囊 | `0 8px 24px rgba(0,0,0,0.4)` | TopBar menu-pill |
+| `--tc-dropdown-shadow` | 下拉 / 弹出菜单 | `0 12px 32px rgba(0,0,0,0.4)` | popover、下拉菜单（AgentComposer） |
+| `--tc-modal-shadow` | 全屏遮罩浮层 | `0 24px 80px rgba(0,0,0,0.5)` | modal、大面板（LoginModal / SkillPanel） |
+| `--tc-card-hover-shadow` | 卡片 hover 抬升 | 多层 ring + 投影 | 卡片网格 hover |
+| `--tc-card-selected-shadow` | 卡片选中态 | 多层 ring + 投影 | 卡片网格选中 |
+
+> dropdown 向上弹出（底部触发的菜单）方向相反，替换时以负 y 偏移变体处理（`0 -12px 32px ...`）；`--tc-dropdown-shadow` 仅定义向下基础值。
+
+新增浮层 shadow：先在语义层级表登记语义名 + 值，再在 `globals.css` `:root` 注册，最后组件引用。
+
+### Shadow 判定清单（T2/T3/T4 替换依据）
+
+并非所有阴影都该 token 化。判定：**重复出现 + 语义可复用** → token 化；**一次性装饰、值各异、配 transform 精心调校** → 豁免。
+
+| 簇 | 现状锚点 | 判定 | 归属 |
+|---|---|---|---|
+| 全屏 modal / 大面板 | LoginModal / SkillPanel `0 24px 80px rgba(0,0,0,0.5)` × 2 | 重复 + 语义 → token | T2 → `--tc-modal-shadow` |
+| 下拉 / popover | AgentComposer `0 12px 32px rgba(0,0,0,0.4)` × 8 向下 + 1 向上变体 | 高重复 → token | T3 → `--tc-dropdown-shadow` |
+| 卡片 hover / 选中 | `--tc-card-hover-shadow` / `--tc-card-selected-shadow` | 已 token，纳入文档不改值 | — |
+| 顶部菜单胶囊 | TopBar `var(--tc-menu-pill-shadow)` | 已 token 引用 | — |
+| 旋转图片阴影 | TemplateCards 多处配 `rotate`，值各异 | 装饰性一次性 → 豁免 | T4 |
+| 亮色按钮发光 | AgentComposer send 按钮 `0 2px 8px rgba(255,255,255,0.1)` × 3 + hover | 亮色控件发光（白色按钮浅投影），语义独立于暗色浮层体系 → 豁免 | T4 |
+| slider thumb / inset 分隔线 / popover 0.32 变体 | 单次或结构独特（`inset`、负 spread） | 装饰性 → 豁免 | T4 |
 
 ## Shapes
 
@@ -170,7 +203,9 @@ Canvas 工作台采用绝对定位的三区布局：左侧工具栏、底部生�
 - ✅ 新增颜色必须先在 `colors:` 注册为 token，再在组件里用 `{colors.xxx}` 引用。
 - ✅ 强调色只用 accent；状态色只用 success/destructive。
 - ✅ 主要可读文字至少用 `secondary (0.7)` 透明度，避免使用 muted。
+- ✅ 浮层投影用 `--tc-<context>-shadow` token（`shadow-[var(--tc-xxx-shadow)]`），新增浮层先在 Elevation 语义层级表登记 + `globals.css` 注册。
 - ❌ 不要引入第二个品牌强调色（保持单色强调）。
 - ❌ 不要用纯白之外的浅色作为大块背景（破坏黑底基调）。
 - ❌ 不要在组件里硬编码 hex/rgba 值，所有值走 token。
+- ⚠️ 豁免：装饰性一次性阴影（旋转图片、亮色控件发光、slider thumb、inset 分隔线）值各异且精心调校，不走 token，判定见 Elevation「Shadow 判定清单」。
 - ⚠️ 豁免：`login-primary (#4e40f3)` 是与 `accent` 并列的登录专用强调色，仅用于 `LoginModal` 的「登录」按钮（复刻 topview.ai 风格）。这是项目内唯一允许的第二品牌色，且仅此一处；其他场景仍坚持单色强调（accent）。
