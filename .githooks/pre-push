@@ -28,8 +28,8 @@ else
 fi
 
 # pre-push 从 stdin 读取多行，每行：<local ref> <local sha> <remote ref> <remote sha>
-# 零哈希（删除远程分支时 local sha=0000）的行跳过。
-# 我们只关心第一个被推送的本地分支 HEAD 是否落后于 origin/master。
+# 删除远程分支时 local sha=0000：master/main 仍先拦截，普通分支删除跳过后续校验。
+# 每个被推送的本地分支都独立检查命名与是否落后 origin/master。
 
 # 先取最新 origin/master（fetch 一次，确保判断基于最新远程）
 # 静默 fetch，失败不阻断（网络问题不该卡住 push；落后判断失败时放行，由人兜底）
