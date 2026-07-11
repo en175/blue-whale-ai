@@ -60,7 +60,7 @@
 
 ## 禁碰/禁提交
 
-- 不碰生成物：`dist/`、`target/`、`.next/`、`__pycache__/`、`node_modules/`；`graphify-out/` 的团队图谱按官方方案入库，`graphify-out/cache/` 与 `graphify-out/cost.json` 仍不提交
+- 不碰生成物：`dist/`、`target/`、`.next/`、`__pycache__/`、`node_modules/`；`graphify-out/` 整个不入库（本地产物，各 worktree / clone 各自生成或共享）
 - 不提交：生成物、`.claude/settings.local.json`、密钥凭证（`.env`、`*.key`、`*.pem`）
 - `.claude/` 团队协作目录进仓（`settings.json` + `hooks/`），仅 `settings.local.json` 不进。
 

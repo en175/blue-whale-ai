@@ -63,7 +63,7 @@ cd blue_whale_web && npm install
 - 锁文件：`package-lock.json`
 - patch-package 维护的 `patches/`
 - DESIGN v2 diff（设计系统升级专用产物）
-- `graphify-out/cache/`、`graphify-out/cost.json`、`.codex/`（本地产物；`graphify-out/` 团队图谱按官方方案入库）
+- `graphify-out/`、`.codex/`（本地产物，均不入库）
 
 ## 手动跑
 
