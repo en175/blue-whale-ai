@@ -38,8 +38,8 @@
 - 入口要求本地 `master` 干净，fetch 后融合本地与远程历史，再从同步后的精确 SHA 创建 Work Tree，固定在 `../blue-whale-worktrees/`。
 - 本地领先时保留本地提交；远程领先时 fast-forward；分叉时普通 merge；冲突自动 abort 且不创建 Work Tree。
 - 本地 `master` 是用户集成区，Agent 只允许通过上述开工入口执行同步，不得直接写任务文件。
-- 子 issue 完成后停在未提交 diff，用户确认后才提交。
-- 提交流程：`scripts/commit-task-for-review.sh --user-authorized -m "<message>"` → `scripts/merge-task-to-local-master.sh --user-authorized <branch>`
+- 子 issue 完成即直接走提交入口落盘 commit（无需用户先确认/授权），停在 commit 等 review；用户确认环节后移到 merge 本地 master 前。
+- 提交流程：`scripts/commit-task-for-review.sh -m "<message>"`（完成即提交，无需授权）→ 用户确认后 `scripts/merge-task-to-local-master.sh --user-authorized <branch>`（合入门槛保持不变）
 - 完整流程：`docs/agents/worktree-workflow.md`，决策：`docs/adr/0010-local-master-is-user-integration-zone.md`
 
 ## Codebase Memory MCP

@@ -4,7 +4,7 @@
 #
 # 兜底对象：
 #   - Bash: 直接 git push（硬拦，必须走标准入口）
-#   - Bash: 带 --user-authorized 的标准入口无交互放行
+#   - Bash: 发布 / 合入标准入口带 --user-authorized 无交互放行；提交入口出现即放行
 #   - Bash: 直接本地验收 commit / 非 --ff-only merge 硬拦并指向标准入口
 #   - mcp__gitee-ent__create_enterprise_repo_pull: 创建 Gitee PR
 #   - mcp__gitee-ent__merge_enterprise_pull: 合并 Gitee PR
@@ -43,7 +43,7 @@ BLOCKED: ${reason}
 本项目发布动作必须遵守：
 	- 发布审查包 = 推送当前工单分支 + 创建指向 master 的 PR
 	- 发布审查包必须使用 scripts/publish-review-package.sh --user-authorized
-	- 本地任务验收必须走带 --user-authorized 的标准入口
+	- 本地任务提交走 scripts/commit-task-for-review.sh（出现即放行）；合入本地 master 走带 --user-authorized 的标准入口
 	- 创建 PR 不使用 draft=true
 	- 合并 PR / 创建 release 必须由 Agent 自动生成绑定具体对象的一次性凭证
 
@@ -213,7 +213,7 @@ fi
 task_acceptance="$(printf '%s' "$COMMAND" | python3 "$PRETOOL" task-acceptance-git 2>/dev/null || true)"
 case "$task_acceptance" in
   "git commit")
-    block "检测到直接 git commit。当前对话若已授权提交，请由 Agent 自动改走 scripts/commit-task-for-review.sh --user-authorized -m \"<message>\"。"
+    block "检测到直接 git commit。请由 Agent 自动改走 scripts/commit-task-for-review.sh -m \"<message>\"。"
     ;;
   "git merge")
     block "检测到非 --ff-only 的直接 git merge。当前对话若已授权合入本地 master，请由 Agent 自动改走 scripts/merge-task-to-local-master.sh --user-authorized <branch>。"
@@ -228,11 +228,9 @@ if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes publ
   exit 0
 fi
 
-# Bash: 标准本地任务验收入口。缺少 --user-authorized 时硬拦；带参数时无交互放行。
+# Bash: 标准本地任务验收入口（worktree 工单分支 commit，本地可逆，非发布动作）。
+# 出现即放行，不校验 --user-authorized（用户确认环节落在 merge 本地 master 前）。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes commit-task-for-review.sh; then
-  if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes commit-task-for-review.sh --user-authorized; then
-    block "任务验收提交入口缺少 --user-authorized。必须先获得用户明确授权。"
-  fi
   exit 0
 fi
 
