@@ -614,7 +614,7 @@ export default function AgentComposer() {
                         </button>
                         {imageModelOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
+                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
                             role="listbox"
                             aria-label="模型"
                           >
@@ -669,7 +669,7 @@ export default function AgentComposer() {
                         </button>
                         {imageAspectRatioOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
+                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
                             role="listbox"
                             aria-label="宽高比"
                           >
@@ -717,7 +717,7 @@ export default function AgentComposer() {
                         </button>
                         {imageResolutionOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
+                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
                             role="listbox"
                             aria-label="分辨率"
                           >
@@ -898,7 +898,7 @@ export default function AgentComposer() {
                         </button>
                         {videoModelOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto w-max"
+                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto w-max"
                             role="listbox"
                             aria-label="模型"
                           >
@@ -966,7 +966,7 @@ export default function AgentComposer() {
                         </button>
                         {refModeOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
+                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
                             role="listbox"
                             aria-label="参考模式"
                           >
@@ -1014,7 +1014,7 @@ export default function AgentComposer() {
                         </button>
                         {aspectRatioOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
+                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
                             role="listbox"
                             aria-label="宽高比"
                           >
@@ -1062,7 +1062,7 @@ export default function AgentComposer() {
                         </button>
                         {resolutionOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
+                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
                             role="listbox"
                             aria-label="分辨率"
                           >
@@ -1110,7 +1110,7 @@ export default function AgentComposer() {
                         </button>
                         {durationOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto rounded-xl w-[240px] p-[14px_16px_10px] flex flex-col items-center gap-2 top-[calc(100%+6px)] left-0 shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150"
+                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto rounded-xl w-[240px] p-[14px_16px_10px] flex flex-col items-center gap-2 top-[calc(100%+6px)] left-0 shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150"
                             role="listbox"
                             aria-label="时长"
                           >
@@ -1323,7 +1323,7 @@ export default function AgentComposer() {
                         />
                       </button>
                       {modelOpen && (
-                        <div className="ncs-thin-scrollbar absolute bg-[rgb(35,35,54)] border border-white/10 rounded-lg p-1 z-[100] max-h-[240px] overflow-y-auto bottom-[calc(100%+6px)] shadow-[0_-12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-top-1 duration-150 left-0 right-auto w-max min-w-[220px]">
+                        <div className="ncs-thin-scrollbar absolute bg-[rgb(35,35,54)] border border-white/10 rounded-lg p-1 z-[100] max-h-[240px] overflow-y-auto bottom-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow-up)] animate-in fade-in slide-in-from-top-1 duration-150 left-0 right-auto w-max min-w-[220px]">
                           {MODELS.map((model) => (
                             <button
                               key={model.id}
