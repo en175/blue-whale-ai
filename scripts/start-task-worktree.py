@@ -14,6 +14,13 @@ ALLOWED_TYPES = ("feature", "fix", "hotfix", "docs", "chore")
 ISSUE_RE = re.compile(r"^(?=.*[A-Za-z])[A-Za-z0-9]+$")
 CHINESE_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 MERGE_MESSAGE = "chore: 同步远程 master 更新"
+GIT_OPERATION_MARKERS = (
+    "MERGE_HEAD",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "rebase-merge",
+    "rebase-apply",
+)
 
 
 class WorkflowError(RuntimeError):
@@ -94,6 +101,15 @@ def absolute_git_path(root, value):
     return path.resolve()
 
 
+def active_git_operations(root):
+    active = []
+    for marker in GIT_OPERATION_MARKERS:
+        value = git(root, "rev-parse", "--git-path", marker).stdout.strip()
+        if absolute_git_path(root, value).exists():
+            active.append(marker)
+    return active
+
+
 def ensure_primary_master(root):
     toplevel = Path(git(root, "rev-parse", "--show-toplevel").stdout.strip()).resolve()
     if toplevel != root.resolve():
@@ -109,6 +125,14 @@ def ensure_primary_master(root):
     branch = git(root, "branch", "--show-current").stdout.strip()
     if branch != "master":
         raise WorkflowError("主 checkout 当前分支必须是 master，实际为：{}".format(branch or "detached HEAD"))
+
+    operations = active_git_operations(root)
+    if operations:
+        raise WorkflowError(
+            "检测到进行中的 Git 操作：{}。请先完成或显式终止该操作。".format(
+                ", ".join(operations)
+            )
+        )
 
     status = git(root, "status", "--porcelain").stdout
     if status:

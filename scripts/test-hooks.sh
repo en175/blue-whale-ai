@@ -1194,6 +1194,8 @@ assert_file_has_text "scripts/start-task-worktree.py" '"worktree", "add", str(ta
 assert_file_has_text "AGENTS.md" '`CLAUDE.md` 是本仓库团队 Agent 规则的唯一权威源' "workflow: AGENTS 索引 CLAUDE 权威源"
 assert_file_not_has_text "scripts/merge-task-to-local-master.sh" "不允许含非 ASCII" "workflow: 本地合入不再拒绝中文分支"
 assert_file_has_text ".githooks/pre-push" '--validate-branch "$branch"' "workflow: pre-push 复用结构化中文分支校验器"
+assert_file_not_has_text ".githooks/pre-push" "纯 shell，零依赖" "workflow: pre-push 不再宣称零依赖"
+assert_file_has_text "scripts/setup-hooks.sh" "Python 3" "workflow: 初始化说明披露 pre-push 的 Python 3 依赖"
 
 setup_git_stub
 export FAKE_BRANCH=feature/x

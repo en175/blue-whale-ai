@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # pre-push hook — Blue-Whale
-# 纯 shell，零依赖。功能：
+# Bash + Python 3 标准库。功能：
 #   拦截「落后的工单分支 push」——push 前检查分支是否已 rebase 到最新 origin/master。
 #
 # 触发式同步策略的「出口铁闸」：哪怕 Agent 忘了 fetch/rebase，push 时也会被拦下，
@@ -43,12 +43,7 @@ invalid_name=0
 direct_master=0
 
 while read -r local_ref local_sha remote_ref remote_sha; do
-  # 跳过删除操作（全零 local sha）
-  case "$local_sha" in
-    0000000000000000000000000000000000000000) continue ;;
-  esac
-
-  # 第一道：禁直推 master/main（合并只在 Gitee 服务端走 PR）
+  # 第一道：master/main 无论更新还是删除都拦截（合并只在 Gitee 服务端走 PR）
   case "$remote_ref" in
     refs/heads/master|refs/heads/main)
       blocked=1
@@ -56,6 +51,11 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       reason="${reason}  直推 ${remote_ref#refs/heads/}：禁本地 push master/main\n"
       continue
       ;;
+  esac
+
+  # 普通远程分支删除无需命名或陈旧度校验（删除时 local sha 为全零）。
+  case "$local_sha" in
+    0000000000000000000000000000000000000000) continue ;;
   esac
 
   # tags 等非分支 ref 不参与任务分支校验。

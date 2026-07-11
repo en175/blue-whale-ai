@@ -173,6 +173,13 @@ class StartTaskWorktreeTest(unittest.TestCase):
         self.assertNotEqual(0, protected.returncode)
         self.assertIn("禁止直推", protected.stderr)
 
+    def test_pre_push_blocks_deleting_protected_branch(self):
+        zero = "0" * 40
+        remote_sha = run("git", "rev-parse", "origin/master", cwd=self.repo).stdout.strip()
+        deletion = self.pre_push("master", sha=zero, remote_sha=remote_sha)
+        self.assertNotEqual(0, deletion.returncode)
+        self.assertIn("禁止直推", deletion.stderr)
+
     def test_pre_push_allows_already_published_legacy_ascii_branch(self):
         run("git", "checkout", "-b", "chore/legacy-ascii", cwd=self.actor)
         run("git", "push", "-u", "origin", "chore/legacy-ascii", cwd=self.actor)
@@ -212,6 +219,27 @@ class StartTaskWorktreeTest(unittest.TestCase):
         )
         self.assertNotEqual(0, result.returncode)
         self.assertIn("不干净", result.stderr)
+        self.assertFalse((self.root / "blue-whale-worktrees").exists())
+
+    def test_rejects_in_progress_merge_without_aborting_it(self):
+        self.commit(self.repo, "shared.txt", "same\n", "fix: 修改本地共享内容")
+        self.commit(self.actor, "shared.txt", "same\n", "fix: 修改远程共享内容")
+        run("git", "push", "origin", "master", cwd=self.actor)
+        run("git", "fetch", "origin", "master", cwd=self.repo)
+        run("git", "merge", "--no-commit", "--no-ff", "origin/master", cwd=self.repo)
+        self.assertEqual("", run("git", "status", "--porcelain", cwd=self.repo).stdout)
+        merge_head = run("git", "rev-parse", "--verify", "MERGE_HEAD", cwd=self.repo).stdout.strip()
+
+        result = self.invoke(
+            "--type", "fix", "--no-issue", "--summary", "保护进行中合并状态"
+        )
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("进行中的 Git 操作", result.stderr)
+        self.assertEqual(
+            merge_head,
+            run("git", "rev-parse", "--verify", "MERGE_HEAD", cwd=self.repo).stdout.strip(),
+        )
         self.assertFalse((self.root / "blue-whale-worktrees").exists())
 
     def test_local_ahead_is_preserved_as_worktree_base(self):

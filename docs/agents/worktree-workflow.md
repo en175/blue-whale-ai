@@ -27,7 +27,7 @@ scripts/start-task-worktree.sh --type docs --no-issue --summary 补全工作树�
 
 脚本会：
 
-- 校验当前是主 checkout 的干净 `master`；dirty 时停止，不自动 stash 或清理
+- 校验当前是主 checkout 的干净 `master`，且没有 merge/rebase/cherry-pick/revert 正在进行；不满足时停止，不自动 abort、stash 或清理
 - 校验并生成白名单前缀 + 结构化中文分支名
 - `git fetch origin master`
 - 本地已包含远程时保留本地 HEAD；本地落后时 `--ff-only`；分叉时普通 merge
