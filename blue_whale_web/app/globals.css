@@ -145,9 +145,10 @@ body {
 
   /* Elevation shadows — floating layers (modal / dropdown).
      语义层级与判定清单见 DESIGN.md "Elevation & Depth"。
-     引用：shadow-[var(--tc-modal-shadow)] / shadow-[var(--tc-dropdown-shadow)]。 */
+     引用：shadow-[var(--tc-modal-shadow)] / shadow-[var(--tc-dropdown-shadow)]（向上变体 --tc-dropdown-shadow-up）。 */
   --tc-modal-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
   --tc-dropdown-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  --tc-dropdown-shadow-up: 0 -12px 32px rgba(0, 0, 0, 0.4);
 
   --tc-menu-pill-bg: #171717;
   --tc-menu-pill-border: rgba(255, 255, 255, 0.04);
