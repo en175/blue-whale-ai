@@ -113,7 +113,9 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
           <X size={16} />
         </button>
 
-        <h2 className="text-[24px] font-semibold leading-tight mb-6 text-white">登录</h2>
+        <h2 className="text-[24px] font-semibold leading-tight mb-6 text-white">
+          登录
+        </h2>
 
         <div className="flex flex-col gap-3">
           {/* 手机号 */}
@@ -132,7 +134,9 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
               />
             </div>
             {phoneError && (
-              <p className="mt-1 text-[12px] text-[#ef4444]">{phoneError}</p>
+              <p className="mt-1 text-[12px] text-[var(--tc-destructive)]">
+                {phoneError}
+              </p>
             )}
           </div>
 
@@ -148,7 +152,9 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
               />
             </div>
             {codeError && (
-              <p className="mt-1 text-[12px] text-[#ef4444]">{codeError}</p>
+              <p className="mt-1 text-[12px] text-[var(--tc-destructive)]">
+                {codeError}
+              </p>
             )}
           </div>
 
@@ -169,7 +175,7 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
               type="checkbox"
               checked={agreed}
               onChange={(e) => setAgreed(e.target.checked)}
-              className="mt-0.5 accent-[#4e40f3]"
+              className="mt-0.5 accent-[var(--tc-login-primary)]"
             />
             <span>
               我已阅读并同意
@@ -196,7 +202,7 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
             type="button"
             disabled={loginDisabled}
             onClick={() => !loginDisabled && onSuccess(phone)}
-            className="h-11 w-full rounded-lg bg-[#4e40f3] text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-[var(--tc-login-primary-hover)] mt-2"
+            className="h-11 w-full rounded-lg bg-[var(--tc-login-primary)] text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-[var(--tc-login-primary-hover)] mt-2"
           >
             登录
           </button>

@@ -79,7 +79,8 @@ body {
   transition: opacity 150ms ease;
 }
 
-.tc-agent-skill-row__switch[aria-checked="true"] .tc-agent-skill-row__switch-label {
+.tc-agent-skill-row__switch[aria-checked="true"]
+  .tc-agent-skill-row__switch-label {
   opacity: 1;
 }
 
@@ -94,7 +95,8 @@ body {
   transition: transform 150ms ease;
 }
 
-.tc-agent-skill-row__switch[aria-checked="true"] .tc-agent-skill-row__switch-thumb {
+.tc-agent-skill-row__switch[aria-checked="true"]
+  .tc-agent-skill-row__switch-thumb {
   transform: translateX(20px);
 }
 
@@ -130,12 +132,16 @@ body {
   --tc-destructive: #ef4444;
 
   --tc-login-modal-bg: #141414;
+  --tc-login-primary: #4e40f3;
   --tc-login-primary-hover: #3d33d1;
 
   --tc-card-hover-stroke: rgba(156, 156, 156, 0.58);
-  --tc-card-hover-shadow: 0 0 0 3px rgba(142, 142, 142, 0.12), 0 12px 32px rgba(0, 0, 0, 0.34);
+  --tc-card-hover-shadow:
+    0 0 0 3px rgba(142, 142, 142, 0.12), 0 12px 32px rgba(0, 0, 0, 0.34);
   --tc-card-selected-stroke: rgba(235, 235, 235, 0.88);
-  --tc-card-selected-shadow: 0 0 0 1px rgba(0, 0, 0, 0.72), 0 0 0 5px rgba(210, 210, 210, 0.18), 0 14px 38px rgba(0, 0, 0, 0.42);
+  --tc-card-selected-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.72), 0 0 0 5px rgba(210, 210, 210, 0.18),
+    0 14px 38px rgba(0, 0, 0, 0.42);
 
   --tc-menu-pill-bg: #171717;
   --tc-menu-pill-border: rgba(255, 255, 255, 0.04);
@@ -190,7 +196,9 @@ body {
 /* Toolbar button hover */
 .tc-ui-glow-btn {
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 /* Canvas textarea scrollbar */
 .tc-panel-textarea-scrollbar::-webkit-scrollbar {
@@ -365,10 +373,14 @@ body {
 @keyframes tc-pickable-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 2px var(--tc-accent), 0 0 0 6px rgba(59, 130, 246, 0.18);
+    box-shadow:
+      0 0 0 2px var(--tc-accent),
+      0 0 0 6px rgba(59, 130, 246, 0.18);
   }
   50% {
-    box-shadow: 0 0 0 2px var(--tc-accent), 0 0 0 10px rgba(59, 130, 246, 0.04);
+    box-shadow:
+      0 0 0 2px var(--tc-accent),
+      0 0 0 10px rgba(59, 130, 246, 0.04);
   }
 }
 .tc-canvas-pickable {
