@@ -122,7 +122,7 @@ Then write the three docs files using the seed templates in this skill folder as
 - [triage-labels.md](./triage-labels.md) — label mapping
 - [domain.md](./domain.md) — domain doc consumer rules + layout
 
-Whatever the tracker, every `issue-tracker.md` carries these sections: **Conventions** (create/read/list/comment/label/close), **PRs/MRs as a triage surface** (only where the tracker has PRs/MRs — local-markdown has none), **When a skill says "publish to the issue tracker"**, **When a skill says "fetch the relevant ticket"**, and **Wayfinding operations** (used by `/wayfinder`). The seed templates (github/gitlab/local/gitee) show the shape; for "other" trackers, write the sections that apply from the user's description. In Wayfinding, label separators are tracker-specific — GitHub/GitLab use colons (`wayfinder:map`); trackers that forbid colons (Gitee) use hyphens (`wayfinder-map`).
+Whatever the tracker, `issue-tracker.md` carries these sections (some conditional): **Conventions** (create/read/list/comment/label/close), **PRs/MRs as a triage surface** (only where the tracker has PRs/MRs — local-markdown has none), **When a skill says "publish to the issue tracker"**, **When a skill says "fetch the relevant ticket"**, and **Wayfinding operations** (used by `/wayfinder`). The seed templates (github/gitlab/local/gitee) show the shape; for "other" trackers, write the sections that apply from the user's description. In Wayfinding, label separators are tracker-specific — GitHub/GitLab use colons (`wayfinder:map`); trackers that forbid colons (Gitee) use hyphens (`wayfinder-map`).
 
 For "other" issue trackers, write `docs/agents/issue-tracker.md` from scratch using the user's description.
 
