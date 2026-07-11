@@ -89,7 +89,7 @@ Agent 内部分支：
 ```text
 blue-whale-agent-workspace/
   README.md
-  AGENTS.md              # 跨工具协作入口（@CLAUDE.md，给非 Claude Code 的 Agent 读）
+  AGENTS.md              # 跨工具显式索引（先读根 CLAUDE.md，再读本目录 CLAUDE.md）
   CLAUDE.md              # 工作台协作规则（不是 Skill 入口）
   skill/                 # ← 对外 Skill 包，安装 = 复制这整个目录
     SKILL.md
@@ -121,7 +121,7 @@ blue-whale-agent-workspace/
 | 文件 | 用途 |
 |---|---|
 | `README.md` | 给人看的项目总览 |
-| `AGENTS.md` | 跨工具协作入口（`@CLAUDE.md`，给 Codex / Cursor 等非 Claude Code 的 Agent 读） |
+| `AGENTS.md` | 跨工具协作入口（显式要求先读根 `CLAUDE.md`，再读本目录 `CLAUDE.md`） |
 | `CLAUDE.md` | 工作台协作规则（角色 / 七大原则 / 工作方式），不是 Skill 入口 |
 
 ### skill/workers

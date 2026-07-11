@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Blue-Whale — 一键初始化本地开发环境（git hooks + Claude guardrails）
 # clone 后跑一次：bash scripts/setup-hooks.sh
-# 零依赖，macOS/Linux 通用。
+# setup 脚本本身仅用 Bash；运行时 pre-push/Work Tree 入口需要 Python 3。
+# 支持 macOS/Linux，以及安装 Git for Windows 的 Git Bash。
 
 set -euo pipefail
 
@@ -21,7 +22,8 @@ echo "✅ git hooks 已配置：core.hooksPath = .githooks（仅本项目）"
 echo "   生效的 hook："
 echo "   - pre-commit：禁提交生成物 + 前端 lint 软提醒 + 后端 py_compile 软提醒 + 工单分支落后软提醒（允许用户本地 master commit）"
 echo "   - commit-msg：Conventional Commits 规范校验"
-echo "   - pre-push：禁直推 master/main + 工单分支落后 origin/master 硬拦"
+echo "   - pre-push：禁直推 master/main + 非结构化中文分支名拦截 + 工单分支落后 origin/master 硬拦"
+echo "     运行依赖：Python 3（macOS/Linux 使用 python3；Windows Git Bash 使用 py -3）"
 echo "   - post-commit/post-checkout：graphify 知识图谱自动重建"
 echo ""
 

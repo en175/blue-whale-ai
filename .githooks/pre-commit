@@ -111,7 +111,7 @@ fi
 #    仅工单分支生效。见 docs/adr/0006-sync-mechanism-auto-block.md。
 # ============================================================
 git fetch origin master >/dev/null 2>&1 || true   # 静默 fetch，失败放行
-_upstream=$(git rev-parse origin/master 2>/dev/null || echo "")
+_upstream=$(git rev-parse --verify --quiet refs/remotes/origin/master 2>/dev/null || true)
 case "$_branch" in
   feature/*|fix/*|hotfix/*|docs/*|chore*)
     # 本地 HEAD 是否已包含 origin/master 最新？不是祖先 = 落后

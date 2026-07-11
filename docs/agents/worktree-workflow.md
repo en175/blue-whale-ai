@@ -8,33 +8,37 @@
 - Agent 不得把本地 `master` 当任务写入区；Agent 可写任务必须先创建独立 task worktree 和工单分支。
 - 所有 task worktree 固定放在主仓同级目录：`../blue-whale-worktrees/`。
 - 一个 task worktree 只承载一个任务分支，用完即清理。
-- `origin/master` 是 Agent 任务分支的默认权威基线；除非用户明确要求，task worktree 不基于本地 `master` 创建。
+- task worktree 基于同步后的本地 `master` 精确 SHA 创建，以同时保留个人本地更新和最新远程更新。
+- 只读调查、研究、设计和审查不需要 task worktree；任务一旦可能写入仓库内容或改变 Git 状态，必须先执行本流程。
 
 ## 开工
 
 在主 checkout 执行：
 
 ```bash
-scripts/start-task-worktree.sh <branch-name> <worktree-dir-name>
+scripts/start-task-worktree.sh --type <类型> (--issue <工单号>|--no-issue) --summary <中文简述>
 ```
 
 示例：
 
 ```bash
-scripts/start-task-worktree.sh docs/补全并行worktree规范 docs-补全并行worktree规范
+scripts/start-task-worktree.sh --type docs --no-issue --summary 补全工作树使用规范
 ```
 
 脚本会：
 
+- 校验当前是主 checkout 的干净 `master`，且没有 merge/rebase/cherry-pick/revert 正在进行；不满足时停止，不自动 abort、stash 或清理
+- 校验并生成白名单前缀 + 结构化中文分支名
 - `git fetch origin master`
-- 从 `origin/master` 创建 task worktree
-- 不要求本地 `master` 干净、同步或不 ahead
+- 本地已包含远程时保留本地 HEAD；本地落后时 `--ff-only`；分叉时普通 merge
+- merge 冲突时自动 `git merge --abort`，不创建分支或 Work Tree
+- 记录同步后的精确 `master` SHA，并从该 SHA 创建 task worktree
 
-如果用户明确要求“基于我本地 master 当前状态开分支”，这不是默认 task worktree 流程，应按“发布包装分支”或一次性迁移流程单独处理。
+脚本生成 Work Tree 目录名，Agent 不需要设计路径。macOS/Linux/Git Bash 可使用 `.sh` 薄包装；Windows PowerShell/CMD 使用 `py -3 scripts/start-task-worktree.py ...`。两者运行同一个 Python 标准库实现。
 
 ## 用户本地集成区
 
-本地 `master` 由用户控制。Agent 看到它 dirty、ahead 或 diverged 时，不自动 stash、清理、rebase、发布，也不把这些状态当作开新 task worktree 的阻塞条件。
+本地 `master` 由用户控制。Agent 不自动 stash、清理、rebase 或发布。开工入口只在主 checkout 干净时同步：保留本地 ahead 提交，并融合 `origin/master`；dirty 或合并冲突都会停止并保留原状态。
 
 只有进入“合入任务验收分支”动作前，本地 `master` 必须是干净工作区；若不干净，Agent 只报告 `git status --short`，等待用户决定。
 
@@ -97,33 +101,23 @@ scripts/merge-task-to-local-master.sh --user-authorized <任务分支>
 
 Claude/Codex hook 会硬拦直接 `git commit`、非 `--ff-only` 的直接 `git merge` 以及缺少 `--user-authorized` 的本地验收入口，并指引 Agent 在已有授权覆盖时自动改走标准入口；带授权参数的标准入口无交互放行。
 
-## 发布包装分支
+## 发布包装 Work Tree
 
-多个子 issue 可先合入用户本地 `master`。用户决定发布时，从本地 `master` 当前状态创建发布包装分支：
+多个子 issue 可先合入用户本地 `master`。用户决定发布时，仍通过同一个开工入口从同步后的本地 `master` 创建结构化中文发布包装 Work Tree：
 
 ```bash
-git checkout master
-git checkout -b feature/<PRD-or-module>-release
+scripts/start-task-worktree.sh --type feature --no-issue --summary 发布模块版本更新
 ```
 
-发布包装分支负责适配远程 `origin/master`。若它与 `origin/master` 冲突或测试失败，修复只发生在发布包装分支，不回写用户本地 `master`。
+发布包装分支负责适配远程 `origin/master`。若同步冲突，入口 abort 且不创建；创建后的测试或发布修复只发生在该 Work Tree，不回写用户本地 `master`。
 
-### 发布包装分支合并后清理
+PR 合并后在该 Work Tree 运行 `scripts/cleanup-task-worktree.sh`，与普通任务使用同一清理流程。
 
-发布包装分支合并进 `origin/master` 后，其形态是「主 checkout 上的本地分支」（不在 task worktree 内），`cleanup-task-worktree.sh` 只认 worktree 路径形态、在此 fail。用专用入口清理：
+策略升级前已经存在的主 checkout 发布包装分支不要求迁移；其合并后仍使用旧清理入口收尾，但不得再以这种形态创建新分支：
 
 ```bash
 scripts/cleanup-release-branch.sh --user-authorized <发布包装分支>
 ```
-
-脚本在主 checkout 的本地 `master` 上执行，会：
-
-- 校验在主 checkout（非 task worktree）、当前在 `master`、工作区干净
-- 校验分支名命中白名单前缀（`feature/ fix/ hotfix/ docs/ chore/`）、本地分支存在
-- `fetch origin master` 并用 `merge-base --is-ancestor` 确认已合并进 `origin/master`
-- 删本地分支 + 删远程源分支（`ls-remote` 探活后才删）+ `git fetch --prune`
-
-与 `## PR 合并后清理 task worktree` 的区别：那个入口管 **task worktree 形态**（删 worktree + 任务分支 + 远程源分支），本入口管 **主 checkout 发布包装分支形态**（只删分支，无 worktree）。两者按形态分流，不要混用。本地分支删除用 `update-ref -d`（非 `branch -d`），因为本地 `master` 作为用户集成区可能落后 `origin/master`，`branch -d` 的「已合入当前 HEAD」判定会误拒已合并分支。
 
 ## 发布审查包
 
@@ -135,7 +129,7 @@ scripts/publish-review-package.sh --user-authorized
 
 脚本是发布审查包的唯一标准入口。`--user-authorized` 表示 Agent 已从当前对话取得明确授权，Claude Code 与 Codex Hook 均无二次弹框放行。它只做 Git 安全检查和推分支：
 
-- 当前必须是工单分支（task worktree 分支或发布包装分支）。
+- 当前必须是结构化中文任务/发布包装 Work Tree 分支；策略升级前已存在的远程旧分支可完成收尾。
 - 工作区必须干净。
 - 当前分支必须包含最新 `origin/master`。
 - 推送当前分支到远程；远程分支已存在时使用 `--force-with-lease` 安全更新。
