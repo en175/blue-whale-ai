@@ -1,11 +1,11 @@
 # 分支命名规范
 
-> 本仓库分支命名的**单一权威源**。前缀白名单由 hook 强制（`scripts/block-dangerous-git.sh` + `.githooks/pre-push`）；本文与 hook **同源维护**——改前缀必须同步改 hook。
+> 本仓库分支命名的详细规范。团队 Agent 总规则以根目录 `CLAUDE.md` 为权威源；创建与校验逻辑统一由 `scripts/start-task-worktree.py` 提供，`.githooks/pre-push` 复用该校验器。
 > 决策背景见 [ADR-0004](../adr/0004-branch-naming.md)。
 
 ## 两条铁律
 
-1. **强制白名单**：分支名必须以下列前缀开头，否则 `--force-with-lease` 被拦、落后于 `origin/master` 时 push 被拦。
+1. **强制白名单**：分支名必须以下列前缀开头，否则入口拒绝创建、`pre-push` 拒绝推送。
 2. **前缀英文、标题中文**：前缀是 hook bash glob 匹配的，必须 ASCII；标题部分用中文。
 
 ## 前缀白名单（工单分支）
@@ -36,6 +36,23 @@
 - **分隔符**：仅 `/`（前缀）+ `-`（号-简述）。简述内部**禁**空格 / `_` / `-`。
 - **大小写**：工单号保留 Gitee 原样；简述部分混入的英文/拼音用小写。
 - **禁**：空格、下划线、纯英文 / 纯拼音标题。
+
+硬校验只判断可稳定自动判断的格式：前缀、工单号、中文字符、长度及非法分隔符。“动宾结构、禁纯名词”由 Agent 在生成简述时自检，不在脚本中猜测中文语义。
+
+## 唯一创建入口
+
+```bash
+# macOS / Linux / Git Bash
+scripts/start-task-worktree.sh --type fix --issue IK094T --summary 修复工作树写入护栏
+
+# 无工单必须明确声明
+scripts/start-task-worktree.sh --type chore --no-issue --summary 完善工作树启动流程
+
+# Windows PowerShell / CMD
+py -3 scripts/start-task-worktree.py --type fix --issue IK094T --summary 修复工作树写入护栏
+```
+
+Agent 不直接拼接完整分支名或 Work Tree 目录名；入口根据结构化参数生成并验证。
 
 ### 实例
 
@@ -90,6 +107,7 @@ git 原生支持 UTF-8 分支名，Gitee 支持。国际惯例分支名走 ASCII
 | hook | 拦什么 | 白名单 |
 |---|---|---|
 | `scripts/block-dangerous-git.sh` | 非工单分支的 `--force-with-lease` | `feature/* fix/* hotfix/* docs/* chore/*` |
-| `.githooks/pre-push` | 工单分支落后 `origin/master` 时的 push | 同上 |
+| `scripts/start-task-worktree.py` | 创建前拒绝不合规命名 | `feature/* fix/* hotfix/* docs/* chore/*` + 中文简述 |
+| `.githooks/pre-push` | 拒绝新建不合规分支名；拒绝落后 `origin/master` 的工单分支 push | 复用 Python 校验器 |
 
-分支名不在白名单 → rebase 后强推被拦、落后 push 被拦。排障见 hook 脚本注释或项目 README。
+分支名不合规会在创建和首次 push 两个节点被拒绝。策略生效前已经存在于 `origin` 的 ASCII 分支仅允许继续收尾，不要求迁移；不得据此创建新的 ASCII 分支。排障见入口错误信息或 hook 脚本注释。

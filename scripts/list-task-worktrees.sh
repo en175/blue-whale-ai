@@ -31,7 +31,7 @@ for path in "$WORKTREE_BASE"/*; do
   [ -n "$(git -C "$path" status --porcelain)" ] && dirty="dirty"
 
   merged="unknown"
-  if git -C "$path" rev-parse origin/master >/dev/null 2>&1; then
+  if git -C "$path" rev-parse --verify --quiet refs/remotes/origin/master >/dev/null 2>&1; then
     if git -C "$path" merge-base --is-ancestor HEAD origin/master 2>/dev/null; then
       merged="merged"
     else

@@ -62,32 +62,12 @@ esac
 branch="$(git -C "$ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
 [ "$branch" = "master" ] || fail "当前分支是 ${branch:-detached HEAD}，请先切回本地 master。"
 
-# 1. 前缀白名单
+# 新任务由 start-task-worktree.py 生成中文名，pre-push 也会校验。
+# 此处只保留前缀校验，让策略生效前已存在的 ASCII task worktree 能完成本地合入。
 case "$TASK_BRANCH" in
   feature/*|fix/*|hotfix/*|docs/*|chore/*) ;;
   *) fail "任务分支必须使用白名单前缀：feature/ fix/ hotfix/ docs/ chore/" ;;
 esac
-
-# 2. 前缀后段不能为空（拒绝 feature/）
-_suffix="${TASK_BRANCH#*/}"
-if [ -z "$_suffix" ]; then
-  fail "任务分支名前缀后不能为空。格式：<prefix>/<ticket-id>-<summary>，如 feature/IJZ5WA-add-canvas-node"
-fi
-
-# 3. 拒绝含空格
-case "$TASK_BRANCH" in
-  *\ *) fail "任务分支名不允许含空格：$TASK_BRANCH" ;;
-esac
-
-# 4. 拒绝含下划线（项目约定用连字符）
-case "$TASK_BRANCH" in
-  *_*) fail "任务分支名不允许含下划线，请用连字符：$TASK_BRANCH" ;;
-esac
-
-# 5. 拒绝非 ASCII 字符
-if printf '%s' "$TASK_BRANCH" | LC_ALL=C grep -q '[^ -~]'; then
-  fail "任务分支名不允许含非 ASCII 字符（如中文）：$TASK_BRANCH"
-fi
 
 git -C "$ROOT" show-ref --verify --quiet "refs/heads/$TASK_BRANCH" || fail "本地任务分支不存在：$TASK_BRANCH"
 

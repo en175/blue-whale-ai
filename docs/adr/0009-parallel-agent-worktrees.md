@@ -3,7 +3,7 @@
 - **状态**：Accepted
 - **日期**：2026-07-07
 - **决策者**：JJNNReno（与 Codex 经 `/grill-me` 会话共同得出）
-- **更新**：D1/D3 中关于本地 `master` 的旧前提已被 [ADR-0010](0010-local-master-is-user-integration-zone.md) 取代；task worktree 隔离仍然有效。
+- **更新**：2026-07-12，D1/D3 的基线规则以 [ADR-0010](0010-local-master-is-user-integration-zone.md) 为准；task worktree 隔离仍然有效。
 
 ## 背景
 
@@ -19,7 +19,7 @@
 
 Agent 一旦进入可写阶段，必须先创建独立 task worktree 和工单分支。`master` 是否允许用户本地开发由 [ADR-0010](0010-local-master-is-user-integration-zone.md) 重新定义；本 ADR 保留的是“Agent 写入任务必须隔离”的决策。
 
-任务分支默认从 `origin/master` 创建，不从本地 dirty/ahead/diverged 的 `master` 创建。
+任务分支从同步后的本地 `master` 精确 SHA 创建。本地 dirty 会阻断；ahead 被保留；diverged 先普通 merge，冲突则 abort 并停止。
 
 ### D2. 固定 task worktree 目录
 
@@ -31,15 +31,9 @@ Agent 一旦进入可写阶段，必须先创建独立 task worktree 和工单�
 
 脚本只创建、巡检、清理这个目录下的 worktree。禁止在主仓内部创建任务 worktree。
 
-### D3. 本地 master 是可刷新镜像（已由 ADR-0010 取代）
+### D3. 同步与创建是同一个原子开工入口
 
-历史决策：创建 task worktree 前必须先同步本地 `master`：
-
-```bash
-scripts/sync-master.sh
-```
-
-现行决策见 [ADR-0010](0010-local-master-is-user-integration-zone.md)：本地 `master` 是用户本地集成区，task worktree 默认直接从 `origin/master` 创建，不要求本地 `master` 干净或同步。
+现行决策见 [ADR-0010](0010-local-master-is-user-integration-zone.md)：不再提供独立 `sync-master.sh`。`start-task-worktree.py` 在创建前完成 fetch、历史关系判断、fast-forward/merge 和精确 SHA 捕获，避免同步与创建之间出现另一套流程或错误基线。
 
 ### D4. 发布和清理分离
 
@@ -95,7 +89,7 @@ scripts/ensure-graphify-worktree.sh
 ## 后果
 
 - 正面：多个 Agent Session 可以并行开发而不共享可写工作区。
-- 正面：开工基线来自最新 `origin/master`。（本地 `master` 镜像约束已由 ADR-0010 取代。）
+- 正面：开工基线同时包含用户本地 `master` 的未推送提交和最新 `origin/master`。
 - 正面：PR 未合并前保留 task worktree，便于处理审查反馈；PR 合并后有标准清理入口。
 - 代价：每个可写任务多一个 worktree 目录，且代码检索前需要单独建立 Codebase Memory MCP 索引。
 
