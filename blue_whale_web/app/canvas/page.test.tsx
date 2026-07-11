@@ -81,3 +81,23 @@ describe("CanvasPageInner / 未登录 gating", () => {
     expect(mocks.openLogin).toHaveBeenCalledTimes(1);
   });
 });
+
+// 已登录 gating 分支（IJZLE5）：IJZLE2 只覆盖未登录分支，
+// 此处补 loadUser 返回 user 时的守卫——不 replace、不 openLogin。
+// 断言守卫副作用，不断 DOM（_canvas 子树统一 stub null 组件，无可见内容）。
+describe("CanvasPageInner / 已登录 gating", () => {
+  beforeEach(() => {
+    mocks.loadUser.mockReset();
+    mocks.openLogin.mockReset();
+    mocks.replace.mockReset();
+  });
+
+  it("已登录直访：守卫不触发，不 replace 不 openLogin", () => {
+    mocks.loadUser.mockReturnValue({ phone: "13800001234" });
+
+    render(<CanvasPageInner />);
+
+    expect(mocks.replace).not.toHaveBeenCalled();
+    expect(mocks.openLogin).not.toHaveBeenCalled();
+  });
+});
