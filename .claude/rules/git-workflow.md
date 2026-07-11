@@ -33,9 +33,11 @@
 
 ## Task Worktree
 
-- Agent 改文件前必须在主 checkout 跑 `scripts/start-task-worktree.sh <branch> <worktree-dir>`。
-- Worktree 默认从 `origin/master` 创建，固定在 `../blue-whale-worktrees/`。
-- 本地 `master` 是用户集成区，Agent 不得写入。
+- 只读任务不要求 Work Tree；可写任务在任何写入前必须从主 checkout 运行：
+  `scripts/start-task-worktree.sh --type <feature|fix|hotfix|docs|chore> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>`。
+- 入口要求本地 `master` 干净，fetch 后融合本地与远程历史，再从同步后的精确 SHA 创建 Work Tree，固定在 `../blue-whale-worktrees/`。
+- 本地领先时保留本地提交；远程领先时 fast-forward；分叉时普通 merge；冲突自动 abort 且不创建 Work Tree。
+- 本地 `master` 是用户集成区，Agent 只允许通过上述开工入口执行同步，不得直接写任务文件。
 - 子 issue 完成后停在未提交 diff，用户确认后才提交。
 - 提交流程：`scripts/commit-task-for-review.sh --user-authorized -m "<message>"` → `scripts/merge-task-to-local-master.sh --user-authorized <branch>`
 - 完整流程：`docs/agents/worktree-workflow.md`，决策：`docs/adr/0010-local-master-is-user-integration-zone.md`
@@ -66,7 +68,7 @@
 
 ## Hook 改动同步检查
 
-- 改 `.claude/hooks/*.sh` 或 `.claude/settings.json` 的 PreToolUse gate 时，必须同步检查 `.codex/hooks.json` 对应项（Codex 经 `.codex/hooks/run-claude-pretool.sh` shim 复用同一批脚本）。
+- 改 `.claude/hooks/*.sh` 或 `.claude/settings.json` 的平台中立 PreToolUse gate 时，必须同步检查 `.codex/hooks.json` 对应项（Codex 经 `.codex/hooks/run-claude-pretool.sh` shim 复用同一批脚本）。
 - 涉及一次性凭证消费时，Claude/Codex 的 `PostToolUse` matcher 也必须同步；Pre 按 `tool_use_id` 原子占用但不消费，只有 `tool_response.isError=false` 的明确成功结果才消费，失败或畸形结果释放占用并保留凭证。
-- 不同步须有显式降级理由：提醒型 gate（只注入 context、exit 0 不阻断，如 `cbm-discovery-gate.sh`）允许 Codex 缺失（Codex 无对应 MCP 时注入无意义）；阻断型 gate 必须双系统同步。
+- 不同步须有显式理由：提醒型 gate 可缺失；Claude 专属 `Edit|Write` 主检出区兜底不复制到工具名/输入结构不同的平台。跨平台强约束由 `CLAUDE.md`、`AGENTS.md`、Python 唯一入口和 Git `pre-push` 承担。
 - 机制兜底：`bash scripts/test-hooks.sh` 的 `assert_codex_hooks_valid` 校验双系统一致。深读见 `docs/agents/hooks/README.md`「变更检查清单」。

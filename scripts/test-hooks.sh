@@ -474,8 +474,10 @@ for event in ("PreToolUse", "PostToolUse"):
     claude_items = claude["hooks"].get(event, [])
     codex_items = codex["hooks"].get(event, [])
     if event == "PreToolUse":
-        # 提醒型 gate 只注入 context、exit 0 不阻断；Codex 无对应 MCP 时允许缺失。
-        claude_items = [it for it in claude_items if it["matcher"] != "Grep|Glob"]
+        # 提醒型 gate 与 Claude 专属 Edit|Write 兜底不属于平台中立契约。
+        claude_items = [
+            it for it in claude_items if it["matcher"] not in ("Grep|Glob", "Edit|Write")
+        ]
     if shape(claude_items) != shape(codex_items):
         raise SystemExit(
             f"{event} matcher/hook shape mismatch: claude={shape(claude_items)} codex={shape(codex_items)}"
@@ -1182,10 +1184,16 @@ assert_git_ignored ".codex/hooks/other.sh" "codex: 禁止提交复制出来的 h
 
 # Slice 5.5 — 用户本地集成区 / Agent 任务区边界
 assert_file_not_has_text ".githooks/pre-commit" "禁止在 master/main 上提交" "workflow: pre-commit 不再拦用户本地 master commit"
-assert_file_not_has_text "scripts/start-task-worktree.sh" "sync-master.sh" "workflow: start-task-worktree 不再要求同步本地 master"
+assert_file_not_has_text "scripts/start-task-worktree.sh" "git worktree" "workflow: shell 入口不复制 Git 业务逻辑"
 assert_file_not_has_text "scripts/cleanup-task-worktree.sh" "sync-master.sh" "workflow: cleanup-task-worktree 不再同步用户本地 master"
 assert_file_not_has_text "scripts/publish-review-package.sh" "任务 worktree 内执行" "workflow: publish-review-package 支持发布包装分支"
-assert_file_has_text "scripts/start-task-worktree.sh" 'worktree add "$target" -b "$branch" origin/master' "workflow: task worktree 默认基于 origin/master"
+assert_file_has_text "scripts/start-task-worktree.py" '"fetch", "origin", "master"' "workflow: Python 入口先 fetch origin/master"
+assert_file_has_text "scripts/start-task-worktree.py" '"merge", "--ff-only", "origin/master"' "workflow: 远程领先时 fast-forward"
+assert_file_has_text "scripts/start-task-worktree.py" '"--no-ff"' "workflow: 分叉时普通 merge"
+assert_file_has_text "scripts/start-task-worktree.py" '"worktree", "add", str(target), "-b", branch, base_sha' "workflow: worktree 基于同步后的精确 SHA"
+assert_file_has_text "AGENTS.md" '`CLAUDE.md` 是本仓库团队 Agent 规则的唯一权威源' "workflow: AGENTS 索引 CLAUDE 权威源"
+assert_file_not_has_text "scripts/merge-task-to-local-master.sh" "不允许含非 ASCII" "workflow: 本地合入不再拒绝中文分支"
+assert_file_has_text ".githooks/pre-push" '--validate-branch "$branch"' "workflow: pre-push 复用结构化中文分支校验器"
 
 setup_git_stub
 export FAKE_BRANCH=feature/x

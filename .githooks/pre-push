@@ -8,13 +8,26 @@
 #
 # 规则：
 #   - master/main 保护分支：**任何本地直推一律拦截**（合并只在 Gitee 服务端走 PR）。
-#   - feature/* fix/* hotfix/* docs/* chore/* 工单分支：若 origin/master 有提交不在本地推送分支祖先里
-#     （即本地落后于 master）→ 拦截，提示先 fetch + rebase。
+#   - 其他本地分支：分支名必须通过结构化中文命名校验。
+#   - 合规工单分支：若 origin/master 有提交不在本地推送分支祖先里 → 拦截。
 #
 # 退出码非 0 = 拦截 push。
 # 注意：rebase/merge 进行中时此 hook 不应误触发，但 pre-push 正常不会在 rebase 中触发。
 
 set -uo pipefail
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+if command -v python3 >/dev/null 2>&1; then
+  validator=(python3 "$ROOT/scripts/start-task-worktree.py")
+elif command -v py >/dev/null 2>&1; then
+  validator=(py -3 "$ROOT/scripts/start-task-worktree.py")
+elif command -v python >/dev/null 2>&1; then
+  validator=(python "$ROOT/scripts/start-task-worktree.py")
+else
+  echo "❌ pre-push: 未找到 Python 3，无法验证结构化中文分支名。" >&2
+  exit 1
+fi
 
 # pre-push 从 stdin 读取多行，每行：<local ref> <local sha> <remote ref> <remote sha>
 # 零哈希（删除远程分支时 local sha=0000）的行跳过。
@@ -32,6 +45,8 @@ fi
 
 blocked=0
 reason=""
+invalid_name=0
+direct_master=0
 
 while read -r local_ref local_sha remote_ref remote_sha; do
   # 跳过删除操作（全零 local sha）
@@ -43,21 +58,29 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   case "$remote_ref" in
     refs/heads/master|refs/heads/main)
       blocked=1
+      direct_master=1
       reason="${reason}  直推 ${remote_ref#refs/heads/}：禁本地 push master/main\n"
+      continue
       ;;
   esac
 
-  # 只管工单分支（落后判断仅对这些分支生效，前缀见 docs/agents/branch-naming.md）
+  # tags 等非分支 ref 不参与任务分支校验。
   case "$remote_ref" in
-    refs/heads/feature/*|refs/heads/fix/*|refs/heads/hotfix/*|refs/heads/docs/*|refs/heads/chore/*) : ;;
+    refs/heads/*) branch=${remote_ref#refs/heads/} ;;
     *) continue ;;
   esac
+
+  validation_error="$("${validator[@]}" --validate-branch "$branch" 2>&1)" || {
+    blocked=1
+    invalid_name=1
+    reason="${reason}  ${branch}：结构化中文分支名不合规\n"
+    continue
+  }
 
   # 落后判断：origin/master 是否已是 local_sha 的祖先？
   # 是祖先 → 本地已包含 master 最新（已 rebase）→ 放行
   # 不是祖先 → 本地落后于 master → 拦截
   if ! git merge-base --is-ancestor "$upstream" "$local_sha" 2>/dev/null; then
-    branch=${remote_ref#refs/heads/}
     # 计算落后多少个提交，给提示
     behind=$(git rev-list --count "$local_sha".."$upstream" 2>/dev/null || echo "?")
     blocked=1
@@ -66,8 +89,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 done
 
 if [ "$blocked" -ne 0 ]; then
-  # 区分两种拦截：直推 master / 工单分支落后
-  if printf '%b' "$reason" | grep -q "禁本地 push master/main"; then
+  if [ "$direct_master" -ne 0 ]; then
     cat >&2 <<EOF
 ❌ pre-push: 禁止直推 master/main（已拦截）。
 `printf '%b' "$reason"`
@@ -80,6 +102,18 @@ if [ "$blocked" -ne 0 ]; then
 
 "自审合"只免互审，不免流程。详见 CLAUDE.md「提交与审查」红线
 与 docs/adr/0003-no-direct-push-to-master.md。
+EOF
+  elif [ "$invalid_name" -ne 0 ]; then
+    cat >&2 <<EOF
+❌ pre-push: 分支名不符合结构化中文规范，已拦截。
+`printf '%b' "$reason"`
+
+请通过唯一入口创建任务分支：
+
+  scripts/start-task-worktree.sh --type fix --issue IK094T --summary 修复工作树写入护栏
+  scripts/start-task-worktree.sh --type chore --no-issue --summary 完善工作树启动流程
+
+完整规则见 docs/agents/branch-naming.md。
 EOF
   else
     cat >&2 <<EOF

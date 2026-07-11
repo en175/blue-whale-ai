@@ -8,33 +8,37 @@
 - Agent 不得把本地 `master` 当任务写入区；Agent 可写任务必须先创建独立 task worktree 和工单分支。
 - 所有 task worktree 固定放在主仓同级目录：`../blue-whale-worktrees/`。
 - 一个 task worktree 只承载一个任务分支，用完即清理。
-- `origin/master` 是 Agent 任务分支的默认权威基线；除非用户明确要求，task worktree 不基于本地 `master` 创建。
+- task worktree 基于同步后的本地 `master` 精确 SHA 创建，以同时保留个人本地更新和最新远程更新。
+- 只读调查、研究、设计和审查不需要 task worktree；任务一旦可能写入仓库内容或改变 Git 状态，必须先执行本流程。
 
 ## 开工
 
 在主 checkout 执行：
 
 ```bash
-scripts/start-task-worktree.sh <branch-name> <worktree-dir-name>
+scripts/start-task-worktree.sh --type <类型> (--issue <工单号>|--no-issue) --summary <中文简述>
 ```
 
 示例：
 
 ```bash
-scripts/start-task-worktree.sh docs/补全并行worktree规范 docs-补全并行worktree规范
+scripts/start-task-worktree.sh --type docs --no-issue --summary 补全工作树使用规范
 ```
 
 脚本会：
 
+- 校验当前是主 checkout 的干净 `master`；dirty 时停止，不自动 stash 或清理
+- 校验并生成白名单前缀 + 结构化中文分支名
 - `git fetch origin master`
-- 从 `origin/master` 创建 task worktree
-- 不要求本地 `master` 干净、同步或不 ahead
+- 本地已包含远程时保留本地 HEAD；本地落后时 `--ff-only`；分叉时普通 merge
+- merge 冲突时自动 `git merge --abort`，不创建分支或 Work Tree
+- 记录同步后的精确 `master` SHA，并从该 SHA 创建 task worktree
 
-如果用户明确要求“基于我本地 master 当前状态开分支”，这不是默认 task worktree 流程，应按“发布包装分支”或一次性迁移流程单独处理。
+脚本生成 Work Tree 目录名，Agent 不需要设计路径。macOS/Linux/Git Bash 可使用 `.sh` 薄包装；Windows PowerShell/CMD 使用 `py -3 scripts/start-task-worktree.py ...`。两者运行同一个 Python 标准库实现。
 
 ## 用户本地集成区
 
-本地 `master` 由用户控制。Agent 看到它 dirty、ahead 或 diverged 时，不自动 stash、清理、rebase、发布，也不把这些状态当作开新 task worktree 的阻塞条件。
+本地 `master` 由用户控制。Agent 不自动 stash、清理、rebase 或发布。开工入口只在主 checkout 干净时同步：保留本地 ahead 提交，并融合 `origin/master`；dirty 或合并冲突都会停止并保留原状态。
 
 只有进入“合入任务验收分支”动作前，本地 `master` 必须是干净工作区；若不干净，Agent 只报告 `git status --short`，等待用户决定。
 

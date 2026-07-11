@@ -1,8 +1,7 @@
 # Hooks 维护手册
 
-> `.claude/hooks/` 下 PreToolUse 拦截器脚本是**单一权威源**。
-> Claude Code 通过 `.claude/settings.json` 挂载；Codex 通过 `.codex/hooks.json` 挂载到同一批脚本。
-> 脚本 + 两端挂载点**同源维护**——改任何一处必须同步改另一处。
+> `CLAUDE.md` + `AGENTS.md` + `scripts/start-task-worktree.py` 构成平台中立的前置策略；Hook 只做运行时兜底，不是完整安全边界。
+> 可跨平台复用的 `.claude/hooks/` 脚本由 Claude Code 直接挂载，Codex 通过 `.codex/hooks.json` 指向同一实现。Claude 专属 `Edit|Write` 主检出区防护不在 Codex 复制无效 matcher。
 > 决策背景：补齐 CLAUDE.md「Gitee 工作流」高频硬约束的执行末梢（让红线在 hook 层落地，不只靠文档纪律）。
 
 ---
@@ -11,6 +10,7 @@
 
 | 脚本 | 挂载 matcher | 触发事件 | 作用 | 关联硬约束 |
 |---|---|---|---|---|
+| `block-master-edit.sh` | Claude Code `Edit\|Write` | `PreToolUse` | Claude Code 主检出区写入兜底；其他 Agent 由 `AGENTS.md` 前置策略约束 | `CLAUDE.md`「可写任务先建 task worktree」 |
 | `block-dangerous-git.sh` | `Bash` | `PreToolUse` | 拦裸 `--force`、`reset --hard`、`clean -f`、`branch -D`、`checkout .`、`restore .` | CLAUDE.md「提交与审查」 |
 | `block-push-to-master.sh` | `Bash` | `PreToolUse` | 拦任何对 `master`/`main` 的 push（显式 + 隐式） | [ADR-0003](../../adr/0003-no-direct-push-to-master.md) |
 | `confirm-release-action.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` / `mcp__gitee-ent__create_enterprise_repo_release` | `PreToolUse` / `PostToolUse` | 标准入口带 `--user-authorized` 无交互放行；直接 push/commit/非 ff-only merge（含复合命令和 Git alias）硬拦；PR 标记在 Pre 校验，合并/release 凭证按 `tool_use_id` 原子占用；明确成功 Post 消费，失败/畸形 Post 保留 | CLAUDE.md「发布动作必须先获用户授权」 / [ADR-0010](../../adr/0010-local-master-is-user-integration-zone.md) / [ADR-0011](../../adr/0011-release-marker-consume-after-pr-success.md) / [ADR-0012](../../adr/0012-agent-noninteractive-authorization.md) |
@@ -58,6 +58,7 @@ chmod +x .claude/hooks/<name>.sh
 - **`$CLAUDE_PROJECT_DIR`** 必须用，路径才在不同项目根下都对。
 - **matcher 精确**：要拦某个 MCP 工具就写完整 `mcp__server__tool_name`，别偷懒写 `mcp__*`（通配不一定生效）。
 - **同 matcher 多 hook 用数组**：可以挂多条，独立 exit code（一条拦了不影响另一条放行）。
+- 只有目标平台确实暴露同名、同输入结构的工具 matcher 才复用。不要为了表面对称，把 Claude 的 `Edit|Write` matcher 原样复制到使用不同写入工具名的平台。
 
 Codex 挂载点写在 `.codex/hooks.json`，但**不要复制脚本实现到 `.codex/hooks/`**。Codex command 统一通过薄 wrapper 定位 `.claude/hooks`：
 
@@ -118,7 +119,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 夹具还校验 Codex 挂载层：
 - `.codex/hooks.json` 必须存在。
-- `hooks.PreToolUse` 的**阻断型** gate 及全部 `PostToolUse` matcher + hook 数量必须与 `.claude/settings.json` 一致；提醒型 gate 允许 Codex 缺失。
+- 平台中立的**阻断型** gate 及全部 `PostToolUse` matcher + hook 数量必须与 `.claude/settings.json` 一致；提醒型 gate 与 Claude 专属 `Edit|Write` 兜底允许 Codex 缺失。
 - 所有 Codex 脚本 command 必须通过 `.codex/hooks/run-claude-pretool.sh`，不得直接指向 `.claude/hooks/` 或复制出来的 `.codex/hooks/` 实现。
 - 每个 Codex 包装命令必须和同位置 Claude hook 挂载的脚本名一致。
 - 代表性 Codex 包装命令必须从 `.codex/hooks.json` 读取，并能从 repo root 调到权威脚本得到相同拦截/放行结果。
