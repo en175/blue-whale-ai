@@ -660,6 +660,12 @@ run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git commit -m \"feat: task s
 assert_exit 2 "release: 直接 git commit 硬拦"
 assert_stderr_has "commit-task-for-review.sh -m" "release: 直接 git commit 指向标准入口"
 
+# 裸 git commit --amend 同被拦（任何 commit 子命令归为 git commit），文案须同时指引首次 -m 与 review 后 --amend。
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git commit --amend"}}'
+assert_exit 2 "release: 直接 git commit --amend 硬拦"
+assert_stderr_has "commit-task-for-review.sh -m" "release: git commit --amend 文案仍含首次 -m 指引"
+assert_stderr_has "commit-task-for-review.sh --amend" "release: git commit --amend 文案含 --amend 指引"
+
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge --no-ff feature/x"}}'
 assert_exit 2 "release: 直接 git merge --no-ff 硬拦"
 assert_stderr_has "merge-task-to-local-master.sh --user-authorized" "release: 直接 git merge --no-ff 指向标准入口"
@@ -1236,6 +1242,10 @@ assert_stdout_empty "codex: release 授权入口无输出"
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"git commit -m \"feat: task slice\""}}'
 assert_exit 2 "codex: direct commit 硬阻断"
 assert_stderr_has "commit-task-for-review.sh -m" "codex: direct commit 指向标准入口"
+
+run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"git commit --amend"}}'
+assert_exit 2 "codex: direct commit --amend 硬阻断"
+assert_stderr_has "commit-task-for-review.sh --amend" "codex: direct commit --amend 文案含 --amend 指引"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh --user-authorized feature/x"}}'
 assert_exit 0 "codex: local merge 授权入口无交互放行"
