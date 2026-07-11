@@ -4,6 +4,8 @@
 - **日期**：2026-07-10
 - **决策者**：JJNNReno（与 Claude Code 经 IK006J 会话共同得出）
 
+> 本 ADR 的“Pre 校验、成功 Post 消费、失败保留”原则继续有效；Codex 降级与交互确认说明已由 [ADR-0012](0012-agent-noninteractive-authorization.md) 取代。当前 Codex 同样挂载 PostToolUse，并对 `tool_response.isError` 失败结果保留凭证。
+
 ## 背景
 
 发布审查包流程（见 [ADR-0010](0010-local-master-is-user-integration-zone.md)）用 Claude Code `PreToolUse` hook（`.claude/hooks/confirm-release-action.sh`）做末梢防护：AI 创建 Gitee PR 前必须先走标准通道 `scripts/publish-review-package.sh --user-authorized` 领一张「发布标记」（TTL 900s，绑定分支 + target），hook 在 `validate_publish_marker` 里校验标记存在 / TTL / 分支匹配。
@@ -33,10 +35,10 @@
 
 | 路线 | 行为 | 判定 |
 |---|---|---|
-| **A Post 消费** ✅ | Pre 纯校验放行；PostToolUse（PR 成功后）撕票 | 采纳。PostToolUse 只在工具成功时触发，天然实现「成功才消耗」。 |
+| **A Post 消费** ✅ | Pre 纯校验放行；PostToolUse 明确成功结果撕票 | 采纳。仅 `tool_response.isError=false` 消费；失败、缺失或类型畸形均保留。 |
 | **B Pre 消费 + API 失败回写标记** | Pre 仍删标记，靠额外机制在 API 失败时重新落盘 | 否决。hook 感知不到 API 成败，回写标记需引入跨阶段状态传递，复杂且易再错。 |
 
-**关键技术依据（官方 hooks 文档已查证）**：`PostToolUse` 只在工具成功时触发；失败（含 MCP `isError:true`）走 `PostToolUseFailure`（文档原文「fires for tool calls that throw errors or return failure results」）。故 PostToolUse 分支直接撕票即可，无需在 hook 内判 `isError`——平台契约已把失败路由隔离掉。
+**关键技术依据**：消费只能发生在工具执行后的生命周期事件。共享实现采用风险不对称的 guard：仅当 `tool_response.isError` 严格为布尔 `false` 时消费；缺失、类型漂移或明确失败都保留到重试或 TTL，不提前撕票。
 
 ### D3. TTL 900s 兜底，不为 100% 撕票加复杂度
 
@@ -47,7 +49,7 @@
 ## 考虑过的备选
 
 - **路线 B（Pre 消费 + API 失败回写标记）**：否决——见 D2。Pre 阶段无法感知 API 成败，回写需要把已删标记重新落盘的跨阶段机制，且 Pre 不能区分失败类型（404 / 网络 / 参数错），增加耦合，治标不治本。
-- **Post 分支内加 `isError` 判断 guard**：v1 不加。信任平台契约（PostToolUse 不含失败调用）。若实测发现 Gitee MCP 的 `isError` 泄漏进 `PostToolUse`，再加「歧义时默认不消费」guard——风险不对称：标记残留（漏撕）= 良性 / TTL 清理；过早消费（复发）= bug 复发。残留一侧的代价远小于复发。
+- **Post 分支内不判断 `isError`**：旧版采纳、现已由 ADR-0012 取代。共享 Claude/Codex 实现必须判断明确失败并保留凭证；风险不对称仍是“宁可残留到 TTL，不提前消费”。
 
 ## 后果
 
@@ -57,7 +59,7 @@
   - Pre 阶段变纯校验，职责更清晰（Pre 管放行，Post 管撕票）。
 - **负面 / 代价**：
   - 漏撕场景标记多活至 TTL（最多 900s）。由 TTL + Pre 的 TTL 分支 consume 兜底，不永久有效。
-  - **Codex 侧不消费标记**：Codex wrapper（`.codex/hooks/run-claude-pretool.sh`）只适配 `PreToolUse`，本次不为 Codex 加 `PostToolUse`（加了会报错）。Codex 环境下标记不被消费，仅靠 TTL 清理。这是可接受的降级——Codex 的发布动作本就需要用户手动执行或换 Claude Code 环境（见 `docs/agents/commit-and-review.md` Codex 段）。
+  - 历史实现曾让 Codex 仅靠 TTL 清理；ADR-0012 已取消该降级，Claude/Codex 现统一挂载 PostToolUse。Codex 失败结果通过 `tool_response.isError` guard 保留凭证。
   - Pre block 路径（无票 / 过期 / 不匹配 / draft / 错 target）工具不执行 → Post 不触发 → 不消费（正确）。
 
 ## 实现要点

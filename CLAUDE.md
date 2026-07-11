@@ -24,6 +24,7 @@
 3. **合并只用 merge** — 禁 squash/rebase。合并不自动删源分支，事后手动清理。
 4. **Agent 写入用 task worktree** — 不写本地 `master`。`scripts/start-task-worktree.sh` 开工。
 5. **动 git 前先 fetch** — `git fetch origin` 后操作，落后 push 会被 hook 硬拦。
+6. **授权无二次弹框** — 只认当前对话中的人类授权；Agent 自动使用 `--user-authorized` 或一次性凭证，Hook 只纠偏和硬拦，不返回 ASK。
 
 ## Agent skills
 

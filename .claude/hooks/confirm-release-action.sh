@@ -1,45 +1,38 @@
 #!/usr/bin/env bash
-# Claude Code PreToolUse / PostToolUse hook — 发布动作标准入口兜底（仅本项目）
+# Claude Code / Codex PreToolUse + PostToolUse — Agent 授权流程兜底（仅本项目）
 # JSON 与 shell 命令解析委托给 lib/pretool.py，避免转义引号和 git 全局选项绕过。
 #
 # 兜底对象：
 #   - Bash: 直接 git push（硬拦，必须走标准入口）
-#   - Bash: scripts/publish-review-package.sh --user-authorized（一次确认）
-#   - Bash: 本地验收 commit / 非 --ff-only merge（一次确认，或走标准本地入口）
+#   - Bash: 带 --user-authorized 的标准入口无交互放行
+#   - Bash: 直接本地验收 commit / 非 --ff-only merge 硬拦并指向标准入口
 #   - mcp__gitee-ent__create_enterprise_repo_pull: 创建 Gitee PR
 #   - mcp__gitee-ent__merge_enterprise_pull: 合并 Gitee PR
 #   - mcp__gitee-ent__create_enterprise_repo_release: 创建 Gitee release
 #
 # 规则：
-#   - 发布审查包只允许通过标准入口触发，并在入口处 ask 一次。
+#   - 发布审查包只允许通过标准入口触发；--user-authorized 即 Agent 对人类授权的声明。
 #   - 直接 git push 是绕过标准入口，直接阻断。
 #   - 创建 PR 校验标准入口写入的短期标记（target=master/source_branch/no draft）；
 #     Pre 放行、PostToolUse 成功后消费标记（失败可重试，见 ADR-0011）。
-#   - 发布审查包授权不覆盖合并；合并仍会单独触发确认。
-#   - 本地任务验收授权不覆盖远程发布；commit 与本地 merge 都需要确认。
+#   - 合并 PR / 创建 release 使用 AI 自动生成、绑定对象、TTL 900s 的一次性凭证。
+#   - Pre 仅校验，Post 成功后消费；失败保留凭证供有限重试。
 #
 # 输出契约：
-#   - stdout 仅输出 Claude Code 结构化 JSON 决策
+#   - stdout 保持为空
 #   - stderr 仅用于阻断时说明原因
-#   - exit 0 = 放行或要求确认；exit 2 = 阻断
+#   - exit 0 = 放行；exit 2 = 阻断并向 Agent 提供纠偏入口
 
 INPUT=$(cat)
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 PRETOOL="$HOOK_DIR/lib/pretool.py"
+AUTH_HELPER="$HOOK_DIR/lib/authorization.py"
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 MARKER_TTL_SECONDS=900
 
 extract_json_value() {
   key="$1"
   printf '%s' "$INPUT" | python3 "$PRETOOL" value "$key" 2>/dev/null || true
-}
-
-ask_permission() {
-  reason="$1"
-  cat <<EOF
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"${reason}"}}
-EOF
-  exit 0
 }
 
 block() {
@@ -50,13 +43,61 @@ BLOCKED: ${reason}
 本项目发布动作必须遵守：
 	- 发布审查包 = 推送当前工单分支 + 创建指向 master 的 PR
 	- 发布审查包必须使用 scripts/publish-review-package.sh --user-authorized
-	- 本地任务验收必须先获得用户确认，再 commit 或 merge 到本地 master
+	- 本地任务验收必须走带 --user-authorized 的标准入口
 	- 创建 PR 不使用 draft=true
-	- 合并 PR 必须另获用户授权，不能复用发布审查包授权
+	- 合并 PR / 创建 release 必须由 Agent 自动生成绑定具体对象的一次性凭证
 
 详见 CLAUDE.md「发布动作必须先获用户授权」。
 EOF
   exit 2
+}
+
+tool_response_succeeded() {
+  printf '%s' "$INPUT" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+response = data.get("tool_response")
+raise SystemExit(0 if isinstance(response, dict) and response.get("isError") is False else 1)
+' 2>/dev/null
+}
+
+action_subject() {
+  case "$1" in
+    merge-pr) extract_json_value "pull_request_id" ;;
+    create-release) extract_json_value "release_tag_version" ;;
+    *) return 1 ;;
+  esac
+}
+
+load_action_scope() {
+  AUTH_ACTION="$1"
+  AUTH_ENTERPRISE_ID="$(extract_json_value "enterprise_id")"
+  AUTH_PROJECT_ID="$(extract_json_value "project_id")"
+  AUTH_SUBJECT="$(action_subject "$AUTH_ACTION")"
+}
+
+validate_action_authorization() {
+  load_action_scope "$1"
+
+  [ -n "$AUTH_ENTERPRISE_ID" ] || block "${AUTH_ACTION} 缺少 enterprise_id，无法校验授权范围。"
+  [ -n "$AUTH_PROJECT_ID" ] || block "${AUTH_ACTION} 缺少 project_id，无法校验授权范围。"
+  [ -n "$AUTH_SUBJECT" ] || block "${AUTH_ACTION} 缺少目标对象，无法校验授权范围。"
+  [ -n "$TOOL_USE_ID" ] || block "${AUTH_ACTION} 缺少 tool_use_id，无法原子占用一次性授权凭证。"
+
+  reason="$(python3 "$AUTH_HELPER" claim "$PROJECT_DIR" "$AUTH_ACTION" "$AUTH_ENTERPRISE_ID" "$AUTH_PROJECT_ID" "$AUTH_SUBJECT" "$TOOL_USE_ID" 2>&1)" || {
+    block "${reason} 当前对话若已明确授权，请由 Agent 自动运行 scripts/manage-agent-authorization.sh grant --user-authorized ${AUTH_ACTION} 的对应命令后重试。"
+  }
+}
+
+finish_action_authorization() {
+  mode="$1"
+  load_action_scope "$2"
+  [ -n "$AUTH_ENTERPRISE_ID" ] && [ -n "$AUTH_PROJECT_ID" ] && [ -n "$AUTH_SUBJECT" ] || return 0
+  [ -n "$TOOL_USE_ID" ] || return 0
+  python3 "$AUTH_HELPER" "$mode" "$PROJECT_DIR" "$AUTH_ACTION" "$AUTH_ENTERPRISE_ID" "$AUTH_PROJECT_ID" "$AUTH_SUBJECT" "$TOOL_USE_ID" >/dev/null 2>&1 || true
 }
 
 # 发布标记路径：git common dir（主 checkout 与所有 worktree 共享同一物理路径）
@@ -120,21 +161,47 @@ validate_publish_marker() {
 # PostToolUse 只在工具成功时触发（失败走 PostToolUseFailure），故直接撕票无需判 isError。见 ADR-0011。
 # Post 阶段不能阻断已执行的工具，始终 exit 0。
 handle_post_tool_use() {
-  [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ] || exit 0
-  local source_branch
-  source_branch="$(extract_json_value "source_branch")"
-  [ -n "$source_branch" ] || exit 0
-  consume_publish_marker "$(marker_path_for_branch "$source_branch")"
+  # 只有明确 isError=false 才能证明成功；失败或畸形响应保留凭证并释放 claim。
+  succeeded=0
+  tool_response_succeeded && succeeded=1
+  case "$TOOL_NAME" in
+    mcp__gitee-ent__create_enterprise_repo_pull)
+      source_branch="$(extract_json_value "source_branch")"
+      if [ "$succeeded" = 1 ] && [ -n "$source_branch" ]; then
+        consume_publish_marker "$(marker_path_for_branch "$source_branch")"
+      fi
+      ;;
+    mcp__gitee-ent__merge_enterprise_pull)
+      if [ "$succeeded" = 1 ]; then
+        finish_action_authorization consume merge-pr
+      else
+        finish_action_authorization release merge-pr
+      fi
+      ;;
+    mcp__gitee-ent__create_enterprise_repo_release)
+      if [ "$succeeded" = 1 ]; then
+        finish_action_authorization consume create-release
+      else
+        finish_action_authorization release create-release
+      fi
+      ;;
+  esac
   exit 0
 }
 
 TOOL_NAME=$(extract_json_value "tool_name")
 COMMAND=$(extract_json_value "command")
 HOOK_EVENT_NAME=$(extract_json_value "hook_event_name")
+TOOL_USE_ID=$(extract_json_value "tool_use_id")
 
 # PostToolUse 分流：PR 创建成功后撕票。Pre 阶段（无 hook_event_name）跳过，走下方 Pre 逻辑。
 if [ "$HOOK_EVENT_NAME" = "PostToolUse" ]; then
   handle_post_tool_use
+fi
+
+# Bash: inline alias 覆盖或 shell/cycle alias 无法安全分类，fail closed。
+if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" unsafe-git-alias; then
+  block "检测到无法安全分类的 Git alias。请改用明确的标准入口或原生 Git 子命令。"
 fi
 
 # Bash: 直接 git push 属于绕过标准入口，硬拦。
@@ -142,35 +209,41 @@ if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" has-git-push
   block "检测到直接 git push。发布审查包必须使用 scripts/publish-review-package.sh --user-authorized。"
 fi
 
-# Bash: 标准发布审查包入口。缺少 --user-authorized 时硬拦；带参数时 ask 一次。
+# 先扫描整条命令中的裸 commit / 非 ff-only merge，避免标准入口提前放行后续 segment。
+task_acceptance="$(printf '%s' "$COMMAND" | python3 "$PRETOOL" task-acceptance-git 2>/dev/null || true)"
+case "$task_acceptance" in
+  "git commit")
+    block "检测到直接 git commit。当前对话若已授权提交，请由 Agent 自动改走 scripts/commit-task-for-review.sh --user-authorized -m \"<message>\"。"
+    ;;
+  "git merge")
+    block "检测到非 --ff-only 的直接 git merge。当前对话若已授权合入本地 master，请由 Agent 自动改走 scripts/merge-task-to-local-master.sh --user-authorized <branch>。"
+    ;;
+esac
+
+# Bash: 标准发布审查包入口。缺少 --user-authorized 时硬拦；带参数时无交互放行。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes publish-review-package.sh; then
   if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes publish-review-package.sh --user-authorized; then
     block "发布审查包入口缺少 --user-authorized。必须先获得用户明确授权。"
   fi
-  ask_permission "确认用户已授权发布审查包：推送当前工单分支并创建 target=master 的 PR。"
+  exit 0
 fi
 
-# Bash: 标准本地任务验收入口。缺少 --user-authorized 时硬拦；带参数时 ask 一次。
+# Bash: 标准本地任务验收入口。缺少 --user-authorized 时硬拦；带参数时无交互放行。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes commit-task-for-review.sh; then
   if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes commit-task-for-review.sh --user-authorized; then
     block "任务验收提交入口缺少 --user-authorized。必须先获得用户明确授权。"
   fi
-  ask_permission "确认用户已授权提交任务验收分支。该授权不覆盖合入本地 master 或远程发布。"
+  exit 0
 fi
 
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes merge-task-to-local-master.sh; then
   if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes merge-task-to-local-master.sh --user-authorized; then
     block "合入用户本地 master 入口缺少 --user-authorized。必须先获得用户明确授权。"
   fi
-  ask_permission "确认用户已授权将任务分支合入本地 master。该授权不覆盖远程发布或 PR 合并。"
+  exit 0
 fi
 
-# Bash: 直接 git commit / 非 --ff-only git merge 也需要确认，防止绕过任务验收边界。
-if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" task-acceptance-git >/dev/null; then
-  ask_permission "确认用户已授权本地任务验收 git 操作。子 issue 默认终点仍是未提交 diff + 验证结果。"
-fi
-
-# Bash: cleanup-task-worktree.sh 不在这里 ask。脚本自身校验 PR 已进 origin/master、工作区干净、路径正确。
+# Bash: cleanup-task-worktree.sh 依靠脚本自身校验 PR 已进 origin/master、工作区干净、路径正确。
 
 # Gitee: 创建 PR。只校验发布审查包形态，不做二次确认。
 if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
@@ -196,14 +269,16 @@ if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
   exit 0
 fi
 
-# Gitee: 合并 PR。必须独立确认，不能被发布审查包授权覆盖。
+# Gitee: 合并 PR。必须持有 AI 自动生成且绑定具体 PR 的一次性凭证。
 if [ "$TOOL_NAME" = "mcp__gitee-ent__merge_enterprise_pull" ]; then
-  ask_permission "合并 Gitee PR 需要用户单独确认：确认用户已明确授权合并该 PR。"
+  validate_action_authorization merge-pr
+  exit 0
 fi
 
-# Gitee: 创建仓库 release。属于发布动作，必须单独确认。
+# Gitee: 创建仓库 release。必须持有 AI 自动生成且绑定具体 tag 的一次性凭证。
 if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_release" ]; then
-  ask_permission "创建 Gitee release 需要用户单独确认：确认用户已明确授权发布该 release。"
+  validate_action_authorization create-release
+  exit 0
 fi
 
 exit 0

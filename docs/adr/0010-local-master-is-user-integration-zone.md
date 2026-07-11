@@ -4,6 +4,8 @@
 - **日期**：2026-07-09
 - **决策者**：JJNNReno（与 Codex 经 `/grill-with-docs` 会话共同得出）
 
+> 授权交互方式已由 [ADR-0012](0012-agent-noninteractive-authorization.md) 更新：标准入口带 `--user-authorized` 时无二次确认，直接 Git 绕过仍由 Hook 硬拦。
+
 ## 背景
 
 PRD 会拆成多个子 issue。旧流程把每个 Agent 可写任务和工单分支绑定得过紧，容易被理解为“子 issue 完成即可推 PR/合并”；同时旧脚本把本地 `master` 当作 `origin/master` 的干净镜像，限制了用户在本地 `master` 上自由调整、commit、集成多个子任务的工作方式。
@@ -19,6 +21,6 @@ Agent 完成子 issue 后停在任务验收分支，默认交付未提交 diff �
 - 用户保留本地 `master` 的自由度，可把多个子 issue 先集成到本地再统一发布模块 PR。
 - Agent 写入仍被隔离在 task worktree，不会污染用户本地集成区。
 - `scripts/start-task-worktree.sh` 不再同步或要求本地 `master` 干净；`.githooks/pre-commit` 不再禁止本地 `master` commit。
-- 本地任务验收 commit 与本地 `master` 合入也有标准入口和 hook 确认，避免 Agent 擅自越过未提交 diff 的默认终点。
+- 本地任务验收 commit 与本地 `master` 合入有标准入口和 Hook 兜底；带授权参数无交互放行，直接 Git 绕过硬拦。
 - 发布和远程合并仍受发布授权 hook 约束，禁止 Agent 擅自 push、开 PR 或合并 PR。
 - 主 checkout 发布包装分支合并进 `origin/master` 后，有标准清理入口 `scripts/cleanup-release-branch.sh --user-authorized <branch>`，删本地分支 + 远程源分支 + `fetch --prune`，填补 `cleanup-task-worktree.sh` 只认 task worktree 路径形态的 gap。
