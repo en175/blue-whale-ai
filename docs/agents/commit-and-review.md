@@ -33,7 +33,7 @@
 
 ## 禁提交清单（hook 会挡）
 
-- **生成物**：`dist*`、`.next/`（前端构建产物）、`__pycache__/`、`*.pyc`、`.pytest_cache/`（后端 Python 缓存）；`graphify-out/` 团队图谱按官方方案入库，`graphify-out/cache/` 与 `graphify-out/cost.json` 仍不提交
+- **生成物**：`dist*`、`.next/`（前端构建产物）、`__pycache__/`、`*.pyc`、`.pytest_cache/`（后端 Python 缓存）；`graphify-out/` 整个不入库（本地产物，由 `.gitignore` 忽略，各 worktree / clone 各自生成或共享）
 - **个人本机配置**：`.claude/settings.local.json`（`.gitignore` 忽略；其余 `.claude/` 进仓共享，见根 `CLAUDE.md`）
 - **密钥凭证**：`.env`、`*.key`、`*.pem`、含明文密码的配置文件（敏感配置走环境变量，不进仓）
 
@@ -158,7 +158,7 @@ ________
 
 | 检查项 | 类型 | 说明 |
 |---|---|---|
-| 禁提交生成物 | 🔴 硬挡 | `graphify-out/cache/` `graphify-out/cost.json` `dist*` `.next/` `__pycache__/` `*.pyc` `.pytest_cache/`（`.claude/` 进仓共享，仅 `settings.local.json` 由 `.gitignore` 忽略，非 hook 拦；`graphify-out/` 团队图谱按官方方案入库） |
+| 禁提交生成物 | 🔴 硬挡 | `dist*` `.next/` `__pycache__/` `*.pyc` `.pytest_cache/`（`.claude/` 进仓共享，仅 `settings.local.json` 由 `.gitignore` 忽略，非 hook 拦；`graphify-out/` 整个由 `.gitignore` 忽略，非 hook 拦） |
 | 本地 master 提交 | 🟢 放行 | pre-commit：允许用户在本地 `master` 上提交，作为用户本地集成区。Agent 不得把本地 `master` 当任务写入区；Agent 写入任务必须先用 [worktree-workflow.md](worktree-workflow.md) 创建 task worktree + 工单分支 |
 | commit 规范 | 🔴 硬挡 | Conventional Commits，格式不符拦截 |
 | 前端 lint | 🟡 软提醒 | 改 `blue_whale_web/` 时跑 `npm run lint`，失败只警告不拦 |
