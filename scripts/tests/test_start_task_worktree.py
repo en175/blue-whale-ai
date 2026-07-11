@@ -80,13 +80,15 @@ class StartTaskWorktreeTest(unittest.TestCase):
     def invoke(self, *args):
         return run(sys.executable, self.repo / "scripts/start-task-worktree.py", *args, cwd=self.repo, check=False)
 
-    def pre_push(self, branch, sha=None):
+    def pre_push(self, branch, sha=None, remote_sha=None):
         sha = sha or run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
-        zero = "0" * 40
+        remote_sha = remote_sha or "0" * 40
         return subprocess.run(
             ["bash", str(self.repo / ".githooks/pre-push")],
             cwd=str(self.repo),
-            input="refs/heads/{0} {1} refs/heads/{0} {2}\n".format(branch, sha, zero),
+            input="refs/heads/{0} {1} refs/heads/{0} {2}\n".format(
+                branch, sha, remote_sha
+            ),
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -175,15 +177,23 @@ class StartTaskWorktreeTest(unittest.TestCase):
         run("git", "checkout", "-b", "chore/legacy-ascii", cwd=self.actor)
         run("git", "push", "-u", "origin", "chore/legacy-ascii", cwd=self.actor)
         legacy_sha = run("git", "rev-parse", "HEAD", cwd=self.actor).stdout.strip()
+        legacy = self.pre_push(
+            "chore/legacy-ascii", legacy_sha, remote_sha=legacy_sha
+        )
+        self.assertEqual(0, legacy.returncode, legacy.stderr)
+
+    def test_pre_push_does_not_trust_stale_remote_tracking_ref(self):
+        sha = run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
         run(
             "git",
-            "fetch",
-            "origin",
-            "refs/heads/chore/legacy-ascii:refs/remotes/origin/chore/legacy-ascii",
+            "update-ref",
+            "refs/remotes/origin/chore/new-ascii",
+            sha,
             cwd=self.repo,
         )
-        legacy = self.pre_push("chore/legacy-ascii", legacy_sha)
-        self.assertEqual(0, legacy.returncode, legacy.stderr)
+        new_branch = self.pre_push("chore/new-ascii", sha)
+        self.assertNotEqual(0, new_branch.returncode)
+        self.assertIn("结构化中文规范", new_branch.stderr)
 
     def test_rejects_ascii_summary_without_creating_worktree(self):
         before = run("git", "rev-parse", "master", cwd=self.repo).stdout.strip()

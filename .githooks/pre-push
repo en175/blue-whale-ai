@@ -66,14 +66,17 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 
   if ! "${validator[@]}" --validate-branch "$branch" >/dev/null 2>&1; then
     # 已发布到远程的旧 ASCII 分支允许继续收尾；新分支首次 push 必须遵循中文规范。
-    if git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
-      printf '⚠️ pre-push: 存量远程分支 %s 使用旧命名，本次兼容放行。\n' "$branch" >&2
-    else
-      blocked=1
-      invalid_name=1
-      reason="${reason}  ${branch}：结构化中文分支名不合规\n"
-      continue
-    fi
+    case "$remote_sha" in
+      0000000000000000000000000000000000000000)
+        blocked=1
+        invalid_name=1
+        reason="${reason}  ${branch}：结构化中文分支名不合规\n"
+        continue
+        ;;
+      *)
+        printf '⚠️ pre-push: 存量远程分支 %s 使用旧命名，本次兼容放行。\n' "$branch" >&2
+        ;;
+    esac
   fi
 
   # 落后判断：origin/master 是否已是 local_sha 的祖先？
