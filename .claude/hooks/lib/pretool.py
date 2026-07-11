@@ -21,9 +21,32 @@ from typing import Any
 
 SEPARATORS = {";", "&", "&&", "|", "||", "(", ")"}
 WORK_BRANCH_PREFIXES = ("feature/", "fix/", "hotfix/", "docs/", "chore/")
+NON_ALIAS_SUBCOMMANDS = {
+    "add",
+    "branch",
+    "checkout",
+    "clean",
+    "commit",
+    "config",
+    "diff",
+    "fetch",
+    "log",
+    "merge",
+    "push",
+    "rebase",
+    "reset",
+    "restore",
+    "rev-parse",
+    "show",
+    "status",
+    "switch",
+    "symbolic-ref",
+    "worktree",
+}
+UNSAFE_ALIAS_SUBCOMMANDS = {"unsafe-alias", "alias-cycle"}
 # 顶层 key 白名单：命中则读 data 顶层元数据，其余 key 只读 tool_input。
 # 最小权限——避免让任意 key 误读顶层元数据。tool_name 仍保留 tool_input 回退以兼容旧测试夹具。
-TOP_LEVEL_KEYS = {"tool_name", "hook_event_name"}
+TOP_LEVEL_KEYS = {"tool_name", "hook_event_name", "tool_use_id"}
 GIT_GLOBAL_OPTS_WITH_ARG = {
     "-C",
     "-c",
@@ -302,7 +325,8 @@ def git_invocations(command: str) -> list[GitInvocation]:
             while index < len(tokens) and not is_separator(tokens[index]):
                 args.append(tokens[index])
                 index += 1
-            invocations.append(GitInvocation(subcommand=subcommand, args=args, cwd=cwd))
+            invocation = GitInvocation(subcommand=subcommand, args=args, cwd=cwd)
+            invocations.extend(resolve_git_alias(invocation))
             break
 
         while index < len(tokens) and not is_git_token(tokens[index]):
@@ -315,6 +339,66 @@ def git_invocations(command: str) -> list[GitInvocation]:
         invocations.extend(git_invocations(nested))
 
     return invocations
+
+
+def configured_git_alias(name: str, cwd: str | None) -> str | None:
+    if name in NON_ALIAS_SUBCOMMANDS:
+        return None
+    command = ["git"]
+    if cwd:
+        command.extend(["-C", cwd])
+    command.extend(["config", "--get", f"alias.{name}"])
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    value = result.stdout.rstrip("\n")
+    return value or None
+
+
+def resolve_git_alias(invocation: GitInvocation, seen: tuple[str, ...] = ()) -> list[GitInvocation]:
+    if invocation.subcommand in seen or len(seen) >= 10:
+        return [GitInvocation(subcommand="alias-cycle", args=invocation.args, cwd=invocation.cwd)]
+    alias = configured_git_alias(invocation.subcommand, invocation.cwd)
+    if alias is None:
+        return [invocation]
+    if alias.startswith("!"):
+        return [GitInvocation(subcommand="unsafe-alias", args=invocation.args, cwd=invocation.cwd)]
+    try:
+        tokens = shlex.split(alias)
+    except ValueError:
+        return [GitInvocation(subcommand="unsafe-alias", args=invocation.args, cwd=invocation.cwd)]
+    if not tokens:
+        return [GitInvocation(subcommand="unsafe-alias", args=invocation.args, cwd=invocation.cwd)]
+    # Git aliases may expand to global options before the real subcommand, for
+    # example ``-c foo.bar=baz push``.  Treat that shape as unsafe instead of
+    # mistaking the option for a harmless subcommand; this hook is a safety
+    # boundary, so an alias whose effective command is not direct is fail-closed.
+    if tokens[0].startswith("-"):
+        return [GitInvocation(subcommand="unsafe-alias", args=invocation.args, cwd=invocation.cwd)]
+    expanded = GitInvocation(
+        subcommand=tokens[0],
+        args=tokens[1:] + invocation.args,
+        cwd=invocation.cwd,
+    )
+    return resolve_git_alias(expanded, seen + (invocation.subcommand,))
+
+
+def has_inline_alias_override(command: str) -> bool:
+    try:
+        tokens = shell_tokens(command)
+    except ValueError:
+        return bool(re.search(r"\balias\.[A-Za-z0-9_-]+\s*=", command))
+    for index, token in enumerate(tokens):
+        if token == "-c" and index + 1 < len(tokens) and tokens[index + 1].startswith("alias."):
+            return True
+        if token.startswith("-calias.") or token.startswith("--config-env=alias."):
+            return True
+        if token == "--config-env" and index + 1 < len(tokens) and tokens[index + 1].startswith("alias."):
+            return True
+    return any(has_inline_alias_override(nested) for nested in nested_shell_commands(command))
 
 
 def push_invocations(command: str) -> list[GitInvocation]:
@@ -405,6 +489,12 @@ def mode_protected_push_target(command: str) -> int:
     return 1
 
 
+def mode_unsafe_git_alias(command: str) -> int:
+    if has_inline_alias_override(command):
+        return 0
+    return 0 if any(inv.subcommand in UNSAFE_ALIAS_SUBCOMMANDS for inv in git_invocations(command)) else 1
+
+
 def mode_push_has_bare_force(command: str) -> int:
     for invocation in push_invocations(command):
         if has_bare_force(invocation.args):
@@ -476,6 +566,8 @@ def main() -> int:
     command = command_from_stdin()
     if mode == "has-git-push":
         return mode_has_git_push(command)
+    if mode == "unsafe-git-alias":
+        return mode_unsafe_git_alias(command)
     if mode == "protected-push-target":
         return mode_protected_push_target(command)
     if mode == "push-has-bare-force":

@@ -9,14 +9,13 @@
 
 ## 路由表：按场景查对应规则文件
 
-| 场景 | 文件 |
-|------|------|
-| 代码理解（查结构 / 调用链 / 架构） | `.claude/rules/code-intelligence.md`（自动加载） |
-| Gitee 工作流（提交/分支/PR/发布/worktree） | `.claude/rules/git-workflow.md`（自动加载） |
-| Gitee Issue / MCP 工具操作 | `.claude/rules/issue-tracker.md`（自动加载） |
-| 前端 UI 修改（`blue_whale_web/`） | `.claude/rules/frontend.md`（路径作用域，改前端文件时自动加载，无需手动查） |
-| PR 模板 / Hook 兜底清单 / 低频细节 | `docs/agents/commit-and-review.md` |
-| ADR（架构决策记录） | `docs/adr/` |
+| 场景                              | 文件                                                  |
+| ------------------------------- | --------------------------------------------------- |
+| 代码理解（查结构 / 调用链 / 架构）            | `.claude/rules/code-intelligence.md`                |
+| Gitee 工作流（提交/分支/PR/发布/worktree） | `.claude/rules/git-workflow.md`                     |
+| Gitee Issue / MCP 工具操作          | `.claude/rules/issue-tracker.md`                    |
+| 前端 UI 修改（`blue_whale_web/`）     | `.claude/rules/frontend.md`（路径作用域，改前端文件时自动加载，无需手动查） |
+| PR 模板 / Hook 兜底清单 / 低频细节        | `docs/agents/commit-and-review.md`                  |
 
 ## 最高红线（摘要，细节见 rules 文件）
 
@@ -25,12 +24,13 @@
 3. **合并只用 merge** — 禁 squash/rebase。合并不自动删源分支，事后手动清理。
 4. **Agent 写入用 task worktree** — 不写本地 `master`。`scripts/start-task-worktree.sh` 开工。
 5. **动 git 前先 fetch** — `git fetch origin` 后操作，落后 push 会被 hook 硬拦。
+6. **授权无二次弹框** — 只认当前对话中的人类授权；Agent 自动使用 `--user-authorized` 或一次性凭证，Hook 只纠偏和硬拦，不返回 ASK。
 
 ## Agent skills
 
 ### Issue tracker
 
-Gitee Issues（`mcp__gitee-ent__*` MCP 工具，外部 PR 非请求面）。见 `docs/agents/issue-tracker.md`。
+硬约束见路由表（`.claude/rules/issue-tracker.md`）；详细手册/迁移 runbook 见 `docs/agents/issue-tracker.md`。外部 PR 非请求面。
 
 ### Triage labels
 

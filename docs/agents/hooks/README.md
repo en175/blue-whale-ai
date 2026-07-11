@@ -13,7 +13,7 @@
 |---|---|---|---|---|
 | `block-dangerous-git.sh` | `Bash` | `PreToolUse` | 拦裸 `--force`、`reset --hard`、`clean -f`、`branch -D`、`checkout .`、`restore .` | CLAUDE.md「提交与审查」 |
 | `block-push-to-master.sh` | `Bash` | `PreToolUse` | 拦任何对 `master`/`main` 的 push（显式 + 隐式） | [ADR-0003](../../adr/0003-no-direct-push-to-master.md) |
-| `confirm-release-action.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` / `mcp__gitee-ent__create_enterprise_repo_release` | `PreToolUse` / `PostToolUse` | 直接 `git push` 硬拦；`scripts/publish-review-package.sh --user-authorized` 触发一次确认；本地任务验收 commit / 非 `--ff-only` merge 及其标准入口触发确认；PR 在 Pre 校验发布入口写入的短期标记（`draft` 非 true、`target_branch=master`、`source_branch` 匹配）、PostToolUse 创建成功后消费（失败可重试）；合并 PR / 创建 release 单独确认 | CLAUDE.md「发布动作必须先获用户授权」 / [ADR-0010](../../adr/0010-local-master-is-user-integration-zone.md) / [ADR-0011](../../adr/0011-release-marker-consume-after-pr-success.md) |
+| `confirm-release-action.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` / `mcp__gitee-ent__create_enterprise_repo_release` | `PreToolUse` / `PostToolUse` | 标准入口带 `--user-authorized` 无交互放行；直接 push/commit/非 ff-only merge（含复合命令和 Git alias）硬拦；PR 标记在 Pre 校验，合并/release 凭证按 `tool_use_id` 原子占用；明确成功 Post 消费，失败/畸形 Post 保留 | CLAUDE.md「发布动作必须先获用户授权」 / [ADR-0010](../../adr/0010-local-master-is-user-integration-zone.md) / [ADR-0011](../../adr/0011-release-marker-consume-after-pr-success.md) / [ADR-0012](../../adr/0012-agent-noninteractive-authorization.md) |
 | `block-squash-merge.sh` | `mcp__gitee-ent__merge_enterprise_pull` | `PreToolUse` | 拦 `merge_method=squash`/`rebase`，强制走 `merge` | CLAUDE.md「合并方法」 |
 | `block-issue-without-repo.sh` | `mcp__gitee-ent__create_enterprise_issue` / `mcp__gitee-ent__update_enterprise_issue` | `PreToolUse` | 拦 `project_id` 缺失/为 0；拦子 issue 未带 `project_id/program_id`，强制仓库可见 | [ADR-0007](../../adr/0007-issue-must-link-repo.md) / [ADR-0008](../../adr/0008-sub-issues-must-inherit-repo.md) |
 
@@ -70,7 +70,7 @@ Codex 挂载点写在 `.codex/hooks.json`，但**不要复制脚本实现到 `.c
 
 原因：
 - `.claude/hooks` 是唯一脚本源，避免 Claude/Codex 两套实现漂移。
-- `.codex/hooks/run-claude-pretool.sh` 只做平台适配：Claude Code 支持的 `permissionDecision=ask` 在 Codex `PreToolUse` 里不支持，wrapper 会把它转换成 `exit 2` 硬阻断，避免发布/合并/推送确认失效后继续执行。
+- `.codex/hooks/run-claude-pretool.sh` 是透明 wrapper：同一权威脚本在 Claude/Codex 都使用“stdout 空 + exit 0 放行 / exit 2 阻断”的契约，不再产生或转换 ASK。
 - `.codex/config.toml` 属于本机私密配置，可能含 token，不进仓；项目共享的只有 `.codex/hooks.json`。
 - Codex 首次拉取或 hook 变更后，用户需要在 Codex 里运行 `/hooks` review/trust 项目 hook，否则新挂载点不会执行。
 
@@ -114,15 +114,15 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 ### 测试边界（seam）
 
-5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现，只测这条边界。`confirm-release-action.sh` 的确认型用例只保留在标准发布审查包入口、合并和 release 这些低频边界；直接 `git push`、draft PR、非 master 目标 PR 是阻断型用例。唯一外部依赖 `git rev-parse`（push-to-master / dangerous-git 的「无显式 refspec → 查当前分支」分支用）由夹具用 PATH 注入的临时 fake git 隔离（响应 `rev-parse --abbrev-ref HEAD` → `$FAKE_BRANCH`），不碰真实仓库。
+5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现，只测这条边界。`confirm-release-action.sh` 覆盖标准入口无输出放行、复合命令/Git alias 绕过硬拦、凭证 TTL/对象隔离/并发占用、Post 明确成功消费和失败/畸形保留。发布标记与动作凭证测试均在临时 Git 仓库运行，不读写真实 common dir。
 
 夹具还校验 Codex 挂载层：
 - `.codex/hooks.json` 必须存在。
-- `hooks.PreToolUse` 的**阻断型** gate 的 matcher + hook 数量必须与 `.claude/settings.json` 一致；提醒型 gate（只注入 context、exit 0 不阻断，如 `cbm-discovery-gate.sh`）允许 Codex 缺失（Codex 无对应 MCP 时注入无意义）。
+- `hooks.PreToolUse` 的**阻断型** gate 及全部 `PostToolUse` matcher + hook 数量必须与 `.claude/settings.json` 一致；提醒型 gate 允许 Codex 缺失。
 - 所有 Codex 脚本 command 必须通过 `.codex/hooks/run-claude-pretool.sh`，不得直接指向 `.claude/hooks/` 或复制出来的 `.codex/hooks/` 实现。
 - 每个 Codex 包装命令必须和同位置 Claude hook 挂载的脚本名一致。
 - 代表性 Codex 包装命令必须从 `.codex/hooks.json` 读取，并能从 repo root 调到权威脚本得到相同拦截/放行结果。
-- `permissionDecision=ask` 的确认型输出在 Codex 包装层必须转换为硬阻断。Codex 当前不支持交互式确认弹窗，因此发布审查包入口、合并和 release 在 Codex 中会停住，避免失败放行；需要用户手动执行或换用支持确认的 Claude Code 环境。
+- 可执行 Hook、wrapper 和活跃规则禁止返回 ASK 决策；标准授权路径必须在 Claude/Codex 均无交互放行。
 - `.gitignore` 必须只放行 `.codex/hooks.json` 和 `.codex/hooks/run-claude-pretool.sh`；`.codex/config.toml`、其它 `.codex/*`、其它 `.codex/hooks/*` 均保持忽略。
 
 ### 字段类型以 MCP schema 为准（核心教训）

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # pre-commit hook — Blue-Whale
 # 纯 shell，零依赖。功能：
-#   1. 禁提交生成物（graphify-out/ dist/ target/ .next/ __pycache__/ node_modules/ 等）
+#   1. 禁提交生成物（dist/ target/ .next/ __pycache__/ node_modules/ 等；graphify-out/ 团队图谱除外）
 #   2. 前端改动时跑 lint-staged（prettier --write + eslint --fix），lint error 不可修时硬拦
 #   3. 前端改动全量 lint 兜底软提醒（不拦提交）
 #   4. 后端改动时跑 py_compile（软提醒，不拦提交）
@@ -19,7 +19,8 @@ staged_files=$(git diff --cached --name-only --diff-filter=ACMR)
 # 1. 禁提交生成物
 # ============================================================
 ban_patterns=(
-  'graphify-out/'
+  'graphify-out/cache/'
+  'graphify-out/cost.json'
   '/dist/'
   'dist-ssr/'
   '/target/'

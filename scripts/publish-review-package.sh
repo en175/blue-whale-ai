@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Publish the current task branch as the first half of a review package.
-# The matching Claude Code hook requires --user-authorized and asks once before
-# this script runs. Creating the PR remains a separate Gitee MCP action.
+# The shared hook requires --user-authorized and then allows this entrypoint
+# without another prompt. Creating the PR remains a separate Gitee MCP action.
 
 set -euo pipefail
 

@@ -95,7 +95,7 @@ scripts/merge-task-to-local-master.sh --user-authorized <任务分支>
 
 5. 如有 merge conflict，Agent 可在本次合入授权范围内解决并运行验证；解决后停在本地 `master` 汇报结果，不继续远程发布。
 
-Claude/Codex hook 会拦住或确认直接 `git commit`、非 `--ff-only` 的直接 `git merge` 以及缺少 `--user-authorized` 的本地验收入口，避免 Agent 跳过默认的未提交 diff 验收点。
+Claude/Codex hook 会硬拦直接 `git commit`、非 `--ff-only` 的直接 `git merge` 以及缺少 `--user-authorized` 的本地验收入口，并指引 Agent 在已有授权覆盖时自动改走标准入口；带授权参数的标准入口无交互放行。
 
 ## 发布包装分支
 
@@ -133,7 +133,7 @@ scripts/cleanup-release-branch.sh --user-authorized <发布包装分支>
 scripts/publish-review-package.sh --user-authorized
 ```
 
-脚本是发布审查包的唯一标准入口，会在 Claude Code Hook 中触发一次用户确认。它只做 Git 安全检查和推分支：
+脚本是发布审查包的唯一标准入口。`--user-authorized` 表示 Agent 已从当前对话取得明确授权，Claude Code 与 Codex Hook 均无二次弹框放行。它只做 Git 安全检查和推分支：
 
 - 当前必须是工单分支（task worktree 分支或发布包装分支）。
 - 工作区必须干净。
@@ -147,6 +147,8 @@ scripts/publish-review-package.sh --user-authorized
 **标记位置契约**：发布标记按来源分支隔离，存于 git common dir（`<repo>/.git/agent-release-review-package-<branch-slug>`，分支名中的 `/` 转义为 `%`）。common dir 对主 checkout 与所有 task worktree 是**同一物理路径**，因此 **Claude session 在主 checkout 还是 worktree 启动均对称生效**——标记读写不依赖 session 启动位置。此契约修复了「主 checkout session + cd worktree 跑发布」时建 PR 被误拦的缺陷（标记写在 worktree git path、hook 在主仓 git path 找不到）。
 
 PR 未合并前，本地分支、远程源分支和 task worktree 都保留，以便处理审查反馈。
+
+合并 PR 必须在当前对话中另获明确授权。Agent 自动生成绑定企业、仓库和 PR ID 的一次性凭证后调用 MCP；PreToolUse 按 `tool_use_id` 原子占用凭证，避免并发复用，只有 `tool_response.isError=false` 的明确成功 PostToolUse 才消费。失败或畸形结果释放占用并保留凭证。合并成功授权同时覆盖按分支形态执行上述安全清理，不再单独询问。
 
 ## PR 合并后清理 task worktree
 
