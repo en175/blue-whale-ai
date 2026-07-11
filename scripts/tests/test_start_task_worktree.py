@@ -80,6 +80,18 @@ class StartTaskWorktreeTest(unittest.TestCase):
     def invoke(self, *args):
         return run(sys.executable, self.repo / "scripts/start-task-worktree.py", *args, cwd=self.repo, check=False)
 
+    def pre_push(self, branch, sha=None):
+        sha = sha or run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
+        zero = "0" * 40
+        return subprocess.run(
+            ["bash", str(self.repo / ".githooks/pre-push")],
+            cwd=str(self.repo),
+            input="refs/heads/{0} {1} refs/heads/{0} {2}\n".format(branch, sha, zero),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
     def task_worktree(self):
         output = run("git", "worktree", "list", "--porcelain", cwd=self.repo).stdout
         paths = [
@@ -142,24 +154,36 @@ class StartTaskWorktreeTest(unittest.TestCase):
                 self.assertNotEqual(0, invalid.returncode, branch)
 
     def test_pre_push_blocks_invalid_name_and_allows_valid_chinese_name(self):
-        sha = run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
-        zero = "0" * 40
-
-        def pre_push(branch):
-            return subprocess.run(
-                ["bash", str(self.repo / ".githooks/pre-push")],
-                cwd=str(self.repo),
-                input="refs/heads/{0} {1} refs/heads/{0} {2}\n".format(branch, sha, zero),
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-
-        valid = pre_push("chore/实施极简工作树流程")
-        invalid = pre_push("chore/implement-worktree")
+        valid = self.pre_push("chore/实施极简工作树流程")
+        invalid = self.pre_push("chore/implement-worktree")
         self.assertEqual(0, valid.returncode, valid.stderr)
         self.assertNotEqual(0, invalid.returncode)
         self.assertIn("结构化中文规范", invalid.stderr)
+
+    def test_pre_push_without_upstream_only_skips_staleness_check(self):
+        run("git", "remote", "remove", "origin", cwd=self.repo)
+        valid = self.pre_push("chore/实施极简工作树流程")
+        invalid = self.pre_push("chore/implement-worktree")
+        protected = self.pre_push("master")
+        self.assertEqual(0, valid.returncode, valid.stderr)
+        self.assertNotEqual(0, invalid.returncode)
+        self.assertIn("结构化中文规范", invalid.stderr)
+        self.assertNotEqual(0, protected.returncode)
+        self.assertIn("禁止直推", protected.stderr)
+
+    def test_pre_push_allows_already_published_legacy_ascii_branch(self):
+        run("git", "checkout", "-b", "chore/legacy-ascii", cwd=self.actor)
+        run("git", "push", "-u", "origin", "chore/legacy-ascii", cwd=self.actor)
+        legacy_sha = run("git", "rev-parse", "HEAD", cwd=self.actor).stdout.strip()
+        run(
+            "git",
+            "fetch",
+            "origin",
+            "refs/heads/chore/legacy-ascii:refs/remotes/origin/chore/legacy-ascii",
+            cwd=self.repo,
+        )
+        legacy = self.pre_push("chore/legacy-ascii", legacy_sha)
+        self.assertEqual(0, legacy.returncode, legacy.stderr)
 
     def test_rejects_ascii_summary_without_creating_worktree(self):
         before = run("git", "rev-parse", "master", cwd=self.repo).stdout.strip()

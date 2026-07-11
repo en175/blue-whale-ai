@@ -22,8 +22,6 @@ if command -v python3 >/dev/null 2>&1; then
   validator=(python3 "$ROOT/scripts/start-task-worktree.py")
 elif command -v py >/dev/null 2>&1; then
   validator=(py -3 "$ROOT/scripts/start-task-worktree.py")
-elif command -v python >/dev/null 2>&1; then
-  validator=(python "$ROOT/scripts/start-task-worktree.py")
 else
   echo "❌ pre-push: 未找到 Python 3，无法验证结构化中文分支名。" >&2
   exit 1
@@ -37,11 +35,7 @@ fi
 # 静默 fetch，失败不阻断（网络问题不该卡住 push；落后判断失败时放行，由人兜底）
 git fetch origin master >/dev/null 2>&1 || true
 
-upstream=$(git rev-parse origin/master 2>/dev/null || echo "")
-if [ -z "$upstream" ]; then
-  # 取不到 origin/master（如离线 / 远程未配置），放行，不阻断 push
-  exit 0
-fi
+upstream=$(git rev-parse --verify --quiet refs/remotes/origin/master 2>/dev/null || true)
 
 blocked=0
 reason=""
@@ -70,17 +64,22 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     *) continue ;;
   esac
 
-  validation_error="$("${validator[@]}" --validate-branch "$branch" 2>&1)" || {
-    blocked=1
-    invalid_name=1
-    reason="${reason}  ${branch}：结构化中文分支名不合规\n"
-    continue
-  }
+  if ! "${validator[@]}" --validate-branch "$branch" >/dev/null 2>&1; then
+    # 已发布到远程的旧 ASCII 分支允许继续收尾；新分支首次 push 必须遵循中文规范。
+    if git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+      printf '⚠️ pre-push: 存量远程分支 %s 使用旧命名，本次兼容放行。\n' "$branch" >&2
+    else
+      blocked=1
+      invalid_name=1
+      reason="${reason}  ${branch}：结构化中文分支名不合规\n"
+      continue
+    fi
+  fi
 
   # 落后判断：origin/master 是否已是 local_sha 的祖先？
   # 是祖先 → 本地已包含 master 最新（已 rebase）→ 放行
   # 不是祖先 → 本地落后于 master → 拦截
-  if ! git merge-base --is-ancestor "$upstream" "$local_sha" 2>/dev/null; then
+  if [ -n "$upstream" ] && ! git merge-base --is-ancestor "$upstream" "$local_sha" 2>/dev/null; then
     # 计算落后多少个提交，给提示
     behind=$(git rev-list --count "$local_sha".."$upstream" 2>/dev/null || echo "?")
     blocked=1

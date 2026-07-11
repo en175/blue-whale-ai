@@ -14,9 +14,5 @@ if command -v py >/dev/null 2>&1; then
   exec py -3 "$ENTRY" "$@"
 fi
 
-if command -v python >/dev/null 2>&1; then
-  exec python "$ENTRY" "$@"
-fi
-
 echo "❌ start-task-worktree: 未找到 Python 3。macOS 请使用 python3，Windows 请使用 py -3。" >&2
 exit 1

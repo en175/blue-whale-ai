@@ -92,5 +92,5 @@ cat <<EOF
   1. 创建 Gitee PR：$branch → master
   2. 按 .gitee/PULL_REQUEST_TEMPLATE.md 填写实现范围、风险、测试结果和审查重点
   3. PR 创建后停下来，等待开发者审查
-  4. PR 合并后按分支位置清理：task worktree 运行 scripts/cleanup-task-worktree.sh；主 checkout 发布包装分支则切回 master 后删除本地发布分支
+  4. PR 合并后运行 scripts/cleanup-task-worktree.sh；仅策略升级前已有的主 checkout 发布分支使用旧清理入口
 EOF

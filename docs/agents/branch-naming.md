@@ -108,6 +108,6 @@ git 原生支持 UTF-8 分支名，Gitee 支持。国际惯例分支名走 ASCII
 |---|---|---|
 | `scripts/block-dangerous-git.sh` | 非工单分支的 `--force-with-lease` | `feature/* fix/* hotfix/* docs/* chore/*` |
 | `scripts/start-task-worktree.py` | 创建前拒绝不合规命名 | `feature/* fix/* hotfix/* docs/* chore/*` + 中文简述 |
-| `.githooks/pre-push` | 拒绝不合规分支名；拒绝落后 `origin/master` 的工单分支 push | 复用 Python 校验器 |
+| `.githooks/pre-push` | 拒绝新建不合规分支名；拒绝落后 `origin/master` 的工单分支 push | 复用 Python 校验器 |
 
-分支名不合规会在创建和 push 两个节点被拒绝。排障见入口错误信息或 hook 脚本注释。
+分支名不合规会在创建和首次 push 两个节点被拒绝。策略生效前已经存在于 `origin` 的 ASCII 分支仅允许继续收尾，不要求迁移；不得据此创建新的 ASCII 分支。排障见入口错误信息或 hook 脚本注释。

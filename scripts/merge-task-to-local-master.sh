@@ -62,18 +62,12 @@ esac
 branch="$(git -C "$ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
 [ "$branch" = "master" ] || fail "当前分支是 ${branch:-detached HEAD}，请先切回本地 master。"
 
-if command -v python3 >/dev/null 2>&1; then
-  validator=(python3 "$ROOT/scripts/start-task-worktree.py")
-elif command -v py >/dev/null 2>&1; then
-  validator=(py -3 "$ROOT/scripts/start-task-worktree.py")
-elif command -v python >/dev/null 2>&1; then
-  validator=(python "$ROOT/scripts/start-task-worktree.py")
-else
-  fail "未找到 Python 3，无法验证结构化中文分支名。"
-fi
-
-validation_error="$("${validator[@]}" --validate-branch "$TASK_BRANCH" 2>&1)" ||
-  fail "任务分支名不合规：$validation_error"
+# 新任务由 start-task-worktree.py 生成中文名，pre-push 也会校验。
+# 此处只保留前缀校验，让策略生效前已存在的 ASCII task worktree 能完成本地合入。
+case "$TASK_BRANCH" in
+  feature/*|fix/*|hotfix/*|docs/*|chore/*) ;;
+  *) fail "任务分支必须使用白名单前缀：feature/ fix/ hotfix/ docs/ chore/" ;;
+esac
 
 git -C "$ROOT" show-ref --verify --quiet "refs/heads/$TASK_BRANCH" || fail "本地任务分支不存在：$TASK_BRANCH"
 
