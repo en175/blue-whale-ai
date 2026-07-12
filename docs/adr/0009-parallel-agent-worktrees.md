@@ -40,10 +40,10 @@ Agent 一旦进入可写阶段，必须先创建独立 task worktree 和工单�
 任务完成后先发布分支：
 
 ```bash
-scripts/publish-review-package.sh --user-authorized
+scripts/publish-review-package.sh --user-authorized --create-pr
 ```
 
-该脚本只推送分支，不创建 PR，不删除本地 worktree。
+该脚本的 create 模式只推送分支并写创建标记，不创建 PR、不删除本地 worktree；已有 PR 审查修订改走 `--update-pr <IID>`，见 [ADR-0013](0013-open-pr-update-state-machine.md)。
 
 PR 合并后再清理：
 

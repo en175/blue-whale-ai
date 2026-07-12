@@ -118,7 +118,7 @@ case "$_branch" in
     if [ -n "$_upstream" ] && ! git merge-base --is-ancestor "$_upstream" HEAD 2>/dev/null; then
       _behind=$(git rev-list --count HEAD.."$_upstream" 2>/dev/null || echo "?")
       echo "⚠️  pre-commit: ${_branch} 落后 origin/master 约 ${_behind} 个提交（软提醒，不拦 commit）。" >&2
-      echo "    冲突会越攒越大 → 建议尽快 git fetch origin && git rebase origin/master" >&2
+      echo "    冲突会越攒越大 → 建议尽快运行 scripts/sync-task-from-origin.sh sync --json" >&2
       echo "    push 时 pre-push 仍会硬拦（铁闸）。见 docs/adr/0006-sync-mechanism-auto-block.md。" >&2
     fi
     ;;
