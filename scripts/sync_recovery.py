@@ -42,6 +42,9 @@ def set_push_state(path: Path, head: str, state: str) -> None:
         data.pop("pushed_head", None)
         data.pop("push_state", None)
     else:
+        # pushed_head 在 in_flight 与 pushed 两阶段均写入，仅靠 push_state 区分阶段：
+        # in_flight 表示推送结果未确认，pushed 表示已确认推送成功。
+        # 单看 pushed_head 不能判定是否真已推送，须配合 push_state。
         data["pushed_head"] = head
         data["push_state"] = state
     write_recovery(path, data)
