@@ -30,6 +30,11 @@ AUTH_HELPER="$HOOK_DIR/lib/authorization.py"
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 MARKER_TTL_SECONDS=900
 
+# squash/rebase 方法拦截的共享逻辑（lib/merge-method-check.sh），
+# 与 block-squash-merge.sh 共用，避免判定 + 消息文案双份漂移。
+# shellcheck source=lib/merge-method-check.sh
+. "$HOOK_DIR/lib/merge-method-check.sh"
+
 extract_json_value() {
   key="$1"
   printf '%s' "$INPUT" | python3 "$PRETOOL" value "$key" 2>/dev/null || true
@@ -288,8 +293,12 @@ if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
   exit 0
 fi
 
-# Gitee: 合并 PR。必须持有 AI 自动生成且绑定具体 PR 的一次性凭证。
+# Gitee: 合并 PR。先校验合并方法（纯参数错优先报），再校验授权凭证。
+# squash/rebase 检查原由独立 hook block-squash-merge.sh 承担，但多 hook 执行顺序
+# 不保证按配置数组顺序，squash 错误可能被掩盖为“缺凭证”误导。现并入此处，
+# 在凭证校验前阻断，保证纠正信号精准（无论客户端 hook 执行顺序）。
 if [ "$TOOL_NAME" = "mcp__gitee-ent__merge_enterprise_pull" ]; then
+  check_merge_method_and_block "$(extract_json_value "merge_method")"
   validate_action_authorization merge-pr
   exit 0
 fi

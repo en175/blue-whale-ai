@@ -578,7 +578,6 @@ PY
 
 CODEX_BLOCK_PUSH_CMD="$(codex_command_for block-push-to-master.sh)"
 CODEX_DANGER_CMD="$(codex_command_for block-dangerous-git.sh)"
-CODEX_SQUASH_CMD="$(codex_command_for block-squash-merge.sh)"
 CODEX_ISSUE_CMD="$(codex_command_for block-issue-without-repo.sh)"
 CODEX_RELEASE_CMD="$(codex_command_for confirm-release-action.sh)"
 CODEX_RELEASE_POST_CMD="$(codex_command_for confirm-release-action.sh PostToolUse)"
@@ -838,8 +837,24 @@ run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_p
 assert_exit 2 "release: 非 master 目标 PR 拦截"
 
 # 合并 PR → 必须持有绑定企业/仓库/PR 的一次性凭证。
+# squash/rebase 方法检查已并入 confirm-release-action.sh（在凭证校验前），
+# 消除多 hook 执行顺序不确定导致的纠正信号误导。
 setup_action_test_repo
 remove_all_action_markers
+
+# squash 方法错误优先于凭证校验报出（无论是否有凭证）。
+write_action_marker merge-pr 16660949 48854568 12
+run_hook "$RELEASE_HOOK" '{"tool_use_id":"merge-12-squash","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":12,"merge_method":"squash"}}'
+assert_exit 2 "release: merge PR squash 方法优先拦截（即使有凭证）"
+assert_stderr_has "squash" "release: merge PR squash 提示含 squash"
+
+run_hook "$RELEASE_HOOK" '{"tool_use_id":"merge-12-rebase","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":12,"merge_method":"rebase"}}'
+assert_exit 2 "release: merge PR rebase 方法优先拦截（即使有凭证）"
+assert_stderr_has "rebase" "release: merge PR rebase 提示含 rebase"
+
+# 消费 squash 测试写入的凭证，避免污染后续用例。
+remove_all_action_markers
+
 run_hook "$RELEASE_HOOK" '{"tool_use_id":"merge-12-missing","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":12,"merge_method":"merge"}}'
 assert_exit 2 "release: merge PR 缺凭证拦截"
 assert_stderr_has "manage-agent-authorization.sh grant" "release: merge PR 缺凭证提示自动授权入口"
@@ -1261,8 +1276,11 @@ assert_stderr_has "--force" "codex: dangerous git 包装命令提示"
 run_command_hook "$CODEX_DANGER_CMD" '{"tool_input":{"command":"git push --force-with-lease origin feature/x"}}'
 assert_exit 0 "codex: force-with-lease 工单分支放行"
 
-run_command_hook "$CODEX_SQUASH_CMD" '{"tool_input":{"merge_method":"squash"}}'
+# Codex 端 squash 检查已并入 confirm-release-action.sh（通过 run-claude-pretool.sh 转发）。
+# block-squash-merge.sh 不再在 .codex/hooks.json 注册，故用 CODEX_RELEASE_CMD 验证。
+run_command_hook "$CODEX_RELEASE_CMD" '{"tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"merge_method":"squash"}}'
 assert_exit 2 "codex: squash merge 包装命令拦截"
+assert_stderr_has "squash" "codex: squash merge 提示含 squash"
 
 run_command_hook "$CODEX_ISSUE_CMD" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_input":{"issue_id":"IJZ5WA","issue_state_id":123,"label_ids":"342812299"}}'
 assert_exit 0 "codex: 普通 update issue 放行"
