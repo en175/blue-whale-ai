@@ -4,7 +4,7 @@
 #
 # 兜底对象：
 #   - Bash: 直接 git push（硬拦，必须走标准入口）
-#   - Bash: 发布 / 合入标准入口带 --user-authorized 无交互放行；提交入口出现即放行
+#   - Bash: 发布 create/update / 合入标准入口带 --user-authorized 无交互放行；提交/同步入口出现即放行
 #   - Bash: 直接本地验收 commit / 非 --ff-only merge 硬拦并指向标准入口
 #   - mcp__gitee-ent__create_enterprise_repo_pull: 创建 Gitee PR
 #   - mcp__gitee-ent__merge_enterprise_pull: 合并 Gitee PR
@@ -41,8 +41,9 @@ block() {
 BLOCKED: ${reason}
 
 本项目发布动作必须遵守：
-	- 发布审查包 = 推送当前工单分支 + 创建指向 master 的 PR
-	- 发布审查包必须使用 scripts/publish-review-package.sh --user-authorized
+		- 首次发布使用 scripts/publish-review-package.sh --user-authorized --create-pr
+		- 已有 PR 更新使用 scripts/publish-review-package.sh --user-authorized --update-pr <PR编号>
+		- 分支落后时，Agent 依据规则主动运行 scripts/sync-task-from-origin.sh sync；Hook 不自动同步
 	- 本地任务提交走 scripts/commit-task-for-review.sh（出现即放行）；合入本地 master 走带 --user-authorized 的标准入口
 	- 创建 PR 不使用 draft=true
 	- 合并 PR / 创建 release 必须由 Agent 自动生成绑定具体对象的一次性凭证
@@ -136,21 +137,21 @@ validate_publish_marker() {
   marker_created_at="$(read_publish_marker created_at "$marker_path" || true)"
 
   if [ -z "$marker_branch" ] || [ -z "$marker_target" ] || [ -z "$marker_created_at" ]; then
-    block "创建 PR 前必须先通过 scripts/publish-review-package.sh --user-authorized 推送当前工单分支。"
+    block "创建 PR 前必须先通过 scripts/publish-review-package.sh --user-authorized --create-pr 推送当前工单分支。"
   fi
 
   now="$(date +%s)"
   case "$marker_created_at" in
-    ''|*[!0-9]*) block "发布审查包授权标记无效。请重新执行 scripts/publish-review-package.sh --user-authorized。" ;;
+    ''|*[!0-9]*) block "发布审查包授权标记无效。请重新执行 scripts/publish-review-package.sh --user-authorized --create-pr。" ;;
   esac
 
   if [ $((now - marker_created_at)) -gt "$MARKER_TTL_SECONDS" ]; then
     consume_publish_marker "$marker_path"
-    block "发布审查包授权标记已过期。请重新执行 scripts/publish-review-package.sh --user-authorized。"
+    block "发布审查包授权标记已过期。请重新执行 scripts/publish-review-package.sh --user-authorized --create-pr。"
   fi
 
   if [ "$marker_branch" != "$source_branch" ] || [ "$marker_target" != "$target_branch" ]; then
-    block "PR 分支与发布审查包授权标记不匹配。请重新执行 scripts/publish-review-package.sh --user-authorized。"
+    block "PR 分支与发布审查包授权标记不匹配。请重新执行 scripts/publish-review-package.sh --user-authorized --create-pr。"
   fi
 
   # 成功路径不在此消费：消费延后到 PostToolUse（PR 创建成功后），见 ADR-0011。
@@ -206,7 +207,7 @@ fi
 
 # Bash: 直接 git push 属于绕过标准入口，硬拦。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" has-git-push; then
-  block "检测到直接 git push。发布审查包必须使用 scripts/publish-review-package.sh --user-authorized。"
+  block "检测到直接 git push。首次发布请走 scripts/publish-review-package.sh --user-authorized --create-pr；已有 PR 更新请走 --update-pr <PR编号>。"
 fi
 
 # 先扫描整条命令中的裸 commit / 非 ff-only merge，避免标准入口提前放行后续 segment。
@@ -218,13 +219,31 @@ case "$task_acceptance" in
   "git merge")
     block "检测到非 --ff-only 的直接 git merge。当前对话若已授权合入本地 master，请由 Agent 自动改走 scripts/merge-task-to-local-master.sh --user-authorized <branch>。"
     ;;
+  "git merge origin/master")
+    block "检测到用 merge 同步 origin/master。任务分支同步固定使用 rebase；请由 Agent 依据规则运行 scripts/sync-task-from-origin.sh sync --json。"
+    ;;
 esac
 
-# Bash: 标准发布审查包入口。缺少 --user-authorized 时硬拦；带参数时无交互放行。
+# Bash: 标准发布审查包入口。缺授权或缺显式 create/update 模式时硬拦；合规时静默放行。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes publish-review-package.sh; then
   if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes publish-review-package.sh --user-authorized; then
     block "发布审查包入口缺少 --user-authorized。必须先获得用户明确授权。"
   fi
+  publish_mode="$(printf '%s' "$COMMAND" | python3 "$PRETOOL" publish-review-mode 2>/dev/null || true)"
+  case "$publish_mode" in
+    create) exit 0 ;;
+    update)
+      if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes publish-review-package.sh --pr-snapshot; then
+        block "已有 PR 更新入口缺少 --pr-snapshot。Agent 必须先通过 Gitee MCP 读取并规范化 PR 快照。"
+      fi
+      exit 0
+      ;;
+    *) block "发布入口必须且只能选择 --create-pr 或 --update-pr <正整数 PR 编号>。" ;;
+  esac
+fi
+
+# Bash: 标准同步入口是规则驱动的显式操作，不需要发布授权；Hook 只静默放行。
+if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes sync-task-from-origin.sh; then
   exit 0
 fi
 

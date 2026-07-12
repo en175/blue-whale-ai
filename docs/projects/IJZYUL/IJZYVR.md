@@ -138,7 +138,7 @@ scripts/merge-task-to-local-master.sh --user-authorized "feature/IJZYVR-API客�
 合并后建议：
 
 1. 父 issue IJZYUL README 更新：进度 6/8,IJZYVR 行加 ✅
-2. 按 Gitee 工作流发布审查：`scripts/publish-review-package.sh --user-authorized`
+2. 按当时 Gitee 工作流发布审查：`scripts/publish-review-package.sh --user-authorized`（历史记录；现行入口必须显式选择 `--create-pr` / `--update-pr`，见 ADR-0013）
 3. 后续接入工单（不属本工单）：
    - IJZYUL 进度归档更新
    - 各业务 feature wire up（BottomDock → startGeneration / TopBar → listProjects / Asset 上传替换 base64）

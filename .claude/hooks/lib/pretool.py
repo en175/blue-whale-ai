@@ -520,9 +520,31 @@ def mode_task_acceptance_git(command: str) -> int:
             print("git commit")
             return 0
         if invocation.subcommand == "merge" and "--ff-only" not in invocation.args:
-            print("git merge")
+            print("git merge origin/master" if "origin/master" in invocation.args else "git merge")
             return 0
     return 1
+
+
+def mode_publish_review_mode(command: str) -> int:
+    matched = False
+    for invocation in command_invocations(command):
+        if posixpath.basename(invocation.executable) != "publish-review-package.sh":
+            continue
+        matched = True
+        args = invocation.args
+        create_count = args.count("--create-pr")
+        update_positions = [index for index, arg in enumerate(args) if arg == "--update-pr"]
+        if create_count == 1 and not update_positions:
+            print("create")
+            return 0
+        if create_count == 0 and len(update_positions) == 1:
+            index = update_positions[0]
+            if index + 1 < len(args) and args[index + 1].isdigit() and int(args[index + 1]) > 0:
+                print("update")
+                return 0
+        print("invalid")
+        return 0
+    return 1 if not matched else 0
 
 
 def mode_dangerous_pattern(command: str) -> int:
@@ -576,6 +598,8 @@ def main() -> int:
         return mode_force_lease_non_work(command)
     if mode == "task-acceptance-git":
         return mode_task_acceptance_git(command)
+    if mode == "publish-review-mode":
+        return mode_publish_review_mode(command)
     if mode == "dangerous-pattern":
         return mode_dangerous_pattern(command)
     if mode == "invokes":

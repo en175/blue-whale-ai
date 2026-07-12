@@ -36,6 +36,40 @@ scripts/start-task-worktree.sh --type docs --no-issue --summary 补全工作树�
 
 脚本生成 Work Tree 目录名，Agent 不需要设计路径。macOS/Linux/Git Bash 可使用 `.sh` 薄包装；Windows PowerShell/CMD 使用 `py -3 scripts/start-task-worktree.py ...`。两者运行同一个 Python 标准库实现。
 
+### Windows（Git Bash）手动验证
+
+`.sh` wrapper 在 Git Bash 下探测 Python 3 的顺序为 `python3`（命中 Microsoft Store 桩则跳过）→ `py -3` → 报错引导。CI 矩阵不覆盖 Windows，以下步骤需在 Windows 手动执行并记录结果。
+
+前置：已装真正的 Python 3（python.org 安装包或 Microsoft Store 正式版），`py` launcher 随安装可用；Git Bash（Git for Windows 自带）。
+
+1. 确认 `py -3` 可用、未被 Store 桩遮蔽：
+
+   ```bash
+   py -3 --version
+   ```
+
+   预期打印 `Python 3.x.x`。若报「Python was not found」，说明 Store 的 `python3` 应用执行别名在 PATH 最前，需在「设置 → 应用 → 高级应用设置 → 应用执行别名」关闭 `python3`/`python`，或保证 `py -3` 在 PATH 中早于 `WindowsApps`。
+
+2. 在主 checkout（Git Bash）运行开工入口，验证结构化中文分支生成：
+
+   ```bash
+   bash scripts/start-task-worktree.sh --type chore --no-issue --summary 补全工作树使用规范
+   ```
+
+   预期退出码 0，stdout 含「已创建中文任务分支：chore/补全工作树使用规范」与 Work Tree 路径。
+
+3. 验证 UTF-8 中文分支名往返：
+
+   ```bash
+   git -C <Work-Tree-路径> branch --show-current
+   ```
+
+   预期正确打印 `chore/补全工作树使用规范`，中文无乱码；随后推送时 pre-push 接受该中文名（pre-push 拒绝/接受的逻辑由 `scripts/tests/test_start_task_worktree.py` 黑盒覆盖，Windows 侧只需确认中文名不被 Git Bash 编码损坏）。
+
+4.（可选）验证 Store 桩检测：临时把 `WindowsApps` 放到 PATH 最前再跑步骤 2，预期 wrapper 跳过桩、改走 `py -3` 成功；临时移除 `py` 后再跑，预期非零退出且 stderr 含「Microsoft Store 桩」引导。
+
+每次 Windows 环境的 Python/Git Bash 升级或开工入口改动后，执行人在此记录通过结果（日期 + Python 版本 + Git Bash 版本）。
+
 ## 用户本地集成区
 
 本地 `master` 由用户控制。Agent 不自动 stash、清理、rebase 或发布。开工入口只在主 checkout 干净时同步：保留本地 ahead 提交，并融合 `origin/master`；dirty 或合并冲突都会停止并保留原状态。
@@ -122,28 +156,69 @@ PR 合并后在该 Work Tree 运行 `scripts/cleanup-task-worktree.sh`，与普�
 scripts/cleanup-release-branch.sh --user-authorized <发布包装分支>
 ```
 
-## 发布审查包
+## 发布前同步
 
-用户明确授权发布审查包后，在待发布工单分支执行：
+模型应先依据本节主动检查分支与 `origin/master`，Hook 只在误走直接 merge/push 时兜底。任务/发布包装分支落后时运行：
 
 ```bash
-scripts/publish-review-package.sh --user-authorized
+scripts/sync-task-from-origin.sh sync --json
 ```
 
-脚本是发布审查包的唯一标准入口。`--user-authorized` 表示 Agent 已从当前对话取得明确授权，Claude Code 与 Codex Hook 均无二次弹框放行。它只做 Git 安全检查和推分支：
+入口固定 rebase，不自动 fallback 到 merge；它在 worktree 私有 git dir 建立恢复文件和 backup ref。核心状态：
 
-- 当前必须是结构化中文任务/发布包装 Work Tree 分支；策略升级前已存在的远程旧分支可完成收尾。
-- 工作区必须干净。
-- 当前分支必须包含最新 `origin/master`。
-- 推送当前分支到远程；远程分支已存在时使用 `--force-with-lease` 安全更新。
+- `UP_TO_DATE`：无需同步，HEAD 未改写；
+- `SYNCED`：rebase 与 `git diff --check` 完成，随后由 Agent 运行范围化测试；
+- `REBASE_CONFLICT_ABORTED`：已自动 abort 并恢复同步前 HEAD。Agent 根据输出的 commit、冲突文件和三方 SHA 解释语义差异、给出推荐方案后停止；
+- `VERIFICATION_FAILED`：保留恢复点，不得推送。
 
-禁止直接执行 `git push` 绕过该入口；直接 push 会被 Hook 硬拦。旧脚本 `scripts/publish-task-branch.sh` 已废弃，只会提示改用标准入口。
+推送前测试失败时可运行 `scripts/sync-task-from-origin.sh rollback --json`。进入 push 前入口先持久化 fail-closed 状态，之后即使进程中断或状态确认写入失败也禁止自动 rollback。远端核验成功后先运行 `scripts/verify-pr-update.sh ...` 记录核验，再运行 `finalize`。完整事务见 [ADR-0013](../adr/0013-open-pr-update-state-machine.md)。
 
-脚本不创建 Gitee PR。推送成功后会写入短期发布标记；随后按 `.gitee/PULL_REQUEST_TEMPLATE.md` 在 Gitee 创建 PR，目标分支为 `master`。创建 PR Hook 在 PreToolUse 校验该标记（`draft` 非 true、`target_branch=master`、`source_branch` 与发布标记一致），PostToolUse 创建成功后消费，不二次确认。PR 创建失败（404 / 网络 / 参数错）不消耗标记，可原地重试（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)）。PR 创建后必须停下来交给开发者审查；发布审查包授权不覆盖合并。
+## 发布审查包双模式
+
+发布入口必须且只能选择一种模式；旧的无模式调用立即拒绝：
+
+```bash
+# 首次发布并准备创建 PR
+scripts/publish-review-package.sh --user-authorized --create-pr --json
+
+# 审查修订后更新已有 PR
+scripts/publish-review-package.sh --user-authorized --update-pr <PR编号> --pr-snapshot <推送前临时JSON> --json
+```
+
+`--user-authorized` 表示 Agent 已从当前对话取得对应的创建或更新授权，Claude Code 与 Codex Hook 静默放行。两种模式都校验结构化任务分支、工作区干净及分支包含最新 `origin/master`；不满足时返回 `NEEDS_SYNC`，Agent 自动改走同步入口一次，不询问 merge/rebase 策略。
+
+- `--create-pr`：推送后写短期发布标记；Agent 按模板创建一次 `target=master`、非 draft PR并停下等待审查。
+- `--update-pr`：Agent 先通过 Gitee MCP 读取 PR 并规范化为临时快照（IID、opened、source、target、head、conflict、changed_files、fetched_at）；入口要求远端同名源分支存在，硬校验快照和冻结范围，并使用同步事务捕获的旧 SHA 做显式 `force-with-lease`。合法新增范围逐项使用 `--allow-scope-file <路径>` 声明。
+- 推送后校准 PR 描述并重新读取快照，运行 `scripts/verify-pr-update.sh --update-pr <PR编号> --pr-snapshot <推送后临时JSON> --json`。只有返回 `PR_UPDATE_VERIFIED` 后才可 `finalize` 和宣布完成；快照临时文件不进仓，完成后删除。
+
+快照是 Agent 对 Gitee MCP 实时响应的规范化投影，不是人工填写的判断。临时文件必须为 JSON object，权限 `0600`，字段契约如下（`fetched_at` 距调用不得超过 300 秒）：
+
+```json
+{
+  "pull_request_id": 65,
+  "state": "opened",
+  "source_branch": "feature/工单-中文简述",
+  "target_branch": "master",
+  "head_sha": "40位GitSHA",
+  "conflict": false,
+  "changed_files": ["path/to/file"],
+  "fetched_at": 1783872000
+}
+```
+
+首次创建 PR 前若发生过同步事务，创建成功后同样用新 PR 的 IID 和推送后快照运行 `verify-pr-update.sh`，再 `finalize`；create/update 的远端硬终点一致。
+
+PR 更新授权按本轮意图判断：明确“修复后更新/重新推送 PR”覆盖本轮修订、同步、范围化测试、推送、描述校准和远端核验，不对内部步骤重复询问；只要求“修复”但未表达远端更新时停在本地 commit。
+
+PR 创建后业务范围冻结，只允许本 PR 的 review 修订、测试、文档闭环与同步结果；新工单另开分支。机器校验提交/文件/merge/远端 SHA，Agent 对照 PR、Issue 和 review 反馈审查语义范围。
+
+禁止直接执行 `git push` 绕过入口；直接 push 会被 Hook 硬拦。旧脚本 `scripts/publish-task-branch.sh` 已废弃，只会提示选择明确模式。
+
+create 模式的发布标记由创建 PR Hook 在 PreToolUse 校验（`draft` 非 true、`target_branch=master`、`source_branch` 匹配），PostToolUse 创建成功后消费。创建失败不消耗，可原地重试（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)）。update 模式不使用发布标记。
 
 **标记位置契约**：发布标记按来源分支隔离，存于 git common dir（`<repo>/.git/agent-release-review-package-<branch-slug>`，分支名中的 `/` 转义为 `%`）。common dir 对主 checkout 与所有 task worktree 是**同一物理路径**，因此 **Claude session 在主 checkout 还是 worktree 启动均对称生效**——标记读写不依赖 session 启动位置。此契约修复了「主 checkout session + cd worktree 跑发布」时建 PR 被误拦的缺陷（标记写在 worktree git path、hook 在主仓 git path 找不到）。
 
-PR 未合并前，本地分支、远程源分支和 task worktree 都保留，以便处理审查反馈。
+PR 未合并前，本地分支、远程源分支和 task worktree 都保留，以便处理审查反馈；已有 PR 更新统一走 update 模式。
 
 合并 PR 必须在当前对话中另获明确授权。Agent 自动生成绑定企业、仓库和 PR ID 的一次性凭证后调用 MCP；PreToolUse 按 `tool_use_id` 原子占用凭证，避免并发复用，只有 `tool_response.isError=false` 的明确成功 PostToolUse 才消费。失败或畸形结果释放占用并保留凭证。合并成功授权同时覆盖按分支形态执行上述安全清理，不再单独询问。
 

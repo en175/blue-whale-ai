@@ -115,7 +115,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 ### 测试边界（seam）
 
-5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现，只测这条边界。`confirm-release-action.sh` 覆盖标准入口无输出放行、复合命令/Git alias 绕过硬拦、凭证 TTL/对象隔离/并发占用、Post 明确成功消费和失败/畸形保留。发布标记与动作凭证测试均在临时 Git 仓库运行，不读写真实 common dir。
+5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现，只测这条边界。`confirm-release-action.sh` 覆盖同步/create/update 标准入口无输出放行、缺授权/缺模式/直接 push/错误 merge 同步及复合命令/Git alias 绕过硬拦、凭证 TTL/对象隔离/并发占用、Post 明确成功消费和失败/畸形保留。Hook 不执行同步、不选择发布模式；正常状态机由 `CLAUDE.md` 和 ADR-0013 驱动。发布标记与动作凭证测试均在临时 Git 仓库运行，不读写真实 common dir。
 
 夹具还校验 Codex 挂载层：
 - `.codex/hooks.json` 必须存在。
