@@ -81,12 +81,17 @@ NodeItem/Card 是它呈现给用户的视图。
 _Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeItem 是结果视图;
 把 Job 与 Asset 混为一谈 —— Job 是过程,Asset 是它的产物。
 
+**GenerationAuthorizationGate（生成授权门）**:
+Agent 创建 GenerationJob 前对用户意图与风险的分类：明确且在默认成本额度内则直接执行；
+存在关键歧义则继续对齐；高成本或不可逆操作则先取得自然语言确认。
+_Avoid_: 每次生成都确认、确认按钮、把需求对齐误称为授权。
+
 **展示边界(画布 vs 对话)**:
 Canvas 只承载 Asset(图片 / 视频)节点 —— 即生成素材(中间结果或最终结果)。
 所有过程性文字内容(Brief 摘要、Skill 推荐、脚本 / 分镜、图片理解摘要、Review、
 visible_reasoning 思考过程)都在 AgentChatPanel 对话流里以文字或文字卡展示,
 **不进画布**。一句话:**画布 = 素材,对话 = 过程**。
-确认 / 修改 / 重试一律通过对话自然语言表达(后端按 confirmation_gate 四分类处理),
+确认 / 修改 / 重试一律通过对话自然语言表达，并遵循 GenerationAuthorizationGate，
 画布节点与对话区都**不设确认按钮**。
 _Avoid_: 把 Brief / Skill / 分镜 / Review 做成画布节点;在画布或对话里加确认按钮;
 把提示词、worker 名、文件路径等内部信息展示给用户。
