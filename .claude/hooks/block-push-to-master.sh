@@ -43,7 +43,7 @@ BLOCKED: 直推 ${target_ref} 被拦截。
 - 所有进 master 的改动统一走：开分支 → 推分支 → Gitee 建 PR → 服务端合并
 - 用户授权合并也走流程（分支→PR→合并），不绕过 PR
 - hotfix/* 同样走分支→PR，无特权
-- 详见 CLAUDE.md「Gitee 工作流」与 docs/adr/0003
+- 详见 CLAUDE.md「Gitee 工作流」与 docs/agents/commit-and-review.md
 EOF
     exit 2
     ;;
