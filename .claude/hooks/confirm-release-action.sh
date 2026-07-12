@@ -228,16 +228,18 @@ if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes publ
   exit 0
 fi
 
-# Bash: 标准本地任务验收入口（worktree 工单分支 commit，本地可逆，非发布动作）。
-# 出现即放行，不校验 --user-authorized（用户确认环节落在 merge 本地 master 前）。
-if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes commit-task-for-review.sh; then
-  exit 0
-fi
-
+# Bash: 合入本地 master 入口（发布链路关键检查点）。必须在 commit-task 白名单之前校验：
+# 否则 `commit-task ... && merge-task <无授权>` 会被 commit-task 的 exit 0 短路，跳过 merge 授权。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes merge-task-to-local-master.sh; then
   if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes merge-task-to-local-master.sh --user-authorized; then
     block "合入用户本地 master 入口缺少 --user-authorized。必须先获得用户明确授权。"
   fi
+  exit 0
+fi
+
+# Bash: 标准本地任务验收入口（worktree 工单分支 commit，本地可逆，非发布动作）。
+# 出现即放行，不校验 --user-authorized（用户确认环节落在 merge 本地 master 前）。
+if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes commit-task-for-review.sh; then
   exit 0
 fi
 

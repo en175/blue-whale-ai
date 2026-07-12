@@ -708,6 +708,9 @@ assert_stdout_empty "release: bash -lc publish-review-package 无交互输出"
 # 标准入口不能掩盖同一复合命令中的裸 Git 操作。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/commit-task-for-review.sh -m \"feat: x\" && git commit -m \"bypass\""}}'
 assert_exit 2 "release: 标准 commit 入口后裸 commit 仍硬拦"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/commit-task-for-review.sh -m \"feat: x\" && scripts/merge-task-to-local-master.sh feature/x"}}'
+assert_exit 2 "release: commit-task 入口后接无授权 merge-task 仍硬拦"
+assert_stderr_has "--user-authorized" "release: 复合命令提示 merge 授权"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh --user-authorized feature/x && git merge --no-ff feature/y"}}'
 assert_exit 2 "release: 标准 merge 入口后裸 merge 仍硬拦"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized && git commit -m \"bypass\""}}'
