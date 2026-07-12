@@ -172,9 +172,8 @@ def synchronize(root: Path, as_json: bool) -> int:
     rebase = git(root, "rebase", "origin/master", check=False)
     if rebase.returncode != 0:
         conflicts = git_output(root, "diff", "--name-only", "--diff-filter=U").splitlines()
-        rebase_head = git_output(root, "rev-parse", "--verify", "REBASE_HEAD") if git(
-            root, "rev-parse", "--verify", "REBASE_HEAD", check=False
-        ).returncode == 0 else ""
+        rebase_head_probe = git(root, "rev-parse", "--verify", "REBASE_HEAD", check=False)
+        rebase_head = rebase_head_probe.stdout.strip() if rebase_head_probe.returncode == 0 else ""
         abort = git(root, "rebase", "--abort", check=False)
         restored_head = git_output(root, "rev-parse", "HEAD")
         if abort.returncode != 0 or restored_head != original_head:

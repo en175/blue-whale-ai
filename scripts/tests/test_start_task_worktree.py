@@ -12,6 +12,7 @@ from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1] / "start-task-worktree.py"
 SOURCE_SH = Path(__file__).resolve().parents[1] / "start-task-worktree.sh"
+SOURCE_LIB = Path(__file__).resolve().parents[1] / "lib" / "python3-command.sh"
 SOURCE_PRE_PUSH = Path(__file__).resolve().parents[2] / ".githooks/pre-push"
 
 
@@ -42,6 +43,7 @@ class StartTaskWorktreeTest(unittest.TestCase):
 
         self.assertTrue(SOURCE.exists(), "production entrypoint does not exist yet")
         self.assertTrue(SOURCE_SH.exists(), "shell compatibility wrapper does not exist")
+        self.assertTrue(SOURCE_LIB.exists(), "shared python3 launcher lib does not exist")
         self.assertTrue(SOURCE_PRE_PUSH.exists(), "pre-push hook does not exist")
         run("git", "init", "--bare", "--initial-branch=master", self.origin, cwd=self.root)
         run("git", "init", "--initial-branch=master", self.repo, cwd=self.root)
@@ -51,6 +53,9 @@ class StartTaskWorktreeTest(unittest.TestCase):
         scripts.mkdir()
         shutil.copy2(SOURCE, scripts / SOURCE.name)
         shutil.copy2(SOURCE_SH, scripts / SOURCE_SH.name)
+        lib = scripts / "lib"
+        lib.mkdir()
+        shutil.copy2(SOURCE_LIB, lib / SOURCE_LIB.name)
         hooks = self.repo / ".githooks"
         hooks.mkdir()
         shutil.copy2(SOURCE_PRE_PUSH, hooks / "pre-push")

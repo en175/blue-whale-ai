@@ -130,7 +130,7 @@ def verify(args: argparse.Namespace, root: Path, data: dict[str, object]) -> int
     head = git(root, "rev-parse", "HEAD")
     validate_identity(data, args.iid, branch, head)
     if data["conflict"] is not False:
-        raise EvidenceError("PR conflict 必须明确为 false。")
+        raise EvidenceError("PR conflict 必须是 JSON 布尔 false（非字符串 \"false\"）。")
     local_files = changed_files(root)
     if sorted(set(str(item) for item in data["changed_files"])) != sorted(set(local_files)):
         raise EvidenceError("Gitee PR changed_files 与本地最终 diff 不一致。")
