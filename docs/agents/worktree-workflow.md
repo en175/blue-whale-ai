@@ -36,6 +36,40 @@ scripts/start-task-worktree.sh --type docs --no-issue --summary 补全工作树�
 
 脚本生成 Work Tree 目录名，Agent 不需要设计路径。macOS/Linux/Git Bash 可使用 `.sh` 薄包装；Windows PowerShell/CMD 使用 `py -3 scripts/start-task-worktree.py ...`。两者运行同一个 Python 标准库实现。
 
+### Windows（Git Bash）手动验证
+
+`.sh` wrapper 在 Git Bash 下探测 Python 3 的顺序为 `python3`（命中 Microsoft Store 桩则跳过）→ `py -3` → 报错引导。CI 矩阵不覆盖 Windows，以下步骤需在 Windows 手动执行并记录结果。
+
+前置：已装真正的 Python 3（python.org 安装包或 Microsoft Store 正式版），`py` launcher 随安装可用；Git Bash（Git for Windows 自带）。
+
+1. 确认 `py -3` 可用、未被 Store 桩遮蔽：
+
+   ```bash
+   py -3 --version
+   ```
+
+   预期打印 `Python 3.x.x`。若报「Python was not found」，说明 Store 的 `python3` 应用执行别名在 PATH 最前，需在「设置 → 应用 → 高级应用设置 → 应用执行别名」关闭 `python3`/`python`，或保证 `py -3` 在 PATH 中早于 `WindowsApps`。
+
+2. 在主 checkout（Git Bash）运行开工入口，验证结构化中文分支生成：
+
+   ```bash
+   bash scripts/start-task-worktree.sh --type chore --no-issue --summary 补全工作树使用规范
+   ```
+
+   预期退出码 0，stdout 含「已创建中文任务分支：chore/补全工作树使用规范」与 Work Tree 路径。
+
+3. 验证 UTF-8 中文分支名往返：
+
+   ```bash
+   git -C <Work-Tree-路径> branch --show-current
+   ```
+
+   预期正确打印 `chore/补全工作树使用规范`，中文无乱码；随后推送时 pre-push 接受该中文名（pre-push 拒绝/接受的逻辑由 `scripts/tests/test_start_task_worktree.py` 黑盒覆盖，Windows 侧只需确认中文名不被 Git Bash 编码损坏）。
+
+4.（可选）验证 Store 桩检测：临时把 `WindowsApps` 放到 PATH 最前再跑步骤 2，预期 wrapper 跳过桩、改走 `py -3` 成功；临时移除 `py` 后再跑，预期非零退出且 stderr 含「Microsoft Store 桩」引导。
+
+每次 Windows 环境的 Python/Git Bash 升级或开工入口改动后，执行人在此记录通过结果（日期 + Python 版本 + Git Bash 版本）。
+
 ## 用户本地集成区
 
 本地 `master` 由用户控制。Agent 不自动 stash、清理、rebase 或发布。开工入口只在主 checkout 干净时同步：保留本地 ahead 提交，并融合 `origin/master`；dirty 或合并冲突都会停止并保留原状态。

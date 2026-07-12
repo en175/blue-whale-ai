@@ -351,6 +351,86 @@ class StartTaskWorktreeTest(unittest.TestCase):
         self.assertIn("手动", result.stderr)
         self.assertFalse((self.root / "blue-whale-worktrees").exists())
 
+    def test_wrapper_skips_microsoft_store_python3_stub(self):
+        """合成 Store 桩（路径含 WindowsApps）且不提供 py launcher，验证 wrapper 跳过桩、报桩引导、不建 worktree。当前平台 PATH 注入模拟 Windows Git Bash 链路，非真 Windows 冒烟（真 Windows 见 docs/agents/worktree-workflow.md 手动验证）。"""
+        store_dir = self.root / "Microsoft" / "WindowsApps"
+        store_dir.mkdir(parents=True)
+        stub = store_dir / "python3"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            'echo "Python was not found; run from Microsoft Store" >&2\n'
+            "exit 9\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+
+        env = dict(os.environ)
+        env["PATH"] = "{}{}{}".format(store_dir, os.pathsep, env["PATH"])
+
+        result = subprocess.run(
+            ["bash", str(self.repo / "scripts/start-task-worktree.sh"),
+             "--type", "fix", "--no-issue", "--summary", "跳过桩检测场景"],
+            cwd=str(self.repo),
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertNotEqual(0, result.returncode, result.stderr)
+        self.assertIn("桩", result.stderr)
+        # 桩未被 exec：stderr 不应含桩的特征输出
+        self.assertNotIn("Python was not found", result.stderr)
+        self.assertFalse((self.root / "blue-whale-worktrees").exists())
+
+    def test_wrapper_falls_back_to_py_launcher_when_python3_is_stub(self):
+        """合成桩 + 假 py launcher（shift 去掉 -3，转给真 python3 绝对路径），验证 wrapper 跳过桩后 fallback py -3 成功建 worktree。逻辑等价模拟，非真 Windows 冒烟（真 Windows 见 docs/agents/worktree-workflow.md 手动验证）。"""
+        real_python3 = shutil.which("python3")
+        self.assertIsNotNone(real_python3, "测试机需有真 python3")
+
+        store_dir = self.root / "Microsoft" / "WindowsApps"
+        store_dir.mkdir(parents=True)
+        stub = store_dir / "python3"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            'echo "Python was not found; run from Microsoft Store" >&2\n'
+            "exit 9\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+
+        py_dir = self.root / "py-bin"
+        py_dir.mkdir()
+        fake_py = py_dir / "py"
+        fake_py.write_text(
+            "#!/usr/bin/env bash\n"
+            "shift\n"
+            'exec "{real}" "$@"\n'.format(real=real_python3),
+            encoding="utf-8",
+        )
+        fake_py.chmod(0o755)
+
+        env = dict(os.environ)
+        env["PATH"] = "{}{}{}{}{}".format(
+            store_dir, os.pathsep, py_dir, os.pathsep, env["PATH"]
+        )
+
+        result = subprocess.run(
+            ["bash", str(self.repo / "scripts/start-task-worktree.sh"),
+             "--type", "fix", "--no-issue", "--summary", "回退py启动器场景"],
+            cwd=str(self.repo),
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertNotIn("Python was not found", result.stderr)
+        task = self.assert_worktree_matches_master()
+        branch = run("git", "branch", "--show-current", cwd=task).stdout.strip()
+        self.assertEqual("fix/回退py启动器场景", branch)
+
 
 if __name__ == "__main__":
     unittest.main()
