@@ -24,7 +24,7 @@
 3. **合并只用 merge** — 禁 squash/rebase。合并不自动删源分支，事后手动清理。
 4. **可写任务先建 task worktree** — 只读调查/审查可直接进行；一旦任务可能写文件或改变 Git 状态，必须先从主 checkout 运行唯一入口：`scripts/start-task-worktree.sh --type <类型> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>`。入口成功前禁止写入。
 5. **Work Tree 基于同步后的本地 master** — 入口要求主 checkout 位于干净 `master`，先 fetch `origin/master`；远程领先则 fast-forward，本地领先则保留，双方分叉则普通 merge。冲突自动 abort 且不创建 Work Tree；成功后从同步后的精确 SHA 创建中文任务分支。
-6. **授权无二次弹框** — 只认当前对话中的人类授权；Agent 自动使用 `--user-authorized` 或一次性凭证，Hook 只纠偏和硬拦，不返回 ASK。
+6. **授权无二次弹框** — 只认当前对话中的人类授权；Agent 自动使用 `--user-authorized` 或一次性凭证（提交入口除外：worktree 工单分支 commit 本地可逆，出现即放行），Hook 只纠偏和硬拦，不返回 ASK。
 
 `CLAUDE.md` 是团队 Agent 规则的权威源。Claude Code 直接读取本文件；其他 Agent 通过根目录 `AGENTS.md` 索引到本文件。`.claude/hooks/block-master-edit.sh` 只是 Claude Code 的主检出区写入兜底，不替代上述前置规则，也不作为跨平台流程核心。
 

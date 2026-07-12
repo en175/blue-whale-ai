@@ -3,7 +3,9 @@
 - **状态**：Accepted
 - **日期**：2026-07-09
 - **决策者**：JJNNReno（与 Codex 经 `/grill-with-docs` 会话共同得出）
-- **更新**：2026-07-12，任务 Work Tree 基线改为同步后的本地 `master`，以保留团队本地优先的模块化开发方式。
+- **更新**：
+  - 2026-07-12，任务 Work Tree 基线改为同步后的本地 `master`，以保留团队本地优先的模块化开发方式。
+  - 2026-07-12，任务验收 commit 门槛移除（IK0E1A）：完成子 issue 即直接走 `commit-task-for-review.sh` 落盘 commit（无需 `--user-authorized`），用户确认环节后移到 merge 本地 master 前。
 
 > 授权交互方式已由 [ADR-0012](0012-agent-noninteractive-authorization.md) 更新：标准入口带 `--user-authorized` 时无二次确认，直接 Git 绕过仍由 Hook 硬拦。
 
@@ -17,7 +19,7 @@ PRD 会拆成多个子 issue。旧流程把每个 Agent 可写任务和工单分
 
 入口要求主 checkout 位于干净的 `master`，先 fetch `origin/master`，再按历史关系执行最小同步：本地包含远程则不改写，本地落后则 fast-forward，双方分叉则普通 merge。冲突时自动 abort 且不创建 Work Tree。同步成功后记录精确 SHA，并从该 SHA 创建任务分支，从而同时保留本地领先提交与远程最新提交。
 
-Agent 完成子 issue 后停在任务验收分支，默认交付未提交 diff 和验证结果。用户确认后，Agent 才能通过 `scripts/commit-task-for-review.sh --user-authorized -m "<message>"` 在任务分支 commit，并通过 `scripts/merge-task-to-local-master.sh --user-authorized <任务分支>` 以 `git merge --no-ff` 合入用户本地 `master`；合入前本地 `master` 必须干净。用户决定发布时，仍通过同一入口从本地 `master` 当前状态创建结构化中文发布包装 Work Tree，再推 PR 到 `origin/master`。PR 合并进远程 `master` 必须单独授权。
+Agent 完成子 issue 后直接通过 `scripts/commit-task-for-review.sh -m "<message>"` 在任务分支落盘 commit（本地可逆，无需授权门槛），默认交付一个 commit 和验证结果。用户确认 commit 无问题后，Agent 才能通过 `scripts/merge-task-to-local-master.sh --user-authorized <任务分支>` 以 `git merge --no-ff` 合入用户本地 `master`；合入前本地 `master` 必须干净。用户决定发布时，仍通过同一入口从本地 `master` 当前状态创建结构化中文发布包装 Work Tree，再推 PR 到 `origin/master`。PR 合并进远程 `master` 必须单独授权。
 
 ## 后果
 
@@ -26,6 +28,6 @@ Agent 完成子 issue 后停在任务验收分支，默认交付未提交 diff �
 - `scripts/start-task-worktree.py` 是同步、命名与创建的唯一逻辑入口；`.sh` 仅负责跨环境寻找 Python 3。
 - 创建前要求本地 `master` 干净，但不要求它与远程完全相同；本地 ahead 是合法且必须保留的状态。
 - merge 冲突会中止开工，不允许 Agent 绕过同步后直接写入。
-- 本地任务验收 commit 与本地 `master` 合入有标准入口和 Hook 兜底；带授权参数无交互放行，直接 Git 绕过硬拦。
+- 本地任务验收 commit 有标准入口和 Hook 兜底（提交入口出现即放行，无需授权）；本地 `master` 合入有标准入口和 Hook 兜底，带授权参数无交互放行；直接 Git 绕过硬拦。
 - 发布和远程合并仍受发布授权 hook 约束，禁止 Agent 擅自 push、开 PR 或合并 PR。
 - 新发布包装统一使用 task Work Tree 和 `cleanup-task-worktree.sh`；策略升级前已有的主 checkout 发布包装分支可用 `cleanup-release-branch.sh` 完成收尾，不引入迁移状态机。

@@ -113,12 +113,12 @@ _Avoid_: 直接在用户本地集成区写入任务
 
 **任务验收分支**:
 Agent 完成子 issue 后停留的 worktree 分支，用于用户 review 或微调。默认终点是
-worktree 分支上的未提交 diff 与验证结果汇报；只有用户确认该任务分支无问题后，
-才进入 commit 并合并到用户本地集成区的阶段。确认后通过
-`scripts/commit-task-for-review.sh --user-authorized -m "<message>"` 提交任务分支，
-再由用户本地集成区通过 `scripts/merge-task-to-local-master.sh --user-authorized <任务分支>`
-以 `git merge --no-ff` 合入，以保留子任务边界。该本地合入默认可由 Agent 在用户
-明确确认后执行；用户也可以选择手动合入。
+worktree 分支上的一个 commit 与验证结果汇报：完成子 issue 即直接通过
+`scripts/commit-task-for-review.sh -m "<message>"` 落盘（worktree 工单分支 commit
+是本地可逆动作，无需用户授权门槛）；用户确认该 commit 无问题后，才进入合并到
+用户本地集成区的阶段，通过 `scripts/merge-task-to-local-master.sh --user-authorized <任务分支>`
+以 `git merge --no-ff` 合入，以保留子任务边界（合入门槛保持不变）。该本地合入
+默认可由 Agent 在用户明确确认后执行；用户也可以选择手动合入。
 _Avoid_: 子 issue 完成后自动发布 PR、自动合并到 master
 
 **发布包装分支**:
