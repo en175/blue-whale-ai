@@ -64,7 +64,6 @@ BLOCKED: ${reason}
 - 发布后用 list_enterprise_issues(project_id, search=ident) 反查确认仓库可见
 
 详见 docs/agents/issue-tracker.md「创建 issue」。
-决策见 docs/adr/0007-issue-must-link-repo.md、0008-sub-issues-must-inherit-repo.md 与 0014-root-issue-must-link-program.md。
 EOF
   exit 2
 }
