@@ -3,7 +3,7 @@
 - **状态**：Accepted
 - **日期**：2026-07-05
 - **决策者**：JJNNReno（与 Claude Code 经 `/grill-with-docs` 会话共同得出）
-- **更新**：2026-07-12，开工同步由 [ADR-0010](0010-local-master-is-user-integration-zone.md) 的唯一 Work Tree 入口完成；本文保留任务分支后续发布前的提醒与阻断策略。
+- **更新**：2026-07-12，开工同步由 [ADR-0010](0010-local-master-is-user-integration-zone.md) 的唯一 Work Tree 入口完成；发布前被阻断后的显式恢复由 [ADR-0013](0013-open-pr-update-state-machine.md) 定义。本文保留提醒与阻断策略。
 
 ## 背景
 
@@ -35,7 +35,7 @@ Agent 写入任务前，通过唯一入口同步干净的本地 `master` 与 `or
 | 形态 | 行为 | 判定 |
 |---|---|---|
 | **A 自动同步** | 机器替你 fetch + rebase，撞冲突机器自解 | **否决**。冲突语义判断机器做不了，自动合 = 默默选边 = 「乱掉」真发生。 |
-| **B 自动阻断** ✅ | 机器检测落后、**拦住**你，逼你 rebase；冲突仍人/AI 解 | 采纳。机器保证「跳不过同步」，不替你解冲突。 |
+| **B 自动阻断** ✅ | Hook/入口检测落后并停止；Agent 依据规则显式调用同步入口，冲突不自动选边 | 采纳。机器保证「跳不过同步」，标准入口只负责可恢复 rebase/abort，不替人解决语义冲突。 |
 
 ### D3. pre-commit 落后检测 = 软提醒（不硬拦）
 
@@ -51,6 +51,8 @@ Agent 写入任务前，通过唯一入口同步干净的本地 `master` 与 `or
 ### D4. pre-push 硬拦（出口铁闸，已实现）
 
 `pre-push` 每次 push 自动 `fetch`，工单分支落后 `origin/master` → `exit 1` 拦截，提示先 rebase。已实现于 `.githooks/pre-push`。
+
+阻断后不是让 Hook 自动 rebase，也不是让 Agent临场选择 merge。Agent 依据 `CLAUDE.md` 主动运行 `scripts/sync-task-from-origin.sh sync --json`；入口在显式调用内建立恢复点、执行 rebase、冲突自动 abort。正常恢复状态机见 [ADR-0013](0013-open-pr-update-state-machine.md)。
 
 ### D5. 不加 escalation（纯两层）
 
@@ -72,6 +74,7 @@ Agent 写入任务前，通过唯一入口同步干净的本地 `master` 与 `or
 ## 后果
 
 - **正面**：同步机制化（不靠记忆）——三层防线 `AI 指令（前置）+ pre-commit 软提醒（早冒信号）+ pre-push 硬拦（不可跳过）`。冲突早冒、小颗粒。文档（README/CLAUDE.md/commit-and-review）与 hook 代码一致。
+- **职责不变**：文档驱动 Agent 主动调用标准同步入口；Hook 只提醒/阻断，不推进正常流程。
 - **负面 / 代价**：
   - 每次 commit 多一次 `git fetch origin master`（静默、秒级、失败放行），轻微延迟。
   - 软提醒可能被忽略——由 pre-push 铁闸兜底，不会事故。
@@ -83,3 +86,4 @@ Agent 写入任务前，通过唯一入口同步干净的本地 `master` 与 `or
 - 上游决策：[ADR-0003](0003-no-direct-push-to-master.md)（禁直推 master）、[ADR-0004](0004-branch-naming.md)（分支命名）
 - 规则源：`README.md` §1「工作流」、`CLAUDE.md`「提交与审查·远程-本地同步」、[docs/agents/commit-and-review.md](../agents/commit-and-review.md)「Hook 兜底清单」
 - 代码实现：`.githooks/pre-commit`（软提醒）、`.githooks/pre-push`（硬拦）
+- 恢复状态机：[ADR-0013](0013-open-pr-update-state-machine.md)、`scripts/sync-task-from-origin.py`

@@ -614,7 +614,8 @@ assert_exit 0 "release: 非发布 git status 放行"
 # git push 修改远程 → 硬拦，必须走标准发布审查包入口
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git push -u origin feature/x"}}'
 assert_exit 2 "release: 直接 git push 被拦截"
-assert_stderr_has "publish-review-package.sh --user-authorized" "release: 直接 git push 提示标准入口"
+assert_stderr_has "--create-pr" "release: 直接 git push 提示首次创建模式"
+assert_stderr_has "--update-pr" "release: 直接 git push 提示已有 PR 更新模式"
 
 # git 全局选项形式也应硬拦
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git -C ../blue-whale-worktrees/task push origin feature/x"}}'
@@ -650,10 +651,24 @@ run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash scripts/publish-review-
 assert_exit 2 "release: bash publish-review-package 缺参数被拦截"
 assert_stderr_has "--user-authorized" "release: bash publish-review-package 缺参数提示授权参数"
 
-# 新发布审查包入口带授权参数 → 无交互放行
+# 新发布审查包入口带授权但缺模式 → fail closed
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized"}}'
-assert_exit 0 "release: publish-review-package 授权入口放行"
-assert_stdout_empty "release: publish-review-package 无交互输出"
+assert_exit 2 "release: publish-review-package 缺模式被拦截"
+assert_stderr_has "--create-pr" "release: publish-review-package 缺模式提示 create"
+assert_stderr_has "--update-pr" "release: publish-review-package 缺模式提示 update"
+
+# create/update 显式单模式 + 授权 → 无交互放行
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized --create-pr"}}'
+assert_exit 0 "release: publish-review-package create 授权入口放行"
+assert_stdout_empty "release: publish-review-package create 无交互输出"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized --update-pr 65"}}'
+assert_exit 2 "release: publish-review-package update 缺 PR 快照被拦截"
+assert_stderr_has "--pr-snapshot" "release: publish-review-package update 缺快照提示"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized --update-pr 65 --pr-snapshot /tmp/pr-65.json"}}'
+assert_exit 0 "release: publish-review-package update 授权入口放行"
+assert_stdout_empty "release: publish-review-package update 无交互输出"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized --create-pr --update-pr 65"}}'
+assert_exit 2 "release: publish-review-package 双模式被拦截"
 
 # 直接本地 commit / merge --no-ff 硬拦，要求改走标准入口。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git commit -m \"feat: task slice\""}}'
@@ -673,6 +688,14 @@ assert_stderr_has "merge-task-to-local-master.sh --user-authorized" "release: �
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge feature/x"}}'
 assert_exit 2 "release: 直接 git merge 工单分支硬拦"
 assert_stderr_has "merge-task-to-local-master.sh --user-authorized" "release: 直接 git merge 工单分支指向标准入口"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge origin/master"}}'
+assert_exit 2 "release: 直接 merge origin/master 硬拦"
+assert_stderr_has "sync-task-from-origin.sh sync" "release: 同步 merge 指向 rebase 同步入口"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/sync-task-from-origin.sh sync --json"}}'
+assert_exit 0 "release: 标准同步入口静默放行"
+assert_stdout_empty "release: 标准同步入口无 Hook 输出"
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge --ff-only origin/master"}}'
 assert_exit 0 "release: git merge --ff-only 同步放行"
@@ -695,15 +718,15 @@ run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/merge-task-to-local-
 assert_exit 0 "release: merge-task-to-local-master 授权入口放行"
 assert_stdout_empty "release: merge-task-to-local-master 无交互输出"
 
-# bash 包裹新发布审查包入口带授权参数 → 仍应无交互放行
-run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash scripts/publish-review-package.sh --user-authorized"}}'
-assert_exit 0 "release: bash publish-review-package 授权入口放行"
-assert_stdout_empty "release: bash publish-review-package 无交互输出"
+# bash 包裹新发布审查包入口带授权和模式 → 仍应无交互放行
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash scripts/publish-review-package.sh --user-authorized --create-pr"}}'
+assert_exit 0 "release: bash publish-review-package create 授权入口放行"
+assert_stdout_empty "release: bash publish-review-package create 无交互输出"
 
 # bash -lc 包裹标准入口仍应识别
-run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash -lc \"scripts/publish-review-package.sh --user-authorized\""}}'
-assert_exit 0 "release: bash -lc publish-review-package 授权入口放行"
-assert_stdout_empty "release: bash -lc publish-review-package 无交互输出"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash -lc \"scripts/publish-review-package.sh --user-authorized --update-pr 65 --pr-snapshot /tmp/pr-65.json\""}}'
+assert_exit 0 "release: bash -lc publish-review-package update 授权入口放行"
+assert_stdout_empty "release: bash -lc publish-review-package update 无交互输出"
 
 # 标准入口不能掩盖同一复合命令中的裸 Git 操作。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/commit-task-for-review.sh -m \"feat: x\" && git commit -m \"bypass\""}}'
@@ -713,7 +736,7 @@ assert_exit 2 "release: commit-task 入口后接无授权 merge-task 仍硬拦"
 assert_stderr_has "--user-authorized" "release: 复合命令提示 merge 授权"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh --user-authorized feature/x && git merge --no-ff feature/y"}}'
 assert_exit 2 "release: 标准 merge 入口后裸 merge 仍硬拦"
-run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized && git commit -m \"bypass\""}}'
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized --create-pr && git commit -m \"bypass\""}}'
 assert_exit 2 "release: 标准 publish 入口后裸 commit 仍硬拦"
 
 # 内联和仓库 Git alias 不能绕过 push / commit / merge 分类。
@@ -777,7 +800,7 @@ assert_file_exists "$(publish_marker_path feature/x)" "release: 非 draft PR Pre
 remove_publish_marker feature/x
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
 assert_exit 2 "release: 普通 PR 缺发布标记拦截"
-assert_stderr_has "publish-review-package.sh --user-authorized" "release: 普通 PR 缺发布标记提示标准入口"
+assert_stderr_has "--create-pr" "release: 普通 PR 缺发布标记提示 create 模式"
 
 # G+ 标记按分支隔离：写 feature/other 标记，PR 用 source=feature/x 只找 feature%x 文件，
 # 找不到 → 落到「缺标记」阻断（等效防伪造消费授权，失败模式从「不匹配」变为「缺标记」，
@@ -785,7 +808,7 @@ assert_stderr_has "publish-review-package.sh --user-authorized" "release: 普通
 write_publish_marker "feature/other"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
 assert_exit 2 "release: 跨分支 PR 找不到对应标记拦截"
-assert_stderr_has "publish-review-package.sh --user-authorized" "release: 跨分支 PR 缺标记提示"
+assert_stderr_has "--create-pr" "release: 跨分支 PR 缺标记提示 create 模式"
 remove_publish_marker feature/other
 
 # 过期发布标记 → 阻断并消费标记
@@ -1239,8 +1262,11 @@ assert_exit 2 "codex: 直接 git push 包装命令拦截"
 assert_stderr_has "直接 git push" "codex: 直接 git push 包装命令提示"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized"}}'
-assert_exit 0 "codex: release 授权入口无交互放行"
-assert_stdout_empty "codex: release 授权入口无输出"
+assert_exit 2 "codex: release 缺模式被拦"
+
+run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized --update-pr 65 --pr-snapshot /tmp/pr-65.json"}}'
+assert_exit 0 "codex: release update 授权入口无交互放行"
+assert_stdout_empty "codex: release update 授权入口无输出"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"git commit -m \"feat: task slice\""}}'
 assert_exit 2 "codex: direct commit 硬阻断"

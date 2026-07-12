@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Deprecated: use scripts/publish-review-package.sh --user-authorized.
+# Deprecated: use an explicit publish-review-package create/update mode.
 
 set -euo pipefail
 
 cat >&2 <<EOF
 ❌ publish-task-branch 已废弃。
 
-发布审查包必须使用唯一入口：
-  scripts/publish-review-package.sh --user-authorized
+发布必须显式选择入口模式：
+  首次创建：scripts/publish-review-package.sh --user-authorized --create-pr
+  更新已有：scripts/publish-review-package.sh --user-authorized --update-pr <PR编号> --pr-snapshot <临时JSON>
 
-该入口会在 Claude Code Hook 中触发一次用户确认；确认后推送当前工单分支，
-随后创建 target=master 的 PR。
+Agent 依据 CLAUDE.md 主动选择；Hook 只在缺授权、缺模式或绕过入口时阻断。
 EOF
 exit 2

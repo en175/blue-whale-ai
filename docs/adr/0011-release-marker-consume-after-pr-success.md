@@ -8,7 +8,7 @@
 
 ## 背景
 
-发布审查包流程（见 [ADR-0010](0010-local-master-is-user-integration-zone.md)）用 Claude Code `PreToolUse` hook（`.claude/hooks/confirm-release-action.sh`）做末梢防护：AI 创建 Gitee PR 前必须先走标准通道 `scripts/publish-review-package.sh --user-authorized` 领一张「发布标记」（TTL 900s，绑定分支 + target），hook 在 `validate_publish_marker` 里校验标记存在 / TTL / 分支匹配。
+首次发布流程（见 [ADR-0010](0010-local-master-is-user-integration-zone.md)、[ADR-0013](0013-open-pr-update-state-machine.md)）用 Claude Code `PreToolUse` hook（`.claude/hooks/confirm-release-action.sh`）做末梢防护：AI 创建 Gitee PR 前必须先走 `scripts/publish-review-package.sh --user-authorized --create-pr` 领一张「发布标记」（TTL 900s，绑定分支 + target），hook 在 `validate_publish_marker` 里校验标记存在 / TTL / 分支匹配。已有 PR 的 `--update-pr` 模式不创建或消费此标记。
 
 问题在于消费时机。决策前的实现：`validate_publish_marker` 在 PreToolUse 阶段**校验通过即 `consume_publish_marker`（`rm -f` 删标记）**，随后 `exit 0` 放行。但真正的 Gitee API 调用（`create_enterprise_repo_pull`）发生在 hook 放行**之后**，hook 感知不到 API 成败。
 
