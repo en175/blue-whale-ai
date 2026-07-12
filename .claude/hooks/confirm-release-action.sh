@@ -213,7 +213,7 @@ fi
 task_acceptance="$(printf '%s' "$COMMAND" | python3 "$PRETOOL" task-acceptance-git 2>/dev/null || true)"
 case "$task_acceptance" in
   "git commit")
-    block "检测到直接 git commit。请由 Agent 自动改走 scripts/commit-task-for-review.sh -m \"<message>\"。"
+    block "检测到直接 git commit。请由 Agent 自动改走 scripts/commit-task-for-review.sh -m \"<message>\"（首次提交），或 review 后修订改走 scripts/commit-task-for-review.sh --amend [-m \"<new-message>\"]。"
     ;;
   "git merge")
     block "检测到非 --ff-only 的直接 git merge。当前对话若已授权合入本地 master，请由 Agent 自动改走 scripts/merge-task-to-local-master.sh --user-authorized <branch>。"

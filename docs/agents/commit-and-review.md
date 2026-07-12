@@ -41,7 +41,7 @@
 
 ## 发布授权与审查门槛
 
-Agent 完成子 issue 后的默认终点是**任务验收分支上的一个 commit + 验证结果汇报**：完成即直接走 `scripts/commit-task-for-review.sh -m "<message>"` 落盘（worktree 工单分支 commit 是本地可逆动作，无需用户授权门槛），停在 commit 等 review。用户确认 commit 无问题后，Agent 才能通过 `scripts/merge-task-to-local-master.sh --user-authorized <branch>` 将该任务分支以 `merge --no-ff` 合入用户本地 `master`（合入门槛保持不变）。未经用户明确授权，Agent 禁止执行发布动作：
+Agent 完成子 issue 后的默认终点是**任务验收分支上的一个 commit + 验证结果汇报**：完成即直接走 `scripts/commit-task-for-review.sh -m "<message>"` 落盘（worktree 工单分支 commit 是本地可逆动作，无需用户授权门槛），停在 commit 等 review。用户 review commit 后若需修订，Agent 走 `scripts/commit-task-for-review.sh --amend`（默认保留原 message，`-m` 覆盖）覆盖最后 commit，维持一个子 issue 一个 commit 粒度。用户确认 commit 无问题后，Agent 才能通过 `scripts/merge-task-to-local-master.sh --user-authorized <branch>` 将该任务分支以 `merge --no-ff` 合入用户本地 `master`（合入门槛保持不变）。未经用户明确授权，Agent 禁止执行发布动作：
 
 - `git push`
 - 创建 PR
@@ -166,7 +166,7 @@ ________
 | 禁直推 master/main | 🔴 硬挡 | pre-push：任何本地直推 `master`/`main` 一律拦，合并只在 Gitee 服务端走 PR |
 | 工单分支落后拦截 | 🔴 硬挡 | pre-push：工单分支（前缀见 [branch-naming.md](branch-naming.md)）落后于 `origin/master` 时拒绝 push，强制先 rebase |
 | AI 破坏性 git 操作 | 🔴 硬挡 | 裸 `--force`/`-f`、对 `master`/`main` 强推、`reset --hard` / `clean -f` / `branch -D` / `checkout .` / `restore .` 均拦；工单分支上的 `--force-with-lease` 放行（前缀见 [branch-naming.md](branch-naming.md)） |
-| 本地任务验收入口 | 🔴 阻断 / 🟢 放行 | Claude/Codex PreToolUse（`confirm-release-action.sh`）：直接 `git commit`、非 `--ff-only` 的直接 `git merge` 硬拦并指向标准入口；提交入口 `commit-task-for-review.sh` 出现即放行（worktree commit 本地可逆，无需授权），合入入口 `merge-task-to-local-master.sh` 仍需 `--user-authorized` |
+| 本地任务验收入口 | 🔴 阻断 / 🟢 放行 | Claude/Codex PreToolUse（`confirm-release-action.sh`）：直接 `git commit`（含 `--amend`）、非 `--ff-only` 的直接 `git merge` 硬拦并指向标准入口（commit 文案同时指引首次 `-m` 与 review 后 `--amend`）；提交入口 `commit-task-for-review.sh` 出现即放行（worktree commit 本地可逆，无需授权；支持 `-m` 首次提交与 `--amend` review 后修订），合入入口 `merge-task-to-local-master.sh` 仍需 `--user-authorized` |
 | 工单分支落后软提醒 | 🟡 软提醒 | pre-commit：工单分支（前缀见 [branch-naming.md](branch-naming.md)）落后 `origin/master` 时 `echo` 提示落后提交数，**不拦 commit**（硬拦在 pre-push）。本地 `master` 不做落后提醒，它是用户本地集成区。见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md) |
 | squash/rebase 合并拦截 | 🔴 硬挡 | Claude PreToolUse（`block-squash-merge.sh`）：AI 调 `mcp__gitee-ent__merge_enterprise_pull` 时 `merge_method=squash`/`rebase` 一律拦，强制 **merge**（免改写 sha 致 `git branch -d` 失败 + 拦 `-D` 死锁，见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md)）。人网页操作拦不到，靠自觉 |
 | 发布动作标准入口 | 🔴 阻断 / 🟢 凭证放行 | Claude/Codex PreToolUse/PostToolUse（`confirm-release-action.sh`）：直接 `git push` 硬拦；发布入口带 `--user-authorized` 无交互放行并写 PR 标记；合并 PR / 创建 release 需 Agent 自动生成绑定对象的一次性凭证；Pre 按 `tool_use_id` 原子占用，明确成功 Post 消费，失败/畸形 Post 释放占用并保留至 TTL（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)、[ADR-0012](../adr/0012-agent-noninteractive-authorization.md)） |

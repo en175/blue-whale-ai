@@ -111,11 +111,20 @@ Agent 完成子 issue 后直接走提交入口落盘 commit（无需用户先确
 - 验证结果
 - 用户 review / 微调入口
 
+用户 review commit 后发现问题，Agent 修订完走提交入口 `--amend` 模式覆盖最后 commit，维持「一个子 issue 一个 commit」粒度：
+
+```bash
+scripts/commit-task-for-review.sh --amend              # 默认保留原 commit message
+scripts/commit-task-for-review.sh --amend -m "<new>"   # 覆盖 commit message
+```
+
+`--amend` 仅在该分支已有首次提交后可用（首次提交前 amend 会改写 worktree 基线，被入口拒绝）；入口在首次提交后拒绝再次首次提交并引导 `--amend`。worktree 验收分支 publish 前不 push，amend 改写历史安全。
+
 Agent 不自动合入本地 `master`、不自动推送、不自动开 PR。
 
 ## 合入用户本地集成区
 
-用户确认任务验收分支上的 commit 无问题后，Agent 可以在明确确认下执行本地合入；用户也可以手动合入。Agent 执行时：
+用户确认任务验收分支上的 commit 无问题后（若 review 发现问题，Agent 先走 `scripts/commit-task-for-review.sh --amend` 修订最后 commit 再确认），Agent 可以在明确确认下执行本地合入；用户也可以手动合入。Agent 执行时：
 
 1. 确认本地 `master` 工作区干净；不干净则报告状态并停止。
 2. 切回本地 `master`。
