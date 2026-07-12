@@ -73,9 +73,27 @@ Issue 发布入口仍为 MCP。原因：
 
 迁移会写真实 Gitee 数据，执行前必须单独确认。
 
+## 闭环验证（2026-07-12，IK0FRU 探针）
+
+迁移策略 step 3 的不确定性「Gitee 是否允许后改归属」由 IK0FRU 探针消除：
+
+- **根 issue 场景直接验证**：`update_enterprise_issue(IK0FL6, program_id=883843)` 成功，`get_enterprise_issue_detail(IK0FL6).program_id` 反查 = 883843（0 → 883843）。
+- **副作用**：单传 `program_id` 一个字段，`state` / `assignee` / `labels` 均无变化——无污染。（对比：同次 update 若附带 `label_ids` 含 `ready-for-agent`，state 会被企业看板自动化改成 `progressing`、assignee 被指派——系标签触发，与归属字段无关。）
+- **结论（根 issue 场景）**：Gitee **允许后改归属**。根 issue 走 step 1（`update` 补归属）即可，step 3（重建）不必要。子 issue 场景见下「覆盖范围」。
+
+**覆盖范围**：
+
+- 根 issue（`root_id=0`，如 IK0FL6）——**直接验证可行**。
+- 子 issue（带 `parent_id`，如 IJZ74*）——**未单独验证**。`program_id` 是工作项的字段级属性，`update` 改字段值一般不因 issue 层级（根/子）而异，故子 issue 预期同样允许后改归属；但本探针未直接证实，执行 IJZ74* 迁移时仍须按 step 2 反查确认后方可定论。
+
+据此，存量 `program_id=0` 根游离项的批量补挂（后续 ticket）走 `update_enterprise_issue(program_id=883843)` 路径，无需重建。
+
+参考：[IK0FRU](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK0FRU)（探针）、[IK0FL6](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK0FL6)（探针样本）。
+
 ## 参考
 
 - [ADR-0007：所有 Gitee issue 必须关联仓库](0007-issue-must-link-repo.md)
+- [ADR-0014：根 issue 必须归属项目](0014-root-issue-must-link-program.md)
 - [`docs/agents/issue-tracker.md`](../agents/issue-tracker.md)
 - [`docs/research/gitee-enterprise-subissues-mcp.md`](../research/gitee-enterprise-subissues-mcp.md)
 - 实测事件：`IJZ5WA` / `IJZ74J` / `IJZ74K` / `IJZ74L` / `IJZ74M` / `IJZ74N`
