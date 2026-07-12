@@ -28,7 +28,7 @@
 
 | branch | 动作 |
 |---|---|
-| `generation_in_progress` | 提示「还在生成中,等画布完成」,不推进,不启新 Job |
+| `generation_in_progress` | 读 `rules/decision_layer.md` generation_in_progress 细分：不取消不打断，按用户意图细分（等待/查询/不取消诚实回应/修改记下/不并行），记最后意图生成完提醒 |
 | `generation_failed` | 读 failed node 错误,提供「重试 / 修改 / 取消」 |
 | `product_switch` | 读 `rules/product_switch_p0.md` 按五类处理 |
 | `new_task` | 按 `suggested_route` 路由:lightweight → `workflows/direct_generation.md` 或 `image_generation_prompt.md`;full_canvas → `video_agent_canvas.md` |

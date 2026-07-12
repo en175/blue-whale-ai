@@ -44,6 +44,8 @@ review / 思考)不在画布,见下方"对话消息"。
 
 `title` 可变：`asset_understanding` 完成时走 `canvas_update` 推前端。用户手改后置 `is_user_titled=true`，后续 understanding 不再覆盖。
 
+> title 是辅助（无障碍 / 搜索），不是用户区分产品的主依据。画布全展示所有素材，用户靠看图点选认素材（见 `PRD/ORCHESTRATION-DECISIONS.md` 决策 2）。
+
 ### 对话消息(ChatMessage)
 
 过程性内容在 AgentChatPanel 对话流展示,**不进画布**。类型:
@@ -115,6 +117,7 @@ awaiting_confirm
 ## 画布写入规则
 
 - 只有图片 / 视频素材结果写成 canvas node。
+- 内容相同的上传图视为同一 asset（看内容不看文件名），去重不重复展示，复用已有 `asset_understanding`（见 `PRD/ORCHESTRATION-DECISIONS.md` 决策 6）。
 - brief / skill / 分镜 / review / asset_understanding / visible_reasoning 等过程内容必须写成 ChatMessage，不进画布。
 - `asset_understanding` 的**数据本体**挂 asset 表（`understanding_data`），既不进画布也不作为 ChatMessage 字段；ChatMessage 里的 `asset_understanding` 只是从数据本体派生的展示摘要。
 - node 必须绑定 `stage_id`。

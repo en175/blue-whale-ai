@@ -98,7 +98,7 @@ decision_context:
 
 | branch | 触发 | 主 Agent 动作 |
 |---|---|---|
-| `generation_in_progress` | `has_generating=true` | 提示等待，不推进，不启新 Job |
+| `generation_in_progress` | `has_generating=true` | 按细分处理（见「generation_in_progress 细分」） |
 | `generation_failed` | tiebreak 命中 `has_failed` | 读 failed node 错误，提供重试 / 修改 / 取消 |
 | `product_switch` | L1 `intent_direction=product_switch` | 读 `product_switch_p0.md` 分类处理（5 类） |
 | `new_task` | L1 `intent_direction=new_task` | 按 `suggested_route` 路由：lightweight → `direct_generation.md` / `image_generation_prompt.md`；full_canvas → `video_agent_canvas.md` |
@@ -191,7 +191,7 @@ L1 是**独立轻量 classifier**（haiku 级），不是主 Agent 自判。
 
 ```text
 switch(decision_branch):
-  generation_in_progress → 提示「还在生成中，等画布完成」，不启新 Job
+  generation_in_progress → 按细分处理（见「generation_in_progress 细分」）
   generation_failed      → 读 failed node，提供「重试 / 修改 / 取消」
   product_switch         → 读 product_switch_p0.md，按 5 类处理
   new_task               → 按 suggested_route 路由到 lightweight / full_canvas workflow
@@ -201,6 +201,22 @@ switch(decision_branch):
   confirm_pending        → 读 confirmation_gate.md，判四分类
   clarify                → 问一句「新建视频 / 修改当前画布 / 选 Skill」
 ```
+
+### generation_in_progress 细分（决策 7/8）
+
+生成链路不可打断：用户发起生图后，**默认不取消、不打断**，结果生成完返回画布成品，用户在确认门决定去留。分支内主 Agent 按用户意图细分（对齐 confirm_pending 四分类模式）：
+
+| 用户说 | 模型回应 |
+|---|---|
+| 好了吗 / 还在吗 | 提示生成中 |
+| 怎么样了 | 读状态 / preview（有则展示） |
+| 取消 / 不要了 | **不取消**，诚实说「生成已启动会跑完，结果出来你在画布决定」 |
+| 换 prompt 重来 | 不打断，记下意图，结果出来在确认门 revise |
+| 做另一个 | 不并行，记下排队，结果出来再接 |
+
+- 生成失败（Provider 自己报错）不算「取消」，走 `generation_failed`（重试 / 修改 / 取消，已有）
+- P0 不支持并行启新 Job
+- **生成中意图接上**（决策 8）：模型跨 turn 记住生成中用户表达的**最后一个**意图，生成完 `turn_done` 时主动提醒接上（如「成品回来了。你刚才说要换 prompt，要基于这版改还是重做？」）。多个意图只记最后一个。
 
 ## 推翻规则（主 Agent 可推翻 L1 软建议）
 

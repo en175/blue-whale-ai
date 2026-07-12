@@ -71,7 +71,8 @@ previous_product_context
 
 处理：
 
-- 将当前 `active_product_context` 移入 `previous_product_context`。
+- 将当前 `active_product_context` 移入 `previous_product_context`（**前提：当前 Brief 已 confirmed**）。
+- **Brief 未确认时**：半成品 Brief 文本不保留、不进 `previous_product_context`（不构成可恢复产品方向）；Brief 阶段已上传的图片 asset 保留在当前画布可复用；模型在 `visible_reasoning` 声明废弃 + 下一步，不弹确认。详见 `PRD/ORCHESTRATION-DECISIONS.md` 决策 1。
 - 用新产品建立新的 `active_product_context`。
 - 重新确认 Brief / Skill / 阶段计划，不能只重跑最后的视频或图片。
 - 旧内容不删除，但不再作为当前主线。
@@ -171,6 +172,7 @@ previous_product_context
 - 用户说“继续”不能触发产品切换。
 - 产品切换后，后续 Brief / Skill / 分镜 / 视觉仍要按确认门停住。
 - 确认门只检查当前 `active_product_context` 对应的 ready 节点。
+- product_switch 触发时，若当前 `awaiting_confirm` 的 Brief 未 confirmed，半成品 Brief 不进 `previous_product_context`（见第 2 类）。
 
 ## 禁止
 
