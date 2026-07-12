@@ -72,6 +72,6 @@ BLOCKED: 禁止在 master 分支直接 Edit/Write 文件。
 Agent 不得在本地 master 直接修改文件（最高红线）。
 - 请使用唯一入口创建 task worktree：scripts/start-task-worktree.sh --type fix --issue IK094T --summary 修复工作树写入护栏
 - 在 worktree 的工单分支上完成开发后，走 PR 流程合并
-- 详见 CLAUDE.md「Task Worktree」与 docs/adr/0010-local-master-is-user-integration-zone.md
+- 详见 CLAUDE.md「Task Worktree」与 docs/agents/worktree-workflow.md
 EOF
 exit 2
