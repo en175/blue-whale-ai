@@ -986,25 +986,38 @@ teardown_publish_test_repo
 # 防止正则退回 string-only 时 number 用例漏检（PR #11 / IJZ5WA 复现）。
 ISSUE_HOOK=block-issue-without-repo.sh
 
-# 字段缺失 → 拦
+# 字段全缺 → 拦
 run_hook "$ISSUE_HOOK" '{"tool_input":{}}'
 assert_exit 2 "issue: project_id 缺失拦截"
 
-# number 合法值 → 放行（schema 原生形态，回归基线核心）
+# 根 issue 只传 project_id（缺 program_id）→ 拦
 run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":48854568}}'
-assert_exit 0 "issue: project_id=number 放行"
+assert_exit 2 "issue: 根 issue 缺 program_id 拦截"
+assert_stderr_has "program_id" "issue: 根 issue 缺 program_id 提示"
 
-# number 0（Gitee 无关联哨兵）→ 拦
+# project_id number 0（Gitee 无关联哨兵）→ 拦
 run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":0}}'
 assert_exit 2 "issue: project_id=number 0 拦截"
 
-# string 形态合法值 → 放行
-run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":"48854568"}}'
-assert_exit 0 "issue: project_id=string 放行"
-
-# string "0" → 拦
+# project_id string "0" → 拦
 run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":"0"}}'
 assert_exit 2 "issue: project_id=string \"0\" 拦截"
+
+# project_id + program_id 都是 number 合法值 → 放行（schema 原生形态，回归基线核心）
+run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":48854568,"program_id":883843}}'
+assert_exit 0 "issue: project_id/program_id=number 放行"
+
+# project_id + program_id 都是 string 合法值 → 放行
+run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":"48854568","program_id":"883843"}}'
+assert_exit 0 "issue: project_id/program_id=string 放行"
+
+# 根 issue program_id=number 0（project_id 合法）→ 拦
+run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":48854568,"program_id":0}}'
+assert_exit 2 "issue: 根 issue program_id=number 0 拦截"
+
+# 根 issue program_id=string "0"（project_id 合法）→ 拦
+run_hook "$ISSUE_HOOK" '{"tool_input":{"project_id":48854568,"program_id":"0"}}'
+assert_exit 2 "issue: 根 issue program_id=string \"0\" 拦截"
 
 # 子 issue 只传 parent_id、不传 project_id → 拦
 run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_input":{"parent_id":33553306}}'
@@ -1027,6 +1040,10 @@ assert_exit 0 "issue: 普通 update 放行"
 # update 显式 project_id=0 → 拦
 run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_input":{"issue_id":"IJZ5WA","project_id":0}}'
 assert_exit 2 "issue: update project_id=0 拦截"
+
+# update 显式 program_id=0 → 拦（对称 project_id=0）
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_input":{"issue_id":"IJZ5WA","program_id":0}}'
+assert_exit 2 "issue: update program_id=0 拦截"
 
 # update 子 issue 时只传 parent_id、不补 project_id/program_id → 拦
 run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_input":{"issue_id":"IJZ74J","parent_id":33553306}}'
