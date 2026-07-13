@@ -2,9 +2,11 @@
 
 > **工单**：[IJZYVQ — 顶层领域类型聚合](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IJZYVQ)
 > **父 issue**：[IJZYUL](./README.md)
-> **状态**：🔄 进行中（分支上，待 PR 审核）
+> **状态**：✅ 已合并到 master（PR #42，merge commit `c3639e9`）
 > **分支**：`feature/IJZYVQ-顶层领域类型`
-> **完成日期**：—
+> **commit**：`65af9fc`（feat）+ `03c5ac5`（docs close-out）→ merged as `c3639e9`
+> **PR**：[#42](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/pulls/42)
+> **完成日期**：2026-07-10
 
 ## 范围
 
@@ -106,4 +108,4 @@
 - 本次提交含 **IJZYVQ 实现 + 本 docs**（按 IJZYUL 约定："每一个子issue完成的时候,把记录的一起提交到分支里去当做记录"）
 - 7 个改动文件全部围绕领域类型拆出，无顺手"重构相邻代码"
 - IJZYVK（退役 AgentComposer）已撤回，本工单顺带迁出 CardStatus import 路径未影响其设计
-- 父 issue IJZYUL 总进度 IJZYVQ 完成 → 5/8（README 待 IJZYVQ 合后更新）
+- 父 issue IJZYUL 总进度 IJZYVQ 完成 → 5/8（README 已随 IJZYUL 收尾 PR 同步到 7/8 完成 / 1 撤回 / 0 待办）
