@@ -78,7 +78,7 @@ P0 按两条入口落地，避免把 Dock 直生和 Agent 编排混成一条链�
 
 后端收到 `text` 后、主 Agent 开跑前,先算 `decision_context`(见 `backend_implementation_contract.md` + `skill/rules/decision_layer.md`):
 
-1. 硬状态代码每轮必跑(零成本):`has_generating` / `has_ready_node` / `has_failed` / `awaiting_confirm` / `pending_workflow` / `current_stage` / `active_product_context` / `previous_product_context` / `active_asset_id` / `candidate_asset_ids`。
+1. 硬状态代码每轮必跑(零成本):`has_generating` / `has_ready_node` / `has_failed` / `awaiting_confirm` / `pending_workflow` / `current_stage` / `active_product_context` / `product_history_summary` / `active_asset_id` / `candidate_asset_ids`。(`previous_product_context` 已升级为 `product_history_summary`,支持同对话多产品历史,见 `PRD/PRODUCT-HISTORY-PRD.md` §6)
 2. `has_generating=true` 直接短路到 `decision_branch=generation_in_progress`,**跳过 L1**。
 3. 其余情况调 L1 轻量 classifier(haiku 级),得 `intent_direction` + 仅 `new_task` 带 `suggested_route`。
 4. 后端代码按组合器优先级算出单一 `decision_branch`。
