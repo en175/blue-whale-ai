@@ -2,9 +2,11 @@
 
 > **工单**：[IJZYVR — API 客户端骨架](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IJZYVR)
 > **父 issue**：[IJZYUL](./README.md)（子 issue #7）
-> **状态**：⏳ 待提交（实现完成,等用户确认后用 `scripts/commit-task-for-review.sh` 入库）
+> **状态**：✅ 已合并到 master（PR #45，merge commit `3035948`）
 > **分支**：`feature/IJZYVR-API客户端骨架`
-> **完成日期**：—
+> **commit**：`d604e1f`（feat + docs 同 PR）→ merged as `3035948`
+> **PR**：[#45](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/pulls/45)
+> **完成日期**：2026-07-10
 
 ## 范围
 

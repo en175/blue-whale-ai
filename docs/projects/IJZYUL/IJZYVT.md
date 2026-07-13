@@ -2,11 +2,11 @@
 
 > **工单**：[IJZYVT — Playwright E2E](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IJZYVT)
 > **父 issue**：[IJZYUL](./README.md)
-> **状态**：✅ 验证全绿，待 commit（分支上，未 push）
+> **状态**：✅ 已合并到 master（PR #75，merge commit `f473880`）
 > **分支**：`feature/IJZYVT-新增Playwright端到端`
-> **commit**：—（未提交，待用户授权）
-> **PR**：—（待 commit 后用户授权 publish-review-package.sh）
-> **完成日期**：2026-07-10
+> **commit**：`be9efac`（rebase 后）→ merged as `f473880`
+> **PR**：[#75](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/pulls/75)
+> **完成日期**：2026-07-13
 
 ## 范围
 
@@ -162,19 +162,19 @@ CI 工单开时按需追加 `playwright.config.ts` 的 `webServer.url: http://lo
 
 ## 状态时间线
 
-| 时间             | 事件                                       |
-| ---------------- | ------------------------------------------ |
-| 2026-07-10 14:xx | IJZYVT 工单创建（用户 `/implement IJZYVT`）|
-| 2026-07-10 14:xx | Agent 创建 worktree + CBM 索引            |
-| 2026-07-10 15:xx | 8 个新文件 + 6 个 modify 完成              |
-| 2026-07-10 18:xx | 4 步验证绿：playwright 4/4 / vitest 90/90 / lint 0 新增 / build 0 error |
-| 2026-07-10 18:xx | 停未提交 diff，等用户授权 commit           |
-| 2026-07-10 —     | commit + push（待用户授权 `commit-task-for-review.sh` + `publish-review-package.sh`） |
+| 时间                  | 事件                                                          |
+| --------------------- | ------------------------------------------------------------- |
+| 2026-07-09 17:20      | IJZYVT Gitee issue 创建                                       |
+| 2026-07-13 09:22      | Commit `be9efac`（14 files / +550 / -41）+ rebase origin/master（140 commit 无冲突）|
+| 2026-07-13 09:22      | Push `feature/IJZYVT-新增Playwright端到端` 到 origin          |
+| 2026-07-13 09:27      | PR #75 创建（head `be9efac` → base `master` `ea480ce`）       |
+| 2026-07-13 10:46      | Merge PR #75（merge_method=merge）→ origin/master `f473880`   |
+| 2026-07-13 10:54      | 本地清理：worktree + local branch + remote tracking ref       |
+| 2026-07-13 11:04      | IJZYVT Gitee issue state=closed                               |
 
 ## 备注
 
-- IJZYUL 总进度：5/8 已合（VA/VJ/VO/WD/VT）+ 1 撤回（VK）+ 1 待办（VR；VQ 已合）= 7/8 列入跟踪
+- IJZYUL 总进度：7/8 已合（VA/VJ/VO/VQ/VR/WD/VT）+ 1 撤回（VK）+ 0 待办 = 8/8 闭环（详见 `IJZYUL/README.md` 进度表）
 - `app/page.tsx` 改 13 行（routing wrapper + JSDoc），`app/_components/home-client.tsx` 新建 70 行；其余 5 个 modify 文件都是纯 append（gitignore / prettierignore / package.json scripts & devDeps / README / page.tsx routing）
 - pre-commit hook 不动（lint-staged only），Playwright 走 `npm run test:e2e`
-- IJZYVT 占位 ID（`IJZYxx`），PR 阶段用户授权时申请 Gitee 实体 ID（与 IJZYVQ 实际从 `IJZYVP/待定` 调到 `IJZYVQ` 同模式）
-- 远程 source branch `feature/IJZYVT-新增Playwright端到端` 待 PR 合到 origin/master 后，本地 worktree 跑 `scripts/cleanup-task-worktree.sh`
+- 远程 source branch `feature/IJZYVT-新增Playwright端到端` 由 Gitee 服务端在 PR merge 时自动清理，本地 `git fetch --prune` 后 stale ref 已删

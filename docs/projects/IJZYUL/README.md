@@ -2,7 +2,7 @@
 
 > **工单**：[IJZYUL — [ARCH] 前端架构补全计划（vertical slices）](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IJZYUL)
 > **类型**：父 issue（program-level）
-> **状态**：进行中（5/8 子 issue 完成 / 1 已撤回 / 1 待办）
+> **状态**：✅ 已闭环（7/8 子 issue 已合并到 master / 1 已撤回 / 0 待办）—— 父 issue 收尾中
 > **文档存放约定**：本目录每个子 issue 一个 `.md` 文件，子 issue 完成时与该子 issue 的 feature 分支提交一起入库；后续若无法跟随原分支（如 PR 已合并的追溯入库），落到 `chore/docs-ijzyul-progress` 集中补救。
 
 ---
@@ -46,17 +46,17 @@
 | 2 | IJZYVJ | prettier + pre-commit 守门 | ✅ 已合 | `feature/IJZYVJ-补全前端提交守门` | `9c01ccf` | [#38](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/pulls/38) | [IJZYVJ.md](./IJZYVJ.md) |
 | 3 | IJZYVK | 退役 AgentComposer | ❌ 已撤回（wontfix） | — | — | — | [IJZYVK.md](./IJZYVK.md) |
 | 4 | IJZYVO | 拆 SkillPanel 巨型组件 | ✅ 已合 | `feature/IJZYVO-拆SkillPanel组件` | `fe2196c` | [#40](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/pulls/40) | [IJZYVO.md](./IJZYVO.md) |
-| 5 | IJZYVP / 待定 | 顶层领域类型 | ⏳ 待办 | — | — | — | _待开_ |
-| 6 | IJZYxx | useProject hooks 抽离 | ⏳ 待办（阻塞 #5） | — | — | — | _待开_ |
-| 7 | IJZYxx | API 客户端骨架 | ⏳ 待办 | — | — | — | _待开_ |
-| 8 | IJZYVT | 新增 Playwright 端到端 | 🔄 进行中 | `feature/IJZYVT-新增Playwright端到端` | — | — | [IJZYVT.md](./IJZYVT.md) |
+| 5 | IJZYVQ | 顶层领域类型 | ✅ 已合 | `feature/IJZYVQ-顶层领域类型` | `65af9fc` | [#42](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/pulls/42) | [IJZYVQ.md](./IJZYVQ.md) |
+| 6 | IJZYWD | useProject hooks 抽离 | ✅ 已合 | `feature/IJZYWD-canvas-useProject` | `be6aa33` | [#44](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/pulls/44) | [IJZYWD.md](./IJZYWD.md) |
+| 7 | IJZYVR | API 客户端骨架 | ✅ 已合 | `feature/IJZYVR-API客户端骨架` | `d604e1f` | [#45](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/pulls/45) | [IJZYVR.md](./IJZYVR.md) |
+| 8 | IJZYVT | 新增 Playwright 端到端 | ✅ 已合 | `feature/IJZYVT-新增Playwright端到端` | `be9efac` | [#75](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/pulls/75) | [IJZYVT.md](./IJZYVT.md) |
 
 ## 父 issue 验收总览
 
 - [x] 9 条子 issue（含本父 issue）全部 `ready-for-agent` 标签到位
 - [x] IJZYVA / IJZYVJ / IJZYVO 端到端验证通过（手动 + 测试 + lint）
 - [x] IJZYVK 撤回后打 `wontfix` 标签，state=closed
-- [ ] IJZYVP（顶层领域类型）/ IJZYVQ（useProject hooks）/ IJZYVR（API 客户端）/ IJZYVS（E2E）4 条子 issue 全部完成
+- [x] IJZYVQ（顶层领域类型）/ IJZYWD（useProject hooks）/ IJZYVR（API 客户端）/ IJZYVT（E2E）4 条子 issue 全部完成（PR #42 / #44 / #45 / #75）
 - [x] build / lint / test 三件套持续绿
 - [x] 不引入与 CLAUDE.md 冲突的全局状态库 / i18n / PWA / Storybook
 
