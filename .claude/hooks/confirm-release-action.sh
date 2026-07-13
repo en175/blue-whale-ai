@@ -215,7 +215,10 @@ if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" has-git-push
   block "检测到直接 git push。首次发布请走 scripts/publish-review-package.sh --user-authorized --create-pr；已有 PR 更新请走 --update-pr <PR编号>。"
 fi
 
-# 先扫描整条命令中的裸 commit / 非 ff-only merge，避免标准入口提前放行后续 segment。
+# 先扫描整条命令中的裸 commit / 非 ff-only merge / 非 ff-only 非 --rebase pull，
+# 避免标准入口提前放行后续 segment。
+# 分支感知（ADR-0010）：master 上 merge/pull origin/master 是用户集成区合法操作，不拦；
+# 仅在任务分支前缀上拦截并指向标准入口。
 task_acceptance="$(printf '%s' "$COMMAND" | python3 "$PRETOOL" task-acceptance-git 2>/dev/null || true)"
 case "$task_acceptance" in
   "git commit")
@@ -225,7 +228,10 @@ case "$task_acceptance" in
     block "检测到非 --ff-only 的直接 git merge。当前对话若已授权合入本地 master，请由 Agent 自动改走 scripts/merge-task-to-local-master.sh --user-authorized <branch>。"
     ;;
   "git merge origin/master")
-    block "检测到用 merge 同步 origin/master。任务分支同步固定使用 rebase；请由 Agent 依据规则运行 scripts/sync-task-from-origin.sh sync --json。"
+    block "检测到在任务分支上用 merge 同步 origin/master。任务分支同步固定使用 rebase；请由 Agent 依据规则运行 scripts/sync-task-from-origin.sh sync --json。"
+    ;;
+  "git pull")
+    block "检测到在任务分支上直接 git pull（无 --ff-only / --rebase）。任务分支同步固定使用 rebase；请由 Agent 依据规则运行 scripts/sync-task-from-origin.sh sync --json。"
     ;;
 esac
 
