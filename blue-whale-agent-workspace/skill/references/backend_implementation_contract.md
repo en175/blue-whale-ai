@@ -164,7 +164,8 @@ updated_at
 
 过程性内容在对话流展示,**不进画布**:
 
-- `visible_reasoning`  （思考过程,可折叠）
+> `visible_reasoning` 不在此列——它是 **Agent Turn 级字段**(见上 Agent Turn 字段 + `## visible_reasoning` + API 返回 `agent_turn.visible_reasoning`),不是 ChatMessage variant;SSE 传输走独立 event(见 `PRD/AGENT-CONVERSATION-PRD.md` §3)。
+
 - `brief`  （需求摘要）
 - `skill_recommendation`  （Skill 推荐）
 - `asset_understanding`  （图片理解摘要；**派生展示消息**：从 `assets.understanding_data` 派生给用户读的摘要，数据本体挂 asset 表，见 `BACKEND-API-PRD.md` §7）
@@ -271,8 +272,7 @@ confirmed_at
 
 字段说明：
 
-- `message_updates`:本轮新增/更新的**对话消息**(brief / skill / 分镜 / review /
-  visible_reasoning / 结果卡等)。对话区只从这里取内容。
+- `message_updates`:本轮新增/更新的**对话消息**(brief / skill / 分镜 / review / 结果卡等)。对话区只从这里取内容。(`visible_reasoning` 不在此——它是 turn 级字段,见 `agent_turn.visible_reasoning`。)
 - `canvas_updates`:本轮新增/更新的**画布素材节点**(仅 image / video)。
   画布只从这里取内容;过程内容不得放进 canvas_updates。
 - `requires_user_action` / `allowed_actions`:后端组织确认话术的依据,
