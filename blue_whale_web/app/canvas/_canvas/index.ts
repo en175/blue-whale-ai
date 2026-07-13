@@ -20,3 +20,4 @@ export * from "./components/dock";
 export * from "./components/Composer";
 export * from "./components/AgentChatPanel";
 export * from "./components/ZoomControls";
+export * from "./hooks/useCanvasProjects";

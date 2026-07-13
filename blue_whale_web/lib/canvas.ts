@@ -5,7 +5,7 @@
  * 用户身份走 X-User-Id 头（网关注入 JWT 后转发，本地开发 loadAccessToken 走 Authorization
  * 由网关转 X-User-Id；此处不重复造轮子，直接带 Authorization，交给网关处理）。
  */
-import { loadAccessToken } from "@/components/auth/authStorage";
+import { loadAccessToken, loadUser, SKIP_AUTH, MOCK_USER } from "@/components/auth/authStorage";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 const FETCH_TIMEOUT = 10000;
@@ -65,6 +65,11 @@ async function getResult<T>(url: string, options: RequestInit = {}): Promise<T> 
 function authHeaders(token?: string | null): HeadersInit {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  // 本地直连 agent-service（Next rewrite 无网关），后端 UserContext 读 X-User-Id；
+  // 线上网关也注入同名头，本地补发确保直连可用。
+  // SKIP_AUTH 下可能未真实登录（loadUser 为空），用 MOCK_USER.userId 兜底本地直连。
+  const user = loadUser() ?? (SKIP_AUTH ? MOCK_USER : null);
+  if (user) headers["X-User-Id"] = String(user.userId);
   return headers;
 }
 

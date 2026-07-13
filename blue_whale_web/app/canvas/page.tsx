@@ -9,7 +9,7 @@
  * Project 聚合根：useReducer(projectReducer) 管理多项目的画布+对话，active 项目派生
  * nodes/viewport/messages。切换项目 = 更换画布节点集合 + 对话历史（CONTEXT.md L44–50）。
  */
-import { Suspense, useState, useRef, useEffect, useCallback, useReducer } from "react";
+import { Suspense, useState, useRef, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ReactFlowProvider } from "@xyflow/react";
@@ -27,8 +27,7 @@ import {
   ZoomControls,
 } from "./_canvas";
 import type { Viewport, NodeItem, NodeType, DockMediaItem, CardMessage, ChatMessage } from "./_canvas";
-import { nodeFromCard, projectReducer, initialProjectState } from "./_canvas";
-import { PROJECTS } from "./_canvas";
+import { nodeFromCard, useCanvasProjects } from "./_canvas";
 import type { GenerateArgs } from "./_canvas";
 import { generateImage, createVideoJob, streamJob } from "./_canvas/api/generation";
 import { useJobStatus } from "./_canvas/hooks/useJobStatus";
@@ -74,10 +73,18 @@ function CanvasPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Project 聚合根：多项目画布+对话的单一真相源
-  const [projectState, dispatch] = useReducer(projectReducer, PROJECTS, initialProjectState);
-  const activeProject =
-    projectState.projects.find((p) => p.id === projectState.activeProjectId) ?? projectState.projects[0];
+  // Project 聚合根：多项目画布+对话的单一真相源（hook 缝合后端持久化，见 useCanvasProjects）
+  const {
+    state: projectState,
+    dispatch,
+    activeProject,
+    saveStatus,
+    booting,
+    backendReady,
+    createProjectAction,
+    switchProject,
+    deleteProjectAction,
+  } = useCanvasProjects();
   // 派生：当前项目的画布与对话（读取走 active，写入走 dispatch）
   const { nodes, viewport } = activeProject.canvas;
   const messages = activeProject.messages;
@@ -329,6 +336,7 @@ function CanvasPageInner() {
 
   // 视频任务轮询终态：succeeded 落节点，failed/超时复位 generating
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (jobState.status === "succeeded") {
       addNode("image", { content: pendingVideoPromptRef.current, imageUrl: jobState.assetUrl });
       setGenerating(false);
@@ -338,6 +346,7 @@ function CanvasPageInner() {
       setGenerating(false);
       resetJob();
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [jobState, addNode, resetJob]);
 
   // 进入/退出「从画布选择」模式
@@ -421,6 +430,13 @@ function CanvasPageInner() {
   if (gated) {
     return null;
   }
+  if (booting) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-black text-white/60 text-sm">
+        加载画布…
+      </div>
+    );
+  }
 
   return (
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-black text-white">
@@ -435,9 +451,9 @@ function CanvasPageInner() {
       <TopBar
         activeProject={activeProject}
         projects={projectState.projects}
-        onSwitch={(id) => dispatch({ type: "switch", projectId: id })}
-        onCreate={() => dispatch({ type: "create", name: `项目 ${Date.now().toString().slice(-4)}`, idGen: () => `p-${Date.now()}` })}
-        onDelete={(id) => dispatch({ type: "delete", projectId: id })}
+        onSwitch={switchProject}
+        onCreate={createProjectAction}
+        onDelete={deleteProjectAction}
       />
       <TopBarCenter />
       <TopBarRight
@@ -541,14 +557,31 @@ function CanvasPageInner() {
         }
       />
 
-      <Link
-        href="/"
-        className="absolute bottom-4 left-4 z-[400] inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-white/70 backdrop-blur-md transition-colors hover:text-white"
-        style={{ background: "var(--tc-bg-surface)", border: "1px solid var(--tc-menu-pill-border)" }}
-      >
-        <ArrowLeft width={14} height={14} />
-        返回首页
-      </Link>
+      <div className="absolute bottom-4 left-4 z-[400] flex items-center gap-2">
+        <Link
+          href="/"
+          className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-white/70 backdrop-blur-md transition-colors hover:text-white"
+          style={{ background: "var(--tc-bg-surface)", border: "1px solid var(--tc-menu-pill-border)" }}
+        >
+          <ArrowLeft width={14} height={14} />
+          返回首页
+        </Link>
+        {backendReady && saveStatus !== "idle" && (
+          <span
+            className="text-xs"
+            style={{
+              color:
+                saveStatus === "error" ? "var(--tc-destructive)" : "var(--tc-text-muted)",
+            }}
+          >
+            {saveStatus === "saving"
+              ? "保存中…"
+              : saveStatus === "saved"
+                ? "已保存"
+                : "保存失败"}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

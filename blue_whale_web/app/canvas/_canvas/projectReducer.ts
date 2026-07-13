@@ -31,7 +31,11 @@ export type ProjectAction =
   | { type: "set-viewport"; projectId: string; viewport: Viewport }
   | { type: "append-messages"; projectId: string; messages: ChatMessage[] }
   | { type: "set-card-status"; projectId: string; cardId: number | string; status: CardStatus }
-  | { type: "set-nodes"; projectId: string; nodes: NodeItem[] };
+  | { type: "set-nodes"; projectId: string; nodes: NodeItem[] }
+  /** 后端列表覆盖 mock：整体替换 projects，active 落到首项（listProjects 拉取后）。 */
+  | { type: "replace-all"; projects: Project[] }
+  /** loadCanvas 一次恢复某 project 的 nodes+viewport（比 set-nodes + set-viewport 两次 dispatch 干净）。 */
+  | { type: "set-canvas"; projectId: string; nodes: NodeItem[]; viewport: Viewport };
 
 /**
  * 由初始 Project 列表构造 reducer state：active 取第一个 active 标记项目，
@@ -122,6 +126,21 @@ export function projectReducer(state: ProjectState, action: ProjectAction): Proj
           p.id === action.projectId ? { ...p, canvas: { ...p.canvas, nodes: action.nodes } } : p
         ),
       };
+    }
+    case "set-canvas": {
+      return {
+        ...state,
+        projects: state.projects.map((p) =>
+          p.id === action.projectId
+            ? { ...p, canvas: { nodes: action.nodes, viewport: action.viewport } }
+            : p
+        ),
+      };
+    }
+    case "replace-all": {
+      // 后端列表整体覆盖；active 落到首项（列表非空调用方保证）。
+      const first = action.projects[0];
+      return { projects: action.projects, activeProjectId: first ? first.id : state.activeProjectId };
     }
     case "append-messages": {
       return {

@@ -188,6 +188,36 @@ describe("projectReducer / delete (A8)", () => {
   });
 });
 
+describe("projectReducer / set-canvas (A10)", () => {
+  it("set-canvas 一次写入 nodes+viewport，覆盖原画布", () => {
+    const p1 = project("1", { canvas: { nodes: [], viewport: { x: 0, y: 0, zoom: 1 } } });
+    const before = stateFrom([p1]);
+    const node = { id: "n1", type: "image", x: 3, y: 4, width: 10, height: 10 } as never;
+
+    const after = reduce(before, {
+      type: "set-canvas",
+      projectId: "1",
+      nodes: [node],
+      viewport: { x: 9, y: 9, zoom: 2 },
+    });
+
+    const canvas = after.projects.find((p) => p.id === "1")?.canvas;
+    expect(canvas?.nodes).toHaveLength(1);
+    expect(canvas?.viewport).toEqual({ x: 9, y: 9, zoom: 2 });
+  });
+});
+
+describe("projectReducer / replace-all (A11)", () => {
+  it("replace-all 整体替换 projects，active 落到首项", () => {
+    const before = stateFrom([project("1"), project("2")]);
+
+    const after = reduce(before, { type: "replace-all", projects: [project("9"), project("8")] });
+
+    expect(after.projects.map((p) => p.id)).toEqual(["9", "8"]);
+    expect(after.activeProjectId).toBe("9");
+  });
+});
+
 describe("projectReducer / 不可变性回归 (A9)", () => {
   it("reducer 不原地改原 state：对 frozen state 任一 action 不抛、原引用内容不变", () => {
     const node = { id: "n1", type: "image", x: 1, y: 1, width: 1, height: 1 } as const;

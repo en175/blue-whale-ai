@@ -337,7 +337,11 @@ export function CanvasSurface({
           minZoom={0.1}
           maxZoom={3}
           deleteKeyCode={["Backspace", "Delete"]}
-          // 多选（task 3.6）：Ctrl/Shift/Cmd 点选追加 + Shift 拖拽框选（selectionKeyCode 默认 Shift）
+          // 框选（task 3.6）：左键拖空白直接框选（Figma 式，无需 Shift）
+          selectionOnDrag
+          // 平移：中键/右键拖，或按住空格+左键拖（panActivationKeyCode 默认 Space）
+          panOnDrag={[1, 2]}
+          // 多选：Ctrl/Shift/Cmd 点选追加
           multiSelectionKeyCode={["Meta", "Control", "Shift"]}
           // 图层 z 序（task 3.6）：选中即抬升 z-index（bringToFront），默认 true 此处显式固化
           elevateNodesOnSelect
