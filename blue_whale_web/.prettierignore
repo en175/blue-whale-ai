@@ -17,3 +17,10 @@ patches/
 # graphify 与 codemod 自动产物
 graphify-out/
 .codex/
+
+# Playwright 产物（IJZYVT）
+test-results/
+playwright-report/
+.playwright/
+blob-report/
+playwright/.cache/
