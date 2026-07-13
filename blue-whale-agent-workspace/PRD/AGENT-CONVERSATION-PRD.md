@@ -196,7 +196,7 @@ Turn 5 — 审核(软过,turn 内自动收尾):
 
 > **`visible_reasoning` 不在此表**:它在 SSE 走**独立 event**(见上「事件清单」第一行),数据对应 backend contract 的 `agent_turn.visible_reasoning`(turn 级思考过程对象 `{title, items[]}`),**不作为 `message.type` 传输**。contract「对话消息类型」列表里虽含 `visible_reasoning`,本文 SSE 传输层把它独立成 event——数据同源,传输包装不同。
 >
-> (followup:contract 把 `visible_reasoning` 既列为 Agent Turn 字段(第 20/40/262 行)又列为 ChatMessage variant(第 167 行),口径待澄清。本轮只修本文,不动 contract。)
+> (contract 口径已统一:见 commit 29f8491 / PR !88——`visible_reasoning` 定为 Agent Turn 级字段,非 ChatMessage variant;`canvas_state_rules.md` 同步对齐,原 contract variant 列表里的条目已删。)
 
 | variant | 是否展示 | 备注 |
 |---|---|---|
