@@ -50,10 +50,9 @@ _Avoid_: 把 Canvas 当作顶层概念；把 Project 理解为包住全部对象
 Project 内唯一的 AgentChatPanel 持久化消息流；按顺序记录用户与 Agent 的对话事实，并关联多个先后发生的 AgentRun。
 _Avoid_: 把消息直接挂到 Project；把每个 AgentRun 当作独立对话；首版为一个 Project 建立多个 Conversation。
 
-**Card 生命周期状态**: `generating` → `normal` | `failed`。
-失败后的恢复策略为**对话内原地重试**（在 card 上重发同一 prompt/参数）。
-DEMO 阶段不区分失败原因，所有 `failed` card 均可原地重试；后端对接后再细分
-（积分不足/审核拒绝/超时等）。
+**Card 生命周期状态**: `generating` → `normal` | `failed` | `cancelled`。
+失败后的恢复入口仍在原 Card 上，但后端以关联的新 GenerationJob 执行重试；取消且没有产物的
+输出槽位显示为 `cancelled`，不创建 NodeItem，也不计为生成失败。
 
 **User / 访客**（当前阶段）:
 领域的使用者概念。**当前无登录**,前端在本地生成一个匿名标识随每次请求携带,
@@ -75,16 +74,19 @@ NodeItem/Card 是它呈现给用户的视图；在同一个 assetId 下覆写媒
 
 **GenerationJob（生成任务）**:
 一次生图/生视频的后台任务。生命周期:`queued` → `processing` →
-`succeeded` | `partially_succeeded` | `failed`。
+`succeeded` | `partially_succeeded` | `failed` | `cancelled`。
 任务在**后台持久化**:用户刷新页面、切换 Project、关闭浏览器后任务仍继续执行,
 回到该 Project 仍可查到状态与结果。一个 GenerationJob 可产出一个或多个 Asset，
 每个 Asset 分别通过 Card / NodeItem 呈现。
 GenerationJob 必须归属 Project；由 AgentChatPanel 触发时关联 AgentRun，由 BottomDock
 触发时不关联 AgentRun。AgentRun 暂停或进入终态不级联改写已提交 Job；失败重试创建
 带重试关系的新 Job，原 Job 终态不可变。
+取消请求只表达意图；只有供应商确认取消或产品能证明调用尚未发生时，Job 才进入 `cancelled`。
+取消确认前已完成的真实结果仍按成功或部分成功接纳，已产生的 Asset 永久保留。
 **Card 的展示状态是 Job 状态的视图映射**:`processing`→`generating`、
 `succeeded`→`normal`、`failed`→`failed`；`partially_succeeded` 中成功的输出为 `normal`，
-缺失的输出槽位为 `failed`。
+缺失的输出槽位为 `failed`；`cancelled` 中已有 Asset 的输出为 `normal`，未产生结果的槽位为
+`cancelled`。
 _Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeItem 是结果视图;
 把 Job 与 Asset 混为一谈 —— Job 是过程,Asset 是它的产物。
 
@@ -98,7 +100,8 @@ _Avoid_: 把每条用户消息都当作新的 AgentRun；把 AgentRun 与具体�
 
 **RuntimeCheckpoint**（运行时检查点）:
 与活动 AgentRun 绑定的版本化、不透明执行状态，只用于恢复运行，不是 Run、Job、Asset 或产品事件的权威事实。
-创建时固定运行引擎及版本，错误引擎或版本必须拒绝恢复，活动检查点不跨引擎迁移。
+AgentRun 只从当前已接纳版本恢复，不自动回退旧版本；创建时固定运行引擎及版本，错误引擎或版本
+必须拒绝恢复，活动检查点不跨引擎迁移，终态 Run 不再使用 checkpoint。
 _Avoid_: 把 RuntimeCheckpoint 当作产品事实；让运行时检查点独立推进产品状态；由其他引擎解析其内部内容。
 
 **GenerationAuthorizationGate（生成授权门）**:
