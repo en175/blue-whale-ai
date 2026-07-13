@@ -33,6 +33,14 @@ Issues / PRD 存 Gitee 仓库 Issues，无 `gh`/`glab` CLI，走 Gitee MCP（企
 
 Single-context：根 `CONTEXT.md` + `docs/adr/`，技能探索前读这俩。见 `docs/agents/domain.md`。
 
+### Superpowers 技能集（obra/superpowers）
+
+[obra/superpowers](https://github.com/obra/superpowers) 14 个方法论 skill（`brainstorming` / `systematic-debugging` / `test-driven-development` / `writing-plans` 等）已入库共享，与上方 mattpocock skills 共存（名称零冲突）。权威源 `.superpowers/skills/`，Claude Code/ZCode 副本由 `scripts/sync-superpowers-skills.sh` 同步；Codex 走各自本地官方插件。详见 `docs/agents/superpowers.md`。
+
+- **服从 CLAUDE.md**：superpowers 为**可选方法论技能**，不替代本文件 git/issue 工作流硬规则。`using-superpowers` SessionStart 钩子（`.claude/hooks/superpowers-session-start.sh`）注入引导文本，但本文件保持团队 Agent 规则唯一权威源。
+- **`using-git-worktrees` 的 declared preference = `scripts/start-task-worktree.sh`**（满足该 skill Step 1a「Honor any existing declared preference」）。本项目下该 skill 检测到 declared preference 后**跳过自带 `git worktree add` 兜底**，所有可写任务仍走红线 #4 入口。该 skill 的 Step 1b（裸 `git worktree add`）在本项目**永不执行**。
+
+
 ## 最高红线（摘要，细节见 rules 文件）
 
 1. **禁直推 master** — 全走分支 → PR → merge。`hotfix/*` 无特权。
