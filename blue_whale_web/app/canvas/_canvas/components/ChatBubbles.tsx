@@ -20,15 +20,20 @@ export function AgentMessageBubble({ text }: { text: string }) {
   while (segments.length > 0 && segments[segments.length - 1] === "") {
     segments.pop();
   }
-  let nonEmptyIndex = 0;
+  // 提前为每个 segment 标注是否为「首个非空段」，渲染期不再修改共享变量。
+  const segmentFlags = segments.map((segment) => {
+    if (segment === "") return { segment, isFirst: false, isSpacer: true };
+    const priorNonEmpty = segments
+      .slice(0, segments.indexOf(segment))
+      .filter((s) => s !== "").length;
+    return { segment, isFirst: priorNonEmpty === 0, isSpacer: false };
+  });
   return (
     <div className="self-start max-w-[92%] whitespace-pre-wrap break-words rounded-[12px] rounded-bl-[2px] px-2.5 py-2 text-[13px] font-normal leading-[21px] text-white/[0.9]">
-      {segments.map((segment, i) => {
-        if (segment === "") {
+      {segmentFlags.map(({ segment, isFirst, isSpacer }, i) => {
+        if (isSpacer) {
           return <div key={i} style={{ height: 8 }} />;
         }
-        const isFirst = nonEmptyIndex === 0;
-        nonEmptyIndex += 1;
         return (
           <div key={i} style={{ marginTop: isFirst ? 0 : 2 }}>
             {segment}

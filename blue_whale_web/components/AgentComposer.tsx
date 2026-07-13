@@ -390,9 +390,11 @@ export default function AgentComposer() {
   };
 
   // 仅在组件卸载时统一释放尚未移除的 blob: 对象 URL。
-  // 通过 ref 读取最新的 mediaList，且 effect 依赖为空，确保不会在更新时误释放正在显示的 URL。
+  // 通过 ref 读取最新的 mediaList，且 unmount-only effect 不会在更新时误释放正在显示的 URL。
   const mediaListRef = useRef(mediaList);
-  mediaListRef.current = mediaList;
+  useEffect(() => {
+    mediaListRef.current = mediaList;
+  });
   useEffect(() => {
     return () => {
       mediaListRef.current.forEach((item) => {

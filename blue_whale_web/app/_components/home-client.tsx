@@ -30,6 +30,7 @@ export default function HomeClient() {
 
   useEffect(() => {
     if (window.location.search.includes("e2e_error=1")) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- E2E 触发：hydration commit 后 setState 让 re-render 时 throw，由 ErrorBoundary 接住；事件回调无法满足（必须在 commit 后跑）。
       setShouldThrow(true);
     }
   }, []);
