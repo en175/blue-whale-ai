@@ -5,9 +5,6 @@ import com.blue.whale.web.constant.SystemHeaders;
 import org.springframework.util.StringUtils;
 
 import javax.servlet.http.HttpServletRequest;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.util.Optional;
 
 /**
  * IpUtils
@@ -51,14 +48,9 @@ public class IpUtils {
             }
         }
         if (isUnknown(ip)) {
-            ip = Optional.ofNullable(request.getRemoteAddr()).orElse("");
-            if (LOCAL_HOST_IP_V4.equals(ip) || LOCAL_HOST_IP_V6.equals(ip)) {
-                // 根据网卡取本机配置的IP
-                try {
-                    InetAddress inet = InetAddress.getLocalHost();
-                    ip = inet.getHostAddress();
-                } catch (UnknownHostException ignore) {
-                }
+            ip = request.getRemoteAddr();
+            if (ip == null || LOCAL_HOST_IP_V4.equals(ip) || LOCAL_HOST_IP_V6.equals(ip)) {
+                ip = LOCAL_HOST_IP_V4;
             }
         }
 
