@@ -75,3 +75,38 @@ CREATE TABLE user_skill
     INDEX idx_skill (skill_id)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='用户技能引用关系（auto 挂关系上）';
+
+-- ===== 画布核心模块（ADR-0011 统一 project model）=====
+-- project 为唯一根（owner_id 归属用户），canvas 与 project 1:1，整体存 nodes_json + viewport_json。
+-- 审计列遵循 BaseEntity：gmt_create / gmt_modified / version / is_delete。
+
+DROP TABLE IF EXISTS canvas;
+DROP TABLE IF EXISTS project;
+
+CREATE TABLE project
+(
+    id           BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    owner_id     BIGINT       NOT NULL COMMENT '归属用户 ID（来自 X-User-Id 头）',
+    name         VARCHAR(128) NOT NULL COMMENT '项目名',
+    thumb        VARCHAR(512) NULL COMMENT '缩略图 url',
+    gmt_create   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    gmt_modified DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    version      INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    is_delete    TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删 1已删',
+    INDEX idx_project_owner (owner_id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='画布项目（workspace 根）';
+
+CREATE TABLE canvas
+(
+    id            BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    project_id    BIGINT       NOT NULL COMMENT '所属项目 ID',
+    viewport_json JSON NULL COMMENT '视口 JSON：{x, y, zoom}',
+    nodes_json    JSON NULL COMMENT '节点数组 JSON：[{id,type,position,data:{assetId,...}}]',
+    gmt_create    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    gmt_modified  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    version       INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    is_delete     TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删 1已删',
+    UNIQUE KEY uk_canvas_project (project_id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='画布状态（与 project 1:1，整体 JSON 透传）';

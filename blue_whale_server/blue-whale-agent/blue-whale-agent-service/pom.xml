@@ -67,6 +67,13 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Test：junit-jupiter + mockito-core + assertj，版本由 Spring Boot BOM 管理 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <!-- 火山方舟 Ark Runtime SDK：文生图(Seedream 同步) + 图文生视频(Seedance 异步)，OkHttp 连接池 -->
         <dependency>
             <groupId>com.volcengine</groupId>

@@ -1,10 +1,14 @@
 package com.blue.whale.agent.model.dto;
 
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import javax.validation.constraints.NotBlank;
 
 /**
  * 图文生视频请求（Dock 直填式，异步提交）。
+ *
+ * <p>字段显式 {@code @JsonProperty} 指定 snake_case 名，详见 {@link ImageGenerateRequest}。
  *
  * @param prompt        生成提示词（必填）
  * @param modelId       模型 ID（必填），如 {@code doubao-seedance-2-0-260128}
@@ -15,10 +19,10 @@ import javax.validation.constraints.NotBlank;
  */
 public record VideoGenerateRequest(
         @NotBlank(message = "prompt 必填") String prompt,
-        @NotBlank(message = "model_id 必填") String modelId,
+        @JsonProperty("model_id") @NotBlank(message = "model_id 必填") String modelId,
         String resolution,
-        String aspectRatio,
+        @JsonProperty("aspect_ratio") String aspectRatio,
         Long duration,
-        String firstFrameUrl
+        @JsonProperty("first_frame_url") String firstFrameUrl
 ) {
 }

@@ -15,13 +15,22 @@ export type ToolDef = {
 
 export type NodeType = "image" | "text";
 
+/**
+ * 画布节点。坐标语义对齐 React Flow：world 坐标由 {@link position} 承载
+ * （替代原自研 x/y），resize 由 RF `NodeResizer` 驱动 width/height。
+ * `rotation`/`zIndex` 为迁移新增（旋转与图层排序，原实现未覆盖）。
+ */
 export type NodeItem = {
   id: string;
   type: NodeType;
-  x: number;
-  y: number;
+  /** world 坐标（RF `node.position`，替代原 x/y 字段） */
+  position: { x: number; y: number };
   width: number;
   height: number;
+  /** 旋转角度（度），默认 0 */
+  rotation?: number;
+  /** 图层排序，数值越大越靠前（bring-to-front 写入） */
+  zIndex?: number;
   content?: string;
   imageUrl?: string;
   selected?: boolean;
@@ -35,10 +44,11 @@ export type DockMediaItem = {
   src?: string;
 };
 
+/** 视口。字段对齐 RF `Viewport`：`scale` 改名 `zoom`（BREAKING，见 design D5）。 */
 export type Viewport = {
   x: number;
   y: number;
-  scale: number;
+  zoom: number;
 };
 
 export type ChatMessage =

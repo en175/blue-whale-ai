@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { PendingAction, User } from "./types";
-import { clearUser, clearTokens, loadAccessToken, loadRefreshToken, loadUser, saveTokens, saveUser } from "./authStorage";
+import { clearUser, clearTokens, loadAccessToken, loadRefreshToken, loadUser, saveTokens, saveUser, SKIP_AUTH, MOCK_USER } from "./authStorage";
 import { loginWithCode, logoutApi, refreshToken, ApiError } from "@/lib/auth";
 import { subscribeToAuthFailure, getAccessTokenSilently } from "@/lib/api-client";
 import { LoginModal } from "./LoginModal";
@@ -39,6 +39,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // mount: 尝试用 refresh_token 恢复完整 session
   useEffect(() => {
+    // 本地开发：跳过鉴权，直接注入占位用户，不走 refresh 流程
+    if (SKIP_AUTH) {
+      setUser(MOCK_USER);
+      return;
+    }
     const u = loadUser();
 
     // 乐观：有 user 数据立刻恢复 UI 登录态，不等刷新结果
@@ -98,6 +103,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const requireAuth = useCallback(
     async (action: PendingAction, run: () => void) => {
+      // 本地开发跳过鉴权时直接放行
+      if (SKIP_AUTH) { run(); return; }
       // 已在内存中有 user → 直接放行
       if (user) { run(); return; }
 

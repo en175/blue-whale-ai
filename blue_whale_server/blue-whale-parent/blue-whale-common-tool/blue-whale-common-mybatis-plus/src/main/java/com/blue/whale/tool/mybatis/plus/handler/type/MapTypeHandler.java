@@ -24,6 +24,9 @@ import java.util.Set;
 @MappedJdbcTypes({JdbcType.VARCHAR})
 public abstract class MapTypeHandler<K, V> extends IFastJson2TypeHandler {
 
+    public MapTypeHandler(Class<?> type) {
+        super(type);
+    }
 
     /**
      * 获取 key value 的类型引用
@@ -39,14 +42,14 @@ public abstract class MapTypeHandler<K, V> extends IFastJson2TypeHandler {
     }
 
     @Override
-    protected Object parse(String json) {
+    public Object parse(String json) {
         return KeyValue.toMap(
                 keyValueReference().to(JSONArray.parseArray(json))
         );
     }
 
     @Override
-    protected String toJson(Object obj) {
+    public String toJson(Object obj) {
         if (!(obj instanceof Map<?, ?> keyValueMap)) {
             throw new RuntimeException("MapTypeHandler only support Map");
         }

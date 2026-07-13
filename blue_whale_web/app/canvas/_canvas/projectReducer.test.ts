@@ -8,7 +8,7 @@ function stateFrom(projects: Project[]): ProjectState {
   return initialProjectState(projects);
 }
 
-const emptyCanvas = { nodes: [], viewport: { x: 0, y: 0, scale: 1 } };
+const emptyCanvas = { nodes: [], viewport: { x: 0, y: 0, zoom: 1 } };
 
 function project(id: string, overrides: Partial<Project> = {}): Project {
   return {
@@ -48,11 +48,11 @@ describe("projectReducer / switch (A2)", () => {
     const n1 = { id: "n1", type: "image", x: 0, y: 0, width: 10, height: 10 } as const;
     const m1 = { id: "m1", type: "user", text: "hi" } as const;
     const p1 = project("1", {
-      canvas: { nodes: [n1 as never], viewport: { x: 1, y: 1, scale: 1 } },
+      canvas: { nodes: [n1 as never], viewport: { x: 1, y: 1, zoom: 1 } },
       messages: [m1 as never],
     });
     const p2 = project("2", {
-      canvas: { nodes: [], viewport: { x: 2, y: 2, scale: 2 } },
+      canvas: { nodes: [], viewport: { x: 2, y: 2, zoom: 2 } },
       messages: [],
     });
     const before = stateFrom([p1, p2]);
@@ -66,7 +66,7 @@ describe("projectReducer / switch (A2)", () => {
     expect(stillP1?.messages).toHaveLength(1);
     const switchedP2 = after.projects.find((p) => p.id === "2");
     expect(switchedP2?.canvas.nodes).toEqual([]);
-    expect(switchedP2?.canvas.viewport).toEqual({ x: 2, y: 2, scale: 2 });
+    expect(switchedP2?.canvas.viewport).toEqual({ x: 2, y: 2, zoom: 2 });
   });
 });
 
@@ -88,7 +88,7 @@ describe("projectReducer / delete-node (A4)", () => {
   it("delete-node 移除指定节点，其他节点与其他项目不变", () => {
     const n1 = { id: "n1", type: "image", x: 0, y: 0, width: 1, height: 1 } as const;
     const n2 = { id: "n2", type: "image", x: 0, y: 0, width: 1, height: 1 } as const;
-    const p1 = project("1", { canvas: { nodes: [n1 as never, n2 as never], viewport: { x: 0, y: 0, scale: 1 } } });
+    const p1 = project("1", { canvas: { nodes: [n1 as never, n2 as never], viewport: { x: 0, y: 0, zoom: 1 } } });
     const before = stateFrom([p1]);
 
     const after = reduce(before, { type: "delete-node", projectId: "1", nodeId: "n1" });
@@ -101,25 +101,25 @@ describe("projectReducer / delete-node (A4)", () => {
 
 describe("projectReducer / set-viewport (A5)", () => {
   it("set-viewport 更新目标项目视口，其他项目视口不变", () => {
-    const p1 = project("1", { canvas: { nodes: [], viewport: { x: 0, y: 0, scale: 1 } } });
-    const p2 = project("2", { canvas: { nodes: [], viewport: { x: 9, y: 9, scale: 9 } } });
+    const p1 = project("1", { canvas: { nodes: [], viewport: { x: 0, y: 0, zoom: 1 } } });
+    const p2 = project("2", { canvas: { nodes: [], viewport: { x: 9, y: 9, zoom: 9 } } });
     const before = stateFrom([p1, p2]);
 
     const after = reduce(before, {
       type: "set-viewport",
       projectId: "1",
-      viewport: { x: 100, y: 50, scale: 2 },
+      viewport: { x: 100, y: 50, zoom: 2 },
     });
 
     expect(after.projects.find((p) => p.id === "1")?.canvas.viewport).toEqual({
       x: 100,
       y: 50,
-      scale: 2,
+      zoom: 2,
     });
     expect(after.projects.find((p) => p.id === "2")?.canvas.viewport).toEqual({
       x: 9,
       y: 9,
-      scale: 9,
+      zoom: 9,
     });
   });
 });
@@ -188,12 +188,42 @@ describe("projectReducer / delete (A8)", () => {
   });
 });
 
+describe("projectReducer / set-canvas (A10)", () => {
+  it("set-canvas 一次写入 nodes+viewport，覆盖原画布", () => {
+    const p1 = project("1", { canvas: { nodes: [], viewport: { x: 0, y: 0, zoom: 1 } } });
+    const before = stateFrom([p1]);
+    const node = { id: "n1", type: "image", x: 3, y: 4, width: 10, height: 10 } as never;
+
+    const after = reduce(before, {
+      type: "set-canvas",
+      projectId: "1",
+      nodes: [node],
+      viewport: { x: 9, y: 9, zoom: 2 },
+    });
+
+    const canvas = after.projects.find((p) => p.id === "1")?.canvas;
+    expect(canvas?.nodes).toHaveLength(1);
+    expect(canvas?.viewport).toEqual({ x: 9, y: 9, zoom: 2 });
+  });
+});
+
+describe("projectReducer / replace-all (A11)", () => {
+  it("replace-all 整体替换 projects，active 落到首项", () => {
+    const before = stateFrom([project("1"), project("2")]);
+
+    const after = reduce(before, { type: "replace-all", projects: [project("9"), project("8")] });
+
+    expect(after.projects.map((p) => p.id)).toEqual(["9", "8"]);
+    expect(after.activeProjectId).toBe("9");
+  });
+});
+
 describe("projectReducer / 不可变性回归 (A9)", () => {
   it("reducer 不原地改原 state：对 frozen state 任一 action 不抛、原引用内容不变", () => {
     const node = { id: "n1", type: "image", x: 1, y: 1, width: 1, height: 1 } as const;
     const msg = { id: 5, type: "card", text: "t", meta: "1:1", status: "normal" } as const;
     const p1 = project("1", {
-      canvas: { nodes: [node as never], viewport: { x: 0, y: 0, scale: 1 } },
+      canvas: { nodes: [node as never], viewport: { x: 0, y: 0, zoom: 1 } },
       messages: [msg as never],
     });
     const before = stateFrom([p1]);
@@ -203,7 +233,7 @@ describe("projectReducer / 不可变性回归 (A9)", () => {
     const actions: ProjectAction[] = [
       { type: "add-node", projectId: "1", node: { ...node, id: "n2" } as never },
       { type: "delete-node", projectId: "1", nodeId: "n1" },
-      { type: "set-viewport", projectId: "1", viewport: { x: 7, y: 7, scale: 7 } },
+      { type: "set-viewport", projectId: "1", viewport: { x: 7, y: 7, zoom: 7 } },
       { type: "append-messages", projectId: "1", messages: [{ id: 9, type: "user", text: "x" } as never] },
       { type: "set-card-status", projectId: "1", cardId: 5, status: "failed" },
       { type: "create", name: "新", idGen: () => "p2" },

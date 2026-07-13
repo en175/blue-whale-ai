@@ -2,17 +2,19 @@
 
 /**
  * Canvas Page —— 画布路由页面（编排层 / 状态管理）
- * 仅承载页面级状态与交互编排：视口变换、节点增删、Dock 开关、Agent 面板联动等。
- * 所有 UI 子模块（顶栏、工具条、画布节点、Dock、Agent 面板、缩放控件）经统一出口 ./_canvas 引入。
+ * 仅承载页面级状态与交互编排：节点增删、Dock 开关、Agent 面板联动、生成流程等。
+ * 画布的视口平移/缩放/拖拽/选中/resize 由 React Flow（CanvasSurface）受控承接，
+ * nodes 与 viewport 仍以 projectReducer 为单一真相源（多 project 切换 + 持久化基础）。
  *
  * Project 聚合根：useReducer(projectReducer) 管理多项目的画布+对话，active 项目派生
  * nodes/viewport/messages。切换项目 = 更换画布节点集合 + 对话历史（CONTEXT.md L44–50）。
  */
-import { Suspense, useState, useRef, useEffect, useCallback, useReducer } from "react";
+import { Suspense, useState, useRef, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { ReactFlowProvider } from "@xyflow/react";
 import { useAuth } from "@/components/auth/AuthContext";
-import { loadUser } from "@/components/auth/authStorage";
+import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
 import { ArrowLeft } from "lucide-react";
 import {
   TopBar,
@@ -25,8 +27,7 @@ import {
   ZoomControls,
 } from "./_canvas";
 import type { Viewport, NodeItem, NodeType, DockMediaItem, CardMessage, ChatMessage } from "./_canvas";
-import { nodeFromCard, projectReducer, initialProjectState } from "./_canvas";
-import { PROJECTS } from "./_canvas";
+import { nodeFromCard, useCanvasProjects } from "./_canvas";
 import type { GenerateArgs } from "./_canvas";
 import { generateImage, createVideoJob, streamJob } from "./_canvas/api/generation";
 import { useJobStatus } from "./_canvas/hooks/useJobStatus";
@@ -55,6 +56,7 @@ function CanvasPageInner() {
   const prompt = searchParams.get("prompt") || "";
   const { openLogin } = useAuth();
   const guardRouter = useRouter();
+  // 画布视口容器：addNode 据其中心换算 world 坐标（viewport 为受控 {x,y,zoom}）。
   const containerRef = useRef<HTMLDivElement>(null);
 
   // gating：未登录直访 /canvas 时，先空白守卫再决定渲染或跳转，避免画布内容首帧闪烁。
@@ -62,28 +64,36 @@ function CanvasPageInner() {
   const [gated, setGated] = useState(true);
   useEffect(() => {
     const storedUser = loadUser();
-    if (!storedUser) {
+    // 本地开发跳过鉴权（SKIP_AUTH）时，不做未登录跳转
+    if (!SKIP_AUTH && !storedUser) {
       console.warn("[Canvas] gate: loadUser()=null → 踢回首页 + 弹登录。localStorage keys:",
         Object.keys(localStorage).filter(k => k.startsWith("bw-")));
       guardRouter.replace("/");
       openLogin();
     } else {
-      console.log("[Canvas] gate: loadUser() 成功，user:", storedUser.username);
+      console.log("[Canvas] gate: loadUser() 成功，user:", storedUser?.username);
     }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setGated(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Project 聚合根：多项目画布+对话的单一真相源
-  const [projectState, dispatch] = useReducer(projectReducer, PROJECTS, initialProjectState);
-  const activeProject =
-    projectState.projects.find((p) => p.id === projectState.activeProjectId) ?? projectState.projects[0];
+  // Project 聚合根：多项目画布+对话的单一真相源（hook 缝合后端持久化，见 useCanvasProjects）
+  const {
+    state: projectState,
+    dispatch,
+    activeProject,
+    saveStatus,
+    booting,
+    backendReady,
+    createProjectAction,
+    switchProject,
+    deleteProjectAction,
+  } = useCanvasProjects();
   // 派生：当前项目的画布与对话（读取走 active，写入走 dispatch）
   const { nodes, viewport } = activeProject.canvas;
   const messages = activeProject.messages;
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isAgentOpen, setIsAgentOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
   const [bottomDockMode, setBottomDockMode] = useState<"image" | "video">("image");
@@ -98,26 +108,21 @@ function CanvasPageInner() {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const pendingVideoPromptRef = useRef<string>("");
 
-  // CanvasSurface 期望 Dispatch<SetStateAction<...>> 类型的 setter（高频拖拽/缩放内部用）。
-  // 适配为对当前 active project 的 dispatch：解析值或 updater 后整体写回画布。
+  // 受控流写回适配：CanvasSurface 的 onNodesCommit / onViewportChange 解析后整体写回当前 active project。
   const setViewport = useCallback(
-    (next: Viewport | ((prev: Viewport) => Viewport)) => {
-      const resolved =
-        typeof next === "function" ? (next as (prev: Viewport) => Viewport)(activeProject.canvas.viewport) : next;
-      dispatch({ type: "set-viewport", projectId: activeProject.id, viewport: resolved });
+    (next: Viewport) => {
+      dispatch({ type: "set-viewport", projectId: activeProject.id, viewport: next });
     },
-    [activeProject.id, activeProject.canvas.viewport]
+    [activeProject.id]
   );
   const setNodes = useCallback(
-    (next: NodeItem[] | ((prev: NodeItem[]) => NodeItem[])) => {
-      const resolved =
-        typeof next === "function" ? (next as (prev: NodeItem[]) => NodeItem[])(activeProject.canvas.nodes) : next;
-      dispatch({ type: "set-nodes", projectId: activeProject.id, nodes: resolved });
+    (next: NodeItem[]) => {
+      dispatch({ type: "set-nodes", projectId: activeProject.id, nodes: next });
     },
-    [activeProject.id, activeProject.canvas.nodes]
+    [activeProject.id]
   );
 
-  // 画布素材节点操作面板的统一动作分发
+  // 画布素材节点操作面板的统一动作分发（按 nodeId 反查 node）
   const handleNodeAction = useCallback(
     (node: NodeItem, actionId: string) => {
       const name = node.content || "未命名素材";
@@ -177,48 +182,32 @@ function CanvasPageInner() {
     []
   );
 
+  // Esc 退出「从画布选择」模式（节点删除由 RF deleteKeyCode 承接）
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && pickingFor) {
         setPickingFor(null);
-        return;
       }
-      if (e.key !== "Delete" && e.key !== "Backspace") return;
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
-      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
-      if (!selectedId) return;
-      e.preventDefault();
-      setNodes((prev) => prev.filter((n) => n.id !== selectedId));
-      setSelectedId(null);
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedId, pickingFor]);
-
-  useEffect(() => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const cx = rect.width / 2;
-    const cy = rect.height / 2;
-    setViewport({ x: cx, y: cy, scale: 1 });
-  }, []);
+  }, [pickingFor]);
 
   const addNode = useCallback(
     (type: NodeType, extra?: Partial<NodeItem>) => {
       const rect = containerRef.current?.getBoundingClientRect();
       const cx = rect ? rect.width / 2 : 0;
       const cy = rect ? rect.height / 2 : 0;
-      const worldX = (cx - viewport.x) / viewport.scale;
-      const worldY = (cy - viewport.y) / viewport.scale;
+      // world 坐标 = (屏幕中心 - 视口平移) / zoom；等价于 RF screenToFlowPosition({cx,cy})。
+      const worldX = (cx - viewport.x) / viewport.zoom;
+      const worldY = (cy - viewport.y) / viewport.zoom;
       const id = `${type}-${Date.now()}`;
       const base: NodeItem =
         type === "text"
           ? {
               id,
               type,
-              x: worldX - 100,
-              y: worldY - 24,
+              position: { x: worldX - 100, y: worldY - 24 },
               width: 200,
               height: 48,
               content: "文本节点",
@@ -226,23 +215,21 @@ function CanvasPageInner() {
           : {
               id,
               type,
-              x: worldX - 120,
-              y: worldY - 120,
+              position: { x: worldX - 120, y: worldY - 120 },
               width: 240,
               height: 240,
               content: "占位图片节点",
             };
       const node: NodeItem = { ...base, ...extra, id: base.id };
-      // 写入走 reducer：节点归属当前 active project（位置在此算好作为 x/y 传入）
+      // 写入走 reducer：节点归属当前 active project（位置在此算好作为 position 传入）
       dispatch({ type: "add-node", projectId: activeProject.id, node });
-      setSelectedId(id);
       return id;
     },
     [viewport, activeProject.id]
   );
 
   // 对话流出现 card 的同一时刻，在画布同步创建对应图片 NodeItem（同一生成结果两种视图）。
-  // 仅透 content/width/height；x/y/id 留给 addNode（addNode 内部强制 id=image-${Date.now()}）。
+  // 仅透 content/width/height；position/id 留给 addNode。
   const handleCardGenerated = useCallback(
     (card: CardMessage) => {
       const partial = nodeFromCard(card, () => 0);
@@ -354,6 +341,7 @@ function CanvasPageInner() {
 
   // 视频任务轮询终态：succeeded 落节点，failed/超时复位 generating
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (jobState.status === "succeeded") {
       addNode("image", { content: pendingVideoPromptRef.current, imageUrl: jobState.assetUrl });
       setGenerating(false);
@@ -363,6 +351,7 @@ function CanvasPageInner() {
       setGenerating(false);
       resetJob();
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [jobState, addNode, resetJob]);
 
   // 进入/退出「从画布选择」模式
@@ -392,6 +381,25 @@ function CanvasPageInner() {
       setPickingFor(null);
     },
     [pickingFor]
+  );
+
+  // CanvasSurface 节点点击：选择模式下拦截为挑图，否则交 RF 默认选中
+  const handleCanvasNodeClick = useCallback(
+    (node: NodeItem) => {
+      if (pickingFor && node.type === "image" && node.imageUrl) {
+        handlePickNode(node);
+      }
+    },
+    [pickingFor, handlePickNode]
+  );
+
+  // 操作浮层动作：按 nodeId 反查 node 后走 handleNodeAction
+  const handleCanvasNodeAction = useCallback(
+    (nodeId: string, actionId: string) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      if (node) handleNodeAction(node, actionId);
+    },
+    [nodes, handleNodeAction]
   );
 
   // 可选图片节点数（带 imageUrl），用于胶囊空态提示
@@ -427,6 +435,13 @@ function CanvasPageInner() {
   if (gated) {
     return null;
   }
+  if (booting) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-black text-white/60 text-sm">
+        加载画布…
+      </div>
+    );
+  }
 
   return (
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-black text-white">
@@ -441,9 +456,9 @@ function CanvasPageInner() {
       <TopBar
         activeProject={activeProject}
         projects={projectState.projects}
-        onSwitch={(id) => dispatch({ type: "switch", projectId: id })}
-        onCreate={() => dispatch({ type: "create", name: `项目 ${Date.now().toString().slice(-4)}`, idGen: () => `p-${Date.now()}` })}
-        onDelete={(id) => dispatch({ type: "delete", projectId: id })}
+        onSwitch={switchProject}
+        onCreate={createProjectAction}
+        onDelete={deleteProjectAction}
       />
       <TopBarCenter />
       <TopBarRight
@@ -451,19 +466,21 @@ function CanvasPageInner() {
         onAgentToggle={() => setIsAgentOpen((v) => !v)}
       />
 
-      <CanvasSurface
-        containerRef={containerRef}
-        viewport={viewport}
-        nodes={nodes}
-        selectedId={selectedId}
-        setViewport={setViewport}
-        setNodes={setNodes}
-        setSelectedId={setSelectedId}
-        onNodeAction={handleNodeAction}
-        picking={pickingFor !== null}
-        onPickNode={handlePickNode}
-        onExitPick={handleExitPick}
-      />
+      <ReactFlowProvider>
+        <div ref={containerRef} className="absolute inset-0 z-0">
+          <CanvasSurface
+            nodes={nodes}
+            viewport={viewport}
+            onNodesCommit={setNodes}
+            onViewportChange={setViewport}
+            onNodeClick={handleCanvasNodeClick}
+            onPaneClick={handleExitPick}
+            onNodeAction={handleCanvasNodeAction}
+            picking={pickingFor !== null}
+          />
+        </div>
+        <ZoomControls />
+      </ReactFlowProvider>
 
       <LeftToolbar onToolClick={handleToolClick} />
       {pickingFor && (
@@ -479,29 +496,29 @@ function CanvasPageInner() {
             gap: 8,
             padding: "6px 8px 6px 14px",
             borderRadius: 9999,
-            background: "rgba(26, 26, 26, 0.92)",
-            border: "1px solid rgba(255, 255, 255, 0.08)",
-            boxShadow: "0 8px 24px rgba(0, 0, 0, 0.5)",
+            background: "var(--tc-bg-surface)",
+            border: "1px solid var(--tc-border-subtle)",
+            boxShadow: "var(--tc-menu-pill-shadow)",
             backdropFilter: "blur(12px)",
-            color: "rgba(255, 255, 255, 0.85)",
+            color: "var(--tc-text-secondary)",
             fontSize: 12,
             whiteSpace: "nowrap",
           }}
         >
-          <span style={{ color: "var(--tc-accent, #3b82f6)", fontWeight: 600 }}>从画布选择</span>
-          <span style={{ color: "rgba(255, 255, 255, 0.55)" }}>
+          <span style={{ color: "var(--tc-accent)", fontWeight: 600 }}>从画布选择</span>
+          <span style={{ color: "var(--tc-text-tertiary)" }}>
             {pickableCount === 0 ? "画布上还没有可用的图片" : "点击画布中的图片加入"}
           </span>
-          <span style={{ color: "rgba(255, 255, 255, 0.22)" }}>·</span>
+          <span style={{ color: "var(--tc-text-muted)" }}>·</span>
           <button
             type="button"
             onClick={handleExitPick}
             style={{
               padding: "2px 10px",
               borderRadius: 9999,
-              border: 0,
-              background: "rgba(255, 255, 255, 0.08)",
-              color: "rgba(255, 255, 255, 0.8)",
+              border: "1px solid var(--tc-border-subtle)",
+              background: "var(--tc-menu-item-hover)",
+              color: "var(--tc-text-secondary)",
               fontSize: 12,
               cursor: "pointer",
             }}
@@ -544,19 +561,32 @@ function CanvasPageInner() {
           dispatch({ type: "set-card-status", projectId: activeProject.id, cardId, status })
         }
       />
-      <ZoomControls
-        containerRef={containerRef}
-        viewport={viewport}
-        setViewport={setViewport}
-      />
 
-      <Link
-        href="/"
-        className="absolute bottom-4 left-4 z-[400] inline-flex h-8 items-center gap-1.5 rounded-full bg-[#141414]/90 px-3 text-xs font-medium text-white/70 border border-white/[0.04] backdrop-blur-md transition-colors hover:bg-white/[0.06] hover:text-white"
-      >
-        <ArrowLeft width={14} height={14} />
-        返回首页
-      </Link>
+      <div className="absolute bottom-4 left-4 z-[400] flex items-center gap-2">
+        <Link
+          href="/"
+          className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-white/70 backdrop-blur-md transition-colors hover:text-white"
+          style={{ background: "var(--tc-bg-surface)", border: "1px solid var(--tc-menu-pill-border)" }}
+        >
+          <ArrowLeft width={14} height={14} />
+          返回首页
+        </Link>
+        {backendReady && saveStatus !== "idle" && (
+          <span
+            className="text-xs"
+            style={{
+              color:
+                saveStatus === "error" ? "var(--tc-destructive)" : "var(--tc-text-muted)",
+            }}
+          >
+            {saveStatus === "saving"
+              ? "保存中…"
+              : saveStatus === "saved"
+                ? "已保存"
+                : "保存失败"}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

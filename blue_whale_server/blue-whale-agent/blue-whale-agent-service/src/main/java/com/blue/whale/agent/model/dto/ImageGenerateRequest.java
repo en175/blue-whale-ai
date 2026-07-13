@@ -1,11 +1,17 @@
 package com.blue.whale.agent.model.dto;
 
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import javax.validation.constraints.NotBlank;
 import java.util.List;
 
 /**
  * 文生图请求（Dock 直填式）。
+ *
+ * <p>字段显式 {@code @JsonProperty} 指定 snake_case 名：record + 全局
+ * {@code SNAKE_CASE} 命名策略下，Jackson 对 creator 参数的自省会与 final 字段的
+ * FieldProperty 冲突，抛 {@code IllegalAccessException}（record 字段不可反射写入）。
  *
  * @param prompt          生成提示词（必填）
  * @param modelId         模型 ID（必填），如 {@code doubao-seedream-5-0-lite-250723}
@@ -18,12 +24,12 @@ import java.util.List;
  */
 public record ImageGenerateRequest(
         @NotBlank(message = "prompt 必填") String prompt,
-        @NotBlank(message = "model_id 必填") String modelId,
-        @NotBlank(message = "size_id 必填") String sizeId,
-        String aspectRatio,
+        @JsonProperty("model_id") @NotBlank(message = "model_id 必填") String modelId,
+        @JsonProperty("size_id") @NotBlank(message = "size_id 必填") String sizeId,
+        @JsonProperty("aspect_ratio") String aspectRatio,
         String format,
         Integer quantity,
         Boolean watermark,
-        List<String> referenceImages
+        @JsonProperty("reference_images") List<String> referenceImages
 ) {
 }

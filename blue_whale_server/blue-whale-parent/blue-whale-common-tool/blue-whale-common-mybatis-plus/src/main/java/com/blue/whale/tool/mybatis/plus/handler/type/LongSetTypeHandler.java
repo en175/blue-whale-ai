@@ -19,6 +19,10 @@ import java.util.Set;
 @MappedJdbcTypes({JdbcType.VARCHAR})
 public class LongSetTypeHandler extends IFastJson2TypeHandler {
 
+	public LongSetTypeHandler(Class<?> type) {
+		super(type);
+	}
+
 	@Override
 	public TypeReference<?> getTypeReference() {
 		return new TypeReference<Set<Long>>() {

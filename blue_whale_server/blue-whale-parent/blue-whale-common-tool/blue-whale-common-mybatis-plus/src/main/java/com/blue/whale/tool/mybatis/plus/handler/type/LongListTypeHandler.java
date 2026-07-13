@@ -19,6 +19,10 @@ import java.util.List;
 @MappedJdbcTypes({JdbcType.VARCHAR})
 public class LongListTypeHandler extends IFastJson2TypeHandler {
 
+	public LongListTypeHandler(Class<?> type) {
+		super(type);
+	}
+
 	@Override
 	public TypeReference<?> getTypeReference() {
 		return new TypeReference<List<Long>>() {

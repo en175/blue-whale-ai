@@ -19,6 +19,10 @@ import java.util.Set;
 @MappedJdbcTypes({JdbcType.VARCHAR})
 public class IntegerSetTypeHandler extends IFastJson2TypeHandler {
 
+	public IntegerSetTypeHandler(Class<?> type) {
+		super(type);
+	}
+
 	@Override
 	public TypeReference<?> getTypeReference() {
 		return new TypeReference<Set<Integer>>() {
