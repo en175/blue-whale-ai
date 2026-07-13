@@ -66,11 +66,10 @@ do_resolve() {
       pulls/*)   res_kind="pull";  res_number="${tail#pulls/}"   ;;
       issues/*)  res_kind="issue"; res_number="${tail#issues/}"  ;;
     esac
-  elif [[ "$stripped" =~ ^([^/]+)/([^/]+)/(pulls|issues)/([0-9]+) ]]; then
-    # 普通版 URL：org/repo/(pulls|issues)/n
+  elif [[ "$stripped" =~ ^([^/]+)/([^/]+)/(pulls|issues)/([A-Za-z0-9]+) ]]; then
+    # 普通版 URL：org/repo/(pulls|issues)/n 或 issues/IDENT（Gitee issue 是字符串 ident）
     enterprise_path="${BASH_REMATCH[1]}"
     repo_path="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
-    res_kind="${BASH_REMATCH[3]/pulls/pull}"; res_kind="${res_kind/issue/issue}"
     [[ "${BASH_REMATCH[3]}" == "pulls" ]] && res_kind="pull" || res_kind="issue"
     res_number="${BASH_REMATCH[4]}"
   elif [[ "$stripped" =~ ^([^/]+)/([^/]+)$ ]]; then
@@ -125,9 +124,15 @@ do_resolve() {
 }
 
 # ─── check-id ─────────────────────────────────────────────────────────────
-# 校验一个 ID 值是否是「URL 抄来的危险值」。本仓已知正确值（仅用于对照提示，不写死逻辑）：
-#   enterprise_id 应为 list_enterprises 查得（本仓 ≈ 8 位数字）；URL projects/ 段通常 6 位。
-#   危险信号：该值曾经出现在某次 URL 的 projects/ 段 → 几乎必为路由 ID。
+# 离线校验一个 ID 值。脚本不发请求，所以【不能】判定一个值「正确」，只能识别
+# 「已知危险」（URL 路由 ID）。任何不在危险清单里的值都标「无法离线确认」，
+# 唯一权威来源始终是动态查询。这样避免对正确值误报，也避免对未知值打包票。
+#
+# 已知 URL 路由 ID 清单：累积本仓踩过的陷阱值。新增陷阱时在此追加。
+KNOWN_URL_ROUTE_IDS=(
+  "883843"   # 曾被误当 enterprise_id，实为 e.gitee.com projects/ 段网页路由 ID
+)
+
 do_check_id() {
   local which="$1" value="$2"
   [[ "$which" == "enterprise_id" || "$which" == "project_id" ]] \
@@ -136,19 +141,37 @@ do_check_id() {
 
   echo "校验：$which = $value"
   echo ""
-  # 唯一权威来源是动态查询；这里只能给启发式提示。
-  if [[ "$which" == "enterprise_id" ]]; then
-    echo "✔ 正确做法：list_enterprises() → 取 path==\"hangzhou_xuanfu_1\" 的 id。"
-    echo "  enterprise_id 不出现在任何网页 URL 中。如果你是从某个 URL 抄来的数字，那几乎一定是错的。"
+
+  # 1) 已知危险值：精确匹配陷阱清单
+  local is_known_route=0
+  for bad in "${KNOWN_URL_ROUTE_IDS[@]}"; do
+    [[ "$value" == "$bad" ]] && { is_known_route=1; break; }
+  done
+  if [[ "$is_known_route" == 1 ]]; then
+    echo "🚨 已知危险：$value 在本仓 URL 路由 ID 清单中（e.gitee.com projects/ 段网页路由 ID）。"
+    echo "   它【不是】enterprise_id 也【不是】project_id。传给任何 mcp__gitee-ent__* 工具"
+    echo "   会触发误导性 401「企业未授权此应用进行访问」（实为企业不存在，非授权问题）。"
     echo ""
-    echo "  自检：调 get_user_info() 和 list_enterprises() ——"
-    echo "    - 都成功   → token 有效；若用此 $value 调用仍 401，则此值是错的 ID，非授权问题。"
-    echo "    - 都 401   → token/授权问题，与 ID 无关。"
+    echo "   → 用下面的动态查询换掉它。"
   else
-    echo "✔ 正确做法：list_enterprise_repositories(enterprise_id, search=\"blue-whale\")"
+    echo "ⓘ 无法离线确认 ${value} 是否为正确的 ${which}。"
+    echo "   脚本不发请求，唯一权威来源是下面的动态查询。请实查核对，勿依赖本结果下结论。"
+  fi
+  echo ""
+
+  # 2) 正确做法指引
+  if [[ "$which" == "enterprise_id" ]]; then
+    echo "✔ 正确做法：list_enterprises() → 取 path==\"hangzhou-xuanfu_1\" 的 id。"
+    echo "  enterprise_id 不出现在任何网页 URL 中。"
+  else
+    echo "✔ 正确做法：list_enterprise_repositories(enterprise_id, search=\"blue-whale-ai\")"
     echo "            → 取 path_with_namespace==\"hangzhou-xuanfu_1/blue-whale-ai\" 的 id。"
     echo "  project_id 不出现在任何网页 URL 中。"
   fi
+  echo ""
+  echo "  401 自检：调 get_user_info()"
+  echo "    - 成功 → token 有效；若用此 $value 调用仍 401，则值是错的 ID，非授权问题。"
+  echo "    - 401  → token/授权问题，与 ID 无关。"
 }
 
 # ─── diagnose-401 ─────────────────────────────────────────────────────────
