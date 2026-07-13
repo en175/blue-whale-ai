@@ -19,6 +19,10 @@ import java.util.List;
 @MappedJdbcTypes({JdbcType.VARCHAR})
 public class IntegerListTypeHandler extends IFastJson2TypeHandler {
 
+	public IntegerListTypeHandler(Class<?> type) {
+		super(type);
+	}
+
 	@Override
 	public TypeReference<?> getTypeReference() {
 		return new TypeReference<List<Integer>>() {

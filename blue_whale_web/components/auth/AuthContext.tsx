@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { PendingAction, User } from "./types";
-import { clearUser, clearTokens, loadAccessToken, loadRefreshToken, loadUser, saveTokens, saveUser } from "./authStorage";
+import { clearUser, clearTokens, loadAccessToken, loadRefreshToken, loadUser, saveTokens, saveUser, SKIP_AUTH, MOCK_USER } from "./authStorage";
 import { loginWithCode, logoutApi, refreshToken, ApiError } from "@/lib/auth";
 import { LoginModal } from "./LoginModal";
 
@@ -37,6 +37,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // mount 恢复
   useEffect(() => {
+    // 本地开发：跳过鉴权，直接注入占位用户，不走 refresh 流程
+    if (SKIP_AUTH) {
+      setUser(MOCK_USER);
+      return;
+    }
     const u = loadUser();
     if (u) {
       // 尝试用 refresh_token 恢复 session
@@ -66,6 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const requireAuth = useCallback(
     (action: PendingAction, run: () => void) => {
+      if (SKIP_AUTH) { run(); return; }
       if (user) { run(); return; }
       const stored = loadUser();
       const at = loadAccessToken();

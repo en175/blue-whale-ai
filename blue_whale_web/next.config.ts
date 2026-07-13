@@ -1,12 +1,16 @@
 import type { NextConfig } from "next";
 
 /**
- * 后端 API 基址：服务端 env 注入（不暴露前端 bundle）。
- * dev 默认 http://localhost:8000（blue_whale_server application.yml server.port=8000）。
- * 通过 rewrite 代理 /api/* → 后端，浏览器侧同源请求，规避 CORS。
+ * 后端为微服务架构，前端经 Next rewrite 同源代理到各服务，规避浏览器 CORS。
+ *   - agent(8082)：文生图/视频 /api/generation、任务轮询/SSE /api/jobs、ark 回调 /api/webhooks、
+ *     project/canvas 持久化 /api/projects /api/canvases（ADR-0011）、
+ *     模板（前端以 /api/agent/templates 访问，rewrite 去掉 /api/agent 前缀 → 后端 /templates）、
+ *     静态资源 /assets（生成图片/视频落 ./data/assets，WebAppConfig 暴露）。
+ *   - user-service(8081)：鉴权 /api/auth、当前用户 /api/me、用户资料 /api/user。
+ * 注意：微服务拆分后不再有单一后端入口，故废弃旧的 BACKEND_API_BASE_URL(=8000 单体) 写法。
  */
-const BACKEND_API_BASE_URL =
-  process.env.BACKEND_API_BASE_URL || "http://localhost:8000";
+const AGENT = "http://localhost:8082";
+const USER = "http://localhost:8081";
 
 const nextConfig: NextConfig = {
   images: {
@@ -20,37 +24,18 @@ const nextConfig: NextConfig = {
   },
   async rewrites() {
     return [
-      {
-        source: "/api/agent/templates/:path*",
-        destination: "http://localhost:8686/api/agent/templates/:path*",
-      },
-      {
-        source: "/api/auth/:path*",
-        destination: "http://localhost:8081/api/auth/:path*",
-      },
-      {
-        source: "/api/me",
-        destination: "http://localhost:8081/api/me",
-      },
-      {
-        source: "/api/user/:path*",
-        destination: "http://localhost:8081/api/user/:path*",
-      },
-    ];
-  },
-  async rewrites() {
-    return [
-      {
-        source: "/api/:path*",
-        destination: `${BACKEND_API_BASE_URL}/api/:path*`,
-      },
-      {
-        // 静态资源（生成图片等）同源代理 → 后端。
-        // 后端 assets.url 存的是 /assets/<file>，由后端 :8000 的 /assets/** handler 提供服务。
-        // 不代理则前端 <img src="/assets/..."> 落到 Next 源 404，图片显示黑块。
-        source: "/assets/:path*",
-        destination: `${BACKEND_API_BASE_URL}/assets/:path*`,
-      },
+      // agent 8082
+      { source: "/api/generation/:path*", destination: `${AGENT}/api/generation/:path*` },
+      { source: "/api/jobs/:path*", destination: `${AGENT}/api/jobs/:path*` },
+      { source: "/api/webhooks/:path*", destination: `${AGENT}/api/webhooks/:path*` },
+      { source: "/api/projects/:path*", destination: `${AGENT}/api/projects/:path*` },
+      { source: "/api/canvases/:path*", destination: `${AGENT}/api/canvases/:path*` },
+      { source: "/api/agent/templates/:path*", destination: `${AGENT}/templates/:path*` },
+      { source: "/assets/:path*", destination: `${AGENT}/assets/:path*` },
+      // user-service 8081
+      { source: "/api/auth/:path*", destination: `${USER}/api/auth/:path*` },
+      { source: "/api/me", destination: `${USER}/api/me` },
+      { source: "/api/user/:path*", destination: `${USER}/api/user/:path*` },
     ];
   },
 };

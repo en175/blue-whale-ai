@@ -14,6 +14,9 @@ import com.blue.whale.tool.fastjson2.FastJson2;
  */
 public abstract class IFastJson2TypeHandler extends AbstractJsonTypeHandler<Object> {
 
+    public IFastJson2TypeHandler(Class<?> type) {
+        super(type);
+    }
 
     /**
      * 获取泛型的 TypeReference
@@ -23,12 +26,12 @@ public abstract class IFastJson2TypeHandler extends AbstractJsonTypeHandler<Obje
     protected abstract TypeReference<?> getTypeReference();
 
     @Override
-    protected Object parse(String json) {
+    public Object parse(String json) {
         return JSON.parseObject(json, getTypeReference(), FastJson2.readFeature());
     }
 
     @Override
-    protected String toJson(Object obj) {
+    public String toJson(Object obj) {
         return JSON.toJSONString(obj, FastJson2.writeFeature());
     }
 }

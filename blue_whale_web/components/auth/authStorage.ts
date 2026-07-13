@@ -4,6 +4,16 @@ const USER_KEY = "bw-user";
 const ACCESS_TOKEN_KEY = "bw-access-token";
 const REFRESH_TOKEN_KEY = "bw-refresh-token";
 
+/**
+ * 本地开发开关：仅当 .env.local 里 NEXT_PUBLIC_SKIP_AUTH=1 时为 true。
+ * 用于跳过前端登录门槛（画布守卫 + requireAuth）。默认关闭，不影响线上。
+ * 注意：只跳过前端；打到后端的接口仍会被网关 JWT 校验。
+ */
+export const SKIP_AUTH = process.env.NEXT_PUBLIC_SKIP_AUTH === "1";
+
+/** SKIP_AUTH 模式下注入的占位用户，让 UI 呈现已登录态。 */
+export const MOCK_USER: User = { userId: 1, username: "本地测试用户", phone: "13800000000" };
+
 // ---- user ----
 
 export function loadUser(): User | null {

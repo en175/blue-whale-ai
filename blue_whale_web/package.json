@@ -18,6 +18,7 @@
     "design:spec": "designmd spec --rules"
   },
   "dependencies": {
+    "@xyflow/react": "^12.11.2",
     "framer-motion": "^12.42.0",
     "lucide-react": "^1.22.0",
     "next": "16.2.9",

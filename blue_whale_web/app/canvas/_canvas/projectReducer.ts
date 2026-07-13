@@ -8,7 +8,7 @@
  * 副作用全部剥离/注入：
  * - id → 注入 IdGenerator（复用 messages.ts 的 () => number | string）。
  * - 位置（依赖 containerRef + viewport）→ 留在 page.tsx，dispatch 前算好作为
- *   node.x/y 传入，reducer 不碰 DOM/视口。
+ *   node.position 传入，reducer 不碰 DOM/视口。
  * - setTimeout 逐条追加 → 留在 AgentChatPanel，每 tick 调一次 append-messages。
  *
  * 不可变性：reducer 返回新 state，绝不原地改原 state/原 project（A9 回归覆盖）。
@@ -59,7 +59,7 @@ export function projectReducer(state: ProjectState, action: ProjectAction): Proj
         id,
         name: action.name,
         thumb: null,
-        canvas: { nodes: [], viewport: { x: 0, y: 0, scale: 1 } },
+        canvas: { nodes: [], viewport: { x: 0, y: 0, zoom: 1 } },
         messages: [],
       };
       return {
