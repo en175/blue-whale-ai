@@ -19,6 +19,9 @@ const nextConfig: NextConfig = {
     ],
   },
   async rewrites() {
+    // specific 规则在前，catch-all 在后（Next 按顺序匹配，先命中先转发）。
+    // 注：原文件此处有两个 rewrites()，JS 对象重复键后者覆盖前者，导致 auth/templates
+    // 等规则静默失效且 tsc 报 duplicate identifier——合并为单函数修复。
     return [
       // 全走网关（Nacos 服务发现）
       {

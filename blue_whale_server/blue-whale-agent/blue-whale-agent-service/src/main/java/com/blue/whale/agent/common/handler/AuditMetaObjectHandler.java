@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
  * MyBatis-Plus 审计字段自动填充：插入填创建/更新时间、版本、逻辑删除；更新填更新时间。
  * 配合 {@code common.entity.BaseEntity} 的 {@code @TableField(fill = ...)}。注册为 Bean 由 MyBatis-Plus 自动采用。
  */
-@Component
+//@Component
 public class AuditMetaObjectHandler implements MetaObjectHandler {
 
     @Override

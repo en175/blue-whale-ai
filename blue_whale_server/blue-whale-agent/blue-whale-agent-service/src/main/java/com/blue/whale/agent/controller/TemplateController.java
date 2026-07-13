@@ -1,8 +1,8 @@
 package com.blue.whale.agent.controller;
 
-import com.blue.whale.agent.model.TemplateCardDto;
-import com.blue.whale.agent.model.TemplateTagDto;
-import com.blue.whale.agent.model.TemplateTagEnum;
+import com.blue.whale.agent.model.dto.TemplateCardDto;
+import com.blue.whale.agent.model.dto.TemplateTagDto;
+import com.blue.whale.agent.model.enums.TemplateTagEnum;
 import com.blue.whale.agent.service.TemplateService;
 import com.blue.whale.global.base.resp.PageVo;
 import com.blue.whale.global.base.resp.Result;
@@ -20,8 +20,7 @@ import java.util.List;
  * 模板卡片接口
  */
 @RestController
-@RequestMapping("/templates")
-@CrossOrigin(origins = "http://localhost:3000")
+@RequestMapping("/api/agent/templates")
 public class TemplateController {
 
     /** 模板服务 */
