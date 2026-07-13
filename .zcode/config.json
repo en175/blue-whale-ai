@@ -1,0 +1,129 @@
+{
+  "hooks": {
+    "enabled": true,
+    "events": {
+      "PreToolUse": [
+        {
+          "matcher": "Edit|Write",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/block-master-edit.sh"
+            }
+          ]
+        },
+        {
+          "matcher": "Grep|Glob",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/cbm-discovery-gate.sh"
+            }
+          ]
+        },
+        {
+          "matcher": "Bash",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/block-dangerous-git.sh"
+            },
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/block-push-to-master.sh"
+            },
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/confirm-release-action.sh"
+            }
+          ]
+        },
+        {
+          "matcher": "mcp__gitee-ent__create_enterprise_repo_pull",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/confirm-release-action.sh"
+            }
+          ]
+        },
+        {
+          "matcher": "mcp__gitee-ent__merge_enterprise_pull",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/confirm-release-action.sh"
+            }
+          ]
+        },
+        {
+          "matcher": "mcp__gitee-ent__create_enterprise_repo_release",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/confirm-release-action.sh"
+            }
+          ]
+        },
+        {
+          "matcher": "mcp__gitee-ent__create_enterprise_issue",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/block-issue-without-repo.sh"
+            }
+          ]
+        },
+        {
+          "matcher": "mcp__gitee-ent__update_enterprise_issue",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/block-issue-without-repo.sh"
+            }
+          ]
+        }
+      ],
+      "PostToolUse": [
+        {
+          "matcher": "mcp__gitee-ent__create_enterprise_repo_pull",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/confirm-release-action.sh"
+            }
+          ]
+        },
+        {
+          "matcher": "mcp__gitee-ent__merge_enterprise_pull",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/confirm-release-action.sh"
+            }
+          ]
+        },
+        {
+          "matcher": "mcp__gitee-ent__create_enterprise_repo_release",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/confirm-release-action.sh"
+            }
+          ]
+        }
+      ],
+      "SessionStart": [
+        {
+          "matcher": "startup|resume",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/cbm-session-reminder.sh"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

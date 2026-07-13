@@ -32,10 +32,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" block-squash-merge.sh"
-          },
-          {
-            "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" confirm-release-action.sh"
           }
         ]

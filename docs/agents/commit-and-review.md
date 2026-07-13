@@ -78,7 +78,7 @@ PR 合并用 **merge**，**禁用 squash / rebase**。
 
 **约束**：
 
-- AI 用 Gitee MCP `merge_enterprise_pull` 时必须先获得用户合并授权，并使用 `merge_method=merge`（或不传，Gitee 默认 merge）。传 `squash`/`rebase` 会被 `.claude/hooks/block-squash-merge.sh`（PreToolUse）拦（`exit 2`）。
+- AI 用 Gitee MCP `merge_enterprise_pull` 时必须先获得用户合并授权，并使用 `merge_method=merge`（或不传，Gitee 默认 merge）。传 `squash`/`rebase` 会被 `.claude/hooks/confirm-release-action.sh`（PreToolUse，在凭证校验前）拦（`exit 2`）。
 - 人在 Gitee 网页手动合并同样选 **merge**——hook 拦不到服务端人操作，靠自觉 + 本文档约束。
 - 合并即删源分支：**MCP `merge_enterprise_pull` 无 `prune_source_branch` 参数、Gitee merge 默认也不删**（踩坑见 [`hooks/README.md`](hooks/README.md)）。PR 合并后，Agent 回到 task worktree 运行 `scripts/cleanup-task-worktree.sh` 清理远程源分支、本地分支和 worktree；人在 Gitee 界面可勾「删除源分支」。
 
@@ -169,7 +169,7 @@ ________
 | AI 破坏性 git 操作 | 🔴 硬挡 | 裸 `--force`/`-f`、对 `master`/`main` 强推、`reset --hard` / `clean -f` / `branch -D` / `checkout .` / `restore .` 均拦；工单分支上的 `--force-with-lease` 放行（前缀见 [branch-naming.md](branch-naming.md)） |
 | 本地任务验收入口 | 🔴 阻断 / 🟢 放行 | Claude/Codex PreToolUse（`confirm-release-action.sh`）：直接 `git commit`（含 `--amend`）、非 `--ff-only` 的直接 `git merge` 硬拦并指向标准入口（commit 文案同时指引首次 `-m` 与 review 后 `--amend`）；提交入口 `commit-task-for-review.sh` 出现即放行（worktree commit 本地可逆，无需授权；支持 `-m` 首次提交与 `--amend` review 后修订），合入入口 `merge-task-to-local-master.sh` 仍需 `--user-authorized` |
 | 工单分支落后软提醒 | 🟡 软提醒 | pre-commit：工单分支（前缀见 [branch-naming.md](branch-naming.md)）落后 `origin/master` 时 `echo` 提示落后提交数，**不拦 commit**（硬拦在 pre-push）。本地 `master` 不做落后提醒，它是用户本地集成区。见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md) |
-| squash/rebase 合并拦截 | 🔴 硬挡 | Claude PreToolUse（`block-squash-merge.sh`）：AI 调 `mcp__gitee-ent__merge_enterprise_pull` 时 `merge_method=squash`/`rebase` 一律拦，强制 **merge**（免改写 sha 致 `git branch -d` 失败 + 拦 `-D` 死锁，见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md)）。人网页操作拦不到，靠自觉 |
+| squash/rebase 合并拦截 | 🔴 硬挡 | Claude/Codex/ZCode PreToolUse（`confirm-release-action.sh`，在凭证校验前）：AI 调 `mcp__gitee-ent__merge_enterprise_pull` 时 `merge_method=squash`/`rebase` 一律拦，强制 **merge**（免改写 sha 致 `git branch -d` 失败 + 拦 `-D` 死锁，见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md)）。人网页操作拦不到，靠自觉 |
 | 发布动作标准入口 | 🔴 阻断 / 🟢 凭证放行 | Claude/Codex PreToolUse/PostToolUse（`confirm-release-action.sh`）：直接 `git push` 硬拦；发布入口须带 `--user-authorized` 且显式选择 `--create-pr` 或 `--update-pr <IID>`，合规时静默放行。create 写 PR 标记，update 不写；合并 PR / 创建 release 需绑定对象的一次性凭证。Hook 只兜底，不自动同步或推进状态机（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)、[ADR-0012](../adr/0012-agent-noninteractive-authorization.md)、[ADR-0013](../adr/0013-open-pr-update-state-machine.md)） |
 
 > 本表与项目 README 的「Hook 兜底清单」（如有）**同源**——改一处须同步另一处，避免漂移。权威实现以 `.githooks/` + `.claude/hooks/block-dangerous-git.sh` 代码为准。
