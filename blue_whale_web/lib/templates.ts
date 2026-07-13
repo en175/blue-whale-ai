@@ -1,4 +1,5 @@
 import type { ApiResult, TemplatePage, TemplateTag } from "@/types/template";
+import { apiFetch } from "@/lib/api-client";
 
 const API_URL = process.env.NEXT_PUBLIC_TEMPLATE_API_URL ?? "/api/agent/templates";
 const FETCH_TIMEOUT = 8000;
@@ -11,13 +12,7 @@ export class TemplateApiError extends Error {
 }
 
 async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
+  return apiFetch(url, { signal: AbortSignal.timeout(timeoutMs) });
 }
 
 /**

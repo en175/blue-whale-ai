@@ -1,12 +1,14 @@
 /**
  * generation —— 后端生成 API 请求层
  *
- * 走 Next rewrite /api/* → blue_whale_server:8000（见 next.config.ts），浏览器同源无 CORS。
+ * 走 Next rewrite /api/* → 网关 → 后端（见 next.config.ts），浏览器同源无 CORS。
  * 统一 Result{code,msg,data} 拆包：code!==200 抛 Error(msg)，否则返 data。
+ * 鉴权统一走 apiFetch：登录态自动附 Authorization，401 自动刷新。
  *
  * 字段全 snake_case 对齐后端 Jackson SNAKE_CASE 序列化（见 application.yml）。
- * MVP 无鉴权，X-User-Id 头写死（localStorage 可覆盖）。
+ * streamJob 用 EventSource（SSE），不支持自定义 header，暂不走 apiFetch（待单独处理）。
  */
+import { apiFetch } from "@/lib/api-client";
 
 export type ImageModelCapability = {
   model_id: string;
@@ -67,22 +69,12 @@ export type JobStatusResponse = {
 };
 
 const API_BASE = "/api";
-const DEFAULT_USER_ID = "1";
-
-function userIdHeader(): string {
-  if (typeof window === "undefined") return DEFAULT_USER_ID;
-  return window.localStorage.getItem("bw_user_id") || DEFAULT_USER_ID;
-}
 
 async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    res = await apiFetch(`${API_BASE}${path}`, {
       method,
-      headers: {
-        "Content-Type": "application/json",
-        "X-User-Id": userIdHeader(),
-      },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
