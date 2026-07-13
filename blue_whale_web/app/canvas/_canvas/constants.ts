@@ -19,7 +19,7 @@ export const TOOLBAR_BUTTON_PATH =
  * thumb 全部置 null：规避 unsplash 远程图床与 next.config.ts 仅允许 CloudFront 的
  * 白名单冲突（DEMO 阶段统一用占位图标渲染，见 ProjectMenu）。
  */
-const EMPTY_VIEWPORT = { x: 0, y: 0, scale: 1 };
+const EMPTY_VIEWPORT = { x: 0, y: 0, zoom: 1 };
 
 export const PROJECTS: Project[] = [
   {

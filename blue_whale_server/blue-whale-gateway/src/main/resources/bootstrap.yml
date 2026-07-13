@@ -1,0 +1,51 @@
+server:
+  port: 8686
+spring:
+  application:
+    name: blue-whale-gateway
+  profiles:
+    active: blue-whale-dev
+  cloud:
+    nacos:
+      server-addr: 115.190.244.91:8848
+      discovery:
+        # namespace 用 Nacos namespace ID（UUID），非名字；与 agent-service 一致才能发现彼此
+        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
+      config:
+        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
+        file-extension: yml
+        group: BLUE_WHALE
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOriginPatterns: "*"
+            allowedMethods: "*"
+            allowedHeaders: "*"
+            exposedHeaders: "Authorization"
+            allowCredentials: true
+      discovery:
+        locator:
+          enabled: true
+      routes:
+        - id: blue-whale-agent
+          uri: lb://blue-whale-agent
+          predicates:
+            - Path=/api/agent/**
+        - id: blue-whale-user
+          uri: lb://blue-whale-user
+          predicates:
+            - Path=/api/auth/**, /api/me, /api/user/**
+    loadbalancer:
+      retry:
+        enabled: true
+sentinel:
+  nacos:
+    namespace: ${spring.profiles.active}
+    serverAddr: ${spring.cloud.nacos.server-addr}
+    groupId: SENTINEL_GROUP
+    dataId:
+      flowPostfix: -flow-rules
+      degradePostfix: -degrade-rules
+      gwApiPostfix: -gw-api-group-rules
+      gwFlowPostfix: -gw-flow-rules

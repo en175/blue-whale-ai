@@ -1,0 +1,73 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: blue-whale-agent
+  profiles:
+    active: blue-whale-dev
+  cloud:
+    nacos:
+      server-addr: 115.190.244.91:8848
+      discovery:
+        register-enabled: true
+        # namespace 必须用 Nacos 的 namespace ID（UUID），用名字会注册到 console 看不见的隐式命名空间
+        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
+        timeout: 10000
+  datasource:
+    dynamic:
+      primary: master
+      strict: false
+      datasource:
+        master:
+          url: jdbc:mysql://115.190.244.91:3306/blue_whale?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+          username: root
+          password: weitian1024
+          driver-class-name: com.mysql.cj.jdbc.Driver
+          type: com.zaxxer.hikari.HikariDataSource
+          hikari:
+            minimum-idle: 2
+            maximum-pool-size: 10
+            connection-timeout: 20000
+            idle-timeout: 300000
+            max-lifetime: 1200000
+  redis:
+    host: 115.190.244.91
+    port: 6379
+    password: weitian1024
+    database: 0
+  jackson:
+    # 前端字段全 snake_case，必须 SNAKE_CASE 才能映射到后端 camelCase（model_id→modelId）。
+    # MybatisJacksonConfig 复用此 ObjectMapper 给 JacksonTypeHandler，DB 的 JSON 列也是 snake_case。
+    property-naming-strategy: SNAKE_CASE
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.blue.whale.agent.**.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    # 默认走 slf4j，不用 StdOutImpl（它会把每条 SQL 打到 stdout 刷屏）；需要看 SQL 时取消下行注释
+    # log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+oss:
+  volcengine:
+    access-key: ${TOS_ACCESS_KEY}
+    secret-key: ${TOS_SECRET_KEY}
+    bucket-name: ${TOS_BUCKET_NAME}
+    domain: ${TOS_DOMAIN:https://sweet-oa.tos-cn-beijing.volces.com}
+
+logging:
+  level:
+    com.blue.whale.agent.mapper: info
+
+# 火山方舟 Ark：图片/视频生成。api-key 必填，否则 ArkService bean 不创建、生成接口报配置缺失
+volcengine:
+  ark:
+    base-url: https://ark.cn-beijing.volces.com/api/v3
+    api-key: ark-90702f0d-327b-4d76-890c-7dc81efd5721-e0494

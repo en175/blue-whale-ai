@@ -1,19 +1,54 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 import { AspectRatioIcon } from "./icons/AspectRatioIcon";
 
 export const IMAGE_MODELS = [
   {
-    id: "gpt-image-2",
-    label: "GPT Image 2",
-    icon: "https://d1735p3aqhycef.cloudfront.net/aigc-web/public/ai-image-creation/models/openai.png",
+    id: "doubao-seedream-5-0-260128",
+    label: "Seedream 5.0 Lite",
+    defaultResolutionId: "2k",
+    stream: true,
+    resolutions: [
+      { id: "2k", label: "2K" },
+      { id: "3k", label: "3K" },
+      { id: "4k", label: "4K" },
+    ],
   },
-  { id: "nano-banana-2", label: "Nano Banana 2" },
-  { id: "nano-banana-pro", label: "Nano Banana Pro" },
-  { id: "seedream-5", label: "Seedream 5.0" },
+  {
+    id: "doubao-seedream-4-5-251128",
+    label: "Seedream 4.5",
+    defaultResolutionId: "2k",
+    stream: true,
+    resolutions: [
+      { id: "2k", label: "2K" },
+      { id: "4k", label: "4K" },
+    ],
+  },
+  {
+    id: "doubao-seedream-4-0-250615",
+    label: "Seedream 4.0",
+    defaultResolutionId: "2k",
+    stream: true,
+    resolutions: [
+      { id: "1k", label: "1K" },
+      { id: "2k", label: "2K" },
+      { id: "4k", label: "4K" },
+    ],
+  },
+  {
+    id: "doubao-seedream-3-0-t2i-250415",
+    label: "Seedream 3.0 T2I",
+    defaultResolutionId: "1024x1024",
+    stream: false,
+    resolutions: [
+      { id: "512x512", label: "512 × 512" },
+      { id: "1024x1024", label: "1024 × 1024" },
+      { id: "2048x2048", label: "2048 × 2048" },
+    ],
+  },
 ];
 
 export const IMAGE_ASPECT_RATIOS = [
@@ -24,23 +59,20 @@ export const IMAGE_ASPECT_RATIOS = [
   { id: "16:9", label: "16:9" },
   { id: "2:3", label: "2:3" },
   { id: "3:2", label: "3:2" },
-  { id: "5:4", label: "5:4" },
-  { id: "4:5", label: "4:5" },
   { id: "21:9", label: "21:9" },
-  { id: "9:21", label: "9:21" },
-  { id: "1:2", label: "1:2" },
-  { id: "2:1", label: "2:1" },
-];
-
-export const IMAGE_RESOLUTIONS = [
-  { id: "1k", label: "1K" },
-  { id: "2k", label: "2K" },
-  { id: "4k", label: "4K" },
 ];
 
 export type ImageModel = (typeof IMAGE_MODELS)[number];
-export type ImageResolution = (typeof IMAGE_RESOLUTIONS)[number];
+export type ImageResolution = ImageModel["resolutions"][number];
 export type ImageAspectRatio = (typeof IMAGE_ASPECT_RATIOS)[number];
+
+/** 取模型默认分辨率；缺省回退到第一个。 */
+export function defaultResolutionOf(model: ImageModel): ImageResolution {
+  return (
+    model.resolutions.find((r) => r.id === model.defaultResolutionId) ??
+    model.resolutions[0]
+  );
+}
 
 export interface ImageModelSettingsPopoverProps {
   triggerRef: React.RefObject<HTMLElement | null>;
@@ -175,32 +207,6 @@ export function ImageModelSettingsPopover({
                 boxSizing: "border-box",
               }}
             >
-              {selectedModel.icon ? (
-                <img
-                  alt=""
-                  width={16}
-                  height={16}
-                  src={selectedModel.icon}
-                  style={{
-                    width: 16,
-                    height: 16,
-                    borderRadius: 4,
-                    objectFit: "cover",
-                    flexShrink: 0,
-                  }}
-                />
-              ) : (
-                <span
-                  style={{
-                    width: 16,
-                    height: 16,
-                    borderRadius: 4,
-                    background: "rgba(255,255,255,0.1)",
-                    flexShrink: 0,
-                    display: "inline-block",
-                  }}
-                />
-              )}
               <span
                 style={{
                   color: "rgb(255, 255, 255)",
@@ -264,32 +270,6 @@ export function ImageModelSettingsPopover({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {model.icon ? (
-                      <img
-                        alt=""
-                        width={16}
-                        height={16}
-                        src={model.icon}
-                        style={{
-                          width: 16,
-                          height: 16,
-                          borderRadius: 4,
-                          objectFit: "cover",
-                          flexShrink: 0,
-                        }}
-                      />
-                    ) : (
-                      <span
-                        style={{
-                          width: 16,
-                          height: 16,
-                          borderRadius: 4,
-                          background: "rgba(255,255,255,0.1)",
-                          flexShrink: 0,
-                          display: "inline-block",
-                        }}
-                      />
-                    )}
                     <span style={{ fontWeight: 600 }}>{model.label}</span>
                   </button>
                 ))}
@@ -372,7 +352,7 @@ export function ImageModelSettingsPopover({
                   gap: 2,
                 }}
               >
-                {IMAGE_RESOLUTIONS.map((res) => (
+                {selectedModel.resolutions.map((res) => (
                   <button
                     key={res.id}
                     type="button"
