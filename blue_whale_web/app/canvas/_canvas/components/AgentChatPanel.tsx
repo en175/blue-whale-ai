@@ -79,7 +79,6 @@ export function AgentChatPanel({
   useEffect(() => {
     if (prompt && composerRef.current) {
       composerRef.current.innerText = prompt;
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setComposerEmpty(false);
     }
   }, [prompt]);
