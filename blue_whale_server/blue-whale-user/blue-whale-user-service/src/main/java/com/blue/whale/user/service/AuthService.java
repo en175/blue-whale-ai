@@ -42,6 +42,8 @@ public class AuthService {
     private static final String SMS_LIMIT_60S_PREFIX = "bw:sms:limit:60s:";
     private static final String SMS_LIMIT_DAILY_PREFIX = "bw:sms:limit:daily:";
     private static final String SMS_LIMIT_IP_PREFIX = "bw:sms:limit:ip:";
+    /** 测试账号：跳过图形验证码和短信验证码 */
+    private static final String TEST_PHONE = "15079999999";
 
     /** 验证码有效期（秒） */
     private static final int CODE_EXPIRE_SEC = 300;
@@ -101,17 +103,20 @@ public class AuthService {
 
     @Transactional(rollbackFor = Exception.class)
     public LoginResponse login(String phone, String code) {
-        // 从 Redis 取验证码
-        String stored = RedisUtil.getCacheObject(SMS_CODE_PREFIX + phone);
-        if (stored == null) {
-            throw new GlobalException(401, "验证码已过期，请重新获取");
-        }
-        if (!"15079999999".equals(phone) && !stored.equals(code)) {
-            throw new GlobalException(401, "验证码错误");
-        }
+        boolean isTestPhone = TEST_PHONE.equals(phone);
 
-        // 消费掉
-        RedisUtil.delete(SMS_CODE_PREFIX + phone);
+        if (!isTestPhone) {
+            // 从 Redis 取验证码
+            String stored = RedisUtil.getCacheObject(SMS_CODE_PREFIX + phone);
+            if (stored == null) {
+                throw new GlobalException(401, "验证码已过期，请重新获取");
+            }
+            if (!stored.equals(code)) {
+                throw new GlobalException(401, "验证码错误");
+            }
+            // 消费掉
+            RedisUtil.delete(SMS_CODE_PREFIX + phone);
+        }
 
         // 查用户：有则登录，无则注册
         User user = userMapper.selectOne(
