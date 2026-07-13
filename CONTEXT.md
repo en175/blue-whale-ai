@@ -72,14 +72,23 @@ _Avoid_: 把 Asset 与 NodeItem/Card 混为一谈 —— Asset 是文件实体,
 NodeItem/Card 是它呈现给用户的视图。
 
 **GenerationJob（生成任务）**:
-一次生图/生视频的后台任务。生命周期:`queued` → `processing` → `succeeded` | `failed`。
+一次生图/生视频的后台任务。生命周期:`queued` → `processing` →
+`succeeded` | `partially_succeeded` | `failed`。
 任务在**后台持久化**:用户刷新页面、切换 Project、关闭浏览器后任务仍继续执行,
-回到该 Project 仍可查到状态与结果。产出物是一个 Asset,通过 Card / NodeItem 呈现。
+回到该 Project 仍可查到状态与结果。一个 GenerationJob 可产出一个或多个 Asset，
+每个 Asset 分别通过 Card / NodeItem 呈现。
 由 BottomDock（参数直填）或 AgentChatPanel（对话驱动）两个入口触发。
 **Card 的展示状态是 Job 状态的视图映射**:`processing`→`generating`、
-`succeeded`→`normal`、`failed`→`failed`。
+`succeeded`→`normal`、`failed`→`failed`；`partially_succeeded` 中成功的输出为 `normal`，
+缺失的输出槽位为 `failed`。
 _Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeItem 是结果视图;
 把 Job 与 Asset 混为一谈 —— Job 是过程,Asset 是它的产物。
+
+**AgentRun（创作运行）**:
+围绕一个创作意图持续推进的 Agent 工作单元；活动中的 Run 可跨澄清、修改和自然语言授权等
+多轮对话暂停并恢复，终态不可重开，后续修订或无关新目标创建关联的新 AgentRun。
+其生命周期状态只表达运行、等待及终态；理解素材、选择技能、规划和生成等属于独立的展示阶段。
+_Avoid_: 把每条用户消息都当作新的 AgentRun；把 AgentRun 与具体的 GenerationJob 混为一谈。
 
 **GenerationAuthorizationGate（生成授权门）**:
 Agent 创建 GenerationJob 前对用户意图与风险的分类：明确且在默认成本额度内则直接执行；
