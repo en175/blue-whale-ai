@@ -26,7 +26,6 @@ interface LoginModalProps {
 export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
-  const [codeSent, setCodeSent] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [agreed, setAgreed] = useState(false);
   const [phoneError, setPhoneError] = useState<string | null>(null);
@@ -72,7 +71,6 @@ export function LoginModal({ onClose, onSuccess }: LoginModalProps) {
       return;
     }
     setPhoneError(null);
-    setCodeSent(true);
     setCountdown(60);
     // L1 mock：验证码 = LOGIN_CODE ("1234")，不真发短信
   };

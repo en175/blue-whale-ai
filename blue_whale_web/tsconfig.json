@@ -13,6 +13,7 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
+    "types": ["node", "@testing-library/jest-dom"],
     "plugins": [
       {
         "name": "next"
@@ -24,6 +25,9 @@
   },
   "include": [
     "next-env.d.ts",
+    "vitest.setup.ts",
+    "playwright.config.ts",
+    "e2e/**/*.ts",
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
