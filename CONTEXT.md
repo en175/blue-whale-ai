@@ -106,6 +106,13 @@ Agent 创建 GenerationJob 前对用户意图与风险的分类：明确且在�
 存在关键歧义则继续对齐；高成本或不可逆操作则先取得自然语言确认。
 _Avoid_: 每次生成都确认、确认按钮、把需求对齐误称为授权。
 
+**UserInputRequest（用户输入请求）**:
+AgentRun 因关键歧义或 GenerationAuthorizationGate 而等待用户补充信息时创建的请求记录。
+请求内容与唯一标识一经创建不可改写，归属于 AgentRun，不是独立聚合；同一 AgentRun
+最多只有一个活动请求。用户只能通过 Conversation 中引用该请求标识的自然语言消息回答，
+已过期或已回答请求的迟到回复不能解除后续请求。
+_Avoid_: 确认按钮、无请求标识的隐式解锁、把 UserInputRequest 当作独立运行任务。
+
 **展示边界(画布 vs 对话)**:
 Canvas 只承载 Asset(图片 / 视频)节点 —— 即生成素材(中间结果或最终结果)。
 所有过程性文字内容(Brief 摘要、Skill 推荐、脚本 / 分镜、图片理解摘要、Review、
