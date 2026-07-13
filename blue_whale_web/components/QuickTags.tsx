@@ -1,32 +1,57 @@
 "use client";
 
-import { Megaphone, Clapperboard, Copy, Share2, Image } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Clapperboard, Copy, Image as ImageIcon, Megaphone, Share2, type LucideIcon } from "lucide-react";
+import { fetchTemplateTags } from "@/lib/templates";
+import type { TemplateTag } from "@/types/template";
 
-const TAGS = [
-  { id: "marketing", label: "营销视频", icon: Megaphone },
-  { id: "short", label: "微短片", icon: Clapperboard },
-  { id: "replicate", label: "视频复刻", icon: Copy },
-  { id: "social", label: "社媒视频", icon: Share2 },
-  { id: "image", label: "图片设计", icon: Image },
-];
+/** 标签图标映射（图标是视图资产，前端维护，不入库） */
+const ICON_MAP: Record<string, LucideIcon> = {
+  marketing: Megaphone,
+  short: Clapperboard,
+  replicate: Copy,
+  social: Share2,
+  image: ImageIcon,
+};
+const DEFAULT_ICON = Megaphone;
 
 export default function QuickTags({
   active,
   onSelect,
 }: {
   active: string;
-  onSelect: (id: string) => void;
+  onSelect: (code: string) => void;
 }) {
+  const [tags, setTags] = useState<TemplateTag[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchTemplateTags()
+      .then((list) => {
+        if (!cancelled) setTags(list);
+      })
+      .catch(() => {
+        // 加载失败留空，下方渲染占位
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (tags.length === 0) {
+    return <div className="h-8 w-full" aria-hidden />;
+  }
+
   return (
     <div className="ncs-thin-scrollbar flex w-full items-center justify-center gap-1.5 overflow-x-auto">
-      {TAGS.map((tag) => {
-        const Icon = tag.icon;
-        const isActive = active === tag.id;
+      {tags.map((tag) => {
+        const Icon = ICON_MAP[tag.tag_code] ?? DEFAULT_ICON;
+        const isActive = active === tag.tag_code;
         return (
           <button
-            key={tag.id}
+            key={tag.tag_code}
             type="button"
-            onClick={() => onSelect(tag.id)}
+            onClick={() => onSelect(tag.tag_code)}
             className={`group inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-all duration-200 ${
               isActive
                 ? "bg-white/[0.09] text-white/90"
@@ -47,4 +72,3 @@ export default function QuickTags({
     </div>
   );
 }
-

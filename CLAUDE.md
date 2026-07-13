@@ -17,6 +17,22 @@
 | 前端 UI 修改（`blue_whale_web/`）     | `.claude/rules/frontend.md`（路径作用域，改前端文件时自动加载，无需手动查） |
 | PR 模板 / Hook 兜底清单 / 低频细节        | `docs/agents/commit-and-review.md`                  |
 
+## Agent skills
+
+> mattpocock/skills 工程技能的配置锚点。技能运行时读 `docs/agents/` 下三份配置；与上方「路由表」的 `.claude/rules/` 是两套——rules 管 git 工作流硬规则，`docs/agents/` 管 matt 技能运行时配置。
+
+### Issue tracker
+
+Issues / PRD 存 Gitee 仓库 Issues，无 `gh`/`glab` CLI，走 Gitee MCP（企业版优先，普通版回退）。见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+五规范角色（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`）直映 Gitee 同名标签。见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+Single-context：根 `CONTEXT.md` + `docs/adr/`，技能探索前读这俩。见 `docs/agents/domain.md`。
+
 ## 最高红线（摘要，细节见 rules 文件）
 
 1. **禁直推 master** — 全走分支 → PR → merge。`hotfix/*` 无特权。

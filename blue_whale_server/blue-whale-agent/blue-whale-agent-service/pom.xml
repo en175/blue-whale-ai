@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.blue-whale.parent</groupId>
+        <artifactId>blue-whale-parent</artifactId>
+        <version>2025.3</version>
+    </parent>
+
+    <groupId>com.blue-whale.agent</groupId>
+    <artifactId>blue-whale-agent-service</artifactId>
+    <version>2025.3</version>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <!-- Bean Validation：@Valid/@Validated + javax.validation（Boot 2.7） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.blue-whale.tool.log</groupId>
+            <artifactId>blue-whale-common-log</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.blue-whale.global</groupId>
+            <artifactId>blue-whale-global</artifactId>
+        </dependency>
+        <!-- MyBatis-Plus -->
+        <dependency>
+            <groupId>com.blue-whale.tool.mp</groupId>
+            <artifactId>blue-whale-common-mybatis-plus</artifactId>
+        </dependency>
+        <!-- MySQL -->
+        <dependency>
+            <groupId>mysql</groupId>
+            <artifactId>mysql-connector-java</artifactId>
+            <version>8.0.31</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.blue-whale.agent</groupId>
+            <artifactId>blue-whale-agent-api</artifactId>
+            <version>2025.3</version>
+        </dependency>
+
+        <!-- Nacos 注册中心 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+        <!-- bootstrap 引导配置 -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-bootstrap</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Test：junit-jupiter + mockito-core + assertj，版本由 Spring Boot BOM 管理 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- 火山方舟 Ark Runtime SDK：文生图(Seedream 同步) + 图文生视频(Seedance 异步)，OkHttp 连接池 -->
+        <dependency>
+            <groupId>com.volcengine</groupId>
+            <artifactId>volcengine-java-sdk-ark-runtime</artifactId>
+            <version>2.0.14</version>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

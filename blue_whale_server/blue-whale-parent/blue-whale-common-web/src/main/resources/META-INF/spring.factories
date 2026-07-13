@@ -1,0 +1,2 @@
+org.springframework.boot.SpringApplicationRunListener=\
+    com.blue.whale.web.spring.listener.SweetOaAutoConfigureSpringListener

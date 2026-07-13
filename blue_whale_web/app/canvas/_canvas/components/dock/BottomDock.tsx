@@ -4,10 +4,11 @@
  * 按 mode 切换渲染 ImageDockContent 或 VideoDockContent，并提供关闭与素材删除回调。
  */
 import { useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import { squirclePath } from "../../utils";
 import { VIDEO_MODELS, VIDEO_ASPECT_RATIOS, VIDEO_RESOLUTIONS, REF_MODES } from "../../constants";
-import type { DockMediaItem } from "../../types";
+import type { DockMediaItem, GenerateArgs } from "../../types";
 import { ImageDockContent } from "./ImageDockContent";
 import { VideoDockContent } from "./VideoDockContent";
 
@@ -22,6 +23,10 @@ export function BottomDock({
   onPickFromCanvas,
   onExitPick,
   isPicking = false,
+  onGenerate,
+  generating = false,
+  generateError,
+  onClearGenerateError,
 }: {
   mode: "image" | "video";
   onClose: () => void;
@@ -37,6 +42,14 @@ export function BottomDock({
   onExitPick?: () => void;
   /** 当前 Dock 是否处于选择模式 */
   isPicking?: boolean;
+  /** 生成：prompt 由本组件 input state 取，settings 由各 Dock Content 拼 */
+  onGenerate?: (prompt: string, args: GenerateArgs) => void;
+  /** 生成进行中（禁用按钮防重复提交） */
+  generating?: boolean;
+  /** 生成错误提示（用户友好，非内部错误） */
+  generateError?: string | null;
+  /** 关闭生成错误提示 */
+  onClearGenerateError?: () => void;
 }) {
   const [input, setInput] = useState("");
   const [dockSize, setDockSize] = useState({ w: 680, h: 164 });
@@ -114,6 +127,45 @@ export function BottomDock({
               className="nodrag nopan nowheel"
               style={{ width: 680, background: "transparent", display: "flex", flexDirection: "column" }}
             >
+              {generateError && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    padding: "8px 12px",
+                    background: "rgba(239, 68, 68, 0.12)",
+                    borderBottom: "1px solid rgba(239, 68, 68, 0.16)",
+                    color: "rgb(248, 113, 113)",
+                    fontSize: 12,
+                    lineHeight: "16px",
+                  }}
+                >
+                  <span>{generateError}</span>
+                  <button
+                    type="button"
+                    aria-label="关闭错误提示"
+                    onClick={onClearGenerateError}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      padding: 0,
+                      border: 0,
+                      borderRadius: 4,
+                      background: "transparent",
+                      color: "inherit",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <X width={14} height={14} />
+                  </button>
+                </div>
+              )}
               {mode === "image" ? (
                 <ImageDockContent
                   editorRef={editorRef}
@@ -126,6 +178,8 @@ export function BottomDock({
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
+                  onGenerate={(s) => onGenerate?.(input, { mode: "image", settings: s })}
+                  generating={generating}
                 />
               ) : (
                 <VideoDockContent
@@ -161,6 +215,8 @@ export function BottomDock({
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
+                  onGenerate={(s) => onGenerate?.(input, { mode: "video", settings: s })}
+                  generating={generating}
                 />
               )}
             </div>

@@ -126,7 +126,7 @@ EOF
 PR 审核也会基于落后 diff。请先同步：
 
   scripts/sync-task-from-origin.sh sync --json
-  # SYNCED → 按改动范围运行测试 → 使用 publish-review-package 的显式 create/update 模式
+  # SYNCED → 按改动范围运行测试（前端 npm run lint / 后端 mvn test）→ 使用 publish-review-package 的显式 create/update 模式
 
 冲突由入口自动 abort 并返回决策证据。详见 CLAUDE.md 与
 docs/adr/0013-open-pr-update-state-machine.md。

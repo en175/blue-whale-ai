@@ -9,8 +9,11 @@ import { ChevronUp, Image as ImageIcon, Plus, Settings2, X } from "lucide-react"
 import {
   ImageModelSettingsPopover,
   IMAGE_MODELS,
-  IMAGE_RESOLUTIONS,
   IMAGE_ASPECT_RATIOS,
+  defaultResolutionOf,
+  type ImageModel,
+  type ImageResolution,
+  type ImageAspectRatio,
 } from "@/components/ImageModelSettingsPopover";
 import { CreditIcon } from "../../icons";
 import { QUANTITIES } from "../../constants";
@@ -29,12 +32,24 @@ export function ImageDockContent({
   onPickFromCanvas,
   onExitPick,
   isPicking = false,
+  onGenerate,
+  generating = false,
 }: ImageDockContentProps) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState(IMAGE_MODELS[0]);
-  const [selectedResolution, setSelectedResolution] = useState(IMAGE_RESOLUTIONS[0]);
-  const [selectedAspectRatio, setSelectedAspectRatio] = useState(IMAGE_ASPECT_RATIOS[2]);
+  const [selectedModel, setSelectedModel] = useState<ImageModel>(IMAGE_MODELS[0]);
+  const [selectedResolution, setSelectedResolution] = useState<ImageResolution>(
+    defaultResolutionOf(IMAGE_MODELS[0]),
+  );
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState<ImageAspectRatio>(IMAGE_ASPECT_RATIOS[2]);
+
+  // 切模型联动：新模型不支持当前分辨率则重置到该模型默认
+  const handleModelChange = (model: ImageModel) => {
+    setSelectedModel(model);
+    if (!model.resolutions.some((r) => r.id === selectedResolution.id)) {
+      setSelectedResolution(defaultResolutionOf(model));
+    }
+  };
 
   // 上传来源菜单（占位按钮 + 加号共用）
   const localFileRef = useRef<HTMLInputElement>(null);
@@ -342,7 +357,7 @@ export function ImageDockContent({
           open={modelSettingsOpen}
           onClose={() => setModelSettingsOpen(false)}
           selectedModel={selectedModel}
-          onModelChange={setSelectedModel}
+          onModelChange={handleModelChange}
           selectedResolution={selectedResolution}
           onResolutionChange={setSelectedResolution}
           selectedAspectRatio={selectedAspectRatio}
@@ -460,7 +475,15 @@ export function ImageDockContent({
           <div style={{ position: "relative", display: "inline-flex" }}>
             <button
               type="button"
-              disabled
+              disabled={isEmpty || generating}
+              onClick={() =>
+                onGenerate?.({
+                  model: selectedModel,
+                  resolution: selectedResolution,
+                  aspectRatio: selectedAspectRatio,
+                  quantity,
+                })
+              }
               style={{
                 height: 32,
                 padding: "0px 12px",
@@ -473,9 +496,9 @@ export function ImageDockContent({
                 justifyContent: "center",
                 gap: 6,
                 transition: "120ms",
-                background: "rgba(255, 255, 255, 0.06)",
-                color: "rgba(255, 255, 255, 0.32)",
-                cursor: "default",
+                background: isEmpty || generating ? "rgba(255, 255, 255, 0.06)" : "var(--tc-accent)",
+                color: isEmpty || generating ? "rgba(255, 255, 255, 0.32)" : "rgb(255, 255, 255)",
+                cursor: isEmpty || generating ? "default" : "pointer",
                 opacity: 1,
               }}
             >
