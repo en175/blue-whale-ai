@@ -210,7 +210,7 @@ export async function getAccessTokenSilently(): Promise<string | null> {
       })
       .catch((err) => {
         processQueue(err);
-        return null; // silent 模式：不抛错，不触发 onAuthFailure
+        throw err; // silent：抛错由下方 await catch 兜底 return null；不 clearTokens/onAuthFailure
       })
       .finally(() => {
         isRefreshing = false;
