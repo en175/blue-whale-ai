@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import "@xyflow/react/dist/style.css";
 import "./globals.css";
 import { AuthProvider } from "@/components/auth/AuthContext";
+import Sidebar from "@/components/Sidebar";
 
 export const metadata: Metadata = {
   title: "blue_Whale",
@@ -14,8 +16,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN" className="h-full antialiased">
-      <body className="min-h-full flex flex-col bg-[#0a0a0a]">
-        <AuthProvider>{children}</AuthProvider>
+      <body className="min-h-full flex flex-row bg-[#0a0a0a]">
+        <AuthProvider>
+          <Sidebar />
+          <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+        </AuthProvider>
       </body>
     </html>
   );

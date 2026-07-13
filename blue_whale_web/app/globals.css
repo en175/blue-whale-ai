@@ -167,11 +167,15 @@ body {
   --tc-enter-duration-agent: 400ms;
   --tc-enter-duration-settle: 600ms;
   --tc-flow-zoom: 1;
+  --tc-canvas-dot: rgba(255, 255, 255, 0.2);
   --tc-node-toolbar-scale: 1;
   --tc-node-toolbar-offset: 28px;
   --tc-canvas-right-occupied: 484px;
   --tc-agent-panel-width: 468px;
   --tc-agent-composer-width: 460px;
+
+  /* 全局左侧导航栏宽度（首页/生成/资产/画布），Sidebar.tsx 引用；对标即梦窄图标栏 */
+  --tc-sidebar-width: 76px;
 }
 
 /* Toolbar enter animations */
@@ -410,3 +414,26 @@ body {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   pointer-events: none;
 }
+
+/* React Flow 画布覆盖：透明底（透出页面 bg-canvas）+ resize 把手 token 化 + 去掉默认节点边框 */
+.react-flow {
+  background: transparent;
+}
+.react-flow__node {
+  cursor: grab;
+}
+.react-flow__node.dragging {
+  cursor: grabbing;
+}
+.react-flow__resize-control.handle {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: var(--tc-card-selected-stroke);
+  border: 1px solid var(--tc-bg);
+}
+.react-flow__attribution {
+  background: transparent;
+  font-size: 10px;
+}
+

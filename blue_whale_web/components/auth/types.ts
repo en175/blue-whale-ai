@@ -2,8 +2,9 @@
  * 鉴权相关纯类型（数据层，无 JSX / 无副作用）
  */
 
-/** 已登录用户（mock：仅用户名 + 手机号） */
+/** 已登录用户 */
 export type User = {
+  userId: number;
   username: string;
   phone: string;
 };

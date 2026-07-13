@@ -1,46 +1,35 @@
 /**
- * ZoomControls —— 画布右下角缩放控件（展示层）
- * 提供放大/缩小/复位等操作，按当前 viewport 与容器尺寸计算并回写 setViewport。
+ * ZoomControls —— 画布右下角缩放控件（展示层，React Flow 驱动）
+ *
+ * 迁移自手算 viewport.scale。现由 RF `useReactFlow`（zoomIn/zoomOut/zoomTo）
+ * + `useViewport`（读 zoom 百分比）驱动。须渲染在 `<ReactFlowProvider>` 内
+ * （page.tsx 包裹 CanvasSurface + ZoomControls）。
  */
 import { useCallback } from "react";
 import { ChevronDown, Minus, Plus } from "lucide-react";
-import type { Viewport } from "../types";
+import { useReactFlow, useViewport } from "@xyflow/react";
 
-export function ZoomControls({
-  containerRef,
-  viewport,
-  setViewport,
-}: {
-  containerRef: React.RefObject<HTMLDivElement | null>;
-  viewport: Viewport;
-  setViewport: React.Dispatch<React.SetStateAction<Viewport>>;
-}) {
-  const zoomBy = useCallback(
-    (factor: number) => {
-      const rect = containerRef.current?.getBoundingClientRect();
-      const cx = rect ? rect.width / 2 : 0;
-      const cy = rect ? rect.height / 2 : 0;
-      const worldX = (cx - viewport.x) / viewport.scale;
-      const worldY = (cy - viewport.y) / viewport.scale;
-      const newScale = Math.min(3, Math.max(0.1, viewport.scale * factor));
-      setViewport({
-        x: cx - worldX * newScale,
-        y: cy - worldY * newScale,
-        scale: newScale,
-      });
-    },
-    [containerRef, viewport, setViewport]
-  );
+export function ZoomControls() {
+  const { zoomIn, zoomOut, zoomTo } = useReactFlow();
+  const { zoom } = useViewport();
+
+  const handleReset = useCallback(() => {
+    zoomTo(1);
+  }, [zoomTo]);
 
   return (
     <div className="tc-ui-fade-in absolute bottom-4 right-4 z-[150] opacity-100">
-      <div className="tc-bottom-right-panel flex items-center gap-1 rounded-[18px] bg-[#171717] p-1 border border-white/[0.04]">
+      <div
+        className="tc-bottom-right-panel flex items-center gap-1 rounded-[18px] p-1"
+        style={{ background: "var(--tc-menu-pill-bg)", border: "1px solid var(--tc-menu-pill-border)" }}
+      >
         <div className="flex items-center">
           <button
             type="button"
             aria-label="缩小"
-            onClick={() => zoomBy(0.9)}
-            className="tc-ui-glow-btn flex h-7 w-7 items-center justify-center rounded-lg text-white/80 transition-colors hover:bg-white/[0.08]"
+            onClick={() => zoomOut()}
+            className="tc-ui-glow-btn flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--tc-menu-item-hover)]"
+            style={{ color: "var(--tc-text-secondary)" }}
           >
             <Minus width={12} height={12} />
           </button>
@@ -48,25 +37,29 @@ export function ZoomControls({
             type="button"
             aria-label="缩放 100%"
             aria-expanded="false"
-            className="tc-ui-glow-btn inline-flex h-7 w-16 items-center justify-end gap-1.5 rounded-lg px-1.5 text-xs font-medium text-white/95 transition-colors hover:bg-white/[0.08]"
+            onClick={handleReset}
+            className="tc-ui-glow-btn inline-flex h-7 w-16 items-center justify-end gap-1.5 rounded-lg px-1.5 text-xs font-medium transition-colors hover:bg-[var(--tc-menu-item-hover)]"
+            style={{ color: "var(--tc-text-primary)" }}
           >
-            <span className="relative z-[1] flex-1 text-right">{Math.round(viewport.scale * 100)}%</span>
-            <ChevronDown width={11} height={11} stroke="rgba(255,255,255,0.8)" />
+            <span className="relative z-[1] flex-1 text-right">{Math.round(zoom * 100)}%</span>
+            <ChevronDown width={11} height={11} stroke="var(--tc-text-tertiary)" />
           </button>
           <button
             type="button"
             aria-label="放大"
-            onClick={() => zoomBy(1.1)}
-            className="tc-ui-glow-btn flex h-7 w-7 items-center justify-center rounded-lg text-white/80 transition-colors hover:bg-white/[0.08]"
+            onClick={() => zoomIn()}
+            className="tc-ui-glow-btn flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--tc-menu-item-hover)]"
+            style={{ color: "var(--tc-text-secondary)" }}
           >
             <Plus width={12} height={12} />
           </button>
         </div>
-        <div className="mx-0.5 h-4 w-px bg-white/[0.06]" />
+        <div className="mx-0.5 h-4 w-px" style={{ background: "var(--tc-border-subtle)" }} />
         <button
           type="button"
           aria-label="键盘快捷键"
-          className="tc-ui-glow-btn flex h-7 w-7 items-center justify-center rounded-lg text-white/80 transition-colors hover:bg-white/[0.08]"
+          className="tc-ui-glow-btn flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--tc-menu-item-hover)]"
+          style={{ color: "var(--tc-text-secondary)" }}
         >
           <svg
             width={18}

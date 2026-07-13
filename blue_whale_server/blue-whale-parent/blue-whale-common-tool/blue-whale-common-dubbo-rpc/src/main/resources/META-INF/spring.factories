@@ -1,0 +1,2 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+    com.blue.whale.tool.dubbo.rpc.IDynamicDubbo

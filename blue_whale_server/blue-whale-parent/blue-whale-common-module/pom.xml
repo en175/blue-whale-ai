@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.blue-whale.parent</groupId>
+        <artifactId>blue-whale-parent</artifactId>
+        <version>2025.3</version>
+    </parent>
+
+    <groupId>com.blue-whale.module</groupId>
+    <artifactId>blue-whale-common-module</artifactId>
+    <version>2025.3</version>
+    <packaging>pom</packaging>
+    <modules>
+        <module>blue-whale-common-module-api</module>
+        <module>blue-whale-common-module-service</module>
+    </modules>
+
+</project>

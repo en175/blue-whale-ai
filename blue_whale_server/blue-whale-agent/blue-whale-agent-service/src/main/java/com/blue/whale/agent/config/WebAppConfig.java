@@ -1,0 +1,36 @@
+package com.blue.whale.agent.config;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import java.nio.file.Paths;
+
+/**
+ * Web MVC 配置：CORS 放行前端开发源 {@code http://localhost:3000}；{@code /assets/**} 静态映射暴露转存资源。
+ *
+ * <p>采用 {@link WebMvcConfigurer}（而非 {@code WebMvcConfigurationSupport}），不破坏 Spring Boot 默认自动配置。
+ */
+@Configuration
+public class WebAppConfig implements WebMvcConfigurer {
+
+    private static final String[] ALLOWED_ORIGINS = {"http://localhost:3000"};
+
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {
+        registry.addMapping("/**")
+                .allowedOrigins(ALLOWED_ORIGINS)
+                .allowedMethods("*")
+                .allowedHeaders("*")
+                .allowCredentials(true);
+    }
+
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        // 转存资源（视频/图片）落 ./data/assets/，通过 /assets/** 暴露给前端
+        String location = "file:" + Paths.get("./data/assets").toAbsolutePath() + "/";
+        registry.addResourceHandler("/assets/**")
+                .addResourceLocations(location);
+    }
+}

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.blue-whale.security</groupId>
+        <artifactId>blue-whale-security</artifactId>
+        <version>2025.3</version>
+    </parent>
+
+    <groupId>com.blue-whale.security.resource</groupId>
+    <artifactId>blue-whale-security-resource</artifactId>
+    <version>2025.3</version>
+
+    <dependencies>  <!-- 加解密算法支持器 -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk15to18</artifactId>
+            <version>1.68</version>
+        </dependency>
+        <dependency>
+            <groupId>com.blue-whale.security.model</groupId>
+            <artifactId>blue-whale-security-model</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.blue-whale.tool.redis</groupId>
+            <artifactId>blue-whale-common-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.security.oauth.boot</groupId>
+            <artifactId>spring-security-oauth2-autoconfigure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>javax.servlet</groupId>
+            <artifactId>javax.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+</project>

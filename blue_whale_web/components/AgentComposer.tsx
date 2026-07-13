@@ -10,13 +10,20 @@ import {
   RefreshCw,
   X,
   Sparkle,
-  Crown,
   Clock,
   ArrowRight,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import SkillPanel from "./SkillPanel";
 import { AspectRatioIcon } from "./icons/AspectRatioIcon";
+import {
+  IMAGE_MODELS,
+  IMAGE_ASPECT_RATIOS,
+  defaultResolutionOf,
+  type ImageModel,
+  type ImageResolution,
+  type ImageAspectRatio,
+} from "./ImageModelSettingsPopover";
 
 const TABS = [
   { id: "agent", label: "视频智能体", hasCanvas: true },
@@ -37,35 +44,6 @@ const AGENT_MODELS = [
   { id: "qwen-3-7-max", label: "Qwen 3.7 Max", costMultiplier: "1.3x" },
   { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", costMultiplier: "1x" },
   { id: "gemini-3-1-flash-lite", label: "Gemini 3.1 Flash Lite", costMultiplier: "0.3x" },
-];
-
-const IMAGE_MODELS = [
-  { id: "gpt-image-2", label: "GPT Image 2", hasCrown: true },
-  { id: "nano-banana-2", label: "Nano Banana 2", hasCrown: true },
-  { id: "nano-banana-pro", label: "Nano Banana Pro", hasCrown: true },
-  { id: "seedream-5", label: "Seedream 5.0", hasCrown: true },
-];
-
-const IMAGE_RESOLUTIONS = [
-  { id: "1k", label: "1K" },
-  { id: "2k", label: "2K" },
-  { id: "4k", label: "4K" },
-];
-
-const ASPECT_RATIOS = [
-  { id: "9:16", label: "9:16" },
-  { id: "3:4", label: "3:4" },
-  { id: "1:1", label: "1:1" },
-  { id: "4:3", label: "4:3" },
-  { id: "16:9", label: "16:9" },
-  { id: "2:3", label: "2:3" },
-  { id: "3:2", label: "3:2" },
-  { id: "5:4", label: "5:4" },
-  { id: "4:5", label: "4:5" },
-  { id: "21:9", label: "21:9" },
-  { id: "9:21", label: "9:21" },
-  { id: "1:2", label: "1:2" },
-  { id: "2:1", label: "2:1" },
 ];
 
 const VIDEO_ASPECT_RATIOS = [
@@ -98,7 +76,35 @@ interface MediaItem {
   duration?: string;
 }
 
-export default function AgentComposer() {
+export interface GenerateImageParams {
+  modelId: string;
+  aspectRatioId: string;
+  resolutionId: string;
+}
+
+export interface GenerateContext {
+  tab: string;
+  prompt: string;
+  image: GenerateImageParams;
+}
+
+export interface AgentComposerProps {
+  /** 真生成回调（提供则真生成，否则首页默认跳转 /generate?prompt）。 */
+  onGenerate?: (ctx: GenerateContext) => void;
+  /** 占位禁用的 tab id（生成静默不触发），首页默认空。 */
+  disabledTabs?: string[];
+  /** 初始预填 prompt（/generate 读 ?prompt 传入，首页不传）。 */
+  defaultPrompt?: string;
+  /** 参数下拉向上展开（/generate 底部固定挂载避开视口底）；缺省向下（首页）。 */
+  dropUp?: boolean;
+}
+
+export default function AgentComposer({
+  onGenerate,
+  disabledTabs = [],
+  defaultPrompt,
+  dropUp = false,
+}: AgentComposerProps = {}) {
   const [activeTab, setActiveTab] = useState("agent");
   const [content, setContent] = useState("");
   const [isFocused, setIsFocused] = useState(false);
@@ -120,13 +126,7 @@ export default function AgentComposer() {
   const router = useRouter();
   const { requireAuth } = useAuth();
 
-  const handleGenerate = useCallback(() => {
-    const prompt = content.trim();
-    const query = prompt ? `?prompt=${encodeURIComponent(prompt)}` : "";
-    requireAuth({ kind: "home-generate", prompt }, () =>
-      router.push(`/canvas${query}`),
-    );
-  }, [router, content, requireAuth]);
+  const tabDisabled = disabledTabs.includes(activeTab);
 
   // AI 视频 tab params
   const [refMode, setRefMode] = useState(VIDEO_REF_MODES[1]);
@@ -134,14 +134,58 @@ export default function AgentComposer() {
   const [resolution, setResolution] = useState(RESOLUTIONS[0]);
   const [videoDuration, setVideoDuration] = useState(15);
 
-  // AI 图片 tab params
-  const [selectedImageModel, setSelectedImageModel] = useState(IMAGE_MODELS[0]);
+  // AI 图片 tab params（模型/分辨率/宽高比均复用画布 ImageModelSettingsPopover 的 seedream 映射）
+  const [selectedImageModel, setSelectedImageModel] = useState<ImageModel>(IMAGE_MODELS[0]);
   const [imageModelOpen, setImageModelOpen] = useState(false);
 
-  const [imageAspectRatio, setImageAspectRatio] = useState(ASPECT_RATIOS.find((r) => r.id === "16:9")!);
+  const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(
+    IMAGE_ASPECT_RATIOS.find((r) => r.id === "16:9")!,
+  );
   const [imageAspectRatioOpen, setImageAspectRatioOpen] = useState(false);
-  const [imageResolution, setImageResolution] = useState(IMAGE_RESOLUTIONS.find((r) => r.id === "2k")!);
+  const [imageResolution, setImageResolution] = useState<ImageResolution>(defaultResolutionOf(IMAGE_MODELS[0]));
   const [imageResolutionOpen, setImageResolutionOpen] = useState(false);
+
+  const handleGenerate = useCallback(() => {
+    // 视频/agent tab 后端未就绪：占位静默（仅图片 tab 真生成）。
+    if (tabDisabled) return;
+    const prompt = content.trim();
+    requireAuth({ kind: "home-generate", prompt }, () => {
+      if (onGenerate) {
+        onGenerate({
+          tab: activeTab,
+          prompt,
+          image: {
+            modelId: selectedImageModel.id,
+            aspectRatioId: imageAspectRatio.id,
+            resolutionId: imageResolution.id,
+          },
+        });
+        return;
+      }
+      const query = prompt ? `?prompt=${encodeURIComponent(prompt)}` : "";
+      router.push(`/generate${query}`);
+    });
+  }, [
+    tabDisabled,
+    content,
+    requireAuth,
+    onGenerate,
+    activeTab,
+    selectedImageModel,
+    imageAspectRatio,
+    imageResolution,
+    router,
+  ]);
+
+  // 预填 prompt（/generate 读 ?prompt 传入；首页不传跳过）。contentEditable 写入需 ref 就绪。
+  useEffect(() => {
+    if (!defaultPrompt || !editorRef.current) return;
+    if (editorRef.current.innerText.trim() === defaultPrompt.trim()) return;
+    editorRef.current.innerText = defaultPrompt;
+    // 一次性 URL 预填是官方认可模式；set-state-in-effect 规则对此误报。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setContent(defaultPrompt);
+  }, [defaultPrompt]);
 
   const tabRefs = useRef<(HTMLElement | null)[]>([]);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -390,8 +434,9 @@ export default function AgentComposer() {
   };
 
   // 仅在组件卸载时统一释放尚未移除的 blob: 对象 URL。
-  // 通过 ref 读取最新的 mediaList，且 unmount-only effect 不会在更新时误释放正在显示的 URL。
+  // 通过 ref 读取最新的 mediaList，且 effect 依赖为空，确保不会在更新时误释放正在显示的 URL。
   const mediaListRef = useRef(mediaList);
+  // ref 写入须在 effect 内（render 期间写 ref 触发 react-hooks/refs），保持「最新 mediaList」语义。
   useEffect(() => {
     mediaListRef.current = mediaList;
   });
@@ -406,6 +451,11 @@ export default function AgentComposer() {
   const isVideoTab = activeTab === "video";
   const isImageTab = activeTab === "image";
 
+  // 参数下拉展开方向：dropUp 向上（/generate 底部固定挂载避开视口底），缺省向下（首页）。
+  const dropClass = dropUp
+    ? "bottom-[calc(100%+6px)] shadow-[0_-12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-top-1 duration-150"
+    : "top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150";
+
   return (
     <div
       className={`w-full max-w-[920px] bg-[#1d1d1d] rounded-[18px] border transition-[border-color] duration-300 overflow-visible ${
@@ -417,7 +467,7 @@ export default function AgentComposer() {
       }}
     >
       {/* Tabs */}
-      <div className="flex flex-col items-start gap-0.5 pt-2 px-3 pb-1 shadow-[inset_0_-1px_0_rgba(0,0,0,0.34),0_1px_0_rgba(255,255,255,0.035)]">
+      <div className="flex flex-col items-start gap-0.5 pt-2 px-4 pb-1 shadow-[inset_0_-1px_0_rgba(0,0,0,0.34),0_1px_0_rgba(255,255,255,0.035)]">
         <div className="relative flex items-center gap-0">
           <span
             className="pointer-events-none absolute bottom-0 h-0.5 rounded-full bg-white/75 transition-[transform,width,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
@@ -605,18 +655,11 @@ export default function AgentComposer() {
                           aria-label="模型"
                         >
                           <span>{selectedImageModel.label}</span>
-                          {selectedImageModel.hasCrown && (
-                            <Crown
-                              width={12}
-                              height={12}
-                              className="fill-amber-400 text-amber-400 shrink-0"
-                            />
-                          )}
                           <ChevronDown width={11} height={11} />
                         </button>
                         {imageModelOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
+                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
                             role="listbox"
                             aria-label="模型"
                           >
@@ -630,6 +673,10 @@ export default function AgentComposer() {
                                   aria-selected={selected}
                                   onClick={() => {
                                     setSelectedImageModel(model);
+                                    // 切模型：当前分辨率不在新模型可用集合则重置为该模型默认分辨率。
+                                    if (!model.resolutions.some((r) => r.id === imageResolution.id)) {
+                                      setImageResolution(defaultResolutionOf(model));
+                                    }
                                     setImageModelOpen(false);
                                   }}
                                   className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
@@ -640,13 +687,6 @@ export default function AgentComposer() {
                                 >
                                   <span className="inline-flex items-center gap-1.5 min-w-0">
                                     <span className="truncate">{model.label}</span>
-                                    {model.hasCrown && (
-                                      <Crown
-                                        width={12}
-                                        height={12}
-                                        className="fill-amber-400 text-amber-400 shrink-0"
-                                      />
-                                    )}
                                   </span>
                                 </button>
                               );
@@ -671,11 +711,11 @@ export default function AgentComposer() {
                         </button>
                         {imageAspectRatioOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
+                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
                             role="listbox"
                             aria-label="宽高比"
                           >
-                            {ASPECT_RATIOS.map((r) => {
+                            {IMAGE_ASPECT_RATIOS.map((r) => {
                               const selected = imageAspectRatio.id === r.id;
                               return (
                                 <button
@@ -719,11 +759,11 @@ export default function AgentComposer() {
                         </button>
                         {imageResolutionOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
+                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
                             role="listbox"
                             aria-label="分辨率"
                           >
-                            {IMAGE_RESOLUTIONS.map((res) => {
+                            {selectedImageModel.resolutions.map((res) => {
                               const selected = imageResolution.id === res.id;
                               return (
                                 <button
@@ -900,7 +940,7 @@ export default function AgentComposer() {
                         </button>
                         {videoModelOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto w-max"
+                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto w-max`}
                             role="listbox"
                             aria-label="模型"
                           >
@@ -968,7 +1008,7 @@ export default function AgentComposer() {
                         </button>
                         {refModeOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
+                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
                             role="listbox"
                             aria-label="参考模式"
                           >
@@ -1016,7 +1056,7 @@ export default function AgentComposer() {
                         </button>
                         {aspectRatioOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
+                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
                             role="listbox"
                             aria-label="宽高比"
                           >
@@ -1064,7 +1104,7 @@ export default function AgentComposer() {
                         </button>
                         {resolutionOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto top-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150 left-0 right-auto"
+                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
                             role="listbox"
                             aria-label="分辨率"
                           >
@@ -1112,7 +1152,7 @@ export default function AgentComposer() {
                         </button>
                         {durationOpen && (
                           <div
-                            className="ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto rounded-xl w-[240px] p-[14px_16px_10px] flex flex-col items-center gap-2 top-[calc(100%+6px)] left-0 shadow-[var(--tc-dropdown-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-150"
+                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto rounded-xl w-[240px] p-[14px_16px_10px] flex flex-col items-center gap-2 ${dropUp ? "bottom-[calc(100%+6px)] shadow-[0_-12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-top-1 duration-150" : "top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150"} left-0`}
                             role="listbox"
                             aria-label="时长"
                           >
@@ -1325,7 +1365,7 @@ export default function AgentComposer() {
                         />
                       </button>
                       {modelOpen && (
-                        <div className="ncs-thin-scrollbar absolute bg-[rgb(35,35,54)] border border-white/10 rounded-lg p-1 z-[100] max-h-[240px] overflow-y-auto bottom-[calc(100%+6px)] shadow-[var(--tc-dropdown-shadow-up)] animate-in fade-in slide-in-from-top-1 duration-150 left-0 right-auto w-max min-w-[220px]">
+                        <div className="ncs-thin-scrollbar absolute bg-[rgb(35,35,54)] border border-white/10 rounded-lg p-1 z-[100] max-h-[240px] overflow-y-auto bottom-[calc(100%+6px)] shadow-[0_-12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-top-1 duration-150 left-0 right-auto w-max min-w-[220px]">
                           {MODELS.map((model) => (
                             <button
                               key={model.id}
