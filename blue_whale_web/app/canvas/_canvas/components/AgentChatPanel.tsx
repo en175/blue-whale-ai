@@ -10,10 +10,17 @@ import SkillPanel from "@/components/SkillPanel";
 import { squirclePath } from "../utils";
 import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
 import { ComposerShell, ModelSettingsMenu } from "./Composer";
-import { UserMessageBubble, AgentMessageBubble, ThinkingBlock, AgentCard } from "./ChatBubbles";
+import {
+  UserMessageBubble,
+  AgentMessageBubble,
+  ThinkingBlock,
+  AgentCard,
+} from "./ChatBubbles";
 import type { ChatMessage } from "../types";
 import type { CardStatus } from "@/types/domain";
 import { buildMockReplyForMode } from "../messages";
+import { createMessageIdGenerator } from "../idGen";
+import type { MessageIdGenerator } from "../idGen";
 import { useAuth } from "@/components/auth/AuthContext";
 import type { CardMessage } from "../nodeFromCard";
 
@@ -50,21 +57,37 @@ export function AgentChatPanel({
   const CREATION_MODES = useMemo(
     () => [
       { id: "agent", label: "Agent", description: "对话拆解，逐步完善。" },
-      { id: "direct", label: "Direct Gen", description: "根据提示词直接生成图片或视频卡片。" },
+      {
+        id: "direct",
+        label: "Direct Gen",
+        description: "根据提示词直接生成图片或视频卡片。",
+      },
     ],
-    []
+    [],
   );
 
   const AGENT_MODELS = useMemo(
     () => [
       { id: "claude-opus-4-7", label: "Claude Opus 4.7", costMultiplier: "5x" },
-      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", costMultiplier: "3x" },
-      { id: "gemini-3-5-flash", label: "Gemini 3.5 Flash", costMultiplier: "2x" },
+      {
+        id: "claude-sonnet-4-6",
+        label: "Claude Sonnet 4.6",
+        costMultiplier: "3x",
+      },
+      {
+        id: "gemini-3-5-flash",
+        label: "Gemini 3.5 Flash",
+        costMultiplier: "2x",
+      },
       { id: "qwen-3-7-max", label: "Qwen 3.7 Max", costMultiplier: "1.3x" },
       { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", costMultiplier: "1x" },
-      { id: "gemini-3-1-flash-lite", label: "Gemini 3.1 Flash Lite", costMultiplier: "0.3x" },
+      {
+        id: "gemini-3-1-flash-lite",
+        label: "Gemini 3.1 Flash Lite",
+        costMultiplier: "0.3x",
+      },
     ],
-    []
+    [],
   );
 
   const [selectedMode] = useState(CREATION_MODES[0]);
@@ -87,6 +110,11 @@ export function AgentChatPanel({
   const modelSettingsTriggerRef = useRef<HTMLButtonElement>(null);
   const modelSettingsMenuRef = useRef<HTMLDivElement>(null);
   const pendingTimers = useRef<number[]>([]);
+  // 消息 ID 生成器：用户消息与 mock 回复共用，单调自增，根除同 tick 内 Date.now() 碰撞
+  const nextMessageIdRef = useRef<MessageIdGenerator | null>(null);
+  if (nextMessageIdRef.current === null)
+    nextMessageIdRef.current = createMessageIdGenerator();
+  const nextMessageId = nextMessageIdRef.current;
 
   useEffect(() => {
     const el = panelRef.current;
@@ -187,7 +215,7 @@ export function AgentChatPanel({
       for (const id of pendingTimers.current) clearTimeout(id);
       pendingTimers.current = [];
 
-      const userMsg: ChatMessage = { id: Date.now(), type: "user", text };
+      const userMsg: ChatMessage = { id: nextMessageId(), type: "user", text };
       onAppendMessages?.([userMsg]);
       if (composerRef.current) composerRef.current.innerText = "";
       setComposerEmpty(true);
@@ -196,15 +224,21 @@ export function AgentChatPanel({
       const reply = buildMockReplyForMode(
         selectedMode.id as "agent" | "direct",
         text,
-        () => Date.now()
+        nextMessageId,
       );
       reply.forEach((msg, index) => {
-        const timer = window.setTimeout(() => {
-          onAppendMessages?.([msg]);
-          // card 出现的同一 tick 触发回调：对话出 card ⇔ 画布出 NodeItem，原子同步
-          if (msg.type === "card") onCardGenerated?.(msg);
-          bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: "smooth" });
-        }, (index + 1) * 400);
+        const timer = window.setTimeout(
+          () => {
+            onAppendMessages?.([msg]);
+            // card 出现的同一 tick 触发回调：对话出 card ⇔ 画布出 NodeItem，原子同步
+            if (msg.type === "card") onCardGenerated?.(msg);
+            bodyRef.current?.scrollTo({
+              top: bodyRef.current.scrollHeight,
+              behavior: "smooth",
+            });
+          },
+          (index + 1) * 400,
+        );
         pendingTimers.current.push(timer);
       });
     });
@@ -236,7 +270,10 @@ export function AgentChatPanel({
   };
 
   const handleScrollToBottom = () => {
-    bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: "smooth" });
+    bodyRef.current?.scrollTo({
+      top: bodyRef.current.scrollHeight,
+      behavior: "smooth",
+    });
   };
 
   if (!isOpen) return null;
@@ -291,8 +328,12 @@ export function AgentChatPanel({
                 role="tooltip"
               >
                 <div className="whitespace-nowrap rounded-lg border border-white/[0.08] bg-[#1a1a1a]/95 px-2.5 py-1.5 text-[11px] leading-4 shadow-lg">
-                  <div className="tc-agent-session-credit-badge__tooltip-title text-white/55">当前 Agent 对话累计消耗积分</div>
-                  <div className="tc-agent-session-credit-badge__tooltip-value text-white/90">0.12 积分</div>
+                  <div className="tc-agent-session-credit-badge__tooltip-title text-white/55">
+                    当前 Agent 对话累计消耗积分
+                  </div>
+                  <div className="tc-agent-session-credit-badge__tooltip-value text-white/90">
+                    0.12 积分
+                  </div>
                 </div>
               </div>
             </div>
@@ -312,9 +353,30 @@ export function AgentChatPanel({
                     clipPath: `path('${squirclePath(24, 24, 10.8)}')`,
                   }}
                 >
-                  <svg width={16} height={16} viewBox="0 0 20 20" fill="none" aria-hidden="true" className="block">
-                    <rect x="3.5" y="9.5" width="7" height="5" rx="1" fill="currentColor" />
-                    <rect x="2" y="4" width="16" height="12" rx="2" stroke="currentColor" />
+                  <svg
+                    width={16}
+                    height={16}
+                    viewBox="0 0 20 20"
+                    fill="none"
+                    aria-hidden="true"
+                    className="block"
+                  >
+                    <rect
+                      x="3.5"
+                      y="9.5"
+                      width="7"
+                      height="5"
+                      rx="1"
+                      fill="currentColor"
+                    />
+                    <rect
+                      x="2"
+                      y="4"
+                      width="16"
+                      height="12"
+                      rx="2"
+                      stroke="currentColor"
+                    />
                   </svg>
                 </button>
               </div>
@@ -343,7 +405,14 @@ export function AgentChatPanel({
 
         <div
           className="tc-agent-chat-body-wrap"
-          style={{ flex: "1 1 0%", position: "relative", minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}
+          style={{
+            flex: "1 1 0%",
+            position: "relative",
+            minHeight: 0,
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+          }}
         >
           <div
             ref={bodyRef}
@@ -351,9 +420,14 @@ export function AgentChatPanel({
             style={{ flex: "1 1 0%", minHeight: 0 }}
           >
             {messages.map((msg) => {
-              if (msg.type === "user") return <UserMessageBubble key={msg.id} text={msg.text} />;
-              if (msg.type === "thinking") return <ThinkingBlock key={msg.id} msg={msg} />;
-              if (msg.type === "card") return <AgentCard key={msg.id} msg={msg} onReapply={handleReapply} />;
+              if (msg.type === "user")
+                return <UserMessageBubble key={msg.id} text={msg.text} />;
+              if (msg.type === "thinking")
+                return <ThinkingBlock key={msg.id} msg={msg} />;
+              if (msg.type === "card")
+                return (
+                  <AgentCard key={msg.id} msg={msg} onReapply={handleReapply} />
+                );
               return <AgentMessageBubble key={msg.id} text={msg.text} />;
             })}
           </div>
@@ -371,7 +445,10 @@ export function AgentChatPanel({
           </button>
         )}
 
-        <div className="tc-agent-composer-outer flex-shrink-0" style={{ padding: "0 4px 4px" }}>
+        <div
+          className="tc-agent-composer-outer flex-shrink-0"
+          style={{ padding: "0 4px 4px" }}
+        >
           <div style={{ position: "relative" }}>
             <ComposerShell>
               <div className="relative p-2">
@@ -395,7 +472,10 @@ export function AgentChatPanel({
                     }
                   }}
                 />
-                <div className="tc-agent-composer-actions mt-2 flex items-center justify-between" aria-label="Composer actions">
+                <div
+                  className="tc-agent-composer-actions mt-2 flex items-center justify-between"
+                  aria-label="Composer actions"
+                >
                   <div className="tc-agent-composer-actions__start flex items-center gap-1">
                     <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
                       <button
@@ -418,7 +498,9 @@ export function AgentChatPanel({
                       >
                         <span className="tc-agent-skill-btn__content inline-flex items-center gap-1.5">
                           <BookOpenText size={16} />
-                          <span className="tc-agent-skill-btn__label">技能</span>
+                          <span className="tc-agent-skill-btn__label">
+                            技能
+                          </span>
                         </span>
                       </button>
                     </div>
