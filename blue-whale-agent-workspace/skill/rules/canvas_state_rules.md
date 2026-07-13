@@ -50,7 +50,8 @@ review / 思考)不在画布,见下方"对话消息"。
 
 过程性内容在 AgentChatPanel 对话流展示,**不进画布**。类型:
 
-- `visible_reasoning`  （思考过程摘要,可折叠）
+> `visible_reasoning` 不是 ChatMessage——它是 Agent Turn 级字段(见下「Agent Turn 建议字段」+ `backend_implementation_contract.md` ## visible_reasoning);SSE 走独立 event(见 `PRD/AGENT-CONVERSATION-PRD.md` §3)。
+
 - `brief`  （需求摘要）
 - `skill_recommendation`  （Skill 推荐）
 - `asset_understanding`  （图片理解摘要；**派生展示消息**——数据本体挂 asset 表 `understanding_data`，这里只是给用户读的摘要）
@@ -118,13 +119,13 @@ awaiting_confirm
 
 - 只有图片 / 视频素材结果写成 canvas node。
 - 内容相同的上传图视为同一 asset（看内容不看文件名），去重不重复展示，复用已有 `asset_understanding`（见 `PRD/ORCHESTRATION-DECISIONS.md` 决策 6）。
-- brief / skill / 分镜 / review / asset_understanding / visible_reasoning 等过程内容必须写成 ChatMessage，不进画布。
+- brief / skill / 分镜 / review / asset_understanding 等过程内容必须写成 ChatMessage，不进画布。(`visible_reasoning` 是 turn 级字段，非 ChatMessage，同样不进画布。)
 - `asset_understanding` 的**数据本体**挂 asset 表（`understanding_data`），既不进画布也不作为 ChatMessage 字段；ChatMessage 里的 `asset_understanding` 只是从数据本体派生的展示摘要。
 - node 必须绑定 `stage_id`。
 - 生成任务不作为 canvas node；任务状态由 GenerationJob 承载，画布节点只通过 `status` 映射为 queued / generating / ready / failed / confirmed / rejected。
 - ready 结果才能进入确认门。
 - confirmed 结果默认不重写，除非用户明确要求修改。
-- 每轮 Agent turn 可以写入 `visible_reasoning` ChatMessage，用于前端展示产品化思考过程。
+- 每轮 Agent turn 写入 turn 级字段 `visible_reasoning`(非 ChatMessage),用于前端展示产品化思考过程;格式 `{title, items[]}` 见 `backend_implementation_contract.md` ## visible_reasoning。
 - `visible_reasoning` 不得包含内部 prompt、worker 文件名、工具参数、JSON 或文件路径。
 
 ## Agent Turn 建议字段
