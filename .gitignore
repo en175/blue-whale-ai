@@ -40,6 +40,8 @@ next-env.d.ts
 # 本地说明文档（agent 生成的流程说明，不进仓）
 blue-whale-agent-workspace/Description file/
 
+# superpowers 本地产物（plans 等，不进仓）
+docs/superpowers/
 # Playwright 产物（IJZYVT）
 test-results/
 playwright-report/
