@@ -120,11 +120,20 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/cbm-session-reminder.sh"
           }
         ]
+      },
+      {
+        "matcher": "startup|clear|compact|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/superpowers-session-start.sh"
+          }
+        ]
       }
     ]
   },
   "outputStyle": "caveman",
   "enabledPlugins": {
-    "superpowers@claude-plugins-official": true
+    "superpowers@claude-plugins-official": false
   }
 }
