@@ -127,6 +127,9 @@ if [ "$MODE" = update ]; then
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
+# Git Bash on Windows：git rev-parse 返回 `D:/...`（大写盘符），pwd 返回 `/d/...`（小写 posix）。
+# case 比较/路径拼接受影响，统一走 pwd 风格。
+ROOT="$(cd "$ROOT" && pwd)"
 branch="$(git -C "$ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
 case "$branch" in
   feature/*|fix/*|hotfix/*|docs/*|chore/*) ;;
