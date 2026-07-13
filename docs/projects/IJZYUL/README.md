@@ -2,7 +2,7 @@
 
 > **工单**：[IJZYUL — [ARCH] 前端架构补全计划（vertical slices）](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IJZYUL)
 > **类型**：父 issue（program-level）
-> **状态**：进行中（5/8 子 issue 完成 / 1 已撤回 / 2 待办）
+> **状态**：进行中（5/8 子 issue 完成 / 1 已撤回 / 1 待办）
 > **文档存放约定**：本目录每个子 issue 一个 `.md` 文件，子 issue 完成时与该子 issue 的 feature 分支提交一起入库；后续若无法跟随原分支（如 PR 已合并的追溯入库），落到 `chore/docs-ijzyul-progress` 集中补救。
 
 ---
@@ -49,7 +49,7 @@
 | 5 | IJZYVP / 待定 | 顶层领域类型 | ⏳ 待办 | — | — | — | _待开_ |
 | 6 | IJZYxx | useProject hooks 抽离 | ⏳ 待办（阻塞 #5） | — | — | — | _待开_ |
 | 7 | IJZYxx | API 客户端骨架 | ⏳ 待办 | — | — | — | _待开_ |
-| 8 | IJZYxx | Playwright E2E | ⏳ 待办 | — | — | — | _待开_ |
+| 8 | IJZYVT | 新增 Playwright 端到端 | 🔄 进行中 | `feature/IJZYVT-新增Playwright端到端` | — | — | [IJZYVT.md](./IJZYVT.md) |
 
 ## 父 issue 验收总览
 
