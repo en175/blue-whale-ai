@@ -89,8 +89,8 @@
 - **待 PM 拍板**:每种错误(quota_exhausted/content_moderation_rejected/upstream_timeout/asset_unavailable/asset_understanding_missing)的用户文案、是否可重试、重试入口
 - **关联**:`BACKEND-API-PRD.md` §9 第 4 条(错误码)
 
-### 🔲 10. 长对话、内容版本与历史资产索引(P1 评估)
-- **P0 边界**:先支持用户在同一个 Agent 对话中切换两个产品方向。P0 不实现完整 `content_version` 系统、不做长期对话摘要系统、不做完整历史版本索引。
+### 10. 长对话、内容版本与历史资产索引(P0 + P1)
+- **P0 边界(2026-07-13 更新)**:`content_versions`(结构化产品记忆)、历史资产引用、恢复版本**已从 P1 提到 P0** —— 支持同对话内多产品历史切换,容忍但有界(阈值引导新 project)。完整规格见 `PRD/PRODUCT-HISTORY-PRD.md`。P0 仍不做长期对话摘要(`conversation_summary`)、版本索引(`version_index`)、messages / agent_events 分离完整历史。
 - **P0 最小可用建议**:
   - 后端每轮至少保存当前产品方向和上一个产品方向的结构化摘要。
   - 用户切换到新的产品方向时,用户侧话术使用"这是一个新的产品方向。你想继续在当前项目中进行,还是新建一个项目?";不要说"替换"或"覆盖"。
@@ -98,13 +98,14 @@
   - 用户说"用前面的产品重新生成一张产品图"时,应引用上一个产品方向的素材或 `asset_understanding`,创建新的 image GenerationJob,不要覆盖旧图。
   - 如果用户换成完全不同品类或视频目标,只问"继续在当前项目中进行,还是新建一个项目?",不要向用户暴露 workflow / stage / run。
 - **P1 需要评估的完整方案**:
-  - **状态持久化**:每轮更新 `project_state`,保存 active product / current_stage / selected_skill / stage_plan / active_jobs / active_canvas_node_ids。
-  - **内容版本**:新增 `content_versions`,用于处理换产品、替换内容、返回前面产品。字段至少包含 `project_id`、`subject_summary`、`product_asset_ids`、`brief`、`selected_skill`、`stage_plan`、`storyboard`、`status(active/inactive/superseded)`、`created_from`。
+  - **状态持久化**:`project_state` 完整持久化(active product P0 已覆盖;完整 stage_plan / active_jobs 持久化 P1)。
+  - ~~**内容版本**~~:**已提 P0**(见 `PRODUCT-HISTORY-PRD.md`)。
+  - ~~**历史资产引用生成**~~:**已提 P0**(见 `PRODUCT-HISTORY-PRD.md` §5.1 跨产品引用)。
+  - ~~**恢复版本**~~:**已提 P0**(见 `PRODUCT-HISTORY-PRD.md` §5.1 切回历史产品)。
   - **完整历史**:分开保存 `messages` 和 `agent_events`;消息给用户回看,events 给工程追踪版本切换、确认阶段、生成任务和恢复动作。
-  - **历史摘要**:新增 `conversation_summary`,在长对话、阶段确认、产品切换、生成完成或 token 超阈值时生成结构化摘要;摘要记录 key_decisions / open_questions / user_preferences / version_history。
+  - **历史摘要**:新增 `conversation_summary`,在长对话、阶段确认、产品切换、生成完成或 token 超阈值时生成结构化摘要;摘要记录 key_decisions / open_questions / user_preferences / version_history。**即对话压缩层,P0 不做(Codex/Claude Code/OpenCode 压缩都有损),详见 PRODUCT-HISTORY-PRD §3 / §9。**
   - **版本索引**:从 `content_versions` 聚合轻量 `version_index`,让 Agent 能理解"前面的产品/刚才那版"指向哪个产品方向或资产,而不是翻完整聊天。
-  - **历史资产引用生成**:支持 `historical_asset_reference_generation`;用户说"用前面的产品重新生成一张图"时,引用历史产品资产,生成结果写成新的 Canvas Node。
-  - **恢复版本**:支持 restore content version;用户说"还是用回刚才那个产品"时,默认恢复旧版本为 active,不是从零重生成。
+  - **阈值校准**:产品数阈值(意向 3)按真实用户行为校准;`content_versions` superseded 淘汰策略。详见 PRODUCT-HISTORY-PRD §9。
 - **每轮 Agent 输入建议(P1)**:
   - 最新用户消息
   - 当前 `project_state`
@@ -121,7 +122,7 @@
 
 - Skill 面板 P0;创建 tab 隐藏;库 ⊃ 我的;引用非副本(跟随更新);Use 一次性不改 auto;auto 候选池后端自读不前端传;forced > auto > 未指定。
 - **Agent 对话(2026-07-05 锁定,2026-07-06 收口)**:P0 按两入口落地——Dock 直生负责 Direct Image / Direct Video / Image-to-Video;Agent 对话按 `decision_branch` 覆盖 lightweight / full_canvas / prompt_only / revise / product_switch / confirm / consult 等分支。前端无分阶段,过程消息(brief/skill/storyboard/review/visible_reasoning)P0 全展示(文字气泡),P1 仅可选美化;新增 `optimized_prompt_preview` 消息类型(用户友好版,可展示),区别于原始 `optimized_prompt`(发给 Provider,永不进 message);`forced_skill_id` 仅决定 skill 选择那一步,不锁后续 Stage;Agent turn 结束后未完成 Job 由 `active_jobs` + 独立 `/api/jobs/{id}/stream` 接管,重连失败再轮询 `GET /api/jobs/{id}`。
-- **产品切换 P0 边界(2026-07-05 锁定)**:P0 先支持同一 Agent 对话内两个产品方向切换;不做完整内容版本系统。完全不同品类或目标时,用户侧只问"继续在当前项目中进行,还是新建一个项目?",不说替换/覆盖,不暴露 workflow。完整状态持久化、历史摘要、版本索引放 P1 评估。
+- **产品切换 P0 边界(2026-07-05 锁定,2026-07-13 更新)**:P0 已支持同对话内**多产品历史**切换(`content_versions` 从 P1 提 P0,见 `PRODUCT-HISTORY-PRD.md`);容忍但有界,到阈值(意向 3)引导新 project;完全不同品类强推新 project;切回不主动推进要追问。不说替换/覆盖,不暴露 workflow / stage / superseded。对话压缩(`conversation_summary`)、版本索引(`version_index`)仍放 P1 评估。
 - 错误码、目录、身份、上传、Job 生命周期等模块的决策**尚未锁定**(Project、直生于 2026-07-06 锁定,见下)。
 
 ### 2026-07-06 锁定:Dock 直生 ↔ Agent 编排重构(决策 1-15)
