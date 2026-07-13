@@ -56,7 +56,13 @@ Codex 已通过官方插件市场安装并启用（`~/.codex/config.toml` → `[
 
 `brainstorming` · `dispatching-parallel-agents` · `executing-plans` · `finishing-a-development-branch` · `receiving-code-review` · `requesting-code-review` · `subagent-driven-development` · `systematic-debugging` · `test-driven-development` · `using-git-worktrees` · `using-superpowers` · `verification-before-completion` · `writing-plans` · `writing-skills`
 
-> 名称与本项目 mattpocock skills（`tdd` / `code-review` / `diagnosing-bugs` / `grilling` 等）**零冲突**，共存于 `.claude/skills/`（共 41 个 skill 目录）。
+> 名称与本项目 mattpocock skills（`tdd` / `code-review` / `diagnosing-bugs` / `grilling` 等）**零冲突**。
+
+### `.claude/skills/` 与 `.zcode/skills/` 物理一致
+
+两端各 41 个 skill 目录 = 14 个 superpowers（本节）+ 27 个 mattpocock。mattpocock skill 的权威源是 `.claude/skills/`（已含 Gitee 适配，git 跟踪、团队共享），需同步到 `.zcode/skills/` 以保证 ZCode 客户端可发现——`.agents/skills/` 被 `.gitignore` 忽略、仅为本地副本，不作发现依据。
+
+> 维护提示：新增或修改 mattpocock skill 后，需手动同步 `.claude/skills/` → `.zcode/skills/`（本仓库尚无 mattpocock 专用同步脚本，不像 superpowers 有 `sync-superpowers-skills.sh`）。
 
 ## 维护契约
 
