@@ -688,9 +688,63 @@ run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge feature/x"}}'
 assert_exit 2 "release: 直接 git merge 工单分支硬拦"
 assert_stderr_has "merge-task-to-local-master.sh --user-authorized" "release: 直接 git merge 工单分支指向标准入口"
 
+# git merge origin/master 分支感知（ADR-0010）：
+# 任务分支上拦截并指向 rebase 同步入口；master 集成区放行。
+setup_git_stub
+export FAKE_BRANCH=feature/ik0test
+
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge origin/master"}}'
-assert_exit 2 "release: 直接 merge origin/master 硬拦"
-assert_stderr_has "sync-task-from-origin.sh sync" "release: 同步 merge 指向 rebase 同步入口"
+assert_exit 2 "release: 任务分支上 merge origin/master 硬拦"
+assert_stderr_has "sync-task-from-origin.sh sync" "release: 任务分支同步 merge 指向 rebase 同步入口"
+
+# git pull（无 --ff-only / --rebase）在任务分支上与 merge origin/master 等价拦截
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git pull"}}'
+assert_exit 2 "release: 任务分支上 git pull 硬拦"
+assert_stderr_has "sync-task-from-origin.sh sync" "release: 任务分支 pull 指向 rebase 同步入口"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git pull origin master"}}'
+assert_exit 2 "release: 任务分支上 git pull origin master 硬拦"
+assert_stderr_has "sync-task-from-origin.sh sync" "release: 任务分支 pull origin master 指向 rebase 同步入口"
+
+# --ff-only / --rebase 变体在任务分支上放行（安全同步模式）
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git pull --ff-only"}}'
+assert_exit 0 "release: 任务分支上 git pull --ff-only 放行"
+assert_stdout_empty "release: git pull --ff-only 无交互输出"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git pull --rebase"}}'
+assert_exit 0 "release: 任务分支上 git pull --rebase 放行"
+assert_stdout_empty "release: git pull --rebase 无交互输出"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git pull -r"}}'
+assert_exit 0 "release: 任务分支上 git pull -r 放行"
+assert_stdout_empty "release: git pull -r 无交互输出"
+
+# --ff-only=<ref> 变体正确识别为安全 ff-only
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge --ff-only=refs/heads/master origin/master"}}'
+assert_exit 0 "release: git merge --ff-only=<ref> 正确放行"
+assert_stdout_empty "release: git merge --ff-only=<ref> 无交互输出"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git pull --ff-only=refs/heads/master"}}'
+assert_exit 0 "release: git pull --ff-only=<ref> 正确放行"
+assert_stdout_empty "release: git pull --ff-only=<ref> 无交互输出"
+
+# master 分支上 merge/pull origin/master 不拦截（用户本地集成区，ADR-0010）
+export FAKE_BRANCH=master
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge origin/master"}}'
+assert_exit 0 "release: master 分支上 merge origin/master 放行"
+assert_stdout_empty "release: master 上 merge origin/master 无交互输出"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git pull"}}'
+assert_exit 0 "release: master 分支上 git pull 放行"
+assert_stdout_empty "release: master 上 git pull 无交互输出"
+
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git pull origin master"}}'
+assert_exit 0 "release: master 分支上 git pull origin master 放行"
+assert_stdout_empty "release: master 上 git pull origin master 无交互输出"
+
+teardown_git_stub
+unset FAKE_BRANCH
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/sync-task-from-origin.sh sync --json"}}'
 assert_exit 0 "release: 标准同步入口静默放行"
