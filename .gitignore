@@ -36,3 +36,6 @@ playwright-report/
 .playwright/
 blob-report/
 playwright/.cache/
+
+# superpowers 本地产物（plans 等，不进仓）
+docs/superpowers/
