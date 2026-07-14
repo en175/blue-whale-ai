@@ -82,3 +82,23 @@ export function clearTokens(): void {
     localStorage.removeItem(REFRESH_TOKEN_KEY);
   } catch { /* ignore */ }
 }
+
+// ---- last phone ----
+
+const LAST_PHONE_KEY = "bw-last-phone";
+
+export function loadLastPhone(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return localStorage.getItem(LAST_PHONE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function saveLastPhone(phone: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(LAST_PHONE_KEY, phone);
+  } catch { /* ignore */ }
+}

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { isValidPhone, sanitizePhone } from "./phoneValidation";
+import { loadLastPhone, saveLastPhone } from "./authStorage";
 import { fetchCaptcha, sendVerificationCode, ApiError } from "@/lib/auth";
 import { useAuth } from "./AuthContext";
 
@@ -12,7 +13,7 @@ interface LoginModalProps {
 
 export function LoginModal({ onClose }: LoginModalProps) {
   const { signIn } = useAuth();
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(() => loadLastPhone());
   const [code, setCode] = useState("");
   const [countdown, setCountdown] = useState(0);
   const [agreed, setAgreed] = useState(false);
@@ -103,6 +104,7 @@ export function LoginModal({ onClose }: LoginModalProps) {
 
     try {
       await signIn(phone, code);
+      saveLastPhone(phone);
       // signIn 成功后自动关 modal + 回放 gating action
     } catch (e) {
       setCodeError(e instanceof ApiError ? e.message : "登录失败");
