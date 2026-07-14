@@ -68,7 +68,7 @@ export type JobStatusResponse = {
   asset: JobAsset | null;
 };
 
-const API_BASE = "/api";
+const API_BASE = "/api/agent";
 
 async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
   let res: Response;
@@ -127,7 +127,7 @@ export interface StreamHandlers {
 }
 
 /**
- * 订阅流式 job：原生 EventSource 连 `/api/jobs/{id}/stream`，按 data.type 分发。
+ * 订阅流式 job：原生 EventSource 连 `/api/agent/jobs/{id}/stream`，按 data.type 分发。
  * 后端不设 SSE event name，全部走默认 message 通道，onmessage 统一收。
  * 收到 done/error 自动 close；onerror 兜底未收 done 就断。
  */

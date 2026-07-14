@@ -16,7 +16,7 @@ export type Paged<T> = {
   current: number;
 };
 
-const API_BASE = "/api";
+const API_BASE = "/api/agent";
 
 /** 统一 GET/POST 请求：apiFetch 自动带 Authorization 头 + 401 拦截刷新。 */
 export async function request<T>(path: string, method: string, body?: unknown): Promise<T> {

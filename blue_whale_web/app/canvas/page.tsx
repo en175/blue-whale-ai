@@ -86,13 +86,15 @@ function CanvasPageInner() {
     saveStatus,
     booting,
     backendReady,
+    loadError,
+    retry,
     createProjectAction,
     switchProject,
     deleteProjectAction,
   } = useCanvasProjects();
-  // 派生：当前项目的画布与对话（读取走 active，写入走 dispatch）
-  const { nodes, viewport } = activeProject.canvas;
-  const messages = activeProject.messages;
+  // 派生：当前项目的画布与对话（空列表时 activeProject=undefined，给空默认避免崩；空态在下方 return 处理）
+  const { nodes, viewport } = activeProject?.canvas ?? { nodes: [], viewport: { x: 0, y: 0, zoom: 1 } };
+  const messages = activeProject?.messages ?? [];
 
   const [isAgentOpen, setIsAgentOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
@@ -111,15 +113,17 @@ function CanvasPageInner() {
   // 受控流写回适配：CanvasSurface 的 onNodesCommit / onViewportChange 解析后整体写回当前 active project。
   const setViewport = useCallback(
     (next: Viewport) => {
+      if (!activeProject) return;
       dispatch({ type: "set-viewport", projectId: activeProject.id, viewport: next });
     },
-    [activeProject.id]
+    [activeProject?.id]
   );
   const setNodes = useCallback(
     (next: NodeItem[]) => {
+      if (!activeProject) return;
       dispatch({ type: "set-nodes", projectId: activeProject.id, nodes: next });
     },
-    [activeProject.id]
+    [activeProject?.id]
   );
 
   // 画布素材节点操作面板的统一动作分发（按 nodeId 反查 node）
@@ -222,10 +226,11 @@ function CanvasPageInner() {
             };
       const node: NodeItem = { ...base, ...extra, id: base.id };
       // 写入走 reducer：节点归属当前 active project（位置在此算好作为 position 传入）
+      if (!activeProject) return id;
       dispatch({ type: "add-node", projectId: activeProject.id, node });
       return id;
     },
-    [viewport, activeProject.id]
+    [viewport, activeProject?.id]
   );
 
   // 对话流出现 card 的同一时刻，在画布同步创建对应图片 NodeItem（同一生成结果两种视图）。
@@ -439,6 +444,48 @@ function CanvasPageInner() {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-black text-white/60 text-sm">
         加载画布…
+      </div>
+    );
+  }
+  if (!activeProject) {
+    // 空态：后端不可达（loadError）或未登录无 token。显示重试 + 引导新建，不露写死的假数据。
+    return (
+      <div className="flex h-screen w-screen flex-col items-center justify-center gap-5 bg-black">
+        <p className="text-sm" style={{ color: "var(--tc-text-secondary)" }}>
+          {loadError ? "项目加载失败" : "暂无项目"}
+        </p>
+        <div className="flex items-center gap-3">
+          {loadError && (
+            <button
+              type="button"
+              onClick={retry}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm transition-colors"
+              style={{
+                background: "var(--tc-bg-surface)",
+                border: "1px solid var(--tc-border-subtle)",
+                color: "var(--tc-text-secondary)",
+              }}
+            >
+              重试
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={createProjectAction}
+            className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm transition-colors"
+            style={{
+              background: "var(--tc-accent)",
+              color: "var(--tc-on-accent)",
+            }}
+          >
+            新建项目
+          </button>
+        </div>
+        {saveStatus === "error" && (
+          <p className="text-xs" style={{ color: "var(--tc-destructive)" }}>
+            操作失败，请检查服务是否可用
+          </p>
+        )}
       </div>
     );
   }

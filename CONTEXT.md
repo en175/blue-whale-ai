@@ -1,7 +1,8 @@
 # Blue-Whale 前端
 
-一个面向 AI Agent / Canvas 交互的纯客户端单页应用（SPA）。当前为纯前端 DEMO，
-生成能力用 mock/临时方案，未对接后端。
+一个面向 AI Agent / Canvas 交互的纯客户端单页应用（SPA）。项目与画布状态已对接后端
+（project/canvas CRUD 经网关 `/api/agent/**` 路由到 agent-service），生成链路对接后端生成服务；
+Agent 对话回复仍含本地 mock（`messages.ts` 的 `buildMockReplyForMode`）。
 
 ## Language
 

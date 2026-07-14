@@ -26,7 +26,7 @@ import javax.validation.Valid;
  */
 @Tag(name = "画布接口", description = "画布状态 GET/PUT（ADR-0011，与 project 1:1）")
 @RestController
-@RequestMapping("/api/canvases")
+@RequestMapping("/api/agent/canvases")
 @RequiredArgsConstructor
 public class CanvasController {
 

@@ -32,7 +32,7 @@ export type ProjectAction =
   | { type: "append-messages"; projectId: string; messages: ChatMessage[] }
   | { type: "set-card-status"; projectId: string; cardId: number | string; status: CardStatus }
   | { type: "set-nodes"; projectId: string; nodes: NodeItem[] }
-  /** 后端列表覆盖 mock：整体替换 projects，active 落到首项（listProjects 拉取后）。 */
+  /** 后端列表整体覆盖 projects，active 落到首项（listProjects 拉取后）。 */
   | { type: "replace-all"; projects: Project[] }
   /** loadCanvas 一次恢复某 project 的 nodes+viewport（比 set-nodes + set-viewport 两次 dispatch 干净）。 */
   | { type: "set-canvas"; projectId: string; nodes: NodeItem[]; viewport: Viewport };
@@ -46,7 +46,7 @@ export function initialProjectState(projects: Project[]): ProjectState {
   const marked = projects.find((p) => p.active);
   return {
     projects,
-    activeProjectId: (marked ?? first).id,
+    activeProjectId: (marked ?? first)?.id ?? "",
   };
 }
 

@@ -44,7 +44,7 @@
 
 ## 显式不收（保持 skeleton 边界）
 
-- **SSE 客户端**（`/api/jobs/{id}/stream` + `/api/projects/{id}/agent/turn`）—— 业务方按 PRD §5 + AGENT-CONVERSATION-PRD 实现
+- **SSE 客户端**（`/api/agent/jobs/{id}/stream` + `/api/agent/projects/{id}/agent/turn`）—— 业务方按 PRD §5 + AGENT-CONVERSATION-PRD 实现
 - **runtime 校验**（zod / valibot）—— 不引依赖,留 P2
 - **snake ↔ camel 转换器** —— 消费方在 hook 层按需 map 到 `@/types/domain`
 - **实际业务接入**（BottomDock 触发 generate、TopBar 拉 projects 列表、AgentChatPanel 接 agent turn）—— 后续各 feature issue

@@ -53,7 +53,7 @@ export type OutputAsset = {
   height: number | null;
 };
 
-/** 任务列表项（GET /api/jobs records）。 */
+/** 任务列表项（GET /api/agent/jobs records）。 */
 export type JobListItem = {
   job_id: number;
   type: string;
@@ -64,7 +64,7 @@ export type JobListItem = {
   output_assets: OutputAsset[];
 };
 
-/** 轮询单任务状态（GET /api/jobs/{id}）。 */
+/** 轮询单任务状态（GET /api/agent/jobs/{id}）。 */
 export type JobStatus = {
   job_id: number;
   status: string;

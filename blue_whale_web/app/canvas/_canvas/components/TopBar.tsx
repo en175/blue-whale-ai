@@ -50,8 +50,8 @@ export function ProjectMenu({
         zIndex: 300,
         width: 280,
         borderRadius: 8,
-        border: "1px solid rgba(255, 255, 255, 0.04)",
-        background: "rgb(30, 30, 30)",
+        border: "1px solid var(--tc-border-subtle)",
+        background: "var(--tc-bg-surface)",
         padding: "4px 8px 8px",
         boxShadow: "rgba(0, 0, 0, 0.4) 0px 8px 24px",
       }}
@@ -73,11 +73,11 @@ export function ProjectMenu({
           return (
           <div
             key={p.id}
-            className="group/project relative flex items-center"
+            className="group/project relative flex items-center hover:bg-[var(--tc-bg-elevated)]"
             style={{
               padding: "6px 16px",
               borderRadius: 6,
-              background: isActive ? "rgba(255, 255, 255, 0.12)" : "transparent",
+              background: isActive ? "var(--tc-border-active)" : undefined,
             }}
           >
             <button
@@ -292,7 +292,7 @@ export function TopBar({
         fontFamily: "Inter, -apple-system, sans-serif",
         gap: 4,
         padding: 2,
-        background: "rgba(0, 0, 0, 0.55)",
+        background: "var(--tc-bg-overlay)",
         backdropFilter: "blur(12px)",
         borderRadius: 10,
       }}
@@ -338,6 +338,8 @@ export function TopBar({
         <button
           type="button"
           onClick={() => setProjectMenuOpen((v) => !v)}
+          title={activeProject.name}
+          className="bg-[var(--tc-bg-elevated)] hover:bg-[var(--tc-border-active)]"
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -345,11 +347,10 @@ export function TopBar({
             width: "fit-content",
             minWidth: 0,
             boxSizing: "border-box",
-            background: "rgba(42, 42, 45, 0.72)",
             border: 0,
             padding: "4px 8px",
             borderRadius: 8,
-            color: "rgb(255, 255, 255)",
+            color: "var(--tc-text-primary)",
             fontSize: 14,
             fontWeight: 600,
             cursor: "pointer",
@@ -374,7 +375,7 @@ export function TopBar({
           <ChevronDown
             width={14}
             height={14}
-            stroke="rgba(255, 255, 255, 0.5)"
+            stroke="var(--tc-text-muted)"
             strokeWidth={2}
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -395,7 +396,7 @@ export function TopBar({
       <div style={{ position: "relative", display: "inline-flex" }}>
         <button
           type="button"
-          className="tc-shell-btn tc-top-bar-settings-btn"
+          className="tc-shell-btn tc-top-bar-settings-btn bg-transparent hover:bg-[var(--tc-bg-elevated)]"
           aria-label="系统设置"
           style={{
             display: "inline-flex",
@@ -404,9 +405,8 @@ export function TopBar({
             width: 28,
             height: 28,
             borderRadius: 8,
-            background: "transparent",
             border: 0,
-            color: "rgba(255, 255, 255, 0.8)",
+            color: "var(--tc-text-secondary)",
             cursor: "pointer",
             outline: "none",
             transition: "background 120ms",
@@ -415,7 +415,7 @@ export function TopBar({
           <Settings
             width={14}
             height={14}
-            stroke="rgba(255, 255, 255, 0.8)"
+            stroke="var(--tc-text-secondary)"
             strokeWidth={1.5}
             strokeLinecap="round"
             strokeLinejoin="round"

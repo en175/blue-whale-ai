@@ -1,19 +1,19 @@
 /**
- * useCanvasProjects —— 画布多项目持久化数据流 hook（任务 4）
+ * useCanvasProjects —— 画布多项目持久化数据流 hook
  *
  * 把 projectReducer（本地真相源）与后端 project/canvas API 缝合：
- * - 后端可用（listProjects 成功）：覆盖 mock → 切换/首次 loadCanvas 恢复 →
+ * - 后端可用（listProjects 成功）：覆盖初始空列表 → 切换/首次 loadCanvas 恢复 →
  *   canvas 变化 800ms debounce 整体 PUT → beforeunload flush。
- * - 后端不可达 / 未登录（无 token）：保留 PROJECTS mock 作离线 fallback，不连后端。
+ * - 后端不可达 / 未登录（无 token）：projects 停空，activeProject 为 undefined，
+ *   页层渲染空态（加载失败重试 / 引导新建），不露任何写死的假数据。
  *
- * 两级降级判断：
- * - online（有 access token）：决定是否**尝试** listProjects。
+ * 两级判断：
+ * - online（有 access token）：决定是否尝试 listProjects。
  * - backendReady（listProjects 成功）：决定 loadCanvas/saveCanvas/CRUD 是否连后端。
- *   有 token 但后端不可达时 online=true、backendReady=false → 仍走 mock，不刷报错
- *   （避免 mock id "1" 等纯数字 id 误判为后端 id 而触发 loadCanvas 失败）。
+ *   有 token 但后端不可达时 online=true、backendReady=false → 空态 + loadError，可重试。
  *
  * id 适配：后端 ProjectDto.id:number ↔ 前端 Project.id:string。API 边界 String()/Number() 转换，
- * reducer/types 不动。backendReady=true 时 projects 已是后端真 id；false 时是 mock id（不连后端）。
+ * reducer/types 不动。backendReady=true 时 projects 已是后端真 id。
  *
  * 保存守卫：loadCanvas 恢复的 canvas 用 lastSavedRef 快照同步，使保存 effect 判定无变化而跳过；
  * loadingProjectRef 标记加载中的 project，避免慢网络下空 canvas 回存覆盖后端。
@@ -23,7 +23,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { loadAccessToken, loadUser, SKIP_AUTH, MOCK_USER } from "@/components/auth/authStorage";
 import { projectReducer, initialProjectState } from "../projectReducer";
-import { PROJECTS } from "../constants";
 import type { NodeItem, Project, Viewport } from "../types";
 import * as canvasApi from "@/lib/canvas";
 
@@ -43,17 +42,22 @@ function dtoToProject(dto: canvasApi.ProjectDto): Project {
 }
 
 export function useCanvasProjects() {
-  const [state, dispatch] = useReducer(projectReducer, PROJECTS, initialProjectState);
+  const [state, dispatch] = useReducer(projectReducer, [], initialProjectState);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  // listProjects 失败或未登录无 token 时为 true，页层据此渲染「加载失败重试」空态
+  const [loadError, setLoadError] = useState(false);
+  // retry 触发器：+1 让 listProjects effect 重跑（effect 依赖它）
+  const [retryKey, setRetryKey] = useState(0);
 
-  // 进画布时定一次登录态：有 token 才尝试连后端，否则 mock 离线 fallback。
+  // 进画布时定一次登录态：有 token 才尝试连后端，否则空态。
   const [online] = useState(() => typeof window !== "undefined" && !!loadAccessToken());
-  // 后端真正可用（listProjects 成功）才 true；有 token 但后端不可达时仍 false → 走 mock
+  // 后端真正可用（listProjects 成功）才 true；有 token 但后端不可达时仍 false → 空态
   const [backendReady, setBackendReady] = useState(false);
   // offline（无 token）不需要拉取，booting 直接 false；online 等列表到位才 false
   const [booting, setBooting] = useState(online);
   const tokenRef = useRef<string | null>(null);
 
+  // 空列表时为 undefined（页层据此渲染空态，不读 canvas/messages）
   const activeProject =
     state.projects.find((p) => p.id === state.activeProjectId) ?? state.projects[0];
 
@@ -71,7 +75,7 @@ export function useCanvasProjects() {
     stateRef.current = state;
   });
 
-  // 初始 token + 首次拉列表（online 才尝试；失败降级 mock，不阻塞画布）
+  // 初始 token + 首次拉列表（online 才尝试；失败设 loadError，不阻塞画布显示空态）
   useEffect(() => {
     tokenRef.current = loadAccessToken();
     if (!online) {
@@ -90,10 +94,13 @@ export function useCanvasProjects() {
         } else {
           dispatch({ type: "replace-all", projects: list.map(dtoToProject) });
         }
+        setLoadError(false);
         setBackendReady(true); // 后端可用，后续 loadCanvas/saveCanvas/CRUD 连后端
       } catch (e) {
-        // 后端不可达（未启动/token 过期/网关异常）：降级 mock，不阻塞画布使用
-        console.warn("[canvas] backend unreachable, using mock:", e);
+        if (cancelled) return;
+        // 后端不可达（未启动/token 过期/网关异常）：空态 + loadError，可重试，不露假数据
+        console.warn("[canvas] listProjects failed, showing empty state:", e);
+        setLoadError(true);
       } finally {
         if (!cancelled) setBooting(false);
       }
@@ -101,11 +108,18 @@ export function useCanvasProjects() {
     return () => {
       cancelled = true;
     };
-  }, [online]);
+  }, [online, retryKey]);
 
-  // active 变化 → loadCanvas 恢复（仅 backendReady + 未加载过）
+  /** 重试：重置 booting + 抖动 retryKey 触发 listProjects effect 重跑。 */
+  const retry = useCallback(() => {
+    setLoadError(false);
+    setBooting(true);
+    setRetryKey((k) => k + 1);
+  }, []);
+
+  // active 变化 → loadCanvas 恢复（仅 backendReady + 有 activeProject + 未加载过）
   useEffect(() => {
-    if (!backendReady) return; // 后端不可达时走 mock，不 loadCanvas
+    if (!backendReady || !activeProject) return; // 空态/后端不可达时不 loadCanvas
     const pid = activeProject.id;
     if (!pid || loadedRef.current.has(pid)) return;
     loadedRef.current.add(pid);
@@ -131,11 +145,11 @@ export function useCanvasProjects() {
       cancelled = true;
       if (loadingProjectRef.current === pid) loadingProjectRef.current = null;
     };
-  }, [activeProject.id, backendReady]);
+  }, [activeProject?.id, backendReady]);
 
   // canvas 变化 → 800ms debounce 整体 PUT（仅 backendReady + 已加载 + 快照有变化）
   useEffect(() => {
-    if (!backendReady || booting) return;
+    if (!backendReady || booting || !activeProject) return;
     const pid = activeProject.id;
     if (!pid || !loadedRef.current.has(pid)) return;
     if (loadingProjectRef.current === pid) return; // 加载中：避免回存空 canvas 覆盖后端
@@ -169,7 +183,7 @@ export function useCanvasProjects() {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [activeProject.canvas.nodes, activeProject.canvas.viewport, activeProject.id, backendReady, booting]);
+  }, [activeProject?.canvas?.nodes, activeProject?.canvas?.viewport, activeProject?.id, backendReady, booting]);
 
   // beforeunload：flush 未保存改动（fetch keepalive，不阻塞卸载）
   useEffect(() => {
@@ -183,7 +197,7 @@ export function useCanvasProjects() {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       const token = tokenRef.current;
       const user = loadUser() ?? (SKIP_AUTH ? MOCK_USER : null);
-      fetch(`/api/canvases/${p.id}`, {
+      fetch(`/api/agent/canvases/${p.id}`, {
         method: "PUT",
         keepalive: true,
         headers: {
@@ -203,12 +217,16 @@ export function useCanvasProjects() {
 
   // ---- CRUD actions ----
 
-  /** 新建项目：backendReady 先落库拿真 id 再 dispatch；否则用本地 idGen（mock）。 */
+  /** 新建项目：落库拿真 id 再 dispatch。后端不可达时报错（saveStatus=error），不造假项目。 */
   const createProjectAction = useCallback(async () => {
-    const name = `项目 ${Date.now().toString().slice(-4)}`;
-    if (!backendReady) {
-      dispatch({ type: "create", name, idGen: () => `p-${Date.now()}` });
-      return;
+    // 命名 = 当前时间「项目 YYYY-MM-DD HH:mm」；撞名则 (2)(3) 递增
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const base = `项目 ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    let name = base;
+    let suffix = 2;
+    while (stateRef.current.projects.some((p) => p.name === name)) {
+      name = `${base} (${suffix++})`;
     }
     try {
       const dto = await canvasApi.createProject(name);
@@ -218,28 +236,24 @@ export function useCanvasProjects() {
       lastSavedRef.current = JSON.stringify({ nodes: [], viewport: EMPTY_VIEWPORT });
     } catch (e) {
       console.error("[canvas] createProject failed:", e);
+      setSaveStatus("error");
     }
-  }, [backendReady]);
+  }, []);
 
   const switchProject = useCallback((id: string) => {
     dispatch({ type: "switch", projectId: id });
   }, []);
 
-  /** 删除项目：backendReady 先删库再 dispatch；否则直接 dispatch（mock）。 */
-  const deleteProjectAction = useCallback(
-    async (id: string) => {
-      loadedRef.current.delete(id);
-      if (backendReady) {
-        try {
-          await canvasApi.deleteProject(Number(id));
-        } catch (e) {
-          console.error("[canvas] deleteProject failed:", e);
-        }
-      }
-      dispatch({ type: "delete", projectId: id });
-    },
-    [backendReady]
-  );
+  /** 删除项目：后端删 + 本地乐观删（失败仅记日志，不回滚本地删）。 */
+  const deleteProjectAction = useCallback(async (id: string) => {
+    loadedRef.current.delete(id);
+    try {
+      await canvasApi.deleteProject(Number(id));
+    } catch (e) {
+      console.error("[canvas] deleteProject failed:", e);
+    }
+    dispatch({ type: "delete", projectId: id });
+  }, []);
 
   return {
     state,
@@ -248,6 +262,8 @@ export function useCanvasProjects() {
     saveStatus,
     booting,
     backendReady,
+    loadError,
+    retry,
     createProjectAction,
     switchProject,
     deleteProjectAction,

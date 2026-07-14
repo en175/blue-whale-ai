@@ -1,7 +1,7 @@
 /**
  * canvas —— project / canvas 持久化请求层（照 lib/auth.ts 的 fetchWithTimeout + ApiResult 模式）。
  *
- * 走 Next rewrite /api/projects、/api/canvases → agent-service（见 next.config.ts）。
+ * 走 Next rewrite /api/agent/projects、/api/agent/canvases → agent-service（见 next.config.ts）。
  * 用户身份走 X-User-Id 头（网关注入 JWT 后转发，本地开发 loadAccessToken 走 Authorization
  * 由网关转 X-User-Id；此处不重复造轮子，直接带 Authorization，交给网关处理）。
  */
@@ -75,7 +75,7 @@ function authHeaders(token?: string | null): HeadersInit {
 
 /** 建项目。 */
 export function createProject(name: string): Promise<ProjectDto> {
-  return getResult<ProjectDto>("/api/projects", {
+  return getResult<ProjectDto>("/api/agent/projects", {
     method: "POST",
     headers: authHeaders(loadAccessToken()),
     body: JSON.stringify({ name }),
@@ -84,21 +84,21 @@ export function createProject(name: string): Promise<ProjectDto> {
 
 /** 项目列表（当前用户）。 */
 export function listProjects(): Promise<ProjectDto[]> {
-  return getResult<ProjectDto[]>("/api/projects", {
+  return getResult<ProjectDto[]>("/api/agent/projects", {
     headers: authHeaders(loadAccessToken()),
   });
 }
 
 /** 项目详情。 */
 export function getProject(id: number): Promise<ProjectDto> {
-  return getResult<ProjectDto>(`/api/projects/${id}`, {
+  return getResult<ProjectDto>(`/api/agent/projects/${id}`, {
     headers: authHeaders(loadAccessToken()),
   });
 }
 
 /** 重命名项目。 */
 export function renameProject(id: number, name: string): Promise<ProjectDto> {
-  return getResult<ProjectDto>(`/api/projects/${id}`, {
+  return getResult<ProjectDto>(`/api/agent/projects/${id}`, {
     method: "PUT",
     headers: authHeaders(loadAccessToken()),
     body: JSON.stringify({ name }),
@@ -107,7 +107,7 @@ export function renameProject(id: number, name: string): Promise<ProjectDto> {
 
 /** 删除项目。 */
 export function deleteProject(id: number): Promise<void> {
-  return getResult<void>(`/api/projects/${id}`, {
+  return getResult<void>(`/api/agent/projects/${id}`, {
     method: "DELETE",
     headers: authHeaders(loadAccessToken()),
   });
@@ -115,7 +115,7 @@ export function deleteProject(id: number): Promise<void> {
 
 /** 加载画布（按 projectId，无记录时 id 为 null）。 */
 export function loadCanvas(projectId: number): Promise<CanvasDto> {
-  return getResult<CanvasDto>(`/api/canvases?projectId=${projectId}`, {
+  return getResult<CanvasDto>(`/api/agent/canvases?projectId=${projectId}`, {
     headers: authHeaders(loadAccessToken()),
   });
 }
@@ -125,7 +125,7 @@ export function loadCanvas(projectId: number): Promise<CanvasDto> {
  * （后端 SaveCanvasRequest 按透明字符串存，不解析结构，见 ADR-0011 D3）。
  */
 export function saveCanvas(projectId: number, viewport: string, nodes: string): Promise<CanvasDto> {
-  return getResult<CanvasDto>(`/api/canvases/${projectId}`, {
+  return getResult<CanvasDto>(`/api/agent/canvases/${projectId}`, {
     method: "PUT",
     headers: authHeaders(loadAccessToken()),
     body: JSON.stringify({ viewport, nodes }),

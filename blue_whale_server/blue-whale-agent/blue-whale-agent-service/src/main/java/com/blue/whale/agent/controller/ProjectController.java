@@ -27,7 +27,7 @@ import java.util.List;
  */
 @Tag(name = "项目接口", description = "画布项目 CRUD（ADR-0011 project 根）")
 @RestController
-@RequestMapping("/api/projects")
+@RequestMapping("/api/agent/projects")
 @RequiredArgsConstructor
 public class ProjectController {
 
