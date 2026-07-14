@@ -31,7 +31,9 @@ spring:
         - id: blue-whale-agent
           uri: lb://blue-whale-agent
           predicates:
-            - Path=/api/agent/**
+            # agent-service 端点前缀：/api/agent/**（skill/template）、/api/projects/**（project/canvas/snapshot/events）、
+            # /api/jobs/**、/api/generation/**、/api/assets/**、/api/webhooks/**
+            - Path=/api/agent/**,/api/projects/**,/api/jobs/**,/api/generation/**,/api/assets/**,/api/webhooks/**
         - id: blue-whale-user
           uri: lb://blue-whale-user
           predicates:

@@ -73,6 +73,12 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- H2：集成测试用（MODE=MySQL，FOR UPDATE 与事务验证），不进生产 -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <!-- 火山方舟 Ark Runtime SDK：文生图(Seedream 同步) + 图文生视频(Seedance 异步)，OkHttp 连接池 -->
         <dependency>

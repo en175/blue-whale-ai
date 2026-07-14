@@ -1,0 +1,83 @@
+package com.blue.whale.agent.service;
+
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.blue.whale.agent.mapper.AssetMapper;
+import com.blue.whale.agent.mapper.GenerationJobMapper;
+import com.blue.whale.agent.model.dto.CanvasDto;
+import com.blue.whale.agent.model.dto.ProjectDto;
+import com.blue.whale.agent.model.dto.SnapshotResponse;
+import com.blue.whale.agent.model.entity.Asset;
+import com.blue.whale.agent.model.entity.GenerationJob;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Project Snapshot 服务（ADR-0016 §2）。
+ *
+ * <p>恢复入口 {@code GET /api/projects/{projectId}/snapshot}：一致读取 Project、Conversation（首版无）、
+ * 当前 GenerationJob、Canvas 对 Asset 的引用，以及 {@code high_watermark_cursor}。
+ * 快照状态至少反映到该高水位，客户端随后只需订阅该游标之后的增量（ADR-0017 §3）。
+ *
+ * <p>归属校验复用 {@link ProjectService#requireOwned}：查不到抛 DATA_NOT_EXIST，越权抛
+ * DATA_NO_PERMISSION，二者都不泄漏资源是否存在。
+ */
+@Service
+@RequiredArgsConstructor
+public class SnapshotService {
+
+    private final ProjectService projectService;
+    private final CanvasService canvasService;
+    private final GenerationJobMapper generationJobMapper;
+    private final AssetMapper assetMapper;
+    private final ProjectEventService projectEventService;
+
+    /**
+     * 读取 Project 一致快照。
+     *
+     * @param projectId 项目 ID
+     * @param userId    当前用户 ID（用于归属校验）
+     * @return 快照响应（含 high_watermark_cursor）
+     */
+    public SnapshotResponse getSnapshot(Long projectId, Long userId) {
+        // 归属校验（越权/不存在都不泄漏）
+        projectService.requireOwned(projectId, userId);
+
+        ProjectDto project = projectService.get(projectId, userId);
+        CanvasDto canvas = canvasService.getByProject(projectId);
+        List<GenerationJob> jobs = generationJobMapper.selectList(Wrappers.<GenerationJob>lambdaQuery()
+                .eq(GenerationJob::getProjectId, projectId)
+                .orderByDesc(GenerationJob::getGmtCreate));
+
+        List<SnapshotResponse.GenerationJobDto> jobDtos = jobs.stream()
+                .map(j -> new SnapshotResponse.GenerationJobDto(
+                        j.getId(), j.getType(), j.getStatus(), j.getProgress(),
+                        j.getOutputAssetIds()))
+                .toList();
+
+        // 批量查 job 引用的 asset，补 url（防 N+1）
+        Map<Long, SnapshotResponse.AssetDto> assetMap = resolveAssets(jobs);
+
+        long highWatermark = projectEventService.highWatermark(projectId);
+        return new SnapshotResponse(project, canvas, jobDtos, assetMap, highWatermark);
+    }
+
+    private Map<Long, SnapshotResponse.AssetDto> resolveAssets(List<GenerationJob> jobs) {
+        List<Long> assetIds = jobs.stream()
+                .filter(j -> j.getOutputAssetIds() != null)
+                .flatMap(j -> j.getOutputAssetIds().stream())
+                .distinct()
+                .toList();
+        Map<Long, SnapshotResponse.AssetDto> map = new HashMap<>();
+        if (assetIds.isEmpty()) {
+            return map;
+        }
+        for (Asset a : assetMapper.selectByIds(assetIds)) {
+            map.put(a.getId(), new SnapshotResponse.AssetDto(a.getId(), a.getUrl(), a.getType()));
+        }
+        return map;
+    }
+}
