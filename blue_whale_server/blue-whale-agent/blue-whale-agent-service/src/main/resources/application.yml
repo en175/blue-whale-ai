@@ -37,10 +37,9 @@ spring:
     port: 6379
     password: weitian1024
     database: 0
-  jackson:
-    # 前端字段全 snake_case，必须 SNAKE_CASE 才能映射到后端 camelCase（model_id→modelId）。
-    # MybatisJacksonConfig 复用此 ObjectMapper 给 JacksonTypeHandler，DB 的 JSON 列也是 snake_case。
-    property-naming-strategy: SNAKE_CASE
+  # HTTP 对外 JSON 默认 camelCase（合规 CLAUDE.md 后端规范）。
+  # DB JSON 列的 snake↔camel 映射由 MybatisJacksonConfig 注入独立 SNAKE_CASE ObjectMapper 给
+  # JacksonTypeHandler 处理，与 HTTP 隔离；普通列靠 mybatis-plus map-underscore-to-camel-case（见下）。
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml

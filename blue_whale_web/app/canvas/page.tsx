@@ -294,17 +294,17 @@ function CanvasPageInner() {
         if (args.mode === "image") {
           const result = await generateImage({
             prompt: trimmed,
-            model_id: args.settings.model.id,
-            size_id: args.settings.resolution.id,
-            aspect_ratio: args.settings.aspectRatio.id,
+            modelId: args.settings.model.id,
+            sizeId: args.settings.resolution.id,
+            aspectRatio: args.settings.aspectRatio.id,
             quantity: parseQuantity(args.settings.quantity),
-            reference_images: imageDockMedia
+            referenceImages: imageDockMedia
               .map((m) => m.src)
               .filter((s): s is string => Boolean(s)),
           });
-          if (result.stream && result.job_id != null) {
+          if (result.stream && result.jobId != null) {
             // 流式模型：原生 EventSource 订阅，逐张上屏
-            streamJob(result.job_id, {
+            streamJob(result.jobId, {
               onImage: (url) => addNode("image", { content: trimmed, imageUrl: url }),
               onDone: () => {
                 setGenerating(false);
@@ -327,12 +327,12 @@ function CanvasPageInner() {
           const result = await createVideoJob({
             prompt: trimmed,
             resolution: args.settings.resolution.id,
-            aspect_ratio: args.settings.aspectRatio.id,
+            aspectRatio: args.settings.aspectRatio.id,
             duration: args.settings.duration,
-            first_frame_url: videoDockMedia[0]?.src,
+            firstFrameUrl: videoDockMedia[0]?.src,
           });
           pendingVideoPromptRef.current = trimmed;
-          startJob(result.job_id);
+          startJob(result.jobId);
           // generating 在 jobState 终态时由 effect 复位
         }
       } catch (e) {

@@ -15,13 +15,13 @@ export interface ProjectDto {
   id: number;
   name: string;
   thumb: string | null;
-  created_at: string;
+  createdAt: string;
 }
 
 /** 画布响应（整体 GET），对齐后端 CanvasDto；viewport/nodes 为 JSON 字符串。 */
 export interface CanvasDto {
   id: number | null;
-  project_id: number;
+  projectId: number;
   viewport: string;
   nodes: string;
 }

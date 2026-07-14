@@ -1,5 +1,5 @@
 /**
- * assets —— 资产库列表请求层（assets 页用）。字段 snake_case 对齐后端。
+ * assets —— 资产库列表请求层（assets 页用）。字段 camelCase 对齐后端。
  */
 
 import { request, type Paged } from "./api";
@@ -13,7 +13,7 @@ export type AssetItem = {
   height: number | null;
   duration: number | null;
   source: string | null;
-  created_at: string | null;
+  createdAt: string | null;
 };
 
 /** 资产列表：按 type 过滤 + 分页，按创建时间倒序。 */

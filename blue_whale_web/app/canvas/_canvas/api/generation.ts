@@ -5,27 +5,27 @@
  * 统一 Result{code,msg,data} 拆包：code!==200 抛 Error(msg)，否则返 data。
  * 鉴权统一走 apiFetch：登录态自动附 Authorization，401 自动刷新。
  *
- * 字段全 snake_case 对齐后端 Jackson SNAKE_CASE 序列化（见 application.yml）。
+ * 字段全 camelCase 对齐后端 Jackson 默认序列化（见 application.yml）。
  * streamJob 用 EventSource（SSE），不支持自定义 header，暂不走 apiFetch（待单独处理）。
  */
 import { apiFetch } from "@/lib/api-client";
 
 export type ImageModelCapability = {
-  model_id: string;
-  provider_id: string;
-  model_label: string;
+  modelId: string;
+  providerId: string;
+  modelLabel: string;
   icon: string | null;
-  supported_sizes: { id: string; label: string; api_value: string; width?: number; height?: number }[];
-  supported_aspect_ratios: string[];
-  supported_formats: string[];
-  default_size: string;
-  default_format: string | null;
-  default_aspect_ratio: string;
+  supportedSizes: { id: string; label: string; apiValue: string; width?: number; height?: number }[];
+  supportedAspectRatios: string[];
+  supportedFormats: string[];
+  defaultSize: string;
+  defaultFormat: string | null;
+  defaultAspectRatio: string;
   features: {
-    reference_image: boolean;
+    referenceImage: boolean;
     watermark: boolean;
-    quantity_max: number;
-    sequential_image_generation: boolean;
+    quantityMax: number;
+    sequentialImageGeneration: boolean;
     stream: boolean;
     tools: boolean;
   };
@@ -33,36 +33,36 @@ export type ImageModelCapability = {
 
 export type ImageGeneratePayload = {
   prompt: string;
-  model_id: string;
-  size_id: string;
-  aspect_ratio?: string;
+  modelId: string;
+  sizeId: string;
+  aspectRatio?: string;
   format?: string;
   quantity?: number;
   watermark?: boolean;
-  reference_images?: string[];
+  referenceImages?: string[];
 };
 
 export type VideoGeneratePayload = {
   prompt: string;
   resolution?: string;
-  aspect_ratio?: string;
+  aspectRatio?: string;
   duration?: number;
-  first_frame_url?: string;
-  last_frame_url?: string;
+  firstFrameUrl?: string;
+  lastFrameUrl?: string;
 };
 
-export type ImageResult = { asset_id: number; url: string };
+export type ImageResult = { assetId: number; url: string };
 export type ImageGenerateResponse = {
-  job_id?: number;
+  jobId?: number;
   status?: string;
   stream: boolean;
-  asset_id?: number;
+  assetId?: number;
   url?: string;
 };
-export type CreateJobResponse = { job_id: number; status: string };
+export type CreateJobResponse = { jobId: number; status: string };
 export type JobAsset = { id: number; url: string; type: string };
 export type JobStatusResponse = {
-  job_id: number;
+  jobId: number;
   status: string;
   progress: number;
   asset: JobAsset | null;
@@ -97,7 +97,7 @@ export function getImageModels(): Promise<ImageModelCapability[]> {
   return request<ImageModelCapability[]>("/generation/models?capability=image", "GET");
 }
 
-/** 文生图：流式模型返 job_id（再 streamJob 订阅逐张），非流式返 asset_id+url。 */
+/** 文生图：流式模型返 jobId（再 streamJob 订阅逐张），非流式返 assetId+url。 */
 export function generateImage(payload: ImageGeneratePayload): Promise<ImageGenerateResponse> {
   return request<ImageGenerateResponse>("/generation/image", "POST", payload);
 }
@@ -114,10 +114,10 @@ export function getJobStatus(jobId: number): Promise<JobStatusResponse> {
 
 /** SSE 流式事件载荷（后端 SsePayload，type 区分）。 */
 export type StreamEvent =
-  | { type: "image"; image_index: number; asset_id: number; url: string }
-  | { type: "image_failed"; image_index: number; error_code?: string; error_message?: string }
+  | { type: "image"; imageIndex: number; assetId: number; url: string }
+  | { type: "image_failed"; imageIndex: number; errorCode?: string; errorMessage?: string }
   | { type: "done"; usage?: unknown }
-  | { type: "error"; error_code?: string; error_message?: string };
+  | { type: "error"; errorCode?: string; errorMessage?: string };
 
 export interface StreamHandlers {
   onImage?: (url: string, assetId: number, imageIndex: number) => void;
@@ -142,17 +142,17 @@ export function streamJob(jobId: number, handlers: StreamHandlers): EventSource 
     }
     switch (event.type) {
       case "image":
-        handlers.onImage?.(event.url, event.asset_id, event.image_index);
+        handlers.onImage?.(event.url, event.assetId, event.imageIndex);
         break;
       case "image_failed":
-        handlers.onImageFailed?.(event.image_index, event.error_code, event.error_message);
+        handlers.onImageFailed?.(event.imageIndex, event.errorCode, event.errorMessage);
         break;
       case "done":
         handlers.onDone?.();
         es.close();
         break;
       case "error":
-        handlers.onError?.(event.error_message || "生成失败");
+        handlers.onError?.(event.errorMessage || "生成失败");
         es.close();
         break;
     }
