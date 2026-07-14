@@ -5,6 +5,7 @@ import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
+import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
 import com.blue.whale.agent.model.dto.CanvasDto;
 import com.blue.whale.agent.model.dto.ProjectDto;
 import com.blue.whale.agent.model.dto.SnapshotResponse;
@@ -12,14 +13,18 @@ import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.AgentRun;
 import com.blue.whale.agent.model.entity.ConversationMessage;
 import com.blue.whale.agent.model.entity.GenerationJob;
+import com.blue.whale.agent.model.entity.GenerationJobOutput;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Stream;
 
 /**
  * Project Snapshot 服务（ADR-0016 §2）。
@@ -40,6 +45,7 @@ public class SnapshotService {
     private final ConversationMessageMapper conversationMessageMapper;
     private final AgentRunMapper agentRunMapper;
     private final GenerationJobMapper generationJobMapper;
+    private final GenerationJobOutputMapper generationJobOutputMapper;
     private final AssetMapper assetMapper;
     private final ProjectEventService projectEventService;
 
@@ -68,11 +74,13 @@ public class SnapshotService {
                 .eq(GenerationJob::getProjectId, projectId)
                 .orderByDesc(GenerationJob::getGmtCreate));
 
+        Map<Long, List<SnapshotResponse.GenerationJobOutputDto>> outputsByJob = resolveOutputs(jobs);
         List<SnapshotResponse.GenerationJobDto> jobDtos = jobs.stream()
                 .map(j -> new SnapshotResponse.GenerationJobDto(
                         j.getId(), j.getAgentRunId(), j.getActionIdentity(), j.getType(), j.getSource(),
                         j.getInput(), j.getStatus(), j.getProgress(),
-                        j.getOutputAssetIds()))
+                        j.getOutputAssetIds(),
+                        outputsByJob.getOrDefault(j.getId(), Collections.emptyList())))
                 .toList();
         List<SnapshotResponse.ConversationMessageDto> messageDtos = messages.stream()
                 .map(message -> new SnapshotResponse.ConversationMessageDto(
@@ -86,18 +94,43 @@ public class SnapshotService {
                         run.getCurrentCheckpointId(), run.getVersion()))
                 .toList();
 
-        // 批量查 job 引用的 asset，补 url（防 N+1）
-        Map<Long, SnapshotResponse.AssetDto> assetMap = resolveAssets(jobs);
+        // 批量查 job 引用的 Asset，补产品受控访问地址（防 N+1）
+        Map<Long, SnapshotResponse.AssetDto> assetMap = resolveAssets(projectId, jobs, outputsByJob);
 
         long highWatermark = projectEventService.highWatermark(projectId);
         return new SnapshotResponse(
                 project, canvas, messageDtos, runDtos, jobDtos, assetMap, highWatermark);
     }
 
-    private Map<Long, SnapshotResponse.AssetDto> resolveAssets(List<GenerationJob> jobs) {
-        List<Long> assetIds = jobs.stream()
-                .filter(j -> j.getOutputAssetIds() != null)
-                .flatMap(j -> j.getOutputAssetIds().stream())
+    private Map<Long, List<SnapshotResponse.GenerationJobOutputDto>> resolveOutputs(
+            List<GenerationJob> jobs) {
+        List<Long> jobIds = jobs.stream().map(GenerationJob::getId).toList();
+        if (jobIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<Long, List<SnapshotResponse.GenerationJobOutputDto>> outputsByJob = new HashMap<>();
+        for (GenerationJobOutput output : generationJobOutputMapper.selectList(
+                Wrappers.<GenerationJobOutput>lambdaQuery()
+                        .in(GenerationJobOutput::getGenerationJobId, jobIds)
+                        .orderByAsc(GenerationJobOutput::getSlotIndex))) {
+            outputsByJob.computeIfAbsent(output.getGenerationJobId(), ignored -> new java.util.ArrayList<>())
+                    .add(new SnapshotResponse.GenerationJobOutputDto(
+                            output.getSlotIndex(), output.getAssetId()));
+        }
+        return outputsByJob;
+    }
+
+    private Map<Long, SnapshotResponse.AssetDto> resolveAssets(
+            Long projectId,
+            List<GenerationJob> jobs,
+            Map<Long, List<SnapshotResponse.GenerationJobOutputDto>> outputsByJob) {
+        Stream<Long> outputAssetIds = outputsByJob.values().stream()
+                .flatMap(List::stream)
+                .map(SnapshotResponse.GenerationJobOutputDto::assetId);
+        Stream<Long> legacyAssetIds = jobs.stream()
+                .filter(job -> job.getOutputAssetIds() != null)
+                .flatMap(job -> job.getOutputAssetIds().stream());
+        List<Long> assetIds = Stream.concat(outputAssetIds, legacyAssetIds)
                 .distinct()
                 .toList();
         Map<Long, SnapshotResponse.AssetDto> map = new HashMap<>();
@@ -105,8 +138,19 @@ public class SnapshotService {
             return map;
         }
         for (Asset a : assetMapper.selectByIds(assetIds)) {
-            map.put(a.getId(), new SnapshotResponse.AssetDto(a.getId(), a.getUrl(), a.getType()));
+            if (a.getProjectId() != null && !Objects.equals(a.getProjectId(), projectId)) {
+                continue;
+            }
+            map.put(a.getId(), new SnapshotResponse.AssetDto(
+                    a.getId(), assetAccessUrl(projectId, a), a.getType()));
         }
         return map;
+    }
+
+    private String assetAccessUrl(Long projectId, Asset asset) {
+        if (asset.getProjectId() == null) {
+            return asset.getUrl();
+        }
+        return "/api/projects/" + projectId + "/assets/" + asset.getId() + "/content";
     }
 }

@@ -25,7 +25,10 @@ import { loadAccessToken } from "@/components/auth/authStorage";
 import { projectReducer, initialProjectState } from "../projectReducer";
 import { PROJECTS } from "../constants";
 import type { NodeItem, Project, Viewport } from "../types";
-import { projectSnapshotToChatMessages } from "../conversationRecovery";
+import {
+  projectSnapshotToCanvasNodes,
+  projectSnapshotToChatMessages,
+} from "../conversationRecovery";
 import * as canvasApi from "@/lib/canvas";
 import {
   acceptConversationMessage,
@@ -137,9 +140,10 @@ export function useCanvasProjects() {
         return;
       }
       const snapshot = recovery.snapshot;
-      const nodes = snapshot.canvas.nodes
+      const persistedNodes = snapshot.canvas.nodes
         ? (JSON.parse(snapshot.canvas.nodes) as NodeItem[])
         : [];
+      const nodes = projectSnapshotToCanvasNodes(snapshot, persistedNodes);
       const viewport = snapshot.canvas.viewport
         ? (JSON.parse(snapshot.canvas.viewport) as Viewport)
         : EMPTY_VIEWPORT;

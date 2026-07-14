@@ -280,3 +280,35 @@ CREATE TABLE command_idempotency
     is_delete TINYINT NOT NULL DEFAULT 0,
     UNIQUE KEY uk_command_idempotency (project_id, operation, idempotency_key)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='公开命令幂等接纳记录';
+
+CREATE TABLE generation_job_outputs
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    generation_job_id BIGINT NOT NULL,
+    slot_index INT NOT NULL,
+    asset_id BIGINT NOT NULL,
+    delivery_id VARCHAR(128) NOT NULL,
+    content_sha256 VARCHAR(64) NOT NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_generation_output_slot (generation_job_id, slot_index),
+    UNIQUE KEY uk_generation_output_delivery (generation_job_id, delivery_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='GenerationJob 输出槽事实';
+
+CREATE TABLE generation_result_conflicts
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    generation_job_id BIGINT NOT NULL,
+    slot_index INT NOT NULL,
+    attempted_delivery_id VARCHAR(128) NOT NULL,
+    expected_content_sha256 VARCHAR(64) NOT NULL,
+    actual_content_sha256 VARCHAR(64) NOT NULL,
+    reason VARCHAR(64) NOT NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    INDEX idx_generation_result_conflict (generation_job_id, slot_index)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='结果身份冲突诊断事实';

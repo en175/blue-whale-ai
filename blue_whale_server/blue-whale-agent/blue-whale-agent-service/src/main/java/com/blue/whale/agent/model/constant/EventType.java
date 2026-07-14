@@ -35,4 +35,9 @@ public final class EventType {
     public static final String GENERATION_JOB_CREATED = "generation_job.created";
     /** GenerationJob：状态变更（queued→processing→succeeded|failed） */
     public static final String GENERATION_JOB_STATUS_CHANGED = "generation_job.status_changed";
+    /** GenerationJob：稳定输出槽位已绑定 Asset。 */
+    public static final String GENERATION_JOB_OUTPUT_ATTACHED = "generation_job.output_attached";
+
+    /** Asset：产品已接纳不可变媒体对象。 */
+    public static final String ASSET_CREATED = "asset.created";
 }

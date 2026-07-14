@@ -16,7 +16,10 @@ export type ProjectSnapshot = {
   conversation_messages: Array<Record<string, unknown>>;
   agent_runs: Array<Record<string, unknown>>;
   generation_jobs: Array<Record<string, unknown>>;
-  assets: Record<string, unknown>;
+  assets: Record<
+    string,
+    { asset_id: number | string; type: string; access_url: string }
+  >;
   high_watermark_cursor: number;
 };
 
@@ -157,6 +160,19 @@ export function applyProductEvent(
           event.payload,
         ),
       };
+    } else if (event.event_type === "asset.created") {
+      snapshot = {
+        ...snapshot,
+        assets: applyAssetEvent(snapshot.assets, event.payload),
+      };
+    } else if (event.event_type === "generation_job.output_attached") {
+      snapshot = {
+        ...snapshot,
+        generation_jobs: applyGenerationJobOutputEvent(
+          snapshot.generation_jobs,
+          event.payload,
+        ),
+      };
     } else if (
       event.event_type === "conversation.message_accepted" ||
       event.event_type === "conversation.message_completed"
@@ -192,6 +208,69 @@ export function applyProductEvent(
     aggregateVersions,
     deleted,
   };
+}
+
+function applyAssetEvent(
+  assets: ProjectSnapshot["assets"],
+  payload: Record<string, unknown>,
+): ProjectSnapshot["assets"] {
+  const assetId = payload.asset_id;
+  if (
+    (typeof assetId !== "number" && typeof assetId !== "string") ||
+    typeof payload.type !== "string" ||
+    typeof payload.access_url !== "string"
+  ) {
+    return assets;
+  }
+  const identity = String(assetId);
+  return {
+    ...assets,
+    [identity]: {
+      ...assets[identity],
+      asset_id: assetId,
+      type: payload.type,
+      access_url: payload.access_url,
+    },
+  };
+}
+
+function applyGenerationJobOutputEvent(
+  jobs: Array<Record<string, unknown>>,
+  payload: Record<string, unknown>,
+): Array<Record<string, unknown>> {
+  const jobId = payload.job_id;
+  const slotIndex = payload.slot_index;
+  const assetId = payload.asset_id;
+  if (
+    (typeof jobId !== "number" && typeof jobId !== "string") ||
+    typeof slotIndex !== "number" ||
+    (typeof assetId !== "number" && typeof assetId !== "string")
+  ) {
+    return jobs;
+  }
+  const index = jobs.findIndex((job) => String(job.job_id) === String(jobId));
+  const current = index < 0 ? { job_id: jobId } : jobs[index];
+  const outputs = Array.isArray(current.outputs)
+    ? current.outputs.filter(
+        (output): output is Record<string, unknown> =>
+          !!output && typeof output === "object",
+      )
+    : [];
+  const nextOutput = { slot_index: slotIndex, asset_id: assetId };
+  const outputIndex = outputs.findIndex(
+    (output) => output.slot_index === slotIndex,
+  );
+  const nextOutputs =
+    outputIndex < 0
+      ? [...outputs, nextOutput]
+      : outputs.map((output, currentIndex) =>
+          currentIndex === outputIndex ? nextOutput : output,
+        );
+  const nextJob = { ...current, outputs: nextOutputs };
+  if (index < 0) return [...jobs, nextJob];
+  return jobs.map((job, currentIndex) =>
+    currentIndex === index ? nextJob : job,
+  );
 }
 
 function upsertFact(

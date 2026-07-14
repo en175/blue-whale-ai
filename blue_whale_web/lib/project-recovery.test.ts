@@ -135,6 +135,60 @@ describe("Project 恢复状态机", () => {
     expect(state.lastCursor).toBe(12);
   });
 
+  it("按 asset_id 合并 Asset 与输出槽事件，重复回放不产生重复输出", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_asset_11",
+        event_type: "asset.created",
+        aggregate_type: "asset",
+        aggregate_id: "9",
+        aggregate_version: 0,
+        payload: {
+          asset_id: 9,
+          type: "image",
+          access_url: "/api/projects/1/assets/9/content",
+        },
+      }),
+    );
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_output_12",
+        event_type: "generation_job.output_attached",
+        cursor: 12,
+        aggregate_type: "generation_job_output",
+        aggregate_id: "7:0",
+        aggregate_version: 0,
+        payload: { job_id: 7, slot_index: 0, asset_id: 9 },
+      }),
+    );
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_output_13",
+        event_type: "generation_job.output_attached",
+        cursor: 13,
+        aggregate_type: "generation_job_output",
+        aggregate_id: "7:0",
+        aggregate_version: 1,
+        payload: { job_id: 7, slot_index: 0, asset_id: 9 },
+      }),
+    );
+
+    expect(state.snapshot?.assets).toEqual({
+      "9": {
+        asset_id: 9,
+        type: "image",
+        access_url: "/api/projects/1/assets/9/content",
+      },
+    });
+    expect(state.snapshot?.generation_jobs).toEqual([
+      { job_id: 7, outputs: [{ slot_index: 0, asset_id: 9 }] },
+    ]);
+  });
+
   it("应用 Conversation 与 AgentRun 事件并保留可恢复事实", () => {
     let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
 

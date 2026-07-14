@@ -4,6 +4,7 @@ import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
+import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
 import com.blue.whale.agent.model.entity.Project;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
@@ -33,6 +34,8 @@ class SnapshotServiceTest {
     private AgentRunMapper agentRunMapper;
     @Mock
     private GenerationJobMapper generationJobMapper;
+    @Mock
+    private GenerationJobOutputMapper generationJobOutputMapper;
     @Mock
     private AssetMapper assetMapper;
     @Mock
