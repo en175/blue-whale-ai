@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { usePathname, useRouter } from "next/navigation";
 import type { PendingAction, User } from "./types";
 import { clearUser, clearTokens, loadAccessToken, loadRefreshToken, loadUser, saveTokens, saveUser, SKIP_AUTH, MOCK_USER } from "./authStorage";
-import { loginWithCode, logoutApi, refreshToken, ApiError } from "@/lib/auth";
+import { loginWithCode, logoutApi, refreshToken, fetchMe, ApiError } from "@/lib/auth";
 import { subscribeToAuthFailure, getAccessTokenSilently } from "@/lib/api-client";
 import { LoginModal } from "./LoginModal";
 
@@ -15,6 +15,10 @@ interface AuthContextValue {
   requireAuth: (action: PendingAction, run: () => void) => void;
   signIn: (phone: string, code: string) => Promise<void>;
   signOut: () => void;
+  /** 从后端拉最新用户信息并同步本地。换绑成功后用（手机号变更需后端确认）。改昵称不用——用 updateLocalUser（乐观更新）。 */
+  refreshUser: () => Promise<void>;
+  /** 轻量同步：直接 patch 本地 user + storage，不调后端。改昵称成功后用（刚 PUT 成功无需再 GET）。 */
+  updateLocalUser: (patch: Partial<User>) => void;
   openLogin: () => void;
   closeLogin: () => void;
 }
@@ -160,9 +164,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (pathname?.startsWith("/canvas")) router.replace("/");
   }, [pathname, router]);
 
+  // 从后端拉最新用户信息并同步本地（改昵称/换绑成功后调用）
+  const refreshUser = useCallback(async () => {
+    if (SKIP_AUTH) return; // 本地开发模式无后端，跳过
+    const info = await fetchMe();
+    const u: User = { userId: info.user_id, username: info.username, phone: info.phone };
+    saveUser(u);
+    setUser(u);
+  }, []);
+
+  // 轻量同步：直接 patch 本地 user + storage，不调后端
+  const updateLocalUser = useCallback((patch: Partial<User>) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ...patch };
+      saveUser(next);
+      return next;
+    });
+  }, []);
+
   const value: AuthContextValue = {
     user, isLoginOpen, pendingAction,
-    requireAuth, signIn, signOut, openLogin, closeLogin,
+    requireAuth, signIn, signOut, refreshUser, updateLocalUser, openLogin, closeLogin,
   };
 
   return (
