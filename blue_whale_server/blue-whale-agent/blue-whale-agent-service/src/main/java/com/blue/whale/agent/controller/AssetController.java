@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -21,13 +22,14 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @Tag(name = "资源接口", description = "资产库分页查询")
 @RestController
+@RequestMapping("/api/agent/assets")
 @RequiredArgsConstructor
 public class AssetController {
 
     private final AssetService assetService;
 
     /** 按 user + type 分页查资产，按创建时间倒序。 */
-    @GetMapping("/api/assets")
+    @GetMapping
     public Result<Page<AssetResponse>> listAssets(
             @RequestHeader(value = "X-User-Id", required = false) Long userId,
             @RequestParam(name = "type", required = false) String type,

@@ -10,6 +10,7 @@
 import type { Page } from "@playwright/test";
 
 export const SEED_USER = {
+  userId: 1,
   username: "e2e",
   phone: "13800000000",
 } as const;

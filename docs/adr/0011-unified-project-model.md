@@ -11,7 +11,7 @@
 仓库内两个**未落地**的 openspec change 各自为政，project 语义不一致：
 
 - `canvas-reactflow-and-persistence`（对标 topview）：设计 `project(id, owner_id, name, thumb, ...)` + `canvas(id, project_id UNIQUE, nodes_json, viewport_json)`，project : canvas = 1:1。**不碰 asset**。
-- `add-generate-assets-pages`（对标即梦）：`assets` 用户级全局（无 project_id）；`generation_jobs` 有 `projectId` 但孤悬；`GET /api/assets` / `GET /api/jobs` 按 `userId` 平铺。
+- `add-generate-assets-pages`（对标即梦）：`assets` 用户级全局（无 project_id）；`generation_jobs` 有 `projectId` 但孤悬；`GET /api/agent/assets` / `GET /api/agent/jobs` 按 `userId` 平铺。
 
 真实 schema 断点（实测后端 entity）：
 
@@ -48,7 +48,7 @@ canvas 节点（`nodes_json`）存位置 / 尺寸 / z 序 + `data.assetId`；ass
 
 ### D5. 列表接口改 project 主过滤
 
-`GET /api/assets` / `GET /api/jobs` 以 `projectId` 为主维度；`userId` 退化为归属校验（越权返无权限 `code`），不再是平铺维度。前端 `/assets` / `/generate` 按当前 project 展示。全局「当前 project」context 取代 `X-User-Id` 直传 + localStorage 孤岛。
+`GET /api/agent/assets` / `GET /api/agent/jobs` 以 `projectId` 为主维度；`userId` 退化为归属校验（越权返无权限 `code`），不再是平铺维度。前端 `/assets` / `/generate` 按当前 project 展示。全局「当前 project」context 取代 `X-User-Id` 直传 + localStorage 孤岛。
 
 ### D6. 用户级 / 团队级共享库为 Non-Goal
 
@@ -65,7 +65,7 @@ MVP asset 必属 project。topview 的 Team library / Brand Kit（跨项目复�
 
 1. 后端：`project` + `canvas` 表 + CRUD 先行（`canvas-reactflow-and-persistence` tasks 1.x）。
 2. `assets` 表 `ALTER ADD project_id`（NOT NULL）；MVP 存量数据回填默认 project 或清空。
-3. `GET /api/assets` / `GET /api/jobs` 改 project 主过滤 + 归属校验。
+3. `GET /api/agent/assets` / `GET /api/agent/jobs` 改 project 主过滤 + 归属校验。
 4. 前端：`ProjectMenu` 接后端；全局「当前 project」context；`/assets` / `/generate` 按当前 project。
 5. react flow 迁移 + `ImageNode` 引用 asset。
 

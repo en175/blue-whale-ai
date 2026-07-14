@@ -28,7 +28,7 @@ import java.util.List;
  */
 @Tag(name = "生成接口", description = "文生图（Seedream 同步）、图文生视频（Seedance 异步）")
 @RestController
-@RequestMapping("/api/generation")
+@RequestMapping("/api/agent/generation")
 @RequiredArgsConstructor
 public class GenerationController {
 

@@ -4,7 +4,7 @@
 
 import { request, type Paged } from "./api";
 
-/** 资产列表项（GET /api/assets records，不含 storageKey）。 */
+/** 资产列表项（GET /api/agent/assets records，不含 storageKey）。 */
 export type AssetItem = {
   id: number;
   type: string;
