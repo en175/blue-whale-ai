@@ -141,10 +141,17 @@ def normalize_codex_apply_patch() -> int:
     if not targets:
         return 2
 
+    correlation = {
+        key: data[key] for key in ("session_id", "tool_use_id") if key in data
+    }
     for target in targets:
         print(
             json.dumps(
-                {"tool_name": "Write", "tool_input": {"file_path": target}},
+                {
+                    "tool_name": "Write",
+                    **correlation,
+                    "tool_input": {"file_path": target},
+                },
                 ensure_ascii=False,
             )
         )
