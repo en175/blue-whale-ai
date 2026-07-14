@@ -8,7 +8,6 @@ import com.baomidou.mybatisplus.extension.plugins.handler.TenantLineHandler;
 import com.baomidou.mybatisplus.extension.plugins.inner.OptimisticLockerInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.TenantLineInnerInterceptor;
-import com.blue.whale.tool.mybatis.plus.interceptor.SweetOaDataPermissionInterceptor;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -52,7 +51,7 @@ public class MybatisPlusConfig {
         //乐观锁插件
         interceptor.addInnerInterceptor(new OptimisticLockerInnerInterceptor());
         //微甜oa数据权限插件
-        interceptor.addInnerInterceptor(new SweetOaDataPermissionInterceptor());
+        //interceptor.addInnerInterceptor(new SweetOaDataPermissionInterceptor());
         return interceptor;
     }
 
