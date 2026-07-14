@@ -10,7 +10,7 @@
 
 | 脚本 | 挂载 matcher | 触发事件 | 作用 | 关联硬约束 |
 |---|---|---|---|---|
-| `block-master-edit.sh` | Claude Code `Edit\|Write` | `PreToolUse` | Claude Code 主检出区写入兜底；其他 Agent 由 `AGENTS.md` 前置策略约束 | `CLAUDE.md`「可写任务先建 task worktree」 |
+| `block-master-edit.sh` | Claude Code `Edit\|Write` | `PreToolUse` | Claude Code 主检出区写入兜底；其他 Agent 由 `AGENTS.md` 前置策略约束。对仓库内 Edit/Write 的判定（阻断或放行）追加单行结构化审计记录到 `.git/hook-audit/`（IK10CW），审计只记判定元数据、不改变原 exit code/stdout 契约 | `CLAUDE.md`「可写任务先建 task worktree」 |
 | `block-dangerous-git.sh` | `Bash` | `PreToolUse` | 拦裸 `--force`、`reset --hard`、`clean -f`、`branch -D`、`checkout .`、`restore .` | CLAUDE.md「提交与审查」 |
 | `block-push-to-master.sh` | `Bash` | `PreToolUse` | 拦任何对 `master`/`main` 的 push（显式 + 隐式） | [ADR-0003](../../adr/0003-no-direct-push-to-master.md) |
 | `confirm-release-action.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` / `mcp__gitee-ent__create_enterprise_repo_release` | `PreToolUse` / `PostToolUse` | 提交入口 `commit-task-for-review.sh` 出现即放行（worktree commit 本地可逆，无需授权）；发布/合入标准入口带 `--user-authorized` 无交互放行；直接 push/commit/非 ff-only merge（含复合命令和 Git alias）硬拦；**`merge_enterprise_pull` 的 `squash`/`rebase` 方法检查在凭证校验前**（原 `block-squash-merge.sh` 已并入，消除多 hook 执行顺序不确定）；PR 标记在 Pre 校验，合并/release 凭证按 `tool_use_id` 原子占用；明确成功 Post 消费，失败/畸形 Post 保留 | CLAUDE.md「发布动作必须先获用户授权」 / [ADR-0010](../../adr/0010-local-master-is-user-integration-zone.md) / [ADR-0011](../../adr/0011-release-marker-consume-after-pr-success.md) / [ADR-0012](../../adr/0012-agent-noninteractive-authorization.md) |
@@ -115,7 +115,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 ### 测试边界（seam）
 
-5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现，只测这条边界。`confirm-release-action.sh` 覆盖同步/create/update 标准入口无输出放行、缺授权/缺模式/直接 push/错误 merge 同步及复合命令/Git alias 绕过硬拦、凭证 TTL/对象隔离/并发占用、Post 明确成功消费和失败/畸形保留。Hook 不执行同步、不选择发布模式；正常状态机由 `CLAUDE.md` 和 ADR-0013 驱动。发布标记与动作凭证测试均在临时 Git 仓库运行，不读写真实 common dir。
+5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现；`block-master-edit.sh` 还从同一黑盒边界观测 git common dir 中的持久日志、轮转与并发副作用。`confirm-release-action.sh` 覆盖同步/create/update 标准入口无输出放行、缺授权/缺模式/直接 push/错误 merge 同步及复合命令/Git alias 绕过硬拦、凭证 TTL/对象隔离/并发占用、Post 明确成功消费和失败/畸形保留。Hook 不执行同步、不选择发布模式；正常状态机由 `CLAUDE.md` 和 ADR-0013 驱动。发布标记、动作凭证与审计日志测试均在临时 Git 仓库运行，不读写真实 common dir。
 
 夹具还校验 Codex 挂载层：
 - `.codex/hooks.json` 必须存在。

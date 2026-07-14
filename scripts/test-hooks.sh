@@ -428,6 +428,106 @@ assert_git_not_ignored() {
   fi
 }
 
+# ── hook 审计日志辅助（IK10CW）──────────────────────────────────
+# audit_log_file_path <project_dir> <hook_name> <suffix>
+# 解析 git common dir 下的审计日志路径（与 lib/hook_audit.py 同源）。
+audit_log_file_path() {
+  local project_dir="$1" hook_name="$2" suffix="$3"
+  local common safe
+  common="$("$REAL_GIT" -C "$project_dir" rev-parse --git-common-dir 2>/dev/null || true)"
+  case "$common" in
+    "") common="$project_dir/.git" ;;
+    /*) ;;
+    *)  common="$project_dir/$common" ;;
+  esac
+  safe="$(printf '%s' "$hook_name" | tr '/' '_')"
+  printf '%s/hook-audit/%s.log%s' "$common" "$safe" "$suffix"
+}
+
+# audit_log_path <project_dir> <hook_name>
+audit_log_path() {
+  audit_log_file_path "$1" "$2" ""
+}
+
+# audit_log_archive_path <project_dir> <hook_name>
+audit_log_archive_path() {
+  audit_log_file_path "$1" "$2" ".1"
+}
+
+# assert_audit_has_field <log_path> <json_field> <expected_value> <label>
+# 断言活跃日志至少有一行含 field=expected_value（用 python 解析 JSON）。
+assert_audit_has_field() {
+  local log_path="$1" field="$2" expected="$3" label="$4"
+  if python3 - "$log_path" "$field" "$expected" <<'PY'
+import json, sys
+log_path, field, expected = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(log_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            obj = json.loads(line)
+            if str(obj.get(field, "")) == expected:
+                sys.exit(0)
+except FileNotFoundError:
+    pass
+sys.exit(1)
+PY
+  then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] 日志 ${log_path} 未找到 ${field}=${expected}")
+  fi
+}
+
+# assert_audit_line_count <log_path> <expected_count> <label>
+assert_audit_line_count() {
+  local log_path="$1" expected="$2" label="$3"
+  local actual=0
+  if [ -f "$log_path" ]; then
+    actual=$(grep -c '' "$log_path" 2>/dev/null || echo 0)
+  fi
+  if [ "$actual" = "$expected" ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] 日志行数=${actual} 期望=${expected} (${log_path})")
+  fi
+}
+
+# assert_audit_not_tracked <project_dir> <hook_name> <label>
+# 断言 active/archive 位于 git common dir 且不出现在 Git 视图中。
+assert_audit_not_tracked() {
+  local project_dir="$1" hook_name="$2" label="$3"
+  local common active archive status tracked
+  common="$("$REAL_GIT" -C "$project_dir" rev-parse --git-common-dir 2>/dev/null || true)"
+  case "$common" in
+    "") common="$project_dir/.git" ;;
+    /*) ;;
+    *)  common="$project_dir/$common" ;;
+  esac
+  active="$(audit_log_path "$project_dir" "$hook_name")"
+  archive="$(audit_log_archive_path "$project_dir" "$hook_name")"
+  status="$("$REAL_GIT" -C "$project_dir" status --porcelain --untracked-files=all 2>/dev/null || true)"
+  tracked="$("$REAL_GIT" -C "$project_dir" ls-files 2>/dev/null || true)"
+  case "$active:$archive" in
+    "$common"/hook-audit/*:"$common"/hook-audit/*) ;;
+    *)
+      FAIL=$((FAIL + 1))
+      FAILURES+=("[${label}] active/archive 未位于 git common dir: ${active} / ${archive}")
+      return
+      ;;
+  esac
+  if printf '%s\n%s\n' "$status" "$tracked" | grep -qF 'hook-audit'; then
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] hook-audit 出现在 git status/ls-files（不应被跟踪）")
+  else
+    PASS=$((PASS + 1))
+  fi
+}
+
 assert_codex_hooks_valid() {
   local label="$1"; shift
   local tmp_err
@@ -1284,6 +1384,362 @@ run_hook "$MASTER_EDIT_HOOK" "$(printf '{"tool_name":"Write","tool_input":{"file
 assert_exit 0 "master-edit(real): 非 master 仓库不存在子目录 Write 放行（walk 不过度阻塞）"
 rm -rf "$FEATURE_REPO"
 unset REAL_REPO FEATURE_REPO
+
+# Slice 4.7 — block-master-edit 审计闭环（IK10CW）
+# 用真实 git 仓库（stub git 不支持 rev-parse --git-common-dir，审计 helper 依赖它）。
+# 覆盖 AC：阻断记录、放行记录、字段安全、stdout 契约、降级、轮转、并发、不被跟踪。
+AUDIT_HOOK=block-master-edit.sh
+AUDIT_REPO="$(mktemp -d)"
+git -C "$AUDIT_REPO" init -q
+git -C "$AUDIT_REPO" symbolic-ref HEAD refs/heads/master
+git -C "$AUDIT_REPO" config user.email t@t
+git -C "$AUDIT_REPO" config user.name t
+SAVED_CLAUDE_PROJECT_DIR_AUDIT="${CLAUDE_PROJECT_DIR:-}"
+export CLAUDE_PROJECT_DIR="$AUDIT_REPO"
+
+# AC1: master 阻断 → exit 2 + stdout 空 + 审计记录含 tool/branch/exit_code/reason
+run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_blk","session_id":"s_audit","tool_input":{"file_path":"'"$AUDIT_REPO"'/src/a.py"}}'
+assert_exit 2 "audit: master Edit 阻断（exit 2 不变）"
+assert_stdout_empty "audit: master 阻断 stdout 保持为空"
+assert_stderr_has "禁止在 master" "audit: master 阻断保留既有原因"
+AUDIT_LOG="$(audit_log_path "$AUDIT_REPO" "$AUDIT_HOOK")"
+assert_audit_has_field "$AUDIT_LOG" tool Edit "audit: 阻断记录含 tool=Edit"
+assert_audit_has_field "$AUDIT_LOG" branch master "audit: 阻断记录含 branch=master"
+assert_audit_has_field "$AUDIT_LOG" exit_code 2 "audit: 阻断记录含 exit_code=2"
+assert_audit_has_field "$AUDIT_LOG" reason blocked-master "audit: 阻断记录含 reason=blocked-master"
+assert_audit_has_field "$AUDIT_LOG" tool_use_id tu_blk "audit: 阻断记录含 tool_use_id"
+assert_audit_has_field "$AUDIT_LOG" session_id s_audit "audit: 阻断记录含 session_id"
+
+# AC2: 非 master 放行 → exit 0 + stdout 空 + 放行记录
+git -C "$AUDIT_REPO" worktree add -b feature/audit-wt "$AUDIT_REPO-wt" 2>/dev/null
+run_hook "$AUDIT_HOOK" '{"tool_name":"Write","tool_use_id":"tu_allow","session_id":"s_audit","tool_input":{"file_path":"'"$AUDIT_REPO-wt"'/src/b.py"}}'
+assert_exit 0 "audit: 非 master Write 放行（exit 0 不变）"
+assert_stdout_empty "audit: 放行 stdout 保持为空"
+assert_audit_has_field "$AUDIT_LOG" tool Write "audit: 放行记录含 tool=Write"
+assert_audit_has_field "$AUDIT_LOG" branch feature/audit-wt "audit: 放行记录含 branch=feature/audit-wt"
+assert_audit_has_field "$AUDIT_LOG" exit_code 0 "audit: 放行记录含 exit_code=0"
+assert_audit_has_field "$AUDIT_LOG" reason allowed-non-master "audit: 放行记录含 reason=allowed-non-master"
+assert_audit_has_field "$AUDIT_LOG" tool_use_id tu_allow "audit: 放行记录含 tool_use_id"
+
+# AC3: 审计记录可按 session_id 筛选，并能区分阻断与放行
+# 同一 session_id=s_audit 下既有阻断（tu_blk, exit_code=2）又有放行（tu_allow, exit_code=0）
+python3 - "$AUDIT_LOG" <<'PY'
+import json, sys
+log_path = sys.argv[1]
+by_session = {"s_audit": []}
+try:
+    with open(log_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            obj = json.loads(line)
+            sid = obj.get("session_id", "")
+            if sid == "s_audit":
+                by_session["s_audit"].append(obj)
+except FileNotFoundError:
+    sys.exit(1)
+records = by_session["s_audit"]
+# 必须同时存在 exit_code=2（阻断）与 exit_code=0（放行），可按 exit_code 区分
+exit_codes = {r.get("exit_code") for r in records}
+if 2 in exit_codes and 0 in exit_codes and len(records) >= 2:
+    sys.exit(0)
+sys.exit(1)
+PY
+[ $? = 0 ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit: AC3 按 session_id 筛选并区分阻断/放行] 失败"); }
+
+# AC4: 记录不含文件内容/命令/token —— 输入里带敏感内容，断言日志不含
+run_hook "$AUDIT_HOOK" '{"tool_name":"Write","tool_use_id":"tu_secret","session_id":"s_audit","tool_input":{"file_path":"'"$AUDIT_REPO"'/secret.py","content":"SUPER_SECRET_TOKEN=abc123","command":"rm -rf /"}}'
+assert_exit 2 "audit: 含敏感内容的输入仍阻断"
+assert_file_not_has_text "$AUDIT_LOG" "SUPER_SECRET_TOKEN" "audit: 日志不含文件内容"
+assert_file_not_has_text "$AUDIT_LOG" "rm -rf" "audit: 日志不含 Bash 命令"
+assert_file_not_has_text "$AUDIT_LOG" "abc123" "audit: 日志不含凭证值"
+
+# AC: 非 Edit/Write 工具不审计（IK10CW out of scope）
+lines_before_audit=$(grep -c '' "$AUDIT_LOG" 2>/dev/null || echo 0)
+run_hook "$AUDIT_HOOK" '{"tool_name":"Read","tool_use_id":"tu_read","session_id":"s_audit","tool_input":{"file_path":"'"$AUDIT_REPO"'/c.py"}}'
+assert_exit 0 "audit: 非 Edit/Write 工具放行"
+lines_after_read=$(grep -c '' "$AUDIT_LOG" 2>/dev/null || echo 0)
+[ "$lines_before_audit" = "$lines_after_read" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit: Read 不审计] 行数 before=$lines_before_audit after=$lines_after_read"); }
+
+# AC: 仓库外文件不审计（IK10CW out of scope）
+lines_before_audit=$(grep -c '' "$AUDIT_LOG" 2>/dev/null || echo 0)
+run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_outside","session_id":"s_audit","tool_input":{"file_path":"/Users/x/.codex/config.toml"}}'
+assert_exit 0 "audit: 仓库外文件放行"
+lines_after_outside=$(grep -c '' "$AUDIT_LOG" 2>/dev/null || echo 0)
+[ "$lines_before_audit" = "$lines_after_outside" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit: 仓库外不审计] 行数 before=$lines_before_audit after=$lines_after_outside"); }
+
+# AC9: 审计目录不被 git 跟踪
+assert_audit_not_tracked "$AUDIT_REPO" "$AUDIT_HOOK" "audit: 审计目录不出现在 git status/ls-files"
+
+# AC6: 降级语义 —— 日志文件不可写时，exit code 与 stdout 契约不变，stderr 留降级提示
+DEGRADE_REPO="$(mktemp -d)"
+git -C "$DEGRADE_REPO" init -q
+git -C "$DEGRADE_REPO" symbolic-ref HEAD refs/heads/master
+DEGRADE_SAVED="${CLAUDE_PROJECT_DIR:-}"
+export CLAUDE_PROJECT_DIR="$DEGRADE_REPO"
+# 预创建只读日志文件，使追加失败 → 触发降级
+mkdir -p "$DEGRADE_REPO/.git/hook-audit"
+DEGRADE_LOG="$DEGRADE_REPO/.git/hook-audit/block-master-edit.sh.log"
+touch "$DEGRADE_LOG"
+chmod 000 "$DEGRADE_LOG"
+run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_degrade","session_id":"s_audit","tool_input":{"file_path":"'"$DEGRADE_REPO"'/d.py"}}'
+assert_exit 2 "audit: 降级时阻断 exit 2 不变"
+assert_stdout_empty "audit: 降级时 stdout 保持为空"
+assert_stderr_has "禁止在 master" "audit: 降级时保留既有阻断原因"
+assert_stderr_has "hook-audit: degraded" "audit: 降级时 stderr 留降级提示"
+chmod 644 "$DEGRADE_LOG" 2>/dev/null
+export CLAUDE_PROJECT_DIR="$DEGRADE_SAVED"
+rm -rf "$DEGRADE_REPO"
+unset DEGRADE_REPO DEGRADE_SAVED DEGRADE_LOG
+
+# AC6 补充：日志目录不可写（mkdir 失败）→ 同样降级，exit/stdout 契约不变
+DEGRADE_DIR_REPO="$(mktemp -d)"
+git -C "$DEGRADE_DIR_REPO" init -q
+git -C "$DEGRADE_DIR_REPO" symbolic-ref HEAD refs/heads/master
+DEGRADE_DIR_SAVED="${CLAUDE_PROJECT_DIR:-}"
+export CLAUDE_PROJECT_DIR="$DEGRADE_DIR_REPO"
+# 预创建 hook-audit 为文件而非目录，使 mkdir(parents) 失败 → 降级
+touch "$DEGRADE_DIR_REPO/.git/hook-audit"
+run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_degrade_dir","session_id":"s_audit","tool_input":{"file_path":"'"$DEGRADE_DIR_REPO"'/e.py"}}'
+assert_exit 2 "audit: 目录不可写时阻断 exit 2 不变"
+assert_stdout_empty "audit: 目录不可写时 stdout 保持为空"
+assert_stderr_has "hook-audit: degraded" "audit: 目录不可写时 stderr 留降级提示"
+export CLAUDE_PROJECT_DIR="$DEGRADE_DIR_SAVED"
+rm -rf "$DEGRADE_DIR_REPO"
+unset DEGRADE_DIR_REPO DEGRADE_DIR_SAVED
+
+# AC5: 轮转 —— 活跃日志达到 10 MiB 时轮转，只保留 1 个归档
+ROTATE_REPO="$(mktemp -d)"
+git -C "$ROTATE_REPO" init -q
+git -C "$ROTATE_REPO" symbolic-ref HEAD refs/heads/master
+ROTATE_SAVED="${CLAUDE_PROJECT_DIR:-}"
+export CLAUDE_PROJECT_DIR="$ROTATE_REPO"
+ROTATE_LOG="$(audit_log_path "$ROTATE_REPO" "$AUDIT_HOOK")"
+ROTATE_ARCHIVE="$(audit_log_archive_path "$ROTATE_REPO" "$AUDIT_HOOK")"
+# 写一条记录建立日志，再灌填充到 ~9.99 MiB，再追加一条触发轮转
+run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_fill1","session_id":"s_rot","tool_input":{"file_path":"'"$ROTATE_REPO"'/f.py"}}'
+{ dd if=/dev/zero bs=1 count=$((10*1024*1024 - 200)) 2>/dev/null | tr '\0' 'X'; } >>"$ROTATE_LOG"
+run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_fill2","session_id":"s_rot","tool_input":{"file_path":"'"$ROTATE_REPO"'/g.py"}}'
+# 轮转后：归档存在且 >= 10MiB；活跃日志只含最后一条记录
+assert_file_exists "$ROTATE_ARCHIVE" "audit: 轮转后归档存在"
+[ "$(wc -c <"$ROTATE_ARCHIVE" 2>/dev/null)" -ge $((10*1024*1024 - 1000)) ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit: 归档大小] 未达 10MiB"); }
+assert_audit_line_count "$ROTATE_LOG" 1 "audit: 轮转后活跃日志只含 1 条"
+# 第二次轮转：旧归档被替换，不产生 .log.2
+{ dd if=/dev/zero bs=1 count=$((10*1024*1024 - 100)) 2>/dev/null | tr '\0' 'Y'; } >>"$ROTATE_LOG"
+run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_fill3","session_id":"s_rot","tool_input":{"file_path":"'"$ROTATE_REPO"'/h.py"}}'
+assert_file_exists "$ROTATE_ARCHIVE" "audit: 二次轮转后归档仍存在"
+assert_audit_line_count "$ROTATE_LOG" 1 "audit: 二次轮转后活跃日志只含 1 条"
+# 不存在 .log.2
+if [ ! -e "${ROTATE_LOG}.2" ]; then PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); FAILURES+=("[audit: 不产生 .log.2] ${ROTATE_LOG}.2 不应存在"); fi
+export CLAUDE_PROJECT_DIR="$ROTATE_SAVED"
+rm -rf "$ROTATE_REPO"
+unset ROTATE_REPO ROTATE_SAVED ROTATE_LOG ROTATE_ARCHIVE
+
+# AC7: 并发追加 —— 多进程同时写不产生半行/丢失/拼接
+CONCURRENT_REPO="$(mktemp -d)"
+git -C "$CONCURRENT_REPO" init -q
+git -C "$CONCURRENT_REPO" symbolic-ref HEAD refs/heads/master
+CONCURRENT_SAVED="${CLAUDE_PROJECT_DIR:-}"
+export CLAUDE_PROJECT_DIR="$CONCURRENT_REPO"
+CONCURRENT_LOG="$(audit_log_path "$CONCURRENT_REPO" "$AUDIT_HOOK")"
+# 20 个并发进程同时追加
+python3 - "$HOOK_DIR/$AUDIT_HOOK" "$CONCURRENT_REPO" "$CONCURRENT_LOG" <<'PY'
+import json, subprocess, sys, concurrent.futures
+hook_path, project_dir, log_path = sys.argv[1], sys.argv[2], sys.argv[3]
+def write_one(i):
+    rec = {"tool_name":"Edit","tool_use_id":f"tu_c{i}","session_id":"s_conc","tool_input":{"file_path":f"{project_dir}/c{i}.py"}}
+    payload = json.dumps(rec)
+    env = {"CLAUDE_PROJECT_DIR": project_dir, "PATH": "/usr/bin:/bin"}
+    r = subprocess.run(["bash", hook_path], input=payload.encode(), capture_output=True, env=env)
+    return r.returncode
+with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
+    codes = list(ex.map(write_one, range(20)))
+sys.exit(0 if all(c == 2 for c in codes) else 1)
+PY
+[ $? = 0 ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit: 并发 Gate 退出码] 存在非 exit 2"); }
+# 断言：20 行、全部合法 JSON、tool_use_id 唯一
+actual_lines=$(grep -c '' "$CONCURRENT_LOG" 2>/dev/null || echo 0)
+[ "$actual_lines" = "20" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit: 并发行数] actual=$actual_lines expected=20"); }
+python3 - "$CONCURRENT_LOG" <<'PY'
+import json, sys
+log_path = sys.argv[1]
+seen = set()
+ok = True
+try:
+    with open(log_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                ok = False
+                break
+            obj = json.loads(line)  # raises on half/corrupt line
+            tid = obj.get("tool_use_id", "")
+            if tid in seen:
+                ok = False
+                break
+            seen.add(tid)
+    ok = ok and len(seen) == 20
+except Exception:
+    ok = False
+sys.exit(0 if ok else 1)
+PY
+[ $? = 0 ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit: 并发完整性] 存在半行/丢失/拼接/重复"); }
+export CLAUDE_PROJECT_DIR="$CONCURRENT_SAVED"
+rm -rf "$CONCURRENT_REPO"
+unset CONCURRENT_REPO CONCURRENT_SAVED CONCURRENT_LOG
+
+export CLAUDE_PROJECT_DIR="$SAVED_CLAUDE_PROJECT_DIR_AUDIT"
+rm -rf "$AUDIT_REPO" "$AUDIT_REPO-wt"
+unset AUDIT_HOOK AUDIT_REPO AUDIT_LOG SAVED_CLAUDE_PROJECT_DIR_AUDIT
+
+# Slice 4.8 — block-master-edit 审计回归（IK10CW review fixes）
+AUDIT_HOOK=block-master-edit.sh
+
+# 回归：file_path 为对象/数组时，审计记录不泄漏嵌入内容（str() 会序列化嵌套结构）
+POLLUTION_REPO="$(mktemp -d)"
+git -C "$POLLUTION_REPO" init -q
+git -C "$POLLUTION_REPO" symbolic-ref HEAD refs/heads/master
+POLLUTION_LOG="$(audit_log_path "$POLLUTION_REPO" "$AUDIT_HOOK")"
+# 对象 file_path —— 在 master 仓库内跑确保阻断并审计；重点断言不泄漏嵌入值
+( cd "$POLLUTION_REPO" && printf '%s' '{"tool_name":"Edit","tool_use_id":"tu_obj","session_id":"s","tool_input":{"file_path":{"nested":"SECRET_OBJ_VALUE"},"content":"file body"}}' | bash "${HOOK_DIR}/${AUDIT_HOOK}" ) 2>/dev/null
+assert_file_not_has_text "$POLLUTION_LOG" "SECRET_OBJ_VALUE" "audit-regress: 对象 file_path 不泄漏嵌入值"
+assert_file_not_has_text "$POLLUTION_LOG" "file body" "audit-regress: content 字段不入日志"
+# 数组 file_path —— str(["SECRET"]) 会泄漏
+( cd "$POLLUTION_REPO" && printf '%s' '{"tool_name":"Edit","tool_use_id":"tu_arr","session_id":"s","tool_input":{"file_path":["SECRET_ARR_VALUE"]}}' | bash "${HOOK_DIR}/${AUDIT_HOOK}" ) 2>/dev/null
+assert_file_not_has_text "$POLLUTION_LOG" "SECRET_ARR_VALUE" "audit-regress: 数组 file_path 不泄漏嵌入值"
+# 对象型 session_id/tool_use_id 也必须置空，且日志记录仍存在
+run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_session_obj","session_id":{"token":"SECRET_SESSION_VALUE"},"tool_input":{"file_path":"'"$POLLUTION_REPO"'/session.py"}}'
+assert_exit 2 "audit-regress: 对象 session_id 不改变 master 阻断"
+run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":{"mcp":"SECRET_TOOL_USE_VALUE"},"session_id":"s_tool_obj","tool_input":{"file_path":"'"$POLLUTION_REPO"'/tool.py"}}'
+assert_exit 2 "audit-regress: 对象 tool_use_id 不改变 master 阻断"
+assert_file_not_has_text "$POLLUTION_LOG" "SECRET_SESSION_VALUE" "audit-regress: 对象 session_id 不泄漏嵌入值"
+assert_file_not_has_text "$POLLUTION_LOG" "SECRET_TOOL_USE_VALUE" "audit-regress: 对象 tool_use_id 不泄漏嵌入值"
+python3 - "$POLLUTION_LOG" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    records = [json.loads(line) for line in f if line.strip()]
+by_tool_use = {r.get("tool_use_id"): r for r in records}
+tool_object = next((r for r in records if r.get("session_id") == "s_tool_obj"), None)
+ok = (
+    by_tool_use.get("tu_obj", {}).get("file_path") == ""
+    and by_tool_use.get("tu_arr", {}).get("file_path") == ""
+    and by_tool_use.get("tu_session_obj", {}).get("session_id") == ""
+    and tool_object is not None
+    and tool_object.get("tool_use_id") == ""
+)
+sys.exit(0 if ok else 1)
+PY
+[ $? = 0 ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit-regress: 类型污染记录] 记录缺失或非标量字段未置空"); }
+# 数字/布尔关联标识保留文本形式（安全）
+run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":99,"session_id":true,"tool_input":{"file_path":"'"$POLLUTION_REPO"'/n.py"}}'
+assert_audit_has_field "$POLLUTION_LOG" tool_use_id 99 "audit-regress: 数字 tool_use_id 保留文本形式"
+assert_audit_has_field "$POLLUTION_LOG" session_id true "audit-regress: 布尔 session_id 保留文本形式"
+rm -rf "$POLLUTION_REPO"
+unset POLLUTION_REPO POLLUTION_LOG
+
+# 回归：审计写入 file_path 所属工作树的 common dir，不污染主 checkout 真实审计流
+# 原理：脚本用 TOPLEVEL（file_path 解析）而非 CLAUDE_PROJECT_DIR（会话级）定位审计目录。
+REAL_AUDIT_DIR="$(dirname "$(audit_log_path "$REPO_ROOT" "$AUDIT_HOOK")")"
+ISOLATION_REPO="$(mktemp -d)"
+git -C "$ISOLATION_REPO" init -q
+git -C "$ISOLATION_REPO" symbolic-ref HEAD refs/heads/master
+real_before=$( { grep -c '' "$REAL_AUDIT_DIR/block-master-edit.sh.log" 2>/dev/null || echo 0; } )
+run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_iso","session_id":"s_iso","tool_input":{"file_path":"'"$ISOLATION_REPO"'/iso.py"}}'
+assert_exit 2 "audit-regress: 隔离仓库 master 阻断"
+real_after=$( { grep -c '' "$REAL_AUDIT_DIR/block-master-edit.sh.log" 2>/dev/null || echo 0; } )
+[ "$real_before" = "$real_after" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit-regress: 不污染真实流] real before=$real_before after=$real_after"); }
+# 事件应落在隔离仓库自己的审计目录
+assert_audit_has_field "$(audit_log_path "$ISOLATION_REPO" "$AUDIT_HOOK")" tool_use_id tu_iso "audit-regress: 事件落在 file_path 所属工作树"
+rm -rf "$ISOLATION_REPO"
+unset ISOLATION_REPO real_before real_after REAL_AUDIT_DIR
+
+# 回归：并发触发轮转 —— 多进程同时跨越 10MiB 阈值，不产生半行/丢失/拼接
+CONCROT_REPO="$(mktemp -d)"
+git -C "$CONCROT_REPO" init -q
+git -C "$CONCROT_REPO" symbolic-ref HEAD refs/heads/master
+CONCROT_LOG="$(audit_log_path "$CONCROT_REPO" "$AUDIT_HOOK")"
+CONCROT_ARCHIVE="$(audit_log_archive_path "$CONCROT_REPO" "$AUDIT_HOOK")"
+# 预填 active 到接近 10MiB（差 100 bytes），使第一条并发追加即触发追加后轮转。
+# 填充行本身是完整 JSON 审计形状，避免通过“跳过非 JSON 行”掩盖拼接问题。
+echo '{"tool_name":"Edit","tool_use_id":"tu_seed","session_id":"s","tool_input":{"file_path":"'"$CONCROT_REPO"'/seed.py"}}' | bash "${HOOK_DIR}/${AUDIT_HOOK}" 2>/dev/null
+python3 - "$CONCROT_LOG" "$CONCROT_REPO" <<'PY'
+import json, os, sys
+log_path, repo = sys.argv[1], sys.argv[2]
+target = 10 * 1024 * 1024 - 100
+record = {
+    "timestamp": "fixture",
+    "hook": "block-master-edit.sh",
+    "tool": "Edit",
+    "file_path": f"{repo}/padding.py",
+    "branch": "master",
+    "session_id": "s_cr",
+    "tool_use_id": "tu_pad",
+    "exit_code": 2,
+    "reason": "fixture-padding",
+    "padding": "",
+}
+current = os.path.getsize(log_path)
+base = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+padding_size = target - current - len(base.encode()) - 1
+if padding_size < 0:
+    sys.exit(1)
+record["padding"] = "Z" * padding_size
+line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+with open(log_path, "a") as f:
+    f.write(line)
+sys.exit(0 if os.path.getsize(log_path) == target else 1)
+PY
+[ $? = 0 ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit-regress: 并发轮转合法 JSON 填充] 未精确填充到 10MiB-100"); }
+# 15 个并发进程同时追加（第一个跨越阈值触发轮转，其余追加到新 active）
+python3 - "$HOOK_DIR/$AUDIT_HOOK" "$CONCROT_REPO" "$CONCROT_LOG" "$CONCROT_ARCHIVE" <<'PY'
+import json, subprocess, sys, concurrent.futures
+hook_path, repo, log_path, archive_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+def write_one(i):
+    rec = {"tool_name":"Edit","tool_use_id":f"tu_cr{i}","session_id":"s_cr","tool_input":{"file_path":f"{repo}/cr{i}.py"}}
+    r = subprocess.run(["bash", hook_path], input=json.dumps(rec).encode(), capture_output=True, env={"PATH":"/usr/bin:/bin"})
+    return r.returncode
+with concurrent.futures.ThreadPoolExecutor(max_workers=15) as ex:
+    codes = list(ex.map(write_one, range(15)))
+# 汇总：active + archive 的所有行必须全部合法 JSON、tool_use_id 唯一
+seen = set()
+ok = True
+for path in (log_path, archive_path):
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    ok = False
+                    break
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    ok = False
+                    break
+                tid = obj.get("tool_use_id", "")
+                if tid in seen:
+                    ok = False
+                    break
+                seen.add(tid)
+    except FileNotFoundError:
+        pass
+# seed + 合法 JSON 填充 + 15 并发：返回码必须全为 2，ID 集合必须精确相等。
+expected = {"tu_seed", "tu_pad", *(f"tu_cr{i}" for i in range(15))}
+ok = ok and all(code == 2 for code in codes) and seen == expected
+sys.exit(0 if ok else 1)
+PY
+[ $? = 0 ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit-regress: 并发轮转完整性] 半行/丢失/拼接/重复"); }
+# 轮转后活跃日志不超过 10MiB
+if [ -f "$CONCROT_LOG" ]; then
+  concrot_sz=$(wc -c < "$CONCROT_LOG")
+  [ "$concrot_sz" -lt $((10*1024*1024)) ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit-regress: 并发轮转后 active < 10MiB] size=$concrot_sz"); }
+else
+  PASS=$((PASS + 1))
+fi
+rm -rf "$CONCROT_REPO"
+unset CONCROT_REPO CONCROT_LOG CONCROT_ARCHIVE concrot_sz
+unset AUDIT_HOOK
 
 # Slice 5 — Codex project hook layer
 assert_file_exists "$CODEX_HOOKS_JSON" "codex: hooks.json 存在"

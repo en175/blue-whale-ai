@@ -19,12 +19,36 @@
 #   主 checkout session（cwd=master）编辑 worktree 工单分支文件时，
 #   按 file_path 解析得到工单分支 → 放行，不依赖「worktree 必在主 toplevel 外」的布局假设。
 #
+# 审计闭环（IK10CW）：对仓库内 Edit/Write 的判定（阻断或放行）追加一条单行
+#   结构化审计记录（时间/hook/工具/file_path/分支/session_id/tool_use_id/exit_code/reason）。
+#   审计只记判定元数据，不记文件内容/命令/凭证；成功或失败均不改变原 exit code、
+#   stdout 契约或既有阻断信息（降级时仅在 stderr 留简短提示）。
+#   非 Edit/Write 工具与仓库外文件操作不审计（IK10CW out of scope）。
+#
 # 退出码 2 = 阻断 Claude 执行该工具调用。
 
 INPUT=$(cat)
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 PRETOOL="$HOOK_DIR/lib/pretool.py"
+AUDIT="$HOOK_DIR/lib/hook_audit.py"
+HOOK_NAME="$(basename "$0")"
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 "$PRETOOL" value tool_name 2>/dev/null || true)
+
+# audit <exit_code> <reason>：判定完成后、返回前调用；失败不改变 exit code。
+# stdin 复用原 INPUT，让 helper 读 tool_name/tool_use_id/session_id/file_path。
+# project-dir 用 file_path 所属工作树的 TOPLEVEL（已解析），不用会话级
+# CLAUDE_PROJECT_DIR——否则主 checkout 会话编辑 worktree 临时仓库文件时，
+# 审计事件会错误落到真实仓库的 common dir，污染真实审计流。
+# stdout 重定向到 /dev/null（守护 stdout 空契约）；stderr 透传——降级时 helper
+# 在 stderr 留「hook-audit: degraded (...)」简短提示，符合 IK10CW 降级语义。
+audit() {
+  printf '%s' "$INPUT" | python3 "$AUDIT" \
+    --project-dir "$TOPLEVEL" \
+    --hook "$HOOK_NAME" \
+    --branch "$BRANCH" \
+    --exit-code "$1" \
+    --reason "$2" >/dev/null || true
+}
 
 # 只处理 Edit / Write 工具
 case "$TOOL_NAME" in
@@ -59,12 +83,14 @@ if [ -z "$TOPLEVEL" ]; then
   exit 0
 fi
 
-# 非 master 分支（工单分支 worktree / detached HEAD）→ 放行
+# 非 master 分支（工单分支 worktree / detached HEAD）→ 放行并审计
 if [ "$BRANCH" != "master" ]; then
+  audit 0 "allowed-non-master"
   exit 0
 fi
 
-# master 分支 + 仓库内 Edit/Write → 硬拦
+# master 分支 + 仓库内 Edit/Write → 硬拦并审计
+audit 2 "blocked-master"
 cat >&2 <<EOF
 BLOCKED: 禁止在 master 分支直接 Edit/Write 文件。
   工具: $TOOL_NAME
