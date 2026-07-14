@@ -38,9 +38,5 @@
             <groupId>com.blue-whale.tool.fastjson2</groupId>
             <artifactId>blue-whale-common-fastjson2</artifactId>
         </dependency>
-        <dependency>
-            <groupId>com.blue-whale.security.resource</groupId>
-            <artifactId>blue-whale-security-resource</artifactId>
-        </dependency>
     </dependencies>
 </project>

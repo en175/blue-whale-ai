@@ -1,14 +1,14 @@
 /**
  * skills —— Skill 面板后端 API 请求层（IJZ7Z8）。
  *
- * 走 Next rewrite /api/skills/* → agent-service:8082（见 next.config.ts），浏览器同源无 CORS。
- * 复用 generation.ts 的 Result{code,msg,data} 拆包约定 + X-User-Id 头。
+ * 走 Next rewrite /api/agent/skills/* → 网关 → agent-service（见 next.config.ts），同源无 CORS。
+ * 鉴权统一走 apiFetch：登录态自动附 Authorization，401 自动刷新。
  *
  * 字段命名：agent-service 未配 Jackson SNAKE_CASE，字段按 Java 原样 camelCase 输出
  * （skillId / coverUrl / records / current / pages）。已对齐后端实际返回，勿改回 snake_case。
  * library 分页（POST，默认 50/页），mine 一次返全（用户添加数量有限）。
- * MVP 无鉴权，X-User-Id 头默认 "1"（localStorage[bw_user_id] 可覆盖）。
  */
+import { apiFetch } from "@/lib/api-client";
 
 export type SkillLibraryItem = {
   id: number;
@@ -45,20 +45,11 @@ export type LibraryQuery = {
 
 const API_BASE = "/api/agent/skills";
 
-function userIdHeader(): string {
-  if (typeof window === "undefined") return "1";
-  return window.localStorage.getItem("bw_user_id") || "1";
-}
-
 async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    res = await apiFetch(`${API_BASE}${path}`, {
       method,
-      headers: {
-        "Content-Type": "application/json",
-        "X-User-Id": userIdHeader(),
-      },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
