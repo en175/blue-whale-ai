@@ -219,7 +219,15 @@ export function useCanvasProjects() {
 
   /** 新建项目：落库拿真 id 再 dispatch。后端不可达时报错（saveStatus=error），不造假项目。 */
   const createProjectAction = useCallback(async () => {
-    const name = `项目 ${Date.now().toString().slice(-4)}`;
+    // 命名 = 当前时间「项目 YYYY-MM-DD HH:mm」；撞名则 (2)(3) 递增
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const base = `项目 ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    let name = base;
+    let suffix = 2;
+    while (stateRef.current.projects.some((p) => p.name === name)) {
+      name = `${base} (${suffix++})`;
+    }
     try {
       const dto = await canvasApi.createProject(name);
       const pid = String(dto.id);

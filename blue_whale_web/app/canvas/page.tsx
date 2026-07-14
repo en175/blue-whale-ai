@@ -475,7 +475,7 @@ function CanvasPageInner() {
             className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm transition-colors"
             style={{
               background: "var(--tc-accent)",
-              color: "var(--tc-text-on-accent, #fff)",
+              color: "var(--tc-on-accent)",
             }}
           >
             新建项目
