@@ -105,47 +105,42 @@ Hook 触发记录在 `~/.claude/logs/` 或本会话 transcript 里搜 `hookSpeci
 
 ---
 
+## 新人闭环排障路径
+
+按下面的顺序排查，不要把 Hook 当作正常开工入口：
+
+1. **先做写入前主动自检**：按 `CLAUDE.md`「写入前自检」确认当前分支、Agent 任务区、目标路径和 Git 写入区域。若仍在用户本地集成区，停止写入并先运行 `scripts/start-task-worktree.sh`。
+2. **检查三端配置映射**：运行 `python3 scripts/check-hook-contracts.py`。它从 ZCode、Claude Code、Codex 的实际项目配置解析 matcher、执行入口与权威 Gate；失败信息会指出平台、事件、matcher 和 Gate。
+3. **执行配置链闭环**：运行 `python3 scripts/check-hook-closed-loop.py`。它逐端执行 master 与 Agent 任务区的创建/修改场景，并按唯一会话标识和工具调用标识核对阻断/放行结果与审计记录。
+4. **按关联标识定位记录**：使用下节的 `python3 scripts/query-hook-audit.py` 查询。master 写入应为 exit 2，Agent 任务区等价写入应为 exit 0，且每个工具调用标识只对应一条记录。
+5. **最后检查外部客户端**：若真实 ZCode、Claude Code 或 Codex 操作没有关联记录，再检查该客户端的 Hook 信任状态、配置加载结果和自身日志。仓库查询只能定位调用是否进入 Gate，不能解释外部 harness 的内部根因。
+
+这条路径保持“文档驱动、Hook 兜底”：第 1 步是 Agent 正常执行机制，第 2–4 步验证仓库兜底与审计，第 5 步才进入外部客户端取证。
+
+### 证据等级
+
+| 等级 | 证明范围 | 对应入口 |
+|---|---|---|
+| 直接 Gate 黑盒 | 直接向权威 Gate 输入 JSON，验证 exit code、stdout/stderr 与审计副作用；不证明平台实际加载了配置 | `bash scripts/test-hooks.sh` 中各 Gate 黑盒用例 |
+| 配置链集成 | 从仓库实际配置解析 matcher 和 command，再执行到共享 Gate 并关联审计；`probe-codex-write-hook.sh` 也属于此等级 | `python3 scripts/check-hook-closed-loop.py`、`bash scripts/probe-codex-write-hook.sh` |
+| 外部客户端实机探针 | 在真实 ZCode、Claude Code 或 Codex 客户端触发调用，并以客户端提供的关联标识查到仓库审计 | 需在对应客户端环境单独取证，仓库自动化不能替代 |
+
+测试报告必须标明等级。直接 Gate 黑盒或配置链集成通过，不能表述为外部客户端实机探针已通过。
+
 ## 查询阻断型 PreToolUse 审计记录
 
 运行时已注册的五个阻断型 PreToolUse Gate 共享 `.git/hook-audit/` 下的单行 JSON 审计契约。主检出区和 task worktree 通过 Git common dir 看到同一组日志；每个 Gate 有一个活跃 `.log` 和至多一个 `.log.1` 归档。记录时间为 UTC，核心字段为 `timestamp`、`hook`、`tool`、`operation`、`session_id`、`tool_use_id`、`exit_code` 和稳定 `reason`。master 写入 Gate 还保留目标 `file_path` 与 `branch`；其余 Bash/MCP Gate 的这两个字段为空，避免复制命令或工具参数。
 
-下面的查询可同时按起始时间、会话标识和工具调用标识筛选；不需要的条件留空：
+稳定查询入口可同时按起始时间、会话标识和工具调用标识筛选；不需要的条件省略：
 
 ```bash
-COMMON_DIR="$(git rev-parse --git-common-dir)"
-case "$COMMON_DIR" in
-  /*) ;;
-  *) COMMON_DIR="$(git rev-parse --show-toplevel)/$COMMON_DIR" ;;
-esac
-
-FROM_UTC="2026-07-14T00:00:00+00:00"  # 留空表示不限制时间
-SESSION_ID=""                         # 例如当前会话标识
-TOOL_USE_ID=""                        # 例如某次工具调用标识
-
-python3 - "$COMMON_DIR/hook-audit" "$FROM_UTC" "$SESSION_ID" "$TOOL_USE_ID" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-audit_dir = Path(sys.argv[1])
-from_utc, session_id, tool_use_id = sys.argv[2:]
-paths = sorted(audit_dir.glob("*.log")) + sorted(audit_dir.glob("*.log.1"))
-for path in paths:
-    for line in path.read_text().splitlines():
-        if not line:
-            continue
-        record = json.loads(line)
-        if from_utc and record.get("timestamp", "") < from_utc:
-            continue
-        if session_id and record.get("session_id") != session_id:
-            continue
-        if tool_use_id and record.get("tool_use_id") != tool_use_id:
-            continue
-        print(json.dumps(record, ensure_ascii=False))
-PY
+python3 scripts/query-hook-audit.py \
+  --from-utc "2026-07-14T00:00:00+00:00" \
+  --session-id "<session-id>" \
+  --tool-use-id "<tool-use-id>"
 ```
 
-“无记录”只表示该调用没有进入仓库 Hook 执行链，不能据此推断 ZCode、Claude Code、Codex 或其它外部 harness 为什么没有调用仓库 Gate。继续排查时应结合对应 harness 的 hook 信任状态、配置加载结果和自身日志。
+查询不到指定关联标识时，命令明确输出 `未进入仓库 Hook 执行链`。这只表示该调用没有进入仓库 Gate，不能解释外部 harness 的内部根因；继续排查时应结合对应客户端的 Hook 信任状态、配置加载结果和自身日志。
 
 ---
 
