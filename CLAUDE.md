@@ -44,6 +44,17 @@ Single-context：根 `CONTEXT.md` + `docs/adr/`，技能探索前读这俩。见
 6. **授权无二次弹框** — 只认当前对话中的人类授权；Agent 自动使用 `--user-authorized` 或一次性凭证（提交入口除外：worktree 工单分支 commit 本地可逆，出现即放行），Hook 只纠偏和硬拦，不返回 ASK。
 7. **文档驱动、Hook 兜底** — Agent 优先依据本文件及路由规则主动调用标准入口；Hook 只在检测到绕过、缺授权、缺模式或危险 Git 操作时阻断，禁止让 Hook 自动同步、选择策略或推进正常状态机。
 
+## 写入前自检（每次写操作前强制执行）
+
+**摘要是约束声明，自检是执行机制。** 在调用 Edit、Write 或任何会改变 Git 状态的操作前，必须逐项完成以下检查：
+
+1. **确认当前分支** — 读取当前分支；可写任务必须位于由唯一入口创建的结构化中文工单分支，不得在 `master` / `main` 执行。
+2. **确认 Agent 任务区** — 确认已从主 checkout 通过唯一入口 `scripts/start-task-worktree.sh --type <类型> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>` 创建并进入独立 task worktree。
+3. **确认目标路径** — 对每个写入目标确认其所属 Work Tree；目标路径不得指向用户本地集成区（master 主检出区）。
+4. **确认 Git 写入区域** — 任何会改变 Git 状态的操作只在正确的 Agent 任务区及其工单分支执行。
+
+任一项不满足，尤其可写任务尚未进入工单分支或目标路径指向 master 主检出区，立即停止写入，先通过唯一入口创建并进入任务 Work Tree。自检不得新增审批弹框；Hook 继续只在违规时兜底，不自动同步、选择策略或推进工作流。
+
 ## Agent skills
 
 ### Issue tracker
