@@ -32,6 +32,7 @@ NON_ALIAS_SUBCOMMANDS = {
     "fetch",
     "log",
     "merge",
+    "pull",
     "push",
     "rebase",
     "reset",
@@ -514,13 +515,35 @@ def mode_force_lease_non_work(command: str) -> int:
     return 1
 
 
+def has_ff_only(args: list[str]) -> bool:
+    return any(arg == "--ff-only" or arg.startswith("--ff-only=") for arg in args)
+
+
+def has_rebase_option(args: list[str]) -> bool:
+    return any(
+        arg == "--rebase" or arg.startswith("--rebase=") or arg == "-r"
+        for arg in args
+    )
+
+
+def is_task_branch(cwd: str | None) -> bool:
+    return current_branch(cwd).startswith(WORK_BRANCH_PREFIXES)
+
+
 def mode_task_acceptance_git(command: str) -> int:
     for invocation in git_invocations(command):
         if invocation.subcommand == "commit":
             print("git commit")
             return 0
-        if invocation.subcommand == "merge" and "--ff-only" not in invocation.args:
+        if invocation.subcommand == "merge" and not has_ff_only(invocation.args):
+            if "origin/master" in invocation.args and not is_task_branch(invocation.cwd):
+                continue
             print("git merge origin/master" if "origin/master" in invocation.args else "git merge")
+            return 0
+        if invocation.subcommand == "pull" and not has_ff_only(invocation.args) and not has_rebase_option(invocation.args):
+            if not is_task_branch(invocation.cwd):
+                continue
+            print("git pull")
             return 0
     return 1
 

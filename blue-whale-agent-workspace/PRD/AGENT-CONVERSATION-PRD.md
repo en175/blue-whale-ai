@@ -66,7 +66,7 @@ P0 按两条入口落地，避免把 Dock 直生和 Agent 编排混成一条链�
 | `text` | 是 | 用户的自然语言输入。 |
 | `forced_skill_id` | 否 | 仅当用户在 Skill 面板点 `Use` 时携带。**仅决定 skill 选择那一步,不锁后续 Stage**;一次性指令,**不改变用户的 `auto` 状态**(不持久化)。权威定义见 `backend_implementation_contract.md` Agent Turn 字段。 |
 | `reference_asset_ids` | 否 | 用户在对话框打 `@` 引用的画布素材。Agent 拿到 asset_id 后:若该 asset `understanding_status != ready`,先补做 `asset_understanding`(visible_reasoning 兜「我先看一下这张图」),再进图生图 / 图生视频链路。复用 `BACKEND-API-PRD.md` §5.4 直生入口的同名字段语义。 |
-| `active_asset_id` | 否 | 用户画布**选中**的素材。**选中即识别,跳过候选图消歧反问**;与 `reference_asset_ids` 一样,asset 若 `understanding_status != ready` 先补做 `asset_understanding`。优先级:`reference_asset_ids`(@) > `active_asset_id`(选中) > 候选=1 唯一张 > 候选≥2 消歧反问。 |
+| `active_asset_id` | 否 | 用户画布**选中**的素材。**选中即识别,跳过候选图消歧反问**;与 `reference_asset_ids` 一样,asset 若 `understanding_status != ready` 先补做 `asset_understanding`。优先级:`reference_asset_ids`(@) > `active_asset_id`(选中) > 候选=1 唯一张 > 候选≥2 消歧反问。**语义 = 前端选中态透传**(见 `decision_layer.md` decision_context / `backend_implementation_contract.md` Agent Turn 字段):请求传入值直接作为 `decision_context.active_asset_id`,后端不重新从画布读;若与后端画布 selection 状态不一致,**以请求为准**(用户最新操作覆盖)。 |
 
 **`forced_skill_id` 与 auto 候选池的关系**(详见 §5 接入点):
 
@@ -78,7 +78,7 @@ P0 按两条入口落地，避免把 Dock 直生和 Agent 编排混成一条链�
 
 后端收到 `text` 后、主 Agent 开跑前,先算 `decision_context`(见 `backend_implementation_contract.md` + `skill/rules/decision_layer.md`):
 
-1. 硬状态代码每轮必跑(零成本):`has_generating` / `has_ready_node` / `has_failed` / `awaiting_confirm` / `pending_workflow` / `current_stage` / `active_product_context` / `previous_product_context` / `active_asset_id` / `candidate_asset_ids`。
+1. 硬状态代码每轮必跑(零成本):`has_generating` / `has_ready_node` / `has_failed` / `awaiting_confirm` / `pending_workflow` / `current_stage` / `active_product_context` / `product_history_summary` / `active_asset_id` / `candidate_asset_ids`。(`previous_product_context` 已升级为 `product_history_summary`,支持同对话多产品历史,见 `PRD/PRODUCT-HISTORY-PRD.md` §6)
 2. `has_generating=true` 直接短路到 `decision_branch=generation_in_progress`,**跳过 L1**。
 3. 其余情况调 L1 轻量 classifier(haiku 级),得 `intent_direction` + 仅 `new_task` 带 `suggested_route`。
 4. 后端代码按组合器优先级算出单一 `decision_branch`。
@@ -127,13 +127,62 @@ event: turn_done
 data: {"requires_user_action":true,"allowed_actions":["confirm","revise","retry"],"current_stage_id":"stg_xxx","active_job_ids":[]}
 ```
 
+**失败流序列**(呼应 §4 硬约束 5:生成失败必写 `failed` 节点 + `error` 消息,不静默失败):
+
+```
+event: job_started
+data: {"job_id":"job_zzz","type":"image"}
+
+event: job_progress
+data: {"job_id":"job_zzz","status":"processing","progress":0.3}
+
+event: job_done
+data: {"job_id":"job_zzz","status":"failed","error":{"code":"provider_timeout","message":"生成超时,请重试"}}
+
+event: canvas_update
+data: {"node":{"node_id":"n_zzz","type":"image","status":"failed","asset_refs":[],"stage_id":"s_xxx"}}
+
+event: message
+data: {"type":"error","content":{"text":"这张生成失败了,可以重试或换个方向。"}}
+
+event: turn_done
+data: {"requires_user_action":true,"allowed_actions":["retry","revise"],"current_stage_id":"stg_xxx","active_job_ids":[]}
+```
+
+> 失败流必有 `job_done(status:"failed")` → `canvas_update(status:"failed")` → `message(type:"error")` → `turn_done`,`allowed_actions` 收口到 `retry` / `revise`(无 `confirm`)。
+
 > 上面的序列是**轻量编排**形态(一个 turn 内:追问 → 优化提示词 → 生成 → 出结果)。**Full Canvas** 形态不同:跨多个 turn,每个「硬停 stage」(Brief / 分镜 / 视觉 / 视频)切一次 turn,用户确认后才开下一个 turn;「软过 stage」(Skill / 阶段计划 / 审核)在同一 turn 内自动推进。两种形态都**必有 `optimized_prompt_preview`**(Agent 永远优化提示词,区别于 Dock 裸直生)。
+
+**Full Canvas 跨 turn 序列骨架**(硬停 stage = turn 边界,确认才推进;软过 stage 在 turn 内自动推进。stage 细节见 `skill/workflows/video_agent_canvas.md`):
+
+```
+Turn 1 — Brief(硬停·低成本):
+  visible_reasoning → message[skill_recommendation,软过] → message[stage_plan,软过] → message(brief) → turn_done{requires_user_action:true}
+Turn 2 — 脚本分镜(硬停·低成本):
+  visible_reasoning → message(storyboard) → turn_done{requires_user_action:true}
+Turn 3 — 首批视觉(硬停·低成本):
+  visible_reasoning → message(optimized_prompt_preview) → canvas_update(image,generating)
+  → job_started→job_progress→job_done → canvas_update(image,ready) → message(image_card)
+  → turn_done{requires_user_action:true}
+Turn 4 — 视频生成(硬停·**高成本**):
+  visible_reasoning → message(optimized_prompt_preview) → canvas_update(video,generating)
+  → job_started→job_progress→job_done → canvas_update(video,ready) → message(video_card)
+  → turn_done{requires_user_action:true}
+Turn 5 — 审核(软过,turn 内自动收尾):
+  message(review) → turn_done(交付摘要)
+```
+
+> - **低成本硬停**(Brief / 分镜 / 视觉):弱继续("继续 / 下一步")直接推进。
+> - **高成本硬停**(视频):弱继续**不推进**,回二次确认话术(决策 10,见 `confirmation_gate.md`)。
+> - 每个 turn 必有 `visible_reasoning`;生成 turn(Turn 3 / 4)必有 `optimized_prompt_preview` + `job_*` + `canvas_update` + 结果卡。
+> - `allowed_actions` 取值由 §4 确认门四分类 + stage 类型决定,本文不逐 stage 写死。
+> - 失败处理同上「失败流序列」(任一生成 turn 的 Job 失败 → failed 节点 + error 消息)。
 
 ### 事件清单
 
 | 事件 | payload | 说明 |
 |---|---|---|
-| `visible_reasoning` | `{title, items[]}` | 产品化思考过程,可折叠展示。 |
+| `visible_reasoning` | `{title, items[]}` | 产品化思考过程,可折叠展示。**独立 event,不作 `message.type`**(见下 variant 表注)。 |
 | `message` | `{type, content}` | 一条对话消息。`type` 取 backend contract 的 ChatMessage variant 全集(见下表)。 |
 | `canvas_update` | `{node}` | 新增/更新画布素材节点。node payload 见 §5.3。 |
 | `job_started` | `{job_id, type}` | Agent 内部启动了一个 GenerationJob。 |
@@ -143,11 +192,14 @@ data: {"requires_user_action":true,"allowed_actions":["confirm","revise","retry"
 
 ### `message` 的 ChatMessage variant 全集
 
-`type` 字段取 `backend_implementation_contract.md` 「对话消息类型」全集:
+`type` 字段取 `backend_implementation_contract.md` 「对话消息类型」全集。
+
+> **`visible_reasoning` 不在此表**:它在 SSE 走**独立 event**(见上「事件清单」第一行),数据对应 backend contract 的 `agent_turn.visible_reasoning`(turn 级思考过程对象 `{title, items[]}`),**不作为 `message.type` 传输**。contract「对话消息类型」列表里虽含 `visible_reasoning`,本文 SSE 传输层把它独立成 event——数据同源,传输包装不同。
+>
+> (contract 口径已统一:见 commit 29f8491 / PR !88——`visible_reasoning` 定为 Agent Turn 级字段,非 ChatMessage variant;`canvas_state_rules.md` 同步对齐,原 contract variant 列表里的条目已删。)
 
 | variant | 是否展示 | 备注 |
 |---|---|---|
-| `visible_reasoning` | 是 | 思考过程,可折叠。 |
 | `brief` | 是 | 需求摘要。 |
 | `skill_recommendation` | 是 | Skill 推荐。 |
 | `asset_understanding` | 是 | 图片理解摘要。 |
@@ -225,6 +277,8 @@ BottomDock 直生(`/api/projects/{project_id}/generate`)与 Agent 对话(`/agent
 - 如果 Agent turn 结束时 Job 未完成,`turn_done` 必须返回可追踪的 `active_job_ids`,并保证 `GET /api/projects/{id}` 能返回同一批 active jobs。
 - 前端收到未完成 Job 后,立即改用 `/api/jobs/{id}/stream` 追进度;刷新后从 `active_jobs` 恢复。
 - 同一个 Job 的最终状态只能写一次;重复 SSE / 轮询结果必须幂等更新同一个 canvas node。
+- **`active_job_ids` / `active_jobs` 一致性**:`turn_done.active_job_ids`(turn 关闭即时快照)与 `GET /api/projects/{id}` 返回的 `active_jobs` 必须指向同一批 Job,`job_id` 集合一致;前端 turn 内信 `turn_done`,刷新后信 `active_jobs`。
+- **`job_done` 幂等去重**:同一 `job_id` 的 `job_done` 前端按 `job_id` 幂等去重;Agent turn SSE 推过 `job_done` 后,独立 `/api/jobs/{id}/stream` 重连若 Job 已 done,只推最终态一次,不重复推 `job_progress`。
 
 ### 5.3 ↔ Canvas(`canvas_update` 的 node payload)
 
@@ -251,7 +305,7 @@ BottomDock 直生(`/api/projects/{project_id}/generate`)与 Agent 对话(`/agent
 | 后端 runtime | **两入口 + Agent 分支**:Dock 直生;Agent `decision_branch` 覆盖 lightweight / full_canvas / prompt_only / revise / product_switch / confirm / consult 等 | — |
 | 前端过程消息 | **全展示**(文字气泡):brief / skill / storyboard / review / optimized_prompt_preview / visible_reasoning | 可选:过程消息结构化美化(如 storyboard 分镜表、brief 卡片化) |
 | 前端结果 | 结果卡(`image_card` / `video_card`) + 画布素材节点 | — |
-| 对话历史 / 状态持久化 | 最小持久化:当前 + 上一个产品方向的结构化摘要(见 ROADMAP 模块 10 P0 边界);完整 `messages` / `agent_events` 历史**不做** | 状态持久化(`project_state`)+ 内容版本(`content_versions`)+ 完整历史 + 历史摘要(`conversation_summary`)+ 版本索引 + 历史资产引用 + 版本恢复(见 ROADMAP 模块 10) |
+| 对话历史 / 状态持久化 | **`messages` 持久化到 Project**(画布 + 对话 + 进行中任务一起存,`GET /api/projects/{id}` 可恢复,见 BACKEND-API-PRD §5.5)+ 当前 / 上一个产品方向的结构化摘要(见 ROADMAP 模块 10 P0 边界)。**完整历史系统**(messages / agent_events 分离、摘要、版本、索引、恢复)**不做** | 完整历史系统:`messages` 与 `agent_events` 分离 + 历史摘要(`conversation_summary`)+ 内容版本(`content_versions`)+ 版本索引 + 历史资产引用 + 版本恢复(见 ROADMAP 模块 10) |
 
 > 前端**没有分阶段**:所有过程消息 P0 就展示,P1 仅是可选美化,非阻塞。
 > 对话历史与状态持久化是另一条 P1 线,见 `FRONTEND-INTEGRATION-ROADMAP.md` 模块 10,本文不展开。
@@ -264,7 +318,7 @@ BottomDock 直生(`/api/projects/{project_id}/generate`)与 Agent 对话(`/agent
 
 1. **自然语言流式**:用户在 AgentChatPanel 发自然语言,流式看到 `visible_reasoning` + 过程消息(brief/skill/storyboard/review/optimized_prompt_preview)+ 结果卡(`image_card`/`video_card`);画布出现对应素材节点。
 2. **Image-to-Video 前置理解**:Agent 对话里的图转视频必须有 `asset_understanding`;Dock 直生则把图随 `reference_asset_ids` 直传 Provider,不做 understanding。
-3. **刷新不丢**:生成中刷新页面或切走再回来,**画布 + 对话消息 + 进行中任务**都恢复(`GET /api/projects/{id}` 返回整 Project 快照:canvas nodes + messages + active_jobs);Job 走 `active_jobs` 兜底重连或独立 `/api/jobs/{id}/stream`,完成时翻 `ready`。**完整历史系统(摘要 / 内容版本 / messages 与 agent_events 分离 / 版本索引)不在 P0,见 ROADMAP 模块 10。**
+3. **刷新不丢**:生成中刷新页面或切走再回来,**画布 + 已持久化对话 messages + 进行中任务**都恢复(`GET /api/projects/{id}` 返回整 Project 快照:canvas nodes + messages + active_jobs,messages 持久化见 BACKEND-API-PRD §5.5);Job 走 `active_jobs` 兜底重连或独立 `/api/jobs/{id}/stream`,完成时翻 `ready`。**完整历史系统(摘要 / 内容版本 / messages 与 agent_events 分离 / 版本索引 / 版本恢复)不在 P0,见 ROADMAP 模块 10。**
 4. **"继续"不推进**:用户只说"继续"时不推进;`ready` 节点 + 明确确认才推进(确认门四分类)。
 5. **不泄露内部信息**:`trace_event` / `optimized_prompt`(原始)/ `prompt_draft` / worker 名 / 文件路径不出现在任何用户可见响应;对话里给用户看的是 `optimized_prompt_preview`(友好版)。
 6. **画布多图消歧**:任务需要图、画布有 ≥2 张候选、用户未 @ 未选中时,Agent 反问带候选(画布高亮 + 文字引导),不靠「最近 ready」猜;用户画布选中(`active_asset_id`)即识别,不追问;纯文字「第3张」不认。

@@ -10,6 +10,7 @@ import com.blue.whale.user.service.UserService;
 import com.blue.whale.web.utils.IpUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
@@ -37,7 +38,19 @@ public class UserController {
                 .userId(user.getId())
                 .username(user.getUsername())
                 .phone(user.getPhone())
+                .avatar(user.getAvatar())
                 .build());
+    }
+
+    /**
+     * 上传头像
+     * PUT /api/user/avatar
+     */
+    @PutMapping("/api/user/avatar")
+    public Result<Map<String, String>> uploadAvatar(@RequestParam("file") MultipartFile file) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        String url = userService.uploadAvatar(userId, file);
+        return Result.ok(Map.of("url", url));
     }
 
     /**

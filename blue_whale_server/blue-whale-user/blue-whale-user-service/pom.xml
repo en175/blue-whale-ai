@@ -16,10 +16,19 @@
 
     <dependencies>
         <!-- Spring Boot starters -->
-        <!-- Nacos 服务注册 -->
+        <!-- Nacos 服务注册 + 配置中心 -->
         <dependency>
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+        </dependency>
+        <!-- bootstrap context：bootstrap.yml 比 application.yml 更早加载，供 Nacos config 初始化 -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-bootstrap</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -96,6 +105,10 @@
         <dependency>
             <groupId>com.blue-whale.web</groupId>
             <artifactId>blue-whale-common-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.blue-whale.tool.upload</groupId>
+            <artifactId>blue-whale-common-upload</artifactId>
         </dependency>
 
         <!-- Test -->

@@ -2,6 +2,8 @@
 
 Issues 追踪在 Gitee 仓库 `git@gitee.com:hangzhou_xuanfu_1/blue-whale-ai.git`。详细流程：`docs/agents/issue-tracker.md`
 
+> ⚠️ **所有 `mcp__gitee-ent__*` 调用**：`enterprise_id` / `project_id` 必须用 `list_enterprises` / `list_enterprise_repositories` **动态查**，**永不从网页 URL 抄**（URL `projects/883843` 的数字是网页路由 ID，误传会触发误导性 401）。一键解析：`scripts/gitee-resolve-ids.sh resolve <URL>`。详见 `docs/agents/issue-tracker.md`「ID 解析约定」。
+
 ## 创建 Issue
 
 - `mcp__gitee-ent__create_enterprise_issue` — **必传 `project_id`**（值用 `list_enterprise_repositories` 查），否则工单只在企业工作项可见、仓库 Issues 页看不到。

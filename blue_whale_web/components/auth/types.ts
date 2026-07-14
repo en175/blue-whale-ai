@@ -4,9 +4,11 @@
 
 /** 已登录用户 */
 export type User = {
-  userId: number;
+  userId: number;   // 后端用户 ID
+  uid: string;      // 前端生成的稳定显示 ID（U-xxxx），phone→uid 映射，同手机号复用
   username: string;
   phone: string;
+  avatar?: string;  // 头像 URL；空/null/"0" 表示使用默认首字头像
 };
 
 /**

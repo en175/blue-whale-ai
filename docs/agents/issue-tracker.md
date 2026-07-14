@@ -2,6 +2,34 @@
 
 仓库 `git@gitee.com:hangzhou_xuanfu_1/blue-whale-ai.git`（网页 https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues）。优先 MCP 工具，不可用时回退网页。
 
+## ID 解析约定（通用，先于任何 `mcp__gitee-ent__*` 调用读）
+
+> 本节是**所有**企业版 MCP 调用（issue / PR / 仓库 / 标签……）的通用约定，不限于 issue 创建。
+
+**黄金法则：`enterprise_id` 与 `project_id` 永远动态查，永不从网页 URL 抄。**
+
+Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
+
+| 标识符 | 出现在哪 | 能否直接用于 API |
+|---|---|---|
+| 网页路由 ID（如 URL `projects/883843` 的 `883843`） | 网页 URL | ❌ **绝不可**——既非 enterprise_id 也非 project_id |
+| `enterprise_id`（如 `16660949`） | 仅 `list_enterprises` 返回 | ✅ |
+| `project_id`（如 `48854568`） | 仅 `list_enterprise_repositories` 返回 | ✅ |
+| PR 编号（URL `pulls/93` 的 `93`） | 网页 URL | ✅ URL 里**唯一**可直接抄的数字 |
+| issue ident（如 `IJZYUL`） | 网页 URL / 工单标题 | ✅ 字符串标识，非数字 ID |
+
+**误传 ID 的症状具有误导性**：把网页路由 ID 当 `enterprise_id` 传入，Gitee 返回 `401 企业未授权此应用进行访问`——这条信息**措辞误导**，实为「该 ID 指向的企业不存在」，与 OAuth 授权无关。遇到此 401，**先判 token 再判 ID**，不要先怀疑授权：
+
+```
+步骤 1  调 get_user_info()
+          ├─ 成功 → token 有效 → 进入步骤 2
+          └─ 401  → token 失效/类型不符（普通版 REST 报 "Access token is wrong type"）
+步骤 2  token 有效仍 401 = ID 错（最常见）
+          调 list_enterprises() 核对真实 enterprise_id
+```
+
+**一键解析**：`scripts/gitee-resolve-ids.sh resolve <PR/issue URL>` 输出企业 path、仓库 path、资源编号，并标注 URL 中哪个数字是陷阱、给出可直接执行的 MCP 查询模板。`check-id` 子命令校验单个 ID 值，`diagnose-401` 打印上面的决策树。新同事拿到一条 URL，第一步就跑它。
+
 ## 定位
 
 企业版 MCP（`mcp__gitee-ent__*`）用以下 ID 定位，**非 owner/repo**：

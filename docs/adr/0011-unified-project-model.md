@@ -40,7 +40,7 @@ user ──< project (owner_id)
 
 ### D3. canvas 节点引用 asset by assetId，不存死 url
 
-canvas 节点（`nodes_json`）存位置 / 尺寸 / z 序 + `data.assetId`；asset 存 url / 宽高 / duration。生成流：job（属 project）→ 产 asset（属 project）→ 落 canvas 节点（引用 asset）。换源 / 重生成改 asset，不动节点。
+canvas 节点（`nodes_json`）存位置 / 尺寸 / z 序 + `data.assetId`；asset 存对象键 / 宽高 / duration 等媒体事实，签名访问 URL 仅按需生成。生成流：job（属 project）→ 产 asset（属 project）→ 落 canvas 节点（引用 asset）。Asset 媒体内容身份不可变；换源 / 重生成创建带来源关系的新 asset 并显式切换节点引用，旧 asset 保留追溯。仅访问 URL 轮换或对象存储迁移不改变 `assetId`。
 
 ### D4. project : canvas = 1:1
 
@@ -57,7 +57,7 @@ MVP asset 必属 project。topview 的 Team library / Brand Kit（跨项目复�
 ## 后果
 
 - **正面**：「用户→项目→素材」链贯通，对标 topview workspace。两个 change 共用 project 根，消除落地后返工。
-- **正面**：node↔asset 解耦，换源 / 重生成不动节点。
+- **正面**：node↔asset 解耦，访问 URL 轮换或对象存储迁移不动节点；换源 / 重生成通过新 asset 保留完整追溯。
 - **代价**：`assets` 表迁移 + 现有列表接口改维度；前端 `ProjectMenu` 从 localStorage 迁后端，全局加「当前 project」context。
 - **代价**：asset 必属 project，用户上传的参考素材（如 044 的本地媒体上传）也须归当前 project。
 
