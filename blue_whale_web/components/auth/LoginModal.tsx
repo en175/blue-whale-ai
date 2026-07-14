@@ -188,16 +188,14 @@ export function LoginModal({ onClose }: LoginModalProps) {
                   <input className="h-10 bg-transparent outline-none text-sm text-white/90 placeholder:text-white/30 w-full"
                     inputMode="numeric" placeholder="短信验证码" value={code}
                     onChange={(e) => handleCodeChange(e.target.value)} />
+                  <button type="button" disabled={!phoneValid || countdown > 0 || loading}
+                    onClick={handleSendCode}
+                    className="h-10 shrink-0 inline-flex items-center justify-center text-[13px] font-medium border-l border-white/[0.06] text-white/55 hover:text-white/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed pl-3 ml-3">
+                    {countdown > 0 ? `${countdown}s 后重发` : "获取验证码"}
+                  </button>
                 </div>
                 {codeError && <p className="mt-1 text-[12px] text-[#ef4444]">{codeError}</p>}
               </div>
-
-              {/* 获取验证码 */}
-              <button type="button" disabled={!phoneValid || countdown > 0 || loading}
-                onClick={handleSendCode}
-                className="h-10 inline-flex items-center justify-center rounded-lg text-[13px] font-medium border border-white/[0.08] text-white/70 hover:bg-white/[0.05] hover:text-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                {countdown > 0 ? `${countdown}s 后重发` : "获取验证码"}
-              </button>
             </>
           )}
 

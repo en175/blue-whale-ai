@@ -96,6 +96,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       clearTokens();
       clearUser();
+      setPendingAction(null);
+      executorRef.current = null;
       setLoginOpen(true);
     });
   }, []);

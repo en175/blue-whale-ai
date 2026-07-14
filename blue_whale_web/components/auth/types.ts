@@ -23,4 +23,5 @@ export type User = {
 export type PendingAction =
   | { kind: "home-generate"; prompt: string }
   | { kind: "template-select"; prompt: string }
-  | { kind: "canvas-send"; text: string };
+  | { kind: "canvas-send"; text: string }
+  | { kind: "skill-panel" };

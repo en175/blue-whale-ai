@@ -1329,7 +1329,7 @@ export default function AgentComposer({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSkillPanelOpen(true)}
+                    onClick={() => requireAuth({ kind: "skill-panel" }, () => setSkillPanelOpen(true))}
                     className="inline-flex items-center gap-1 h-8 px-3 text-[13px] font-medium text-white/35 rounded-lg bg-transparent border border-white/[0.06] cursor-pointer transition-colors duration-150 whitespace-nowrap hover:bg-white/[0.05] hover:text-white/70"
                     aria-label="Skills"
                     aria-haspopup="dialog"
