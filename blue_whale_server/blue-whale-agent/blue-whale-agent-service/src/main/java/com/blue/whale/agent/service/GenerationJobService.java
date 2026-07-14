@@ -5,10 +5,13 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.mapper.GenerationModelCapabilityMapper;
+import com.blue.whale.agent.model.constant.AggregateType;
+import com.blue.whale.agent.model.constant.EventType;
 import com.blue.whale.agent.model.dto.*;
 import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationModelCapability;
+import com.blue.whale.agent.model.entity.ProjectEvent;
 import com.blue.whale.agent.service.provider.ImageGenerationProvider;
 import com.blue.whale.agent.service.provider.ImageGenerationProviderRegistry;
 import com.blue.whale.global.base.resp.SystemCode;
@@ -23,6 +26,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -50,6 +54,8 @@ public class GenerationJobService {
     private final GenerationModelCapabilityMapper capabilityMapper;
     private final ImageGenerationProviderRegistry providerRegistry;
     private final GenerationStreamService generationStreamService;
+    private final ProjectEventService projectEventService;
+    private final ProjectEventBus eventBus;
 
     /** 文生图：流式模型建 job 异步逐张生成（返 job_id）；非流式模型同步一次性返回（返 asset_id+url）。 */
     @Transactional
@@ -60,10 +66,12 @@ public class GenerationJobService {
         ProviderImageGenerationRequest providerReq = buildProviderRequest(req, capability);
         GenerationJob job = newGenerationJob(userId, GenerationJob.TYPE_IMAGE, capability.getProviderId(), buildImageInput(req));
         jobMapper.insert(job);
+        emitJobCreated(job);
 
         if (streamFlag(capability)) {
             job.setStatus(GenerationJob.STATUS_PROCESSING);
             jobMapper.updateById(job);
+            emitJobStatusChanged(job);
             triggerStreamAfterCommit(job.getId(), capability, providerReq);
             return ImageGenerateResponse.streaming(job.getId());
         }
@@ -76,6 +84,7 @@ public class GenerationJobService {
                     .setProgress(100)
                     .setOutputAssetIds(List.of(asset.getId()));
             jobMapper.updateById(job);
+            emitJobStatusChanged(job);
             return ImageGenerateResponse.sync(asset.getId(), asset.getUrl());
         } catch (DataAccessException e) {
             // 暴露真实根因（最内层异常 message），避免笼统的“数据库未连接”掩盖问题
@@ -116,6 +125,7 @@ public class GenerationJobService {
     public CreateJobResponse createVideoJob(VideoGenerateRequest req, Long userId) {
         GenerationJob job = newGenerationJob(userId, GenerationJob.TYPE_VIDEO, "volcengine", buildVideoInput(req));
         jobMapper.insert(job);
+        emitJobCreated(job);
         try {
             String taskId = volcEngineService.createVideoTask(req.modelId(), req.prompt(), req.firstFrameUrl(),
                     req.aspectRatio(), req.resolution(), req.duration());
@@ -125,6 +135,7 @@ public class GenerationJobService {
                     .setNextPollAt(LocalDateTime.now().plusSeconds(POLL_INTERVAL_SECONDS))
                     .setProgress(0);
             jobMapper.updateById(job);
+            emitJobStatusChanged(job);
             return new CreateJobResponse(job.getId(), GenerationJob.STATUS_QUEUED);
         } catch (Exception e) {
             markFailed(job, SystemCode.FAILURE_CODE, e.getMessage());
@@ -228,6 +239,7 @@ public class GenerationJobService {
                         .setProgress(100)
                         .setOutputAssetIds(List.of(asset.getId()));
                 jobMapper.updateById(job);
+                emitJobStatusChanged(job);
                 log.info("video job {} succeeded, assetId={}", job.getId(), asset.getId());
             }
             case GenerationJob.STATUS_FAILED -> markFailed(job, SystemCode.CONTENT_MODERATION_REJECTED_CODE,
@@ -297,6 +309,53 @@ public class GenerationJobService {
         err.put("message", message == null ? "" : message);
         job.setError(err);
         jobMapper.updateById(job);
+        emitJobStatusChanged(job);
+    }
+
+    /** Job 创建事件（payload 含初始 status/type）。仅归属 Project 的 Job 产事件。 */
+    private void emitJobCreated(GenerationJob job) {
+        if (job.getProjectId() == null) {
+            return;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("job_id", job.getId());
+        payload.put("type", job.getType());
+        payload.put("status", job.getStatus());
+        ProjectEvent event = projectEventService.appendEvent(job.getProjectId(), EventType.GENERATION_JOB_CREATED,
+                AggregateType.GENERATION_JOB, String.valueOf(job.getId()), job.getVersion(),
+                payload, null, null);
+        publishAfterCommit(event);
+    }
+
+    /** Job 状态变更事件（payload 含 status/progress/output_asset_ids）。仅归属 Project 的 Job 产事件。 */
+    private void emitJobStatusChanged(GenerationJob job) {
+        if (job.getProjectId() == null) {
+            return;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("job_id", job.getId());
+        payload.put("status", job.getStatus());
+        payload.put("progress", job.getProgress());
+        payload.put("output_asset_ids", job.getOutputAssetIds());
+        ProjectEvent event = projectEventService.appendEvent(job.getProjectId(), EventType.GENERATION_JOB_STATUS_CHANGED,
+                AggregateType.GENERATION_JOB, String.valueOf(job.getId()), job.getVersion(),
+                payload, null, null);
+        publishAfterCommit(event);
+    }
+
+    /** 事务提交后才推实时 SSE；无事务上下文则直接推。 */
+    private void publishAfterCommit(ProjectEvent event) {
+        ProductEventDto dto = ProductEventDto.from(event);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    eventBus.publish(event.getProjectId(), dto);
+                }
+            });
+        } else {
+            eventBus.publish(event.getProjectId(), dto);
+        }
     }
 
     /** 前端 resolution(size_id) → 上游 API 需要的 size 值。 */

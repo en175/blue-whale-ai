@@ -17,6 +17,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import javax.validation.ConstraintViolation;
@@ -92,6 +93,13 @@ public class RestExceptionConfig {
     public Result<Object> handleError(HttpMessageNotReadableException e) {
         log.debug("param read error", e);
         return Result.failed(SystemCode.MSG_NOT_READABLE);
+    }
+
+    /** SSE 异步请求超时：优雅降级，不抛 500（ADR-0016 §3 SSE 长连接）。 */
+    @ExceptionHandler(AsyncRequestTimeoutException.class)
+    public Result<Object> handleError(AsyncRequestTimeoutException e) {
+        log.debug("async request timeout (sse)", e);
+        return Result.failed(SystemCode.SYSTEM_BUSY, "请求超时");
     }
 
     /** 处理 BindingResult（@RequestBody @Valid 与表单绑定）。 */

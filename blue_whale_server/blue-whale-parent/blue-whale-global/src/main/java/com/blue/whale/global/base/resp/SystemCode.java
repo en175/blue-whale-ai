@@ -45,6 +45,8 @@ public enum SystemCode implements IResultCode {
     CONTENT_MODERATION_REJECTED(SystemCode.CONTENT_MODERATION_REJECTED_CODE, "内容审核未通过"),
     /** 资源不可用 */
     ASSET_UNAVAILABLE(SystemCode.ASSET_UNAVAILABLE_CODE, "资源不可用"),
+    /** 游标已过期 */
+    CURSOR_EXPIRED(SystemCode.CURSOR_EXPIRED_CODE, "游标已过期，请重新获取快照"),
     ;
 
     /** 通用 code */
@@ -71,6 +73,9 @@ public enum SystemCode implements IResultCode {
     public static final int UPSTREAM_TIMEOUT_CODE = 100200;
     public static final int CONTENT_MODERATION_REJECTED_CODE = 100201;
     public static final int ASSET_UNAVAILABLE_CODE = 100202;
+
+    /** 产品事件流 code（ADR-0016 游标恢复） */
+    public static final int CURSOR_EXPIRED_CODE = 100300;
 
     final int code;
     final String msg;
