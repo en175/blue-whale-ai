@@ -46,7 +46,6 @@ public class CanvasController {
                                   @PathVariable("projectId") Long projectId,
                                   @RequestBody @Valid SaveCanvasRequest req) {
         Long uid = UserContext.requireUserId(userId);
-        projectService.requireOwned(projectId, uid);
-        return Result.ok(canvasService.save(projectId, req));
+        return Result.ok(canvasService.save(projectId, uid, req));
     }
 }

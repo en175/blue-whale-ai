@@ -10,11 +10,10 @@ import com.blue.whale.agent.service.ProjectSseService;
 import com.blue.whale.agent.service.SnapshotService;
 import com.blue.whale.global.base.resp.Result;
 import com.blue.whale.global.base.resp.SystemCode;
+import com.blue.whale.global.exception.GlobalException;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -93,15 +92,15 @@ public class ProjectController {
      * SSE {@code id} 等于 Project 内单调游标，{@code event} 等于事件类型；客户端按游标去重。
      */
     @GetMapping(value = "/{id}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Object events(@RequestHeader(value = "X-User-Id", required = false) Long userId,
-                         @PathVariable("id") Long id,
-                         @RequestParam(value = "after", required = false, defaultValue = "0") long after,
-                         javax.servlet.http.HttpServletResponse response) {
+    public SseEmitter events(@RequestHeader(value = "X-User-Id", required = false) Long userId,
+                             @PathVariable("id") Long id,
+                             @RequestParam(value = "after", required = false, defaultValue = "0") long after,
+                             javax.servlet.http.HttpServletResponse response) {
         Long uid = UserContext.requireUserId(userId);
         projectSseService.requireOwned(id, uid);
         if (projectSseService.isCursorExpired(id, after)) {
-            return ResponseEntity.status(HttpStatus.GONE)
-                    .body(Result.failed(SystemCode.CURSOR_EXPIRED));
+            throw new GlobalException(
+                    SystemCode.CURSOR_EXPIRED_CODE, SystemCode.CURSOR_EXPIRED.getMsg());
         }
         response.setHeader("X-Accel-Buffering", "no");
         response.setHeader("Cache-Control", "no-cache");

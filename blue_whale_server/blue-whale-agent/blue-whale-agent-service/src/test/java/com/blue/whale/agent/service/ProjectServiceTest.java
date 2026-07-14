@@ -26,7 +26,7 @@ import static org.mockito.Mockito.*;
 
 /**
  * {@link ProjectService} 单测：workspace 根 CRUD + 归属校验（ADR-0011 D1）+ 事件追加（ADR-0016）。
- * 全 mock {@link ProjectMapper}、{@link ProjectEventService}、{@link ProjectEventBus}，不连数据库。
+ * 全 mock {@link ProjectMapper}、{@link ProjectEventService}，不连数据库。
  */
 @ExtendWith(MockitoExtension.class)
 class ProjectServiceTest {
@@ -35,14 +35,11 @@ class ProjectServiceTest {
     private ProjectMapper projectMapper;
     @Mock
     private ProjectEventService projectEventService;
-    @Mock
-    private ProjectEventBus eventBus;
-
     private ProjectService projectService;
 
     @BeforeEach
     void setUp() {
-        projectService = new ProjectService(projectMapper, projectEventService, eventBus);
+        projectService = new ProjectService(projectMapper, projectEventService);
     }
 
     @Test
@@ -87,17 +84,17 @@ class ProjectServiceTest {
     }
 
     @Test
-    void getThrowsWhenNotExist() {
+    void getUsesResourceNotFoundWhenProjectDoesNotExist() {
         when(projectMapper.selectById(99L)).thenReturn(null);
 
         assertThatThrownBy(() -> projectService.get(99L, 10L))
                 .isInstanceOf(GlobalException.class)
                 .extracting(e -> ((GlobalException) e).getCode())
-                .isEqualTo(SystemCode.DATA_NOT_EXIST_CODE);
+                .isEqualTo(SystemCode.RESOURCE_NOT_FOUND_CODE);
     }
 
     @Test
-    void getThrowsWhenNotOwned() {
+    void getUsesResourceNotFoundWhenProjectIsNotOwned() {
         Project p = new Project().setOwnerId(10L).setName("A");
         p.setId(1L);
         when(projectMapper.selectById(1L)).thenReturn(p);
@@ -105,7 +102,7 @@ class ProjectServiceTest {
         assertThatThrownBy(() -> projectService.get(1L, 999L))
                 .isInstanceOf(GlobalException.class)
                 .extracting(e -> ((GlobalException) e).getCode())
-                .isEqualTo(SystemCode.DATA_NO_PERMISSION_OPERATE_CODE);
+                .isEqualTo(SystemCode.RESOURCE_NOT_FOUND_CODE);
     }
 
     @Test
@@ -139,11 +136,15 @@ class ProjectServiceTest {
     void deleteRemovesWhenOwned() {
         Project p = new Project().setOwnerId(10L).setName("A");
         p.setId(1L);
+        p.setVersion(3);
         when(projectMapper.selectById(1L)).thenReturn(p);
 
         projectService.delete(1L, 10L);
 
         verify(projectMapper).deleteById(1L);
+        verify(projectEventService).appendEvent(
+                eq(1L), eq("project.deleted"), eq("project"), eq("1"), eq(4),
+                eq(java.util.Map.of("project_id", 1L)), isNull(), isNull());
     }
 
     @Test
@@ -166,5 +167,12 @@ class ProjectServiceTest {
         Project result = projectService.requireOwned(1L, 10L);
 
         assertThat(result.getId()).isEqualTo(1L);
+    }
+
+    @Test
+    void resourceNotFoundCodeIsStable() {
+        assertThat(SystemCode.RESOURCE_NOT_FOUND)
+                .extracting(SystemCode::getCode, SystemCode::getMsg)
+                .containsExactly(100301, "资源不存在");
     }
 }

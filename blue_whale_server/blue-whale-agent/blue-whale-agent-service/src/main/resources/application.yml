@@ -66,6 +66,11 @@ logging:
   level:
     com.blue.whale.agent.mapper: info
 
+blue-whale:
+  project-events:
+    redis-enabled: true
+    channel: blue-whale:project-events
+
 # 火山方舟 Ark：图片/视频生成。api-key 必填，否则 ArkService bean 不创建、生成接口报配置缺失
 volcengine:
   ark:

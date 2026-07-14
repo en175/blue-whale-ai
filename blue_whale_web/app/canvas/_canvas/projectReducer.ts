@@ -30,12 +30,30 @@ export type ProjectAction =
   | { type: "delete-node"; projectId: string; nodeId: string }
   | { type: "set-viewport"; projectId: string; viewport: Viewport }
   | { type: "append-messages"; projectId: string; messages: ChatMessage[] }
-  | { type: "set-card-status"; projectId: string; cardId: number | string; status: CardStatus }
+  | {
+      type: "set-card-status";
+      projectId: string;
+      cardId: number | string;
+      status: CardStatus;
+    }
   | { type: "set-nodes"; projectId: string; nodes: NodeItem[] }
   /** 后端列表覆盖 mock：整体替换 projects，active 落到首项（listProjects 拉取后）。 */
   | { type: "replace-all"; projects: Project[] }
   /** loadCanvas 一次恢复某 project 的 nodes+viewport（比 set-nodes + set-viewport 两次 dispatch 干净）。 */
-  | { type: "set-canvas"; projectId: string; nodes: NodeItem[]; viewport: Viewport };
+  | {
+      type: "set-canvas";
+      projectId: string;
+      nodes: NodeItem[];
+      viewport: Viewport;
+    }
+  | {
+      type: "recover-project";
+      projectId: string;
+      name: string;
+      thumb: string | null;
+      nodes: NodeItem[];
+      viewport: Viewport;
+    };
 
 /**
  * 由初始 Project 列表构造 reducer state：active 取第一个 active 标记项目，
@@ -55,7 +73,10 @@ export function initialProjectState(projects: Project[]): ProjectState {
  *
  * 逐切片实现：每个 case 独立返回新 state，绝不原地改原 state/原 project。
  */
-export function projectReducer(state: ProjectState, action: ProjectAction): ProjectState {
+export function projectReducer(
+  state: ProjectState,
+  action: ProjectAction,
+): ProjectState {
   switch (action.type) {
     case "create": {
       const id = String(action.idGen());
@@ -88,8 +109,14 @@ export function projectReducer(state: ProjectState, action: ProjectAction): Proj
         ...state,
         projects: state.projects.map((p) =>
           p.id === action.projectId
-            ? { ...p, canvas: { ...p.canvas, nodes: [...p.canvas.nodes, action.node] } }
-            : p
+            ? {
+                ...p,
+                canvas: {
+                  ...p.canvas,
+                  nodes: [...p.canvas.nodes, action.node],
+                },
+              }
+            : p,
         ),
       };
     }
@@ -105,7 +132,7 @@ export function projectReducer(state: ProjectState, action: ProjectAction): Proj
                   nodes: p.canvas.nodes.filter((n) => n.id !== action.nodeId),
                 },
               }
-            : p
+            : p,
         ),
       };
     }
@@ -115,7 +142,7 @@ export function projectReducer(state: ProjectState, action: ProjectAction): Proj
         projects: state.projects.map((p) =>
           p.id === action.projectId
             ? { ...p, canvas: { ...p.canvas, viewport: action.viewport } }
-            : p
+            : p,
         ),
       };
     }
@@ -123,7 +150,9 @@ export function projectReducer(state: ProjectState, action: ProjectAction): Proj
       return {
         ...state,
         projects: state.projects.map((p) =>
-          p.id === action.projectId ? { ...p, canvas: { ...p.canvas, nodes: action.nodes } } : p
+          p.id === action.projectId
+            ? { ...p, canvas: { ...p.canvas, nodes: action.nodes } }
+            : p,
         ),
       };
     }
@@ -132,15 +161,36 @@ export function projectReducer(state: ProjectState, action: ProjectAction): Proj
         ...state,
         projects: state.projects.map((p) =>
           p.id === action.projectId
-            ? { ...p, canvas: { nodes: action.nodes, viewport: action.viewport } }
-            : p
+            ? {
+                ...p,
+                canvas: { nodes: action.nodes, viewport: action.viewport },
+              }
+            : p,
+        ),
+      };
+    }
+    case "recover-project": {
+      return {
+        ...state,
+        projects: state.projects.map((p) =>
+          p.id === action.projectId
+            ? {
+                ...p,
+                name: action.name,
+                thumb: action.thumb,
+                canvas: { nodes: action.nodes, viewport: action.viewport },
+              }
+            : p,
         ),
       };
     }
     case "replace-all": {
       // 后端列表整体覆盖；active 落到首项（列表非空调用方保证）。
       const first = action.projects[0];
-      return { projects: action.projects, activeProjectId: first ? first.id : state.activeProjectId };
+      return {
+        projects: action.projects,
+        activeProjectId: first ? first.id : state.activeProjectId,
+      };
     }
     case "append-messages": {
       return {
@@ -148,7 +198,7 @@ export function projectReducer(state: ProjectState, action: ProjectAction): Proj
         projects: state.projects.map((p) =>
           p.id === action.projectId
             ? { ...p, messages: [...p.messages, ...action.messages] }
-            : p
+            : p,
         ),
       };
     }
@@ -162,14 +212,16 @@ export function projectReducer(state: ProjectState, action: ProjectAction): Proj
                 messages: p.messages.map((m) =>
                   m.type === "card" && m.id === action.cardId
                     ? { ...m, status: action.status }
-                    : m
+                    : m,
                 ),
               }
-            : p
+            : p,
         ),
       };
     }
     default:
-      throw new Error(`projectReducer: action "${(action as { type: string }).type}" 未实现`);
+      throw new Error(
+        `projectReducer: action "${(action as { type: string }).type}" 未实现`,
+      );
   }
 }

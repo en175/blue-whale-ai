@@ -21,6 +21,7 @@ import java.util.List;
  * @param quantity        生成数量
  * @param watermark       是否添加水印
  * @param referenceImages 参考图 url 列表（可选）
+ * @param projectId       所属 Project（画布内生成时传入；独立生成页可空）
  */
 public record ImageGenerateRequest(
         @NotBlank(message = "prompt 必填") String prompt,
@@ -30,6 +31,7 @@ public record ImageGenerateRequest(
         String format,
         Integer quantity,
         Boolean watermark,
-        @JsonProperty("reference_images") List<String> referenceImages
+        @JsonProperty("reference_images") List<String> referenceImages,
+        @JsonProperty("project_id") Long projectId
 ) {
 }

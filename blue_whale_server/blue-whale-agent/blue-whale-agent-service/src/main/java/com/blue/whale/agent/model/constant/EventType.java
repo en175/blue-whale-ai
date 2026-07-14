@@ -15,6 +15,11 @@ public final class EventType {
     public static final String PROJECT_CREATED = "project.created";
     /** Project：重命名 */
     public static final String PROJECT_RENAMED = "project.renamed";
+    /** Project：删除 */
+    public static final String PROJECT_DELETED = "project.deleted";
+
+    /** Canvas：整体状态更新 */
+    public static final String CANVAS_UPDATED = "canvas.updated";
 
     /** GenerationJob：创建 */
     public static final String GENERATION_JOB_CREATED = "generation_job.created";

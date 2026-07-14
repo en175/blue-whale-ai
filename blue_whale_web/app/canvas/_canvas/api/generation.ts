@@ -15,7 +15,13 @@ export type ImageModelCapability = {
   provider_id: string;
   model_label: string;
   icon: string | null;
-  supported_sizes: { id: string; label: string; api_value: string; width?: number; height?: number }[];
+  supported_sizes: {
+    id: string;
+    label: string;
+    api_value: string;
+    width?: number;
+    height?: number;
+  }[];
   supported_aspect_ratios: string[];
   supported_formats: string[];
   default_size: string;
@@ -32,6 +38,7 @@ export type ImageModelCapability = {
 };
 
 export type ImageGeneratePayload = {
+  project_id?: number;
   prompt: string;
   model_id: string;
   size_id: string;
@@ -43,6 +50,7 @@ export type ImageGeneratePayload = {
 };
 
 export type VideoGeneratePayload = {
+  project_id?: number;
   prompt: string;
   resolution?: string;
   aspect_ratio?: string;
@@ -70,7 +78,11 @@ export type JobStatusResponse = {
 
 const API_BASE = "/api";
 
-async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
+async function request<T>(
+  path: string,
+  method: string,
+  body?: unknown,
+): Promise<T> {
   let res: Response;
   try {
     res = await apiFetch(`${API_BASE}${path}`, {
@@ -94,16 +106,23 @@ async function request<T>(path: string, method: string, body?: unknown): Promise
 
 /** 获取当前启用的图片生成模型能力列表。 */
 export function getImageModels(): Promise<ImageModelCapability[]> {
-  return request<ImageModelCapability[]>("/generation/models?capability=image", "GET");
+  return request<ImageModelCapability[]>(
+    "/generation/models?capability=image",
+    "GET",
+  );
 }
 
 /** 文生图：流式模型返 job_id（再 streamJob 订阅逐张），非流式返 asset_id+url。 */
-export function generateImage(payload: ImageGeneratePayload): Promise<ImageGenerateResponse> {
+export function generateImage(
+  payload: ImageGeneratePayload,
+): Promise<ImageGenerateResponse> {
   return request<ImageGenerateResponse>("/generation/image", "POST", payload);
 }
 
 /** 图文生视频异步提交，立即返回 jobId。 */
-export function createVideoJob(payload: VideoGeneratePayload): Promise<CreateJobResponse> {
+export function createVideoJob(
+  payload: VideoGeneratePayload,
+): Promise<CreateJobResponse> {
   return request<CreateJobResponse>("/generation/video", "POST", payload);
 }
 
@@ -115,7 +134,12 @@ export function getJobStatus(jobId: number): Promise<JobStatusResponse> {
 /** SSE 流式事件载荷（后端 SsePayload，type 区分）。 */
 export type StreamEvent =
   | { type: "image"; image_index: number; asset_id: number; url: string }
-  | { type: "image_failed"; image_index: number; error_code?: string; error_message?: string }
+  | {
+      type: "image_failed";
+      image_index: number;
+      error_code?: string;
+      error_message?: string;
+    }
   | { type: "done"; usage?: unknown }
   | { type: "error"; error_code?: string; error_message?: string };
 
@@ -131,7 +155,10 @@ export interface StreamHandlers {
  * 后端不设 SSE event name，全部走默认 message 通道，onmessage 统一收。
  * 收到 done/error 自动 close；onerror 兜底未收 done 就断。
  */
-export function streamJob(jobId: number, handlers: StreamHandlers): EventSource {
+export function streamJob(
+  jobId: number,
+  handlers: StreamHandlers,
+): EventSource {
   const es = new EventSource(`${API_BASE}/jobs/${jobId}/stream`);
   es.onmessage = (msg) => {
     let event: StreamEvent;
@@ -145,7 +172,11 @@ export function streamJob(jobId: number, handlers: StreamHandlers): EventSource 
         handlers.onImage?.(event.url, event.asset_id, event.image_index);
         break;
       case "image_failed":
-        handlers.onImageFailed?.(event.image_index, event.error_code, event.error_message);
+        handlers.onImageFailed?.(
+          event.image_index,
+          event.error_code,
+          event.error_message,
+        );
         break;
       case "done":
         handlers.onDone?.();

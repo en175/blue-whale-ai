@@ -11,7 +11,6 @@ import com.blue.whale.agent.model.dto.*;
 import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationModelCapability;
-import com.blue.whale.agent.model.entity.ProjectEvent;
 import com.blue.whale.agent.service.provider.ImageGenerationProvider;
 import com.blue.whale.agent.service.provider.ImageGenerationProviderRegistry;
 import com.blue.whale.global.base.resp.SystemCode;
@@ -55,16 +54,18 @@ public class GenerationJobService {
     private final ImageGenerationProviderRegistry providerRegistry;
     private final GenerationStreamService generationStreamService;
     private final ProjectEventService projectEventService;
-    private final ProjectEventBus eventBus;
+    private final ProjectService projectService;
 
     /** 文生图：流式模型建 job 异步逐张生成（返 job_id）；非流式模型同步一次性返回（返 asset_id+url）。 */
     @Transactional
     public ImageGenerateResponse createImageJob(ImageGenerateRequest req, Long userId) {
+        Long projectId = requireOwnedProject(req.projectId(), userId);
         GenerationModelCapability capability = capabilityMapper.selectEnabledByModelId(req.modelId())
                 .orElseThrow(() -> new GlobalException(SystemCode.FAILURE_CODE, "不支持的模型: " + req.modelId()));
 
         ProviderImageGenerationRequest providerReq = buildProviderRequest(req, capability);
-        GenerationJob job = newGenerationJob(userId, GenerationJob.TYPE_IMAGE, capability.getProviderId(), buildImageInput(req));
+        GenerationJob job = newGenerationJob(projectId, userId, GenerationJob.TYPE_IMAGE,
+                capability.getProviderId(), buildImageInput(req));
         jobMapper.insert(job);
         emitJobCreated(job);
 
@@ -123,7 +124,9 @@ public class GenerationJobService {
     /** 图文生视频异步提交，立即返 jobId。 */
     @Transactional
     public CreateJobResponse createVideoJob(VideoGenerateRequest req, Long userId) {
-        GenerationJob job = newGenerationJob(userId, GenerationJob.TYPE_VIDEO, "volcengine", buildVideoInput(req));
+        Long projectId = requireOwnedProject(req.projectId(), userId);
+        GenerationJob job = newGenerationJob(projectId, userId, GenerationJob.TYPE_VIDEO,
+                "volcengine", buildVideoInput(req));
         jobMapper.insert(job);
         emitJobCreated(job);
         try {
@@ -267,8 +270,10 @@ public class GenerationJobService {
                 .build();
     }
 
-    private GenerationJob newGenerationJob(Long userId, String type, String provider, Map<String, Object> input) {
+    private GenerationJob newGenerationJob(Long projectId, Long userId, String type,
+                                           String provider, Map<String, Object> input) {
         return new GenerationJob()
+                .setProjectId(projectId)
                 .setUserId(userId)
                 .setType(type)
                 .setSource(GenerationJob.SOURCE_DOCK)
@@ -288,6 +293,7 @@ public class GenerationJobService {
         input.put("quantity", req.quantity());
         input.put("reference_images", req.referenceImages());
         input.put("watermark", req.watermark());
+        input.put("project_id", req.projectId());
         return input;
     }
 
@@ -299,7 +305,15 @@ public class GenerationJobService {
         input.put("aspectRatio", req.aspectRatio());
         input.put("duration", req.duration());
         input.put("firstFrameUrl", req.firstFrameUrl());
+        input.put("project_id", req.projectId());
         return input;
+    }
+
+    private Long requireOwnedProject(Long projectId, Long userId) {
+        if (projectId != null) {
+            projectService.requireOwned(projectId, userId);
+        }
+        return projectId;
     }
 
     private void markFailed(GenerationJob job, int code, String message) {
@@ -321,10 +335,9 @@ public class GenerationJobService {
         payload.put("job_id", job.getId());
         payload.put("type", job.getType());
         payload.put("status", job.getStatus());
-        ProjectEvent event = projectEventService.appendEvent(job.getProjectId(), EventType.GENERATION_JOB_CREATED,
+        projectEventService.appendEvent(job.getProjectId(), EventType.GENERATION_JOB_CREATED,
                 AggregateType.GENERATION_JOB, String.valueOf(job.getId()), job.getVersion(),
                 payload, null, null);
-        publishAfterCommit(event);
     }
 
     /** Job 状态变更事件（payload 含 status/progress/output_asset_ids）。仅归属 Project 的 Job 产事件。 */
@@ -337,25 +350,9 @@ public class GenerationJobService {
         payload.put("status", job.getStatus());
         payload.put("progress", job.getProgress());
         payload.put("output_asset_ids", job.getOutputAssetIds());
-        ProjectEvent event = projectEventService.appendEvent(job.getProjectId(), EventType.GENERATION_JOB_STATUS_CHANGED,
+        projectEventService.appendEvent(job.getProjectId(), EventType.GENERATION_JOB_STATUS_CHANGED,
                 AggregateType.GENERATION_JOB, String.valueOf(job.getId()), job.getVersion(),
                 payload, null, null);
-        publishAfterCommit(event);
-    }
-
-    /** 事务提交后才推实时 SSE；无事务上下文则直接推。 */
-    private void publishAfterCommit(ProjectEvent event) {
-        ProductEventDto dto = ProductEventDto.from(event);
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    eventBus.publish(event.getProjectId(), dto);
-                }
-            });
-        } else {
-            eventBus.publish(event.getProjectId(), dto);
-        }
     }
 
     /** 前端 resolution(size_id) → 上游 API 需要的 size 值。 */

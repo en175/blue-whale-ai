@@ -146,4 +146,15 @@ class ProjectControllerTest {
 
         assertThat(result).isSameAs(emitter);
     }
+
+    @Test
+    void eventsReturnsExplicitGoneWhenCursorExpired() {
+        doNothing().when(projectSseService).requireOwned(1L, 10L);
+        when(projectSseService.isCursorExpired(1L, 4L)).thenReturn(true);
+
+        assertThatThrownBy(() -> controller.events(10L, 1L, 4L, response))
+                .isInstanceOf(GlobalException.class)
+                .extracting(error -> ((GlobalException) error).getCode())
+                .isEqualTo(SystemCode.CURSOR_EXPIRED_CODE);
+    }
 }
