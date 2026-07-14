@@ -10,12 +10,12 @@
 
 | 脚本 | 挂载 matcher | 触发事件 | 作用 | 关联硬约束 |
 |---|---|---|---|---|
-| `block-master-edit.sh` | ZCode / Claude Code / Codex `Edit\|Write` | `PreToolUse` | 三端主检出区写入兜底；Codex 将 `tool_name=apply_patch`、`tool_input.command` 中的目标路径适配为 Gate 接受的 `Write + file_path` | `CLAUDE.md`「可写任务先建 task worktree」 |
-| `block-dangerous-git.sh` | `Bash` | `PreToolUse` | 拦裸 `--force`、`reset --hard`、`clean -f`、`branch -D`、`checkout .`、`restore .` | CLAUDE.md「提交与审查」 |
-| `block-push-to-master.sh` | `Bash` | `PreToolUse` | 拦任何对 `master`/`main` 的 push（显式 + 隐式） | [ADR-0003](../../adr/0003-no-direct-push-to-master.md) |
-| `confirm-release-action.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` / `mcp__gitee-ent__create_enterprise_repo_release` | `PreToolUse` / `PostToolUse` | 提交入口 `commit-task-for-review.sh` 出现即放行（worktree commit 本地可逆，无需授权）；发布/合入标准入口带 `--user-authorized` 无交互放行；直接 push/commit/非 ff-only merge（含复合命令和 Git alias）硬拦；**`merge_enterprise_pull` 的 `squash`/`rebase` 方法检查在凭证校验前**（原 `block-squash-merge.sh` 已并入，消除多 hook 执行顺序不确定）；PR 标记在 Pre 校验，合并/release 凭证按 `tool_use_id` 原子占用；明确成功 Post 消费，失败/畸形 Post 保留 | CLAUDE.md「发布动作必须先获用户授权」 / [ADR-0010](../../adr/0010-local-master-is-user-integration-zone.md) / [ADR-0011](../../adr/0011-release-marker-consume-after-pr-success.md) / [ADR-0012](../../adr/0012-agent-noninteractive-authorization.md) |
+| `block-master-edit.sh` | ZCode / Claude Code / Codex `Edit\|Write` | `PreToolUse` | 三端主检出区写入兜底；Codex 将 `tool_name=apply_patch`、`tool_input.command` 中的目标路径适配为 Gate 接受的 `Write + file_path`。对仓库内写入的阻断/放行判定追加单行结构化审计记录到 `.git/hook-audit/`（IK10CW），审计只记判定元数据、不改变原 exit code/stdout 契约 | `CLAUDE.md`「可写任务先建 task worktree」 |
+| `block-dangerous-git.sh` | `Bash` | `PreToolUse` | 拦裸 `--force`、`reset --hard`、`clean -f`、`branch -D`、`checkout .`、`restore .`；放行/阻断均审计，但只记工具名、稳定操作类别和决定，不记完整命令 | CLAUDE.md「提交与审查」 |
+| `block-push-to-master.sh` | `Bash` | `PreToolUse` | 拦任何对 `master`/`main` 的 push（显式 + 隐式）；放行/阻断均审计，但不记完整命令或目标 ref 值 | [ADR-0003](../../adr/0003-no-direct-push-to-master.md) |
+| `confirm-release-action.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` / `mcp__gitee-ent__create_enterprise_repo_release` | `PreToolUse` / `PostToolUse` | 提交入口 `commit-task-for-review.sh` 出现即放行（worktree commit 本地可逆，无需授权）；发布/合入标准入口带 `--user-authorized` 无交互放行；直接 push/commit/非 ff-only merge（含复合命令和 Git alias）硬拦；**`merge_enterprise_pull` 的 `squash`/`rebase` 方法检查在凭证校验前**（原 `block-squash-merge.sh` 已并入，消除多 hook 执行顺序不确定）；所有 Pre 判定均审计且不记 Bash 命令或 MCP 参数值；PR 标记在 Pre 校验，合并/release 凭证按 `tool_use_id` 原子占用；明确成功 Post 消费，失败/畸形 Post 保留，Post 不审计 | CLAUDE.md「发布动作必须先获用户授权」 / [ADR-0010](../../adr/0010-local-master-is-user-integration-zone.md) / [ADR-0011](../../adr/0011-release-marker-consume-after-pr-success.md) / [ADR-0012](../../adr/0012-agent-noninteractive-authorization.md) |
 | `block-squash-merge.sh` | _(已并入 `confirm-release-action.sh`，三端配置不再注册)_ | `PreToolUse` | 脚本逻辑保留为独立可测单元（`test-hooks.sh` 仍覆盖），但 squash/rebase 检查职责已迁移到 `confirm-release-action.sh` 内部，消除多 hook 执行顺序不确定导致的纠正信号误导 | CLAUDE.md「合并方法」 |
-| `block-issue-without-repo.sh` | `mcp__gitee-ent__create_enterprise_issue` / `mcp__gitee-ent__update_enterprise_issue` | `PreToolUse` | 拦 `project_id` 缺失/为 0；拦子 issue 未带 `project_id/program_id`，强制仓库可见 | [ADR-0007](../../adr/0007-issue-must-link-repo.md) / [ADR-0008](../../adr/0008-sub-issues-must-inherit-repo.md) |
+| `block-issue-without-repo.sh` | `mcp__gitee-ent__create_enterprise_issue` / `mcp__gitee-ent__update_enterprise_issue` | `PreToolUse` | 拦 `project_id` 缺失/为 0；拦子 issue 未带 `project_id/program_id`，强制仓库可见；放行/阻断均审计，但不记企业、仓库、项目、Issue 等 MCP 参数值 | [ADR-0007](../../adr/0007-issue-must-link-repo.md) / [ADR-0008](../../adr/0008-sub-issues-must-inherit-repo.md) |
 
 > ZCode / Claude Code 配置里有 1 条**纯提醒**型 hook（`Grep|Glob` → `cbm-discovery-gate.sh`，提示先查 CBM 图谱），不阻断执行、仅注入 context；Codex 无对应 CBM MCP，因此 `.codex/hooks.json` 不挂此 gate。`SessionStart` 同样显式排除：它只在会话启动/恢复时注入 context，不是工具调用 Gate，且各平台生命周期挂载不同。两者均不参与阻断等价比较。
 
@@ -105,6 +105,50 @@ Hook 触发记录在 `~/.claude/logs/` 或本会话 transcript 里搜 `hookSpeci
 
 ---
 
+## 查询阻断型 PreToolUse 审计记录
+
+运行时已注册的五个阻断型 PreToolUse Gate 共享 `.git/hook-audit/` 下的单行 JSON 审计契约。主检出区和 task worktree 通过 Git common dir 看到同一组日志；每个 Gate 有一个活跃 `.log` 和至多一个 `.log.1` 归档。记录时间为 UTC，核心字段为 `timestamp`、`hook`、`tool`、`operation`、`session_id`、`tool_use_id`、`exit_code` 和稳定 `reason`。master 写入 Gate 还保留目标 `file_path` 与 `branch`；其余 Bash/MCP Gate 的这两个字段为空，避免复制命令或工具参数。
+
+下面的查询可同时按起始时间、会话标识和工具调用标识筛选；不需要的条件留空：
+
+```bash
+COMMON_DIR="$(git rev-parse --git-common-dir)"
+case "$COMMON_DIR" in
+  /*) ;;
+  *) COMMON_DIR="$(git rev-parse --show-toplevel)/$COMMON_DIR" ;;
+esac
+
+FROM_UTC="2026-07-14T00:00:00+00:00"  # 留空表示不限制时间
+SESSION_ID=""                         # 例如当前会话标识
+TOOL_USE_ID=""                        # 例如某次工具调用标识
+
+python3 - "$COMMON_DIR/hook-audit" "$FROM_UTC" "$SESSION_ID" "$TOOL_USE_ID" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+audit_dir = Path(sys.argv[1])
+from_utc, session_id, tool_use_id = sys.argv[2:]
+paths = sorted(audit_dir.glob("*.log")) + sorted(audit_dir.glob("*.log.1"))
+for path in paths:
+    for line in path.read_text().splitlines():
+        if not line:
+            continue
+        record = json.loads(line)
+        if from_utc and record.get("timestamp", "") < from_utc:
+            continue
+        if session_id and record.get("session_id") != session_id:
+            continue
+        if tool_use_id and record.get("tool_use_id") != tool_use_id:
+            continue
+        print(json.dumps(record, ensure_ascii=False))
+PY
+```
+
+“无记录”只表示该调用没有进入仓库 Hook 执行链，不能据此推断 ZCode、Claude Code、Codex 或其它外部 harness 为什么没有调用仓库 Gate。继续排查时应结合对应 harness 的 hook 信任状态、配置加载结果和自身日志。
+
+---
+
 ## 测试夹具（`scripts/test-hooks.sh`）
 
 > 纯 bash 黑盒夹具，对每个 hook 喂 stdin JSON、断言 exit code（0/2）+ stderr 含关键串，一键跑，退出码反映通过/失败。**改 hook 前先跑它。**
@@ -115,7 +159,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 ### 测试边界（seam）
 
-5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现；`block-master-edit.sh` 还从同一黑盒边界观测 git common dir 中的持久日志、轮转与并发副作用。`confirm-release-action.sh` 覆盖同步/create/update 标准入口无输出放行、缺授权/缺模式/直接 push/错误 merge 同步及复合命令/Git alias 绕过硬拦、凭证 TTL/对象隔离/并发占用、Post 明确成功消费和失败/畸形保留。Hook 不执行同步、不选择发布模式；正常状态机由 `CLAUDE.md` 和 ADR-0013 驱动。发布标记、动作凭证与审计日志测试均在临时 Git 仓库运行，不读写真实 common dir。
+5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现；同一黑盒边界还观测 git common dir 中的持久日志、脱敏内容与审计失败降级，`block-master-edit.sh` 另覆盖轮转和并发副作用。`confirm-release-action.sh` 覆盖同步/create/update 标准入口无输出放行、缺授权/缺模式/直接 push/错误 merge 同步及复合命令/Git alias 绕过硬拦、凭证 TTL/对象隔离/并发占用、Post 明确成功消费和失败/畸形保留，并断言 Post 不生成 PreToolUse 审计记录。Hook 不执行同步、不选择发布模式；正常状态机由 `CLAUDE.md` 和 ADR-0013 驱动。发布标记、动作凭证与审计日志测试均在临时 Git 仓库运行，不读写真实 common dir。
 
 夹具还校验 ZCode / Claude Code / Codex 挂载层：
 - `.zcode/config.json`、`.claude/settings.json`、`.codex/hooks.json` 必须存在。

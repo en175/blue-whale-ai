@@ -46,6 +46,8 @@ audit() {
     --project-dir "$TOPLEVEL" \
     --hook "$HOOK_NAME" \
     --branch "$BRANCH" \
+    --include-file-context \
+    --operation "file-write" \
     --exit-code "$1" \
     --reason "$2" >/dev/null || true
 }
