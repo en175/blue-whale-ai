@@ -10,7 +10,8 @@ spring:
       server-addr: 115.190.244.91:8848
       discovery:
         # namespace 用 Nacos namespace ID（UUID），非名字；与 agent-service 一致才能发现彼此
-        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
+        # 本地开发传 NACOS_NAMESPACE=<隔离 namespace ID> 注册到独立 namespace，避免串线上流量
+        namespace: ${NACOS_NAMESPACE:1bb06cf5-c1ad-4054-b022-49358a2f49aa}
       config:
         namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
         file-extension: yml
