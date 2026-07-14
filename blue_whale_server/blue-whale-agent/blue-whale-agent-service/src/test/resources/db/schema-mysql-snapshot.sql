@@ -27,11 +27,114 @@ CREATE TABLE IF NOT EXISTS canvas
     UNIQUE KEY uk_canvas_project (project_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
+CREATE TABLE IF NOT EXISTS conversations
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_conversation_project (project_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS agent_runs
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    conversation_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    stage VARCHAR(32) NULL,
+    engine VARCHAR(64) NOT NULL,
+    engine_version VARCHAR(64) NOT NULL,
+    adapter_schema_version INT NOT NULL,
+    current_checkpoint_id BIGINT NULL,
+    lease_owner VARCHAR(128) NULL,
+    lease_expires_at DATETIME NULL,
+    fencing_token BIGINT NOT NULL DEFAULT 0,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    INDEX idx_agent_run_claim (status, engine, is_delete, id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS runtime_checkpoints
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    agent_run_id BIGINT NOT NULL,
+    sequence_no INT NOT NULL,
+    run_version INT NOT NULL,
+    engine VARCHAR(64) NOT NULL,
+    engine_version VARCHAR(64) NOT NULL,
+    adapter_schema_version INT NOT NULL,
+    payload_digest VARCHAR(64) NOT NULL,
+    opaque_payload JSON NOT NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_checkpoint_sequence (agent_run_id, sequence_no)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS run_commits
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    agent_run_id BIGINT NOT NULL,
+    commit_id VARCHAR(128) NOT NULL,
+    request_hash VARCHAR(64) NOT NULL,
+    checkpoint_id BIGINT NOT NULL,
+    generation_job_id BIGINT NOT NULL,
+    committed_cursor BIGINT NOT NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_run_commit (agent_run_id, commit_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS conversation_messages
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    conversation_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    agent_run_id BIGINT NULL,
+    client_message_id VARCHAR(64) NULL,
+    role VARCHAR(16) NOT NULL,
+    content TEXT NOT NULL,
+    sequence_no INT NOT NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_conversation_sequence (conversation_id, sequence_no)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS command_idempotency
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    operation VARCHAR(64) NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL,
+    request_hash VARCHAR(64) NOT NULL,
+    message_id BIGINT NOT NULL,
+    agent_run_id BIGINT NOT NULL,
+    accepted_cursor BIGINT NOT NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_command_idempotency (project_id, operation, idempotency_key)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
 CREATE TABLE IF NOT EXISTS generation_jobs
 (
     id               BIGINT PRIMARY KEY AUTO_INCREMENT,
     project_id       BIGINT NULL,
     user_id          BIGINT NOT NULL,
+    agent_run_id     BIGINT NULL,
+    action_identity  VARCHAR(128) NULL,
     type             VARCHAR(32) NOT NULL,
     source           VARCHAR(32) NOT NULL,
     input            JSON NULL,
@@ -49,7 +152,8 @@ CREATE TABLE IF NOT EXISTS generation_jobs
     gmt_create       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     version          INT      NOT NULL DEFAULT 0,
-    is_delete        TINYINT  NOT NULL DEFAULT 0
+    is_delete        TINYINT  NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_agent_run_action (agent_run_id, action_identity)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 CREATE TABLE IF NOT EXISTS project_event_stream

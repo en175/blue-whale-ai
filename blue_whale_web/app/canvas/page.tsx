@@ -105,6 +105,7 @@ function CanvasPageInner() {
     createProjectAction,
     switchProject,
     deleteProjectAction,
+    submitConversationMessageAction,
   } = useCanvasProjects();
   // 派生：当前项目的画布与对话（读取走 active，写入走 dispatch）
   const { nodes, viewport } = activeProject.canvas;
@@ -619,6 +620,9 @@ function CanvasPageInner() {
             projectId: activeProject.id,
             messages: msgs,
           })
+        }
+        onSubmitMessage={
+          backendReady ? submitConversationMessageAction : undefined
         }
         onSetCardStatus={(cardId, status) =>
           dispatch({

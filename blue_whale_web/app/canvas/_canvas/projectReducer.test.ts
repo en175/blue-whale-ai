@@ -288,6 +288,16 @@ describe("projectReducer / recover-project", () => {
       width: 10,
       height: 10,
     } as never;
+    const messages = [
+      { id: "message-1", type: "user", text: "生成蓝鲸" } as const,
+      {
+        id: "job-1",
+        type: "card",
+        text: "蓝鲸",
+        meta: "图片生成",
+        status: "generating",
+      } as const,
+    ];
 
     const after = reduce(before, {
       type: "recover-project",
@@ -296,6 +306,7 @@ describe("projectReducer / recover-project", () => {
       thumb: "thumb.png",
       nodes: [node],
       viewport: { x: 9, y: 9, zoom: 2 },
+      messages,
     });
 
     const recovered = after.projects.find((p) => p.id === "1");
@@ -303,6 +314,7 @@ describe("projectReducer / recover-project", () => {
     expect(recovered?.thumb).toBe("thumb.png");
     expect(recovered?.canvas.nodes).toEqual([node]);
     expect(recovered?.canvas.viewport).toEqual({ x: 9, y: 9, zoom: 2 });
+    expect(recovered?.messages).toEqual(messages);
   });
 });
 

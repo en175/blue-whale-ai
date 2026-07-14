@@ -53,6 +53,7 @@ export type ProjectAction =
       thumb: string | null;
       nodes: NodeItem[];
       viewport: Viewport;
+      messages: ChatMessage[];
     };
 
 /**
@@ -179,6 +180,7 @@ export function projectReducer(
                 name: action.name,
                 thumb: action.thumb,
                 canvas: { nodes: action.nodes, viewport: action.viewport },
+                messages: action.messages,
               }
             : p,
         ),

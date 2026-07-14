@@ -21,6 +21,16 @@ public final class EventType {
     /** Canvas：整体状态更新 */
     public static final String CANVAS_UPDATED = "canvas.updated";
 
+    /** Conversation：用户或 Agent 消息已被 Java 接纳。 */
+    public static final String CONVERSATION_MESSAGE_ACCEPTED = "conversation.message_accepted";
+    /** Conversation：Agent 可见消息已完成。 */
+    public static final String CONVERSATION_MESSAGE_COMPLETED = "conversation.message_completed";
+
+    /** AgentRun：已创建。 */
+    public static final String AGENT_RUN_CREATED = "agent_run.created";
+    /** AgentRun：生命周期状态已变更。 */
+    public static final String AGENT_RUN_STATUS_CHANGED = "agent_run.status_changed";
+
     /** GenerationJob：创建 */
     public static final String GENERATION_JOB_CREATED = "generation_job.created";
     /** GenerationJob：状态变更（queued→processing→succeeded|failed） */
