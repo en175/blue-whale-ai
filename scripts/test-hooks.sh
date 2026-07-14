@@ -382,6 +382,24 @@ assert_file_has_text() {
   fi
 }
 
+assert_markdown_section_has_text() {
+  local path="$1"; shift
+  local heading="$1"; shift
+  local needle="$1"; shift
+  local label="$1"; shift
+  if awk -v heading="$heading" -v needle="$needle" '
+    $0 == heading { in_section = 1; next }
+    in_section && /^## / { in_section = 0 }
+    in_section && index($0, needle) { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$path"; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] ${path} 的 ${heading} 章节未含 \"${needle}\"")
+  fi
+}
+
 assert_file_not_has_text() {
   local path="$1"; shift
   local needle="$1"; shift
@@ -1757,6 +1775,18 @@ assert_git_ignored ".codex/local.json" "codex: 其它本机配置保持私密"
 assert_git_ignored ".codex/hooks/other.sh" "codex: 禁止提交复制出来的 hook 实现"
 
 # Slice 5.5 — 用户本地集成区 / Agent 任务区边界
+WRITE_PREFLIGHT_HEADING="## 写入前自检（每次写操作前强制执行）"
+assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "摘要是约束声明，自检是执行机制" "workflow: 自检说明与红线摘要的关系"
+assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "Edit、Write 或任何会改变 Git 状态的操作前" "workflow: 自检覆盖所有仓库写操作"
+assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "确认当前分支" "workflow: 自检确认当前分支"
+assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "scripts/start-task-worktree.sh" "workflow: 自检指向唯一 Work Tree 入口"
+assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "确认目标路径" "workflow: 自检确认目标路径"
+assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "用户本地集成区（master 主检出区）" "workflow: 自检识别主检出区"
+assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "确认 Git 写入区域" "workflow: 自检确认 Git 写入区域"
+assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "工单分支" "workflow: 自检要求工单分支"
+assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "立即停止写入" "workflow: 自检失败时停止写入"
+assert_file_has_text ".claude/rules/git-workflow.md" "防御顺序：规范前置 → Hook 兜底" "workflow: Git 规则保持规范前置"
+assert_file_has_text "docs/agents/commit-and-review.md" "规范前置 → Hook 兜底" "workflow: 协作文档保持规范前置"
 assert_file_not_has_text ".githooks/pre-commit" "禁止在 master/main 上提交" "workflow: pre-commit 不再拦用户本地 master commit"
 assert_file_not_has_text "scripts/start-task-worktree.sh" "git worktree" "workflow: shell 入口不复制 Git 业务逻辑"
 assert_file_not_has_text "scripts/cleanup-task-worktree.sh" "sync-master.sh" "workflow: cleanup-task-worktree 不再同步用户本地 master"
