@@ -20,6 +20,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOOK_DIR="${HOOK_DIR:-"$REPO_ROOT/.claude/hooks"}"
 HOOK_DIR="$(cd "$HOOK_DIR" && pwd)"
 CODEX_HOOKS_JSON="$REPO_ROOT/.codex/hooks.json"
+CODEX_WRITE_PROBE="$REPO_ROOT/scripts/probe-codex-write-hook.sh"
+HOOK_CONTRACT_CHECKER="$REPO_ROOT/scripts/check-hook-contracts.py"
 AUTH_SCRIPT="$REPO_ROOT/scripts/manage-agent-authorization.sh"
 REAL_GIT="$(command -v git)"
 ACTION_TEST_ROOT=""
@@ -201,6 +203,26 @@ assert_stdout_empty() {
   else
     FAIL=$((FAIL + 1))
     FAILURES+=("[${label}] stdout 应为空，实际=${RUN_STDOUT}")
+  fi
+}
+
+assert_stderr_empty() {
+  local label="$1"; shift
+  if [ -z "$RUN_STDERR" ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] stderr 应为空，实际=${RUN_STDERR}")
+  fi
+}
+
+assert_exit_nonzero() {
+  local label="$1"; shift
+  if [ "$RUN_EXIT" -ne 0 ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] exit=${RUN_EXIT} 期望非零")
   fi
 }
 
@@ -592,9 +614,32 @@ for event in ("PreToolUse", "PostToolUse"):
     claude_items = claude["hooks"].get(event, [])
     codex_items = codex["hooks"].get(event, [])
     if event == "PreToolUse":
-        # 提醒型 gate 与 Claude 专属 Edit|Write 兜底不属于平台中立契约。
+        master_edit_items = [
+            item for item in codex_items if item.get("matcher") == "Edit|Write"
+        ]
+        if len(master_edit_items) != 1:
+            raise SystemExit(
+                "Codex must register exactly one Edit|Write matcher for block-master-edit.sh"
+            )
+        master_edit_scripts = [
+            script
+            for hook in master_edit_items[0].get("hooks", [])
+            if hook.get("type") == "command"
+            for script in [codex_script(hook["command"])]
+            if script
+        ]
+        if master_edit_scripts != ["block-master-edit.sh"]:
+            raise SystemExit(
+                "Codex Edit|Write matcher must point to shared block-master-edit.sh"
+            )
+        script_count += len(master_edit_scripts)
+
+        # 提醒型 gate 不属于平台中立契约；Codex 的 Edit|Write 由专用适配器接入共享 Gate。
         claude_items = [
             it for it in claude_items if it["matcher"] not in ("Grep|Glob", "Edit|Write")
+        ]
+        codex_items = [
+            it for it in codex_items if it["matcher"] != "Edit|Write"
         ]
     if shape(claude_items) != shape(codex_items):
         raise SystemExit(
@@ -658,6 +703,142 @@ PY
   rm -f "$tmp_err"
 }
 
+run_hook_contract_check() {
+  local tmp_out tmp_err
+  tmp_out="$(mktemp)"
+  tmp_err="$(mktemp)"
+  python3 "$HOOK_CONTRACT_CHECKER" "$@" >"$tmp_out" 2>"$tmp_err"
+  RUN_EXIT=$?
+  RUN_STDOUT="$(cat "$tmp_out")"
+  RUN_STDERR="$(cat "$tmp_err")"
+  rm -f "$tmp_out" "$tmp_err"
+}
+
+assert_hook_contract_drift_case() {
+  local fixture_dir="$1"; shift
+  local zcode_fixture="$1"; shift
+  local claude_fixture="$1"; shift
+  local codex_fixture="$1"; shift
+  local platform="$1"; shift
+  local drift_mode="$1"; shift
+  local source drift_fixture drift_label
+  local expected_matcher="Edit|Write"
+  local zcode_candidate="$zcode_fixture"
+  local claude_candidate="$claude_fixture"
+  local codex_candidate="$codex_fixture"
+
+  drift_fixture="$fixture_dir/${platform// /-}-${drift_mode}-drift.json"
+  case "$platform" in
+    "ZCode") source="$zcode_fixture"; zcode_candidate="$drift_fixture" ;;
+    "Claude Code") source="$claude_fixture"; claude_candidate="$drift_fixture" ;;
+    "Codex") source="$codex_fixture"; codex_candidate="$drift_fixture" ;;
+  esac
+  cp "$source" "$drift_fixture"
+  python3 - "$drift_fixture" "$platform" "$drift_mode" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+platform = sys.argv[2]
+drift_mode = sys.argv[3]
+config = json.loads(path.read_text())
+hooks = config["hooks"]["events"] if platform == "ZCode" else config["hooks"]
+if drift_mode == "missing":
+    hooks["PreToolUse"] = [
+        item for item in hooks["PreToolUse"] if item.get("matcher") != "Edit|Write"
+    ]
+elif drift_mode == "extra":
+    command = '"$CLAUDE_PROJECT_DIR"/.claude/hooks/block-master-edit.sh'
+    if platform == "Codex":
+        command = (
+            'bash "$(git rev-parse --show-toplevel)/.codex/hooks/'
+            'run-claude-pretool.sh" block-master-edit.sh'
+        )
+    hooks["PreToolUse"].append(
+        {
+            "matcher": "Read",
+            "hooks": [{"type": "command", "command": command}],
+        }
+    )
+elif drift_mode == "duplicate":
+    for item in hooks["PreToolUse"]:
+        if item.get("matcher") == "Edit|Write":
+            item["hooks"].append(dict(item["hooks"][0]))
+elif drift_mode == "wrong-wrapper":
+    for item in hooks["PreToolUse"]:
+        if item.get("matcher") == "Edit|Write":
+            item["hooks"][0]["command"] = (
+                "bash /tmp/run-claude-pretool.sh block-master-edit.sh"
+            )
+else:
+    for item in hooks["PreToolUse"]:
+        if item.get("matcher") == "Edit|Write":
+            command = "echo .claude/hooks/block-master-edit.sh"
+            if platform == "Codex":
+                command = "echo run-claude-pretool.sh block-master-edit.sh"
+            item["hooks"][0]["command"] = command
+path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n")
+PY
+  run_hook_contract_check \
+    --zcode "$zcode_candidate" \
+    --claude "$claude_candidate" \
+    --codex "$codex_candidate"
+  case "$drift_mode" in
+    missing) drift_label="缺失 Gate" ;;
+    echo) drift_label="未执行 Gate" ;;
+    extra) drift_label="多余阻断契约"; expected_matcher="Read" ;;
+    duplicate) drift_label="重复挂载 Gate" ;;
+    wrong-wrapper) drift_label="wrapper 路径错误" ;;
+  esac
+  assert_exit_nonzero "contracts: ${platform} ${drift_label} 时失败"
+  assert_stderr_has "$platform" "contracts: ${platform} ${drift_label} 诊断含平台"
+  assert_stderr_has "PreToolUse" "contracts: ${platform} ${drift_label} 诊断含事件"
+  assert_stderr_has "$expected_matcher" "contracts: ${platform} ${drift_label} 诊断含 matcher"
+  assert_stderr_has "block-master-edit.sh" "contracts: ${platform} ${drift_label} 诊断含 Gate"
+}
+
+assert_hook_contract_drift_detection() {
+  local fixture_dir zcode_fixture claude_fixture codex_fixture
+  local platform drift_mode
+  fixture_dir="$(mktemp -d)"
+  zcode_fixture="$fixture_dir/zcode.json"
+  claude_fixture="$fixture_dir/claude.json"
+  codex_fixture="$fixture_dir/codex.json"
+  cp "$REPO_ROOT/.zcode/config.json" "$zcode_fixture"
+  cp "$REPO_ROOT/.claude/settings.json" "$claude_fixture"
+  cp "$CODEX_HOOKS_JSON" "$codex_fixture"
+
+  run_hook_contract_check \
+    --zcode "$zcode_fixture" \
+    --claude "$claude_fixture" \
+    --codex "$codex_fixture"
+  assert_exit 0 "contracts: 三端临时基线有效"
+  assert_stdout_empty "contracts: 有效基线 stdout 为空"
+  assert_stderr_empty "contracts: 有效基线 stderr 为空"
+
+  for drift_mode in missing echo extra duplicate; do
+    for platform in "ZCode" "Claude Code" "Codex"; do
+      assert_hook_contract_drift_case \
+        "$fixture_dir" \
+        "$zcode_fixture" \
+        "$claude_fixture" \
+        "$codex_fixture" \
+        "$platform" \
+        "$drift_mode"
+    done
+  done
+  assert_hook_contract_drift_case \
+    "$fixture_dir" \
+    "$zcode_fixture" \
+    "$claude_fixture" \
+    "$codex_fixture" \
+    "Codex" \
+    "wrong-wrapper"
+
+  rm -rf "$fixture_dir"
+}
+
 codex_command_for() {
   local script="$1"; shift
   local event="${1:-PreToolUse}"
@@ -699,6 +880,7 @@ CODEX_DANGER_CMD="$(codex_command_for block-dangerous-git.sh)"
 CODEX_ISSUE_CMD="$(codex_command_for block-issue-without-repo.sh)"
 CODEX_RELEASE_CMD="$(codex_command_for confirm-release-action.sh)"
 CODEX_RELEASE_POST_CMD="$(codex_command_for confirm-release-action.sh PostToolUse)"
+CODEX_MASTER_EDIT_CMD="bash \"$REPO_ROOT/.codex/hooks/run-claude-pretool.sh\" block-master-edit.sh"
 
 # ── 用例 ────────────────────────────────────────────────────────
 
@@ -1760,6 +1942,11 @@ unset CONCROT_REPO CONCROT_LOG CONCROT_ARCHIVE concrot_sz
 unset AUDIT_HOOK
 
 # Slice 5 — Codex project hook layer
+assert_hook_contract_drift_detection
+run_hook_contract_check
+assert_exit 0 "contracts: 真实三端 Hook 配置满足共享契约"
+assert_stdout_empty "contracts: 真实三端 Hook 配置 stdout 为空"
+assert_stderr_empty "contracts: 真实三端 Hook 配置 stderr 为空"
 assert_file_exists "$CODEX_HOOKS_JSON" "codex: hooks.json 存在"
 assert_codex_hooks_valid "codex: hooks.json 与 Claude matcher 同步"
 for runtime_hook in .claude/hooks/*.sh .codex/hooks/*.sh .claude/settings.json .codex/hooks.json; do
@@ -1773,6 +1960,69 @@ assert_git_not_ignored ".codex/hooks/run-claude-pretool.sh" "codex: wrapper 可�
 assert_git_ignored ".codex/config.toml" "codex: config.toml 保持私密"
 assert_git_ignored ".codex/local.json" "codex: 其它本机配置保持私密"
 assert_git_ignored ".codex/hooks/other.sh" "codex: 禁止提交复制出来的 hook 实现"
+
+# 可重复运行时探针必须从真实 Codex 配置一路驱动到共享 Gate，并输出稳定摘要。
+assert_file_exists "$CODEX_WRITE_PROBE" "codex probe: 探针存在"
+run_command_hook "bash \"$CODEX_WRITE_PROBE\"" ""
+assert_exit 0 "codex probe: 运行成功"
+assert_stdout_has "matcher=Edit|Write" "codex probe: 锁定 matcher"
+assert_stdout_has "tool_name=apply_patch" "codex probe: 锁定实际工具名"
+assert_stdout_has "tool_input=command" "codex probe: 锁定输入字段"
+assert_stdout_has "master create=blocked" "codex probe: master 创建被阻断"
+assert_stdout_has "master update=blocked" "codex probe: master 修改被阻断"
+assert_stdout_has "task create=allowed" "codex probe: 任务区创建放行"
+assert_stdout_has "task update=allowed" "codex probe: 任务区修改放行"
+assert_stderr_empty "codex probe: 成功时 stderr 为空"
+
+# Codex 官方 PreToolUse 形状：matcher 命中 Edit|Write，但 wrapper 收到的
+# tool_name 仍为 apply_patch，补丁正文位于 tool_input.command，路径相对 session cwd。
+CODEX_PATCH_ROOT="$(mktemp -d)"
+CODEX_PATCH_MASTER="$CODEX_PATCH_ROOT/master"
+CODEX_PATCH_FEATURE="$CODEX_PATCH_ROOT/feature"
+mkdir -p "$CODEX_PATCH_MASTER" "$CODEX_PATCH_FEATURE"
+git -C "$CODEX_PATCH_MASTER" init -q
+git -C "$CODEX_PATCH_MASTER" symbolic-ref HEAD refs/heads/master
+git -C "$CODEX_PATCH_FEATURE" init -q
+git -C "$CODEX_PATCH_FEATURE" symbolic-ref HEAD refs/heads/feature/x
+printf 'before\n' >"$CODEX_PATCH_MASTER/existing.txt"
+printf 'before\n' >"$CODEX_PATCH_FEATURE/existing.txt"
+
+run_command_hook "$CODEX_MASTER_EDIT_CMD" "$(printf '{\"tool_name\":\"apply_patch\",\"cwd\":\"%s\",\"tool_input\":{\"command\":\"*** Begin Patch\\n*** Add File: created.txt\\n+created\\n*** End Patch\"}}' "$CODEX_PATCH_MASTER")"
+assert_exit 2 "codex apply_patch: master 创建文件由共享 Gate 拦截"
+
+run_command_hook "$CODEX_MASTER_EDIT_CMD" "$(printf '{\"tool_name\":\"apply_patch\",\"cwd\":\"%s\",\"tool_input\":{\"command\":\"*** Begin Patch\\n*** Add File: created.txt\\n+created\\n*** End Patch\"}}' "$CODEX_PATCH_FEATURE")"
+assert_exit 0 "codex apply_patch: feature 创建文件由共享 Gate 放行"
+
+run_command_hook "$CODEX_MASTER_EDIT_CMD" "$(printf '{\"tool_name\":\"apply_patch\",\"cwd\":\"%s\",\"tool_input\":{\"command\":\"*** Begin Patch\\n*** Update File: existing.txt\\n@@\\n-before\\n+after\\n*** End Patch\"}}' "$CODEX_PATCH_MASTER")"
+assert_exit 2 "codex apply_patch: master 修改文件由共享 Gate 拦截"
+
+run_command_hook "$CODEX_MASTER_EDIT_CMD" "$(printf '{\"tool_name\":\"apply_patch\",\"cwd\":\"%s\",\"tool_input\":{\"command\":\"*** Begin Patch\\n*** Update File: existing.txt\\n@@\\n-before\\n+after\\n*** End Patch\"}}' "$CODEX_PATCH_FEATURE")"
+assert_exit 0 "codex apply_patch: feature 修改文件由共享 Gate 放行"
+
+# 第一个目标位于 feature、第二个目标位于 master：wrapper 必须逐目标执行，
+# 不能因首个目标放行而漏掉后续工作树中的 master 写入。
+run_command_hook "$CODEX_MASTER_EDIT_CMD" "$(printf '{\"tool_name\":\"apply_patch\",\"cwd\":\"%s\",\"tool_input\":{\"command\":\"*** Begin Patch\\n*** Add File: feature-only.txt\\n+allowed\\n*** Update File: ../master/existing.txt\\n@@\\n-before\\n+blocked\\n*** End Patch\"}}' "$CODEX_PATCH_FEATURE")"
+assert_exit 2 "codex apply_patch: 多工作树补丁含 master 目标时拦截"
+
+# Update 源文件位于 feature，但 Move to 目标位于 master：源与目标都必须经过共享 Gate。
+run_command_hook "$CODEX_MASTER_EDIT_CMD" "$(printf '{\"tool_name\":\"apply_patch\",\"cwd\":\"%s\",\"tool_input\":{\"command\":\"*** Begin Patch\\n*** Update File: existing.txt\\n*** Move to: ../master/moved.txt\\n@@\\n-before\\n+after\\n*** End Patch\"}}' "$CODEX_PATCH_FEATURE")"
+assert_exit 2 "codex apply_patch: Move to master 目标由共享 Gate 拦截"
+
+run_command_hook "$CODEX_MASTER_EDIT_CMD" "$(printf '{\"tool_name\":\"apply_patch\",\"cwd\":\"%s\",\"tool_input\":{\"command\":\"*** Begin Patch\\n*** Update File: existing.txt\\n*** Move to: moved.txt\\n@@\\n-before\\n+after\\n*** End Patch\"}}' "$CODEX_PATCH_FEATURE")"
+assert_exit 0 "codex apply_patch: Move to feature 目标由共享 Gate 放行"
+
+run_command_hook "$CODEX_MASTER_EDIT_CMD" "$(printf '{\"tool_name\":\"apply_patch\",\"cwd\":\"%s\",\"tool_input\":{\"command\":\"*** Begin Patch\\n*** Add File: feature-only.txt\\n+allowed\\n*** Delete File: ../master/existing.txt\\n*** End Patch\"}}' "$CODEX_PATCH_FEATURE")"
+assert_exit 2 "codex apply_patch: Delete master 目标由共享 Gate 拦截"
+
+run_command_hook "$CODEX_MASTER_EDIT_CMD" "$(printf '{\"tool_name\":\"apply_patch\",\"cwd\":\"%s\",\"tool_input\":{\"command\":\"*** Begin Patch\\n*** Update File: existing.txt\\n*** Move to:\\n@@\\n-before\\n+after\\n*** End Patch\"}}' "$CODEX_PATCH_FEATURE")"
+assert_exit 2 "codex apply_patch: 部分可解析但 Move 目标畸形时 fail closed"
+
+run_command_hook "$CODEX_MASTER_EDIT_CMD" "$(printf '{\"tool_name\":\"apply_patch\",\"cwd\":\"%s\",\"tool_input\":{\"command\":\"*** Begin Patch\\n*** End Patch\"}}' "$CODEX_PATCH_FEATURE")"
+assert_exit 2 "codex apply_patch: 无法解析目标时 fail closed"
+assert_stderr_has "apply_patch" "codex apply_patch: fail closed 提示含输入类型"
+
+rm -rf "$CODEX_PATCH_ROOT"
+unset CODEX_PATCH_ROOT CODEX_PATCH_MASTER CODEX_PATCH_FEATURE
 
 # Slice 5.5 — 用户本地集成区 / Agent 任务区边界
 WRITE_PREFLIGHT_HEADING="## 写入前自检（每次写操作前强制执行）"
