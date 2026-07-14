@@ -21,6 +21,12 @@ public class User extends BaseEntity {
     /** 展示用户名 */
     private String username;
 
+    /** 头像 URL；空或 "0" 表示使用默认首字头像 */
+    private String avatar;
+
+    /** 密码（暂不启用密码登录） */
+    private String password;
+
     /** 状态: NORMAL / EXPIRED / LOCKED / UNAVAILABLE */
     private String status;
 }

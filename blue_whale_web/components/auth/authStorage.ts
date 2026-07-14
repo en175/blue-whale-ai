@@ -12,7 +12,7 @@ const REFRESH_TOKEN_KEY = "bw-refresh-token";
 export const SKIP_AUTH = process.env.NEXT_PUBLIC_SKIP_AUTH === "1";
 
 /** SKIP_AUTH 模式下注入的占位用户，让 UI 呈现已登录态。 */
-export const MOCK_USER: User = { userId: 1, username: "本地测试用户", phone: "13800000000" };
+export const MOCK_USER: User = { userId: 1, uid: "U-0000", username: "本地测试用户", phone: "13800000000" };
 
 // ---- user ----
 
@@ -29,7 +29,12 @@ export function loadUser(): User | null {
     const uid = parsed.userId;
     const userId = typeof uid === "number" ? uid : typeof uid === "string" ? Number(uid) : null;
     if (userId == null || Number.isNaN(userId)) return null;
-    return { username: parsed.username as string, phone: parsed.phone as string, userId };
+    // uid（前端 U-xxxx）：旧数据可能无此字段，回填空串，由 AuthContext 补全
+    const storedUid = typeof parsed.uid === "string" ? parsed.uid : "";
+    // avatar：空 / "0" 视为无头像
+    const avatar = typeof parsed.avatar === "string" && parsed.avatar && parsed.avatar !== "0"
+      ? parsed.avatar : undefined;
+    return { username: parsed.username as string, phone: parsed.phone as string, userId, uid: storedUid, avatar };
   } catch {
     return null;
   }

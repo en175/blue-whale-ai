@@ -26,6 +26,9 @@ public class LoginResponse {
     private String username;
     private String phone;
 
+    /** 头像 URL；空或 "0" 表示默认首字头像 */
+    private String avatar;
+
     @JSONField(name = "is_new_user")
     private Boolean isNewUser;
 }

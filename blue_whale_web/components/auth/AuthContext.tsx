@@ -4,9 +4,10 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { usePathname, useRouter } from "next/navigation";
 import type { PendingAction, User } from "./types";
 import { clearUser, clearTokens, loadAccessToken, loadRefreshToken, loadUser, saveTokens, saveUser, SKIP_AUTH, MOCK_USER } from "./authStorage";
-import { loginWithCode, logoutApi, refreshToken, ApiError } from "@/lib/auth";
+import { loginWithCode, logoutApi, refreshToken, updateUsername as updateUsernameApi, changePhone as changePhoneApi, ApiError } from "@/lib/auth";
 import { subscribeToAuthFailure, getAccessTokenSilently } from "@/lib/api-client";
 import { LoginModal } from "./LoginModal";
+import { resolveUserId, rebindPhone } from "./userId";
 
 interface AuthContextValue {
   user: User | null;
@@ -17,6 +18,9 @@ interface AuthContextValue {
   signOut: () => void;
   openLogin: () => void;
   closeLogin: () => void;
+  updateUsername: (username: string) => Promise<void>;
+  changePhone: (newPhone: string, code: string) => Promise<void>;
+  updateAvatar: (url: string) => void;
 }
 
 const Ctx = createContext<AuthContextValue | null>(null);
@@ -62,9 +66,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // 后台静默换新 token
     refreshToken(rt)
       .then((data) => {
+        const uid = resolveUserId(data.phone);
+        const avatar = data.avatar && data.avatar !== "0" ? data.avatar : undefined;
         saveTokens(data.access_token, data.refresh_token);
-        saveUser({ userId: data.user_id, username: data.username, phone: data.phone });
-        setUser({ userId: data.user_id, username: data.username, phone: data.phone });
+        saveUser({ userId: data.user_id, uid, username: data.username, phone: data.phone, avatar });
+        setUser({ userId: data.user_id, uid, username: data.username, phone: data.phone, avatar });
       })
       .catch((e) => {
         // 仅当存储中 RT 仍是同一份时才处理，避免竞态误伤新登录
@@ -130,7 +136,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuthLoading(true);
     try {
       const data = await loginWithCode(phone, code);
-      const u: User = { userId: data.user_id, username: data.username, phone: data.phone };
+      const uid = resolveUserId(phone);
+      const avatar = data.avatar && data.avatar !== "0" ? data.avatar : undefined;
+      const u: User = { userId: data.user_id, uid, username: data.username, phone: data.phone, avatar };
       saveUser(u);
       saveTokens(data.access_token, data.refresh_token);
       setUser(u);
@@ -160,9 +168,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (pathname?.startsWith("/canvas")) router.replace("/");
   }, [pathname, router]);
 
+  const updateUsername = useCallback(async (username: string) => {
+    await updateUsernameApi(username);
+    setUser((prev) => {
+      if (!prev) return null;
+      const updated = { ...prev, username };
+      saveUser(updated);
+      return updated;
+    });
+  }, []);
+
+  const changePhone = useCallback(async (newPhone: string, code: string) => {
+    await changePhoneApi(newPhone, code);
+    setUser((prev) => {
+      if (!prev) return null;
+      rebindPhone(prev.phone, newPhone, prev.uid);
+      const updated = { ...prev, phone: newPhone };
+      saveUser(updated);
+      return updated;
+    });
+  }, []);
+
+  const updateAvatar = useCallback((url: string) => {
+    setUser((prev) => {
+      if (!prev) return null;
+      const updated = { ...prev, avatar: url };
+      saveUser(updated);
+      return updated;
+    });
+  }, []);
+
   const value: AuthContextValue = {
     user, isLoginOpen, pendingAction,
-    requireAuth, signIn, signOut, openLogin, closeLogin,
+    requireAuth, signIn, signOut, openLogin, closeLogin, updateUsername, changePhone, updateAvatar,
   };
 
   return (

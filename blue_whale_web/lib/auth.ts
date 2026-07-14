@@ -18,12 +18,14 @@ export interface LoginData {
   user_id: number;
   username: string;
   phone: string;
+  avatar?: string;
   is_new_user: boolean;
 }
 export interface UserInfo {
   user_id: number;
   username: string;
   phone: string;
+  avatar?: string;
 }
 
 interface ApiResult<T> {
@@ -134,5 +136,15 @@ export function updateUsername(username: string): Promise<void> {
   return apiRequest<void>("/api/user/username", {
     method: "PUT",
     body: JSON.stringify({ username }),
+  });
+}
+
+/** 上传头像 */
+export async function uploadAvatar(file: File): Promise<{ url: string }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return apiRequest<{ url: string }>("/api/user/avatar", {
+    method: "PUT",
+    body: formData,
   });
 }

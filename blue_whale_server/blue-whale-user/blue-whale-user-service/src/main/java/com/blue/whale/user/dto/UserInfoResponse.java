@@ -16,4 +16,7 @@ public class UserInfoResponse {
 
     private String username;
     private String phone;
+
+    /** 头像 URL；空或 "0" 表示默认首字头像 */
+    private String avatar;
 }
