@@ -2,8 +2,9 @@
 """Append-only audit log for blocking PreToolUse hooks.
 
 Records one structured JSON line per hook invocation, capturing only the
-metadata needed to answer "was this hook actually called?" — never file
-contents, commands, tokens, or credentials.
+metadata needed to answer "was this hook actually called?" plus a bounded
+stable operation category chosen by the gate — never file contents, commands,
+tool parameter values, tokens, or credentials.
 
 Design contract (IK10CW):
   - Audit success or failure MUST NOT change the hook's exit code, stdout,
@@ -82,12 +83,13 @@ def _scalar_str(value: object) -> str:
     return ""
 
 
-def read_upstream_fields() -> dict[str, str]:
-    """Parse tool_name / tool_use_id / session_id / file_path from stdin JSON.
+def read_upstream_fields(include_file_context: bool) -> dict[str, str]:
+    """Parse safe top-level correlation fields from stdin JSON.
 
-    Missing identifiers are kept as empty strings — never reconstruct them
-    from the full payload. Non-string values (objects/arrays) are coerced to
-    empty strings to prevent str() from serializing embedded content.
+    ``file_path`` is read only for the master Edit/Write gate, which opts in
+    explicitly. Other Bash/MCP gates never copy any ``tool_input`` value into
+    the audit record. Missing identifiers are kept as empty strings and
+    non-string values are coerced to empty strings.
     """
     try:
         data = json.load(sys.stdin)
@@ -99,10 +101,12 @@ def read_upstream_fields() -> dict[str, str]:
     if not isinstance(tool_input, dict):
         tool_input = {}
     return {
-        "tool": _scalar_str(data.get("tool_name") or tool_input.get("tool_name")),
+        "tool": _scalar_str(data.get("tool_name")),
         "tool_use_id": _scalar_str(data.get("tool_use_id")),
         "session_id": _scalar_str(data.get("session_id")),
-        "file_path": _scalar_str(tool_input.get("file_path") or data.get("file_path")),
+        "file_path": _scalar_str(tool_input.get("file_path") or data.get("file_path"))
+        if include_file_context
+        else "",
     }
 
 
@@ -154,19 +158,24 @@ def run() -> int:
                         help="hook script name, e.g. block-master-edit.sh")
     parser.add_argument("--branch", default="",
                         help="resolved branch of the target file_path (empty if detached)")
+    parser.add_argument("--include-file-context", action="store_true",
+                        help="record file_path/branch for the master Edit/Write gate")
+    parser.add_argument("--operation", required=True,
+                        help="bounded stable operation category chosen by the gate")
     parser.add_argument("--exit-code", required=True,
                         help="exit code the hook will return (0 or 2)")
     parser.add_argument("--reason", required=True,
                         help="short stable reason tag, e.g. blocked-master")
     args = parser.parse_args()
 
-    upstream = read_upstream_fields()
+    upstream = read_upstream_fields(args.include_file_context)
     record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "hook": args.hook,
         "tool": upstream["tool"],
         "file_path": upstream["file_path"],
-        "branch": args.branch,
+        "branch": args.branch if args.include_file_context else "",
+        "operation": args.operation[:64],
         "session_id": upstream["session_id"],
         "tool_use_id": upstream["tool_use_id"],
         "exit_code": int(args.exit_code),

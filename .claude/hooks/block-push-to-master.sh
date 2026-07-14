@@ -21,12 +21,28 @@
 INPUT=$(cat)
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 PRETOOL="$HOOK_DIR/lib/pretool.py"
+AUDIT="$HOOK_DIR/lib/hook_audit.py"
+HOOK_NAME="$(basename "$0")"
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 COMMAND=$(printf '%s' "$INPUT" | python3 "$PRETOOL" value command 2>/dev/null || true)
 
-[ -z "$COMMAND" ] && exit 0
+audit() {
+  printf '%s' "$INPUT" | python3 "$AUDIT" \
+    --project-dir "$PROJECT_DIR" \
+    --hook "$HOOK_NAME" \
+    --operation "$1" \
+    --exit-code "$2" \
+    --reason "$3" >/dev/null || true
+}
+
+if [ -z "$COMMAND" ]; then
+  audit "bash-other" 0 "allowed-policy"
+  exit 0
+fi
 
 # 非 git push 命令直接放行
 if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" has-git-push; then
+  audit "bash-other" 0 "allowed-policy"
   exit 0
 fi
 
@@ -35,6 +51,7 @@ target_ref=$(printf '%s' "$COMMAND" | python3 "$PRETOOL" protected-push-target 2
 # 显式目标或隐式当前分支 = master/main → 无条件拦
 case "$target_ref" in
   master|main)
+    audit "git-push-protected" 2 "blocked-policy"
     cat >&2 <<EOF
 BLOCKED: 直推 ${target_ref} 被拦截。
   命令: $COMMAND
@@ -49,4 +66,5 @@ EOF
     ;;
 esac
 
+audit "git-push-unprotected" 0 "allowed-policy"
 exit 0
