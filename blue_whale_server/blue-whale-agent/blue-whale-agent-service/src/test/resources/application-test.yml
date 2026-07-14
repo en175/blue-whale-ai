@@ -3,6 +3,12 @@
 server:
   port: 0
 
+blue-whale:
+  outbox:
+    enabled: false
+  project-events:
+    redis-enabled: false
+
 spring:
   datasource:
     dynamic:

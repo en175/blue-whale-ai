@@ -11,6 +11,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -24,12 +26,16 @@ class CanvasServiceTest {
 
     @Mock
     private CanvasMapper canvasMapper;
+    @Mock
+    private ProjectEventService projectEventService;
+    @Mock
+    private ProjectService projectService;
 
     private CanvasService canvasService;
 
     @BeforeEach
     void setUp() {
-        canvasService = new CanvasService(canvasMapper);
+        canvasService = new CanvasService(canvasMapper, projectEventService, projectService);
     }
 
     @Test
@@ -68,12 +74,17 @@ class CanvasServiceTest {
             return 1;
         });
 
-        CanvasDto dto = canvasService.save(1L,
+        CanvasDto dto = canvasService.save(1L, 10L,
                 new SaveCanvasRequest("{\"zoom\":1}", "[{\"id\":\"n1\"}]"));
 
         assertThat(dto.id()).isEqualTo(1L);
         assertThat(captor.getValue().getProjectId()).isEqualTo(1L);
         verify(canvasMapper, never()).updateById(any(Canvas.class));
+        verify(projectEventService).appendEvent(
+                eq(1L), eq("canvas.updated"), eq("canvas"), eq("1"), any(),
+                eq(Map.of("viewport", "{\"zoom\":1}", "nodes", "[{\"id\":\"n1\"}]")),
+                isNull(), isNull());
+        verify(projectService).requireOwnedForUpdate(1L, 10L);
     }
 
     @Test
@@ -86,7 +97,7 @@ class CanvasServiceTest {
         when(canvasMapper.selectOne(any())).thenReturn(existing);
         when(canvasMapper.updateById(any(Canvas.class))).thenReturn(1);
 
-        CanvasDto dto = canvasService.save(1L,
+        CanvasDto dto = canvasService.save(1L, 10L,
                 new SaveCanvasRequest("{\"zoom\":2}", "[{\"id\":\"n2\"}]"));
 
         assertThat(dto.id()).isEqualTo(5L);

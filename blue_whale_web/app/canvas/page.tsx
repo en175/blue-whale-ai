@@ -26,10 +26,21 @@ import {
   AgentChatPanel,
   ZoomControls,
 } from "./_canvas";
-import type { Viewport, NodeItem, NodeType, DockMediaItem, CardMessage, ChatMessage } from "./_canvas";
+import type {
+  Viewport,
+  NodeItem,
+  NodeType,
+  DockMediaItem,
+  CardMessage,
+  ChatMessage,
+} from "./_canvas";
 import { nodeFromCard, useCanvasProjects } from "./_canvas";
 import type { GenerateArgs } from "./_canvas";
-import { generateImage, createVideoJob, streamJob } from "./_canvas/api/generation";
+import {
+  generateImage,
+  createVideoJob,
+  streamJob,
+} from "./_canvas/api/generation";
 import { useJobStatus } from "./_canvas/hooks/useJobStatus";
 
 /** "1x"/"2x" → 数字；解析失败回落 1。 */
@@ -66,12 +77,17 @@ function CanvasPageInner() {
     const storedUser = loadUser();
     // 本地开发跳过鉴权（SKIP_AUTH）时，不做未登录跳转
     if (!SKIP_AUTH && !storedUser) {
-      console.warn("[Canvas] gate: loadUser()=null → 踢回首页 + 弹登录。localStorage keys:",
-        Object.keys(localStorage).filter(k => k.startsWith("bw-")));
+      console.warn(
+        "[Canvas] gate: loadUser()=null → 踢回首页 + 弹登录。localStorage keys:",
+        Object.keys(localStorage).filter((k) => k.startsWith("bw-")),
+      );
       guardRouter.replace("/");
       openLogin();
     } else {
-      console.log("[Canvas] gate: loadUser() 成功，user:", storedUser?.username);
+      console.log(
+        "[Canvas] gate: loadUser() 成功，user:",
+        storedUser?.username,
+      );
     }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setGated(false);
@@ -96,10 +112,15 @@ function CanvasPageInner() {
 
   const [isAgentOpen, setIsAgentOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
-  const [bottomDockMode, setBottomDockMode] = useState<"image" | "video">("image");
+  const [bottomDockMode, setBottomDockMode] = useState<"image" | "video">(
+    "image",
+  );
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
   const [videoDockMedia, setVideoDockMedia] = useState<DockMediaItem[]>([]);
-  const [agentPendingMention, setAgentPendingMention] = useState<{ name: string; nonce: number } | null>(null);
+  const [agentPendingMention, setAgentPendingMention] = useState<{
+    name: string;
+    nonce: number;
+  } | null>(null);
   // 「从画布选择」模式：非 null 表示正在为哪个 Dock 挑图（image/video）
   const [pickingFor, setPickingFor] = useState<"image" | "video" | null>(null);
   // 生成：视频异步轮询 hook + 生成中状态 + 待落节点的 prompt
@@ -111,76 +132,81 @@ function CanvasPageInner() {
   // 受控流写回适配：CanvasSurface 的 onNodesCommit / onViewportChange 解析后整体写回当前 active project。
   const setViewport = useCallback(
     (next: Viewport) => {
-      dispatch({ type: "set-viewport", projectId: activeProject.id, viewport: next });
+      dispatch({
+        type: "set-viewport",
+        projectId: activeProject.id,
+        viewport: next,
+      });
     },
-    [activeProject.id]
+    [activeProject.id],
   );
   const setNodes = useCallback(
     (next: NodeItem[]) => {
       dispatch({ type: "set-nodes", projectId: activeProject.id, nodes: next });
     },
-    [activeProject.id]
+    [activeProject.id],
   );
 
   // 画布素材节点操作面板的统一动作分发（按 nodeId 反查 node）
-  const handleNodeAction = useCallback(
-    (node: NodeItem, actionId: string) => {
-      const name = node.content || "未命名素材";
-      switch (actionId) {
-        case "refresh": {
-          // 重新编辑：唤起底部图片 Dock（不带素材）
-          setBottomDockMode("image");
-          setIsBottomDockOpen(true);
-          break;
-        }
-        case "shuffle": {
-          // 再创作：带入参考图占位 + 唤起图片 Dock
-          if (node.imageUrl) {
-            setImageDockMedia([{ id: node.id, type: "image", name, src: node.imageUrl }]);
-          }
-          setBottomDockMode("image");
-          setIsBottomDockOpen(true);
-          break;
-        }
-        case "mention": {
-          // 添加到对话：打开右侧面板并 @ 素材名
-          setIsAgentOpen(true);
-          setAgentPendingMention({ name, nonce: Date.now() });
-          break;
-        }
-        case "video": {
-          // 生成视频：带入参考图占位 + 唤起视频 Dock
-          if (node.imageUrl) {
-            setVideoDockMedia([{ id: node.id, type: "image", name, src: node.imageUrl }]);
-          }
-          setBottomDockMode("video");
-          setIsBottomDockOpen(true);
-          break;
-        }
-        case "info": {
-          // 详情信息：暂忽略，后续补充
-          break;
-        }
-        case "download": {
-          // 下载：仅图片素材
-          if (node.imageUrl) {
-            const a = document.createElement("a");
-            a.href = node.imageUrl;
-            a.download = name || "image";
-            a.target = "_blank";
-            a.rel = "noopener noreferrer";
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-          }
-          break;
-        }
-        default:
-          break;
+  const handleNodeAction = useCallback((node: NodeItem, actionId: string) => {
+    const name = node.content || "未命名素材";
+    switch (actionId) {
+      case "refresh": {
+        // 重新编辑：唤起底部图片 Dock（不带素材）
+        setBottomDockMode("image");
+        setIsBottomDockOpen(true);
+        break;
       }
-    },
-    []
-  );
+      case "shuffle": {
+        // 再创作：带入参考图占位 + 唤起图片 Dock
+        if (node.imageUrl) {
+          setImageDockMedia([
+            { id: node.id, type: "image", name, src: node.imageUrl },
+          ]);
+        }
+        setBottomDockMode("image");
+        setIsBottomDockOpen(true);
+        break;
+      }
+      case "mention": {
+        // 添加到对话：打开右侧面板并 @ 素材名
+        setIsAgentOpen(true);
+        setAgentPendingMention({ name, nonce: Date.now() });
+        break;
+      }
+      case "video": {
+        // 生成视频：带入参考图占位 + 唤起视频 Dock
+        if (node.imageUrl) {
+          setVideoDockMedia([
+            { id: node.id, type: "image", name, src: node.imageUrl },
+          ]);
+        }
+        setBottomDockMode("video");
+        setIsBottomDockOpen(true);
+        break;
+      }
+      case "info": {
+        // 详情信息：暂忽略，后续补充
+        break;
+      }
+      case "download": {
+        // 下载：仅图片素材
+        if (node.imageUrl) {
+          const a = document.createElement("a");
+          a.href = node.imageUrl;
+          a.download = name || "image";
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }, []);
 
   // Esc 退出「从画布选择」模式（节点删除由 RF deleteKeyCode 承接）
   useEffect(() => {
@@ -225,7 +251,7 @@ function CanvasPageInner() {
       dispatch({ type: "add-node", projectId: activeProject.id, node });
       return id;
     },
-    [viewport, activeProject.id]
+    [viewport, activeProject.id],
   );
 
   // 对话流出现 card 的同一时刻，在画布同步创建对应图片 NodeItem（同一生成结果两种视图）。
@@ -233,9 +259,13 @@ function CanvasPageInner() {
   const handleCardGenerated = useCallback(
     (card: CardMessage) => {
       const partial = nodeFromCard(card, () => 0);
-      addNode("image", { content: partial.content, width: partial.width, height: partial.height });
+      addNode("image", {
+        content: partial.content,
+        width: partial.width,
+        height: partial.height,
+      });
     },
-    [addNode]
+    [addNode],
   );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -261,7 +291,7 @@ function CanvasPageInner() {
       reader.readAsDataURL(file);
       e.target.value = "";
     },
-    [addNode]
+    [addNode],
   );
 
   // Dock「本地上传」：既建画布节点，又把同一资产塞进对应 Dock 的参考 media（共享 id/src）
@@ -269,14 +299,23 @@ function CanvasPageInner() {
     (file: File, mode: "image" | "video") => {
       const url = URL.createObjectURL(file);
       const id = addNode("image", { content: file.name, imageUrl: url });
-      const item: DockMediaItem = { id, type: "image", name: file.name, src: url };
+      const item: DockMediaItem = {
+        id,
+        type: "image",
+        name: file.name,
+        src: url,
+      };
       if (mode === "image") {
-        setImageDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
+        setImageDockMedia((prev) =>
+          prev.some((m) => m.id === id) ? prev : [...prev, item],
+        );
       } else {
-        setVideoDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
+        setVideoDockMedia((prev) =>
+          prev.some((m) => m.id === id) ? prev : [...prev, item],
+        );
       }
     },
-    [addNode]
+    [addNode],
   );
 
   // 生成：图片同步落节点；视频异步提交后由 useJobStatus 轮询，succeeded 落节点
@@ -288,6 +327,7 @@ function CanvasPageInner() {
       try {
         if (args.mode === "image") {
           const result = await generateImage({
+            project_id: Number(activeProject.id),
             prompt: trimmed,
             model_id: args.settings.model.id,
             size_id: args.settings.resolution.id,
@@ -300,7 +340,8 @@ function CanvasPageInner() {
           if (result.stream && result.job_id != null) {
             // 流式模型：原生 EventSource 订阅，逐张上屏
             streamJob(result.job_id, {
-              onImage: (url) => addNode("image", { content: trimmed, imageUrl: url }),
+              onImage: (url) =>
+                addNode("image", { content: trimmed, imageUrl: url }),
               onDone: () => {
                 setGenerating(false);
                 setGenerateError(null);
@@ -320,6 +361,7 @@ function CanvasPageInner() {
           }
         } else {
           const result = await createVideoJob({
+            project_id: Number(activeProject.id),
             prompt: trimmed,
             resolution: args.settings.resolution.id,
             aspect_ratio: args.settings.aspectRatio.id,
@@ -336,14 +378,17 @@ function CanvasPageInner() {
         setGenerating(false);
       }
     },
-    [addNode, imageDockMedia, videoDockMedia, startJob]
+    [activeProject.id, addNode, imageDockMedia, videoDockMedia, startJob],
   );
 
   // 视频任务轮询终态：succeeded 落节点，failed/超时复位 generating
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (jobState.status === "succeeded") {
-      addNode("image", { content: pendingVideoPromptRef.current, imageUrl: jobState.assetUrl });
+      addNode("image", {
+        content: pendingVideoPromptRef.current,
+        imageUrl: jobState.assetUrl,
+      });
       setGenerating(false);
       resetJob();
     } else if (jobState.status === "failed") {
@@ -374,13 +419,17 @@ function CanvasPageInner() {
         src: node.imageUrl,
       };
       if (pickingFor === "image") {
-        setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+        setImageDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
       } else if (pickingFor === "video") {
-        setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+        setVideoDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
       }
       setPickingFor(null);
     },
-    [pickingFor]
+    [pickingFor],
   );
 
   // CanvasSurface 节点点击：选择模式下拦截为挑图，否则交 RF 默认选中
@@ -390,7 +439,7 @@ function CanvasPageInner() {
         handlePickNode(node);
       }
     },
-    [pickingFor, handlePickNode]
+    [pickingFor, handlePickNode],
   );
 
   // 操作浮层动作：按 nodeId 反查 node 后走 handleNodeAction
@@ -399,11 +448,13 @@ function CanvasPageInner() {
       const node = nodes.find((n) => n.id === nodeId);
       if (node) handleNodeAction(node, actionId);
     },
-    [nodes, handleNodeAction]
+    [nodes, handleNodeAction],
   );
 
   // 可选图片节点数（带 imageUrl），用于胶囊空态提示
-  const pickableCount = nodes.filter((n) => n.type === "image" && n.imageUrl).length;
+  const pickableCount = nodes.filter(
+    (n) => n.type === "image" && n.imageUrl,
+  ).length;
 
   const handleToolClick = useCallback(
     (id: string) => {
@@ -429,7 +480,7 @@ function CanvasPageInner() {
         addNode("text");
       }
     },
-    [addNode, bottomDockMode, handleUploadClick]
+    [addNode, bottomDockMode, handleUploadClick],
   );
 
   if (gated) {
@@ -505,9 +556,13 @@ function CanvasPageInner() {
             whiteSpace: "nowrap",
           }}
         >
-          <span style={{ color: "var(--tc-accent)", fontWeight: 600 }}>从画布选择</span>
+          <span style={{ color: "var(--tc-accent)", fontWeight: 600 }}>
+            从画布选择
+          </span>
           <span style={{ color: "var(--tc-text-tertiary)" }}>
-            {pickableCount === 0 ? "画布上还没有可用的图片" : "点击画布中的图片加入"}
+            {pickableCount === 0
+              ? "画布上还没有可用的图片"
+              : "点击画布中的图片加入"}
           </span>
           <span style={{ color: "var(--tc-text-muted)" }}>·</span>
           <button
@@ -533,8 +588,12 @@ function CanvasPageInner() {
           onClose={() => setIsBottomDockOpen(false)}
           imageMedia={imageDockMedia}
           videoMedia={videoDockMedia}
-          onRemoveImageMedia={(id) => setImageDockMedia((prev) => prev.filter((m) => m.id !== id))}
-          onRemoveVideoMedia={(id) => setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))}
+          onRemoveImageMedia={(id) =>
+            setImageDockMedia((prev) => prev.filter((m) => m.id !== id))
+          }
+          onRemoveVideoMedia={(id) =>
+            setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))
+          }
           onLocalUpload={(file) => handleDockLocalUpload(file, bottomDockMode)}
           onPickFromCanvas={() => handleRequestPick(bottomDockMode)}
           onExitPick={handleExitPick}
@@ -555,10 +614,19 @@ function CanvasPageInner() {
         onMentionConsumed={() => setAgentPendingMention(null)}
         onCardGenerated={handleCardGenerated}
         onAppendMessages={(msgs: ChatMessage[]) =>
-          dispatch({ type: "append-messages", projectId: activeProject.id, messages: msgs })
+          dispatch({
+            type: "append-messages",
+            projectId: activeProject.id,
+            messages: msgs,
+          })
         }
         onSetCardStatus={(cardId, status) =>
-          dispatch({ type: "set-card-status", projectId: activeProject.id, cardId, status })
+          dispatch({
+            type: "set-card-status",
+            projectId: activeProject.id,
+            cardId,
+            status,
+          })
         }
       />
 
@@ -566,7 +634,10 @@ function CanvasPageInner() {
         <Link
           href="/"
           className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-white/70 backdrop-blur-md transition-colors hover:text-white"
-          style={{ background: "var(--tc-bg-surface)", border: "1px solid var(--tc-menu-pill-border)" }}
+          style={{
+            background: "var(--tc-bg-surface)",
+            border: "1px solid var(--tc-menu-pill-border)",
+          }}
         >
           <ArrowLeft width={14} height={14} />
           返回首页
@@ -576,7 +647,9 @@ function CanvasPageInner() {
             className="text-xs"
             style={{
               color:
-                saveStatus === "error" ? "var(--tc-destructive)" : "var(--tc-text-muted)",
+                saveStatus === "error"
+                  ? "var(--tc-destructive)"
+                  : "var(--tc-text-muted)",
             }}
           >
             {saveStatus === "saving"

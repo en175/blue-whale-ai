@@ -10,6 +10,8 @@ import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
 import java.util.List;
@@ -22,8 +24,8 @@ import java.util.Map;
  * 当前 GenerationJob、Canvas 对 Asset 的引用，以及 {@code high_watermark_cursor}。
  * 快照状态至少反映到该高水位，客户端随后只需订阅该游标之后的增量（ADR-0017 §3）。
  *
- * <p>归属校验复用 {@link ProjectService#requireOwned}：查不到抛 DATA_NOT_EXIST，越权抛
- * DATA_NO_PERMISSION，二者都不泄漏资源是否存在。
+ * <p>归属校验复用 {@link ProjectService#requireOwned}：查不到或越权都抛 RESOURCE_NOT_FOUND，
+ * 不泄漏资源是否存在。
  */
 @Service
 @RequiredArgsConstructor
@@ -42,6 +44,7 @@ public class SnapshotService {
      * @param userId    当前用户 ID（用于归属校验）
      * @return 快照响应（含 high_watermark_cursor）
      */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public SnapshotResponse getSnapshot(Long projectId, Long userId) {
         // 归属校验（越权/不存在都不泄漏）
         projectService.requireOwned(projectId, userId);

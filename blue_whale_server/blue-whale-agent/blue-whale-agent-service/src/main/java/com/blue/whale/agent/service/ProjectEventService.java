@@ -23,7 +23,7 @@ import java.util.UUID;
  * 使游标分配、事件追加与权威状态转移、Outbox 写入落在同一事务。事务回滚则游标分配一并回滚。
  *
  * <p>游标分配：{@code SELECT ... FOR UPDATE} 锁定该 Project 的高水位行，递增后写回。
- * 首次为某 Project 产生事件时初始化高水位行（初始 0）。
+ * 首次为某 Project 产生事件时初始化高水位行（初始 1）。
  */
 @Slf4j
 @Service
@@ -37,8 +37,8 @@ public class ProjectEventService {
     /**
      * 在当前事务内追加一条产品事件（调用方必须已开启事务）。
      *
-     * <p>步骤：锁定高水位行 → 递增游标 → 写事件日志 → 写 Outbox（骨架）。全部在同一事务，
-     * 回滚则游标分配与事件都不落盘。调用方在 {@code afterCommit} 用返回值推实时 SSE。
+     * <p>步骤：锁定高水位行 → 递增游标 → 写事件日志 → 写 Outbox。全部在同一事务，
+     * 回滚则游标分配、事件和待发布消息都不落盘；发布器随后用稳定消息身份唤醒 SSE 连接。
      *
      * @param projectId        项目 ID
      * @param eventType        事件类型（{@link com.blue.whale.agent.model.constant.EventType}）
@@ -70,6 +70,8 @@ public class ProjectEventService {
 
         outboxMapper.insert(new OutboxMessage()
                 .setMessageId(event.getEventId())
+                .setProjectId(projectId)
+                .setCursor(nextCursor)
                 .setAggregateType(aggregateType)
                 .setAggregateId(aggregateId)
                 .setEventType(eventType)
@@ -119,17 +121,17 @@ public class ProjectEventService {
 
     /**
      * 锁定高水位行并分配下一个连续游标（必须在事务内调用）。
-     * 高水位行不存在时初始化为 0 再递增；并发首个写入由 FOR UPDATE 串行化。
+     * 高水位行不存在时初始化为 1；并发首个写入由 FOR UPDATE 串行化。
      */
     private long allocateCursor(Long projectId) {
         ProjectEventStream stream = eventStreamMapper.selectForUpdate(projectId);
         if (stream == null) {
-            // 首次：初始化高水位行（0），再 FOR UPDATE 确认占位
             ProjectEventStream init = new ProjectEventStream()
                     .setProjectId(projectId)
-                    .setHighWatermark(0L);
+                    .setHighWatermark(1L);
             try {
                 eventStreamMapper.insert(init);
+                return 1L;
             } catch (org.springframework.dao.DuplicateKeyException e) {
                 // 并发初始化：另一事务已插入，重新锁定
                 stream = eventStreamMapper.selectForUpdate(projectId);
@@ -138,7 +140,6 @@ public class ProjectEventService {
                 }
                 return increment(stream);
             }
-            return 1L;
         }
         return increment(stream);
     }

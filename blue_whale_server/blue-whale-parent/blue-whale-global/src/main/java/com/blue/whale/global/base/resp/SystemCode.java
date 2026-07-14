@@ -47,6 +47,8 @@ public enum SystemCode implements IResultCode {
     ASSET_UNAVAILABLE(SystemCode.ASSET_UNAVAILABLE_CODE, "资源不可用"),
     /** 游标已过期 */
     CURSOR_EXPIRED(SystemCode.CURSOR_EXPIRED_CODE, "游标已过期，请重新获取快照"),
+    /** 资源不存在 */
+    RESOURCE_NOT_FOUND(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在"),
     ;
 
     /** 通用 code */
@@ -76,6 +78,7 @@ public enum SystemCode implements IResultCode {
 
     /** 产品事件流 code（ADR-0016 游标恢复） */
     public static final int CURSOR_EXPIRED_CODE = 100300;
+    public static final int RESOURCE_NOT_FOUND_CODE = 100301;
 
     final int code;
     final String msg;

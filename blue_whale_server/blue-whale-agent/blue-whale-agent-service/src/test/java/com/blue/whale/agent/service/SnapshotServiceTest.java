@@ -37,25 +37,23 @@ class SnapshotServiceTest {
 
     @Test
     void getSnapshotRejectsWhenNotOwned() {
-        // 越权 → DATA_NO_PERMISSION（不泄漏存在性）
-        doThrow(new GlobalException(SystemCode.DATA_NO_PERMISSION_OPERATE_CODE, "无权限"))
+        doThrow(new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在"))
                 .when(projectService).requireOwned(1L, 999L);
 
         assertThatThrownBy(() -> snapshotService.getSnapshot(1L, 999L))
                 .isInstanceOf(GlobalException.class)
                 .extracting(e -> ((GlobalException) e).getCode())
-                .isEqualTo(SystemCode.DATA_NO_PERMISSION_OPERATE_CODE);
+                .isEqualTo(SystemCode.RESOURCE_NOT_FOUND_CODE);
     }
 
     @Test
     void getSnapshotRejectsWhenNotExist() {
-        // 不存在 → DATA_NOT_EXIST
-        doThrow(new GlobalException(SystemCode.DATA_NOT_EXIST_CODE, "不存在"))
+        doThrow(new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在"))
                 .when(projectService).requireOwned(99L, 10L);
 
         assertThatThrownBy(() -> snapshotService.getSnapshot(99L, 10L))
                 .isInstanceOf(GlobalException.class)
                 .extracting(e -> ((GlobalException) e).getCode())
-                .isEqualTo(SystemCode.DATA_NOT_EXIST_CODE);
+                .isEqualTo(SystemCode.RESOURCE_NOT_FOUND_CODE);
     }
 }

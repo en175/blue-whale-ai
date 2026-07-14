@@ -93,16 +93,21 @@ CREATE TABLE IF NOT EXISTS project_events
     occurred_at       DATETIME     NOT NULL,
     payload           CLOB NULL,
     gmt_create        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version           INT          NOT NULL DEFAULT 0,
+    is_delete         TINYINT      NOT NULL DEFAULT 0,
     CONSTRAINT uk_event_id UNIQUE (event_id),
     CONSTRAINT uk_project_cursor UNIQUE (project_id, cursor)
 );
 
-CREATE INDEX idx_project_occurred ON project_events (project_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_project_occurred ON project_events (project_id, occurred_at);
 
 CREATE TABLE IF NOT EXISTS outbox_messages
 (
     id              BIGINT PRIMARY KEY AUTO_INCREMENT,
     message_id      VARCHAR(64)  NOT NULL,
+    project_id      BIGINT       NOT NULL,
+    cursor          BIGINT       NOT NULL,
     aggregate_type  VARCHAR(32)  NOT NULL,
     aggregate_id    VARCHAR(64)  NOT NULL,
     event_type      VARCHAR(64)  NOT NULL,
@@ -112,5 +117,7 @@ CREATE TABLE IF NOT EXISTS outbox_messages
     attempt_count   INT      NOT NULL DEFAULT 0,
     gmt_create      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version         INT      NOT NULL DEFAULT 0,
+    is_delete       TINYINT  NOT NULL DEFAULT 0,
     CONSTRAINT uk_outbox_message_id UNIQUE (message_id)
 );

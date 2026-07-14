@@ -8,6 +8,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataAccessException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.transaction.TransactionException;
 import org.springframework.validation.BindException;
@@ -34,11 +36,18 @@ import java.util.Set;
 public class RestExceptionConfig {
 
     @ExceptionHandler(GlobalException.class)
-    public Result<Object> handlerGlobalException(GlobalException exception) {
+    public ResponseEntity<Result<Object>> handlerGlobalException(GlobalException exception) {
         log.debug("global exception", exception);
         Result<Object> failed = Result.failed(exception.code(), exception.msg());
         failed.setData(exception.getData());
-        return failed;
+        HttpStatus status = exception.code() == SystemCode.UNAUTHORIZED_CODE
+                ? HttpStatus.UNAUTHORIZED
+                : exception.code() == SystemCode.RESOURCE_NOT_FOUND_CODE
+                ? HttpStatus.NOT_FOUND
+                : exception.code() == SystemCode.CURSOR_EXPIRED_CODE
+                ? HttpStatus.GONE
+                : HttpStatus.OK;
+        return ResponseEntity.status(status).body(failed);
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)

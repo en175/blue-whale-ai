@@ -115,7 +115,7 @@ CREATE TABLE canvas
 -- project_event_stream：每个 Project 一行，持有高水位游标。产生事件的事务 SELECT ... FOR UPDATE
 --   锁定该行分配连续游标，回滚则游标分配一并回滚（ADR-0017 §3）。
 -- project_events：持久化产品事件日志，封套字段对齐 ADR-0016 §4。SSE 重放与 Snapshot 一致性的共同事实。
--- outbox_messages：Outbox 最小骨架（ADR-0017 §1/§2）。首版只建表 + 同事务写入，投递/Reconciler 后续工单。
+-- outbox_messages：Outbox（ADR-0017 §1/§2）。与产品事件同事务写入，后台重试发布稳定唤醒身份。
 
 CREATE TABLE project_event_stream
 (
@@ -139,6 +139,9 @@ CREATE TABLE project_events
     occurred_at       DATETIME     NOT NULL COMMENT '事件发生时间',
     payload           JSON         NULL COMMENT '事件 payload（封套内，具体事件结构）',
     gmt_create        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    gmt_modified      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+    version           INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    is_delete         TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删 1已删',
     UNIQUE KEY uk_event_id (event_id),
     UNIQUE KEY uk_project_cursor (project_id, cursor),
     INDEX idx_project_occurred (project_id, occurred_at)
@@ -149,16 +152,20 @@ CREATE TABLE outbox_messages
 (
     id              BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
     message_id      VARCHAR(64)  NOT NULL COMMENT '消息稳定 ID（消费者按此去重）',
+    project_id      BIGINT       NOT NULL COMMENT '所属项目 ID',
+    cursor          BIGINT       NOT NULL COMMENT 'Project 内事件游标',
     aggregate_type  VARCHAR(32)  NOT NULL COMMENT '聚合类型',
     aggregate_id    VARCHAR(64)  NOT NULL COMMENT '聚合 ID',
     event_type      VARCHAR(64)  NOT NULL COMMENT '事件类型',
     payload         JSON         NULL COMMENT '消息 payload',
     status          VARCHAR(16)  NOT NULL DEFAULT 'pending' COMMENT 'pending/published',
-    next_attempt_at DATETIME     NULL COMMENT '下次尝试时间（骨架，Reconciler 后续工单）',
+    next_attempt_at DATETIME     NULL COMMENT '下次允许重试时间',
     attempt_count   INT          NOT NULL DEFAULT 0 COMMENT '尝试次数',
     gmt_create      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     gmt_modified    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    version         INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    is_delete       TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删 1已删',
     UNIQUE KEY uk_outbox_message_id (message_id),
     INDEX idx_outbox_status_next (status, next_attempt_at)
 ) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4 COMMENT ='Outbox 最小骨架（首版只写入，投递后续工单）';
+  DEFAULT CHARSET = utf8mb4 COMMENT ='Project 事件唤醒 Outbox（同事务写入、后台重试）';

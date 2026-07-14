@@ -16,6 +16,7 @@ import javax.validation.constraints.NotBlank;
  * @param aspectRatio   宽高比，如 {@code 16:9}（Ark ratio）
  * @param duration      时长（秒）
  * @param firstFrameUrl 首帧图 url（可选）
+ * @param projectId     所属 Project（画布内生成时传入；独立生成页可空）
  */
 public record VideoGenerateRequest(
         @NotBlank(message = "prompt 必填") String prompt,
@@ -23,6 +24,7 @@ public record VideoGenerateRequest(
         String resolution,
         @JsonProperty("aspect_ratio") String aspectRatio,
         Long duration,
-        @JsonProperty("first_frame_url") String firstFrameUrl
+        @JsonProperty("first_frame_url") String firstFrameUrl,
+        @JsonProperty("project_id") Long projectId
 ) {
 }

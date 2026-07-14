@@ -3,6 +3,7 @@ package com.blue.whale.agent.service;
 import com.blue.whale.agent.mapper.OutboxMessageMapper;
 import com.blue.whale.agent.mapper.ProjectEventMapper;
 import com.blue.whale.agent.mapper.ProjectEventStreamMapper;
+import com.blue.whale.agent.model.entity.OutboxMessage;
 import com.blue.whale.agent.model.entity.ProjectEvent;
 import com.blue.whale.agent.model.entity.ProjectEventStream;
 import org.junit.jupiter.api.Test;
@@ -39,7 +40,7 @@ class ProjectEventServiceTest {
     void appendEventIncrementsCursorAndPersistsEventAndOutbox() {
         ProjectEventStream stream = new ProjectEventStream().setProjectId(1L).setHighWatermark(5L);
         when(eventStreamMapper.selectForUpdate(1L)).thenReturn(stream);
-        when(eventMapper.insert(any())).thenAnswer(inv -> {
+        when(eventMapper.insert(any(ProjectEvent.class))).thenAnswer(inv -> {
             ((ProjectEvent) inv.getArgument(0)).setId(100L);
             return 1;
         });
@@ -53,14 +54,14 @@ class ProjectEventServiceTest {
         // 高水位递增到 6
         assertThat(stream.getHighWatermark()).isEqualTo(6L);
         verify(eventStreamMapper).updateById(stream);
-        verify(eventMapper).insert(any());
-        verify(outboxMapper).insert(any());
+        verify(eventMapper).insert(any(ProjectEvent.class));
+        verify(outboxMapper).insert(any(OutboxMessage.class));
     }
 
     @Test
     void appendEventInitializesStreamWhenAbsent() {
         when(eventStreamMapper.selectForUpdate(1L)).thenReturn(null);
-        when(eventMapper.insert(any())).thenAnswer(inv -> {
+        when(eventMapper.insert(any(ProjectEvent.class))).thenAnswer(inv -> {
             ((ProjectEvent) inv.getArgument(0)).setId(1L);
             return 1;
         });
@@ -68,11 +69,15 @@ class ProjectEventServiceTest {
         ProjectEvent event = projectEventService.appendEvent(1L, "project.created", "project",
                 "1", 0, Map.of("name", "A"), null, null);
 
-        // 首次初始化：插入高水位行（0），第一个事件游标=1
-        ArgumentCaptor<ProjectEventStream> captor = ArgumentCaptor.forClass(ProjectEventStream.class);
-        verify(eventStreamMapper).insert(captor.capture());
-        assertThat(captor.getValue().getHighWatermark()).isEqualTo(0L);
+        ArgumentCaptor<ProjectEventStream> streamCaptor = ArgumentCaptor.forClass(ProjectEventStream.class);
+        ArgumentCaptor<OutboxMessage> outboxCaptor = ArgumentCaptor.forClass(OutboxMessage.class);
+        verify(eventStreamMapper).insert(streamCaptor.capture());
+        verify(outboxMapper).insert(outboxCaptor.capture());
+        assertThat(streamCaptor.getValue().getHighWatermark()).isEqualTo(1L);
         assertThat(event.getCursor()).isEqualTo(1L);
+        assertThat(outboxCaptor.getValue().getMessageId()).isEqualTo(event.getEventId());
+        assertThat(outboxCaptor.getValue().getProjectId()).isEqualTo(1L);
+        assertThat(outboxCaptor.getValue().getCursor()).isEqualTo(1L);
     }
 
     @Test

@@ -12,11 +12,10 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 /**
- * Outbox 消息（ADR-0017 §1/§2 最小骨架）。
+ * Outbox 消息（ADR-0017 §1/§2）。
  *
- * <p>首版只在产生产品事件的事务内同步写入，不实现投递/Reconciler（后续工单接入 MQ 或轮询）。
- * 其作用是建立与产品状态同事务的待投递记录骨架，保证后续投递器上线时可直接消费，
- * 而无需再改写事件写入路径。{@code status} 首版恒为 {@code pending}。
+ * <p>在产生产品事件的事务内同步写入，由 {@code OutboxPublisher} 重试发布稳定唤醒身份；
+ * 产品事实仍保存在 project_events，通知重复不会创建新事实。
  */
 @Getter
 @Setter
@@ -32,6 +31,9 @@ public class OutboxMessage extends BaseEntity {
     /** 消息稳定 ID（消费者按 (consumer, message_id) 去重） */
     private String messageId;
 
+    private Long projectId;
+    private Long cursor;
+
     private String aggregateType;
     private String aggregateId;
     private String eventType;
@@ -43,7 +45,7 @@ public class OutboxMessage extends BaseEntity {
     /** pending/published */
     private String status;
 
-    /** 下次尝试时间（骨架，Reconciler 后续工单使用） */
+    /** 下次允许重试时间 */
     private LocalDateTime nextAttemptAt;
 
     /** 尝试次数 */

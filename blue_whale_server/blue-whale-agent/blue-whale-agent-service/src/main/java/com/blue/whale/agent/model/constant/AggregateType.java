@@ -12,6 +12,8 @@ public final class AggregateType {
 
     /** 聚合：project */
     public static final String PROJECT = "project";
+    /** 聚合：canvas */
+    public static final String CANVAS = "canvas";
     /** 聚合：generation_job */
     public static final String GENERATION_JOB = "generation_job";
 }
