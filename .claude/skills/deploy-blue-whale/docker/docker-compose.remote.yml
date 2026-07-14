@@ -25,3 +25,14 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+
+  blue-whale-web:
+    image: blue-whale-web:latest
+    container_name: blue-whale-web
+    environment:
+      - GATEWAY_URL=http://blue-whale-gateway:8686
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      - blue-whale-gateway

@@ -9,10 +9,17 @@ REPO_ROOT="$(cd "$SKILL_DIR/../../.." && pwd)"
 SERVER_DIR="$REPO_ROOT/blue_whale_server"
 
 SERVICES=("$@")
-if [ ${#SERVICES[@]} -eq 0 ]; then SERVICES=(gateway user agent); fi
+if [ ${#SERVICES[@]} -eq 0 ]; then SERVICES=(gateway user agent web); fi
 
 build_one() {
   local svc="$1"
+  if [ "$svc" = web ]; then
+    echo "▶ npm run build (next standalone)"
+    (cd "$REPO_ROOT/blue_whale_web" && NEXT_TELEMETRY_DISABLED=1 npm run build)
+    [ -d "$REPO_ROOT/blue_whale_web/.next/standalone" ] || { echo "✗ 未找到 standalone 产物" >&2; exit 1; }
+    echo "  → .next/standalone"
+    return
+  fi
   echo "▶ mvn package $svc"
   (cd "$SERVER_DIR" && case "$svc" in
     gateway)

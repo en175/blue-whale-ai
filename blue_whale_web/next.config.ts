@@ -13,9 +13,10 @@ import type { NextConfig } from "next";
  *
  * output: 'standalone' 供 Dockerfile 产出最小运行包（.next/standalone/server.js），不影响 dev。
  */
-const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8686";
+const GATEWAY = process.env.GATEWAY_URL || "http://115.190.244.91:8686";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   images: {
     remotePatterns: [
       {
