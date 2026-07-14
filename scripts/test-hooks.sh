@@ -27,6 +27,12 @@ REAL_GIT="$(command -v git)"
 ACTION_TEST_ROOT=""
 PUBLISH_TEST_ROOT=""
 SAVED_CLAUDE_PROJECT_DIR=""
+SAVED_PUBLISH_PROJECT_DIR=""
+ORIGINAL_CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-}"
+HOOK_AUDIT_TEST_ROOT="$(mktemp -d)"
+"$REAL_GIT" -C "$HOOK_AUDIT_TEST_ROOT" init -q
+CLAUDE_PROJECT_DIR="$HOOK_AUDIT_TEST_ROOT"
+export CLAUDE_PROJECT_DIR
 
 # ── git stub（隔离 git rev-parse，不碰真实仓库）────────────────
 # push-to-master / dangerous-git 的「无显式 refspec → 查当前分支」分支，
@@ -329,6 +335,7 @@ teardown_action_test_repo() {
 }
 
 setup_publish_test_repo() {
+  SAVED_PUBLISH_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-}"
   PUBLISH_TEST_ROOT="$(mktemp -d)"
   "$REAL_GIT" -C "$PUBLISH_TEST_ROOT" init -q
   CLAUDE_PROJECT_DIR="$PUBLISH_TEST_ROOT"
@@ -336,10 +343,16 @@ setup_publish_test_repo() {
 }
 
 teardown_publish_test_repo() {
-  unset CLAUDE_PROJECT_DIR
+  if [ -n "$SAVED_PUBLISH_PROJECT_DIR" ]; then
+    CLAUDE_PROJECT_DIR="$SAVED_PUBLISH_PROJECT_DIR"
+    export CLAUDE_PROJECT_DIR
+  else
+    unset CLAUDE_PROJECT_DIR
+  fi
   rm -rf "$PUBLISH_TEST_ROOT"
   PUBLISH_TEST_ROOT=""
-  export PUBLISH_TEST_ROOT
+  SAVED_PUBLISH_PROJECT_DIR=""
+  export PUBLISH_TEST_ROOT SAVED_PUBLISH_PROJECT_DIR
 }
 
 assert_stdout_not_has() {
@@ -519,6 +532,34 @@ PY
   else
     FAIL=$((FAIL + 1))
     FAILURES+=("[${label}] 日志 ${log_path} 未找到 ${field}=${expected}")
+  fi
+}
+
+# assert_audit_record_field <log_path> <tool_use_id> <json_field> <expected_value> <label>
+# 断言指定 tool_use_id 的记录含 field=expected_value，避免跨记录拼出假阳性。
+assert_audit_record_field() {
+  local log_path="$1" tool_use_id="$2" field="$3" expected="$4" label="$5"
+  if python3 - "$log_path" "$tool_use_id" "$field" "$expected" <<'PY'
+import json, sys
+log_path, tool_use_id, field, expected = sys.argv[1:]
+try:
+    with open(log_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            if record.get("tool_use_id") == tool_use_id and str(record.get(field, "")) == expected:
+                raise SystemExit(0)
+except FileNotFoundError:
+    pass
+raise SystemExit(1)
+PY
+  then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILURES+=("[${label}] 日志 ${log_path} 未找到 tool_use_id=${tool_use_id} 且 ${field}=${expected}")
   fi
 }
 
@@ -723,6 +764,7 @@ assert_hook_contract_drift_case() {
   local drift_mode="$1"; shift
   local source drift_fixture drift_label
   local expected_matcher="Edit|Write"
+  local expected_gate="block-master-edit.sh"
   local zcode_candidate="$zcode_fixture"
   local claude_candidate="$claude_fixture"
   local codex_candidate="$codex_fixture"
@@ -771,6 +813,16 @@ elif drift_mode == "wrong-wrapper":
             item["hooks"][0]["command"] = (
                 "bash /tmp/run-claude-pretool.sh block-master-edit.sh"
             )
+elif drift_mode == "unparsed-extra":
+    command = "echo .claude/hooks/opaque-extra.sh"
+    if platform == "Codex":
+        command = "echo run-claude-pretool.sh opaque-extra.sh"
+    hooks["PreToolUse"].append(
+        {
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": command}],
+        }
+    )
 else:
     for item in hooks["PreToolUse"]:
         if item.get("matcher") == "Edit|Write":
@@ -790,12 +842,17 @@ PY
     extra) drift_label="多余阻断契约"; expected_matcher="Read" ;;
     duplicate) drift_label="重复挂载 Gate" ;;
     wrong-wrapper) drift_label="wrapper 路径错误" ;;
+    unparsed-extra)
+      drift_label="无法解析的额外 Gate"
+      expected_matcher="Bash"
+      expected_gate="opaque-extra.sh"
+      ;;
   esac
   assert_exit_nonzero "contracts: ${platform} ${drift_label} 时失败"
   assert_stderr_has "$platform" "contracts: ${platform} ${drift_label} 诊断含平台"
   assert_stderr_has "PreToolUse" "contracts: ${platform} ${drift_label} 诊断含事件"
   assert_stderr_has "$expected_matcher" "contracts: ${platform} ${drift_label} 诊断含 matcher"
-  assert_stderr_has "block-master-edit.sh" "contracts: ${platform} ${drift_label} 诊断含 Gate"
+  assert_stderr_has "$expected_gate" "contracts: ${platform} ${drift_label} 诊断含 Gate"
 }
 
 assert_hook_contract_drift_detection() {
@@ -817,7 +874,7 @@ assert_hook_contract_drift_detection() {
   assert_stdout_empty "contracts: 有效基线 stdout 为空"
   assert_stderr_empty "contracts: 有效基线 stderr 为空"
 
-  for drift_mode in missing echo extra duplicate; do
+  for drift_mode in missing echo extra duplicate unparsed-extra; do
     for platform in "ZCode" "Claude Code" "Codex"; do
       assert_hook_contract_drift_case \
         "$fixture_dir" \
@@ -835,6 +892,53 @@ assert_hook_contract_drift_detection() {
     "$codex_fixture" \
     "Codex" \
     "wrong-wrapper"
+
+  rm -rf "$fixture_dir"
+}
+
+assert_hook_audit_coverage_detection() {
+  local fixture_dir zcode_fixture claude_fixture codex_fixture hooks_fixture
+  fixture_dir="$(mktemp -d)"
+  zcode_fixture="$fixture_dir/zcode.json"
+  claude_fixture="$fixture_dir/claude.json"
+  codex_fixture="$fixture_dir/codex.json"
+  hooks_fixture="$fixture_dir/hooks"
+  cp "$REPO_ROOT/.zcode/config.json" "$zcode_fixture"
+  cp "$REPO_ROOT/.claude/settings.json" "$claude_fixture"
+  cp "$CODEX_HOOKS_JSON" "$codex_fixture"
+  cp -R "$REPO_ROOT/.claude/hooks" "$hooks_fixture"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$hooks_fixture/opaque-extra.sh"
+
+  python3 - "$zcode_fixture" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+config["hooks"]["events"]["PreToolUse"].append(
+    {
+        "matcher": "Bash",
+        "hooks": [
+            {
+                "type": "command",
+                "command": '"${CLAUDE_PROJECT_DIR}"/.claude/hooks/opaque-extra.sh',
+            }
+        ],
+    }
+)
+path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n")
+PY
+
+  run_hook_contract_check \
+    --zcode "$zcode_fixture" \
+    --claude "$claude_fixture" \
+    --codex "$codex_fixture" \
+    --hooks-dir "$hooks_fixture"
+  assert_exit_nonzero "contracts: 已注册未接审计器的 Gate 时失败"
+  assert_stderr_has "审计覆盖检查" "contracts: 未接审计器诊断含检查类别"
+  assert_stderr_has "opaque-extra.sh" "contracts: 未接审计器诊断含 Gate"
+  assert_stderr_has "未接入共享审计器" "contracts: 未接审计器诊断含根因"
 
   rm -rf "$fixture_dir"
 }
@@ -1137,10 +1241,14 @@ assert_exit 0 "release: 非发布验证复合命令放行"
 # 创建合法普通 PR（缺 draft）→ Pre 只校验形态放行，不消费标记（消费延后到 Post，见 ADR-0011）
 setup_publish_test_repo
 write_publish_marker "feature/x"
-run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_use_id":"tu_create_pr_allow","session_id":"s_ik10dr_release","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"SECRET_PR_TITLE"}}'
 assert_exit 0 "release: 普通 PR 放行不二次确认"
 assert_stdout_not_has '"permissionDecision":"ask"' "release: 普通 PR 不二次确认"
 assert_file_exists "$(publish_marker_path feature/x)" "release: 普通 PR Pre 阶段不消费标记（延后到 Post）"
+PUBLISH_AUDIT_LOG="$(audit_log_path "$PUBLISH_TEST_ROOT" "$RELEASE_HOOK")"
+assert_audit_record_field "$PUBLISH_AUDIT_LOG" tu_create_pr_allow operation create-pr "audit-all: create PR 记录操作类别"
+assert_audit_record_field "$PUBLISH_AUDIT_LOG" tu_create_pr_allow exit_code 0 "audit-all: create PR 放行记录"
+assert_file_not_has_text "$PUBLISH_AUDIT_LOG" SECRET_PR_TITLE "audit-all: create PR 不记录 MCP 参数"
 
 # 创建显式非 draft PR → Pre 只校验形态放行，不消费标记（消费延后到 Post，见 ADR-0011）
 write_publish_marker "feature/x"
@@ -1197,14 +1305,21 @@ setup_action_test_repo
 remove_all_action_markers
 
 # squash 方法错误优先于凭证校验报出（无论是否有凭证）。
-write_action_marker merge-pr 16660949 48854568 12
-run_hook "$RELEASE_HOOK" '{"tool_use_id":"merge-12-squash","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":12,"merge_method":"squash"}}'
+write_action_marker merge-pr 987654321 876543219 765432198
+run_hook "$RELEASE_HOOK" '{"tool_use_id":"tu_merge_squash","session_id":"s_ik10dr_release","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":987654321,"project_id":"876543219","pull_request_id":765432198,"merge_method":"squash"}}'
 assert_exit 2 "release: merge PR squash 方法优先拦截（即使有凭证）"
 assert_stderr_has "squash" "release: merge PR squash 提示含 squash"
+ACTION_AUDIT_LOG="$(audit_log_path "$ACTION_TEST_ROOT" "$RELEASE_HOOK")"
+assert_audit_record_field "$ACTION_AUDIT_LOG" tu_merge_squash operation merge-pr "audit-all: squash 由权威 release Gate 记录"
+assert_audit_record_field "$ACTION_AUDIT_LOG" tu_merge_squash exit_code 2 "audit-all: squash 阻断记录"
+assert_file_not_has_text "$ACTION_AUDIT_LOG" 987654321 "audit-all: merge PR 不记录 enterprise_id"
+assert_file_not_has_text "$ACTION_AUDIT_LOG" 876543219 "audit-all: merge PR 不记录 project_id"
+assert_file_not_has_text "$ACTION_AUDIT_LOG" 765432198 "audit-all: merge PR 不记录 pull_request_id"
 
-run_hook "$RELEASE_HOOK" '{"tool_use_id":"merge-12-rebase","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":12,"merge_method":"rebase"}}'
+run_hook "$RELEASE_HOOK" '{"tool_use_id":"tu_merge_rebase","session_id":"s_ik10dr_release","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":987654321,"project_id":"876543219","pull_request_id":765432198,"merge_method":"rebase"}}'
 assert_exit 2 "release: merge PR rebase 方法优先拦截（即使有凭证）"
 assert_stderr_has "rebase" "release: merge PR rebase 提示含 rebase"
+assert_audit_record_field "$ACTION_AUDIT_LOG" tu_merge_rebase operation merge-pr "audit-all: rebase 由权威 release Gate 记录"
 
 # 消费 squash 测试写入的凭证，避免污染后续用例。
 remove_all_action_markers
@@ -1217,6 +1332,8 @@ write_action_marker merge-pr 16660949 48854568 12
 run_hook "$RELEASE_HOOK" '{"tool_use_id":"merge-12-a","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":12,"merge_method":"merge"}}'
 assert_exit 0 "release: merge PR 有效凭证首次 claim 放行"
 assert_stdout_empty "release: merge PR 无交互输出"
+assert_audit_record_field "$ACTION_AUDIT_LOG" merge-12-a operation merge-pr "audit-all: merge PR 记录操作类别"
+assert_audit_record_field "$ACTION_AUDIT_LOG" merge-12-a exit_code 0 "audit-all: merge PR 放行记录"
 assert_file_exists "$(authorization_marker_path merge-pr 16660949 48854568 12)" "release: merge PR Pre 不消费凭证"
 assert_file_exists "$(authorization_claim_path merge-pr 16660949 48854568 12)" "release: merge PR Pre 原子占用凭证"
 
@@ -1265,6 +1382,8 @@ write_action_marker create-release 16660949 48854568 v1.0.0
 run_hook "$RELEASE_HOOK" '{"tool_use_id":"release-v1","tool_name":"mcp__gitee-ent__create_enterprise_repo_release","tool_input":{"enterprise_id":16660949,"project_id":"48854568","release_tag_version":"v1.0.0","release_title":"v1.0.0","release_description":"test"}}'
 assert_exit 0 "release: create release 有效凭证放行"
 assert_stdout_empty "release: create release 无交互输出"
+assert_audit_record_field "$ACTION_AUDIT_LOG" release-v1 operation create-release "audit-all: create release 记录操作类别"
+assert_audit_record_field "$ACTION_AUDIT_LOG" release-v1 exit_code 0 "audit-all: create release 放行记录"
 assert_file_exists "$(authorization_marker_path create-release 16660949 48854568 v1.0.0)" "release: create release Pre 不消费凭证"
 
 run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_use_id":"release-v1","tool_name":"mcp__gitee-ent__create_enterprise_repo_release","tool_input":{"enterprise_id":16660949,"project_id":"48854568","release_tag_version":"v1.0.0","release_title":"v1.0.0","release_description":"test"},"tool_response":{"isError":false}}'
@@ -1331,9 +1450,17 @@ remove_publish_marker "feature/bbb"
 # PostToolUse 消费标记：只有 tool_response.isError=false 明确证明 PR 创建成功才撕票（ADR-0011）。
 write_publish_marker "feature/x"
 assert_file_exists "$(publish_marker_path feature/x)" "release: Post 消费前标记存在"
+post_audit_lines_before=$(grep -c '' "$PUBLISH_AUDIT_LOG" 2>/dev/null || echo 0)
 run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"},"tool_response":{"isError":false}}'
 assert_exit 0 "release: Post create PR 放行（不阻断已执行工具）"
 assert_file_missing "$(publish_marker_path feature/x)" "release: Post 创建成功消费标记"
+post_audit_lines_after=$(grep -c '' "$PUBLISH_AUDIT_LOG" 2>/dev/null || echo 0)
+if [ "$post_audit_lines_before" = "$post_audit_lines_after" ]; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1))
+  FAILURES+=("[audit-all: PostToolUse 不审计] before=${post_audit_lines_before} after=${post_audit_lines_after}")
+fi
 
 # Post 响应缺失或类型畸形时不能证明成功，保留发布标记等待明确结果或 TTL。
 write_publish_marker "feature/x"
@@ -1403,8 +1530,9 @@ run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","
 assert_exit 0 "issue: 子 issue 继承父项归属放行"
 
 # update 只改状态/标签，不要求重复传 project_id → 放行
-run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_input":{"issue_id":"IJZ5WA","issue_state_id":123,"label_ids":"342812299"}}'
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_use_id":"tu_issue_update_allow","tool_input":{"issue_id":"IJZ5WA","issue_state_id":123,"label_ids":"342812299"}}'
 assert_exit 0 "issue: 普通 update 放行"
+assert_audit_record_field "$(audit_log_path "$HOOK_AUDIT_TEST_ROOT" "$ISSUE_HOOK")" tu_issue_update_allow operation issue-update "audit-all: update issue 记录操作类别"
 
 # update 显式 project_id=0 → 拦
 run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__update_enterprise_issue","tool_input":{"issue_id":"IJZ5WA","project_id":0}}'
@@ -1521,6 +1649,113 @@ assert_exit 2 "danger: restore . 拦截"
 teardown_git_stub
 unset FAKE_BRANCH
 
+# Slice 4.2 — 其余运行时阻断型 PreToolUse Gate 审计闭环（IK10DR）
+# 用统一临时 Git 仓库观测 stdin JSON → exit/stdout/stderr + 持久记录，避免污染真实 common dir。
+DANGER_AUDIT_LOG="$(audit_log_path "$HOOK_AUDIT_TEST_ROOT" "$DANGER_HOOK")"
+run_hook "$DANGER_HOOK" '{"tool_name":"Bash","tool_use_id":"tu_danger_block","session_id":"s_ik10dr","tool_input":{"command":"git reset --hard SECRET_DANGER_COMMAND"}}'
+assert_exit 2 "audit-all: dangerous 阻断 exit 2 不变"
+assert_stdout_empty "audit-all: dangerous 阻断 stdout 为空"
+assert_stderr_has "危险 git 操作" "audit-all: dangerous 阻断信息保留"
+assert_audit_record_field "$DANGER_AUDIT_LOG" tu_danger_block operation git-reset-hard "audit-all: dangerous 阻断操作类别"
+assert_audit_record_field "$DANGER_AUDIT_LOG" tu_danger_block exit_code 2 "audit-all: dangerous 阻断记录"
+run_hook "$DANGER_HOOK" '{"tool_name":"Bash","tool_use_id":"tu_danger_allow","session_id":"s_ik10dr","tool_input":{"command":"git status --short SECRET_DANGER_ALLOW"}}'
+assert_exit 0 "audit-all: dangerous 放行 exit 0 不变"
+assert_stdout_empty "audit-all: dangerous 放行 stdout 为空"
+assert_audit_record_field "$DANGER_AUDIT_LOG" tu_danger_allow operation bash-other "audit-all: dangerous 放行操作类别"
+assert_audit_record_field "$DANGER_AUDIT_LOG" tu_danger_allow exit_code 0 "audit-all: dangerous 放行记录"
+assert_file_not_has_text "$DANGER_AUDIT_LOG" SECRET_DANGER_COMMAND "audit-all: dangerous 不记录完整命令"
+assert_file_not_has_text "$DANGER_AUDIT_LOG" SECRET_DANGER_ALLOW "audit-all: dangerous 不记录放行命令"
+
+PUSH_AUDIT_LOG="$(audit_log_path "$HOOK_AUDIT_TEST_ROOT" "$PUSH_HOOK")"
+run_hook "$PUSH_HOOK" '{"tool_name":"Bash","tool_use_id":"tu_push_block","session_id":"s_ik10dr","tool_input":{"command":"git push origin master SECRET_PUSH_COMMAND"}}'
+assert_exit 2 "audit-all: protected push 阻断 exit 2 不变"
+assert_stdout_empty "audit-all: protected push 阻断 stdout 为空"
+assert_stderr_has "直推 master" "audit-all: protected push 阻断信息保留"
+assert_audit_record_field "$PUSH_AUDIT_LOG" tu_push_block operation git-push-protected "audit-all: protected push 阻断操作类别"
+assert_audit_record_field "$PUSH_AUDIT_LOG" tu_push_block exit_code 2 "audit-all: protected push 阻断记录"
+run_hook "$PUSH_HOOK" '{"tool_name":"Bash","tool_use_id":"tu_push_allow","session_id":"s_ik10dr","tool_input":{"command":"git push origin feature/x SECRET_PUSH_ALLOW"}}'
+assert_exit 0 "audit-all: work branch push 放行 exit 0 不变"
+assert_stdout_empty "audit-all: work branch push 放行 stdout 为空"
+assert_audit_record_field "$PUSH_AUDIT_LOG" tu_push_allow operation git-push-unprotected "audit-all: work branch push 放行操作类别"
+assert_audit_record_field "$PUSH_AUDIT_LOG" tu_push_allow exit_code 0 "audit-all: work branch push 放行记录"
+assert_file_not_has_text "$PUSH_AUDIT_LOG" SECRET_PUSH_COMMAND "audit-all: protected push 不记录完整命令"
+assert_file_not_has_text "$PUSH_AUDIT_LOG" SECRET_PUSH_ALLOW "audit-all: work branch push 不记录完整命令"
+
+RELEASE_AUDIT_LOG="$(audit_log_path "$HOOK_AUDIT_TEST_ROOT" "$RELEASE_HOOK")"
+run_hook "$RELEASE_HOOK" '{"tool_name":"Bash","tool_use_id":"tu_release_block","session_id":"s_ik10dr","tool_input":{"command":"git push origin feature/x SECRET_RELEASE_COMMAND","token":"SECRET_RELEASE_TOKEN","file_path":"SECRET_RELEASE_FILE","tool_name":"SECRET_NESTED_TOOL"}}'
+assert_exit 2 "audit-all: release 阻断 exit 2 不变"
+assert_stdout_empty "audit-all: release 阻断 stdout 为空"
+assert_stderr_has "直接 git push" "audit-all: release 阻断信息保留"
+assert_audit_record_field "$RELEASE_AUDIT_LOG" tu_release_block operation git-push "audit-all: release 阻断操作类别"
+assert_audit_record_field "$RELEASE_AUDIT_LOG" tu_release_block exit_code 2 "audit-all: release 阻断记录"
+run_hook "$RELEASE_HOOK" '{"tool_name":"Bash","tool_use_id":"tu_release_allow","session_id":"s_ik10dr","tool_input":{"command":"git status --short SECRET_RELEASE_ALLOW"}}'
+assert_exit 0 "audit-all: release 放行 exit 0 不变"
+assert_stdout_empty "audit-all: release 放行 stdout 为空"
+assert_audit_record_field "$RELEASE_AUDIT_LOG" tu_release_allow operation bash-other "audit-all: release 放行操作类别"
+assert_audit_record_field "$RELEASE_AUDIT_LOG" tu_release_allow exit_code 0 "audit-all: release 放行记录"
+assert_file_not_has_text "$RELEASE_AUDIT_LOG" SECRET_RELEASE_COMMAND "audit-all: release 不记录完整命令"
+assert_file_not_has_text "$RELEASE_AUDIT_LOG" SECRET_RELEASE_ALLOW "audit-all: release 不记录放行命令"
+assert_file_not_has_text "$RELEASE_AUDIT_LOG" SECRET_RELEASE_TOKEN "audit-all: release 不记录凭证"
+assert_file_not_has_text "$RELEASE_AUDIT_LOG" SECRET_RELEASE_FILE "audit-all: release 不记录嵌套 file_path"
+assert_file_not_has_text "$RELEASE_AUDIT_LOG" SECRET_NESTED_TOOL "audit-all: release 不记录嵌套 tool_name"
+
+ISSUE_AUDIT_LOG="$(audit_log_path "$HOOK_AUDIT_TEST_ROOT" "$ISSUE_HOOK")"
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_use_id":"tu_issue_block","session_id":"s_ik10dr","tool_input":{"title":"SECRET_ISSUE_TITLE","token":"SECRET_ISSUE_TOKEN","file_path":"SECRET_ISSUE_FILE","tool_name":"SECRET_ISSUE_NESTED_TOOL"}}'
+assert_exit 2 "audit-all: issue 阻断 exit 2 不变"
+assert_stdout_empty "audit-all: issue 阻断 stdout 为空"
+assert_stderr_has "project_id" "audit-all: issue 阻断信息保留"
+assert_audit_record_field "$ISSUE_AUDIT_LOG" tu_issue_block operation issue-create "audit-all: issue 阻断操作类别"
+assert_audit_record_field "$ISSUE_AUDIT_LOG" tu_issue_block exit_code 2 "audit-all: issue 阻断记录"
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_use_id":"tu_issue_allow","session_id":"s_ik10dr","tool_input":{"project_id":987654321,"program_id":123456789,"title":"SECRET_ISSUE_ALLOW"}}'
+assert_exit 0 "audit-all: issue 放行 exit 0 不变"
+assert_stdout_empty "audit-all: issue 放行 stdout 为空"
+assert_audit_record_field "$ISSUE_AUDIT_LOG" tu_issue_allow operation issue-create "audit-all: issue 放行操作类别"
+assert_audit_record_field "$ISSUE_AUDIT_LOG" tu_issue_allow exit_code 0 "audit-all: issue 放行记录"
+assert_file_not_has_text "$ISSUE_AUDIT_LOG" SECRET_ISSUE_TITLE "audit-all: issue 不记录标题"
+assert_file_not_has_text "$ISSUE_AUDIT_LOG" SECRET_ISSUE_TOKEN "audit-all: issue 不记录 token"
+assert_file_not_has_text "$ISSUE_AUDIT_LOG" SECRET_ISSUE_FILE "audit-all: issue 不记录嵌套 file_path"
+assert_file_not_has_text "$ISSUE_AUDIT_LOG" SECRET_ISSUE_NESTED_TOOL "audit-all: issue 不记录嵌套 tool_name"
+assert_file_not_has_text "$ISSUE_AUDIT_LOG" SECRET_ISSUE_ALLOW "audit-all: issue 不记录放行参数"
+assert_file_not_has_text "$ISSUE_AUDIT_LOG" 987654321 "audit-all: issue 不记录 project_id"
+assert_file_not_has_text "$ISSUE_AUDIT_LOG" 123456789 "audit-all: issue 不记录 program_id"
+
+for audited_gate in "$DANGER_HOOK" "$PUSH_HOOK" "$RELEASE_HOOK" "$ISSUE_HOOK"; do
+  assert_audit_not_tracked "$HOOK_AUDIT_TEST_ROOT" "$audited_gate" "audit-all: ${audited_gate} 审计不进入 Git 视图"
+done
+
+# 每个新增接入 Gate 的审计设施失败都保持原决策，只增加共享契约允许的降级提示。
+AUDIT_DEGRADE_REPO="$(mktemp -d)"
+"$REAL_GIT" -C "$AUDIT_DEGRADE_REPO" init -q
+touch "$AUDIT_DEGRADE_REPO/.git/hook-audit"
+AUDIT_DEGRADE_SAVED="$CLAUDE_PROJECT_DIR"
+export CLAUDE_PROJECT_DIR="$AUDIT_DEGRADE_REPO"
+
+run_hook "$DANGER_HOOK" '{"tool_name":"Bash","tool_input":{"command":"git reset --hard HEAD~1"}}'
+assert_exit 2 "audit-all: dangerous 审计失败仍阻断"
+assert_stdout_empty "audit-all: dangerous 审计失败 stdout 为空"
+assert_stderr_has "危险 git 操作" "audit-all: dangerous 审计失败保留原信息"
+assert_stderr_has "hook-audit: degraded" "audit-all: dangerous 审计失败提示降级"
+run_hook "$PUSH_HOOK" '{"tool_name":"Bash","tool_input":{"command":"git push origin master"}}'
+assert_exit 2 "audit-all: protected push 审计失败仍阻断"
+assert_stdout_empty "audit-all: protected push 审计失败 stdout 为空"
+assert_stderr_has "直推 master" "audit-all: protected push 审计失败保留原信息"
+assert_stderr_has "hook-audit: degraded" "audit-all: protected push 审计失败提示降级"
+run_hook "$RELEASE_HOOK" '{"tool_name":"Bash","tool_input":{"command":"git push origin feature/x"}}'
+assert_exit 2 "audit-all: release 审计失败仍阻断"
+assert_stdout_empty "audit-all: release 审计失败 stdout 为空"
+assert_stderr_has "直接 git push" "audit-all: release 审计失败保留原信息"
+assert_stderr_has "hook-audit: degraded" "audit-all: release 审计失败提示降级"
+run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_input":{}}'
+assert_exit 2 "audit-all: issue 审计失败仍阻断"
+assert_stdout_empty "audit-all: issue 审计失败 stdout 为空"
+assert_stderr_has "project_id" "audit-all: issue 审计失败保留原信息"
+assert_stderr_has "hook-audit: degraded" "audit-all: issue 审计失败提示降级"
+
+export CLAUDE_PROJECT_DIR="$AUDIT_DEGRADE_SAVED"
+rm -rf "$AUDIT_DEGRADE_REPO"
+unset DANGER_AUDIT_LOG PUSH_AUDIT_LOG RELEASE_AUDIT_LOG ISSUE_AUDIT_LOG
+unset AUDIT_DEGRADE_REPO AUDIT_DEGRADE_SAVED audited_gate
+
 # Slice 4.5 — block-master-edit（按 file_path 所属工作树判分支 + 仓库边界）
 MASTER_EDIT_HOOK=block-master-edit.sh
 
@@ -1605,6 +1840,7 @@ assert_stderr_has "禁止在 master" "audit: master 阻断保留既有原因"
 AUDIT_LOG="$(audit_log_path "$AUDIT_REPO" "$AUDIT_HOOK")"
 assert_audit_has_field "$AUDIT_LOG" tool Edit "audit: 阻断记录含 tool=Edit"
 assert_audit_has_field "$AUDIT_LOG" branch master "audit: 阻断记录含 branch=master"
+assert_audit_has_field "$AUDIT_LOG" operation file-write "audit: master Gate 使用共享 operation 字段"
 assert_audit_has_field "$AUDIT_LOG" exit_code 2 "audit: 阻断记录含 exit_code=2"
 assert_audit_has_field "$AUDIT_LOG" reason blocked-master "audit: 阻断记录含 reason=blocked-master"
 assert_audit_has_field "$AUDIT_LOG" tool_use_id tu_blk "audit: 阻断记录含 tool_use_id"
@@ -1943,6 +2179,7 @@ unset AUDIT_HOOK
 
 # Slice 5 — Codex project hook layer
 assert_hook_contract_drift_detection
+assert_hook_audit_coverage_detection
 run_hook_contract_check
 assert_exit 0 "contracts: 真实三端 Hook 配置满足共享契约"
 assert_stdout_empty "contracts: 真实三端 Hook 配置 stdout 为空"
@@ -2308,6 +2545,15 @@ else
 fi
 
 teardown_release_repos
+
+# 恢复调用者环境并删除全局审计隔离仓库。
+if [ -n "$ORIGINAL_CLAUDE_PROJECT_DIR" ]; then
+  CLAUDE_PROJECT_DIR="$ORIGINAL_CLAUDE_PROJECT_DIR"
+  export CLAUDE_PROJECT_DIR
+else
+  unset CLAUDE_PROJECT_DIR
+fi
+rm -rf "$HOOK_AUDIT_TEST_ROOT"
 
 # ── summary ────────────────────────────────────────────────────
 TOTAL=$((PASS + FAIL))
