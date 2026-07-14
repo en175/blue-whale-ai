@@ -259,14 +259,22 @@ function CanvasPageInner() {
   // 仅透 content/width/height；position/id 留给 addNode。
   const handleCardGenerated = useCallback(
     (card: CardMessage) => {
+      if (
+        card.assetId &&
+        activeProject.canvas.nodes.some((node) => node.assetId === card.assetId)
+      ) {
+        return;
+      }
       const partial = nodeFromCard(card, () => 0);
       addNode("image", {
         content: partial.content,
         width: partial.width,
         height: partial.height,
+        assetId: partial.assetId,
+        imageUrl: partial.imageUrl,
       });
     },
-    [addNode],
+    [activeProject.canvas.nodes, addNode],
   );
 
   const fileInputRef = useRef<HTMLInputElement>(null);

@@ -6,6 +6,7 @@
 import { useId, useState } from "react";
 import { ChevronDown, ChevronRight, ChevronUp, Image as ImageIcon } from "lucide-react";
 import type { ChatMessage } from "../types";
+import { AuthenticatedImage } from "./AuthenticatedImage";
 
 export function UserMessageBubble({ text }: { text: string }) {
   return (
@@ -91,7 +92,10 @@ export function AgentCard({
   const ctaLabel = failed ? "重试" : "手动应用";
   return (
     <div className="self-stretch">
-      <div className="flex flex-col gap-2 rounded-xl border border-[var(--tc-border-subtle,rgba(255,255,255,0.08))] bg-white/[0.03] p-3 text-xs leading-normal text-white/[0.92]">
+      <div
+        className="flex flex-col gap-2 rounded-xl border border-[var(--tc-border-subtle,rgba(255,255,255,0.08))] bg-white/[0.03] p-3 text-xs leading-normal text-white/[0.92]"
+        data-asset-id={msg.assetId}
+      >
         <div className="flex items-center justify-between gap-2">
           <div className="tc-agent-card-header-leading">
             <span className="tc-agent-card-badge">
@@ -139,9 +143,18 @@ export function AgentCard({
           </div>
         </div>
         {!collapsed && (
-          <div className="break-words" style={{ overflowWrap: "anywhere" }}>
-            {msg.text}
-          </div>
+          <>
+            {msg.imageUrl && (
+              <AuthenticatedImage
+                accessUrl={msg.imageUrl}
+                alt={msg.text}
+                className="max-h-64 w-full rounded-lg object-contain"
+              />
+            )}
+            <div className="break-words" style={{ overflowWrap: "anywhere" }}>
+              {msg.text}
+            </div>
+          </>
         )}
       </div>
     </div>

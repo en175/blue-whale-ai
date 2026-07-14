@@ -37,10 +37,14 @@ describe("nodeFromCard", () => {
     expect(node.height).toBe(240);
   });
 
-  it("不渲染真实图片：imageUrl 不存在（渲染为灰色占位）", () => {
-    const node = nodeFromCard(makeCard(), idGen);
+  it("把 card 的 asset_id 与受控图片地址原样交给 NodeItem", () => {
+    const node = nodeFromCard(
+      makeCard({ assetId: "asset-9", imageUrl: "/assets/9/content" }),
+      idGen,
+    );
 
-    expect(node.imageUrl).toBeUndefined();
+    expect(node.assetId).toBe("asset-9");
+    expect(node.imageUrl).toBe("/assets/9/content");
   });
 
   it("id 来自注入的 idGen（验注入生效，非硬编码）", () => {

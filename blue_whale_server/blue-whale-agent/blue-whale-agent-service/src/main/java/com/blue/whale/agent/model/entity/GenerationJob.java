@@ -60,6 +60,11 @@ public class GenerationJob extends BaseEntity {
     /** 进度 0-100 */
     private Integer progress;
 
+    /** Java Generation Worker 的短租约执行权。 */
+    private String leaseOwner;
+    private LocalDateTime leaseExpiresAt;
+    private Long fencingToken;
+
     /** 输出 asset id 列表 */
     @TableField(typeHandler = JacksonTypeHandler.class)
     private List<Long> outputAssetIds;

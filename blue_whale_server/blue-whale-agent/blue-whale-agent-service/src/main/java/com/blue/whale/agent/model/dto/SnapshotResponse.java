@@ -58,10 +58,15 @@ public record SnapshotResponse(
             Map<String, Object> input,
             String status,
             Integer progress,
-            List<Long> outputAssetIds) {
+            List<Long> outputAssetIds,
+            List<GenerationJobOutputDto> outputs) {
+    }
+
+    /** GenerationJob 输出槽事实。 */
+    public record GenerationJobOutputDto(Integer slotIndex, Long assetId) {
     }
 
     /** Asset 摘要（Snapshot 切片）。 */
-    public record AssetDto(Long assetId, String url, String type) {
+    public record AssetDto(Long assetId, String accessUrl, String type) {
     }
 }

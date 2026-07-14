@@ -20,4 +20,8 @@ public final class AggregateType {
     public static final String AGENT_RUN = "agent_run";
     /** 聚合：generation_job */
     public static final String GENERATION_JOB = "generation_job";
+    /** 聚合：generation_job_output */
+    public static final String GENERATION_JOB_OUTPUT = "generation_job_output";
+    /** 聚合：asset */
+    public static final String ASSET = "asset";
 }

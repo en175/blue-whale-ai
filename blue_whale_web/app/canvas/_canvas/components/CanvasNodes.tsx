@@ -29,12 +29,14 @@ import type {
 } from "@xyflow/react";
 import { NODE_TOOLBAR_ACTIONS } from "../config";
 import type { NodeItem, NodeType, Viewport } from "../types";
+import { AuthenticatedImage } from "./AuthenticatedImage";
 
 /** RF 节点 data：承载渲染与持久化字段（不随 RF 内部 change 丢失）。 */
 export type CanvasNodeData = {
   width: number;
   height: number;
   content?: string;
+  assetId?: string;
   imageUrl?: string;
   /** 旋转角度（度）；RF 不接管，随 data round-trip 保留。 */
   rotation?: number;
@@ -58,6 +60,7 @@ export function toRFNode(n: NodeItem): CanvasNode {
       width: n.width,
       height: n.height,
       content: n.content,
+      assetId: n.assetId,
       imageUrl: n.imageUrl,
       rotation: n.rotation,
       zIndex: n.zIndex,
@@ -77,6 +80,7 @@ export function fromRFNode(rf: CanvasNode): NodeItem {
     height,
     selected: rf.selected,
     content: rf.data.content,
+    assetId: rf.data.assetId,
     imageUrl: rf.data.imageUrl,
     rotation: rf.data.rotation,
     zIndex: rf.data.zIndex,
@@ -123,6 +127,7 @@ function ImageNode({ id, data, selected }: NodeProps<CanvasNode>) {
         }}
         role="img"
         aria-label={data.content || "图片"}
+        data-asset-id={data.assetId}
       >
         <NodeResizer
           nodeId={id}
@@ -152,8 +157,8 @@ function ImageNode({ id, data, selected }: NodeProps<CanvasNode>) {
           </div>
         </div>
         {data.imageUrl ? (
-          <img
-            src={data.imageUrl}
+          <AuthenticatedImage
+            accessUrl={data.imageUrl}
             alt={data.content || "图片"}
             className="h-full w-full rounded-lg object-contain"
             draggable={false}

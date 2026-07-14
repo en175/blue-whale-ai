@@ -32,6 +32,8 @@ export type NodeItem = {
   /** 图层排序，数值越大越靠前（bring-to-front 写入） */
   zIndex?: number;
   content?: string;
+  /** 对应不可变 Asset；Card 与 NodeItem 以此共享生成结果身份。 */
+  assetId?: string;
   imageUrl?: string;
   selected?: boolean;
 };
@@ -55,7 +57,16 @@ export type ChatMessage =
   | { id: number | string; type: "user"; text: string }
   | { id: number | string; type: "agent"; text: string }
   | { id: number | string; type: "thinking"; text: string; content: string }
-  | { id: number | string; type: "card"; text: string; meta: string; collapsed?: boolean; status?: CardStatus };
+  | {
+      id: number | string;
+      type: "card";
+      text: string;
+      meta: string;
+      collapsed?: boolean;
+      status?: CardStatus;
+      assetId?: string;
+      imageUrl?: string;
+    };
 /**
  * Canvas —— 画布聚合（提为具名类型）。
  * 节点集合 + 视口，归属于 Project（见 CONTEXT.md L44–50）。

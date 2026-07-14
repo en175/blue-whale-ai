@@ -149,11 +149,71 @@ CREATE TABLE IF NOT EXISTS generation_jobs
     last_polled_at   DATETIME NULL,
     error            TEXT NULL,
     stage_id         VARCHAR(64) NULL,
+    lease_owner      VARCHAR(128) NULL,
+    lease_expires_at DATETIME NULL,
+    fencing_token    BIGINT NOT NULL DEFAULT 0,
     gmt_create       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     version          INT      NOT NULL DEFAULT 0,
     is_delete        TINYINT  NOT NULL DEFAULT 0,
     UNIQUE KEY uk_agent_run_action (agent_run_id, action_identity)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS assets
+(
+    id                BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id        BIGINT NULL,
+    user_id           BIGINT NOT NULL,
+    generation_job_id BIGINT NULL,
+    type              VARCHAR(16) NOT NULL,
+    storage_key       VARCHAR(512) NULL,
+    content_sha256    VARCHAR(64) NULL,
+    url               VARCHAR(1024) NULL,
+    mime              VARCHAR(128) NULL,
+    size              BIGINT NULL,
+    width             INT NULL,
+    height            INT NULL,
+    duration          INT NULL,
+    source            VARCHAR(32) NOT NULL,
+    status            VARCHAR(32) NOT NULL,
+    gmt_create        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version           INT NOT NULL DEFAULT 0,
+    is_delete         TINYINT NOT NULL DEFAULT 0,
+    INDEX idx_asset_project (project_id, id),
+    INDEX idx_asset_generation_job (generation_job_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS generation_job_outputs
+(
+    id                BIGINT PRIMARY KEY AUTO_INCREMENT,
+    generation_job_id BIGINT NOT NULL,
+    slot_index        INT NOT NULL,
+    asset_id          BIGINT NOT NULL,
+    delivery_id       VARCHAR(128) NOT NULL,
+    content_sha256    VARCHAR(64) NOT NULL,
+    gmt_create        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version           INT NOT NULL DEFAULT 0,
+    is_delete         TINYINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_generation_output_slot (generation_job_id, slot_index),
+    UNIQUE KEY uk_generation_output_delivery (generation_job_id, delivery_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS generation_result_conflicts
+(
+    id                      BIGINT PRIMARY KEY AUTO_INCREMENT,
+    generation_job_id       BIGINT NOT NULL,
+    slot_index              INT NOT NULL,
+    attempted_delivery_id   VARCHAR(128) NOT NULL,
+    expected_content_sha256 VARCHAR(64) NOT NULL,
+    actual_content_sha256   VARCHAR(64) NOT NULL,
+    reason                  VARCHAR(64) NOT NULL,
+    gmt_create              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version                 INT NOT NULL DEFAULT 0,
+    is_delete               TINYINT NOT NULL DEFAULT 0,
+    INDEX idx_generation_result_conflict (generation_job_id, slot_index)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 CREATE TABLE IF NOT EXISTS project_event_stream
