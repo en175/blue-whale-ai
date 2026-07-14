@@ -22,6 +22,7 @@ HOOK_DIR="$(cd "$HOOK_DIR" && pwd)"
 CODEX_HOOKS_JSON="$REPO_ROOT/.codex/hooks.json"
 CODEX_WRITE_PROBE="$REPO_ROOT/scripts/probe-codex-write-hook.sh"
 HOOK_CONTRACT_CHECKER="$REPO_ROOT/scripts/check-hook-contracts.py"
+HOOK_CLOSED_LOOP_CHECKER="$REPO_ROOT/scripts/check-hook-closed-loop.py"
 AUTH_SCRIPT="$REPO_ROOT/scripts/manage-agent-authorization.sh"
 REAL_GIT="$(command -v git)"
 ACTION_TEST_ROOT=""
@@ -939,6 +940,43 @@ PY
   assert_stderr_has "审计覆盖检查" "contracts: 未接审计器诊断含检查类别"
   assert_stderr_has "opaque-extra.sh" "contracts: 未接审计器诊断含 Gate"
   assert_stderr_has "未接入共享审计器" "contracts: 未接审计器诊断含根因"
+
+  rm -rf "$fixture_dir"
+}
+
+assert_closed_loop_gate_drift_detection() {
+  local fixture_dir zcode_fixture claude_fixture codex_fixture
+  fixture_dir="$(mktemp -d)"
+  zcode_fixture="$fixture_dir/zcode.json"
+  claude_fixture="$fixture_dir/claude.json"
+  codex_fixture="$fixture_dir/codex.json"
+  cp "$REPO_ROOT/.zcode/config.json" "$zcode_fixture"
+  cp "$REPO_ROOT/.claude/settings.json" "$claude_fixture"
+  cp "$CODEX_HOOKS_JSON" "$codex_fixture"
+
+  python3 - "$zcode_fixture" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+for item in config["hooks"]["events"]["PreToolUse"]:
+    if item.get("matcher") == "Edit|Write":
+        item["hooks"][0]["command"] = item["hooks"][0]["command"].replace(
+            "block-master-edit.sh", "block-dangerous-git.sh"
+        )
+path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n")
+PY
+
+  run_command_hook \
+    "python3 \"$HOOK_CLOSED_LOOP_CHECKER\" --zcode \"$zcode_fixture\" --claude \"$claude_fixture\" --codex \"$codex_fixture\"" \
+    ""
+  assert_exit_nonzero "closed-loop drift: Gate 不一致时失败"
+  assert_stderr_has "stage=gate" "closed-loop drift: 诊断含失败阶段"
+  assert_stderr_has "ZCode=block-dangerous-git.sh" "closed-loop drift: 诊断定位 ZCode Gate"
+  assert_stderr_has "Claude Code=block-master-edit.sh" "closed-loop drift: 诊断定位 Claude Code Gate"
+  assert_stderr_has "Codex=block-master-edit.sh" "closed-loop drift: 诊断定位 Codex Gate"
 
   rm -rf "$fixture_dir"
 }
@@ -2180,10 +2218,21 @@ unset AUDIT_HOOK
 # Slice 5 — Codex project hook layer
 assert_hook_contract_drift_detection
 assert_hook_audit_coverage_detection
+assert_closed_loop_gate_drift_detection
 run_hook_contract_check
 assert_exit 0 "contracts: 真实三端 Hook 配置满足共享契约"
 assert_stdout_empty "contracts: 真实三端 Hook 配置 stdout 为空"
 assert_stderr_empty "contracts: 真实三端 Hook 配置 stderr 为空"
+assert_file_exists "$HOOK_CLOSED_LOOP_CHECKER" "closed-loop: 三端配置链闭环检查器存在"
+run_command_hook "python3 \"$HOOK_CLOSED_LOOP_CHECKER\"" ""
+assert_exit 0 "closed-loop: 三端配置链闭环检查通过"
+assert_stdout_has "[配置链集成] ZCode" "closed-loop: 报告含 ZCode 配置链证据"
+assert_stdout_has "[配置链集成] Claude Code" "closed-loop: 报告含 Claude Code 配置链证据"
+assert_stdout_has "[配置链集成] Codex" "closed-loop: 报告含 Codex 配置链证据"
+assert_stdout_has "audit=12/12 unique correlated records" "closed-loop: 报告含唯一审计关联证据"
+assert_stdout_has "[直接 Gate 黑盒]" "closed-loop: 报告区分直接 Gate 黑盒"
+assert_stdout_has "[外部客户端实机探针] 未执行" "closed-loop: 报告不冒充外部客户端实机证据"
+assert_stderr_empty "closed-loop: 成功时 stderr 为空"
 assert_file_exists "$CODEX_HOOKS_JSON" "codex: hooks.json 存在"
 assert_codex_hooks_valid "codex: hooks.json 与 Claude matcher 同步"
 for runtime_hook in .claude/hooks/*.sh .codex/hooks/*.sh .claude/settings.json .codex/hooks.json; do
@@ -2283,6 +2332,13 @@ assert_file_has_text "scripts/start-task-worktree.py" '"merge", "--ff-only", "or
 assert_file_has_text "scripts/start-task-worktree.py" '"--no-ff"' "workflow: 分叉时普通 merge"
 assert_file_has_text "scripts/start-task-worktree.py" '"worktree", "add", str(target), "-b", branch, base_sha' "workflow: worktree 基于同步后的精确 SHA"
 assert_file_has_text "AGENTS.md" '`CLAUDE.md` 是本仓库团队 Agent 规则的唯一权威源' "workflow: AGENTS 索引 CLAUDE 权威源"
+assert_file_has_text "docs/agents/hooks/README.md" "python3 scripts/check-hook-closed-loop.py" "workflow: 新人路径包含三端闭环检查"
+assert_file_has_text "docs/agents/hooks/README.md" "python3 scripts/query-hook-audit.py" "workflow: 新人路径包含审计查询入口"
+assert_file_has_text "docs/agents/hooks/README.md" "未进入仓库 Hook 执行链" "workflow: 新人路径包含缺失调用标识诊断"
+assert_file_has_text "docs/agents/hooks/README.md" "不能解释外部 harness 的内部根因" "workflow: 新人路径保持外部 harness 诊断边界"
+assert_file_has_text "docs/agents/hooks/README.md" "直接 Gate 黑盒" "workflow: 文档区分直接 Gate 黑盒证据"
+assert_file_has_text "docs/agents/hooks/README.md" "配置链集成" "workflow: 文档区分配置链集成证据"
+assert_file_has_text "docs/agents/hooks/README.md" "外部客户端实机探针" "workflow: 文档区分外部客户端实机证据"
 assert_file_not_has_text "scripts/merge-task-to-local-master.sh" "不允许含非 ASCII" "workflow: 本地合入不再拒绝中文分支"
 assert_file_has_text ".githooks/pre-push" '--validate-branch "$branch"' "workflow: pre-push 复用结构化中文分支校验器"
 assert_file_not_has_text ".githooks/pre-push" "纯 shell，零依赖" "workflow: pre-push 不再宣称零依赖"
