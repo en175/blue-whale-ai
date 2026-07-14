@@ -49,6 +49,12 @@ public enum SystemCode implements IResultCode {
     CURSOR_EXPIRED(SystemCode.CURSOR_EXPIRED_CODE, "游标已过期，请重新获取快照"),
     /** 资源不存在 */
     RESOURCE_NOT_FOUND(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在"),
+    /** 幂等键被不同请求复用 */
+    IDEMPOTENCY_KEY_REUSED(SystemCode.IDEMPOTENCY_KEY_REUSED_CODE, "Idempotency-Key 已用于其他请求"),
+    /** AgentRun 提交与当前权威版本或运行时绑定冲突 */
+    AGENT_RUN_CONFLICT(SystemCode.AGENT_RUN_CONFLICT_CODE, "AgentRun 提交绑定或版本无效"),
+    /** Agent 动作提案不在产品允许范围内 */
+    AGENT_ACTION_REJECTED(SystemCode.AGENT_ACTION_REJECTED_CODE, "非法 Agent 动作提案"),
     ;
 
     /** 通用 code */
@@ -79,6 +85,9 @@ public enum SystemCode implements IResultCode {
     /** 产品事件流 code（ADR-0016 游标恢复） */
     public static final int CURSOR_EXPIRED_CODE = 100300;
     public static final int RESOURCE_NOT_FOUND_CODE = 100301;
+    public static final int IDEMPOTENCY_KEY_REUSED_CODE = 100302;
+    public static final int AGENT_RUN_CONFLICT_CODE = 100303;
+    public static final int AGENT_ACTION_REJECTED_CODE = 100304;
 
     final int code;
     final String msg;

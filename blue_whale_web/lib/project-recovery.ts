@@ -13,6 +13,8 @@ export type ProjectSnapshot = {
     viewport: string | null;
     nodes: string | null;
   };
+  conversation_messages: Array<Record<string, unknown>>;
+  agent_runs: Array<Record<string, unknown>>;
   generation_jobs: Array<Record<string, unknown>>;
   assets: Record<string, unknown>;
   high_watermark_cursor: number;
@@ -155,6 +157,30 @@ export function applyProductEvent(
           event.payload,
         ),
       };
+    } else if (
+      event.event_type === "conversation.message_accepted" ||
+      event.event_type === "conversation.message_completed"
+    ) {
+      snapshot = {
+        ...snapshot,
+        conversation_messages: upsertFact(
+          snapshot.conversation_messages,
+          event.payload,
+          "message_id",
+        ),
+      };
+    } else if (
+      event.event_type === "agent_run.created" ||
+      event.event_type === "agent_run.status_changed"
+    ) {
+      snapshot = {
+        ...snapshot,
+        agent_runs: upsertFact(
+          snapshot.agent_runs,
+          event.payload,
+          "agent_run_id",
+        ),
+      };
     }
   }
 
@@ -166,6 +192,24 @@ export function applyProductEvent(
     aggregateVersions,
     deleted,
   };
+}
+
+function upsertFact(
+  facts: Array<Record<string, unknown>>,
+  payload: Record<string, unknown>,
+  identityKey: string,
+): Array<Record<string, unknown>> {
+  const identity = payload[identityKey];
+  if (typeof identity !== "number" && typeof identity !== "string") {
+    return facts;
+  }
+  const index = facts.findIndex(
+    (fact) => String(fact[identityKey]) === String(identity),
+  );
+  if (index < 0) return [...facts, { ...payload }];
+  return facts.map((fact, current) =>
+    current === index ? { ...fact, ...payload } : fact,
+  );
 }
 
 function applyGenerationJobEvent(

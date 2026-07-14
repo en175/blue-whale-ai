@@ -1,0 +1,475 @@
+package com.blue.whale.agent;
+
+import com.blue.whale.agent.mapper.ProjectMapper;
+import com.blue.whale.agent.model.entity.Project;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@SpringBootTest(properties = {
+        "spring.cloud.nacos.discovery.enabled=false",
+        "spring.cloud.nacos.config.enabled=false",
+        "spring.cloud.discovery.enabled=false",
+        "spring.cloud.service-registry.auto-registration.enabled=false",
+        "volcengine.ark.base-url=https://ark.test.invalid",
+        "blue-whale.agent-orchestrator.engine=fake",
+        "blue-whale.agent-orchestrator.engine-version=1",
+        "blue-whale.agent-orchestrator.adapter-schema-version=1"
+})
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
+class ConversationAgentRunIT {
+
+    @Autowired
+    private MockMvc mockMvc;
+    @Autowired
+    private ProjectMapper projectMapper;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @BeforeEach
+    void cleanAgentRunFacts() {
+        jdbcTemplate.batchUpdate(
+                "DELETE FROM run_commits",
+                "DELETE FROM runtime_checkpoints",
+                "DELETE FROM command_idempotency",
+                "DELETE FROM conversation_messages",
+                "DELETE FROM generation_jobs",
+                "DELETE FROM agent_runs",
+                "DELETE FROM conversations",
+                "DELETE FROM outbox_messages",
+                "DELETE FROM project_events",
+                "DELETE FROM project_event_stream",
+                "DELETE FROM project");
+    }
+
+    @Test
+    void repeatedMessageReturnsFirstAcceptanceWithoutDuplicatingFacts() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("agent-run-idempotency");
+        projectMapper.insert(project);
+        String body = "{\"client_message_id\":\"client-1\",\"content\":\"生成一张蓝鲸海报\"}";
+
+        MvcResult first = mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "message-key-1")
+                        .contentType("application/json")
+                        .content(body))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.message_id").isNumber())
+                .andExpect(jsonPath("$.data.agent_run_id").isNumber())
+                .andReturn();
+
+        MvcResult repeated = mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "message-key-1")
+                        .contentType("application/json")
+                        .content(body))
+                .andExpect(status().isAccepted())
+                .andReturn();
+
+        JsonNode firstData = objectMapper.readTree(first.getResponse().getContentAsString()).path("data");
+        JsonNode repeatedData = objectMapper.readTree(repeated.getResponse().getContentAsString()).path("data");
+        assertThat(repeatedData).isEqualTo(firstData);
+        assertThat(count("conversation_messages", "project_id", project.getId())).isEqualTo(1);
+        assertThat(count("agent_runs", "project_id", project.getId())).isEqualTo(1);
+        assertThat(count("project_events", "project_id", project.getId())).isEqualTo(2);
+        assertThat(count("outbox_messages", "project_id", project.getId())).isEqualTo(2);
+    }
+
+    @Test
+    void sameIdempotencyKeyWithDifferentRequestIsRejectedWithoutSideEffects() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("agent-run-conflict");
+        projectMapper.insert(project);
+
+        mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "conflicting-key")
+                        .contentType("application/json")
+                        .content("{\"client_message_id\":\"client-a\",\"content\":\"生成蓝鲸\"}"))
+                .andExpect(status().isAccepted());
+
+        mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "conflicting-key")
+                        .contentType("application/json")
+                        .content("{\"client_message_id\":\"client-b\",\"content\":\"生成白鲸\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(100302));
+
+        assertThat(count("conversation_messages", "project_id", project.getId())).isEqualTo(1);
+        assertThat(count("agent_runs", "project_id", project.getId())).isEqualTo(1);
+        assertThat(count("project_events", "project_id", project.getId())).isEqualTo(2);
+    }
+
+    @Test
+    void messageRequiresAuthenticationAndProjectOwnership() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("owned-project");
+        projectMapper.insert(project);
+        String body = "{\"client_message_id\":\"client-auth\",\"content\":\"生成蓝鲸\"}";
+
+        mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("Idempotency-Key", "missing-user")
+                        .contentType("application/json")
+                        .content(body))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "11")
+                        .header("Idempotency-Key", "wrong-user")
+                        .contentType("application/json")
+                        .content(body))
+                .andExpect(status().isNotFound());
+
+        assertThat(count("conversation_messages", "project_id", project.getId())).isZero();
+        assertThat(count("agent_runs", "project_id", project.getId())).isZero();
+        assertThat(count("project_events", "project_id", project.getId())).isZero();
+    }
+
+    @Test
+    void fakeRunCommitCreatesOneCheckpointMessageAndQueuedGenerationJob() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("fake-run-commit");
+        projectMapper.insert(project);
+        JsonNode accepted = postMessage(project.getId(), "run-message-key", "生成一张蓝鲸海报");
+        long runId = accepted.path("agent_run_id").asLong();
+
+        MvcResult claimed = mockMvc.perform(post("/internal/agent-runs/claim")
+                        .header("X-Worker-Id", "fake-worker-1")
+                        .header("X-Orchestrator-Engine", "fake"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.agent_run_id").value(runId))
+                .andExpect(jsonPath("$.data.engine").value("fake"))
+                .andReturn();
+        JsonNode work = objectMapper.readTree(claimed.getResponse().getContentAsString()).path("data");
+        String commitBody = "{" +
+                "\"commit_id\":\"commit-1\"," +
+                "\"project_id\":" + project.getId() + "," +
+                "\"user_id\":10," +
+                "\"expected_run_version\":" + work.path("run_version").asInt() + "," +
+                "\"fencing_token\":" + work.path("fencing_token").asLong() + "," +
+                "\"engine\":\"fake\"," +
+                "\"engine_version\":\"1\"," +
+                "\"adapter_schema_version\":1," +
+                "\"visible_text\":\"已接纳，正在生成图片。\"," +
+                "\"checkpoint\":{\"opaque_payload\":{\"step\":\"proposed\"}}," +
+                "\"actions\":[{\"action_id\":\"action-1\",\"action_type\":\"generate_image\"," +
+                "\"arguments\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}}]}";
+
+        MvcResult firstCommit = postCommit(runId, commitBody)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.generation_job_id").isNumber())
+                .andExpect(jsonPath("$.data.checkpoint_id").isNumber())
+                .andReturn();
+        MvcResult repeatedCommit = postCommit(runId, commitBody)
+                .andExpect(status().isOk())
+                .andReturn();
+        MvcResult reorderedCommit = postCommit(runId, commitBody.replace(
+                        "\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"",
+                        "\"aspect_ratio\":\"1:1\",\"prompt\":\"蓝鲸海报\""))
+                .andExpect(status().isOk())
+                .andReturn();
+        postCommit(runId, commitBody.replace("正在生成图片", "准备生成图片"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(100302));
+
+        JsonNode firstData = objectMapper.readTree(firstCommit.getResponse().getContentAsString()).path("data");
+        JsonNode repeatedData = objectMapper.readTree(repeatedCommit.getResponse().getContentAsString()).path("data");
+        JsonNode reorderedData = objectMapper.readTree(reorderedCommit.getResponse().getContentAsString()).path("data");
+        assertThat(repeatedData).isEqualTo(firstData);
+        assertThat(reorderedData).isEqualTo(firstData);
+        assertThat(count("runtime_checkpoints", "agent_run_id", runId)).isEqualTo(1);
+        assertThat(count("run_commits", "agent_run_id", runId)).isEqualTo(1);
+        assertThat(count("conversation_messages", "project_id", project.getId())).isEqualTo(2);
+        assertThat(count("generation_jobs", "agent_run_id", runId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT source FROM generation_jobs WHERE agent_run_id = ?", String.class, runId))
+                .isEqualTo("agent_run");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE agent_run_id = ?", String.class, runId))
+                .isEqualTo("queued");
+        assertThat(count("project_events", "project_id", project.getId())).isEqualTo(6);
+        assertThat(count("outbox_messages", "project_id", project.getId())).isEqualTo(6);
+
+        mockMvc.perform(get("/api/projects/{id}/snapshot", project.getId())
+                        .header("X-User-Id", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.conversation_messages.length()").value(2))
+                .andExpect(jsonPath("$.data.conversation_messages[1].content")
+                        .value("已接纳，正在生成图片。"))
+                .andExpect(jsonPath("$.data.agent_runs[0].agent_run_id").value(runId))
+                .andExpect(jsonPath("$.data.agent_runs[0].status").value("awaiting_job"))
+                .andExpect(jsonPath("$.data.generation_jobs[0].source").value("agent_run"))
+                .andExpect(jsonPath("$.data.generation_jobs[0].agent_run_id").value(runId));
+    }
+
+    @Test
+    void staleRunVersionIsRejectedBeforeWritingCommitFacts() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("stale-run");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "stale-key", "生成一张蓝鲸海报")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        String body = validCommitBody(project.getId(), work)
+                .replace("\"expected_run_version\":" + work.path("run_version").asInt(),
+                        "\"expected_run_version\":" + (work.path("run_version").asInt() + 1));
+
+        postCommit(runId, body)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(100303));
+
+        assertNoCommitFacts(project.getId(), runId);
+    }
+
+    @Test
+    void wrongEngineAndAdapterSchemaAreRejectedBeforeWritingCommitFacts() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("wrong-runtime-binding");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "binding-key", "生成一张蓝鲸海报")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        String valid = validCommitBody(project.getId(), work);
+
+        postCommit(runId, valid.replace("\"engine\":\"fake\"", "\"engine\":\"pydantic\""))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(100303));
+        postCommit(runId, valid.replace("\"adapter_schema_version\":1",
+                        "\"adapter_schema_version\":2"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(100303));
+        postCommit(runId, valid.replace("\"engine_version\":\"1\"",
+                        "\"engine_version\":\"2\""))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(100303));
+        postCommit(runId, valid.replace("\"user_id\":10", "\"user_id\":11"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(100303));
+
+        assertNoCommitFacts(project.getId(), runId);
+    }
+
+    @Test
+    void illegalOrFrameworkShapedActionIsRejectedBeforeWritingCommitFacts() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("illegal-action");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "action-key", "生成一张蓝鲸海报")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        String body = validCommitBody(project.getId(), work)
+                .replace("\"aspect_ratio\":\"1:1\"",
+                        "\"aspect_ratio\":\"1:1\",\"framework_type\":\"pydantic_ai.RunContext\"");
+
+        postCommit(runId, body)
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(100304));
+        postCommit(runId, validCommitBody(project.getId(), work)
+                        .replace("\"actions\":", "\"error\":{\"reason\":\"failed\"},\"actions\":"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(100304));
+        postCommit(runId, validCommitBody(project.getId(), work)
+                        .replace("\"aspect_ratio\":\"1:1\"", "\"aspect_ratio\":123"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(100304));
+        postCommit(runId, validCommitBody(project.getId(), work)
+                        .replace("\"action_id\":\"action-1\"",
+                                "\"action_id\":\"" + "a".repeat(129) + "\""))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(100304));
+
+        assertNoCommitFacts(project.getId(), runId);
+    }
+
+    @Test
+    void expiredLeaseRejectsOldWorkerAndAllowsFencedReclaim() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("expired-lease");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "lease-key", "生成一张蓝鲸海报")
+                .path("agent_run_id").asLong();
+        JsonNode firstWork = claim(runId, "fake-worker-1");
+        jdbcTemplate.update("UPDATE agent_runs SET lease_expires_at = ? WHERE id = ?",
+                Timestamp.valueOf(LocalDateTime.now().minusMinutes(1)), runId);
+
+        postCommit(runId, validCommitBody(project.getId(), firstWork), "fake-worker-1")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(100303));
+        assertNoCommitFacts(project.getId(), runId);
+
+        JsonNode reclaimed = claim(runId, "fake-worker-2");
+        assertThat(reclaimed.path("fencing_token").asLong())
+                .isGreaterThan(firstWork.path("fencing_token").asLong());
+        postCommit(runId, validCommitBody(project.getId(), reclaimed), "fake-worker-2")
+                .andExpect(status().isOk());
+
+        assertThat(count("runtime_checkpoints", "agent_run_id", runId)).isEqualTo(1);
+        assertThat(count("generation_jobs", "agent_run_id", runId)).isEqualTo(1);
+    }
+
+    @Test
+    void corruptCheckpointIsRejectedBeforeReclaimSideEffects() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("corrupt-checkpoint");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "checkpoint-key", "生成一张蓝鲸海报")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        postCommit(runId, validCommitBody(project.getId(), work))
+                .andExpect(status().isOk());
+        Long fencingToken = jdbcTemplate.queryForObject(
+                "SELECT fencing_token FROM agent_runs WHERE id = ?", Long.class, runId);
+        jdbcTemplate.update("UPDATE agent_runs SET status = 'queued' WHERE id = ?", runId);
+        jdbcTemplate.update("UPDATE runtime_checkpoints SET payload_digest = 'corrupt' WHERE agent_run_id = ?",
+                runId);
+        Project healthyProject = new Project().setOwnerId(10L).setName("healthy-after-corrupt");
+        projectMapper.insert(healthyProject);
+        long healthyRunId = postMessage(healthyProject.getId(), "healthy-key", "生成一张健康海报")
+                .path("agent_run_id").asLong();
+
+        JsonNode healthyWork = claim(healthyRunId, "fake-worker-2");
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT fencing_token FROM agent_runs WHERE id = ?", Long.class, runId))
+                .isEqualTo(fencingToken);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM agent_runs WHERE id = ?", String.class, runId))
+                .isEqualTo("recovery_failed");
+        assertThat(count("project_events", "project_id", project.getId())).isEqualTo(7);
+        assertThat(count("outbox_messages", "project_id", project.getId())).isEqualTo(7);
+        assertThat(healthyWork.path("agent_run_id").asLong()).isEqualTo(healthyRunId);
+    }
+
+    @Test
+    void validCheckpointSurvivesVersionedWakeAndRepeatedLeaseRecovery() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("checkpoint-recovery");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "checkpoint-recovery-key", "生成一张蓝鲸海报")
+                .path("agent_run_id").asLong();
+        JsonNode initialWork = claim(runId);
+        JsonNode committed = objectMapper.readTree(postCommit(
+                        runId, validCommitBody(project.getId(), initialWork))
+                        .andExpect(status().isOk())
+                        .andReturn().getResponse().getContentAsString()).path("data");
+        jdbcTemplate.update("UPDATE agent_runs SET status = 'queued', version = version + 1 WHERE id = ?", runId);
+
+        JsonNode resumed = claim(runId, "fake-worker-2");
+        assertThat(resumed.path("checkpoint").path("checkpoint_id").asLong())
+                .isEqualTo(committed.path("checkpoint_id").asLong());
+        jdbcTemplate.update("UPDATE agent_runs SET lease_expires_at = ? WHERE id = ?",
+                Timestamp.valueOf(LocalDateTime.now().minusMinutes(1)), runId);
+
+        JsonNode recoveredAgain = claim(runId, "fake-worker-3");
+        assertThat(recoveredAgain.path("checkpoint")).isEqualTo(resumed.path("checkpoint"));
+        assertThat(recoveredAgain.path("fencing_token").asLong())
+                .isGreaterThan(resumed.path("fencing_token").asLong());
+    }
+
+    @Test
+    void corruptCheckpointRemainsQuarantinedWhenQueueBecomesEmpty() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("quarantine-only-run");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "quarantine-only-key", "生成一张蓝鲸海报")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        postCommit(runId, validCommitBody(project.getId(), work))
+                .andExpect(status().isOk());
+        jdbcTemplate.update("UPDATE agent_runs SET status = 'queued' WHERE id = ?", runId);
+        jdbcTemplate.update("UPDATE runtime_checkpoints SET payload_digest = 'corrupt' WHERE agent_run_id = ?",
+                runId);
+
+        mockMvc.perform(post("/internal/agent-runs/claim")
+                        .header("X-Worker-Id", "fake-worker-2")
+                        .header("X-Orchestrator-Engine", "fake"))
+                .andExpect(status().isNotFound());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM agent_runs WHERE id = ?", String.class, runId))
+                .isEqualTo("recovery_failed");
+        assertThat(count("project_events", "project_id", project.getId())).isEqualTo(7);
+        assertThat(count("outbox_messages", "project_id", project.getId())).isEqualTo(7);
+    }
+
+    private JsonNode postMessage(Long projectId, String idempotencyKey, String content) throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/projects/{id}/conversation/messages", projectId)
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", idempotencyKey)
+                        .contentType("application/json")
+                        .content("{\"client_message_id\":\"client-" + idempotencyKey
+                                + "\",\"content\":\"" + content + "\"}"))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+    }
+
+    private JsonNode claim(long expectedRunId) throws Exception {
+        return claim(expectedRunId, "fake-worker-1");
+    }
+
+    private JsonNode claim(long expectedRunId, String workerId) throws Exception {
+        MvcResult result = mockMvc.perform(post("/internal/agent-runs/claim")
+                        .header("X-Worker-Id", workerId)
+                        .header("X-Orchestrator-Engine", "fake"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.agent_run_id").value(expectedRunId))
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+    }
+
+    private String validCommitBody(Long projectId, JsonNode work) {
+        return "{" +
+                "\"commit_id\":\"commit-1\"," +
+                "\"project_id\":" + projectId + "," +
+                "\"user_id\":10," +
+                "\"expected_run_version\":" + work.path("run_version").asInt() + "," +
+                "\"fencing_token\":" + work.path("fencing_token").asLong() + "," +
+                "\"engine\":\"fake\"," +
+                "\"engine_version\":\"1\"," +
+                "\"adapter_schema_version\":1," +
+                "\"visible_text\":\"已接纳，正在生成图片。\"," +
+                "\"checkpoint\":{\"opaque_payload\":{\"step\":\"proposed\"}}," +
+                "\"actions\":[{\"action_id\":\"action-1\",\"action_type\":\"generate_image\"," +
+                "\"arguments\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}}]}";
+    }
+
+    private void assertNoCommitFacts(Long projectId, long runId) {
+        assertThat(count("runtime_checkpoints", "agent_run_id", runId)).isZero();
+        assertThat(count("run_commits", "agent_run_id", runId)).isZero();
+        assertThat(count("conversation_messages", "project_id", projectId)).isEqualTo(1);
+        assertThat(count("generation_jobs", "agent_run_id", runId)).isZero();
+        assertThat(count("project_events", "project_id", projectId)).isEqualTo(3);
+        assertThat(count("outbox_messages", "project_id", projectId)).isEqualTo(3);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions postCommit(long runId, String body) throws Exception {
+        return postCommit(runId, body, "fake-worker-1");
+    }
+
+    private org.springframework.test.web.servlet.ResultActions postCommit(
+            long runId, String body, String workerId) throws Exception {
+        return mockMvc.perform(post("/internal/agent-runs/{id}/commits", runId)
+                .header("X-Worker-Id", workerId)
+                .contentType("application/json")
+                .content(body));
+    }
+
+    private long count(String table, String column, Long value) {
+        Long result = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM " + table + " WHERE " + column + " = ?", Long.class, value);
+        return result == null ? 0L : result;
+    }
+}

@@ -15,6 +15,8 @@ function snapshot(cursor: number, name = "before"): ProjectSnapshot {
   return {
     project: { id: 1, name, thumb: null, created_at: "2026-07-14T00:00:00" },
     canvas: { id: 2, project_id: 1, viewport: '{"zoom":1}', nodes: "[]" },
+    conversation_messages: [],
+    agent_runs: [],
     generation_jobs: [],
     assets: {},
     high_watermark_cursor: cursor,
@@ -131,6 +133,52 @@ describe("Project 恢复状态机", () => {
       },
     ]);
     expect(state.lastCursor).toBe(12);
+  });
+
+  it("应用 Conversation 与 AgentRun 事件并保留可恢复事实", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_message_11",
+        event_type: "conversation.message_completed",
+        aggregate_type: "conversation",
+        aggregate_id: "3",
+        aggregate_version: 2,
+        payload: {
+          message_id: 8,
+          conversation_id: 3,
+          agent_run_id: 5,
+          role: "assistant",
+          content: "正在生成图片。",
+          sequence_no: 2,
+        },
+      }),
+    );
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_run_12",
+        event_type: "agent_run.status_changed",
+        cursor: 12,
+        aggregate_type: "agent_run",
+        aggregate_id: "5",
+        aggregate_version: 2,
+        payload: {
+          agent_run_id: 5,
+          status: "awaiting_job",
+          stage: "generating",
+        },
+      }),
+    );
+
+    expect(state.snapshot?.conversation_messages).toEqual([
+      expect.objectContaining({ message_id: 8, sequence_no: 2 }),
+    ]);
+    expect(state.snapshot?.agent_runs).toEqual([
+      expect.objectContaining({ agent_run_id: 5, status: "awaiting_job" }),
+    ]);
   });
 });
 

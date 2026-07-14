@@ -38,13 +38,16 @@ public class GenerationJob extends BaseEntity {
     /** 来源 */
     public static final String SOURCE_DOCK = "dock";
     public static final String SOURCE_AGENT = "agent";
+    public static final String SOURCE_AGENT_RUN = "agent_run";
 
     private Long projectId;
     private Long userId;
+    private Long agentRunId;
+    private String actionIdentity;
 
     /** image / video */
     private String type;
-    /** dock / agent */
+    /** dock / agent / agent_run */
     private String source;
 
     /** 生成输入参数（prompt/model/resolution 等），整存整取 */

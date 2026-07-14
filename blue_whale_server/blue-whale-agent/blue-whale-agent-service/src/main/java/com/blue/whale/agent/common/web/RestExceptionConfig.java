@@ -46,6 +46,12 @@ public class RestExceptionConfig {
                 ? HttpStatus.NOT_FOUND
                 : exception.code() == SystemCode.CURSOR_EXPIRED_CODE
                 ? HttpStatus.GONE
+                : exception.code() == SystemCode.IDEMPOTENCY_KEY_REUSED_CODE
+                ? HttpStatus.CONFLICT
+                : exception.code() == SystemCode.AGENT_RUN_CONFLICT_CODE
+                ? HttpStatus.CONFLICT
+                : exception.code() == SystemCode.AGENT_ACTION_REJECTED_CODE
+                ? HttpStatus.UNPROCESSABLE_ENTITY
                 : HttpStatus.OK;
         return ResponseEntity.status(status).body(failed);
     }

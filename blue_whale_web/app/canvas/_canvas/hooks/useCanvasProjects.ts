@@ -25,7 +25,12 @@ import { loadAccessToken } from "@/components/auth/authStorage";
 import { projectReducer, initialProjectState } from "../projectReducer";
 import { PROJECTS } from "../constants";
 import type { NodeItem, Project, Viewport } from "../types";
+import { projectSnapshotToChatMessages } from "../conversationRecovery";
 import * as canvasApi from "@/lib/canvas";
+import {
+  acceptConversationMessage,
+  newConversationCommandIdentity,
+} from "@/lib/conversation";
 import {
   projectRecoveryTransport,
   runProjectRecovery,
@@ -138,6 +143,7 @@ export function useCanvasProjects() {
       const viewport = snapshot.canvas.viewport
         ? (JSON.parse(snapshot.canvas.viewport) as Viewport)
         : EMPTY_VIEWPORT;
+      const messages = projectSnapshotToChatMessages(snapshot);
       dispatch({
         type: "recover-project",
         projectId: pid,
@@ -145,6 +151,7 @@ export function useCanvasProjects() {
         thumb: snapshot.project.thumb,
         nodes,
         viewport,
+        messages,
       });
       lastSavedRef.current = JSON.stringify({ nodes, viewport });
       loadingProjectRef.current = null;
@@ -280,6 +287,19 @@ export function useCanvasProjects() {
     [backendReady],
   );
 
+  const submitConversationMessageAction = useCallback(
+    async (content: string) => {
+      if (!backendReady) return;
+      await acceptConversationMessage(
+        Number(activeProject.id),
+        content,
+        newConversationCommandIdentity(),
+        newConversationCommandIdentity(),
+      );
+    },
+    [activeProject.id, backendReady],
+  );
+
   return {
     state,
     dispatch,
@@ -290,5 +310,6 @@ export function useCanvasProjects() {
     createProjectAction,
     switchProject,
     deleteProjectAction,
+    submitConversationMessageAction,
   };
 }

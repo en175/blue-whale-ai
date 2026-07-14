@@ -120,7 +120,7 @@ class ProjectControllerTest {
     void snapshotReturnsOkResult() {
         SnapshotResponse snap = new SnapshotResponse(
                 new ProjectDto(1L, "A", null, LocalDateTime.now()),
-                null, List.of(), Map.of(), 5L);
+                null, List.of(), List.of(), List.of(), Map.of(), 5L);
         when(snapshotService.getSnapshot(1L, 10L)).thenReturn(snap);
 
         Result<SnapshotResponse> result = controller.snapshot(10L, 1L);

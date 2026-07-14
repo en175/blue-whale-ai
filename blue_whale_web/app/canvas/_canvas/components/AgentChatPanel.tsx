@@ -32,6 +32,7 @@ export function AgentChatPanel({
   onMentionConsumed,
   onCardGenerated,
   onAppendMessages,
+  onSubmitMessage,
   onSetCardStatus,
   prompt,
 }: {
@@ -44,6 +45,8 @@ export function AgentChatPanel({
   onCardGenerated?: (card: CardMessage) => void;
   /** 追加消息到当前项目（user 消息 + 逐条生成的 agent 回复均经此上抛） */
   onAppendMessages?: (messages: ChatMessage[]) => void;
+  /** 后端可用时提交权威 Conversation 命令；缺省时保留既有离线 mock。 */
+  onSubmitMessage?: (text: string) => Promise<void>;
   /** 设置当前项目内某 card 的状态（重试链推进） */
   onSetCardStatus?: (cardId: number | string, status: CardStatus) => void;
   /** 首页续上 / 模板卡点击带入的 prompt，填入 composer（可编辑后发送） */
@@ -214,6 +217,20 @@ export function AgentChatPanel({
       // 重新发送前清掉上一轮尚未触发的逐条追加定时器
       for (const id of pendingTimers.current) clearTimeout(id);
       pendingTimers.current = [];
+
+      if (onSubmitMessage) {
+        if (composerRef.current) composerRef.current.innerText = "";
+        setComposerEmpty(true);
+        void onSubmitMessage(text).catch((error) => {
+          console.error("[canvas] conversation message failed:", error);
+          const editor = composerRef.current;
+          if (editor && editor.innerText.trim().length === 0) {
+            editor.innerText = text;
+            setComposerEmpty(false);
+          }
+        });
+        return;
+      }
 
       const userMsg: ChatMessage = { id: nextMessageId(), type: "user", text };
       onAppendMessages?.([userMsg]);

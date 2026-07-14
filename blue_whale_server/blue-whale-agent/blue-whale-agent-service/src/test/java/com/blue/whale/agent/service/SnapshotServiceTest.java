@@ -1,6 +1,8 @@
 package com.blue.whale.agent.service;
 
 import com.blue.whale.agent.mapper.AssetMapper;
+import com.blue.whale.agent.mapper.AgentRunMapper;
+import com.blue.whale.agent.mapper.ConversationMessageMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.model.entity.Project;
 import com.blue.whale.global.base.resp.SystemCode;
@@ -25,6 +27,10 @@ class SnapshotServiceTest {
     private ProjectService projectService;
     @Mock
     private com.blue.whale.agent.service.CanvasService canvasService;
+    @Mock
+    private ConversationMessageMapper conversationMessageMapper;
+    @Mock
+    private AgentRunMapper agentRunMapper;
     @Mock
     private GenerationJobMapper generationJobMapper;
     @Mock

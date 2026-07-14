@@ -2,11 +2,15 @@ package com.blue.whale.agent.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.blue.whale.agent.mapper.AssetMapper;
+import com.blue.whale.agent.mapper.AgentRunMapper;
+import com.blue.whale.agent.mapper.ConversationMessageMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.model.dto.CanvasDto;
 import com.blue.whale.agent.model.dto.ProjectDto;
 import com.blue.whale.agent.model.dto.SnapshotResponse;
 import com.blue.whale.agent.model.entity.Asset;
+import com.blue.whale.agent.model.entity.AgentRun;
+import com.blue.whale.agent.model.entity.ConversationMessage;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -33,6 +37,8 @@ public class SnapshotService {
 
     private final ProjectService projectService;
     private final CanvasService canvasService;
+    private final ConversationMessageMapper conversationMessageMapper;
+    private final AgentRunMapper agentRunMapper;
     private final GenerationJobMapper generationJobMapper;
     private final AssetMapper assetMapper;
     private final ProjectEventService projectEventService;
@@ -51,21 +57,41 @@ public class SnapshotService {
 
         ProjectDto project = projectService.get(projectId, userId);
         CanvasDto canvas = canvasService.getByProject(projectId);
+        List<ConversationMessage> messages = conversationMessageMapper.selectList(
+                Wrappers.<ConversationMessage>lambdaQuery()
+                        .eq(ConversationMessage::getProjectId, projectId)
+                        .orderByAsc(ConversationMessage::getSequenceNo));
+        List<AgentRun> runs = agentRunMapper.selectList(Wrappers.<AgentRun>lambdaQuery()
+                .eq(AgentRun::getProjectId, projectId)
+                .orderByAsc(AgentRun::getGmtCreate));
         List<GenerationJob> jobs = generationJobMapper.selectList(Wrappers.<GenerationJob>lambdaQuery()
                 .eq(GenerationJob::getProjectId, projectId)
                 .orderByDesc(GenerationJob::getGmtCreate));
 
         List<SnapshotResponse.GenerationJobDto> jobDtos = jobs.stream()
                 .map(j -> new SnapshotResponse.GenerationJobDto(
-                        j.getId(), j.getType(), j.getStatus(), j.getProgress(),
+                        j.getId(), j.getAgentRunId(), j.getActionIdentity(), j.getType(), j.getSource(),
+                        j.getInput(), j.getStatus(), j.getProgress(),
                         j.getOutputAssetIds()))
+                .toList();
+        List<SnapshotResponse.ConversationMessageDto> messageDtos = messages.stream()
+                .map(message -> new SnapshotResponse.ConversationMessageDto(
+                        message.getId(), message.getConversationId(), message.getAgentRunId(),
+                        message.getRole(), message.getContent(), message.getSequenceNo()))
+                .toList();
+        List<SnapshotResponse.AgentRunDto> runDtos = runs.stream()
+                .map(run -> new SnapshotResponse.AgentRunDto(
+                        run.getId(), run.getConversationId(), run.getStatus(), run.getStage(),
+                        run.getEngine(), run.getEngineVersion(), run.getAdapterSchemaVersion(),
+                        run.getCurrentCheckpointId(), run.getVersion()))
                 .toList();
 
         // 批量查 job 引用的 asset，补 url（防 N+1）
         Map<Long, SnapshotResponse.AssetDto> assetMap = resolveAssets(jobs);
 
         long highWatermark = projectEventService.highWatermark(projectId);
-        return new SnapshotResponse(project, canvas, jobDtos, assetMap, highWatermark);
+        return new SnapshotResponse(
+                project, canvas, messageDtos, runDtos, jobDtos, assetMap, highWatermark);
     }
 
     private Map<Long, SnapshotResponse.AssetDto> resolveAssets(List<GenerationJob> jobs) {
