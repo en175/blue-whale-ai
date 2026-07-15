@@ -14,9 +14,9 @@ import java.time.LocalDateTime;
 public interface GenerationJobMapper extends BaseMapper<GenerationJob> {
 
     @Select("SELECT * FROM generation_jobs WHERE source IN ('agent_run', 'bottom_dock') AND is_delete = 0 AND ("
-            + "(type = 'image' AND (status = 'queued' "
-            + "OR (status = 'processing' AND (lease_expires_at IS NULL "
-            + "OR lease_expires_at < CURRENT_TIMESTAMP)))) "
+            + "(type = 'image' AND (next_action_at IS NULL OR next_action_at <= CURRENT_TIMESTAMP) "
+            + "AND (status = 'queued' OR (status IN ('processing', 'cancel_requested') "
+            + "AND (lease_expires_at IS NULL OR lease_expires_at < CURRENT_TIMESTAMP)))) "
             + "OR (type = 'video' AND source = 'bottom_dock' "
             + "AND ((status IN ('queued', 'processing', 'cancel_requested') "
             + "AND (next_action_at IS NULL OR next_action_at <= CURRENT_TIMESTAMP)) "
@@ -45,4 +45,17 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJob> {
             + "gmt_modified = CURRENT_TIMESTAMP WHERE id = #{id} AND type = 'video' "
             + "AND status IN ('processing', 'cancel_requested') AND is_delete = 0")
     int wakeVideoJob(@Param("id") Long id);
+
+    @Update("UPDATE generation_jobs SET lease_expires_at = #{deadline}, "
+            + "execution_deadline_at = COALESCE(execution_deadline_at, #{deadline}), "
+            + "gmt_modified = CURRENT_TIMESTAMP WHERE id = #{id} AND type = 'image' "
+            + "AND status = 'processing' AND version = #{version} "
+            + "AND fencing_token = #{fencingToken} AND lease_owner = #{leaseOwner} "
+            + "AND is_delete = 0")
+    int extendImageCallLease(
+            @Param("id") Long id,
+            @Param("version") Integer version,
+            @Param("fencingToken") Long fencingToken,
+            @Param("leaseOwner") String leaseOwner,
+            @Param("deadline") LocalDateTime deadline);
 }

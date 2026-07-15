@@ -29,7 +29,10 @@ class GenerationWorkerTest {
         when(claimService.claim("worker-1")).thenReturn(claim);
         when(provider.generate(new GenerationProviderRequest(7L, 11L, claim.input())))
                 .thenReturn(GenerationProviderResult.success(new byte[]{1}, "image/png", 1, 1));
-        when(storage.store(any(byte[].class), eq("image/png")))
+        PreparedGenerationObject prepared = new PreparedGenerationObject(
+                "test/key", "0".repeat(64), "image/png", 1);
+        when(storage.prepare(any(byte[].class), eq("image/png"))).thenReturn(prepared);
+        when(storage.store(eq(prepared), any(byte[].class)))
                 .thenThrow(new IllegalStateException("tos secret detail"));
         GenerationWorker worker = new GenerationWorker(claimService, acceptanceService, provider, storage);
 

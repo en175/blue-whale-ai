@@ -58,7 +58,8 @@ class SeedanceGenerationLiveSmokeTest {
                 observation = provider.observe(reference);
                 if (observation.status() == ProviderObservation.Status.SUCCEEDED) {
                     VideoIngestedResult ingested = ingestor.ingest(
-                            smokeJobId, observation.temporaryResultUrl(), observation.durationSeconds(), 4);
+                            smokeJobId, 0, observation.temporaryResultUrl(),
+                            observation.durationSeconds(), 4);
                     assertThat(ingested.stored().storageKey())
                             .isEqualTo(properties.getTos().getPrefix()
                                     + "/video/jobs/" + smokeJobId + "/slot-0.mp4");

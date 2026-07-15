@@ -23,7 +23,7 @@ class SeedanceVideoResultIngestorTest {
                 client, mock(VideoGenerationStorage.class), properties());
 
         assertThatThrownBy(() -> ingestor.ingest(
-                1L, "https://result.volces.com/video.mp4", 4, 4))
+                1L, 0, "https://result.volces.com/video.mp4", 4, 4))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Seedance 视频下载失败");
     }
@@ -44,7 +44,7 @@ class SeedanceVideoResultIngestorTest {
                 client, mock(VideoGenerationStorage.class), properties());
 
         assertThatThrownBy(() -> ingestor.ingest(
-                1L, "https://result.volces.com/video.mp4", 4, 4))
+                1L, 0, "https://result.volces.com/video.mp4", 4, 4))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Seedance 视频下载失败");
     }

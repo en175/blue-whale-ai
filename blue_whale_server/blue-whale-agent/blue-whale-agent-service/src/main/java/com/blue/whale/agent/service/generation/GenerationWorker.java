@@ -3,8 +3,12 @@ package com.blue.whale.agent.service.generation;
 import com.blue.whale.agent.model.dto.GenerationFailureCommand;
 import com.blue.whale.agent.model.dto.GenerationJobClaim;
 import com.blue.whale.agent.model.dto.GenerationResultCommand;
+import com.blue.whale.agent.model.dto.AssetObjectTransferHandle;
+import com.blue.whale.agent.model.entity.Asset;
+import com.blue.whale.agent.service.AssetObjectLifecycleService;
 import com.blue.whale.agent.service.GenerationJobClaimService;
 import com.blue.whale.agent.service.GenerationResultAcceptanceService;
+import com.blue.whale.agent.service.ImageProviderCallService;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 public class GenerationWorker {
@@ -14,13 +18,15 @@ public class GenerationWorker {
     private final GenerationProvider provider;
     private final GenerationStorage storage;
     private final SeedanceVideoGenerationProcessor videoProcessor;
+    private final AssetObjectLifecycleService assetObjectLifecycleService;
+    private final ImageProviderCallService imageProviderCallService;
 
     public GenerationWorker(
             GenerationJobClaimService claimService,
             GenerationResultAcceptanceService acceptanceService,
             GenerationProvider provider,
             GenerationStorage storage) {
-        this(claimService, acceptanceService, provider, storage, null);
+        this(claimService, acceptanceService, provider, storage, null, null, null);
     }
 
     public GenerationWorker(
@@ -29,11 +35,35 @@ public class GenerationWorker {
             GenerationProvider provider,
             GenerationStorage storage,
             SeedanceVideoGenerationProcessor videoProcessor) {
+        this(claimService, acceptanceService, provider, storage, videoProcessor, null, null);
+    }
+
+    public GenerationWorker(
+            GenerationJobClaimService claimService,
+            GenerationResultAcceptanceService acceptanceService,
+            GenerationProvider provider,
+            GenerationStorage storage,
+            SeedanceVideoGenerationProcessor videoProcessor,
+            AssetObjectLifecycleService assetObjectLifecycleService) {
+        this(claimService, acceptanceService, provider, storage, videoProcessor,
+                assetObjectLifecycleService, null);
+    }
+
+    public GenerationWorker(
+            GenerationJobClaimService claimService,
+            GenerationResultAcceptanceService acceptanceService,
+            GenerationProvider provider,
+            GenerationStorage storage,
+            SeedanceVideoGenerationProcessor videoProcessor,
+            AssetObjectLifecycleService assetObjectLifecycleService,
+            ImageProviderCallService imageProviderCallService) {
         this.claimService = claimService;
         this.acceptanceService = acceptanceService;
         this.provider = provider;
         this.storage = storage;
         this.videoProcessor = videoProcessor;
+        this.assetObjectLifecycleService = assetObjectLifecycleService;
+        this.imageProviderCallService = imageProviderCallService;
     }
 
     public boolean runOnce(String workerId) {
@@ -55,13 +85,30 @@ public class GenerationWorker {
             return true;
         }
 
+        if (imageProviderCallService != null
+                && imageProviderCallService.prepare(claim) != ImageProviderCallService.Preparation.CALL) {
+            return true;
+        }
         GenerationProviderResult result = provider.generate(new GenerationProviderRequest(
                 claim.projectId(), claim.userId(), claim.input()));
+        if (imageProviderCallService != null) {
+            imageProviderCallService.recordOutcome(claim, result.status().name().toLowerCase());
+        }
         if (result.status() == GenerationProviderResult.Status.SUCCESS) {
+            PreparedGenerationObject prepared = storage.prepare(result.content(), result.mimeType());
+            AssetObjectTransferHandle transfer = assetObjectLifecycleService == null ? null
+                    : assetObjectLifecycleService.beginTransfer(
+                    prepared.storageKey(), Asset.SOURCE_GENERATED);
             StoredGenerationObject stored;
             try {
-                stored = storage.store(result.content(), result.mimeType());
+                stored = storage.store(prepared, result.content());
+                if (transfer != null) {
+                    assetObjectLifecycleService.completeTransfer(transfer, stored.contentSha256());
+                }
             } catch (RuntimeException exception) {
+                if (transfer != null) {
+                    assetObjectLifecycleService.failTransfer(transfer);
+                }
                 acceptanceService.acceptFailure(new GenerationFailureCommand(
                         claim.jobId(), claim.targetSlotIndex(), claim.jobVersion(),
                         claim.fencingToken(), claim.leaseOwner(),

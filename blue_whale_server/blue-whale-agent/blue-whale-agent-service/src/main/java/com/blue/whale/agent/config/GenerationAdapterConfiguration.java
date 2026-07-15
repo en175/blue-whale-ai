@@ -4,8 +4,11 @@ import com.blue.whale.agent.service.GenerationJobClaimService;
 import com.blue.whale.agent.service.GenerationResultAcceptanceService;
 import com.blue.whale.agent.service.ProjectAssetContentService;
 import com.blue.whale.agent.service.ProjectAssetAccessService;
+import com.blue.whale.agent.service.AssetObjectLifecycleService;
+import com.blue.whale.agent.service.ImageProviderCallService;
 import com.blue.whale.agent.service.generation.GenerationAdapterProperties;
 import com.blue.whale.agent.service.generation.AsyncGenerationProvider;
+import com.blue.whale.agent.service.generation.AssetObjectGarbageCollector;
 import com.blue.whale.agent.service.generation.GenerationProvider;
 import com.blue.whale.agent.service.generation.GenerationWorker;
 import com.blue.whale.agent.service.generation.OpenAiImageGenerationProvider;
@@ -111,9 +114,10 @@ public class GenerationAdapterConfiguration {
             OkHttpClient generationOkHttpClient,
             TosGenerationStorage storage,
             GenerationAdapterProperties properties,
+            AssetObjectLifecycleService lifecycleService,
             GenerationAdapterReadiness readiness) {
         return new SeedanceVideoResultIngestor(
-                generationOkHttpClient, storage, properties);
+                generationOkHttpClient, storage, properties, lifecycleService);
     }
 
     @Bean
@@ -124,9 +128,20 @@ public class GenerationAdapterConfiguration {
             GenerationProvider provider,
             TosGenerationStorage storage,
             ObjectProvider<SeedanceVideoGenerationProcessor> videoProcessorProvider,
+            AssetObjectLifecycleService lifecycleService,
+            ImageProviderCallService imageProviderCallService,
             GenerationAdapterReadiness readiness) {
         return new GenerationWorker(claimService, acceptanceService, provider, storage,
-                videoProcessorProvider.getIfAvailable());
+                videoProcessorProvider.getIfAvailable(), lifecycleService, imageProviderCallService);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = MODE)
+    AssetObjectGarbageCollector assetObjectGarbageCollector(
+            AssetObjectLifecycleService lifecycleService,
+            TosGenerationStorage storage,
+            GenerationAdapterReadiness readiness) {
+        return new AssetObjectGarbageCollector(lifecycleService, storage);
     }
 
     private void validate(GenerationAdapterProperties properties) {

@@ -4,6 +4,7 @@ import com.volcengine.tos.TOSV2;
 import com.volcengine.tos.comm.common.ACLType;
 import com.volcengine.tos.model.object.GetObjectV2Input;
 import com.volcengine.tos.model.object.GetObjectV2Output;
+import com.volcengine.tos.model.object.DeleteObjectInput;
 import com.volcengine.tos.model.object.ObjectMetaRequestOptions;
 import com.volcengine.tos.model.object.PreSignedURLInput;
 import com.volcengine.tos.model.object.PreSignedURLOutput;
@@ -18,9 +19,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.util.HexFormat;
+import java.util.UUID;
 
 public class TosGenerationStorage implements
-        GenerationStorage, VideoGenerationStorage, GenerationObjectReader, GenerationObjectSigner {
+        GenerationStorage, VideoGenerationStorage, GenerationObjectReader, GenerationObjectSigner,
+        GenerationObjectDeletionStorage {
 
     private final TOSV2 tosClient;
     private final GenerationAdapterProperties properties;
@@ -36,56 +39,77 @@ public class TosGenerationStorage implements
     }
 
     @Override
-    public StoredGenerationObject store(byte[] content, String mimeType) {
+    public PreparedGenerationObject prepare(byte[] content, String mimeType) {
         if (content == null || content.length == 0 || !"image/png".equals(mimeType)) {
             throw new IllegalArgumentException("只允许存储非空 PNG 图片");
         }
         String digest = sha256(content);
         String storageKey = normalizedPrefix() + "/sha256/" + digest + ".png";
+        return new PreparedGenerationObject(storageKey, digest, mimeType, content.length);
+    }
+
+    @Override
+    public StoredGenerationObject store(PreparedGenerationObject prepared, byte[] content) {
+        if (prepared == null || content == null || content.length != prepared.sizeBytes()
+                || !sha256(content).equals(prepared.contentSha256())) {
+            throw new IllegalArgumentException("图片内容与预备对象不一致");
+        }
         ObjectMetaRequestOptions options = new ObjectMetaRequestOptions()
-                .setContentType(mimeType)
+                .setContentType(prepared.mimeType())
                 .setAclType(ACLType.ACL_PRIVATE);
         PutObjectInput input = new PutObjectInput()
                 .setBucket(properties.getTos().getBucket())
-                .setKey(storageKey)
+                .setKey(prepared.storageKey())
                 .setContent(new ByteArrayInputStream(content))
                 .setContentLength(content.length)
                 .setOptions(options);
         tosClient.putObject(input);
-        return new StoredGenerationObject(storageKey, digest, mimeType, content.length);
+        return new StoredGenerationObject(prepared.storageKey(), prepared.contentSha256(),
+                prepared.mimeType(), prepared.sizeBytes());
     }
 
     @Override
-    public StoredGenerationObject storeVideo(
+    public PreparedVideoGenerationObject prepareVideo(
             Long jobId,
             int slotIndex,
-            InputStream content,
             long contentLength,
             String mimeType) {
         long maxBytes = properties.getTos().getMaxVideoBytes();
-        if (jobId == null || slotIndex < 0 || content == null
+        if (jobId == null || slotIndex < 0
                 || contentLength <= 0 || contentLength > maxBytes
                 || !"video/mp4".equals(mimeType)) {
             throw new IllegalArgumentException("只允许在大小上限内存储非空 MP4 视频");
         }
         String storageKey = normalizedPrefix() + "/video/jobs/" + jobId
-                + "/slot-" + slotIndex + ".mp4";
+                + "/slot-" + slotIndex + "/" + UUID.randomUUID() + ".mp4";
+        return new PreparedVideoGenerationObject(storageKey, mimeType, contentLength);
+    }
+
+    @Override
+    public StoredGenerationObject storeVideo(
+            PreparedVideoGenerationObject prepared,
+            InputStream content) {
+        if (prepared == null || content == null) {
+            throw new IllegalArgumentException("视频内容与预备对象不一致");
+        }
+        long maxBytes = properties.getTos().getMaxVideoBytes();
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             DigestInputStream digestStream = new DigestInputStream(
                     new BoundedInputStream(content, maxBytes), digest);
             ObjectMetaRequestOptions options = new ObjectMetaRequestOptions()
-                    .setContentType(mimeType)
+                    .setContentType(prepared.mimeType())
                     .setAclType(ACLType.ACL_PRIVATE);
             PutObjectInput input = new PutObjectInput()
                     .setBucket(properties.getTos().getBucket())
-                    .setKey(storageKey)
+                    .setKey(prepared.storageKey())
                     .setContent(digestStream)
-                    .setContentLength(contentLength)
+                    .setContentLength(prepared.sizeBytes())
                     .setOptions(options);
             tosClient.putObject(input);
             return new StoredGenerationObject(
-                    storageKey, HexFormat.of().formatHex(digest.digest()), mimeType, contentLength);
+                    prepared.storageKey(), HexFormat.of().formatHex(digest.digest()),
+                    prepared.mimeType(), prepared.sizeBytes());
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("JDK 不支持 SHA-256", exception);
         }
@@ -121,6 +145,13 @@ public class TosGenerationStorage implements
                 .setExpires(ttlSeconds);
         PreSignedURLOutput output = tosClient.preSignedURL(input);
         return new SignedGenerationObject(output.getSignedUrl(), clock.instant().plusSeconds(ttlSeconds));
+    }
+
+    @Override
+    public void delete(String storageKey) {
+        tosClient.deleteObject(new DeleteObjectInput()
+                .setBucket(properties.getTos().getBucket())
+                .setKey(storageKey));
     }
 
     private String normalizedPrefix() {

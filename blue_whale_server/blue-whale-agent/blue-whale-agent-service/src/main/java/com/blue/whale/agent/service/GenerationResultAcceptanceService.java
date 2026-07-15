@@ -8,6 +8,7 @@ import com.blue.whale.agent.mapper.GenerationResultConflictMapper;
 import com.blue.whale.agent.model.constant.AggregateType;
 import com.blue.whale.agent.model.constant.EventType;
 import com.blue.whale.agent.model.dto.GenerationAcceptanceResult;
+import com.blue.whale.agent.model.dto.GenerationCancellationCommand;
 import com.blue.whale.agent.model.dto.GenerationFailureCommand;
 import com.blue.whale.agent.model.dto.GenerationResultCommand;
 import com.blue.whale.agent.model.dto.VideoGenerationResultCommand;
@@ -36,6 +37,7 @@ public class GenerationResultAcceptanceService {
     private final GenerationJobOutputMapper outputMapper;
     private final GenerationResultConflictMapper conflictMapper;
     private final AssetMapper assetMapper;
+    private final AssetObjectLifecycleService assetObjectLifecycleService;
     private final AgentRunMapper agentRunMapper;
     private final ProjectEventService projectEventService;
 
@@ -59,12 +61,16 @@ public class GenerationResultAcceptanceService {
             return new GenerationAcceptanceResult(
                     GenerationAcceptanceResult.Status.CONFLICT, output.getAssetId());
         }
-        if (GenerationJobOutput.STATUS_FAILED.equals(output.getStatus()) || isTerminal(job)) {
+        if (GenerationJobOutput.STATUS_FAILED.equals(output.getStatus())
+                || GenerationJobOutput.STATUS_CANCELLED.equals(output.getStatus())
+                || isTerminal(job)) {
             return new GenerationAcceptanceResult(GenerationAcceptanceResult.Status.CONFLICT, output.getAssetId());
         }
 
         requireCurrentFence(job, command.fencingToken());
         requireExecutionOwner(job, command, generationJobMapper.selectCurrentTime());
+        assetObjectLifecycleService.protectReference(
+                command.storageKey(), command.contentSha256(), Asset.SOURCE_GENERATED);
         Asset asset = new Asset()
                 .setProjectId(job.getProjectId())
                 .setUserId(job.getUserId())
@@ -116,7 +122,9 @@ public class GenerationResultAcceptanceService {
             return new GenerationAcceptanceResult(
                     GenerationAcceptanceResult.Status.IDEMPOTENT, output.getAssetId());
         }
-        if (GenerationJobOutput.STATUS_SUCCEEDED.equals(output.getStatus()) || isTerminal(job)) {
+        if (GenerationJobOutput.STATUS_SUCCEEDED.equals(output.getStatus())
+                || GenerationJobOutput.STATUS_CANCELLED.equals(output.getStatus())
+                || isTerminal(job)) {
             return new GenerationAcceptanceResult(GenerationAcceptanceResult.Status.CONFLICT, output.getAssetId());
         }
         requireExecutionOwner(job, command.expectedJobVersion(), command.fencingToken(),
@@ -132,6 +140,41 @@ public class GenerationResultAcceptanceService {
         appendJobStatusChanged(failed);
         resumePydanticRun(failed);
         return new GenerationAcceptanceResult(GenerationAcceptanceResult.Status.FAILED, null);
+    }
+
+    @Transactional
+    public GenerationAcceptanceResult acceptCancellation(GenerationCancellationCommand command) {
+        validateCancellationCommand(command);
+        GenerationJob job = generationJobMapper.selectForUpdate(command.jobId());
+        if (job == null) {
+            throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
+        }
+        GenerationJobOutput output = outputMapper.selectForUpdate(command.jobId(), command.slotIndex());
+        if (output == null) {
+            throw conflict();
+        }
+        if (GenerationJobOutput.STATUS_CANCELLED.equals(output.getStatus())) {
+            return new GenerationAcceptanceResult(
+                    GenerationAcceptanceResult.Status.IDEMPOTENT, output.getAssetId());
+        }
+        if (GenerationJobOutput.STATUS_SUCCEEDED.equals(output.getStatus())
+                || GenerationJobOutput.STATUS_FAILED.equals(output.getStatus())
+                || isTerminal(job)) {
+            return new GenerationAcceptanceResult(
+                    GenerationAcceptanceResult.Status.CONFLICT, output.getAssetId());
+        }
+        requireCancellationOwner(job, command, generationJobMapper.selectCurrentTime());
+        output.setStatus(GenerationJobOutput.STATUS_CANCELLED).setError(null);
+        if (outputMapper.updateById(output) != 1) {
+            throw conflict();
+        }
+        aggregate(job, null);
+        updateAcceptedJob(job);
+        GenerationJob cancelled = generationJobMapper.selectById(job.getId());
+        appendOutputUpdated(cancelled, output);
+        appendJobStatusChanged(cancelled);
+        resumePydanticRun(cancelled);
+        return new GenerationAcceptanceResult(GenerationAcceptanceResult.Status.CANCELLED, null);
     }
 
     @Transactional
@@ -159,11 +202,15 @@ public class GenerationResultAcceptanceService {
             return new GenerationAcceptanceResult(
                 GenerationAcceptanceResult.Status.CONFLICT, output.getAssetId());
         }
-        if (GenerationJobOutput.STATUS_FAILED.equals(output.getStatus()) || isTerminal(job)) {
+        if (GenerationJobOutput.STATUS_FAILED.equals(output.getStatus())
+                || GenerationJobOutput.STATUS_CANCELLED.equals(output.getStatus())
+                || isTerminal(job)) {
             return new GenerationAcceptanceResult(GenerationAcceptanceResult.Status.CONFLICT, output.getAssetId());
         }
         requireCurrentVideoFence(job, command.fencingToken());
         requireVideoExecutionOwner(job, command, generationJobMapper.selectCurrentTime());
+        assetObjectLifecycleService.protectReference(
+                command.storageKey(), command.contentSha256(), Asset.SOURCE_GENERATED);
 
         Asset asset = new Asset()
                 .setProjectId(job.getProjectId())
@@ -234,6 +281,18 @@ public class GenerationResultAcceptanceService {
         }
     }
 
+    private void validateCancellationCommand(GenerationCancellationCommand command) {
+        boolean valid = command != null
+                && command.jobId() != null
+                && command.slotIndex() >= 0
+                && command.expectedJobVersion() >= 0
+                && command.fencingToken() > 0
+                && command.leaseOwner() != null && !command.leaseOwner().isBlank();
+        if (!valid) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "生成取消命令无效");
+        }
+    }
+
     private void validateVideoCommand(VideoGenerationResultCommand command) {
         boolean valid = command != null
                 && command.jobId() != null
@@ -266,7 +325,7 @@ public class GenerationResultAcceptanceService {
                 && GenerationJob.TYPE_VIDEO.equals(job.getType())
                 && GenerationJob.SOURCE_BOTTOM_DOCK.equals(job.getSource())
                 && activeStatus
-                && Objects.equals(job.getVersion(), command.expectedJobVersion())
+                && resultVersionMatches(job, command.expectedJobVersion())
                 && Objects.equals(job.getFencingToken(), command.fencingToken())
                 && Objects.equals(job.getLeaseOwner(), command.leaseOwner())
                 && job.getLeaseExpiresAt() != null
@@ -302,6 +361,30 @@ public class GenerationResultAcceptanceService {
         }
     }
 
+    private void requireCancellationOwner(
+            GenerationJob job,
+            GenerationCancellationCommand command,
+            LocalDateTime databaseNow) {
+        boolean currentVersion = Objects.equals(job.getVersion(), command.expectedJobVersion());
+        boolean cancellationTransition = GenerationJob.STATUS_CANCEL_REQUESTED.equals(job.getStatus())
+                && job.getVersion() != null
+                && job.getVersion() == command.expectedJobVersion() + 1;
+        boolean valid = job.getProjectId() != null
+                && (GenerationJob.TYPE_IMAGE.equals(job.getType())
+                || GenerationJob.TYPE_VIDEO.equals(job.getType()))
+                && (GenerationJob.SOURCE_AGENT_RUN.equals(job.getSource())
+                || GenerationJob.SOURCE_BOTTOM_DOCK.equals(job.getSource()))
+                && GenerationJob.STATUS_CANCEL_REQUESTED.equals(job.getStatus())
+                && (currentVersion || cancellationTransition)
+                && Objects.equals(job.getFencingToken(), command.fencingToken())
+                && Objects.equals(job.getLeaseOwner(), command.leaseOwner())
+                && job.getLeaseExpiresAt() != null
+                && job.getLeaseExpiresAt().isAfter(databaseNow);
+        if (!valid) {
+            throw conflict();
+        }
+    }
+
     private void requireExecutionOwner(
             GenerationJob job,
             Integer expectedJobVersion,
@@ -309,14 +392,15 @@ public class GenerationResultAcceptanceService {
             String leaseOwner,
             LocalDateTime databaseNow) {
         boolean imageOwner = isWorkerImageJob(job)
-                && GenerationJob.STATUS_PROCESSING.equals(job.getStatus());
+                && (GenerationJob.STATUS_PROCESSING.equals(job.getStatus())
+                || GenerationJob.STATUS_CANCEL_REQUESTED.equals(job.getStatus()));
         boolean videoOwner = job.getProjectId() != null
                 && GenerationJob.TYPE_VIDEO.equals(job.getType())
                 && GenerationJob.SOURCE_BOTTOM_DOCK.equals(job.getSource())
                 && (GenerationJob.STATUS_PROCESSING.equals(job.getStatus())
                 || GenerationJob.STATUS_CANCEL_REQUESTED.equals(job.getStatus()));
         boolean matches = (imageOwner || videoOwner)
-                && Objects.equals(job.getVersion(), expectedJobVersion)
+                && resultVersionMatches(job, expectedJobVersion)
                 && Objects.equals(job.getFencingToken(), fencingToken)
                 && Objects.equals(job.getLeaseOwner(), leaseOwner)
                 && job.getLeaseExpiresAt() != null
@@ -324,6 +408,14 @@ public class GenerationResultAcceptanceService {
         if (!matches) {
             throw conflict();
         }
+    }
+
+    private boolean resultVersionMatches(GenerationJob job, Integer expectedJobVersion) {
+        return Objects.equals(job.getVersion(), expectedJobVersion)
+                || (GenerationJob.STATUS_CANCEL_REQUESTED.equals(job.getStatus())
+                && job.getVersion() != null
+                && expectedJobVersion != null
+                && job.getVersion() == expectedJobVersion + 1);
     }
 
     private boolean isWorkerImageJob(GenerationJob job) {
@@ -346,15 +438,26 @@ public class GenerationResultAcceptanceService {
                 .toList();
         long resolved = outputs.stream()
                 .filter(output -> GenerationJobOutput.STATUS_SUCCEEDED.equals(output.getStatus())
-                        || GenerationJobOutput.STATUS_FAILED.equals(output.getStatus()))
+                        || GenerationJobOutput.STATUS_FAILED.equals(output.getStatus())
+                        || GenerationJobOutput.STATUS_CANCELLED.equals(output.getStatus()))
                 .count();
+        long cancelled = outputs.stream()
+                .filter(output -> GenerationJobOutput.STATUS_CANCELLED.equals(output.getStatus()))
+                .count();
+        boolean hasFailure = outputs.stream()
+                .anyMatch(output -> GenerationJobOutput.STATUS_FAILED.equals(output.getStatus()));
 
         if (resolved < expected) {
-            job.setStatus(GenerationJob.STATUS_PROCESSING).setError(null);
+            job.setStatus(job.getCancelRequestedAt() == null
+                            ? GenerationJob.STATUS_PROCESSING
+                            : GenerationJob.STATUS_CANCEL_REQUESTED)
+                    .setError(null);
         } else if (assetIds.size() == expected) {
             job.setStatus(GenerationJob.STATUS_SUCCEEDED).setError(null);
         } else if (!assetIds.isEmpty()) {
             job.setStatus(GenerationJob.STATUS_PARTIALLY_SUCCEEDED).setError(null);
+        } else if (cancelled == expected) {
+            job.setStatus(GenerationJob.STATUS_CANCELLED).setError(null);
         } else {
             Map<String, Object> firstError = outputs.stream()
                     .map(GenerationJobOutput::getError)
@@ -368,6 +471,7 @@ public class GenerationResultAcceptanceService {
         }
         LocalDateTime nextActionAt = GenerationJob.TYPE_VIDEO.equals(job.getType())
                 && GenerationJob.STATUS_PARTIALLY_SUCCEEDED.equals(job.getStatus())
+                && hasFailure
                 ? generationJobMapper.selectCurrentTime() : null;
         job.setOutputAssetIds(assetIds)
                 .setLeaseOwner(null)
@@ -451,7 +555,7 @@ public class GenerationResultAcceptanceService {
                 payload, null, null);
     }
 
-    private void resumePydanticRun(GenerationJob job) {
+    void resumePydanticRun(GenerationJob job) {
         if (!isTerminal(job)
                 || !GenerationJob.SOURCE_AGENT_RUN.equals(job.getSource())
                 || job.getAgentRunId() == null) {

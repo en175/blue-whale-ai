@@ -4,6 +4,7 @@ import com.volcengine.tos.TOSV2;
 import com.volcengine.tos.comm.common.ACLType;
 import com.volcengine.tos.model.object.GetObjectV2Input;
 import com.volcengine.tos.model.object.GetObjectV2Output;
+import com.volcengine.tos.model.object.DeleteObjectInput;
 import com.volcengine.tos.model.object.PreSignedURLInput;
 import com.volcengine.tos.model.object.PreSignedURLOutput;
 import com.volcengine.tos.model.object.PutObjectInput;
@@ -25,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -71,7 +73,7 @@ class TosGenerationStorageTest {
     }
 
     @Test
-    void storesVideoPrivatelyAtDeterministicJobSlotKey() throws Exception {
+    void storesVideoPrivatelyAtImmutableAttemptKey() throws Exception {
         byte[] content = "mp4-bytes".getBytes(StandardCharsets.UTF_8);
         properties.getTos().setMaxVideoBytes(20);
         doAnswer(invocation -> {
@@ -79,15 +81,26 @@ class TosGenerationStorageTest {
             input.getContent().readAllBytes();
             return null;
         }).when(tosClient).putObject(any(PutObjectInput.class));
+        PreparedVideoGenerationObject prepared = storage.prepareVideo(
+                9L, 0, content.length, "video/mp4");
+        PreparedVideoGenerationObject anotherAttempt = storage.prepareVideo(
+                9L, 0, content.length, "video/mp4");
 
         StoredGenerationObject stored = storage.storeVideo(
-                9L, 0, new ByteArrayInputStream(content), content.length, "video/mp4");
+                prepared, new ByteArrayInputStream(content));
+        storage.storeVideo(anotherAttempt, new ByteArrayInputStream(content));
 
-        assertThat(stored.storageKey()).isEqualTo("generation-assets/video/jobs/9/slot-0.mp4");
+        assertThat(prepared.storageKey()).isNotEqualTo(anotherAttempt.storageKey());
+        assertThat(stored.storageKey()).isEqualTo(prepared.storageKey());
+        assertThat(stored.storageKey())
+                .matches("generation-assets/video/jobs/9/slot-0/[0-9a-f-]{36}\\.mp4");
         assertThat(stored.contentSha256()).isEqualTo(HexFormat.of().formatHex(
                 MessageDigest.getInstance("SHA-256").digest(content)));
         ArgumentCaptor<PutObjectInput> inputCaptor = ArgumentCaptor.forClass(PutObjectInput.class);
-        verify(tosClient).putObject(inputCaptor.capture());
+        verify(tosClient, times(2)).putObject(inputCaptor.capture());
+        assertThat(inputCaptor.getAllValues())
+                .extracting(PutObjectInput::getKey)
+                .doesNotHaveDuplicates();
         assertThat(inputCaptor.getValue().getOptions().getContentType()).isEqualTo("video/mp4");
         assertThat(inputCaptor.getValue().getOptions().getAclType()).isEqualTo(ACLType.ACL_PRIVATE);
     }
@@ -130,5 +143,17 @@ class TosGenerationStorageTest {
         assertThatThrownBy(() -> storage.read("generation-assets/sha256/a.png"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("TOS 对象超过读取上限");
+    }
+
+    @Test
+    void deletesPrivateObjectByStableStorageKey() {
+        storage.delete("generation-assets/sha256/orphan.png");
+
+        ArgumentCaptor<DeleteObjectInput> inputCaptor =
+                ArgumentCaptor.forClass(DeleteObjectInput.class);
+        verify(tosClient).deleteObject(inputCaptor.capture());
+        assertThat(inputCaptor.getValue().getBucket()).isEqualTo("private-bucket");
+        assertThat(inputCaptor.getValue().getKey())
+                .isEqualTo("generation-assets/sha256/orphan.png");
     }
 }

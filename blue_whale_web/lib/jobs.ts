@@ -38,10 +38,12 @@ export function mapJobStatusToCardStatus(
     case "cancel_requested":
       return "generating";
     case "succeeded":
+    case "partially_succeeded":
       return "normal";
     case "failed":
-    case "cancelled":
       return "failed";
+    case "cancelled":
+      return "cancelled";
   }
 }
 
@@ -49,6 +51,7 @@ export function mapJobStatusToCardStatus(
 export function isJobTerminal(job: GenerationJob): boolean {
   return (
     job.status === "succeeded" ||
+    job.status === "partially_succeeded" ||
     job.status === "failed" ||
     job.status === "cancelled"
   );

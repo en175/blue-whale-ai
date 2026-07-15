@@ -97,11 +97,15 @@ public class GenerationJobCommandService {
                 .setStatus(GenerationJob.STATUS_QUEUED)
                 .setProgress(GenerationJob.TYPE_VIDEO.equals(request.type()) ? null : 0)
                 .setFencingToken(0L);
+        LocalDateTime databaseNow = generationJobMapper.selectCurrentTime();
         if (GenerationJob.TYPE_VIDEO.equals(request.type())) {
-            LocalDateTime databaseNow = generationJobMapper.selectCurrentTime();
             job.setStrategyVersion("seedance-2.0-v1")
                     .setExecutionDeadlineAt(databaseNow.plusMinutes(30))
                     .setEvidenceReconcileUntil(databaseNow.plusHours(24))
+                    .setNextActionAt(databaseNow);
+        } else {
+            job.setStrategyVersion("image-sync-v1")
+                    .setExecutionDeadlineAt(databaseNow.plusMinutes(30))
                     .setNextActionAt(databaseNow);
         }
         generationJobMapper.insert(job);
@@ -206,11 +210,15 @@ public class GenerationJobCommandService {
                 .setStatus(GenerationJob.STATUS_QUEUED)
                 .setProgress(GenerationJob.TYPE_VIDEO.equals(original.getType()) ? null : 0)
                 .setFencingToken(0L);
+        LocalDateTime databaseNow = generationJobMapper.selectCurrentTime();
         if (GenerationJob.TYPE_VIDEO.equals(original.getType())) {
-            LocalDateTime databaseNow = generationJobMapper.selectCurrentTime();
             retry.setStrategyVersion("seedance-2.0-v1")
                     .setExecutionDeadlineAt(databaseNow.plusMinutes(30))
                     .setEvidenceReconcileUntil(databaseNow.plusHours(24))
+                    .setNextActionAt(databaseNow);
+        } else {
+            retry.setStrategyVersion("image-sync-v1")
+                    .setExecutionDeadlineAt(databaseNow.plusMinutes(30))
                     .setNextActionAt(databaseNow);
         }
         generationJobMapper.insert(retry);

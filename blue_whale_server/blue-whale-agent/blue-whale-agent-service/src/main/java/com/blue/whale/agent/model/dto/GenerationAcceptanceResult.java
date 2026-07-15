@@ -6,6 +6,7 @@ public record GenerationAcceptanceResult(Status status, Long assetId) {
         ACCEPTED,
         IDEMPOTENT,
         CONFLICT,
-        FAILED
+        FAILED,
+        CANCELLED
     }
 }

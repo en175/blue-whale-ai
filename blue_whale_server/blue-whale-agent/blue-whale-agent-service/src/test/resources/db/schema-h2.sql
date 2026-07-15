@@ -210,6 +210,38 @@ CREATE TABLE IF NOT EXISTS generation_job_outputs
     CONSTRAINT uk_generation_output_delivery UNIQUE (generation_job_id, delivery_id)
 );
 
+CREATE TABLE IF NOT EXISTS asset_storage_objects
+(
+    id                      BIGINT PRIMARY KEY AUTO_INCREMENT,
+    storage_key             VARCHAR(512) NOT NULL,
+    content_sha256          VARCHAR(64) NULL,
+    source                  VARCHAR(32) NOT NULL,
+    state                   VARCHAR(32) NOT NULL,
+    active_transfer_count   INT NOT NULL DEFAULT 0,
+    first_unreferenced_at   DATETIME NULL,
+    delete_owner            VARCHAR(128) NULL,
+    delete_lease_expires_at DATETIME NULL,
+    gmt_create              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version                 INT NOT NULL DEFAULT 0,
+    is_delete               TINYINT NOT NULL DEFAULT 0,
+    CONSTRAINT uk_asset_storage_object_key UNIQUE (storage_key)
+);
+
+CREATE TABLE IF NOT EXISTS asset_object_transfers
+(
+    id            BIGINT PRIMARY KEY AUTO_INCREMENT,
+    transfer_token VARCHAR(64) NOT NULL,
+    storage_key   VARCHAR(512) NOT NULL,
+    status        VARCHAR(32) NOT NULL,
+    expires_at    DATETIME NOT NULL,
+    gmt_create    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version       INT NOT NULL DEFAULT 0,
+    is_delete     TINYINT NOT NULL DEFAULT 0,
+    CONSTRAINT uk_asset_object_transfer_token UNIQUE (transfer_token)
+);
+
 CREATE TABLE IF NOT EXISTS generation_result_conflicts
 (
     id                      BIGINT PRIMARY KEY AUTO_INCREMENT,

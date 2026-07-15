@@ -104,6 +104,11 @@ public class SeedanceAsyncGenerationProvider implements AsyncGenerationProvider 
     }
 
     @Override
+    public ProviderCancellationCapability cancellationCapability() {
+        return ProviderCancellationCapability.QUEUED_ONLY;
+    }
+
+    @Override
     public String providerId() {
         return PROVIDER;
     }

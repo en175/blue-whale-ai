@@ -22,6 +22,7 @@ export function nextRetryStatus(current: CardStatus): {
 } {
   if (current === "failed") return { next: "generating", isTerminal: false };
   if (current === "generating") return { next: "normal", isTerminal: true };
+  if (current === "cancelled") return { next: "cancelled", isTerminal: true };
   return { next: "normal", isTerminal: true };
 }
 
@@ -34,6 +35,8 @@ export function nextRetryStatus(current: CardStatus): {
  */
 export function fromJobStatus(jobStatus: string): CardStatus {
   if (jobStatus === "succeeded") return "normal";
+  if (jobStatus === "partially_succeeded") return "normal";
   if (jobStatus === "failed") return "failed";
+  if (jobStatus === "cancelled") return "cancelled";
   return "generating";
 }
