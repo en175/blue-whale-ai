@@ -3,6 +3,7 @@ import { apiRequest } from "@/lib/api-client";
 import {
   cancelProjectGenerationJob,
   createProjectGenerationJob,
+  retryMissingProjectGenerationJobOutputs,
 } from "./generation";
 
 vi.mock("@/lib/api-client", () => ({
@@ -25,7 +26,7 @@ describe("BottomDock GenerationJob 命令 API", () => {
         type: "image",
         input_asset_ids: [3],
         parameters: { prompt: "蓝鲸海报", aspect_ratio: "1:1" },
-        expected_output_count: 1,
+        expected_output_count: 4,
       },
       "command-1",
     );
@@ -37,7 +38,7 @@ describe("BottomDock GenerationJob 命令 API", () => {
         type: "image",
         input_asset_ids: [3],
         parameters: { prompt: "蓝鲸海报", aspect_ratio: "1:1" },
-        expected_output_count: 1,
+        expected_output_count: 4,
       }),
     });
   });
@@ -74,6 +75,23 @@ describe("BottomDock GenerationJob 命令 API", () => {
       2,
       "/api/projects/7/generation-jobs/10/cancel",
       { method: "POST" },
+    );
+  });
+
+  it("缺失输出重试携带稳定幂等键且不提交成功槽列表", async () => {
+    vi.mocked(apiRequest).mockResolvedValue({
+      generation_job_id: 11,
+      cursor: 14,
+    });
+
+    await retryMissingProjectGenerationJobOutputs(7, 10, "retry-command-1");
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      "/api/projects/7/generation-jobs/10/retry",
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": "retry-command-1" },
+      },
     );
   });
 });

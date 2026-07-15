@@ -5,6 +5,7 @@ import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.ConversationMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
+import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
 import com.blue.whale.agent.mapper.RunCommitRecordMapper;
 import com.blue.whale.agent.mapper.RuntimeCheckpointMapper;
 import com.blue.whale.agent.model.constant.AggregateType;
@@ -16,6 +17,7 @@ import com.blue.whale.agent.model.entity.AgentRun;
 import com.blue.whale.agent.model.entity.Conversation;
 import com.blue.whale.agent.model.entity.ConversationMessage;
 import com.blue.whale.agent.model.entity.GenerationJob;
+import com.blue.whale.agent.model.entity.GenerationJobOutput;
 import com.blue.whale.agent.model.entity.RunCommitRecord;
 import com.blue.whale.agent.model.entity.RuntimeCheckpoint;
 import com.blue.whale.global.base.resp.SystemCode;
@@ -52,6 +54,7 @@ public class AgentRunWorkerService {
     private final RuntimeCheckpointMapper checkpointMapper;
     private final RunCommitRecordMapper runCommitMapper;
     private final GenerationJobMapper generationJobMapper;
+    private final GenerationJobOutputMapper generationJobOutputMapper;
     private final ProjectService projectService;
     private final ProjectEventService projectEventService;
     private final ObjectMapper objectMapper;
@@ -178,10 +181,15 @@ public class AgentRunWorkerService {
                     .setActionIdentity(action.actionId())
                     .setType(GenerationJob.TYPE_IMAGE)
                     .setSource(GenerationJob.SOURCE_AGENT_RUN)
+                    .setExpectedOutputCount(1)
                     .setInput(new LinkedHashMap<>(action.arguments()))
                     .setStatus(GenerationJob.STATUS_QUEUED)
                     .setProgress(0);
             generationJobMapper.insert(job);
+            generationJobOutputMapper.insert(new GenerationJobOutput()
+                    .setGenerationJobId(job.getId())
+                    .setSlotIndex(0)
+                    .setStatus(GenerationJobOutput.STATUS_PENDING));
         }
 
         Map<String, Object> messagePayload = new LinkedHashMap<>();
@@ -205,6 +213,11 @@ public class AgentRunWorkerService {
             jobPayload.put("status", job.getStatus());
             jobPayload.put("progress", job.getProgress());
             jobPayload.put("input", job.getInput());
+            jobPayload.put("expected_output_count", job.getExpectedOutputCount());
+            jobPayload.put("retry_of_job_id", job.getRetryOfJobId());
+            jobPayload.put("outputs", List.of(Map.of(
+                    "slot_index", 0,
+                    "status", GenerationJobOutput.STATUS_PENDING)));
             projectEventService.appendEvent(run.getProjectId(), EventType.GENERATION_JOB_CREATED,
                     AggregateType.GENERATION_JOB, String.valueOf(job.getId()), job.getVersion(),
                     jobPayload, request.commitId(), null);
@@ -322,7 +335,8 @@ public class AgentRunWorkerService {
     private RunWorkResponse.AcceptedResult acceptedResult(GenerationJob job) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("job_id", job.getId());
-        if (GenerationJob.STATUS_SUCCEEDED.equals(job.getStatus())) {
+        if (GenerationJob.STATUS_SUCCEEDED.equals(job.getStatus())
+                || GenerationJob.STATUS_PARTIALLY_SUCCEEDED.equals(job.getStatus())) {
             result.put("asset_ids", job.getOutputAssetIds() == null ? List.of() : job.getOutputAssetIds());
         } else {
             result.put("error", job.getError() == null ? Map.of() : job.getError());
@@ -347,6 +361,7 @@ public class AgentRunWorkerService {
                 || !Objects.equals(job.getAgentRunId(), run.getId())
                 || !GenerationJob.SOURCE_AGENT_RUN.equals(job.getSource())
                 || !(GenerationJob.STATUS_SUCCEEDED.equals(job.getStatus())
+                        || GenerationJob.STATUS_PARTIALLY_SUCCEEDED.equals(job.getStatus())
                         || GenerationJob.STATUS_FAILED.equals(job.getStatus()))) {
             return List.of();
         }

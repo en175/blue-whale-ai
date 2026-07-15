@@ -135,6 +135,8 @@ CREATE TABLE IF NOT EXISTS generation_jobs
     user_id          BIGINT NOT NULL,
     agent_run_id     BIGINT NULL,
     action_identity  VARCHAR(128) NULL,
+    expected_output_count INT NOT NULL DEFAULT 1,
+    retry_of_job_id  BIGINT NULL,
     type             VARCHAR(32) NOT NULL,
     source           VARCHAR(32) NOT NULL,
     input            JSON NULL,
@@ -197,6 +199,8 @@ CREATE TABLE IF NOT EXISTS generation_job_outputs
     asset_id          BIGINT NULL,
     delivery_id       VARCHAR(128) NULL,
     content_sha256    VARCHAR(64) NULL,
+    status            VARCHAR(32) NOT NULL DEFAULT 'pending',
+    error             JSON NULL,
     gmt_create        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     version           INT NOT NULL DEFAULT 0,
@@ -225,6 +229,7 @@ CREATE TABLE IF NOT EXISTS generation_provider_tasks
 (
     id                         BIGINT PRIMARY KEY AUTO_INCREMENT,
     generation_job_id          BIGINT NOT NULL,
+    slot_index                 INT NOT NULL,
     provider                   VARCHAR(64) NOT NULL,
     account_id                 VARCHAR(128) NOT NULL,
     provider_task_id           VARCHAR(128) NULL,
@@ -240,7 +245,7 @@ CREATE TABLE IF NOT EXISTS generation_provider_tasks
     gmt_modified               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     version                    INT NOT NULL DEFAULT 0,
     is_delete                  TINYINT NOT NULL DEFAULT 0,
-    UNIQUE KEY uk_provider_task_job (generation_job_id),
+    UNIQUE KEY uk_provider_task_job_slot (generation_job_id, slot_index),
     UNIQUE KEY uk_provider_task_ref (provider, account_id, provider_task_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 

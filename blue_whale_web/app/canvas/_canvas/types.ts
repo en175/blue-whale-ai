@@ -70,6 +70,10 @@ export type ChatMessage =
       status?: CardStatus;
       assetId?: string;
       imageUrl?: string;
+      /** 权威 GenerationJob 身份；失败 Card 以此触发缺失槽重试。 */
+      generationJobId?: number | string;
+      /** Card 对应的稳定输出槽。 */
+      slotIndex?: number;
     };
 /**
  * Canvas —— 画布聚合（提为具名类型）。

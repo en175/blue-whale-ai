@@ -165,7 +165,10 @@ export function applyProductEvent(
         ...snapshot,
         assets: applyAssetEvent(snapshot.assets, event.payload),
       };
-    } else if (event.event_type === "generation_job.output_attached") {
+    } else if (
+      event.event_type === "generation_job.output_attached" ||
+      event.event_type === "generation_job.output_updated"
+    ) {
       snapshot = {
         ...snapshot,
         generation_jobs: applyGenerationJobOutputEvent(
@@ -244,7 +247,10 @@ function applyGenerationJobOutputEvent(
   if (
     (typeof jobId !== "number" && typeof jobId !== "string") ||
     typeof slotIndex !== "number" ||
-    (typeof assetId !== "number" && typeof assetId !== "string")
+    (assetId !== null &&
+      assetId !== undefined &&
+      typeof assetId !== "number" &&
+      typeof assetId !== "string")
   ) {
     return jobs;
   }
@@ -256,13 +262,32 @@ function applyGenerationJobOutputEvent(
           !!output && typeof output === "object",
       )
     : [];
-  const nextOutput = { slot_index: slotIndex, asset_id: assetId };
   const outputIndex = outputs.findIndex(
     (output) => output.slot_index === slotIndex,
   );
+  const previousOutput = outputIndex < 0 ? {} : outputs[outputIndex];
+  const nextOutput = {
+    ...previousOutput,
+    slot_index: slotIndex,
+    ...(Object.prototype.hasOwnProperty.call(payload, "status") &&
+    typeof payload.status === "string"
+      ? { status: payload.status }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(payload, "asset_id")
+      ? { asset_id: assetId ?? null }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(payload, "error") &&
+    (payload.error === null ||
+      (!!payload.error && typeof payload.error === "object"))
+      ? { error: payload.error }
+      : {}),
+  };
   const nextOutputs =
     outputIndex < 0
-      ? [...outputs, nextOutput]
+      ? [...outputs, nextOutput].sort(
+          (left, right) =>
+            Number(left.slot_index ?? 0) - Number(right.slot_index ?? 0),
+        )
       : outputs.map((output, currentIndex) =>
           currentIndex === outputIndex ? nextOutput : output,
         );

@@ -364,7 +364,10 @@ class GenerationWorkerIT {
         assertThat(job.getStatus()).isEqualTo(GenerationJob.STATUS_FAILED);
         assertThat(job.getError()).containsEntry("code", errorCode);
         assertThat(count("assets", "generation_job_id", jobId)).isZero();
-        assertThat(count("generation_job_outputs", "generation_job_id", jobId)).isZero();
+        assertThat(count("generation_job_outputs", "generation_job_id", jobId)).isOne();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_job_outputs WHERE generation_job_id = ?",
+                String.class, jobId)).isEqualTo("failed");
     }
 
     private long count(String table, String column, Long value) {

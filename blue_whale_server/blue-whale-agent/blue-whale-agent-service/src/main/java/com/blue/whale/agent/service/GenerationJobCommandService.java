@@ -33,6 +33,7 @@ import java.util.stream.Collectors;
 public class GenerationJobCommandService {
 
     private static final String OPERATION = "generation_job.create.bottom_dock";
+    private static final String RETRY_OPERATION = "generation_job.retry_missing";
 
     private final ProjectService projectService;
     private final AssetMapper assetMapper;
@@ -91,6 +92,7 @@ public class GenerationJobCommandService {
                 .setSource(GenerationJob.SOURCE_BOTTOM_DOCK)
                 .setActionIdentity("bottom-dock:" + Sha256.hex(projectId + "\u0000" + OPERATION
                         + "\u0000" + idempotencyKey))
+                .setExpectedOutputCount(request.expectedOutputCount())
                 .setInput(input)
                 .setStatus(GenerationJob.STATUS_QUEUED)
                 .setProgress(GenerationJob.TYPE_VIDEO.equals(request.type()) ? null : 0)
@@ -103,10 +105,11 @@ public class GenerationJobCommandService {
                     .setNextActionAt(databaseNow);
         }
         generationJobMapper.insert(job);
-        if (GenerationJob.TYPE_VIDEO.equals(request.type())) {
+        for (int slotIndex = 0; slotIndex < request.expectedOutputCount(); slotIndex++) {
             generationJobOutputMapper.insert(new GenerationJobOutput()
                     .setGenerationJobId(job.getId())
-                    .setSlotIndex(0));
+                    .setSlotIndex(slotIndex)
+                    .setStatus(GenerationJobOutput.STATUS_PENDING));
         }
 
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -117,6 +120,13 @@ public class GenerationJobCommandService {
         payload.put("status", job.getStatus());
         payload.put("progress", job.getProgress());
         payload.put("input", job.getInput());
+        payload.put("expected_output_count", job.getExpectedOutputCount());
+        payload.put("retry_of_job_id", job.getRetryOfJobId());
+        payload.put("outputs", java.util.stream.IntStream.range(0, job.getExpectedOutputCount())
+                .mapToObj(slotIndex -> Map.of(
+                        "slot_index", (Object) slotIndex,
+                        "status", GenerationJobOutput.STATUS_PENDING))
+                .toList());
         projectEventService.appendEvent(projectId, EventType.GENERATION_JOB_CREATED,
                 AggregateType.GENERATION_JOB, String.valueOf(job.getId()), job.getVersion(),
                 payload, idempotencyKey, null);
@@ -133,8 +143,123 @@ public class GenerationJobCommandService {
         return response(accepted);
     }
 
+    @Transactional
+    public CreateGenerationJobResponse retryMissingOutputs(
+            Long projectId,
+            Long originalJobId,
+            Long userId,
+            String idempotencyKey) {
+        requireIdempotencyKey(idempotencyKey);
+        projectService.requireOwnedForUpdate(projectId, userId);
+        GenerationJob original = generationJobMapper.selectForUpdate(originalJobId);
+        if (original == null
+                || !Objects.equals(original.getProjectId(), projectId)
+                || !Objects.equals(original.getUserId(), userId)) {
+            throw resourceNotFound();
+        }
+        boolean retryableStatus = GenerationJob.STATUS_PARTIALLY_SUCCEEDED.equals(original.getStatus())
+                || GenerationJob.STATUS_FAILED.equals(original.getStatus());
+        boolean executableSource = GenerationJob.SOURCE_BOTTOM_DOCK.equals(original.getSource())
+                || GenerationJob.SOURCE_AGENT_RUN.equals(original.getSource());
+        if (!retryableStatus || !executableSource) {
+            throw new GlobalException(SystemCode.AGENT_RUN_CONFLICT_CODE, "生成任务当前不可重试");
+        }
+        List<GenerationJobOutput> failedOutputs = generationJobOutputMapper
+                .selectByJobForUpdate(originalJobId).stream()
+                .filter(output -> GenerationJobOutput.STATUS_FAILED.equals(output.getStatus()))
+                .toList();
+        if (failedOutputs.isEmpty()) {
+            throw new GlobalException(SystemCode.AGENT_RUN_CONFLICT_CODE, "生成任务没有缺失输出");
+        }
+
+        String requestHash = Sha256.hex(originalJobId + "\u0000" + failedOutputs.stream()
+                .map(output -> String.valueOf(output.getSlotIndex()))
+                .collect(Collectors.joining(",")));
+        CommandIdempotency existing = idempotencyMapper.selectOne(
+                Wrappers.<CommandIdempotency>lambdaQuery()
+                        .eq(CommandIdempotency::getProjectId, projectId)
+                        .eq(CommandIdempotency::getOperation, RETRY_OPERATION)
+                        .eq(CommandIdempotency::getIdempotencyKey, idempotencyKey));
+        if (existing != null) {
+            if (!requestHash.equals(existing.getRequestHash())) {
+                throw new GlobalException(SystemCode.IDEMPOTENCY_KEY_REUSED_CODE,
+                        SystemCode.IDEMPOTENCY_KEY_REUSED.getMsg());
+            }
+            return response(existing);
+        }
+
+        Map<String, Object> input = original.getInput() == null
+                ? new LinkedHashMap<>() : new LinkedHashMap<>(original.getInput());
+        input.put("expected_output_count", failedOutputs.size());
+        input.put("retry_slot_indexes", failedOutputs.stream()
+                .map(GenerationJobOutput::getSlotIndex).toList());
+        GenerationJob retry = new GenerationJob()
+                .setProjectId(projectId)
+                .setUserId(userId)
+                .setAgentRunId(original.getAgentRunId())
+                .setActionIdentity("retry:" + originalJobId + ":" + Sha256.hex(idempotencyKey))
+                .setExpectedOutputCount(failedOutputs.size())
+                .setRetryOfJobId(originalJobId)
+                .setType(original.getType())
+                .setSource(original.getSource())
+                .setInput(input)
+                .setStatus(GenerationJob.STATUS_QUEUED)
+                .setProgress(GenerationJob.TYPE_VIDEO.equals(original.getType()) ? null : 0)
+                .setFencingToken(0L);
+        if (GenerationJob.TYPE_VIDEO.equals(original.getType())) {
+            LocalDateTime databaseNow = generationJobMapper.selectCurrentTime();
+            retry.setStrategyVersion("seedance-2.0-v1")
+                    .setExecutionDeadlineAt(databaseNow.plusMinutes(30))
+                    .setEvidenceReconcileUntil(databaseNow.plusHours(24))
+                    .setNextActionAt(databaseNow);
+        }
+        generationJobMapper.insert(retry);
+        for (GenerationJobOutput failedOutput : failedOutputs) {
+            generationJobOutputMapper.insert(new GenerationJobOutput()
+                    .setGenerationJobId(retry.getId())
+                    .setSlotIndex(failedOutput.getSlotIndex())
+                    .setStatus(GenerationJobOutput.STATUS_PENDING));
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("job_id", retry.getId());
+        payload.put("action_identity", retry.getActionIdentity());
+        payload.put("type", retry.getType());
+        payload.put("source", retry.getSource());
+        payload.put("status", retry.getStatus());
+        payload.put("progress", retry.getProgress());
+        payload.put("input", retry.getInput());
+        payload.put("expected_output_count", retry.getExpectedOutputCount());
+        payload.put("retry_of_job_id", retry.getRetryOfJobId());
+        payload.put("outputs", failedOutputs.stream()
+                .map(output -> Map.of(
+                        "slot_index", (Object) output.getSlotIndex(),
+                        "status", GenerationJobOutput.STATUS_PENDING))
+                .toList());
+        projectEventService.appendEvent(projectId, EventType.GENERATION_JOB_CREATED,
+                AggregateType.GENERATION_JOB, String.valueOf(retry.getId()), retry.getVersion(),
+                payload, idempotencyKey, null);
+
+        long cursor = projectEventService.highWatermark(projectId);
+        CommandIdempotency accepted = new CommandIdempotency()
+                .setProjectId(projectId)
+                .setOperation(RETRY_OPERATION)
+                .setIdempotencyKey(idempotencyKey)
+                .setRequestHash(requestHash)
+                .setGenerationJobId(retry.getId())
+                .setAcceptedCursor(cursor);
+        idempotencyMapper.insert(accepted);
+        return response(accepted);
+    }
+
     private CreateGenerationJobResponse response(CommandIdempotency record) {
         return new CreateGenerationJobResponse(record.getGenerationJobId(), record.getAcceptedCursor());
+    }
+
+    private void requireIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 128) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "Idempotency-Key 无效");
+        }
     }
 
     private void requireOwnedInputAssets(Long projectId, Long userId, List<Long> inputAssetIds) {

@@ -166,6 +166,46 @@ class BottomDockGenerationJobIT {
     }
 
     @Test
+    void imageAndVideoCommandsReserveEveryExpectedOutputSlot() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("bottom-dock-multi-output");
+        projectMapper.insert(project);
+        String imageBody = "{" +
+                "\"type\":\"image\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{\"prompt\":\"四张蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"expected_output_count\":4}";
+        String videoBody = "{" +
+                "\"type\":\"video\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{" +
+                "\"prompt\":\"四段蓝鲸视频\"," +
+                "\"aspect_ratio\":\"16:9\"," +
+                "\"resolution\":\"480p\"," +
+                "\"duration\":4}," +
+                "\"expected_output_count\":4}";
+
+        long imageJobId = responseData(postGenerationJob(project.getId(), "multi-image", imageBody)
+                .andExpect(status().isAccepted()).andReturn()).path("generation_job_id").asLong();
+        long videoJobId = responseData(postGenerationJob(project.getId(), "multi-video", videoBody)
+                .andExpect(status().isAccepted()).andReturn()).path("generation_job_id").asLong();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT expected_output_count FROM generation_jobs WHERE id = ?",
+                Integer.class, imageJobId)).isEqualTo(4);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT expected_output_count FROM generation_jobs WHERE id = ?",
+                Integer.class, videoJobId)).isEqualTo(4);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT slot_index FROM generation_job_outputs " +
+                        "WHERE generation_job_id = ? ORDER BY slot_index", Integer.class, imageJobId))
+                .containsExactly(0, 1, 2, 3);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT status FROM generation_job_outputs " +
+                        "WHERE generation_job_id = ? ORDER BY slot_index", String.class, videoJobId))
+                .containsExactly("pending", "pending", "pending", "pending");
+    }
+
+    @Test
     void snapshotDoesNotExposeLegacyImageRootCause() throws Exception {
         Project project = new Project().setOwnerId(10L).setName("snapshot-error-redaction");
         projectMapper.insert(project);
@@ -381,6 +421,118 @@ class BottomDockGenerationJobIT {
                 .andExpect(jsonPath("$.data.generation_jobs[0].outputs[0].asset_id").isNumber());
     }
 
+    @Test
+    void retryCreatesOneIdempotentJobForFailedSlotsWithoutChangingOriginalFacts() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("missing-output-retry");
+        projectMapper.insert(project);
+        String body = "{" +
+                "\"type\":\"image\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{\"prompt\":\"四张蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"expected_output_count\":4}";
+        long originalJobId = responseData(postGenerationJob(project.getId(), "retry-original", body)
+                .andExpect(status().isAccepted()).andReturn()).path("generation_job_id").asLong();
+
+        Asset first = generatedAsset(project.getId(), originalJobId, "retry/original-0.png", "a");
+        Asset third = generatedAsset(project.getId(), originalJobId, "retry/original-2.png", "c");
+        jdbcTemplate.update("UPDATE generation_job_outputs SET status = 'succeeded', asset_id = ?, " +
+                        "content_sha256 = ?, delivery_id = 'original-0' WHERE generation_job_id = ? AND slot_index = 0",
+                first.getId(), first.getContentSha256(), originalJobId);
+        jdbcTemplate.update("UPDATE generation_job_outputs SET status = 'failed', " +
+                        "error = '{\"code\":\"provider_failed\",\"message\":\"slot 1 failed\"}' " +
+                        "WHERE generation_job_id = ? AND slot_index = 1", originalJobId);
+        jdbcTemplate.update("UPDATE generation_job_outputs SET status = 'succeeded', asset_id = ?, " +
+                        "content_sha256 = ?, delivery_id = 'original-2' WHERE generation_job_id = ? AND slot_index = 2",
+                third.getId(), third.getContentSha256(), originalJobId);
+        jdbcTemplate.update("UPDATE generation_job_outputs SET status = 'failed', " +
+                        "error = '{\"code\":\"provider_failed\",\"message\":\"slot 3 failed\"}' " +
+                        "WHERE generation_job_id = ? AND slot_index = 3", originalJobId);
+        jdbcTemplate.update("UPDATE generation_jobs SET status = 'partially_succeeded', progress = 100, " +
+                "output_asset_ids = ? WHERE id = ?", "[" + first.getId() + "," + third.getId() + "]", originalJobId);
+
+        MvcResult firstRetry = postRetry(project.getId(), originalJobId, "missing-retry-key")
+                .andExpect(status().isAccepted())
+                .andReturn();
+        MvcResult repeatedRetry = postRetry(project.getId(), originalJobId, "missing-retry-key")
+                .andExpect(status().isAccepted())
+                .andReturn();
+        assertThat(responseData(repeatedRetry)).isEqualTo(responseData(firstRetry));
+        long retryJobId = responseData(firstRetry).path("generation_job_id").asLong();
+
+        assertThat(retryJobId).isNotEqualTo(originalJobId);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT retry_of_job_id FROM generation_jobs WHERE id = ?", Long.class, retryJobId))
+                .isEqualTo(originalJobId);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT expected_output_count FROM generation_jobs WHERE id = ?", Integer.class, retryJobId))
+                .isEqualTo(2);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT slot_index FROM generation_job_outputs WHERE generation_job_id = ? ORDER BY slot_index",
+                Integer.class, retryJobId)).containsExactly(1, 3);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT status FROM generation_job_outputs WHERE generation_job_id = ? ORDER BY slot_index",
+                String.class, originalJobId))
+                .containsExactly("succeeded", "failed", "succeeded", "failed");
+        assertThat(count("assets", "generation_job_id", originalJobId)).isEqualTo(2);
+        assertThat(count("generation_jobs", "project_id", project.getId())).isEqualTo(2);
+        mockMvc.perform(get("/api/projects/{projectId}/generation-jobs/{jobId}",
+                        project.getId(), retryJobId)
+                        .header("X-User-Id", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.job_id").value(retryJobId))
+                .andExpect(jsonPath("$.data.expected_output_count").value(2))
+                .andExpect(jsonPath("$.data.retry_of_job_id").value(originalJobId))
+                .andExpect(jsonPath("$.data.outputs[0].slot_index").value(1))
+                .andExpect(jsonPath("$.data.outputs[0].status").value("pending"))
+                .andExpect(jsonPath("$.data.outputs[1].slot_index").value(3));
+        mockMvc.perform(get("/api/projects/{id}/snapshot", project.getId())
+                        .header("X-User-Id", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.generation_jobs[0].job_id").value(retryJobId))
+                .andExpect(jsonPath("$.data.generation_jobs[0].expected_output_count").value(2))
+                .andExpect(jsonPath("$.data.generation_jobs[0].retry_of_job_id").value(originalJobId))
+                .andExpect(jsonPath("$.data.generation_jobs[1].outputs[1].status").value("failed"))
+                .andExpect(jsonPath("$.data.generation_jobs[1].outputs[1].error.code")
+                        .value("provider_failed"));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT payload FROM project_events WHERE aggregate_id = ? AND event_type = 'generation_job.created'",
+                String.class, String.valueOf(retryJobId)))
+                .contains("\"retry_of_job_id\":" + originalJobId)
+                .contains("\"slot_index\":1")
+                .contains("\"status\":\"pending\"");
+
+        String secondBody = body.replace("四张蓝鲸海报", "另一组蓝鲸海报").replace(":4}", ":1}");
+        long otherJobId = responseData(postGenerationJob(project.getId(), "retry-other", secondBody)
+                .andExpect(status().isAccepted()).andReturn()).path("generation_job_id").asLong();
+        jdbcTemplate.update("UPDATE generation_job_outputs SET status = 'failed', " +
+                        "error = '{\"code\":\"provider_failed\",\"message\":\"failed\"}' " +
+                        "WHERE generation_job_id = ?", otherJobId);
+        jdbcTemplate.update("UPDATE generation_jobs SET status = 'failed', progress = 100 WHERE id = ?", otherJobId);
+        postRetry(project.getId(), otherJobId, "missing-retry-key")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(100302));
+    }
+
+    private Asset generatedAsset(
+            Long projectId,
+            Long jobId,
+            String storageKey,
+            String digestCharacter) {
+        Asset asset = new Asset()
+                .setProjectId(projectId)
+                .setUserId(10L)
+                .setGenerationJobId(jobId)
+                .setType(Asset.TYPE_IMAGE)
+                .setStorageKey(storageKey)
+                .setContentSha256(digestCharacter.repeat(64))
+                .setMime("image/png")
+                .setSize(1L)
+                .setSource(Asset.SOURCE_GENERATED)
+                .setStatus(Asset.STATUS_NORMAL);
+        assetMapper.insert(asset);
+        return asset;
+    }
+
     private CompletableFuture<MvcResult> postConcurrently(
             ExecutorService executor, CountDownLatch start, Long projectId, String body) {
         return CompletableFuture.supplyAsync(() -> {
@@ -406,6 +558,14 @@ class BottomDockGenerationJobIT {
                 .header("Idempotency-Key", idempotencyKey)
                 .contentType("application/json")
                 .content(body));
+    }
+
+    private org.springframework.test.web.servlet.ResultActions postRetry(
+            Long projectId, Long jobId, String idempotencyKey) throws Exception {
+        return mockMvc.perform(post("/api/projects/{projectId}/generation-jobs/{jobId}/retry",
+                        projectId, jobId)
+                .header("X-User-Id", "10")
+                .header("Idempotency-Key", idempotencyKey));
     }
 
     private long count(String table, String column, Long value) {

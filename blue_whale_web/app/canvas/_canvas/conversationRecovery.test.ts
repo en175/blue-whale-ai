@@ -48,11 +48,13 @@ describe("Agent 对话恢复投影", () => {
       { id: "message-1", type: "user", text: "生成一张蓝鲸海报" },
       { id: "message-2", type: "agent", text: "已接纳，正在生成图片。" },
       {
-        id: "generation-job-9",
+        id: "generation-job-9-slot-0",
         type: "card",
         text: "蓝鲸海报",
         meta: "图片生成",
         status: "generating",
+        generationJobId: 9,
+        slotIndex: 0,
       },
     ]);
   });
@@ -88,7 +90,7 @@ describe("Agent 对话恢复投影", () => {
 
     expect(projectSnapshotToChatMessages(snapshot)).toContainEqual(
       expect.objectContaining({
-        id: "generation-job-9",
+        id: "generation-job-9-slot-0",
         type: "card",
         assetId: "12",
         imageUrl: "/api/projects/1/assets/12/content",
@@ -184,5 +186,65 @@ describe("Agent 对话恢复投影", () => {
     });
     expect(JSON.stringify(replayed[0])).not.toContain("signature=");
     expect(replayed[0]).not.toHaveProperty("imageUrl");
+  });
+
+  it("部分成功时每个输出槽生成一张 Card，只有成功槽生成 Node", () => {
+    const snapshot: ProjectSnapshot = {
+      project: { id: 1, name: "P", thumb: null, created_at: "now" },
+      canvas: { id: null, project_id: 1, viewport: null, nodes: "[]" },
+      conversation_messages: [],
+      agent_runs: [{ agent_run_id: 5, status: "succeeded" }],
+      generation_jobs: [
+        {
+          job_id: 20,
+          agent_run_id: 5,
+          source: "agent_run",
+          type: "image",
+          input: { prompt: "两张蓝鲸", aspect_ratio: "1:1" },
+          status: "partially_succeeded",
+          expected_output_count: 2,
+          outputs: [
+            { slot_index: 0, status: "succeeded", asset_id: 30 },
+            {
+              slot_index: 1,
+              status: "failed",
+              asset_id: null,
+              error: { code: "provider_failed", message: "图像生成失败" },
+            },
+          ],
+          output_asset_ids: [30],
+        },
+      ],
+      assets: {
+        "30": {
+          asset_id: 30,
+          type: "image",
+          access_url: "/api/projects/1/assets/30/content",
+        },
+      },
+      high_watermark_cursor: 20,
+    };
+
+    expect(projectSnapshotToChatMessages(snapshot)).toEqual([
+      expect.objectContaining({
+        id: "generation-job-20-slot-0",
+        generationJobId: 20,
+        slotIndex: 0,
+        status: "normal",
+        assetId: "30",
+      }),
+      expect.objectContaining({
+        id: "generation-job-20-slot-1",
+        generationJobId: 20,
+        slotIndex: 1,
+        status: "failed",
+      }),
+    ]);
+    expect(projectSnapshotToCanvasNodes(snapshot, [])).toEqual([
+      expect.objectContaining({
+        id: "generation-job-20-slot-0",
+        assetId: "30",
+      }),
+    ]);
   });
 });

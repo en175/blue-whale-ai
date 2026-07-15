@@ -36,7 +36,7 @@ public class CreateGenerationJobRequest {
     @JsonProperty("expected_output_count")
     @NotNull
     @Min(1)
-    @Max(1)
+    @Max(4)
     private Integer expectedOutputCount;
 
     @JsonIgnore

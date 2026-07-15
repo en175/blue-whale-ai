@@ -45,7 +45,8 @@ public class SeedanceCallbackService {
         String providerTaskId = text(payload.get("id"));
         // 与 Worker 保持 generation_jobs → generation_provider_tasks 的统一加锁顺序。
         jobMapper.selectForUpdate(generationJobId);
-        GenerationProviderTask evidence = taskMapper.selectByJobForUpdate(generationJobId);
+        GenerationProviderTask evidence = taskMapper.selectByJobAndProviderTaskForUpdate(
+                generationJobId, providerTaskId);
         String invalidReason = invalidReason(evidence, accountId, providerTaskId, capability);
         if (invalidReason != null) {
             auditMapper.insert(new SeedanceCallbackSecurityAudit()

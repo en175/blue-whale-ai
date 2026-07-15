@@ -189,6 +189,41 @@ describe("Project 恢复状态机", () => {
     ]);
   });
 
+  it("输出失败事件保留空 asset 并合并公开错误", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_output_failed_11",
+        event_type: "generation_job.output_updated",
+        aggregate_type: "generation_job_output",
+        aggregate_id: "7:1",
+        aggregate_version: 1,
+        payload: {
+          job_id: 7,
+          slot_index: 1,
+          status: "failed",
+          asset_id: null,
+          error: { code: "provider_failed", message: "图像生成失败" },
+        },
+      }),
+    );
+
+    expect(state.snapshot?.generation_jobs).toEqual([
+      {
+        job_id: 7,
+        outputs: [
+          {
+            slot_index: 1,
+            status: "failed",
+            asset_id: null,
+            error: { code: "provider_failed", message: "图像生成失败" },
+          },
+        ],
+      },
+    ]);
+  });
+
   it("应用 Conversation 与 AgentRun 事件并保留可恢复事实", () => {
     let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
 

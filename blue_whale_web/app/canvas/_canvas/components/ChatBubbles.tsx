@@ -4,7 +4,12 @@
  * 仅负责渲染，数据来源于 AgentChatPanel 传入的 ChatMessage。
  */
 import { useId, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronUp, Image as ImageIcon } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Image as ImageIcon,
+} from "lucide-react";
 import type { ChatMessage } from "../types";
 import { AuthenticatedImage } from "./AuthenticatedImage";
 
@@ -45,7 +50,11 @@ export function AgentMessageBubble({ text }: { text: string }) {
   );
 }
 
-export function ThinkingBlock({ msg }: { msg: Extract<ChatMessage, { type: "thinking" }> }) {
+export function ThinkingBlock({
+  msg,
+}: {
+  msg: Extract<ChatMessage, { type: "thinking" }>;
+}) {
   const [expanded, setExpanded] = useState(true);
   return (
     <div className="tc-agent-thinking-block self-start">
@@ -62,12 +71,18 @@ export function ThinkingBlock({ msg }: { msg: Extract<ChatMessage, { type: "thin
         <ChevronRight
           width={13}
           height={13}
-          className={["tc-agent-thinking-trigger__icon", expanded ? "rotate-90" : ""].join(" ")}
+          className={[
+            "tc-agent-thinking-trigger__icon",
+            expanded ? "rotate-90" : "",
+          ].join(" ")}
         />
       </button>
       {expanded && (
         <div className="tc-agent-thinking-content-wrap">
-          <div className="tc-agent-thinking-content" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+          <div
+            className="tc-agent-thinking-content"
+            style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+          >
             {msg.content}
           </div>
         </div>
@@ -78,9 +93,11 @@ export function ThinkingBlock({ msg }: { msg: Extract<ChatMessage, { type: "thin
 
 export function AgentCard({
   msg,
+  busy = false,
   onReapply,
 }: {
   msg: Extract<ChatMessage, { type: "card" }>;
+  busy?: boolean;
   /** 用户点击主按钮（手动应用 / 重试）的统一意图，由容器层按 card.status 分发 */
   onReapply?: (card: Extract<ChatMessage, { type: "card" }>) => void;
 }) {
@@ -89,7 +106,7 @@ export function AgentCard({
   const status = msg.status ?? "normal";
   const generating = status === "generating";
   const failed = status === "failed";
-  const ctaLabel = failed ? "重试" : "手动应用";
+  const ctaLabel = busy ? "重试中" : failed ? "重试" : "手动应用";
   return (
     <div className="self-stretch">
       <div
@@ -99,16 +116,23 @@ export function AgentCard({
         <div className="flex items-center justify-between gap-2">
           <div className="tc-agent-card-header-leading">
             <span className="tc-agent-card-badge">
-              <ImageIcon width={13} height={13} stroke="currentColor" strokeWidth={1.8} />
+              <ImageIcon
+                width={13}
+                height={13}
+                stroke="currentColor"
+                strokeWidth={1.8}
+              />
             </span>
           </div>
           <div className="tc-agent-card-header-actions">
             <span className="tc-agent-card-meta">
-              <span style={{ color: "rgba(255,255,255,0.55)" }}>{msg.meta}</span>
+              <span style={{ color: "rgba(255,255,255,0.55)" }}>
+                {msg.meta}
+              </span>
             </span>
             <button
               type="button"
-              disabled={generating}
+              disabled={generating || busy}
               onClick={() => onReapply?.(msg)}
               className={[
                 "tc-agent-card-cta tc-agent-card-cta--reapply",
@@ -116,17 +140,52 @@ export function AgentCard({
                 "inline-flex items-center gap-1 rounded-md bg-white/[0.08] px-2 py-1 text-xs text-white/80 transition-colors hover:bg-white/[0.12] disabled:cursor-default disabled:opacity-50",
               ].join(" ")}
               aria-label={failed ? "生成失败，可重试" : ctaLabel}
-              aria-busy={generating}
+              aria-busy={generating || busy}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width={12}
+                height={12}
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
                 <defs>
-                  <mask id={`tc-agent-card-reapply-plus-${maskId}`} maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+                  <mask
+                    id={`tc-agent-card-reapply-plus-${maskId}`}
+                    maskUnits="userSpaceOnUse"
+                    x="0"
+                    y="0"
+                    width="24"
+                    height="24"
+                  >
                     <rect x="0" y="0" width="24" height="24" fill="black" />
-                    <path d="M5 12h14" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M12 5v14" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                    <path
+                      d="M5 12h14"
+                      fill="none"
+                      stroke="white"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M12 5v14"
+                      fill="none"
+                      stroke="white"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
                   </mask>
                 </defs>
-                <rect x="0" y="0" width="24" height="24" fill="currentColor" mask={`url(#tc-agent-card-reapply-plus-${maskId})`} />
+                <rect
+                  x="0"
+                  y="0"
+                  width="24"
+                  height="24"
+                  fill="currentColor"
+                  mask={`url(#tc-agent-card-reapply-plus-${maskId})`}
+                />
               </svg>
               <span className="tc-agent-card-cta__label">{ctaLabel}</span>
             </button>
@@ -138,7 +197,11 @@ export function AgentCard({
               title="折叠卡片"
               onClick={() => setCollapsed((v) => !v)}
             >
-              {collapsed ? <ChevronDown width={14} height={14} /> : <ChevronUp width={14} height={14} />}
+              {collapsed ? (
+                <ChevronDown width={14} height={14} />
+              ) : (
+                <ChevronUp width={14} height={14} />
+              )}
             </button>
           </div>
         </div>
