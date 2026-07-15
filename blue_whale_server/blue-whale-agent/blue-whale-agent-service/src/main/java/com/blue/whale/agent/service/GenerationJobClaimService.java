@@ -29,7 +29,7 @@ public class GenerationJobClaimService {
         if (workerId == null || workerId.isBlank() || workerId.length() > 128) {
             throw new GlobalException(SystemCode.FAILURE_CODE, "Generation Worker 标识无效");
         }
-        GenerationJob job = generationJobMapper.selectNextAgentImageForUpdate();
+        GenerationJob job = generationJobMapper.selectNextImageForUpdate();
         if (job == null) {
             throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "暂无可认领 GenerationJob");
         }

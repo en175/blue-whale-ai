@@ -164,9 +164,7 @@ public class GenerationResultAcceptanceService {
     }
 
     private void requireCurrentFence(GenerationJob job, Long fencingToken) {
-        boolean matches = job.getProjectId() != null
-                && GenerationJob.SOURCE_AGENT_RUN.equals(job.getSource())
-                && GenerationJob.TYPE_IMAGE.equals(job.getType())
+        boolean matches = isWorkerImageJob(job)
                 && Objects.equals(job.getFencingToken(), fencingToken);
         if (!matches) {
             throw conflict();
@@ -179,9 +177,7 @@ public class GenerationResultAcceptanceService {
             Long fencingToken,
             String leaseOwner,
             LocalDateTime databaseNow) {
-        boolean matches = job.getProjectId() != null
-                && GenerationJob.SOURCE_AGENT_RUN.equals(job.getSource())
-                && GenerationJob.TYPE_IMAGE.equals(job.getType())
+        boolean matches = isWorkerImageJob(job)
                 && GenerationJob.STATUS_PROCESSING.equals(job.getStatus())
                 && Objects.equals(job.getVersion(), expectedJobVersion)
                 && Objects.equals(job.getFencingToken(), fencingToken)
@@ -191,6 +187,13 @@ public class GenerationResultAcceptanceService {
         if (!matches) {
             throw conflict();
         }
+    }
+
+    private boolean isWorkerImageJob(GenerationJob job) {
+        return job.getProjectId() != null
+                && GenerationJob.TYPE_IMAGE.equals(job.getType())
+                && (GenerationJob.SOURCE_AGENT_RUN.equals(job.getSource())
+                || GenerationJob.SOURCE_BOTTOM_DOCK.equals(job.getSource()));
     }
 
     private void recordConflict(GenerationJobOutput existing, GenerationResultCommand command) {

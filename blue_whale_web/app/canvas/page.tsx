@@ -15,6 +15,7 @@ import Link from "next/link";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useAuth } from "@/components/auth/AuthContext";
 import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
+import { newCommandIdentity } from "@/lib/command-identity";
 import { ArrowLeft } from "lucide-react";
 import {
   TopBar,
@@ -37,17 +38,10 @@ import type {
 import { nodeFromCard, useCanvasProjects } from "./_canvas";
 import type { GenerateArgs } from "./_canvas";
 import {
-  generateImage,
+  createProjectGenerationJob,
   createVideoJob,
-  streamJob,
 } from "./_canvas/api/generation";
 import { useJobStatus } from "./_canvas/hooks/useJobStatus";
-
-/** "1x"/"2x" → 数字；解析失败回落 1。 */
-function parseQuantity(q: string): number {
-  const n = parseInt(q, 10);
-  return Number.isNaN(n) ? 1 : n;
-}
 
 /** 把后端/网络错误映射为用户友好提示，避免暴露内部配置。 */
 function userFriendlyErrorMessage(e: unknown): string {
@@ -55,6 +49,12 @@ function userFriendlyErrorMessage(e: unknown): string {
   const msg = e.message;
   if (msg.includes("后端未启动") || msg.includes("无法连接")) {
     return "无法连接到服务，请检查网络或稍后重试";
+  }
+  if (msg.includes("参考素材尚未成为可用 Asset")) {
+    return "参考素材尚未上传完成，请先使用已有资产";
+  }
+  if (msg.includes("当前闭环仅支持单图生成")) {
+    return "当前仅支持每次生成 1 张图片";
   }
   if (msg.includes("ARK_API_KEY") || msg.includes("数据库")) {
     return "服务暂时不可用，请稍后重试";
@@ -162,7 +162,13 @@ function CanvasPageInner() {
         // 再创作：带入参考图占位 + 唤起图片 Dock
         if (node.imageUrl) {
           setImageDockMedia([
-            { id: node.id, type: "image", name, src: node.imageUrl },
+            {
+              id: node.id,
+              type: "image",
+              name,
+              assetId: node.assetId,
+              src: node.imageUrl,
+            },
           ]);
         }
         setBottomDockMode("image");
@@ -179,7 +185,13 @@ function CanvasPageInner() {
         // 生成视频：带入参考图占位 + 唤起视频 Dock
         if (node.imageUrl) {
           setVideoDockMedia([
-            { id: node.id, type: "image", name, src: node.imageUrl },
+            {
+              id: node.id,
+              type: "image",
+              name,
+              assetId: node.assetId,
+              src: node.imageUrl,
+            },
           ]);
         }
         setBottomDockMode("video");
@@ -327,7 +339,7 @@ function CanvasPageInner() {
     [addNode],
   );
 
-  // 生成：图片同步落节点；视频异步提交后由 useJobStatus 轮询，succeeded 落节点
+  // 生成：图片提交产品命令，结果由 Project Snapshot/SSE 落节点；视频保留现有异步轮询。
   const handleGenerate = useCallback(
     async (promptText: string, args: GenerateArgs) => {
       const trimmed = promptText.trim();
@@ -335,39 +347,40 @@ function CanvasPageInner() {
       setGenerating(true);
       try {
         if (args.mode === "image") {
-          const result = await generateImage({
-            project_id: Number(activeProject.id),
-            prompt: trimmed,
-            model_id: args.settings.model.id,
-            size_id: args.settings.resolution.id,
-            aspect_ratio: args.settings.aspectRatio.id,
-            quantity: parseQuantity(args.settings.quantity),
-            reference_images: imageDockMedia
-              .map((m) => m.src)
-              .filter((s): s is string => Boolean(s)),
-          });
-          if (result.stream && result.job_id != null) {
-            // 流式模型：原生 EventSource 订阅，逐张上屏
-            streamJob(result.job_id, {
-              onImage: (url) =>
-                addNode("image", { content: trimmed, imageUrl: url }),
-              onDone: () => {
-                setGenerating(false);
-                setGenerateError(null);
-              },
-              onError: (message) => {
-                setGenerateError(message);
-                setGenerating(false);
-              },
-            });
-          } else {
-            // 非流式模型：同步单图上屏
-            if (result.url) {
-              addNode("image", { content: trimmed, imageUrl: result.url });
-            }
-            setGenerating(false);
-            setGenerateError(null);
+          if (!backendReady) {
+            throw new Error("后端未启动或无法连接");
           }
+          if (args.settings.quantity !== "1x") {
+            throw new Error("当前闭环仅支持单图生成");
+          }
+          const projectId = Number(activeProject.id);
+          const inputAssetIds = imageDockMedia.map((media) =>
+            Number(media.assetId),
+          );
+          if (
+            !Number.isSafeInteger(projectId) ||
+            projectId <= 0 ||
+            inputAssetIds.some(
+              (assetId) => !Number.isSafeInteger(assetId) || assetId <= 0,
+            )
+          ) {
+            throw new Error("参考素材尚未成为可用 Asset");
+          }
+          await createProjectGenerationJob(
+            projectId,
+            {
+              type: "image",
+              input_asset_ids: inputAssetIds,
+              parameters: {
+                prompt: trimmed,
+                aspect_ratio: args.settings.aspectRatio.id,
+              },
+              expected_output_count: 1,
+            },
+            newCommandIdentity(),
+          );
+          setGenerating(false);
+          setGenerateError(null);
         } else {
           const result = await createVideoJob({
             project_id: Number(activeProject.id),
@@ -387,7 +400,7 @@ function CanvasPageInner() {
         setGenerating(false);
       }
     },
-    [activeProject.id, addNode, imageDockMedia, videoDockMedia, startJob],
+    [activeProject.id, backendReady, imageDockMedia, videoDockMedia, startJob],
   );
 
   // 视频任务轮询终态：succeeded 落节点，failed/超时复位 generating
@@ -425,6 +438,7 @@ function CanvasPageInner() {
         id: node.id,
         type: "image",
         name: node.content || "图片",
+        assetId: node.assetId,
         src: node.imageUrl,
       };
       if (pickingFor === "image") {
