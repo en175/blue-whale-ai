@@ -6,9 +6,9 @@
  * 由网关转 X-User-Id；此处不重复造轮子，直接带 Authorization，交给网关处理）。
  */
 import { loadAccessToken, loadUser, SKIP_AUTH, MOCK_USER } from "@/components/auth/authStorage";
+import { apiFetch } from "./api-client";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
-const FETCH_TIMEOUT = 10000;
 
 /** 项目响应（列表/详情），对齐后端 ProjectDto。 */
 export interface ProjectDto {
@@ -40,18 +40,8 @@ export class ApiError extends Error {
   }
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 async function getResult<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetchWithTimeout(`${API_BASE}${url}`, options, FETCH_TIMEOUT);
+  const res = await apiFetch(`${API_BASE}${url}`, options);
   if (!res.ok) {
     throw new ApiError(`请求失败: ${res.status}`, res.status);
   }
