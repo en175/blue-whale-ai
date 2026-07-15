@@ -237,7 +237,7 @@ CREATE TABLE run_commits
     commit_id VARCHAR(128) NOT NULL,
     request_hash VARCHAR(64) NOT NULL,
     checkpoint_id BIGINT NOT NULL,
-    generation_job_id BIGINT NOT NULL,
+    generation_job_id BIGINT NULL,
     committed_cursor BIGINT NOT NULL,
     gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

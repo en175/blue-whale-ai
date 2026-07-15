@@ -3,6 +3,21 @@ from typing import Any, Mapping, Optional, Protocol, Sequence
 
 
 @dataclass(frozen=True)
+class RuntimeCheckpoint:
+    engine: str
+    engine_version: str
+    adapter_schema_version: int
+    opaque_payload: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class AcceptedActionResult:
+    action_id: str
+    status: str
+    result: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
 class RunWork:
     agent_run_id: int
     project_id: int
@@ -14,7 +29,8 @@ class RunWork:
     engine_version: str
     adapter_schema_version: int
     messages: Sequence[Mapping[str, str]]
-    checkpoint: Optional[Mapping[str, Any]]
+    checkpoint: Optional[RuntimeCheckpoint]
+    accepted_results: Sequence[AcceptedActionResult] = ()
 
 
 @dataclass(frozen=True)
@@ -35,9 +51,10 @@ class ProposedAction:
 class OrchestratorResult:
     commit_id: str
     visible_text: str
-    checkpoint: Mapping[str, Any]
+    checkpoint: RuntimeCheckpoint
     actions: Sequence[ProposedAction]
     usage: Optional[Mapping[str, Any]] = None
+    error: Optional[Mapping[str, str]] = None
 
     def to_commit_payload(self, work: RunWork) -> dict[str, Any]:
         return {
@@ -50,9 +67,10 @@ class OrchestratorResult:
             "engine_version": work.engine_version,
             "adapter_schema_version": work.adapter_schema_version,
             "visible_text": self.visible_text,
-            "checkpoint": {"opaque_payload": dict(self.checkpoint)},
+            "checkpoint": {"opaque_payload": dict(self.checkpoint.opaque_payload)},
             "actions": [action.to_payload() for action in self.actions],
             "usage": dict(self.usage) if self.usage is not None else None,
+            "error": dict(self.error) if self.error is not None else None,
         }
 
 

@@ -3,7 +3,6 @@ package com.blue.whale.agent.model.dto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import javax.validation.Valid;
 import javax.validation.constraints.NotBlank;
-import javax.validation.constraints.NotEmpty;
 import javax.validation.constraints.NotNull;
 
 import java.util.List;
@@ -20,7 +19,7 @@ public record RunCommitRequest(
         @JsonProperty("adapter_schema_version") @NotNull Integer adapterSchemaVersion,
         @JsonProperty("visible_text") @NotBlank String visibleText,
         @Valid @NotNull CommitCheckpoint checkpoint,
-        @Valid @NotEmpty List<ProposedAction> actions,
+        @Valid @NotNull List<ProposedAction> actions,
         Map<String, Object> usage,
         @JsonProperty("user_input_request") Map<String, Object> userInputRequest,
         Map<String, Object> error

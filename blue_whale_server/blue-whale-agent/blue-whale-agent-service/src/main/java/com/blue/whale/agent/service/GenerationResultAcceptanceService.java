@@ -2,6 +2,7 @@ package com.blue.whale.agent.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.blue.whale.agent.mapper.AssetMapper;
+import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
 import com.blue.whale.agent.mapper.GenerationResultConflictMapper;
@@ -11,6 +12,7 @@ import com.blue.whale.agent.model.dto.GenerationAcceptanceResult;
 import com.blue.whale.agent.model.dto.GenerationFailureCommand;
 import com.blue.whale.agent.model.dto.GenerationResultCommand;
 import com.blue.whale.agent.model.entity.Asset;
+import com.blue.whale.agent.model.entity.AgentRun;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationJobOutput;
 import com.blue.whale.agent.model.entity.GenerationResultConflict;
@@ -34,6 +36,7 @@ public class GenerationResultAcceptanceService {
     private final GenerationJobOutputMapper outputMapper;
     private final GenerationResultConflictMapper conflictMapper;
     private final AssetMapper assetMapper;
+    private final AgentRunMapper agentRunMapper;
     private final ProjectEventService projectEventService;
 
     @Transactional
@@ -89,6 +92,7 @@ public class GenerationResultAcceptanceService {
         appendAssetCreated(asset, output);
         appendOutputAttached(output);
         appendJobStatusChanged(accepted);
+        resumePydanticRun(accepted);
         return new GenerationAcceptanceResult(GenerationAcceptanceResult.Status.ACCEPTED, asset.getId());
     }
 
@@ -109,6 +113,7 @@ public class GenerationResultAcceptanceService {
         clearLease(job.getId());
         GenerationJob failed = generationJobMapper.selectById(job.getId());
         appendJobStatusChanged(failed);
+        resumePydanticRun(failed);
         return new GenerationAcceptanceResult(GenerationAcceptanceResult.Status.FAILED, null);
     }
 
@@ -225,6 +230,38 @@ public class GenerationResultAcceptanceService {
         payload.put("output_asset_ids", job.getOutputAssetIds());
         projectEventService.appendEvent(job.getProjectId(), EventType.GENERATION_JOB_STATUS_CHANGED,
                 AggregateType.GENERATION_JOB, String.valueOf(job.getId()), job.getVersion(),
+                payload, null, null);
+    }
+
+    private void resumePydanticRun(GenerationJob job) {
+        if (!GenerationJob.SOURCE_AGENT_RUN.equals(job.getSource()) || job.getAgentRunId() == null) {
+            return;
+        }
+        AgentRun run = agentRunMapper.selectForUpdate(job.getAgentRunId());
+        if (run == null
+                || !AgentRun.STATUS_AWAITING_JOB.equals(run.getStatus())
+                || !"pydantic-ai".equals(run.getEngine())
+                || !"2.9.0".equals(run.getEngineVersion())
+                || !Integer.valueOf(1).equals(run.getAdapterSchemaVersion())) {
+            return;
+        }
+        run.setStatus(AgentRun.STATUS_QUEUED)
+                .setStage("resuming")
+                .setLeaseOwner(null)
+                .setLeaseExpiresAt(null);
+        agentRunMapper.updateById(run);
+        AgentRun resumed = agentRunMapper.selectById(run.getId());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("agent_run_id", resumed.getId());
+        payload.put("conversation_id", resumed.getConversationId());
+        payload.put("status", resumed.getStatus());
+        payload.put("stage", resumed.getStage());
+        payload.put("engine", resumed.getEngine());
+        payload.put("engine_version", resumed.getEngineVersion());
+        payload.put("adapter_schema_version", resumed.getAdapterSchemaVersion());
+        payload.put("current_checkpoint_id", resumed.getCurrentCheckpointId());
+        projectEventService.appendEvent(resumed.getProjectId(), EventType.AGENT_RUN_STATUS_CHANGED,
+                AggregateType.AGENT_RUN, String.valueOf(resumed.getId()), resumed.getVersion(),
                 payload, null, null);
     }
 
