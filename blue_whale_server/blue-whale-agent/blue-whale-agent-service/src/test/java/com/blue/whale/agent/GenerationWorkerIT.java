@@ -28,6 +28,7 @@ import java.io.ByteArrayInputStream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {
@@ -102,6 +103,10 @@ class GenerationWorkerIT {
         assertThat(storedImage).startsWith(
                 (byte) 0x89, (byte) 0x50, (byte) 0x4e, (byte) 0x47);
         assertThat(ImageIO.read(new ByteArrayInputStream(storedImage))).isNotNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT width FROM assets WHERE id = ?", Integer.class, assetId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT height FROM assets WHERE id = ?", Integer.class, assetId)).isEqualTo(1);
         assertThat(count("generation_job_outputs", "generation_job_id", jobId)).isEqualTo(1);
         assertThat(jdbcTemplate.queryForList(
                 "SELECT event_type FROM project_events WHERE project_id = ? ORDER BY cursor",
@@ -123,6 +128,16 @@ class GenerationWorkerIT {
         mockMvc.perform(get(accessUrl).header("X-User-Id", "10"))
                 .andExpect(status().isOk());
         mockMvc.perform(get(accessUrl).header("X-User-Id", "11"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/projects/{projectId}/assets/{assetId}",
+                        job.getProjectId(), assetId)
+                        .header("X-User-Id", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.url").value(org.hamcrest.Matchers.startsWith("https://")))
+                .andExpect(jsonPath("$.data.expires_at").isString());
+        mockMvc.perform(get("/api/projects/{projectId}/assets/{assetId}",
+                        job.getProjectId(), assetId)
+                        .header("X-User-Id", "11"))
                 .andExpect(status().isNotFound());
     }
 

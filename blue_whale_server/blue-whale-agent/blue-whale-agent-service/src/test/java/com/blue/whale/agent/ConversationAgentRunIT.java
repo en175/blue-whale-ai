@@ -298,6 +298,26 @@ class ConversationAgentRunIT {
     }
 
     @Test
+    void imageActionPersistsValidatedReferenceAssetIds() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("reference-image-action");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "reference-image-key", "参考素材生成海报")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        String body = validCommitBody(project.getId(), work).replace(
+                "\"aspect_ratio\":\"1:1\"",
+                "\"aspect_ratio\":\"1:1\",\"reference_asset_ids\":[91,92]");
+
+        postCommit(runId, body).andExpect(status().isOk());
+
+        String inputJson = jdbcTemplate.queryForObject(
+                "SELECT input FROM generation_jobs WHERE agent_run_id = ?", String.class, runId);
+        assertThat(objectMapper.readTree(inputJson).path("reference_asset_ids"))
+                .containsExactly(objectMapper.getNodeFactory().numberNode(91),
+                        objectMapper.getNodeFactory().numberNode(92));
+    }
+
+    @Test
     void fakeRunCannotUseThePydanticNoActionCompletionPath() throws Exception {
         Project project = new Project().setOwnerId(10L).setName("fake-no-action");
         projectMapper.insert(project);

@@ -24,11 +24,19 @@ public class ProjectAssetContentService {
         projectService.requireOwned(projectId, userId);
         Asset asset = assetMapper.selectById(assetId);
         if (asset == null || !Objects.equals(asset.getProjectId(), projectId)
+                || !Objects.equals(asset.getUserId(), userId)
                 || !Asset.STATUS_NORMAL.equals(asset.getStatus())) {
             throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
         }
         GenerationObjectReader reader = readerProvider.getIfAvailable();
-        byte[] content = reader == null ? null : reader.read(asset.getStorageKey());
+        byte[] content = null;
+        if (reader != null && asset.getStorageKey() != null && !asset.getStorageKey().isBlank()) {
+            try {
+                content = reader.read(asset.getStorageKey());
+            } catch (RuntimeException exception) {
+                throw new GlobalException(SystemCode.ASSET_UNAVAILABLE_CODE, "资源不可用");
+            }
+        }
         if (content == null) {
             throw new GlobalException(SystemCode.ASSET_UNAVAILABLE_CODE, "资源不可用");
         }

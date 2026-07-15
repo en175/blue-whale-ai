@@ -18,7 +18,11 @@ class _ContractError(Exception):
     pass
 
 
-def generate_image(prompt: str, aspect_ratio: ImageAspectRatio = "1:1") -> str:
+def generate_image(
+    prompt: str,
+    aspect_ratio: ImageAspectRatio = "1:1",
+    reference_asset_ids: list[int] | None = None,
+) -> str:
     """Propose an image action for the Java product control plane to accept."""
     raise CallDeferred
 

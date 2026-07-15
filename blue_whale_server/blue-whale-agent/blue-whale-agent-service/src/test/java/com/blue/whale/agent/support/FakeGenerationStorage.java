@@ -2,15 +2,19 @@ package com.blue.whale.agent.support;
 
 import com.blue.whale.agent.service.generation.GenerationStorage;
 import com.blue.whale.agent.service.generation.GenerationObjectReader;
+import com.blue.whale.agent.service.generation.GenerationObjectSigner;
+import com.blue.whale.agent.service.generation.SignedGenerationObject;
 import com.blue.whale.agent.service.generation.StoredGenerationObject;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class FakeGenerationStorage implements GenerationStorage, GenerationObjectReader {
+public class FakeGenerationStorage implements
+        GenerationStorage, GenerationObjectReader, GenerationObjectSigner {
 
     private final Map<String, byte[]> objects = new ConcurrentHashMap<>();
 
@@ -26,6 +30,13 @@ public class FakeGenerationStorage implements GenerationStorage, GenerationObjec
     public byte[] read(String storageKey) {
         byte[] content = objects.get(storageKey);
         return content == null ? null : Arrays.copyOf(content, content.length);
+    }
+
+    @Override
+    public SignedGenerationObject sign(String storageKey) {
+        return new SignedGenerationObject(
+                "https://fake-storage.invalid/" + storageKey + "?signature=test-only",
+                Instant.now().plusSeconds(300));
     }
 
     public void clear() {
