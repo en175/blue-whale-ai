@@ -30,10 +30,8 @@ import {
   projectSnapshotToChatMessages,
 } from "../conversationRecovery";
 import * as canvasApi from "@/lib/canvas";
-import {
-  acceptConversationMessage,
-  newConversationCommandIdentity,
-} from "@/lib/conversation";
+import { acceptConversationMessage } from "@/lib/conversation";
+import { newCommandIdentity } from "@/lib/command-identity";
 import {
   projectRecoveryTransport,
   runProjectRecovery,
@@ -297,8 +295,8 @@ export function useCanvasProjects() {
       await acceptConversationMessage(
         Number(activeProject.id),
         content,
-        newConversationCommandIdentity(),
-        newConversationCommandIdentity(),
+        newCommandIdentity(),
+        newCommandIdentity(),
       );
     },
     [activeProject.id, backendReady],

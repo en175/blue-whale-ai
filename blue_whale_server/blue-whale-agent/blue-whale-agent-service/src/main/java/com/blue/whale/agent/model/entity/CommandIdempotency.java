@@ -17,5 +17,6 @@ public class CommandIdempotency extends BaseEntity {
     private String requestHash;
     private Long messageId;
     private Long agentRunId;
+    private Long generationJobId;
     private Long acceptedCursor;
 }

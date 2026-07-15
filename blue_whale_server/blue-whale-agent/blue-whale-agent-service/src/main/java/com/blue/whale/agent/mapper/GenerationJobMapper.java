@@ -12,11 +12,11 @@ import java.time.LocalDateTime;
  */
 public interface GenerationJobMapper extends BaseMapper<GenerationJob> {
 
-    @Select("SELECT * FROM generation_jobs WHERE source = 'agent_run' AND type = 'image' "
+    @Select("SELECT * FROM generation_jobs WHERE source IN ('agent_run', 'bottom_dock') AND type = 'image' "
             + "AND is_delete = 0 AND (status = 'queued' "
             + "OR (status = 'processing' AND lease_expires_at < CURRENT_TIMESTAMP)) "
             + "ORDER BY id LIMIT 1 FOR UPDATE")
-    GenerationJob selectNextAgentImageForUpdate();
+    GenerationJob selectNextImageForUpdate();
 
     @Select("SELECT * FROM generation_jobs WHERE id = #{id} AND is_delete = 0 FOR UPDATE")
     GenerationJob selectForUpdate(@Param("id") Long id);

@@ -59,7 +59,7 @@ export function projectSnapshotToCanvasNodes(
   const nodes = [...persistedNodes];
   snapshot.generation_jobs.forEach((job, index) => {
     if (
-      job.source !== "agent_run" ||
+      (job.source !== "agent_run" && job.source !== "bottom_dock") ||
       job.type !== "image" ||
       job.status !== "succeeded" ||
       (typeof job.job_id !== "number" && typeof job.job_id !== "string")
@@ -81,7 +81,9 @@ export function projectSnapshotToCanvasNodes(
       };
       return;
     }
-    const { width, height } = parseAspectRatio(generationAspectRatio(job.input));
+    const { width, height } = parseAspectRatio(
+      generationAspectRatio(job.input),
+    );
     nodes.push({
       id: nodeId,
       type: "image",

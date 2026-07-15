@@ -43,6 +43,8 @@ export type DockMediaItem = {
   id: string;
   type: "image" | "video" | "audio";
   name: string;
+  /** 后端不可变 Asset 身份；生成命令不接受临时媒体 URL 充当输入身份。 */
+  assetId?: string;
   src?: string;
 };
 

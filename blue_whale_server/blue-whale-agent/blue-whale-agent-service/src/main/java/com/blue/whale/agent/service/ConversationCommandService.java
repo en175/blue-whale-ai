@@ -1,6 +1,7 @@
 package com.blue.whale.agent.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.blue.whale.agent.common.crypto.Sha256;
 import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.CommandIdempotencyMapper;
 import com.blue.whale.agent.mapper.ConversationMapper;
@@ -20,10 +21,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -139,13 +136,8 @@ public class ConversationCommandService {
     }
 
     private String requestHash(AcceptConversationMessageRequest request) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            String canonical = request.clientMessageId() + "\u0000" + request.content() + "\u0000"
-                    + String.valueOf(request.replyToInputRequestId());
-            return HexFormat.of().formatHex(digest.digest(canonical.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 unavailable", exception);
-        }
+        String canonical = request.clientMessageId() + "\u0000" + request.content() + "\u0000"
+                + String.valueOf(request.replyToInputRequestId());
+        return Sha256.hex(canonical);
     }
 }

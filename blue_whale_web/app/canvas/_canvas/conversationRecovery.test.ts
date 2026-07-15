@@ -103,4 +103,44 @@ describe("Agent 对话恢复投影", () => {
       imageUrl: "/api/projects/1/assets/12/content",
     });
   });
+
+  it("把 BottomDock 成功输出投影为唯一 NodeItem 且不创建 Agent Card", () => {
+    const snapshot: ProjectSnapshot = {
+      project: { id: 1, name: "P", thumb: null, created_at: "now" },
+      canvas: { id: null, project_id: 1, viewport: null, nodes: "[]" },
+      conversation_messages: [],
+      agent_runs: [],
+      generation_jobs: [
+        {
+          job_id: 10,
+          source: "bottom_dock",
+          type: "image",
+          input: { prompt: "码头蓝鲸", aspect_ratio: "16:9" },
+          status: "succeeded",
+          progress: 100,
+          outputs: [{ slot_index: 0, asset_id: 13 }],
+          output_asset_ids: [13],
+        },
+      ],
+      assets: {
+        "13": {
+          asset_id: 13,
+          type: "image",
+          access_url: "/api/projects/1/assets/13/content",
+        },
+      },
+      high_watermark_cursor: 12,
+    };
+
+    expect(projectSnapshotToChatMessages(snapshot)).toEqual([]);
+    const first = projectSnapshotToCanvasNodes(snapshot, []);
+    const replayed = projectSnapshotToCanvasNodes(snapshot, first);
+    expect(replayed).toHaveLength(1);
+    expect(replayed[0]).toMatchObject({
+      id: "generation-job-10-slot-0",
+      content: "码头蓝鲸",
+      assetId: "13",
+      imageUrl: "/api/projects/1/assets/13/content",
+    });
+  });
 });
