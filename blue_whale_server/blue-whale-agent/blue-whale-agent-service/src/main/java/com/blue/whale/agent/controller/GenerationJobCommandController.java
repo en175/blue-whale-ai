@@ -3,13 +3,16 @@ package com.blue.whale.agent.controller;
 import com.blue.whale.agent.common.context.UserContext;
 import com.blue.whale.agent.model.dto.CreateGenerationJobRequest;
 import com.blue.whale.agent.model.dto.CreateGenerationJobResponse;
+import com.blue.whale.agent.model.dto.SnapshotResponse;
 import com.blue.whale.agent.service.GenerationJobCommandService;
 import com.blue.whale.agent.service.GenerationJobCancellationService;
+import com.blue.whale.agent.service.SnapshotService;
 import com.blue.whale.global.base.resp.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -26,6 +29,16 @@ public class GenerationJobCommandController {
 
     private final GenerationJobCommandService commandService;
     private final GenerationJobCancellationService cancellationService;
+    private final SnapshotService snapshotService;
+
+    @GetMapping("/{jobId}")
+    public Result<SnapshotResponse.GenerationJobDto> get(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @PathVariable("projectId") Long projectId,
+            @PathVariable("jobId") Long jobId) {
+        return Result.ok(snapshotService.getGenerationJob(
+                projectId, jobId, UserContext.requireUserId(userId)));
+    }
 
     @PostMapping
     public ResponseEntity<Result<CreateGenerationJobResponse>> create(
@@ -45,5 +58,16 @@ public class GenerationJobCommandController {
             @PathVariable("jobId") Long jobId) {
         cancellationService.cancel(projectId, jobId, UserContext.requireUserId(userId));
         return ResponseEntity.accepted().body(Result.ok(null));
+    }
+
+    @PostMapping("/{jobId}/retry")
+    public ResponseEntity<Result<CreateGenerationJobResponse>> retryMissingOutputs(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @PathVariable("projectId") Long projectId,
+            @PathVariable("jobId") Long jobId) {
+        CreateGenerationJobResponse accepted = commandService.retryMissingOutputs(
+                projectId, jobId, UserContext.requireUserId(userId), idempotencyKey);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(Result.ok(accepted));
     }
 }

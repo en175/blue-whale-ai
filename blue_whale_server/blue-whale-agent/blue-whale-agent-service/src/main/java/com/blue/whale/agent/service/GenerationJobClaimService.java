@@ -1,10 +1,12 @@
 package com.blue.whale.agent.service;
 
 import com.blue.whale.agent.mapper.GenerationJobMapper;
+import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
 import com.blue.whale.agent.model.constant.AggregateType;
 import com.blue.whale.agent.model.constant.EventType;
 import com.blue.whale.agent.model.dto.GenerationJobClaim;
 import com.blue.whale.agent.model.entity.GenerationJob;
+import com.blue.whale.agent.model.entity.GenerationJobOutput;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +26,7 @@ public class GenerationJobClaimService {
     private static final long VIDEO_LEASE_SECONDS = 300;
 
     private final GenerationJobMapper generationJobMapper;
+    private final GenerationJobOutputMapper outputMapper;
     private final ProjectEventService projectEventService;
 
     @Transactional
@@ -36,6 +39,16 @@ public class GenerationJobClaimService {
             throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "暂无可认领 GenerationJob");
         }
         LocalDateTime databaseNow = generationJobMapper.selectCurrentTime();
+        GenerationJobOutput target = outputMapper.selectNextPendingForUpdate(job.getId());
+        if (target == null
+                && GenerationJob.TYPE_VIDEO.equals(job.getType())
+                && (GenerationJob.STATUS_FAILED.equals(job.getStatus())
+                || GenerationJob.STATUS_PARTIALLY_SUCCEEDED.equals(job.getStatus()))) {
+            target = outputMapper.selectFailedForEvidenceForUpdate(job.getId());
+        }
+        if (target == null) {
+            throw conflict();
+        }
         long nextFencingToken = job.getFencingToken() == null ? 1L : job.getFencingToken() + 1L;
         String previousStatus = job.getStatus();
         if (GenerationJob.STATUS_QUEUED.equals(previousStatus)) {
@@ -55,7 +68,7 @@ public class GenerationJobClaimService {
             appendStatusChanged(claimed);
         }
         return new GenerationJobClaim(
-                claimed.getId(), claimed.getProjectId(), claimed.getUserId(), claimed.getVersion(),
+                claimed.getId(), target.getSlotIndex(), claimed.getProjectId(), claimed.getUserId(), claimed.getVersion(),
                 claimed.getFencingToken(), claimed.getLeaseOwner(), claimed.getInput(), claimed.getType(),
                 claimed.getStatus(), claimed.getExecutionDeadlineAt());
     }

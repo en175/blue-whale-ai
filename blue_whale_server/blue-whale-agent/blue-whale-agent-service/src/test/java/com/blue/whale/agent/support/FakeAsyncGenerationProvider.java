@@ -12,12 +12,13 @@ import java.util.concurrent.TimeUnit;
 
 public class FakeAsyncGenerationProvider implements AsyncGenerationProvider {
 
-    private static final String TASK_ID = "fake-seedance-task-1";
+    private static final String TASK_ID_PREFIX = "fake-seedance-task-";
 
     private final AtomicInteger submissions = new AtomicInteger();
     private final AtomicInteger observations = new AtomicInteger();
     private final AtomicInteger cancellations = new AtomicInteger();
     private volatile String callbackUrl;
+    private volatile String taskId;
     private volatile ProviderObservation observation;
     private volatile boolean ambiguousSubmission;
     private volatile boolean rejectedSubmission;
@@ -31,7 +32,8 @@ public class FakeAsyncGenerationProvider implements AsyncGenerationProvider {
 
     @Override
     public ProviderTaskReference submit(AsyncGenerationSpec spec) {
-        submissions.incrementAndGet();
+        int submissionNumber = submissions.incrementAndGet();
+        taskId = TASK_ID_PREFIX + submissionNumber;
         callbackUrl = spec.callbackUrl();
         CountDownLatch started = submissionStarted;
         CountDownLatch release = submissionRelease;
@@ -54,7 +56,7 @@ public class FakeAsyncGenerationProvider implements AsyncGenerationProvider {
             throw new ProviderSubmissionException(
                     false, "invalid_request", "Fake rejected submission", null);
         }
-        return new ProviderTaskReference(providerId(), accountId(), TASK_ID);
+        return new ProviderTaskReference(providerId(), accountId(), taskId);
     }
 
     @Override
@@ -92,11 +94,18 @@ public class FakeAsyncGenerationProvider implements AsyncGenerationProvider {
                 null, null, "succeeded", null, null);
     }
 
+    public void fail() {
+        observation = new ProviderObservation(
+                ProviderObservation.Status.FAILED, null, null,
+                "provider_failed", "Fake generation failure", "failed", null, null);
+    }
+
     public void reset() {
         submissions.set(0);
         observations.set(0);
         cancellations.set(0);
         callbackUrl = null;
+        taskId = null;
         ambiguousSubmission = false;
         rejectedSubmission = false;
         succeedsOnCancelConfirmation = false;
@@ -124,7 +133,7 @@ public class FakeAsyncGenerationProvider implements AsyncGenerationProvider {
     }
 
     public String taskId() {
-        return TASK_ID;
+        return taskId;
     }
 
     public void submitAmbiguously() {
@@ -133,6 +142,10 @@ public class FakeAsyncGenerationProvider implements AsyncGenerationProvider {
 
     public void rejectSubmission() {
         rejectedSubmission = true;
+    }
+
+    public void allowSubmission() {
+        rejectedSubmission = false;
     }
 
     public void succeedOnCancelConfirmation() {

@@ -35,6 +35,7 @@ public class GenerationJob extends BaseEntity {
     public static final String STATUS_QUEUED = "queued";
     public static final String STATUS_PROCESSING = "processing";
     public static final String STATUS_SUCCEEDED = "succeeded";
+    public static final String STATUS_PARTIALLY_SUCCEEDED = "partially_succeeded";
     public static final String STATUS_FAILED = "failed";
     public static final String STATUS_CANCEL_REQUESTED = "cancel_requested";
     public static final String STATUS_CANCELLED = "cancelled";
@@ -49,6 +50,8 @@ public class GenerationJob extends BaseEntity {
     private Long userId;
     private Long agentRunId;
     private String actionIdentity;
+    private Integer expectedOutputCount;
+    private Long retryOfJobId;
 
     /** image / video */
     private String type;
@@ -59,7 +62,7 @@ public class GenerationJob extends BaseEntity {
     @TableField(typeHandler = JacksonTypeHandler.class)
     private Map<String, Object> input;
 
-    /** queued / processing / cancel_requested / succeeded / failed / cancelled */
+    /** queued / processing / cancel_requested / succeeded / partially_succeeded / failed / cancelled */
     private String status;
 
     /** 进度 0-100 */
@@ -96,7 +99,7 @@ public class GenerationJob extends BaseEntity {
     private LocalDateTime lastPolledAt;
 
     /** 错误信息 JSON：{code, message} */
-    @TableField(typeHandler = JacksonTypeHandler.class)
+    @TableField(typeHandler = JacksonTypeHandler.class, updateStrategy = FieldStrategy.ALWAYS)
     private Map<String, Object> error;
 
     /** 画布 stage id */

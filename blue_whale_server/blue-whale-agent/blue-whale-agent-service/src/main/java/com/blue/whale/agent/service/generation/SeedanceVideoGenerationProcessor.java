@@ -163,8 +163,9 @@ public class SeedanceVideoGenerationProcessor {
         }
         StoredGenerationObject stored = ingested.stored();
         acceptanceService.acceptVideoSuccess(new VideoGenerationResultCommand(
-                claim.jobId(), 0, claim.jobVersion(), claim.fencingToken(), claim.leaseOwner(),
-                "job-" + claim.jobId() + "-slot-0", stored.storageKey(),
+                claim.jobId(), claim.targetSlotIndex(), claim.jobVersion(),
+                claim.fencingToken(), claim.leaseOwner(),
+                "job-" + claim.jobId() + "-slot-" + claim.targetSlotIndex(), stored.storageKey(),
                 stored.contentSha256(), stored.mimeType(), stored.sizeBytes(),
                 ingested.durationSeconds()));
     }

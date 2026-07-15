@@ -31,24 +31,24 @@ export function projectSnapshotToChatMessages(
         runIds.has(String(job.agent_run_id)) &&
         (typeof job.job_id === "number" || typeof job.job_id === "string"),
     )
-    .map<ChatMessage>((job) => {
-      const asset = generationAsset(snapshot, job);
-      return {
-        id: `generation-job-${String(job.job_id)}`,
-        type: "card",
-        text: generationPrompt(job.input),
-        meta: "图片生成",
-        status:
-          job.status === "failed"
-            ? "failed"
-            : job.status === "succeeded"
-              ? "normal"
-              : "generating",
-        ...(asset
-          ? { assetId: String(asset.asset_id), imageUrl: asset.access_url }
-          : {}),
-      };
-    });
+    .flatMap<ChatMessage>((job) =>
+      generationOutputs(job).map((output) => {
+        const asset = generationAsset(snapshot, output);
+        const slotIndex = Number(output.slot_index);
+        return {
+          id: `generation-job-${String(job.job_id)}-slot-${slotIndex}`,
+          type: "card",
+          text: generationPrompt(job.input),
+          meta: job.type === "video" ? "视频生成" : "图片生成",
+          status: outputStatus(job, output),
+          generationJobId: job.job_id as number | string,
+          slotIndex,
+          ...(asset
+            ? { assetId: String(asset.asset_id), imageUrl: asset.access_url }
+            : {}),
+        };
+      }),
+    );
   return [...messages, ...cards];
 }
 
@@ -57,51 +57,58 @@ export function projectSnapshotToCanvasNodes(
   persistedNodes: NodeItem[],
 ): NodeItem[] {
   const nodes = [...persistedNodes];
-  snapshot.generation_jobs.forEach((job, index) => {
+  let positionIndex = 0;
+  snapshot.generation_jobs.forEach((job) => {
     if (
       (job.source !== "agent_run" && job.source !== "bottom_dock") ||
       (job.type !== "image" && job.type !== "video") ||
-      job.status !== "succeeded" ||
       (typeof job.job_id !== "number" && typeof job.job_id !== "string")
     ) {
       return;
     }
-    const asset = generationAsset(snapshot, job);
-    if (!asset) return;
-    const assetId = String(asset.asset_id);
-    const isVideo = job.type === "video";
-    const nodeId = `generation-job-${String(job.job_id)}-slot-0`;
-    const existingIndex = nodes.findIndex(
-      (node) => node.assetId === assetId || node.id === nodeId,
-    );
-    if (existingIndex >= 0) {
-      const existing = { ...nodes[existingIndex] };
-      delete existing.imageUrl;
-      delete existing.assetAccessUrl;
-      nodes[existingIndex] = {
-        ...existing,
+    generationOutputs(job).forEach((output) => {
+      const asset = generationAsset(snapshot, output);
+      if (!asset || !isSuccessfulOutput(job, output)) return;
+      const assetId = String(asset.asset_id);
+      const isVideo = job.type === "video";
+      const slotIndex = Number(output.slot_index);
+      const nodeId = `generation-job-${String(job.job_id)}-slot-${slotIndex}`;
+      const existingIndex = nodes.findIndex(
+        (node) => node.assetId === assetId || node.id === nodeId,
+      );
+      if (existingIndex >= 0) {
+        const existing = { ...nodes[existingIndex] };
+        delete existing.imageUrl;
+        delete existing.assetAccessUrl;
+        nodes[existingIndex] = {
+          ...existing,
+          type: isVideo ? "video" : "image",
+          assetId,
+          ...(isVideo
+            ? { assetAccessUrl: asset.access_url }
+            : { imageUrl: asset.access_url }),
+        };
+        return;
+      }
+      const { width, height } = parseAspectRatio(
+        generationAspectRatio(job.input),
+      );
+      nodes.push({
+        id: nodeId,
         type: isVideo ? "video" : "image",
+        position: {
+          x: 48 + positionIndex * 32,
+          y: 48 + positionIndex * 32,
+        },
+        width,
+        height,
+        content: generationPrompt(job.input),
         assetId,
         ...(isVideo
           ? { assetAccessUrl: asset.access_url }
           : { imageUrl: asset.access_url }),
-      };
-      return;
-    }
-    const { width, height } = parseAspectRatio(
-      generationAspectRatio(job.input),
-    );
-    nodes.push({
-      id: nodeId,
-      type: isVideo ? "video" : "image",
-      position: { x: 48 + index * 32, y: 48 + index * 32 },
-      width,
-      height,
-      content: generationPrompt(job.input),
-      assetId,
-      ...(isVideo
-        ? { assetAccessUrl: asset.access_url }
-        : { imageUrl: asset.access_url }),
+      });
+      positionIndex += 1;
     });
   });
   return nodes;
@@ -109,18 +116,55 @@ export function projectSnapshotToCanvasNodes(
 
 function generationAsset(
   snapshot: ProjectSnapshot,
-  job: Record<string, unknown>,
+  output: Record<string, unknown>,
 ): ProjectSnapshot["assets"][string] | null {
-  const outputs = Array.isArray(job.outputs) ? job.outputs : [];
-  const output = outputs.find(
-    (value) =>
-      !!value &&
-      typeof value === "object" &&
-      (value as Record<string, unknown>).slot_index === 0,
-  ) as Record<string, unknown> | undefined;
-  const assetId = output?.asset_id;
+  const assetId = output.asset_id;
   if (typeof assetId !== "number" && typeof assetId !== "string") return null;
   return snapshot.assets[String(assetId)] ?? null;
+}
+
+function generationOutputs(
+  job: Record<string, unknown>,
+): Record<string, unknown>[] {
+  const outputs = Array.isArray(job.outputs)
+    ? job.outputs.filter(
+        (output): output is Record<string, unknown> =>
+          !!output &&
+          typeof output === "object" &&
+          typeof (output as Record<string, unknown>).slot_index === "number",
+      )
+    : [];
+  if (outputs.length > 0) {
+    return [...outputs].sort(
+      (left, right) => Number(left.slot_index) - Number(right.slot_index),
+    );
+  }
+  return [{ slot_index: 0 }];
+}
+
+function outputStatus(
+  job: Record<string, unknown>,
+  output: Record<string, unknown>,
+): "normal" | "generating" | "failed" {
+  if (output.status === "succeeded") return "normal";
+  if (output.status === "failed") return "failed";
+  if (output.asset_id !== null && output.asset_id !== undefined)
+    return "normal";
+  if (job.status === "failed") return "failed";
+  return "generating";
+}
+
+function isSuccessfulOutput(
+  job: Record<string, unknown>,
+  output: Record<string, unknown>,
+): boolean {
+  return (
+    output.status === "succeeded" ||
+    (output.status === undefined &&
+      job.status === "succeeded" &&
+      output.asset_id !== null &&
+      output.asset_id !== undefined)
+  );
 }
 
 function isConversationMessage(value: Record<string, unknown>): value is Record<

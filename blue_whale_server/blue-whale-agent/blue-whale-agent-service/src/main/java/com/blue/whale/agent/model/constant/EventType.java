@@ -37,6 +37,8 @@ public final class EventType {
     public static final String GENERATION_JOB_STATUS_CHANGED = "generation_job.status_changed";
     /** GenerationJob：稳定输出槽位已绑定 Asset。 */
     public static final String GENERATION_JOB_OUTPUT_ATTACHED = "generation_job.output_attached";
+    /** GenerationJob：稳定输出槽位状态已更新。 */
+    public static final String GENERATION_JOB_OUTPUT_UPDATED = "generation_job.output_updated";
 
     /** Asset：产品已接纳不可变媒体对象。 */
     public static final String ASSET_CREATED = "asset.created";

@@ -75,6 +75,7 @@ public class GenerationJobCancellationService {
 
     private boolean isTerminal(String status) {
         return GenerationJob.STATUS_SUCCEEDED.equals(status)
+                || GenerationJob.STATUS_PARTIALLY_SUCCEEDED.equals(status)
                 || GenerationJob.STATUS_FAILED.equals(status)
                 || GenerationJob.STATUS_CANCELLED.equals(status);
     }

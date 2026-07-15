@@ -53,6 +53,8 @@ public record SnapshotResponse(
             Long jobId,
             Long agentRunId,
             String actionIdentity,
+            Integer expectedOutputCount,
+            Long retryOfJobId,
             String type,
             String source,
             Map<String, Object> input,
@@ -64,7 +66,11 @@ public record SnapshotResponse(
     }
 
     /** GenerationJob 输出槽事实。 */
-    public record GenerationJobOutputDto(Integer slotIndex, Long assetId) {
+    public record GenerationJobOutputDto(
+            Integer slotIndex,
+            String status,
+            Long assetId,
+            Map<String, Object> error) {
     }
 
     /** Asset 摘要（Snapshot 切片）。 */

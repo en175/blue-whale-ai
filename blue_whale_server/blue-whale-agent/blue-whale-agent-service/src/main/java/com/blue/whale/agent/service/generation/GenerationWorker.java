@@ -63,24 +63,28 @@ public class GenerationWorker {
                 stored = storage.store(result.content(), result.mimeType());
             } catch (RuntimeException exception) {
                 acceptanceService.acceptFailure(new GenerationFailureCommand(
-                        claim.jobId(), claim.jobVersion(), claim.fencingToken(), claim.leaseOwner(),
+                        claim.jobId(), claim.targetSlotIndex(), claim.jobVersion(),
+                        claim.fencingToken(), claim.leaseOwner(),
                         "storage_failed", "生成结果存储失败"));
                 return true;
             }
             acceptanceService.acceptSuccess(new GenerationResultCommand(
-                    claim.jobId(), 0, claim.jobVersion(), claim.fencingToken(), claim.leaseOwner(),
+                    claim.jobId(), claim.targetSlotIndex(), claim.jobVersion(),
+                    claim.fencingToken(), claim.leaseOwner(),
                     deliveryId(claim), stored.storageKey(), stored.contentSha256(),
                     stored.mimeType(), stored.sizeBytes(), result.width(), result.height()));
             return true;
         }
 
         acceptanceService.acceptFailure(new GenerationFailureCommand(
-                claim.jobId(), claim.jobVersion(), claim.fencingToken(), claim.leaseOwner(),
+                claim.jobId(), claim.targetSlotIndex(), claim.jobVersion(),
+                claim.fencingToken(), claim.leaseOwner(),
                 result.errorCode(), result.errorMessage()));
         return true;
     }
 
     private String deliveryId(GenerationJobClaim claim) {
-        return "job-" + claim.jobId() + "-fence-" + claim.fencingToken();
+        return "job-" + claim.jobId() + "-slot-" + claim.targetSlotIndex()
+                + "-fence-" + claim.fencingToken();
     }
 }

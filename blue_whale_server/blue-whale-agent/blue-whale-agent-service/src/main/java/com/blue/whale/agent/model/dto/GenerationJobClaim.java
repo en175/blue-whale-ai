@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 
 public record GenerationJobClaim(
         Long jobId,
+        int targetSlotIndex,
         Long projectId,
         Long userId,
         Integer jobVersion,
@@ -23,7 +24,7 @@ public record GenerationJobClaim(
             Long fencingToken,
             String leaseOwner,
             Map<String, Object> input) {
-        this(jobId, projectId, userId, jobVersion, fencingToken, leaseOwner, input,
+        this(jobId, 0, projectId, userId, jobVersion, fencingToken, leaseOwner, input,
                 "image", "processing", null);
     }
 }

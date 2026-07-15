@@ -40,6 +40,7 @@ import type { GenerateArgs } from "./_canvas";
 import {
   cancelProjectGenerationJob,
   createProjectGenerationJob,
+  retryMissingProjectGenerationJobOutputs,
 } from "./_canvas/api/generation";
 import {
   setProjectSubmitting,
@@ -68,6 +69,14 @@ function userFriendlyErrorMessage(e: unknown): string {
   return "生成失败，请稍后重试";
 }
 
+function expectedOutputCount(quantity: string): number {
+  const count = Number(quantity.replace(/x$/i, ""));
+  if (!Number.isInteger(count) || count < 1 || count > 4) {
+    throw new Error("输出数量无效");
+  }
+  return count;
+}
+
 function CanvasPageInner() {
   const searchParams = useSearchParams();
   const prompt = searchParams.get("prompt") || "";
@@ -75,6 +84,7 @@ function CanvasPageInner() {
   const guardRouter = useRouter();
   // 画布视口容器：addNode 据其中心换算 world 坐标（viewport 为受控 {x,y,zoom}）。
   const containerRef = useRef<HTMLDivElement>(null);
+  const retryIdempotencyKeysRef = useRef<Record<string, string>>({});
 
   // gating：未登录直访 /canvas 时，先空白守卫再决定渲染或跳转，避免画布内容首帧闪烁。
   // TODO: 接真实数据后改为路由守卫（middleware 或 server component 检查登录态）。
@@ -394,10 +404,8 @@ function CanvasPageInner() {
           throw new Error("后端未启动或无法连接");
         }
         if (args.mode === "image") {
-          if (args.settings.quantity !== "1x") {
-            throw new Error("当前闭环仅支持单图生成");
-          }
           const projectId = Number(activeProject.id);
+          const outputCount = expectedOutputCount(args.settings.quantity);
           const inputAssetIds = imageDockMedia.map((media) =>
             Number(media.assetId),
           );
@@ -419,16 +427,17 @@ function CanvasPageInner() {
                 prompt: trimmed,
                 aspect_ratio: args.settings.aspectRatio.id,
               },
-              expected_output_count: 1,
+              expected_output_count: outputCount,
             },
             newCommandIdentity(),
           );
           setGenerateError(null);
         } else {
-          if (args.settings.quantity !== "1x" || videoDockMedia.length > 1) {
-            throw new Error("当前闭环仅支持单视频生成");
+          if (videoDockMedia.length > 1) {
+            throw new Error("视频参考素材数量超出限制");
           }
           const projectId = Number(activeProject.id);
+          const outputCount = expectedOutputCount(args.settings.quantity);
           const inputAssetIds = videoDockMedia.map((media) =>
             Number(media.assetId),
           );
@@ -452,7 +461,7 @@ function CanvasPageInner() {
                 resolution: args.settings.resolution.id,
                 duration: args.settings.duration,
               },
-              expected_output_count: 1,
+              expected_output_count: outputCount,
             },
             newCommandIdentity(),
           );
@@ -472,6 +481,27 @@ function CanvasPageInner() {
       }
     },
     [activeProject.id, backendReady, imageDockMedia, videoDockMedia],
+  );
+
+  const handleRetryGenerationJob = useCallback(
+    async (generationJobId: number | string) => {
+      if (!backendReady) throw new Error("后端未启动或无法连接");
+      const projectId = Number(activeProject.id);
+      const jobId = Number(generationJobId);
+      if (
+        !Number.isSafeInteger(projectId) ||
+        projectId <= 0 ||
+        !Number.isSafeInteger(jobId) ||
+        jobId <= 0
+      ) {
+        throw new Error("GenerationJob 身份无效");
+      }
+      const identity =
+        retryIdempotencyKeysRef.current[String(jobId)] ?? newCommandIdentity();
+      retryIdempotencyKeysRef.current[String(jobId)] = identity;
+      await retryMissingProjectGenerationJobOutputs(projectId, jobId, identity);
+    },
+    [activeProject.id, backendReady],
   );
 
   // Project SSE 到达终态后呈现稳定错误；节点由恢复投影统一创建。
@@ -738,6 +768,7 @@ function CanvasPageInner() {
             status,
           })
         }
+        onRetryGenerationJob={handleRetryGenerationJob}
       />
 
       <div className="absolute bottom-4 left-4 z-[400] flex items-center gap-2">

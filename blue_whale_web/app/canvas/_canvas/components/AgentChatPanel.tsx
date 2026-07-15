@@ -34,6 +34,7 @@ export function AgentChatPanel({
   onAppendMessages,
   onSubmitMessage,
   onSetCardStatus,
+  onRetryGenerationJob,
   prompt,
 }: {
   /** 受控消息流：来自当前 Project.messages（切换项目随 key remount 更换） */
@@ -49,6 +50,8 @@ export function AgentChatPanel({
   onSubmitMessage?: (text: string) => Promise<void>;
   /** 设置当前项目内某 card 的状态（重试链推进） */
   onSetCardStatus?: (cardId: number | string, status: CardStatus) => void;
+  /** 权威失败 Card 的真实重试命令；新 Job 由 Snapshot/SSE 恢复。 */
+  onRetryGenerationJob?: (generationJobId: number | string) => Promise<void>;
   /** 首页续上 / 模板卡点击带入的 prompt，填入 composer（可编辑后发送） */
   prompt?: string;
 }) {
@@ -56,6 +59,9 @@ export function AgentChatPanel({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [panelSize, setPanelSize] = useState({ w: 468, h: 600 });
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
+  const [retryingCards, setRetryingCards] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
 
   const CREATION_MODES = useMemo(
     () => [
@@ -264,13 +270,35 @@ export function AgentChatPanel({
   /**
    * 手动应用 / 重试：用户点 card 主按钮的统一入口。
    * 按 card 当前 status 分发：
-   *   failed/generating → 走重试状态机 failed→generating→normal（DEMO 固定成功，不创建画布节点）
+   *   权威 failed → 创建仅含缺失槽的新 Job，原 Card 保持失败事实
+   *   离线 failed/generating → 保留既有 DEMO 状态机
    *   normal            → 把 card 作为 NodeItem 应用到画布（复用既有 onCardGenerated，page.tsx 零改）
    */
   const handleReapply = (card: CardMessage) => {
     const current = card.status ?? "normal";
     if (current === "normal") {
       onCardGenerated?.(card);
+      return;
+    }
+    if (
+      current === "failed" &&
+      card.generationJobId !== undefined &&
+      onRetryGenerationJob
+    ) {
+      const cardKey = String(card.id);
+      if (retryingCards.has(cardKey)) return;
+      setRetryingCards((currentCards) => new Set(currentCards).add(cardKey));
+      void onRetryGenerationJob(card.generationJobId)
+        .catch((error) => {
+          console.error("[canvas] generation retry failed:", error);
+        })
+        .finally(() => {
+          setRetryingCards((currentCards) => {
+            const next = new Set(currentCards);
+            next.delete(cardKey);
+            return next;
+          });
+        });
       return;
     }
     // 重试链：清掉上一轮残留 timer，立即进入 generating，再排一步推进到终态 normal
@@ -443,7 +471,12 @@ export function AgentChatPanel({
                 return <ThinkingBlock key={msg.id} msg={msg} />;
               if (msg.type === "card")
                 return (
-                  <AgentCard key={msg.id} msg={msg} onReapply={handleReapply} />
+                  <AgentCard
+                    key={msg.id}
+                    msg={msg}
+                    busy={retryingCards.has(String(msg.id))}
+                    onReapply={handleReapply}
+                  />
                 );
               return <AgentMessageBubble key={msg.id} text={msg.text} />;
             })}

@@ -18,6 +18,7 @@ public class GenerationProviderTask extends BaseEntity {
     public static final String SUBMISSION_FAILED = "failed";
 
     private Long generationJobId;
+    private Integer slotIndex;
     private String provider;
     private String accountId;
     private String providerTaskId;

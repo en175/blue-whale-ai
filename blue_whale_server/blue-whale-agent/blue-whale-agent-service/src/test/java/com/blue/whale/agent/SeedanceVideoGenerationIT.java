@@ -1,9 +1,12 @@
 package com.blue.whale.agent;
 
 import com.blue.whale.agent.mapper.ProjectMapper;
+import com.blue.whale.agent.model.dto.GenerationAcceptanceResult;
 import com.blue.whale.agent.model.entity.Project;
 import com.blue.whale.agent.model.dto.GenerationJobClaim;
+import com.blue.whale.agent.model.dto.VideoGenerationResultCommand;
 import com.blue.whale.agent.service.GenerationJobClaimService;
+import com.blue.whale.agent.service.GenerationResultAcceptanceService;
 import com.blue.whale.agent.service.SeedanceProviderTaskService;
 import com.blue.whale.agent.service.generation.GenerationWorker;
 import com.blue.whale.agent.service.generation.ProviderObservation;
@@ -59,6 +62,8 @@ class SeedanceVideoGenerationIT {
     private GenerationWorker generationWorker;
     @Autowired
     private GenerationJobClaimService claimService;
+    @Autowired
+    private GenerationResultAcceptanceService acceptanceService;
     @Autowired
     private SeedanceProviderTaskService taskService;
     @Autowired
@@ -265,6 +270,203 @@ class SeedanceVideoGenerationIT {
     }
 
     @Test
+    void videoSlotsKeepIndependentProviderEvidenceAndAggregatePartialSuccess() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("seedance-multi-output");
+        projectMapper.insert(project);
+        long jobId = createVideoJob(project.getId(), "seedance-multi-output-key", 2);
+
+        assertThat(generationWorker.runOnce("video-worker-slot-0-submit")).isTrue();
+        provider.succeed();
+        jdbcTemplate.update("UPDATE generation_jobs SET next_action_at = CURRENT_TIMESTAMP WHERE id = ?", jobId);
+        assertThat(generationWorker.runOnce("video-worker-slot-0-observe")).isTrue();
+
+        assertThat(generationWorker.runOnce("video-worker-slot-1-submit")).isTrue();
+        String firstDigest = jdbcTemplate.queryForObject(
+                "SELECT content_sha256 FROM generation_job_outputs "
+                        + "WHERE generation_job_id = ? AND slot_index = 0",
+                String.class, jobId);
+        GenerationAcceptanceResult repeated = acceptanceService.acceptVideoSuccess(
+                new VideoGenerationResultCommand(
+                        jobId, 0, 0, 1L, "expired-slot-0-worker", "slot-0-repeat",
+                        "fake/video/repeat.mp4", firstDigest, "video/mp4", 128L, 4));
+        assertThat(repeated.status()).isEqualTo(GenerationAcceptanceResult.Status.IDEMPOTENT);
+        GenerationAcceptanceResult conflict = acceptanceService.acceptVideoSuccess(
+                new VideoGenerationResultCommand(
+                        jobId, 0, 0, 1L, "expired-slot-0-worker", "slot-0-conflict",
+                        "fake/video/conflict.mp4", "f".repeat(64), "video/mp4", 128L, 4));
+        assertThat(conflict.status()).isEqualTo(GenerationAcceptanceResult.Status.CONFLICT);
+        provider.fail();
+        jdbcTemplate.update("UPDATE generation_jobs SET next_action_at = CURRENT_TIMESTAMP WHERE id = ?", jobId);
+        assertThat(generationWorker.runOnce("video-worker-slot-1-observe")).isTrue();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("partially_succeeded");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT slot_index FROM generation_provider_tasks WHERE generation_job_id = ? ORDER BY slot_index",
+                Integer.class, jobId)).containsExactly(0, 1);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT status FROM generation_job_outputs WHERE generation_job_id = ? ORDER BY slot_index",
+                String.class, jobId)).containsExactly("succeeded", "failed");
+        assertThat(count("assets", "generation_job_id", jobId)).isEqualTo(1);
+
+        Integer failedSlotObservations = jdbcTemplate.queryForObject(
+                "SELECT observe_count FROM generation_provider_tasks "
+                        + "WHERE generation_job_id = ? AND slot_index = 1",
+                Integer.class, jobId);
+        provider.succeed();
+        jdbcTemplate.update(
+                "UPDATE generation_jobs SET next_action_at = CURRENT_TIMESTAMP WHERE id = ?", jobId);
+        assertThat(generationWorker.runOnce("video-worker-partial-evidence")).isTrue();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT observe_count FROM generation_provider_tasks "
+                        + "WHERE generation_job_id = ? AND slot_index = 1",
+                Integer.class, jobId)).isGreaterThan(failedSlotObservations);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("partially_succeeded");
+        assertThat(count("assets", "generation_job_id", jobId)).isEqualTo(1);
+    }
+
+    @Test
+    void everyVideoSlotCanSucceedIndependently() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("seedance-all-success");
+        projectMapper.insert(project);
+        long jobId = createVideoJob(project.getId(), "seedance-all-success-key", 2);
+
+        completeNextVideoSlot(jobId, "video-all-success-0", true);
+        completeNextVideoSlot(jobId, "video-all-success-1", true);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("succeeded");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT status FROM generation_job_outputs "
+                        + "WHERE generation_job_id = ? ORDER BY slot_index",
+                String.class, jobId)).containsExactly("succeeded", "succeeded");
+        assertThat(count("assets", "generation_job_id", jobId)).isEqualTo(2);
+    }
+
+    @Test
+    void partialVideoSchedulesFailedSlotEvidenceWhenSuccessArrivesLast() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("seedance-failure-first-partial");
+        projectMapper.insert(project);
+        long jobId = createVideoJob(project.getId(), "seedance-failure-first-key", 2);
+
+        completeNextVideoSlot(jobId, "video-failure-first-0", false);
+        Integer observationsBefore = jdbcTemplate.queryForObject(
+                "SELECT observe_count FROM generation_provider_tasks "
+                        + "WHERE generation_job_id = ? AND slot_index = 0",
+                Integer.class, jobId);
+        completeNextVideoSlot(jobId, "video-failure-first-1", true);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("partially_succeeded");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT next_action_at FROM generation_jobs WHERE id = ?",
+                java.sql.Timestamp.class, jobId)).isNotNull();
+        provider.succeed();
+        assertThat(generationWorker.runOnce("video-failure-first-evidence")).isTrue();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT observe_count FROM generation_provider_tasks "
+                        + "WHERE generation_job_id = ? AND slot_index = 0",
+                Integer.class, jobId)).isGreaterThan(observationsBefore);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("partially_succeeded");
+        assertThat(count("assets", "generation_job_id", jobId)).isEqualTo(1);
+    }
+
+    @Test
+    void definiteSubmissionFailureDoesNotEnterEvidenceReconciliation() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("seedance-definite-rejection");
+        projectMapper.insert(project);
+        long jobId = createVideoJob(project.getId(), "seedance-definite-rejection-key", 2);
+
+        provider.rejectSubmission();
+        assertThat(generationWorker.runOnce("video-definite-rejection")).isTrue();
+        provider.allowSubmission();
+        completeNextVideoSlot(jobId, "video-after-definite-rejection", true);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("partially_succeeded");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT provider_task_id FROM generation_provider_tasks "
+                        + "WHERE generation_job_id = ? AND slot_index = 0",
+                String.class, jobId)).isNull();
+        assertThat(generationWorker.runOnce("video-no-evidence-task")).isFalse();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("partially_succeeded");
+        assertThat(count("assets", "generation_job_id", jobId)).isEqualTo(1);
+    }
+
+    @Test
+    void failedVideoSlotsRotateEvidenceAndRetryAsOneIdempotentJob() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("seedance-all-failed-retry");
+        projectMapper.insert(project);
+        long jobId = createVideoJob(project.getId(), "seedance-all-failed-key", 2);
+
+        completeNextVideoSlot(jobId, "video-all-failed-0", false);
+        completeNextVideoSlot(jobId, "video-all-failed-1", false);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("failed");
+        assertThat(count("assets", "generation_job_id", jobId)).isZero();
+        java.util.List<Integer> observationsBefore = jdbcTemplate.queryForList(
+                "SELECT observe_count FROM generation_provider_tasks "
+                        + "WHERE generation_job_id = ? ORDER BY slot_index",
+                Integer.class, jobId);
+
+        provider.succeed();
+        for (int index = 0; index < 2; index++) {
+            jdbcTemplate.update(
+                    "UPDATE generation_jobs SET next_action_at = CURRENT_TIMESTAMP WHERE id = ?", jobId);
+            assertThat(generationWorker.runOnce("video-evidence-" + index)).isTrue();
+        }
+        java.util.List<Integer> observationsAfter = jdbcTemplate.queryForList(
+                "SELECT observe_count FROM generation_provider_tasks "
+                        + "WHERE generation_job_id = ? ORDER BY slot_index",
+                Integer.class, jobId);
+        assertThat(observationsAfter.get(0)).isGreaterThan(observationsBefore.get(0));
+        assertThat(observationsAfter.get(1)).isGreaterThan(observationsBefore.get(1));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("failed");
+        assertThat(count("assets", "generation_job_id", jobId)).isZero();
+
+        MvcResult firstRetry = mockMvc.perform(post(
+                        "/api/projects/{projectId}/generation-jobs/{jobId}/retry",
+                        project.getId(), jobId)
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "video-missing-retry-key"))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        long retryJobId = objectMapper.readTree(firstRetry.getResponse().getContentAsString())
+                .path("data").path("generation_job_id").asLong();
+        mockMvc.perform(post("/api/projects/{projectId}/generation-jobs/{jobId}/retry",
+                        project.getId(), jobId)
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "video-missing-retry-key"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.generation_job_id").value(retryJobId));
+        mockMvc.perform(get("/api/projects/{projectId}/generation-jobs/{jobId}",
+                        project.getId(), retryJobId)
+                        .header("X-User-Id", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.type").value("video"))
+                .andExpect(jsonPath("$.data.retry_of_job_id").value(jobId))
+                .andExpect(jsonPath("$.data.expected_output_count").value(2))
+                .andExpect(jsonPath("$.data.outputs[0].slot_index").value(0))
+                .andExpect(jsonPath("$.data.outputs[0].status").value("pending"))
+                .andExpect(jsonPath("$.data.outputs[1].slot_index").value(1));
+        assertThat(count("generation_jobs", "retry_of_job_id", jobId)).isEqualTo(1);
+    }
+
+    @Test
     void cancellationDuringSubmissionKeepsKnownProviderTaskForCancellation() throws Exception {
         Project project = new Project().setOwnerId(10L).setName("seedance-submit-cancel-race");
         projectMapper.insert(project);
@@ -344,6 +546,11 @@ class SeedanceVideoGenerationIT {
     }
 
     private long createVideoJob(Long projectId, String idempotencyKey) throws Exception {
+        return createVideoJob(projectId, idempotencyKey, 1);
+    }
+
+    private long createVideoJob(Long projectId, String idempotencyKey, int expectedOutputCount)
+            throws Exception {
         MvcResult accepted = mockMvc.perform(post("/api/projects/{id}/generation-jobs", projectId)
                         .header("X-User-Id", "10")
                         .header("Idempotency-Key", idempotencyKey)
@@ -356,7 +563,7 @@ class SeedanceVideoGenerationIT {
                                 "\"aspect_ratio\":\"16:9\"," +
                                 "\"resolution\":\"480p\"," +
                                 "\"duration\":4}," +
-                                "\"expected_output_count\":1}"))
+                                "\"expected_output_count\":" + expectedOutputCount + "}"))
                 .andExpect(status().isAccepted())
                 .andReturn();
         JsonNode data = objectMapper.readTree(accepted.getResponse().getContentAsString()).path("data");
@@ -368,6 +575,18 @@ class SeedanceVideoGenerationIT {
                         projectId, jobId)
                         .header("X-User-Id", "10"))
                 .andExpect(status().isAccepted());
+    }
+
+    private void completeNextVideoSlot(long jobId, String workerPrefix, boolean success) {
+        assertThat(generationWorker.runOnce(workerPrefix + "-submit")).isTrue();
+        if (success) {
+            provider.succeed();
+        } else {
+            provider.fail();
+        }
+        jdbcTemplate.update(
+                "UPDATE generation_jobs SET next_action_at = CURRENT_TIMESTAMP WHERE id = ?", jobId);
+        assertThat(generationWorker.runOnce(workerPrefix + "-observe")).isTrue();
     }
 
     private long count(String table, String column, Long value) {

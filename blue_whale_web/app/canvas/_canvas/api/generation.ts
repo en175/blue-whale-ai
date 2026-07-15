@@ -38,7 +38,7 @@ export type ImageModelCapability = {
 
 export type CreateProjectGenerationJobPayload = {
   input_asset_ids: number[];
-  expected_output_count: 1;
+  expected_output_count: number;
 } & (
   | {
       type: "image";
@@ -123,5 +123,20 @@ export function cancelProjectGenerationJob(
   return apiRequest<void>(
     `/api/projects/${projectId}/generation-jobs/${generationJobId}/cancel`,
     { method: "POST" },
+  );
+}
+
+/** 为终态 GenerationJob 仅创建缺失/失败输出槽的新任务。 */
+export function retryMissingProjectGenerationJobOutputs(
+  projectId: number,
+  generationJobId: number,
+  idempotencyKey: string,
+): Promise<AcceptedProjectGenerationJob> {
+  return apiRequest<AcceptedProjectGenerationJob>(
+    `/api/projects/${projectId}/generation-jobs/${generationJobId}/retry`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+    },
   );
 }

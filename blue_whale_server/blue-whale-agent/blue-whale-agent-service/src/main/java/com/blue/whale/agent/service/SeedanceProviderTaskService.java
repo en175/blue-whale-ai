@@ -5,6 +5,7 @@ import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.mapper.GenerationProviderTaskMapper;
 import com.blue.whale.agent.model.constant.AggregateType;
 import com.blue.whale.agent.model.constant.EventType;
+import com.blue.whale.agent.model.dto.GenerationFailureCommand;
 import com.blue.whale.agent.model.dto.GenerationJobClaim;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationProviderTask;
@@ -33,14 +34,17 @@ public class SeedanceProviderTaskService {
 
     private final GenerationJobMapper jobMapper;
     private final GenerationProviderTaskMapper taskMapper;
+    private final GenerationResultAcceptanceService acceptanceService;
     private final ProjectEventService projectEventService;
     private final GenerationAdapterProperties properties;
 
     @Transactional
     public SubmissionPreparation prepare(GenerationJobClaim claim) {
         GenerationJob job = requireClaimedVideoJob(claim);
-        GenerationProviderTask existing = taskMapper.selectByJobForUpdate(job.getId());
-        boolean evidenceOnly = GenerationJob.STATUS_FAILED.equals(job.getStatus());
+        GenerationProviderTask existing = taskMapper.selectByJobAndSlotForUpdate(
+                job.getId(), claim.targetSlotIndex());
+        boolean evidenceOnly = GenerationJob.STATUS_FAILED.equals(job.getStatus())
+                || GenerationJob.STATUS_PARTIALLY_SUCCEEDED.equals(job.getStatus());
         if (existing != null) {
             if (existing.getProviderTaskId() != null && !existing.getProviderTaskId().isBlank()) {
                 return SubmissionPreparation.task(reference(existing),
@@ -48,9 +52,7 @@ public class SeedanceProviderTaskService {
             }
             if (job.getExecutionDeadlineAt() != null
                     && !job.getExecutionDeadlineAt().isAfter(jobMapper.selectCurrentTime())) {
-                complete(job, GenerationJob.STATUS_FAILED,
-                        Map.of("code", "submission_unknown",
-                                "message", "无法确认视频任务是否已提交"), false);
+                acceptFailedSlot(claim, "submission_unknown", "无法确认视频任务是否已提交", true);
                 return SubmissionPreparation.cancelled();
             }
             releaseAt(job, job.getExecutionDeadlineAt());
@@ -67,6 +69,7 @@ public class SeedanceProviderTaskService {
         String accountId = properties.getSeedance().getAccountId();
         GenerationProviderTask evidence = new GenerationProviderTask()
                 .setGenerationJobId(job.getId())
+                .setSlotIndex(claim.targetSlotIndex())
                 .setProvider(PROVIDER)
                 .setAccountId(accountId)
                 .setSubmissionState(GenerationProviderTask.SUBMISSION_SUBMITTING)
@@ -82,7 +85,7 @@ public class SeedanceProviderTaskService {
     @Transactional
     public void recordSubmitted(GenerationJobClaim claim, ProviderTaskReference reference) {
         GenerationJob job = requireClaimedVideoJobAfterSubmission(claim);
-        GenerationProviderTask evidence = requireEvidence(job.getId());
+        GenerationProviderTask evidence = requireEvidence(job.getId(), claim.targetSlotIndex());
         if (!PROVIDER.equals(reference.providerId())
                 || !Objects.equals(evidence.getAccountId(), reference.accountId())
                 || reference.taskId() == null || reference.taskId().isBlank()) {
@@ -106,7 +109,7 @@ public class SeedanceProviderTaskService {
             String rawCode,
             String rawMessage) {
         GenerationJob job = requireClaimedVideoJobAfterSubmission(claim);
-        GenerationProviderTask evidence = requireEvidence(job.getId());
+        GenerationProviderTask evidence = requireEvidence(job.getId(), claim.targetSlotIndex());
         evidence.setSubmissionState(ambiguous
                         ? GenerationProviderTask.SUBMISSION_UNKNOWN
                         : GenerationProviderTask.SUBMISSION_FAILED)
@@ -118,15 +121,14 @@ public class SeedanceProviderTaskService {
         } else if (GenerationJob.STATUS_CANCEL_REQUESTED.equals(job.getStatus())) {
             complete(job, GenerationJob.STATUS_CANCELLED, null, false);
         } else {
-            complete(job, GenerationJob.STATUS_FAILED,
-                    Map.of("code", "provider_failed", "message", "视频生成提交失败"), false);
+            acceptFailedSlot(claim, "provider_failed", "视频生成提交失败", false);
         }
     }
 
     @Transactional
     public int recordObservation(GenerationJobClaim claim, ProviderObservation observation) {
         GenerationJob job = requireClaimedVideoJob(claim);
-        GenerationProviderTask evidence = requireEvidence(job.getId());
+        GenerationProviderTask evidence = requireEvidence(job.getId(), claim.targetSlotIndex());
         int observeCount = evidence.getObserveCount() == null ? 1 : evidence.getObserveCount() + 1;
         evidence.setProviderStatus(observation.status().name().toLowerCase())
                 .setRawStatus(observation.rawStatus())
@@ -151,8 +153,8 @@ public class SeedanceProviderTaskService {
 
     @Transactional
     public void completeFailed(GenerationJobClaim claim, String errorCode, String message) {
-        complete(requireClaimedVideoJob(claim), GenerationJob.STATUS_FAILED,
-                Map.of("code", errorCode, "message", message), true);
+        requireClaimedVideoJob(claim);
+        acceptFailedSlot(claim, errorCode, message, true);
     }
 
     @Transactional(readOnly = true)
@@ -198,12 +200,32 @@ public class SeedanceProviderTaskService {
         return job;
     }
 
-    private GenerationProviderTask requireEvidence(Long jobId) {
-        GenerationProviderTask evidence = taskMapper.selectByJobForUpdate(jobId);
+    private GenerationProviderTask requireEvidence(Long jobId, int slotIndex) {
+        GenerationProviderTask evidence = taskMapper.selectByJobAndSlotForUpdate(jobId, slotIndex);
         if (evidence == null) {
             throw conflict();
         }
         return evidence;
+    }
+
+    private void acceptFailedSlot(
+            GenerationJobClaim claim,
+            String errorCode,
+            String message,
+            boolean reconcileEvidence) {
+        acceptanceService.acceptFailure(new GenerationFailureCommand(
+                claim.jobId(), claim.targetSlotIndex(), claim.jobVersion(), claim.fencingToken(),
+                claim.leaseOwner(), errorCode, message));
+        GenerationJob failed = jobMapper.selectForUpdate(claim.jobId());
+        if (reconcileEvidence
+                && (GenerationJob.STATUS_FAILED.equals(failed.getStatus())
+                || GenerationJob.STATUS_PARTIALLY_SUCCEEDED.equals(failed.getStatus()))) {
+            failed.setNextActionAt(jobMapper.selectCurrentTime().plusSeconds(
+                    properties.getSeedance().getMaxPollSeconds()));
+            if (jobMapper.updateById(failed) != 1) {
+                throw conflict();
+            }
+        }
     }
 
     private ProviderTaskReference reference(GenerationProviderTask evidence) {
@@ -244,6 +266,7 @@ public class SeedanceProviderTaskService {
 
     private boolean isTerminal(String status) {
         return GenerationJob.STATUS_SUCCEEDED.equals(status)
+                || GenerationJob.STATUS_PARTIALLY_SUCCEEDED.equals(status)
                 || GenerationJob.STATUS_FAILED.equals(status)
                 || GenerationJob.STATUS_CANCELLED.equals(status);
     }

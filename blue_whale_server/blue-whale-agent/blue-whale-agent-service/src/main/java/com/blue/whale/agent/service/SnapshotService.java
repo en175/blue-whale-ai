@@ -14,6 +14,8 @@ import com.blue.whale.agent.model.entity.AgentRun;
 import com.blue.whale.agent.model.entity.ConversationMessage;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationJobOutput;
+import com.blue.whale.global.base.resp.SystemCode;
+import com.blue.whale.global.exception.GlobalException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -24,7 +26,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -77,12 +78,8 @@ public class SnapshotService {
 
         Map<Long, List<SnapshotResponse.GenerationJobOutputDto>> outputsByJob = resolveOutputs(jobs);
         List<SnapshotResponse.GenerationJobDto> jobDtos = jobs.stream()
-                .map(j -> new SnapshotResponse.GenerationJobDto(
-                        j.getId(), j.getAgentRunId(), j.getActionIdentity(), j.getType(), j.getSource(),
-                        j.getInput(), j.getStatus(), j.getProgress(),
-                        publicError(j),
-                        j.getOutputAssetIds(),
-                        outputsByJob.getOrDefault(j.getId(), Collections.emptyList())))
+                .map(job -> toJobDto(job,
+                        outputsByJob.getOrDefault(job.getId(), Collections.emptyList())))
                 .toList();
         List<SnapshotResponse.ConversationMessageDto> messageDtos = messages.stream()
                 .map(message -> new SnapshotResponse.ConversationMessageDto(
@@ -104,6 +101,30 @@ public class SnapshotService {
                 project, canvas, messageDtos, runDtos, jobDtos, assetMap, highWatermark);
     }
 
+    @Transactional(readOnly = true)
+    public SnapshotResponse.GenerationJobDto getGenerationJob(
+            Long projectId,
+            Long jobId,
+            Long userId) {
+        projectService.requireOwned(projectId, userId);
+        GenerationJob job = generationJobMapper.selectById(jobId);
+        if (job == null || !Objects.equals(job.getProjectId(), projectId)) {
+            throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
+        }
+        return toJobDto(job, resolveOutputs(List.of(job))
+                .getOrDefault(jobId, Collections.emptyList()));
+    }
+
+    private SnapshotResponse.GenerationJobDto toJobDto(
+            GenerationJob job,
+            List<SnapshotResponse.GenerationJobOutputDto> outputs) {
+        return new SnapshotResponse.GenerationJobDto(
+                job.getId(), job.getAgentRunId(), job.getActionIdentity(),
+                job.getExpectedOutputCount(), job.getRetryOfJobId(), job.getType(), job.getSource(),
+                job.getInput(), job.getStatus(), job.getProgress(), publicError(job),
+                job.getOutputAssetIds(), outputs);
+    }
+
     private Map<Long, List<SnapshotResponse.GenerationJobOutputDto>> resolveOutputs(
             List<GenerationJob> jobs) {
         List<Long> jobIds = jobs.stream().map(GenerationJob::getId).toList();
@@ -117,7 +138,9 @@ public class SnapshotService {
                         .orderByAsc(GenerationJobOutput::getSlotIndex))) {
             outputsByJob.computeIfAbsent(output.getGenerationJobId(), ignored -> new java.util.ArrayList<>())
                     .add(new SnapshotResponse.GenerationJobOutputDto(
-                            output.getSlotIndex(), output.getAssetId()));
+                            output.getSlotIndex(), output.getStatus(), output.getAssetId(),
+                            GenerationPublicError.project(
+                                    output.getError(), jobType(jobs, output.getGenerationJobId()))));
         }
         return outputsByJob;
     }
@@ -128,7 +151,8 @@ public class SnapshotService {
             Map<Long, List<SnapshotResponse.GenerationJobOutputDto>> outputsByJob) {
         Stream<Long> outputAssetIds = outputsByJob.values().stream()
                 .flatMap(List::stream)
-                .map(SnapshotResponse.GenerationJobOutputDto::assetId);
+                .map(SnapshotResponse.GenerationJobOutputDto::assetId)
+                .filter(Objects::nonNull);
         Stream<Long> legacyAssetIds = jobs.stream()
                 .filter(job -> job.getOutputAssetIds() != null)
                 .flatMap(job -> job.getOutputAssetIds().stream());
@@ -158,24 +182,17 @@ public class SnapshotService {
     }
 
     private Map<String, Object> publicError(GenerationJob job) {
-        if (!GenerationJob.STATUS_FAILED.equals(job.getStatus())
-                || !GenerationJob.TYPE_VIDEO.equals(job.getType())
-                || !GenerationJob.SOURCE_BOTTOM_DOCK.equals(job.getSource())) {
+        if (!GenerationJob.STATUS_FAILED.equals(job.getStatus())) {
             return null;
         }
-        Object rawCode = job.getError() == null ? null : job.getError().get("code");
-        String code = rawCode == null ? "video_generation_failed" : String.valueOf(rawCode);
-        String message = switch (code) {
-            case "submission_unknown" -> "无法确认视频任务是否已提交";
-            case "timed_out" -> "视频生成超时";
-            case "storage_failed" -> "生成结果存储失败";
-            case "provider_failed" -> "视频生成失败";
-            default -> "视频生成失败";
-        };
-        if (!Set.of("submission_unknown", "timed_out", "storage_failed", "provider_failed")
-                .contains(code)) {
-            code = "video_generation_failed";
-        }
-        return Map.of("code", code, "message", message);
+        return GenerationPublicError.project(job.getError(), job.getType());
+    }
+
+    private String jobType(List<GenerationJob> jobs, Long jobId) {
+        return jobs.stream()
+                .filter(job -> Objects.equals(job.getId(), jobId))
+                .map(GenerationJob::getType)
+                .findFirst()
+                .orElse(GenerationJob.TYPE_IMAGE);
     }
 }
