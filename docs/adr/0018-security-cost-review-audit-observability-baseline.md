@@ -40,6 +40,9 @@ Java Product API 控制，Worker、模型和前端不能绕过。
 
 ### 3. 输入与输出都必须经过产品权威的 ContentReview
 
+> **部分取代**：ADR-0023 取消了 AgentChatPanel 用户消息和 BottomDock 文字提示词的独立前置
+> ContentReview；上传素材与所有输出仍适用本节，直到后续 ADR 明确调整。
+
 用户提示词与上传素材在进入 Agent 或供应商前审核；模型文字与生成媒体在向 User 展示、下载或
 作为后续输入前审核。只有产品控制面接纳的明确通过决定才能继续。拒绝、超时、审核服务不可用或
 结果无法验证时一律 fail closed。
