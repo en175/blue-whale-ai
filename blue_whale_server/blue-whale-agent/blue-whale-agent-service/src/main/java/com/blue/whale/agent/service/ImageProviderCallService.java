@@ -9,6 +9,7 @@ import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationProviderTask;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
+import com.blue.whale.agent.service.governance.CostReservationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,10 +28,12 @@ public class ImageProviderCallService {
     private final GenerationJobMapper jobMapper;
     private final GenerationProviderTaskMapper taskMapper;
     private final GenerationResultAcceptanceService acceptanceService;
+    private final CostReservationService costReservationService;
 
     @Transactional
     public Preparation prepare(GenerationJobClaim claim) {
         GenerationJob job = requireClaimedImageJob(claim);
+        costReservationService.requireActiveBeforeProvider(claim.jobId());
         GenerationProviderTask evidence = taskMapper.selectByJobAndSlotForUpdate(
                 claim.jobId(), claim.targetSlotIndex());
         if (evidence == null) {

@@ -127,6 +127,11 @@ public class SeedanceAsyncGenerationProvider implements AsyncGenerationProvider 
     }
 
     private ProviderSubmissionException submissionException(Exception exception) {
+        if (exception instanceof IllegalStateException
+                && "ARK_API_KEY 未配置".equals(exception.getMessage())) {
+            return new ProviderSubmissionException(false, "provider_not_configured",
+                    stableMessage(exception), exception);
+        }
         if (exception instanceof ApiException apiException) {
             int code = apiException.getCode();
             boolean ambiguous = code <= 0 || code >= 500;

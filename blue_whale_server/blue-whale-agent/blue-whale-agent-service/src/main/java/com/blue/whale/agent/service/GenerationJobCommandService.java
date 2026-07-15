@@ -16,6 +16,8 @@ import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationJobOutput;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
+import com.blue.whale.agent.service.governance.GenerationCostAdmissionService;
+import com.blue.whale.agent.service.governance.AuthorizedGenerationAction;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,13 +43,15 @@ public class GenerationJobCommandService {
     private final GenerationJobOutputMapper generationJobOutputMapper;
     private final CommandIdempotencyMapper idempotencyMapper;
     private final ProjectEventService projectEventService;
+    private final GenerationCostAdmissionService costAdmissionService;
 
     @Transactional
     public CreateGenerationJobResponse create(
             Long projectId,
             Long userId,
             String idempotencyKey,
-            CreateGenerationJobRequest request) {
+            CreateGenerationJobRequest request,
+            Long inputRequestId) {
         if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 128) {
             throw new GlobalException(SystemCode.FAILURE_CODE, "Idempotency-Key 无效");
         }
@@ -85,13 +89,20 @@ public class GenerationJobCommandService {
             input.put("reference_asset_ids", request.inputAssetIds());
         }
         input.put("expected_output_count", request.expectedOutputCount());
+        String actionIdentity = "bottom-dock:" + Sha256.hex(projectId + "\u0000" + OPERATION
+                + "\u0000" + idempotencyKey);
+        String actionType = GenerationJob.TYPE_VIDEO.equals(request.type())
+                ? "generate_video" : "generate_image";
+        AuthorizedGenerationAction authorization = costAdmissionService.authorizeRequest(
+                userId, projectId, "GenerationRequest", actionIdentity, actionIdentity,
+                actionType, input, false, inputRequestId);
         GenerationJob job = new GenerationJob()
                 .setProjectId(projectId)
                 .setUserId(userId)
                 .setType(request.type())
                 .setSource(GenerationJob.SOURCE_BOTTOM_DOCK)
-                .setActionIdentity("bottom-dock:" + Sha256.hex(projectId + "\u0000" + OPERATION
-                        + "\u0000" + idempotencyKey))
+                .setActionIdentity(authorization.actionIdentity())
+                .setProjectActionIdentity(authorization.actionIdentity())
                 .setExpectedOutputCount(request.expectedOutputCount())
                 .setInput(input)
                 .setStatus(GenerationJob.STATUS_QUEUED)
@@ -109,6 +120,9 @@ public class GenerationJobCommandService {
                     .setNextActionAt(databaseNow);
         }
         generationJobMapper.insert(job);
+        costAdmissionService.reserveAuthorized(
+                userId, projectId, job.getId(), job.getActionIdentity(),
+                actionType, authorization.quote());
         for (int slotIndex = 0; slotIndex < request.expectedOutputCount(); slotIndex++) {
             generationJobOutputMapper.insert(new GenerationJobOutput()
                     .setGenerationJobId(job.getId())
@@ -152,7 +166,8 @@ public class GenerationJobCommandService {
             Long projectId,
             Long originalJobId,
             Long userId,
-            String idempotencyKey) {
+            String idempotencyKey,
+            Long inputRequestId) {
         requireIdempotencyKey(idempotencyKey);
         projectService.requireOwnedForUpdate(projectId, userId);
         GenerationJob original = generationJobMapper.selectForUpdate(originalJobId);
@@ -197,11 +212,18 @@ public class GenerationJobCommandService {
         input.put("expected_output_count", failedOutputs.size());
         input.put("retry_slot_indexes", failedOutputs.stream()
                 .map(GenerationJobOutput::getSlotIndex).toList());
+        String actionIdentity = "retry:" + originalJobId + ":" + Sha256.hex(idempotencyKey);
+        String actionType = GenerationJob.TYPE_VIDEO.equals(original.getType())
+                ? "generate_video" : "generate_image";
+        AuthorizedGenerationAction authorization = costAdmissionService.authorizeRequest(
+                userId, projectId, "GenerationRetryRequest", actionIdentity, actionIdentity,
+                actionType, input, false, inputRequestId);
         GenerationJob retry = new GenerationJob()
                 .setProjectId(projectId)
                 .setUserId(userId)
                 .setAgentRunId(original.getAgentRunId())
-                .setActionIdentity("retry:" + originalJobId + ":" + Sha256.hex(idempotencyKey))
+                .setActionIdentity(authorization.actionIdentity())
+                .setProjectActionIdentity(authorization.actionIdentity())
                 .setExpectedOutputCount(failedOutputs.size())
                 .setRetryOfJobId(originalJobId)
                 .setType(original.getType())
@@ -222,6 +244,9 @@ public class GenerationJobCommandService {
                     .setNextActionAt(databaseNow);
         }
         generationJobMapper.insert(retry);
+        costAdmissionService.reserveAuthorized(
+                userId, projectId, retry.getId(), retry.getActionIdentity(),
+                actionType, authorization.quote());
         for (GenerationJobOutput failedOutput : failedOutputs) {
             generationJobOutputMapper.insert(new GenerationJobOutput()
                     .setGenerationJobId(retry.getId())

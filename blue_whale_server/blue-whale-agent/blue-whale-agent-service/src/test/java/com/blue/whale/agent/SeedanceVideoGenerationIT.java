@@ -10,6 +10,7 @@ import com.blue.whale.agent.service.GenerationResultAcceptanceService;
 import com.blue.whale.agent.service.SeedanceProviderTaskService;
 import com.blue.whale.agent.service.generation.GenerationWorker;
 import com.blue.whale.agent.service.generation.ProviderObservation;
+import com.blue.whale.agent.service.governance.GovernanceException;
 import com.blue.whale.agent.support.FakeAsyncGenerationProvider;
 import com.blue.whale.agent.support.FakeGenerationConfiguration;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -73,6 +74,9 @@ class SeedanceVideoGenerationIT {
     void cleanFacts() {
         provider.reset();
         jdbcTemplate.batchUpdate(
+                "DELETE FROM audit_records",
+                "DELETE FROM cost_reservations",
+                "DELETE FROM cost_budget_locks",
                 "DELETE FROM seedance_callback_security_audits",
                 "DELETE FROM seedance_callback_inbox",
                 "DELETE FROM generation_provider_tasks",
@@ -85,6 +89,48 @@ class SeedanceVideoGenerationIT {
                 "DELETE FROM project_events",
                 "DELETE FROM project_event_stream",
                 "DELETE FROM project");
+    }
+
+    @Test
+    void videoProviderSubmissionFailsClosedWithoutActiveReservation() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("seedance-cost-guard");
+        projectMapper.insert(project);
+        long jobId = createVideoJob(project.getId(), "seedance-cost-guard-key");
+        jdbcTemplate.update("DELETE FROM cost_reservations WHERE generation_job_id = ?", jobId);
+
+        assertThatThrownBy(() -> generationWorker.runOnce("video-worker-cost-guard"))
+                .isInstanceOf(GovernanceException.class)
+                .satisfies(error -> assertThat(((GovernanceException) error).publicCode())
+                        .isEqualTo("ACTION_NOT_ALLOWED"));
+        assertThat(provider.submissionCount()).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT reason_code FROM audit_records WHERE correlation_id = ? " +
+                        "AND action = 'cost_reservation.provider_admission'",
+                String.class, "generation-job:" + jobId))
+                .isEqualTo("ACTIVE_RESERVATION_REQUIRED");
+    }
+
+    @Test
+    void localProviderReadinessFailureReleasesReservationWithoutSubmission() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("seedance-local-readiness");
+        projectMapper.insert(project);
+        long jobId = createVideoJob(project.getId(), "seedance-local-readiness-key");
+        provider.becomeUnavailableBeforeSubmission();
+
+        assertThat(generationWorker.runOnce("video-worker-local-readiness")).isTrue();
+
+        assertThat(provider.submissionCount()).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("failed");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM cost_reservations WHERE generation_job_id = ?",
+                String.class, jobId)).isEqualTo("RELEASED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT reason_code FROM audit_records WHERE correlation_id = ? "
+                        + "AND action = 'cost_reservation.release'",
+                String.class, "generation-job:" + jobId))
+                .isEqualTo("PROVIDER_NOT_CALLED");
     }
 
     @Test
@@ -179,6 +225,9 @@ class SeedanceVideoGenerationIT {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT status FROM generation_jobs WHERE id = ?", String.class, localJobId))
                 .isEqualTo("cancelled");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM cost_reservations WHERE generation_job_id = ?",
+                String.class, localJobId)).isEqualTo("RELEASED");
         assertThat(provider.submissionCount()).isZero();
 
         long providerJobId = createVideoJob(project.getId(), "seedance-provider-cancel");
@@ -190,6 +239,9 @@ class SeedanceVideoGenerationIT {
                 .isEqualTo("cancelled");
         assertThat(provider.submissionCount()).isEqualTo(1);
         assertThat(provider.cancellationCount()).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM cost_reservations WHERE generation_job_id = ?",
+                String.class, providerJobId)).isEqualTo("SETTLED");
     }
 
     @Test
@@ -276,6 +328,9 @@ class SeedanceVideoGenerationIT {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
                 .isEqualTo("failed");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM cost_reservations WHERE generation_job_id = ?",
+                String.class, jobId)).isEqualTo("PENDING_RECONCILIATION");
         assertThat(provider.cancellationCount()).isEqualTo(1);
 
         provider.succeed();
@@ -287,6 +342,9 @@ class SeedanceVideoGenerationIT {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT provider_status FROM generation_provider_tasks WHERE generation_job_id = ?",
                 String.class, jobId)).isEqualTo("succeeded");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM cost_reservations WHERE generation_job_id = ?",
+                String.class, jobId)).isEqualTo("SETTLED");
         assertThat(count("assets", "generation_job_id", jobId)).isZero();
 
         jdbcTemplate.update("UPDATE generation_jobs SET evidence_reconcile_until = " +

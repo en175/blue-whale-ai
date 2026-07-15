@@ -45,8 +45,10 @@ public class GenerationController {
     /** 文生图：流式模型返 job_id（前端 EventSource 订阅逐张），非流式返 asset_id+url。 */
     @PostMapping("/image")
     public Result<ImageGenerateResponse> generateImage(@RequestHeader(value = "X-User-Id", required = false) Long userId,
+                                                       @RequestHeader(value = "X-Input-Request-Id", required = false) Long inputRequestId,
                                                        @RequestBody @Valid ImageGenerateRequest req) {
-        return Result.ok(generationJobService.createImageJob(req, requireUserId(userId)));
+        return Result.ok(generationJobService.createImageJob(
+                req, requireUserId(userId), inputRequestId));
     }
 
     private Long requireUserId(Long userId) {

@@ -16,6 +16,9 @@ import com.blue.whale.agent.service.GenerationJobClaimService;
 import com.blue.whale.agent.service.ProjectEventService;
 import com.blue.whale.agent.service.GenerationResultAcceptanceService;
 import com.blue.whale.agent.service.SnapshotService;
+import com.blue.whale.agent.service.governance.CostReservationCommand;
+import com.blue.whale.agent.service.governance.CostReservationService;
+import com.blue.whale.agent.service.governance.PriceQuote;
 import com.blue.whale.global.exception.GlobalException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,11 +61,16 @@ class GenerationResultAcceptanceIT {
     @Autowired
     private ProjectEventService projectEventService;
     @Autowired
+    private CostReservationService costReservationService;
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void cleanGenerationFacts() {
         jdbcTemplate.batchUpdate(
+                "DELETE FROM audit_records",
+                "DELETE FROM cost_reservations",
+                "DELETE FROM cost_budget_locks",
                 "DELETE FROM generation_result_conflicts",
                 "DELETE FROM generation_job_outputs",
                 "DELETE FROM assets",
@@ -249,10 +257,14 @@ class GenerationResultAcceptanceIT {
                 String.class, job.getId() + ":0");
         assertThat(snapshotError)
                 .containsEntry("code", "image_generation_failed")
-                .containsEntry("message", "图像生成失败");
+                .containsEntry("message", "图像生成失败")
+                .containsEntry("retryable", false)
+                .containsEntry("budget_effect", "actual_settled");
         assertThat(eventPayload)
                 .contains("\"code\":\"image_generation_failed\"")
                 .contains("\"message\":\"图像生成失败\"")
+                .contains("\"retryable\":false")
+                .contains("\"budget_effect\":\"actual_settled\"")
                 .doesNotContain("provider_rate_limited")
                 .doesNotContain("provider secret detail");
     }
@@ -267,6 +279,7 @@ class GenerationResultAcceptanceIT {
         LinkedHashMap<String, Object> input = new LinkedHashMap<>();
         input.put("prompt", prompt);
         input.put("aspect_ratio", "1:1");
+        input.put("expected_output_count", expectedOutputCount);
         GenerationJob job = new GenerationJob()
                 .setProjectId(project.getId())
                 .setUserId(10L)
@@ -279,6 +292,10 @@ class GenerationResultAcceptanceIT {
                 .setStatus(GenerationJob.STATUS_QUEUED)
                 .setProgress(0);
         generationJobMapper.insert(job);
+        costReservationService.reserve(new CostReservationCommand(
+                10L, project.getId(), job.getId(), job.getActionIdentity(), "generate_image",
+                new PriceQuote(25L * expectedOutputCount, "image-sync", "price-test",
+                        "cny-test", "model-policy-test")));
         for (int slotIndex = 0; slotIndex < expectedOutputCount; slotIndex++) {
             outputMapper.insert(new GenerationJobOutput()
                     .setGenerationJobId(job.getId())

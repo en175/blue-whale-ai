@@ -16,6 +16,10 @@ public interface ImageGenerationProvider {
     /** 返回 provider 标识，如 {@code volcengine}。 */
     String getProviderId();
 
+    /** 在任何付费网络调用前校验本地 Provider 配置。 */
+    default void requireReady() {
+    }
+
     /** 执行图片生成（同步），返回生成结果。 */
     ImageGenerationResult generate(ProviderImageGenerationRequest req);
 

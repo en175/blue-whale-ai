@@ -44,10 +44,12 @@ public class GenerationJobCommandController {
     public ResponseEntity<Result<CreateGenerationJobResponse>> create(
             @RequestHeader(value = "X-User-Id", required = false) Long userId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = "X-Input-Request-Id", required = false) Long inputRequestId,
             @PathVariable("projectId") Long projectId,
             @RequestBody @Valid CreateGenerationJobRequest request) {
         CreateGenerationJobResponse accepted = commandService.create(
-                projectId, UserContext.requireUserId(userId), idempotencyKey, request);
+                projectId, UserContext.requireUserId(userId), idempotencyKey, request,
+                inputRequestId);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(Result.ok(accepted));
     }
 
@@ -64,10 +66,12 @@ public class GenerationJobCommandController {
     public ResponseEntity<Result<CreateGenerationJobResponse>> retryMissingOutputs(
             @RequestHeader(value = "X-User-Id", required = false) Long userId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = "X-Input-Request-Id", required = false) Long inputRequestId,
             @PathVariable("projectId") Long projectId,
             @PathVariable("jobId") Long jobId) {
         CreateGenerationJobResponse accepted = commandService.retryMissingOutputs(
-                projectId, jobId, UserContext.requireUserId(userId), idempotencyKey);
+                projectId, jobId, UserContext.requireUserId(userId), idempotencyKey,
+                inputRequestId);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(Result.ok(accepted));
     }
 }

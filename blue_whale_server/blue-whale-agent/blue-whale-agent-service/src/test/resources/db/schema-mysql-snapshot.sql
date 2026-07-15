@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS agent_runs
     engine_version VARCHAR(64) NOT NULL,
     adapter_schema_version INT NOT NULL,
     current_checkpoint_id BIGINT NULL,
+    confirmed_input_request_id BIGINT NULL,
     lease_owner VARCHAR(128) NULL,
     lease_expires_at DATETIME NULL,
     fencing_token BIGINT NOT NULL DEFAULT 0,
@@ -86,12 +87,45 @@ CREATE TABLE IF NOT EXISTS run_commits
     request_hash VARCHAR(64) NOT NULL,
     checkpoint_id BIGINT NOT NULL,
     generation_job_id BIGINT NULL,
+    user_input_request_id BIGINT NULL,
     committed_cursor BIGINT NOT NULL,
     gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     version INT NOT NULL DEFAULT 0,
     is_delete TINYINT NOT NULL DEFAULT 0,
     UNIQUE KEY uk_run_commit (agent_run_id, commit_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS user_input_requests
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    conversation_id BIGINT NULL,
+    source_agent_run_id BIGINT NULL,
+    resumed_agent_run_id BIGINT NULL,
+    request_target_type VARCHAR(64) NULL,
+    action_identity VARCHAR(128) NOT NULL,
+    action_type VARCHAR(64) NOT NULL,
+    arguments_digest VARCHAR(64) NOT NULL,
+    quoted_amount_fen BIGINT NOT NULL,
+    quoted_provider VARCHAR(64) NOT NULL,
+    price_catalog_version VARCHAR(64) NOT NULL,
+    exchange_rate_version VARCHAR(64) NOT NULL,
+    model_policy_version VARCHAR(64) NOT NULL,
+    cost_rule_version VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    confirmed_at DATETIME NULL,
+    consumed_at DATETIME NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_input_request_resumed_run (resumed_agent_run_id),
+    UNIQUE KEY uk_standalone_action_confirmation (
+        project_id, user_id, request_target_type, action_identity),
+    INDEX idx_input_request_owner (project_id, user_id, status)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 CREATE TABLE IF NOT EXISTS conversation_messages
@@ -135,6 +169,7 @@ CREATE TABLE IF NOT EXISTS generation_jobs
     user_id          BIGINT NOT NULL,
     agent_run_id     BIGINT NULL,
     action_identity  VARCHAR(128) NULL,
+    project_action_identity VARCHAR(128) NULL,
     expected_output_count INT NOT NULL DEFAULT 1,
     retry_of_job_id  BIGINT NULL,
     type             VARCHAR(32) NOT NULL,
@@ -163,7 +198,8 @@ CREATE TABLE IF NOT EXISTS generation_jobs
     gmt_modified     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     version          INT      NOT NULL DEFAULT 0,
     is_delete        TINYINT  NOT NULL DEFAULT 0,
-    UNIQUE KEY uk_agent_run_action (agent_run_id, action_identity)
+    UNIQUE KEY uk_agent_run_action (agent_run_id, action_identity),
+    UNIQUE KEY uk_project_action_identity (project_id, project_action_identity)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 CREATE TABLE IF NOT EXISTS assets
@@ -362,4 +398,55 @@ CREATE TABLE IF NOT EXISTS outbox_messages
     is_delete       TINYINT NOT NULL DEFAULT 0,
     UNIQUE KEY uk_outbox_message_id (message_id),
     INDEX idx_outbox_status_next (status, next_attempt_at)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+CREATE TABLE IF NOT EXISTS cost_budget_locks
+(
+    scope_key VARCHAR(160) PRIMARY KEY,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS cost_reservations
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    generation_job_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    action_identity VARCHAR(128) NOT NULL,
+    action_type VARCHAR(64) NOT NULL,
+    provider VARCHAR(64) NOT NULL,
+    reserved_amount_fen BIGINT NOT NULL,
+    actual_amount_fen BIGINT NULL,
+    status VARCHAR(32) NOT NULL,
+    price_catalog_version VARCHAR(64) NOT NULL,
+    exchange_rate_version VARCHAR(64) NOT NULL,
+    model_policy_version VARCHAR(64) NOT NULL,
+    cost_rule_version VARCHAR(64) NOT NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_cost_reservation_job (generation_job_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS audit_records
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    actor_user_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    target_type VARCHAR(64) NOT NULL,
+    target_id VARCHAR(128) NOT NULL,
+    action VARCHAR(128) NOT NULL,
+    decision VARCHAR(32) NOT NULL,
+    reason_code VARCHAR(128) NOT NULL,
+    policy_version VARCHAR(64) NOT NULL,
+    price_catalog_version VARCHAR(64) NULL,
+    exchange_rate_version VARCHAR(64) NULL,
+    model_policy_version VARCHAR(64) NULL,
+    cost_rule_version VARCHAR(64) NOT NULL,
+    request_id VARCHAR(128) NOT NULL,
+    correlation_id VARCHAR(128) NOT NULL,
+    trace_id VARCHAR(128) NOT NULL,
+    environment VARCHAR(64) NOT NULL,
+    occurred_at DATETIME NOT NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;

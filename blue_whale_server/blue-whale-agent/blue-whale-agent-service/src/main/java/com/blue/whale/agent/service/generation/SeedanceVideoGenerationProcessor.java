@@ -5,6 +5,7 @@ import com.blue.whale.agent.model.dto.VideoGenerationResultCommand;
 import com.blue.whale.agent.service.GenerationResultAcceptanceService;
 import com.blue.whale.agent.service.SeedanceProviderTaskService;
 import com.blue.whale.agent.service.SeedanceProviderTaskService.SubmissionPreparation;
+import com.blue.whale.agent.service.governance.CostReservationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,7 @@ public class SeedanceVideoGenerationProcessor {
     private final ObjectProvider<AsyncGenerationProvider> providerProvider;
     private final ObjectProvider<VideoResultIngestor> ingestorProvider;
     private final GenerationAdapterProperties properties;
+    private final CostReservationService costReservationService;
 
     public void process(GenerationJobClaim claim) {
         SubmissionPreparation preparation = taskService.prepare(claim);
@@ -34,6 +36,7 @@ public class SeedanceVideoGenerationProcessor {
             throw new IllegalStateException("Seedance Adapter 未配置");
         }
         if (preparation.kind() == SubmissionPreparation.Kind.SUBMIT) {
+            costReservationService.requireActiveBeforeProvider(claim.jobId());
             submit(claim, preparation.callbackUrl(), provider);
             return;
         }
@@ -87,6 +90,10 @@ public class SeedanceVideoGenerationProcessor {
         }
         int observeCount = taskService.recordObservation(claim, observation);
         if (preparation.evidenceOnly()) {
+            if (isTerminal(observation)) {
+                costReservationService.settlePendingReconciliation(
+                        claim.jobId(), "PROVIDER_EVIDENCE_RECONCILED");
+            }
             scheduleEvidenceReconciliation(claim, observeCount);
             return;
         }
@@ -190,6 +197,12 @@ public class SeedanceVideoGenerationProcessor {
 
     private void scheduleEvidenceReconciliation(GenerationJobClaim claim, int observeCount) {
         taskService.schedule(claim, nextDelaySeconds(observeCount));
+    }
+
+    private boolean isTerminal(ProviderObservation observation) {
+        return observation.status() == ProviderObservation.Status.SUCCEEDED
+                || observation.status() == ProviderObservation.Status.FAILED
+                || observation.status() == ProviderObservation.Status.CANCELLED;
     }
 
     private int nextDelaySeconds(int observeCount) {

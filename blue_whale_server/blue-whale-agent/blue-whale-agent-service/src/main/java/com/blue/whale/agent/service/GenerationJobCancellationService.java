@@ -8,6 +8,7 @@ import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationJobOutput;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
+import com.blue.whale.agent.service.governance.CostReservationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +27,7 @@ public class GenerationJobCancellationService {
     private final GenerationJobOutputMapper outputMapper;
     private final ProjectEventService projectEventService;
     private final GenerationResultAcceptanceService acceptanceService;
+    private final CostReservationService costReservationService;
 
     @Transactional
     public void cancel(Long projectId, Long jobId, Long userId) {
@@ -40,6 +42,7 @@ public class GenerationJobCancellationService {
         LocalDateTime now = jobMapper.selectCurrentTime();
         if (GenerationJob.STATUS_QUEUED.equals(job.getStatus())) {
             cancelPendingOutputs(job);
+            costReservationService.release(job.getId(), "CANCELLED_BEFORE_PROVIDER");
             job.setStatus(GenerationJob.STATUS_CANCELLED)
                     .setProgress(null)
                     .setCancelRequestedAt(now)

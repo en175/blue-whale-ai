@@ -48,6 +48,11 @@ public class VolcEngineService implements ImageGenerationProvider {
         return true;
     }
 
+    @Override
+    public void requireReady() {
+        requireArk();
+    }
+
     /** 文生图同步生成，按模型能力透传支持的字段。 */
     @Override
     public ImageGenerationResult generate(ProviderImageGenerationRequest req) {

@@ -7,6 +7,9 @@ import com.blue.whale.agent.model.dto.GenerationResultCommand;
 import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.Project;
 import com.blue.whale.agent.service.GenerationResultAcceptanceService;
+import com.blue.whale.agent.service.governance.CostControlProperties;
+import com.blue.whale.agent.service.governance.GenerationCostAdmissionService;
+import com.blue.whale.agent.service.governance.GovernanceException;
 import com.blue.whale.agent.service.generation.GenerationWorker;
 import com.blue.whale.agent.support.FakeGenerationConfiguration;
 import com.blue.whale.agent.support.FakeGenerationStorage;
@@ -18,18 +21,21 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -63,11 +69,20 @@ class BottomDockGenerationJobIT {
     private FakeGenerationStorage storage;
     @Autowired
     private GenerationResultAcceptanceService generationResultAcceptanceService;
+    @Autowired
+    private CostControlProperties costControlProperties;
+    @Autowired
+    private GenerationCostAdmissionService costAdmissionService;
 
     @BeforeEach
     void cleanFacts() {
+        costControlProperties.setImageReservationFen(25L);
         storage.clear();
         jdbcTemplate.batchUpdate(
+                "DELETE FROM audit_records",
+                "DELETE FROM cost_reservations",
+                "DELETE FROM cost_budget_locks",
+                "DELETE FROM user_input_requests",
                 "DELETE FROM generation_result_conflicts",
                 "DELETE FROM generation_job_outputs",
                 "DELETE FROM assets",
@@ -80,6 +95,215 @@ class BottomDockGenerationJobIT {
                 "DELETE FROM project_events",
                 "DELETE FROM project_event_stream",
                 "DELETE FROM project");
+    }
+
+    @Test
+    void costlyBottomDockActionCanBeConfirmedAndResubmittedWithBoundInputRequest() throws Exception {
+        costControlProperties.setImageReservationFen(75L);
+        Project project = new Project().setOwnerId(10L).setName("standalone-confirmation");
+        projectMapper.insert(project);
+        String body = "{" +
+                "\"type\":\"image\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{\"prompt\":\"四张蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"expected_output_count\":4}";
+
+        MvcResult pending = postGenerationJob(project.getId(), "standalone-confirm", body)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.data.code").value("INPUT_REQUIRED"))
+                .andExpect(jsonPath("$.data.input_request_id").isNumber())
+                .andReturn();
+        long inputRequestId = responseData(pending).path("input_request_id").asLong();
+        assertThat(count("generation_jobs", "project_id", project.getId())).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM user_input_requests WHERE id = ?", String.class, inputRequestId))
+                .isEqualTo("pending");
+
+        mockMvc.perform(post("/api/projects/{projectId}/input-requests/{requestId}/confirm",
+                        project.getId(), inputRequestId)
+                        .header("X-User-Id", "10")
+                        .contentType("application/json")
+                        .content("{\"content\":\"确认继续执行\"}"))
+                .andExpect(status().isOk());
+
+        MvcResult accepted = mockMvc.perform(post(
+                        "/api/projects/{id}/generation-jobs", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "standalone-confirm")
+                        .header("X-Input-Request-Id", inputRequestId)
+                        .contentType("application/json")
+                        .content(body))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        long jobId = responseData(accepted).path("generation_job_id").asLong();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM user_input_requests WHERE id = ?", String.class, inputRequestId))
+                .isEqualTo("consumed");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT reserved_amount_fen FROM cost_reservations WHERE generation_job_id = ?",
+                Long.class, jobId)).isEqualTo(300L);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT action FROM audit_records WHERE target_id = ? ORDER BY id",
+                String.class, String.valueOf(inputRequestId)))
+                .containsExactly("user_input_request.confirm", "user_input_request.consume");
+    }
+
+    @Test
+    void repeatedInputRequiredCommandReusesOnePendingRequest() throws Exception {
+        costControlProperties.setImageReservationFen(250L);
+        Project project = new Project().setOwnerId(10L).setName("input-required-idempotency");
+        projectMapper.insert(project);
+        String body = "{" +
+                "\"type\":\"image\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"expected_output_count\":1}";
+
+        MvcResult first = postGenerationJob(project.getId(), "pending-idempotency", body)
+                .andExpect(status().isConflict())
+                .andReturn();
+        MvcResult repeated = postGenerationJob(project.getId(), "pending-idempotency", body)
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        assertThat(responseData(repeated).path("input_request_id").asLong())
+                .isEqualTo(responseData(first).path("input_request_id").asLong());
+        assertThat(count("user_input_requests", "project_id", project.getId())).isEqualTo(1);
+    }
+
+    @Test
+    void confirmedStandaloneRequestCannotMoveToAnotherIdempotencyKey() throws Exception {
+        costControlProperties.setImageReservationFen(250L);
+        Project project = new Project().setOwnerId(10L).setName("confirmation-command-binding");
+        projectMapper.insert(project);
+        String body = "{" +
+                "\"type\":\"image\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"expected_output_count\":1}";
+
+        MvcResult pending = postGenerationJob(project.getId(), "bound-key-a", body)
+                .andExpect(status().isConflict())
+                .andReturn();
+        long inputRequestId = responseData(pending).path("input_request_id").asLong();
+        mockMvc.perform(post("/api/projects/{projectId}/input-requests/{requestId}/confirm",
+                        project.getId(), inputRequestId)
+                        .header("X-User-Id", "10")
+                        .contentType("application/json")
+                        .content("{\"content\":\"确认继续执行\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/projects/{id}/generation-jobs", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "bound-key-b")
+                        .header("X-Input-Request-Id", inputRequestId)
+                        .contentType("application/json")
+                        .content(body))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.data.code").value("ACTION_NOT_ALLOWED"));
+        assertThat(count("generation_jobs", "project_id", project.getId())).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM user_input_requests WHERE id = ?", String.class,
+                inputRequestId)).isEqualTo("confirmed");
+
+        mockMvc.perform(post("/api/projects/{id}/generation-jobs", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "bound-key-a")
+                        .header("X-Input-Request-Id", inputRequestId)
+                        .contentType("application/json")
+                        .content(body))
+                .andExpect(status().isAccepted());
+        assertThat(count("generation_jobs", "project_id", project.getId())).isEqualTo(1);
+    }
+
+    @Test
+    void legacyContinuationUsesTheIdentityStoredByItsInputRequest() throws Exception {
+        costControlProperties.setImageReservationFen(250L);
+        Project project = new Project().setOwnerId(10L).setName("legacy-confirmation-continuation");
+        projectMapper.insert(project);
+        Map<String, Object> arguments = Map.of(
+                "prompt", "蓝鲸海报",
+                "expected_output_count", 1,
+                "_cost_provider", "volcengine");
+
+        GovernanceException pending = org.assertj.core.api.Assertions.catchThrowableOfType(
+                () -> costAdmissionService.authorizeRequest(
+                        10L, project.getId(), "LegacyGenerationRequest", "legacy-action",
+                        "legacy-action", "generate_image", arguments, false, null),
+                GovernanceException.class);
+        assertThat(pending.publicCode()).isEqualTo("INPUT_REQUIRED");
+
+        mockMvc.perform(post("/api/projects/{projectId}/input-requests/{requestId}/confirm",
+                        project.getId(), pending.getInputRequestId())
+                        .header("X-User-Id", "10")
+                        .contentType("application/json")
+                        .content("{\"content\":\"确认继续执行\"}"))
+                .andExpect(status().isOk());
+
+        var authorized = costAdmissionService.authorizeRequest(
+                10L, project.getId(), "LegacyGenerationRequest", null,
+                null, "generate_image", arguments, false, pending.getInputRequestId());
+        assertThat(authorized.actionIdentity()).isEqualTo("legacy-action");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM user_input_requests WHERE id = ?", String.class,
+                pending.getInputRequestId())).isEqualTo("consumed");
+    }
+
+    @Test
+    void legacyJobStatusAndStreamRequireTheOwningUser() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("legacy-job-owner");
+        projectMapper.insert(project);
+        String body = "{" +
+                "\"type\":\"image\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"expected_output_count\":1}";
+        long jobId = responseData(postGenerationJob(project.getId(), "owner-check", body)
+                .andExpect(status().isAccepted()).andReturn()).path("generation_job_id").asLong();
+
+        mockMvc.perform(get("/api/jobs/{id}", jobId)).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/jobs/{id}", jobId).header("X-User-Id", "11"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/jobs/{id}/stream", jobId).header("X-User-Id", "11"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/jobs/{id}", jobId).header("X-User-Id", "10"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void paidProviderCallRequiresReservationAndSettlesAcceptedResult() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("cost-controlled-image");
+        projectMapper.insert(project);
+        String body = "{" +
+                "\"type\":\"image\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{\"prompt\":\"有成本边界的蓝鲸\",\"aspect_ratio\":\"1:1\"}," +
+                "\"expected_output_count\":1}";
+
+        long jobId = responseData(postGenerationJob(project.getId(), "cost-controlled-image", body)
+                .andExpect(status().isAccepted()).andReturn()).path("generation_job_id").asLong();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM cost_reservations WHERE generation_job_id = ?", String.class, jobId))
+                .isEqualTo("ACTIVE");
+        assertThat(generationWorker.runOnce("cost-worker")).isTrue();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM cost_reservations WHERE generation_job_id = ?", String.class, jobId))
+                .isEqualTo("SETTLED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT actual_amount_fen FROM cost_reservations WHERE generation_job_id = ?", Long.class, jobId))
+                .isEqualTo(25L);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT action FROM audit_records WHERE correlation_id = ? ORDER BY id",
+                String.class, "generation-job:" + jobId))
+                .containsExactly(
+                        "cost_reservation.create",
+                        "cost_reservation.settle");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_records WHERE action = 'generation_action.authorize' " +
+                        "AND request_id = (SELECT action_identity FROM generation_jobs WHERE id = ?)",
+                Long.class, jobId)).isEqualTo(1L);
     }
 
     @Test
@@ -116,6 +340,23 @@ class BottomDockGenerationJobIT {
         assertThat(count("agent_runs", "project_id", project.getId())).isZero();
         assertThat(count("project_events", "project_id", project.getId())).isEqualTo(1);
         assertThat(count("outbox_messages", "project_id", project.getId())).isEqualTo(1);
+    }
+
+    @Test
+    void projectIdentityRolloutAllowsHistoricalRunScopedDuplicatesAndProtectsNewRows() {
+        Project project = new Project().setOwnerId(10L).setName("action-identity-rollout");
+        projectMapper.insert(project);
+        String insert = "INSERT INTO generation_jobs "
+                + "(project_id, user_id, agent_run_id, action_identity, project_action_identity, "
+                + "type, source, status) VALUES (?, 10, ?, 'action-1', ?, 'image', 'agent_run', 'queued')";
+
+        jdbcTemplate.update(insert, project.getId(), 101L, null);
+        jdbcTemplate.update(insert, project.getId(), 102L, null);
+        jdbcTemplate.update(insert, project.getId(), 103L, "action-1");
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                insert, project.getId(), 104L, "action-1"))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test

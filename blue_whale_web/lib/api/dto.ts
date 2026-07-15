@@ -110,6 +110,16 @@ export type GenerateResponse = {
   status: JobStatus;
 };
 
+/** 面向 API / Job / SSE 消费者的安全错误信封。 */
+export type PublicErrorEnvelope = {
+  code: string;
+  message: string;
+  retryable: boolean;
+  retry_after_seconds: number | null;
+  input_request_id: number | null;
+  budget_effect: string;
+};
+
 /** `GET /api/jobs/{id}` 响应 / `GET /api/projects/{id}` 中 active_jobs 元素 */
 export type JobResponse = {
   job_id: string;
@@ -118,7 +128,7 @@ export type JobResponse = {
   status: JobStatus;
   progress: number;
   output_asset_ids: string[];
-  error: { code: string; message: string; detail?: unknown } | null;
+  error: PublicErrorEnvelope | null;
   created_at: string;
   updated_at: string;
 };
