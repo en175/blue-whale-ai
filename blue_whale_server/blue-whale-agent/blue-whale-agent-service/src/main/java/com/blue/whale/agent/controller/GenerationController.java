@@ -26,7 +26,7 @@ import java.util.List;
  *
  * <p>用户身份走 {@code X-User-Id} 请求头（MVP 无鉴权，前端直传）。
  * 响应统一 {@link Result} 包装；异常由 {@code RestExceptionConfig} 转 Result。
- * JSON 字段 snake_case（全局 Jackson SNAKE_CASE）。
+ * HTTP JSON 字段 camelCase（ADR-0019）。
  */
 @Tag(name = "生成接口", description = "文生图（Seedream 同步）、图文生视频（Seedance 异步）")
 @RestController

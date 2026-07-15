@@ -23,7 +23,7 @@ import java.util.List;
 
 /**
  * 项目接口：workspace 根 CRUD（ADR-0011）。用户身份走 {@code X-User-Id} 头。
- * 响应统一 {@link Result}；JSON snake_case（全局 Jackson SNAKE_CASE）。
+ * 响应统一 {@link Result}；HTTP JSON 字段 camelCase（ADR-0019）。
  */
 @Tag(name = "项目接口", description = "画布项目 CRUD（ADR-0011 project 根）")
 @RestController

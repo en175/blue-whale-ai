@@ -5,20 +5,20 @@ const FETCH_TIMEOUT = 10000;
 
 export interface SendCodeResult {
   success: boolean;
-  expires_in: number;
+  expiresIn: number;
 }
 export interface LoginData {
-  access_token: string;
-  refresh_token: string;
-  expires_in: number;
-  user_id: number;
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  userId: number;
   username: string;
   phone: string;
   avatar?: string;
-  is_new_user: boolean;
+  isNewUser: boolean;
 }
 export interface UserInfo {
-  user_id: number;
+  userId: number;
   username: string;
   phone: string;
   avatar?: string;
@@ -110,7 +110,7 @@ export function fetchMe(): Promise<UserInfo> {
 export function sendChangePhoneCode(newPhone: string): Promise<SendCodeResult> {
   return apiRequest<SendCodeResult>("/api/user/phone/send-code", {
     method: "POST",
-    body: JSON.stringify({ new_phone: newPhone }),
+    body: JSON.stringify({ newPhone }),
   });
 }
 
@@ -118,7 +118,7 @@ export function sendChangePhoneCode(newPhone: string): Promise<SendCodeResult> {
 export function changePhone(newPhone: string, code: string): Promise<void> {
   return apiRequest<void>("/api/user/phone", {
     method: "PUT",
-    body: JSON.stringify({ new_phone: newPhone, code }),
+    body: JSON.stringify({ newPhone, code }),
   });
 }
 

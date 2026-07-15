@@ -2,7 +2,7 @@
  * API Client — 基于 fetch 的双 Token 自动刷新封装。
  *
  * 特性：
- * - 请求自动附带 Authorization: Bearer <access_token>
+ * - 请求自动附带 Authorization: Bearer <accessToken>
  * - 收到 401 → 单例锁 + 请求队列，静默刷新 token
  * - 刷新成功 → 重放队列中所有请求，用户无感
  * - 刷新失败 → 清空 tokens，通知 AuthContext 弹出登录
@@ -84,7 +84,7 @@ export function buildAuthHeaders(token?: string | null): Record<string, string> 
   return headers;
 }
 
-/** 调用后端 /api/auth/refresh，返回新的 access_token。不经过 apiFetch 自身。 */
+/** 调用后端 /api/auth/refresh，返回新的 accessToken。不经过 apiFetch 自身。 */
 async function doRefreshToken(): Promise<string> {
   const rt = loadRefreshToken();
   if (!rt) throw new Error("No refresh token");
@@ -105,8 +105,8 @@ async function doRefreshToken(): Promise<string> {
   }
 
   const data = json.data as LoginData;
-  saveTokens(data.access_token, data.refresh_token);
-  return data.access_token;
+  saveTokens(data.accessToken, data.refreshToken);
+  return data.accessToken;
 }
 
 // ---------------------------------------------------------------------------

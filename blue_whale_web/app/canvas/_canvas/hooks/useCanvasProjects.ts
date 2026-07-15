@@ -25,11 +25,21 @@ import { loadAccessToken } from "@/components/auth/authStorage";
 import { buildAuthHeaders } from "@/lib/api-client";
 import { projectReducer, initialProjectState } from "../projectReducer";
 import type { NodeItem, Project, Viewport } from "../types";
+import { filterPersistableNodes } from "../persist";
 import * as canvasApi from "@/lib/canvas";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 const EMPTY_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
+
+/** 撞名时追加 (2)(3)… 递增至不撞现有名集合；不撞则原样返回。新建/重命名共用。 */
+function dedupeName(name: string, existing: string[]): string {
+  const taken = new Set(existing);
+  if (!taken.has(name)) return name;
+  let suffix = 2;
+  while (taken.has(`${name} (${suffix})`)) suffix++;
+  return `${name} (${suffix})`;
+}
 
 /** 后端 ProjectDto → 前端 Project（id number→string；canvas 未加载先给空，loadCanvas 再填）。 */
 function dtoToProject(dto: canvasApi.ProjectDto): Project {
@@ -56,6 +66,9 @@ export function useCanvasProjects() {
   const [backendReady, setBackendReady] = useState(false);
   // offline（无 token）不需要拉取，booting 直接 false；online 等列表到位才 false
   const [booting, setBooting] = useState(online);
+  // 最近 loadCanvas 完成的 projectId（成功/失败都 set）：供页层刷新恢复在 loadCanvas
+  // 之后触发，避免 set-canvas 覆盖 recover 重建的 loading 占位（design D12）。
+  const [loadedCanvasId, setLoadedCanvasId] = useState<string | null>(null);
 
   // 空列表时为 undefined（页层据此渲染空态，不读 canvas/messages）
   const activeProject =
@@ -134,11 +147,13 @@ export function useCanvasProjects() {
         // 同步快照：加载的数据视为「已存」，避免触发回存覆盖
         lastSavedRef.current = JSON.stringify({ nodes, viewport });
         loadingProjectRef.current = null;
+        setLoadedCanvasId(pid); // 通知页层：loadCanvas 完成，可触发刷新恢复
       })
       .catch((e) => {
         console.error("[canvas] loadCanvas failed:", e);
         lastSavedRef.current = JSON.stringify({ nodes: [], viewport: EMPTY_VIEWPORT });
         loadingProjectRef.current = null;
+        setLoadedCanvasId(pid); // 失败也算加载完成，让恢复可重建占位
       });
     return () => {
       cancelled = true;
@@ -153,7 +168,7 @@ export function useCanvasProjects() {
     if (!pid || !loadedRef.current.has(pid)) return;
     if (loadingProjectRef.current === pid) return; // 加载中：避免回存空 canvas 覆盖后端
     const snap = JSON.stringify({
-      nodes: activeProject.canvas.nodes,
+      nodes: filterPersistableNodes(activeProject.canvas.nodes),
       viewport: activeProject.canvas.viewport,
     });
     if (snap === lastSavedRef.current) return; // 无变化（含刚加载的数据）
@@ -163,14 +178,15 @@ export function useCanvasProjects() {
     saveTimerRef.current = setTimeout(async () => {
       const p = stateRef.current.projects.find((x) => x.id === pid);
       if (!p) return;
+      const persistNodes = filterPersistableNodes(p.canvas.nodes);
       try {
         await canvasApi.saveCanvas(
           Number(pid),
           JSON.stringify(p.canvas.viewport),
-          JSON.stringify(p.canvas.nodes)
+          JSON.stringify(persistNodes)
         );
         lastSavedRef.current = JSON.stringify({
-          nodes: p.canvas.nodes,
+          nodes: persistNodes,
           viewport: p.canvas.viewport,
         });
         setSaveStatus("saved");
@@ -191,7 +207,8 @@ export function useCanvasProjects() {
       const s = stateRef.current;
       const p = s.projects.find((x) => x.id === s.activeProjectId);
       if (!p) return;
-      const snap = JSON.stringify({ nodes: p.canvas.nodes, viewport: p.canvas.viewport });
+      const persistNodes = filterPersistableNodes(p.canvas.nodes);
+      const snap = JSON.stringify({ nodes: persistNodes, viewport: p.canvas.viewport });
       if (snap === lastSavedRef.current) return; // 已存，不重复
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       const token = loadAccessToken();
@@ -204,7 +221,7 @@ export function useCanvasProjects() {
         },
         body: JSON.stringify({
           viewport: JSON.stringify(p.canvas.viewport),
-          nodes: JSON.stringify(p.canvas.nodes),
+          nodes: JSON.stringify(persistNodes),
         }),
       }).catch(() => {});
     };
@@ -216,15 +233,11 @@ export function useCanvasProjects() {
 
   /** 新建项目：落库拿真 id 再 dispatch。后端不可达时报错（saveStatus=error），不造假项目。 */
   const createProjectAction = useCallback(async () => {
-    // 命名 = 当前时间「项目 YYYY-MM-DD HH:mm」；撞名则 (2)(3) 递增
+    // 命名 = 当前时间「YYYY-MM-DD HH:mm」（无「项目」前缀）；撞名 dedupeName 加 (2)(3)
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, "0");
-    const base = `项目 ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-    let name = base;
-    let suffix = 2;
-    while (stateRef.current.projects.some((p) => p.name === name)) {
-      name = `${base} (${suffix++})`;
-    }
+    const base = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    const name = dedupeName(base, stateRef.current.projects.map((p) => p.name));
     try {
       const dto = await canvasApi.createProject(name);
       const pid = String(dto.id);
@@ -236,6 +249,31 @@ export function useCanvasProjects() {
       setSaveStatus("error");
     }
   }, []);
+
+  /**
+   * 重命名项目：trim→空名/同名回退→重名 dedupeName 加序号→调 renameProject→dispatch。
+   * 返回是否成功落库（供组件决定退出编辑态；失败/空名/同名均 false，state 不变显原名）。
+   */
+  const renameProjectAction = useCallback(
+    async (id: string, rawName: string): Promise<boolean> => {
+      const trimmed = rawName.trim();
+      const current = stateRef.current.projects.find((p) => p.id === id);
+      if (!current) return false;
+      if (!trimmed || trimmed === current.name) return false;
+      const existing = stateRef.current.projects.filter((p) => p.id !== id).map((p) => p.name);
+      const name = dedupeName(trimmed, existing);
+      try {
+        await canvasApi.renameProject(Number(id), name);
+        dispatch({ type: "rename", projectId: id, name });
+        return true;
+      } catch (e) {
+        console.error("[canvas] renameProject failed:", e);
+        setSaveStatus("error");
+        return false;
+      }
+    },
+    []
+  );
 
   const switchProject = useCallback((id: string) => {
     dispatch({ type: "switch", projectId: id });
@@ -259,9 +297,11 @@ export function useCanvasProjects() {
     saveStatus,
     booting,
     backendReady,
+    loadedCanvasId,
     loadError,
     retry,
     createProjectAction,
+    renameProjectAction,
     switchProject,
     deleteProjectAction,
   };

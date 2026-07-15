@@ -5,30 +5,19 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
-import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
-import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
-import java.nio.file.Paths;
 import java.util.List;
 
 /**
- * Web MVC 配置：{@code /assets/**} 静态映射暴露转存资源。
- *
- * <p>采用 {@link WebMvcConfigurer}（而非 {@code WebMvcConfigurationSupport}），不破坏 Spring Boot 默认自动配置。
+ * Web 配置：CORS 过滤器。
  *
  * <p>CORS 走 {@link CorsFilter}（Servlet Filter 层，同 user 服务 SecurityConfig 的 corsConfigurationSource 机制）。
  * 不用 {@code addCorsMappings}（MVC Interceptor 层），本环境下 allowedOriginPatterns 运行时不绑定 → 带 Origin 请求 403。
+ *
+ * <p>转存资源已统一上 TOS 对象存储（公开读 url），不再本地落盘 / 静态映射（见 asset-oss-storage-pipeline D3）。
  */
 @Configuration
-public class WebAppConfig implements WebMvcConfigurer {
-
-    @Override
-    public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // 转存资源（视频/图片）落 ./data/assets/，通过 /assets/** 暴露给前端
-        String location = "file:" + Paths.get("./data/assets").toAbsolutePath() + "/";
-        registry.addResourceHandler("/assets/**")
-                .addResourceLocations(location);
-    }
+public class WebAppConfig {
 
     /**
      * CORS 过滤器：Filter 层处理，与 user 服务 SecurityConfig#corsConfigurationSource 一致。

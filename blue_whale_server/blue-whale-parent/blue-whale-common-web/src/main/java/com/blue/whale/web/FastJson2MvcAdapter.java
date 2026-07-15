@@ -33,8 +33,8 @@ public class FastJson2MvcAdapter implements WebMvcConfigurer {
 
     {
         config.setDateFormat(FastJson2.DATE_PATTEN);
-        // 前端字段全 snake_case（model_id / size_id 等），后端字段 camelCase（modelId / sizeId）。
-        // SupportSmartMatch 让 fastjson2 反序列化时自动桥接 snake_case↔camelCase，否则 model_id 映射不到 modelId、触发校验失败。
+        // 前后端 HTTP JSON 字段统一 camelCase（ADR-0019）。
+        // SupportSmartMatch 保留作兼容兜底：历史 snake_case 请求仍能反序列化到 camelCase 字段。
         config.setReaderFeatures(ArrayUtil.append(FastJson2.readFeature(), JSONReader.Feature.TrimString, JSONReader.Feature.SupportSmartMatch));
         config.setWriterFeatures(ArrayUtil.append(FastJson2.writeFeature(), JSONWriter.Feature.WriteLongAsString));
         config.setWriterFilters(new DesensitizeWriteFilter());

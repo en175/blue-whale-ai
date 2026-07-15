@@ -13,7 +13,13 @@ export type ToolDef = {
   divider?: boolean;
 };
 
-export type NodeType = "image" | "text";
+export type NodeType = "image" | "video" | "text";
+
+/**
+ * 生成态：loading 生成中（占位）/ ready 就绪 / error 失败。
+ * loading | error 不持久化（saveCanvas 过滤），仅 ready 入库。
+ */
+export type NodeStatus = "loading" | "ready" | "error";
 
 /**
  * 画布节点。坐标语义对齐 React Flow：world 坐标由 {@link position} 承载
@@ -33,6 +39,14 @@ export type NodeItem = {
   zIndex?: number;
   content?: string;
   imageUrl?: string;
+  /** 关联资产 ID（生成/上传素材的 asset 引用，供持久化恢复与去重） */
+  assetId?: number;
+  /** 生成态：loading 占位 / ready 就绪 / error 失败。省略视为 ready（兼容旧数据） */
+  status?: NodeStatus;
+  /** 失败文案（status=error 时展示） */
+  errorMessage?: string;
+  /** 视频生成进度（0-100，loading 期展示「生成中 NN%」；临时态不持久化）。 */
+  progress?: number;
   selected?: boolean;
 };
 

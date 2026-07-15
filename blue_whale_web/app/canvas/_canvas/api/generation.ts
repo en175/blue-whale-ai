@@ -117,6 +117,43 @@ export function getJobStatus(jobId: number): Promise<JobStatusResponse> {
   return request<JobStatusResponse>(`/jobs/${jobId}`, "GET");
 }
 
+/** 任务列表项（对齐后端 JobListItemDto，camelCase）。 */
+export type JobListItem = {
+  jobId: number;
+  type: string;
+  status: string;
+  progress: number;
+  input: Record<string, unknown> | null;
+  createdAt: string;
+  outputAssets: { id: number; url: string; type: string; width?: number; height?: number }[] | null;
+};
+
+export type ListJobsParams = {
+  projectId: number;
+  status?: string;
+  type?: string;
+  page?: number;
+  size?: number;
+};
+
+/** 后端 Page 序列化形状（MyBatis-Plus {records,total,...}）。 */
+type PageData<T> = { records?: T[]; total?: number; size?: number; current?: number };
+
+/**
+ * 查任务列表（生成流页 / 刷新恢复）：按 projectId+status 过滤，createdAt 倒序分页。
+ * 刷新恢复用 `status=processing` 查跑着的 job，重建画布占位（design D12）。
+ */
+export async function listJobs(params: ListJobsParams): Promise<JobListItem[]> {
+  const qs = new URLSearchParams();
+  qs.set("projectId", String(params.projectId));
+  if (params.status) qs.set("status", params.status);
+  if (params.type) qs.set("type", params.type);
+  qs.set("page", String(params.page ?? 1));
+  qs.set("size", String(params.size ?? 50));
+  const data = await request<PageData<JobListItem> | JobListItem[]>(`/jobs?${qs.toString()}`, "GET");
+  return Array.isArray(data) ? data : (data.records ?? []);
+}
+
 /** SSE 流式事件载荷（后端 SsePayload，type 区分）。 */
 export type StreamEvent =
   | { type: "image"; imageIndex: number; assetId: number; url: string }

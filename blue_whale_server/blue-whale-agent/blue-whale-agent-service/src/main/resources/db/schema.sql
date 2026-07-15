@@ -135,3 +135,35 @@ CREATE TABLE assets
     INDEX idx_asset_project_type (project_id, type)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='资源（图片/视频，生成输出或上传）';
+
+-- ============ 模型能力注册表（configurable-multi-model / video-generation）============
+-- generation_model_capability：每 provider+model 维度的生成能力参数（尺寸/比例/格式/特性开关）。
+-- 后端/前端均按本表工作，避免硬编码模型差异；JSON 字段 JacksonTypeHandler 整存整取。
+-- 种子见 data.sql（4 image Seedream + 1 video Seedance）。变更能力数据时同步改表 + data.sql。
+
+DROP TABLE IF EXISTS generation_model_capability;
+
+CREATE TABLE generation_model_capability
+(
+    id                      BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    provider_id             VARCHAR(32)  NOT NULL COMMENT 'provider 标识，如 volcengine',
+    model_id                VARCHAR(128) NOT NULL COMMENT '模型 ID，如 doubao-seedream-5-0-260128',
+    capability_type         VARCHAR(16)  NOT NULL COMMENT '能力类型：image / video',
+    model_label             VARCHAR(64)  NOT NULL COMMENT '前端展示名',
+    icon                    VARCHAR(512) NULL COMMENT '模型图标 URL',
+    supported_sizes         JSON         NOT NULL COMMENT '尺寸选项 [{id,label,api_value,width,height}]',
+    supported_aspect_ratios JSON         NOT NULL COMMENT '宽高比列表，如 ["1:1","16:9"]',
+    supported_formats       JSON         NOT NULL COMMENT '输出格式，如 ["png","jpeg"]；空数组不支持自定义',
+    default_size            VARCHAR(32)  NOT NULL COMMENT '默认 size_id',
+    default_format          VARCHAR(16)  NULL COMMENT '默认输出格式',
+    default_aspect_ratio    VARCHAR(16)  NOT NULL COMMENT '默认宽高比',
+    features                JSON         NOT NULL COMMENT '特性开关 {reference_image,watermark,quantity_max,sequential_image_generation,stream,tools}',
+    enabled                 TINYINT      NOT NULL DEFAULT 1 COMMENT '是否启用：0关 1开',
+    gmt_create              DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    gmt_modified            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    version                 INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    is_delete               TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删 1已删',
+    UNIQUE INDEX uk_provider_model (provider_id, model_id),
+    INDEX idx_capability_type (capability_type, enabled)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='模型能力注册表（provider+model 维度的生成能力参数）';

@@ -3,13 +3,56 @@
  * 包含项目下拉菜单 ProjectMenu、顶部左侧栏 TopBar（Logo + 项目切换 + 设置）、
  * 中部占位 TopBarCenter、右侧 Agent 入口 TopBarRight。
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { ChevronDown, MessageSquare, Pencil, Settings, Trash2 } from "lucide-react";
 import type { Project } from "../types";
 import { IconPlus, TopviewLogo } from "../icons";
 import { UserMenu } from "@/components/auth/UserMenu";
 import { Tooltip } from "@/components/Tooltip";
 import { SettingsModal } from "./SettingsModal";
+
+/** inline 重命名输入框：autofocus + 全选，Enter/blur 提交。无效输入由父组件回退（无取消）。 */
+function RenameInput({
+  defaultValue,
+  onCommit,
+  style,
+}: {
+  defaultValue: string;
+  onCommit: (value: string) => void;
+  style?: CSSProperties;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    ref.current?.focus();
+    ref.current?.select();
+  }, []);
+  return (
+    <input
+      ref={ref}
+      defaultValue={defaultValue}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          onCommit(ref.current?.value ?? "");
+        }
+      }}
+      onBlur={() => onCommit(ref.current?.value ?? "")}
+      style={{
+        background: "var(--tc-bg-surface)",
+        border: "1px solid var(--tc-border-active)",
+        borderRadius: 6,
+        color: "var(--tc-text-primary)",
+        fontSize: 14,
+        padding: "2px 6px",
+        outline: "none",
+        width: "100%",
+        minWidth: 0,
+        boxSizing: "border-box",
+        ...style,
+      }}
+    />
+  );
+}
 
 export function ProjectMenu({
   open,
@@ -19,6 +62,8 @@ export function ProjectMenu({
   onSwitch,
   onCreate,
   onDelete,
+  onRename,
+  onRenameRequest,
 }: {
   open: boolean;
   onClose: () => void;
@@ -27,8 +72,12 @@ export function ProjectMenu({
   onSwitch: (id: string) => void;
   onCreate: () => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, name: string) => Promise<boolean> | boolean;
+  onRenameRequest: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
+  // 正在 inline 重命名的项目 id（双击该项进入编辑）
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -75,6 +124,7 @@ export function ProjectMenu({
           return (
           <div
             key={p.id}
+            onDoubleClick={() => setEditingId(p.id)}
             className="group/project relative flex items-center hover:bg-[var(--tc-bg-elevated)]"
             style={{
               padding: "6px 16px",
@@ -85,8 +135,8 @@ export function ProjectMenu({
             <button
               type="button"
               onClick={() => {
+                if (editingId === p.id) return;
                 onSwitch(p.id);
-                onClose();
               }}
               style={{
                 display: "flex",
@@ -142,22 +192,34 @@ export function ProjectMenu({
                   </svg>
                 )}
               </div>
-              <span
-                style={{
-                  flex: "1 1 0%",
-                  minWidth: 0,
-                  overflow: "hidden",
-                  whiteSpace: "nowrap",
-                  fontWeight: isActive ? 600 : 400,
-                  WebkitMaskImage:
-                    "linear-gradient(to right, black calc(100% - 12px), transparent calc(100% + 0px))",
-                  maskImage:
-                    "linear-gradient(to right, black calc(100% - 12px), transparent calc(100% + 0px))",
-                  transition: "mask-image 0.1s, -webkit-mask-image 0.1s",
-                }}
-              >
-                {p.name}
-              </span>
+              {editingId === p.id ? (
+                <RenameInput
+                  defaultValue={p.name}
+                  onCommit={async (v) => {
+                    setEditingId(null);
+                    onClose();
+                    await onRename(p.id, v);
+                  }}
+                  style={{ fontWeight: isActive ? 600 : 400 }}
+                />
+              ) : (
+                <span
+                  style={{
+                    flex: "1 1 0%",
+                    minWidth: 0,
+                    overflow: "hidden",
+                    whiteSpace: "nowrap",
+                    fontWeight: isActive ? 600 : 400,
+                    WebkitMaskImage:
+                      "linear-gradient(to right, black calc(100% - 12px), transparent calc(100% + 0px))",
+                    maskImage:
+                      "linear-gradient(to right, black calc(100% - 12px), transparent calc(100% + 0px))",
+                    transition: "mask-image 0.1s, -webkit-mask-image 0.1s",
+                  }}
+                >
+                  {p.name}
+                </span>
+              )}
             </button>
             <button
               type="button"
@@ -193,6 +255,7 @@ export function ProjectMenu({
       <div style={{ height: 1, background: "rgba(255, 255, 255, 0.06)", margin: "8px 0" }} />
       <button
         type="button"
+        onClick={() => onRenameRequest()}
         style={{
           display: "flex",
           alignItems: "center",
@@ -271,15 +334,19 @@ export function TopBar({
   onSwitch,
   onCreate,
   onDelete,
+  onRename,
 }: {
   activeProject: Project;
   projects: Project[];
   onSwitch: (id: string) => void;
   onCreate: () => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, name: string) => Promise<boolean> | boolean;
 }) {
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 顶部项目名 inline 重命名态（双击 / Rename 按钮触发）
+  const [editing, setEditing] = useState(false);
 
   return (
     <div
@@ -338,54 +405,82 @@ export function TopBar({
         }}
       />
       <div style={{ display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
-        <button
-          type="button"
-          onClick={() => setProjectMenuOpen((v) => !v)}
-          title={activeProject.name}
-          className="bg-[var(--tc-bg-elevated)] hover:bg-[var(--tc-border-active)]"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            maxWidth: 224,
-            width: "fit-content",
-            minWidth: 0,
-            boxSizing: "border-box",
-            border: 0,
-            padding: "4px 8px",
-            borderRadius: 8,
-            color: "var(--tc-text-primary)",
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: "pointer",
-            outline: "none",
-            transition: "background 120ms",
-            overflow: "hidden",
-            gap: 4,
-          }}
-        >
-          <span
+        {editing ? (
+          <div
+            className="bg-[var(--tc-bg-elevated)]"
             style={{
-              flex: "0 1 auto",
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              textAlign: "left",
+              display: "inline-flex",
+              alignItems: "center",
+              maxWidth: 224,
+              minWidth: 120,
+              padding: "2px 8px",
+              borderRadius: 8,
+              gap: 4,
             }}
           >
-            {activeProject.name}
-          </span>
-          <ChevronDown
-            width={14}
-            height={14}
-            stroke="var(--tc-text-muted)"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-            style={{ flexShrink: 0 }}
-          />
-        </button>
+            <RenameInput
+              defaultValue={activeProject.name}
+              onCommit={async (v) => {
+                setEditing(false);
+                await onRename(activeProject.id, v);
+              }}
+              style={{ fontWeight: 600 }}
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setProjectMenuOpen((v) => !v)}
+            onDoubleClick={() => {
+              setProjectMenuOpen(false);
+              setEditing(true);
+            }}
+            title={activeProject.name}
+            className="bg-[var(--tc-bg-elevated)] hover:bg-[var(--tc-border-active)]"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              maxWidth: 224,
+              width: "fit-content",
+              minWidth: 0,
+              boxSizing: "border-box",
+              border: 0,
+              padding: "4px 8px",
+              borderRadius: 8,
+              color: "var(--tc-text-primary)",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+              outline: "none",
+              transition: "background 120ms",
+              overflow: "hidden",
+              gap: 4,
+            }}
+          >
+            <span
+              style={{
+                flex: "0 1 auto",
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                textAlign: "left",
+              }}
+            >
+              {activeProject.name}
+            </span>
+            <ChevronDown
+              width={14}
+              height={14}
+              stroke="var(--tc-text-muted)"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              style={{ flexShrink: 0 }}
+            />
+          </button>
+        )}
         <ProjectMenu
           open={projectMenuOpen}
           onClose={() => setProjectMenuOpen(false)}
@@ -394,6 +489,11 @@ export function TopBar({
           onSwitch={onSwitch}
           onCreate={onCreate}
           onDelete={onDelete}
+          onRename={onRename}
+          onRenameRequest={() => {
+            setProjectMenuOpen(false);
+            setEditing(true);
+          }}
         />
       </div>
       <div style={{ position: "relative", display: "inline-flex" }}>
