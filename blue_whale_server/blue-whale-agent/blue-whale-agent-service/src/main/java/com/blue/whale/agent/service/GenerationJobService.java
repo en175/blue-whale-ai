@@ -9,6 +9,9 @@ import com.blue.whale.agent.model.dto.*;
 import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationModelCapability;
+import com.blue.whale.agent.model.request.ImageGenerateRequest;
+import com.blue.whale.agent.model.request.ProviderImageGenerationRequest;
+import com.blue.whale.agent.model.request.VideoGenerateRequest;
 import com.blue.whale.agent.service.provider.ImageGenerationProvider;
 import com.blue.whale.agent.service.provider.ImageGenerationProviderRegistry;
 import com.blue.whale.global.base.resp.SystemCode;
@@ -53,7 +56,7 @@ public class GenerationJobService {
 
     /** 文生图：流式模型建 job 异步逐张生成（返 job_id）；非流式模型同步一次性返回（返 asset_id+url）。 */
     @Transactional
-    public ImageGenerateResponse createImageJob(ImageGenerateRequest req, Long userId) {
+    public ImageGenerateDto createImageJob(ImageGenerateRequest req, Long userId) {
         GenerationModelCapability capability = capabilityMapper.selectEnabledByModelId(req.modelId())
                 .orElseThrow(() -> new GlobalException(SystemCode.FAILURE_CODE, "不支持的模型: " + req.modelId()));
 
@@ -65,18 +68,18 @@ public class GenerationJobService {
             job.setStatus(GenerationJob.STATUS_PROCESSING);
             jobMapper.updateById(job);
             triggerStreamAfterCommit(job.getId(), capability, providerReq);
-            return ImageGenerateResponse.streaming(job.getId());
+            return ImageGenerateDto.streaming(job.getId());
         }
 
         try {
             ImageGenerationProvider provider = providerRegistry.getProvider(capability.getProviderId());
-            ImageGenerationResult result = provider.generate(providerReq);
+            ImageGenerationDto result = provider.generate(providerReq);
             Asset asset = assetStorageService.downloadAndStore(result.getImageUrl(), userId, Asset.TYPE_IMAGE, null);
             job.setStatus(GenerationJob.STATUS_SUCCEEDED)
                     .setProgress(100)
                     .setOutputAssetIds(List.of(asset.getId()));
             jobMapper.updateById(job);
-            return ImageGenerateResponse.sync(asset.getId(), asset.getUrl());
+            return ImageGenerateDto.sync(asset.getId(), asset.getUrl());
         } catch (DataAccessException e) {
             // 暴露真实根因（最内层异常 message），避免笼统的“数据库未连接”掩盖问题
             log.error("createImageJob 数据库操作异常", e);
@@ -113,7 +116,7 @@ public class GenerationJobService {
 
     /** 图文生视频异步提交，立即返 jobId。 */
     @Transactional
-    public CreateJobResponse createVideoJob(VideoGenerateRequest req, Long userId) {
+    public CreateJobDto createVideoJob(VideoGenerateRequest req, Long userId) {
         GenerationJob job = newGenerationJob(userId, GenerationJob.TYPE_VIDEO, "volcengine", buildVideoInput(req));
         jobMapper.insert(job);
         try {
@@ -125,7 +128,7 @@ public class GenerationJobService {
                     .setNextPollAt(LocalDateTime.now().plusSeconds(POLL_INTERVAL_SECONDS))
                     .setProgress(0);
             jobMapper.updateById(job);
-            return new CreateJobResponse(job.getId(), GenerationJob.STATUS_QUEUED);
+            return new CreateJobDto(job.getId(), GenerationJob.STATUS_QUEUED);
         } catch (Exception e) {
             markFailed(job, SystemCode.FAILURE_CODE, e.getMessage());
             throw e instanceof GlobalException ge ? ge : new GlobalException(SystemCode.FAILURE_CODE, e.getMessage());
@@ -133,27 +136,27 @@ public class GenerationJobService {
     }
 
     /** 查询任务状态，供前端轮询。 */
-    public JobStatusResponse getJobStatus(Long jobId) {
+    public JobStatusDto getJobStatus(Long jobId) {
         GenerationJob job = jobMapper.selectById(jobId);
         if (job == null) {
             throw new GlobalException(SystemCode.NOT_FOUND_CODE, "job not found");
         }
-        JobStatusResponse.AssetDto assetDto = null;
+        JobStatusDto.AssetDto assetDto = null;
         if (GenerationJob.STATUS_SUCCEEDED.equals(job.getStatus())
                 && job.getOutputAssetIds() != null && !job.getOutputAssetIds().isEmpty()) {
             Asset asset = assetMapper.selectById(job.getOutputAssetIds().get(0));
             if (asset != null) {
-                assetDto = new JobStatusResponse.AssetDto(asset.getId(), asset.getUrl(), asset.getType());
+                assetDto = new JobStatusDto.AssetDto(asset.getId(), asset.getUrl(), asset.getType());
             }
         }
-        return new JobStatusResponse(job.getId(), job.getStatus(), job.getProgress(), assetDto);
+        return new JobStatusDto(job.getId(), job.getStatus(), job.getProgress(), assetDto);
     }
 
     /**
      * 任务列表（生成流页）：按 {@code userId} + {@code type/status/projectId} 过滤，分页，按创建时间倒序。
      * 产出资源（outputAssets）一次性按 outputAssetIds 批量查 assets 补 url，避免 N+1。
      */
-    public Page<JobListItemResponse> listJobs(Long userId, String type, String status, Long projectId, int page, int size) {
+    public Page<JobListItemDto> listJobs(Long userId, String type, String status, Long projectId, int page, int size) {
         Page<GenerationJob> jobPage = jobMapper.selectPage(new Page<>(page, size),
                 Wrappers.<GenerationJob>lambdaQuery()
                         .eq(GenerationJob::getUserId, userId)
@@ -174,24 +177,24 @@ public class GenerationJobService {
             }
         }
 
-        List<JobListItemResponse> items = jobPage.getRecords().stream()
-                .map(j -> new JobListItemResponse(j.getId(), j.getType(), j.getStatus(), j.getProgress(),
+        List<JobListItemDto> items = jobPage.getRecords().stream()
+                .map(j -> new JobListItemDto(j.getId(), j.getType(), j.getStatus(), j.getProgress(),
                         j.getInput(), j.getGmtCreate(), resolveOutputAssets(j, assetMap)))
                 .toList();
 
-        Page<JobListItemResponse> result = new Page<>(jobPage.getCurrent(), jobPage.getSize(), jobPage.getTotal());
+        Page<JobListItemDto> result = new Page<>(jobPage.getCurrent(), jobPage.getSize(), jobPage.getTotal());
         result.setRecords(items);
         return result;
     }
 
-    private List<JobListItemResponse.OutputAsset> resolveOutputAssets(GenerationJob job, Map<Long, Asset> assetMap) {
+    private List<JobListItemDto.OutputAsset> resolveOutputAssets(GenerationJob job, Map<Long, Asset> assetMap) {
         if (job.getOutputAssetIds() == null) {
             return List.of();
         }
         return job.getOutputAssetIds().stream()
                 .map(assetMap::get)
                 .filter(a -> a != null)
-                .map(a -> new JobListItemResponse.OutputAsset(a.getId(), a.getUrl(), a.getType(), a.getWidth(), a.getHeight()))
+                .map(a -> new JobListItemDto.OutputAsset(a.getId(), a.getUrl(), a.getType(), a.getWidth(), a.getHeight()))
                 .toList();
     }
 
@@ -206,7 +209,7 @@ public class GenerationJobService {
             markFailed(job, SystemCode.UPSTREAM_TIMEOUT_CODE, "轮询次数超限（" + MAX_POLL_COUNT + "）");
             return;
         }
-        VideoTaskResult result = volcEngineService.getVideoTask(job.getProviderTaskId());
+        VideoTaskDto result = volcEngineService.getVideoTask(job.getProviderTaskId());
         String status = mapStatus(result.status());
         int newPollCount = pollCount + 1;
         job.setPollCount(newPollCount);

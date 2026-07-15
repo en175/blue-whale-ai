@@ -1,4 +1,4 @@
-package com.blue.whale.agent.model.dto;
+package com.blue.whale.agent.model.request;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

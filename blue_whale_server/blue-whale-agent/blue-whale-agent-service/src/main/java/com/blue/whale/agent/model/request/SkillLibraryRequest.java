@@ -1,4 +1,4 @@
-package com.blue.whale.agent.model.dto;
+package com.blue.whale.agent.model.request;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -12,7 +12,7 @@ import lombok.experimental.Accessors;
 @Getter
 @Setter
 @Accessors(chain = true)
-public class SkillLibraryQuery {
+public class SkillLibraryRequest {
 
     /** 页码（1-based），默认 1 */
     private Long pageNum = 1L;

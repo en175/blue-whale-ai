@@ -8,7 +8,7 @@ import lombok.Getter;
  */
 @Getter
 @AllArgsConstructor
-public class ImageGenerationResult {
+public class ImageGenerationDto {
 
     private final String imageUrl;
 }

@@ -8,7 +8,7 @@ package com.blue.whale.agent.model.dto;
  * @param progress 进度 0-100
  * @param asset    成功时的输出资源（可为 null）
  */
-public record JobStatusResponse(Long jobId, String status, Integer progress, AssetDto asset) {
+public record JobStatusDto(Long jobId, String status, Integer progress, AssetDto asset) {
 
     /** 输出资源摘要。 */
     public record AssetDto(Long id, String url, String type) {

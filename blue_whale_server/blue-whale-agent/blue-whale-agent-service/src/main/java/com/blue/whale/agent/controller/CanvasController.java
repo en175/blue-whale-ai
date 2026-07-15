@@ -2,7 +2,7 @@ package com.blue.whale.agent.controller;
 
 import com.blue.whale.agent.common.context.UserContext;
 import com.blue.whale.agent.model.dto.CanvasDto;
-import com.blue.whale.agent.model.dto.SaveCanvasRequest;
+import com.blue.whale.agent.model.request.SaveCanvasRequest;
 import com.blue.whale.agent.service.CanvasService;
 import com.blue.whale.agent.service.ProjectService;
 import com.blue.whale.global.base.resp.Result;

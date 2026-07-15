@@ -1,6 +1,8 @@
 package com.blue.whale.agent.controller;
 
 import com.blue.whale.agent.model.dto.*;
+import com.blue.whale.agent.model.request.ImageGenerateRequest;
+import com.blue.whale.agent.model.request.VideoGenerateRequest;
 import com.blue.whale.agent.service.GenerationJobService;
 import com.blue.whale.agent.service.GenerationModelCapabilityService;
 import com.blue.whale.global.base.resp.Result;
@@ -37,22 +39,22 @@ public class GenerationController {
 
     /** 查询当前启用的图片生成模型及其能力。 */
     @GetMapping("/models")
-    public Result<List<ImageModelCapabilityResponse>> listModels(
+    public Result<List<ImageModelCapabilityDto>> listModels(
             @RequestParam(name = "capability", defaultValue = "image") String capability) {
         return Result.ok(capabilityService.listCapabilities(capability));
     }
 
     /** 文生图：流式模型返 job_id（前端 EventSource 订阅逐张），非流式返 asset_id+url。 */
     @PostMapping("/image")
-    public Result<ImageGenerateResponse> generateImage(@RequestHeader(value = "X-User-Id", required = false) Long userId,
-                                                       @RequestBody @Valid ImageGenerateRequest req) {
+    public Result<ImageGenerateDto> generateImage(@RequestHeader(value = "X-User-Id", required = false) Long userId,
+                                                  @RequestBody @Valid ImageGenerateRequest req) {
         return Result.ok(generationJobService.createImageJob(req, requireUserId(userId)));
     }
 
     /** 图文生视频异步提交，立即返回 jobId，前端轮询查状态。 */
     @PostMapping("/video")
-    public Result<CreateJobResponse> generateVideo(@RequestHeader(value = "X-User-Id", required = false) Long userId,
-                                                   @RequestBody @Valid VideoGenerateRequest req) {
+    public Result<CreateJobDto> generateVideo(@RequestHeader(value = "X-User-Id", required = false) Long userId,
+                                              @RequestBody @Valid VideoGenerateRequest req) {
         return Result.ok(generationJobService.createVideoJob(req, requireUserId(userId)));
     }
 

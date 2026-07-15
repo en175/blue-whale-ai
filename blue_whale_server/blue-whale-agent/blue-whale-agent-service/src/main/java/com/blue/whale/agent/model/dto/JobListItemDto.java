@@ -15,7 +15,7 @@ import java.util.Map;
  * @param createdAt    创建时间
  * @param outputAssets 产出资源（仅 succeeded 非空）
  */
-public record JobListItemResponse(
+public record JobListItemDto(
         Long jobId,
         String type,
         String status,

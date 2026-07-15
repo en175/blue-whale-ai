@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
  * @param source    generated / uploaded
  * @param createdAt 创建时间
  */
-public record AssetResponse(
+public record AssetDto(
         Long id,
         String type,
         String url,

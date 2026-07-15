@@ -2,7 +2,7 @@ package com.blue.whale.agent.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 
-import com.blue.whale.agent.model.dto.AssetResponse;
+import com.blue.whale.agent.model.dto.AssetDto;
 import com.blue.whale.agent.service.AssetService;
 import com.blue.whale.global.base.resp.Result;
 import com.blue.whale.global.base.resp.SystemCode;
@@ -30,7 +30,7 @@ public class AssetController {
 
     /** 按 user + type 分页查资产，按创建时间倒序。 */
     @GetMapping
-    public Result<Page<AssetResponse>> listAssets(
+    public Result<Page<AssetDto>> listAssets(
             @RequestHeader(value = "X-User-Id", required = false) Long userId,
             @RequestParam(name = "type", required = false) String type,
             @RequestParam(name = "page", defaultValue = "1") int page,

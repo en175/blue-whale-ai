@@ -1,9 +1,9 @@
 package com.blue.whale.agent.service;
 
 import com.blue.whale.agent.config.VolcEngineConfig;
-import com.blue.whale.agent.model.dto.ImageGenerationResult;
-import com.blue.whale.agent.model.dto.ProviderImageGenerationRequest;
-import com.blue.whale.agent.model.dto.VideoTaskResult;
+import com.blue.whale.agent.model.dto.ImageGenerationDto;
+import com.blue.whale.agent.model.request.ProviderImageGenerationRequest;
+import com.blue.whale.agent.model.dto.VideoTaskDto;
 import com.blue.whale.agent.service.provider.ImageGenerationProvider;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
@@ -56,7 +56,7 @@ public class VolcEngineService implements ImageGenerationProvider {
 
     /** 文生图同步生成，按模型能力透传支持的字段。 */
     @Override
-    public ImageGenerationResult generate(ProviderImageGenerationRequest req) {
+    public ImageGenerationDto generate(ProviderImageGenerationRequest req) {
         ArkService arkService = requireArk();
         GenerateImagesRequest request = buildArkRequest(req);
         try {
@@ -69,7 +69,7 @@ public class VolcEngineService implements ImageGenerationProvider {
             if (resp.getData() == null || resp.getData().isEmpty()) {
                 throw new GlobalException(SystemCode.FAILURE_CODE, "文生图返回空数据");
             }
-            return new ImageGenerationResult(resp.getData().get(0).getUrl());
+            return new ImageGenerationDto(resp.getData().get(0).getUrl());
         } catch (GlobalException e) {
             throw e;
         } catch (Exception e) {
@@ -153,7 +153,7 @@ public class VolcEngineService implements ImageGenerationProvider {
     }
 
     /** 查询视频任务状态，返回 status/videoUrl/error。 */
-    public VideoTaskResult getVideoTask(String taskId) {
+    public VideoTaskDto getVideoTask(String taskId) {
         ArkService arkService = requireArk();
         GetContentGenerationTaskRequest req = GetContentGenerationTaskRequest.builder().taskId(taskId).build();
         try {
@@ -161,7 +161,7 @@ public class VolcEngineService implements ImageGenerationProvider {
             String videoUrl = resp.getContent() != null ? resp.getContent().getVideoUrl() : null;
             String errorCode = resp.getError() != null ? resp.getError().getCode() : null;
             String errorMsg = resp.getError() != null ? resp.getError().getMessage() : null;
-            return new VideoTaskResult(resp.getStatus(), videoUrl, errorCode, errorMsg);
+            return new VideoTaskDto(resp.getStatus(), videoUrl, errorCode, errorMsg);
         } catch (Exception e) {
             logArkError("getContentGenerationTask", e);
             throw new GlobalException(SystemCode.FAILURE_CODE, "上游查询任务失败: " + rootMessage(e));

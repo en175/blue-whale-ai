@@ -1,27 +1,17 @@
 package com.blue.whale.agent.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.blue.whale.agent.model.dto.AutoUpdateRequest;
-import com.blue.whale.agent.model.dto.ItemsVo;
-import com.blue.whale.agent.model.dto.SkillLibraryDto;
-import com.blue.whale.agent.model.dto.SkillLibraryQuery;
-import com.blue.whale.agent.model.dto.SkillMineDto;
-import com.blue.whale.agent.model.dto.SkillMineQuery;
+import com.blue.whale.agent.model.dto.*;
+import com.blue.whale.agent.model.request.AutoUpdateRequest;
+import com.blue.whale.agent.model.request.SkillLibraryRequest;
+import com.blue.whale.agent.model.request.SkillMineRequest;
 import com.blue.whale.agent.service.SkillService;
 import com.blue.whale.global.base.resp.Result;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 /**
  * 技能面板接口（IJZ7Z8）。{@code @RequestMapping("/api/agent/skills")}。
@@ -41,18 +31,18 @@ public class SkillController {
     @PostMapping("/library")
     public Result<Page<SkillLibraryDto>> library(
             @RequestHeader(value = "X-User-Id", required = false) Long userId,
-            @RequestBody(required = false) SkillLibraryQuery query) {
+            @RequestBody(required = false) SkillLibraryRequest query) {
         return Result.ok(skillService.listLibrary(requireUserId(userId),
-                query == null ? new SkillLibraryQuery() : query));
+                query == null ? new SkillLibraryRequest() : query));
     }
 
     /** 我的 Skills 分页（POST，与 library 一致滚动加载） */
     @PostMapping("/mine")
     public Result<Page<SkillMineDto>> mine(
             @RequestHeader(value = "X-User-Id", required = false) Long userId,
-            @RequestBody(required = false) SkillMineQuery query) {
+            @RequestBody(required = false) SkillMineRequest query) {
         return Result.ok(skillService.listMine(requireUserId(userId),
-                query == null ? new SkillMineQuery() : query));
+                query == null ? new SkillMineRequest() : query));
     }
 
     /** 添加到我的（建立引用，默认 auto=false） */

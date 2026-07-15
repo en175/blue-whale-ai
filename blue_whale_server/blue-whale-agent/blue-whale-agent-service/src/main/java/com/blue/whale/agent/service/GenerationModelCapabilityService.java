@@ -1,7 +1,7 @@
 package com.blue.whale.agent.service;
 
 import com.blue.whale.agent.mapper.GenerationModelCapabilityMapper;
-import com.blue.whale.agent.model.dto.ImageModelCapabilityResponse;
+import com.blue.whale.agent.model.dto.ImageModelCapabilityDto;
 import com.blue.whale.agent.model.entity.GenerationModelCapability;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -18,23 +18,23 @@ public class GenerationModelCapabilityService {
     private final GenerationModelCapabilityMapper capabilityMapper;
 
     /** 查询指定能力类型下所有启用的模型能力。 */
-    public List<ImageModelCapabilityResponse> listCapabilities(String capabilityType) {
+    public List<ImageModelCapabilityDto> listCapabilities(String capabilityType) {
         List<GenerationModelCapability> capabilities = capabilityMapper.selectEnabledByCapabilityType(capabilityType);
         return capabilities.stream().map(this::toResponse).toList();
     }
 
-    private ImageModelCapabilityResponse toResponse(GenerationModelCapability cap) {
-        List<ImageModelCapabilityResponse.SizeOption> sizes = cap.getSupportedSizes() == null
+    private ImageModelCapabilityDto toResponse(GenerationModelCapability cap) {
+        List<ImageModelCapabilityDto.SizeOption> sizes = cap.getSupportedSizes() == null
                 ? List.of()
                 : cap.getSupportedSizes().stream()
-                .map(o -> new ImageModelCapabilityResponse.SizeOption(
+                .map(o -> new ImageModelCapabilityDto.SizeOption(
                         o.getId(), o.getLabel(), o.getApiValue(), o.getWidth(), o.getHeight()))
                 .toList();
 
         GenerationModelCapability.Features src = cap.getFeatures();
-        ImageModelCapabilityResponse.Features features = src == null
-                ? new ImageModelCapabilityResponse.Features(false, false, 1, false, false, false)
-                : new ImageModelCapabilityResponse.Features(
+        ImageModelCapabilityDto.Features features = src == null
+                ? new ImageModelCapabilityDto.Features(false, false, 1, false, false, false)
+                : new ImageModelCapabilityDto.Features(
                 Boolean.TRUE.equals(src.getReferenceImage()),
                 Boolean.TRUE.equals(src.getWatermark()),
                 src.getQuantityMax(),
@@ -42,7 +42,7 @@ public class GenerationModelCapabilityService {
                 Boolean.TRUE.equals(src.getStream()),
                 Boolean.TRUE.equals(src.getTools()));
 
-        return new ImageModelCapabilityResponse(
+        return new ImageModelCapabilityDto(
                 cap.getModelId(),
                 cap.getProviderId(),
                 cap.getModelLabel(),

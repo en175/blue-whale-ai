@@ -2,7 +2,7 @@ package com.blue.whale.agent.service;
 
 import com.blue.whale.agent.mapper.CanvasMapper;
 import com.blue.whale.agent.model.dto.CanvasDto;
-import com.blue.whale.agent.model.dto.SaveCanvasRequest;
+import com.blue.whale.agent.model.request.SaveCanvasRequest;
 import com.blue.whale.agent.model.entity.Canvas;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -10,7 +10,7 @@ import java.util.List;
  */
 @Getter
 @AllArgsConstructor
-public class ImageModelCapabilityResponse {
+public class ImageModelCapabilityDto {
 
     private final String modelId;
     private final String providerId;

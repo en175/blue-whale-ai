@@ -1,4 +1,4 @@
-package com.blue.whale.agent.model.dto;
+package com.blue.whale.agent.model.request;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -10,7 +10,7 @@ import lombok.experimental.Accessors;
 @Getter
 @Setter
 @Accessors(chain = true)
-public class SkillMineQuery {
+public class SkillMineRequest {
 
     private Long pageNum = 1L;
     private Long pageSize = 50L;

@@ -8,5 +8,5 @@ package com.blue.whale.agent.model.dto;
  * @param errorCode 失败错误码（火山侧）
  * @param errorMsg  失败错误消息
  */
-public record VideoTaskResult(String status, String videoUrl, String errorCode, String errorMsg) {
+public record VideoTaskDto(String status, String videoUrl, String errorCode, String errorMsg) {
 }

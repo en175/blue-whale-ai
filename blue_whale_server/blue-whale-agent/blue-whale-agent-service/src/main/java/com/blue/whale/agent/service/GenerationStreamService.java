@@ -2,7 +2,7 @@ package com.blue.whale.agent.service;
 
 import com.blue.whale.agent.config.AsyncConfig;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
-import com.blue.whale.agent.model.dto.ProviderImageGenerationRequest;
+import com.blue.whale.agent.model.request.ProviderImageGenerationRequest;
 import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationModelCapability;

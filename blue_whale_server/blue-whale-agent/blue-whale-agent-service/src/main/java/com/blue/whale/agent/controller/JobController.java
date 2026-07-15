@@ -1,8 +1,8 @@
 package com.blue.whale.agent.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.blue.whale.agent.model.dto.JobListItemResponse;
-import com.blue.whale.agent.model.dto.JobStatusResponse;
+import com.blue.whale.agent.model.dto.JobListItemDto;
+import com.blue.whale.agent.model.dto.JobStatusDto;
 import com.blue.whale.agent.service.GenerationJobService;
 import com.blue.whale.agent.service.JobStreamBus;
 import com.blue.whale.global.base.resp.Result;
@@ -39,7 +39,7 @@ public class JobController {
 
     /** 任务列表（生成流页）：按 type/status/projectId 过滤 + 分页，按创建时间倒序。身份走 X-User-Id 头。 */
     @GetMapping("/api/agent/jobs")
-    public Result<Page<JobListItemResponse>> listJobs(
+    public Result<Page<JobListItemDto>> listJobs(
             @RequestHeader(value = "X-User-Id", required = false) Long userId,
             @RequestParam(name = "type", required = false) String type,
             @RequestParam(name = "status", required = false) String status,
@@ -51,7 +51,7 @@ public class JobController {
 
     /** 轮询查任务状态。 */
     @GetMapping("/api/agent/jobs/{id}")
-    public Result<JobStatusResponse> getStatus(@PathVariable("id") Long id) {
+    public Result<JobStatusDto> getStatus(@PathVariable("id") Long id) {
         return Result.ok(generationJobService.getJobStatus(id));
     }
 
