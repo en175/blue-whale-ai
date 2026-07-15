@@ -41,7 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const executorRef = useRef<(() => void) | null>(null);
   const hasMountedRef = useRef(false); // StrictMode 下 useEffect 双重火守卫
 
-  // mount: 尝试用 refresh_token 恢复完整 session
+  // mount: 尝试用 refreshToken 恢复完整 session
   useEffect(() => {
     // 本地开发：跳过鉴权，直接注入占位用户，不走 refresh 流程
     if (SKIP_AUTH) {
@@ -68,9 +68,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .then((data) => {
         const uid = resolveUserId(data.phone);
         const avatar = data.avatar && data.avatar !== "0" ? data.avatar : undefined;
-        saveTokens(data.access_token, data.refresh_token);
-        saveUser({ userId: data.user_id, uid, username: data.username, phone: data.phone, avatar });
-        setUser({ userId: data.user_id, uid, username: data.username, phone: data.phone, avatar });
+        saveTokens(data.accessToken, data.refreshToken);
+        saveUser({ userId: data.userId, uid, username: data.username, phone: data.phone, avatar });
+        setUser({ userId: data.userId, uid, username: data.username, phone: data.phone, avatar });
       })
       .catch((e) => {
         // 仅当存储中 RT 仍是同一份时才处理，避免竞态误伤新登录
@@ -140,9 +140,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await loginWithCode(phone, code);
       const uid = resolveUserId(phone);
       const avatar = data.avatar && data.avatar !== "0" ? data.avatar : undefined;
-      const u: User = { userId: data.user_id, uid, username: data.username, phone: data.phone, avatar };
+      const u: User = { userId: data.userId, uid, username: data.username, phone: data.phone, avatar };
       saveUser(u);
-      saveTokens(data.access_token, data.refresh_token);
+      saveTokens(data.accessToken, data.refreshToken);
       setUser(u);
       setLoginOpen(false);
       // 回放被拦动作
