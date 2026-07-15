@@ -31,6 +31,9 @@ public class Asset extends BaseEntity {
 
     private Long userId;
 
+    /** 所属项目 ID */
+    private Long projectId;
+
     /** image / video */
     private String type;
 

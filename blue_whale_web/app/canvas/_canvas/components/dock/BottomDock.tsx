@@ -27,6 +27,11 @@ export function BottomDock({
   generating = false,
   generateError,
   onClearGenerateError,
+  firstFrameUrl,
+  lastFrameUrl,
+  onFrameUpload,
+  onFrameClear,
+  onSwapFrames,
 }: {
   mode: "image" | "video";
   onClose: () => void;
@@ -50,6 +55,12 @@ export function BottomDock({
   generateError?: string | null;
   /** 关闭生成错误提示 */
   onClearGenerateError?: () => void;
+  /** 首尾帧（视频首尾帧模式，page 层上传后回填 TOS url）。 */
+  firstFrameUrl?: string;
+  lastFrameUrl?: string;
+  onFrameUpload?: (file: File, slot: "first" | "last") => void;
+  onFrameClear?: (slot: "first" | "last") => void;
+  onSwapFrames?: () => void;
 }) {
   const [input, setInput] = useState("");
   const [dockSize, setDockSize] = useState({ w: 680, h: 164 });
@@ -209,6 +220,11 @@ export function BottomDock({
                   setAdvancedOpen={setAdvancedOpen}
                   internetSearch={internetSearch}
                   setInternetSearch={setInternetSearch}
+                  firstFrameUrl={firstFrameUrl}
+                  lastFrameUrl={lastFrameUrl}
+                  onFrameUpload={onFrameUpload}
+                  onFrameClear={onFrameClear}
+                  onSwapFrames={onSwapFrames}
                   media={videoMedia}
                   onRemoveMedia={onRemoveVideoMedia}
                   onLocalUpload={onLocalUpload}

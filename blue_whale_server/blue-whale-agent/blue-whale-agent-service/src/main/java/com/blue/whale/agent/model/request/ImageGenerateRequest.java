@@ -23,6 +23,7 @@ import java.util.List;
  * @param referenceImages 参考图 url 列表（可选）
  */
 public record ImageGenerateRequest(
+        Long projectId,
         @NotBlank(message = "prompt 必填") String prompt,
         @JsonProperty("model_id") @NotBlank(message = "model_id 必填") String modelId,
         @JsonProperty("size_id") @NotBlank(message = "size_id 必填") String sizeId,

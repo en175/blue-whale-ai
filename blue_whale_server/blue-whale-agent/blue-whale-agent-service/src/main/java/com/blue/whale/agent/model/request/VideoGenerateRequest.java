@@ -18,6 +18,7 @@ import javax.validation.constraints.NotBlank;
  * @param firstFrameUrl 首帧图 url（可选）
  */
 public record VideoGenerateRequest(
+        Long projectId,
         @NotBlank(message = "prompt 必填") String prompt,
         @JsonProperty("model_id") @NotBlank(message = "model_id 必填") String modelId,
         String resolution,

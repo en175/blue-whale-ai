@@ -4,11 +4,13 @@
  * 走 Next rewrite /api/* → 网关 → 后端（见 next.config.ts），浏览器同源无 CORS。
  * 统一 Result{code,msg,data} 拆包：code!==200 抛 Error(msg)，否则返 data。
  * 鉴权统一走 apiFetch：登录态自动附 Authorization，401 自动刷新。
+ * streamJob 同样走 apiFetch：fetch + ReadableStream 替代原生 EventSource
+ * （EventSource 不支持自定义 header，无法带 token 过网关），统一鉴权 + 401 自动刷新。
  *
  * 字段全 camelCase 对齐后端 Jackson 默认序列化（见 application.yml）。
- * streamJob 用 EventSource（SSE），不支持自定义 header，暂不走 apiFetch（待单独处理）。
  */
 import { apiFetch } from "@/lib/api-client";
+import { readSseStream } from "@/lib/sse";
 
 export type ImageModelCapability = {
   modelId: string;
@@ -33,6 +35,7 @@ export type ImageModelCapability = {
 
 export type ImageGeneratePayload = {
   prompt: string;
+  projectId: number;
   modelId: string;
   sizeId: string;
   aspectRatio?: string;
@@ -44,6 +47,8 @@ export type ImageGeneratePayload = {
 
 export type VideoGeneratePayload = {
   prompt: string;
+  projectId: number;
+  modelId?: string;
   resolution?: string;
   aspectRatio?: string;
   duration?: number;
@@ -126,40 +131,56 @@ export interface StreamHandlers {
   onError?: (message: string) => void;
 }
 
+/** 流式订阅句柄：close() 主动断开（AbortController.abort）。 */
+export type StreamSubscription = { close(): void };
+
 /**
- * 订阅流式 job：原生 EventSource 连 `/api/agent/jobs/{id}/stream`，按 data.type 分发。
- * 后端不设 SSE event name，全部走默认 message 通道，onmessage 统一收。
- * 收到 done/error 自动 close；onerror 兜底未收 done 就断。
+ * 订阅流式 job：fetch（经 apiFetch 带 token）+ ReadableStream 读 `/api/agent/jobs/{id}/stream`，
+ * 按 SSE 帧解析 data.type 分发。后端不设 event name，全走默认 message 通道。
+ * 鉴权复用 apiFetch（Authorization + 401 自动刷新）；done/error 自动 abort，
+ * 读取异常/断连兜底 onError；close() 主动断开不触发 onError。
  */
-export function streamJob(jobId: number, handlers: StreamHandlers): EventSource {
-  const es = new EventSource(`${API_BASE}/jobs/${jobId}/stream`);
-  es.onmessage = (msg) => {
-    let event: StreamEvent;
+export function streamJob(jobId: number, handlers: StreamHandlers): StreamSubscription {
+  const controller = new AbortController();
+  const run = async () => {
     try {
-      event = JSON.parse(msg.data);
+      const res = await apiFetch(`${API_BASE}/jobs/${jobId}/stream`, {
+        signal: controller.signal,
+        headers: { Accept: "text/event-stream" },
+      });
+      if (!res.ok || !res.body) {
+        handlers.onError?.(`流式连接失败: ${res.status}`);
+        return;
+      }
+      await readSseStream(res.body.getReader(), (data) => {
+        let event: StreamEvent;
+        try {
+          event = JSON.parse(data) as StreamEvent;
+        } catch {
+          return;
+        }
+        switch (event.type) {
+          case "image":
+            handlers.onImage?.(event.url, event.assetId, event.imageIndex);
+            break;
+          case "image_failed":
+            handlers.onImageFailed?.(event.imageIndex, event.errorCode, event.errorMessage);
+            break;
+          case "done":
+            handlers.onDone?.();
+            controller.abort();
+            break;
+          case "error":
+            handlers.onError?.(event.errorMessage || "生成失败");
+            controller.abort();
+            break;
+        }
+      });
     } catch {
-      return;
-    }
-    switch (event.type) {
-      case "image":
-        handlers.onImage?.(event.url, event.assetId, event.imageIndex);
-        break;
-      case "image_failed":
-        handlers.onImageFailed?.(event.imageIndex, event.errorCode, event.errorMessage);
-        break;
-      case "done":
-        handlers.onDone?.();
-        es.close();
-        break;
-      case "error":
-        handlers.onError?.(event.errorMessage || "生成失败");
-        es.close();
-        break;
+      if (controller.signal.aborted) return; // 主动 close，静默
+      handlers.onError?.("流式连接中断");
     }
   };
-  es.onerror = () => {
-    handlers.onError?.("流式连接中断");
-    es.close();
-  };
-  return es;
+  void run();
+  return { close: () => controller.abort() };
 }

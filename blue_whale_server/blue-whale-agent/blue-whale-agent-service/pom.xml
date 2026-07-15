@@ -37,6 +37,11 @@
             <groupId>com.blue-whale.tool.mp</groupId>
             <artifactId>blue-whale-common-mybatis-plus</artifactId>
         </dependency>
+        <!-- 资产上传 TOS 对象存储 -->
+        <dependency>
+            <groupId>com.blue-whale.tool.upload</groupId>
+            <artifactId>blue-whale-common-upload</artifactId>
+        </dependency>
         <!-- MySQL -->
         <dependency>
             <groupId>mysql</groupId>

@@ -95,6 +95,11 @@ type NodeActionsContextValue = {
 };
 const NodeActionsContext = createContext<NodeActionsContextValue>({});
 
+/** 视频 url 判断（按后缀，兼容 query string）。 */
+function isVideoUrl(url?: string): boolean {
+  return !!url && /\.(mp4|webm|mov|m4v|ogg)(\?.*)?$/i.test(url);
+}
+
 /** 图片节点：NodeResizer 补 resize、NodeToolbar 承载操作菜单、可选态呼吸角标。 */
 function ImageNode({ id, data, selected }: NodeProps<CanvasNode>) {
   const { onAction, picking } = useContext(NodeActionsContext);
@@ -103,7 +108,7 @@ function ImageNode({ id, data, selected }: NodeProps<CanvasNode>) {
   const pickable = picking && !!data.imageUrl;
   return (
     <>
-      <NodeToolbar position={Position.Top} offset={8}>
+      <NodeToolbar position={Position.Top} offset={8} isVisible={isVideoUrl(data.imageUrl) || undefined}>
         <NodeToolbarActions onAction={(actionId) => onAction?.(id, actionId)} />
       </NodeToolbar>
       <div
@@ -152,12 +157,20 @@ function ImageNode({ id, data, selected }: NodeProps<CanvasNode>) {
           </div>
         </div>
         {data.imageUrl ? (
-          <img
-            src={data.imageUrl}
-            alt={data.content || "图片"}
-            className="h-full w-full rounded-lg object-contain"
-            draggable={false}
-          />
+          isVideoUrl(data.imageUrl) ? (
+            <video
+              src={data.imageUrl}
+              controls
+              className="nodrag nopan nowheel h-full w-full rounded-lg object-contain"
+            />
+          ) : (
+            <img
+              src={data.imageUrl}
+              alt={data.content || "图片"}
+              className="h-full w-full rounded-lg object-contain"
+              draggable={false}
+            />
+          )
         ) : (
           <div
             className="flex h-full w-full items-center justify-center"
@@ -191,7 +204,7 @@ function TextNode({ data, selected }: NodeProps<CanvasNode>) {
   );
 }
 
-/** 操作浮层内容：复用 NODE_TOOLBAR_ACTIONS 配置（含分隔线与隐藏项）。 */
+/** 操作浮层内容：复用 NODE_TOOLBAR_ACTIONS 配置，渲染「图标+文字」卡片，均匀横排。 */
 function NodeToolbarActions({ onAction }: { onAction: (id: string) => void }) {
   return (
     <div
@@ -203,35 +216,57 @@ function NodeToolbarActions({ onAction }: { onAction: (id: string) => void }) {
       }}
     >
       {NODE_TOOLBAR_ACTIONS.map((action) => {
-        if (action.id.startsWith("divider")) {
+        if (action.id === "divider") {
           return (
             <div
-              key={action.id}
+              key="divider"
               style={{
                 width: 1,
-                height: 24,
+                height: 16,
                 background: "var(--tc-border)",
-                margin: "0 2px",
+                margin: "0 4px",
                 flexShrink: 0,
               }}
             />
           );
         }
-        if (action.hidden) return null;
-        return (
-          <div key={action.id} style={{ position: "relative" }}>
+        if (action.iconOnly) {
+          return (
             <button
+              key={action.id}
               type="button"
               aria-label={action.label}
-              aria-pressed="false"
-              aria-expanded="false"
               onClick={() => onAction(action.id)}
-              className="tc-node-toolbar-button tc-ui-glow-btn flex items-center justify-center rounded-lg transition-colors hover:bg-[var(--tc-menu-item-hover)]"
-              style={{ width: 32, height: 32, padding: 8, border: 0, background: "transparent" }}
+              className="tc-node-toolbar-button tc-ui-glow-btn flex items-center justify-center rounded-lg hover:bg-[var(--tc-menu-item-hover)] hover:text-white"
+              style={{ width: 32, height: 32, padding: 0, border: 0, background: "transparent", color: "var(--tc-text-secondary)" }}
             >
               {action.icon}
             </button>
-          </div>
+          );
+        }
+        return (
+          <button
+            key={action.id}
+            type="button"
+            aria-label={action.label}
+            onClick={() => onAction(action.id)}
+            className="tc-node-toolbar-button tc-ui-glow-btn flex items-center gap-1.5 rounded-lg hover:bg-[var(--tc-menu-item-hover)] hover:text-white"
+            style={{
+              height: 32,
+              padding: "0 8px",
+              border: 0,
+              background: "transparent",
+              color: "var(--tc-text-secondary)",
+            }}
+          >
+            {action.icon}
+            <span
+              className="whitespace-nowrap"
+              style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.02em", lineHeight: "16px" }}
+            >
+              {action.label}
+            </span>
+          </button>
         );
       })}
     </div>

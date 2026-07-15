@@ -110,3 +110,28 @@ CREATE TABLE canvas
     UNIQUE KEY uk_canvas_project (project_id)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='画布状态（与 project 1:1，整体 JSON 透传）';
+
+CREATE TABLE assets
+(
+    id           BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    user_id      BIGINT       NOT NULL COMMENT '归属用户 ID',
+    project_id   BIGINT       NOT NULL DEFAULT 0 COMMENT '所属项目 ID',
+    type         VARCHAR(16)  NOT NULL COMMENT '资源类型：image / video',
+    storage_key  VARCHAR(512) NULL COMMENT '存储 key（TOS object key）',
+    url          VARCHAR(1024) NULL COMMENT '可访问 url（TOS 公开地址）',
+    mime         VARCHAR(64)  NULL COMMENT 'MIME',
+    size         BIGINT       NULL COMMENT '字节',
+    width        INT          NULL COMMENT '宽',
+    height       INT          NULL COMMENT '高',
+    duration     INT          NULL COMMENT '视频时长（秒）',
+    source       VARCHAR(16)  NULL COMMENT '来源：generated / uploaded',
+    status       VARCHAR(16)  NULL COMMENT '状态：normal / failed',
+    gmt_create   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    gmt_modified DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    version      INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    is_delete    TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删 1已删',
+    INDEX idx_asset_user (user_id),
+    INDEX idx_asset_project (project_id),
+    INDEX idx_asset_project_type (project_id, type)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='资源（图片/视频，生成输出或上传）';

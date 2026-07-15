@@ -8,6 +8,8 @@ import { ChevronDown, MessageSquare, Pencil, Settings, Trash2 } from "lucide-rea
 import type { Project } from "../types";
 import { IconPlus, TopviewLogo } from "../icons";
 import { UserMenu } from "@/components/auth/UserMenu";
+import { Tooltip } from "@/components/Tooltip";
+import { SettingsModal } from "./SettingsModal";
 
 export function ProjectMenu({
   open,
@@ -277,6 +279,7 @@ export function TopBar({
   onDelete: (id: string) => void;
 }) {
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <div
@@ -394,35 +397,39 @@ export function TopBar({
         />
       </div>
       <div style={{ position: "relative", display: "inline-flex" }}>
-        <button
-          type="button"
-          className="tc-shell-btn tc-top-bar-settings-btn bg-transparent hover:bg-[var(--tc-bg-elevated)]"
-          aria-label="系统设置"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 28,
-            height: 28,
-            borderRadius: 8,
-            border: 0,
-            color: "var(--tc-text-secondary)",
-            cursor: "pointer",
-            outline: "none",
-            transition: "background 120ms",
-          }}
-        >
-          <Settings
-            width={14}
-            height={14}
-            stroke="var(--tc-text-secondary)"
-            strokeWidth={1.5}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          />
-        </button>
+        <Tooltip content="系统设置" side="bottom">
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="tc-shell-btn tc-top-bar-settings-btn bg-transparent hover:bg-[var(--tc-bg-elevated)]"
+            aria-label="系统设置"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              border: 0,
+              color: "var(--tc-text-secondary)",
+              cursor: "pointer",
+              outline: "none",
+              transition: "background 120ms",
+            }}
+          >
+            <Settings
+              width={14}
+              height={14}
+              stroke="var(--tc-text-secondary)"
+              strokeWidth={1.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            />
+          </button>
+        </Tooltip>
       </div>
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

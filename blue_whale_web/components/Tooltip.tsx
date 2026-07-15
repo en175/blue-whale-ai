@@ -28,7 +28,7 @@ export function Tooltip({
 }: {
   content: string;
   children: ReactElement<{ onMouseEnter?: (e: MouseEvent) => void; onMouseLeave?: () => void }>;
-  side?: "right" | "top";
+  side?: "right" | "top" | "bottom";
   gap?: number;
 }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
@@ -42,7 +42,9 @@ export function Tooltip({
       setPos(
         side === "right"
           ? { x: r.right + gap, y: r.top + r.height / 2 }
-          : { x: r.left + r.width / 2, y: r.top - gap }
+          : side === "top"
+            ? { x: r.left + r.width / 2, y: r.top - gap }
+            : { x: r.left + r.width / 2, y: r.bottom + gap }
       );
     },
     onMouseLeave: () => setPos(null),
@@ -61,7 +63,12 @@ export function Tooltip({
               position: "fixed",
               left: pos.x,
               top: pos.y,
-              transform: side === "right" ? "translateY(-50%)" : "translate(-50%, -100%)",
+              transform:
+                side === "right"
+                  ? "translateY(-50%)"
+                  : side === "top"
+                    ? "translate(-50%, -100%)"
+                    : "translate(-50%, 0)",
               zIndex: 9999,
               pointerEvents: "none",
               padding: "6px 10px",

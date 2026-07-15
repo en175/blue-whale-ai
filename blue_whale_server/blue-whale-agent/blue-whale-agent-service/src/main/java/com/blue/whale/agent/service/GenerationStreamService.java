@@ -88,7 +88,7 @@ public class GenerationStreamService {
         if (url == null || url.isBlank()) {
             return;
         }
-        Asset asset = assetStorageService.downloadAndStore(url, job.getUserId(), Asset.TYPE_IMAGE, null);
+        Asset asset = assetStorageService.downloadAndStore(url, job.getUserId(), job.getProjectId(), Asset.TYPE_IMAGE, null);
         appendAssetAndEmit(job.getId(), event.getImageIndex(), asset);
     }
 

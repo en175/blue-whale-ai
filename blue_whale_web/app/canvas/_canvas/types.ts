@@ -98,6 +98,10 @@ export type VideoGenerateSettings = {
   duration: number;
   quantity: string;
   refMode: SelectOption;
+  /** 首帧 TOS url（首尾帧模式） */
+  firstFrameUrl?: string;
+  /** 尾帧 TOS url（首尾帧模式） */
+  lastFrameUrl?: string;
 };
 
 /** 生成请求参数：discriminated union，按 mode narrow settings。 */
@@ -163,6 +167,16 @@ export type VideoDockContentProps = {
   onExitPick?: () => void;
   /** 当前是否处于「从画布选择」模式（本 Dock 维度） */
   isPicking?: boolean;
+  /** 首帧 TOS url（首尾帧模式） */
+  firstFrameUrl?: string;
+  /** 尾帧 TOS url（首尾帧模式） */
+  lastFrameUrl?: string;
+  /** 首尾帧上传：file + 位置，由页面层上传 TOS 后回填 url */
+  onFrameUpload?: (file: File, which: "first" | "last") => void;
+  /** 移除首/尾帧 */
+  onFrameClear?: (which: "first" | "last") => void;
+  /** 交换首尾帧 */
+  onSwapFrames?: () => void;
   /** 生成：Dock 内拼装本地 settings 上抛，prompt 由 BottomDock 从 input 取 */
   onGenerate?: (settings: VideoGenerateSettings) => void;
   /** 生成进行中（禁用按钮防重复提交） */
