@@ -23,6 +23,10 @@
 # 退出码 2 = 阻断 Claude 执行该工具调用。
 
 INPUT=$(cat)
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+AUDIT="$HOOK_DIR/lib/hook_audit.py"
+HOOK_NAME="$(basename "$0")"
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 
 extract_json_value() {
   key="$1"
@@ -40,11 +44,20 @@ PARENT_ID=$(extract_json_value "parent_id")
 IS_UPDATE=0
 [ "$TOOL_NAME" = "mcp__gitee-ent__update_enterprise_issue" ] && IS_UPDATE=1
 
+AUDIT_OPERATION="issue-create"
+[ "$IS_UPDATE" -eq 1 ] && AUDIT_OPERATION="issue-update"
+
 HAS_PARENT=0
 [ -n "$PARENT_ID" ] && [ "$PARENT_ID" != "0" ] && HAS_PARENT=1
 
 block() {
   reason="$1"
+  printf '%s' "$INPUT" | python3 "$AUDIT" \
+    --project-dir "$PROJECT_DIR" \
+    --hook "$HOOK_NAME" \
+    --operation "$AUDIT_OPERATION" \
+    --exit-code 2 \
+    --reason "blocked-policy" >/dev/null || true
   cat >&2 <<EOF
 BLOCKED: ${reason}
   tool_name: ${TOOL_NAME:-（未知，按 create 规则处理）}
@@ -102,4 +115,10 @@ if [ "$IS_UPDATE" -eq 0 ] && [ "$HAS_PARENT" -eq 0 ]; then
   fi
 fi
 
+printf '%s' "$INPUT" | python3 "$AUDIT" \
+  --project-dir "$PROJECT_DIR" \
+  --hook "$HOOK_NAME" \
+  --operation "$AUDIT_OPERATION" \
+  --exit-code 0 \
+  --reason "allowed-policy" >/dev/null || true
 exit 0

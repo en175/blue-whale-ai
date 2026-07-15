@@ -2,8 +2,8 @@
 # Codex lifecycle wrapper for the shared Claude hook scripts.
 #
 # .claude/hooks remains the policy authority. Shared hooks use the common
-# no-output allow / exit-2 block contract, so this wrapper is intentionally
-# transparent for both PreToolUse and PostToolUse.
+# no-output allow / exit-2 block contract. Only block-master-edit.sh needs a
+# Codex apply_patch adapter; every other lifecycle hook remains transparent.
 
 set -u
 
@@ -26,6 +26,26 @@ script="$root/.claude/hooks/$script_name"
 if [ ! -f "$script" ]; then
   echo "BLOCKED: shared hook script not found: $script" >&2
   exit 2
+fi
+
+if [ "$script_name" = "block-master-edit.sh" ]; then
+  input="$(cat)"
+  pretool="$root/.claude/hooks/lib/pretool.py"
+  if ! normalized_inputs="$(printf '%s' "$input" | python3 "$pretool" normalize-codex-apply-patch)"; then
+    echo "BLOCKED: unable to parse Codex apply_patch targets." >&2
+    exit 2
+  fi
+
+  while IFS= read -r normalized_input; do
+    printf '%s' "$normalized_input" | bash "$script"
+    exit_code=$?
+    if [ "$exit_code" -ne 0 ]; then
+      exit "$exit_code"
+    fi
+  done <<EOF
+$normalized_inputs
+EOF
+  exit 0
 fi
 
 exec bash "$script"

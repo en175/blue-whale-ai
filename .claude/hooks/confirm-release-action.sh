@@ -27,6 +27,8 @@ INPUT=$(cat)
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 PRETOOL="$HOOK_DIR/lib/pretool.py"
 AUTH_HELPER="$HOOK_DIR/lib/authorization.py"
+AUDIT="$HOOK_DIR/lib/hook_audit.py"
+HOOK_NAME="$(basename "$0")"
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 MARKER_TTL_SECONDS=900
 
@@ -40,8 +42,23 @@ extract_json_value() {
   printf '%s' "$INPUT" | python3 "$PRETOOL" value "$key" 2>/dev/null || true
 }
 
+audit() {
+  printf '%s' "$INPUT" | python3 "$AUDIT" \
+    --project-dir "$PROJECT_DIR" \
+    --hook "$HOOK_NAME" \
+    --operation "$AUDIT_OPERATION" \
+    --exit-code "$1" \
+    --reason "$2" >/dev/null || true
+}
+
+allow() {
+  audit 0 "allowed-policy"
+  exit 0
+}
+
 block() {
   reason="$1"
+  audit 2 "blocked-policy"
   cat >&2 <<EOF
 BLOCKED: ${reason}
 
@@ -205,13 +222,22 @@ if [ "$HOOK_EVENT_NAME" = "PostToolUse" ]; then
   handle_post_tool_use
 fi
 
+case "$TOOL_NAME" in
+  mcp__gitee-ent__create_enterprise_repo_pull) AUDIT_OPERATION="create-pr" ;;
+  mcp__gitee-ent__merge_enterprise_pull) AUDIT_OPERATION="merge-pr" ;;
+  mcp__gitee-ent__create_enterprise_repo_release) AUDIT_OPERATION="create-release" ;;
+  *) AUDIT_OPERATION="bash-other" ;;
+esac
+
 # Bash: inline alias 覆盖或 shell/cycle alias 无法安全分类，fail closed。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" unsafe-git-alias; then
+  AUDIT_OPERATION="git-alias"
   block "检测到无法安全分类的 Git alias。请改用明确的标准入口或原生 Git 子命令。"
 fi
 
 # Bash: 直接 git push 属于绕过标准入口，硬拦。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" has-git-push; then
+  AUDIT_OPERATION="git-push"
   block "检测到直接 git push。首次发布请走 scripts/publish-review-package.sh --user-authorized --create-pr；已有 PR 更新请走 --update-pr <PR编号>。"
 fi
 
@@ -222,32 +248,37 @@ fi
 task_acceptance="$(printf '%s' "$COMMAND" | python3 "$PRETOOL" task-acceptance-git 2>/dev/null || true)"
 case "$task_acceptance" in
   "git commit")
+    AUDIT_OPERATION="git-commit"
     block "检测到直接 git commit。请由 Agent 自动改走 scripts/commit-task-for-review.sh -m \"<message>\"（首次提交），或 review 后修订改走 scripts/commit-task-for-review.sh --amend [-m \"<new-message>\"]。"
     ;;
   "git merge")
+    AUDIT_OPERATION="git-merge"
     block "检测到非 --ff-only 的直接 git merge。当前对话若已授权合入本地 master，请由 Agent 自动改走 scripts/merge-task-to-local-master.sh --user-authorized <branch>。"
     ;;
   "git merge origin/master")
+    AUDIT_OPERATION="git-merge-sync"
     block "检测到在任务分支上用 merge 同步 origin/master。任务分支同步固定使用 rebase；请由 Agent 依据规则运行 scripts/sync-task-from-origin.sh sync --json。"
     ;;
   "git pull")
+    AUDIT_OPERATION="git-pull"
     block "检测到在任务分支上直接 git pull（无 --ff-only / --rebase）。任务分支同步固定使用 rebase；请由 Agent 依据规则运行 scripts/sync-task-from-origin.sh sync --json。"
     ;;
 esac
 
 # Bash: 标准发布审查包入口。缺授权或缺显式 create/update 模式时硬拦；合规时静默放行。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes publish-review-package.sh; then
+  AUDIT_OPERATION="publish-package"
   if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes publish-review-package.sh --user-authorized; then
     block "发布审查包入口缺少 --user-authorized。必须先获得用户明确授权。"
   fi
   publish_mode="$(printf '%s' "$COMMAND" | python3 "$PRETOOL" publish-review-mode 2>/dev/null || true)"
   case "$publish_mode" in
-    create) exit 0 ;;
+    create) allow ;;
     update)
       if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes publish-review-package.sh --pr-snapshot; then
         block "已有 PR 更新入口缺少 --pr-snapshot。Agent 必须先通过 Gitee MCP 读取并规范化 PR 快照。"
       fi
-      exit 0
+      allow
       ;;
     *) block "发布入口必须且只能选择 --create-pr 或 --update-pr <正整数 PR 编号>。" ;;
   esac
@@ -255,28 +286,32 @@ fi
 
 # Bash: 标准同步入口是规则驱动的显式操作，不需要发布授权；Hook 只静默放行。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes sync-task-from-origin.sh; then
-  exit 0
+  AUDIT_OPERATION="sync-task"
+  allow
 fi
 
 # Bash: 合入本地 master 入口（发布链路关键检查点）。必须在 commit-task 白名单之前校验：
 # 否则 `commit-task ... && merge-task <无授权>` 会被 commit-task 的 exit 0 短路，跳过 merge 授权。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes merge-task-to-local-master.sh; then
+  AUDIT_OPERATION="merge-local-master"
   if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes merge-task-to-local-master.sh --user-authorized; then
     block "合入用户本地 master 入口缺少 --user-authorized。必须先获得用户明确授权。"
   fi
-  exit 0
+  allow
 fi
 
 # Bash: 标准本地任务验收入口（worktree 工单分支 commit，本地可逆，非发布动作）。
 # 出现即放行，不校验 --user-authorized（用户确认环节落在 merge 本地 master 前）。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes commit-task-for-review.sh; then
-  exit 0
+  AUDIT_OPERATION="commit-task"
+  allow
 fi
 
 # Bash: cleanup-task-worktree.sh 依靠脚本自身校验 PR 已进 origin/master、工作区干净、路径正确。
 
 # Gitee: 创建 PR。只校验发布审查包形态，不做二次确认。
 if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
+  AUDIT_OPERATION="create-pr"
   DRAFT=$(extract_json_value "draft")
   TARGET_BRANCH=$(extract_json_value "target_branch")
   SOURCE_BRANCH=$(extract_json_value "source_branch")
@@ -296,7 +331,7 @@ if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
 
   validate_publish_marker "$SOURCE_BRANCH" "$TARGET_BRANCH"
 
-  exit 0
+  allow
 fi
 
 # Gitee: 合并 PR。先校验合并方法（纯参数错优先报），再校验授权凭证。
@@ -304,15 +339,21 @@ fi
 # 不保证按配置数组顺序，squash 错误可能被掩盖为“缺凭证”误导。现并入此处，
 # 在凭证校验前阻断，保证纠正信号精准（无论客户端 hook 执行顺序）。
 if [ "$TOOL_NAME" = "mcp__gitee-ent__merge_enterprise_pull" ]; then
-  check_merge_method_and_block "$(extract_json_value "merge_method")"
+  AUDIT_OPERATION="merge-pr"
+  MERGE_METHOD="$(extract_json_value "merge_method")"
+  case "$MERGE_METHOD" in
+    squash|rebase) audit 2 "blocked-policy" ;;
+  esac
+  check_merge_method_and_block "$MERGE_METHOD"
   validate_action_authorization merge-pr
-  exit 0
+  allow
 fi
 
 # Gitee: 创建仓库 release。必须持有 AI 自动生成且绑定具体 tag 的一次性凭证。
 if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_release" ]; then
+  AUDIT_OPERATION="create-release"
   validate_action_authorization create-release
-  exit 0
+  allow
 fi
 
-exit 0
+allow

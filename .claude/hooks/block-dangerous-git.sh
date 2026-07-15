@@ -21,9 +21,24 @@
 INPUT=$(cat)
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 PRETOOL="$HOOK_DIR/lib/pretool.py"
+AUDIT="$HOOK_DIR/lib/hook_audit.py"
+HOOK_NAME="$(basename "$0")"
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 COMMAND=$(printf '%s' "$INPUT" | python3 "$PRETOOL" value command 2>/dev/null || true)
 
-[ -z "$COMMAND" ] && exit 0
+audit() {
+  printf '%s' "$INPUT" | python3 "$AUDIT" \
+    --project-dir "$PROJECT_DIR" \
+    --hook "$HOOK_NAME" \
+    --operation "$1" \
+    --exit-code "$2" \
+    --reason "$3" >/dev/null || true
+}
+
+if [ -z "$COMMAND" ]; then
+  audit "bash-other" 0 "allowed-policy"
+  exit 0
+fi
 
 # ============================================================
 # push 的精细化处理：区分 force-with-lease（feature 分支放行）与裸 --force（全拦）
@@ -31,6 +46,7 @@ COMMAND=$(printf '%s' "$INPUT" | python3 "$PRETOOL" value command 2>/dev/null ||
 if printf '%s' "$COMMAND" | python3 "$PRETOOL" has-git-push; then
   # 规则 1：裸 --force（无 -with-lease）→ 无条件拦
   if printf '%s' "$COMMAND" | python3 "$PRETOOL" push-has-bare-force; then
+    audit "git-push-bare-force" 2 "blocked-policy"
     cat >&2 <<EOF
 BLOCKED: 裸 --force 被拦截。
   命令: $COMMAND
@@ -46,6 +62,7 @@ EOF
   # 规则 2：force-with-lease 但目标非工单分支（含 master/main/当前在 master）→ 拦
   target_ref=$(printf '%s' "$COMMAND" | python3 "$PRETOOL" force-lease-non-work 2>/dev/null || true)
   if [ -n "$target_ref" ]; then
+    audit "git-push-force-with-lease" 2 "blocked-policy"
     cat >&2 <<EOF
 BLOCKED: 对非工单分支的 force-with-lease 被拦截。
   命令: $COMMAND
@@ -68,6 +85,15 @@ fi
 # ============================================================
 pattern=$(printf '%s' "$COMMAND" | python3 "$PRETOOL" dangerous-pattern 2>/dev/null || true)
 if [ -n "$pattern" ]; then
+  case "$pattern" in
+    "git reset --hard") operation="git-reset-hard" ;;
+    "git clean -f") operation="git-clean-force" ;;
+    "git branch -D") operation="git-branch-force-delete" ;;
+    "git checkout .") operation="git-checkout-all" ;;
+    "git restore .") operation="git-restore-all" ;;
+    *) operation="git-dangerous-other" ;;
+  esac
+  audit "$operation" 2 "blocked-policy"
   cat >&2 <<EOF
 BLOCKED: 危险 git 操作被拦截。
   命令: $COMMAND
@@ -81,4 +107,9 @@ EOF
   exit 2
 fi
 
+if printf '%s' "$COMMAND" | python3 "$PRETOOL" has-git-push; then
+  audit "git-push-non-dangerous" 0 "allowed-policy"
+else
+  audit "bash-other" 0 "allowed-policy"
+fi
 exit 0
