@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { X, ChevronLeft, Loader2 } from "lucide-react";
 import { useAuth } from "./AuthContext";
 import { maskPhone } from "./phoneUtils";
-import { sendVerificationCode, sendChangePhoneCode, fetchCaptcha } from "@/lib/auth";
+import { sendVerificationCode, sendChangePhoneCode } from "@/lib/auth";
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -27,11 +27,6 @@ export function RebindPhoneModal({ onClose }: RebindPhoneModalProps) {
   const [newCodeSending, setNewCodeSending] = useState(false);
   const [newCodeSent, setNewCodeSent] = useState(false);
   const [newCountdown, setNewCountdown] = useState(0);
-
-  // 图形验证码（非测试号必需）
-  const [captchaImage, setCaptchaImage] = useState<string | null>(null);
-  const [captchaToken, setCaptchaToken] = useState("");
-  const [captchaAnswer, setCaptchaAnswer] = useState("");
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -61,45 +56,16 @@ export function RebindPhoneModal({ onClose }: RebindPhoneModalProps) {
 
   if (!user) return null;
 
-  const isTestPhone = user.phone === "15079999999";
-
-  // ---- 加载图形验证码 ----
-  const loadCaptcha = async () => {
-    try {
-      const result = await fetchCaptcha();
-      setCaptchaImage(result.captcha_image);
-      setCaptchaToken(result.captcha_token);
-      setCaptchaAnswer("");
-    } catch {
-      setError("获取图形验证码失败");
-    }
-  };
-
   // ---- Step 1: 向当前手机号发验证码 ----
   const handleSendCurrentCode = async () => {
     setError(null);
     setCurrentCodeSending(true);
     try {
-      if (isTestPhone) {
-        // 测试号跳过 captcha
-        await sendVerificationCode(user.phone, "", "");
-      } else {
-        if (!captchaToken) {
-          await loadCaptcha();
-          setCurrentCodeSending(false);
-          return;
-        }
-        await sendVerificationCode(user.phone, captchaToken, captchaAnswer);
-      }
+      await sendVerificationCode(user.phone);
       setCurrentCodeSent(true);
       setCurrentCountdown(60);
-      if (!isTestPhone) {
-        setCaptchaImage(null);
-        setCaptchaToken("");
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "发送失败");
-      if (!isTestPhone) loadCaptcha(); // 刷新验证码
     } finally {
       setCurrentCodeSending(false);
     }
@@ -110,25 +76,11 @@ export function RebindPhoneModal({ onClose }: RebindPhoneModalProps) {
     setError(null);
     setNewCodeSending(true);
     try {
-      if (isTestPhone || newPhone === "15079999999") {
-        await sendChangePhoneCode(newPhone, "", "");
-      } else {
-        if (!captchaToken) {
-          await loadCaptcha();
-          setNewCodeSending(false);
-          return;
-        }
-        await sendChangePhoneCode(newPhone, captchaToken, captchaAnswer);
-      }
+      await sendChangePhoneCode(newPhone);
       setNewCodeSent(true);
       setNewCountdown(60);
-      if (!isTestPhone && newPhone !== "15079999999") {
-        setCaptchaImage(null);
-        setCaptchaToken("");
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "发送失败");
-      if (!isTestPhone && newPhone !== "15079999999") loadCaptcha();
     } finally {
       setNewCodeSending(false);
     }
@@ -312,27 +264,6 @@ export function RebindPhoneModal({ onClose }: RebindPhoneModalProps) {
                 </button>
               </div>
             </div>
-            {/* 图形验证码（非测试号） */}
-            {!isTestPhone && captchaImage && (
-              <div>
-                <label className="block text-[12px] text-white/55 mb-1.5">图形验证码</label>
-                <div className="flex gap-2">
-                  <img
-                    src={captchaImage}
-                    alt="验证码"
-                    className="h-10 w-24 rounded-lg cursor-pointer"
-                    onClick={loadCaptcha}
-                  />
-                  <input
-                    className="h-10 flex-1 bg-white/[0.05] rounded-lg px-3 border border-white/[0.06] focus:border-white/20 outline-none text-sm text-white/90 placeholder:text-white/30 transition-colors"
-                    placeholder="图片验证码"
-                    maxLength={4}
-                    value={captchaAnswer}
-                    onChange={(e) => setCaptchaAnswer(e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
             <button
               type="button"
               onClick={goNext}
@@ -408,27 +339,6 @@ export function RebindPhoneModal({ onClose }: RebindPhoneModalProps) {
                 </button>
               </div>
             </div>
-            {/* 图形验证码（非测试号） */}
-            {!isTestPhone && newPhone !== "15079999999" && captchaImage && (
-              <div>
-                <label className="block text-[12px] text-white/55 mb-1.5">图形验证码</label>
-                <div className="flex gap-2">
-                  <img
-                    src={captchaImage}
-                    alt="验证码"
-                    className="h-10 w-24 rounded-lg cursor-pointer"
-                    onClick={loadCaptcha}
-                  />
-                  <input
-                    className="h-10 flex-1 bg-white/[0.05] rounded-lg px-3 border border-white/[0.06] focus:border-white/20 outline-none text-sm text-white/90 placeholder:text-white/30 transition-colors"
-                    placeholder="图片验证码"
-                    maxLength={4}
-                    value={captchaAnswer}
-                    onChange={(e) => setCaptchaAnswer(e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
             <button
               type="button"
               onClick={goNext}

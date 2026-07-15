@@ -45,7 +45,7 @@ public class SecurityConfig {
                 // URL 权限
                 .and()
                 .authorizeRequests()
-                .antMatchers("/api/auth/send-code", "/api/auth/login", "/api/auth/captcha", "/api/auth/refresh").permitAll()
+                .antMatchers("/api/auth/send-code", "/api/auth/login", "/api/auth/refresh").permitAll()
                 .antMatchers("/api/**").authenticated()
                 .anyRequest().permitAll()
 

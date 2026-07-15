@@ -59,6 +59,17 @@ jwt:
 sms:
   provider: volcengine
 
+# 火山引擎 TOS 对象存储（域名由 prefix 自动推导：https://{prefix}.tos-cn-beijing.volces.com）
+# 生产环境 access-key / secret-key / bucket-name 由 Nacos 配置中心下发，本地为空则跳过 storageService 初始化
+oss:
+  tos:
+    prefix: user-avatar
+    endpoint: https://tos-cn-beijing.volces.com
+    region: cn-beijing
+    access-key:
+    secret-key:
+    bucket-name: bluewhale-assets
+
 # 火山引擎短信（切换 provider=volcengine 后生效）
 volcengine:
   sms:

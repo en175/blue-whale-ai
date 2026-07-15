@@ -28,7 +28,7 @@ public class AuthController {
     public Result<Map<String, Object>> sendCode(@Valid @RequestBody SendCodeRequest req,
                                                  HttpServletRequest request) {
         String ip = IpUtils.getIpAddr(request);
-        authService.sendCode(req.getPhone(), ip, req.getCaptchaToken(), req.getCaptchaAnswer());
+        authService.sendCode(req.getPhone(), ip);
         return Result.ok(Map.of("success", true, "expires_in", 300));
     }
 

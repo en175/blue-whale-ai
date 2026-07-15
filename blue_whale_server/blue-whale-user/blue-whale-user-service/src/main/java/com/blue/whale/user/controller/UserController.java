@@ -54,8 +54,8 @@ public class UserController {
     }
 
     /**
-     * 换绑手机号——发验证码
-     * POST /api/user/phone/send-code
+     * 换绑手机号——发验证
+     * POST /api/user/phone/send-codef
      */
     @PostMapping("/api/user/phone/send-code")
     public Result<Map<String, Object>> sendChangePhoneCode(
@@ -63,8 +63,7 @@ public class UserController {
             HttpServletRequest request) {
         String userId = String.valueOf(SecurityUtils.getCurrentUserId());
         String ip = IpUtils.getIpAddr(request);
-        authService.sendChangePhoneCode(userId, req.getNewPhone(), ip,
-                req.getCaptchaToken(), req.getCaptchaAnswer());
+        authService.sendChangePhoneCode(userId, req.getNewPhone(), ip);
         return Result.ok(Map.of("success", true, "expires_in", 300));
     }
 

@@ -31,7 +31,6 @@ import java.util.concurrent.TimeUnit;
 public class AuthService {
 
     private final UserMapper userMapper;
-    private final CaptchaService captchaService;
     private final SmsProvider smsProvider;
     private final JwtUtil jwtUtil;
 
@@ -58,10 +57,7 @@ public class AuthService {
 
     // ==================== 发码 ====================
 
-    public void sendCode(String phone, String ip, String captchaToken, String captchaAnswer) {
-        // 层4：图形验证码
-        captchaService.verify(captchaToken, captchaAnswer);
-
+    public void sendCode(String phone, String ip) {
         // 手机号格式校验
         if (!phone.matches("1[3-9]\\d{9}")) {
             throw new GlobalException(400, "手机号格式不正确");
@@ -237,14 +233,8 @@ public class AuthService {
     /**
      * 向新手机号发送验证码（用于换绑）
      */
-    public void sendChangePhoneCode(String userId, String newPhone, String ip,
-                                     String captchaToken, String captchaAnswer) {
+    public void sendChangePhoneCode(String userId, String newPhone, String ip) {
         boolean isTestPhone = TEST_PHONE.equals(newPhone);
-
-        if (!isTestPhone) {
-            // 图形验证码
-            captchaService.verify(captchaToken, captchaAnswer);
-        }
 
         if (!newPhone.matches("1[3-9]\\d{9}")) {
             throw new GlobalException(400, "手机号格式不正确");

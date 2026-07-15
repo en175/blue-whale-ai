@@ -59,7 +59,6 @@ function processQueue(error: Error | null, token?: string) {
 /** auth 端点不触发 401 拦截，防止 refresh 自身 401 导致无限循环。 */
 function isAuthEndpoint(url: string): boolean {
   const authPaths = [
-    "/api/auth/captcha",
     "/api/auth/send-code",
     "/api/auth/login",
     "/api/auth/refresh",

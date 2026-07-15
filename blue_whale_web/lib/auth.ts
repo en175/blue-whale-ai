@@ -3,10 +3,6 @@ import { apiRequest } from "./api-client";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 const FETCH_TIMEOUT = 10000;
 
-export interface CaptchaResult {
-  captcha_token: string;
-  captcha_image: string;
-}
 export interface SendCodeResult {
   success: boolean;
   expires_in: number;
@@ -52,7 +48,7 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: nu
   }
 }
 
-/** 仅用于 auth 端点（login/refresh/captcha/send-code），不走 401 拦截。 */
+/** 仅用于 auth 端点（login/refresh/send-code），不走 401 拦截。 */
 async function getResult<T>(url: string, options: RequestInit = {}): Promise<T> {
   const res = await fetchWithTimeout(`${API_BASE}${url}`, options, FETCH_TIMEOUT);
   if (!res.ok) {
@@ -69,16 +65,11 @@ async function getResult<T>(url: string, options: RequestInit = {}): Promise<T> 
 // 公开 auth 端点（不走 401 拦截，避免无限循环）
 // ---------------------------------------------------------------------------
 
-/** 获取图形验证码 */
-export function fetchCaptcha(): Promise<CaptchaResult> {
-  return getResult<CaptchaResult>("/api/auth/captcha");
-}
-
 /** 发送短信验证码 */
-export function sendVerificationCode(phone: string, captchaToken: string, captchaAnswer: string): Promise<SendCodeResult> {
+export function sendVerificationCode(phone: string): Promise<SendCodeResult> {
   return getResult<SendCodeResult>("/api/auth/send-code", {
     method: "POST",
-    body: JSON.stringify({ phone, captcha_token: captchaToken, captcha_answer: captchaAnswer }),
+    body: JSON.stringify({ phone }),
   });
 }
 
@@ -116,10 +107,10 @@ export function fetchMe(): Promise<UserInfo> {
 }
 
 /** 更换手机号——发验证码 */
-export function sendChangePhoneCode(newPhone: string, captchaToken: string, captchaAnswer: string): Promise<SendCodeResult> {
+export function sendChangePhoneCode(newPhone: string): Promise<SendCodeResult> {
   return apiRequest<SendCodeResult>("/api/user/phone/send-code", {
     method: "POST",
-    body: JSON.stringify({ new_phone: newPhone, captcha_token: captchaToken, captcha_answer: captchaAnswer }),
+    body: JSON.stringify({ new_phone: newPhone }),
   });
 }
 

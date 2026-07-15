@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { isValidPhone, sanitizePhone } from "./phoneValidation";
 import { loadLastPhone, saveLastPhone } from "./authStorage";
-import { fetchCaptcha, sendVerificationCode, ApiError } from "@/lib/auth";
+import { ApiError, sendVerificationCode } from "@/lib/auth";
 import { useAuth } from "./AuthContext";
 
 interface LoginModalProps {
@@ -20,13 +20,6 @@ export function LoginModal({ onClose }: LoginModalProps) {
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [codeError, setCodeError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  // 图形验证码
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
-  const [captchaImage, setCaptchaImage] = useState<string | null>(null);
-  const [captchaAnswer, setCaptchaAnswer] = useState("");
-  const [showCaptcha, setShowCaptcha] = useState(false);
-  const [captchaError, setCaptchaError] = useState<string | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -51,46 +44,17 @@ export function LoginModal({ onClose }: LoginModalProps) {
   const phoneValid = isValidPhone(phone);
   const loginDisabled = !phoneValid || code.length !== 6 || !agreed || loading;
 
-  // ===== 获取验证码 =====
+  // ===== 获取验证码: 直接发送短信 =====
   const handleSendCode = async () => {
     if (!phoneValid) { setPhoneError("请输入正确的手机号"); return; }
     setPhoneError(null);
     setLoading(true);
 
     try {
-      // Step 1: 获取图形验证码
-      const captcha = await fetchCaptcha();
-      setCaptchaToken(captcha.captcha_token);
-      setCaptchaImage(captcha.captcha_image);
-      setCaptchaAnswer("");
-      setCaptchaError(null);
-      setShowCaptcha(true);
-    } catch (e) {
-      setPhoneError(e instanceof ApiError ? e.message : "获取验证码失败");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ===== 提交图形验证码 → 发短信 =====
-  const handleCaptchaSubmit = async () => {
-    if (!captchaAnswer || !captchaToken) return;
-    setLoading(true);
-    setCaptchaError(null);
-
-    try {
-      await sendVerificationCode(phone, captchaToken, captchaAnswer);
-      setShowCaptcha(false);
+      await sendVerificationCode(phone);
       setCountdown(60);
     } catch (e) {
-      setCaptchaError(e instanceof ApiError ? e.message : "验证失败，请重试");
-      // 刷新验证码
-      try {
-        const captcha = await fetchCaptcha();
-        setCaptchaToken(captcha.captcha_token);
-        setCaptchaImage(captcha.captcha_image);
-        setCaptchaAnswer("");
-      } catch { /* ignore */ }
+      setPhoneError(e instanceof ApiError ? e.message : "发送验证码失败，请重试");
     } finally {
       setLoading(false);
     }
@@ -153,51 +117,20 @@ export function LoginModal({ onClose }: LoginModalProps) {
             {phoneError && <p className="mt-1 text-[12px] text-[#ef4444]">{phoneError}</p>}
           </div>
 
-          {/* 图形验证码 */}
-          {showCaptcha && (
-            <div>
-              <div className="flex items-center gap-2">
-                {captchaImage && (
-                  <img src={captchaImage} alt="验证码" className="h-10 rounded cursor-pointer"
-                    onClick={async () => {
-                      try {
-                        const c = await fetchCaptcha();
-                        setCaptchaToken(c.captcha_token);
-                        setCaptchaImage(c.captcha_image);
-                      } catch { /* ignore */ }
-                    }} />
-                )}
-                <input className="h-10 flex-1 bg-white/[0.05] rounded-lg px-3 border border-white/[0.06] focus-within:border-white/20 outline-none text-sm text-white/90"
-                  placeholder="图形验证码" value={captchaAnswer} maxLength={6}
-                  onChange={(e) => setCaptchaAnswer(e.target.value.toUpperCase().slice(0, 6))} />
-              </div>
-              {captchaError && <p className="mt-1 text-[12px] text-[#ef4444]">{captchaError}</p>}
-              <button type="button" disabled={!captchaAnswer || loading}
-                onClick={handleCaptchaSubmit}
-                className="mt-2 h-10 w-full rounded-lg bg-[#4e40f3] text-white text-sm font-medium disabled:opacity-40">
-                {loading ? "发送中..." : "发送验证码"}
+          {/* 短信验证码 */}
+          <div>
+            <div className="flex items-center bg-white/[0.05] rounded-lg px-3 border border-white/[0.06] focus-within:border-white/20 transition-colors">
+              <input className="h-10 bg-transparent outline-none text-sm text-white/90 placeholder:text-white/30 w-full"
+                inputMode="numeric" placeholder="短信验证码" value={code}
+                onChange={(e) => handleCodeChange(e.target.value)} />
+              <button type="button" disabled={!phoneValid || countdown > 0 || loading}
+                onClick={handleSendCode}
+                className="h-10 shrink-0 inline-flex items-center justify-center text-[13px] font-medium border-l border-white/[0.06] text-white/55 hover:text-white/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed pl-3 ml-3">
+                {countdown > 0 ? `${countdown}s 后重发` : "获取验证码"}
               </button>
             </div>
-          )}
-
-          {/* 短信验证码 */}
-          {!showCaptcha && (
-            <>
-              <div>
-                <div className="flex items-center bg-white/[0.05] rounded-lg px-3 border border-white/[0.06] focus-within:border-white/20 transition-colors">
-                  <input className="h-10 bg-transparent outline-none text-sm text-white/90 placeholder:text-white/30 w-full"
-                    inputMode="numeric" placeholder="短信验证码" value={code}
-                    onChange={(e) => handleCodeChange(e.target.value)} />
-                  <button type="button" disabled={!phoneValid || countdown > 0 || loading}
-                    onClick={handleSendCode}
-                    className="h-10 shrink-0 inline-flex items-center justify-center text-[13px] font-medium border-l border-white/[0.06] text-white/55 hover:text-white/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed pl-3 ml-3">
-                    {countdown > 0 ? `${countdown}s 后重发` : "获取验证码"}
-                  </button>
-                </div>
-                {codeError && <p className="mt-1 text-[12px] text-[#ef4444]">{codeError}</p>}
-              </div>
-            </>
-          )}
+            {codeError && <p className="mt-1 text-[12px] text-[#ef4444]">{codeError}</p>}
+          </div>
 
           {/* 协议 */}
           <label className="flex items-start gap-2 text-[12px] text-white/55 leading-relaxed mt-1 select-none cursor-pointer">
