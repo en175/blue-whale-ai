@@ -14,12 +14,14 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
 public class GenerationJobClaimService {
 
-    private static final long LEASE_SECONDS = 30;
+    private static final long IMAGE_LEASE_SECONDS = 30;
+    private static final long VIDEO_LEASE_SECONDS = 300;
 
     private final GenerationJobMapper generationJobMapper;
     private final ProjectEventService projectEventService;
@@ -29,24 +31,33 @@ public class GenerationJobClaimService {
         if (workerId == null || workerId.isBlank() || workerId.length() > 128) {
             throw new GlobalException(SystemCode.FAILURE_CODE, "Generation Worker 标识无效");
         }
-        GenerationJob job = generationJobMapper.selectNextImageForUpdate();
+        GenerationJob job = generationJobMapper.selectNextWorkerJobForUpdate();
         if (job == null) {
             throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "暂无可认领 GenerationJob");
         }
         LocalDateTime databaseNow = generationJobMapper.selectCurrentTime();
         long nextFencingToken = job.getFencingToken() == null ? 1L : job.getFencingToken() + 1L;
-        job.setStatus(GenerationJob.STATUS_PROCESSING)
+        String previousStatus = job.getStatus();
+        if (GenerationJob.STATUS_QUEUED.equals(previousStatus)) {
+            job.setStatus(GenerationJob.STATUS_PROCESSING);
+        }
+        long leaseSeconds = GenerationJob.TYPE_VIDEO.equals(job.getType())
+                ? VIDEO_LEASE_SECONDS : IMAGE_LEASE_SECONDS;
+        job
                 .setLeaseOwner(workerId)
-                .setLeaseExpiresAt(databaseNow.plusSeconds(LEASE_SECONDS))
+                .setLeaseExpiresAt(databaseNow.plusSeconds(leaseSeconds))
                 .setFencingToken(nextFencingToken);
         if (generationJobMapper.updateById(job) != 1) {
             throw conflict();
         }
         GenerationJob claimed = generationJobMapper.selectById(job.getId());
-        appendStatusChanged(claimed);
+        if (!Objects.equals(previousStatus, claimed.getStatus())) {
+            appendStatusChanged(claimed);
+        }
         return new GenerationJobClaim(
                 claimed.getId(), claimed.getProjectId(), claimed.getUserId(), claimed.getVersion(),
-                claimed.getFencingToken(), claimed.getLeaseOwner(), claimed.getInput());
+                claimed.getFencingToken(), claimed.getLeaseOwner(), claimed.getInput(), claimed.getType(),
+                claimed.getStatus(), claimed.getExecutionDeadlineAt());
     }
 
     private void appendStatusChanged(GenerationJob job) {

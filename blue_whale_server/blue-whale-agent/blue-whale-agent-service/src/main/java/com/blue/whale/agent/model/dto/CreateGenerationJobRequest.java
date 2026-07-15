@@ -14,6 +14,7 @@ import javax.validation.constraints.Pattern;
 import javax.validation.constraints.Positive;
 import javax.validation.constraints.Size;
 import java.util.List;
+import java.util.Set;
 
 /** BottomDock 创建 Project 级 GenerationJob 的产品中性命令。 */
 public class CreateGenerationJobRequest {
@@ -57,6 +58,12 @@ public class CreateGenerationJobRequest {
         return expectedOutputCount;
     }
 
+    @JsonIgnore
+    @AssertTrue(message = "视频生成仅支持 0 或 1 个参考图片 Asset")
+    public boolean isValidVideoInputCount() {
+        return !"video".equals(type) || inputAssetIds == null || inputAssetIds.size() <= 1;
+    }
+
     @JsonAnySetter
     public void rejectUnsupportedField(String name, Object value) {
         unsupportedField = true;
@@ -80,6 +87,12 @@ public class CreateGenerationJobRequest {
         @Pattern(regexp = "[1-9][0-9]*:[1-9][0-9]*")
         private String aspectRatio;
 
+        @JsonProperty("resolution")
+        private String resolution;
+
+        @JsonProperty("duration")
+        private Integer duration;
+
         @JsonIgnore
         private boolean unsupportedField;
 
@@ -89,6 +102,26 @@ public class CreateGenerationJobRequest {
 
         public String aspectRatio() {
             return aspectRatio;
+        }
+
+        public String resolution() {
+            return resolution;
+        }
+
+        public Integer duration() {
+            return duration;
+        }
+
+        @JsonIgnore
+        public boolean isValidFor(String type) {
+            if ("image".equals(type)) {
+                return resolution == null && duration == null;
+            }
+            return "video".equals(type)
+                    && Set.of("16:9", "4:3", "1:1", "3:4", "9:16", "21:9")
+                    .contains(aspectRatio)
+                    && Set.of("480p", "720p", "1080p").contains(resolution)
+                    && duration != null && duration >= 4 && duration <= 15;
         }
 
         @JsonAnySetter

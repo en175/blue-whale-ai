@@ -37,37 +37,30 @@ export type ImageModelCapability = {
 };
 
 export type CreateProjectGenerationJobPayload = {
-  type: "image";
   input_asset_ids: number[];
-  parameters: {
-    prompt: string;
-    aspect_ratio: string;
-  };
   expected_output_count: 1;
-};
+} & (
+  | {
+      type: "image";
+      parameters: {
+        prompt: string;
+        aspect_ratio: string;
+      };
+    }
+  | {
+      type: "video";
+      parameters: {
+        prompt: string;
+        aspect_ratio: string;
+        resolution: string;
+        duration: number;
+      };
+    }
+);
 
 export type AcceptedProjectGenerationJob = {
   generation_job_id: number;
   cursor: number;
-};
-
-export type VideoGeneratePayload = {
-  project_id?: number;
-  prompt: string;
-  resolution?: string;
-  aspect_ratio?: string;
-  duration?: number;
-  first_frame_url?: string;
-  last_frame_url?: string;
-};
-
-export type CreateJobResponse = { job_id: number; status: string };
-export type JobAsset = { id: number; url: string; type: string };
-export type JobStatusResponse = {
-  job_id: number;
-  status: string;
-  progress: number;
-  asset: JobAsset | null;
 };
 
 const API_BASE = "/api";
@@ -122,14 +115,13 @@ export function createProjectGenerationJob(
   );
 }
 
-/** 图文生视频异步提交，立即返回 jobId。 */
-export function createVideoJob(
-  payload: VideoGeneratePayload,
-): Promise<CreateJobResponse> {
-  return request<CreateJobResponse>("/generation/video", "POST", payload);
-}
-
-/** 轮询查任务状态。 */
-export function getJobStatus(jobId: number): Promise<JobStatusResponse> {
-  return request<JobStatusResponse>(`/jobs/${jobId}`, "GET");
+/** BottomDock 视频取消命令；状态仍由 Project Snapshot/SSE 恢复。 */
+export function cancelProjectGenerationJob(
+  projectId: number,
+  generationJobId: number,
+): Promise<void> {
+  return apiRequest<void>(
+    `/api/projects/${projectId}/generation-jobs/${generationJobId}/cancel`,
+    { method: "POST" },
+  );
 }

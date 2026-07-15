@@ -7,7 +7,12 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import { squirclePath } from "../../utils";
-import { VIDEO_MODELS, VIDEO_ASPECT_RATIOS, VIDEO_RESOLUTIONS, REF_MODES } from "../../constants";
+import {
+  VIDEO_MODELS,
+  VIDEO_ASPECT_RATIOS,
+  VIDEO_RESOLUTIONS,
+  REF_MODES,
+} from "../../constants";
 import type { DockMediaItem, GenerateArgs } from "../../types";
 import { ImageDockContent } from "./ImageDockContent";
 import { VideoDockContent } from "./VideoDockContent";
@@ -27,6 +32,10 @@ export function BottomDock({
   generating = false,
   generateError,
   onClearGenerateError,
+  videoJobStatus,
+  videoJobError,
+  onCancelVideoJob,
+  cancellingVideo = false,
 }: {
   mode: "image" | "video";
   onClose: () => void;
@@ -50,6 +59,11 @@ export function BottomDock({
   generateError?: string | null;
   /** 关闭生成错误提示 */
   onClearGenerateError?: () => void;
+  /** 当前 Project 中最近一次 BottomDock 视频任务的权威状态。 */
+  videoJobStatus?: string | null;
+  videoJobError?: string | null;
+  onCancelVideoJob?: () => void;
+  cancellingVideo?: boolean;
 }) {
   const [input, setInput] = useState("");
   const [dockSize, setDockSize] = useState({ w: 680, h: 164 });
@@ -81,6 +95,8 @@ export function BottomDock({
 
   const path = squirclePath(dockSize.w, dockSize.h, 28.8);
   const isEmpty = input.trim().length === 0;
+  const canCancelVideo =
+    videoJobStatus === "queued" || videoJobStatus === "processing";
 
   const handleInput = () => {
     const text = editorRef.current?.innerText ?? "";
@@ -89,7 +105,9 @@ export function BottomDock({
 
   return (
     <div
-      data-canvas-reference-drop-target={mode === "image" ? "image-dock" : "video-dock"}
+      data-canvas-reference-drop-target={
+        mode === "image" ? "image-dock" : "video-dock"
+      }
       style={{
         position: "absolute",
         bottom: 16,
@@ -103,7 +121,8 @@ export function BottomDock({
         style={{
           clipPath: "inset(0%)",
           opacity: 1,
-          transition: "clip-path 120ms cubic-bezier(0.16, 1, 0.3, 1), opacity 120ms cubic-bezier(0.16, 1, 0.3, 1)",
+          transition:
+            "clip-path 120ms cubic-bezier(0.16, 1, 0.3, 1), opacity 120ms cubic-bezier(0.16, 1, 0.3, 1)",
         }}
       >
         <div style={{ position: "relative" }}>
@@ -125,8 +144,65 @@ export function BottomDock({
             <div
               ref={contentRef}
               className="nodrag nopan nowheel"
-              style={{ width: 680, background: "transparent", display: "flex", flexDirection: "column" }}
+              style={{
+                width: 680,
+                background: "transparent",
+                display: "flex",
+                flexDirection: "column",
+              }}
             >
+              {mode === "video" && videoJobStatus && (
+                <div
+                  aria-live="polite"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    padding: "8px 12px",
+                    background: "var(--tc-bg-elevated)",
+                    borderBottom: "1px solid var(--tc-border-subtle)",
+                    color:
+                      videoJobStatus === "failed"
+                        ? "var(--tc-destructive)"
+                        : "var(--tc-text-secondary)",
+                    fontSize: 12,
+                    lineHeight: "16px",
+                  }}
+                >
+                  <span>
+                    {videoJobStatus === "queued"
+                      ? "视频任务等待提交"
+                      : videoJobStatus === "processing"
+                        ? "视频生成中"
+                        : videoJobStatus === "cancel_requested"
+                          ? "正在取消视频任务"
+                          : videoJobStatus === "cancelled"
+                            ? "视频生成已取消"
+                            : videoJobStatus === "succeeded"
+                              ? "视频已生成并加入画布"
+                              : videoJobError || "视频生成失败"}
+                  </span>
+                  {canCancelVideo && (
+                    <button
+                      type="button"
+                      onClick={onCancelVideoJob}
+                      disabled={cancellingVideo}
+                      style={{
+                        border: "1px solid var(--tc-border-active)",
+                        borderRadius: 6,
+                        background: "var(--tc-menu-item-hover)",
+                        color: "var(--tc-text-secondary)",
+                        padding: "3px 9px",
+                        cursor: cancellingVideo ? "wait" : "pointer",
+                        opacity: cancellingVideo ? 0.6 : 1,
+                      }}
+                    >
+                      {cancellingVideo ? "取消中…" : "取消生成"}
+                    </button>
+                  )}
+                </div>
+              )}
               {generateError && (
                 <div
                   style={{
@@ -178,7 +254,9 @@ export function BottomDock({
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
-                  onGenerate={(s) => onGenerate?.(input, { mode: "image", settings: s })}
+                  onGenerate={(s) =>
+                    onGenerate?.(input, { mode: "image", settings: s })
+                  }
                   generating={generating}
                 />
               ) : (
@@ -215,7 +293,9 @@ export function BottomDock({
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
-                  onGenerate={(s) => onGenerate?.(input, { mode: "video", settings: s })}
+                  onGenerate={(s) =>
+                    onGenerate?.(input, { mode: "video", settings: s })
+                  }
                   generating={generating}
                 />
               )}

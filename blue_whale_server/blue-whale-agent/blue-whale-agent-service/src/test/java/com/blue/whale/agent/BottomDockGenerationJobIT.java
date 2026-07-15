@@ -119,6 +119,81 @@ class BottomDockGenerationJobIT {
     }
 
     @Test
+    void videoCommandFreezesServerStrategyAndReservesOneOutputSlot() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("bottom-dock-video");
+        projectMapper.insert(project);
+        String body = "{" +
+                "\"type\":\"video\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{" +
+                "\"prompt\":\"蓝鲸跃出海面\"," +
+                "\"aspect_ratio\":\"16:9\"," +
+                "\"resolution\":\"480p\"," +
+                "\"duration\":4}," +
+                "\"expected_output_count\":1}";
+
+        MvcResult accepted = postGenerationJob(project.getId(), "video-key-1", body)
+                .andExpect(status().isAccepted())
+                .andReturn();
+        long jobId = objectMapper.readTree(accepted.getResponse().getContentAsString())
+                .path("data").path("generation_job_id").asLong();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT type FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("video");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT source FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("bottom_dock");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT strategy_version FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("seedance-2.0-v1");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT TIMESTAMPDIFF(MINUTE, CURRENT_TIMESTAMP, execution_deadline_at) " +
+                        "FROM generation_jobs WHERE id = ?", Integer.class, jobId))
+                .isBetween(29, 30);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT progress FROM generation_jobs WHERE id = ?", Integer.class, jobId))
+                .isNull();
+        assertThat(count("generation_job_outputs", "generation_job_id", jobId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT input FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .contains("\"resolution\":\"480p\"")
+                .contains("\"duration\":4")
+                .doesNotContain("provider")
+                .doesNotContain("model")
+                .doesNotContain("callback")
+                .doesNotContain("url");
+    }
+
+    @Test
+    void snapshotDoesNotExposeLegacyImageRootCause() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("snapshot-error-redaction");
+        projectMapper.insert(project);
+        String body = "{" +
+                "\"type\":\"image\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"expected_output_count\":1}";
+        MvcResult accepted = postGenerationJob(project.getId(), "snapshot-error-key", body)
+                .andExpect(status().isAccepted())
+                .andReturn();
+        long jobId = objectMapper.readTree(accepted.getResponse().getContentAsString())
+                .path("data").path("generation_job_id").asLong();
+        jdbcTemplate.update("UPDATE generation_jobs SET status = 'failed', " +
+                "error = '{\"code\":500,\"message\":\"jdbc://private-host/root-password\"}' " +
+                "WHERE id = ?", jobId);
+
+        MvcResult snapshot = mockMvc.perform(get("/api/projects/{id}/snapshot", project.getId())
+                        .header("X-User-Id", "10"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        assertThat(snapshot.getResponse().getContentAsString())
+                .doesNotContain("private-host")
+                .doesNotContain("root-password");
+    }
+
+    @Test
     void foreignInputAssetIsRejectedWithoutCreatingJob() throws Exception {
         Project owned = new Project().setOwnerId(10L).setName("owned-project");
         Project foreign = new Project().setOwnerId(11L).setName("foreign-project");

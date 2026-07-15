@@ -38,6 +38,8 @@ export type CardStatus = "failed" | "generating" | "normal";
 export type GenerationJobStatus =
   | "queued"
   | "processing"
+  | "cancel_requested"
+  | "cancelled"
   | "succeeded"
   | "failed";
 
@@ -80,7 +82,7 @@ export type GenerationJob = {
 
 // ---------- NodeItem（CONTEXT.md L22-24）----------
 
-export type NodeType = "image" | "text";
+export type NodeType = "image" | "video" | "text";
 
 /**
  * 画布上的素材单元（图片或文本节点）。

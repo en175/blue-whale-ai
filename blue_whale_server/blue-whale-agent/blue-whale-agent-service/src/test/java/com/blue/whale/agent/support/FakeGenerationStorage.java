@@ -5,7 +5,10 @@ import com.blue.whale.agent.service.generation.GenerationObjectReader;
 import com.blue.whale.agent.service.generation.GenerationObjectSigner;
 import com.blue.whale.agent.service.generation.SignedGenerationObject;
 import com.blue.whale.agent.service.generation.StoredGenerationObject;
+import com.blue.whale.agent.service.generation.VideoGenerationStorage;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
@@ -14,7 +17,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class FakeGenerationStorage implements
-        GenerationStorage, GenerationObjectReader, GenerationObjectSigner {
+        GenerationStorage, VideoGenerationStorage, GenerationObjectReader, GenerationObjectSigner {
 
     private final Map<String, byte[]> objects = new ConcurrentHashMap<>();
 
@@ -24,6 +27,27 @@ public class FakeGenerationStorage implements
         String storageKey = "fake/sha256/" + digest;
         objects.putIfAbsent(storageKey, Arrays.copyOf(content, content.length));
         return new StoredGenerationObject(storageKey, digest, mimeType, content.length);
+    }
+
+    @Override
+    public StoredGenerationObject storeVideo(
+            Long jobId,
+            int slotIndex,
+            InputStream content,
+            long contentLength,
+            String mimeType) {
+        try {
+            byte[] bytes = content.readAllBytes();
+            if (bytes.length != contentLength) {
+                throw new IllegalArgumentException("Fake 视频长度不一致");
+            }
+            String digest = sha256(bytes);
+            String storageKey = "fake/video/jobs/" + jobId + "/slot-" + slotIndex + ".mp4";
+            objects.put(storageKey, Arrays.copyOf(bytes, bytes.length));
+            return new StoredGenerationObject(storageKey, digest, mimeType, bytes.length);
+        } catch (IOException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     @Override

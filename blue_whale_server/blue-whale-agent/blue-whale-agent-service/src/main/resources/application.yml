@@ -83,6 +83,14 @@ blue-whale:
       prefix: ${GENERATION_TOS_PREFIX:generation}
       signed-url-ttl-seconds: ${GENERATION_TOS_SIGNED_URL_TTL_SECONDS:300}
       max-read-bytes: ${GENERATION_TOS_MAX_READ_BYTES:20971520}
+      max-video-bytes: ${GENERATION_TOS_MAX_VIDEO_BYTES:209715200}
+    seedance:
+      account-id: ${SEEDANCE_ACCOUNT_ID:default}
+      callback-base-url: ${SEEDANCE_CALLBACK_BASE_URL:}
+      initial-poll-seconds: 5
+      max-poll-seconds: 30
+      allowed-result-host-suffixes: ${SEEDANCE_ALLOWED_RESULT_HOST_SUFFIXES:volces.com}
+    worker-scheduled: ${GENERATION_WORKER_SCHEDULED:true}
   project-events:
     redis-enabled: true
     channel: blue-whale:project-events

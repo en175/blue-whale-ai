@@ -3,12 +3,19 @@ package com.blue.whale.agent.config;
 import com.blue.whale.agent.service.GenerationJobClaimService;
 import com.blue.whale.agent.service.GenerationResultAcceptanceService;
 import com.blue.whale.agent.service.ProjectAssetContentService;
+import com.blue.whale.agent.service.ProjectAssetAccessService;
 import com.blue.whale.agent.service.generation.GenerationAdapterProperties;
+import com.blue.whale.agent.service.generation.AsyncGenerationProvider;
 import com.blue.whale.agent.service.generation.GenerationProvider;
 import com.blue.whale.agent.service.generation.GenerationWorker;
 import com.blue.whale.agent.service.generation.OpenAiImageGenerationProvider;
+import com.blue.whale.agent.service.generation.SeedanceAsyncGenerationProvider;
+import com.blue.whale.agent.service.generation.SeedanceVideoGenerationProcessor;
+import com.blue.whale.agent.service.generation.SeedanceVideoResultIngestor;
 import com.blue.whale.agent.service.generation.TosGenerationStorage;
+import com.blue.whale.agent.service.generation.VideoResultIngestor;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.volcengine.ark.runtime.service.ArkService;
 import com.volcengine.tos.TOSV2;
 import com.volcengine.tos.TOSV2ClientBuilder;
 import okhttp3.HttpUrl;
@@ -17,6 +24,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -88,13 +96,37 @@ public class GenerationAdapterConfiguration {
 
     @Bean
     @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = MODE)
+    AsyncGenerationProvider asyncGenerationProvider(
+            ObjectProvider<ArkService> arkServiceProvider,
+            ProjectAssetAccessService assetAccessService,
+            GenerationAdapterProperties properties,
+            GenerationAdapterReadiness readiness) {
+        return new SeedanceAsyncGenerationProvider(
+                arkServiceProvider, assetAccessService, properties);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = MODE)
+    VideoResultIngestor videoResultIngestor(
+            OkHttpClient generationOkHttpClient,
+            TosGenerationStorage storage,
+            GenerationAdapterProperties properties,
+            GenerationAdapterReadiness readiness) {
+        return new SeedanceVideoResultIngestor(
+                generationOkHttpClient, storage, properties);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = MODE)
     GenerationWorker generationWorker(
             GenerationJobClaimService claimService,
             GenerationResultAcceptanceService acceptanceService,
             GenerationProvider provider,
             TosGenerationStorage storage,
+            ObjectProvider<SeedanceVideoGenerationProcessor> videoProcessorProvider,
             GenerationAdapterReadiness readiness) {
-        return new GenerationWorker(claimService, acceptanceService, provider, storage);
+        return new GenerationWorker(claimService, acceptanceService, provider, storage,
+                videoProcessorProvider.getIfAvailable());
     }
 
     private void validate(GenerationAdapterProperties properties) {
@@ -151,6 +183,38 @@ public class GenerationAdapterConfiguration {
         }
         if (tos.getMaxReadBytes() <= 0) {
             throw new IllegalStateException("图片生成配置无效: tos.max-read-bytes");
+        }
+        if (tos.getMaxVideoBytes() <= 0) {
+            throw new IllegalStateException("视频生成配置无效: tos.max-video-bytes");
+        }
+
+        GenerationAdapterProperties.Seedance seedance = properties.getSeedance();
+        requireText("seedance.account-id", seedance.getAccountId());
+        if (!seedance.getAccountId().matches("[A-Za-z0-9._-]+")) {
+            throw new IllegalStateException("视频生成配置无效: seedance.account-id");
+        }
+        requireText("seedance.callback-base-url", seedance.getCallbackBaseUrl());
+        HttpUrl callbackBaseUrl = HttpUrl.parse(seedance.getCallbackBaseUrl());
+        if (callbackBaseUrl == null
+                || !"https".equals(callbackBaseUrl.scheme())
+                || !"/".equals(callbackBaseUrl.encodedPath())
+                || callbackBaseUrl.query() != null
+                || callbackBaseUrl.fragment() != null
+                || !callbackBaseUrl.username().isEmpty()
+                || !callbackBaseUrl.password().isEmpty()) {
+            throw new IllegalStateException("视频生成配置无效: seedance.callback-base-url");
+        }
+        if (seedance.getInitialPollSeconds() <= 0
+                || seedance.getMaxPollSeconds() < seedance.getInitialPollSeconds()) {
+            throw new IllegalStateException("视频生成配置无效: seedance.poll-seconds");
+        }
+        if (seedance.getAllowedResultHostSuffixes() == null
+                || seedance.getAllowedResultHostSuffixes().isEmpty()
+                || seedance.getAllowedResultHostSuffixes().stream().anyMatch(
+                suffix -> suffix == null || !suffix.matches("[A-Za-z0-9.-]+")
+                        || suffix.startsWith(".") || suffix.endsWith("."))) {
+            throw new IllegalStateException(
+                    "视频生成配置无效: seedance.allowed-result-host-suffixes");
         }
     }
 

@@ -10,8 +10,14 @@
  *
  * 坐标语义对齐 RF：world 坐标由 `position{x,y}` 承载（替代原 x/y），见 types.ts。
  */
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
-import { Image as ImageIcon, Plus } from "lucide-react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
+import { Image as ImageIcon, Plus, Video as VideoIcon } from "lucide-react";
 import {
   ReactFlow,
   Background,
@@ -21,15 +27,11 @@ import {
   Position,
   applyNodeChanges,
 } from "@xyflow/react";
-import type {
-  Node,
-  NodeProps,
-  OnNodesChange,
-  OnMoveEnd,
-} from "@xyflow/react";
+import type { Node, NodeProps, OnNodesChange, OnMoveEnd } from "@xyflow/react";
 import { NODE_TOOLBAR_ACTIONS } from "../config";
 import type { NodeItem, NodeType, Viewport } from "../types";
 import { AuthenticatedImage } from "./AuthenticatedImage";
+import { AuthenticatedVideo } from "./AuthenticatedVideo";
 
 /** RF 节点 data：承载渲染与持久化字段（不随 RF 内部 change 丢失）。 */
 export type CanvasNodeData = {
@@ -38,6 +40,7 @@ export type CanvasNodeData = {
   content?: string;
   assetId?: string;
   imageUrl?: string;
+  assetAccessUrl?: string;
   /** 旋转角度（度）；RF 不接管，随 data round-trip 保留。 */
   rotation?: number;
   /** 图层排序；RF `elevateNodesOnSelect` 处理视觉抬升，此值用于持久化基线。 */
@@ -62,6 +65,7 @@ export function toRFNode(n: NodeItem): CanvasNode {
       content: n.content,
       assetId: n.assetId,
       imageUrl: n.imageUrl,
+      assetAccessUrl: n.assetAccessUrl,
       rotation: n.rotation,
       zIndex: n.zIndex,
     },
@@ -82,9 +86,72 @@ export function fromRFNode(rf: CanvasNode): NodeItem {
     content: rf.data.content,
     assetId: rf.data.assetId,
     imageUrl: rf.data.imageUrl,
+    assetAccessUrl: rf.data.assetAccessUrl,
     rotation: rf.data.rotation,
     zIndex: rf.data.zIndex,
   };
+}
+
+function VideoNode({ id, data, selected }: NodeProps<CanvasNode>) {
+  const { onAction } = useContext(NodeActionsContext);
+  return (
+    <>
+      <NodeToolbar position={Position.Top} offset={8}>
+        <NodeToolbarActions onAction={(actionId) => onAction?.(id, actionId)} />
+      </NodeToolbar>
+      <div
+        className="relative overflow-visible rounded-lg"
+        style={{
+          width: data.width,
+          height: data.height,
+          outline: selected
+            ? "2px solid var(--tc-card-selected-stroke)"
+            : "2px solid transparent",
+          background: "var(--tc-bg-elevated)",
+        }}
+        aria-label={data.content || "视频"}
+        data-asset-id={data.assetId}
+      >
+        <NodeResizer
+          nodeId={id}
+          isVisible={selected}
+          minWidth={160}
+          minHeight={90}
+          keepAspectRatio
+          handleClassName="tc-node-resize-handle"
+        />
+        <div
+          className="nodrag absolute -top-6 left-0 flex items-center text-xs font-normal leading-4 select-none"
+          style={{ width: data.width, color: "var(--tc-text-secondary)" }}
+        >
+          <VideoIcon width={13} height={13} stroke="currentColor" />
+          <span className="ml-[5px] max-w-[216px] overflow-hidden text-ellipsis whitespace-nowrap">
+            {data.content || "视频节点"}
+          </span>
+        </div>
+        {data.assetAccessUrl ? (
+          <AuthenticatedVideo
+            accessUrl={data.assetAccessUrl}
+            className="h-full w-full rounded-lg object-contain"
+            controls
+            preload="metadata"
+          />
+        ) : (
+          <div
+            className="flex h-full w-full items-center justify-center"
+            style={{ color: "var(--tc-text-muted)" }}
+          >
+            <VideoIcon
+              width={48}
+              height={48}
+              stroke="currentColor"
+              strokeWidth={1}
+            />
+          </div>
+        )}
+      </div>
+    </>
+  );
 }
 
 /**
@@ -168,7 +235,12 @@ function ImageNode({ id, data, selected }: NodeProps<CanvasNode>) {
             className="flex h-full w-full items-center justify-center"
             style={{ color: "var(--tc-text-muted)" }}
           >
-            <ImageIcon width={48} height={48} stroke="currentColor" strokeWidth={1} />
+            <ImageIcon
+              width={48}
+              height={48}
+              stroke="currentColor"
+              strokeWidth={1}
+            />
           </div>
         )}
       </div>
@@ -184,12 +256,17 @@ function TextNode({ data, selected }: NodeProps<CanvasNode>) {
       style={{
         width: data.width,
         height: data.height,
-        outline: selected ? "2px solid var(--tc-card-selected-stroke)" : "2px solid transparent",
+        outline: selected
+          ? "2px solid var(--tc-card-selected-stroke)"
+          : "2px solid transparent",
         outlineOffset: 0,
         background: "var(--tc-bg-surface)",
       }}
     >
-      <span className="text-center text-sm leading-5" style={{ color: "var(--tc-text-secondary)" }}>
+      <span
+        className="text-center text-sm leading-5"
+        style={{ color: "var(--tc-text-secondary)" }}
+      >
         {data.content}
       </span>
     </div>
@@ -232,7 +309,13 @@ function NodeToolbarActions({ onAction }: { onAction: (id: string) => void }) {
               aria-expanded="false"
               onClick={() => onAction(action.id)}
               className="tc-node-toolbar-button tc-ui-glow-btn flex items-center justify-center rounded-lg transition-colors hover:bg-[var(--tc-menu-item-hover)]"
-              style={{ width: 32, height: 32, padding: 8, border: 0, background: "transparent" }}
+              style={{
+                width: 32,
+                height: 32,
+                padding: 8,
+                border: 0,
+                background: "transparent",
+              }}
             >
               {action.icon}
             </button>
@@ -244,7 +327,11 @@ function NodeToolbarActions({ onAction }: { onAction: (id: string) => void }) {
 }
 
 /** nodeTypes 须稳定引用（RF 内部按引用判等重建），模块级常量。 */
-const nodeTypes = { image: ImageNode, text: TextNode } as const;
+const nodeTypes = {
+  image: ImageNode,
+  video: VideoNode,
+  text: TextNode,
+} as const;
 
 export type CanvasSurfaceProps = {
   nodes: NodeItem[];
@@ -289,9 +376,9 @@ export function CanvasSurface({
   // rfNodes memo 重算若不带 measured，RF 把受控节点当"新"反复 re-init，拖拽命中未初始化节点刷屏。
   // 解：用 state 缓存 RF 测得的 measured/尺寸（render 期读 state 合法，事件处理器里 setState 合法，
   // 避开 ref-during-render），注入受控节点跨 render 保持 initialized。
-  const [measured, setMeasured] = useState<Map<string, { width?: number; height?: number }>>(
-    () => new Map()
-  );
+  const [measured, setMeasured] = useState<
+    Map<string, { width?: number; height?: number }>
+  >(() => new Map());
   const rfNodes = useMemo(
     () =>
       nodes.map((n) => {
@@ -303,7 +390,7 @@ export function CanvasSurface({
           height: m?.height ?? n.height,
         } satisfies CanvasNode;
       }),
-    [nodes, measured]
+    [nodes, measured],
   );
 
   const handleNodesChange = useCallback<OnNodesChange<CanvasNode>>(
@@ -318,12 +405,12 @@ export function CanvasSurface({
       });
       onNodesCommit(next.map(fromRFNode));
     },
-    [rfNodes, onNodesCommit]
+    [rfNodes, onNodesCommit],
   );
 
   const nodeActionsValue = useMemo<NodeActionsContextValue>(
     () => ({ onAction: onNodeAction, onResizeEnd: onNodeResizeEnd, picking }),
-    [onNodeAction, onNodeResizeEnd, picking]
+    [onNodeAction, onNodeResizeEnd, picking],
   );
 
   return (
@@ -351,15 +438,24 @@ export function CanvasSurface({
           // 图层 z 序（task 3.6）：选中即抬升 z-index（bringToFront），默认 true 此处显式固化
           elevateNodesOnSelect
           colorMode="dark"
-          onNodeClick={(_e, node) => onNodeClick?.(fromRFNode(node as CanvasNode))}
+          onNodeClick={(_e, node) =>
+            onNodeClick?.(fromRFNode(node as CanvasNode))
+          }
           onPaneClick={() => onPaneClick?.()}
-          onNodeDragStop={(_e, node) => onNodeDragStop?.(fromRFNode(node as CanvasNode))}
+          onNodeDragStop={(_e, node) =>
+            onNodeDragStop?.(fromRFNode(node as CanvasNode))
+          }
           onSelectionChange={({ nodes: selected }) =>
             onSelectionChange?.(selected.map((n) => n.id))
           }
           proOptions={{ hideAttribution: false }}
         >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--tc-canvas-dot)" />
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={20}
+            size={1}
+            color="var(--tc-canvas-dot)"
+          />
         </ReactFlow>
       </NodeActionsContext.Provider>
     </div>

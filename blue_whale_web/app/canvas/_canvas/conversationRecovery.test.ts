@@ -143,4 +143,46 @@ describe("Agent 对话恢复投影", () => {
       imageUrl: "/api/projects/1/assets/13/content",
     });
   });
+
+  it("把 BottomDock 视频输出恢复为稳定 video 节点且不持久化签名 URL", () => {
+    const snapshot: ProjectSnapshot = {
+      project: { id: 1, name: "P", thumb: null, created_at: "now" },
+      canvas: { id: null, project_id: 1, viewport: null, nodes: "[]" },
+      conversation_messages: [],
+      agent_runs: [],
+      generation_jobs: [
+        {
+          job_id: 11,
+          source: "bottom_dock",
+          type: "video",
+          input: { prompt: "蓝鲸跃出海面", aspect_ratio: "16:9" },
+          status: "succeeded",
+          progress: null,
+          outputs: [{ slot_index: 0, asset_id: 14 }],
+          output_asset_ids: [14],
+        },
+      ],
+      assets: {
+        "14": {
+          asset_id: 14,
+          type: "video",
+          access_url: "/api/projects/1/assets/14",
+        },
+      },
+      high_watermark_cursor: 16,
+    };
+
+    const first = projectSnapshotToCanvasNodes(snapshot, []);
+    const replayed = projectSnapshotToCanvasNodes(snapshot, first);
+    expect(replayed).toHaveLength(1);
+    expect(replayed[0]).toMatchObject({
+      id: "generation-job-11-slot-0",
+      type: "video",
+      content: "蓝鲸跃出海面",
+      assetId: "14",
+      assetAccessUrl: "/api/projects/1/assets/14",
+    });
+    expect(JSON.stringify(replayed[0])).not.toContain("signature=");
+    expect(replayed[0]).not.toHaveProperty("imageUrl");
+  });
 });

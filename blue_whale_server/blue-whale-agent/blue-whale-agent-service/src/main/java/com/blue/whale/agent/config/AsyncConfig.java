@@ -9,7 +9,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.util.concurrent.Executor;
 
 /**
- * 异步执行配置：{@code @EnableAsync} + {@code @EnableScheduling}（JobPoller 定时轮询）+ 生成任务专用线程池。
+ * 异步执行配置：{@code @EnableAsync} + {@code @EnableScheduling} + 生成任务专用线程池。
  *
  * <p>生成任务（调 Ark）走 {@link #GENERATION_EXECUTOR} 异步执行，不阻塞 Servlet 请求线程。
  * 视频生成耗时长（分钟级），线程池限流避免 Ark 限流 + 防止线程爆炸。

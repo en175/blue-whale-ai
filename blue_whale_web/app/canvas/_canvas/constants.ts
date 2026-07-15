@@ -37,7 +37,11 @@ export const PROJECTS: Project[] = [
         content:
           'The user wants to generate an image of a kitten. This is a simple, direct image generation request in Instant mode. Let me follow the workflow:\n\n1. This is a direct final prompt for image generation - "生成一个小猫" (generate a kitten)\n2. I need to load the direct workflow and output-card-image skill\n3. For image requests, I create ImageCard task cards directly without preview/confirmation\n\nLet me first set the display language (user is writing in Chinese), then view the necessary skills, and create the image card directly.\n\nThe user\'s language is zh-CN based on "生成一个小猫".\n\nLet me view the workflow and output skill, then create the image card.\nThe user wants to generate an image of a kitten ("生成一个小猫"). This is a direct image generation request in Instant mode. According to the workflow, ImageCards skip preview and approval - I should create the card directly.\n\nLet me call plan_output_kinds and then image_card_output_fn directly.',
       },
-      { id: 3, type: "agent", text: "正在为你生成一张可爱的小猫图片 🐱\n\n\n\n" },
+      {
+        id: 3,
+        type: "agent",
+        text: "正在为你生成一张可爱的小猫图片 🐱\n\n\n\n",
+      },
       {
         id: 4,
         type: "card",
@@ -65,13 +69,15 @@ export const PROJECTS: Project[] = [
     canvas: { nodes: [], viewport: EMPTY_VIEWPORT },
     messages: [],
   },
-  { id: "4", name: "草稿项目", thumb: null, canvas: { nodes: [], viewport: EMPTY_VIEWPORT }, messages: [] },
+  {
+    id: "4",
+    name: "草稿项目",
+    thumb: null,
+    canvas: { nodes: [], viewport: EMPTY_VIEWPORT },
+    messages: [],
+  },
 ];
-export const VIDEO_MODELS = [
-  { id: "seedance-2", label: "Seedance 2.0" },
-  { id: "seedance-mini", label: "Seedance 2.0 Mini" },
-  { id: "seedance-fast", label: "Seedance 2.0 Fast" },
-];
+export const VIDEO_MODELS = [{ id: "seedance-2", label: "Seedance 2.0" }];
 
 export const VIDEO_ASPECT_RATIOS = [
   { id: "16:9", label: "16:9" },
@@ -86,14 +92,15 @@ export const VIDEO_RESOLUTIONS = [
   { id: "480p", label: "480p" },
   { id: "720p", label: "720p" },
   { id: "1080p", label: "1080p" },
-  { id: "2160p", label: "2160p" },
 ];
 
 export const VIDEO_DURATION_MIN = 4;
 export const VIDEO_DURATION_MAX = 15;
 export const VIDEO_DURATION_STEP = 1;
 export const VIDEO_DURATION_TICKS = Array.from(
-  { length: (VIDEO_DURATION_MAX - VIDEO_DURATION_MIN) / VIDEO_DURATION_STEP + 1 },
+  {
+    length: (VIDEO_DURATION_MAX - VIDEO_DURATION_MIN) / VIDEO_DURATION_STEP + 1,
+  },
   (_, i) => VIDEO_DURATION_MIN + i * VIDEO_DURATION_STEP,
 );
 

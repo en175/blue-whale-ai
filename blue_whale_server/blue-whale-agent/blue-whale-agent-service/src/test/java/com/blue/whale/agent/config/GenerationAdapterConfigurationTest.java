@@ -3,10 +3,13 @@ package com.blue.whale.agent.config;
 import com.blue.whale.agent.service.GenerationJobClaimService;
 import com.blue.whale.agent.service.GenerationResultAcceptanceService;
 import com.blue.whale.agent.service.ProjectAssetContentService;
+import com.blue.whale.agent.service.ProjectAssetAccessService;
 import com.blue.whale.agent.service.generation.GenerationObjectSigner;
+import com.blue.whale.agent.service.generation.AsyncGenerationProvider;
 import com.blue.whale.agent.service.generation.GenerationProvider;
 import com.blue.whale.agent.service.generation.GenerationStorage;
 import com.blue.whale.agent.service.generation.GenerationWorker;
+import com.blue.whale.agent.service.generation.VideoResultIngestor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.volcengine.tos.TOSV2;
 import org.junit.jupiter.api.Test;
@@ -21,6 +24,7 @@ class GenerationAdapterConfigurationTest {
             .withUserConfiguration(GenerationAdapterConfiguration.class)
             .withBean(ObjectMapper.class, ObjectMapper::new)
             .withBean(ProjectAssetContentService.class, () -> mock(ProjectAssetContentService.class))
+            .withBean(ProjectAssetAccessService.class, () -> mock(ProjectAssetAccessService.class))
             .withBean(GenerationJobClaimService.class, () -> mock(GenerationJobClaimService.class))
             .withBean(GenerationResultAcceptanceService.class,
                     () -> mock(GenerationResultAcceptanceService.class));
@@ -32,6 +36,8 @@ class GenerationAdapterConfigurationTest {
             assertThat(context).doesNotHaveBean(GenerationStorage.class);
             assertThat(context).doesNotHaveBean(GenerationObjectSigner.class);
             assertThat(context).doesNotHaveBean(GenerationWorker.class);
+            assertThat(context).doesNotHaveBean(AsyncGenerationProvider.class);
+            assertThat(context).doesNotHaveBean(VideoResultIngestor.class);
             assertThat(context).doesNotHaveBean(TOSV2.class);
         });
     }
@@ -67,6 +73,8 @@ class GenerationAdapterConfigurationTest {
                     assertThat(context).hasSingleBean(GenerationStorage.class);
                     assertThat(context).hasSingleBean(GenerationObjectSigner.class);
                     assertThat(context).hasSingleBean(GenerationWorker.class);
+                    assertThat(context).hasSingleBean(AsyncGenerationProvider.class);
+                    assertThat(context).hasSingleBean(VideoResultIngestor.class);
                     assertThat(context).hasSingleBean(TOSV2.class);
                 });
     }
@@ -111,7 +119,8 @@ class GenerationAdapterConfigurationTest {
                 "blue-whale.generation.tos.secret-key=tos-secret",
                 "blue-whale.generation.tos.region=cn-beijing",
                 "blue-whale.generation.tos.endpoint=tos-cn-beijing.volces.com",
-                "blue-whale.generation.tos.bucket=private-bucket"
+                "blue-whale.generation.tos.bucket=private-bucket",
+                "blue-whale.generation.seedance.callback-base-url=https://callback.example.test"
         };
     }
 }

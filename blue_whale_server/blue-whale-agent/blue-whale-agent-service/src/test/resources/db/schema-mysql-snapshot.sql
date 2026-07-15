@@ -152,6 +152,11 @@ CREATE TABLE IF NOT EXISTS generation_jobs
     lease_owner      VARCHAR(128) NULL,
     lease_expires_at DATETIME NULL,
     fencing_token    BIGINT NOT NULL DEFAULT 0,
+    strategy_version VARCHAR(64) NULL,
+    execution_deadline_at DATETIME NULL,
+    evidence_reconcile_until DATETIME NULL,
+    next_action_at DATETIME NULL,
+    cancel_requested_at DATETIME NULL,
     gmt_create       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     version          INT      NOT NULL DEFAULT 0,
@@ -189,9 +194,9 @@ CREATE TABLE IF NOT EXISTS generation_job_outputs
     id                BIGINT PRIMARY KEY AUTO_INCREMENT,
     generation_job_id BIGINT NOT NULL,
     slot_index        INT NOT NULL,
-    asset_id          BIGINT NOT NULL,
-    delivery_id       VARCHAR(128) NOT NULL,
-    content_sha256    VARCHAR(64) NOT NULL,
+    asset_id          BIGINT NULL,
+    delivery_id       VARCHAR(128) NULL,
+    content_sha256    VARCHAR(64) NULL,
     gmt_create        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     version           INT NOT NULL DEFAULT 0,
@@ -214,6 +219,60 @@ CREATE TABLE IF NOT EXISTS generation_result_conflicts
     version                 INT NOT NULL DEFAULT 0,
     is_delete               TINYINT NOT NULL DEFAULT 0,
     INDEX idx_generation_result_conflict (generation_job_id, slot_index)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS generation_provider_tasks
+(
+    id                         BIGINT PRIMARY KEY AUTO_INCREMENT,
+    generation_job_id          BIGINT NOT NULL,
+    provider                   VARCHAR(64) NOT NULL,
+    account_id                 VARCHAR(128) NOT NULL,
+    provider_task_id           VARCHAR(128) NULL,
+    submission_state           VARCHAR(32) NOT NULL,
+    provider_status            VARCHAR(32) NULL,
+    callback_capability_digest VARCHAR(64) NOT NULL,
+    raw_status                 VARCHAR(64) NULL,
+    raw_error_code             VARCHAR(128) NULL,
+    raw_error_message          TEXT NULL,
+    temporary_result_url       VARCHAR(2048) NULL,
+    observe_count              INT NOT NULL DEFAULT 0,
+    gmt_create                 DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version                    INT NOT NULL DEFAULT 0,
+    is_delete                  TINYINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_provider_task_job (generation_job_id),
+    UNIQUE KEY uk_provider_task_ref (provider, account_id, provider_task_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS seedance_callback_inbox
+(
+    id                  BIGINT PRIMARY KEY AUTO_INCREMENT,
+    generation_job_id   BIGINT NOT NULL,
+    provider             VARCHAR(64) NOT NULL,
+    account_id           VARCHAR(128) NOT NULL,
+    provider_task_id     VARCHAR(128) NOT NULL,
+    dedup_key            VARCHAR(64) NOT NULL,
+    payload_hash         VARCHAR(64) NOT NULL,
+    payload              JSON NOT NULL,
+    gmt_create           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version              INT NOT NULL DEFAULT 0,
+    is_delete            TINYINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_seedance_callback_dedup (dedup_key)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS seedance_callback_security_audits
+(
+    id                  BIGINT PRIMARY KEY AUTO_INCREMENT,
+    generation_job_id   BIGINT NULL,
+    account_id           VARCHAR(128) NULL,
+    provider_task_id     VARCHAR(128) NULL,
+    reason               VARCHAR(64) NOT NULL,
+    payload_hash         VARCHAR(64) NOT NULL,
+    gmt_create           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version              INT NOT NULL DEFAULT 0,
+    is_delete            TINYINT NOT NULL DEFAULT 0
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 CREATE TABLE IF NOT EXISTS project_event_stream

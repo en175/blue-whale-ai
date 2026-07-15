@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -79,6 +80,7 @@ public class SnapshotService {
                 .map(j -> new SnapshotResponse.GenerationJobDto(
                         j.getId(), j.getAgentRunId(), j.getActionIdentity(), j.getType(), j.getSource(),
                         j.getInput(), j.getStatus(), j.getProgress(),
+                        publicError(j),
                         j.getOutputAssetIds(),
                         outputsByJob.getOrDefault(j.getId(), Collections.emptyList())))
                 .toList();
@@ -151,6 +153,29 @@ public class SnapshotService {
         if (asset.getProjectId() == null) {
             return asset.getUrl();
         }
-        return "/api/projects/" + projectId + "/assets/" + asset.getId() + "/content";
+        String base = "/api/projects/" + projectId + "/assets/" + asset.getId();
+        return Asset.TYPE_VIDEO.equals(asset.getType()) ? base : base + "/content";
+    }
+
+    private Map<String, Object> publicError(GenerationJob job) {
+        if (!GenerationJob.STATUS_FAILED.equals(job.getStatus())
+                || !GenerationJob.TYPE_VIDEO.equals(job.getType())
+                || !GenerationJob.SOURCE_BOTTOM_DOCK.equals(job.getSource())) {
+            return null;
+        }
+        Object rawCode = job.getError() == null ? null : job.getError().get("code");
+        String code = rawCode == null ? "video_generation_failed" : String.valueOf(rawCode);
+        String message = switch (code) {
+            case "submission_unknown" -> "无法确认视频任务是否已提交";
+            case "timed_out" -> "视频生成超时";
+            case "storage_failed" -> "生成结果存储失败";
+            case "provider_failed" -> "视频生成失败";
+            default -> "视频生成失败";
+        };
+        if (!Set.of("submission_unknown", "timed_out", "storage_failed", "provider_failed")
+                .contains(code)) {
+            code = "video_generation_failed";
+        }
+        return Map.of("code", code, "message", message);
     }
 }

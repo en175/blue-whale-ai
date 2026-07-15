@@ -7,15 +7,34 @@ import com.blue.whale.agent.service.GenerationJobClaimService;
 import com.blue.whale.agent.service.GenerationResultAcceptanceService;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
-import lombok.RequiredArgsConstructor;
-
-@RequiredArgsConstructor
 public class GenerationWorker {
 
     private final GenerationJobClaimService claimService;
     private final GenerationResultAcceptanceService acceptanceService;
     private final GenerationProvider provider;
     private final GenerationStorage storage;
+    private final SeedanceVideoGenerationProcessor videoProcessor;
+
+    public GenerationWorker(
+            GenerationJobClaimService claimService,
+            GenerationResultAcceptanceService acceptanceService,
+            GenerationProvider provider,
+            GenerationStorage storage) {
+        this(claimService, acceptanceService, provider, storage, null);
+    }
+
+    public GenerationWorker(
+            GenerationJobClaimService claimService,
+            GenerationResultAcceptanceService acceptanceService,
+            GenerationProvider provider,
+            GenerationStorage storage,
+            SeedanceVideoGenerationProcessor videoProcessor) {
+        this.claimService = claimService;
+        this.acceptanceService = acceptanceService;
+        this.provider = provider;
+        this.storage = storage;
+        this.videoProcessor = videoProcessor;
+    }
 
     public boolean runOnce(String workerId) {
         GenerationJobClaim claim;
@@ -26,6 +45,14 @@ public class GenerationWorker {
                 return false;
             }
             throw exception;
+        }
+
+        if ("video".equals(claim.type())) {
+            if (videoProcessor == null) {
+                throw new IllegalStateException("视频 Generation Worker 未配置");
+            }
+            videoProcessor.process(claim);
+            return true;
         }
 
         GenerationProviderResult result = provider.generate(new GenerationProviderRequest(

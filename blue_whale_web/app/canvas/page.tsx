@@ -38,10 +38,13 @@ import type {
 import { nodeFromCard, useCanvasProjects } from "./_canvas";
 import type { GenerateArgs } from "./_canvas";
 import {
+  cancelProjectGenerationJob,
   createProjectGenerationJob,
-  createVideoJob,
 } from "./_canvas/api/generation";
-import { useJobStatus } from "./_canvas/hooks/useJobStatus";
+import {
+  setProjectSubmitting,
+  type ProjectSubmissionState,
+} from "./_canvas/projectGenerationState";
 
 /** 把后端/网络错误映射为用户友好提示，避免暴露内部配置。 */
 function userFriendlyErrorMessage(e: unknown): string {
@@ -55,6 +58,9 @@ function userFriendlyErrorMessage(e: unknown): string {
   }
   if (msg.includes("当前闭环仅支持单图生成")) {
     return "当前仅支持每次生成 1 张图片";
+  }
+  if (msg.includes("当前闭环仅支持单视频生成")) {
+    return "当前仅支持每次生成 1 个视频";
   }
   if (msg.includes("ARK_API_KEY") || msg.includes("数据库")) {
     return "服务暂时不可用，请稍后重试";
@@ -102,6 +108,7 @@ function CanvasPageInner() {
     saveStatus,
     booting,
     backendReady,
+    generationJobs,
     createProjectAction,
     switchProject,
     deleteProjectAction,
@@ -124,11 +131,45 @@ function CanvasPageInner() {
   } | null>(null);
   // 「从画布选择」模式：非 null 表示正在为哪个 Dock 挑图（image/video）
   const [pickingFor, setPickingFor] = useState<"image" | "video" | null>(null);
-  // 生成：视频异步轮询 hook + 生成中状态 + 待落节点的 prompt
-  const { state: jobState, start: startJob, reset: resetJob } = useJobStatus();
-  const [generating, setGenerating] = useState(false);
+  const [submittingByProject, setSubmittingByProject] =
+    useState<ProjectSubmissionState>({});
   const [generateError, setGenerateError] = useState<string | null>(null);
-  const pendingVideoPromptRef = useRef<string>("");
+  const [activeVideoJobIdByProject, setActiveVideoJobIdByProject] = useState<
+    Record<string, number>
+  >({});
+  const [cancellingVideo, setCancellingVideo] = useState(false);
+  const generating = Boolean(submittingByProject[activeProject.id]);
+  const activeVideoJobId = activeVideoJobIdByProject[activeProject.id];
+
+  const videoJobs = generationJobs.filter(
+    (job) => job.source === "bottom_dock" && job.type === "video",
+  );
+  const activeVideoJob = videoJobs.find(
+    (job) => Number(job.job_id) === activeVideoJobId,
+  );
+  const currentVideoJob =
+    activeVideoJob ??
+    (generating || activeVideoJobId
+      ? undefined
+      : [...videoJobs].sort(
+          (left, right) => Number(right.job_id) - Number(left.job_id),
+        )[0]);
+  const currentVideoJobId = Number(currentVideoJob?.job_id);
+  const currentVideoStatus =
+    typeof currentVideoJob?.status === "string" ? currentVideoJob.status : null;
+  const videoJobActive =
+    (activeVideoJobId !== undefined && !activeVideoJob) ||
+    currentVideoStatus === "queued" ||
+    currentVideoStatus === "processing" ||
+    currentVideoStatus === "cancel_requested";
+  const currentVideoError =
+    currentVideoJob?.error && typeof currentVideoJob.error === "object"
+      ? (currentVideoJob.error as Record<string, unknown>)
+      : null;
+  const currentVideoErrorMessage =
+    typeof currentVideoError?.message === "string"
+      ? currentVideoError.message
+      : null;
 
   // 受控流写回适配：CanvasSurface 的 onNodesCommit / onViewportChange 解析后整体写回当前 active project。
   const setViewport = useCallback(
@@ -139,13 +180,13 @@ function CanvasPageInner() {
         viewport: next,
       });
     },
-    [activeProject.id],
+    [activeProject.id, dispatch],
   );
   const setNodes = useCallback(
     (next: NodeItem[]) => {
       dispatch({ type: "set-nodes", projectId: activeProject.id, nodes: next });
     },
-    [activeProject.id],
+    [activeProject.id, dispatch],
   );
 
   // 画布素材节点操作面板的统一动作分发（按 nodeId 反查 node）
@@ -264,7 +305,7 @@ function CanvasPageInner() {
       dispatch({ type: "add-node", projectId: activeProject.id, node });
       return id;
     },
-    [viewport, activeProject.id],
+    [viewport, activeProject.id, dispatch],
   );
 
   // 对话流出现 card 的同一时刻，在画布同步创建对应图片 NodeItem（同一生成结果两种视图）。
@@ -339,17 +380,20 @@ function CanvasPageInner() {
     [addNode],
   );
 
-  // 生成：图片提交产品命令，结果由 Project Snapshot/SSE 落节点；视频保留现有异步轮询。
+  // 图片与视频统一提交 Project 命令；结果都由 Snapshot/SSE 恢复。
   const handleGenerate = useCallback(
     async (promptText: string, args: GenerateArgs) => {
       const trimmed = promptText.trim();
       if (!trimmed) return;
-      setGenerating(true);
+      const submittingProjectId = activeProject.id;
+      setSubmittingByProject((current) =>
+        setProjectSubmitting(current, submittingProjectId, true),
+      );
       try {
+        if (!backendReady) {
+          throw new Error("后端未启动或无法连接");
+        }
         if (args.mode === "image") {
-          if (!backendReady) {
-            throw new Error("后端未启动或无法连接");
-          }
           if (args.settings.quantity !== "1x") {
             throw new Error("当前闭环仅支持单图生成");
           }
@@ -379,47 +423,81 @@ function CanvasPageInner() {
             },
             newCommandIdentity(),
           );
-          setGenerating(false);
           setGenerateError(null);
         } else {
-          const result = await createVideoJob({
-            project_id: Number(activeProject.id),
-            prompt: trimmed,
-            resolution: args.settings.resolution.id,
-            aspect_ratio: args.settings.aspectRatio.id,
-            duration: args.settings.duration,
-            first_frame_url: videoDockMedia[0]?.src,
-          });
-          pendingVideoPromptRef.current = trimmed;
-          startJob(result.job_id);
-          // generating 在 jobState 终态时由 effect 复位
+          if (args.settings.quantity !== "1x" || videoDockMedia.length > 1) {
+            throw new Error("当前闭环仅支持单视频生成");
+          }
+          const projectId = Number(activeProject.id);
+          const inputAssetIds = videoDockMedia.map((media) =>
+            Number(media.assetId),
+          );
+          if (
+            !Number.isSafeInteger(projectId) ||
+            projectId <= 0 ||
+            inputAssetIds.some(
+              (assetId) => !Number.isSafeInteger(assetId) || assetId <= 0,
+            )
+          ) {
+            throw new Error("参考素材尚未成为可用 Asset");
+          }
+          const result = await createProjectGenerationJob(
+            projectId,
+            {
+              type: "video",
+              input_asset_ids: inputAssetIds,
+              parameters: {
+                prompt: trimmed,
+                aspect_ratio: args.settings.aspectRatio.id,
+                resolution: args.settings.resolution.id,
+                duration: args.settings.duration,
+              },
+              expected_output_count: 1,
+            },
+            newCommandIdentity(),
+          );
+          setActiveVideoJobIdByProject((current) => ({
+            ...current,
+            [submittingProjectId]: result.generation_job_id,
+          }));
+          setGenerateError(null);
         }
       } catch (e) {
         console.error("generate failed", e);
         setGenerateError(userFriendlyErrorMessage(e));
-        setGenerating(false);
+      } finally {
+        setSubmittingByProject((current) =>
+          setProjectSubmitting(current, submittingProjectId, false),
+        );
       }
     },
-    [activeProject.id, backendReady, imageDockMedia, videoDockMedia, startJob],
+    [activeProject.id, backendReady, imageDockMedia, videoDockMedia],
   );
 
-  // 视频任务轮询终态：succeeded 落节点，failed/超时复位 generating
+  // Project SSE 到达终态后呈现稳定错误；节点由恢复投影统一创建。
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
-    if (jobState.status === "succeeded") {
-      addNode("image", {
-        content: pendingVideoPromptRef.current,
-        imageUrl: jobState.assetUrl,
-      });
-      setGenerating(false);
-      resetJob();
-    } else if (jobState.status === "failed") {
-      console.error("video generate failed:", jobState.message);
-      setGenerating(false);
-      resetJob();
+    if (currentVideoStatus === "failed") {
+      setGenerateError(currentVideoErrorMessage || "视频生成失败，请稍后重试");
     }
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [jobState, addNode, resetJob]);
+  }, [currentVideoErrorMessage, currentVideoStatus]);
+
+  const handleCancelVideo = useCallback(async () => {
+    if (!Number.isSafeInteger(currentVideoJobId) || currentVideoJobId <= 0)
+      return;
+    setCancellingVideo(true);
+    try {
+      await cancelProjectGenerationJob(
+        Number(activeProject.id),
+        currentVideoJobId,
+      );
+    } catch (error) {
+      setGenerateError(userFriendlyErrorMessage(error));
+    } finally {
+      setCancellingVideo(false);
+    }
+  }, [activeProject.id, currentVideoJobId]);
 
   // 进入/退出「从画布选择」模式
   const handleRequestPick = useCallback((mode: "image" | "video") => {
@@ -622,9 +700,15 @@ function CanvasPageInner() {
           onExitPick={handleExitPick}
           isPicking={pickingFor === bottomDockMode}
           onGenerate={handleGenerate}
-          generating={generating}
+          generating={
+            generating || (bottomDockMode === "video" && videoJobActive)
+          }
           generateError={generateError}
           onClearGenerateError={() => setGenerateError(null)}
+          videoJobStatus={currentVideoStatus}
+          videoJobError={currentVideoErrorMessage}
+          onCancelVideoJob={handleCancelVideo}
+          cancellingVideo={cancellingVideo}
         />
       )}
       <AgentChatPanel

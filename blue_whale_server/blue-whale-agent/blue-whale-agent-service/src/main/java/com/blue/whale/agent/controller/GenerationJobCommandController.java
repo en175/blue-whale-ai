@@ -4,6 +4,7 @@ import com.blue.whale.agent.common.context.UserContext;
 import com.blue.whale.agent.model.dto.CreateGenerationJobRequest;
 import com.blue.whale.agent.model.dto.CreateGenerationJobResponse;
 import com.blue.whale.agent.service.GenerationJobCommandService;
+import com.blue.whale.agent.service.GenerationJobCancellationService;
 import com.blue.whale.global.base.resp.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -24,6 +25,7 @@ import javax.validation.Valid;
 public class GenerationJobCommandController {
 
     private final GenerationJobCommandService commandService;
+    private final GenerationJobCancellationService cancellationService;
 
     @PostMapping
     public ResponseEntity<Result<CreateGenerationJobResponse>> create(
@@ -34,5 +36,14 @@ public class GenerationJobCommandController {
         CreateGenerationJobResponse accepted = commandService.create(
                 projectId, UserContext.requireUserId(userId), idempotencyKey, request);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(Result.ok(accepted));
+    }
+
+    @PostMapping("/{jobId}/cancel")
+    public ResponseEntity<Result<Void>> cancel(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @PathVariable("projectId") Long projectId,
+            @PathVariable("jobId") Long jobId) {
+        cancellationService.cancel(projectId, jobId, UserContext.requireUserId(userId));
+        return ResponseEntity.accepted().body(Result.ok(null));
     }
 }
