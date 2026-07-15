@@ -27,7 +27,7 @@ import type {
   OnNodesChange,
   OnMoveEnd,
 } from "@xyflow/react";
-import { NODE_TOOLBAR_ACTIONS } from "../config";
+import { NODE_TOOLBAR_ACTIONS, NODE_TOOLBAR_VIDEO_ACTIONS, type NodeToolbarAction } from "../config";
 import type { NodeItem, NodeType, Viewport } from "../types";
 
 /** RF 节点 data：承载渲染与持久化字段（不随 RF 内部 change 丢失）。 */
@@ -108,8 +108,11 @@ function ImageNode({ id, data, selected }: NodeProps<CanvasNode>) {
   const pickable = picking && !!data.imageUrl;
   return (
     <>
-      <NodeToolbar position={Position.Top} offset={8} isVisible={isVideoUrl(data.imageUrl) || undefined}>
-        <NodeToolbarActions onAction={(actionId) => onAction?.(id, actionId)} />
+      <NodeToolbar position={Position.Top} offset={8}>
+        <NodeToolbarActions
+          actions={isVideoUrl(data.imageUrl) ? NODE_TOOLBAR_VIDEO_ACTIONS : undefined}
+          onAction={(actionId) => onAction?.(id, actionId)}
+        />
       </NodeToolbar>
       <div
         className={[
@@ -205,7 +208,13 @@ function TextNode({ data, selected }: NodeProps<CanvasNode>) {
 }
 
 /** 操作浮层内容：复用 NODE_TOOLBAR_ACTIONS 配置，渲染「图标+文字」卡片，均匀横排。 */
-function NodeToolbarActions({ onAction }: { onAction: (id: string) => void }) {
+function NodeToolbarActions({
+  onAction,
+  actions = NODE_TOOLBAR_ACTIONS,
+}: {
+  onAction: (id: string) => void;
+  actions?: NodeToolbarAction[];
+}) {
   return (
     <div
       className="tc-node-toolbar flex items-center gap-1 rounded-[14px] px-2 py-1.5"
@@ -215,7 +224,7 @@ function NodeToolbarActions({ onAction }: { onAction: (id: string) => void }) {
         backdropFilter: "blur(12px)",
       }}
     >
-      {NODE_TOOLBAR_ACTIONS.map((action) => {
+      {actions.map((action) => {
         if (action.id === "divider") {
           return (
             <div
