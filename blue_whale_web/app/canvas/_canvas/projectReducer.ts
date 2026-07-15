@@ -27,6 +27,8 @@ export type ProjectAction =
   | { type: "create"; name: string; idGen: IdGenerator }
   | { type: "delete"; projectId: string }
   | { type: "add-node"; projectId: string; node: NodeItem }
+  /** 按 nodeId 原地更新部分字段（占位→出图/失败流转，design D7）。 */
+  | { type: "update-node"; projectId: string; nodeId: string; patch: Partial<NodeItem> }
   | { type: "delete-node"; projectId: string; nodeId: string }
   | { type: "set-viewport"; projectId: string; viewport: Viewport }
   | { type: "append-messages"; projectId: string; messages: ChatMessage[] }
@@ -35,7 +37,9 @@ export type ProjectAction =
   /** 后端列表整体覆盖 projects，active 落到首项（listProjects 拉取后）。 */
   | { type: "replace-all"; projects: Project[] }
   /** loadCanvas 一次恢复某 project 的 nodes+viewport（比 set-nodes + set-viewport 两次 dispatch 干净）。 */
-  | { type: "set-canvas"; projectId: string; nodes: NodeItem[]; viewport: Viewport };
+  | { type: "set-canvas"; projectId: string; nodes: NodeItem[]; viewport: Viewport }
+  /** 重命名项目（renameProject 落库后更新 name）。 */
+  | { type: "rename"; projectId: string; name: string };
 
 /**
  * 由初始 Project 列表构造 reducer state：active 取第一个 active 标记项目，
@@ -89,6 +93,24 @@ export function projectReducer(state: ProjectState, action: ProjectAction): Proj
         projects: state.projects.map((p) =>
           p.id === action.projectId
             ? { ...p, canvas: { ...p.canvas, nodes: [...p.canvas.nodes, action.node] } }
+            : p
+        ),
+      };
+    }
+    case "update-node": {
+      return {
+        ...state,
+        projects: state.projects.map((p) =>
+          p.id === action.projectId
+            ? {
+                ...p,
+                canvas: {
+                  ...p.canvas,
+                  nodes: p.canvas.nodes.map((n) =>
+                    n.id === action.nodeId ? { ...n, ...action.patch } : n
+                  ),
+                },
+              }
             : p
         ),
       };
@@ -166,6 +188,14 @@ export function projectReducer(state: ProjectState, action: ProjectAction): Proj
                 ),
               }
             : p
+        ),
+      };
+    }
+    case "rename": {
+      return {
+        ...state,
+        projects: state.projects.map((p) =>
+          p.id === action.projectId ? { ...p, name: action.name } : p
         ),
       };
     }

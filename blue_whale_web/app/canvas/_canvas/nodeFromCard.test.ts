@@ -29,12 +29,12 @@ describe("nodeFromCard", () => {
     expect(node.content).toBe("画一只猫");
   });
 
-  it("宽高由 meta 派生（16:9 → 427×240，独立算出）", () => {
+  it("宽高由 meta 派生（16:9 → 356×200，短边基准 200，独立算出）", () => {
     const node = nodeFromCard(makeCard({ meta: "16:9" }), idGen);
 
-    // 期望值独立算出：round(240 * 16 / 9) = 427
-    expect(node.width).toBe(427);
-    expect(node.height).toBe(240);
+    // 期望值独立算出：短边(高)基准 200，长边 round(200 * 16 / 9) = 356
+    expect(node.width).toBe(356);
+    expect(node.height).toBe(200);
   });
 
   it("不渲染真实图片：imageUrl 不存在（渲染为灰色占位）", () => {
@@ -49,9 +49,9 @@ describe("nodeFromCard", () => {
     expect(node.id).toBe(FIXED_ID);
   });
 
-  it("未知 meta 回退传导到 240×240", () => {
+  it("未知 meta 回退传导到 200×200", () => {
     const node = nodeFromCard(makeCard({ meta: "横向" }), idGen);
 
-    expect(node).toMatchObject({ width: 240, height: 240 });
+    expect(node).toMatchObject({ width: 200, height: 200 });
   });
 });

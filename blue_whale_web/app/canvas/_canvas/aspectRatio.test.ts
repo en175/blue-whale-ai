@@ -10,29 +10,29 @@ describe("parseAspectRatio", () => {
       });
     });
 
-    it("16:9 → 短边(高)=240，长边(宽)按比例放大", () => {
-      // 期望值独立算出：round(240 * 16 / 9) = round(426.67) = 427
-      expect(parseAspectRatio("16:9")).toEqual({ width: 427, height: 240 });
+    it("16:9 → 短边(高)=200，长边(宽)按比例放大", () => {
+      // 期望值独立算出：round(200 * 16 / 9) = round(355.56) = 356
+      expect(parseAspectRatio("16:9")).toEqual({ width: 356, height: 200 });
     });
 
-    it("9:16 → 短边(宽)=240，长边(高)按比例放大", () => {
-      // 期望值独立算出：round(240 * 16 / 9) = 427
-      expect(parseAspectRatio("9:16")).toEqual({ width: 240, height: 427 });
+    it("9:16 → 短边(宽)=200，长边(高)按比例放大", () => {
+      // 期望值独立算出：round(200 * 16 / 9) = 356
+      expect(parseAspectRatio("9:16")).toEqual({ width: 200, height: 356 });
     });
 
-    it("4:3 → 短边(高)=240，长边(宽)按比例放大", () => {
-      // 期望值独立算出：240 * 4 / 3 = 320
-      expect(parseAspectRatio("4:3")).toEqual({ width: 320, height: 240 });
+    it("4:3 → 短边(高)=200，长边(宽)按比例放大", () => {
+      // 期望值独立算出：round(200 * 4 / 3) = round(266.67) = 267
+      expect(parseAspectRatio("4:3")).toEqual({ width: 267, height: 200 });
     });
 
-    it("3:4 → 短边(宽)=240，长边(高)按比例放大", () => {
-      // 期望值独立算出：240 * 4 / 3 = 320
-      expect(parseAspectRatio("3:4")).toEqual({ width: 240, height: 320 });
+    it("3:4 → 短边(宽)=200，长边(高)按比例放大", () => {
+      // 期望值独立算出：round(200 * 4 / 3) = 267
+      expect(parseAspectRatio("3:4")).toEqual({ width: 200, height: 267 });
     });
 
-    it("21:9 → 短边(高)=240，长边(宽)按比例放大", () => {
-      // 期望值独立算出：round(240 * 21 / 9) = round(560) = 560
-      expect(parseAspectRatio("21:9")).toEqual({ width: 560, height: 240 });
+    it("21:9 → 短边(高)=200，长边(宽)按比例放大", () => {
+      // 期望值独立算出：round(200 * 21 / 9) = round(466.67) = 467
+      expect(parseAspectRatio("21:9")).toEqual({ width: 467, height: 200 });
     });
   });
 

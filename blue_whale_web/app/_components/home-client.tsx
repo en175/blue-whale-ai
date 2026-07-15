@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import PromoCapsule from "@/components/PromoCapsule";
 import { UserMenu } from "@/components/auth/UserMenu";
 import AgentComposer from "@/components/AgentComposer";
 import QuickTags from "@/components/QuickTags";
@@ -46,11 +45,8 @@ export default function HomeClient() {
       <div className="fixed top-4 right-4 z-[100]">
         <UserMenu />
       </div>
-      <div className="flex justify-center pt-[32px]">
-        <PromoCapsule />
-      </div>
 
-      <h1 className="font-outfit text-[36px] font-semibold leading-[56px] text-center pt-0 mb-[32px] text-white">
+      <h1 className="font-outfit text-[36px] font-semibold leading-[56px] text-center pt-8 mb-[32px] text-white">
         任意视频，告诉你的 Agent 即可创建
       </h1>
 
