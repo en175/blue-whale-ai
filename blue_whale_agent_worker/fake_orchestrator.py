@@ -1,4 +1,4 @@
-from .contracts import OrchestratorResult, ProposedAction, RunWork
+from .contracts import OrchestratorResult, ProposedAction, RunWork, RuntimeCheckpoint
 
 
 class FakeOrchestrator:
@@ -16,7 +16,12 @@ class FakeOrchestrator:
         return OrchestratorResult(
             commit_id=f"fake-{work.agent_run_id}-{work.run_version}",
             visible_text="已接纳，正在生成图片。",
-            checkpoint={"step": "image_proposed", "prompt": prompt},
+            checkpoint=RuntimeCheckpoint(
+                engine=work.engine,
+                engine_version=work.engine_version,
+                adapter_schema_version=work.adapter_schema_version,
+                opaque_payload={"step": "image_proposed", "prompt": prompt},
+            ),
             actions=(
                 ProposedAction(
                     action_id=f"fake-image-{work.agent_run_id}-{work.run_version}",

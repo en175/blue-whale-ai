@@ -127,6 +127,133 @@ class GenerationWorkerIT {
     }
 
     @Test
+    void pydanticRunResumesWithAcceptedAssetAndCompletesWithoutAnotherJob() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("pydantic-resume");
+        projectMapper.insert(project);
+        MvcResult message = mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "pydantic-resume-message")
+                        .contentType("application/json")
+                        .content("{\"client_message_id\":\"pydantic-client\","
+                                + "\"content\":\"生成一张蓝鲸海报\"}"))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        long runId = objectMapper.readTree(message.getResponse().getContentAsString())
+                .path("data").path("agent_run_id").asLong();
+        jdbcTemplate.update(
+                "UPDATE agent_runs SET engine = 'pydantic-ai', engine_version = '2.9.0' WHERE id = ?",
+                runId);
+
+        MvcResult firstClaim = mockMvc.perform(post("/internal/agent-runs/claim")
+                        .header("X-Worker-Id", "pydantic-worker-1")
+                        .header("X-Orchestrator-Engine", "pydantic-ai"))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode firstWork = objectMapper.readTree(firstClaim.getResponse().getContentAsString()).path("data");
+        String prematureCompletion = "{" +
+                "\"commit_id\":\"pydantic-premature-completion\"," +
+                "\"project_id\":" + project.getId() + "," +
+                "\"user_id\":10," +
+                "\"expected_run_version\":" + firstWork.path("run_version").asInt() + "," +
+                "\"fencing_token\":" + firstWork.path("fencing_token").asLong() + "," +
+                "\"engine\":\"pydantic-ai\"," +
+                "\"engine_version\":\"2.9.0\"," +
+                "\"adapter_schema_version\":1," +
+                "\"visible_text\":\"图片已经生成。\"," +
+                "\"checkpoint\":{\"opaque_payload\":{" +
+                "\"format\":\"pydantic-ai-v1\",\"messages\":[],\"pending_calls\":[]}}," +
+                "\"actions\":[]}";
+        mockMvc.perform(post("/internal/agent-runs/{id}/commits", runId)
+                        .header("X-Worker-Id", "pydantic-worker-1")
+                        .contentType("application/json")
+                        .content(prematureCompletion))
+                .andExpect(status().isUnprocessableEntity());
+
+        String firstCommit = "{" +
+                "\"commit_id\":\"pydantic-commit-1\"," +
+                "\"project_id\":" + project.getId() + "," +
+                "\"user_id\":10," +
+                "\"expected_run_version\":" + firstWork.path("run_version").asInt() + "," +
+                "\"fencing_token\":" + firstWork.path("fencing_token").asLong() + "," +
+                "\"engine\":\"pydantic-ai\"," +
+                "\"engine_version\":\"2.9.0\"," +
+                "\"adapter_schema_version\":1," +
+                "\"visible_text\":\"已接纳，正在生成图片。\"," +
+                "\"checkpoint\":{\"opaque_payload\":{"
+                + "\"format\":\"pydantic-ai-v1\",\"messages\":[],"
+                + "\"pending_calls\":[{\"action_id\":\"pydantic-image-1\","
+                + "\"tool_call_id\":\"private-call-1\"}]}},"
+                + "\"actions\":[{\"action_id\":\"pydantic-image-1\","
+                + "\"action_type\":\"generate_image\","
+                + "\"arguments\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}}]}";
+        MvcResult firstCommitted = mockMvc.perform(post("/internal/agent-runs/{id}/commits", runId)
+                        .header("X-Worker-Id", "pydantic-worker-1")
+                        .contentType("application/json")
+                        .content(firstCommit))
+                .andExpect(status().isOk())
+                .andReturn();
+        long jobId = objectMapper.readTree(firstCommitted.getResponse().getContentAsString())
+                .path("data").path("generation_job_id").asLong();
+
+        assertThat(generationWorker.runOnce("generation-worker-pydantic")).isTrue();
+
+        generationJobMapper.insert(new GenerationJob()
+                .setProjectId(project.getId())
+                .setUserId(10L)
+                .setAgentRunId(runId)
+                .setActionIdentity("historical-action")
+                .setType(GenerationJob.TYPE_IMAGE)
+                .setSource(GenerationJob.SOURCE_AGENT_RUN)
+                .setInput(java.util.Map.of("prompt", "历史动作"))
+                .setStatus(GenerationJob.STATUS_FAILED)
+                .setProgress(0)
+                .setError(java.util.Map.of("code", "historical")));
+
+        MvcResult resumedClaim = mockMvc.perform(post("/internal/agent-runs/claim")
+                        .header("X-Worker-Id", "pydantic-worker-2")
+                        .header("X-Orchestrator-Engine", "pydantic-ai"))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode resumedWork = objectMapper.readTree(resumedClaim.getResponse().getContentAsString()).path("data");
+        assertThat(resumedWork.path("checkpoint").path("engine").asText()).isEqualTo("pydantic-ai");
+        assertThat(resumedWork.path("checkpoint").path("engine_version").asText()).isEqualTo("2.9.0");
+        assertThat(resumedWork.path("accepted_results")).hasSize(1);
+        assertThat(resumedWork.path("accepted_results").get(0).path("action_id").asText())
+                .isEqualTo("pydantic-image-1");
+        assertThat(resumedWork.path("accepted_results").get(0).path("status").asText())
+                .isEqualTo("succeeded");
+        assertThat(resumedWork.path("accepted_results").get(0).path("result")
+                .path("asset_ids").get(0).asLong()).isPositive();
+
+        String finalCommit = "{" +
+                "\"commit_id\":\"pydantic-commit-2\"," +
+                "\"project_id\":" + project.getId() + "," +
+                "\"user_id\":10," +
+                "\"expected_run_version\":" + resumedWork.path("run_version").asInt() + "," +
+                "\"fencing_token\":" + resumedWork.path("fencing_token").asLong() + "," +
+                "\"engine\":\"pydantic-ai\"," +
+                "\"engine_version\":\"2.9.0\"," +
+                "\"adapter_schema_version\":1," +
+                "\"visible_text\":\"图片已经生成。\"," +
+                "\"checkpoint\":{\"opaque_payload\":{"
+                + "\"format\":\"pydantic-ai-v1\",\"messages\":[],\"pending_calls\":[]}},"
+                + "\"actions\":[]}";
+        mockMvc.perform(post("/internal/agent-runs/{id}/commits", runId)
+                        .header("X-Worker-Id", "pydantic-worker-2")
+                        .contentType("application/json")
+                        .content(finalCommit))
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM agent_runs WHERE id = ?", String.class, runId))
+                .isEqualTo("completed");
+        assertThat(count("generation_jobs", "agent_run_id", runId)).isEqualTo(2);
+        assertThat(count("conversation_messages", "agent_run_id", runId)).isEqualTo(3);
+        assertThat(generationJobMapper.selectById(jobId).getStatus())
+                .isEqualTo(GenerationJob.STATUS_SUCCEEDED);
+    }
+
+    @Test
     void providerFailureMarksJobFailedWithoutAsset() throws Exception {
         Long jobId = createJobThroughAgentRun("fake:failure");
 

@@ -95,12 +95,16 @@ public class AgentRunWorkerService {
                     .stream()
                     .map(message -> new RunWorkResponse.RunMessage(message.getRole(), message.getContent()))
                     .toList();
+            List<RunWorkResponse.AcceptedResult> acceptedResults = acceptedResults(run, checkpoint);
             return new RunWorkResponse(
                     run.getId(), run.getProjectId(), run.getConversationId(), run.getUserId(),
                     run.getVersion(), run.getFencingToken(), run.getEngine(), run.getEngineVersion(),
                     run.getAdapterSchemaVersion(), messages,
                     checkpoint == null ? null
-                            : new RunWorkResponse.Checkpoint(checkpoint.getId(), checkpoint.getOpaquePayload()));
+                            : new RunWorkResponse.Checkpoint(
+                                    checkpoint.getId(), checkpoint.getEngine(), checkpoint.getEngineVersion(),
+                                    checkpoint.getAdapterSchemaVersion(), checkpoint.getOpaquePayload()),
+                    acceptedResults);
         }
     }
 
@@ -129,7 +133,12 @@ public class AgentRunWorkerService {
             throw new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
                     "首版不接受用户补充输入或错误终态提交");
         }
-        RunCommitRequest.ProposedAction action = validateAction(request.actions());
+        if (request.actions().isEmpty() && !supportsNoActionCompletion(run)) {
+            throw new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
+                    "只有固定版 Pydantic AI Run 可提交无动作完成结果");
+        }
+        RunCommitRequest.ProposedAction action = request.actions().isEmpty()
+                ? null : validateAction(request.actions());
 
         long checkpointCount = checkpointMapper.selectCount(Wrappers.<RuntimeCheckpoint>lambdaQuery()
                 .eq(RuntimeCheckpoint::getAgentRunId, runId));
@@ -159,17 +168,20 @@ public class AgentRunWorkerService {
                 .setSequenceNo(Math.toIntExact(messageCount + 1));
         messageMapper.insert(message);
 
-        GenerationJob job = new GenerationJob()
-                .setProjectId(run.getProjectId())
-                .setUserId(run.getUserId())
-                .setAgentRunId(runId)
-                .setActionIdentity(action.actionId())
-                .setType(GenerationJob.TYPE_IMAGE)
-                .setSource(GenerationJob.SOURCE_AGENT_RUN)
-                .setInput(new LinkedHashMap<>(action.arguments()))
-                .setStatus(GenerationJob.STATUS_QUEUED)
-                .setProgress(0);
-        generationJobMapper.insert(job);
+        GenerationJob job = null;
+        if (action != null) {
+            job = new GenerationJob()
+                    .setProjectId(run.getProjectId())
+                    .setUserId(run.getUserId())
+                    .setAgentRunId(runId)
+                    .setActionIdentity(action.actionId())
+                    .setType(GenerationJob.TYPE_IMAGE)
+                    .setSource(GenerationJob.SOURCE_AGENT_RUN)
+                    .setInput(new LinkedHashMap<>(action.arguments()))
+                    .setStatus(GenerationJob.STATUS_QUEUED)
+                    .setProgress(0);
+            generationJobMapper.insert(job);
+        }
 
         Map<String, Object> messagePayload = new LinkedHashMap<>();
         messagePayload.put("message_id", message.getId());
@@ -182,22 +194,24 @@ public class AgentRunWorkerService {
                 AggregateType.CONVERSATION, String.valueOf(conversation.getId()), message.getSequenceNo(),
                 messagePayload, request.commitId(), null);
 
-        Map<String, Object> jobPayload = new LinkedHashMap<>();
-        jobPayload.put("job_id", job.getId());
-        jobPayload.put("agent_run_id", runId);
-        jobPayload.put("action_identity", job.getActionIdentity());
-        jobPayload.put("type", job.getType());
-        jobPayload.put("source", job.getSource());
-        jobPayload.put("status", job.getStatus());
-        jobPayload.put("progress", job.getProgress());
-        jobPayload.put("input", job.getInput());
-        projectEventService.appendEvent(run.getProjectId(), EventType.GENERATION_JOB_CREATED,
-                AggregateType.GENERATION_JOB, String.valueOf(job.getId()), job.getVersion(),
-                jobPayload, request.commitId(), null);
+        if (job != null) {
+            Map<String, Object> jobPayload = new LinkedHashMap<>();
+            jobPayload.put("job_id", job.getId());
+            jobPayload.put("agent_run_id", runId);
+            jobPayload.put("action_identity", job.getActionIdentity());
+            jobPayload.put("type", job.getType());
+            jobPayload.put("source", job.getSource());
+            jobPayload.put("status", job.getStatus());
+            jobPayload.put("progress", job.getProgress());
+            jobPayload.put("input", job.getInput());
+            projectEventService.appendEvent(run.getProjectId(), EventType.GENERATION_JOB_CREATED,
+                    AggregateType.GENERATION_JOB, String.valueOf(job.getId()), job.getVersion(),
+                    jobPayload, request.commitId(), null);
+        }
 
         run.setCurrentCheckpointId(checkpoint.getId())
-                .setStatus(AgentRun.STATUS_AWAITING_JOB)
-                .setStage("generating")
+                .setStatus(job == null ? AgentRun.STATUS_COMPLETED : AgentRun.STATUS_AWAITING_JOB)
+                .setStage(job == null ? "completed" : "generating")
                 .setLeaseOwner(null)
                 .setLeaseExpiresAt(null);
         agentRunMapper.updateById(run);
@@ -211,7 +225,7 @@ public class AgentRunWorkerService {
                 .setCommitId(request.commitId())
                 .setRequestHash(requestHash)
                 .setCheckpointId(checkpoint.getId())
-                .setGenerationJobId(job.getId())
+                .setGenerationJobId(job == null ? null : job.getId())
                 .setCommittedCursor(projectEventService.highWatermark(run.getProjectId()));
         runCommitMapper.insert(committed);
         return response(committed);
@@ -284,6 +298,52 @@ public class AgentRunWorkerService {
                     SystemCode.AGENT_ACTION_REJECTED.getMsg());
         }
         return action;
+    }
+
+    private RunWorkResponse.AcceptedResult acceptedResult(GenerationJob job) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("job_id", job.getId());
+        if (GenerationJob.STATUS_SUCCEEDED.equals(job.getStatus())) {
+            result.put("asset_ids", job.getOutputAssetIds() == null ? List.of() : job.getOutputAssetIds());
+        } else {
+            result.put("error", job.getError() == null ? Map.of() : job.getError());
+        }
+        return new RunWorkResponse.AcceptedResult(job.getActionIdentity(), job.getStatus(), result);
+    }
+
+    private List<RunWorkResponse.AcceptedResult> acceptedResults(
+            AgentRun run,
+            RuntimeCheckpoint checkpoint) {
+        if (checkpoint == null) {
+            return List.of();
+        }
+        RunCommitRecord commit = runCommitMapper.selectOne(Wrappers.<RunCommitRecord>lambdaQuery()
+                .eq(RunCommitRecord::getAgentRunId, run.getId())
+                .eq(RunCommitRecord::getCheckpointId, checkpoint.getId()));
+        if (commit == null || commit.getGenerationJobId() == null) {
+            return List.of();
+        }
+        GenerationJob job = generationJobMapper.selectById(commit.getGenerationJobId());
+        if (job == null
+                || !Objects.equals(job.getAgentRunId(), run.getId())
+                || !GenerationJob.SOURCE_AGENT_RUN.equals(job.getSource())
+                || !(GenerationJob.STATUS_SUCCEEDED.equals(job.getStatus())
+                        || GenerationJob.STATUS_FAILED.equals(job.getStatus()))) {
+            return List.of();
+        }
+        return List.of(acceptedResult(job));
+    }
+
+    private boolean supportsNoActionCompletion(AgentRun run) {
+        if (!"pydantic-ai".equals(run.getEngine())
+                || !"2.9.0".equals(run.getEngineVersion())
+                || !Integer.valueOf(1).equals(run.getAdapterSchemaVersion())
+                || run.getCurrentCheckpointId() == null) {
+            return false;
+        }
+        RuntimeCheckpoint checkpoint = checkpointMapper.selectById(run.getCurrentCheckpointId());
+        return checkpointMatches(run, checkpoint)
+                && acceptedResults(run, checkpoint).size() == 1;
     }
 
     private Map<String, Object> runPayload(AgentRun run) {

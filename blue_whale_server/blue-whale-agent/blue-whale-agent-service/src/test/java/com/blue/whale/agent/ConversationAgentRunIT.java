@@ -298,6 +298,25 @@ class ConversationAgentRunIT {
     }
 
     @Test
+    void fakeRunCannotUseThePydanticNoActionCompletionPath() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("fake-no-action");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "fake-no-action-key", "生成一张蓝鲸海报")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        String body = validCommitBody(project.getId(), work).replace(
+                "\"actions\":[{\"action_id\":\"action-1\",\"action_type\":\"generate_image\","
+                        + "\"arguments\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}}]",
+                "\"actions\":[]");
+
+        postCommit(runId, body)
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(100304));
+
+        assertNoCommitFacts(project.getId(), runId);
+    }
+
+    @Test
     void expiredLeaseRejectsOldWorkerAndAllowsFencedReclaim() throws Exception {
         Project project = new Project().setOwnerId(10L).setName("expired-lease");
         projectMapper.insert(project);
