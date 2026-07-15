@@ -17,6 +17,10 @@ describe("mapJobStatusToCardStatus（CONTEXT.md L79-80 视图映射）", () => {
   it("queued → generating（队列中视为过渡态，与 processing UI 一致）", () => {
     expect(mapJobStatusToCardStatus("queued")).toBe("generating");
   });
+
+  it("cancelled → cancelled（取消不是失败）", () => {
+    expect(mapJobStatusToCardStatus("cancelled")).toBe("cancelled");
+  });
 });
 
 describe("isJobTerminal", () => {
@@ -41,11 +45,20 @@ describe("isJobTerminal", () => {
   });
 
   it("queued / processing 非终态", () => {
+    expect(isJobTerminal({ id: "j", status: "queued", createdAt: 0 })).toBe(
+      false,
+    );
+    expect(isJobTerminal({ id: "j", status: "processing", createdAt: 0 })).toBe(
+      false,
+    );
+  });
+
+  it("partially_succeeded / cancelled 是终态", () => {
     expect(
-      isJobTerminal({ id: "j", status: "queued", createdAt: 0 }),
-    ).toBe(false);
-    expect(
-      isJobTerminal({ id: "j", status: "processing", createdAt: 0 }),
-    ).toBe(false);
+      isJobTerminal({ id: "j", status: "partially_succeeded", createdAt: 0 }),
+    ).toBe(true);
+    expect(isJobTerminal({ id: "j", status: "cancelled", createdAt: 0 })).toBe(
+      true,
+    );
   });
 });

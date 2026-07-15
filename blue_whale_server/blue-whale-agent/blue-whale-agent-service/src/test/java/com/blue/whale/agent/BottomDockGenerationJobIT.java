@@ -206,6 +206,42 @@ class BottomDockGenerationJobIT {
     }
 
     @Test
+    void cancellingQueuedMultiOutputImageCancelsEveryUnsubmittedSlotIdempotently() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("queued-image-cancel");
+        projectMapper.insert(project);
+        String body = "{" +
+                "\"type\":\"image\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{\"prompt\":\"三张蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"expected_output_count\":3}";
+        long jobId = responseData(postGenerationJob(project.getId(), "queued-image-cancel", body)
+                .andExpect(status().isAccepted()).andReturn()).path("generation_job_id").asLong();
+
+        cancel(project.getId(), jobId).andExpect(status().isAccepted());
+        long eventCountAfterFirstCancel = count("project_events", "project_id", project.getId());
+        cancel(project.getId(), jobId).andExpect(status().isAccepted());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("cancelled");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT status FROM generation_job_outputs WHERE generation_job_id = ? " +
+                        "ORDER BY slot_index", String.class, jobId))
+                .containsExactly("cancelled", "cancelled", "cancelled");
+        assertThat(count("project_events", "project_id", project.getId()))
+                .isEqualTo(eventCountAfterFirstCancel);
+        assertThat(generationWorker.runOnce("queued-image-cancel-worker")).isFalse();
+
+        mockMvc.perform(get("/api/projects/{id}/snapshot", project.getId())
+                        .header("X-User-Id", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.generation_jobs[0].status").value("cancelled"))
+                .andExpect(jsonPath("$.data.generation_jobs[0].outputs[0].status").value("cancelled"))
+                .andExpect(jsonPath("$.data.generation_jobs[0].outputs[1].status").value("cancelled"))
+                .andExpect(jsonPath("$.data.generation_jobs[0].outputs[2].status").value("cancelled"));
+    }
+
+    @Test
     void snapshotDoesNotExposeLegacyImageRootCause() throws Exception {
         Project project = new Project().setOwnerId(10L).setName("snapshot-error-redaction");
         projectMapper.insert(project);
@@ -566,6 +602,14 @@ class BottomDockGenerationJobIT {
                         projectId, jobId)
                 .header("X-User-Id", "10")
                 .header("Idempotency-Key", idempotencyKey));
+    }
+
+    private org.springframework.test.web.servlet.ResultActions cancel(Long projectId, Long jobId)
+            throws Exception {
+        return mockMvc.perform(post(
+                        "/api/projects/{projectId}/generation-jobs/{jobId}/cancel",
+                        projectId, jobId)
+                .header("X-User-Id", "10"));
     }
 
     private long count(String table, String column, Long value) {

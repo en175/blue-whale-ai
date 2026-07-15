@@ -184,7 +184,11 @@ public class AgentRunWorkerService {
                     .setExpectedOutputCount(1)
                     .setInput(new LinkedHashMap<>(action.arguments()))
                     .setStatus(GenerationJob.STATUS_QUEUED)
-                    .setProgress(0);
+                    .setProgress(0)
+                    .setFencingToken(0L)
+                    .setStrategyVersion("image-sync-v1")
+                    .setExecutionDeadlineAt(generationJobMapper.selectCurrentTime().plusMinutes(30))
+                    .setNextActionAt(generationJobMapper.selectCurrentTime());
             generationJobMapper.insert(job);
             generationJobOutputMapper.insert(new GenerationJobOutput()
                     .setGenerationJobId(job.getId())
@@ -362,7 +366,8 @@ public class AgentRunWorkerService {
                 || !GenerationJob.SOURCE_AGENT_RUN.equals(job.getSource())
                 || !(GenerationJob.STATUS_SUCCEEDED.equals(job.getStatus())
                         || GenerationJob.STATUS_PARTIALLY_SUCCEEDED.equals(job.getStatus())
-                        || GenerationJob.STATUS_FAILED.equals(job.getStatus()))) {
+                        || GenerationJob.STATUS_FAILED.equals(job.getStatus())
+                        || GenerationJob.STATUS_CANCELLED.equals(job.getStatus()))) {
             return List.of();
         }
         return List.of(acceptedResult(job));

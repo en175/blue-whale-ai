@@ -2,6 +2,9 @@ package com.blue.whale.agent.support;
 
 import com.blue.whale.agent.service.GenerationJobClaimService;
 import com.blue.whale.agent.service.GenerationResultAcceptanceService;
+import com.blue.whale.agent.service.AssetObjectLifecycleService;
+import com.blue.whale.agent.service.ImageProviderCallService;
+import com.blue.whale.agent.service.generation.AssetObjectGarbageCollector;
 import com.blue.whale.agent.service.generation.GenerationProvider;
 import com.blue.whale.agent.service.generation.GenerationStorage;
 import com.blue.whale.agent.service.generation.GenerationWorker;
@@ -37,9 +40,9 @@ public class FakeGenerationConfiguration {
     @Bean
     @Primary
     VideoResultIngestor fakeVideoResultIngestor(FakeGenerationStorage storage) {
-        return (jobId, temporaryResultUrl, providerDurationSeconds, expectedDurationSeconds) -> {
+        return (jobId, slotIndex, temporaryResultUrl, providerDurationSeconds, expectedDurationSeconds) -> {
             byte[] content = "fake-mp4".getBytes(StandardCharsets.UTF_8);
-            return new VideoIngestedResult(storage.storeVideo(jobId, 0,
+            return new VideoIngestedResult(storage.storeVideo(jobId, slotIndex,
                     new ByteArrayInputStream(content), content.length, "video/mp4"),
                     expectedDurationSeconds);
         };
@@ -51,8 +54,18 @@ public class FakeGenerationConfiguration {
             GenerationResultAcceptanceService acceptanceService,
             GenerationProvider provider,
             GenerationStorage storage,
-            SeedanceVideoGenerationProcessor videoProcessor) {
+            SeedanceVideoGenerationProcessor videoProcessor,
+            AssetObjectLifecycleService lifecycleService,
+            ImageProviderCallService imageProviderCallService) {
         return new GenerationWorker(
-                claimService, acceptanceService, provider, storage, videoProcessor);
+                claimService, acceptanceService, provider, storage, videoProcessor,
+                lifecycleService, imageProviderCallService);
+    }
+
+    @Bean
+    AssetObjectGarbageCollector assetObjectGarbageCollector(
+            AssetObjectLifecycleService lifecycleService,
+            FakeGenerationStorage storage) {
+        return new AssetObjectGarbageCollector(lifecycleService, storage);
     }
 }

@@ -106,7 +106,14 @@ export function AgentCard({
   const status = msg.status ?? "normal";
   const generating = status === "generating";
   const failed = status === "failed";
-  const ctaLabel = busy ? "重试中" : failed ? "重试" : "手动应用";
+  const cancelled = status === "cancelled";
+  const ctaLabel = busy
+    ? "重试中"
+    : failed
+      ? "重试"
+      : cancelled
+        ? "已取消"
+        : "手动应用";
   return (
     <div className="self-stretch">
       <div
@@ -132,7 +139,7 @@ export function AgentCard({
             </span>
             <button
               type="button"
-              disabled={generating || busy}
+              disabled={generating || cancelled || busy}
               onClick={() => onReapply?.(msg)}
               className={[
                 "tc-agent-card-cta tc-agent-card-cta--reapply",

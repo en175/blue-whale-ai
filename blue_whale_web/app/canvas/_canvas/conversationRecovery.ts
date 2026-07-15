@@ -145,12 +145,14 @@ function generationOutputs(
 function outputStatus(
   job: Record<string, unknown>,
   output: Record<string, unknown>,
-): "normal" | "generating" | "failed" {
+): "normal" | "generating" | "failed" | "cancelled" {
   if (output.status === "succeeded") return "normal";
   if (output.status === "failed") return "failed";
+  if (output.status === "cancelled") return "cancelled";
   if (output.asset_id !== null && output.asset_id !== undefined)
     return "normal";
   if (job.status === "failed") return "failed";
+  if (job.status === "cancelled") return "cancelled";
   return "generating";
 }
 

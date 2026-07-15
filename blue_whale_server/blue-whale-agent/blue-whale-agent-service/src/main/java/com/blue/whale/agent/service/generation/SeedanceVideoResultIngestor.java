@@ -1,5 +1,8 @@
 package com.blue.whale.agent.service.generation;
 
+import com.blue.whale.agent.model.dto.AssetObjectTransferHandle;
+import com.blue.whale.agent.model.entity.Asset;
+import com.blue.whale.agent.service.AssetObjectLifecycleService;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -20,11 +23,20 @@ public class SeedanceVideoResultIngestor implements VideoResultIngestor {
     private final OkHttpClient httpClient;
     private final VideoGenerationStorage storage;
     private final GenerationAdapterProperties properties;
+    private final AssetObjectLifecycleService lifecycleService;
 
     public SeedanceVideoResultIngestor(
             OkHttpClient httpClient,
             VideoGenerationStorage storage,
             GenerationAdapterProperties properties) {
+        this(httpClient, storage, properties, null);
+    }
+
+    public SeedanceVideoResultIngestor(
+            OkHttpClient httpClient,
+            VideoGenerationStorage storage,
+            GenerationAdapterProperties properties,
+            AssetObjectLifecycleService lifecycleService) {
         Dns upstreamDns = httpClient.dns();
         this.httpClient = httpClient.newBuilder()
                 .followRedirects(false)
@@ -33,11 +45,13 @@ public class SeedanceVideoResultIngestor implements VideoResultIngestor {
                 .build();
         this.storage = storage;
         this.properties = properties;
+        this.lifecycleService = lifecycleService;
     }
 
     @Override
     public VideoIngestedResult ingest(
             Long jobId,
+            int slotIndex,
             String temporaryResultUrl,
             Integer providerDurationSeconds,
             int expectedDurationSeconds) {
@@ -64,9 +78,22 @@ public class SeedanceVideoResultIngestor implements VideoResultIngestor {
             if (length <= 0 || length > properties.getTos().getMaxVideoBytes()) {
                 throw new IllegalArgumentException("Seedance 视频大小无效");
             }
-            StoredGenerationObject stored = storage.storeVideo(
-                    jobId, 0, body.byteStream(), length, "video/mp4");
-            return new VideoIngestedResult(stored, providerDurationSeconds);
+            PreparedVideoGenerationObject prepared = storage.prepareVideo(
+                    jobId, slotIndex, length, "video/mp4");
+            AssetObjectTransferHandle transfer = lifecycleService == null ? null
+                    : lifecycleService.beginTransfer(prepared.storageKey(), Asset.SOURCE_GENERATED);
+            try {
+                StoredGenerationObject stored = storage.storeVideo(prepared, body.byteStream());
+                if (transfer != null) {
+                    lifecycleService.completeTransfer(transfer, stored.contentSha256());
+                }
+                return new VideoIngestedResult(stored, providerDurationSeconds);
+            } catch (RuntimeException exception) {
+                if (transfer != null) {
+                    lifecycleService.failTransfer(transfer);
+                }
+                throw exception;
+            }
         } catch (IOException exception) {
             throw new IllegalStateException("Seedance 视频下载失败", exception);
         }

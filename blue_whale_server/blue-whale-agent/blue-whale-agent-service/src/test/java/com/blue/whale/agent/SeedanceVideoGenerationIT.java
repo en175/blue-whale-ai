@@ -193,6 +193,51 @@ class SeedanceVideoGenerationIT {
     }
 
     @Test
+    void providerInitiatedCancellationBecomesStableFailureWithoutUserIntent() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("seedance-provider-cancelled");
+        projectMapper.insert(project);
+        long jobId = createVideoJob(project.getId(), "seedance-provider-cancelled");
+
+        assertThat(generationWorker.runOnce("video-worker-provider-cancel-submit")).isTrue();
+        provider.cancelExternally();
+        jdbcTemplate.update(
+                "UPDATE generation_jobs SET next_action_at = CURRENT_TIMESTAMP WHERE id = ?", jobId);
+
+        assertThat(generationWorker.runOnce("video-worker-provider-cancel-observe")).isTrue();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("failed");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_job_outputs WHERE generation_job_id = ?",
+                String.class, jobId)).isEqualTo("failed");
+    }
+
+    @Test
+    void confirmedCancellationKeepsSucceededSlotAndCancelsOnlyMissingSlot() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("seedance-partial-cancel");
+        projectMapper.insert(project);
+        long jobId = createVideoJob(project.getId(), "seedance-partial-cancel", 2);
+
+        completeNextVideoSlot(jobId, "video-worker-first-result", true);
+        provider.queue();
+        assertThat(generationWorker.runOnce("video-worker-second-submit")).isTrue();
+        cancel(project.getId(), jobId);
+        jdbcTemplate.update(
+                "UPDATE generation_jobs SET next_action_at = CURRENT_TIMESTAMP WHERE id = ?", jobId);
+        assertThat(generationWorker.runOnce("video-worker-second-cancel")).isTrue();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("partially_succeeded");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT status FROM generation_job_outputs WHERE generation_job_id = ? " +
+                        "ORDER BY slot_index", String.class, jobId))
+                .containsExactly("succeeded", "cancelled");
+        assertThat(count("assets", "generation_job_id", jobId)).isEqualTo(1);
+        assertThat(provider.cancellationCount()).isEqualTo(1);
+    }
+
+    @Test
     void ambiguousSubmissionIsNeverBlindlyResubmitted() throws Exception {
         Project project = new Project().setOwnerId(10L).setName("seedance-ambiguous");
         projectMapper.insert(project);

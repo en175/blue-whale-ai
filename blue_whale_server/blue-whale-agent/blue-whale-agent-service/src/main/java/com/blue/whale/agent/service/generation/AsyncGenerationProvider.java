@@ -8,6 +8,8 @@ public interface AsyncGenerationProvider {
 
     void requestCancel(ProviderTaskReference reference);
 
+    ProviderCancellationCapability cancellationCapability();
+
     String providerId();
 
     String accountId();

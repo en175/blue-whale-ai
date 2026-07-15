@@ -4,6 +4,8 @@ import com.blue.whale.agent.service.GenerationJobClaimService;
 import com.blue.whale.agent.service.GenerationResultAcceptanceService;
 import com.blue.whale.agent.service.ProjectAssetContentService;
 import com.blue.whale.agent.service.ProjectAssetAccessService;
+import com.blue.whale.agent.service.AssetObjectLifecycleService;
+import com.blue.whale.agent.service.ImageProviderCallService;
 import com.blue.whale.agent.service.generation.GenerationObjectSigner;
 import com.blue.whale.agent.service.generation.AsyncGenerationProvider;
 import com.blue.whale.agent.service.generation.GenerationProvider;
@@ -26,6 +28,10 @@ class GenerationAdapterConfigurationTest {
             .withBean(ProjectAssetContentService.class, () -> mock(ProjectAssetContentService.class))
             .withBean(ProjectAssetAccessService.class, () -> mock(ProjectAssetAccessService.class))
             .withBean(GenerationJobClaimService.class, () -> mock(GenerationJobClaimService.class))
+            .withBean(AssetObjectLifecycleService.class,
+                    () -> mock(AssetObjectLifecycleService.class))
+            .withBean(ImageProviderCallService.class,
+                    () -> mock(ImageProviderCallService.class))
             .withBean(GenerationResultAcceptanceService.class,
                     () -> mock(GenerationResultAcceptanceService.class));
 

@@ -247,4 +247,35 @@ describe("Agent 对话恢复投影", () => {
       }),
     ]);
   });
+
+  it("取消槽恢复为独立取消态且不生成 Node", () => {
+    const snapshot: ProjectSnapshot = {
+      project: { id: 1, name: "P", thumb: null, created_at: "now" },
+      canvas: { id: null, project_id: 1, viewport: null, nodes: "[]" },
+      conversation_messages: [],
+      agent_runs: [{ agent_run_id: 5, status: "completed" }],
+      generation_jobs: [
+        {
+          job_id: 21,
+          agent_run_id: 5,
+          source: "agent_run",
+          type: "image",
+          input: { prompt: "取消的蓝鲸" },
+          status: "cancelled",
+          outputs: [{ slot_index: 0, status: "cancelled", asset_id: null }],
+          output_asset_ids: [],
+        },
+      ],
+      assets: {},
+      high_watermark_cursor: 21,
+    };
+
+    expect(projectSnapshotToChatMessages(snapshot)).toEqual([
+      expect.objectContaining({
+        id: "generation-job-21-slot-0",
+        status: "cancelled",
+      }),
+    ]);
+    expect(projectSnapshotToCanvasNodes(snapshot, [])).toEqual([]);
+  });
 });

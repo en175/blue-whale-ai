@@ -24,6 +24,13 @@ describe("nextRetryStatus", () => {
     expect(result.isTerminal).toBe(true);
   });
 
+  it("cancelled 保持取消终态且不可进入重试链", () => {
+    expect(nextRetryStatus("cancelled")).toEqual({
+      next: "cancelled",
+      isTerminal: true,
+    });
+  });
+
   it("重试链 failed→generating→normal 两步收敛，无回退", () => {
     const trajectory: { next: CardStatus; isTerminal: boolean }[] = [];
     let current: CardStatus = "failed";
@@ -44,8 +51,16 @@ describe("fromJobStatus", () => {
     expect(fromJobStatus("succeeded")).toBe("normal");
   });
 
+  it("partially_succeeded 映射 normal（保留成功输出）", () => {
+    expect(fromJobStatus("partially_succeeded")).toBe("normal");
+  });
+
   it("failed 映射 failed", () => {
     expect(fromJobStatus("failed")).toBe("failed");
+  });
+
+  it("cancelled 映射 cancelled", () => {
+    expect(fromJobStatus("cancelled")).toBe("cancelled");
   });
 
   it("queued / processing 映射 generating（过渡态）", () => {

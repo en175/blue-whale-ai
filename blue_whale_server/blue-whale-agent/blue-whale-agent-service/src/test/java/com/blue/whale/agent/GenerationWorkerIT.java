@@ -7,7 +7,11 @@ import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.Project;
 import com.blue.whale.agent.service.generation.GenerationWorker;
+import com.blue.whale.agent.service.GenerationJobClaimService;
+import com.blue.whale.agent.service.ImageProviderCallService;
+import com.blue.whale.agent.model.dto.GenerationJobClaim;
 import com.blue.whale.agent.support.FakeGenerationConfiguration;
+import com.blue.whale.agent.support.FakeGenerationProvider;
 import com.blue.whale.agent.support.FakeGenerationStorage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,6 +28,8 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import javax.imageio.ImageIO;
 import java.io.ByteArrayInputStream;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -59,6 +65,12 @@ class GenerationWorkerIT {
     @Autowired
     private FakeGenerationStorage storage;
     @Autowired
+    private FakeGenerationProvider provider;
+    @Autowired
+    private GenerationJobClaimService claimService;
+    @Autowired
+    private ImageProviderCallService imageProviderCallService;
+    @Autowired
     private JdbcTemplate jdbcTemplate;
     @Autowired
     private ObjectMapper objectMapper;
@@ -66,7 +78,11 @@ class GenerationWorkerIT {
     @BeforeEach
     void cleanFacts() {
         storage.clear();
+        provider.reset();
         jdbcTemplate.batchUpdate(
+                "DELETE FROM asset_object_transfers",
+                "DELETE FROM asset_storage_objects",
+                "DELETE FROM generation_provider_tasks",
                 "DELETE FROM generation_result_conflicts",
                 "DELETE FROM generation_job_outputs",
                 "DELETE FROM assets",
@@ -284,6 +300,135 @@ class GenerationWorkerIT {
         assertThat(generationWorker.runOnce("generation-worker-no-result")).isTrue();
 
         assertFailedWithoutAsset(jobId, "no_result");
+    }
+
+    @Test
+    void providerSuccessWinsWhenCancellationArrivesDuringImageCall() throws Exception {
+        Long jobId = createJobThroughAgentRun("cancel-race-success");
+        GenerationJob created = generationJobMapper.selectById(jobId);
+        provider.blockNext();
+
+        CompletableFuture<Boolean> worker = CompletableFuture.supplyAsync(
+                () -> generationWorker.runOnce("generation-worker-cancel-race"));
+        assertThat(provider.awaitStarted()).isTrue();
+        mockMvc.perform(post("/api/projects/{projectId}/generation-jobs/{jobId}/cancel",
+                        created.getProjectId(), jobId)
+                        .header("X-User-Id", "10"))
+                .andExpect(status().isAccepted());
+        provider.release();
+
+        assertThat(worker.get(5, TimeUnit.SECONDS)).isTrue();
+        GenerationJob completed = generationJobMapper.selectById(jobId);
+        assertThat(completed.getStatus()).isEqualTo(GenerationJob.STATUS_SUCCEEDED);
+        assertThat(completed.getCancelRequestedAt()).isNotNull();
+        assertThat(provider.callCount()).isOne();
+        assertThat(count("assets", "generation_job_id", jobId)).isOne();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_job_outputs WHERE generation_job_id = ?",
+                String.class, jobId)).isEqualTo("succeeded");
+    }
+
+    @Test
+    void cancellationBeforeImageProviderCallUsesDurableProofAndSkipsProvider() throws Exception {
+        Long jobId = createJobThroughAgentRun("cancel-before-provider");
+        GenerationJob created = generationJobMapper.selectById(jobId);
+        GenerationJobClaim claim = claimService.claim("generation-worker-before-call");
+        mockMvc.perform(post("/api/projects/{projectId}/generation-jobs/{jobId}/cancel",
+                        created.getProjectId(), jobId)
+                        .header("X-User-Id", "10"))
+                .andExpect(status().isAccepted());
+
+        assertThat(imageProviderCallService.prepare(claim))
+                .isEqualTo(ImageProviderCallService.Preparation.CANCELLED);
+
+        assertThat(generationJobMapper.selectById(jobId).getStatus())
+                .isEqualTo(GenerationJob.STATUS_CANCELLED);
+        assertThat(provider.callCount()).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM generation_provider_tasks WHERE generation_job_id = ?",
+                Long.class, jobId)).isZero();
+    }
+
+    @Test
+    void queuedAgentRunCancellationResumesWithCancelledResult() throws Exception {
+        Long jobId = createJobThroughAgentRun("cancel-agent-run-job");
+        GenerationJob created = generationJobMapper.selectById(jobId);
+        Long runId = created.getAgentRunId();
+        jdbcTemplate.update("UPDATE agent_runs SET engine = 'pydantic-ai', "
+                + "engine_version = '2.9.0' WHERE id = ?", runId);
+        jdbcTemplate.update("UPDATE runtime_checkpoints SET engine = 'pydantic-ai', "
+                + "engine_version = '2.9.0' WHERE id = "
+                + "(SELECT current_checkpoint_id FROM agent_runs WHERE id = ?)", runId);
+
+        mockMvc.perform(post("/api/projects/{projectId}/generation-jobs/{jobId}/cancel",
+                        created.getProjectId(), jobId)
+                        .header("X-User-Id", "10"))
+                .andExpect(status().isAccepted());
+
+        assertThat(generationJobMapper.selectById(jobId).getStatus())
+                .isEqualTo(GenerationJob.STATUS_CANCELLED);
+        MvcResult resumed = mockMvc.perform(post("/internal/agent-runs/claim")
+                        .header("X-Worker-Id", "pydantic-cancel-worker")
+                        .header("X-Orchestrator-Engine", "pydantic-ai"))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode work = objectMapper.readTree(resumed.getResponse().getContentAsString()).path("data");
+        assertThat(work.path("accepted_results")).hasSize(1);
+        assertThat(work.path("accepted_results").get(0).path("action_id").asText())
+                .isEqualTo("action-1");
+        assertThat(work.path("accepted_results").get(0).path("status").asText())
+                .isEqualTo("cancelled");
+    }
+
+    @Test
+    void terminalAgentRunDoesNotStopItsSubmittedGenerationJob() throws Exception {
+        Long jobId = createJobThroughAgentRun("independent-job-lifecycle");
+        GenerationJob created = generationJobMapper.selectById(jobId);
+        jdbcTemplate.update("UPDATE agent_runs SET status = 'recovery_failed', "
+                + "stage = 'adapter_exited' WHERE id = ?", created.getAgentRunId());
+
+        assertThat(generationWorker.runOnce("generation-worker-after-adapter-exit")).isTrue();
+
+        assertThat(generationJobMapper.selectById(jobId).getStatus())
+                .isEqualTo(GenerationJob.STATUS_SUCCEEDED);
+        assertThat(count("assets", "generation_job_id", jobId)).isOne();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM agent_runs WHERE id = ?", String.class, created.getAgentRunId()))
+                .isEqualTo("recovery_failed");
+    }
+
+    @Test
+    void restartNeverResubmitsOrFakesCancellationWhenImageOutcomeIsUnknown() throws Exception {
+        Long jobId = createJobThroughAgentRun("unknown-after-restart");
+        GenerationJob created = generationJobMapper.selectById(jobId);
+        GenerationJobClaim firstClaim = claimService.claim("generation-worker-crashed");
+        assertThat(imageProviderCallService.prepare(firstClaim))
+                .isEqualTo(ImageProviderCallService.Preparation.CALL);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT lease_expires_at = execution_deadline_at FROM generation_jobs WHERE id = ?",
+                Boolean.class, jobId)).isTrue();
+        mockMvc.perform(post("/api/projects/{projectId}/generation-jobs/{jobId}/cancel",
+                        created.getProjectId(), jobId)
+                        .header("X-User-Id", "10"))
+                .andExpect(status().isAccepted());
+        jdbcTemplate.update("UPDATE generation_jobs SET lease_expires_at = "
+                + "DATEADD('SECOND', -1, CURRENT_TIMESTAMP), next_action_at = CURRENT_TIMESTAMP "
+                + "WHERE id = ?", jobId);
+
+        assertThat(generationWorker.runOnce("generation-worker-restarted")).isTrue();
+        assertThat(provider.callCount()).isZero();
+        assertThat(generationJobMapper.selectById(jobId).getStatus())
+                .isEqualTo(GenerationJob.STATUS_CANCEL_REQUESTED);
+
+        jdbcTemplate.update("UPDATE generation_jobs SET execution_deadline_at = "
+                + "DATEADD('SECOND', -1, CURRENT_TIMESTAMP), next_action_at = CURRENT_TIMESTAMP "
+                + "WHERE id = ?", jobId);
+        assertThat(generationWorker.runOnce("generation-worker-reconciler")).isTrue();
+
+        GenerationJob failed = generationJobMapper.selectById(jobId);
+        assertThat(failed.getStatus()).isEqualTo(GenerationJob.STATUS_FAILED);
+        assertThat(failed.getError()).containsEntry("code", "outcome_unknown");
+        assertThat(provider.callCount()).isZero();
     }
 
     @Test

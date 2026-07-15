@@ -19,6 +19,7 @@ public class GenerationJobOutput extends BaseEntity {
     public static final String STATUS_PENDING = "pending";
     public static final String STATUS_SUCCEEDED = "succeeded";
     public static final String STATUS_FAILED = "failed";
+    public static final String STATUS_CANCELLED = "cancelled";
 
     private Long generationJobId;
     private Integer slotIndex;

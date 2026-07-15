@@ -276,6 +276,7 @@ export function AgentChatPanel({
    */
   const handleReapply = (card: CardMessage) => {
     const current = card.status ?? "normal";
+    if (current === "cancelled") return;
     if (current === "normal") {
       onCardGenerated?.(card);
       return;

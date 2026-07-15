@@ -3,8 +3,7 @@ package com.blue.whale.agent.service;
 import com.blue.whale.agent.common.crypto.Sha256;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.mapper.GenerationProviderTaskMapper;
-import com.blue.whale.agent.model.constant.AggregateType;
-import com.blue.whale.agent.model.constant.EventType;
+import com.blue.whale.agent.model.dto.GenerationCancellationCommand;
 import com.blue.whale.agent.model.dto.GenerationFailureCommand;
 import com.blue.whale.agent.model.dto.GenerationJobClaim;
 import com.blue.whale.agent.model.entity.GenerationJob;
@@ -21,8 +20,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.Objects;
 
 @Service
@@ -35,7 +32,6 @@ public class SeedanceProviderTaskService {
     private final GenerationJobMapper jobMapper;
     private final GenerationProviderTaskMapper taskMapper;
     private final GenerationResultAcceptanceService acceptanceService;
-    private final ProjectEventService projectEventService;
     private final GenerationAdapterProperties properties;
 
     @Transactional
@@ -59,7 +55,7 @@ public class SeedanceProviderTaskService {
             return SubmissionPreparation.noResubmit();
         }
         if (GenerationJob.STATUS_CANCEL_REQUESTED.equals(job.getStatus())) {
-            complete(job, GenerationJob.STATUS_CANCELLED, null, false);
+            acceptCancelledSlot(claim);
             return SubmissionPreparation.cancelled();
         }
 
@@ -119,7 +115,7 @@ public class SeedanceProviderTaskService {
         if (ambiguous) {
             releaseAt(job, job.getExecutionDeadlineAt());
         } else if (GenerationJob.STATUS_CANCEL_REQUESTED.equals(job.getStatus())) {
-            complete(job, GenerationJob.STATUS_CANCELLED, null, false);
+            acceptCancelledSlot(claim);
         } else {
             acceptFailedSlot(claim, "provider_failed", "视频生成提交失败", false);
         }
@@ -148,7 +144,8 @@ public class SeedanceProviderTaskService {
 
     @Transactional
     public void completeCancelled(GenerationJobClaim claim) {
-        complete(requireClaimedVideoJob(claim), GenerationJob.STATUS_CANCELLED, null, false);
+        requireClaimedVideoJob(claim);
+        acceptCancelledSlot(claim);
     }
 
     @Transactional
@@ -228,6 +225,12 @@ public class SeedanceProviderTaskService {
         }
     }
 
+    private void acceptCancelledSlot(GenerationJobClaim claim) {
+        acceptanceService.acceptCancellation(new GenerationCancellationCommand(
+                claim.jobId(), claim.targetSlotIndex(), claim.jobVersion(), claim.fencingToken(),
+                claim.leaseOwner()));
+    }
+
     private ProviderTaskReference reference(GenerationProviderTask evidence) {
         return new ProviderTaskReference(
                 evidence.getProvider(), evidence.getAccountId(), evidence.getProviderTaskId());
@@ -240,49 +243,6 @@ public class SeedanceProviderTaskService {
         if (jobMapper.updateById(job) != 1) {
             throw conflict();
         }
-    }
-
-    private void complete(
-            GenerationJob job,
-            String status,
-            Map<String, Object> error,
-            boolean reconcileEvidence) {
-        if (isTerminal(job.getStatus())) {
-            return;
-        }
-        job.setStatus(status)
-                .setProgress(null)
-                .setError(error)
-                .setNextActionAt(GenerationJob.STATUS_FAILED.equals(status) && reconcileEvidence
-                        ? jobMapper.selectCurrentTime().plusSeconds(
-                        properties.getSeedance().getMaxPollSeconds()) : null)
-                .setLeaseOwner(null)
-                .setLeaseExpiresAt(null);
-        if (jobMapper.updateById(job) != 1) {
-            throw conflict();
-        }
-        appendStatusChanged(jobMapper.selectById(job.getId()));
-    }
-
-    private boolean isTerminal(String status) {
-        return GenerationJob.STATUS_SUCCEEDED.equals(status)
-                || GenerationJob.STATUS_PARTIALLY_SUCCEEDED.equals(status)
-                || GenerationJob.STATUS_FAILED.equals(status)
-                || GenerationJob.STATUS_CANCELLED.equals(status);
-    }
-
-    private void appendStatusChanged(GenerationJob job) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("job_id", job.getId());
-        payload.put("status", job.getStatus());
-        payload.put("progress", job.getProgress());
-        payload.put("output_asset_ids", job.getOutputAssetIds());
-        if (job.getError() != null) {
-            payload.put("error", job.getError());
-        }
-        projectEventService.appendEvent(job.getProjectId(), EventType.GENERATION_JOB_STATUS_CHANGED,
-                AggregateType.GENERATION_JOB, String.valueOf(job.getId()), job.getVersion(),
-                payload, null, null);
     }
 
     private String normalizedCallbackBaseUrl() {

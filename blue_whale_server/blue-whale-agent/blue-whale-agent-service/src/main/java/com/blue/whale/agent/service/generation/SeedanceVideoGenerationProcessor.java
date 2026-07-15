@@ -90,29 +90,34 @@ public class SeedanceVideoGenerationProcessor {
             scheduleEvidenceReconciliation(claim, observeCount);
             return;
         }
-        if (completeFromTerminalObservation(claim, observation, true)) {
+        CancellationOutcome cancellationOutcome = preparation.cancelRequested()
+                ? CancellationOutcome.USER_CANCELLED
+                : CancellationOutcome.PROVIDER_FAILED;
+        if (completeFromTerminalObservation(claim, observation, cancellationOutcome)) {
             return;
         }
 
         boolean deadlineReached = claim.executionDeadlineAt() != null
                 && !claim.executionDeadlineAt().isAfter(taskService.databaseNow());
         if (preparation.cancelRequested()
-                && observation.status() == ProviderObservation.Status.QUEUED) {
+                && provider.cancellationCapability().supports(observation.status())) {
             provider.requestCancel(preparation.reference());
             ProviderObservation confirmed = provider.observe(preparation.reference());
             taskService.recordObservation(claim, confirmed);
-            if (completeFromTerminalObservation(claim, confirmed, true)) {
+            if (completeFromTerminalObservation(
+                    claim, confirmed, CancellationOutcome.USER_CANCELLED)) {
                 return;
             }
             observation = confirmed;
         }
         if (deadlineReached) {
-            if (observation.status() == ProviderObservation.Status.QUEUED) {
+            if (provider.cancellationCapability().supports(observation.status())) {
                 try {
                     provider.requestCancel(preparation.reference());
                     ProviderObservation confirmed = provider.observe(preparation.reference());
                     taskService.recordObservation(claim, confirmed);
-                    if (completeFromTerminalObservation(claim, confirmed, false)) {
+                    if (completeFromTerminalObservation(
+                            claim, confirmed, CancellationOutcome.IGNORE)) {
                         return;
                     }
                 } catch (RuntimeException ignored) {
@@ -128,7 +133,7 @@ public class SeedanceVideoGenerationProcessor {
     private boolean completeFromTerminalObservation(
             GenerationJobClaim claim,
             ProviderObservation observation,
-            boolean acceptCancelled) {
+            CancellationOutcome cancellationOutcome) {
         if (observation.status() == ProviderObservation.Status.SUCCEEDED) {
             acceptSuccess(claim, observation);
             return true;
@@ -139,11 +144,23 @@ public class SeedanceVideoGenerationProcessor {
                     observation.errorMessage() == null ? "视频生成失败" : observation.errorMessage());
             return true;
         }
-        if (acceptCancelled && observation.status() == ProviderObservation.Status.CANCELLED) {
-            taskService.completeCancelled(claim);
-            return true;
+        if (observation.status() == ProviderObservation.Status.CANCELLED) {
+            if (cancellationOutcome == CancellationOutcome.USER_CANCELLED) {
+                taskService.completeCancelled(claim);
+                return true;
+            }
+            if (cancellationOutcome == CancellationOutcome.PROVIDER_FAILED) {
+                taskService.completeFailed(claim, "provider_cancelled", "视频生成被供应商取消");
+                return true;
+            }
         }
         return false;
+    }
+
+    private enum CancellationOutcome {
+        USER_CANCELLED,
+        PROVIDER_FAILED,
+        IGNORE
     }
 
     private void acceptSuccess(GenerationJobClaim claim, ProviderObservation observation) {
@@ -155,7 +172,8 @@ public class SeedanceVideoGenerationProcessor {
         int expectedDuration = number(claim.input().get("duration"), 4);
         VideoIngestedResult ingested;
         try {
-            ingested = ingestor.ingest(claim.jobId(), observation.temporaryResultUrl(),
+            ingested = ingestor.ingest(claim.jobId(), claim.targetSlotIndex(),
+                    observation.temporaryResultUrl(),
                     observation.durationSeconds(), expectedDuration);
         } catch (RuntimeException exception) {
             taskService.completeFailed(claim, "storage_failed", "生成结果存储失败");

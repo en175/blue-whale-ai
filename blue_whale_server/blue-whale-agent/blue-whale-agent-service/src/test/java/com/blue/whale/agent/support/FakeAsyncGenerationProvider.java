@@ -5,6 +5,7 @@ import com.blue.whale.agent.service.generation.AsyncGenerationSpec;
 import com.blue.whale.agent.service.generation.ProviderObservation;
 import com.blue.whale.agent.service.generation.ProviderSubmissionException;
 import com.blue.whale.agent.service.generation.ProviderTaskReference;
+import com.blue.whale.agent.service.generation.ProviderCancellationCapability;
 
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CountDownLatch;
@@ -78,6 +79,11 @@ public class FakeAsyncGenerationProvider implements AsyncGenerationProvider {
     }
 
     @Override
+    public ProviderCancellationCapability cancellationCapability() {
+        return ProviderCancellationCapability.QUEUED_ONLY;
+    }
+
+    @Override
     public String providerId() {
         return "seedance";
     }
@@ -98,6 +104,18 @@ public class FakeAsyncGenerationProvider implements AsyncGenerationProvider {
         observation = new ProviderObservation(
                 ProviderObservation.Status.FAILED, null, null,
                 "provider_failed", "Fake generation failure", "failed", null, null);
+    }
+
+    public void queue() {
+        observation = new ProviderObservation(
+                ProviderObservation.Status.QUEUED, null, null,
+                null, null, "queued", null, null);
+    }
+
+    public void cancelExternally() {
+        observation = new ProviderObservation(
+                ProviderObservation.Status.CANCELLED, null, null,
+                null, null, "cancelled", null, null);
     }
 
     public void reset() {
