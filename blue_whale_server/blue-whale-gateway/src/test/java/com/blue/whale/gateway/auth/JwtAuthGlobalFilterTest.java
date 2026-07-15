@@ -63,4 +63,24 @@ class JwtAuthGlobalFilterTest {
         assertThat(forwarded.get()).isNull();
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
+
+    @Test
+    void allowsOnlySeedanceCallbackShapeWithoutBearerToken() {
+        JwtAuthGlobalFilter filter = new JwtAuthGlobalFilter(SECRET);
+        MockServerWebExchange callback = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/webhooks/seedance/account-1/27?capability=opaque"));
+        AtomicReference<ServerWebExchange> forwarded = new AtomicReference<>();
+
+        filter.filter(callback, next -> {
+            forwarded.set(next);
+            return Mono.empty();
+        }).block();
+
+        assertThat(forwarded.get()).isNotNull();
+
+        MockServerWebExchange unrelatedWebhook = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/webhooks/other/account-1/27"));
+        filter.filter(unrelatedWebhook, next -> Mono.empty()).block();
+        assertThat(unrelatedWebhook.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
 }

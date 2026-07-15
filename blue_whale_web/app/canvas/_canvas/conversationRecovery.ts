@@ -60,7 +60,7 @@ export function projectSnapshotToCanvasNodes(
   snapshot.generation_jobs.forEach((job, index) => {
     if (
       (job.source !== "agent_run" && job.source !== "bottom_dock") ||
-      job.type !== "image" ||
+      (job.type !== "image" && job.type !== "video") ||
       job.status !== "succeeded" ||
       (typeof job.job_id !== "number" && typeof job.job_id !== "string")
     ) {
@@ -69,15 +69,22 @@ export function projectSnapshotToCanvasNodes(
     const asset = generationAsset(snapshot, job);
     if (!asset) return;
     const assetId = String(asset.asset_id);
+    const isVideo = job.type === "video";
     const nodeId = `generation-job-${String(job.job_id)}-slot-0`;
     const existingIndex = nodes.findIndex(
       (node) => node.assetId === assetId || node.id === nodeId,
     );
     if (existingIndex >= 0) {
+      const existing = { ...nodes[existingIndex] };
+      delete existing.imageUrl;
+      delete existing.assetAccessUrl;
       nodes[existingIndex] = {
-        ...nodes[existingIndex],
+        ...existing,
+        type: isVideo ? "video" : "image",
         assetId,
-        imageUrl: asset.access_url,
+        ...(isVideo
+          ? { assetAccessUrl: asset.access_url }
+          : { imageUrl: asset.access_url }),
       };
       return;
     }
@@ -86,13 +93,15 @@ export function projectSnapshotToCanvasNodes(
     );
     nodes.push({
       id: nodeId,
-      type: "image",
+      type: isVideo ? "video" : "image",
       position: { x: 48 + index * 32, y: 48 + index * 32 },
       width,
       height,
       content: generationPrompt(job.input),
       assetId,
-      imageUrl: asset.access_url,
+      ...(isVideo
+        ? { assetAccessUrl: asset.access_url }
+        : { imageUrl: asset.access_url }),
     });
   });
   return nodes;

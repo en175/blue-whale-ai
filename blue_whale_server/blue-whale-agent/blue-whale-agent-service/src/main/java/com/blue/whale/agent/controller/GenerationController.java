@@ -20,13 +20,13 @@ import javax.validation.Valid;
 import java.util.List;
 
 /**
- * 生成接口：文生图（Seedream）同步、图文生视频（Seedance 2.0）异步。
+ * 生成接口：保留生成流页使用的文生图入口。
  *
  * <p>用户身份走 {@code X-User-Id} 请求头（MVP 无鉴权，前端直传）。
  * 响应统一 {@link Result} 包装；异常由 {@code RestExceptionConfig} 转 Result。
  * JSON 字段 snake_case（全局 Jackson SNAKE_CASE）。
  */
-@Tag(name = "生成接口", description = "文生图（Seedream 同步）、图文生视频（Seedance 异步）")
+@Tag(name = "生成接口", description = "文生图（Seedream 同步）")
 @RestController
 @RequestMapping("/api/generation")
 @RequiredArgsConstructor
@@ -47,13 +47,6 @@ public class GenerationController {
     public Result<ImageGenerateResponse> generateImage(@RequestHeader(value = "X-User-Id", required = false) Long userId,
                                                        @RequestBody @Valid ImageGenerateRequest req) {
         return Result.ok(generationJobService.createImageJob(req, requireUserId(userId)));
-    }
-
-    /** 图文生视频异步提交，立即返回 jobId，前端轮询查状态。 */
-    @PostMapping("/video")
-    public Result<CreateJobResponse> generateVideo(@RequestHeader(value = "X-User-Id", required = false) Long userId,
-                                                   @RequestBody @Valid VideoGenerateRequest req) {
-        return Result.ok(generationJobService.createVideoJob(req, requireUserId(userId)));
     }
 
     private Long requireUserId(Long userId) {

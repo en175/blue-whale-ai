@@ -29,7 +29,6 @@ class GenerationJobServiceTest {
 
     @Mock private GenerationJobMapper jobMapper;
     @Mock private AssetMapper assetMapper;
-    @Mock private VolcEngineService volcEngineService;
     @Mock private AssetStorageService assetStorageService;
     @Mock private GenerationModelCapabilityMapper capabilityMapper;
     @Mock private ImageGenerationProviderRegistry providerRegistry;
@@ -41,7 +40,7 @@ class GenerationJobServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new GenerationJobService(jobMapper, assetMapper, volcEngineService,
+        service = new GenerationJobService(jobMapper, assetMapper,
                 assetStorageService, capabilityMapper, providerRegistry, generationStreamService,
                 projectEventService, projectService);
     }

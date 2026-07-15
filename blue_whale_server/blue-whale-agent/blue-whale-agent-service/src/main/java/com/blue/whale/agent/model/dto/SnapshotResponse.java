@@ -13,7 +13,7 @@ import java.util.Map;
  * @param conversationMessages Conversation 可见消息
  * @param agentRuns           当前及历史 AgentRun
  * @param generationJobs      当前及历史 GenerationJob
- * @param assets              job 产出 Asset 的 id→摘要映射（含签名 URL）
+ * @param assets              job 产出 Asset 的 id→摘要映射（含产品受控访问地址）
  * @param highWatermarkCursor 高水位游标（客户端从该游标接续 SSE）
  */
 public record SnapshotResponse(
@@ -58,6 +58,7 @@ public record SnapshotResponse(
             Map<String, Object> input,
             String status,
             Integer progress,
+            Map<String, Object> error,
             List<Long> outputAssetIds,
             List<GenerationJobOutputDto> outputs) {
     }

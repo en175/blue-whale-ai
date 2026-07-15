@@ -11,6 +11,7 @@ import com.blue.whale.agent.model.constant.EventType;
 import com.blue.whale.agent.model.dto.GenerationAcceptanceResult;
 import com.blue.whale.agent.model.dto.GenerationFailureCommand;
 import com.blue.whale.agent.model.dto.GenerationResultCommand;
+import com.blue.whale.agent.model.dto.VideoGenerationResultCommand;
 import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.AgentRun;
 import com.blue.whale.agent.model.entity.GenerationJob;
@@ -119,6 +120,74 @@ public class GenerationResultAcceptanceService {
         return new GenerationAcceptanceResult(GenerationAcceptanceResult.Status.FAILED, null);
     }
 
+    @Transactional
+    public GenerationAcceptanceResult acceptVideoSuccess(VideoGenerationResultCommand command) {
+        validateVideoCommand(command);
+        GenerationJob job = generationJobMapper.selectForUpdate(command.jobId());
+        if (job == null) {
+            throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
+        }
+        requireCurrentVideoFence(job, command.fencingToken());
+        GenerationJobOutput output = outputMapper.selectForUpdate(command.jobId(), command.slotIndex());
+        if (output != null && output.getAssetId() != null) {
+            if (Objects.equals(output.getContentSha256(), command.contentSha256())) {
+                return new GenerationAcceptanceResult(
+                        GenerationAcceptanceResult.Status.IDEMPOTENT, output.getAssetId());
+            }
+            GenerationResultCommand conflictCommand = new GenerationResultCommand(
+                    command.jobId(), command.slotIndex(), command.expectedJobVersion(),
+                    command.fencingToken(), command.leaseOwner(), command.deliveryId(),
+                    command.storageKey(), command.contentSha256(), command.mimeType(),
+                    command.sizeBytes());
+            recordConflict(output, conflictCommand);
+            return new GenerationAcceptanceResult(
+                GenerationAcceptanceResult.Status.CONFLICT, output.getAssetId());
+        }
+        requireVideoExecutionOwner(job, command, generationJobMapper.selectCurrentTime());
+
+        Asset asset = new Asset()
+                .setProjectId(job.getProjectId())
+                .setUserId(job.getUserId())
+                .setGenerationJobId(job.getId())
+                .setType(Asset.TYPE_VIDEO)
+                .setStorageKey(command.storageKey())
+                .setContentSha256(command.contentSha256())
+                .setMime(command.mimeType())
+                .setSize(command.sizeBytes())
+                .setDuration(command.durationSeconds())
+                .setSource(Asset.SOURCE_GENERATED)
+                .setStatus(Asset.STATUS_NORMAL);
+        assetMapper.insert(asset);
+
+        if (output == null) {
+            output = new GenerationJobOutput()
+                    .setGenerationJobId(job.getId())
+                    .setSlotIndex(command.slotIndex());
+        }
+        output.setAssetId(asset.getId())
+                .setDeliveryId(command.deliveryId())
+                .setContentSha256(command.contentSha256());
+        if (output.getId() == null) {
+            outputMapper.insert(output);
+        } else if (outputMapper.updateById(output) != 1) {
+            throw conflict();
+        }
+
+        job.setStatus(GenerationJob.STATUS_SUCCEEDED)
+                .setProgress(null)
+                .setNextActionAt(null)
+                .setOutputAssetIds(List.of(asset.getId()));
+        if (generationJobMapper.updateById(job) != 1) {
+            throw conflict();
+        }
+        clearLease(job.getId());
+        GenerationJob accepted = generationJobMapper.selectById(job.getId());
+        appendAssetCreated(asset, output);
+        appendOutputAttached(output);
+        appendJobStatusChanged(accepted);
+        return new GenerationAcceptanceResult(GenerationAcceptanceResult.Status.ACCEPTED, asset.getId());
+    }
+
     private void validateCommand(GenerationResultCommand command) {
         boolean valid = command != null
                 && command.jobId() != null
@@ -152,6 +221,58 @@ public class GenerationResultAcceptanceService {
                 && command.errorMessage() != null && !command.errorMessage().isBlank();
         if (!valid) {
             throw new GlobalException(SystemCode.FAILURE_CODE, "生成失败命令无效");
+        }
+    }
+
+    private void validateVideoCommand(VideoGenerationResultCommand command) {
+        boolean valid = command != null
+                && command.jobId() != null
+                && command.slotIndex() == 0
+                && command.expectedJobVersion() >= 0
+                && command.fencingToken() > 0
+                && command.leaseOwner() != null && !command.leaseOwner().isBlank()
+                && command.deliveryId() != null && !command.deliveryId().isBlank()
+                && command.deliveryId().length() <= 128
+                && command.storageKey() != null && !command.storageKey().isBlank()
+                && command.storageKey().length() <= 512
+                && command.contentSha256() != null
+                && command.contentSha256().matches("[0-9a-f]{64}")
+                && "video/mp4".equals(command.mimeType())
+                && command.sizeBytes() > 0
+                && command.durationSeconds() >= 4
+                && command.durationSeconds() <= 15;
+        if (!valid) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "视频生成结果命令无效");
+        }
+    }
+
+    private void requireVideoExecutionOwner(
+            GenerationJob job,
+            VideoGenerationResultCommand command,
+            LocalDateTime databaseNow) {
+        boolean activeStatus = GenerationJob.STATUS_PROCESSING.equals(job.getStatus())
+                || GenerationJob.STATUS_CANCEL_REQUESTED.equals(job.getStatus());
+        boolean matches = job.getProjectId() != null
+                && GenerationJob.TYPE_VIDEO.equals(job.getType())
+                && GenerationJob.SOURCE_BOTTOM_DOCK.equals(job.getSource())
+                && activeStatus
+                && Objects.equals(job.getVersion(), command.expectedJobVersion())
+                && Objects.equals(job.getFencingToken(), command.fencingToken())
+                && Objects.equals(job.getLeaseOwner(), command.leaseOwner())
+                && job.getLeaseExpiresAt() != null
+                && job.getLeaseExpiresAt().isAfter(databaseNow);
+        if (!matches) {
+            throw conflict();
+        }
+    }
+
+    private void requireCurrentVideoFence(GenerationJob job, Long fencingToken) {
+        boolean matches = job.getProjectId() != null
+                && GenerationJob.TYPE_VIDEO.equals(job.getType())
+                && GenerationJob.SOURCE_BOTTOM_DOCK.equals(job.getSource())
+                && Objects.equals(job.getFencingToken(), fencingToken);
+        if (!matches) {
+            throw conflict();
         }
     }
 
@@ -212,7 +333,7 @@ public class GenerationResultAcceptanceService {
         payload.put("generation_job_id", asset.getGenerationJobId());
         payload.put("slot_index", output.getSlotIndex());
         payload.put("type", asset.getType());
-        payload.put("access_url", assetAccessUrl(asset.getProjectId(), asset.getId()));
+        payload.put("access_url", assetAccessUrl(asset));
         projectEventService.appendEvent(asset.getProjectId(), EventType.ASSET_CREATED,
                 AggregateType.ASSET, String.valueOf(asset.getId()), asset.getVersion(),
                 payload, null, null);
@@ -281,8 +402,9 @@ public class GenerationResultAcceptanceService {
         return job.getProjectId();
     }
 
-    private String assetAccessUrl(Long projectId, Long assetId) {
-        return "/api/projects/" + projectId + "/assets/" + assetId + "/content";
+    private String assetAccessUrl(Asset asset) {
+        String base = "/api/projects/" + asset.getProjectId() + "/assets/" + asset.getId();
+        return Asset.TYPE_VIDEO.equals(asset.getType()) ? base : base + "/content";
     }
 
     private GlobalException conflict() {

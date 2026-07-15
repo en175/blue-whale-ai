@@ -5,6 +5,7 @@ import com.blue.whale.agent.common.crypto.Sha256;
 import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.mapper.CommandIdempotencyMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
+import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
 import com.blue.whale.agent.model.constant.AggregateType;
 import com.blue.whale.agent.model.constant.EventType;
 import com.blue.whale.agent.model.dto.CreateGenerationJobRequest;
@@ -12,6 +13,7 @@ import com.blue.whale.agent.model.dto.CreateGenerationJobResponse;
 import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.CommandIdempotency;
 import com.blue.whale.agent.model.entity.GenerationJob;
+import com.blue.whale.agent.model.entity.GenerationJobOutput;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.time.LocalDateTime;
 import java.util.stream.Collectors;
 
 @Service
@@ -34,6 +37,7 @@ public class GenerationJobCommandService {
     private final ProjectService projectService;
     private final AssetMapper assetMapper;
     private final GenerationJobMapper generationJobMapper;
+    private final GenerationJobOutputMapper generationJobOutputMapper;
     private final CommandIdempotencyMapper idempotencyMapper;
     private final ProjectEventService projectEventService;
 
@@ -60,14 +64,22 @@ public class GenerationJobCommandService {
             }
             return response(existing);
         }
-        if (!GenerationJob.TYPE_IMAGE.equals(request.type())) {
+        if (!GenerationJob.TYPE_IMAGE.equals(request.type())
+                && !GenerationJob.TYPE_VIDEO.equals(request.type())) {
             throw new GlobalException(SystemCode.FAILURE_CODE, "暂不支持该生成类型");
+        }
+        if (!request.parameters().isValidFor(request.type())) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "生成参数不在服务端能力范围内");
         }
         requireOwnedInputAssets(projectId, userId, request.inputAssetIds());
 
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("prompt", request.parameters().prompt());
         input.put("aspect_ratio", request.parameters().aspectRatio());
+        if (GenerationJob.TYPE_VIDEO.equals(request.type())) {
+            input.put("resolution", request.parameters().resolution());
+            input.put("duration", request.parameters().duration());
+        }
         if (!request.inputAssetIds().isEmpty()) {
             input.put("reference_asset_ids", request.inputAssetIds());
         }
@@ -75,15 +87,27 @@ public class GenerationJobCommandService {
         GenerationJob job = new GenerationJob()
                 .setProjectId(projectId)
                 .setUserId(userId)
-                .setType(GenerationJob.TYPE_IMAGE)
+                .setType(request.type())
                 .setSource(GenerationJob.SOURCE_BOTTOM_DOCK)
                 .setActionIdentity("bottom-dock:" + Sha256.hex(projectId + "\u0000" + OPERATION
                         + "\u0000" + idempotencyKey))
                 .setInput(input)
                 .setStatus(GenerationJob.STATUS_QUEUED)
-                .setProgress(0)
+                .setProgress(GenerationJob.TYPE_VIDEO.equals(request.type()) ? null : 0)
                 .setFencingToken(0L);
+        if (GenerationJob.TYPE_VIDEO.equals(request.type())) {
+            LocalDateTime databaseNow = generationJobMapper.selectCurrentTime();
+            job.setStrategyVersion("seedance-2.0-v1")
+                    .setExecutionDeadlineAt(databaseNow.plusMinutes(30))
+                    .setEvidenceReconcileUntil(databaseNow.plusHours(24))
+                    .setNextActionAt(databaseNow);
+        }
         generationJobMapper.insert(job);
+        if (GenerationJob.TYPE_VIDEO.equals(request.type())) {
+            generationJobOutputMapper.insert(new GenerationJobOutput()
+                    .setGenerationJobId(job.getId())
+                    .setSlotIndex(0));
+        }
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("job_id", job.getId());
@@ -141,7 +165,8 @@ public class GenerationJobCommandService {
                 .map(String::valueOf)
                 .collect(Collectors.joining(","));
         return Sha256.hex(request.type() + "\u0000" + request.parameters().prompt() + "\u0000"
-                + request.parameters().aspectRatio() + "\u0000" + assetIds + "\u0000"
+                + request.parameters().aspectRatio() + "\u0000" + request.parameters().resolution()
+                + "\u0000" + request.parameters().duration() + "\u0000" + assetIds + "\u0000"
                 + request.expectedOutputCount());
     }
 }

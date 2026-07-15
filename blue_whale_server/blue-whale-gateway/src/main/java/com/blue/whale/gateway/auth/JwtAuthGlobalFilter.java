@@ -23,6 +23,7 @@ import reactor.core.publisher.Mono;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 网关统一 JWT 鉴权过滤器。
@@ -39,6 +40,8 @@ public class JwtAuthGlobalFilter implements GlobalFilter {
             "/api/auth/captcha",
             "/api/auth/refresh"
     );
+    private static final Pattern SEEDANCE_CALLBACK_PATH = Pattern.compile(
+            "^/api/webhooks/seedance/[A-Za-z0-9._-]+/[1-9][0-9]*$");
 
     private final SecretKey secretKey;
 
@@ -51,7 +54,7 @@ public class JwtAuthGlobalFilter implements GlobalFilter {
         String path = exchange.getRequest().getURI().getPath();
 
         // 白名单放行
-        if (WHITELIST.contains(path)) {
+        if (WHITELIST.contains(path) || SEEDANCE_CALLBACK_PATH.matcher(path).matches()) {
             return chain.filter(exchange);
         }
 

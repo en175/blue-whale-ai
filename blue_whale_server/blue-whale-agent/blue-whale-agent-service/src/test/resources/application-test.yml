@@ -4,6 +4,8 @@ server:
   port: 0
 
 blue-whale:
+  generation:
+    worker-scheduled: false
   outbox:
     enabled: false
   project-events:

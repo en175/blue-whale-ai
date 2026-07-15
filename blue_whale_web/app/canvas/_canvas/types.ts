@@ -13,7 +13,7 @@ export type ToolDef = {
   divider?: boolean;
 };
 
-export type NodeType = "image" | "text";
+export type NodeType = "image" | "video" | "text";
 
 /**
  * 画布节点。坐标语义对齐 React Flow：world 坐标由 {@link position} 承载
@@ -35,6 +35,8 @@ export type NodeItem = {
   /** 对应不可变 Asset；Card 与 NodeItem 以此共享生成结果身份。 */
   assetId?: string;
   imageUrl?: string;
+  /** 视频资产的稳定鉴权入口；签名 URL 仅由播放器保存在内存中。 */
+  assetAccessUrl?: string;
   selected?: boolean;
 };
 

@@ -60,6 +60,9 @@ export function useCanvasProjects() {
     initialProjectState,
   );
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [generationJobsByProject, setGenerationJobsByProject] = useState<
+    Record<string, Array<Record<string, unknown>>>
+  >({});
 
   // 进画布时定一次登录态：有 token 才尝试连后端，否则 mock 离线 fallback。
   const [online] = useState(
@@ -138,6 +141,10 @@ export function useCanvasProjects() {
         return;
       }
       const snapshot = recovery.snapshot;
+      setGenerationJobsByProject((current) => ({
+        ...current,
+        [pid]: snapshot.generation_jobs,
+      }));
       const persistedNodes = snapshot.canvas.nodes
         ? (JSON.parse(snapshot.canvas.nodes) as NodeItem[])
         : [];
@@ -285,6 +292,11 @@ export function useCanvasProjects() {
         }
       }
       dispatch({ type: "delete", projectId: id });
+      setGenerationJobsByProject((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
     },
     [backendReady],
   );
@@ -309,6 +321,7 @@ export function useCanvasProjects() {
     saveStatus,
     booting,
     backendReady,
+    generationJobs: generationJobsByProject[activeProject.id] ?? [],
     createProjectAction,
     switchProject,
     deleteProjectAction,

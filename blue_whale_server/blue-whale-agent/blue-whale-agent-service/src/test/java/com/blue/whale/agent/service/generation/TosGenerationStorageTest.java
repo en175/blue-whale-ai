@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -67,6 +68,28 @@ class TosGenerationStorageTest {
         assertThat(input.getOptions().getContentType()).isEqualTo("image/png");
         assertThat(input.getOptions().getAclType()).isEqualTo(ACLType.ACL_PRIVATE);
         assertThat(input.getContent().readAllBytes()).isEqualTo(content);
+    }
+
+    @Test
+    void storesVideoPrivatelyAtDeterministicJobSlotKey() throws Exception {
+        byte[] content = "mp4-bytes".getBytes(StandardCharsets.UTF_8);
+        properties.getTos().setMaxVideoBytes(20);
+        doAnswer(invocation -> {
+            PutObjectInput input = invocation.getArgument(0);
+            input.getContent().readAllBytes();
+            return null;
+        }).when(tosClient).putObject(any(PutObjectInput.class));
+
+        StoredGenerationObject stored = storage.storeVideo(
+                9L, 0, new ByteArrayInputStream(content), content.length, "video/mp4");
+
+        assertThat(stored.storageKey()).isEqualTo("generation-assets/video/jobs/9/slot-0.mp4");
+        assertThat(stored.contentSha256()).isEqualTo(HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(content)));
+        ArgumentCaptor<PutObjectInput> inputCaptor = ArgumentCaptor.forClass(PutObjectInput.class);
+        verify(tosClient).putObject(inputCaptor.capture());
+        assertThat(inputCaptor.getValue().getOptions().getContentType()).isEqualTo("video/mp4");
+        assertThat(inputCaptor.getValue().getOptions().getAclType()).isEqualTo(ACLType.ACL_PRIVATE);
     }
 
     @Test

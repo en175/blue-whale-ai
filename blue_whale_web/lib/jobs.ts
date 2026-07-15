@@ -14,7 +14,11 @@
  * 请求层字段全 snake_case 对齐后端 Jackson SNAKE_CASE 序列化。
  */
 
-import type { CardStatus, GenerationJob, GenerationJobStatus } from "@/types/domain";
+import type {
+  CardStatus,
+  GenerationJob,
+  GenerationJobStatus,
+} from "@/types/domain";
 import { request, type Paged } from "./api";
 
 /**
@@ -31,17 +35,23 @@ export function mapJobStatusToCardStatus(
   switch (status) {
     case "queued":
     case "processing":
+    case "cancel_requested":
       return "generating";
     case "succeeded":
       return "normal";
     case "failed":
+    case "cancelled":
       return "failed";
   }
 }
 
 /** Job 是否处于终态（不再有状态转移）。succeeded / failed 都是终态。 */
 export function isJobTerminal(job: GenerationJob): boolean {
-  return job.status === "succeeded" || job.status === "failed";
+  return (
+    job.status === "succeeded" ||
+    job.status === "failed" ||
+    job.status === "cancelled"
+  );
 }
 
 /** 任务产出资源缩略。宽高后端可能为 null（视频）。 */
@@ -90,7 +100,9 @@ export type ListJobsParams = {
 };
 
 /** 任务列表（生成流页）：按 type/status/projectId 过滤 + 分页，按创建时间倒序。 */
-export function listJobs(params: ListJobsParams = {}): Promise<Paged<JobListItem>> {
+export function listJobs(
+  params: ListJobsParams = {},
+): Promise<Paged<JobListItem>> {
   const q = new URLSearchParams();
   if (params.type) q.set("type", params.type);
   if (params.status) q.set("status", params.status);

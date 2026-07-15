@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiRequest } from "@/lib/api-client";
-import { createProjectGenerationJob } from "./generation";
+import {
+  cancelProjectGenerationJob,
+  createProjectGenerationJob,
+} from "./generation";
 
 vi.mock("@/lib/api-client", () => ({
   apiFetch: vi.fn(),
@@ -37,5 +40,40 @@ describe("BottomDock GenerationJob 命令 API", () => {
         expected_output_count: 1,
       }),
     });
+  });
+
+  it("视频也走 Project GenerationJob 命令且取消不再轮询旧 Job API", async () => {
+    vi.mocked(apiRequest).mockResolvedValueOnce({
+      generation_job_id: 10,
+      cursor: 13,
+    });
+
+    await createProjectGenerationJob(
+      7,
+      {
+        type: "video",
+        input_asset_ids: [3],
+        parameters: {
+          prompt: "蓝鲸跃出海面",
+          aspect_ratio: "16:9",
+          resolution: "480p",
+          duration: 4,
+        },
+        expected_output_count: 1,
+      },
+      "video-command-1",
+    );
+    await cancelProjectGenerationJob(7, 10);
+
+    expect(apiRequest).toHaveBeenNthCalledWith(
+      1,
+      "/api/projects/7/generation-jobs",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(apiRequest).toHaveBeenNthCalledWith(
+      2,
+      "/api/projects/7/generation-jobs/10/cancel",
+      { method: "POST" },
+    );
   });
 });

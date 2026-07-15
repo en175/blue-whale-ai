@@ -10,13 +10,17 @@ import com.volcengine.tos.model.object.PreSignedURLOutput;
 import com.volcengine.tos.model.object.PutObjectInput;
 
 import java.io.ByteArrayInputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.util.HexFormat;
 
-public class TosGenerationStorage implements GenerationStorage, GenerationObjectReader, GenerationObjectSigner {
+public class TosGenerationStorage implements
+        GenerationStorage, VideoGenerationStorage, GenerationObjectReader, GenerationObjectSigner {
 
     private final TOSV2 tosClient;
     private final GenerationAdapterProperties properties;
@@ -49,6 +53,42 @@ public class TosGenerationStorage implements GenerationStorage, GenerationObject
                 .setOptions(options);
         tosClient.putObject(input);
         return new StoredGenerationObject(storageKey, digest, mimeType, content.length);
+    }
+
+    @Override
+    public StoredGenerationObject storeVideo(
+            Long jobId,
+            int slotIndex,
+            InputStream content,
+            long contentLength,
+            String mimeType) {
+        long maxBytes = properties.getTos().getMaxVideoBytes();
+        if (jobId == null || slotIndex < 0 || content == null
+                || contentLength <= 0 || contentLength > maxBytes
+                || !"video/mp4".equals(mimeType)) {
+            throw new IllegalArgumentException("只允许在大小上限内存储非空 MP4 视频");
+        }
+        String storageKey = normalizedPrefix() + "/video/jobs/" + jobId
+                + "/slot-" + slotIndex + ".mp4";
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            DigestInputStream digestStream = new DigestInputStream(
+                    new BoundedInputStream(content, maxBytes), digest);
+            ObjectMetaRequestOptions options = new ObjectMetaRequestOptions()
+                    .setContentType(mimeType)
+                    .setAclType(ACLType.ACL_PRIVATE);
+            PutObjectInput input = new PutObjectInput()
+                    .setBucket(properties.getTos().getBucket())
+                    .setKey(storageKey)
+                    .setContent(digestStream)
+                    .setContentLength(contentLength)
+                    .setOptions(options);
+            tosClient.putObject(input);
+            return new StoredGenerationObject(
+                    storageKey, HexFormat.of().formatHex(digest.digest()), mimeType, contentLength);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("JDK 不支持 SHA-256", exception);
+        }
     }
 
     @Override
@@ -99,6 +139,42 @@ public class TosGenerationStorage implements GenerationStorage, GenerationObject
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("JDK 不支持 SHA-256", exception);
+        }
+    }
+
+    private static final class BoundedInputStream extends FilterInputStream {
+
+        private final long maxBytes;
+        private long count;
+
+        private BoundedInputStream(InputStream input, long maxBytes) {
+            super(input);
+            this.maxBytes = maxBytes;
+        }
+
+        @Override
+        public int read() throws IOException {
+            int value = super.read();
+            if (value >= 0) {
+                record(1);
+            }
+            return value;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            int read = super.read(buffer, offset, length);
+            if (read > 0) {
+                record(read);
+            }
+            return read;
+        }
+
+        private void record(int read) throws IOException {
+            count += read;
+            if (count > maxBytes) {
+                throw new IOException("视频对象超过存储上限");
+            }
         }
     }
 }
