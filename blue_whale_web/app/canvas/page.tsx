@@ -30,6 +30,7 @@ import type { Viewport, NodeItem, NodeType, DockMediaItem, CardMessage, ChatMess
 import { nodeFromCard, useCanvasProjects } from "./_canvas";
 import type { GenerateArgs } from "./_canvas";
 import { generateImage, createVideoJob, streamJob } from "./_canvas/api/generation";
+import { uploadAsset } from "@/lib/assets";
 import { useJobStatus } from "./_canvas/hooks/useJobStatus";
 
 /** "1x"/"2x" → 数字；解析失败回落 1。 */
@@ -101,6 +102,9 @@ function CanvasPageInner() {
   const [bottomDockMode, setBottomDockMode] = useState<"image" | "video">("image");
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
   const [videoDockMedia, setVideoDockMedia] = useState<DockMediaItem[]>([]);
+  // 视频首尾帧模式：已上传首/尾帧的 TOS url（后端可访问，非本地 blob）
+  const [firstFrameUrl, setFirstFrameUrl] = useState<string | undefined>(undefined);
+  const [lastFrameUrl, setLastFrameUrl] = useState<string | undefined>(undefined);
   const [agentPendingMention, setAgentPendingMention] = useState<{ name: string; nonce: number } | null>(null);
   // 「从画布选择」模式：非 null 表示正在为哪个 Dock 挑图（image/video）
   const [pickingFor, setPickingFor] = useState<"image" | "video" | null>(null);
@@ -110,7 +114,7 @@ function CanvasPageInner() {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const pendingVideoPromptRef = useRef<string>("");
 
-  // 受控流写回适配：CanvasSurface 的 onNodesCommit / onViewportChange 解析后整体写回当前 active project。
+  // 受控流写回适配：CanvasSurface 的 onNodes_commit / onViewportChange 解析后整体写回当前 active project。
   const setViewport = useCallback(
     (next: Viewport) => {
       if (!activeProject) return;
@@ -249,51 +253,92 @@ function CanvasPageInner() {
     fileInputRef.current?.click();
   }, []);
 
+  // 左工具栏「上传」：图片/视频都收，上传 TOS 拿持久 url 建画布节点（视频由 ImageNode 按 url 后缀自动切 <video>）
   const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const url = ev.target?.result as string | undefined;
-        if (url) {
-          addNode("image", {
-            content: file.name,
-            imageUrl: url,
-          });
-        }
-      };
-      reader.readAsDataURL(file);
       e.target.value = "";
-    },
-    [addNode]
-  );
-
-  // Dock「本地上传」：既建画布节点，又把同一资产塞进对应 Dock 的参考 media（共享 id/src）
-  const handleDockLocalUpload = useCallback(
-    (file: File, mode: "image" | "video") => {
-      const url = URL.createObjectURL(file);
-      const id = addNode("image", { content: file.name, imageUrl: url });
-      const item: DockMediaItem = { id, type: "image", name: file.name, src: url };
-      if (mode === "image") {
-        setImageDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
-      } else {
-        setVideoDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
+      if (!activeProject) return;
+      const mediaType: "image" | "video" = file.type.startsWith("video/") ? "video" : "image";
+      try {
+        const result = await uploadAsset(file, Number(activeProject.id), mediaType);
+        addNode("image", { content: file.name, imageUrl: result.url });
+      } catch (err) {
+        setGenerateError(userFriendlyErrorMessage(err));
       }
     },
-    [addNode]
+    [addNode, activeProject?.id]
   );
+
+  // Dock「本地上传」：上传 TOS 拿持久 url，按 MIME 分 image/video/audio；
+  // 图片建画布节点，视频/音频只入 Dock media（画布暂不承载视频/音频节点）
+  const handleDockLocalUpload = useCallback(
+    async (file: File, mode: "image" | "video") => {
+      if (!activeProject) return;
+      const mediaType: DockMediaItem["type"] = file.type.startsWith("image/")
+        ? "image"
+        : file.type.startsWith("video/")
+          ? "video"
+          : "audio";
+      try {
+        const result = await uploadAsset(file, Number(activeProject.id), mediaType);
+        // 图片/视频上画布（视频由 ImageNode 按 url 后缀自动切 <video>）；音频不入画布
+        const onCanvas = mediaType === "image" || mediaType === "video";
+        const id = onCanvas
+          ? addNode("image", { content: file.name, imageUrl: result.url })
+          : `${mediaType}-${Date.now()}`;
+        const item: DockMediaItem = { id, type: mediaType, name: file.name, src: result.url };
+        if (mode === "image") {
+          setImageDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
+        } else {
+          setVideoDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
+        }
+      } catch (e) {
+        setGenerateError(userFriendlyErrorMessage(e));
+      }
+    },
+    [addNode, activeProject?.id]
+  );
+
+  // 首尾帧上传：调后端 asset upload 拿 TOS url 回填（后端可访问，非本地 blob）
+  const handleFrameUpload = useCallback(
+    async (file: File, slot: "first" | "last") => {
+      if (!activeProject) return;
+      try {
+        const result = await uploadAsset(file, Number(activeProject.id), "image");
+        if (slot === "first") setFirstFrameUrl(result.url);
+        else setLastFrameUrl(result.url);
+      } catch (e) {
+        setGenerateError(userFriendlyErrorMessage(e));
+      }
+    },
+    [activeProject?.id],
+  );
+
+  const handleFrameClear = useCallback((slot: "first" | "last") => {
+    if (slot === "first") setFirstFrameUrl(undefined);
+    else setLastFrameUrl(undefined);
+  }, []);
+
+  const handleSwapFrames = useCallback(() => {
+    const tmp = firstFrameUrl;
+    setFirstFrameUrl(lastFrameUrl);
+    setLastFrameUrl(tmp);
+  }, [firstFrameUrl, lastFrameUrl]);
 
   // 生成：图片同步落节点；视频异步提交后由 useJobStatus 轮询，succeeded 落节点
   const handleGenerate = useCallback(
     async (promptText: string, args: GenerateArgs) => {
       const trimmed = promptText.trim();
       if (!trimmed) return;
+      if (!activeProject) return;
       setGenerating(true);
       try {
         if (args.mode === "image") {
           const result = await generateImage({
             prompt: trimmed,
+            projectId: Number(activeProject.id),
             modelId: args.settings.model.id,
             sizeId: args.settings.resolution.id,
             aspectRatio: args.settings.aspectRatio.id,
@@ -326,10 +371,13 @@ function CanvasPageInner() {
         } else {
           const result = await createVideoJob({
             prompt: trimmed,
+            projectId: Number(activeProject.id),
+            modelId: args.settings.model.id,
             resolution: args.settings.resolution.id,
             aspectRatio: args.settings.aspectRatio.id,
             duration: args.settings.duration,
-            firstFrameUrl: videoDockMedia[0]?.src,
+            firstFrameUrl: args.settings.firstFrameUrl,
+            lastFrameUrl: args.settings.lastFrameUrl,
           });
           pendingVideoPromptRef.current = trimmed;
           startJob(result.jobId);
@@ -341,7 +389,7 @@ function CanvasPageInner() {
         setGenerating(false);
       }
     },
-    [addNode, imageDockMedia, videoDockMedia, startJob]
+    [addNode, imageDockMedia, startJob, activeProject?.id]
   );
 
   // 视频任务轮询终态：succeeded 落节点，failed/超时复位 generating
@@ -495,7 +543,7 @@ function CanvasPageInner() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,video/*"
         className="sr-only"
         onChange={handleFileChange}
         aria-hidden="true"
@@ -582,6 +630,11 @@ function CanvasPageInner() {
           videoMedia={videoDockMedia}
           onRemoveImageMedia={(id) => setImageDockMedia((prev) => prev.filter((m) => m.id !== id))}
           onRemoveVideoMedia={(id) => setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))}
+          firstFrameUrl={firstFrameUrl}
+          lastFrameUrl={lastFrameUrl}
+          onFrameUpload={handleFrameUpload}
+          onFrameClear={handleFrameClear}
+          onSwapFrames={handleSwapFrames}
           onLocalUpload={(file) => handleDockLocalUpload(file, bottomDockMode)}
           onPickFromCanvas={() => handleRequestPick(bottomDockMode)}
           onExitPick={handleExitPick}

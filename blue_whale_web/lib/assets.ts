@@ -3,6 +3,7 @@
  */
 
 import { request, type Paged } from "./api";
+import { apiRequest } from "./api-client";
 
 /** 资产列表项（GET /api/agent/assets records，不含 storageKey）。 */
 export type AssetItem = {
@@ -25,4 +26,23 @@ export function listAssets(
   q.set("page", String(params.page ?? 1));
   q.set("size", String(params.size ?? 60));
   return request<Paged<AssetItem>>(`/assets?${q.toString()}`, "GET");
+}
+
+/**
+ * 上传素材到 TOS（后端中转）：multipart file + projectId + type → {id, url}。
+ * 返回 url 为 TOS 永久地址，可持久化到 canvas 节点，刷新不丢（替 URL.createObjectURL 临时 blob）。
+ */
+export async function uploadAsset(
+  file: File,
+  projectId: number,
+  type: "image" | "video" | "audio",
+): Promise<{ id: number; url: string }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("projectId", String(projectId));
+  fd.append("type", type);
+  return apiRequest<{ id: number; url: string }>("/api/agent/assets/upload", {
+    method: "POST",
+    body: fd,
+  });
 }

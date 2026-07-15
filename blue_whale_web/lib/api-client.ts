@@ -13,6 +13,9 @@ import {
   loadRefreshToken,
   saveTokens,
   clearTokens,
+  loadUser,
+  SKIP_AUTH,
+  MOCK_USER,
 } from "@/components/auth/authStorage";
 import type { LoginData } from "./auth";
 
@@ -67,6 +70,20 @@ function isAuthEndpoint(url: string): boolean {
   return authPaths.some((p) => url.includes(p));
 }
 
+/**
+ * 构建统一鉴权请求头：Authorization（有 token 时）+ X-User-Id。
+ * 本地直连 agent-service 无网关时后端 UserContext 读 X-User-Id；
+ * 线上网关注入同名头会覆盖。apiFetch 内部与 beforeunload 等同步场景共用此出口，
+ * 鉴权头不再散落各处手拼。
+ */
+export function buildAuthHeaders(token?: string | null): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const user = loadUser() ?? (SKIP_AUTH ? MOCK_USER : null);
+  if (user) headers["X-User-Id"] = String(user.userId);
+  return headers;
+}
+
 /** 调用后端 /api/auth/refresh，返回新的 access_token。不经过 apiFetch 自身。 */
 async function doRefreshToken(): Promise<string> {
   const rt = loadRefreshToken();
@@ -109,8 +126,8 @@ export async function apiFetch(
     if (!headers.has("Content-Type") && !(options.body instanceof FormData)) {
       headers.set("Content-Type", "application/json");
     }
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
+    for (const [k, v] of Object.entries(buildAuthHeaders(token))) {
+      if (!headers.has(k)) headers.set(k, v);
     }
     return fetch(url, { ...options, headers });
   };

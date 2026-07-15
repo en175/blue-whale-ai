@@ -53,6 +53,7 @@ public class GenerationJobService {
     private final GenerationModelCapabilityMapper capabilityMapper;
     private final ImageGenerationProviderRegistry providerRegistry;
     private final GenerationStreamService generationStreamService;
+    private final ProjectService projectService;
 
     /** 文生图：流式模型建 job 异步逐张生成（返 job_id）；非流式模型同步一次性返回（返 asset_id+url）。 */
     @Transactional
@@ -60,8 +61,9 @@ public class GenerationJobService {
         GenerationModelCapability capability = capabilityMapper.selectEnabledByModelId(req.modelId())
                 .orElseThrow(() -> new GlobalException(SystemCode.FAILURE_CODE, "不支持的模型: " + req.modelId()));
 
+        projectService.requireOwned(req.projectId(), userId);
         ProviderImageGenerationRequest providerReq = buildProviderRequest(req, capability);
-        GenerationJob job = newGenerationJob(userId, GenerationJob.TYPE_IMAGE, capability.getProviderId(), buildImageInput(req));
+        GenerationJob job = newGenerationJob(userId, req.projectId(), GenerationJob.TYPE_IMAGE, capability.getProviderId(), buildImageInput(req));
         jobMapper.insert(job);
 
         if (streamFlag(capability)) {
@@ -74,7 +76,7 @@ public class GenerationJobService {
         try {
             ImageGenerationProvider provider = providerRegistry.getProvider(capability.getProviderId());
             ImageGenerationDto result = provider.generate(providerReq);
-            Asset asset = assetStorageService.downloadAndStore(result.getImageUrl(), userId, Asset.TYPE_IMAGE, null);
+            Asset asset = assetStorageService.downloadAndStore(result.getImageUrl(), userId, job.getProjectId(), Asset.TYPE_IMAGE, null);
             job.setStatus(GenerationJob.STATUS_SUCCEEDED)
                     .setProgress(100)
                     .setOutputAssetIds(List.of(asset.getId()));
@@ -117,7 +119,8 @@ public class GenerationJobService {
     /** 图文生视频异步提交，立即返 jobId。 */
     @Transactional
     public CreateJobDto createVideoJob(VideoGenerateRequest req, Long userId) {
-        GenerationJob job = newGenerationJob(userId, GenerationJob.TYPE_VIDEO, "volcengine", buildVideoInput(req));
+        projectService.requireOwned(req.projectId(), userId);
+        GenerationJob job = newGenerationJob(userId, req.projectId(), GenerationJob.TYPE_VIDEO, "volcengine", buildVideoInput(req));
         jobMapper.insert(job);
         try {
             String taskId = volcEngineService.createVideoTask(req.modelId(), req.prompt(), req.firstFrameUrl(),
@@ -226,7 +229,7 @@ public class GenerationJobService {
                     return;
                 }
                 Asset asset = assetStorageService.downloadAndStore(result.videoUrl(), job.getUserId(),
-                        Asset.TYPE_VIDEO, "video/mp4");
+                        job.getProjectId(), Asset.TYPE_VIDEO, "video/mp4");
                 job.setStatus(GenerationJob.STATUS_SUCCEEDED)
                         .setProgress(100)
                         .setOutputAssetIds(List.of(asset.getId()));
@@ -258,9 +261,10 @@ public class GenerationJobService {
                 .build();
     }
 
-    private GenerationJob newGenerationJob(Long userId, String type, String provider, Map<String, Object> input) {
+    private GenerationJob newGenerationJob(Long userId, Long projectId, String type, String provider, Map<String, Object> input) {
         return new GenerationJob()
                 .setUserId(userId)
+                .setProjectId(projectId)
                 .setType(type)
                 .setSource(GenerationJob.SOURCE_DOCK)
                 .setInput(input)

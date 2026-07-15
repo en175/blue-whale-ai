@@ -37,6 +37,11 @@ spring:
     port: 6379
     password: weitian1024
     database: 0
+  servlet:
+    multipart:
+      # 素材上传上限：图片≤2MB / 视频≤50MB（与 AssetService 校验对齐），放开 Spring/Tomcat 默认 1MB 限制
+      max-file-size: 50MB
+      max-request-size: 55MB
   # HTTP 对外 JSON 默认 camelCase（合规 CLAUDE.md 后端规范）。
   # DB JSON 列的 snake↔camel 映射由 MybatisJacksonConfig 注入独立 SNAKE_CASE ObjectMapper 给
   # JacksonTypeHandler 处理，与 HTTP 隔离；普通列靠 mybatis-plus map-underscore-to-camel-case（见下）。
@@ -56,11 +61,10 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 oss:
-  volcengine:
+  tos:
     access-key: ${TOS_ACCESS_KEY}
     secret-key: ${TOS_SECRET_KEY}
     bucket-name: ${TOS_BUCKET_NAME}
-    domain: ${TOS_DOMAIN:https://sweet-oa.tos-cn-beijing.volces.com}
 
 logging:
   level:

@@ -21,7 +21,8 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { loadAccessToken, loadUser, SKIP_AUTH, MOCK_USER } from "@/components/auth/authStorage";
+import { loadAccessToken } from "@/components/auth/authStorage";
+import { buildAuthHeaders } from "@/lib/api-client";
 import { projectReducer, initialProjectState } from "../projectReducer";
 import type { NodeItem, Project, Viewport } from "../types";
 import * as canvasApi from "@/lib/canvas";
@@ -55,7 +56,6 @@ export function useCanvasProjects() {
   const [backendReady, setBackendReady] = useState(false);
   // offline（无 token）不需要拉取，booting 直接 false；online 等列表到位才 false
   const [booting, setBooting] = useState(online);
-  const tokenRef = useRef<string | null>(null);
 
   // 空列表时为 undefined（页层据此渲染空态，不读 canvas/messages）
   const activeProject =
@@ -77,7 +77,6 @@ export function useCanvasProjects() {
 
   // 初始 token + 首次拉列表（online 才尝试；失败设 loadError，不阻塞画布显示空态）
   useEffect(() => {
-    tokenRef.current = loadAccessToken();
     if (!online) {
       return;
     }
@@ -195,15 +194,13 @@ export function useCanvasProjects() {
       const snap = JSON.stringify({ nodes: p.canvas.nodes, viewport: p.canvas.viewport });
       if (snap === lastSavedRef.current) return; // 已存，不重复
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      const token = tokenRef.current;
-      const user = loadUser() ?? (SKIP_AUTH ? MOCK_USER : null);
+      const token = loadAccessToken();
       fetch(`/api/agent/canvases/${p.id}`, {
         method: "PUT",
         keepalive: true,
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(user ? { "X-User-Id": String(user.userId) } : {}),
+          ...buildAuthHeaders(token),
         },
         body: JSON.stringify({
           viewport: JSON.stringify(p.canvas.viewport),
