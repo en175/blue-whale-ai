@@ -30,6 +30,22 @@ def image_proposal_model(messages, info):
     )
 
 
+def reference_image_proposal_model(messages, info):
+    return ModelResponse(
+        parts=(
+            ToolCallPart(
+                "generate_image",
+                {
+                    "prompt": "把月亮加入参考图",
+                    "aspect_ratio": "16:9",
+                    "reference_asset_ids": [91, 92],
+                },
+                "provider-private-reference-call-id",
+            ),
+        )
+    )
+
+
 def failing_model(messages, info):
     raise RuntimeError("provider-secret=sk-test file=/tmp/private-prompt")
 
@@ -53,6 +69,29 @@ def unsafe_resume_model(messages, info):
 
 
 class PydanticAIOrchestratorTest(unittest.TestCase):
+    def test_production_adapter_can_propose_owned_reference_asset_ids(self) -> None:
+        work = RunWork(
+            agent_run_id=23,
+            project_id=7,
+            conversation_id=11,
+            user_id=10,
+            run_version=1,
+            fencing_token=4,
+            engine="pydantic-ai",
+            engine_version="2.9.0",
+            adapter_schema_version=1,
+            messages=({"role": "user", "content": "参考素材生成海报"},),
+            checkpoint=None,
+        )
+
+        result = PydanticAIOrchestrator(
+            FunctionModel(reference_image_proposal_model)
+        ).advance(work)
+
+        self.assertEqual(
+            [91, 92], result.actions[0].arguments["reference_asset_ids"]
+        )
+
     def test_production_adapter_returns_a_product_neutral_image_proposal(self) -> None:
         work = RunWork(
             agent_run_id=23,

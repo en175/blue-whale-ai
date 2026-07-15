@@ -67,6 +67,22 @@ logging:
     com.blue.whale.agent.mapper: info
 
 blue-whale:
+  generation:
+    mode: ${GENERATION_MODE:disabled}
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      model: ${OPENAI_IMAGE_MODEL:gpt-image-2}
+      max-image-bytes: ${OPENAI_IMAGE_MAX_BYTES:20971520}
+    tos:
+      access-key: ${GENERATION_TOS_ACCESS_KEY:}
+      secret-key: ${GENERATION_TOS_SECRET_KEY:}
+      region: ${GENERATION_TOS_REGION:}
+      endpoint: ${GENERATION_TOS_ENDPOINT:}
+      bucket: ${GENERATION_TOS_BUCKET:}
+      prefix: ${GENERATION_TOS_PREFIX:generation}
+      signed-url-ttl-seconds: ${GENERATION_TOS_SIGNED_URL_TTL_SECONDS:300}
+      max-read-bytes: ${GENERATION_TOS_MAX_READ_BYTES:20971520}
   project-events:
     redis-enabled: true
     channel: blue-whale:project-events

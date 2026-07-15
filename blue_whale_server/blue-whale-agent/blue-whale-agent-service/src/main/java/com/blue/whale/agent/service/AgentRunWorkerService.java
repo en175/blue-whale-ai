@@ -41,7 +41,8 @@ import java.util.TreeMap;
 @RequiredArgsConstructor
 public class AgentRunWorkerService {
 
-    private static final Set<String> IMAGE_ARGUMENTS = Set.of("prompt", "aspect_ratio");
+    private static final Set<String> IMAGE_ARGUMENTS =
+            Set.of("prompt", "aspect_ratio", "reference_asset_ids");
     private static final Set<String> IMAGE_ASPECT_RATIOS =
             Set.of("1:1", "16:9", "9:16", "4:3", "3:4", "2:3", "3:2", "21:9");
 
@@ -287,17 +288,35 @@ public class AgentRunWorkerService {
         }
         RunCommitRequest.ProposedAction action = actions.get(0);
         Object aspectRatio = action.arguments().get("aspect_ratio");
+        Object referenceAssetIds = action.arguments().get("reference_asset_ids");
         if (!"generate_image".equals(action.actionType())
                 || action.actionId().length() > 128
                 || !IMAGE_ARGUMENTS.containsAll(action.arguments().keySet())
                 || !(action.arguments().get("prompt") instanceof String prompt)
                 || prompt.isBlank()
                 || (aspectRatio != null
-                        && (!(aspectRatio instanceof String ratio) || !IMAGE_ASPECT_RATIOS.contains(ratio)))) {
+                        && (!(aspectRatio instanceof String ratio) || !IMAGE_ASPECT_RATIOS.contains(ratio)))
+                || (referenceAssetIds != null && !validReferenceAssetIds(referenceAssetIds))) {
             throw new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
                     SystemCode.AGENT_ACTION_REJECTED.getMsg());
         }
         return action;
+    }
+
+    private boolean validReferenceAssetIds(Object value) {
+        if (!(value instanceof List<?> assetIds) || assetIds.isEmpty() || assetIds.size() > 4) {
+            return false;
+        }
+        for (Object assetId : assetIds) {
+            if (!(assetId instanceof Number number)) {
+                return false;
+            }
+            long longValue = number.longValue();
+            if (longValue <= 0 || number.doubleValue() != (double) longValue) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private RunWorkResponse.AcceptedResult acceptedResult(GenerationJob job) {

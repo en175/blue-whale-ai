@@ -68,6 +68,8 @@ public class GenerationResultAcceptanceService {
                 .setContentSha256(command.contentSha256())
                 .setMime(command.mimeType())
                 .setSize(command.sizeBytes())
+                .setWidth(command.width())
+                .setHeight(command.height())
                 .setSource(Asset.SOURCE_GENERATED)
                 .setStatus(Asset.STATUS_NORMAL);
         assetMapper.insert(asset);
@@ -131,7 +133,10 @@ public class GenerationResultAcceptanceService {
                 && command.contentSha256() != null
                 && command.contentSha256().matches("[0-9a-f]{64}")
                 && command.mimeType() != null && command.mimeType().startsWith("image/")
-                && command.sizeBytes() > 0;
+                && command.sizeBytes() > 0
+                && ((command.width() == null && command.height() == null)
+                        || (command.width() != null && command.width() > 0
+                        && command.height() != null && command.height() > 0));
         if (!valid) {
             throw new GlobalException(SystemCode.FAILURE_CODE, "生成结果命令无效");
         }
