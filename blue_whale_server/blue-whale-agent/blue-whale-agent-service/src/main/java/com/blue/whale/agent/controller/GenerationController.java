@@ -38,10 +38,15 @@ public class GenerationController {
     private final GenerationModelCapabilityService capabilityService;
 
     /** 查询当前启用的图片生成模型及其能力。 */
-    @GetMapping("/models")
-    public Result<List<ImageModelCapabilityDto>> listModels(
-            @RequestParam(name = "capability", defaultValue = "image") String capability) {
-        return Result.ok(capabilityService.listCapabilities(capability));
+    @GetMapping("/image/models")
+    public Result<List<ImageModelCapabilityDto>> listImageModels() {
+        return Result.ok(capabilityService.listImageCapabilities());
+    }
+
+    /** 查询当前启用的视频生成模型及其能力。 */
+    @GetMapping("/video/models")
+    public Result<List<VideoModelCapabilityDto>> listVideoModels() {
+        return Result.ok(capabilityService.listVideoCapabilities());
     }
 
     /** 文生图：流式模型返 job_id（前端 EventSource 订阅逐张），非流式返 asset_id+url。 */

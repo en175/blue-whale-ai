@@ -45,6 +45,10 @@ public class GenerationJobService {
     public static final int MAX_POLL_COUNT = 120;
     private static final long POLL_INTERVAL_SECONDS = 5;
     private static final int MAX_REFERENCE_IMAGES = 14;
+    /** 火山 Seedance 全能参考素材上限（图≤9 / 视频≤3 / 音频≤3）。 */
+    private static final int MAX_VIDEO_REF_IMAGES = 9;
+    private static final int MAX_VIDEO_REF_VIDEOS = 3;
+    private static final int MAX_VIDEO_REF_AUDIOS = 3;
 
     private final GenerationJobMapper jobMapper;
     private final AssetMapper assetMapper;
@@ -120,10 +124,17 @@ public class GenerationJobService {
     @Transactional
     public CreateJobDto createVideoJob(VideoGenerateRequest req, Long userId) {
         projectService.requireOwned(req.projectId(), userId);
+        GenerationModelCapability capability = capabilityMapper.selectEnabledByModelId(req.modelId())
+                .orElseThrow(() -> new GlobalException(SystemCode.FAILURE_CODE, "不支持的模型: " + req.modelId()));
+        validateVideoMutualExclusion(req);
+        validateVideoReference(req, capability);
+
         GenerationJob job = newGenerationJob(userId, req.projectId(), GenerationJob.TYPE_VIDEO, "volcengine", buildVideoInput(req));
         jobMapper.insert(job);
         try {
-            String taskId = volcEngineService.createVideoTask(req.modelId(), req.prompt(), req.firstFrameUrl(),
+            String taskId = volcEngineService.createVideoTask(req.modelId(), req.prompt(),
+                    req.firstFrameUrl(), req.lastFrameUrl(),
+                    req.referenceImages(), req.referenceVideos(), req.referenceAudios(),
                     req.aspectRatio(), req.resolution(), req.duration());
             job.setStatus(GenerationJob.STATUS_PROCESSING)
                     .setProviderTaskId(taskId)
@@ -294,6 +305,10 @@ public class GenerationJobService {
         input.put("aspectRatio", req.aspectRatio());
         input.put("duration", req.duration());
         input.put("firstFrameUrl", req.firstFrameUrl());
+        input.put("lastFrameUrl", req.lastFrameUrl());
+        input.put("reference_images", req.referenceImages());
+        input.put("reference_videos", req.referenceVideos());
+        input.put("reference_audios", req.referenceAudios());
         return input;
     }
 
@@ -362,6 +377,54 @@ public class GenerationJobService {
             throw new GlobalException(SystemCode.FAILURE_CODE, "生成数量超过该模型限制（最大 " + max + "）");
         }
         return value;
+    }
+
+    /** 首尾帧模式与全能参考模式互斥（火山 Seedance 三场景不可混用）。 */
+    private void validateVideoMutualExclusion(VideoGenerateRequest req) {
+        boolean hasFirstLast = isNotBlank(req.firstFrameUrl()) || isNotBlank(req.lastFrameUrl());
+        boolean hasReference = hasItems(req.referenceImages()) || hasItems(req.referenceVideos()) || hasItems(req.referenceAudios());
+        if (hasFirstLast && hasReference) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "首尾帧模式与全能参考模式互斥，不可同时提交");
+        }
+    }
+
+    /** 按模型能力 + 火山上限校验全能参考素材（图≤9 / 视频≤3 / 音频≤3；音频不可单独，需配图或视频）。 */
+    private void validateVideoReference(VideoGenerateRequest req, GenerationModelCapability capability) {
+        int imgCount = sizeOf(req.referenceImages());
+        int vidCount = sizeOf(req.referenceVideos());
+        int audCount = sizeOf(req.referenceAudios());
+        if (imgCount + vidCount + audCount == 0) {
+            return;
+        }
+        GenerationModelCapability.Features features = capability.getFeatures();
+        if (features == null || !Boolean.TRUE.equals(features.getReferenceImage())) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "当前模型不支持全能参考");
+        }
+        if (imgCount > MAX_VIDEO_REF_IMAGES) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "参考图最多 " + MAX_VIDEO_REF_IMAGES + " 张");
+        }
+        if (vidCount > MAX_VIDEO_REF_VIDEOS) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "参考视频最多 " + MAX_VIDEO_REF_VIDEOS + " 段");
+        }
+        if (audCount > MAX_VIDEO_REF_AUDIOS) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "参考音频最多 " + MAX_VIDEO_REF_AUDIOS + " 段");
+        }
+        // 火山：音频不可单独输入，至少需 1 张图或 1 段视频
+        if (audCount > 0 && imgCount == 0 && vidCount == 0) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "音频不可单独参考，至少需 1 张图或 1 段视频");
+        }
+    }
+
+    private static boolean isNotBlank(String s) {
+        return s != null && !s.isBlank();
+    }
+
+    private static boolean hasItems(List<?> list) {
+        return list != null && !list.isEmpty();
+    }
+
+    private static int sizeOf(List<?> list) {
+        return list == null ? 0 : list.size();
     }
 
     /** 火山 status → 本地状态机。 */

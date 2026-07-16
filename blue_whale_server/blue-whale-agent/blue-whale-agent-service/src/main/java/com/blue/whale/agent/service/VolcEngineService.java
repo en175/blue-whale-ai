@@ -9,6 +9,10 @@ import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import com.volcengine.ApiException;
 import com.volcengine.ark.runtime.model.content.generation.CreateContentGenerationTaskRequest;
+import com.volcengine.ark.runtime.model.content.generation.CreateContentGenerationTaskRequest.AudioUrl;
+import com.volcengine.ark.runtime.model.content.generation.CreateContentGenerationTaskRequest.Content;
+import com.volcengine.ark.runtime.model.content.generation.CreateContentGenerationTaskRequest.ImageUrl;
+import com.volcengine.ark.runtime.model.content.generation.CreateContentGenerationTaskRequest.VideoUrl;
 import com.volcengine.ark.runtime.model.content.generation.CreateContentGenerationTaskResult;
 import com.volcengine.ark.runtime.model.content.generation.GetContentGenerationTaskRequest;
 import com.volcengine.ark.runtime.model.content.generation.GetContentGenerationTaskResponse;
@@ -116,20 +120,33 @@ public class VolcEngineService implements ImageGenerationProvider {
         return builder.build();
     }
 
-    /** 创建视频生成任务，返回火山 task id。 */
-    public String createVideoTask(String model, String prompt, String imageUrl, String ratio, String resolution, Long duration) {
+    /**
+     * 创建视频生成任务，返回火山 task id。
+     *
+     * <p>火山 Seedance 三场景互斥（由调用方 {@code GenerationJobService} 预校验）：
+     * <ul>
+     *   <li>首帧：{@code firstFrameUrl}（role=first_frame）</li>
+     *   <li>首尾帧：{@code + lastFrameUrl}（role=last_frame）</li>
+     *   <li>全能参考：{@code referenceImages/Videos/Audios}
+     *       （role=reference_image / reference_video / reference_audio）</li>
+     * </ul>
+     * 三类参考素材顺序追加（火山按 content 数组顺序 + role 识别多模态参考场景）。
+     */
+    public String createVideoTask(String model, String prompt,
+                                  String firstFrameUrl, String lastFrameUrl,
+                                  List<String> referenceImages, List<String> referenceVideos, List<String> referenceAudios,
+                                  String ratio, String resolution, Long duration) {
         ArkService arkService = requireArk();
-        List<CreateContentGenerationTaskRequest.Content> contents = new ArrayList<>();
-        contents.add(CreateContentGenerationTaskRequest.Content.builder()
-                .type("text")
-                .text(prompt)
-                .build());
-        if (imageUrl != null && !imageUrl.isBlank()) {
-            contents.add(CreateContentGenerationTaskRequest.Content.builder()
-                    .type("image_url")
-                    .imageUrl(CreateContentGenerationTaskRequest.ImageUrl.builder().url(imageUrl).build())
-                    .build());
-        }
+        List<Content> contents = new ArrayList<>();
+        contents.add(Content.builder().type("text").text(prompt).build());
+        // 首帧/尾帧（首尾帧模式）
+        addFrameContent(contents, firstFrameUrl, "first_frame");
+        addFrameContent(contents, lastFrameUrl, "last_frame");
+        // 全能参考模式：参考图 / 参考视频 / 参考音频
+        addReferenceContents(contents, referenceImages, "image_url", "reference_image", false);
+        addReferenceContents(contents, referenceVideos, "video_url", "reference_video", true);
+        addReferenceContents(contents, referenceAudios, "audio_url", "reference_audio", true);
+
         CreateContentGenerationTaskRequest.Builder builder = CreateContentGenerationTaskRequest.builder()
                 .model(model)
                 .content(contents);
@@ -149,6 +166,45 @@ public class VolcEngineService implements ImageGenerationProvider {
         } catch (Exception e) {
             logArkError("createContentGenerationTask", e);
             throw new GlobalException(SystemCode.FAILURE_CODE, "上游创建任务失败: " + rootMessage(e));
+        }
+    }
+
+    /** 追加首/尾帧 image_url 元素（role=first_frame / last_frame）。 */
+    private void addFrameContent(List<Content> contents, String url, String role) {
+        if (url == null || url.isBlank()) {
+            return;
+        }
+        contents.add(Content.builder()
+                .type("image_url")
+                .imageUrl(ImageUrl.builder().url(url).build())
+                .role(role)
+                .build());
+    }
+
+    /**
+     * 追加全能参考元素：image_url / video_url / audio_url，统一带 reference_* role。
+     *
+     * @param isMedia true=视频/音频（videoUrl / audioUrl），false=图片（imageUrl）
+     */
+    private void addReferenceContents(List<Content> contents, List<String> urls, String type, String role, boolean isMedia) {
+        if (urls == null || urls.isEmpty()) {
+            return;
+        }
+        for (String url : urls) {
+            if (url == null || url.isBlank()) {
+                continue;
+            }
+            Content.Builder b = Content.builder().type(type).role(role);
+            if (isMedia) {
+                if ("video_url".equals(type)) {
+                    b.videoUrl(VideoUrl.builder().url(url).build());
+                } else {
+                    b.audioUrl(AudioUrl.builder().url(url).build());
+                }
+            } else {
+                b.imageUrl(ImageUrl.builder().url(url).build());
+            }
+            contents.add(b.build());
         }
     }
 

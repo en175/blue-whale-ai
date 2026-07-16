@@ -5,6 +5,7 @@
  */
 import type React from "react";
 import type { CardStatus } from "@/types/domain";
+import type { VideoModelCapability } from "./api/generation";
 
 export type ToolDef = {
   id: string;
@@ -56,6 +57,8 @@ export type DockMediaItem = {
   type: "image" | "video" | "audio";
   name: string;
   src?: string;
+  /** 关联资产 ID（预埋：当前参考素材 URL 直传，assetId 为后续统一切 assetId 引用预留，spec D7） */
+  assetId?: number;
 };
 
 /** 视口。字段对齐 RF `Viewport`：`scale` 改名 `zoom`（BREAKING，见 design D5）。 */
@@ -93,7 +96,7 @@ export type Project = {
   active?: boolean;
 };
 
-/** 生成设置选项（id+label 形状，与 constants 里的 VIDEO_MODELS 等一致）。 */
+/** 生成设置选项（id+label 形状）。 */
 export type SelectOption = { id: string; label: string };
 
 /** 图片 Dock 生成设置（model/resolution/aspectRatio/quantity 在 ImageDockContent 本地 state）。 */
@@ -116,6 +119,12 @@ export type VideoGenerateSettings = {
   firstFrameUrl?: string;
   /** 尾帧 TOS url（首尾帧模式） */
   lastFrameUrl?: string;
+  /** 全能参考图 url 列表（omni 模式） */
+  referenceImages?: string[];
+  /** 全能参考视频 url 列表（omni 模式） */
+  referenceVideos?: string[];
+  /** 全能参考音频 url 列表（omni 模式） */
+  referenceAudios?: string[];
 };
 
 /** 生成请求参数：discriminated union，按 mode narrow settings。 */
@@ -154,13 +163,16 @@ export type VideoDockContentProps = {
   refModeOpen: boolean;
   setRefModeOpen: (v: boolean) => void;
   selectedModel: { id: string; label: string };
-  setSelectedModel: (m: { id: string; label: string }) => void;
+  /** 选中模型（传完整 capability，触发分辨率/比例/时长联动重置）。 */
+  onSelectModel: (cap: VideoModelCapability) => void;
   modelSettingsOpen: boolean;
   setModelSettingsOpen: (v: boolean) => void;
   aspectRatio: { id: string; label: string };
   setAspectRatio: (r: { id: string; label: string }) => void;
   resolution: { id: string; label: string };
   setResolution: (r: { id: string; label: string }) => void;
+  /** DB 拉取的视频模型能力列表（模型/分辨率/比例/时长下拉的数据源，含联动）。 */
+  videoModels: VideoModelCapability[];
   duration: number;
   setDuration: (d: number) => void;
   quantity: string;

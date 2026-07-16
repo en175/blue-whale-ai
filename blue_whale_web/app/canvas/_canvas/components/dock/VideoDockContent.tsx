@@ -17,17 +17,7 @@ import {
 } from "lucide-react";
 import { AspectRatioIcon } from "@/components/icons/AspectRatioIcon";
 import { CreditIcon, IconClose, IconPlus } from "../../icons";
-import {
-  VIDEO_MODELS,
-  VIDEO_ASPECT_RATIOS,
-  VIDEO_RESOLUTIONS,
-  VIDEO_DURATION_MIN,
-  VIDEO_DURATION_MAX,
-  VIDEO_DURATION_STEP,
-  VIDEO_DURATION_TICKS,
-  REF_MODES,
-  QUANTITIES,
-} from "../../constants";
+import { VIDEO_ASPECT_RATIOS, REF_MODES, QUANTITIES } from "../../constants";
 import type { VideoDockContentProps } from "../../types";
 import { FrameUploadButton, MediaCategoryButton, MediaSection } from "./parts";
 import { UploadSourceMenu } from "./UploadSourceMenu";
@@ -56,13 +46,14 @@ export function VideoDockContent(props: VideoDockContentProps) {
     refModeOpen,
     setRefModeOpen,
     selectedModel,
-    setSelectedModel,
+    onSelectModel,
     modelSettingsOpen,
     setModelSettingsOpen,
     aspectRatio,
     setAspectRatio,
     resolution,
     setResolution,
+    videoModels,
     duration,
     setDuration,
     quantity,
@@ -87,6 +78,18 @@ export function VideoDockContent(props: VideoDockContentProps) {
     onGenerate,
     generating = false,
   } = props;
+
+  // 当前模型的 capability（DB 驱动）：下拉数据源 + 联动。比例用平台固定集合常量。
+  const currentCap = videoModels.find((m) => m.modelId === selectedModel.id) ?? videoModels[0];
+  const resolutions = currentCap?.supportedResolutions ?? [];
+  const drMin = currentCap?.durationRange?.min ?? 4;
+  const drMax = currentCap?.durationRange?.max ?? 15;
+  const drStep = currentCap?.durationRange?.step ?? 1;
+  const durationTicks = Array.from({ length: (drMax - drMin) / drStep + 1 }, (_, i) => drMin + i * drStep);
+
+  // omni 全能参考：按类型从 media 收集 url（图片/视频/音频分别打 reference_image/reference_video/reference_audio）
+  const collectRefs = (type: MediaCategory): string[] =>
+    media.filter((m) => m.type === type).map((m) => m.src).filter((s): s is string => Boolean(s));
 
   // 上传来源菜单（参考图占位 + 加号共用）
   const localFileRef = useRef<HTMLInputElement>(null);
@@ -688,7 +691,8 @@ export function VideoDockContent(props: VideoDockContentProps) {
             <button
               type="button"
               disabled={isEmpty || generating}
-              onClick={() =>
+              onClick={() => {
+                const isOmni = refMode.id === "omni";
                 onGenerate?.({
                   model: selectedModel,
                   resolution,
@@ -696,10 +700,14 @@ export function VideoDockContent(props: VideoDockContentProps) {
                   duration,
                   quantity,
                   refMode,
-                  firstFrameUrl,
-                  lastFrameUrl,
-                })
-              }
+                  // 互斥：首尾帧模式发 frame url，omni 模式发参考素材（火山三场景不可混用）
+                  firstFrameUrl: isOmni ? undefined : firstFrameUrl,
+                  lastFrameUrl: isOmni ? undefined : lastFrameUrl,
+                  referenceImages: isOmni ? collectRefs("image") : undefined,
+                  referenceVideos: isOmni ? collectRefs("video") : undefined,
+                  referenceAudios: isOmni ? collectRefs("audio") : undefined,
+                });
+              }}
               style={{
                 height: 32,
                 padding: "0px 12px",
@@ -915,12 +923,12 @@ export function VideoDockContent(props: VideoDockContentProps) {
                         gap: 2,
                       }}
                     >
-                      {VIDEO_MODELS.map((m) => (
+                      {videoModels.map((m) => (
                         <button
-                          key={m.id}
+                          key={m.modelId}
                           type="button"
                           onClick={() => {
-                            setSelectedModel(m);
+                            onSelectModel(m);
                             setModelDropdownOpen(false);
                           }}
                           style={{
@@ -929,7 +937,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                             borderRadius: 6,
                             border: 0,
                             background:
-                              selectedModel.id === m.id ? "rgba(255, 255, 255, 0.08)" : "transparent",
+                              selectedModel.id === m.modelId ? "rgba(255, 255, 255, 0.08)" : "transparent",
                             color: "rgb(255, 255, 255)",
                             fontSize: 12,
                             cursor: "pointer",
@@ -941,7 +949,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                             textAlign: "left",
                           }}
                         >
-                          <span style={{ fontWeight: 600 }}>{m.label}</span>
+                          <span style={{ fontWeight: 600 }}>{m.modelLabel}</span>
                         </button>
                       ))}
                     </div>
@@ -1022,12 +1030,12 @@ export function VideoDockContent(props: VideoDockContentProps) {
                         gap: 2,
                       }}
                     >
-                      {VIDEO_RESOLUTIONS.map((r) => (
+                      {resolutions.map((r) => (
                         <button
                           key={r.id}
                           type="button"
                           onClick={() => {
-                            setResolution(r);
+                            setResolution({ id: r.id, label: r.label });
                             setResolutionDropdownOpen(false);
                           }}
                           style={{
@@ -1066,9 +1074,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
               </div>
               <input
                 className="tc-duration-slider__input"
-                min={VIDEO_DURATION_MIN}
-                max={VIDEO_DURATION_MAX}
-                step={VIDEO_DURATION_STEP}
+                min={drMin}
+                max={drMax}
+                step={drStep}
                 aria-label="时长"
                 aria-valuetext={`${duration}s`}
                 type="range"
@@ -1076,19 +1084,19 @@ export function VideoDockContent(props: VideoDockContentProps) {
                 onChange={(e) => setDuration(Number(e.target.value))}
                 style={{
                   ["--tc-duration-slider-progress" as string]: `${
-                    ((duration - VIDEO_DURATION_MIN) / (VIDEO_DURATION_MAX - VIDEO_DURATION_MIN)) * 100
+                    ((duration - drMin) / (drMax - drMin)) * 100
                   }%`,
                 }}
               />
               <div className="tc-duration-slider__ticks" aria-hidden="true">
                 <div className="tc-duration-slider__tick-track">
-                  {VIDEO_DURATION_TICKS.map((t) => (
+                  {durationTicks.map((t) => (
                     <span
                       key={t}
                       className={`tc-duration-slider__tick${t === duration ? " tc-duration-slider__tick--active" : ""}`}
                       style={{
                         ["--tc-duration-slider-tick-position" as string]: `${
-                          ((t - VIDEO_DURATION_MIN) / (VIDEO_DURATION_MAX - VIDEO_DURATION_MIN)) * 100
+                          ((t - drMin) / (drMax - drMin)) * 100
                         }%`,
                       }}
                     />
@@ -1096,8 +1104,8 @@ export function VideoDockContent(props: VideoDockContentProps) {
                 </div>
               </div>
               <div className="tc-duration-slider__limits" aria-hidden="true">
-                <span>{VIDEO_DURATION_MIN}s</span>
-                <span>{VIDEO_DURATION_MAX}s</span>
+                <span>{drMin}s</span>
+                <span>{drMax}s</span>
               </div>
             </div>
 
