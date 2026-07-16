@@ -75,6 +75,9 @@ public class GenerationModelCapability extends BaseEntity {
     /** 是否启用 */
     private Boolean enabled;
 
+    /** 展示排序（升序，越小越靠前；最新模型设小值，前端默认取列表第一项） */
+    private Integer sortOrder;
+
     /** 尺寸选项 JSON 结构 */
     @Getter
     @Setter
