@@ -60,14 +60,59 @@ _Avoid_: 把消息直接挂到 Project；把每个 AgentRun 当作独立对话�
 _Avoid_: 访客、匿名 User、客户端自报 `userId`、把浏览器本地标识当作身份。
 
 **ContentReview（内容审核）**:
-对进入 Agent 或供应商的输入及即将向 User 展示的输出形成的产品安全决定；只有明确通过的内容
-才能继续或可见，审核拒绝、超时或不可用均不得默认放行。
-_Avoid_: 把供应商审核结果直接当作产品权威；审核不可用时默认通过。
+Java Product API 对产品策略纳入审核范围的内容形成的安全决定；普通用户文字消息和提示词不做
+独立前置审核，Agent 或生成供应商的安全结果可以成为后续 ReviewEvidence。受审内容可以复用匹配的
+既有结果或依据充分的证据，不要求人工逐条审批，也不等于每次都调用外部审核服务。
+内容决定只有 `pass` 或 `reject`；超时、不可用或无效证据属于审核运行故障，不得伪装成内容拒绝。
+规范化决定随关联产品事实保留并参与未来 Project 删除流程；最小化 AuditRecord 独立保留 365 天。
+同一 Project 内相同受审主体、内容摘要、模态、输入/输出方向和策略版本共享一个逻辑审核；其
+`pending` 只能进入不可变的 `decided` 或 `failed` 终态，终态失败后的 User 重试创建关联的新审核。
+_Avoid_: 人工审核、把供应商审核结果直接当作产品权威、把产品决定理解为全量外部调用、审核不可用时默认通过。
+
+**ContentReviewPolicy（内容审核策略）**:
+Java Product API 形成 ContentReview 决定时采用的不可变、版本化规则包，包含适用模态与方向、
+产品判定规则、供应商配置引用、阈值、ReviewReasonCode 映射版本和证据要求。候选版本依次经过
+`draft`、`validated`、`active`、`retired`；新审核绑定创建时的活动版本，后续尝试和历史决定不漂移。
+_Avoid_: 原地修改已发布策略、让供应商配置隐式改变产品决定、回滚时改写既有审核或重审历史 Asset。
+
+**ReviewReasonCode（审核原因码）**:
+ContentReview 作出 `reject` 决定时记录的一个或多个产品级安全分类，稳定取值为
+`sexual_content`、`minor_safety`、`violence`、`self_harm`、`hate_or_harassment`、
+`illegal_or_regulated`、`privacy_or_sensitive_data`、`fraud_or_impersonation`、
+`cyber_abuse`、`prompt_attack`、`resource_abuse`、`custom_policy` 或
+`unclassified_policy_risk`。供应商标签必须经版本化映射转换；未知标签归入
+`unclassified_policy_risk` 并拒绝。ReviewReasonCode 只对具备安全运营权限的内部角色可见，
+普通 User 和公开 API 只得到稳定错误码与安全提示。
+_Avoid_: 供应商原始标签、把超时或不可用等运行故障当作审核原因码、未知标签默认放行、向普通 User 暴露内部原因码或命中规则。
+
+**ReviewEvidence（审核证据）**:
+Java Product API 形成 ContentReview 时采用的可验证事实，包括匹配内容与策略版本的既有决定、
+专用审核服务结果或生成供应商自带审核结果；证据本身不授予内容通过资格。产品只持久化最小化、
+可追溯的证据引用和规范化字段，不保存供应商完整响应、命中原文或额外内容副本。
+_Avoid_: 审核决定、把任一供应商证据直接当作放行结果、把供应商原始响应当作长期证据存档。
+
+**ReviewAttempt（审核尝试）**:
+ContentReview 为取得证据而发起的一次供应商调用事实；同一逻辑审核可以因可重试故障包含多个
+追加式 ReviewAttempt。自动重试期间 ContentReview 保持 `pending`，尝试失败不等于产品拒绝；
+ContentReview 进入终态后，ReviewAttempt 不能改写其决定。
+_Avoid_: 把每次供应商重试当作新的内容审核、用 ReviewAttempt 直接决定内容通过、覆盖旧尝试记录。
+
+**OutputReleaseGate（输出释放门）**:
+Java Product API 在 Agent 文字变为 User 可见内容前形成的产品安全边界；供应商证据覆盖待释放前缀时
+可以流式释放，否则必须缓冲完整回复并在 ContentReview 明确通过后整体释放。
+完整回复的专用审核总预算为 5 秒；无法形成决定时丢弃未释放文字并返回安全错误，不进入后台审核。
+_Avoid_: 供应商直接向 User 流式输出、把流式安全信号直接当作产品决定、逐片调用外部审核服务。
 
 **Asset（资产）**:
 一个必须归属 Project 的图片或视频文件单元，媒体内容身份不可变，由产品控制的对象存储持久化。
 对象永久私有；访问 URL 仅在服务端确认当前 User 有权访问所属 Project 与 Asset 后临时签发，
 不构成 Asset 身份或长期地址。
+用户上传的 Asset 在内容固定后执行一次机器 ContentReview；明确通过后可作为输入重复使用，
+不因每次生成或后续策略升级重复送审。编辑、换源或生成派生版本会创建新 Asset，并重新审核。
+上传审核自动恢复最多 15 分钟，期间只显示“素材处理中”且不可使用；耗尽后隔离对象再保留 24 小时
+供仅重试审核，到期仍未通过则删除并要求重新上传。
+供应商生成结果只有在 Java Product API 依据充分 ReviewEvidence 明确通过后才成为 Asset，继而
+可见、可下载或可作为后续输入；证据不足时只对该结果调用一次专用审核服务。
 **同一 Asset 可被多个视图引用** —— Card（对话流呈现）与 NodeItem（画布呈现）
 是同一生成结果的两种视图,二者引用同一个 Asset。
 既包含用户上传的素材（作为生成输入）,也包含生成产出的结果（作为输出）,
@@ -86,10 +131,17 @@ NodeItem/Card 是它呈现给用户的视图；在同一个 assetId 下覆写媒
 GenerationJob 必须归属 Project；由 AgentChatPanel 触发时关联 AgentRun，由 BottomDock
 触发时不关联 AgentRun。AgentRun 暂停或进入终态不级联改写已提交 Job；失败重试创建
 带重试关系的新 Job，原 Job 终态不可变。
+供应商结果等待 ContentReview 时，Job 仍为 `processing`，内部阶段为 `reviewing`；审核暂时不可用
+只重试同一隔离结果，不重新调用生成供应商，也不产生第二次生成费用。自动恢复窗口为 15 分钟；
+耗尽后 Job 以 `CONTENT_REVIEW_UNAVAILABLE` 失败，隔离结果再保留 24 小时供仅重试审核。
 取消请求只表达意图；只有供应商确认取消或产品能证明调用尚未发生时，Job 才进入 `cancelled`。
 取消确认前已完成的真实结果仍按成功或部分成功接纳，已产生的 Asset 永久保留。
 **Card 的展示状态是 Job 状态的视图映射**:`processing`→`generating`、
 `succeeded`→`normal`、`failed`→`failed`；`partially_succeeded` 中成功的输出为 `normal`，
+被 ContentReview 拒绝的输出槽位为 `failed` 且不创建 Asset；多输出任务仅部分通过时为
+`partially_succeeded`。供应商已产生的实际成本仍按事实结算。
+被拒绝的上传或生成媒体立即进入删除队列，并在一小时内从隔离对象存储清除；未释放的 Agent
+文字被拒绝后立即从内存丢弃，不进入 Conversation、产品事件或 Snapshot。
 缺失的输出槽位为 `failed`；`cancelled` 中已有 Asset 的输出为 `normal`，未产生结果的槽位为
 `cancelled`。
 _Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeItem 是结果视图;
