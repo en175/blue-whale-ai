@@ -12,6 +12,7 @@ CREATE TABLE template_card
     title       VARCHAR(255) NOT NULL COMMENT '卡片标题',
     video_url   VARCHAR(512) NULL COMMENT '视频地址',
     layout      VARCHAR(32)  NOT NULL COMMENT '布局：wide/portrait/social/image',
+    content     TEXT         NULL COMMENT '提示词：点击卡片后下发的 prompt 文本',
     sort_order  INT          NOT NULL DEFAULT 0 COMMENT '排序',
     create_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',

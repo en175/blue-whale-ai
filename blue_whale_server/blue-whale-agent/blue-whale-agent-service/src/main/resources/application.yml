@@ -15,6 +15,13 @@ spring:
         # 本地开发传 NACOS_NAMESPACE=<隔离 namespace ID> 注册到独立 namespace，避免串线上流量
         namespace: ${NACOS_NAMESPACE:1bb06cf5-c1ad-4054-b022-49358a2f49aa}
         timeout: 10000
+      config:
+        server-addr: 115.190.244.91:8848
+        namespace: ${NACOS_NAMESPACE:1bb06cf5-c1ad-4054-b022-49358a2f49aa}
+        file-extension: yml
+        group: BLUE_WHALE
+
+
   datasource:
     dynamic:
       primary: master
@@ -62,9 +69,9 @@ mybatis-plus:
 
 oss:
   tos:
-    access-key: ${TOS_ACCESS_KEY}
-    secret-key: ${TOS_SECRET_KEY}
-    bucket-name: ${TOS_BUCKET_NAME}
+    access-key: AKLTYjI2ZjM3NDU1NTBiNDQwMDkwNjFhZmQxOWVhOGYyODg
+    secret-key: WVdVMU9UTmhaREppTWpSa05EWmlOVGxoT1RNMFlqVTVOR00xWkRKalpqaw==
+    bucket-name: bluewhale-assets
 
 logging:
   level:
@@ -75,3 +82,24 @@ volcengine:
   ark:
     base-url: https://ark.cn-beijing.volces.com/api/v3
     api-key: ark-90702f0d-327b-4d76-890c-7dc81efd5721-e0494
+
+# 模板标签：原 TemplateTagEnum 枚举迁为配置项，增删标签改此处即可，无需改代码
+# tagCode 值须与 DB template_card.tag_code 现有数据保持一致
+bluewhale:
+  template:
+    tags:
+      - tag-code: marketing
+        label: 营销视频
+        sort-order: 0
+      - tag-code: short
+        label: 微短片
+        sort-order: 1
+      - tag-code: replicate
+        label: 视频复刻
+        sort-order: 2
+      - tag-code: social
+        label: 社媒视频
+        sort-order: 3
+      - tag-code: image
+        label: 图片设计
+        sort-order: 4

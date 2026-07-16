@@ -15,6 +15,8 @@ public class TemplateCardDto {
     private List<String> images;
     /** 布局：wide/portrait/social/image */
     private String layout;
+    /** 提示词：点击卡片后下发的 prompt 文本，可空 */
+    private String content;
 
     public TemplateCardDto() {
     }
@@ -22,11 +24,12 @@ public class TemplateCardDto {
     /**
      * 全参构造器
      */
-    public TemplateCardDto(String title, String video, List<String> images, String layout) {
+    public TemplateCardDto(String title, String video, List<String> images, String layout, String content) {
         this.title = title;
         this.video = video;
         this.images = images;
         this.layout = layout;
+        this.content = content;
     }
 
     public String getTitle() {
@@ -59,5 +62,13 @@ public class TemplateCardDto {
 
     public void setLayout(String layout) {
         this.layout = layout;
+    }
+
+    public String getContent() {
+        return content;
+    }
+
+    public void setContent(String content) {
+        this.content = content;
     }
 }
