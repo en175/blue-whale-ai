@@ -1,6 +1,7 @@
 package com.blue.whale.user.controller;
 
 import com.blue.whale.global.base.resp.Result;
+import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import com.blue.whale.user.dto.LoginRequest;
 import com.blue.whale.user.dto.LoginResponse;
@@ -41,7 +42,7 @@ public class AuthController {
     public Result<LoginResponse> refresh(HttpServletRequest request) {
         String header = request.getHeader("Authorization");
         if (header == null || !header.startsWith("Bearer ")) {
-            throw new GlobalException(401, "缺少 refresh_token");
+            throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "缺少 refresh_token");
         }
         return Result.ok(authService.refresh(header.substring(7)));
     }

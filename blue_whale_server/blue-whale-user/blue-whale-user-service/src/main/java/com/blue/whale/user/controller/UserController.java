@@ -1,6 +1,7 @@
 package com.blue.whale.user.controller;
 
 import com.blue.whale.global.base.resp.Result;
+import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import com.blue.whale.user.config.SecurityUtils;
 import com.blue.whale.user.dto.*;
@@ -31,7 +32,7 @@ public class UserController {
         Long userId = SecurityUtils.getCurrentUserId();
         User user = userService.getById(userId);
         if (user == null) {
-            throw new GlobalException(401, "用户不存在");
+            throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "用户不存在");
         }
 
         return Result.ok(UserInfoResponse.builder()
@@ -55,13 +56,13 @@ public class UserController {
 
     /**
      * 换绑手机号——发验证
-     * POST /api/user/phone/send-codef
+     * POST /api/user/phone/send-code
      */
     @PostMapping("/api/user/phone/send-code")
     public Result<Map<String, Object>> sendChangePhoneCode(
             @Valid @RequestBody ChangePhoneSendCodeRequest req,
             HttpServletRequest request) {
-        String userId = String.valueOf(SecurityUtils.getCurrentUserId());
+        Long userId = SecurityUtils.getCurrentUserId();
         String ip = IpUtils.getIpAddr(request);
         authService.sendChangePhoneCode(userId, req.getNewPhone(), ip);
         return Result.ok(Map.of("success", true, "expires_in", 300));
@@ -73,7 +74,7 @@ public class UserController {
      */
     @PutMapping("/api/user/phone")
     public Result<Void> changePhone(@Valid @RequestBody ChangePhoneRequest req) {
-        String userId = String.valueOf(SecurityUtils.getCurrentUserId());
+        Long userId = SecurityUtils.getCurrentUserId();
         authService.changePhone(userId, req.getNewPhone(), req.getCode());
         return Result.ok();
     }

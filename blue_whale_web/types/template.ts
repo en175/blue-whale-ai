@@ -8,8 +8,8 @@ export interface TemplateCard {
 }
 
 export interface TemplateTag {
-  /** 后端 Jackson SNAKE_CASE 序列化 → tag_code（非 tagCode） */
-  tag_code: string;
+  /** 后端序列化为 camelCase → tagCode */
+  tagCode: string;
   label: string;
   cards?: TemplateCard[];
 }

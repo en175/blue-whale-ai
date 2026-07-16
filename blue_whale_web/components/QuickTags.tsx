@@ -45,13 +45,13 @@ export default function QuickTags({
   return (
     <div className="ncs-thin-scrollbar flex w-full items-center justify-center gap-1.5 overflow-x-auto">
       {tags.map((tag) => {
-        const Icon = ICON_MAP[tag.tag_code] ?? DEFAULT_ICON;
-        const isActive = active === tag.tag_code;
+        const Icon = ICON_MAP[tag.tagCode] ?? DEFAULT_ICON;
+        const isActive = active === tag.tagCode;
         return (
           <button
-            key={tag.tag_code}
+            key={tag.tagCode}
             type="button"
-            onClick={() => onSelect(tag.tag_code)}
+            onClick={() => onSelect(tag.tagCode)}
             className={`group inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-all duration-200 ${
               isActive
                 ? "bg-white/[0.09] text-white/90"

@@ -9,12 +9,7 @@ import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-
 import javax.servlet.http.HttpServletResponse;
-import java.util.List;
 
 /**
  * Spring Security 配置
@@ -39,11 +34,7 @@ public class SecurityConfig {
                 // 禁用 CSRF（REST API）
                 .csrf().disable()
 
-                // CORS 由 Security 接管
-                .cors()
-
                 // URL 权限
-                .and()
                 .authorizeRequests()
                 .antMatchers("/api/auth/send-code", "/api/auth/login", "/api/auth/refresh").permitAll()
                 .antMatchers("/api/**").authenticated()
@@ -64,24 +55,6 @@ public class SecurityConfig {
                 .httpBasic().disable();
 
         return http.build();
-    }
-
-    /**
-     * CORS 跨域配置
-     */
-    @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOriginPatterns(List.of("*"));
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
-        config.setExposedHeaders(List.of("Authorization", "X-Response-Time"));
-        config.setAllowCredentials(true);
-        config.setMaxAge(3600L);
-
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/api/**", config);
-        return source;
     }
 
     /**
