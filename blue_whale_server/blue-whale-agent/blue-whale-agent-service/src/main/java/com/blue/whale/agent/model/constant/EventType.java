@@ -31,6 +31,9 @@ public final class EventType {
     /** AgentRun：生命周期状态已变更。 */
     public static final String AGENT_RUN_STATUS_CHANGED = "agent_run.status_changed";
 
+    /** UserInputRequest：Java 策略要求一次性自然语言确认。 */
+    public static final String USER_INPUT_REQUEST_CREATED = "user_input_request.created";
+
     /** GenerationJob：创建 */
     public static final String GENERATION_JOB_CREATED = "generation_job.created";
     /** GenerationJob：状态变更（queued→processing→succeeded|failed） */

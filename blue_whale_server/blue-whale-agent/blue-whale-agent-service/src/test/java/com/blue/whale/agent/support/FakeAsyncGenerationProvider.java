@@ -23,6 +23,7 @@ public class FakeAsyncGenerationProvider implements AsyncGenerationProvider {
     private volatile ProviderObservation observation;
     private volatile boolean ambiguousSubmission;
     private volatile boolean rejectedSubmission;
+    private volatile boolean unavailableBeforeSubmission;
     private volatile boolean succeedsOnCancelConfirmation;
     private volatile CountDownLatch submissionStarted;
     private volatile CountDownLatch submissionRelease;
@@ -33,6 +34,10 @@ public class FakeAsyncGenerationProvider implements AsyncGenerationProvider {
 
     @Override
     public ProviderTaskReference submit(AsyncGenerationSpec spec) {
+        if (unavailableBeforeSubmission) {
+            throw new ProviderSubmissionException(
+                    false, "provider_not_configured", "Fake provider unavailable", null);
+        }
         int submissionNumber = submissions.incrementAndGet();
         taskId = TASK_ID_PREFIX + submissionNumber;
         callbackUrl = spec.callbackUrl();
@@ -126,6 +131,7 @@ public class FakeAsyncGenerationProvider implements AsyncGenerationProvider {
         taskId = null;
         ambiguousSubmission = false;
         rejectedSubmission = false;
+        unavailableBeforeSubmission = false;
         succeedsOnCancelConfirmation = false;
         submissionStarted = null;
         submissionRelease = null;
@@ -160,6 +166,10 @@ public class FakeAsyncGenerationProvider implements AsyncGenerationProvider {
 
     public void rejectSubmission() {
         rejectedSubmission = true;
+    }
+
+    public void becomeUnavailableBeforeSubmission() {
+        unavailableBeforeSubmission = true;
     }
 
     public void allowSubmission() {

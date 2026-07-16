@@ -3,6 +3,7 @@ package com.blue.whale.agent.common.web;
 import com.blue.whale.global.base.resp.Result;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
+import com.blue.whale.agent.service.governance.GovernanceException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.core.Ordered;
@@ -34,6 +35,15 @@ import java.util.Set;
 @RestControllerAdvice
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class RestExceptionConfig {
+
+    @ExceptionHandler(GovernanceException.class)
+    public ResponseEntity<Result<Object>> handleGovernanceException(GovernanceException exception) {
+        log.debug("governance exception", exception);
+        Result<Object> failed = Result.failed(
+                SystemCode.AGENT_ACTION_REJECTED_CODE, exception.getMessage());
+        failed.setData(exception.publicEnvelope());
+        return ResponseEntity.status(exception.getHttpStatus()).body(failed);
+    }
 
     @ExceptionHandler(GlobalException.class)
     public ResponseEntity<Result<Object>> handlerGlobalException(GlobalException exception) {
@@ -91,17 +101,13 @@ public class RestExceptionConfig {
     @ExceptionHandler(DataAccessException.class)
     public Result<Object> handleError(DataAccessException e) {
         log.error("data access error", e);
-        Throwable root = e.getMostSpecificCause() != null ? e.getMostSpecificCause() : e;
-        String rootMsg = root.getMessage() != null ? root.getMessage() : e.getMessage();
-        return Result.failed(500, "数据库错误: " + rootMsg);
+        return Result.failed(500, "服务暂时不可用");
     }
 
     @ExceptionHandler(TransactionException.class)
     public Result<Object> handleError(TransactionException e) {
         log.error("transaction error", e);
-        Throwable root = e.getMostSpecificCause() != null ? e.getMostSpecificCause() : e;
-        String rootMsg = root.getMessage() != null ? root.getMessage() : e.getMessage();
-        return Result.failed(500, "数据库错误: " + rootMsg);
+        return Result.failed(500, "服务暂时不可用");
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

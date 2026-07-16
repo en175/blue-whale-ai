@@ -8,6 +8,7 @@ import com.blue.whale.agent.model.constant.EventType;
 import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationModelCapability;
+import com.blue.whale.agent.service.governance.CostReservationService;
 import com.blue.whale.agent.service.provider.ImageGenerationProvider;
 import com.blue.whale.agent.service.provider.ImageGenerationProviderRegistry;
 import com.blue.whale.global.base.resp.SystemCode;
@@ -49,18 +50,21 @@ public class GenerationStreamService {
     private final JobStreamBus bus;
     private final ProjectEventService projectEventService;
     private final TransactionTemplate transactionTemplate;
+    private final CostReservationService costReservationService;
 
     public GenerationStreamService(GenerationJobMapper jobMapper,
                                    AssetStorageService assetStorageService,
                                    ImageGenerationProviderRegistry providerRegistry,
                                    JobStreamBus bus,
                                    ProjectEventService projectEventService,
+                                   CostReservationService costReservationService,
                                    PlatformTransactionManager transactionManager) {
         this.jobMapper = jobMapper;
         this.assetStorageService = assetStorageService;
         this.providerRegistry = providerRegistry;
         this.bus = bus;
         this.projectEventService = projectEventService;
+        this.costReservationService = costReservationService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -72,19 +76,26 @@ public class GenerationStreamService {
             log.warn("stream job {} not found, skip", jobId);
             return;
         }
-        ImageGenerationProvider provider = providerRegistry.getProvider(capability.getProviderId());
+        boolean providerCallStarted = false;
         try {
+            costReservationService.requireActiveBeforeProvider(jobId);
+            ImageGenerationProvider provider = providerRegistry.getProvider(capability.getProviderId());
+            provider.requireReady();
+            providerCallStarted = true;
             provider.streamGenerateImages(req)
                     .blockingForEach(event -> dispatch(job, event));
             markSucceeded(jobId);
+            costReservationService.settleReserved(jobId, "PROVIDER_COST_PROVEN");
             bus.emit(jobId, SsePayload.done(null));
             bus.complete(jobId);
             log.info("stream job {} succeeded", jobId);
         } catch (Exception e) {
             log.error("stream job {} failed", jobId, e);
-            String msg = rootMessage(e);
+            String msg = "图像生成失败";
             markFailed(jobId, msg);
-            bus.emit(jobId, SsePayload.error(SystemCode.FAILURE.name(), msg));
+            costReservationService.finalizeProviderFailure(jobId, providerCallStarted);
+            String budgetEffect = costReservationService.budgetEffect(jobId).wireValue();
+            bus.emit(jobId, SsePayload.error(budgetEffect));
             bus.complete(jobId);
         }
     }
@@ -121,7 +132,9 @@ public class GenerationStreamService {
         if (INTERNAL_ERROR_CODE.equals(code)) {
             throw new GlobalException(SystemCode.FAILURE_CODE, "上游内部错误: " + msg);
         }
-        bus.emit(job.getId(), SsePayload.imageFailed(event.getImageIndex(), code, msg));
+        bus.emit(job.getId(), SsePayload.imageFailed(
+                event.getImageIndex(),
+                costReservationService.budgetEffect(job.getId()).wireValue()));
     }
 
     /** 小事务：原子提交 asset 追加、job 状态与 Project 事件/outbox，再推送 job SSE。 */
@@ -179,11 +192,4 @@ public class GenerationStreamService {
                 payload, null, null);
     }
 
-    private String rootMessage(Exception e) {
-        Throwable cur = e;
-        while (cur.getCause() != null && cur.getCause() != cur) {
-            cur = cur.getCause();
-        }
-        return cur.getMessage();
-    }
 }

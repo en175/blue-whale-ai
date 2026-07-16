@@ -13,20 +13,29 @@ import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationModelCapability;
 import com.blue.whale.agent.service.provider.ImageGenerationProvider;
 import com.blue.whale.agent.service.provider.ImageGenerationProviderRegistry;
+import com.blue.whale.agent.service.governance.CostReservationService;
+import com.blue.whale.agent.service.governance.AuthorizedGenerationAction;
+import com.blue.whale.agent.service.governance.GenerationCostAdmissionService;
+import com.blue.whale.agent.service.governance.GovernanceException;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * 生成任务服务：状态机 {@code queued → processing → succeeded | failed}（沿用 PRD §5.4）。
@@ -48,49 +57,99 @@ public class GenerationJobService {
     private final GenerationStreamService generationStreamService;
     private final ProjectEventService projectEventService;
     private final ProjectService projectService;
+    private final GenerationCostAdmissionService costAdmissionService;
+    private final CostReservationService costReservationService;
+    private final PlatformTransactionManager transactionManager;
 
     /** 文生图：流式模型建 job 异步逐张生成（返 job_id）；非流式模型同步一次性返回（返 asset_id+url）。 */
-    @Transactional
-    public ImageGenerateResponse createImageJob(ImageGenerateRequest req, Long userId) {
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public ImageGenerateResponse createImageJob(
+            ImageGenerateRequest req, Long userId, Long inputRequestId) {
         Long projectId = requireOwnedProject(req.projectId(), userId);
         GenerationModelCapability capability = capabilityMapper.selectEnabledByModelId(req.modelId())
                 .orElseThrow(() -> new GlobalException(SystemCode.FAILURE_CODE, "不支持的模型: " + req.modelId()));
 
         ProviderImageGenerationRequest providerReq = buildProviderRequest(req, capability);
-        GenerationJob job = newGenerationJob(projectId, userId, GenerationJob.TYPE_IMAGE,
-                capability.getProviderId(), buildImageInput(req));
-        jobMapper.insert(job);
-        emitJobCreated(job);
+        Map<String, Object> input = buildImageInput(req);
+        Map<String, Object> admissionArguments = new HashMap<>(input);
+        admissionArguments.put("_cost_provider", capability.getProviderId());
+        String proposedActionIdentity = inputRequestId == null
+                ? "legacy-dock:" + UUID.randomUUID() : null;
+        boolean streaming = streamFlag(capability);
+        GenerationJob job = inTransaction(() -> {
+            AuthorizedGenerationAction authorization = costAdmissionService.authorizeRequest(
+                    userId, projectId, "LegacyGenerationRequest", proposedActionIdentity,
+                    proposedActionIdentity, "generate_image", admissionArguments,
+                    false, inputRequestId);
+            GenerationJob created = newGenerationJob(projectId, userId, GenerationJob.TYPE_IMAGE,
+                    capability.getProviderId(), input);
+            jobMapper.insert(created);
+            created.setActionIdentity(authorization.actionIdentity())
+                    .setProjectActionIdentity(authorization.actionIdentity())
+                    .setExpectedOutputCount(providerReq.getQuantity());
+            jobMapper.updateById(created);
+            costAdmissionService.reserveAuthorized(
+                    userId, projectId, created.getId(), created.getActionIdentity(), "generate_image",
+                    authorization.quote());
+            emitJobCreated(created);
+            if (streaming) {
+                created.setStatus(GenerationJob.STATUS_PROCESSING);
+                jobMapper.updateById(created);
+                emitJobStatusChanged(created);
+            }
+            return created;
+        });
 
-        if (streamFlag(capability)) {
-            job.setStatus(GenerationJob.STATUS_PROCESSING);
-            jobMapper.updateById(job);
-            emitJobStatusChanged(job);
+        if (streaming) {
             triggerStreamAfterCommit(job.getId(), capability, providerReq);
             return ImageGenerateResponse.streaming(job.getId());
         }
 
+        boolean providerCallStarted = false;
         try {
+            costReservationService.requireActiveBeforeProvider(job.getId());
             ImageGenerationProvider provider = providerRegistry.getProvider(capability.getProviderId());
+            provider.requireReady();
+            providerCallStarted = true;
             ImageGenerationResult result = provider.generate(providerReq);
             Asset asset = assetStorageService.downloadAndStore(result.getImageUrl(), userId, Asset.TYPE_IMAGE, null);
-            job.setStatus(GenerationJob.STATUS_SUCCEEDED)
-                    .setProgress(100)
-                    .setOutputAssetIds(List.of(asset.getId()));
-            jobMapper.updateById(job);
-            emitJobStatusChanged(job);
+            inTransaction(() -> {
+                job.setStatus(GenerationJob.STATUS_SUCCEEDED)
+                        .setProgress(100)
+                        .setOutputAssetIds(List.of(asset.getId()));
+                jobMapper.updateById(job);
+                costReservationService.settleReserved(job.getId(), "PROVIDER_COST_PROVEN");
+                emitJobStatusChanged(job);
+            });
             return ImageGenerateResponse.sync(asset.getId(), asset.getUrl());
+        } catch (GovernanceException e) {
+            throw e;
         } catch (DataAccessException e) {
             // 暴露真实根因（最内层异常 message），避免笼统的“数据库未连接”掩盖问题
             log.error("createImageJob 数据库操作异常", e);
-            Throwable root = e.getMostSpecificCause() != null ? e.getMostSpecificCause() : e;
-            String rootMsg = root.getMessage() != null ? root.getMessage() : e.getMessage();
-            markFailed(job, 500, "数据库错误: " + rootMsg);
-            throw new GlobalException("数据库错误: " + rootMsg);
+            boolean paidCallStarted = providerCallStarted;
+            inTransaction(() -> {
+                markFailed(job, 500, "服务暂时不可用");
+                finalizeCostAfterFailure(job.getId(), paidCallStarted);
+            });
+            throw new GlobalException(SystemCode.FAILURE_CODE, "服务暂时不可用");
         } catch (Exception e) {
-            markFailed(job, SystemCode.FAILURE_CODE, e.getMessage());
-            throw e instanceof GlobalException ge ? ge : new GlobalException(SystemCode.FAILURE_CODE, e.getMessage());
+            log.error("createImageJob 上游生成失败", e);
+            boolean paidCallStarted = providerCallStarted;
+            inTransaction(() -> {
+                markFailed(job, SystemCode.FAILURE_CODE, "图像生成失败");
+                finalizeCostAfterFailure(job.getId(), paidCallStarted);
+            });
+            throw new GlobalException(SystemCode.FAILURE_CODE, "图像生成失败");
         }
+    }
+
+    private <T> T inTransaction(Supplier<T> action) {
+        return new TransactionTemplate(transactionManager).execute(status -> action.get());
+    }
+
+    private void inTransaction(Runnable action) {
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> action.run());
     }
 
     /** 模型能力 features.stream=true 走流式路径。 */
@@ -115,11 +174,12 @@ public class GenerationJobService {
     }
 
     /** 查询任务状态，供前端轮询。 */
-    public JobStatusResponse getJobStatus(Long jobId) {
+    public JobStatusResponse getJobStatus(Long jobId, Long userId) {
         GenerationJob job = jobMapper.selectById(jobId);
-        if (job == null) {
-            throw new GlobalException(SystemCode.NOT_FOUND_CODE, "job not found");
+        if (job == null || !java.util.Objects.equals(job.getUserId(), userId)) {
+            throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
         }
+        projectService.requireOwned(job.getProjectId(), userId);
         JobStatusResponse.AssetDto assetDto = null;
         if (GenerationJob.STATUS_SUCCEEDED.equals(job.getStatus())
                 && job.getOutputAssetIds() != null && !job.getOutputAssetIds().isEmpty()) {
@@ -128,7 +188,16 @@ public class GenerationJobService {
                 assetDto = new JobStatusResponse.AssetDto(asset.getId(), asset.getUrl(), asset.getType());
             }
         }
-        return new JobStatusResponse(job.getId(), job.getStatus(), job.getProgress(), assetDto);
+        Map<String, Object> publicError = null;
+        if (GenerationJob.STATUS_FAILED.equals(job.getStatus())) {
+            Map<String, Object> storedError = job.getError() == null ? Map.of() : job.getError();
+            publicError = GenerationPublicError.project(
+                    storedError,
+                    job.getType(),
+                    costReservationService.budgetEffect(job.getId()).wireValue());
+        }
+        return new JobStatusResponse(
+                job.getId(), job.getStatus(), job.getProgress(), assetDto, publicError);
     }
 
     /**
@@ -217,6 +286,7 @@ public class GenerationJobService {
         input.put("aspect_ratio", req.aspectRatio());
         input.put("format", req.format());
         input.put("quantity", req.quantity());
+        input.put("expected_output_count", req.quantity() == null ? 1 : req.quantity());
         input.put("reference_images", req.referenceImages());
         input.put("watermark", req.watermark());
         input.put("project_id", req.projectId());
@@ -224,9 +294,10 @@ public class GenerationJobService {
     }
 
     private Long requireOwnedProject(Long projectId, Long userId) {
-        if (projectId != null) {
-            projectService.requireOwned(projectId, userId);
+        if (projectId == null) {
+            throw GovernanceException.actionNotAllowed();
         }
+        projectService.requireOwned(projectId, userId);
         return projectId;
     }
 
@@ -238,6 +309,10 @@ public class GenerationJobService {
         job.setError(err);
         jobMapper.updateById(job);
         emitJobStatusChanged(job);
+    }
+
+    private void finalizeCostAfterFailure(Long jobId, boolean providerCallStarted) {
+        costReservationService.finalizeProviderFailure(jobId, providerCallStarted);
     }
 
     /** Job 创建事件（payload 含初始 status/type）。仅归属 Project 的 Job 产事件。 */

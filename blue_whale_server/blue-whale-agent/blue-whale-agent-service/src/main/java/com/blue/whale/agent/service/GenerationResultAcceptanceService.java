@@ -5,6 +5,7 @@ import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
 import com.blue.whale.agent.mapper.GenerationResultConflictMapper;
+import com.blue.whale.agent.mapper.GenerationProviderTaskMapper;
 import com.blue.whale.agent.model.constant.AggregateType;
 import com.blue.whale.agent.model.constant.EventType;
 import com.blue.whale.agent.model.dto.GenerationAcceptanceResult;
@@ -19,6 +20,7 @@ import com.blue.whale.agent.model.entity.GenerationJobOutput;
 import com.blue.whale.agent.model.entity.GenerationResultConflict;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
+import com.blue.whale.agent.service.governance.CostReservationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +42,8 @@ public class GenerationResultAcceptanceService {
     private final AssetObjectLifecycleService assetObjectLifecycleService;
     private final AgentRunMapper agentRunMapper;
     private final ProjectEventService projectEventService;
+    private final CostReservationService costReservationService;
+    private final GenerationProviderTaskMapper providerTaskMapper;
 
     @Transactional
     public GenerationAcceptanceResult acceptSuccess(GenerationResultCommand command) {
@@ -99,6 +103,10 @@ public class GenerationResultAcceptanceService {
         updateAcceptedJob(job);
         GenerationJob accepted = generationJobMapper.selectById(job.getId());
 
+        if (isTerminal(accepted)) {
+            costReservationService.settleReserved(job.getId(), "PROVIDER_COST_PROVEN");
+        }
+
         appendAssetCreated(asset, output);
         appendOutputAttached(output);
         appendJobStatusChanged(accepted);
@@ -136,6 +144,16 @@ public class GenerationResultAcceptanceService {
         aggregate(job, error);
         updateAcceptedJob(job);
         GenerationJob failed = generationJobMapper.selectById(job.getId());
+        if (isTerminal(failed)) {
+            if (isOutcomeUnknown(command.errorCode())) {
+                costReservationService.markPendingReconciliation(
+                        job.getId(), "PROVIDER_RESULT_UNKNOWN");
+            } else if ("provider_not_configured".equals(command.errorCode())) {
+                costReservationService.release(job.getId(), "PROVIDER_NOT_CALLED");
+            } else {
+                costReservationService.settleReserved(job.getId(), "PROVIDER_COST_PROVEN");
+            }
+        }
         appendOutputUpdated(failed, output);
         appendJobStatusChanged(failed);
         resumePydanticRun(failed);
@@ -171,10 +189,23 @@ public class GenerationResultAcceptanceService {
         aggregate(job, null);
         updateAcceptedJob(job);
         GenerationJob cancelled = generationJobMapper.selectById(job.getId());
+        if (isTerminal(cancelled)) {
+            if (providerTaskMapper.countByJob(job.getId()) > 0) {
+                costReservationService.settleReserved(job.getId(), "PROVIDER_CALL_STARTED");
+            } else {
+                costReservationService.release(job.getId(), "CANCELLED_BEFORE_PROVIDER");
+            }
+        }
         appendOutputUpdated(cancelled, output);
         appendJobStatusChanged(cancelled);
         resumePydanticRun(cancelled);
         return new GenerationAcceptanceResult(GenerationAcceptanceResult.Status.CANCELLED, null);
+    }
+
+    private boolean isOutcomeUnknown(String errorCode) {
+        return "submission_unknown".equals(errorCode)
+                || "outcome_unknown".equals(errorCode)
+                || "timed_out".equals(errorCode);
     }
 
     @Transactional
@@ -238,6 +269,9 @@ public class GenerationResultAcceptanceService {
         aggregate(job, null);
         updateAcceptedJob(job);
         GenerationJob accepted = generationJobMapper.selectById(job.getId());
+        if (isTerminal(accepted)) {
+            costReservationService.settleReserved(job.getId(), "PROVIDER_COST_PROVEN");
+        }
         appendAssetCreated(asset, output);
         appendOutputAttached(output);
         appendJobStatusChanged(accepted);
@@ -536,7 +570,9 @@ public class GenerationResultAcceptanceService {
         payload.put("slot_index", output.getSlotIndex());
         payload.put("status", output.getStatus());
         payload.put("asset_id", output.getAssetId());
-        payload.put("error", GenerationPublicError.project(output.getError(), job.getType()));
+        payload.put("error", GenerationPublicError.project(
+                output.getError(), job.getType(),
+                costReservationService.budgetEffect(job.getId()).wireValue()));
         projectEventService.appendEvent(job.getProjectId(),
                 EventType.GENERATION_JOB_OUTPUT_UPDATED,
                 AggregateType.GENERATION_JOB_OUTPUT,

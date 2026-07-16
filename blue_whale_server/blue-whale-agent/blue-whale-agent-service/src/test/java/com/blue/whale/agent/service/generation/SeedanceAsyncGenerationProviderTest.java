@@ -10,12 +10,35 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class SeedanceAsyncGenerationProviderTest {
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void missingLocalCredentialsIsAConfirmedPreProviderFailure() {
+        ObjectProvider<ArkService> serviceProvider = mock(ObjectProvider.class);
+        when(serviceProvider.getIfAvailable()).thenReturn(null);
+        SeedanceAsyncGenerationProvider provider = new SeedanceAsyncGenerationProvider(
+                serviceProvider,
+                mock(ProjectAssetAccessService.class),
+                new GenerationAdapterProperties());
+
+        assertThatThrownBy(() -> provider.submit(new AsyncGenerationSpec(
+                7L, 11L, "蓝鲸跃出海面", null,
+                "16:9", "480p", 4,
+                "https://callback.example.test/api/webhooks/seedance/a/9?capability=secret")))
+                .isInstanceOf(ProviderSubmissionException.class)
+                .satisfies(error -> {
+                    ProviderSubmissionException failure = (ProviderSubmissionException) error;
+                    assertThat(failure.isAmbiguous()).isFalse();
+                    assertThat(failure.getRawCode()).isEqualTo("provider_not_configured");
+                });
+    }
 
     @Test
     @SuppressWarnings("unchecked")

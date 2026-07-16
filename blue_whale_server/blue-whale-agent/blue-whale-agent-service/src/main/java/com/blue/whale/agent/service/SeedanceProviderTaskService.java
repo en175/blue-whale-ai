@@ -117,7 +117,11 @@ public class SeedanceProviderTaskService {
         } else if (GenerationJob.STATUS_CANCEL_REQUESTED.equals(job.getStatus())) {
             acceptCancelledSlot(claim);
         } else {
-            acceptFailedSlot(claim, "provider_failed", "视频生成提交失败", false);
+            boolean beforeProvider = "provider_not_configured".equals(rawCode);
+            acceptFailedSlot(claim,
+                    beforeProvider ? rawCode : "provider_failed",
+                    beforeProvider ? "视频生成服务未配置" : "视频生成提交失败",
+                    false);
         }
     }
 

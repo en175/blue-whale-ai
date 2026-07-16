@@ -1,16 +1,21 @@
 package com.blue.whale.agent.service;
 
+import com.blue.whale.agent.common.web.PublicRequestId;
 import com.blue.whale.agent.model.entity.GenerationJob;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.LinkedHashMap;
 
 final class GenerationPublicError {
 
     private GenerationPublicError() {
     }
 
-    static Map<String, Object> project(Map<String, Object> error, String type) {
+    static Map<String, Object> project(
+            Map<String, Object> error,
+            String type,
+            String budgetEffect) {
         if (error == null) {
             return null;
         }
@@ -33,6 +38,28 @@ final class GenerationPublicError {
                 .contains(code)) {
             code = fallbackCode;
         }
-        return Map.of("code", code, "message", message);
+        return envelope(code, message, budgetEffect);
+    }
+
+    static Map<String, Object> envelope(String code, String message, String budgetEffect) {
+        return envelope(code, message, budgetEffect, PublicRequestId.current());
+    }
+
+    static Map<String, Object> requestNeutralEnvelope(
+            String code, String message, String budgetEffect) {
+        return envelope(code, message, budgetEffect, null);
+    }
+
+    private static Map<String, Object> envelope(
+            String code, String message, String budgetEffect, String requestId) {
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("code", code);
+        envelope.put("message", message);
+        envelope.put("retryable", false);
+        envelope.put("retry_after_seconds", null);
+        envelope.put("request_id", requestId);
+        envelope.put("input_request_id", null);
+        envelope.put("budget_effect", budgetEffect == null ? "none" : budgetEffect);
+        return envelope;
     }
 }

@@ -45,14 +45,19 @@ public class JobController {
 
     /** 轮询查任务状态。 */
     @GetMapping("/api/jobs/{id}")
-    public Result<JobStatusResponse> getStatus(@PathVariable("id") Long id) {
-        return Result.ok(generationJobService.getJobStatus(id));
+    public Result<JobStatusResponse> getStatus(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @PathVariable("id") Long id) {
+        return Result.ok(generationJobService.getJobStatus(id, requireUserId(userId)));
     }
 
     /** SSE 流式推送：客户端原生 EventSource 订阅逐张图。 */
     @GetMapping(value = "/api/jobs/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(@PathVariable("id") Long id, HttpServletResponse response) {
-        generationJobService.getJobStatus(id); // 不存在则抛 NOT_FOUND
+    public SseEmitter stream(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @PathVariable("id") Long id,
+            HttpServletResponse response) {
+        generationJobService.getJobStatus(id, requireUserId(userId));
         response.setHeader("X-Accel-Buffering", "no");
         response.setHeader("Cache-Control", "no-cache");
         SseEmitter emitter = new SseEmitter(300_000L);

@@ -18,6 +18,8 @@ public final class AggregateType {
     public static final String CONVERSATION = "conversation";
     /** 聚合：agent_run */
     public static final String AGENT_RUN = "agent_run";
+    /** 聚合：user_input_request */
+    public static final String USER_INPUT_REQUEST = "user_input_request";
     /** 聚合：generation_job */
     public static final String GENERATION_JOB = "generation_job";
     /** 聚合：generation_job_output */

@@ -20,6 +20,7 @@ import type {
   GenerationJobStatus,
 } from "@/types/domain";
 import { request, type Paged } from "./api";
+import type { PublicErrorEnvelope } from "./api/dto";
 
 /**
  * GenerationJob 状态 → Card 视图状态（CONTEXT.md L79-80 视图映射）。
@@ -83,6 +84,7 @@ export type JobStatus = {
   status: string;
   progress: number;
   asset: { id: number; url: string; type: string } | null;
+  error: PublicErrorEnvelope | null;
 };
 
 /** 图片模型能力（仅取 generate 页默认生成所需字段）。 */

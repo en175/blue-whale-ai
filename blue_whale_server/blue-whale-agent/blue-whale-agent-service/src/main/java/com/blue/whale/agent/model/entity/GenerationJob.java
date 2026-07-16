@@ -50,6 +50,7 @@ public class GenerationJob extends BaseEntity {
     private Long userId;
     private Long agentRunId;
     private String actionIdentity;
+    private String projectActionIdentity;
     private Integer expectedOutputCount;
     private Long retryOfJobId;
 

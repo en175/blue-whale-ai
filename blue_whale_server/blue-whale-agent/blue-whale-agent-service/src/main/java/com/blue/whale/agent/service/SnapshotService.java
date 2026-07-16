@@ -16,6 +16,7 @@ import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationJobOutput;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
+import com.blue.whale.agent.service.governance.CostReservationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -50,6 +51,7 @@ public class SnapshotService {
     private final GenerationJobOutputMapper generationJobOutputMapper;
     private final AssetMapper assetMapper;
     private final ProjectEventService projectEventService;
+    private final CostReservationService costReservationService;
 
     /**
      * 读取 Project 一致快照。
@@ -140,7 +142,8 @@ public class SnapshotService {
                     .add(new SnapshotResponse.GenerationJobOutputDto(
                             output.getSlotIndex(), output.getStatus(), output.getAssetId(),
                             GenerationPublicError.project(
-                                    output.getError(), jobType(jobs, output.getGenerationJobId()))));
+                                    output.getError(), jobType(jobs, output.getGenerationJobId()),
+                                    budgetEffect(output.getGenerationJobId()))));
         }
         return outputsByJob;
     }
@@ -185,7 +188,12 @@ public class SnapshotService {
         if (!GenerationJob.STATUS_FAILED.equals(job.getStatus())) {
             return null;
         }
-        return GenerationPublicError.project(job.getError(), job.getType());
+        return GenerationPublicError.project(
+                job.getError(), job.getType(), budgetEffect(job.getId()));
+    }
+
+    private String budgetEffect(Long jobId) {
+        return costReservationService.budgetEffect(jobId).wireValue();
     }
 
     private String jobType(List<GenerationJob> jobs, Long jobId) {

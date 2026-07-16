@@ -17,6 +17,8 @@ import com.blue.whale.agent.model.entity.Conversation;
 import com.blue.whale.agent.model.entity.ConversationMessage;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
+import com.blue.whale.agent.service.governance.UserInputRequestService;
+import com.blue.whale.agent.service.governance.PersistedUserInputDecisionException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,8 +39,9 @@ public class ConversationCommandService {
     private final AgentRunMapper agentRunMapper;
     private final CommandIdempotencyMapper idempotencyMapper;
     private final ProjectEventService projectEventService;
+    private final UserInputRequestService userInputRequestService;
 
-    @Transactional
+    @Transactional(noRollbackFor = PersistedUserInputDecisionException.class)
     public AcceptConversationMessageResponse accept(Long projectId, Long userId, String idempotencyKey,
                                                      AcceptConversationMessageRequest request) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
@@ -58,6 +61,9 @@ public class ConversationCommandService {
             }
             return response(existing);
         }
+        Long confirmedInputRequestId = request.replyToInputRequestId() == null ? null
+                : userInputRequestService.confirm(
+                        projectId, userId, request.replyToInputRequestId(), request.content());
 
         Conversation conversation = conversationMapper.selectOne(
                 Wrappers.<Conversation>lambdaQuery().eq(Conversation::getProjectId, projectId));
@@ -79,8 +85,12 @@ public class ConversationCommandService {
                 .setEngine(orchestratorProperties.getEngine())
                 .setEngineVersion(orchestratorProperties.getEngineVersion())
                 .setAdapterSchemaVersion(orchestratorProperties.getAdapterSchemaVersion())
+                .setConfirmedInputRequestId(confirmedInputRequestId)
                 .setFencingToken(0L);
         agentRunMapper.insert(run);
+        if (confirmedInputRequestId != null) {
+            userInputRequestService.bindResumedRun(confirmedInputRequestId, run.getId());
+        }
 
         long messageCount = messageMapper.selectCount(Wrappers.<ConversationMessage>lambdaQuery()
                 .eq(ConversationMessage::getConversationId, conversation.getId()));

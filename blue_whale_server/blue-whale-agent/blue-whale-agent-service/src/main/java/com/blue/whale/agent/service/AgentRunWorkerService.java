@@ -2,6 +2,7 @@ package com.blue.whale.agent.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.blue.whale.agent.mapper.AgentRunMapper;
+import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.mapper.ConversationMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
@@ -14,12 +15,21 @@ import com.blue.whale.agent.model.dto.RunCommitRequest;
 import com.blue.whale.agent.model.dto.RunCommitResponse;
 import com.blue.whale.agent.model.dto.RunWorkResponse;
 import com.blue.whale.agent.model.entity.AgentRun;
+import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.Conversation;
 import com.blue.whale.agent.model.entity.ConversationMessage;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationJobOutput;
 import com.blue.whale.agent.model.entity.RunCommitRecord;
 import com.blue.whale.agent.model.entity.RuntimeCheckpoint;
+import com.blue.whale.agent.model.entity.UserInputRequest;
+import com.blue.whale.agent.service.governance.ActionAuthorizationCommand;
+import com.blue.whale.agent.service.governance.AuthorizationDecision;
+import com.blue.whale.agent.service.governance.AuthorizationOutcome;
+import com.blue.whale.agent.service.governance.GenerationActionAuthorizationService;
+import com.blue.whale.agent.service.governance.GenerationCostAdmissionService;
+import com.blue.whale.agent.service.governance.CostReservationService;
+import com.blue.whale.agent.service.governance.UserInputRequestService;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -55,8 +65,13 @@ public class AgentRunWorkerService {
     private final RunCommitRecordMapper runCommitMapper;
     private final GenerationJobMapper generationJobMapper;
     private final GenerationJobOutputMapper generationJobOutputMapper;
+    private final AssetMapper assetMapper;
     private final ProjectService projectService;
     private final ProjectEventService projectEventService;
+    private final GenerationActionAuthorizationService actionAuthorizationService;
+    private final GenerationCostAdmissionService costAdmissionService;
+    private final CostReservationService costReservationService;
+    private final UserInputRequestService userInputRequestService;
     private final ObjectMapper objectMapper;
 
     @Transactional(noRollbackFor = ClaimQueueExhaustedAfterQuarantine.class)
@@ -132,17 +147,36 @@ public class AgentRunWorkerService {
         }
 
         validateCommit(run, workerId, request, agentRunMapper.selectCurrentTime());
-        projectService.requireOwned(run.getProjectId(), run.getUserId());
+        projectService.requireOwnedForUpdate(run.getProjectId(), run.getUserId());
         if (request.userInputRequest() != null || request.error() != null) {
-            throw new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
-                    "首版不接受用户补充输入或错误终态提交");
+            actionAuthorizationService.deny(
+                    actionCommand(run, null, false), "WORKER_TERMINAL_NOT_ALLOWED");
         }
         if (request.actions().isEmpty() && !supportsNoActionCompletion(run)) {
-            throw new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
-                    "只有固定版 Pydantic AI Run 可提交无动作完成结果");
+            actionAuthorizationService.deny(
+                    actionCommand(run, null, false), "ACTION_MISSING");
         }
-        RunCommitRequest.ProposedAction action = request.actions().isEmpty()
-                ? null : validateAction(request.actions());
+        RunCommitRequest.ProposedAction action = null;
+        AuthorizationDecision authorization = null;
+        if (!request.actions().isEmpty()) {
+            try {
+                action = validateAction(run, request.actions());
+            } catch (GlobalException exception) {
+                RunCommitRequest.ProposedAction proposed = request.actions().size() == 1
+                        ? request.actions().get(0) : null;
+                actionAuthorizationService.deny(actionCommand(run, proposed, false),
+                        "ACTION_SCHEMA_OR_OWNERSHIP_REJECTED");
+                throw exception;
+            }
+            boolean confirmed = run.getConfirmedInputRequestId() != null;
+            if (confirmed) {
+                userInputRequestService.consumeValidated(
+                        run.getConfirmedInputRequestId(), run.getProjectId(), run.getUserId(), run.getId(),
+                        action.actionId(), action.actionType(), action.arguments());
+            }
+            authorization = actionAuthorizationService.authorize(
+                    actionCommand(run, action, confirmed));
+        }
 
         long checkpointCount = checkpointMapper.selectCount(Wrappers.<RuntimeCheckpoint>lambdaQuery()
                 .eq(RuntimeCheckpoint::getAgentRunId, runId));
@@ -172,17 +206,25 @@ public class AgentRunWorkerService {
                 .setSequenceNo(Math.toIntExact(messageCount + 1));
         messageMapper.insert(message);
 
+        UserInputRequest inputRequest = null;
         GenerationJob job = null;
-        if (action != null) {
+        if (action != null && authorization.outcome() == AuthorizationOutcome.INPUT_REQUIRED) {
+            inputRequest = userInputRequestService.create(
+                    run.getProjectId(), run.getUserId(), run.getConversationId(), runId,
+                    action.actionId(), action.actionType(), action.arguments(), authorization.quote());
+        } else if (action != null) {
+            LinkedHashMap<String, Object> input = new LinkedHashMap<>(action.arguments());
+            input.put("expected_output_count", 1);
             job = new GenerationJob()
                     .setProjectId(run.getProjectId())
                     .setUserId(run.getUserId())
                     .setAgentRunId(runId)
                     .setActionIdentity(action.actionId())
+                    .setProjectActionIdentity(action.actionId())
                     .setType(GenerationJob.TYPE_IMAGE)
                     .setSource(GenerationJob.SOURCE_AGENT_RUN)
                     .setExpectedOutputCount(1)
-                    .setInput(new LinkedHashMap<>(action.arguments()))
+                    .setInput(input)
                     .setStatus(GenerationJob.STATUS_QUEUED)
                     .setProgress(0)
                     .setFencingToken(0L)
@@ -190,6 +232,9 @@ public class AgentRunWorkerService {
                     .setExecutionDeadlineAt(generationJobMapper.selectCurrentTime().plusMinutes(30))
                     .setNextActionAt(generationJobMapper.selectCurrentTime());
             generationJobMapper.insert(job);
+            costAdmissionService.reserveAuthorized(
+                    run.getUserId(), run.getProjectId(), job.getId(), action.actionId(),
+                    action.actionType(), authorization.quote());
             generationJobOutputMapper.insert(new GenerationJobOutput()
                     .setGenerationJobId(job.getId())
                     .setSlotIndex(0)
@@ -227,9 +272,24 @@ public class AgentRunWorkerService {
                     jobPayload, request.commitId(), null);
         }
 
+        if (inputRequest != null) {
+            Map<String, Object> inputPayload = new LinkedHashMap<>();
+            inputPayload.put("input_request_id", inputRequest.getId());
+            inputPayload.put("agent_run_id", runId);
+            inputPayload.put("action_identity", inputRequest.getActionIdentity());
+            inputPayload.put("action_type", inputRequest.getActionType());
+            inputPayload.put("status", inputRequest.getStatus());
+            inputPayload.put("expires_at", inputRequest.getExpiresAt());
+            projectEventService.appendEvent(run.getProjectId(), EventType.USER_INPUT_REQUEST_CREATED,
+                    AggregateType.USER_INPUT_REQUEST, String.valueOf(inputRequest.getId()), 0,
+                    inputPayload, request.commitId(), null);
+        }
+
         run.setCurrentCheckpointId(checkpoint.getId())
-                .setStatus(job == null ? AgentRun.STATUS_COMPLETED : AgentRun.STATUS_AWAITING_JOB)
-                .setStage(job == null ? "completed" : "generating")
+                .setStatus(inputRequest != null ? AgentRun.STATUS_AWAITING_INPUT
+                        : job == null ? AgentRun.STATUS_COMPLETED : AgentRun.STATUS_AWAITING_JOB)
+                .setStage(inputRequest != null ? "awaiting_confirmation"
+                        : job == null ? "completed" : "generating")
                 .setLeaseOwner(null)
                 .setLeaseExpiresAt(null);
         agentRunMapper.updateById(run);
@@ -244,6 +304,7 @@ public class AgentRunWorkerService {
                 .setRequestHash(requestHash)
                 .setCheckpointId(checkpoint.getId())
                 .setGenerationJobId(job == null ? null : job.getId())
+                .setUserInputRequestId(inputRequest == null ? null : inputRequest.getId())
                 .setCommittedCursor(projectEventService.highWatermark(run.getProjectId()));
         runCommitMapper.insert(committed);
         return response(committed);
@@ -298,7 +359,9 @@ public class AgentRunWorkerService {
                 runPayload(quarantined), null, null);
     }
 
-    private RunCommitRequest.ProposedAction validateAction(List<RunCommitRequest.ProposedAction> actions) {
+    private RunCommitRequest.ProposedAction validateAction(
+            AgentRun run,
+            List<RunCommitRequest.ProposedAction> actions) {
         if (actions.size() != 1) {
             throw new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
                     "首版只接受单个图片生成动作");
@@ -313,14 +376,18 @@ public class AgentRunWorkerService {
                 || prompt.isBlank()
                 || (aspectRatio != null
                         && (!(aspectRatio instanceof String ratio) || !IMAGE_ASPECT_RATIOS.contains(ratio)))
-                || (referenceAssetIds != null && !validReferenceAssetIds(referenceAssetIds))) {
+                || (referenceAssetIds != null
+                        && !validReferenceAssetIds(run, referenceAssetIds))
+                || generationJobMapper.selectCount(Wrappers.<GenerationJob>lambdaQuery()
+                        .eq(GenerationJob::getProjectId, run.getProjectId())
+                        .eq(GenerationJob::getProjectActionIdentity, action.actionId())) > 0) {
             throw new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
                     SystemCode.AGENT_ACTION_REJECTED.getMsg());
         }
         return action;
     }
 
-    private boolean validReferenceAssetIds(Object value) {
+    private boolean validReferenceAssetIds(AgentRun run, Object value) {
         if (!(value instanceof List<?> assetIds) || assetIds.isEmpty() || assetIds.size() > 4) {
             return false;
         }
@@ -333,7 +400,30 @@ public class AgentRunWorkerService {
                 return false;
             }
         }
-        return true;
+        List<Long> ids = assetIds.stream().map(assetId -> ((Number) assetId).longValue())
+                .distinct().toList();
+        if (ids.size() != assetIds.size()) {
+            return false;
+        }
+        List<Asset> assets = assetMapper.selectBatchIds(ids);
+        return assets.size() == ids.size() && assets.stream().allMatch(asset ->
+                Objects.equals(asset.getProjectId(), run.getProjectId())
+                        && Objects.equals(asset.getUserId(), run.getUserId())
+                        && Asset.TYPE_IMAGE.equals(asset.getType())
+                        && Asset.STATUS_NORMAL.equals(asset.getStatus()));
+    }
+
+    private ActionAuthorizationCommand actionCommand(
+            AgentRun run,
+            RunCommitRequest.ProposedAction action,
+            boolean confirmed) {
+        return new ActionAuthorizationCommand(
+                run.getUserId(), run.getProjectId(), "AgentRun", String.valueOf(run.getId()),
+                "agent-run:" + run.getId(),
+                action == null ? "commit-with-invalid-actions" : action.actionId(),
+                action == null ? "unknown" : action.actionType(),
+                action == null || action.arguments() == null ? Map.of() : action.arguments(),
+                false, confirmed);
     }
 
     private RunWorkResponse.AcceptedResult acceptedResult(GenerationJob job) {
@@ -342,8 +432,13 @@ public class AgentRunWorkerService {
         if (GenerationJob.STATUS_SUCCEEDED.equals(job.getStatus())
                 || GenerationJob.STATUS_PARTIALLY_SUCCEEDED.equals(job.getStatus())) {
             result.put("asset_ids", job.getOutputAssetIds() == null ? List.of() : job.getOutputAssetIds());
+        } else if (GenerationJob.STATUS_FAILED.equals(job.getStatus())) {
+            result.put("error", GenerationPublicError.project(
+                    job.getError() == null ? Map.of() : job.getError(),
+                    job.getType(),
+                    costReservationService.budgetEffect(job.getId()).wireValue()));
         } else {
-            result.put("error", job.getError() == null ? Map.of() : job.getError());
+            result.put("error", Map.of());
         }
         return new RunWorkResponse.AcceptedResult(job.getActionIdentity(), job.getStatus(), result);
     }
@@ -400,7 +495,8 @@ public class AgentRunWorkerService {
 
     private RunCommitResponse response(RunCommitRecord record) {
         return new RunCommitResponse(
-                record.getCheckpointId(), record.getGenerationJobId(), record.getCommittedCursor());
+                record.getCheckpointId(), record.getGenerationJobId(), record.getUserInputRequestId(),
+                record.getCommittedCursor());
     }
 
     private String digest(Object value) {

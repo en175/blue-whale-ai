@@ -1,6 +1,8 @@
 package com.blue.whale.agent;
 
 import com.blue.whale.agent.mapper.ProjectMapper;
+import com.blue.whale.agent.mapper.AssetMapper;
+import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.Project;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,6 +44,8 @@ class ConversationAgentRunIT {
     @Autowired
     private ProjectMapper projectMapper;
     @Autowired
+    private AssetMapper assetMapper;
+    @Autowired
     private JdbcTemplate jdbcTemplate;
     @Autowired
     private ObjectMapper objectMapper;
@@ -49,11 +53,17 @@ class ConversationAgentRunIT {
     @BeforeEach
     void cleanAgentRunFacts() {
         jdbcTemplate.batchUpdate(
+                "DELETE FROM audit_records",
+                "DELETE FROM cost_reservations",
+                "DELETE FROM cost_budget_locks",
+                "DELETE FROM user_input_requests",
                 "DELETE FROM run_commits",
                 "DELETE FROM runtime_checkpoints",
                 "DELETE FROM command_idempotency",
                 "DELETE FROM conversation_messages",
+                "DELETE FROM generation_job_outputs",
                 "DELETE FROM generation_jobs",
+                "DELETE FROM assets",
                 "DELETE FROM agent_runs",
                 "DELETE FROM conversations",
                 "DELETE FROM outbox_messages",
@@ -301,20 +311,94 @@ class ConversationAgentRunIT {
     void imageActionPersistsValidatedReferenceAssetIds() throws Exception {
         Project project = new Project().setOwnerId(10L).setName("reference-image-action");
         projectMapper.insert(project);
+        Asset first = referenceAsset(project.getId(), "reference/first.png");
+        Asset second = referenceAsset(project.getId(), "reference/second.png");
         long runId = postMessage(project.getId(), "reference-image-key", "参考素材生成海报")
                 .path("agent_run_id").asLong();
         JsonNode work = claim(runId);
         String body = validCommitBody(project.getId(), work).replace(
                 "\"aspect_ratio\":\"1:1\"",
-                "\"aspect_ratio\":\"1:1\",\"reference_asset_ids\":[91,92]");
+                "\"aspect_ratio\":\"1:1\",\"reference_asset_ids\":["
+                        + first.getId() + "," + second.getId() + "]");
 
         postCommit(runId, body).andExpect(status().isOk());
 
         String inputJson = jdbcTemplate.queryForObject(
                 "SELECT input FROM generation_jobs WHERE agent_run_id = ?", String.class, runId);
         assertThat(objectMapper.readTree(inputJson).path("reference_asset_ids"))
-                .containsExactly(objectMapper.getNodeFactory().numberNode(91),
-                        objectMapper.getNodeFactory().numberNode(92));
+                .extracting(JsonNode::asLong)
+                .containsExactly(first.getId(), second.getId());
+    }
+
+    @Test
+    void imageActionCannotReferenceAssetOutsideTheOwnedProject() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("owned-action-project");
+        projectMapper.insert(project);
+        Project other = new Project().setOwnerId(11L).setName("other-action-project");
+        projectMapper.insert(other);
+        Asset foreign = new Asset()
+                .setProjectId(other.getId())
+                .setUserId(11L)
+                .setType(Asset.TYPE_IMAGE)
+                .setStorageKey("reference/foreign.png")
+                .setMime("image/png")
+                .setSize(128L)
+                .setSource(Asset.SOURCE_UPLOADED)
+                .setStatus(Asset.STATUS_NORMAL);
+        assetMapper.insert(foreign);
+        long runId = postMessage(project.getId(), "foreign-reference-key", "参考素材生成海报")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        String body = validCommitBody(project.getId(), work).replace(
+                "\"aspect_ratio\":\"1:1\"",
+                "\"aspect_ratio\":\"1:1\",\"reference_asset_ids\":[" + foreign.getId() + "]");
+
+        postCommit(runId, body)
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.data.code").value("ACTION_NOT_ALLOWED"));
+
+        assertNoCommitFacts(project.getId(), runId);
+    }
+
+    @Test
+    void imageActionCannotReferenceAnOwnedVideoAsset() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("wrong-reference-type");
+        projectMapper.insert(project);
+        Asset video = new Asset()
+                .setProjectId(project.getId())
+                .setUserId(10L)
+                .setType(Asset.TYPE_VIDEO)
+                .setStorageKey("reference/video.mp4")
+                .setMime("video/mp4")
+                .setSize(128L)
+                .setSource(Asset.SOURCE_UPLOADED)
+                .setStatus(Asset.STATUS_NORMAL);
+        assetMapper.insert(video);
+        long runId = postMessage(project.getId(), "video-reference-key", "参考素材生成海报")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        String body = validCommitBody(project.getId(), work).replace(
+                "\"aspect_ratio\":\"1:1\"",
+                "\"aspect_ratio\":\"1:1\",\"reference_asset_ids\":[" + video.getId() + "]");
+
+        postCommit(runId, body)
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.data.code").value("ACTION_NOT_ALLOWED"));
+        assertNoCommitFacts(project.getId(), runId);
+    }
+
+    private Asset referenceAsset(Long projectId, String storageKey) {
+        Asset asset = new Asset()
+                .setProjectId(projectId)
+                .setUserId(10L)
+                .setType(Asset.TYPE_IMAGE)
+                .setStorageKey(storageKey)
+                .setMime("image/png")
+                .setSize(128L)
+                .setSource(Asset.SOURCE_UPLOADED)
+                .setStatus(Asset.STATUS_NORMAL);
+        assetMapper.insert(asset);
+        return asset;
     }
 
     @Test

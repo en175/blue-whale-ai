@@ -16,5 +16,6 @@ public class RunCommitRecord extends BaseEntity {
     private String requestHash;
     private Long checkpointId;
     private Long generationJobId;
+    private Long userInputRequestId;
     private Long committedCursor;
 }

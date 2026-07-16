@@ -14,6 +14,7 @@ public class AgentRun extends BaseEntity {
     public static final String STATUS_QUEUED = "queued";
     public static final String STATUS_RUNNING = "running";
     public static final String STATUS_AWAITING_JOB = "awaiting_job";
+    public static final String STATUS_AWAITING_INPUT = "awaiting_input";
     public static final String STATUS_COMPLETED = "completed";
     public static final String STATUS_RECOVERY_FAILED = "recovery_failed";
     private Long projectId;
@@ -25,6 +26,7 @@ public class AgentRun extends BaseEntity {
     private String engineVersion;
     private Integer adapterSchemaVersion;
     private Long currentCheckpointId;
+    private Long confirmedInputRequestId;
     private String leaseOwner;
     private java.time.LocalDateTime leaseExpiresAt;
     private Long fencingToken;

@@ -7,6 +7,10 @@ import org.apache.ibatis.annotations.Select;
 
 public interface GenerationProviderTaskMapper extends BaseMapper<GenerationProviderTask> {
 
+    @Select("SELECT COUNT(*) FROM generation_provider_tasks WHERE generation_job_id = #{jobId} "
+            + "AND is_delete = 0")
+    long countByJob(@Param("jobId") Long jobId);
+
     @Select("SELECT * FROM generation_provider_tasks WHERE generation_job_id = #{jobId} "
             + "AND slot_index = #{slotIndex} AND is_delete = 0 FOR UPDATE")
     GenerationProviderTask selectByJobAndSlotForUpdate(
