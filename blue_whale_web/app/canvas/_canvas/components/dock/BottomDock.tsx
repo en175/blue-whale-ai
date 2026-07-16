@@ -7,8 +7,10 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import { squirclePath } from "../../utils";
-import { VIDEO_MODELS, VIDEO_ASPECT_RATIOS, VIDEO_RESOLUTIONS, REF_MODES } from "../../constants";
-import type { DockMediaItem, GenerateArgs } from "../../types";
+import { REF_MODES } from "../../constants";
+import { getVideoModels } from "../../api/generation";
+import type { VideoModelCapability } from "../../api/generation";
+import type { DockMediaItem, GenerateArgs, SelectOption } from "../../types";
 import { ImageDockContent } from "./ImageDockContent";
 import { VideoDockContent } from "./VideoDockContent";
 
@@ -69,15 +71,42 @@ export function BottomDock({
 
   const [refMode, setRefMode] = useState(REF_MODES[0]);
   const [refModeOpen, setRefModeOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState(VIDEO_MODELS[0]);
+  const [videoModels, setVideoModels] = useState<VideoModelCapability[]>([]);
+  const [selectedModel, setSelectedModel] = useState<SelectOption>({ id: "", label: "" });
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const [aspectRatio, setAspectRatio] = useState(VIDEO_ASPECT_RATIOS[0]);
-  const [resolution, setResolution] = useState(VIDEO_RESOLUTIONS[1]);
-  const [duration, setDuration] = useState(10);
+  const [aspectRatio, setAspectRatio] = useState<SelectOption>({ id: "", label: "" });
+  const [resolution, setResolution] = useState<SelectOption>({ id: "", label: "" });
+  const [duration, setDuration] = useState(5);
   const [quantity, setQuantity] = useState("1x");
   const [quantityOpen, setQuantityOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [internetSearch, setInternetSearch] = useState(false);
+
+  /** 应用某个视频模型：联动重置 分辨率/比例/时长 到该模型默认值（DB 驱动）。 */
+  const applyModel = (cap: VideoModelCapability) => {
+    const defRes = cap.supportedResolutions.find((r) => r.id === cap.defaultResolution) ?? cap.supportedResolutions[0];
+    const defRatio = cap.supportedAspectRatios.includes(cap.defaultAspectRatio)
+      ? cap.defaultAspectRatio
+      : cap.supportedAspectRatios[0];
+    setSelectedModel({ id: cap.modelId, label: cap.modelLabel });
+    setResolution(defRes ? { id: defRes.id, label: defRes.label } : { id: "", label: "" });
+    setAspectRatio({ id: defRatio, label: defRatio });
+    setDuration(cap.defaultDuration ?? cap.durationRange?.min ?? 5);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    getVideoModels()
+      .then((ms) => {
+        if (cancelled || ms.length === 0) return;
+        setVideoModels(ms);
+        applyModel(ms[0]);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const el = contentRef.current;
@@ -203,7 +232,8 @@ export function BottomDock({
                   refModeOpen={refModeOpen}
                   setRefModeOpen={setRefModeOpen}
                   selectedModel={selectedModel}
-                  setSelectedModel={setSelectedModel}
+                  onSelectModel={applyModel}
+                  videoModels={videoModels}
                   modelSettingsOpen={modelSettingsOpen}
                   setModelSettingsOpen={setModelSettingsOpen}
                   aspectRatio={aspectRatio}

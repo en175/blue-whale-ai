@@ -17,42 +17,35 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, X } from "lucide-react";
-import {
-  IMAGE_MODELS,
-  defaultResolutionOf,
-  type ImageModel,
-  type ImageResolution,
-} from "@/components/ImageModelSettingsPopover";
+import { getImageModels, getVideoModels } from "../api/generation";
+import type { ImageModelCapability, VideoModelCapability } from "../api/generation";
 
 const LANGUAGES = ["简体中文", "English"];
 
-// 全能参考 / 首尾帧：视频类模型，后端无 API，静态占位（竞品同款）
-const VIDEO_MODELS = [{ id: "seedance-2.0", label: "Seedance 2.0" }];
-const VIDEO_RESOLUTIONS = [
-  { id: "720p", label: "720p" },
-  { id: "1080p", label: "1080p" },
-];
-
 // AI 音乐：后端无 API，静态占位
 const MUSIC_MODELS = [{ id: "topview-music", label: "Topview Music" }];
+
+type ResOption = { id: string; label: string };
 
 export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   // 基础
   const [lang, setLang] = useState(LANGUAGES[0]);
   const [langOpen, setLangOpen] = useState(false);
   // 图片
-  const [imgModel, setImgModel] = useState<ImageModel>(IMAGE_MODELS[0]);
-  const [imgRes, setImgRes] = useState<ImageResolution>(defaultResolutionOf(IMAGE_MODELS[0]));
+  const [imgModels, setImgModels] = useState<ImageModelCapability[]>([]);
+  const [imgModel, setImgModel] = useState<ImageModelCapability | undefined>(undefined);
+  const [imgRes, setImgRes] = useState<ResOption>({ id: "", label: "" });
   const [imgModelOpen, setImgModelOpen] = useState(false);
   const [imgResOpen, setImgResOpen] = useState(false);
   // 全能参考
-  const [refModel, setRefModel] = useState(VIDEO_MODELS[0]);
-  const [refRes, setRefRes] = useState(VIDEO_RESOLUTIONS[0]);
+  const [videoModels, setVideoModels] = useState<VideoModelCapability[]>([]);
+  const [refModel, setRefModel] = useState<VideoModelCapability | undefined>(undefined);
+  const [refRes, setRefRes] = useState<ResOption>({ id: "", label: "" });
   const [refModelOpen, setRefModelOpen] = useState(false);
   const [refResOpen, setRefResOpen] = useState(false);
   // 首尾帧
-  const [frameModel, setFrameModel] = useState(VIDEO_MODELS[0]);
-  const [frameRes, setFrameRes] = useState(VIDEO_RESOLUTIONS[0]);
+  const [frameModel, setFrameModel] = useState<VideoModelCapability | undefined>(undefined);
+  const [frameRes, setFrameRes] = useState<ResOption>({ id: "", label: "" });
   const [frameModelOpen, setFrameModelOpen] = useState(false);
   const [frameResOpen, setFrameResOpen] = useState(false);
   // AI 音乐
@@ -68,22 +61,65 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    Promise.all([getImageModels(), getVideoModels()])
+      .then(([imgs, vids]) => {
+        if (cancelled) return;
+        setImgModels(imgs);
+        setVideoModels(vids);
+        if (imgs[0]) {
+          setImgModel(imgs[0]);
+          const dr = imgs[0].supportedSizes.find((s) => s.id === imgs[0].defaultSize) ?? imgs[0].supportedSizes[0];
+          setImgRes(dr ? { id: dr.id, label: dr.label } : { id: "", label: "" });
+        }
+        if (vids[0]) {
+          setRefModel(vids[0]);
+          setFrameModel(vids[0]);
+          const dres = vids[0].supportedResolutions.find((r) => r.id === vids[0].defaultResolution) ?? vids[0].supportedResolutions[0];
+          const resOpt = dres ? { id: dres.id, label: dres.label } : { id: "", label: "" };
+          setRefRes(resOpt);
+          setFrameRes(resOpt);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   if (!open || typeof document === "undefined") return null;
 
-  const handleImgModel = (m: ImageModel) => {
+  const handleImgModel = (m: ImageModelCapability) => {
     setImgModel(m);
-    if (!m.resolutions.some((r) => r.id === imgRes.id)) setImgRes(defaultResolutionOf(m));
+    if (!m.supportedSizes.some((r) => r.id === imgRes.id)) {
+      const dr = m.supportedSizes.find((s) => s.id === m.defaultSize) ?? m.supportedSizes[0];
+      setImgRes(dr ? { id: dr.id, label: dr.label } : { id: "", label: "" });
+    }
     setImgModelOpen(false);
+  };
+
+  const handleVideoModel = (
+    m: VideoModelCapability,
+    setModel: (m: VideoModelCapability) => void,
+    setRes: (r: ResOption) => void,
+    cur: ResOption,
+  ) => {
+    setModel(m);
+    if (!m.supportedResolutions.some((r) => r.id === cur.id)) {
+      const dr = m.supportedResolutions.find((r) => r.id === m.defaultResolution) ?? m.supportedResolutions[0];
+      setRes(dr ? { id: dr.id, label: dr.label } : { id: "", label: "" });
+    }
   };
 
   const resetDefault = () => {
     setLang(LANGUAGES[0]);
-    setImgModel(IMAGE_MODELS[0]);
-    setImgRes(defaultResolutionOf(IMAGE_MODELS[0]));
-    setRefModel(VIDEO_MODELS[0]);
-    setRefRes(VIDEO_RESOLUTIONS[0]);
-    setFrameModel(VIDEO_MODELS[0]);
-    setFrameRes(VIDEO_RESOLUTIONS[0]);
+    if (imgModels[0]) handleImgModel(imgModels[0]);
+    if (videoModels[0]) {
+      handleVideoModel(videoModels[0], setRefModel, setRefRes, refRes);
+      handleVideoModel(videoModels[0], setFrameModel, setFrameRes, frameRes);
+    }
     setMusic(MUSIC_MODELS[0]);
   };
 
@@ -212,11 +248,11 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                 <Dropdown
                   open={imgModelOpen}
                   onToggle={() => setImgModelOpen((v) => !v)}
-                  label={imgModel.label}
+                  label={imgModel?.modelLabel ?? ""}
                 >
-                  {IMAGE_MODELS.map((m) => (
-                    <Row key={m.id} selected={imgModel.id === m.id} onClick={() => handleImgModel(m)}>
-                      {m.label}
+                  {imgModels.map((m) => (
+                    <Row key={m.modelId} selected={imgModel?.modelId === m.modelId} onClick={() => handleImgModel(m)}>
+                      {m.modelLabel}
                     </Row>
                   ))}
                 </Dropdown>
@@ -225,8 +261,8 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                   onToggle={() => setImgResOpen((v) => !v)}
                   label={imgRes.label}
                 >
-                  {imgModel.resolutions.map((r) => (
-                    <Row key={r.id} selected={imgRes.id === r.id} onClick={() => { setImgRes(r); setImgResOpen(false); }}>
+                  {(imgModel?.supportedSizes ?? []).map((r) => (
+                    <Row key={r.id} selected={imgRes.id === r.id} onClick={() => { setImgRes({ id: r.id, label: r.label }); setImgResOpen(false); }}>
                       {r.label}
                     </Row>
                   ))}
@@ -238,11 +274,11 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                 <Dropdown
                   open={refModelOpen}
                   onToggle={() => setRefModelOpen((v) => !v)}
-                  label={refModel.label}
+                  label={refModel?.modelLabel ?? ""}
                 >
-                  {VIDEO_MODELS.map((m) => (
-                    <Row key={m.id} selected={refModel.id === m.id} onClick={() => { setRefModel(m); setRefModelOpen(false); }}>
-                      {m.label}
+                  {videoModels.map((m) => (
+                    <Row key={m.modelId} selected={refModel?.modelId === m.modelId} onClick={() => { handleVideoModel(m, setRefModel, setRefRes, refRes); setRefModelOpen(false); }}>
+                      {m.modelLabel}
                     </Row>
                   ))}
                 </Dropdown>
@@ -251,8 +287,8 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                   onToggle={() => setRefResOpen((v) => !v)}
                   label={refRes.label}
                 >
-                  {VIDEO_RESOLUTIONS.map((r) => (
-                    <Row key={r.id} selected={refRes.id === r.id} onClick={() => { setRefRes(r); setRefResOpen(false); }}>
+                  {(refModel?.supportedResolutions ?? []).map((r) => (
+                    <Row key={r.id} selected={refRes.id === r.id} onClick={() => { setRefRes({ id: r.id, label: r.label }); setRefResOpen(false); }}>
                       {r.label}
                     </Row>
                   ))}
@@ -264,11 +300,11 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                 <Dropdown
                   open={frameModelOpen}
                   onToggle={() => setFrameModelOpen((v) => !v)}
-                  label={frameModel.label}
+                  label={frameModel?.modelLabel ?? ""}
                 >
-                  {VIDEO_MODELS.map((m) => (
-                    <Row key={m.id} selected={frameModel.id === m.id} onClick={() => { setFrameModel(m); setFrameModelOpen(false); }}>
-                      {m.label}
+                  {videoModels.map((m) => (
+                    <Row key={m.modelId} selected={frameModel?.modelId === m.modelId} onClick={() => { handleVideoModel(m, setFrameModel, setFrameRes, frameRes); setFrameModelOpen(false); }}>
+                      {m.modelLabel}
                     </Row>
                   ))}
                 </Dropdown>
@@ -277,8 +313,8 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                   onToggle={() => setFrameResOpen((v) => !v)}
                   label={frameRes.label}
                 >
-                  {VIDEO_RESOLUTIONS.map((r) => (
-                    <Row key={r.id} selected={frameRes.id === r.id} onClick={() => { setFrameRes(r); setFrameResOpen(false); }}>
+                  {(frameModel?.supportedResolutions ?? []).map((r) => (
+                    <Row key={r.id} selected={frameRes.id === r.id} onClick={() => { setFrameRes({ id: r.id, label: r.label }); setFrameResOpen(false); }}>
                       {r.label}
                     </Row>
                   ))}

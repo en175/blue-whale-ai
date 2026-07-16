@@ -254,6 +254,7 @@ function CanvasPageInner() {
   // 占位→出图/失败原地流转（design D1/D7）：按 nodeId patch，不删重建保位置。
   const updateNode = useCallback(
     (nodeId: string, patch: Partial<NodeItem>) => {
+      console.log("[DEBUG-genbug] updateNode", nodeId, patch);
       if (!activeProject) return;
       dispatch({ type: "update-node", projectId: activeProject.id, nodeId, patch });
     },
@@ -321,7 +322,7 @@ function CanvasPageInner() {
         } else {
           id = `${mediaType}-${Date.now()}`;
         }
-        const item: DockMediaItem = { id, type: mediaType, name: file.name, src: result.url };
+        const item: DockMediaItem = { id, type: mediaType, name: file.name, src: result.url, assetId: result.id };
         if (mode === "image") {
           setImageDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
         } else {
@@ -386,6 +387,7 @@ function CanvasPageInner() {
               .map((m) => m.src)
               .filter((s): s is string => Boolean(s)),
           });
+          console.log("[DEBUG-genbug] generateImage result", { stream: result.stream, jobId: result.jobId, url: result.url, assetId: result.assetId, placeholderId });
           if (result.stream && result.jobId != null) {
             // 流式（design D14）：1 占位代表首张 + 增量新增；中间失败建独立 error 节点
             let firstReady = false;
@@ -442,6 +444,9 @@ function CanvasPageInner() {
             duration: args.settings.duration,
             firstFrameUrl: args.settings.firstFrameUrl,
             lastFrameUrl: args.settings.lastFrameUrl,
+            referenceImages: args.settings.referenceImages,
+            referenceVideos: args.settings.referenceVideos,
+            referenceAudios: args.settings.referenceAudios,
           });
           // 视频占位按目标宽高比（aspect-ratio-frame D8）
           const ar = parseAspectRatio(args.settings.aspectRatio.id);

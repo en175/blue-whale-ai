@@ -7,7 +7,7 @@
  *
  * 文生图同步（generateImage）不走此 hook，直接 await 拿 url。
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getJobStatus, type JobStatusResponse } from "../api/generation";
 
 export type JobPollState =
@@ -24,59 +24,67 @@ export function useJobStatus() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startedAtRef = useRef<number>(0);
 
-  const stop = () => {
+  // useCallback 稳定引用：消费方 effect 若依赖 start/reset，普通函数字面量会每次 render 新引用，
+  // 导致 effect 重跑→setState→重 render→effect 重跑 死循环（polling 时触发 Maximum update depth）。
+  const stop = useCallback(() => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-  };
+  }, []);
 
-  const poll = async (jobId: number) => {
-    try {
-      const job: JobStatusResponse = await getJobStatus(jobId);
-      if (job.status === "succeeded" && job.asset) {
+  const poll = useCallback(
+    async (jobId: number) => {
+      try {
+        const job: JobStatusResponse = await getJobStatus(jobId);
+        if (job.status === "succeeded" && job.asset) {
+          stop();
+          setState({
+            status: "succeeded",
+            jobId,
+            assetUrl: job.asset.url,
+            assetType: job.asset.type,
+          });
+        } else if (job.status === "failed") {
+          stop();
+          setState({ status: "failed", jobId, message: "生成失败" });
+        } else {
+          setState({ status: "polling", jobId, progress: job.progress ?? 0 });
+        }
+      } catch (e) {
         stop();
         setState({
-          status: "succeeded",
+          status: "failed",
           jobId,
-          assetUrl: job.asset.url,
-          assetType: job.asset.type,
+          message: e instanceof Error ? e.message : "轮询失败",
         });
-      } else if (job.status === "failed") {
-        stop();
-        setState({ status: "failed", jobId, message: "生成失败" });
-      } else {
-        setState({ status: "polling", jobId, progress: job.progress ?? 0 });
       }
-    } catch (e) {
+    },
+    [stop],
+  );
+
+  const start = useCallback(
+    (jobId: number) => {
       stop();
-      setState({
-        status: "failed",
-        jobId,
-        message: e instanceof Error ? e.message : "轮询失败",
-      });
-    }
-  };
-
-  const start = (jobId: number) => {
-    stop();
-    startedAtRef.current = Date.now();
-    setState({ status: "polling", jobId, progress: 0 });
-    timerRef.current = setInterval(() => {
-      if (Date.now() - startedAtRef.current > MAX_POLL_DURATION_MS) {
-        stop();
-        setState({ status: "failed", jobId, message: "轮询超时" });
-        return;
-      }
+      startedAtRef.current = Date.now();
+      setState({ status: "polling", jobId, progress: 0 });
+      timerRef.current = setInterval(() => {
+        if (Date.now() - startedAtRef.current > MAX_POLL_DURATION_MS) {
+          stop();
+          setState({ status: "failed", jobId, message: "轮询超时" });
+          return;
+        }
+        void poll(jobId);
+      }, POLL_INTERVAL_MS);
       void poll(jobId);
-    }, POLL_INTERVAL_MS);
-    void poll(jobId);
-  };
+    },
+    [stop, poll],
+  );
 
-  const reset = () => {
+  const reset = useCallback(() => {
     stop();
     setState({ status: "idle" });
-  };
+  }, [stop]);
 
   useEffect(() => stop, []);
 

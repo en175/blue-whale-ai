@@ -54,6 +54,12 @@ export type VideoGeneratePayload = {
   duration?: number;
   firstFrameUrl?: string;
   lastFrameUrl?: string;
+  /** 全能参考图 url 列表（omni 模式，火山 role=reference_image） */
+  referenceImages?: string[];
+  /** 全能参考视频 url 列表（omni 模式，火山 role=reference_video） */
+  referenceVideos?: string[];
+  /** 全能参考音频 url 列表（omni 模式，火山 role=reference_audio） */
+  referenceAudios?: string[];
 };
 
 export type ImageResult = { assetId: number; url: string };
@@ -99,7 +105,37 @@ async function request<T>(path: string, method: string, body?: unknown): Promise
 
 /** 获取当前启用的图片生成模型能力列表。 */
 export function getImageModels(): Promise<ImageModelCapability[]> {
-  return request<ImageModelCapability[]>("/generation/models?capability=image", "GET");
+  return request<ImageModelCapability[]>("/generation/image/models", "GET");
+}
+
+/** 视频模型能力（DB 驱动，对齐后端 VideoModelCapabilityDto，camelCase）。 */
+export type VideoResolution = { id: string; label: string; apiValue: string };
+export type VideoDurationRange = { min: number; max: number; step: number };
+export type VideoFeatures = {
+  firstFrame: boolean;
+  firstLastFrame: boolean;
+  referenceImage: boolean;
+  watermark: boolean;
+  audio: boolean;
+  tools: boolean;
+};
+export type VideoModelCapability = {
+  modelId: string;
+  providerId: string;
+  modelLabel: string;
+  icon: string | null;
+  supportedResolutions: VideoResolution[];
+  supportedAspectRatios: string[];
+  durationRange: VideoDurationRange | null;
+  defaultResolution: string;
+  defaultAspectRatio: string;
+  defaultDuration: number | null;
+  features: VideoFeatures;
+};
+
+/** 获取当前启用的视频生成模型能力列表。 */
+export function getVideoModels(): Promise<VideoModelCapability[]> {
+  return request<VideoModelCapability[]>("/generation/video/models", "GET");
 }
 
 /** 文生图：流式模型返 jobId（再 streamJob 订阅逐张），非流式返 assetId+url。 */
@@ -180,6 +216,7 @@ export type StreamSubscription = { close(): void };
 export function streamJob(jobId: number, handlers: StreamHandlers): StreamSubscription {
   const controller = new AbortController();
   const run = async () => {
+    console.log("[DEBUG-genbug] streamJob start", jobId);
     try {
       const res = await apiFetch(`${API_BASE}/jobs/${jobId}/stream`, {
         signal: controller.signal,
@@ -190,14 +227,17 @@ export function streamJob(jobId: number, handlers: StreamHandlers): StreamSubscr
         return;
       }
       await readSseStream(res.body.getReader(), (data) => {
+        console.log("[DEBUG-genbug] sse data:", data);
         let event: StreamEvent;
         try {
           event = JSON.parse(data) as StreamEvent;
         } catch {
+          console.log("[DEBUG-genbug] sse parse FAILED:", data);
           return;
         }
         switch (event.type) {
           case "image":
+            console.log("[DEBUG-genbug] onImage", event.imageIndex, event.url);
             handlers.onImage?.(event.url, event.assetId, event.imageIndex);
             break;
           case "image_failed":
