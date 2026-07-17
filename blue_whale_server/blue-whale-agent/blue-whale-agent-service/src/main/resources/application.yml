@@ -72,7 +72,9 @@ logging:
 
 blue-whale:
   generation:
+    # disabled | openai-tos | fake（fake 仅限非生产，需同时显式置 fake-allowed=true）
     mode: ${GENERATION_MODE:disabled}
+    fake-allowed: ${GENERATION_FAKE_ALLOWED:false}
     openai:
       api-key: ${OPENAI_API_KEY:}
       base-url: ${OPENAI_BASE_URL:https://api.openai.com}
@@ -98,6 +100,9 @@ blue-whale:
   project-events:
     redis-enabled: true
     channel: blue-whale:project-events
+  # ContentReview 策略版本（ADR-0029）：本地非生产固定确定性策略；生产由专门 issue 接入真实供应商
+  content-review:
+    policy-version: ${CONTENT_REVIEW_POLICY_VERSION:local-fake-v1}
   agent-orchestrator:
     engine: ${AGENT_ORCHESTRATOR_ENGINE:pydantic-ai}
     engine-version: ${AGENT_ORCHESTRATOR_ENGINE_VERSION:2.9.0}

@@ -12,6 +12,8 @@ import java.util.List;
 public class GenerationAdapterProperties {
 
     private String mode = "disabled";
+    /** 显式确认在非生产环境启用 Fake 适配器（mode=fake 时必须为 true） */
+    private boolean fakeAllowed = false;
     private final OpenAi openai = new OpenAi();
     private final Tos tos = new Tos();
     private final Seedance seedance = new Seedance();

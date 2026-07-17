@@ -11,12 +11,19 @@ import com.blue.whale.agent.service.generation.AsyncGenerationProvider;
 import com.blue.whale.agent.service.generation.AssetObjectGarbageCollector;
 import com.blue.whale.agent.service.generation.GenerationProvider;
 import com.blue.whale.agent.service.generation.GenerationWorker;
+import com.blue.whale.agent.service.generation.LocalFakeGenerationStorage;
+import com.blue.whale.agent.service.generation.LocalFakeImageGenerationProvider;
 import com.blue.whale.agent.service.generation.OpenAiImageGenerationProvider;
 import com.blue.whale.agent.service.generation.SeedanceAsyncGenerationProvider;
 import com.blue.whale.agent.service.generation.SeedanceVideoGenerationProcessor;
 import com.blue.whale.agent.service.generation.SeedanceVideoResultIngestor;
 import com.blue.whale.agent.service.generation.TosGenerationStorage;
 import com.blue.whale.agent.service.generation.VideoResultIngestor;
+import com.blue.whale.agent.service.governance.ContentReviewProperties;
+import com.blue.whale.agent.service.governance.ContentReviewService;
+import com.blue.whale.agent.service.governance.LocalFakeReviewEvidenceSource;
+import com.blue.whale.agent.service.governance.PendingRealProviderReviewEvidenceSource;
+import com.blue.whale.agent.service.governance.ReviewEvidenceSource;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.volcengine.ark.runtime.service.ArkService;
 import com.volcengine.tos.TOSV2;
@@ -28,6 +35,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -37,13 +46,28 @@ import java.time.Duration;
 public class GenerationAdapterConfiguration {
 
     private static final String MODE = "openai-tos";
+    private static final String FAKE_MODE = "fake";
 
     @Bean
-    GenerationModeValidator generationModeValidator(GenerationAdapterProperties properties) {
-        if (!"disabled".equals(properties.getMode()) && !MODE.equals(properties.getMode())) {
+    GenerationModeValidator generationModeValidator(
+            GenerationAdapterProperties properties, Environment environment) {
+        validateMode(properties.getMode(), properties.isFakeAllowed(), environment);
+        return new GenerationModeValidator();
+    }
+
+    static void validateMode(String mode, boolean fakeAllowed, Environment environment) {
+        if (!"disabled".equals(mode) && !MODE.equals(mode) && !FAKE_MODE.equals(mode)) {
             throw new IllegalStateException("图片生成配置无效: mode");
         }
-        return new GenerationModeValidator();
+        if (FAKE_MODE.equals(mode)) {
+            if (!fakeAllowed) {
+                throw new IllegalStateException(
+                        "Fake 图片生成适配器仅限非生产环境显式启用: fake-allowed");
+            }
+            if (environment != null && environment.acceptsProfiles(Profiles.of("prod"))) {
+                throw new IllegalStateException("Fake 图片生成适配器禁止在生产环境启用");
+            }
+        }
     }
 
     @Bean
@@ -83,6 +107,16 @@ public class GenerationAdapterConfiguration {
             GenerationAdapterProperties properties,
             GenerationAdapterReadiness readiness) {
         return new TosGenerationStorage(generationTosClient, properties, Clock.systemUTC());
+    }
+
+    // 生产真实审核供应商（ADR-0021 LLM Shield）未接入前，以 fail-closed 占位证据源
+    // 保证真实供应商路径不绕过 ContentReview：unavailable → fail closed，不创建 Asset。
+    @Bean
+    @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = MODE)
+    ReviewEvidenceSource reviewEvidenceSource(
+            ContentReviewProperties contentReviewProperties,
+            GenerationAdapterReadiness readiness) {
+        return new PendingRealProviderReviewEvidenceSource(contentReviewProperties);
     }
 
     @Bean
@@ -130,9 +164,51 @@ public class GenerationAdapterConfiguration {
             ObjectProvider<SeedanceVideoGenerationProcessor> videoProcessorProvider,
             AssetObjectLifecycleService lifecycleService,
             ImageProviderCallService imageProviderCallService,
+            ContentReviewService contentReviewService,
             GenerationAdapterReadiness readiness) {
         return new GenerationWorker(claimService, acceptanceService, provider, storage,
-                videoProcessorProvider.getIfAvailable(), lifecycleService, imageProviderCallService);
+                videoProcessorProvider.getIfAvailable(), lifecycleService, imageProviderCallService,
+                contentReviewService);
+    }
+
+    // ===== 本地非生产 Fake 装配（mode=fake，需 fake-allowed 显式确认，禁止生产） =====
+
+    @Bean
+    @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = FAKE_MODE)
+    LocalFakeImageGenerationProvider localFakeImageGenerationProvider(
+            GenerationModeValidator modeValidator) {
+        return new LocalFakeImageGenerationProvider();
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = FAKE_MODE)
+    LocalFakeGenerationStorage localFakeGenerationStorage(GenerationModeValidator modeValidator) {
+        return new LocalFakeGenerationStorage();
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = FAKE_MODE)
+    LocalFakeReviewEvidenceSource localFakeReviewEvidenceSource(
+            ContentReviewProperties contentReviewProperties,
+            GenerationModeValidator modeValidator) {
+        return new LocalFakeReviewEvidenceSource(contentReviewProperties);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = FAKE_MODE)
+    GenerationWorker fakeGenerationWorker(
+            GenerationJobClaimService claimService,
+            GenerationResultAcceptanceService acceptanceService,
+            LocalFakeImageGenerationProvider provider,
+            LocalFakeGenerationStorage storage,
+            ObjectProvider<SeedanceVideoGenerationProcessor> videoProcessorProvider,
+            AssetObjectLifecycleService lifecycleService,
+            ImageProviderCallService imageProviderCallService,
+            ContentReviewService contentReviewService,
+            GenerationModeValidator modeValidator) {
+        return new GenerationWorker(claimService, acceptanceService, provider, storage,
+                videoProcessorProvider.getIfAvailable(), lifecycleService, imageProviderCallService,
+                contentReviewService);
     }
 
     @Bean

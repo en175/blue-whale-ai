@@ -31,10 +31,13 @@ final class GenerationPublicError {
                     ? "视频生成失败" : "图像生成失败";
             case "no_result" -> "生成服务未返回结果";
             case "all_outputs_failed" -> "所有输出均生成失败";
+            case "content_rejected" -> "生成内容未通过安全审核";
+            case "content_review_unavailable" -> "内容审核不可用";
             default -> GenerationJob.TYPE_VIDEO.equals(type) ? "视频生成失败" : "图像生成失败";
         };
         if (!Set.of("submission_unknown", "timed_out", "storage_failed", "provider_failed",
-                        "no_result", "all_outputs_failed")
+                        "no_result", "all_outputs_failed",
+                        "content_rejected", "content_review_unavailable")
                 .contains(code)) {
             code = fallbackCode;
         }

@@ -9,12 +9,15 @@ import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationProviderTask;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
+import com.blue.whale.agent.service.governance.AuditRecordWriter;
 import com.blue.whale.agent.service.governance.CostReservationService;
+import com.blue.whale.agent.service.governance.CostReservationSnapshot;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Locale;
 import java.util.Objects;
 
 @Service
@@ -29,11 +32,13 @@ public class ImageProviderCallService {
     private final GenerationProviderTaskMapper taskMapper;
     private final GenerationResultAcceptanceService acceptanceService;
     private final CostReservationService costReservationService;
+    private final AuditRecordWriter auditRecordWriter;
 
     @Transactional
     public Preparation prepare(GenerationJobClaim claim) {
         GenerationJob job = requireClaimedImageJob(claim);
-        costReservationService.requireActiveBeforeProvider(claim.jobId());
+        CostReservationSnapshot reservation = costReservationService.requireActiveBeforeProvider(
+                claim.jobId());
         GenerationProviderTask evidence = taskMapper.selectByJobAndSlotForUpdate(
                 claim.jobId(), claim.targetSlotIndex());
         if (evidence == null) {
@@ -61,6 +66,10 @@ public class ImageProviderCallService {
                     deadline) != 1) {
                 throw conflict();
             }
+            auditRecordWriter.appendProviderCallFact(
+                    job.getUserId(), job.getProjectId(), job.getId(),
+                    "cost_reservation.provider_admission", "allowed", "RESERVATION_ACTIVE",
+                    reservation.costRuleVersion());
             return Preparation.CALL;
         }
         LocalDateTime now = jobMapper.selectCurrentTime();
@@ -92,6 +101,14 @@ public class ImageProviderCallService {
         if (taskMapper.updateById(evidence) != 1) {
             throw conflict();
         }
+        CostReservationSnapshot reservation = costReservationService.findByJob(claim.jobId())
+                .orElseThrow(() -> new IllegalStateException("付费供应商调用缺少成本预留"));
+        auditRecordWriter.appendProviderCallFact(
+                claim.userId(), claim.projectId(), claim.jobId(),
+                "generation_provider.call_outcome",
+                "success".equals(status) ? "allowed" : "denied",
+                status.toUpperCase(Locale.ROOT),
+                reservation.costRuleVersion());
     }
 
     private GenerationJob requireClaimedImageJob(GenerationJobClaim claim) {
