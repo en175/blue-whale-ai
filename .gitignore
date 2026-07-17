@@ -61,3 +61,6 @@ logs/
 
 # zcode 本地产物（plans 等，不进仓）
 .zcode/plans/
+
+# kimi 本机项目配置（CLI 自维护的 local.toml，勿入库；hooks.toml 与 hooks/ 为团队共享配置）
+.kimi-code/local.toml

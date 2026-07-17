@@ -96,8 +96,15 @@ def value(key: str) -> int:
         # tool_name 保留 tool_input 回退以兼容旧测试夹具。
         if key == "tool_name":
             result = data.get("tool_name", tool_input.get("tool_name"))
+        elif key == "tool_use_id":
+            # Kimi CLI 载荷的关联 id 字段是 tool_call_id（无 tool_use_id）；
+            # Claude Code / Codex / ZCode 均带 tool_use_id，优先取之。
+            result = data.get("tool_use_id") or data.get("tool_call_id")
         else:
             result = data.get(key)
+    elif key == "file_path":
+        # Kimi CLI 的 Write/Edit 参数名是 path（无 file_path）。
+        result = tool_input.get("file_path") or tool_input.get("path")
     else:
         result = tool_input.get(key)
     if result is None:
