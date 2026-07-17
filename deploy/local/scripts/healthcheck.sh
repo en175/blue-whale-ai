@@ -23,9 +23,14 @@ declare -a SERVICES=(
   "bw-agent-worker|Agent Worker"
 )
 
-# 取容器健康状态：healthy / unhealthy / starting / no healthcheck / not-found
+# 取容器健康状态：healthy / unhealthy / starting / no-healthcheck / not-found
+# 注意：未配置 healthcheck 的容器（如 worker）其 .State.Health 为 nil，
+# 此时 '{{.State.Health.Status}}' Go 模板会输出 "<no value>" 且 exit 0，
+# 不会触发 || 分支；必须显式探测 .State.Health 是否存在。
 container_health() {
-  docker inspect --format '{{.State.Health.Status}}' "$1" 2>/dev/null || echo "not-found"
+  local out
+  out=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$1" 2>/dev/null) || echo "not-found"
+  echo "$out"
 }
 
 failures=0

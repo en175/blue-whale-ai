@@ -36,11 +36,16 @@ services:
       - ../../blue_whale_server/blue-whale-agent/blue-whale-agent-service/src/main/resources/db/data.sql:/docker-entrypoint-initdb.d/02-data.sql:ro
       - ../../blue_whale_server/blue-whale-agent/blue-whale-agent-service/src/main/resources/db/skill-data.sql:/docker-entrypoint-initdb.d/03-skill-data.sql:ro
     healthcheck:
+      # init（down -v 后首次启动）要跑 ~470KB 的 SQL（schema 24KB + data 28KB + skill-data 418KB），
+      # 在容器化磁盘 IO 下首次执行可能 3-5 分钟。start_period 必须覆盖这个窗口，
+      # 否则 compose 的 depends_on: service_healthy 会在 MySQL 还在初始化时误判为 unhealthy，
+      # 导致依赖它的 user/agent/web/worker 全部启动失败（实测踩过）。
+      # 180s start_period + 30 次 × 5s retry = 总等待上限 330s，足够覆盖首次初始化。
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_PASSWORD:-blue_whale}"]
       interval: 5s
       timeout: 5s
       retries: 30
-      start_period: 30s
+      start_period: 180s
 
   redis:
     image: redis:7-alpine
@@ -57,12 +62,11 @@ services:
       retries: 10
 
   nacos:
-    # 与 spring-cloud-alibaba 2021.0.4.0 兼容；standalone 模式无需外置 MySQL
-    # nacos/nacos-server 官方镜像无 arm64 manifest（仅 linux/amd64），
-    # Apple Silicon（Colima/QEMU）通过 platform: linux/amd64 走 x86_64 仿真。
-    # intel mac 上此字段被忽略，行为一致。
-    platform: linux/amd64
-    image: nacos/nacos-server:v2.2.3
+    # 与 spring-cloud-alibaba 2021.0.4.0 兼容（client 2.2.1 ↔ server 2.4.3，同属 2.x gRPC 协议，向下兼容）。
+    # standalone 模式走内嵌 Derby，无需外置 MySQL。
+    # nacos/nacos-server 自 v2.4.0 起官方提供 linux/arm64 manifest，
+    # Apple Silicon 原生运行，无需 QEMU 仿真（v2.2.3 仅 amd64，仿真跑 JDK 1.8 启动需 10+ 分钟）。
+    image: nacos/nacos-server:v2.4.3
     container_name: bw-nacos
     restart: unless-stopped
     environment:
