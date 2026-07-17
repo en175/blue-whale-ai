@@ -169,9 +169,11 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ""
-      GENERATION_MODE: disabled
+      # 本地 Fake 图片生成（IK1NRZ）：确定性非生产适配，无需真实供应商/对象存储凭据；
+      # Java 内嵌 Generation Worker 定时认领（GENERATION_WORKER_SCHEDULED 默认 true）
+      GENERATION_MODE: fake
+      GENERATION_FAKE_ALLOWED: "true"
       AGENT_ORCHESTRATOR_ENGINE: fake
-      GENERATION_WORKER_SCHEDULED: "false"
       JAVA_TOOL_OPTIONS: "-Xmx512m"
     ports:
       - "${AGENT_PUBLISH_PORT:-8082}:8082"

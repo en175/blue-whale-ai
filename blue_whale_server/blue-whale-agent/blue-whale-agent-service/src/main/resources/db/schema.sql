@@ -503,3 +503,91 @@ CREATE TABLE audit_records
     KEY idx_audit_correlation (correlation_id, id),
     KEY idx_audit_occurred (occurred_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE generation_jobs
+(
+    id               BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id       BIGINT NULL,
+    user_id          BIGINT NOT NULL,
+    agent_run_id     BIGINT NULL,
+    action_identity  VARCHAR(128) NULL,
+    project_action_identity VARCHAR(128) NULL,
+    expected_output_count INT NOT NULL DEFAULT 1,
+    retry_of_job_id  BIGINT NULL,
+    type             VARCHAR(32) NOT NULL,
+    source           VARCHAR(32) NOT NULL,
+    input            JSON NULL,
+    status           VARCHAR(32) NOT NULL,
+    progress         INT NULL,
+    output_asset_ids JSON NULL,
+    provider         VARCHAR(64) NULL,
+    provider_task_id VARCHAR(128) NULL,
+    poll_count       INT NULL,
+    next_poll_at     DATETIME NULL,
+    retry_count      INT NULL,
+    last_polled_at   DATETIME NULL,
+    error            TEXT NULL,
+    stage_id         VARCHAR(64) NULL,
+    lease_owner      VARCHAR(128) NULL,
+    lease_expires_at DATETIME NULL,
+    fencing_token    BIGINT NOT NULL DEFAULT 0,
+    strategy_version VARCHAR(64) NULL,
+    execution_deadline_at DATETIME NULL,
+    evidence_reconcile_until DATETIME NULL,
+    next_action_at DATETIME NULL,
+    cancel_requested_at DATETIME NULL,
+    gmt_create       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version          INT      NOT NULL DEFAULT 0,
+    is_delete        TINYINT  NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_agent_run_action (agent_run_id, action_identity),
+    UNIQUE KEY uk_project_action_identity (project_id, project_action_identity)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='生成任务事实';
+
+CREATE TABLE assets
+(
+    id                BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id        BIGINT NULL,
+    user_id           BIGINT NOT NULL,
+    generation_job_id BIGINT NULL,
+    type              VARCHAR(16) NOT NULL,
+    storage_key       VARCHAR(512) NULL,
+    content_sha256    VARCHAR(64) NULL,
+    url               VARCHAR(1024) NULL,
+    mime              VARCHAR(128) NULL,
+    size              BIGINT NULL,
+    width             INT NULL,
+    height            INT NULL,
+    duration          INT NULL,
+    source            VARCHAR(32) NOT NULL,
+    status            VARCHAR(32) NOT NULL,
+    gmt_create        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version           INT NOT NULL DEFAULT 0,
+    is_delete         TINYINT NOT NULL DEFAULT 0,
+    INDEX idx_asset_project (project_id, id),
+    INDEX idx_asset_generation_job (generation_job_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='Asset 资源事实';
+
+CREATE TABLE content_reviews
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    subject_type VARCHAR(32) NOT NULL,
+    subject_id VARCHAR(128) NOT NULL,
+    content_digest VARCHAR(64) NOT NULL,
+    modality VARCHAR(16) NOT NULL,
+    direction VARCHAR(16) NOT NULL,
+    policy_version VARCHAR(64) NOT NULL,
+    review_state VARCHAR(16) NOT NULL,
+    decision VARCHAR(16) NULL,
+    failure_code VARCHAR(32) NULL,
+    reason_codes JSON NULL,
+    evidence_ref VARCHAR(256) NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_content_review_identity (project_id, subject_type, subject_id, content_digest, modality, direction, policy_version)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='内容审核规范化决定事实';

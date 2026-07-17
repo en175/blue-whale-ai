@@ -299,6 +299,8 @@ class BottomDockGenerationJobIT {
                 String.class, "generation-job:" + jobId))
                 .containsExactly(
                         "cost_reservation.create",
+                        "cost_reservation.provider_admission",
+                        "generation_provider.call_outcome",
                         "cost_reservation.settle");
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM audit_records WHERE action = 'generation_action.authorize' " +

@@ -38,11 +38,11 @@ scripts/local-mvp.sh health
 | 维度 | 默认值 | 说明 |
 |---|---|---|
 | Agent 编排引擎 | `AGENT_ORCHESTRATOR_ENGINE=fake` | 不调真实 LLM；Python Worker `--adapter fake` |
-| 图片生成 | `GENERATION_MODE=disabled` | 不调 TOS / OpenAI / Ark；Fake 生图链路由其他 issue 接入 |
-| 生成 Worker | `GENERATION_WORKER_SCHEDULED=false` | 关闭 Java 侧定时拉取，避免与 Python Worker 双消费 |
-| ContentReview | 链路尚未实现 | 当前代码库无 ContentReview 实现，默认无生产审核调用；链路由其他 issue 接入 |
+| 图片生成 | `GENERATION_MODE=fake` + `GENERATION_FAKE_ALLOWED=true` | 本地确定性 Fake Provider（IK1NRZ），不调 TOS / OpenAI / Ark；生产环境禁止启用 |
+| 生成 Worker | `GENERATION_WORKER_SCHEDULED=true`（默认） | Java 内嵌 Worker 定时认领 GenerationJob 并推进到终态 |
+| ContentReview | 本地确定性非生产审核（策略版本 `local-fake-v1`） | Fake 图片先经规范化 ContentReview，只有 `decided + pass` 才接纳为 Asset；拒绝/失败/无效证据 fail closed |
 | 短信 | `SMS_PROVIDER=console` | 验证码打到 user-service 容器日志，不发真实短信 |
-| 存储/审计 | 本地非生产 | MySQL 持久化到 docker volume；无对象存储 / 审计外部依赖 |
+| 存储/审计 | 本地非生产 | MySQL 持久化到 docker volume；Fake 生成内容存 Agent 进程内存（重启即失效）；无对象存储 / 审计外部依赖 |
 
 ## 服务端口
 
@@ -103,7 +103,6 @@ AGENT_PUBLISH_PORT=8082
 
 ## 不在范围内（其他 issue 处理）
 
-- Fake 生图到 Asset / Card / NodeItem 实际链路 → IK1NRZ
 - AgentChatPanel 创作澄清与 AgentRun 恢复 → IK1NRY
 - Playwright E2E 覆盖 → IK1NS2
 - 真实图片供应商受控验收 → IK1NS3 / IK1NS4
