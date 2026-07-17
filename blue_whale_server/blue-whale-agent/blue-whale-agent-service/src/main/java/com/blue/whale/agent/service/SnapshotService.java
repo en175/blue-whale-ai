@@ -6,6 +6,7 @@ import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
+import com.blue.whale.agent.mapper.UserInputRequestMapper;
 import com.blue.whale.agent.model.dto.CanvasDto;
 import com.blue.whale.agent.model.dto.ProjectDto;
 import com.blue.whale.agent.model.dto.SnapshotResponse;
@@ -14,6 +15,7 @@ import com.blue.whale.agent.model.entity.AgentRun;
 import com.blue.whale.agent.model.entity.ConversationMessage;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationJobOutput;
+import com.blue.whale.agent.model.entity.UserInputRequest;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import com.blue.whale.agent.service.governance.CostReservationService;
@@ -49,6 +51,7 @@ public class SnapshotService {
     private final AgentRunMapper agentRunMapper;
     private final GenerationJobMapper generationJobMapper;
     private final GenerationJobOutputMapper generationJobOutputMapper;
+    private final UserInputRequestMapper userInputRequestMapper;
     private final AssetMapper assetMapper;
     private final ProjectEventService projectEventService;
     private final CostReservationService costReservationService;
@@ -88,11 +91,13 @@ public class SnapshotService {
                         message.getId(), message.getConversationId(), message.getAgentRunId(),
                         message.getRole(), message.getContent(), message.getSequenceNo()))
                 .toList();
+        Map<Long, SnapshotResponse.UserInputRequestDto> activeRequestByRun = resolveActiveInputRequests(projectId, runs);
         List<SnapshotResponse.AgentRunDto> runDtos = runs.stream()
                 .map(run -> new SnapshotResponse.AgentRunDto(
                         run.getId(), run.getConversationId(), run.getStatus(), run.getStage(),
                         run.getEngine(), run.getEngineVersion(), run.getAdapterSchemaVersion(),
-                        run.getCurrentCheckpointId(), run.getVersion()))
+                        run.getCurrentCheckpointId(), run.getVersion(),
+                        activeRequestByRun.get(run.getId())))
                 .toList();
 
         // 批量查 job 引用的 Asset，补产品受控访问地址（防 N+1）
@@ -202,5 +207,37 @@ public class SnapshotService {
                 .map(GenerationJob::getType)
                 .findFirst()
                 .orElse(GenerationJob.TYPE_IMAGE);
+    }
+
+    /**
+     * 查询每个非终态 AgentRun 当前的活动 UserInputRequest（ADR-0016 §2）。
+     *
+     * <p>活动请求通过 source_agent_run_id 关联到创建它的 AgentRun（该 run 处于 awaiting_input）。
+     * 一个 AgentRun 至多一个活动请求（pending 或 confirmed），取最近一条。
+     */
+    private Map<Long, SnapshotResponse.UserInputRequestDto> resolveActiveInputRequests(
+            Long projectId,
+            List<AgentRun> runs) {
+        List<Long> runIds = runs.stream().map(AgentRun::getId).toList();
+        if (runIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<UserInputRequest> active = userInputRequestMapper.selectList(
+                Wrappers.<UserInputRequest>lambdaQuery()
+                        .eq(UserInputRequest::getProjectId, projectId)
+                        .in(UserInputRequest::getSourceAgentRunId, runIds)
+                        .in(UserInputRequest::getStatus,
+                                UserInputRequest.STATUS_PENDING,
+                                UserInputRequest.STATUS_CONFIRMED)
+                        .orderByDesc(UserInputRequest::getId));
+        Map<Long, SnapshotResponse.UserInputRequestDto> byRun = new HashMap<>();
+        for (UserInputRequest request : active) {
+            // 同一 AgentRun 至多一个活动请求；按 id desc 取首条，跳过可能的重复。
+            byRun.putIfAbsent(request.getSourceAgentRunId(), new SnapshotResponse.UserInputRequestDto(
+                    request.getId(), request.getRequestType(), request.getQuestion(),
+                    request.getActionIdentity(), request.getActionType(),
+                    request.getStatus(), request.getExpiresAt()));
+        }
+        return byRun;
     }
 }

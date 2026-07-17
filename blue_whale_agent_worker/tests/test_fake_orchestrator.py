@@ -65,6 +65,39 @@ class FakeOrchestratorTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "engine=fake"):
             FakeOrchestrator().advance(production_work)
 
+    def test_clarification_proposal_serializes_only_product_neutral_fields(self) -> None:
+        clarification_work = RunWork(
+            **{
+                **self.work.__dict__,
+                "messages": ({"role": "user", "content": "澄清:蓝鲸海报"},),
+            }
+        )
+        result = FakeOrchestrator().advance(clarification_work)
+        payload = result.to_commit_payload(clarification_work)
+
+        # 创作澄清与动作互斥：payload 不携带 actions，只携带 user_input_request 提议。
+        self.assertEqual([], payload["actions"])
+        proposal = payload["user_input_request"]
+        self.assertEqual("creation_clarification", proposal["request_type"])
+        self.assertIn("蓝鲸海报", proposal["question"])
+        # 产品中性：不泄漏框架内部或供应商私有字段。
+        serialized = json.dumps(payload, ensure_ascii=False)
+        self.assertNotIn("pydantic", serialized.lower())
+        self.assertNotIn("provider", serialized.lower())
+        self.assertNotIn("deferredtool", serialized.lower())
+
+    def test_clarification_proposal_is_mutually_exclusive_with_actions(self) -> None:
+        clarification_work = RunWork(
+            **{
+                **self.work.__dict__,
+                "messages": ({"role": "user", "content": "澄清:蓝鲸海报"},),
+            }
+        )
+        result = FakeOrchestrator().advance(clarification_work)
+
+        self.assertEqual((), result.actions)
+        self.assertIsNotNone(result.input_request)
+
 
 if __name__ == "__main__":
     unittest.main()

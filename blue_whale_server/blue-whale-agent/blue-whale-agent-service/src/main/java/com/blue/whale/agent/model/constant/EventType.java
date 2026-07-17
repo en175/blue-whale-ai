@@ -30,8 +30,14 @@ public final class EventType {
     public static final String AGENT_RUN_CREATED = "agent_run.created";
     /** AgentRun：生命周期状态已变更。 */
     public static final String AGENT_RUN_STATUS_CHANGED = "agent_run.status_changed";
+    /** AgentRun：创作澄清输入请求已创建（UserInputRequest 归属 AgentRun，ADR-0016 §5）。 */
+    public static final String AGENT_RUN_USER_INPUT_REQUESTED = "agent_run.user_input_requested";
+    /** AgentRun：创作澄清输入请求已被自然语言回答。 */
+    public static final String AGENT_RUN_USER_INPUT_ANSWERED = "agent_run.user_input_answered";
+    /** AgentRun：创作澄清输入请求已过期。 */
+    public static final String AGENT_RUN_USER_INPUT_EXPIRED = "agent_run.user_input_expired";
 
-    /** UserInputRequest：Java 策略要求一次性自然语言确认。 */
+    /** UserInputRequest：Java 策略要求一次性自然语言确认（成本确认，独立聚合，向后兼容）。 */
     public static final String USER_INPUT_REQUEST_CREATED = "user_input_request.created";
 
     /** GenerationJob：创建 */

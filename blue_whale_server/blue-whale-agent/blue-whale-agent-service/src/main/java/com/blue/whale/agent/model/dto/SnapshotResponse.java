@@ -45,7 +45,24 @@ public record SnapshotResponse(
             String engineVersion,
             Integer adapterSchemaVersion,
             Long currentCheckpointId,
-            Integer version) {
+            Integer version,
+            UserInputRequestDto activeInputRequest) {
+    }
+
+    /**
+     * UserInputRequest 产品中性切片（ADR-0016 §2 要求返回 AgentRun 当前活动请求）。
+     *
+     * <p>不含成本版本字段（quotedAmountFen/provider/catalog 等），避免供应商私有信息泄漏到 Snapshot。
+     * 创作澄清暴露可见问题；成本确认暴露动作身份与类型，供前端展示待确认动作。
+     */
+    public record UserInputRequestDto(
+            Long inputRequestId,
+            String requestType,
+            String question,
+            String actionIdentity,
+            String actionType,
+            String status,
+            java.time.LocalDateTime expiresAt) {
     }
 
     /** GenerationJob 摘要（Snapshot 切片）。 */
