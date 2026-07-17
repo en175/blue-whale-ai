@@ -1396,6 +1396,17 @@ run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__merge_enterprise_pull","
 assert_exit 2 "release: merge PR 缺 tool_use_id 拦截"
 assert_stderr_has "tool_use_id" "release: merge PR 缺 tool_use_id 提示"
 
+# Kimi CLI 载荷：关联 id 字段为 tool_call_id（无 tool_use_id），Gate 经回退等价 claim/consume。
+write_action_marker merge-pr 16660949 48854568 21
+run_hook "$RELEASE_HOOK" '{"tool_call_id":"kimi-merge-21","session_id":"kimi-s1","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":21,"merge_method":"merge"}}'
+assert_exit 0 "release: Kimi merge PR tool_call_id claim 放行"
+assert_audit_record_field "$ACTION_AUDIT_LOG" kimi-merge-21 operation merge-pr "audit-all: Kimi merge PR 以 tool_call_id 记录审计"
+assert_file_exists "$(authorization_claim_path merge-pr 16660949 48854568 21)" "release: Kimi merge PR Pre 原子占用凭证"
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_call_id":"kimi-merge-21","session_id":"kimi-s1","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":21,"merge_method":"merge"},"tool_output":"{\"state\":\"merged\"}"}'
+assert_exit 0 "release: Kimi merge PR 成功 Post 放行"
+assert_file_missing "$(authorization_marker_path merge-pr 16660949 48854568 21)" "release: Kimi merge PR 成功 Post 消费凭证"
+assert_file_missing "$(authorization_claim_path merge-pr 16660949 48854568 21)" "release: Kimi merge PR 成功 Post 清理占用"
+
 write_action_marker merge-pr 16660949 48854568 13 1
 run_hook "$RELEASE_HOOK" '{"tool_use_id":"merge-13","tool_name":"mcp__gitee-ent__merge_enterprise_pull","tool_input":{"enterprise_id":16660949,"project_id":"48854568","pull_request_id":13,"merge_method":"merge"}}'
 assert_exit 2 "release: merge PR 过期凭证拦截"
@@ -1505,6 +1516,20 @@ write_publish_marker "feature/x"
 run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master"},"tool_response":{"isError":"false"}}'
 assert_exit 0 "release: Post 畸形 isError 放行不阻断"
 assert_file_exists "$(publish_marker_path feature/x)" "release: Post 畸形 isError 保留标记"
+remove_publish_marker feature/x
+
+# Kimi CLI Post：载荷无 tool_response，成功输出字段为 tool_output（kimi PostToolUse 仅成功时触发）→ 撕票。
+write_publish_marker "feature/kimi-post"
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","session_id":"kimi-s1","cwd":"/tmp","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/kimi-post","target_branch":"master","title":"test"},"tool_call_id":"tool_kimi_post_1","tool_output":"{\"iid\":1}"}'
+assert_exit 0 "release: Kimi Post create PR 放行"
+assert_file_missing "$(publish_marker_path feature/kimi-post)" "release: Kimi Post tool_output 视为成功并消费标记"
+remove_publish_marker "feature/kimi-post"
+
+# 无 tool_response 且无 tool_output 的 Post 载荷（畸形/未知平台）保守保留标记。
+write_publish_marker "feature/x"
+run_hook "$RELEASE_HOOK" '{"hook_event_name":"PostToolUse","tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","title":"test"}}'
+assert_exit 0 "release: Post 无成功证明字段放行不阻断"
+assert_file_exists "$(publish_marker_path feature/x)" "release: Post 无成功证明字段保留标记"
 remove_publish_marker feature/x
 
 # Post 缺 source_branch 不 consume（guard）：撕票需 source_branch 算路径，缺失则不动标记。
@@ -1805,6 +1830,12 @@ export FAKE_TOPLEVEL_MAP=$'/tmp/repo\t/tmp/repo\n/tmp/worktree\t/tmp/worktree'
 # 主 checkout master，Edit 主 checkout 内文件 → 拦
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/repo/src/a.py"}}'
 assert_exit 2 "master-edit: 主 checkout master 文件拦截"
+
+# Kimi CLI 形状：tool_input 路径参数为 path（无 file_path）→ 同判拦截/放行
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Write","tool_call_id":"tool_k1","tool_input":{"path":"/tmp/repo/src/a.py"}}'
+assert_exit 2 "master-edit: Kimi path 形状 master 文件拦截"
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Write","tool_call_id":"tool_k2","tool_input":{"path":"/tmp/worktree/src/b.py"}}'
+assert_exit 0 "master-edit: Kimi path 形状工单分支文件放行"
 
 # 主 checkout session（cwd=master），Edit worktree 工单分支文件 → 放行
 # 核心：按 file_path 所属工作树解析得工单分支，不靠「worktree 路径不在主 toplevel 前缀内」的布局假设
@@ -2220,22 +2251,23 @@ assert_hook_contract_drift_detection
 assert_hook_audit_coverage_detection
 assert_closed_loop_gate_drift_detection
 run_hook_contract_check
-assert_exit 0 "contracts: 真实三端 Hook 配置满足共享契约"
-assert_stdout_empty "contracts: 真实三端 Hook 配置 stdout 为空"
-assert_stderr_empty "contracts: 真实三端 Hook 配置 stderr 为空"
-assert_file_exists "$HOOK_CLOSED_LOOP_CHECKER" "closed-loop: 三端配置链闭环检查器存在"
+assert_exit 0 "contracts: 真实四端 Hook 配置满足共享契约"
+assert_stdout_empty "contracts: 真实四端 Hook 配置 stdout 为空"
+assert_stderr_empty "contracts: 真实四端 Hook 配置 stderr 为空"
+assert_file_exists "$HOOK_CLOSED_LOOP_CHECKER" "closed-loop: 四端配置链闭环检查器存在"
 run_command_hook "python3 \"$HOOK_CLOSED_LOOP_CHECKER\"" ""
-assert_exit 0 "closed-loop: 三端配置链闭环检查通过"
+assert_exit 0 "closed-loop: 四端配置链闭环检查通过"
 assert_stdout_has "[配置链集成] ZCode" "closed-loop: 报告含 ZCode 配置链证据"
 assert_stdout_has "[配置链集成] Claude Code" "closed-loop: 报告含 Claude Code 配置链证据"
 assert_stdout_has "[配置链集成] Codex" "closed-loop: 报告含 Codex 配置链证据"
-assert_stdout_has "audit=12/12 unique correlated records" "closed-loop: 报告含唯一审计关联证据"
+assert_stdout_has "[配置链集成] Kimi CLI" "closed-loop: 报告含 Kimi CLI 配置链证据"
+assert_stdout_has "audit=16/16 unique correlated records" "closed-loop: 报告含唯一审计关联证据"
 assert_stdout_has "[直接 Gate 黑盒]" "closed-loop: 报告区分直接 Gate 黑盒"
 assert_stdout_has "[外部客户端实机探针] 未执行" "closed-loop: 报告不冒充外部客户端实机证据"
 assert_stderr_empty "closed-loop: 成功时 stderr 为空"
 assert_file_exists "$CODEX_HOOKS_JSON" "codex: hooks.json 存在"
 assert_codex_hooks_valid "codex: hooks.json 与 Claude matcher 同步"
-for runtime_hook in .claude/hooks/*.sh .codex/hooks/*.sh .claude/settings.json .codex/hooks.json; do
+for runtime_hook in .claude/hooks/*.sh .codex/hooks/*.sh .kimi-code/hooks/*.sh .claude/settings.json .codex/hooks.json .kimi-code/hooks.toml; do
   assert_file_not_matches "$runtime_hook" 'permissionDecision[^[:alnum:]]*[=:][^[:alnum:]]*ask' "hooks: $runtime_hook 不包含 ask 运行机制"
 done
 for active_doc in CLAUDE.md CONTEXT.md .claude/rules/git-workflow.md docs/agents/commit-and-review.md docs/agents/worktree-workflow.md docs/agents/hooks/README.md; do
@@ -2246,6 +2278,9 @@ assert_git_not_ignored ".codex/hooks/run-claude-pretool.sh" "codex: wrapper 可�
 assert_git_ignored ".codex/config.toml" "codex: config.toml 保持私密"
 assert_git_ignored ".codex/local.json" "codex: 其它本机配置保持私密"
 assert_git_ignored ".codex/hooks/other.sh" "codex: 禁止提交复制出来的 hook 实现"
+assert_git_not_ignored ".kimi-code/hooks.toml" "kimi: hooks.toml 可提交"
+assert_git_not_ignored ".kimi-code/hooks/blue-whale-hook.sh" "kimi: shim 可提交"
+assert_git_ignored ".kimi-code/local.toml" "kimi: local.toml 保持本机私有"
 
 # 可重复运行时探针必须从真实 Codex 配置一路驱动到共享 Gate，并输出稳定摘要。
 assert_file_exists "$CODEX_WRITE_PROBE" "codex probe: 探针存在"
@@ -2601,6 +2636,55 @@ else
 fi
 
 teardown_release_repos
+
+# Slice 7 — Kimi CLI shim 路由守卫（用户级全局挂载下的跨项目隔离 + opt-in 标记）
+KIMI_SHIM="$REPO_ROOT/.kimi-code/hooks/blue-whale-hook.sh"
+
+# 参数异常一律静默放行：shim 全局挂载，任何配置错误不得波及其它项目。
+run_command_hook "bash \"$KIMI_SHIM\"" '{}'
+assert_exit 0 "kimi shim: 无参数静默放行"
+run_command_hook "bash \"$KIMI_SHIM\" ../evil.sh" '{}'
+assert_exit 0 "kimi shim: 非法 gate 名静默放行"
+
+KIMI_SHIM_ROOT="$(mktemp -d)"
+
+# 非 git 目录 → 静默放行
+KIMI_NOGIT="$KIMI_SHIM_ROOT/nogit"
+mkdir -p "$KIMI_NOGIT"
+run_command_hook "(cd \"$KIMI_NOGIT\" && bash \"$KIMI_SHIM\" block-master-edit.sh)" '{}'
+assert_exit 0 "kimi shim: 非 git 目录静默放行"
+
+# git 项目缺 opt-in 标记（.kimi-code/hooks.toml）→ 静默放行（其它项目零干扰）
+KIMI_OTHER="$KIMI_SHIM_ROOT/other"
+mkdir -p "$KIMI_OTHER"
+git -C "$KIMI_OTHER" init -q
+run_command_hook "(cd \"$KIMI_OTHER\" && bash \"$KIMI_SHIM\" block-master-edit.sh)" '{}'
+assert_exit 0 "kimi shim: 无 opt-in 标记的项目静默放行"
+
+# 有标记但 Gate 缺失 → 静默放行
+mkdir -p "$KIMI_OTHER/.kimi-code"
+touch "$KIMI_OTHER/.kimi-code/hooks.toml"
+run_command_hook "(cd \"$KIMI_OTHER\" && bash \"$KIMI_SHIM\" block-master-edit.sh)" '{}'
+assert_exit 0 "kimi shim: 标记存在但 Gate 缺失静默放行"
+
+# 标记 + Gate 齐备 → 路由执行，stdin 与 exit code/stderr 原样透传
+mkdir -p "$KIMI_OTHER/.claude/hooks"
+cat > "$KIMI_OTHER/.claude/hooks/block-master-edit.sh" <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+case "$input" in
+  *blockme*) echo "shim-gate blocked" >&2; exit 2 ;;
+esac
+exit 0
+EOF
+run_command_hook "(cd \"$KIMI_OTHER\" && bash \"$KIMI_SHIM\" block-master-edit.sh)" '{"tool_name":"Write","tool_input":{"file_path":"blockme.txt"}}'
+assert_exit 2 "kimi shim: opt-in 项目路由到 Gate 并透传阻断"
+assert_stderr_has "shim-gate blocked" "kimi shim: 透传 Gate 阻断原因"
+run_command_hook "(cd \"$KIMI_OTHER\" && bash \"$KIMI_SHIM\" block-master-edit.sh)" '{"tool_name":"Write","tool_input":{"file_path":"ok.txt"}}'
+assert_exit 0 "kimi shim: opt-in 项目 Gate 放行"
+
+rm -rf "$KIMI_SHIM_ROOT"
+unset KIMI_SHIM KIMI_SHIM_ROOT KIMI_NOGIT KIMI_OTHER
 
 # 恢复调用者环境并删除全局审计隔离仓库。
 if [ -n "$ORIGINAL_CLAUDE_PROJECT_DIR" ]; then

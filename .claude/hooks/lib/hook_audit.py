@@ -102,9 +102,13 @@ def read_upstream_fields(include_file_context: bool) -> dict[str, str]:
         tool_input = {}
     return {
         "tool": _scalar_str(data.get("tool_name")),
-        "tool_use_id": _scalar_str(data.get("tool_use_id")),
+        # Kimi CLI 的关联 id 字段是 tool_call_id；Claude 系平台是 tool_use_id。
+        "tool_use_id": _scalar_str(data.get("tool_use_id") or data.get("tool_call_id")),
         "session_id": _scalar_str(data.get("session_id")),
-        "file_path": _scalar_str(tool_input.get("file_path") or data.get("file_path"))
+        # Kimi CLI 的 Write/Edit 参数名是 path；Claude 系平台是 file_path。
+        "file_path": _scalar_str(
+            tool_input.get("file_path") or tool_input.get("path") or data.get("file_path")
+        )
         if include_file_context
         else "",
     }

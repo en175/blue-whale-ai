@@ -2,6 +2,7 @@
 
 > `CLAUDE.md` + `AGENTS.md` + `scripts/start-task-worktree.py` 构成平台中立的前置策略；Hook 只做运行时兜底，不是完整安全边界。
 > 可跨平台复用的 `.claude/hooks/` 脚本由 ZCode / Claude Code 直接挂载；Codex 通过 `.codex/hooks.json` 和薄 wrapper 复用同一权威实现。Codex 的 `Edit|Write` matcher 仍收到官方 `apply_patch` 输入，由 wrapper 只做输入适配后进入共享 Gate。
+> Kimi CLI 不支持项目级 hooks，通过 `scripts/install-kimi-hooks.sh` 把 `.kimi-code/hooks.toml` 写入用户级 `~/.kimi-code/config.toml`，再经用户级 shim 路由回同一权威实现（见「Kimi CLI 挂载」节）。
 > 决策背景：补齐 CLAUDE.md「Gitee 工作流」高频硬约束的执行末梢（让红线在 hook 层落地，不只靠文档纪律）。
 
 ---
@@ -41,9 +42,9 @@ chmod +x .claude/hooks/<name>.sh
 
 > **未执行可执行权限** = hook 静默失效（`type: command` 不带 `bash` 前缀时，Claude Code 不会自动加执行位）。这是 90% 的"hook 不工作"故障的根因。
 
-### 3. 挂到 ZCode / Claude Code / Codex 三端配置
+### 3. 挂到 ZCode / Claude Code / Codex / Kimi CLI 四端配置
 
-在 `.zcode/config.json`、`.claude/settings.json` 和 `.codex/hooks.json` 的 `PreToolUse` 中加入等价阻断契约（ZCode 位于 `hooks.events.PreToolUse`，其余两端位于 `hooks.PreToolUse`）。ZCode / Claude Code 的 command 直接挂权威 Gate，例如：
+在 `.zcode/config.json`、`.claude/settings.json`、`.codex/hooks.json` 和 `.kimi-code/hooks.toml` 的 `PreToolUse` 中加入等价阻断契约（ZCode 位于 `hooks.events.PreToolUse`，Kimi 为 `[[hooks]]` 扁平条目，其余两端位于 `hooks.PreToolUse`）。ZCode / Claude Code 的 command 直接挂权威 Gate，例如：
 
 ```json
 {
@@ -74,6 +75,23 @@ Codex 挂载点写在 `.codex/hooks.json`，但**不要复制脚本实现到 `.c
 - `.codex/hooks/run-claude-pretool.sh` 对普通 Gate 透明转发；仅对 `apply_patch → block-master-edit.sh` 做目标路径适配。三端都使用“stdout 空 + exit 0 放行 / stderr 原因 + exit 2 阻断”的契约，不产生或转换 ASK。
 - `.codex/config.toml` 属于本机私密配置，可能含 token，不进仓；项目共享的只有 `.codex/hooks.json`。
 - Codex 首次拉取或 hook 变更后，用户需要在 Codex 里运行 `/hooks` review/trust 项目 hook，否则新挂载点不会执行。
+
+---
+
+## Kimi CLI 挂载（用户级 shim）
+
+Kimi CLI 只从用户级 `~/.kimi-code/config.toml` 加载 hooks（实测项目级 `.kimi-code/local.toml` 不加载），无法像其它三端一样把配置入库生效。适配方式：
+
+- **配置片段入库**：`.kimi-code/hooks.toml` 收录与三端阻断/观察契约一一对应的 `[[hooks]]` 条目（10 PreToolUse + 3 PostToolUse），command 统一指向用户级 shim。
+- **shim 路由**：`scripts/install-kimi-hooks.sh` 把 `.kimi-code/hooks/blue-whale-hook.sh` 同步到 `~/.kimi-code/hooks/` 并把片段以 managed block 写入用户级配置（`--uninstall` 干净移除）。shim 带 opt-in 标记守卫：仅当会话项目根存在 `.kimi-code/hooks.toml` 才路由到 `.claude/hooks/<gate>`，本机其它项目静默放行、零干扰。
+- **载荷差异已由 Gate 层吸收**（对 Claude 系行为无影响）：
+  - Kimi 的关联 id 字段是 `tool_call_id`（无 `tool_use_id`）——`lib/pretool.py` 与 `lib/hook_audit.py` 做回退映射，授权 claim 与审计关联不变。
+  - Kimi 的 Write/Edit 目标路径参数是 `tool_input.path`（无 `file_path`）——同样由上述回退吸收，`block-master-edit.sh` 的分支判定与审计不变。
+  - Kimi 的 PostToolUse 成功输出字段是 `tool_output`（无 `tool_response`），且仅在工具成功时触发（失败走 `PostToolUseFailure`）——`confirm-release-action.sh` 的成功判定兼容两种形状，PR 标记撕票语义不变。
+  - Kimi 的 SessionStart 是观察型事件（fire-and-forget，stdout 不注入上下文；compaction 走独立 PreCompact/PostCompact 观察事件）。注入型的 `cbm-session-reminder.sh` / `superpowers-session-start.sh` 挂载到 kimi 即为死配置，因此 `.kimi-code/hooks.toml` 不挂 SessionStart。kimi 会话启动 context 由原生 AGENTS.md 加载机制覆盖（项目 AGENTS.md 指向 CLAUDE.md，规则路由完整）；superpowers 引导在 kimi 无 hook 等价物。
+- 阻断契约一致：`exit 0` 放行、`stderr + exit 2` 阻断、其它非零 fail-open。注意 Kimi 的 fail-open 是官方设计，hooks 同样只是兜底而非完整安全边界。
+- 使用 kimi 的本机首次（或换新机）运行一次 `scripts/install-kimi-hooks.sh`；变更 `.kimi-code/hooks.toml` 或 shim 后重跑一次即可幂等同步。新会话生效，已有会话用 `/reload` 重载。
+- 目前 Kimi CLI 为个人使用（非团队平台）：配置入库不是为团队分发，而是机制必需——task worktree 从 git 提交状态创建，`.kimi-code/hooks.toml`（opt-in 标记）与 shim 权威源若不入库，worktree 会话中 hook 会静默失效；入库同时让契约/闭环检查器可持续守护四端一致。
 
 ---
 
@@ -110,10 +128,10 @@ Hook 触发记录在 `~/.claude/logs/` 或本会话 transcript 里搜 `hookSpeci
 按下面的顺序排查，不要把 Hook 当作正常开工入口：
 
 1. **先做写入前主动自检**：按 `CLAUDE.md`「写入前自检」确认当前分支、Agent 任务区、目标路径和 Git 写入区域。若仍在用户本地集成区，停止写入并先运行 `scripts/start-task-worktree.sh`。
-2. **检查三端配置映射**：运行 `python3 scripts/check-hook-contracts.py`。它从 ZCode、Claude Code、Codex 的实际项目配置解析 matcher、执行入口与权威 Gate；失败信息会指出平台、事件、matcher 和 Gate。
+2. **检查四端配置映射**：运行 `python3 scripts/check-hook-contracts.py`。它从 ZCode、Claude Code、Codex、Kimi CLI 的实际项目配置解析 matcher、执行入口与权威 Gate；失败信息会指出平台、事件、matcher 和 Gate。
 3. **执行配置链闭环**：运行 `python3 scripts/check-hook-closed-loop.py`。它逐端执行 master 与 Agent 任务区的创建/修改场景，并按唯一会话标识和工具调用标识核对阻断/放行结果与审计记录。
 4. **按关联标识定位记录**：使用下节的 `python3 scripts/query-hook-audit.py` 查询。master 写入应为 exit 2，Agent 任务区等价写入应为 exit 0，且每个工具调用标识只对应一条记录。
-5. **最后检查外部客户端**：若真实 ZCode、Claude Code 或 Codex 操作没有关联记录，再检查该客户端的 Hook 信任状态、配置加载结果和自身日志。仓库查询只能定位调用是否进入 Gate，不能解释外部 harness 的内部根因。
+5. **最后检查外部客户端**：若真实 ZCode、Claude Code、Codex 或 Kimi CLI 操作没有关联记录，再检查该客户端的 Hook 信任状态、配置加载结果和自身日志。仓库查询只能定位调用是否进入 Gate，不能解释外部 harness 的内部根因。
 
 这条路径保持“文档驱动、Hook 兜底”：第 1 步是 Agent 正常执行机制，第 2–4 步验证仓库兜底与审计，第 5 步才进入外部客户端取证。
 
@@ -156,16 +174,17 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 5 个 hook 同构：`printf '<json>' | bash <hook>.sh` 的 **stdin JSON → exit code + stdout/stderr** 黑盒。夹具不测内部实现；同一黑盒边界还观测 git common dir 中的持久日志、脱敏内容与审计失败降级，`block-master-edit.sh` 另覆盖轮转和并发副作用。`confirm-release-action.sh` 覆盖同步/create/update 标准入口无输出放行、缺授权/缺模式/直接 push/错误 merge 同步及复合命令/Git alias 绕过硬拦、凭证 TTL/对象隔离/并发占用、Post 明确成功消费和失败/畸形保留，并断言 Post 不生成 PreToolUse 审计记录。Hook 不执行同步、不选择发布模式；正常状态机由 `CLAUDE.md` 和 ADR-0013 驱动。发布标记、动作凭证与审计日志测试均在临时 Git 仓库运行，不读写真实 common dir。
 
-夹具还校验 ZCode / Claude Code / Codex 挂载层：
-- `.zcode/config.json`、`.claude/settings.json`、`.codex/hooks.json` 必须存在。
-- 平台中立的**阻断型** `PreToolUse` / `PostToolUse` 事件、matcher、Hook 数量和权威 Gate 必须三端等价。
-- 提醒型 `Grep|Glob` 只注入 context、不阻断，且 Codex 无对应 CBM MCP；`SessionStart` 只注入会话启动/恢复 context、不是工具调用 Gate，且各平台生命周期挂载不同。两者显式排除于阻断等价比较。
+夹具还校验 ZCode / Claude Code / Codex / Kimi CLI 挂载层：
+- `.zcode/config.json`、`.claude/settings.json`、`.codex/hooks.json`、`.kimi-code/hooks.toml` 必须存在。
+- 平台中立的**阻断型** `PreToolUse` / `PostToolUse` 事件、matcher、Hook 数量和权威 Gate 必须四端等价。
+- 提醒型 `Grep|Glob` 只注入 context、不阻断，且 Codex 无对应 CBM MCP；`SessionStart` 只注入会话启动/恢复 context、不是工具调用 Gate，且各平台生命周期挂载不同（Kimi 仅 `startup|resume`）。两者显式排除于阻断等价比较。
 - 所有 Codex 脚本 command 必须通过 `.codex/hooks/run-claude-pretool.sh`，不得直接指向 `.claude/hooks/` 或复制出来的 `.codex/hooks/` 实现。
 - 每个 Codex 包装命令必须和同位置 ZCode / Claude Code Hook 挂载的脚本名一致。
 - 代表性 Codex 包装命令必须从 `.codex/hooks.json` 读取，并能从 repo root 调到权威脚本得到相同拦截/放行结果。
 - `bash scripts/probe-codex-write-hook.sh` 必须读取真实 `.codex/hooks.json`，以官方 `apply_patch` 形状探测真实 wrapper → 共享 Gate，证明 master 创建/修改阻断、任务区创建/修改放行且不实际执行补丁。
-- 可执行 Hook、wrapper 和活跃规则禁止返回 ASK 决策；标准授权路径必须在 ZCode / Claude Code / Codex 均无交互放行。
-- `.gitignore` 必须只放行 `.codex/hooks.json` 和 `.codex/hooks/run-claude-pretool.sh`；`.codex/config.toml`、其它 `.codex/*`、其它 `.codex/hooks/*` 均保持忽略。
+- Kimi CLI shim 在参数异常、非 git 目录、无 `.kimi-code/hooks.toml` opt-in 标记、Gate 缺失时一律静默放行；标记与 Gate 齐备时 stdin 与 exit code/stderr 原样透传（Slice 7）。
+- 可执行 Hook、wrapper 和活跃规则禁止返回 ASK 决策；标准授权路径必须在 ZCode / Claude Code / Codex / Kimi CLI 均无交互放行。
+- `.gitignore` 必须只放行 `.codex/hooks.json` 和 `.codex/hooks/run-claude-pretool.sh`；`.codex/config.toml`、其它 `.codex/*`、其它 `.codex/hooks/*` 均保持忽略。`.kimi-code/hooks.toml` 与 `.kimi-code/hooks/` 可提交，`.kimi-code/local.toml` 保持忽略。
 
 ### 字段类型以 MCP schema 为准（核心教训）
 
@@ -187,6 +206,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 | stderr 有报错但工具仍执行 | exit code 不是 0/2 | 在脚本末尾加 `echo "DEBUG exit=$?" >&2` |
 | 提醒型 hook 不响应 | 激活条件不满足（如 `graphify-out/graph.json` 缺失） | `[ -f graphify-out/graph.json ] && echo OK` |
 | Codex hook 不响应 | `.codex/hooks.json` 未被信任 | 在 Codex 里运行 `/hooks`，review 并 trust 项目 hook |
+| Kimi CLI hook 不响应 | 未安装用户级 shim/配置，或会话未重载 | 运行 `scripts/install-kimi-hooks.sh`，然后 `kimi doctor` 校验并重开会话（或 `/reload`） |
 
 ---
 
@@ -194,7 +214,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 
 - [ ] 新脚本遵循解析策略、stdin 读 JSON、`exit 0/2` 语义
 - [ ] `chmod +x` 已执行
-- [ ] `.zcode/config.json`、`.claude/settings.json`、`.codex/hooks.json` 同步更新（事件 + matcher + Hook 数量 + 权威 Gate）；**阻断型 Pre/Post 必须三端同步**
+- [ ] `.zcode/config.json`、`.claude/settings.json`、`.codex/hooks.json`、`.kimi-code/hooks.toml` 同步更新（事件 + matcher + Hook 数量 + 权威 Gate）；**阻断型 Pre/Post 必须四端同步**
 - [ ] Codex command 经 `.codex/hooks/run-claude-pretool.sh` 指向 `.claude/hooks/` 权威 Gate；`apply_patch` 只做输入适配，不复制策略
 - [ ] 提醒型 `Grep|Glob` 或 `SessionStart` 未同步时，排除理由仍分别满足“非阻断且 Codex 无对应 CBM MCP”与“会话 context 注入而非工具 Gate”
 - [ ] 至少 1 个**应当被拦**的测试用例 + 1 个**应当放行**的测试用例跑过
