@@ -257,6 +257,7 @@ public class GenerationJobCommandService {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("job_id", retry.getId());
         payload.put("action_identity", retry.getActionIdentity());
+        payload.put("agent_run_id", retry.getAgentRunId());
         payload.put("type", retry.getType());
         payload.put("source", retry.getSource());
         payload.put("status", retry.getStatus());

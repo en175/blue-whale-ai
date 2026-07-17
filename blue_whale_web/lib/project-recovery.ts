@@ -161,7 +161,11 @@ export function applyProductEvent(
 
   const aggregateKey = `${event.aggregate_type}:${event.aggregate_id}`;
   const previousVersion = state.aggregateVersions.get(aggregateKey) ?? -1;
-  if (event.aggregate_version <= previousVersion) {
+  // 只拒绝「严格更旧」的状态；同一聚合允许同版本连续事件。
+  // 后端对部分事实事件（如 agent_run.user_input_requested/user_input_answered）不递增
+  // 聚合版本，它们与前一条 status_changed 同版本；若用 <= 会把这些事件误判为旧状态丢弃，
+  // 导致前端看不到 pending 澄清请求、回答无法绑定原 AgentRun（IK1NS2 实测复现）。
+  if (event.aggregate_version < previousVersion) {
     return { ...state, lastCursor: event.cursor, seenEventIds };
   }
 

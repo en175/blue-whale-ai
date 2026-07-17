@@ -399,6 +399,51 @@ describe("创作澄清活动请求投影", () => {
     ).toBe(42);
   });
 
+  it("同聚合同版本的 user_input_requested 不被误拒（IK1NS2 回归）", () => {
+    // 后端对 user_input_requested 不递增聚合版本：它与前一条 status_changed 同版本。
+    // 版本守卫只拒绝严格更旧的状态，同版本事实事件仍须应用，否则前端丢失 pending
+    // 澄清请求，回答无法绑定原 AgentRun。
+    let state = applySnapshot(initialProjectRecoveryState(1), {
+      ...snapshot(10),
+      agent_runs: [{ agent_run_id: 5, conversation_id: 3, status: "queued" }],
+    });
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_sc_1",
+        event_type: "agent_run.status_changed",
+        aggregate_type: "agent_run",
+        aggregate_id: "5",
+        aggregate_version: 1,
+        payload: { agent_run_id: 5, status: "running", stage: "orchestrating" },
+      }),
+    );
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_req_2",
+        cursor: 12,
+        event_type: "agent_run.user_input_requested",
+        aggregate_type: "agent_run",
+        aggregate_id: "5",
+        aggregate_version: 1,
+        payload: {
+          input_request_id: 42,
+          agent_run_id: 5,
+          request_type: "creation_clarification",
+          question: "希望什么风格？",
+          status: "pending",
+          expires_at: "2099-01-01T00:00:00Z",
+        },
+      }),
+    );
+
+    expect(
+      deriveAnswerableClarification(state.snapshot, NOW)?.input_request_id,
+    ).toBe(42);
+  });
+
   it("user_input_answered 事件把请求标记为已回答，不再参与 Composer 绑定", () => {
     let state = applySnapshot(initialProjectRecoveryState(1), {
       ...snapshot(10),

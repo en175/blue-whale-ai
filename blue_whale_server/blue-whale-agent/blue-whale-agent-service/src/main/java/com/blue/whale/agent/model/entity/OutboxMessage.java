@@ -32,6 +32,9 @@ public class OutboxMessage extends BaseEntity {
     private String messageId;
 
     private Long projectId;
+
+    /** Project 内事件游标。cursor 为 MySQL 保留字，列名必须带反引号 */
+    @TableField("`cursor`")
     private Long cursor;
 
     private String aggregateType;

@@ -23,6 +23,9 @@ test.describe("Canvas — retry chain tracer-bullet", () => {
     // 2. 进入 /canvas —— 4 个项目预置，#1 ("小猫创作") 包含 1 张 status=failed 卡
     await page.goto("/canvas");
 
+    // 卡片在 AgentChatPanel 内渲染，面板默认收起，先打开
+    await page.getByRole("button", { name: "Canvas Agent" }).click();
+
     // 等待至少 1 张卡渲染（处理 mock reply 的 setTimeout 入场）
     const cardCta = page.locator("button.tc-agent-card-cta");
     await expect(cardCta).toHaveCount(1, { timeout: 10_000 });
