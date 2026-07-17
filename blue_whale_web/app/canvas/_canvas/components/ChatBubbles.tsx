@@ -224,6 +224,18 @@ export function AgentCard({
             <div className="break-words" style={{ overflowWrap: "anywhere" }}>
               {msg.text}
             </div>
+            {failed && msg.errorMessage && (
+              <div
+                className="tc-agent-card-error break-words"
+                style={{
+                  overflowWrap: "anywhere",
+                  color: "var(--tc-destructive)",
+                }}
+                role="status"
+              >
+                {msg.errorMessage}
+              </div>
+            )}
           </>
         )}
       </div>
