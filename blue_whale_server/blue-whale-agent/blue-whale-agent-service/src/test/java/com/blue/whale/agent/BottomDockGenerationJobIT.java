@@ -301,6 +301,7 @@ class BottomDockGenerationJobIT {
                         "cost_reservation.create",
                         "cost_reservation.provider_admission",
                         "generation_provider.call_outcome",
+                        "content_review.decision",
                         "cost_reservation.settle");
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM audit_records WHERE action = 'generation_action.authorize' " +

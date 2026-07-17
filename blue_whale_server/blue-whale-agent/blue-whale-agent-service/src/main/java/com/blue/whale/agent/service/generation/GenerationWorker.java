@@ -132,25 +132,26 @@ public class GenerationWorker {
             }
             // 供应商结果先作为私有、未接纳结果处理：只有 ContentReview decided + pass
             // 才允许创建 Asset（ADR-0022 / ADR-0029）；其余组合 fail closed。
-            if (contentReviewService != null) {
-                ContentReviewOutcome review = contentReviewService.reviewGeneratedImage(
-                        new ReviewEvidenceRequest(
-                                claim.projectId(), claim.userId(), claim.jobId(),
-                                claim.targetSlotIndex(), stored.contentSha256(),
-                                stored.mimeType(), claim.input()));
-                if (review.status() != ContentReviewOutcome.Status.PASSED) {
-                    if (transfer != null) {
-                        assetObjectLifecycleService.failTransfer(transfer);
-                    }
-                    discardUnacceptedObject(stored.storageKey());
-                    boolean rejected = review.status() == ContentReviewOutcome.Status.REJECTED;
-                    acceptanceService.acceptFailure(new GenerationFailureCommand(
-                            claim.jobId(), claim.targetSlotIndex(), claim.jobVersion(),
-                            claim.fencingToken(), claim.leaseOwner(),
-                            rejected ? "content_rejected" : "content_review_unavailable",
-                            rejected ? "生成结果未通过内容审核" : "内容审核暂不可用"));
-                    return true;
+            // 无条件审核——生产与 Fake 适配器都注入 ContentReviewService，证据源缺失
+            // 由 ContentReviewService 自身 fail closed（无证据源抛 IllegalStateException
+            // 被本方法外层捕获为 Job 失败，或在证据源返回 failed 时走 acceptFailure）。
+            ContentReviewOutcome review = contentReviewService.reviewGeneratedImage(
+                    new ReviewEvidenceRequest(
+                            claim.projectId(), claim.userId(), claim.jobId(),
+                            claim.targetSlotIndex(), stored.contentSha256(),
+                            stored.mimeType(), claim.input()));
+            if (review.status() != ContentReviewOutcome.Status.PASSED) {
+                if (transfer != null) {
+                    assetObjectLifecycleService.failTransfer(transfer);
                 }
+                discardUnacceptedObject(stored.storageKey());
+                boolean rejected = review.status() == ContentReviewOutcome.Status.REJECTED;
+                acceptanceService.acceptFailure(new GenerationFailureCommand(
+                        claim.jobId(), claim.targetSlotIndex(), claim.jobVersion(),
+                        claim.fencingToken(), claim.leaseOwner(),
+                        rejected ? "content_rejected" : "content_review_unavailable",
+                        rejected ? "生成结果未通过内容审核" : "内容审核暂不可用"));
+                return true;
             }
             try {
                 if (transfer != null) {

@@ -12,6 +12,8 @@ import com.blue.whale.agent.service.generation.GenerationProvider;
 import com.blue.whale.agent.service.generation.GenerationStorage;
 import com.blue.whale.agent.service.generation.GenerationWorker;
 import com.blue.whale.agent.service.generation.VideoResultIngestor;
+import com.blue.whale.agent.service.governance.ContentReviewProperties;
+import com.blue.whale.agent.service.governance.ContentReviewService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.volcengine.tos.TOSV2;
 import org.junit.jupiter.api.Test;
@@ -33,7 +35,9 @@ class GenerationAdapterConfigurationTest {
             .withBean(ImageProviderCallService.class,
                     () -> mock(ImageProviderCallService.class))
             .withBean(GenerationResultAcceptanceService.class,
-                    () -> mock(GenerationResultAcceptanceService.class));
+                    () -> mock(GenerationResultAcceptanceService.class))
+            .withBean(ContentReviewService.class, () -> mock(ContentReviewService.class))
+            .withBean(ContentReviewProperties.class, ContentReviewProperties::new);
 
     @Test
     void disabledModeRegistersNoProductionOrFakeAdapter() {

@@ -22,6 +22,8 @@ import com.blue.whale.agent.service.generation.VideoResultIngestor;
 import com.blue.whale.agent.service.governance.ContentReviewProperties;
 import com.blue.whale.agent.service.governance.ContentReviewService;
 import com.blue.whale.agent.service.governance.LocalFakeReviewEvidenceSource;
+import com.blue.whale.agent.service.governance.PendingRealProviderReviewEvidenceSource;
+import com.blue.whale.agent.service.governance.ReviewEvidenceSource;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.volcengine.ark.runtime.service.ArkService;
 import com.volcengine.tos.TOSV2;
@@ -107,6 +109,16 @@ public class GenerationAdapterConfiguration {
         return new TosGenerationStorage(generationTosClient, properties, Clock.systemUTC());
     }
 
+    // 生产真实审核供应商（ADR-0021 LLM Shield）未接入前，以 fail-closed 占位证据源
+    // 保证真实供应商路径不绕过 ContentReview：unavailable → fail closed，不创建 Asset。
+    @Bean
+    @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = MODE)
+    ReviewEvidenceSource reviewEvidenceSource(
+            ContentReviewProperties contentReviewProperties,
+            GenerationAdapterReadiness readiness) {
+        return new PendingRealProviderReviewEvidenceSource(contentReviewProperties);
+    }
+
     @Bean
     @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = MODE)
     GenerationProvider generationProvider(
@@ -152,9 +164,11 @@ public class GenerationAdapterConfiguration {
             ObjectProvider<SeedanceVideoGenerationProcessor> videoProcessorProvider,
             AssetObjectLifecycleService lifecycleService,
             ImageProviderCallService imageProviderCallService,
+            ContentReviewService contentReviewService,
             GenerationAdapterReadiness readiness) {
         return new GenerationWorker(claimService, acceptanceService, provider, storage,
-                videoProcessorProvider.getIfAvailable(), lifecycleService, imageProviderCallService);
+                videoProcessorProvider.getIfAvailable(), lifecycleService, imageProviderCallService,
+                contentReviewService);
     }
 
     // ===== 本地非生产 Fake 装配（mode=fake，需 fake-allowed 显式确认，禁止生产） =====
