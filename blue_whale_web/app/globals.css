@@ -398,6 +398,15 @@ body {
   cursor: pointer !important;
   animation: tc-pickable-pulse 1.6s ease-in-out infinite;
 }
+/* 重新编辑触发：dock 输入框聚焦闪烁（outline accent 蓝边闪 2 次，X4）*/
+@keyframes tc-dock-pulse {
+  0%, 100% { outline: 2px solid transparent; outline-offset: 2px; }
+  35%, 65% { outline: 2px solid var(--tc-accent); outline-offset: 2px; }
+}
+.tc-dock-pulse {
+  animation: tc-dock-pulse 0.9s ease-out;
+  border-radius: 6px;
+}
 .tc-canvas-pickable-badge {
   position: absolute;
   top: -10px;
@@ -415,12 +424,19 @@ body {
   pointer-events: none;
 }
 
-/* React Flow 画布覆盖：透明底（透出页面 bg-canvas）+ resize 把手 token 化 + 去掉默认节点边框 */
+/* React Flow 画布覆盖：纯黑底（bg-canvas token）+ resize 把手 token 化 + 去掉默认节点边框 */
 .react-flow {
-  background: transparent;
+  background: var(--tc-bg);
+}
+/* 画布空白面板：default 箭头（左键框选，非小手；平移走 panOnDrag 中/右键 + panOnScroll 滚轮）
+   覆盖 RF .draggable 状态类（panOnDrag 触发 .react-flow__pane.draggable{cursor:grab}，特异性 0,2,0）*/
+.react-flow__pane,
+.react-flow__pane.draggable,
+.react-flow__pane.selection {
+  cursor: default;
 }
 .react-flow__node {
-  cursor: grab;
+  cursor: default;
 }
 .react-flow__node.dragging {
   cursor: grabbing;

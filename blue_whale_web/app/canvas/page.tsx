@@ -107,6 +107,8 @@ function CanvasPageInner() {
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
   const [bottomDockMode, setBottomDockMode] = useState<"image" | "video">("image");
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
+  /** 重新编辑（refresh）触发 dock 输入框聚焦 + 闪烁信号（nonce，递增触发 effect） */
+  const [dockFocusSignal, setDockFocusSignal] = useState(0);
   const [videoDockMedia, setVideoDockMedia] = useState<DockMediaItem[]>([]);
   // 视频首尾帧模式：已上传首/尾帧的 TOS url（后端可访问，非本地 blob）
   const [firstFrameUrl, setFirstFrameUrl] = useState<string | undefined>(undefined);
@@ -142,13 +144,15 @@ function CanvasPageInner() {
       const name = node.content || "未命名素材";
       switch (actionId) {
         case "refresh": {
-          // 重新编辑：唤起底部图片 Dock（不带素材）
+          // 重新编辑（X4）：唤起底部图片 Dock（不带素材）+ 输入框聚焦闪烁
           setBottomDockMode("image");
           setIsBottomDockOpen(true);
+          setDockFocusSignal((n) => n + 1);
           break;
         }
-        case "shuffle": {
-          // 再创作：带入参考图占位 + 唤起图片 Dock
+        case "shuffle":
+        case "image": {
+          // 生成图片 / 再创作：带入参考图 + 唤起图片 Dock（X3）
           if (node.imageUrl) {
             setImageDockMedia([{ id: node.id, type: "image", name, src: node.imageUrl }]);
           }
@@ -782,6 +786,7 @@ function CanvasPageInner() {
           onClose={() => setIsBottomDockOpen(false)}
           imageMedia={imageDockMedia}
           videoMedia={videoDockMedia}
+          focusSignal={dockFocusSignal}
           onRemoveImageMedia={(id) => setImageDockMedia((prev) => prev.filter((m) => m.id !== id))}
           onRemoveVideoMedia={(id) => setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))}
           firstFrameUrl={firstFrameUrl}

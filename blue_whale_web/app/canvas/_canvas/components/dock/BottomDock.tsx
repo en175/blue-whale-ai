@@ -34,6 +34,7 @@ export function BottomDock({
   onFrameUpload,
   onFrameClear,
   onSwapFrames,
+  focusSignal,
 }: {
   mode: "image" | "video";
   onClose: () => void;
@@ -63,6 +64,8 @@ export function BottomDock({
   onFrameUpload?: (file: File, slot: "first" | "last") => void;
   onFrameClear?: (slot: "first" | "last") => void;
   onSwapFrames?: () => void;
+  /** 重新编辑触发：递增 nonce → useEffect 聚焦 contentEditable + 闪烁（X4） */
+  focusSignal?: number;
 }) {
   const [input, setInput] = useState("");
   const [dockSize, setDockSize] = useState({ w: 680, h: 164 });
@@ -118,6 +121,22 @@ export function BottomDock({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // 重新编辑（X4）：focusSignal 变化 → 聚焦输入框 + pulse 闪烁动画
+  useEffect(() => {
+    if (!focusSignal) return;
+    const raf = requestAnimationFrame(() => {
+      const el = editorRef.current;
+      if (!el) return;
+      el.focus();
+      el.classList.remove("tc-dock-pulse");
+      void el.offsetWidth; // 触发 reflow 重置动画，允许连续触发
+      el.classList.add("tc-dock-pulse");
+      const done = () => el.classList.remove("tc-dock-pulse");
+      el.addEventListener("animationend", done, { once: true });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [focusSignal]);
 
   const path = squirclePath(dockSize.w, dockSize.h, 28.8);
   const isEmpty = input.trim().length === 0;
