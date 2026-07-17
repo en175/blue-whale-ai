@@ -75,6 +75,9 @@ blue-whale:
     # disabled | openai-tos | fake（fake 仅限非生产，需同时显式置 fake-allowed=true）
     mode: ${GENERATION_MODE:disabled}
     fake-allowed: ${GENERATION_FAKE_ALLOWED:false}
+    # 受控真实图片验收（IK1NS3）：仅 mode=openai-tos 的非生产环境可显式置 true，
+    # 以非生产确定性证据源替换 fail-closed 占位证据源；生产 profile 拒绝该组合
+    acceptance-allowed: ${GENERATION_ACCEPTANCE_ALLOWED:false}
     openai:
       api-key: ${OPENAI_API_KEY:}
       base-url: ${OPENAI_BASE_URL:https://api.openai.com}

@@ -39,6 +39,7 @@ scripts/local-mvp.sh health
 |---|---|---|
 | Agent 编排引擎 | `AGENT_ORCHESTRATOR_ENGINE=fake` | 不调真实 LLM；Python Worker `--adapter fake` |
 | 图片生成 | `GENERATION_MODE=fake` + `GENERATION_FAKE_ALLOWED=true` | 本地确定性 Fake Provider（IK1NRZ），不调 TOS / OpenAI / Ark；生产环境禁止启用 |
+| 受控真实图片验收 | 默认关闭（`GENERATION_ACCEPTANCE_ALLOWED=false`） | 仅限非生产显式启用的一次受控真实调用（IK1NS3），步骤与证据模板见 `acceptance/README.md` |
 | 生成 Worker | `GENERATION_WORKER_SCHEDULED=true`（默认） | Java 内嵌 Worker 定时认领 GenerationJob 并推进到终态 |
 | ContentReview | 本地确定性非生产审核（策略版本 `local-fake-v1`） | Fake 图片先经规范化 ContentReview，只有 `decided + pass` 才接纳为 Asset；拒绝/失败/无效证据 fail closed |
 | 短信 | `SMS_PROVIDER=console` | 验证码打到 user-service 容器日志，不发真实短信 |
@@ -105,7 +106,7 @@ AGENT_PUBLISH_PORT=8082
 
 - AgentChatPanel 创作澄清与 AgentRun 恢复 → IK1NRY
 - Playwright E2E 覆盖 → IK1NS2
-- 真实图片供应商受控验收 → IK1NS3 / IK1NS4
+- 真实图片供应商受控验收 → IK1NS3 已交付（见 `acceptance/README.md`）；生产正式启用（接入 ADR-0021 审核供应商）→ IK1NS4
 - VKE 部署、生产 KMS、OpenTelemetry / Collector → 不在本 MVP 范围
 
 ## 故障排查

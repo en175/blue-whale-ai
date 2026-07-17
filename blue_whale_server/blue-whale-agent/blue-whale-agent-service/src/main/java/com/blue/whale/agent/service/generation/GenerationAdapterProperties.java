@@ -14,6 +14,11 @@ public class GenerationAdapterProperties {
     private String mode = "disabled";
     /** 显式确认在非生产环境启用 Fake 适配器（mode=fake 时必须为 true） */
     private boolean fakeAllowed = false;
+    /**
+     * 显式确认在非生产环境启用受控真实图片验收（IK1NS3）：仅 mode=openai-tos 时有效，
+     * 以非生产确定性证据源替换 fail-closed 占位证据源；生产 profile 拒绝启动。
+     */
+    private boolean acceptanceAllowed = false;
     private final OpenAi openai = new OpenAi();
     private final Tos tos = new Tos();
     private final Seedance seedance = new Seedance();
