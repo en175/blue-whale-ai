@@ -56,6 +56,12 @@ docs/superpowers/
 target/
 *.class
 
+# Python 构建产物（pip install . / setup.py 生成，不入库）
+*.egg-info/
+build/
+dist/
+.eggs/
+
 # 运行日志
 logs/
 
@@ -64,3 +70,6 @@ logs/
 
 # kimi 本机项目配置（CLI 自维护的 local.toml，勿入库；hooks.toml 与 hooks/ 为团队共享配置）
 .kimi-code/local.toml
+
+# 本地 MVP 实际 env（凭据不入库；deploy/local/.env.example 入库）
+deploy/local/.env

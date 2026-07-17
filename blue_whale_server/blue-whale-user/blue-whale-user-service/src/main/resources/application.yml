@@ -6,10 +6,11 @@ spring:
     name: blue-whale-user
   cloud:
     nacos:
-      server-addr: 115.190.244.91:8848
+      # 本地 Docker Compose 默认连容器服务名 nacos:8848；远端用 NACOS_SERVER_ADDR 覆盖
+      server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
       discovery:
         enabled: true
-        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
+        namespace: ${NACOS_NAMESPACE:}
 
   web:
     encoding:
@@ -22,9 +23,10 @@ spring:
       - org.redisson.spring.starter.RedissonAutoConfiguration
 
   datasource:
-    url: jdbc:mysql://115.190.244.91:3306/blue_whale?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
-    username: root
-    password: weitian1024
+    # 本地默认连容器服务名 mysql:3306；远端用 MYSQL_HOST/MYSQL_PORT/MYSQL_DB 覆盖
+    url: jdbc:mysql://${MYSQL_HOST:mysql}:${MYSQL_PORT:3306}/${MYSQL_DB:blue_whale}?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:blue_whale}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jackson:
@@ -36,9 +38,10 @@ spring:
       schema-locations: classpath:schema.sql
 
   redis:
-    host: 115.190.244.91
-    port: 6379
-    password: weitian1024
+    # 本地默认连容器服务名 redis:6379（无密码）；远端用 REDIS_HOST/REDIS_PORT/REDIS_PASSWORD 覆盖
+    host: ${REDIS_HOST:redis}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
     database: 0
 
 mybatis-plus:
@@ -56,13 +59,14 @@ jwt:
   expiration: 604800
 
 sms:
-  provider: volcengine
+  # 本地默认 console（控制台打印验证码，无需真实短信）；远端用 SMS_PROVIDER=volcengine 覆盖
+  provider: ${SMS_PROVIDER:console}
 
-# 火山引擎短信（切换 provider=volcengine 后生效）
+# 火山引擎短信（切换 provider=volcengine 后生效，凭据必须由 env 注入，不入库）
 volcengine:
   sms:
-    access-key-id: AKLTYjI2ZjM3NDU1NTBiNDQwMDkwNjFhZmQxOWVhOGYyODg
-    secret-access-key: WVdVMU9UTmhaREppTWpSa05EWmlOVGxoT1RNMFlqVTVOR00xWkRKalpqaw==
-    sms-account: 8c04a6b6
-    sign: 玄浮科技
-    template-id: S1T_1y2pbbfa2t4oy
+    access-key-id: ${VOLC_SMS_ACCESS_KEY_ID:}
+    secret-access-key: ${VOLC_SMS_SECRET_ACCESS_KEY:}
+    sms-account: ${VOLC_SMS_ACCOUNT:}
+    sign: ${VOLC_SMS_SIGN:玄浮科技}
+    template-id: ${VOLC_SMS_TEMPLATE_ID:}
