@@ -4,6 +4,7 @@ import {
   applyProductEvent,
   applySnapshot,
   consumeProjectEventStream,
+  deriveAnswerableClarification,
   initialProjectRecoveryState,
   runProjectRecovery,
   type ProductEventEnvelope,
@@ -292,6 +293,143 @@ describe("Project SSE 解析器", () => {
     await consumeProjectEventStream(stream, (value) => received.push(value));
 
     expect(received).toEqual([event()]);
+  });
+});
+
+describe("创作澄清活动请求投影", () => {
+  const NOW = new Date("2026-07-17T00:00:00Z");
+  const clarificationRequest = {
+    input_request_id: 42,
+    request_type: "creation_clarification",
+    question: "希望什么风格？",
+    action_identity: "clarification:5",
+    action_type: "creation_clarification",
+    status: "pending",
+    expires_at: "2099-01-01T00:00:00Z",
+  };
+  const awaitingRun = {
+    agent_run_id: 5,
+    conversation_id: 3,
+    status: "awaiting_input",
+    active_input_request: clarificationRequest,
+  };
+
+  it("从 Snapshot 派生当前可回答的创作澄清请求", () => {
+    const snap: ProjectSnapshot = {
+      ...snapshot(10),
+      agent_runs: [awaitingRun],
+    };
+
+    expect(deriveAnswerableClarification(snap, NOW)?.input_request_id).toBe(42);
+  });
+
+  it("多个候选时绑定最新创建的请求", () => {
+    const older = {
+      agent_run_id: 4,
+      active_input_request: { ...clarificationRequest, input_request_id: 40 },
+    };
+    const snap: ProjectSnapshot = {
+      ...snapshot(10),
+      agent_runs: [older, awaitingRun],
+    };
+
+    expect(deriveAnswerableClarification(snap, NOW)?.input_request_id).toBe(42);
+  });
+
+  it("过期、已回答、已消费或非创作澄清的请求不参与绑定", () => {
+    const variants = [
+      {
+        ...awaitingRun,
+        active_input_request: {
+          ...clarificationRequest,
+          expires_at: "2020-01-01T00:00:00Z",
+        },
+      },
+      {
+        ...awaitingRun,
+        active_input_request: { ...clarificationRequest, status: "confirmed" },
+      },
+      {
+        ...awaitingRun,
+        active_input_request: { ...clarificationRequest, status: "consumed" },
+      },
+      {
+        ...awaitingRun,
+        active_input_request: {
+          ...clarificationRequest,
+          request_type: "cost_confirmation",
+          question: null,
+        },
+      },
+    ];
+
+    for (const run of variants) {
+      const snap: ProjectSnapshot = { ...snapshot(10), agent_runs: [run] };
+      expect(deriveAnswerableClarification(snap, NOW)).toBeNull();
+    }
+  });
+
+  it("user_input_requested 事件把活动澄清请求投影到对应 AgentRun", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), {
+      ...snapshot(10),
+      agent_runs: [{ agent_run_id: 5, conversation_id: 3, status: "running" }],
+    });
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_req_1",
+        event_type: "agent_run.user_input_requested",
+        aggregate_type: "agent_run",
+        aggregate_id: "5",
+        aggregate_version: 2,
+        payload: {
+          input_request_id: 42,
+          agent_run_id: 5,
+          request_type: "creation_clarification",
+          question: "希望什么风格？",
+          status: "pending",
+          expires_at: "2099-01-01T00:00:00Z",
+        },
+      }),
+    );
+
+    expect(
+      deriveAnswerableClarification(state.snapshot, NOW)?.input_request_id,
+    ).toBe(42);
+  });
+
+  it("user_input_answered 事件把请求标记为已回答，不再参与 Composer 绑定", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), {
+      ...snapshot(10),
+      agent_runs: [awaitingRun],
+    });
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_ans_1",
+        event_type: "agent_run.user_input_answered",
+        aggregate_type: "agent_run",
+        aggregate_id: "5",
+        aggregate_version: 3,
+        payload: {
+          input_request_id: 42,
+          source_agent_run_id: 5,
+          resumed_agent_run_id: 6,
+          answer_message_id: 9,
+          status: "confirmed",
+        },
+      }),
+    );
+
+    const run = state.snapshot?.agent_runs.find(
+      (candidate) => candidate.agent_run_id === 5,
+    );
+    expect(
+      (run?.active_input_request as { status?: string } | undefined)?.status,
+    ).toBe("confirmed");
+    expect(deriveAnswerableClarification(state.snapshot, NOW)).toBeNull();
   });
 });
 

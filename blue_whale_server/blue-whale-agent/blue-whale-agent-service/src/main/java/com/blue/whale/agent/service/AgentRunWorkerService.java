@@ -90,9 +90,20 @@ public class AgentRunWorkerService {
                 }
                 throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "暂无可认领 AgentRun");
             }
-            RuntimeCheckpoint checkpoint = run.getCurrentCheckpointId() == null
-                    ? null : checkpointMapper.selectById(run.getCurrentCheckpointId());
-            if (!checkpointMatches(run, checkpoint)) {
+            RuntimeCheckpoint checkpoint;
+            boolean checkpointValid;
+            if (run.getCurrentCheckpointId() != null) {
+                checkpoint = checkpointMapper.selectById(run.getCurrentCheckpointId());
+                checkpointValid = checkpointMatches(run, checkpoint);
+            } else if (run.getConfirmedInputRequestId() != null) {
+                // resumed run 首轮认领：携带来源流程已接纳的 RuntimeCheckpoint。
+                checkpoint = resumeCheckpoint(run);
+                checkpointValid = checkpoint != null;
+            } else {
+                checkpoint = null;
+                checkpointValid = true;
+            }
+            if (!checkpointValid) {
                 quarantine(run);
                 quarantined = true;
                 continue;
@@ -383,6 +394,38 @@ public class AgentRunWorkerService {
                 && Objects.equals(checkpoint.getEngineVersion(), run.getEngineVersion())
                 && Objects.equals(checkpoint.getAdapterSchemaVersion(), run.getAdapterSchemaVersion())
                 && Objects.equals(checkpoint.getPayloadDigest(), checkpointDigest(checkpoint.getOpaquePayload()));
+    }
+
+    /**
+     * resumed run 首轮认领时解析来源流程当前已接纳的 RuntimeCheckpoint。
+     *
+     * <p>checkpoint 仍归属 source run（不复制行、不回写 resumed run 的 current_checkpoint_id），
+     * 只随工作包跨 seam 传递且对 Java 保持不透明。engine、engine_version 与
+     * adapter_schema_version 必须与 resumed run 匹配（resumed run 的三件套继承自 source
+     * run），payload 摘要必须校验通过；任何缺失或不匹配都视为损坏，返回 null 交由认领循环隔离。
+     */
+    private RuntimeCheckpoint resumeCheckpoint(AgentRun run) {
+        UserInputRequest request = userInputRequestMapper.selectById(run.getConfirmedInputRequestId());
+        if (request == null || request.getSourceAgentRunId() == null) {
+            return null;
+        }
+        AgentRun sourceRun = agentRunMapper.selectById(request.getSourceAgentRunId());
+        if (sourceRun == null || sourceRun.getCurrentCheckpointId() == null) {
+            return null;
+        }
+        RuntimeCheckpoint checkpoint = checkpointMapper.selectById(sourceRun.getCurrentCheckpointId());
+        if (checkpoint == null
+                || !Objects.equals(checkpoint.getAgentRunId(), sourceRun.getId())
+                || checkpoint.getRunVersion() == null
+                || checkpoint.getRunVersion() > sourceRun.getVersion()
+                || !Objects.equals(checkpoint.getEngine(), run.getEngine())
+                || !Objects.equals(checkpoint.getEngineVersion(), run.getEngineVersion())
+                || !Objects.equals(checkpoint.getAdapterSchemaVersion(), run.getAdapterSchemaVersion())
+                || !Objects.equals(checkpoint.getPayloadDigest(),
+                        checkpointDigest(checkpoint.getOpaquePayload()))) {
+            return null;
+        }
+        return checkpoint;
     }
 
     private void quarantine(AgentRun run) {

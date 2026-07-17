@@ -14,6 +14,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -180,6 +182,144 @@ class CreationClarificationIT {
                         "agent_run.user_input_answered");
     }
 
+    @Test
+    void resumedRunInheritsSourceEngineAndWorkPackageCarriesSourceCheckpoint() throws Exception {
+        Project project = newProject();
+        JsonNode firstRun = postMessage(project.getId(), "msg-1", "generate a whale poster", null)
+                .path("agent_run_id");
+        JsonNode work = claim(firstRun.asLong(), "worker-1");
+
+        // 模拟 source run 创建于旧引擎版本：消息接受只能取配置默认（fake/1/1），
+        // 历史 run 的引擎身份用 SQL 直接固定。
+        jdbcTemplate.update(
+                "UPDATE agent_runs SET engine_version = ?, adapter_schema_version = ? WHERE id = ?",
+                "0.9", 7, firstRun.asLong());
+
+        MvcResult proposed = commit(firstRun.asLong(), "worker-1",
+                        clarificationCommitBody(project.getId(), work, "commit-1", "Which style?", "0.9", 7))
+                .andExpect(status().isOk())
+                .andReturn();
+        long inputRequestId = objectMapper.readTree(proposed.getResponse().getContentAsString())
+                .path("data").path("input_request_id").asLong();
+
+        JsonNode resumed = postMessage(
+                project.getId(), "answer-1", "ink wash style with whitespace", inputRequestId);
+        long resumedRunId = resumed.path("agent_run_id").asLong();
+
+        // resumed run 继承 source run 的引擎身份，而非配置默认 fake/1/1。
+        Map<String, Object> resumedRow = jdbcTemplate.queryForMap(
+                "SELECT engine, engine_version, adapter_schema_version FROM agent_runs WHERE id = ?",
+                resumedRunId);
+        assertThat(resumedRow.get("engine")).isEqualTo("fake");
+        assertThat(resumedRow.get("engine_version")).isEqualTo("0.9");
+        assertThat(((Number) resumedRow.get("adapter_schema_version")).intValue()).isEqualTo(7);
+
+        // claim resumed run：工作包携带 source 流程已接纳的 RuntimeCheckpoint，且三件套匹配。
+        JsonNode resumedWork = claim(resumedRunId, "worker-2");
+        assertThat(resumedWork.path("agent_run_id").asLong()).isEqualTo(resumedRunId);
+        JsonNode checkpoint = resumedWork.path("checkpoint");
+        assertThat(checkpoint == null || checkpoint.isNull()).isFalse();
+        assertThat(checkpoint.path("engine").asText()).isEqualTo("fake");
+        assertThat(checkpoint.path("engine_version").asText()).isEqualTo("0.9");
+        assertThat(checkpoint.path("adapter_schema_version").asInt()).isEqualTo(7);
+        assertThat(checkpoint.path("opaque_payload").path("step").asText())
+                .isEqualTo("clarification_proposed");
+
+        // 恢复后只提交一个 generate_image 动作：恰好一个 queued、source=agent_run、
+        // 关联 resumed run 的 GenerationJob，请求一次性消费。
+        commit(resumedRunId, "worker-2",
+                        actionCommitBody(project.getId(), resumedWork, "commit-2",
+                                "whale poster, ink wash style with whitespace", "0.9", 7))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.generation_job_id").isNumber());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM generation_jobs WHERE project_id = ?",
+                Long.class, project.getId())).isEqualTo(1L);
+        Map<String, Object> job = jdbcTemplate.queryForMap(
+                "SELECT status, source, agent_run_id FROM generation_jobs WHERE project_id = ?",
+                project.getId());
+        assertThat(job.get("status")).isEqualTo("queued");
+        assertThat(job.get("source")).isEqualTo("agent_run");
+        assertThat(((Number) job.get("agent_run_id")).longValue()).isEqualTo(resumedRunId);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM user_input_requests WHERE id = ?",
+                String.class, inputRequestId)).isEqualTo("consumed");
+    }
+
+    @Test
+    void duplicateAnswerDoesNotCreateSecondResumedRunAndIdempotentReplayIsStable() throws Exception {
+        Project project = newProject();
+        JsonNode firstRun = postMessage(project.getId(), "msg-1", "generate a whale poster", null)
+                .path("agent_run_id");
+        JsonNode work = claim(firstRun.asLong(), "worker-1");
+        MvcResult proposed = commit(firstRun.asLong(), "worker-1",
+                        clarificationCommitBody(project.getId(), work, "commit-1", "Which style?"))
+                .andReturn();
+        long inputRequestId = objectMapper.readTree(proposed.getResponse().getContentAsString())
+                .path("data").path("input_request_id").asLong();
+
+        JsonNode resumed = postMessage(
+                project.getId(), "answer-1", "ink wash style with whitespace", inputRequestId);
+        long resumedRunId = resumed.path("agent_run_id").asLong();
+
+        // 迟到/重复回答（新幂等键）：拒绝，不产生第二个 resumed run。
+        mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "answer-2")
+                        .contentType("application/json")
+                        .content(messageBody("client-answer-2", "watercolor instead", inputRequestId)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.data.code").value("ACTION_NOT_ALLOWED"));
+        // 同一命令的幂等重放：结果稳定，仍返回原 resumed run。
+        JsonNode replayed = postMessage(
+                project.getId(), "answer-1", "ink wash style with whitespace", inputRequestId);
+        assertThat(replayed.path("agent_run_id").asLong()).isEqualTo(resumedRunId);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM agent_runs WHERE project_id = ?",
+                Long.class, project.getId())).isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM user_input_requests WHERE id = ?",
+                String.class, inputRequestId)).isEqualTo("confirmed");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM generation_jobs WHERE project_id = ?",
+                Long.class, project.getId())).isEqualTo(0L);
+    }
+
+    @Test
+    void expiredRequestRejectsLateAnswerWithoutResuming() throws Exception {
+        Project project = newProject();
+        JsonNode firstRun = postMessage(project.getId(), "msg-1", "generate a whale poster", null)
+                .path("agent_run_id");
+        JsonNode work = claim(firstRun.asLong(), "worker-1");
+        MvcResult proposed = commit(firstRun.asLong(), "worker-1",
+                        clarificationCommitBody(project.getId(), work, "commit-1", "Which style?"))
+                .andReturn();
+        long inputRequestId = objectMapper.readTree(proposed.getResponse().getContentAsString())
+                .path("data").path("input_request_id").asLong();
+
+        // 请求已过期：迟到回答被拒绝，source run 保持等待输入，不创建 resumed run。
+        jdbcTemplate.update("UPDATE user_input_requests SET expires_at = ? WHERE id = ?",
+                java.sql.Timestamp.from(java.time.Instant.now().minusSeconds(60)), inputRequestId);
+        mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "answer-late")
+                        .contentType("application/json")
+                        .content(messageBody("client-answer-late", "too late", inputRequestId)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.data.code").value("ACTION_NOT_ALLOWED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM user_input_requests WHERE id = ?",
+                String.class, inputRequestId)).isEqualTo("expired");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM agent_runs WHERE project_id = ?",
+                Long.class, project.getId())).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM agent_runs WHERE id = ?",
+                String.class, firstRun.asLong())).isEqualTo("awaiting_input");
+    }
+
     private Project newProject() {
         Project project = new Project().setOwnerId(10L).setName("creation-clarification");
         projectMapper.insert(project);
@@ -216,6 +356,11 @@ class CreationClarificationIT {
     }
 
     private String clarificationCommitBody(long projectId, JsonNode work, String commitId, String question) {
+        return clarificationCommitBody(projectId, work, commitId, question, "1", 1);
+    }
+
+    private String clarificationCommitBody(long projectId, JsonNode work, String commitId, String question,
+                                           String engineVersion, int adapterSchemaVersion) {
         return "{" +
                 "\"commit_id\":\"" + commitId + "\"," +
                 "\"project_id\":" + projectId + "," +
@@ -223,13 +368,31 @@ class CreationClarificationIT {
                 "\"expected_run_version\":" + work.path("run_version").asInt() + "," +
                 "\"fencing_token\":" + work.path("fencing_token").asLong() + "," +
                 "\"engine\":\"fake\"," +
-                "\"engine_version\":\"1\"," +
-                "\"adapter_schema_version\":1," +
+                "\"engine_version\":\"" + engineVersion + "\"," +
+                "\"adapter_schema_version\":" + adapterSchemaVersion + "," +
                 "\"visible_text\":\"" + question + "\"," +
                 "\"checkpoint\":{\"opaque_payload\":{\"step\":\"clarification_proposed\"}}," +
                 "\"actions\":[]," +
                 "\"user_input_request\":{\"request_type\":\"creation_clarification\"," +
                 "\"question\":\"" + question + "\"}}";
+    }
+
+    private String actionCommitBody(long projectId, JsonNode work, String commitId, String prompt,
+                                    String engineVersion, int adapterSchemaVersion) {
+        return "{" +
+                "\"commit_id\":\"" + commitId + "\"," +
+                "\"project_id\":" + projectId + "," +
+                "\"user_id\":10," +
+                "\"expected_run_version\":" + work.path("run_version").asInt() + "," +
+                "\"fencing_token\":" + work.path("fencing_token").asLong() + "," +
+                "\"engine\":\"fake\"," +
+                "\"engine_version\":\"" + engineVersion + "\"," +
+                "\"adapter_schema_version\":" + adapterSchemaVersion + "," +
+                "\"visible_text\":\"已按澄清回答准备好图片动作。\"," +
+                "\"checkpoint\":{\"opaque_payload\":{\"step\":\"image_proposed\"," +
+                "\"prompt\":\"" + prompt + "\"}}," +
+                "\"actions\":[{\"action_id\":\"action-resume-1\",\"action_type\":\"generate_image\"," +
+                "\"arguments\":{\"prompt\":\"" + prompt + "\",\"aspect_ratio\":\"1:1\"}}]}";
     }
 
     private String commitWithProposalAndAction(long projectId, JsonNode work, String commitId) {

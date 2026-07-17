@@ -6,6 +6,7 @@ import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.CommandIdempotencyMapper;
 import com.blue.whale.agent.mapper.ConversationMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
+import com.blue.whale.agent.mapper.UserInputRequestMapper;
 import com.blue.whale.agent.model.constant.AggregateType;
 import com.blue.whale.agent.model.constant.EventType;
 import com.blue.whale.agent.config.AgentOrchestratorProperties;
@@ -41,6 +42,7 @@ public class ConversationCommandService {
     private final CommandIdempotencyMapper idempotencyMapper;
     private final ProjectEventService projectEventService;
     private final UserInputRequestService userInputRequestService;
+    private final UserInputRequestMapper userInputRequestMapper;
 
     @Transactional(noRollbackFor = PersistedUserInputDecisionException.class)
     public AcceptConversationMessageResponse accept(Long projectId, Long userId, String idempotencyKey,
@@ -65,6 +67,11 @@ public class ConversationCommandService {
         Long confirmedInputRequestId = request.replyToInputRequestId() == null ? null
                 : userInputRequestService.confirm(
                         projectId, userId, request.replyToInputRequestId(), request.content());
+        // resumed run 继承来源 AgentRun 的引擎身份：运行中的 AgentRun 固定到创建时的
+        // engine、engine_version 与 adapter_schema_version（ADR-0019 §1），恢复后认领它的
+        // Worker 必须面对与来源流程一致的引擎身份与 checkpoint。
+        AgentRun sourceRun = confirmedInputRequestId == null ? null
+                : sourceRunOf(confirmedInputRequestId);
 
         Conversation conversation = conversationMapper.selectOne(
                 Wrappers.<Conversation>lambdaQuery().eq(Conversation::getProjectId, projectId));
@@ -83,9 +90,11 @@ public class ConversationCommandService {
                 .setUserId(userId)
                 .setStatus(AgentRun.STATUS_QUEUED)
                 .setStage("understanding")
-                .setEngine(orchestratorProperties.getEngine())
-                .setEngineVersion(orchestratorProperties.getEngineVersion())
-                .setAdapterSchemaVersion(orchestratorProperties.getAdapterSchemaVersion())
+                .setEngine(sourceRun != null ? sourceRun.getEngine() : orchestratorProperties.getEngine())
+                .setEngineVersion(sourceRun != null ? sourceRun.getEngineVersion()
+                        : orchestratorProperties.getEngineVersion())
+                .setAdapterSchemaVersion(sourceRun != null ? sourceRun.getAdapterSchemaVersion()
+                        : orchestratorProperties.getAdapterSchemaVersion())
                 .setConfirmedInputRequestId(confirmedInputRequestId)
                 .setFencingToken(0L);
         agentRunMapper.insert(run);
@@ -153,6 +162,18 @@ public class ConversationCommandService {
     private AcceptConversationMessageResponse response(CommandIdempotency record) {
         return new AcceptConversationMessageResponse(
                 record.getMessageId(), record.getAgentRunId(), record.getAcceptedCursor());
+    }
+
+    /**
+     * 解析已确认输入请求的来源 AgentRun（resumed run 继承引擎身份用）。
+     * 数据异常（请求缺失或无来源 run）时返回 null，调用方回退配置默认身份。
+     */
+    private AgentRun sourceRunOf(Long confirmedInputRequestId) {
+        UserInputRequest confirmed = userInputRequestMapper.selectById(confirmedInputRequestId);
+        if (confirmed == null || confirmed.getSourceAgentRunId() == null) {
+            return null;
+        }
+        return agentRunMapper.selectById(confirmed.getSourceAgentRunId());
     }
 
     private String requestHash(AcceptConversationMessageRequest request) {

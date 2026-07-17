@@ -11,6 +11,7 @@ export function acceptConversationMessage(
   content: string,
   clientMessageId: string,
   idempotencyKey: string,
+  replyToInputRequestId?: number,
 ): Promise<AcceptedConversationMessage> {
   return apiRequest<AcceptedConversationMessage>(
     `/api/projects/${projectId}/conversation/messages`,
@@ -20,6 +21,9 @@ export function acceptConversationMessage(
       body: JSON.stringify({
         client_message_id: clientMessageId,
         content,
+        ...(replyToInputRequestId == null
+          ? {}
+          : { reply_to_input_request_id: replyToInputRequestId }),
       }),
     },
   );
