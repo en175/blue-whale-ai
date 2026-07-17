@@ -22,6 +22,7 @@ import com.blue.whale.agent.service.generation.VideoResultIngestor;
 import com.blue.whale.agent.service.governance.ContentReviewProperties;
 import com.blue.whale.agent.service.governance.ContentReviewService;
 import com.blue.whale.agent.service.governance.LocalFakeReviewEvidenceSource;
+import com.blue.whale.agent.service.governance.NonProductionAcceptanceReviewEvidenceSource;
 import com.blue.whale.agent.service.governance.PendingRealProviderReviewEvidenceSource;
 import com.blue.whale.agent.service.governance.ReviewEvidenceSource;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -51,21 +52,32 @@ public class GenerationAdapterConfiguration {
     @Bean
     GenerationModeValidator generationModeValidator(
             GenerationAdapterProperties properties, Environment environment) {
-        validateMode(properties.getMode(), properties.isFakeAllowed(), environment);
+        validateMode(properties, environment);
         return new GenerationModeValidator();
     }
 
-    static void validateMode(String mode, boolean fakeAllowed, Environment environment) {
+    static void validateMode(GenerationAdapterProperties properties, Environment environment) {
+        String mode = properties.getMode();
         if (!"disabled".equals(mode) && !MODE.equals(mode) && !FAKE_MODE.equals(mode)) {
             throw new IllegalStateException("图片生成配置无效: mode");
         }
         if (FAKE_MODE.equals(mode)) {
-            if (!fakeAllowed) {
+            if (!properties.isFakeAllowed()) {
                 throw new IllegalStateException(
                         "Fake 图片生成适配器仅限非生产环境显式启用: fake-allowed");
             }
             if (environment != null && environment.acceptsProfiles(Profiles.of("prod"))) {
                 throw new IllegalStateException("Fake 图片生成适配器禁止在生产环境启用");
+            }
+        }
+        // 受控真实验收（IK1NS3）：仅限 openai-tos 的非生产显式组合，其余组合拒绝启动
+        if (properties.isAcceptanceAllowed()) {
+            if (!MODE.equals(mode)) {
+                throw new IllegalStateException(
+                        "受控真实验收仅限 openai-tos 模式: acceptance-allowed");
+            }
+            if (environment != null && environment.acceptsProfiles(Profiles.of("prod"))) {
+                throw new IllegalStateException("受控真实验收禁止在生产环境启用");
             }
         }
     }
@@ -111,11 +123,17 @@ public class GenerationAdapterConfiguration {
 
     // 生产真实审核供应商（ADR-0021 LLM Shield）未接入前，以 fail-closed 占位证据源
     // 保证真实供应商路径不绕过 ContentReview：unavailable → fail closed，不创建 Asset。
+    // 受控真实验收（IK1NS3，acceptance-allowed=true 的非生产显式组合）替换为非生产
+    // 确定性验收证据源；决定仍由 ContentReviewService 归一化并持久化。
     @Bean
     @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = MODE)
     ReviewEvidenceSource reviewEvidenceSource(
             ContentReviewProperties contentReviewProperties,
+            GenerationAdapterProperties generationAdapterProperties,
             GenerationAdapterReadiness readiness) {
+        if (generationAdapterProperties.isAcceptanceAllowed()) {
+            return new NonProductionAcceptanceReviewEvidenceSource(contentReviewProperties);
+        }
         return new PendingRealProviderReviewEvidenceSource(contentReviewProperties);
     }
 

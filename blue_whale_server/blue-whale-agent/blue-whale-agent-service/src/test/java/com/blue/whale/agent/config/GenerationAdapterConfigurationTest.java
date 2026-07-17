@@ -14,6 +14,9 @@ import com.blue.whale.agent.service.generation.GenerationWorker;
 import com.blue.whale.agent.service.generation.VideoResultIngestor;
 import com.blue.whale.agent.service.governance.ContentReviewProperties;
 import com.blue.whale.agent.service.governance.ContentReviewService;
+import com.blue.whale.agent.service.governance.NonProductionAcceptanceReviewEvidenceSource;
+import com.blue.whale.agent.service.governance.PendingRealProviderReviewEvidenceSource;
+import com.blue.whale.agent.service.governance.ReviewEvidenceSource;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.volcengine.tos.TOSV2;
 import org.junit.jupiter.api.Test;
@@ -86,6 +89,77 @@ class GenerationAdapterConfigurationTest {
                     assertThat(context).hasSingleBean(AsyncGenerationProvider.class);
                     assertThat(context).hasSingleBean(VideoResultIngestor.class);
                     assertThat(context).hasSingleBean(TOSV2.class);
+                    // 生产真实模式默认保持 fail-closed 占位证据源
+                    assertThat(context).getBean(ReviewEvidenceSource.class)
+                            .isInstanceOf(PendingRealProviderReviewEvidenceSource.class);
+                });
+    }
+
+    @Test
+    void acceptanceModeRegistersNonProductionEvidenceSourceAlongsideRealAdapters() {
+        contextRunner.withPropertyValues(validProperties())
+                .withPropertyValues("blue-whale.generation.acceptance-allowed=true")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(GenerationProvider.class);
+                    assertThat(context).hasSingleBean(GenerationStorage.class);
+                    assertThat(context).hasSingleBean(GenerationWorker.class);
+                    assertThat(context).hasSingleBean(TOSV2.class);
+                    assertThat(context).getBean(ReviewEvidenceSource.class)
+                            .isInstanceOf(NonProductionAcceptanceReviewEvidenceSource.class);
+                });
+    }
+
+    @Test
+    void acceptanceModeFailsClosedWhenCredentialsAreMissing() {
+        contextRunner
+                .withPropertyValues(
+                        "blue-whale.generation.mode=openai-tos",
+                        "blue-whale.generation.acceptance-allowed=true")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasRootCauseMessage("缺少图片生成配置: openai.api-key");
+                });
+    }
+
+    @Test
+    void acceptanceFlagRejectedWithNonOpenAiTosMode() {
+        contextRunner
+                .withPropertyValues(
+                        "blue-whale.generation.mode=fake",
+                        "blue-whale.generation.fake-allowed=true",
+                        "blue-whale.generation.acceptance-allowed=true")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasRootCauseMessage("受控真实验收仅限 openai-tos 模式: acceptance-allowed");
+                });
+    }
+
+    @Test
+    void acceptanceModeFailsClosedWhenConfigIsInvalid() {
+        contextRunner.withPropertyValues(validProperties())
+                .withPropertyValues(
+                        "blue-whale.generation.acceptance-allowed=true",
+                        "blue-whale.generation.openai.base-url=https://api.openai.example/v1")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasRootCauseMessage("图片生成配置无效: openai.base-url 必须为服务根地址");
+                });
+    }
+
+    @Test
+    void acceptanceModeRejectedUnderProductionProfile() {
+        contextRunner.withPropertyValues(validProperties())
+                .withPropertyValues(
+                        "blue-whale.generation.acceptance-allowed=true",
+                        "spring.profiles.active=prod")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasRootCauseMessage("受控真实验收禁止在生产环境启用");
                 });
     }
 

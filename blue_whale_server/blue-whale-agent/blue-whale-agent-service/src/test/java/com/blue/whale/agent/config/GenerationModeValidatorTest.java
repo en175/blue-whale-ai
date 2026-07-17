@@ -8,7 +8,8 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Fake 图片生成适配器的启用守卫：仅限非生产环境显式开启，生产环境不能意外启用。
+ * 图片生成适配器的启用守卫：Fake 与受控真实验收都仅限非生产环境显式开启，
+ * 生产环境不能意外启用；未知或互相矛盾的组合拒绝启动。
  */
 class GenerationModeValidatorTest {
 
@@ -16,22 +17,22 @@ class GenerationModeValidatorTest {
 
     @Test
     void disabledAndOpenAiTosModesAreAccepted() {
-        assertThatCode(() -> validate("disabled", false, new MockEnvironment()))
+        assertThatCode(() -> validate("disabled", false, false, new MockEnvironment()))
                 .doesNotThrowAnyException();
-        assertThatCode(() -> validate("openai-tos", false, new MockEnvironment()))
+        assertThatCode(() -> validate("openai-tos", false, false, new MockEnvironment()))
                 .doesNotThrowAnyException();
     }
 
     @Test
     void unknownModeIsRejected() {
-        assertThatThrownBy(() -> validate("fakee", true, new MockEnvironment()))
+        assertThatThrownBy(() -> validate("fakee", true, false, new MockEnvironment()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("mode");
     }
 
     @Test
     void fakeModeRequiresExplicitNonProductionAcknowledgement() {
-        assertThatThrownBy(() -> validate("fake", false, new MockEnvironment()))
+        assertThatThrownBy(() -> validate("fake", false, false, new MockEnvironment()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("fake-allowed");
     }
@@ -40,25 +41,56 @@ class GenerationModeValidatorTest {
     void fakeModeIsRejectedUnderProductionProfile() {
         MockEnvironment production = new MockEnvironment();
         production.setActiveProfiles("prod");
-        assertThatThrownBy(() -> validate("fake", true, production))
+        assertThatThrownBy(() -> validate("fake", true, false, production))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("生产");
     }
 
     @Test
     void fakeModeStartsWhenExplicitlyAcknowledgedOutsideProduction() {
-        assertThatCode(() -> validate("fake", true, new MockEnvironment()))
+        assertThatCode(() -> validate("fake", true, false, new MockEnvironment()))
                 .doesNotThrowAnyException();
         MockEnvironment test = new MockEnvironment();
         test.setActiveProfiles("test");
-        assertThatCode(() -> validate("fake", true, test))
+        assertThatCode(() -> validate("fake", true, false, test))
                 .doesNotThrowAnyException();
     }
 
-    private void validate(String mode, boolean fakeAllowed, MockEnvironment environment) {
+    @Test
+    void acceptanceRequiresOpenAiTosMode() {
+        assertThatThrownBy(() -> validate("disabled", false, true, new MockEnvironment()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("acceptance-allowed");
+        assertThatThrownBy(() -> validate("fake", true, true, new MockEnvironment()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("acceptance-allowed");
+    }
+
+    @Test
+    void acceptanceIsRejectedUnderProductionProfile() {
+        MockEnvironment production = new MockEnvironment();
+        production.setActiveProfiles("prod");
+        assertThatThrownBy(() -> validate("openai-tos", false, true, production))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("生产");
+    }
+
+    @Test
+    void acceptanceStartsWithOpenAiTosOutsideProduction() {
+        assertThatCode(() -> validate("openai-tos", false, true, new MockEnvironment()))
+                .doesNotThrowAnyException();
+        MockEnvironment test = new MockEnvironment();
+        test.setActiveProfiles("test");
+        assertThatCode(() -> validate("openai-tos", false, true, test))
+                .doesNotThrowAnyException();
+    }
+
+    private void validate(
+            String mode, boolean fakeAllowed, boolean acceptanceAllowed, MockEnvironment environment) {
         GenerationAdapterProperties properties = new GenerationAdapterProperties();
         properties.setMode(mode);
         properties.setFakeAllowed(fakeAllowed);
+        properties.setAcceptanceAllowed(acceptanceAllowed);
         configuration.generationModeValidator(properties, environment);
     }
 }
