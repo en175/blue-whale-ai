@@ -23,6 +23,50 @@ export type ProjectSnapshot = {
   high_watermark_cursor: number;
 };
 
+export type ActiveInputRequest = {
+  input_request_id: number;
+  request_type: string;
+  question: string | null;
+  status: string;
+  expires_at: string;
+};
+
+/**
+ * 派生当前唯一可回答的创作澄清请求（AgentChatPanel Composer 下一次提交的回答绑定）。
+ *
+ * 只绑定 pending 状态的 creation_clarification：confirmed（已回答）、consumed（已消费）、
+ * 过期或成本确认请求都不参与绑定。Snapshot 已按服务端认证限定当前 User/Project，
+ * 同一创作流程任一时刻至多一个 pending 请求；防御性取最新创建者。
+ */
+export function deriveAnswerableClarification(
+  snapshot: ProjectSnapshot | null,
+  now: Date = new Date(),
+): ActiveInputRequest | null {
+  if (!snapshot) return null;
+  let answerable: ActiveInputRequest | null = null;
+  for (const run of snapshot.agent_runs) {
+    const request = run.active_input_request;
+    if (!request || typeof request !== "object") continue;
+    const candidate = request as Record<string, unknown>;
+    if (
+      candidate.request_type !== "creation_clarification" ||
+      candidate.status !== "pending" ||
+      typeof candidate.input_request_id !== "number" ||
+      typeof candidate.expires_at !== "string" ||
+      !(new Date(candidate.expires_at).getTime() > now.getTime())
+    ) {
+      continue;
+    }
+    if (
+      answerable === null ||
+      candidate.input_request_id > answerable.input_request_id
+    ) {
+      answerable = candidate as unknown as ActiveInputRequest;
+    }
+  }
+  return answerable;
+}
+
 export type ProductEventEnvelope = {
   schema_version: number;
   event_id: string;
@@ -200,6 +244,22 @@ export function applyProductEvent(
           "agent_run_id",
         ),
       };
+    } else if (event.event_type === "agent_run.user_input_requested") {
+      snapshot = {
+        ...snapshot,
+        agent_runs: applyUserInputRequestedEvent(
+          snapshot.agent_runs,
+          event.payload,
+        ),
+      };
+    } else if (event.event_type === "agent_run.user_input_answered") {
+      snapshot = {
+        ...snapshot,
+        agent_runs: applyUserInputAnsweredEvent(
+          snapshot.agent_runs,
+          event.payload,
+        ),
+      };
     }
   }
 
@@ -296,6 +356,57 @@ function applyGenerationJobOutputEvent(
   return jobs.map((job, currentIndex) =>
     currentIndex === index ? nextJob : job,
   );
+}
+
+function applyUserInputRequestedEvent(
+  runs: Array<Record<string, unknown>>,
+  payload: Record<string, unknown>,
+): Array<Record<string, unknown>> {
+  const runId = payload.agent_run_id;
+  if (
+    (typeof runId !== "number" && typeof runId !== "string") ||
+    typeof payload.input_request_id !== "number"
+  ) {
+    return runs;
+  }
+  const activeInputRequest: Record<string, unknown> = {
+    input_request_id: payload.input_request_id,
+    request_type: payload.request_type,
+    question: typeof payload.question === "string" ? payload.question : null,
+    status: payload.status,
+    expires_at: payload.expires_at,
+  };
+  const index = runs.findIndex(
+    (run) => String(run.agent_run_id) === String(runId),
+  );
+  if (index < 0) {
+    return [
+      ...runs,
+      { agent_run_id: runId, active_input_request: activeInputRequest },
+    ];
+  }
+  return runs.map((run, current) =>
+    current === index
+      ? { ...run, active_input_request: activeInputRequest }
+      : run,
+  );
+}
+
+function applyUserInputAnsweredEvent(
+  runs: Array<Record<string, unknown>>,
+  payload: Record<string, unknown>,
+): Array<Record<string, unknown>> {
+  const requestId = payload.input_request_id;
+  if (typeof requestId !== "number") return runs;
+  const status =
+    typeof payload.status === "string" ? payload.status : "confirmed";
+  return runs.map((run) => {
+    const active = run.active_input_request;
+    if (!active || typeof active !== "object") return run;
+    const current = active as Record<string, unknown>;
+    if (current.input_request_id !== requestId) return run;
+    return { ...run, active_input_request: { ...current, status } };
+  });
 }
 
 function upsertFact(

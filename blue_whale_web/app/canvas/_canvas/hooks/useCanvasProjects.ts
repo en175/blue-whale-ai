@@ -33,9 +33,11 @@ import * as canvasApi from "@/lib/canvas";
 import { acceptConversationMessage } from "@/lib/conversation";
 import { newCommandIdentity } from "@/lib/command-identity";
 import {
+  deriveAnswerableClarification,
   projectRecoveryTransport,
   runProjectRecovery,
   type ProjectRecoveryState,
+  type ProjectSnapshot,
 } from "@/lib/project-recovery";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -80,6 +82,8 @@ export function useCanvasProjects() {
 
   // 已建立恢复循环的 projectId 集合（避免重复连接）
   const loadedRef = useRef<Set<string>>(new Set());
+  // 每个 project 最新 Snapshot：Composer 提交时派生活动创作澄清请求用（参照 generationJobsByProject 模式）
+  const snapshotsRef = useRef<Record<string, ProjectSnapshot>>({});
   // 正在恢复 Snapshot 的 projectId：加载期间禁止保存 effect 回存空 canvas 覆盖后端
   const loadingProjectRef = useRef<string | null>(null);
   // 上次落库的 canvas 快照（JSON）：恢复后同步，使保存 effect 判定「无变化」跳过回存
@@ -141,6 +145,7 @@ export function useCanvasProjects() {
         return;
       }
       const snapshot = recovery.snapshot;
+      snapshotsRef.current = { ...snapshotsRef.current, [pid]: snapshot };
       setGenerationJobsByProject((current) => ({
         ...current,
         [pid]: snapshot.generation_jobs,
@@ -297,6 +302,9 @@ export function useCanvasProjects() {
         delete next[id];
         return next;
       });
+      snapshotsRef.current = Object.fromEntries(
+        Object.entries(snapshotsRef.current).filter(([pid]) => pid !== id),
+      );
     },
     [backendReady],
   );
@@ -304,11 +312,17 @@ export function useCanvasProjects() {
   const submitConversationMessageAction = useCallback(
     async (content: string) => {
       if (!backendReady) return;
+      // 当前创作流程等待澄清时，下一条非空自然语言消息自动引用该请求；
+      // 无活动请求时保持普通消息行为（不传绑定，由后端按普通消息处理）。
+      const answerable = deriveAnswerableClarification(
+        snapshotsRef.current[activeProject.id] ?? null,
+      );
       await acceptConversationMessage(
         Number(activeProject.id),
         content,
         newCommandIdentity(),
         newCommandIdentity(),
+        answerable?.input_request_id,
       );
     },
     [activeProject.id, backendReady],

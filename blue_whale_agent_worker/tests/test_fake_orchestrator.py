@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from blue_whale_agent_worker.contracts import RunWork
+from blue_whale_agent_worker.contracts import RunWork, RuntimeCheckpoint
 from blue_whale_agent_worker.fake_orchestrator import FakeOrchestrator
 from blue_whale_agent_worker.worker import AgentWorker
 
@@ -97,6 +97,71 @@ class FakeOrchestratorTest(unittest.TestCase):
 
         self.assertEqual((), result.actions)
         self.assertIsNotNone(result.input_request)
+
+    def test_incomplete_intent_proposes_clarification_without_manual_prefix(self) -> None:
+        # 意图缺少推进生图所必需的信息（剥掉「生成一张」后无实质内容）：
+        # 确定性地只提出一个创作澄清请求，不提出动作。
+        incomplete_work = RunWork(
+            **{
+                **self.work.__dict__,
+                "messages": ({"role": "user", "content": "生成一张"},),
+            }
+        )
+        result = FakeOrchestrator().advance(incomplete_work)
+        payload = result.to_commit_payload(incomplete_work)
+
+        self.assertEqual((), result.actions)
+        self.assertIsNotNone(result.input_request)
+        self.assertEqual(
+            "creation_clarification", payload["user_input_request"]["request_type"]
+        )
+        self.assertEqual([], payload["actions"])
+        self.assertEqual(
+            "clarification_proposed", result.checkpoint.opaque_payload["step"]
+        )
+
+    def test_resume_after_clarification_merges_original_intent_and_answer(self) -> None:
+        # 恢复工作包：checkpoint 存有首轮原始创作意图，最新消息是用户的自然语言回答。
+        # 恢复后恰好一个 generate_image 动作，参数同时保留两者形成的约束。
+        checkpoint = RuntimeCheckpoint(
+            engine="fake",
+            engine_version="1",
+            adapter_schema_version=1,
+            opaque_payload={"step": "clarification_proposed", "topic": "蓝鲸海报"},
+        )
+        resumed_work = RunWork(
+            **{
+                **self.work.__dict__,
+                "run_version": 2,
+                "messages": (
+                    {"role": "user", "content": "生成一张蓝鲸海报"},
+                    {"role": "assistant", "content": "请补充你希望生成的「蓝鲸海报」的具体风格或细节。"},
+                    {"role": "user", "content": "水墨风格带留白"},
+                ),
+                "checkpoint": checkpoint,
+            }
+        )
+        result = FakeOrchestrator().advance(resumed_work)
+
+        self.assertIsNone(result.input_request)
+        self.assertEqual(1, len(result.actions))
+        action = result.actions[0]
+        self.assertEqual("generate_image", action.action_type)
+        prompt = action.arguments["prompt"]
+        self.assertIn("蓝鲸海报", prompt)
+        self.assertIn("水墨风格带留白", prompt)
+
+    def test_resume_rejects_checkpoint_with_mismatched_engine_identity(self) -> None:
+        checkpoint = RuntimeCheckpoint(
+            engine="fake",
+            engine_version="0.9",
+            adapter_schema_version=7,
+            opaque_payload={"step": "clarification_proposed", "topic": "蓝鲸海报"},
+        )
+        resumed_work = RunWork(**{**self.work.__dict__, "checkpoint": checkpoint})
+
+        with self.assertRaisesRegex(ValueError, "不匹配"):
+            FakeOrchestrator().advance(resumed_work)
 
 
 if __name__ == "__main__":

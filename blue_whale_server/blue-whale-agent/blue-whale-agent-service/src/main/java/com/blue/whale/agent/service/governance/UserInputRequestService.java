@@ -370,10 +370,12 @@ public class UserInputRequestService {
             UserInputRequest request,
             String reasonCode) {
         String correlationId = "user-input-request:" + requestId;
-        PriceQuote quote = request == null ? null : new PriceQuote(
-                request.getQuotedAmountFen(), request.getQuotedProvider(),
-                request.getPriceCatalogVersion(), request.getExchangeRateVersion(),
-                request.getModelPolicyVersion());
+        // 创作澄清无报价字段：仅成本确认拒绝携带报价审计切片，避免对 null 报价拆箱。
+        PriceQuote quote = request == null || request.getQuotedAmountFen() == null ? null
+                : new PriceQuote(
+                        request.getQuotedAmountFen(), request.getQuotedProvider(),
+                        request.getPriceCatalogVersion(), request.getExchangeRateVersion(),
+                        request.getModelPolicyVersion());
         String ruleVersion = request == null || request.getCostRuleVersion() == null
                 ? properties.getRuleVersion() : request.getCostRuleVersion();
         auditRecordWriter.appendDeniedActionDecision(
