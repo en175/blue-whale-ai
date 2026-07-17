@@ -319,9 +319,294 @@ Blue-Whale 已经有 Director + Brief / Skill / Image Understanding / Prompt / S
 | ACP / Editor integration | 暂无直接价值，除非未来做开放 Agent 协议 | P3 |
 | TUI | 不建议借鉴为主产品形态 | 不采用 |
 
-## 4. 不适合照搬的部分
+## 4. Blue-Whale 最值得深入学习的 Grok Build 工程机制
 
-### 4.1 不照搬 TUI
+本章从“源码学习清单”角度补充：哪些 Grok Build 机制值得 Blue-Whale 后端深入拆解，应该学什么，如何转译到视频 / 图片创作后端，以及哪些部分不能照搬。
+
+### 4.1 工具系统：从“模型直接做事”改成“模型调受控工具”
+
+Grok Build 的工具系统有一个核心思想：Agent 不直接修改真实世界，而是通过工具层执行动作。文件读取、搜索、编辑、命令执行、Web 检索、任务管理、子代理、MCP 工具都被封装成明确工具，工具描述、权限、错误恢复和上下文注入都有统一管线。
+
+Blue-Whale 应重点学习的不是具体工具名，而是这套分层：
+
+```text
+Agent 意图
+  -> 工具调用请求
+  -> 权限 / 状态 / 成本校验
+  -> 业务服务执行
+  -> 结构化结果
+  -> Agent 收口给用户
+```
+
+对应到 Blue-Whale，P0 工具层至少应包含：
+
+| Blue-Whale 工具 | 职责 | 不能让 LLM 自由发挥的点 |
+|---|---|---|
+| `understand_asset` | 调视觉模型，生成 asset_understanding | 不能假装看懂图片 |
+| `select_skill` | 从 Skill 库选择创作套路 | 不能绕过用户手动 Use 或 auto 设置 |
+| `optimize_prompt` | 生成 provider 可用 prompt 和用户友好 preview | 原始 optimized_prompt 不能直接展示 |
+| `authorize_generation` | 判断是否允许创建 GenerationJob | 高成本、无素材理解、无 prompt 时必须阻断 |
+| `create_generation_job` | 创建异步生成任务 | 不能由 Agent 直接写 job 状态 |
+| `update_canvas_node` | 创建 / 更新 image 或 video 节点 | Canvas 只承载素材，不承载过程消息 |
+| `advance_stage` | 推进 workflow stage | 必须独立校验 ready node |
+| `append_agent_event` | 写入事件日志 | 用于恢复、审计和回放 |
+
+建议后端实现一个内部 `AgentHarnessPort`，让 Director 只能通过端口调用能力。这样做的直接收益是：
+
+- 每个工具可以单测。
+- 真实 Provider 可以替换为 Fake Provider。
+- Spike 可以不依赖真实生图 / 生视频成本。
+- 工具错误可以结构化返回，减少 Agent 重试时乱猜。
+- 后端可以在工具层统一做日志、权限、成本和审计。
+
+不应照搬 Grok Build 的部分：
+
+- 不照搬文件编辑、shell 命令、Git 操作作为核心工具。
+- 不把 Blue-Whale 的 Canvas / Asset 当成文件系统。
+- 不让 Tool call 状态直接等于产品状态。
+- 不让 LLM 直接决定数据库最终写入。
+
+### 4.2 上下文压缩：把“长对话”变成可恢复的产品状态
+
+Grok Build 的上下文压缩不是简单摘要，而是把长会话拆成几类信息：确定性重注入的规则 / 环境 / 当前任务状态，以及由模型总结的历史叙述。它特别重视最后一条用户请求、项目规则、当前工作状态、后台任务和 TODO 的保留。
+
+Blue-Whale 的长对话也会遇到同类问题：
+
+- 用户在一个 Project 里连续做多个产品方向。
+- 同一产品经历 Brief、Skill、分镜、首批视觉、视频、修改和重试。
+- 用户会说“刚才那个”“上一版”“用前面的产品”“继续做这个方向”。
+- 前端断线或刷新后，需要恢复 AgentRun 和 active_jobs。
+- 上下文太长时，不能把所有历史消息都塞给模型。
+
+Blue-Whale 应把上下文拆成三层，而不是只做聊天摘要：
+
+| 层 | 内容 | 谁是权威 |
+|---|---|---|
+| 产品事实 | Project、Canvas、Asset、GenerationJob、Stage、confirmed node | 数据库 |
+| 编排状态 | AgentRun、current_stage、awaiting_confirm、pending intent、active_jobs | 后端状态机 |
+| 历史叙述 | 用户偏好、产品历史摘要、已放弃方向、对话脉络 | 可由 LLM 总结 |
+
+建议新增或明确以下对象：
+
+```text
+conversation_summary
+product_history_summary
+agent_run_snapshot
+stage_snapshot
+active_jobs_snapshot
+last_user_intent_during_generation
+```
+
+压缩时必须确定性保留：
+
+- 当前 Project ID。
+- 当前 active_product_context。
+- 当前 stage 和确认门状态。
+- 当前 Canvas ready / generating / failed 节点。
+- active_jobs。
+- 用户最近一次明确修改意图。
+- 已确认的 Skill / Brief / Storyboard。
+
+可以交给 LLM 总结：
+
+- 用户偏好的风格。
+- 多轮沟通中的非关键描述。
+- 已完成方向的自然语言摘要。
+- 放弃过的产品方向及原因。
+
+不应照搬 Grok Build 的部分：
+
+- 不用文件快照替代 Canvas snapshot。
+- 不把压缩摘要当产品事实。
+- 不允许摘要覆盖数据库里的 confirmed node、Asset、GenerationJob。
+- 不依赖模型总结来判断是否可以确认或推进阶段。
+
+### 4.3 权限与安全：把确认门升级成生成授权系统
+
+Grok Build 的权限系统值得学习的地方是“多层阻断”，而不是某个具体权限模式。它不是只问用户 yes / no，而是把 Hook、规则、记住的授权、内建只读判断和 prompt policy 组合成一条授权链。
+
+Blue-Whale 也需要一条生成授权链：
+
+```text
+before_generation
+  -> 资源归属检查
+  -> 素材理解检查
+  -> prompt 完整性检查
+  -> stage / confirmation 检查
+  -> 成本与并发检查
+  -> provider 能力检查
+  -> allow / ask_user / deny
+```
+
+建议把现有确认门扩展为两个层次：
+
+| 层 | 职责 | 示例 |
+|---|---|---|
+| Confirmation Gate | 用户是否确认当前阶段结果 | ready node 才能确认，弱继续不直接推进高成本阶段 |
+| GenerationAuthorizationGate | 是否允许创建 GenerationJob | 无 optimized_prompt、无 asset_understanding、成本超限时拒绝 |
+
+最低限度规则：
+
+- 没有 `ready` 或 `awaiting_confirm` 节点：不能确认。
+- 节点 `generating`：不能确认。
+- 用户弱继续：低成本阶段可推进，高成本视频必须二次确认。
+- Agent 链路创建 GenerationJob 前必须有 `optimized_prompt`。
+- 图生图 / 图生视频前必须有 `asset_understanding`。
+- 当前用户无 Asset 权限：拒绝。
+- generating 中用户要求新任务：不并行，记录 pending intent。
+- provider 参数不合法：拒绝或请用户修改。
+- 生成失败：必须写 failed node 和 error message。
+
+对 Blue-Whale 来说，权限与安全还包括成本安全：
+
+- 单 Job 最大成本。
+- 单 Project 并发 Job 上限。
+- 单用户每日生成上限。
+- 高成本模型二次确认。
+- 重试只重试失败输出，不重复消耗成功输出。
+
+不应照搬 Grok Build 的部分：
+
+- 不把 shell 命令 allow / deny 语义直接迁移到视频生成。
+- 不把“always approve”做成默认创作模式。
+- 不让用户一次授权变成后续所有高成本生成的空白支票。
+- 不让 Hook 崩溃时默认放行高成本 Provider 调用。
+
+### 4.4 Sessions / Background Tasks：让 AgentRun、GenerationJob、Project 可恢复
+
+Grok Build 的 Session 和 Background Tasks 对 Blue-Whale 很有参考价值。它把会话更新保存为可恢复日志，并把长任务从前台对话里解耦出来。Blue-Whale 的生成任务天然更需要这套思想，因为图片 / 视频生成比代码命令更慢、更贵、更容易失败。
+
+Blue-Whale 应把这两个机制转译为：
+
+| Grok Build | Blue-Whale |
+|---|---|
+| Session | AgentRun / Conversation |
+| updates.jsonl | agent_events / turn_events |
+| Rewind point | Canvas / Stage snapshot |
+| Background command | GenerationJob |
+| Task output | Asset + Canvas Node |
+| Resume session | Project 恢复 + AgentRun 恢复 |
+| Compact session | conversation_summary + product_history_summary |
+
+P0 必须做到：
+
+- `POST /agent/turn` 返回前后，关键事件都写入 agent_events。
+- GenerationJob 创建后不依赖 SSE 连接存活。
+- 前端刷新后，`GET /projects/{id}` 能恢复 Canvas、messages、active_jobs。
+- Job 完成后必须能把 Asset 吸收到 Canvas。
+- Job 失败后必须能展示 failed node 和 error message。
+- 用户在生成中表达的新意图要记录，生成完成后能接上。
+
+建议事件流最少包含：
+
+```text
+turn_started
+decision_context_built
+branch_selected
+tool_call_started
+tool_call_done
+generation_authorized
+generation_job_created
+generation_job_progress
+generation_job_done
+canvas_node_updated
+confirmation_waiting
+stage_advanced
+turn_done
+turn_failed
+```
+
+SSE 只是一种传输方式，不应该是事实来源。正确关系是：
+
+```text
+数据库状态 / agent_events 是事实
+SSE 是把事实变化推给前端
+前端断线后通过 Project 恢复事实
+```
+
+不应照搬 Grok Build 的部分：
+
+- 不用本地 session 目录作为产品存储。
+- 不让对话日志替代结构化表。
+- 不承诺 Provider Job 一定可取消。
+- 不把“后台任务完成”直接等同于用户确认。
+
+### 4.5 Skills / Hooks / Plugins：先内部标准化，再开放扩展
+
+Grok Build 的 Skills、Hooks、Plugins 说明了一个成熟 Agent 系统如何扩展能力：Skill 提供可复用流程，Hook 插入生命周期，Plugin 打包能力并带有信任边界。
+
+Blue-Whale 可以借鉴这个方向，但要分阶段做。
+
+P0 应先做好内部 Skill 标准：
+
+```text
+skill_id
+name
+description
+applicable_scenes
+required_inputs
+output_contract
+prompt_rules
+example_inputs
+example_outputs
+risk_notes
+```
+
+每个 Skill 的职责应该是：
+
+- 定义创意结构。
+- 定义适用场景。
+- 提供分镜 / 画面 / 卖点表达套路。
+- 影响 Prompt Optimizer 的创意输入。
+
+Skill 不应该：
+
+- 直接调用 Provider。
+- 直接创建 GenerationJob。
+- 直接改 Canvas。
+- 跳过 Brief、图像理解或确认门。
+- 替用户确认结果。
+
+Hooks 可以作为 P1 能力加入，优先放在这些节点：
+
+| Hook | 用途 |
+|---|---|
+| `before_skill_select` | 限制行业 Skill、按用户权限过滤 |
+| `after_skill_select` | 记录推荐理由，供调试 |
+| `before_prompt_optimize` | 注入平台规则、品牌限制 |
+| `after_prompt_optimize` | 检查敏感词、版权、格式 |
+| `before_generation_job_create` | 成本、素材、权限、模型能力检查 |
+| `after_generation_job_done` | 质量评估、自动 review、失败归因 |
+| `before_stage_advance` | 确认门铁闸 |
+
+Plugins 建议放到 P2，不要过早做开放生态。可以先内部模拟插件包：
+
+- 电商商品图包。
+- UGC 广告包。
+- 短剧分镜包。
+- 品牌片包。
+- 平台投放规格包。
+- Provider 适配包。
+
+插件化前必须先解决：
+
+- Skill 输出 schema。
+- 插件信任边界。
+- Hook 是否可阻断。
+- 插件能访问哪些 Asset。
+- 插件是否能触发成本动作。
+- 插件版本升级如何影响历史 AgentRun。
+
+不应照搬 Grok Build 的部分：
+
+- 不让未信任插件执行外部调用。
+- 不让第三方 Skill 绕过产品状态机。
+- 不把插件定义的数据结构直接进产品数据库。
+- 不把 Hook 失败默认放行用于高成本生成链路。
+
+## 5. 不适合照搬的部分
+
+### 5.1 不照搬 TUI
 
 Grok Build 是终端工作台。Blue-Whale 是 Web Canvas 创作产品。
 
@@ -335,7 +620,7 @@ Blue-Whale 的第一界面应该是：
 
 不是终端 scrollback、命令输出和文件 diff。
 
-### 4.2 不照搬代码工作区模型
+### 5.2 不照搬代码工作区模型
 
 Grok Build 的 workspace 围绕文件、Git、命令执行和代码编辑。
 
@@ -351,7 +636,7 @@ Blue-Whale 的 workspace 围绕：
 
 如果把 Blue-Whale 硬套到"文件 + 命令 + session"的模型，会导致产品对象失真。
 
-### 4.3 不让 Grok Build session 替代 AgentRun
+### 5.3 不让 Grok Build session 替代 AgentRun
 
 Grok Build session 是 coding agent 会话。Blue-Whale AgentRun 是创作意图和生成流程。
 
@@ -368,7 +653,7 @@ Blue-Whale 的 AgentRun 需要表达：
 
 Grok Build session 不具备这些产品语义。
 
-### 4.4 不让工具权限替代生成授权
+### 5.4 不让工具权限替代生成授权
 
 代码 Agent 的权限重点是：能不能读文件、改文件、跑命令。
 
@@ -383,7 +668,7 @@ Blue-Whale 的权限重点是：
 
 所以只能借鉴"授权链"思想，不能复用其权限语义。
 
-### 4.5 不让 Skill 自动触发绕过状态机
+### 5.5 不让 Skill 自动触发绕过状态机
 
 Grok Build Skill 可根据描述自动触发。Blue-Whale 也可以 auto 推荐 Skill，但不能让 Skill 自动越权推进阶段。
 
@@ -396,9 +681,9 @@ Grok Build Skill 可根据描述自动触发。Blue-Whale 也可以 auto 推荐 
 - Skill 不能直接创建 GenerationJob。
 - Skill 不能替用户确认结果。
 
-## 5. 对 Blue-Whale 现有 Agent 编排的映射
+## 6. 对 Blue-Whale 现有 Agent 编排的映射
 
-### 5.1 Plan Mode → Stage Plan + 确认门
+### 6.1 Plan Mode → Stage Plan + 确认门
 
 Blue-Whale 已有 Full Canvas 多阶段：
 
@@ -416,7 +701,7 @@ Brief -> Skill -> Stage Plan -> Storyboard -> First Visuals -> Video -> Review
 
 其中视频生成前必须是高成本确认门。
 
-### 5.2 Permission Chain → GenerationAuthorizationGate
+### 6.2 Permission Chain → GenerationAuthorizationGate
 
 建议 Blue-Whale 后端显式引入 `GenerationAuthorizationGate` 或同等模块。
 
@@ -436,7 +721,7 @@ Brief -> Skill -> Stage Plan -> Storyboard -> First Visuals -> Video -> Review
 - 当前用户无 asset 权限：deny。
 - provider 不支持参数组合：deny 或 ask_user。
 
-### 5.3 Tool Layer → AgentHarnessPort
+### 6.3 Tool Layer → AgentHarnessPort
 
 建议后端定义内部端口，而不是让 Director 直接调业务函数：
 
@@ -461,7 +746,7 @@ AgentHarnessPort
 - 每个工具可单测。
 - Agent 输出不直接污染数据库。
 
-### 5.4 Session Persistence → Agent Event Log
+### 6.4 Session Persistence → Agent Event Log
 
 借鉴 Grok Build 的 append-only JSONL 思想，但落到 Blue-Whale 数据库：
 
@@ -494,7 +779,7 @@ agent_events:
 
 产品状态仍以结构化表为准，事件日志用于恢复、审计和排查。
 
-### 5.5 Background Tasks → GenerationJob
+### 6.5 Background Tasks → GenerationJob
 
 Blue-Whale 的 `GenerationJob` 应借鉴 Grok Build background task 的"立即返回 ID + 后续查询 / 事件更新"模式。
 
@@ -521,7 +806,7 @@ absorbed
 - 失败必须写 failed node 和 error message。
 - 前端断线不影响 Job。
 
-### 5.6 Sandbox → 产品能力隔离
+### 6.6 Sandbox → 产品能力隔离
 
 Blue-Whale 不一定需要 OS sandbox，但需要产品级能力沙箱：
 
@@ -534,7 +819,7 @@ Blue-Whale 不一定需要 OS sandbox，但需要产品级能力沙箱：
 | Plugin | 未信任插件不能运行 Hook 或外部调用 |
 | MCP | 默认不接；接入时必须按 server / tool 白名单授权 |
 
-## 6. 三种方案对比
+## 7. 三种方案对比
 
 | 方案 | 描述 | 优点 | 风险 | 结论 |
 |---|---|---|---|---|
@@ -544,9 +829,9 @@ Blue-Whale 不一定需要 OS sandbox，但需要产品级能力沙箱：
 
 推荐选择：**B. 借鉴架构，Blue-Whale 自建 Agent Runtime。**
 
-## 7. 建议的 Blue-Whale 后端架构
+## 8. 建议的 Blue-Whale 后端架构
 
-### 7.1 P0 架构分层
+### 8.1 P0 架构分层
 
 ```text
 API Layer
@@ -587,7 +872,7 @@ Providers
   LLM model
 ```
 
-### 7.2 P0 最小闭环
+### 8.2 P0 最小闭环
 
 先不要做完整 Full Canvas。
 
@@ -606,7 +891,7 @@ Providers
   -> confirmation gate
 ```
 
-### 7.3 P1 扩展
+### 8.3 P1 扩展
 
 P0 稳定后再加：
 
@@ -620,7 +905,7 @@ P0 稳定后再加：
 - 内容安全 Hook。
 - 创作版本恢复。
 
-## 8. 受限 Spike 验收门槛
+## 9. 受限 Spike 验收门槛
 
 Spike 只做一条 tracer bullet：
 
@@ -659,15 +944,15 @@ Agent 对话输入
 
 任一核心门槛失败，说明当前设计仍停留在 demo 级，不应进入生产后端。
 
-## 9. 风险与边界
+## 10. 风险与边界
 
-### 9.1 最大风险：只学界面，不学控制面
+### 10.1 最大风险：只学界面，不学控制面
 
 Grok Build 最有价值的是控制面：权限、工具、Hook、沙箱、会话、后台任务。
 
 如果 Blue-Whale 只学"有个 Agent 对话框"，但不实现后端铁闸和状态恢复，会得到一个看起来聪明但不可控的生成聊天框。
 
-### 9.2 第二风险：文档规则没有变成可执行规则
+### 10.2 第二风险：文档规则没有变成可执行规则
 
 `blue-whale-agent-workspace` 里的 Markdown 规则必须转为：
 
@@ -680,7 +965,7 @@ Grok Build 最有价值的是控制面：权限、工具、Hook、沙箱、会�
 
 否则规则只存在于提示词里，无法保证稳定。
 
-### 9.3 第三风险：过早插件化
+### 10.3 第三风险：过早插件化
 
 Grok Build 的 Plugins 很完整，但 Blue-Whale 不应过早做开放插件市场。
 
@@ -693,7 +978,7 @@ Grok Build 的 Plugins 很完整，但 Blue-Whale 不应过早做开放插件市
 - Provider 调用授权。
 - 审计与回滚。
 
-### 9.4 第四风险：把取消当成产品语义
+### 10.4 第四风险：把取消当成产品语义
 
 代码 Agent 可以 kill background command。视频生成 Provider 未必能可靠取消。
 
@@ -706,7 +991,7 @@ Blue-Whale 需要区分：
 
 不要承诺"用户说取消就一定取消 Provider Job"。
 
-## 10. 最终判断
+## 11. 最终判断
 
 Grok Build 对 Blue-Whale 的价值集中在 **Agent 后端工程化方法**，不在具体运行时复用。
 
