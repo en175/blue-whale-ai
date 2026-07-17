@@ -58,3 +58,6 @@ target/
 
 # 运行日志
 logs/
+
+# zcode 本地产物（plans 等，不进仓）
+.zcode/plans/
