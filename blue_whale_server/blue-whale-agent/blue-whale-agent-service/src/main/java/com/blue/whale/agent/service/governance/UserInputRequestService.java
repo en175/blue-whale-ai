@@ -46,6 +46,42 @@ public class UserInputRequestService {
                 actionIdentity, actionType, arguments, quote);
     }
 
+    /**
+     * 创建创作澄清请求（产品中性输入请求，归属 AgentRun）。
+     *
+     * <p>创作澄清不带动作报价与供应商字段：Agent 缺少推进创作所必需的信息时，向用户提出一个
+     * 可见问题并等待自然语言回答。走 conversation 形（与成本确认 conversation 形共享 awaiting
+     * 通道），不进 standalone 幂等键。
+     *
+     * @param question Agent 向用户提出的可见问题，不可为空
+     */
+    @Transactional
+    public UserInputRequest createCreationClarification(
+            Long projectId,
+            Long userId,
+            Long conversationId,
+            Long sourceAgentRunId,
+            String question) {
+        if (question == null || question.isBlank()) {
+            throw new IllegalArgumentException("创作澄清请求必须携带可见问题");
+        }
+        LocalDateTime now = mapper.selectCurrentTime();
+        UserInputRequest request = new UserInputRequest()
+                .setProjectId(projectId)
+                .setUserId(userId)
+                .setRequestType(UserInputRequest.REQUEST_TYPE_CREATION_CLARIFICATION)
+                .setConversationId(conversationId)
+                .setSourceAgentRunId(sourceAgentRunId)
+                .setQuestion(question)
+                .setActionIdentity("clarification:" + sourceAgentRunId)
+                .setActionType(UserInputRequest.REQUEST_TYPE_CREATION_CLARIFICATION)
+                .setArgumentsDigest(argumentsDigest(Map.of()))
+                .setStatus(UserInputRequest.STATUS_PENDING)
+                .setExpiresAt(now.plusMinutes(10));
+        mapper.insert(request);
+        return request;
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW,
             noRollbackFor = GovernanceException.class)
     public UserInputRequest createStandalone(
@@ -86,6 +122,7 @@ public class UserInputRequestService {
         UserInputRequest request = new UserInputRequest()
                 .setProjectId(projectId)
                 .setUserId(userId)
+                .setRequestType(UserInputRequest.REQUEST_TYPE_COST_CONFIRMATION)
                 .setConversationId(conversationId)
                 .setSourceAgentRunId(sourceAgentRunId)
                 .setRequestTargetType(requestTargetType)
@@ -144,18 +181,57 @@ public class UserInputRequestService {
             mapper.updateById(request);
             throw persistedRejected(projectId, userId, requestId, request, "LATE_CONFIRMATION");
         }
-        if (!CONFIRMATIONS.contains(normalize(content))) {
+        boolean creationClarification = request.isCreationClarification();
+        if (creationClarification) {
+            // 创作澄清接受任意非空自然语言回答（不限确认短语）。
+            if (content == null || content.isBlank()) {
+                auditRecordWriter.appendUserInputDecision(
+                        request, "user_input_request.clarification_ambiguous", "needs_confirmation",
+                        "AMBIGUOUS_CLARIFICATION_ANSWER", properties.getRuleVersion());
+                throw PersistedUserInputDecisionException.inputRequired(requestId);
+            }
             auditRecordWriter.appendUserInputDecision(
-                    request, "user_input_request.ambiguous", "needs_confirmation",
-                    "AMBIGUOUS_CONFIRMATION", properties.getRuleVersion());
-            throw PersistedUserInputDecisionException.inputRequired(requestId);
+                    request, "user_input_request.clarification_answered", "allowed",
+                    "CLARIFICATION_ANSWER_ACCEPTED", properties.getRuleVersion());
+        } else {
+            if (!CONFIRMATIONS.contains(normalize(content))) {
+                auditRecordWriter.appendUserInputDecision(
+                        request, "user_input_request.ambiguous", "needs_confirmation",
+                        "AMBIGUOUS_CONFIRMATION", properties.getRuleVersion());
+                throw PersistedUserInputDecisionException.inputRequired(requestId);
+            }
+            auditRecordWriter.appendUserInputDecision(
+                    request, "user_input_request.confirm", "allowed",
+                    "NATURAL_LANGUAGE_CONFIRMATION_ACCEPTED", properties.getRuleVersion());
         }
-        auditRecordWriter.appendUserInputDecision(
-                request, "user_input_request.confirm", "allowed",
-                "NATURAL_LANGUAGE_CONFIRMATION_ACCEPTED", properties.getRuleVersion());
         request.setStatus(UserInputRequest.STATUS_CONFIRMED).setConfirmedAt(now);
         update(request);
         return request.getId();
+    }
+
+    /**
+     * 将已确认请求绑定到权威 Conversation 回答消息（创作澄清用）。
+     *
+     * <p>回答消息在 confirm 之后才持久化，因此绑定在调用方建好消息后回填。
+     * 仅创作澄清请求会绑定回答消息；成本确认请求返回 empty，调用方无需发 answered 事件。
+     *
+     * @return 创作澄清请求（含来源 AgentRun 用于发 answered 事件）；非创作澄清返回 empty
+     */
+    @Transactional
+    public Optional<UserInputRequest> bindAnswerIfClarification(
+            Long requestId, Long projectId, Long userId, Long answerMessageId) {
+        UserInputRequest request = requireOwnedForUpdate(projectId, userId, requestId);
+        if (!request.isCreationClarification()) {
+            return Optional.empty();
+        }
+        if (!UserInputRequest.STATUS_CONFIRMED.equals(request.getStatus())
+                || request.getAnswerMessageId() != null) {
+            throw auditedActionNotAllowed(projectId, userId, requestId, request,
+                    "DUPLICATE_ANSWER_BINDING");
+        }
+        request.setAnswerMessageId(answerMessageId);
+        update(request);
+        return Optional.of(request);
     }
 
     @Transactional
@@ -185,17 +261,22 @@ public class UserInputRequestService {
             Map<String, Object> arguments) {
         UserInputRequest request = requireOwnedForUpdate(projectId, userId, requestId);
         LocalDateTime now = mapper.selectCurrentTime();
-        Optional<PriceQuote> currentQuote = priceCatalog.quote(actionType, arguments);
-        boolean valid = UserInputRequest.STATUS_CONFIRMED.equals(request.getStatus())
-                && request.getExpiresAt().isAfter(now)
-                && request.getConversationId() != null
+        boolean conversationShape = request.getConversationId() != null
                 && request.getSourceAgentRunId() != null
-                && request.getRequestTargetType() == null
-                && Objects.equals(request.getResumedAgentRunId(), resumedRunId)
-                && Objects.equals(request.getActionIdentity(), actionIdentity)
-                && Objects.equals(request.getActionType(), actionType)
-                && Objects.equals(request.getArgumentsDigest(), argumentsDigest(arguments))
-                && currentQuote.filter(quote -> matchesQuote(request, quote)).isPresent();
+                && request.getRequestTargetType() == null;
+        boolean baseValid = UserInputRequest.STATUS_CONFIRMED.equals(request.getStatus())
+                && request.getExpiresAt().isAfter(now)
+                && conversationShape
+                && Objects.equals(request.getResumedAgentRunId(), resumedRunId);
+        boolean creationClarification = request.isCreationClarification();
+        // 创作澄清消费只校验归属、状态、未过期与 resumed run 绑定；不校验动作身份与报价
+        //（创作澄清无绑定动作，恢复后 Agent 会基于回答提议新动作，走正常的成本确认或直接执行）。
+        boolean valid = baseValid && (creationClarification
+                || (Objects.equals(request.getActionIdentity(), actionIdentity)
+                        && Objects.equals(request.getActionType(), actionType)
+                        && Objects.equals(request.getArgumentsDigest(), argumentsDigest(arguments))
+                        && priceCatalog.quote(actionType, arguments)
+                                .filter(quote -> matchesQuote(request, quote)).isPresent()));
         if (!valid) {
             throw auditedActionNotAllowed(projectId, userId, requestId, request,
                     "CONFIRMATION_BINDING_REJECTED");
@@ -293,7 +374,7 @@ public class UserInputRequestService {
                 request.getQuotedAmountFen(), request.getQuotedProvider(),
                 request.getPriceCatalogVersion(), request.getExchangeRateVersion(),
                 request.getModelPolicyVersion());
-        String ruleVersion = request == null
+        String ruleVersion = request == null || request.getCostRuleVersion() == null
                 ? properties.getRuleVersion() : request.getCostRuleVersion();
         auditRecordWriter.appendDeniedActionDecision(
                 new ActionAuthorizationCommand(

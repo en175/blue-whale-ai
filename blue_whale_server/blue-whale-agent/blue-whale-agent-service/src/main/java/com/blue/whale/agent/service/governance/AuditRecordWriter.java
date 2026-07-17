@@ -106,7 +106,8 @@ public class AuditRecordWriter {
                 .setPriceCatalogVersion(request.getPriceCatalogVersion())
                 .setExchangeRateVersion(request.getExchangeRateVersion())
                 .setModelPolicyVersion(request.getModelPolicyVersion())
-                .setCostRuleVersion(request.getCostRuleVersion())
+                .setCostRuleVersion(request.getCostRuleVersion() == null
+                        ? policyVersion : request.getCostRuleVersion())
                 .setRequestId("user-input-request:" + request.getId())
                 .setCorrelationId("user-input-request:" + request.getId())
                 .setTraceId("user-input-request:" + request.getId());

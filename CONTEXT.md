@@ -182,10 +182,13 @@ Agent 创建 GenerationJob 前对用户意图与风险的分类：明确且在�
 _Avoid_: 每次生成都确认、确认按钮、把需求对齐误称为授权。
 
 **UserInputRequest（用户输入请求）**:
-AgentRun 因关键歧义或 GenerationAuthorizationGate 而等待用户补充信息时创建的请求记录。
-请求内容与唯一标识一经创建不可改写，归属于 AgentRun，不是独立聚合；同一 AgentRun
-最多只有一个活动请求。用户只能通过 Conversation 中引用该请求标识的自然语言消息回答，
-已过期或已回答请求的迟到回复不能解除后续请求。
+AgentRun 因关键歧义或 GenerationAuthorizationGate 而等待用户补充信息时创建的产品中性请求记录，
+以稳定的产品级 `request_type` 区分创作澄清（`creation_clarification`）与成本确认
+（`cost_confirmation`）。请求类型、可见问题、来源 AgentRun、Conversation 归属与恢复绑定一经创建
+不可改写，归属于 AgentRun，不是独立聚合；同一 AgentRun 最多只有一个活动请求。用户只能通过
+Conversation 中引用该请求标识的自然语言消息回答，已过期或已回答请求的迟到回复不能解除后续请求。
+创作澄清接受任意非空回答，不需要报价/供应商/成本策略字段；成本确认仍校验动作身份、参数摘要、
+报价与策略版本（详见 ADR-0036）。
 _Avoid_: 确认按钮、无请求标识的隐式解锁、把 UserInputRequest 当作独立运行任务。
 
 **展示边界(画布 vs 对话)**:

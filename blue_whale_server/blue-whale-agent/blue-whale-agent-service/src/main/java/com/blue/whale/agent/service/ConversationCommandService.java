@@ -15,6 +15,7 @@ import com.blue.whale.agent.model.entity.AgentRun;
 import com.blue.whale.agent.model.entity.CommandIdempotency;
 import com.blue.whale.agent.model.entity.Conversation;
 import com.blue.whale.agent.model.entity.ConversationMessage;
+import com.blue.whale.agent.model.entity.UserInputRequest;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import com.blue.whale.agent.service.governance.UserInputRequestService;
@@ -127,6 +128,15 @@ public class ConversationCommandService {
                 AggregateType.AGENT_RUN, String.valueOf(run.getId()), 0,
                 runPayload, request.clientMessageId(), null);
 
+        if (confirmedInputRequestId != null) {
+            // 创作澄清回答绑定到权威消息，并向 ADR-0016 §5 靠拢发 AgentRun 聚合 answered 事件。
+            // 成本确认请求不绑定回答消息，bindAnswerIfClarification 返回 empty 时跳过。
+            userInputRequestService.bindAnswerIfClarification(
+                    confirmedInputRequestId, projectId, userId, message.getId())
+                    .ifPresent(clarification -> emitClarificationAnswered(
+                            projectId, clarification, run.getId(), message.getId()));
+        }
+
         long cursor = projectEventService.highWatermark(projectId);
         CommandIdempotency accepted = new CommandIdempotency()
                 .setProjectId(projectId)
@@ -149,5 +159,31 @@ public class ConversationCommandService {
         String canonical = request.clientMessageId() + "\u0000" + request.content() + "\u0000"
                 + String.valueOf(request.replyToInputRequestId());
         return Sha256.hex(canonical);
+    }
+
+    /**
+     * 发送创作澄清回答事件（AgentRun 聚合，ADR-0016 §5）。
+     *
+     * <p>事件聚合身份用来源（awaiting_input）AgentRun，回答后的 resumed run 作为 payload 字段，
+     * 不另立聚合，保持与 requested 事件同一聚合边界。
+     */
+    private void emitClarificationAnswered(
+            Long projectId,
+            UserInputRequest clarification,
+            Long resumedRunId,
+            Long answerMessageId) {
+        AgentRun sourceRun = clarification.getSourceAgentRunId() == null ? null
+                : agentRunMapper.selectById(clarification.getSourceAgentRunId());
+        int sourceVersion = sourceRun == null ? 0 : sourceRun.getVersion();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("input_request_id", clarification.getId());
+        payload.put("source_agent_run_id", clarification.getSourceAgentRunId());
+        payload.put("resumed_agent_run_id", resumedRunId);
+        payload.put("answer_message_id", answerMessageId);
+        payload.put("status", clarification.getStatus());
+        projectEventService.appendEvent(projectId, EventType.AGENT_RUN_USER_INPUT_ANSWERED,
+                AggregateType.AGENT_RUN,
+                String.valueOf(clarification.getSourceAgentRunId()), sourceVersion,
+                payload, null, null);
     }
 }

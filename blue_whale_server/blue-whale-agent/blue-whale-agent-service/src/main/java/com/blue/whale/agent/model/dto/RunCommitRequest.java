@@ -21,7 +21,7 @@ public record RunCommitRequest(
         @Valid @NotNull CommitCheckpoint checkpoint,
         @Valid @NotNull List<ProposedAction> actions,
         Map<String, Object> usage,
-        @JsonProperty("user_input_request") Map<String, Object> userInputRequest,
+        @Valid @JsonProperty("user_input_request") UserInputRequestProposal userInputRequest,
         Map<String, Object> error
 ) {
     public record CommitCheckpoint(

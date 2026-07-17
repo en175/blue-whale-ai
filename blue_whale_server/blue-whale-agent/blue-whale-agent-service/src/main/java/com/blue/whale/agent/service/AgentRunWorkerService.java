@@ -9,11 +9,13 @@ import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
 import com.blue.whale.agent.mapper.RunCommitRecordMapper;
 import com.blue.whale.agent.mapper.RuntimeCheckpointMapper;
+import com.blue.whale.agent.mapper.UserInputRequestMapper;
 import com.blue.whale.agent.model.constant.AggregateType;
 import com.blue.whale.agent.model.constant.EventType;
 import com.blue.whale.agent.model.dto.RunCommitRequest;
 import com.blue.whale.agent.model.dto.RunCommitResponse;
 import com.blue.whale.agent.model.dto.RunWorkResponse;
+import com.blue.whale.agent.model.dto.UserInputRequestProposal;
 import com.blue.whale.agent.model.entity.AgentRun;
 import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.Conversation;
@@ -65,6 +67,7 @@ public class AgentRunWorkerService {
     private final RunCommitRecordMapper runCommitMapper;
     private final GenerationJobMapper generationJobMapper;
     private final GenerationJobOutputMapper generationJobOutputMapper;
+    private final UserInputRequestMapper userInputRequestMapper;
     private final AssetMapper assetMapper;
     private final ProjectService projectService;
     private final ProjectEventService projectEventService;
@@ -148,17 +151,29 @@ public class AgentRunWorkerService {
 
         validateCommit(run, workerId, request, agentRunMapper.selectCurrentTime());
         projectService.requireOwnedForUpdate(run.getProjectId(), run.getUserId());
-        if (request.userInputRequest() != null || request.error() != null) {
+        UserInputRequestProposal proposal = request.userInputRequest();
+        if (request.error() != null) {
+            // Worker 终态错误仍由 Java 拒绝：公开事实只承认 Java 接纳的状态转移。
             actionAuthorizationService.deny(
                     actionCommand(run, null, false), "WORKER_TERMINAL_NOT_ALLOWED");
         }
-        if (request.actions().isEmpty() && !supportsNoActionCompletion(run)) {
+        if (proposal != null && !request.actions().isEmpty()) {
+            // 提议与动作互斥：一次提交要么推进一个动作，要么提出一个输入请求。
+            actionAuthorizationService.deny(
+                    actionCommand(run, null, false), "PROPOSAL_ACTION_MUTEX");
+        }
+        if (proposal != null && run.getConfirmedInputRequestId() != null) {
+            // 来源 AgentRun 已绑定待消费的确认请求，不接受新的输入请求提议。
+            actionAuthorizationService.deny(
+                    actionCommand(run, null, false), "ACTIVE_REQUEST_ALREADY_BOUND");
+        }
+        if (proposal == null && request.actions().isEmpty() && !supportsNoActionCompletion(run)) {
             actionAuthorizationService.deny(
                     actionCommand(run, null, false), "ACTION_MISSING");
         }
         RunCommitRequest.ProposedAction action = null;
         AuthorizationDecision authorization = null;
-        if (!request.actions().isEmpty()) {
+        if (proposal == null && !request.actions().isEmpty()) {
             try {
                 action = validateAction(run, request.actions());
             } catch (GlobalException exception) {
@@ -208,7 +223,13 @@ public class AgentRunWorkerService {
 
         UserInputRequest inputRequest = null;
         GenerationJob job = null;
-        if (action != null && authorization.outcome() == AuthorizationOutcome.INPUT_REQUIRED) {
+        if (proposal != null) {
+            // 创作澄清提议：原子保存 RuntimeCheckpoint（已在上文插入）与 UserInputRequest，
+            // 令来源 AgentRun 进入等待输入状态并释放租约。无动作、无报价。
+            inputRequest = userInputRequestService.createCreationClarification(
+                    run.getProjectId(), run.getUserId(), conversation.getId(), runId,
+                    proposal.question());
+        } else if (action != null && authorization.outcome() == AuthorizationOutcome.INPUT_REQUIRED) {
             inputRequest = userInputRequestService.create(
                     run.getProjectId(), run.getUserId(), run.getConversationId(), runId,
                     action.actionId(), action.actionType(), action.arguments(), authorization.quote());
@@ -273,23 +294,40 @@ public class AgentRunWorkerService {
         }
 
         if (inputRequest != null) {
+            boolean creationClarification = inputRequest.isCreationClarification();
             Map<String, Object> inputPayload = new LinkedHashMap<>();
             inputPayload.put("input_request_id", inputRequest.getId());
             inputPayload.put("agent_run_id", runId);
-            inputPayload.put("action_identity", inputRequest.getActionIdentity());
-            inputPayload.put("action_type", inputRequest.getActionType());
+            inputPayload.put("request_type", inputRequest.getRequestType());
+            if (creationClarification) {
+                inputPayload.put("question", inputRequest.getQuestion());
+            } else {
+                inputPayload.put("action_identity", inputRequest.getActionIdentity());
+                inputPayload.put("action_type", inputRequest.getActionType());
+            }
             inputPayload.put("status", inputRequest.getStatus());
             inputPayload.put("expires_at", inputRequest.getExpiresAt());
-            projectEventService.appendEvent(run.getProjectId(), EventType.USER_INPUT_REQUEST_CREATED,
-                    AggregateType.USER_INPUT_REQUEST, String.valueOf(inputRequest.getId()), 0,
-                    inputPayload, request.commitId(), null);
+            if (creationClarification) {
+                // 创作澄清向 ADR-0016 §5 靠拢：UserInputRequest 归属 AgentRun，
+                // 事件使用 AgentRun 聚合身份与版本。
+                projectEventService.appendEvent(run.getProjectId(),
+                        EventType.AGENT_RUN_USER_INPUT_REQUESTED,
+                        AggregateType.AGENT_RUN, String.valueOf(runId), run.getVersion(),
+                        inputPayload, request.commitId(), null);
+            } else {
+                // 成本确认沿用独立聚合事件，向后兼容现有 SSE 客户端。
+                projectEventService.appendEvent(run.getProjectId(), EventType.USER_INPUT_REQUEST_CREATED,
+                        AggregateType.USER_INPUT_REQUEST, String.valueOf(inputRequest.getId()), 0,
+                        inputPayload, request.commitId(), null);
+            }
         }
 
         run.setCurrentCheckpointId(checkpoint.getId())
                 .setStatus(inputRequest != null ? AgentRun.STATUS_AWAITING_INPUT
                         : job == null ? AgentRun.STATUS_COMPLETED : AgentRun.STATUS_AWAITING_JOB)
-                .setStage(inputRequest != null ? "awaiting_confirmation"
-                        : job == null ? "completed" : "generating")
+                .setStage(inputRequest != null
+                        ? (proposal != null ? "awaiting_clarification" : "awaiting_confirmation")
+                        : (job == null ? "completed" : "generating"))
                 .setLeaseOwner(null)
                 .setLeaseExpiresAt(null);
         agentRunMapper.updateById(run);
