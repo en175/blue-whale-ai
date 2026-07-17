@@ -1,0 +1,19 @@
+node_modules
+.next
+out
+dist
+.git
+.gitignore
+.eslintcache
+*.log
+npm-debug.log*
+.DS_Store
+coverage
+.nyc_output
+test-results
+playwright-report
+playwright/.cache
+# IDE
+.vscode
+.idea
+*.swp

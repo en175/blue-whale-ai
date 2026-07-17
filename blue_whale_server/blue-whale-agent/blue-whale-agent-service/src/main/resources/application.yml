@@ -8,11 +8,13 @@ spring:
     active: blue-whale-dev
   cloud:
     nacos:
-      server-addr: 115.190.244.91:8848
+      # 本地 Docker Compose 默认连容器服务名 nacos:8848；远端用 NACOS_SERVER_ADDR 覆盖
+      server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
       discovery:
         register-enabled: true
-        # namespace 必须用 Nacos 的 namespace ID（UUID），用名字会注册到 console 看不见的隐式命名空间
-        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
+        # namespace 必须用 Nacos 的 namespace ID（UUID）或 public 空 namespace（本地默认空）；
+        # 用名字会注册到 console 看不见的隐式命名空间
+        namespace: ${NACOS_NAMESPACE:}
         timeout: 10000
   datasource:
     dynamic:
@@ -20,9 +22,10 @@ spring:
       strict: false
       datasource:
         master:
-          url: jdbc:mysql://115.190.244.91:3306/blue_whale?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-          username: root
-          password: weitian1024
+          # 本地默认连容器服务名 mysql:3306；远端用 MYSQL_HOST/MYSQL_PORT/MYSQL_DB 覆盖
+          url: jdbc:mysql://${MYSQL_HOST:mysql}:${MYSQL_PORT:3306}/${MYSQL_DB:blue_whale}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+          username: ${MYSQL_USER:root}
+          password: ${MYSQL_PASSWORD:blue_whale}
           driver-class-name: com.mysql.cj.jdbc.Driver
           type: com.zaxxer.hikari.HikariDataSource
           hikari:
@@ -32,9 +35,10 @@ spring:
             idle-timeout: 300000
             max-lifetime: 1200000
   redis:
-    host: 115.190.244.91
-    port: 6379
-    password: weitian1024
+    # 本地默认连容器服务名 redis:6379（无密码）；远端用 REDIS_HOST/REDIS_PORT/REDIS_PASSWORD 覆盖
+    host: ${REDIS_HOST:redis}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
     database: 0
   jackson:
     # 前端字段全 snake_case，必须 SNAKE_CASE 才能映射到后端 camelCase（model_id→modelId）。
@@ -102,5 +106,5 @@ blue-whale:
 # 火山方舟 Ark：图片/视频生成。api-key 必填，否则 ArkService bean 不创建、生成接口报配置缺失
 volcengine:
   ark:
-    base-url: https://ark.cn-beijing.volces.com/api/v3
-    api-key: ark-90702f0d-327b-4d76-890c-7dc81efd5721-e0494
+    base-url: ${ARK_BASE_URL:https://ark.cn-beijing.volces.com/api/v3}
+    api-key: ${ARK_API_KEY:}

@@ -56,8 +56,17 @@ docs/superpowers/
 target/
 *.class
 
+# Python 构建产物（pip install . / setup.py 生成，不入库）
+*.egg-info/
+build/
+dist/
+.eggs/
+
 # 运行日志
 logs/
 
 # zcode 本地产物（plans 等，不进仓）
 .zcode/plans/
+
+# 本地 MVP 实际 env（凭据不入库；deploy/local/.env.example 入库）
+deploy/local/.env

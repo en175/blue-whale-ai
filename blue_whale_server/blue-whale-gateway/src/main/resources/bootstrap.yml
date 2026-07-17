@@ -7,12 +7,13 @@ spring:
     active: blue-whale-dev
   cloud:
     nacos:
-      server-addr: 115.190.244.91:8848
+      # 本地 Docker Compose 默认连容器服务名 nacos:8848；远端用 NACOS_SERVER_ADDR 覆盖
+      server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
       discovery:
-        # namespace 用 Nacos namespace ID（UUID），非名字；与 agent-service 一致才能发现彼此
-        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
+        # namespace 用 Nacos namespace ID（UUID）或 public 空 namespace（本地默认空）；与 agent-service 一致才能发现彼此
+        namespace: ${NACOS_NAMESPACE:}
       config:
-        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
+        namespace: ${NACOS_NAMESPACE:}
         file-extension: yml
         group: BLUE_WHALE
     gateway:
