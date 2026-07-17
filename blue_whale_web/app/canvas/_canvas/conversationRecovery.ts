@@ -35,6 +35,7 @@ export function projectSnapshotToChatMessages(
       generationOutputs(job).map((output) => {
         const asset = generationAsset(snapshot, output);
         const slotIndex = Number(output.slot_index);
+        const errorMessage = publicErrorMessage(output, job);
         return {
           id: `generation-job-${String(job.job_id)}-slot-${slotIndex}`,
           type: "card",
@@ -46,6 +47,7 @@ export function projectSnapshotToChatMessages(
           ...(asset
             ? { assetId: String(asset.asset_id), imageUrl: asset.access_url }
             : {}),
+          ...(errorMessage ? { errorMessage } : {}),
         };
       }),
     );
@@ -154,6 +156,26 @@ function outputStatus(
   if (job.status === "failed") return "failed";
   if (job.status === "cancelled") return "cancelled";
   return "generating";
+}
+
+/**
+ * 取产品规范化失败文案：优先 output.error.message（槽级），回退 job.error.message（Job 级）。
+ * 后端 GenerationPublicError 已把内部错误映射为稳定公开文案（如"图像生成失败"），
+ * 故此处理论上不会泄漏内部信息；非 string 保守不投影。
+ */
+function publicErrorMessage(
+  output: Record<string, unknown>,
+  job: Record<string, unknown>,
+): string | null {
+  const fromOutput = errorMessageOf(output.error);
+  if (fromOutput) return fromOutput;
+  return errorMessageOf(job.error);
+}
+
+function errorMessageOf(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const message = (error as Record<string, unknown>).message;
+  return typeof message === "string" && message.trim() ? message : null;
 }
 
 function isSuccessfulOutput(

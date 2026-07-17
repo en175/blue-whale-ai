@@ -74,6 +74,8 @@ export type ChatMessage =
       generationJobId?: number | string;
       /** Card 对应的稳定输出槽。 */
       slotIndex?: number;
+      /** 产品规范化失败文案（来自后端公开错误信封）；失败 Card 向 User 展示，不泄漏内部信息。 */
+      errorMessage?: string;
     };
 /**
  * Canvas —— 画布聚合（提为具名类型）。

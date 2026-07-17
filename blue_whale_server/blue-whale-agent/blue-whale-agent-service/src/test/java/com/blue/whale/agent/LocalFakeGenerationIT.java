@@ -204,6 +204,81 @@ class LocalFakeGenerationIT {
     }
 
     @Test
+    void agentRunFailureCardRetryCreatesLinkedSucceedingJob() throws Exception {
+        Long originalJobId = createJobThroughAgentRun("fake:failure");
+
+        // 原始 Job 确定性失败：failed、无 Asset、公开规范化错误（不泄漏内部信息）
+        assertThat(generationWorker.runOnce("generation-worker-retry-origin")).isTrue();
+        GenerationJob original = generationJobMapper.selectById(originalJobId);
+        Long projectId = original.getProjectId();
+        assertThat(original.getStatus()).isEqualTo(GenerationJob.STATUS_FAILED);
+        assertThat(original.getError()).containsEntry("code", "provider_failed");
+        assertThat(count("assets", "generation_job_id", originalJobId)).isZero();
+
+        // Snapshot 暴露产品规范化错误文案，不泄漏 "Fake Provider 显式失败"
+        Map<String, Object> failedJobDto = readGenerationJobFromSnapshot(projectId, originalJobId);
+        assertThat(errorMessageOf(failedJobDto)).isEqualTo("图像生成失败");
+        assertThat(objectMapper.writeValueAsString(failedJobDto)).doesNotContain("Fake Provider");
+
+        // Card 重试：创建关联原 Job 的新 GenerationJob（retry_of_job_id 指向原 Job）
+        String retryKey = "retry-" + originalJobId + "-1";
+        Long retryJobId = retryMissingOutputs(projectId, originalJobId, retryKey);
+        assertThat(retryJobId).isNotEqualTo(originalJobId);
+        GenerationJob retry = generationJobMapper.selectById(retryJobId);
+        assertThat(retry.getRetryOfJobId()).isEqualTo(originalJobId);
+        // 原 Job 终态不被改写
+        assertThat(generationJobMapper.selectById(originalJobId).getStatus())
+                .isEqualTo(GenerationJob.STATUS_FAILED);
+
+        // 新 Job 独立执行 → 成功，经 ContentReview，创建一个私有 Asset，独立 CostReservation
+        assertThat(generationWorker.runOnce("generation-worker-retry-success")).isTrue();
+        GenerationJob succeededRetry = generationJobMapper.selectById(retryJobId);
+        assertThat(succeededRetry.getStatus()).isEqualTo(GenerationJob.STATUS_SUCCEEDED);
+        assertThat(succeededRetry.getOutputAssetIds()).hasSize(1);
+        Long retryAssetId = succeededRetry.getOutputAssetIds().get(0);
+        assertThat(count("assets", "generation_job_id", retryJobId)).isEqualTo(1);
+        assertThat(count("assets", "generation_job_id", originalJobId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM cost_reservations WHERE generation_job_id = ?",
+                String.class, retryJobId)).isEqualTo("SETTLED");
+        // 新 Job 经 ContentReview 决定通过才创建 Asset（ADR-0022 / ADR-0029 闸门）
+        Map<String, Object> retryReview = jdbcTemplate.queryForMap(
+                "SELECT * FROM content_reviews WHERE subject_id = ?",
+                "generation-job:" + retryJobId + ":slot:0");
+        assertThat(retryReview.get("review_state")).isEqualTo("decided");
+        assertThat(retryReview.get("decision")).isEqualTo("pass");
+        assertThat(retryReview.get("policy_version")).isEqualTo("local-fake-v1");
+        assertThat(count("content_reviews", "subject_id", "generation-job:" + retryJobId + ":slot:0"))
+                .isEqualTo(1);
+        // 新 Asset 私有访问边界：owner 200，跨 User 404
+        String retryAccessUrl = "/api/projects/" + projectId + "/assets/" + retryAssetId + "/content";
+        mockMvc.perform(get(retryAccessUrl).header("X-User-Id", "10"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get(retryAccessUrl).header("X-User-Id", "11"))
+                .andExpect(status().isNotFound());
+
+        // 新 Asset 同时被成功 Card 与 Canvas NodeItem 引用；原失败事实仍可从 Snapshot 恢复
+        Map<String, Object> retryJobDto = readGenerationJobFromSnapshot(projectId, retryJobId);
+        assertThat(retryJobDto.get("status")).isEqualTo("succeeded");
+        assertThat(firstOutputAssetId(retryJobDto)).isEqualTo(retryAssetId);
+        Map<String, Object> originalStillFailed = readGenerationJobFromSnapshot(projectId, originalJobId);
+        assertThat(originalStillFailed.get("status")).isEqualTo("failed");
+        assertThat(errorMessageOf(originalStillFailed)).isEqualTo("图像生成失败");
+
+        // 幂等：同 Idempotency-Key 重放返回同一 retry Job，不增加 Job/CostReservation/Asset/Provider 调用
+        long jobsBefore = countAll("generation_jobs");
+        long reservationsBefore = countAll("cost_reservations");
+        long assetsBefore = countAll("assets");
+        long providerTasksBefore = countAll("generation_provider_tasks");
+        Long replayedJobId = retryMissingOutputs(projectId, originalJobId, retryKey);
+        assertThat(replayedJobId).isEqualTo(retryJobId);
+        assertThat(countAll("generation_jobs")).isEqualTo(jobsBefore);
+        assertThat(countAll("cost_reservations")).isEqualTo(reservationsBefore);
+        assertThat(countAll("assets")).isEqualTo(assetsBefore);
+        assertThat(countAll("generation_provider_tasks")).isEqualTo(providerTasksBefore);
+    }
+
+    @Test
     void reviewRejectFailsClosedWithoutAsset() throws Exception {
         Long jobId = createJobThroughAgentRun("fake:review-reject");
 
@@ -359,5 +434,65 @@ class LocalFakeGenerationIT {
         Long result = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM " + table + " WHERE " + column + " = ?", Long.class, value);
         return result == null ? 0 : result;
+    }
+
+    private long countAll(String table) {
+        Long result = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM " + table, Long.class);
+        return result == null ? 0 : result;
+    }
+
+    /** 从 Project Snapshot 的 generation_jobs 中按 job_id 取单条 Job DTO（snake_case）。 */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> readGenerationJobFromSnapshot(Long projectId, Long jobId) throws Exception {
+        MvcResult snapshot = mockMvc.perform(get("/api/projects/{id}/snapshot", projectId)
+                        .header("X-User-Id", "10"))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode jobs = objectMapper.readTree(
+                        snapshot.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8))
+                .path("data").path("generation_jobs");
+        for (JsonNode job : jobs) {
+            if (job.path("job_id").asLong() == jobId) {
+                return objectMapper.treeToValue(job, Map.class);
+            }
+        }
+        throw new AssertionError("Snapshot 未找到 generation_job: " + jobId);
+    }
+
+    /** 调 Card 重试端点，返回新创建的 retry GenerationJob id。 */
+    private Long retryMissingOutputs(Long projectId, Long originalJobId, String idempotencyKey) throws Exception {
+        MvcResult result = mockMvc.perform(
+                        post("/api/projects/{id}/generation-jobs/{jobId}/retry", projectId, originalJobId)
+                                .header("X-User-Id", "10")
+                                .header("Idempotency-Key", idempotencyKey))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString())
+                .path("data").path("generation_job_id").asLong();
+    }
+
+    /** 从 Snapshot Job DTO（snake_case）取规范化公开错误 message。 */
+    private String errorMessageOf(Map<String, Object> jobDto) {
+        Object error = jobDto.get("error");
+        if (!(error instanceof Map<?, ?> errorMap)) {
+            return null;
+        }
+        Object message = errorMap.get("message");
+        return message == null ? null : String.valueOf(message);
+    }
+
+    /** 从 Snapshot Job DTO 的首个 output 取 asset_id。 */
+    private Long firstOutputAssetId(Map<String, Object> jobDto) {
+        Object outputs = jobDto.get("outputs");
+        if (!(outputs instanceof List<?> outputList) || outputList.isEmpty()) {
+            return null;
+        }
+        Object first = outputList.get(0);
+        if (!(first instanceof Map<?, ?> outputMap)) {
+            return null;
+        }
+        Object assetId = outputMap.get("asset_id");
+        return assetId == null ? null : ((Number) assetId).longValue();
     }
 }

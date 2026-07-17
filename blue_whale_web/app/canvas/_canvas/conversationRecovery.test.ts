@@ -248,6 +248,79 @@ describe("Agent 对话恢复投影", () => {
     ]);
   });
 
+  it("失败 Card 投影产品规范化错误文案且不泄漏内部信息", () => {
+    const snapshot: ProjectSnapshot = {
+      project: { id: 1, name: "P", thumb: null, created_at: "now" },
+      canvas: { id: null, project_id: 1, viewport: null, nodes: "[]" },
+      conversation_messages: [],
+      agent_runs: [{ agent_run_id: 5, status: "completed" }],
+      generation_jobs: [
+        {
+          job_id: 30,
+          agent_run_id: 5,
+          source: "agent_run",
+          type: "image",
+          input: { prompt: "失败的蓝鲸", aspect_ratio: "1:1" },
+          status: "failed",
+          outputs: [
+            {
+              slot_index: 0,
+              status: "failed",
+              asset_id: null,
+              error: { code: "provider_failed", message: "图像生成失败" },
+            },
+          ],
+          output_asset_ids: [],
+        },
+      ],
+      assets: {},
+      high_watermark_cursor: 30,
+    };
+
+    const cards = projectSnapshotToChatMessages(snapshot);
+    expect(cards).toEqual([
+      expect.objectContaining({
+        id: "generation-job-30-slot-0",
+        status: "failed",
+        errorMessage: "图像生成失败",
+      }),
+    ]);
+    // 不泄漏后端内部原始 message（"Fake Provider 显式失败" 等）
+    expect(JSON.stringify(cards)).not.toContain("Fake Provider");
+  });
+
+  it("Job 级失败回退投影 job.error.message（无 output.error 时）", () => {
+    const snapshot: ProjectSnapshot = {
+      project: { id: 1, name: "P", thumb: null, created_at: "now" },
+      canvas: { id: null, project_id: 1, viewport: null, nodes: "[]" },
+      conversation_messages: [],
+      agent_runs: [{ agent_run_id: 5, status: "completed" }],
+      generation_jobs: [
+        {
+          job_id: 31,
+          agent_run_id: 5,
+          source: "agent_run",
+          type: "image",
+          input: { prompt: "失败的蓝鲸" },
+          status: "failed",
+          error: { code: "provider_failed", message: "图像生成失败" },
+          outputs: [{ slot_index: 0, status: "failed", asset_id: null }],
+          output_asset_ids: [],
+        },
+      ],
+      assets: {},
+      high_watermark_cursor: 31,
+    };
+
+    expect(projectSnapshotToChatMessages(snapshot)).toEqual([
+      expect.objectContaining({
+        id: "generation-job-31-slot-0",
+        status: "failed",
+        errorMessage: "图像生成失败",
+      }),
+    ]);
+  });
+
   it("取消槽恢复为独立取消态且不生成 Node", () => {
     const snapshot: ProjectSnapshot = {
       project: { id: 1, name: "P", thumb: null, created_at: "now" },
