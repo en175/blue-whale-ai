@@ -42,7 +42,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 先落地 V1 全量基线，再把 GenerationJob/Asset 域回退到 pre-ik10i6 历史形态
  * （jobs/assets 缺后加列、其余域表缺失），并预置既有 Project/Canvas/Job/Asset 关联数据。
  * 上下文启动时 {@code blue-whale.schema-migration.enabled=true} 触发迁移器补记 V1、
- * 跑 V2 与 V3 收敛升级；随后测试用公开 HTTP 链路验证创建、Worker 接纳、单资源查询
+ * 跑 V2、V3 与 V4 收敛升级；随后测试用公开 HTTP 链路验证创建、Worker 接纳、单资源查询
  * 与 Snapshot 恢复在升级后的库上全部可用，且既有事实保留。
  */
 @EnabledIfEnvironmentVariable(named = "BLUE_WHALE_TEST_MYSQL_URL", matches = "jdbc:mysql://.+")
@@ -76,7 +76,7 @@ class GenerationOnUpgradedSchemaMySqlIT {
             "cost_budget_locks", "cost_reservations", "audit_records",
             "generation_jobs", "assets", "content_reviews");
 
-    /** 回退到历史形态的域表：V3 应重建缺失表、为 jobs/assets 补列 */
+    /** 回退到历史形态的域表：V4 应重建缺失表、为 jobs/assets 补列 */
     private static final List<String> LEGACY_DROPPED_TABLES = List.of(
             "generation_job_outputs", "generation_provider_tasks",
             "asset_storage_objects", "asset_object_transfers",
@@ -113,7 +113,7 @@ class GenerationOnUpgradedSchemaMySqlIT {
 
     /**
      * 造受支持旧库：V1 全量基线 → generation 域回退 pre-ik10i6 形态 → 预置关联数据。
-     * 在上下文启动前执行，随后迁移器在启动时完成 V1 补记与 V2/V3 升级。
+     * 在上下文启动前执行，随后迁移器在启动时完成 V1 补记与 V2/V3/V4 升级。
      */
     private static void createLegacyDatabase(String url, String username, String password) throws Exception {
         Class.forName(MYSQL_DRIVER);
@@ -132,7 +132,7 @@ class GenerationOnUpgradedSchemaMySqlIT {
                     st.execute(stmt);
                 }
             }
-            // generation 域回退：缺失表由 V3 重建；jobs/assets 建成初始形态由 V3 补列
+            // generation 域回退：缺失表由 V4 重建；jobs/assets 建成初始形态由 V4 补列
             for (String table : LEGACY_DROPPED_TABLES) {
                 st.execute("DROP TABLE IF EXISTS " + table);
             }
@@ -239,10 +239,10 @@ class GenerationOnUpgradedSchemaMySqlIT {
 
     @Test
     void publicGenerationChainWorksOnUpgradedLegacyDatabase() throws Exception {
-        // 迁移器已在启动时完成升级：记账本记录 1,2,3（V1 补记 + V2 + V3）
+        // 迁移器已在启动时完成升级：记账本记录 1,2,3,4（V1 补记 + V2 + V3 + V4）
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT GROUP_CONCAT(version ORDER BY version) FROM schema_migrations", String.class))
-                .isEqualTo("1,2,3");
+                .isEqualTo("1,2,3,4");
 
         // 公开生成命令：创建 GenerationJob（升级后的库上接纳事务全链路写入）
         String body = "{" +

@@ -2,13 +2,13 @@
 # Schema 迁移四场景验收(IK1W1E + IK1W1L)
 #
 # 用真实 MySQL + 隔离 Compose 栈验证版本化迁移与 Schema 就绪门禁：
-#   1. empty              空库初始化：down -v 起空卷，迁移器跑 V1+V2+V3，记账本记录版本，表齐全，
+#   1. empty              空库初始化：down -v 起空卷，迁移器跑 V1+V2+V3+V4，记账本记录版本，表齐全，
 #                         游标物理列为非保留字 event_cursor(IK1W1M)。
 #   2. upgrade            旧库保数据升级：注入旧库夹具，迁移器补记 V1 且保留既有业务数据；
 #                         旧库事件/Outbox 的游标值、身份、状态与重试元数据完整保留(IK1W1M)。
 #   3. drift              未知漂移失败：注入坏夹具(记账本谎称 V1 但缺表)，迁移失败、业务服务不启动。
 #   4. upgrade-generation 生成域旧库升级(IK1W1L)：注入 pre-ik10i6 形态 generation 域旧库，
-#                         V3 原地建缺表/补缺列/幂等回填，既有 Job/Asset/Canvas 关联保留。
+#                         V4 原地建缺表/补缺列/幂等回填，既有 Job/Asset/Canvas 关联保留。
 #
 # 各场景独立 Compose 项目(bw-schema-*)，结束 down -v 清理，可重复执行。
 # 复用 deploy/local/docker-compose.yml + .acceptance.yml 基础设施与镜像。
@@ -131,7 +131,7 @@ trap 'rm -f "$TMP_OVERRIDE"' EXIT
 scenario_empty() {
   local project="bw-schema-empty"
   echo "🧪 [1/4] 空库初始化(project=$project)"
-  echo "   down -v 起空卷 → 迁移器应跑 V1+V2+V3，记账本记录版本，表齐全"
+  echo "   down -v 起空卷 → 迁移器应跑 V1+V2+V3+V4，记账本记录版本，表齐全"
   docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" down -v --remove-orphans >/dev/null 2>&1 || true
 
   start_infra "$project"
@@ -146,7 +146,7 @@ scenario_empty() {
     fail "空库场景失败"
   fi
 
-  # 断言：记账本含 V1、V2、V3；project 表存在；
+  # 断言：记账本含 V1、V2、V3、V4；project 表存在；
   # IK1W1M：游标物理列为非保留字 event_cursor，保留字 cursor 列不存在
   local versions; versions="$(mysql_exec "$project" 'SELECT GROUP_CONCAT(version ORDER BY version) FROM schema_migrations' 2>/dev/null | tail -1)"
   local has_project; has_project="$(mysql_exec "$project" "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$MYSQL_DB' AND table_name='project'" 2>/dev/null | tail -1)"
@@ -157,7 +157,7 @@ scenario_empty() {
   echo "   project 表存在: $has_project"
   echo "   event_cursor 列数(期望 2): ${event_cursor_cols}；保留字 cursor 列数(期望 0): $reserved_cols"
 
-  [ "$versions" = "1,2,3" ] || fail "空库：记账本应为 1,2,3，实际 $versions"
+  [ "$versions" = "1,2,3,4" ] || fail "空库：记账本应为 1,2,3,4，实际 $versions"
   [ "$has_project" = "1" ] || fail "空库：project 表应存在"
   [ "$event_cursor_cols" = "2" ] || fail "空库：project_events/outbox_messages 应有 event_cursor 列"
   [ "$reserved_cols" = "0" ] || fail "空库：不应残留保留字 cursor 列"
@@ -193,7 +193,7 @@ scenario_upgrade() {
     fail "旧库升级场景失败"
   fi
 
-  # 断言：记账本含 V1、V2、V3(补记 V1 + 跑 V2/V3)；既有 2 行数据保留；V2 seed 追加；
+  # 断言：记账本含 V1、V2、V3、V4(补记 V1 + 跑 V2/V3/V4)；既有 2 行数据保留；V2 seed 追加；
   # IK1W1M：旧库事件/Outbox 的游标值、身份、状态与重试元数据完整保留，顺序不变
   local versions; versions="$(mysql_exec "$project" 'SELECT GROUP_CONCAT(version ORDER BY version) FROM schema_migrations' 2>/dev/null | tail -1)"
   local preserved; preserved="$(mysql_exec "$project" 'SELECT COUNT(*) FROM project WHERE id IN (9001,9002)' 2>/dev/null | tail -1)"
@@ -209,7 +209,7 @@ scenario_upgrade() {
   echo "   Outbox(message_id/游标/状态/重试/下次重试,按序): $outbox"
   echo "   保留字 cursor 列数(期望 0): $reserved_cols"
 
-  [ "$versions" = "1,2,3" ] || fail "旧库：记账本应为 1,2,3(补记 V1+V2/V3)，实际 $versions"
+  [ "$versions" = "1,2,3,4" ] || fail "旧库：记账本应为 1,2,3,4(补记 V1+V2/V3/V4)，实际 $versions"
   [ "$preserved" = "2" ] || fail "旧库：既有数据未保留(期望 2 行，实际 $preserved)"
   [ "$events" = "evt_old_1/1,evt_old_2/2,evt_old_3/3" ] || fail "旧库：事件游标值或顺序未保留，实际 $events"
   [ "$outbox" = "evt_old_1/1/pending/2/2030-01-02 03:04:05,evt_old_2/2/published/0/null,evt_old_3/3/pending/1/2030-02-03 04:05:06" ] \
@@ -260,7 +260,7 @@ scenario_drift() {
 scenario_upgrade_generation() {
   local project="bw-schema-upgrade-generation"
   echo "🧪 [4/4] 生成域旧库升级(project=$project)"
-  echo "   注入 pre-ik10i6 形态 generation 域夹具 → V3 建缺表/补缺列/幂等回填，既有事实保留"
+  echo "   注入 pre-ik10i6 形态 generation 域夹具 → V4 建缺表/补缺列/幂等回填，既有事实保留"
   docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" -f "$TMP_OVERRIDE" down -v --remove-orphans >/dev/null 2>&1 || true
 
   write_fixture_override "$FIXTURE_DIR/old-generation-schema.sql"
@@ -284,7 +284,7 @@ scenario_upgrade_generation() {
     fail "生成域旧库升级场景失败"
   fi
 
-  # 断言：记账本 1,2,3；缺表建出；缺列补齐；既有事实与关联保留；输出槽回填
+  # 断言：记账本 1,2,3,4；缺表建出；缺列补齐；既有事实与关联保留；输出槽回填
   local versions; versions="$(mysql_exec "$project" 'SELECT GROUP_CONCAT(version ORDER BY version) FROM schema_migrations' 2>/dev/null | tail -1)"
   local outputs_table; outputs_table="$(mysql_exec "$project" "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$MYSQL_DB' AND table_name='generation_job_outputs'" 2>/dev/null | tail -1)"
   local col_ok; col_ok="$(mysql_exec "$project" "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$MYSQL_DB' AND table_name='generation_jobs' AND column_name='strategy_version'" 2>/dev/null | tail -1)"
@@ -299,7 +299,7 @@ scenario_upgrade_generation() {
   echo "   既有 Job 6001: version=$job_version status=$job_status  既有 Asset 7001: $asset_ok"
   echo "   Canvas→Asset 引用保持: $canvas_link  输出槽回填: $backfill"
 
-  [ "$versions" = "1,2,3" ] || fail "生成域旧库：记账本应为 1,2,3，实际 $versions"
+  [ "$versions" = "1,2,3,4" ] || fail "生成域旧库：记账本应为 1,2,3,4，实际 $versions"
   [ "$outputs_table" = "1" ] || fail "生成域旧库：generation_job_outputs 应建出"
   [ "$col_ok" = "1" ] || fail "生成域旧库：strategy_version 列应补齐"
   [ "$job_version" = "3" ] || fail "生成域旧库：既有 Job 聚合版本应保留(期望 3，实际 $job_version)"
