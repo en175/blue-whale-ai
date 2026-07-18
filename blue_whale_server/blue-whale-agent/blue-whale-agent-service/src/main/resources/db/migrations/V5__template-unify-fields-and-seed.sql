@@ -6,6 +6,9 @@
 -- 稳定触发 MySQL 1054（未知列 is_delete），模板推荐链路整体不可用。
 --
 -- 本版本做的事（不改动已应用的 V1/V2/V3/V4；V3 = 游标去保留字 IK1W1M，V4 = 生成任务资产 IK1W1L）：
+--   0. 表级守卫先行：任一表不存在时（补记 V1 不执行 V1 SQL 的生成域旧库，IK1Z51）
+--      直接建出最终形态（公共字段 + 唯一键 + V1 普通索引），随后的列级守卫
+--      与搬移全部幂等跳过，终态与空库路径一致，不再 fail-closed 误报 1146
 --   1. 两表原地升级为 BaseEntity 公共持久化字段：新增 gmt_create/gmt_modified/
 --      version/is_delete，旧列值搬入新列后删除旧列。主键 id 与 card_id 关联不动，
 --      既有模板记录与图片关系全部保留，不删除、不替换数据卷。
@@ -22,6 +25,16 @@
 -- 任意语句失败重跑安全；已应用版本由 schema_migrations 记账本跳过。
 
 -- ============ template_card：字段统一 ============
+
+-- 0) 表级守卫（IK1Z51）：表不存在直接建最终形态，随后 1)~4) 幂等跳过
+SET @tc_create := (SELECT IF(COUNT(*) = 0,
+  'CREATE TABLE template_card (id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT ''主键'', tag_code VARCHAR(64) NOT NULL COMMENT ''所属标签'', title VARCHAR(255) NOT NULL COMMENT ''卡片标题'', video_url VARCHAR(512) NULL COMMENT ''视频地址'', layout VARCHAR(32) NOT NULL COMMENT ''布局：wide/portrait/social/image'', sort_order INT NOT NULL DEFAULT 0 COMMENT ''排序'', gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT ''创建时间'', gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT ''更新时间'', version INT NOT NULL DEFAULT 0 COMMENT ''乐观锁版本'', is_delete TINYINT NOT NULL DEFAULT 0 COMMENT ''逻辑删除：0未删 1已删'', UNIQUE KEY uk_template_card_tag_title (tag_code, title), INDEX idx_tag_code (tag_code), INDEX idx_tag_sort (tag_code, sort_order)) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT =''模板卡片''',
+  'SELECT 1')
+FROM information_schema.TABLES
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'template_card');
+PREPARE stmt FROM @tc_create;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- 1) 新增公共持久化字段（仅当 gmt_create 不存在）
 SET @tc_add := (SELECT IF(COUNT(*) = 0,
@@ -64,6 +77,16 @@ EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
 -- ============ template_card_image：字段统一 ============
+
+-- 0) 表级守卫（IK1Z51）：表不存在直接建最终形态，随后 1)~4) 幂等跳过
+SET @tci_create := (SELECT IF(COUNT(*) = 0,
+  'CREATE TABLE template_card_image (id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT ''主键'', card_id BIGINT NOT NULL COMMENT ''卡片ID'', image_url VARCHAR(512) NOT NULL COMMENT ''图片地址'', sort_order INT NOT NULL DEFAULT 0 COMMENT ''排序'', gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT ''创建时间'', gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT ''更新时间'', version INT NOT NULL DEFAULT 0 COMMENT ''乐观锁版本'', is_delete TINYINT NOT NULL DEFAULT 0 COMMENT ''逻辑删除：0未删 1已删'', UNIQUE KEY uk_template_card_image_card_sort (card_id, sort_order), INDEX idx_card_id (card_id), INDEX idx_card_sort (card_id, sort_order)) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT =''卡片图片''',
+  'SELECT 1')
+FROM information_schema.TABLES
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'template_card_image');
+PREPARE stmt FROM @tci_create;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- 1) 新增公共持久化字段
 SET @tci_add := (SELECT IF(COUNT(*) = 0,
