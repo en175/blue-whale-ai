@@ -51,11 +51,13 @@ public class HealthController {
     }
 
     /**
-     * users 表存在性探针：成功 → true；表不存在/缺列/连接异常 → false。
+     * users 表存在性探针：查询能成功执行（表存在 + 列就绪）→ true；表不存在/缺列/连接异常 → false。
+     * 用 queryForList 而非 queryForMap：干净环境 users 为空表（schema.sql 只建表不插数据），
+     * queryForMap 会因「expected 1, actual 0」误报 DOWN。空表 ≠ schema 漂移，不应判不健康。
      */
     private boolean probeUsersTable() {
         try {
-            jdbcTemplate.queryForMap(PROBE_SQL);
+            jdbcTemplate.queryForList(PROBE_SQL);
             return true;
         } catch (Exception e) {
             log.warn("users 表探针失败，user-service 报 DOWN：{}", e.getMessage());
