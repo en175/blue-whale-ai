@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
-# Schema 迁移三场景验收(IK1W1E)
+# Schema 迁移四场景验收(IK1W1E + IK1W1L)
 #
 # 用真实 MySQL + 隔离 Compose 栈验证版本化迁移与 Schema 就绪门禁：
-#   1. empty   空库初始化：down -v 起空卷，迁移器跑 V1+V2+V3，记账本记录版本，表齐全，
-#              游标物理列为非保留字 event_cursor(IK1W1M)。
-#   2. upgrade 旧库保数据升级：注入旧库夹具，迁移器补记 V1 且保留既有业务数据；
-#              旧库事件/Outbox 的游标值、身份、状态与重试元数据完整保留(IK1W1M)。
-#   3. drift   未知漂移失败：注入坏夹具(记账本谎称 V1 但缺表)，迁移失败、业务服务不启动。
+#   1. empty              空库初始化：down -v 起空卷，迁移器跑 V1+V2+V3，记账本记录版本，表齐全，
+#                         游标物理列为非保留字 event_cursor(IK1W1M)。
+#   2. upgrade            旧库保数据升级：注入旧库夹具，迁移器补记 V1 且保留既有业务数据；
+#                         旧库事件/Outbox 的游标值、身份、状态与重试元数据完整保留(IK1W1M)。
+#   3. drift              未知漂移失败：注入坏夹具(记账本谎称 V1 但缺表)，迁移失败、业务服务不启动。
+#   4. upgrade-generation 生成域旧库升级(IK1W1L)：注入 pre-ik10i6 形态 generation 域旧库，
+#                         V3 原地建缺表/补缺列/幂等回填，既有 Job/Asset/Canvas 关联保留。
 #
-# 三个场景各自独立 Compose 项目(bw-schema-*)，结束 down -v 清理，可重复执行。
+# 各场景独立 Compose 项目(bw-schema-*)，结束 down -v 清理，可重复执行。
 # 复用 deploy/local/docker-compose.yml + .acceptance.yml 基础设施与镜像。
 #
 # 用法：
-#   scripts/run-schema-acceptance.sh              跑全部三个场景
-#   scripts/run-schema-acceptance.sh empty        只跑空库场景
-#   scripts/run-schema-acceptance.sh upgrade      只跑旧库升级场景
-#   scripts/run-schema-acceptance.sh drift        只跑漂移失败场景
-#   scripts/run-schema-acceptance.sh --keep-stack 调试：结束后保留最后一个栈
+#   scripts/run-schema-acceptance.sh                      跑全部四个场景
+#   scripts/run-schema-acceptance.sh empty                只跑空库场景
+#   scripts/run-schema-acceptance.sh upgrade              只跑旧库升级场景
+#   scripts/run-schema-acceptance.sh drift                只跑漂移失败场景
+#   scripts/run-schema-acceptance.sh upgrade-generation   只跑生成域旧库升级场景
+#   scripts/run-schema-acceptance.sh --keep-stack         调试：结束后保留最后一个栈
 #
 # 前置：需先 scripts/run-mvp-acceptance.sh --keep-stack 或 docker build 构建过 :acceptance 镜像。
 # 本脚本不重新构建镜像(聚焦验证迁移逻辑，镜像构建由 run-mvp-acceptance.sh 负责)。
@@ -36,13 +39,14 @@ fail() { echo "❌ schema-acceptance: $*" >&2; exit 1; }
 
 usage() {
   cat <<'EOF'
-Schema 迁移验收(IK1W1E)—— 用法：
+Schema 迁移验收(IK1W1E + IK1W1L)—— 用法：
 
-  scripts/run-schema-acceptance.sh              全部三个场景
-  scripts/run-schema-acceptance.sh empty        空库初始化
-  scripts/run-schema-acceptance.sh upgrade      旧库保数据升级
-  scripts/run-schema-acceptance.sh drift        未知漂移失败
-  scripts/run-schema-acceptance.sh --keep-stack 调试：保留最后一个栈
+  scripts/run-schema-acceptance.sh                      全部四个场景
+  scripts/run-schema-acceptance.sh empty                空库初始化
+  scripts/run-schema-acceptance.sh upgrade              旧库保数据升级
+  scripts/run-schema-acceptance.sh drift                未知漂移失败
+  scripts/run-schema-acceptance.sh upgrade-generation   生成域旧库升级(IK1W1L)
+  scripts/run-schema-acceptance.sh --keep-stack         调试：保留最后一个栈
 
 前置：:acceptance 镜像需已构建(scripts/run-mvp-acceptance.sh 会构建)。
 EOF
@@ -50,13 +54,13 @@ EOF
 
 for arg in "$@"; do
   case "$arg" in
-    empty|upgrade|drift) SCENARIOS+=("$arg") ;;
+    empty|upgrade|drift|upgrade-generation) SCENARIOS+=("$arg") ;;
     --keep-stack) KEEP_STACK=1 ;;
     -h|--help|help) usage; exit 0 ;;
     *) usage; fail "未知参数：$arg" ;;
   esac
 done
-[ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(empty upgrade drift)
+[ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(empty upgrade drift upgrade-generation)
 
 command -v docker >/dev/null || fail "未找到 docker"
 docker compose version >/dev/null 2>&1 || fail "docker compose v2 不可用"
@@ -126,7 +130,7 @@ trap 'rm -f "$TMP_OVERRIDE"' EXIT
 # ───────────── 场景 1：空库初始化 ─────────────
 scenario_empty() {
   local project="bw-schema-empty"
-  echo "🧪 [1/3] 空库初始化(project=$project)"
+  echo "🧪 [1/4] 空库初始化(project=$project)"
   echo "   down -v 起空卷 → 迁移器应跑 V1+V2+V3，记账本记录版本，表齐全"
   docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" down -v --remove-orphans >/dev/null 2>&1 || true
 
@@ -158,14 +162,14 @@ scenario_empty() {
   [ "$event_cursor_cols" = "2" ] || fail "空库：project_events/outbox_messages 应有 event_cursor 列"
   [ "$reserved_cols" = "0" ] || fail "空库：不应残留保留字 cursor 列"
 
-  echo "✅ [1/3] 空库初始化通过"
+  echo "✅ [1/4] 空库初始化通过"
   [ "$KEEP_STACK" = "1" ] || docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" down -v --remove-orphans >/dev/null 2>&1 || true
 }
 
 # ───────────── 场景 2：旧库保数据升级 ─────────────
 scenario_upgrade() {
   local project="bw-schema-upgrade"
-  echo "🧪 [2/3] 旧库保数据升级(project=$project)"
+  echo "🧪 [2/4] 旧库保数据升级(project=$project)"
   echo "   注入旧库夹具 → 迁移器补记 V1，既有业务数据保留"
   docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" -f "$TMP_OVERRIDE" down -v --remove-orphans >/dev/null 2>&1 || true
 
@@ -212,14 +216,14 @@ scenario_upgrade() {
     || fail "旧库：Outbox 身份/状态/重试元数据未保留，实际 $outbox"
   [ "$reserved_cols" = "0" ] || fail "旧库：不应残留保留字 cursor 列"
 
-  echo "✅ [2/3] 旧库保数据升级通过"
+  echo "✅ [2/4] 旧库保数据升级通过"
   [ "$KEEP_STACK" = "1" ] || docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" -f "$TMP_OVERRIDE" down -v --remove-orphans >/dev/null 2>&1 || true
 }
 
 # ───────────── 场景 3：未知漂移失败 ─────────────
 scenario_drift() {
   local project="bw-schema-drift"
-  echo "🧪 [3/3] 未知漂移失败(project=$project)"
+  echo "🧪 [3/4] 未知漂移失败(project=$project)"
   echo "   注入坏夹具(记账本谎称 V1 但缺 project 表)→ 迁移失败、业务服务不启动"
   docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" -f "$TMP_OVERRIDE" down -v --remove-orphans >/dev/null 2>&1 || true
 
@@ -248,7 +252,73 @@ scenario_drift() {
   case "$user_st" in running|healthy) fail "漂移：user 不应启动但状态=$user_st" ;; esac
   case "$agent_st" in running|healthy) fail "漂移：agent 不应启动但状态=$agent_st" ;; esac
 
-  echo "✅ [3/3] 未知漂移失败通过(fail-closed 门禁生效)"
+  echo "✅ [3/4] 未知漂移失败通过(fail-closed 门禁生效)"
+  [ "$KEEP_STACK" = "1" ] || docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" -f "$TMP_OVERRIDE" down -v --remove-orphans >/dev/null 2>&1 || true
+}
+
+# ───────────── 场景 4：生成域旧库升级（IK1W1L） ─────────────
+scenario_upgrade_generation() {
+  local project="bw-schema-upgrade-generation"
+  echo "🧪 [4/4] 生成域旧库升级(project=$project)"
+  echo "   注入 pre-ik10i6 形态 generation 域夹具 → V3 建缺表/补缺列/幂等回填，既有事实保留"
+  docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" -f "$TMP_OVERRIDE" down -v --remove-orphans >/dev/null 2>&1 || true
+
+  write_fixture_override "$FIXTURE_DIR/old-generation-schema.sql"
+  start_infra "$project" "$TMP_OVERRIDE"
+
+  # 升级前：generation_job_outputs 等表不存在，generation_jobs 缺后加列
+  local pre_outputs; pre_outputs="$(mysql_exec "$project" "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$MYSQL_DB' AND table_name='generation_job_outputs'" 2>/dev/null | tail -1)"
+  local pre_col; pre_col="$(mysql_exec "$project" "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$MYSQL_DB' AND table_name='generation_jobs' AND column_name='strategy_version'" 2>/dev/null | tail -1)"
+  echo "   升级前 generation_job_outputs 表存在: $pre_outputs(期望 0)"
+  echo "   升级前 generation_jobs.strategy_version 列存在: $pre_col(期望 0)"
+  [ "$pre_outputs" = "0" ] || fail "夹具异常：generation_job_outputs 不应存在"
+  [ "$pre_col" = "0" ] || fail "夹具异常：strategy_version 列不应存在"
+
+  docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" up blue-whale-schema-migration >/dev/null 2>&1 &
+  local code; code="$(wait_migration_done bw-acc-schema-migration)"
+
+  if [ "$code" != "0" ]; then
+    echo "❌ 生成域旧库升级迁移失败(exit=$code)"
+    docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" logs blue-whale-schema-migration 2>&1 | tail -30
+    [ "$KEEP_STACK" = "1" ] || docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" -f "$TMP_OVERRIDE" down -v --remove-orphans >/dev/null 2>&1 || true
+    fail "生成域旧库升级场景失败"
+  fi
+
+  # 断言：记账本 1,2,3；缺表建出；缺列补齐；既有事实与关联保留；输出槽回填
+  local versions; versions="$(mysql_exec "$project" 'SELECT GROUP_CONCAT(version ORDER BY version) FROM schema_migrations' 2>/dev/null | tail -1)"
+  local outputs_table; outputs_table="$(mysql_exec "$project" "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$MYSQL_DB' AND table_name='generation_job_outputs'" 2>/dev/null | tail -1)"
+  local col_ok; col_ok="$(mysql_exec "$project" "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$MYSQL_DB' AND table_name='generation_jobs' AND column_name='strategy_version'" 2>/dev/null | tail -1)"
+  local job_version; job_version="$(mysql_exec "$project" 'SELECT version FROM generation_jobs WHERE id=6001' 2>/dev/null | tail -1)"
+  local job_status; job_status="$(mysql_exec "$project" 'SELECT status FROM generation_jobs WHERE id=6001' 2>/dev/null | tail -1)"
+  local asset_ok; asset_ok="$(mysql_exec "$project" "SELECT COUNT(*) FROM assets WHERE id=7001 AND storage_key='legacy/acc-7001.png'" 2>/dev/null | tail -1)"
+  local canvas_link; canvas_link="$(mysql_exec "$project" "SELECT COUNT(*) FROM canvas WHERE id=8001 AND JSON_CONTAINS(nodes_json, '7001', '\$[0].data.assetId')" 2>/dev/null | tail -1)"
+  local backfill; backfill="$(mysql_exec "$project" "SELECT COUNT(*) FROM generation_job_outputs WHERE generation_job_id=6001 AND slot_index=0 AND status='succeeded'" 2>/dev/null | tail -1)"
+
+  echo "   记账本版本: $versions"
+  echo "   generation_job_outputs 建出: $outputs_table  strategy_version 补齐: $col_ok"
+  echo "   既有 Job 6001: version=$job_version status=$job_status  既有 Asset 7001: $asset_ok"
+  echo "   Canvas→Asset 引用保持: $canvas_link  输出槽回填: $backfill"
+
+  [ "$versions" = "1,2,3" ] || fail "生成域旧库：记账本应为 1,2,3，实际 $versions"
+  [ "$outputs_table" = "1" ] || fail "生成域旧库：generation_job_outputs 应建出"
+  [ "$col_ok" = "1" ] || fail "生成域旧库：strategy_version 列应补齐"
+  [ "$job_version" = "3" ] || fail "生成域旧库：既有 Job 聚合版本应保留(期望 3，实际 $job_version)"
+  [ "$job_status" = "succeeded" ] || fail "生成域旧库：既有 Job 状态应保留(期望 succeeded，实际 $job_status)"
+  [ "$asset_ok" = "1" ] || fail "生成域旧库：既有 Asset 未保留"
+  [ "$canvas_link" = "1" ] || fail "生成域旧库：Canvas→Asset 引用未保持"
+  [ "$backfill" = "1" ] || fail "生成域旧库：输出槽应回填 succeeded 行"
+
+  # 幂等：再跑一次迁移容器，exit 0 且数据不重复、版本号不变
+  docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" up blue-whale-schema-migration >/dev/null 2>&1 &
+  local code2; code2="$(wait_migration_done bw-acc-schema-migration)"
+  local outputs_count; outputs_count="$(mysql_exec "$project" 'SELECT COUNT(*) FROM generation_job_outputs' 2>/dev/null | tail -1)"
+  local job_version2; job_version2="$(mysql_exec "$project" 'SELECT version FROM generation_jobs WHERE id=6001' 2>/dev/null | tail -1)"
+  echo "   重复迁移 exit=$code2  输出行数=$outputs_count  Job version=$job_version2"
+  [ "$code2" = "0" ] || fail "生成域旧库：重复迁移应 exit 0，实际 $code2"
+  [ "$outputs_count" = "1" ] || fail "生成域旧库：重复迁移不应重复回填(期望 1 行，实际 $outputs_count)"
+  [ "$job_version2" = "3" ] || fail "生成域旧库：重复迁移不应改变版本号(期望 3，实际 $job_version2)"
+
+  echo "✅ [4/4] 生成域旧库升级通过"
   [ "$KEEP_STACK" = "1" ] || docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" -f "$TMP_OVERRIDE" down -v --remove-orphans >/dev/null 2>&1 || true
 }
 
@@ -259,6 +329,7 @@ for s in "${SCENARIOS[@]}"; do
     empty) scenario_empty ;;
     upgrade) scenario_upgrade ;;
     drift) scenario_drift ;;
+    upgrade-generation) scenario_upgrade_generation ;;
   esac
 done
 
