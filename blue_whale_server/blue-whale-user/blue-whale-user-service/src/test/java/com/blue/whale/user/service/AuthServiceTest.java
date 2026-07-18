@@ -104,7 +104,7 @@ class AuthServiceTest {
         redisMock.when(() -> RedisUtil.getCacheObject(contains("code"))).thenReturn("123456");
 
         when(userMapper.selectOne(any())).thenReturn(null);
-        when(userMapper.insert(any())).thenReturn(1);
+        when(userMapper.insert(any(User.class))).thenReturn(1);
         when(userMapper.selectCount(any())).thenReturn(0L);
 
         var resp = authService.login("13800138000", "123456");
@@ -131,7 +131,7 @@ class AuthServiceTest {
 
         assertThat(resp.getIsNewUser()).isFalse();
         assertThat(resp.getUsername()).isEqualTo("用户7281");
-        verify(userMapper, never()).insert(any());
+        verify(userMapper, never()).insert(any(User.class));
     }
 
     @Test

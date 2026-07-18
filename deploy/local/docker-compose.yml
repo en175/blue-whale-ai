@@ -185,10 +185,9 @@ services:
       blue-whale-schema-migration:
         condition: service_completed_successfully
     healthcheck:
-      # user-service 无专用 /health 端点；测 8081 端口可达。
-      # Spring Security 对 / 返回 401/403（进程起来、Security 生效）；
-      # 接受 2xx/3xx/4xx，排除 5xx（服务异常）和 000（连接失败）。
-      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/ | grep -qE '^(2|3|4)'"]
+      # IK1WZP：探测专用 /health 端点（users 表存在性探针），替代端口可达判断。
+      # users 表正常 → 200；表缺失/缺列 → 503（fail-closed）。curl -f 在 ≥400 时退出非零。
+      test: ["CMD-SHELL", "curl -fs http://127.0.0.1:8081/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 18
