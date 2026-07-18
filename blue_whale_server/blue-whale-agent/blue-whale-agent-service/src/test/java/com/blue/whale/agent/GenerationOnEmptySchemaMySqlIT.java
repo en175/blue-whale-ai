@@ -37,7 +37,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>上下文启动前（{@link DynamicPropertySource}）清空测试库全部业务表；
  * 上下文启动时 {@code blue-whale.schema-migration.enabled=true} 触发迁移器在空库上
- * 完整执行 V1+V2+V3+V4；随后验证公开生成命令创建并查询 GenerationJob、Worker 接纳成功
+ * 完整执行 V1+V2+V3+V4+V5；随后验证公开生成命令创建并查询 GenerationJob、Worker 接纳成功
  * 结果创建关联 Asset，并能通过 Project 级 Snapshot 查询恢复。
  */
 @EnabledIfEnvironmentVariable(named = "BLUE_WHALE_TEST_MYSQL_URL", matches = "jdbc:mysql://.+")
@@ -116,7 +116,7 @@ class GenerationOnEmptySchemaMySqlIT {
         // 空库迁移链完整执行：记账本记录 1,2,3,4
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT GROUP_CONCAT(version ORDER BY version) FROM schema_migrations", String.class))
-                .isEqualTo("1,2,3,4");
+                .isEqualTo("1,2,3,4,5");
 
         // 预置 Project（迁移链不管业务数据，测试直接写）
         jdbcTemplate.update("INSERT INTO project (id, owner_id, name) VALUES (9101, 1001, 'empty-db-gen')");

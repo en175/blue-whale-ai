@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * {@code BLUE_WHALE_TEST_MYSQL_URL/USERNAME/PASSWORD}。默认环境明确跳过。
  *
  * <p>直接用生产迁移目录 {@link SchemaMigrationService#DEFAULT_MIGRATION_LOCATION}
- * （V1/V2/V3/V4）驱动迁移器，覆盖：
+ * （V1/V2/V3/V4/V5）驱动迁移器，覆盖：
  * <ul>
  *   <li>空库初始化后 GenerationJob/Asset 域结构齐全，重复执行幂等</li>
  *   <li>受支持旧形态（pre-ik10i6 缺表缺列、ik10i6 时代 NOT NULL 输出槽、
@@ -139,7 +139,7 @@ class GenerationSchemaMigrationMySqlIT {
 
         List<Integer> applied = service.migrate();
 
-        assertThat(applied).containsExactly(1, 2, 3, 4);
+        assertThat(applied).containsExactly(1, 2, 3, 4, 5);
         for (String table : List.of(
                 "generation_jobs", "generation_job_outputs", "assets",
                 "asset_storage_objects", "asset_object_transfers",
@@ -159,7 +159,7 @@ class GenerationSchemaMigrationMySqlIT {
 
         // 重复执行：无新版本、无漂移报错
         assertThat(service.migrate()).isEmpty();
-        assertThat(appliedVersions()).containsExactly(1, 2, 3, 4);
+        assertThat(appliedVersions()).containsExactly(1, 2, 3, 4, 5);
     }
 
     @Test
@@ -182,8 +182,8 @@ class GenerationSchemaMigrationMySqlIT {
                 db, SchemaMigrationService.DEFAULT_MIGRATION_LOCATION);
         List<Integer> applied = service.migrate();
 
-        // 旧库补记 V1，随后 V2、V3、V4 正常应用
-        assertThat(applied).containsExactly(1, 2, 3, 4);
+        // 旧库补记 V1，随后 V2、V3、V4、V5 正常应用
+        assertThat(applied).containsExactly(1, 2, 3, 4, 5);
 
         // 缺列补齐：generation_jobs 十一个后加列、assets 三个后加列
         for (String column : List.of(
@@ -350,7 +350,7 @@ class GenerationSchemaMigrationMySqlIT {
                 db, SchemaMigrationService.DEFAULT_MIGRATION_LOCATION);
         List<Integer> applied = service.migrate();
 
-        assertThat(applied).containsExactly(1, 2, 3, 4);
+        assertThat(applied).containsExactly(1, 2, 3, 4, 5);
 
         // NOT NULL 三列放宽为 V1 契约的可空形态
         assertThat(columnNullable("generation_job_outputs", "asset_id")).isTrue();
@@ -509,7 +509,7 @@ class GenerationSchemaMigrationMySqlIT {
                 db, SchemaMigrationService.DEFAULT_MIGRATION_LOCATION);
         List<Integer> applied = service.migrate();
 
-        assertThat(applied).containsExactly(1, 2, 3, 4);
+        assertThat(applied).containsExactly(1, 2, 3, 4, 5);
 
         // 旧唯一索引被丢弃，多输出契约的新唯一索引与 slot_index 列就位
         assertThat(indexExists("generation_provider_tasks", "uk_provider_task_job")).isFalse();
