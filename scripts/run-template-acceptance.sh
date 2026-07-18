@@ -203,11 +203,11 @@ cleanup_project() {
 
 # ── 公共断言 ──
 
-# 记账本为 1,2,3,4,5 且全部 applied（V1 基线 / V2 Skill seed / V3 游标 IK1W1M / V4 生成任务资产 IK1W1L / V5 模板 IK1W1K）
+# 记账本为 1,2,3,4,5,6 且全部 applied（V1 基线 / V2 Skill seed / V3 游标 IK1W1M / V4 生成任务资产 IK1W1L / V5 模板 IK1W1K / V6 Agent 运行持久化 IK1W1J）
 assert_ledger() {
   local project="$1" versions
   versions="$(mysql_scalar "$project" 'SELECT GROUP_CONCAT(version ORDER BY version) FROM schema_migrations WHERE status=1')"
-  [ "$versions" = "1,2,3,4,5" ] || fail "记账本应为 1,2,3,4,5(applied)，实际 $versions"
+  [ "$versions" = "1,2,3,4,5,6" ] || fail "记账本应为 1,2,3,4,5,6(applied)，实际 $versions"
   echo "   记账本版本: $versions ✓"
 }
 

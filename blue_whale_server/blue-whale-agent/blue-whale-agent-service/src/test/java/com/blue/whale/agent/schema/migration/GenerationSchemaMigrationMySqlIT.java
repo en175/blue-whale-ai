@@ -133,13 +133,13 @@ class GenerationSchemaMigrationMySqlIT {
     }
 
     @Test
-    void emptyDatabaseAppliesV1V2V3V4AndConvergesGenerationTables() {
+    void emptyDatabaseAppliesFullMigrationChainAndConvergesGenerationTables() {
         SchemaMigrationService service = new SchemaMigrationService(
                 db, SchemaMigrationService.DEFAULT_MIGRATION_LOCATION);
 
         List<Integer> applied = service.migrate();
 
-        assertThat(applied).containsExactly(1, 2, 3, 4, 5);
+        assertThat(applied).containsExactly(1, 2, 3, 4, 5, 6);
         for (String table : List.of(
                 "generation_jobs", "generation_job_outputs", "assets",
                 "asset_storage_objects", "asset_object_transfers",
@@ -182,8 +182,8 @@ class GenerationSchemaMigrationMySqlIT {
                 db, SchemaMigrationService.DEFAULT_MIGRATION_LOCATION);
         List<Integer> applied = service.migrate();
 
-        // 旧库补记 V1，随后 V2、V3、V4、V5 正常应用
-        assertThat(applied).containsExactly(1, 2, 3, 4, 5);
+        // 旧库补记 V1，随后 V2、V3、V4、V5、V6 正常应用
+        assertThat(applied).containsExactly(1, 2, 3, 4, 5, 6);
 
         // 缺列补齐：generation_jobs 十一个后加列、assets 三个后加列
         for (String column : List.of(
@@ -350,7 +350,7 @@ class GenerationSchemaMigrationMySqlIT {
                 db, SchemaMigrationService.DEFAULT_MIGRATION_LOCATION);
         List<Integer> applied = service.migrate();
 
-        assertThat(applied).containsExactly(1, 2, 3, 4, 5);
+        assertThat(applied).containsExactly(1, 2, 3, 4, 5, 6);
 
         // NOT NULL 三列放宽为 V1 契约的可空形态
         assertThat(columnNullable("generation_job_outputs", "asset_id")).isTrue();
@@ -509,7 +509,7 @@ class GenerationSchemaMigrationMySqlIT {
                 db, SchemaMigrationService.DEFAULT_MIGRATION_LOCATION);
         List<Integer> applied = service.migrate();
 
-        assertThat(applied).containsExactly(1, 2, 3, 4, 5);
+        assertThat(applied).containsExactly(1, 2, 3, 4, 5, 6);
 
         // 旧唯一索引被丢弃，多输出契约的新唯一索引与 slot_index 列就位
         assertThat(indexExists("generation_provider_tasks", "uk_provider_task_job")).isFalse();
