@@ -75,5 +75,8 @@ Agent/Gateway 的 `/health` 返回 `build.commit` / `build.builtAt`，启动日�
 2. **V1__baseline.sql 与 schema.sql 内容重复**：V1 是 schema.sql 的幂等化副本，二者需同步维护。
    schema.sql 保留作为人读参考；V1__baseline.sql 是迁移器加载的权威源。未来改表应改 V1 对应的
    新增量文件，而非回改 V1（V1 已锁定）。建议加 CI 守卫防止二者意外漂移。
-3. **模板种子数据归 IK1W1K**：V2__seed.sql 仅含 Skill 面板种子。template_card 种子数据与字段
-   统一由 IK1W1K 负责（IK1W1K Blocked by IK1W1E）。空库启动后 template_card 表结构就绪但无数据。
+3. **模板种子数据归 IK1W1K（已完成）**：V2__seed.sql 仅含 Skill 面板种子。template_card 字段
+   统一与种子已由 IK1W1K 在 V5__template-unify-fields-and-seed.sql 落地（V3=游标 IK1W1M、
+   V4=生成任务资产 IK1W1L 已先合入占用，模板迁移顺延为 V5）：两表原地升级为 BaseEntity
+   公共持久化字段（gmt_create/gmt_modified/version/is_delete），并建立 uk_template_card_tag_title /
+   uk_template_card_image_card_sort 逻辑身份唯一键保证种子幂等。

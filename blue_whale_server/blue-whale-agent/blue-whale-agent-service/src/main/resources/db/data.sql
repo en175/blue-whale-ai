@@ -1,3 +1,8 @@
+-- ⚠️ 已归档（IK1W1K）：模板种子已并入版本化迁移 db/migrations/V5__template-unify-fields-and-seed.sql，
+-- 由 SchemaMigrationService 统一执行；V5 同时为模板与图片建立了唯一键逻辑身份，幂等由
+-- uk_template_card_tag_title / uk_template_card_image_card_sort 保证。
+-- 历史保留供追溯，不再手动执行。
+
 -- 模板初始化数据（配合 schema.sql 使用，可重复执行：INSERT IGNORE）
 -- 标签元数据不在此处，见 TemplateTagEnum 枚举
 

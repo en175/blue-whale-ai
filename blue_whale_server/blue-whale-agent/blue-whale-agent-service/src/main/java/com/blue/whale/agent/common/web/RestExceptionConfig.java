@@ -100,13 +100,15 @@ public class RestExceptionConfig {
 
     @ExceptionHandler(DataAccessException.class)
     public Result<Object> handleError(DataAccessException e) {
-        log.error("data access error", e);
+        // User 提示保持脱敏；日志携带 Request ID（PublicRequestIdFilter 写入），
+        // 可用响应头 X-Request-Id 反查底层数据库原因（IK1W1K）
+        log.error("data access error, requestId={}", PublicRequestId.current(), e);
         return Result.failed(500, "服务暂时不可用");
     }
 
     @ExceptionHandler(TransactionException.class)
     public Result<Object> handleError(TransactionException e) {
-        log.error("transaction error", e);
+        log.error("transaction error, requestId={}", PublicRequestId.current(), e);
         return Result.failed(500, "服务暂时不可用");
     }
 

@@ -23,14 +23,14 @@ MySQL(healthy) → blue-whale-schema-migration(跑迁移, exit 0) → user/agent
 
 新增 Schema 变更时，在
 `blue_whale_server/blue-whale-agent/blue-whale-agent-service/src/main/resources/db/migrations/`
-下创建 `V<下一个版本号>__<简短英文描述>.sql`，例如 `V4__<change>.sql`。
+下创建 `V<下一个版本号>__<简短英文描述>.sql`，例如 `V5__<change>.sql`。
 
 - 版本号连续递增（V1、V2、V3…），不可重复。
 - SQL 必须幂等（`CREATE TABLE IF NOT EXISTS`、`INSERT IGNORE`、information_schema 守卫等），便于重复启动。
-- V1 = 基线 Schema（等价于 `db/schema.sql`），V2 = 模板与 Skill seed 数据，
-  V3 = 产品事件与 Outbox 游标物理列去保留字（`` `cursor` `` → `event_cursor`，IK1W1M）
-  + GenerationJob/Asset 域旧库结构收敛（IK1W1L）：对受支持历史形态原地建缺表、补缺列、
-  收敛旧约束并幂等回填输出槽；无法安全识别的漂移 fail-closed（查不存在表名携带漂移摘要报错）。
+- V1 = 基线 Schema（等价于 `db/schema.sql`），V2 = Skill seed 数据，
+  V3 = 产品事件与 Outbox 游标物理列去保留字（`` `cursor` `` → `event_cursor`，IK1W1M），
+  V4 = GenerationJob 与 Asset 持久化结构收敛升级（IK1W1L），
+  V5 = 模板表公共字段统一 + 模板 seed 数据（IK1W1K）。
 
 历史 `ik*.sql` 已归档（顶部有注释），变更已并入 V1，不再执行。
 
@@ -49,30 +49,28 @@ curl -s http://localhost:8082/health | python3 -m json.tool
 docker inspect blue-whale-agent:local | grep blue-whale.git-commit
 ```
 
-## 四场景验收
+## 三场景验收
 
 ```bash
 # 前置：先构建 :acceptance 镜像（run-mvp-acceptance.sh 会构建）
 scripts/run-mvp-acceptance.sh --keep-stack   # 或 docker compose build
 
-# 跑全部四个场景（各自独立 Compose 项目，结束清理）
+# 跑全部三个场景（各自独立 Compose 项目，结束清理）
 scripts/run-schema-acceptance.sh
 
 # 或只跑单个场景
-scripts/run-schema-acceptance.sh empty               # 空库初始化
-scripts/run-schema-acceptance.sh upgrade             # 旧库保数据升级
-scripts/run-schema-acceptance.sh drift               # 未知漂移失败（fail-closed）
-scripts/run-schema-acceptance.sh upgrade-generation  # 生成域旧库升级（IK1W1L）
+scripts/run-schema-acceptance.sh empty       # 空库初始化
+scripts/run-schema-acceptance.sh upgrade     # 旧库保数据升级
+scripts/run-schema-acceptance.sh drift       # 未知漂移失败（fail-closed）
 ```
 
 ### 场景说明
 
 | 场景 | 夹具 | 期望 |
 |------|------|------|
-| empty | 无（空卷） | 迁移跑 V1+V2+V3，记账本记录 1,2,3，表齐全，游标物理列为 event_cursor |
-| upgrade | `fixtures/old-baseline.sql` | 旧库补记 V1，既有 project 数据（id 9001/9002）保留；旧事件/Outbox 游标值、身份、状态与重试元数据完整保留 |
+| empty | 无（空卷） | 迁移跑 V1→V2→V3→V4→V5，记账本记录 1,2,3,4,5，表齐全，游标物理列为 event_cursor |
+| upgrade | `fixtures/old-baseline.sql` | 旧库补记 V1 后增量 V2/V3/V4/V5，既有 project 数据（id 9001/9002）保留；旧事件/Outbox 游标值、身份、状态与重试元数据完整保留 |
 | drift | `fixtures/drift.sql` | 记账本谎称 V1 但缺 project 表 → V2 失败，业务服务不启动 |
-| upgrade-generation | `fixtures/old-generation-schema.sql` | pre-ik10i6 形态 generation 域旧库：V3 建缺表、补缺列、收敛旧约束并回填输出槽；既有 Job 6001/Asset 7001/Canvas 8001 及其关联保留；重复迁移幂等 |
 
 ## 开发者日常
 
