@@ -229,11 +229,28 @@ class GenerationSchemaMigrationMySqlIT {
                 "SELECT status FROM generation_job_outputs WHERE generation_job_id = 6001 AND slot_index = 0"))
                 .isEqualTo("succeeded");
 
+        // IK1Z51：旧库缺 template_card/template_card_image（补记 V1 不执行 V1 SQL）时，
+        // V5 直接建出最终形态并导入种子，不得 fail-closed 误报
+        assertThat(tableExists("template_card")).isTrue();
+        assertThat(tableExists("template_card_image")).isTrue();
+        for (String column : List.of("gmt_create", "gmt_modified", "version", "is_delete")) {
+            assertThat(columnExists("template_card", column)).as("template_card.%s 应存在", column).isTrue();
+            assertThat(columnExists("template_card_image", column)).as("template_card_image.%s 应存在", column).isTrue();
+        }
+        assertThat(columnExists("template_card", "create_time")).isFalse();
+        assertThat(columnExists("template_card_image", "create_time")).isFalse();
+        assertThat(indexExists("template_card", "uk_template_card_tag_title")).isTrue();
+        assertThat(indexExists("template_card_image", "uk_template_card_image_card_sort")).isTrue();
+        assertThat(queryLong("SELECT COUNT(*) FROM template_card")).isEqualTo(32L);
+        assertThat(queryLong("SELECT COUNT(*) FROM template_card_image")).isEqualTo(96L);
+
         // 重复执行：无新版本、数据不重复、版本号与终态不变
         assertThat(service.migrate()).isEmpty();
         assertThat(queryLong("SELECT COUNT(*) FROM generation_jobs")).isEqualTo(1L);
         assertThat(queryLong("SELECT COUNT(*) FROM generation_job_outputs")).isEqualTo(1L);
         assertThat(queryLong("SELECT COUNT(*) FROM assets")).isEqualTo(1L);
+        assertThat(queryLong("SELECT COUNT(*) FROM template_card")).isEqualTo(32L);
+        assertThat(queryLong("SELECT COUNT(*) FROM template_card_image")).isEqualTo(96L);
         assertThat(queryLong("SELECT version FROM generation_jobs WHERE id = 6001")).isEqualTo(3L);
         assertThat(queryString("SELECT status FROM generation_jobs WHERE id = 6001")).isEqualTo("succeeded");
     }
