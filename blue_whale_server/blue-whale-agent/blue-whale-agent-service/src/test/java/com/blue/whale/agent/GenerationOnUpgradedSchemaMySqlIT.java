@@ -113,7 +113,7 @@ class GenerationOnUpgradedSchemaMySqlIT {
 
     /**
      * 造受支持旧库：V1 全量基线 → generation 域回退 pre-ik10i6 形态 → 预置关联数据。
-     * 在上下文启动前执行，随后迁移器在启动时完成 V1 补记与 V2/V3/V4 升级。
+     * 在上下文启动前执行，随后迁移器在启动时完成 V1 补记与 V2/V3/V4/V5 升级。
      */
     private static void createLegacyDatabase(String url, String username, String password) throws Exception {
         Class.forName(MYSQL_DRIVER);
@@ -239,10 +239,10 @@ class GenerationOnUpgradedSchemaMySqlIT {
 
     @Test
     void publicGenerationChainWorksOnUpgradedLegacyDatabase() throws Exception {
-        // 迁移器已在启动时完成升级：记账本记录 1,2,3,4（V1 补记 + V2 + V3 + V4）
+        // 迁移器已在启动时完成升级：记账本记录 1,2,3,4,5（V1 补记 + V2 + V3 + V4 + V5）
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT GROUP_CONCAT(version ORDER BY version) FROM schema_migrations", String.class))
-                .isEqualTo("1,2,3,4");
+                .isEqualTo("1,2,3,4,5");
 
         // 公开生成命令：创建 GenerationJob（升级后的库上接纳事务全链路写入）
         String body = "{" +
