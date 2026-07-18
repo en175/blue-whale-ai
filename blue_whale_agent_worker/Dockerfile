@@ -1,14 +1,13 @@
 # Python Agent Worker（Fake / Pydantic-AI orchestrator）
 #
-# 注意包布局：setup.cfg 用 `package_dir = blue_whale_agent_worker = .`，
-# 即包源文件直接在仓库根（__init__.py / worker.py 等），没有 blue_whale_agent_worker/ 子目录。
-# 因此 Dockerfile 直接 COPY 整个上下文到 /app，由 pip install . 解析。
+# 标准 src 布局：包源文件在 src/blue_whale_agent_worker/，
+# setup.cfg 用 `package_dir = = src` + `packages.find where = src` 解析。
 
 FROM python:3.11-slim AS builder
 WORKDIR /build
-# 只 COPY 打包元数据 + 源文件（.dockerignore 已排除 tests / __pycache__）
+# 只 COPY 打包元数据 + 包源目录（tests / .venv 等本来就不进入安装产物）
 COPY pyproject.toml setup.cfg ./
-COPY __init__.py __main__.py adapters.py contracts.py fake_orchestrator.py http_gateway.py pydantic_orchestrator.py worker.py ./
+COPY src/ src/
 # 安装到 /install 便于多阶段复制
 RUN pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir --prefix=/install .
