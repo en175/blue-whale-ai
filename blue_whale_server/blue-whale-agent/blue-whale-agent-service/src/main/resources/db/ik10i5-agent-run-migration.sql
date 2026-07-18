@@ -1,3 +1,5 @@
+-- ⚠️ 已归档（IK1W1E）：本迁移的变更已并入 V1 基线 (db/migrations/V1__baseline.sql)。
+-- 历史保留供追溯，不再由迁移器执行。新增量请放在 db/migrations/V<n>__<slug>.sql。
 -- IK10I5 一次性生产迁移：在发布 Agent Service 与 Worker 前执行。
 -- 示例：mysql --host=<host> --user=<user> --password <database> < ik10i5-agent-run-migration.sql
 -- 本脚本不删除任何业务事实；末尾 ALTER 由迁移台账保证只执行一次。

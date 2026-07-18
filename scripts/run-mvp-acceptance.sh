@@ -29,10 +29,16 @@ LOG_DIR="$WEB_DIR/test-results/fullstack/service-logs"
 SANITIZER="$ROOT/scripts/lib/sanitize_acceptance_logs.py"
 KEEP_STACK=0
 
+# IK1W1E 构建身份：注入当前 checkout commit 与时间，验收栈镜像自带溯源标签。
+export GIT_COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+export BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
 # 等待健康的服务（docker 健康检查）与仅要求 running 的服务
 HEALTHY_CONTAINERS="bw-acc-mysql bw-acc-redis bw-acc-nacos bw-acc-gateway bw-acc-user bw-acc-agent bw-acc-web"
 RUNNING_CONTAINERS="bw-acc-agent-worker"
-ALL_SERVICES="mysql redis nacos blue-whale-gateway blue-whale-user blue-whale-agent blue-whale-agent-worker blue-whale-web"
+# IK1W1E：Schema 迁移容器跑完即退出，exit 0=成功，非 0=失败（fail-closed 门禁）
+COMPLETED_CONTAINERS="bw-acc-schema-migration"
+ALL_SERVICES="mysql redis nacos blue-whale-schema-migration blue-whale-gateway blue-whale-user blue-whale-agent blue-whale-agent-worker blue-whale-web"
 WAIT_DEADLINE_S=720
 WAIT_INTERVAL_S=5
 
@@ -78,12 +84,30 @@ container_state() {
   docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$1" 2>/dev/null || echo "missing"
 }
 
+container_exit_code() {
+  docker inspect -f '{{.State.ExitCode}}' "$1" 2>/dev/null || echo "-1"
+}
+
 wait_healthy() {
-  echo "⏳ 等待全部服务健康（MySQL 首次初始化可能需 3–5 分钟）..."
+  echo "⏳ 等待全部服务健康（Schema 迁移 + MySQL 首次初始化可能需数分钟）..."
   local elapsed=0
   while [ "$elapsed" -lt "$WAIT_DEADLINE_S" ]; do
     local pending=""
     local failed=""
+    # IK1W1E：优先检查 migration 容器——它失败则 user/agent 永不启动，应立即报错
+    for c in $COMPLETED_CONTAINERS; do
+      case "$(container_state "$c")" in
+        exited)
+          if [ "$(container_exit_code "$c")" = "0" ]; then
+            : # 迁移成功完成
+          else
+            failed="$failed $c(exit=$(container_exit_code "$c"))"
+          fi
+          ;;
+        dead) failed="$failed $c" ;;
+        *) pending="$pending $c" ;;
+      esac
+    done
     for c in $HEALTHY_CONTAINERS; do
       case "$(container_state "$c")" in
         healthy) ;;

@@ -33,6 +33,14 @@ services:
     container_name: bw-acc-nacos
     ports: !reset []
 
+  # IK1W1E：Schema 迁移容器，复用 agent:acceptance 镜像，钉死密码与基座一致
+  blue-whale-schema-migration:
+    image: blue-whale-agent:acceptance
+    container_name: bw-acc-schema-migration
+    environment:
+      MYSQL_DB: blue_whale
+      MYSQL_PASSWORD: blue_whale
+
   blue-whale-gateway:
     image: blue-whale-gateway:acceptance
     container_name: bw-acc-gateway

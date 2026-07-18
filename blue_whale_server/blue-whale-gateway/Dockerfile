@@ -12,6 +12,12 @@ RUN mvn -q -f blue-whale-parent/pom.xml install -Dmaven.test.skip=true -B \
 
 FROM eclipse-temurin:17-jre
 WORKDIR /app
+# IK1W1E 构建身份：构建期注入源码 commit 与时间，通过 LABEL + ENV 暴露。
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+LABEL blue-whale.git-commit="${GIT_COMMIT}" blue-whale.build-time="${BUILD_TIME}"
+ENV GIT_COMMIT=${GIT_COMMIT} \
+    BUILD_TIME=${BUILD_TIME}
 # curl 供 Docker healthcheck 探测 /health
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
  && rm -rf /var/lib/apt/lists/*
