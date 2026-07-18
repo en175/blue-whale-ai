@@ -1,3 +1,5 @@
+-- ⚠️ 已归档（IK1W1E）：本迁移的变更已并入 V1 基线 (db/migrations/V1__baseline.sql)。
+-- 历史保留供追溯，不再由迁移器执行。新增量请放在 db/migrations/V<n>__<slug>.sql。
 CREATE TABLE IF NOT EXISTS asset_storage_objects
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,

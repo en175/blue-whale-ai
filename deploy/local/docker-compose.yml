@@ -31,21 +31,17 @@ services:
       - "${MYSQL_PUBLISH_PORT:-3306}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
-      # 首次启动按字母序执行：01-schema.sql → 02-data.sql → 03-skill-data.sql
-      - ../../blue_whale_server/blue-whale-agent/blue-whale-agent-service/src/main/resources/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ../../blue_whale_server/blue-whale-agent/blue-whale-agent-service/src/main/resources/db/data.sql:/docker-entrypoint-initdb.d/02-data.sql:ro
-      - ../../blue_whale_server/blue-whale-agent/blue-whale-agent-service/src/main/resources/db/skill-data.sql:/docker-entrypoint-initdb.d/03-skill-data.sql:ro
+      # IK1W1E：不再挂载 init SQL 到 docker-entrypoint-initdb.d。
+      # MySQL 原生 entrypoint 只在空卷首次启动执行 init SQL，已有命名卷不会升级（漂移根因）。
+      # Schema 初始化与版本化升级改由 blue-whale-schema-migration 容器统一接管。
     healthcheck:
-      # init（down -v 后首次启动）要跑 ~470KB 的 SQL（schema 24KB + data 28KB + skill-data 418KB），
-      # 在容器化磁盘 IO 下首次执行可能 3-5 分钟。start_period 必须覆盖这个窗口，
-      # 否则 compose 的 depends_on: service_healthy 会在 MySQL 还在初始化时误判为 unhealthy，
-      # 导致依赖它的 user/agent/web/worker 全部启动失败（实测踩过）。
-      # 180s start_period + 30 次 × 5s retry = 总等待上限 330s，足够覆盖首次初始化。
+      # MySQL 本身不再跑 ~470KB 的 init SQL，健康检查只需覆盖 mysqld 启动（数秒）。
+      # 180s start_period 留足余量；实际首次启动通常 10-20s。
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_PASSWORD:-blue_whale}"]
       interval: 5s
       timeout: 5s
       retries: 30
-      start_period: 180s
+      start_period: 60s
 
   redis:
     image: redis:7-alpine
@@ -86,11 +82,52 @@ services:
       retries: 30
       start_period: 40s
 
+  # ===== Schema 迁移（IK1W1E）=====
+  # 单一权威迁移入口：等 MySQL 健康后按版本顺序执行 db/migrations/V*__*.sql，
+  # 在 schema_migrations 记账本持久记录版本与状态。迁移成功 exit 0，失败 exit 非 0。
+  # 下游 user/agent 用 depends_on: service_completed_successfully 等待迁移成功完成；
+  # 迁移失败则 user/agent 根本不启动，实现 fail-closed 门禁。
+  # 复用 agent 镜像（迁移器在 agent jar 内），用 migration-only profile 跑完即退出，
+  # 不启动 web 服务、不注册 Nacos。Redis 仅因 agent 上下文 redisson 装配需要可达，
+  # 迁移逻辑本身只用 MySQL JDBC。
+  blue-whale-schema-migration:
+    image: blue-whale-agent:local
+    container_name: bw-schema-migration
+    restart: "no"
+    environment:
+      SPRING_PROFILES_ACTIVE: migration-only
+      BLUE_WHALE_SCHEMA_MIGRATION_ENABLED: "true"
+      # 关闭 Nacos 注册（迁移是临时任务，不注册到发现中心）
+      SPRING_CLOUD_NACOS_DISCOVERY_ENABLED: "false"
+      SPRING_CLOUD_NACOS_DISCOVERY_REGISTER_ENABLED: "false"
+      NACOS_SERVER_ADDR: nacos:8848
+      NACOS_NAMESPACE: ""
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_DB: ${MYSQL_DB:-blue_whale}
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-blue_whale}
+      # Redis 凭据：agent 上下文启动时 redisson bean 会装配并探测 Redis，
+      # 迁移逻辑本身不用 Redis，但让连接可达避免上下文启动噪音。
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ""
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   # ===== 业务服务（build context 统一在 blue_whale_server/） =====
   blue-whale-gateway:
     build:
       context: ../../blue_whale_server
       dockerfile: blue-whale-gateway/Dockerfile
+      args:
+        # IK1W1E：构建身份注入，由 local-mvp.sh / run-mvp-acceptance.sh export
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
     image: blue-whale-gateway:local
     container_name: bw-gateway
     restart: unless-stopped
@@ -115,6 +152,9 @@ services:
     build:
       context: ../../blue_whale_server
       dockerfile: blue-whale-user/blue-whale-user-service/Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
     image: blue-whale-user:local
     container_name: bw-user
     restart: unless-stopped
@@ -141,6 +181,9 @@ services:
         condition: service_healthy
       nacos:
         condition: service_healthy
+      # IK1W1E：等 Schema 迁移成功完成才启动，迁移失败则 user 不启动（fail-closed 门禁）
+      blue-whale-schema-migration:
+        condition: service_completed_successfully
     healthcheck:
       # user-service 无专用 /health 端点；测 8081 端口可达。
       # Spring Security 对 / 返回 401/403（进程起来、Security 生效）；
@@ -155,6 +198,9 @@ services:
     build:
       context: ../../blue_whale_server
       dockerfile: blue-whale-agent/blue-whale-agent-service/Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
     image: blue-whale-agent:local
     container_name: bw-agent
     restart: unless-stopped
@@ -197,6 +243,9 @@ services:
         condition: service_healthy
       nacos:
         condition: service_healthy
+      # IK1W1E：等 Schema 迁移成功完成才启动，迁移失败则 agent 不启动（fail-closed 门禁）
+      blue-whale-schema-migration:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://127.0.0.1:8082/health || exit 1"]
       interval: 10s

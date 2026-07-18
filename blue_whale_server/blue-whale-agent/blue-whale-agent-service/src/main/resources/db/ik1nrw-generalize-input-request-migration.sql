@@ -1,3 +1,5 @@
+-- ⚠️ 已归档（IK1W1E）：本迁移的变更已并入 V1 基线 (db/migrations/V1__baseline.sql)。
+-- 历史保留供追溯，不再由迁移器执行。新增量请放在 db/migrations/V<n>__<slug>.sql。
 -- IK1NRW：泛化 UserInputRequest 契约为产品中性输入请求
 --
 -- 将原"成本确认专用"的 user_input_requests 中性化为归属 AgentRun 的产品级输入请求，

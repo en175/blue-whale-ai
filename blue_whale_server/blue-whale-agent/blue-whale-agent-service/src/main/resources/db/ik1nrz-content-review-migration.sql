@@ -1,3 +1,5 @@
+-- ⚠️ 已归档（IK1W1E）：本迁移的变更已并入 V1 基线 (db/migrations/V1__baseline.sql)。
+-- 历史保留供追溯，不再由迁移器执行。新增量请放在 db/migrations/V<n>__<slug>.sql。
 -- IK1NRZ 一次性生产迁移：发布内容审核（ContentReview）产品控制面前执行。
 -- 示例：mysql --host=<host> --user=<user> --password <database> < ik1nrz-content-review-migration.sql
 -- CREATE 语句幂等（IF NOT EXISTS），由迁移台账保证只执行一次。

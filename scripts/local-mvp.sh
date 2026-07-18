@@ -21,6 +21,11 @@ COMPOSE_FILE="$DEPLOY_DIR/docker-compose.yml"
 ENV_FILE="$DEPLOY_DIR/.env"
 ENV_EXAMPLE="$DEPLOY_DIR/.env.example"
 
+# IK1W1E 构建身份：构建期注入当前 checkout 的 commit 与时间，供镜像 LABEL / 启动日志核对。
+# git 不可用或非 git 目录时回退 unknown，不阻断启动。
+export GIT_COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+export BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
 fail() {
   echo "❌ local-mvp: $*" >&2
   exit 1

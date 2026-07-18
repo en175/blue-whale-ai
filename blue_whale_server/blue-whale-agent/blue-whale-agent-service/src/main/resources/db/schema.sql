@@ -1,11 +1,8 @@
--- 重建（含审计字段：create_time / update_time / deleted）
--- 标签不再入表，元数据见 TemplateTagEnum 枚举；本文件仅建卡片与图片表
--- 手动执行：先跑本文件，再跑 data.sql
+-- V1 基线 Schema（IK1W1E）：所有表幂等建表（CREATE TABLE IF NOT EXISTS），
+-- 由 SchemaMigrationService 作为 V1 迁移版本加载，空库建表、旧库（表已存在）跳过。
+-- 表内容修复（模板旧字段、cursor 保留字等）由 IK1W1J/K/L/M 后续版本增量处理，本基线不动。
 
-DROP TABLE IF EXISTS template_card_image;
-DROP TABLE IF EXISTS template_card;
-
-CREATE TABLE template_card
+CREATE TABLE IF NOT EXISTS template_card
 (
     id          BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
     tag_code    VARCHAR(64)  NOT NULL COMMENT '所属标签',
@@ -21,7 +18,7 @@ CREATE TABLE template_card
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='模板卡片';
 
-CREATE TABLE template_card_image
+CREATE TABLE IF NOT EXISTS template_card_image
 (
     id          BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
     card_id     BIGINT       NOT NULL COMMENT '卡片ID',
@@ -39,10 +36,8 @@ CREATE TABLE template_card_image
 -- skill：技能库（权威内容），列名对齐 BaseEntity（gmt_create/gmt_modified/version/is_delete）
 -- seed 来源 blue-whale-agent-workspace/skill/library/raw/*.md（60 条），见 data.sql
 
-DROP TABLE IF EXISTS user_skill;
-DROP TABLE IF EXISTS skill;
 
-CREATE TABLE skill
+CREATE TABLE IF NOT EXISTS skill
 (
     id          BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
     name        VARCHAR(255) NOT NULL COMMENT '展示名（文件名生成）',
@@ -60,7 +55,7 @@ CREATE TABLE skill
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='技能库';
 
-CREATE TABLE user_skill
+CREATE TABLE IF NOT EXISTS user_skill
 (
     id          BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
     user_id     BIGINT       NOT NULL COMMENT '用户ID（X-User-Id）',
@@ -80,10 +75,8 @@ CREATE TABLE user_skill
 -- project 为唯一根（owner_id 归属用户），canvas 与 project 1:1，整体存 nodes_json + viewport_json。
 -- 审计列遵循 BaseEntity：gmt_create / gmt_modified / version / is_delete。
 
-DROP TABLE IF EXISTS canvas;
-DROP TABLE IF EXISTS project;
 
-CREATE TABLE project
+CREATE TABLE IF NOT EXISTS project
 (
     id           BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
     owner_id     BIGINT       NOT NULL COMMENT '归属用户 ID（来自 X-User-Id 头）',
@@ -97,7 +90,7 @@ CREATE TABLE project
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='画布项目（workspace 根）';
 
-CREATE TABLE canvas
+CREATE TABLE IF NOT EXISTS canvas
 (
     id            BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
     project_id    BIGINT       NOT NULL COMMENT '所属项目 ID',
@@ -117,14 +110,14 @@ CREATE TABLE canvas
 -- project_events：持久化产品事件日志，封套字段对齐 ADR-0016 §4。SSE 重放与 Snapshot 一致性的共同事实。
 -- outbox_messages：Outbox（ADR-0017 §1/§2）。与产品事件同事务写入，后台重试发布稳定唤醒身份。
 
-CREATE TABLE project_event_stream
+CREATE TABLE IF NOT EXISTS project_event_stream
 (
     project_id     BIGINT PRIMARY KEY COMMENT '所属项目 ID（与 project.id 对齐）',
     high_watermark BIGINT NOT NULL DEFAULT 0 COMMENT '当前高水位游标（已分配的最大 cursor）'
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='Project 事件流高水位（游标分配锁点，无审计列）';
 
-CREATE TABLE project_events
+CREATE TABLE IF NOT EXISTS project_events
 (
     id                BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
     project_id        BIGINT       NOT NULL COMMENT '所属项目 ID',
@@ -148,7 +141,7 @@ CREATE TABLE project_events
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='持久化产品事件日志（ADR-0016 封套）';
 
-CREATE TABLE outbox_messages
+CREATE TABLE IF NOT EXISTS outbox_messages
 (
     id              BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
     message_id      VARCHAR(64)  NOT NULL COMMENT '消息稳定 ID（消费者按此去重）',
@@ -171,15 +164,8 @@ CREATE TABLE outbox_messages
   DEFAULT CHARSET = utf8mb4 COMMENT ='Project 事件唤醒 Outbox（同事务写入、后台重试）';
 
 -- ===== Conversation 与 AgentRun（IK10I5） =====
-DROP TABLE IF EXISTS run_commits;
-DROP TABLE IF EXISTS runtime_checkpoints;
-DROP TABLE IF EXISTS command_idempotency;
-DROP TABLE IF EXISTS conversation_messages;
-DROP TABLE IF EXISTS user_input_requests;
-DROP TABLE IF EXISTS agent_runs;
-DROP TABLE IF EXISTS conversations;
 
-CREATE TABLE conversations
+CREATE TABLE IF NOT EXISTS conversations
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     project_id BIGINT NOT NULL,
@@ -190,7 +176,7 @@ CREATE TABLE conversations
     UNIQUE KEY uk_conversation_project (project_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='Project 唯一 Conversation';
 
-CREATE TABLE agent_runs
+CREATE TABLE IF NOT EXISTS agent_runs
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     project_id BIGINT NOT NULL,
@@ -214,7 +200,7 @@ CREATE TABLE agent_runs
     INDEX idx_agent_run_claim (status, engine, is_delete, id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='持久 AgentRun';
 
-CREATE TABLE runtime_checkpoints
+CREATE TABLE IF NOT EXISTS runtime_checkpoints
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     agent_run_id BIGINT NOT NULL,
@@ -232,7 +218,7 @@ CREATE TABLE runtime_checkpoints
     UNIQUE KEY uk_checkpoint_sequence (agent_run_id, sequence_no)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='AgentRun 不透明运行时检查点';
 
-CREATE TABLE run_commits
+CREATE TABLE IF NOT EXISTS run_commits
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     agent_run_id BIGINT NOT NULL,
@@ -249,7 +235,7 @@ CREATE TABLE run_commits
     UNIQUE KEY uk_run_commit (agent_run_id, commit_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='AgentRun 提交幂等结果';
 
-CREATE TABLE user_input_requests
+CREATE TABLE IF NOT EXISTS user_input_requests
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     project_id BIGINT NOT NULL,
@@ -284,7 +270,7 @@ CREATE TABLE user_input_requests
         project_id, user_id, request_target_type, action_identity)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='产品中性输入请求，归属 AgentRun，区分创作澄清与成本确认';
 
-CREATE TABLE conversation_messages
+CREATE TABLE IF NOT EXISTS conversation_messages
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     conversation_id BIGINT NOT NULL,
@@ -302,7 +288,7 @@ CREATE TABLE conversation_messages
     INDEX idx_message_project (project_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='Conversation 消息事实';
 
-CREATE TABLE command_idempotency
+CREATE TABLE IF NOT EXISTS command_idempotency
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     project_id BIGINT NOT NULL,
@@ -320,7 +306,7 @@ CREATE TABLE command_idempotency
     UNIQUE KEY uk_command_idempotency (project_id, operation, idempotency_key)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='公开命令幂等接纳记录';
 
-CREATE TABLE generation_job_outputs
+CREATE TABLE IF NOT EXISTS generation_job_outputs
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     generation_job_id BIGINT NOT NULL,
@@ -338,7 +324,7 @@ CREATE TABLE generation_job_outputs
     UNIQUE KEY uk_generation_output_delivery (generation_job_id, delivery_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='GenerationJob 输出槽事实';
 
-CREATE TABLE asset_storage_objects
+CREATE TABLE IF NOT EXISTS asset_storage_objects
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     storage_key VARCHAR(512) NOT NULL,
@@ -357,7 +343,7 @@ CREATE TABLE asset_storage_objects
     INDEX idx_asset_storage_gc (state, active_transfer_count, first_unreferenced_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='Asset 不可变存储对象生命周期';
 
-CREATE TABLE asset_object_transfers
+CREATE TABLE IF NOT EXISTS asset_object_transfers
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     transfer_token VARCHAR(64) NOT NULL,
@@ -372,7 +358,7 @@ CREATE TABLE asset_object_transfers
     INDEX idx_asset_transfer_expiry (status, expires_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='Asset 存储上传活跃传输';
 
-CREATE TABLE generation_result_conflicts
+CREATE TABLE IF NOT EXISTS generation_result_conflicts
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     generation_job_id BIGINT NOT NULL,
@@ -388,7 +374,7 @@ CREATE TABLE generation_result_conflicts
     INDEX idx_generation_result_conflict (generation_job_id, slot_index)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='结果身份冲突诊断事实';
 
-CREATE TABLE generation_provider_tasks
+CREATE TABLE IF NOT EXISTS generation_provider_tasks
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     generation_job_id BIGINT NOT NULL,
@@ -412,7 +398,7 @@ CREATE TABLE generation_provider_tasks
     UNIQUE KEY uk_provider_task_ref (provider, account_id, provider_task_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='GenerationJob 供应商内部证据';
 
-CREATE TABLE seedance_callback_inbox
+CREATE TABLE IF NOT EXISTS seedance_callback_inbox
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     generation_job_id BIGINT NOT NULL,
@@ -429,7 +415,7 @@ CREATE TABLE seedance_callback_inbox
     UNIQUE KEY uk_seedance_callback_dedup (dedup_key)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='Seedance callback 去重 Inbox';
 
-CREATE TABLE seedance_callback_security_audits
+CREATE TABLE IF NOT EXISTS seedance_callback_security_audits
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     generation_job_id BIGINT NULL,
@@ -443,17 +429,14 @@ CREATE TABLE seedance_callback_security_audits
     is_delete TINYINT NOT NULL DEFAULT 0
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='无效 callback 安全审计';
 
-DROP TABLE IF EXISTS audit_records;
-DROP TABLE IF EXISTS cost_reservations;
-DROP TABLE IF EXISTS cost_budget_locks;
 
-CREATE TABLE cost_budget_locks
+CREATE TABLE IF NOT EXISTS cost_budget_locks
 (
     scope_key VARCHAR(160) PRIMARY KEY,
     gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
-CREATE TABLE cost_reservations
+CREATE TABLE IF NOT EXISTS cost_reservations
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     generation_job_id BIGINT NOT NULL,
@@ -479,7 +462,7 @@ CREATE TABLE cost_reservations
     KEY idx_cost_provider_window (provider, gmt_create)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
-CREATE TABLE audit_records
+CREATE TABLE IF NOT EXISTS audit_records
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     actor_user_id BIGINT NOT NULL,
@@ -504,7 +487,7 @@ CREATE TABLE audit_records
     KEY idx_audit_occurred (occurred_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
-CREATE TABLE generation_jobs
+CREATE TABLE IF NOT EXISTS generation_jobs
 (
     id               BIGINT PRIMARY KEY AUTO_INCREMENT,
     project_id       BIGINT NULL,
@@ -544,7 +527,7 @@ CREATE TABLE generation_jobs
     UNIQUE KEY uk_project_action_identity (project_id, project_action_identity)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='生成任务事实';
 
-CREATE TABLE assets
+CREATE TABLE IF NOT EXISTS assets
 (
     id                BIGINT PRIMARY KEY AUTO_INCREMENT,
     project_id        BIGINT NULL,
@@ -569,7 +552,7 @@ CREATE TABLE assets
     INDEX idx_asset_generation_job (generation_job_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='Asset 资源事实';
 
-CREATE TABLE content_reviews
+CREATE TABLE IF NOT EXISTS content_reviews
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     project_id BIGINT NOT NULL,

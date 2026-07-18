@@ -74,9 +74,28 @@ for entry in "${SERVICES[@]}"; do
   esac
 done
 
+# IK1W1E：Schema 迁移容器是一次性任务（跑完 exit），单独检查其退出码。
+# exit 0 = 迁移成功完成；非 0 = 迁移失败（fail-closed，user/agent 不会启动）。
+printf -- "---------------- migration ----------------\n"
+mig_state=$(docker inspect --format '{{.State.Status}}' "bw-schema-migration" 2>/dev/null || echo "not-found")
+if [ "$mig_state" = "not-found" ]; then
+  printf "  %s?%s %-14s — 容器不存在（旧栈？迁移器 IK1W1E 后引入）\n" "$RED" "$RESET" "Schema Migration"
+elif [ "$mig_state" = "exited" ]; then
+  mig_code=$(docker inspect --format '{{.State.ExitCode}}' "bw-schema-migration" 2>/dev/null || echo "-1")
+  if [ "$mig_code" = "0" ]; then
+    printf "  %s✓%s %-14s — 迁移已完成（exit 0）\n" "$GREEN" "$RESET" "Schema Migration"
+  else
+    printf "  %s✗%s %-14s — 迁移失败（exit %s，查 logs: docker logs bw-schema-migration）\n" "$RED" "$RESET" "Schema Migration" "$mig_code"
+    failures=$((failures+1))
+  fi
+else
+  printf "  %s⏳%s %-14s — %s（迁移进行中？）\n" "$RED" "$RESET" "Schema Migration" "$mig_state"
+  failures=$((failures+1))
+fi
+
 echo "============================"
 if [ "$failures" -eq 0 ]; then
-  printf "%s全部 8 个服务就绪%s\n" "$GREEN" "$RESET"
+  printf "%s全部服务就绪%s\n" "$GREEN" "$RESET"
   exit 0
 else
   printf "%s有 %d 个服务未就绪%s（见上方 ✗ / ⏳ 行）\n" "$RED" "$failures" "$RESET"
