@@ -226,6 +226,13 @@ class LocalFakeGenerationIT {
         assertThat(retryJobId).isNotEqualTo(originalJobId);
         GenerationJob retry = generationJobMapper.selectById(retryJobId);
         assertThat(retry.getRetryOfJobId()).isEqualTo(originalJobId);
+        // 事件契约（IK1NS2）：重试的 generation_job.created 事件必须携带 agent_run_id，
+        // 否则前端恢复投影无法把新 Job 关联到 AgentRun，成功 Card 在实时路径永不出现
+        String retryCreatedPayload = jdbcTemplate.queryForObject(
+                "SELECT payload FROM project_events WHERE event_type = 'generation_job.created' AND aggregate_id = ?",
+                String.class, String.valueOf(retryJobId));
+        assertThat(objectMapper.readTree(retryCreatedPayload).path("agent_run_id").asLong())
+                .isEqualTo(original.getAgentRunId());
         // 原 Job 终态不被改写
         assertThat(generationJobMapper.selectById(originalJobId).getStatus())
                 .isEqualTo(GenerationJob.STATUS_FAILED);

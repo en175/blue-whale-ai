@@ -128,7 +128,7 @@ CREATE TABLE project_events
 (
     id                BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
     project_id        BIGINT       NOT NULL COMMENT '所属项目 ID',
-    cursor            BIGINT       NOT NULL COMMENT 'Project 内单调递增游标（SSE id）',
+    `cursor`          BIGINT       NOT NULL COMMENT 'Project 内单调递增游标（SSE id）',
     event_id          VARCHAR(64)  NOT NULL COMMENT '事件唯一标识（evt_ 前缀）',
     event_type        VARCHAR(64)  NOT NULL COMMENT '事件类型（如 project.created）',
     aggregate_type    VARCHAR(32)  NOT NULL COMMENT '聚合类型（project/generation_job）',
@@ -143,7 +143,7 @@ CREATE TABLE project_events
     version           INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
     is_delete         TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删 1已删',
     UNIQUE KEY uk_event_id (event_id),
-    UNIQUE KEY uk_project_cursor (project_id, cursor),
+    UNIQUE KEY uk_project_cursor (project_id, `cursor`),
     INDEX idx_project_occurred (project_id, occurred_at)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='持久化产品事件日志（ADR-0016 封套）';
@@ -153,7 +153,7 @@ CREATE TABLE outbox_messages
     id              BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
     message_id      VARCHAR(64)  NOT NULL COMMENT '消息稳定 ID（消费者按此去重）',
     project_id      BIGINT       NOT NULL COMMENT '所属项目 ID',
-    cursor          BIGINT       NOT NULL COMMENT 'Project 内事件游标',
+    `cursor`        BIGINT       NOT NULL COMMENT 'Project 内事件游标',
     aggregate_type  VARCHAR(32)  NOT NULL COMMENT '聚合类型',
     aggregate_id    VARCHAR(64)  NOT NULL COMMENT '聚合 ID',
     event_type      VARCHAR(64)  NOT NULL COMMENT '事件类型',

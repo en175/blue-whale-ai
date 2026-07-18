@@ -11,6 +11,7 @@ import com.blue.whale.agent.service.generation.AsyncGenerationProvider;
 import com.blue.whale.agent.service.generation.AssetObjectGarbageCollector;
 import com.blue.whale.agent.service.generation.GenerationProvider;
 import com.blue.whale.agent.service.generation.GenerationWorker;
+import com.blue.whale.agent.service.generation.GenerationWorkerScheduler;
 import com.blue.whale.agent.service.generation.LocalFakeGenerationStorage;
 import com.blue.whale.agent.service.generation.LocalFakeImageGenerationProvider;
 import com.blue.whale.agent.service.generation.OpenAiImageGenerationProvider;
@@ -236,6 +237,21 @@ public class GenerationAdapterConfiguration {
             TosGenerationStorage storage,
             GenerationAdapterReadiness readiness) {
         return new AssetObjectGarbageCollector(lifecycleService, storage);
+    }
+
+    /**
+     * 生成任务认领调度器。无条件注册（仅保留 worker-scheduled 开关），调度器内部经
+     * ObjectProvider 惰性解析 GenerationWorker——{@code @ConditionalOnBean} 依赖注册顺序，
+     * 曾把调度器静默跳过导致 GenerationJob 永远 queued（IK1NS2 修复）。
+     */
+    @Bean
+    @ConditionalOnProperty(
+            prefix = "blue-whale.generation",
+            name = "worker-scheduled",
+            havingValue = "true",
+            matchIfMissing = true)
+    GenerationWorkerScheduler generationWorkerScheduler(ObjectProvider<GenerationWorker> workerProvider) {
+        return new GenerationWorkerScheduler(workerProvider);
     }
 
     private void validate(GenerationAdapterProperties properties) {

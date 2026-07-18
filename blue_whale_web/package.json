@@ -17,6 +17,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "test:e2e:fullstack": "bash ../scripts/run-mvp-acceptance.sh",
     "design:lint": "designmd lint DESIGN.md",
     "design:diff": "designmd diff DESIGN.md DESIGN-v2.md",
     "design:export:tw": "designmd export --format css-tailwind DESIGN.md",

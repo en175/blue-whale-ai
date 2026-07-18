@@ -102,10 +102,17 @@ AGENT_PUBLISH_PORT=8082
 - `JWT_SECRET` 默认值是开发占位，**生产部署必须通过 env 覆盖**
 - 火山短信、TOS、Ark 等真实凭据已从 yml 移除，远端部署时由 env 注入
 
+## 全栈 MVP 验收（IK1NS2 已交付）
+
+```bash
+scripts/run-mvp-acceptance.sh   # 起隔离全栈（项目 bw-mvp-acceptance）→ 等健康 → 全栈 Playwright → 清理
+```
+
+与 `blue_whale_web/e2e/` 的纯前端 Mock 回归分离；详见 `blue_whale_web/e2e-fullstack/README.md`。
+
 ## 不在范围内（其他 issue 处理）
 
 - AgentChatPanel 创作澄清与 AgentRun 恢复 → IK1NRY
-- Playwright E2E 覆盖 → IK1NS2
 - 真实图片供应商受控验收 → IK1NS3 已交付（见 `acceptance/README.md`）；生产正式启用（接入 ADR-0021 审核供应商）→ IK1NS4
 - VKE 部署、生产 KMS、OpenTelemetry / Collector → 不在本 MVP 范围
 
