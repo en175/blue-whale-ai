@@ -16,13 +16,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * V3 GenerationJob/Asset 结构收敛升级的真实 MySQL 验收（IK1W1L）。
+ * V4 GenerationJob/Asset 结构收敛升级的真实 MySQL 验收（IK1W1L）。
  *
  * <p>仅在显式提供专用测试库连接时运行（与 SnapshotMySqlConsistencyIT 同约定）：
  * {@code BLUE_WHALE_TEST_MYSQL_URL/USERNAME/PASSWORD}。默认环境明确跳过。
  *
  * <p>直接用生产迁移目录 {@link SchemaMigrationService#DEFAULT_MIGRATION_LOCATION}
- * （V1/V2/V3）驱动迁移器，覆盖：
+ * （V1/V2/V3/V4）驱动迁移器，覆盖：
  * <ul>
  *   <li>空库初始化后 GenerationJob/Asset 域结构齐全，重复执行幂等</li>
  *   <li>受支持旧形态（pre-ik10i6 缺表缺列、ik10i6 时代 NOT NULL 输出槽、
@@ -133,13 +133,13 @@ class GenerationSchemaMigrationMySqlIT {
     }
 
     @Test
-    void emptyDatabaseAppliesV1V2V3AndConvergesGenerationTables() {
+    void emptyDatabaseAppliesV1V2V3V4AndConvergesGenerationTables() {
         SchemaMigrationService service = new SchemaMigrationService(
                 db, SchemaMigrationService.DEFAULT_MIGRATION_LOCATION);
 
         List<Integer> applied = service.migrate();
 
-        assertThat(applied).containsExactly(1, 2, 3);
+        assertThat(applied).containsExactly(1, 2, 3, 4);
         for (String table : List.of(
                 "generation_jobs", "generation_job_outputs", "assets",
                 "asset_storage_objects", "asset_object_transfers",
@@ -152,14 +152,14 @@ class GenerationSchemaMigrationMySqlIT {
         assertThat(columnExists("generation_jobs", "project_action_identity")).isTrue();
         assertThat(columnExists("generation_job_outputs", "status")).isTrue();
         assertThat(indexExists("generation_provider_tasks", "uk_provider_task_job_slot")).isTrue();
-        // Worker 认领/重试/视频 action 扫描索引（ik10i6/id/ic 引入，V1 未并入）由 V3 补齐
+        // Worker 认领/重试/视频 action 扫描索引（ik10i6/id/ic 引入，V1 未并入）由 V4 补齐
         assertThat(indexExists("generation_jobs", "idx_generation_job_claim")).isTrue();
         assertThat(indexExists("generation_jobs", "idx_generation_job_retry_of")).isTrue();
         assertThat(indexExists("generation_jobs", "idx_generation_video_action")).isTrue();
 
         // 重复执行：无新版本、无漂移报错
         assertThat(service.migrate()).isEmpty();
-        assertThat(appliedVersions()).containsExactly(1, 2, 3);
+        assertThat(appliedVersions()).containsExactly(1, 2, 3, 4);
     }
 
     @Test
@@ -182,8 +182,8 @@ class GenerationSchemaMigrationMySqlIT {
                 db, SchemaMigrationService.DEFAULT_MIGRATION_LOCATION);
         List<Integer> applied = service.migrate();
 
-        // 旧库补记 V1，随后 V2、V3 正常应用
-        assertThat(applied).containsExactly(1, 2, 3);
+        // 旧库补记 V1，随后 V2、V3、V4 正常应用
+        assertThat(applied).containsExactly(1, 2, 3, 4);
 
         // 缺列补齐：generation_jobs 十一个后加列、assets 三个后加列
         for (String column : List.of(
@@ -350,7 +350,7 @@ class GenerationSchemaMigrationMySqlIT {
                 db, SchemaMigrationService.DEFAULT_MIGRATION_LOCATION);
         List<Integer> applied = service.migrate();
 
-        assertThat(applied).containsExactly(1, 2, 3);
+        assertThat(applied).containsExactly(1, 2, 3, 4);
 
         // NOT NULL 三列放宽为 V1 契约的可空形态
         assertThat(columnNullable("generation_job_outputs", "asset_id")).isTrue();
@@ -509,7 +509,7 @@ class GenerationSchemaMigrationMySqlIT {
                 db, SchemaMigrationService.DEFAULT_MIGRATION_LOCATION);
         List<Integer> applied = service.migrate();
 
-        assertThat(applied).containsExactly(1, 2, 3);
+        assertThat(applied).containsExactly(1, 2, 3, 4);
 
         // 旧唯一索引被丢弃，多输出契约的新唯一索引与 slot_index 列就位
         assertThat(indexExists("generation_provider_tasks", "uk_provider_task_job")).isFalse();
@@ -549,10 +549,10 @@ class GenerationSchemaMigrationMySqlIT {
 
         assertThatThrownBy(service::migrate)
                 .isInstanceOf(SchemaMigrationService.MigrationException.class)
-                .hasMessageContaining("V3")
+                .hasMessageContaining("V4")
                 .hasMessageContaining("漂移");
-        // fail-closed：V3 记录 failed，不允许跳过失败版本静默成功
-        assertThat(failedVersions()).contains(3);
+        // fail-closed：V4 记录 failed，不允许跳过失败版本静默成功
+        assertThat(failedVersions()).contains(4);
     }
 
     @Test
@@ -570,9 +570,9 @@ class GenerationSchemaMigrationMySqlIT {
 
         assertThatThrownBy(service::migrate)
                 .isInstanceOf(SchemaMigrationService.MigrationException.class)
-                .hasMessageContaining("V3")
+                .hasMessageContaining("V4")
                 .hasMessageContaining("漂移");
-        assertThat(failedVersions()).contains(3);
+        assertThat(failedVersions()).contains(4);
     }
 
     // ===== 夹具与工具 =====
