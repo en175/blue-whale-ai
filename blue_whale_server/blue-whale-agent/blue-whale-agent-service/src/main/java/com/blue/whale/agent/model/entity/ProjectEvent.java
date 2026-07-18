@@ -29,8 +29,8 @@ public class ProjectEvent extends BaseEntity {
 
     private Long projectId;
 
-    /** Project 内单调递增游标（SSE id）。cursor 为 MySQL 保留字，列名必须带反引号 */
-    @TableField("`cursor`")
+    /** Project 内单调递增游标（SSE id）。物理列 event_cursor（cursor 为 MySQL 保留字，IK1W1M 改名） */
+    @TableField("event_cursor")
     private Long cursor;
 
     /** 事件唯一标识（evt_ 前缀） */

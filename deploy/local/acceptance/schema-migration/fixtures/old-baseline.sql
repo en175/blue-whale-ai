@@ -581,3 +581,25 @@ CREATE TABLE IF NOT EXISTS content_reviews
 INSERT INTO project (id, owner_id, name) VALUES
     (9001, 1001, '验收-旧库-项目A'),
     (9002, 1001, '验收-旧库-项目B');
+
+-- IK1W1M：旧库既有产品事件与 Outbox（带反引号的 `cursor` 列）。升级后游标值、事件身份、
+-- payload、状态与重试元数据必须完整保留，(project_id, cursor) 顺序不变。
+INSERT INTO project_event_stream (project_id, high_watermark) VALUES (9001, 3);
+INSERT INTO project_events
+    (project_id, `cursor`, event_id, event_type, aggregate_type, aggregate_id,
+     aggregate_version, correlation_id, causation_id, occurred_at, payload) VALUES
+    (9001, 1, 'evt_old_1', 'project.created', 'project', '9001', 0, 'corr-1', NULL,
+     '2026-07-01 10:00:00', JSON_OBJECT('seq', 1)),
+    (9001, 2, 'evt_old_2', 'project.renamed', 'project', '9001', 1, 'corr-1', 'evt_old_1',
+     '2026-07-01 10:01:00', JSON_OBJECT('seq', 2)),
+    (9001, 3, 'evt_old_3', 'job.created', 'generation_job', '99', 2, 'corr-2', 'evt_old_2',
+     '2026-07-01 10:02:00', JSON_OBJECT('seq', 3));
+INSERT INTO outbox_messages
+    (message_id, project_id, `cursor`, aggregate_type, aggregate_id, event_type,
+     payload, status, next_attempt_at, attempt_count) VALUES
+    ('evt_old_1', 9001, 1, 'project', '9001', 'project.created',
+     JSON_OBJECT('seq', 1), 'pending', '2030-01-02 03:04:05', 2),
+    ('evt_old_2', 9001, 2, 'project', '9001', 'project.renamed',
+     JSON_OBJECT('seq', 2), 'published', NULL, 0),
+    ('evt_old_3', 9001, 3, 'generation_job', '99', 'job.created',
+     JSON_OBJECT('seq', 3), 'pending', '2030-02-03 04:05:06', 1);

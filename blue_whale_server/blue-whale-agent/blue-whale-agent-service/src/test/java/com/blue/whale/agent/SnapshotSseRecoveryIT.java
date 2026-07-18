@@ -245,7 +245,7 @@ class SnapshotSseRecoveryIT {
             }
             return project.getId();
         });
-        jdbcTemplate.update("DELETE FROM project_events WHERE project_id = ? AND cursor < 3", projectId);
+        jdbcTemplate.update("DELETE FROM project_events WHERE project_id = ? AND event_cursor < 3", projectId);
 
         assertThat(projectEventService.earliestCursor(projectId)).isEqualTo(3L);
         assertThat(projectSseService.isCursorExpired(projectId, 1L)).isTrue();
