@@ -125,7 +125,7 @@ class GenerationWorkerIT {
                 "SELECT height FROM assets WHERE id = ?", Integer.class, assetId)).isEqualTo(1);
         assertThat(count("generation_job_outputs", "generation_job_id", jobId)).isEqualTo(1);
         assertThat(jdbcTemplate.queryForList(
-                "SELECT event_type FROM project_events WHERE project_id = ? ORDER BY cursor",
+                "SELECT event_type FROM project_events WHERE project_id = ? ORDER BY event_cursor",
                 String.class, job.getProjectId()))
                 .contains("asset.created", "generation_job.output_attached");
 

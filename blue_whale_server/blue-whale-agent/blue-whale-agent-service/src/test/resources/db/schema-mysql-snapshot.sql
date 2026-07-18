@@ -363,7 +363,7 @@ CREATE TABLE IF NOT EXISTS project_events
 (
     id                BIGINT PRIMARY KEY AUTO_INCREMENT,
     project_id        BIGINT       NOT NULL,
-    cursor            BIGINT       NOT NULL,
+    event_cursor      BIGINT       NOT NULL,
     event_id          VARCHAR(64)  NOT NULL,
     event_type        VARCHAR(64)  NOT NULL,
     aggregate_type    VARCHAR(32)  NOT NULL,
@@ -378,7 +378,7 @@ CREATE TABLE IF NOT EXISTS project_events
     version           INT          NOT NULL DEFAULT 0,
     is_delete         TINYINT      NOT NULL DEFAULT 0,
     UNIQUE KEY uk_event_id (event_id),
-    UNIQUE KEY uk_project_cursor (project_id, cursor),
+    UNIQUE KEY uk_project_cursor (project_id, event_cursor),
     INDEX idx_project_occurred (project_id, occurred_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
@@ -387,7 +387,7 @@ CREATE TABLE IF NOT EXISTS outbox_messages
     id              BIGINT PRIMARY KEY AUTO_INCREMENT,
     message_id      VARCHAR(64) NOT NULL,
     project_id      BIGINT      NOT NULL,
-    cursor          BIGINT      NOT NULL,
+    event_cursor    BIGINT      NOT NULL,
     aggregate_type  VARCHAR(32) NOT NULL,
     aggregate_id    VARCHAR(64) NOT NULL,
     event_type      VARCHAR(64) NOT NULL,

@@ -166,7 +166,7 @@ class LocalFakeGenerationIT {
 
         // 事件与快照携带同一个 asset_id
         assertThat(jdbcTemplate.queryForList(
-                "SELECT event_type FROM project_events WHERE project_id = ? ORDER BY cursor",
+                "SELECT event_type FROM project_events WHERE project_id = ? ORDER BY event_cursor",
                 String.class, job.getProjectId()))
                 .contains("asset.created", "generation_job.output_attached");
         MvcResult snapshot = mockMvc.perform(get("/api/projects/{id}/snapshot", job.getProjectId())

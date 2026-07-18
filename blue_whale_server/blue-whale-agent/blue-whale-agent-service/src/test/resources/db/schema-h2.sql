@@ -1,6 +1,6 @@
 -- H2（MODE=MySQL）集成测试建表脚本。
--- 与 db/schema.sql 对齐，但去掉 MySQL 专有语法（ENGINE/CHARSET/COMMENT/JSON→CLOB/ON UPDATE）。
--- 仅用于 SnapshotSseRecoveryIT，生产以 db/schema.sql 为准。
+-- 与迁移链最终 schema 对齐（V1 基线 + V3 游标列改名 event_cursor），但去掉 MySQL 专有语法（ENGINE/CHARSET/COMMENT/JSON→CLOB/ON UPDATE）。
+-- 仅用于 SnapshotSseRecoveryIT，生产以 db/migrations 迁移链为准。
 
 CREATE TABLE IF NOT EXISTS project
 (
@@ -360,7 +360,7 @@ CREATE TABLE IF NOT EXISTS project_events
 (
     id                BIGINT PRIMARY KEY AUTO_INCREMENT,
     project_id        BIGINT       NOT NULL,
-    cursor            BIGINT       NOT NULL,
+    event_cursor      BIGINT       NOT NULL,
     event_id          VARCHAR(64)  NOT NULL,
     event_type        VARCHAR(64)  NOT NULL,
     aggregate_type    VARCHAR(32)  NOT NULL,
@@ -375,7 +375,7 @@ CREATE TABLE IF NOT EXISTS project_events
     version           INT          NOT NULL DEFAULT 0,
     is_delete         TINYINT      NOT NULL DEFAULT 0,
     CONSTRAINT uk_event_id UNIQUE (event_id),
-    CONSTRAINT uk_project_cursor UNIQUE (project_id, cursor)
+    CONSTRAINT uk_project_cursor UNIQUE (project_id, event_cursor)
 );
 
 CREATE INDEX IF NOT EXISTS idx_project_occurred ON project_events (project_id, occurred_at);
@@ -385,7 +385,7 @@ CREATE TABLE IF NOT EXISTS outbox_messages
     id              BIGINT PRIMARY KEY AUTO_INCREMENT,
     message_id      VARCHAR(64)  NOT NULL,
     project_id      BIGINT       NOT NULL,
-    cursor          BIGINT       NOT NULL,
+    event_cursor    BIGINT       NOT NULL,
     aggregate_type  VARCHAR(32)  NOT NULL,
     aggregate_id    VARCHAR(64)  NOT NULL,
     event_type      VARCHAR(64)  NOT NULL,

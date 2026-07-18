@@ -2,8 +2,10 @@
 # Schema 迁移三场景验收(IK1W1E)
 #
 # 用真实 MySQL + 隔离 Compose 栈验证版本化迁移与 Schema 就绪门禁：
-#   1. empty   空库初始化：down -v 起空卷，迁移器跑 V1+V2，记账本记录版本，表齐全。
-#   2. upgrade 旧库保数据升级：注入旧库夹具，迁移器补记 V1 且保留既有业务数据。
+#   1. empty   空库初始化：down -v 起空卷，迁移器跑 V1+V2+V3，记账本记录版本，表齐全，
+#              游标物理列为非保留字 event_cursor(IK1W1M)。
+#   2. upgrade 旧库保数据升级：注入旧库夹具，迁移器补记 V1 且保留既有业务数据；
+#              旧库事件/Outbox 的游标值、身份、状态与重试元数据完整保留(IK1W1M)。
 #   3. drift   未知漂移失败：注入坏夹具(记账本谎称 V1 但缺表)，迁移失败、业务服务不启动。
 #
 # 三个场景各自独立 Compose 项目(bw-schema-*)，结束 down -v 清理，可重复执行。
@@ -125,7 +127,7 @@ trap 'rm -f "$TMP_OVERRIDE"' EXIT
 scenario_empty() {
   local project="bw-schema-empty"
   echo "🧪 [1/3] 空库初始化(project=$project)"
-  echo "   down -v 起空卷 → 迁移器应跑 V1+V2，记账本记录版本，表齐全"
+  echo "   down -v 起空卷 → 迁移器应跑 V1+V2+V3，记账本记录版本，表齐全"
   docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" down -v --remove-orphans >/dev/null 2>&1 || true
 
   start_infra "$project"
@@ -140,15 +142,21 @@ scenario_empty() {
     fail "空库场景失败"
   fi
 
-  # 断言：记账本含 V1、V2；project 表存在
+  # 断言：记账本含 V1、V2、V3；project 表存在；
+  # IK1W1M：游标物理列为非保留字 event_cursor，保留字 cursor 列不存在
   local versions; versions="$(mysql_exec "$project" 'SELECT GROUP_CONCAT(version ORDER BY version) FROM schema_migrations' 2>/dev/null | tail -1)"
   local has_project; has_project="$(mysql_exec "$project" "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$MYSQL_DB' AND table_name='project'" 2>/dev/null | tail -1)"
+  local event_cursor_cols; event_cursor_cols="$(mysql_exec "$project" "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$MYSQL_DB' AND table_name IN ('project_events','outbox_messages') AND column_name='event_cursor'" 2>/dev/null | tail -1)"
+  local reserved_cols; reserved_cols="$(mysql_exec "$project" "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$MYSQL_DB' AND table_name IN ('project_events','outbox_messages') AND column_name='cursor'" 2>/dev/null | tail -1)"
 
   echo "   记账本版本: $versions"
   echo "   project 表存在: $has_project"
+  echo "   event_cursor 列数(期望 2): ${event_cursor_cols}；保留字 cursor 列数(期望 0): $reserved_cols"
 
-  [ "$versions" = "1,2" ] || fail "空库：记账本应为 1,2，实际 $versions"
+  [ "$versions" = "1,2,3" ] || fail "空库：记账本应为 1,2,3，实际 $versions"
   [ "$has_project" = "1" ] || fail "空库：project 表应存在"
+  [ "$event_cursor_cols" = "2" ] || fail "空库：project_events/outbox_messages 应有 event_cursor 列"
+  [ "$reserved_cols" = "0" ] || fail "空库：不应残留保留字 cursor 列"
 
   echo "✅ [1/3] 空库初始化通过"
   [ "$KEEP_STACK" = "1" ] || docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" down -v --remove-orphans >/dev/null 2>&1 || true
@@ -181,17 +189,28 @@ scenario_upgrade() {
     fail "旧库升级场景失败"
   fi
 
-  # 断言：记账本含 V1、V2(补记 V1 + 跑 V2)；既有 2 行数据保留；V2 seed 追加
+  # 断言：记账本含 V1、V2、V3(补记 V1 + 跑 V2/V3)；既有 2 行数据保留；V2 seed 追加；
+  # IK1W1M：旧库事件/Outbox 的游标值、身份、状态与重试元数据完整保留，顺序不变
   local versions; versions="$(mysql_exec "$project" 'SELECT GROUP_CONCAT(version ORDER BY version) FROM schema_migrations' 2>/dev/null | tail -1)"
   local preserved; preserved="$(mysql_exec "$project" 'SELECT COUNT(*) FROM project WHERE id IN (9001,9002)' 2>/dev/null | tail -1)"
   local total; total="$(mysql_exec "$project" 'SELECT COUNT(*) FROM project' 2>/dev/null | tail -1)"
+  local events; events="$(mysql_exec "$project" "SELECT GROUP_CONCAT(CONCAT(event_id,'/',event_cursor) ORDER BY project_id, event_cursor) FROM project_events WHERE project_id=9001" 2>/dev/null | tail -1)"
+  local outbox; outbox="$(mysql_exec "$project" "SELECT GROUP_CONCAT(CONCAT_WS('/',message_id,event_cursor,status,attempt_count,IFNULL(next_attempt_at,'null')) ORDER BY project_id, event_cursor) FROM outbox_messages WHERE project_id=9001" 2>/dev/null | tail -1)"
+  local reserved_cols; reserved_cols="$(mysql_exec "$project" "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$MYSQL_DB' AND table_name IN ('project_events','outbox_messages') AND column_name='cursor'" 2>/dev/null | tail -1)"
 
   echo "   记账本版本: $versions"
   echo "   既有数据(id 9001,9002)保留: $preserved 行"
   echo "   project 总行数(含 V2 seed): $total"
+  echo "   事件(event_id/游标,按序): $events"
+  echo "   Outbox(message_id/游标/状态/重试/下次重试,按序): $outbox"
+  echo "   保留字 cursor 列数(期望 0): $reserved_cols"
 
-  [ "$versions" = "1,2" ] || fail "旧库：记账本应为 1,2(补记 V1+V2)，实际 $versions"
+  [ "$versions" = "1,2,3" ] || fail "旧库：记账本应为 1,2,3(补记 V1+V2/V3)，实际 $versions"
   [ "$preserved" = "2" ] || fail "旧库：既有数据未保留(期望 2 行，实际 $preserved)"
+  [ "$events" = "evt_old_1/1,evt_old_2/2,evt_old_3/3" ] || fail "旧库：事件游标值或顺序未保留，实际 $events"
+  [ "$outbox" = "evt_old_1/1/pending/2/2030-01-02 03:04:05,evt_old_2/2/published/0/null,evt_old_3/3/pending/1/2030-02-03 04:05:06" ] \
+    || fail "旧库：Outbox 身份/状态/重试元数据未保留，实际 $outbox"
+  [ "$reserved_cols" = "0" ] || fail "旧库：不应残留保留字 cursor 列"
 
   echo "✅ [2/3] 旧库保数据升级通过"
   [ "$KEEP_STACK" = "1" ] || docker compose -p "$project" -f "$COMPOSE_BASE" -f "$COMPOSE_ACC" -f "$TMP_OVERRIDE" down -v --remove-orphans >/dev/null 2>&1 || true
