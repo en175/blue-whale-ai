@@ -46,6 +46,7 @@ public class SecurityConfig {
                 .and()
                 .authorizeRequests()
                 .antMatchers("/api/auth/send-code", "/api/auth/login", "/api/auth/captcha", "/api/auth/refresh").permitAll()
+                .antMatchers("/health").permitAll()
                 .antMatchers("/api/**").authenticated()
                 .anyRequest().permitAll()
 

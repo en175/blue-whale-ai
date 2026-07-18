@@ -51,7 +51,7 @@ scripts/local-mvp.sh health
 |---|---|---|---|
 | Web (Next.js) | 3000 | 3000 | `GET /` |
 | Gateway | 8686 | 8686 | `GET /health` |
-| User Service | 8081 | 8081 | 端口可达（无专用 /health，测 `/` 返回 4xx） |
+| User Service | 8081 | 8081 | `GET /health`（users 表探针，IK1WZP） |
 | Agent Service | 8082 | 8082 | `GET /health` |
 | MySQL | 3306 | 3306 | TCP |
 | Redis | 6379 | 6379 | TCP |
