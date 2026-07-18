@@ -5,7 +5,7 @@ from pydantic_ai.models.function import FunctionModel
 from blue_whale_agent_worker.adapters import create_orchestrator
 from blue_whale_agent_worker.fake_orchestrator import FakeOrchestrator
 from blue_whale_agent_worker.pydantic_orchestrator import PydanticAIOrchestrator
-from blue_whale_agent_worker.tests.test_pydantic_orchestrator import (
+from test_pydantic_orchestrator import (
     image_proposal_model,
 )
 
