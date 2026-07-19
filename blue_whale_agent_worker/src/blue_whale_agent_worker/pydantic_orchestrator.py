@@ -29,8 +29,14 @@ def generate_image(
     prompt: str,
     aspect_ratio: ImageAspectRatio = "1:1",
     reference_asset_ids: list[int] | None = None,
+    size: str | None = None,
+    web_search: bool | None = None,
 ) -> str:
-    """Propose an image action for the Java product control plane to accept."""
+    """Propose an image action for the Java product control plane to accept.
+
+    size 与 web_search 可选：缺省由产品控制平面按模型能力表兜底；模型固定走能力表
+    默认项，Agent 不暴露模型选择。
+    """
     raise CallDeferred
 
 

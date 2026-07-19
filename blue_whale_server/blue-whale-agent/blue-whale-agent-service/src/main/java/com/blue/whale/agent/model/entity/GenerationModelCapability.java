@@ -90,4 +90,20 @@ public class GenerationModelCapability extends BaseEntity {
         private Boolean stream;
         private Boolean tools;
     }
+
+    /**
+     * 按 size_id 查尺寸选项（大小写不敏感）；命中返回该选项，否则 null。
+     * BottomDock 服务端校验与 Provider 路由共用，避免白名单解析逻辑双份。
+     */
+    public SizeOption findSizeById(String sizeId) {
+        if (supportedSizes == null || supportedSizes.isEmpty() || sizeId == null || sizeId.isBlank()) {
+            return null;
+        }
+        for (SizeOption option : supportedSizes) {
+            if (option.getId() != null && option.getId().equalsIgnoreCase(sizeId)) {
+                return option;
+            }
+        }
+        return null;
+    }
 }

@@ -7,6 +7,7 @@ import com.blue.whale.agent.mapper.ConversationMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
+import com.blue.whale.agent.mapper.GenerationModelCapabilityMapper;
 import com.blue.whale.agent.mapper.RunCommitRecordMapper;
 import com.blue.whale.agent.mapper.RuntimeCheckpointMapper;
 import com.blue.whale.agent.mapper.UserInputRequestMapper;
@@ -22,6 +23,7 @@ import com.blue.whale.agent.model.entity.Conversation;
 import com.blue.whale.agent.model.entity.ConversationMessage;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationJobOutput;
+import com.blue.whale.agent.model.entity.GenerationModelCapability;
 import com.blue.whale.agent.model.entity.RunCommitRecord;
 import com.blue.whale.agent.model.entity.RuntimeCheckpoint;
 import com.blue.whale.agent.model.entity.UserInputRequest;
@@ -56,7 +58,7 @@ import java.util.TreeMap;
 public class AgentRunWorkerService {
 
     private static final Set<String> IMAGE_ARGUMENTS =
-            Set.of("prompt", "aspect_ratio", "reference_asset_ids");
+            Set.of("prompt", "aspect_ratio", "reference_asset_ids", "size", "web_search");
     private static final Set<String> IMAGE_ASPECT_RATIOS =
             Set.of("1:1", "16:9", "9:16", "4:3", "3:4", "2:3", "3:2", "21:9");
 
@@ -75,6 +77,7 @@ public class AgentRunWorkerService {
     private final GenerationCostAdmissionService costAdmissionService;
     private final CostReservationService costReservationService;
     private final UserInputRequestService userInputRequestService;
+    private final GenerationModelCapabilityMapper capabilityMapper;
     private final ObjectMapper objectMapper;
 
     @Transactional(noRollbackFor = ClaimQueueExhaustedAfterQuarantine.class)
@@ -247,6 +250,19 @@ public class AgentRunWorkerService {
         } else if (action != null) {
             LinkedHashMap<String, Object> input = new LinkedHashMap<>(action.arguments());
             input.put("expected_output_count", 1);
+            // Agent 不暴露模型选择：按能力表默认 image 模型注入 model_id 并校验/规范化 size，
+            // 对称 BottomDock fail-early（reserveAuthorized 之前），非法 size 不产生 cost 预留（IK21O5）
+            GenerationModelCapability capability = resolveAgentImageCapability();
+            input.put("model_id", capability.getModelId());
+            Object sizeArg = input.get("size");
+            if (sizeArg instanceof String sizeValue && !sizeValue.isBlank()) {
+                GenerationModelCapability.SizeOption sizeOption = capability.findSizeById(sizeValue);
+                if (sizeOption == null) {
+                    throw new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
+                            SystemCode.AGENT_ACTION_REJECTED.getMsg());
+                }
+                input.put("size", sizeOption.getId());
+            }
             job = new GenerationJob()
                     .setProjectId(run.getProjectId())
                     .setUserId(run.getUserId())
@@ -450,6 +466,8 @@ public class AgentRunWorkerService {
         RunCommitRequest.ProposedAction action = actions.get(0);
         Object aspectRatio = action.arguments().get("aspect_ratio");
         Object referenceAssetIds = action.arguments().get("reference_asset_ids");
+        Object size = action.arguments().get("size");
+        Object webSearch = action.arguments().get("web_search");
         if (!"generate_image".equals(action.actionType())
                 || action.actionId().length() > 128
                 || !IMAGE_ARGUMENTS.containsAll(action.arguments().keySet())
@@ -459,6 +477,8 @@ public class AgentRunWorkerService {
                         && (!(aspectRatio instanceof String ratio) || !IMAGE_ASPECT_RATIOS.contains(ratio)))
                 || (referenceAssetIds != null
                         && !validReferenceAssetIds(run, referenceAssetIds))
+                || (size != null && !(size instanceof String))
+                || (webSearch != null && !(webSearch instanceof Boolean))
                 || generationJobMapper.selectCount(Wrappers.<GenerationJob>lambdaQuery()
                         .eq(GenerationJob::getProjectId, run.getProjectId())
                         .eq(GenerationJob::getProjectActionIdentity, action.actionId())) > 0) {
@@ -466,6 +486,15 @@ public class AgentRunWorkerService {
                     SystemCode.AGENT_ACTION_REJECTED.getMsg());
         }
         return action;
+    }
+
+    /** Agent 路径不暴露模型选择：回落能力表第一行 enabled image 模型（能力表为唯一权威）。 */
+    private GenerationModelCapability resolveAgentImageCapability() {
+        return capabilityMapper.selectEnabledByCapabilityType(GenerationModelCapability.CAPABILITY_IMAGE)
+                .stream()
+                .findFirst()
+                .orElseThrow(() -> new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
+                        SystemCode.AGENT_ACTION_REJECTED.getMsg()));
     }
 
     private boolean validReferenceAssetIds(AgentRun run, Object value) {

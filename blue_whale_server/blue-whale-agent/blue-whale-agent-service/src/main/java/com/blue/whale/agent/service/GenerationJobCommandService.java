@@ -6,6 +6,7 @@ import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.mapper.CommandIdempotencyMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
+import com.blue.whale.agent.mapper.GenerationModelCapabilityMapper;
 import com.blue.whale.agent.model.constant.AggregateType;
 import com.blue.whale.agent.model.constant.EventType;
 import com.blue.whale.agent.model.dto.CreateGenerationJobRequest;
@@ -14,6 +15,7 @@ import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.CommandIdempotency;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationJobOutput;
+import com.blue.whale.agent.model.entity.GenerationModelCapability;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import com.blue.whale.agent.service.governance.GenerationCostAdmissionService;
@@ -44,6 +46,7 @@ public class GenerationJobCommandService {
     private final CommandIdempotencyMapper idempotencyMapper;
     private final ProjectEventService projectEventService;
     private final GenerationCostAdmissionService costAdmissionService;
+    private final GenerationModelCapabilityMapper capabilityMapper;
 
     @Transactional
     public CreateGenerationJobResponse create(
@@ -81,6 +84,14 @@ public class GenerationJobCommandService {
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("prompt", request.parameters().prompt());
         input.put("aspect_ratio", request.parameters().aspectRatio());
+        if (GenerationJob.TYPE_IMAGE.equals(request.type())) {
+            // 按 capability 白名单校验 model_id 与 size：fail early 在 cost 授权与 Job 落库之前，
+            // 非法模型/尺寸直接拒绝，不产生付费调用（IK21O5）
+            GenerationModelCapability capability = requireImageCapability(request.parameters().modelId());
+            input.put("model_id", capability.getModelId());
+            input.put("size", resolveSupportedSize(request.parameters().size(), capability));
+            input.put("web_search", Boolean.TRUE.equals(request.parameters().webSearch()));
+        }
         if (GenerationJob.TYPE_VIDEO.equals(request.type())) {
             input.put("resolution", request.parameters().resolution());
             input.put("duration", request.parameters().duration());
@@ -326,6 +337,27 @@ public class GenerationJobCommandService {
         return Sha256.hex(request.type() + "\u0000" + request.parameters().prompt() + "\u0000"
                 + request.parameters().aspectRatio() + "\u0000" + request.parameters().resolution()
                 + "\u0000" + request.parameters().duration() + "\u0000" + assetIds + "\u0000"
-                + request.expectedOutputCount());
+                + request.expectedOutputCount() + "\u0000"
+                + request.parameters().modelId() + "\u0000"
+                + request.parameters().size() + "\u0000"
+                + request.parameters().webSearch());
+    }
+
+    private GenerationModelCapability requireImageCapability(String modelId) {
+        return capabilityMapper.selectEnabledByModelId(modelId)
+                .orElseThrow(() -> new GlobalException(SystemCode.FAILURE_CODE,
+                        "不支持的模型: " + modelId));
+    }
+
+    private String resolveSupportedSize(String requested, GenerationModelCapability capability) {
+        String sizeId = (requested == null || requested.isBlank())
+                ? capability.getDefaultSize() : requested;
+        GenerationModelCapability.SizeOption option = capability.findSizeById(sizeId);
+        if (option == null) {
+            throw new GlobalException(SystemCode.FAILURE_CODE,
+                    (sizeId == null || sizeId.isBlank())
+                            ? "模型未配置可用尺寸" : "模型不支持该尺寸: " + sizeId);
+        }
+        return option.getId();
     }
 }
