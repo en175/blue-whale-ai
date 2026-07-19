@@ -372,6 +372,48 @@ class ConversationAgentRunIT {
     }
 
     @Test
+    void nonStringSizeIsRejectedBeforeCostReservation() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("non-string-size");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "non-string-size-key", "生成一张小猫")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+
+        // size 非 String 在 validateAction 结构校验即拒（不经过能力表），fail-early 零副作用。
+        postCommit(runId, validCommitBody(project.getId(), work).replace(
+                        "\"aspect_ratio\":\"1:1\"",
+                        "\"aspect_ratio\":\"1:1\",\"size\":123"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(100304));
+
+        assertNoCommitFacts(project.getId(), runId);
+        assertThat(count("cost_reservations", "project_id", project.getId())).isZero();
+    }
+
+    @Test
+    void imageActionIsRejectedWhenNoImageCapabilityEnabled() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("capability-disabled");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "capability-disabled-key", "生成一张小猫")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+
+        // 能力表无 enabled image 模型时 resolveAgentImageCapability fail-closed 拒绝；
+        // 用 enabled=0 模拟空表结果，finally 恢复避免污染共享 H2 种子。
+        jdbcTemplate.update("UPDATE generation_model_capability SET enabled = 0 WHERE capability_type = 'image'");
+        try {
+            postCommit(runId, validCommitBody(project.getId(), work))
+                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(jsonPath("$.code").value(100304));
+        } finally {
+            jdbcTemplate.update("UPDATE generation_model_capability SET enabled = 1 WHERE capability_type = 'image'");
+        }
+
+        assertNoCommitFacts(project.getId(), runId);
+        assertThat(count("cost_reservations", "project_id", project.getId())).isZero();
+    }
+
+    @Test
     void imageActionPersistsValidatedReferenceAssetIds() throws Exception {
         Project project = new Project().setOwnerId(10L).setName("reference-image-action");
         projectMapper.insert(project);

@@ -53,6 +53,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Import(FakeGenerationConfiguration.class)
 class BottomDockGenerationJobIT {
 
+    /** IK21O5 起 image 请求必填 model_id，夹具统一使用能力表种子模型。 */
+    private static final String IMAGE_MODEL_ID = "doubao-seedream-5.0-lite";
+
     @Autowired
     private MockMvc mockMvc;
     @Autowired
@@ -105,7 +108,7 @@ class BottomDockGenerationJobIT {
         String body = "{" +
                 "\"type\":\"image\"," +
                 "\"input_asset_ids\":[]," +
-                "\"parameters\":{\"prompt\":\"四张蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"parameters\":{\"prompt\":\"四张蓝鲸海报\",\"aspect_ratio\":\"1:1\",\"model_id\":\"" + IMAGE_MODEL_ID + "\"}," +
                 "\"expected_output_count\":4}";
 
         MvcResult pending = postGenerationJob(project.getId(), "standalone-confirm", body)
@@ -157,7 +160,7 @@ class BottomDockGenerationJobIT {
         String body = "{" +
                 "\"type\":\"image\"," +
                 "\"input_asset_ids\":[]," +
-                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\",\"model_id\":\"" + IMAGE_MODEL_ID + "\"}," +
                 "\"expected_output_count\":1}";
 
         MvcResult first = postGenerationJob(project.getId(), "pending-idempotency", body)
@@ -180,7 +183,7 @@ class BottomDockGenerationJobIT {
         String body = "{" +
                 "\"type\":\"image\"," +
                 "\"input_asset_ids\":[]," +
-                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\",\"model_id\":\"" + IMAGE_MODEL_ID + "\"}," +
                 "\"expected_output_count\":1}";
 
         MvcResult pending = postGenerationJob(project.getId(), "bound-key-a", body)
@@ -257,7 +260,7 @@ class BottomDockGenerationJobIT {
         String body = "{" +
                 "\"type\":\"image\"," +
                 "\"input_asset_ids\":[]," +
-                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\",\"model_id\":\"" + IMAGE_MODEL_ID + "\"}," +
                 "\"expected_output_count\":1}";
         long jobId = responseData(postGenerationJob(project.getId(), "owner-check", body)
                 .andExpect(status().isAccepted()).andReturn()).path("generation_job_id").asLong();
@@ -278,7 +281,7 @@ class BottomDockGenerationJobIT {
         String body = "{" +
                 "\"type\":\"image\"," +
                 "\"input_asset_ids\":[]," +
-                "\"parameters\":{\"prompt\":\"有成本边界的蓝鲸\",\"aspect_ratio\":\"1:1\"}," +
+                "\"parameters\":{\"prompt\":\"有成本边界的蓝鲸\",\"aspect_ratio\":\"1:1\",\"model_id\":\"" + IMAGE_MODEL_ID + "\"}," +
                 "\"expected_output_count\":1}";
 
         long jobId = responseData(postGenerationJob(project.getId(), "cost-controlled-image", body)
@@ -316,7 +319,7 @@ class BottomDockGenerationJobIT {
         String body = "{" +
                 "\"type\":\"image\"," +
                 "\"input_asset_ids\":[]," +
-                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\",\"model_id\":\"" + IMAGE_MODEL_ID + "\"}," +
                 "\"expected_output_count\":1}";
 
         MvcResult first = postGenerationJob(project.getId(), "dock-key-1", body)
@@ -416,7 +419,7 @@ class BottomDockGenerationJobIT {
         String imageBody = "{" +
                 "\"type\":\"image\"," +
                 "\"input_asset_ids\":[]," +
-                "\"parameters\":{\"prompt\":\"四张蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"parameters\":{\"prompt\":\"四张蓝鲸海报\",\"aspect_ratio\":\"1:1\",\"model_id\":\"" + IMAGE_MODEL_ID + "\"}," +
                 "\"expected_output_count\":4}";
         String videoBody = "{" +
                 "\"type\":\"video\"," +
@@ -456,7 +459,7 @@ class BottomDockGenerationJobIT {
         String body = "{" +
                 "\"type\":\"image\"," +
                 "\"input_asset_ids\":[]," +
-                "\"parameters\":{\"prompt\":\"三张蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"parameters\":{\"prompt\":\"三张蓝鲸海报\",\"aspect_ratio\":\"1:1\",\"model_id\":\"" + IMAGE_MODEL_ID + "\"}," +
                 "\"expected_output_count\":3}";
         long jobId = responseData(postGenerationJob(project.getId(), "queued-image-cancel", body)
                 .andExpect(status().isAccepted()).andReturn()).path("generation_job_id").asLong();
@@ -492,7 +495,7 @@ class BottomDockGenerationJobIT {
         String body = "{" +
                 "\"type\":\"image\"," +
                 "\"input_asset_ids\":[]," +
-                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\",\"model_id\":\"" + IMAGE_MODEL_ID + "\"}," +
                 "\"expected_output_count\":1}";
         MvcResult accepted = postGenerationJob(project.getId(), "snapshot-error-key", body)
                 .andExpect(status().isAccepted())
@@ -531,7 +534,7 @@ class BottomDockGenerationJobIT {
         String body = "{" +
                 "\"type\":\"image\"," +
                 "\"input_asset_ids\":[" + foreignAsset.getId() + "]," +
-                "\"parameters\":{\"prompt\":\"参考素材生成\",\"aspect_ratio\":\"1:1\"}," +
+                "\"parameters\":{\"prompt\":\"参考素材生成\",\"aspect_ratio\":\"1:1\",\"model_id\":\"" + IMAGE_MODEL_ID + "\"}," +
                 "\"expected_output_count\":1}";
 
         postGenerationJob(owned.getId(), "foreign-asset-key", body)
@@ -562,6 +565,48 @@ class BottomDockGenerationJobIT {
 
         assertThat(count("generation_jobs", "project_id", project.getId())).isZero();
         assertThat(count("project_events", "project_id", project.getId())).isZero();
+    }
+
+    @Test
+    void imageCommandWithoutModelIdIsRejectedWithoutCreatingJob() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("missing-model-id");
+        projectMapper.insert(project);
+        String body = "{" +
+                "\"type\":\"image\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"expected_output_count\":1}";
+
+        // IK21O5 起 image 必填 model_id：缺省在 isValidFor 边界被拒，不落 Job。
+        postGenerationJob(project.getId(), "missing-model-id-key", body)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.msg").value("生成参数不在服务端能力范围内"));
+
+        assertThat(count("generation_jobs", "project_id", project.getId())).isZero();
+        assertThat(count("project_events", "project_id", project.getId())).isZero();
+    }
+
+    @Test
+    void imageCommandWithUnsupportedModelIdIsRejectedWithoutCreatingJob() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("unsupported-model-id");
+        projectMapper.insert(project);
+        String body = "{" +
+                "\"type\":\"image\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"," +
+                "\"model_id\":\"not-a-registered-model\"}," +
+                "\"expected_output_count\":1}";
+
+        // model_id 必须在能力表白名单内：requireImageCapability fail-closed，不产生付费调用。
+        postGenerationJob(project.getId(), "unsupported-model-id-key", body)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.msg").value("不支持的模型: not-a-registered-model"));
+
+        assertThat(count("generation_jobs", "project_id", project.getId())).isZero();
+        assertThat(count("project_events", "project_id", project.getId())).isZero();
+        assertThat(count("cost_reservations", "project_id", project.getId())).isZero();
     }
 
     @Test
@@ -605,7 +650,7 @@ class BottomDockGenerationJobIT {
         String firstBody = "{" +
                 "\"type\":\"image\"," +
                 "\"input_asset_ids\":[]," +
-                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\",\"model_id\":\"" + IMAGE_MODEL_ID + "\"}," +
                 "\"expected_output_count\":1}";
         String changedBody = firstBody.replace("蓝鲸海报", "白鲸海报");
 
@@ -627,7 +672,7 @@ class BottomDockGenerationJobIT {
         String body = "{" +
                 "\"type\":\"image\"," +
                 "\"input_asset_ids\":[]," +
-                "\"parameters\":{\"prompt\":\"并发蓝鲸\",\"aspect_ratio\":\"1:1\"}," +
+                "\"parameters\":{\"prompt\":\"并发蓝鲸\",\"aspect_ratio\":\"1:1\",\"model_id\":\"" + IMAGE_MODEL_ID + "\"}," +
                 "\"expected_output_count\":1}";
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -655,7 +700,7 @@ class BottomDockGenerationJobIT {
         String body = "{" +
                 "\"type\":\"image\"," +
                 "\"input_asset_ids\":[]," +
-                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"parameters\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\",\"model_id\":\"" + IMAGE_MODEL_ID + "\"}," +
                 "\"expected_output_count\":1}";
         MvcResult accepted = postGenerationJob(project.getId(), "worker-key", body)
                 .andExpect(status().isAccepted())
@@ -708,7 +753,7 @@ class BottomDockGenerationJobIT {
         String body = "{" +
                 "\"type\":\"image\"," +
                 "\"input_asset_ids\":[]," +
-                "\"parameters\":{\"prompt\":\"四张蓝鲸海报\",\"aspect_ratio\":\"1:1\"}," +
+                "\"parameters\":{\"prompt\":\"四张蓝鲸海报\",\"aspect_ratio\":\"1:1\",\"model_id\":\"" + IMAGE_MODEL_ID + "\"}," +
                 "\"expected_output_count\":4}";
         long originalJobId = responseData(postGenerationJob(project.getId(), "retry-original", body)
                 .andExpect(status().isAccepted()).andReturn()).path("generation_job_id").asLong();
