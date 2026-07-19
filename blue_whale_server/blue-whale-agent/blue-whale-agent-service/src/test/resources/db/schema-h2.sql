@@ -473,3 +473,56 @@ CREATE TABLE IF NOT EXISTS content_reviews
     is_delete TINYINT NOT NULL DEFAULT 0,
     CONSTRAINT uk_content_review_identity UNIQUE (project_id, subject_type, subject_id, content_digest, modality, direction, policy_version)
 );
+
+-- 生成模型能力注册表（V7 对齐；JSON 列退化为 CLOB，JacksonTypeHandler 整存整取）。
+-- 种子与 V7 一致：火山方舟 Agent Plan 唯一文生图模型 doubao-seedream-5.0-lite。
+-- Agent action 落 GenerationJob 时按本表注入默认 model_id、校验 size 白名单，
+-- 缺表/缺种子时注入 fail-closed 拒绝 action（IK21O7 回归补齐）。
+CREATE TABLE IF NOT EXISTS generation_model_capability
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    provider_id VARCHAR(64) NOT NULL,
+    model_id VARCHAR(128) NOT NULL,
+    capability_type VARCHAR(32) NOT NULL,
+    model_label VARCHAR(128) NULL,
+    icon VARCHAR(512) NULL,
+    supported_sizes CLOB NULL,
+    supported_aspect_ratios CLOB NULL,
+    supported_formats CLOB NULL,
+    default_size VARCHAR(32) NULL,
+    default_format VARCHAR(32) NULL,
+    default_aspect_ratio VARCHAR(32) NULL,
+    features CLOB NULL,
+    enabled TINYINT NOT NULL DEFAULT 0,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    CONSTRAINT uk_gmc_provider_model UNIQUE (provider_id, model_id)
+);
+
+INSERT INTO generation_model_capability
+    (provider_id, model_id, capability_type, model_label, icon,
+     supported_sizes, supported_aspect_ratios, supported_formats,
+     default_size, default_format, default_aspect_ratio,
+     features, enabled)
+SELECT 'volcengine',
+    'doubao-seedream-5.0-lite',
+    'image',
+    '豆包 Seedream 5.0 lite',
+    NULL,
+    '[{"id":"2k","label":"2K","api_value":"2K","width":2048,"height":2048},'
+        || '{"id":"3k","label":"3K","api_value":"3K","width":3072,"height":3072},'
+        || '{"id":"4k","label":"4K","api_value":"4K","width":4096,"height":4096}]',
+    '["1:1","16:9","9:16","4:3","3:4","21:9"]',
+    '["png","jpeg"]',
+    '2K',
+    'png',
+    '1:1',
+    '{"reference_image":true,"watermark":true,"quantity_max":4,'
+        || '"sequential_image_generation":true,"stream":true,"tools":true}',
+    1
+WHERE NOT EXISTS (
+    SELECT 1 FROM generation_model_capability
+    WHERE provider_id = 'volcengine' AND model_id = 'doubao-seedream-5.0-lite'
+);

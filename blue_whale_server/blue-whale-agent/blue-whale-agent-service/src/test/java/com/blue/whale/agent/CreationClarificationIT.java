@@ -247,6 +247,40 @@ class CreationClarificationIT {
     }
 
     @Test
+    void resumedImageActionInjectsCapabilityDefaultModelId() throws Exception {
+        Project project = newProject();
+        JsonNode firstRun = postMessage(project.getId(), "msg-1", "generate a whale poster", null)
+                .path("agent_run_id");
+        JsonNode work = claim(firstRun.asLong(), "worker-1");
+        MvcResult proposed = commit(firstRun.asLong(), "worker-1",
+                        clarificationCommitBody(project.getId(), work, "commit-1", "Which style?"))
+                .andReturn();
+        long inputRequestId = objectMapper.readTree(proposed.getResponse().getContentAsString())
+                .path("data").path("input_request_id").asLong();
+
+        JsonNode resumed = postMessage(
+                project.getId(), "answer-1", "ink wash style with whitespace", inputRequestId);
+        long resumedRunId = resumed.path("agent_run_id").asLong();
+        JsonNode resumedWork = claim(resumedRunId, "worker-2");
+        commit(resumedRunId, "worker-2",
+                        actionCommitBody(project.getId(), resumedWork, "commit-2",
+                                "whale poster, ink wash style with whitespace", "1", 1)
+                                .replace("\"aspect_ratio\":\"1:1\"",
+                                        "\"aspect_ratio\":\"1:1\",\"size\":\"2K\",\"web_search\":true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.generation_job_id").isNumber());
+
+        // IK21O7：澄清恢复后的再次提交同样注入能力表默认模型、规范化 size 并透传
+        // web_search，真图链路行为与直接提交一致。
+        JsonNode input = objectMapper.readTree(jdbcTemplate.queryForObject(
+                "SELECT input FROM generation_jobs WHERE agent_run_id = ?", String.class, resumedRunId));
+        assertThat(input.path("model_id").asText()).isEqualTo("doubao-seedream-5.0-lite");
+        assertThat(input.path("expected_output_count").asInt()).isEqualTo(1);
+        assertThat(input.path("size").asText()).isEqualTo("2k");
+        assertThat(input.path("web_search").asBoolean()).isTrue();
+    }
+
+    @Test
     void duplicateAnswerDoesNotCreateSecondResumedRunAndIdempotentReplayIsStable() throws Exception {
         Project project = newProject();
         JsonNode firstRun = postMessage(project.getId(), "msg-1", "generate a whale poster", null)

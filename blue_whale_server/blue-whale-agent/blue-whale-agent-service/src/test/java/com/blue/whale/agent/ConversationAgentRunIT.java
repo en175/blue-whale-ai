@@ -308,6 +308,70 @@ class ConversationAgentRunIT {
     }
 
     @Test
+    void imageActionInjectsCapabilityDefaultModelId() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("default-model-injection");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "default-model-key", "生成一张小猫")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+
+        postCommit(runId, validCommitBody(project.getId(), work)).andExpect(status().isOk());
+
+        // IK21O7：Agent 不暴露模型选择，Job input 注入能力表默认 image 模型；
+        // size 缺省时不记录 size 键（IK21O5 已知瑕疵），执行按能力表 defaultSize(2K)。
+        JsonNode input = objectMapper.readTree(jdbcTemplate.queryForObject(
+                "SELECT input FROM generation_jobs WHERE agent_run_id = ?", String.class, runId));
+        assertThat(input.path("model_id").asText()).isEqualTo("doubao-seedream-5.0-lite");
+        assertThat(input.path("expected_output_count").asInt()).isEqualTo(1);
+        assertThat(input.has("size")).isFalse();
+    }
+
+    @Test
+    void imageActionNormalizesSizeAndPassesWebSearch() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("size-web-search-action");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "size-web-search-key", "联网生成一张 2K 小猫")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        String body = validCommitBody(project.getId(), work).replace(
+                "\"aspect_ratio\":\"1:1\"",
+                "\"aspect_ratio\":\"1:1\",\"size\":\"2K\",\"web_search\":true");
+
+        postCommit(runId, body).andExpect(status().isOk());
+
+        // 能力表 size 白名单大小写不敏感命中后规范化为种子 size_id；web_search 原样透传。
+        JsonNode input = objectMapper.readTree(jdbcTemplate.queryForObject(
+                "SELECT input FROM generation_jobs WHERE agent_run_id = ?", String.class, runId));
+        assertThat(input.path("model_id").asText()).isEqualTo("doubao-seedream-5.0-lite");
+        assertThat(input.path("size").asText()).isEqualTo("2k");
+        assertThat(input.path("web_search").asBoolean()).isTrue();
+    }
+
+    @Test
+    void invalidSizeOrWebSearchIsRejectedBeforeCostReservation() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("invalid-size-web-search");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "invalid-size-key", "生成一张小猫")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+
+        postCommit(runId, validCommitBody(project.getId(), work).replace(
+                        "\"aspect_ratio\":\"1:1\"",
+                        "\"aspect_ratio\":\"1:1\",\"size\":\"8K\""))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(100304));
+        postCommit(runId, validCommitBody(project.getId(), work).replace(
+                        "\"aspect_ratio\":\"1:1\"",
+                        "\"aspect_ratio\":\"1:1\",\"web_search\":\"yes\""))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(100304));
+
+        // fail-early：非法 size/web_search 不落 Job、不产生 cost 预留（reserveAuthorized 之前）。
+        assertNoCommitFacts(project.getId(), runId);
+        assertThat(count("cost_reservations", "project_id", project.getId())).isZero();
+    }
+
+    @Test
     void imageActionPersistsValidatedReferenceAssetIds() throws Exception {
         Project project = new Project().setOwnerId(10L).setName("reference-image-action");
         projectMapper.insert(project);
