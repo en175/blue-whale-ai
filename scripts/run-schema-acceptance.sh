@@ -57,7 +57,12 @@ SCENARIOS=()
 # Agent 运行持久化七张表（IK1W1J 契约）
 AGENT_TABLES="'conversations','agent_runs','runtime_checkpoints','run_commits','user_input_requests','conversation_messages','command_idempotency'"
 # 迁移账本期望版本（V1 基线 + V2 seed + V3 游标去保留字 + V4 生成资产 + V5 模板 + V6 Agent 运行持久化）
-EXPECTED_VERSIONS="1,2,3,4,5,6"
+# 从迁移目录动态派生版本集，加新版本无需改脚本。
+# sort -n 防止 V10+ 字典序排到 V2 前；sed 只取 V 与 __ 之间的数字，slug 含数字不误读。
+MIGRATIONS_DIR="$(cd "$(dirname "$0")/.." && pwd)/blue_whale_server/blue-whale-agent/blue-whale-agent-service/src/main/resources/db/migrations"
+EXPECTED_VERSIONS=$(ls "$MIGRATIONS_DIR"/V*__*.sql \
+    | sed 's#.*/V\([0-9]*\)__[[:alnum:]_-]*\.sql#\1#' \
+    | sort -n | paste -sd, -)
 # Worker claim 租约秒数（与 AgentRunWorkerService 一致），接管验证需等待租约过期
 LEASE_SECONDS=31
 
@@ -390,7 +395,7 @@ scenario_empty() {
   echo "   project 表存在: $has_project"
   echo "   event_cursor 列数(期望 2): ${event_cursor_cols}；保留字 cursor 列数(期望 0): $reserved_cols"
 
-  [ "$versions" = "1,2,3,4,5,6" ] || fail "空库：记账本应为 1,2,3,4,5,6，实际 $versions"
+  [ "$versions" = "$EXPECTED_VERSIONS" ] || fail "空库：记账本应为 ${EXPECTED_VERSIONS}，实际 $versions"
   [ "$has_project" = "1" ] || fail "空库：project 表应存在"
   [ "$event_cursor_cols" = "2" ] || fail "空库：project_events/outbox_messages 应有 event_cursor 列"
   [ "$reserved_cols" = "0" ] || fail "空库：不应残留保留字 cursor 列"
@@ -553,7 +558,7 @@ scenario_upgrade() {
   echo "   Outbox(message_id/游标/状态/重试/下次重试,按序): $outbox"
   echo "   保留字 cursor 列数(期望 0): $reserved_cols"
 
-  [ "$versions" = "1,2,3,4,5,6" ] || fail "旧库：记账本应为 1,2,3,4,5,6(补记 V1+V2/V3/V4/V5/V6)，实际 $versions"
+  [ "$versions" = "$EXPECTED_VERSIONS" ] || fail "旧库：记账本应为 ${EXPECTED_VERSIONS}(补记 V1+V2/V3/V4/V5/V6)，实际 $versions"
   [ "$preserved" = "2" ] || fail "旧库：既有数据未保留(期望 2 行，实际 $preserved)"
   [ "$events" = "evt_old_1/1,evt_old_2/2,evt_old_3/3" ] || fail "旧库：事件游标值或顺序未保留，实际 $events"
   [ "$outbox" = "evt_old_1/1/pending/2/2030-01-02 03:04:05,evt_old_2/2/published/0/null,evt_old_3/3/pending/1/2030-02-03 04:05:06" ] \

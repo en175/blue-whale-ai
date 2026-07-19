@@ -2,6 +2,7 @@ package com.blue.whale.agent;
 
 import com.blue.whale.agent.service.governance.CostControlProperties;
 import com.blue.whale.agent.service.generation.GenerationWorker;
+import com.blue.whale.agent.support.ExpectedMigrationVersions;
 import com.blue.whale.agent.support.FakeGenerationConfiguration;
 import com.blue.whale.agent.support.FakeGenerationStorage;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -113,10 +114,10 @@ class GenerationOnEmptySchemaMySqlIT {
 
     @Test
     void publicGenerationChainWorksOnFreshlyMigratedEmptyDatabase() throws Exception {
-        // 空库迁移链完整执行：记账本记录 1,2,3,4,5,6
+        // 空库迁移链完整执行：记账本记录全部已应用版本
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT GROUP_CONCAT(version ORDER BY version) FROM schema_migrations", String.class))
-                .isEqualTo("1,2,3,4,5,6");
+                .isEqualTo(ExpectedMigrationVersions.APPLIED_CSV);
 
         // 预置 Project（迁移链不管业务数据，测试直接写）
         jdbcTemplate.update("INSERT INTO project (id, owner_id, name) VALUES (9101, 1001, 'empty-db-gen')");
