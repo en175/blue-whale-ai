@@ -1,5 +1,6 @@
 package com.blue.whale.agent.config;
 
+import com.blue.whale.agent.mapper.GenerationModelCapabilityMapper;
 import com.blue.whale.agent.service.GenerationJobClaimService;
 import com.blue.whale.agent.service.GenerationResultAcceptanceService;
 import com.blue.whale.agent.service.ProjectAssetContentService;
@@ -16,6 +17,7 @@ import com.blue.whale.agent.service.generation.LocalDiskGenerationStorage;
 import com.blue.whale.agent.service.generation.LocalFakeGenerationStorage;
 import com.blue.whale.agent.service.generation.LocalFakeImageGenerationProvider;
 import com.blue.whale.agent.service.generation.OpenAiImageGenerationProvider;
+import com.blue.whale.agent.service.generation.VolcEngineImageGenerationProvider;
 import com.blue.whale.agent.service.generation.SeedanceAsyncGenerationProvider;
 import com.blue.whale.agent.service.generation.SeedanceVideoGenerationProcessor;
 import com.blue.whale.agent.service.generation.SeedanceVideoResultIngestor;
@@ -259,8 +261,9 @@ public class GenerationAdapterConfiguration {
                 contentReviewService);
     }
 
-    // ===== Agent Plan 模式装配（IK21O4 地基）：本地磁盘存储 + 非生产确定性验收证据源 =====
-    // Provider 与 GenerationWorker 留待 T2（IK21O5）接火山方舟队列 Provider；
+    // ===== Agent Plan 模式装配（IK21O4 地基 + IK21O5 火山 Provider）：本地磁盘存储 +
+    // 非生产确定性验收证据源 + 火山方舟 GenerationProvider + GenerationWorker =====
+    // Provider 真实调用方舟 /plan/v3（ArkService base-url 已校验含 /plan/），b64_json 免二次下载；
     // GenerationWorkerScheduler 经 ObjectProvider 惰性解析，无 worker 时空转，启动不受影响。
 
     @Bean
@@ -277,6 +280,34 @@ public class GenerationAdapterConfiguration {
             ContentReviewProperties contentReviewProperties,
             GenerationModeValidator modeValidator) {
         return new NonProductionAcceptanceReviewEvidenceSource(contentReviewProperties);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = AGENT_PLAN_MODE)
+    GenerationProvider agentPlanGenerationProvider(
+            ObjectProvider<ArkService> arkServiceProvider,
+            ProjectAssetContentService assetContentService,
+            GenerationModelCapabilityMapper capabilityMapper,
+            GenerationModeValidator modeValidator) {
+        return new VolcEngineImageGenerationProvider(
+                arkServiceProvider, assetContentService, capabilityMapper);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = AGENT_PLAN_MODE)
+    GenerationWorker agentPlanGenerationWorker(
+            GenerationJobClaimService claimService,
+            GenerationResultAcceptanceService acceptanceService,
+            GenerationProvider agentPlanGenerationProvider,
+            LocalDiskGenerationStorage localDiskGenerationStorage,
+            ObjectProvider<SeedanceVideoGenerationProcessor> videoProcessorProvider,
+            AssetObjectLifecycleService assetObjectLifecycleService,
+            ImageProviderCallService imageProviderCallService,
+            ContentReviewService contentReviewService,
+            GenerationModeValidator modeValidator) {
+        return new GenerationWorker(claimService, acceptanceService, agentPlanGenerationProvider,
+                localDiskGenerationStorage, videoProcessorProvider.getIfAvailable(),
+                assetObjectLifecycleService, imageProviderCallService, contentReviewService);
     }
 
     @Bean

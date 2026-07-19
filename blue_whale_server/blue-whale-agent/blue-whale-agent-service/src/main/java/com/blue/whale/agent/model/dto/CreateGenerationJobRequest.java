@@ -93,6 +93,18 @@ public class CreateGenerationJobRequest {
         @JsonProperty("duration")
         private Integer duration;
 
+        /** 文生图模型 ID（image 必填），按能力表白名单校验，见 GenerationJobCommandService。 */
+        @JsonProperty("model_id")
+        private String modelId;
+
+        /** 尺寸档位 id（如 {@code 2k}/{@code 3k}/{@code 4k}），可选；缺省由服务端按能力表 defaultSize 兜底。 */
+        @JsonProperty("size")
+        private String size;
+
+        /** 是否启用联网搜索（tools 透传方舟），可选；缺省/false 不带 tools。 */
+        @JsonProperty("web_search")
+        private Boolean webSearch;
+
         @JsonIgnore
         private boolean unsupportedField;
 
@@ -112,10 +124,23 @@ public class CreateGenerationJobRequest {
             return duration;
         }
 
+        public String modelId() {
+            return modelId;
+        }
+
+        public String size() {
+            return size;
+        }
+
+        public Boolean webSearch() {
+            return webSearch;
+        }
+
         @JsonIgnore
         public boolean isValidFor(String type) {
             if ("image".equals(type)) {
-                return resolution == null && duration == null;
+                return resolution == null && duration == null
+                        && modelId != null && !modelId.isBlank();
             }
             return "video".equals(type)
                     && Set.of("16:9", "4:3", "1:1", "3:4", "9:16", "21:9")
