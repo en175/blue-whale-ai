@@ -99,6 +99,9 @@ blue-whale:
       initial-poll-seconds: 5
       max-poll-seconds: 30
       allowed-result-host-suffixes: ${SEEDANCE_ALLOWED_RESULT_HOST_SUFFIXES:volces.com}
+    agent-plan:
+      # 本地磁盘生成存储根目录（Docker 卷挂载，重启不丢）；仅 mode=agent-plan 时由 LocalDiskGenerationStorage 使用
+      storage-root: ${GENERATION_LOCAL_STORAGE_ROOT:/var/lib/blue-whale/generation}
     worker-scheduled: ${GENERATION_WORKER_SCHEDULED:true}
   project-events:
     redis-enabled: true

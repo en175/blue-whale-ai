@@ -12,6 +12,7 @@ import com.blue.whale.agent.service.generation.AssetObjectGarbageCollector;
 import com.blue.whale.agent.service.generation.GenerationProvider;
 import com.blue.whale.agent.service.generation.GenerationWorker;
 import com.blue.whale.agent.service.generation.GenerationWorkerScheduler;
+import com.blue.whale.agent.service.generation.LocalDiskGenerationStorage;
 import com.blue.whale.agent.service.generation.LocalFakeGenerationStorage;
 import com.blue.whale.agent.service.generation.LocalFakeImageGenerationProvider;
 import com.blue.whale.agent.service.generation.OpenAiImageGenerationProvider;
@@ -49,6 +50,8 @@ public class GenerationAdapterConfiguration {
 
     private static final String MODE = "openai-tos";
     private static final String FAKE_MODE = "fake";
+    private static final String AGENT_PLAN_MODE = "agent-plan";
+    private static final String ARK_PLAN_BASE_URL_FRAGMENT = "/plan/";
 
     @Bean
     GenerationModeValidator generationModeValidator(
@@ -59,7 +62,8 @@ public class GenerationAdapterConfiguration {
 
     static void validateMode(GenerationAdapterProperties properties, Environment environment) {
         String mode = properties.getMode();
-        if (!"disabled".equals(mode) && !MODE.equals(mode) && !FAKE_MODE.equals(mode)) {
+        if (!"disabled".equals(mode) && !MODE.equals(mode)
+                && !FAKE_MODE.equals(mode) && !AGENT_PLAN_MODE.equals(mode)) {
             throw new IllegalStateException("图片生成配置无效: mode");
         }
         if (FAKE_MODE.equals(mode)) {
@@ -79,6 +83,31 @@ public class GenerationAdapterConfiguration {
             }
             if (environment != null && environment.acceptsProfiles(Profiles.of("prod"))) {
                 throw new IllegalStateException("受控真实验收禁止在生产环境启用");
+            }
+        }
+        // Agent Plan 模式（IK21O4）：ARK key/base-url 缺失即 fail-closed 报配置缺失，
+        // base-url 必须含 /plan/ 端点（混用标准 /api/v3 会失败或产生额外费用），
+        // 生产 profile 拒绝该模式启动。
+        if (AGENT_PLAN_MODE.equals(mode)) {
+            if (environment == null) {
+                throw new IllegalStateException("Agent Plan 模式缺少 Environment 校验 ARK 配置");
+            }
+            if (environment.acceptsProfiles(Profiles.of("prod"))) {
+                throw new IllegalStateException("Agent Plan 模式禁止在生产环境启用");
+            }
+            String arkKey = environment.getProperty("volcengine.ark.api-key");
+            if (arkKey == null || arkKey.isBlank()) {
+                throw new IllegalStateException(
+                        "Agent Plan 模式缺少配置: volcengine.ark.api-key (ARK_API_KEY)");
+            }
+            String arkBaseUrl = environment.getProperty("volcengine.ark.base-url");
+            if (arkBaseUrl == null || arkBaseUrl.isBlank()) {
+                throw new IllegalStateException(
+                        "Agent Plan 模式缺少配置: volcengine.ark.base-url (ARK_BASE_URL)");
+            }
+            if (!arkBaseUrl.contains(ARK_PLAN_BASE_URL_FRAGMENT)) {
+                throw new IllegalStateException(
+                        "Agent Plan 模式要求 base-url 含 /plan/ 端点: volcengine.ark.base-url");
             }
         }
     }
@@ -228,6 +257,26 @@ public class GenerationAdapterConfiguration {
         return new GenerationWorker(claimService, acceptanceService, provider, storage,
                 videoProcessorProvider.getIfAvailable(), lifecycleService, imageProviderCallService,
                 contentReviewService);
+    }
+
+    // ===== Agent Plan 模式装配（IK21O4 地基）：本地磁盘存储 + 非生产确定性验收证据源 =====
+    // Provider 与 GenerationWorker 留待 T2（IK21O5）接火山方舟队列 Provider；
+    // GenerationWorkerScheduler 经 ObjectProvider 惰性解析，无 worker 时空转，启动不受影响。
+
+    @Bean
+    @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = AGENT_PLAN_MODE)
+    LocalDiskGenerationStorage localDiskGenerationStorage(
+            GenerationAdapterProperties properties,
+            GenerationModeValidator modeValidator) {
+        return new LocalDiskGenerationStorage(properties);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "blue-whale.generation", name = "mode", havingValue = AGENT_PLAN_MODE)
+    ReviewEvidenceSource agentPlanReviewEvidenceSource(
+            ContentReviewProperties contentReviewProperties,
+            GenerationModeValidator modeValidator) {
+        return new NonProductionAcceptanceReviewEvidenceSource(contentReviewProperties);
     }
 
     @Bean
