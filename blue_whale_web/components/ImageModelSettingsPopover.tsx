@@ -4,7 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 import { AspectRatioIcon } from "./icons/AspectRatioIcon";
+import type { ImageModelCapability } from "@/app/canvas/_canvas/api/generation";
 
+/**
+ * 桥接期常量：BottomDock 图片表单已迁移到 getImageModels() 能力表（IK21O6），
+ * 此处仅 AgentComposer（Agent 入口，IK21O6 out of scope）继续消费。
+ * 待后续子工单把 AgentComposer 迁到能力表后整体删除。
+ */
 export const IMAGE_MODELS = [
   {
     id: "doubao-seedream-5-0-260128",
@@ -28,7 +34,7 @@ export const IMAGE_MODELS = [
     ],
   },
   {
-    id: "doubao-seedream-4-0-250615",
+    id: "doubao-seedream-4-0-250828",
     label: "Seedream 4.0",
     defaultResolutionId: "2k",
     stream: true,
@@ -78,24 +84,36 @@ export interface ImageModelSettingsPopoverProps {
   triggerRef: React.RefObject<HTMLElement | null>;
   open: boolean;
   onClose: () => void;
-  selectedModel: ImageModel;
-  onModelChange: (model: ImageModel) => void;
-  selectedResolution: ImageResolution;
-  onResolutionChange: (resolution: ImageResolution) => void;
+  /** 可选模型列表（能力表驱动，getImageModels() 返回）。 */
+  models: ImageModelCapability[];
+  selectedModel: ImageModelCapability;
+  onModelChange: (model: ImageModelCapability) => void;
+  /** 所选分辨率档位（selectedModel.supported_sizes 的某项）。 */
+  selectedSize: { id: string; label: string };
+  onSizeChange: (size: { id: string; label: string }) => void;
   selectedAspectRatio: ImageAspectRatio;
   onAspectRatioChange: (ratio: ImageAspectRatio) => void;
+  /** 联网搜索开关态。 */
+  webSearch: boolean;
+  onWebSearchChange: (v: boolean) => void;
+  /** 是否显示联网开关（依所选模型 features.tools）。 */
+  showWebSearch: boolean;
 }
 
 export function ImageModelSettingsPopover({
   triggerRef,
   open,
   onClose,
+  models,
   selectedModel,
   onModelChange,
-  selectedResolution,
-  onResolutionChange,
+  selectedSize,
+  onSizeChange,
   selectedAspectRatio,
   onAspectRatioChange,
+  webSearch,
+  onWebSearchChange,
+  showWebSearch,
 }: ImageModelSettingsPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: 16, bottom: 64 });
@@ -217,7 +235,7 @@ export function ImageModelSettingsPopover({
                   textOverflow: "ellipsis",
                 }}
               >
-                {selectedModel.label}
+                {selectedModel.model_label}
               </span>
               <ChevronDown
                 width={14}
@@ -243,9 +261,9 @@ export function ImageModelSettingsPopover({
                   gap: 2,
                 }}
               >
-                {IMAGE_MODELS.map((model) => (
+                {models.map((model) => (
                   <button
-                    key={model.id}
+                    key={model.model_id}
                     type="button"
                     onClick={() => {
                       onModelChange(model);
@@ -257,7 +275,7 @@ export function ImageModelSettingsPopover({
                       borderRadius: 6,
                       border: 0,
                       background:
-                        selectedModel.id === model.id
+                        selectedModel.model_id === model.model_id
                           ? "rgba(255, 255, 255, 0.08)"
                           : "transparent",
                       color: "rgb(255, 255, 255)",
@@ -270,7 +288,7 @@ export function ImageModelSettingsPopover({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    <span style={{ fontWeight: 600 }}>{model.label}</span>
+                    <span style={{ fontWeight: 600 }}>{model.model_label}</span>
                   </button>
                 ))}
               </div>
@@ -326,7 +344,7 @@ export function ImageModelSettingsPopover({
                   textAlign: "left",
                 }}
               >
-                {selectedResolution.label}
+                {selectedSize.label}
               </span>
               <ChevronDown
                 width={14}
@@ -352,12 +370,12 @@ export function ImageModelSettingsPopover({
                   gap: 2,
                 }}
               >
-                {selectedModel.resolutions.map((res) => (
+                {selectedModel.supported_sizes.map((res) => (
                   <button
                     key={res.id}
                     type="button"
                     onClick={() => {
-                      onResolutionChange(res);
+                      onSizeChange(res);
                       setResolutionOpen(false);
                     }}
                     style={{
@@ -366,7 +384,7 @@ export function ImageModelSettingsPopover({
                       borderRadius: 6,
                       border: 0,
                       background:
-                        selectedResolution.id === res.id
+                        selectedSize.id === res.id
                           ? "rgba(255, 255, 255, 0.08)"
                           : "transparent",
                       color: "rgb(255, 255, 255)",
@@ -471,6 +489,50 @@ export function ImageModelSettingsPopover({
           })}
         </div>
       </div>
+
+      {/* 联网搜索 */}
+      {showWebSearch && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "4px 0" }}>
+          <div style={{ fontSize: 12, color: "var(--tc-text-muted)", fontWeight: 500, padding: "0px 4px" }}>
+            联网搜索
+          </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "7px 4px" }}>
+            <span style={{ fontSize: 12, color: "var(--tc-text-secondary)", fontWeight: 400 }}>搜索最新网络信息辅助生成</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={webSearch}
+              aria-label="联网搜索"
+              onClick={() => onWebSearchChange(!webSearch)}
+              style={{
+                position: "relative",
+                width: 36,
+                height: 20,
+                borderRadius: 9999,
+                border: 0,
+                background: webSearch ? "var(--tc-accent)" : "var(--tc-border-active)",
+                cursor: "pointer",
+                transition: "background 150ms",
+                flexShrink: 0,
+                padding: 0,
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  top: 2,
+                  left: webSearch ? 18 : 2,
+                  width: 16,
+                  height: 16,
+                  borderRadius: "50%",
+                  background: "var(--tc-on-accent)",
+                  transition: "left 150ms",
+                }}
+              />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   ,
   body
