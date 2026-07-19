@@ -426,6 +426,9 @@ function CanvasPageInner() {
               parameters: {
                 prompt: trimmed,
                 aspect_ratio: args.settings.aspectRatio.id,
+                model_id: args.settings.modelId,
+                size: args.settings.size,
+                web_search: args.settings.webSearch,
               },
               expected_output_count: outputCount,
             },

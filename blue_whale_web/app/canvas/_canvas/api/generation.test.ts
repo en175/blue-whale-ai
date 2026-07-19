@@ -25,7 +25,7 @@ describe("BottomDock GenerationJob 命令 API", () => {
       {
         type: "image",
         input_asset_ids: [3],
-        parameters: { prompt: "蓝鲸海报", aspect_ratio: "1:1" },
+        parameters: { prompt: "蓝鲸海报", aspect_ratio: "1:1", model_id: "doubao-seedream-5-0-260128", size: "2k", web_search: false },
         expected_output_count: 4,
       },
       "command-1",
@@ -37,7 +37,7 @@ describe("BottomDock GenerationJob 命令 API", () => {
       body: JSON.stringify({
         type: "image",
         input_asset_ids: [3],
-        parameters: { prompt: "蓝鲸海报", aspect_ratio: "1:1" },
+        parameters: { prompt: "蓝鲸海报", aspect_ratio: "1:1", model_id: "doubao-seedream-5-0-260128", size: "2k", web_search: false },
         expected_output_count: 4,
       }),
     });

@@ -8,13 +8,10 @@ import { createPortal } from "react-dom";
 import { ChevronUp, Image as ImageIcon, Plus, Settings2, X } from "lucide-react";
 import {
   ImageModelSettingsPopover,
-  IMAGE_MODELS,
   IMAGE_ASPECT_RATIOS,
-  defaultResolutionOf,
-  type ImageModel,
-  type ImageResolution,
   type ImageAspectRatio,
 } from "@/components/ImageModelSettingsPopover";
+import { getImageModels, type ImageModelCapability } from "../../api/generation";
 import { CreditIcon } from "../../icons";
 import { QUANTITIES } from "../../constants";
 import type { ImageDockContentProps } from "../../types";
@@ -37,17 +34,46 @@ export function ImageDockContent({
 }: ImageDockContentProps) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<ImageModel>(IMAGE_MODELS[0]);
-  const [selectedResolution, setSelectedResolution] = useState<ImageResolution>(
-    defaultResolutionOf(IMAGE_MODELS[0]),
-  );
+  const [models, setModels] = useState<ImageModelCapability[]>([]);
+  const [selectedModel, setSelectedModel] = useState<ImageModelCapability | null>(null);
+  const [selectedSize, setSelectedSize] = useState<{ id: string; label: string } | null>(null);
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<ImageAspectRatio>(IMAGE_ASPECT_RATIOS[2]);
+  const [webSearch, setWebSearch] = useState(false);
 
-  // 切模型联动：新模型不支持当前分辨率则重置到该模型默认
-  const handleModelChange = (model: ImageModel) => {
+  // 取模型默认分辨率档位（能力表 default_size，缺省回退首个）。
+  const pickDefaultSize = (m: ImageModelCapability) =>
+    m.supported_sizes.find((s) => s.id === m.default_size) ?? m.supported_sizes[0];
+
+  // 模型列表改接口拉取（废除前端写死常量）。
+  useEffect(() => {
+    let cancelled = false;
+    getImageModels()
+      .then((list) => {
+        if (cancelled || list.length === 0) return;
+        const first = list[0];
+        setModels(list);
+        setSelectedModel(first);
+        setSelectedSize(pickDefaultSize(first));
+      })
+      .catch((err) => {
+        // 能力表拉取失败：保持空，无可用模型时生成按钮禁用。
+        console.error("getImageModels failed", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 切模型联动：新模型不支持当前分辨率则重置到该模型默认。
+  const handleModelChange = (model: ImageModelCapability) => {
     setSelectedModel(model);
-    if (!model.resolutions.some((r) => r.id === selectedResolution.id)) {
-      setSelectedResolution(defaultResolutionOf(model));
+    if (!model.supported_sizes.some((s) => s.id === selectedSize?.id)) {
+      setSelectedSize(pickDefaultSize(model));
+    }
+    // 数量不超新模型上限（features.quantity_max）。
+    const currentQty = parseInt(quantity, 10);
+    if (!Number.isNaN(currentQty) && currentQty > model.features.quantity_max) {
+      setQuantity(`${model.features.quantity_max}x`);
     }
   };
 
@@ -337,7 +363,7 @@ export function ImageDockContent({
           >
             <Settings2 width={14} height={14} stroke="currentColor" strokeWidth={2} aria-hidden="true" />
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textAlign: "left", fontSize: 12 }}>
-              {selectedModel.label}
+              {selectedModel?.model_label ?? "加载中…"}
             </span>
           </div>
           <span
@@ -349,20 +375,26 @@ export function ImageDockContent({
             aria-hidden="true"
             style={{ width: 1, height: 8, flexShrink: 0, alignSelf: "center", background: "rgba(255, 255, 255, 0.08)", borderRadius: 1 }}
           />
-          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "0px 8px" }}>{selectedResolution.label}</div>
+          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "0px 8px" }}>{selectedSize?.label ?? "—"}</div>
         </button>
 
-        <ImageModelSettingsPopover
-          triggerRef={settingsRef}
-          open={modelSettingsOpen}
-          onClose={() => setModelSettingsOpen(false)}
-          selectedModel={selectedModel}
-          onModelChange={handleModelChange}
-          selectedResolution={selectedResolution}
-          onResolutionChange={setSelectedResolution}
-          selectedAspectRatio={selectedAspectRatio}
-          onAspectRatioChange={setSelectedAspectRatio}
-        />
+        {selectedModel && selectedSize && (
+          <ImageModelSettingsPopover
+            triggerRef={settingsRef}
+            open={modelSettingsOpen}
+            onClose={() => setModelSettingsOpen(false)}
+            models={models}
+            selectedModel={selectedModel}
+            onModelChange={handleModelChange}
+            selectedSize={selectedSize}
+            onSizeChange={setSelectedSize}
+            selectedAspectRatio={selectedAspectRatio}
+            onAspectRatioChange={setSelectedAspectRatio}
+            webSearch={webSearch}
+            onWebSearchChange={setWebSearch}
+            showWebSearch={selectedModel.features.tools}
+          />
+        )}
 
         <div style={{ flex: "1 1 0%" }} />
 
@@ -432,7 +464,7 @@ export function ImageDockContent({
                   "opacity 250ms cubic-bezier(0.16, 1, 0.3, 1), transform 250ms cubic-bezier(0.16, 1, 0.3, 1)",
               }}
             >
-              {QUANTITIES.map((q) => {
+              {QUANTITIES.filter((q) => parseInt(q, 10) <= (selectedModel?.features.quantity_max ?? 1)).map((q) => {
                 const selected = quantity === q;
                 return (
                   <button
@@ -475,15 +507,17 @@ export function ImageDockContent({
           <div style={{ position: "relative", display: "inline-flex" }}>
             <button
               type="button"
-              disabled={isEmpty || generating}
-              onClick={() =>
+              disabled={isEmpty || generating || !selectedModel || !selectedSize}
+              onClick={() => {
+                if (!selectedModel || !selectedSize) return;
                 onGenerate?.({
-                  model: selectedModel,
-                  resolution: selectedResolution,
+                  modelId: selectedModel.model_id,
+                  size: selectedSize.id,
+                  webSearch: webSearch,
                   aspectRatio: selectedAspectRatio,
                   quantity,
-                })
-              }
+                });
+              }}
               style={{
                 height: 32,
                 padding: "0px 12px",

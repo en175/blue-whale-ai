@@ -45,6 +45,12 @@ export type CreateProjectGenerationJobPayload = {
       parameters: {
         prompt: string;
         aspect_ratio: string;
+        /** 能力表白名单内的模型 id（image 必填，服务端校验）。 */
+        model_id: string;
+        /** 分辨率档位 id（能力表 supported_sizes[].id，如 2k/3k/4k）。 */
+        size: string;
+        /** 联网搜索开关（缺省 false）。 */
+        web_search: boolean;
       };
     }
   | {

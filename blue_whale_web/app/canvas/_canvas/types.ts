@@ -103,12 +103,16 @@ export type Project = {
 /** 生成设置选项（id+label 形状，与 constants 里的 VIDEO_MODELS 等一致）。 */
 export type SelectOption = { id: string; label: string };
 
-/** 图片 Dock 生成设置（model/resolution/aspectRatio/quantity 在 ImageDockContent 本地 state）。 */
+/** 图片 Dock 生成设置（model/size/aspectRatio/quantity/webSearch 在 ImageDockContent 本地 state）。 */
 export type ImageGenerateSettings = {
-  model: SelectOption;
-  resolution: SelectOption;
   aspectRatio: SelectOption;
   quantity: string;
+  /** 所选模型 id（能力表 model_id），真传 payload.parameters.model_id。 */
+  modelId: string;
+  /** 分辨率档位 id（能力表 supported_sizes[].id），真传 payload.parameters.size。 */
+  size: string;
+  /** 联网搜索开关，真传 payload.parameters.web_search。 */
+  webSearch: boolean;
 };
 
 /** 视频 Dock 生成设置（BottomDock 自持 state 透传）。 */
