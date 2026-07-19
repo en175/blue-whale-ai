@@ -1,5 +1,6 @@
 package com.blue.whale.agent.schema.migration;
 
+import com.blue.whale.agent.support.ExpectedMigrationVersions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -74,12 +75,12 @@ class CursorColumnMigrationMySqlIT {
     void freshDatabaseMigratesToNonReservedCursorColumns() throws Exception {
         List<Integer> applied = new SchemaMigrationService(dataSource).migrate();
 
-        assertThat(applied).containsExactly(1, 2, 3, 4, 5, 6);
+        assertThat(applied).containsExactlyElementsOf(ExpectedMigrationVersions.APPLIED);
         assertThat(columnExists("project_events", "event_cursor")).isTrue();
         assertThat(columnExists("project_events", "cursor")).isFalse();
         assertThat(columnExists("outbox_messages", "event_cursor")).isTrue();
         assertThat(columnExists("outbox_messages", "cursor")).isFalse();
-        assertThat(appliedVersions()).containsExactly(1, 2, 3, 4, 5, 6);
+        assertThat(appliedVersions()).containsExactlyElementsOf(ExpectedMigrationVersions.APPLIED);
 
         // 建表后写入与分页查询不再依赖保留字引用：裸列名直接可用
         try (Connection conn = dataSource.getConnection(); Statement st = conn.createStatement()) {
@@ -110,8 +111,8 @@ class CursorColumnMigrationMySqlIT {
 
         List<Integer> applied = new SchemaMigrationService(dataSource).migrate();
 
-        // 旧库：补记 V1（不重跑 DDL），随后应用 V2、V3、V4、V5、V6
-        assertThat(applied).containsExactly(1, 2, 3, 4, 5, 6);
+        // 旧库：补记 V1（不重跑 DDL），随后应用其余已应用版本
+        assertThat(applied).containsExactlyElementsOf(ExpectedMigrationVersions.APPLIED);
         assertThat(columnExists("project_events", "event_cursor")).isTrue();
         assertThat(columnExists("project_events", "cursor")).isFalse();
         assertThat(columnExists("outbox_messages", "event_cursor")).isTrue();

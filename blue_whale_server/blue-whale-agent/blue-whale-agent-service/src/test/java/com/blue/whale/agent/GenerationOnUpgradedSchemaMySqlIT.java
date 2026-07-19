@@ -2,6 +2,7 @@ package com.blue.whale.agent;
 
 import com.blue.whale.agent.service.governance.CostControlProperties;
 import com.blue.whale.agent.service.generation.GenerationWorker;
+import com.blue.whale.agent.support.ExpectedMigrationVersions;
 import com.blue.whale.agent.support.FakeGenerationConfiguration;
 import com.blue.whale.agent.support.FakeGenerationStorage;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -239,10 +240,10 @@ class GenerationOnUpgradedSchemaMySqlIT {
 
     @Test
     void publicGenerationChainWorksOnUpgradedLegacyDatabase() throws Exception {
-        // 迁移器已在启动时完成升级：记账本记录 1,2,3,4,5,6（V1 补记 + V2 + V3 + V4 + V5 + V6）
+        // 迁移器已在启动时完成升级：记账本记录全部已应用版本（V1 补记，其余正常应用）
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT GROUP_CONCAT(version ORDER BY version) FROM schema_migrations", String.class))
-                .isEqualTo("1,2,3,4,5,6");
+                .isEqualTo(ExpectedMigrationVersions.APPLIED_CSV);
 
         // 公开生成命令：创建 GenerationJob（升级后的库上接纳事务全链路写入）
         String body = "{" +

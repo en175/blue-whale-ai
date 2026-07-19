@@ -1,4 +1,4 @@
--- 迁移版本 V3：GenerationJob 与 Asset 持久化结构收敛升级（IK1W1L）
+-- 迁移版本 V4：GenerationJob 与 Asset 持久化结构收敛升级（IK1W1L）
 --
 -- 背景：IK1W1E 迁移器对旧库（project 表存在且记账本为空）只补记 V1 不重放 DDL，
 -- 早于归档一次性迁移（ik10i6/ik10ib/ik10ic/ik10id/ik10if/ik10pt/ik1nrz）的旧库
@@ -377,7 +377,7 @@ SET @drift := (
 -- SIGNAL 不受 prepared statement 协议支持，改为查询一张以漂移摘要命名的不存在表，
 -- 让 MySQL 用 ERROR 1146 抛出含具体漂移列与期望/实际信息的失败。
 SET @sig := IF(@drift IS NULL, 'SELECT 1',
-    CONCAT('SELECT 1 FROM `v3_拒绝升级_核心结构漂移__',
+    CONCAT('SELECT 1 FROM `v4_拒绝升级_核心结构漂移__',
            LEFT(REPLACE(REPLACE(@drift, ' ', '_'), ';', ','), 40), '`'));
 PREPARE stmt FROM @sig;
 EXECUTE stmt;
@@ -802,7 +802,7 @@ SET @drift := (
        OR c.IS_NULLABLE <> e.nul);
 -- 同前置校验：SIGNAL 不受 prepared statement 协议支持，用不存在表名携带漂移摘要报错。
 SET @sig := IF(@drift IS NULL, 'SELECT 1',
-    CONCAT('SELECT 1 FROM `v3_拒绝升级_收敛后结构不符__',
+    CONCAT('SELECT 1 FROM `v4_拒绝升级_收敛后结构不符__',
            LEFT(REPLACE(REPLACE(@drift, ' ', '_'), ';', ','), 40), '`'));
 PREPARE stmt FROM @sig;
 EXECUTE stmt;

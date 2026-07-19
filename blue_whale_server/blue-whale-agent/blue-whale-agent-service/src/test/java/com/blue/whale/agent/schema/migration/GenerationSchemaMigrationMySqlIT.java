@@ -1,5 +1,6 @@
 package com.blue.whale.agent.schema.migration;
 
+import com.blue.whale.agent.support.ExpectedMigrationVersions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -139,7 +140,7 @@ class GenerationSchemaMigrationMySqlIT {
 
         List<Integer> applied = service.migrate();
 
-        assertThat(applied).containsExactly(1, 2, 3, 4, 5, 6);
+        assertThat(applied).containsExactlyElementsOf(ExpectedMigrationVersions.APPLIED);
         for (String table : List.of(
                 "generation_jobs", "generation_job_outputs", "assets",
                 "asset_storage_objects", "asset_object_transfers",
@@ -159,7 +160,7 @@ class GenerationSchemaMigrationMySqlIT {
 
         // 重复执行：无新版本、无漂移报错
         assertThat(service.migrate()).isEmpty();
-        assertThat(appliedVersions()).containsExactly(1, 2, 3, 4, 5, 6);
+        assertThat(appliedVersions()).containsExactlyElementsOf(ExpectedMigrationVersions.APPLIED);
     }
 
     @Test
@@ -182,8 +183,8 @@ class GenerationSchemaMigrationMySqlIT {
                 db, SchemaMigrationService.DEFAULT_MIGRATION_LOCATION);
         List<Integer> applied = service.migrate();
 
-        // 旧库补记 V1，随后 V2、V3、V4、V5、V6 正常应用
-        assertThat(applied).containsExactly(1, 2, 3, 4, 5, 6);
+        // 旧库补记 V1，随后应用其余已应用版本
+        assertThat(applied).containsExactlyElementsOf(ExpectedMigrationVersions.APPLIED);
 
         // 缺列补齐：generation_jobs 十一个后加列、assets 三个后加列
         for (String column : List.of(
@@ -367,7 +368,7 @@ class GenerationSchemaMigrationMySqlIT {
                 db, SchemaMigrationService.DEFAULT_MIGRATION_LOCATION);
         List<Integer> applied = service.migrate();
 
-        assertThat(applied).containsExactly(1, 2, 3, 4, 5, 6);
+        assertThat(applied).containsExactlyElementsOf(ExpectedMigrationVersions.APPLIED);
 
         // NOT NULL 三列放宽为 V1 契约的可空形态
         assertThat(columnNullable("generation_job_outputs", "asset_id")).isTrue();
@@ -526,7 +527,7 @@ class GenerationSchemaMigrationMySqlIT {
                 db, SchemaMigrationService.DEFAULT_MIGRATION_LOCATION);
         List<Integer> applied = service.migrate();
 
-        assertThat(applied).containsExactly(1, 2, 3, 4, 5, 6);
+        assertThat(applied).containsExactlyElementsOf(ExpectedMigrationVersions.APPLIED);
 
         // 旧唯一索引被丢弃，多输出契约的新唯一索引与 slot_index 列就位
         assertThat(indexExists("generation_provider_tasks", "uk_provider_task_job")).isFalse();
@@ -569,7 +570,7 @@ class GenerationSchemaMigrationMySqlIT {
                 .hasMessageContaining("V4")
                 .hasMessageContaining("漂移");
         // fail-closed：V4 记录 failed，不允许跳过失败版本静默成功
-        assertThat(failedVersions()).contains(4);
+        assertThat(failedVersions()).contains(ExpectedMigrationVersions.GENERATION_CONVERGENCE_VERSION);
     }
 
     @Test
@@ -589,7 +590,7 @@ class GenerationSchemaMigrationMySqlIT {
                 .isInstanceOf(SchemaMigrationService.MigrationException.class)
                 .hasMessageContaining("V4")
                 .hasMessageContaining("漂移");
-        assertThat(failedVersions()).contains(4);
+        assertThat(failedVersions()).contains(ExpectedMigrationVersions.GENERATION_CONVERGENCE_VERSION);
     }
 
     // ===== 夹具与工具 =====
