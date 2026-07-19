@@ -46,6 +46,22 @@ def reference_image_proposal_model(messages, info):
     )
 
 
+def size_and_web_search_proposal_model(messages, info):
+    return ModelResponse(
+        parts=(
+            ToolCallPart(
+                "generate_image",
+                {
+                    "prompt": "联网生成一张 2K 蓝鲸海报",
+                    "size": "2K",
+                    "web_search": True,
+                },
+                "provider-private-size-call-id",
+            ),
+        )
+    )
+
+
 def failing_model(messages, info):
     raise RuntimeError("provider-secret=sk-test file=/tmp/private-prompt")
 
@@ -110,6 +126,29 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertEqual(
             [91, 92], result.actions[0].arguments["reference_asset_ids"]
         )
+
+    def test_production_adapter_passes_through_size_and_web_search(self) -> None:
+        work = RunWork(
+            agent_run_id=23,
+            project_id=7,
+            conversation_id=11,
+            user_id=10,
+            run_version=1,
+            fencing_token=4,
+            engine="pydantic-ai",
+            engine_version="2.9.0",
+            adapter_schema_version=1,
+            messages=({"role": "user", "content": "联网生成一张 2K 蓝鲸海报"},),
+            checkpoint=None,
+        )
+
+        result = PydanticAIOrchestrator(
+            FunctionModel(size_and_web_search_proposal_model)
+        ).advance(work)
+        payload = result.to_commit_payload(work)
+
+        self.assertEqual("2K", payload["actions"][0]["arguments"]["size"])
+        self.assertIs(True, payload["actions"][0]["arguments"]["web_search"])
 
     def test_production_adapter_returns_a_product_neutral_image_proposal(self) -> None:
         work = RunWork(

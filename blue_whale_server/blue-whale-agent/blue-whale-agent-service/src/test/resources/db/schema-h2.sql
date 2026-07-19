@@ -1,6 +1,6 @@
 -- H2（MODE=MySQL）集成测试建表脚本。
--- 与迁移链最终 schema 对齐（V1 基线 + V3 游标列改名 event_cursor），但去掉 MySQL 专有语法（ENGINE/CHARSET/COMMENT/JSON→CLOB/ON UPDATE）。
--- 仅用于 SnapshotSseRecoveryIT，生产以 db/migrations 迁移链为准。
+-- 与迁移链最终 schema 对齐（V1 基线 + V3 游标列改名 event_cursor + V7 能力注册表），但去掉 MySQL 专有语法（ENGINE/CHARSET/COMMENT/JSON→CLOB/ON UPDATE）。
+-- 通用 IT schema（test profile 全量 IT 共用），生产以 db/migrations 迁移链为准。
 
 CREATE TABLE IF NOT EXISTS project
 (
