@@ -85,6 +85,55 @@ class GenerationModeValidatorTest {
                 .doesNotThrowAnyException();
     }
 
+    // ===== Agent Plan 模式（IK21O4）：ARK key/base-url 缺失即 fail-closed，生产拒绝 =====
+
+    @Test
+    void agentPlanRequiresArkApiKey() {
+        MockEnvironment env = arkEnvironment(null,
+                "https://ark.cn-beijing.volces.com/api/plan/v3");
+        assertThatThrownBy(() -> validateAgentPlan(env))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("ark.api-key");
+    }
+
+    @Test
+    void agentPlanRequiresArkBaseUrl() {
+        MockEnvironment env = arkEnvironment("ark-test-key", null);
+        assertThatThrownBy(() -> validateAgentPlan(env))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("ark.base-url");
+    }
+
+    @Test
+    void agentPlanRequiresPlanEndpointBaseUrl() {
+        MockEnvironment env = arkEnvironment("ark-test-key",
+                "https://ark.cn-beijing.volces.com/api/v3");
+        assertThatThrownBy(() -> validateAgentPlan(env))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("plan");
+    }
+
+    @Test
+    void agentPlanRejectedUnderProductionProfile() {
+        MockEnvironment prod = arkEnvironment("ark-test-key",
+                "https://ark.cn-beijing.volces.com/api/plan/v3");
+        prod.setActiveProfiles("prod");
+        assertThatThrownBy(() -> validateAgentPlan(prod))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("生产");
+    }
+
+    @Test
+    void agentPlanStartsWithKeyAndPlanEndpointOutsideProduction() {
+        MockEnvironment env = arkEnvironment("ark-test-key",
+                "https://ark.cn-beijing.volces.com/api/plan/v3");
+        assertThatCode(() -> validateAgentPlan(env)).doesNotThrowAnyException();
+        MockEnvironment test = arkEnvironment("ark-test-key",
+                "https://ark.cn-beijing.volces.com/api/plan/v3");
+        test.setActiveProfiles("test");
+        assertThatCode(() -> validateAgentPlan(test)).doesNotThrowAnyException();
+    }
+
     private void validate(
             String mode, boolean fakeAllowed, boolean acceptanceAllowed, MockEnvironment environment) {
         GenerationAdapterProperties properties = new GenerationAdapterProperties();
@@ -92,5 +141,22 @@ class GenerationModeValidatorTest {
         properties.setFakeAllowed(fakeAllowed);
         properties.setAcceptanceAllowed(acceptanceAllowed);
         configuration.generationModeValidator(properties, environment);
+    }
+
+    private void validateAgentPlan(MockEnvironment environment) {
+        GenerationAdapterProperties properties = new GenerationAdapterProperties();
+        properties.setMode("agent-plan");
+        configuration.generationModeValidator(properties, environment);
+    }
+
+    private MockEnvironment arkEnvironment(String apiKey, String baseUrl) {
+        MockEnvironment environment = new MockEnvironment();
+        if (apiKey != null) {
+            environment.setProperty("volcengine.ark.api-key", apiKey);
+        }
+        if (baseUrl != null) {
+            environment.setProperty("volcengine.ark.base-url", baseUrl);
+        }
+        return environment;
     }
 }

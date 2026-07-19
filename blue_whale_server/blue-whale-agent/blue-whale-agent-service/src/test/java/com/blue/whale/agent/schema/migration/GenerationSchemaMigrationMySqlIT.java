@@ -48,7 +48,7 @@ class GenerationSchemaMigrationMySqlIT {
             "generation_result_conflicts", "generation_provider_tasks",
             "seedance_callback_inbox", "seedance_callback_security_audits",
             "cost_budget_locks", "cost_reservations", "audit_records",
-            "generation_jobs", "assets", "content_reviews");
+            "generation_jobs", "assets", "content_reviews", "generation_model_capability");
 
     /** pre-ik10i6 历史形态 generation_jobs（初始列，缺 ik10i6~ik10pt 后加列） */
     private static final String LEGACY_JOBS_PRE_IK10I6_DDL = """
@@ -157,6 +157,14 @@ class GenerationSchemaMigrationMySqlIT {
         assertThat(indexExists("generation_jobs", "idx_generation_job_claim")).isTrue();
         assertThat(indexExists("generation_jobs", "idx_generation_job_retry_of")).isTrue();
         assertThat(indexExists("generation_jobs", "idx_generation_video_action")).isTrue();
+
+        // V7（IK21O4）：模型能力表建出，且种子一行 enabled 的 Seedream lite 就位
+        assertThat(tableExists("generation_model_capability")).isTrue();
+        assertThat(queryLong(
+                "SELECT COUNT(*) FROM generation_model_capability "
+                        + "WHERE provider_id = 'volcengine' AND model_id = 'doubao-seedream-5.0-lite' "
+                        + "AND capability_type = 'image' AND enabled = 1 AND is_delete = 0"))
+                .isEqualTo(1L);
 
         // 重复执行：无新版本、无漂移报错
         assertThat(service.migrate()).isEmpty();

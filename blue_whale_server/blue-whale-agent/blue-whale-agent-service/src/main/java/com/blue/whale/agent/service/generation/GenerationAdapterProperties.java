@@ -22,6 +22,7 @@ public class GenerationAdapterProperties {
     private final OpenAi openai = new OpenAi();
     private final Tos tos = new Tos();
     private final Seedance seedance = new Seedance();
+    private final AgentPlan agentPlan = new AgentPlan();
     private boolean workerScheduled = true;
 
     @Getter
@@ -57,5 +58,16 @@ public class GenerationAdapterProperties {
         private int initialPollSeconds = 5;
         private int maxPollSeconds = 30;
         private List<String> allowedResultHostSuffixes = List.of("volces.com");
+    }
+
+    /**
+     * Agent Plan 模式（IK21O4）本地磁盘生成存储配置：内容寻址对象落 Docker 卷持久化，
+     * 重启不丢；切到 TOS 等对象存储由后续工单负责（接口抽象现成）。
+     */
+    @Getter
+    @Setter
+    public static class AgentPlan {
+        /** 本地磁盘生成存储根目录（Docker 卷挂载点，重启不丢）。 */
+        private String storageRoot = "/var/lib/blue-whale/generation";
     }
 }
