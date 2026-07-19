@@ -55,7 +55,7 @@ function dtoToProject(dto: canvasApi.ProjectDto): Project {
   };
 }
 
-export function useCanvasProjects() {
+export function useCanvasProjects(preferredProjectId?: string | null) {
   const [state, dispatch] = useReducer(
     projectReducer,
     PROJECTS,
@@ -127,6 +127,22 @@ export function useCanvasProjects() {
       cancelled = true;
     };
   }, [online]);
+
+  // ?project=<id> 初始定位（/generate「打开项目」闭环）：列表加载完成后应用一次，
+  // 把 active 切到 URL 指定的项目；id 不存在于列表时忽略，回退默认 active（首项）。
+  // 只应用一次：此后用户经 ProjectMenu 手动切换不被弹回。
+  const preferredAppliedRef = useRef(false);
+  useEffect(() => {
+    if (preferredAppliedRef.current || booting) return;
+    preferredAppliedRef.current = true;
+    if (
+      preferredProjectId &&
+      preferredProjectId !== state.activeProjectId &&
+      state.projects.some((p) => p.id === preferredProjectId)
+    ) {
+      dispatch({ type: "switch", projectId: preferredProjectId });
+    }
+  }, [booting, preferredProjectId, state.projects, state.activeProjectId]);
 
   // active 变化 → Snapshot + SSE 恢复（仅 backendReady + 未建立恢复循环）
   useEffect(() => {

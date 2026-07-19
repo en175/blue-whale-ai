@@ -60,7 +60,7 @@ class ProjectControllerTest {
 
     @Test
     void createReturnsOkResult() {
-        ProjectDto dto = new ProjectDto(1L, "A", null, LocalDateTime.now());
+        ProjectDto dto = new ProjectDto(1L, "A", null, LocalDateTime.now(), "canvas");
         when(projectService.create(10L, new CreateProjectRequest("A"))).thenReturn(dto);
 
         Result<ProjectDto> result = controller.create(10L, new CreateProjectRequest("A"));
@@ -77,7 +77,7 @@ class ProjectControllerTest {
 
     @Test
     void listReturnsOkResult() {
-        ProjectDto dto = new ProjectDto(1L, "A", null, LocalDateTime.now());
+        ProjectDto dto = new ProjectDto(1L, "A", null, LocalDateTime.now(), "canvas");
         when(projectService.list(10L)).thenReturn(List.of(dto));
 
         Result<List<ProjectDto>> result = controller.list(10L);
@@ -119,7 +119,7 @@ class ProjectControllerTest {
     @Test
     void snapshotReturnsOkResult() {
         SnapshotResponse snap = new SnapshotResponse(
-                new ProjectDto(1L, "A", null, LocalDateTime.now()),
+                new ProjectDto(1L, "A", null, LocalDateTime.now(), "canvas"),
                 null, List.of(), List.of(), List.of(), Map.of(), 5L);
         when(snapshotService.getSnapshot(1L, 10L)).thenReturn(snap);
 

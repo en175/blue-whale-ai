@@ -130,7 +130,7 @@ export type ChatMessage =
       text: string;
       meta: string;
       collapsed?: boolean;
-      /** Card 视图状态；与 GenerationJob 状态的视图映射见 `lib/jobs.ts` */
+      /** Card 视图状态；与 GenerationJob 状态的视图映射见 `app/canvas/_canvas/conversationRecovery.ts` 与 `app/generate/inboxMessages.ts` 的 outputStatus */
       status?: CardStatus;
     };
 

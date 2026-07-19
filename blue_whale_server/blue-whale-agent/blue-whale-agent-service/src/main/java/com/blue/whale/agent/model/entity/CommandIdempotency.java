@@ -18,5 +18,7 @@ public class CommandIdempotency extends BaseEntity {
     private Long messageId;
     private Long agentRunId;
     private Long generationJobId;
+    /** 首次接纳结果资源 ID（conversation/asset 等，按 operation 解释）。 */
+    private Long resourceId;
     private Long acceptedCursor;
 }

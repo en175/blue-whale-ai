@@ -95,11 +95,14 @@ export function AgentCard({
   msg,
   busy = false,
   onReapply,
+  hideCta = false,
 }: {
   msg: Extract<ChatMessage, { type: "card" }>;
   busy?: boolean;
   /** 用户点击主按钮（手动应用 / 重试）的统一意图，由容器层按 card.status 分发 */
   onReapply?: (card: Extract<ChatMessage, { type: "card" }>) => void;
+  /** 隐藏主按钮（生成页等无「应用到画布」语义的容器用）；缺省 false，画布行为不变 */
+  hideCta?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(msg.collapsed ?? false);
   const maskId = useId().replace(/:/g, "");
@@ -137,65 +140,67 @@ export function AgentCard({
                 {msg.meta}
               </span>
             </span>
-            <button
-              type="button"
-              disabled={generating || cancelled || busy}
-              onClick={() => onReapply?.(msg)}
-              className={[
-                "tc-agent-card-cta tc-agent-card-cta--reapply",
-                failed ? "tc-agent-card-cta--reapply-failed" : "",
-                "inline-flex items-center gap-1 rounded-md bg-white/[0.08] px-2 py-1 text-xs text-white/80 transition-colors hover:bg-white/[0.12] disabled:cursor-default disabled:opacity-50",
-              ].join(" ")}
-              aria-label={failed ? "生成失败，可重试" : ctaLabel}
-              aria-busy={generating || busy}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width={12}
-                height={12}
-                viewBox="0 0 24 24"
-                fill="none"
-                aria-hidden="true"
+            {!hideCta && (
+              <button
+                type="button"
+                disabled={generating || cancelled || busy}
+                onClick={() => onReapply?.(msg)}
+                className={[
+                  "tc-agent-card-cta tc-agent-card-cta--reapply",
+                  failed ? "tc-agent-card-cta--reapply-failed" : "",
+                  "inline-flex items-center gap-1 rounded-md bg-white/[0.08] px-2 py-1 text-xs text-white/80 transition-colors hover:bg-white/[0.12] disabled:cursor-default disabled:opacity-50",
+                ].join(" ")}
+                aria-label={failed ? "生成失败，可重试" : ctaLabel}
+                aria-busy={generating || busy}
               >
-                <defs>
-                  <mask
-                    id={`tc-agent-card-reapply-plus-${maskId}`}
-                    maskUnits="userSpaceOnUse"
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width={12}
+                  height={12}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <defs>
+                    <mask
+                      id={`tc-agent-card-reapply-plus-${maskId}`}
+                      maskUnits="userSpaceOnUse"
+                      x="0"
+                      y="0"
+                      width="24"
+                      height="24"
+                    >
+                      <rect x="0" y="0" width="24" height="24" fill="black" />
+                      <path
+                        d="M5 12h14"
+                        fill="none"
+                        stroke="white"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M12 5v14"
+                        fill="none"
+                        stroke="white"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </mask>
+                  </defs>
+                  <rect
                     x="0"
                     y="0"
                     width="24"
                     height="24"
-                  >
-                    <rect x="0" y="0" width="24" height="24" fill="black" />
-                    <path
-                      d="M5 12h14"
-                      fill="none"
-                      stroke="white"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M12 5v14"
-                      fill="none"
-                      stroke="white"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </mask>
-                </defs>
-                <rect
-                  x="0"
-                  y="0"
-                  width="24"
-                  height="24"
-                  fill="currentColor"
-                  mask={`url(#tc-agent-card-reapply-plus-${maskId})`}
-                />
-              </svg>
-              <span className="tc-agent-card-cta__label">{ctaLabel}</span>
-            </button>
+                    fill="currentColor"
+                    mask={`url(#tc-agent-card-reapply-plus-${maskId})`}
+                  />
+                </svg>
+                <span className="tc-agent-card-cta__label">{ctaLabel}</span>
+              </button>
+            )}
             <button
               type="button"
               className="tc-agent-card-collapse-btn inline-flex h-6 w-6 items-center justify-center rounded-md text-white/50 transition-colors hover:bg-white/[0.06]"

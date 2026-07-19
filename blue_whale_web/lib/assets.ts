@@ -26,3 +26,21 @@ export function listAssets(
   q.set("size", String(params.size ?? 60));
   return request<Paged<AssetItem>>(`/assets?${q.toString()}`, "GET");
 }
+
+/**
+ * 把资产复制到目标普通 canvas 项目（生成页「添加到项目」用）。
+ * Idempotency-Key 必传：同一资产→同一项目的重试须复用同一键（生命周期由调用点管理）。
+ * 返回目标项目内的新副本；响应字段与 AssetItem 一致。
+ */
+export function copyAssetToProject(
+  projectId: number,
+  sourceAssetId: number,
+  idempotencyKey: string,
+): Promise<AssetItem> {
+  return request<AssetItem>(
+    `/projects/${projectId}/assets`,
+    "POST",
+    { source_asset_id: sourceAssetId },
+    { "Idempotency-Key": idempotencyKey },
+  );
+}

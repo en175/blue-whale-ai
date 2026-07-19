@@ -111,6 +111,7 @@ function CanvasPageInner() {
   }, []);
 
   // Project 聚合根：多项目画布+对话的单一真相源（hook 缝合后端持久化，见 useCanvasProjects）
+  // ?project=<id>：URL 指定初始活动项目（生成页「打开项目」闭环），无效则忽略回退默认。
   const {
     state: projectState,
     dispatch,
@@ -123,7 +124,7 @@ function CanvasPageInner() {
     switchProject,
     deleteProjectAction,
     submitConversationMessageAction,
-  } = useCanvasProjects();
+  } = useCanvasProjects(searchParams.get("project"));
   // 派生：当前项目的画布与对话（读取走 active，写入走 dispatch）
   const { nodes, viewport } = activeProject.canvas;
   const messages = activeProject.messages;

@@ -5,6 +5,7 @@ import com.blue.whale.agent.model.entity.AssetStorageObject;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
 
@@ -30,4 +31,9 @@ public interface AssetStorageObjectMapper extends BaseMapper<AssetStorageObject>
     AssetStorageObject selectGcCandidateForUpdate(
             @Param("cutoff") LocalDateTime cutoff,
             @Param("now") LocalDateTime now);
+
+    /** 标记对象进入待回收计时（生成收件箱永久删除后无其他引用时调用，GC 保留期后物理回收）。 */
+    @Update("UPDATE asset_storage_objects SET first_unreferenced_at = #{now}, "
+            + "gmt_modified = CURRENT_TIMESTAMP WHERE storage_key = #{storageKey} AND is_delete = 0")
+    int markFirstUnreferenced(@Param("storageKey") String storageKey, @Param("now") LocalDateTime now);
 }

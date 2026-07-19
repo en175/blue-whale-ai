@@ -1,5 +1,5 @@
 -- H2（MODE=MySQL）集成测试建表脚本。
--- 与迁移链最终 schema 对齐（V1 基线 + V3 游标列改名 event_cursor + V7 能力注册表），但去掉 MySQL 专有语法（ENGINE/CHARSET/COMMENT/JSON→CLOB/ON UPDATE）。
+-- 与迁移链最终 schema 对齐（V1 基线 + V3 游标列改名 event_cursor + V7 能力注册表 + V8 收件箱地基），但去掉 MySQL 专有语法（ENGINE/CHARSET/COMMENT/JSON→CLOB/ON UPDATE）。
 -- 通用 IT schema（test profile 全量 IT 共用），生产以 db/migrations 迁移链为准。
 
 CREATE TABLE IF NOT EXISTS project
@@ -8,10 +8,13 @@ CREATE TABLE IF NOT EXISTS project
     owner_id     BIGINT       NOT NULL,
     name         VARCHAR(128) NOT NULL,
     thumb        VARCHAR(512) NULL,
+    purpose      VARCHAR(32)  NOT NULL DEFAULT 'canvas',
     gmt_create   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version      INT          NOT NULL DEFAULT 0,
-    is_delete    TINYINT      NOT NULL DEFAULT 0
+    is_delete    TINYINT      NOT NULL DEFAULT 0,
+    inbox_guard  BIGINT GENERATED ALWAYS AS (CASE WHEN purpose = 'generation_inbox' AND is_delete = 0 THEN owner_id ELSE NULL END),
+    CONSTRAINT uk_project_inbox_guard UNIQUE (inbox_guard)
 );
 
 CREATE TABLE IF NOT EXISTS canvas
@@ -34,9 +37,10 @@ CREATE TABLE IF NOT EXISTS conversations
     gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version INT NOT NULL DEFAULT 0,
-    is_delete TINYINT NOT NULL DEFAULT 0,
-    CONSTRAINT uk_conversation_project UNIQUE (project_id)
+    is_delete TINYINT NOT NULL DEFAULT 0
 );
+
+CREATE INDEX IF NOT EXISTS idx_conversation_project ON conversations (project_id);
 
 CREATE TABLE IF NOT EXISTS agent_runs
 (
@@ -159,6 +163,7 @@ CREATE TABLE IF NOT EXISTS command_idempotency
     message_id BIGINT NULL,
     agent_run_id BIGINT NULL,
     generation_job_id BIGINT NULL,
+    resource_id BIGINT NULL,
     accepted_cursor BIGINT NOT NULL,
     gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -224,11 +229,14 @@ CREATE TABLE IF NOT EXISTS assets
     duration          INT NULL,
     source            VARCHAR(32)  NOT NULL,
     status            VARCHAR(32)  NOT NULL,
+    source_asset_id   BIGINT NULL,
     gmt_create        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version           INT      NOT NULL DEFAULT 0,
     is_delete         TINYINT  NOT NULL DEFAULT 0
 );
+
+CREATE INDEX IF NOT EXISTS idx_asset_source_asset ON assets (source_asset_id);
 
 CREATE TABLE IF NOT EXISTS generation_job_outputs
 (

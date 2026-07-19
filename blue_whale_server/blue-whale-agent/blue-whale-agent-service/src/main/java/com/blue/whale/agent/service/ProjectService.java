@@ -46,11 +46,12 @@ public class ProjectService {
         return toDto(p);
     }
 
-    /** 列出用户下全部项目（按创建时间倒序）。 */
+    /** 列出用户下全部项目（按创建时间倒序）。生成收件箱（purpose=generation_inbox）从列表隐藏。 */
     public List<ProjectDto> list(Long ownerId) {
         return projectMapper.selectList(
                         Wrappers.<Project>lambdaQuery()
                                 .eq(Project::getOwnerId, ownerId)
+                                .ne(Project::getPurpose, Project.PURPOSE_GENERATION_INBOX)
                                 .orderByDesc(Project::getGmtCreate))
                 .stream()
                 .map(this::toDto)
@@ -76,10 +77,17 @@ public class ProjectService {
         return toDto(p);
     }
 
-    /** 逻辑删除项目（canvas 残留为孤儿，MVP 不级联，见 ADR-0011 后续）。 */
+    /**
+     * 逻辑删除项目（canvas 残留为孤儿，MVP 不级联，见 ADR-0011 后续）。
+     * 生成收件箱对通用项目端点不可见（与 {@link #list} 过滤语义一致），按资源不存在拒绝；
+     * 永久删除只走 {@code DELETE /api/generation-inbox}。
+     */
     @Transactional
     public void delete(Long id, Long ownerId) {
         Project project = requireOwned(id, ownerId);
+        if (Project.PURPOSE_GENERATION_INBOX.equals(project.getPurpose())) {
+            throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
+        }
         projectMapper.deleteById(id);
         int deletedVersion = project.getVersion() == null ? 1 : project.getVersion() + 1;
         projectEventService.appendEvent(id, EventType.PROJECT_DELETED,
@@ -111,7 +119,7 @@ public class ProjectService {
     }
 
     private ProjectDto toDto(Project p) {
-        return new ProjectDto(p.getId(), p.getName(), p.getThumb(), p.getGmtCreate());
+        return new ProjectDto(p.getId(), p.getName(), p.getThumb(), p.getGmtCreate(), p.getPurpose());
     }
 
 }
