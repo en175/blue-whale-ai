@@ -173,8 +173,59 @@ _Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeIt
 多轮对话暂停并恢复，终态不可重开，后续修订或无关新目标创建关联的新 AgentRun。
 其生命周期状态只表达运行、等待及终态；理解素材、选择技能、规划和生成等属于独立的展示阶段。
 AgentRun 可关联多个 GenerationJob 及其输出用途，但不拥有 Job 的执行生命周期；恢复时吸收
-Job 已持久化的结果事实。
+Job 已持久化的结果事实。创建时固定 Runtime Agent Bundle 与 ModelProfile；Creative Skill
+首次激活后固定其具体版本，后续恢复不随发布或回滚漂移。
 _Avoid_: 把每条用户消息都当作新的 AgentRun；把 AgentRun 与具体的 GenerationJob 混为一谈。
+
+### Agent 运行配置
+
+**AgentDefinition（Agent 定义）**:
+平台内部一个 Agent 的稳定身份，是 Runtime Agent Bundle 草稿与发布版本的归属根；自身不承载运行时内容。
+_Avoid_: AgentRun、BundleVersion、可直接执行的提示词。
+
+**Runtime Agent Bundle（运行时 Agent 包）**:
+平台维护、普通 User 不可见的 Agent 行为配置边界，由角色、Rules、根 Runtime Skill、允许的模型与工具以及资源清单组成；运行时只消费其不可变发布版本。
+_Avoid_: 仓库目录、Creative Skill、可变系统提示词、Agent 框架 checkpoint。
+
+**BundleDraft（运行时 Agent 包草稿）**:
+一个可编辑、可校验但不可运行的 Runtime Agent Bundle 工作区；发布后产生新的不可变 BundleVersion。
+_Avoid_: 活动配置、可由 Worker 读取的快照。
+
+**BundleVersion（运行时 Agent 包版本）**:
+Runtime Agent Bundle 的不可变发布快照；AgentRun 固定具体版本，激活或回滚只影响之后创建的 Run。
+_Avoid_: 原地修改的配置行、Git commit、RuntimeCheckpoint 版本。
+
+**RoleDocument（角色文档）**:
+定义内部 Agent 身份、职责和任务边界的根 Markdown 资源；每个 BundleVersion 恰好一个并始终装载。
+_Avoid_: Rule、Runtime Skill、面向 User 的角色模板。
+
+**Rule（运行时规则）**:
+约束 Agent 行为的一条版本化 Markdown 资源，只能按 `always_on` 或 `on_demand` 装载，不能授予或放宽平台权限、安全、成本与状态铁闸。
+_Avoid_: 平台铁闸、Creative Skill、散落在代码中的提示词分支。
+
+**RuleSet（规则集）**:
+Runtime Agent Bundle 中按确定顺序生效的 Rule 引用集合；冲突 Rule 必须在发布前消解，不能依赖后写覆盖。
+_Avoid_: 无序标签集合、运行时临时拼接的提示词。
+
+**Runtime Skill（运行时技能）**:
+平台内部、随 BundleVersion 发布的 Agent 工作流资源；初始只披露元数据，正文与引用资源在选择后按需装载。
+_Avoid_: Creative Skill、数据库 `skill` 表的用户内容、硬编码 Orchestrator 分支。
+
+**Creative Skill（创作技能）**:
+User 可见、可通过 `Use` 或 `auto` 激活的版本化创作方法；与 Runtime Skill 共用 Markdown 包形态，但生命周期、权限和发布边界独立。
+_Avoid_: Runtime Skill、内部 Rule、无修饰的“Skill”（在运行时契约中必须指明类型）。
+
+**ModelProfile（模型档案）**:
+平台批准的版本化模型能力与上下文上限，供 Bundle 形成允许子集并由 AgentRun 固定；不包含凭据或供应商私有请求配置。
+_Avoid_: API Key、动态价格目录、模型供应商原始配置。
+
+**ToolGrant（工具授权声明）**:
+Bundle 对平台工具注册表的版本化允许子集，只赋予 Agent 提议动作的资格；每次副作用仍由 Java Product API 确定性接纳。
+_Avoid_: 已授权命令、模型输出即执行、绕过 GenerationAuthorizationGate。
+
+**ResourceManifest（资源清单）**:
+BundleVersion 内所有资源身份、版本、内容摘要、装载方式与已解析引用的不可变索引，是运行时加载与导入导出复现的依据。
+_Avoid_: 可变文件目录、网络资源目录、未校验的相对路径列表。
 
 **RuntimeCheckpoint**（运行时检查点）:
 与活动 AgentRun 绑定的版本化、不透明执行状态，只用于恢复运行，不是 Run、Job、Asset 或产品事件的权威事实。
