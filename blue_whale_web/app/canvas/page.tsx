@@ -46,9 +46,19 @@ import {
   setProjectSubmitting,
   type ProjectSubmissionState,
 } from "./_canvas/projectGenerationState";
+import { isApiError } from "@/lib/api/errors";
 
 /** 把后端/网络错误映射为用户友好提示，避免暴露内部配置。 */
 function userFriendlyErrorMessage(e: unknown): string {
+  // ApiError：诊断事实（code + request_id）只进日志，不回传用户（IK2BCH）。
+  if (isApiError(e)) {
+    console.error(
+      "[generate] ApiError code=%s requestId=%s msg=%s",
+      e.code,
+      e.requestId ?? "-",
+      e.message,
+    );
+  }
   if (!(e instanceof Error)) return "生成失败，请稍后重试";
   const msg = e.message;
   if (msg.includes("后端未启动") || msg.includes("无法连接")) {

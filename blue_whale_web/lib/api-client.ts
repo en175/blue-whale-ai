@@ -15,6 +15,7 @@ import {
   clearTokens,
 } from "@/components/auth/authStorage";
 import type { LoginData } from "./auth";
+import { ApiError } from "./api/errors";
 
 // ---------------------------------------------------------------------------
 // Singleton lock & request queue
@@ -37,7 +38,9 @@ type AuthFailureHandler = () => void;
 let onAuthFailure: AuthFailureHandler | null = null;
 
 /** 注册认证失败回调（refresh token 也过期 → 需要重新登录）。返回取消订阅函数。 */
-export function subscribeToAuthFailure(handler: AuthFailureHandler): () => void {
+export function subscribeToAuthFailure(
+  handler: AuthFailureHandler,
+): () => void {
   onAuthFailure = handler;
   return () => {
     onAuthFailure = null;
@@ -135,7 +138,10 @@ export async function apiFetch(
       })
       .catch((err) => {
         processQueue(err);
-        console.warn("[api-client] apiFetch 401 → refresh 也失败，清理 tokens", err instanceof Error ? err.message : err);
+        console.warn(
+          "[api-client] apiFetch 401 → refresh 也失败，清理 tokens",
+          err instanceof Error ? err.message : err,
+        );
         clearTokens();
         onAuthFailure?.();
         throw err;
@@ -159,8 +165,34 @@ export async function apiFetch(
 
 /**
  * 便捷方法：apiFetch + 解析统一 Result 结构 { code, msg, data }。
- * code === 200 → 返回 data；否则抛 Error(msg)。
+ * code === 200 → 返回 data；否则抛 ApiError（保留稳定 code + request_id，IK2BCH）。
  */
+type ResultEnvelope = {
+  msg?: string;
+  data?: {
+    code?: string;
+    message?: string;
+    request_id?: string;
+  };
+};
+
+/** 从 Result envelope 构造 ApiError：优先取 data.code/request_id，响应头 X-Request-Id 兜底。 */
+function buildApiError(
+  res: Response,
+  envelope: ResultEnvelope | undefined,
+  fallbackCode: string,
+  fallbackMessage: string,
+): ApiError {
+  const data = envelope?.data;
+  return new ApiError({
+    status: res.status,
+    code: data?.code ?? fallbackCode,
+    message: envelope?.msg ?? data?.message ?? fallbackMessage,
+    detail: data ?? envelope,
+    requestId: data?.request_id ?? res.headers.get("X-Request-Id") ?? undefined,
+  });
+}
+
 export async function apiRequest<T>(
   url: string,
   options: RequestInit = {},
@@ -172,8 +204,17 @@ export async function apiRequest<T>(
     throw new Error("后端未启动或无法连接");
   }
 
+  // HTTP 4xx/5xx：尝试解析 Result envelope，保留稳定 code + request_id（IK2BCH）。
   if (!res.ok) {
-    throw new Error(`请求失败: ${res.status}`);
+    const envelope: ResultEnvelope | undefined = await res
+      .json()
+      .catch(() => undefined);
+    throw buildApiError(
+      res,
+      envelope,
+      `http_${res.status}`,
+      `请求失败: ${res.status}`,
+    );
   }
 
   let json: { code: number; msg?: string; data?: T };
@@ -184,7 +225,13 @@ export async function apiRequest<T>(
   }
 
   if (json.code !== 200) {
-    throw new Error(json.msg || `上游错误 ${json.code}`);
+    // HTTP 200 业务失败：envelope 在 data 内。
+    throw buildApiError(
+      res,
+      json as unknown as ResultEnvelope,
+      String(json.code),
+      json.msg ?? `上游错误 ${json.code}`,
+    );
   }
 
   return json.data as T;
