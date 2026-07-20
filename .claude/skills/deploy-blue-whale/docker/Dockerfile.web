@@ -1,0 +1,14 @@
+# 前端 Next.js standalone 远程 assemble。build context = /opt/blue-whale/。
+# 产物由 push.sh 传到 web/：standalone/（server.js + 精简 node_modules）+ static/ + public/。
+# 本地 next build 出 standalone（mac），远程只需 node runtime 跑 server.js。
+# sharp 跨平台坑已排除：前端 0 引用 next/image，运行时不触发 sharp。
+FROM docker.m.daocloud.io/library/node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
+COPY web/standalone/ ./
+COPY web/static/ ./.next/static
+COPY web/public/ ./public
+EXPOSE 3000
+CMD ["node", "server.js"]

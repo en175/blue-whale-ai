@@ -1,5 +1,8 @@
 # Frontend Skill Panel PRD（P0）
 
+> 🔗 **关联**：需求 #IJZ7Z8 · wayfinder map #IK29RN（前端接后端三链路总图）
+> **同批 PRD**：[AGENT-CONVERSATION-PRD.md](./AGENT-CONVERSATION-PRD.md)（Skill 调用语义 §5）· [BACKEND-API-PRD.md](./BACKEND-API-PRD.md) · [路线图](./FRONTEND-INTEGRATION-ROADMAP.md)
+
 > 给后端/前端工程师的 Skill 面板交付契约。
 > 版本:P0 · 日期:2026-07-04
 > Skill 接口由 P1 提升至 P0;Skill 被 Agent 实际调用的语义见 `AGENT-CONVERSATION-PRD.md` §5(接入点)。

@@ -30,7 +30,7 @@ partial images，但没有可持久查询的 provider task、retrieve 或 cancel
 - `GenerateResponse` 返回 Blue-Whale `job_id` 与本地状态；
 - `JobResponse` 暴露 `queued | processing | succeeded | failed`、progress、
   `output_asset_ids` 与规范化 error；
-- Asset 是独立文件实体，URL 过期后由 `GET /api/assets/{id}` 重新签发；
+- Asset 是独立文件实体，URL 过期后由 `GET /api/agent/assets/{id}` 重新签发；
 - BottomDock 和 AgentChatPanel 是不同入口，但共用 GenerationJob 与 Asset；
 - 产品数据库而非供应商保存 Project、GenerationJob、Asset、SSE sequence 和恢复事实。
 

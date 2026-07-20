@@ -10,8 +10,8 @@ REMOTE_DIR="${REMOTE_DIR:-/opt/blue-whale}"
 # 服务白名单（本流程仅后端 3 服务）
 check_svc() {
   case "$1" in
-    gateway|user|agent) ;;
-    *) echo "未知服务: $1（可选: gateway|user|agent）" >&2; exit 1 ;;
+    gateway|user|agent|web) ;;
+    *) echo "未知服务: $1（可选: gateway|user|agent|web）" >&2; exit 1 ;;
   esac
 }
 

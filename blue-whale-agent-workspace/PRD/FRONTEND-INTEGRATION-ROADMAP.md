@@ -1,5 +1,8 @@
 # 前端接通后端 PRD 模块路线图
 
+> 🔗 **关联**：wayfinder map #IK29RN（三链路总图）· 需求 #IJZ7Z7 / #IJZ7Z8 / #IJZ7Z9
+> **同批 PRD**：[AGENT-CONVERSATION-PRD.md](./AGENT-CONVERSATION-PRD.md) · [BACKEND-API-PRD.md](./BACKEND-API-PRD.md) · [FRONTEND-SKILL-PANEL-PRD.md](./FRONTEND-SKILL-PANEL-PRD.md)
+
 > 跨 session 的进度索引。新 session 读此文件即可接上,不依赖对话记忆。
 > 最后更新:2026-07-06
 
