@@ -1,5 +1,8 @@
 # Blue-Whale 后端接口 PRD（P0）
 
+> 🔗 **关联**：需求 #IJZ7Z9 · wayfinder map #IK29RN（前端接后端三链路总图）
+> **同批 PRD**：[AGENT-CONVERSATION-PRD.md](./AGENT-CONVERSATION-PRD.md)（§5.6 抽出）· [FRONTEND-SKILL-PANEL-PRD.md](./FRONTEND-SKILL-PANEL-PRD.md) · [路线图](./FRONTEND-INTEGRATION-ROADMAP.md)
+
 > 给后端工程师的**核心接口 + 数据模型 + 直生链路 + 通用传输约定**交付文档。配合本仓库的编排规则与数据契约一起实现。
 > 版本:P0 · 日期:2026-07-04
 
