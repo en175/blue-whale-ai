@@ -3,6 +3,7 @@ package com.blue.whale.agent.service;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.AssetMapper;
+import com.blue.whale.agent.mapper.AssistantMessageStreamMapper;
 import com.blue.whale.agent.mapper.ConversationMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
@@ -19,6 +20,7 @@ import com.blue.whale.agent.model.dto.RunWorkResponse;
 import com.blue.whale.agent.model.dto.UserInputRequestProposal;
 import com.blue.whale.agent.model.entity.AgentRun;
 import com.blue.whale.agent.model.entity.Asset;
+import com.blue.whale.agent.model.entity.AssistantMessageStream;
 import com.blue.whale.agent.model.entity.Conversation;
 import com.blue.whale.agent.model.entity.ConversationMessage;
 import com.blue.whale.agent.model.entity.GenerationJob;
@@ -65,6 +67,7 @@ public class AgentRunWorkerService {
     private final AgentRunMapper agentRunMapper;
     private final ConversationMapper conversationMapper;
     private final ConversationMessageMapper messageMapper;
+    private final AssistantMessageStreamMapper assistantMessageStreamMapper;
     private final RuntimeCheckpointMapper checkpointMapper;
     private final RunCommitRecordMapper runCommitMapper;
     private final GenerationJobMapper generationJobMapper;
@@ -224,16 +227,34 @@ public class AgentRunWorkerService {
         if (conversation == null) {
             throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
         }
-        long messageCount = messageMapper.selectCount(Wrappers.<ConversationMessage>lambdaQuery()
-                .eq(ConversationMessage::getConversationId, conversation.getId()));
-        ConversationMessage message = new ConversationMessage()
-                .setConversationId(conversation.getId())
-                .setProjectId(run.getProjectId())
-                .setAgentRunId(runId)
-                .setRole(ConversationMessage.ROLE_ASSISTANT)
-                .setContent(request.visibleText())
-                .setSequenceNo(Math.toIntExact(messageCount + 1));
-        messageMapper.insert(message);
+        ConversationMessage message;
+        boolean streamedMessage = request.assistantMessageStreamId() != null
+                && !request.assistantMessageStreamId().isBlank();
+        if (streamedMessage) {
+            AssistantMessageStream stream = assistantMessageStreamMapper.selectByStreamIdForUpdate(
+                    request.assistantMessageStreamId());
+            message = stream == null ? null : messageMapper.selectById(stream.getMessageId());
+            boolean validStream = stream != null
+                    && Objects.equals(stream.getAgentRunId(), runId)
+                    && AssistantMessageStream.STATUS_COMPLETED.equals(stream.getStatus())
+                    && message != null
+                    && Objects.equals(message.getContent(), request.visibleText());
+            if (!validStream) {
+                throw new GlobalException(SystemCode.AGENT_RUN_CONFLICT_CODE,
+                        SystemCode.AGENT_RUN_CONFLICT.getMsg());
+            }
+        } else {
+            long messageCount = messageMapper.selectCount(Wrappers.<ConversationMessage>lambdaQuery()
+                    .eq(ConversationMessage::getConversationId, conversation.getId()));
+            message = new ConversationMessage()
+                    .setConversationId(conversation.getId())
+                    .setProjectId(run.getProjectId())
+                    .setAgentRunId(runId)
+                    .setRole(ConversationMessage.ROLE_ASSISTANT)
+                    .setContent(request.visibleText())
+                    .setSequenceNo(Math.toIntExact(messageCount + 1));
+            messageMapper.insert(message);
+        }
 
         UserInputRequest inputRequest = null;
         GenerationJob job = null;
@@ -289,16 +310,18 @@ public class AgentRunWorkerService {
                     .setStatus(GenerationJobOutput.STATUS_PENDING));
         }
 
-        Map<String, Object> messagePayload = new LinkedHashMap<>();
-        messagePayload.put("message_id", message.getId());
-        messagePayload.put("conversation_id", conversation.getId());
-        messagePayload.put("agent_run_id", runId);
-        messagePayload.put("role", message.getRole());
-        messagePayload.put("content", message.getContent());
-        messagePayload.put("sequence_no", message.getSequenceNo());
-        projectEventService.appendEvent(run.getProjectId(), EventType.CONVERSATION_MESSAGE_COMPLETED,
-                AggregateType.CONVERSATION, String.valueOf(conversation.getId()), message.getSequenceNo(),
-                messagePayload, request.commitId(), null);
+        if (!streamedMessage) {
+            Map<String, Object> messagePayload = new LinkedHashMap<>();
+            messagePayload.put("message_id", message.getId());
+            messagePayload.put("conversation_id", conversation.getId());
+            messagePayload.put("agent_run_id", runId);
+            messagePayload.put("role", message.getRole());
+            messagePayload.put("content", message.getContent());
+            messagePayload.put("sequence_no", message.getSequenceNo());
+            projectEventService.appendEvent(run.getProjectId(), EventType.CONVERSATION_MESSAGE_COMPLETED,
+                    AggregateType.CONVERSATION, String.valueOf(conversation.getId()), message.getSequenceNo(),
+                    messagePayload, request.commitId(), null);
+        }
 
         if (job != null) {
             Map<String, Object> jobPayload = new LinkedHashMap<>();

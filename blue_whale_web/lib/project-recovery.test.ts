@@ -270,6 +270,159 @@ describe("Project 恢复状态机", () => {
       expect.objectContaining({ agent_run_id: 5, status: "awaiting_job" }),
     ]);
   });
+
+  it("按 stream_id 重放 Assistant started、chunk 与 completed 且不重复文本", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_stream_started",
+        event_type: "conversation.message_started",
+        aggregate_type: "conversation_message",
+        aggregate_id: "assistant-stream-5",
+        aggregate_version: 0,
+        payload: {
+          stream_id: "assistant-stream-5",
+          conversation_id: 3,
+          agent_run_id: 5,
+          role: "assistant",
+          content: "",
+          status: "streaming",
+          last_chunk_sequence: 0,
+        },
+      }),
+    );
+
+    expect(state.snapshot?.conversation_messages).toEqual([
+      expect.objectContaining({
+        stream_id: "assistant-stream-5",
+        content: "",
+        status: "streaming",
+      }),
+    ]);
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_stream_chunk_1",
+        cursor: 12,
+        event_type: "conversation.message_chunk_appended",
+        aggregate_type: "conversation_message",
+        aggregate_id: "assistant-stream-5",
+        aggregate_version: 1,
+        payload: {
+          message_id: 8,
+          stream_id: "assistant-stream-5",
+          conversation_id: 3,
+          agent_run_id: 5,
+          role: "assistant",
+          content: "你好，",
+          sequence_no: 2,
+          status: "streaming",
+          last_chunk_sequence: 1,
+        },
+      }),
+    );
+
+    expect(state.snapshot?.conversation_messages).toEqual([
+      expect.objectContaining({
+        message_id: 8,
+        stream_id: "assistant-stream-5",
+        content: "你好，",
+        last_chunk_sequence: 1,
+      }),
+    ]);
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_stream_chunk_1",
+        cursor: 13,
+        event_type: "conversation.message_chunk_appended",
+        aggregate_type: "conversation_message",
+        aggregate_id: "assistant-stream-5",
+        aggregate_version: 1,
+        payload: {
+          message_id: 8,
+          stream_id: "assistant-stream-5",
+          content: "不应重复",
+          last_chunk_sequence: 1,
+        },
+      }),
+    );
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_stream_old",
+        cursor: 14,
+        event_type: "conversation.message_chunk_appended",
+        aggregate_type: "conversation_message",
+        aggregate_id: "assistant-stream-5",
+        aggregate_version: 0,
+        payload: {
+          message_id: 8,
+          stream_id: "assistant-stream-5",
+          content: "旧内容",
+          last_chunk_sequence: 0,
+        },
+      }),
+    );
+
+    expect(state.snapshot?.conversation_messages[0]?.content).toBe("你好，");
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_job_with_private_text",
+        cursor: 15,
+        event_type: "generation_job.status_changed",
+        aggregate_type: "generation_job",
+        aggregate_id: "91",
+        aggregate_version: 1,
+        payload: {
+          job_id: 91,
+          status: "processing",
+          content: "工具、Job、Asset 私有文本不得进入 Conversation",
+        },
+      }),
+    );
+
+    expect(state.snapshot?.conversation_messages[0]?.content).toBe("你好，");
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_stream_completed",
+        cursor: 16,
+        event_type: "conversation.message_completed",
+        aggregate_type: "conversation_message",
+        aggregate_id: "assistant-stream-5",
+        aggregate_version: 2,
+        payload: {
+          message_id: 8,
+          stream_id: "assistant-stream-5",
+          conversation_id: 3,
+          agent_run_id: 5,
+          role: "assistant",
+          content: "你好，世界",
+          sequence_no: 2,
+          status: "completed",
+          last_chunk_sequence: 2,
+        },
+      }),
+    );
+
+    expect(state.snapshot?.conversation_messages).toEqual([
+      expect.objectContaining({
+        message_id: 8,
+        stream_id: "assistant-stream-5",
+        content: "你好，世界",
+        status: "completed",
+        last_chunk_sequence: 2,
+      }),
+    ]);
+  });
 });
 
 describe("Project SSE 解析器", () => {
@@ -479,6 +632,121 @@ describe("创作澄清活动请求投影", () => {
 });
 
 describe("Project 恢复协调器", () => {
+  it("Assistant 流中途断线后从最后游标续传且文本不重不漏", async () => {
+    const controller = new AbortController();
+    const afterValues: number[] = [];
+    const contents: string[] = [];
+    let connection = 0;
+    const transport: ProjectRecoveryTransport = {
+      loadSnapshot: vi.fn(async () => snapshot(10)),
+      consumeEvents: vi.fn(async (_projectId, after, _signal, onEvent) => {
+        afterValues.push(after);
+        connection += 1;
+        if (connection === 1) {
+          onEvent(
+            event({
+              event_id: "evt_stream_started_disconnect",
+              cursor: 11,
+              event_type: "conversation.message_started",
+              aggregate_type: "conversation_message",
+              aggregate_id: "assistant-stream-disconnect",
+              aggregate_version: 0,
+              payload: {
+                stream_id: "assistant-stream-disconnect",
+                conversation_id: 3,
+                agent_run_id: 5,
+                role: "assistant",
+                content: "",
+                status: "streaming",
+                last_chunk_sequence: 0,
+              },
+            }),
+          );
+          onEvent(
+            event({
+              event_id: "evt_stream_chunk_disconnect_1",
+              cursor: 12,
+              event_type: "conversation.message_chunk_appended",
+              aggregate_type: "conversation_message",
+              aggregate_id: "assistant-stream-disconnect",
+              aggregate_version: 1,
+              payload: {
+                message_id: 8,
+                stream_id: "assistant-stream-disconnect",
+                conversation_id: 3,
+                agent_run_id: 5,
+                role: "assistant",
+                content: "你好，",
+                sequence_no: 2,
+                status: "streaming",
+                last_chunk_sequence: 1,
+              },
+            }),
+          );
+          throw new Error("network disconnected mid-stream");
+        }
+        onEvent(
+          event({
+            event_id: "evt_stream_chunk_disconnect_2",
+            cursor: 13,
+            event_type: "conversation.message_chunk_appended",
+            aggregate_type: "conversation_message",
+            aggregate_id: "assistant-stream-disconnect",
+            aggregate_version: 2,
+            payload: {
+              message_id: 8,
+              stream_id: "assistant-stream-disconnect",
+              conversation_id: 3,
+              agent_run_id: 5,
+              role: "assistant",
+              content: "你好，世界",
+              sequence_no: 2,
+              status: "streaming",
+              last_chunk_sequence: 2,
+            },
+          }),
+        );
+        onEvent(
+          event({
+            event_id: "evt_stream_complete_disconnect",
+            cursor: 14,
+            event_type: "conversation.message_completed",
+            aggregate_type: "conversation_message",
+            aggregate_id: "assistant-stream-disconnect",
+            aggregate_version: 3,
+            payload: {
+              message_id: 8,
+              stream_id: "assistant-stream-disconnect",
+              conversation_id: 3,
+              agent_run_id: 5,
+              role: "assistant",
+              content: "你好，世界",
+              sequence_no: 2,
+              status: "completed",
+              last_chunk_sequence: 2,
+            },
+          }),
+        );
+        controller.abort();
+      }),
+    };
+
+    await runProjectRecovery(
+      1,
+      transport,
+      (state) => {
+        const content = state.snapshot?.conversation_messages[0]?.content;
+        if (typeof content === "string") contents.push(content);
+      },
+      controller.signal,
+      0,
+    );
+
+    expect(afterValues).toEqual([10, 12]);
+    expect(contents).toContain("你好，");
+    expect(contents.at(-1)).toBe("你好，世界");
+  });
+
   it("断线从最后游标重连，游标过期后重新获取 Snapshot", async () => {
     const controller = new AbortController();
     const afterValues: number[] = [];

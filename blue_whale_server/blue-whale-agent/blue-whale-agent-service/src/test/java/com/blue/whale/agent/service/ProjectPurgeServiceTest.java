@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.mapper.AssetStorageObjectMapper;
+import com.blue.whale.agent.mapper.AssistantMessageChunkMapper;
+import com.blue.whale.agent.mapper.AssistantMessageStreamMapper;
 import com.blue.whale.agent.mapper.CanvasMapper;
 import com.blue.whale.agent.mapper.ConversationMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
@@ -61,6 +63,10 @@ class ProjectPurgeServiceTest {
     @Mock
     private ConversationMessageMapper messageMapper;
     @Mock
+    private AssistantMessageChunkMapper assistantMessageChunkMapper;
+    @Mock
+    private AssistantMessageStreamMapper assistantMessageStreamMapper;
+    @Mock
     private UserInputRequestMapper userInputRequestMapper;
     @Mock
     private RuntimeCheckpointMapper runtimeCheckpointMapper;
@@ -102,7 +108,8 @@ class ProjectPurgeServiceTest {
     @BeforeEach
     void setUp() {
         purgeService = new ProjectPurgeService(
-                projectMapper, conversationMapper, messageMapper, userInputRequestMapper,
+                projectMapper, conversationMapper, messageMapper,
+                assistantMessageChunkMapper, assistantMessageStreamMapper, userInputRequestMapper,
                 runtimeCheckpointMapper, runCommitRecordMapper, agentRunMapper,
                 generationJobMapper, generationJobOutputMapper, generationProviderTaskMapper,
                 generationResultConflictMapper, canvasMapper, assetMapper, storageObjectMapper,

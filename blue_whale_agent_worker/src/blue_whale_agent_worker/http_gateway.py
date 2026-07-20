@@ -53,6 +53,27 @@ class JavaRunGateway:
     def commit(self, run_id: int, payload: dict[str, Any]) -> None:
         self._request(f"/internal/agent-runs/{run_id}/commits", payload)
 
+    def start_assistant_message(
+        self, run_id: int, payload: dict[str, Any]
+    ) -> None:
+        self._request(
+            f"/internal/agent-runs/{run_id}/assistant-messages/start", payload
+        )
+
+    def append_assistant_message_chunk(
+        self, run_id: int, payload: dict[str, Any]
+    ) -> None:
+        self._request(
+            f"/internal/agent-runs/{run_id}/assistant-messages/chunks", payload
+        )
+
+    def complete_assistant_message(
+        self, run_id: int, payload: dict[str, Any]
+    ) -> None:
+        self._request(
+            f"/internal/agent-runs/{run_id}/assistant-messages/complete", payload
+        )
+
     def _request(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         request = Request(
             f"{self._base_url}{path}",

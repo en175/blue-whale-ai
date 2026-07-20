@@ -32,7 +32,10 @@ public record SnapshotResponse(
             Long agentRunId,
             String role,
             String content,
-            Integer sequenceNo) {
+            Integer sequenceNo,
+            String streamId,
+            String status,
+            Integer lastChunkSequence) {
     }
 
     /** AgentRun 权威状态（Snapshot 切片）。 */

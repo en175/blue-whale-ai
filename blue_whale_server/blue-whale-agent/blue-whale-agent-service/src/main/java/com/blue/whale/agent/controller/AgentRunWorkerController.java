@@ -3,6 +3,9 @@ package com.blue.whale.agent.controller;
 import com.blue.whale.agent.model.dto.RunCommitRequest;
 import com.blue.whale.agent.model.dto.RunCommitResponse;
 import com.blue.whale.agent.model.dto.RunWorkResponse;
+import com.blue.whale.agent.model.dto.AssistantMessageStreamRequests;
+import com.blue.whale.agent.model.dto.AssistantMessageStreamResponse;
+import com.blue.whale.agent.service.AssistantMessageStreamService;
 import com.blue.whale.agent.service.AgentRunWorkerService;
 import com.blue.whale.global.base.resp.Result;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +24,7 @@ import javax.validation.Valid;
 public class AgentRunWorkerController {
 
     private final AgentRunWorkerService workerService;
+    private final AssistantMessageStreamService assistantMessageStreamService;
 
     @PostMapping("/claim")
     public Result<RunWorkResponse> claim(
@@ -35,5 +39,29 @@ public class AgentRunWorkerController {
             @RequestHeader(value = "X-Worker-Id", required = false) String workerId,
             @RequestBody @Valid RunCommitRequest request) {
         return Result.ok(workerService.commit(runId, workerId, request));
+    }
+
+    @PostMapping("/{runId}/assistant-messages/start")
+    public Result<AssistantMessageStreamResponse> startAssistantMessage(
+            @PathVariable Long runId,
+            @RequestHeader(value = "X-Worker-Id", required = false) String workerId,
+            @RequestBody @Valid AssistantMessageStreamRequests.Start request) {
+        return Result.ok(assistantMessageStreamService.start(runId, workerId, request));
+    }
+
+    @PostMapping("/{runId}/assistant-messages/chunks")
+    public Result<AssistantMessageStreamResponse> appendAssistantMessageChunk(
+            @PathVariable Long runId,
+            @RequestHeader(value = "X-Worker-Id", required = false) String workerId,
+            @RequestBody @Valid AssistantMessageStreamRequests.Chunk request) {
+        return Result.ok(assistantMessageStreamService.append(runId, workerId, request));
+    }
+
+    @PostMapping("/{runId}/assistant-messages/complete")
+    public Result<AssistantMessageStreamResponse> completeAssistantMessage(
+            @PathVariable Long runId,
+            @RequestHeader(value = "X-Worker-Id", required = false) String workerId,
+            @RequestBody @Valid AssistantMessageStreamRequests.Complete request) {
+        return Result.ok(assistantMessageStreamService.complete(runId, workerId, request));
     }
 }

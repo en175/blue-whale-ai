@@ -34,4 +34,12 @@ public class PendingRealProviderReviewEvidenceSource implements ReviewEvidenceSo
                 FAILURE_CODE,
                 EVIDENCE_REF);
     }
+
+    @Override
+    public ReviewEvidence produceAgentText(
+            AgentTextReviewRequest request, String policyVersion) {
+        return ReviewEvidence.failed(
+                request.contentDigest(), "text", ContentReview.DIRECTION_OUTPUT,
+                policyVersion, FAILURE_CODE, EVIDENCE_REF);
+    }
 }
