@@ -1,7 +1,8 @@
 # Blue-Whale 前端
 
-一个面向 AI Agent / Canvas 交互的纯客户端单页应用（SPA）。当前为纯前端 DEMO，
-生成能力用 mock/临时方案，未对接后端。
+一个面向 AI Agent / Canvas 交互的单页应用（SPA）。前端承载 Canvas、AgentChatPanel
+与 BottomDock 等入口；生成、审核、成本与审计由 Java Product API 与 Python 运行时组成的
+后端统一处理（详见 ADR-0015），生图入口共享统一的生图工具包与 GenerationJob 队列流水线。
 
 ## Language
 
@@ -32,14 +33,28 @@ _Avoid_: 把 Card 与 NodeItem 当作两个独立概念。
 **BottomDock**（底部生成 Dock）:
 Canvas 底部的生成工具面板，由 `LeftToolbar` 的 ai-image / ai-video 工具触发，
 含 image / video 两种 mode。它是**纯生成工具**：手填参数（模型、比例、分辨率、
-时长、数量、联网搜索等）做确定式生成，不涉及对话流。
+时长、数量、联网搜索等；参数随 GenerationJob 提交真实生效）做确定式生成，不涉及对话流。
 对应 `_canvas/components/dock/`。
 
-**生成能力的两个入口（职责边界不同，非同一功能）**:
+**生图入口（职责边界不同，非同一功能）**:
 - **BottomDock**：纯生成工具，参数驱动，不暴露对话上下文。
 - **AgentChatPanel**：编排 + 生成，对话/技能/上下文驱动，不暴露细粒度参数。
-两者产物都是 Card / NodeItem，但**职责边界不同、是两个独立功能**，
-后续对接后端应为两套独立的生成路径，不应强行合并为同一 API。
+- **/generate（GenerationInbox）**：Agent 对话式生成，承载独立 Conversation 与恢复语义。
+三者产物都是 Card / NodeItem，**入口职责独立、是不同功能**；但执行层不各自维护独立生成路径，
+统一进入生图工具包与 GenerationJob 队列流水线（成本预留 + 内容审核 + 失败重试）。
+
+**生图工具包（generation toolkit）**:
+三个生图入口共享的执行层，与入口的产品职责边界正交。由三部分组成：
+- **GenerationProvider** —— 图片执行层的产品中性请求/结果契约；具体实现（Fake、OpenAI、
+  火山方舟 Agent Plan 等）按运行 mode（`GENERATION_MODE`）装配，当前没有独立的运行时 Provider Registry。
+- **generation_model_capability** —— Provider、模型与尺寸/格式/数量/参考图/tools 能力的权威数据表；
+  前端选项从后端 `/api/generation/models` 拉取，不再写死。
+- **公共治理流水线** —— 成本预留（CostReservation）、内容审核（ContentReview）、失败重试与多输出，
+  由统一的 GenerationJob 队列承接。
+火山方舟 Agent Plan 使用专属 `/api/plan/v3` 端点与专属 API Key；退役的 `/api/generation/image`
+直连因绕过成本预留与内容审核不再提供（详见 [ADR-0038](docs/adr/0038-generation-toolkit-and-image-direct-retirement.md)）。
+_Avoid_: 把工具包写成独立的 Provider Registry 运行时组件；把入口产品职责边界与执行层统一混为一谈；
+新增供应商时不走能力表与队列流水线。
 
 **Project**（项目，产品归属根）:
 领域顶层的归属、授权与生命周期范围；Canvas、Conversation、AgentRun、GenerationJob 与 Asset 均归属于 Project，但各自保持独立的一致性边界。
