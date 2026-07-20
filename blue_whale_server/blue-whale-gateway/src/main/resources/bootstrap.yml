@@ -33,9 +33,10 @@ spring:
           uri: lb://blue-whale-agent
           predicates:
             # agent-service 端点前缀：/api/agent/**（skill/template）、/api/projects/**（project/snapshot/events）、
+            # /api/generation-inbox/**（GenerationInboxController，生成收件箱 IK21O9）、
             # /api/canvases/**（CanvasController，画布读写）、
             # /api/jobs/**、/api/generation/**、/api/assets/**、/api/webhooks/**
-            - Path=/api/agent/**,/api/projects/**,/api/canvases/**,/api/jobs/**,/api/generation/**,/api/assets/**,/api/webhooks/**
+            - Path=/api/agent/**,/api/projects/**,/api/generation-inbox/**,/api/canvases/**,/api/jobs/**,/api/generation/**,/api/assets/**,/api/webhooks/**
         - id: blue-whale-user
           uri: lb://blue-whale-user
           predicates:

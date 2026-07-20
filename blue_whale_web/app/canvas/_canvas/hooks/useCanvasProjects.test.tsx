@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { listProjects } from "@/lib/canvas";
 import { acceptConversationMessage } from "@/lib/conversation";
 import { runProjectRecovery } from "@/lib/project-recovery";
 import type {
@@ -118,5 +119,47 @@ describe("useCanvasProjects 创作澄清回答绑定", () => {
       "cmd-id",
       undefined,
     );
+  });
+});
+
+describe("useCanvasProjects ?project 初始定位（/generate「打开项目」闭环）", () => {
+  it("preferred id 存在于列表时 active 切到该项目；只应用一次，手动切换不被弹回", async () => {
+    vi.mocked(listProjects).mockResolvedValue([
+      { id: 1, name: "demo", thumb: null, created_at: "2026-07-17" },
+      { id: 2, name: "目标项目", thumb: null, created_at: "2026-07-17" },
+    ]);
+
+    const { result } = renderHook(() => useCanvasProjects("2"));
+    await waitFor(() => expect(result.current.backendReady).toBe(true));
+    await waitFor(() => expect(result.current.activeProject.id).toBe("2"));
+
+    // 参数应用后用户仍可自由切换（不被 URL 参数弹回）
+    act(() => result.current.switchProject("1"));
+    expect(result.current.activeProject.id).toBe("1");
+  });
+
+  it("preferred id 不存在于列表时忽略参数，active 保持首项（回退现行为）", async () => {
+    vi.mocked(listProjects).mockResolvedValue([
+      { id: 1, name: "demo", thumb: null, created_at: "2026-07-17" },
+    ]);
+
+    const { result } = renderHook(() => useCanvasProjects("999"));
+    await waitFor(() => expect(result.current.backendReady).toBe(true));
+    // 给一次性定位 effect 一个应用窗口后仍应保持首项
+    await waitFor(() =>
+      expect(vi.mocked(runProjectRecovery)).toHaveBeenCalled(),
+    );
+    expect(result.current.activeProject.id).toBe("1");
+  });
+
+  it("无 preferred id 时行为不变：active 为列表首项", async () => {
+    vi.mocked(listProjects).mockResolvedValue([
+      { id: 1, name: "demo", thumb: null, created_at: "2026-07-17" },
+      { id: 2, name: "second", thumb: null, created_at: "2026-07-17" },
+    ]);
+
+    const { result } = renderHook(() => useCanvasProjects());
+    await waitFor(() => expect(result.current.backendReady).toBe(true));
+    expect(result.current.activeProject.id).toBe("1");
   });
 });

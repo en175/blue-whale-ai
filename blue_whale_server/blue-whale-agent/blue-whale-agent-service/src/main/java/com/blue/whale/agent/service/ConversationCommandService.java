@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -73,16 +74,7 @@ public class ConversationCommandService {
         AgentRun sourceRun = confirmedInputRequestId == null ? null
                 : sourceRunOf(confirmedInputRequestId);
 
-        Conversation conversation = conversationMapper.selectOne(
-                Wrappers.<Conversation>lambdaQuery().eq(Conversation::getProjectId, projectId));
-        if (conversation == null) {
-            conversation = new Conversation().setProjectId(projectId);
-            conversationMapper.insert(conversation);
-        }
-        conversation = conversationMapper.selectForUpdate(conversation.getId());
-        if (conversation == null) {
-            throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
-        }
+        Conversation conversation = resolveConversation(projectId, request.conversationId());
 
         AgentRun run = new AgentRun()
                 .setProjectId(projectId)
@@ -162,6 +154,37 @@ public class ConversationCommandService {
     private AcceptConversationMessageResponse response(CommandIdempotency record) {
         return new AcceptConversationMessageResponse(
                 record.getMessageId(), record.getAgentRunId(), record.getAcceptedCursor());
+    }
+
+    /**
+     * 解析消息落点 Conversation 并加锁（FOR UPDATE）。
+     *
+     * <p>显式传 {@code conversationId} 时必须属于本项目，否则按资源不存在处理（不泄漏存在性）；
+     * 未传时取项目下最新一条（生成收件箱允许多段对话，不能用 selectOne），无则懒建。
+     * canvas 项目事实上只有一条对话，行为与此前一致。
+     */
+    private Conversation resolveConversation(Long projectId, Long conversationId) {
+        if (conversationId != null) {
+            Conversation specified = conversationMapper.selectForUpdate(conversationId);
+            if (specified == null || !specified.getProjectId().equals(projectId)) {
+                throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
+            }
+            return specified;
+        }
+        List<Conversation> conversations = conversationMapper.selectList(
+                Wrappers.<Conversation>lambdaQuery()
+                        .eq(Conversation::getProjectId, projectId)
+                        .orderByDesc(Conversation::getId));
+        Conversation conversation = conversations.isEmpty() ? null : conversations.get(0);
+        if (conversation == null) {
+            conversation = new Conversation().setProjectId(projectId);
+            conversationMapper.insert(conversation);
+        }
+        conversation = conversationMapper.selectForUpdate(conversation.getId());
+        if (conversation == null) {
+            throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
+        }
+        return conversation;
     }
 
     /**

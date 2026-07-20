@@ -1,5 +1,8 @@
 package com.blue.whale.agent.service;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.blue.whale.agent.mapper.ProjectMapper;
 import com.blue.whale.agent.model.dto.CreateProjectRequest;
 import com.blue.whale.agent.model.dto.ProjectDto;
@@ -8,6 +11,8 @@ import com.blue.whale.agent.model.entity.Project;
 import com.blue.whale.agent.model.entity.ProjectEvent;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,6 +42,12 @@ class ProjectServiceTest {
     private ProjectEventService projectEventService;
     private ProjectService projectService;
 
+    @BeforeAll
+    static void initTableInfo() {
+        // 纯 mock 单测无 MyBatis 上下文，手动注册 TableInfo 才能解析 lambda 查询列名
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), Project.class);
+    }
+
     @BeforeEach
     void setUp() {
         projectService = new ProjectService(projectMapper, projectEventService);
@@ -47,6 +58,7 @@ class ProjectServiceTest {
         ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
         when(projectMapper.insert(captor.capture())).thenAnswer(inv -> {
             captor.getValue().setId(1L);
+            captor.getValue().setPurpose(Project.PURPOSE_CANVAS);
             return 1;
         });
         when(projectEventService.appendEvent(anyLong(), anyString(), anyString(), anyString(),
@@ -56,13 +68,14 @@ class ProjectServiceTest {
 
         assertThat(dto.id()).isEqualTo(1L);
         assertThat(dto.name()).isEqualTo("我的项目");
+        assertThat(dto.purpose()).isEqualTo(Project.PURPOSE_CANVAS);
         assertThat(captor.getValue().getOwnerId()).isEqualTo(10L);
         verify(projectEventService).appendEvent(eq(1L), anyString(), anyString(), anyString(), any(), any(), any(), any());
     }
 
     @Test
     void listReturnsOnlyOwnerProjects() {
-        Project p1 = new Project().setOwnerId(10L).setName("A");
+        Project p1 = new Project().setOwnerId(10L).setName("A").setPurpose(Project.PURPOSE_CANVAS);
         p1.setId(1L);
         when(projectMapper.selectList(any())).thenReturn(List.of(p1));
 
@@ -70,6 +83,22 @@ class ProjectServiceTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).name()).isEqualTo("A");
+        assertThat(result.get(0).purpose()).isEqualTo(Project.PURPOSE_CANVAS);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void listExcludesGenerationInboxProjects() {
+        when(projectMapper.selectList(any())).thenReturn(List.of());
+
+        projectService.list(10L);
+
+        ArgumentCaptor<LambdaQueryWrapper<Project>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(projectMapper).selectList(captor.capture());
+        // 生成收件箱（purpose=generation_inbox）必须从项目列表查询条件中排除
+        assertThat(captor.getValue().getSqlSegment()).contains("purpose");
+        assertThat(captor.getValue().getParamNameValuePairs())
+                .containsValue(Project.PURPOSE_GENERATION_INBOX);
     }
 
     @Test
@@ -145,6 +174,20 @@ class ProjectServiceTest {
         verify(projectEventService).appendEvent(
                 eq(1L), eq("project.deleted"), eq("project"), eq("1"), eq(4),
                 eq(java.util.Map.of("project_id", 1L)), isNull(), isNull());
+    }
+
+    @Test
+    void deleteRejectsGenerationInbox() {
+        Project p = new Project().setOwnerId(10L).setName("生成收件箱")
+                .setPurpose(Project.PURPOSE_GENERATION_INBOX);
+        p.setId(1L);
+        when(projectMapper.selectById(1L)).thenReturn(p);
+
+        assertThatThrownBy(() -> projectService.delete(1L, 10L))
+                .isInstanceOf(GlobalException.class)
+                .extracting(e -> ((GlobalException) e).getCode())
+                .isEqualTo(SystemCode.RESOURCE_NOT_FOUND_CODE);
+        verify(projectMapper, never()).deleteById(any(Long.class));
     }
 
     @Test

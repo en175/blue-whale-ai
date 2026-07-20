@@ -56,4 +56,7 @@ public class Asset extends BaseEntity {
     /** generated / uploaded */
     private String source;
     private String status;
+
+    /** 跨项目复制来源：源 Asset ID（跨项目复制时写入，其余为 null） */
+    private Long sourceAssetId;
 }

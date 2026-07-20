@@ -633,6 +633,91 @@ class ConversationAgentRunIT {
         assertThat(count("outbox_messages", "project_id", project.getId())).isEqualTo(7);
     }
 
+    @Test
+    void generationInboxIsHiddenFromProjectList() throws Exception {
+        // 生成收件箱（purpose=generation_inbox）不出现在 GET /api/projects（IK21O9 ac）
+        Project canvas = new Project().setOwnerId(10L).setName("canvas-project");
+        projectMapper.insert(canvas);
+        Project inbox = new Project().setOwnerId(10L).setName("生成收件箱")
+                .setPurpose(Project.PURPOSE_GENERATION_INBOX);
+        projectMapper.insert(inbox);
+
+        mockMvc.perform(get("/api/projects").header("X-User-Id", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].id").value(canvas.getId()))
+                .andExpect(jsonPath("$.data[0].purpose").value("canvas"));
+    }
+
+    @Test
+    void messageWithoutConversationIdLandsInLatestConversation() throws Exception {
+        // 生成收件箱允许多段对话：不传 conversation_id 时落到最新一条（IK21O9）
+        Project project = new Project().setOwnerId(10L).setName("multi-conversation-latest");
+        projectMapper.insert(project);
+        jdbcTemplate.update("INSERT INTO conversations (project_id) VALUES (?)", project.getId());
+        jdbcTemplate.update("INSERT INTO conversations (project_id) VALUES (?)", project.getId());
+        Long latestConversationId = jdbcTemplate.queryForObject(
+                "SELECT MAX(id) FROM conversations WHERE project_id = ?", Long.class, project.getId());
+
+        JsonNode accepted = postMessage(project.getId(), "multi-latest-key", "生成一张蓝鲸海报");
+
+        assertThat(latestConversationId).isNotNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT conversation_id FROM conversation_messages WHERE id = ?", Long.class,
+                accepted.path("message_id").asLong())).isEqualTo(latestConversationId);
+    }
+
+    @Test
+    void messageWithConversationIdLandsInSpecifiedConversation() throws Exception {
+        // 显式传 conversation_id 时落到指定对话，而不是最新一条（IK21O9）
+        Project project = new Project().setOwnerId(10L).setName("multi-conversation-specified");
+        projectMapper.insert(project);
+        jdbcTemplate.update("INSERT INTO conversations (project_id) VALUES (?)", project.getId());
+        Long firstConversationId = jdbcTemplate.queryForObject(
+                "SELECT MIN(id) FROM conversations WHERE project_id = ?", Long.class, project.getId());
+        jdbcTemplate.update("INSERT INTO conversations (project_id) VALUES (?)", project.getId());
+
+        MvcResult result = mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "multi-specified-key")
+                        .contentType("application/json")
+                        .content("{\"client_message_id\":\"client-multi-specified\","
+                                + "\"content\":\"生成一张蓝鲸海报\","
+                                + "\"conversation_id\":" + firstConversationId + "}"))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        JsonNode accepted = objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT conversation_id FROM conversation_messages WHERE id = ?", Long.class,
+                accepted.path("message_id").asLong())).isEqualTo(firstConversationId);
+    }
+
+    @Test
+    void messageWithConversationIdOfOtherProjectIsRejected() throws Exception {
+        // conversation_id 不属于本 project 时按资源不存在拒绝，不产生任何事实（IK21O9）
+        Project project = new Project().setOwnerId(10L).setName("multi-conversation-owner");
+        projectMapper.insert(project);
+        Project other = new Project().setOwnerId(10L).setName("multi-conversation-other");
+        projectMapper.insert(other);
+        jdbcTemplate.update("INSERT INTO conversations (project_id) VALUES (?)", other.getId());
+        Long otherConversationId = jdbcTemplate.queryForObject(
+                "SELECT MIN(id) FROM conversations WHERE project_id = ?", Long.class, other.getId());
+
+        mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "multi-foreign-key")
+                        .contentType("application/json")
+                        .content("{\"client_message_id\":\"client-multi-foreign\","
+                                + "\"content\":\"生成一张蓝鲸海报\","
+                                + "\"conversation_id\":" + otherConversationId + "}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(100301));
+
+        assertThat(count("conversation_messages", "project_id", project.getId())).isZero();
+        assertThat(count("agent_runs", "project_id", project.getId())).isZero();
+    }
+
     private JsonNode postMessage(Long projectId, String idempotencyKey, String content) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/projects/{id}/conversation/messages", projectId)
                         .header("X-User-Id", "10")

@@ -52,6 +52,8 @@ public class RestExceptionConfig {
         failed.setData(exception.getData());
         HttpStatus status = exception.code() == SystemCode.UNAUTHORIZED_CODE
                 ? HttpStatus.UNAUTHORIZED
+                : exception.code() == SystemCode.PARAM_MISS_CODE
+                ? HttpStatus.BAD_REQUEST
                 : exception.code() == SystemCode.RESOURCE_NOT_FOUND_CODE
                 ? HttpStatus.NOT_FOUND
                 : exception.code() == SystemCode.CURSOR_EXPIRED_CODE

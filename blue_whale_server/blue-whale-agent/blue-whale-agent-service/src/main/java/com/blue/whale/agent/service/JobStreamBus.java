@@ -14,8 +14,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
 /**
- * 流式 job 内存事件总线：后台 {@code GenerationStreamService} 发事件，
- * {@code JobController} 的 {@link SseEmitter} 订阅。
+ * 流式 job 内存事件总线：事件产生方调用 {@link #emit} 发布，
+ * {@code JobController} 的 {@link SseEmitter} 订阅（{@code /api/jobs/{id}/stream}）。
  *
  * <p>订阅时先补发 history（解决订阅晚于首张图），{@link #complete} 不清 history
  * （重订阅仍可据 history 重建终态）。history 上限 {@link #MAX_HISTORY}，超限丢最旧。
