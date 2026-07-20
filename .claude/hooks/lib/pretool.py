@@ -109,6 +109,55 @@ def value(key: str) -> int:
     return 0
 
 
+def normalize_codex_apply_patch() -> int:
+    data = load_pretool()
+    tool_input = data.get("tool_input")
+    cwd = data.get("cwd")
+    if (
+        data.get("tool_name") != "apply_patch"
+        or not isinstance(tool_input, dict)
+        or not isinstance(tool_input.get("command"), str)
+        or not isinstance(cwd, str)
+        or not cwd
+    ):
+        return 2
+
+    targets: list[str] = []
+    for line in tool_input["command"].splitlines():
+        match = re.fullmatch(r"\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)", line)
+        if match is None:
+            if line.startswith("*** ") and line not in {
+                "*** Begin Patch",
+                "*** End Patch",
+                "*** End of File",
+            }:
+                return 2
+            continue
+        target = match.group(1)
+        if not target:
+            return 2
+        targets.append(os.path.abspath(os.path.join(cwd, target)))
+
+    if not targets:
+        return 2
+
+    correlation = {
+        key: data[key] for key in ("session_id", "tool_use_id") if key in data
+    }
+    for target in targets:
+        print(
+            json.dumps(
+                {
+                    "tool_name": "Write",
+                    **correlation,
+                    "tool_input": {"file_path": target},
+                },
+                ensure_ascii=False,
+            )
+        )
+    return 0
+
+
 def shell_tokens(command: str) -> list[str]:
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
@@ -611,6 +660,10 @@ def main() -> int:
         if len(sys.argv) != 3:
             return 2
         return value(sys.argv[2])
+    if mode == "normalize-codex-apply-patch":
+        if len(sys.argv) != 2:
+            return 2
+        return normalize_codex_apply_patch()
 
     command = command_from_stdin()
     if mode == "has-git-push":
