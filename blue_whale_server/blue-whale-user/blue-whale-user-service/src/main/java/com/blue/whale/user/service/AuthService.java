@@ -30,4 +30,7 @@ public interface AuthService {
 
     /** 设置密码（已登录 + 短信验证码） */
     void setPassword(Long userId, String code, String password);
+
+    /** 修改密码：短信验证码+旧密码双重验证，成功后全清 refresh_token 踢设备 */
+    void changePassword(Long userId, String code, String oldPassword, String newPassword, String ip);
 }

@@ -14,6 +14,9 @@ import com.blue.whale.user.sms.SmsProvider;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -318,6 +321,11 @@ public class AuthServiceImpl implements AuthService {
 
     // ==================== 密码登录 ====================
 
+    /** 修改密码限流：userId 维度 3 次/分钟 */
+    private static final String CHANGE_PASSWORD_LIMIT_PREFIX = "bw:passwd:change:user:";
+    private static final int CHANGE_PASSWORD_LIMIT = 3;
+    private static final int CHANGE_PASSWORD_LIMIT_TTL = 60;
+
     /** 密码强度正则：至少 8 位，含字母+数字 */
     private static final String PASSWORD_PATTERN = "^(?=.*[A-Za-z])(?=.*\\d).{8,128}$";
 
@@ -380,7 +388,6 @@ public class AuthServiceImpl implements AuthService {
     // ==================== 设置密码 ====================
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void setPassword(Long userId, String code, String password) {
         User user = userMapper.selectById(userId);
         if (user == null) {
@@ -388,17 +395,7 @@ public class AuthServiceImpl implements AuthService {
         }
 
         // 校验短信验证码
-        boolean isTestPhone = TEST_PHONE.equals(user.getPhone());
-        if (!isTestPhone) {
-            String stored = RedisUtil.getCacheObject(SMS_CODE_PREFIX + user.getPhone());
-            if (stored == null) {
-                throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "验证码已过期，请重新获取");
-            }
-            if (!stored.equals(code)) {
-                throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "验证码错误");
-            }
-            RedisUtil.delete(SMS_CODE_PREFIX + user.getPhone());
-        }
+        validateAndConsumeSmsCode(user.getPhone(), code);
 
         // 密码强度校验
         if (!password.matches(PASSWORD_PATTERN)) {
@@ -410,13 +407,108 @@ public class AuthServiceImpl implements AuthService {
         User updateUser = new User();
         updateUser.setId(userId);
         updateUser.setPassword(hashed);
-        updateUser.setGmtModified(LocalDateTime.now());
         userMapper.updateById(updateUser);
 
         log.info("密码设置成功: userId={}", userId);
     }
 
+    // ==================== 修改密码 ====================
+
+    @Override
+    public void changePassword(Long userId, String code, String oldPassword, String newPassword, String ip) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "用户不存在");
+        }
+
+        // 未设密码 → 引导使用设置密码
+        if (user.getPassword() == null) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "尚未设置密码，请使用设置密码功能");
+        }
+
+        // userId 限流：3 次/分钟
+        String limitKey = CHANGE_PASSWORD_LIMIT_PREFIX + userId;
+        Long count = incrWithTTL(limitKey, CHANGE_PASSWORD_LIMIT_TTL);
+        if (count > CHANGE_PASSWORD_LIMIT) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "操作过于频繁，请稍后再试");
+        }
+
+        // 校验短信验证码
+        validateAndConsumeSmsCode(user.getPhone(), code);
+
+        // 校验旧密码
+        if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
+            throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "旧密码错误");
+        }
+
+        // 新密码强度校验
+        if (!newPassword.matches(PASSWORD_PATTERN)) {
+            throw new GlobalException(SystemCode.PARAM_VALID_ERROR_CODE, "密码需 8-128 位，且包含字母和数字");
+        }
+
+        // 新旧密码不能相同
+        if (passwordEncoder.matches(newPassword, user.getPassword())) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "新密码不能与旧密码相同");
+        }
+
+        // 更新密码
+        String hashed = passwordEncoder.encode(newPassword);
+        User updateUser = new User();
+        updateUser.setId(userId);
+        updateUser.setPassword(hashed);
+        userMapper.updateById(updateUser);
+
+        // 全清该用户所有 refresh_token，所有设备强制重登
+        clearAllRefreshTokens(String.valueOf(userId));
+
+        log.info("密码修改成功: userId={}", userId);
+    }
+
     // ==================== 内部方法 ====================
+
+    /**
+     * 校验短信验证码并消费。测试账号跳过验证。
+     */
+    private void validateAndConsumeSmsCode(String phone, String code) {
+        if (TEST_PHONE.equals(phone)) {
+            return;
+        }
+        String stored = RedisUtil.getCacheObject(SMS_CODE_PREFIX + phone);
+        if (stored == null) {
+            throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "验证码已过期，请重新获取");
+        }
+        if (!stored.equals(code)) {
+            throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "验证码错误");
+        }
+        RedisUtil.delete(SMS_CODE_PREFIX + phone);
+    }
+
+    /**
+     * 清除指定用户所有 refresh_token（改密码后踢设备）。
+     * 用 SCAN 替代 KEYS，避免阻塞 Redis 事件循环。
+     */
+    private void clearAllRefreshTokens(String userId) {
+        String pattern = REFRESH_TOKEN_PREFIX + "*";
+        var keysToDelete = new java.util.ArrayList<String>();
+        RedisUtil.getRedisTemplate().execute((RedisCallback<Void>) connection -> {
+            try (Cursor<byte[]> cursor = connection.scan(
+                    ScanOptions.scanOptions().match(pattern).count(100).build())) {
+                while (cursor.hasNext()) {
+                    keysToDelete.add(new String(cursor.next()));
+                }
+            } catch (Exception e) {
+                log.error("清除 refresh_token 扫描失败: userId={}", userId, e);
+            }
+            return null;
+        });
+        for (String key : keysToDelete) {
+            String storedUserId = RedisUtil.getCacheObject(key);
+            if (userId.equals(storedUserId)) {
+                RedisUtil.delete(key);
+            }
+        }
+        log.info("已清除用户所有 refresh_token: userId={}", userId);
+    }
 
     private String generateCode() {
         int code = SECURE_RANDOM.nextInt(1_000_000);
