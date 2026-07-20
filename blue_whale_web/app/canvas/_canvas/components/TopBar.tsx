@@ -4,12 +4,12 @@
  * 中部占位 TopBarCenter、右侧 Agent 入口 TopBarRight。
  */
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { ChevronDown, MessageSquare, Pencil, Settings, Trash2 } from "lucide-react";
+import { ChevronDown, Coins, MessageSquare, Pencil, Settings, Trash2 } from "lucide-react";
 import type { Project } from "../types";
 import { IconPlus, TopviewLogo } from "../icons";
-import { UserMenu } from "@/components/auth/UserMenu";
 import { Tooltip } from "@/components/Tooltip";
 import { SettingsModal } from "./SettingsModal";
+import { FeedbackDrawer } from "./FeedbackDrawer";
 
 /** inline 重命名输入框：autofocus + 全选，Enter/blur 提交。无效输入由父组件回退（无取消）。 */
 function RenameInput({
@@ -373,27 +373,8 @@ export function TopBar({
           className="tc-logo-menu-btn"
           aria-label="导航菜单"
           aria-expanded={false}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "transparent",
-            border: 0,
-            padding: 0,
-            cursor: "pointer",
-            outline: "none",
-          }}
         >
-          <div
-            style={{
-              transform: "scale(0.85)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <TopviewLogo className="text-white" />
-          </div>
+          <TopviewLogo className="text-white" />
         </button>
       </div>
       <div
@@ -436,7 +417,7 @@ export function TopBar({
               setEditing(true);
             }}
             title={activeProject.name}
-            className="bg-[var(--tc-bg-elevated)] hover:bg-[var(--tc-border-active)]"
+            className="hover:bg-[var(--tc-menu-item-hover)]"
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -546,10 +527,28 @@ export function TopBarRight({
   isAgentOpen: boolean;
   onAgentToggle: () => void;
 }) {
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   return (
     <div className="tc-top-bar-right absolute top-4 right-4 z-[100] flex items-center">
       <div className="tc-top-bar-right__actions flex items-center gap-2">
-        <UserMenu />
+        <button
+          type="button"
+          aria-label="反馈"
+          onClick={() => setFeedbackOpen(true)}
+          className="tc-shell-btn inline-flex h-9 items-center rounded-[18px] px-3 text-white/80 transition-colors hover:bg-[var(--tc-menu-item-hover)]"
+          style={{ background: "transparent", border: 0, cursor: "pointer" }}
+        >
+          <span className="text-[13px] font-medium">反馈</span>
+        </button>
+        <Tooltip content="学分（账户资产，占位）" side="bottom">
+          <div
+            className="tc-shell-btn tc-shell-btn--labeled inline-flex h-9 items-center gap-1.5 rounded-[18px] bg-[var(--tc-menu-pill-bg)] px-3 text-white border border-[var(--tc-menu-pill-border)] shadow-[var(--tc-menu-pill-shadow)] backdrop-blur-md"
+            aria-label="学分"
+          >
+            <Coins width={16} height={16} stroke="rgba(255,255,255,0.8)" strokeWidth={1.5} />
+            <span className="tc-shell-btn__label text-[13px] font-medium tabular-nums">100</span>
+          </div>
+        </Tooltip>
         <button
           type="button"
           onClick={onAgentToggle}
@@ -561,6 +560,7 @@ export function TopBarRight({
           <span className="tc-shell-btn__label text-[13px] font-medium">Agent</span>
         </button>
       </div>
+      <FeedbackDrawer isOpen={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </div>
   );
 }

@@ -6,7 +6,7 @@
  */
 import type { ToolDef } from "./types";
 import type { ReactNode } from "react";
-import { SelectIcon, SparkleIcon, VideoGenIcon } from "./icons";
+import { Cube3DIcon, SelectIcon, SparkleIcon, VideoGenIcon, WhiteboardIcon } from "./icons";
 import {
   AtSign,
   AudioLines,
@@ -14,23 +14,37 @@ import {
   Captions,
   Clapperboard,
   Download,
+  GalleryVerticalEnd,
   Info,
   Lightbulb,
   Paintbrush,
   PencilLine,
   RefreshCw,
+  ShoppingBag,
   Sparkles,
-  SquarePlus,
   Type,
+  Upload,
   Video,
 } from "lucide-react";
 
+// 分组对齐竞品 topview.ai 左侧栏（2-6-2 结构）：
+//   组1 基础操作：选择 / 上传
+//   组2 内容生成：AI 图片 / AI 视频 / 音频 / 文字 / 3D / 白板
+//   组3 管理：资产 / 商品卡片
+// divider 渲染在按钮下方：落在「上传」「白板」之后。
+// 注：音频 / 3D / 白板 / 资产 / 商品卡片 后端未接，点击占位
+//     （page.tsx handleToolClick 无对应 case → noop），仅前端图标展示。
 export const LEFT_TOOLS: ToolDef[] = [
   { id: "select", label: "选择", icon: <SelectIcon className="text-white" /> },
-  { id: "upload", label: "上传", icon: <SquarePlus width={20} height={20} stroke="rgba(255, 255, 255, 0.8)" strokeWidth={1.5} /> },
-  { id: "text", label: "文本", icon: <Type width={20} height={20} stroke="rgba(255, 255, 255, 0.8)" strokeWidth={1.5} />, divider: true },
+  { id: "upload", label: "上传", icon: <Upload width={20} height={20} stroke="rgba(255, 255, 255, 0.8)" strokeWidth={1.5} />, divider: true },
   { id: "ai-image", label: "AI 图片", icon: <SparkleIcon className="text-white" /> },
   { id: "ai-video", label: "AI 视频", icon: <VideoGenIcon className="text-white" /> },
+  { id: "audio", label: "音频", icon: <AudioLines width={20} height={20} stroke="rgba(255, 255, 255, 0.8)" strokeWidth={1.5} /> },
+  { id: "text", label: "文本", icon: <Type width={20} height={20} stroke="rgba(255, 255, 255, 0.8)" strokeWidth={1.5} /> },
+  { id: "3d", label: "3D", icon: <Cube3DIcon className="text-white" /> },
+  { id: "whiteboard", label: "白板", icon: <WhiteboardIcon className="text-white" />, divider: true },
+  { id: "assets", label: "资产", icon: <GalleryVerticalEnd width={20} height={20} stroke="rgba(255, 255, 255, 0.8)" strokeWidth={1.5} /> },
+  { id: "product-card", label: "商品卡片", icon: <ShoppingBag width={20} height={20} stroke="rgba(255, 255, 255, 0.8)" strokeWidth={1.5} /> },
 ];
 export type NodeToolbarAction = {
   id: string;

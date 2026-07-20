@@ -58,6 +58,8 @@ public class GenerationStreamService {
             provider.streamGenerateImages(req)
                     .blockingForEach(event -> dispatch(job, event));
             markSucceeded(jobId);
+            // 终态契约：done/error 必须在 complete 前 emit，且此后不再 emit——JobStreamBus.complete
+            // 依赖此不变量挂 TTL 清 history（§6.7），违反会导致孤儿 history 条目泄漏。
             bus.emit(jobId, SsePayload.done(null));
             bus.complete(jobId);
             log.info("stream job {} succeeded", jobId);
@@ -65,6 +67,7 @@ public class GenerationStreamService {
             log.error("stream job {} failed", jobId, e);
             String msg = rootMessage(e);
             markFailed(jobId, msg);
+            // 同上终态契约：error 在 complete 前 emit，此后不再 emit。
             bus.emit(jobId, SsePayload.error(SystemCode.FAILURE.name(), msg));
             bus.complete(jobId);
         }

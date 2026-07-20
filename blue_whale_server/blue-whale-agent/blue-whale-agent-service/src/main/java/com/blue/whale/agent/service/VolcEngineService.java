@@ -241,8 +241,20 @@ public class VolcEngineService implements ImageGenerationProvider {
         }
     }
 
+    /**
+     * 提取上游错误信息：{@link ApiException} 优先透出方舟响应体（含具体错误码/原因，如
+     * {@code ModelNotOpen} / {@code InvalidEndpointOrModel.NotFound}），避免只给 "HTTP 404"
+     * 无法定位；非 ApiException 取最深 cause message。
+     */
     private String rootMessage(Exception e) {
         Throwable cur = e;
+        while (cur != null) {
+            if (cur instanceof ApiException ae && ae.getResponseBody() != null && !ae.getResponseBody().isBlank()) {
+                return ae.getResponseBody();
+            }
+            cur = cur.getCause() == cur ? null : cur.getCause();
+        }
+        cur = e;
         while (cur.getCause() != null && cur.getCause() != cur) {
             cur = cur.getCause();
         }

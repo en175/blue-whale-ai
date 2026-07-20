@@ -24,8 +24,6 @@ import {
 } from "lucide-react";
 import {
   ReactFlow,
-  Background,
-  BackgroundVariant,
   NodeResizer,
   NodeToolbar,
   Position,
@@ -404,14 +402,14 @@ function ImageNode({ id, data, selected }: NodeProps<CanvasNode>) {
         )}
         <div
           className={`nodrag absolute -top-6 left-0 flex items-center text-xs font-normal leading-4 select-none transition-opacity duration-150 ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-          style={{ width }}
+          style={{ width, background: "transparent" }}
         >
           <div
             className="flex min-w-0 flex-1 items-center gap-[5px]"
             style={{ color: "var(--tc-text-secondary)" }}
           >
             <ImageIcon width={13} height={13} stroke="currentColor" />
-            <span className="tc-node-label-bar__name relative inline-block max-w-[216px] cursor-text overflow-hidden text-ellipsis whitespace-nowrap align-bottom">
+            <span className="tc-node-label-bar__name relative inline-block max-w-[216px] cursor-text overflow-hidden text-ellipsis whitespace-nowrap">
               {data.content || "图片节点"}
             </span>
           </div>
@@ -470,14 +468,14 @@ function VideoNode({ id, data, selected }: NodeProps<CanvasNode>) {
         />
         <div
           className={`nodrag absolute -top-6 left-0 flex items-center text-xs font-normal leading-4 select-none transition-opacity duration-150 ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-          style={{ width }}
+          style={{ width, background: "transparent" }}
         >
           <div
             className="flex min-w-0 flex-1 items-center gap-[5px]"
             style={{ color: "var(--tc-text-secondary)" }}
           >
             <VideoIcon width={13} height={13} stroke="currentColor" />
-            <span className="tc-node-label-bar__name relative inline-block max-w-[216px] cursor-text overflow-hidden text-ellipsis whitespace-nowrap align-bottom">
+            <span className="tc-node-label-bar__name relative inline-block max-w-[216px] cursor-text overflow-hidden text-ellipsis whitespace-nowrap">
               {data.content || "视频节点"}
             </span>
           </div>
@@ -695,8 +693,13 @@ export function CanvasSurface({
           deleteKeyCode={["Backspace", "Delete"]}
           // 框选（task 3.6）：左键拖空白直接框选（Figma 式，无需 Shift）
           selectionOnDrag
-          // 平移：中键/右键拖，或按住空格+左键拖（panActivationKeyCode 默认 Space）
+          // 平移：中键/右键拖 / 空格+左键拖；滚轮 & 触摸板双指平移（panOnScroll，对齐 topview）
           panOnDrag={[1, 2]}
+          panOnScroll
+          zoomOnScroll={false}
+          zoomOnPinch
+          // 缩放：Cmd/Ctrl+滚轮（zoomActivationKeyCode）；触摸板捏合缩放
+          zoomActivationKeyCode="Control"
           // 多选：Ctrl/Shift/Cmd 点选追加
           multiSelectionKeyCode={["Meta", "Control", "Shift"]}
           // 图层 z 序（task 3.6）：选中即抬升 z-index（bringToFront），默认 true 此处显式固化
@@ -708,10 +711,8 @@ export function CanvasSurface({
           onSelectionChange={({ nodes: selected }) =>
             onSelectionChange?.(selected.map((n) => n.id))
           }
-          proOptions={{ hideAttribution: false }}
-        >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--tc-canvas-dot)" />
-        </ReactFlow>
+          proOptions={{ hideAttribution: true }}
+        />
       </NodeActionsContext.Provider>
     </div>
   );

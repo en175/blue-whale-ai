@@ -16,6 +16,7 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { useAuth } from "@/components/auth/AuthContext";
 import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
 import { ArrowLeft } from "lucide-react";
+import type { MentionItem } from "./_canvas/components/dock/mention";
 import {
   TopBar,
   TopBarCenter,
@@ -107,6 +108,13 @@ function CanvasPageInner() {
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
   const [bottomDockMode, setBottomDockMode] = useState<"image" | "video">("image");
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
+  /** 重新编辑（refresh）触发 dock 输入框聚焦 + 闪烁信号（nonce，递增触发 effect） */
+  const [dockFocusSignal, setDockFocusSignal] = useState(0);
+  /** 插入参考图 mention pill 信号（nonce 触发 BottomDock insertMention effect，X3） */
+  const [dockMentionSignal, setDockMentionSignal] = useState<{ nonce: number; item: MentionItem | null; replace?: boolean }>({
+    nonce: 0,
+    item: null,
+  });
   const [videoDockMedia, setVideoDockMedia] = useState<DockMediaItem[]>([]);
   // 视频首尾帧模式：已上传首/尾帧的 TOS url（后端可访问，非本地 blob）
   const [firstFrameUrl, setFirstFrameUrl] = useState<string | undefined>(undefined);
@@ -142,18 +150,23 @@ function CanvasPageInner() {
       const name = node.content || "未命名素材";
       switch (actionId) {
         case "refresh": {
-          // 重新编辑：唤起底部图片 Dock（不带素材）
+          // 重新编辑（X4）：唤起底部图片 Dock（不带素材）+ 聚焦输入框原生 caret
           setBottomDockMode("image");
           setIsBottomDockOpen(true);
+          setDockFocusSignal((n) => n + 1);
           break;
         }
-        case "shuffle": {
-          // 再创作：带入参考图占位 + 唤起图片 Dock
-          if (node.imageUrl) {
-            setImageDockMedia([{ id: node.id, type: "image", name, src: node.imageUrl }]);
-          }
+        case "shuffle":
+        case "image": {
+          // 生成图片 / 再创作（X3）：唤起图片 Dock + 参考图同步进顶部缩略图和 mention pill
           setBottomDockMode("image");
           setIsBottomDockOpen(true);
+          setDockFocusSignal((n) => n + 1);
+          if (node.imageUrl) {
+            const item: DockMediaItem = { id: node.id, type: "image", name, src: node.imageUrl };
+            setImageDockMedia([item]);
+            setDockMentionSignal({ nonce: Date.now(), item: { src: node.imageUrl, name, id: node.id }, replace: true });
+          }
           break;
         }
         case "mention": {
@@ -383,7 +396,7 @@ function CanvasPageInner() {
             sizeId: args.settings.resolution.id,
             aspectRatio: args.settings.aspectRatio.id,
             quantity: parseQuantity(args.settings.quantity),
-            referenceImages: imageDockMedia
+            referenceImages: args.referenceImages ?? imageDockMedia
               .map((m) => m.src)
               .filter((s): s is string => Boolean(s)),
           });
@@ -782,6 +795,8 @@ function CanvasPageInner() {
           onClose={() => setIsBottomDockOpen(false)}
           imageMedia={imageDockMedia}
           videoMedia={videoDockMedia}
+          focusSignal={dockFocusSignal}
+          dockMentionSignal={dockMentionSignal}
           onRemoveImageMedia={(id) => setImageDockMedia((prev) => prev.filter((m) => m.id !== id))}
           onRemoveVideoMedia={(id) => setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))}
           firstFrameUrl={firstFrameUrl}

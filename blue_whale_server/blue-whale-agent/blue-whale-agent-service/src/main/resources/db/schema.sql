@@ -162,6 +162,7 @@ CREATE TABLE generation_model_capability
     default_duration        INT          NULL COMMENT '视频默认时长（秒）；image 行 NULL',
     features                JSON         NOT NULL COMMENT '特性开关 {reference_image,watermark,quantity_max,sequential_image_generation,stream,tools}',
     enabled                 TINYINT      NOT NULL DEFAULT 1 COMMENT '是否启用：0关 1开',
+    sort_order              INT          NOT NULL DEFAULT 0 COMMENT '展示排序（升序，越小越靠前；最新模型设小值，前端默认取列表第一项）',
     gmt_create              DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     gmt_modified            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     version                 INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',

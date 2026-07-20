@@ -27,6 +27,7 @@ data/
 
 # OpenSpec 规划文档（本地工具，不入库）
 openspec/
+openspec-frontend/
 
 # agent 本地参考文档（视频/图片生成 API、todos 等，不入库；注意是 docs/agent 单数，勿与 docs/agents 团队文档混淆）
 docs/agent/
@@ -58,3 +59,7 @@ target/
 
 # 运行日志
 logs/
+
+# mitmproxy 抓包产物（本地工具，不入库）
+mitm_mcp_traffic.db
+*.flow
