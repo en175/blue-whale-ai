@@ -301,9 +301,17 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
     dispatch({ type: "switch", projectId: id });
   }, []);
 
-  /** 删除项目：backendReady 先删库再 dispatch；否则直接 dispatch（mock）。 */
+  /** 删除项目：永久删除不可恢复（IK25EG），先二次确认；确认后 backendReady 先删库再 dispatch；否则直接 dispatch（mock）。 */
   const deleteProjectAction = useCallback(
     async (id: string) => {
+      const target = stateRef.current.projects.find((p) => p.id === id);
+      if (
+        !window.confirm(
+          `将永久删除项目「${target?.name ?? id}」及其画布、对话、生成记录和作品，不可恢复。确定删除？`,
+        )
+      ) {
+        return;
+      }
       loadedRef.current.delete(id);
       if (backendReady) {
         try {
