@@ -3,7 +3,9 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# pwd -P 取物理路径（getcwd 规范大小写），避免大小写不敏感文件系统上
+# 逻辑 PWD 拼写漂移进 ROOT/ENTRY；Python 端另有 samefile 兜底（ADR-0039）。
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 ENTRY="$ROOT/scripts/start-task-worktree.py"
 
 # 复用共享 Python 3 启动器探测：跳过 Microsoft Store 的 app execution alias 桩
