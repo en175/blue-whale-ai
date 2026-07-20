@@ -9,7 +9,8 @@ spring:
       server-addr: 115.190.244.91:8848
       discovery:
         enabled: true
-        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
+        # 本地开发传 NACOS_NAMESPACE=<隔离 namespace ID> 注册到独立 namespace，避免串线上流量
+        namespace: ${NACOS_NAMESPACE:1bb06cf5-c1ad-4054-b022-49358a2f49aa}
 
   web:
     encoding:
@@ -26,9 +27,6 @@ spring:
     username: root
     password: weitian1024
     driver-class-name: com.mysql.cj.jdbc.Driver
-
-  jackson:
-    property-naming-strategy: SNAKE_CASE
 
   sql:
     init:
@@ -57,6 +55,17 @@ jwt:
 
 sms:
   provider: volcengine
+
+# 火山引擎 TOS 对象存储（域名由 prefix 自动推导：https://{prefix}.tos-cn-beijing.volces.com）
+# 生产环境 access-key / secret-key / bucket-name 由 Nacos 配置中心下发，本地为空则跳过 storageService 初始化
+oss:
+  tos:
+    prefix: user-avatar
+    endpoint: https://tos-cn-beijing.volces.com
+    region: cn-beijing
+    access-key:
+    secret-key:
+    bucket-name: bluewhale-assets
 
 # 火山引擎短信（切换 provider=volcengine 后生效）
 volcengine:

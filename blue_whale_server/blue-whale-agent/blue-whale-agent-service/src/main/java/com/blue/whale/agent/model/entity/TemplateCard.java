@@ -10,7 +10,7 @@ import com.blue.whale.global.base.entity.BaseEntity;
 public class TemplateCard extends BaseEntity {
 
 
-    /** 所属标签代码（对应 TemplateTagEnum.tagCode） */
+    /** 所属标签代码（对应 bluewhale.template.tags 配置项） */
     private String tagCode;
 
     /** 卡片标题 */
@@ -21,6 +21,9 @@ public class TemplateCard extends BaseEntity {
 
     /** 布局：wide/portrait/social/image */
     private String layout;
+
+    /** 提示词：点击卡片后下发的 prompt 文本，可空 */
+    private String content;
 
     /** 排序权重，数值越小越靠前 */
     private Integer sortOrder;
@@ -55,6 +58,14 @@ public class TemplateCard extends BaseEntity {
 
     public void setLayout(String layout) {
         this.layout = layout;
+    }
+
+    public String getContent() {
+        return content;
+    }
+
+    public void setContent(String content) {
+        this.content = content;
     }
 
     public Integer getSortOrder() {

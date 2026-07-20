@@ -1,8 +1,8 @@
 package com.blue.whale.agent.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.blue.whale.agent.model.dto.JobListItemResponse;
-import com.blue.whale.agent.model.dto.JobStatusResponse;
+import com.blue.whale.agent.model.dto.JobListItemDto;
+import com.blue.whale.agent.model.dto.JobStatusDto;
 import com.blue.whale.agent.service.GenerationJobService;
 import com.blue.whale.agent.service.JobStreamBus;
 import com.blue.whale.global.base.resp.Result;
@@ -26,7 +26,7 @@ import java.util.Map;
 /**
  * 任务接口：列表查询（生成流页）、轮询查状态（前端 setInterval 调）、SSE stream 预留、Ark webhook 回调预留。
  *
- * <p>类级不加 {@code @RequestMapping}：端点路径前缀不同（{@code /api/jobs} 与 {@code /api/webhooks/ark}），
+ * <p>类级不加 {@code @RequestMapping}：端点路径前缀不同（{@code /api/agent/jobs} 与 {@code /api/webhooks/ark}），
  * 方法级写全路径更清晰。
  */
 @Tag(name = "任务接口", description = "任务列表查询、轮询查状态、SSE 与 webhook 预留")
@@ -38,8 +38,8 @@ public class JobController {
     private final JobStreamBus jobStreamBus;
 
     /** 任务列表（生成流页）：按 type/status/projectId 过滤 + 分页，按创建时间倒序。身份走 X-User-Id 头。 */
-    @GetMapping("/api/jobs")
-    public Result<Page<JobListItemResponse>> listJobs(
+    @GetMapping("/api/agent/jobs")
+    public Result<Page<JobListItemDto>> listJobs(
             @RequestHeader(value = "X-User-Id", required = false) Long userId,
             @RequestParam(name = "type", required = false) String type,
             @RequestParam(name = "status", required = false) String status,
@@ -50,13 +50,13 @@ public class JobController {
     }
 
     /** 轮询查任务状态。 */
-    @GetMapping("/api/jobs/{id}")
-    public Result<JobStatusResponse> getStatus(@PathVariable("id") Long id) {
+    @GetMapping("/api/agent/jobs/{id}")
+    public Result<JobStatusDto> getStatus(@PathVariable("id") Long id) {
         return Result.ok(generationJobService.getJobStatus(id));
     }
 
     /** SSE 流式推送：客户端原生 EventSource 订阅逐张图。 */
-    @GetMapping(value = "/api/jobs/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @GetMapping(value = "/api/agent/jobs/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(@PathVariable("id") Long id, HttpServletResponse response) {
         generationJobService.getJobStatus(id); // 不存在则抛 NOT_FOUND
         response.setHeader("X-Accel-Buffering", "no");

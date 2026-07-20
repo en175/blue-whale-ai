@@ -5,13 +5,14 @@
 ## 流程
 
 ```
-本地 mvn package ──jar──▶ scp ──▶ 远程 /opt/blue-whale/jars/
+本地 build ──artifact──▶ scp ──▶ 远程 /opt/blue-whale/
+  后端: mvn package → jar                │  前端: next build → standalone tar
                                         │
-                       远程 docker build（COPY jar + temurin:21-jre）
+                       远程 docker build（后端 COPY jar + temurin:21-jre / 前端 COPY standalone + node:22-alpine）
                                         │
                           blue-whale-<svc>:latest
                                         │
-                    restart.sh：检测旧容器 → docker rm -f → compose up -d
+                    restart.sh：检测旧容器 → docker rm -f → compose up -d（web 后 curl 验证 3000）
 ```
 
 ## 目录结构
@@ -31,7 +32,8 @@
     ├── Dockerfile.gateway       # jar-based（远程 build 用）
     ├── Dockerfile.user
     ├── Dockerfile.agent
-    └── docker-compose.remote.yml  # 3 后端编排（scp 到远程 docker-compose.yml）
+    ├── Dockerfile.web           # standalone-based（node:22-alpine 跑 server.js）
+    └── docker-compose.remote.yml  # 4 服务编排（scp 到远程 docker-compose.yml）
 ```
 
 ## 本次改动文件（未提交 git，等审查）

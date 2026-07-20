@@ -2,9 +2,9 @@ package com.blue.whale.agent.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.blue.whale.agent.model.dto.SkillLibraryDto;
-import com.blue.whale.agent.model.dto.SkillLibraryQuery;
+import com.blue.whale.agent.model.request.SkillLibraryRequest;
 import com.blue.whale.agent.model.dto.SkillMineDto;
-import com.blue.whale.agent.model.dto.SkillMineQuery;
+import com.blue.whale.agent.model.request.SkillMineRequest;
 
 /**
  * 技能面板服务。关系模型：库(skill) ⊃ 我的(user_skill 引用)，auto 挂关系上。
@@ -14,10 +14,10 @@ import com.blue.whale.agent.model.dto.SkillMineQuery;
 public interface SkillService {
 
     /** 系统内置 skill 分页（source=official），可按 keyword 搜 name/description */
-    Page<SkillLibraryDto> listLibrary(Long userId, SkillLibraryQuery q);
+    Page<SkillLibraryDto> listLibrary(Long userId, SkillLibraryRequest q);
 
     /** user 已添加子集分页 + auto + skill 内容快照（join，my tab 自足，与 library 一致滚动加载） */
-    Page<SkillMineDto> listMine(Long userId, SkillMineQuery q);
+    Page<SkillMineDto> listMine(Long userId, SkillMineRequest q);
 
     /** 建立引用（加入「我的」，默认 auto=false）。ON DUPLICATE KEY 恢复已逻辑删行 */
     void add(Long userId, Long skillId);

@@ -1,9 +1,9 @@
 package com.blue.whale.agent.controller;
 
 import com.blue.whale.agent.common.context.UserContext;
-import com.blue.whale.agent.model.dto.CreateProjectRequest;
+import com.blue.whale.agent.model.request.CreateProjectRequest;
 import com.blue.whale.agent.model.dto.ProjectDto;
-import com.blue.whale.agent.model.dto.RenameProjectRequest;
+import com.blue.whale.agent.model.request.RenameProjectRequest;
 import com.blue.whale.agent.service.ProjectService;
 import com.blue.whale.global.base.resp.Result;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -23,11 +23,11 @@ import java.util.List;
 
 /**
  * 项目接口：workspace 根 CRUD（ADR-0011）。用户身份走 {@code X-User-Id} 头。
- * 响应统一 {@link Result}；JSON snake_case（全局 Jackson SNAKE_CASE）。
+ * 响应统一 {@link Result}；HTTP JSON 字段 camelCase（ADR-0019）。
  */
 @Tag(name = "项目接口", description = "画布项目 CRUD（ADR-0011 project 根）")
 @RestController
-@RequestMapping("/api/projects")
+@RequestMapping("/api/agent/projects")
 @RequiredArgsConstructor
 public class ProjectController {
 

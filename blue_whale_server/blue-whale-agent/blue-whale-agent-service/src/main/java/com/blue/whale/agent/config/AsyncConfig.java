@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.util.concurrent.Executor;
 
@@ -33,5 +34,21 @@ public class AsyncConfig {
         executor.setAwaitTerminationSeconds(30);
         executor.initialize();
         return executor;
+    }
+
+    /**
+     * SSE history TTL 清理专用调度器：单线程，与 {@link #GENERATION_EXECUTOR} 及 {@code @Scheduled}
+     * 默认调度池隔离。供 {@code JobStreamBus#complete} 终态后挂一次性延迟任务清 history（§6.7），
+     * 避免清理任务拖慢 {@code JobPoller} 的 5s 轮询节拍。
+     */
+    @Bean(name = "streamSweeperScheduler", destroyMethod = "shutdown")
+    public ThreadPoolTaskScheduler streamSweeperScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("stream-sweeper-");
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(10);
+        scheduler.initialize();
+        return scheduler;
     }
 }

@@ -12,8 +12,16 @@ spring:
       discovery:
         register-enabled: true
         # namespace 必须用 Nacos 的 namespace ID（UUID），用名字会注册到 console 看不见的隐式命名空间
-        namespace: 1bb06cf5-c1ad-4054-b022-49358a2f49aa
+        # 本地开发传 NACOS_NAMESPACE=<隔离 namespace ID> 注册到独立 namespace，避免串线上流量
+        namespace: ${NACOS_NAMESPACE:1bb06cf5-c1ad-4054-b022-49358a2f49aa}
         timeout: 10000
+      config:
+        server-addr: 115.190.244.91:8848
+        namespace: ${NACOS_NAMESPACE:1bb06cf5-c1ad-4054-b022-49358a2f49aa}
+        file-extension: yml
+        group: BLUE_WHALE
+
+
   datasource:
     dynamic:
       primary: master
@@ -36,10 +44,14 @@ spring:
     port: 6379
     password: weitian1024
     database: 0
-  jackson:
-    # 前端字段全 snake_case，必须 SNAKE_CASE 才能映射到后端 camelCase（model_id→modelId）。
-    # MybatisJacksonConfig 复用此 ObjectMapper 给 JacksonTypeHandler，DB 的 JSON 列也是 snake_case。
-    property-naming-strategy: SNAKE_CASE
+  servlet:
+    multipart:
+      # 素材上传上限：图片≤2MB / 视频≤50MB（与 AssetService 校验对齐），放开 Spring/Tomcat 默认 1MB 限制
+      max-file-size: 50MB
+      max-request-size: 55MB
+  # HTTP 对外 JSON 默认 camelCase（合规 CLAUDE.md 后端规范）。
+  # DB JSON 列的 snake↔camel 映射由 MybatisJacksonConfig 注入独立 SNAKE_CASE ObjectMapper 给
+  # JacksonTypeHandler 处理，与 HTTP 隔离；普通列靠 mybatis-plus map-underscore-to-camel-case（见下）。
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
@@ -56,11 +68,10 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 oss:
-  volcengine:
-    access-key: ${TOS_ACCESS_KEY}
-    secret-key: ${TOS_SECRET_KEY}
-    bucket-name: ${TOS_BUCKET_NAME}
-    domain: ${TOS_DOMAIN:https://sweet-oa.tos-cn-beijing.volces.com}
+  tos:
+    access-key: AKLTYjI2ZjM3NDU1NTBiNDQwMDkwNjFhZmQxOWVhOGYyODg
+    secret-key: WVdVMU9UTmhaREppTWpSa05EWmlOVGxoT1RNMFlqVTVOR00xWkRKalpqaw==
+    bucket-name: bluewhale-assets
 
 logging:
   level:
@@ -71,3 +82,24 @@ volcengine:
   ark:
     base-url: https://ark.cn-beijing.volces.com/api/v3
     api-key: ark-90702f0d-327b-4d76-890c-7dc81efd5721-e0494
+
+# 模板标签：原 TemplateTagEnum 枚举迁为配置项，增删标签改此处即可，无需改代码
+# tagCode 值须与 DB template_card.tag_code 现有数据保持一致
+bluewhale:
+  template:
+    tags:
+      - tag-code: marketing
+        label: 营销视频
+        sort-order: 0
+      - tag-code: short
+        label: 微短片
+        sort-order: 1
+      - tag-code: replicate
+        label: 视频复刻
+        sort-order: 2
+      - tag-code: social
+        label: 社媒视频
+        sort-order: 3
+      - tag-code: image
+        label: 图片设计
+        sort-order: 4

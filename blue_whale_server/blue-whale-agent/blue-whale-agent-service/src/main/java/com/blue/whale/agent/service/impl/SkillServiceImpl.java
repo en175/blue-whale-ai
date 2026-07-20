@@ -6,9 +6,9 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.blue.whale.agent.mapper.SkillMapper;
 import com.blue.whale.agent.mapper.UserSkillMapper;
 import com.blue.whale.agent.model.dto.SkillLibraryDto;
-import com.blue.whale.agent.model.dto.SkillLibraryQuery;
+import com.blue.whale.agent.model.request.SkillLibraryRequest;
 import com.blue.whale.agent.model.dto.SkillMineDto;
-import com.blue.whale.agent.model.dto.SkillMineQuery;
+import com.blue.whale.agent.model.request.SkillMineRequest;
 import com.blue.whale.agent.model.entity.Skill;
 import com.blue.whale.agent.model.entity.UserSkill;
 import com.blue.whale.agent.service.SkillService;
@@ -39,7 +39,7 @@ public class SkillServiceImpl implements SkillService {
     private final UserSkillMapper userSkillMapper;
 
     @Override
-    public Page<SkillLibraryDto> listLibrary(Long userId, SkillLibraryQuery q) {
+    public Page<SkillLibraryDto> listLibrary(Long userId, SkillLibraryRequest q) {
         Page<Skill> page = new Page<>(q.getPageNum(), q.getPageSize());
         LambdaQueryWrapper<Skill> wrapper = new LambdaQueryWrapper<Skill>();
         wrapper.select(Skill.class, info -> !info.getColumn().equals("content"))
@@ -71,7 +71,7 @@ public class SkillServiceImpl implements SkillService {
     }
 
     @Override
-    public Page<SkillMineDto> listMine(Long userId, SkillMineQuery q) {
+    public Page<SkillMineDto> listMine(Long userId, SkillMineRequest q) {
         Page<UserSkill> page = new Page<>(q.getPageNum(), q.getPageSize());
         LambdaQueryWrapper<UserSkill> wrapper = new LambdaQueryWrapper<UserSkill>()
                 .eq(UserSkill::getUserId, userId).orderByAsc(UserSkill::getSkillId);

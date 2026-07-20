@@ -380,6 +380,29 @@ body {
   color: rgba(255, 255, 255, 0.35);
 }
 
+/* 左上角 Logo 菜单按钮：纯 class 布局，对齐竞品。
+   svg 缩到 24 + display:block + line-height:0，消除 inline baseline 间隙与 scale 偏移，
+   让 Logo 和项目名/设置图标垂直齐平。 */
+.tc-logo-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  /* 拉开和分隔线的距离 + 整体微调（下移/左移），补偿静态布局与竞品 JS 渲染的观感差；值可调 */
+  margin-right: 4px;
+  cursor: pointer;
+  outline: none;
+  line-height: 0;
+  transform: translate(-1px, 2px);
+}
+.tc-logo-menu-btn svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+}
+
 /* 画布「从画布选择」模式下，可选图片节点的呼吸描边与角标 */
 @keyframes tc-pickable-pulse {
   0%,
@@ -398,6 +421,50 @@ body {
   cursor: pointer !important;
   animation: tc-pickable-pulse 1.6s ease-in-out infinite;
 }
+/* 参考图 mention pill（contentEditable 内嵌，对齐 topview tc-mention-pill）*/
+.tc-mention-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 2px;
+  margin: 0 2px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--tc-border-subtle);
+  vertical-align: baseline;
+  user-select: none;
+}
+.tc-mention-pill__thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.tc-mention-pill__name {
+  font-size: 11px;
+  color: var(--tc-text-secondary);
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tc-mention-pill__x {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--tc-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 1;
+}
 .tc-canvas-pickable-badge {
   position: absolute;
   top: -10px;
@@ -415,12 +482,19 @@ body {
   pointer-events: none;
 }
 
-/* React Flow 画布覆盖：透明底（透出页面 bg-canvas）+ resize 把手 token 化 + 去掉默认节点边框 */
+/* React Flow 画布覆盖：纯黑底（bg-canvas token）+ resize 把手 token 化 + 去掉默认节点边框 */
 .react-flow {
-  background: transparent;
+  background: var(--tc-bg);
+}
+/* 画布空白面板：default 箭头（左键框选，非小手；平移走 panOnDrag 中/右键 + panOnScroll 滚轮）
+   覆盖 RF .draggable 状态类（panOnDrag 触发 .react-flow__pane.draggable{cursor:grab}，特异性 0,2,0）*/
+.react-flow__pane,
+.react-flow__pane.draggable,
+.react-flow__pane.selection {
+  cursor: default;
 }
 .react-flow__node {
-  cursor: grab;
+  cursor: default;
 }
 .react-flow__node.dragging {
   cursor: grabbing;

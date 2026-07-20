@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: blue-whale-user
+  cloud:
+    nacos:
+      server-addr: 115.190.244.91:8848
+      config:
+        server-addr: 115.190.244.91:8848
+        namespace: 65639ed4-3cac-4e6c-ae42-c7d25c5e1127
+        file-extension: yml
+        group: BLUE_WHALE

@@ -488,7 +488,7 @@ export function AgentChatPanel({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setSkillPanelOpen(true)}
+                        onClick={() => requireAuth({ kind: "skill-panel" }, () => setSkillPanelOpen(true))}
                         className="tc-agent-skill-btn tc-agent-composer-pill-btn inline-flex h-8 items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.05] px-3 text-xs font-medium text-white/85 transition-colors hover:bg-white/[0.08]"
                         aria-label="技能"
                         aria-haspopup="dialog"

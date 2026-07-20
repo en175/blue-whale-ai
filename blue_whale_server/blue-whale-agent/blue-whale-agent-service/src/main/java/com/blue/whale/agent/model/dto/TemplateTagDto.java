@@ -5,7 +5,7 @@ package com.blue.whale.agent.model.dto;
  */
 public class TemplateTagDto {
 
-    /** 标签代码（对应 TemplateTagEnum.tagCode） */
+    /** 标签代码（对应 bluewhale.template.tags 配置项） */
     private String tagCode;
     /** 标签名称 */
     private String label;

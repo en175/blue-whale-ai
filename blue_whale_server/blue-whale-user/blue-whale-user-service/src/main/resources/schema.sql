@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS users (
     id              BIGINT       AUTO_INCREMENT PRIMARY KEY,
     phone           VARCHAR(20)  NOT NULL,
     username        VARCHAR(50)  NOT NULL,
+    avatar          VARCHAR(500) DEFAULT NULL COMMENT '头像 URL；空或 0 表示默认首字头像',
+    password        VARCHAR(255) DEFAULT NULL COMMENT '密码（暂不启用）',
     status          VARCHAR(30)  NOT NULL DEFAULT 'NORMAL',
     gmt_create      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

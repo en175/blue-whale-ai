@@ -16,6 +16,8 @@ import type { NextConfig } from "next";
 const GATEWAY = process.env.GATEWAY_URL || "http://115.190.244.91:8686";
 
 const nextConfig: NextConfig = {
+  reactStrictMode: false,
+  output: "standalone",
   images: {
     remotePatterns: [
       {
