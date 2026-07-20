@@ -2,21 +2,10 @@ package com.blue.whale.agent.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.blue.whale.agent.common.crypto.Sha256;
-import com.blue.whale.agent.mapper.AgentRunMapper;
-import com.blue.whale.agent.mapper.AssetMapper;
-import com.blue.whale.agent.mapper.AssetStorageObjectMapper;
-import com.blue.whale.agent.mapper.CanvasMapper;
 import com.blue.whale.agent.mapper.CommandIdempotencyMapper;
 import com.blue.whale.agent.mapper.ConversationMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
-import com.blue.whale.agent.mapper.GenerationJobMapper;
-import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
-import com.blue.whale.agent.mapper.GenerationProviderTaskMapper;
-import com.blue.whale.agent.mapper.GenerationResultConflictMapper;
 import com.blue.whale.agent.mapper.ProjectMapper;
-import com.blue.whale.agent.mapper.RunCommitRecordMapper;
-import com.blue.whale.agent.mapper.RuntimeCheckpointMapper;
-import com.blue.whale.agent.mapper.UserInputRequestMapper;
 import com.blue.whale.agent.model.constant.AggregateType;
 import com.blue.whale.agent.model.constant.EventType;
 import com.blue.whale.agent.model.dto.AcceptConversationMessageRequest;
@@ -37,7 +26,6 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,19 +54,9 @@ public class GenerationInboxService {
     private final ConversationMapper conversationMapper;
     private final ConversationMessageMapper messageMapper;
     private final CommandIdempotencyMapper idempotencyMapper;
-    private final AgentRunMapper agentRunMapper;
-    private final UserInputRequestMapper userInputRequestMapper;
-    private final RuntimeCheckpointMapper runtimeCheckpointMapper;
-    private final RunCommitRecordMapper runCommitRecordMapper;
-    private final GenerationJobMapper generationJobMapper;
-    private final GenerationJobOutputMapper generationJobOutputMapper;
-    private final GenerationProviderTaskMapper generationProviderTaskMapper;
-    private final GenerationResultConflictMapper generationResultConflictMapper;
-    private final CanvasMapper canvasMapper;
-    private final AssetMapper assetMapper;
-    private final AssetStorageObjectMapper storageObjectMapper;
     private final ProjectEventService projectEventService;
     private final ConversationCommandService conversationCommandService;
+    private final ProjectPurgeService projectPurgeService;
 
     /** 取当前用户的生成收件箱；未创建返回 null（GET 是只读，不创建）。 */
     public GenerationInboxDto getInbox(Long userId) {
@@ -166,34 +144,14 @@ public class GenerationInboxService {
     }
 
     /**
-     * 永久删除收件箱：同事务先写 PROJECT_DELETED 审计事件，再按先子后父物理删除用户可见内容，
-     * 最后物理删 project 行。project_events / outbox_messages / project_event_stream /
-     * command_idempotency / content_reviews / cost 治理表保留作最小审计；
-     * 共享存储对象仅在全表无其他引用时标记 first_unreferenced_at（GC 保留期后物理回收）。
+     * 永久删除收件箱：委托 {@link ProjectPurgeService} 的统一物理级联（IK25EG 对齐删除语义）——
+     * 锁项目行序列化并发写入、尽力终结在途任务成本面、审计事件先行、
+     * 共享存储对象仅在全表无其他引用时标记待回收、最小审计表保留。
      */
     @Transactional
     public void purgeInbox(Long userId) {
         Project inbox = requireInbox(userId);
-        Long inboxId = inbox.getId();
-        int deletedVersion = inbox.getVersion() == null ? 1 : inbox.getVersion() + 1;
-        projectEventService.appendEvent(inboxId, EventType.PROJECT_DELETED,
-                AggregateType.PROJECT, String.valueOf(inboxId), deletedVersion,
-                Map.of("project_id", inboxId), null, null);
-        messageMapper.hardDeleteByProjectId(inboxId);
-        userInputRequestMapper.hardDeleteByProjectId(inboxId);
-        runtimeCheckpointMapper.hardDeleteByAgentRunProjectId(inboxId);
-        runCommitRecordMapper.hardDeleteByAgentRunProjectId(inboxId);
-        agentRunMapper.hardDeleteByProjectId(inboxId);
-        generationJobOutputMapper.hardDeleteByGenerationJobProjectId(inboxId);
-        generationProviderTaskMapper.hardDeleteByGenerationJobProjectId(inboxId);
-        generationResultConflictMapper.hardDeleteByGenerationJobProjectId(inboxId);
-        generationJobMapper.hardDeleteByProjectId(inboxId);
-        conversationMapper.hardDeleteByProjectId(inboxId);
-        canvasMapper.hardDeleteByProjectId(inboxId);
-        List<String> storageKeys = assetMapper.selectDistinctStorageKeysByProjectId(inboxId);
-        assetMapper.hardDeleteByProjectId(inboxId);
-        markUnreferencedIfOrphaned(storageKeys);
-        projectMapper.hardDeleteById(inboxId);
+        projectPurgeService.purge(inbox);
     }
 
     /**
@@ -247,19 +205,6 @@ public class GenerationInboxService {
                         .orderByDesc(Conversation::getId)
                         .last("LIMIT 1"));
         return latest.isEmpty() ? null : latest.get(0).getId();
-    }
-
-    /** 与 GC 同一判据：全表（含逻辑删除行）无引用才进入待回收计时；其他项目副本仍在引用则不动。 */
-    private void markUnreferencedIfOrphaned(List<String> storageKeys) {
-        if (storageKeys.isEmpty()) {
-            return;
-        }
-        LocalDateTime now = generationJobMapper.selectCurrentTime();
-        for (String storageKey : storageKeys) {
-            if (assetMapper.countAllByStorageKey(storageKey) == 0) {
-                storageObjectMapper.markFirstUnreferenced(storageKey, now);
-            }
-        }
     }
 
     private Project findInbox(Long userId) {

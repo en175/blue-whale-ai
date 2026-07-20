@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Sidebar —— 全局左侧窄导航栏（首页 / 生成 / 资产 / 画布）。
+ * Sidebar —— 全局左侧窄导航栏（首页 / 项目 / 生成 / 资产 / 画布）。
  *
  * 对标即梦窄图标栏（~76px）：图标在上、小字在下，垂直排列。logo 用图标（点回首页）。
  * canvas 路由（/canvas 开头）自隐藏：使 canvas 保持全屏、内容不动（守「不动 canvas」约束）。
@@ -10,7 +10,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FolderOpen, Home, LayoutGrid, Sparkles, Waves } from "lucide-react";
+import {
+  FolderKanban,
+  FolderOpen,
+  Home,
+  LayoutGrid,
+  Sparkles,
+  Waves,
+} from "lucide-react";
 
 type NavItem = {
   href: string;
@@ -20,6 +27,7 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "首页", icon: Home },
+  { href: "/projects", label: "项目", icon: FolderKanban },
   { href: "/generate", label: "生成", icon: Sparkles },
   { href: "/assets", label: "资产", icon: FolderOpen },
   { href: "/canvas", label: "画布", icon: LayoutGrid },
@@ -57,7 +65,9 @@ export default function Sidebar() {
             }
           >
             <Icon className="h-5 w-5" />
-            <span className="text-[11px] font-medium leading-none">{label}</span>
+            <span className="text-[11px] font-medium leading-none">
+              {label}
+            </span>
           </Link>
         );
       })}

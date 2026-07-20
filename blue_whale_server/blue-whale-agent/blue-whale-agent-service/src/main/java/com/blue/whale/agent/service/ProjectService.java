@@ -30,6 +30,7 @@ public class ProjectService {
 
     private final ProjectMapper projectMapper;
     private final ProjectEventService projectEventService;
+    private final ProjectPurgeService projectPurgeService;
 
     /** 新建项目。 */
     @Transactional
@@ -78,9 +79,10 @@ public class ProjectService {
     }
 
     /**
-     * 逻辑删除项目（canvas 残留为孤儿，MVP 不级联，见 ADR-0011 后续）。
+     * 永久删除项目（IK25EG）：委托 {@link ProjectPurgeService} 物理级联删除项目拥有的
+     * 画布、对话、生成记录与作品，在途任务尽力取消、迟到结果不得复活内容，审计记录按既有策略保留。
      * 生成收件箱对通用项目端点不可见（与 {@link #list} 过滤语义一致），按资源不存在拒绝；
-     * 永久删除只走 {@code DELETE /api/generation-inbox}。
+     * 收件箱永久删除走 {@code DELETE /api/generation-inbox}。
      */
     @Transactional
     public void delete(Long id, Long ownerId) {
@@ -88,11 +90,7 @@ public class ProjectService {
         if (Project.PURPOSE_GENERATION_INBOX.equals(project.getPurpose())) {
             throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
         }
-        projectMapper.deleteById(id);
-        int deletedVersion = project.getVersion() == null ? 1 : project.getVersion() + 1;
-        projectEventService.appendEvent(id, EventType.PROJECT_DELETED,
-                AggregateType.PROJECT, String.valueOf(id), deletedVersion,
-                Map.of("project_id", id), null, null);
+        projectPurgeService.purge(project);
     }
 
     /**

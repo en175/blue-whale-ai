@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { listProjects } from "@/lib/canvas";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { listProjects, deleteProject } from "@/lib/canvas";
 import { acceptConversationMessage } from "@/lib/conversation";
 import { runProjectRecovery } from "@/lib/project-recovery";
 import type {
@@ -161,5 +161,51 @@ describe("useCanvasProjects ?project 初始定位（/generate「打开项目」�
     const { result } = renderHook(() => useCanvasProjects());
     await waitFor(() => expect(result.current.backendReady).toBe(true));
     expect(result.current.activeProject.id).toBe("1");
+  });
+});
+
+describe("useCanvasProjects 删除项目二次确认（IK25EG）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(listProjects).mockResolvedValue([
+      { id: 1, name: "demo", thumb: null, created_at: "2026-07-17" },
+      { id: 2, name: "second", thumb: null, created_at: "2026-07-17" },
+    ]);
+  });
+
+  it("确认永久删除后调用删除接口并移除项目", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const { result } = renderHook(() => useCanvasProjects());
+    await waitFor(() => expect(result.current.backendReady).toBe(true));
+
+    await act(async () => {
+      await result.current.deleteProjectAction("1");
+    });
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(vi.mocked(deleteProject)).toHaveBeenCalledWith(1);
+    expect(
+      result.current.state.projects.find((p) => p.id === "1"),
+    ).toBeUndefined();
+    expect(
+      result.current.state.projects.find((p) => p.id === "2"),
+    ).toBeDefined();
+    confirmSpy.mockRestore();
+  });
+
+  it("取消确认则不调用删除接口，项目保留", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { result } = renderHook(() => useCanvasProjects());
+    await waitFor(() => expect(result.current.backendReady).toBe(true));
+
+    await act(async () => {
+      await result.current.deleteProjectAction("1");
+    });
+
+    expect(vi.mocked(deleteProject)).not.toHaveBeenCalled();
+    expect(
+      result.current.state.projects.find((p) => p.id === "1"),
+    ).toBeDefined();
+    confirmSpy.mockRestore();
   });
 });

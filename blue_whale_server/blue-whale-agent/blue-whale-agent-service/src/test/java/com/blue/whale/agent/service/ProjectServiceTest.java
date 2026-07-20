@@ -40,6 +40,8 @@ class ProjectServiceTest {
     private ProjectMapper projectMapper;
     @Mock
     private ProjectEventService projectEventService;
+    @Mock
+    private ProjectPurgeService projectPurgeService;
     private ProjectService projectService;
 
     @BeforeAll
@@ -50,7 +52,7 @@ class ProjectServiceTest {
 
     @BeforeEach
     void setUp() {
-        projectService = new ProjectService(projectMapper, projectEventService);
+        projectService = new ProjectService(projectMapper, projectEventService, projectPurgeService);
     }
 
     @Test
@@ -162,7 +164,7 @@ class ProjectServiceTest {
     }
 
     @Test
-    void deleteRemovesWhenOwned() {
+    void deleteDelegatesToPermanentPurgeWhenOwned() {
         Project p = new Project().setOwnerId(10L).setName("A");
         p.setId(1L);
         p.setVersion(3);
@@ -170,10 +172,8 @@ class ProjectServiceTest {
 
         projectService.delete(1L, 10L);
 
-        verify(projectMapper).deleteById(1L);
-        verify(projectEventService).appendEvent(
-                eq(1L), eq("project.deleted"), eq("project"), eq("1"), eq(4),
-                eq(java.util.Map.of("project_id", 1L)), isNull(), isNull());
+        // IK25EG：删除语义升级为永久物理级联，由 ProjectPurgeService 统一执行
+        verify(projectPurgeService).purge(p);
     }
 
     @Test
@@ -187,7 +187,7 @@ class ProjectServiceTest {
                 .isInstanceOf(GlobalException.class)
                 .extracting(e -> ((GlobalException) e).getCode())
                 .isEqualTo(SystemCode.RESOURCE_NOT_FOUND_CODE);
-        verify(projectMapper, never()).deleteById(any(Long.class));
+        verify(projectPurgeService, never()).purge(any());
     }
 
     @Test
@@ -198,7 +198,7 @@ class ProjectServiceTest {
 
         assertThatThrownBy(() -> projectService.delete(1L, 999L))
                 .isInstanceOf(GlobalException.class);
-        verify(projectMapper, never()).deleteById(any(Long.class));
+        verify(projectPurgeService, never()).purge(any());
     }
 
     @Test
