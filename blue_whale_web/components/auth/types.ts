@@ -9,6 +9,7 @@ export type User = {
   username: string;
   phone: string;
   avatar?: string;  // 头像 URL；空/null/"0" 表示使用默认首字头像
+  hasPassword?: boolean; // 是否已设置密码
 };
 
 /**

@@ -24,4 +24,10 @@ public interface AuthService {
 
     /** 校验验证码并换绑手机号 */
     void changePhone(Long userId, String newPhone, String code);
+
+    /** 密码登录：account 支持手机号或用户名 */
+    LoginResponse passwordLogin(String account, String password);
+
+    /** 设置密码（已登录 + 短信验证码） */
+    void setPassword(Long userId, String code, String password);
 }
