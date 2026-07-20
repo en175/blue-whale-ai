@@ -6,8 +6,8 @@
  * 与 constants.ts 的 VIDEO_ASPECT_RATIOS token 集保持一致。
  */
 
-/** 基准边长（与 addNode 的 image 默认边长 240 一致） */
-export const ASPECT_RATIO_BASE = 240;
+/** 基准边长（与 addNode 的 image 默认边长 200 一致） */
+export const ASPECT_RATIO_BASE = 200;
 
 export type PixelSize = { width: number; height: number };
 
@@ -15,8 +15,8 @@ const RATIO_RE = /^(\d+):(\d+)$/;
 
 /**
  * 把比例 token 解析成像素尺寸。
- * 基准边长作用于短边：w>=h 时高=240、宽=240×(w/h)；否则反之。
- * 回退（空串 / 非数字 / 缺冒号 / 含 0 避免除零）一律返回 {240, 240}。
+ * 基准边长作用于短边：w>=h 时高=200、宽=200×(w/h)；否则反之。
+ * 回退（空串 / 非数字 / 缺冒号 / 含 0 避免除零）一律返回 {200, 200}。
  */
 export function parseAspectRatio(meta: string): PixelSize {
   const fallback: PixelSize = { width: ASPECT_RATIO_BASE, height: ASPECT_RATIO_BASE };

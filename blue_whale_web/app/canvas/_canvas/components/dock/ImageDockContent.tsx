@@ -8,8 +8,7 @@ import { createPortal } from "react-dom";
 import { ChevronUp, Image as ImageIcon, Plus, Settings2, X } from "lucide-react";
 import {
   ImageModelSettingsPopover,
-  IMAGE_MODELS,
-  IMAGE_ASPECT_RATIOS,
+  useImageModels,
   defaultResolutionOf,
   type ImageModel,
   type ImageResolution,
@@ -37,17 +36,38 @@ export function ImageDockContent({
 }: ImageDockContentProps) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<ImageModel>(IMAGE_MODELS[0]);
-  const [selectedResolution, setSelectedResolution] = useState<ImageResolution>(
-    defaultResolutionOf(IMAGE_MODELS[0]),
-  );
-  const [selectedAspectRatio, setSelectedAspectRatio] = useState<ImageAspectRatio>(IMAGE_ASPECT_RATIOS[2]);
+  const { models } = useImageModels();
+  const [selectedModel, setSelectedModel] = useState<ImageModel | null>(null);
+  const [selectedResolution, setSelectedResolution] = useState<ImageResolution | null>(null);
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState<ImageAspectRatio | null>(null);
 
-  // 切模型联动：新模型不支持当前分辨率则重置到该模型默认
+  // 模型列表加载后初始化默认选择（首个模型 + 其默认分辨率/宽高比）
+  useEffect(() => {
+    if (selectedModel || models.length === 0) return;
+    const first = models[0];
+    // 异步数据加载后初始化默认选择；set-state-in-effect 对此异步初始化场景误报。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedModel(first);
+    setSelectedResolution(defaultResolutionOf(first));
+    const defaultRatio =
+      first.aspectRatios.find((r) => r.id === first.capability.defaultAspectRatio) ??
+      first.aspectRatios[0] ??
+      null;
+    setSelectedAspectRatio(defaultRatio);
+  }, [models, selectedModel]);
+
+  // 切模型联动：新模型不支持当前分辨率/宽高比则重置到该模型默认
   const handleModelChange = (model: ImageModel) => {
     setSelectedModel(model);
-    if (!model.resolutions.some((r) => r.id === selectedResolution.id)) {
+    if (!model.resolutions.some((r) => r.id === selectedResolution?.id)) {
       setSelectedResolution(defaultResolutionOf(model));
+    }
+    if (!model.aspectRatios.some((r) => r.id === selectedAspectRatio?.id)) {
+      const fallback =
+        model.aspectRatios.find((r) => r.id === model.capability.defaultAspectRatio) ??
+        model.aspectRatios[0] ??
+        null;
+      setSelectedAspectRatio(fallback);
     }
   };
 
@@ -137,7 +157,7 @@ export function ImageDockContent({
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: 8,
+                  gap: 0,
                   borderRadius: 10,
                   position: "relative",
                 }}
@@ -167,41 +187,44 @@ export function ImageDockContent({
                   </button>
                 </div>
 
-                <div style={{ display: "flex", alignItems: "flex-start", flexWrap: "wrap", gap: 6, paddingLeft: 4 }}>
-                  {media.length > 0
-                    ? media.map((m) => <DockMediaThumb key={m.id} item={m} onRemove={onRemoveMedia} />)
-                    : (
-                      <div style={{ position: "relative", flexShrink: 0 }}>
-                        <button
-                          ref={placeholderRef}
-                          type="button"
-                          aria-label="Upload reference image"
-                          aria-haspopup="menu"
-                          aria-expanded={uploadMenuOpen}
-                          onClick={() => handleTriggerClick(placeholderRef)}
-                          style={{
-                            position: "relative",
-                            width: 44,
-                            height: 44,
-                            padding: 0,
-                            borderRadius: 9,
-                            border: "1px solid rgba(255, 255, 255, 0.02)",
-                            background: "rgba(255, 255, 255, 0.043)",
-                            color: "rgba(255, 255, 255, 0.62)",
-                            cursor: "pointer",
-                            opacity: 1,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            overflow: "hidden",
-                            transition: "background 120ms, color 120ms",
-                            flexShrink: 0,
-                          }}
-                        >
-                          <ImageIcon width={18} height={18} stroke="currentColor" strokeWidth={1.8} aria-hidden="true" />
-                        </button>
-                      </div>
-                    )}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    paddingLeft: 8,
+                    paddingTop: 4,
+                  }}
+                >
+                  {media.map((item) => (
+                    <DockMediaThumb key={item.id} item={item} onRemove={onRemoveMedia} />
+                  ))}
+                  <button
+                    ref={placeholderRef}
+                    type="button"
+                    aria-label="Upload reference image"
+                    aria-haspopup="menu"
+                    aria-expanded={uploadMenuOpen}
+                    onClick={() => handleTriggerClick(placeholderRef)}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      padding: 0,
+                      borderRadius: 9,
+                      border: "1px solid rgba(255, 255, 255, 0.02)",
+                      background: "rgba(255, 255, 255, 0.043)",
+                      color: "rgba(255, 255, 255, 0.62)",
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      overflow: "hidden",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <ImageIcon width={18} height={18} stroke="currentColor" strokeWidth={1.8} aria-hidden="true" />
+                  </button>
                 </div>
 
                 <div style={{ position: "relative", flex: "1 1 0%", minWidth: 0 }}>
@@ -337,32 +360,34 @@ export function ImageDockContent({
           >
             <Settings2 width={14} height={14} stroke="currentColor" strokeWidth={2} aria-hidden="true" />
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textAlign: "left", fontSize: 12 }}>
-              {selectedModel.label}
+              {selectedModel?.label ?? "加载中…"}
             </span>
           </div>
           <span
             aria-hidden="true"
             style={{ width: 1, height: 8, flexShrink: 0, alignSelf: "center", background: "rgba(255, 255, 255, 0.08)", borderRadius: 1 }}
           />
-          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "0px 8px" }}>{selectedAspectRatio.label}</div>
+          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "0px 8px" }}>{selectedAspectRatio?.label ?? "—"}</div>
           <span
             aria-hidden="true"
             style={{ width: 1, height: 8, flexShrink: 0, alignSelf: "center", background: "rgba(255, 255, 255, 0.08)", borderRadius: 1 }}
           />
-          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "0px 8px" }}>{selectedResolution.label}</div>
+          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "0px 8px" }}>{selectedResolution?.label ?? "—"}</div>
         </button>
 
-        <ImageModelSettingsPopover
-          triggerRef={settingsRef}
-          open={modelSettingsOpen}
-          onClose={() => setModelSettingsOpen(false)}
-          selectedModel={selectedModel}
-          onModelChange={handleModelChange}
-          selectedResolution={selectedResolution}
-          onResolutionChange={setSelectedResolution}
-          selectedAspectRatio={selectedAspectRatio}
-          onAspectRatioChange={setSelectedAspectRatio}
-        />
+        {selectedModel && selectedResolution && selectedAspectRatio && (
+          <ImageModelSettingsPopover
+            triggerRef={settingsRef}
+            open={modelSettingsOpen}
+            onClose={() => setModelSettingsOpen(false)}
+            selectedModel={selectedModel}
+            onModelChange={handleModelChange}
+            selectedResolution={selectedResolution}
+            onResolutionChange={setSelectedResolution}
+            selectedAspectRatio={selectedAspectRatio}
+            onAspectRatioChange={setSelectedAspectRatio}
+          />
+        )}
 
         <div style={{ flex: "1 1 0%" }} />
 
@@ -475,15 +500,16 @@ export function ImageDockContent({
           <div style={{ position: "relative", display: "inline-flex" }}>
             <button
               type="button"
-              disabled={isEmpty || generating}
-              onClick={() =>
+              disabled={isEmpty || generating || !selectedModel || !selectedResolution || !selectedAspectRatio}
+              onClick={() => {
+                if (!selectedModel || !selectedResolution || !selectedAspectRatio) return;
                 onGenerate?.({
                   model: selectedModel,
                   resolution: selectedResolution,
                   aspectRatio: selectedAspectRatio,
                   quantity,
-                })
-              }
+                });
+              }}
               style={{
                 height: 32,
                 padding: "0px 12px",

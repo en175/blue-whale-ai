@@ -11,7 +11,7 @@
  *   2. 请求层：任务列表、状态轮询、文生图触发（generate 页用）。
  *
  * UI 标签（"排队中"/"生成中"等）属 UI 层职责，不在本文件。
- * 请求层字段全 snake_case 对齐后端 Jackson SNAKE_CASE 序列化。
+ * 请求层字段全 camelCase 对齐后端 Jackson 默认序列化。
  */
 
 import type { CardStatus, GenerationJob, GenerationJobStatus } from "@/types/domain";
@@ -53,20 +53,20 @@ export type OutputAsset = {
   height: number | null;
 };
 
-/** 任务列表项（GET /api/jobs records）。 */
+/** 任务列表项（GET /api/agent/jobs records）。 */
 export type JobListItem = {
-  job_id: number;
+  jobId: number;
   type: string;
   status: string;
   progress: number;
   input: Record<string, unknown> | null;
-  created_at: string | null;
-  output_assets: OutputAsset[];
+  createdAt: string | null;
+  outputAssets: OutputAsset[];
 };
 
-/** 轮询单任务状态（GET /api/jobs/{id}）。 */
+/** 轮询单任务状态（GET /api/agent/jobs/{id}）。 */
 export type JobStatus = {
-  job_id: number;
+  jobId: number;
   status: string;
   progress: number;
   asset: { id: number; url: string; type: string } | null;
@@ -74,12 +74,12 @@ export type JobStatus = {
 
 /** 图片模型能力（仅取 generate 页默认生成所需字段）。 */
 export type ImageModel = {
-  model_id: string;
-  default_size: string;
-  default_aspect_ratio: string;
+  modelId: string;
+  defaultSize: string;
+  defaultAspectRatio: string;
 };
 
-export type ImageResult = { asset_id: number; url: string };
+export type ImageResult = { assetId: number; url: string };
 
 export type ListJobsParams = {
   type?: string;
@@ -113,9 +113,9 @@ export function listImageModels(): Promise<ImageModel[]> {
 /** 文生图同步生成，返回 asset id + url。 */
 export function generateImage(payload: {
   prompt: string;
-  model_id: string;
-  size_id: string;
-  aspect_ratio?: string;
+  modelId: string;
+  sizeId: string;
+  aspectRatio?: string;
   quantity?: number;
 }): Promise<ImageResult> {
   return request<ImageResult>("/generation/image", "POST", payload);

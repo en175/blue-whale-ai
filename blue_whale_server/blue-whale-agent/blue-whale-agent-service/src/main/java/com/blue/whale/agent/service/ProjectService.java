@@ -2,9 +2,9 @@ package com.blue.whale.agent.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.blue.whale.agent.mapper.ProjectMapper;
-import com.blue.whale.agent.model.dto.CreateProjectRequest;
+import com.blue.whale.agent.model.request.CreateProjectRequest;
 import com.blue.whale.agent.model.dto.ProjectDto;
-import com.blue.whale.agent.model.dto.RenameProjectRequest;
+import com.blue.whale.agent.model.request.RenameProjectRequest;
 import com.blue.whale.agent.model.entity.Project;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;

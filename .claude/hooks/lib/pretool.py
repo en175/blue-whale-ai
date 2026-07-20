@@ -582,8 +582,12 @@ def is_task_branch(cwd: str | None) -> bool:
 def mode_task_acceptance_git(command: str) -> int:
     for invocation in git_invocations(command):
         if invocation.subcommand == "commit":
-            print("git commit")
-            return 0
+            # 工单分支放行手动 commit（长期特性分支频繁连续提交，非 worktree 原子模型）；
+            # master/非工单分支仍拦（保护用户集成区）。与下方 merge/pull 分支感知一致。
+            if not is_task_branch(invocation.cwd):
+                print("git commit")
+                return 0
+            continue
         if invocation.subcommand == "merge" and not has_ff_only(invocation.args):
             if "origin/master" in invocation.args and not is_task_branch(invocation.cwd):
                 continue

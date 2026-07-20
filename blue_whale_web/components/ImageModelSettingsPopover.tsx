@@ -4,69 +4,96 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 import { AspectRatioIcon } from "./icons/AspectRatioIcon";
+import {
+  getImageModels,
+  type ImageModelCapability,
+} from "@/app/canvas/_canvas/api/generation";
 
-export const IMAGE_MODELS = [
-  {
-    id: "doubao-seedream-5-0-260128",
-    label: "Seedream 5.0 Lite",
-    defaultResolutionId: "2k",
-    stream: true,
-    resolutions: [
-      { id: "2k", label: "2K" },
-      { id: "3k", label: "3K" },
-      { id: "4k", label: "4K" },
-    ],
-  },
-  {
-    id: "doubao-seedream-4-5-251128",
-    label: "Seedream 4.5",
-    defaultResolutionId: "2k",
-    stream: true,
-    resolutions: [
-      { id: "2k", label: "2K" },
-      { id: "4k", label: "4K" },
-    ],
-  },
-  {
-    id: "doubao-seedream-4-0-250615",
-    label: "Seedream 4.0",
-    defaultResolutionId: "2k",
-    stream: true,
-    resolutions: [
-      { id: "1k", label: "1K" },
-      { id: "2k", label: "2K" },
-      { id: "4k", label: "4K" },
-    ],
-  },
-  {
-    id: "doubao-seedream-3-0-t2i-250415",
-    label: "Seedream 3.0 T2I",
-    defaultResolutionId: "1024x1024",
-    stream: false,
-    resolutions: [
-      { id: "512x512", label: "512 × 512" },
-      { id: "1024x1024", label: "1024 × 1024" },
-      { id: "2048x2048", label: "2048 × 2048" },
-    ],
-  },
-];
+// --- 对外类型（名字保留，形状对齐 API 映射后的 UI 模型） ---
 
-export const IMAGE_ASPECT_RATIOS = [
-  { id: "9:16", label: "9:16" },
-  { id: "3:4", label: "3:4" },
-  { id: "1:1", label: "1:1" },
-  { id: "4:3", label: "4:3" },
-  { id: "16:9", label: "16:9" },
-  { id: "2:3", label: "2:3" },
-  { id: "3:2", label: "3:2" },
-  { id: "21:9", label: "21:9" },
-];
+export type ImageResolution = { id: string; label: string };
+export type ImageAspectRatio = { id: string; label: string };
 
-export type ImageModel = (typeof IMAGE_MODELS)[number];
-export type ImageResolution = ImageModel["resolutions"][number];
-export type ImageAspectRatio = (typeof IMAGE_ASPECT_RATIOS)[number];
+export type ImageModel = {
+  /** 真实模型 id（如 doubao-seedream-5-0-260128），映射自 capability.modelId */
+  id: string;
+  label: string;
+  defaultResolutionId: string;
+  stream: boolean;
+  resolutions: ImageResolution[];
+  /** 该模型支持的宽高比（从 capability.supportedAspectRatios 映射） */
+  aspectRatios: ImageAspectRatio[];
+  /** 原始 API 能力（含 supportedFormats/features 等高级字段，供消费方按需读取） */
+  capability: ImageModelCapability;
+};
 
-/** 取模型默认分辨率；缺省回退到第一个。 */
+// --- API → UI 模型映射 ---
+
+function capabilityToModel(cap: ImageModelCapability): ImageModel {
+  return {
+    id: cap.modelId,
+    label: cap.modelLabel,
+    defaultResolutionId: cap.defaultSize,
+    stream: cap.features.stream,
+    resolutions: cap.supportedSizes.map((s) => ({ id: s.id, label: s.label })),
+    aspectRatios: cap.supportedAspectRatios.map((r) => ({ id: r, label: r })),
+    capability: cap,
+  };
+}
+
+// --- 数据获取（模块级缓存，多消费方共享单次请求） ---
+
+let imageModelsPromise: Promise<ImageModel[]> | null = null;
+
+function fetchImageModels(): Promise<ImageModel[]> {
+  if (!imageModelsPromise) {
+    imageModelsPromise = getImageModels()
+      .then((caps) => caps.map(capabilityToModel))
+      .catch((err) => {
+        imageModelsPromise = null; // 失败清缓存，允许下次重试
+        throw err;
+      });
+  }
+  return imageModelsPromise;
+}
+
+/**
+ * 拉取 DB 驱动的图片模型能力列表。
+ * 模块级缓存保证多消费方（Popover / ImageDockContent / AgentComposer）共享单次请求。
+ */
+export function useImageModels(): {
+  models: ImageModel[];
+  loading: boolean;
+  error: string | null;
+} {
+  const [models, setModels] = useState<ImageModel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchImageModels()
+      .then((mapped) => {
+        if (!cancelled) {
+          setModels(mapped);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "加载图片模型失败");
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { models, loading, error };
+}
+
+/** 取模型默认分辨率；缺省回退到第一个。签名保持兼容（消费方依赖）。 */
 export function defaultResolutionOf(model: ImageModel): ImageResolution {
   return (
     model.resolutions.find((r) => r.id === model.defaultResolutionId) ??
@@ -101,6 +128,8 @@ export function ImageModelSettingsPopover({
   const [position, setPosition] = useState({ left: 16, bottom: 64 });
   const [modelOpen, setModelOpen] = useState(false);
   const [resolutionOpen, setResolutionOpen] = useState(false);
+  // DB 驱动的模型列表（模块级缓存，与 ImageDockContent/AgentComposer 共享单次请求）
+  const { models } = useImageModels();
 
   useEffect(() => {
     if (open && triggerRef.current) {
@@ -243,7 +272,7 @@ export function ImageModelSettingsPopover({
                   gap: 2,
                 }}
               >
-                {IMAGE_MODELS.map((model) => (
+                {models.map((model) => (
                   <button
                     key={model.id}
                     type="button"
@@ -418,7 +447,7 @@ export function ImageModelSettingsPopover({
             gap: 2,
           }}
         >
-          {IMAGE_ASPECT_RATIOS.map((ratio) => {
+          {selectedModel.aspectRatios.map((ratio) => {
             const selected = selectedAspectRatio.id === ratio.id;
             return (
               <button

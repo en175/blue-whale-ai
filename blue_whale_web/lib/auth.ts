@@ -3,27 +3,26 @@ import { apiRequest } from "./api-client";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 const FETCH_TIMEOUT = 10000;
 
-export interface CaptchaResult {
-  captcha_token: string;
-  captcha_image: string;
-}
 export interface SendCodeResult {
   success: boolean;
-  expires_in: number;
+  expiresIn: number;
 }
 export interface LoginData {
-  access_token: string;
-  refresh_token: string;
-  expires_in: number;
-  user_id: number;
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  userId: number;
   username: string;
   phone: string;
-  is_new_user: boolean;
+  avatar?: string;
+  isNewUser: boolean;
+  hasPassword?: boolean;
 }
 export interface UserInfo {
-  user_id: number;
+  userId: number;
   username: string;
   phone: string;
+  avatar?: string;
 }
 
 interface ApiResult<T> {
@@ -50,7 +49,7 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: nu
   }
 }
 
-/** 仅用于 auth 端点（login/refresh/captcha/send-code），不走 401 拦截。 */
+/** 仅用于 auth 端点（login/refresh/send-code），不走 401 拦截。 */
 async function getResult<T>(url: string, options: RequestInit = {}): Promise<T> {
   const res = await fetchWithTimeout(`${API_BASE}${url}`, options, FETCH_TIMEOUT);
   if (!res.ok) {
@@ -67,16 +66,11 @@ async function getResult<T>(url: string, options: RequestInit = {}): Promise<T> 
 // 公开 auth 端点（不走 401 拦截，避免无限循环）
 // ---------------------------------------------------------------------------
 
-/** 获取图形验证码 */
-export function fetchCaptcha(): Promise<CaptchaResult> {
-  return getResult<CaptchaResult>("/api/auth/captcha");
-}
-
 /** 发送短信验证码 */
-export function sendVerificationCode(phone: string, captchaToken: string, captchaAnswer: string): Promise<SendCodeResult> {
+export function sendVerificationCode(phone: string): Promise<SendCodeResult> {
   return getResult<SendCodeResult>("/api/auth/send-code", {
     method: "POST",
-    body: JSON.stringify({ phone, captcha_token: captchaToken, captcha_answer: captchaAnswer }),
+    body: JSON.stringify({ phone }),
   });
 }
 
@@ -85,6 +79,14 @@ export function loginWithCode(phone: string, code: string): Promise<LoginData> {
   return getResult<LoginData>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({ phone, code }),
+  });
+}
+
+/** 密码登录：account 支持手机号或用户名 */
+export function loginWithPassword(account: string, password: string): Promise<LoginData> {
+  return getResult<LoginData>("/api/auth/login/password", {
+    method: "POST",
+    body: JSON.stringify({ account, password }),
   });
 }
 
@@ -114,10 +116,10 @@ export function fetchMe(): Promise<UserInfo> {
 }
 
 /** 更换手机号——发验证码 */
-export function sendChangePhoneCode(newPhone: string, captchaToken: string, captchaAnswer: string): Promise<SendCodeResult> {
+export function sendChangePhoneCode(newPhone: string): Promise<SendCodeResult> {
   return apiRequest<SendCodeResult>("/api/user/phone/send-code", {
     method: "POST",
-    body: JSON.stringify({ new_phone: newPhone, captcha_token: captchaToken, captcha_answer: captchaAnswer }),
+    body: JSON.stringify({ newPhone }),
   });
 }
 
@@ -125,7 +127,7 @@ export function sendChangePhoneCode(newPhone: string, captchaToken: string, capt
 export function changePhone(newPhone: string, code: string): Promise<void> {
   return apiRequest<void>("/api/user/phone", {
     method: "PUT",
-    body: JSON.stringify({ new_phone: newPhone, code }),
+    body: JSON.stringify({ newPhone, code }),
   });
 }
 
@@ -134,5 +136,23 @@ export function updateUsername(username: string): Promise<void> {
   return apiRequest<void>("/api/user/username", {
     method: "PUT",
     body: JSON.stringify({ username }),
+  });
+}
+
+/** 上传头像 */
+export async function uploadAvatar(file: File): Promise<{ url: string }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return apiRequest<{ url: string }>("/api/user/avatar", {
+    method: "PUT",
+    body: formData,
+  });
+}
+
+/** 设置密码（已登录 + 短信验证码） */
+export function setPassword(code: string, password: string): Promise<void> {
+  return apiRequest<void>("/api/auth/set-password", {
+    method: "POST",
+    body: JSON.stringify({ code, password }),
   });
 }

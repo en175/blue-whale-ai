@@ -1,6 +1,8 @@
 package com.blue.whale.agent.controller;
 
 import com.blue.whale.agent.model.dto.*;
+import com.blue.whale.agent.model.request.ImageGenerateRequest;
+import com.blue.whale.agent.model.request.VideoGenerateRequest;
 import com.blue.whale.agent.service.GenerationJobService;
 import com.blue.whale.agent.service.GenerationModelCapabilityService;
 import com.blue.whale.global.base.resp.Result;
@@ -24,11 +26,11 @@ import java.util.List;
  *
  * <p>用户身份走 {@code X-User-Id} 请求头（MVP 无鉴权，前端直传）。
  * 响应统一 {@link Result} 包装；异常由 {@code RestExceptionConfig} 转 Result。
- * JSON 字段 snake_case（全局 Jackson SNAKE_CASE）。
+ * HTTP JSON 字段 camelCase（ADR-0019）。
  */
 @Tag(name = "生成接口", description = "文生图（Seedream 同步）、图文生视频（Seedance 异步）")
 @RestController
-@RequestMapping("/api/generation")
+@RequestMapping("/api/agent/generation")
 @RequiredArgsConstructor
 public class GenerationController {
 
@@ -36,23 +38,28 @@ public class GenerationController {
     private final GenerationModelCapabilityService capabilityService;
 
     /** 查询当前启用的图片生成模型及其能力。 */
-    @GetMapping("/models")
-    public Result<List<ImageModelCapabilityResponse>> listModels(
-            @RequestParam(name = "capability", defaultValue = "image") String capability) {
-        return Result.ok(capabilityService.listCapabilities(capability));
+    @GetMapping("/image/models")
+    public Result<List<ImageModelCapabilityDto>> listImageModels() {
+        return Result.ok(capabilityService.listImageCapabilities());
+    }
+
+    /** 查询当前启用的视频生成模型及其能力。 */
+    @GetMapping("/video/models")
+    public Result<List<VideoModelCapabilityDto>> listVideoModels() {
+        return Result.ok(capabilityService.listVideoCapabilities());
     }
 
     /** 文生图：流式模型返 job_id（前端 EventSource 订阅逐张），非流式返 asset_id+url。 */
     @PostMapping("/image")
-    public Result<ImageGenerateResponse> generateImage(@RequestHeader(value = "X-User-Id", required = false) Long userId,
-                                                       @RequestBody @Valid ImageGenerateRequest req) {
+    public Result<ImageGenerateDto> generateImage(@RequestHeader(value = "X-User-Id", required = false) Long userId,
+                                                  @RequestBody @Valid ImageGenerateRequest req) {
         return Result.ok(generationJobService.createImageJob(req, requireUserId(userId)));
     }
 
     /** 图文生视频异步提交，立即返回 jobId，前端轮询查状态。 */
     @PostMapping("/video")
-    public Result<CreateJobResponse> generateVideo(@RequestHeader(value = "X-User-Id", required = false) Long userId,
-                                                   @RequestBody @Valid VideoGenerateRequest req) {
+    public Result<CreateJobDto> generateVideo(@RequestHeader(value = "X-User-Id", required = false) Long userId,
+                                              @RequestBody @Valid VideoGenerateRequest req) {
         return Result.ok(generationJobService.createVideoJob(req, requireUserId(userId)));
     }
 

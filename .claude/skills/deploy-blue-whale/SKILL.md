@@ -1,21 +1,21 @@
 ---
 name: deploy-blue-whale
-description: Build the blue-whale backend (gateway/user/agent) into jars locally with Maven, scp jars + Dockerfiles to remote server 115.190.244.91, build Docker images remotely, then detect running containers and restart them. Use when the user wants to deploy / publish / ship the backend, or says "部署"/"发布"/"推到服务器"/"打jar推上去".
+description: Build the blue-whale backend (gateway/user/agent) into jars locally with Maven and the frontend (web) into Next.js standalone locally, scp artifacts + Dockerfiles to remote server 115.190.244.91, build Docker images remotely, then detect running containers and restart them. Use when the user wants to deploy / publish / ship the backend or frontend, or says "部署"/"发布"/"推到服务器"/"打jar推上去".
 disable-model-invocation: true
 ---
 
 # Deploy Blue-Whale（jar → 远程 build 镜像）
 
-本地 `mvn package` 打后端 jar → scp 到 `115.190.244.91` → **远程 `docker build` 成镜像** → 检测容器重启。
+本地后端 `mvn package` 打 jar + 前端 `next build` 出 standalone → scp 到 `115.190.244.91` → **远程 `docker build` 成镜像** → 检测容器重启。
 仅手动 `/deploy-blue-whale` 触发（生产部署，禁止 agent 自动）。
 
-> 为什么远程 build：本地不碰 docker（绕过 docker.io 被墙），jar 小传得快；镜像在远程 build，base image 由远程拉（远程网络或已配 mirror）。
+> 为什么远程 build：本地不碰 docker（绕过 docker.io 被墙），后端 jar 小传得快、前端 standalone tar 也不大；镜像在远程 build，base image 由远程拉（远程网络或已配 mirror）。
 
 ## 范围
 
-- **仅后端 3 服务**：gateway(8686) + user(8081) + agent(8082)。
-- 前端不在本流程（Next.js 非 jar，另行处理）。
-- 全部流量走网关：gateway 对外，user/agent 内部，由 gateway 经 Nacos 发现路由。
+- **4 服务**：后端 gateway(8686) + user(8081) + agent(8082) + 前端 web(3000)。
+- 前端 Next.js standalone：本地 `next build` 出 `.next/standalone` → tar 打包 scp → 远程 `docker build`（node:22-alpine 跑 server.js）。`/api` `/assets` 由 Next rewrite 代理到 `GATEWAY_URL=http://blue-whale-gateway:8686`（compose 服务名）。
+- 全部流量走网关：gateway 对外，user/agent 内部，由 gateway 经 Nacos 发现路由。前端 3000 直接对外（浏览器入口）。
 - 依赖 nacos/mysql/redis 已在 `115.190.244.91` 运行，后端 yml 直连服务器公网 IP。
 - SSH：`ssh -i /Users/apple/Downloads/weitian.pem root@115.190.244.91`。
 
@@ -36,11 +36,12 @@ disable-model-invocation: true
 
 ## 用法
 
-一键全流程（build jar → push → remote build → restart）：
+一键全流程（build → push → remote build → restart）：
 
 ```bash
-bash .claude/skills/deploy-blue-whale/scripts/deploy.sh            # 全部 3 服务
+bash .claude/skills/deploy-blue-whale/scripts/deploy.sh            # 全部 4 服务（含前端）
 bash .claude/skills/deploy-blue-whale/scripts/deploy.sh agent      # 只 agent
+bash .claude/skills/deploy-blue-whale/scripts/deploy.sh web        # 只前端
 bash .claude/skills/deploy-blue-whale/scripts/deploy.sh gateway user  # 指定多个
 ```
 
@@ -48,10 +49,10 @@ bash .claude/skills/deploy-blue-whale/scripts/deploy.sh gateway user  # 指定�
 
 | 脚本 | 作用 |
 |---|---|
-| `scripts/build.sh` | 本地 `mvn package` 打 fat jar |
-| `scripts/push.sh` | scp jar + Dockerfile.* + compose 到 `/opt/blue-whale/` |
-| `scripts/remote-build.sh` | 远程 `docker build` 把 jar 打成 `blue-whale-<svc>:latest` |
-| `scripts/restart.sh` | 检测同名容器 → `docker rm -f` → `docker compose up -d` 重建 |
+| `scripts/build.sh` | 本地后端 `mvn package` 打 fat jar / 前端 `next build` 出 standalone |
+| `scripts/push.sh` | scp jar + Dockerfile.* + compose（前端 tar 打包 standalone 产物）到 `/opt/blue-whale/` |
+| `scripts/remote-build.sh` | 远程 `docker build` 打成 `blue-whale-<svc>:latest` |
+| `scripts/restart.sh` | 检测同名容器 → `docker rm -f` → `docker compose up -d` 重建（web 后 curl 验证 3000） |
 
 覆盖配置（环境变量）：`DEPLOY_KEY` / `DEPLOY_HOST` / `DEPLOY_USER` / `REMOTE_DIR`。
 
@@ -65,6 +66,8 @@ bash .claude/skills/deploy-blue-whale/scripts/deploy.sh gateway user  # 指定�
 - **Nacos 注册 IP**：后端容器化后注册到 Nacos 的 IP 可能是容器内网 IP。同 compose 网关可达；跨主机或注册成宿主 IP 则配 `spring.cloud.nacos.discovery.ip`。首次部署观察 gateway 路由是否命中。
 - **远程拉镜像失败**：`remote-build.sh` 会报错指路——给远程 docker 配 `registry-mirrors`。
 - **gateway 分离 lib**：若 gateway 不是 fat jar（spring-boot 分离打包），`Dockerfile.gateway` 要补 `COPY lib lib` + `COPY config config`（参考项目原有 `blue-whale-gateway/Dockerfile`）。
+- **前端 standalone**：本地 `next build` 出 `.next/standalone` + `.next/static` + `public/`，tar 打包 scp，远程 `node:22-alpine` 跑 `server.js`。`GATEWAY_URL` 由 compose env 注入（服务名）。sharp 跨平台坑已排除（前端 0 引用 next/image）；未来引入 `next/image` 要改 slim 基镜或装 musl sharp。
+- **前端防火墙**：3000 端口要在远程防火墙/云安全组放行，否则外网访问不通（宿主 `curl localhost:3000` 仍通，易误判）。
 
 ## 触发示例
 

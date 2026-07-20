@@ -5,6 +5,7 @@
  */
 import type React from "react";
 import type { CardStatus } from "@/types/domain";
+import type { VideoModelCapability } from "./api/generation";
 
 export type ToolDef = {
   id: string;
@@ -13,7 +14,13 @@ export type ToolDef = {
   divider?: boolean;
 };
 
-export type NodeType = "image" | "text";
+export type NodeType = "image" | "video" | "text";
+
+/**
+ * 生成态：loading 生成中（占位）/ ready 就绪 / error 失败。
+ * loading | error 不持久化（saveCanvas 过滤），仅 ready 入库。
+ */
+export type NodeStatus = "loading" | "ready" | "error";
 
 /**
  * 画布节点。坐标语义对齐 React Flow：world 坐标由 {@link position} 承载
@@ -33,6 +40,14 @@ export type NodeItem = {
   zIndex?: number;
   content?: string;
   imageUrl?: string;
+  /** 关联资产 ID（生成/上传素材的 asset 引用，供持久化恢复与去重） */
+  assetId?: number;
+  /** 生成态：loading 占位 / ready 就绪 / error 失败。省略视为 ready（兼容旧数据） */
+  status?: NodeStatus;
+  /** 失败文案（status=error 时展示） */
+  errorMessage?: string;
+  /** 视频生成进度（0-100，loading 期展示「生成中 NN%」；临时态不持久化）。 */
+  progress?: number;
   selected?: boolean;
 };
 
@@ -42,6 +57,8 @@ export type DockMediaItem = {
   type: "image" | "video" | "audio";
   name: string;
   src?: string;
+  /** 关联资产 ID（预埋：当前参考素材 URL 直传，assetId 为后续统一切 assetId 引用预留，spec D7） */
+  assetId?: number;
 };
 
 /** 视口。字段对齐 RF `Viewport`：`scale` 改名 `zoom`（BREAKING，见 design D5）。 */
@@ -79,7 +96,7 @@ export type Project = {
   active?: boolean;
 };
 
-/** 生成设置选项（id+label 形状，与 constants 里的 VIDEO_MODELS 等一致）。 */
+/** 生成设置选项（id+label 形状）。 */
 export type SelectOption = { id: string; label: string };
 
 /** 图片 Dock 生成设置（model/resolution/aspectRatio/quantity 在 ImageDockContent 本地 state）。 */
@@ -98,11 +115,21 @@ export type VideoGenerateSettings = {
   duration: number;
   quantity: string;
   refMode: SelectOption;
+  /** 首帧 TOS url（首尾帧模式） */
+  firstFrameUrl?: string;
+  /** 尾帧 TOS url（首尾帧模式） */
+  lastFrameUrl?: string;
+  /** 全能参考图 url 列表（omni 模式） */
+  referenceImages?: string[];
+  /** 全能参考视频 url 列表（omni 模式） */
+  referenceVideos?: string[];
+  /** 全能参考音频 url 列表（omni 模式） */
+  referenceAudios?: string[];
 };
 
 /** 生成请求参数：discriminated union，按 mode narrow settings。 */
 export type GenerateArgs =
-  | { mode: "image"; settings: ImageGenerateSettings }
+  | { mode: "image"; settings: ImageGenerateSettings; referenceImages?: string[] }
   | { mode: "video"; settings: VideoGenerateSettings };
 
 export type ImageDockContentProps = {
@@ -136,13 +163,16 @@ export type VideoDockContentProps = {
   refModeOpen: boolean;
   setRefModeOpen: (v: boolean) => void;
   selectedModel: { id: string; label: string };
-  setSelectedModel: (m: { id: string; label: string }) => void;
+  /** 选中模型（传完整 capability，触发分辨率/比例/时长联动重置）。 */
+  onSelectModel: (cap: VideoModelCapability) => void;
   modelSettingsOpen: boolean;
   setModelSettingsOpen: (v: boolean) => void;
   aspectRatio: { id: string; label: string };
   setAspectRatio: (r: { id: string; label: string }) => void;
   resolution: { id: string; label: string };
   setResolution: (r: { id: string; label: string }) => void;
+  /** DB 拉取的视频模型能力列表（模型/分辨率/比例/时长下拉的数据源，含联动）。 */
+  videoModels: VideoModelCapability[];
   duration: number;
   setDuration: (d: number) => void;
   quantity: string;
@@ -163,6 +193,16 @@ export type VideoDockContentProps = {
   onExitPick?: () => void;
   /** 当前是否处于「从画布选择」模式（本 Dock 维度） */
   isPicking?: boolean;
+  /** 首帧 TOS url（首尾帧模式） */
+  firstFrameUrl?: string;
+  /** 尾帧 TOS url（首尾帧模式） */
+  lastFrameUrl?: string;
+  /** 首尾帧上传：file + 位置，由页面层上传 TOS 后回填 url */
+  onFrameUpload?: (file: File, which: "first" | "last") => void;
+  /** 移除首/尾帧 */
+  onFrameClear?: (which: "first" | "last") => void;
+  /** 交换首尾帧 */
+  onSwapFrames?: () => void;
   /** 生成：Dock 内拼装本地 settings 上抛，prompt 由 BottomDock 从 input 取 */
   onGenerate?: (settings: VideoGenerateSettings) => void;
   /** 生成进行中（禁用按钮防重复提交） */

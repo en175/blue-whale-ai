@@ -1,7 +1,7 @@
 package com.blue.whale.agent.service.provider;
 
-import com.blue.whale.agent.model.dto.ImageGenerationResult;
-import com.blue.whale.agent.model.dto.ProviderImageGenerationRequest;
+import com.blue.whale.agent.model.dto.ImageGenerationDto;
+import com.blue.whale.agent.model.request.ProviderImageGenerationRequest;
 import com.volcengine.ark.runtime.model.images.generation.ImageGenStreamEvent;
 import io.reactivex.Flowable;
 
@@ -17,7 +17,7 @@ public interface ImageGenerationProvider {
     String getProviderId();
 
     /** 执行图片生成（同步），返回生成结果。 */
-    ImageGenerationResult generate(ProviderImageGenerationRequest req);
+    ImageGenerationDto generate(ProviderImageGenerationRequest req);
 
     /** 是否支持流式生成（逐张返图）。默认 false，流式 Provider 覆盖为 true。 */
     default boolean supportsStreaming() {

@@ -37,6 +37,11 @@
             <groupId>com.blue-whale.tool.mp</groupId>
             <artifactId>blue-whale-common-mybatis-plus</artifactId>
         </dependency>
+        <!-- 资产上传 TOS 对象存储 -->
+        <dependency>
+            <groupId>com.blue-whale.tool.upload</groupId>
+            <artifactId>blue-whale-common-upload</artifactId>
+        </dependency>
         <!-- MySQL -->
         <dependency>
             <groupId>mysql</groupId>
@@ -54,6 +59,10 @@
         <dependency>
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
         </dependency>
         <!-- bootstrap 引导配置 -->
         <dependency>

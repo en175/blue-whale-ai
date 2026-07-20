@@ -26,7 +26,6 @@ import static org.mockito.Mockito.*;
 class AuthServiceTest {
 
     @Mock private UserMapper userMapper;
-    @Mock private CaptchaService captchaService;
     @Mock private RedisTemplate<String, Object> redisTemplate;
     @Mock private ValueOperations<String, Object> valueOperations;
     private ConsoleSmsProvider smsProvider;
@@ -41,7 +40,7 @@ class AuthServiceTest {
         jwtConfig.setExpiration(604800L);
         JwtUtil jwtUtil = new JwtUtil(jwtConfig);
         smsProvider = spy(new ConsoleSmsProvider());
-        authService = new AuthService(userMapper, captchaService, smsProvider, jwtUtil);
+        authService = new AuthService(userMapper, smsProvider, jwtUtil);
 
         redisMock = mockStatic(RedisUtil.class);
     }
@@ -53,7 +52,6 @@ class AuthServiceTest {
 
     @Test
     void sendCodeSuccess() {
-        doNothing().when(captchaService).verify(any(), any());
 
         // mock RedisTemplate（供 incrWithTTL 使用）
         redisMock.when(RedisUtil::getRedisTemplate).thenReturn(redisTemplate);
@@ -63,28 +61,26 @@ class AuthServiceTest {
         // 模拟 Redis: 60s间隔无记录
         redisMock.when(() -> RedisUtil.getCacheObject(contains("60s"))).thenReturn(null);
 
-        authService.sendCode("13800138000", "127.0.0.1", "token", "A3K9");
+        authService.sendCode("13800138000", "127.0.0.1");
 
         verify(smsProvider).send(eq("13800138000"), any());
     }
 
     @Test
     void sendCodePhoneDailyLimit() {
-        doNothing().when(captchaService).verify(any(), any());
 
         redisMock.when(RedisUtil::getRedisTemplate).thenReturn(redisTemplate);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.increment(anyString())).thenReturn(11L);  // 超过日限
 
         assertThatThrownBy(() ->
-                authService.sendCode("13800138000", "127.0.0.1", "token", "A3K9"))
+                authService.sendCode("13800138000", "127.0.0.1"))
                 .isInstanceOf(GlobalException.class)
                 .hasMessageContaining("今日发送次数");
     }
 
     @Test
     void sendCodeRateLimited60s() {
-        doNothing().when(captchaService).verify(any(), any());
 
         redisMock.when(RedisUtil::getRedisTemplate).thenReturn(redisTemplate);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
@@ -93,7 +89,7 @@ class AuthServiceTest {
         redisMock.when(() -> RedisUtil.getCacheObject(contains("60s"))).thenReturn("1");
 
         assertThatThrownBy(() ->
-                authService.sendCode("13800138000", "127.0.0.1", "token", "A3K9"))
+                authService.sendCode("13800138000", "127.0.0.1"))
                 .isInstanceOf(GlobalException.class)
                 .hasMessageContaining("60秒");
     }

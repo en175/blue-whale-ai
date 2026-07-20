@@ -4,9 +4,10 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { usePathname, useRouter } from "next/navigation";
 import type { PendingAction, User } from "./types";
 import { clearUser, clearTokens, loadAccessToken, loadRefreshToken, loadUser, saveTokens, saveUser, SKIP_AUTH, MOCK_USER } from "./authStorage";
-import { loginWithCode, logoutApi, refreshToken, fetchMe, ApiError } from "@/lib/auth";
-import { subscribeToAuthFailure, getAccessTokenSilently } from "@/lib/api-client";
+import { loginWithCode, loginWithPassword, logoutApi, updateUsername as updateUsernameApi, changePhone as changePhoneApi } from "@/lib/auth";
+import { subscribeToAuthFailure, getAccessTokenSilently, refreshTokens } from "@/lib/api-client";
 import { LoginModal } from "./LoginModal";
+import { resolveUserId, rebindPhone } from "./userId";
 
 interface AuthContextValue {
   user: User | null;
@@ -14,13 +15,13 @@ interface AuthContextValue {
   pendingAction: PendingAction | null;
   requireAuth: (action: PendingAction, run: () => void) => void;
   signIn: (phone: string, code: string) => Promise<void>;
+  signInWithPassword: (account: string, password: string) => Promise<void>;
   signOut: () => void;
-  /** 从后端拉最新用户信息并同步本地。换绑成功后用（手机号变更需后端确认）。改昵称不用——用 updateLocalUser（乐观更新）。 */
-  refreshUser: () => Promise<void>;
-  /** 轻量同步：直接 patch 本地 user + storage，不调后端。改昵称成功后用（刚 PUT 成功无需再 GET）。 */
-  updateLocalUser: (patch: Partial<User>) => void;
   openLogin: () => void;
   closeLogin: () => void;
+  updateUsername: (username: string) => Promise<void>;
+  changePhone: (newPhone: string, code: string) => Promise<void>;
+  updateAvatar: (url: string) => void;
 }
 
 const Ctx = createContext<AuthContextValue | null>(null);
@@ -41,7 +42,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const executorRef = useRef<(() => void) | null>(null);
   const hasMountedRef = useRef(false); // StrictMode 下 useEffect 双重火守卫
 
-  // mount: 尝试用 refresh_token 恢复完整 session
+  // mount: 尝试用 refreshToken 恢复完整 session
   useEffect(() => {
     // 本地开发：跳过鉴权，直接注入占位用户，不走 refresh 流程
     if (SKIP_AUTH) {
@@ -63,27 +64,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     hasMountedRef.current = true;
     console.log("[Auth] mount: 发送 refresh 请求...");
 
-    // 后台静默换新 token
-    refreshToken(rt)
+    // 后台静默换新 token（与 apiFetch 401 共享单例锁，防竞态）
+    refreshTokens()
       .then((data) => {
-        saveTokens(data.access_token, data.refresh_token);
-        saveUser({ userId: data.user_id, username: data.username, phone: data.phone });
-        setUser({ userId: data.user_id, username: data.username, phone: data.phone });
+        const currentRt = loadRefreshToken();
+        if (currentRt !== rt) return; // 竞态守卫：期间已有新登录
+
+        const uid = resolveUserId(data.phone);
+        const avatar = data.avatar && data.avatar !== "0" ? data.avatar : undefined;
+        saveUser({ userId: data.userId, uid, username: data.username, phone: data.phone, avatar, hasPassword: data.hasPassword });
+        setUser({ userId: data.userId, uid, username: data.username, phone: data.phone, avatar, hasPassword: data.hasPassword });
       })
       .catch((e) => {
-        // 仅当存储中 RT 仍是同一份时才处理，避免竞态误伤新登录
         const currentRt = loadRefreshToken();
         if (currentRt !== rt) return;
 
-        // 只有后端明确 401（token 无效/已轮换）才清 tokens
-        // 网络错误 / 后端未启动 → 保留本地登录态，下次操作时 api-client 自动重试
-        if (e instanceof ApiError && e.code === 401) {
-          console.warn("[Auth] mount refresh → 后端 401，清理 tokens", e.message);
-          clearTokens();
+        const isNetworkError =
+          e instanceof Error && e.message.startsWith("__NETWORK_ERROR__");
+        if (isNetworkError) {
+          console.warn("[Auth] mount refresh 网络错误，保留登录态", e.message);
         } else {
-          console.warn("[Auth] mount refresh 失败但保留登录态", e instanceof Error ? e.message : e);
+          console.warn("[Auth] mount refresh 鉴权失败，清理 tokens", e instanceof Error ? e.message : e);
+          clearTokens();
         }
-        // 无论如何，user 保留（乐观恢复的 UI 仍可展示）
       });
   }, []);
 
@@ -94,6 +97,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       clearTokens();
       clearUser();
+      setPendingAction(null);
+      executorRef.current = null;
       setLoginOpen(true);
     });
   }, []);
@@ -134,9 +139,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuthLoading(true);
     try {
       const data = await loginWithCode(phone, code);
-      const u: User = { userId: data.user_id, username: data.username, phone: data.phone };
+      const uid = resolveUserId(phone);
+      const avatar = data.avatar && data.avatar !== "0" ? data.avatar : undefined;
+      const u: User = { userId: data.userId, uid, username: data.username, phone: data.phone, avatar, hasPassword: data.hasPassword };
       saveUser(u);
-      saveTokens(data.access_token, data.refresh_token);
+      saveTokens(data.accessToken, data.refreshToken);
       setUser(u);
       setLoginOpen(false);
       // 回放被拦动作
@@ -153,6 +160,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const signInWithPassword = useCallback(async (account: string, password: string) => {
+    setAuthLoading(true);
+    try {
+      const data = await loginWithPassword(account, password);
+      const uid = resolveUserId(data.phone);
+      const avatar = data.avatar && data.avatar !== "0" ? data.avatar : undefined;
+      const u: User = { userId: data.userId, uid, username: data.username, phone: data.phone, avatar, hasPassword: data.hasPassword };
+      saveUser(u);
+      saveTokens(data.accessToken, data.refreshToken);
+      setUser(u);
+      setLoginOpen(false);
+      const exec = executorRef.current;
+      if (exec) {
+        executorRef.current = null;
+        setPendingAction(null);
+        exec();
+      }
+    } catch (e) {
+      throw e;
+    } finally {
+      setAuthLoading(false);
+    }
+  }, []);
+
   const signOut = useCallback(() => {
     const rt = loadRefreshToken();
     if (rt) logoutApi(rt).catch(() => { /* ignore */ });
@@ -164,28 +195,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (pathname?.startsWith("/canvas")) router.replace("/");
   }, [pathname, router]);
 
-  // 从后端拉最新用户信息并同步本地（改昵称/换绑成功后调用）
-  const refreshUser = useCallback(async () => {
-    if (SKIP_AUTH) return; // 本地开发模式无后端，跳过
-    const info = await fetchMe();
-    const u: User = { userId: info.user_id, username: info.username, phone: info.phone };
-    saveUser(u);
-    setUser(u);
+  const updateUsername = useCallback(async (username: string) => {
+    await updateUsernameApi(username);
+    setUser((prev) => {
+      if (!prev) return null;
+      const updated = { ...prev, username };
+      saveUser(updated);
+      return updated;
+    });
   }, []);
 
-  // 轻量同步：直接 patch 本地 user + storage，不调后端
-  const updateLocalUser = useCallback((patch: Partial<User>) => {
+  const changePhone = useCallback(async (newPhone: string, code: string) => {
+    await changePhoneApi(newPhone, code);
     setUser((prev) => {
-      if (!prev) return prev;
-      const next = { ...prev, ...patch };
-      saveUser(next);
-      return next;
+      if (!prev) return null;
+      rebindPhone(prev.phone, newPhone, prev.uid);
+      const updated = { ...prev, phone: newPhone };
+      saveUser(updated);
+      return updated;
+    });
+  }, []);
+
+  const updateAvatar = useCallback((url: string) => {
+    setUser((prev) => {
+      if (!prev) return null;
+      const updated = { ...prev, avatar: url };
+      saveUser(updated);
+      return updated;
     });
   }, []);
 
   const value: AuthContextValue = {
     user, isLoginOpen, pendingAction,
-    requireAuth, signIn, signOut, refreshUser, updateLocalUser, openLogin, closeLogin,
+    requireAuth, signIn, signInWithPassword, signOut, openLogin, closeLogin, updateUsername, changePhone, updateAvatar,
   };
 
   return (

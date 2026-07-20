@@ -2,7 +2,7 @@
  * API Client — 基于 fetch 的双 Token 自动刷新封装。
  *
  * 特性：
- * - 请求自动附带 Authorization: Bearer <access_token>
+ * - 请求自动附带 Authorization: Bearer <accessToken>
  * - 收到 401 → 单例锁 + 请求队列，静默刷新 token
  * - 刷新成功 → 重放队列中所有请求，用户无感
  * - 刷新失败 → 清空 tokens，通知 AuthContext 弹出登录
@@ -13,6 +13,9 @@ import {
   loadRefreshToken,
   saveTokens,
   clearTokens,
+  loadUser,
+  SKIP_AUTH,
+  MOCK_USER,
 } from "@/components/auth/authStorage";
 import type { LoginData } from "./auth";
 
@@ -21,7 +24,7 @@ import type { LoginData } from "./auth";
 // ---------------------------------------------------------------------------
 
 let isRefreshing = false;
-let refreshPromise: Promise<string> | null = null;
+let refreshPromise: Promise<LoginData> | null = null;
 
 type QueueItem = {
   resolve: (token: string) => void;
@@ -59,7 +62,6 @@ function processQueue(error: Error | null, token?: string) {
 /** auth 端点不触发 401 拦截，防止 refresh 自身 401 导致无限循环。 */
 function isAuthEndpoint(url: string): boolean {
   const authPaths = [
-    "/api/auth/captcha",
     "/api/auth/send-code",
     "/api/auth/login",
     "/api/auth/refresh",
@@ -68,18 +70,37 @@ function isAuthEndpoint(url: string): boolean {
   return authPaths.some((p) => url.includes(p));
 }
 
-/** 调用后端 /api/auth/refresh，返回新的 access_token。不经过 apiFetch 自身。 */
-async function doRefreshToken(): Promise<string> {
+/**
+ * 构建统一鉴权请求头：Authorization（有 token 时）+ X-User-Id。
+ * 本地直连 agent-service 无网关时后端 UserContext 读 X-User-Id；
+ * 线上网关注入同名头会覆盖。apiFetch 内部与 beforeunload 等同步场景共用此出口，
+ * 鉴权头不再散落各处手拼。
+ */
+export function buildAuthHeaders(token?: string | null): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const user = loadUser() ?? (SKIP_AUTH ? MOCK_USER : null);
+  if (user) headers["X-User-Id"] = String(user.userId);
+  return headers;
+}
+
+/** 调用后端 /api/auth/refresh，返回 LoginData。不经过 apiFetch 自身。 */
+async function doRefreshToken(): Promise<LoginData> {
   const rt = loadRefreshToken();
   if (!rt) throw new Error("No refresh token");
 
-  const res = await fetch("/api/auth/refresh", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${rt}`,
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch("/api/auth/refresh", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${rt}`,
+      },
+    });
+  } catch (err) {
+    throw new Error(`__NETWORK_ERROR__${err instanceof Error ? err.message : "Network error"}`);
+  }
 
   if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
 
@@ -89,8 +110,39 @@ async function doRefreshToken(): Promise<string> {
   }
 
   const data = json.data as LoginData;
-  saveTokens(data.access_token, data.refresh_token);
-  return data.access_token;
+  saveTokens(data.accessToken, data.refreshToken);
+  return data;
+}
+
+/**
+ * 单例刷新 token。同时被 apiFetch 401 拦截和 AuthContext mount 刷新使用，
+ * 确保同一时刻只有一条 /api/auth/refresh 请求，防止 token 轮换竞态。
+ */
+export async function refreshTokens(): Promise<LoginData> {
+  if (!isRefreshing) {
+    isRefreshing = true;
+    refreshPromise = doRefreshToken()
+      .then((data) => {
+        processQueue(null, data.accessToken);
+        return data;
+      })
+      .catch((err) => {
+        processQueue(err);
+        // 网络错误保留 tokens（乐观登录态不丢），鉴权错误清理并弹登录
+        const isNetworkError =
+          err instanceof Error && err.message.startsWith("__NETWORK_ERROR__");
+        if (!isNetworkError) {
+          clearTokens();
+          onAuthFailure?.();
+        }
+        throw err;
+      })
+      .finally(() => {
+        isRefreshing = false;
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise!;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,11 +159,11 @@ export async function apiFetch(
 ): Promise<Response> {
   const makeRequest = (token?: string | null): Promise<Response> => {
     const headers = new Headers(options.headers);
-    if (!headers.has("Content-Type")) {
+    if (!headers.has("Content-Type") && !(options.body instanceof FormData)) {
       headers.set("Content-Type", "application/json");
     }
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
+    for (const [k, v] of Object.entries(buildAuthHeaders(token))) {
+      if (!headers.has(k)) headers.set(k, v);
     }
     return fetch(url, { ...options, headers });
   };
@@ -125,31 +177,10 @@ export async function apiFetch(
     return res;
   }
 
-  // 401 on 受保护端点 → 启动刷新（单例）
-  if (!isRefreshing) {
-    isRefreshing = true;
-    refreshPromise = doRefreshToken()
-      .then((token) => {
-        processQueue(null, token);
-        return token;
-      })
-      .catch((err) => {
-        processQueue(err);
-        console.warn("[api-client] apiFetch 401 → refresh 也失败，清理 tokens", err instanceof Error ? err.message : err);
-        clearTokens();
-        onAuthFailure?.();
-        throw err;
-      })
-      .finally(() => {
-        isRefreshing = false;
-        refreshPromise = null;
-      });
-  }
-
-  // 等待刷新完成（正在进行的或刚启动的）
+  // 401 on 受保护端点 → 刷新并重试
   try {
-    const newToken = await refreshPromise;
-    res = await makeRequest(newToken);
+    const data = await refreshTokens();
+    res = await makeRequest(data.accessToken);
   } catch {
     throw new Error("认证已过期，请重新登录");
   }
@@ -201,26 +232,8 @@ export async function getAccessTokenSilently(): Promise<string | null> {
   const rt = loadRefreshToken();
   if (!rt) return null;
 
-  if (!isRefreshing) {
-    isRefreshing = true;
-    refreshPromise = doRefreshToken()
-      .then((token) => {
-        processQueue(null, token);
-        return token;
-      })
-      .catch((err) => {
-        processQueue(err);
-        throw err; // silent：抛错由下方 await catch 兜底 return null；不 clearTokens/onAuthFailure
-      })
-      .finally(() => {
-        isRefreshing = false;
-        refreshPromise = null;
-      });
-  }
-
-  // refreshPromise 可能由 apiFetch 发起（失败会 reject），这里兜底 catch
   try {
-    return await refreshPromise;
+    return (await refreshTokens()).accessToken;
   } catch {
     return null;
   }

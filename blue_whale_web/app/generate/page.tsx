@@ -88,9 +88,9 @@ function JobCard({ job }: { job: JobListItem }) {
           />
         </div>
       )}
-      {job.output_assets.length > 0 && (
+      {job.outputAssets.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
-          {job.output_assets.map((a) => (
+          {job.outputAssets.map((a) => (
             <AssetThumb key={a.id} asset={a} />
           ))}
         </div>
@@ -139,9 +139,9 @@ export default function GeneratePage() {
       const pending = jobs.filter((j) => !TERMINAL.has(j.status));
       const results = await Promise.all(
         pending.map((j) =>
-          getJobStatus(j.job_id)
+          getJobStatus(j.jobId)
             .then((s) => ({
-              job_id: j.job_id,
+              jobId: j.jobId,
               status: s.status,
               progress: s.progress,
               asset: s.asset,
@@ -151,13 +151,13 @@ export default function GeneratePage() {
       );
       setJobs((prev) =>
         prev.map((j) => {
-          const r = results.find((x) => x && x.job_id === j.job_id);
+          const r = results.find((x) => x && x.jobId === j.jobId);
           if (!r) return j;
           return {
             ...j,
             status: r.status,
             progress: r.progress,
-            output_assets:
+            outputAssets:
               r.asset && r.status === "succeeded"
                 ? [
                     {
@@ -168,7 +168,7 @@ export default function GeneratePage() {
                       height: null,
                     },
                   ]
-                : j.output_assets,
+                : j.outputAssets,
           };
         }),
       );
@@ -184,9 +184,9 @@ export default function GeneratePage() {
       try {
         await generateImage({
           prompt: ctx.prompt,
-          model_id: ctx.image.modelId,
-          size_id: ctx.image.resolutionId,
-          aspect_ratio: ctx.image.aspectRatioId,
+          modelId: ctx.image.modelId,
+          sizeId: ctx.image.resolutionId,
+          aspectRatio: ctx.image.aspectRatioId,
           quantity: 1,
         });
         refresh();
@@ -212,7 +212,7 @@ export default function GeneratePage() {
         ) : (
           <div className="flex flex-col gap-3">
             {jobs.map((job) => (
-              <JobCard key={job.job_id} job={job} />
+              <JobCard key={job.jobId} job={job} />
             ))}
           </div>
         )}
