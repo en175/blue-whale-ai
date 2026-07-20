@@ -2686,6 +2686,44 @@ assert_exit 0 "kimi shim: opt-in 项目 Gate 放行"
 rm -rf "$KIMI_SHIM_ROOT"
 unset KIMI_SHIM KIMI_SHIM_ROOT KIMI_NOGIT KIMI_OTHER
 
+# Slice 8 — start-task-worktree.sh 主 checkout 守卫的大小写不敏感回归
+# 守卫意图是「同一物理目录」，旧实现用跨来源字符串比较（git getcwd 规范大小写
+# vs BASH_SOURCE/pwd 逻辑大小写），大小写不敏感 FS 上同一目录两种拼写被误拦。
+# 修复后判等走 inode（samefile），对大小写与软链拼写均不敏感。
+# 用例：沙箱主 checkout 建在混合大小写目录，从小写拼写路径调入口；守卫应放行，
+# 由下一步「本地分支已存在」短路报错（零副作用：不 fetch、不建 Work Tree）。
+# 文件系统大小写敏感（Linux）时无法构造拼写差异 → 整组跳过。
+CASE_PROBE_DIR="$(mktemp -d)"
+touch "$CASE_PROBE_DIR/MixedCaseProbe"
+if [ -f "$CASE_PROBE_DIR/mixedcaseprobe" ]; then
+  CASE_REPO_PARENT="$(mktemp -d)"
+  CASE_REPO="$CASE_REPO_PARENT/CaseGuard-Repo"
+  git init -q "$CASE_REPO"
+  mkdir -p "$CASE_REPO/scripts/lib"
+  cp "$REPO_ROOT/scripts/start-task-worktree.sh" "$CASE_REPO/scripts/"
+  cp "$REPO_ROOT/scripts/start-task-worktree.py" "$CASE_REPO/scripts/"
+  cp "$REPO_ROOT/scripts/lib/python3-command.sh" "$CASE_REPO/scripts/lib/"
+  (
+    cd "$CASE_REPO"
+    git config user.email t@t
+    git config user.name t
+    git add scripts
+    git commit -q -m "add scripts"
+    git branch -M master
+    git branch "fix/占位分支回归"
+  )
+  CASE_REPO_LOWER="$(printf '%s' "$CASE_REPO" | tr 'A-Z' 'a-z')"
+  run_repo_script "$CASE_REPO_LOWER" "$CASE_REPO_LOWER/scripts/start-task-worktree.sh" --type fix --no-issue --summary 占位分支回归
+  assert_exit 1 "start-entry: 小写拼写调入口不被守卫误拦"
+  assert_stderr_has "本地分支已存在" "start-entry: 守卫放行后撞分支存在短路"
+  rm -rf "$CASE_REPO_PARENT"
+  unset CASE_REPO_PARENT CASE_REPO CASE_REPO_LOWER
+else
+  echo "SKIP: 文件系统大小写敏感，跳过 start-task-worktree 大小写守卫用例"
+fi
+rm -rf "$CASE_PROBE_DIR"
+unset CASE_PROBE_DIR
+
 # 恢复调用者环境并删除全局审计隔离仓库。
 if [ -n "$ORIGINAL_CLAUDE_PROJECT_DIR" ]; then
   CLAUDE_PROJECT_DIR="$ORIGINAL_CLAUDE_PROJECT_DIR"
