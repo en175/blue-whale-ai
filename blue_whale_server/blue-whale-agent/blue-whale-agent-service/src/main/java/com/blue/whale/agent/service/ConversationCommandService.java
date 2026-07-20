@@ -17,6 +17,7 @@ import com.blue.whale.agent.model.entity.CommandIdempotency;
 import com.blue.whale.agent.model.entity.Conversation;
 import com.blue.whale.agent.model.entity.ConversationMessage;
 import com.blue.whale.agent.model.entity.UserInputRequest;
+import com.blue.whale.agent.runtimebundle.RuntimeBundleRunPinResolver;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import com.blue.whale.agent.service.governance.UserInputRequestService;
@@ -44,6 +45,7 @@ public class ConversationCommandService {
     private final ProjectEventService projectEventService;
     private final UserInputRequestService userInputRequestService;
     private final UserInputRequestMapper userInputRequestMapper;
+    private final RuntimeBundleRunPinResolver runtimeBundleRunPinResolver;
 
     @Transactional(noRollbackFor = PersistedUserInputDecisionException.class)
     public AcceptConversationMessageResponse accept(Long projectId, Long userId, String idempotencyKey,
@@ -73,6 +75,7 @@ public class ConversationCommandService {
         // Worker 必须面对与来源流程一致的引擎身份与 checkpoint。
         AgentRun sourceRun = confirmedInputRequestId == null ? null
                 : sourceRunOf(confirmedInputRequestId);
+        RuntimeBundleRunPinResolver.RunPin runPin = runtimeBundleRunPinResolver.resolve(sourceRun);
 
         Conversation conversation = resolveConversation(projectId, request.conversationId());
 
@@ -87,6 +90,11 @@ public class ConversationCommandService {
                         : orchestratorProperties.getEngineVersion())
                 .setAdapterSchemaVersion(sourceRun != null ? sourceRun.getAdapterSchemaVersion()
                         : orchestratorProperties.getAdapterSchemaVersion())
+                .setBundleVersionId(runPin.bundleVersionId())
+                .setManifestDigest(runPin.manifestDigest())
+                .setModelProfileId(runPin.modelProfileId())
+                .setModelProfileVersion(runPin.modelProfileVersion())
+                .setActivatedCreativeSkillVersions(runPin.activatedCreativeSkillVersions())
                 .setConfirmedInputRequestId(confirmedInputRequestId)
                 .setFencingToken(0L);
         agentRunMapper.insert(run);
@@ -125,6 +133,11 @@ public class ConversationCommandService {
         runPayload.put("engine", run.getEngine());
         runPayload.put("engine_version", run.getEngineVersion());
         runPayload.put("adapter_schema_version", run.getAdapterSchemaVersion());
+        runPayload.put("bundle_version_id", run.getBundleVersionId());
+        runPayload.put("manifest_digest", run.getManifestDigest());
+        runPayload.put("model_profile_id", run.getModelProfileId());
+        runPayload.put("model_profile_version", run.getModelProfileVersion());
+        runPayload.put("activated_creative_skill_versions", run.getActivatedCreativeSkillVersions());
         projectEventService.appendEvent(projectId, EventType.AGENT_RUN_CREATED,
                 AggregateType.AGENT_RUN, String.valueOf(run.getId()), 0,
                 runPayload, request.clientMessageId(), null);
