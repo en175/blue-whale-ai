@@ -6,6 +6,7 @@
 import { X } from "lucide-react";
 import { IconPlus } from "../../icons";
 import type { DockMediaItem } from "../../types";
+import { AuthenticatedImage } from "../AuthenticatedImage";
 
 export function MediaUploadButton({
   label,
@@ -18,7 +19,13 @@ export function MediaUploadButton({
 }) {
   return (
     <div style={{ position: "relative", flexShrink: 0 }}>
-      <input type="file" accept={accept} multiple aria-hidden="true" style={{ display: "none" }} />
+      <input
+        type="file"
+        accept={accept}
+        multiple
+        aria-hidden="true"
+        style={{ display: "none" }}
+      />
       <button
         type="button"
         aria-label={label}
@@ -49,7 +56,12 @@ export function MediaUploadButton({
 export function FrameUploadButton({ label }: { label: string }) {
   return (
     <div style={{ position: "relative", flexShrink: 0 }}>
-      <input type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" aria-hidden="true" style={{ display: "none" }} />
+      <input
+        type="file"
+        accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+        aria-hidden="true"
+        style={{ display: "none" }}
+      />
       <button
         type="button"
         aria-label={label}
@@ -85,24 +97,45 @@ export function FrameUploadButton({ label }: { label: string }) {
 }
 
 // 底部 Dock 里的素材缩略图，带右上角删除按钮
-export function DockMediaThumb({ item, onRemove }: { item: DockMediaItem; onRemove?: (id: string) => void }) {
+export function DockMediaThumb({
+  item,
+  onRemove,
+}: {
+  item: DockMediaItem;
+  onRemove?: (id: string) => void;
+}) {
+  // 参考图身份以不可变 assetId 为准：有 Asset 身份的 src 即受保护 access_url，
+  // 必须复用带身份媒体读取（裸 <img> 无身份稳定 401）；
+  // 本地上传项无 assetId、src 为本地临时 URL（blob:/data:）：直显，不走带身份读取。
+  const protectedUrl = item.assetId && item.src ? item.src : null;
+  const imageStyle = {
+    width: 44,
+    height: 44,
+    borderRadius: 9,
+    objectFit: "cover",
+    flexShrink: 0,
+    display: "block",
+    border: "1px solid rgba(255, 255, 255, 0.08)",
+  } as const;
   return (
     <div style={{ position: "relative", flexShrink: 0 }}>
-      <img
-        src={item.src}
-        alt={item.name}
-        title={item.name}
-        draggable={false}
-        style={{
-          width: 44,
-          height: 44,
-          borderRadius: 9,
-          objectFit: "cover",
-          flexShrink: 0,
-          display: "block",
-          border: "1px solid rgba(255, 255, 255, 0.08)",
-        }}
-      />
+      {protectedUrl ? (
+        <AuthenticatedImage
+          accessUrl={protectedUrl}
+          alt={item.name}
+          title={item.name}
+          draggable={false}
+          style={imageStyle}
+        />
+      ) : (
+        <img
+          src={item.src}
+          alt={item.name}
+          title={item.name}
+          draggable={false}
+          style={imageStyle}
+        />
+      )}
       {onRemove && (
         <button
           type="button"
