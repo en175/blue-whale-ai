@@ -1,5 +1,8 @@
 # Agent 对话交付 PRD（P0）
 
+> 🔗 **关联**：需求 #IJZ7Z7 · wayfinder map #IK29RN（前端接后端三链路总图）
+> **同批 PRD**：[FRONTEND-SKILL-PANEL-PRD.md](./FRONTEND-SKILL-PANEL-PRD.md)（§5 Skill 接入）· [BACKEND-API-PRD.md](./BACKEND-API-PRD.md)（§5.6 抽出源）· [路线图](./FRONTEND-INTEGRATION-ROADMAP.md)
+
 > 给前后端工程师的 Agent 对话交付契约。从 `BACKEND-API-PRD.md` §5.6 抽出,闭合 Skill 面板 ↔ Agent 对话的接入点断头路。
 > 版本:P0 · 日期:2026-07-05
 
