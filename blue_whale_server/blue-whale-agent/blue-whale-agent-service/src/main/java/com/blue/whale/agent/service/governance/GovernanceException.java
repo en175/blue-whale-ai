@@ -51,6 +51,12 @@ public class GovernanceException extends RuntimeException {
                 BudgetEffect.NONE, HttpStatus.UNPROCESSABLE_ENTITY);
     }
 
+    public static GovernanceException validationFailed(String message) {
+        return new GovernanceException(
+                "VALIDATION_FAILED", message, false, null, null,
+                BudgetEffect.NONE, HttpStatus.BAD_REQUEST);
+    }
+
     public String publicCode() {
         return publicCode;
     }

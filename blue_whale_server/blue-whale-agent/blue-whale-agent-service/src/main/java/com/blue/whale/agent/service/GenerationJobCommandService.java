@@ -20,6 +20,7 @@ import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import com.blue.whale.agent.service.governance.GenerationCostAdmissionService;
 import com.blue.whale.agent.service.governance.AuthorizedGenerationAction;
+import com.blue.whale.agent.service.governance.GovernanceException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -77,7 +78,7 @@ public class GenerationJobCommandService {
             throw new GlobalException(SystemCode.FAILURE_CODE, "暂不支持该生成类型");
         }
         if (!request.parameters().isValidFor(request.type())) {
-            throw new GlobalException(SystemCode.FAILURE_CODE, "生成参数不在服务端能力范围内");
+            throw GovernanceException.validationFailed("生成参数不在服务端能力范围内");
         }
         requireOwnedInputAssets(projectId, userId, request.inputAssetIds());
 
@@ -345,7 +346,7 @@ public class GenerationJobCommandService {
 
     private GenerationModelCapability requireImageCapability(String modelId) {
         return capabilityMapper.selectEnabledByModelId(modelId)
-                .orElseThrow(() -> new GlobalException(SystemCode.FAILURE_CODE,
+                .orElseThrow(() -> GovernanceException.validationFailed(
                         "不支持的模型: " + modelId));
     }
 
@@ -354,7 +355,7 @@ public class GenerationJobCommandService {
                 ? capability.getDefaultSize() : requested;
         GenerationModelCapability.SizeOption option = capability.findSizeById(sizeId);
         if (option == null) {
-            throw new GlobalException(SystemCode.FAILURE_CODE,
+            throw GovernanceException.validationFailed(
                     (sizeId == null || sizeId.isBlank())
                             ? "模型未配置可用尺寸" : "模型不支持该尺寸: " + sizeId);
         }

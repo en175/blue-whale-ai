@@ -578,13 +578,21 @@ class BottomDockGenerationJobIT {
                 "\"expected_output_count\":1}";
 
         // IK21O5 起 image 必填 model_id：缺省在 isValidFor 边界被拒，不落 Job。
+        // 参数错误统一 GovernanceException(VALIDATION_FAILED, 400)：保留稳定 code + request_id（IK2BCH）。
         postGenerationJob(project.getId(), "missing-model-id-key", body)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.msg").value("生成参数不在服务端能力范围内"));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg").value("生成参数不在服务端能力范围内"))
+                .andExpect(jsonPath("$.data.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.data.request_id").isNotEmpty());
 
         assertThat(count("generation_jobs", "project_id", project.getId())).isZero();
         assertThat(count("project_events", "project_id", project.getId())).isZero();
+        assertThat(count("cost_reservations", "project_id", project.getId())).isZero();
+        // 参数校验在 cost admission 之前 fail-closed，不产生任何 Provider 调用审计。
+        assertThat(jdbcTemplate.queryForList("SELECT action FROM audit_records", String.class))
+                .doesNotContain("cost_reservation.provider_admission",
+                        "generation_provider.call_outcome",
+                        "content_review.decision", "cost_reservation.settle");
     }
 
     @Test
@@ -599,14 +607,21 @@ class BottomDockGenerationJobIT {
                 "\"expected_output_count\":1}";
 
         // model_id 必须在能力表白名单内：requireImageCapability fail-closed，不产生付费调用。
+        // 参数错误统一 GovernanceException(VALIDATION_FAILED, 400)：保留稳定 code + request_id（IK2BCH）。
         postGenerationJob(project.getId(), "unsupported-model-id-key", body)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.msg").value("不支持的模型: not-a-registered-model"));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg").value("不支持的模型: not-a-registered-model"))
+                .andExpect(jsonPath("$.data.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.data.request_id").isNotEmpty());
 
         assertThat(count("generation_jobs", "project_id", project.getId())).isZero();
         assertThat(count("project_events", "project_id", project.getId())).isZero();
         assertThat(count("cost_reservations", "project_id", project.getId())).isZero();
+        // 参数校验在 cost admission 之前 fail-closed，不产生任何 Provider 调用审计。
+        assertThat(jdbcTemplate.queryForList("SELECT action FROM audit_records", String.class))
+                .doesNotContain("cost_reservation.provider_admission",
+                        "generation_provider.call_outcome",
+                        "content_review.decision", "cost_reservation.settle");
     }
 
     @Test

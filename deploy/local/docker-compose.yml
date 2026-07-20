@@ -287,6 +287,9 @@ services:
     build:
       context: ../../blue_whale_web
       dockerfile: Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
     image: blue-whale-web:local
     container_name: bw-web
     restart: unless-stopped

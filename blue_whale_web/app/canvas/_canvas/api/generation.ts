@@ -7,7 +7,7 @@
  *
  * 字段全 snake_case 对齐后端 Jackson SNAKE_CASE 序列化（见 application.yml）。
  */
-import { apiFetch, apiRequest } from "@/lib/api-client";
+import { apiRequest } from "@/lib/api-client";
 
 export type ImageModelCapability = {
   model_id: string;
@@ -76,25 +76,11 @@ async function request<T>(
   method: string,
   body?: unknown,
 ): Promise<T> {
-  let res: Response;
-  try {
-    res = await apiFetch(`${API_BASE}${path}`, {
-      method,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-  } catch {
-    throw new Error("后端未启动或无法连接");
-  }
-  let json: { code: number; msg?: string; data?: T };
-  try {
-    json = await res.json();
-  } catch {
-    throw new Error(`上游响应非 JSON（HTTP ${res.status}）`);
-  }
-  if (json.code !== 200) {
-    throw new Error(json.msg || `上游错误 ${json.code}`);
-  }
-  return json.data as T;
+  // 复用 apiRequest：统一 Result 拆包 + 失败抛 ApiError（保留 code/request_id，IK2BCH）。
+  return apiRequest<T>(`${API_BASE}${path}`, {
+    method,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
 }
 
 /** 获取当前启用的图片生成模型能力列表。 */

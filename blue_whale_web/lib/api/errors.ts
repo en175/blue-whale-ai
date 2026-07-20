@@ -35,12 +35,14 @@ export type ApiErrorOptions = {
   code: string;
   message: string;
   detail?: unknown;
+  requestId?: string;
 };
 
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly detail: unknown;
+  readonly requestId?: string;
 
   constructor(opts: ApiErrorOptions) {
     super(opts.message);
@@ -48,6 +50,7 @@ export class ApiError extends Error {
     this.status = opts.status;
     this.code = opts.code;
     this.detail = opts.detail;
+    this.requestId = opts.requestId;
   }
 }
 
