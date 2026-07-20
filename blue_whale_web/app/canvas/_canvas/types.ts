@@ -129,7 +129,7 @@ export type VideoGenerateSettings = {
 
 /** 生成请求参数：discriminated union，按 mode narrow settings。 */
 export type GenerateArgs =
-  | { mode: "image"; settings: ImageGenerateSettings }
+  | { mode: "image"; settings: ImageGenerateSettings; referenceImages?: string[] }
   | { mode: "video"; settings: VideoGenerateSettings };
 
 export type ImageDockContentProps = {

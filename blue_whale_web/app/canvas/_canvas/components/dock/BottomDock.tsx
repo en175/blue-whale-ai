@@ -13,6 +13,7 @@ import type { VideoModelCapability } from "../../api/generation";
 import type { DockMediaItem, GenerateArgs, SelectOption } from "../../types";
 import { ImageDockContent } from "./ImageDockContent";
 import { VideoDockContent } from "./VideoDockContent";
+import { extractEditor, insertMention, removeMention, type MentionItem } from "./mention";
 
 export function BottomDock({
   mode,
@@ -35,6 +36,7 @@ export function BottomDock({
   onFrameClear,
   onSwapFrames,
   focusSignal,
+  dockMentionSignal,
 }: {
   mode: "image" | "video";
   onClose: () => void;
@@ -64,10 +66,14 @@ export function BottomDock({
   onFrameUpload?: (file: File, slot: "first" | "last") => void;
   onFrameClear?: (slot: "first" | "last") => void;
   onSwapFrames?: () => void;
-  /** 重新编辑触发：递增 nonce → useEffect 聚焦 contentEditable + 闪烁（X4） */
+  /** 重新编辑/带图生成触发：递增 nonce → 聚焦 contentEditable，显示原生 caret（X4） */
   focusSignal?: number;
+  /** 插入参考图 mention：nonce 递增触发 effect，item 为待插参考图（X3 mention pill）。replace=true 清空 editor 只留一个 */
+  dockMentionSignal?: { nonce: number; item: MentionItem | null; replace?: boolean };
 }) {
   const [input, setInput] = useState("");
+  /** 从 editor pill 抽取的参考图 URL（提交 referenceImages），随 handleInput 更新 */
+  const [mentions, setMentions] = useState<string[]>([]);
   const [dockSize, setDockSize] = useState({ w: 680, h: 164 });
   const editorRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -122,28 +128,41 @@ export function BottomDock({
     return () => ro.disconnect();
   }, []);
 
-  // 重新编辑（X4）：focusSignal 变化 → 聚焦输入框 + pulse 闪烁动画
+  // 重新编辑/带图生成（X4）：focusSignal 变化 → 聚焦输入框，只显示浏览器原生 caret
   useEffect(() => {
     if (!focusSignal) return;
-    const raf = requestAnimationFrame(() => {
-      const el = editorRef.current;
-      if (!el) return;
-      el.focus();
-      el.classList.remove("tc-dock-pulse");
-      void el.offsetWidth; // 触发 reflow 重置动画，允许连续触发
-      el.classList.add("tc-dock-pulse");
-      const done = () => el.classList.remove("tc-dock-pulse");
-      el.addEventListener("animationend", done, { once: true });
-    });
+    const raf = requestAnimationFrame(() => editorRef.current?.focus());
     return () => cancelAnimationFrame(raf);
   }, [focusSignal]);
 
+  // 插入参考图 mention pill（X3）：dockMentionSignal.nonce 变化 → editor 光标处插 pill
+  useEffect(() => {
+    const sig = dockMentionSignal;
+    const item = sig?.item;
+    if (!sig?.nonce || !item) return;
+    const raf = requestAnimationFrame(() => {
+      const el = editorRef.current;
+      if (!el) return;
+      insertMention(el, item, { replace: sig.replace });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [dockMentionSignal]);
+
   const path = squirclePath(dockSize.w, dockSize.h, 28.8);
-  const isEmpty = input.trim().length === 0;
+  const isEmpty = input.trim().length === 0 && mentions.length === 0;
 
   const handleInput = () => {
-    const text = editorRef.current?.innerText ?? "";
-    setInput(text);
+    const el = editorRef.current;
+    if (!el) return;
+    const { prompt, referenceImages } = extractEditor(el);
+    setInput(prompt);
+    setMentions(referenceImages);
+  };
+
+  const handleRemoveImageMedia = (id: string) => {
+    const el = editorRef.current;
+    if (el) removeMention(el, id);
+    onRemoveImageMedia?.(id);
   };
 
   return (
@@ -232,12 +251,12 @@ export function BottomDock({
                   onInput={handleInput}
                   onClose={onClose}
                   media={imageMedia}
-                  onRemoveMedia={onRemoveImageMedia}
+                  onRemoveMedia={handleRemoveImageMedia}
                   onLocalUpload={onLocalUpload}
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
-                  onGenerate={(s) => onGenerate?.(input, { mode: "image", settings: s })}
+                  onGenerate={(s) => onGenerate?.(input, { mode: "image", settings: s, referenceImages: mentions })}
                   generating={generating}
                 />
               ) : (

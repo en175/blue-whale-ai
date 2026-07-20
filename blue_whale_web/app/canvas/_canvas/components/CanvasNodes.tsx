@@ -402,14 +402,14 @@ function ImageNode({ id, data, selected }: NodeProps<CanvasNode>) {
         )}
         <div
           className={`nodrag absolute -top-6 left-0 flex items-center text-xs font-normal leading-4 select-none transition-opacity duration-150 ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-          style={{ width }}
+          style={{ width, background: "transparent" }}
         >
           <div
             className="flex min-w-0 flex-1 items-center gap-[5px]"
             style={{ color: "var(--tc-text-secondary)" }}
           >
             <ImageIcon width={13} height={13} stroke="currentColor" />
-            <span className="tc-node-label-bar__name relative inline-block max-w-[216px] cursor-text overflow-hidden text-ellipsis whitespace-nowrap align-bottom">
+            <span className="tc-node-label-bar__name relative inline-block max-w-[216px] cursor-text overflow-hidden text-ellipsis whitespace-nowrap">
               {data.content || "图片节点"}
             </span>
           </div>
@@ -468,14 +468,14 @@ function VideoNode({ id, data, selected }: NodeProps<CanvasNode>) {
         />
         <div
           className={`nodrag absolute -top-6 left-0 flex items-center text-xs font-normal leading-4 select-none transition-opacity duration-150 ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-          style={{ width }}
+          style={{ width, background: "transparent" }}
         >
           <div
             className="flex min-w-0 flex-1 items-center gap-[5px]"
             style={{ color: "var(--tc-text-secondary)" }}
           >
             <VideoIcon width={13} height={13} stroke="currentColor" />
-            <span className="tc-node-label-bar__name relative inline-block max-w-[216px] cursor-text overflow-hidden text-ellipsis whitespace-nowrap align-bottom">
+            <span className="tc-node-label-bar__name relative inline-block max-w-[216px] cursor-text overflow-hidden text-ellipsis whitespace-nowrap">
               {data.content || "视频节点"}
             </span>
           </div>

@@ -157,7 +157,7 @@ export function ImageDockContent({
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: 8,
+                  gap: 0,
                   borderRadius: 10,
                   position: "relative",
                 }}
@@ -187,41 +187,44 @@ export function ImageDockContent({
                   </button>
                 </div>
 
-                <div style={{ display: "flex", alignItems: "flex-start", flexWrap: "wrap", gap: 6, paddingLeft: 4 }}>
-                  {media.length > 0
-                    ? media.map((m) => <DockMediaThumb key={m.id} item={m} onRemove={onRemoveMedia} />)
-                    : (
-                      <div style={{ position: "relative", flexShrink: 0 }}>
-                        <button
-                          ref={placeholderRef}
-                          type="button"
-                          aria-label="Upload reference image"
-                          aria-haspopup="menu"
-                          aria-expanded={uploadMenuOpen}
-                          onClick={() => handleTriggerClick(placeholderRef)}
-                          style={{
-                            position: "relative",
-                            width: 44,
-                            height: 44,
-                            padding: 0,
-                            borderRadius: 9,
-                            border: "1px solid rgba(255, 255, 255, 0.02)",
-                            background: "rgba(255, 255, 255, 0.043)",
-                            color: "rgba(255, 255, 255, 0.62)",
-                            cursor: "pointer",
-                            opacity: 1,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            overflow: "hidden",
-                            transition: "background 120ms, color 120ms",
-                            flexShrink: 0,
-                          }}
-                        >
-                          <ImageIcon width={18} height={18} stroke="currentColor" strokeWidth={1.8} aria-hidden="true" />
-                        </button>
-                      </div>
-                    )}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    paddingLeft: 8,
+                    paddingTop: 4,
+                  }}
+                >
+                  {media.map((item) => (
+                    <DockMediaThumb key={item.id} item={item} onRemove={onRemoveMedia} />
+                  ))}
+                  <button
+                    ref={placeholderRef}
+                    type="button"
+                    aria-label="Upload reference image"
+                    aria-haspopup="menu"
+                    aria-expanded={uploadMenuOpen}
+                    onClick={() => handleTriggerClick(placeholderRef)}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      padding: 0,
+                      borderRadius: 9,
+                      border: "1px solid rgba(255, 255, 255, 0.02)",
+                      background: "rgba(255, 255, 255, 0.043)",
+                      color: "rgba(255, 255, 255, 0.62)",
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      overflow: "hidden",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <ImageIcon width={18} height={18} stroke="currentColor" strokeWidth={1.8} aria-hidden="true" />
+                  </button>
                 </div>
 
                 <div style={{ position: "relative", flex: "1 1 0%", minWidth: 0 }}>
