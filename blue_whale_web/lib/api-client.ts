@@ -24,7 +24,7 @@ import type { LoginData } from "./auth";
 // ---------------------------------------------------------------------------
 
 let isRefreshing = false;
-let refreshPromise: Promise<string> | null = null;
+let refreshPromise: Promise<LoginData> | null = null;
 
 type QueueItem = {
   resolve: (token: string) => void;
@@ -84,18 +84,23 @@ export function buildAuthHeaders(token?: string | null): Record<string, string> 
   return headers;
 }
 
-/** 调用后端 /api/auth/refresh，返回新的 accessToken。不经过 apiFetch 自身。 */
-async function doRefreshToken(): Promise<string> {
+/** 调用后端 /api/auth/refresh，返回 LoginData。不经过 apiFetch 自身。 */
+async function doRefreshToken(): Promise<LoginData> {
   const rt = loadRefreshToken();
   if (!rt) throw new Error("No refresh token");
 
-  const res = await fetch("/api/auth/refresh", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${rt}`,
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch("/api/auth/refresh", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${rt}`,
+      },
+    });
+  } catch (err) {
+    throw new Error(`__NETWORK_ERROR__${err instanceof Error ? err.message : "Network error"}`);
+  }
 
   if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
 
@@ -106,7 +111,38 @@ async function doRefreshToken(): Promise<string> {
 
   const data = json.data as LoginData;
   saveTokens(data.accessToken, data.refreshToken);
-  return data.accessToken;
+  return data;
+}
+
+/**
+ * 单例刷新 token。同时被 apiFetch 401 拦截和 AuthContext mount 刷新使用，
+ * 确保同一时刻只有一条 /api/auth/refresh 请求，防止 token 轮换竞态。
+ */
+export async function refreshTokens(): Promise<LoginData> {
+  if (!isRefreshing) {
+    isRefreshing = true;
+    refreshPromise = doRefreshToken()
+      .then((data) => {
+        processQueue(null, data.accessToken);
+        return data;
+      })
+      .catch((err) => {
+        processQueue(err);
+        // 网络错误保留 tokens（乐观登录态不丢），鉴权错误清理并弹登录
+        const isNetworkError =
+          err instanceof Error && err.message.startsWith("__NETWORK_ERROR__");
+        if (!isNetworkError) {
+          clearTokens();
+          onAuthFailure?.();
+        }
+        throw err;
+      })
+      .finally(() => {
+        isRefreshing = false;
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise!;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,31 +177,10 @@ export async function apiFetch(
     return res;
   }
 
-  // 401 on 受保护端点 → 启动刷新（单例）
-  if (!isRefreshing) {
-    isRefreshing = true;
-    refreshPromise = doRefreshToken()
-      .then((token) => {
-        processQueue(null, token);
-        return token;
-      })
-      .catch((err) => {
-        processQueue(err);
-        console.warn("[api-client] apiFetch 401 → refresh 也失败，清理 tokens", err instanceof Error ? err.message : err);
-        clearTokens();
-        onAuthFailure?.();
-        throw err;
-      })
-      .finally(() => {
-        isRefreshing = false;
-        refreshPromise = null;
-      });
-  }
-
-  // 等待刷新完成（正在进行的或刚启动的）
+  // 401 on 受保护端点 → 刷新并重试
   try {
-    const newToken = await refreshPromise;
-    res = await makeRequest(newToken);
+    const data = await refreshTokens();
+    res = await makeRequest(data.accessToken);
   } catch {
     throw new Error("认证已过期，请重新登录");
   }
@@ -217,26 +232,8 @@ export async function getAccessTokenSilently(): Promise<string | null> {
   const rt = loadRefreshToken();
   if (!rt) return null;
 
-  if (!isRefreshing) {
-    isRefreshing = true;
-    refreshPromise = doRefreshToken()
-      .then((token) => {
-        processQueue(null, token);
-        return token;
-      })
-      .catch((err) => {
-        processQueue(err);
-        throw err; // silent：抛错由下方 await catch 兜底 return null；不 clearTokens/onAuthFailure
-      })
-      .finally(() => {
-        isRefreshing = false;
-        refreshPromise = null;
-      });
-  }
-
-  // refreshPromise 可能由 apiFetch 发起（失败会 reject），这里兜底 catch
   try {
-    return await refreshPromise;
+    return (await refreshTokens()).accessToken;
   } catch {
     return null;
   }

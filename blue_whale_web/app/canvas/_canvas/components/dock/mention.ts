@@ -1,133 +1,191 @@
 /**
- * Mention pill —— contentEditable 内嵌的参考图引用（对齐 topview tc-mention-pill）。
+ * mention —— contentEditable 参考图 pill 工具
  *
- * 把参考图作为 `contenteditable=false` 的胶囊 span 插入输入框文字流，跟提示词混排；
- * 提交时从 DOM 抽取 prompt（纯文本，排除 pill）+ referenceImages（pill src 列表，按出现顺序）。
- *
- * editor 是 uncontrolled contentEditable（React 不控 innerHTML），pill 用 DOM API 插入，
- * React 重渲染不丢内容（DOM 由浏览器管）。
+ * 在 contentEditable 编辑器内插入/移除参考图 mention pill，
+ * 并从编辑器 DOM 中提取纯文本 prompt 与参考图 URL 列表。
  */
 
+/** 参考图 mention 条目 */
 export type MentionItem = {
-  src: string;
-  name: string;
-  /** data-mention-id，用于去重 / 标识 */
   id: string;
+  type: "image" | "video" | "audio";
+  name: string;
+  src?: string;
+  assetId?: number;
 };
 
-export const PILL_ATTR = "data-mention-src";
-const PILL_CLASS = "tc-mention-pill";
+const MENTION_ATTR = "data-mention-id";
 
-/** 触发 editor 的 input 事件，让 onInput（handleInput）重新抽取 prompt + mentions。 */
-function dispatchInput(editor: HTMLElement) {
-  editor.dispatchEvent(new InputEvent("input", { bubbles: true }));
+/** 在 contentEditable 编辑器光标处插入 mention pill。replace=true 时清空编辑器只保留该 pill。 */
+export function insertMention(
+  el: HTMLElement,
+  item: MentionItem,
+  opts?: { replace?: boolean },
+): void {
+  if (opts?.replace) {
+    el.innerHTML = "";
+  }
+
+  // 确保编辑器聚焦，光标在末尾
+  el.focus();
+  const sel = window.getSelection();
+  if (!sel) return;
+
+  // 若无可用的 range，将光标放到编辑器末尾
+  let range: Range;
+  try {
+    if (sel.rangeCount > 0) {
+      range = sel.getRangeAt(0);
+      // 确保 range 在目标编辑器内
+      if (!el.contains(range.commonAncestorContainer)) {
+        range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+      }
+    } else {
+      range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+    }
+  } catch {
+    range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+  }
+
+  // 构建 pill 元素
+  const pill = buildPill(item);
+
+  // 在光标处插入 pill
+  range.deleteContents();
+  range.insertNode(pill);
+
+  // pill 后加一个空格方便继续输入
+  const space = document.createTextNode(" ");
+  range.setStartAfter(pill);
+  range.collapse(true);
+  range.insertNode(space);
+
+  // 光标移到空格后
+  range.setStartAfter(space);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  // 触发 input 事件让 React 感知变化
+  el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-/** 建一个 mention pill DOM 节点（contenteditable=false，前图后名 + X 删除）。 */
+/** 从编辑器中移除指定 id 的 mention pill */
+export function removeMention(el: HTMLElement, id: string): void {
+  const pill = el.querySelector(`[${MENTION_ATTR}="${id}"]`);
+  if (!pill) return;
+
+  // 移除 pill 前可能的前导换行/空格，以及之后的空格
+  const prev = pill.previousSibling;
+  if (prev && prev.nodeType === Node.TEXT_NODE && prev.textContent?.trim() === "") {
+    prev.remove();
+  }
+  const next = pill.nextSibling;
+  if (next && next.nodeType === Node.TEXT_NODE && next.textContent?.trim() === "") {
+    next.remove();
+  }
+  pill.remove();
+
+  // 触发 input 事件
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/**
+ * 从编辑器 DOM 中提取纯文本 prompt 与参考图 URL 列表。
+ * mention pill 在 prompt 中替换为占位符 `@[name]`，referenceImages 返回其 src 列表。
+ */
+export function extractEditor(el: HTMLElement): {
+  prompt: string;
+  referenceImages: string[];
+} {
+  const referenceImages: string[] = [];
+  const parts: string[] = [];
+
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      parts.push(node.textContent ?? "");
+      return;
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const elem = node as HTMLElement;
+      const mentionId = elem.getAttribute(MENTION_ATTR);
+      if (mentionId) {
+        const name = elem.getAttribute("data-mention-name") ?? mentionId;
+        const src = elem.getAttribute("data-mention-src");
+        parts.push(`@[${name}]`);
+        if (src) referenceImages.push(src);
+        return;
+      }
+      // 递归子节点
+      for (const child of node.childNodes) {
+        walk(child);
+      }
+    }
+  };
+
+  walk(el);
+
+  return {
+    prompt: parts.join("").replace(/ /g, " ").trim(),
+    referenceImages,
+  };
+}
+
+// ---- helpers ----
+
 function buildPill(item: MentionItem): HTMLElement {
   const pill = document.createElement("span");
-  pill.setAttribute("contenteditable", "false");
-  pill.setAttribute(PILL_ATTR, item.src);
+  pill.setAttribute(MENTION_ATTR, item.id);
   pill.setAttribute("data-mention-name", item.name);
-  pill.setAttribute("data-mention-id", item.id);
-  pill.className = `${PILL_CLASS} ${PILL_CLASS}--media`;
-  pill.contentEditable = "false";
+  if (item.src) pill.setAttribute("data-mention-src", item.src);
+  pill.setAttribute("contenteditable", "false");
+  pill.setAttribute("data-mention-type", item.type);
+  pill.style.cssText = [
+    "display:inline-flex",
+    "align-items:center",
+    "gap:3px",
+    "padding:1px 6px 1px 4px",
+    "margin:0 2px",
+    "border-radius:5px",
+    "background:rgba(255,255,255,0.1)",
+    "color:rgba(255,255,255,0.85)",
+    "font-size:13px",
+    "line-height:20px",
+    "vertical-align:middle",
+    "user-select:none",
+    "cursor:default",
+  ].join(";");
 
-  const thumb = document.createElement("img");
-  thumb.className = `${PILL_CLASS}__thumb`;
-  thumb.src = item.src;
-  thumb.alt = item.name;
-  thumb.draggable = false;
-  thumb.width = 18;
-  thumb.height = 18;
-  thumb.referrerPolicy = "no-referrer";
-  thumb.decoding = "async";
+  // 缩略图（如果有 src）
+  if (item.src) {
+    const img = document.createElement("img");
+    img.src = item.src;
+    img.alt = item.name;
+    img.style.cssText = [
+      "width:18px",
+      "height:18px",
+      "border-radius:3px",
+      "object-fit:cover",
+      "flex-shrink:0",
+    ].join(";");
+    pill.appendChild(img);
+  } else {
+    // 图标占位
+    const icon = document.createElement("span");
+    icon.textContent = item.type === "image" ? "🖼" : item.type === "video" ? "🎬" : "🎵";
+    icon.style.cssText = "font-size:12px;line-height:1;";
+    pill.appendChild(icon);
+  }
 
-  const name = document.createElement("span");
-  name.className = `${PILL_CLASS}__name`;
-  name.textContent = item.name;
+  const label = document.createElement("span");
+  label.textContent = item.name.length > 12 ? item.name.slice(0, 12) + "…" : item.name;
+  pill.appendChild(label);
 
-  const x = document.createElement("button");
-  x.type = "button";
-  x.className = `${PILL_CLASS}__x`;
-  x.setAttribute("aria-label", `移除 ${item.name}`);
-  x.addEventListener("click", (e) => {
-    e.preventDefault();
-    const editor = pill.parentElement;
-    pill.remove();
-    if (editor) dispatchInput(editor);
-  });
-  x.textContent = "×";
-
-  pill.appendChild(thumb);
-  pill.appendChild(name);
-  pill.appendChild(x);
   return pill;
-}
-
-/** 按素材 id 删除 mention pill；顶部缩略图删除时用于同步取消输入框引用。 */
-export function removeMention(editor: HTMLDivElement, id: string): boolean {
-  const pill = Array.from(editor.querySelectorAll<HTMLElement>(`[${PILL_ATTR}]`)).find(
-    (node) => node.dataset.mentionId === id,
-  );
-  if (!pill) return false;
-  pill.remove();
-  dispatchInput(editor);
-  return true;
-}
-
-/**
- * 在 contentEditable 光标处插入 mention pill + 后随不间断空格（保证光标可移出 pill）。
- * Range 插入模式参考 AgentChatPanel.insertSkillIntoComposer。
- */
-export function insertMention(
-  editor: HTMLDivElement,
-  item: MentionItem,
-  options?: { replace?: boolean }
-) {
-  editor.focus();
-  if (options?.replace) {
-    editor.innerHTML = "";
-  } else if (editor.querySelector(`[${PILL_ATTR}="${item.src}"]`)) {
-    dispatchInput(editor);
-    return;
-  }
-  const pill = buildPill(item);
-  const space = document.createTextNode(" ");
-
-  const selection = window.getSelection();
-  let placed = false;
-  if (!options?.replace && selection && selection.rangeCount > 0) {
-    const range = selection.getRangeAt(0);
-    if (editor.contains(range.commonAncestorContainer)) {
-      range.deleteContents();
-      range.insertNode(space);
-      range.insertNode(pill);
-      range.setStartAfter(space);
-      range.setEndAfter(space);
-      selection.removeAllRanges();
-      selection.addRange(range);
-      placed = true;
-    }
-  }
-  if (!placed) {
-    editor.appendChild(pill);
-    editor.appendChild(space);
-  }
-  dispatchInput(editor);
-}
-
-/**
- * 从 editor DOM 抽取：prompt（纯文本，排除 pill）+ referenceImages（pill src 列表，按 DOM 出现顺序）。
- */
-export function extractEditor(editor: HTMLDivElement): { prompt: string; referenceImages: string[] } {
-  const clone = editor.cloneNode(true) as HTMLDivElement;
-  clone.querySelectorAll(`[${PILL_ATTR}]`).forEach((n) => n.remove());
-  const prompt = (clone.innerText ?? "").replace(/ /g, " ");
-  const referenceImages: string[] = [];
-  editor.querySelectorAll(`[${PILL_ATTR}]`).forEach((n) => {
-    const src = (n as HTMLElement).getAttribute(PILL_ATTR);
-    if (src && !referenceImages.includes(src)) referenceImages.push(src);
-  });
-  return { prompt, referenceImages };
 }

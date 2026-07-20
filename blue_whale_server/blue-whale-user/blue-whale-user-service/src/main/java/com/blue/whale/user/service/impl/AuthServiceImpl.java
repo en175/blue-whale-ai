@@ -15,6 +15,7 @@ import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +36,7 @@ public class AuthServiceImpl implements AuthService {
     private final UserMapper userMapper;
     private final SmsProvider smsProvider;
     private final JwtUtil jwtUtil;
+    private final PasswordEncoder passwordEncoder;
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
@@ -161,6 +163,7 @@ public class AuthServiceImpl implements AuthService {
                 .phone(user.getPhone())
                 .avatar(user.getAvatar())
                 .isNewUser(isNewUser)
+                .hasPassword(user.getPassword() != null)
                 .build();
     }
 
@@ -212,6 +215,7 @@ public class AuthServiceImpl implements AuthService {
                 .phone(user.getPhone())
                 .avatar(user.getAvatar())
                 .isNewUser(false)
+                .hasPassword(user.getPassword() != null)
                 .build();
     }
 
@@ -312,6 +316,106 @@ public class AuthServiceImpl implements AuthService {
         log.info("手机号更换成功: userId={}, newPhone={}", userId, maskPhone(newPhone));
     }
 
+    // ==================== 密码登录 ====================
+
+    /** 密码强度正则：至少 8 位，含字母+数字 */
+    private static final String PASSWORD_PATTERN = "^(?=.*[A-Za-z])(?=.*\\d).{8,128}$";
+
+    @Override
+    public LoginResponse passwordLogin(String account, String password) {
+        // 查用户：先按手机号，再按用户名
+        User user = userMapper.selectOne(
+                new LambdaQueryWrapper<User>()
+                        .eq(User::getPhone, account)
+                        .last("LIMIT 1")
+        );
+        if (user == null) {
+            user = userMapper.selectOne(
+                    new LambdaQueryWrapper<User>()
+                            .eq(User::getUsername, account)
+                            .last("LIMIT 1")
+            );
+        }
+        if (user == null) {
+            throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "账号未注册");
+        }
+
+        // 未设密码
+        if (user.getPassword() == null) {
+            throw new GlobalException(SystemCode.FAILURE_CODE, "未设置密码，请先用验证码登录");
+        }
+
+        // 校验密码
+        if (!passwordEncoder.matches(password, user.getPassword())) {
+            throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "密码错误");
+        }
+
+        log.info("密码登录成功: id={}, account={}", user.getId(), maskAccount(account));
+
+        // 生成双 token
+        String userIdStr = String.valueOf(user.getId());
+        String accessToken = jwtUtil.generateAccessToken(userIdStr, user.getPhone());
+        String refreshToken = jwtUtil.generateRefreshToken(userIdStr);
+        var claims = jwtUtil.parse(refreshToken);
+        RedisUtil.setCacheObject(
+                REFRESH_TOKEN_PREFIX + claims.getId(),
+                userIdStr,
+                2_592_000,
+                TimeUnit.SECONDS
+        );
+
+        return LoginResponse.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .expiresIn(jwtUtil.getAccessExpiration())
+                .userId(user.getId())
+                .username(user.getUsername())
+                .phone(user.getPhone())
+                .avatar(user.getAvatar())
+                .isNewUser(false)
+                .hasPassword(user.getPassword() != null)
+                .build();
+    }
+
+    // ==================== 设置密码 ====================
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void setPassword(Long userId, String code, String password) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "用户不存在");
+        }
+
+        // 校验短信验证码
+        boolean isTestPhone = TEST_PHONE.equals(user.getPhone());
+        if (!isTestPhone) {
+            String stored = RedisUtil.getCacheObject(SMS_CODE_PREFIX + user.getPhone());
+            if (stored == null) {
+                throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "验证码已过期，请重新获取");
+            }
+            if (!stored.equals(code)) {
+                throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "验证码错误");
+            }
+            RedisUtil.delete(SMS_CODE_PREFIX + user.getPhone());
+        }
+
+        // 密码强度校验
+        if (!password.matches(PASSWORD_PATTERN)) {
+            throw new GlobalException(SystemCode.PARAM_VALID_ERROR_CODE, "密码需 8-128 位，且包含字母和数字");
+        }
+
+        // hash 并更新
+        String hashed = passwordEncoder.encode(password);
+        User updateUser = new User();
+        updateUser.setId(userId);
+        updateUser.setPassword(hashed);
+        updateUser.setGmtModified(LocalDateTime.now());
+        userMapper.updateById(updateUser);
+
+        log.info("密码设置成功: userId={}", userId);
+    }
+
     // ==================== 内部方法 ====================
 
     private String generateCode() {
@@ -347,6 +451,14 @@ public class AuthServiceImpl implements AuthService {
     private static String maskPhone(String phone) {
         if (phone == null || phone.length() < 7) return "***";
         return phone.replaceAll("(\\d{3})\\d{4}(\\d{4})", "$1****$2");
+    }
+
+    /** 账号脱敏：手机号走 maskPhone，用户名只留首尾字符 */
+    private static String maskAccount(String account) {
+        if (account == null) return "***";
+        if (account.matches("1[3-9]\\d{9}")) return maskPhone(account);
+        if (account.length() <= 2) return account.charAt(0) + "*";
+        return account.charAt(0) + "***" + account.charAt(account.length() - 1);
     }
 
     private Long incrWithTTL(String key, int ttlSeconds) {

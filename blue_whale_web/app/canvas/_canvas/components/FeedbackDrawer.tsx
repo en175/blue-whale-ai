@@ -1,173 +1,101 @@
 /**
- * FeedbackDrawer —— 右侧「意见反馈」抽屉（展示层）。
- * 点击画布右上「反馈」按钮弹出。表单：反馈类型单选 + 内容 textarea（0/200）+ 截图上传（占位）。
- * 提交先不接后端（noop → 关闭）。createPortal 渲染浮层，Esc / 点遮罩关闭。
+ * FeedbackDrawer —— 右侧滑出反馈面板
+ * 收集用户反馈文本，提交后关闭。
  */
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
-import { ImagePlus, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 
-const FEEDBACK_TYPES = [
-  { id: "bug", label: "问题反馈" },
-  { id: "feature", label: "功能建议" },
-  { id: "other", label: "其他" },
-] as const;
+interface FeedbackDrawerProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
 
-const MAX_LEN = 200;
-
-export function FeedbackDrawer({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
-  const [type, setType] = useState<string>(FEEDBACK_TYPES[0].id);
-  const [content, setContent] = useState("");
+export function FeedbackDrawer({ isOpen, onClose }: FeedbackDrawerProps) {
+  const [text, setText] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [isOpen, onClose]);
+    if (isOpen) {
+      setText("");
+      setSubmitted(false);
+      // 等动画帧后聚焦
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    }
+  }, [isOpen]);
+
+  const handleSubmit = () => {
+    if (!text.trim()) return;
+    // TODO: 接入反馈 API
+    setSubmitted(true);
+  };
 
   if (!isOpen) return null;
 
-  return createPortal(
-    <div className="fixed inset-0 z-[400]" role="dialog" aria-modal="true" aria-label="意见反馈">
+  return (
+    <>
       {/* 遮罩 */}
-      <div className="absolute inset-0" style={{ background: "var(--tc-bg-overlay)" }} onClick={onClose} />
+      <div
+        className="fixed inset-0 z-[2147483611] bg-black/40"
+        onClick={onClose}
+        aria-hidden="true"
+      />
       {/* 抽屉 */}
       <div
-        className="absolute right-0 top-0 flex h-full flex-col tc-enter tc-enter--right"
-        style={{
-          width: 380,
-          background: "var(--tc-bg-surface)",
-          borderLeft: "1px solid var(--tc-border-subtle)",
-          boxShadow: "rgba(0, 0, 0, 0.4) -8px 0 24px",
-        }}
+        className="fixed top-0 right-0 z-[2147483612] h-full w-[400px] max-w-[calc(100vw-32px)] bg-[#1a1a1a] border-l border-white/[0.08] shadow-[-8px_0_40px_rgba(0,0,0,0.4)] flex flex-col"
+        role="dialog"
+        aria-modal="true"
+        aria-label="反馈"
       >
-        {/* 标题栏 */}
-        <div
-          className="flex items-center justify-between px-5 py-4"
-          style={{ borderBottom: "1px solid var(--tc-border-subtle)" }}
-        >
-          <span className="text-[15px] font-semibold" style={{ color: "var(--tc-text-primary)" }}>
-            意见反馈
-          </span>
-          <button
-            type="button"
-            aria-label="关闭"
-            onClick={onClose}
-            className="tc-ui-glow-btn flex h-7 w-7 items-center justify-center rounded-lg hover:bg-[var(--tc-menu-item-hover)]"
-            style={{ background: "transparent", border: 0, color: "var(--tc-text-secondary)", cursor: "pointer" }}
-          >
-            <X width={16} height={16} />
-          </button>
-        </div>
-
-        {/* 内容区 */}
-        <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-5">
-          {/* 反馈类型 */}
-          <div className="flex flex-col gap-2">
-            <label className="text-xs" style={{ color: "var(--tc-text-tertiary)" }}>
-              反馈类型
-            </label>
-            <div className="flex gap-2">
-              {FEEDBACK_TYPES.map((t) => {
-                const active = type === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => setType(t.id)}
-                    className="rounded-full px-3 py-1.5 text-xs transition-colors"
-                    style={{
-                      background: active ? "var(--tc-accent)" : "transparent",
-                      border: `1px solid ${active ? "var(--tc-accent)" : "var(--tc-border)"}`,
-                      color: active ? "#fff" : "var(--tc-text-secondary)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {t.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* 反馈内容 */}
-          <div className="flex flex-col gap-2">
-            <label className="text-xs" style={{ color: "var(--tc-text-tertiary)" }}>
-              反馈内容
-            </label>
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value.slice(0, MAX_LEN))}
-              placeholder="请输入反馈内容"
-              maxLength={MAX_LEN}
-              rows={6}
-              className="resize-none rounded-lg px-3 py-2 text-sm outline-none"
-              style={{
-                background: "var(--tc-bg-elevated)",
-                border: "1px solid var(--tc-border)",
-                color: "var(--tc-text-primary)",
-              }}
-            />
-            <span className="self-end text-[11px] tabular-nums" style={{ color: "var(--tc-text-muted)" }}>
-              {content.length}/{MAX_LEN}
-            </span>
-          </div>
-
-          {/* 截图上传（占位，未接上传） */}
-          <div className="flex flex-col gap-2">
-            <label className="text-xs" style={{ color: "var(--tc-text-tertiary)" }}>
-              截图（可选）
-            </label>
-            <div
-              className="flex flex-col items-center justify-center gap-1.5 rounded-lg py-6"
-              style={{
-                border: "1px dashed var(--tc-border-active)",
-                background: "var(--tc-bg-elevated)",
-                color: "var(--tc-text-muted)",
-              }}
-            >
-              <ImagePlus width={20} height={20} />
-              <span className="text-xs">拖拽或点击上传截图</span>
-            </div>
-          </div>
-        </div>
-
-        {/* 底部按钮 */}
-        <div
-          className="flex justify-end gap-2 px-5 py-4"
-          style={{ borderTop: "1px solid var(--tc-border-subtle)" }}
-        >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06] shrink-0">
+          <h3 className="text-[15px] font-semibold text-white">反馈</h3>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-4 py-2 text-sm transition-colors hover:bg-[var(--tc-menu-item-hover)]"
-            style={{
-              background: "transparent",
-              border: "1px solid var(--tc-border)",
-              color: "var(--tc-text-secondary)",
-              cursor: "pointer",
-            }}
+            className="inline-flex w-8 h-8 items-center justify-center rounded-lg text-white/45 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
+            aria-label="关闭反馈"
           >
-            取消
+            <X size={16} />
           </button>
-          <button
-            type="button"
-            disabled={!content.trim()}
-            onClick={() => {
-              // TODO: 接后端提交反馈（type + content + 截图）
-              onClose();
-            }}
-            className="rounded-lg px-4 py-2 text-sm font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ background: "var(--tc-accent)", border: 0, color: "#fff", cursor: "pointer" }}
-          >
-            提交
-          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 flex flex-col gap-4 p-5 min-h-0">
+          {submitted ? (
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-white/60">
+              <div className="text-[64px]">🎉</div>
+              <p className="text-sm">感谢你的反馈！</p>
+              <button
+                type="button"
+                onClick={onClose}
+                className="mt-2 h-9 px-5 rounded-lg bg-white/[0.08] text-white/80 text-sm hover:bg-white/[0.12] transition-colors"
+              >
+                关闭
+              </button>
+            </div>
+          ) : (
+            <>
+              <textarea
+                ref={textareaRef}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="请描述你的问题或建议…"
+                rows={8}
+                className="w-full flex-1 min-h-[160px] bg-white/[0.05] rounded-lg px-4 py-3 text-sm text-white/90 placeholder:text-white/30 outline-none resize-none border border-white/[0.06] focus:border-white/20 transition-colors"
+              />
+              <button
+                type="button"
+                disabled={!text.trim()}
+                onClick={handleSubmit}
+                className="h-10 w-full rounded-lg bg-[#4e40f3] text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-[#3d33d1] shrink-0"
+              >
+                提交反馈
+              </button>
+            </>
+          )}
         </div>
       </div>
-    </div>,
-    document.body,
+    </>
   );
 }

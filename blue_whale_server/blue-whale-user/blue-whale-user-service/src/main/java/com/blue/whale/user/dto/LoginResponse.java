@@ -25,4 +25,7 @@ public class LoginResponse {
     private String avatar;
 
     private Boolean isNewUser;
+
+    /** 是否已设置密码 */
+    private Boolean hasPassword;
 }

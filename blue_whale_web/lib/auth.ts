@@ -16,6 +16,7 @@ export interface LoginData {
   phone: string;
   avatar?: string;
   isNewUser: boolean;
+  hasPassword?: boolean;
 }
 export interface UserInfo {
   userId: number;
@@ -81,6 +82,14 @@ export function loginWithCode(phone: string, code: string): Promise<LoginData> {
   });
 }
 
+/** 密码登录：account 支持手机号或用户名 */
+export function loginWithPassword(account: string, password: string): Promise<LoginData> {
+  return getResult<LoginData>("/api/auth/login/password", {
+    method: "POST",
+    body: JSON.stringify({ account, password }),
+  });
+}
+
 /** 刷新 token（由 api-client 内部直接 fetch，外部一般不直接调）。 */
 export function refreshToken(refreshToken: string): Promise<LoginData> {
   return getResult<LoginData>("/api/auth/refresh", {
@@ -137,5 +146,13 @@ export async function uploadAvatar(file: File): Promise<{ url: string }> {
   return apiRequest<{ url: string }>("/api/user/avatar", {
     method: "PUT",
     body: formData,
+  });
+}
+
+/** 设置密码（已登录 + 短信验证码） */
+export function setPassword(code: string, password: string): Promise<void> {
+  return apiRequest<void>("/api/auth/set-password", {
+    method: "POST",
+    body: JSON.stringify({ code, password }),
   });
 }

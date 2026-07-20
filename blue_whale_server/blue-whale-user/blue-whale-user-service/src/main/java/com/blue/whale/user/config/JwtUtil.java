@@ -22,7 +22,7 @@ public class JwtUtil {
 
     /** access_token 有效期（秒），默认 15 分钟 */
 //    private static final long ACCESS_EXPIRATION = 900;
-    private static final long ACCESS_EXPIRATION = 60;
+    private static final long ACCESS_EXPIRATION = 60*60*24;
     /** refresh_token 有效期（秒），默认 30 天 */
     private static final long REFRESH_EXPIRATION = 2_592_000;
 

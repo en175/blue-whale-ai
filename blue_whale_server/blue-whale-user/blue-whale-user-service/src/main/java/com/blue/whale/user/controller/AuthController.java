@@ -5,12 +5,15 @@ import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import com.blue.whale.user.dto.LoginRequest;
 import com.blue.whale.user.dto.LoginResponse;
+import com.blue.whale.user.dto.PasswordLoginRequest;
 import com.blue.whale.user.dto.SendCodeRequest;
+import com.blue.whale.user.dto.SetPasswordRequest;
 import com.blue.whale.user.service.AuthService;
 import com.blue.whale.web.utils.IpUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -53,6 +56,18 @@ public class AuthController {
         if (header != null && header.startsWith("Bearer ")) {
             authService.logout(header.substring(7));
         }
+        return Result.ok();
+    }
+
+    @PostMapping("/login/password")
+    public Result<LoginResponse> passwordLogin(@Valid @RequestBody PasswordLoginRequest req) {
+        return Result.ok(authService.passwordLogin(req.getAccount(), req.getPassword()));
+    }
+
+    @PostMapping("/set-password")
+    public Result<Void> setPassword(@Valid @RequestBody SetPasswordRequest req,
+                                     @RequestHeader("X-User-Id") Long userId) {
+        authService.setPassword(userId, req.getCode(), req.getPassword());
         return Result.ok();
     }
 }
