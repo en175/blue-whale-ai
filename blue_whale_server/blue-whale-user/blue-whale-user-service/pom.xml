@@ -72,6 +72,10 @@
 
         <!-- Blue-Whale 内部模块 -->
         <dependency>
+            <groupId>com.blue-whale.tool.mp</groupId>
+            <artifactId>blue-whale-common-mybatis-plus</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.blue-whale.tool.log</groupId>
             <artifactId>blue-whale-common-log</artifactId>
             <exclusions>
