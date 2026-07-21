@@ -1,3 +1,4 @@
+import hashlib
 import json
 import unittest
 
@@ -92,6 +93,142 @@ def _bundle_source() -> FakeBundleSource:
             }
         },
     )
+
+
+# ---- 受限资源读取夹具（IK2QBM：on_demand Skill 正文 + 引用资源）----
+
+SKILL_RESOURCE_ID = "skill_root"
+SKILL_NAME = "root_skill"
+SKILL_DESC = "根创作工作流"
+SKILL_BODY = "# 根创作工作流正文\n1. 澄清意图 2. 提出生图动作。"
+REF_RESOURCE_ID = "ref_rule"
+REF_BODY = "# 安全规则\n生成前确认比例与风格。"
+
+
+def _sha256(text: str) -> str:
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _skill_manifest() -> dict:
+    return {
+        "formatVersion": 1,
+        "baseUri": f"bw-bundle://{BUNDLE_VERSION_ID}/",
+        "digestAlgorithm": "sha256",
+        "resources": [
+            {
+                "resourceId": "role_main",
+                "revision": 1,
+                "kind": "role_document",
+                "path": "AGENTS.md",
+                "mediaType": "text/markdown",
+                "loadMode": "always_on",
+                "contentDigest": _sha256(ROLE_DOCUMENT_BODY),
+                "sizeBytes": len(ROLE_DOCUMENT_BODY),
+                "tokenEstimate": 32,
+                "references": [],
+            },
+            {
+                "resourceId": SKILL_RESOURCE_ID,
+                "revision": 1,
+                "kind": "runtime_skill",
+                "path": "skill.md",
+                "mediaType": "text/markdown",
+                "loadMode": "on_demand",
+                "contentDigest": _sha256(SKILL_BODY),
+                "sizeBytes": len(SKILL_BODY),
+                "tokenEstimate": 32,
+                "references": [{"rawRef": "ref.md", "resolvedResourceId": REF_RESOURCE_ID}],
+                "metadata": {
+                    "name": SKILL_NAME,
+                    "description": SKILL_DESC,
+                    "allowImplicitInvocation": False,
+                },
+            },
+            {
+                "resourceId": REF_RESOURCE_ID,
+                "revision": 1,
+                "kind": "rule",
+                "path": "ref.md",
+                "mediaType": "text/markdown",
+                "loadMode": "on_demand",
+                "contentDigest": _sha256(REF_BODY),
+                "sizeBytes": len(REF_BODY),
+                "tokenEstimate": 32,
+                "references": [],
+            },
+        ],
+    }
+
+
+SKILL_MANIFEST_DIGEST = manifest_digest(_skill_manifest())
+
+
+def _skill_snapshot() -> dict:
+    manifest = dict(_skill_manifest())
+    manifest["manifestDigest"] = SKILL_MANIFEST_DIGEST
+    return {
+        "bundleVersionId": BUNDLE_VERSION_ID,
+        "version": "1.0.0",
+        "composition": {
+            "roleDocumentId": "role_main",
+            "ruleSet": {"rules": []},
+            "rootRuntimeSkillId": SKILL_RESOURCE_ID,
+            "modelProfiles": [
+                {
+                    "modelProfileId": MODEL_PROFILE_ID,
+                    "version": MODEL_PROFILE_VERSION,
+                    "modelKey": "doubao-seed-1-6",
+                    "capabilities": ["text", "tool_calling"],
+                    "maxInputTokens": 100000,
+                    "maxOutputTokens": 4096,
+                }
+            ],
+            "toolGrants": [],
+            "tokenBudget": {
+                "estimator": "chars_div_4",
+                "initialContextMaxTokens": 1000,
+                "singleResourceMaxTokens": 1000,
+                "activeContextMaxTokens": 4000,
+            },
+            "resourceManifest": manifest,
+        },
+    }
+
+
+def _skill_source() -> FakeBundleSource:
+    return FakeBundleSource(
+        snapshots={BUNDLE_VERSION_ID: _skill_snapshot()},
+        resources={
+            BUNDLE_VERSION_ID: {
+                "role_main": {"resource_id": "role_main", "content": ROLE_DOCUMENT_BODY},
+                SKILL_RESOURCE_ID: {"resource_id": SKILL_RESOURCE_ID, "content": SKILL_BODY},
+                REF_RESOURCE_ID: {"resource_id": REF_RESOURCE_ID, "content": REF_BODY},
+            }
+        },
+    )
+
+
+def _skill_work(**overrides) -> RunWork:
+    fields = dict(
+        agent_run_id=23,
+        project_id=7,
+        conversation_id=11,
+        user_id=10,
+        run_version=1,
+        fencing_token=4,
+        engine="pydantic-ai",
+        engine_version="2.9.0",
+        adapter_schema_version=1,
+        messages=({"role": "user", "content": "帮我生成一张海报"},),
+        checkpoint=None,
+        bundle_version_id=BUNDLE_VERSION_ID,
+        manifest_digest=SKILL_MANIFEST_DIGEST,
+        model_profile_id=MODEL_PROFILE_ID,
+        model_profile_version=MODEL_PROFILE_VERSION,
+        tool_grants=(_generate_image_grant(),),
+    )
+    fields.update(overrides)
+    return RunWork(**fields)
 
 
 def _generate_image_grant() -> ToolGrant:
@@ -720,13 +857,14 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertIn("generate_image", captured["with_grant"])
         self.assertEqual("create_image_generation_job", result.actions[0].tool_id)
 
-        # grant 为空集：模型收到空工具集（纯文本对话），未授权工具不可见。
+        # grant 为空集：未授权业务工具不可见；read_resource 是 Bundle 固有受限读取
+        # 工具，不经 ToolGrant，每个有 Bundle pin 的 Run 总注入（IK2QBM）。
         text_result = PydanticAIOrchestrator(
             FunctionModel(text_capture_model), _bundle_source()
         ).advance(
             _pydantic_work(messages=({"role": "user", "content": "你好"},), tool_grants=())
         )
-        self.assertEqual([], captured["without_grant"])
+        self.assertEqual(["read_resource"], captured["without_grant"])
         self.assertIsNone(text_result.error)
 
     def test_read_only_direct_and_side_effect_deferred_registration(self) -> None:
@@ -942,6 +1080,226 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertEqual("create_image_generation_job", payload["actions"][0]["tool_id"])
         self.assertEqual("16:9", payload["actions"][0]["arguments"]["aspect_ratio"])
         self.assertEqual("已接纳，正在生成图片。", resumed_result.visible_text)
+
+    def test_untriggered_skill_body_stays_out_of_model_context(self) -> None:
+        # IK2QBM acceptance #2：未触发 Skill 正文不进入模型上下文；instructions 仅含元数据。
+        captured: list = []
+
+        def capture_model(messages, info):
+            captured.append(info.instructions)
+            return ModelResponse(parts=(TextPart("您想要什么风格？"),))
+
+        result = PydanticAIOrchestrator(
+            FunctionModel(capture_model), _skill_source()
+        ).advance(_skill_work())
+
+        self.assertEqual(1, len(captured))
+        self.assertNotIn(SKILL_BODY, captured[0])
+        self.assertNotIn(REF_BODY, captured[0])
+        self.assertIn(SKILL_NAME, captured[0])  # 元数据仍披露
+        # 未触发 on_demand 读取：evidence 只含 initial
+        origins = {entry["origin"] for entry in result.bundle_evidence}
+        self.assertEqual({"initial"}, origins)
+
+    def test_triggered_skill_body_enters_via_read_resource(self) -> None:
+        # IK2QBM acceptance #2/#6：模型触发 read_resource 读 Skill 正文，经工具返回进入，
+        # 产生 on_demand 读取证据并随 commit 回传（契约 §6 第 4 条）。
+        def read_then_clarify_model(messages, info):
+            if not any(
+                isinstance(part, ToolReturnPart)
+                for message in messages
+                for part in message.parts
+            ):
+                return ModelResponse(
+                    parts=(
+                        ToolCallPart(
+                            "read_resource",
+                            {"resource_id": SKILL_RESOURCE_ID},
+                            "read-skill-call",
+                        ),
+                    )
+                )
+            return ModelResponse(parts=(TextPart("已读取工作流，请补充风格。"),))
+
+        result = PydanticAIOrchestrator(
+            FunctionModel(read_then_clarify_model), _skill_source()
+        ).advance(_skill_work())
+
+        on_demand = [
+            entry for entry in result.bundle_evidence if entry["origin"] == "on_demand"
+        ]
+        self.assertEqual(1, len(on_demand))
+        self.assertEqual(SKILL_RESOURCE_ID, on_demand[0]["resource_id"])
+        self.assertEqual(_sha256(SKILL_BODY), on_demand[0]["content_digest"])
+        payload = result.to_commit_payload(_skill_work())
+        self.assertIsNotNone(payload["bundle_evidence"])
+        read_ids = {entry["resource_id"] for entry in payload["bundle_evidence"]}
+        self.assertIn(SKILL_RESOURCE_ID, read_ids)
+
+    def test_triggered_skill_references_read_in_layers(self) -> None:
+        # IK2QBM acceptance #2：触发后正文与引用资源可逐层按需读取。instructions 披露
+        # Skill 已解析引用的 resourceId，模型先读 Skill 正文，再据披露的引用键读引用 Rule。
+        captured: list = []
+
+        def read_in_layers_model(messages, info):
+            captured.append(info.instructions)
+            returns = [
+                part
+                for message in messages
+                for part in message.parts
+                if isinstance(part, ToolReturnPart)
+            ]
+            if len(returns) == 0:
+                return ModelResponse(
+                    parts=(
+                        ToolCallPart(
+                            "read_resource",
+                            {"resource_id": SKILL_RESOURCE_ID},
+                            "read-skill",
+                        ),
+                    )
+                )
+            if len(returns) == 1:
+                return ModelResponse(
+                    parts=(
+                        ToolCallPart(
+                            "read_resource",
+                            {"resource_id": REF_RESOURCE_ID},
+                            "read-ref",
+                        ),
+                    )
+                )
+            return ModelResponse(parts=(TextPart("已读工作流与安全规则，请补充比例。"),))
+
+        result = PydanticAIOrchestrator(
+            FunctionModel(read_in_layers_model), _skill_source()
+        ).advance(_skill_work())
+
+        # instructions 披露引用 resourceId：模型逐层寻址键可达
+        self.assertIn(REF_RESOURCE_ID, captured[0])
+        # 两层 on_demand 读取证据随 commit 回传
+        on_demand_ids = {
+            entry["resource_id"]
+            for entry in result.bundle_evidence
+            if entry["origin"] == "on_demand"
+        }
+        self.assertEqual({SKILL_RESOURCE_ID, REF_RESOURCE_ID}, on_demand_ids)
+        self.assertEqual(
+            _sha256(REF_BODY),
+            next(
+                entry["content_digest"]
+                for entry in result.bundle_evidence
+                if entry["resource_id"] == REF_RESOURCE_ID
+            ),
+        )
+
+    def test_read_resource_digest_mismatch_fails_closed_end_to_end(self) -> None:
+        # IK2QBM acceptance #3：源端正文与 manifest 摘要不符 → BUNDLE_RESOURCE_DIGEST_MISMATCH。
+        tampered = FakeBundleSource(
+            snapshots={BUNDLE_VERSION_ID: _skill_snapshot()},
+            resources={
+                BUNDLE_VERSION_ID: {
+                    "role_main": {"resource_id": "role_main", "content": ROLE_DOCUMENT_BODY},
+                    SKILL_RESOURCE_ID: {
+                        "resource_id": SKILL_RESOURCE_ID,
+                        "content": "被篡改的工作流正文",
+                    },
+                    REF_RESOURCE_ID: {"resource_id": REF_RESOURCE_ID, "content": REF_BODY},
+                }
+            },
+        )
+
+        def read_model(messages, info):
+            return ModelResponse(
+                parts=(
+                    ToolCallPart(
+                        "read_resource",
+                        {"resource_id": SKILL_RESOURCE_ID},
+                        "tampered-call",
+                    ),
+                )
+            )
+
+        result = PydanticAIOrchestrator(FunctionModel(read_model), tampered).advance(
+            _skill_work()
+        )
+        self.assertEqual("BUNDLE_RESOURCE_DIGEST_MISMATCH", result.error["code"])
+
+    def test_checkpoint_replay_rebuilds_read_resource_ledger(self) -> None:
+        # IK2QBM acceptance #7：checkpoint 恢复从消息历史确定性重建 read_resource 已读集合。
+        def read_then_image_model(messages, info):
+            has_return = any(
+                isinstance(part, ToolReturnPart)
+                for message in messages
+                for part in message.parts
+            )
+            if not has_return:
+                return ModelResponse(
+                    parts=(
+                        ToolCallPart(
+                            "read_resource",
+                            {"resource_id": REF_RESOURCE_ID},
+                            "read-ref-call",
+                        ),
+                    )
+                )
+            return ModelResponse(
+                parts=(
+                    ToolCallPart(
+                        "generate_image",
+                        {"prompt": "海报", "aspect_ratio": "1:1"},
+                        "img-call",
+                    ),
+                )
+            )
+
+        def resume_text_model(messages, info):
+            return ModelResponse(parts=(TextPart("图片已经生成。"),))
+
+        initial = PydanticAIOrchestrator(
+            FunctionModel(read_then_image_model), _skill_source()
+        ).advance(_skill_work())
+        self.assertEqual(1, len(initial.actions))  # 首轮 read_resource 后提议生图
+        first_on_demand = [
+            entry for entry in initial.bundle_evidence if entry["origin"] == "on_demand"
+        ]
+        self.assertEqual(1, len(first_on_demand))
+        self.assertEqual(REF_RESOURCE_ID, first_on_demand[0]["resource_id"])
+
+        restored = RuntimeCheckpoint(
+            engine=initial.checkpoint.engine,
+            engine_version=initial.checkpoint.engine_version,
+            adapter_schema_version=initial.checkpoint.adapter_schema_version,
+            opaque_payload=json.loads(
+                json.dumps(initial.checkpoint.opaque_payload, ensure_ascii=False)
+            ),
+        )
+        resumed = PydanticAIOrchestrator(
+            FunctionModel(resume_text_model), _skill_source()
+        ).advance(
+            _skill_work(
+                run_version=2,
+                fencing_token=5,
+                checkpoint=restored,
+                accepted_results=(
+                    AcceptedActionResult(
+                        action_id=initial.actions[0].action_id,
+                        status="succeeded",
+                        result={"asset_ids": [91]},
+                    ),
+                ),
+            )
+        )
+        history = [
+            entry for entry in resumed.bundle_evidence if entry["origin"] == "history"
+        ]
+        self.assertEqual(1, len(history))
+        self.assertEqual(REF_RESOURCE_ID, history[0]["resource_id"])
+        # 恢复重建后不再 on_demand 重复读 ref
+        resumed_on_demand = [
+            entry for entry in resumed.bundle_evidence if entry["origin"] == "on_demand"
+        ]
+        self.assertEqual(0, len(resumed_on_demand))
 
 
 if __name__ == "__main__":

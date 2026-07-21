@@ -1,18 +1,24 @@
-"""Runtime Agent Bundle 基础上下文装载器（契约 §6 / IK2QBJ）。
+"""Runtime Agent Bundle 基础上下文装载器（契约 §6 / IK2QBJ + IK2QBM）。
 
 消费 ``BundleVerifier`` 校验通过的 ``VerifiedSnapshot``，按 always_on 装载基础上下文
 （RoleDocument + always_on Rules 正文 + 全部 RuntimeSkill 元数据），拼成 Agent 初始
 instructions，并过 ``initialContextMaxTokens`` 预算门。Skill 正文不进入初始上下文
 （按需 ``read_resource`` 由 sibling IK2QBM 承接）。
 
+IK2QBM：``load`` 同时产出活动上下文基线 token 与 always_on 资源的 ``ReadEvidence``
+（``origin=initial``），交给 ``ResourceGate`` 作为 on_demand 预算累计与账本起点。active
+基线含 Skill 元数据（已进入 instructions），evidence 只记实际资源读取。
+
 token 估算按快照 ``TokenBudget.estimator`` 执行（当前仅 ``chars_div_4``），与 Java 发布侧
 ``RuntimeBundleValidator.estimateTokens`` 逐字节一致：空串 0，否则 ``max(1, (len + 3) // 4)``；
-Skill 元数据估算对象为 ``name + "\\n" + description``（对齐 Java 预算校验）。
+Skill 元数据估算对象为 ``name + "\\n" + description``（对齐 Java 预算校验）；Skill 已解析引用的
+``resolvedResourceId`` 进入初始上下文（模型逐层 ``read_resource`` 的寻址键），额外计入活动基线。
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from .errors import (
@@ -22,7 +28,15 @@ from .errors import (
     MODEL_CAPABILITY_INSUFFICIENT,
     BundleError,
 )
+from .gate import (
+    ORIGIN_INITIAL,
+    ReadEvidence,
+    content_digest,
+    resource_id,
+    revision,
+)
 from .source import BundleSource
+from .tokens import estimate_chars_div_4
 from .verifier import VerifiedSnapshot
 
 LOAD_ALWAYS_ON = "always_on"
@@ -35,13 +49,37 @@ REQUIRED_CAPABILITIES = frozenset({"tool_calling"})
 SUPPORTED_TOKEN_ESTIMATOR = "chars_div_4"
 
 
-def _estimate_chars_div_4(text: str) -> int:
-    return 0 if not text else max(1, (len(text) + 3) // 4)
+@dataclass(frozen=True)
+class LoadedContext:
+    """基础上下文装载产物：instructions + 活动基线 token + initial 读取证据。
+
+    ``initial_tokens`` 含 Skill 元数据（已进入 instructions），是 ``activeContextMaxTokens``
+    累计门的起点；``initial_evidence`` 只记 always_on 资源的实际读取（Skill 元数据经
+    instructions 体现，非独立资源读取）。
+    """
+
+    instructions: str
+    initial_tokens: int
+    initial_evidence: tuple[ReadEvidence, ...]
 
 
 def _skill_metadata(skill: Mapping[str, Any]) -> Mapping[str, Any]:
     metadata = skill.get("metadata")
     return metadata if isinstance(metadata, Mapping) else {}
+
+
+def _skill_reference_ids(skill: Mapping[str, Any]) -> tuple[str, ...]:
+    """Skill 已解析引用的 resourceId：模型逐层 read_resource 的寻址键（契约 §6 第 3 条）。"""
+    references = skill.get("references")
+    if not isinstance(references, list):
+        return ()
+    identifiers: list[str] = []
+    for reference in references:
+        if isinstance(reference, Mapping):
+            resolved = reference.get("resolvedResourceId")
+            if isinstance(resolved, str) and resolved:
+                identifiers.append(resolved)
+    return tuple(identifiers)
 
 
 class ContextLoader:
@@ -55,7 +93,7 @@ class ContextLoader:
         verified: VerifiedSnapshot,
         model_profile_id: str,
         model_profile_version: str,
-    ) -> str:
+    ) -> LoadedContext:
         composition = verified.snapshot.get("composition")
         if not isinstance(composition, Mapping):
             raise BundleError(BUNDLE_SNAPSHOT_MALFORMED, "发布快照缺少 composition")
@@ -75,8 +113,13 @@ class ContextLoader:
         rule_bodies = [self._fetch_body(bundle_version_id, rule) for rule in always_rules]
         instructions = self._render_instructions(role_body, rule_bodies, skills)
 
-        self._enforce_initial_budget(composition, role_body, rule_bodies, skills)
-        return instructions
+        initial_tokens = self._initial_token_total(
+            composition, role_body, rule_bodies, skills
+        )
+        initial_evidence = self._initial_evidence(
+            role, role_body, always_rules, rule_bodies
+        )
+        return LoadedContext(instructions, initial_tokens, initial_evidence)
 
     @staticmethod
     def _require_token_estimator(composition: Mapping[str, Any]) -> None:
@@ -168,15 +211,18 @@ class ContextLoader:
                     f"description: {metadata.get('description', '')} | "
                     f"allowImplicitInvocation: {metadata.get('allowImplicitInvocation')}"
                 )
+                # 披露已解析引用的 resourceId：模型据此逐层 read_resource 读 Rule/Workflow/Reference
+                for ref_id in _skill_reference_ids(skill):
+                    parts.append(f"  - reference resourceId: {ref_id}")
         return "\n\n".join(parts)
 
     @staticmethod
-    def _enforce_initial_budget(
+    def _initial_token_total(
         composition: Mapping[str, Any],
         role_body: str,
         rule_bodies: list[str],
         skills: list[Mapping[str, Any]],
-    ) -> None:
+    ) -> int:
         budget = composition.get("tokenBudget")
         max_initial = (
             budget.get("initialContextMaxTokens") if isinstance(budget, Mapping) else None
@@ -185,15 +231,47 @@ class ContextLoader:
             raise BundleError(
                 BUNDLE_SNAPSHOT_MALFORMED, "tokenBudget 缺少 initialContextMaxTokens"
             )
-        total = _estimate_chars_div_4(role_body)
-        total += sum(_estimate_chars_div_4(body) for body in rule_bodies)
+        total = estimate_chars_div_4(role_body)
+        total += sum(estimate_chars_div_4(body) for body in rule_bodies)
         for skill in skills:
             metadata = _skill_metadata(skill)
-            total += _estimate_chars_div_4(
+            total += estimate_chars_div_4(
                 f"{metadata.get('name', '')}\n{metadata.get('description', '')}"
             )
+            # 引用 resourceId 进入初始上下文（模型逐层读取的寻址键），计入活动基线
+            for ref_id in _skill_reference_ids(skill):
+                total += estimate_chars_div_4(ref_id)
         if total > max_initial:
             raise BundleError(
                 BUNDLE_TOKEN_BUDGET_EXCEEDED,
                 "初始上下文（RoleDocument + always_on Rules + Skill 元数据）超预算",
             )
+        return total
+
+    @staticmethod
+    def _initial_evidence(
+        role: Mapping[str, Any],
+        role_body: str,
+        always_rules: list[Mapping[str, Any]],
+        rule_bodies: list[str],
+    ) -> tuple[ReadEvidence, ...]:
+        evidence: list[ReadEvidence] = [
+            ReadEvidence(
+                resource_id=resource_id(role),
+                revision=revision(role),
+                content_digest=content_digest(role),
+                token_estimate=estimate_chars_div_4(role_body),
+                origin=ORIGIN_INITIAL,
+            )
+        ]
+        for rule, body in zip(always_rules, rule_bodies, strict=True):
+            evidence.append(
+                ReadEvidence(
+                    resource_id=resource_id(rule),
+                    revision=revision(rule),
+                    content_digest=content_digest(rule),
+                    token_estimate=estimate_chars_div_4(body),
+                    origin=ORIGIN_INITIAL,
+                )
+            )
+        return tuple(evidence)

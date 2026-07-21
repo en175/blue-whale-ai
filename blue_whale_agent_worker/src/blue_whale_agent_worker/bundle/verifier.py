@@ -36,12 +36,19 @@ class VerifiedSnapshot:
     snapshot: Mapping[str, Any]
 
 
-def _resource_manifest(snapshot: Mapping[str, Any]) -> Mapping[str, Any] | None:
+def composition_mapping(
+    snapshot: Mapping[str, Any], key: str
+) -> Mapping[str, Any] | None:
+    """从发布快照 ``composition`` 取子 Mapping（tokenBudget / resourceManifest 共享导航）。"""
     composition = snapshot.get("composition")
     if not isinstance(composition, Mapping):
         return None
-    manifest = composition.get("resourceManifest")
-    return manifest if isinstance(manifest, Mapping) else None
+    child = composition.get(key)
+    return child if isinstance(child, Mapping) else None
+
+
+def resource_manifest(snapshot: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    return composition_mapping(snapshot, "resourceManifest")
 
 
 class BundleVerifier:
@@ -74,7 +81,7 @@ class BundleVerifier:
                 "快照 bundleVersionId 与 AgentRun pin 不一致",
             )
 
-        manifest = _resource_manifest(snapshot)
+        manifest = resource_manifest(snapshot)
         if manifest is None:
             raise BundleError(
                 BUNDLE_MANIFEST_DIGEST_MISMATCH, "发布快照缺少 resourceManifest"

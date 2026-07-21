@@ -135,7 +135,8 @@ class ContextLoaderTest(unittest.TestCase):
         source = _source(snapshot)
         loader = ContextLoader(source)
 
-        instructions = loader.load(_verified(snapshot), MODEL_PROFILE_ID, MODEL_VERSION)
+        loaded = loader.load(_verified(snapshot), MODEL_PROFILE_ID, MODEL_VERSION)
+        instructions = loaded.instructions
 
         self.assertIn(ROLE_BODY, instructions)
         self.assertIn(RULE_BODY, instructions)
@@ -212,6 +213,48 @@ class ContextLoaderTest(unittest.TestCase):
                 _verified(snapshot_tight), MODEL_PROFILE_ID, MODEL_VERSION
             )
         self.assertEqual(BUNDLE_TOKEN_BUDGET_EXCEEDED, ctx.exception.code)
+
+    def test_load_produces_active_baseline_and_initial_evidence(self) -> None:
+        # IK2QBM：load 产出活动基线 token（含 Skill 元数据）与 always_on initial 证据，
+        # 作为 ResourceGate 的预算累计与账本起点。
+        snapshot = _make_snapshot()
+        source = _source(snapshot)
+        loaded = ContextLoader(source).load(
+            _verified(snapshot), MODEL_PROFILE_ID, MODEL_VERSION
+        )
+
+        expected_baseline = (
+            _chars_div_4(ROLE_BODY)
+            + _chars_div_4(RULE_BODY)
+            + _chars_div_4(f"{SKILL_NAME}\n{SKILL_DESC}")
+        )
+        self.assertEqual(expected_baseline, loaded.initial_tokens)
+        self.assertEqual(2, len(loaded.initial_evidence))  # role_main + rule_safety
+        identities = {(e.resource_id, e.origin) for e in loaded.initial_evidence}
+        self.assertEqual(
+            {("role_main", "initial"), ("rule_safety", "initial")}, identities
+        )
+
+    def test_load_discloses_skill_reference_ids_and_counts_baseline(self) -> None:
+        # IK2QBM acceptance #2：instructions 披露 Skill 已解析引用的 resourceId，
+        # 模型据此逐层 read_resource；引用 resourceId 计入活动基线 token。
+        snapshot = _make_snapshot()
+        snapshot["composition"]["resourceManifest"]["resources"][2]["references"] = [
+            {"rawRef": "ref.md", "resolvedResourceId": "ref_extra"}
+        ]
+        loaded = ContextLoader(_source(snapshot)).load(
+            _verified(snapshot), MODEL_PROFILE_ID, MODEL_VERSION
+        )
+
+        self.assertIn("ref_extra", loaded.instructions)
+        self.assertIn("reference resourceId", loaded.instructions)
+        expected_baseline = (
+            _chars_div_4(ROLE_BODY)
+            + _chars_div_4(RULE_BODY)
+            + _chars_div_4(f"{SKILL_NAME}\n{SKILL_DESC}")
+            + _chars_div_4("ref_extra")
+        )
+        self.assertEqual(expected_baseline, loaded.initial_tokens)
 
 
 if __name__ == "__main__":
