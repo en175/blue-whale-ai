@@ -1,11 +1,37 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { PendingAction, User } from "./types";
-import { clearUser, clearTokens, loadAccessToken, loadRefreshToken, loadUser, saveTokens, saveUser, SKIP_AUTH, MOCK_USER } from "./authStorage";
-import { loginWithCode, logoutApi, refreshToken, fetchMe, ApiError } from "@/lib/auth";
-import { subscribeToAuthFailure, getAccessTokenSilently } from "@/lib/api-client";
+import {
+  clearUser,
+  clearTokens,
+  loadAccessToken,
+  loadRefreshToken,
+  loadUser,
+  saveTokens,
+  saveUser,
+  SKIP_AUTH,
+  MOCK_USER,
+} from "./authStorage";
+import {
+  loginWithCode,
+  logoutApi,
+  refreshToken,
+  fetchMe,
+  ApiError,
+} from "@/lib/auth";
+import {
+  subscribeToAuthFailure,
+  getAccessTokenSilently,
+} from "@/lib/api-client";
 import { LoginModal } from "./LoginModal";
 
 interface AuthContextValue {
@@ -34,23 +60,25 @@ export function useAuth(): AuthContextValue {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() =>
+    SKIP_AUTH ? MOCK_USER : null,
+  );
   const [isLoginOpen, setLoginOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(
+    null,
+  );
   const [authLoading, setAuthLoading] = useState(false);
   const executorRef = useRef<(() => void) | null>(null);
   const hasMountedRef = useRef(false); // StrictMode 下 useEffect 双重火守卫
 
   // mount: 尝试用 refresh_token 恢复完整 session
   useEffect(() => {
-    // 本地开发：跳过鉴权，直接注入占位用户，不走 refresh 流程
-    if (SKIP_AUTH) {
-      setUser(MOCK_USER);
-      return;
-    }
+    // 本地开发：跳过鉴权，user 已由 useState lazy init 注入（避免 effect 内 setState）
+    if (SKIP_AUTH) return;
     const u = loadUser();
 
     // 乐观：有 user 数据立刻恢复 UI 登录态，不等刷新结果
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount 从 storage 恢复是合法 effect 用途
     if (u) setUser(u);
 
     // 如果 ref 已标记（StrictMode 双重火），跳过第二次 refresh 请求
@@ -67,8 +95,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refreshToken(rt)
       .then((data) => {
         saveTokens(data.access_token, data.refresh_token);
-        saveUser({ userId: data.user_id, username: data.username, phone: data.phone });
-        setUser({ userId: data.user_id, username: data.username, phone: data.phone });
+        saveUser({
+          userId: data.user_id,
+          username: data.username,
+          phone: data.phone,
+          hasPassword: data.has_password,
+        });
+        setUser({
+          userId: data.user_id,
+          username: data.username,
+          phone: data.phone,
+          hasPassword: data.has_password,
+        });
       })
       .catch((e) => {
         // 仅当存储中 RT 仍是同一份时才处理，避免竞态误伤新登录
@@ -78,10 +116,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // 只有后端明确 401（token 无效/已轮换）才清 tokens
         // 网络错误 / 后端未启动 → 保留本地登录态，下次操作时 api-client 自动重试
         if (e instanceof ApiError && e.code === 401) {
-          console.warn("[Auth] mount refresh → 后端 401，清理 tokens", e.message);
+          console.warn(
+            "[Auth] mount refresh → 后端 401，清理 tokens",
+            e.message,
+          );
           clearTokens();
         } else {
-          console.warn("[Auth] mount refresh 失败但保留登录态", e instanceof Error ? e.message : e);
+          console.warn(
+            "[Auth] mount refresh 失败但保留登录态",
+            e instanceof Error ? e.message : e,
+          );
         }
         // 无论如何，user 保留（乐观恢复的 UI 仍可展示）
       });
@@ -108,18 +152,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const requireAuth = useCallback(
     async (action: PendingAction, run: () => void) => {
       // 本地开发跳过鉴权时直接放行
-      if (SKIP_AUTH) { run(); return; }
+      if (SKIP_AUTH) {
+        run();
+        return;
+      }
       // 已在内存中有 user → 直接放行
-      if (user) { run(); return; }
+      if (user) {
+        run();
+        return;
+      }
 
       // 尝试从 storage 恢复 + 静默刷新 token
       const stored = loadUser();
       if (stored) {
         const at = loadAccessToken();
-        if (at) { setUser(stored); run(); return; }
+        if (at) {
+          setUser(stored);
+          run();
+          return;
+        }
         // 无 access token → 尝试 refresh
         const token = await getAccessTokenSilently();
-        if (token) { setUser(stored); run(); return; }
+        if (token) {
+          setUser(stored);
+          run();
+          return;
+        }
       }
 
       // 兜底：弹出登录
@@ -134,7 +192,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuthLoading(true);
     try {
       const data = await loginWithCode(phone, code);
-      const u: User = { userId: data.user_id, username: data.username, phone: data.phone };
+      const u: User = {
+        userId: data.user_id,
+        username: data.username,
+        phone: data.phone,
+        hasPassword: data.has_password,
+      };
       saveUser(u);
       saveTokens(data.access_token, data.refresh_token);
       setUser(u);
@@ -155,7 +218,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(() => {
     const rt = loadRefreshToken();
-    if (rt) logoutApi(rt).catch(() => { /* ignore */ });
+    if (rt)
+      logoutApi(rt).catch(() => {
+        /* ignore */
+      });
     clearUser();
     clearTokens();
     setUser(null);
@@ -168,7 +234,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshUser = useCallback(async () => {
     if (SKIP_AUTH) return; // 本地开发模式无后端，跳过
     const info = await fetchMe();
-    const u: User = { userId: info.user_id, username: info.username, phone: info.phone };
+    const u: User = {
+      userId: info.user_id,
+      username: info.username,
+      phone: info.phone,
+      hasPassword: info.has_password,
+    };
     saveUser(u);
     setUser(u);
   }, []);
@@ -184,8 +255,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value: AuthContextValue = {
-    user, isLoginOpen, pendingAction,
-    requireAuth, signIn, signOut, refreshUser, updateLocalUser, openLogin, closeLogin,
+    user,
+    isLoginOpen,
+    pendingAction,
+    requireAuth,
+    signIn,
+    signOut,
+    refreshUser,
+    updateLocalUser,
+    openLogin,
+    closeLogin,
   };
 
   return (

@@ -37,6 +37,7 @@ public class UserController {
                 .userId(user.getId())
                 .username(user.getUsername())
                 .phone(user.getPhone())
+                .hasPassword(user.getPassword() != null)
                 .build());
     }
 
@@ -82,11 +83,20 @@ public class UserController {
      * PUT /api/user/password
      */
     @PutMapping("/api/user/password")
-    public Result<Void> changePassword(@Valid @RequestBody ChangePasswordRequest req,
-                                        HttpServletRequest request) {
+    public Result<Void> changePassword(@Valid @RequestBody ChangePasswordRequest req) {
         Long userId = SecurityUtils.getCurrentUserId();
-        String ip = IpUtils.getIpAddr(request);
-        authService.changePassword(userId, req.getCode(), req.getOldPassword(), req.getNewPassword(), ip);
+        authService.changePassword(userId, req.getCode(), req.getOldPassword(), req.getNewPassword());
+        return Result.ok();
+    }
+
+    /**
+     * 设置密码：首次设置，短信验证码校验
+     * POST /api/user/password/set
+     */
+    @PostMapping("/api/user/password/set")
+    public Result<Void> setPassword(@Valid @RequestBody SetPasswordRequest req) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        authService.setPassword(userId, req.getCode(), req.getNewPassword());
         return Result.ok();
     }
 }
