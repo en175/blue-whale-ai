@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS agent_runs
     model_profile_id VARCHAR(80) NULL,
     model_profile_version VARCHAR(64) NULL,
     activated_creative_skill_versions CLOB NULL,
+    tool_grants CLOB NULL,
     current_checkpoint_id BIGINT NULL,
     confirmed_input_request_id BIGINT NULL,
     lease_owner VARCHAR(128) NULL,

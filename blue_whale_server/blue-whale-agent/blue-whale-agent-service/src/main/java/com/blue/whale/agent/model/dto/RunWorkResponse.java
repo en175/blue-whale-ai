@@ -20,7 +20,8 @@ public record RunWorkResponse(
         Object activatedCreativeSkillVersions,
         List<RunMessage> messages,
         Checkpoint checkpoint,
-        List<AcceptedResult> acceptedResults
+        List<AcceptedResult> acceptedResults,
+        String toolGrants
 ) {
     public record RunMessage(String role, String content) {
     }

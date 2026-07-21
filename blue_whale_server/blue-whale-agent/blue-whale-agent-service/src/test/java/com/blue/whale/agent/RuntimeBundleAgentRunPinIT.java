@@ -76,8 +76,8 @@ class RuntimeBundleAgentRunPinIT {
                     (agent_definition_id, definition_key, display_name, description, active_bundle_version_id)
                 VALUES ('pin_agent', 'pin-agent', 'Pin Agent', 'AgentRun pin test', 'pin_agent_v2_0_0')
                 """);
-        String digestV1 = insertVersion("pin_agent_v1_0_0", "1.0.0", "model_v1");
-        String digestV2 = insertVersion("pin_agent_v2_0_0", "2.0.0", "model_v2");
+        String digestV1 = insertVersion("pin_agent_v1_0_0", "1.0.0", "model_v1", "canvas.read", "read");
+        String digestV2 = insertVersion("pin_agent_v2_0_0", "2.0.0", "model_v2", "generate_image", "side_effect");
 
         long runV2 = postMessage("run-v2", "first run");
 
@@ -119,6 +119,10 @@ class RuntimeBundleAgentRunPinIT {
         assertThat(claimed.path("manifest_digest").asText()).isEqualTo(digestV2);
         assertThat(claimed.path("model_profile_id").asText()).isEqualTo("model_v2");
         assertThat(claimed.path("model_profile_version").asText()).isEqualTo("2.0.0");
+        // Worker 工作包携带当次 Run 钉住的 ToolGrant（JSON 文本），未授权工具不出现（IK2QBS）。
+        JsonNode claimedToolGrants = objectMapper.readTree(claimed.path("tool_grants").asText());
+        assertThat(claimedToolGrants.get(0).path("toolName").asText()).isEqualTo("generate_image");
+        assertThat(claimedToolGrants.get(0).path("effect").asText()).isEqualTo("side_effect");
     }
 
     private long postMessage(String idempotencyKey, String content) throws Exception {
@@ -135,7 +139,8 @@ class RuntimeBundleAgentRunPinIT {
         return objectMapper.readTree(response).path("data").path("agent_run_id").asLong();
     }
 
-    private String insertVersion(String versionId, String version, String modelProfileId) throws Exception {
+    private String insertVersion(String versionId, String version, String modelProfileId,
+            String toolGrantName, String toolGrantEffect) throws Exception {
         ObjectNode manifest = objectMapper.createObjectNode()
                 .put("formatVersion", 1)
                 .put("baseUri", "bw-bundle://" + versionId + "/")
@@ -148,6 +153,16 @@ class RuntimeBundleAgentRunPinIT {
                 objectMapper.createObjectNode()
                         .put("modelProfileId", modelProfileId)
                         .put("version", version)));
+        ObjectNode grant = objectMapper.createObjectNode()
+                .put("toolName", toolGrantName)
+                .put("registryVersion", 1)
+                .put("effect", toolGrantEffect)
+                .put("proposalOnly", true);
+        grant.set("argumentSchema", objectMapper.createObjectNode()
+                .put("$schema", "https://json-schema.org/draft/2020-12/schema")
+                .put("type", "object"));
+        grant.set("constraints", objectMapper.createObjectNode());
+        composition.set("toolGrants", objectMapper.createArrayNode().add(grant));
         composition.set("resourceManifest", manifest);
         ObjectNode snapshot = objectMapper.createObjectNode()
                 .put("bundleVersionId", versionId);

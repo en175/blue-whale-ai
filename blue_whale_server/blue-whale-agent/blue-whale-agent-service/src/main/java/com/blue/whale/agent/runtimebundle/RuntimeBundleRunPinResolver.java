@@ -63,17 +63,23 @@ public final class RuntimeBundleRunPinResolver {
         }
         // Creative Skill 首次激活固定由后续运行时任务承接；契约不允许 Bundle 声明
         // activatedCreativeSkillVersions（发布期白名单拒绝），新 Run 该字段恒为空数组。
+        // ToolGrant 从激活 BundleVersion 快照 composition.toolGrants 解析，透传给 Worker
+        // 作为当次模型可见工具集的权威；快照未声明 grants（纯文本对话）视作空集。
+        JsonNode toolGrantsNode = composition.path("toolGrants");
+        String toolGrantsJson = toolGrantsNode.isArray() ? toolGrantsNode.toString() : "[]";
         return requiredPin(
                 pin.bundleVersionId(), pin.manifestDigest(),
                 model.path("modelProfileId").asText(), model.path("version").asText(),
-                "[]");
+                "[]",
+                toolGrantsJson);
     }
 
     private RunPin inherited(AgentRun sourceRun) {
         return requiredPin(
                 sourceRun.getBundleVersionId(), sourceRun.getManifestDigest(),
                 sourceRun.getModelProfileId(), sourceRun.getModelProfileVersion(),
-                sourceRun.getActivatedCreativeSkillVersions());
+                sourceRun.getActivatedCreativeSkillVersions(),
+                sourceRun.getToolGrants());
     }
 
     private RunPin requiredPin(
@@ -81,13 +87,15 @@ public final class RuntimeBundleRunPinResolver {
             String manifestDigest,
             String modelProfileId,
             String modelProfileVersion,
-            String creativeSkillVersions) {
+            String creativeSkillVersions,
+            String toolGrants) {
         if (blank(bundleVersionId) || blank(manifestDigest)
                 || blank(modelProfileId) || blank(modelProfileVersion)) {
             throw unavailable("Runtime Bundle 运行身份不完整");
         }
         return new RunPin(bundleVersionId, manifestDigest, modelProfileId, modelProfileVersion,
-                blank(creativeSkillVersions) ? "[]" : creativeSkillVersions);
+                blank(creativeSkillVersions) ? "[]" : creativeSkillVersions,
+                blank(toolGrants) ? "[]" : toolGrants);
     }
 
     private boolean blank(String value) {
@@ -103,10 +111,11 @@ public final class RuntimeBundleRunPinResolver {
             String manifestDigest,
             String modelProfileId,
             String modelProfileVersion,
-            String activatedCreativeSkillVersions) {
+            String activatedCreativeSkillVersions,
+            String toolGrants) {
 
         static RunPin disabled() {
-            return new RunPin(null, null, null, null, null);
+            return new RunPin(null, null, null, null, null, null);
         }
     }
 

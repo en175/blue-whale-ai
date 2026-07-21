@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional, Protocol, Sequence
+from typing import Any, Literal, Mapping, Optional, Protocol, Sequence
 
 
 @dataclass(frozen=True)
@@ -15,6 +15,23 @@ class AcceptedActionResult:
     action_id: str
     status: str
     result: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class ToolGrant:
+    """Run 钉住的 BundleVersion 授权工具子集（契约 §2.5 ToolGrant）。
+
+    Worker Adapter 按当次 Run 的 toolGrants 动态构造模型可见工具集：未列出的工具
+    对模型完全不可见，权限边界在提示词层成立。effect 决定注册方式（read 直接工具、
+    side_effect deferred 工具）。契约违约（工具不在注册表 / 版本漂移 / effect 不符）fail closed。
+    """
+
+    tool_name: str
+    registry_version: int
+    effect: Literal["read", "side_effect"]
+    proposal_only: bool
+    argument_schema: Mapping[str, Any]
+    constraints: Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -40,6 +57,9 @@ class RunWork:
     model_profile_id: Optional[str] = None
     model_profile_version: Optional[str] = None
     activated_creative_skill_versions: Optional[Sequence[Any]] = None
+    # 当次 Run 钉住的 ToolGrant 子集（契约 §2.5）：Adapter 据此动态构造模型可见工具集，
+    # 未授权工具对模型完全不可见。enforcement-disabled 时 Java 不下发，gateway 解析为空集。
+    tool_grants: Sequence[ToolGrant] = ()
 
 
 @dataclass(frozen=True)

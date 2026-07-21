@@ -28,4 +28,13 @@ class RuntimeBundleMigrationContractTest {
         assertThat(migration).contains("resource_revision INT NOT NULL");
         assertThat(migration).contains("response_json JSON NULL");
     }
+
+    @Test
+    void v11AddsAgentRunToolGrantsColumn() throws Exception {
+        String migration = new String(new ClassPathResource(
+                "db/migrations/V11__agent-run-tool-grants.sql").getInputStream().readAllBytes(),
+                StandardCharsets.UTF_8);
+        assertThat(migration).contains("ALTER TABLE agent_runs");
+        assertThat(migration).contains("ADD COLUMN tool_grants JSON NULL");
+    }
 }

@@ -1,6 +1,7 @@
 import json
 import unittest
 
+from pydantic_ai import CallDeferred
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import FunctionModel
 
@@ -8,8 +9,12 @@ from blue_whale_agent_worker.contracts import (
     AcceptedActionResult,
     RunWork,
     RuntimeCheckpoint,
+    ToolGrant,
 )
-from blue_whale_agent_worker.pydantic_orchestrator import PydanticAIOrchestrator
+from blue_whale_agent_worker.pydantic_orchestrator import (
+    PydanticAIOrchestrator,
+    ToolImplementation,
+)
 
 
 def image_proposal_model(messages, info):
@@ -103,6 +108,20 @@ def always_text_model(messages, info):
     return ModelResponse(parts=(TextPart("仍然缺少信息。"),))
 
 
+def _generate_image_grant() -> ToolGrant:
+    return ToolGrant(
+        tool_name="generate_image",
+        registry_version=1,
+        effect="side_effect",
+        proposal_only=True,
+        argument_schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+        },
+        constraints={},
+    )
+
+
 class PydanticAIOrchestratorTest(unittest.TestCase):
     def test_production_adapter_can_propose_owned_reference_asset_ids(self) -> None:
         work = RunWork(
@@ -117,6 +136,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             adapter_schema_version=1,
             messages=({"role": "user", "content": "参考素材生成海报"},),
             checkpoint=None,
+            tool_grants=(_generate_image_grant(),),
         )
 
         result = PydanticAIOrchestrator(
@@ -140,6 +160,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             adapter_schema_version=1,
             messages=({"role": "user", "content": "联网生成一张 2K 蓝鲸海报"},),
             checkpoint=None,
+            tool_grants=(_generate_image_grant(),),
         )
 
         result = PydanticAIOrchestrator(
@@ -163,6 +184,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             adapter_schema_version=1,
             messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
             checkpoint=None,
+            tool_grants=(_generate_image_grant(),),
         )
 
         result = PydanticAIOrchestrator(FunctionModel(image_proposal_model)).advance(work)
@@ -195,6 +217,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             adapter_schema_version=1,
             messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
             checkpoint=None,
+            tool_grants=(_generate_image_grant(),),
         )
         initial_result = PydanticAIOrchestrator(
             FunctionModel(image_proposal_model)
@@ -274,6 +297,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             adapter_schema_version=1,
             messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
             checkpoint=None,
+            tool_grants=(_generate_image_grant(),),
         )
 
         result = PydanticAIOrchestrator(FunctionModel(failing_model)).advance(work)
@@ -298,6 +322,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             adapter_schema_version=1,
             messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
             checkpoint=None,
+            tool_grants=(_generate_image_grant(),),
         )
         mismatches = (
             {"engine": "fake"},
@@ -366,6 +391,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             adapter_schema_version=1,
             messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
             checkpoint=None,
+            tool_grants=(_generate_image_grant(),),
         )
         initial_result = PydanticAIOrchestrator(
             FunctionModel(clarification_dialogue_model)
@@ -424,6 +450,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             adapter_schema_version=1,
             messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
             checkpoint=None,
+            tool_grants=(_generate_image_grant(),),
         )
         initial_result = PydanticAIOrchestrator(
             FunctionModel(always_text_model)
@@ -464,6 +491,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             adapter_schema_version=1,
             messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
             checkpoint=None,
+            tool_grants=(_generate_image_grant(),),
         )
         initial_result = PydanticAIOrchestrator(
             FunctionModel(unsafe_resume_model)
@@ -490,6 +518,173 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
 
         self.assertEqual("图片已经生成。", resumed_result.visible_text)
         self.assertNotIn("sk-private", resumed_result.visible_text)
+
+    def test_tool_set_built_from_grant_and_unauthorized_invisible(self) -> None:
+        # 模型可见工具集由当次 Run 钉住的 ToolGrant 决定；未授权工具不出现在工具列表。
+        captured: dict = {}
+
+        def image_capture_model(messages, info):
+            captured["with_grant"] = sorted(t.name for t in info.function_tools)
+            return ModelResponse(
+                parts=(
+                    ToolCallPart(
+                        "generate_image",
+                        {"prompt": "蓝鲸", "aspect_ratio": "1:1"},
+                        "capture-call-id",
+                    ),
+                )
+            )
+
+        def text_capture_model(messages, info):
+            captured["without_grant"] = sorted(t.name for t in info.function_tools)
+            return ModelResponse(parts=(TextPart("纯文本对话"),))
+
+        base = dict(
+            agent_run_id=23, project_id=7, conversation_id=11, user_id=10,
+            run_version=1, fencing_token=4, engine="pydantic-ai",
+            engine_version="2.9.0", adapter_schema_version=1,
+            messages=({"role": "user", "content": "你好"},), checkpoint=None,
+        )
+
+        result = PydanticAIOrchestrator(FunctionModel(image_capture_model)).advance(
+            RunWork(**base, tool_grants=(_generate_image_grant(),))
+        )
+        self.assertIn("generate_image", captured["with_grant"])
+        self.assertEqual("create_image_generation_job", result.actions[0].tool_id)
+
+        # grant 为空集：模型收到空工具集（纯文本对话），未授权工具不可见。
+        text_result = PydanticAIOrchestrator(FunctionModel(text_capture_model)).advance(
+            RunWork(**base)
+        )
+        self.assertEqual([], captured["without_grant"])
+        self.assertIsNone(text_result.error)
+
+    def test_read_only_direct_and_side_effect_deferred_registration(self) -> None:
+        # 只读 effect 以直接工具注册（handler 直接执行返回）；副作用 effect 以 deferred 注册（raise CallDeferred）。
+        read_calls: list = []
+
+        def fake_read(resource_id: str) -> str:
+            """直接工具：读取并返回结果，模型可见其返回。"""
+            read_calls.append(resource_id)
+            return "read-content"
+
+        def fake_side_effect(payload: str) -> str:
+            """副作用工具：仅提议，由控制面接纳。"""
+            raise CallDeferred
+
+        schema = {"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object"}
+        implementations = {
+            "fake_read": ToolImplementation("fake_read", "fake_read_tool", 1, "read", fake_read),
+            "fake_side_effect": ToolImplementation(
+                "fake_side_effect", "fake_side_effect_tool", 1, "side_effect", fake_side_effect
+            ),
+        }
+        grants = (
+            ToolGrant("fake_read", 1, "read", True, dict(schema), {}),
+            ToolGrant("fake_side_effect", 1, "side_effect", True, dict(schema), {}),
+        )
+        base = dict(
+            agent_run_id=24, project_id=7, conversation_id=11, user_id=10,
+            run_version=1, fencing_token=4, engine="pydantic-ai",
+            engine_version="2.9.0", adapter_schema_version=1,
+            messages=({"role": "user", "content": "读一下"},), checkpoint=None,
+            tool_grants=grants,
+        )
+
+        def read_then_text_model(messages, info):
+            if not any(
+                isinstance(part, ToolReturnPart)
+                for message in messages
+                for part in message.parts
+            ):
+                return ModelResponse(
+                    parts=(ToolCallPart("fake_read", {"resource_id": "node-1"}, "read-call-id"),)
+                )
+            return ModelResponse(parts=(TextPart("读取完成"),))
+
+        read_result = PydanticAIOrchestrator(
+            FunctionModel(read_then_text_model), implementations
+        ).advance(RunWork(**base))
+        self.assertEqual(["node-1"], read_calls)
+        self.assertIsNone(read_result.error)
+
+        def side_effect_model(messages, info):
+            return ModelResponse(
+                parts=(ToolCallPart("fake_side_effect", {"payload": "x"}, "se-call-id"),)
+            )
+
+        side_result = PydanticAIOrchestrator(
+            FunctionModel(side_effect_model), implementations
+        ).advance(RunWork(**base))
+        self.assertEqual(1, len(side_result.actions))
+        self.assertEqual("fake_side_effect_tool", side_result.actions[0].tool_id)
+
+    def test_contract_violations_fail_closed_without_internal_leaks(self) -> None:
+        # grant 不匹配 / 工具不在注册表 / 版本漂移 / effect 不符 一律 fail closed，
+        # 并入现有归一化通道（ORCHESTRATOR_CONTRACT_MISMATCH），不泄露内部工具名或路径。
+        schema = {"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object"}
+        base = dict(
+            agent_run_id=25, project_id=7, conversation_id=11, user_id=10,
+            run_version=1, fencing_token=4, engine="pydantic-ai",
+            engine_version="2.9.0", adapter_schema_version=1,
+            messages=({"role": "user", "content": "你好"},), checkpoint=None,
+        )
+
+        def plain_text_model(messages, info):
+            return ModelResponse(parts=(TextPart("文本"),))
+
+        unknown = (ToolGrant("ghost_tool", 1, "read", True, dict(schema), {}),)
+        work = RunWork(**base, tool_grants=unknown)
+        result = PydanticAIOrchestrator(FunctionModel(plain_text_model)).advance(work)
+        self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
+        self.assertNotIn(
+            "ghost_tool",
+            json.dumps(result.to_commit_payload(work), ensure_ascii=False),
+        )
+
+        drifted = (ToolGrant("generate_image", 99, "side_effect", True, dict(schema), {}),)
+        work = RunWork(**base, tool_grants=drifted)
+        result = PydanticAIOrchestrator(FunctionModel(plain_text_model)).advance(work)
+        self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
+        self.assertNotIn(
+            "generate_image",
+            json.dumps(result.to_commit_payload(work), ensure_ascii=False),
+        )
+
+        mismatched = (ToolGrant("generate_image", 1, "read", True, dict(schema), {}),)
+        work = RunWork(**base, tool_grants=mismatched)
+        result = PydanticAIOrchestrator(FunctionModel(plain_text_model)).advance(work)
+        self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
+        self.assertNotIn(
+            "generate_image",
+            json.dumps(result.to_commit_payload(work), ensure_ascii=False),
+        )
+
+    def test_gateway_malformed_tool_grants_normalizes_via_orchestrator(self) -> None:
+        # Java 下发畸形 toolGrants（关键字段缺失）：gateway 不抛未归一化异常，
+        # 字段缺失落入默认值，由 orchestrator 语义校验统一归一化为 ORCHESTRATOR_CONTRACT_MISMATCH。
+        from blue_whale_agent_worker.http_gateway import _parse_tool_grants
+
+        grants = _parse_tool_grants(
+            '[{"registryVersion": 1, "effect": "read", "proposalOnly": true, '
+            '"argumentSchema": {"$schema": "x"}, "constraints": {}}]'
+        )
+        self.assertEqual("", grants[0].tool_name)
+
+        base = dict(
+            agent_run_id=26, project_id=7, conversation_id=11, user_id=10,
+            run_version=1, fencing_token=4, engine="pydantic-ai",
+            engine_version="2.9.0", adapter_schema_version=1,
+            messages=({"role": "user", "content": "你好"},), checkpoint=None,
+        )
+
+        def plain_text_model(messages, info):
+            return ModelResponse(parts=(TextPart("文本"),))
+
+        result = PydanticAIOrchestrator(FunctionModel(plain_text_model)).advance(
+            RunWork(**base, tool_grants=grants)
+        )
+        self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
 
 
 if __name__ == "__main__":

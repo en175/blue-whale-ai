@@ -152,7 +152,8 @@ public class AgentRunWorkerService {
                             : new RunWorkResponse.Checkpoint(
                                     checkpoint.getId(), checkpoint.getEngine(), checkpoint.getEngineVersion(),
                                     checkpoint.getAdapterSchemaVersion(), checkpoint.getOpaquePayload()),
-                    acceptedResults);
+                    acceptedResults,
+                    run.getToolGrants());
         }
     }
 

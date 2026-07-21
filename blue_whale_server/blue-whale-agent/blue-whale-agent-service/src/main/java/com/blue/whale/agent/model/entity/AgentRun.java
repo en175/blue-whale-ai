@@ -30,6 +30,7 @@ public class AgentRun extends BaseEntity {
     private String modelProfileId;
     private String modelProfileVersion;
     private String activatedCreativeSkillVersions;
+    private String toolGrants;
     private Long currentCheckpointId;
     private Long confirmedInputRequestId;
     private String leaseOwner;
