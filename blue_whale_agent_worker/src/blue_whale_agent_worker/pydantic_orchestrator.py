@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Callable, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping
 
 from pydantic_ai import Agent, CallDeferred, DeferredToolRequests, DeferredToolResults
 from pydantic_ai.messages import ModelMessagesTypeAdapter
@@ -12,7 +12,6 @@ from .bundle.verifier import BundleVerifier
 from .contracts import (
     OrchestratorResult,
     ProposedAction,
-    REQUEST_TYPE_CREATION_CLARIFICATION,
     RunWork,
     RuntimeCheckpoint,
     UserInputRequestProposal,
@@ -22,6 +21,10 @@ from .contracts import (
 ENGINE = "pydantic-ai"
 ENGINE_VERSION = "2.9.0"
 ADAPTER_SCHEMA_VERSION = 1
+
+# checkpoint pending_calls 项的 kind 标记：澄清 deferred call 恢复时用用户自然语言
+# 回答作 ToolResult 回喂，区别于动作 pending（结果来自 accepted_results）。
+_CLARIFICATION_PENDING_KIND = "clarification"
 
 ImageAspectRatio = Literal["1:1", "16:9", "9:16", "4:3", "3:4", "2:3", "3:2", "21:9"]
 
@@ -45,6 +48,20 @@ def generate_image(
     raise CallDeferred
 
 
+def request_user_input(
+    request_type: Literal["creation_clarification"],
+    question: str,
+    resume_binding: dict[str, Any] | None = None,
+) -> str:
+    """Propose a product-neutral input request (creation clarification) for the user.
+
+    显式副作用工具（IK2QBY）：Agent 缺少推进创作所必需的信息时，向用户提出一个可见问题
+    并等待自然语言回答。仍走 ADR-0036 的 UserInputRequestProposal 通道，不新建请求端点；
+    resume_binding 为不透明产品事实，回传给来源 AgentRun 用于多轮恢复。
+    """
+    raise CallDeferred
+
+
 @dataclass(frozen=True)
 class ToolImplementation:
     """Python 侧工具实现注册项：tool_name 对应的 handler 与平台注册表元数据。
@@ -62,14 +79,18 @@ class ToolImplementation:
 
 
 def _default_tool_implementations() -> Mapping[str, ToolImplementation]:
-    """生产默认工具实现目录：当前仅图片生成（side_effect / deferred）。
+    """生产默认工具实现目录：图片生成与请求用户输入（均 side_effect / deferred）。
 
-    只读工具的实际读取实现属后续子工单；本目录先落框架，按 grant 动态装配机制通用支持。
+    request_user_input 把创作澄清从隐式文本分支升级为显式副作用工具（IK2QBY）；
+    只读工具的实际读取实现属后续子工单，本目录先落框架，按 grant 动态装配机制通用支持。
     """
 
     return {
         "generate_image": ToolImplementation(
             "generate_image", "create_image_generation_job", 1, "side_effect", generate_image
+        ),
+        "request_user_input": ToolImplementation(
+            "request_user_input", "request_user_input", 1, "side_effect", request_user_input
         ),
     }
 
@@ -126,7 +147,6 @@ class PydanticAIOrchestrator:
             instructions=instructions,
             tools=self._build_tools(work),
         )
-        resume_after_clarification = False
         if work.checkpoint is None:
             prompt = next(
                 message["content"]
@@ -140,33 +160,46 @@ class PydanticAIOrchestrator:
             messages = ModelMessagesTypeAdapter.validate_python(payload["messages"])
             restored_calls = payload["pending_calls"]
             if restored_calls:
-                # 生成任务完成恢复：待处理动作与已接纳结果对齐后继续。
-                calls_by_action = {
-                    str(pending["action_id"]): str(pending["tool_call_id"])
-                    for pending in restored_calls
-                }
+                # 恢复闭合 checkpoint 消息历史中的 deferred ToolCallPart：动作 pending 的
+                # 结果来自 accepted_results，澄清 pending 的结果来自用户最新自然语言回答
+                # （request_user_input 的 ToolReturn 即用户回答，IK2QBY 多轮澄清）。
                 results_by_action = {
                     result.action_id: result for result in work.accepted_results
                 }
-                if set(results_by_action) != set(calls_by_action):
+                action_pending = [
+                    pending for pending in restored_calls
+                    if pending.get("kind") != _CLARIFICATION_PENDING_KIND
+                ]
+                if {pending["action_id"] for pending in action_pending} != set(results_by_action):
                     raise _ContractError("已接纳结果与 checkpoint 中的待处理动作不匹配")
-                deferred_results = DeferredToolResults(
-                    calls={
-                        tool_call_id: {
-                            "status": results_by_action[action_id].status,
-                            "result": dict(results_by_action[action_id].result),
-                        }
-                        for action_id, tool_call_id in calls_by_action.items()
+                deferred_calls: dict[str, Mapping[str, Any]] = {}
+                for pending in action_pending:
+                    result = results_by_action[pending["action_id"]]
+                    deferred_calls[pending["tool_call_id"]] = {
+                        "status": result.status,
+                        "result": dict(result.result),
                     }
-                )
+                clarify_pending = [
+                    pending for pending in restored_calls
+                    if pending.get("kind") == _CLARIFICATION_PENDING_KIND
+                ]
+                if clarify_pending:
+                    answer = next(
+                        message["content"]
+                        for message in reversed(work.messages)
+                        if message["role"] == "user"
+                    )
+                    for pending in clarify_pending:
+                        deferred_calls[pending["tool_call_id"]] = {
+                            "status": "answered",
+                            "result": {"answer": answer},
+                        }
                 run_result = agent.run_sync(
                     message_history=messages,
-                    deferred_tool_results=deferred_results,
+                    deferred_tool_results=DeferredToolResults(calls=deferred_calls),
                 )
             else:
-                # 创作澄清恢复：checkpoint 消息历史保存原始创作意图与澄清问题，
-                # 最新的用户消息是自然语言回答，二者共同约束恢复后的动作。
-                resume_after_clarification = True
+                # 无 pending 恢复：checkpoint 消息历史 + 最新用户消息继续自然对话。
                 answer = next(
                     message["content"]
                     for message in reversed(work.messages)
@@ -180,7 +213,7 @@ class PydanticAIOrchestrator:
         if isinstance(run_result.output, DeferredToolRequests):
             requests = run_result.output
             if len(requests.calls) != 1:
-                raise _ContractError("模型必须且只能提出一个外部动作")
+                raise _ContractError("模型必须且只能提出一个外部动作或输入请求")
             call = requests.calls[0]
             authorized_side_effects = {
                 grant.tool_name for grant in work.tool_grants if grant.effect == "side_effect"
@@ -188,33 +221,35 @@ class PydanticAIOrchestrator:
             if call.tool_name not in authorized_side_effects:
                 raise _ContractError("模型提出了不在当次授权集合内的工具动作")
             action_id = f"pydantic-{call.tool_name}-{work.agent_run_id}-{work.run_version}"
-            implementation = self._implementations[call.tool_name]
-            actions = (
-                ProposedAction(
-                    action_id=action_id,
-                    tool_id=implementation.tool_id,
-                    registry_version=implementation.registry_version,
-                    arguments=call.args_as_dict(),
-                ),
-            )
-            pending_calls = (
-                {"action_id": action_id, "tool_call_id": call.tool_call_id},
-            )
-            visible_text = "已接纳，正在生成图片。"
-        elif work.checkpoint is None:
-            # 初次推进的文本输出 = 模型认为缺少必要信息，转换为产品中性的创作澄清提议。
-            question = run_result.output.strip()
-            if not question:
-                raise _ContractError("创作澄清问题不能为空")
-            input_request = UserInputRequestProposal(
-                request_type=REQUEST_TYPE_CREATION_CLARIFICATION,
-                question=question,
-            )
-            visible_text = question
-        elif resume_after_clarification:
-            # 澄清恢复后只允许一个内置 generate_image 动作，不接受再次文本输出。
-            raise _ContractError("澄清恢复后必须提出一个图片生成动作")
-        else:
+            if call.tool_name == "request_user_input":
+                # 显式澄清工具（IK2QBY）：参数映射 UserInputRequestProposal，仍走 ADR-0036
+                # 通道。挂 clarification pending——恢复时把用户自然语言回答作为该 deferred
+                # call 的 ToolResult 回喂，闭合 checkpoint 消息历史，支持多轮澄清往返。
+                arguments = call.args_as_dict()
+                input_request = UserInputRequestProposal(
+                    request_type=arguments["request_type"],
+                    question=arguments["question"],
+                    resume_binding=arguments.get("resume_binding"),
+                )
+                pending_calls = (
+                    {"action_id": action_id, "tool_call_id": call.tool_call_id, "kind": _CLARIFICATION_PENDING_KIND},
+                )
+                visible_text = arguments["question"]
+            else:
+                implementation = self._implementations[call.tool_name]
+                actions = (
+                    ProposedAction(
+                        action_id=action_id,
+                        tool_id=implementation.tool_id,
+                        registry_version=implementation.registry_version,
+                        arguments=call.args_as_dict(),
+                    ),
+                )
+                pending_calls = (
+                    {"action_id": action_id, "tool_call_id": call.tool_call_id},
+                )
+                visible_text = "已接纳，正在生成图片。"
+        elif work.accepted_results:
             rejected = [r for r in work.accepted_results if r.status == "rejected"]
             if rejected:
                 # IK2QBX 动作被治理拒绝后模型未再提议：用面向 User 的安全提示收尾，
@@ -228,6 +263,13 @@ class PydanticAIOrchestrator:
                 visible_text = "图片已经生成。"
             else:
                 visible_text = "图片生成未完成。"
+        else:
+            # 初次推进或澄清恢复的纯文本输出（无工具调用）：模型可见文本直通，作为
+            # 多轮自然对话的普通回应。澄清只来自显式 request_user_input 工具，不再由
+            # 文本隐式触发（IK2QBY 退役隐式分支、解除「澄清恢复后必须出动作」自限）。
+            visible_text = run_result.output.strip()
+            if not visible_text:
+                raise _ContractError("模型输出不能为空")
 
         checkpoint = RuntimeCheckpoint(
             engine=work.engine,

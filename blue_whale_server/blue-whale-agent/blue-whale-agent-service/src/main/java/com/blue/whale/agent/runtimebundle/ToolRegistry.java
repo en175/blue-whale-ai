@@ -80,6 +80,27 @@ public final class ToolRegistry {
                                  "prompt":{"maxLength":2000}}"""),
                         Set.of("tool_calling"),
                         "image"));
+        registry.put(
+                new ToolKey("request_user_input", 1),
+                new ToolDefinition(
+                        "request_user_input",
+                        1,
+                        "side_effect",
+                        RiskLevel.LOW,
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object",\
+                                 "properties":{"request_type":{"type":"string","enum":["creation_clarification"]},\
+                                               "question":{"type":"string","minLength":1},\
+                                               "resume_binding":{"type":"object","additionalProperties":true}},\
+                                 "required":["request_type","question"],\
+                                 "additionalProperties":false}"""),
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object"}"""),
+                        parseBuiltinSchema(objectMapper, "{\"question\":{\"maxLength\":1000}}"),
+                        Set.of("tool_calling"),
+                        null));
         return registry;
     }
 

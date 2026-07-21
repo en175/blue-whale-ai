@@ -108,6 +108,20 @@ def _generate_image_grant() -> ToolGrant:
     )
 
 
+def _request_user_input_grant() -> ToolGrant:
+    return ToolGrant(
+        tool_name="request_user_input",
+        registry_version=1,
+        effect="side_effect",
+        proposal_only=True,
+        argument_schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+        },
+        constraints={},
+    )
+
+
 def _pydantic_work(**overrides) -> RunWork:
     fields = dict(
         agent_run_id=23,
@@ -197,16 +211,56 @@ def unsafe_resume_model(messages, info):
     return image_proposal_model(messages, info)
 
 
-def clarification_dialogue_model(messages, info):
-    """首轮：意图缺少信息，模型用纯文本提出澄清问题；
-    恢复：消息历史中已有自己的澄清问题，针对新回答提出单个生图动作。"""
-    asked = any(
+def request_user_input_model(messages, info):
+    """IK2QBY：意图缺少信息，模型调用显式 request_user_input 工具提出澄清问题。"""
+    return ModelResponse(
+        parts=(
+            ToolCallPart(
+                "request_user_input",
+                {"request_type": "creation_clarification", "question": "您希望什么风格和比例？"},
+                "clarification-call-id",
+            ),
+        )
+    )
+
+
+def request_user_input_with_binding_model(messages, info):
+    """携带 resume_binding 的显式澄清工具调用（AC1 参数映射）。"""
+    return ModelResponse(
+        parts=(
+            ToolCallPart(
+                "request_user_input",
+                {
+                    "request_type": "creation_clarification",
+                    "question": "您希望什么风格？",
+                    "resume_binding": {"intent": "poster", "round": 1},
+                },
+                "binding-call-id",
+            ),
+        )
+    )
+
+
+def clarify_then_image_model(messages, info):
+    """首轮调用 request_user_input 提问；恢复后调用 generate_image 出动作。"""
+    clarified = any(
         isinstance(message, ModelResponse)
-        and any(isinstance(part, TextPart) for part in message.parts)
+        and any(
+            isinstance(part, ToolCallPart) and part.tool_name == "request_user_input"
+            for part in message.parts
+        )
         for message in messages
     )
-    if not asked:
-        return ModelResponse(parts=(TextPart("您希望什么风格和比例？"),))
+    if not clarified:
+        return ModelResponse(
+            parts=(
+                ToolCallPart(
+                    "request_user_input",
+                    {"request_type": "creation_clarification", "question": "您希望什么风格和比例？"},
+                    "clarify-call-id",
+                ),
+            )
+        )
     return ModelResponse(
         parts=(
             ToolCallPart(
@@ -269,7 +323,8 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertIn(ROLE_DOCUMENT_BODY, instructions)
         self.assertNotIn("创作编排器", instructions)  # 硬编码角色提示词已移除
         self.assertNotIn("Blue-Whale", instructions)
-        self.assertIsNotNone(result.input_request)
+        # 纯文本输出直通为可见文本（IK2QBY 后澄清只来自显式 request_user_input 工具）。
+        self.assertEqual("您想要什么风格？", result.visible_text)
 
     def test_missing_bundle_pin_fails_closed(self) -> None:
         # pin 缺失（enforcement-enabled=false 形态）不回退硬编码，fail closed。
@@ -455,11 +510,15 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 )
                 self.assertEqual((), result.actions)
 
-    def test_initial_text_becomes_a_product_neutral_clarification_proposal(self) -> None:
-        work = _pydantic_work(messages=({"role": "user", "content": "生成一张"},))
+    def test_request_user_input_tool_produces_clarification_proposal(self) -> None:
+        # IK2QBY：澄清从隐式文本分支升级为显式 request_user_input 副作用工具。
+        work = _pydantic_work(
+            messages=({"role": "user", "content": "生成一张"},),
+            tool_grants=(_generate_image_grant(), _request_user_input_grant()),
+        )
 
         result = PydanticAIOrchestrator(
-            FunctionModel(clarification_dialogue_model), _bundle_source()
+            FunctionModel(request_user_input_model), _bundle_source()
         ).advance(work)
         payload = result.to_commit_payload(work)
 
@@ -470,15 +529,34 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertEqual("creation_clarification", proposal["request_type"])
         self.assertEqual("您希望什么风格和比例？", proposal["question"])
         self.assertEqual("您希望什么风格和比例？", payload["visible_text"])
-        self.assertEqual((), result.checkpoint.opaque_payload["pending_calls"])
+        # 澄清工具挂 clarification pending：恢复时把用户回答作为该 deferred call 的
+        # ToolResult 回喂。pending 与 ToolCallPart 是 adapter 私有 checkpoint 状态，
+        # 与 generate_image 路径一致，不属产品泄露（顶层 input_request 才是产品事实）。
+        pending = result.checkpoint.opaque_payload["pending_calls"]
+        self.assertEqual(1, len(pending))
+        self.assertEqual("clarification", pending[0]["kind"])
         serialized = json.dumps(payload, ensure_ascii=False)
         self.assertNotIn("deferredtoolrequests", serialized.lower())
-        self.assertNotIn("tool_call_id", serialized)
+
+    def test_request_user_input_maps_resume_binding_argument(self) -> None:
+        # IK2QBY AC1：参数映射 UserInputRequestProposal（request_type / question / resume_binding）。
+        work = _pydantic_work(
+            tool_grants=(_generate_image_grant(), _request_user_input_grant()),
+        )
+        result = PydanticAIOrchestrator(
+            FunctionModel(request_user_input_with_binding_model), _bundle_source()
+        ).advance(work)
+        proposal = result.to_commit_payload(work)["user_input_request"]
+
+        self.assertEqual("creation_clarification", proposal["request_type"])
+        self.assertEqual("您希望什么风格？", proposal["question"])
+        self.assertEqual({"intent": "poster", "round": 1}, proposal["resume_binding"])
 
     def test_clarification_resume_proposes_a_single_image_action(self) -> None:
-        initial_work = _pydantic_work()
+        grants = (_generate_image_grant(), _request_user_input_grant())
+        initial_work = _pydantic_work(tool_grants=grants)
         initial_result = PydanticAIOrchestrator(
-            FunctionModel(clarification_dialogue_model), _bundle_source()
+            FunctionModel(clarify_then_image_model), _bundle_source()
         ).advance(initial_work)
         self.assertIsNotNone(initial_result.input_request)
         restored_checkpoint = RuntimeCheckpoint(
@@ -498,10 +576,11 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 {"role": "user", "content": "水墨风格带留白"},
             ),
             checkpoint=restored_checkpoint,
+            tool_grants=grants,
         )
 
         resumed_result = PydanticAIOrchestrator(
-            FunctionModel(clarification_dialogue_model), _bundle_source()
+            FunctionModel(clarify_then_image_model), _bundle_source()
         ).advance(resumed_work)
 
         self.assertIsNone(resumed_result.input_request)
@@ -516,11 +595,57 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             1, len(resumed_result.checkpoint.opaque_payload["pending_calls"])
         )
 
-    def test_clarification_resume_text_fails_closed(self) -> None:
-        # 澄清恢复后模型仍输出文本（未提出动作）：契约违约，失败关闭。
-        initial_work = _pydantic_work()
+    def test_clarification_resume_can_propose_another_clarification(self) -> None:
+        # IK2QBY AC3：解除「澄清恢复后必须出动作」自限，支持两次以上澄清往返。
+        grants = (_generate_image_grant(), _request_user_input_grant())
+        initial_work = _pydantic_work(tool_grants=grants)
         initial_result = PydanticAIOrchestrator(
-            FunctionModel(always_text_model), _bundle_source()
+            FunctionModel(request_user_input_model), _bundle_source()
+        ).advance(initial_work)
+        self.assertIsNotNone(initial_result.input_request)
+        restored_checkpoint = RuntimeCheckpoint(
+            engine=initial_result.checkpoint.engine,
+            engine_version=initial_result.checkpoint.engine_version,
+            adapter_schema_version=initial_result.checkpoint.adapter_schema_version,
+            opaque_payload=json.loads(
+                json.dumps(initial_result.checkpoint.opaque_payload, ensure_ascii=False)
+            ),
+        )
+        resumed_work = _pydantic_work(
+            run_version=2,
+            fencing_token=5,
+            messages=(
+                {"role": "user", "content": "生成一张蓝鲸海报"},
+                {"role": "assistant", "content": "您希望什么风格和比例？"},
+                {"role": "user", "content": "水墨风格"},
+            ),
+            checkpoint=restored_checkpoint,
+            tool_grants=grants,
+        )
+
+        resumed_result = PydanticAIOrchestrator(
+            FunctionModel(request_user_input_model), _bundle_source()
+        ).advance(resumed_work)
+
+        # 第二轮澄清：再次提出输入请求，不出动作，不 fail closed。
+        self.assertIsNone(resumed_result.error)
+        self.assertEqual((), resumed_result.actions)
+        self.assertIsNotNone(resumed_result.input_request)
+        self.assertEqual(
+            "您希望什么风格和比例？", resumed_result.input_request.question
+        )
+        # 第二轮澄清同样挂 clarification pending，等待下一个回答闭合。
+        resumed_pending = resumed_result.checkpoint.opaque_payload["pending_calls"]
+        self.assertEqual(1, len(resumed_pending))
+        self.assertEqual("clarification", resumed_pending[0]["kind"])
+
+    def test_clarification_resume_plain_text_passes_through(self) -> None:
+        # IK2QBY：澄清恢复后的纯文本输出（无工具调用）作为自然对话回应直通，
+        # 不再 fail closed（「澄清恢复后必须出动作」自限已解除）。
+        grants = (_generate_image_grant(), _request_user_input_grant())
+        initial_work = _pydantic_work(tool_grants=grants)
+        initial_result = PydanticAIOrchestrator(
+            FunctionModel(request_user_input_model), _bundle_source()
         ).advance(initial_work)
         self.assertIsNotNone(initial_result.input_request)
         resumed_work = _pydantic_work(
@@ -528,19 +653,21 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             fencing_token=5,
             messages=(
                 {"role": "user", "content": "生成一张蓝鲸海报"},
-                {"role": "assistant", "content": "仍然缺少信息。"},
+                {"role": "assistant", "content": "您希望什么风格和比例？"},
                 {"role": "user", "content": "水墨风格"},
             ),
             checkpoint=initial_result.checkpoint,
+            tool_grants=grants,
         )
 
         result = PydanticAIOrchestrator(
             FunctionModel(always_text_model), _bundle_source()
         ).advance(resumed_work)
 
-        self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
+        self.assertIsNone(result.error)
         self.assertEqual((), result.actions)
         self.assertIsNone(result.input_request)
+        self.assertEqual("仍然缺少信息。", result.visible_text)
 
     def test_resumed_model_text_is_replaced_by_fixed_product_copy(self) -> None:
         initial_work = _pydantic_work()
