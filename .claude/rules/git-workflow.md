@@ -42,6 +42,13 @@
 - 提交流程：`scripts/commit-task-for-review.sh -m "<message>"`（完成即提交，无需授权）→ 用户确认后 `scripts/merge-task-to-local-master.sh --user-authorized <branch>`（合入门槛保持不变）
 - 完整流程：`docs/agents/worktree-workflow.md`，决策：`docs/adr/0010-local-master-is-user-integration-zone.md`
 
+## 同族工单串行与契约先行
+
+- 同族工单（实现同一契约章节的基础设施 + 功能工单）必须串行：基础设施工单先合入本地 master，功能工单再基于新 master 开工；禁止并行分支各自造同构轮子。
+- 契约条款要求跨进程交换的数据（如契约 §6.4 证据回传），必须先在契约文档定死字段名与形状，再开工实现；字段未定死前不得各自发明。
+- 跨服务契约文件（Worker `contracts.py` / Java `RunCommitRequest.java` 等）的改动尽量拆成独立小工单先行合入，功能工单基于已合契约开发。
+- 决策：`docs/adr/0041-sibling-issues-serial-contract-first.md`
+
 ## Codebase Memory MCP
 
 - 创建 task worktree 后，必须先对该 worktree 跑 `index_repository(repo_path=<task-worktree>)` 并确认 `index_status=ready`。
