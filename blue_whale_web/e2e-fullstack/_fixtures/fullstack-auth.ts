@@ -137,3 +137,20 @@ export async function fetchSnapshot(
   }
   return ((await res.json()) as { data: ProjectSnapshot }).data;
 }
+
+/**
+ * 为单个 fullstack spec 创建隔离 Project（IK2BDN）。
+ * 串行套件共享同一验收库：各 spec 必须用私有 Project 并 goto `/canvas?project=<id>`，
+ * 否则互相的生成 Job/Asset/画布节点会破坏彼此的全局计数断言。
+ */
+export async function createProject(
+  api: APIRequestContext,
+  name: string,
+): Promise<number> {
+  const res = await api.post("/api/projects", { data: { name } });
+  if (!res.ok()) {
+    throw new Error(`Project 创建失败：${res.status()} ${await res.text()}`);
+  }
+  const body = (await res.json()) as { data: { id: number } };
+  return body.data.id;
+}

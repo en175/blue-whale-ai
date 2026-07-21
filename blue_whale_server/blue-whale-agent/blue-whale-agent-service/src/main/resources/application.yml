@@ -113,6 +113,10 @@ blue-whale:
     engine: ${AGENT_ORCHESTRATOR_ENGINE:pydantic-ai}
     engine-version: ${AGENT_ORCHESTRATOR_ENGINE_VERSION:2.9.0}
     adapter-schema-version: ${AGENT_ORCHESTRATOR_SCHEMA_VERSION:1}
+  runtime-bundle:
+    # 运行钉版强制开关（IK2D8J）：默认开启与 @Value 缺省一致；隔离验收栈无激活
+    # BundleVersion 种子（与 test profile 一致），经 compose 显式置 false。
+    enforcement-enabled: ${RUNTIME_BUNDLE_ENFORCEMENT_ENABLED:true}
 
 # 火山方舟 Ark：图片/视频生成。api-key 必填，否则 ArkService bean 不创建、生成接口报配置缺失
 volcengine:
