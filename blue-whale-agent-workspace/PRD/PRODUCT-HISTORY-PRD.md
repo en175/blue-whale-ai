@@ -22,7 +22,7 @@
 
 1. **无新建对话出口** —— 当前编排不支持「新开对话 / 重置」，所有产品需求挤在同一个 Agent 对话窗口（三份 PRD 零相关设计）。用户心智默认「对话能记住」。
 2. **LLM 长会话丢上下文** —— 对话足够长，早期 messages 被 context 物理截断。
-3. **P0 两槽位挤掉最旧产品** —— 现状只有 `active_product_context` + `previous_product_context` 两个槽位（见 `AGENT-CONVERSATION-PRD.md` 硬状态代码）。切到第三个产品，最早的产品方向被覆盖，找不回。
+3. **P0 设计为两槽位,会挤掉最旧产品** —— skill 设计层(见 `AGENT-CONVERSATION-PRD.md` 硬状态代码)是 `active_product_context` + `previous_product_context` 两槽位,切到第三个产品最早方向被覆盖找不回。**2026-07-21 后端扫描**:agent turn / product_context 整条零实现(后端实体只有 Project/Canvas/Asset/Job/Skill/UserSkill/TemplateCard,无 product_context / messages / agent_events),两槽位尚未落地——本 PRD 的 `content_versions` 是从零设计,不替换既有实现。
 
 结果：用户在一段对话里做过多个产品，想切回之前某个，**切不回或被覆盖**。
 
