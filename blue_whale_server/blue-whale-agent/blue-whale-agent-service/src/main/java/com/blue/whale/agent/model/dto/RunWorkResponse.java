@@ -13,6 +13,11 @@ public record RunWorkResponse(
         String engine,
         String engineVersion,
         Integer adapterSchemaVersion,
+        String bundleVersionId,
+        String manifestDigest,
+        String modelProfileId,
+        String modelProfileVersion,
+        Object activatedCreativeSkillVersions,
         List<RunMessage> messages,
         Checkpoint checkpoint,
         List<AcceptedResult> acceptedResults

@@ -49,6 +49,11 @@
             <artifactId>redisson</artifactId>
             <version>${redisson-spring.version}</version>
         </dependency>
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>2.0.4</version>
+        </dependency>
 
         <dependency>
             <groupId>com.blue-whale.agent</groupId>
@@ -101,6 +106,18 @@
     </dependencies>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>../../../docs/specs</directory>
+                <includes>
+                    <include>runtime-agent-bundle.schema.json</include>
+                </includes>
+                <targetPath>schema</targetPath>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

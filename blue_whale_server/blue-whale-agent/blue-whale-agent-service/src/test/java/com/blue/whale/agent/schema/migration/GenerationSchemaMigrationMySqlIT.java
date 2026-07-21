@@ -43,6 +43,8 @@ class GenerationSchemaMigrationMySqlIT {
             "template_card", "template_card_image", "skill", "user_skill",
             "project", "canvas", "project_event_stream", "project_events", "outbox_messages",
             "conversations", "agent_runs", "runtime_checkpoints", "run_commits",
+            "runtime_agent_definitions", "runtime_bundle_drafts", "runtime_bundle_versions",
+            "runtime_bundle_resources", "runtime_bundle_write_idempotency", "runtime_bundle_audit_records",
             "user_input_requests", "conversation_messages", "command_idempotency",
             "generation_job_outputs", "asset_storage_objects", "asset_object_transfers",
             "generation_result_conflicts", "generation_provider_tasks",
@@ -157,6 +159,19 @@ class GenerationSchemaMigrationMySqlIT {
         assertThat(indexExists("generation_jobs", "idx_generation_job_claim")).isTrue();
         assertThat(indexExists("generation_jobs", "idx_generation_job_retry_of")).isTrue();
         assertThat(indexExists("generation_jobs", "idx_generation_video_action")).isTrue();
+
+        for (String table : List.of(
+                "runtime_agent_definitions", "runtime_bundle_drafts", "runtime_bundle_versions",
+                "runtime_bundle_resources", "runtime_bundle_write_idempotency",
+                "runtime_bundle_audit_records")) {
+            assertThat(tableExists(table)).as("表 %s 应存在", table).isTrue();
+        }
+        assertThat(columnExists("runtime_bundle_resources", "resource_revision")).isTrue();
+        for (String column : List.of(
+                "bundle_version_id", "manifest_digest", "model_profile_id",
+                "model_profile_version", "activated_creative_skill_versions")) {
+            assertThat(columnExists("agent_runs", column)).as("agent_runs.%s 应存在", column).isTrue();
+        }
 
         // V7（IK21O4）：模型能力表建出，且种子一行 enabled 的 Seedream lite 就位
         assertThat(tableExists("generation_model_capability")).isTrue();

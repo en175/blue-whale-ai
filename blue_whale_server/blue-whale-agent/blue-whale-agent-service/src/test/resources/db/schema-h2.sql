@@ -1,5 +1,5 @@
 -- H2（MODE=MySQL）集成测试建表脚本。
--- 与迁移链最终 schema 对齐（V1 基线 + V3 游标列改名 + V7 能力注册表 + V8 收件箱 + V9 Assistant 分块），但去掉 MySQL 专有语法。
+-- 与迁移链最终 schema 对齐（V1 基线 + V3 游标列改名 event_cursor + V7 能力注册表 + V8 收件箱 + V9 Assistant 分块 + V10 Runtime Bundle），但去掉 MySQL 专有语法（ENGINE/CHARSET/COMMENT/JSON→CLOB/ON UPDATE）。
 -- 通用 IT schema（test profile 全量 IT 共用），生产以 db/migrations 迁移链为准。
 
 CREATE TABLE IF NOT EXISTS project
@@ -53,6 +53,11 @@ CREATE TABLE IF NOT EXISTS agent_runs
     engine VARCHAR(64) NOT NULL,
     engine_version VARCHAR(64) NOT NULL,
     adapter_schema_version INT NOT NULL,
+    bundle_version_id VARCHAR(96) NULL,
+    manifest_digest VARCHAR(71) NULL,
+    model_profile_id VARCHAR(80) NULL,
+    model_profile_version VARCHAR(64) NULL,
+    activated_creative_skill_versions CLOB NULL,
     current_checkpoint_id BIGINT NULL,
     confirmed_input_request_id BIGINT NULL,
     lease_owner VARCHAR(128) NULL,
@@ -66,6 +71,96 @@ CREATE TABLE IF NOT EXISTS agent_runs
 
 CREATE INDEX IF NOT EXISTS idx_agent_run_claim
     ON agent_runs (status, engine, is_delete, id);
+
+CREATE TABLE IF NOT EXISTS runtime_agent_definitions
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    agent_definition_id VARCHAR(80) NOT NULL,
+    definition_key VARCHAR(64) NOT NULL,
+    display_name VARCHAR(120) NOT NULL,
+    description VARCHAR(1000) NOT NULL,
+    active_bundle_version_id VARCHAR(96) NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_runtime_agent_definition_id UNIQUE (agent_definition_id),
+    CONSTRAINT uk_runtime_agent_definition_key UNIQUE (definition_key)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_bundle_drafts
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    draft_id VARCHAR(96) NOT NULL,
+    agent_definition_id VARCHAR(80) NOT NULL,
+    base_version_id VARCHAR(96) NULL,
+    draft_revision INT NOT NULL,
+    validation_state VARCHAR(16) NOT NULL,
+    last_validated_revision INT NULL,
+    composition_json CLOB NOT NULL,
+    resources_json CLOB NOT NULL,
+    created_by BIGINT NOT NULL,
+    updated_by BIGINT NOT NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_runtime_bundle_draft_id UNIQUE (draft_id),
+    CONSTRAINT uk_runtime_bundle_agent_draft UNIQUE (agent_definition_id)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_bundle_versions
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    bundle_version_id VARCHAR(96) NOT NULL,
+    agent_definition_id VARCHAR(80) NOT NULL,
+    semantic_version VARCHAR(64) NOT NULL,
+    source_draft_id VARCHAR(96) NOT NULL,
+    source_draft_revision INT NOT NULL,
+    manifest_digest VARCHAR(71) NOT NULL,
+    snapshot_json CLOB NOT NULL,
+    published_by BIGINT NOT NULL,
+    published_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_runtime_bundle_version_id UNIQUE (bundle_version_id),
+    CONSTRAINT uk_runtime_bundle_semver UNIQUE (agent_definition_id, semantic_version)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_bundle_resources
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    bundle_version_id VARCHAR(96) NOT NULL,
+    resource_id VARCHAR(80) NOT NULL,
+    resource_revision INT NOT NULL,
+    resource_kind VARCHAR(32) NOT NULL,
+    resource_path VARCHAR(512) NOT NULL,
+    media_type VARCHAR(128) NOT NULL,
+    load_mode VARCHAR(16) NOT NULL,
+    content_digest VARCHAR(71) NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    token_estimate INT NOT NULL,
+    metadata_json CLOB NOT NULL,
+    content CLOB NOT NULL,
+    CONSTRAINT uk_runtime_bundle_resource UNIQUE (bundle_version_id, resource_id)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_bundle_write_idempotency
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    operation VARCHAR(64) NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL,
+    request_hash VARCHAR(71) NOT NULL,
+    response_json CLOB NULL,
+    actor_user_id BIGINT NOT NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_runtime_bundle_idempotency UNIQUE (operation, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_bundle_audit_records
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    actor_user_id BIGINT NOT NULL,
+    operation VARCHAR(64) NOT NULL,
+    target_type VARCHAR(32) NOT NULL,
+    target_id VARCHAR(128) NOT NULL,
+    details_json CLOB NOT NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE TABLE IF NOT EXISTS runtime_checkpoints
 (

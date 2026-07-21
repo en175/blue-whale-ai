@@ -138,7 +138,9 @@ public class AgentRunWorkerService {
             return new RunWorkResponse(
                     run.getId(), run.getProjectId(), run.getConversationId(), run.getUserId(),
                     run.getVersion(), run.getFencingToken(), run.getEngine(), run.getEngineVersion(),
-                    run.getAdapterSchemaVersion(), messages,
+                    run.getAdapterSchemaVersion(), run.getBundleVersionId(), run.getManifestDigest(),
+                    run.getModelProfileId(), run.getModelProfileVersion(),
+                    creativeSkillVersions(run.getActivatedCreativeSkillVersions()), messages,
                     checkpoint == null ? null
                             : new RunWorkResponse.Checkpoint(
                                     checkpoint.getId(), checkpoint.getEngine(), checkpoint.getEngineVersion(),
@@ -622,8 +624,25 @@ public class AgentRunWorkerService {
         payload.put("engine", run.getEngine());
         payload.put("engine_version", run.getEngineVersion());
         payload.put("adapter_schema_version", run.getAdapterSchemaVersion());
+        payload.put("bundle_version_id", run.getBundleVersionId());
+        payload.put("manifest_digest", run.getManifestDigest());
+        payload.put("model_profile_id", run.getModelProfileId());
+        payload.put("model_profile_version", run.getModelProfileVersion());
+        payload.put("activated_creative_skill_versions",
+                creativeSkillVersions(run.getActivatedCreativeSkillVersions()));
         payload.put("current_checkpoint_id", run.getCurrentCheckpointId());
         return payload;
+    }
+
+    private Object creativeSkillVersions(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readTree(value);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("AgentRun 的 Creative Skill 版本钉住数据已损坏", exception);
+        }
     }
 
     private RunCommitResponse response(RunCommitRecord record) {

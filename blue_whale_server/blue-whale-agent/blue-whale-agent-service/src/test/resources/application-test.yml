@@ -10,6 +10,8 @@ blue-whale:
     enabled: false
   project-events:
     redis-enabled: false
+  runtime-bundle:
+    enforcement-enabled: false
 
 spring:
   datasource:

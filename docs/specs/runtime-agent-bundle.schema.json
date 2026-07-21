@@ -1,0 +1,674 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.blue-whale.ai/runtime-agent-bundle/v1/schema.json",
+  "title": "Blue-Whale Runtime Agent Bundle Contract",
+  "description": "Runtime Agent Bundle draft and immutable published snapshot contract. Cross-resource publication invariants are defined in the companion specification.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/BundleDraft"
+    },
+    {
+      "$ref": "#/$defs/BundleVersion"
+    }
+  ],
+  "$defs": {
+    "Identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,79}$"
+    },
+    "SemVer": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "ResourcePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+    },
+    "LoadMode": {
+      "type": "string",
+      "enum": [
+        "always_on",
+        "on_demand"
+      ]
+    },
+    "AgentDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agentDefinitionId",
+        "key",
+        "displayName",
+        "description"
+      ],
+      "properties": {
+        "agentDefinitionId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    },
+    "ResourceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rawRef",
+        "resolvedResourceId"
+      ],
+      "properties": {
+        "rawRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*:)(?!/).+$"
+        },
+        "resolvedResourceId": {
+          "$ref": "#/$defs/Identifier"
+        }
+      }
+    },
+    "ResourceBase": {
+      "type": "object",
+      "required": [
+        "resourceId",
+        "revision",
+        "path",
+        "mediaType",
+        "loadMode",
+        "contentDigest",
+        "sizeBytes",
+        "tokenEstimate",
+        "references"
+      ],
+      "properties": {
+        "resourceId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "path": {
+          "$ref": "#/$defs/ResourcePath"
+        },
+        "mediaType": {
+          "type": "string",
+          "pattern": "^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+(?:;.*)?$"
+        },
+        "loadMode": {
+          "$ref": "#/$defs/LoadMode"
+        },
+        "contentDigest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tokenEstimate": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ResourceReference"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "RoleDocument": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/$defs/ResourceBase"
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "role_document"
+            },
+            "loadMode": {
+              "const": "always_on"
+            },
+            "mediaType": {
+              "const": "text/markdown"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "Rule": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/$defs/ResourceBase"
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "conflictDomain"
+          ],
+          "properties": {
+            "kind": {
+              "const": "rule"
+            },
+            "mediaType": {
+              "const": "text/markdown"
+            },
+            "conflictDomain": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 160,
+              "pattern": "^[a-z][a-z0-9_.:-]*$"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "SkillMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description",
+        "allowImplicitInvocation"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "allowImplicitInvocation": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RuntimeSkill": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/$defs/ResourceBase"
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "kind": {
+              "const": "runtime_skill"
+            },
+            "loadMode": {
+              "const": "on_demand"
+            },
+            "mediaType": {
+              "const": "text/markdown"
+            },
+            "metadata": {
+              "$ref": "#/$defs/SkillMetadata"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "CreativeSkill": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/$defs/ResourceBase"
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "creativeSkillId",
+            "version",
+            "metadata"
+          ],
+          "properties": {
+            "kind": {
+              "const": "creative_skill"
+            },
+            "creativeSkillId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "version": {
+              "$ref": "#/$defs/SemVer"
+            },
+            "loadMode": {
+              "const": "on_demand"
+            },
+            "mediaType": {
+              "const": "text/markdown"
+            },
+            "metadata": {
+              "$ref": "#/$defs/SkillMetadata"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "ReferenceResource": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/$defs/ResourceBase"
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "reference"
+            },
+            "loadMode": {
+              "const": "on_demand"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RuleSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rules"
+      ],
+      "properties": {
+        "rules": {
+          "type": "array",
+          "description": "Array order is the immutable rule order.",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "ModelProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "modelProfileId",
+        "version",
+        "modelKey",
+        "capabilities",
+        "maxInputTokens",
+        "maxOutputTokens"
+      ],
+      "properties": {
+        "modelProfileId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "version": {
+          "$ref": "#/$defs/SemVer"
+        },
+        "modelKey": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "text",
+              "vision",
+              "tool_calling",
+              "structured_output"
+            ]
+          }
+        },
+        "maxInputTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ToolGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "toolName",
+        "registryVersion",
+        "effect",
+        "proposalOnly",
+        "argumentSchema",
+        "constraints"
+      ],
+      "properties": {
+        "toolName": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+        },
+        "registryVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "effect": {
+          "type": "string",
+          "enum": [
+            "read",
+            "side_effect"
+          ]
+        },
+        "proposalOnly": {
+          "const": true
+        },
+        "argumentSchema": {
+          "type": "object",
+          "required": [
+            "$schema"
+          ],
+          "properties": {
+            "$schema": {
+              "const": "https://json-schema.org/draft/2020-12/schema"
+            }
+          },
+          "additionalProperties": true
+        },
+        "constraints": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "TokenBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "estimator",
+        "initialContextMaxTokens",
+        "singleResourceMaxTokens",
+        "activeContextMaxTokens"
+      ],
+      "properties": {
+        "estimator": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{2,127}$"
+        },
+        "initialContextMaxTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "singleResourceMaxTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "activeContextMaxTokens": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ResourceManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "baseUri",
+        "digestAlgorithm",
+        "manifestDigest",
+        "resources"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "baseUri": {
+          "type": "string",
+          "pattern": "^bw-bundle://[a-z][a-z0-9_]{2,79}/$"
+        },
+        "digestAlgorithm": {
+          "const": "sha256"
+        },
+        "manifestDigest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "resources": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/RoleDocument"
+              },
+              {
+                "$ref": "#/$defs/Rule"
+              },
+              {
+                "$ref": "#/$defs/RuntimeSkill"
+              },
+              {
+                "$ref": "#/$defs/ReferenceResource"
+              }
+            ]
+          }
+        }
+      },
+      "allOf": [
+        {
+          "properties": {
+            "resources": {
+              "type": "array",
+              "contains": {
+                "$ref": "#/$defs/RoleDocument"
+              },
+              "minContains": 1,
+              "maxContains": 1
+            }
+          }
+        },
+        {
+          "properties": {
+            "resources": {
+              "type": "array",
+              "contains": {
+                "$ref": "#/$defs/RuntimeSkill"
+              },
+              "minContains": 1,
+              "maxContains": 1
+            }
+          }
+        }
+      ]
+    },
+    "BundleComposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "roleDocumentId",
+        "ruleSet",
+        "rootRuntimeSkillId",
+        "modelProfiles",
+        "toolGrants",
+        "tokenBudget",
+        "resourceManifest"
+      ],
+      "properties": {
+        "roleDocumentId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "ruleSet": {
+          "$ref": "#/$defs/RuleSet"
+        },
+        "rootRuntimeSkillId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "modelProfiles": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ModelProfile"
+          }
+        },
+        "toolGrants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolGrant"
+          }
+        },
+        "tokenBudget": {
+          "$ref": "#/$defs/TokenBudget"
+        },
+        "resourceManifest": {
+          "$ref": "#/$defs/ResourceManifest"
+        }
+      }
+    },
+    "BundleDraft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "schemaVersion",
+        "draftId",
+        "agentDefinitionId",
+        "baseVersionId",
+        "draftRevision",
+        "validationState",
+        "lastValidatedRevision",
+        "composition"
+      ],
+      "properties": {
+        "kind": {
+          "const": "bundle_draft"
+        },
+        "schemaVersion": {
+          "const": 1
+        },
+        "draftId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "agentDefinitionId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "baseVersionId": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "draftRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "validationState": {
+          "type": "string",
+          "enum": [
+            "editing",
+            "invalid",
+            "valid"
+          ]
+        },
+        "lastValidatedRevision": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "composition": {
+          "$ref": "#/$defs/BundleComposition"
+        }
+      }
+    },
+    "BundleVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "schemaVersion",
+        "bundleVersionId",
+        "agentDefinition",
+        "version",
+        "publishedAt",
+        "publishedBy",
+        "composition"
+      ],
+      "properties": {
+        "kind": {
+          "const": "bundle_version"
+        },
+        "schemaVersion": {
+          "const": 1
+        },
+        "bundleVersionId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "agentDefinition": {
+          "$ref": "#/$defs/AgentDefinition"
+        },
+        "version": {
+          "$ref": "#/$defs/SemVer"
+        },
+        "publishedAt": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "publishedBy": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "composition": {
+          "$ref": "#/$defs/BundleComposition"
+        }
+      }
+    }
+  },
+  "$comment": "Publication additionally requires unique resourceId/path pairs, exact role/root/rule references, no cycles, unique non-null conflictDomain values, valid digests, token budgets, and platform-registry subset checks. JSON Schema alone cannot express those graph and trust-boundary invariants."
+}
