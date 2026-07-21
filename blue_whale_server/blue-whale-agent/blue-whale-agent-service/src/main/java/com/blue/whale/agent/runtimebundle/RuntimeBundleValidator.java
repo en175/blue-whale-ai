@@ -4,11 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -66,8 +64,8 @@ final class RuntimeBundleValidator {
     private final RuntimeBundleDigests digests;
     private final RuntimeBundleContractMapper contractMapper;
     private final RuntimeBundleSchemaValidator schemaValidator;
+    private final ToolRegistry toolRegistry;
     private final Set<ApprovedModelContract> approvedModelContracts;
-    private final Set<ApprovedToolContract> approvedToolContracts;
     private final Set<String> approvedTokenEstimators;
 
     RuntimeBundleValidator(
@@ -75,16 +73,16 @@ final class RuntimeBundleValidator {
             RuntimeBundleDigests digests,
             RuntimeBundleContractMapper contractMapper,
             RuntimeBundleSchemaValidator schemaValidator,
+            ToolRegistry toolRegistry,
             @Value("${blue-whale.runtime-bundle.approved-model-contracts:}") String configuredModels,
-            @Value("${blue-whale.runtime-bundle.approved-tool-contracts:}") String configuredTools,
             @Value("${blue-whale.runtime-bundle.approved-token-estimators:}")
                     String configuredTokenEstimators) {
         this.objectMapper = objectMapper;
         this.digests = digests;
         this.contractMapper = contractMapper;
         this.schemaValidator = schemaValidator;
+        this.toolRegistry = toolRegistry;
         this.approvedModelContracts = configuredModelContracts(configuredModels);
-        this.approvedToolContracts = configuredToolContracts(configuredTools);
         this.approvedTokenEstimators = configuredValues(configuredTokenEstimators);
     }
 
@@ -504,12 +502,12 @@ final class RuntimeBundleValidator {
     }
 
     private boolean matchesApprovedTool(JsonNode grant) {
-        return approvedToolContracts.stream().anyMatch(approved ->
-                approved.toolName().equals(grant.path("tool_name").asText())
-                        && approved.registryVersion() == grant.path("registry_version").asInt(0)
-                        && approved.effect().equals(grant.path("effect").asText())
-                        && schemaNoWider(grant.path("argument_schema"), approved.argumentSchema())
-                        && constraintsNoWider(grant.path("constraints"), approved.constraints()));
+        return toolRegistry
+                .find(grant.path("tool_name").asText(), grant.path("registry_version").asInt(0))
+                .map(definition -> definition.effect().equals(grant.path("effect").asText())
+                        && schemaNoWider(grant.path("argument_schema"), definition.inputSchema())
+                        && constraintsNoWider(grant.path("constraints"), definition.constraints()))
+                .orElse(false);
     }
 
     private boolean schemaNoWider(JsonNode requested, JsonNode approved) {
@@ -785,24 +783,6 @@ final class RuntimeBundleValidator {
         return Set.copyOf(result);
     }
 
-    private Set<ApprovedToolContract> configuredToolContracts(String configured) {
-        Set<ApprovedToolContract> result = new HashSet<>();
-        for (String entry : configured.split(",")) {
-            String[] fields = entry.trim().split("\\|", -1);
-            if (fields.length == 5) {
-                try {
-                    result.add(new ApprovedToolContract(
-                            fields[0], Integer.parseInt(fields[1]), fields[2],
-                            objectMapper.readTree(Base64.getDecoder().decode(fields[3])),
-                            objectMapper.readTree(Base64.getDecoder().decode(fields[4]))));
-                } catch (IllegalArgumentException | IOException ignored) {
-                    // Invalid platform catalog entries are ignored so validation fails closed.
-                }
-            }
-        }
-        return Set.copyOf(result);
-    }
-
     private Set<String> configuredValues(String configured) {
         Set<String> result = new HashSet<>();
         for (String value : configured.split(",")) {
@@ -820,13 +800,6 @@ final class RuntimeBundleValidator {
             Set<String> capabilities,
             int maxInputTokens,
             int maxOutputTokens) {}
-
-    private record ApprovedToolContract(
-            String toolName,
-            int registryVersion,
-            String effect,
-            JsonNode argumentSchema,
-            JsonNode constraints) {}
 
     record ValidationResult(
             List<String> errors, ObjectNode composition, ArrayNode resources, String manifestDigest) {

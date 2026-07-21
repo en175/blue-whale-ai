@@ -32,10 +32,6 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
         "blue-whale.runtime-bundle.worker-ids=worker-1",
         "blue-whale.runtime-bundle.approved-model-contracts="
                 + "model_canvas|1.0.0|doubao-seed-1-6|text+tool_calling|100000|4096",
-        "blue-whale.runtime-bundle.approved-tool-contracts="
-                + "canvas.read|1|read|"
-                + "eyIkc2NoZW1hIjoiaHR0cHM6Ly9qc29uLXNjaGVtYS5vcmcvZHJhZnQvMjAyMC0xMi9zY2hlbWEiLCJ0eXBlIjoib2JqZWN0IiwicHJvcGVydGllcyI6eyJsaW1pdCI6eyJ0eXBlIjoiaW50ZWdlciIsIm1heGltdW0iOjEwMH19LCJhZGRpdGlvbmFsUHJvcGVydGllcyI6ZmFsc2V9|"
-                + "eyJtYXhfcmVzdWx0cyI6MTAwfQ==",
         "blue-whale.runtime-bundle.approved-token-estimators=chars_div_4"
 })
 @AutoConfigureMockMvc
@@ -72,6 +68,8 @@ class RuntimeBundleLifecycleIT {
         assertThat(manifestV1.path("baseUri").asText())
                 .isEqualTo("bw-bundle://" + versionV1 + "/");
         assertThat(digestWithoutManifestDigest(manifestV1)).isEqualTo(digestV1);
+        assertThat(immutableV1.path("data").path("composition").path("toolGrants")
+                .get(0).path("registryVersion").asInt()).isEqualTo(1);
 
         String originalSnapshot = jdbcTemplate.queryForObject("""
                 SELECT snapshot_json FROM runtime_bundle_versions WHERE bundle_version_id = ?
@@ -272,6 +270,24 @@ class RuntimeBundleLifecycleIT {
         ((ObjectNode) unauthorizedTool.path("composition").path("tool_grants").get(0))
                 .put("tool_name", "canvas.delete");
         assertPublicationBlocked("tool_agent", unauthorizedTool, "unauthorized_tool");
+
+        // 已注册 toolName + 未注册 registryVersion（canvas.read v99）：toolId+registryVersion 是主键，
+        // 单独换版本号不在注册表 → unauthorized_tool，守住主键语义不被退化为只查 toolName。
+        ObjectNode unregisteredVersion = validDraftNode();
+        ((ObjectNode) unregisteredVersion.path("composition").path("tool_grants").get(0))
+                .put("registry_version", 99);
+        assertPublicationBlocked("tool_version_agent", unregisteredVersion, "unauthorized_tool");
+
+        ObjectNode widerSchema = validDraftNode();
+        ((ObjectNode) widerSchema.path("composition").path("tool_grants").get(0)
+                .path("argument_schema").path("properties").path("limit"))
+                .put("maximum", 200);
+        assertPublicationBlocked("wider_schema_agent", widerSchema, "unauthorized_tool");
+
+        ObjectNode widerConstraints = validDraftNode();
+        ((ObjectNode) widerConstraints.path("composition").path("tool_grants").get(0)
+                .path("constraints")).put("max_results", 200);
+        assertPublicationBlocked("wider_constraints_agent", widerConstraints, "unauthorized_tool");
 
         ObjectNode unauthorizedModelContract = validDraftNode();
         ((ObjectNode) unauthorizedModelContract.path("composition").path("model_profiles").get(0))
