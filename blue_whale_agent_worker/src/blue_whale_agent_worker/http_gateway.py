@@ -129,6 +129,27 @@ class JavaRunGateway:
             method="GET",
         )
 
+    def fetch_conversation_summary(self, run_id: int) -> dict[str, Any]:
+        """GET /internal/agent-runs/{runId}/conversation/summary：对话摘要（snake_case）。"""
+        return self._request(
+            f"/internal/agent-runs/{run_id}/conversation/summary", method="GET"
+        )
+
+    def fetch_conversation_history(
+        self,
+        run_id: int,
+        after: Optional[int] = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """GET /internal/agent-runs/{runId}/conversation/history：游标分页历史（snake_case）。"""
+        query = f"?limit={limit}"
+        if after is not None:
+            query += f"&after={after}"
+        return self._request(
+            f"/internal/agent-runs/{run_id}/conversation/history{query}",
+            method="GET",
+        )
+
     def _request(
         self,
         path: str,

@@ -43,6 +43,7 @@ from .verifier import VerifiedSnapshot, composition_mapping, resource_manifest
 ORIGIN_INITIAL = "initial"
 ORIGIN_ON_DEMAND = "on_demand"
 ORIGIN_HISTORY = "history"
+ORIGIN_CONVERSATION = "conversation"
 
 
 def _sha256_text(text: str) -> str:
@@ -121,6 +122,35 @@ class ResourceGate:
         if resource is None or resource_id in self._charged:
             return
         self._charge(resource_id, resource, ORIGIN_HISTORY)
+
+    def charge_conversation(self, resource_id: str, content: str) -> None:
+        """非 manifest 内容（对话读取，IK2QBZ）的记账：无 digest 比对，同一双预算门与账本。
+
+        Conversation 消息非 Bundle 资源，无固化 ``contentDigest`` 可比对；token 估算、
+        single / active 双预算门与 ReadEvidence 记账和 manifest 资源完全同口径，计入
+        同一活动上下文累计（``origin=conversation``，``revision`` 恒 0，digest 为本次
+        返回内容的 sha256）。每次调用独立记账——翻页读取各计各的，不走 ``_charged``
+        幂等去重（对话内容随游标变化，非不可变 Bundle 字节）。
+        """
+        tokens = estimate_chars_div_4(content)
+        if tokens > self._single_max:
+            raise BundleError(
+                BUNDLE_TOKEN_BUDGET_EXCEEDED, "单次对话读取超预算，已拒绝而非截断"
+            )
+        if self._active_tokens + tokens > self._active_max:
+            raise BundleError(
+                BUNDLE_TOKEN_BUDGET_EXCEEDED, "活动上下文超预算，已拒绝而非截断"
+            )
+        self._active_tokens += tokens
+        self._ledger.append(
+            ReadEvidence(
+                resource_id=resource_id,
+                revision=0,
+                content_digest=_sha256_text(content),
+                token_estimate=tokens,
+                origin=ORIGIN_CONVERSATION,
+            )
+        )
 
     def evidence(self) -> tuple[ReadEvidence, ...]:
         return tuple(self._ledger)

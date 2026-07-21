@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Mapping
 
@@ -17,6 +18,7 @@ from .bundle.loader import ContextLoader, LoadedContext
 from .bundle.source import BundleSource
 from .bundle.verifier import BundleVerifier, VerifiedSnapshot
 from .contracts import (
+    ConversationSource,
     OrchestratorResult,
     ProposedAction,
     RunWork,
@@ -28,6 +30,9 @@ from .contracts import (
 ENGINE = "pydantic-ai"
 ENGINE_VERSION = "2.9.0"
 ADAPTER_SCHEMA_VERSION = 1
+
+# IK2QBZ read_conversation_* 直接工具的注册表版本（与 Java 工具注册表对齐）。
+READ_CONVERSATION_REGISTRY_VERSION = 1
 
 # checkpoint pending_calls 项的 kind 标记：澄清 deferred call 恢复时用用户自然语言
 # 回答作 ToolResult 回喂，区别于动作 pending（结果来自 accepted_results）。
@@ -118,9 +123,11 @@ class PydanticAIOrchestrator:
         model: Model | str,
         bundle_source: BundleSource,
         implementations: Mapping[str, ToolImplementation] | None = None,
+        conversation_source: ConversationSource | None = None,
     ) -> None:
         self._model = model
         self._bundle_source = bundle_source
+        self._conversation_source = conversation_source
         self._implementations = (
             implementations
             if implementations is not None
@@ -163,6 +170,8 @@ class PydanticAIOrchestrator:
         verified, loaded = self._load_bundle(work)
         # 受限资源读取闸门：持有校验通过的快照与基础上下文基线，承接 on_demand 读取、
         # 双预算门、digest 比对与 ReadEvidence 记账（契约 §6 第 3 条 / IK2QBM）。
+        # 对话读取（IK2QBZ read_conversation_*）复用同一闸门与账本：无 manifest digest
+        # 可比，但共享双预算门、活动上下文累计与证据通道（origin=conversation）。
         gate = ResourceGate(
             verified,
             self._bundle_source,
@@ -173,7 +182,7 @@ class PydanticAIOrchestrator:
             self._model,
             output_type=(str, DeferredToolRequests),
             instructions=loaded.instructions,
-            tools=(*self._build_tools(work), read_resource),
+            tools=(*self._build_tools(work, gate), read_resource),
             deps_type=ResourceGate,
         )
         if work.checkpoint is None:
@@ -361,26 +370,78 @@ class PydanticAIOrchestrator:
             for item in evidence
         )
 
-    def _build_tools(self, work: RunWork) -> tuple:
+    def _build_tools(self, work: RunWork, gate: ResourceGate) -> tuple:
         """按当次 Run 钉住的 ToolGrant 动态构造模型可见工具集。
 
         只读 effect → 直接工具（handler 直接返回结果）；副作用 effect → deferred 工具
-        （handler raise CallDeferred）。未列出的工具对模型完全不可见。grant 与实现目录的
-        tool_name / registry_version / effect 任一不符 fail closed，并入现有契约归一化通道
-        （ORCHESTRATOR_CONTRACT_MISMATCH），不泄露内部细节。``read_resource`` 不经 ToolGrant，
-        作为 Bundle 固有受限读取工具在 ``_advance`` 中单独注入。
+        （handler raise CallDeferred）。只读 effect 的对话读取工具（read_conversation_*）
+        → per-advance 闭包，捕获 conversation_source + run + gate，读后经 ResourceGate
+        双预算门记账（origin=conversation，与 Bundle 资源同一活动上下文账本）。
+        未列出的工具对模型完全不可见。grant 与实现目录的 tool_name / registry_version /
+        effect 任一不符 fail closed，并入现有契约归一化通道（ORCHESTRATOR_CONTRACT_MISMATCH），
+        不泄露内部细节。``read_resource`` 不经 ToolGrant，作为 Bundle 固有受限读取工具
+        在 ``_advance`` 中单独注入。
         """
         tools: list = []
         for grant in work.tool_grants:
             implementation = self._implementations.get(grant.tool_name)
-            if implementation is None:
+            if implementation is not None:
+                if implementation.registry_version != grant.registry_version:
+                    raise _ContractError("工具注册表版本与授权不符")
+                if implementation.effect != grant.effect:
+                    raise _ContractError("工具效果类别与授权不符")
+                tools.append(implementation.handler)
+                continue
+            factory = self._read_tool_factory(grant.tool_name)
+            if factory is None:
                 raise _ContractError("授权工具不在 Worker 注册表")
-            if implementation.registry_version != grant.registry_version:
-                raise _ContractError("工具注册表版本与授权不符")
-            if implementation.effect != grant.effect:
+            if grant.effect != "read":
                 raise _ContractError("工具效果类别与授权不符")
-            tools.append(implementation.handler)
+            if grant.registry_version != READ_CONVERSATION_REGISTRY_VERSION:
+                raise _ContractError("工具注册表版本与授权不符")
+            tools.append(factory(work, gate))
         return tuple(tools)
+
+    def _read_tool_factory(
+        self, tool_name: str
+    ) -> Callable[[RunWork, ResourceGate], Callable[..., object]] | None:
+        """read_conversation_* 闭包工厂；conversation_source 未配置时返回 None（工具不可见）。"""
+        if self._conversation_source is None:
+            return None
+        if tool_name == "read_conversation_summary":
+            return self._make_read_conversation_summary
+        if tool_name == "read_conversation_history":
+            return self._make_read_conversation_history
+        return None
+
+    def _make_read_conversation_summary(
+        self, work: RunWork, gate: ResourceGate
+    ) -> Callable[..., object]:
+        def read_conversation_summary() -> str:
+            """读取当前对话的紧凑摘要（消息数 / 首末预览 / 时间范围）。"""
+            data = self._conversation_source.fetch_conversation_summary(work.agent_run_id)
+            content = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+            gate.charge_conversation(f"conversation:{work.conversation_id}:summary", content)
+            return content
+
+        return read_conversation_summary
+
+    def _make_read_conversation_history(
+        self, work: RunWork, gate: ResourceGate
+    ) -> Callable[..., object]:
+        def read_conversation_history(after: int | None = None, limit: int = 20) -> str:
+            """按 sequence_no 游标读取对话历史（升序），after 为上一页 nextCursor。"""
+            data = self._conversation_source.fetch_conversation_history(
+                work.agent_run_id, after=after, limit=limit
+            )
+            content = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+            cursor_part = "" if after is None else f":after:{after}"
+            gate.charge_conversation(
+                f"conversation:{work.conversation_id}:history{cursor_part}", content
+            )
+            return content
+
+        return read_conversation_history
 
     @staticmethod
     def _validate_identity(work: RunWork) -> None:
