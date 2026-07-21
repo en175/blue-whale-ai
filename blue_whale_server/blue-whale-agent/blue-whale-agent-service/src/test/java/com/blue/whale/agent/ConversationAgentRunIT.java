@@ -181,7 +181,7 @@ class ConversationAgentRunIT {
                 "\"adapter_schema_version\":1," +
                 "\"visible_text\":\"已接纳，正在生成图片。\"," +
                 "\"checkpoint\":{\"opaque_payload\":{\"step\":\"proposed\"}}," +
-                "\"actions\":[{\"action_id\":\"action-1\",\"action_type\":\"generate_image\"," +
+                "\"actions\":[{\"action_id\":\"action-1\",\"tool_id\":\"create_image_generation_job\",\"registry_version\":1," +
                 "\"arguments\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}}]}";
 
         MvcResult firstCommit = postCommit(runId, commitBody)
@@ -515,7 +515,7 @@ class ConversationAgentRunIT {
                 .path("agent_run_id").asLong();
         JsonNode work = claim(runId);
         String body = validCommitBody(project.getId(), work).replace(
-                "\"actions\":[{\"action_id\":\"action-1\",\"action_type\":\"generate_image\","
+                "\"actions\":[{\"action_id\":\"action-1\",\"tool_id\":\"create_image_generation_job\",\"registry_version\":1,"
                         + "\"arguments\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}}]",
                 "\"actions\":[]");
 
@@ -756,7 +756,7 @@ class ConversationAgentRunIT {
                 "\"adapter_schema_version\":1," +
                 "\"visible_text\":\"已接纳，正在生成图片。\"," +
                 "\"checkpoint\":{\"opaque_payload\":{\"step\":\"proposed\"}}," +
-                "\"actions\":[{\"action_id\":\"action-1\",\"action_type\":\"generate_image\"," +
+                "\"actions\":[{\"action_id\":\"action-1\",\"tool_id\":\"create_image_generation_job\",\"registry_version\":1," +
                 "\"arguments\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}}]}";
     }
 

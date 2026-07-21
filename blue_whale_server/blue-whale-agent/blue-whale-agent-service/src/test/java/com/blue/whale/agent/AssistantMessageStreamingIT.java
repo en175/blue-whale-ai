@@ -360,7 +360,7 @@ class AssistantMessageStreamingIT extends AssistantMessageStreamITBase {
                                 + binding + ",\"visible_text\":\"" + text + "\","
                                 + "\"checkpoint\":{\"opaque_payload\":{\"step\":\"proposed\"}},"
                                 + "\"actions\":[{\"action_id\":\"action-stream\","
-                                + "\"action_type\":\"generate_image\","
+                                + "\"tool_id\":\"create_image_generation_job\",\"registry_version\":1,"
                                 + "\"arguments\":{\"prompt\":\"蓝鲸海报\","
                                 + "\"aspect_ratio\":\"1:1\"}}]}"))
                 .andExpect(status().isOk());

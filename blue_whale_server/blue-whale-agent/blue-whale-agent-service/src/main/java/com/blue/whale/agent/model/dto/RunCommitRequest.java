@@ -30,9 +30,15 @@ public record RunCommitRequest(
     ) {
     }
 
+    /**
+     * Agent 提议的工具动作（注册表驱动）。{@code tool_id + registry_version} 绑定注册表
+     * {@code ToolDefinition}，自由 {@code action_type} 已退役；{@code action_id} 确定性、Run 内唯一，
+     * 作幂等键（同一 action_id 重复提交不产生重复 GenerationJob 或重复成本预留）。
+     */
     public record ProposedAction(
             @JsonProperty("action_id") @NotBlank String actionId,
-            @JsonProperty("action_type") @NotBlank String actionType,
+            @JsonProperty("tool_id") @NotBlank String toolId,
+            @JsonProperty("registry_version") @NotNull Integer registryVersion,
             @NotNull Map<String, Object> arguments
     ) {
     }

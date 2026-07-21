@@ -289,7 +289,7 @@ class ControlledRealImageAcceptanceIT {
                 "\"adapter_schema_version\":1," +
                 "\"visible_text\":\"已接纳，正在生成图片。\","
                 + "\"checkpoint\":{\"opaque_payload\":{\"step\":\"proposed\"}},"
-                + "\"actions\":[{\"action_id\":\"action-1\",\"action_type\":\"generate_image\","
+                + "\"actions\":[{\"action_id\":\"action-1\",\"tool_id\":\"create_image_generation_job\",\"registry_version\":1,"
                 + "\"arguments\":{\"prompt\":\"" + prompt + "\",\"aspect_ratio\":\"1:1\"}}]}";
         MvcResult committed = mockMvc.perform(post("/internal/agent-runs/{id}/commits", runId)
                         .header("X-Worker-Id", "agent-worker")

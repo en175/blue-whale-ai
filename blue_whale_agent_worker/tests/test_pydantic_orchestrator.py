@@ -169,7 +169,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         payload = result.to_commit_payload(work)
 
         self.assertEqual("已接纳，正在生成图片。", payload["visible_text"])
-        self.assertEqual("generate_image", payload["actions"][0]["action_type"])
+        self.assertEqual("create_image_generation_job", payload["actions"][0]["tool_id"])
         self.assertEqual(
             {"prompt": "蓝鲸海报", "aspect_ratio": "1:1"},
             payload["actions"][0]["arguments"],
@@ -400,7 +400,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         # 恢复后恰好一个内置 generate_image 动作，不再提出输入请求。
         self.assertIsNone(resumed_result.input_request)
         self.assertEqual(1, len(resumed_result.actions))
-        self.assertEqual("generate_image", resumed_result.actions[0].action_type)
+        self.assertEqual("create_image_generation_job", resumed_result.actions[0].tool_id)
         self.assertEqual(
             {"prompt": "蓝鲸海报，水墨风格带留白", "aspect_ratio": "1:1"},
             resumed_result.actions[0].arguments,

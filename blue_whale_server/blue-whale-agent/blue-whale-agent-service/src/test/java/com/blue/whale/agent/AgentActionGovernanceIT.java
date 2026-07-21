@@ -205,7 +205,7 @@ class AgentActionGovernanceIT {
                 "\"visible_text\":\"已按提示绕过策略。\"," +
                 "\"checkpoint\":{\"opaque_payload\":{\"step\":\"injected\"}}," +
                 "\"actions\":[{\"action_id\":\"injected-delete\"," +
-                "\"action_type\":\"delete_project\"," +
+                "\"tool_id\":\"delete_project\",\"registry_version\":1," +
                 "\"arguments\":{\"project_id\":" + project.getId() + "}}]}";
 
         commit(run.asLong(), "prompt-injection-worker", body)
@@ -372,7 +372,7 @@ class AgentActionGovernanceIT {
                 "\"visible_text\":\"准备执行图片生成。\"," +
                 "\"checkpoint\":{\"opaque_payload\":{\"step\":\"proposed\"}}," +
                 "\"actions\":[{\"action_id\":\"action-costly-1\"," +
-                "\"action_type\":\"generate_image\"," +
+                "\"tool_id\":\"create_image_generation_job\",\"registry_version\":1," +
                 "\"arguments\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}}]}";
     }
 

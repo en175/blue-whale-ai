@@ -36,6 +36,10 @@ import com.blue.whale.agent.service.governance.GenerationActionAuthorizationServ
 import com.blue.whale.agent.service.governance.GenerationCostAdmissionService;
 import com.blue.whale.agent.service.governance.CostReservationService;
 import com.blue.whale.agent.service.governance.UserInputRequestService;
+import com.blue.whale.agent.runtimebundle.RunToolGrantResolver;
+import com.blue.whale.agent.runtimebundle.ToolDefinition;
+import com.blue.whale.agent.runtimebundle.ToolGrantScope;
+import com.blue.whale.agent.runtimebundle.ToolRegistry;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -82,6 +86,9 @@ public class AgentRunWorkerService {
     private final UserInputRequestService userInputRequestService;
     private final GenerationModelCapabilityMapper capabilityMapper;
     private final ObjectMapper objectMapper;
+    private final ToolRegistry toolRegistry;
+    private final RunToolGrantResolver runToolGrantResolver;
+    private final ToolGrantScope toolGrantScope;
 
     @Transactional(noRollbackFor = ClaimQueueExhaustedAfterQuarantine.class)
     public RunWorkResponse claim(String workerId, String engine) {
@@ -174,31 +181,34 @@ public class AgentRunWorkerService {
         if (request.error() != null) {
             // Worker 终态错误仍由 Java 拒绝：公开事实只承认 Java 接纳的状态转移。
             actionAuthorizationService.deny(
-                    actionCommand(run, null, false), "WORKER_TERMINAL_NOT_ALLOWED");
+                    actionCommand(run, null, "unknown", false), "WORKER_TERMINAL_NOT_ALLOWED");
         }
         if (proposal != null && !request.actions().isEmpty()) {
             // 提议与动作互斥：一次提交要么推进一个动作，要么提出一个输入请求。
             actionAuthorizationService.deny(
-                    actionCommand(run, null, false), "PROPOSAL_ACTION_MUTEX");
+                    actionCommand(run, null, "unknown", false), "PROPOSAL_ACTION_MUTEX");
         }
         if (proposal != null && run.getConfirmedInputRequestId() != null) {
             // 来源 AgentRun 已绑定待消费的确认请求，不接受新的输入请求提议。
             actionAuthorizationService.deny(
-                    actionCommand(run, null, false), "ACTIVE_REQUEST_ALREADY_BOUND");
+                    actionCommand(run, null, "unknown", false), "ACTIVE_REQUEST_ALREADY_BOUND");
         }
         if (proposal == null && request.actions().isEmpty() && !supportsNoActionCompletion(run)) {
             actionAuthorizationService.deny(
-                    actionCommand(run, null, false), "ACTION_MISSING");
+                    actionCommand(run, null, "unknown", false), "ACTION_MISSING");
         }
         RunCommitRequest.ProposedAction action = null;
+        String actionType = null;
         AuthorizationDecision authorization = null;
         if (proposal == null && !request.actions().isEmpty()) {
             try {
-                action = validateAction(run, request.actions());
+                ValidatedAction validated = validateAction(run, request.actions());
+                action = validated.action();
+                actionType = validated.actionType();
             } catch (GlobalException exception) {
                 RunCommitRequest.ProposedAction proposed = request.actions().size() == 1
                         ? request.actions().get(0) : null;
-                actionAuthorizationService.deny(actionCommand(run, proposed, false),
+                actionAuthorizationService.deny(actionCommand(run, proposed, "unknown", false),
                         "ACTION_SCHEMA_OR_OWNERSHIP_REJECTED");
                 throw exception;
             }
@@ -206,10 +216,10 @@ public class AgentRunWorkerService {
             if (confirmed) {
                 userInputRequestService.consumeValidated(
                         run.getConfirmedInputRequestId(), run.getProjectId(), run.getUserId(), run.getId(),
-                        action.actionId(), action.actionType(), action.arguments());
+                        action.actionId(), actionType, action.arguments());
             }
             authorization = actionAuthorizationService.authorize(
-                    actionCommand(run, action, confirmed));
+                    actionCommand(run, action, actionType, confirmed));
         }
 
         long checkpointCount = checkpointMapper.selectCount(Wrappers.<RuntimeCheckpoint>lambdaQuery()
@@ -269,7 +279,7 @@ public class AgentRunWorkerService {
         } else if (action != null && authorization.outcome() == AuthorizationOutcome.INPUT_REQUIRED) {
             inputRequest = userInputRequestService.create(
                     run.getProjectId(), run.getUserId(), run.getConversationId(), runId,
-                    action.actionId(), action.actionType(), action.arguments(), authorization.quote());
+                    action.actionId(), actionType, action.arguments(), authorization.quote());
         } else if (action != null) {
             LinkedHashMap<String, Object> input = new LinkedHashMap<>(action.arguments());
             input.put("expected_output_count", 1);
@@ -305,7 +315,7 @@ public class AgentRunWorkerService {
             generationJobMapper.insert(job);
             costAdmissionService.reserveAuthorized(
                     run.getUserId(), run.getProjectId(), job.getId(), action.actionId(),
-                    action.actionType(), authorization.quote());
+                    actionType, authorization.quote());
             generationJobOutputMapper.insert(new GenerationJobOutput()
                     .setGenerationJobId(job.getId())
                     .setSlotIndex(0)
@@ -481,7 +491,7 @@ public class AgentRunWorkerService {
                 runPayload(quarantined), null, null);
     }
 
-    private RunCommitRequest.ProposedAction validateAction(
+    private ValidatedAction validateAction(
             AgentRun run,
             List<RunCommitRequest.ProposedAction> actions) {
         if (actions.size() != 1) {
@@ -489,12 +499,28 @@ public class AgentRunWorkerService {
                     "首版只接受单个图片生成动作");
         }
         RunCommitRequest.ProposedAction action = actions.get(0);
+        ToolDefinition definition = toolRegistry
+                .find(action.toolId(), action.registryVersion())
+                .orElseThrow(() -> new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
+                        SystemCode.AGENT_ACTION_REJECTED.getMsg()));
+        // Run 钉住 grants 服务端复验：enforcement=true（run.bundleVersionId 非空）时，工具必须被该
+        // Run 的 Bundle 授权，且 grant 收窄（schemaNoWider/constraintsNoWider，复用既有铁闸）合法。
+        if (run.getBundleVersionId() != null && !run.getBundleVersionId().isBlank()) {
+            RunToolGrantResolver.ResolvedToolGrant grant = runToolGrantResolver
+                    .resolve(run.getBundleVersionId(), action.toolId(), action.registryVersion())
+                    .orElseThrow(() -> new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
+                            SystemCode.AGENT_ACTION_REJECTED.getMsg()));
+            if (!toolGrantScope.schemaNoWider(grant.argumentSchema(), definition.inputSchema())
+                    || !toolGrantScope.constraintsNoWider(grant.constraints(), definition.constraints())) {
+                throw new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
+                        SystemCode.AGENT_ACTION_REJECTED.getMsg());
+            }
+        }
         Object aspectRatio = action.arguments().get("aspect_ratio");
         Object referenceAssetIds = action.arguments().get("reference_asset_ids");
         Object size = action.arguments().get("size");
         Object webSearch = action.arguments().get("web_search");
-        if (!"generate_image".equals(action.actionType())
-                || action.actionId().length() > 128
+        if (action.actionId().length() > 128
                 || !IMAGE_ARGUMENTS.containsAll(action.arguments().keySet())
                 || !(action.arguments().get("prompt") instanceof String prompt)
                 || prompt.isBlank()
@@ -510,7 +536,7 @@ public class AgentRunWorkerService {
             throw new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
                     SystemCode.AGENT_ACTION_REJECTED.getMsg());
         }
-        return action;
+        return new ValidatedAction(action, definition.actionType());
     }
 
     /** Agent 路径不暴露模型选择：回落能力表第一行 enabled image 模型（能力表为唯一权威）。 */
@@ -551,14 +577,18 @@ public class AgentRunWorkerService {
     private ActionAuthorizationCommand actionCommand(
             AgentRun run,
             RunCommitRequest.ProposedAction action,
+            String actionType,
             boolean confirmed) {
         return new ActionAuthorizationCommand(
                 run.getUserId(), run.getProjectId(), "AgentRun", String.valueOf(run.getId()),
                 "agent-run:" + run.getId(),
                 action == null ? "commit-with-invalid-actions" : action.actionId(),
-                action == null ? "unknown" : action.actionType(),
+                actionType,
                 action == null || action.arguments() == null ? Map.of() : action.arguments(),
                 false, confirmed);
+    }
+
+    private record ValidatedAction(RunCommitRequest.ProposedAction action, String actionType) {
     }
 
     private RunWorkResponse.AcceptedResult acceptedResult(GenerationJob job) {

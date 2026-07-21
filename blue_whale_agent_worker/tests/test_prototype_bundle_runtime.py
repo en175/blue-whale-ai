@@ -471,7 +471,7 @@ def test_two_clarification_rounds_then_action():
     assert outcome1.actions == () and outcome2.actions == ()
     # 第三论提出且只提出一个 deferred 动作，pending call 进入 checkpoint
     assert len(outcome3.actions) == 1
-    assert outcome3.actions[0]["action_type"] == "generate_image"
+    assert outcome3.actions[0]["tool_id"] == "create_image_generation_job"
     assert outcome3.actions[0]["arguments"]["prompt"] == "蓝鲸海报，水墨风格"
     assert outcome3.pending_calls[0]["tool_call_id"] == "provider-private-call-007"
     assert gateway.released_text("s1") == "您想要什么风格？"
