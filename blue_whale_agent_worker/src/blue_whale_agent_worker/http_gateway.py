@@ -3,7 +3,7 @@ from typing import Any, Optional
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from .contracts import AcceptedActionResult, RunWork, RuntimeCheckpoint
+from .contracts import AcceptedActionResult, RunWork, RuntimeCheckpoint, ToolGrant
 
 
 def _optional_str(value: Any) -> Optional[str]:
@@ -54,6 +54,29 @@ def run_work_from_payload(data: dict[str, Any]) -> RunWork:
         activated_creative_skill_versions=_optional_seq(
             data.get("activated_creative_skill_versions")
         ),
+        tool_grants=_parse_tool_grants(data.get("tool_grants")),
+    )
+
+
+def _parse_tool_grants(raw: Any) -> tuple[ToolGrant, ...]:
+    """Java 下发的 toolGrants 是 JSON 文本（与 activatedCreativeSkillVersions 同形态）；
+    缺失或空集合法（纯文本对话）。逐项映射到 ToolGrant，字段缺失落入默认值，
+    由 Orchestrator 的语义校验（工具不在注册表 / 版本漂移 / effect 不符）统一归一化为
+    ORCHESTRATOR_CONTRACT_MISMATCH，不在 gateway 层抛未归一化异常。
+    """
+    if not raw:
+        return ()
+    parsed = json.loads(raw) if isinstance(raw, str) else raw
+    return tuple(
+        ToolGrant(
+            tool_name=str(item.get("toolName", "")),
+            registry_version=int(item.get("registryVersion", 0)),
+            effect=str(item.get("effect", "")),
+            proposal_only=bool(item.get("proposalOnly", False)),
+            argument_schema=dict(item.get("argumentSchema", {})),
+            constraints=dict(item.get("constraints", {})),
+        )
+        for item in parsed
     )
 
 

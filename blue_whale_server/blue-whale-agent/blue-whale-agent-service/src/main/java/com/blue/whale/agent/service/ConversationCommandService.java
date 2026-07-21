@@ -95,6 +95,7 @@ public class ConversationCommandService {
                 .setModelProfileId(runPin.modelProfileId())
                 .setModelProfileVersion(runPin.modelProfileVersion())
                 .setActivatedCreativeSkillVersions(runPin.activatedCreativeSkillVersions())
+                .setToolGrants(runPin.toolGrants())
                 .setConfirmedInputRequestId(confirmedInputRequestId)
                 .setFencingToken(0L);
         agentRunMapper.insert(run);
