@@ -31,6 +31,15 @@ class RunWork:
     messages: Sequence[Mapping[str, str]]
     checkpoint: Optional[RuntimeCheckpoint]
     accepted_results: Sequence[AcceptedActionResult] = ()
+    # AgentRun 固定的 Runtime Bundle / ModelProfile / CreativeSkill pin（契约 §6）。
+    # Java 在创建 AgentRun 时原子固定；enforcement-enabled=true 时下发，测试环境
+    # （enforcement-enabled=false）为 None。Worker 按 bundle_version_id 拉取发布快照，
+    # 用 manifest_digest 与本地重算值逐字节比对；字段不再被 claim 载荷解析丢弃。
+    bundle_version_id: Optional[str] = None
+    manifest_digest: Optional[str] = None
+    model_profile_id: Optional[str] = None
+    model_profile_version: Optional[str] = None
+    activated_creative_skill_versions: Optional[Sequence[Any]] = None
 
 
 @dataclass(frozen=True)
