@@ -222,6 +222,33 @@ def always_text_model(messages, info):
     return ModelResponse(parts=(TextPart("仍然缺少信息。"),))
 
 
+def rejected_then_retry_model(messages, info):
+    """收到工具结果后调整参数重新提议，模拟模型理解拒绝结果并改提动作。"""
+    if any(
+        isinstance(part, ToolReturnPart)
+        for message in messages
+        for part in message.parts
+    ):
+        return ModelResponse(
+            parts=(
+                ToolCallPart(
+                    "generate_image",
+                    {"prompt": "蓝鲸海报", "aspect_ratio": "16:9"},
+                    "rejected-retry-call-id",
+                ),
+            )
+        )
+    return ModelResponse(
+        parts=(
+            ToolCallPart(
+                "generate_image",
+                {"prompt": "蓝鲸海报", "aspect_ratio": "1:1"},
+                "rejected-first-call-id",
+            ),
+        )
+    )
+
+
 class PydanticAIOrchestratorTest(unittest.TestCase):
     def test_bundle_instructions_replace_hardcoded_prompt_and_reach_model(self) -> None:
         # IK2QBJ acceptance #1/#6：instructions 由 Bundle 基础上下文生成，
@@ -705,6 +732,89 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             )
         )
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
+    def test_rejected_action_surfaces_user_safe_message_without_internal_codes(self) -> None:
+        # IK2QBX 动作被治理拒绝后，拒绝结果经已接纳通道回喂；模型不再提动作时，
+        # 编排用面向 User 的安全提示收尾，不暴露内部 reasonCode，也不报编排失败。
+        initial_result = PydanticAIOrchestrator(
+            FunctionModel(image_proposal_model), _bundle_source()
+        ).advance(_pydantic_work())
+        restored_checkpoint = RuntimeCheckpoint(
+            engine=initial_result.checkpoint.engine,
+            engine_version=initial_result.checkpoint.engine_version,
+            adapter_schema_version=initial_result.checkpoint.adapter_schema_version,
+            opaque_payload=json.loads(
+                json.dumps(initial_result.checkpoint.opaque_payload, ensure_ascii=False)
+            ),
+        )
+        resumed_work = _pydantic_work(
+            run_version=2,
+            fencing_token=5,
+            checkpoint=restored_checkpoint,
+            accepted_results=(
+                AcceptedActionResult(
+                    action_id=initial_result.actions[0].action_id,
+                    status="rejected",
+                    result={
+                        "public_code": "QUOTA_EXCEEDED",
+                        "message": "当前操作超过可用额度。",
+                        "retryable": True,
+                    },
+                ),
+            ),
+        )
+
+        resumed_result = PydanticAIOrchestrator(
+            FunctionModel(image_proposal_model), _bundle_source()
+        ).advance(resumed_work)
+        payload = resumed_result.to_commit_payload(resumed_work)
+
+        self.assertEqual("当前操作超过可用额度。", resumed_result.visible_text)
+        self.assertEqual((), resumed_result.actions)
+        self.assertEqual([], payload["actions"])
+        self.assertIsNone(resumed_result.error)
+        serialized = json.dumps(payload, ensure_ascii=False)
+        # 内部诊断码不外泄；QUOTA_EXCEEDED 是面向 User 的稳定公开码，可暴露。
+        self.assertNotIn("ACTION_SCHEMA_OR_OWNERSHIP_REJECTED", serialized)
+
+    def test_rejected_action_lets_model_adjust_and_repropose(self) -> None:
+        # IK2QBX 拒绝结果回喂后，模型可调整参数改提新动作；编排照常接纳新提议。
+        initial_result = PydanticAIOrchestrator(
+            FunctionModel(rejected_then_retry_model), _bundle_source()
+        ).advance(_pydantic_work())
+        restored_checkpoint = RuntimeCheckpoint(
+            engine=initial_result.checkpoint.engine,
+            engine_version=initial_result.checkpoint.engine_version,
+            adapter_schema_version=initial_result.checkpoint.adapter_schema_version,
+            opaque_payload=json.loads(
+                json.dumps(initial_result.checkpoint.opaque_payload, ensure_ascii=False)
+            ),
+        )
+        resumed_work = _pydantic_work(
+            run_version=2,
+            fencing_token=5,
+            checkpoint=restored_checkpoint,
+            accepted_results=(
+                AcceptedActionResult(
+                    action_id=initial_result.actions[0].action_id,
+                    status="rejected",
+                    result={
+                        "public_code": "ACTION_NOT_ALLOWED",
+                        "message": "当前动作未获授权。",
+                        "retryable": False,
+                    },
+                ),
+            ),
+        )
+
+        resumed_result = PydanticAIOrchestrator(
+            FunctionModel(rejected_then_retry_model), _bundle_source()
+        ).advance(resumed_work)
+        payload = resumed_result.to_commit_payload(resumed_work)
+
+        self.assertEqual(1, len(resumed_result.actions))
+        self.assertEqual("create_image_generation_job", payload["actions"][0]["tool_id"])
+        self.assertEqual("16:9", payload["actions"][0]["arguments"]["aspect_ratio"])
+        self.assertEqual("已接纳，正在生成图片。", resumed_result.visible_text)
 
 
 if __name__ == "__main__":

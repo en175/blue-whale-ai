@@ -18,4 +18,8 @@ public class RunCommitRecord extends BaseEntity {
     private Long generationJobId;
     private Long userInputRequestId;
     private Long committedCursor;
+    private String rejectedActionId;
+    private String rejectedPublicCode;
+    private String rejectedMessage;
+    private Boolean rejectedRetryable;
 }
