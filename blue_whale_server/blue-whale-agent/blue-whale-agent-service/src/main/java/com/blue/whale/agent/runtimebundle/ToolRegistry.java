@@ -81,6 +81,32 @@ public final class ToolRegistry {
                         Set.of("tool_calling"),
                         "image"));
         registry.put(
+                new ToolKey("create_video_generation_job", 1),
+                new ToolDefinition(
+                        "create_video_generation_job",
+                        1,
+                        "side_effect",
+                        RiskLevel.MEDIUM,
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object",\
+                                 "properties":{"prompt":{"type":"string","minLength":1},\
+                                               "aspect_ratio":{"type":"string","enum":["16:9","4:3","1:1","3:4","9:16","21:9"]},\
+                                               "resolution":{"type":"string","enum":["480p","720p","1080p"]},\
+                                               "duration":{"type":"integer","minimum":4,"maximum":15},\
+                                               "reference_asset_ids":{"type":"array","maxItems":1,"items":{"type":"integer","minimum":1}}},\
+                                 "required":["prompt","aspect_ratio","resolution","duration"],\
+                                 "additionalProperties":false}"""),
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object",\
+                                 "properties":{"job_id":{"type":"integer"}}}"""),
+                        parseBuiltinSchema(objectMapper, """
+                                {"expected_output_count":{"min":1,"max":1},\
+                                 "prompt":{"maxLength":4000}}"""),
+                        Set.of("tool_calling"),
+                        "video"));
+        registry.put(
                 new ToolKey("request_user_input", 1),
                 new ToolDefinition(
                         "request_user_input",

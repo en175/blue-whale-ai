@@ -64,10 +64,21 @@ import java.util.TreeMap;
 @RequiredArgsConstructor
 public class AgentRunWorkerService {
 
+    private static final String VIDEO_TOOL_ID = "create_video_generation_job";
     private static final Set<String> IMAGE_ARGUMENTS =
             Set.of("prompt", "aspect_ratio", "reference_asset_ids", "size", "web_search");
     private static final Set<String> IMAGE_ASPECT_RATIOS =
             Set.of("1:1", "16:9", "9:16", "4:3", "3:4", "2:3", "3:2", "21:9");
+    private static final Set<String> VIDEO_ARGUMENTS =
+            Set.of("prompt", "aspect_ratio", "resolution", "duration", "reference_asset_ids");
+    private static final Set<String> VIDEO_ASPECT_RATIOS =
+            Set.of("16:9", "4:3", "1:1", "3:4", "9:16", "21:9");
+    private static final Set<String> VIDEO_RESOLUTIONS =
+            Set.of("480p", "720p", "1080p");
+    private static final int VIDEO_DURATION_MIN = 4;
+    private static final int VIDEO_DURATION_MAX = 15;
+    private static final int IMAGE_REFERENCE_ASSET_MAX = 4;
+    private static final int VIDEO_REFERENCE_ASSET_MAX = 1;
 
     private final AgentRunMapper agentRunMapper;
     private final ConversationMapper conversationMapper;
@@ -291,20 +302,34 @@ public class AgentRunWorkerService {
                     run.getProjectId(), run.getUserId(), run.getConversationId(), runId,
                     action.actionId(), actionType, action.arguments(), authorization.quote());
         } else if (action != null && rejection == null) {
+            boolean isVideo = VIDEO_TOOL_ID.equals(action.toolId());
             LinkedHashMap<String, Object> input = new LinkedHashMap<>(action.arguments());
             input.put("expected_output_count", 1);
-            // Agent 不暴露模型选择：按能力表默认 image 模型注入 model_id 并校验/规范化 size，
-            // 对称 BottomDock fail-early（reserveAuthorized 之前），非法 size 不产生 cost 预留（IK21O5）
-            GenerationModelCapability capability = resolveAgentImageCapability();
-            input.put("model_id", capability.getModelId());
-            Object sizeArg = input.get("size");
-            if (sizeArg instanceof String sizeValue && !sizeValue.isBlank()) {
-                GenerationModelCapability.SizeOption sizeOption = capability.findSizeById(sizeValue);
-                if (sizeOption == null) {
-                    throw new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
-                            SystemCode.AGENT_ACTION_REJECTED.getMsg());
+            String strategyVersion;
+            Integer progress;
+            LocalDateTime databaseNow = generationJobMapper.selectCurrentTime();
+            LocalDateTime evidenceReconcileUntil = null;
+            if (isVideo) {
+                // 视频不暴露模型选择：参数已在 validateAction 白名单校验，对称 BottomDock video 段。
+                strategyVersion = "seedance-2.0-v1";
+                progress = null;
+                evidenceReconcileUntil = databaseNow.plusHours(24);
+            } else {
+                // Agent 不暴露模型选择：按能力表默认 image 模型注入 model_id 并校验/规范化 size，
+                // 对称 BottomDock fail-early（reserveAuthorized 之前），非法 size 不产生 cost 预留（IK21O5）
+                GenerationModelCapability capability = resolveAgentImageCapability();
+                input.put("model_id", capability.getModelId());
+                Object sizeArg = input.get("size");
+                if (sizeArg instanceof String sizeValue && !sizeValue.isBlank()) {
+                    GenerationModelCapability.SizeOption sizeOption = capability.findSizeById(sizeValue);
+                    if (sizeOption == null) {
+                        throw new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
+                                SystemCode.AGENT_ACTION_REJECTED.getMsg());
+                    }
+                    input.put("size", sizeOption.getId());
                 }
-                input.put("size", sizeOption.getId());
+                strategyVersion = "image-sync-v1";
+                progress = 0;
             }
             job = new GenerationJob()
                     .setProjectId(run.getProjectId())
@@ -312,16 +337,17 @@ public class AgentRunWorkerService {
                     .setAgentRunId(runId)
                     .setActionIdentity(action.actionId())
                     .setProjectActionIdentity(action.actionId())
-                    .setType(GenerationJob.TYPE_IMAGE)
+                    .setType(isVideo ? GenerationJob.TYPE_VIDEO : GenerationJob.TYPE_IMAGE)
                     .setSource(GenerationJob.SOURCE_AGENT_RUN)
                     .setExpectedOutputCount(1)
                     .setInput(input)
                     .setStatus(GenerationJob.STATUS_QUEUED)
-                    .setProgress(0)
+                    .setProgress(progress)
                     .setFencingToken(0L)
-                    .setStrategyVersion("image-sync-v1")
-                    .setExecutionDeadlineAt(generationJobMapper.selectCurrentTime().plusMinutes(30))
-                    .setNextActionAt(generationJobMapper.selectCurrentTime());
+                    .setStrategyVersion(strategyVersion)
+                    .setExecutionDeadlineAt(databaseNow.plusMinutes(30))
+                    .setEvidenceReconcileUntil(evidenceReconcileUntil)
+                    .setNextActionAt(databaseNow);
             generationJobMapper.insert(job);
             costAdmissionService.reserveAuthorized(
                     run.getUserId(), run.getProjectId(), job.getId(), action.actionId(),
@@ -512,7 +538,7 @@ public class AgentRunWorkerService {
             List<RunCommitRequest.ProposedAction> actions) {
         if (actions.size() != 1) {
             throw new GlobalException(SystemCode.AGENT_ACTION_REJECTED_CODE,
-                    "首版只接受单个图片生成动作");
+                    "首版只接受单个生成动作");
         }
         RunCommitRequest.ProposedAction action = actions.get(0);
         ToolDefinition definition = toolRegistry
@@ -532,20 +558,31 @@ public class AgentRunWorkerService {
                         SystemCode.AGENT_ACTION_REJECTED.getMsg());
             }
         }
+        // 参数白名单按工具分流：image 走图片超能力（size/web_search），video 走视频超能力（resolution/duration）。
+        boolean isVideo = VIDEO_TOOL_ID.equals(action.toolId());
+        Set<String> allowedArguments = isVideo ? VIDEO_ARGUMENTS : IMAGE_ARGUMENTS;
+        Set<String> allowedAspectRatios = isVideo ? VIDEO_ASPECT_RATIOS : IMAGE_ASPECT_RATIOS;
+        int referenceAssetMax = isVideo ? VIDEO_REFERENCE_ASSET_MAX : IMAGE_REFERENCE_ASSET_MAX;
         Object aspectRatio = action.arguments().get("aspect_ratio");
         Object referenceAssetIds = action.arguments().get("reference_asset_ids");
+        Object resolution = action.arguments().get("resolution");
+        Object duration = action.arguments().get("duration");
         Object size = action.arguments().get("size");
         Object webSearch = action.arguments().get("web_search");
         if (action.actionId().length() > 128
-                || !IMAGE_ARGUMENTS.containsAll(action.arguments().keySet())
+                || !allowedArguments.containsAll(action.arguments().keySet())
                 || !(action.arguments().get("prompt") instanceof String prompt)
                 || prompt.isBlank()
+                || (isVideo && (aspectRatio == null || resolution == null || duration == null))
                 || (aspectRatio != null
-                        && (!(aspectRatio instanceof String ratio) || !IMAGE_ASPECT_RATIOS.contains(ratio)))
+                        && (!(aspectRatio instanceof String ratio) || !allowedAspectRatios.contains(ratio)))
                 || (referenceAssetIds != null
-                        && !validReferenceAssetIds(run, referenceAssetIds))
+                        && !validReferenceAssetIds(run, referenceAssetIds, referenceAssetMax))
                 || (size != null && !(size instanceof String))
                 || (webSearch != null && !(webSearch instanceof Boolean))
+                || (resolution != null
+                        && (!(resolution instanceof String value) || !VIDEO_RESOLUTIONS.contains(value)))
+                || (duration != null && !validVideoDuration(duration))
                 || generationJobMapper.selectCount(Wrappers.<GenerationJob>lambdaQuery()
                         .eq(GenerationJob::getProjectId, run.getProjectId())
                         .eq(GenerationJob::getProjectActionIdentity, action.actionId())) > 0) {
@@ -564,8 +601,8 @@ public class AgentRunWorkerService {
                         SystemCode.AGENT_ACTION_REJECTED.getMsg()));
     }
 
-    private boolean validReferenceAssetIds(AgentRun run, Object value) {
-        if (!(value instanceof List<?> assetIds) || assetIds.isEmpty() || assetIds.size() > 4) {
+    private boolean validReferenceAssetIds(AgentRun run, Object value, int maxItems) {
+        if (!(value instanceof List<?> assetIds) || assetIds.isEmpty() || assetIds.size() > maxItems) {
             return false;
         }
         for (Object assetId : assetIds) {
@@ -588,6 +625,15 @@ public class AgentRunWorkerService {
                         && Objects.equals(asset.getUserId(), run.getUserId())
                         && Asset.TYPE_IMAGE.equals(asset.getType())
                         && Asset.STATUS_NORMAL.equals(asset.getStatus()));
+    }
+
+    private boolean validVideoDuration(Object duration) {
+        if (!(duration instanceof Number number)) {
+            return false;
+        }
+        int value = number.intValue();
+        return number.doubleValue() == (double) value
+                && value >= VIDEO_DURATION_MIN && value <= VIDEO_DURATION_MAX;
     }
 
     private ActionAuthorizationCommand actionCommand(

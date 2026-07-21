@@ -33,10 +33,17 @@ public record ToolDefinition(
 
     /**
      * 派生治理链（{@code GenerationAuthorizationGate} / {@code PriceCatalog} / 审计）使用的稳定动作标识。
-     * image 生图能力映射为 {@code generate_image}（对接 ADR-0038 报价分支与用户直接入口共用的标识）；
+     * image 生图能力映射为 {@code generate_image}，video 生视频能力映射为 {@code generate_video}
+     * （对接 {@code PriceCatalog} 报价分支与 {@code GenerationJobCommandService} 共用的标识）；
      * 其余能力直接以 {@code generationCapabilityType} 作为动作标识。
      */
     public String actionType() {
-        return "image".equals(generationCapabilityType) ? "generate_image" : generationCapabilityType;
+        if ("image".equals(generationCapabilityType)) {
+            return "generate_image";
+        }
+        if ("video".equals(generationCapabilityType)) {
+            return "generate_video";
+        }
+        return generationCapabilityType;
     }
 }
