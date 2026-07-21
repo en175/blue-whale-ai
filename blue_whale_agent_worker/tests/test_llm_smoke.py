@@ -6,6 +6,14 @@ from typing import Any
 from blue_whale_agent_worker.contracts import RunWork
 from blue_whale_agent_worker.pydantic_orchestrator import PydanticAIOrchestrator
 from blue_whale_agent_worker.worker import AgentWorker
+from test_pydantic_orchestrator import (
+    BUNDLE_VERSION_ID,
+    MANIFEST_DIGEST,
+    MODEL_PROFILE_ID,
+    MODEL_PROFILE_VERSION,
+    _bundle_source,
+    _generate_image_grant,
+)
 
 
 SMOKE_MODEL = os.getenv("BLUE_WHALE_LLM_SMOKE_MODEL")
@@ -60,10 +68,17 @@ class PydanticAILiveSmokeTest(unittest.TestCase):
             adapter_schema_version=1,
             messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
             checkpoint=None,
+            bundle_version_id=BUNDLE_VERSION_ID,
+            manifest_digest=MANIFEST_DIGEST,
+            model_profile_id=MODEL_PROFILE_ID,
+            model_profile_version=MODEL_PROFILE_VERSION,
+            tool_grants=(_generate_image_grant(),),
         )
 
         gateway = RecordingRunGateway(work)
-        AgentWorker(gateway, PydanticAIOrchestrator(SMOKE_MODEL)).run_once()
+        AgentWorker(
+            gateway, PydanticAIOrchestrator(SMOKE_MODEL, _bundle_source())
+        ).run_once()
 
         self.assertEqual(work.agent_run_id, gateway.committed_run_id)
         commit_payload = gateway.commit_payload

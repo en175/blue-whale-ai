@@ -120,6 +120,15 @@ class JavaRunGateway:
             f"/internal/runtime-bundles/versions/{bundle_version_id}", method="GET"
         )
 
+    def fetch_resource(
+        self, bundle_version_id: str, resource_id: str
+    ) -> dict[str, Any]:
+        """GET .../resources/{resourceId}：单资源正文（snake_case metadata + content）。"""
+        return self._request(
+            f"/internal/runtime-bundles/versions/{bundle_version_id}/resources/{resource_id}",
+            method="GET",
+        )
+
     def _request(
         self,
         path: str,

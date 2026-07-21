@@ -15,7 +15,7 @@ def main() -> None:
     args = parser.parse_args()
 
     gateway = JavaRunGateway(args.base_url, args.worker_id, args.adapter)
-    orchestrator = create_orchestrator(args.adapter, args.model)
+    orchestrator = create_orchestrator(args.adapter, args.model, gateway)
     AgentWorker(gateway, orchestrator).run_once()
 
 

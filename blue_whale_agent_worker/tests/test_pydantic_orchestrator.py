@@ -5,6 +5,8 @@ from pydantic_ai import CallDeferred
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import FunctionModel
 
+from blue_whale_agent_worker.bundle.canonical import manifest_digest
+from blue_whale_agent_worker.bundle.source import FakeBundleSource
 from blue_whale_agent_worker.contracts import (
     AcceptedActionResult,
     RunWork,
@@ -15,6 +17,118 @@ from blue_whale_agent_worker.pydantic_orchestrator import (
     PydanticAIOrchestrator,
     ToolImplementation,
 )
+
+# ---- Bundle 基础上下文夹具（IK2QBJ：instructions 由装载后的 Bundle 驱动）----
+
+BUNDLE_VERSION_ID = "pin_agent_v2_0_0"
+MODEL_PROFILE_ID = "model_v2"
+MODEL_PROFILE_VERSION = "2.0.0"
+ROLE_DOCUMENT_BODY = "# 角色：蓝鲸创作导演\n你负责把用户创作意图推进到可生成。"
+
+
+def _bundle_manifest() -> dict:
+    return {
+        "formatVersion": 1,
+        "baseUri": f"bw-bundle://{BUNDLE_VERSION_ID}/",
+        "digestAlgorithm": "sha256",
+        "resources": [
+            {
+                "resourceId": "role_main",
+                "revision": 1,
+                "kind": "role_document",
+                "path": "AGENTS.md",
+                "mediaType": "text/markdown",
+                "loadMode": "always_on",
+                "contentDigest": "sha256:" + "0" * 64,
+                "sizeBytes": len(ROLE_DOCUMENT_BODY),
+                "tokenEstimate": 32,
+                "references": [],
+            }
+        ],
+    }
+
+
+MANIFEST_DIGEST = manifest_digest(_bundle_manifest())
+
+
+def _bundle_snapshot() -> dict:
+    manifest = dict(_bundle_manifest())
+    manifest["manifestDigest"] = MANIFEST_DIGEST
+    return {
+        "bundleVersionId": BUNDLE_VERSION_ID,
+        "version": "1.0.0",
+        "composition": {
+            "roleDocumentId": "role_main",
+            "ruleSet": {"rules": []},
+            "rootRuntimeSkillId": "role_main",
+            "modelProfiles": [
+                {
+                    "modelProfileId": MODEL_PROFILE_ID,
+                    "version": MODEL_PROFILE_VERSION,
+                    "modelKey": "doubao-seed-1-6",
+                    "capabilities": ["text", "tool_calling"],
+                    "maxInputTokens": 100000,
+                    "maxOutputTokens": 4096,
+                }
+            ],
+            "toolGrants": [],
+            "tokenBudget": {
+                "estimator": "chars_div_4",
+                "initialContextMaxTokens": 1000,
+                "singleResourceMaxTokens": 1000,
+                "activeContextMaxTokens": 4000,
+            },
+            "resourceManifest": manifest,
+        },
+    }
+
+
+def _bundle_source() -> FakeBundleSource:
+    return FakeBundleSource(
+        snapshots={BUNDLE_VERSION_ID: _bundle_snapshot()},
+        resources={
+            BUNDLE_VERSION_ID: {
+                "role_main": {"resource_id": "role_main", "content": ROLE_DOCUMENT_BODY}
+            }
+        },
+    )
+
+
+def _generate_image_grant() -> ToolGrant:
+    return ToolGrant(
+        tool_name="generate_image",
+        registry_version=1,
+        effect="side_effect",
+        proposal_only=True,
+        argument_schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+        },
+        constraints={},
+    )
+
+
+def _pydantic_work(**overrides) -> RunWork:
+    fields = dict(
+        agent_run_id=23,
+        project_id=7,
+        conversation_id=11,
+        user_id=10,
+        run_version=1,
+        fencing_token=4,
+        engine="pydantic-ai",
+        engine_version="2.9.0",
+        adapter_schema_version=1,
+        messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
+        checkpoint=None,
+        bundle_version_id=BUNDLE_VERSION_ID,
+        manifest_digest=MANIFEST_DIGEST,
+        model_profile_id=MODEL_PROFILE_ID,
+        model_profile_version=MODEL_PROFILE_VERSION,
+        tool_grants=(_generate_image_grant(),),
+    )
+    fields.update(overrides)
+    return RunWork(**fields)
 
 
 def image_proposal_model(messages, info):
@@ -108,39 +222,80 @@ def always_text_model(messages, info):
     return ModelResponse(parts=(TextPart("仍然缺少信息。"),))
 
 
-def _generate_image_grant() -> ToolGrant:
-    return ToolGrant(
-        tool_name="generate_image",
-        registry_version=1,
-        effect="side_effect",
-        proposal_only=True,
-        argument_schema={
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-        },
-        constraints={},
-    )
-
-
 class PydanticAIOrchestratorTest(unittest.TestCase):
-    def test_production_adapter_can_propose_owned_reference_asset_ids(self) -> None:
-        work = RunWork(
-            agent_run_id=23,
-            project_id=7,
-            conversation_id=11,
-            user_id=10,
-            run_version=1,
-            fencing_token=4,
-            engine="pydantic-ai",
-            engine_version="2.9.0",
-            adapter_schema_version=1,
-            messages=({"role": "user", "content": "参考素材生成海报"},),
-            checkpoint=None,
-            tool_grants=(_generate_image_grant(),),
+    def test_bundle_instructions_replace_hardcoded_prompt_and_reach_model(self) -> None:
+        # IK2QBJ acceptance #1/#6：instructions 由 Bundle 基础上下文生成，
+        # 代码中硬编码角色提示词消失，装载后的 RoleDocument 正文实际进入模型。
+        captured = []
+
+        def capturing_model(messages, info):
+            captured.append(info.instructions)
+            return ModelResponse(parts=(TextPart("您想要什么风格？"),))
+
+        work = _pydantic_work(messages=({"role": "user", "content": "生成一张"},))
+        result = PydanticAIOrchestrator(
+            FunctionModel(capturing_model), _bundle_source()
+        ).advance(work)
+
+        self.assertEqual(1, len(captured))
+        instructions = captured[0]
+        self.assertIn(ROLE_DOCUMENT_BODY, instructions)
+        self.assertNotIn("创作编排器", instructions)  # 硬编码角色提示词已移除
+        self.assertNotIn("Blue-Whale", instructions)
+        self.assertIsNotNone(result.input_request)
+
+    def test_missing_bundle_pin_fails_closed(self) -> None:
+        # pin 缺失（enforcement-enabled=false 形态）不回退硬编码，fail closed。
+        work = _pydantic_work(bundle_version_id=None, manifest_digest=None)
+        result = PydanticAIOrchestrator(
+            FunctionModel(image_proposal_model), _bundle_source()
+        ).advance(work)
+
+        self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
+        self.assertEqual((), result.actions)
+
+    def test_bundle_token_budget_exceeded_is_mapped_to_error_code(self) -> None:
+        # 初始上下文超预算：规范化 BUNDLE_TOKEN_BUDGET_EXCEEDED 提交 Java，不静默截断。
+        tight_snapshot = _bundle_snapshot()
+        tight_snapshot["composition"]["tokenBudget"]["initialContextMaxTokens"] = 1
+        source = FakeBundleSource(
+            snapshots={BUNDLE_VERSION_ID: tight_snapshot},
+            resources={
+                BUNDLE_VERSION_ID: {
+                    "role_main": {"resource_id": "role_main", "content": ROLE_DOCUMENT_BODY}
+                }
+            },
         )
+        result = PydanticAIOrchestrator(
+            FunctionModel(image_proposal_model), source
+        ).advance(_pydantic_work())
+
+        self.assertEqual("BUNDLE_TOKEN_BUDGET_EXCEEDED", result.error["code"])
+        self.assertEqual((), result.actions)
+
+    def test_model_profile_without_tool_calling_fails_closed(self) -> None:
+        no_tools_snapshot = _bundle_snapshot()
+        no_tools_snapshot["composition"]["modelProfiles"][0]["capabilities"] = ["text"]
+        source = FakeBundleSource(
+            snapshots={BUNDLE_VERSION_ID: no_tools_snapshot},
+            resources={
+                BUNDLE_VERSION_ID: {
+                    "role_main": {"resource_id": "role_main", "content": ROLE_DOCUMENT_BODY}
+                }
+            },
+        )
+        result = PydanticAIOrchestrator(
+            FunctionModel(image_proposal_model), source
+        ).advance(_pydantic_work())
+
+        self.assertEqual("MODEL_CAPABILITY_INSUFFICIENT", result.error["code"])
+        self.assertEqual((), result.actions)
+
+    def test_production_adapter_can_propose_owned_reference_asset_ids(self) -> None:
+        work = _pydantic_work(messages=({"role": "user", "content": "参考素材生成海报"},))
 
         result = PydanticAIOrchestrator(
-            FunctionModel(reference_image_proposal_model)
+            FunctionModel(reference_image_proposal_model), _bundle_source()
         ).advance(work)
 
         self.assertEqual(
@@ -148,23 +303,12 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         )
 
     def test_production_adapter_passes_through_size_and_web_search(self) -> None:
-        work = RunWork(
-            agent_run_id=23,
-            project_id=7,
-            conversation_id=11,
-            user_id=10,
-            run_version=1,
-            fencing_token=4,
-            engine="pydantic-ai",
-            engine_version="2.9.0",
-            adapter_schema_version=1,
-            messages=({"role": "user", "content": "联网生成一张 2K 蓝鲸海报"},),
-            checkpoint=None,
-            tool_grants=(_generate_image_grant(),),
+        work = _pydantic_work(
+            messages=({"role": "user", "content": "联网生成一张 2K 蓝鲸海报"},)
         )
 
         result = PydanticAIOrchestrator(
-            FunctionModel(size_and_web_search_proposal_model)
+            FunctionModel(size_and_web_search_proposal_model), _bundle_source()
         ).advance(work)
         payload = result.to_commit_payload(work)
 
@@ -172,22 +316,11 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertIs(True, payload["actions"][0]["arguments"]["web_search"])
 
     def test_production_adapter_returns_a_product_neutral_image_proposal(self) -> None:
-        work = RunWork(
-            agent_run_id=23,
-            project_id=7,
-            conversation_id=11,
-            user_id=10,
-            run_version=1,
-            fencing_token=4,
-            engine="pydantic-ai",
-            engine_version="2.9.0",
-            adapter_schema_version=1,
-            messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
-            checkpoint=None,
-            tool_grants=(_generate_image_grant(),),
-        )
+        work = _pydantic_work()
 
-        result = PydanticAIOrchestrator(FunctionModel(image_proposal_model)).advance(work)
+        result = PydanticAIOrchestrator(
+            FunctionModel(image_proposal_model), _bundle_source()
+        ).advance(work)
         payload = result.to_commit_payload(work)
 
         self.assertEqual("已接纳，正在生成图片。", payload["visible_text"])
@@ -205,22 +338,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         json.dumps(payload, ensure_ascii=False)
 
     def test_deferred_image_result_resumes_in_a_new_adapter_instance(self) -> None:
-        initial_work = RunWork(
-            agent_run_id=23,
-            project_id=7,
-            conversation_id=11,
-            user_id=10,
-            run_version=1,
-            fencing_token=4,
-            engine="pydantic-ai",
-            engine_version="2.9.0",
-            adapter_schema_version=1,
-            messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
-            checkpoint=None,
-            tool_grants=(_generate_image_grant(),),
-        )
+        initial_work = _pydantic_work()
         initial_result = PydanticAIOrchestrator(
-            FunctionModel(image_proposal_model)
+            FunctionModel(image_proposal_model), _bundle_source()
         ).advance(initial_work)
         restored_checkpoint = RuntimeCheckpoint(
             engine=initial_result.checkpoint.engine,
@@ -230,24 +350,21 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 json.dumps(initial_result.checkpoint.opaque_payload, ensure_ascii=False)
             ),
         )
-        resumed_work = RunWork(
-            **{
-                **initial_work.__dict__,
-                "run_version": 2,
-                "fencing_token": 5,
-                "checkpoint": restored_checkpoint,
-                "accepted_results": (
-                    AcceptedActionResult(
-                        action_id=initial_result.actions[0].action_id,
-                        status="succeeded",
-                        result={"asset_ids": [91]},
-                    ),
+        resumed_work = _pydantic_work(
+            run_version=2,
+            fencing_token=5,
+            checkpoint=restored_checkpoint,
+            accepted_results=(
+                AcceptedActionResult(
+                    action_id=initial_result.actions[0].action_id,
+                    status="succeeded",
+                    result={"asset_ids": [91]},
                 ),
-            }
+            ),
         )
 
         resumed_result = PydanticAIOrchestrator(
-            FunctionModel(image_proposal_model)
+            FunctionModel(image_proposal_model), _bundle_source()
         ).advance(resumed_work)
 
         self.assertEqual("图片已经生成。", resumed_result.visible_text)
@@ -257,17 +374,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         )
 
     def test_mismatched_or_corrupt_checkpoint_fails_closed(self) -> None:
-        work = RunWork(
-            agent_run_id=23,
-            project_id=7,
-            conversation_id=11,
-            user_id=10,
+        work = _pydantic_work(
             run_version=2,
             fencing_token=5,
-            engine="pydantic-ai",
-            engine_version="2.9.0",
-            adapter_schema_version=1,
-            messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
             checkpoint=RuntimeCheckpoint(
                 engine="pydantic-ai",
                 engine_version="2.8.0",
@@ -276,7 +385,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             ),
         )
 
-        result = PydanticAIOrchestrator(FunctionModel(image_proposal_model)).advance(work)
+        result = PydanticAIOrchestrator(
+            FunctionModel(image_proposal_model), _bundle_source()
+        ).advance(work)
         serialized = json.dumps(result.to_commit_payload(work), ensure_ascii=False)
 
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
@@ -285,22 +396,11 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertNotIn("2.8.0", serialized)
 
     def test_framework_exception_is_normalized_without_private_details(self) -> None:
-        work = RunWork(
-            agent_run_id=23,
-            project_id=7,
-            conversation_id=11,
-            user_id=10,
-            run_version=1,
-            fencing_token=4,
-            engine="pydantic-ai",
-            engine_version="2.9.0",
-            adapter_schema_version=1,
-            messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
-            checkpoint=None,
-            tool_grants=(_generate_image_grant(),),
-        )
+        work = _pydantic_work()
 
-        result = PydanticAIOrchestrator(FunctionModel(failing_model)).advance(work)
+        result = PydanticAIOrchestrator(
+            FunctionModel(failing_model), _bundle_source()
+        ).advance(work)
         serialized = json.dumps(result.to_commit_payload(work), ensure_ascii=False)
 
         self.assertEqual("ORCHESTRATION_FAILED", result.error["code"])
@@ -310,20 +410,6 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertNotIn("/tmp/private-prompt", serialized)
 
     def test_engine_identity_mismatches_are_normalized(self) -> None:
-        base = RunWork(
-            agent_run_id=23,
-            project_id=7,
-            conversation_id=11,
-            user_id=10,
-            run_version=1,
-            fencing_token=4,
-            engine="pydantic-ai",
-            engine_version="2.9.0",
-            adapter_schema_version=1,
-            messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
-            checkpoint=None,
-            tool_grants=(_generate_image_grant(),),
-        )
         mismatches = (
             {"engine": "fake"},
             {"engine_version": "2.8.0"},
@@ -332,9 +418,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
 
         for mismatch in mismatches:
             with self.subTest(mismatch=mismatch):
-                work = RunWork(**{**base.__dict__, **mismatch})
+                work = _pydantic_work(**mismatch)
                 result = PydanticAIOrchestrator(
-                    FunctionModel(image_proposal_model)
+                    FunctionModel(image_proposal_model), _bundle_source()
                 ).advance(work)
 
                 self.assertEqual(
@@ -343,24 +429,10 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 self.assertEqual((), result.actions)
 
     def test_initial_text_becomes_a_product_neutral_clarification_proposal(self) -> None:
-        # 模型认为意图缺少推进生图所必需的信息时，初次推进的文本输出
-        # 转换为产品中性的创作澄清提议（与动作互斥），不再视为契约违约。
-        work = RunWork(
-            agent_run_id=23,
-            project_id=7,
-            conversation_id=11,
-            user_id=10,
-            run_version=1,
-            fencing_token=4,
-            engine="pydantic-ai",
-            engine_version="2.9.0",
-            adapter_schema_version=1,
-            messages=({"role": "user", "content": "生成一张"},),
-            checkpoint=None,
-        )
+        work = _pydantic_work(messages=({"role": "user", "content": "生成一张"},))
 
         result = PydanticAIOrchestrator(
-            FunctionModel(clarification_dialogue_model)
+            FunctionModel(clarification_dialogue_model), _bundle_source()
         ).advance(work)
         payload = result.to_commit_payload(work)
 
@@ -370,31 +442,16 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         proposal = payload["user_input_request"]
         self.assertEqual("creation_clarification", proposal["request_type"])
         self.assertEqual("您希望什么风格和比例？", proposal["question"])
-        # 可见 Agent 消息与澄清问题一致。
         self.assertEqual("您希望什么风格和比例？", payload["visible_text"])
-        # 澄清形态 checkpoint：无待处理动作，支持后续恢复。
         self.assertEqual((), result.checkpoint.opaque_payload["pending_calls"])
         serialized = json.dumps(payload, ensure_ascii=False)
         self.assertNotIn("deferredtoolrequests", serialized.lower())
         self.assertNotIn("tool_call_id", serialized)
 
     def test_clarification_resume_proposes_a_single_image_action(self) -> None:
-        initial_work = RunWork(
-            agent_run_id=23,
-            project_id=7,
-            conversation_id=11,
-            user_id=10,
-            run_version=1,
-            fencing_token=4,
-            engine="pydantic-ai",
-            engine_version="2.9.0",
-            adapter_schema_version=1,
-            messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
-            checkpoint=None,
-            tool_grants=(_generate_image_grant(),),
-        )
+        initial_work = _pydantic_work()
         initial_result = PydanticAIOrchestrator(
-            FunctionModel(clarification_dialogue_model)
+            FunctionModel(clarification_dialogue_model), _bundle_source()
         ).advance(initial_work)
         self.assertIsNotNone(initial_result.input_request)
         restored_checkpoint = RuntimeCheckpoint(
@@ -405,25 +462,21 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 json.dumps(initial_result.checkpoint.opaque_payload, ensure_ascii=False)
             ),
         )
-        resumed_work = RunWork(
-            **{
-                **initial_work.__dict__,
-                "run_version": 2,
-                "fencing_token": 5,
-                "messages": (
-                    {"role": "user", "content": "生成一张蓝鲸海报"},
-                    {"role": "assistant", "content": "您希望什么风格和比例？"},
-                    {"role": "user", "content": "水墨风格带留白"},
-                ),
-                "checkpoint": restored_checkpoint,
-            }
+        resumed_work = _pydantic_work(
+            run_version=2,
+            fencing_token=5,
+            messages=(
+                {"role": "user", "content": "生成一张蓝鲸海报"},
+                {"role": "assistant", "content": "您希望什么风格和比例？"},
+                {"role": "user", "content": "水墨风格带留白"},
+            ),
+            checkpoint=restored_checkpoint,
         )
 
         resumed_result = PydanticAIOrchestrator(
-            FunctionModel(clarification_dialogue_model)
+            FunctionModel(clarification_dialogue_model), _bundle_source()
         ).advance(resumed_work)
 
-        # 恢复后恰好一个内置 generate_image 动作，不再提出输入请求。
         self.assertIsNone(resumed_result.input_request)
         self.assertEqual(1, len(resumed_result.actions))
         self.assertEqual("create_image_generation_job", resumed_result.actions[0].tool_id)
@@ -438,82 +491,50 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
 
     def test_clarification_resume_text_fails_closed(self) -> None:
         # 澄清恢复后模型仍输出文本（未提出动作）：契约违约，失败关闭。
-        initial_work = RunWork(
-            agent_run_id=23,
-            project_id=7,
-            conversation_id=11,
-            user_id=10,
-            run_version=1,
-            fencing_token=4,
-            engine="pydantic-ai",
-            engine_version="2.9.0",
-            adapter_schema_version=1,
-            messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
-            checkpoint=None,
-            tool_grants=(_generate_image_grant(),),
-        )
+        initial_work = _pydantic_work()
         initial_result = PydanticAIOrchestrator(
-            FunctionModel(always_text_model)
+            FunctionModel(always_text_model), _bundle_source()
         ).advance(initial_work)
         self.assertIsNotNone(initial_result.input_request)
-        resumed_work = RunWork(
-            **{
-                **initial_work.__dict__,
-                "run_version": 2,
-                "fencing_token": 5,
-                "messages": (
-                    {"role": "user", "content": "生成一张蓝鲸海报"},
-                    {"role": "assistant", "content": "仍然缺少信息。"},
-                    {"role": "user", "content": "水墨风格"},
-                ),
-                "checkpoint": initial_result.checkpoint,
-            }
+        resumed_work = _pydantic_work(
+            run_version=2,
+            fencing_token=5,
+            messages=(
+                {"role": "user", "content": "生成一张蓝鲸海报"},
+                {"role": "assistant", "content": "仍然缺少信息。"},
+                {"role": "user", "content": "水墨风格"},
+            ),
+            checkpoint=initial_result.checkpoint,
         )
 
-        result = PydanticAIOrchestrator(FunctionModel(always_text_model)).advance(
-            resumed_work
-        )
+        result = PydanticAIOrchestrator(
+            FunctionModel(always_text_model), _bundle_source()
+        ).advance(resumed_work)
 
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
         self.assertEqual((), result.actions)
         self.assertIsNone(result.input_request)
 
     def test_resumed_model_text_is_replaced_by_fixed_product_copy(self) -> None:
-        initial_work = RunWork(
-            agent_run_id=23,
-            project_id=7,
-            conversation_id=11,
-            user_id=10,
-            run_version=1,
-            fencing_token=4,
-            engine="pydantic-ai",
-            engine_version="2.9.0",
-            adapter_schema_version=1,
-            messages=({"role": "user", "content": "生成一张蓝鲸海报"},),
-            checkpoint=None,
-            tool_grants=(_generate_image_grant(),),
-        )
+        initial_work = _pydantic_work()
         initial_result = PydanticAIOrchestrator(
-            FunctionModel(unsafe_resume_model)
+            FunctionModel(unsafe_resume_model), _bundle_source()
         ).advance(initial_work)
-        resumed_work = RunWork(
-            **{
-                **initial_work.__dict__,
-                "run_version": 2,
-                "fencing_token": 5,
-                "checkpoint": initial_result.checkpoint,
-                "accepted_results": (
-                    AcceptedActionResult(
-                        action_id=initial_result.actions[0].action_id,
-                        status="succeeded",
-                        result={"asset_ids": [91]},
-                    ),
+        resumed_work = _pydantic_work(
+            run_version=2,
+            fencing_token=5,
+            checkpoint=initial_result.checkpoint,
+            accepted_results=(
+                AcceptedActionResult(
+                    action_id=initial_result.actions[0].action_id,
+                    status="succeeded",
+                    result={"asset_ids": [91]},
                 ),
-            }
+            ),
         )
 
         resumed_result = PydanticAIOrchestrator(
-            FunctionModel(unsafe_resume_model)
+            FunctionModel(unsafe_resume_model), _bundle_source()
         ).advance(resumed_work)
 
         self.assertEqual("图片已经生成。", resumed_result.visible_text)
@@ -539,22 +560,17 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             captured["without_grant"] = sorted(t.name for t in info.function_tools)
             return ModelResponse(parts=(TextPart("纯文本对话"),))
 
-        base = dict(
-            agent_run_id=23, project_id=7, conversation_id=11, user_id=10,
-            run_version=1, fencing_token=4, engine="pydantic-ai",
-            engine_version="2.9.0", adapter_schema_version=1,
-            messages=({"role": "user", "content": "你好"},), checkpoint=None,
-        )
-
-        result = PydanticAIOrchestrator(FunctionModel(image_capture_model)).advance(
-            RunWork(**base, tool_grants=(_generate_image_grant(),))
-        )
+        result = PydanticAIOrchestrator(
+            FunctionModel(image_capture_model), _bundle_source()
+        ).advance(_pydantic_work(messages=({"role": "user", "content": "你好"},)))
         self.assertIn("generate_image", captured["with_grant"])
         self.assertEqual("create_image_generation_job", result.actions[0].tool_id)
 
         # grant 为空集：模型收到空工具集（纯文本对话），未授权工具不可见。
-        text_result = PydanticAIOrchestrator(FunctionModel(text_capture_model)).advance(
-            RunWork(**base)
+        text_result = PydanticAIOrchestrator(
+            FunctionModel(text_capture_model), _bundle_source()
+        ).advance(
+            _pydantic_work(messages=({"role": "user", "content": "你好"},), tool_grants=())
         )
         self.assertEqual([], captured["without_grant"])
         self.assertIsNone(text_result.error)
@@ -583,13 +599,6 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             ToolGrant("fake_read", 1, "read", True, dict(schema), {}),
             ToolGrant("fake_side_effect", 1, "side_effect", True, dict(schema), {}),
         )
-        base = dict(
-            agent_run_id=24, project_id=7, conversation_id=11, user_id=10,
-            run_version=1, fencing_token=4, engine="pydantic-ai",
-            engine_version="2.9.0", adapter_schema_version=1,
-            messages=({"role": "user", "content": "读一下"},), checkpoint=None,
-            tool_grants=grants,
-        )
 
         def read_then_text_model(messages, info):
             if not any(
@@ -603,8 +612,12 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             return ModelResponse(parts=(TextPart("读取完成"),))
 
         read_result = PydanticAIOrchestrator(
-            FunctionModel(read_then_text_model), implementations
-        ).advance(RunWork(**base))
+            FunctionModel(read_then_text_model), _bundle_source(), implementations
+        ).advance(
+            _pydantic_work(
+                messages=({"role": "user", "content": "读一下"},), tool_grants=grants
+            )
+        )
         self.assertEqual(["node-1"], read_calls)
         self.assertIsNone(read_result.error)
 
@@ -614,8 +627,12 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             )
 
         side_result = PydanticAIOrchestrator(
-            FunctionModel(side_effect_model), implementations
-        ).advance(RunWork(**base))
+            FunctionModel(side_effect_model), _bundle_source(), implementations
+        ).advance(
+            _pydantic_work(
+                messages=({"role": "user", "content": "读一下"},), tool_grants=grants
+            )
+        )
         self.assertEqual(1, len(side_result.actions))
         self.assertEqual("fake_side_effect_tool", side_result.actions[0].tool_id)
 
@@ -623,19 +640,17 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         # grant 不匹配 / 工具不在注册表 / 版本漂移 / effect 不符 一律 fail closed，
         # 并入现有归一化通道（ORCHESTRATOR_CONTRACT_MISMATCH），不泄露内部工具名或路径。
         schema = {"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object"}
-        base = dict(
-            agent_run_id=25, project_id=7, conversation_id=11, user_id=10,
-            run_version=1, fencing_token=4, engine="pydantic-ai",
-            engine_version="2.9.0", adapter_schema_version=1,
-            messages=({"role": "user", "content": "你好"},), checkpoint=None,
-        )
 
         def plain_text_model(messages, info):
             return ModelResponse(parts=(TextPart("文本"),))
 
         unknown = (ToolGrant("ghost_tool", 1, "read", True, dict(schema), {}),)
-        work = RunWork(**base, tool_grants=unknown)
-        result = PydanticAIOrchestrator(FunctionModel(plain_text_model)).advance(work)
+        work = _pydantic_work(
+            messages=({"role": "user", "content": "你好"},), tool_grants=unknown
+        )
+        result = PydanticAIOrchestrator(
+            FunctionModel(plain_text_model), _bundle_source()
+        ).advance(work)
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
         self.assertNotIn(
             "ghost_tool",
@@ -643,8 +658,12 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         )
 
         drifted = (ToolGrant("generate_image", 99, "side_effect", True, dict(schema), {}),)
-        work = RunWork(**base, tool_grants=drifted)
-        result = PydanticAIOrchestrator(FunctionModel(plain_text_model)).advance(work)
+        work = _pydantic_work(
+            messages=({"role": "user", "content": "你好"},), tool_grants=drifted
+        )
+        result = PydanticAIOrchestrator(
+            FunctionModel(plain_text_model), _bundle_source()
+        ).advance(work)
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
         self.assertNotIn(
             "generate_image",
@@ -652,8 +671,12 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         )
 
         mismatched = (ToolGrant("generate_image", 1, "read", True, dict(schema), {}),)
-        work = RunWork(**base, tool_grants=mismatched)
-        result = PydanticAIOrchestrator(FunctionModel(plain_text_model)).advance(work)
+        work = _pydantic_work(
+            messages=({"role": "user", "content": "你好"},), tool_grants=mismatched
+        )
+        result = PydanticAIOrchestrator(
+            FunctionModel(plain_text_model), _bundle_source()
+        ).advance(work)
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
         self.assertNotIn(
             "generate_image",
@@ -671,18 +694,15 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         )
         self.assertEqual("", grants[0].tool_name)
 
-        base = dict(
-            agent_run_id=26, project_id=7, conversation_id=11, user_id=10,
-            run_version=1, fencing_token=4, engine="pydantic-ai",
-            engine_version="2.9.0", adapter_schema_version=1,
-            messages=({"role": "user", "content": "你好"},), checkpoint=None,
-        )
-
         def plain_text_model(messages, info):
             return ModelResponse(parts=(TextPart("文本"),))
 
-        result = PydanticAIOrchestrator(FunctionModel(plain_text_model)).advance(
-            RunWork(**base, tool_grants=grants)
+        result = PydanticAIOrchestrator(
+            FunctionModel(plain_text_model), _bundle_source()
+        ).advance(
+            _pydantic_work(
+                messages=({"role": "user", "content": "你好"},), tool_grants=grants
+            )
         )
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
 
