@@ -26,23 +26,40 @@
 
 ## 1. 背景与现状
 
-前端(`blue_whale/`)当前是**纯客户端 SPA**,经穷尽式扫描:
+> **⚠️ 2026-07-21 全仓扫描更新**:本节原版本(2026-07-04)写「前端纯 SPA,网络调用 0 处」——**已过时**。经扫描 `blue_whale_web`(前端 Next.js)+ `blue_whale_server`(后端 Java Spring Cloud:gateway / agent / user),前端已大量接真实后端。下方为现实。
 
-- `fetch` / `axios` / `WebSocket` / `EventSource` / Server Action / API Route = **0 处**
-- `process.env.*` / `localStorage` / `sessionStorage` = **0 处**
-- 所有"数据"均为硬编码常量 + mock 函数 + 本地 `blob:` / `base64`,**刷新即丢**
+### 已接真实后端
 
-前端露出三条真实后端线索:
+网关 `GATEWAY_URL` 默认 `http://115.190.244.91:8686`,Next rewrite `/api/*` + `/assets/*` 同源代理,`lib/api-client.ts` 统一 Bearer token + 401 刷新。
 
-1. `AgentChatPanel` 的 mock thinking 文案(`load direct workflow`、`plan_output_kinds`、`image_card_output_fn`)—— 真实后端是 workflow + skill 调度的 Agent runtime(本 workspace 已设计)。
-2. 33 条真实 Skill 封面用 `du9d8548ooqnc.cloudfront.net` 的 **CloudFront Signed URL**(`Key-Pair-Id=K1PJBMEIA4Y1WS`)—— 后端已有 skill 仓库 + 签名分发能力。
-3. `next.config.ts` 仅白名单了 `dj5nb01yl89hl.cloudfront.net`。
+| 域 | 端点 | 状态 |
+|---|---|---|
+| 鉴权 | `/api/auth/*`(captcha/send-code/login/refresh/logout)+ `/api/me` + `/api/user/*` | **完整接,手机号验证码 + JWT 双 token**(非原匿名 X-User-Id) |
+| Project/Canvas | `/api/projects` + `/api/canvases`(两表方案) | **完整接**(`lib/canvas.ts` + `useCanvasProjects`,800ms debounce PUT + beforeunload flush) |
+| Job 流 | `/api/jobs` + `/{id}` + `/{id}/stream`(SSE) | **完整接**,image SSE + video 轮询;`jobs.source`(dock/agent)+ `stage_id` 已有 |
+| 生成 | `/api/generation/image\|video` + `/api/generation/models?capability=` | **完整接** |
+| Skill/模板 | `/api/agent/skills/*` + `/api/agent/templates/*` | **完整接** |
+| 资产 | `/api/assets?type=`(只读列表) | 接了;`presign`/`complete` 骨架零调用 |
+
+### 仍 mock / 零落地
+
+1. **Agent 对话整条**(`AgentChatPanel.handleSend` → `buildMockReplyForMode`,无网络) — 见 [AGENT-CONVERSATION-PRD.md](./AGENT-CONVERSATION-PRD.md),后端 agent turn 零实现
+2. **三处模型硬编码**(`AgentComposer` / `AgentChatPanel` / `constants.ts`) — catalog 端点已存在(`/api/generation/models`),前端未接
+3. **画布上传 base64**(`canvas/page.tsx:247` FileReader) — `presign`/`complete` 骨架零调用
+4. PROJECTS mock 降级 fallback(`backendReady=false` 时)
+
+### 后端实现状态(扫描 `blue_whale_server`)
+
+- **已实现**:四表(users/project/canvas/assets/generation_jobs)、catalog(`generation_model_capability` 表,数据等价 §5.3 全集)、Project/Canvas CRUD、Job 流、Skill/模板、鉴权(登录 JWT)
+- **缺(从零建)**:资产上传(presign/complete/GET/{id})、canvas.messages(零)、assets.understanding 字段(零)、agent turn 整条(零)、video SSE(只有 image SSE)
+
+> 详见 wayfinder map #IK29RN + 共享地基 #IK2H6I(G0)。原始「三条后端线索」(Skill 封面 CloudFront / next.config 白名单)仍成立,见 §9。
 
 ## 2. 范围
 
 ### P0(本文覆盖,业务主链路)
 
-- 匿名用户标识(无登录、无鉴权)
+- ~~匿名用户标识(无登录、无鉴权)~~ → **手机号登录 JWT**(见 §4,2026-07-21 校准)
 - 资产上传(预签名直传)
 - 模型/参数目录(聚合接口)
 - 生成任务:Direct(含 Direct Image / Direct Video)/ Image-to-Video / Full Video Canvas 三条链路全做(对齐 ROADMAP「已锁定产品决策」)
@@ -69,7 +86,7 @@
 
 权威定义见仓库根 `CONTEXT.md` 与 `skill/references/backend_implementation_contract.md`。要点:
 
-- **User / 访客**:当前匿名,接口带 `X-User-Id`,不做登录鉴权,但必须做资源归属隔离。一个 User 拥有多个 Project。
+- **User / 访客**:**手机号登录 JWT**(非匿名,见 §4;2026-07-21 校准);资源归属隔离。一个 User 拥有多个 Project。
 - **Project**:顶层聚合根,1:1 包含 Canvas + 对话流。
 - **Asset**:图片/视频文件实体,有 id 与可访问 URL。**Card 与 NodeItem 是同一 Asset 的两种视图**。
 - **GenerationJob**:异步后台任务,持久化。`queued → processing → succeeded | failed`。产出 Asset。
@@ -80,17 +97,17 @@
 
 ## 4. 通用传输约定
 
+> **⚠️ 2026-07-21 更新**:鉴权从原「匿名 X-User-Id」改为「手机号登录 JWT」(后端已实现,前端已接);错误格式从原 `{error:{...}}` 改为 `Result{code,msg,data}`(Jackson,前端已按此解)。
+
 - 所有接口前缀 `/api`。
-- 鉴权(P0):HTTP header `X-User-Id: <uuid>`,前端首次进入本地生成 UUID 存 `localStorage`,后续每次请求携带。后端**只识别、不做登录校验**;P2 升级为登录 Token。
-- P0 匿名安全边界:
-  - `X-User-Id` 必须是合法 UUID,非法值直接拒绝。
-  - Project / Asset / GenerationJob / Skill 关系都必须绑定 `user_id`。
-  - 任意读取、修改、删除接口都必须校验资源归属当前 `X-User-Id`,禁止跨用户访问。
-  - 预签名上传 URL 只能写入当前用户预创建的 Asset key,不能由前端自定义存储路径。
-  - P0 不承诺强身份安全,但必须做到基础资源隔离;P2 登录后再做账户级鉴权与迁移。
-- 编码:JSON,P0 用 snake_case(与 backend contract 一致)。
+- **鉴权:手机号验证码登录 + JWT 双 token**(user-service 已实现)。网关 `JwtAuthGlobalFilter` 强制:除 `/api/auth/**` 白名单外所有 `/api/**` 必须带 `Authorization: Bearer <access_token>`,无 token 直接 401。
+  - access_token 15min、refresh_token 30d(存 Redis `bw:refresh:{jti}`);refresh 一次一换、删旧。
+  - **无匿名 X-User-Id 直传**(原 P0 匿名方案后端不存在);`X-User-Id` 由网关从 JWT 注入,前端不直传。
+  - 前端 token 存储 `localStorage` 键 `bw-access-token` / `bw-refresh-token` / `bw-user`(`components/auth/authStorage.ts`);`NEXT_PUBLIC_SKIP_AUTH=1` 本地跳过前端登录门槛(后端 JWT 仍校验)。
+  - 资源归属隔离:Project / Asset / GenerationJob / Skill 都绑 `user_id`,接口校验归属,禁止跨用户访问(P2 登录迁移见 §11)。
+- 编码:JSON,snake_case。
 - 时间:ISO 8601 字符串。
-- 错误:统一 `{ "error": { "code": "...", "message": "...", "detail": {} } }`,HTTP 状态码标准语义。
+- **错误:统一 `Result{code,msg,data}`**(Jackson 序列化,前端 `lib/api.ts` 按 `{code,msg,data}` 拆解);HTTP 状态码标准语义。错误码至少区分 `quota_exhausted`(P2)/ `content_moderation_rejected` / `upstream_timeout` / `asset_unavailable` / `asset_understanding_missing`。
 - 长任务统一走异步 + SSE(见 §8)。
 
 ## 5. 接口清单(P0)
@@ -154,8 +171,10 @@
 
 ### 5.3 模型 / 参数目录
 
-#### `GET /api/catalog`
-聚合返回所有创作参数,**作为前端唯一来源**(消除前端 `AgentComposer` / `AgentChatPanel` / `constants.ts` 三处硬编码)。
+> **⚠️ 2026-07-21 更新**:端点名从 `/api/catalog` 改为 **`/api/generation/models`**(后端已实现,数据等价全集)。前端三处硬编码**仍未接**,是 G0(#IK2H6I)前端工作量。
+
+#### `GET /api/generation/models?capability=image|video`
+聚合返回模型能力,**作为前端唯一来源**(消除前端 `AgentComposer` / `AgentChatPanel` / `constants.ts` 三处硬编码)。后端表 `generation_model_capability`(provider_id / model_id / capability_type / model_label / icon / supported_sizes / supported_aspect_ratios / supported_formats / default_* / features{referenceImage/watermark/quantityMax/sequentialImageGeneration/stream/tools} / enabled)。`capability` 默认 image,可传 video。
 ```json
 {
   "creation_modes": [ { "id": "agent", "label": "视频智能体" }, { "id": "direct", "label": "直接生成" } ],
@@ -232,6 +251,15 @@ data: {"job_id":"job_xxx","status":"succeeded","output_asset_ids":["ast_yyy"]}
 ---
 
 ### 5.5 Project(画布 + 对话 持久化)
+
+> **⚠️ 2026-07-21 现实校准**:下方单表方案(`projects.canvas_state` + `messages` jsonb)**后端未实现**。现实是**两表**:
+> - `project`(owner_id / name / thumb)
+> - `canvas`(project_id UNIQUE / viewport_json / nodes_json)—— canvas 只存 viewport+nodes,**无 messages 列**
+> - `messages` 持久化用**新建 `message` 表**(一条一行,关联 project_id;见 AGENT-CONVERSATION-PRD / wayfinder #IK2H7R B 票建),**不进 canvas**
+> - 现行前端已接两表(`lib/canvas.ts`:GET/POST/PUT/DELETE `/api/projects` + `/api/canvases`,800ms debounce PUT + beforeunload flush)
+> - `GET /api/projects/{id}` 恢复 = canvas nodes(从 canvas 表)+ messages(从 message 表)+ active_jobs(从 generation_jobs)
+>
+> 下方接口签名保留作「理想契约」,实现按上方两表 + message 表。
 
 #### `GET /api/projects`
 替换前端 TopBar 的 `PROJECTS` 硬编码。
@@ -315,15 +343,18 @@ data: {"job_id":"job_xxx","status":"succeeded","output_asset_ids":["ast_yyy"]}
 
 ## 7. 数据模型(补充 backend contract 未覆盖的表)
 
+> **⚠️ 2026-07-21 现实校准**:标注每张表「✅ 后端已实现 / ⚠️ 待补」。理想字段保留,现实偏离见标注。
+
 backend contract 已定义:Agent Turn / Canvas Node / Workflow Run / Stage / ChatMessage。补充:
 
 ```
-users
-  id (uuid)
-  anonymous_id (uuid, unique)     -- P0 唯一身份;P2 加 account 关联
+users                                          -- ✅ 已实现(手机号登录,非匿名)
+  id
+  phone / username / status                    -- 现实字段(user-service)
+  (anonymous_id 方案未实现;P2 登录迁移见 §11)
   created_at
 
-assets
+assets                                         -- ✅ 已实现(⚠️ understanding 两列待补 G0 #IK2H6I)
   id
   user_id
   type            -- image | video
@@ -332,31 +363,43 @@ assets
   mime, size
   width, height, duration
   source          -- upload | generated
-  status          -- uploading | ready | failed
-  understanding_status  -- none | processing | ready | failed（仅 Agent 链路消费图前触发；Provider 直消图不需要）
-  understanding_data     -- jsonb: subject/visual_traits/scene/text_or_logo/usage_intent/must_keep/can_change/uncertainties/source；数据本体，跨链路复用
+  status          -- normal | failed            -- 现实枚举
+  understanding_status  -- ⚠️ 待补(G0);none | processing | ready | failed（仅 Agent 链路消费图前触发）
+  understanding_data     -- ⚠️ 待补(G0);jsonb: subject/visual_traits/scene/text_or_logo/usage_intent/must_keep/can_change/uncertainties/source
   created_at
 
-projects
+projects                                       -- ✅ 已实现(现实两表,见下)
   id
-  user_id
-  title
-  canvas_state    -- jsonb: { nodes[], viewport }
-  messages        -- jsonb: ChatMessage[]
+  user_id (owner_id)
+  title (name)
+  thumb (cover_asset_id)
   created_at, updated_at
+  -- ⚠️ 现实不含 canvas_state / messages 列;原 PRD 单表方案未实现
 
-generation_jobs
+canvas                                         -- ✅ 已实现(现实新增表,从 projects 拆出)
+  project_id (UNIQUE)
+  viewport_json                                 -- json 字符串,后端不解析
+  nodes_json                                    -- json 字符串
+
+message                                        -- ⚠️ 待建(wayfinder #IK2H7R B 票;Agent 对话 messages)
+  id
+  project_id
+  role / type / content                         -- 取 backend contract ChatMessage variant
+  created_at
+
+generation_jobs                                -- ✅ 已实现(source + stage_id 已有)
   id
   project_id
   user_id
   type            -- image | video
-  source          -- dock | agent
+  source          -- dock | agent               -- ✅ 已有
   input           -- jsonb: prompt/model/params/reference_asset_ids
   status          -- queued | processing | succeeded | failed
   progress
   output_asset_ids -- jsonb
   error
-  stage_id        -- 关联 workspace Stage(agent 触发时)
+  stage_id        -- 关联 workspace Stage       -- ✅ 已有(agent 触发时)
+  provider / provider_task_id / poll_count / next_poll_at / retry_count / last_polled_at  -- 现实轮询字段
   created_at, updated_at
 ```
 

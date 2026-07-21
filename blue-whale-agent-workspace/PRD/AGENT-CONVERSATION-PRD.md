@@ -6,6 +6,12 @@
 > 给前后端工程师的 Agent 对话交付契约。从 `BACKEND-API-PRD.md` §5.6 抽出,闭合 Skill 面板 ↔ Agent 对话的接入点断头路。
 > 版本:P0 · 日期:2026-07-05
 
+> **⚠️ 2026-07-21 后端扫描校准**:本文是 Agent 对话**交付契约**(理想)。后端 `blue_whale_server` 扫描确认:**agent turn 整条零实现**(无 `/api/projects/{id}/agent/turn` Controller / turn Service / `decision_context` 算法 / turn SSE / messages 表)。前端 `AgentChatPanel` 仍走 `buildMockReplyForMode` 本地 mock。
+>
+> 本契约由 wayfinder map #IK29RN 细拆为 7 票(B–H,挂 #IJZ7Z7),前置共享地基 #IK2H6I(G0)。实现时**可复用**:`JobStreamBus` 订阅/补发 history/complete 模式、`SseEmitter`+`@Async(GENERATION_EXECUTOR)`、`X-User-Id`+`UserContext.requireUserId`(网关注入)、`jobs.source=agent`+`stage_id`(已就绪,Agent Job 关联 stage 零工作)、`skill.content`(md 全文,turn 拼 prompt 直读)。
+>
+> **待定**:turn 端点路径——网关显式路由只有 `/api/agent/**` + `/api/auth/**`,`/api/projects/**` 路由缺口;走 `/api/agent/projects/{id}/turn` 还是补网关路由,B 票(#IK2H7R)执行时定。
+
 ## 0. 怎么读这份文档
 
 实现前**必读** workspace 三份契约 + 两份规则:
