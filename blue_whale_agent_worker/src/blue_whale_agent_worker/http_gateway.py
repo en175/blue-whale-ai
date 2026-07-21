@@ -1,9 +1,19 @@
 import json
-from typing import Any
+from typing import Any, Optional
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from .contracts import AcceptedActionResult, RunWork, RuntimeCheckpoint
+
+
+def _optional_str(value: Any) -> Optional[str]:
+    return str(value) if value is not None else None
+
+
+def _optional_seq(value: Any) -> Optional[tuple[Any, ...]]:
+    if value is None:
+        return None
+    return tuple(value)
 
 
 def run_work_from_payload(data: dict[str, Any]) -> RunWork:
@@ -37,6 +47,13 @@ def run_work_from_payload(data: dict[str, Any]) -> RunWork:
         messages=tuple(data.get("messages", ())),
         checkpoint=checkpoint,
         accepted_results=accepted_results,
+        bundle_version_id=_optional_str(data.get("bundle_version_id")),
+        manifest_digest=_optional_str(data.get("manifest_digest")),
+        model_profile_id=_optional_str(data.get("model_profile_id")),
+        model_profile_version=_optional_str(data.get("model_profile_version")),
+        activated_creative_skill_versions=_optional_seq(
+            data.get("activated_creative_skill_versions")
+        ),
     )
 
 
@@ -74,17 +91,32 @@ class JavaRunGateway:
             f"/internal/agent-runs/{run_id}/assistant-messages/complete", payload
         )
 
-    def _request(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def fetch_snapshot(self, bundle_version_id: str) -> dict[str, Any]:
+        """GET /internal/runtime-bundles/versions/{bundleVersionId}：整份发布快照（camelCase）。"""
+        return self._request(
+            f"/internal/runtime-bundles/versions/{bundle_version_id}", method="GET"
+        )
+
+    def _request(
+        self,
+        path: str,
+        payload: Optional[dict[str, Any]] = None,
+        method: str = "POST",
+    ) -> dict[str, Any]:
+        headers: dict[str, str] = {
+            "Accept": "application/json",
+            "X-Worker-Id": self._worker_id,
+            "X-Orchestrator-Engine": self._orchestrator_engine,
+        }
+        data = None
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
+            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = Request(
             f"{self._base_url}{path}",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "X-Worker-Id": self._worker_id,
-                "X-Orchestrator-Engine": self._orchestrator_engine,
-            },
+            data=data,
+            method=method,
+            headers=headers,
         )
         try:
             with urlopen(request, timeout=30) as response:
