@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Eye, EyeOff, X } from "lucide-react";
-import { sendVerificationCode, setPassword, ApiError } from "@/lib/auth";
+import { sendVerificationCode, setPassword, changePassword, ApiError } from "@/lib/auth";
 import { useAuth } from "./AuthContext";
 import { maskPhone } from "./phoneUtils";
 
@@ -12,7 +12,7 @@ interface AccountInfoModalProps {
 }
 
 export function AccountInfoModal({ onClose, onOpenRebind }: AccountInfoModalProps) {
-  const { user } = useAuth();
+  const { user, signOut, openLogin } = useAuth();
   const [copied, setCopied] = useState(false);
   const [showSetPassword, setShowSetPassword] = useState(false);
   const [passwordCode, setPasswordCode] = useState("");
@@ -25,6 +25,8 @@ export function AccountInfoModal({ onClose, onOpenRebind }: AccountInfoModalProp
   const [pwSubmitting, setPwSubmitting] = useState(false);
   const [pwError, setPwError] = useState<string | null>(null);
   const [pwSuccess, setPwSuccess] = useState(false);
+  const [oldPassword, setOldPassword] = useState("");
+  const [showOldPw, setShowOldPw] = useState(false);
   const pwTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -86,6 +88,31 @@ export function AccountInfoModal({ onClose, onOpenRebind }: AccountInfoModalProp
       setShowSetPassword(false);
     } catch (e) {
       setPwError(e instanceof ApiError ? e.message : "设置密码失败");
+    } finally {
+      setPwSubmitting(false);
+    }
+  };
+
+  // ===== 提交修改密码 =====
+  const handleChangePassword = async () => {
+    if (!oldPassword) { setPwError("请输入旧密码"); return; }
+    if (newPassword.length < 8) { setPwError("密码至少 8 位"); return; }
+    if (!/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) { setPwError("密码需包含字母和数字"); return; }
+    if (newPassword !== confirmPassword) { setPwError("两次密码不一致"); return; }
+    if (oldPassword === newPassword) { setPwError("新密码不能与旧密码相同"); return; }
+    if (passwordCode.length !== 6) { setPwError("请输入 6 位验证码"); return; }
+
+    setPwSubmitting(true);
+    setPwError(null);
+    try {
+      await changePassword(passwordCode, oldPassword, newPassword);
+      setPwSuccess(true);
+      setShowSetPassword(false);
+      // 改密码成功 → 全清 refresh_token，强制重登
+      signOut();
+      openLogin();
+    } catch (e) {
+      setPwError(e instanceof ApiError ? e.message : "修改密码失败");
     } finally {
       setPwSubmitting(false);
     }
@@ -173,6 +200,19 @@ export function AccountInfoModal({ onClose, onOpenRebind }: AccountInfoModalProp
                 </button>
               </div>
 
+              {/* 旧密码（仅修改密码时显示） */}
+              {user.hasPassword && (
+                <div className="flex items-center bg-white/[0.05] rounded-lg px-3 border border-white/[0.06] focus-within:border-white/20 transition-colors">
+                  <input className="h-10 bg-transparent outline-none text-sm text-white/90 placeholder:text-white/30 w-full"
+                    type={showOldPw ? "text" : "password"} placeholder="旧密码" value={oldPassword}
+                    onChange={(e) => { setOldPassword(e.target.value); setPwError(null); }} />
+                  <button type="button" className="shrink-0 text-white/40 hover:text-white/70 transition-colors ml-2"
+                    onClick={() => setShowOldPw((v) => !v)} tabIndex={-1}>
+                    {showOldPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              )}
+
               {/* 新密码 */}
               <div className="flex items-center bg-white/[0.05] rounded-lg px-3 border border-white/[0.06] focus-within:border-white/20 transition-colors">
                 <input className="h-10 bg-transparent outline-none text-sm text-white/90 placeholder:text-white/30 w-full"
@@ -197,7 +237,7 @@ export function AccountInfoModal({ onClose, onOpenRebind }: AccountInfoModalProp
 
               {/* 错误 / 成功 */}
               {pwError && <p className="text-[12px] text-[#ef4444]">{pwError}</p>}
-              {pwSuccess && <p className="text-[12px] text-[#22c55e]">密码设置成功</p>}
+              {pwSuccess && <p className="text-[12px] text-[#22c55e]">{user.hasPassword ? "密码修改成功，请重新登录" : "密码设置成功"}</p>}
 
               {/* 操作按钮 */}
               <div className="flex gap-2">
@@ -207,9 +247,9 @@ export function AccountInfoModal({ onClose, onOpenRebind }: AccountInfoModalProp
                   取消
                 </button>
                 <button type="button" disabled={pwSubmitting}
-                  onClick={handleSetPassword}
+                  onClick={user.hasPassword ? handleChangePassword : handleSetPassword}
                   className="flex-1 h-10 rounded-lg bg-[#4e40f3] text-white text-[13px] font-medium transition-colors disabled:opacity-40 enabled:hover:bg-[#3d33d1]">
-                  {pwSubmitting ? "提交中..." : "确认设置"}
+                  {pwSubmitting ? "提交中..." : user.hasPassword ? "确认修改" : "确认设置"}
                 </button>
               </div>
             </div>

@@ -156,3 +156,15 @@ export function setPassword(code: string, password: string): Promise<void> {
     body: JSON.stringify({ code, password }),
   });
 }
+
+/** 修改密码：短信验证码+旧密码+新密码，成功后全设备强制重登 */
+export function changePassword(
+  code: string,
+  oldPassword: string,
+  newPassword: string,
+): Promise<void> {
+  return apiRequest<void>("/api/user/password", {
+    method: "PUT",
+    body: JSON.stringify({ code, oldPassword, newPassword }),
+  });
+}
