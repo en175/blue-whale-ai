@@ -16,4 +16,7 @@ public class UserInfoResponse {
 
     private String username;
     private String phone;
+
+    @JSONField(name = "has_password")
+    private Boolean hasPassword;
 }

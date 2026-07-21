@@ -28,4 +28,8 @@ public class LoginResponse {
 
     @JSONField(name = "is_new_user")
     private Boolean isNewUser;
+
+    /** 是否已设置密码（null=未设） */
+    @JSONField(name = "has_password")
+    private Boolean hasPassword;
 }

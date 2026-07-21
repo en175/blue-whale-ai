@@ -11,6 +11,7 @@ import { SKIP_AUTH } from "./authStorage";
 import { maskPhone } from "./format";
 import { ModalShell } from "./ModalShell";
 import { RebindPhoneModal } from "./RebindPhoneModal";
+import { ChangePasswordModal } from "./ChangePasswordModal";
 
 interface AccountModalProps {
   onClose: () => void;
@@ -41,12 +42,19 @@ function Row({
 export function AccountModal({ onClose }: AccountModalProps) {
   const { user } = useAuth();
   const [rebindOpen, setRebindOpen] = useState(false);
+  const [changePwdOpen, setChangePwdOpen] = useState(false);
 
   const maskedPhone = user ? maskPhone(user.phone) : "";
 
   return (
-    <ModalShell ariaLabel="账号信息" onClose={onClose} closeOnEscape={!rebindOpen}>
-      <h2 className="text-[24px] font-semibold leading-tight mb-6 text-white">账号信息</h2>
+    <ModalShell
+      ariaLabel="账号信息"
+      onClose={onClose}
+      closeOnEscape={!rebindOpen && !changePwdOpen}
+    >
+      <h2 className="text-[24px] font-semibold leading-tight mb-6 text-white">
+        账号信息
+      </h2>
 
       <div className="flex flex-col">
         <Row label="用户ID" value={user ? String(user.userId) : "—"} />
@@ -66,6 +74,21 @@ export function AccountModal({ onClose }: AccountModalProps) {
             </button>
           }
         />
+        <Row
+          label="密码"
+          value={user?.hasPassword ? "已设置" : "未设置"}
+          action={
+            <button
+              type="button"
+              onClick={() => setChangePwdOpen(true)}
+              disabled={SKIP_AUTH}
+              className="text-[12px] text-white/55 hover:text-white/90 underline-offset-4 hover:underline transition-colors disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+              title={SKIP_AUTH ? "本地开发模式不可用" : undefined}
+            >
+              {user?.hasPassword ? "修改" : "设置"}
+            </button>
+          }
+        />
       </div>
 
       {SKIP_AUTH && (
@@ -75,6 +98,9 @@ export function AccountModal({ onClose }: AccountModalProps) {
       )}
 
       {rebindOpen && <RebindPhoneModal onClose={() => setRebindOpen(false)} />}
+      {changePwdOpen && (
+        <ChangePasswordModal onClose={() => setChangePwdOpen(false)} />
+      )}
     </ModalShell>
   );
 }

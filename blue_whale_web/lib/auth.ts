@@ -19,11 +19,13 @@ export interface LoginData {
   username: string;
   phone: string;
   is_new_user: boolean;
+  has_password: boolean;
 }
 export interface UserInfo {
   user_id: number;
   username: string;
   phone: string;
+  has_password: boolean;
 }
 
 interface ApiResult<T> {
@@ -34,13 +36,20 @@ interface ApiResult<T> {
 }
 
 export class ApiError extends Error {
-  constructor(message: string, public code?: number) {
+  constructor(
+    message: string,
+    public code?: number,
+  ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -51,8 +60,15 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: nu
 }
 
 /** 仅用于 auth 端点（login/refresh/captcha/send-code），不走 401 拦截。 */
-async function getResult<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetchWithTimeout(`${API_BASE}${url}`, options, FETCH_TIMEOUT);
+async function getResult<T>(
+  url: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const res = await fetchWithTimeout(
+    `${API_BASE}${url}`,
+    options,
+    FETCH_TIMEOUT,
+  );
   if (!res.ok) {
     throw new ApiError(`请求失败: ${res.status}`, res.status);
   }
@@ -73,10 +89,18 @@ export function fetchCaptcha(): Promise<CaptchaResult> {
 }
 
 /** 发送短信验证码 */
-export function sendVerificationCode(phone: string, captchaToken: string, captchaAnswer: string): Promise<SendCodeResult> {
+export function sendVerificationCode(
+  phone: string,
+  captchaToken: string,
+  captchaAnswer: string,
+): Promise<SendCodeResult> {
   return getResult<SendCodeResult>("/api/auth/send-code", {
     method: "POST",
-    body: JSON.stringify({ phone, captcha_token: captchaToken, captcha_answer: captchaAnswer }),
+    body: JSON.stringify({
+      phone,
+      captcha_token: captchaToken,
+      captcha_answer: captchaAnswer,
+    }),
   });
 }
 
@@ -114,10 +138,18 @@ export function fetchMe(): Promise<UserInfo> {
 }
 
 /** 更换手机号——发验证码 */
-export function sendChangePhoneCode(newPhone: string, captchaToken: string, captchaAnswer: string): Promise<SendCodeResult> {
+export function sendChangePhoneCode(
+  newPhone: string,
+  captchaToken: string,
+  captchaAnswer: string,
+): Promise<SendCodeResult> {
   return apiRequest<SendCodeResult>("/api/user/phone/send-code", {
     method: "POST",
-    body: JSON.stringify({ new_phone: newPhone, captcha_token: captchaToken, captcha_answer: captchaAnswer }),
+    body: JSON.stringify({
+      new_phone: newPhone,
+      captcha_token: captchaToken,
+      captcha_answer: captchaAnswer,
+    }),
   });
 }
 
@@ -134,5 +166,29 @@ export function updateUsername(username: string): Promise<void> {
   return apiRequest<void>("/api/user/username", {
     method: "PUT",
     body: JSON.stringify({ username }),
+  });
+}
+
+/** 设置密码（首次） */
+export function setPassword(code: string, newPassword: string): Promise<void> {
+  return apiRequest<void>("/api/user/password/set", {
+    method: "POST",
+    body: JSON.stringify({ code, new_password: newPassword }),
+  });
+}
+
+/** 修改密码（成功后踢所有设备，需重新登录） */
+export function changePassword(
+  code: string,
+  oldPassword: string,
+  newPassword: string,
+): Promise<void> {
+  return apiRequest<void>("/api/user/password", {
+    method: "PUT",
+    body: JSON.stringify({
+      code,
+      old_password: oldPassword,
+      new_password: newPassword,
+    }),
   });
 }

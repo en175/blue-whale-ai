@@ -13,12 +13,14 @@ import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
@@ -34,6 +36,7 @@ public class AuthService {
     private final CaptchaService captchaService;
     private final SmsProvider smsProvider;
     private final JwtUtil jwtUtil;
+    private final PasswordEncoder passwordEncoder;
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
@@ -103,20 +106,7 @@ public class AuthService {
 
     @Transactional(rollbackFor = Exception.class)
     public LoginResponse login(String phone, String code) {
-        boolean isTestPhone = TEST_PHONE.equals(phone);
-
-        if (!isTestPhone) {
-            // 从 Redis 取验证码
-            String stored = RedisUtil.getCacheObject(SMS_CODE_PREFIX + phone);
-            if (stored == null) {
-                throw new GlobalException(401, "验证码已过期，请重新获取");
-            }
-            if (!stored.equals(code)) {
-                throw new GlobalException(401, "验证码错误");
-            }
-            // 消费掉
-            RedisUtil.delete(SMS_CODE_PREFIX + phone);
-        }
+        verifyAndConsumeSmsCode(SMS_CODE_PREFIX, phone, code);
 
         // 查用户：有则登录，无则注册
         User user = userMapper.selectOne(
@@ -151,9 +141,10 @@ public class AuthService {
         RedisUtil.setCacheObject(
                 REFRESH_TOKEN_PREFIX + claims.getId(),
                 userIdStr,
-                2_592_000,  // 30 天
+                REFRESH_TTL_SEC,
                 TimeUnit.SECONDS
         );
+        addRefreshToUserIndex(userIdStr, claims.getId());
 
         return LoginResponse.builder()
                 .accessToken(accessToken)
@@ -163,12 +154,19 @@ public class AuthService {
                 .username(user.getUsername())
                 .phone(user.getPhone())
                 .isNewUser(isNewUser)
+                .hasPassword(user.getPassword() != null)
                 .build();
     }
 
     // ==================== 刷新 Token ====================
 
     private static final String REFRESH_TOKEN_PREFIX = "bw:refresh:";
+    private static final String REFRESH_USER_INDEX_PREFIX = "bw:refresh:user:";
+    private static final String CHANGE_PASSWORD_LIMIT_PREFIX = "bw:passwd:change:user:";
+    private static final int CHANGE_PASSWORD_LIMIT = 3;
+    private static final int CHANGE_PASSWORD_LIMIT_TTL_SEC = 60;
+    private static final String PASSWORD_PATTERN = "^(?=.*[A-Za-z])(?=.*\\d).{8,128}$";
+    private static final int REFRESH_TTL_SEC = 2_592_000;
 
     public LoginResponse refresh(String refreshToken) {
         Claims claims;
@@ -186,6 +184,7 @@ public class AuthService {
 
         // 删旧 refresh_token
         RedisUtil.delete(REFRESH_TOKEN_PREFIX + claims.getId());
+        removeFromUserIndex(userId, claims.getId());
 
         // 查用户
         User user = userMapper.selectById(Long.valueOf(userId));
@@ -200,9 +199,10 @@ public class AuthService {
         RedisUtil.setCacheObject(
                 REFRESH_TOKEN_PREFIX + newClaims.getId(),
                 userId,
-                2_592_000,  // 30 天
+                REFRESH_TTL_SEC,
                 TimeUnit.SECONDS
         );
+        addRefreshToUserIndex(userId, newClaims.getId());
 
         return LoginResponse.builder()
                 .accessToken(newAccess)
@@ -212,6 +212,7 @@ public class AuthService {
                 .username(user.getUsername())
                 .phone(user.getPhone())
                 .isNewUser(false)
+                .hasPassword(user.getPassword() != null)
                 .build();
     }
 
@@ -222,6 +223,7 @@ public class AuthService {
         try {
             var claims = jwtUtil.parse(refreshToken);
             RedisUtil.delete(REFRESH_TOKEN_PREFIX + claims.getId());
+            removeFromUserIndex(claims.getSubject(), claims.getId());
             log.debug("登出成功: jti={}", claims.getId());
         } catch (Exception e) {
             log.debug("登出时 token 已过期或无效: {}", e.getMessage());
@@ -281,14 +283,7 @@ public class AuthService {
      * 校验验证码并更换手机号
      */
     public void changePhone(String userId, String newPhone, String code) {
-        String stored = RedisUtil.getCacheObject(CHANGE_PHONE_CODE_PREFIX + newPhone);
-        if (stored == null) {
-            throw new GlobalException(401, "验证码已过期，请重新获取");
-        }
-        if (!stored.equals(code)) {
-            throw new GlobalException(401, "验证码错误");
-        }
-        RedisUtil.delete(CHANGE_PHONE_CODE_PREFIX + newPhone);
+        verifyAndConsumeSmsCode(CHANGE_PHONE_CODE_PREFIX, newPhone, code);
 
         // 检查占用
         Long count = userMapper.selectCount(
@@ -346,5 +341,120 @@ public class AuthService {
             RedisUtil.getRedisTemplate().expire(key, ttlSeconds, TimeUnit.SECONDS);
         }
         return count == null ? 0L : count;
+    }
+
+    // ==================== 密码 ====================
+
+    /**
+     * 首次设置密码：短信验证码校验 + 强度校验（不踢设备，非安全事件）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void setPassword(Long userId, String code, String newPassword) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new GlobalException(401, "用户不存在");
+        }
+        if (user.getPassword() != null) {
+            throw new GlobalException(400, "已设置密码，请使用修改密码功能");
+        }
+        verifyAndConsumeSmsCode(SMS_CODE_PREFIX, user.getPhone(), code);
+        if (!newPassword.matches(PASSWORD_PATTERN)) {
+            throw new GlobalException(400, "密码需 8-128 位，且包含字母和数字");
+        }
+        String hashed = passwordEncoder.encode(newPassword);
+        userMapper.update(null,
+                new LambdaUpdateWrapper<User>()
+                        .eq(User::getId, userId)
+                        .set(User::getPassword, hashed)
+                        .set(User::getGmtModified, LocalDateTime.now())
+        );
+        log.info("设置密码成功: userId={}", userId);
+    }
+
+    /**
+     * 修改密码：短信验证码 + 旧密码双重校验，成功后踢所有设备
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void changePassword(Long userId, String code, String oldPassword, String newPassword) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new GlobalException(401, "用户不存在");
+        }
+        if (user.getPassword() == null) {
+            throw new GlobalException(400, "尚未设置密码，请使用设置密码功能");
+        }
+        // userId 维度限流：3 次/分钟
+        Long count = incrWithTTL(CHANGE_PASSWORD_LIMIT_PREFIX + userId, CHANGE_PASSWORD_LIMIT_TTL_SEC);
+        if (count > CHANGE_PASSWORD_LIMIT) {
+            throw new GlobalException(429, "操作过于频繁");
+        }
+        verifyAndConsumeSmsCode(SMS_CODE_PREFIX, user.getPhone(), code);
+        if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
+            throw new GlobalException(401, "旧密码错误");
+        }
+        if (!newPassword.matches(PASSWORD_PATTERN)) {
+            throw new GlobalException(400, "密码需 8-128 位，且包含字母和数字");
+        }
+        if (passwordEncoder.matches(newPassword, user.getPassword())) {
+            throw new GlobalException(400, "新密码不能与旧密码相同");
+        }
+        String hashed = passwordEncoder.encode(newPassword);
+        userMapper.update(null,
+                new LambdaUpdateWrapper<User>()
+                        .eq(User::getId, userId)
+                        .set(User::getPassword, hashed)
+                        .set(User::getGmtModified, LocalDateTime.now())
+        );
+        clearAllRefreshTokensByUser(String.valueOf(userId));
+        log.info("修改密码成功: userId={}", userId);
+    }
+
+    // ==================== 验证码校验 helper ====================
+
+    /**
+     * 校验并消费短信验证码（测试号跳过）
+     */
+    private void verifyAndConsumeSmsCode(String prefix, String phone, String code) {
+        if (TEST_PHONE.equals(phone)) {
+            return;
+        }
+        String stored = RedisUtil.getCacheObject(prefix + phone);
+        if (stored == null) {
+            throw new GlobalException(401, "验证码已过期，请重新获取");
+        }
+        if (!stored.equals(code)) {
+            throw new GlobalException(401, "验证码错误");
+        }
+        RedisUtil.delete(prefix + phone);
+    }
+
+    // ==================== 反向索引 helper（踢设备） ====================
+
+    /**
+     * 把 refresh_token 的 jti 加入用户反向索引集合
+     */
+    private void addRefreshToUserIndex(String userId, String jti) {
+        RedisUtil.getRedisTemplate().opsForSet().add(REFRESH_USER_INDEX_PREFIX + userId, jti);
+        RedisUtil.getRedisTemplate().expire(REFRESH_USER_INDEX_PREFIX + userId, REFRESH_TTL_SEC, TimeUnit.SECONDS);
+    }
+
+    /**
+     * 从用户反向索引集合移除指定 jti
+     */
+    private void removeFromUserIndex(String userId, String jti) {
+        RedisUtil.getRedisTemplate().opsForSet().remove(REFRESH_USER_INDEX_PREFIX + userId, jti);
+    }
+
+    /**
+     * 清除用户所有 refresh_token（踢所有设备）
+     */
+    private void clearAllRefreshTokensByUser(String userId) {
+        Set<String> jtis = RedisUtil.getCacheSet(REFRESH_USER_INDEX_PREFIX + userId);
+        if (jtis != null) {
+            for (String jti : jtis) {
+                RedisUtil.delete(REFRESH_TOKEN_PREFIX + jti);
+            }
+        }
+        RedisUtil.delete(REFRESH_USER_INDEX_PREFIX + userId);
     }
 }

@@ -1,5 +1,6 @@
 package com.blue.whale.user.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
 import lombok.Data;
 
 import javax.validation.constraints.NotBlank;
@@ -13,10 +14,12 @@ public class ChangePasswordRequest {
     private String code;
 
     @NotBlank(message = "旧密码不能为空")
+    @JSONField(name = "old_password")
     private String oldPassword;
 
     @NotBlank(message = "新密码不能为空")
     @Size(min = 8, max = 128, message = "密码长度需在8-128位之间")
     @Pattern(regexp = "^(?=.*[A-Za-z])(?=.*\\d).+$", message = "密码需包含字母和数字")
+    @JSONField(name = "new_password")
     private String newPassword;
 }

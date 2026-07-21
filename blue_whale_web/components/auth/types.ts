@@ -7,6 +7,7 @@ export type User = {
   userId: number;
   username: string;
   phone: string;
+  hasPassword?: boolean;
 };
 
 /**

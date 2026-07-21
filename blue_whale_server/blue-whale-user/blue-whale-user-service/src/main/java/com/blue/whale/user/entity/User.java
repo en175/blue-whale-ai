@@ -23,4 +23,7 @@ public class User extends BaseEntity {
 
     /** 状态: NORMAL / EXPIRED / LOCKED / UNAVAILABLE */
     private String status;
+
+    /** BCrypt 哈希；NULL=未设密码 */
+    private String password;
 }
