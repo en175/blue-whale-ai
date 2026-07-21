@@ -33,6 +33,7 @@ import com.blue.whale.agent.service.governance.ActionAuthorizationCommand;
 import com.blue.whale.agent.service.governance.AuthorizationDecision;
 import com.blue.whale.agent.service.governance.AuthorizationOutcome;
 import com.blue.whale.agent.service.governance.GenerationActionAuthorizationService;
+import com.blue.whale.agent.service.governance.GovernanceException;
 import com.blue.whale.agent.service.governance.GenerationCostAdmissionService;
 import com.blue.whale.agent.service.governance.CostReservationService;
 import com.blue.whale.agent.service.governance.UserInputRequestService;
@@ -222,6 +223,14 @@ public class AgentRunWorkerService {
             authorization = actionAuthorizationService.authorize(
                     actionCommand(run, action, actionType, confirmed));
         }
+        // IK2QBX 治理拒绝回喂：authorize DENIED 不再抛异常终结提交，
+        // 投影为面向 User 的稳定 publicCode（不暴露内部 reasonCode），落 RunCommitRecord 经通道回喂。
+        GovernanceException.RejectionEnvelope rejection = null;
+        String rejectedActionId = null;
+        if (authorization != null && authorization.outcome() == AuthorizationOutcome.DENIED) {
+            rejection = GovernanceException.forDeniedReasonCode(authorization.reasonCode());
+            rejectedActionId = action.actionId();
+        }
 
         long checkpointCount = checkpointMapper.selectCount(Wrappers.<RuntimeCheckpoint>lambdaQuery()
                 .eq(RuntimeCheckpoint::getAgentRunId, runId));
@@ -281,7 +290,7 @@ public class AgentRunWorkerService {
             inputRequest = userInputRequestService.create(
                     run.getProjectId(), run.getUserId(), run.getConversationId(), runId,
                     action.actionId(), actionType, action.arguments(), authorization.quote());
-        } else if (action != null) {
+        } else if (action != null && rejection == null) {
             LinkedHashMap<String, Object> input = new LinkedHashMap<>(action.arguments());
             input.put("expected_output_count", 1);
             // Agent 不暴露模型选择：按能力表默认 image 模型注入 model_id 并校验/规范化 size，
@@ -386,9 +395,11 @@ public class AgentRunWorkerService {
         }
 
         run.setCurrentCheckpointId(checkpoint.getId())
-                .setStatus(inputRequest != null ? AgentRun.STATUS_AWAITING_INPUT
+                .setStatus(rejection != null ? AgentRun.STATUS_QUEUED
+                        : inputRequest != null ? AgentRun.STATUS_AWAITING_INPUT
                         : job == null ? AgentRun.STATUS_COMPLETED : AgentRun.STATUS_AWAITING_JOB)
-                .setStage(inputRequest != null
+                .setStage(rejection != null ? "awaiting_retry"
+                        : inputRequest != null
                         ? (proposal != null ? "awaiting_clarification" : "awaiting_confirmation")
                         : (job == null ? "completed" : "generating"))
                 .setLeaseOwner(null)
@@ -406,6 +417,10 @@ public class AgentRunWorkerService {
                 .setCheckpointId(checkpoint.getId())
                 .setGenerationJobId(job == null ? null : job.getId())
                 .setUserInputRequestId(inputRequest == null ? null : inputRequest.getId())
+                .setRejectedActionId(rejectedActionId)
+                .setRejectedPublicCode(rejection == null ? null : rejection.publicCode())
+                .setRejectedMessage(rejection == null ? null : rejection.message())
+                .setRejectedRetryable(rejection != null && rejection.retryable())
                 .setCommittedCursor(projectEventService.highWatermark(run.getProjectId()));
         runCommitMapper.insert(committed);
         return response(committed);
@@ -618,7 +633,19 @@ public class AgentRunWorkerService {
         RunCommitRecord commit = runCommitMapper.selectOne(Wrappers.<RunCommitRecord>lambdaQuery()
                 .eq(RunCommitRecord::getAgentRunId, run.getId())
                 .eq(RunCommitRecord::getCheckpointId, checkpoint.getId()));
-        if (commit == null || commit.getGenerationJobId() == null) {
+        if (commit == null) {
+            return List.of();
+        }
+        if (commit.getRejectedActionId() != null) {
+            // IK2QBX 拒绝结果：面向 User 的稳定公开码与安全提示，不暴露内部 reasonCode。
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("public_code", commit.getRejectedPublicCode());
+            result.put("message", commit.getRejectedMessage());
+            result.put("retryable", Boolean.TRUE.equals(commit.getRejectedRetryable()));
+            return List.of(new RunWorkResponse.AcceptedResult(
+                    commit.getRejectedActionId(), "rejected", result));
+        }
+        if (commit.getGenerationJobId() == null) {
             return List.of();
         }
         GenerationJob job = generationJobMapper.selectById(commit.getGenerationJobId());

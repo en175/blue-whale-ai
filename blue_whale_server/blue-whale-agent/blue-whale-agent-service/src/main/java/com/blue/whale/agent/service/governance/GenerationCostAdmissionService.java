@@ -37,6 +37,14 @@ public class GenerationCostAdmissionService {
                 userId, projectId, targetType, resolvedTargetId,
                 "generation-request:" + actionIdentity, actionIdentity, actionType, arguments,
                 irreversible, validatedConfirmation));
+        if (decision.outcome() == AuthorizationOutcome.DENIED) {
+            // 独立生成请求路径（非 AgentRun commit）保持异常终结：
+            // 拒绝回喂通道只服务于 AgentRun 编排，此处仍按原语义抛 GovernanceException。
+            if ("QUOTA_EXCEEDED".equals(decision.reasonCode())) {
+                throw GovernanceException.quotaExceeded();
+            }
+            throw GovernanceException.actionNotAllowed();
+        }
         if (decision.outcome() == AuthorizationOutcome.INPUT_REQUIRED) {
             var request = userInputRequestService.createStandalone(
                     projectId, userId, targetType, actionIdentity, actionType, arguments,

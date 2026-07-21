@@ -215,11 +215,19 @@ class PydanticAIOrchestrator:
             # 澄清恢复后只允许一个内置 generate_image 动作，不接受再次文本输出。
             raise _ContractError("澄清恢复后必须提出一个图片生成动作")
         else:
-            visible_text = (
-                "图片已经生成。"
-                if all(result.status == "succeeded" for result in work.accepted_results)
-                else "图片生成未完成。"
-            )
+            rejected = [r for r in work.accepted_results if r.status == "rejected"]
+            if rejected:
+                # IK2QBX 动作被治理拒绝后模型未再提议：用面向 User 的安全提示收尾，
+                # 不暴露内部 reasonCode。模型若选择调整，会走 DeferredToolRequests 分支提新提议。
+                message = rejected[-1].result.get("message")
+                visible_text = (
+                    message if isinstance(message, str) and message.strip()
+                    else "图片生成未完成。"
+                )
+            elif all(result.status == "succeeded" for result in work.accepted_results):
+                visible_text = "图片已经生成。"
+            else:
+                visible_text = "图片生成未完成。"
 
         checkpoint = RuntimeCheckpoint(
             engine=work.engine,

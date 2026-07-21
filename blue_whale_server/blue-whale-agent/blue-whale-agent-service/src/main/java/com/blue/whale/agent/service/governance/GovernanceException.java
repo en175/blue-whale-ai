@@ -76,4 +76,22 @@ public class GovernanceException extends RuntimeException {
         envelope.put("budget_effect", budgetEffect.wireValue());
         return envelope;
     }
+
+    /**
+     * IK2QBX 拒绝结果回喂通道：把内部 reasonCode 投影为面向 User 的稳定公开码与安全提示。
+     * 复用既有 publicCode 工厂族，不向 User 侧暴露内部诊断码（如 ACTION_SCHEMA_OR_OWNERSHIP_REJECTED）。
+     */
+    public static RejectionEnvelope forDeniedReasonCode(String reasonCode) {
+        if ("QUOTA_EXCEEDED".equals(reasonCode)) {
+            // 配额类拒绝：额度刷新后可重试，retryable=true 让模型可改提或提示用户等待。
+            return new RejectionEnvelope("QUOTA_EXCEEDED", quotaExceeded().getMessage(), true);
+        }
+        return new RejectionEnvelope("ACTION_NOT_ALLOWED", actionNotAllowed().getMessage(), false);
+    }
+
+    /**
+     * IK2QBX 拒绝结果回喂通道载荷：经 RunCommitRecord 持久化，由 accepted_results 通道回传 Worker。
+     */
+    public record RejectionEnvelope(String publicCode, String message, boolean retryable) {
+    }
 }

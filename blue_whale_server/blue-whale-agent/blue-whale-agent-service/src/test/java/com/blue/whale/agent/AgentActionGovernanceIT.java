@@ -3,7 +3,10 @@ package com.blue.whale.agent;
 import com.blue.whale.agent.mapper.ProjectMapper;
 import com.blue.whale.agent.model.entity.Project;
 import com.blue.whale.agent.service.ProjectEventService;
+import com.blue.whale.agent.service.governance.AuthorizationDecision;
+import com.blue.whale.agent.service.governance.AuthorizationOutcome;
 import com.blue.whale.agent.service.governance.CostControlProperties;
+import com.blue.whale.agent.service.governance.GenerationAuthorizationGate;
 import com.blue.whale.agent.service.governance.PriceQuote;
 import com.blue.whale.agent.service.governance.UserInputRequestService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -26,6 +29,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -62,6 +66,8 @@ class AgentActionGovernanceIT {
     private UserInputRequestService userInputRequestService;
     @SpyBean
     private ProjectEventService projectEventService;
+    @SpyBean
+    private GenerationAuthorizationGate authorizationGate;
 
     @BeforeEach
     void cleanFacts() {
@@ -83,6 +89,7 @@ class AgentActionGovernanceIT {
                 "DELETE FROM project_events",
                 "DELETE FROM project_event_stream",
                 "DELETE FROM project");
+        reset(authorizationGate);
     }
 
     @Test
@@ -327,6 +334,51 @@ class AgentActionGovernanceIT {
                 "SELECT reason_code FROM audit_records WHERE target_id = ? ORDER BY id DESC LIMIT 1",
                 String.class, String.valueOf(standalone.getId())))
                 .isEqualTo("CONFIRMATION_CHANNEL_MISMATCH");
+    }
+
+    @Test
+    void deniedGovernanceActionFeedsBackViaAcceptedResultsChannel() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("denied-feed-back");
+        projectMapper.insert(project);
+        JsonNode run = postMessage(
+                project.getId(), "deny-message", "生成一张蓝鲸海报", null).path("agent_run_id");
+        JsonNode work = claim(run.asLong(), "deny-worker");
+        doReturn(new AuthorizationDecision(AuthorizationOutcome.DENIED, null, "QUOTA_EXCEEDED"))
+                .when(authorizationGate).evaluate(any());
+
+        // IK2QBX 治理拒绝不再以 422 终结提交，而是 200 推进 Run 回队列等 Worker 下一轮调整。
+        commit(run.asLong(), "deny-worker", commitBody(project.getId(), work, "deny-commit"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.generation_job_id").doesNotExist())
+                .andExpect(jsonPath("$.data.input_request_id").doesNotExist());
+
+        // 拒绝不产生副作用：无 GenerationJob、无成本预留。
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM generation_jobs", Long.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM cost_reservations", Long.class)).isZero();
+        // 审计仍落库内部 reasonCode（denied + QUOTA_EXCEEDED）。
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT reason_code FROM audit_records WHERE decision = 'denied' ORDER BY id DESC LIMIT 1",
+                String.class)).isEqualTo("QUOTA_EXCEEDED");
+        // Run 设回 queued（复用现有状态枚举，不改生命周期），stage 等待重试。
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM agent_runs WHERE id = ?", String.class, run.asLong()))
+                .isEqualTo("queued");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT stage FROM agent_runs WHERE id = ?", String.class, run.asLong()))
+                .isEqualTo("awaiting_retry");
+
+        reset(authorizationGate);
+        // Worker 下一轮 claim 经 accepted_results 通道拿到 rejected 结果（回喂模型）。
+        JsonNode rejectedWork = claim(run.asLong(), "deny-worker-2");
+        JsonNode acceptedResult = rejectedWork.path("accepted_results").get(0);
+        assertThat(acceptedResult.path("status").asText()).isEqualTo("rejected");
+        assertThat(acceptedResult.path("result").path("public_code").asText())
+                .isEqualTo("QUOTA_EXCEEDED");
+        assertThat(acceptedResult.path("result").path("retryable").asBoolean()).isTrue();
+        // 内部诊断码不外泄：accepted_result 只含面向 User 的 publicCode。
+        assertThat(acceptedResult.toString()).doesNotContain("COST_UPPER_BOUND_UNKNOWN");
     }
 
     private JsonNode postMessage(
