@@ -257,7 +257,8 @@ class BundleAgentRuntime:
             actions = (
                 {
                     "action_id": action_id,
-                    "action_type": call.tool_name,
+                    "tool_id": "create_image_generation_job",
+                    "registry_version": 1,
                     "arguments": call.args_as_dict(),
                 },
             )

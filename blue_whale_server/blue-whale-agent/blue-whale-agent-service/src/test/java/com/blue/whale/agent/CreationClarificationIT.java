@@ -425,7 +425,7 @@ class CreationClarificationIT {
                 "\"visible_text\":\"已按澄清回答准备好图片动作。\"," +
                 "\"checkpoint\":{\"opaque_payload\":{\"step\":\"image_proposed\"," +
                 "\"prompt\":\"" + prompt + "\"}}," +
-                "\"actions\":[{\"action_id\":\"action-resume-1\",\"action_type\":\"generate_image\"," +
+                "\"actions\":[{\"action_id\":\"action-resume-1\",\"tool_id\":\"create_image_generation_job\",\"registry_version\":1," +
                 "\"arguments\":{\"prompt\":\"" + prompt + "\",\"aspect_ratio\":\"1:1\"}}]}";
     }
 
@@ -441,7 +441,7 @@ class CreationClarificationIT {
                 "\"adapter_schema_version\":1," +
                 "\"visible_text\":\"mutex test\"," +
                 "\"checkpoint\":{\"opaque_payload\":{\"step\":\"mutex\"}}," +
-                "\"actions\":[{\"action_id\":\"action-1\",\"action_type\":\"generate_image\"," +
+                "\"actions\":[{\"action_id\":\"action-1\",\"tool_id\":\"create_image_generation_job\",\"registry_version\":1," +
                 "\"arguments\":{\"prompt\":\"whale\",\"aspect_ratio\":\"1:1\"}}]," +
                 "\"user_input_request\":{\"request_type\":\"creation_clarification\"," +
                 "\"question\":\"style?\"}}";

@@ -35,14 +35,22 @@ class RunWork:
 
 @dataclass(frozen=True)
 class ProposedAction:
+    """Agent 提议的工具动作（注册表驱动）。
+
+    tool_id + registry_version 绑定注册表 ToolDefinition，自由 action_type 已退役；
+    action_id 确定性、Run 内唯一，作幂等键：同一 action_id 重复提交不产生重复 GenerationJob 或重复成本预留。
+    """
+
     action_id: str
-    action_type: str
+    tool_id: str
+    registry_version: int
     arguments: Mapping[str, Any]
 
     def to_payload(self) -> dict[str, Any]:
         return {
             "action_id": self.action_id,
-            "action_type": self.action_type,
+            "tool_id": self.tool_id,
+            "registry_version": self.registry_version,
             "arguments": dict(self.arguments),
         }
 

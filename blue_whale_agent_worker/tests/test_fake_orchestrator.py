@@ -82,7 +82,7 @@ class FakeOrchestratorTest(unittest.TestCase):
         result = FakeOrchestrator().advance(self.work)
         payload = result.to_commit_payload(self.work)
 
-        self.assertEqual("generate_image", payload["actions"][0]["action_type"])
+        self.assertEqual("create_image_generation_job", payload["actions"][0]["tool_id"])
         self.assertEqual("蓝鲸海报", payload["actions"][0]["arguments"]["prompt"])
         serialized = json.dumps(payload, ensure_ascii=False)
         self.assertNotIn("pydantic", serialized.lower())
@@ -284,7 +284,7 @@ class FakeOrchestratorTest(unittest.TestCase):
         self.assertIsNone(result.input_request)
         self.assertEqual(1, len(result.actions))
         action = result.actions[0]
-        self.assertEqual("generate_image", action.action_type)
+        self.assertEqual("create_image_generation_job", action.tool_id)
         prompt = action.arguments["prompt"]
         self.assertIn("蓝鲸海报", prompt)
         self.assertIn("水墨风格带留白", prompt)

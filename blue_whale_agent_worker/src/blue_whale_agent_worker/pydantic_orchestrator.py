@@ -127,7 +127,8 @@ class PydanticAIOrchestrator:
             actions = (
                 ProposedAction(
                     action_id=action_id,
-                    action_type="generate_image",
+                    tool_id="create_image_generation_job",
+                    registry_version=1,
                     arguments=call.args_as_dict(),
                 ),
             )

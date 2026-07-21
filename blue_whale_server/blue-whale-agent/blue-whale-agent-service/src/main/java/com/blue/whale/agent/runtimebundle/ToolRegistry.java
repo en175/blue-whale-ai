@@ -19,7 +19,7 @@ import org.springframework.stereotype.Component;
  * <p>本注册表是 Agent 可提议动作的目录，与 ADR-0038 按 mode 装配的生图 Provider 不是同一概念。
  */
 @Component
-final class ToolRegistry {
+public final class ToolRegistry {
 
     private final Map<ToolKey, ToolDefinition> tools;
 
@@ -27,7 +27,7 @@ final class ToolRegistry {
         this.tools = Map.copyOf(registerDefaults(objectMapper));
     }
 
-    Optional<ToolDefinition> find(String toolId, int registryVersion) {
+    public Optional<ToolDefinition> find(String toolId, int registryVersion) {
         if (toolId == null) {
             return Optional.empty();
         }
@@ -54,6 +54,32 @@ final class ToolRegistry {
                         parseBuiltinSchema(objectMapper, "{\"max_results\":100}"),
                         Set.of("tool_calling"),
                         null));
+        registry.put(
+                new ToolKey("create_image_generation_job", 1),
+                new ToolDefinition(
+                        "create_image_generation_job",
+                        1,
+                        "side_effect",
+                        RiskLevel.MEDIUM,
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object",\
+                                 "properties":{"prompt":{"type":"string","minLength":1},\
+                                               "aspect_ratio":{"type":"string","enum":["1:1","16:9","9:16","4:3","3:4","2:3","3:2","21:9"]},\
+                                               "reference_asset_ids":{"type":"array","maxItems":4,"items":{"type":"integer","minimum":1}},\
+                                               "size":{"type":"string"},\
+                                               "web_search":{"type":"boolean"}},\
+                                 "required":["prompt"],\
+                                 "additionalProperties":false}"""),
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object",\
+                                 "properties":{"job_id":{"type":"integer"}}}"""),
+                        parseBuiltinSchema(objectMapper, """
+                                {"expected_output_count":{"min":1,"max":1},\
+                                 "prompt":{"maxLength":2000}}"""),
+                        Set.of("tool_calling"),
+                        "image"));
         return registry;
     }
 

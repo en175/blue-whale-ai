@@ -80,7 +80,8 @@ class FakeOrchestrator:
             actions=(
                 ProposedAction(
                     action_id=f"fake-image-{work.agent_run_id}-{work.run_version}",
-                    action_type="generate_image",
+                    tool_id="create_image_generation_job",
+                    registry_version=1,
                     arguments={"prompt": prompt, "aspect_ratio": "1:1"},
                 ),
             ),

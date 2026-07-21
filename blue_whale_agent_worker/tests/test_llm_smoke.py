@@ -71,7 +71,7 @@ class PydanticAILiveSmokeTest(unittest.TestCase):
         self.assertEqual("已接纳，正在生成图片。", commit_payload["visible_text"])
         self.assertEqual(1, len(commit_payload["actions"]))
         self.assertEqual(
-            "generate_image", commit_payload["actions"][0]["action_type"]
+            "create_image_generation_job", commit_payload["actions"][0]["tool_id"]
         )
         print(
             f"LLM smoke evidence: model={SMOKE_MODEL}, "
