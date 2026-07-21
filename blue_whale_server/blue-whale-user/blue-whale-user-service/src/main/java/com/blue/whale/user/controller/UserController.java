@@ -76,4 +76,17 @@ public class UserController {
         userService.updateUsername(userId, req.getUsername());
         return Result.ok();
     }
+
+    /**
+     * 修改密码：短信验证码+旧密码双重验证，成功后全清 refresh_token 踢设备
+     * PUT /api/user/password
+     */
+    @PutMapping("/api/user/password")
+    public Result<Void> changePassword(@Valid @RequestBody ChangePasswordRequest req,
+                                        HttpServletRequest request) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        String ip = IpUtils.getIpAddr(request);
+        authService.changePassword(userId, req.getCode(), req.getOldPassword(), req.getNewPassword(), ip);
+        return Result.ok();
+    }
 }
