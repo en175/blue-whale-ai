@@ -16,5 +16,17 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- verification_codes 和 captcha_challenges 已迁移至 Redis，不再建表。
 
--- password 列幂等迁移（MySQL 8.0.29+ / H2 1.4.200+ 支持 ADD COLUMN IF NOT EXISTS，旧库升级安全）
-ALTER TABLE users ADD COLUMN IF NOT EXISTS password VARCHAR(100) NULL COMMENT 'BCrypt 哈希；NULL=未设密码';
+-- password 列幂等迁移：MySQL 8.0 不支持 ADD COLUMN IF NOT EXISTS（注释旧写法会在启动期直接语法报错），
+-- 用 information_schema 守卫 + PREPARE 动态执行，新库（CREATE TABLE 已含 password）与旧库升级均安全。
+SET @bw_users_has_password := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'password'
+);
+SET @bw_users_add_password := IF(
+    @bw_users_has_password = 0,
+    'ALTER TABLE users ADD COLUMN password VARCHAR(100) NULL COMMENT ''BCrypt 哈希；NULL=未设密码''',
+    'SELECT 1'
+);
+PREPARE bw_users_add_password_stmt FROM @bw_users_add_password;
+EXECUTE bw_users_add_password_stmt;
+DEALLOCATE PREPARE bw_users_add_password_stmt;
