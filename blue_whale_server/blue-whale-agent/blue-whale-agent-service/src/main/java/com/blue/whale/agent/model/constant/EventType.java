@@ -23,7 +23,11 @@ public final class EventType {
 
     /** Conversation：用户或 Agent 消息已被 Java 接纳。 */
     public static final String CONVERSATION_MESSAGE_ACCEPTED = "conversation.message_accepted";
-    /** Conversation：Agent 可见消息已完成。 */
+    /** Conversation：Assistant 消息流已建立，不含未审核文本。 */
+    public static final String CONVERSATION_MESSAGE_STARTED = "conversation.message_started";
+    /** Conversation：审核通过的 Assistant 文本前缀已追加。 */
+    public static final String CONVERSATION_MESSAGE_CHUNK_APPENDED = "conversation.message_chunk_appended";
+    /** Conversation：Agent 可见消息已到达终态（completed 或 rejected，payload 的 status 区分）。 */
     public static final String CONVERSATION_MESSAGE_COMPLETED = "conversation.message_completed";
 
     /** AgentRun：已创建。 */

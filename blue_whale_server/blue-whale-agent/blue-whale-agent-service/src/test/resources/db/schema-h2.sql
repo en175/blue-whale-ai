@@ -1,5 +1,5 @@
 -- H2（MODE=MySQL）集成测试建表脚本。
--- 与迁移链最终 schema 对齐（V1 基线 + V3 游标列改名 event_cursor + V7 能力注册表 + V8 收件箱地基），但去掉 MySQL 专有语法（ENGINE/CHARSET/COMMENT/JSON→CLOB/ON UPDATE）。
+-- 与迁移链最终 schema 对齐（V1 基线 + V3 游标列改名 + V7 能力注册表 + V8 收件箱 + V9 Assistant 分块），但去掉 MySQL 专有语法。
 -- 通用 IT schema（test profile 全量 IT 共用），生产以 db/migrations 迁移链为准。
 
 CREATE TABLE IF NOT EXISTS project
@@ -143,14 +143,58 @@ CREATE TABLE IF NOT EXISTS conversation_messages
     project_id BIGINT NOT NULL,
     agent_run_id BIGINT NULL,
     client_message_id VARCHAR(64) NULL,
+    stream_id VARCHAR(128) NULL,
     role VARCHAR(16) NOT NULL,
     content CLOB NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'completed',
+    last_chunk_sequence INT NOT NULL DEFAULT 0,
     sequence_no INT NOT NULL,
     gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version INT NOT NULL DEFAULT 0,
     is_delete TINYINT NOT NULL DEFAULT 0,
-    CONSTRAINT uk_conversation_sequence UNIQUE (conversation_id, sequence_no)
+    CONSTRAINT uk_conversation_sequence UNIQUE (conversation_id, sequence_no),
+    CONSTRAINT uk_conversation_stream UNIQUE (stream_id)
+);
+
+CREATE TABLE IF NOT EXISTS assistant_message_streams
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    stream_id VARCHAR(128) NOT NULL,
+    agent_run_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    conversation_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    message_id BIGINT NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    last_sequence_no INT NOT NULL DEFAULT 0,
+    released_sequence_no INT NOT NULL DEFAULT 0,
+    start_idempotency_key VARCHAR(128) NOT NULL,
+    complete_idempotency_key VARCHAR(128) NULL,
+    content_digest VARCHAR(64) NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    CONSTRAINT uk_assistant_stream_id UNIQUE (stream_id),
+    CONSTRAINT uk_assistant_stream_run UNIQUE (agent_run_id)
+);
+
+CREATE TABLE IF NOT EXISTS assistant_message_chunks
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    assistant_message_stream_id BIGINT NOT NULL,
+    sequence_no INT NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL,
+    content CLOB NOT NULL,
+    content_digest VARCHAR(64) NOT NULL,
+    released TINYINT NOT NULL DEFAULT 0,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    CONSTRAINT uk_assistant_chunk_sequence UNIQUE (assistant_message_stream_id, sequence_no),
+    CONSTRAINT uk_assistant_chunk_idempotency UNIQUE (assistant_message_stream_id, idempotency_key)
 );
 
 CREATE TABLE IF NOT EXISTS command_idempotency

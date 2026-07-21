@@ -17,6 +17,7 @@ public record RunCommitRequest(
         @NotBlank String engine,
         @JsonProperty("engine_version") @NotBlank String engineVersion,
         @JsonProperty("adapter_schema_version") @NotNull Integer adapterSchemaVersion,
+        @JsonProperty("assistant_message_stream_id") String assistantMessageStreamId,
         @JsonProperty("visible_text") @NotBlank String visibleText,
         @Valid @NotNull CommitCheckpoint checkpoint,
         @Valid @NotNull List<ProposedAction> actions,

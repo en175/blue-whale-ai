@@ -16,6 +16,8 @@ public final class AggregateType {
     public static final String CANVAS = "canvas";
     /** 聚合：conversation */
     public static final String CONVERSATION = "conversation";
+    /** 聚合：conversation_message */
+    public static final String CONVERSATION_MESSAGE = "conversation_message";
     /** 聚合：agent_run */
     public static final String AGENT_RUN = "agent_run";
     /** 聚合：user_input_request */

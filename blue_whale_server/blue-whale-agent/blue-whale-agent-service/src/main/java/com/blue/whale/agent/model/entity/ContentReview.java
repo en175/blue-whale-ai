@@ -15,8 +15,10 @@ import java.util.List;
  * 原因码与最小化证据引用，不持久化供应商完整响应或原始媒体。
  *
  * <p>逻辑唯一身份 = project_id + subject_type + subject_id + content_digest
- * + modality + direction + policy_version；只能从 pending 进入不可变终态
+ * + modality + direction + policy_version；只能从 pending 进入终态
  * decided / failed，只有 decided + pass 允许内容继续，其余组合 fail closed。
+ * 例外：agent_text 的 failed 不是终态——审核暂时不可用不形成永久决定，
+ * 恢复后按同一身份重审并更新同一行（见 ContentReviewService#reviewAgentText）。
  */
 @Getter
 @Setter
@@ -26,9 +28,11 @@ public class ContentReview extends BaseEntity {
 
     /** 受审主体：生成输出槽位 */
     public static final String SUBJECT_TYPE_GENERATION_OUTPUT = "generation_output";
+    public static final String SUBJECT_TYPE_AGENT_TEXT = "agent_text";
 
     /** 模态 */
     public static final String MODALITY_IMAGE = "image";
+    public static final String MODALITY_TEXT = "text";
 
     /** 方向：面向 User 的输出 */
     public static final String DIRECTION_OUTPUT = "output";

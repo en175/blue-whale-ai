@@ -87,8 +87,10 @@ class OrchestratorResult:
     error: Optional[Mapping[str, str]] = None
     input_request: Optional[UserInputRequestProposal] = None
 
-    def to_commit_payload(self, work: RunWork) -> dict[str, Any]:
-        return {
+    def to_commit_payload(
+        self, work: RunWork, assistant_message_stream_id: Optional[str] = None
+    ) -> dict[str, Any]:
+        payload = {
             "commit_id": self.commit_id,
             "project_id": work.project_id,
             "user_id": work.user_id,
@@ -106,6 +108,9 @@ class OrchestratorResult:
                 self.input_request.to_payload() if self.input_request is not None else None
             ),
         }
+        if assistant_message_stream_id is not None:
+            payload["assistant_message_stream_id"] = assistant_message_stream_id
+        return payload
 
 
 class OrchestratorPort(Protocol):
@@ -119,3 +124,18 @@ class RunGateway(Protocol):
 
     def commit(self, run_id: int, payload: dict[str, Any]) -> None:
         """把提案提交给 Java Product API 做权威校验和持久化。"""
+
+    def start_assistant_message(
+        self, run_id: int, payload: dict[str, Any]
+    ) -> None:
+        """建立不含未审核文本的 Assistant 消息流。"""
+
+    def append_assistant_message_chunk(
+        self, run_id: int, payload: dict[str, Any]
+    ) -> None:
+        """把原始文本块交给 Java 私有持久化与发布门。"""
+
+    def complete_assistant_message(
+        self, run_id: int, payload: dict[str, Any]
+    ) -> None:
+        """校验并完成 Assistant 消息流。"""

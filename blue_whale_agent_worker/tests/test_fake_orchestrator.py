@@ -1,7 +1,12 @@
+import hashlib
 import json
 import unittest
 
-from blue_whale_agent_worker.contracts import RunWork, RuntimeCheckpoint
+from blue_whale_agent_worker.contracts import (
+    OrchestratorResult,
+    RunWork,
+    RuntimeCheckpoint,
+)
 from blue_whale_agent_worker.fake_orchestrator import FakeOrchestrator
 from blue_whale_agent_worker.worker import AgentWorker
 
@@ -11,13 +16,50 @@ class RecordingRunGateway:
         self.work = work
         self.committed_run_id = None
         self.commit_payload = None
+        self.operations = []
 
     def claim(self) -> RunWork:
         return self.work
 
     def commit(self, run_id: int, payload: dict[str, object]) -> None:
+        self.operations.append(("commit", run_id, payload))
         self.committed_run_id = run_id
         self.commit_payload = payload
+
+    def start_assistant_message(
+        self, run_id: int, payload: dict[str, object]
+    ) -> None:
+        self.operations.append(("start", run_id, payload))
+
+    def append_assistant_message_chunk(
+        self, run_id: int, payload: dict[str, object]
+    ) -> None:
+        self.operations.append(("chunk", run_id, payload))
+
+    def complete_assistant_message(
+        self, run_id: int, payload: dict[str, object]
+    ) -> None:
+        self.operations.append(("complete", run_id, payload))
+
+
+class _StaticTextOrchestrator:
+    """返回定长可见文本的编排器桩：驱动 worker 的多块切分路径。"""
+
+    def __init__(self, visible_text: str) -> None:
+        self._visible_text = visible_text
+
+    def advance(self, work: RunWork) -> OrchestratorResult:
+        return OrchestratorResult(
+            commit_id=f"static-{work.agent_run_id}-{work.run_version}",
+            visible_text=self._visible_text,
+            checkpoint=RuntimeCheckpoint(
+                engine=work.engine,
+                engine_version=work.engine_version,
+                adapter_schema_version=work.adapter_schema_version,
+                opaque_payload={"step": "static"},
+            ),
+            actions=(),
+        )
 
 
 class FakeOrchestratorTest(unittest.TestCase):
@@ -56,6 +98,102 @@ class FakeOrchestratorTest(unittest.TestCase):
         self.assertEqual(7, gateway.commit_payload["project_id"])
         self.assertEqual(4, gateway.commit_payload["fencing_token"])
         self.assertEqual("fake", gateway.commit_payload["engine"])
+        self.assertEqual(
+            ["start", "chunk", "complete", "commit"],
+            [operation[0] for operation in gateway.operations],
+        )
+        start_payload = gateway.operations[0][2]
+        chunk_payload = gateway.operations[1][2]
+        complete_payload = gateway.operations[2][2]
+        stream_id = start_payload["stream_id"]
+        self.assertEqual(stream_id, chunk_payload["stream_id"])
+        self.assertEqual(stream_id, complete_payload["stream_id"])
+        self.assertEqual(stream_id, gateway.commit_payload["assistant_message_stream_id"])
+        self.assertEqual(1, chunk_payload["sequence_no"])
+        self.assertEqual(
+            "已接纳，正在生成图片。", chunk_payload["content"]
+        )
+        self.assertEqual(
+            "local-fake" if self.work.engine == "fake" else "worker-prefix",
+            chunk_payload["review_evidence"]["source"],
+        )
+        self.assertTrue(
+            all(
+                len(operation[2]["idempotency_key"]) <= 64
+                for operation in gateway.operations[:3]
+            )
+        )
+        self.assertEqual(64, len(complete_payload["content_digest"]))
+
+    def test_worker_splits_long_visible_text_into_sequenced_chunks(self) -> None:
+        # 160 字符 > TEXT_CHUNK_SIZE(64)：切 3 块，逐块审核放行，complete 按全文封口。
+        long_text = "分段" * 80
+        gateway = RecordingRunGateway(self.work)
+
+        AgentWorker(gateway, _StaticTextOrchestrator(long_text)).run_once()
+
+        chunk_payloads = [
+            operation[2] for operation in gateway.operations
+            if operation[0] == "chunk"
+        ]
+        self.assertEqual(3, len(chunk_payloads))
+        self.assertEqual(
+            [1, 2, 3], [payload["sequence_no"] for payload in chunk_payloads]
+        )
+        self.assertEqual(
+            long_text, "".join(payload["content"] for payload in chunk_payloads)
+        )
+        self.assertEqual(
+            3, len({payload["idempotency_key"] for payload in chunk_payloads})
+        )
+        complete_payload = [
+            operation[2] for operation in gateway.operations
+            if operation[0] == "complete"
+        ][0]
+        self.assertEqual(3, complete_payload["final_sequence_no"])
+        self.assertEqual(
+            hashlib.sha256(long_text.encode("utf-8")).hexdigest(),
+            complete_payload["content_digest"],
+        )
+
+    def test_chunk_identity_survives_lease_reclaim_for_long_text(self) -> None:
+        long_text = "重放" * 80
+        first_gateway = RecordingRunGateway(self.work)
+        reclaimed_gateway = RecordingRunGateway(
+            RunWork(**{**self.work.__dict__, "run_version": 2, "fencing_token": 5})
+        )
+
+        AgentWorker(first_gateway, _StaticTextOrchestrator(long_text)).run_once()
+        AgentWorker(reclaimed_gateway, _StaticTextOrchestrator(long_text)).run_once()
+
+        self.assertEqual(
+            [
+                (operation[0], operation[2].get("idempotency_key"))
+                for operation in first_gateway.operations
+            ],
+            [
+                (operation[0], operation[2].get("idempotency_key"))
+                for operation in reclaimed_gateway.operations
+            ],
+        )
+
+    def test_stream_identity_survives_lease_reclaim_with_a_new_run_version(self) -> None:
+        first_gateway = RecordingRunGateway(self.work)
+        reclaimed_gateway = RecordingRunGateway(
+            RunWork(**{**self.work.__dict__, "run_version": 2, "fencing_token": 5})
+        )
+
+        AgentWorker(first_gateway, FakeOrchestrator()).run_once()
+        AgentWorker(reclaimed_gateway, FakeOrchestrator()).run_once()
+
+        for operation_index in range(3):
+            first_payload = first_gateway.operations[operation_index][2]
+            reclaimed_payload = reclaimed_gateway.operations[operation_index][2]
+            self.assertEqual(first_payload["stream_id"], reclaimed_payload["stream_id"])
+            self.assertEqual(
+                first_payload["idempotency_key"],
+                reclaimed_payload["idempotency_key"],
+            )
 
     def test_fake_refuses_a_production_engine_run(self) -> None:
         production_work = RunWork(

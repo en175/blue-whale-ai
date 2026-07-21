@@ -47,4 +47,22 @@ public class LocalFakeReviewEvidenceSource implements ReviewEvidenceSource {
                 request.contentDigest(), ContentReview.MODALITY_IMAGE, ContentReview.DIRECTION_OUTPUT,
                 properties.getPolicyVersion(), EVIDENCE_REF);
     }
+
+    @Override
+    public ReviewEvidence produceAgentText(
+            AgentTextReviewRequest request, String policyVersion) {
+        if ("fake:review-reject".equals(request.content())) {
+            return ReviewEvidence.reject(
+                    request.contentDigest(), "text", ContentReview.DIRECTION_OUTPUT,
+                    policyVersion, List.of("custom_policy"), EVIDENCE_REF);
+        }
+        if ("fake:review-unavailable".equals(request.content())) {
+            return ReviewEvidence.failed(
+                    request.contentDigest(), "text", ContentReview.DIRECTION_OUTPUT,
+                    policyVersion, "unavailable", EVIDENCE_REF);
+        }
+        return ReviewEvidence.pass(
+                request.contentDigest(), "text", ContentReview.DIRECTION_OUTPUT,
+                policyVersion, EVIDENCE_REF);
+    }
 }

@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.mapper.AssetStorageObjectMapper;
+import com.blue.whale.agent.mapper.AssistantMessageChunkMapper;
+import com.blue.whale.agent.mapper.AssistantMessageStreamMapper;
 import com.blue.whale.agent.mapper.CanvasMapper;
 import com.blue.whale.agent.mapper.ConversationMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
@@ -63,6 +65,8 @@ public class ProjectPurgeService {
     private final ProjectMapper projectMapper;
     private final ConversationMapper conversationMapper;
     private final ConversationMessageMapper messageMapper;
+    private final AssistantMessageChunkMapper assistantMessageChunkMapper;
+    private final AssistantMessageStreamMapper assistantMessageStreamMapper;
     private final UserInputRequestMapper userInputRequestMapper;
     private final RuntimeCheckpointMapper runtimeCheckpointMapper;
     private final RunCommitRecordMapper runCommitRecordMapper;
@@ -94,6 +98,8 @@ public class ProjectPurgeService {
                 AggregateType.PROJECT, String.valueOf(projectId), deletedVersion,
                 Map.of("project_id", projectId), null, null);
         settleActiveJobReservations(projectId);
+        assistantMessageChunkMapper.hardDeleteByProjectId(projectId);
+        assistantMessageStreamMapper.hardDeleteByProjectId(projectId);
         messageMapper.hardDeleteByProjectId(projectId);
         userInputRequestMapper.hardDeleteByProjectId(projectId);
         runtimeCheckpointMapper.hardDeleteByAgentRunProjectId(projectId);

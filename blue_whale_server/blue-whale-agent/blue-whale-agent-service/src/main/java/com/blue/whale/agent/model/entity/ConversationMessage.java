@@ -18,7 +18,10 @@ public class ConversationMessage extends BaseEntity {
     private Long projectId;
     private Long agentRunId;
     private String clientMessageId;
+    private String streamId;
     private String role;
     private String content;
+    private String status;
+    private Integer lastChunkSequence;
     private Integer sequenceNo;
 }

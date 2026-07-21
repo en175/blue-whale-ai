@@ -24,6 +24,21 @@ class RecordingRunGateway:
         self.committed_run_id = run_id
         self.commit_payload = payload
 
+    def start_assistant_message(
+        self, run_id: int, payload: dict[str, Any]
+    ) -> None:
+        pass
+
+    def append_assistant_message_chunk(
+        self, run_id: int, payload: dict[str, Any]
+    ) -> None:
+        pass
+
+    def complete_assistant_message(
+        self, run_id: int, payload: dict[str, Any]
+    ) -> None:
+        pass
+
 
 class PydanticAILiveSmokeTest(unittest.TestCase):
     @unittest.skipUnless(

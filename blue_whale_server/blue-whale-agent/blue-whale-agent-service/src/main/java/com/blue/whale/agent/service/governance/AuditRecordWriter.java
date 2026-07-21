@@ -184,6 +184,15 @@ public class AuditRecordWriter {
             Long generationJobId,
             String decision,
             String reasonCode) {
+        appendContentReviewDecision(
+                review, "generation-job:" + generationJobId, decision, reasonCode);
+    }
+
+    public void appendContentReviewDecision(
+            ContentReview review,
+            String correlationId,
+            String decision,
+            String reasonCode) {
         AuditRecord record = new AuditRecord()
                 .setActorUserId(review.getUserId())
                 .setProjectId(review.getProjectId())
@@ -194,9 +203,9 @@ public class AuditRecordWriter {
                 .setReasonCode(reasonCode)
                 .setPolicyVersion(review.getPolicyVersion())
                 .setCostRuleVersion(review.getPolicyVersion())
-                .setRequestId("generation-job:" + generationJobId)
-                .setCorrelationId("generation-job:" + generationJobId)
-                .setTraceId("generation-job:" + generationJobId);
+                .setRequestId(correlationId)
+                .setCorrelationId(correlationId)
+                .setTraceId(correlationId);
         persist(record);
     }
 

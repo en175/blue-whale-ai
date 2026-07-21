@@ -226,14 +226,15 @@ export function applyProductEvent(
       };
     } else if (
       event.event_type === "conversation.message_accepted" ||
+      event.event_type === "conversation.message_started" ||
+      event.event_type === "conversation.message_chunk_appended" ||
       event.event_type === "conversation.message_completed"
     ) {
       snapshot = {
         ...snapshot,
-        conversation_messages: upsertFact(
+        conversation_messages: upsertConversationMessage(
           snapshot.conversation_messages,
           event.payload,
-          "message_id",
         ),
       };
     } else if (
@@ -275,6 +276,29 @@ export function applyProductEvent(
     aggregateVersions,
     deleted,
   };
+}
+
+function upsertConversationMessage(
+  messages: Array<Record<string, unknown>>,
+  payload: Record<string, unknown>,
+): Array<Record<string, unknown>> {
+  const messageId = payload.message_id;
+  const streamId = payload.stream_id;
+  const hasMessageId =
+    typeof messageId === "number" || typeof messageId === "string";
+  const hasStreamId =
+    typeof streamId === "number" || typeof streamId === "string";
+  if (!hasMessageId && !hasStreamId) return messages;
+
+  const index = messages.findIndex(
+    (message) =>
+      (hasMessageId && String(message.message_id) === String(messageId)) ||
+      (hasStreamId && String(message.stream_id) === String(streamId)),
+  );
+  if (index < 0) return [...messages, { ...payload }];
+  return messages.map((message, current) =>
+    current === index ? { ...message, ...payload } : message,
+  );
 }
 
 function applyAssetEvent(

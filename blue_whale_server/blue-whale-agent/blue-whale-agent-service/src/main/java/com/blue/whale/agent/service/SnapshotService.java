@@ -89,7 +89,8 @@ public class SnapshotService {
         List<SnapshotResponse.ConversationMessageDto> messageDtos = messages.stream()
                 .map(message -> new SnapshotResponse.ConversationMessageDto(
                         message.getId(), message.getConversationId(), message.getAgentRunId(),
-                        message.getRole(), message.getContent(), message.getSequenceNo()))
+                        message.getRole(), message.getContent(), message.getSequenceNo(),
+                        message.getStreamId(), message.getStatus(), message.getLastChunkSequence()))
                 .toList();
         Map<Long, SnapshotResponse.UserInputRequestDto> activeRequestByRun = resolveActiveInputRequests(projectId, runs);
         List<SnapshotResponse.AgentRunDto> runDtos = runs.stream()

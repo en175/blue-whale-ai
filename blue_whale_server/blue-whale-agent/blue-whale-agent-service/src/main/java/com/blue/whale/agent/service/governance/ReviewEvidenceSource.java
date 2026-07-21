@@ -8,4 +8,16 @@ package com.blue.whale.agent.service.governance;
 public interface ReviewEvidenceSource {
 
     ReviewEvidence produce(ReviewEvidenceRequest request);
+
+    /**
+     * 只校验请求已携带的流式证据，或在受控环境生成确定性证据；该方法运行在产品短事务内，
+     * 实现不得执行网络 I/O。需要调用外部供应商的完整文本审核必须在事务外完成，再把最小化
+     * 证据交给产品控制面接纳（ADR-0017）。
+     */
+    default ReviewEvidence produceAgentText(
+            AgentTextReviewRequest request, String policyVersion) {
+        return ReviewEvidence.failed(
+                request.contentDigest(), "text", "output", policyVersion,
+                "unavailable", "agent-text-review-unavailable");
+    }
 }

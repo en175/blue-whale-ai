@@ -35,4 +35,12 @@ public class NonProductionAcceptanceReviewEvidenceSource implements ReviewEviden
                 properties.getPolicyVersion(),
                 EVIDENCE_REF);
     }
+
+    @Override
+    public ReviewEvidence produceAgentText(
+            AgentTextReviewRequest request, String policyVersion) {
+        return ReviewEvidence.pass(
+                request.contentDigest(), "text", ContentReview.DIRECTION_OUTPUT,
+                policyVersion, EVIDENCE_REF);
+    }
 }
