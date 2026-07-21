@@ -55,6 +55,41 @@ public final class ToolRegistry {
                         Set.of("tool_calling"),
                         null));
         registry.put(
+                new ToolKey("read_conversation_summary", 1),
+                new ToolDefinition(
+                        "read_conversation_summary",
+                        1,
+                        "read",
+                        RiskLevel.LOW,
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object",\
+                                 "additionalProperties":false}"""),
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object"}"""),
+                        parseBuiltinSchema(objectMapper, "{}"),
+                        Set.of("tool_calling"),
+                        null));
+        registry.put(
+                new ToolKey("read_conversation_history", 1),
+                new ToolDefinition(
+                        "read_conversation_history",
+                        1,
+                        "read",
+                        RiskLevel.LOW,
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object",\
+                                 "properties":{"after":{"type":"integer","minimum":1},"limit":{"type":"integer","minimum":1,"maximum":100}},\
+                                 "additionalProperties":false}"""),
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object"}"""),
+                        parseBuiltinSchema(objectMapper, "{\"limit\":{\"max\":100}}"),
+                        Set.of("tool_calling"),
+                        null));
+        registry.put(
                 new ToolKey("create_image_generation_job", 1),
                 new ToolDefinition(
                         "create_image_generation_job",

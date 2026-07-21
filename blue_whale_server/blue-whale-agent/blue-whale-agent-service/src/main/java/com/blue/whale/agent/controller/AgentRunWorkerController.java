@@ -5,15 +5,20 @@ import com.blue.whale.agent.model.dto.RunCommitResponse;
 import com.blue.whale.agent.model.dto.RunWorkResponse;
 import com.blue.whale.agent.model.dto.AssistantMessageStreamRequests;
 import com.blue.whale.agent.model.dto.AssistantMessageStreamResponse;
+import com.blue.whale.agent.model.dto.ConversationHistoryResponse;
+import com.blue.whale.agent.model.dto.ConversationSummaryResponse;
 import com.blue.whale.agent.service.AssistantMessageStreamService;
 import com.blue.whale.agent.service.AgentRunWorkerService;
+import com.blue.whale.agent.service.ConversationQueryService;
 import com.blue.whale.global.base.resp.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.validation.Valid;
@@ -24,6 +29,7 @@ import javax.validation.Valid;
 public class AgentRunWorkerController {
 
     private final AgentRunWorkerService workerService;
+    private final ConversationQueryService conversationQueryService;
     private final AssistantMessageStreamService assistantMessageStreamService;
 
     @PostMapping("/claim")
@@ -39,6 +45,22 @@ public class AgentRunWorkerController {
             @RequestHeader(value = "X-Worker-Id", required = false) String workerId,
             @RequestBody @Valid RunCommitRequest request) {
         return Result.ok(workerService.commit(runId, workerId, request));
+    }
+
+    @GetMapping("/{runId}/conversation/history")
+    public Result<ConversationHistoryResponse> conversationHistory(
+            @PathVariable Long runId,
+            @RequestHeader(value = "X-Worker-Id", required = false) String workerId,
+            @RequestParam(value = "after", required = false) Integer after,
+            @RequestParam(value = "limit", required = false) Integer limit) {
+        return Result.ok(conversationQueryService.history(runId, workerId, after, limit));
+    }
+
+    @GetMapping("/{runId}/conversation/summary")
+    public Result<ConversationSummaryResponse> conversationSummary(
+            @PathVariable Long runId,
+            @RequestHeader(value = "X-Worker-Id", required = false) String workerId) {
+        return Result.ok(conversationQueryService.summary(runId, workerId));
     }
 
     @PostMapping("/{runId}/assistant-messages/start")

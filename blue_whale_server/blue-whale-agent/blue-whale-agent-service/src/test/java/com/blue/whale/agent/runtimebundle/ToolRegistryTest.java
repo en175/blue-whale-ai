@@ -18,6 +18,27 @@ class ToolRegistryTest {
     }
 
     @Test
+    void readConversationToolsRegisteredAsReadOnly() {
+        // IK2QBZ：两个对话读取直接工具须在发布期注册表登记为只读，否则 ToolGrant 发布校验
+        // 拒绝、Worker 侧闭包恒为死分支，端到端不通。
+        ToolDefinition summary = registry.find("read_conversation_summary", 1).orElseThrow();
+        assertThat(summary.effect()).isEqualTo("read");
+        assertThat(summary.riskLevel()).isEqualTo(RiskLevel.LOW);
+        assertThat(summary.generationCapabilityType()).isNull();
+        assertThat(summary.inputSchema().path("additionalProperties").asBoolean()).isFalse();
+
+        ToolDefinition history = registry.find("read_conversation_history", 1).orElseThrow();
+        assertThat(history.effect()).isEqualTo("read");
+        assertThat(history.riskLevel()).isEqualTo(RiskLevel.LOW);
+        assertThat(history.generationCapabilityType()).isNull();
+        assertThat(history.inputSchema().path("properties").has("after")).isTrue();
+        assertThat(history.inputSchema().path("properties").has("limit")).isTrue();
+        assertThat(history.inputSchema().path("properties").path("limit").path("maximum").asInt())
+                .isEqualTo(100);
+        assertThat(history.constraints().path("limit").path("max").asInt()).isEqualTo(100);
+    }
+
+    @Test
     void createImageGenerationJobIsRegisteredAsFirstSideEffectTool() {
         ToolDefinition def = registry.find("create_image_generation_job", 1).orElseThrow();
         assertThat(def.effect()).isEqualTo("side_effect");

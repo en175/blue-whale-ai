@@ -46,6 +46,7 @@ import com.blue.whale.global.exception.GlobalException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -61,6 +62,7 @@ import java.util.Set;
 import java.util.TreeMap;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class AgentRunWorkerService {
 
@@ -172,6 +174,9 @@ public class AgentRunWorkerService {
     @Transactional
     public RunCommitResponse commit(Long runId, String workerId, RunCommitRequest request) {
         requireWorker(workerId);
+        if (request.bundleEvidence() != null && !request.bundleEvidence().isEmpty()) {
+            log.info("AgentRun {} 提交 {} 条读取证据", runId, request.bundleEvidence().size());
+        }
         AgentRun run = agentRunMapper.selectForUpdate(runId);
         if (run == null) {
             throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");

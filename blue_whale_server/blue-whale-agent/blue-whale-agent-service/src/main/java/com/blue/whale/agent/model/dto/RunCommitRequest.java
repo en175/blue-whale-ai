@@ -27,7 +27,8 @@ public record RunCommitRequest(
         /** 资源读取证据（契约 §6 第 4 条）。Worker 随 commit 回传当次 Run 实际装载的 Bundle 资源摘要，
          * 与 {@code usage} 同通道：经 {@code requestDigest} 纳入幂等键，不改变既有 commit 语义、不落独立表。
          * 元素为 ReadEvidence（resource_id / revision / content_digest / token_estimate / origin），
-         * 不含资源正文或私有路径；enforcement-disabled 的测试 Run 不携带此字段。 */
+         * 不含资源正文或私有路径；enforcement-disabled 的测试 Run 不携带此字段。
+         * IK2QBZ：read_conversation_* 对话读取证据复用本通道（origin=conversation）。 */
         @JsonProperty("bundle_evidence") List<Map<String, Object>> bundleEvidence
 ) {
     public record CommitCheckpoint(

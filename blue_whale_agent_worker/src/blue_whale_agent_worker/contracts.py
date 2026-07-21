@@ -183,3 +183,21 @@ class RunGateway(Protocol):
         self, run_id: int, payload: dict[str, Any]
     ) -> None:
         """校验并完成 Assistant 消息流。"""
+
+
+class ConversationSource(Protocol):
+    """对话历史只读源（IK2QBZ）：Worker 经它按需回溯当前 Run 绑定的 Conversation。
+
+    JavaRunGateway 天然满足（duck-typed）。端点以 runId 为根，Project 范围由 run 绑定闭环。
+    """
+
+    def fetch_conversation_summary(self, run_id: int) -> Mapping[str, Any]:
+        """读取当前对话摘要（消息数 / 首末预览 / 时间范围）。"""
+
+    def fetch_conversation_history(
+        self,
+        run_id: int,
+        after: Optional[int] = None,
+        limit: int = 20,
+    ) -> Mapping[str, Any]:
+        """按 sequence_no 游标分页读取对话历史（升序）；after 为上一页 nextCursor。"""
