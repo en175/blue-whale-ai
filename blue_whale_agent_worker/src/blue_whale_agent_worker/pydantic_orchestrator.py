@@ -1,14 +1,21 @@
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Mapping
 
-from pydantic_ai import Agent, CallDeferred, DeferredToolRequests, DeferredToolResults
-from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai import (
+    Agent,
+    CallDeferred,
+    DeferredToolRequests,
+    DeferredToolResults,
+    RunContext,
+)
+from pydantic_ai.messages import ModelMessagesTypeAdapter, ToolCallPart
 from pydantic_ai.models import Model
 
 from .bundle.errors import BundleError
-from .bundle.loader import ContextLoader
+from .bundle.gate import ReadEvidence, ResourceGate
+from .bundle.loader import ContextLoader, LoadedContext
 from .bundle.source import BundleSource
-from .bundle.verifier import BundleVerifier
+from .bundle.verifier import BundleVerifier, VerifiedSnapshot
 from .contracts import (
     OrchestratorResult,
     ProposedAction,
@@ -60,6 +67,16 @@ def request_user_input(
     resume_binding 为不透明产品事实，回传给来源 AgentRun 用于多轮恢复。
     """
     raise CallDeferred
+
+
+def read_resource(ctx: RunContext[ResourceGate], resource_id: str) -> str:
+    """按发布快照固化的 resourceId 读取 on_demand 资源正文（受限、记账）。
+
+    Bundle 固有受限读取工具，独立于当次 ToolGrant（业务动作工具）：每个有 Bundle pin
+    的 Run 总注入，由 ResourceGate 做 digest 比对与双预算门，运行时不做路径 / 网络 /
+    跨 Bundle 寻址。
+    """
+    return ctx.deps.read(resource_id)
 
 
 @dataclass(frozen=True)
@@ -120,10 +137,12 @@ class PydanticAIOrchestrator:
         except Exception:
             return self._failure(work, "ORCHESTRATION_FAILED")
 
-    def _load_instructions(self, work: RunWork) -> str:
+    def _load_bundle(
+        self, work: RunWork
+    ) -> tuple[VerifiedSnapshot, LoadedContext]:
         # 生产路径：按 AgentRun 固定的 BundleVersion 拉取并校验快照，装载基础上下文
-        # 产出 instructions（契约 §6）。pin 缺失（enforcement-enabled=false 的测试环境）
-        # 视为配置错误 fail closed，不回退硬编码提示词。
+        # 产出 instructions + 活动基线 token + initial 读取证据（契约 §6）。pin 缺失
+        # （enforcement-enabled=false 的测试环境）视为配置错误 fail closed，不回退硬编码提示词。
         if (
             not work.bundle_version_id
             or not work.manifest_digest
@@ -134,18 +153,28 @@ class PydanticAIOrchestrator:
         verified = BundleVerifier(self._bundle_source).verify(
             work.bundle_version_id, work.manifest_digest
         )
-        return ContextLoader(self._bundle_source).load(
+        loaded = ContextLoader(self._bundle_source).load(
             verified, work.model_profile_id, work.model_profile_version
         )
+        return verified, loaded
 
     def _advance(self, work: RunWork) -> OrchestratorResult:
         self._validate_identity(work)
-        instructions = self._load_instructions(work)
+        verified, loaded = self._load_bundle(work)
+        # 受限资源读取闸门：持有校验通过的快照与基础上下文基线，承接 on_demand 读取、
+        # 双预算门、digest 比对与 ReadEvidence 记账（契约 §6 第 3 条 / IK2QBM）。
+        gate = ResourceGate(
+            verified,
+            self._bundle_source,
+            initial_tokens=loaded.initial_tokens,
+            initial_evidence=loaded.initial_evidence,
+        )
         agent = Agent(
             self._model,
             output_type=(str, DeferredToolRequests),
-            instructions=instructions,
-            tools=self._build_tools(work),
+            instructions=loaded.instructions,
+            tools=(*self._build_tools(work), read_resource),
+            deps_type=ResourceGate,
         )
         if work.checkpoint is None:
             prompt = next(
@@ -153,11 +182,14 @@ class PydanticAIOrchestrator:
                 for message in reversed(work.messages)
                 if message["role"] == "user"
             )
-            run_result = agent.run_sync(prompt)
+            run_result = agent.run_sync(prompt, deps=gate)
         else:
             self._validate_checkpoint(work)
             payload = work.checkpoint.opaque_payload
             messages = ModelMessagesTypeAdapter.validate_python(payload["messages"])
+            # 已读账本不从 checkpoint 复制（契约 §6：checkpoint 不嵌 Bundle 内容），
+            # 而是从消息历史中的 read_resource 调用确定性地重建，重建后仍受 active 门约束。
+            self._replay_read_resource(messages, gate)
             restored_calls = payload["pending_calls"]
             if restored_calls:
                 # 恢复闭合 checkpoint 消息历史中的 deferred ToolCallPart：动作 pending 的
@@ -197,6 +229,7 @@ class PydanticAIOrchestrator:
                 run_result = agent.run_sync(
                     message_history=messages,
                     deferred_tool_results=DeferredToolResults(calls=deferred_calls),
+                    deps=gate,
                 )
             else:
                 # 无 pending 恢复：checkpoint 消息历史 + 最新用户消息继续自然对话。
@@ -205,7 +238,7 @@ class PydanticAIOrchestrator:
                     for message in reversed(work.messages)
                     if message["role"] == "user"
                 )
-                run_result = agent.run_sync(answer, message_history=messages)
+                run_result = agent.run_sync(answer, message_history=messages, deps=gate)
 
         actions: tuple[ProposedAction, ...] = ()
         pending_calls: tuple[dict[str, str], ...] = ()
@@ -295,6 +328,37 @@ class PydanticAIOrchestrator:
                 "requests": usage.requests,
             },
             input_request=input_request,
+            bundle_evidence=self._evidence_payload(gate.evidence()),
+        )
+
+    @staticmethod
+    def _replay_read_resource(messages: Any, gate: ResourceGate) -> None:
+        """checkpoint 恢复时从消息历史确定性重建 read_resource 已读集合。
+
+        已读账本不进 checkpoint；恢复时从历史中的 read_resource 工具调用重建，重建后
+        集合继续受 activeContextMaxTokens 约束，恢复路径与首次读取走同一预算逻辑，
+        不构成侧门。
+        """
+        for message in messages:
+            for part in message.parts:
+                if isinstance(part, ToolCallPart) and part.tool_name == "read_resource":
+                    resource_id = part.args_as_dict().get("resource_id")
+                    if isinstance(resource_id, str):
+                        gate.register_from_history(resource_id)
+
+    @staticmethod
+    def _evidence_payload(
+        evidence: tuple[ReadEvidence, ...]
+    ) -> tuple[dict[str, Any], ...]:
+        return tuple(
+            {
+                "resource_id": item.resource_id,
+                "revision": item.revision,
+                "content_digest": item.content_digest,
+                "token_estimate": item.token_estimate,
+                "origin": item.origin,
+            }
+            for item in evidence
         )
 
     def _build_tools(self, work: RunWork) -> tuple:
@@ -303,7 +367,8 @@ class PydanticAIOrchestrator:
         只读 effect → 直接工具（handler 直接返回结果）；副作用 effect → deferred 工具
         （handler raise CallDeferred）。未列出的工具对模型完全不可见。grant 与实现目录的
         tool_name / registry_version / effect 任一不符 fail closed，并入现有契约归一化通道
-        （ORCHESTRATOR_CONTRACT_MISMATCH），不泄露内部细节。
+        （ORCHESTRATOR_CONTRACT_MISMATCH），不泄露内部细节。``read_resource`` 不经 ToolGrant，
+        作为 Bundle 固有受限读取工具在 ``_advance`` 中单独注入。
         """
         tools: list = []
         for grant in work.tool_grants:

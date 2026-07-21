@@ -123,6 +123,8 @@ class OrchestratorResult:
     usage: Optional[Mapping[str, Any]] = None
     error: Optional[Mapping[str, str]] = None
     input_request: Optional[UserInputRequestProposal] = None
+    # 资源读取证据（契约 §6 第 4 条）：随 commit 回传 Java，与 usage 指标同通道。
+    bundle_evidence: Optional[Sequence[Mapping[str, Any]]] = None
 
     def to_commit_payload(
         self, work: RunWork, assistant_message_stream_id: Optional[str] = None
@@ -143,6 +145,11 @@ class OrchestratorResult:
             "error": dict(self.error) if self.error is not None else None,
             "user_input_request": (
                 self.input_request.to_payload() if self.input_request is not None else None
+            ),
+            "bundle_evidence": (
+                [dict(entry) for entry in self.bundle_evidence]
+                if self.bundle_evidence is not None
+                else None
             ),
         }
         if assistant_message_stream_id is not None:
