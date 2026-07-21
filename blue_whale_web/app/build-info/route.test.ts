@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { GET } from "./route";
 
-describe("/__build_info route（IK2BCH）", () => {
+describe("/build-info route（IK2BCH）", () => {
   beforeEach(() => {
     delete process.env.GIT_COMMIT;
     delete process.env.BUILD_TIME;

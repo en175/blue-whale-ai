@@ -12,6 +12,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e-fullstack",
+  // 只收 *.spec.ts；_fixtures 下的 vitest 单测（*.test.ts）归 `npm run test`，不进 Playwright
+  testMatch: "**/*.spec.ts",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,

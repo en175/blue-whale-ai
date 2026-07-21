@@ -75,6 +75,9 @@ services:
       GENERATION_TOS_ENDPOINT: ""
       GENERATION_TOS_BUCKET: ""
       SEEDANCE_CALLBACK_BASE_URL: ""
+      # 验收栈没有激活 BundleVersion 种子（V10 只建表不播种）：关闭运行钉版强制，
+      # 与 application-test.yml（enforcement-enabled: false）一致，否则对话接纳 404
+      RUNTIME_BUNDLE_ENFORCEMENT_ENABLED: "false"
       # 浏览器经 web(3100) 访问 API 时 Origin 为 localhost:3100，需显式放行（默认仅 3000）
       AGENT_CORS_ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:3100"
     ports: !reset []

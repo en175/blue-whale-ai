@@ -7,16 +7,13 @@
  *
  * 断言权威：UI（SSE/快照投影）+ Project Snapshot API（经 Web rewrite → Gateway）。
  * 本套件由 scripts/run-mvp-acceptance.sh 驱动（隔离 Compose 全栈，Fake Provider，零真实费用）。
+ * 串行套件共享同一验收库：本 spec 在私有 Project 内运行（createProject + ?project= 进入），
+ * 与其他 spec 的 Job/Asset/画布节点互不可见（IK2BDN 引入的隔离约定）。
  */
-import {
-  expect,
-  request,
-  test,
-  type APIRequestContext,
-  type Page,
-} from "@playwright/test";
+import { expect, request, test, type Page } from "@playwright/test";
 import {
   bearerClient,
+  createProject,
   fetchSnapshot,
   loginViaApi,
   seedSession,
@@ -39,12 +36,6 @@ async function openChatPanel(page: Page): Promise<void> {
 async function sendChatMessage(page: Page, text: string): Promise<void> {
   await page.locator(COMPOSER).fill(text);
   await page.locator(SEND_BUTTON).click();
-}
-
-async function listProjectIds(api: APIRequestContext): Promise<number[]> {
-  const res = await api.get("/api/projects");
-  const body = (await res.json()) as { data: Array<{ id: number }> };
-  return body.data.map((p) => p.id);
 }
 
 function canvasNodePositions(
@@ -75,12 +66,9 @@ test("MVP 全栈闭环：创作澄清→成功生成→拖动刷新恢复→失�
   let firstAssetId = "";
 
   await test.step("进入 Project：服务端认可的合成测试认证态，API 全经 Gateway", async () => {
-    await page.goto("/canvas");
-    // 空库时前端自动创建「未命名项目」；等后端项目出现并以其为权威
-    await expect
-      .poll(async () => (await listProjectIds(api)).length, { timeout: 30_000 })
-      .toBeGreaterThan(0);
-    projectId = (await listProjectIds(api))[0];
+    // 串行套件共享验收库：本 spec 使用私有 Project（其他 spec 的 Job/节点不会破坏全局计数断言）
+    projectId = await createProject(api, `IK1NS2 MVP 闭环 ${Date.now()}`);
+    await page.goto(`/canvas?project=${projectId}`);
     await openChatPanel(page);
   });
 

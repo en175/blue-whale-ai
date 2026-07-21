@@ -22,7 +22,7 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 # IK2BCH 构建身份：构建期注入源码 commit 与时间，通过 LABEL + ENV 暴露，
-# 供 docker inspect 与 /__build_info 端点核对运行制品版本（照搬 agent-service IK1W1E 范式）。
+# 供 docker inspect 与 /build-info 端点核对运行制品版本（照搬 agent-service IK1W1E 范式）。
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
 LABEL blue-whale.git-commit="${GIT_COMMIT}" blue-whale.build-time="${BUILD_TIME}"
