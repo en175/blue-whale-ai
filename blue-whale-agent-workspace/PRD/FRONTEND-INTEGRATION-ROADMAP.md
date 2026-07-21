@@ -4,7 +4,9 @@
 > **同批 PRD**：[AGENT-CONVERSATION-PRD.md](./AGENT-CONVERSATION-PRD.md) · [BACKEND-API-PRD.md](./BACKEND-API-PRD.md) · [FRONTEND-SKILL-PANEL-PRD.md](./FRONTEND-SKILL-PANEL-PRD.md)
 
 > 跨 session 的进度索引。新 session 读此文件即可接上,不依赖对话记忆。
-> 最后更新:2026-07-06
+> 最后更新:2026-07-21(重扫 `blue_whale_web` 前端,校准基线 + 模块标记。2026-07-06 版基线「纯 SPA 零 fetch」等 8 条全过时,已重写)
+>
+> **⚠️ 读前须知**:本索引的「前端现状基线」和模块标记已于 2026-07-21 对齐代码现实。但**决策记录(决策 1-21)是历史沉淀,保留原貌**,不随代码推进改动——需要看「现在做到哪」看模块清单的状态标记,不要从决策记录推断实现进度。
 
 ## 怎么用这份文件
 
@@ -14,16 +16,21 @@
 - 拍板的决策汇总在文末「已锁定决策」
 - 写新模块 PRD 时参照 `skill/references/frontend_canvas_interaction_contract.md` 的颗粒度(行为契约,不写实现)
 
-## 前端现状基线(供后续模块引用,不重复扫)
+## 前端现状基线(2026-07-21 重扫 `blue_whale_web`,供后续模块引用)
 
-- 纯前端 SPA,零 `fetch`/`axios`/`WebSocket`/`EventSource`/Server Action/API Route
-- 零 `localStorage`/`sessionStorage`,唯一跨页通道是 URL `?prompt=`
-- 三块 state 各锁组件:Canvas nodes(`app/canvas/page.tsx:31`)、对话 messages(`AgentChatPanel.tsx:33`)、dock 参数(`dock/BottomDock.tsx:34-44`)——无全局 store
-- 模型目录硬编码 4 处(且不一致):`components/AgentComposer.tsx`、`app/canvas/_canvas/components/AgentChatPanel.tsx`、`app/canvas/_canvas/constants.ts`、`components/ImageModelSettingsPopover.tsx`
-- **BottomDock 是断头路**:无 `onGenerate` 回调
-- TopBar 新建/打开/重命名项目三个按钮全空 onClick
-- 首页"开始生成"裸 `router.push('/canvas?prompt=...')`,参数全丢
-- 上传走 `FileReader.readAsDataURL` → base64(`app/canvas/page.tsx:174-192`)
+> 旧版(2026-07-06)写「纯 SPA 零 fetch / 零 localStorage / BottomDock 断头路」等——**全过时**。下方为现实。
+
+- **网络层已全面接后端**:`fetch` 原生(无 axios/EventSource/WebSocket)。两套 client 并存——匿名 `apiFetch`(`lib/api/client.ts`,自动附 `X-User-Id`)+ 双 token `apiRequest`(`lib/api-client.ts`,401 自动刷新);另有少量直 `fetch` 绕过。业务错误体 `{error:{code,message,detail}}` → `ApiError`(`lib/api/errors.ts`)
+- **SSE 已接(仅画布直生链路)**:`streamJob`(`app/canvas/_canvas/api/generation.ts:216-241`)走 fetch+ReadableStream 消费 `/api/agent/jobs/{id}/stream`(非原生 EventSource,要带 token)。**AgentChatPanel 仍走本地 mock**(`buildMockReplyForMode`,`AgentChatPanel.tsx:224`),Agent 对话链路零接后端(见 `AGENT-CONVERSATION-PRD.md` 顶部警示)
+- **localStorage 多 key**:`bw-user-id` / `bw-user` / `bw-access-token` / `bw-refresh-token` / `bw-last-phone` / `bw-phone-id-map` / `bw-history`
+- **全局 store**(无 zustand):`AuthProvider`(`app/layout.tsx:20` 全局)+ `useCanvasProjects`(`projectReducer` 单一真相源,nodes/messages 已并入 project 粒度,`page.tsx:104-105`)+ `NodeActionsContext`(`CanvasNodes.tsx:119`)。三块 state 不再各锁组件
+- **模型目录已收敛后端拉**:`getImageModels()`/`getVideoModels()`(Promise)→ `/catalog`(`lib/api/endpoints.ts:61`)。四处硬编码全清;`constants.ts:4` 只剩宽高比常量(平台固定集合,非模型)
+- **BottomDock onGenerate 已接通**:`BottomDock.tsx:56` 声明 → `page.tsx:811` 注入 `handleGenerate` → `generateImage/createVideoJob/streamJob` → `/projects/{id}/generate`(`lib/api/endpoints.ts:70`)
+- **TopBar 项目 CRUD 全接通**:`onCreate/onRename/onDelete`(`TopBar.tsx:63/73/292`)→ `useCanvasProjects`(`createProjectAction` POST `/projects`、保存 PUT `/api/agent/canvases/{id}`)
+- **首页"开始生成"跳 `/generate`**(非 `/canvas`),`?prompt` 被 `/generate` 页消费(`AgentComposer.tsx:265`);**但未建 Project**——决策 7「首页输入→立即建 Project→跳画布」**首页侧未落地**
+- **上传已换 multipart 直传**:`uploadAsset`(`lib/assets.ts:26-42`)→ `POST /api/agent/assets/upload`,返回 TOS 永久 url。base64 已废
+- **身份已是完整登录系统**(非匿名):手机号+验证码 / 账号+密码,双 token 自动刷新(`components/auth/` 18+ 文件:AuthContext/LoginModal/AccountModal/RebindPhoneModal/UserMenu...)。未登录踢回首页(`page.tsx:75-76`)。另存匿名 `userId`(UUID→`X-User-Id`)兜底
+- **Job 刷新恢复已落地**:`recover.ts`(processing job → 占位 patch,稳定 id 去重)+ `useJobStatus`(3s 轮询 + 10min 兜底超时)+ `page.tsx:504-562` 接 `listJobs({status:"processing"})` 续 SSE/轮询。MVP 限制:多 video 并行只续最后一个
 
 ## 模块清单
 
@@ -37,55 +44,48 @@
 ### ✅ 2. BottomDock 直生闭环(已完成 — 决策 1-6+13-14)
 - **产出**:Dock = 纯参数透传(零优化零 understanding),产物落画布不进对话流;Agent 通过 `@` 引用画布素材;Image-to-Video 两边都能做(Dock 直传 Provider / Agent understanding+优化)。详见文末「已锁定产品决策」。
 - **已锁定的原待拍板**:直生只上画布不进对话流;并行入口允许(同一 Project 两条路径可并行 Job);project_id 由模块 5 解决(进画布即有)。
-- **实现侧待办**:`BottomDock.tsx` 的 `onGenerate` 接通 `POST /generate`(前端代码,文档侧已闭合)。
+- **✅ 实现已接通(2026-07-21)**:`BottomDock.tsx:56` `onGenerate` → `page.tsx:811` `handleGenerate` → `generateImage/createVideoJob/streamJob` → `/projects/{id}/generate`。原"实现侧待办"已闭合。
 - **关联**:`BACKEND-API-PRD.md` §5.4 / §6;`generation_route_decision.md`;`app/canvas/_canvas/components/dock/BottomDock.tsx`
 
-### 🔲 3. SSE 事件 → 前端渲染映射表(P0)
-- **缺口**:`AGENT-CONVERSATION-PRD.md` §3 列了 SSE 全事件序列,前端如何消费/断线兜底/事件→UI 翻译表未定义。现有 contract 只写"消息怎么展示",没写"事件流怎么消费"
+### 🟡 3. SSE 事件 → 前端渲染映射表(P0)
+- **2026-07-21 现实**:画布直生链路 SSE 已通(`streamJob` 消费 `/api/agent/jobs/{id}/stream`,事件→onImage/onVideo/onProgress/onDone)。**Agent 对话链路 SSE 仍未接**——`AgentChatPanel` 走 `buildMockReplyForMode` 本地 mock,因后端 agent turn 整条零实现(见 `AGENT-CONVERSATION-PRD.md` 顶部警示)
+- **剩余缺口**:Agent 对话侧 SSE 全事件序列(visible_reasoning/message/canvas_update/job_started/job_progress/job_done/turn_done)→ UI 翻译表、断线兜底、事件叠加。后端 agent turn 落地后才有意义
 - **待 PM 拍板**:
-  - 每种事件(visible_reasoning/message/canvas_update/job_started/job_progress/job_done/turn_done)触发什么 UI 变化
+  - 每种事件触发什么 UI 变化
   - 事件乱序/丢失怎么办
-  - SSE 断线后 `GET /jobs/{id}` 轮询兜底的频率和退出条件
+  - SSE 断线后 `GET /jobs/{id}` 轮询兜底的频率和退出条件(直生侧已用 3s 轮询 + 10min 兜底,可复用)
   - 一条 turn 内多个 canvas_update 怎么叠加到画布
 - **关联**:`AGENT-CONVERSATION-PRD.md` §3 / §5.2;`BACKEND-API-PRD.md` §8;`skill/references/frontend_canvas_interaction_contract.md`
 
-### 🔲 4. 生成任务前端生命周期 / "刷新不丢"(P0)
-- **缺口**:后端 `active_jobs` 暴露进行中任务,前端表现未定义
-- **待 PM 拍板**:
-  - generating 卡显示进度条还是只显示"生成中"
-  - 刷新回来看到 generating 卡要不要续推 SSE
-  - 任务失败时画布卡 vs 对话各显示什么文案
-  - 多 Job 并行时阶段状态怎么呈现
-- **关联**:`BACKEND-API-PRD.md` §8 / §10(验收第 2 条);`AGENT-CONVERSATION-PRD.md` §5.2 / §7
+### 🟡 4. 生成任务前端生命周期 / "刷新不丢"(P0)
+- **2026-07-21 现实**:核心已落地。`recover.ts` 把 processing job 映射成画布占位(稳定 id `job-{jobId}` 去重);`useJobStatus` 3s 轮询 + 10min 兜底超时;`page.tsx:504-562` 接 `listJobs({status:"processing"})` 续 SSE/轮询
+- **已知 MVP 限制**:多 video processing 并行只续最后一个(`page.tsx:515` 自承);图片/视频失败文案未按错误码区分(属模块 9)
+- **剩余待 PM 拍板**:
+  - 多 Job 并行阶段状态呈现(现仅续最后一个)
+  - 任务失败画布卡 vs 对话各显示什么文案(对接模块 9 错误码)
+- **关联**:`BACKEND-API-PRD.md` §8 / §10(验收第 2 条);`AGENT-CONVERSATION-PRD.md` §5.2 / §7;`app/canvas/_canvas/recover.ts`;`app/canvas/_canvas/hooks/useJobStatus.ts`
 
 ### ✅ 5. Project 管理 UX(已完成 — 决策 7-9)
 - **产出**:首页输入 → 立即建 Project(带 `initial_prompt`)→ 跳画布;`initial_prompt` 预填 AgentChatPanel(不自动开跑);自动保存(结构 2s / viewport 5s / beforeunload flush / 多 tab 不处理);列表 updated_at DESC;删除二次确认;双击重命名;新建入口(首页 + 列表页空 project)。详见文末「已锁定产品决策」。
-- **实现侧待办**:TopBar 三按钮 + 首页跳转接通 `POST /projects`(前端代码,文档侧已闭合)。
+- **✅ TopBar 侧已接通(2026-07-21)**:`onCreate/onRename/onDelete`(`TopBar.tsx:63/73/292`)→ `useCanvasProjects`(POST `/projects`、PUT `/api/agent/canvases/{id}`)。自动保存 beforeunload flush 已实现
+- **⚠️ 首页侧未落地**:决策 7「首页输入→立即建 Project→跳画布」**首页入口未接**——`AgentComposer.tsx:265` 仍 `router.push('/generate?prompt=…')`,首页与 Project 体系脱钩(`/generate` 消费 prompt 但不建 Project)
 - **关联**:`BACKEND-API-PRD.md` §5.5;`app/canvas/_canvas/components/TopBar.tsx`;`components/AgentComposer.tsx`
 
-### 🔲 6. 匿名身份与设备识别(P0)
-- **缺口**:contract 完全没提"用户是谁"
-- **待 PM 拍板**:
-  - UUID 何时生成(首次进站?首次点生成?)
-  - 用户能否看到自己的身份
-  - 清缓存后 Project 算谁的;P2 登录时匿名数据怎么迁移
-- **关联**:`BACKEND-API-PRD.md` §4 / §5.1 / §11(风险)
+### ✅ 6. 身份与登录系统(已完成 — 范围超出原 P0 设想)
+- **2026-07-21 现实**:已落地**完整登录系统**(原 P0 只设想"匿名身份与设备识别")。手机号+验证码 / 账号+密码双入口,双 token(access+refresh)自动刷新,`components/auth/` 18+ 文件:AuthContext / LoginModal / AccountModal / RebindPhoneModal / ProfileModal / HistoryModal / UserMenu / authStorage / userId / phoneValidation...
+- **鉴权链路**:`lib/api-client.ts` `apiRequest` 带 `Authorization: Bearer`,401 自动刷新重试;`subscribeToAuthFailure` 全局兜底;`app/layout.tsx:20` 全局 `<AuthProvider>`;`app/canvas/page.tsx:75-76` 未登录踢回首页+弹登录
+- **两套 userId 并存**:匿名 UUID(`lib/api/userId.ts`→`X-User-Id` header,PRD §4 兜底)+ 登录态 phone 映射(`components/auth/userId.ts`→`bw-phone-id-map`)
+- **关联**:`BACKEND-API-PRD.md` §4 / §5.1 / §11(风险);`components/auth/`
 
-### 🔲 7. 资产上传交互契约(P0)
-- **缺口**:presign 直传的 UX 未定义,现状是 base64
-- **待 PM 拍板**:
-  - 上传中画布显示什么(占位卡?进度?)
-  - 上传失败怎么重试、完成前能否关页面
-  - 上传是独立动作还是嵌进生成流程(对话里说"用这张图"怎么触发上传)
-- **关联**:`BACKEND-API-PRD.md` §5.2 / §9 第 3 条(上传);`app/canvas/page.tsx:174-192`
+### 🟡 7. 资产上传交互契约(P0)
+- **2026-07-21 现实**:上传核心已通——`uploadAsset`(`lib/assets.ts:26-42`)multipart 直传 `POST /api/agent/assets/upload`,返回 TOS 永久 url。base64 已废,`page.tsx:302/323/356` 三处接通
+- **剩余缺口(UX 层未定)**:上传中画布显示(占位卡?进度?)、失败重试、完成前关页面、上传嵌进对话流("用这张图"怎么触发)——这些 PRD 层未定
+- **关联**:`BACKEND-API-PRD.md` §5.2 / §9 第 3 条(上传);`lib/assets.ts`;`app/canvas/page.tsx`
 
-### 🔲 8. 参数目录 catalog 内容与降级(P0)
-- **缺口**:4 处硬编码要收敛到 `GET /api/catalog`,但目录内容来源和降级策略未定
-- **待 PM 拍板**:
-  - P0 必须有的模型/比例/分辨率权威清单
-  - 目录拉取失败时兜底硬编码还是禁用生成
-  - 后端新增模型时前端怎么动态展示、积分 multiplier 怎么显示
-- **关联**:`BACKEND-API-PRD.md` §5.3 / §10(验收第 4 条)
+### ✅ 8. 参数目录 catalog 内容与降级(P0)
+- **2026-07-21 现实**:目录拉取已收敛——`getImageModels()`/`getVideoModels()`(Promise)→ `/catalog`(`lib/api/endpoints.ts:61`),四处硬编码全清。`constants.ts:4` 只剩宽高比常量(平台固定集合)
+- **剩余缺口**:降级策略待定——目录拉取失败时,前端现行为是清缓存允许重试(`ImageModelSettingsPopover.tsx:53`),未定「兜底硬编码 vs 禁用生成」;积分 multiplier 展示未定
+- **关联**:`BACKEND-API-PRD.md` §5.3 / §10(验收第 4 条);`lib/api/endpoints.ts`;`app/canvas/_canvas/api/generation.ts`
 
 ### 🔲 9. 错误码 → 用户文案映射(P0)
 - **缺口**:后端 §9 第 4 条列 5 种错误码,前端每种显示什么没说
@@ -126,7 +126,7 @@
 - Skill 面板 P0;创建 tab 隐藏;库 ⊃ 我的;引用非副本(跟随更新);Use 一次性不改 auto;auto 候选池后端自读不前端传;forced > auto > 未指定。
 - **Agent 对话(2026-07-05 锁定,2026-07-06 收口)**:P0 按两入口落地——Dock 直生负责 Direct Image / Direct Video / Image-to-Video;Agent 对话按 `decision_branch` 覆盖 lightweight / full_canvas / prompt_only / revise / product_switch / confirm / consult 等分支。前端无分阶段,过程消息(brief/skill/storyboard/review/visible_reasoning)P0 全展示(文字气泡),P1 仅可选美化;新增 `optimized_prompt_preview` 消息类型(用户友好版,可展示),区别于原始 `optimized_prompt`(发给 Provider,永不进 message);`forced_skill_id` 仅决定 skill 选择那一步,不锁后续 Stage;Agent turn 结束后未完成 Job 由 `active_jobs` + 独立 `/api/jobs/{id}/stream` 接管,重连失败再轮询 `GET /api/jobs/{id}`。
 - **产品切换 P0 边界(2026-07-05 锁定,2026-07-13 更新)**:P0 已支持同对话内**多产品历史**切换(`content_versions` 从 P1 提 P0,见 `PRODUCT-HISTORY-PRD.md`);容忍但有界,到阈值(意向 3)引导新 project;完全不同品类强推新 project;切回不主动推进要追问。不说替换/覆盖,不暴露 workflow / stage / superseded。对话压缩(`conversation_summary`)、版本索引(`version_index`)仍放 P1 评估。
-- 错误码、目录、身份、上传、Job 生命周期等模块的决策**尚未锁定**(Project、直生于 2026-07-06 锁定,见下)。
+- 错误码(模块 9)决策**尚未锁定**;目录(模块 8)/身份(模块 6)/上传(模块 7)/Job 生命周期(模块 4)已由前端实现事实上落地(见各模块 2026-07-21 现实)。Project、直生于 2026-07-06 锁定,见下。
 
 ### 2026-07-06 锁定:Dock 直生 ↔ Agent 编排重构(决策 1-15)
 
@@ -192,11 +192,18 @@
 
 ## 建议推进顺序
 
-P0 主链路优先:**模块 5(Project)→ 模块 2(BottomDock)→ 模块 3(SSE 映射)→ 模块 4(Job 生命周期)→ 模块 7(上传)→ 模块 6(身份)→ 模块 8(目录)→ 模块 9(错误码)**。Project 和 BottomDock 强耦合(直生需要 project_id),建议先一起定。
+**2026-07-21 现状**:模块 2/6/8 已完成,模块 4/7 核心已通剩 UX/边界,模块 5 TopBar 闭合但首页侧未落地,模块 3 直生侧 SSE 通、Agent 侧卡后端 turn。
+
+**剩余待办(按依赖)**:
+1. **模块 5 首页侧**——首页输入接 POST /projects 立即建 Project(决策 7 未落地,纯前端工作,无后端依赖)
+2. **模块 9 错误码 → 文案**——后端错误码已就绪,前端映射表 + 重试入口待定
+3. **模块 4 收尾**——多 Job 并行呈现 + 失败文案(对接模块 9)
+4. **模块 7 上传 UX**——占位卡/进度/重试/对话流嵌入
+5. **模块 3 Agent 对话 SSE**——卡后端 agent turn 落地(见 `AGENT-CONVERSATION-PRD.md`),turn 通了才有意义
 
 ## 不要做的事
 
-- 不主动改 `blue_whale/` 前端代码(用户没要求)
+- 不主动改 `blue_whale_web/` 前端代码(用户没要求)
 - 不读/改 `deer-flow/`
 - 不用 `gh` CLI;Gitee MCP 当前 token 访问该仓库 404,本任务是本地文档工作
 - 不重写已完成的模块 1 三份产出
