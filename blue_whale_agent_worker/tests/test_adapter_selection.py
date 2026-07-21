@@ -6,6 +6,7 @@ from blue_whale_agent_worker.adapters import create_orchestrator
 from blue_whale_agent_worker.fake_orchestrator import FakeOrchestrator
 from blue_whale_agent_worker.pydantic_orchestrator import PydanticAIOrchestrator
 from test_pydantic_orchestrator import (
+    _bundle_source,
     image_proposal_model,
 )
 
@@ -16,7 +17,7 @@ class AdapterSelectionTest(unittest.TestCase):
 
     def test_fixed_production_adapter_requires_an_injected_model(self) -> None:
         orchestrator = create_orchestrator(
-            "pydantic-ai", FunctionModel(image_proposal_model)
+            "pydantic-ai", FunctionModel(image_proposal_model), _bundle_source()
         )
 
         self.assertIsInstance(orchestrator, PydanticAIOrchestrator)

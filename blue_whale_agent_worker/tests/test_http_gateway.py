@@ -207,6 +207,36 @@ class BundleFetchContractTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             gateway.fetch_snapshot("missing_version")
 
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_fetch_resource_get_url_worker_header_and_resource_body(
+        self, mocked_urlopen
+    ) -> None:
+        resource = {
+            "resource_id": "role_main",
+            "revision": 1,
+            "kind": "role_document",
+            "content_digest": "sha256:" + "0" * 64,
+            "content": "# Role\n",
+        }
+        mocked_urlopen.return_value = FakeResponse(
+            json.dumps({"code": 200, "data": resource}).encode("utf-8")
+        )
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+
+        fetched = gateway.fetch_resource("pin_agent_v2_0_0", "role_main")
+
+        request = mocked_urlopen.call_args.args[0]
+        self.assertEqual(
+            "http://java.test/internal/runtime-bundles/versions/pin_agent_v2_0_0/resources/role_main",
+            request.full_url,
+        )
+        self.assertEqual("GET", request.method)
+        self.assertEqual("worker-1", request.get_header("X-worker-id"))
+        self.assertIsNone(request.data)  # GET 无 body
+        # 单资源响应为 snake_case metadata + content
+        self.assertEqual("# Role\n", fetched["content"])
+        self.assertEqual("role_main", fetched["resource_id"])
+
 
 if __name__ == "__main__":
     unittest.main()
