@@ -1,5 +1,6 @@
 from pydantic_ai.models import Model
 
+from .bundle.cache import CachingBundleSource, default_cache_dir
 from .bundle.source import BundleSource
 from .contracts import OrchestratorPort
 from .fake_orchestrator import FakeOrchestrator
@@ -18,5 +19,8 @@ def create_orchestrator(
             raise ValueError("pydantic-ai Adapter 需要显式模型配置")
         if bundle_source is None:
             raise ValueError("pydantic-ai Adapter 需要 BundleSource")
-        return PydanticAIOrchestrator(model, bundle_source)
+        # 内容寻址磁盘缓存装饰层（IK2QBP）：同内容同版本只拉一次，进程重启后命中本地缓存。
+        # Verifier / ContextLoader / ResourceGate 均不感知缓存存在（契约不变）。
+        caching_source = CachingBundleSource(bundle_source, default_cache_dir())
+        return PydanticAIOrchestrator(model, caching_source)
     raise ValueError(f"未知编排 Adapter: {adapter}")
