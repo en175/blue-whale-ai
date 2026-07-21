@@ -232,6 +232,49 @@ class ConversationAgentRunIT {
     }
 
     @Test
+    void bundleEvidenceEntersCommitIdempotency() throws Exception {
+        // IK2QBQ：资源读取证据随 commit 回传 Java（契约 §6 第 4 条），与 usage 同通道——
+        // 证据经 requestDigest 纳入幂等键，不改变既有 commit 语义。带证据的提交被接纳，
+        // 同 commit_id 证据漂移或缺失则判 IDEMPOTENCY_KEY_REUSED。
+        Project project = new Project().setOwnerId(10L).setName("bundle-evidence-commit");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "evidence-message-key", "生成一张蓝鲸海报")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        String evidenceA = "\"bundle_evidence\":[{\"resource_id\":\"skill_root\",\"revision\":1,"
+                + "\"content_digest\":\"sha256:aaaa\",\"token_estimate\":32,\"origin\":\"on_demand\"}]";
+        String evidenceB = "\"bundle_evidence\":[{\"resource_id\":\"skill_root\",\"revision\":1,"
+                + "\"content_digest\":\"sha256:bbbb\",\"token_estimate\":32,\"origin\":\"history\"}]";
+        String bodyA = commitBodyWithEvidence(project.getId(), work, evidenceA);
+
+        // 带证据的 commit 被 Java 接收并正常推进生图动作
+        postCommit(runId, bodyA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.generation_job_id").isNumber());
+        // 同 commit_id 同证据 → 幂等成功
+        postCommit(runId, bodyA).andExpect(status().isOk());
+        // 同 commit_id 证据内容变 → 冲突：证据纳入 requestDigest 幂等键
+        postCommit(runId, commitBodyWithEvidence(project.getId(), work, evidenceB))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(100302));
+        // 同 commit_id 去掉证据 → 冲突：证据有无同样影响摘要
+        postCommit(runId, commitBodyWithEvidence(project.getId(), work, null))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(100302));
+        assertThat(count("run_commits", "agent_run_id", runId)).isEqualTo(1);
+    }
+
+    private String commitBodyWithEvidence(Long projectId, JsonNode work, String bundleEvidenceJson) {
+        // 复用 validCommitBody：仅替换 commit_id，并在 actions 数组后追加可选证据段。
+        String base = validCommitBody(projectId, work)
+                .replace("\"commit_id\":\"commit-1\"", "\"commit_id\":\"commit-evidence\"");
+        if (bundleEvidenceJson == null || bundleEvidenceJson.isBlank()) {
+            return base;
+        }
+        return base.replace("]}", "]," + bundleEvidenceJson + "}");
+    }
+
+    @Test
     void staleRunVersionIsRejectedBeforeWritingCommitFacts() throws Exception {
         Project project = new Project().setOwnerId(10L).setName("stale-run");
         projectMapper.insert(project);

@@ -1301,6 +1301,51 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         ]
         self.assertEqual(0, len(resumed_on_demand))
 
+    def test_checkpoint_opaque_payload_excludes_read_ledger(self) -> None:
+        # IK2QBQ acceptance #3：已读账本不进 checkpoint opaque payload（契约 §6：
+        # checkpoint 保持不透明、不嵌 Bundle 内容）。恢复时从消息历史重建账本，
+        # 而非从 checkpoint 复制——故 checkpoint 不得残留账本、证据或资源正文。
+        def read_then_image_model(messages, info):
+            has_return = any(
+                isinstance(part, ToolReturnPart)
+                for message in messages
+                for part in message.parts
+            )
+            if not has_return:
+                return ModelResponse(
+                    parts=(
+                        ToolCallPart(
+                            "read_resource",
+                            {"resource_id": REF_RESOURCE_ID},
+                            "read-ref-call",
+                        ),
+                    )
+                )
+            return ModelResponse(
+                parts=(
+                    ToolCallPart(
+                        "generate_image",
+                        {"prompt": "海报", "aspect_ratio": "1:1"},
+                        "img-call",
+                    ),
+                )
+            )
+
+        result = PydanticAIOrchestrator(
+            FunctionModel(read_then_image_model), _skill_source()
+        ).advance(_skill_work())
+        # 触发过 on_demand 读取：证据随 commit 回传，但不入 checkpoint
+        self.assertTrue(
+            any(entry["origin"] == "on_demand" for entry in result.bundle_evidence)
+        )
+        payload = result.checkpoint.opaque_payload
+        # checkpoint 只保存框架不透明状态：format / messages / pending_calls
+        self.assertEqual({"format", "messages", "pending_calls"}, set(payload.keys()))
+        # 账本、证据标记或资源正文绝不嵌入 checkpoint
+        serialized = json.dumps(payload, ensure_ascii=False)
+        for forbidden in ("ledger", "evidence", "charged", SKILL_BODY, REF_BODY):
+            self.assertNotIn(forbidden, serialized)
+
 
 if __name__ == "__main__":
     unittest.main()
