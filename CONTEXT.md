@@ -195,6 +195,10 @@ _Avoid_: 活动配置、可由 Worker 读取的快照。
 Runtime Agent Bundle 的不可变发布快照；AgentRun 固定具体版本，激活或回滚只影响之后创建的 Run。
 _Avoid_: 原地修改的配置行、Git commit、RuntimeCheckpoint 版本。
 
+**Run pin（版本固定）**:
+AgentRun 启动时由 Java Product API 原子固定的版本锚点：`bundle_version_id` / `manifest_digest` / `model_profile_id` / `model_profile_version` / `activated_creative_skill_versions`。这些 pin 随 RunWork 下发并权威记录于 AgentRun；Worker 装载前对 `manifestDigest` 与发布快照做 fail-closed 校验，不随 commit 回传。
+_Avoid_: Worker 回显 pin、可变版本引用、运行中改写 pin。
+
 **RoleDocument（角色文档）**:
 定义内部 Agent 身份、职责和任务边界的根 Markdown 资源；每个 BundleVersion 恰好一个并始终装载。
 _Avoid_: Rule、Runtime Skill、面向 User 的角色模板。
@@ -238,6 +242,10 @@ _Avoid_: 在 ToolGrant 里携带风险等级、把风险等级当作发布期铁
 **ResourceManifest（资源清单）**:
 BundleVersion 内所有资源身份、版本、内容摘要、装载方式与已解析引用的不可变索引，是运行时加载与导入导出复现的依据。
 _Avoid_: 可变文件目录、网络资源目录、未校验的相对路径列表。
+
+**ReadEvidence（资源读取证据）**:
+Worker 单次资源读取的证据（`resource_id` / `revision` / `content_digest` / `token_estimate` / `origin`），随 commit 以 `bundle_evidence` 与 `usage` 同通道回传 Java；Java 当前仅 `log.info` 记录条数、不持久化。
+_Avoid_: 资源正文、私有文件路径、Bundle / ModelProfile / CreativeSkill pin 回显。
 
 **RuntimeCheckpoint**（运行时检查点）:
 与活动 AgentRun 绑定的版本化、不透明执行状态，只用于恢复运行，不是 Run、Job、Asset 或产品事件的权威事实。
