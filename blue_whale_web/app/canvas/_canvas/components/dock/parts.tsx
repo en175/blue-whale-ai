@@ -209,7 +209,14 @@ function VideoThumb({ src, name }: { src: string; name: string }) {
         preload="auto"
         muted
         playsInline
-        style={{ display: "none" }}
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          overflow: "hidden",
+          opacity: 0,
+          pointerEvents: "none",
+        }}
       />
       <canvas
         ref={canvasRef}
