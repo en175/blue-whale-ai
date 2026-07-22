@@ -143,6 +143,16 @@ _Avoid_: 供应商直接向 User 流式输出、把流式安全信号直接当�
 _Avoid_: 把 Asset 与 NodeItem/Card 混为一谈 —— Asset 是文件实体,
 NodeItem/Card 是它呈现给用户的视图；在同一个 assetId 下覆写媒体内容。
 
+**AssetMention（@ 引用）**:
+用户消息对一个 Asset 的结构化引用，在 AgentChatPanel 输入器中以 pill 形态承载 assetId，
+消息文本中呈现为 `@[name]`；它是消息事实的一部分，随消息落定即不可变、无失效语义，
+Asset 后续状态变化由读取时校验兜底。
+同一 Conversation 内被 @ 引用过的 Asset 构成 Agent 读取放行（read_asset 白名单）的来源之一，
+与画布节点引用、本 AgentRun 生成产物并列；Agent 读取对话历史时获得每条消息的有序引用列表，
+据此精确读取对应 Asset；跨 Project、跨 User 或非 normal 状态的读取一律同构拒绝。
+_Avoid_: 把 @ 引用当作无 assetId 的纯文本提及；把 @ 引用与画布选中、生成参考图输入混为一谈；
+把引用当作可撤销的授权。
+
 **GenerationJob（生成任务）**:
 一次生图/生视频的后台任务。生命周期:`queued` → `processing` →
 `succeeded` | `partially_succeeded` | `failed` | `cancelled`。
