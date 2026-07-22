@@ -223,7 +223,6 @@ function VideoThumb({ src, name }: { src: string; name: string }) {
       />
     </>
   );
-  );
 }
 
 // 底部 Dock 里的素材缩略图，按类型渲染（图片缩略图 / 视频·音频图标），带右上角删除按钮。
