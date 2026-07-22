@@ -1,51 +1,12 @@
 /**
  * Dock Parts —— Dock 共享部件（展示层）
- * MediaUploadButton：素材上传按钮；FrameUploadButton：首尾帧上传按钮；
+ * FrameUploadButton：首尾帧上传按钮；
  * DockMediaThumb：素材缩略图（含删除）。供 ImageDockContent / VideoDockContent 复用。
  */
 import { useRef } from "react";
 import { AudioLines, Video, X } from "lucide-react";
 import { IconPlus } from "../../icons";
 import type { DockMediaItem } from "../../types";
-
-export function MediaUploadButton({
-  label,
-  accept,
-  icon,
-}: {
-  label: string;
-  accept: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <div style={{ position: "relative", flexShrink: 0 }}>
-      <input type="file" accept={accept} multiple aria-hidden="true" style={{ display: "none" }} />
-      <button
-        type="button"
-        aria-label={label}
-        style={{
-          width: 44,
-          height: 44,
-          borderRadius: 9,
-          border: "1px solid rgba(255, 255, 255, 0.02)",
-          background: "rgba(255, 255, 255, 0.043)",
-          color: "rgba(255, 255, 255, 0.62)",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 6,
-          padding: 0,
-          cursor: "pointer",
-          opacity: 1,
-          transition: "background 120ms, color 120ms",
-          flexShrink: 0,
-        }}
-      >
-        {icon}
-      </button>
-    </div>
-  );
-}
 
 export function FrameUploadButton({
   label,
