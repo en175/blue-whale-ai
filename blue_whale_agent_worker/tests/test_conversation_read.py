@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
@@ -174,6 +175,66 @@ class ReadConversationHistoryToolTest(unittest.TestCase):
         ids = [e["resource_id"] for e in evidence]
         self.assertEqual(ids[0], "conversation:11:history")
         self.assertEqual(ids[1], "conversation:11:history:after:1")
+
+    def test_history_referenced_asset_ids_passed_into_model_context(self) -> None:
+        # IK39RW：read_conversation_history 工具把 history 响应每条 MessageItem 的
+        # referenced_asset_ids（IK39RU 落，按 mention_seq 升序，无引用为空数组）原样
+        # 透传进模型上下文 JSON。fetch 零裁剪 + _record 直接 json.dumps，链路天然成立。
+        captured: list = []
+
+        def capture_then_text_model(messages, info):
+            tool_returns = [
+                part for message in messages for part in message.parts
+                if isinstance(part, ToolReturnPart)
+            ]
+            if not tool_returns:
+                return ModelResponse(
+                    parts=(ToolCallPart("read_conversation_history", {}, "ref-call"),)
+                )
+            captured.append(tool_returns[0].content)
+            return ModelResponse(parts=(TextPart("已读取历史"),))
+
+        conv = _FakeConversationSource(history={
+            "conversation_id": 11,
+            "items": [
+                {
+                    "message_id": 1,
+                    "sequence_no": 1,
+                    "role": "user",
+                    "content": "看 @[海报A] 和 @[海报B]",
+                    "agent_run_id": 23,
+                    "referenced_asset_ids": [101, 102],
+                },
+                {
+                    "message_id": 2,
+                    "sequence_no": 2,
+                    "role": "assistant",
+                    "content": "好的",
+                    "agent_run_id": 23,
+                    "referenced_asset_ids": [],
+                },
+            ],
+            "next_cursor": None,
+            "has_more": False,
+        })
+        orch = PydanticAIOrchestrator(
+            FunctionModel(capture_then_text_model),
+            _bundle_source(),
+            conversation_source=conv,
+        )
+        result = orch.advance(
+            _pydantic_work(
+                messages=({"role": "user", "content": "读历史"},),
+                tool_grants=(_read_grant("read_conversation_history"),),
+            )
+        )
+        self.assertIsNone(result.error)
+        self.assertEqual(len(captured), 1)
+        # _record 走 json.dumps，ToolReturnPart.content 即 LLM 可见的模型上下文 JSON
+        items = json.loads(captured[0])["items"]
+        # 字段以数组原样留存（mention_seq 升序与 @[name] 对齐由上游 IK39RU Java 保证）
+        self.assertEqual(items[0]["referenced_asset_ids"], [101, 102])
+        self.assertEqual(items[1]["referenced_asset_ids"], [])  # 无引用 → 空数组留存
 
 
 class ReadConversationBudgetAndGrantTest(unittest.TestCase):
