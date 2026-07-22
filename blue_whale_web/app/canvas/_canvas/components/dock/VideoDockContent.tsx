@@ -77,6 +77,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
     isPicking = false,
     onGenerate,
     generating = false,
+    onPreviewMedia,
   } = props;
 
   // 当前模型的 capability（DB 驱动）：下拉数据源 + 联动。比例用平台固定集合常量。
@@ -109,8 +110,11 @@ export function VideoDockContent(props: VideoDockContentProps) {
     openUploadMenuFrom(ref);
   };
   const handleLocalFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) onLocalUpload?.(file);
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    for (let i = 0; i < files.length; i++) {
+      onLocalUpload?.(files[i]);
+    }
     e.target.value = "";
   };
 
@@ -219,6 +223,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
         ref={localFileRef}
         type="file"
         accept="image/*,video/*"
+        multiple
         className="sr-only"
         aria-hidden="true"
         onChange={handleLocalFileChange}
@@ -1271,6 +1276,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
               onRemove={onRemoveMedia}
               onUpload={onLocalUpload}
               onPickFromCanvas={onPickFromCanvas}
+              onPreview={onPreviewMedia}
             />
           </div>,
           document.body,

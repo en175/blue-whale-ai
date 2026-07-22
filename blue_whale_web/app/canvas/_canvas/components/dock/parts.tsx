@@ -117,45 +117,90 @@ export function FrameUploadButton({
   );
 }
 
-// 底部 Dock 里的素材缩略图，按类型渲染（图片缩略图 / 视频·音频图标），带右上角删除按钮
-export function DockMediaThumb({ item, onRemove }: { item: DockMediaItem; onRemove?: (id: string) => void }) {
+// 底部 Dock 里的素材缩略图，按类型渲染（图片缩略图 / 视频·音频图标），带右上角删除按钮。
+// 点击可预览（onPreview），上传中显示进度百分比。
+export function DockMediaThumb({
+  item,
+  onRemove,
+  onPreview,
+}: {
+  item: DockMediaItem;
+  onRemove?: (id: string) => void;
+  onPreview?: (item: DockMediaItem) => void;
+}) {
+  const uploading = typeof item.uploadProgress === "number" && item.uploadProgress < 100;
+
   return (
     <div style={{ position: "relative", flexShrink: 0 }}>
-      {item.type === "image" ? (
-        <img
-          src={item.src}
-          alt={item.name}
-          title={item.name}
-          draggable={false}
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: 9,
-            objectFit: "cover",
-            flexShrink: 0,
-            display: "block",
-            border: "1px solid rgba(255, 255, 255, 0.08)",
-          }}
-        />
-      ) : (
-        <div
-          title={item.name}
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: 9,
-            background: "rgba(255, 255, 255, 0.04)",
-            border: "1px solid rgba(255, 255, 255, 0.08)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "rgba(255, 255, 255, 0.5)",
-            flexShrink: 0,
-          }}
-        >
-          {item.type === "video" ? <Video width={18} height={18} /> : <AudioLines width={18} height={18} />}
-        </div>
-      )}
+      <button
+        type="button"
+        aria-label={uploading ? `上传中 ${item.uploadProgress}%` : `预览 ${item.name}`}
+        onClick={() => onPreview?.(item)}
+        disabled={uploading}
+        style={{
+          padding: 0,
+          border: 0,
+          background: "transparent",
+          cursor: uploading ? "default" : "pointer",
+          display: "block",
+        }}
+      >
+        {uploading ? (
+          // 上传中：灰色占位 + 百分比
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 9,
+              background: "rgba(255, 255, 255, 0.06)",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "rgba(255, 255, 255, 0.55)",
+              fontSize: 12,
+              fontWeight: 600,
+              flexShrink: 0,
+            }}
+          >
+            {item.uploadProgress}%
+          </div>
+        ) : item.type === "image" ? (
+          <img
+            src={item.src}
+            alt={item.name}
+            title={item.name}
+            draggable={false}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 9,
+              objectFit: "cover",
+              flexShrink: 0,
+              display: "block",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+            }}
+          />
+        ) : (
+          <div
+            title={item.name}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 9,
+              background: "rgba(255, 255, 255, 0.04)",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "rgba(255, 255, 255, 0.5)",
+              flexShrink: 0,
+            }}
+          >
+            {item.type === "video" ? <Video width={18} height={18} /> : <AudioLines width={18} height={18} />}
+          </div>
+        )}
+      </button>
       {onRemove && (
         <button
           type="button"
@@ -261,6 +306,7 @@ export function MediaSection({
   onRemove,
   onUpload,
   onPickFromCanvas,
+  onPreview,
   uploadedMax,
   total,
   totalMax,
@@ -271,6 +317,7 @@ export function MediaSection({
   onRemove?: (id: string) => void;
   onUpload?: (file: File) => void;
   onPickFromCanvas?: () => void;
+  onPreview?: (item: DockMediaItem) => void;
   uploadedMax: number;
   total: number;
   totalMax: number;
@@ -299,7 +346,7 @@ export function MediaSection({
       {items.length > 0 && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {items.map((m) => (
-            <DockMediaThumb key={m.id} item={m} onRemove={onRemove} />
+            <DockMediaThumb key={m.id} item={m} onRemove={onRemove} onPreview={onPreview} />
           ))}
         </div>
       )}
