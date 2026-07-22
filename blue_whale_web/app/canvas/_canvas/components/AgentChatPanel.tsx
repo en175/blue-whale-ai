@@ -16,13 +16,17 @@ import {
   ThinkingBlock,
   AgentCard,
 } from "./ChatBubbles";
-import type { ChatMessage } from "../types";
+import type { ChatMessage, PendingMention } from "../types";
 import type { CardStatus } from "@/types/domain";
 import { buildMockReplyForMode } from "../messages";
 import { createMessageIdGenerator } from "../idGen";
 import type { MessageIdGenerator } from "../idGen";
 import { useAuth } from "@/components/auth/AuthContext";
 import type { CardMessage } from "../nodeFromCard";
+import { extractEditor, insertMention } from "./dock/mention";
+
+/** @ 素材 pill 数量上限，对齐后端 referenced_asset_ids @Size(max=10)。 */
+const MENTION_LIMIT = 10;
 
 export function AgentChatPanel({
   messages,
@@ -41,13 +45,16 @@ export function AgentChatPanel({
   messages: ChatMessage[];
   isOpen: boolean;
   onClose: () => void;
-  pendingMention?: { name: string; nonce: number } | null;
+  pendingMention?: PendingMention | null;
   onMentionConsumed?: () => void;
   onCardGenerated?: (card: CardMessage) => void;
   /** 追加消息到当前项目（user 消息 + 逐条生成的 agent 回复均经此上抛） */
   onAppendMessages?: (messages: ChatMessage[]) => void;
   /** 后端可用时提交权威 Conversation 命令；缺省时保留既有离线 mock。 */
-  onSubmitMessage?: (text: string) => Promise<void>;
+  onSubmitMessage?: (
+    text: string,
+    referencedAssetIds?: number[],
+  ) => Promise<void>;
   /** 设置当前项目内某 card 的状态（重试链推进） */
   onSetCardStatus?: (cardId: number | string, status: CardStatus) => void;
   /** 权威失败 Card 的真实重试命令；新 Job 由 Snapshot/SSE 恢复。 */
@@ -56,6 +63,7 @@ export function AgentChatPanel({
   prompt?: string;
 }) {
   const [composerEmpty, setComposerEmpty] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [panelSize, setPanelSize] = useState({ w: 468, h: 600 });
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
@@ -207,46 +215,87 @@ export function AgentChatPanel({
     setSkillPanelOpen(false);
   }, []);
 
-  // 外部（如画布节点操作面板）请求把素材名 @ 插入输入框
+  // 外部（画布节点操作菜单「添加到对话」）请求把素材插入输入框：
+  // 带 assetId 走 pill 路径（发送时写入 referenced_asset_ids），无 assetId 回退纯文本。
   useEffect(() => {
     if (!pendingMention) return;
-    insertSkillIntoComposer(pendingMention.name);
+    const editor = composerRef.current;
+    if (pendingMention.assetId != null && editor) {
+      const existing = editor.querySelectorAll("[data-mention-id]").length;
+      const dup = editor.querySelector(
+        `[data-mention-asset-id="${pendingMention.assetId}"]`,
+      );
+      if (existing >= MENTION_LIMIT) {
+        // 超上限静默忽略，后端 @Size(max=10) 兜底
+        console.warn(
+          "[canvas] mention pill 超过上限，已忽略",
+          MENTION_LIMIT,
+          pendingMention.name,
+        );
+      } else if (dup) {
+        // 同素材已插入：不重复，保证 content @[name] 与 assetIds 一一对应
+        console.warn(
+          "[canvas] mention pill 已存在，忽略重复插入",
+          pendingMention.name,
+        );
+      } else {
+        insertMention(editor, {
+          id: String(pendingMention.assetId),
+          type: pendingMention.type ?? "image",
+          name: pendingMention.name,
+          src: pendingMention.src,
+          assetId: pendingMention.assetId,
+        });
+        handleComposerInput();
+      }
+    } else {
+      insertSkillIntoComposer(pendingMention.name);
+    }
     onMentionConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingMention?.nonce]);
 
   const handleSend = () => {
-    const text = composerRef.current?.innerText.trim() || "";
-    if (!text) return;
+    const { prompt, assetIds } = composerRef.current
+      ? extractEditor(composerRef.current)
+      : { prompt: "", assetIds: [] as number[] };
+    if (!prompt && assetIds.length === 0) return;
 
-    requireAuth({ kind: "canvas-send", text }, () => {
+    requireAuth({ kind: "canvas-send", text: prompt }, () => {
       // 重新发送前清掉上一轮尚未触发的逐条追加定时器
       for (const id of pendingTimers.current) clearTimeout(id);
       pendingTimers.current = [];
 
       if (onSubmitMessage) {
-        if (composerRef.current) composerRef.current.innerText = "";
-        setComposerEmpty(true);
-        void onSubmitMessage(text).catch((error) => {
-          console.error("[canvas] conversation message failed:", error);
-          const editor = composerRef.current;
-          if (editor && editor.innerText.trim().length === 0) {
-            editor.innerText = text;
-            setComposerEmpty(false);
-          }
-        });
+        // 请求飞行期锁定发送按钮，防止重复提交（清空延后到成功回调）
+        setSubmitting(true);
+        void onSubmitMessage(prompt, assetIds)
+          .then(() => {
+            if (composerRef.current) composerRef.current.innerHTML = "";
+            setComposerEmpty(true);
+          })
+          .catch((error) => {
+            console.error("[canvas] conversation message failed:", error);
+          })
+          .finally(() => {
+            setSubmitting(false);
+          });
         return;
       }
 
-      const userMsg: ChatMessage = { id: nextMessageId(), type: "user", text };
+      const userMsg: ChatMessage = {
+        id: nextMessageId(),
+        type: "user",
+        text: prompt,
+      };
       onAppendMessages?.([userMsg]);
-      if (composerRef.current) composerRef.current.innerText = "";
+      if (composerRef.current) composerRef.current.innerHTML = "";
       setComposerEmpty(true);
 
       // 按当前创作模式生成 mock 回复，错开逐条追加模拟逐步生成
       const reply = buildMockReplyForMode(
         selectedMode.id as "agent" | "direct",
-        text,
+        prompt,
         nextMessageId,
       );
       reply.forEach((msg, index) => {
@@ -588,10 +637,10 @@ export function AgentChatPanel({
                       <button
                         type="button"
                         onClick={handleSend}
-                        disabled={composerEmpty}
+                        disabled={composerEmpty || submitting}
                         className="tc-agent-send-btn tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-black transition-colors hover:bg-white/90 disabled:cursor-default disabled:bg-white/[0.1] disabled:text-white/[0.25]"
                         aria-label="发送"
-                        aria-disabled={composerEmpty}
+                        aria-disabled={composerEmpty || submitting}
                       >
                         <IconSend size={14} />
                       </button>

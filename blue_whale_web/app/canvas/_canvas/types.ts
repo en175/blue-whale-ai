@@ -50,6 +50,15 @@ export type DockMediaItem = {
   src?: string;
 };
 
+/** 「添加到对话」待插入输入框的素材提及（page.tsx 与 AgentChatPanel 共享）。 */
+export type PendingMention = {
+  name: string;
+  nonce: number;
+  assetId?: number;
+  src?: string;
+  type?: "image" | "video" | "audio";
+};
+
 /** 视口。字段对齐 RF `Viewport`：`scale` 改名 `zoom`（BREAKING，见 design D5）。 */
 export type Viewport = {
   x: number;

@@ -334,7 +334,7 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
   );
 
   const submitConversationMessageAction = useCallback(
-    async (content: string) => {
+    async (content: string, referencedAssetIds?: number[]) => {
       if (!backendReady) return;
       // 当前创作流程等待澄清时，下一条非空自然语言消息自动引用该请求；
       // 无活动请求时保持普通消息行为（不传绑定，由后端按普通消息处理）。
@@ -347,6 +347,7 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
         newCommandIdentity(),
         newCommandIdentity(),
         answerable?.input_request_id,
+        referencedAssetIds,
       );
     },
     [activeProject.id, backendReady],

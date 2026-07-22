@@ -35,6 +35,7 @@ import type {
   DockMediaItem,
   CardMessage,
   ChatMessage,
+  PendingMention,
 } from "./_canvas";
 import { nodeFromCard, useCanvasProjects } from "./_canvas";
 import type { GenerateArgs } from "./_canvas";
@@ -147,10 +148,8 @@ function CanvasPageInner() {
   );
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
   const [videoDockMedia, setVideoDockMedia] = useState<DockMediaItem[]>([]);
-  const [agentPendingMention, setAgentPendingMention] = useState<{
-    name: string;
-    nonce: number;
-  } | null>(null);
+  const [agentPendingMention, setAgentPendingMention] =
+    useState<PendingMention | null>(null);
   // 「从画布选择」模式：非 null 表示正在为哪个 Dock 挑图（image/video）
   const [pickingFor, setPickingFor] = useState<"image" | "video" | null>(null);
   const [submittingByProject, setSubmittingByProject] =
@@ -239,9 +238,24 @@ function CanvasPageInner() {
         break;
       }
       case "mention": {
-        // 添加到对话：打开右侧面板并 @ 素材名
+        // 添加到对话：打开右侧面板并插入素材 pill（携带 assetId）
         setIsAgentOpen(true);
-        setAgentPendingMention({ name, nonce: Date.now() });
+        const assetId = Number(node.assetId);
+        if (
+          node.assetId != null &&
+          Number.isSafeInteger(assetId) &&
+          assetId > 0
+        ) {
+          setAgentPendingMention({
+            name,
+            nonce: Date.now(),
+            assetId,
+            src: node.imageUrl,
+            type: node.type === "video" ? "video" : "image",
+          });
+        } else {
+          setAgentPendingMention({ name, nonce: Date.now() });
+        }
         break;
       }
       case "video": {

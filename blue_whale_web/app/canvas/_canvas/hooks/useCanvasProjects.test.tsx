@@ -102,6 +102,7 @@ describe("useCanvasProjects 创作澄清回答绑定", () => {
       "cmd-id",
       "cmd-id",
       42,
+      undefined,
     );
   });
 
@@ -118,6 +119,24 @@ describe("useCanvasProjects 创作澄清回答绑定", () => {
       "cmd-id",
       "cmd-id",
       undefined,
+      undefined,
+    );
+  });
+
+  it("携带 referencedAssetIds 时透传给 acceptConversationMessage（DOM 序去重由上游负责）", async () => {
+    const { result } = await renderRecoveredPanel(snapshotWith([]));
+
+    await act(async () => {
+      await result.current.submitConversationMessageAction("参考这张", [9, 3]);
+    });
+
+    expect(vi.mocked(acceptConversationMessage)).toHaveBeenCalledWith(
+      1,
+      "参考这张",
+      "cmd-id",
+      "cmd-id",
+      undefined,
+      [9, 3],
     );
   });
 });
