@@ -129,71 +129,71 @@ const thumbBoxStyle: React.CSSProperties = {
 /**
  * VideoThumb —— 隐藏 <video> 加载首帧 → canvas 绘制 → 显示首帧缩略图。
  * <video> 做缩略图浏览器不主动解码帧；canvas 提取可保证跨浏览器一致。
- * 跨域视频 canvas 会 taint，仅显示不导出，正常。
+ * video 元素必须挂 DOM 中才触发加载，故 render 隐藏 video + canvas 并用 ref 联动。
  */
 function VideoThumb({ src, name }: { src: string; name: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [ready, setReady] = useState(false);
   const [fallback, setFallback] = useState(false);
 
   useEffect(() => {
-    const video = document.createElement("video");
-    video.src = src;
-    video.preload = "auto";
-    video.muted = true;
-    video.playsInline = true;
-    video.setAttribute("playsinline", "");
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
 
     let cancelled = false;
 
-    const onLoadedData = () => {
-      video.currentTime = 0.1;
-    };
-
-    const onSeeked = () => {
-      if (cancelled) return;
-      const canvas = canvasRef.current;
-      if (!canvas || !video.videoWidth) return;
+    const seekAndDraw = () => {
+      if (cancelled || !video.videoWidth) return;
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext("2d");
       if (ctx) {
         try {
           ctx.drawImage(video, 0, 0);
-          setReady(true);
-        } catch {
-          // canvas tainted (cross-origin 无 CORS)，不可导出但 DOM 显示可
-          setReady(true);
+          console.debug("[DEBUG-vthumb] drawImage ok", src.slice(-40));
+        } catch (e) {
+          console.debug("[DEBUG-vthumb] drawImage tainted", src.slice(-40), e);
         }
       }
-      cleanup();
+      setReady(true);
+    };
+
+    const onLoadedData = () => {
+      console.debug("[DEBUG-vthumb] loadeddata", src.slice(-40));
+      video.currentTime = 0.1;
+    };
+
+    const onSeeked = () => {
+      console.debug("[DEBUG-vthumb] seeked", video.videoWidth, "x", video.videoHeight, src.slice(-40));
+      seekAndDraw();
     };
 
     const onError = () => {
+      console.debug("[DEBUG-vthumb] error", src.slice(-40));
       if (!cancelled) setFallback(true);
-      cleanup();
-    };
-
-    const cleanup = () => {
-      video.removeEventListener("loadeddata", onLoadedData);
-      video.removeEventListener("seeked", onSeeked);
-      video.removeEventListener("error", onError);
-      video.removeAttribute("src");
-      video.load();
     };
 
     video.addEventListener("loadeddata", onLoadedData);
     video.addEventListener("seeked", onSeeked);
     video.addEventListener("error", onError);
-    video.load();
+    // 已在 DOM 中，直接触发加载
+    if (video.readyState >= 2) {
+      // 已经 loadeddata
+      onLoadedData();
+    }
 
     return () => {
       cancelled = true;
-      cleanup();
+      video.removeEventListener("loadeddata", onLoadedData);
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("error", onError);
     };
   }, [src]);
 
   if (fallback) {
+    console.debug("[DEBUG-vthumb] fallback icon", src.slice(-40));
     return (
       <div title={name} style={{ ...thumbBoxStyle, background: "rgba(255, 255, 255, 0.04)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255, 255, 255, 0.5)" }}>
         <Video width={18} height={18} />
@@ -202,16 +202,27 @@ function VideoThumb({ src, name }: { src: string; name: string }) {
   }
 
   return (
-    <canvas
-      ref={canvasRef}
-      title={name}
-      style={{
-        ...thumbBoxStyle,
-        objectFit: "cover",
-        background: "rgba(255, 255, 255, 0.04)",
-        visibility: ready ? "visible" : "hidden",
-      }}
-    />
+    <>
+      <video
+        ref={videoRef}
+        src={src}
+        preload="auto"
+        muted
+        playsInline
+        style={{ display: "none" }}
+      />
+      <canvas
+        ref={canvasRef}
+        title={name}
+        style={{
+          ...thumbBoxStyle,
+          objectFit: "cover",
+          background: "rgba(255, 255, 255, 0.04)",
+          visibility: ready ? "visible" : "hidden",
+        }}
+      />
+    </>
+  );
   );
 }
 
