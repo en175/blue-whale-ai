@@ -24,11 +24,11 @@ token 估算复用 ``ContextLoader`` 的 ``chars_div_4`` 算法（与 Java 发�
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .canonical import sha256_hex
 from .errors import (
     BUNDLE_RESOURCE_DIGEST_MISMATCH,
     BUNDLE_RESOURCE_UNKNOWN,
@@ -46,8 +46,8 @@ ORIGIN_HISTORY = "history"
 ORIGIN_CONVERSATION = "conversation"
 
 
-def _sha256_text(text: str) -> str:
-    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+def sha256_text(text: str) -> str:
+    return "sha256:" + sha256_hex(text)
 
 
 @dataclass(frozen=True)
@@ -146,7 +146,7 @@ class ResourceGate:
             ReadEvidence(
                 resource_id=resource_id,
                 revision=0,
-                content_digest=_sha256_text(content),
+                content_digest=sha256_text(content),
                 token_estimate=tokens,
                 origin=ORIGIN_CONVERSATION,
             )
@@ -205,7 +205,7 @@ class ResourceGate:
         content = body.get("content") if isinstance(body, Mapping) else None
         if not isinstance(content, str):
             raise BundleError(BUNDLE_RESOURCE_UNKNOWN, "按需资源缺少正文")
-        if _sha256_text(content) != content_digest(resource):
+        if sha256_text(content) != content_digest(resource):
             raise BundleError(
                 BUNDLE_RESOURCE_DIGEST_MISMATCH, "按需资源字节与 manifest 摘要不符"
             )

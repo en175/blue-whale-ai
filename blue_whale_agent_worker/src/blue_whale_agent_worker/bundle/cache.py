@@ -27,7 +27,6 @@ BundleVersion 下只从内层（Java 控制面）拉取一次，后续读取（�
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import tempfile
@@ -35,14 +34,11 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .canonical import sha256_hex
 from .source import BundleSource
 
 _DEFAULT_MAX_BYTES = 64 * 1024 * 1024
 _INDEX_NAME = "index.json"
-
-
-def _sha256_hex(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def default_cache_dir() -> Path:
@@ -78,7 +74,7 @@ class CachingBundleSource:
         if digest is not None:
             body = self._read_body(ns, digest)
             content = body.get("content") if isinstance(body, Mapping) else None
-            if isinstance(content, str) and _sha256_hex(content) == digest:
+            if isinstance(content, str) and sha256_hex(content) == digest:
                 return body  # 命中：读回重算 sha256 已校验身份，零网络
             self._delete_body(ns, digest)  # 损坏 / 被篡改：丢弃，绝不返回脏数据
             index.pop(resource_id, None)
@@ -86,7 +82,7 @@ class CachingBundleSource:
         body = self._inner.fetch_resource(bundle_version_id, resource_id)
         content = body.get("content") if isinstance(body, Mapping) else None
         if isinstance(content, str):
-            digest = _sha256_hex(content)
+            digest = sha256_hex(content)
             self._write_body(ns, digest, body)
             index[resource_id] = digest
             self._write_index(ns, index)
@@ -95,7 +91,7 @@ class CachingBundleSource:
 
     def _namespace_dir(self, bundle_version_id: str) -> Path:
         # sha256 派生目录名：按版本隔离 + 防路径穿越，不明文落 bundleVersionId。
-        return self._cache_dir / _sha256_hex(bundle_version_id)
+        return self._cache_dir / sha256_hex(bundle_version_id)
 
     def _read_index(self, ns: Path) -> dict[str, str]:
         data = self._load_json(ns / _INDEX_NAME)
