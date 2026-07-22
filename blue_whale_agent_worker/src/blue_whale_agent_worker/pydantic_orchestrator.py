@@ -1,6 +1,5 @@
 import json
-from dataclasses import dataclass
-from typing import Any, Callable, Literal, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from pydantic_ai import (
     Agent,
@@ -8,8 +7,9 @@ from pydantic_ai import (
     DeferredToolRequests,
     DeferredToolResults,
     RunContext,
+    Tool,
 )
-from pydantic_ai.messages import ModelMessagesTypeAdapter, ToolCallPart
+from pydantic_ai.messages import ModelMessagesTypeAdapter, TextPart, ToolCallPart
 from pydantic_ai.models import Model
 
 from .bundle.errors import BundleError
@@ -24,6 +24,7 @@ from .contracts import (
     ProposedAction,
     RunWork,
     RuntimeCheckpoint,
+    ToolGrant,
     UserInputRequestProposal,
 )
 
@@ -40,82 +41,8 @@ READ_DIRECT_TOOL_REGISTRY_VERSION = 1
 # 回答作 ToolResult 回喂，区别于动作 pending（结果来自 accepted_results）。
 _CLARIFICATION_PENDING_KIND = "clarification"
 
-ImageAspectRatio = Literal["1:1", "16:9", "9:16", "4:3", "3:4", "2:3", "3:2", "21:9"]
-
-# 视频 aspect_ratio 与图片分开声明：视频能力 enum 不含 2:3 / 3:2（对齐 Java
-# ToolRegistry create_video_generation_job inputSchema）。
-VideoAspectRatio = Literal["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]
-VideoResolution = Literal["480p", "720p", "1080p"]
-
-
-def _acceptance_text(tool_name: str) -> str:
-    # 提议接纳文案按工具区分（图片 / 视频）；图片文案逐字不变。
-    if tool_name == "generate_video":
-        return "已接纳，正在生成视频。"
-    return "已接纳，正在生成图片。"
-
-
-def _terminal_text(tool_name: str, *, succeeded: bool) -> str:
-    # 终态收尾文案按工具区分；图片文案逐字不变。
-    if tool_name == "generate_video":
-        return "视频已经生成。" if succeeded else "视频生成未完成。"
-    return "图片已经生成。" if succeeded else "图片生成未完成。"
-
-
-def _action_tool_name(action_id: str) -> str:
-    # action_id 格式 pydantic-{tool_name}-{agent_run_id}-{run_version}；tool_name 用
-    # 下划线不含连字符，split("-")[1] 稳定反解（AcceptedActionResult 无 tool 字段）。
-    return action_id.split("-")[1]
-
-
 class _ContractError(Exception):
     pass
-
-
-def generate_image(
-    prompt: str,
-    aspect_ratio: ImageAspectRatio = "1:1",
-    reference_asset_ids: list[int] | None = None,
-    size: str | None = None,
-    web_search: bool | None = None,
-) -> str:
-    """Propose an image action for the Java product control plane to accept.
-
-    size 与 web_search 可选：缺省由产品控制平面按模型能力表兜底；模型固定走能力表
-    默认项，Agent 不暴露模型选择。
-    """
-    raise CallDeferred
-
-
-def generate_video(
-    prompt: str,
-    aspect_ratio: VideoAspectRatio,
-    resolution: VideoResolution,
-    duration: int,
-    reference_asset_ids: list[int] | None = None,
-) -> str:
-    """Propose a video action for the Java product control plane to accept.
-
-    参数与 Java ToolRegistry create_video_generation_job inputSchema 对齐：prompt /
-    aspect_ratio / resolution / duration 必填，reference_asset_ids 可选。duration 取值
-    范围（4–15）与 reference_asset_ids 数量（≤1）由 Java 治理链校验
-    （VideoAgentActionGovernanceIT 已测），Worker 签名不硬限——对称图片 size / web_search。
-    """
-    raise CallDeferred
-
-
-def request_user_input(
-    request_type: Literal["creation_clarification"],
-    question: str,
-    resume_binding: dict[str, Any] | None = None,
-) -> str:
-    """Propose a product-neutral input request (creation clarification) for the user.
-
-    显式副作用工具（IK2QBY）：Agent 缺少推进创作所必需的信息时，向用户提出一个可见问题
-    并等待自然语言回答。仍走 ADR-0036 的 UserInputRequestProposal 通道，不新建请求端点；
-    resume_binding 为不透明产品事实，回传给来源 AgentRun 用于多轮恢复。
-    """
-    raise CallDeferred
 
 
 def read_resource(ctx: RunContext[ResourceGate], resource_id: str) -> str:
@@ -128,48 +55,11 @@ def read_resource(ctx: RunContext[ResourceGate], resource_id: str) -> str:
     return ctx.deps.read(resource_id)
 
 
-@dataclass(frozen=True)
-class ToolImplementation:
-    """Python 侧工具实现注册项：tool_name 对应的 handler 与平台注册表元数据。
-
-    handler 是 pydantic-ai 工具函数：副作用工具函数体 raise CallDeferred（deferred 注册），
-    只读工具函数体直接返回结果（直接工具注册）。pydantic-ai 据函数签名生成模型可见 schema，
-    函数名即工具名。registry_version / effect 与平台 ToolRegistry 对齐，用于校验当次 grant。
-    """
-
-    tool_name: str
-    tool_id: str
-    registry_version: int
-    effect: Literal["read", "side_effect"]
-    handler: Callable[..., object]
-
-
-def _default_tool_implementations() -> Mapping[str, ToolImplementation]:
-    """生产默认工具实现目录：图片生成、视频生成与请求用户输入（均 side_effect / deferred）。
-
-    request_user_input 把创作澄清从隐式文本分支升级为显式副作用工具（IK2QBY）；
-    只读工具的实际读取实现属后续子工单，本目录先落框架，按 grant 动态装配机制通用支持。
-    """
-
-    return {
-        "generate_image": ToolImplementation(
-            "generate_image", "create_image_generation_job", 1, "side_effect", generate_image
-        ),
-        "generate_video": ToolImplementation(
-            "generate_video", "create_video_generation_job", 1, "side_effect", generate_video
-        ),
-        "request_user_input": ToolImplementation(
-            "request_user_input", "request_user_input", 1, "side_effect", request_user_input
-        ),
-    }
-
-
 class PydanticAIOrchestrator:
     def __init__(
         self,
         model: Model | str,
         bundle_source: BundleSource,
-        implementations: Mapping[str, ToolImplementation] | None = None,
         conversation_source: ConversationSource | None = None,
         creative_context_source: CreativeContextSource | None = None,
     ) -> None:
@@ -177,11 +67,6 @@ class PydanticAIOrchestrator:
         self._bundle_source = bundle_source
         self._conversation_source = conversation_source
         self._creative_context_source = creative_context_source
-        self._implementations = (
-            implementations
-            if implementations is not None
-            else _default_tool_implementations()
-        )
 
     def advance(self, work: RunWork) -> OrchestratorResult:
         try:
@@ -327,67 +212,68 @@ class PydanticAIOrchestrator:
         input_request: UserInputRequestProposal | None = None
         if isinstance(run_result.output, DeferredToolRequests):
             requests = run_result.output
-            if len(requests.calls) != 1:
-                raise _ContractError("模型必须且只能提出一个外部动作或输入请求")
-            call = requests.calls[0]
             authorized_side_effects = {
                 grant.tool_name for grant in work.tool_grants if grant.effect == "side_effect"
             }
-            if call.tool_name not in authorized_side_effects:
-                raise _ContractError("模型提出了不在当次授权集合内的工具动作")
-            action_id = f"pydantic-{call.tool_name}-{work.agent_run_id}-{work.run_version}"
-            if call.tool_name == "request_user_input":
-                # 显式澄清工具（IK2QBY）：参数映射 UserInputRequestProposal，仍走 ADR-0036
-                # 通道。挂 clarification pending——恢复时把用户自然语言回答作为该 deferred
-                # call 的 ToolResult 回喂，闭合 checkpoint 消息历史，支持多轮澄清往返。
-                arguments = call.args_as_dict()
-                input_request = UserInputRequestProposal(
-                    request_type=arguments["request_type"],
-                    question=arguments["question"],
-                    resume_binding=arguments.get("resume_binding"),
-                )
-                pending_calls = (
-                    {"action_id": action_id, "tool_call_id": call.tool_call_id, "kind": _CLARIFICATION_PENDING_KIND},
-                )
-                visible_text = arguments["question"]
-            else:
-                implementation = self._implementations[call.tool_name]
-                actions = (
+            # 解除单动作自限（IK3BG0）：一轮可零或多个副作用动作提议，按 Java commit 契约
+            # 分批提交、逐一经铁闸接纳（RunCommitRequest.actions 是 List）。PROPOSAL_ACTION_MUTEX
+            # （UserInputRequest 提议与副作用动作互斥）由 Java 铁闸权威判定，Worker 不自立规矩。
+            side_effect_calls: list[ToolCallPart] = []
+            for call in requests.calls:
+                if call.tool_name not in authorized_side_effects:
+                    raise _ContractError("模型提出了不在当次授权集合内的工具动作")
+                if call.tool_name == "request_user_input":
+                    # 显式澄清工具（IK2QBY）：参数映射 UserInputRequestProposal，仍走 ADR-0036
+                    # 通道。挂 clarification pending——恢复时把用户自然语言回答作为该 deferred
+                    # call 的 ToolResult 回喂，闭合 checkpoint 消息历史，支持多轮澄清往返。
+                    # toolName "request_user_input" 由 ADR-0036 固定为 Java 注册表 toolId，不随
+                    # grant 动态化；同 Run 同时最多一个活动 UserInputRequest（ADR-0036 铁闸），
+                    # 故此分支 action_id 不带序号（副作用多动作分批才需序号保证 Run 内唯一）。
+                    arguments = call.args_as_dict()
+                    input_request = UserInputRequestProposal(
+                        request_type=arguments["request_type"],
+                        question=arguments["question"],
+                        resume_binding=arguments.get("resume_binding"),
+                    )
+                    action_id = f"pydantic-{call.tool_name}-{work.agent_run_id}-{work.run_version}"
+                    pending_calls += (
+                        {"action_id": action_id, "tool_call_id": call.tool_call_id, "kind": _CLARIFICATION_PENDING_KIND},
+                    )
+                else:
+                    side_effect_calls.append(call)
+            # 多副作用动作分批：每个 call 一个 ProposedAction，action_id 含序号保证 Run 内
+            # 唯一（幂等键）；tool_id 即 grant.tool_name（= Java 注册表 toolId），registry_version
+            # 取自当次 grant，逐一经 Java commit 铁闸复验接纳。
+            grants_by_name = {grant.tool_name: grant for grant in work.tool_grants}
+            for idx, call in enumerate(side_effect_calls):
+                grant = grants_by_name[call.tool_name]
+                action_id = f"pydantic-{call.tool_name}-{work.agent_run_id}-{work.run_version}-{idx}"
+                actions += (
                     ProposedAction(
                         action_id=action_id,
-                        tool_id=implementation.tool_id,
-                        registry_version=implementation.registry_version,
+                        tool_id=call.tool_name,
+                        registry_version=grant.registry_version,
                         arguments=call.args_as_dict(),
                     ),
                 )
-                pending_calls = (
+                pending_calls += (
                     {"action_id": action_id, "tool_call_id": call.tool_call_id},
                 )
-                visible_text = _acceptance_text(call.tool_name)
-        elif work.accepted_results:
-            rejected = [r for r in work.accepted_results if r.status == "rejected"]
-            if rejected:
-                # IK2QBX 动作被治理拒绝后模型未再提议：用面向 User 的安全提示收尾，
-                # 不暴露内部 reasonCode。模型若选择调整，会走 DeferredToolRequests 分支提新提议。
-                message = rejected[-1].result.get("message")
-                if isinstance(message, str) and message.strip():
-                    visible_text = message
-                else:
-                    visible_text = _terminal_text(
-                        _action_tool_name(rejected[-1].action_id), succeeded=False
-                    )
+            # deferred 动作轮可见文本一律来自模型 TextPart，不再用固定文案冒充模型回复
+            # （「deferred 动作轮无可见文本」是模型行为的不变量；instructions 引导动作轮
+            # 附过渡说明以满足 RunCommitRequest.visibleText 非空契约）。澄清轮用模型 question。
+            if input_request is not None:
+                visible_text = input_request.question
             else:
-                visible_text = _terminal_text(
-                    _action_tool_name(work.accepted_results[-1].action_id),
-                    succeeded=all(
-                        result.status == "succeeded" for result in work.accepted_results
-                    ),
-                )
+                visible_text = self._model_visible_text(run_result)
+                if not visible_text:
+                    raise _ContractError("deferred 动作轮缺少模型可见文本")
         else:
-            # 初次推进或澄清恢复的纯文本输出（无工具调用）：模型可见文本直通，作为
-            # 多轮自然对话的普通回应。澄清只来自显式 request_user_input 工具，不再由
-            # 文本隐式触发（IK2QBY 退役隐式分支、解除「澄清恢复后必须出动作」自限）。
-            visible_text = run_result.output.strip()
+            # 纯咨询 / 终态轮：模型可见文本直通，不再用固定文案替换（动作/终态轮不再
+            # 出现固定文案冒充模型回复）。终态轮的安全提示由模型自身输出（Bundle instructions
+            # 引导模型看到治理拒绝结果后转述，见测试 safe_message_after_rejection_model）；
+            # 模型本轮无可见文本即 fail closed，Worker 不用 Java message 制造文本。
+            visible_text = self._model_visible_text(run_result)
             if not visible_text:
                 raise _ContractError("模型输出不能为空")
 
@@ -495,34 +381,65 @@ class PydanticAIOrchestrator:
     def _build_tools(self, work: RunWork, gate: ResourceGate) -> tuple:
         """按当次 Run 钉住的 ToolGrant 动态构造模型可见工具集。
 
-        只读 effect → 直接工具（handler 直接返回结果）；副作用 effect → deferred 工具
-        （handler raise CallDeferred）。只读 effect 的对话读取工具（read_conversation_*）
-        → per-advance 闭包，捕获 conversation_source + run + gate，读后经 ResourceGate
-        双预算门记账（origin=conversation，与 Bundle 资源同一活动上下文账本）。
-        未列出的工具对模型完全不可见。grant 与实现目录的 tool_name / registry_version /
-        effect 任一不符 fail closed，并入现有契约归一化通道（ORCHESTRATOR_CONTRACT_MISMATCH），
-        不泄露内部细节。``read_resource`` 不经 ToolGrant，作为 Bundle 固有受限读取工具
-        在 ``_advance`` 中单独注入。
+        side_effect effect → 按 ToolGrant.argument_schema（平台 ToolRegistry input schema）
+        构造 deferred 提议工具（handler raise CallDeferred，模型提议、Java 接纳后执行），
+        模型可见 schema 完全由发布内容决定，Worker 不携带硬编码工具实现目录。read effect
+        → 只读源协议直接工具（per-advance 闭包，读后经 ResourceGate 双预算门记账，
+        origin=conversation，与 Bundle 资源同一活动上下文账本）。未列出的工具对模型完全
+        不可见；effect 非法或 read 工具不在注册表 fail closed，并入现有契约归一化通道
+        （ORCHESTRATOR_CONTRACT_MISMATCH），不泄露内部细节。``read_resource`` 不经 ToolGrant，
+        作为 Bundle 固有受限读取工具在 ``_advance`` 中单独注入。
         """
         tools: list = []
         for grant in work.tool_grants:
-            implementation = self._implementations.get(grant.tool_name)
-            if implementation is not None:
-                if implementation.registry_version != grant.registry_version:
+            if grant.effect == "side_effect":
+                tools.append(self._make_deferred_tool(grant))
+            elif grant.effect == "read":
+                if grant.registry_version != READ_DIRECT_TOOL_REGISTRY_VERSION:
                     raise _ContractError("工具注册表版本与授权不符")
-                if implementation.effect != grant.effect:
-                    raise _ContractError("工具效果类别与授权不符")
-                tools.append(implementation.handler)
-                continue
-            factory = self._read_tool_factory(grant.tool_name)
-            if factory is None:
-                raise _ContractError("授权工具不在 Worker 注册表")
-            if grant.effect != "read":
+                factory = self._read_tool_factory(grant.tool_name)
+                if factory is None:
+                    raise _ContractError("授权工具不在 Worker 注册表")
+                tools.append(factory(work, gate))
+            else:
                 raise _ContractError("工具效果类别与授权不符")
-            if grant.registry_version != READ_DIRECT_TOOL_REGISTRY_VERSION:
-                raise _ContractError("工具注册表版本与授权不符")
-            tools.append(factory(work, gate))
         return tuple(tools)
+
+    @staticmethod
+    def _make_deferred_tool(grant: ToolGrant) -> Tool:
+        """按 ToolGrant.argument_schema 构造 deferred 提议工具（IK3BG0 工具目录泛化）。
+
+        effect=side_effect 工具不再来自硬编码函数目录：handler 仅 raise CallDeferred 把
+        执行权交还框架（模型提议、Java 接纳后执行），模型可见参数 schema 由 Run pin 的
+        ToolGrant.argument_schema（Draft 2020-12，平台 ToolRegistry input schema）驱动，
+        工具名即 grant.tool_name（= Java 注册表 toolId）。
+        """
+
+        def deferred_handler(**_kwargs: Any) -> str:
+            raise CallDeferred
+
+        return Tool.from_schema(
+            deferred_handler,
+            name=grant.tool_name,
+            description=None,
+            json_schema=dict(grant.argument_schema),
+        )
+
+    @staticmethod
+    def _model_visible_text(run_result: Any) -> str:
+        """提取模型本轮可见文本：纯文本轮取 output，deferred 动作轮取最后 ModelResponse 的 TextPart。
+
+        动作提议轮与终态轮不再用固定文案替换模型文本——可见文本一律来自模型自身输出，
+        「deferred 动作轮无可见文本」作为模型行为的直接不变量（Worker 不制造文案）。
+        """
+        output = run_result.output
+        if isinstance(output, str):
+            return output.strip()
+        for message in reversed(run_result.all_messages()):
+            for part in message.parts:
+                if isinstance(part, TextPart) and part.content.strip():
+                    return part.content.strip()
+        return ""
 
     def _read_tool_factory(
         self, tool_name: str

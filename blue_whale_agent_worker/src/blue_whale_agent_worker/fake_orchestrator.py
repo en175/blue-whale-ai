@@ -62,15 +62,29 @@ class FakeOrchestrator:
     def _resume_after_clarification(
         self, work: RunWork, latest_user_message: str
     ) -> OrchestratorResult:
-        # 恢复原始创作流程：checkpoint 中的原始意图与本次自然语言回答共同形成动作约束。
+        # 澄清恢复后对齐生产新语义（IK3BG0）：模型（Fake 脚本）可以零动作、纯文本收尾——
+        # 「澄清恢复后必须生图」的旧自限已移除。原意图与用户回答合并进可见文本，作为
+        # 恢复后零动作收尾的演示夹具（生产侧「恢复后可再澄清 / 纯文本 / 动作」由
+        # pydantic_orchestrator 覆盖，Fake 不再绑定生图）。
         topic = work.checkpoint.opaque_payload["topic"]
         answer = latest_user_message.strip()
-        return self._image_action(work, f"{topic}，{answer}")
+        return OrchestratorResult(
+            commit_id=f"fake-{work.agent_run_id}-{work.run_version}",
+            visible_text=f"已了解，将按「{answer}」处理「{topic}」。",
+            checkpoint=RuntimeCheckpoint(
+                engine=work.engine,
+                engine_version=work.engine_version,
+                adapter_schema_version=work.adapter_schema_version,
+                opaque_payload={"step": "completed", "topic": topic, "answer": answer},
+            ),
+            actions=(),
+            usage={"input_units": 0, "output_units": 0},
+        )
 
     def _image_action(self, work: RunWork, prompt: str) -> OrchestratorResult:
         return OrchestratorResult(
             commit_id=f"fake-{work.agent_run_id}-{work.run_version}",
-            visible_text="已接纳，正在生成图片。",
+            visible_text=f"正在为你生成图片：{prompt}",
             checkpoint=RuntimeCheckpoint(
                 engine=work.engine,
                 engine_version=work.engine_version,
