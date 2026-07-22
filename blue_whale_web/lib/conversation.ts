@@ -12,6 +12,7 @@ export function acceptConversationMessage(
   clientMessageId: string,
   idempotencyKey: string,
   replyToInputRequestId?: number,
+  referencedAssetIds?: number[],
 ): Promise<AcceptedConversationMessage> {
   return apiRequest<AcceptedConversationMessage>(
     `/api/projects/${projectId}/conversation/messages`,
@@ -24,6 +25,9 @@ export function acceptConversationMessage(
         ...(replyToInputRequestId == null
           ? {}
           : { reply_to_input_request_id: replyToInputRequestId }),
+        ...(referencedAssetIds?.length
+          ? { referenced_asset_ids: referencedAssetIds }
+          : {}),
       }),
     },
   );

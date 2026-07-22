@@ -51,4 +51,51 @@ describe("Conversation 命令 API", () => {
       }),
     );
   });
+
+  it("携带 referenced_asset_ids（数字数组、snake_case、DOM 序）", async () => {
+    vi.mocked(apiRequest).mockResolvedValue({
+      message_id: 1,
+      agent_run_id: 2,
+      cursor: 3,
+    });
+
+    await acceptConversationMessage(
+      7,
+      "@[蓝鲸] 帮我画",
+      "c-3",
+      "k-3",
+      undefined,
+      [9, 3],
+    );
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      "/api/projects/7/conversation/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          client_message_id: "c-3",
+          content: "@[蓝鲸] 帮我画",
+          referenced_asset_ids: [9, 3],
+        }),
+      }),
+    );
+  });
+
+  it("referencedAssetIds 为空时不发送该字段", async () => {
+    vi.mocked(apiRequest).mockResolvedValue({
+      message_id: 1,
+      agent_run_id: 2,
+      cursor: 3,
+    });
+
+    await acceptConversationMessage(7, "纯文本", "c-4", "k-4", undefined, []);
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      "/api/projects/7/conversation/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.not.stringContaining("referenced_asset_ids"),
+      }),
+    );
+  });
 });
