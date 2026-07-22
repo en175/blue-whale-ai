@@ -61,6 +61,7 @@ export const NODE_TOOLBAR_ACTIONS: NodeToolbarAction[] = [
 /** 视频节点操作菜单。 */
 export const NODE_TOOLBAR_VIDEO_ACTIONS: NodeToolbarAction[] = [
   { id: "refresh", label: "重新编辑", icon: <RefreshCw width={16} height={16} className="tc-node-toolbar-icon" /> },
+  { id: "image", label: "生成图片", icon: <Sparkles width={16} height={16} className="tc-node-toolbar-icon" /> },
   { id: "video", label: "生成视频", icon: <Video width={16} height={16} className="tc-node-toolbar-icon" /> },
   { id: "divider", label: "", icon: null },
   { id: "info", label: "信息", icon: <Info width={16} height={16} className="tc-node-toolbar-icon" />, iconOnly: true },
