@@ -263,8 +263,13 @@ Worker 认领 Run 时：
 4. Worker commit 回传的证据分两层：
    - **资源读取证据 `ReadEvidence`**：Worker 是资源装载唯一知情者，必须回传本次 Run 实际读取的
      每个资源的 `ReadEvidence`（`resource_id` / `revision` / `content_digest` / `token_estimate` /
-     `origin`），与 `usage` 指标同通道（载荷字段 `bundle_evidence`）。Java 侧当前仅 `log.info`
-     记录条数、不持久化；该载荷另经 `requestDigest` 进入幂等哈希（反重放，非持久化）。
+     `origin`），与 `usage` 指标同通道（载荷字段 `bundle_evidence`）。Java 侧在 commit 接纳路径
+     逐条持久化到主 `audit_records`（一条证据一行）：`target_type=BundleResource` /
+     `target_id=resource_id` / `action=bundle.read_evidence` / `decision=observed` /
+     `reason_code=origin` / `details={revision,content_digest,token_estimate}`，`request_id` 与
+     `correlation_id` 均为 `agent-run:{runId}:{commitId}`；证据是观测非决策，版本列用占位。写入失败
+     fail closed（与 commit 共生共灭，回滚整个提交）。该载荷另经 `requestDigest` 进入幂等哈希（反重放，
+     独立于审计持久化）。
    - **Bundle / ModelProfile / CreativeSkill pin 不回传**：`bundle_version_id` / `manifest_digest` /
      `model_profile_id` / `model_profile_version` / `activated_creative_skill_versions` 在 RunWork
      下发时已由 Java AgentRun 原子固定并权威记录，Worker 装载前 fail-closed 校验，commit 载荷

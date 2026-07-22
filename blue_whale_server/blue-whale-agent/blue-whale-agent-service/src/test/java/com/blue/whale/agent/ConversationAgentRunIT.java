@@ -265,6 +265,44 @@ class ConversationAgentRunIT {
         assertThat(count("run_commits", "agent_run_id", runId)).isEqualTo(1);
     }
 
+    @Test
+    void bundleEvidencePersistedToMainAuditRecords() throws Exception {
+        // IK3AH2（契约 §6.4）：ReadEvidence 逐条落主 audit_records（action=bundle.read_evidence /
+        // decision=observed），兑现「只读访问可追溯」承诺；空证据不落证据审计行。
+        Project project = new Project().setOwnerId(10L).setName("bundle-evidence-audit");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "evidence-audit-key", "生成一张蓝鲸海报")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        String evidence = "\"bundle_evidence\":["
+                + "{\"resource_id\":\"skill_root\",\"revision\":2,\"content_digest\":\"sha256:aaa\","
+                + "\"token_estimate\":32,\"origin\":\"on_demand\"},"
+                + "{\"resource_id\":\"skill_node_1\",\"revision\":1,\"content_digest\":\"sha256:bbb\","
+                + "\"token_estimate\":64,\"origin\":\"history\"}]";
+        postCommit(runId, commitBodyWithEvidence(project.getId(), work, evidence))
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_records WHERE action = 'bundle.read_evidence'",
+                Long.class)).isEqualTo(2L);
+        String details = jdbcTemplate.queryForObject(
+                "SELECT details FROM audit_records WHERE action = 'bundle.read_evidence' "
+                        + "AND target_id = 'skill_root'", String.class);
+        assertThat(details).contains("\"revision\":2").contains("sha256:aaa").contains("token_estimate");
+
+        // 空证据 commit 不写证据审计行（数量仍为 2）。
+        long emptyRunId = postMessage(project.getId(), "evidence-empty-key", "生成一张白鲸海报")
+                .path("agent_run_id").asLong();
+        JsonNode emptyWork = claim(emptyRunId);
+        // 用独立 action_id 避免与带证据 run 的 action-1 撞项目级 GenerationJob 去重。
+        postCommit(emptyRunId, commitBodyWithEvidence(project.getId(), emptyWork, null)
+                        .replace("\"action_id\":\"action-1\"", "\"action_id\":\"action-empty\""))
+                .andExpect(status().isOk());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_records WHERE action = 'bundle.read_evidence'",
+                Long.class)).isEqualTo(2L);
+    }
+
     private String commitBodyWithEvidence(Long projectId, JsonNode work, String bundleEvidenceJson) {
         // 复用 validCommitBody：仅替换 commit_id，并在 actions 数组后追加可选证据段。
         String base = validCommitBody(projectId, work)
@@ -347,8 +385,48 @@ class ConversationAgentRunIT {
                                 "\"action_id\":\"" + "a".repeat(129) + "\""))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value(100304));
+        // IK3AH2：schema 驱动校验——注册表 inputSchema/constraints 单一事实源生效。
+        // constraints prompt.maxLength:2000 违约（超长 prompt）。
+        postCommit(runId, validCommitBody(project.getId(), work)
+                        .replace("\"蓝鲸海报\"", "\"" + "鲸".repeat(2001) + "\""))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(100304));
+        // enum 违约：aspect_ratio 非法值。
+        postCommit(runId, validCommitBody(project.getId(), work)
+                        .replace("\"aspect_ratio\":\"1:1\"", "\"aspect_ratio\":\"5:4\""))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(100304));
+        // maxItems 违约：reference_asset_ids 超 image 上限 4。
+        postCommit(runId, validCommitBody(project.getId(), work)
+                        .replace("\"aspect_ratio\":\"1:1\"",
+                                "\"aspect_ratio\":\"1:1\",\"reference_asset_ids\":[1,2,3,4,5]"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(100304));
 
         assertNoCommitFacts(project.getId(), runId);
+    }
+
+    @Test
+    void videoActionValidatedBySchema() throws Exception {
+        // IK3AH2：video tool schema 校验——duration 违反 minimum:4 拒，合法 video commit 不误伤。
+        Project project = new Project().setOwnerId(10L).setName("video-schema");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId(), "video-schema-key", "生成一段蓝鲸视频")
+                .path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        // duration=3 违反注册表 minimum:4（schema 驱动，替代原 validVideoDuration）。
+        postCommit(runId, videoCommitBody(project.getId(), work).replace("\"duration\":5", "\"duration\":3"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(100304));
+        assertNoCommitFacts(project.getId(), runId);
+
+        // 合法 video commit→200 不误伤（另起 run 避开 action_id 项目级去重）。
+        long okRunId = postMessage(project.getId(), "video-ok-key", "生成一段蓝鲸视频")
+                .path("agent_run_id").asLong();
+        JsonNode okWork = claim(okRunId);
+        postCommit(okRunId, videoCommitBody(project.getId(), okWork))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.generation_job_id").isNumber());
     }
 
     @Test
@@ -949,6 +1027,24 @@ class ConversationAgentRunIT {
                 "\"checkpoint\":{\"opaque_payload\":{\"step\":\"proposed\"}}," +
                 "\"actions\":[{\"action_id\":\"action-1\",\"tool_id\":\"create_image_generation_job\",\"registry_version\":1," +
                 "\"arguments\":{\"prompt\":\"蓝鲸海报\",\"aspect_ratio\":\"1:1\"}}]}";
+    }
+
+    private String videoCommitBody(Long projectId, JsonNode work) {
+        return "{"
+                + "\"commit_id\":\"commit-video\","
+                + "\"project_id\":" + projectId + ","
+                + "\"user_id\":10,"
+                + "\"expected_run_version\":" + work.path("run_version").asInt() + ","
+                + "\"fencing_token\":" + work.path("fencing_token").asLong() + ","
+                + "\"engine\":\"fake\","
+                + "\"engine_version\":\"1\","
+                + "\"adapter_schema_version\":1,"
+                + "\"visible_text\":\"已接纳，正在生成视频。\","
+                + "\"checkpoint\":{\"opaque_payload\":{\"step\":\"proposed\"}},"
+                + "\"actions\":[{\"action_id\":\"action-video\",\"tool_id\":\"create_video_generation_job\","
+                + "\"registry_version\":1,"
+                + "\"arguments\":{\"prompt\":\"蓝鲸视频\",\"aspect_ratio\":\"16:9\","
+                + "\"resolution\":\"720p\",\"duration\":5}}]}";
     }
 
     private void assertNoCommitFacts(Long projectId, long runId) {

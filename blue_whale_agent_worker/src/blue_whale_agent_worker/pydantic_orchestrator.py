@@ -244,6 +244,10 @@ class PydanticAIOrchestrator:
             # 视野（契约 §6.1）。默认 canvas_nodes 为空集 → 不注入，既有首轮行为不变。
             if work.canvas_nodes:
                 prompt = self._canvas_materials_prompt(work.canvas_nodes) + "\n\n" + prompt
+            # IK3AH2（契约 §6.1 三段式）：首轮注入 Conversation 摘要，与画布节点并列前置。
+            # 默认 conversation_summary 为 None → 不注入，既有首轮行为不变。
+            if work.conversation_summary:
+                prompt = self._conversation_summary_prompt(work.conversation_summary) + "\n\n" + prompt
             run_result = agent.run_sync(prompt, deps=gate)
         else:
             self._validate_checkpoint(work)
@@ -257,14 +261,18 @@ class PydanticAIOrchestrator:
                 # 恢复闭合 checkpoint 消息历史中的 deferred ToolCallPart：动作 pending 的
                 # 结果来自 accepted_results，澄清 pending 的结果来自用户最新自然语言回答
                 # （request_user_input 的 ToolReturn 即用户回答，IK2QBY 多轮澄清）。
-                results_by_action = {
-                    result.action_id: result for result in work.accepted_results
-                }
                 action_pending = [
                     pending for pending in restored_calls
                     if pending.get("kind") != _CLARIFICATION_PENDING_KIND
                 ]
-                if {pending["action_id"] for pending in action_pending} != set(results_by_action):
+                # IK3AH2：clarification 软回喂的 rejected 共用 accepted_results 通道但属 clarify 命名空间，
+                # 不参与 action 一一匹配——results_by_action 只收 action pending 对应的结果。
+                action_pending_ids = {pending["action_id"] for pending in action_pending}
+                results_by_action = {
+                    result.action_id: result for result in work.accepted_results
+                    if result.action_id in action_pending_ids
+                }
+                if action_pending_ids != set(results_by_action):
                     raise _ContractError("已接纳结果与 checkpoint 中的待处理动作不匹配")
                 deferred_calls: dict[str, Mapping[str, Any]] = {}
                 for pending in action_pending:
@@ -278,16 +286,28 @@ class PydanticAIOrchestrator:
                     if pending.get("kind") == _CLARIFICATION_PENDING_KIND
                 ]
                 if clarify_pending:
-                    answer = next(
-                        message["content"]
-                        for message in reversed(work.messages)
-                        if message["role"] == "user"
+                    rejected = next(
+                        (r for r in work.accepted_results if r.status == "rejected"), None
                     )
-                    for pending in clarify_pending:
-                        deferred_calls[pending["tool_call_id"]] = {
-                            "status": "answered",
-                            "result": {"answer": answer},
-                        }
+                    if rejected is not None:
+                        # IK3AH2：服务端 grant 未授予的澄清被软回喂为 rejected，回喂该 tool_call_id
+                        # 拒绝结果，不取用户回答，让模型改走动作路径。
+                        for pending in clarify_pending:
+                            deferred_calls[pending["tool_call_id"]] = {
+                                "status": "rejected",
+                                "result": dict(rejected.result),
+                            }
+                    else:
+                        answer = next(
+                            message["content"]
+                            for message in reversed(work.messages)
+                            if message["role"] == "user"
+                        )
+                        for pending in clarify_pending:
+                            deferred_calls[pending["tool_call_id"]] = {
+                                "status": "answered",
+                                "result": {"answer": answer},
+                            }
                 run_result = agent.run_sync(
                     message_history=messages,
                     deferred_tool_results=DeferredToolResults(calls=deferred_calls),
@@ -449,6 +469,27 @@ class PydanticAIOrchestrator:
         lines = ["用户当前画布上的素材（可经 read_asset 读取）："]
         for node in canvas_nodes:
             lines.append(f"- type={node.get('type')}, asset_id={node.get('asset_id')}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _conversation_summary_prompt(summary: Mapping[str, Any]) -> str:
+        """IK3AH2：首轮把 claim 下发的 Conversation 摘要拼成紧凑上下文（契约 §6.1 三段式）。
+
+        仅渲染摘要切片（消息计数 + 首末预览 + 时间范围），完整历史由
+        ``read_conversation_history`` 游标分页按需读取。None 字段跳过。
+        """
+        lines = ["对话历史摘要（更早消息可经 read_conversation_history 读取）："]
+        if summary.get("conversation_id") is not None:
+            lines.append(f"- conversation_id={summary.get('conversation_id')}")
+        lines.append(f"- message_count={summary.get('message_count')}")
+        if summary.get("first_user_preview") is not None:
+            lines.append(f"- first_user_preview={summary.get('first_user_preview')}")
+        if summary.get("last_message_preview") is not None:
+            lines.append(f"- last_message_preview={summary.get('last_message_preview')}")
+        if summary.get("earliest_at") is not None:
+            lines.append(f"- earliest_at={summary.get('earliest_at')}")
+        if summary.get("latest_at") is not None:
+            lines.append(f"- latest_at={summary.get('latest_at')}")
         return "\n".join(lines)
 
     def _build_tools(self, work: RunWork, gate: ResourceGate) -> tuple:

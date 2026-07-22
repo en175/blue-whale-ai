@@ -554,6 +554,55 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
 
         self.assertEqual("生成海报", captured[0])
 
+    def test_first_turn_injects_compact_conversation_summary(self) -> None:
+        # IK3AH2（契约 §6.1 三段式）：首轮（checkpoint None）若 claim 下发 conversation_summary
+        # 非空，在 prompt 前拼紧凑摘要上下文（摘要 + 引用节点 + 最近窗口三段式）。
+        captured: list = []
+
+        def capture_prompt_model(messages, info):
+            captured.append(messages[-1].parts[-1].content)
+            return ModelResponse(parts=(TextPart("好的，了解了历史摘要。"),))
+
+        work = _pydantic_work(
+            messages=({"role": "user", "content": "继续之前的对话"},),
+            conversation_summary={
+                "conversation_id": 11,
+                "message_count": 6,
+                "first_user_preview": "帮我生成一张海报",
+                "last_message_preview": "再调整一下色调",
+                "earliest_at": "2026-07-20T10:00:00",
+                "latest_at": "2026-07-20T11:00:00",
+            },
+        )
+        result = PydanticAIOrchestrator(
+            FunctionModel(capture_prompt_model), _bundle_source()
+        ).advance(work)
+
+        self.assertIsNone(result.error)
+        prompt = captured[0]
+        self.assertIn("摘要", prompt)
+        self.assertIn("message_count=6", prompt)
+        self.assertIn("first_user_preview=帮我生成一张海报", prompt)
+        self.assertIn("last_message_preview=再调整一下色调", prompt)
+        self.assertIn("earliest_at=2026-07-20T10:00:00", prompt)
+        self.assertIn("latest_at=2026-07-20T11:00:00", prompt)
+        self.assertIn("继续之前的对话", prompt)
+
+    def test_first_turn_without_conversation_summary_leaves_prompt_untouched(self) -> None:
+        # 默认 conversation_summary 为 None → 不注入摘要，prompt 原样（与 canvas 反例对称）。
+        captured: list = []
+
+        def capture_prompt_model(messages, info):
+            captured.append(messages[-1].parts[-1].content)
+            return ModelResponse(parts=(TextPart("好的"),))
+
+        work = _pydantic_work(messages=({"role": "user", "content": "生成海报"},))
+        PydanticAIOrchestrator(
+            FunctionModel(capture_prompt_model), _bundle_source()
+        ).advance(work)
+
+        self.assertEqual("生成海报", captured[0])
+
     def test_missing_bundle_pin_fails_closed(self) -> None:
         # pin 缺失（enforcement-enabled=false 形态）不回退硬编码，fail closed。
         work = _pydantic_work(bundle_version_id=None, manifest_digest=None)
@@ -822,6 +871,70 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertEqual(
             1, len(resumed_result.checkpoint.opaque_payload["pending_calls"])
         )
+
+    def test_rejected_clarification_is_fed_back_to_model(self) -> None:
+        # IK3AH2：服务端 grant 未授予的澄清被软回喂为 rejected，Worker 把拒绝结果回喂该
+        # tool_call_id（不取用户回答），让模型改走动作路径。
+        grants = (_generate_image_grant(), _request_user_input_grant())
+        initial_work = _pydantic_work(tool_grants=grants)
+        initial_result = PydanticAIOrchestrator(
+            FunctionModel(clarify_then_image_model), _bundle_source()
+        ).advance(initial_work)
+        self.assertIsNotNone(initial_result.input_request)
+        restored_checkpoint = RuntimeCheckpoint(
+            engine=initial_result.checkpoint.engine,
+            engine_version=initial_result.checkpoint.engine_version,
+            adapter_schema_version=initial_result.checkpoint.adapter_schema_version,
+            opaque_payload=json.loads(
+                json.dumps(initial_result.checkpoint.opaque_payload, ensure_ascii=False)
+            ),
+        )
+        rejected = AcceptedActionResult(
+            action_id="clarification:" + str(initial_work.agent_run_id),
+            status="rejected",
+            result={
+                "public_code": "ACTION_NOT_ALLOWED",
+                "message": "当前动作未获授权。",
+                "retryable": False,
+            },
+        )
+        captured: list = []
+
+        def capture_deferred_result_model(messages, info):
+            captured.extend(
+                part for message in messages
+                for part in message.parts
+                if isinstance(part, ToolReturnPart)
+            )
+            return ModelResponse(parts=(ToolCallPart(
+                "generate_image",
+                {"prompt": "蓝鲸海报", "aspect_ratio": "1:1"},
+                "retry-call-id",
+            ),))
+
+        resumed_work = _pydantic_work(
+            run_version=2,
+            fencing_token=5,
+            messages=(
+                {"role": "user", "content": "生成一张蓝鲸海报"},
+                {"role": "assistant", "content": "您希望什么风格和比例？"},
+                {"role": "user", "content": "水墨风格带留白"},
+            ),
+            checkpoint=restored_checkpoint,
+            accepted_results=(rejected,),
+            tool_grants=grants,
+        )
+        result = PydanticAIOrchestrator(
+            FunctionModel(capture_deferred_result_model), _bundle_source()
+        ).advance(resumed_work)
+
+        # 澄清 tool_call_id 收到 rejected 回喂（status=rejected + 拒绝公开码），不取用户回答。
+        self.assertIsNone(result.error)
+        rejected_payloads = [
+            str(part.content) for part in captured if "rejected" in str(part.content)
+        ]
+        self.assertTrue(rejected_payloads)
+        self.assertIn("ACTION_NOT_ALLOWED", rejected_payloads[0])
 
     def test_clarification_resume_can_propose_another_clarification(self) -> None:
         # IK2QBY AC3：解除「澄清恢复后必须出动作」自限，支持两次以上澄清往返。

@@ -5,6 +5,8 @@ import com.blue.whale.agent.model.entity.AuditRecord;
 import com.blue.whale.agent.model.entity.ContentReview;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.UserInputRequest;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -12,12 +14,15 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
 public class AuditRecordWriter {
 
     private final AuditRecordMapper mapper;
+    private final ObjectMapper objectMapper;
 
     @Value("${spring.profiles.active:default}")
     private String environment;
@@ -207,6 +212,52 @@ public class AuditRecordWriter {
                 .setCorrelationId(correlationId)
                 .setTraceId(correlationId);
         persist(record);
+    }
+
+    /**
+     * 只读资源读取证据审计（契约 §6.4 / IK3AH2）：Worker commit 回传的每条 ReadEvidence 逐条落主
+     * audit_records。证据是观测非决策，版本列用 {@code "evidence"} 占位；{@code details} 存 revision /
+     * content_digest / token_estimate。与 commit 同事务（不加 REQUIRES_NEW），写入失败 fail closed
+     * 回滚整个提交，兑现「只读访问可追溯」治理承诺。
+     */
+    public void appendBundleReadEvidence(
+            Long userId,
+            Long projectId,
+            Long agentRunId,
+            String commitId,
+            String resourceId,
+            String origin,
+            Object revision,
+            Object contentDigest,
+            Object tokenEstimate) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("revision", revision);
+        details.put("content_digest", contentDigest);
+        details.put("token_estimate", tokenEstimate);
+        String correlation = "agent-run:" + agentRunId + ":" + commitId;
+        AuditRecord record = new AuditRecord()
+                .setActorUserId(userId)
+                .setProjectId(projectId)
+                .setTargetType("BundleResource")
+                .setTargetId(resourceId)
+                .setAction("bundle.read_evidence")
+                .setDecision("observed")
+                .setReasonCode(origin)
+                .setPolicyVersion("evidence")
+                .setCostRuleVersion("evidence")
+                .setRequestId(correlation)
+                .setCorrelationId(correlation)
+                .setTraceId(correlation)
+                .setDetails(writeJson(details));
+        persist(record);
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("无法序列化审计 details", exception);
+        }
     }
 
     private void persist(AuditRecord record) {

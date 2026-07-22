@@ -600,6 +600,7 @@ CREATE TABLE IF NOT EXISTS audit_records
     trace_id VARCHAR(128) NOT NULL,
     environment VARCHAR(64) NOT NULL,
     occurred_at DATETIME NOT NULL,
+    details CLOB NULL,
     gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -26,6 +26,7 @@ public class AuditRecord {
     private String requestId;
     private String correlationId;
     private String traceId;
+    private String details;
     private String environment;
     private LocalDateTime occurredAt;
     private LocalDateTime gmtCreate;
