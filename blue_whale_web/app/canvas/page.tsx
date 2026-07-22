@@ -158,14 +158,15 @@ function CanvasPageInner() {
         }
         case "shuffle":
         case "image": {
-          // 生成图片 / 再创作（X3）：唤起图片 Dock + 参考图同步进顶部缩略图和 mention pill
+          // 生成图片 / 再创作：唤起图片 Dock + 参考图累积（去重）+ mention pill
           setBottomDockMode("image");
           setIsBottomDockOpen(true);
           setDockFocusSignal((n) => n + 1);
           if (node.imageUrl) {
-            const item: DockMediaItem = { id: node.id, type: "image", name, src: node.imageUrl };
-            setImageDockMedia([item]);
-            setDockMentionSignal({ nonce: Date.now(), item: { src: node.imageUrl, name, id: node.id }, replace: true });
+            const mediaType: DockMediaItem["type"] = node.type === "video" ? "video" : "image";
+            const item: DockMediaItem = { id: node.id, type: mediaType, name, src: node.imageUrl };
+            setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+            setDockMentionSignal({ nonce: Date.now(), item: { src: node.imageUrl, name, id: node.id, type: mediaType }, replace: false });
           }
           break;
         }
@@ -176,9 +177,12 @@ function CanvasPageInner() {
           break;
         }
         case "video": {
-          // 生成视频：带入参考图占位 + 唤起视频 Dock
+          // 生成视频：带入参考图（按 node.type 分 image/video）+ mention pill + 唤起视频 Dock
           if (node.imageUrl) {
-            setVideoDockMedia([{ id: node.id, type: "image", name, src: node.imageUrl }]);
+            const mediaType: DockMediaItem["type"] = node.type === "video" ? "video" : "image";
+            const item: DockMediaItem = { id: node.id, type: mediaType, name, src: node.imageUrl };
+            setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+            setDockMentionSignal({ nonce: Date.now(), item: { src: node.imageUrl, name, id: node.id, type: mediaType }, replace: false });
           }
           setBottomDockMode("video");
           setIsBottomDockOpen(true);
