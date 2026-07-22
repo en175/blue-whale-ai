@@ -5,9 +5,15 @@ import com.blue.whale.agent.model.dto.RunCommitResponse;
 import com.blue.whale.agent.model.dto.RunWorkResponse;
 import com.blue.whale.agent.model.dto.AssistantMessageStreamRequests;
 import com.blue.whale.agent.model.dto.AssistantMessageStreamResponse;
+import com.blue.whale.agent.model.dto.AgentAssetResponse;
+import com.blue.whale.agent.model.dto.CanvasNodeDetail;
+import com.blue.whale.agent.model.dto.CanvasNodesResponse;
 import com.blue.whale.agent.model.dto.ConversationHistoryResponse;
 import com.blue.whale.agent.model.dto.ConversationSummaryResponse;
+import com.blue.whale.agent.model.dto.CreativeSkillResponse;
+import com.blue.whale.agent.model.dto.GenerationJobStatusResponse;
 import com.blue.whale.agent.service.AssistantMessageStreamService;
+import com.blue.whale.agent.service.CreativeContextQueryService;
 import com.blue.whale.agent.service.AgentRunWorkerService;
 import com.blue.whale.agent.service.ConversationQueryService;
 import com.blue.whale.global.base.resp.Result;
@@ -22,6 +28,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.validation.Valid;
+import java.util.List;
 
 @RestController
 @RequestMapping("/internal/agent-runs")
@@ -30,6 +37,7 @@ public class AgentRunWorkerController {
 
     private final AgentRunWorkerService workerService;
     private final ConversationQueryService conversationQueryService;
+    private final CreativeContextQueryService creativeContextQueryService;
     private final AssistantMessageStreamService assistantMessageStreamService;
 
     @PostMapping("/claim")
@@ -61,6 +69,45 @@ public class AgentRunWorkerController {
             @PathVariable Long runId,
             @RequestHeader(value = "X-Worker-Id", required = false) String workerId) {
         return Result.ok(conversationQueryService.summary(runId, workerId));
+    }
+
+    @GetMapping("/{runId}/canvas/nodes")
+    public Result<CanvasNodesResponse> listCanvasNodes(
+            @PathVariable Long runId,
+            @RequestHeader(value = "X-Worker-Id", required = false) String workerId,
+            @RequestParam(value = "limit", required = false) Integer limit) {
+        return Result.ok(creativeContextQueryService.listCanvasNodes(runId, workerId, limit));
+    }
+
+    @GetMapping("/{runId}/canvas/nodes/{nodeId}")
+    public Result<CanvasNodeDetail> readCanvasNode(
+            @PathVariable Long runId,
+            @PathVariable String nodeId,
+            @RequestHeader(value = "X-Worker-Id", required = false) String workerId) {
+        return Result.ok(creativeContextQueryService.readCanvasNode(runId, workerId, nodeId));
+    }
+
+    @GetMapping("/{runId}/assets/{assetId}")
+    public Result<AgentAssetResponse> readAsset(
+            @PathVariable Long runId,
+            @PathVariable Long assetId,
+            @RequestHeader(value = "X-Worker-Id", required = false) String workerId) {
+        return Result.ok(creativeContextQueryService.readAsset(runId, workerId, assetId));
+    }
+
+    @GetMapping("/{runId}/generation-jobs/{jobId}/status")
+    public Result<GenerationJobStatusResponse> readGenerationJobStatus(
+            @PathVariable Long runId,
+            @PathVariable Long jobId,
+            @RequestHeader(value = "X-Worker-Id", required = false) String workerId) {
+        return Result.ok(creativeContextQueryService.readGenerationJobStatus(runId, workerId, jobId));
+    }
+
+    @GetMapping("/{runId}/creative-skills")
+    public Result<List<CreativeSkillResponse>> listCreativeSkills(
+            @PathVariable Long runId,
+            @RequestHeader(value = "X-Worker-Id", required = false) String workerId) {
+        return Result.ok(creativeContextQueryService.listCreativeSkills(runId, workerId));
     }
 
     @PostMapping("/{runId}/assistant-messages/start")

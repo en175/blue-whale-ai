@@ -201,3 +201,30 @@ class ConversationSource(Protocol):
         limit: int = 20,
     ) -> Mapping[str, Any]:
         """按 sequence_no 游标分页读取对话历史（升序）；after 为上一页 nextCursor。"""
+
+
+class CreativeContextSource(Protocol):
+    """创作现场只读源（IK2QC7）：Worker 经它回溯当前 Run 绑定的画布 / 素材 / 生成任务 / 技能。
+
+    与 ``ConversationSource`` 同根：端点以 runId 为根，Project 范围由 run 绑定闭环，
+    ``JavaRunGateway`` 天然满足（duck-typed）。
+    """
+
+    def fetch_canvas_nodes(
+        self, run_id: int, limit: Optional[int] = None
+    ) -> Mapping[str, Any]:
+        """读取当前 Project 画布的节点摘要列表（紧凑，限流）。"""
+
+    def fetch_canvas_node(self, run_id: int, node_id: str) -> Mapping[str, Any]:
+        """读取单个画布节点详情（含原始 data）。"""
+
+    def fetch_asset(self, run_id: int, asset_id: int) -> Mapping[str, Any]:
+        """读取单个 Asset 元数据（仅放行画布引用 ∪ 本 Run 产物范围）。"""
+
+    def fetch_generation_job_status(
+        self, run_id: int, job_id: int
+    ) -> Mapping[str, Any]:
+        """读取单个生成任务的紧凑状态。"""
+
+    def fetch_creative_skills(self, run_id: int) -> Sequence[Mapping[str, Any]]:
+        """读取 Run 固定 Bundle 快照里的 Creative Skill 紧凑元数据列表。"""

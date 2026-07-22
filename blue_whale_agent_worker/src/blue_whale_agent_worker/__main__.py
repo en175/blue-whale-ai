@@ -16,7 +16,11 @@ def main() -> None:
 
     gateway = JavaRunGateway(args.base_url, args.worker_id, args.adapter)
     orchestrator = create_orchestrator(
-        args.adapter, args.model, gateway, conversation_source=gateway
+        args.adapter,
+        args.model,
+        gateway,
+        conversation_source=gateway,
+        creative_context_source=gateway,
     )
     AgentWorker(gateway, orchestrator).run_once()
 

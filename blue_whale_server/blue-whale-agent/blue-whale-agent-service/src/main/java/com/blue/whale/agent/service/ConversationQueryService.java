@@ -1,19 +1,15 @@
 package com.blue.whale.agent.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
 import com.blue.whale.agent.model.dto.ConversationHistoryResponse;
 import com.blue.whale.agent.model.dto.ConversationHistoryResponse.MessageItem;
 import com.blue.whale.agent.model.dto.ConversationSummaryResponse;
 import com.blue.whale.agent.model.entity.AgentRun;
 import com.blue.whale.agent.model.entity.ConversationMessage;
-import com.blue.whale.global.base.resp.SystemCode;
-import com.blue.whale.global.exception.GlobalException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
@@ -34,11 +30,11 @@ public class ConversationQueryService {
     private static final int PREVIEW_MAX_LENGTH = 50;
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
-    private final AgentRunMapper agentRunMapper;
     private final ConversationMessageMapper messageMapper;
+    private final RunLeaseGuard runLeaseGuard;
 
     public ConversationHistoryResponse history(Long runId, String workerId, Integer after, Integer limit) {
-        AgentRun run = requireLeasedRun(runId, workerId);
+        AgentRun run = runLeaseGuard.requireLeasedRun(runId, workerId);
         int pageSize = clampPageSize(limit);
         var query = Wrappers.<ConversationMessage>lambdaQuery()
                 .eq(ConversationMessage::getConversationId, run.getConversationId())
@@ -63,7 +59,7 @@ public class ConversationQueryService {
     }
 
     public ConversationSummaryResponse summary(Long runId, String workerId) {
-        AgentRun run = requireLeasedRun(runId, workerId);
+        AgentRun run = runLeaseGuard.requireLeasedRun(runId, workerId);
         List<ConversationMessage> messages = messageMapper.selectList(
                 Wrappers.<ConversationMessage>lambdaQuery()
                         .eq(ConversationMessage::getConversationId, run.getConversationId())
@@ -81,24 +77,6 @@ public class ConversationQueryService {
         String latestAt = messages.isEmpty() ? null : messages.get(messages.size() - 1).getGmtCreate().format(ISO);
         return new ConversationSummaryResponse(run.getConversationId(), count, firstUserPreview,
                 lastPreview, earliestAt, latestAt);
-    }
-
-    private AgentRun requireLeasedRun(Long runId, String workerId) {
-        if (workerId == null || workerId.isBlank()) {
-            throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "未认证");
-        }
-        AgentRun run = agentRunMapper.selectById(runId);
-        if (run == null) {
-            throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
-        }
-        LocalDateTime now = agentRunMapper.selectCurrentTime();
-        if (!workerId.equals(run.getLeaseOwner())
-                || run.getLeaseExpiresAt() == null
-                || !run.getLeaseExpiresAt().isAfter(now)) {
-            throw new GlobalException(SystemCode.AGENT_RUN_CONFLICT_CODE,
-                    SystemCode.AGENT_RUN_CONFLICT.getMsg());
-        }
-        return run;
     }
 
     private int clampPageSize(Integer limit) {

@@ -150,12 +150,48 @@ class JavaRunGateway:
             method="GET",
         )
 
+    def fetch_canvas_nodes(
+        self, run_id: int, limit: Optional[int] = None
+    ) -> dict[str, Any]:
+        """GET /internal/agent-runs/{runId}/canvas/nodes：画布节点摘要列表（snake_case）。"""
+        query = f"?limit={limit}" if limit is not None else ""
+        return self._request(
+            f"/internal/agent-runs/{run_id}/canvas/nodes{query}", method="GET"
+        )
+
+    def fetch_canvas_node(self, run_id: int, node_id: str) -> dict[str, Any]:
+        """GET /internal/agent-runs/{runId}/canvas/nodes/{nodeId}：单节点详情（snake_case）。"""
+        return self._request(
+            f"/internal/agent-runs/{run_id}/canvas/nodes/{node_id}", method="GET"
+        )
+
+    def fetch_asset(self, run_id: int, asset_id: int) -> dict[str, Any]:
+        """GET /internal/agent-runs/{runId}/assets/{assetId}：Asset 元数据（snake_case）。"""
+        return self._request(
+            f"/internal/agent-runs/{run_id}/assets/{asset_id}", method="GET"
+        )
+
+    def fetch_generation_job_status(
+        self, run_id: int, job_id: int
+    ) -> dict[str, Any]:
+        """GET /internal/agent-runs/{runId}/generation-jobs/{jobId}/status：任务状态（snake_case）。"""
+        return self._request(
+            f"/internal/agent-runs/{run_id}/generation-jobs/{job_id}/status",
+            method="GET",
+        )
+
+    def fetch_creative_skills(self, run_id: int) -> list[dict[str, Any]]:
+        """GET /internal/agent-runs/{runId}/creative-skills：Creative Skill 元数据列表。"""
+        return self._request(
+            f"/internal/agent-runs/{run_id}/creative-skills", method="GET"
+        )
+
     def _request(
         self,
         path: str,
         payload: Optional[dict[str, Any]] = None,
         method: str = "POST",
-    ) -> dict[str, Any]:
+    ) -> Any:
         headers: dict[str, str] = {
             "Accept": "application/json",
             "X-Worker-Id": self._worker_id,
@@ -179,6 +215,7 @@ class JavaRunGateway:
             raise RuntimeError(
                 f"Java Product API 返回 HTTP {error.code}: {detail}"
             ) from error
-        if result.get("code") != 200 or not isinstance(result.get("data"), dict):
+        # list_creative_skills 等端点返回数组（data 为 list），其余为对象（dict）。
+        if result.get("code") != 200 or not isinstance(result.get("data"), (dict, list)):
             raise RuntimeError(result.get("msg") or "Java Product API 拒绝请求")
         return result["data"]
