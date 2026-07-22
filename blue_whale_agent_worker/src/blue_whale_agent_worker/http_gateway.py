@@ -55,6 +55,8 @@ def run_work_from_payload(data: dict[str, Any]) -> RunWork:
             data.get("activated_creative_skill_versions")
         ),
         tool_grants=_parse_tool_grants(data.get("tool_grants")),
+        conversation_summary=data.get("conversation_summary"),
+        canvas_nodes=tuple(data.get("canvas_nodes", ())),
     )
 
 

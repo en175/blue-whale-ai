@@ -761,6 +761,54 @@ class ConversationAgentRunIT {
         assertThat(count("agent_runs", "project_id", project.getId())).isZero();
     }
 
+    @Test
+    void claimDeliversCompactInitialContextWithBoundedMessageWindow() throws Exception {
+        // IK2QC8：claim 下发紧凑三段（契约 §6.1）——Conversation 摘要 + 画布媒体节点 + 有界最近窗口，
+        // 不再整段全量消息。其余历史由 read_conversation_history 按需读取。
+        Project project = new Project().setOwnerId(10L).setName("compact-initial-context");
+        projectMapper.insert(project);
+        Asset canvasAsset = referenceAsset(project.getId(), "reference/canvas.png");
+        long assetId = canvasAsset.getId();
+        // 画布挂一个携带 assetId 的媒体节点；无 assetId 的纯文本节点不在 claim 下发。
+        jdbcTemplate.update(
+                "INSERT INTO canvas (project_id, nodes_json) VALUES (?,?)",
+                project.getId(),
+                "[{\"id\":\"node-1\",\"type\":\"image\",\"data\":{\"assetId\":" + assetId + "}},"
+                        + "{\"id\":\"node-2\",\"type\":\"text\",\"data\":{}}]");
+        // 发 1 条消息建 run + conversation（sequenceNo=1, role=user, content=「msg-1」）
+        JsonNode accepted = postMessage(project.getId(), "compact-context-key", "msg-1");
+        long runId = accepted.path("agent_run_id").asLong();
+        long conversationId = jdbcTemplate.queryForObject(
+                "SELECT conversation_id FROM conversation_messages WHERE id = ?", Long.class,
+                accepted.path("message_id").asLong());
+        // 向同一 conversation 追加 9 条消息（sequenceNo 2..10，user/assistant 混角）→ 共 10 条
+        for (int i = 2; i <= 10; i++) {
+            jdbcTemplate.update(
+                    "INSERT INTO conversation_messages (conversation_id, project_id, role, content, sequence_no) "
+                            + "VALUES (?,?,?,?,?)",
+                    conversationId, project.getId(),
+                    i % 2 == 0 ? "assistant" : "user", "msg-" + i, i);
+        }
+
+        JsonNode work = claim(runId);
+
+        // messages 为有界最近窗口（末尾 6 条，时间升序），非全量 10 条
+        JsonNode messages = work.path("messages");
+        assertThat(messages.isArray()).isTrue();
+        assertThat(messages.size()).isEqualTo(6);
+        assertThat(messages.get(0).path("content").asText()).isEqualTo("msg-5");
+        assertThat(messages.get(5).path("content").asText()).isEqualTo("msg-10");
+        // conversation_summary.message_count 为全量消息数 10（窗口有界但摘要统计全量）
+        assertThat(work.path("conversation_summary").path("message_count").asInt()).isEqualTo(10);
+        // canvas_nodes 仅含携带 assetId 的媒体节点（node-1）；纯文本 node-2 不在
+        JsonNode canvasNodes = work.path("canvas_nodes");
+        assertThat(canvasNodes.isArray()).isTrue();
+        assertThat(canvasNodes.size()).isEqualTo(1);
+        assertThat(canvasNodes.get(0).path("node_id").asText()).isEqualTo("node-1");
+        assertThat(canvasNodes.get(0).path("type").asText()).isEqualTo("image");
+        assertThat(canvasNodes.get(0).path("asset_id").asLong()).isEqualTo(assetId);
+    }
+
     private JsonNode postMessage(Long projectId, String idempotencyKey, String content) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/projects/{id}/conversation/messages", projectId)
                         .header("X-User-Id", "10")

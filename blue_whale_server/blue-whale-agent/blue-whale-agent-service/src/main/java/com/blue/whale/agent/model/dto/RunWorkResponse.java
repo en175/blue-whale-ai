@@ -21,7 +21,11 @@ public record RunWorkResponse(
         List<RunMessage> messages,
         Checkpoint checkpoint,
         List<AcceptedResult> acceptedResults,
-        String toolGrants
+        String toolGrants,
+        // IK2QC8 紧凑初始上下文（契约 §6.1）：摘要 + 画布媒体节点 + 有界最近窗口。
+        // messages 语义收窄为最近窗口，conversationSummary / canvasNodes 可空。
+        ConversationSummaryResponse conversationSummary,
+        List<CanvasNodeSummary> canvasNodes
 ) {
     public record RunMessage(String role, String content) {
     }

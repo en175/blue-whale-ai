@@ -60,6 +60,12 @@ class RunWork:
     # 当次 Run 钉住的 ToolGrant 子集（契约 §2.5）：Adapter 据此动态构造模型可见工具集，
     # 未授权工具对模型完全不可见。enforcement-disabled 时 Java 不下发，gateway 解析为空集。
     tool_grants: Sequence[ToolGrant] = ()
+    # IK2QC8 紧凑初始上下文（契约 §6.1）：claim 下发的 Conversation 摘要与画布媒体节点。
+    # conversation_summary 为摘要 Mapping 或 None（enforcement-disabled / 空 Conversation）；
+    # canvas_nodes 为携带 assetId 的媒体节点摘要列表（无画布 / 无媒体节点 → 空集，合法）。
+    # messages 语义收窄为「有界最近窗口」（末尾若干条），首轮仍含最新 user 消息。
+    conversation_summary: Optional[Mapping[str, Any]] = None
+    canvas_nodes: Sequence[Mapping[str, Any]] = ()
 
 
 @dataclass(frozen=True)

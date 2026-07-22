@@ -122,6 +122,61 @@ class RunWorkPayloadTest(unittest.TestCase):
         self.assertIsNone(work.model_profile_version)
         self.assertIsNone(work.activated_creative_skill_versions)
 
+    def test_run_work_carries_compact_context_fields(self) -> None:
+        # IK2QC8（契约 §6.1）：conversation_summary（dict）与 canvas_nodes（列表）从
+        # snake_case 载荷正确解析；messages 现为有界最近窗口但仍原样解析。
+        work = run_work_from_payload(
+            {
+                "agent_run_id": 23,
+                "project_id": 7,
+                "conversation_id": 11,
+                "user_id": 10,
+                "run_version": 2,
+                "fencing_token": 5,
+                "engine": "pydantic-ai",
+                "engine_version": "2.9.0",
+                "adapter_schema_version": 1,
+                "messages": [{"role": "user", "content": "生成海报"}],
+                "checkpoint": None,
+                "conversation_summary": {
+                    "conversation_id": 11,
+                    "message_count": 10,
+                    "first_user_preview": "生成海报",
+                    "last_message_preview": "msg-10",
+                    "earliest_at": "2026-07-22T10:00:00",
+                    "latest_at": "2026-07-22T11:00:00",
+                },
+                "canvas_nodes": [
+                    {"node_id": "node-1", "type": "image", "asset_id": 77},
+                ],
+            }
+        )
+        self.assertEqual(10, work.conversation_summary["message_count"])
+        self.assertEqual("生成海报", work.conversation_summary["first_user_preview"])
+        self.assertEqual(1, len(work.canvas_nodes))
+        self.assertEqual("node-1", work.canvas_nodes[0]["node_id"])
+        self.assertEqual(77, work.canvas_nodes[0]["asset_id"])
+
+    def test_run_work_compact_context_null_when_absent(self) -> None:
+        # 字段缺失 / enforcement-disabled → conversation_summary=None，canvas_nodes=()。
+        work = run_work_from_payload(
+            {
+                "agent_run_id": 23,
+                "project_id": 7,
+                "conversation_id": 11,
+                "user_id": 10,
+                "run_version": 2,
+                "fencing_token": 5,
+                "engine": "fake",
+                "engine_version": "1",
+                "adapter_schema_version": 1,
+                "messages": [],
+                "checkpoint": None,
+            }
+        )
+        self.assertIsNone(work.conversation_summary)
+        self.assertEqual((), work.canvas_nodes)
+
     @patch("blue_whale_agent_worker.http_gateway.urlopen")
     def test_streaming_methods_use_java_product_api_paths(self, mocked_urlopen) -> None:
         mocked_urlopen.return_value = FakeResponse()
