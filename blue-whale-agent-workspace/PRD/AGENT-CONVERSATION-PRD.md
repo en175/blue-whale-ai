@@ -359,5 +359,5 @@ BottomDock 直生(`/api/projects/{project_id}/generate`)与 Agent 对话(`/agent
 ## 8. 风险
 
 - **Agent runtime 复杂度**:Full Video Canvas 编排是多 worker 协作,后端实现成本高。P0 接口和消息链路一次到位,联调时按入口验收:先 Dock 直生,再 Agent lightweight / prompt_only / full_canvas。
-- **URL 签名过期**:Skill 封面用 CloudFront Signed URL,会集体 403;由 Skill 面板的 `signed-cover` 接口兜底,详见 `FRONTEND-SKILL-PANEL-PRD.md` §9。
+- **URL 签名过期(已解,2026-07-22)**:Skill 封面不用签名(详见 `FRONTEND-SKILL-PANEL-PRD.md` §3.4),无集体 403 风险。
 - **匿名身份迁移**:P2 引入登录时,需把 `anonymous_id` 名下的 Project/Asset/对话合并到正式账户,后端需预留合并路径(详见 `BACKEND-API-PRD.md` §11)。
