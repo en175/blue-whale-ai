@@ -8,7 +8,7 @@
 实现前**必读**：
 
 - `AGENT-CONVERSATION-PRD.md` —— Agent turn 契约、每轮硬状态代码（§产品上下文）。
-- `skill/rules/product_switch_p0.md` —— 运行时产品切换规则。**本文落定后需同步：两槽位（active/previous）→ N 槽位（content_versions + active 指针）+ 阈值引导**。
+- `skill/rules/product_switch_p0.md` —— 运行时产品切换规则（**已同步**：两槽位 → N 槽位 `content_versions` + active 指针 + 阈值引导，见 §11）。
 - `skill/references/backend_implementation_contract.md` —— 字段权威定义层，本文不重定义字段，只引用。
 - `PRD/ORCHESTRATION-DECISIONS.md` 决策 1 —— 半成品 Brief 不保留口径，本文沿用。
 
@@ -180,11 +180,11 @@ Codex / Claude Code / OpenCode 三者的压缩机制本质相同：**整段对�
 
 ---
 
-## 11. 关联文档同步（本次不做，标注待办）
+## 11. 关联文档同步（已完成）
 
-- `skill/rules/product_switch_p0.md` —— 需从两槽位改为 N 槽位 + 阈值引导 + 写入门槛（Brief confirmed）。
-- `PRD/FRONTEND-INTEGRATION-ROADMAP.md` §模块10 —— `content_versions` / 历史资产引用 / 恢复版本 从 P1 提 P0；`conversation_summary` / `version_index` 保持 P1。
-- `PRD/AGENT-CONVERSATION-PRD.md` 硬状态代码 —— `previous_product_context` 扩展为 history 摘要。
+- `skill/rules/product_switch_p0.md` —— 已从两槽位（active / previous）改为 N 槽位（active + `product_history`），6 类判断重写，含阈值引导（第 6 类）+ 写入门槛（Brief confirmed）。
+- `PRD/FRONTEND-INTEGRATION-ROADMAP.md` §模块10 —— `content_versions` / 历史资产引用 / 恢复版本 已提 P0（行 96 / 105–107 / 128）；`conversation_summary` / `version_index` 保持 P1。
+- `PRD/AGENT-CONVERSATION-PRD.md` 硬状态代码 —— `previous_product_context` 已升级为 `product_history_summary`（行 90）。
 
 ---
 
