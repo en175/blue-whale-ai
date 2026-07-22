@@ -6,11 +6,11 @@
 > 给前后端工程师的 Agent 对话交付契约。从 `BACKEND-API-PRD.md` §5.6 抽出,闭合 Skill 面板 ↔ Agent 对话的接入点断头路。
 > 版本:P0 · 日期:2026-07-05
 
-> **⚠️ 2026-07-21 后端扫描校准**:本文是 Agent 对话**交付契约**(理想)。后端 `blue_whale_server` 扫描确认:**agent turn 整条零实现**(无 `/api/projects/{id}/agent/turn` Controller / turn Service / `decision_context` 算法 / turn SSE / messages 表)。前端 `AgentChatPanel` 仍走 `buildMockReplyForMode` 本地 mock。
+> **⚠️ 2026-07-21 后端扫描校准**:本文是 Agent 对话**交付契约**(理想)。后端 `blue_whale_server` 扫描确认:**agent turn 整条零实现**(无 `/api/agent/projects/{id}/turn` Controller / turn Service / `decision_context` 算法 / turn SSE / messages 表)。前端 `AgentChatPanel` 仍走 `buildMockReplyForMode` 本地 mock。
 >
 > 本契约由 wayfinder map #IK29RN 细拆为 7 票(B–H,挂 #IJZ7Z7),前置共享地基 #IK2H6I(G0)。实现时**可复用**:`JobStreamBus` 订阅/补发 history/complete 模式、`SseEmitter`+`@Async(GENERATION_EXECUTOR)`、`X-User-Id`+`UserContext.requireUserId`(网关注入)、`jobs.source=agent`+`stage_id`(已就绪,Agent Job 关联 stage 零工作)、`skill.content`(md 全文,turn 拼 prompt 直读)。
 >
-> **待定**:turn 端点路径——网关显式路由只有 `/api/agent/**` + `/api/auth/**`,`/api/projects/**` 路由缺口;走 `/api/agent/projects/{id}/turn` 还是补网关路由,B 票(#IK2H7R)执行时定。
+> **turn 端点路径已定(2026-07-22 #IK2LMS 调研)**:走 `POST /api/agent/projects/{project_id}/turn`,复用现成 `/api/agent/**` 谓词,零网关改动。前提纠正:不存在 `/api/projects/**` 缺口,全仓 26 端点统一挂 `/api/agent/<resource>` 下(`blue-whale-gateway bootstrap.yml` 单条谓词,无动态路由 bean)。B 票(#IK2H7R)执行时落 `TurnController`。
 
 ## 0. 怎么读这份文档
 
@@ -54,7 +54,7 @@ P0 按两条入口落地，避免把 Dock 直生和 Agent 编排混成一条链�
 
 ## 2. 输入
 
-### `POST /api/projects/{project_id}/agent/turn`
+### `POST /api/agent/projects/{project_id}/turn`
 
 用户在 AgentChatPanel 发一句话。后端先算 `decision_context`,主 Agent 按 `decision_branch` 分流(轻量编排 / Full Canvas / prompt_only / 非生成等),逐段流式返回;必要时启动 GenerationJob。
 
@@ -258,6 +258,28 @@ Skill 面板只负责把"用户选了哪个 skill / 哪些 skill 开了 auto"传
 - **冲突仲裁**:`forced_skill_id`(Use)> auto 候选池 > 未指定。Use 与 auto 冲突时以 Use 为准。
 - **`forced_skill_id` 仅决定 skill 选择那一步,不锁后续 Stage**(skill 选完后的 brief→分镜→视觉→视频 编排照常走)。
 - **Use 不持久化为 `auto`**(一次性指令)。
+
+#### forced 符合性判断与反问(2026-07-22 #IK2LY7 grilling 补)
+
+`forced_skill_id` 不盲从执行,Agent 先判 skill 跟意图的符合性:
+
+- **判断方式**:复用 L1 已算的 `intent_direction`,比对 forced_skill 能力类型,**零额外重模型成本**。
+- **反问阈值**:只在 skill 能力跟意图所需能力类型**正交**时反问(生图 vs 文本、文本 vs 视频这类)。轻度场景偏差不拦,默认信任 forced。跟候选图消歧阈值一致(有明显歧义才打断)。
+- **反问形态**(命中阈值时):
+  - `visible_reasoning`:说明不符
+  - `message(skill_recommendation)`:带 **1 个候选推荐** skill
+  - `turn_done`:`requires_user_action=true`,`allowed_actions` 三选——用推荐的 / 坚持原 forced / 按意图不用 skill
+- **符合时不推推荐卡**:`forced_skill_id` 跟意图匹配(无反问)时,Agent 直接执行,在 `visible_reasoning` 一句话带过("按你选的「X」skill 执行"),不推 `skill_recommendation`。
+
+#### skill_recommendation 触发清单(2026-07-22 补)
+
+| 场景 | 推不推 | 形态 |
+|---|---|---|
+| Full Canvas Turn 1 开局(见 §3) | 推 | 告知型(软过,Agent 选了告知,不停) |
+| forced 不符反问(见上) | 推 | 交互型(带候选 + allowed_actions 三选) |
+| 轻量编排 / auto 命中 / 未 Use | 不推 | `visible_reasoning` 一句话带过 |
+
+**原则**:只在需要用户参与 skill 决策时推。`visible_reasoning` 承担"告知用了什么 skill",`skill_recommendation` message 承担"需要用户拍板"。两者职责分开,不重叠。
 
 > 呼应 `FRONTEND-SKILL-PANEL-PRD.md` §5(接入点)。两边联调验收见该 PRD §8 第 7 条。
 
