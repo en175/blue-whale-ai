@@ -144,8 +144,20 @@ Bundle 的 SemVer 公共面由三部分共同组成：本 Schema / manifest 结�
 - Markdown / 文本在发布前必须已经是 UTF-8（无 BOM）和 LF；发布器校验但不静默改写，摘要计算对象
   是发布者提交的确切字节。需要换行或编码迁移时先在 Draft 中显式产生新 revision。
 - 每个资源使用 `sha256:<64 位小写十六进制>`；摘要不同即为不同 revision 内容。
-- `manifestDigest` 对移除自身 `manifestDigest` 字段后的 manifest 使用 RFC 8785 JSON Canonicalization
-  Scheme 规范化，再计算 SHA-256。
+- `manifestDigest` 对移除自身 `manifestDigest` 字段后的 manifest 做规范化再计算 SHA-256，
+  前缀 `sha256:<64 位小写十六进制>`。规范化是双侧各自的等价实现，**不是 RFC 8785 JSON
+  Canonicalization Scheme**：对象键递归字典序（Python `json.dumps(sort_keys=True)`、Java
+  `Comparator.naturalOrder()`，在 ASCII / BMP 键下逐字节一致）、数组保序、紧凑分隔符
+  （`,` / `:` 无空格）、UTF-8 编码。实现锚点为
+  `blue_whale_agent_worker/.../bundle/canonical.py` 与 `RuntimeBundleDigests.java#canonicalize`，
+  golden 测试用 Java IT 夹具（`pin_agent_v2_0_0` manifest）锁定双侧逐字节一致。
+- 上述等价性的确定性前提由 schema 显式保证，放宽任一约束即须 MAJOR 版本双侧重对齐：所有
+  数值字段为 `"type":"integer"`（`formatVersion` / `schemaVersion` 为 `"const":1` 字面量，无
+  浮点）；manifest 键集封闭——但**无单一顶层 `additionalProperties:false`**，封闭性由根
+  `oneOf`（`BundleDraft` / `BundleVersion`）两分支各自 `additionalProperties:false` 与五资源
+  子类型（`RoleDocument` / `Rule` / `RuntimeSkill` / `CreativeSkill` / `ReferenceResource`）的
+  `unevaluatedProperties:false` 共同实现；键全 ASCII。一旦 manifest 出现浮点（科学计数法）、
+  非 BMP（代理对）键或 `U+2028` / `U+2029`，Python `json.dumps` 可能与 Jackson 分叉。
 - 归档容器的文件顺序、时间戳或压缩参数不参与身份；可复现性由 manifest 与每个资源摘要保证。
 
 ## 4. ResourceManifest 与发布校验
@@ -248,7 +260,15 @@ Worker 认领 Run 时：
 1. 通过 Java 内部接口按 `bundleVersionId` 取得发布快照，校验 `manifestDigest`。
 2. 初始装载 RoleDocument、`always_on` Rules 和 Runtime/Creative Skill 元数据。
 3. Agent 选择 Skill 或引用资源时，按已解析 resourceId 读取内容；每次读取前执行 token 预算。
-4. Worker commit 必须回传已使用的 Bundle、ModelProfile、CreativeSkill 与资源摘要证据。
+4. Worker commit 回传的证据分两层：
+   - **资源读取证据 `ReadEvidence`**：Worker 是资源装载唯一知情者，必须回传本次 Run 实际读取的
+     每个资源的 `ReadEvidence`（`resource_id` / `revision` / `content_digest` / `token_estimate` /
+     `origin`），与 `usage` 指标同通道（载荷字段 `bundle_evidence`）。Java 侧当前仅 `log.info`
+     记录条数、不持久化；该载荷另经 `requestDigest` 进入幂等哈希（反重放，非持久化）。
+   - **Bundle / ModelProfile / CreativeSkill pin 不回传**：`bundle_version_id` / `manifest_digest` /
+     `model_profile_id` / `model_profile_version` / `activated_creative_skill_versions` 在 RunWork
+     下发时已由 Java AgentRun 原子固定并权威记录，Worker 装载前 fail-closed 校验，commit 载荷
+     不回传这些 pin 回显字段。
 5. 版本缺失、摘要不符、资源未授权或预算超限时 fail closed；生产环境不得切换到默认提示词或 Mock。
 
 Bundle 固定与 `engine + engineVersion + adapterSchemaVersion` 固定是正交维度：前者固定行为配置，
@@ -338,7 +358,7 @@ AgentDefinition、Draft/Version、from/to 版本、manifestDigest、结果与规
 | 调研问题 | 本契约决议 |
 |---|---|
 | SemVer 公共 API | Schema / manifest、装载与 Grant/Profile 接口、可观察 Agent 能力共同组成；规则见 3.1 |
-| Bundle 根摘要 | 采用 SHA-256(JCS(manifest 去除自身摘要字段))，JCS 固定 RFC 8785 |
+| Bundle 根摘要 | 采用 SHA-256(规范化(manifest 去除自身 `manifestDigest` 字段))；规范化 = 对象键递归字典序 + 数组保序 + 紧凑分隔符 + UTF-8（**非 RFC 8785 JCS**）。确定性依赖 schema：数值字段全 `"integer"`（`formatVersion` / `schemaVersion` 为 `const:1`）、键集封闭（根 `oneOf` 两分支 `additionalProperties:false` + 五资源子类型 `unevaluatedProperties:false`，**无单一顶层 `additionalProperties:false`**）、键全 ASCII；放宽任一约束须 MAJOR 双侧重对齐 |
 | 归档逐字节复现 | P0 不要求，只要求逻辑 manifest 与资源摘要往返一致 |
 | 外部引用 | 禁止；发布快照必须完全自包含且默认离线解析 |
 | 递归 Schema | P0 ToolGrant 禁止外部、动态和递归引用；关键 format 另做领域校验 |
