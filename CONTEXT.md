@@ -151,6 +151,34 @@ _Avoid_: 把 Brief / Skill / 分镜 / Review 做成画布节点;在画布或对�
 为验证某个高风险点而做的最小可运行验证，**不是正式功能交付**。
 _Avoid_: 原型、demo、试验（这些含义更宽）
 
+### 计费与货币
+
+> 计费域术语适用于 `blue_whale_api`（开源 new-api 二开）。统一 RMB 决策见 [ADR-0021](docs/adr/0021-unified-rmb-billing.md)。
+
+**quota（额度）**:
+new-api 内部中性计费单位（无货币属性，类比游戏币）；默认锚点 500000 quota = $1（`QuotaPerUnit`）只是换算系数，非 quota 固有的美元属性。所有扣费、充值、余额最终落到 quota 整数。
+_Avoid_: 把 quota 当作美元 / 人民币；把 500000=$1 当作 quota 的固有属性
+
+**价格模式（price mode）**:
+模型定价的一种录入形态，存原始价（`ModelPrice`）。**保持美元锚点存储**（`ModelPrice` 仍 $ 语义，不做语义重定义）。管理员可经前端 ¥/$ 输入辅助按 ¥ 填，提交时前端 ÷汇率 转 $ 存入（见 ADR-0021 决策②）。
+_Avoid_: 把价格模式当作比率模式；以为统一 RMB 要重定义存储语义或新建存储
+
+**比率模式（ratio mode）**:
+模型定价的另一种录入形态，存乘数（`ModelRatio`），按基准倍率计费，不受汇率换算影响。
+_Avoid_: 把比率模式当作价格模式
+
+**汇率（exchange rate，`USDExchangeRate`）**:
+默认 7、可动态配，统一用于**展示换算**（getDisplayMeta 锁 CNY）与**前端 ¥→$ 输入换算**。**不用于后端计费÷**（计费美元锚点不动）；改后重启生效。
+_Avoid_: 展示汇率与输入换算汇率分离维护；以为计费公式要÷汇率；当作固定常量
+
+**按秒计费（per-second billing）**:
+视频 / 异步生成任务的计费方式，adapter 返回 `{"seconds":N}` 经 `task_billing` 与 `billingexpr` DSL 按秒算，是 new-api 原生能力。
+_Avoid_: 把按秒计费当作二开新功能
+
+**ratio_sync（上游价格同步）**:
+从 models.dev 拉上游官方定价（USD）的功能，手动触发（非自动 cron）。**保持美元锚点不动**：拉 USD 官方价 → ratio，不改造成拉¥存¥。美元模型（claude 等）上游有官方 USD 价，自动同步正常。
+_Avoid_: 把 ratio_sync 当作自动 cron；为统一 RMB 改造它拉¥存¥；在 RMB 体系下直接禁用它
+
 ### Agent 协作语言
 
 **用户本地集成区**:
