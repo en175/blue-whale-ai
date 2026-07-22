@@ -21,7 +21,7 @@ Skill 面板是**独立功能模块**,不是某个页面的附属。它负责让
 - Skill 库 ⊃ 我的 Skills(引用关系,跟随更新,非副本)
 - 库 → 添加到我的;我的 → 移除
 - 我的 skill 的 `auto` 开关、`Use` 手动选用
-- 封面签名 URL 按需加载(替换现有 33 条硬编码签名)
+- 封面走 `cover_url` 公开 URL(DB `skill.cover_url`),空走占位图(无签名)
 
 ### 不包含(P0 隐藏,推迟)
 
@@ -64,7 +64,7 @@ Skill 库(library)
       "id": "skl_xxx",
       "name": "电商产品图",
       "description": "...",
-      "cover_token": "skl_xxx",      // 用于换签名 URL,不是签名本身
+      "coverUrl": "https://...",     // 公开图 URL(skill.cover_url),空则前端走占位
       "source": "official" | "community",
       "added": true                   // 当前用户是否已添加到"我的"
     }
@@ -92,9 +92,11 @@ Skill 库(library)
 - `DELETE /api/skills/mine/{id}` —— 解除引用(从"我的"移除),**不删 skill 本身**
 - `PATCH /api/skills/mine/{id}` —— `{ "auto": boolean }`,改关系上的 auto 开关
 
-### 3.4 封面签名
+### 3.4 封面(无签名,2026-07-22 决策)
 
-- `GET /api/skills/{id}/signed-cover` —— 按需签发,带过期。前端**不得**缓存签名 URL 超过其 `expires_in`。
+- Skill 封面**不用 CloudFront Signed URL**(封面非敏感,PM 定)。无 `signed-cover` 端点。
+- 封面 = `skill.cover_url`(公开图 URL),由 `library`/`mine` 响应直接返回 `coverUrl`,前端直取。
+- `cover_url` 为空 → 前端走 `COVER_PLACEHOLDER` 占位图。
 
 ## 4. 交互规则
 
@@ -127,9 +129,9 @@ Skill 库(library)
 
 ### 4.4 封面加载策略
 
-- 列表先用占位图渲染,**不阻塞**面板打开
-- 异步请求 `signed-cover`,拿到后填入
-- 签名过期或加载失败 → 统一兜底占位图,**不显示裂图**
+- 列表用 `coverUrl` 渲染,空值走 `COVER_PLACEHOLDER` 占位图,**不阻塞**面板打开
+- `coverUrl` 加载失败 → 统一兜底占位图,**不显示裂图**
+- 无签名/无过期/无重签(封面是公开静态 URL)
 
 ### 4.5 `Use` 与 `auto` 的语义
 
@@ -156,7 +158,7 @@ Skill 库(library)
 
 现有前端 `components/SkillPanel.tsx` 的硬编码:
 
-- `MY_SKILLS`(33 条,含 CloudFront 签名 URL)—— **全部移除**,改走 `GET /skills/mine` + `signed-cover`
+- `MY_SKILLS`(33 条,含 CloudFront 签名 URL)—— **全部移除**,改走 `GET /skills/mine`(封面取 `cover_url`,无签名)
 - `LIBRARY_SKILLS`(6 条,placehold.co 占位)—— **全部移除**,改走 `GET /skills/library`
 - `SKILL_MD_TEMPLATE`(创建 tab 用)—— P0 隐藏,保留代码不删
 
@@ -164,9 +166,9 @@ Skill 库(library)
 
 ## 7. 禁止体验
 
-- 不得硬编码签名 URL(已淘汰,会集体过期 403)
+- 不得硬编码 skill 数据(含封面 URL),全部走后端 `cover_url`
 - 不得复制 skill 内容到"我的"(引用,非副本)
-- 封面签名失败时不得显示裂图,必须兜底占位
+- 封面 `cover_url` 加载失败时不得显示裂图,必须兜底占位
 - 移除"我的"中的 skill 不得删除库里的原 skill
 - `auto` 状态不得跨用户污染(关系属性,非 skill 属性)
 - 两个 tab 的"已添加"状态不得出现不同步
@@ -177,13 +179,13 @@ Skill 库(library)
 1. 我的 Skills / Skill 库两个 tab 正常切换,数据全部来自后端(`SkillPanel.tsx` 内零硬编码 skill 数据)。
 2. **双向同步**:库点"添加" → "我的"立刻出现 + 库中该条同步变"已添加";"我的"点移除 → "我的"消失 + 库中该条同步变回"添加"按钮。任意时刻两边状态一致。
 3. `auto` 开关切换持久化,刷新页面后状态保留。
-4. 封面通过 `signed-cover` 异步加载,列表不阻塞;签名失败显示兜底占位,无裂图。
+4. 封面走 `cover_url` 渲染,空值/加载失败显示兜底占位,无裂图(无签名机制)。
 5. 库内 skill 更新(封面/名称/描述),"我的"中同 skill_id 跟随变化。
 6. 创建 Skill 入口对用户不可见。
 7. **联调验收(依赖 Agent 模块)**:点 `Use` 后,当前 Agent turn 确实按该 skill 执行;`auto=on` 的 skill 会出现在 Agent 后续 turn 的候选中。
 
 ## 9. 风险
 
-- **签名 URL 过期**:现有 33 条硬编码签名约 2026-08 过期,P0 必须在此之前切到 `signed-cover` 按需签发,否则"我的"页面集体裂图。
+- **签名 URL 过期(已解,2026-07-22)**:PM 决定封面不用签名(§3.4),33 条硬编码签名 URL 随 mock 数据一并移除(§6),改走 `cover_url` 公开 URL,无过期裂图风险。
 - **双向同步竞态**:用户快速在两 tab 间切换 + 同时操作添加/移除,可能出现本地状态与后端不一致。前端需以接口返回为权威,本地乐观更新失败时回滚。
 - **Agent 接入**:`Use` / `auto` 由 `AGENT-CONVERSATION-PRD.md` §5 承接,联调验收见本文 §8 第 7 条。
