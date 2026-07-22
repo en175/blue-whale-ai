@@ -14,22 +14,18 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletResponse;
-import java.util.Map;
 
 /**
- * 任务接口：列表查询（生成流页）、轮询查状态（前端 setInterval 调）、SSE stream 预留、Ark webhook 回调预留。
+ * 任务接口：列表查询（生成流页）、轮询查状态（前端 setInterval 调）、SSE stream 预留。
  *
- * <p>类级不加 {@code @RequestMapping}：端点路径前缀不同（{@code /api/agent/jobs} 与 {@code /api/webhooks/ark}），
- * 方法级写全路径更清晰。
+ * <p>类级不加 {@code @RequestMapping}：方法级写全路径更清晰。
  */
-@Tag(name = "任务接口", description = "任务列表查询、轮询查状态、SSE 与 webhook 预留")
+@Tag(name = "任务接口", description = "任务列表查询、轮询查状态、SSE 预留")
 @RestController
 @RequiredArgsConstructor
 public class JobController {
@@ -64,12 +60,6 @@ public class JobController {
         SseEmitter emitter = new SseEmitter(300_000L);
         jobStreamBus.subscribe(id, emitter);
         return emitter;
-    }
-
-    /** Ark 任务回调 webhook 预留：MVP 不依赖回调（poller 主动拉），仅收悉 200。 */
-    @PostMapping("/api/webhooks/ark")
-    public Result<Map<String, String>> arkCallback(@RequestBody(required = false) Map<String, Object> payload) {
-        return Result.ok(Map.of("status", "received"));
     }
 
     private Long requireUserId(Long userId) {
