@@ -42,6 +42,31 @@ _CLARIFICATION_PENDING_KIND = "clarification"
 
 ImageAspectRatio = Literal["1:1", "16:9", "9:16", "4:3", "3:4", "2:3", "3:2", "21:9"]
 
+# 视频 aspect_ratio 与图片分开声明：视频能力 enum 不含 2:3 / 3:2（对齐 Java
+# ToolRegistry create_video_generation_job inputSchema）。
+VideoAspectRatio = Literal["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]
+VideoResolution = Literal["480p", "720p", "1080p"]
+
+
+def _acceptance_text(tool_name: str) -> str:
+    # 提议接纳文案按工具区分（图片 / 视频）；图片文案逐字不变。
+    if tool_name == "generate_video":
+        return "已接纳，正在生成视频。"
+    return "已接纳，正在生成图片。"
+
+
+def _terminal_text(tool_name: str, *, succeeded: bool) -> str:
+    # 终态收尾文案按工具区分；图片文案逐字不变。
+    if tool_name == "generate_video":
+        return "视频已经生成。" if succeeded else "视频生成未完成。"
+    return "图片已经生成。" if succeeded else "图片生成未完成。"
+
+
+def _action_tool_name(action_id: str) -> str:
+    # action_id 格式 pydantic-{tool_name}-{agent_run_id}-{run_version}；tool_name 用
+    # 下划线不含连字符，split("-")[1] 稳定反解（AcceptedActionResult 无 tool 字段）。
+    return action_id.split("-")[1]
+
 
 class _ContractError(Exception):
     pass
@@ -58,6 +83,23 @@ def generate_image(
 
     size 与 web_search 可选：缺省由产品控制平面按模型能力表兜底；模型固定走能力表
     默认项，Agent 不暴露模型选择。
+    """
+    raise CallDeferred
+
+
+def generate_video(
+    prompt: str,
+    aspect_ratio: VideoAspectRatio,
+    resolution: VideoResolution,
+    duration: int,
+    reference_asset_ids: list[int] | None = None,
+) -> str:
+    """Propose a video action for the Java product control plane to accept.
+
+    参数与 Java ToolRegistry create_video_generation_job inputSchema 对齐：prompt /
+    aspect_ratio / resolution / duration 必填，reference_asset_ids 可选。duration 取值
+    范围（4–15）与 reference_asset_ids 数量（≤1）由 Java 治理链校验
+    （VideoAgentActionGovernanceIT 已测），Worker 签名不硬限——对称图片 size / web_search。
     """
     raise CallDeferred
 
@@ -103,7 +145,7 @@ class ToolImplementation:
 
 
 def _default_tool_implementations() -> Mapping[str, ToolImplementation]:
-    """生产默认工具实现目录：图片生成与请求用户输入（均 side_effect / deferred）。
+    """生产默认工具实现目录：图片生成、视频生成与请求用户输入（均 side_effect / deferred）。
 
     request_user_input 把创作澄清从隐式文本分支升级为显式副作用工具（IK2QBY）；
     只读工具的实际读取实现属后续子工单，本目录先落框架，按 grant 动态装配机制通用支持。
@@ -112,6 +154,9 @@ def _default_tool_implementations() -> Mapping[str, ToolImplementation]:
     return {
         "generate_image": ToolImplementation(
             "generate_image", "create_image_generation_job", 1, "side_effect", generate_image
+        ),
+        "generate_video": ToolImplementation(
+            "generate_video", "create_video_generation_job", 1, "side_effect", generate_video
         ),
         "request_user_input": ToolImplementation(
             "request_user_input", "request_user_input", 1, "side_effect", request_user_input
@@ -298,21 +343,26 @@ class PydanticAIOrchestrator:
                 pending_calls = (
                     {"action_id": action_id, "tool_call_id": call.tool_call_id},
                 )
-                visible_text = "已接纳，正在生成图片。"
+                visible_text = _acceptance_text(call.tool_name)
         elif work.accepted_results:
             rejected = [r for r in work.accepted_results if r.status == "rejected"]
             if rejected:
                 # IK2QBX 动作被治理拒绝后模型未再提议：用面向 User 的安全提示收尾，
                 # 不暴露内部 reasonCode。模型若选择调整，会走 DeferredToolRequests 分支提新提议。
                 message = rejected[-1].result.get("message")
-                visible_text = (
-                    message if isinstance(message, str) and message.strip()
-                    else "图片生成未完成。"
-                )
-            elif all(result.status == "succeeded" for result in work.accepted_results):
-                visible_text = "图片已经生成。"
+                if isinstance(message, str) and message.strip():
+                    visible_text = message
+                else:
+                    visible_text = _terminal_text(
+                        _action_tool_name(rejected[-1].action_id), succeeded=False
+                    )
             else:
-                visible_text = "图片生成未完成。"
+                visible_text = _terminal_text(
+                    _action_tool_name(work.accepted_results[-1].action_id),
+                    succeeded=all(
+                        result.status == "succeeded" for result in work.accepted_results
+                    ),
+                )
         else:
             # 初次推进或澄清恢复的纯文本输出（无工具调用）：模型可见文本直通，作为
             # 多轮自然对话的普通回应。澄清只来自显式 request_user_input 工具，不再由

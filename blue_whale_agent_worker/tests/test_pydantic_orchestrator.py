@@ -256,6 +256,20 @@ def _generate_image_grant() -> ToolGrant:
     )
 
 
+def _generate_video_grant() -> ToolGrant:
+    return ToolGrant(
+        tool_name="generate_video",
+        registry_version=1,
+        effect="side_effect",
+        proposal_only=True,
+        argument_schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+        },
+        constraints={},
+    )
+
+
 def _request_user_input_grant() -> ToolGrant:
     return ToolGrant(
         tool_name="request_user_input",
@@ -306,6 +320,29 @@ def image_proposal_model(messages, info):
                 "generate_image",
                 {"prompt": "蓝鲸海报", "aspect_ratio": "1:1"},
                 "provider-private-call-id",
+            ),
+        )
+    )
+
+
+def video_proposal_model(messages, info):
+    if any(
+        isinstance(part, ToolReturnPart)
+        for message in messages
+        for part in message.parts
+    ):
+        return ModelResponse(parts=(TextPart("视频已经生成。"),))
+    return ModelResponse(
+        parts=(
+            ToolCallPart(
+                "generate_video",
+                {
+                    "prompt": "蓝鲸游动",
+                    "aspect_ratio": "16:9",
+                    "resolution": "720p",
+                    "duration": 8,
+                },
+                "provider-private-video-call-id",
             ),
         )
     )
@@ -1409,6 +1446,178 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         serialized = json.dumps(payload, ensure_ascii=False)
         for forbidden in ("ledger", "evidence", "charged", SKILL_BODY, REF_BODY):
             self.assertNotIn(forbidden, serialized)
+
+    def test_production_adapter_returns_a_product_neutral_video_proposal(self) -> None:
+        # IK3AH1 验收#1#2：对称 test_production_adapter_returns_a_product_neutral_image_proposal。
+        # 视频工具走与图片相同的 deferred 提议映射；tool_id 回传 Java 注册表
+        # create_video_generation_job；action_id 不泄露 provider call id；payload 可序列化。
+        work = _pydantic_work(tool_grants=(_generate_video_grant(),))
+
+        result = PydanticAIOrchestrator(
+            FunctionModel(video_proposal_model), _bundle_source()
+        ).advance(work)
+        payload = result.to_commit_payload(work)
+
+        self.assertEqual("已接纳，正在生成视频。", payload["visible_text"])
+        self.assertEqual("create_video_generation_job", payload["actions"][0]["tool_id"])
+        self.assertEqual(
+            {
+                "prompt": "蓝鲸游动",
+                "aspect_ratio": "16:9",
+                "resolution": "720p",
+                "duration": 8,
+            },
+            payload["actions"][0]["arguments"],
+        )
+        self.assertNotEqual(
+            "provider-private-video-call-id", payload["actions"][0]["action_id"]
+        )
+        self.assertEqual("pydantic-ai", result.checkpoint.engine)
+        self.assertEqual("2.9.0", result.checkpoint.engine_version)
+        self.assertEqual(1, result.checkpoint.adapter_schema_version)
+        json.dumps(payload, ensure_ascii=False)
+
+    def test_video_tool_visible_only_when_granted(self) -> None:
+        # IK3AH1 验收#4：对称 test_tool_set_built_from_grant_and_unauthorized_invisible。
+        # 含 video grant → generate_video 在 function_tools；不含 → 不可见（只剩 read_resource）。
+        captured: dict = {}
+
+        def video_capture_model(messages, info):
+            captured["with_grant"] = sorted(t.name for t in info.function_tools)
+            return ModelResponse(
+                parts=(
+                    ToolCallPart(
+                        "generate_video",
+                        {
+                            "prompt": "蓝鲸",
+                            "aspect_ratio": "16:9",
+                            "resolution": "720p",
+                            "duration": 8,
+                        },
+                        "capture-call-id",
+                    ),
+                )
+            )
+
+        def text_capture_model(messages, info):
+            captured["without_grant"] = sorted(t.name for t in info.function_tools)
+            return ModelResponse(parts=(TextPart("纯文本对话"),))
+
+        result = PydanticAIOrchestrator(
+            FunctionModel(video_capture_model), _bundle_source()
+        ).advance(
+            _pydantic_work(
+                messages=({"role": "user", "content": "你好"},),
+                tool_grants=(_generate_video_grant(),),
+            )
+        )
+        self.assertIn("generate_video", captured["with_grant"])
+        self.assertEqual("create_video_generation_job", result.actions[0].tool_id)
+
+        # grant 为空集：未授权业务工具不可见；read_resource 是 Bundle 固有受限读取工具。
+        PydanticAIOrchestrator(
+            FunctionModel(text_capture_model), _bundle_source()
+        ).advance(
+            _pydantic_work(messages=({"role": "user", "content": "你好"},), tool_grants=())
+        )
+        self.assertEqual(["read_resource"], captured["without_grant"])
+
+    def test_mixed_grants_video_proposal_does_not_break_run(self) -> None:
+        # IK3AH1 验收#3：原 bug 回归。Bundle 同时授予图片+视频，但视频此前无注册实现，
+        # _build_tools 遍历到 video grant 命中「实现目录无注册 + 非 read 工厂」分支，
+        # 抛 ORCHESTRATOR_CONTRACT_MISMATCH → 整个 Run fail closed，连累已授权图片。
+        # 补 generate_video 实现后，混合 grant 正常推进，模型提视频不连累图片。
+        grants = (_generate_image_grant(), _generate_video_grant())
+        work = _pydantic_work(
+            messages=({"role": "user", "content": "生成蓝鲸游动视频"},),
+            tool_grants=grants,
+        )
+
+        result = PydanticAIOrchestrator(
+            FunctionModel(video_proposal_model), _bundle_source()
+        ).advance(work)
+
+        self.assertIsNone(result.error)
+        self.assertEqual(1, len(result.actions))
+        self.assertEqual("create_video_generation_job", result.actions[0].tool_id)
+
+    def test_video_contract_violations_fail_closed_without_internal_leaks(self) -> None:
+        # IK3AH1 验收#5：对称 test_contract_violations_fail_closed_without_internal_leaks。
+        # generate_video 版本漂移 / effect 不符 / ghost 视频工具 一律 fail closed，
+        # 并入归一化通道（ORCHESTRATOR_CONTRACT_MISMATCH），不泄露内部工具名。
+        schema = {"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object"}
+
+        def plain_text_model(messages, info):
+            return ModelResponse(parts=(TextPart("文本"),))
+
+        drifted = (ToolGrant("generate_video", 99, "side_effect", True, dict(schema), {}),)
+        work = _pydantic_work(
+            messages=({"role": "user", "content": "你好"},), tool_grants=drifted
+        )
+        result = PydanticAIOrchestrator(
+            FunctionModel(plain_text_model), _bundle_source()
+        ).advance(work)
+        self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
+        self.assertNotIn(
+            "generate_video",
+            json.dumps(result.to_commit_payload(work), ensure_ascii=False),
+        )
+
+        mismatched = (ToolGrant("generate_video", 1, "read", True, dict(schema), {}),)
+        work = _pydantic_work(
+            messages=({"role": "user", "content": "你好"},), tool_grants=mismatched
+        )
+        result = PydanticAIOrchestrator(
+            FunctionModel(plain_text_model), _bundle_source()
+        ).advance(work)
+        self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
+        self.assertNotIn(
+            "generate_video",
+            json.dumps(result.to_commit_payload(work), ensure_ascii=False),
+        )
+
+        ghost = (ToolGrant("ghost_video_tool", 1, "read", True, dict(schema), {}),)
+        work = _pydantic_work(
+            messages=({"role": "user", "content": "你好"},), tool_grants=ghost
+        )
+        result = PydanticAIOrchestrator(
+            FunctionModel(plain_text_model), _bundle_source()
+        ).advance(work)
+        self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
+        self.assertNotIn(
+            "ghost_video_tool",
+            json.dumps(result.to_commit_payload(work), ensure_ascii=False),
+        )
+
+    def test_video_invalid_aspect_ratio_enum_fails_closed(self) -> None:
+        # IK3AH1 验收#5：视频 aspect_ratio enum 不含图片专属 "2:3"。模型提非法 enum，
+        # pydantic-ai 在 CallDeferred 前用工具 args_validator（含 Literal enum）校验拦截，
+        # 最终 fail closed，不泄露内部工具名。duration 越界由 Java 治理链校验，不在 Worker 测。
+        def invalid_enum_model(messages, info):
+            return ModelResponse(
+                parts=(
+                    ToolCallPart(
+                        "generate_video",
+                        {
+                            "prompt": "蓝鲸",
+                            "aspect_ratio": "2:3",
+                            "resolution": "720p",
+                            "duration": 8,
+                        },
+                        "invalid-enum-call-id",
+                    ),
+                )
+            )
+
+        work = _pydantic_work(tool_grants=(_generate_video_grant(),))
+        result = PydanticAIOrchestrator(
+            FunctionModel(invalid_enum_model), _bundle_source()
+        ).advance(work)
+
+        self.assertIsNotNone(result.error)
+        self.assertEqual((), result.actions)
+        serialized = json.dumps(result.to_commit_payload(work), ensure_ascii=False)
+        self.assertNotIn("generate_video", serialized)
 
 
 if __name__ == "__main__":
