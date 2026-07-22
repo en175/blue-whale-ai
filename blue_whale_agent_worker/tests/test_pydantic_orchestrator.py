@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import unittest
 
 from pydantic_ai import CallDeferred
@@ -107,6 +108,16 @@ REF_BODY = "# 安全规则\n生成前确认比例与风格。"
 
 def _sha256(text: str) -> str:
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _disclosed_skill_resource_id(instructions: str) -> str:
+    """从 instructions 解析根 RuntimeSkill 披露的 resourceId（IK306N 按需读取寻址键）。
+
+    未匹配即断言失败——这正是被测的「根 Skill 正文按需读取在生产可达」。
+    """
+    match = re.search(r"skill resourceId: (\S+)", instructions)
+    assert match is not None, "instructions 未披露根 Skill resourceId"
+    return match.group(1)
 
 
 def _skill_manifest() -> dict:
@@ -1097,24 +1108,30 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertNotIn(SKILL_BODY, captured[0])
         self.assertNotIn(REF_BODY, captured[0])
         self.assertIn(SKILL_NAME, captured[0])  # 元数据仍披露
+        self.assertIn("skill resourceId", captured[0])  # 根 id 元数据级披露（IK306N）
         # 未触发 on_demand 读取：evidence 只含 initial
         origins = {entry["origin"] for entry in result.bundle_evidence}
         self.assertEqual({"initial"}, origins)
 
     def test_triggered_skill_body_enters_via_read_resource(self) -> None:
-        # IK2QBM acceptance #2/#6：模型触发 read_resource 读 Skill 正文，经工具返回进入，
-        # 产生 on_demand 读取证据并随 commit 回传（契约 §6 第 4 条）。
+        # IK2QBM acceptance #2/#6 + IK306N：模型从 instructions 披露的根 Skill resourceId 出发
+        # 触发 read_resource 读 Skill 正文，经工具返回进入，产生 on_demand 证据并随 commit 回传。
+        captured_instructions: list = []
+
         def read_then_clarify_model(messages, info):
+            captured_instructions.append(info.instructions)
             if not any(
                 isinstance(part, ToolReturnPart)
                 for message in messages
                 for part in message.parts
             ):
+                # 生产语义：根 id 来自 instructions 披露，不硬编码（IK306N）
+                skill_id = _disclosed_skill_resource_id(info.instructions)
                 return ModelResponse(
                     parts=(
                         ToolCallPart(
                             "read_resource",
-                            {"resource_id": SKILL_RESOURCE_ID},
+                            {"resource_id": skill_id},
                             "read-skill-call",
                         ),
                     )
@@ -1125,16 +1142,17 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             FunctionModel(read_then_clarify_model), _skill_source()
         ).advance(_skill_work())
 
+        disclosed_skill_id = _disclosed_skill_resource_id(captured_instructions[0])
         on_demand = [
             entry for entry in result.bundle_evidence if entry["origin"] == "on_demand"
         ]
         self.assertEqual(1, len(on_demand))
-        self.assertEqual(SKILL_RESOURCE_ID, on_demand[0]["resource_id"])
+        self.assertEqual(disclosed_skill_id, on_demand[0]["resource_id"])
         self.assertEqual(_sha256(SKILL_BODY), on_demand[0]["content_digest"])
         payload = result.to_commit_payload(_skill_work())
         self.assertIsNotNone(payload["bundle_evidence"])
         read_ids = {entry["resource_id"] for entry in payload["bundle_evidence"]}
-        self.assertIn(SKILL_RESOURCE_ID, read_ids)
+        self.assertIn(disclosed_skill_id, read_ids)
 
     def test_triggered_skill_references_read_in_layers(self) -> None:
         # IK2QBM acceptance #2：触发后正文与引用资源可逐层按需读取。instructions 披露
@@ -1150,11 +1168,13 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 if isinstance(part, ToolReturnPart)
             ]
             if len(returns) == 0:
+                # 生产语义：根 id 来自 instructions 披露（IK306N）
+                skill_id = _disclosed_skill_resource_id(info.instructions)
                 return ModelResponse(
                     parts=(
                         ToolCallPart(
                             "read_resource",
-                            {"resource_id": SKILL_RESOURCE_ID},
+                            {"resource_id": skill_id},
                             "read-skill",
                         ),
                     )
@@ -1210,11 +1230,12 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         )
 
         def read_model(messages, info):
+            skill_id = _disclosed_skill_resource_id(info.instructions)
             return ModelResponse(
                 parts=(
                     ToolCallPart(
                         "read_resource",
-                        {"resource_id": SKILL_RESOURCE_ID},
+                        {"resource_id": skill_id},
                         "tampered-call",
                     ),
                 )

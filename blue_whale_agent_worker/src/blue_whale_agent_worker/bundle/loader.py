@@ -13,6 +13,8 @@ token 估算按快照 ``TokenBudget.estimator`` 执行（当前仅 ``chars_div_4
 ``RuntimeBundleValidator.estimateTokens`` 逐字节一致：空串 0，否则 ``max(1, (len + 3) // 4)``；
 Skill 元数据估算对象为 ``name + "\\n" + description``（对齐 Java 预算校验）；Skill 已解析引用的
 ``resolvedResourceId`` 进入初始上下文（模型逐层 ``read_resource`` 的寻址键），额外计入活动基线。
+根 ``RuntimeSkill`` 自身的 ``resourceId``（来自 ``composition.rootRuntimeSkillId``）同样进入初始
+上下文，作为模型按需 ``read_resource`` 读取根 Skill 正文的寻址键，额外计入活动基线。
 """
 
 from __future__ import annotations
@@ -111,7 +113,10 @@ class ContextLoader:
         bundle_version_id = verified.bundle_version_id
         role_body = self._fetch_body(bundle_version_id, role)
         rule_bodies = [self._fetch_body(bundle_version_id, rule) for rule in always_rules]
-        instructions = self._render_instructions(role_body, rule_bodies, skills)
+        root_runtime_skill_id = composition.get("rootRuntimeSkillId")
+        instructions = self._render_instructions(
+            role_body, rule_bodies, skills, root_runtime_skill_id
+        )
 
         initial_tokens = self._initial_token_total(
             composition, role_body, rule_bodies, skills
@@ -197,6 +202,7 @@ class ContextLoader:
         role_body: str,
         rule_bodies: list[str],
         skills: list[Mapping[str, Any]],
+        root_runtime_skill_id: str | None,
     ) -> str:
         parts = [role_body]
         if rule_bodies:
@@ -211,6 +217,9 @@ class ContextLoader:
                     f"description: {metadata.get('description', '')} | "
                     f"allowImplicitInvocation: {metadata.get('allowImplicitInvocation')}"
                 )
+                # 披露根 RuntimeSkill 自身 resourceId：模型据此 read_resource 读根 Skill 正文
+                if root_runtime_skill_id:
+                    parts.append(f"  - skill resourceId: {root_runtime_skill_id}")
                 # 披露已解析引用的 resourceId：模型据此逐层 read_resource 读 Rule/Workflow/Reference
                 for ref_id in _skill_reference_ids(skill):
                     parts.append(f"  - reference resourceId: {ref_id}")
@@ -241,6 +250,10 @@ class ContextLoader:
             # 引用 resourceId 进入初始上下文（模型逐层读取的寻址键），计入活动基线
             for ref_id in _skill_reference_ids(skill):
                 total += estimate_chars_div_4(ref_id)
+        # 根 RuntimeSkill 自身 resourceId 进入初始上下文（根 Skill 正文寻址键），计入活动基线
+        root_runtime_skill_id = composition.get("rootRuntimeSkillId")
+        if isinstance(root_runtime_skill_id, str) and root_runtime_skill_id:
+            total += estimate_chars_div_4(root_runtime_skill_id)
         if total > max_initial:
             raise BundleError(
                 BUNDLE_TOKEN_BUDGET_EXCEEDED,
