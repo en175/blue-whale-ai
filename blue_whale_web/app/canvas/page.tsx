@@ -164,7 +164,7 @@ function CanvasPageInner() {
           setIsBottomDockOpen(true);
           setDockFocusSignal((n) => n + 1);
           if (node.imageUrl) {
-            const mediaType: DockMediaItem["type"] = node.type === "video" ? "video" : "image";
+            const mediaType: DockMediaItem["type"] = node.type === "video" || /\.(mp4|webm|mov|m4v|ogg)(\?.*)?$/i.test(node.imageUrl) ? "video" : "image";
             const item: DockMediaItem = { id: node.id, type: mediaType, name, src: node.imageUrl };
             setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
             setDockMentionSignal({ nonce: Date.now(), item: { src: node.imageUrl, name, id: node.id, type: mediaType }, replace: false });
@@ -180,7 +180,7 @@ function CanvasPageInner() {
         case "video": {
           // 生成视频：带入参考图（按 node.type 分 image/video）+ mention pill + 唤起视频 Dock
           if (node.imageUrl) {
-            const mediaType: DockMediaItem["type"] = node.type === "video" ? "video" : "image";
+            const mediaType: DockMediaItem["type"] = node.type === "video" || /\.(mp4|webm|mov|m4v|ogg)(\?.*)?$/i.test(node.imageUrl) ? "video" : "image";
             const item: DockMediaItem = { id: node.id, type: mediaType, name, src: node.imageUrl };
             setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
             setDockMentionSignal({ nonce: Date.now(), item: { src: node.imageUrl, name, id: node.id, type: mediaType }, replace: false });
