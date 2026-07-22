@@ -149,6 +149,8 @@ export type ImageDockContentProps = {
   onGenerate?: (settings: ImageGenerateSettings) => void;
   /** 生成进行中（禁用按钮防重复提交） */
   generating?: boolean;
+  /** 点击缩略图预览素材 */
+  onPreviewMedia?: (item: DockMediaItem) => void;
 };
 
 export type VideoDockContentProps = {
@@ -192,4 +194,6 @@ export type VideoDockContentProps = {
   onGenerate?: (settings: VideoGenerateSettings) => void;
   /** 生成进行中（禁用按钮防重复提交） */
   generating?: boolean;
+  /** 点击缩略图预览素材 */
+  onPreviewMedia?: (item: DockMediaItem) => void;
 };

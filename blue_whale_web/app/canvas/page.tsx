@@ -14,6 +14,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useAuth } from "@/components/auth/AuthContext";
+import { toast } from "@/components/Toast";
 import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
 import { newCommandIdentity } from "@/lib/command-identity";
 import { ArrowLeft } from "lucide-react";
@@ -727,7 +728,8 @@ function CanvasPageInner() {
           </button>
         </div>
       )}
-      {isBottomDockOpen && (
+      {/* BottomDock 始终挂载（display 控制显隐），保留用户调好的参数 */}
+      <div style={{ display: isBottomDockOpen ? undefined : "none" }}>
         <BottomDock
           mode={bottomDockMode}
           onClose={() => setIsBottomDockOpen(false)}
@@ -754,7 +756,7 @@ function CanvasPageInner() {
           onCancelVideoJob={handleCancelVideo}
           cancellingVideo={cancellingVideo}
         />
-      )}
+      </div>
       <AgentChatPanel
         key={activeProject.id}
         prompt={prompt}

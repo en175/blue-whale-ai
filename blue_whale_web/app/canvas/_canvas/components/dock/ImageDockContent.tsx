@@ -31,6 +31,7 @@ export function ImageDockContent({
   isPicking = false,
   onGenerate,
   generating = false,
+  onPreviewMedia,
 }: ImageDockContentProps) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
@@ -98,8 +99,11 @@ export function ImageDockContent({
   };
 
   const handleLocalFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) onLocalUpload?.(file);
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    for (let i = 0; i < files.length; i++) {
+      onLocalUpload?.(files[i]);
+    }
     e.target.value = "";
   };
 
@@ -134,6 +138,7 @@ export function ImageDockContent({
         ref={localFileRef}
         type="file"
         accept="image/*"
+        multiple
         className="sr-only"
         aria-hidden="true"
         onChange={handleLocalFileChange}

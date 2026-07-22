@@ -160,6 +160,15 @@ body {
   --tc-dock-control-hover-bg: rgba(255, 255, 255, 0.12);
   --tc-dock-control-active-bg: rgba(255, 255, 255, 0.12);
 
+  /* Toast 通知 —— 对齐 DESIGN.md destructive / success token */
+  --tc-toast-error-bg: rgba(239, 68, 68, 0.92);
+  --tc-toast-success-bg: rgba(34, 197, 94, 0.92);
+  --tc-toast-text: #ffffff;
+  --tc-toast-rounded: 8px;
+  --tc-toast-font: Outfit, -apple-system, sans-serif;
+  --tc-toast-font-size: 13px;
+  --tc-toast-shadow: var(--tc-menu-pill-shadow);
+
   --tc-ease-enter: cubic-bezier(0.23, 1, 0.32, 1);
   --tc-enter-distance-chrome: 24px;
   --tc-enter-distance-agent: 32px;

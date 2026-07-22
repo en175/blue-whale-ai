@@ -1,6 +1,6 @@
 /**
  * Dock Parts —— Dock 共享部件（展示层）
- * MediaUploadButton：素材上传按钮；FrameUploadButton：首尾帧上传按钮；
+ * FrameUploadButton：首尾帧上传按钮；
  * DockMediaThumb：素材缩略图（含删除）。供 ImageDockContent / VideoDockContent 复用。
  */
 import { X } from "lucide-react";

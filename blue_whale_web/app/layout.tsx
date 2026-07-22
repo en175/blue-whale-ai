@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "@xyflow/react/dist/style.css";
 import "./globals.css";
 import { AuthProvider } from "@/components/auth/AuthContext";
+import { ToastProvider } from "@/components/Toast";
 import Sidebar from "@/components/Sidebar";
 
 export const metadata: Metadata = {
@@ -18,8 +19,10 @@ export default function RootLayout({
     <html lang="zh-CN" className="h-full antialiased">
       <body className="min-h-full flex flex-row bg-[#0a0a0a]">
         <AuthProvider>
-          <Sidebar />
-          <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+          <ToastProvider>
+            <Sidebar />
+            <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+          </ToastProvider>
         </AuthProvider>
       </body>
     </html>

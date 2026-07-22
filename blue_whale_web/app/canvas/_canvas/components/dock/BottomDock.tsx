@@ -81,6 +81,7 @@ export function BottomDock({
   const [quantityOpen, setQuantityOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [internetSearch, setInternetSearch] = useState(false);
+  const [previewItem, setPreviewItem] = useState<DockMediaItem | null>(null);
 
   useEffect(() => {
     const el = contentRef.current;
@@ -258,6 +259,7 @@ export function BottomDock({
                     onGenerate?.(input, { mode: "image", settings: s })
                   }
                   generating={generating}
+                  onPreviewMedia={setPreviewItem}
                 />
               ) : (
                 <VideoDockContent
@@ -297,12 +299,16 @@ export function BottomDock({
                     onGenerate?.(input, { mode: "video", settings: s })
                   }
                   generating={generating}
+                  onPreviewMedia={setPreviewItem}
                 />
               )}
             </div>
           </SmoothCorners>
         </div>
       </div>
+      {previewItem && (
+        <MediaPreviewModal item={previewItem} onClose={() => setPreviewItem(null)} />
+      )}
     </div>
   );
 }
