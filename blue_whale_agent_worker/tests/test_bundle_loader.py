@@ -144,6 +144,9 @@ class ContextLoaderTest(unittest.TestCase):
         self.assertIn(SKILL_DESC, instructions)
         self.assertIn("allowImplicitInvocation", instructions)
         self.assertNotIn(SKILL_BODY, instructions)  # Skill 正文不进初始上下文
+        # 根 Skill resourceId 作为 read_resource 寻址键披露（正文不进上下文）
+        self.assertIn("skill resourceId", instructions)
+        self.assertIn("skill_root", instructions)
         # 只拉 always_on 正文（RoleDocument + 常驻 Rule），Skill 正文不拉
         self.assertEqual(2, source.resource_fetches)
 
@@ -200,6 +203,7 @@ class ContextLoaderTest(unittest.TestCase):
             _chars_div_4(ROLE_BODY)
             + _chars_div_4(RULE_BODY)
             + _chars_div_4(f"{SKILL_NAME}\n{SKILL_DESC}")
+            + _chars_div_4("skill_root")  # 根 RuntimeSkill resourceId 计入活动基线
         )
 
         snapshot_ok = _make_snapshot(initial_max=total)
@@ -227,6 +231,7 @@ class ContextLoaderTest(unittest.TestCase):
             _chars_div_4(ROLE_BODY)
             + _chars_div_4(RULE_BODY)
             + _chars_div_4(f"{SKILL_NAME}\n{SKILL_DESC}")
+            + _chars_div_4("skill_root")  # 根 RuntimeSkill resourceId 计入活动基线
         )
         self.assertEqual(expected_baseline, loaded.initial_tokens)
         self.assertEqual(2, len(loaded.initial_evidence))  # role_main + rule_safety
@@ -248,11 +253,34 @@ class ContextLoaderTest(unittest.TestCase):
 
         self.assertIn("ref_extra", loaded.instructions)
         self.assertIn("reference resourceId", loaded.instructions)
+        self.assertIn("skill_root", loaded.instructions)
+        self.assertIn("skill resourceId", loaded.instructions)
         expected_baseline = (
             _chars_div_4(ROLE_BODY)
             + _chars_div_4(RULE_BODY)
             + _chars_div_4(f"{SKILL_NAME}\n{SKILL_DESC}")
+            + _chars_div_4("skill_root")  # 根 RuntimeSkill resourceId 计入活动基线
             + _chars_div_4("ref_extra")
+        )
+        self.assertEqual(expected_baseline, loaded.initial_tokens)
+
+    def test_load_discloses_root_runtime_skill_id_and_counts_baseline(self) -> None:
+        # IK306N：instructions 披露根 RuntimeSkill 自身 resourceId（rootRuntimeSkillId），
+        # 作为模型按需 read_resource 读根 Skill 正文的寻址键；根 id 计入活动基线 token。
+        snapshot = _make_snapshot()
+        loaded = ContextLoader(_source(snapshot)).load(
+            _verified(snapshot), MODEL_PROFILE_ID, MODEL_VERSION
+        )
+
+        root_skill_id = snapshot["composition"]["rootRuntimeSkillId"]
+        self.assertIn("skill resourceId", loaded.instructions)
+        self.assertIn(root_skill_id, loaded.instructions)
+        self.assertNotIn(SKILL_BODY, loaded.instructions)  # 正文仍未进初始上下文
+        expected_baseline = (
+            _chars_div_4(ROLE_BODY)
+            + _chars_div_4(RULE_BODY)
+            + _chars_div_4(f"{SKILL_NAME}\n{SKILL_DESC}")
+            + _chars_div_4(root_skill_id)
         )
         self.assertEqual(expected_baseline, loaded.initial_tokens)
 
