@@ -14,6 +14,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useAuth } from "@/components/auth/AuthContext";
+import { toast } from "@/components/Toast";
 import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
 import { ArrowLeft } from "lucide-react";
 import type { MentionItem } from "./_canvas/components/dock/mention";
@@ -158,14 +159,15 @@ function CanvasPageInner() {
         }
         case "shuffle":
         case "image": {
-          // 生成图片 / 再创作（X3）：唤起图片 Dock + 参考图同步进顶部缩略图和 mention pill
+          // 生成图片 / 再创作：唤起图片 Dock + 参考图累积（去重）+ mention pill
           setBottomDockMode("image");
           setIsBottomDockOpen(true);
           setDockFocusSignal((n) => n + 1);
           if (node.imageUrl) {
-            const item: DockMediaItem = { id: node.id, type: "image", name, src: node.imageUrl };
-            setImageDockMedia([item]);
-            setDockMentionSignal({ nonce: Date.now(), item: { src: node.imageUrl, name, id: node.id }, replace: true });
+            const mediaType: DockMediaItem["type"] = node.type === "video" || /\.(mp4|webm|mov|m4v|ogg)(\?.*)?$/i.test(node.imageUrl) ? "video" : "image";
+            const item: DockMediaItem = { id: node.id, type: mediaType, name, src: node.imageUrl };
+            setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+            setDockMentionSignal({ nonce: Date.now(), item: { src: node.imageUrl, name, id: node.id, type: mediaType }, replace: false });
           }
           break;
         }
@@ -176,9 +178,12 @@ function CanvasPageInner() {
           break;
         }
         case "video": {
-          // 生成视频：带入参考图占位 + 唤起视频 Dock
+          // 生成视频：带入参考图（按 node.type 分 image/video）+ mention pill + 唤起视频 Dock
           if (node.imageUrl) {
-            setVideoDockMedia([{ id: node.id, type: "image", name, src: node.imageUrl }]);
+            const mediaType: DockMediaItem["type"] = node.type === "video" || /\.(mp4|webm|mov|m4v|ogg)(\?.*)?$/i.test(node.imageUrl) ? "video" : "image";
+            const item: DockMediaItem = { id: node.id, type: mediaType, name, src: node.imageUrl };
+            setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+            setDockMentionSignal({ nonce: Date.now(), item: { src: node.imageUrl, name, id: node.id, type: mediaType }, replace: false });
           }
           setBottomDockMode("video");
           setIsBottomDockOpen(true);
@@ -310,7 +315,8 @@ function CanvasPageInner() {
   );
 
   // Dock「本地上传」：上传 TOS 拿持久 url，按 MIME 分 image/video/audio；
-  // 图片建画布节点，视频/音频只入 Dock media（画布暂不承载视频/音频节点）
+  // 图片/视频建画布节点，音频只入 Dock media（画布暂不承载音频节点）。
+  // 上传前校验大小（视频 ≤ 50MB），上传中显示缩略图进度百分比。
   const handleDockLocalUpload = useCallback(
     async (file: File, mode: "image" | "video") => {
       if (!activeProject) return;
@@ -319,9 +325,33 @@ function CanvasPageInner() {
         : file.type.startsWith("video/")
           ? "video"
           : "audio";
+
+      // 校验：视频 ≤ 50MB
+      const MAX_VIDEO_MB = 50;
+      if (mediaType === "video" && file.size > MAX_VIDEO_MB * 1024 * 1024) {
+        toast.error(`视频大小不能超过 ${MAX_VIDEO_MB}MB`);
+        return;
+      }
+
+      // 占位 item（上传前先入 Dock media 列表，显示进度）
+      const placeholderId = `${mediaType}-upload-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const placeholder: DockMediaItem = {
+        id: placeholderId,
+        type: mediaType,
+        name: file.name,
+        uploadProgress: 0,
+      };
+      const setMedia = mode === "image" ? setImageDockMedia : setVideoDockMedia;
+      setMedia((prev) => [...prev, placeholder]);
+
       try {
-        const result = await uploadAsset(file, Number(activeProject.id), mediaType);
-        // 图片/视频上画布（视频由 ImageNode 按 url 后缀自动切 <video>）；音频不入画布
+        const result = await uploadAsset(file, Number(activeProject.id), mediaType, (pct) => {
+          setMedia((prev) => prev.map((m) => (m.id === placeholderId ? { ...m, uploadProgress: pct } : m)));
+        });
+
+        // 上传成功：移除占位，替换为真实 item
+        setMedia((prev) => prev.filter((m) => m.id !== placeholderId));
+
         const onCanvas = mediaType === "image" || mediaType === "video";
         let id: string;
         if (onCanvas) {
@@ -336,13 +366,11 @@ function CanvasPageInner() {
           id = `${mediaType}-${Date.now()}`;
         }
         const item: DockMediaItem = { id, type: mediaType, name: file.name, src: result.url, assetId: result.id };
-        if (mode === "image") {
-          setImageDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
-        } else {
-          setVideoDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
-        }
+        setMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
       } catch (e) {
-        setGenerateError(userFriendlyErrorMessage(e));
+        // 上传失败：移除占位 + toast 提示
+        setMedia((prev) => prev.filter((m) => m.id !== placeholderId));
+        toast.error(`上传失败：${userFriendlyErrorMessage(e)}`);
       }
     },
     [addNode, activeProject?.id]
@@ -789,7 +817,8 @@ function CanvasPageInner() {
           </button>
         </div>
       )}
-      {isBottomDockOpen && (
+      {/* BottomDock 始终挂载（display 控制显隐），保留用户调好的参数 */}
+      <div style={{ display: isBottomDockOpen ? undefined : "none" }}>
         <BottomDock
           mode={bottomDockMode}
           onClose={() => setIsBottomDockOpen(false)}
@@ -813,7 +842,7 @@ function CanvasPageInner() {
           generateError={generateError}
           onClearGenerateError={() => setGenerateError(null)}
         />
-      )}
+      </div>
       <AgentChatPanel
         key={activeProject.id}
         prompt={prompt}

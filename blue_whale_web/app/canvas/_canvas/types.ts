@@ -59,6 +59,8 @@ export type DockMediaItem = {
   src?: string;
   /** 关联资产 ID（预埋：当前参考素材 URL 直传，assetId 为后续统一切 assetId 引用预留，spec D7） */
   assetId?: number;
+  /** 上传进度 0-100；undefined = 已完成或在 Dock 缩略图区不显示进度 */
+  uploadProgress?: number;
 };
 
 /** 视口。字段对齐 RF `Viewport`：`scale` 改名 `zoom`（BREAKING，见 design D5）。 */
@@ -151,6 +153,8 @@ export type ImageDockContentProps = {
   onGenerate?: (settings: ImageGenerateSettings) => void;
   /** 生成进行中（禁用按钮防重复提交） */
   generating?: boolean;
+  /** 点击缩略图预览素材 */
+  onPreviewMedia?: (item: DockMediaItem) => void;
 };
 
 export type VideoDockContentProps = {
@@ -207,4 +211,6 @@ export type VideoDockContentProps = {
   onGenerate?: (settings: VideoGenerateSettings) => void;
   /** 生成进行中（禁用按钮防重复提交） */
   generating?: boolean;
+  /** 点击缩略图预览素材 */
+  onPreviewMedia?: (item: DockMediaItem) => void;
 };

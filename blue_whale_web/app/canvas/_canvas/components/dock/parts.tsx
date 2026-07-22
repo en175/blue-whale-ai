@@ -1,51 +1,12 @@
 /**
  * Dock Parts —— Dock 共享部件（展示层）
- * MediaUploadButton：素材上传按钮；FrameUploadButton：首尾帧上传按钮；
+ * FrameUploadButton：首尾帧上传按钮；
  * DockMediaThumb：素材缩略图（含删除）。供 ImageDockContent / VideoDockContent 复用。
  */
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AudioLines, Video, X } from "lucide-react";
 import { IconPlus } from "../../icons";
 import type { DockMediaItem } from "../../types";
-
-export function MediaUploadButton({
-  label,
-  accept,
-  icon,
-}: {
-  label: string;
-  accept: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <div style={{ position: "relative", flexShrink: 0 }}>
-      <input type="file" accept={accept} multiple aria-hidden="true" style={{ display: "none" }} />
-      <button
-        type="button"
-        aria-label={label}
-        style={{
-          width: 44,
-          height: 44,
-          borderRadius: 9,
-          border: "1px solid rgba(255, 255, 255, 0.02)",
-          background: "rgba(255, 255, 255, 0.043)",
-          color: "rgba(255, 255, 255, 0.62)",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 6,
-          padding: 0,
-          cursor: "pointer",
-          opacity: 1,
-          transition: "background 120ms, color 120ms",
-          flexShrink: 0,
-        }}
-      >
-        {icon}
-      </button>
-    </div>
-  );
-}
 
 export function FrameUploadButton({
   label,
@@ -156,45 +117,186 @@ export function FrameUploadButton({
   );
 }
 
-// 底部 Dock 里的素材缩略图，按类型渲染（图片缩略图 / 视频·音频图标），带右上角删除按钮
-export function DockMediaThumb({ item, onRemove }: { item: DockMediaItem; onRemove?: (id: string) => void }) {
+const thumbBoxStyle: React.CSSProperties = {
+  width: 44,
+  height: 44,
+  borderRadius: 9,
+  flexShrink: 0,
+  display: "block",
+  border: "1px solid rgba(255, 255, 255, 0.08)",
+};
+
+/**
+ * VideoThumb —— 隐藏 <video> 加载首帧 → canvas 绘制 → 显示首帧缩略图。
+ * <video> 做缩略图浏览器不主动解码帧；canvas 提取可保证跨浏览器一致。
+ * video 元素必须挂 DOM 中才触发加载，故 render 隐藏 video + canvas 并用 ref 联动。
+ */
+function VideoThumb({ src, name }: { src: string; name: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [ready, setReady] = useState(false);
+  const [fallback, setFallback] = useState(false);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+    let cancelled = false;
+
+    const draw = () => {
+      if (cancelled || !video.videoWidth) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        try { ctx.drawImage(video, 0, 0); } catch { /* tainted ok */ }
+      }
+      setReady(true);
+    };
+
+    const onLoadedData = () => { video.currentTime = 0; };
+    const onSeeked = () => draw();
+    const onError = () => { if (!cancelled) setFallback(true); };
+
+    video.addEventListener("loadeddata", onLoadedData);
+    video.addEventListener("seeked", onSeeked);
+    video.addEventListener("error", onError);
+    if (video.readyState >= 2) onLoadedData();
+
+    return () => {
+      cancelled = true;
+      video.removeEventListener("loadeddata", onLoadedData);
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("error", onError);
+    };
+  }, [src]);
+
+  if (fallback) {
+    return (
+      <div title={name} style={{ ...thumbBoxStyle, background: "rgba(255, 255, 255, 0.04)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255, 255, 255, 0.5)" }}>
+        <Video width={18} height={18} />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <video
+        ref={videoRef}
+        src={src}
+        preload="auto"
+        muted
+        playsInline
+        style={{
+          position: "fixed",
+          left: "-9999px",
+          top: 0,
+          width: 320,
+          height: 240,
+          opacity: 0,
+          pointerEvents: "none",
+        }}
+      />
+      <canvas
+        ref={canvasRef}
+        title={name}
+        style={{
+          ...thumbBoxStyle,
+          objectFit: "cover",
+          background: "rgba(255, 255, 255, 0.04)",
+          visibility: ready ? "visible" : "hidden",
+        }}
+      />
+    </>
+  );
+}
+
+// 底部 Dock 里的素材缩略图，按类型渲染（图片缩略图 / 视频·音频图标），带右上角删除按钮。
+// 点击可预览（onPreview），上传中显示进度百分比。
+export function DockMediaThumb({
+  item,
+  onRemove,
+  onPreview,
+}: {
+  item: DockMediaItem;
+  onRemove?: (id: string) => void;
+  onPreview?: (item: DockMediaItem) => void;
+}) {
+  const uploading = typeof item.uploadProgress === "number" && item.uploadProgress < 100;
+
   return (
     <div style={{ position: "relative", flexShrink: 0 }}>
-      {item.type === "image" ? (
-        <img
-          src={item.src}
-          alt={item.name}
-          title={item.name}
-          draggable={false}
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: 9,
-            objectFit: "cover",
-            flexShrink: 0,
-            display: "block",
-            border: "1px solid rgba(255, 255, 255, 0.08)",
-          }}
-        />
-      ) : (
-        <div
-          title={item.name}
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: 9,
-            background: "rgba(255, 255, 255, 0.04)",
-            border: "1px solid rgba(255, 255, 255, 0.08)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "rgba(255, 255, 255, 0.5)",
-            flexShrink: 0,
-          }}
-        >
-          {item.type === "video" ? <Video width={18} height={18} /> : <AudioLines width={18} height={18} />}
-        </div>
-      )}
+      <button
+        type="button"
+        aria-label={uploading ? `上传中 ${item.uploadProgress}%` : `预览 ${item.name}`}
+        onClick={() => onPreview?.(item)}
+        disabled={uploading}
+        style={{
+          padding: 0,
+          border: 0,
+          background: "transparent",
+          cursor: uploading ? "default" : "pointer",
+          display: "block",
+        }}
+      >
+        {uploading ? (
+          // 上传中：灰色占位 + 百分比
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 9,
+              background: "var(--tc-border-subtle)",
+              border: "1px solid var(--tc-border-subtle)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "var(--tc-text-tertiary)",
+              fontSize: 12,
+              fontWeight: 600,
+              flexShrink: 0,
+            }}
+          >
+            {item.uploadProgress}%
+          </div>
+        ) : item.type === "image" ? (
+          <img
+            src={item.src}
+            alt={item.name}
+            title={item.name}
+            draggable={false}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 9,
+              objectFit: "cover",
+              flexShrink: 0,
+              display: "block",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+            }}
+          />
+        ) : item.type === "video" && item.src ? (
+          <VideoThumb src={item.src} name={item.name} />
+        ) : (
+          <div
+            title={item.name}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 9,
+              background: "rgba(255, 255, 255, 0.04)",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "rgba(255, 255, 255, 0.5)",
+              flexShrink: 0,
+            }}
+          >
+            {item.type === "video" ? <Video width={18} height={18} /> : <AudioLines width={18} height={18} />}
+          </div>
+        )}
+      </button>
       {onRemove && (
         <button
           type="button"
@@ -300,6 +402,7 @@ export function MediaSection({
   onRemove,
   onUpload,
   onPickFromCanvas,
+  onPreview,
   uploadedMax,
   total,
   totalMax,
@@ -310,6 +413,7 @@ export function MediaSection({
   onRemove?: (id: string) => void;
   onUpload?: (file: File) => void;
   onPickFromCanvas?: () => void;
+  onPreview?: (item: DockMediaItem) => void;
   uploadedMax: number;
   total: number;
   totalMax: number;
@@ -338,7 +442,7 @@ export function MediaSection({
       {items.length > 0 && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {items.map((m) => (
-            <DockMediaThumb key={m.id} item={m} onRemove={onRemove} />
+            <DockMediaThumb key={m.id} item={m} onRemove={onRemove} onPreview={onPreview} />
           ))}
         </div>
       )}
