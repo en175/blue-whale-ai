@@ -3,6 +3,7 @@ package com.blue.whale.agent.service;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
+import com.blue.whale.agent.mapper.MessageAssetReferenceMapper;
 import com.blue.whale.agent.model.dto.AgentAssetResponse;
 import com.blue.whale.agent.model.dto.CanvasDto;
 import com.blue.whale.agent.model.dto.CanvasNodeDetail;
@@ -13,6 +14,7 @@ import com.blue.whale.agent.model.dto.GenerationJobStatusResponse;
 import com.blue.whale.agent.model.entity.AgentRun;
 import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.GenerationJob;
+import com.blue.whale.agent.model.entity.MessageAssetReference;
 import com.blue.whale.agent.runtimebundle.RuntimeBundleService;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
@@ -51,6 +53,7 @@ public class CreativeContextQueryService {
     private final RunLeaseGuard runLeaseGuard;
     private final AssetMapper assetMapper;
     private final GenerationJobMapper generationJobMapper;
+    private final MessageAssetReferenceMapper messageAssetReferenceMapper;
     private final CanvasService canvasService;
     private final RuntimeBundleService runtimeBundleService;
     private final ObjectMapper objectMapper;
@@ -167,8 +170,15 @@ public class CreativeContextQueryService {
     }
 
     /**
-     * 当前 Run 的放行 Asset 白名单：画布节点 {@code data.assetId} ∪ 本 Run 的 {@code agent_run}
-     * 来源生成任务输出 {@code outputAssetIds}。纯结构化数据合成，无新增持久化状态。
+     * 当前 Run 的放行 Asset 白名单三源并集：
+     * <ol>
+     * <li>画布节点 {@code data.assetId}；
+     * <li>本 Run 的 {@code agent_run} 来源生成任务输出 {@code outputAssetIds}；
+     * <li>同 Conversation 全部消息 @ 引用的 assetId（IK39RU）——范围按 {@code conversationId}
+     * 而非当前 Run，使追问轮次的新 Run 即使自身不带引用，仍能读早先 Run 落的引用素材。
+     * 不加 userId 过滤：写路径 {@code filterOwnedReferenceAssetIds} 已保证落库引用同 user，
+     * 跨 user 由 {@code readAsset} 三元组兜底。
+     * </ol>
      */
     private Set<Long> allowedAssetIds(AgentRun run, Long runId) {
         Set<Long> allowed = new HashSet<>();
@@ -187,6 +197,13 @@ public class CreativeContextQueryService {
             if (outputs != null) {
                 allowed.addAll(outputs);
             }
+        }
+        List<MessageAssetReference> references = messageAssetReferenceMapper.selectList(
+                Wrappers.<MessageAssetReference>lambdaQuery()
+                        .eq(MessageAssetReference::getConversationId, run.getConversationId())
+                        .eq(MessageAssetReference::getProjectId, run.getProjectId()));
+        for (MessageAssetReference reference : references) {
+            allowed.add(reference.getAssetId());
         }
         return allowed;
     }

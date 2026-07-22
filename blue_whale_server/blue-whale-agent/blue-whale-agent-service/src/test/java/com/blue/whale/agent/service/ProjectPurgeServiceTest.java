@@ -15,6 +15,7 @@ import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
 import com.blue.whale.agent.mapper.GenerationProviderTaskMapper;
 import com.blue.whale.agent.mapper.GenerationResultConflictMapper;
+import com.blue.whale.agent.mapper.MessageAssetReferenceMapper;
 import com.blue.whale.agent.mapper.ProjectMapper;
 import com.blue.whale.agent.mapper.RunCommitRecordMapper;
 import com.blue.whale.agent.mapper.RuntimeCheckpointMapper;
@@ -63,6 +64,8 @@ class ProjectPurgeServiceTest {
     @Mock
     private ConversationMessageMapper messageMapper;
     @Mock
+    private MessageAssetReferenceMapper messageAssetReferenceMapper;
+    @Mock
     private AssistantMessageChunkMapper assistantMessageChunkMapper;
     @Mock
     private AssistantMessageStreamMapper assistantMessageStreamMapper;
@@ -108,7 +111,7 @@ class ProjectPurgeServiceTest {
     @BeforeEach
     void setUp() {
         purgeService = new ProjectPurgeService(
-                projectMapper, conversationMapper, messageMapper,
+                projectMapper, conversationMapper, messageMapper, messageAssetReferenceMapper,
                 assistantMessageChunkMapper, assistantMessageStreamMapper, userInputRequestMapper,
                 runtimeCheckpointMapper, runCommitRecordMapper, agentRunMapper,
                 generationJobMapper, generationJobOutputMapper, generationProviderTaskMapper,
@@ -134,9 +137,12 @@ class ProjectPurgeServiceTest {
 
         purgeService.purge(locked);
 
-        InOrder order = inOrder(projectMapper, costReservationService, generationJobMapper);
+        InOrder order = inOrder(projectMapper, costReservationService, generationJobMapper,
+                messageMapper, messageAssetReferenceMapper);
         order.verify(projectMapper).selectForUpdate(1L);
         order.verify(costReservationService).release(11L, "CANCELLED_BEFORE_PROVIDER");
+        order.verify(messageMapper).hardDeleteByProjectId(1L);
+        order.verify(messageAssetReferenceMapper).hardDeleteByProjectId(1L);
         order.verify(generationJobMapper).hardDeleteByProjectId(1L);
         order.verify(projectMapper).hardDeleteById(1L);
         verify(projectEventService).appendEvent(eq(1L), eq("project.deleted"), eq("project"),
