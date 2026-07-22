@@ -53,7 +53,7 @@
 - **已实现**:四表(users/project/canvas/assets/generation_jobs)、catalog(`generation_model_capability` 表,数据等价 §5.3 全集)、Project/Canvas CRUD、Job 流、Skill/模板、鉴权(登录 JWT)
 - **缺(从零建)**:资产上传(presign/complete/GET/{id})、canvas.messages(零)、assets.understanding 字段(零)、agent turn 整条(零)、video SSE(只有 image SSE)
 
-> 详见 wayfinder map #IK29RN + 共享地基 #IK2H6I(G0)。原始「三条后端线索」(Skill 封面 CloudFront / next.config 白名单)仍成立,见 §9。
+> 详见 wayfinder map #IK29RN + 共享地基 #IK2H6I(G0)。原始「三条后端线索」(Skill 封面 / next.config 白名单):封面已决不用 CloudFront 签名(§9.2),走 cover_url 公开 URL。
 
 ## 2. 范围
 
@@ -65,7 +65,7 @@
 - 生成任务:Direct(含 Direct Image / Direct Video)/ Image-to-Video / Full Video Canvas 三条链路全做(对齐 ROADMAP「已锁定产品决策」)
 - Agent 对话过程消息 P0 全部展示为文字气泡；P1 只做结构化美化
 - Agent 对话(SSE 流式,返回对话消息 + 画布素材更新)→ **见独立 `AGENT-CONVERSATION-PRD.md`**
-- Skill 面板 P0 实现我的 Skills / Skill 库 / auto / Use / 签名封面
+- Skill 面板 P0 实现我的 Skills / Skill 库 / auto / Use / 封面(cover_url,无签名)
 - Project 持久化(画布 + 对话 + 进行中任务,刷新不丢)
 
 ### P1(本文列出占位,后续细化)
@@ -414,7 +414,7 @@ generation_jobs                                -- ✅ 已实现(source + stage_i
 ## 9. 非功能 / 前置依赖
 
 1. **CDN 域名统一**:前端发现三个 CloudFront 域(`dj5nb01yl89hl`、`du9d8548ooqnc`、`d1735p3aqhycef`)+ `images.unsplash.com` + `placehold.co`。后端规划统一资产域名后,前端同步更新 `next.config.ts` 的 `images.remotePatterns`(目前只白名单了 `dj5nb01yl89hl`)。
-2. **签名 URL**:Skill 封面用 CloudFront Signed URL(`Key-Pair-Id=K1PJBMEIA4Y1WS`,带过期)。前端**不得硬编码签名**;所有需签名的 URL 由后端按需签发(`GET /api/assets/{id}`、`GET /api/skills/{id}/signed-cover`)。
+2. **Skill 封面(无签名,2026-07-22 决策)**:封面非敏感,不用 CloudFront Signed URL。封面 = `skill.cover_url` 公开图 URL,由 `library`/`mine` 直接返回,无 `signed-cover` 端点。(`GET /api/assets/{id}` 资产签名另议,非封面。)
 3. **上传替换 base64**:当前前端用 `FileReader.readAsDataURL` 把上传图塞进画布 state(`app/canvas/page.tsx:163-189`),大图会撑爆内存。后端 presign 接口就绪后前端立即改走直传。
 4. **错误码**:至少区分 `quota_exhausted`(P2)/ `content_moderation_rejected` / `upstream_timeout` / `asset_unavailable` / `asset_understanding_missing`。
 5. **多模态**:主 LLM 不支持图像时,后端必须调视觉模型或回退让用户补充,不得伪造 `asset_understanding`。
@@ -432,6 +432,6 @@ generation_jobs                                -- ✅ 已实现(source + stage_i
 
 ## 11. 风险
 
-- **URL 签名过期**:前端硬编码的 33 条 Skill 签名 URL 会集体 403;由 Skill 面板的 `signed-cover` 接口兜底,详见 `FRONTEND-SKILL-PANEL-PRD.md` §9。
+- **URL 签名过期(已解,2026-07-22)**:Skill 封面不用签名(详见 `FRONTEND-SKILL-PANEL-PRD.md` §3.4),33 条硬编码签名随 mock 移除,无集体 403 风险。
 - **匿名身份迁移**:P2 引入登录时,需把 `anonymous_id` 名下的 Project/Asset 合并到正式账户,后端需预留合并路径。
 - **Agent runtime 复杂度**:见 `AGENT-CONVERSATION-PRD.md` §8。

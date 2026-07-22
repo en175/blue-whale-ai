@@ -1,5 +1,6 @@
 package com.blue.whale.gateway.auth;
 
+import com.blue.whale.gateway.util.GatewayHeaderUtils;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
@@ -80,10 +81,12 @@ public class JwtAuthGlobalFilter implements GlobalFilter {
             String userId = claims.getSubject();
             String phone = claims.get("phone", String.class);
 
-            // 通过 → 传 X-User-Id 给下游
+            // 通过 → 清除客户端伪造头后传 X-User-Id 给下游
             ServerHttpRequest mutated = exchange.getRequest().mutate()
-                    .header("X-User-Id", userId)
-                    .header("X-Phone", phone != null ? phone : "")
+                    .headers(h -> {
+                        GatewayHeaderUtils.sanitizeAndSet(h, "X-User-Id", userId);
+                        GatewayHeaderUtils.sanitizeAndSet(h, "X-Phone", phone != null ? phone : "");
+                    })
                     .build();
             return chain.filter(exchange.mutate().request(mutated).build());
 

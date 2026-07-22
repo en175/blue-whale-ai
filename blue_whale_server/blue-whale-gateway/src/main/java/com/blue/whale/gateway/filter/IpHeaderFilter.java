@@ -1,6 +1,7 @@
 package com.blue.whale.gateway.filter;
 
 
+import com.blue.whale.gateway.util.GatewayHeaderUtils;
 import com.blue.whale.gateway.util.IpUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,10 +33,10 @@ public class IpHeaderFilter implements GlobalFilter {
 
         String ip = IpUtils.getIpAddr(exchange.getRequest());
         log.debug("客户端ip:{}",ip);
-        // 该步骤可选。可以传递给下游服务器，用于业务处理
+        // 清除客户端伪造头后传递真实 IP 给下游，防 IP 欺骗
         ServerHttpRequest request = exchange.getRequest()
                 .mutate()
-                .header("X-Real-IP", ip)
+                .headers(h -> GatewayHeaderUtils.sanitizeAndSet(h, "X-Real-IP", ip))
                 .build();
         return chain.filter(exchange.mutate().request(request).build());
     }
