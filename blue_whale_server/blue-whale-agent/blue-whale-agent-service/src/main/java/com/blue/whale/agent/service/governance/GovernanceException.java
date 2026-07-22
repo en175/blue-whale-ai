@@ -79,7 +79,9 @@ public class GovernanceException extends RuntimeException {
 
     /**
      * IK2QBX 拒绝结果回喂通道：把内部 reasonCode 投影为面向 User 的稳定公开码与安全提示。
-     * 复用既有 publicCode 工厂族，不向 User 侧暴露内部诊断码（如 ACTION_SCHEMA_OR_OWNERSHIP_REJECTED）。
+     * 复用既有 publicCode 工厂族，不向 User 侧暴露内部诊断码（如 ACTION_SCHEMA_OR_OWNERSHIP_REJECTED、
+     * CLARIFICATION_TOOL_NOT_GRANTED）；非配额类拒绝统一投影为 ACTION_NOT_ALLOWED（retryable=false），
+     * 让模型改走已授权的动作路径。
      */
     public static RejectionEnvelope forDeniedReasonCode(String reasonCode) {
         if ("QUOTA_EXCEEDED".equals(reasonCode)) {

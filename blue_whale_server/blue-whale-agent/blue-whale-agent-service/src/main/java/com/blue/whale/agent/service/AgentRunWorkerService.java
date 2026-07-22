@@ -30,6 +30,7 @@ import com.blue.whale.agent.model.entity.GenerationModelCapability;
 import com.blue.whale.agent.model.entity.RunCommitRecord;
 import com.blue.whale.agent.model.entity.RuntimeCheckpoint;
 import com.blue.whale.agent.model.entity.UserInputRequest;
+import com.blue.whale.agent.service.governance.AuditRecordWriter;
 import com.blue.whale.agent.service.governance.ActionAuthorizationCommand;
 import com.blue.whale.agent.service.governance.AuthorizationDecision;
 import com.blue.whale.agent.service.governance.AuthorizationOutcome;
@@ -39,6 +40,7 @@ import com.blue.whale.agent.service.governance.GenerationCostAdmissionService;
 import com.blue.whale.agent.service.governance.CostReservationService;
 import com.blue.whale.agent.service.governance.UserInputRequestService;
 import com.blue.whale.agent.runtimebundle.RunToolGrantResolver;
+import com.blue.whale.agent.runtimebundle.ToolArgumentValidator;
 import com.blue.whale.agent.runtimebundle.ToolDefinition;
 import com.blue.whale.agent.runtimebundle.ToolGrantScope;
 import com.blue.whale.agent.runtimebundle.ToolRegistry;
@@ -60,7 +62,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.TreeMap;
 
 @Service
@@ -69,20 +70,6 @@ import java.util.TreeMap;
 public class AgentRunWorkerService {
 
     private static final String VIDEO_TOOL_ID = "create_video_generation_job";
-    private static final Set<String> IMAGE_ARGUMENTS =
-            Set.of("prompt", "aspect_ratio", "reference_asset_ids", "size", "web_search");
-    private static final Set<String> IMAGE_ASPECT_RATIOS =
-            Set.of("1:1", "16:9", "9:16", "4:3", "3:4", "2:3", "3:2", "21:9");
-    private static final Set<String> VIDEO_ARGUMENTS =
-            Set.of("prompt", "aspect_ratio", "resolution", "duration", "reference_asset_ids");
-    private static final Set<String> VIDEO_ASPECT_RATIOS =
-            Set.of("16:9", "4:3", "1:1", "3:4", "9:16", "21:9");
-    private static final Set<String> VIDEO_RESOLUTIONS =
-            Set.of("480p", "720p", "1080p");
-    private static final int VIDEO_DURATION_MIN = 4;
-    private static final int VIDEO_DURATION_MAX = 15;
-    private static final int IMAGE_REFERENCE_ASSET_MAX = 4;
-    private static final int VIDEO_REFERENCE_ASSET_MAX = 1;
     // IK2QC8：claim 下发的最近消息窗口（契约 §6.1），末尾若干条回到时间升序；更早历史由
     // read_conversation_history 游标分页按需读取。
     private static final int RECENT_MESSAGE_WINDOW = 6;
@@ -103,11 +90,13 @@ public class AgentRunWorkerService {
     private final GenerationCostAdmissionService costAdmissionService;
     private final CostReservationService costReservationService;
     private final UserInputRequestService userInputRequestService;
+    private final AuditRecordWriter auditRecordWriter;
     private final GenerationModelCapabilityMapper capabilityMapper;
     private final ObjectMapper objectMapper;
     private final ToolRegistry toolRegistry;
     private final RunToolGrantResolver runToolGrantResolver;
     private final ToolGrantScope toolGrantScope;
+    private final ToolArgumentValidator toolArgumentValidator;
     // IK2QC8：claim 下发紧凑初始上下文（契约 §6.1）——复用 IK2QBZ / IK2QC7 只读查询服务，
     // 以 runId + workerId 经 requireLeasedRun 鉴权（claim 已取得租约），二者仅依赖
     // guard / mapper / CanvasService / RuntimeBundleService，无循环依赖。
@@ -189,9 +178,6 @@ public class AgentRunWorkerService {
     @Transactional
     public RunCommitResponse commit(Long runId, String workerId, RunCommitRequest request) {
         requireWorker(workerId);
-        if (request.bundleEvidence() != null && !request.bundleEvidence().isEmpty()) {
-            log.info("AgentRun {} 提交 {} 条读取证据", runId, request.bundleEvidence().size());
-        }
         AgentRun run = agentRunMapper.selectForUpdate(runId);
         if (run == null) {
             throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
@@ -209,6 +195,9 @@ public class AgentRunWorkerService {
         }
 
         validateCommit(run, workerId, request, agentRunMapper.selectCurrentTime());
+        // IK3AH2（契约 §6.4）：只读资源证据逐条落主 audit_records，与 commit 同事务共生共灭，
+        // 写入失败 fail closed 回滚整个提交。幂等重放在上文 existing 分支已 return，不会重复落证据。
+        persistBundleReadEvidence(run.getUserId(), run.getProjectId(), runId, request);
         projectService.requireOwnedForUpdate(run.getProjectId(), run.getUserId());
         UserInputRequestProposal proposal = request.userInputRequest();
         if (request.error() != null) {
@@ -312,11 +301,27 @@ public class AgentRunWorkerService {
         UserInputRequest inputRequest = null;
         GenerationJob job = null;
         if (proposal != null) {
-            // 创作澄清提议：原子保存 RuntimeCheckpoint（已在上文插入）与 UserInputRequest，
-            // 令来源 AgentRun 进入等待输入状态并释放租约。无动作、无报价。
-            inputRequest = userInputRequestService.createCreationClarification(
-                    run.getProjectId(), run.getUserId(), conversation.getId(), runId,
-                    proposal.question());
+            // IK3AH2：澄清提议服务端 grant 复验——未授予 request_user_input 的 Run 不能发起创作澄清，
+            // 投影为软回喂（run queued/awaiting_retry，accepted_results 回喂 rejected），堵住绕过动作路径
+            // grant 铁闸的盲点。bundleVersionId 空（enforcement=false）时保持现状（测试 / 降级路径）。
+            if (run.getBundleVersionId() != null && !run.getBundleVersionId().isBlank()
+                    && runToolGrantResolver.resolve(run.getBundleVersionId(), "request_user_input", 1)
+                            .isEmpty()) {
+                rejectedActionId = "clarification:" + runId;
+                auditRecordWriter.appendDeniedActionDecision(
+                        new ActionAuthorizationCommand(
+                                run.getUserId(), run.getProjectId(), "AgentRun", String.valueOf(runId),
+                                "agent-run:" + runId, "clarification:" + runId, "request_user_input",
+                                Map.of(), false, false),
+                        "CLARIFICATION_TOOL_NOT_GRANTED", null, "runtime-bundle-grant");
+                rejection = GovernanceException.forDeniedReasonCode("CLARIFICATION_TOOL_NOT_GRANTED");
+            } else {
+                // 创作澄清提议：原子保存 RuntimeCheckpoint（已在上文插入）与 UserInputRequest，
+                // 令来源 AgentRun 进入等待输入状态并释放租约。无动作、无报价。
+                inputRequest = userInputRequestService.createCreationClarification(
+                        run.getProjectId(), run.getUserId(), conversation.getId(), runId,
+                        proposal.question());
+            }
         } else if (action != null && authorization.outcome() == AuthorizationOutcome.INPUT_REQUIRED) {
             inputRequest = userInputRequestService.create(
                     run.getProjectId(), run.getUserId(), run.getConversationId(), runId,
@@ -330,7 +335,7 @@ public class AgentRunWorkerService {
             LocalDateTime databaseNow = generationJobMapper.selectCurrentTime();
             LocalDateTime evidenceReconcileUntil = null;
             if (isVideo) {
-                // 视频不暴露模型选择：参数已在 validateAction 白名单校验，对称 BottomDock video 段。
+                // 视频不暴露模型选择：参数已在 validateAction 经注册表 schema 校验，对称 BottomDock video 段。
                 strategyVersion = "seedance-2.0-v1";
                 progress = null;
                 evidenceReconcileUntil = databaseNow.plusHours(24);
@@ -494,6 +499,27 @@ public class AgentRunWorkerService {
         }
     }
 
+    private void persistBundleReadEvidence(
+            Long userId, Long projectId, Long runId, RunCommitRequest request) {
+        List<Map<String, Object>> evidence = request.bundleEvidence();
+        if (evidence == null || evidence.isEmpty()) {
+            return;
+        }
+        for (Map<String, Object> entry : evidence) {
+            auditRecordWriter.appendBundleReadEvidence(
+                    userId, projectId, runId, request.commitId(),
+                    asText(entry.get("resource_id")),
+                    asText(entry.get("origin")),
+                    entry.get("revision"),
+                    entry.get("content_digest"),
+                    entry.get("token_estimate"));
+        }
+    }
+
+    private static String asText(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
     private boolean checkpointMatches(AgentRun run, RuntimeCheckpoint checkpoint) {
         if (run.getCurrentCheckpointId() == null) {
             return true;
@@ -578,31 +604,14 @@ public class AgentRunWorkerService {
                         SystemCode.AGENT_ACTION_REJECTED.getMsg());
             }
         }
-        // 参数白名单按工具分流：image 走图片超能力（size/web_search），video 走视频超能力（resolution/duration）。
-        boolean isVideo = VIDEO_TOOL_ID.equals(action.toolId());
-        Set<String> allowedArguments = isVideo ? VIDEO_ARGUMENTS : IMAGE_ARGUMENTS;
-        Set<String> allowedAspectRatios = isVideo ? VIDEO_ASPECT_RATIOS : IMAGE_ASPECT_RATIOS;
-        int referenceAssetMax = isVideo ? VIDEO_REFERENCE_ASSET_MAX : IMAGE_REFERENCE_ASSET_MAX;
-        Object aspectRatio = action.arguments().get("aspect_ratio");
+        // IK3AH2：参数校验单一事实源——注册表 inputSchema + constraints 驱动（替代手工白名单），
+        // 覆盖 type/enum/minLength/maxLength/minimum/maximum/maxItems/items/additionalProperties 等，
+        // prompt.maxLength:2000(image)/4000(video) 由 constraints 生效。违约抛 AGENT_ACTION_REJECTED，
+        // 由 commit 上文 try/catch 统一 fail-closed。
+        toolArgumentValidator.validate(action.arguments(), definition.inputSchema(), definition.constraints());
         Object referenceAssetIds = action.arguments().get("reference_asset_ids");
-        Object resolution = action.arguments().get("resolution");
-        Object duration = action.arguments().get("duration");
-        Object size = action.arguments().get("size");
-        Object webSearch = action.arguments().get("web_search");
         if (action.actionId().length() > 128
-                || !allowedArguments.containsAll(action.arguments().keySet())
-                || !(action.arguments().get("prompt") instanceof String prompt)
-                || prompt.isBlank()
-                || (isVideo && (aspectRatio == null || resolution == null || duration == null))
-                || (aspectRatio != null
-                        && (!(aspectRatio instanceof String ratio) || !allowedAspectRatios.contains(ratio)))
-                || (referenceAssetIds != null
-                        && !validReferenceAssetIds(run, referenceAssetIds, referenceAssetMax))
-                || (size != null && !(size instanceof String))
-                || (webSearch != null && !(webSearch instanceof Boolean))
-                || (resolution != null
-                        && (!(resolution instanceof String value) || !VIDEO_RESOLUTIONS.contains(value)))
-                || (duration != null && !validVideoDuration(duration))
+                || (referenceAssetIds != null && !validReferenceAssetIds(run, referenceAssetIds))
                 || generationJobMapper.selectCount(Wrappers.<GenerationJob>lambdaQuery()
                         .eq(GenerationJob::getProjectId, run.getProjectId())
                         .eq(GenerationJob::getProjectActionIdentity, action.actionId())) > 0) {
@@ -621,8 +630,8 @@ public class AgentRunWorkerService {
                         SystemCode.AGENT_ACTION_REJECTED.getMsg()));
     }
 
-    private boolean validReferenceAssetIds(AgentRun run, Object value, int maxItems) {
-        if (!(value instanceof List<?> assetIds) || assetIds.isEmpty() || assetIds.size() > maxItems) {
+    private boolean validReferenceAssetIds(AgentRun run, Object value) {
+        if (!(value instanceof List<?> assetIds) || assetIds.isEmpty()) {
             return false;
         }
         for (Object assetId : assetIds) {
@@ -645,15 +654,6 @@ public class AgentRunWorkerService {
                         && Objects.equals(asset.getUserId(), run.getUserId())
                         && Asset.TYPE_IMAGE.equals(asset.getType())
                         && Asset.STATUS_NORMAL.equals(asset.getStatus()));
-    }
-
-    private boolean validVideoDuration(Object duration) {
-        if (!(duration instanceof Number number)) {
-            return false;
-        }
-        int value = number.intValue();
-        return number.doubleValue() == (double) value
-                && value >= VIDEO_DURATION_MIN && value <= VIDEO_DURATION_MAX;
     }
 
     private ActionAuthorizationCommand actionCommand(
