@@ -38,6 +38,16 @@ public interface GenerationJobOutputMapper extends BaseMapper<GenerationJobOutpu
             + "ORDER BY slot_index FOR UPDATE")
     List<GenerationJobOutput> selectByJobForUpdate(@Param("jobId") Long jobId);
 
+    /**
+     * 组图模式：查 Job 的 pending 槽序号（升序）。
+     * <p>不加 {@code FOR UPDATE}：组图由 claim 的 lease 独占（claim0 持有期间调度 SQL 不让别 worker 抢），
+     * 此查询仅为确定单次方舟调用需回填的张数与槽位（IK24Q9）。
+     */
+    @Select("SELECT slot_index FROM generation_job_outputs "
+            + "WHERE generation_job_id = #{jobId} AND status = 'pending' "
+            + "AND is_delete = 0 ORDER BY slot_index")
+    List<Integer> selectPendingSlotIndexesByJob(@Param("jobId") Long jobId);
+
     /** 物理删除项目全部生成任务的输出槽位（生成收件箱永久删除用，绕过逻辑删除）。 */
     @Delete("DELETE FROM generation_job_outputs WHERE generation_job_id IN "
             + "(SELECT id FROM generation_jobs WHERE project_id = #{projectId})")

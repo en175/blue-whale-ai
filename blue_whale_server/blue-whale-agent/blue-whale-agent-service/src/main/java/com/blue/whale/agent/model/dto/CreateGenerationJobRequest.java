@@ -105,6 +105,10 @@ public class CreateGenerationJobRequest {
         @JsonProperty("web_search")
         private Boolean webSearch;
 
+        /** 是否启用组图模式（单次方舟调用产 N 张），可选；缺省/false 走多 slot 多次单图默认路径。 */
+        @JsonProperty("sequential_image_generation")
+        private Boolean sequentialImageGeneration;
+
         @JsonIgnore
         private boolean unsupportedField;
 
@@ -134,6 +138,10 @@ public class CreateGenerationJobRequest {
 
         public Boolean webSearch() {
             return webSearch;
+        }
+
+        public Boolean sequentialImageGeneration() {
+            return sequentialImageGeneration;
         }
 
         @JsonIgnore

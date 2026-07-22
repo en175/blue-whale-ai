@@ -98,6 +98,11 @@ export interface ImageModelSettingsPopoverProps {
   onWebSearchChange: (v: boolean) => void;
   /** 是否显示联网开关（依所选模型 features.tools）。 */
   showWebSearch: boolean;
+  /** 组图模式开关态。 */
+  sequential: boolean;
+  onSequentialChange: (v: boolean) => void;
+  /** 是否显示组图开关（依所选模型 features.sequential_image_generation）。 */
+  showSequential: boolean;
 }
 
 export function ImageModelSettingsPopover({
@@ -114,6 +119,9 @@ export function ImageModelSettingsPopover({
   webSearch,
   onWebSearchChange,
   showWebSearch,
+  sequential,
+  onSequentialChange,
+  showSequential,
 }: ImageModelSettingsPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: 16, bottom: 64 });
@@ -492,12 +500,42 @@ export function ImageModelSettingsPopover({
 
       {/* 联网搜索 */}
       {showWebSearch && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "4px 0" }}>
-          <div style={{ fontSize: 12, color: "var(--tc-text-muted)", fontWeight: 500, padding: "0px 4px" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            padding: "4px 0",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--tc-text-muted)",
+              fontWeight: 500,
+              padding: "0px 4px",
+            }}
+          >
             联网搜索
           </div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "7px 4px" }}>
-            <span style={{ fontSize: 12, color: "var(--tc-text-secondary)", fontWeight: 400 }}>搜索最新网络信息辅助生成</span>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              padding: "7px 4px",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 12,
+                color: "var(--tc-text-secondary)",
+                fontWeight: 400,
+              }}
+            >
+              搜索最新网络信息辅助生成
+            </span>
             <button
               type="button"
               role="switch"
@@ -510,7 +548,9 @@ export function ImageModelSettingsPopover({
                 height: 20,
                 borderRadius: 9999,
                 border: 0,
-                background: webSearch ? "var(--tc-accent)" : "var(--tc-border-active)",
+                background: webSearch
+                  ? "var(--tc-accent)"
+                  : "var(--tc-border-active)",
                 cursor: "pointer",
                 transition: "background 150ms",
                 flexShrink: 0,
@@ -533,8 +573,82 @@ export function ImageModelSettingsPopover({
           </div>
         </div>
       )}
-    </div>
-  ,
-  body
-);
+      {/* 组图模式 */}
+      {showSequential && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            padding: "4px 0",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--tc-text-muted)",
+              fontWeight: 500,
+              padding: "0px 4px",
+            }}
+          >
+            组图模式
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              padding: "7px 4px",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 12,
+                color: "var(--tc-text-secondary)",
+                fontWeight: 400,
+              }}
+            >
+              单次调用生成多张关联图
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={sequential}
+              aria-label="组图模式"
+              onClick={() => onSequentialChange(!sequential)}
+              style={{
+                position: "relative",
+                width: 36,
+                height: 20,
+                borderRadius: 9999,
+                border: 0,
+                background: sequential
+                  ? "var(--tc-accent)"
+                  : "var(--tc-border-active)",
+                cursor: "pointer",
+                transition: "background 150ms",
+                flexShrink: 0,
+                padding: 0,
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  top: 2,
+                  left: sequential ? 18 : 2,
+                  width: 16,
+                  height: 16,
+                  borderRadius: "50%",
+                  background: "var(--tc-on-accent)",
+                  transition: "left 150ms",
+                }}
+              />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>,
+    body,
+  );
 }

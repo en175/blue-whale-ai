@@ -3,8 +3,8 @@
  *
  * 双重核验，均针对「实际运行制品」而非工作区源码：
  *  1. 构建身份：GET /build-info → git_commit/build_time 非 "unknown"，证明运行镜像携带构建身份。
- *  2. BottomDock 基础图片命令：page.route 拦截 generation-jobs 请求，核 payload 含五字段
- *     （model_id/size/web_search/input_asset_ids/expected_output_count），证明运行 bundle 真传五字段
+ *  2. BottomDock 基础图片命令：page.route 拦截 generation-jobs 请求，核 payload 含六字段
+ *     （model_id/size/web_search/sequential_image_generation/input_asset_ids/expected_output_count），证明运行 bundle 真传六字段
  *     ——这正是用户原 bug（旧 bundle 只发 prompt+aspect_ratio，缺 model_id 被服务端拒）的回归门。
  *
  * 由 scripts/run-mvp-acceptance.sh 驱动（隔离 Compose 全栈，Fake Provider，零真实费用）。
@@ -31,7 +31,7 @@ import {
 
 type CapturedPayload = ImageCommandCapture["payload"];
 
-test("BottomDock 运行态契约：构建身份非 unknown + 基础图片请求含五字段", async ({
+test("BottomDock 运行态契约：构建身份非 unknown + 基础图片请求含六字段", async ({
   page,
   baseURL,
 }) => {
@@ -49,7 +49,7 @@ test("BottomDock 运行态契约：构建身份非 unknown + 基础图片请求�
     expect(info.build_time, "build_time 不能是 unknown").not.toBe("unknown");
   });
 
-  await test.step("BottomDock 基础图片请求 payload 含五字段", async () => {
+  await test.step("BottomDock 基础图片请求 payload 含六字段", async () => {
     // 串行套件共享验收库：本 spec 使用私有 Project，成功 Job 的节点/Asset 不污染其他 spec
     const api = await bearerClient(baseURL!, session);
     const projectId = await createProject(api, `T61 运行态契约 ${Date.now()}`);
@@ -81,12 +81,16 @@ test("BottomDock 运行态契约：构建身份非 unknown + 基础图片请求�
     expect(captured!.type).toBe("image");
     expect(captured!.input_asset_ids).toEqual([]);
     expect(captured!.expected_output_count).toBeGreaterThanOrEqual(1);
-    // 五字段核验（运行 bundle 真传，非工作区源码）
+    // 六字段核验（运行 bundle 真传，非工作区源码）
     expect(captured!.parameters.model_id, "model_id 必传").toBeTruthy();
     expect(captured!.parameters.size, "size 必传").toBeTruthy();
     expect(
       typeof captured!.parameters.web_search,
       "web_search 必传为布尔",
+    ).toBe("boolean");
+    expect(
+      typeof captured!.parameters.sequential_image_generation,
+      "sequential_image_generation 必传为布尔",
     ).toBe("boolean");
     expect(captured!.parameters.prompt).toContain("蓝鲸");
     expect(captured!.parameters.aspect_ratio).toBeTruthy();

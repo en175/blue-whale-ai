@@ -278,6 +278,122 @@ public class GenerationResultAcceptanceService {
         return new GenerationAcceptanceResult(GenerationAcceptanceResult.Status.ACCEPTED, asset.getId());
     }
 
+    // ===== 组图模式（IK24Q9 方案 K）：单槽接纳不动 job 的 lease/version，
+    //       claim0 的 fence/lease/version 全程保持，多槽独立事务均通过校验；
+    //       最后 finalizeSequentialJob 一次 aggregate 算终态、清 lease、settle。 =====
+
+    @Transactional
+    public GenerationAcceptanceResult acceptSequentialSlot(GenerationResultCommand command) {
+        validateCommand(command);
+        GenerationJob job = generationJobMapper.selectForUpdate(command.jobId());
+        if (job == null) {
+            throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
+        }
+        GenerationJobOutput output = outputMapper.selectForUpdate(command.jobId(), command.slotIndex());
+        if (output == null) {
+            throw conflict();
+        }
+        if (GenerationJobOutput.STATUS_SUCCEEDED.equals(output.getStatus())) {
+            if (Objects.equals(output.getContentSha256(), command.contentSha256())) {
+                return new GenerationAcceptanceResult(
+                        GenerationAcceptanceResult.Status.IDEMPOTENT, output.getAssetId());
+            }
+            recordConflict(output, command);
+            return new GenerationAcceptanceResult(
+                    GenerationAcceptanceResult.Status.CONFLICT, output.getAssetId());
+        }
+        if (GenerationJobOutput.STATUS_FAILED.equals(output.getStatus())
+                || GenerationJobOutput.STATUS_CANCELLED.equals(output.getStatus())
+                || isTerminal(job)) {
+            return new GenerationAcceptanceResult(
+                    GenerationAcceptanceResult.Status.CONFLICT, output.getAssetId());
+        }
+        requireCurrentFence(job, command.fencingToken());
+        requireExecutionOwner(job, command, generationJobMapper.selectCurrentTime());
+        assetObjectLifecycleService.protectReference(
+                command.storageKey(), command.contentSha256(), Asset.SOURCE_GENERATED);
+        Asset asset = new Asset()
+                .setProjectId(job.getProjectId())
+                .setUserId(job.getUserId())
+                .setGenerationJobId(job.getId())
+                .setType(Asset.TYPE_IMAGE)
+                .setStorageKey(command.storageKey())
+                .setContentSha256(command.contentSha256())
+                .setMime(command.mimeType())
+                .setSize(command.sizeBytes())
+                .setWidth(command.width())
+                .setHeight(command.height())
+                .setSource(Asset.SOURCE_GENERATED)
+                .setStatus(Asset.STATUS_NORMAL);
+        assetMapper.insert(asset);
+        output.setAssetId(asset.getId())
+                .setDeliveryId(command.deliveryId())
+                .setContentSha256(command.contentSha256())
+                .setStatus(GenerationJobOutput.STATUS_SUCCEEDED)
+                .setError(null);
+        if (outputMapper.updateById(output) != 1) {
+            throw conflict();
+        }
+        appendAssetCreated(asset, output);
+        appendOutputAttached(output);
+        return new GenerationAcceptanceResult(
+                GenerationAcceptanceResult.Status.ACCEPTED, asset.getId());
+    }
+
+    @Transactional
+    public GenerationAcceptanceResult acceptSequentialFailure(GenerationFailureCommand command) {
+        validateFailureCommand(command);
+        GenerationJob job = generationJobMapper.selectForUpdate(command.jobId());
+        if (job == null) {
+            throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
+        }
+        GenerationJobOutput output = outputMapper.selectForUpdate(command.jobId(), command.slotIndex());
+        if (output == null) {
+            throw conflict();
+        }
+        Map<String, Object> error = Map.of("code", command.errorCode(), "message", command.errorMessage());
+        if (GenerationJobOutput.STATUS_FAILED.equals(output.getStatus())) {
+            return new GenerationAcceptanceResult(
+                    GenerationAcceptanceResult.Status.IDEMPOTENT, output.getAssetId());
+        }
+        if (GenerationJobOutput.STATUS_SUCCEEDED.equals(output.getStatus())
+                || GenerationJobOutput.STATUS_CANCELLED.equals(output.getStatus())
+                || isTerminal(job)) {
+            return new GenerationAcceptanceResult(
+                    GenerationAcceptanceResult.Status.CONFLICT, output.getAssetId());
+        }
+        requireExecutionOwner(job, command.expectedJobVersion(), command.fencingToken(),
+                command.leaseOwner(), generationJobMapper.selectCurrentTime());
+        output.setStatus(GenerationJobOutput.STATUS_FAILED).setError(error);
+        if (outputMapper.updateById(output) != 1) {
+            throw conflict();
+        }
+        appendOutputUpdated(job, output);
+        return new GenerationAcceptanceResult(GenerationAcceptanceResult.Status.FAILED, null);
+    }
+
+    @Transactional
+    public GenerationAcceptanceResult finalizeSequentialJob(Long jobId, Long fencingToken) {
+        GenerationJob job = generationJobMapper.selectForUpdate(jobId);
+        if (job == null) {
+            throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
+        }
+        requireCurrentFence(job, fencingToken);
+        aggregate(job, null);
+        updateAcceptedJob(job);
+        GenerationJob finalized = generationJobMapper.selectById(job.getId());
+        if (isTerminal(finalized)) {
+            costReservationService.settleReserved(job.getId(), "PROVIDER_COST_PROVEN");
+        }
+        appendJobStatusChanged(finalized);
+        resumePydanticRun(finalized);
+        boolean succeeded = GenerationJob.STATUS_SUCCEEDED.equals(finalized.getStatus());
+        return new GenerationAcceptanceResult(
+                succeeded ? GenerationAcceptanceResult.Status.ACCEPTED
+                        : GenerationAcceptanceResult.Status.FAILED,
+                null);
+    }
+
     private void validateCommand(GenerationResultCommand command) {
         boolean valid = command != null
                 && command.jobId() != null

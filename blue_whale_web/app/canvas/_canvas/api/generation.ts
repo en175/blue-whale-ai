@@ -51,6 +51,8 @@ export type CreateProjectGenerationJobPayload = {
         size: string;
         /** 联网搜索开关（缺省 false）。 */
         web_search: boolean;
+        /** 组图模式开关（缺省 false）。 */
+        sequential_image_generation: boolean;
       };
     }
   | {

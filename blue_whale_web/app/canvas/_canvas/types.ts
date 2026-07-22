@@ -122,6 +122,8 @@ export type ImageGenerateSettings = {
   size: string;
   /** 联网搜索开关，真传 payload.parameters.web_search。 */
   webSearch: boolean;
+  /** 组图模式开关，真传 payload.parameters.sequential_image_generation。 */
+  sequential: boolean;
 };
 
 /** 视频 Dock 生成设置（BottomDock 自持 state 透传）。 */
