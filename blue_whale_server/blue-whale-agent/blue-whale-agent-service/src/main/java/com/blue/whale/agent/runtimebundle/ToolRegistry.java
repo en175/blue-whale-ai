@@ -37,21 +37,95 @@ public final class ToolRegistry {
     private Map<ToolKey, ToolDefinition> registerDefaults(ObjectMapper objectMapper) {
         Map<ToolKey, ToolDefinition> registry = new LinkedHashMap<>();
         registry.put(
-                new ToolKey("canvas.read", 1),
+                new ToolKey("list_canvas_nodes", 1),
                 new ToolDefinition(
-                        "canvas.read",
+                        "list_canvas_nodes",
                         1,
                         "read",
                         RiskLevel.LOW,
                         parseBuiltinSchema(objectMapper, """
                                 {"$schema":"https://json-schema.org/draft/2020-12/schema",\
                                  "type":"object",\
-                                 "properties":{"limit":{"type":"integer","maximum":100}},\
+                                 "properties":{"limit":{"type":"integer","minimum":1,"maximum":200}},\
                                  "additionalProperties":false}"""),
                         parseBuiltinSchema(objectMapper, """
                                 {"$schema":"https://json-schema.org/draft/2020-12/schema",\
                                  "type":"object"}"""),
-                        parseBuiltinSchema(objectMapper, "{\"max_results\":100}"),
+                        parseBuiltinSchema(objectMapper, "{\"max_results\":200}"),
+                        Set.of("tool_calling"),
+                        null));
+        registry.put(
+                new ToolKey("read_canvas_node", 1),
+                new ToolDefinition(
+                        "read_canvas_node",
+                        1,
+                        "read",
+                        RiskLevel.LOW,
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object",\
+                                 "properties":{"node_id":{"type":"string","minLength":1}},\
+                                 "required":["node_id"],\
+                                 "additionalProperties":false}"""),
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object"}"""),
+                        parseBuiltinSchema(objectMapper, "{}"),
+                        Set.of("tool_calling"),
+                        null));
+        registry.put(
+                new ToolKey("read_asset", 1),
+                new ToolDefinition(
+                        "read_asset",
+                        1,
+                        "read",
+                        RiskLevel.LOW,
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object",\
+                                 "properties":{"asset_id":{"type":"integer","minimum":1}},\
+                                 "required":["asset_id"],\
+                                 "additionalProperties":false}"""),
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object"}"""),
+                        parseBuiltinSchema(objectMapper, "{}"),
+                        Set.of("tool_calling"),
+                        null));
+        registry.put(
+                new ToolKey("read_generation_job_status", 1),
+                new ToolDefinition(
+                        "read_generation_job_status",
+                        1,
+                        "read",
+                        RiskLevel.LOW,
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object",\
+                                 "properties":{"job_id":{"type":"integer","minimum":1}},\
+                                 "required":["job_id"],\
+                                 "additionalProperties":false}"""),
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object"}"""),
+                        parseBuiltinSchema(objectMapper, "{}"),
+                        Set.of("tool_calling"),
+                        null));
+        registry.put(
+                new ToolKey("list_creative_skills", 1),
+                new ToolDefinition(
+                        "list_creative_skills",
+                        1,
+                        "read",
+                        RiskLevel.LOW,
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object",\
+                                 "additionalProperties":false}"""),
+                        parseBuiltinSchema(objectMapper, """
+                                {"$schema":"https://json-schema.org/draft/2020-12/schema",\
+                                 "type":"object"}"""),
+                        parseBuiltinSchema(objectMapper, "{}"),
                         Set.of("tool_calling"),
                         null));
         registry.put(

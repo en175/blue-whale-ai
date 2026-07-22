@@ -3,6 +3,8 @@ package com.blue.whale.agent.runtimebundle;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ToolRegistryTest {
@@ -10,11 +12,17 @@ class ToolRegistryTest {
     private final ToolRegistry registry = new ToolRegistry(new ObjectMapper());
 
     @Test
-    void canvasReadRemainsRegisteredAsReadOnlyTool() {
-        ToolDefinition def = registry.find("canvas.read", 1).orElseThrow();
-        assertThat(def.effect()).isEqualTo("read");
-        assertThat(def.riskLevel()).isEqualTo(RiskLevel.LOW);
-        assertThat(def.generationCapabilityType()).isNull();
+    void creativeContextToolsRegisteredAsReadOnly() {
+        // IK2QC7：五个创作现场只读直接工具须在发布期注册表登记为只读（取代退役的 canvas.read 占位），
+        // 否则 ToolGrant 发布校验拒绝、Worker 侧闭包恒为死分支，端到端不通。
+        for (String toolId : List.of(
+                "list_canvas_nodes", "read_canvas_node", "read_asset",
+                "read_generation_job_status", "list_creative_skills")) {
+            ToolDefinition def = registry.find(toolId, 1).orElseThrow();
+            assertThat(def.effect()).isEqualTo("read");
+            assertThat(def.riskLevel()).isEqualTo(RiskLevel.LOW);
+            assertThat(def.generationCapabilityType()).isNull();
+        }
     }
 
     @Test

@@ -19,6 +19,7 @@ from .bundle.source import BundleSource
 from .bundle.verifier import BundleVerifier, VerifiedSnapshot
 from .contracts import (
     ConversationSource,
+    CreativeContextSource,
     OrchestratorResult,
     ProposedAction,
     RunWork,
@@ -31,8 +32,9 @@ ENGINE = "pydantic-ai"
 ENGINE_VERSION = "2.9.0"
 ADAPTER_SCHEMA_VERSION = 1
 
-# IK2QBZ read_conversation_* 直接工具的注册表版本（与 Java 工具注册表对齐）。
-READ_CONVERSATION_REGISTRY_VERSION = 1
+# read effect 直接工具的注册表版本（read_conversation_* 与 IK2QC7 创作现场五工具统一 v1，
+# 与 Java 工具注册表对齐）。
+READ_DIRECT_TOOL_REGISTRY_VERSION = 1
 
 # checkpoint pending_calls 项的 kind 标记：澄清 deferred call 恢复时用用户自然语言
 # 回答作 ToolResult 回喂，区别于动作 pending（结果来自 accepted_results）。
@@ -124,10 +126,12 @@ class PydanticAIOrchestrator:
         bundle_source: BundleSource,
         implementations: Mapping[str, ToolImplementation] | None = None,
         conversation_source: ConversationSource | None = None,
+        creative_context_source: CreativeContextSource | None = None,
     ) -> None:
         self._model = model
         self._bundle_source = bundle_source
         self._conversation_source = conversation_source
+        self._creative_context_source = creative_context_source
         self._implementations = (
             implementations
             if implementations is not None
@@ -370,6 +374,17 @@ class PydanticAIOrchestrator:
             for item in evidence
         )
 
+    @staticmethod
+    def _record(gate: ResourceGate, resource_id: str, data: Any) -> str:
+        """fetch 后统一 json.dumps + charge_conversation 记账 + 返回紧凑文本。
+
+        read effect 直接工具（对话读取与创作现场读取）共用同一记账形态：内容紧凑序列化后
+        经 ResourceGate 双预算门记账（origin=conversation），返回模型可见文本。
+        """
+        content = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        gate.charge_conversation(resource_id, content)
+        return content
+
     def _build_tools(self, work: RunWork, gate: ResourceGate) -> tuple:
         """按当次 Run 钉住的 ToolGrant 动态构造模型可见工具集。
 
@@ -397,7 +412,7 @@ class PydanticAIOrchestrator:
                 raise _ContractError("授权工具不在 Worker 注册表")
             if grant.effect != "read":
                 raise _ContractError("工具效果类别与授权不符")
-            if grant.registry_version != READ_CONVERSATION_REGISTRY_VERSION:
+            if grant.registry_version != READ_DIRECT_TOOL_REGISTRY_VERSION:
                 raise _ContractError("工具注册表版本与授权不符")
             tools.append(factory(work, gate))
         return tuple(tools)
@@ -405,14 +420,23 @@ class PydanticAIOrchestrator:
     def _read_tool_factory(
         self, tool_name: str
     ) -> Callable[[RunWork, ResourceGate], Callable[..., object]] | None:
-        """read_conversation_* 闭包工厂；conversation_source 未配置时返回 None（工具不可见）。"""
-        if self._conversation_source is None:
-            return None
-        if tool_name == "read_conversation_summary":
-            return self._make_read_conversation_summary
-        if tool_name == "read_conversation_history":
+        """read effect 直接工具的闭包工厂；对应 source 未配置时该工具不可见。"""
+        if tool_name in ("read_conversation_summary", "read_conversation_history"):
+            if self._conversation_source is None:
+                return None
+            if tool_name == "read_conversation_summary":
+                return self._make_read_conversation_summary
             return self._make_read_conversation_history
-        return None
+        if self._creative_context_source is None:
+            return None
+        creative_factories = {
+            "list_canvas_nodes": self._make_list_canvas_nodes,
+            "read_canvas_node": self._make_read_canvas_node,
+            "read_asset": self._make_read_asset,
+            "read_generation_job_status": self._make_read_generation_job_status,
+            "list_creative_skills": self._make_list_creative_skills,
+        }
+        return creative_factories.get(tool_name)
 
     def _make_read_conversation_summary(
         self, work: RunWork, gate: ResourceGate
@@ -420,9 +444,7 @@ class PydanticAIOrchestrator:
         def read_conversation_summary() -> str:
             """读取当前对话的紧凑摘要（消息数 / 首末预览 / 时间范围）。"""
             data = self._conversation_source.fetch_conversation_summary(work.agent_run_id)
-            content = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-            gate.charge_conversation(f"conversation:{work.conversation_id}:summary", content)
-            return content
+            return self._record(gate, f"conversation:{work.conversation_id}:summary", data)
 
         return read_conversation_summary
 
@@ -434,14 +456,68 @@ class PydanticAIOrchestrator:
             data = self._conversation_source.fetch_conversation_history(
                 work.agent_run_id, after=after, limit=limit
             )
-            content = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-            cursor_part = "" if after is None else f":after:{after}"
-            gate.charge_conversation(
-                f"conversation:{work.conversation_id}:history{cursor_part}", content
-            )
-            return content
+            resource_id = f"conversation:{work.conversation_id}:history"
+            if after is not None:
+                resource_id += f":after:{after}"
+            return self._record(gate, resource_id, data)
 
         return read_conversation_history
+
+    def _make_list_canvas_nodes(
+        self, work: RunWork, gate: ResourceGate
+    ) -> Callable[..., object]:
+        def list_canvas_nodes(limit: int | None = None) -> str:
+            """读取当前 Project 画布的节点摘要列表（nodeId / type / assetId，紧凑限流）。"""
+            data = self._creative_context_source.fetch_canvas_nodes(
+                work.agent_run_id, limit=limit
+            )
+            return self._record(gate, f"context:{work.project_id}:canvas_nodes", data)
+
+        return list_canvas_nodes
+
+    def _make_read_canvas_node(
+        self, work: RunWork, gate: ResourceGate
+    ) -> Callable[..., object]:
+        def read_canvas_node(node_id: str) -> str:
+            """读取单个画布节点详情（含原始 data 对象，前端 React Flow 定义）。"""
+            data = self._creative_context_source.fetch_canvas_node(
+                work.agent_run_id, node_id
+            )
+            return self._record(gate, f"context:{work.project_id}:canvas_node:{node_id}", data)
+
+        return read_canvas_node
+
+    def _make_read_asset(
+        self, work: RunWork, gate: ResourceGate
+    ) -> Callable[..., object]:
+        def read_asset(asset_id: int) -> str:
+            """读取单个 Asset 元数据（仅放行画布引用 ∪ 本 Run 产物范围内的 Asset）。"""
+            data = self._creative_context_source.fetch_asset(work.agent_run_id, asset_id)
+            return self._record(gate, f"context:{work.project_id}:asset:{asset_id}", data)
+
+        return read_asset
+
+    def _make_read_generation_job_status(
+        self, work: RunWork, gate: ResourceGate
+    ) -> Callable[..., object]:
+        def read_generation_job_status(job_id: int) -> str:
+            """读取单个生成任务的紧凑状态（status / progress / error / outputs）。"""
+            data = self._creative_context_source.fetch_generation_job_status(
+                work.agent_run_id, job_id
+            )
+            return self._record(gate, f"context:{work.project_id}:job_status:{job_id}", data)
+
+        return read_generation_job_status
+
+    def _make_list_creative_skills(
+        self, work: RunWork, gate: ResourceGate
+    ) -> Callable[..., object]:
+        def list_creative_skills() -> str:
+            """读取 Run 固定 Bundle 里的 Creative Skill 元数据列表（name / description）。"""
+            data = self._creative_context_source.fetch_creative_skills(work.agent_run_id)
+            return self._record(gate, f"context:{work.project_id}:creative_skills", data)
+
+        return list_creative_skills
 
     @staticmethod
     def _validate_identity(work: RunWork) -> None:
