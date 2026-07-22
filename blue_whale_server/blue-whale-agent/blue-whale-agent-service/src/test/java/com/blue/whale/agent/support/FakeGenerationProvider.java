@@ -4,7 +4,9 @@ import com.blue.whale.agent.service.generation.GenerationProvider;
 import com.blue.whale.agent.service.generation.GenerationProviderRequest;
 import com.blue.whale.agent.service.generation.GenerationProviderResult;
 
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -34,6 +36,16 @@ public class FakeGenerationProvider implements GenerationProvider {
         }
         if ("fake:no-result".equals(prompt)) {
             return GenerationProviderResult.noResult();
+        }
+        if (Boolean.TRUE.equals(request.input().get("sequential_image_generation"))) {
+            int maxImages = request.input().get("max_images") instanceof Number number
+                    ? number.intValue() : 1;
+            List<GenerationProviderResult.ImageResult> images = new ArrayList<>();
+            for (int i = 0; i < maxImages; i++) {
+                images.add(new GenerationProviderResult.ImageResult(
+                        ONE_PIXEL_PNG.clone(), "image/png", 1, 1));
+            }
+            return GenerationProviderResult.success(images);
         }
         return GenerationProviderResult.success(ONE_PIXEL_PNG.clone(), "image/png", 1, 1);
     }

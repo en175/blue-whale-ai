@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -185,6 +186,52 @@ class VolcEngineImageGenerationProviderTest {
     }
 
     @Test
+    void sequentialFlagProducesMultipleImagesWithAutoAndMaxImages() {
+        GenerationModelCapabilityMapper mapper = defaultMapper();
+        ArkService arkService = mock(ArkService.class);
+        when(arkService.generateImages(any())).thenReturn(pngResponse(List.of(
+                ONE_PIXEL_PNG_B64, ONE_PIXEL_PNG_B64, ONE_PIXEL_PNG_B64)));
+        VolcEngineImageGenerationProvider provider = newProvider(arkService, mapper);
+
+        GenerationProviderResult result = provider.generate(new GenerationProviderRequest(7L, 11L, Map.of(
+                "prompt", "三联组图", "model_id", "doubao-seedream-5.0-lite",
+                "sequential_image_generation", true, "max_images", 3)));
+
+        assertThat(result.status()).isEqualTo(GenerationProviderResult.Status.SUCCESS);
+        assertThat(result.images()).hasSize(3);
+        assertThat(result.content()).isEqualTo(ONE_PIXEL_PNG);
+        GenerateImagesRequest req = captureRequest(arkService);
+        assertThat(req.getSequentialImageGeneration()).isEqualTo("auto");
+        assertThat(req.getSequentialImageGenerationOptions()).isNotNull();
+        assertThat(req.getSequentialImageGenerationOptions().getMaxImages()).isEqualTo(3);
+    }
+
+    @Test
+    void sequentialFlagRejectedWhenCapabilityNotDeclared() {
+        GenerationModelCapability capability = new GenerationModelCapability();
+        capability.setModelId("doubao-seedream-5.0-lite");
+        capability.setCapabilityType("image");
+        capability.setSupportedSizes(List.of(sizeOption("2k", "2K")));
+        capability.setDefaultSize("2K");
+        GenerationModelCapability.Features features = new GenerationModelCapability.Features();
+        features.setQuantityMax(4);
+        capability.setFeatures(features);
+        GenerationModelCapabilityMapper mapper = mock(GenerationModelCapabilityMapper.class);
+        when(mapper.selectEnabledByModelId("doubao-seedream-5.0-lite"))
+                .thenReturn(Optional.of(capability));
+        ArkService arkService = mock(ArkService.class);
+        VolcEngineImageGenerationProvider provider = newProvider(arkService, mapper);
+
+        GenerationProviderResult result = provider.generate(new GenerationProviderRequest(7L, 11L, Map.of(
+                "prompt", "组图", "model_id", "doubao-seedream-5.0-lite",
+                "sequential_image_generation", true, "max_images", 3)));
+
+        assertThat(result.status()).isEqualTo(GenerationProviderResult.Status.FAILURE);
+        assertThat(result.errorCode()).isEqualTo("sequential_unsupported");
+        verify(arkService, never()).generateImages(any());
+    }
+
+    @Test
     void missingPromptRejectedBeforePaidCall() {
         ArkService arkService = mock(ArkService.class);
         VolcEngineImageGenerationProvider provider = newProvider(arkService, defaultMapper());
@@ -233,6 +280,18 @@ class VolcEngineImageGenerationProviderTest {
         return response;
     }
 
+    private ImagesResponse pngResponse(List<String> base64Images) {
+        List<ImagesResponse.Image> images = new ArrayList<>();
+        for (String b64 : base64Images) {
+            ImagesResponse.Image image = new ImagesResponse.Image();
+            image.setB64Json(b64);
+            images.add(image);
+        }
+        ImagesResponse response = new ImagesResponse();
+        response.setData(images);
+        return response;
+    }
+
     private GenerationModelCapability seedream() {
         GenerationModelCapability capability = new GenerationModelCapability();
         capability.setModelId("doubao-seedream-5.0-lite");
@@ -243,6 +302,7 @@ class VolcEngineImageGenerationProviderTest {
         GenerationModelCapability.Features features = new GenerationModelCapability.Features();
         features.setReferenceImage(true);
         features.setQuantityMax(4);
+        features.setSequentialImageGeneration(true);
         capability.setFeatures(features);
         return capability;
     }

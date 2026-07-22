@@ -8,6 +8,7 @@ import com.blue.whale.global.exception.GlobalException;
 import com.volcengine.ApiException;
 import com.volcengine.ark.runtime.model.images.generation.GenerateImagesRequest;
 import com.volcengine.ark.runtime.model.images.generation.GenerateImagesRequest.ContentGenerationTool;
+import com.volcengine.ark.runtime.model.images.generation.GenerateImagesRequest.SequentialImageGenerationOptions;
 import com.volcengine.ark.runtime.model.images.generation.ImagesResponse;
 import com.volcengine.ark.runtime.model.images.generation.ResponseFormat;
 import com.volcengine.ark.runtime.service.ArkService;
@@ -29,19 +30,19 @@ import java.util.Map;
  * GenerationAdapterConfiguration 校验含 {@code /plan/}）。
  *
  * <p>支持文生图 + 参考图（image 参数：先从项目 Asset 存储读出 bytes 转 base64 data URL 透传，
- * 免外部可读 URL）+ 联网搜索（{@code tools=[{type=web_search}]}）；响应用 {@code b64_json}
- * 免二次下载。按 {@link GenerationModelCapability} 能力表路由 {@code model_id}（Agent 路径缺省时
+ * 免外部可读 URL）+ 联网搜索（{@code tools=[{type=web_search}]}）+ 组图模式
+ * （{@code sequential_image_generation=auto} + {@code max_images=N}，单次方舟调用产 N 张关联图，
+ * 由 GenerationWorker 分别回填 Job 的 N 个输出槽）；响应用 {@code b64_json} 免二次下载。
+ * 按 {@link GenerationModelCapability} 能力表路由 {@code model_id}（Agent 路径缺省时
  * 回落 enabled image 默认模型）并校验 size 白名单；非法 model/size fail-closed 返回明确错误，
  * 不再透传到方舟（避免产生付费调用）。
- *
- * <p>单次只产出一张图：组图由 Job 多 slot（{@code expected_output_count}）多次 generate 承载，
- * 故不装配 sequential_image_generation/max_images（能力表已声明该能力供后续单次多图扩展）。
  */
 public class VolcEngineImageGenerationProvider implements GenerationProvider {
 
     private static final int MAX_IMAGE_BYTES = 20 * 1024 * 1024;
     private static final int MAX_REFERENCE_IMAGES = 4;
     private static final String WEB_SEARCH_TOOL_TYPE = "web_search";
+    private static final String SEQUENTIAL_MODE = "auto";
 
     private final ObjectProvider<ArkService> arkServiceProvider;
     private final ProjectAssetContentService assetContentService;
@@ -79,18 +80,46 @@ public class VolcEngineImageGenerationProvider implements GenerationProvider {
         if (referenceDataUrls == null) {
             return GenerationProviderResult.failure("reference_image_unavailable", "参考资源不可用");
         }
+        boolean sequential = Boolean.TRUE.equals(input.get("sequential_image_generation"));
+        int maxImages = 1;
+        if (sequential) {
+            // 防御性二次校验：CommandService 已 fail-closed 校验能力，此处双保险避免产生付费调用。
+            GenerationModelCapability.Features features = capability.getFeatures();
+            if (features == null
+                    || !Boolean.TRUE.equals(features.getSequentialImageGeneration())) {
+                return GenerationProviderResult.failure(
+                        "sequential_unsupported", "模型不支持组图模式");
+            }
+            maxImages = resolveMaxImages(input);
+            Integer quantityMax = features.getQuantityMax();
+            if (maxImages < 2 || (quantityMax != null && maxImages > quantityMax)) {
+                return GenerationProviderResult.failure(
+                        "invalid_request", "组图数量参数无效");
+            }
+        }
         ArkService arkService = arkServiceProvider.getIfAvailable();
         if (arkService == null) {
             return GenerationProviderResult.failure(
                     "provider_not_configured", "图片生成服务暂不可用");
         }
         GenerateImagesRequest arkRequest = buildRequest(
-                capability.getModelId(), prompt, apiSize, webSearch, referenceDataUrls);
+                capability.getModelId(), prompt, apiSize, webSearch, referenceDataUrls,
+                sequential, maxImages);
         try {
             return toResult(arkService.generateImages(arkRequest));
         } catch (Exception exception) {
             return providerFailure(exception);
         }
+    }
+
+    private int resolveMaxImages(Map<String, Object> input) {
+        if (input.get("max_images") instanceof Number number) {
+            return number.intValue();
+        }
+        if (input.get("expected_output_count") instanceof Number number) {
+            return number.intValue();
+        }
+        return 1;
     }
 
     private GenerationModelCapability resolveCapability(String requestedModelId) {
@@ -149,7 +178,8 @@ public class VolcEngineImageGenerationProvider implements GenerationProvider {
 
     private GenerateImagesRequest buildRequest(
             String modelId, String prompt, String apiSize,
-            Boolean webSearch, List<String> referenceDataUrls) {
+            Boolean webSearch, List<String> referenceDataUrls,
+            boolean sequential, int maxImages) {
         GenerateImagesRequest.Builder builder = GenerateImagesRequest.builder()
                 .model(modelId)
                 .prompt(prompt)
@@ -166,6 +196,12 @@ public class VolcEngineImageGenerationProvider implements GenerationProvider {
             tool.setType(WEB_SEARCH_TOOL_TYPE);
             builder.tools(List.of(tool));
         }
+        if (sequential) {
+            SequentialImageGenerationOptions options = new SequentialImageGenerationOptions();
+            options.setMaxImages(maxImages);
+            builder.sequentialImageGeneration(SEQUENTIAL_MODE)
+                    .sequentialImageGenerationOptions(options);
+        }
         return builder.build();
     }
 
@@ -173,40 +209,46 @@ public class VolcEngineImageGenerationProvider implements GenerationProvider {
         if (response == null || response.getData() == null || response.getData().isEmpty()) {
             return GenerationProviderResult.noResult();
         }
-        String base64 = response.getData().get(0).getB64Json();
-        if (base64 == null || base64.isBlank()) {
+        // 组图遍历多张：坏图（base64 缺失/超限/解码失败）宽容跳过，不拖垮整批。
+        List<GenerationProviderResult.ImageResult> images = new ArrayList<>();
+        for (ImagesResponse.Image raw : response.getData()) {
+            String base64 = raw.getB64Json();
+            if (base64 == null || base64.isBlank()) {
+                continue;
+            }
+            GenerationProviderResult.ImageResult decoded = decodeOne(base64);
+            if (decoded != null) {
+                images.add(decoded);
+            }
+        }
+        if (images.isEmpty()) {
             return GenerationProviderResult.noResult();
         }
-        return decode(base64);
+        return GenerationProviderResult.success(images);
     }
 
-    private GenerationProviderResult decode(String base64) {
+    private GenerationProviderResult.ImageResult decodeOne(String base64) {
         if ((long) base64.length() * 3 / 4 > MAX_IMAGE_BYTES) {
-            return GenerationProviderResult.failure(
-                    "invalid_provider_result", "图片生成结果超过大小限制");
+            return null;
         }
         byte[] content;
         try {
             content = Base64.getDecoder().decode(base64);
         } catch (IllegalArgumentException exception) {
-            return GenerationProviderResult.failure(
-                    "invalid_provider_result", "图片生成结果格式无效");
+            return null;
         }
         if (content.length == 0 || content.length > MAX_IMAGE_BYTES) {
-            return GenerationProviderResult.failure(
-                    "invalid_provider_result", "图片生成结果超过大小限制");
+            return null;
         }
         try {
             BufferedImage image = ImageIO.read(new ByteArrayInputStream(content));
             if (image == null) {
-                return GenerationProviderResult.failure(
-                        "invalid_provider_result", "图片生成结果格式无效");
+                return null;
             }
-            return GenerationProviderResult.success(content, "image/png",
-                    image.getWidth(), image.getHeight());
+            return new GenerationProviderResult.ImageResult(
+                    content, "image/png", image.getWidth(), image.getHeight());
         } catch (IOException exception) {
-            return GenerationProviderResult.failure(
-                    "invalid_provider_result", "图片生成结果格式无效");
+            return null;
         }
     }
 

@@ -455,6 +455,7 @@ function CanvasPageInner() {
                 model_id: args.settings.modelId,
                 size: args.settings.size,
                 web_search: args.settings.webSearch,
+                sequential_image_generation: args.settings.sequential,
               },
               expected_output_count: outputCount,
             },

@@ -92,6 +92,24 @@ public class GenerationJobCommandService {
             input.put("model_id", capability.getModelId());
             input.put("size", resolveSupportedSize(request.parameters().size(), capability));
             input.put("web_search", Boolean.TRUE.equals(request.parameters().webSearch()));
+            // 组图模式校验接缝：能力表 features.sequential_image_generation 为唯一权威，
+            // 未声明能力或 count 超出 quantity_max 时 fail-closed（IK24Q9），在 cost 授权前拒绝。
+            boolean sequential = Boolean.TRUE.equals(request.parameters().sequentialImageGeneration());
+            if (sequential) {
+                GenerationModelCapability.Features features = capability.getFeatures();
+                if (features == null
+                        || !Boolean.TRUE.equals(features.getSequentialImageGeneration())) {
+                    throw GovernanceException.validationFailed(
+                            "模型不支持组图模式: " + capability.getModelId());
+                }
+                Integer quantityMax = features.getQuantityMax();
+                int count = request.expectedOutputCount();
+                if (quantityMax == null || count > quantityMax) {
+                    throw GovernanceException.validationFailed(
+                            "组图数量超出上限: " + count + " > " + quantityMax);
+                }
+            }
+            input.put("sequential_image_generation", sequential);
         }
         if (GenerationJob.TYPE_VIDEO.equals(request.type())) {
             input.put("resolution", request.parameters().resolution());
@@ -341,7 +359,8 @@ public class GenerationJobCommandService {
                 + request.expectedOutputCount() + "\u0000"
                 + request.parameters().modelId() + "\u0000"
                 + request.parameters().size() + "\u0000"
-                + request.parameters().webSearch());
+                + request.parameters().webSearch() + " "
+                + request.parameters().sequentialImageGeneration());
     }
 
     private GenerationModelCapability requireImageCapability(String modelId) {

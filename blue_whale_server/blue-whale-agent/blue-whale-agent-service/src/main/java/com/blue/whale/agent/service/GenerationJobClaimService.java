@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -71,6 +72,13 @@ public class GenerationJobClaimService {
                 claimed.getId(), target.getSlotIndex(), claimed.getProjectId(), claimed.getUserId(), claimed.getVersion(),
                 claimed.getFencingToken(), claimed.getLeaseOwner(), claimed.getInput(), claimed.getType(),
                 claimed.getStatus(), claimed.getExecutionDeadlineAt());
+    }
+
+    /**
+     * 组图模式：返回 Job 当前 pending 槽序号（升序），供 Worker 单次方舟调用回填 N 槽（IK24Q9）。
+     */
+    public List<Integer> pendingSlotIndexes(Long jobId) {
+        return outputMapper.selectPendingSlotIndexesByJob(jobId);
     }
 
     private void appendStatusChanged(GenerationJob job) {

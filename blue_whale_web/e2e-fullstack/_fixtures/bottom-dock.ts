@@ -24,6 +24,7 @@ export interface ImageCommandCapture {
       model_id?: string;
       size?: string;
       web_search?: boolean;
+      sequential_image_generation?: boolean;
     };
   };
   /** 服务端 202 接纳返回的 Job 身份。 */

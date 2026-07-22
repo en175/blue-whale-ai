@@ -12,6 +12,7 @@ import com.blue.whale.agent.service.governance.GenerationCostAdmissionService;
 import com.blue.whale.agent.service.governance.GovernanceException;
 import com.blue.whale.agent.service.generation.GenerationWorker;
 import com.blue.whale.agent.support.FakeGenerationConfiguration;
+import com.blue.whale.agent.support.FakeGenerationProvider;
 import com.blue.whale.agent.support.FakeGenerationStorage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -76,6 +77,8 @@ class BottomDockGenerationJobIT {
     private CostControlProperties costControlProperties;
     @Autowired
     private GenerationCostAdmissionService costAdmissionService;
+    @Autowired
+    private FakeGenerationProvider fakeGenerationProvider;
 
     @BeforeEach
     void cleanFacts() {
@@ -851,6 +854,89 @@ class BottomDockGenerationJobIT {
         postRetry(project.getId(), otherJobId, "missing-retry-key")
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(100302));
+    }
+
+    @Test
+    void sequentialImageGenerationFillsAllSlotsInOneProviderCall() throws Exception {
+        fakeGenerationProvider.reset();
+        Project project = new Project().setOwnerId(10L).setName("sequential-image");
+        projectMapper.insert(project);
+        String body = "{" +
+                "\"type\":\"image\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{\"prompt\":\"四联组图\",\"aspect_ratio\":\"1:1\"," +
+                "\"model_id\":\"" + IMAGE_MODEL_ID + "\",\"sequential_image_generation\":true}," +
+                "\"expected_output_count\":4}";
+
+        long jobId = responseData(postGenerationJob(project.getId(), "sequential-image", body)
+                .andExpect(status().isAccepted()).andReturn()).path("generation_job_id").asLong();
+
+        assertThat(generationWorker.runOnce("sequential-worker")).isTrue();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM generation_jobs WHERE id = ?", String.class, jobId))
+                .isEqualTo("succeeded");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT status FROM generation_job_outputs WHERE generation_job_id = ? ORDER BY slot_index",
+                String.class, jobId))
+                .containsExactly("succeeded", "succeeded", "succeeded", "succeeded");
+        assertThat(count("assets", "generation_job_id", jobId)).isEqualTo(4);
+        assertThat(fakeGenerationProvider.callCount())
+                .as("组图模式单次方舟调用回填全部 N 槽")
+                .isEqualTo(1);
+    }
+
+    @Test
+    void sequentialRejectedWhenModelCapabilityNotDeclared() throws Exception {
+        insertCapability("doubao-no-sequential",
+                "{\"reference_image\":true,\"quantity_max\":4}");
+        Project project = new Project().setOwnerId(10L).setName("sequential-unsupported");
+        projectMapper.insert(project);
+        String body = "{" +
+                "\"type\":\"image\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{\"prompt\":\"组图\",\"aspect_ratio\":\"1:1\"," +
+                "\"model_id\":\"doubao-no-sequential\",\"sequential_image_generation\":true}," +
+                "\"expected_output_count\":2}";
+
+        postGenerationJob(project.getId(), "sequential-unsupported", body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg").value("模型不支持组图模式: doubao-no-sequential"))
+                .andExpect(jsonPath("$.data.code").value("VALIDATION_FAILED"));
+
+        assertThat(count("generation_jobs", "project_id", project.getId())).isZero();
+        assertThat(count("cost_reservations", "project_id", project.getId())).isZero();
+    }
+
+    @Test
+    void sequentialRejectedWhenCountExceedsQuantityMax() throws Exception {
+        insertCapability("doubao-low-quantity",
+                "{\"reference_image\":true,\"quantity_max\":2,\"sequential_image_generation\":true}");
+        Project project = new Project().setOwnerId(10L).setName("sequential-overflow");
+        projectMapper.insert(project);
+        String body = "{" +
+                "\"type\":\"image\"," +
+                "\"input_asset_ids\":[]," +
+                "\"parameters\":{\"prompt\":\"超限组图\",\"aspect_ratio\":\"1:1\"," +
+                "\"model_id\":\"doubao-low-quantity\",\"sequential_image_generation\":true}," +
+                "\"expected_output_count\":3}";
+
+        postGenerationJob(project.getId(), "sequential-overflow", body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg").value("组图数量超出上限: 3 > 2"))
+                .andExpect(jsonPath("$.data.code").value("VALIDATION_FAILED"));
+
+        assertThat(count("generation_jobs", "project_id", project.getId())).isZero();
+        assertThat(count("cost_reservations", "project_id", project.getId())).isZero();
+    }
+
+    private void insertCapability(String modelId, String featuresJson) {
+        jdbcTemplate.update("DELETE FROM generation_model_capability WHERE model_id = ?", modelId);
+        jdbcTemplate.update("INSERT INTO generation_model_capability "
+                        + "(provider_id, model_id, capability_type, supported_sizes, default_size, features, enabled) "
+                        + "VALUES ('volcengine', ?, 'image', "
+                        + "'[{\"id\":\"2k\",\"label\":\"2K\",\"api_value\":\"2K\",\"width\":2048,\"height\":2048}]', "
+                        + "'2K', ?, 1)", modelId, featuresJson);
     }
 
     private Asset generatedAsset(
