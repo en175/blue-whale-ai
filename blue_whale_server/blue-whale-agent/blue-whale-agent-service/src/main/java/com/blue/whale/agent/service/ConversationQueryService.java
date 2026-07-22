@@ -2,16 +2,21 @@ package com.blue.whale.agent.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
+import com.blue.whale.agent.mapper.MessageAssetReferenceMapper;
 import com.blue.whale.agent.model.dto.ConversationHistoryResponse;
 import com.blue.whale.agent.model.dto.ConversationHistoryResponse.MessageItem;
 import com.blue.whale.agent.model.dto.ConversationSummaryResponse;
 import com.blue.whale.agent.model.entity.AgentRun;
 import com.blue.whale.agent.model.entity.ConversationMessage;
+import com.blue.whale.agent.model.entity.MessageAssetReference;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Conversation 只读查询（IK2QBZ）：面向 Python Agent Worker 的对话摘要与游标分页历史。
@@ -31,6 +36,7 @@ public class ConversationQueryService {
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
     private final ConversationMessageMapper messageMapper;
+    private final MessageAssetReferenceMapper messageAssetReferenceMapper;
     private final RunLeaseGuard runLeaseGuard;
 
     public ConversationHistoryResponse history(Long runId, String workerId, Integer after, Integer limit) {
@@ -51,9 +57,11 @@ public class ConversationQueryService {
             page = page.subList(0, pageSize);
             nextCursor = page.get(page.size() - 1).getSequenceNo().longValue();
         }
+        Map<Long, List<Long>> referencesByMessage = loadReferencedAssetIds(page);
         List<MessageItem> items = page.stream()
                 .map(m -> new MessageItem(m.getId(), m.getRole(), m.getContent(),
-                        m.getSequenceNo(), m.getAgentRunId()))
+                        m.getSequenceNo(), m.getAgentRunId(),
+                        referencesByMessage.getOrDefault(m.getId(), List.of())))
                 .toList();
         return new ConversationHistoryResponse(run.getConversationId(), items, nextCursor, hasMore);
     }
@@ -91,5 +99,27 @@ public class ConversationQueryService {
             return null;
         }
         return content.length() <= PREVIEW_MAX_LENGTH ? content : content.substring(0, PREVIEW_MAX_LENGTH);
+    }
+
+    /**
+     * 批量加载一页消息各自 @ 引用的 assetId（按 mention_seq 升序）。
+     * 单次 IN 查询 + computeIfAbsent 分组——迭代序即升序，免逐组排序；空 page 短路零查询。
+     * 每页固定 2 条查询（messages + references），与页大小无关，规避 N+1。
+     */
+    private Map<Long, List<Long>> loadReferencedAssetIds(List<ConversationMessage> page) {
+        if (page.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> messageIds = page.stream().map(ConversationMessage::getId).toList();
+        List<MessageAssetReference> references = messageAssetReferenceMapper.selectList(
+                Wrappers.<MessageAssetReference>lambdaQuery()
+                        .in(MessageAssetReference::getMessageId, messageIds)
+                        .orderByAsc(MessageAssetReference::getMentionSeq));
+        Map<Long, List<Long>> byMessage = new HashMap<>();
+        for (MessageAssetReference reference : references) {
+            byMessage.computeIfAbsent(reference.getMessageId(), key -> new ArrayList<>())
+                    .add(reference.getAssetId());
+        }
+        return byMessage;
     }
 }

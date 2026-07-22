@@ -21,6 +21,7 @@ public record ConversationHistoryResponse(
             String role,
             String content,
             Integer sequenceNo,
-            Long agentRunId
+            Long agentRunId,
+            List<Long> referencedAssetIds
     ) {}
 }

@@ -51,6 +51,7 @@ class CreativeContextReadIT {
                 "DELETE FROM runtime_checkpoints",
                 "DELETE FROM generation_job_outputs",
                 "DELETE FROM generation_jobs",
+                "DELETE FROM message_asset_reference",
                 "DELETE FROM conversation_messages",
                 "DELETE FROM agent_runs",
                 "DELETE FROM assets",
@@ -156,6 +157,99 @@ class CreativeContextReadIT {
     }
 
     @Test
+    void readAssetAllowsConversationReferencedAsset() throws Exception {
+        // AC2：画布空、无 Run 产物、X 只经第三源（同 Conversation @ 引用）放行
+        Project project = newProject(10L);
+        Long conversationId = seedConversation(project.getId());
+        Long runId = seedLeasedRun(project.getId(), conversationId, 10L, "worker-1");
+        seedCanvas(project.getId(), "[]");
+        Long messageId = seedMessageReturningId(conversationId, project.getId(), "user", "看这张", 1);
+        seedReference(messageId, conversationId, project.getId(), 9L, 1);
+        seedAsset(project.getId(), 10L, 9L, "image", "normal");
+        mockMvc.perform(get("/internal/agent-runs/{runId}/assets/{assetId}", runId, 9)
+                        .header("X-Worker-Id", "worker-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.asset_id").value(9));
+    }
+
+    @Test
+    void readAssetAllowsReferencedAssetFromPriorRunInSameConversation() throws Exception {
+        // AC3 追问：同 Conversation 两 Run，Run A 带 @ X，Run B 不带；用 Run B 的 lease 读 X 放行
+        // （第三源按 conversationId 查到 Run A 落的引用行，追问轮次放行）
+        Project project = newProject(10L);
+        Long conversationId = seedConversation(project.getId());
+        seedLeasedRun(project.getId(), conversationId, 10L, "worker-1");
+        seedLeasedRun(project.getId(), conversationId, 10L, "worker-1");
+        Long runB = jdbcTemplate.queryForObject(
+                "SELECT MAX(id) FROM agent_runs WHERE conversation_id = ?", Long.class, conversationId);
+        seedCanvas(project.getId(), "[]");
+        Long messageId = seedMessageReturningId(conversationId, project.getId(), "user", "Run A @ X", 1);
+        seedReference(messageId, conversationId, project.getId(), 9L, 1);
+        seedAsset(project.getId(), 10L, 9L, "image", "normal");
+        mockMvc.perform(get("/internal/agent-runs/{runId}/assets/{assetId}", runB, 9)
+                        .header("X-Worker-Id", "worker-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.asset_id").value(9));
+    }
+
+    @Test
+    void readAssetRejectsAssetReferencedInOtherConversation() throws Exception {
+        // AC3 隔离：同 Project 两 Conversation，X 只在 conv1 @ 引用、只经第三源可达；
+        // conv2 的 Run 读 X → 100301（第三源按 conversationId 隔离）
+        Project project = newProject(10L);
+        Long conv1 = seedConversation(project.getId());
+        Long conv2 = seedConversation(project.getId());
+        seedLeasedRun(project.getId(), conv1, 10L, "worker-1");
+        Long run2 = seedLeasedRun(project.getId(), conv2, 10L, "worker-1");
+        seedCanvas(project.getId(), "[]");
+        Long message1 = seedMessageReturningId(conv1, project.getId(), "user", "conv1 @ X", 1);
+        seedReference(message1, conv1, project.getId(), 9L, 1);
+        seedAsset(project.getId(), 10L, 9L, "image", "normal");
+        mockMvc.perform(get("/internal/agent-runs/{runId}/assets/{assetId}", run2, 9)
+                        .header("X-Worker-Id", "worker-1"))
+                .andExpect(status().is4xxClientError())
+                .andExpect(jsonPath("$.code").value(100301));
+    }
+
+    @Test
+    void readAssetRejectsAssetReferencedInOtherProject() throws Exception {
+        // AC4 跨 Project：X 在 projectA 引用，projectB 的 Run 读 X → 100301
+        // （第三源用 projectB conv 查不到 + 三元组 projectId 兜底）
+        Project projectA = newProject(10L);
+        Project projectB = new Project().setOwnerId(10L).setName("ctx-read-other-proj");
+        projectMapper.insert(projectB);
+        Long convA = seedConversation(projectA.getId());
+        Long convB = seedConversation(projectB.getId());
+        Long runB = seedLeasedRun(projectB.getId(), convB, 10L, "worker-1");
+        seedCanvas(projectA.getId(), "[]");
+        seedCanvas(projectB.getId(), "[]");
+        Long messageA = seedMessageReturningId(convA, projectA.getId(), "user", "A @ X", 1);
+        seedReference(messageA, convA, projectA.getId(), 9L, 1);
+        seedAsset(projectA.getId(), 10L, 9L, "image", "normal");
+        mockMvc.perform(get("/internal/agent-runs/{runId}/assets/{assetId}", runB, 9)
+                        .header("X-Worker-Id", "worker-1"))
+                .andExpect(status().is4xxClientError())
+                .andExpect(jsonPath("$.code").value(100301));
+    }
+
+    @Test
+    void readAssetRejectsAssetReferencedByOtherUser() throws Exception {
+        // AC4 跨 User：直接 seed 越权引用行（绕过写路径 filterOwnedReferenceAssetIds），
+        // asset userId=11 ≠ run userId=10；第三源 surface 后三元组 userId 拒
+        Project project = newProject(10L);
+        Long conversationId = seedConversation(project.getId());
+        Long runId = seedLeasedRun(project.getId(), conversationId, 10L, "worker-1");
+        seedCanvas(project.getId(), "[]");
+        Long messageId = seedMessageReturningId(conversationId, project.getId(), "user", "@ X", 1);
+        seedReference(messageId, conversationId, project.getId(), 9L, 1);
+        seedAsset(project.getId(), 11L, 9L, "image", "normal");
+        mockMvc.perform(get("/internal/agent-runs/{runId}/assets/{assetId}", runId, 9)
+                        .header("X-Worker-Id", "worker-1"))
+                .andExpect(status().is4xxClientError())
+                .andExpect(jsonPath("$.code").value(100301));
+    }
+
+    @Test
     void readGenerationJobStatusReturnsStatus() throws Exception {
         Project project = newProject(10L);
         Long conversationId = seedConversation(project.getId());
@@ -255,5 +349,21 @@ class CreativeContextReadIT {
                 projectId, userId, runId, "image", "agent_run", "succeeded", 100, outputAssetIds);
         return jdbcTemplate.queryForObject(
                 "SELECT MAX(id) FROM generation_jobs WHERE agent_run_id = ?", Long.class, runId);
+    }
+
+    private Long seedMessageReturningId(Long conversationId, Long projectId, String role, String content, int sequenceNo) {
+        jdbcTemplate.update(
+                "INSERT INTO conversation_messages (conversation_id, project_id, role, content, sequence_no) "
+                        + "VALUES (?,?,?,?,?)",
+                conversationId, projectId, role, content, sequenceNo);
+        return jdbcTemplate.queryForObject(
+                "SELECT MAX(id) FROM conversation_messages WHERE conversation_id = ?", Long.class, conversationId);
+    }
+
+    private void seedReference(Long messageId, Long conversationId, Long projectId, Long assetId, int mentionSeq) {
+        jdbcTemplate.update(
+                "INSERT INTO message_asset_reference (message_id, conversation_id, project_id, asset_id, mention_seq) "
+                        + "VALUES (?,?,?,?,?)",
+                messageId, conversationId, projectId, assetId, mentionSeq);
     }
 }

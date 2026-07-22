@@ -14,6 +14,7 @@ import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
 import com.blue.whale.agent.mapper.GenerationProviderTaskMapper;
 import com.blue.whale.agent.mapper.GenerationResultConflictMapper;
+import com.blue.whale.agent.mapper.MessageAssetReferenceMapper;
 import com.blue.whale.agent.mapper.ProjectMapper;
 import com.blue.whale.agent.mapper.RunCommitRecordMapper;
 import com.blue.whale.agent.mapper.RuntimeCheckpointMapper;
@@ -65,6 +66,7 @@ public class ProjectPurgeService {
     private final ProjectMapper projectMapper;
     private final ConversationMapper conversationMapper;
     private final ConversationMessageMapper messageMapper;
+    private final MessageAssetReferenceMapper messageAssetReferenceMapper;
     private final AssistantMessageChunkMapper assistantMessageChunkMapper;
     private final AssistantMessageStreamMapper assistantMessageStreamMapper;
     private final UserInputRequestMapper userInputRequestMapper;
@@ -101,6 +103,7 @@ public class ProjectPurgeService {
         assistantMessageChunkMapper.hardDeleteByProjectId(projectId);
         assistantMessageStreamMapper.hardDeleteByProjectId(projectId);
         messageMapper.hardDeleteByProjectId(projectId);
+        messageAssetReferenceMapper.hardDeleteByProjectId(projectId);
         userInputRequestMapper.hardDeleteByProjectId(projectId);
         runtimeCheckpointMapper.hardDeleteByAgentRunProjectId(projectId);
         runCommitRecordMapper.hardDeleteByAgentRunProjectId(projectId);

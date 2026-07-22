@@ -102,6 +102,7 @@ class ProjectPurgeIT {
                 "DELETE FROM run_commits",
                 "DELETE FROM runtime_checkpoints",
                 "DELETE FROM command_idempotency",
+                "DELETE FROM message_asset_reference",
                 "DELETE FROM conversation_messages",
                 "DELETE FROM generation_result_conflicts",
                 "DELETE FROM generation_provider_tasks",
@@ -203,6 +204,29 @@ class ProjectPurgeIT {
         mockMvc.perform(get("/api/projects").header("X-User-Id", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(0));
+    }
+
+    @Test
+    void deleteCascadesMessageAssetReference() throws Exception {
+        // message_asset_reference 随项目永久删除级联清除（Project purge 与 GenerationInbox 永久删除同走 purge）
+        long projectId = createProject("引用项目");
+        jdbcTemplate.update("INSERT INTO conversations (project_id) VALUES (?)", projectId);
+        Long conversationId = jdbcTemplate.queryForObject(
+                "SELECT id FROM conversations WHERE project_id = ?", Long.class, projectId);
+        jdbcTemplate.update("INSERT INTO conversation_messages "
+                        + "(conversation_id, project_id, role, content, sequence_no) VALUES (?, ?, 'user', '引用素材', 1)",
+                conversationId, projectId);
+        Long messageId = jdbcTemplate.queryForObject(
+                "SELECT id FROM conversation_messages WHERE project_id = ?", Long.class, projectId);
+        jdbcTemplate.update("INSERT INTO message_asset_reference "
+                + "(message_id, conversation_id, project_id, asset_id, mention_seq) VALUES (?, ?, ?, 7, 1)",
+                messageId, conversationId, projectId);
+
+        mockMvc.perform(delete("/api/projects/{id}", projectId).header("X-User-Id", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        assertThat(count("message_asset_reference", "project_id", projectId)).isZero();
     }
 
     @Test

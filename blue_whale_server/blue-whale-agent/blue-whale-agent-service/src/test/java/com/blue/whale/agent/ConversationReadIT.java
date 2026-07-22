@@ -49,6 +49,7 @@ class ConversationReadIT {
         jdbcTemplate.batchUpdate(
                 "DELETE FROM run_commits",
                 "DELETE FROM runtime_checkpoints",
+                "DELETE FROM message_asset_reference",
                 "DELETE FROM conversation_messages",
                 "DELETE FROM agent_runs",
                 "DELETE FROM conversations",
@@ -111,6 +112,36 @@ class ConversationReadIT {
                 .andExpect(jsonPath("$.data.last_message_preview").value("好的，正在生成蓝鲸深海图。"))
                 .andExpect(jsonPath("$.data.earliest_at").isString())
                 .andExpect(jsonPath("$.data.latest_at").isString());
+    }
+
+    @Test
+    void historyReturnsReferencedAssetIdsOrderedByMentionSeq() throws Exception {
+        // 一条消息 @ 两张素材，按 mention_seq 升序回传 referenced_asset_ids
+        Project project = newProject(10L);
+        Long conversationId = seedConversation(project.getId());
+        Long runId = seedLeasedRun(project.getId(), conversationId, 10L, "worker-1");
+        Long messageId = seedMessageReturningId(conversationId, project.getId(), "user", "看这两张", 1);
+        seedReference(messageId, conversationId, project.getId(), 11L, 1);
+        seedReference(messageId, conversationId, project.getId(), 22L, 2);
+        mockMvc.perform(get("/internal/agent-runs/{runId}/conversation/history", runId)
+                        .header("X-Worker-Id", "worker-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].referenced_asset_ids[0]").value(11))
+                .andExpect(jsonPath("$.data.items[0].referenced_asset_ids[1]").value(22));
+    }
+
+    @Test
+    void historyReturnsEmptyReferencedAssetIdsWhenNoReferences() throws Exception {
+        // 无引用消息回传空数组 []（非 null），Python Worker 不靠名称猜
+        Project project = newProject(10L);
+        Long conversationId = seedConversation(project.getId());
+        Long runId = seedLeasedRun(project.getId(), conversationId, 10L, "worker-1");
+        seedMessage(conversationId, project.getId(), "user", "纯文本无引用", 1);
+        mockMvc.perform(get("/internal/agent-runs/{runId}/conversation/history", runId)
+                        .header("X-Worker-Id", "worker-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].referenced_asset_ids").isArray())
+                .andExpect(jsonPath("$.data.items[0].referenced_asset_ids").isEmpty());
     }
 
     @Test
@@ -196,5 +227,18 @@ class ConversationReadIT {
                 "INSERT INTO conversation_messages (conversation_id, project_id, role, content, sequence_no) "
                         + "VALUES (?,?,?,?,?)",
                 conversationId, projectId, role, content, sequenceNo);
+    }
+
+    private Long seedMessageReturningId(Long conversationId, Long projectId, String role, String content, int sequenceNo) {
+        seedMessage(conversationId, projectId, role, content, sequenceNo);
+        return jdbcTemplate.queryForObject(
+                "SELECT MAX(id) FROM conversation_messages WHERE conversation_id = ?", Long.class, conversationId);
+    }
+
+    private void seedReference(Long messageId, Long conversationId, Long projectId, Long assetId, int mentionSeq) {
+        jdbcTemplate.update(
+                "INSERT INTO message_asset_reference (message_id, conversation_id, project_id, asset_id, mention_seq) "
+                        + "VALUES (?,?,?,?,?)",
+                messageId, conversationId, projectId, assetId, mentionSeq);
     }
 }
