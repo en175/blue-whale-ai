@@ -789,7 +789,8 @@ function CanvasPageInner() {
           </button>
         </div>
       )}
-      {isBottomDockOpen && (
+      {/* BottomDock 始终挂载（display 控制显隐），保留用户调好的参数 */}
+      <div style={{ display: isBottomDockOpen ? undefined : "none" }}>
         <BottomDock
           mode={bottomDockMode}
           onClose={() => setIsBottomDockOpen(false)}
@@ -813,7 +814,7 @@ function CanvasPageInner() {
           generateError={generateError}
           onClearGenerateError={() => setGenerateError(null)}
         />
-      )}
+      </div>
       <AgentChatPanel
         key={activeProject.id}
         prompt={prompt}
