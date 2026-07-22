@@ -141,48 +141,27 @@ function VideoThumb({ src, name }: { src: string; name: string }) {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
-
     let cancelled = false;
 
-    const seekAndDraw = () => {
+    const draw = () => {
       if (cancelled || !video.videoWidth) return;
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext("2d");
       if (ctx) {
-        try {
-          ctx.drawImage(video, 0, 0);
-          console.debug("[DEBUG-vthumb] drawImage ok", src.slice(-40));
-        } catch (e) {
-          console.debug("[DEBUG-vthumb] drawImage tainted", src.slice(-40), e);
-        }
+        try { ctx.drawImage(video, 0, 0); } catch { /* tainted ok */ }
       }
       setReady(true);
     };
 
-    const onLoadedData = () => {
-      console.debug("[DEBUG-vthumb] loadeddata", src.slice(-40));
-      video.currentTime = 0.1;
-    };
-
-    const onSeeked = () => {
-      console.debug("[DEBUG-vthumb] seeked", video.videoWidth, "x", video.videoHeight, src.slice(-40));
-      seekAndDraw();
-    };
-
-    const onError = () => {
-      console.debug("[DEBUG-vthumb] error", src.slice(-40));
-      if (!cancelled) setFallback(true);
-    };
+    const onLoadedData = () => { video.currentTime = 0; };
+    const onSeeked = () => draw();
+    const onError = () => { if (!cancelled) setFallback(true); };
 
     video.addEventListener("loadeddata", onLoadedData);
     video.addEventListener("seeked", onSeeked);
     video.addEventListener("error", onError);
-    // 已在 DOM 中，直接触发加载
-    if (video.readyState >= 2) {
-      // 已经 loadeddata
-      onLoadedData();
-    }
+    if (video.readyState >= 2) onLoadedData();
 
     return () => {
       cancelled = true;
@@ -193,7 +172,6 @@ function VideoThumb({ src, name }: { src: string; name: string }) {
   }, [src]);
 
   if (fallback) {
-    console.debug("[DEBUG-vthumb] fallback icon", src.slice(-40));
     return (
       <div title={name} style={{ ...thumbBoxStyle, background: "rgba(255, 255, 255, 0.04)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255, 255, 255, 0.5)" }}>
         <Video width={18} height={18} />
@@ -210,10 +188,11 @@ function VideoThumb({ src, name }: { src: string; name: string }) {
         muted
         playsInline
         style={{
-          position: "absolute",
-          width: 1,
-          height: 1,
-          overflow: "hidden",
+          position: "fixed",
+          left: "-9999px",
+          top: 0,
+          width: 320,
+          height: 240,
           opacity: 0,
           pointerEvents: "none",
         }}
