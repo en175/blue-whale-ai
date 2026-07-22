@@ -14,6 +14,7 @@ import type { DockMediaItem, GenerateArgs, SelectOption } from "../../types";
 import { ImageDockContent } from "./ImageDockContent";
 import { VideoDockContent } from "./VideoDockContent";
 import { extractEditor, insertMention, removeMention, type MentionItem } from "./mention";
+import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 
 export function BottomDock({
   mode,
@@ -90,6 +91,7 @@ export function BottomDock({
   const [quantityOpen, setQuantityOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [internetSearch, setInternetSearch] = useState(false);
+  const [previewItem, setPreviewItem] = useState<DockMediaItem | null>(null);
 
   /** 应用某个视频模型：联动重置 分辨率/比例/时长 到该模型默认值（DB 驱动）。 */
   const applyModel = (cap: VideoModelCapability) => {
@@ -258,6 +260,7 @@ export function BottomDock({
                   isPicking={isPicking}
                   onGenerate={(s) => onGenerate?.(input, { mode: "image", settings: s, referenceImages: mentions })}
                   generating={generating}
+                  onPreviewMedia={setPreviewItem}
                 />
               ) : (
                 <VideoDockContent
@@ -301,12 +304,16 @@ export function BottomDock({
                   isPicking={isPicking}
                   onGenerate={(s) => onGenerate?.(input, { mode: "video", settings: s })}
                   generating={generating}
+                  onPreviewMedia={setPreviewItem}
                 />
               )}
             </div>
           </SmoothCorners>
         </div>
       </div>
+      {previewItem && (
+        <MediaPreviewModal item={previewItem} onClose={() => setPreviewItem(null)} />
+      )}
     </div>
   );
 }
