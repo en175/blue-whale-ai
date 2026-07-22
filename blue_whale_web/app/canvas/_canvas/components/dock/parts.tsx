@@ -3,7 +3,7 @@
  * FrameUploadButton：首尾帧上传按钮；
  * DockMediaThumb：素材缩略图（含删除）。供 ImageDockContent / VideoDockContent 复用。
  */
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AudioLines, Video, X } from "lucide-react";
 import { IconPlus } from "../../icons";
 import type { DockMediaItem } from "../../types";
@@ -117,6 +117,104 @@ export function FrameUploadButton({
   );
 }
 
+const thumbBoxStyle: React.CSSProperties = {
+  width: 44,
+  height: 44,
+  borderRadius: 9,
+  flexShrink: 0,
+  display: "block",
+  border: "1px solid rgba(255, 255, 255, 0.08)",
+};
+
+/**
+ * VideoThumb —— 隐藏 <video> 加载首帧 → canvas 绘制 → 显示首帧缩略图。
+ * <video> 做缩略图浏览器不主动解码帧；canvas 提取可保证跨浏览器一致。
+ * 跨域视频 canvas 会 taint，仅显示不导出，正常。
+ */
+function VideoThumb({ src, name }: { src: string; name: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [ready, setReady] = useState(false);
+  const [fallback, setFallback] = useState(false);
+
+  useEffect(() => {
+    const video = document.createElement("video");
+    video.src = src;
+    video.preload = "auto";
+    video.muted = true;
+    video.playsInline = true;
+    video.setAttribute("playsinline", "");
+
+    let cancelled = false;
+
+    const onLoadedData = () => {
+      video.currentTime = 0.1;
+    };
+
+    const onSeeked = () => {
+      if (cancelled) return;
+      const canvas = canvasRef.current;
+      if (!canvas || !video.videoWidth) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        try {
+          ctx.drawImage(video, 0, 0);
+          setReady(true);
+        } catch {
+          // canvas tainted (cross-origin 无 CORS)，不可导出但 DOM 显示可
+          setReady(true);
+        }
+      }
+      cleanup();
+    };
+
+    const onError = () => {
+      if (!cancelled) setFallback(true);
+      cleanup();
+    };
+
+    const cleanup = () => {
+      video.removeEventListener("loadeddata", onLoadedData);
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("error", onError);
+      video.removeAttribute("src");
+      video.load();
+    };
+
+    video.addEventListener("loadeddata", onLoadedData);
+    video.addEventListener("seeked", onSeeked);
+    video.addEventListener("error", onError);
+    video.load();
+
+    return () => {
+      cancelled = true;
+      cleanup();
+    };
+  }, [src]);
+
+  if (fallback) {
+    return (
+      <div title={name} style={{ ...thumbBoxStyle, background: "rgba(255, 255, 255, 0.04)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255, 255, 255, 0.5)" }}>
+        <Video width={18} height={18} />
+      </div>
+    );
+  }
+
+  return (
+    <canvas
+      ref={canvasRef}
+      title={name}
+      style={{
+        ...thumbBoxStyle,
+        objectFit: "cover",
+        background: "rgba(255, 255, 255, 0.04)",
+        visibility: ready ? "visible" : "hidden",
+      }}
+    />
+  );
+}
+
 // 底部 Dock 里的素材缩略图，按类型渲染（图片缩略图 / 视频·音频图标），带右上角删除按钮。
 // 点击可预览（onPreview），上传中显示进度百分比。
 export function DockMediaThumb({
@@ -182,20 +280,7 @@ export function DockMediaThumb({
             }}
           />
         ) : item.type === "video" && item.src ? (
-          <video
-            src={item.src}
-            title={item.name}
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 9,
-              objectFit: "cover",
-              flexShrink: 0,
-              display: "block",
-              border: "1px solid rgba(255, 255, 255, 0.08)",
-              background: "rgba(255, 255, 255, 0.04)",
-            }}
-          />
+          <VideoThumb src={item.src} name={item.name} />
         ) : (
           <div
             title={item.name}
