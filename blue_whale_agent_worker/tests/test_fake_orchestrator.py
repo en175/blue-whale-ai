@@ -111,7 +111,7 @@ class FakeOrchestratorTest(unittest.TestCase):
         self.assertEqual(stream_id, gateway.commit_payload["assistant_message_stream_id"])
         self.assertEqual(1, chunk_payload["sequence_no"])
         self.assertEqual(
-            "已接纳，正在生成图片。", chunk_payload["content"]
+            "正在为你生成图片：蓝鲸海报", chunk_payload["content"]
         )
         self.assertEqual(
             "local-fake" if self.work.engine == "fake" else "worker-prefix",
@@ -260,7 +260,8 @@ class FakeOrchestratorTest(unittest.TestCase):
 
     def test_resume_after_clarification_merges_original_intent_and_answer(self) -> None:
         # 恢复工作包：checkpoint 存有首轮原始创作意图，最新消息是用户的自然语言回答。
-        # 恢复后恰好一个 generate_image 动作，参数同时保留两者形成的约束。
+        # IK3BG0：澄清恢复后解除「必须生图」自限——Fake 以零动作纯文本收尾，原意图与
+        # 回答合并进可见文本（生产侧「恢复后可再澄清 / 纯文本 / 动作」由 pydantic_orchestrator 覆盖）。
         checkpoint = RuntimeCheckpoint(
             engine="fake",
             engine_version="1",
@@ -282,12 +283,10 @@ class FakeOrchestratorTest(unittest.TestCase):
         result = FakeOrchestrator().advance(resumed_work)
 
         self.assertIsNone(result.input_request)
-        self.assertEqual(1, len(result.actions))
-        action = result.actions[0]
-        self.assertEqual("create_image_generation_job", action.tool_id)
-        prompt = action.arguments["prompt"]
-        self.assertIn("蓝鲸海报", prompt)
-        self.assertIn("水墨风格带留白", prompt)
+        self.assertEqual(0, len(result.actions))
+        # 原意图（蓝鲸海报）与用户回答（水墨风格带留白）合并进零动作收尾的可见文本。
+        self.assertIn("蓝鲸海报", result.visible_text)
+        self.assertIn("水墨风格带留白", result.visible_text)
 
     def test_resume_rejects_checkpoint_with_mismatched_engine_identity(self) -> None:
         checkpoint = RuntimeCheckpoint(

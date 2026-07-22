@@ -15,10 +15,7 @@ from blue_whale_agent_worker.contracts import (
     RuntimeCheckpoint,
     ToolGrant,
 )
-from blue_whale_agent_worker.pydantic_orchestrator import (
-    PydanticAIOrchestrator,
-    ToolImplementation,
-)
+from blue_whale_agent_worker.pydantic_orchestrator import PydanticAIOrchestrator
 
 # ---- Bundle 基础上下文夹具（IK2QBJ：instructions 由装载后的 Bundle 驱动）----
 
@@ -244,7 +241,7 @@ def _skill_work(**overrides) -> RunWork:
 
 def _generate_image_grant() -> ToolGrant:
     return ToolGrant(
-        tool_name="generate_image",
+        tool_name="create_image_generation_job",
         registry_version=1,
         effect="side_effect",
         proposal_only=True,
@@ -258,7 +255,7 @@ def _generate_image_grant() -> ToolGrant:
 
 def _generate_video_grant() -> ToolGrant:
     return ToolGrant(
-        tool_name="generate_video",
+        tool_name="create_video_generation_job",
         registry_version=1,
         effect="side_effect",
         proposal_only=True,
@@ -316,8 +313,9 @@ def image_proposal_model(messages, info):
         return ModelResponse(parts=(TextPart("图片已经生成。"),))
     return ModelResponse(
         parts=(
+            TextPart("好的，为你生成图片。"),
             ToolCallPart(
-                "generate_image",
+                "create_image_generation_job",
                 {"prompt": "蓝鲸海报", "aspect_ratio": "1:1"},
                 "provider-private-call-id",
             ),
@@ -334,8 +332,9 @@ def video_proposal_model(messages, info):
         return ModelResponse(parts=(TextPart("视频已经生成。"),))
     return ModelResponse(
         parts=(
+            TextPart("好的，为你生成视频。"),
             ToolCallPart(
-                "generate_video",
+                "create_video_generation_job",
                 {
                     "prompt": "蓝鲸游动",
                     "aspect_ratio": "16:9",
@@ -351,8 +350,9 @@ def video_proposal_model(messages, info):
 def reference_image_proposal_model(messages, info):
     return ModelResponse(
         parts=(
+            TextPart("好的，把月亮加入参考图生成。"),
             ToolCallPart(
-                "generate_image",
+                "create_image_generation_job",
                 {
                     "prompt": "把月亮加入参考图",
                     "aspect_ratio": "16:9",
@@ -367,8 +367,9 @@ def reference_image_proposal_model(messages, info):
 def size_and_web_search_proposal_model(messages, info):
     return ModelResponse(
         parts=(
+            TextPart("好的，联网生成 2K 图片。"),
             ToolCallPart(
-                "generate_image",
+                "create_image_generation_job",
                 {
                     "prompt": "联网生成一张 2K 蓝鲸海报",
                     "size": "2K",
@@ -448,8 +449,9 @@ def clarify_then_image_model(messages, info):
         )
     return ModelResponse(
         parts=(
+            TextPart("好的，按你的风格生成。"),
             ToolCallPart(
-                "generate_image",
+                "create_image_generation_job",
                 {"prompt": "蓝鲸海报，水墨风格带留白", "aspect_ratio": "1:1"},
                 "clarification-resume-call-id",
             ),
@@ -470,8 +472,9 @@ def rejected_then_retry_model(messages, info):
     ):
         return ModelResponse(
             parts=(
+                TextPart("好的，调整参数重新生成。"),
                 ToolCallPart(
-                    "generate_image",
+                    "create_image_generation_job",
                     {"prompt": "蓝鲸海报", "aspect_ratio": "16:9"},
                     "rejected-retry-call-id",
                 ),
@@ -479,8 +482,9 @@ def rejected_then_retry_model(messages, info):
         )
     return ModelResponse(
         parts=(
+            TextPart("好的，为你生成图片。"),
             ToolCallPart(
-                "generate_image",
+                "create_image_generation_job",
                 {"prompt": "蓝鲸海报", "aspect_ratio": "1:1"},
                 "rejected-first-call-id",
             ),
@@ -682,7 +686,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         ).advance(work)
         payload = result.to_commit_payload(work)
 
-        self.assertEqual("已接纳，正在生成图片。", payload["visible_text"])
+        self.assertEqual("好的，为你生成图片。", payload["visible_text"])
         self.assertEqual("create_image_generation_job", payload["actions"][0]["tool_id"])
         self.assertEqual(
             {"prompt": "蓝鲸海报", "aspect_ratio": "1:1"},
@@ -867,7 +871,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             {"prompt": "蓝鲸海报，水墨风格带留白", "aspect_ratio": "1:1"},
             resumed_result.actions[0].arguments,
         )
-        self.assertEqual("已接纳，正在生成图片。", resumed_result.visible_text)
+        self.assertEqual("好的，按你的风格生成。", resumed_result.visible_text)
         self.assertEqual(
             1, len(resumed_result.checkpoint.opaque_payload["pending_calls"])
         )
@@ -906,11 +910,14 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 for part in message.parts
                 if isinstance(part, ToolReturnPart)
             )
-            return ModelResponse(parts=(ToolCallPart(
-                "generate_image",
-                {"prompt": "蓝鲸海报", "aspect_ratio": "1:1"},
-                "retry-call-id",
-            ),))
+            return ModelResponse(parts=(
+                TextPart("好的，改走生成路径。"),
+                ToolCallPart(
+                    "create_image_generation_job",
+                    {"prompt": "蓝鲸海报", "aspect_ratio": "1:1"},
+                    "retry-call-id",
+                ),
+            ))
 
         resumed_work = _pydantic_work(
             run_version=2,
@@ -1010,7 +1017,10 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertIsNone(result.input_request)
         self.assertEqual("仍然缺少信息。", result.visible_text)
 
-    def test_resumed_model_text_is_replaced_by_fixed_product_copy(self) -> None:
+    def test_resumed_model_text_passes_through_without_fixed_copy_replacement(self) -> None:
+        # IK3BG0：终态轮可见文本一律来自模型自身输出，不再用固定文案替换。即使模型输出
+        # 含敏感片段，Worker 也直传——防泄露由 Java §7「内容审核与输出释放」铁闸在释放层
+        # 负责，Worker 不承担内容审核、不制造固定文案冒充模型回复。
         initial_work = _pydantic_work()
         initial_result = PydanticAIOrchestrator(
             FunctionModel(unsafe_resume_model), _bundle_source()
@@ -1032,8 +1042,10 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             FunctionModel(unsafe_resume_model), _bundle_source()
         ).advance(resumed_work)
 
-        self.assertEqual("图片已经生成。", resumed_result.visible_text)
-        self.assertNotIn("sk-private", resumed_result.visible_text)
+        # Worker 直传模型文本（含敏感片段），不再替换为固定文案「图片已经生成。」。
+        self.assertEqual(
+            "provider-secret=sk-private-user-prompt=蓝鲸海报", resumed_result.visible_text
+        )
 
     def test_tool_set_built_from_grant_and_unauthorized_invisible(self) -> None:
         # 模型可见工具集由当次 Run 钉住的 ToolGrant 决定；未授权工具不出现在工具列表。
@@ -1043,8 +1055,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             captured["with_grant"] = sorted(t.name for t in info.function_tools)
             return ModelResponse(
                 parts=(
+                    TextPart("好的，为你生成图片。"),
                     ToolCallPart(
-                        "generate_image",
+                        "create_image_generation_job",
                         {"prompt": "蓝鲸", "aspect_ratio": "1:1"},
                         "capture-call-id",
                     ),
@@ -1058,7 +1071,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         result = PydanticAIOrchestrator(
             FunctionModel(image_capture_model), _bundle_source()
         ).advance(_pydantic_work(messages=({"role": "user", "content": "你好"},)))
-        self.assertIn("generate_image", captured["with_grant"])
+        self.assertIn("create_image_generation_job", captured["with_grant"])
         self.assertEqual("create_image_generation_job", result.actions[0].tool_id)
 
         # grant 为空集：未授权业务工具不可见；read_resource 是 Bundle 固有受限读取
@@ -1071,66 +1084,116 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertEqual(["read_resource"], captured["without_grant"])
         self.assertIsNone(text_result.error)
 
-    def test_read_only_direct_and_side_effect_deferred_registration(self) -> None:
-        # 只读 effect 以直接工具注册（handler 直接执行返回）；副作用 effect 以 deferred 注册（raise CallDeferred）。
-        read_calls: list = []
-
-        def fake_read(resource_id: str) -> str:
-            """直接工具：读取并返回结果，模型可见其返回。"""
-            read_calls.append(resource_id)
-            return "read-content"
-
-        def fake_side_effect(payload: str) -> str:
-            """副作用工具：仅提议，由控制面接纳。"""
-            raise CallDeferred
-
+    def test_side_effect_tool_built_from_grant_argument_schema(self) -> None:
+        # IK3BG0：side_effect 工具不再来自硬编码函数目录，按 ToolGrant.argument_schema
+        # 动态构造为 deferred 提议工具（Tool.from_schema，handler raise CallDeferred）。
+        # 模型可见工具名即 grant.tool_name（= Java 注册表 toolId），ProposedAction.tool_id
+        # 直接取自 grant.tool_name，无硬编码映射。动作轮可见文本来自模型 TextPart。
         schema = {"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object"}
-        implementations = {
-            "fake_read": ToolImplementation("fake_read", "fake_read_tool", 1, "read", fake_read),
-            "fake_side_effect": ToolImplementation(
-                "fake_side_effect", "fake_side_effect_tool", 1, "side_effect", fake_side_effect
-            ),
-        }
-        grants = (
-            ToolGrant("fake_read", 1, "read", True, dict(schema), {}),
-            ToolGrant("fake_side_effect", 1, "side_effect", True, dict(schema), {}),
-        )
-
-        def read_then_text_model(messages, info):
-            if not any(
-                isinstance(part, ToolReturnPart)
-                for message in messages
-                for part in message.parts
-            ):
-                return ModelResponse(
-                    parts=(ToolCallPart("fake_read", {"resource_id": "node-1"}, "read-call-id"),)
-                )
-            return ModelResponse(parts=(TextPart("读取完成"),))
-
-        read_result = PydanticAIOrchestrator(
-            FunctionModel(read_then_text_model), _bundle_source(), implementations
-        ).advance(
-            _pydantic_work(
-                messages=({"role": "user", "content": "读一下"},), tool_grants=grants
-            )
-        )
-        self.assertEqual(["node-1"], read_calls)
-        self.assertIsNone(read_result.error)
 
         def side_effect_model(messages, info):
             return ModelResponse(
-                parts=(ToolCallPart("fake_side_effect", {"payload": "x"}, "se-call-id"),)
+                parts=(
+                    TextPart("好的，执行副作用动作。"),
+                    ToolCallPart("fake_side_effect", {"payload": "x"}, "se-call-id"),
+                )
             )
 
+        grants = (ToolGrant("fake_side_effect", 1, "side_effect", True, dict(schema), {}),)
         side_result = PydanticAIOrchestrator(
-            FunctionModel(side_effect_model), _bundle_source(), implementations
+            FunctionModel(side_effect_model), _bundle_source()
         ).advance(
             _pydantic_work(
-                messages=({"role": "user", "content": "读一下"},), tool_grants=grants
+                messages=({"role": "user", "content": "执行"},), tool_grants=grants
             )
         )
+        self.assertIsNone(side_result.error)
         self.assertEqual(1, len(side_result.actions))
-        self.assertEqual("fake_side_effect_tool", side_result.actions[0].tool_id)
+        self.assertEqual("fake_side_effect", side_result.actions[0].tool_id)
+        self.assertEqual(1, side_result.actions[0].registry_version)
+        self.assertEqual({"payload": "x"}, side_result.actions[0].arguments)
+        # 动作轮可见文本来自模型 TextPart，不再是固定文案冒充。
+        self.assertEqual("好的，执行副作用动作。", side_result.visible_text)
+
+    def test_pure_consultation_yields_zero_actions(self) -> None:
+        # IK3BG0 acceptance：纯咨询轮模型只输出文本、不提动作——零动作收场，不创建
+        # GenerationJob、不产生动作提议。「每轮必须一个动作」硬校验已移除，零动作合法。
+        def consult_only_model(messages, info):
+            return ModelResponse(parts=(TextPart("建议你先确定主题再生成。"),))
+
+        result = PydanticAIOrchestrator(
+            FunctionModel(consult_only_model), _bundle_source()
+        ).advance(
+            _pydantic_work(messages=({"role": "user", "content": "有什么建议"},))
+        )
+        self.assertIsNone(result.error)
+        self.assertEqual((), result.actions)
+        self.assertIsNone(result.input_request)
+        self.assertEqual("建议你先确定主题再生成。", result.visible_text)
+
+    def test_skill_selects_video_tool_from_dynamic_tool_set(self) -> None:
+        # IK3BG0 acceptance：模型按上下文从动态构造的工具集中选择视频工具提议
+        # （side_effect 工具由 grant 动态构造，Skill 路由选择 video 而非 image）。
+        result = PydanticAIOrchestrator(
+            FunctionModel(video_proposal_model), _bundle_source()
+        ).advance(
+            _pydantic_work(
+                messages=({"role": "user", "content": "生成蓝鲸游动视频"},),
+                tool_grants=(_generate_image_grant(), _generate_video_grant()),
+            )
+        )
+        self.assertIsNone(result.error)
+        self.assertEqual(1, len(result.actions))
+        self.assertEqual("create_video_generation_job", result.actions[0].tool_id)
+        self.assertEqual("好的，为你生成视频。", result.visible_text)
+
+    def test_multiple_side_effect_actions_batched_in_one_turn(self) -> None:
+        # IK3BG0 acceptance：解除单动作自限——一轮可提议多个副作用动作，按 Java commit
+        # 契约分批提交（RunCommitRequest.actions 是 List，逐一经铁闸接纳），每个 action_id
+        # 含序号保证 Run 内唯一（幂等键），pending_calls 每动作一项以闭合 checkpoint。
+        def multi_action_model(messages, info):
+            return ModelResponse(
+                parts=(
+                    TextPart("好的，同时生成图片和视频。"),
+                    ToolCallPart(
+                        "create_image_generation_job",
+                        {"prompt": "蓝鲸海报", "aspect_ratio": "1:1"},
+                        "multi-image-call",
+                    ),
+                    ToolCallPart(
+                        "create_video_generation_job",
+                        {
+                            "prompt": "蓝鲸游动",
+                            "aspect_ratio": "16:9",
+                            "resolution": "720p",
+                            "duration": 8,
+                        },
+                        "multi-video-call",
+                    ),
+                )
+            )
+
+        result = PydanticAIOrchestrator(
+            FunctionModel(multi_action_model), _bundle_source()
+        ).advance(
+            _pydantic_work(
+                messages=({"role": "user", "content": "同时生成图片和视频"},),
+                tool_grants=(_generate_image_grant(), _generate_video_grant()),
+            )
+        )
+        self.assertIsNone(result.error)
+        self.assertEqual(2, len(result.actions))
+        tool_ids = [action.tool_id for action in result.actions]
+        self.assertIn("create_image_generation_job", tool_ids)
+        self.assertIn("create_video_generation_job", tool_ids)
+        # action_id 含序号保证 Run 内唯一（幂等键）。
+        action_ids = [action.action_id for action in result.actions]
+        self.assertEqual(2, len(set(action_ids)))
+        # pending_calls 每个动作一项，回喂 checkpoint。
+        self.assertEqual(
+            2, len(result.checkpoint.opaque_payload["pending_calls"])
+        )
+        self.assertEqual("好的，同时生成图片和视频。", result.visible_text)
 
     def test_contract_violations_fail_closed_without_internal_leaks(self) -> None:
         # grant 不匹配 / 工具不在注册表 / 版本漂移 / effect 不符 一律 fail closed，
@@ -1153,20 +1216,20 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             json.dumps(result.to_commit_payload(work), ensure_ascii=False),
         )
 
-        drifted = (ToolGrant("generate_image", 99, "side_effect", True, dict(schema), {}),)
+        drifted = (ToolGrant("create_image_generation_job", 99, "side_effect", True, dict(schema), {}),)
         work = _pydantic_work(
-            messages=({"role": "user", "content": "你好"},), tool_grants=drifted
+            messages=({"role": "user", "content": "生成一张蓝鲸海报"},), tool_grants=drifted
         )
+        # IK3BG0：side_effect 工具 registry_version 由 grant 透传，Worker 不自立版本校验——
+        # 版本漂移由 Java commit 铁闸（RunToolGrantResolver 按 toolId+registryVersion 复验）
+        # 权威判定。Worker 照常构造提议并透传 registry_version=99，不 fail closed。
         result = PydanticAIOrchestrator(
-            FunctionModel(plain_text_model), _bundle_source()
+            FunctionModel(image_proposal_model), _bundle_source()
         ).advance(work)
-        self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
-        self.assertNotIn(
-            "generate_image",
-            json.dumps(result.to_commit_payload(work), ensure_ascii=False),
-        )
+        self.assertIsNone(result.error)
+        self.assertEqual(99, result.actions[0].registry_version)
 
-        mismatched = (ToolGrant("generate_image", 1, "read", True, dict(schema), {}),)
+        mismatched = (ToolGrant("create_image_generation_job", 1, "read", True, dict(schema), {}),)
         work = _pydantic_work(
             messages=({"role": "user", "content": "你好"},), tool_grants=mismatched
         )
@@ -1175,7 +1238,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         ).advance(work)
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
         self.assertNotIn(
-            "generate_image",
+            "create_image_generation_job",
             json.dumps(result.to_commit_payload(work), ensure_ascii=False),
         )
 
@@ -1232,8 +1295,13 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             ),
         )
 
+        def safe_message_after_rejection_model(messages, info):
+            # rejected 后模型输出面向用户的安全说明（生产语义：模型看到治理拒绝结果后，
+            # 由 instructions 引导转述安全提示；Worker 透传模型文本，不暴露内部 reasonCode）。
+            return ModelResponse(parts=(TextPart("当前操作超过可用额度。"),))
+
         resumed_result = PydanticAIOrchestrator(
-            FunctionModel(image_proposal_model), _bundle_source()
+            FunctionModel(safe_message_after_rejection_model), _bundle_source()
         ).advance(resumed_work)
         payload = resumed_result.to_commit_payload(resumed_work)
 
@@ -1283,7 +1351,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertEqual(1, len(resumed_result.actions))
         self.assertEqual("create_image_generation_job", payload["actions"][0]["tool_id"])
         self.assertEqual("16:9", payload["actions"][0]["arguments"]["aspect_ratio"])
-        self.assertEqual("已接纳，正在生成图片。", resumed_result.visible_text)
+        self.assertEqual("好的，调整参数重新生成。", resumed_result.visible_text)
 
     def test_untriggered_skill_body_stays_out_of_model_context(self) -> None:
         # IK2QBM acceptance #2：未触发 Skill 正文不进入模型上下文；instructions 仅含元数据。
@@ -1459,8 +1527,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 )
             return ModelResponse(
                 parts=(
+                    TextPart("好的，为你生成图片。"),
                     ToolCallPart(
-                        "generate_image",
+                        "create_image_generation_job",
                         {"prompt": "海报", "aspect_ratio": "1:1"},
                         "img-call",
                     ),
@@ -1537,8 +1606,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 )
             return ModelResponse(
                 parts=(
+                    TextPart("好的，为你生成图片。"),
                     ToolCallPart(
-                        "generate_image",
+                        "create_image_generation_job",
                         {"prompt": "海报", "aspect_ratio": "1:1"},
                         "img-call",
                     ),
@@ -1571,7 +1641,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         ).advance(work)
         payload = result.to_commit_payload(work)
 
-        self.assertEqual("已接纳，正在生成视频。", payload["visible_text"])
+        self.assertEqual("好的，为你生成视频。", payload["visible_text"])
         self.assertEqual("create_video_generation_job", payload["actions"][0]["tool_id"])
         self.assertEqual(
             {
@@ -1599,8 +1669,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             captured["with_grant"] = sorted(t.name for t in info.function_tools)
             return ModelResponse(
                 parts=(
+                    TextPart("好的，为你生成视频。"),
                     ToolCallPart(
-                        "generate_video",
+                        "create_video_generation_job",
                         {
                             "prompt": "蓝鲸",
                             "aspect_ratio": "16:9",
@@ -1624,7 +1695,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 tool_grants=(_generate_video_grant(),),
             )
         )
-        self.assertIn("generate_video", captured["with_grant"])
+        self.assertIn("create_video_generation_job", captured["with_grant"])
         self.assertEqual("create_video_generation_job", result.actions[0].tool_id)
 
         # grant 为空集：未授权业务工具不可见；read_resource 是 Bundle 固有受限读取工具。
@@ -1663,20 +1734,20 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         def plain_text_model(messages, info):
             return ModelResponse(parts=(TextPart("文本"),))
 
-        drifted = (ToolGrant("generate_video", 99, "side_effect", True, dict(schema), {}),)
+        drifted = (ToolGrant("create_video_generation_job", 99, "side_effect", True, dict(schema), {}),)
         work = _pydantic_work(
-            messages=({"role": "user", "content": "你好"},), tool_grants=drifted
+            messages=({"role": "user", "content": "生成蓝鲸游动视频"},), tool_grants=drifted
         )
+        # IK3BG0：side_effect 工具 registry_version 由 grant 透传，Worker 不自立版本校验——
+        # 版本漂移由 Java commit 铁闸（RunToolGrantResolver 按 toolId+registryVersion 复验）
+        # 权威判定。Worker 照常构造提议并透传 registry_version=99，不 fail closed。
         result = PydanticAIOrchestrator(
-            FunctionModel(plain_text_model), _bundle_source()
+            FunctionModel(video_proposal_model), _bundle_source()
         ).advance(work)
-        self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
-        self.assertNotIn(
-            "generate_video",
-            json.dumps(result.to_commit_payload(work), ensure_ascii=False),
-        )
+        self.assertIsNone(result.error)
+        self.assertEqual(99, result.actions[0].registry_version)
 
-        mismatched = (ToolGrant("generate_video", 1, "read", True, dict(schema), {}),)
+        mismatched = (ToolGrant("create_video_generation_job", 1, "read", True, dict(schema), {}),)
         work = _pydantic_work(
             messages=({"role": "user", "content": "你好"},), tool_grants=mismatched
         )
@@ -1685,7 +1756,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         ).advance(work)
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
         self.assertNotIn(
-            "generate_video",
+            "create_video_generation_job",
             json.dumps(result.to_commit_payload(work), ensure_ascii=False),
         )
 
@@ -1710,7 +1781,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             return ModelResponse(
                 parts=(
                     ToolCallPart(
-                        "generate_video",
+                        "create_video_generation_job",
                         {
                             "prompt": "蓝鲸",
                             "aspect_ratio": "2:3",
@@ -1730,7 +1801,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertIsNotNone(result.error)
         self.assertEqual((), result.actions)
         serialized = json.dumps(result.to_commit_payload(work), ensure_ascii=False)
-        self.assertNotIn("generate_video", serialized)
+        self.assertNotIn("create_video_generation_job", serialized)
 
 
 if __name__ == "__main__":
