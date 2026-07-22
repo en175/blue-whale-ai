@@ -325,6 +325,7 @@ function CanvasPageInner() {
         : file.type.startsWith("video/")
           ? "video"
           : "audio";
+      console.debug("[DEBUG-upload] mode=", mode, "file=", file.name, "mediaType=", mediaType);
 
       // 校验：视频 ≤ 50MB
       const MAX_VIDEO_MB = 50;
