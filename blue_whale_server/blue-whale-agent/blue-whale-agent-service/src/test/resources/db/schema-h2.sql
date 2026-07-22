@@ -1,5 +1,5 @@
 -- H2（MODE=MySQL）集成测试建表脚本。
--- 与迁移链最终 schema 对齐（V1 基线 + V3 游标列改名 event_cursor + V7 能力注册表 + V8 收件箱 + V9 Assistant 分块 + V10 Runtime Bundle），但去掉 MySQL 专有语法（ENGINE/CHARSET/COMMENT/JSON→CLOB/ON UPDATE）。
+-- 与迁移链最终 schema 对齐（V1 基线 + V3 游标列改名 event_cursor + V7 能力注册表 + V8 收件箱 + V9 Assistant 分块 + V10 Runtime Bundle + V13 @ 引用关系），但去掉 MySQL 专有语法（ENGINE/CHARSET/COMMENT/JSON→CLOB/ON UPDATE）。
 -- 通用 IT schema（test profile 全量 IT 共用），生产以 db/migrations 迁移链为准。
 
 CREATE TABLE IF NOT EXISTS project
@@ -678,3 +678,21 @@ WHERE NOT EXISTS (
     SELECT 1 FROM generation_model_capability
     WHERE provider_id = 'volcengine' AND model_id = 'doubao-seedream-5.0-lite'
 );
+
+CREATE TABLE IF NOT EXISTS message_asset_reference
+(
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    message_id BIGINT NOT NULL,
+    conversation_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    asset_id BIGINT NOT NULL,
+    mention_seq INT NOT NULL,
+    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    is_delete TINYINT NOT NULL DEFAULT 0,
+    CONSTRAINT uk_message_asset UNIQUE (message_id, asset_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_asset_reference_conversation ON message_asset_reference (conversation_id);
+CREATE INDEX IF NOT EXISTS idx_message_asset_reference_project ON message_asset_reference (project_id);

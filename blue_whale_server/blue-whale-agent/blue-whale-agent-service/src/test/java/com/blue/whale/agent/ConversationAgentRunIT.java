@@ -60,6 +60,7 @@ class ConversationAgentRunIT {
                 "DELETE FROM run_commits",
                 "DELETE FROM runtime_checkpoints",
                 "DELETE FROM command_idempotency",
+                "DELETE FROM message_asset_reference",
                 "DELETE FROM conversation_messages",
                 "DELETE FROM generation_job_outputs",
                 "DELETE FROM generation_jobs",
@@ -809,6 +810,89 @@ class ConversationAgentRunIT {
         assertThat(canvasNodes.get(0).path("asset_id").asLong()).isEqualTo(assetId);
     }
 
+    @Test
+    void referencedAssetIdsArePersistedWithOrderedMentionSeq() throws Exception {
+        // IK39QX：@ 引用随消息同事务持久化到 message_asset_reference，mention_seq 按请求列表保序（1-based），
+        // conversation_id / project_id 冗余存储便于读路径白名单反查。
+        Project project = new Project().setOwnerId(10L).setName("message-asset-reference");
+        projectMapper.insert(project);
+        Asset first = referenceAsset(project.getId(), "reference/first.png");
+        Asset second = referenceAsset(project.getId(), "reference/second.png");
+
+        JsonNode accepted = postMessageWithReferences(project.getId(), "reference-persist-key",
+                "参考素材生成海报", "[" + first.getId() + "," + second.getId() + "]");
+
+        long messageId = accepted.path("message_id").asLong();
+        long conversationId = jdbcTemplate.queryForObject(
+                "SELECT conversation_id FROM conversation_messages WHERE id = ?", Long.class, messageId);
+        assertThat(count("message_asset_reference", "message_id", messageId)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT asset_id FROM message_asset_reference WHERE message_id = ? ORDER BY mention_seq",
+                Long.class, messageId)).containsExactly(first.getId(), second.getId());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT conversation_id FROM message_asset_reference WHERE message_id = ? AND asset_id = ?",
+                Long.class, messageId, first.getId())).isEqualTo(conversationId);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT project_id FROM message_asset_reference WHERE message_id = ? AND asset_id = ?",
+                Long.class, messageId, first.getId())).isEqualTo(project.getId());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT mention_seq FROM message_asset_reference WHERE message_id = ? AND asset_id = ?",
+                Long.class, messageId, first.getId())).isEqualTo(1);
+    }
+
+    @Test
+    void referencedAssetIdsOutsideOwnedProjectAreSilentlyDropped() throws Exception {
+        // IK39QX：越权/失效引用 id 静默过滤（warn 不硬断言），只落归属本 project+user 的子集。
+        Project project = new Project().setOwnerId(10L).setName("owned-reference-project");
+        projectMapper.insert(project);
+        Project other = new Project().setOwnerId(11L).setName("foreign-reference-project");
+        projectMapper.insert(other);
+        Asset foreign = new Asset()
+                .setProjectId(other.getId())
+                .setUserId(11L)
+                .setType(Asset.TYPE_IMAGE)
+                .setStorageKey("reference/foreign.png")
+                .setMime("image/png")
+                .setSize(128L)
+                .setSource(Asset.SOURCE_UPLOADED)
+                .setStatus(Asset.STATUS_NORMAL);
+        assetMapper.insert(foreign);
+        Asset owned = referenceAsset(project.getId(), "reference/owned.png");
+
+        JsonNode accepted = postMessageWithReferences(project.getId(), "reference-filter-key",
+                "参考素材生成海报", "[" + owned.getId() + "," + foreign.getId() + "]");
+
+        long messageId = accepted.path("message_id").asLong();
+        assertThat(count("message_asset_reference", "message_id", messageId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT asset_id FROM message_asset_reference WHERE message_id = ?", Long.class, messageId))
+                .isEqualTo(owned.getId());
+    }
+
+    @Test
+    void idempotencyConflictWhenReferencedAssetIdsDrift() throws Exception {
+        // IK39QX：requestHash 纳入去重后引用列表；同 key 仅引用列表不同 → 100302 冲突，不追加引用行。
+        Project project = new Project().setOwnerId(10L).setName("reference-idempotency");
+        projectMapper.insert(project);
+        Asset first = referenceAsset(project.getId(), "reference/idem-first.png");
+        Asset second = referenceAsset(project.getId(), "reference/idem-second.png");
+
+        postMessageWithReferences(project.getId(), "reference-idem-key",
+                "参考素材生成海报", "[" + first.getId() + "]");
+        // 仅 referenced_asset_ids 由 [first] 漂移到 [first,second]，其余字段不变 → 证明引用列表纳入幂等键。
+        mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "reference-idem-key")
+                        .contentType("application/json")
+                        .content("{\"client_message_id\":\"client-reference-idem-key\","
+                                + "\"content\":\"参考素材生成海报\","
+                                + "\"referenced_asset_ids\":[" + first.getId() + "," + second.getId() + "]}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(100302));
+
+        assertThat(count("message_asset_reference", "project_id", project.getId())).isEqualTo(1);
+    }
+
     private JsonNode postMessage(Long projectId, String idempotencyKey, String content) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/projects/{id}/conversation/messages", projectId)
                         .header("X-User-Id", "10")
@@ -816,6 +900,22 @@ class ConversationAgentRunIT {
                         .contentType("application/json")
                         .content("{\"client_message_id\":\"client-" + idempotencyKey
                                 + "\",\"content\":\"" + content + "\"}"))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+    }
+
+    private JsonNode postMessageWithReferences(Long projectId, String idempotencyKey, String content,
+                                               String referencedAssetIdsJson) throws Exception {
+        String body = "{\"client_message_id\":\"client-" + idempotencyKey
+                + "\",\"content\":\"" + content + "\""
+                + (referencedAssetIdsJson == null ? "" : ",\"referenced_asset_ids\":" + referencedAssetIdsJson)
+                + "}";
+        MvcResult result = mockMvc.perform(post("/api/projects/{id}/conversation/messages", projectId)
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", idempotencyKey)
+                        .contentType("application/json")
+                        .content(body))
                 .andExpect(status().isAccepted())
                 .andReturn();
         return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
