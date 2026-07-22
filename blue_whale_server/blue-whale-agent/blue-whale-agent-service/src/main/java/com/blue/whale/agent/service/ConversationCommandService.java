@@ -3,9 +3,11 @@ package com.blue.whale.agent.service;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.blue.whale.agent.common.crypto.Sha256;
 import com.blue.whale.agent.mapper.AgentRunMapper;
+import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.mapper.CommandIdempotencyMapper;
 import com.blue.whale.agent.mapper.ConversationMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
+import com.blue.whale.agent.mapper.MessageAssetReferenceMapper;
 import com.blue.whale.agent.mapper.UserInputRequestMapper;
 import com.blue.whale.agent.model.constant.AggregateType;
 import com.blue.whale.agent.model.constant.EventType;
@@ -13,9 +15,11 @@ import com.blue.whale.agent.config.AgentOrchestratorProperties;
 import com.blue.whale.agent.model.dto.AcceptConversationMessageRequest;
 import com.blue.whale.agent.model.dto.AcceptConversationMessageResponse;
 import com.blue.whale.agent.model.entity.AgentRun;
+import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.CommandIdempotency;
 import com.blue.whale.agent.model.entity.Conversation;
 import com.blue.whale.agent.model.entity.ConversationMessage;
+import com.blue.whale.agent.model.entity.MessageAssetReference;
 import com.blue.whale.agent.model.entity.UserInputRequest;
 import com.blue.whale.agent.runtimebundle.RuntimeBundleRunPinResolver;
 import com.blue.whale.global.base.resp.SystemCode;
@@ -23,14 +27,19 @@ import com.blue.whale.global.exception.GlobalException;
 import com.blue.whale.agent.service.governance.UserInputRequestService;
 import com.blue.whale.agent.service.governance.PersistedUserInputDecisionException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class ConversationCommandService {
 
@@ -42,6 +51,8 @@ public class ConversationCommandService {
     private final ConversationMessageMapper messageMapper;
     private final AgentRunMapper agentRunMapper;
     private final CommandIdempotencyMapper idempotencyMapper;
+    private final AssetMapper assetMapper;
+    private final MessageAssetReferenceMapper messageAssetReferenceMapper;
     private final ProjectEventService projectEventService;
     private final UserInputRequestService userInputRequestService;
     private final UserInputRequestMapper userInputRequestMapper;
@@ -114,6 +125,18 @@ public class ConversationCommandService {
                 .setContent(request.content())
                 .setSequenceNo(Math.toIntExact(messageCount + 1));
         messageMapper.insert(message);
+        // IK39QX：@ 引用随消息同事务持久化；越权/失效 id 已在 filterOwnedReferenceAssetIds 静默过滤，
+        // mention_seq 按过滤后有效子集的请求顺序 1-based 赋值。
+        List<Long> referencedAssetIds = filterOwnedReferenceAssetIds(projectId, userId, request.referencedAssetIds());
+        int mentionSeq = 0;
+        for (Long assetId : referencedAssetIds) {
+            messageAssetReferenceMapper.insert(new MessageAssetReference()
+                    .setMessageId(message.getId())
+                    .setConversationId(conversation.getId())
+                    .setProjectId(projectId)
+                    .setAssetId(assetId)
+                    .setMentionSeq(++mentionSeq));
+        }
 
         Map<String, Object> messagePayload = new LinkedHashMap<>();
         messagePayload.put("message_id", message.getId());
@@ -214,9 +237,38 @@ public class ConversationCommandService {
     }
 
     private String requestHash(AcceptConversationMessageRequest request) {
+        // 幂等键纳入去重后原始引用列表（DOM 序 distinct）；越权过滤发生在 hash 之后的落库阶段，
+        // 故同幂等键不同客户端引用列表 = 冲突，与越权过滤解耦（ADR-0042 D2）。
+        List<Long> referencedAssetIds = request.referencedAssetIds() == null
+                ? List.of()
+                : request.referencedAssetIds().stream().distinct().toList();
         String canonical = request.clientMessageId() + "\u0000" + request.content() + "\u0000"
-                + String.valueOf(request.replyToInputRequestId());
+                + String.valueOf(request.replyToInputRequestId()) + referencedAssetIds;
         return Sha256.hex(canonical);
+    }
+
+    /**
+     * 过滤出归属本 project + user 的引用素材子集（ADR-0042 D2：Asset 存在且 projectId+userId 匹配）。
+     *
+     * <p>不卡 type、不卡 status（video 也能被 @；status 由读路径三元组兜底）。
+     * 越权/失效（含逻辑删除、不存在）id 静默丢弃并 warn，返回保序的有效子集。
+     */
+    private List<Long> filterOwnedReferenceAssetIds(Long projectId, Long userId, List<Long> rawIds) {
+        if (rawIds == null || rawIds.isEmpty()) {
+            return List.of();
+        }
+        List<Long> distinctIds = rawIds.stream().distinct().toList();
+        Set<Long> ownedAssetIds = assetMapper.selectBatchIds(distinctIds).stream()
+                .filter(asset -> Objects.equals(asset.getProjectId(), projectId)
+                        && Objects.equals(asset.getUserId(), userId))
+                .map(Asset::getId)
+                .collect(Collectors.toSet());
+        List<Long> owned = distinctIds.stream().filter(ownedAssetIds::contains).toList();
+        List<Long> dropped = distinctIds.stream().filter(id -> !ownedAssetIds.contains(id)).toList();
+        if (!dropped.isEmpty()) {
+            log.warn("丢弃越权/失效引用素材：projectId={}, userId={}, dropped={}", projectId, userId, dropped);
+        }
+        return owned;
     }
 
     /**

@@ -288,7 +288,7 @@ class ProjectPurgeIT {
                 .andExpect(status().isOk());
 
         assertThatThrownBy(() -> conversationCommandService.accept(projectId, 10L, "late-key",
-                new AcceptConversationMessageRequest("client-late", "迟到消息", null, conversationId)))
+                new AcceptConversationMessageRequest("client-late", "迟到消息", null, conversationId, null)))
                 .isInstanceOf(GlobalException.class)
                 .extracting(e -> ((GlobalException) e).getCode())
                 .isEqualTo(SystemCode.RESOURCE_NOT_FOUND_CODE);
