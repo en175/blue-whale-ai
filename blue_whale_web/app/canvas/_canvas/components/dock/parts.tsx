@@ -184,9 +184,6 @@ export function DockMediaThumb({
         ) : item.type === "video" && item.src ? (
           <video
             src={item.src}
-            preload="metadata"
-            muted
-            playsInline
             title={item.name}
             style={{
               width: 44,

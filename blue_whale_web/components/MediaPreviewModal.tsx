@@ -100,6 +100,7 @@ export function MediaPreviewModal({
             src={item.src}
             controls
             autoPlay
+            muted
             style={{
               maxWidth: "90vw",
               maxHeight: "90vh",
