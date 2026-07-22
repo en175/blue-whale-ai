@@ -14,6 +14,7 @@ import com.blue.whale.agent.mapper.RuntimeCheckpointMapper;
 import com.blue.whale.agent.mapper.UserInputRequestMapper;
 import com.blue.whale.agent.model.constant.AggregateType;
 import com.blue.whale.agent.model.constant.EventType;
+import com.blue.whale.agent.model.dto.CanvasNodeSummary;
 import com.blue.whale.agent.model.dto.RunCommitRequest;
 import com.blue.whale.agent.model.dto.RunCommitResponse;
 import com.blue.whale.agent.model.dto.RunWorkResponse;
@@ -53,6 +54,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -81,6 +83,9 @@ public class AgentRunWorkerService {
     private static final int VIDEO_DURATION_MAX = 15;
     private static final int IMAGE_REFERENCE_ASSET_MAX = 4;
     private static final int VIDEO_REFERENCE_ASSET_MAX = 1;
+    // IK2QC8：claim 下发的最近消息窗口（契约 §6.1），末尾若干条回到时间升序；更早历史由
+    // read_conversation_history 游标分页按需读取。
+    private static final int RECENT_MESSAGE_WINDOW = 6;
 
     private final AgentRunMapper agentRunMapper;
     private final ConversationMapper conversationMapper;
@@ -103,6 +108,11 @@ public class AgentRunWorkerService {
     private final ToolRegistry toolRegistry;
     private final RunToolGrantResolver runToolGrantResolver;
     private final ToolGrantScope toolGrantScope;
+    // IK2QC8：claim 下发紧凑初始上下文（契约 §6.1）——复用 IK2QBZ / IK2QC7 只读查询服务，
+    // 以 runId + workerId 经 requireLeasedRun 鉴权（claim 已取得租约），二者仅依赖
+    // guard / mapper / CanvasService / RuntimeBundleService，无循环依赖。
+    private final ConversationQueryService conversationQueryService;
+    private final CreativeContextQueryService creativeContextQueryService;
 
     @Transactional(noRollbackFor = ClaimQueueExhaustedAfterQuarantine.class)
     public RunWorkResponse claim(String workerId, String engine) {
@@ -148,11 +158,14 @@ public class AgentRunWorkerService {
                     AggregateType.AGENT_RUN, String.valueOf(run.getId()), run.getVersion(),
                     runPayload(run), null, null);
 
-            List<RunWorkResponse.RunMessage> messages = messageMapper.selectList(
-                            Wrappers.<ConversationMessage>lambdaQuery()
-                                    .eq(ConversationMessage::getConversationId, run.getConversationId())
-                                    .orderByAsc(ConversationMessage::getSequenceNo))
-                    .stream()
+            List<ConversationMessage> recent = messageMapper.selectList(
+                    Wrappers.<ConversationMessage>lambdaQuery()
+                            .eq(ConversationMessage::getConversationId, run.getConversationId())
+                            .orderByDesc(ConversationMessage::getSequenceNo)
+                            .last("LIMIT " + RECENT_MESSAGE_WINDOW));
+            // LIMIT 取末尾窗口后反转回时间升序；空对话 → 空窗口，合法下发（契约 §6.1）。
+            Collections.reverse(recent);
+            List<RunWorkResponse.RunMessage> messages = recent.stream()
                     .map(message -> new RunWorkResponse.RunMessage(message.getRole(), message.getContent()))
                     .toList();
             List<RunWorkResponse.AcceptedResult> acceptedResults = acceptedResults(run, checkpoint);
@@ -167,7 +180,9 @@ public class AgentRunWorkerService {
                                     checkpoint.getId(), checkpoint.getEngine(), checkpoint.getEngineVersion(),
                                     checkpoint.getAdapterSchemaVersion(), checkpoint.getOpaquePayload()),
                     acceptedResults,
-                    run.getToolGrants());
+                    run.getToolGrants(),
+                    conversationQueryService.summary(run.getId(), workerId),
+                    mediaCanvasNodes(run.getId(), workerId));
         }
     }
 
@@ -710,6 +725,17 @@ public class AgentRunWorkerService {
             return List.of();
         }
         return List.of(acceptedResult(job));
+    }
+
+    /**
+     * IK2QC8：claim 下发的画布媒体节点（契约 §6.1）——复用 IK2QC7 listCanvasNodes，仅保留携带
+     * {@code assetId} 的媒体节点，贴合「素材」语义并与 {@code read_asset} 白名单源 A 对齐。claim 已
+     * 取得租约，内部 {@code requireLeasedRun} 通过；无画布 / 无媒体节点 → 空集，合法下发。
+     */
+    private List<CanvasNodeSummary> mediaCanvasNodes(Long runId, String workerId) {
+        return creativeContextQueryService.listCanvasNodes(runId, workerId, null).nodes().stream()
+                .filter(node -> node.assetId() != null)
+                .toList();
     }
 
     private boolean supportsNoActionCompletion(AgentRun run) {

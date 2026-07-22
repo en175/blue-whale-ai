@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping, Sequence
 
 from pydantic_ai import (
     Agent,
@@ -195,6 +195,10 @@ class PydanticAIOrchestrator:
                 for message in reversed(work.messages)
                 if message["role"] == "user"
             )
+            # IK2QC8：首轮把 claim 下发的画布媒体节点拼成紧凑上下文，让素材第一时间进入 Agent
+            # 视野（契约 §6.1）。默认 canvas_nodes 为空集 → 不注入，既有首轮行为不变。
+            if work.canvas_nodes:
+                prompt = self._canvas_materials_prompt(work.canvas_nodes) + "\n\n" + prompt
             run_result = agent.run_sync(prompt, deps=gate)
         else:
             self._validate_checkpoint(work)
@@ -384,6 +388,18 @@ class PydanticAIOrchestrator:
         content = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
         gate.charge_conversation(resource_id, content)
         return content
+
+    @staticmethod
+    def _canvas_materials_prompt(canvas_nodes: Sequence[Mapping[str, Any]]) -> str:
+        """IK2QC8：首轮把 claim 下发的画布媒体节点拼成紧凑上下文（契约 §6.1）。
+
+        仅列携带 assetId 的媒体节点（type + assetId），完整节点 data 与素材正文由
+        ``list_canvas_nodes`` / ``read_canvas_node`` / ``read_asset`` 按需读取。
+        """
+        lines = ["用户当前画布上的素材（可经 read_asset 读取）："]
+        for node in canvas_nodes:
+            lines.append(f"- type={node.get('type')}, asset_id={node.get('asset_id')}")
+        return "\n".join(lines)
 
     def _build_tools(self, work: RunWork, gate: ResourceGate) -> tuple:
         """按当次 Run 钉住的 ToolGrant 动态构造模型可见工具集。

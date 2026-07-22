@@ -274,6 +274,26 @@ Worker 认领 Run 时：
 Bundle 固定与 `engine + engineVersion + adapterSchemaVersion` 固定是正交维度：前者固定行为配置，
 后者固定 checkpoint 解释器。RuntimeCheckpoint 继续只保存框架不透明状态，不复制 Bundle 内容。
 
+### 6.1 紧凑初始上下文（claim 下发）
+
+Worker 认领 AgentRun 时，控制面下发**紧凑三段初始上下文**，而非整段 Conversation 全量消息：聚焦首轮
+视野、控制启动载荷，其余历史由 Agent 经 `read_conversation_history` 按需游标分页读取。RunWork 下发
+新增 / 收窄三字段（字段经全局 SNAKE_CASE 策略输出为 snake_case）：
+
+- **`conversationSummary`**：Conversation 摘要，可空。形状复用 `ConversationSummaryResponse`：
+  `messageCount`（已持久化消息总数）/ `firstUserPreview`（首条 user 消息截断预览）/ `lastMessagePreview`
+  （末条消息截断预览）/ `earliestAt` / `latestAt`（首末消息创建时间，ISO 本地时间）。
+- **`canvasNodes`**：当前 Project 画布上**携带 `assetId` 的媒体节点**摘要列表，可空 / 空集。形状复用
+  `CanvasNodeSummary`：`nodeId` / `type` / `assetId`。只下发带 `assetId` 的媒体节点，贴合「素材」语义并与
+  `read_asset` 白名单源 A（画布节点引用）对齐；不带 `assetId` 的纯文本节点与完整节点 `data` 不在此下发，
+  由 `list_canvas_nodes` / `read_canvas_node` 按需读取。
+- **`messages`**：语义从「全量历史」收窄为「有界最近消息窗口」（末尾若干条 `role` / `content`，按时间升序）。
+  窗口必然包含最新一条 user 消息；更早的历史由 `read_conversation_history` 游标分页按需读取。
+
+空集兜底：enforcement-disabled / 空 Conversation / 无消息 / 无画布或无媒体节点时，摘要字段与窗口均可为
+空集（如 `messageCount=0`、`canvasNodes=[]`、`messages=[]`），均为合法下发，不阻断 claim。用户当轮
+「选中锚定」（前端选中态落库 + 提交携带 `selected_node_ids`）留待后续工单，本节不定义。
+
 ## 7. 平台铁闸与可编辑内容
 
 | 平台不可协商铁闸（Bundle 不能改） | Bundle 可编辑内容 |
@@ -343,7 +363,7 @@ AgentDefinition、Draft/Version、from/to 版本、manifestDigest、结果与规
 
 ### Python Agent Worker
 
-- `RunWork` 新增 Bundle / ModelProfile / CreativeSkill pin 与受控资源读取能力。
+- `RunWork` 新增 Bundle / ModelProfile / CreativeSkill pin 与受控资源读取能力；claim 初始下发为紧凑上下文（Conversation 摘要 + 画布媒体节点 + 有界最近窗口），见 §6.1。
 - 移除生产硬编码 instructions / tool tuple，把框架类型留在 Adapter 内。
 - 只按 ResourceManifest 的 resolvedResourceId 读取，不解释 Draft，不扫描仓库，不做网络资源解析。
 

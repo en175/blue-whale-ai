@@ -474,6 +474,49 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         # 纯文本输出直通为可见文本（IK2QBY 后澄清只来自显式 request_user_input 工具）。
         self.assertEqual("您想要什么风格？", result.visible_text)
 
+    def test_first_turn_injects_compact_canvas_materials_context(self) -> None:
+        # IK2QC8（契约 §6.1）：首轮（checkpoint None）若 claim 下发 canvas_nodes 非空，
+        # 在 prompt 前拼紧凑素材上下文，让素材第一时间进入 Agent 视野。
+        captured: list = []
+
+        def capture_prompt_model(messages, info):
+            captured.append(messages[-1].parts[-1].content)
+            return ModelResponse(parts=(TextPart("好的，了解了画布素材。"),))
+
+        work = _pydantic_work(
+            messages=({"role": "user", "content": "参考画布素材生成海报"},),
+            canvas_nodes=(
+                {"node_id": "node-1", "type": "image", "asset_id": 77},
+                {"node_id": "node-2", "type": "image", "asset_id": 88},
+            ),
+        )
+        result = PydanticAIOrchestrator(
+            FunctionModel(capture_prompt_model), _bundle_source()
+        ).advance(work)
+
+        self.assertIsNone(result.error)
+        prompt = captured[0]
+        self.assertIn("画布", prompt)
+        self.assertIn("type=image", prompt)
+        self.assertIn("asset_id=77", prompt)
+        self.assertIn("asset_id=88", prompt)
+        self.assertIn("参考画布素材生成海报", prompt)
+
+    def test_first_turn_without_canvas_nodes_leaves_prompt_untouched(self) -> None:
+        # 默认 canvas_nodes 为空集 → 不注入素材上下文，prompt 原样（既有行为不变）。
+        captured: list = []
+
+        def capture_prompt_model(messages, info):
+            captured.append(messages[-1].parts[-1].content)
+            return ModelResponse(parts=(TextPart("好的"),))
+
+        work = _pydantic_work(messages=({"role": "user", "content": "生成海报"},))
+        PydanticAIOrchestrator(
+            FunctionModel(capture_prompt_model), _bundle_source()
+        ).advance(work)
+
+        self.assertEqual("生成海报", captured[0])
+
     def test_missing_bundle_pin_fails_closed(self) -> None:
         # pin 缺失（enforcement-enabled=false 形态）不回退硬编码，fail closed。
         work = _pydantic_work(bundle_version_id=None, manifest_digest=None)
