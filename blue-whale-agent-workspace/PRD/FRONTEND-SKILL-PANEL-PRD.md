@@ -148,6 +148,7 @@ Skill 库(library)
 1. 用户点 `Use` → 当前 turn 的请求体携带 `forced_skill_id`,Agent 必须基于它执行(仅决定 skill 选择那一步,不锁后续 Stage)。
 2. `auto=true` 的 skill 集合 → Agent runtime 后端自读 `/api/skills/mine?auto=true`(不在请求里传),作为 CEO 路由的候选输入。
 3. 若用户 `Use` 与 `auto` 候选冲突 → 以 `Use` 为准(优先级:Use > auto > 未指定)。
+4. **forced 符合性判断与反问**(2026-07-22 补,详见 `AGENT-CONVERSATION-PRD.md` §5.1):Agent 不盲从 forced,先判 skill 跟意图能力是否正交,正交才反问(带 1 候选 + `allowed_actions` 三选)。本模块不负责该判断,仅知会——Use 后若 Agent 反问,前端按 `skill_recommendation` 消息 + `turn_done.allowed_actions` 渲染候选与三选。
 
 > ✅ Agent 模块 PRD 已就位并呼应此接入点,见 `AGENT-CONVERSATION-PRD.md` §5.1。`forced_skill_id` 字段权威定义在 `skill/references/backend_implementation_contract.md` Agent Turn 字段。
 
