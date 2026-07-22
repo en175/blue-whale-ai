@@ -181,6 +181,24 @@ export function DockMediaThumb({
               border: "1px solid rgba(255, 255, 255, 0.08)",
             }}
           />
+        ) : item.type === "video" && item.src ? (
+          <video
+            src={item.src}
+            preload="metadata"
+            muted
+            playsInline
+            title={item.name}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 9,
+              objectFit: "cover",
+              flexShrink: 0,
+              display: "block",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              background: "rgba(255, 255, 255, 0.04)",
+            }}
+          />
         ) : (
           <div
             title={item.name}
