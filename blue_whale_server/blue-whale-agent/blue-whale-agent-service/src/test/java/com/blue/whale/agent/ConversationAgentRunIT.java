@@ -373,10 +373,6 @@ class ConversationAgentRunIT {
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value(100304));
         postCommit(runId, validCommitBody(project.getId(), work)
-                        .replace("\"actions\":", "\"error\":{\"reason\":\"failed\"},\"actions\":"))
-                .andExpect(status().isUnprocessableEntity())
-                .andExpect(jsonPath("$.code").value(100304));
-        postCommit(runId, validCommitBody(project.getId(), work)
                         .replace("\"aspect_ratio\":\"1:1\"", "\"aspect_ratio\":123"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value(100304));
@@ -630,7 +626,9 @@ class ConversationAgentRunIT {
     }
 
     @Test
-    void fakeRunCannotUseThePydanticNoActionCompletionPath() throws Exception {
+    void fakeRunZeroActionCommitCompletesRun() throws Exception {
+        // IK3BG2（ADR-0043）：零动作完成契约级无条件放行、不限引擎——fake Run 首轮纯咨询
+        // 零动作 commit 即合法完成（原「pydantic 专属无动作收尾」限制随 ACTION_MISSING 退役）。
         Project project = new Project().setOwnerId(10L).setName("fake-no-action");
         projectMapper.insert(project);
         long runId = postMessage(project.getId(), "fake-no-action-key", "生成一张蓝鲸海报")
@@ -642,10 +640,12 @@ class ConversationAgentRunIT {
                 "\"actions\":[]");
 
         postCommit(runId, body)
-                .andExpect(status().isUnprocessableEntity())
-                .andExpect(jsonPath("$.code").value(100304));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.checkpoint_id").isNumber());
 
-        assertNoCommitFacts(project.getId(), runId);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM agent_runs WHERE id = ?", String.class, runId))
+                .isEqualTo("completed");
     }
 
     @Test

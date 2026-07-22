@@ -63,6 +63,10 @@
 `UserInputRequestProposal(request_type, question, resume_binding)`，并以 `@Pattern` 约束首版只接受
 `creation_clarification`。`AgentRunWorkerService` 把原 `WORKER_TERMINAL_NOT_ALLOWED` 硬拒改为：
 
+> **修订（ADR-0043）**：下述两条已更新——`error != null` 自 ADR-0043 D4 起接纳为 `failed` 终态
+> （本条逆转）；`ACTIVE_REQUEST_ALREADY_BOUND` 语义自 ADR-0043 D1 起收紧为「同时最多一个活动
+> 请求」，顺序多轮澄清合法。互斥（`PROPOSAL_ACTION_MUTEX`）与下文接纳后的原子保存不变。
+
 - `error != null` 仍为终态拒绝（公开事实只承认 Java 接纳的状态转移）；
 - `user_input_request` 提议被校验并接纳，前提是它与同提交的 `actions` **互斥**
  （`PROPOSAL_ACTION_MUTEX`），且来源 AgentRun 未绑定待消费请求

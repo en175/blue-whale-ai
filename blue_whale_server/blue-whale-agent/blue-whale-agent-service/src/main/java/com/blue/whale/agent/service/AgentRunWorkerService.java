@@ -73,6 +73,9 @@ public class AgentRunWorkerService {
     // IK2QC8：claim 下发的最近消息窗口（契约 §6.1），末尾若干条回到时间升序；更早历史由
     // read_conversation_history 游标分页按需读取。
     private static final int RECENT_MESSAGE_WINDOW = 6;
+    // IK3BG2（ADR-0043）：agent_runs.error_code / error_message 列长（V15），截断兜底。
+    private static final int ERROR_CODE_MAX_LENGTH = 96;
+    private static final int ERROR_MESSAGE_MAX_LENGTH = 1024;
 
     private final AgentRunMapper agentRunMapper;
     private final ConversationMapper conversationMapper;
@@ -200,29 +203,28 @@ public class AgentRunWorkerService {
         persistBundleReadEvidence(run.getUserId(), run.getProjectId(), runId, request);
         projectService.requireOwnedForUpdate(run.getProjectId(), run.getUserId());
         UserInputRequestProposal proposal = request.userInputRequest();
-        if (request.error() != null) {
-            // Worker 终态错误仍由 Java 拒绝：公开事实只承认 Java 接纳的状态转移。
-            actionAuthorizationService.deny(
-                    actionCommand(run, null, "unknown", false), "WORKER_TERMINAL_NOT_ALLOWED");
-        }
-        if (proposal != null && !request.actions().isEmpty()) {
+        Map<String, Object> terminalError = request.error();
+        // IK3BG2（ADR-0043）：恢复绑定的创作澄清在 commit 被接纳时即消费——恢复后可再澄清、
+        // 修改方案或直接行动，回答已随工作包吸收，任何收场形态都算消费。成本确认仍只在动作
+        // 分支按动作身份与报价严格消费。
+        boolean boundClarificationConsumed = consumeBoundClarification(run);
+        if (terminalError == null && proposal != null && !request.actions().isEmpty()) {
             // 提议与动作互斥：一次提交要么推进一个动作，要么提出一个输入请求。
             actionAuthorizationService.deny(
                     actionCommand(run, null, "unknown", false), "PROPOSAL_ACTION_MUTEX");
         }
-        if (proposal != null && run.getConfirmedInputRequestId() != null) {
-            // 来源 AgentRun 已绑定待消费的确认请求，不接受新的输入请求提议。
+        if (terminalError == null && proposal != null && hasActiveInputRequest(run)) {
+            // 同时最多一个活动请求（pending/confirmed 且未过期未消费，两种 request_type 同规则），
+            // 取代「每 Run 终生一次」：同一 AgentRun 顺序多轮澄清合法。
             actionAuthorizationService.deny(
                     actionCommand(run, null, "unknown", false), "ACTIVE_REQUEST_ALREADY_BOUND");
         }
-        if (proposal == null && request.actions().isEmpty() && !supportsNoActionCompletion(run)) {
-            actionAuthorizationService.deny(
-                    actionCommand(run, null, "unknown", false), "ACTION_MISSING");
-        }
+        // IK3BG2（ADR-0043）：ACTION_MISSING 闸门退役——任何无动作、无输入请求提议、无错误的
+        // commit 即合法完成（completed），契约级无条件放行、不限引擎与 checkpoint 形态。
         RunCommitRequest.ProposedAction action = null;
         String actionType = null;
         AuthorizationDecision authorization = null;
-        if (proposal == null && !request.actions().isEmpty()) {
+        if (terminalError == null && proposal == null && !request.actions().isEmpty()) {
             try {
                 ValidatedAction validated = validateAction(run, request.actions());
                 action = validated.action();
@@ -235,7 +237,7 @@ public class AgentRunWorkerService {
                 throw exception;
             }
             boolean confirmed = run.getConfirmedInputRequestId() != null;
-            if (confirmed) {
+            if (confirmed && !boundClarificationConsumed) {
                 userInputRequestService.consumeValidated(
                         run.getConfirmedInputRequestId(), run.getProjectId(), run.getUserId(), run.getId(),
                         action.actionId(), actionType, action.arguments());
@@ -300,7 +302,7 @@ public class AgentRunWorkerService {
 
         UserInputRequest inputRequest = null;
         GenerationJob job = null;
-        if (proposal != null) {
+        if (terminalError == null && proposal != null) {
             // IK3AH2：澄清提议服务端 grant 复验——未授予 request_user_input 的 Run 不能发起创作澄清，
             // 投影为软回喂（run queued/awaiting_retry，accepted_results 回喂 rejected），堵住绕过动作路径
             // grant 铁闸的盲点。bundleVersionId 空（enforcement=false）时保持现状（测试 / 降级路径）。
@@ -446,16 +448,27 @@ public class AgentRunWorkerService {
         }
 
         run.setCurrentCheckpointId(checkpoint.getId())
-                .setStatus(rejection != null ? AgentRun.STATUS_QUEUED
+                .setStatus(terminalError != null ? AgentRun.STATUS_FAILED
+                        : rejection != null ? AgentRun.STATUS_QUEUED
                         : inputRequest != null ? AgentRun.STATUS_AWAITING_INPUT
                         : job == null ? AgentRun.STATUS_COMPLETED : AgentRun.STATUS_AWAITING_JOB)
-                .setStage(rejection != null ? "awaiting_retry"
+                .setStage(terminalError != null ? "failed"
+                        : rejection != null ? "awaiting_retry"
                         : inputRequest != null
                         ? (proposal != null ? "awaiting_clarification" : "awaiting_confirmation")
                         : (job == null ? "completed" : "generating"))
+                // IK3BG2（ADR-0043）：error commit 接纳为 failed 终态——error_code/error_message
+                // 原样持久化（Worker 侧脱敏契约维持），列长截断兜底；failed Run 不再被 claim/重放。
+                .setErrorCode(terminalError == null ? null
+                        : truncate(asText(terminalError.get("code")), ERROR_CODE_MAX_LENGTH))
+                .setErrorMessage(terminalError == null ? null
+                        : truncate(asText(terminalError.get("message")), ERROR_MESSAGE_MAX_LENGTH))
                 .setLeaseOwner(null)
                 .setLeaseExpiresAt(null);
         agentRunMapper.updateById(run);
+        // updateById 的 NOT_NULL 字段策略下 setLeaseOwner(null) 不持久化：租约释放须显式置空，
+        // 否则 awaiting_*/completed/failed Run 残留 lease_owner（状态过滤兜底，但不符「释放租约」口径）。
+        releaseLease(runId);
         run = agentRunMapper.selectById(runId);
         projectEventService.appendEvent(run.getProjectId(), EventType.AGENT_RUN_STATUS_CHANGED,
                 AggregateType.AGENT_RUN, String.valueOf(runId), run.getVersion(),
@@ -738,16 +751,70 @@ public class AgentRunWorkerService {
                 .toList();
     }
 
-    private boolean supportsNoActionCompletion(AgentRun run) {
-        if (!"pydantic-ai".equals(run.getEngine())
-                || !"2.9.0".equals(run.getEngineVersion())
-                || !Integer.valueOf(1).equals(run.getAdapterSchemaVersion())
-                || run.getCurrentCheckpointId() == null) {
+    /**
+     * IK3BG2（ADR-0043）：resumed run 绑定的创作澄清在 commit 被接纳时消费——恢复后可再澄清、
+     * 修改方案或直接行动，回答已随工作包吸收，任何收场形态（动作 / 再澄清 / 纯文本 / 错误终态）
+     * 都算消费。成本确认绑定返回 false，仍由动作分支按动作身份与报价严格消费。
+     *
+     * @return 绑定的创作澄清已在本 commit 消费
+     */
+    private boolean consumeBoundClarification(AgentRun run) {
+        Long requestId = run.getConfirmedInputRequestId();
+        if (requestId == null) {
             return false;
         }
-        RuntimeCheckpoint checkpoint = checkpointMapper.selectById(run.getCurrentCheckpointId());
-        return checkpointMatches(run, checkpoint)
-                && acceptedResults(run, checkpoint).size() == 1;
+        UserInputRequest bound = userInputRequestMapper.selectById(requestId);
+        if (bound == null || !bound.isCreationClarification()) {
+            return false;
+        }
+        userInputRequestService.consumeValidated(
+                requestId, run.getProjectId(), run.getUserId(), run.getId(), null, null, Map.of());
+        return true;
+    }
+
+    /**
+     * IK3BG2（ADR-0036 §4 口径）：当前 Run 是否仍有活动 UserInputRequest——活动 = pending /
+     * confirmed 且未过期未消费，两种 request_type 同规则；覆盖来源为本 Run 的请求与经
+     * confirmedInputRequestId 绑定到本 Run 的请求（创作澄清绑定已在 commit 入口消费，不会误伤
+     * 顺序多轮澄清）。
+     */
+    private boolean hasActiveInputRequest(AgentRun run) {
+        LocalDateTime now = userInputRequestMapper.selectCurrentTime();
+        long sourced = userInputRequestMapper.selectCount(Wrappers.<UserInputRequest>lambdaQuery()
+                .eq(UserInputRequest::getProjectId, run.getProjectId())
+                .eq(UserInputRequest::getSourceAgentRunId, run.getId())
+                .in(UserInputRequest::getStatus,
+                        UserInputRequest.STATUS_PENDING, UserInputRequest.STATUS_CONFIRMED)
+                .gt(UserInputRequest::getExpiresAt, now));
+        if (sourced > 0) {
+            return true;
+        }
+        Long boundId = run.getConfirmedInputRequestId();
+        if (boundId == null) {
+            return false;
+        }
+        UserInputRequest bound = userInputRequestMapper.selectById(boundId);
+        return bound != null
+                && (UserInputRequest.STATUS_PENDING.equals(bound.getStatus())
+                        || UserInputRequest.STATUS_CONFIRMED.equals(bound.getStatus()))
+                && bound.getExpiresAt() != null
+                && bound.getExpiresAt().isAfter(now);
+    }
+
+    /** 显式置空租约列（updateById 的 NOT_NULL 字段策略不持久化 null）。 */
+    private void releaseLease(Long runId) {
+        agentRunMapper.update(null, Wrappers.<AgentRun>lambdaUpdate()
+                .eq(AgentRun::getId, runId)
+                .set(AgentRun::getLeaseOwner, null)
+                .set(AgentRun::getLeaseExpiresAt, null));
+    }
+
+    /** 列长截断兜底：error_code / error_message 原样持久化，超长截断（ADR-0043）。 */
+    private static String truncate(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
     }
 
     private Map<String, Object> runPayload(AgentRun run) {

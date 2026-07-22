@@ -181,24 +181,6 @@ class GenerationWorkerIT {
                 .andExpect(status().isOk())
                 .andReturn();
         JsonNode firstWork = objectMapper.readTree(firstClaim.getResponse().getContentAsString()).path("data");
-        String prematureCompletion = "{" +
-                "\"commit_id\":\"pydantic-premature-completion\"," +
-                "\"project_id\":" + project.getId() + "," +
-                "\"user_id\":10," +
-                "\"expected_run_version\":" + firstWork.path("run_version").asInt() + "," +
-                "\"fencing_token\":" + firstWork.path("fencing_token").asLong() + "," +
-                "\"engine\":\"pydantic-ai\"," +
-                "\"engine_version\":\"2.9.0\"," +
-                "\"adapter_schema_version\":1," +
-                "\"visible_text\":\"图片已经生成。\"," +
-                "\"checkpoint\":{\"opaque_payload\":{" +
-                "\"format\":\"pydantic-ai-v1\",\"messages\":[],\"pending_calls\":[]}}," +
-                "\"actions\":[]}";
-        mockMvc.perform(post("/internal/agent-runs/{id}/commits", runId)
-                        .header("X-Worker-Id", "pydantic-worker-1")
-                        .contentType("application/json")
-                        .content(prematureCompletion))
-                .andExpect(status().isUnprocessableEntity());
 
         String firstCommit = "{" +
                 "\"commit_id\":\"pydantic-commit-1\"," +

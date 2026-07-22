@@ -181,6 +181,10 @@ _Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeIt
 **AgentRun（创作运行）**:
 围绕一个创作意图持续推进的 Agent 工作单元；活动中的 Run 可跨澄清、修改和自然语言授权等
 多轮对话暂停并恢复，终态不可重开，后续修订或无关新目标创建关联的新 AgentRun。
+收场只有三种规范化终态（ADR-0043）：`completed`（模型给出无动作提议的收尾轮，零动作 commit
+无条件合法）、`superseded`（被同 Conversation 新目标取代——fencing token 递增、释放租约，在途旧
+Worker 后续 commit 收 409 并确定性退出）、`failed`（Worker 错误 commit 接纳为终态，error_code /
+error_message 落列归因）；checkpoint 损坏隔离的 `recovery_failed` 同属终态。
 其生命周期状态只表达运行、等待及终态；理解素材、选择技能、规划和生成等属于独立的展示阶段。
 AgentRun 可关联多个 GenerationJob 及其输出用途，但不拥有 Job 的执行生命周期；恢复时吸收
 Job 已持久化的结果事实。创建时固定 Runtime Agent Bundle 与 ModelProfile；Creative Skill

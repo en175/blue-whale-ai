@@ -113,6 +113,11 @@ public class ConversationCommandService {
         if (confirmedInputRequestId != null) {
             userInputRequestService.bindResumedRun(confirmedInputRequestId, run.getId());
         }
+        // IK3BG2（ADR-0043）：新消息创建新 Run 时，同 Conversation 其余非终态 Run 原子置为
+        // superseded 终态——fencing token 递增、释放租约；在途旧 Worker 下次 commit 因 version /
+        // fencing / 租约校验失败收到 409（AGENT_RUN_CONFLICT）并确定性退出、不再提交任何状态。
+        // 已提交 GenerationJob 不级联改写（CONTEXT.md 既有语义）。
+        supersedeInFlightRuns(conversation.getId(), run.getId(), projectId, request.clientMessageId());
 
         long messageCount = messageMapper.selectCount(Wrappers.<ConversationMessage>lambdaQuery()
                 .eq(ConversationMessage::getConversationId, conversation.getId()));
@@ -149,22 +154,9 @@ public class ConversationCommandService {
                 AggregateType.CONVERSATION, String.valueOf(conversation.getId()), message.getSequenceNo(),
                 messagePayload, request.clientMessageId(), null);
 
-        Map<String, Object> runPayload = new LinkedHashMap<>();
-        runPayload.put("agent_run_id", run.getId());
-        runPayload.put("conversation_id", conversation.getId());
-        runPayload.put("status", run.getStatus());
-        runPayload.put("stage", run.getStage());
-        runPayload.put("engine", run.getEngine());
-        runPayload.put("engine_version", run.getEngineVersion());
-        runPayload.put("adapter_schema_version", run.getAdapterSchemaVersion());
-        runPayload.put("bundle_version_id", run.getBundleVersionId());
-        runPayload.put("manifest_digest", run.getManifestDigest());
-        runPayload.put("model_profile_id", run.getModelProfileId());
-        runPayload.put("model_profile_version", run.getModelProfileVersion());
-        runPayload.put("activated_creative_skill_versions", run.getActivatedCreativeSkillVersions());
         projectEventService.appendEvent(projectId, EventType.AGENT_RUN_CREATED,
                 AggregateType.AGENT_RUN, String.valueOf(run.getId()), 0,
-                runPayload, request.clientMessageId(), null);
+                runPayload(run), request.clientMessageId(), null);
 
         if (confirmedInputRequestId != null) {
             // 创作澄清回答绑定到权威消息，并向 ADR-0016 §5 靠拢发 AgentRun 聚合 answered 事件。
@@ -222,6 +214,56 @@ public class ConversationCommandService {
             throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
         }
         return conversation;
+    }
+
+    /**
+     * IK3BG2（ADR-0043）：把同 Conversation 除新 Run 外的非终态 Run 原子置为 superseded 终态。
+     *
+     * <p>FOR UPDATE 与 claim 的行锁互斥，避免与正在认领的 Run 竞争漏取代；fencing token 递增 +
+     * 释放租约使在途旧 Worker 下次 commit 确定性收到 409。逐个发 AGENT_RUN_STATUS_CHANGED 事件，
+     * 与既有状态迁移口径一致。
+     */
+    private void supersedeInFlightRuns(Long conversationId, Long newRunId, Long projectId,
+                                       String clientMessageId) {
+        List<AgentRun> inFlight = agentRunMapper.selectList(Wrappers.<AgentRun>lambdaQuery()
+                .eq(AgentRun::getConversationId, conversationId)
+                .ne(AgentRun::getId, newRunId)
+                .in(AgentRun::getStatus, AgentRun.STATUS_QUEUED, AgentRun.STATUS_RUNNING,
+                        AgentRun.STATUS_AWAITING_JOB, AgentRun.STATUS_AWAITING_INPUT)
+                .last("FOR UPDATE"));
+        for (AgentRun stale : inFlight) {
+            // lambdaUpdate 显式置空租约列（updateById 的 NOT_NULL 字段策略不持久化 null）；
+            // version 条件兜底并发认领竞争。
+            agentRunMapper.update(null, Wrappers.<AgentRun>lambdaUpdate()
+                    .eq(AgentRun::getId, stale.getId())
+                    .eq(AgentRun::getVersion, stale.getVersion())
+                    .set(AgentRun::getStatus, AgentRun.STATUS_SUPERSEDED)
+                    .set(AgentRun::getStage, "superseded")
+                    .set(AgentRun::getFencingToken, stale.getFencingToken() + 1)
+                    .set(AgentRun::getLeaseOwner, null)
+                    .set(AgentRun::getLeaseExpiresAt, null));
+            AgentRun superseded = agentRunMapper.selectById(stale.getId());
+            projectEventService.appendEvent(projectId, EventType.AGENT_RUN_STATUS_CHANGED,
+                    AggregateType.AGENT_RUN, String.valueOf(superseded.getId()), superseded.getVersion(),
+                    runPayload(superseded), clientMessageId, null);
+        }
+    }
+
+    private Map<String, Object> runPayload(AgentRun run) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("agent_run_id", run.getId());
+        payload.put("conversation_id", run.getConversationId());
+        payload.put("status", run.getStatus());
+        payload.put("stage", run.getStage());
+        payload.put("engine", run.getEngine());
+        payload.put("engine_version", run.getEngineVersion());
+        payload.put("adapter_schema_version", run.getAdapterSchemaVersion());
+        payload.put("bundle_version_id", run.getBundleVersionId());
+        payload.put("manifest_digest", run.getManifestDigest());
+        payload.put("model_profile_id", run.getModelProfileId());
+        payload.put("model_profile_version", run.getModelProfileVersion());
+        payload.put("activated_creative_skill_versions", run.getActivatedCreativeSkillVersions());
+        return payload;
     }
 
     /**

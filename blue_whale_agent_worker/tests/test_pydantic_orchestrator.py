@@ -1017,6 +1017,100 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertIsNone(result.input_request)
         self.assertEqual("仍然缺少信息。", result.visible_text)
 
+    def test_explicit_intent_acts_directly_without_forced_followup(self) -> None:
+        # IK3BG2：明确输入零追问——模型首轮直接行动时不被程序强制追问，Worker 不产生
+        # 任何澄清提议或契约错误，动作提议直通 Java 铁闸。
+        work = _pydantic_work()
+
+        result = PydanticAIOrchestrator(
+            FunctionModel(image_proposal_model), _bundle_source()
+        ).advance(work)
+
+        self.assertIsNone(result.error)
+        self.assertIsNone(result.input_request)
+        self.assertEqual(1, len(result.actions))
+        self.assertEqual("create_image_generation_job", result.actions[0].tool_id)
+
+    def test_three_consecutive_clarification_round_trips_are_legal(self) -> None:
+        # IK3BG2：连续三次以上澄清往返——多轮对话节奏由意图而非程序分支决定；恢复后可
+        # 再澄清、修改方案或直接行动，无任何「恢复后必须出动作」的程序自限。
+        grants = (_generate_image_grant(), _request_user_input_grant())
+        questions = ["您希望什么风格？", "横版还是竖版？", "需要 slogan 吗？"]
+        answers = ["水墨", "横版", "要"]
+
+        def clarify_three_times_model(messages, info):
+            asked = sum(
+                1
+                for message in messages
+                if isinstance(message, ModelResponse)
+                for part in message.parts
+                if isinstance(part, ToolCallPart)
+                and part.tool_name == "request_user_input"
+            )
+            if asked < 3:
+                return ModelResponse(
+                    parts=(
+                        ToolCallPart(
+                            "request_user_input",
+                            {
+                                "request_type": "creation_clarification",
+                                "question": questions[asked],
+                            },
+                            f"clarify-call-{asked}",
+                        ),
+                    )
+                )
+            return ModelResponse(
+                parts=(
+                    TextPart("三轮澄清齐了，开始生成。"),
+                    ToolCallPart(
+                        "create_image_generation_job",
+                        {"prompt": "三轮澄清后的海报", "aspect_ratio": "1:1"},
+                        "final-call",
+                    ),
+                )
+            )
+
+        work = _pydantic_work(tool_grants=grants)
+        for round_no in range(4):
+            # 每轮换新 orchestrator 实例 advance，模拟 Worker 单轮进程 + checkpoint 回传。
+            result = PydanticAIOrchestrator(
+                FunctionModel(clarify_three_times_model), _bundle_source()
+            ).advance(work)
+            self.assertIsNone(result.error)
+            if round_no < 3:
+                # 第 1/2/3 轮：再次合法提出澄清，不出动作。
+                self.assertEqual((), result.actions)
+                self.assertIsNotNone(result.input_request)
+                self.assertEqual(questions[round_no], result.input_request.question)
+                restored_checkpoint = RuntimeCheckpoint(
+                    engine=result.checkpoint.engine,
+                    engine_version=result.checkpoint.engine_version,
+                    adapter_schema_version=result.checkpoint.adapter_schema_version,
+                    opaque_payload=json.loads(
+                        json.dumps(result.checkpoint.opaque_payload, ensure_ascii=False)
+                    ),
+                )
+                work = _pydantic_work(
+                    run_version=work.run_version + 1,
+                    fencing_token=work.fencing_token + 1,
+                    messages=work.messages
+                    + (
+                        {"role": "assistant", "content": questions[round_no]},
+                        {"role": "user", "content": answers[round_no]},
+                    ),
+                    checkpoint=restored_checkpoint,
+                    tool_grants=grants,
+                )
+            else:
+                # 第 4 轮：三轮澄清闭合后直接行动，无新一轮澄清、无契约错误。
+                self.assertIsNone(result.input_request)
+                self.assertEqual(1, len(result.actions))
+                self.assertEqual(
+                    "create_image_generation_job", result.actions[0].tool_id
+                )
+                self.assertEqual("三轮澄清齐了，开始生成。", result.visible_text)
+
     def test_resumed_model_text_passes_through_without_fixed_copy_replacement(self) -> None:
         # IK3BG0：终态轮可见文本一律来自模型自身输出，不再用固定文案替换。即使模型输出
         # 含敏感片段，Worker 也直传——防泄露由 Java §7「内容审核与输出释放」铁闸在释放层

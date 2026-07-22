@@ -81,6 +81,17 @@ class RuntimeBundleAgentRunPinIT {
 
         long runV2 = postMessage("run-v2", "first run");
 
+        // IK3BG2（ADR-0043）：新消息会原子取代同 Conversation 在途 Run——先认领 runV2
+        // （Worker 工作包携带其 pin），再发第二条消息；第二条消息把 runV2 置为 superseded，
+        // rollback 只影响之后创建的 Run 的 pin。
+        JsonNode claimed = objectMapper.readTree(mockMvc.perform(post("/internal/agent-runs/claim")
+                        .header("X-Worker-Id", "pin-worker")
+                        .header("X-Orchestrator-Engine", "fake"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString()).path("data");
+
         mockMvc.perform(post("/internal/runtime-bundles/agents/pin_agent/rollback")
                         .header("X-User-Id", "10")
                         .header("Idempotency-Key", "rollback-pin-v1")
@@ -89,6 +100,11 @@ class RuntimeBundleAgentRunPinIT {
                 .andExpect(status().isOk());
 
         long runV1 = postMessage("run-v1", "second run");
+
+        // 在途 runV2 被新消息取代（superseded 终态），其 pin 不回溯改写。
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM agent_runs WHERE id = ?", String.class, runV2))
+                .isEqualTo("superseded");
 
         Map<String, Object> oldPin = jdbcTemplate.queryForMap("""
                 SELECT bundle_version_id, manifest_digest, model_profile_id, model_profile_version
@@ -107,13 +123,7 @@ class RuntimeBundleAgentRunPinIT {
                 .containsEntry("model_profile_id", "model_v1")
                 .containsEntry("model_profile_version", "1.0.0");
 
-        JsonNode claimed = objectMapper.readTree(mockMvc.perform(post("/internal/agent-runs/claim")
-                        .header("X-Worker-Id", "pin-worker")
-                        .header("X-Orchestrator-Engine", "fake"))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString()).path("data");
+        // claimed 为 rollback 前认领的 runV2 工作包：Worker 收到的 pin 身份固定于 Run 创建时。
         assertThat(claimed.path("agent_run_id").asLong()).isEqualTo(runV2);
         assertThat(claimed.path("bundle_version_id").asText()).isEqualTo("pin_agent_v2_0_0");
         assertThat(claimed.path("manifest_digest").asText()).isEqualTo(digestV2);

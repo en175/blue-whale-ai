@@ -5,9 +5,31 @@ from urllib.request import Request, urlopen
 
 from .contracts import AcceptedActionResult, RunWork, RuntimeCheckpoint, ToolGrant
 
+# Java SystemCode.AGENT_RUN_CONFLICT（100303）：commit 因 expectedRunVersion / fencing token /
+# 租约校验失败被拒——Run 已被新目标取代（superseded）或租约失效，Worker 应确定性退出。
+AGENT_RUN_CONFLICT_CODE = 100303
+
+
+class AgentRunConflictError(RuntimeError):
+    """Java 铁闸 409（AGENT_RUN_CONFLICT）：当前 Run 已被取代或租约失效。
+
+    与其余 RuntimeError（崩溃重试）区分：调用方捕获后打一条结构化 warn 日志并
+    exit 0，不再提交任何状态。
+    """
+
 
 def _optional_str(value: Any) -> Optional[str]:
     return str(value) if value is not None else None
+
+
+def _is_agent_run_conflict(detail: str) -> bool:
+    """409 响应体是 Java 统一 Result 信封（{code, msg, data}），仅 code=AGENT_RUN_CONFLICT
+    （100303）映射为确定性退出；其余 409（如 IDEMPOTENCY_KEY_REUSED）维持崩溃重试。"""
+    try:
+        envelope = json.loads(detail)
+    except ValueError:
+        return False
+    return isinstance(envelope, dict) and envelope.get("code") == AGENT_RUN_CONFLICT_CODE
 
 
 def _optional_seq(value: Any) -> Optional[tuple[Any, ...]]:
@@ -214,6 +236,10 @@ class JavaRunGateway:
                 result = json.loads(response.read().decode("utf-8"))
         except HTTPError as error:
             detail = error.read().decode("utf-8")
+            if error.code == 409 and _is_agent_run_conflict(detail):
+                raise AgentRunConflictError(
+                    f"Java Product API 返回 HTTP 409（AGENT_RUN_CONFLICT）: {detail}"
+                ) from error
             raise RuntimeError(
                 f"Java Product API 返回 HTTP {error.code}: {detail}"
             ) from error

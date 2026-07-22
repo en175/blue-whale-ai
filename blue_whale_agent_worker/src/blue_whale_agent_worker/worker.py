@@ -1,6 +1,12 @@
 import hashlib
+import json
+import logging
+from typing import Optional
 
-from .contracts import OrchestratorPort, RunGateway
+from .contracts import OrchestratorPort, RunGateway, RunWork
+from .http_gateway import AgentRunConflictError
+
+logger = logging.getLogger("blue_whale_agent_worker")
 
 # 可见文本切块大小（字符数）：编排器一次性给出全文，worker 按定长窗口切成多块
 # 走完整分块协议（逐块审核、前缀放行），定长切分保证租约重领后的重放确定性。
@@ -19,7 +25,26 @@ class AgentWorker:
         self._orchestrator = orchestrator
 
     def run_once(self) -> None:
-        work = self._gateway.claim()
+        work: Optional[RunWork] = None
+        try:
+            work = self._gateway.claim()
+            self._advance_and_commit(work)
+        except AgentRunConflictError as error:
+            # IK3BG2：Run 被新目标取代（superseded）后旧 Worker 的任何写都被 409 拒绝——
+            # 打一条结构化 warn 日志并正常返回（进程 exit 0），不再提交任何状态；
+            # 其余错误维持现状冒泡（非零退出，由外层循环崩溃重试）。
+            logger.warning(
+                json.dumps(
+                    {
+                        "event": "agent_run_conflict",
+                        "agent_run_id": None if work is None else work.agent_run_id,
+                        "message": str(error),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+    def _advance_and_commit(self, work: RunWork) -> None:
         proposal = self._orchestrator.advance(work)
         stream_id = self._stream_id(work.agent_run_id)
         run_binding = {
