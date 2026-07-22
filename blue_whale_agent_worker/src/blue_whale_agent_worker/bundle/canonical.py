@@ -26,12 +26,23 @@ from typing import Any
 MANIFEST_DIGEST_FIELD = "manifestDigest"
 
 
+def sha256_hex(text: str) -> str:
+    """纯文本 UTF-8 的 SHA-256 十六进制摘要（无 ``sha256:`` 前缀）。
+
+    纯字节摘要的共享核心：``cache`` 用无前缀 hex 作内容寻址文件名键，``gate`` /
+    ``loader`` 包一层 ``sha256:`` 前缀比对 manifest 声明值，``canonical_json_digest`` /
+    ``manifest_digest`` 复用此核心做最终字节摘要（多出的是前置 canonical JSON 序列化，
+    锁 Jackson golden，与摘要算法正交）。
+    """
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def canonical_json_digest(value: Any) -> str:
     """对任意 JSON 值做与 Jackson canonicalize 等价的规范化后 SHA-256。"""
     canonical = json.dumps(
         value, separators=(",", ":"), sort_keys=True, ensure_ascii=False
     )
-    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return "sha256:" + sha256_hex(canonical)
 
 
 def manifest_digest(resource_manifest: dict[str, Any]) -> str:

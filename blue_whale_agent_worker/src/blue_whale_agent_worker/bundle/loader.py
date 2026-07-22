@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .errors import (
+    BUNDLE_RESOURCE_DIGEST_MISMATCH,
     BUNDLE_RESOURCE_UNKNOWN,
     BUNDLE_SNAPSHOT_MALFORMED,
     BUNDLE_TOKEN_BUDGET_EXCEEDED,
@@ -36,6 +37,7 @@ from .gate import (
     content_digest,
     resource_id,
     revision,
+    sha256_text,
 )
 from .source import BundleSource
 from .tokens import estimate_chars_div_4
@@ -195,6 +197,10 @@ class ContextLoader:
             raise BundleError(
                 BUNDLE_RESOURCE_UNKNOWN, f"always_on 资源缺少正文: {resource_id}"
             )
+        if sha256_text(content) != content_digest(resource):
+            raise BundleError(
+                BUNDLE_RESOURCE_DIGEST_MISMATCH, "always_on 资源字节与 manifest 摘要不符"
+            )
         return content
 
     @staticmethod
@@ -210,6 +216,10 @@ class ContextLoader:
             parts.extend(rule_bodies)
         if skills:
             parts.append("## Available Skills")
+            # 根 RuntimeSkill 自身 resourceId：read_resource 读根 Skill 正文的寻址入口，
+            # 优先披露且仅一次（与 _initial_token_total 计费 1 次口径对齐），不随 skill 数量重复。
+            if root_runtime_skill_id:
+                parts.append(f"- skill resourceId: {root_runtime_skill_id}")
             for skill in skills:
                 metadata = _skill_metadata(skill)
                 parts.append(
@@ -217,9 +227,6 @@ class ContextLoader:
                     f"description: {metadata.get('description', '')} | "
                     f"allowImplicitInvocation: {metadata.get('allowImplicitInvocation')}"
                 )
-                # 披露根 RuntimeSkill 自身 resourceId：模型据此 read_resource 读根 Skill 正文
-                if root_runtime_skill_id:
-                    parts.append(f"  - skill resourceId: {root_runtime_skill_id}")
                 # 披露已解析引用的 resourceId：模型据此逐层 read_resource 读 Rule/Workflow/Reference
                 for ref_id in _skill_reference_ids(skill):
                     parts.append(f"  - reference resourceId: {ref_id}")

@@ -28,6 +28,10 @@ MODEL_PROFILE_VERSION = "2.0.0"
 ROLE_DOCUMENT_BODY = "# 角色：蓝鲸创作导演\n你负责把用户创作意图推进到可生成。"
 
 
+def _sha256(text: str) -> str:
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def _bundle_manifest() -> dict:
     return {
         "formatVersion": 1,
@@ -41,7 +45,7 @@ def _bundle_manifest() -> dict:
                 "path": "AGENTS.md",
                 "mediaType": "text/markdown",
                 "loadMode": "always_on",
-                "contentDigest": "sha256:" + "0" * 64,
+                "contentDigest": _sha256(ROLE_DOCUMENT_BODY),
                 "sizeBytes": len(ROLE_DOCUMENT_BODY),
                 "tokenEstimate": 32,
                 "references": [],
@@ -104,10 +108,6 @@ SKILL_DESC = "根创作工作流"
 SKILL_BODY = "# 根创作工作流正文\n1. 澄清意图 2. 提出生图动作。"
 REF_RESOURCE_ID = "ref_rule"
 REF_BODY = "# 安全规则\n生成前确认比例与风格。"
-
-
-def _sha256(text: str) -> str:
-    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _disclosed_skill_resource_id(instructions: str) -> str:

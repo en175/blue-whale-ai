@@ -4,9 +4,11 @@
 基础上下文装载、Skill 元数据披露、token 预算门、ModelProfile 能力门、fail closed。
 """
 
+import hashlib
 import unittest
 
 from blue_whale_agent_worker.bundle.errors import (
+    BUNDLE_RESOURCE_DIGEST_MISMATCH,
     BUNDLE_RESOURCE_UNKNOWN,
     BUNDLE_SNAPSHOT_MALFORMED,
     BUNDLE_TOKEN_BUDGET_EXCEEDED,
@@ -26,7 +28,19 @@ MODEL_PROFILE_ID = "model_v2"
 MODEL_VERSION = "2.0.0"
 
 
-def _resource(resource_id, kind, load_mode, *, conflict_domain=None, metadata=None):
+def _sha256(text: str) -> str:
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _resource(
+    resource_id,
+    kind,
+    load_mode,
+    *,
+    content_digest,
+    conflict_domain=None,
+    metadata=None,
+):
     resource = {
         "resourceId": resource_id,
         "revision": 1,
@@ -34,7 +48,7 @@ def _resource(resource_id, kind, load_mode, *, conflict_domain=None, metadata=No
         "path": f"{resource_id}.md",
         "mediaType": "text/markdown",
         "loadMode": load_mode,
-        "contentDigest": "sha256:" + "0" * 64,
+        "contentDigest": content_digest,
         "sizeBytes": 100,
         "tokenEstimate": 25,
         "references": [],
@@ -48,12 +62,21 @@ def _resource(resource_id, kind, load_mode, *, conflict_domain=None, metadata=No
 
 def _resources():
     return [
-        _resource("role_main", "role_document", "always_on"),
-        _resource("rule_safety", "rule", "always_on", conflict_domain="safety"),
+        _resource(
+            "role_main", "role_document", "always_on", content_digest=_sha256(ROLE_BODY)
+        ),
+        _resource(
+            "rule_safety",
+            "rule",
+            "always_on",
+            conflict_domain="safety",
+            content_digest=_sha256(RULE_BODY),
+        ),
         _resource(
             "skill_root",
             "runtime_skill",
             "on_demand",
+            content_digest=_sha256(SKILL_BODY),
             metadata={
                 "name": SKILL_NAME,
                 "description": SKILL_DESC,
@@ -283,6 +306,70 @@ class ContextLoaderTest(unittest.TestCase):
             + _chars_div_4(root_skill_id)
         )
         self.assertEqual(expected_baseline, loaded.initial_tokens)
+
+    def test_load_tampered_always_on_body_fails_closed_on_digest_mismatch(self) -> None:
+        # IK3AGW：always_on 资源正文被篡改 → 初始装载重算 sha256 与 manifest 摘要不符，
+        # 在拼 instructions / 触发模型前 fail closed（与 on_demand 读取口径一致）。
+        snapshot = _make_snapshot()
+        # manifest contentDigest 锁定 ROLE_BODY 的摘要；源端返回被篡改正文。
+        tampered_source = _source(
+            snapshot,
+            resources={
+                "role_main": {"resource_id": "role_main", "content": "被篡改的角色正文"},
+                "rule_safety": {"resource_id": "rule_safety", "content": RULE_BODY},
+                "skill_root": {"resource_id": "skill_root", "content": SKILL_BODY},
+            },
+        )
+        loader = ContextLoader(tampered_source)
+
+        with self.assertRaises(BundleError) as ctx:
+            loader.load(_verified(snapshot), MODEL_PROFILE_ID, MODEL_VERSION)
+
+        self.assertEqual(BUNDLE_RESOURCE_DIGEST_MISMATCH, ctx.exception.code)
+
+    def test_load_tampered_always_on_rule_body_fails_closed_on_digest_mismatch(self) -> None:
+        # IK3AGW AC1：always-on Rule 正文被篡改同样 fail closed（与 RoleDocument 同一 _fetch_body 路径）。
+        snapshot = _make_snapshot()
+        # manifest contentDigest 锁定 RULE_BODY 的摘要；源端返回被篡改正文。
+        tampered_source = _source(
+            snapshot,
+            resources={
+                "role_main": {"resource_id": "role_main", "content": ROLE_BODY},
+                "rule_safety": {"resource_id": "rule_safety", "content": "被篡改的安全规则正文"},
+                "skill_root": {"resource_id": "skill_root", "content": SKILL_BODY},
+            },
+        )
+        loader = ContextLoader(tampered_source)
+
+        with self.assertRaises(BundleError) as ctx:
+            loader.load(_verified(snapshot), MODEL_PROFILE_ID, MODEL_VERSION)
+
+        self.assertEqual(BUNDLE_RESOURCE_DIGEST_MISMATCH, ctx.exception.code)
+
+    def test_load_renders_root_runtime_skill_id_once_for_multiple_skills(self) -> None:
+        # IK3AGW AC5：根 RuntimeSkill resourceId 只渲染一次，不随 skill 数量重复。
+        snapshot = _make_snapshot()
+        snapshot["composition"]["resourceManifest"]["resources"].append(
+            _resource(
+                "skill_extra",
+                "runtime_skill",
+                "on_demand",
+                content_digest=_sha256(SKILL_BODY),
+                metadata={
+                    "name": "extra_skill",
+                    "description": "附加工作流",
+                    "allowImplicitInvocation": False,
+                },
+            )
+        )
+        loaded = ContextLoader(_source(snapshot)).load(
+            _verified(snapshot), MODEL_PROFILE_ID, MODEL_VERSION
+        )
+
+        root_skill_id = snapshot["composition"]["rootRuntimeSkillId"]
+        self.assertEqual(
+            1, loaded.instructions.count(f"skill resourceId: {root_skill_id}")
+        )
 
 
 if __name__ == "__main__":
