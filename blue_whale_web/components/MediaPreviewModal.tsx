@@ -39,8 +39,9 @@ export function MediaPreviewModal({
         position: "fixed",
         inset: 0,
         zIndex: 2147483646,
-        background: "rgba(0, 0, 0, 0.85)",
+        background: "var(--tc-bg-overlay)",
         backdropFilter: "blur(12px)",
+        boxShadow: "var(--tc-modal-shadow)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -51,7 +52,10 @@ export function MediaPreviewModal({
       <button
         type="button"
         aria-label="关闭预览"
-        onClick={onClose}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
         style={{
           position: "absolute",
           top: 16,
@@ -60,8 +64,8 @@ export function MediaPreviewModal({
           height: 36,
           borderRadius: 8,
           border: 0,
-          background: "rgba(255, 255, 255, 0.08)",
-          color: "rgba(255, 255, 255, 0.8)",
+          background: "var(--tc-border-subtle)",
+          color: "var(--tc-text-primary)",
           cursor: "pointer",
           display: "flex",
           alignItems: "center",
@@ -114,7 +118,7 @@ export function MediaPreviewModal({
               flexDirection: "column",
               alignItems: "center",
               gap: 12,
-              color: "rgba(255, 255, 255, 0.4)",
+              color: "var(--tc-text-muted)",
             }}
           >
             <AudioLines width={64} height={64} strokeWidth={1.5} />

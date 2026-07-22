@@ -325,7 +325,6 @@ function CanvasPageInner() {
         : file.type.startsWith("video/")
           ? "video"
           : "audio";
-      console.debug("[DEBUG-upload] mode=", mode, "file=", file.name, "mediaType=", mediaType);
 
       // 校验：视频 ≤ 50MB
       const MAX_VIDEO_MB = 50;
@@ -371,7 +370,7 @@ function CanvasPageInner() {
       } catch (e) {
         // 上传失败：移除占位 + toast 提示
         setMedia((prev) => prev.filter((m) => m.id !== placeholderId));
-        toast.error("上传失败，请重试");
+        toast.error(`上传失败：${userFriendlyErrorMessage(e)}`);
       }
     },
     [addNode, activeProject?.id]

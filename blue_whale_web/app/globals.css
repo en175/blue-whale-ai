@@ -167,7 +167,7 @@ body {
   --tc-toast-rounded: 8px;
   --tc-toast-font: Outfit, -apple-system, sans-serif;
   --tc-toast-font-size: 13px;
-  --tc-toast-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --tc-toast-shadow: var(--tc-menu-pill-shadow);
 
   --tc-ease-enter: cubic-bezier(0.23, 1, 0.32, 1);
   --tc-enter-distance-chrome: 24px;
