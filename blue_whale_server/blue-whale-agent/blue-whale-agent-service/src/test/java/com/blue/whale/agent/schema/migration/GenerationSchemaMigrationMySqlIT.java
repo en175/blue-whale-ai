@@ -50,7 +50,8 @@ class GenerationSchemaMigrationMySqlIT {
             "generation_result_conflicts", "generation_provider_tasks",
             "seedance_callback_inbox", "seedance_callback_security_audits",
             "cost_budget_locks", "cost_reservations", "audit_records",
-            "generation_jobs", "assets", "content_reviews", "generation_model_capability");
+            "generation_jobs", "assets", "content_reviews", "generation_model_capability",
+            "assistant_message_streams", "assistant_message_chunks");
 
     /** pre-ik10i6 历史形态 generation_jobs（初始列，缺 ik10i6~ik10pt 后加列） */
     private static final String LEGACY_JOBS_PRE_IK10I6_DDL = """

@@ -62,6 +62,8 @@ public class RestExceptionConfig {
                 ? HttpStatus.CONFLICT
                 : exception.code() == SystemCode.AGENT_RUN_CONFLICT_CODE
                 ? HttpStatus.CONFLICT
+                : exception.code() == SystemCode.ASSISTANT_STREAM_ATTEMPT_EXHAUSTED_CODE
+                ? HttpStatus.CONFLICT
                 : exception.code() == SystemCode.AGENT_ACTION_REJECTED_CODE
                 ? HttpStatus.UNPROCESSABLE_ENTITY
                 : HttpStatus.OK;

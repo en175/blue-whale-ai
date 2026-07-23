@@ -6,7 +6,7 @@ import java.util.List;
 public final class ExpectedMigrationVersions {
 
     /** 已应用的迁移版本集，有序。加新版本只改此处。 */
-    public static final List<Integer> APPLIED = List.of(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+    public static final List<Integer> APPLIED = List.of(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
 
     /** 记账本字符串形态，派生自 APPLIED（按版本号升序逗号拼接）。 */
     public static final String APPLIED_CSV = String.join(",", APPLIED.stream().map(String::valueOf).toList());

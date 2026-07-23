@@ -55,6 +55,8 @@ public enum SystemCode implements IResultCode {
     AGENT_RUN_CONFLICT(SystemCode.AGENT_RUN_CONFLICT_CODE, "AgentRun 提交绑定或版本无效"),
     /** Agent 动作提案不在产品允许范围内 */
     AGENT_ACTION_REJECTED(SystemCode.AGENT_ACTION_REJECTED_CODE, "非法 Agent 动作提案"),
+    /** AgentRun 的回复流尝试额度已用尽，不得再次调用模型 */
+    ASSISTANT_STREAM_ATTEMPT_EXHAUSTED(SystemCode.ASSISTANT_STREAM_ATTEMPT_EXHAUSTED_CODE, "回复流尝试额度已用尽"),
     ;
 
     /** 通用 code */
@@ -88,6 +90,7 @@ public enum SystemCode implements IResultCode {
     public static final int IDEMPOTENCY_KEY_REUSED_CODE = 100302;
     public static final int AGENT_RUN_CONFLICT_CODE = 100303;
     public static final int AGENT_ACTION_REJECTED_CODE = 100304;
+    public static final int ASSISTANT_STREAM_ATTEMPT_EXHAUSTED_CODE = 100305;
 
     final int code;
     final String msg;

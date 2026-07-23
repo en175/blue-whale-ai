@@ -190,6 +190,12 @@ class RunGateway(Protocol):
     ) -> None:
         """校验并完成 Assistant 消息流。"""
 
+    def abort_assistant_message(
+        self, run_id: int, payload: dict[str, Any]
+    ) -> None:
+        """幂等 abort 一次回复流尝试（IK3GIM）：payload 携带 stream_id、
+        ≤64 字符幂等键与规范化 reason_code；aborted 为不可重开终态。"""
+
 
 class ConversationSource(Protocol):
     """对话历史只读源（IK2QBZ）：Worker 经它按需回溯当前 Run 绑定的 Conversation。

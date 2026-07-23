@@ -274,13 +274,16 @@ CREATE TABLE IF NOT EXISTS assistant_message_streams
     start_idempotency_key VARCHAR(128) NOT NULL,
     complete_idempotency_key VARCHAR(128) NULL,
     content_digest VARCHAR(64) NULL,
+    abort_idempotency_key VARCHAR(128) NULL,
+    abort_reason_code VARCHAR(64) NULL,
     gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version INT NOT NULL DEFAULT 0,
     is_delete TINYINT NOT NULL DEFAULT 0,
-    CONSTRAINT uk_assistant_stream_id UNIQUE (stream_id),
-    CONSTRAINT uk_assistant_stream_run UNIQUE (agent_run_id)
+    CONSTRAINT uk_assistant_stream_id UNIQUE (stream_id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_assistant_stream_run ON assistant_message_streams (agent_run_id);
 
 CREATE TABLE IF NOT EXISTS assistant_message_chunks
 (

@@ -60,6 +60,24 @@ public final class AssistantMessageStreamRequests {
         }
     }
 
+    public record Abort(
+            @JsonProperty("stream_id") @NotBlank String streamId,
+            @JsonProperty("idempotency_key") @NotBlank @Size(max = 64) String idempotencyKey,
+            @JsonProperty("reason_code") @NotBlank @Size(max = 64) String reasonCode,
+            @JsonProperty("project_id") @NotNull Long projectId,
+            @JsonProperty("user_id") @NotNull Long userId,
+            @JsonProperty("expected_run_version") @NotNull Integer expectedRunVersion,
+            @JsonProperty("fencing_token") @NotNull Long fencingToken,
+            @NotBlank String engine,
+            @JsonProperty("engine_version") @NotBlank String engineVersion,
+            @JsonProperty("adapter_schema_version") @NotNull Integer adapterSchemaVersion) {
+        public RunBinding binding() {
+            return new RunBinding(
+                    projectId, userId, expectedRunVersion, fencingToken,
+                    engine, engineVersion, adapterSchemaVersion);
+        }
+    }
+
     public record Complete(
             @JsonProperty("stream_id") @NotBlank String streamId,
             @JsonProperty("idempotency_key") @NotBlank @Size(max = 64) String idempotencyKey,

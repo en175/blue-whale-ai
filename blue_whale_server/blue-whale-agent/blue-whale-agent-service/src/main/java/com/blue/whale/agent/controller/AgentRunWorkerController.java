@@ -133,4 +133,12 @@ public class AgentRunWorkerController {
             @RequestBody @Valid AssistantMessageStreamRequests.Complete request) {
         return Result.ok(assistantMessageStreamService.complete(runId, workerId, request));
     }
+
+    @PostMapping("/{runId}/assistant-messages/abort")
+    public Result<AssistantMessageStreamResponse> abortAssistantMessage(
+            @PathVariable Long runId,
+            @RequestHeader(value = "X-Worker-Id", required = false) String workerId,
+            @RequestBody @Valid AssistantMessageStreamRequests.Abort request) {
+        return Result.ok(assistantMessageStreamService.abort(runId, workerId, request));
+    }
 }

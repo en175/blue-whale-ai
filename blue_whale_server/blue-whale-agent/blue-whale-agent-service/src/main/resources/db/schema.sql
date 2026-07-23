@@ -307,12 +307,14 @@ CREATE TABLE IF NOT EXISTS assistant_message_streams
     start_idempotency_key VARCHAR(128) NOT NULL,
     complete_idempotency_key VARCHAR(128) NULL,
     content_digest VARCHAR(64) NULL,
+    abort_idempotency_key VARCHAR(128) NULL,
+    abort_reason_code VARCHAR(64) NULL,
     gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     version INT NOT NULL DEFAULT 0,
     is_delete TINYINT NOT NULL DEFAULT 0,
     UNIQUE KEY uk_assistant_stream_id (stream_id),
-    UNIQUE KEY uk_assistant_stream_run (agent_run_id)
+    INDEX idx_assistant_stream_run (agent_run_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='Assistant 私有输出流状态';
 
 CREATE TABLE IF NOT EXISTS assistant_message_chunks
