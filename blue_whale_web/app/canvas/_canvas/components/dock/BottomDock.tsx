@@ -10,7 +10,7 @@ import { squirclePath } from "../../utils";
 import { REF_MODES } from "../../constants";
 import { getVideoModels } from "../../api/generation";
 import type { VideoModelCapability } from "../../api/generation";
-import type { DockMediaItem, GenerateArgs, SelectOption } from "../../types";
+import type { DockMediaItem, GenerateArgs, PrefillSignal, SelectOption } from "../../types";
 import { ImageDockContent } from "./ImageDockContent";
 import { VideoDockContent } from "./VideoDockContent";
 import { extractEditor, insertMention, removeMention, type MentionItem } from "./mention";
@@ -38,6 +38,7 @@ export function BottomDock({
   onSwapFrames,
   focusSignal,
   dockMentionSignal,
+  prefillSignal,
 }: {
   mode: "image" | "video";
   onClose: () => void;
@@ -71,6 +72,8 @@ export function BottomDock({
   focusSignal?: number;
   /** 插入参考图 mention：nonce 递增触发 effect，item 为待插参考图（X3 mention pill）。replace=true 清空 editor 只留一个 */
   dockMentionSignal?: { nonce: number; item: MentionItem | null; replace?: boolean };
+  /** 重新编辑预填（P2）：nonce 递增 → 应用 recipe 参数到 Dock（prompt + video 设置；image 透传 ImageDockContent） */
+  prefillSignal?: PrefillSignal;
 }) {
   const [input, setInput] = useState("");
   /** 从 editor pill 抽取的参考图 URL（提交 referenceImages），随 handleInput 更新 */
@@ -149,6 +152,45 @@ export function BottomDock({
     });
     return () => cancelAnimationFrame(raf);
   }, [dockMentionSignal]);
+
+  // 重新编辑预填（P2）：prefillSignal.nonce → prompt+参考图命令式写进 contentEditable（非受控）+ video 设置
+  useEffect(() => {
+    if (!prefillSignal?.prefill) return;
+    const p = prefillSignal.prefill;
+    const el = editorRef.current;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (el) {
+      el.innerHTML = "";
+      el.focus();
+      if (p.prompt) document.execCommand("insertText", false, p.prompt);
+      // 参考图 pill 只插 image 模式（image 生成用 editor mentions）；video 走 videoDockMedia（page 按 ref.kind 设，分到 referenceImages/Videos/Audios）
+      if (mode === "image") {
+        p.references?.forEach((r) => insertMention(el, { id: `prefill-${r.url}`, type: r.kind, name: "", src: r.url }));
+      }
+      const { prompt: pp, referenceImages } = extractEditor(el);
+      setInput(pp);
+      setMentions(referenceImages);
+    }
+    if (mode === "video") {
+      if (p.modelId) {
+        const vm = videoModels.find((v) => v.modelId === p.modelId);
+        setSelectedModel({ id: p.modelId, label: vm?.modelLabel ?? p.modelId });
+      }
+      if (p.aspectRatio) setAspectRatio({ id: p.aspectRatio, label: p.aspectRatio });
+      if (p.resolution) {
+        const vm = videoModels.find((v) => v.modelId === p.modelId);
+        const res = vm?.supportedResolutions.find((r) => r.id === p.resolution);
+        setResolution({ id: p.resolution, label: res?.label ?? p.resolution });
+      }
+      if (p.refMode) {
+        const rm = REF_MODES.find((r) => r.id === p.refMode);
+        if (rm) setRefMode(rm);
+      }
+      if (typeof p.duration === "number") setDuration(p.duration);
+      if (p.quantity != null) setQuantity(`${p.quantity}x`);
+    }
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [prefillSignal?.nonce, videoModels, mode]);
 
   const path = squirclePath(dockSize.w, dockSize.h, 28.8);
   const isEmpty = input.trim().length === 0 && mentions.length === 0;
@@ -261,6 +303,7 @@ export function BottomDock({
                   onGenerate={(s) => onGenerate?.(input, { mode: "image", settings: s, referenceImages: mentions })}
                   generating={generating}
                   onPreviewMedia={setPreviewItem}
+                  prefillSignal={prefillSignal}
                 />
               ) : (
                 <VideoDockContent

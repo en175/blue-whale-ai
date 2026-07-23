@@ -13,6 +13,7 @@
  */
 
 import { apiFetch } from "./client";
+import { apiRequest } from "../api-client";
 import type {
   AssetResponse,
   CatalogResponse,
@@ -40,20 +41,22 @@ export function getMe(): Promise<MeResponse> {
 export function presignAsset(
   req: PresignAssetRequest,
 ): Promise<PresignAssetResponse> {
-  return apiFetch<PresignAssetResponse>("/assets/presign", {
+  return apiFetch<PresignAssetResponse>("/agent/assets/presign", {
     method: "POST",
     body: req,
   });
 }
 
 export function completeAsset(assetId: string): Promise<AssetResponse> {
-  return apiFetch<AssetResponse>(`/assets/${enc(assetId)}/complete`, {
+  return apiFetch<AssetResponse>(`/agent/assets/${enc(assetId)}/complete`, {
     method: "POST",
   });
 }
 
+// getAsset 走 api-client（带 Authorization + 401 刷新），与 canvas/generation 一致；
+// client.ts 的 apiFetch 不带鉴权 → ensureAsset 刷新恢复会 401。
 export function getAsset(assetId: string): Promise<AssetResponse> {
-  return apiFetch<AssetResponse>(`/assets/${enc(assetId)}`);
+  return apiRequest<AssetResponse>(`/api/agent/assets/${enc(assetId)}`);
 }
 
 // ---------- §5.3 ----------

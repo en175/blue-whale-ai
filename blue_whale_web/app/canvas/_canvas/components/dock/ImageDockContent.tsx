@@ -34,6 +34,7 @@ export function ImageDockContent({
   onGenerate,
   generating = false,
   onPreviewMedia,
+  prefillSignal,
 }: ImageDockContentProps) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
@@ -56,6 +57,27 @@ export function ImageDockContent({
       null;
     setSelectedAspectRatio(defaultRatio);
   }, [models, selectedModel]);
+
+  // 重新编辑预填（P2）：prefillSignal.nonce 变化 → 按 recipe 匹配模型/分辨率/比例/数量（models 就绪后应用）
+  useEffect(() => {
+    if (!prefillSignal?.prefill) return;
+    const p = prefillSignal.prefill;
+    if (p.modelId) {
+      const m = models.find((mm) => mm.id === p.modelId);
+      if (m) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setSelectedModel(m);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setSelectedResolution(m.resolutions.find((r) => r.id === p.resolution) ?? defaultResolutionOf(m));
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setSelectedAspectRatio(m.aspectRatios.find((r) => r.id === p.aspectRatio) ?? m.aspectRatios[0] ?? null);
+      }
+    }
+    if (p.quantity != null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setQuantity(`${p.quantity}x`);
+    }
+  }, [prefillSignal?.nonce, models]);
 
   // 切模型联动：新模型不支持当前分辨率/宽高比则重置到该模型默认
   const handleModelChange = (model: ImageModel) => {
