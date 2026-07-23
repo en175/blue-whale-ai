@@ -182,7 +182,9 @@ class FakeOrchestratorTest(unittest.TestCase):
             ],
         )
 
-    def test_stream_identity_survives_lease_reclaim_with_a_new_run_version(self) -> None:
+    def test_new_attempt_after_lease_reclaim_uses_a_fresh_stream_id(self) -> None:
+        # 契约 §1.2：租约重领后的重跑是新尝试，必须使用新 stream_id（旧尝试已被
+        # Java 兜底 abort，不可续写）；同一尝试的传输重试才复用原 stream_id。
         first_gateway = RecordingRunGateway(self.work)
         reclaimed_gateway = RecordingRunGateway(
             RunWork(**{**self.work.__dict__, "run_version": 2, "fencing_token": 5})
@@ -191,14 +193,51 @@ class FakeOrchestratorTest(unittest.TestCase):
         AgentWorker(first_gateway, FakeOrchestrator()).run_once()
         AgentWorker(reclaimed_gateway, FakeOrchestrator()).run_once()
 
+        first_stream_ids = {
+            operation[2]["stream_id"] for operation in first_gateway.operations[:3]
+        }
+        reclaimed_stream_ids = {
+            operation[2]["stream_id"] for operation in reclaimed_gateway.operations[:3]
+        }
+        # 每次尝试内部 start/chunk/complete 与 commit 复用同一 stream_id。
+        self.assertEqual(1, len(first_stream_ids))
+        self.assertEqual(1, len(reclaimed_stream_ids))
+        first_stream_id = first_stream_ids.pop()
+        reclaimed_stream_id = reclaimed_stream_ids.pop()
+        self.assertEqual(
+            first_stream_id,
+            first_gateway.commit_payload["assistant_message_stream_id"],
+        )
+        self.assertEqual(
+            reclaimed_stream_id,
+            reclaimed_gateway.commit_payload["assistant_message_stream_id"],
+        )
+        # 两次尝试（新 run_version 的重跑）必须使用不同的 stream_id；
+        # 幂等键保持确定性（run_id+operation 派生），支撑同键重放。
+        self.assertNotEqual(first_stream_id, reclaimed_stream_id)
         for operation_index in range(3):
-            first_payload = first_gateway.operations[operation_index][2]
-            reclaimed_payload = reclaimed_gateway.operations[operation_index][2]
-            self.assertEqual(first_payload["stream_id"], reclaimed_payload["stream_id"])
             self.assertEqual(
-                first_payload["idempotency_key"],
-                reclaimed_payload["idempotency_key"],
+                first_gateway.operations[operation_index][2]["idempotency_key"],
+                reclaimed_gateway.operations[operation_index][2]["idempotency_key"],
             )
+
+    def test_stream_id_is_opaque_and_not_derived_from_run_id(self) -> None:
+        # 契约 §1.2：stream_id 是不可从 AgentRun ID 推导的不透明标识，
+        # 不含可逆的 AgentRun 身份编码。
+        first_gateway = RecordingRunGateway(self.work)
+        second_gateway = RecordingRunGateway(self.work)
+
+        AgentWorker(first_gateway, FakeOrchestrator()).run_once()
+        AgentWorker(second_gateway, FakeOrchestrator()).run_once()
+
+        stream_ids = [
+            first_gateway.operations[0][2]["stream_id"],
+            second_gateway.operations[0][2]["stream_id"],
+        ]
+        self.assertNotEqual(stream_ids[0], stream_ids[1])
+        for stream_id in stream_ids:
+            self.assertNotEqual(f"assistant-{self.work.agent_run_id}", stream_id)
+            self.assertRegex(stream_id, r"^assistant-[0-9a-f]{32}$")
 
     def test_fake_refuses_a_production_engine_run(self) -> None:
         production_work = RunWork(
