@@ -1,0 +1,176 @@
+import { describe, it, expect } from "vitest";
+import { serialize, parse, createEmptyDoc, type CanvasDoc, type NodeRecipe } from "./model";
+
+/**
+ * 兼容老数据结构：serialize 产 NodeItem[]（老 /canvas filterPersistableNodes 对数组调
+ * .filter；存 {nodes,edges} 对象则崩）。parse 双兼容老 NodeItem[] + 新 {nodes,edges}。
+ */
+describe("canvas-doc-model", () => {
+  it("creates empty doc", () => {
+    expect(createEmptyDoc("c1")).toEqual({ id: "c1", nodes: [], edges: [], version: 1 });
+  });
+
+  it("serialize 产 NodeItem[]（老格式数组，兼容老 /canvas 不崩）", () => {
+    const doc: CanvasDoc = {
+      id: "c1",
+      version: 1,
+      edges: [],
+      nodes: [
+        { id: "n1", type: "image", position: { x: 1, y: 2 }, width: 100, height: 100, data: { kind: "image", assetId: "95", content: "猫" } },
+      ],
+    };
+    const arr = JSON.parse(serialize(doc));
+    expect(Array.isArray(arr)).toBe(true);
+    expect(arr).toHaveLength(1);
+    expect(arr[0]).toMatchObject({ id: "n1", type: "image", position: { x: 1, y: 2 }, width: 100, height: 100, content: "猫", assetId: 95 });
+  });
+
+  it("serialize 剥临时态（status/progress/selected 不入库）+ assetId String→Number", () => {
+    const doc: CanvasDoc = {
+      id: "c1",
+      version: 1,
+      edges: [],
+      nodes: [{ id: "n1", type: "image", position: { x: 0, y: 0 }, data: { kind: "image", assetId: "95", status: "running", progress: 50 } }],
+    };
+    const json = serialize(doc);
+    expect(json).not.toContain("status");
+    expect(json).not.toContain("progress");
+    expect(json).not.toContain("selected");
+    expect(json).toContain('"assetId":95');
+  });
+
+  it("parse 兼容老 NodeItem[]（数组，老 /canvas 写的）", () => {
+    const oldJson = JSON.stringify([
+      { id: "n1", type: "image", position: { x: 1, y: 2 }, width: 100, height: 100, content: "猫", assetId: 95 },
+    ]);
+    const doc = parse(oldJson);
+    expect(doc.nodes).toHaveLength(1);
+    expect(doc.nodes[0]).toMatchObject({ id: "n1", type: "image", position: { x: 1, y: 2 }, data: { kind: "image", assetId: "95", content: "猫" } });
+  });
+
+  it("parse 兼容新 {nodes,edges}（对象，v2 已写的）", () => {
+    const newJson = JSON.stringify({
+      id: "c1",
+      version: 1,
+      edges: [],
+      nodes: [{ id: "n1", type: "image", position: { x: 0, y: 0 }, data: { kind: "image", assetId: "95" } }],
+    });
+    const doc = parse(newJson);
+    expect(doc.nodes).toHaveLength(1);
+    expect(doc.nodes[0].data.assetId).toBe("95");
+  });
+
+  it("round-trip：serialize→parse 关键字段保留（assetId String 全链路）", () => {
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({ id: "n1", type: "image", position: { x: 5, y: 6 }, width: 200, height: 200, data: { kind: "image", assetId: "95", content: "猫" } });
+    const back = parse(serialize(doc));
+    expect(back.nodes[0]).toMatchObject({ id: "n1", type: "image", position: { x: 5, y: 6 }, data: { kind: "image", assetId: "95", content: "猫" } });
+  });
+
+  it("serialize 把 edges 聚合到 target 节点 references（兼容老 NodeItem[]）", () => {
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({ id: "t", type: "text", position: { x: 0, y: 0 }, data: { kind: "text", prompt: "猫" } });
+    doc.nodes.push({ id: "i", type: "image", position: { x: 100, y: 0 }, data: { kind: "image" } });
+    doc.edges.push({ id: "e1", source: "t", target: "i", sourceHandle: "text", targetHandle: "prompt" });
+    const arr = JSON.parse(serialize(doc));
+    expect(arr.find((n: { id: string }) => n.id === "i").references).toEqual([{ source: "t", sourceHandle: "text", targetHandle: "prompt" }]);
+    expect(arr.find((n: { id: string }) => n.id === "t").references).toEqual([]); // text 无入边
+  });
+
+  it("parse references → edges（round-trip）", () => {
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({ id: "t", type: "text", position: { x: 0, y: 0 }, data: { kind: "text", prompt: "猫" } });
+    doc.nodes.push({ id: "i", type: "image", position: { x: 100, y: 0 }, data: { kind: "image" } });
+    doc.edges.push({ id: "e1", source: "t", target: "i", sourceHandle: "text", targetHandle: "prompt" });
+    const back = parse(serialize(doc));
+    expect(back.edges).toHaveLength(1);
+    expect(back.edges[0]).toMatchObject({ source: "t", target: "i", sourceHandle: "text", targetHandle: "prompt" });
+  });
+
+  it("parse 老 NodeItem[] 无 references → edges=[]（兼容老）", () => {
+    const old = JSON.stringify([{ id: "n1", type: "image", position: { x: 0, y: 0 }, width: 100, height: 100, content: "猫" }]);
+    expect(parse(old).edges).toEqual([]);
+  });
+
+  it("serialize/parse 保 prompt（文本节点）", () => {
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({ id: "t", type: "text", position: { x: 0, y: 0 }, data: { kind: "text", prompt: "画一只猫" } });
+    const back = parse(serialize(doc));
+    expect(back.nodes[0].data.prompt).toBe("画一只猫");
+  });
+
+  it("serialize audio 节点产 type=audio（不降级 image）", () => {
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({ id: "a1", type: "audio", position: { x: 0, y: 0 }, width: 240, height: 120, data: { kind: "audio", assetId: "12", content: "旁白.mp3" } });
+    const arr = JSON.parse(serialize(doc));
+    expect(arr[0].type).toBe("audio");
+    expect(arr[0].assetId).toBe(12);
+  });
+
+  it("audio 节点 serialize→parse kind 保留（不降级 image，IJZY0Z 音频持久化）", () => {
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({ id: "a1", type: "audio", position: { x: 0, y: 0 }, width: 240, height: 120, data: { kind: "audio", assetId: "12", content: "旁白.mp3" } });
+    const back = parse(serialize(doc));
+    expect(back.nodes[0].data.kind).toBe("audio");
+    expect(back.nodes[0].data.assetId).toBe("12");
+    expect(back.nodes[0].data.content).toBe("旁白.mp3");
+  });
+
+  it("parse 老 NodeItem type=audio → kind=audio（兼容已存的音频节点）", () => {
+    const old = JSON.stringify([{ id: "a1", type: "audio", position: { x: 0, y: 0 }, width: 240, height: 120, content: "旁白.mp3", assetId: 12 }]);
+    expect(parse(old).nodes[0].data.kind).toBe("audio");
+  });
+
+  it("generated recipe serialize→parse 深保留（origin/model/params/inputs/jobId）", () => {
+    const recipe: NodeRecipe = {
+      origin: "generated",
+      generation: {
+        mediaKind: "image",
+        model: "doubao-seedream",
+        params: { aspectRatio: "16:9", resolution: "1080p", quantity: 1 },
+        inputs: { prompt: { kind: "text", nodeId: "t1", text: "猫" } },
+        jobId: "job-7",
+        generatedAt: "2026-07-22T10:00:00Z",
+      },
+    };
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({ id: "n1", type: "image", position: { x: 0, y: 0 }, data: { kind: "image", assetId: "95", recipe } });
+    const back = parse(serialize(doc));
+    expect(back.nodes[0].data.recipe).toEqual(recipe);
+  });
+
+  it("video recipe 首帧溯源 round-trip（nodeId 画布内 vs assetId 画布外）", () => {
+    const recipe: NodeRecipe = {
+      origin: "generated",
+      generation: {
+        mediaKind: "video",
+        model: "kling-v2",
+        params: { aspectRatio: "16:9", resolution: "1080p", duration: 5, refMode: "firstlast" },
+        inputs: { firstFrame: { kind: "image", assetId: "88", url: "https://tos/ff.png" } },
+        jobId: "job-8",
+      },
+    };
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({ id: "v1", type: "video", position: { x: 0, y: 0 }, data: { kind: "video", assetId: "96", recipe } });
+    expect(parse(serialize(doc)).nodes[0].data.recipe).toEqual(recipe);
+  });
+
+  it("uploaded recipe round-trip（无 generation）", () => {
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({ id: "u1", type: "audio", position: { x: 0, y: 0 }, data: { kind: "audio", assetId: "12", recipe: { origin: "uploaded" } } });
+    expect(parse(serialize(doc)).nodes[0].data.recipe).toEqual({ origin: "uploaded" });
+  });
+
+  it("老数据无 recipe → recipe undefined 不崩（向前兼容）", () => {
+    const old = JSON.stringify([{ id: "n1", type: "image", position: { x: 0, y: 0 }, width: 100, height: 100, content: "猫", assetId: 95 }]);
+    const node = parse(old).nodes[0];
+    expect(node.data.recipe).toBeUndefined();
+  });
+
+  it("serialize 输出含 recipe 字段（持久化进画布 JSON）", () => {
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({ id: "n1", type: "image", position: { x: 0, y: 0 }, data: { kind: "image", assetId: "95", recipe: { origin: "uploaded" } } });
+    const arr = JSON.parse(serialize(doc));
+    expect(arr[0].recipe).toEqual({ origin: "uploaded" });
+  });
+});

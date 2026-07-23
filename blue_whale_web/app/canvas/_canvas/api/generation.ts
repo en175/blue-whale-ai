@@ -4,133 +4,295 @@
  * 走 Next rewrite /api/* → 网关 → 后端（见 next.config.ts），浏览器同源无 CORS。
  * 统一 Result{code,msg,data} 拆包：code!==200 抛 Error(msg)，否则返 data。
  * 鉴权统一走 apiFetch：登录态自动附 Authorization，401 自动刷新。
+ * streamJob 同样走 apiFetch：fetch + ReadableStream 替代原生 EventSource
+ * （EventSource 不支持自定义 header，无法带 token 过网关），统一鉴权 + 401 自动刷新。
  *
- * 字段全 snake_case 对齐后端 Jackson SNAKE_CASE 序列化（见 application.yml）。
+ * 字段全 camelCase 对齐后端 Jackson 默认序列化（见 application.yml）。
  */
-import { apiRequest } from "@/lib/api-client";
+import { apiFetch } from "@/lib/api-client";
+import { readSseStream } from "@/lib/sse";
 
 export type ImageModelCapability = {
-  model_id: string;
-  provider_id: string;
-  model_label: string;
+  modelId: string;
+  providerId: string;
+  modelLabel: string;
   icon: string | null;
-  supported_sizes: {
-    id: string;
-    label: string;
-    api_value: string;
-    width?: number;
-    height?: number;
-  }[];
-  supported_aspect_ratios: string[];
-  supported_formats: string[];
-  default_size: string;
-  default_format: string | null;
-  default_aspect_ratio: string;
+  supportedSizes: { id: string; label: string; apiValue: string; width?: number; height?: number }[];
+  supportedAspectRatios: string[];
+  supportedFormats: string[];
+  defaultSize: string;
+  defaultFormat: string | null;
+  defaultAspectRatio: string;
   features: {
-    reference_image: boolean;
+    referenceImage: boolean;
     watermark: boolean;
-    quantity_max: number;
-    sequential_image_generation: boolean;
+    quantityMax: number;
+    sequentialImageGeneration: boolean;
     stream: boolean;
     tools: boolean;
   };
 };
 
-export type CreateProjectGenerationJobPayload = {
-  input_asset_ids: number[];
-  expected_output_count: number;
-} & (
-  | {
-      type: "image";
-      parameters: {
-        prompt: string;
-        aspect_ratio: string;
-        /** 能力表白名单内的模型 id（image 必填，服务端校验）。 */
-        model_id: string;
-        /** 分辨率档位 id（能力表 supported_sizes[].id，如 2k/3k/4k）。 */
-        size: string;
-        /** 联网搜索开关（缺省 false）。 */
-        web_search: boolean;
-        /** 组图模式开关（缺省 false）。 */
-        sequential_image_generation: boolean;
-      };
-    }
-  | {
-      type: "video";
-      parameters: {
-        prompt: string;
-        aspect_ratio: string;
-        resolution: string;
-        duration: number;
-      };
-    }
-);
-
-export type AcceptedProjectGenerationJob = {
-  generation_job_id: number;
-  cursor: number;
+export type ImageGeneratePayload = {
+  prompt: string;
+  projectId: number;
+  modelId: string;
+  sizeId: string;
+  aspectRatio?: string;
+  format?: string;
+  quantity?: number;
+  watermark?: boolean;
+  referenceImages?: string[];
 };
 
-const API_BASE = "/api";
+export type VideoGeneratePayload = {
+  prompt: string;
+  projectId: number;
+  modelId?: string;
+  resolution?: string;
+  aspectRatio?: string;
+  duration?: number;
+  firstFrameUrl?: string;
+  lastFrameUrl?: string;
+  /** 全能参考图 url 列表（omni 模式，火山 role=reference_image） */
+  referenceImages?: string[];
+  /** 全能参考视频 url 列表（omni 模式，火山 role=reference_video） */
+  referenceVideos?: string[];
+  /** 全能参考音频 url 列表（omni 模式，火山 role=reference_audio） */
+  referenceAudios?: string[];
+};
 
-async function request<T>(
-  path: string,
-  method: string,
-  body?: unknown,
-): Promise<T> {
-  // 复用 apiRequest：统一 Result 拆包 + 失败抛 ApiError（保留 code/request_id，IK2BCH）。
-  return apiRequest<T>(`${API_BASE}${path}`, {
-    method,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+export type ImageResult = { assetId: number; url: string };
+export type ImageGenerateResponse = {
+  jobId?: number;
+  status?: string;
+  stream: boolean;
+  assetId?: number;
+  url?: string;
+};
+export type CreateJobResponse = { jobId: number; status: string };
+export type JobAsset = { id: number; url: string; type: string };
+export type JobStatusResponse = {
+  jobId: number;
+  status: string;
+  progress: number;
+  asset: JobAsset | null;
+};
+
+const API_BASE = "/api/agent";
+
+async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
+  let res: Response;
+  try {
+    res = await apiFetch(`${API_BASE}${path}`, {
+      method,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new Error("后端未启动或无法连接");
+  }
+  let json: { code: number; msg?: string; data?: T };
+  try {
+    json = await res.json();
+  } catch {
+    throw new Error(`上游响应非 JSON（HTTP ${res.status}）`);
+  }
+  if (json.code !== 200) {
+    throw new Error(json.msg || `上游错误 ${json.code}`);
+  }
+  return json.data as T;
 }
 
 /** 获取当前启用的图片生成模型能力列表。 */
 export function getImageModels(): Promise<ImageModelCapability[]> {
-  return request<ImageModelCapability[]>(
-    "/generation/models?capability=image",
-    "GET",
-  );
+  return request<ImageModelCapability[]>("/generation/image/models", "GET");
 }
 
-/** BottomDock 单图命令：服务端固定 source，后续结果由 Project Snapshot/SSE 恢复。 */
-export function createProjectGenerationJob(
-  projectId: number,
-  payload: CreateProjectGenerationJobPayload,
-  idempotencyKey: string,
-): Promise<AcceptedProjectGenerationJob> {
-  return apiRequest<AcceptedProjectGenerationJob>(
-    `/api/projects/${projectId}/generation-jobs`,
-    {
-      method: "POST",
-      headers: { "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify(payload),
-    },
-  );
+/** 视频模型能力（DB 驱动，对齐后端 VideoModelCapabilityDto，camelCase）。 */
+export type VideoResolution = { id: string; label: string; apiValue: string };
+export type VideoDurationRange = { min: number; max: number; step: number };
+export type VideoFeatures = {
+  firstFrame: boolean;
+  firstLastFrame: boolean;
+  referenceImage: boolean;
+  watermark: boolean;
+  audio: boolean;
+  tools: boolean;
+};
+export type VideoModelCapability = {
+  modelId: string;
+  providerId: string;
+  modelLabel: string;
+  icon: string | null;
+  supportedResolutions: VideoResolution[];
+  supportedAspectRatios: string[];
+  durationRange: VideoDurationRange | null;
+  defaultResolution: string;
+  defaultAspectRatio: string;
+  defaultDuration: number | null;
+  features: VideoFeatures;
+};
+
+/** 获取当前启用的视频生成模型能力列表。 */
+export function getVideoModels(): Promise<VideoModelCapability[]> {
+  return request<VideoModelCapability[]>("/generation/video/models", "GET");
 }
 
-/** BottomDock 视频取消命令；状态仍由 Project Snapshot/SSE 恢复。 */
-export function cancelProjectGenerationJob(
-  projectId: number,
-  generationJobId: number,
-): Promise<void> {
-  return apiRequest<void>(
-    `/api/projects/${projectId}/generation-jobs/${generationJobId}/cancel`,
-    { method: "POST" },
-  );
+/** 文生图：流式模型返 jobId（再 streamJob 订阅逐张），非流式返 assetId+url。 */
+export function generateImage(payload: ImageGeneratePayload): Promise<ImageGenerateResponse> {
+  return request<ImageGenerateResponse>("/generation/image", "POST", payload);
 }
 
-/** 为终态 GenerationJob 仅创建缺失/失败输出槽的新任务。 */
-export function retryMissingProjectGenerationJobOutputs(
-  projectId: number,
-  generationJobId: number,
-  idempotencyKey: string,
-): Promise<AcceptedProjectGenerationJob> {
-  return apiRequest<AcceptedProjectGenerationJob>(
-    `/api/projects/${projectId}/generation-jobs/${generationJobId}/retry`,
-    {
-      method: "POST",
-      headers: { "Idempotency-Key": idempotencyKey },
-    },
-  );
+/** 图文生视频异步提交，立即返回 jobId。 */
+export function createVideoJob(payload: VideoGeneratePayload): Promise<CreateJobResponse> {
+  return request<CreateJobResponse>("/generation/video", "POST", payload);
+}
+
+/** 音频生成 payload（IJZXW7-B；签名对齐 image/video，后端音频生成就绪后直接用）。 */
+export type AudioGeneratePayload = {
+  prompt: string;
+  projectId: number;
+  modelId?: string;
+  duration?: number;
+  sampleRate?: number;
+  format?: string;
+  referenceAudios?: string[];
+  referenceImages?: string[];
+  referenceVideos?: string[];
+};
+
+export type AudioGenerateResponse = {
+  url: string;
+  assetId: number;
+  jobId?: number;
+};
+
+/**
+ * ⚠️ MOCK（IJZXW7-B 占位）：后端暂无音频生成 provider，前端 mock 兜底——
+ * 固定延迟 + 固定 sample url + 假 assetId，**不发真请求**。签名对齐 generateImage，
+ * 后端音频生成就绪后把实现改为 `request<AudioGenerateResponse>("/generation/audio", "POST", payload)`，
+ * 签名不变。sample 用公开音频（TODO：换本地 public/audio/sample.mp3 fixture）。
+ */
+const MOCK_AUDIO_DELAY_MS = 1500;
+const MOCK_AUDIO_SAMPLE_URL = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
+export function generateAudio(payload: AudioGeneratePayload): Promise<AudioGenerateResponse> {
+  void payload; // mock 不消费参数（签名保留供后端真请求）
+  const assetId = (Math.floor(Date.now() % 900000)) + 100000; // 假 assetId（mock，避开真 asset id 段）
+  return new Promise((resolve) => {
+    setTimeout(() => resolve({ url: MOCK_AUDIO_SAMPLE_URL, assetId }), MOCK_AUDIO_DELAY_MS);
+  });
+}
+
+/** 轮询查任务状态。 */
+export function getJobStatus(jobId: number): Promise<JobStatusResponse> {
+  return request<JobStatusResponse>(`/jobs/${jobId}`, "GET");
+}
+
+/** 任务列表项（对齐后端 JobListItemDto，camelCase）。 */
+export type JobListItem = {
+  jobId: number;
+  type: string;
+  status: string;
+  progress: number;
+  input: Record<string, unknown> | null;
+  createdAt: string;
+  outputAssets: { id: number; url: string; type: string; width?: number; height?: number }[] | null;
+};
+
+export type ListJobsParams = {
+  projectId: number;
+  status?: string;
+  type?: string;
+  page?: number;
+  size?: number;
+};
+
+/** 后端 Page 序列化形状（MyBatis-Plus {records,total,...}）。 */
+type PageData<T> = { records?: T[]; total?: number; size?: number; current?: number };
+
+/**
+ * 查任务列表（生成流页 / 刷新恢复）：按 projectId+status 过滤，createdAt 倒序分页。
+ * 刷新恢复用 `status=processing` 查跑着的 job，重建画布占位（design D12）。
+ */
+export async function listJobs(params: ListJobsParams): Promise<JobListItem[]> {
+  const qs = new URLSearchParams();
+  qs.set("projectId", String(params.projectId));
+  if (params.status) qs.set("status", params.status);
+  if (params.type) qs.set("type", params.type);
+  qs.set("page", String(params.page ?? 1));
+  qs.set("size", String(params.size ?? 50));
+  const data = await request<PageData<JobListItem> | JobListItem[]>(`/jobs?${qs.toString()}`, "GET");
+  return Array.isArray(data) ? data : (data.records ?? []);
+}
+
+/** SSE 流式事件载荷（后端 SsePayload，type 区分）。 */
+export type StreamEvent =
+  | { type: "image"; imageIndex: number; assetId: number; url: string }
+  | { type: "image_failed"; imageIndex: number; errorCode?: string; errorMessage?: string }
+  | { type: "done"; usage?: unknown }
+  | { type: "error"; errorCode?: string; errorMessage?: string };
+
+export interface StreamHandlers {
+  onImage?: (url: string, assetId: number, imageIndex: number) => void;
+  onImageFailed?: (imageIndex: number, code?: string, message?: string) => void;
+  onDone?: () => void;
+  onError?: (message: string) => void;
+}
+
+/** 流式订阅句柄：close() 主动断开（AbortController.abort）。 */
+export type StreamSubscription = { close(): void };
+
+/**
+ * 订阅流式 job：fetch（经 apiFetch 带 token）+ ReadableStream 读 `/api/agent/jobs/{id}/stream`，
+ * 按 SSE 帧解析 data.type 分发。后端不设 event name，全走默认 message 通道。
+ * 鉴权复用 apiFetch（Authorization + 401 自动刷新）；done/error 自动 abort，
+ * 读取异常/断连兜底 onError；close() 主动断开不触发 onError。
+ */
+export function streamJob(jobId: number, handlers: StreamHandlers): StreamSubscription {
+  const controller = new AbortController();
+  const run = async () => {
+    console.log("[DEBUG-genbug] streamJob start", jobId);
+    try {
+      const res = await apiFetch(`${API_BASE}/jobs/${jobId}/stream`, {
+        signal: controller.signal,
+        headers: { Accept: "text/event-stream" },
+      });
+      if (!res.ok || !res.body) {
+        handlers.onError?.(`流式连接失败: ${res.status}`);
+        return;
+      }
+      await readSseStream(res.body.getReader(), (data) => {
+        console.log("[DEBUG-genbug] sse data:", data);
+        let event: StreamEvent;
+        try {
+          event = JSON.parse(data) as StreamEvent;
+        } catch {
+          console.log("[DEBUG-genbug] sse parse FAILED:", data);
+          return;
+        }
+        switch (event.type) {
+          case "image":
+            console.log("[DEBUG-genbug] onImage", event.imageIndex, event.url);
+            handlers.onImage?.(event.url, event.assetId, event.imageIndex);
+            break;
+          case "image_failed":
+            handlers.onImageFailed?.(event.imageIndex, event.errorCode, event.errorMessage);
+            break;
+          case "done":
+            handlers.onDone?.();
+            controller.abort();
+            break;
+          case "error":
+            handlers.onError?.(event.errorMessage || "生成失败");
+            controller.abort();
+            break;
+        }
+      });
+    } catch {
+      if (controller.signal.aborted) return; // 主动 close，静默
+      handlers.onError?.("流式连接中断");
+    }
+  };
+  void run();
+  return { close: () => controller.abort() };
 }

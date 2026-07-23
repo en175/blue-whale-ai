@@ -7,7 +7,7 @@ import lombok.Setter;
 import lombok.experimental.Accessors;
 
 /**
- * 资源实体：图片 / 视频的持久化（生成输出或上传）。
+ * 资源实体：图片 / 视频 / 音频的持久化（生成输出或上传）。
  *
  * <p>生成成功时由 service 层写入，{@code url} 存转存后地址（Ark video_url 24h 过期，必须后端转存）。
  */
@@ -20,6 +20,7 @@ public class Asset extends BaseEntity {
     /** 资源类型 */
     public static final String TYPE_IMAGE = "image";
     public static final String TYPE_VIDEO = "video";
+    public static final String TYPE_AUDIO = "audio";
 
     /** 来源 */
     public static final String SOURCE_GENERATED = "generated";
@@ -33,7 +34,7 @@ public class Asset extends BaseEntity {
     private Long userId;
     private Long generationJobId;
 
-    /** image / video */
+    /** image / video / audio */
     private String type;
 
     /** 存储 key（本地路径或对象存储 key） */

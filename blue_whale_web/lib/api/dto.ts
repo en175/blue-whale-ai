@@ -4,7 +4,7 @@
  * 严格对齐 `blue-whale-agent-workspace/BACKEND-API-PRD.md` §5 P0 接口契约。
  *
  * 命名约定:
- * - snake_case（与后端 JSON 一致,不做转换）
+ * - camelCase（与后端 JSON 一致,不做转换）
  * - 时间字段用 ISO 8601 字符串（PRD §4）
  *
  * 边界:
@@ -18,7 +18,7 @@
 // ---------- §5.1 me ----------
 /** `GET /api/me` */
 export type MeResponse = {
-  user_id: string;
+  userId: string;
   anonymous: true;
   credits: null;
   subscription: null;
@@ -40,38 +40,37 @@ export type PresignAssetRequest = {
 
 /** `POST /api/assets/presign` 响应 */
 export type PresignAssetResponse = {
-  asset_id: string;
-  upload_url: string;
+  assetId: string;
+  uploadUrl: string;
   headers: Record<string, string>;
-  expires_in: number;
+  expiresIn: number;
 };
 
-/** `POST /api/assets/{id}/complete` + `GET /api/assets/{id}` 响应 */
+/** `GET /api/agent/assets/{id}` 响应（对齐后端 AssetDto：id 非 assetId，无 status/mime/size） */
 export type AssetResponse = {
-  asset_id: string;
-  status: "uploading" | "ready" | "failed";
+  id: number | string;
   type: AssetKind;
   url: string;
-  width: number;
-  height: number;
+  width: number | null;
+  height: number | null;
   duration: number | null;
-  mime: string;
-  size: number;
+  source?: string | null;
+  createdAt?: string;
 };
 
 // ---------- §5.3 catalog ----------
 /** `GET /api/catalog` 响应 —— 前端创作参数唯一来源 */
 export type CatalogResponse = {
-  creation_modes: Array<{ id: string; label: string }>;
-  video_models: Array<{ id: string; label: string; cost_multiplier: number }>;
-  image_models: Array<{ id: string; label: string; premium: boolean }>;
-  agent_llm_models: Array<{ id: string; cost_multiplier: number }>;
-  video_aspect_ratios: string[];
-  image_aspect_ratios: string[];
+  creationModes: Array<{ id: string; label: string }>;
+  videoModels: Array<{ id: string; label: string; costMultiplier: number }>;
+  imageModels: Array<{ id: string; label: string; premium: boolean }>;
+  agentLlmModels: Array<{ id: string; costMultiplier: number }>;
+  videoAspectRatios: string[];
+  imageAspectRatios: string[];
   resolutions: string[];
-  image_resolutions: string[];
+  imageResolutions: string[];
   durations: { min: number; max: number };
-  ref_modes: string[];
+  refModes: string[];
 };
 
 // ---------- §5.4 generation jobs ----------
@@ -86,12 +85,12 @@ export type JobStatus = "queued" | "processing" | "succeeded" | "failed";
 
 /** 生成参数（与 BottomDock UI 参数一一对应）。 */
 export type GenerationParams = {
-  aspect_ratio: string;
+  aspectRatio: string;
   resolution: string;
   duration: number;
-  ref_mode: string;
+  refMode: string;
   quantity: number;
-  internet_search: boolean;
+  internetSearch: boolean;
 };
 
 /** `POST /api/projects/{id}/generate` 请求（BottomDock 直生入口） */
@@ -100,37 +99,27 @@ export type GenerateRequest = {
   prompt: string;
   model: string;
   params: GenerationParams;
-  reference_asset_ids: string[];
+  referenceAssetIds: string[];
   source: GenerationSource;
 };
 
 /** `POST /api/projects/{id}/generate` 响应 */
 export type GenerateResponse = {
-  job_id: string;
+  jobId: string;
   status: JobStatus;
 };
 
-/** 面向 API / Job / SSE 消费者的安全错误信封。 */
-export type PublicErrorEnvelope = {
-  code: string;
-  message: string;
-  retryable: boolean;
-  retry_after_seconds: number | null;
-  input_request_id: number | null;
-  budget_effect: string;
-};
-
-/** `GET /api/jobs/{id}` 响应 / `GET /api/projects/{id}` 中 active_jobs 元素 */
+/** `GET /api/jobs/{id}` 响应 / `GET /api/projects/{id}` 中 activeJobs 元素 */
 export type JobResponse = {
-  job_id: string;
-  project_id: string;
+  jobId: string;
+  projectId: string;
   type: GenerationType;
   status: JobStatus;
   progress: number;
-  output_asset_ids: string[];
-  error: PublicErrorEnvelope | null;
-  created_at: string;
-  updated_at: string;
+  outputAssetIds: string[];
+  error: { code: string; message: string; detail?: unknown } | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 // ---------- §5.5 projects ----------
@@ -138,8 +127,8 @@ export type JobResponse = {
 export type ProjectSummary = {
   id: string;
   title: string;
-  cover_asset_id: string | null;
-  updated_at: string;
+  coverAssetId: string | null;
+  updatedAt: string;
 };
 
 /** `GET /api/projects` 响应 */
@@ -147,7 +136,7 @@ export type ListProjectsResponse = {
   items: ProjectSummary[];
 };
 
-/** 画布聚合状态（PRD §5.5 `canvas_state`） */
+/** 画布聚合状态（PRD §5.5 `canvasState`） */
 export type CanvasStateDto = {
   nodes: unknown[];
   viewport: Record<string, unknown>;
@@ -156,22 +145,22 @@ export type CanvasStateDto = {
 /** `POST /api/projects` 请求 */
 export type CreateProjectRequest = {
   title: string;
-  initial_prompt?: string;
+  initialPrompt?: string;
 };
 
 /** `POST /api/projects` 响应 */
 export type CreateProjectResponse = {
   id: string;
   title: string;
-  canvas_state: CanvasStateDto;
+  canvasState: CanvasStateDto;
   messages: unknown[];
-  created_at: string;
+  createdAt: string;
 };
 
 /** `PATCH /api/projects/{id}` 请求 */
 export type PatchProjectRequest = {
   title?: string;
-  canvas_state?: CanvasStateDto;
+  canvasState?: CanvasStateDto;
   messages?: unknown[];
 };
 
@@ -179,8 +168,8 @@ export type PatchProjectRequest = {
 export type GetProjectResponse = {
   id: string;
   title: string;
-  canvas_state: CanvasStateDto;
+  canvasState: CanvasStateDto;
   messages: unknown[];
-  active_jobs: JobResponse[];
-  updated_at: string;
+  activeJobs: JobResponse[];
+  updatedAt: string;
 };
