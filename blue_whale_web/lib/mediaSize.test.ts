@@ -1,9 +1,9 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   scaleToShortSide,
   fallbackMediaSize,
   readMediaNaturalSize,
-  detectMediaKind,
   MEDIA_SHORT_SIDE,
 } from "./mediaSize";
 
@@ -137,9 +137,6 @@ describe("fallbackMediaSize", () => {
       height: MEDIA_SHORT_SIDE,
     });
   });
-  it("audio → 卡片尺寸（无像素维度）", () => {
-    expect(fallbackMediaSize("audio")).toEqual({ width: 240, height: 120 });
-  });
 });
 
 describe("readMediaNaturalSize", () => {
@@ -186,24 +183,5 @@ describe("readMediaNaturalSize", () => {
     const p = readMediaNaturalSize("http://x/never.png", "image");
     await vi.advanceTimersByTimeAsync(3000);
     expect(await p).toEqual(fallbackMediaSize("image"));
-  });
-
-  it("audio → 直返 fallback（不读媒体，无 natural size）", async () => {
-    const p = readMediaNaturalSize("http://x/a.mp3", "audio");
-    expect(await p).toEqual(fallbackMediaSize("audio"));
-  });
-});
-
-describe("detectMediaKind", () => {
-  it("image/video/audio MIME 正确分类", () => {
-    expect(detectMediaKind(new File(["x"], "a.png", { type: "image/png" }))).toBe("image");
-    expect(detectMediaKind(new File(["x"], "a.mp4", { type: "video/mp4" }))).toBe("video");
-    expect(detectMediaKind(new File(["x"], "a.mp3", { type: "audio/mpeg" }))).toBe("audio");
-    expect(detectMediaKind(new File(["x"], "a.wav", { type: "audio/wav" }))).toBe("audio");
-  });
-
-  it("无 / 未知 MIME 回退 image", () => {
-    expect(detectMediaKind(new File(["x"], "a", { type: "" }))).toBe("image");
-    expect(detectMediaKind(new File(["x"], "a.bin", { type: "application/octet-stream" }))).toBe("image");
   });
 });
