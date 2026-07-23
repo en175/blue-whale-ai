@@ -65,6 +65,11 @@ class LoadedContext:
     instructions: str
     initial_tokens: int
     initial_evidence: tuple[ReadEvidence, ...]
+    # Run pin 选中的 ModelProfile 的 modelKey：编排层据此校验进程配置的模型实例
+    # 与固定档案身份一致（IK3BG5），不一致 fail closed，不静默用进程默认模型。
+    # 契约约定：modelKey 是不含 provider 前缀的裸模型名（如 "doubao-seed-1-6"），
+    # 与编排层 str 模型规格剥掉 provider 段后的名字逐字节比对。
+    model_key: str
 
 
 def _skill_metadata(skill: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -105,6 +110,11 @@ class ContextLoader:
         self._require_token_estimator(composition)
         profile = self._select_profile(composition, model_profile_id, model_profile_version)
         self._require_capabilities(profile)  # 能力门在拉正文前 fail closed
+        model_key = profile.get("modelKey")
+        if not isinstance(model_key, str) or not model_key:
+            raise BundleError(
+                BUNDLE_SNAPSHOT_MALFORMED, "AgentRun 固定的 ModelProfile 缺少 modelKey"
+            )
 
         manifest = composition.get("resourceManifest")
         resources = (
@@ -126,7 +136,7 @@ class ContextLoader:
         initial_evidence = self._initial_evidence(
             role, role_body, always_rules, rule_bodies
         )
-        return LoadedContext(instructions, initial_tokens, initial_evidence)
+        return LoadedContext(instructions, initial_tokens, initial_evidence, model_key)
 
     @staticmethod
     def _require_token_estimator(composition: Mapping[str, Any]) -> None:
