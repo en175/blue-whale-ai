@@ -271,22 +271,24 @@ class RuntimeBundleLifecycleIT {
                 .put("tool_name", "canvas.delete");
         assertPublicationBlocked("tool_agent", unauthorizedTool, "unauthorized_tool");
 
-        // 已注册 toolName + 未注册 registryVersion（canvas.read v99）：toolId+registryVersion 是主键，
+        // 已注册 toolName + 未注册 registryVersion（list_canvas_nodes v99）：toolId+registryVersion 是主键，
         // 单独换版本号不在注册表 → unauthorized_tool，守住主键语义不被退化为只查 toolName。
         ObjectNode unregisteredVersion = validDraftNode();
         ((ObjectNode) unregisteredVersion.path("composition").path("tool_grants").get(0))
                 .put("registry_version", 99);
         assertPublicationBlocked("tool_version_agent", unregisteredVersion, "unauthorized_tool");
 
+        // 注册表 list_canvas_nodes v1 的 limit 上限即 200：maximum 201 才构成「更宽」，200 只是持平会被放行。
         ObjectNode widerSchema = validDraftNode();
         ((ObjectNode) widerSchema.path("composition").path("tool_grants").get(0)
                 .path("argument_schema").path("properties").path("limit"))
-                .put("maximum", 200);
+                .put("maximum", 201);
         assertPublicationBlocked("wider_schema_agent", widerSchema, "unauthorized_tool");
 
+        // 同理，注册表 constraints.max_results 上限即 200：201 才构成「更宽」。
         ObjectNode widerConstraints = validDraftNode();
         ((ObjectNode) widerConstraints.path("composition").path("tool_grants").get(0)
-                .path("constraints")).put("max_results", 200);
+                .path("constraints")).put("max_results", 201);
         assertPublicationBlocked("wider_constraints_agent", widerConstraints, "unauthorized_tool");
 
         ObjectNode unauthorizedModelContract = validDraftNode();
@@ -578,14 +580,14 @@ class RuntimeBundleLifecycleIT {
                     "max_output_tokens": 4096
                   }],
                   "tool_grants": [{
-                    "tool_name": "canvas.read",
+                    "tool_name": "list_canvas_nodes",
                     "registry_version": 1,
                     "effect": "read",
                     "proposal_only": true,
                     "argument_schema": {
                       "$schema": "https://json-schema.org/draft/2020-12/schema",
                       "type": "object",
-                      "properties": {"limit": {"type": "integer", "maximum": 50}},
+                      "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 50}},
                       "additionalProperties": false
                     },
                     "constraints": {"max_results": 50}
