@@ -60,6 +60,21 @@ class AssetServiceTest {
     }
 
     @Test
+    void uploadAssetStoresAudioAndReturnsIdUrl() {
+        Asset stored = new Asset().setUrl("https://tos/x.mp3");
+        stored.setId(51L);
+        when(assetStorageService.storeUploaded(any(), eq(10L), eq(1L), eq("audio"))).thenReturn(stored);
+        MultipartFile file = mock(MultipartFile.class);
+        when(file.getContentType()).thenReturn("audio/mpeg");
+        when(file.getSize()).thenReturn(1024L);
+
+        UploadAssetResponse resp = assetService.uploadAsset(10L, 1L, file, "audio");
+
+        verify(assetStorageService).storeUploaded(any(), eq(10L), eq(1L), eq("audio"));
+        assertThat(resp.id()).isEqualTo(51L);
+    }
+
+    @Test
     void uploadAssetPropagatesOwnershipViolation() {
         when(projectService.requireOwned(1L, 999L))
                 .thenThrow(new GlobalException(SystemCode.DATA_NO_PERMISSION_OPERATE_CODE, "无权限"));
@@ -76,7 +91,7 @@ class AssetServiceTest {
     void uploadAssetRejectsInvalidType() {
         MultipartFile file = mock(MultipartFile.class);
 
-        assertThatThrownBy(() -> assetService.uploadAsset(10L, 1L, file, "audio"))
+        assertThatThrownBy(() -> assetService.uploadAsset(10L, 1L, file, "document"))
                 .isInstanceOf(GlobalException.class)
                 .extracting(e -> ((GlobalException) e).getCode())
                 .isEqualTo(SystemCode.PARAM_VALID_ERROR_CODE);

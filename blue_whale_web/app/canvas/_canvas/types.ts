@@ -42,6 +42,10 @@ export type NodeItem = {
   imageUrl?: string;
   /** 关联资产 ID（生成/上传素材的 asset 引用，供持久化恢复与去重） */
   assetId?: number;
+  /** v2 工作流：文本节点 prompt（驱动下游 prompt handle） */
+  prompt?: string;
+  /** v2 工作流入边（serialize edges 聚合到 target；老 /canvas 忽略） */
+  references?: Array<{ source: string; sourceHandle?: string; targetHandle?: string }>;
   /** 生成态：loading 占位 / ready 就绪 / error 失败。省略视为 ready（兼容旧数据） */
   status?: NodeStatus;
   /** 失败文案（status=error 时展示） */
@@ -62,6 +66,23 @@ export type DockMediaItem = {
   /** 上传进度 0-100；undefined = 已完成或在 Dock 缩略图区不显示进度 */
   uploadProgress?: number;
 };
+
+/** 重新编辑时从节点 recipe 回填底部栏的参数快照（P2：recipe.generation → Dock 预填）。 */
+export type DockPrefill = {
+  prompt?: string;
+  modelId?: string;
+  aspectRatio?: string;
+  resolution?: string;
+  quantity?: number;
+  duration?: number;
+  refMode?: string;
+  firstFrameUrl?: string;
+  lastFrameUrl?: string;
+  references?: { url: string; kind: "image" | "video" | "audio" }[];
+};
+
+/** 预填信号：nonce 递增触发 effect 把 prefill 应用到 Dock（仿 focusSignal/dockMentionSignal）。 */
+export type PrefillSignal = { nonce: number; prefill: DockPrefill };
 
 /** 视口。字段对齐 RF `Viewport`：`scale` 改名 `zoom`（BREAKING，见 design D5）。 */
 export type Viewport = {
@@ -155,6 +176,8 @@ export type ImageDockContentProps = {
   generating?: boolean;
   /** 点击缩略图预览素材 */
   onPreviewMedia?: (item: DockMediaItem) => void;
+  /** 重新编辑预填（P2）：nonce 递增触发 effect 把 recipe 参数应用到图片 Dock 设置 */
+  prefillSignal?: PrefillSignal;
 };
 
 export type VideoDockContentProps = {

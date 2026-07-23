@@ -46,17 +46,16 @@ export type PresignAssetResponse = {
   expiresIn: number;
 };
 
-/** `POST /api/assets/{id}/complete` + `GET /api/assets/{id}` 响应 */
+/** `GET /api/agent/assets/{id}` 响应（对齐后端 AssetDto：id 非 assetId，无 status/mime/size） */
 export type AssetResponse = {
-  assetId: string;
-  status: "uploading" | "ready" | "failed";
+  id: number | string;
   type: AssetKind;
   url: string;
-  width: number;
-  height: number;
+  width: number | null;
+  height: number | null;
   duration: number | null;
-  mime: string;
-  size: number;
+  source?: string | null;
+  createdAt?: string;
 };
 
 // ---------- §5.3 catalog ----------

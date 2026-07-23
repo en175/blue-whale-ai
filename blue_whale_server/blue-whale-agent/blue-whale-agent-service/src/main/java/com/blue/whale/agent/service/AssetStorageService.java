@@ -133,6 +133,12 @@ public class AssetStorageService {
             if (lower.endsWith(".webp")) return "image/webp";
             if (lower.endsWith(".gif")) return "image/gif";
             if (lower.endsWith(".mp4")) return "video/mp4";
+            if (lower.endsWith(".mp3")) return "audio/mpeg";
+            if (lower.endsWith(".wav")) return "audio/wav";
+            if (lower.endsWith(".m4a")) return "audio/mp4";
+            if (lower.endsWith(".ogg")) return "audio/ogg";
+            if (lower.endsWith(".aac")) return "audio/aac";
+            if (lower.endsWith(".flac")) return "audio/flac";
         }
         return "image/png";
     }
@@ -166,6 +172,12 @@ public class AssetStorageService {
             case "image/jpeg", "image/jpg" -> ".jpg";
             case "image/webp" -> ".webp";
             case "image/gif" -> ".gif";
+            case "audio/mpeg", "audio/mp3" -> ".mp3";
+            case "audio/wav", "audio/wave", "audio/x-wav" -> ".wav";
+            case "audio/mp4", "audio/m4a" -> ".m4a";
+            case "audio/ogg", "audio/ogg; codecs=opus" -> ".ogg";
+            case "audio/aac" -> ".aac";
+            case "audio/flac" -> ".flac";
             default -> ".bin";
         };
     }

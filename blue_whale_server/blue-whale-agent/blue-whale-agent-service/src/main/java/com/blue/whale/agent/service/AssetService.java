@@ -27,6 +27,8 @@ public class AssetService {
     private static final long MAX_IMAGE_SIZE = 2 * 1024 * 1024L;
     /** 视频大小上限 50MB。 */
     private static final long MAX_VIDEO_SIZE = 50 * 1024 * 1024L;
+    /** 音频大小上限 25MB。 */
+    private static final long MAX_AUDIO_SIZE = 25 * 1024 * 1024L;
 
     private final AssetMapper assetMapper;
     private final AssetStorageService assetStorageService;
@@ -54,24 +56,38 @@ public class AssetService {
      * @param userId    操作用户（X-User-Id）
      * @param projectId 所属项目（必须为该用户拥有）
      * @param file      上传文件
-     * @param type      资源类型 image / video
+     * @param type      资源类型 image / video / audio
      */
     public UploadAssetResponse uploadAsset(Long userId, Long projectId, MultipartFile file, String type) {
         projectService.requireOwned(projectId, userId);
-        if (!Asset.TYPE_IMAGE.equals(type) && !Asset.TYPE_VIDEO.equals(type)) {
+        if (!Asset.TYPE_IMAGE.equals(type) && !Asset.TYPE_VIDEO.equals(type) && !Asset.TYPE_AUDIO.equals(type)) {
             throw new GlobalException(SystemCode.PARAM_VALID_ERROR_CODE, "不支持的资源类型: " + type);
         }
         String contentType = file.getContentType();
         if (contentType == null || !contentType.startsWith(type + "/")) {
             throw new GlobalException(SystemCode.PARAM_VALID_ERROR_CODE, "文件类型与声明类型不匹配");
         }
-        long maxSize = Asset.TYPE_IMAGE.equals(type) ? MAX_IMAGE_SIZE : MAX_VIDEO_SIZE;
+        long maxSize = maxSizeOf(type);
         if (file.getSize() > maxSize) {
             throw new GlobalException(SystemCode.PARAM_VALID_ERROR_CODE,
-                    "文件超出大小限制（" + (Asset.TYPE_IMAGE.equals(type) ? "图片≤2MB" : "视频≤50MB") + "）");
+                    "文件超出大小限制（" + sizeLimitTip(type) + "）");
         }
         Asset asset = assetStorageService.storeUploaded(file, userId, projectId, type);
         return new UploadAssetResponse(asset.getId(), asset.getUrl());
+    }
+
+    /** 按资源类型取大小上限（image/video/audio）。 */
+    private long maxSizeOf(String type) {
+        if (Asset.TYPE_IMAGE.equals(type)) return MAX_IMAGE_SIZE;
+        if (Asset.TYPE_VIDEO.equals(type)) return MAX_VIDEO_SIZE;
+        return MAX_AUDIO_SIZE;
+    }
+
+    /** 按资源类型取大小上限提示文案。 */
+    private String sizeLimitTip(String type) {
+        if (Asset.TYPE_IMAGE.equals(type)) return "图片≤2MB";
+        if (Asset.TYPE_VIDEO.equals(type)) return "视频≤50MB";
+        return "音频≤25MB";
     }
 
     /** 按 id 取资产（归属校验：仅owner可取）。 */

@@ -13,7 +13,7 @@ import { getJobStatus, type JobStatusResponse } from "../api/generation";
 export type JobPollState =
   | { status: "idle" }
   | { status: "polling"; jobId: number; progress: number }
-  | { status: "succeeded"; jobId: number; assetUrl: string; assetType: string }
+  | { status: "succeeded"; jobId: number; assetId: string; assetUrl: string; assetType: string }
   | { status: "failed"; jobId: number; message: string };
 
 const POLL_INTERVAL_MS = 3000;
@@ -42,6 +42,7 @@ export function useJobStatus() {
           setState({
             status: "succeeded",
             jobId,
+            assetId: String(job.asset.id),
             assetUrl: job.asset.url,
             assetType: job.asset.type,
           });
