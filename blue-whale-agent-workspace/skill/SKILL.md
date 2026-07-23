@@ -3,6 +3,8 @@ name: blue-whale-agent-canvas
 description: Blue-Whale 式 AI 视频画布编排 Skill。用于把用户的视频创作需求拆解为多 Agent 协作、渐进式披露、Skill 选择、分镜规划、生成任务、画布确认门和修改重试流程。触发场景：AI 视频 Agent、Video Agent Canvas、产品视频、UGC 广告、短剧、品牌广告、分镜生成、画布确认、视频生成工作流。
 ---
 
+> **⚠️ 已替代（2026-07-24，IK2D8R）**：本目录是历史维护源，不再是运行时实现权威，不得整目录发布。其 `decision_context` → `switch(decision_branch)` 路由、L1 classifier、固定九分支与固定确认门已废弃。首版 Runtime Bundle（Director 角色 + 必要 Rules + 根 RuntimeSkill）见 `../runtime-bundle/`；本目录每个资源的迁移结论见 `../../docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md`。
+
 # Blue-Whale Video Agent Canvas
 
 > **用本 Skill 时，你就是主 Agent（Director）。** 第一步读 `workers/director_agent.md` 拿运行时决策：读 `decision_context` → `switch(decision_branch)` → 按分支动作收口。判定分层架构（硬状态后端算 / L1 轻量 classifier / 主 Agent 收口）见 `rules/decision_layer.md`。

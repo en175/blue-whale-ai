@@ -1,5 +1,7 @@
 # Blue-Whale Agent Workspace
 
+> **当前权威（2026-07-24，IK2D8R）**：本工作台的运行时 Agent 配置以 [`runtime-bundle/`](./runtime-bundle/) 为准（首版 Runtime Bundle 维护源，可构建、可导入、可静态校验）。`skill/` 目录是历史维护源，其中 `decision_context`、L1 classifier、固定九分支、旧 `/agent/turn`、固定确认门等语义已废弃；每个历史资源的保留/重写/归档/拆分结论见 [迁移清单](../docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md)。
+
 这是一个用于设计 Blue-Whale 式 Video Agent Canvas 的 Agent 编排工作台。
 
 它不是后端代码项目，也不是单个提示词，而是一套可交给 Agent、产品、前端和后端工程继续落地的编排规则系统。

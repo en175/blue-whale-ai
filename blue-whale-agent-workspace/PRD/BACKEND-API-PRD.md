@@ -1,5 +1,7 @@
 # Blue-Whale 后端接口 PRD（P0）
 
+> **⚠️ 部分替代（2026-07-24，IK2D8R）**：本文 §5.6 的 Agent turn 接口（`POST .../agent/turn`）与 L1 分流相关内容是历史记录，不再是实现权威——该公开协议废弃且不实现兼容端点，唯一公开对话协议为 Conversation message 命令 + Project Snapshot/SSE（ADR-0016/0039，[Runtime Agent Bundle 契约](../../docs/specs/2026-07-20-runtime-agent-bundle-contract.md) §9）。其余章节（用户/资产/目录/直生链路/传输约定）的有效性以各自后续工单与 ADR 为准。
+
 > 🔗 **关联**：需求 #IJZ7Z9 · wayfinder map #IK29RN（前端接后端三链路总图）
 > **同批 PRD**：[AGENT-CONVERSATION-PRD.md](./AGENT-CONVERSATION-PRD.md)（§5.6 抽出）· [FRONTEND-SKILL-PANEL-PRD.md](./FRONTEND-SKILL-PANEL-PRD.md) · [路线图](./FRONTEND-INTEGRATION-ROADMAP.md)
 
