@@ -5,15 +5,22 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronUp, Image as ImageIcon, Plus, Settings2, X } from "lucide-react";
+import {
+  ChevronUp,
+  Image as ImageIcon,
+  Plus,
+  Settings2,
+  X,
+} from "lucide-react";
 import {
   ImageModelSettingsPopover,
-  useImageModels,
-  defaultResolutionOf,
-  type ImageModel,
-  type ImageResolution,
+  IMAGE_ASPECT_RATIOS,
   type ImageAspectRatio,
 } from "@/components/ImageModelSettingsPopover";
+import {
+  getImageModels,
+  type ImageModelCapability,
+} from "../../api/generation";
 import { CreditIcon } from "../../icons";
 import { QUANTITIES } from "../../constants";
 import type { ImageDockContentProps } from "../../types";
@@ -34,63 +41,56 @@ export function ImageDockContent({
   onGenerate,
   generating = false,
   onPreviewMedia,
-  prefillSignal,
 }: ImageDockContentProps) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const { models } = useImageModels();
-  const [selectedModel, setSelectedModel] = useState<ImageModel | null>(null);
-  const [selectedResolution, setSelectedResolution] = useState<ImageResolution | null>(null);
-  const [selectedAspectRatio, setSelectedAspectRatio] = useState<ImageAspectRatio | null>(null);
+  const [models, setModels] = useState<ImageModelCapability[]>([]);
+  const [selectedModel, setSelectedModel] =
+    useState<ImageModelCapability | null>(null);
+  const [selectedSize, setSelectedSize] = useState<{
+    id: string;
+    label: string;
+  } | null>(null);
+  const [selectedAspectRatio, setSelectedAspectRatio] =
+    useState<ImageAspectRatio>(IMAGE_ASPECT_RATIOS[2]);
+  const [webSearch, setWebSearch] = useState(false);
+  const [sequential, setSequential] = useState(false);
 
-  // 模型列表加载后初始化默认选择（首个模型 + 其默认分辨率/宽高比）
+  // 取模型默认分辨率档位（能力表 default_size，缺省回退首个）。
+  const pickDefaultSize = (m: ImageModelCapability) =>
+    m.supported_sizes.find((s) => s.id === m.default_size) ??
+    m.supported_sizes[0];
+
+  // 模型列表改接口拉取（废除前端写死常量）。
   useEffect(() => {
-    if (selectedModel || models.length === 0) return;
-    const first = models[0];
-    // 异步数据加载后初始化默认选择；set-state-in-effect 对此异步初始化场景误报。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelectedModel(first);
-    setSelectedResolution(defaultResolutionOf(first));
-    const defaultRatio =
-      first.aspectRatios.find((r) => r.id === first.capability.defaultAspectRatio) ??
-      first.aspectRatios[0] ??
-      null;
-    setSelectedAspectRatio(defaultRatio);
-  }, [models, selectedModel]);
+    let cancelled = false;
+    getImageModels()
+      .then((list) => {
+        if (cancelled || list.length === 0) return;
+        const first = list[0];
+        setModels(list);
+        setSelectedModel(first);
+        setSelectedSize(pickDefaultSize(first));
+      })
+      .catch((err) => {
+        // 能力表拉取失败：保持空，无可用模型时生成按钮禁用。
+        console.error("getImageModels failed", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  // 重新编辑预填（P2）：prefillSignal.nonce 变化 → 按 recipe 匹配模型/分辨率/比例/数量（models 就绪后应用）
-  useEffect(() => {
-    if (!prefillSignal?.prefill) return;
-    const p = prefillSignal.prefill;
-    if (p.modelId) {
-      const m = models.find((mm) => mm.id === p.modelId);
-      if (m) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setSelectedModel(m);
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setSelectedResolution(m.resolutions.find((r) => r.id === p.resolution) ?? defaultResolutionOf(m));
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setSelectedAspectRatio(m.aspectRatios.find((r) => r.id === p.aspectRatio) ?? m.aspectRatios[0] ?? null);
-      }
-    }
-    if (p.quantity != null) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setQuantity(`${p.quantity}x`);
-    }
-  }, [prefillSignal?.nonce, models]);
-
-  // 切模型联动：新模型不支持当前分辨率/宽高比则重置到该模型默认
-  const handleModelChange = (model: ImageModel) => {
+  // 切模型联动：新模型不支持当前分辨率则重置到该模型默认。
+  const handleModelChange = (model: ImageModelCapability) => {
     setSelectedModel(model);
-    if (!model.resolutions.some((r) => r.id === selectedResolution?.id)) {
-      setSelectedResolution(defaultResolutionOf(model));
+    if (!model.supported_sizes.some((s) => s.id === selectedSize?.id)) {
+      setSelectedSize(pickDefaultSize(model));
     }
-    if (!model.aspectRatios.some((r) => r.id === selectedAspectRatio?.id)) {
-      const fallback =
-        model.aspectRatios.find((r) => r.id === model.capability.defaultAspectRatio) ??
-        model.aspectRatios[0] ??
-        null;
-      setSelectedAspectRatio(fallback);
+    // 数量不超新模型上限（features.quantity_max）。
+    const currentQty = parseInt(quantity, 10);
+    if (!Number.isNaN(currentQty) && currentQty > model.features.quantity_max) {
+      setQuantity(`${model.features.quantity_max}x`);
     }
   };
 
@@ -101,12 +101,16 @@ export function ImageDockContent({
   const uploadTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
 
-  const openUploadMenuFrom = (ref: React.RefObject<HTMLButtonElement | null>) => {
+  const openUploadMenuFrom = (
+    ref: React.RefObject<HTMLButtonElement | null>,
+  ) => {
     uploadTriggerRef.current = ref.current;
     setUploadMenuOpen(true);
   };
 
-  const handleTriggerClick = (ref: React.RefObject<HTMLButtonElement | null>) => {
+  const handleTriggerClick = (
+    ref: React.RefObject<HTMLButtonElement | null>,
+  ) => {
     if (isPicking) {
       onExitPick?.();
       return;
@@ -127,12 +131,18 @@ export function ImageDockContent({
   const quantityMenuRef = useRef<HTMLDivElement>(null);
   const [quantityOpen, setQuantityOpen] = useState(false);
   const [quantity, setQuantity] = useState("1x");
-  const [quantityPos, setQuantityPos] = useState<{ left: number; bottom: number }>({ left: 0, bottom: 0 });
+  const [quantityPos, setQuantityPos] = useState<{
+    left: number;
+    bottom: number;
+  }>({ left: 0, bottom: 0 });
 
   useEffect(() => {
     if (quantityOpen && quantityRef.current) {
       const rect = quantityRef.current.getBoundingClientRect();
-      setQuantityPos({ left: rect.left, bottom: window.innerHeight - rect.top + 8 });
+      setQuantityPos({
+        left: rect.left,
+        bottom: window.innerHeight - rect.top + 8,
+      });
     }
   }, [quantityOpen]);
 
@@ -179,17 +189,26 @@ export function ImageDockContent({
       >
         <div>
           <div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                width: "100%",
+              }}
+            >
               <div
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: 0,
+                  gap: 8,
                   borderRadius: 10,
                   position: "relative",
                 }}
               >
-                <div style={{ position: "absolute", top: 0, right: 0, zIndex: 1 }}>
+                <div
+                  style={{ position: "absolute", top: 0, right: 0, zIndex: 1 }}
+                >
                   <button
                     type="button"
                     aria-label="Close"
@@ -219,42 +238,61 @@ export function ImageDockContent({
                     display: "flex",
                     alignItems: "flex-start",
                     flexWrap: "wrap",
-                    gap: 8,
-                    paddingLeft: 8,
-                    paddingTop: 4,
+                    gap: 6,
+                    paddingLeft: 4,
                   }}
                 >
-                  {media.map((item) => (
-                    <DockMediaThumb key={item.id} item={item} onRemove={onRemoveMedia} onPreview={onPreviewMedia} />
-                  ))}
-                  <button
-                    ref={placeholderRef}
-                    type="button"
-                    aria-label="Upload reference image"
-                    aria-haspopup="menu"
-                    aria-expanded={uploadMenuOpen}
-                    onClick={() => handleTriggerClick(placeholderRef)}
-                    style={{
-                      width: 44,
-                      height: 44,
-                      padding: 0,
-                      borderRadius: 9,
-                      border: "1px solid rgba(255, 255, 255, 0.02)",
-                      background: "rgba(255, 255, 255, 0.043)",
-                      color: "rgba(255, 255, 255, 0.62)",
-                      cursor: "pointer",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      overflow: "hidden",
-                      flexShrink: 0,
-                    }}
-                  >
-                    <ImageIcon width={18} height={18} stroke="currentColor" strokeWidth={1.8} aria-hidden="true" />
-                  </button>
+                  {media.length > 0 ? (
+                    media.map((m) => (
+                      <DockMediaThumb
+                        key={m.id}
+                        item={m}
+                        onRemove={onRemoveMedia}
+                      />
+                    ))
+                  ) : (
+                    <div style={{ position: "relative", flexShrink: 0 }}>
+                      <button
+                        ref={placeholderRef}
+                        type="button"
+                        aria-label="Upload reference image"
+                        aria-haspopup="menu"
+                        aria-expanded={uploadMenuOpen}
+                        onClick={() => handleTriggerClick(placeholderRef)}
+                        style={{
+                          position: "relative",
+                          width: 44,
+                          height: 44,
+                          padding: 0,
+                          borderRadius: 9,
+                          border: "1px solid rgba(255, 255, 255, 0.02)",
+                          background: "rgba(255, 255, 255, 0.043)",
+                          color: "rgba(255, 255, 255, 0.62)",
+                          cursor: "pointer",
+                          opacity: 1,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          overflow: "hidden",
+                          transition: "background 120ms, color 120ms",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <ImageIcon
+                          width={18}
+                          height={18}
+                          stroke="currentColor"
+                          strokeWidth={1.8}
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                <div style={{ position: "relative", flex: "1 1 0%", minWidth: 0 }}>
+                <div
+                  style={{ position: "relative", flex: "1 1 0%", minWidth: 0 }}
+                >
                   <div
                     ref={editorRef}
                     contentEditable
@@ -385,34 +423,89 @@ export function ImageDockContent({
               paddingRight: 8,
             }}
           >
-            <Settings2 width={14} height={14} stroke="currentColor" strokeWidth={2} aria-hidden="true" />
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textAlign: "left", fontSize: 12 }}>
-              {selectedModel?.label ?? "加载中…"}
+            <Settings2
+              width={14}
+              height={14}
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            />
+            <span
+              style={{
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                textAlign: "left",
+                fontSize: 12,
+              }}
+            >
+              {selectedModel?.model_label ?? "加载中…"}
             </span>
           </div>
           <span
             aria-hidden="true"
-            style={{ width: 1, height: 8, flexShrink: 0, alignSelf: "center", background: "rgba(255, 255, 255, 0.08)", borderRadius: 1 }}
+            style={{
+              width: 1,
+              height: 8,
+              flexShrink: 0,
+              alignSelf: "center",
+              background: "rgba(255, 255, 255, 0.08)",
+              borderRadius: 1,
+            }}
           />
-          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "0px 8px" }}>{selectedAspectRatio?.label ?? "—"}</div>
+          <div
+            style={{
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "0px 8px",
+            }}
+          >
+            {selectedAspectRatio.label}
+          </div>
           <span
             aria-hidden="true"
-            style={{ width: 1, height: 8, flexShrink: 0, alignSelf: "center", background: "rgba(255, 255, 255, 0.08)", borderRadius: 1 }}
+            style={{
+              width: 1,
+              height: 8,
+              flexShrink: 0,
+              alignSelf: "center",
+              background: "rgba(255, 255, 255, 0.08)",
+              borderRadius: 1,
+            }}
           />
-          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "0px 8px" }}>{selectedResolution?.label ?? "—"}</div>
+          <div
+            style={{
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "0px 8px",
+            }}
+          >
+            {selectedSize?.label ?? "—"}
+          </div>
         </button>
 
-        {selectedModel && selectedResolution && selectedAspectRatio && (
+        {selectedModel && selectedSize && (
           <ImageModelSettingsPopover
             triggerRef={settingsRef}
             open={modelSettingsOpen}
             onClose={() => setModelSettingsOpen(false)}
+            models={models}
             selectedModel={selectedModel}
             onModelChange={handleModelChange}
-            selectedResolution={selectedResolution}
-            onResolutionChange={setSelectedResolution}
+            selectedSize={selectedSize}
+            onSizeChange={setSelectedSize}
             selectedAspectRatio={selectedAspectRatio}
             onAspectRatioChange={setSelectedAspectRatio}
+            webSearch={webSearch}
+            onWebSearchChange={setWebSearch}
+            showWebSearch={selectedModel.features.tools}
+            sequential={sequential}
+            onSequentialChange={setSequential}
+            showSequential={selectedModel.features.sequential_image_generation}
           />
         )}
 
@@ -450,7 +543,9 @@ export function ImageDockContent({
             overflow: "hidden",
           }}
         >
-          <span style={{ fontSize: 12, lineHeight: "16px", fontWeight: 600 }}>{quantity}</span>
+          <span style={{ fontSize: 12, lineHeight: "16px", fontWeight: 600 }}>
+            {quantity}
+          </span>
         </button>
 
         {quantityOpen &&
@@ -484,7 +579,11 @@ export function ImageDockContent({
                   "opacity 250ms cubic-bezier(0.16, 1, 0.3, 1), transform 250ms cubic-bezier(0.16, 1, 0.3, 1)",
               }}
             >
-              {QUANTITIES.map((q) => {
+              {QUANTITIES.filter(
+                (q) =>
+                  parseInt(q, 10) <=
+                  (selectedModel?.features.quantity_max ?? 1),
+              ).map((q) => {
                 const selected = quantity === q;
                 return (
                   <button
@@ -501,8 +600,12 @@ export function ImageDockContent({
                       padding: "7px 10px",
                       border: 0,
                       borderRadius: 6,
-                      background: selected ? "rgba(255, 255, 255, 0.08)" : "transparent",
-                      color: selected ? "rgba(255, 255, 255, 0.85)" : "rgba(255, 255, 255, 0.45)",
+                      background: selected
+                        ? "rgba(255, 255, 255, 0.08)"
+                        : "transparent",
+                      color: selected
+                        ? "rgba(255, 255, 255, 0.85)"
+                        : "rgba(255, 255, 255, 0.45)",
                       fontSize: 12,
                       lineHeight: "16px",
                       fontWeight: selected ? 500 : 400,
@@ -527,12 +630,16 @@ export function ImageDockContent({
           <div style={{ position: "relative", display: "inline-flex" }}>
             <button
               type="button"
-              disabled={isEmpty || generating || !selectedModel || !selectedResolution || !selectedAspectRatio}
+              disabled={
+                isEmpty || generating || !selectedModel || !selectedSize
+              }
               onClick={() => {
-                if (!selectedModel || !selectedResolution || !selectedAspectRatio) return;
+                if (!selectedModel || !selectedSize) return;
                 onGenerate?.({
-                  model: selectedModel,
-                  resolution: selectedResolution,
+                  modelId: selectedModel.model_id,
+                  size: selectedSize.id,
+                  webSearch: webSearch,
+                  sequential: sequential,
                   aspectRatio: selectedAspectRatio,
                   quantity,
                 });
@@ -549,15 +656,35 @@ export function ImageDockContent({
                 justifyContent: "center",
                 gap: 6,
                 transition: "120ms",
-                background: isEmpty || generating ? "rgba(255, 255, 255, 0.06)" : "var(--tc-accent)",
-                color: isEmpty || generating ? "rgba(255, 255, 255, 0.32)" : "rgb(255, 255, 255)",
+                background:
+                  isEmpty || generating
+                    ? "rgba(255, 255, 255, 0.06)"
+                    : "var(--tc-accent)",
+                color:
+                  isEmpty || generating
+                    ? "rgba(255, 255, 255, 0.32)"
+                    : "rgb(255, 255, 255)",
                 cursor: isEmpty || generating ? "default" : "pointer",
                 opacity: 1,
               }}
             >
               <CreditIcon size={14} />
-              <span style={{ fontSize: 12, fontWeight: 600, lineHeight: "16px" }}>0.2</span>
-              <span style={{ lineHeight: "16px", marginLeft: 2, display: "inline-flex", alignItems: "center", gap: 4 }}>生成</span>
+              <span
+                style={{ fontSize: 12, fontWeight: 600, lineHeight: "16px" }}
+              >
+                0.2
+              </span>
+              <span
+                style={{
+                  lineHeight: "16px",
+                  marginLeft: 2,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                生成
+              </span>
             </button>
           </div>
           <button
@@ -570,7 +697,8 @@ export function ImageDockContent({
               borderRadius: "0px 8px 8px 0px",
               borderWidth: "medium medium medium 1px",
               borderStyle: "none none none solid",
-              borderColor: "currentcolor currentcolor currentcolor rgba(255, 255, 255, 0.08)",
+              borderColor:
+                "currentcolor currentcolor currentcolor rgba(255, 255, 255, 0.08)",
               borderImage: "initial",
               display: "flex",
               alignItems: "center",
@@ -582,7 +710,12 @@ export function ImageDockContent({
               cursor: "default",
             }}
           >
-            <ChevronUp width={16} height={16} strokeWidth={2.25} aria-hidden="true" />
+            <ChevronUp
+              width={16}
+              height={16}
+              strokeWidth={2.25}
+              aria-hidden="true"
+            />
           </button>
         </div>
       </div>
