@@ -339,6 +339,26 @@ _Avoid_: 把按秒计费当作二开新功能
 从 models.dev 拉上游官方定价（USD）的功能，手动触发（非自动 cron）。**保持美元锚点不动**：拉 USD 官方价 → ratio，不改造成拉¥存¥。美元模型（claude 等）上游有官方 USD 价，自动同步正常。
 _Avoid_: 把 ratio_sync 当作自动 cron；为统一 RMB 改造它拉¥存¥；在 RMB 体系下直接禁用它
 
+### 支付（payment）
+
+> 支付域术语适用于 `blue_whale_api`（Go，充值/quota）与 `blue_whale_server`（Java，blue-whale-pay 支付通道）。架构决策见 [ADR-0025](docs/adr/0025-payment-extension-via-blue-whale-pay.md)、[ADR-0026](docs/adr/0026-java-go-dubbo-triple-rpc.md)。
+
+**blue-whale-pay**:
+blue_whale_server 中的支付微服务，移植 jeepay 渠道对接经验，作为微信/支付宝的纯支付通道（下单 + 回调验签），被 Go 经 Dubbo 调用；不管订单状态机与账本。
+_Avoid_: jeepay（那是参考的开源支付系统，非本项目服务名）
+
+**jeepay**:
+本需求参考的开源支付系统（计全支付，SpringBoot 3.3.7），只移植其渠道 SDK 对接经验，不整体引入。
+_Avoid_: 当作本项目服务；认为要整套搬入或独立部署
+
+**充值链路（topup flow，Go 发起 Java 当通道）**:
+Go 充值页发起、Java blue-whale-pay 当纯支付通道、Go 仍是订单与 quota 账本唯一权威的支付数据流；Java 只负责下单与回调验签，结果经 Dubbo 回写 Go。
+_Avoid_: 把订单或账本权威挪到 Java；前端直发 Java 绕过 Go
+
+**confirmTopUp**:
+Go 暴露给 Java 的 Dubbo 回写接口，带订单级幂等守卫（仅 top_ups.status==pending 时加 quota），是支付成功回写 quota 的唯一入口。
+_Avoid_: 裸调 IncreaseUserQuota 做回写（它非幂等，重复调会多加 quota，见 service/funding_source.go:61）
+
 ### Agent 协作语言
 
 **用户本地集成区**:
