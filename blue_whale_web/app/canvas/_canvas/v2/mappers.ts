@@ -8,7 +8,7 @@
  */
 import { parseAspectRatio } from "../aspectRatio";
 import type { CanvasNodeData, NodeKindId, GenerationRecipe, ImageGenParams, VideoGenParams } from "../model";
-import type { DockPrefill } from "../types";
+import type { DockPrefill, DockMediaItem } from "../types";
 import type { JobListItem } from "../api/generation";
 import type { CardMessage } from "../nodeFromCard";
 
@@ -66,4 +66,28 @@ export function recipeToDockPrefill(gen: GenerationRecipe): DockPrefill {
     lastFrameUrl: gen.inputs.lastFrame?.url,
     references: refs && refs.length ? refs : undefined,
   };
+}
+
+/** 点击式跨模态 refill（D IJZY24）：节点 + action → 唤起 Dock mode + 带参考 media / derived。 */
+export type CrossmodalRefill = { mode?: "image" | "video" | "audio"; media?: DockMediaItem; derived?: boolean };
+
+export function buildCrossmodalRefill(
+  node: { id: string; data: { kind: NodeKindId; content?: string } },
+  actionId: string,
+  src?: string,
+): CrossmodalRefill | null {
+  // 只 image/video/audio 媒体节点参与跨模态（text/group 无跨模态 toolbar action）
+  if (node.data.kind !== "image" && node.data.kind !== "video" && node.data.kind !== "audio") return null;
+  const name = node.data.content || "未命名素材";
+  const type = node.data.kind; // image|video|audio ∈ DockMediaItem["type"]
+  switch (actionId) {
+    case "video": // 生成视频（图/视/音 → video Dock 带参考）
+    case "audio": // 生成音频（图/视/音 → audio Dock 带参考，mock）
+      if (!src) return null;
+      return { mode: actionId, media: { id: node.id, type, name, src } };
+    case "extract-audio": // 提取音频（视 → 派生占位，后端待接）
+      return { derived: true };
+    default:
+      return null;
+  }
 }

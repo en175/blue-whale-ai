@@ -173,15 +173,17 @@ export function useCanvasDoc(): CanvasDocApi {
     projectIdRef.current = projectId;
     const dto = await loadCanvas(Number(projectId));
     const doc = parse(dto.nodes);
+    // 去重：防 persist 脏数据同 id 重复（历史 recover 未去重遗留）致 RF id 冲突/toolbar 错乱
+    const nodes = doc.nodes.filter((n, i, arr) => arr.findIndex((x) => x.id === n.id) === i);
     const vp: Viewport = dto.viewport ? JSON.parse(dto.viewport) : DEFAULT_VP;
-    nodesRef.current = doc.nodes;
+    nodesRef.current = nodes;
     edgesRef.current = doc.edges;
     vpRef.current = vp;
-    setNodes(doc.nodes);
+    setNodes(nodes);
     setEdges(doc.edges);
     setViewport(vp);
     setSaveState("idle");
-    return { nodes: doc.nodes, edges: doc.edges, viewport: vp };
+    return { nodes, edges: doc.edges, viewport: vp };
   }, []);
 
   return {

@@ -39,6 +39,7 @@ export function BottomDock({
   onFrameUpload,
   onFrameClear,
   onSwapFrames,
+  onPickFrameFromCanvas,
   focusSignal,
   dockMentionSignal,
   prefillSignal,
@@ -73,6 +74,7 @@ export function BottomDock({
   onFrameUpload?: (file: File, slot: "first" | "last") => void;
   onFrameClear?: (slot: "first" | "last") => void;
   onSwapFrames?: () => void;
+  onPickFrameFromCanvas?: (slot: "first" | "last") => void;
   /** 重新编辑/带图生成触发：递增 nonce → 聚焦 contentEditable，显示原生 caret（X4） */
   focusSignal?: number;
   /** 插入参考图 mention：nonce 递增触发 effect，item 为待插参考图（X3 mention pill）。replace=true 清空 editor 只留一个 */
@@ -361,6 +363,7 @@ export function BottomDock({
                   onFrameUpload={onFrameUpload}
                   onFrameClear={onFrameClear}
                   onSwapFrames={onSwapFrames}
+                  onPickFrameFromCanvas={onPickFrameFromCanvas}
                   media={videoMedia}
                   onRemoveMedia={onRemoveVideoMedia}
                   onLocalUpload={onLocalUpload}

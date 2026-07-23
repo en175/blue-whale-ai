@@ -21,10 +21,11 @@ import { CanvasSurface } from "../../canvas/_canvas/v2/CanvasSurface";
 import type { MenuPayload } from "../../canvas/_canvas/v2/CanvasSurface";
 import { ContextMenu, type ContextMenuKind } from "../../canvas/_canvas/v2/ContextMenu";
 import { useV2Projects } from "../../canvas/_canvas/v2/useV2Projects";
-import { cardToV2ImageFields, jobToV2Placeholder, recipeToDockPrefill } from "../../canvas/_canvas/v2/mappers";
+import { cardToV2ImageFields, jobToV2Placeholder, recipeToDockPrefill, buildCrossmodalRefill } from "../../canvas/_canvas/v2/mappers";
 import { resolveInputs, toRecipeInputs, buildGenerationRecipe } from "../../canvas/_canvas/engine";
 import { nodeKinds } from "../../canvas/_canvas/kinds";
 import { findPlacement } from "../../canvas/_canvas/placement";
+import { dockAccept } from "../../canvas/_canvas/utils";
 import { parseAspectRatio } from "../../canvas/_canvas/aspectRatio";
 import { generateImage, createVideoJob, streamJob, listJobs, getImageModels, getVideoModels, generateAudio } from "../../canvas/_canvas/api/generation";
 import { useJobStatus } from "../../canvas/_canvas/hooks/useJobStatus";
@@ -123,7 +124,7 @@ function CanvasV2ProjectInner() {
   const [firstFrameUrl, setFirstFrameUrl] = useState<string | undefined>(undefined);
   const [lastFrameUrl, setLastFrameUrl] = useState<string | undefined>(undefined);
   const [agentPendingMention, setAgentPendingMention] = useState<{ name: string; nonce: number } | null>(null);
-  const [pickingFor, setPickingFor] = useState<"image" | "video" | "audio" | null>(null);
+  const [pickingFor, setPickingFor] = useState<"image" | "video" | "audio" | "firstFrame" | "lastFrame" | null>(null);
   const [menu, setMenu] = useState<MenuPayload | null>(null);
   const { state: jobState, start: startJob, reset: resetJob } = useJobStatus();
   const [generating, setGenerating] = useState(false);
@@ -297,10 +298,22 @@ function CanvasV2ProjectInner() {
           setAgentPendingMention({ name, nonce: Date.now() });
           break;
         }
-        case "video": {
-          if (src) setVideoDockMedia([{ id: node.id, type: "image", name, src }]);
-          setBottomDockMode("video");
-          setIsBottomDockOpen(true);
+        case "video":
+        case "audio":
+        case "extract-audio": {
+          // D 跨模态点击式：buildCrossmodalRefill 算 mode + 带参考 media / derived
+          const refill = buildCrossmodalRefill(node, actionId, src);
+          if (!refill) break;
+          if (refill.derived) {
+            setGenerateError("提取音频：后端未接入（占位）");
+            break;
+          }
+          if (refill.mode && refill.media) {
+            setBottomDockMode(refill.mode);
+            setIsBottomDockOpen(true);
+            if (refill.mode === "video") setVideoDockMedia([refill.media]);
+            else if (refill.mode === "audio") setAudioDockMedia([refill.media]);
+          }
           break;
         }
         case "download": {
@@ -539,14 +552,23 @@ function CanvasV2ProjectInner() {
   // load：useCanvasDoc 拉画布 → ensureAsset 填 assets → recover processing jobs
   const recoveredRef = useRef<Set<string>>(new Set());
   const recoverProcessingJobs = useCallback(
-    async (projectId: string) => {
+    async (projectId: string, existingNodeIds: Set<string>) => {
       try {
         const jobs = await listJobs({ projectId: Number(projectId), status: "processing", size: 50 });
         for (const job of jobs) {
           const ph = jobToV2Placeholder(job);
+          if (existingNodeIds.has(ph.id)) continue; // 去重：画布已 persist 该 job 占位则跳过（防重复堆积）
           addNode(ph.kind, { id: ph.id, width: ph.width, height: ph.height, data: ph.data });
+          const input = (job.input ?? {}) as { prompt?: string; aspectRatio?: string; resolution?: string; duration?: number; refMode?: string };
           if (ph.kind === "video") {
             pendingVideoNodeRef.current = ph.id;
+            // recover recipe（best-effort 从 job.input 重建；model 字段 JobListItem 暂无，留空待后端补）
+            pendingVideoRecipeRef.current = buildGenerationRecipe({
+              mediaKind: "video",
+              model: "",
+              params: { aspectRatio: input.aspectRatio ?? "16:9", resolution: input.resolution ?? "720p", duration: input.duration ?? 5, refMode: input.refMode ?? "omni" },
+              inputs: { prompt: { kind: "text", text: input.prompt ?? "" } },
+            });
             startJob(job.jobId);
           } else {
             streamJob(job.jobId, buildImageStreamHandlers(ph.id, ph.data.content ?? "", ph.width, ph.height));
@@ -572,7 +594,7 @@ function CanvasV2ProjectInner() {
             .filter((n) => n.data.assetId)
             .map((n) => ensureAsset(n.data.assetId as string)),
         );
-        void recoverProcessingJobs(pid);
+        void recoverProcessingJobs(pid, new Set(d.nodes.map((n) => n.id)));
       } catch (e) {
         console.warn("[canvas-v2] load failed", e);
       }
@@ -583,6 +605,7 @@ function CanvasV2ProjectInner() {
   }, [pid, loadDoc, ensureAsset, recoverProcessingJobs]);
 
   const handleRequestPick = useCallback((mode: "image" | "video" | "audio") => setPickingFor(mode), []);
+  const handlePickFrameFromCanvas = useCallback((slot: "first" | "last") => setPickingFor(slot === "first" ? "firstFrame" : "lastFrame"), []);
   const handleExitPick = useCallback(() => setPickingFor(null), []);
   const handlePickNode = useCallback(
     (node: CanvasNode) => {
@@ -595,6 +618,8 @@ function CanvasV2ProjectInner() {
       if (pickingFor === "image") setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
       else if (pickingFor === "video") setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
       else if (pickingFor === "audio") setAudioDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+      else if (pickingFor === "firstFrame") setFirstFrameUrl(src);
+      else if (pickingFor === "lastFrame") setLastFrameUrl(src);
       setPickingFor(null);
     },
     [pickingFor, assets],
@@ -717,6 +742,7 @@ function CanvasV2ProjectInner() {
             onNodeRetry={handleNodeRetry}
             onEditPrompt={onEditPrompt}
             picking={pickingFor !== null}
+            pickingAccept={pickingFor ? dockAccept(pickingFor) : undefined}
           />
         </div>
         <ZoomControls />
@@ -795,6 +821,7 @@ function CanvasV2ProjectInner() {
           onFrameUpload={handleFrameUpload}
           onFrameClear={handleFrameClear}
           onSwapFrames={handleSwapFrames}
+          onPickFrameFromCanvas={handlePickFrameFromCanvas}
           onLocalUpload={(file) => handleDockLocalUpload(file, bottomDockMode)}
           onPickFromCanvas={() => handleRequestPick(bottomDockMode)}
           onExitPick={handleExitPick}
