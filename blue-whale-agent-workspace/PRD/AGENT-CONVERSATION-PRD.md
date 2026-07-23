@@ -1,5 +1,7 @@
 # Agent 对话交付 PRD（P0）
 
+> **⚠️ 已替代（2026-07-24，IK2D8R）**：本文是历史记录，不再是实现权威。其描述的 `POST .../agent/turn`、`decision_context`、L1 classifier 与固定九分支已被废弃且不实现兼容层（契约 §9）。当前权威：[Runtime Agent Bundle 领域契约](../../docs/specs/2026-07-20-runtime-agent-bundle-contract.md) + Conversation message 命令与 Project Snapshot/SSE（ADR-0016/0039）；首版 Bundle 见 `../runtime-bundle/`，逐资源迁移结论见 `../../docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md`。IJZ7Z7 的交付目标由 IK2D8R 及其同族工单承接。
+
 > 🔗 **关联**：需求 #IJZ7Z7 · wayfinder map #IK29RN（前端接后端三链路总图）
 > **同批 PRD**：[FRONTEND-SKILL-PANEL-PRD.md](./FRONTEND-SKILL-PANEL-PRD.md)（§5 Skill 接入）· [BACKEND-API-PRD.md](./BACKEND-API-PRD.md)（§5.6 抽出源）· [路线图](./FRONTEND-INTEGRATION-ROADMAP.md)
 

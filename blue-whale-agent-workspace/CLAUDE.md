@@ -1,5 +1,7 @@
 # Blue-Whale Agent Workspace
 
+> **当前权威（2026-07-24，IK2D8R）**：运行时 Agent 配置以 `runtime-bundle/` 为准（首版 Runtime Bundle 维护源）。`skill/` 是历史维护源，其 decision_context / L1 classifier / 固定九分支 / 旧 agent/turn / 固定确认门语义已废弃；逐资源迁移结论见 `../docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md`。
+
 > 本文件是**工作台协作规则**(在这个工作台里怎么干活、产出什么资产、遵守什么原则),给协作的人/AI 看。
 >
 > **Skill 入口与编排规则在别处**:可安装的 Skill 入口 = `skill/SKILL.md`;主 Agent 运行时决策权威 = `skill/workers/director_agent.md`。要装这个 Skill,**只复制 `skill/` 目录**,不用读本文件。

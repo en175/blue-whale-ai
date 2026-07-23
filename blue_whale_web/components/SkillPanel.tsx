@@ -23,7 +23,7 @@ import {
  * - 「我的 Skills」：mine API（POST 分页，join skill 返完整内容快照 + auto）。
  * - 「Skill 库」：library API（POST 分页，可 keyword 搜 name/description）。
  * add/remove 在 library tab 内（乐观 + 回滚）；auto 在 my tab 内（乐观 + 回滚）。
- * 封面取 coverUrl，空走默认图。Use 传 skill.name（forced_skill_id 真接入依赖 IJZ7Z7）。
+ * 封面取 coverUrl，空走默认图。Use 传 skill.name（forced_skill_id 真接入原依赖 IJZ7Z7；IJZ7Z7 已由 IK2D8R 替代，见 docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md）。
  */
 
 const COVER_PLACEHOLDER =
