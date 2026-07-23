@@ -7,20 +7,27 @@ import { useEffect, useRef, useState } from "react";
 import { AudioLines, Video, X } from "lucide-react";
 import { IconPlus } from "../../icons";
 import type { DockMediaItem } from "../../types";
+import { UploadSourceMenu } from "./UploadSourceMenu";
 
 export function FrameUploadButton({
   label,
   value,
   onPick,
   onClear,
+  onPickFromCanvas,
 }: {
   label: string;
   /** 已上传帧的 TOS url；有值显示缩略图，无值显示上传占位。 */
   value?: string;
   onPick?: (file: File) => void;
   onClear?: () => void;
+  /** 从画布选图片设此帧（首尾帧从画布选）。传了则按钮弹上传/从画布选菜单。 */
+  onPickFromCanvas?: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const hasPickFromCanvas = !!onPickFromCanvas;
   return (
     <div style={{ position: "relative", flexShrink: 0 }}>
       <input
@@ -35,10 +42,20 @@ export function FrameUploadButton({
           e.target.value = "";
         }}
       />
+      {hasPickFromCanvas && (
+        <UploadSourceMenu
+          triggerRef={triggerRef}
+          open={menuOpen}
+          onClose={() => setMenuOpen(false)}
+          onLocalUpload={() => inputRef.current?.click()}
+          onPickFromCanvas={onPickFromCanvas}
+        />
+      )}
       <button
+        ref={triggerRef}
         type="button"
         aria-label={value ? `${label}已上传，点击更换` : `上传${label}`}
-        onClick={() => inputRef.current?.click()}
+        onClick={() => (hasPickFromCanvas ? setMenuOpen(true) : inputRef.current?.click())}
         style={{
           width: 48,
           height: 48,

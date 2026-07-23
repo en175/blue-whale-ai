@@ -261,6 +261,8 @@ export type VideoDockContentProps = {
   onFrameClear?: (which: "first" | "last") => void;
   /** 交换首尾帧 */
   onSwapFrames?: () => void;
+  /** 从画布选图片设首/尾帧（首尾帧从画布选素材） */
+  onPickFrameFromCanvas?: (slot: "first" | "last") => void;
   /** 生成：Dock 内拼装本地 settings 上抛，prompt 由 BottomDock 从 input 取 */
   onGenerate?: (settings: VideoGenerateSettings) => void;
   /** 生成进行中（禁用按钮防重复提交） */

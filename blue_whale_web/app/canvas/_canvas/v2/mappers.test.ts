@@ -3,7 +3,7 @@
  * card → 图片节点字段。不改老 recover.ts/nodeFromCard.ts（strangler 老不动）。
  */
 import { describe, it, expect } from "vitest";
-import { jobToV2Placeholder, cardToV2ImageFields, recipeToDockPrefill } from "./mappers";
+import { jobToV2Placeholder, cardToV2ImageFields, recipeToDockPrefill, buildCrossmodalRefill } from "./mappers";
 import type { JobListItem } from "../api/generation";
 import type { CardMessage } from "../nodeFromCard";
 import type { GenerationRecipe } from "../model";
@@ -104,5 +104,33 @@ describe("recipeToDockPrefill", () => {
     expect(p.prompt).toBeUndefined();
     expect(p.modelId).toBe("");
     expect(p.references).toBeUndefined();
+  });
+});
+
+describe("buildCrossmodalRefill（D 跨模态点击式）", () => {
+  const img = { id: "i1", data: { kind: "image" as const, content: "猫", assetId: "a1" } };
+  const vid = { id: "v1", data: { kind: "video" as const, content: "风景", assetId: "a2" } };
+  const aud = { id: "u1", data: { kind: "audio" as const, content: "旁白", assetId: "a3" } };
+
+  it("图片→生成视频: mode=video, media[type=image]", () => {
+    expect(buildCrossmodalRefill(img, "video", "url-i")).toEqual({ mode: "video", media: { id: "i1", type: "image", name: "猫", src: "url-i" } });
+  });
+  it("图片→生成音频: mode=audio, media[type=image]", () => {
+    expect(buildCrossmodalRefill(img, "audio", "url-i")).toEqual({ mode: "audio", media: { id: "i1", type: "image", name: "猫", src: "url-i" } });
+  });
+  it("视频→生成视频: mode=video, media[type=video]", () => {
+    expect(buildCrossmodalRefill(vid, "video", "url-v")).toEqual({ mode: "video", media: { id: "v1", type: "video", name: "风景", src: "url-v" } });
+  });
+  it("音频→生成视频: mode=video, media[type=audio]", () => {
+    expect(buildCrossmodalRefill(aud, "video", "url-u")).toEqual({ mode: "video", media: { id: "u1", type: "audio", name: "旁白", src: "url-u" } });
+  });
+  it("视频→提取音频: derived=true", () => {
+    expect(buildCrossmodalRefill(vid, "extract-audio", "url-v")).toEqual({ derived: true });
+  });
+  it("无 src → null（video/audio 需 src 带参考）", () => {
+    expect(buildCrossmodalRefill(img, "video", undefined)).toBeNull();
+  });
+  it("非跨模态 action → null", () => {
+    expect(buildCrossmodalRefill(img, "download", "url")).toBeNull();
   });
 });

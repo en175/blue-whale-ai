@@ -69,6 +69,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
     onFrameUpload,
     onFrameClear,
     onSwapFrames,
+    onPickFrameFromCanvas,
     media = [],
     onRemoveMedia,
     onLocalUpload,
@@ -299,6 +300,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                       value={firstFrameUrl}
                       onPick={(f) => onFrameUpload?.(f, "first")}
                       onClear={() => onFrameClear?.("first")}
+                      onPickFromCanvas={() => onPickFrameFromCanvas?.("first")}
                     />
                     <button
                       type="button"
@@ -327,6 +329,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                       value={lastFrameUrl}
                       onPick={(f) => onFrameUpload?.(f, "last")}
                       onClear={() => onFrameClear?.("last")}
+                      onPickFromCanvas={() => onPickFrameFromCanvas?.("last")}
                     />
                   </div>
                 </div>

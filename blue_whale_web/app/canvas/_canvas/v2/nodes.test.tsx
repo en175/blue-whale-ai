@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { MediaStateBody } from "./nodes";
 
 /**
@@ -37,6 +37,15 @@ describe("MediaStateBody / video 首帧封面", () => {
     expect(video).not.toBeNull();
     expect(video?.getAttribute("preload")).toBe("metadata");
     expect(screen.getByTestId("video-frame-pending")).toBeInTheDocument();
+  });
+
+  it("video 静音按钮切换 muted（IJZY1V）", () => {
+    const { container } = render(<MediaStateBody kind="video" status="done" src="https://tos/a.mp4" />);
+    const video = container.querySelector("video");
+    expect(video?.muted).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "静音" }));
+    expect(video?.muted).toBe(true);
+    expect(screen.getByRole("button", { name: "取消静音" })).toBeInTheDocument();
   });
 });
 

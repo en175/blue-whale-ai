@@ -13,7 +13,7 @@ import {
   type Connection,
   type OnConnectEnd,
 } from "@xyflow/react";
-import type { CanvasNode, CanvasEdge } from "../model";
+import type { CanvasNode, CanvasEdge, MediaKind } from "../model";
 import { MediaNode, TextNode, GroupNode, NodeActionsContext } from "./nodes";
 
 type Viewport = { x: number; y: number; zoom: number };
@@ -38,6 +38,8 @@ export type CanvasSurfaceProps = {
   onPaneMenu?: (payload: MenuPayload) => void;
   onEdgeDropMenu?: (payload: MenuPayload) => void;
   picking?: boolean;
+  /** D-3 picking 按 Dock 类型过滤（dockAccept）；undefined = 不过滤（任何媒体可选） */
+  pickingAccept?: MediaKind[];
   children?: ReactNode;
 };
 
@@ -57,6 +59,7 @@ export function CanvasSurface({
   onPaneMenu,
   onEdgeDropMenu,
   picking,
+  pickingAccept,
   children,
 }: CanvasSurfaceProps) {
   const { zoomIn, zoomOut, fitView, screenToFlowPosition } = useReactFlow();
@@ -130,8 +133,8 @@ export function CanvasSurface({
   }, [zoomIn, zoomOut, fitView]);
 
   const nodeActionsValue = useMemo(
-    () => ({ onAction: onNodeAction, onRetry: onNodeRetry, onEditPrompt, picking }),
-    [onNodeAction, onNodeRetry, onEditPrompt, picking],
+    () => ({ onAction: onNodeAction, onRetry: onNodeRetry, onEditPrompt, picking, pickingAccept }),
+    [onNodeAction, onNodeRetry, onEditPrompt, picking, pickingAccept],
   );
 
   return (
