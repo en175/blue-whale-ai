@@ -474,7 +474,7 @@ function CanvasPageInner() {
             }
             setGenerating(false);
           }
-        } else {
+        } else if (args.mode === "video") {
           // 视频（design D1/D16）：createVideoJob 成功后放 video 占位 loading，轮询流转
           const result = await createVideoJob({
             prompt: trimmed,

@@ -26,7 +26,7 @@ import { resolveInputs, toRecipeInputs, buildGenerationRecipe } from "../../canv
 import { nodeKinds } from "../../canvas/_canvas/kinds";
 import { findPlacement } from "../../canvas/_canvas/placement";
 import { parseAspectRatio } from "../../canvas/_canvas/aspectRatio";
-import { generateImage, createVideoJob, streamJob, listJobs, getImageModels, getVideoModels } from "../../canvas/_canvas/api/generation";
+import { generateImage, createVideoJob, streamJob, listJobs, getImageModels, getVideoModels, generateAudio } from "../../canvas/_canvas/api/generation";
 import { useJobStatus } from "../../canvas/_canvas/hooks/useJobStatus";
 import type { MentionItem } from "../../canvas/_canvas/components/dock/mention";
 import {
@@ -109,7 +109,7 @@ function CanvasV2ProjectInner() {
 
   const [isAgentOpen, setIsAgentOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
-  const [bottomDockMode, setBottomDockMode] = useState<"image" | "video">("image");
+  const [bottomDockMode, setBottomDockMode] = useState<"image" | "video" | "audio">("image");
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
   const [dockFocusSignal, setDockFocusSignal] = useState(0);
   /** 重新编辑预填（P2）：recipe.generation → Dock 参数回填信号 */
@@ -119,10 +119,11 @@ function CanvasV2ProjectInner() {
     item: null,
   });
   const [videoDockMedia, setVideoDockMedia] = useState<DockMediaItem[]>([]);
+  const [audioDockMedia, setAudioDockMedia] = useState<DockMediaItem[]>([]);
   const [firstFrameUrl, setFirstFrameUrl] = useState<string | undefined>(undefined);
   const [lastFrameUrl, setLastFrameUrl] = useState<string | undefined>(undefined);
   const [agentPendingMention, setAgentPendingMention] = useState<{ name: string; nonce: number } | null>(null);
-  const [pickingFor, setPickingFor] = useState<"image" | "video" | null>(null);
+  const [pickingFor, setPickingFor] = useState<"image" | "video" | "audio" | null>(null);
   const [menu, setMenu] = useState<MenuPayload | null>(null);
   const { state: jobState, start: startJob, reset: resetJob } = useJobStatus();
   const [generating, setGenerating] = useState(false);
@@ -383,7 +384,7 @@ function CanvasV2ProjectInner() {
   );
 
   const handleDockLocalUpload = useCallback(
-    async (file: File, mode: "image" | "video") => {
+    async (file: File, mode: "image" | "video" | "audio") => {
       if (!pid) return;
       const mediaType = detectMediaKind(file); // image/video/audio 均建画布节点（IJZY0Z 上传落画布）
       try {
@@ -394,6 +395,7 @@ function CanvasV2ProjectInner() {
         const id = addNode(mediaType, { width: size.width, height: size.height, data: { content: file.name, status: "done", assetId: aid, recipe: { origin: "uploaded" } } });
         const item: DockMediaItem = { id, type: mediaType, name: file.name, src: result.url, assetId: result.id };
         if (mode === "image") setImageDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
+        else if (mode === "audio") setAudioDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
         else setVideoDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
       } catch (e) {
         setGenerateError(userFriendlyErrorMessage(e));
@@ -460,7 +462,7 @@ function CanvasV2ProjectInner() {
             }
             setGenerating(false);
           }
-        } else {
+        } else if (args.mode === "video") {
           const result = await createVideoJob({
             prompt: trimmed,
             projectId: Number(pid),
@@ -485,6 +487,25 @@ function CanvasV2ProjectInner() {
           pendingVideoRecipeRef.current = videoRecipe;
           pendingVideoNodeRef.current = placeholderId;
           startJob(result.jobId);
+        } else if (args.mode === "audio") {
+          // 音频生成（IJZXW7-B）：generateAudio 当前 mock（后端无音频 provider），就绪切真不改签名
+          placeholderId = addNode("audio", { width: 240, height: 120, data: { content: trimmed, status: "running" } });
+          const result = await generateAudio({
+            prompt: trimmed,
+            projectId: Number(pid),
+            modelId: args.settings.model.id,
+            duration: args.settings.duration,
+            sampleRate: args.settings.sampleRate,
+            format: args.settings.format.id,
+          });
+          const audioRecipe = buildGenerationRecipe({
+            mediaKind: "audio",
+            model: args.settings.model.id,
+            params: { duration: args.settings.duration, sampleRate: args.settings.sampleRate, format: args.settings.format.id },
+            inputs: { prompt: { kind: "text", text: trimmed } },
+          });
+          setNodeAsset(placeholderId, String(result.assetId), "audio", result.url, "generated", audioRecipe);
+          setGenerating(false);
         }
       } catch (e) {
         if (placeholderId && args.mode === "image") updateNode(placeholderId, { status: "error", errorMessage: userFriendlyErrorMessage(e) });
@@ -561,7 +582,7 @@ function CanvasV2ProjectInner() {
     };
   }, [pid, loadDoc, ensureAsset, recoverProcessingJobs]);
 
-  const handleRequestPick = useCallback((mode: "image" | "video") => setPickingFor(mode), []);
+  const handleRequestPick = useCallback((mode: "image" | "video" | "audio") => setPickingFor(mode), []);
   const handleExitPick = useCallback(() => setPickingFor(null), []);
   const handlePickNode = useCallback(
     (node: CanvasNode) => {
@@ -573,6 +594,7 @@ function CanvasV2ProjectInner() {
       const item: DockMediaItem = { id: node.id, type: "image", name: (node.data.content as string) || "图片", src };
       if (pickingFor === "image") setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
       else if (pickingFor === "video") setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+      else if (pickingFor === "audio") setAudioDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
       setPickingFor(null);
     },
     [pickingFor, assets],
@@ -615,7 +637,8 @@ function CanvasV2ProjectInner() {
       if (id === "upload") {
         openFilePicker("image/*,video/*,audio/*");
       } else if (id === "audio") {
-        openFilePicker("audio/*");
+        setBottomDockMode("audio");
+        setIsBottomDockOpen((open) => (bottomDockMode === "audio" && open ? false : true));
       } else if (id === "ai-image") {
         setBottomDockMode("image");
         setIsBottomDockOpen((open) => (bottomDockMode === "image" && open ? false : true));
@@ -760,11 +783,13 @@ function CanvasV2ProjectInner() {
           onClose={() => setIsBottomDockOpen(false)}
           imageMedia={imageDockMedia}
           videoMedia={videoDockMedia}
+          audioMedia={audioDockMedia}
           focusSignal={dockFocusSignal}
           dockMentionSignal={dockMentionSignal}
           prefillSignal={prefillSignal ?? undefined}
           onRemoveImageMedia={(id) => setImageDockMedia((prev) => prev.filter((m) => m.id !== id))}
           onRemoveVideoMedia={(id) => setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))}
+          onRemoveAudioMedia={(id) => setAudioDockMedia((prev) => prev.filter((m) => m.id !== id))}
           firstFrameUrl={firstFrameUrl}
           lastFrameUrl={lastFrameUrl}
           onFrameUpload={handleFrameUpload}
