@@ -36,4 +36,7 @@ public class SkillMineDto {
 
     /** official / community */
     private String source;
+
+    /** Creative Skill 稳定字符串身份（IK3NPB，1B 经 source_skill_id 映射回查；wire → creative_skill_id） */
+    private String creativeSkillId;
 }

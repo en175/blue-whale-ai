@@ -23,7 +23,7 @@ public final class RuntimeBundleDigests {
         this.objectMapper = objectMapper;
     }
 
-    String content(String value) {
+    public String content(String value) {
         return sha256(value.getBytes(StandardCharsets.UTF_8));
     }
 

@@ -702,3 +702,68 @@ CREATE TABLE IF NOT EXISTS message_asset_reference
 
 CREATE INDEX IF NOT EXISTS idx_message_asset_reference_conversation ON message_asset_reference (conversation_id);
 CREATE INDEX IF NOT EXISTS idx_message_asset_reference_project ON message_asset_reference (project_id);
+
+-- Skill 面板旧表（V1 基线镜像，IT schema 此前缺失，新建 mine/library IT 必须有）。
+CREATE TABLE IF NOT EXISTS skill
+(
+    id           BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name         VARCHAR(255) NOT NULL,
+    description  CLOB         NULL,
+    content      CLOB         NULL,
+    source       VARCHAR(32)  NOT NULL DEFAULT 'official',
+    sort_order   INT          NOT NULL DEFAULT 0,
+    cover_url    VARCHAR(512) NULL,
+    gmt_create   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version      INT          NOT NULL DEFAULT 0,
+    is_delete    TINYINT      NOT NULL DEFAULT 0,
+    CONSTRAINT uk_name UNIQUE (name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sort ON skill (sort_order);
+
+CREATE TABLE IF NOT EXISTS user_skill
+(
+    id           BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id      BIGINT       NOT NULL,
+    skill_id     BIGINT       NOT NULL,
+    auto         TINYINT      NOT NULL DEFAULT 0,
+    gmt_create   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version      INT          NOT NULL DEFAULT 0,
+    is_delete    TINYINT      NOT NULL DEFAULT 0,
+    CONSTRAINT uk_user_skill UNIQUE (user_id, skill_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user ON user_skill (user_id);
+CREATE INDEX IF NOT EXISTS idx_skill ON user_skill (skill_id);
+
+-- Creative Skill 版本化库（V17 镜像，IK3NPB）。与旧 skill 表并存，自记 source_skill_id 映射（1B）。
+CREATE TABLE IF NOT EXISTS creative_skill
+(
+    id                BIGINT PRIMARY KEY AUTO_INCREMENT,
+    creative_skill_id VARCHAR(80)   NOT NULL,
+    name              VARCHAR(255)  NOT NULL,
+    description       VARCHAR(1000) NULL,
+    source_skill_id   BIGINT        NULL,
+    active_version_id VARCHAR(80)   NULL,
+    gmt_create        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_creative_skill_id UNIQUE (creative_skill_id)
+);
+
+CREATE TABLE IF NOT EXISTS creative_skill_version
+(
+    id                        BIGINT PRIMARY KEY AUTO_INCREMENT,
+    creative_skill_version_id VARCHAR(80)  NOT NULL,
+    creative_skill_id         VARCHAR(80)  NOT NULL,
+    display_version           VARCHAR(64)  NOT NULL,
+    body                      CLOB         NOT NULL,
+    content_digest            VARCHAR(71)  NOT NULL,
+    resource_digest           VARCHAR(71)  NOT NULL,
+    media_type                VARCHAR(128) NOT NULL DEFAULT 'text/markdown',
+    gmt_create                DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified              DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_creative_skill_version_id UNIQUE (creative_skill_version_id),
+    CONSTRAINT uk_creative_skill_version_semver UNIQUE (creative_skill_id, display_version)
+);
