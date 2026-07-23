@@ -68,3 +68,29 @@ blue_whale_web/node_modules
 # Python 缓存（hook 脚本运行产物）
 __pycache__/
 *.pyc
+
+# 本地私人配置（kimi CLI 等，勿入库）
+.kimi-code/*
+!.kimi-code/
+!.kimi-code/hooks.toml
+!.kimi-code/hooks/
+.kimi-code/hooks/*
+!.kimi-code/hooks/blue-whale-hook.sh
+.kimi-code/local.toml
+
+# SDD 运行时 scratch（progress ledger/task reports），不进仓；.superpowers/skills/ 是 tracked 技能文件
+.superpowers/sdd/
+
+# Python 构建产物与虚拟环境（本地运行/测试生成，不入库）
+*.egg-info/
+build/
+dist/
+.eggs/
+*.py[cod]
+.venv/
+
+# zcode 本地产物（plans 等，不进仓）
+.zcode/plans/
+
+# 本地 MVP 实际 env（凭据不入库；deploy/local/.env.example 入库）
+deploy/local/.env
