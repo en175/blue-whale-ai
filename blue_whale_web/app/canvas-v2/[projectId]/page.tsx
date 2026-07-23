@@ -28,7 +28,7 @@ import { findPlacement } from "../../canvas/_canvas/placement";
 import { dockAccept } from "../../canvas/_canvas/utils";
 import { parseAspectRatio } from "../../canvas/_canvas/aspectRatio";
 import { generateImage, createVideoJob, streamJob, listJobs, getImageModels, getVideoModels, generateAudio } from "../../canvas/_canvas/api/generation";
-import { useJobStatus } from "../../canvas/_canvas/hooks/useJobStatus";
+import { useVideoJobs } from "../../canvas/_canvas/hooks/useVideoJobs";
 import type { MentionItem } from "../../canvas/_canvas/components/dock/mention";
 import {
   TopBar,
@@ -126,12 +126,9 @@ function CanvasV2ProjectInner() {
   const [agentPendingMention, setAgentPendingMention] = useState<{ name: string; nonce: number } | null>(null);
   const [pickingFor, setPickingFor] = useState<"image" | "video" | "audio" | "firstFrame" | "lastFrame" | null>(null);
   const [menu, setMenu] = useState<MenuPayload | null>(null);
-  const { state: jobState, start: startJob, reset: resetJob } = useJobStatus();
+  const videoJobs = useVideoJobs();
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
-  const pendingVideoNodeRef = useRef<string | null>(null);
-  /** 视频生成冻结的 recipe（succeeded 时随 assetId 写回节点）。 */
-  const pendingVideoRecipeRef = useRef<NodeRecipe | null>(null);
 
   const addNode = useCallback(
     (kind: NodeKindId, extra?: { id?: string; width?: number; height?: number; data?: Partial<CanvasNodeData> }): string => {
@@ -170,6 +167,22 @@ function CanvasV2ProjectInner() {
       patchNode(nodeId, recipe ? { assetId, status: "done", recipe } : { assetId, status: "done" });
     },
     [addAsset, patchNode],
+  );
+
+  // 视频 job 编排：nodeId 闭包注入 useVideoJobs 回调。recipe 已在节点上（创建即写），
+  // 此处只按 job 生命周期更新 progress / 写 assetId / 报错——不再依赖单 ref，多视频可并发。
+  const startVideoJob = useCallback(
+    (nodeId: string, jobId: number) => {
+      videoJobs.start(jobId, {
+        onProgress: (progress) => updateNode(nodeId, { progress }),
+        onSucceeded: ({ assetId, assetUrl }) => setNodeAsset(nodeId, assetId, "video", assetUrl, "generated"),
+        onFailed: (message) => {
+          updateNode(nodeId, { status: "error", errorMessage: message });
+          setGenerateError(message);
+        },
+      });
+    },
+    [videoJobs, updateNode, setNodeAsset],
   );
 
   const buildImageStreamHandlers = useCallback(
@@ -229,10 +242,12 @@ function CanvasV2ProjectInner() {
           else patchNode(nodeId, { status: "error", errorMessage: "未返回图片" });
           setGenerating(false);
         } else {
-          // video：createVideoJob + 轮询（jobState effect 复位 generating + 出图 setNodeAsset）
+          // video：createVideoJob → recipe 创建即写节点 → startVideoJob per-job 轮询（并发安全）
           const models = await getVideoModels();
           const model = models[0];
-          patchNode(nodeId, { status: "running", progress: 0 });
+          // recipe 创建即写节点：配方发起那刻全有，running/失败窗口期也带溯源（不再拖到 succeeded）
+          const videoRecipe = buildGenerationRecipe({ mediaKind: "video", model: model?.modelId ?? "", params: { aspectRatio: model?.defaultAspectRatio ?? "16:9", resolution: model?.defaultResolution ?? "1080p", duration: model?.defaultDuration ?? 5, refMode: "none" }, inputs: recipeInputs });
+          patchNode(nodeId, { status: "running", progress: 0, recipe: videoRecipe });
           const result = await createVideoJob({
             prompt,
             projectId: Number(pid),
@@ -242,9 +257,8 @@ function CanvasV2ProjectInner() {
             duration: model?.defaultDuration ?? 5,
             firstFrameUrl: task.firstFrame?.src,
           });
-          pendingVideoRecipeRef.current = buildGenerationRecipe({ mediaKind: "video", model: model?.modelId ?? "", params: { aspectRatio: model?.defaultAspectRatio ?? "16:9", resolution: model?.defaultResolution ?? "1080p", duration: model?.defaultDuration ?? 5, refMode: "none" }, inputs: recipeInputs });
-          pendingVideoNodeRef.current = nodeId;
-          startJob(result.jobId);
+          startVideoJob(nodeId, result.jobId);
+          setGenerating(false); // 视频转后台轮询（节点自身 running/progress 反馈），不阻塞后续并发生成
         }
       } catch (e) {
         patchNode(nodeId, { status: "error", errorMessage: userFriendlyErrorMessage(e) });
@@ -252,7 +266,7 @@ function CanvasV2ProjectInner() {
         setGenerating(false);
       }
     },
-    [nodes, edges, assets, pid, patchNode, setNodeAsset, startJob],
+    [nodes, edges, assets, pid, patchNode, setNodeAsset, startVideoJob],
   );
 
   const handleNodeAction = useCallback(
@@ -496,10 +510,9 @@ function CanvasV2ProjectInner() {
             ...(args.settings.referenceAudios?.map((u) => ({ kind: "audio" as const, url: u })) ?? []),
           ];
           const videoRecipe = buildGenerationRecipe({ mediaKind: "video", model: args.settings.model.id, params: { aspectRatio: args.settings.aspectRatio.id, resolution: args.settings.resolution.id, duration: args.settings.duration, refMode: args.settings.refMode.id }, inputs: { prompt: { kind: "text", text: trimmed }, firstFrame: args.settings.firstFrameUrl ? { kind: "image", url: args.settings.firstFrameUrl } : undefined, lastFrame: args.settings.lastFrameUrl ? { kind: "image", url: args.settings.lastFrameUrl } : undefined, references: vidRefs.length ? vidRefs : undefined } });
-          placeholderId = addNode("video", { width: ar.width, height: ar.height, data: { content: trimmed, status: "running", progress: 0 } });
-          pendingVideoRecipeRef.current = videoRecipe;
-          pendingVideoNodeRef.current = placeholderId;
-          startJob(result.jobId);
+          placeholderId = addNode("video", { width: ar.width, height: ar.height, data: { content: trimmed, status: "running", progress: 0, recipe: videoRecipe } });
+          startVideoJob(placeholderId, result.jobId);
+          setGenerating(false); // 视频转后台轮询，不阻塞后续并发生成
         } else if (args.mode === "audio") {
           // 音频生成（IJZXW7-B）：generateAudio 当前 mock（后端无音频 provider），就绪切真不改签名
           placeholderId = addNode("audio", { width: 240, height: 120, data: { content: trimmed, status: "running" } });
@@ -526,28 +539,11 @@ function CanvasV2ProjectInner() {
         setGenerating(false);
       }
     },
-    [addNode, updateNode, setNodeAsset, buildImageStreamHandlers, imageDockMedia, startJob, pid],
+    [addNode, updateNode, setNodeAsset, buildImageStreamHandlers, imageDockMedia, startVideoJob, pid],
   );
 
-  useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect */
-    const nodeId = pendingVideoNodeRef.current;
-    if (jobState.status === "polling" && nodeId) {
-      updateNode(nodeId, { progress: jobState.progress });
-    } else if (jobState.status === "succeeded") {
-      if (nodeId) setNodeAsset(nodeId, jobState.assetId, "video", jobState.assetUrl, "generated", pendingVideoRecipeRef.current ?? undefined);
-      pendingVideoRecipeRef.current = null;
-      setGenerating(false);
-      resetJob();
-    } else if (jobState.status === "failed") {
-      const msg = jobState.message || "视频生成失败";
-      if (nodeId) updateNode(nodeId, { status: "error", errorMessage: msg });
-      setGenerateError(msg);
-      setGenerating(false);
-      resetJob();
-    }
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, [jobState, updateNode, setNodeAsset, resetJob]);
+  // 视频 job 进度 / 出图 / 报错已由 useVideoJobs 的 per-job 回调（startVideoJob）驱动，
+  // 每个 job 更新自己的 nodeId，多视频并发互不干扰——不再需要单 jobState effect。
 
   // load：useCanvasDoc 拉画布 → ensureAsset 填 assets → recover processing jobs
   const recoveredRef = useRef<Set<string>>(new Set());
@@ -558,19 +554,19 @@ function CanvasV2ProjectInner() {
         for (const job of jobs) {
           const ph = jobToV2Placeholder(job);
           if (existingNodeIds.has(ph.id)) continue; // 去重：画布已 persist 该 job 占位则跳过（防重复堆积）
-          addNode(ph.kind, { id: ph.id, width: ph.width, height: ph.height, data: ph.data });
           const input = (job.input ?? {}) as { prompt?: string; aspectRatio?: string; resolution?: string; duration?: number; refMode?: string };
           if (ph.kind === "video") {
-            pendingVideoNodeRef.current = ph.id;
-            // recover recipe（best-effort 从 job.input 重建；model 字段 JobListItem 暂无，留空待后端补）
-            pendingVideoRecipeRef.current = buildGenerationRecipe({
+            // recover recipe（best-effort 从 job.input 重建；model 字段 JobListItem 暂无，留空待后端补）→ 创建即写节点
+            const recoverRecipe = buildGenerationRecipe({
               mediaKind: "video",
               model: "",
               params: { aspectRatio: input.aspectRatio ?? "16:9", resolution: input.resolution ?? "720p", duration: input.duration ?? 5, refMode: input.refMode ?? "omni" },
               inputs: { prompt: { kind: "text", text: input.prompt ?? "" } },
             });
-            startJob(job.jobId);
+            addNode(ph.kind, { id: ph.id, width: ph.width, height: ph.height, data: { ...ph.data, recipe: recoverRecipe } });
+            startVideoJob(ph.id, job.jobId); // per-job 独立轮询：多个 processing 视频并发 recover，不再单 ref 覆盖
           } else {
+            addNode(ph.kind, { id: ph.id, width: ph.width, height: ph.height, data: ph.data });
             streamJob(job.jobId, buildImageStreamHandlers(ph.id, ph.data.content ?? "", ph.width, ph.height));
           }
         }
@@ -578,7 +574,7 @@ function CanvasV2ProjectInner() {
         console.warn("[canvas-v2] recover processing jobs failed:", e);
       }
     },
-    [addNode, startJob, buildImageStreamHandlers],
+    [addNode, startVideoJob, buildImageStreamHandlers],
   );
   useEffect(() => {
     if (!pid) return;
