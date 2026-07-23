@@ -3,7 +3,25 @@ from typing import Any, Optional
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from .contracts import AcceptedActionResult, RunWork, RuntimeCheckpoint, ToolGrant
+from .contracts import (
+    AcceptedActionResult,
+    AgentRunConflictError,
+    RunWork,
+    RuntimeCheckpoint,
+    StreamAttemptExhaustedError,
+    ToolGrant,
+)
+
+__all__ = [
+    "AcceptedActionResult",
+    "AgentRunConflictError",
+    "JavaRunGateway",
+    "RunWork",
+    "RuntimeCheckpoint",
+    "StreamAttemptExhaustedError",
+    "ToolGrant",
+    "run_work_from_payload",
+]
 
 # Java SystemCode.AGENT_RUN_CONFLICT（100303）：commit 因 expectedRunVersion / fencing token /
 # 租约校验失败被拒——Run 已被新目标取代（superseded）或租约失效，Worker 应确定性退出。
@@ -11,22 +29,6 @@ AGENT_RUN_CONFLICT_CODE = 100303
 # Java SystemCode.ASSISTANT_STREAM_ATTEMPT_EXHAUSTED（100305，IK3GIM）：同一 AgentRun 的
 # 回复流尝试额度（2 次）已用尽——Worker 不得再次调用模型，应提交规范化失败。
 ASSISTANT_STREAM_ATTEMPT_EXHAUSTED_CODE = 100305
-
-
-class AgentRunConflictError(RuntimeError):
-    """Java 铁闸 409（AGENT_RUN_CONFLICT）：当前 Run 已被取代或租约失效。
-
-    与其余 RuntimeError（崩溃重试）区分：调用方捕获后打一条结构化 warn 日志并
-    exit 0，不再提交任何状态。
-    """
-
-
-class StreamAttemptExhaustedError(RuntimeError):
-    """Java 409（ASSISTANT_STREAM_ATTEMPT_EXHAUSTED）：回复流尝试额度已用尽。
-
-    与 AgentRunConflictError 区分：Run 绑定仍有效但不允许再开新尝试，调用方应在
-    不再次调用模型的情况下提交规范化错误（F1/F3 编排由 IK3BG3 实现）。
-    """
 
 
 def _optional_str(value: Any) -> Optional[str]:
@@ -154,8 +156,10 @@ class JavaRunGateway:
 
     def abort_assistant_message(
         self, run_id: int, payload: dict[str, Any]
-    ) -> None:
-        self._request(
+    ) -> Optional[dict[str, Any]]:
+        # 透出 AssistantMessageStreamResponse（含 released_sequence_no，契约 §3.1），
+        # Worker F1 路径据它截取未放行尾部；传输层零新增，仅返回已有响应体。
+        return self._request(
             f"/internal/agent-runs/{run_id}/assistant-messages/abort", payload
         )
 

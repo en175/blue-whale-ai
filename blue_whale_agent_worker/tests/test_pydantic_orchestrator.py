@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import re
@@ -5,17 +6,86 @@ import unittest
 
 from pydantic_ai import CallDeferred
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
 from blue_whale_agent_worker.bundle.canonical import manifest_digest
 from blue_whale_agent_worker.bundle.source import FakeBundleSource
 from blue_whale_agent_worker.contracts import (
     AcceptedActionResult,
+    MixedStreamError,
     RunWork,
     RuntimeCheckpoint,
     ToolGrant,
 )
-from blue_whale_agent_worker.pydantic_orchestrator import PydanticAIOrchestrator
+from blue_whale_agent_worker.pydantic_orchestrator import (
+    ACTION_ONLY_RETRY_INSTRUCTION,
+    ACTION_ONLY_RETRY_WITH_BRIDGING_INSTRUCTION,
+    PydanticAIOrchestrator,
+)
+
+
+def streaming_model(fn):
+    """把同步 ModelResponse 夹具包装成支持 run_stream 的 FunctionModel（IK3BG3）。
+
+    TextPart 以两段增量产出（驱动 ChunkFormer 跨 feed 边界成块），ToolCallPart
+    以 DeltaToolCall 产出（deferred 动作与 read 直接工具同形，原型夹具形态）。
+    """
+
+    async def stream_function(messages, info):
+        response = fn(messages, info)
+        # F1 纯动作重试轮：假 provider 遵从「只输出工具调用」指令，剥离文本部分
+        # （需要验证「重试轮仍混流」的测试应自行构造不服从指令的 FunctionModel）。
+        action_only = _action_only_round(info)
+        for index, part in enumerate(response.parts):
+            if isinstance(part, TextPart):
+                if action_only:
+                    continue
+                content = part.content
+                mid = max(1, len(content) // 2)
+                yield content[:mid]
+                if content[mid:]:
+                    yield content[mid:]
+            elif isinstance(part, ToolCallPart):
+                yield {
+                    index: DeltaToolCall(
+                        name=part.tool_name,
+                        json_args=json.dumps(
+                            part.args_as_dict(), ensure_ascii=False
+                        ),
+                        tool_call_id=part.tool_call_id,
+                    )
+                }
+
+    return FunctionModel(fn, stream_function=stream_function)
+
+
+def _action_only_round(info) -> bool:
+    """F1 纯动作重试轮判定：run 级 instructions 追加了纯动作指令。"""
+    return ACTION_ONLY_RETRY_INSTRUCTION in (info.instructions or "")
+
+
+def _advance(orchestrator, work):
+    """同步驱动 async 端口；混合流（F1）时镜像 Worker 编排：捕获 MixedStreamError，
+    把已流产文本作为 prior_text 换流重试纯动作轮（不经 gateway；abort 与尝试预算
+    语义由 Worker 层测试覆盖）。"""
+    return asyncio.run(_advance_streaming(orchestrator, work))
+
+
+async def _advance_streaming(orchestrator, work):
+    chunks: list = []
+    try:
+        return await orchestrator.advance(
+            work, stream_id="test-stream-1", emit_chunk=chunks.append
+        )
+    except MixedStreamError as error:
+        # 不经 gateway 的编排镜像：无 abort 响应可截取未放行尾部（那是 Worker
+        # 层语义，由 Worker 层测试覆盖），此处按全文承接重试。
+        return await orchestrator.advance(
+            work,
+            stream_id="test-stream-2",
+            emit_chunk=chunks.append,
+            f1_retry_prior_text=error.streamed_text,
+        )
 
 # ---- Bundle 基础上下文夹具（IK2QBJ：instructions 由装载后的 Bundle 驱动）----
 
@@ -447,16 +517,12 @@ def clarify_then_image_model(messages, info):
                 ),
             )
         )
-    return ModelResponse(
-        parts=(
-            TextPart("好的，按你的风格生成。"),
-            ToolCallPart(
-                "create_image_generation_job",
-                {"prompt": "蓝鲸海报，水墨风格带留白", "aspect_ratio": "1:1"},
-                "clarification-resume-call-id",
-            ),
-        )
+    call = ToolCallPart(
+        "create_image_generation_job",
+        {"prompt": "蓝鲸海报，水墨风格带留白", "aspect_ratio": "1:1"},
+        "clarification-resume-call-id",
     )
+    return ModelResponse(parts=(TextPart("好的，按你的风格生成。"), call))
 
 
 def always_text_model(messages, info):
@@ -503,9 +569,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             return ModelResponse(parts=(TextPart("您想要什么风格？"),))
 
         work = _pydantic_work(messages=({"role": "user", "content": "生成一张"},))
-        result = PydanticAIOrchestrator(
-            FunctionModel(capturing_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(capturing_model), _bundle_source()
+        ), work)
 
         self.assertEqual(1, len(captured))
         instructions = captured[0]
@@ -531,9 +597,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 {"node_id": "node-2", "type": "image", "asset_id": 88},
             ),
         )
-        result = PydanticAIOrchestrator(
-            FunctionModel(capture_prompt_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(capture_prompt_model), _bundle_source()
+        ), work)
 
         self.assertIsNone(result.error)
         prompt = captured[0]
@@ -552,9 +618,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             return ModelResponse(parts=(TextPart("好的"),))
 
         work = _pydantic_work(messages=({"role": "user", "content": "生成海报"},))
-        PydanticAIOrchestrator(
-            FunctionModel(capture_prompt_model), _bundle_source()
-        ).advance(work)
+        _advance(PydanticAIOrchestrator(
+            streaming_model(capture_prompt_model), _bundle_source()
+        ), work)
 
         self.assertEqual("生成海报", captured[0])
 
@@ -578,9 +644,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 "latest_at": "2026-07-20T11:00:00",
             },
         )
-        result = PydanticAIOrchestrator(
-            FunctionModel(capture_prompt_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(capture_prompt_model), _bundle_source()
+        ), work)
 
         self.assertIsNone(result.error)
         prompt = captured[0]
@@ -601,18 +667,18 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             return ModelResponse(parts=(TextPart("好的"),))
 
         work = _pydantic_work(messages=({"role": "user", "content": "生成海报"},))
-        PydanticAIOrchestrator(
-            FunctionModel(capture_prompt_model), _bundle_source()
-        ).advance(work)
+        _advance(PydanticAIOrchestrator(
+            streaming_model(capture_prompt_model), _bundle_source()
+        ), work)
 
         self.assertEqual("生成海报", captured[0])
 
     def test_missing_bundle_pin_fails_closed(self) -> None:
         # pin 缺失（enforcement-enabled=false 形态）不回退硬编码，fail closed。
         work = _pydantic_work(bundle_version_id=None, manifest_digest=None)
-        result = PydanticAIOrchestrator(
-            FunctionModel(image_proposal_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(image_proposal_model), _bundle_source()
+        ), work)
 
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
         self.assertEqual((), result.actions)
@@ -629,9 +695,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 }
             },
         )
-        result = PydanticAIOrchestrator(
-            FunctionModel(image_proposal_model), source
-        ).advance(_pydantic_work())
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(image_proposal_model), source
+        ), _pydantic_work())
 
         self.assertEqual("BUNDLE_TOKEN_BUDGET_EXCEEDED", result.error["code"])
         self.assertEqual((), result.actions)
@@ -647,9 +713,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 }
             },
         )
-        result = PydanticAIOrchestrator(
-            FunctionModel(image_proposal_model), source
-        ).advance(_pydantic_work())
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(image_proposal_model), source
+        ), _pydantic_work())
 
         self.assertEqual("MODEL_CAPABILITY_INSUFFICIENT", result.error["code"])
         self.assertEqual((), result.actions)
@@ -657,9 +723,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
     def test_production_adapter_can_propose_owned_reference_asset_ids(self) -> None:
         work = _pydantic_work(messages=({"role": "user", "content": "参考素材生成海报"},))
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(reference_image_proposal_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(reference_image_proposal_model), _bundle_source()
+        ), work)
 
         self.assertEqual(
             [91, 92], result.actions[0].arguments["reference_asset_ids"]
@@ -670,9 +736,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             messages=({"role": "user", "content": "联网生成一张 2K 蓝鲸海报"},)
         )
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(size_and_web_search_proposal_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(size_and_web_search_proposal_model), _bundle_source()
+        ), work)
         payload = result.to_commit_payload(work)
 
         self.assertEqual("2K", payload["actions"][0]["arguments"]["size"])
@@ -681,9 +747,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
     def test_production_adapter_returns_a_product_neutral_image_proposal(self) -> None:
         work = _pydantic_work()
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(image_proposal_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(image_proposal_model), _bundle_source()
+        ), work)
         payload = result.to_commit_payload(work)
 
         self.assertEqual("好的，为你生成图片。", payload["visible_text"])
@@ -702,9 +768,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
 
     def test_deferred_image_result_resumes_in_a_new_adapter_instance(self) -> None:
         initial_work = _pydantic_work()
-        initial_result = PydanticAIOrchestrator(
-            FunctionModel(image_proposal_model), _bundle_source()
-        ).advance(initial_work)
+        initial_result = _advance(PydanticAIOrchestrator(
+            streaming_model(image_proposal_model), _bundle_source()
+        ), initial_work)
         restored_checkpoint = RuntimeCheckpoint(
             engine=initial_result.checkpoint.engine,
             engine_version=initial_result.checkpoint.engine_version,
@@ -726,9 +792,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             ),
         )
 
-        resumed_result = PydanticAIOrchestrator(
-            FunctionModel(image_proposal_model), _bundle_source()
-        ).advance(resumed_work)
+        resumed_result = _advance(PydanticAIOrchestrator(
+            streaming_model(image_proposal_model), _bundle_source()
+        ), resumed_work)
 
         self.assertEqual("图片已经生成。", resumed_result.visible_text)
         self.assertEqual((), resumed_result.actions)
@@ -748,9 +814,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             ),
         )
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(image_proposal_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(image_proposal_model), _bundle_source()
+        ), work)
         serialized = json.dumps(result.to_commit_payload(work), ensure_ascii=False)
 
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
@@ -761,9 +827,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
     def test_framework_exception_is_normalized_without_private_details(self) -> None:
         work = _pydantic_work()
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(failing_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(failing_model), _bundle_source()
+        ), work)
         serialized = json.dumps(result.to_commit_payload(work), ensure_ascii=False)
 
         self.assertEqual("ORCHESTRATION_FAILED", result.error["code"])
@@ -782,9 +848,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         for mismatch in mismatches:
             with self.subTest(mismatch=mismatch):
                 work = _pydantic_work(**mismatch)
-                result = PydanticAIOrchestrator(
-                    FunctionModel(image_proposal_model), _bundle_source()
-                ).advance(work)
+                result = _advance(PydanticAIOrchestrator(
+                    streaming_model(image_proposal_model), _bundle_source()
+                ), work)
 
                 self.assertEqual(
                     "ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"]
@@ -798,9 +864,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             tool_grants=(_generate_image_grant(), _request_user_input_grant()),
         )
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(request_user_input_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(request_user_input_model), _bundle_source()
+        ), work)
         payload = result.to_commit_payload(work)
 
         self.assertEqual((), result.actions)
@@ -824,9 +890,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         work = _pydantic_work(
             tool_grants=(_generate_image_grant(), _request_user_input_grant()),
         )
-        result = PydanticAIOrchestrator(
-            FunctionModel(request_user_input_with_binding_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(request_user_input_with_binding_model), _bundle_source()
+        ), work)
         proposal = result.to_commit_payload(work)["user_input_request"]
 
         self.assertEqual("creation_clarification", proposal["request_type"])
@@ -836,9 +902,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
     def test_clarification_resume_proposes_a_single_image_action(self) -> None:
         grants = (_generate_image_grant(), _request_user_input_grant())
         initial_work = _pydantic_work(tool_grants=grants)
-        initial_result = PydanticAIOrchestrator(
-            FunctionModel(clarify_then_image_model), _bundle_source()
-        ).advance(initial_work)
+        initial_result = _advance(PydanticAIOrchestrator(
+            streaming_model(clarify_then_image_model), _bundle_source()
+        ), initial_work)
         self.assertIsNotNone(initial_result.input_request)
         restored_checkpoint = RuntimeCheckpoint(
             engine=initial_result.checkpoint.engine,
@@ -860,9 +926,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             tool_grants=grants,
         )
 
-        resumed_result = PydanticAIOrchestrator(
-            FunctionModel(clarify_then_image_model), _bundle_source()
-        ).advance(resumed_work)
+        resumed_result = _advance(PydanticAIOrchestrator(
+            streaming_model(clarify_then_image_model), _bundle_source()
+        ), resumed_work)
 
         self.assertIsNone(resumed_result.input_request)
         self.assertEqual(1, len(resumed_result.actions))
@@ -881,9 +947,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         # tool_call_id（不取用户回答），让模型改走动作路径。
         grants = (_generate_image_grant(), _request_user_input_grant())
         initial_work = _pydantic_work(tool_grants=grants)
-        initial_result = PydanticAIOrchestrator(
-            FunctionModel(clarify_then_image_model), _bundle_source()
-        ).advance(initial_work)
+        initial_result = _advance(PydanticAIOrchestrator(
+            streaming_model(clarify_then_image_model), _bundle_source()
+        ), initial_work)
         self.assertIsNotNone(initial_result.input_request)
         restored_checkpoint = RuntimeCheckpoint(
             engine=initial_result.checkpoint.engine,
@@ -931,9 +997,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             accepted_results=(rejected,),
             tool_grants=grants,
         )
-        result = PydanticAIOrchestrator(
-            FunctionModel(capture_deferred_result_model), _bundle_source()
-        ).advance(resumed_work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(capture_deferred_result_model), _bundle_source()
+        ), resumed_work)
 
         # 澄清 tool_call_id 收到 rejected 回喂（status=rejected + 拒绝公开码），不取用户回答。
         self.assertIsNone(result.error)
@@ -947,9 +1013,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         # IK2QBY AC3：解除「澄清恢复后必须出动作」自限，支持两次以上澄清往返。
         grants = (_generate_image_grant(), _request_user_input_grant())
         initial_work = _pydantic_work(tool_grants=grants)
-        initial_result = PydanticAIOrchestrator(
-            FunctionModel(request_user_input_model), _bundle_source()
-        ).advance(initial_work)
+        initial_result = _advance(PydanticAIOrchestrator(
+            streaming_model(request_user_input_model), _bundle_source()
+        ), initial_work)
         self.assertIsNotNone(initial_result.input_request)
         restored_checkpoint = RuntimeCheckpoint(
             engine=initial_result.checkpoint.engine,
@@ -971,9 +1037,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             tool_grants=grants,
         )
 
-        resumed_result = PydanticAIOrchestrator(
-            FunctionModel(request_user_input_model), _bundle_source()
-        ).advance(resumed_work)
+        resumed_result = _advance(PydanticAIOrchestrator(
+            streaming_model(request_user_input_model), _bundle_source()
+        ), resumed_work)
 
         # 第二轮澄清：再次提出输入请求，不出动作，不 fail closed。
         self.assertIsNone(resumed_result.error)
@@ -992,9 +1058,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         # 不再 fail closed（「澄清恢复后必须出动作」自限已解除）。
         grants = (_generate_image_grant(), _request_user_input_grant())
         initial_work = _pydantic_work(tool_grants=grants)
-        initial_result = PydanticAIOrchestrator(
-            FunctionModel(request_user_input_model), _bundle_source()
-        ).advance(initial_work)
+        initial_result = _advance(PydanticAIOrchestrator(
+            streaming_model(request_user_input_model), _bundle_source()
+        ), initial_work)
         self.assertIsNotNone(initial_result.input_request)
         resumed_work = _pydantic_work(
             run_version=2,
@@ -1008,9 +1074,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             tool_grants=grants,
         )
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(always_text_model), _bundle_source()
-        ).advance(resumed_work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(always_text_model), _bundle_source()
+        ), resumed_work)
 
         self.assertIsNone(result.error)
         self.assertEqual((), result.actions)
@@ -1022,9 +1088,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         # 任何澄清提议或契约错误，动作提议直通 Java 铁闸。
         work = _pydantic_work()
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(image_proposal_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(image_proposal_model), _bundle_source()
+        ), work)
 
         self.assertIsNone(result.error)
         self.assertIsNone(result.input_request)
@@ -1074,9 +1140,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         work = _pydantic_work(tool_grants=grants)
         for round_no in range(4):
             # 每轮换新 orchestrator 实例 advance，模拟 Worker 单轮进程 + checkpoint 回传。
-            result = PydanticAIOrchestrator(
-                FunctionModel(clarify_three_times_model), _bundle_source()
-            ).advance(work)
+            result = _advance(PydanticAIOrchestrator(
+                streaming_model(clarify_three_times_model), _bundle_source()
+            ), work)
             self.assertIsNone(result.error)
             if round_no < 3:
                 # 第 1/2/3 轮：再次合法提出澄清，不出动作。
@@ -1116,9 +1182,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         # 含敏感片段，Worker 也直传——防泄露由 Java §7「内容审核与输出释放」铁闸在释放层
         # 负责，Worker 不承担内容审核、不制造固定文案冒充模型回复。
         initial_work = _pydantic_work()
-        initial_result = PydanticAIOrchestrator(
-            FunctionModel(unsafe_resume_model), _bundle_source()
-        ).advance(initial_work)
+        initial_result = _advance(PydanticAIOrchestrator(
+            streaming_model(unsafe_resume_model), _bundle_source()
+        ), initial_work)
         resumed_work = _pydantic_work(
             run_version=2,
             fencing_token=5,
@@ -1132,9 +1198,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             ),
         )
 
-        resumed_result = PydanticAIOrchestrator(
-            FunctionModel(unsafe_resume_model), _bundle_source()
-        ).advance(resumed_work)
+        resumed_result = _advance(PydanticAIOrchestrator(
+            streaming_model(unsafe_resume_model), _bundle_source()
+        ), resumed_work)
 
         # Worker 直传模型文本（含敏感片段），不再替换为固定文案「图片已经生成。」。
         self.assertEqual(
@@ -1162,19 +1228,17 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             captured["without_grant"] = sorted(t.name for t in info.function_tools)
             return ModelResponse(parts=(TextPart("纯文本对话"),))
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(image_capture_model), _bundle_source()
-        ).advance(_pydantic_work(messages=({"role": "user", "content": "你好"},)))
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(image_capture_model), _bundle_source()
+        ), _pydantic_work(messages=({"role": "user", "content": "你好"},)))
         self.assertIn("create_image_generation_job", captured["with_grant"])
         self.assertEqual("create_image_generation_job", result.actions[0].tool_id)
 
         # grant 为空集：未授权业务工具不可见；read_resource 是 Bundle 固有受限读取
         # 工具，不经 ToolGrant，每个有 Bundle pin 的 Run 总注入（IK2QBM）。
-        text_result = PydanticAIOrchestrator(
-            FunctionModel(text_capture_model), _bundle_source()
-        ).advance(
-            _pydantic_work(messages=({"role": "user", "content": "你好"},), tool_grants=())
-        )
+        text_result = _advance(PydanticAIOrchestrator(
+            streaming_model(text_capture_model), _bundle_source()
+        ), _pydantic_work(messages=({"role": "user", "content": "你好"},), tool_grants=()))
         self.assertEqual(["read_resource"], captured["without_grant"])
         self.assertIsNone(text_result.error)
 
@@ -1194,13 +1258,11 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             )
 
         grants = (ToolGrant("fake_side_effect", 1, "side_effect", True, dict(schema), {}),)
-        side_result = PydanticAIOrchestrator(
-            FunctionModel(side_effect_model), _bundle_source()
-        ).advance(
-            _pydantic_work(
+        side_result = _advance(PydanticAIOrchestrator(
+            streaming_model(side_effect_model), _bundle_source()
+        ), _pydantic_work(
                 messages=({"role": "user", "content": "执行"},), tool_grants=grants
-            )
-        )
+            ))
         self.assertIsNone(side_result.error)
         self.assertEqual(1, len(side_result.actions))
         self.assertEqual("fake_side_effect", side_result.actions[0].tool_id)
@@ -1215,11 +1277,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         def consult_only_model(messages, info):
             return ModelResponse(parts=(TextPart("建议你先确定主题再生成。"),))
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(consult_only_model), _bundle_source()
-        ).advance(
-            _pydantic_work(messages=({"role": "user", "content": "有什么建议"},))
-        )
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(consult_only_model), _bundle_source()
+        ), _pydantic_work(messages=({"role": "user", "content": "有什么建议"},)))
         self.assertIsNone(result.error)
         self.assertEqual((), result.actions)
         self.assertIsNone(result.input_request)
@@ -1228,14 +1288,12 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
     def test_skill_selects_video_tool_from_dynamic_tool_set(self) -> None:
         # IK3BG0 acceptance：模型按上下文从动态构造的工具集中选择视频工具提议
         # （side_effect 工具由 grant 动态构造，Skill 路由选择 video 而非 image）。
-        result = PydanticAIOrchestrator(
-            FunctionModel(video_proposal_model), _bundle_source()
-        ).advance(
-            _pydantic_work(
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(video_proposal_model), _bundle_source()
+        ), _pydantic_work(
                 messages=({"role": "user", "content": "生成蓝鲸游动视频"},),
                 tool_grants=(_generate_image_grant(), _generate_video_grant()),
-            )
-        )
+            ))
         self.assertIsNone(result.error)
         self.assertEqual(1, len(result.actions))
         self.assertEqual("create_video_generation_job", result.actions[0].tool_id)
@@ -1267,14 +1325,12 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 )
             )
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(multi_action_model), _bundle_source()
-        ).advance(
-            _pydantic_work(
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(multi_action_model), _bundle_source()
+        ), _pydantic_work(
                 messages=({"role": "user", "content": "同时生成图片和视频"},),
                 tool_grants=(_generate_image_grant(), _generate_video_grant()),
-            )
-        )
+            ))
         self.assertIsNone(result.error)
         self.assertEqual(2, len(result.actions))
         tool_ids = [action.tool_id for action in result.actions]
@@ -1301,9 +1357,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         work = _pydantic_work(
             messages=({"role": "user", "content": "你好"},), tool_grants=unknown
         )
-        result = PydanticAIOrchestrator(
-            FunctionModel(plain_text_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(plain_text_model), _bundle_source()
+        ), work)
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
         self.assertNotIn(
             "ghost_tool",
@@ -1317,9 +1373,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         # IK3BG0：side_effect 工具 registry_version 由 grant 透传，Worker 不自立版本校验——
         # 版本漂移由 Java commit 铁闸（RunToolGrantResolver 按 toolId+registryVersion 复验）
         # 权威判定。Worker 照常构造提议并透传 registry_version=99，不 fail closed。
-        result = PydanticAIOrchestrator(
-            FunctionModel(image_proposal_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(image_proposal_model), _bundle_source()
+        ), work)
         self.assertIsNone(result.error)
         self.assertEqual(99, result.actions[0].registry_version)
 
@@ -1327,9 +1383,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         work = _pydantic_work(
             messages=({"role": "user", "content": "你好"},), tool_grants=mismatched
         )
-        result = PydanticAIOrchestrator(
-            FunctionModel(plain_text_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(plain_text_model), _bundle_source()
+        ), work)
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
         self.assertNotIn(
             "create_image_generation_job",
@@ -1350,20 +1406,18 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         def plain_text_model(messages, info):
             return ModelResponse(parts=(TextPart("文本"),))
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(plain_text_model), _bundle_source()
-        ).advance(
-            _pydantic_work(
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(plain_text_model), _bundle_source()
+        ), _pydantic_work(
                 messages=({"role": "user", "content": "你好"},), tool_grants=grants
-            )
-        )
+            ))
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
     def test_rejected_action_surfaces_user_safe_message_without_internal_codes(self) -> None:
         # IK2QBX 动作被治理拒绝后，拒绝结果经已接纳通道回喂；模型不再提动作时，
         # 编排用面向 User 的安全提示收尾，不暴露内部 reasonCode，也不报编排失败。
-        initial_result = PydanticAIOrchestrator(
-            FunctionModel(image_proposal_model), _bundle_source()
-        ).advance(_pydantic_work())
+        initial_result = _advance(PydanticAIOrchestrator(
+            streaming_model(image_proposal_model), _bundle_source()
+        ), _pydantic_work())
         restored_checkpoint = RuntimeCheckpoint(
             engine=initial_result.checkpoint.engine,
             engine_version=initial_result.checkpoint.engine_version,
@@ -1394,9 +1448,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             # 由 instructions 引导转述安全提示；Worker 透传模型文本，不暴露内部 reasonCode）。
             return ModelResponse(parts=(TextPart("当前操作超过可用额度。"),))
 
-        resumed_result = PydanticAIOrchestrator(
-            FunctionModel(safe_message_after_rejection_model), _bundle_source()
-        ).advance(resumed_work)
+        resumed_result = _advance(PydanticAIOrchestrator(
+            streaming_model(safe_message_after_rejection_model), _bundle_source()
+        ), resumed_work)
         payload = resumed_result.to_commit_payload(resumed_work)
 
         self.assertEqual("当前操作超过可用额度。", resumed_result.visible_text)
@@ -1409,9 +1463,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
 
     def test_rejected_action_lets_model_adjust_and_repropose(self) -> None:
         # IK2QBX 拒绝结果回喂后，模型可调整参数改提新动作；编排照常接纳新提议。
-        initial_result = PydanticAIOrchestrator(
-            FunctionModel(rejected_then_retry_model), _bundle_source()
-        ).advance(_pydantic_work())
+        initial_result = _advance(PydanticAIOrchestrator(
+            streaming_model(rejected_then_retry_model), _bundle_source()
+        ), _pydantic_work())
         restored_checkpoint = RuntimeCheckpoint(
             engine=initial_result.checkpoint.engine,
             engine_version=initial_result.checkpoint.engine_version,
@@ -1437,9 +1491,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             ),
         )
 
-        resumed_result = PydanticAIOrchestrator(
-            FunctionModel(rejected_then_retry_model), _bundle_source()
-        ).advance(resumed_work)
+        resumed_result = _advance(PydanticAIOrchestrator(
+            streaming_model(rejected_then_retry_model), _bundle_source()
+        ), resumed_work)
         payload = resumed_result.to_commit_payload(resumed_work)
 
         self.assertEqual(1, len(resumed_result.actions))
@@ -1455,9 +1509,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             captured.append(info.instructions)
             return ModelResponse(parts=(TextPart("您想要什么风格？"),))
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(capture_model), _skill_source()
-        ).advance(_skill_work())
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(capture_model), _skill_source()
+        ), _skill_work())
 
         self.assertEqual(1, len(captured))
         self.assertNotIn(SKILL_BODY, captured[0])
@@ -1493,9 +1547,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 )
             return ModelResponse(parts=(TextPart("已读取工作流，请补充风格。"),))
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(read_then_clarify_model), _skill_source()
-        ).advance(_skill_work())
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(read_then_clarify_model), _skill_source()
+        ), _skill_work())
 
         disclosed_skill_id = _disclosed_skill_resource_id(captured_instructions[0])
         on_demand = [
@@ -1546,9 +1600,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 )
             return ModelResponse(parts=(TextPart("已读工作流与安全规则，请补充比例。"),))
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(read_in_layers_model), _skill_source()
-        ).advance(_skill_work())
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(read_in_layers_model), _skill_source()
+        ), _skill_work())
 
         # instructions 披露引用 resourceId：模型逐层寻址键可达
         self.assertIn(REF_RESOURCE_ID, captured[0])
@@ -1596,9 +1650,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 )
             )
 
-        result = PydanticAIOrchestrator(FunctionModel(read_model), tampered).advance(
-            _skill_work()
-        )
+        result = _advance(PydanticAIOrchestrator(streaming_model(read_model), tampered), _skill_work())
         self.assertEqual("BUNDLE_RESOURCE_DIGEST_MISMATCH", result.error["code"])
 
     def test_checkpoint_replay_rebuilds_read_resource_ledger(self) -> None:
@@ -1633,9 +1685,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         def resume_text_model(messages, info):
             return ModelResponse(parts=(TextPart("图片已经生成。"),))
 
-        initial = PydanticAIOrchestrator(
-            FunctionModel(read_then_image_model), _skill_source()
-        ).advance(_skill_work())
+        initial = _advance(PydanticAIOrchestrator(
+            streaming_model(read_then_image_model), _skill_source()
+        ), _skill_work())
         self.assertEqual(1, len(initial.actions))  # 首轮 read_resource 后提议生图
         first_on_demand = [
             entry for entry in initial.bundle_evidence if entry["origin"] == "on_demand"
@@ -1651,10 +1703,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 json.dumps(initial.checkpoint.opaque_payload, ensure_ascii=False)
             ),
         )
-        resumed = PydanticAIOrchestrator(
-            FunctionModel(resume_text_model), _skill_source()
-        ).advance(
-            _skill_work(
+        resumed = _advance(PydanticAIOrchestrator(
+            streaming_model(resume_text_model), _skill_source()
+        ), _skill_work(
                 run_version=2,
                 fencing_token=5,
                 checkpoint=restored,
@@ -1665,8 +1716,7 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                         result={"asset_ids": [91]},
                     ),
                 ),
-            )
-        )
+            ))
         history = [
             entry for entry in resumed.bundle_evidence if entry["origin"] == "history"
         ]
@@ -1709,16 +1759,20 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
                 )
             )
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(read_then_image_model), _skill_source()
-        ).advance(_skill_work())
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(read_then_image_model), _skill_source()
+        ), _skill_work())
         # 触发过 on_demand 读取：证据随 commit 回传，但不入 checkpoint
         self.assertTrue(
             any(entry["origin"] == "on_demand" for entry in result.bundle_evidence)
         )
         payload = result.checkpoint.opaque_payload
-        # checkpoint 只保存框架不透明状态：format / messages / pending_calls
-        self.assertEqual({"format", "messages", "pending_calls"}, set(payload.keys()))
+        # checkpoint 只保存框架不透明状态：format / messages / pending_calls /
+        # stream_id（IK3BG3，契约 §1：记录产出它的回复流尝试，恢复不续写旧流）
+        self.assertEqual(
+            {"format", "messages", "pending_calls", "stream_id"},
+            set(payload.keys()),
+        )
         # 账本、证据标记或资源正文绝不嵌入 checkpoint
         serialized = json.dumps(payload, ensure_ascii=False)
         for forbidden in ("ledger", "evidence", "charged", SKILL_BODY, REF_BODY):
@@ -1730,9 +1784,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         # create_video_generation_job；action_id 不泄露 provider call id；payload 可序列化。
         work = _pydantic_work(tool_grants=(_generate_video_grant(),))
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(video_proposal_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(video_proposal_model), _bundle_source()
+        ), work)
         payload = result.to_commit_payload(work)
 
         self.assertEqual("好的，为你生成视频。", payload["visible_text"])
@@ -1781,23 +1835,19 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             captured["without_grant"] = sorted(t.name for t in info.function_tools)
             return ModelResponse(parts=(TextPart("纯文本对话"),))
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(video_capture_model), _bundle_source()
-        ).advance(
-            _pydantic_work(
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(video_capture_model), _bundle_source()
+        ), _pydantic_work(
                 messages=({"role": "user", "content": "你好"},),
                 tool_grants=(_generate_video_grant(),),
-            )
-        )
+            ))
         self.assertIn("create_video_generation_job", captured["with_grant"])
         self.assertEqual("create_video_generation_job", result.actions[0].tool_id)
 
         # grant 为空集：未授权业务工具不可见；read_resource 是 Bundle 固有受限读取工具。
-        PydanticAIOrchestrator(
-            FunctionModel(text_capture_model), _bundle_source()
-        ).advance(
-            _pydantic_work(messages=({"role": "user", "content": "你好"},), tool_grants=())
-        )
+        _advance(PydanticAIOrchestrator(
+            streaming_model(text_capture_model), _bundle_source()
+        ), _pydantic_work(messages=({"role": "user", "content": "你好"},), tool_grants=()))
         self.assertEqual(["read_resource"], captured["without_grant"])
 
     def test_mixed_grants_video_proposal_does_not_break_run(self) -> None:
@@ -1811,9 +1861,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             tool_grants=grants,
         )
 
-        result = PydanticAIOrchestrator(
-            FunctionModel(video_proposal_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(video_proposal_model), _bundle_source()
+        ), work)
 
         self.assertIsNone(result.error)
         self.assertEqual(1, len(result.actions))
@@ -1835,9 +1885,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         # IK3BG0：side_effect 工具 registry_version 由 grant 透传，Worker 不自立版本校验——
         # 版本漂移由 Java commit 铁闸（RunToolGrantResolver 按 toolId+registryVersion 复验）
         # 权威判定。Worker 照常构造提议并透传 registry_version=99，不 fail closed。
-        result = PydanticAIOrchestrator(
-            FunctionModel(video_proposal_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(video_proposal_model), _bundle_source()
+        ), work)
         self.assertIsNone(result.error)
         self.assertEqual(99, result.actions[0].registry_version)
 
@@ -1845,9 +1895,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         work = _pydantic_work(
             messages=({"role": "user", "content": "你好"},), tool_grants=mismatched
         )
-        result = PydanticAIOrchestrator(
-            FunctionModel(plain_text_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(plain_text_model), _bundle_source()
+        ), work)
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
         self.assertNotIn(
             "create_video_generation_job",
@@ -1858,9 +1908,9 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         work = _pydantic_work(
             messages=({"role": "user", "content": "你好"},), tool_grants=ghost
         )
-        result = PydanticAIOrchestrator(
-            FunctionModel(plain_text_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(plain_text_model), _bundle_source()
+        ), work)
         self.assertEqual("ORCHESTRATOR_CONTRACT_MISMATCH", result.error["code"])
         self.assertNotIn(
             "ghost_video_tool",
@@ -1888,14 +1938,207 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
             )
 
         work = _pydantic_work(tool_grants=(_generate_video_grant(),))
-        result = PydanticAIOrchestrator(
-            FunctionModel(invalid_enum_model), _bundle_source()
-        ).advance(work)
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(invalid_enum_model), _bundle_source()
+        ), work)
 
         self.assertIsNotNone(result.error)
         self.assertEqual((), result.actions)
         serialized = json.dumps(result.to_commit_payload(work), ensure_ascii=False)
         self.assertNotIn("create_video_generation_job", serialized)
+
+
+class StreamingAdvanceTest(unittest.TestCase):
+    """IK3BG3 真流式主路径：run_stream + ChunkFormer 消费形态、F1 混流检测与
+    纯动作重试轮、checkpoint 携带 stream_id 且向后兼容旧格式。"""
+
+    def test_streamed_text_is_chunked_through_emit_chunk(self) -> None:
+        # 长文本经 stream_text 增量进入 ChunkFormer：64 字符满窗切块 + 尾块，
+        # 幂等键 ≤64，visible_text 与逐块拼接逐字节一致（Java 以流内容比对封口）。
+        long_text = "流" * 150
+
+        def long_text_model(messages, info):
+            return ModelResponse(parts=(TextPart(long_text),))
+
+        chunks: list = []
+        work = _pydantic_work()
+        result = asyncio.run(
+            PydanticAIOrchestrator(
+                streaming_model(long_text_model), _bundle_source()
+            ).advance(work, stream_id="s-chunk", emit_chunk=chunks.append)
+        )
+
+        self.assertEqual(3, len(chunks))  # 150 = 64 + 64 + 22（尾块）
+        self.assertEqual([1, 2, 3], [chunk["sequence_no"] for chunk in chunks])
+        self.assertEqual(long_text, "".join(chunk["content"] for chunk in chunks))
+        self.assertEqual(long_text, result.visible_text)
+        self.assertEqual("s-chunk", chunks[0]["stream_id"])
+        self.assertTrue(all(len(chunk["idempotency_key"]) <= 64 for chunk in chunks))
+        # chunk payload 不含 deferred 工具 / provider 原始字段（不混流）。
+        for chunk in chunks:
+            self.assertNotIn("tool_call_id", chunk)
+
+    def test_mixed_stream_raises_mixed_stream_error_with_streamed_text(self) -> None:
+        # F1：get_output() 返回 str 且最后 ModelResponse 含 deferred ToolCallPart →
+        # fail closed 抛 MixedStreamError，异常携带已流出全文（含未满窗缓冲）与
+        # 该轮真实模型用量（Worker 截取未放行尾部重放并聚合 usage 进 commit）。
+        work = _pydantic_work()
+        with self.assertRaises(MixedStreamError) as caught:
+            asyncio.run(
+                PydanticAIOrchestrator(
+                    streaming_model(image_proposal_model), _bundle_source()
+                ).advance(work, stream_id="s-mix", emit_chunk=lambda chunk: None)
+            )
+
+        self.assertEqual("好的，为你生成图片。", caught.exception.streamed_text)
+        self.assertEqual(1, caught.exception.usage["requests"])
+
+    def test_action_only_retry_replays_prior_text_and_proposes_action(self) -> None:
+        # F1 规范轮：新 stream_id 重试，f1_retry_prior_text（语义为混流轮文本的
+        # 未放行尾部，由 Worker 按 abort 响应截取；本测试直接给值）确定性重放进
+        # 新尝试（同文逐块一致），模型收到「只输出工具调用」指令，动作不丢失，
+        # visible_text 即重放的尾部文本。
+        captured: list = []
+
+        def capture_model(messages, info):
+            captured.append(info.instructions or "")
+            return image_proposal_model(messages, info)
+
+        orchestrator = PydanticAIOrchestrator(
+            streaming_model(capture_model), _bundle_source()
+        )
+        work = _pydantic_work()
+        chunks: list = []
+        with self.assertRaises(MixedStreamError):
+            asyncio.run(
+                orchestrator.advance(work, stream_id="s1", emit_chunk=chunks.append)
+            )
+        prior_text = "未放行尾部文本。"
+
+        result = asyncio.run(
+            orchestrator.advance(
+                work,
+                stream_id="s2",
+                emit_chunk=chunks.append,
+                f1_retry_prior_text=prior_text,
+            )
+        )
+
+        self.assertEqual(2, len(captured))
+        self.assertIn(ACTION_ONLY_RETRY_INSTRUCTION, captured[1])
+        retry_chunks = [chunk for chunk in chunks if chunk["stream_id"] == "s2"]
+        self.assertEqual(
+            prior_text, "".join(chunk["content"] for chunk in retry_chunks)
+        )
+        self.assertEqual(prior_text, result.visible_text)
+        self.assertEqual(1, len(result.actions))
+        self.assertEqual(
+            "create_image_generation_job", result.actions[0].tool_id
+        )
+        self.assertIsNone(result.error)
+        # checkpoint 携带产出它的回复流尝试标识（契约 §1）。
+        self.assertEqual("s2", result.checkpoint.opaque_payload["stream_id"])
+
+    def test_empty_tail_retry_extracts_action_with_bridging_text(self) -> None:
+        # 空尾部重试轮（全文已放行，f1_retry_prior_text=""）：编排层向模型追加
+        # 过渡说明指令；模型返回 过渡 TextPart + deferred 动作（2.9.0 实测同响应
+        # output 仍为 str），动作从最后 ModelResponse 显式提取，visible_text 即
+        # 过渡说明，commit 可正常闭环。
+        captured: list = []
+
+        def bridging_model(messages, info):
+            captured.append(info.instructions or "")
+            return ModelResponse(
+                parts=(
+                    TextPart("好的，马上为您生成。"),
+                    ToolCallPart(
+                        "create_image_generation_job",
+                        {"prompt": "蓝鲸海报", "aspect_ratio": "1:1"},
+                        "bridging-call-id",
+                    ),
+                )
+            )
+
+        chunks: list = []
+        work = _pydantic_work()
+        result = asyncio.run(
+            PydanticAIOrchestrator(
+                streaming_model(bridging_model), _bundle_source()
+            ).advance(
+                work,
+                stream_id="s-bridge",
+                emit_chunk=chunks.append,
+                f1_retry_prior_text="",
+            )
+        )
+
+        self.assertIn(ACTION_ONLY_RETRY_WITH_BRIDGING_INSTRUCTION, captured[0])
+        self.assertEqual("好的，马上为您生成。", result.visible_text)
+        self.assertEqual(1, len(result.actions))
+        self.assertEqual(
+            "create_image_generation_job", result.actions[0].tool_id
+        )
+        self.assertIsNone(result.error)
+
+    def test_retry_round_that_mixes_again_fails_closed(self) -> None:
+        # 重试轮仍混流（模型拒不服从纯动作指令）→ 再次 fail closed 抛
+        # MixedStreamError，由 Worker 走额度用尽的规范化失败，不再调用模型。
+        async def stubborn_stream(messages, info):
+            yield "仍然混流的文本。"
+            yield {
+                0: DeltaToolCall(
+                    name="create_image_generation_job",
+                    json_args='{"prompt": "蓝鲸"}',
+                    tool_call_id="stubborn-call",
+                )
+            }
+
+        orchestrator = PydanticAIOrchestrator(
+            FunctionModel(stream_function=stubborn_stream), _bundle_source()
+        )
+        work = _pydantic_work()
+        with self.assertRaises(MixedStreamError):
+            asyncio.run(
+                orchestrator.advance(
+                    work,
+                    stream_id="s2",
+                    emit_chunk=lambda chunk: None,
+                    f1_retry_prior_text="上一轮文本。",
+                )
+            )
+
+    def test_legacy_checkpoint_without_stream_id_resumes_normally(self) -> None:
+        # 旧格式 checkpoint（无 stream_id 字段）向后兼容：视为 None → 新尝试，
+        # 不炸，恢复语义不变（契约 §1 / IK3BG3 设计决策 8）。
+        grants = (_generate_image_grant(), _request_user_input_grant())
+        initial_work = _pydantic_work(tool_grants=grants)
+        initial_result = _advance(PydanticAIOrchestrator(
+            streaming_model(clarify_then_image_model), _bundle_source()
+        ), initial_work)
+        legacy_payload = dict(initial_result.checkpoint.opaque_payload)
+        legacy_payload.pop("stream_id")
+
+        resumed_work = _pydantic_work(
+            run_version=2,
+            messages=(
+                {"role": "user", "content": "生成一张蓝鲸海报"},
+                {"role": "assistant", "content": "您希望什么风格和比例？"},
+                {"role": "user", "content": "水墨风格带留白"},
+            ),
+            checkpoint=RuntimeCheckpoint(
+                engine="pydantic-ai",
+                engine_version="2.9.0",
+                adapter_schema_version=1,
+                opaque_payload=legacy_payload,
+            ),
+            tool_grants=grants,
+        )
+        resumed_result = _advance(PydanticAIOrchestrator(
+            streaming_model(clarify_then_image_model), _bundle_source()
+        ), resumed_work)
+
+        self.assertIsNone(resumed_result.error)
+        self.assertEqual(1, len(resumed_result.actions))
 
 
 if __name__ == "__main__":

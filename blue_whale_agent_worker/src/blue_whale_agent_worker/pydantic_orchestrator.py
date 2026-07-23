@@ -9,7 +9,12 @@ from pydantic_ai import (
     RunContext,
     Tool,
 )
-from pydantic_ai.messages import ModelMessagesTypeAdapter, TextPart, ToolCallPart
+from pydantic_ai.exceptions import UserError
+from pydantic_ai.messages import (
+    ModelMessagesTypeAdapter,
+    ModelResponse,
+    ToolCallPart,
+)
 from pydantic_ai.models import Model
 
 from .bundle.errors import BundleError
@@ -18,20 +23,39 @@ from .bundle.loader import ContextLoader, LoadedContext
 from .bundle.source import BundleSource
 from .bundle.verifier import BundleVerifier, VerifiedSnapshot
 from .contracts import (
+    AgentRunConflictError,
+    ChunkDeliveryError,
+    ChunkSink,
     ConversationSource,
     CreativeContextSource,
+    MixedStreamError,
     OrchestratorResult,
     ProposedAction,
     RunWork,
     RuntimeCheckpoint,
+    StreamAttemptExhaustedError,
     ToolGrant,
     UserInputRequestProposal,
 )
+from .streaming import ChunkFormer, review_evidence_for
 
 
 ENGINE = "pydantic-ai"
 ENGINE_VERSION = "2.9.0"
 ADAPTER_SCHEMA_VERSION = 1
+
+# F1 纯动作重试轮向模型追加的指令（契约 §3.3 PROTOCOL_MIXED_STREAM 的规范轮）：
+# 混流轮的可见文本已由 Worker 重放进新尝试，本轮模型只提动作、不再输出文本。
+ACTION_ONLY_RETRY_INSTRUCTION = (
+    "上一轮回复因文本与工具调用混流被作废。本轮只输出工具调用、不输出可见文本。"
+)
+
+# F1 空尾部重试轮（混流轮全文已放行，无尾部可重放）的替代指令：允许模型附一句
+# 简短过渡说明以满足 commit 可见文本非空约束，但不得重复已发布的回答正文。
+ACTION_ONLY_RETRY_WITH_BRIDGING_INSTRUCTION = (
+    "上一轮回答已完整发布。本轮只调用工具完成动作，可附一句简短过渡说明，"
+    "不要重复已发布的回答正文。"
+)
 
 # read effect 直接工具的注册表版本（read_conversation_* 与 IK2QC7 创作现场五工具统一 v1，
 # 与 Java 工具注册表对齐）。
@@ -68,15 +92,50 @@ class PydanticAIOrchestrator:
         self._conversation_source = conversation_source
         self._creative_context_source = creative_context_source
 
-    def advance(self, work: RunWork) -> OrchestratorResult:
+    async def advance(
+        self,
+        work: RunWork,
+        *,
+        stream_id: str | None = None,
+        emit_chunk: ChunkSink,
+        f1_retry_prior_text: str | None = None,
+    ) -> OrchestratorResult:
+        # IK3BG3 真流式主路径：可见文本经 ChunkFormer（唯一成块边界）逐块回调给
+        # Worker 的 sink（必填：全部调用方都经分块协议提交）。
+        former = ChunkFormer(
+            run_id=work.agent_run_id,
+            stream_id=stream_id or "",
+            review_evidence=review_evidence_for(work),
+        )
         try:
-            return self._advance(work)
+            result = await self._advance(
+                work, stream_id, former, emit_chunk, f1_retry_prior_text
+            )
+            self._flush(former, emit_chunk)
+            return result
+        except (
+            MixedStreamError,
+            AgentRunConflictError,
+            StreamAttemptExhaustedError,
+            ChunkDeliveryError,
+        ):
+            # F1 混流与 gateway 冲突/传输分类不归一化：交 Worker 编排
+            # （abort + 重试 / 确定性退出 / 崩溃重试）。
+            raise
         except BundleError as exc:
-            return self._failure(work, exc.code, exc.message)
+            return self._failure(work, exc.code, exc.message, former, emit_chunk)
         except _ContractError:
-            return self._failure(work, "ORCHESTRATOR_CONTRACT_MISMATCH")
+            return self._failure(
+                work,
+                "ORCHESTRATOR_CONTRACT_MISMATCH",
+                "编排暂时无法继续。",
+                former,
+                emit_chunk,
+            )
         except Exception:
-            return self._failure(work, "ORCHESTRATION_FAILED")
+            return self._failure(
+                work, "ORCHESTRATION_FAILED", "编排暂时无法继续。", former, emit_chunk
+            )
 
     def _load_bundle(
         self, work: RunWork
@@ -99,7 +158,14 @@ class PydanticAIOrchestrator:
         )
         return verified, loaded
 
-    def _advance(self, work: RunWork) -> OrchestratorResult:
+    async def _advance(
+        self,
+        work: RunWork,
+        stream_id: str | None,
+        former: ChunkFormer,
+        emit_chunk: ChunkSink,
+        f1_retry_prior_text: str | None,
+    ) -> OrchestratorResult:
         self._validate_identity(work)
         verified, loaded = self._load_bundle(work)
         # 受限资源读取闸门：持有校验通过的快照与基础上下文基线，承接 on_demand 读取、
@@ -119,99 +185,47 @@ class PydanticAIOrchestrator:
             tools=(*self._build_tools(work, gate), read_resource),
             deps_type=ResourceGate,
         )
-        if work.checkpoint is None:
-            prompt = next(
-                message["content"]
-                for message in reversed(work.messages)
-                if message["role"] == "user"
+        prompt, message_history, deferred_results = self._build_run_input(work, gate)
+        instructions = None
+        if f1_retry_prior_text is not None:
+            # F1 纯动作重试轮（契约 §3.3）：先把上一轮混流文本的未放行尾部确定性
+            # 重放进新尝试（ChunkFormer 定长窗保证同文逐块一致、同键重放幂等），
+            # 再向模型追加指令——动作不得静默丢失，文本与动作不混流。空尾部（全文
+            # 已放行）换用过渡说明指令：模型可附一句简短过渡说明以满足 commit 可见
+            # 文本非空约束，但不得重复已发布的正文（避免用户可见重复）。
+            self._emit_text(former, emit_chunk, f1_retry_prior_text)
+            instructions = (
+                ACTION_ONLY_RETRY_INSTRUCTION
+                if f1_retry_prior_text
+                else ACTION_ONLY_RETRY_WITH_BRIDGING_INSTRUCTION
             )
-            # IK2QC8：首轮把 claim 下发的画布媒体节点拼成紧凑上下文，让素材第一时间进入 Agent
-            # 视野（契约 §6.1）。默认 canvas_nodes 为空集 → 不注入，既有首轮行为不变。
-            if work.canvas_nodes:
-                prompt = self._canvas_materials_prompt(work.canvas_nodes) + "\n\n" + prompt
-            # IK3AH2（契约 §6.1 三段式）：首轮注入 Conversation 摘要，与画布节点并列前置。
-            # 默认 conversation_summary 为 None → 不注入，既有首轮行为不变。
-            if work.conversation_summary:
-                prompt = self._conversation_summary_prompt(work.conversation_summary) + "\n\n" + prompt
-            run_result = agent.run_sync(prompt, deps=gate)
-        else:
-            self._validate_checkpoint(work)
-            payload = work.checkpoint.opaque_payload
-            messages = ModelMessagesTypeAdapter.validate_python(payload["messages"])
-            # 已读账本不从 checkpoint 复制（契约 §6：checkpoint 不嵌 Bundle 内容），
-            # 而是从消息历史中的 read_resource 调用确定性地重建，重建后仍受 active 门约束。
-            self._replay_read_resource(messages, gate)
-            restored_calls = payload["pending_calls"]
-            if restored_calls:
-                # 恢复闭合 checkpoint 消息历史中的 deferred ToolCallPart：动作 pending 的
-                # 结果来自 accepted_results，澄清 pending 的结果来自用户最新自然语言回答
-                # （request_user_input 的 ToolReturn 即用户回答，IK2QBY 多轮澄清）。
-                action_pending = [
-                    pending for pending in restored_calls
-                    if pending.get("kind") != _CLARIFICATION_PENDING_KIND
-                ]
-                # IK3AH2：clarification 软回喂的 rejected 共用 accepted_results 通道但属 clarify 命名空间，
-                # 不参与 action 一一匹配——results_by_action 只收 action pending 对应的结果。
-                action_pending_ids = {pending["action_id"] for pending in action_pending}
-                results_by_action = {
-                    result.action_id: result for result in work.accepted_results
-                    if result.action_id in action_pending_ids
-                }
-                if action_pending_ids != set(results_by_action):
-                    raise _ContractError("已接纳结果与 checkpoint 中的待处理动作不匹配")
-                deferred_calls: dict[str, Mapping[str, Any]] = {}
-                for pending in action_pending:
-                    result = results_by_action[pending["action_id"]]
-                    deferred_calls[pending["tool_call_id"]] = {
-                        "status": result.status,
-                        "result": dict(result.result),
-                    }
-                clarify_pending = [
-                    pending for pending in restored_calls
-                    if pending.get("kind") == _CLARIFICATION_PENDING_KIND
-                ]
-                if clarify_pending:
-                    rejected = next(
-                        (r for r in work.accepted_results if r.status == "rejected"), None
-                    )
-                    if rejected is not None:
-                        # IK3AH2：服务端 grant 未授予的澄清被软回喂为 rejected，回喂该 tool_call_id
-                        # 拒绝结果，不取用户回答，让模型改走动作路径。
-                        for pending in clarify_pending:
-                            deferred_calls[pending["tool_call_id"]] = {
-                                "status": "rejected",
-                                "result": dict(rejected.result),
-                            }
-                    else:
-                        answer = next(
-                            message["content"]
-                            for message in reversed(work.messages)
-                            if message["role"] == "user"
-                        )
-                        for pending in clarify_pending:
-                            deferred_calls[pending["tool_call_id"]] = {
-                                "status": "answered",
-                                "result": {"answer": answer},
-                            }
-                run_result = agent.run_sync(
-                    message_history=messages,
-                    deferred_tool_results=DeferredToolResults(calls=deferred_calls),
-                    deps=gate,
-                )
-            else:
-                # 无 pending 恢复：checkpoint 消息历史 + 最新用户消息继续自然对话。
-                answer = next(
-                    message["content"]
-                    for message in reversed(work.messages)
-                    if message["role"] == "user"
-                )
-                run_result = agent.run_sync(answer, message_history=messages, deps=gate)
+        output, messages, usage = await self._run_streaming(
+            agent,
+            prompt,
+            message_history,
+            deferred_results,
+            gate,
+            former,
+            emit_chunk,
+            instructions,
+        )
+        if isinstance(output, str):
+            recovered = self._reject_mixed_stream(
+                work,
+                messages,
+                action_only_retry=f1_retry_prior_text is not None,
+                allow_bridged_action=f1_retry_prior_text == "",
+                former=former,
+                usage=usage,
+            )
+            if recovered is not None:
+                output = recovered
 
         actions: tuple[ProposedAction, ...] = ()
         pending_calls: tuple[dict[str, str], ...] = ()
         input_request: UserInputRequestProposal | None = None
-        if isinstance(run_result.output, DeferredToolRequests):
-            requests = run_result.output
+        if isinstance(output, DeferredToolRequests):
+            requests = output
             authorized_side_effects = {
                 grant.tool_name for grant in work.tool_grants if grant.effect == "side_effect"
             }
@@ -259,22 +273,33 @@ class PydanticAIOrchestrator:
                 pending_calls += (
                     {"action_id": action_id, "tool_call_id": call.tool_call_id},
                 )
-            # deferred 动作轮可见文本一律来自模型 TextPart，不再用固定文案冒充模型回复
-            # （「deferred 动作轮无可见文本」是模型行为的不变量；instructions 引导动作轮
-            # 附过渡说明以满足 RunCommitRequest.visibleText 非空契约）。澄清轮用模型 question。
+            # deferred 动作轮可见文本一律来自模型本轮流经分块协议的文本，不再用固定
+            # 文案冒充模型回复（「deferred 动作轮无可见文本」是模型行为的不变量；
+            # instructions 引导动作轮附过渡说明以满足 RunCommitRequest.visibleText
+            # 非空契约）。澄清轮用模型 question——它来自工具参数而非流式 TextPart，
+            # 经 ChunkFormer 进入分块协议，与 commit visible_text 逐字节一致。
             if input_request is not None:
-                visible_text = input_request.question
+                if f1_retry_prior_text is None:
+                    self._emit_text(former, emit_chunk, input_request.question)
+                visible_text = former.full_text
             else:
-                visible_text = self._model_visible_text(run_result)
-                if not visible_text:
+                visible_text = former.full_text
+                if not visible_text.strip():
+                    if f1_retry_prior_text is not None:
+                        # 空尾部重试轮的边缘兜底：模型连过渡说明都不给——
+                        # fail closed，归一化为 ORCHESTRATOR_CONTRACT_MISMATCH。
+                        raise _ContractError(
+                            "F1 重试轮零可见文本：模型未附过渡说明或正文"
+                        )
                     raise _ContractError("deferred 动作轮缺少模型可见文本")
         else:
-            # 纯咨询 / 终态轮：模型可见文本直通，不再用固定文案替换（动作/终态轮不再
-            # 出现固定文案冒充模型回复）。终态轮的安全提示由模型自身输出（Bundle instructions
-            # 引导模型看到治理拒绝结果后转述，见测试 safe_message_after_rejection_model）；
+            # 纯咨询 / 终态轮：模型可见文本直通（流式形态下即 ChunkFormer 累计全文，
+            # 与 commit visible_text 逐字节一致，Java 以流内容比对封口），不再用固定
+            # 文案替换。终态轮的安全提示由模型自身输出（Bundle instructions 引导模型
+            # 看到治理拒绝结果后转述，见测试 safe_message_after_rejection_model）；
             # 模型本轮无可见文本即 fail closed，Worker 不用 Java message 制造文本。
-            visible_text = self._model_visible_text(run_result)
-            if not visible_text:
+            visible_text = former.full_text
+            if not visible_text.strip():
                 raise _ContractError("模型输出不能为空")
 
         checkpoint = RuntimeCheckpoint(
@@ -284,25 +309,223 @@ class PydanticAIOrchestrator:
             opaque_payload={
                 "format": "pydantic-ai-v1",
                 "messages": ModelMessagesTypeAdapter.dump_python(
-                    run_result.all_messages(), mode="json"
+                    messages, mode="json"
                 ),
                 "pending_calls": pending_calls,
+                # IK3BG3（契约 §1）：checkpoint 记录产出它的回复流尝试；恢复不续写
+                # 旧流——每次 run_once 都是新尝试（新 stream_id），从 checkpoint
+                # messages 重新推进；旧格式无此字段视为 None，不炸。
+                "stream_id": stream_id,
             },
         )
-        usage = run_result.usage
         return OrchestratorResult(
             commit_id=f"pydantic-ai-{work.agent_run_id}-{work.run_version}",
             visible_text=visible_text,
             checkpoint=checkpoint,
             actions=actions,
-            usage={
-                "input_units": usage.input_tokens,
-                "output_units": usage.output_tokens,
-                "requests": usage.requests,
-            },
+            usage=self._usage_payload(usage),
             input_request=input_request,
             bundle_evidence=self._evidence_payload(gate.evidence()),
         )
+
+    def _build_run_input(
+        self, work: RunWork, gate: ResourceGate
+    ) -> tuple[Any, Any, Any]:
+        """按工作包形态产出 run_stream 的三元输入（prompt / message_history /
+        deferred_tool_results）；恢复语义与 run_sync 时代完全一致。"""
+        if work.checkpoint is None:
+            prompt = next(
+                message["content"]
+                for message in reversed(work.messages)
+                if message["role"] == "user"
+            )
+            # IK2QC8：首轮把 claim 下发的画布媒体节点拼成紧凑上下文，让素材第一时间进入 Agent
+            # 视野（契约 §6.1）。默认 canvas_nodes 为空集 → 不注入，既有首轮行为不变。
+            if work.canvas_nodes:
+                prompt = self._canvas_materials_prompt(work.canvas_nodes) + "\n\n" + prompt
+            # IK3AH2（契约 §6.1 三段式）：首轮注入 Conversation 摘要，与画布节点并列前置。
+            # 默认 conversation_summary 为 None → 不注入，既有首轮行为不变。
+            if work.conversation_summary:
+                prompt = self._conversation_summary_prompt(work.conversation_summary) + "\n\n" + prompt
+            return prompt, None, None
+        self._validate_checkpoint(work)
+        payload = work.checkpoint.opaque_payload
+        messages = ModelMessagesTypeAdapter.validate_python(payload["messages"])
+        # 已读账本不从 checkpoint 复制（契约 §6：checkpoint 不嵌 Bundle 内容），
+        # 而是从消息历史中的 read_resource 调用确定性地重建，重建后仍受 active 门约束。
+        self._replay_read_resource(messages, gate)
+        restored_calls = payload["pending_calls"]
+        if not restored_calls:
+            # 无 pending 恢复：checkpoint 消息历史 + 最新用户消息继续自然对话。
+            answer = next(
+                message["content"]
+                for message in reversed(work.messages)
+                if message["role"] == "user"
+            )
+            return answer, messages, None
+        # 恢复闭合 checkpoint 消息历史中的 deferred ToolCallPart：动作 pending 的
+        # 结果来自 accepted_results，澄清 pending 的结果来自用户最新自然语言回答
+        # （request_user_input 的 ToolReturn 即用户回答，IK2QBY 多轮澄清）。
+        action_pending = [
+            pending for pending in restored_calls
+            if pending.get("kind") != _CLARIFICATION_PENDING_KIND
+        ]
+        # IK3AH2：clarification 软回喂的 rejected 共用 accepted_results 通道但属 clarify 命名空间，
+        # 不参与 action 一一匹配——results_by_action 只收 action pending 对应的结果。
+        action_pending_ids = {pending["action_id"] for pending in action_pending}
+        results_by_action = {
+            result.action_id: result for result in work.accepted_results
+            if result.action_id in action_pending_ids
+        }
+        if action_pending_ids != set(results_by_action):
+            raise _ContractError("已接纳结果与 checkpoint 中的待处理动作不匹配")
+        deferred_calls: dict[str, Mapping[str, Any]] = {}
+        for pending in action_pending:
+            result = results_by_action[pending["action_id"]]
+            deferred_calls[pending["tool_call_id"]] = {
+                "status": result.status,
+                "result": dict(result.result),
+            }
+        clarify_pending = [
+            pending for pending in restored_calls
+            if pending.get("kind") == _CLARIFICATION_PENDING_KIND
+        ]
+        if clarify_pending:
+            rejected = next(
+                (r for r in work.accepted_results if r.status == "rejected"), None
+            )
+            if rejected is not None:
+                # IK3AH2：服务端 grant 未授予的澄清被软回喂为 rejected，回喂该 tool_call_id
+                # 拒绝结果，不取用户回答，让模型改走动作路径。
+                for pending in clarify_pending:
+                    deferred_calls[pending["tool_call_id"]] = {
+                        "status": "rejected",
+                        "result": dict(rejected.result),
+                    }
+            else:
+                answer = next(
+                    message["content"]
+                    for message in reversed(work.messages)
+                    if message["role"] == "user"
+                )
+                for pending in clarify_pending:
+                    deferred_calls[pending["tool_call_id"]] = {
+                        "status": "answered",
+                        "result": {"answer": answer},
+                    }
+        return None, messages, DeferredToolResults(calls=deferred_calls)
+
+    async def _run_streaming(
+        self,
+        agent: Agent,
+        prompt: Any,
+        message_history: Any,
+        deferred_results: Any,
+        gate: ResourceGate,
+        former: ChunkFormer,
+        emit_chunk: ChunkSink,
+        instructions: str | None,
+    ) -> tuple[Any, Any, Any]:
+        """run_stream 固定消费形态（原型蓝本）：stream_text(delta=True) → ChunkFormer
+        逐块回调；纯工具响应轮 stream_text 抛 UserError 属框架正常行为（F2），容忍后
+        走 get_output()。文本 chunk 与 deferred 工具 / Job / Asset 事件不混流——动作
+        不进 chunk payload。"""
+        kwargs: dict[str, Any] = {"deps": gate}
+        if message_history is not None:
+            kwargs["message_history"] = message_history
+        if deferred_results is not None:
+            kwargs["deferred_tool_results"] = deferred_results
+        if instructions is not None:
+            kwargs["instructions"] = instructions
+        async with agent.run_stream(prompt, **kwargs) as streamed:
+            try:
+                async for delta in streamed.stream_text(delta=True):
+                    self._emit_text(former, emit_chunk, delta)
+            except UserError:
+                pass  # F2：纯工具响应（无文本部分），stream_text 不可用属正常
+            output = await streamed.get_output()
+            messages = streamed.all_messages()
+            usage = streamed.usage
+        return output, messages, usage
+
+    @staticmethod
+    def _emit_text(
+        former: ChunkFormer, emit_chunk: ChunkSink, text: str
+    ) -> None:
+        if not text:
+            return
+        for chunk in former.feed(text):
+            emit_chunk(chunk)
+
+    @staticmethod
+    def _flush(former: ChunkFormer, emit_chunk: ChunkSink) -> None:
+        """收尾：尾块（不足一窗的留存）落盘；digest 与 final_sequence_no 由 Worker
+        按 visible_text 与已收块数自行封口（提交顺序归 Worker）。"""
+        tail, _digest, _count = former.finish()
+        for chunk in tail:
+            emit_chunk(chunk)
+
+    @staticmethod
+    def _reject_mixed_stream(
+        work: RunWork,
+        messages: Any,
+        action_only_retry: bool,
+        allow_bridged_action: bool,
+        former: ChunkFormer,
+        usage: Any,
+    ) -> DeferredToolRequests | None:
+        """F1 混流检测（契约 §3.3，原型 _reject_mixed_stream 蓝本）：流式路径的
+        关键失败模式防护（本原型实测确认于 2.9.0）——模型在同一流式响应里既给
+        deferred 工具调用又给文本时，get_output() 静默返回 str 并丢失 deferred
+        请求。首轮命中即 fail closed 抛 MixedStreamError，交 Worker abort + 规范
+        轮重试，不得静默放行文本。纯动作重试轮仍返回 str（再混流或模型拒不提
+        动作）同样 fail closed，由 Worker 走规范化失败，不再调用模型。
+
+        例外——空尾部重试轮（allow_bridged_action）：全文已放行、无尾部可重放，
+        过渡说明指令允许模型在同响应附过渡 TextPart + deferred 动作；2.9.0 下
+        output 仍为 str，但动作在最后 ModelResponse 中并未丢失，显式提取为
+        DeferredToolRequests 闭环（不依赖 output 类型，无静默丢弃）。异常携带
+        混流轮已流出的全部可见文本（含未满窗缓冲）与该轮真实模型用量，供
+        Worker 截取未放行尾部重放并把用量聚合进最终 commit。"""
+        streamed_text = former.full_text
+        usage_payload = PydanticAIOrchestrator._usage_payload(usage)
+        bridged_calls: list = []
+        if messages:
+            deferred_names = {
+                grant.tool_name
+                for grant in work.tool_grants
+                if grant.effect == "side_effect"
+            }
+            last = messages[-1]
+            if isinstance(last, ModelResponse):
+                bridged_calls = [
+                    part
+                    for part in last.parts
+                    if isinstance(part, ToolCallPart)
+                    and part.tool_name in deferred_names
+                ]
+        if action_only_retry:
+            if allow_bridged_action and bridged_calls:
+                return DeferredToolRequests(calls=bridged_calls)
+            raise MixedStreamError(
+                "纯动作重试轮仍返回文本输出，动作无法确定", streamed_text, usage_payload
+            )
+        if bridged_calls:
+            raise MixedStreamError(
+                "流式响应混合了文本与 deferred 动作，框架会静默丢弃动作",
+                streamed_text,
+                usage_payload,
+            )
+        return None
+
+    @staticmethod
+    def _usage_payload(usage: Any) -> dict[str, Any]:
+        """RunUsage → commit usage 载荷（与 OrchestratorResult.usage 同结构）。"""
+        return {
+            "input_units": usage.input_tokens,
+            "output_units": usage.output_tokens,
+            "requests": usage.requests,
+        }
 
     @staticmethod
     def _replay_read_resource(messages: Any, gate: ResourceGate) -> None:
@@ -424,22 +647,6 @@ class PydanticAIOrchestrator:
             description=None,
             json_schema=dict(grant.argument_schema),
         )
-
-    @staticmethod
-    def _model_visible_text(run_result: Any) -> str:
-        """提取模型本轮可见文本：纯文本轮取 output，deferred 动作轮取最后 ModelResponse 的 TextPart。
-
-        动作提议轮与终态轮不再用固定文案替换模型文本——可见文本一律来自模型自身输出，
-        「deferred 动作轮无可见文本」作为模型行为的直接不变量（Worker 不制造文案）。
-        """
-        output = run_result.output
-        if isinstance(output, str):
-            return output.strip()
-        for message in reversed(run_result.all_messages()):
-            for part in message.parts:
-                if isinstance(part, TextPart) and part.content.strip():
-                    return part.content.strip()
-        return ""
 
     def _read_tool_factory(
         self, tool_name: str
@@ -569,13 +776,21 @@ class PydanticAIOrchestrator:
 
     @staticmethod
     def _failure(
-        work: RunWork, code: str, message: str = "编排暂时无法继续。"
+        work: RunWork,
+        code: str,
+        message: str,
+        former: ChunkFormer,
+        emit_chunk: ChunkSink,
     ) -> OrchestratorResult:
         # visible_text 固定产品中性文案；error.message 携带规范化错误码对应的脱敏说明，
-        # 供 Java 控制面按 code 做确定性重试或告警（契约 §6）。
+        # 供 Java 控制面按 code 做确定性重试或告警（契约 §6）。流式形态下失败文案同样
+        # 经 ChunkFormer 分块进入协议，与 commit visible_text 逐字节一致。
+        visible_text = "编排暂时无法继续。"
+        PydanticAIOrchestrator._emit_text(former, emit_chunk, visible_text)
+        PydanticAIOrchestrator._flush(former, emit_chunk)
         return OrchestratorResult(
             commit_id=f"pydantic-ai-{work.agent_run_id}-{work.run_version}",
-            visible_text="编排暂时无法继续。",
+            visible_text=visible_text,
             checkpoint=RuntimeCheckpoint(
                 engine=ENGINE,
                 engine_version=ENGINE_VERSION,

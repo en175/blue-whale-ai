@@ -1,7 +1,11 @@
 # Assistant 回复流尝试（AssistantMessageStreamAttempt）abort 与重跑契约
 
 - **状态**：Accepted for implementation
-- **契约版本**：1
+- **契约版本**：2
+- **修订记录**：版本 2（2026-07-23，IK3BG3 实施定稿）——明确 F1 重试轮的文本承接
+  规则：新尝试以新 stream_id 经新尝试审核门确定性重放「未放行尾部」，已放行前缀
+  保留在 aborted 消息中不得重复重放；空尾部（全文已放行）时模型可附简短过渡说明
+  以满足 commit 可见文本非空约束。
 - **关联工单**：[扩展回复流尝试的 abort 与重跑契约](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3GIM)
 - **下游消费**：[迁入真流式链路并落地 F1/F3 fail-closed 规则](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3BG3)
 - **前置契约**：[Runtime Agent Bundle 领域契约与资源规范](2026-07-20-runtime-agent-bundle-contract.md)、[ADR-0025 证据门控流式输出](../adr/0025-evidence-gated-agent-text-streaming.md)、[ADR-0043 AgentRun 终态](../adr/0043-agent-run-terminal-outcomes.md)
@@ -74,7 +78,7 @@ POST /internal/agent-runs/{runId}/assistant-messages/abort
 |---|---|---|
 | `CANCELLED` | Worker | 用户取消，F3 整流 abort |
 | `DISCONNECT` | Worker | 传输断连前主动 abort |
-| `PROTOCOL_MIXED_STREAM` | Worker | F1 检测到文本与 deferred 动作混流，fail closed |
+| `PROTOCOL_MIXED_STREAM` | Worker | F1 检测到文本与 deferred 动作混流，fail closed；规范轮以新 `stream_id` 确定性重放「未放行尾部」（经新尝试审核门放行），已放行前缀保留在 aborted 消息中不得重复重放；空尾部（全文已放行）时模型可附简短过渡说明以满足 commit 可见文本非空约束 |
 | `LEASE_TAKEOVER` | Java | 租约接管时兜底 abort 遗留活动尝试 |
 | `SUPERSEDED` | Java | Run 被同会话新目标取代时兜底 abort 遗留活动尝试 |
 
@@ -109,3 +113,11 @@ reason code 是稳定契约值；新增取值必须先修订本文档。
    新增 `409 + 业务码 100305` → `StreamAttemptExhaustedError`；其余错误（含
    `409 + 100302` 幂等冲突）维持崩溃重试。
 3. F1/F3 的检测、编排与重跑由 IK3BG3 实现；本契约只提供控制面能力。
+4. F1 重试轮的文本承接规则（Worker 侧，配合 §3.3）：Worker 按 abort 响应的
+   `released_sequence_no` 截取混流轮文本的未放行尾部（流式期间 chunk 均为
+   64 字符满窗块，已放行字符数 = `released_sequence_no` × 64），在新尝试中经
+   ChunkFormer 确定性重放并通过新尝试的审核门；commit 的 `visible_text` 只须与
+   本尝试流内容逐字节相等。空尾部时 Worker 向模型追加过渡说明指令，模型可附
+   一句简短过渡说明作为本尝试可见文本；模型仍零可见文本则 fail closed 走
+   规范化失败。abort 未送达时不做尾部推算，重试 `start` 因遗留活动尝试冲突
+   收敛到既有 409 分类，由 §4 的 LEASE_TAKEOVER 兜底。

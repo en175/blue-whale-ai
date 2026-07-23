@@ -1,7 +1,6 @@
 import unittest
 
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
-from pydantic_ai.models.function import FunctionModel
 
 from blue_whale_agent_worker.bundle.errors import (
     BUNDLE_TOKEN_BUDGET_EXCEEDED,
@@ -10,7 +9,12 @@ from blue_whale_agent_worker.bundle.errors import (
 from blue_whale_agent_worker.contracts import ToolGrant
 from blue_whale_agent_worker.pydantic_orchestrator import PydanticAIOrchestrator
 
-from test_pydantic_orchestrator import _bundle_source, _pydantic_work
+from test_pydantic_orchestrator import (
+    _advance,
+    _bundle_source,
+    _pydantic_work,
+    streaming_model,
+)
 
 
 def _creative_grant(tool_name: str) -> ToolGrant:
@@ -116,16 +120,14 @@ class CreativeContextReadToolTest(unittest.TestCase):
     def test_list_canvas_nodes_calls_source_and_records_evidence(self) -> None:
         ctx = _FakeCreativeContextSource()
         orch = PydanticAIOrchestrator(
-            FunctionModel(_tool_then_text_model("list_canvas_nodes")),
+            streaming_model(_tool_then_text_model("list_canvas_nodes")),
             _bundle_source(),
             creative_context_source=ctx,
         )
-        result = orch.advance(
-            _pydantic_work(
+        result = _advance(orch, _pydantic_work(
                 messages=({"role": "user", "content": "画布上有啥"},),
                 tool_grants=(_creative_grant("list_canvas_nodes"),),
-            )
-        )
+            ))
         self.assertIsNone(result.error)
         self.assertEqual(ctx.canvas_nodes_calls, [(23, None)])
         evidence = _context_evidence(result.bundle_evidence)
@@ -135,16 +137,14 @@ class CreativeContextReadToolTest(unittest.TestCase):
     def test_read_canvas_node_passes_node_id(self) -> None:
         ctx = _FakeCreativeContextSource()
         orch = PydanticAIOrchestrator(
-            FunctionModel(_tool_then_text_model("read_canvas_node", {"node_id": "n1"})),
+            streaming_model(_tool_then_text_model("read_canvas_node", {"node_id": "n1"})),
             _bundle_source(),
             creative_context_source=ctx,
         )
-        result = orch.advance(
-            _pydantic_work(
+        result = _advance(orch, _pydantic_work(
                 messages=({"role": "user", "content": "看那个节点"},),
                 tool_grants=(_creative_grant("read_canvas_node"),),
-            )
-        )
+            ))
         self.assertIsNone(result.error)
         self.assertEqual(ctx.canvas_node_calls, [(23, "n1")])
         evidence = _context_evidence(result.bundle_evidence)
@@ -153,16 +153,14 @@ class CreativeContextReadToolTest(unittest.TestCase):
     def test_read_asset_passes_asset_id(self) -> None:
         ctx = _FakeCreativeContextSource()
         orch = PydanticAIOrchestrator(
-            FunctionModel(_tool_then_text_model("read_asset", {"asset_id": 5})),
+            streaming_model(_tool_then_text_model("read_asset", {"asset_id": 5})),
             _bundle_source(),
             creative_context_source=ctx,
         )
-        result = orch.advance(
-            _pydantic_work(
+        result = _advance(orch, _pydantic_work(
                 messages=({"role": "user", "content": "那张图啥样"},),
                 tool_grants=(_creative_grant("read_asset"),),
-            )
-        )
+            ))
         self.assertIsNone(result.error)
         self.assertEqual(ctx.asset_calls, [(23, 5)])
         evidence = _context_evidence(result.bundle_evidence)
@@ -171,16 +169,14 @@ class CreativeContextReadToolTest(unittest.TestCase):
     def test_read_generation_job_status_passes_job_id(self) -> None:
         ctx = _FakeCreativeContextSource()
         orch = PydanticAIOrchestrator(
-            FunctionModel(_tool_then_text_model("read_generation_job_status", {"job_id": 9})),
+            streaming_model(_tool_then_text_model("read_generation_job_status", {"job_id": 9})),
             _bundle_source(),
             creative_context_source=ctx,
         )
-        result = orch.advance(
-            _pydantic_work(
+        result = _advance(orch, _pydantic_work(
                 messages=({"role": "user", "content": "图好了吗"},),
                 tool_grants=(_creative_grant("read_generation_job_status"),),
-            )
-        )
+            ))
         self.assertIsNone(result.error)
         self.assertEqual(ctx.job_status_calls, [(23, 9)])
         evidence = _context_evidence(result.bundle_evidence)
@@ -189,16 +185,14 @@ class CreativeContextReadToolTest(unittest.TestCase):
     def test_list_creative_skills_calls_source(self) -> None:
         ctx = _FakeCreativeContextSource()
         orch = PydanticAIOrchestrator(
-            FunctionModel(_tool_then_text_model("list_creative_skills")),
+            streaming_model(_tool_then_text_model("list_creative_skills")),
             _bundle_source(),
             creative_context_source=ctx,
         )
-        result = orch.advance(
-            _pydantic_work(
+        result = _advance(orch, _pydantic_work(
                 messages=({"role": "user", "content": "有哪些技能"},),
                 tool_grants=(_creative_grant("list_creative_skills"),),
-            )
-        )
+            ))
         self.assertIsNone(result.error)
         self.assertEqual(ctx.creative_skills_calls, [23])
         evidence = _context_evidence(result.bundle_evidence)
@@ -211,23 +205,21 @@ class CreativeContextBudgetAndGrantTest(unittest.TestCase):
         ctx = _FakeCreativeContextSource()
         ctx.asset_payload = {"asset_id": 5, "blob": "x" * 8000}
         orch = PydanticAIOrchestrator(
-            FunctionModel(_tool_then_text_model("read_asset", {"asset_id": 5})),
+            streaming_model(_tool_then_text_model("read_asset", {"asset_id": 5})),
             _bundle_source(),
             creative_context_source=ctx,
         )
-        result = orch.advance(
-            _pydantic_work(
+        result = _advance(orch, _pydantic_work(
                 messages=({"role": "user", "content": "读素材"},),
                 tool_grants=(_creative_grant("read_asset"),),
-            )
-        )
+            ))
         self.assertIsNotNone(result.error)
         self.assertEqual(result.error["code"], BUNDLE_TOKEN_BUDGET_EXCEEDED)
 
     def test_grant_effect_mismatch_fails_closed(self) -> None:
         ctx = _FakeCreativeContextSource()
         orch = PydanticAIOrchestrator(
-            FunctionModel(_tool_then_text_model("read_asset", {"asset_id": 5})),
+            streaming_model(_tool_then_text_model("read_asset", {"asset_id": 5})),
             _bundle_source(),
             creative_context_source=ctx,
         )
@@ -239,27 +231,23 @@ class CreativeContextBudgetAndGrantTest(unittest.TestCase):
             argument_schema={"type": "object"},
             constraints={},
         )
-        result = orch.advance(
-            _pydantic_work(
+        result = _advance(orch, _pydantic_work(
                 messages=({"role": "user", "content": "读素材"},),
                 tool_grants=(mismatch,),
-            )
-        )
+            ))
         self.assertIsNotNone(result.error)
         self.assertEqual(result.error["code"], "ORCHESTRATOR_CONTRACT_MISMATCH")
 
     def test_unknown_creative_tool_fails_closed(self) -> None:
         # 授权表里没有 read_asset 时（source 未注入）工具不可见 → grant 不匹配。
         orch = PydanticAIOrchestrator(
-            FunctionModel(_tool_then_text_model("read_asset", {"asset_id": 5})),
+            streaming_model(_tool_then_text_model("read_asset", {"asset_id": 5})),
             _bundle_source(),
         )
-        result = orch.advance(
-            _pydantic_work(
+        result = _advance(orch, _pydantic_work(
                 messages=({"role": "user", "content": "读素材"},),
                 tool_grants=(_creative_grant("read_asset"),),
-            )
-        )
+            ))
         self.assertIsNotNone(result.error)
         self.assertEqual(result.error["code"], "ORCHESTRATOR_CONTRACT_MISMATCH")
 
