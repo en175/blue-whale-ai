@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS agent_runs
     lease_owner VARCHAR(128) NULL,
     lease_expires_at DATETIME NULL,
     fencing_token BIGINT NOT NULL DEFAULT 0,
+    error_code VARCHAR(96) NULL,
+    error_message VARCHAR(1024) NULL,
     gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version INT NOT NULL DEFAULT 0,

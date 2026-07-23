@@ -1,8 +1,14 @@
 import unittest
 from unittest.mock import patch
+import io
 import json
+from urllib.error import HTTPError
 
-from blue_whale_agent_worker.http_gateway import JavaRunGateway, run_work_from_payload
+from blue_whale_agent_worker.http_gateway import (
+    AgentRunConflictError,
+    JavaRunGateway,
+    run_work_from_payload,
+)
 
 
 class FakeResponse:
@@ -291,6 +297,48 @@ class BundleFetchContractTest(unittest.TestCase):
         # 单资源响应为 snake_case metadata + content
         self.assertEqual("# Role\n", fetched["content"])
         self.assertEqual("role_main", fetched["resource_id"])
+
+
+class CommitConflictClassificationTest(unittest.TestCase):
+    """IK3BG2：409/AGENT_RUN_CONFLICT 映射为专用冲突错误类型，与其余 RuntimeError 区分。"""
+
+    @staticmethod
+    def _http_error(code: int, body: bytes) -> HTTPError:
+        return HTTPError("http://java.test/x", code, "error", None, io.BytesIO(body))
+
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_agent_run_conflict_409_maps_to_dedicated_error(self, mocked_urlopen) -> None:
+        mocked_urlopen.side_effect = self._http_error(
+            409,
+            json.dumps(
+                {"code": 100303, "msg": "AgentRun 状态冲突", "data": None}
+            ).encode("utf-8"),
+        )
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+
+        with self.assertRaises(AgentRunConflictError):
+            gateway.commit(23, {"commit_id": "c-1"})
+
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_other_http_errors_stay_crash_retry_runtime_error(self, mocked_urlopen) -> None:
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+        cases = [
+            # 同为 409 但非 AGENT_RUN_CONFLICT（如 IDEMPOTENCY_KEY_REUSED）维持崩溃重试
+            self._http_error(
+                409,
+                json.dumps({"code": 100302, "msg": "idempotency", "data": None}).encode("utf-8"),
+            ),
+            # 非 409 状态码
+            self._http_error(500, b"oops"),
+            # 409 但响应体非 JSON 信封（代理/网关原文）
+            self._http_error(409, b"<html>proxy</html>"),
+        ]
+        for error in cases:
+            with self.subTest(error=error.code):
+                mocked_urlopen.side_effect = error
+                with self.assertRaises(RuntimeError) as caught:
+                    gateway.commit(23, {"commit_id": "c-1"})
+                self.assertNotIsInstance(caught.exception, AgentRunConflictError)
 
 
 if __name__ == "__main__":
