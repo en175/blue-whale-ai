@@ -1,0 +1,14 @@
+[
+  {
+    "creative_skill_id": "cs_poster_design",
+    "name": "poster-design",
+    "description": "海报设计创作方法：从主题到版式的分步工作流。",
+    "activation_eligibility": "requires_user_use"
+  },
+  {
+    "creative_skill_id": "cs_storyboard",
+    "name": "storyboard",
+    "description": "分镜脚本创作方法：按节拍拆解叙事。",
+    "activation_eligibility": "requires_user_use"
+  }
+]

@@ -1,0 +1,419 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.blue-whale.ai/creative-skill-activation/v1/schema.json",
+  "title": "Blue-Whale Creative Skill Activation Contract",
+  "description": "Creative Skill selection and activation payloads exchanged between Web, Java Product API and Python Agent Worker. Wire shape is snake_case end to end. Sequence, idempotency and fail-closed semantics are defined in the companion specification.",
+  "$defs": {
+    "CreativeSkillId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,79}$"
+    },
+    "CreativeSkillVersionId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,79}$"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "DisplayVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "ResourcePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+    },
+    "IdempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "SkillName": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+    },
+    "SkillDescription": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "MessageCreativeSkillSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "forced_creative_skill_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CreativeSkillId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "AutoCreativeSkillCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "creative_skill_id",
+        "creative_skill_version_id",
+        "name",
+        "description",
+        "display_version",
+        "resource_digest"
+      ],
+      "properties": {
+        "creative_skill_id": {
+          "$ref": "#/$defs/CreativeSkillId"
+        },
+        "creative_skill_version_id": {
+          "$ref": "#/$defs/CreativeSkillVersionId"
+        },
+        "name": {
+          "$ref": "#/$defs/SkillName"
+        },
+        "description": {
+          "$ref": "#/$defs/SkillDescription"
+        },
+        "display_version": {
+          "$ref": "#/$defs/DisplayVersion"
+        },
+        "resource_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "ForcedUseReason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "user_use"
+        }
+      }
+    },
+    "AutoMatchDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "matched_fields"
+      ],
+      "properties": {
+        "matched_fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "conversation_messages",
+              "conversation_summary",
+              "canvas_nodes",
+              "project_metadata"
+            ]
+          }
+        }
+      }
+    },
+    "AutoMatchReason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "detail"
+      ],
+      "properties": {
+        "type": {
+          "const": "agent_match"
+        },
+        "detail": {
+          "$ref": "#/$defs/AutoMatchDetail"
+        }
+      }
+    },
+    "CreativeSkillActivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "creative_skill_id",
+        "creative_skill_version_id",
+        "source",
+        "reason",
+        "resource_digest"
+      ],
+      "properties": {
+        "creative_skill_id": {
+          "$ref": "#/$defs/CreativeSkillId"
+        },
+        "creative_skill_version_id": {
+          "$ref": "#/$defs/CreativeSkillVersionId"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "forced_use",
+            "auto"
+          ]
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ForcedUseReason"
+            },
+            {
+              "$ref": "#/$defs/AutoMatchReason"
+            }
+          ]
+        },
+        "resource_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "forced_use"
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "$ref": "#/$defs/ForcedUseReason"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "auto"
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "$ref": "#/$defs/AutoMatchReason"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "RunWorkCreativeSkillFields": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "auto_creative_skill_candidates",
+        "activated_creative_skill_versions"
+      ],
+      "properties": {
+        "auto_creative_skill_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AutoCreativeSkillCandidate"
+          }
+        },
+        "activated_creative_skill_versions": {
+          "type": "array",
+          "maxItems": 1,
+          "items": {
+            "$ref": "#/$defs/CreativeSkillActivation"
+          }
+        }
+      }
+    },
+    "ActivateCreativeSkillRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "expected_run_version",
+        "creative_skill_id",
+        "creative_skill_version_id",
+        "reason"
+      ],
+      "properties": {
+        "idempotency_key": {
+          "$ref": "#/$defs/IdempotencyKey"
+        },
+        "expected_run_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "creative_skill_id": {
+          "$ref": "#/$defs/CreativeSkillId"
+        },
+        "creative_skill_version_id": {
+          "$ref": "#/$defs/CreativeSkillVersionId"
+        },
+        "reason": {
+          "$ref": "#/$defs/AutoMatchReason"
+        }
+      }
+    },
+    "ActivateCreativeSkillResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accepted",
+        "activation",
+        "run_version"
+      ],
+      "properties": {
+        "accepted": {
+          "const": true
+        },
+        "activation": {
+          "$ref": "#/$defs/CreativeSkillActivation"
+        },
+        "run_version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "CreativeSkillBodyResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "creative_skill_id",
+        "creative_skill_version_id",
+        "media_type",
+        "body",
+        "content_digest"
+      ],
+      "properties": {
+        "creative_skill_id": {
+          "$ref": "#/$defs/CreativeSkillId"
+        },
+        "creative_skill_version_id": {
+          "$ref": "#/$defs/CreativeSkillVersionId"
+        },
+        "media_type": {
+          "const": "text/markdown"
+        },
+        "body": {
+          "type": "string"
+        },
+        "content_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "CreativeSkillReferenceResourceResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "creative_skill_id",
+        "creative_skill_version_id",
+        "resource_path",
+        "media_type",
+        "content",
+        "content_digest"
+      ],
+      "properties": {
+        "creative_skill_id": {
+          "$ref": "#/$defs/CreativeSkillId"
+        },
+        "creative_skill_version_id": {
+          "$ref": "#/$defs/CreativeSkillVersionId"
+        },
+        "resource_path": {
+          "$ref": "#/$defs/ResourcePath"
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+(?:;.*)?$"
+        },
+        "content": {
+          "type": "string"
+        },
+        "content_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "CreativeSkillRecommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "creative_skill_id",
+        "name",
+        "description",
+        "activation_eligibility"
+      ],
+      "properties": {
+        "creative_skill_id": {
+          "$ref": "#/$defs/CreativeSkillId"
+        },
+        "name": {
+          "$ref": "#/$defs/SkillName"
+        },
+        "description": {
+          "$ref": "#/$defs/SkillDescription"
+        },
+        "activation_eligibility": {
+          "const": "requires_user_use"
+        }
+      }
+    },
+    "RunCreativeSkillRecommendationsResponse": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CreativeSkillRecommendation"
+      }
+    },
+    "CreativeSkillActivationErrorCode": {
+      "type": "string",
+      "enum": [
+        "CREATIVE_SKILL_UNAVAILABLE",
+        "CREATIVE_SKILL_VERSION_UNAVAILABLE",
+        "CREATIVE_SKILL_SELECTION_NOT_ALLOWED",
+        "CREATIVE_SKILL_NOT_A_CANDIDATE",
+        "CREATIVE_SKILL_ALREADY_ACTIVATED",
+        "AGENT_RUN_CONFLICT",
+        "IDEMPOTENCY_KEY_REUSED",
+        "CREATIVE_SKILL_CONTENT_MISSING",
+        "CREATIVE_SKILL_DIGEST_MISMATCH"
+      ]
+    },
+    "CreativeSkillActivationError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/CreativeSkillActivationErrorCode"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    }
+  },
+  "$comment": "Acceptance additionally requires Java-side checks JSON Schema alone cannot express: candidate membership of an auto activation request, single activation per AgentRun, version/digest equality against the pinned version, and idempotent replay of the acceptance response."
+}

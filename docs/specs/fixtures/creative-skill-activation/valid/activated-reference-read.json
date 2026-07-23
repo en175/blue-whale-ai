@@ -1,0 +1,8 @@
+{
+  "creative_skill_id": "cs_poster_design",
+  "creative_skill_version_id": "csv_poster_design_1_0_0",
+  "resource_path": "references/layout-checklist.md",
+  "media_type": "text/markdown",
+  "content": "- 对齐网格\n- 检查留白比例",
+  "content_digest": "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+}

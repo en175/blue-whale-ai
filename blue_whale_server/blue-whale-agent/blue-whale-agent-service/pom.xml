@@ -114,10 +114,23 @@
                 <directory>../../../docs/specs</directory>
                 <includes>
                     <include>runtime-agent-bundle.schema.json</include>
+                    <include>creative-skill-activation.schema.json</include>
                 </includes>
                 <targetPath>schema</targetPath>
             </resource>
         </resources>
+        <testResources>
+            <testResource>
+                <directory>src/test/resources</directory>
+            </testResource>
+            <testResource>
+                <directory>../../../docs/specs/fixtures</directory>
+                <includes>
+                    <include>creative-skill-activation/**</include>
+                </includes>
+                <targetPath>fixtures</targetPath>
+            </testResource>
+        </testResources>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

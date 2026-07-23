@@ -248,44 +248,6 @@
       ],
       "unevaluatedProperties": false
     },
-    "CreativeSkill": {
-      "type": "object",
-      "allOf": [
-        {
-          "$ref": "#/$defs/ResourceBase"
-        },
-        {
-          "type": "object",
-          "required": [
-            "kind",
-            "creativeSkillId",
-            "version",
-            "metadata"
-          ],
-          "properties": {
-            "kind": {
-              "const": "creative_skill"
-            },
-            "creativeSkillId": {
-              "$ref": "#/$defs/Identifier"
-            },
-            "version": {
-              "$ref": "#/$defs/SemVer"
-            },
-            "loadMode": {
-              "const": "on_demand"
-            },
-            "mediaType": {
-              "const": "text/markdown"
-            },
-            "metadata": {
-              "$ref": "#/$defs/SkillMetadata"
-            }
-          }
-        }
-      ],
-      "unevaluatedProperties": false
-    },
     "ReferenceResource": {
       "type": "object",
       "allOf": [
