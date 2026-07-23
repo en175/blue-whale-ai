@@ -13,6 +13,7 @@ import type { VideoModelCapability } from "../../api/generation";
 import type { DockMediaItem, GenerateArgs, PrefillSignal, SelectOption } from "../../types";
 import { ImageDockContent } from "./ImageDockContent";
 import { VideoDockContent } from "./VideoDockContent";
+import { AudioDockContent } from "./AudioDockContent";
 import { extractEditor, insertMention, removeMention, type MentionItem } from "./mention";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 
@@ -21,8 +22,10 @@ export function BottomDock({
   onClose,
   imageMedia = [],
   videoMedia = [],
+  audioMedia = [],
   onRemoveImageMedia,
   onRemoveVideoMedia,
+  onRemoveAudioMedia,
   onLocalUpload,
   onPickFromCanvas,
   onExitPick,
@@ -40,12 +43,14 @@ export function BottomDock({
   dockMentionSignal,
   prefillSignal,
 }: {
-  mode: "image" | "video";
+  mode: "image" | "video" | "audio";
   onClose: () => void;
   imageMedia?: DockMediaItem[];
   videoMedia?: DockMediaItem[];
+  audioMedia?: DockMediaItem[];
   onRemoveImageMedia?: (id: string) => void;
   onRemoveVideoMedia?: (id: string) => void;
+  onRemoveAudioMedia?: (id: string) => void;
   /** 本地上传（建画布节点 + 入对应 Dock media） */
   onLocalUpload?: (file: File) => void;
   /** 进入画布选择模式 */
@@ -301,6 +306,23 @@ export function BottomDock({
                   onExitPick={onExitPick}
                   isPicking={isPicking}
                   onGenerate={(s) => onGenerate?.(input, { mode: "image", settings: s, referenceImages: mentions })}
+                  generating={generating}
+                  onPreviewMedia={setPreviewItem}
+                  prefillSignal={prefillSignal}
+                />
+              ) : mode === "audio" ? (
+                <AudioDockContent
+                  editorRef={editorRef}
+                  isEmpty={isEmpty}
+                  onInput={handleInput}
+                  onClose={onClose}
+                  media={audioMedia}
+                  onRemoveMedia={onRemoveAudioMedia}
+                  onLocalUpload={onLocalUpload}
+                  onPickFromCanvas={onPickFromCanvas}
+                  onExitPick={onExitPick}
+                  isPicking={isPicking}
+                  onGenerate={(s) => onGenerate?.(input, { mode: "audio", settings: s })}
                   generating={generating}
                   onPreviewMedia={setPreviewItem}
                   prefillSignal={prefillSignal}
