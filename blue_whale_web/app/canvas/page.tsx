@@ -462,7 +462,7 @@ function CanvasPageInner() {
             newCommandIdentity(),
           );
           setGenerateError(null);
-        } else {
+        } else if (args.mode === "video") {
           if (videoDockMedia.length > 1) {
             throw new Error("视频参考素材数量超出限制");
           }

@@ -1,6 +1,6 @@
 ## Why
 
-画布前端 `NodeItem` 混 `imageUrl + assetId + status/progress/selected`（临时态落库）、无 NodeKind registry、工作流无底层；后端生成已返回 assetId 但前端 `page.tsx` 丢弃（IK2BJK 点名的「未完成迁移」）。加媒介/未来工作流都要返工。需一次建到位 canvas-studio 式分层底座（L0-L5），从底层支持工作流，Zustand 管状态，不动后端。
+画布前端 `NodeItem` 混 `imageUrl + assetId + status/progress/selected`（临时态落库）、无 NodeKind registry、工作流无底层；后端生成已返回 assetId 但前端 `page.tsx` 丢弃（IK2BJK 点名的「未完成迁移」）。加媒介/未来工作流都要返工。需一次建到位分层底座（L0-L5），从底层支持工作流，Zustand 管状态，不动后端。
 
 ## What Changes
 

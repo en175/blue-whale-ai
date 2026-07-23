@@ -59,6 +59,25 @@ export type PendingMention = {
   type?: "image" | "video" | "audio";
 };
 
+/** 重新编辑时从节点 recipe 回填底部栏的参数快照（P2：recipe.generation → Dock 预填）。 */
+export type DockPrefill = {
+  prompt?: string;
+  modelId?: string;
+  aspectRatio?: string;
+  resolution?: string;
+  quantity?: number;
+  duration?: number;
+  sampleRate?: number;
+  format?: string;
+  refMode?: string;
+  firstFrameUrl?: string;
+  lastFrameUrl?: string;
+  references?: { url: string; kind: "image" | "video" | "audio" }[];
+};
+
+/** 预填信号：nonce 递增触发 effect 把 prefill 应用到 Dock（仿 focusSignal/dockMentionSignal）。 */
+export type PrefillSignal = { nonce: number; prefill: DockPrefill };
+
 /** 视口。字段对齐 RF `Viewport`：`scale` 改名 `zoom`（BREAKING，见 design D5）。 */
 export type Viewport = {
   x: number;
@@ -126,6 +145,14 @@ export type ImageGenerateSettings = {
   sequential: boolean;
 };
 
+/** 音频 Dock 生成设置（IJZXW7-B；模型/参数 mock，后端音频生成就绪换 catalog）。 */
+export type AudioGenerateSettings = {
+  model: SelectOption;
+  duration: number;
+  sampleRate: number;
+  format: SelectOption;
+};
+
 /** 视频 Dock 生成设置（BottomDock 自持 state 透传）。 */
 export type VideoGenerateSettings = {
   model: SelectOption;
@@ -138,8 +165,13 @@ export type VideoGenerateSettings = {
 
 /** 生成请求参数：discriminated union，按 mode narrow settings。 */
 export type GenerateArgs =
-  | { mode: "image"; settings: ImageGenerateSettings }
-  | { mode: "video"; settings: VideoGenerateSettings };
+  | {
+      mode: "image";
+      settings: ImageGenerateSettings;
+      referenceImages?: string[];
+    }
+  | { mode: "video"; settings: VideoGenerateSettings }
+  | { mode: "audio"; settings: AudioGenerateSettings };
 
 export type ImageDockContentProps = {
   editorRef: React.RefObject<HTMLDivElement | null>;
@@ -162,6 +194,26 @@ export type ImageDockContentProps = {
   generating?: boolean;
   /** 点击缩略图预览素材 */
   onPreviewMedia?: (item: DockMediaItem) => void;
+};
+
+/** 音频 Dock 内容 props（IJZXW7-B；自持 mock 模型/参数，仿 ImageDockContentProps）。 */
+export type AudioDockContentProps = {
+  editorRef: React.RefObject<HTMLDivElement | null>;
+  isEmpty: boolean;
+  onInput: () => void;
+  onClose: () => void;
+  media?: DockMediaItem[];
+  onRemoveMedia?: (id: string) => void;
+  /** 本地上传音频：Dock 内 file input 选定文件后上抛，由页面层建画布节点 + 入 media */
+  onLocalUpload?: (file: File) => void;
+  /** 从画布选择：可选图/视/音节点作参考 */
+  onPickFromCanvas?: () => void;
+  onExitPick?: () => void;
+  isPicking?: boolean;
+  onGenerate?: (settings: AudioGenerateSettings) => void;
+  generating?: boolean;
+  onPreviewMedia?: (item: DockMediaItem) => void;
+  prefillSignal?: PrefillSignal;
 };
 
 export type VideoDockContentProps = {

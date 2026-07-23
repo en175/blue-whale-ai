@@ -134,3 +134,44 @@ export function retryMissingProjectGenerationJobOutputs(
     },
   );
 }
+
+/** 音频生成 payload（IJZXW7-B；签名对齐 image/video，后端音频生成就绪后直接用）。 */
+export type AudioGeneratePayload = {
+  prompt: string;
+  projectId: number;
+  modelId?: string;
+  duration?: number;
+  sampleRate?: number;
+  format?: string;
+  referenceAudios?: string[];
+  referenceImages?: string[];
+  referenceVideos?: string[];
+};
+
+export type AudioGenerateResponse = {
+  url: string;
+  assetId: number;
+  jobId?: number;
+};
+
+/**
+ * ⚠️ MOCK（IJZXW7-B 占位）：后端暂无音频生成 provider，前端 mock 兜底——
+ * 固定延迟 + 固定 sample url + 假 assetId，**不发真请求**。签名对齐 generateImage，
+ * 后端音频生成就绪后把实现改为 `request<AudioGenerateResponse>("/generation/audio", "POST", payload)`，
+ * 签名不变。sample 用公开音频（TODO：换本地 public/audio/sample.mp3 fixture）。
+ */
+const MOCK_AUDIO_DELAY_MS = 1500;
+const MOCK_AUDIO_SAMPLE_URL =
+  "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
+export function generateAudio(
+  payload: AudioGeneratePayload,
+): Promise<AudioGenerateResponse> {
+  void payload; // mock 不消费参数（签名保留供后端真请求）
+  const assetId = Math.floor(Date.now() % 900000) + 100000; // 假 assetId（mock，避开真 asset id 段）
+  return new Promise((resolve) => {
+    setTimeout(
+      () => resolve({ url: MOCK_AUDIO_SAMPLE_URL, assetId }),
+      MOCK_AUDIO_DELAY_MS,
+    );
+  });
+}
