@@ -301,8 +301,8 @@ public class AssistantMessageStreamService {
                 && !AssistantMessageStream.STATUS_REVIEW_FAILED.equals(stream.getStatus())) {
             throw conflict();
         }
-        abortAttempt(stream, request.idempotencyKey(), request.reasonCode());
-        return response(stream);
+        long cursor = abortAttempt(stream, request.idempotencyKey(), request.reasonCode());
+        return response(stream, cursor);
     }
 
     /**
@@ -324,8 +324,17 @@ public class AssistantMessageStreamService {
         }
     }
 
-    /** abort 终态化：保留已放行前缀、擦除未放行私有尾部、消息以 aborted 封口发终态事件。 */
-    private void abortAttempt(AssistantMessageStream stream, String idempotencyKey, String reasonCode) {
+    /**
+     * abort 终态化：保留已放行前缀、擦除未放行私有尾部、消息以 aborted 封口发终态事件。
+     * <p>content 不变量：本方法不重算 {@link ConversationMessage#getContent()}。进入本方法时
+     * stream 仅处于 streaming / review_failed 态，content 只含 OutputReleaseGate 已放行的前缀，
+     * 未放行私有尾部仅存于 chunk 行（已由 {@link #discardUnreleasedChunks} 擦除）。此不变量与
+     * {@link #closeMessageRejected} 同模式；未来若改 review_failed 写入 fullContent 路径，
+     * 勿在此误留未放行文本。
+     * <p>返回封口事件的 cursor，使 abort 响应与 start/complete 同走
+     * {@link #response(AssistantMessageStream, long)} 的精确 cursor 语义。
+     */
+    private long abortAttempt(AssistantMessageStream stream, String idempotencyKey, String reasonCode) {
         stream.setStatus(AssistantMessageStream.STATUS_ABORTED)
                 .setAbortIdempotencyKey(idempotencyKey)
                 .setAbortReasonCode(reasonCode);
@@ -334,7 +343,7 @@ public class AssistantMessageStreamService {
         ConversationMessage message = requireMessage(stream);
         message.setStatus(AssistantMessageStream.STATUS_ABORTED);
         messageMapper.updateById(message);
-        appendMessageEvent(
+        return appendMessageEvent(
                 stream, message, EventType.CONVERSATION_MESSAGE_COMPLETED,
                 stream.getLastSequenceNo() + 1, idempotencyKey);
     }

@@ -1,6 +1,7 @@
 package com.blue.whale.agent;
 
 import com.blue.whale.agent.model.entity.Project;
+import com.blue.whale.agent.model.entity.ProjectEvent;
 import com.blue.whale.agent.service.ProjectEventService;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
@@ -172,11 +173,21 @@ class AssistantMessageStreamAttemptIT extends AssistantMessageStreamITBase {
                 + "\",\"idempotency_key\":\"chunk-boundary-2\",\"sequence_no\":2,"
                 + "\"content\":\"未放行私有尾部\"," + binding + "}")
                 .andExpect(status().isOk());
-        postStream(runId, "abort", "{\"stream_id\":\"" + streamId
+        MvcResult aborted = postStream(runId, "abort", "{\"stream_id\":\"" + streamId
                 + "\",\"idempotency_key\":\"abort-boundary\",\"reason_code\":\"PROTOCOL_MIXED_STREAM\","
                 + binding + "}")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.released_sequence_no").value(1));
+                .andExpect(jsonPath("$.data.released_sequence_no").value(1))
+                .andReturn();
+        // abort 响应 cursor 落在 abort 封口事件上，与 start/complete 同走精确 cursor 语义（非 highWatermark）。
+        long abortCursor = objectMapper.readTree(aborted.getResponse().getContentAsString())
+                .path("data").path("cursor").asLong();
+        assertThat(abortCursor).isPositive();
+        long sealedEventCursor = projectEventService.eventsAfter(project.getId(), 0, 100).stream()
+                .filter(event -> "conversation.message_completed".equals(event.getEventType()))
+                .mapToLong(ProjectEvent::getCursor)
+                .max().orElseThrow();
+        assertThat(abortCursor).isEqualTo(sealedEventCursor);
 
         // 已放行前缀保留、未放行私有尾部擦除、流与消息均 aborted 终态。
         assertThat(jdbcTemplate.queryForObject(
@@ -335,5 +346,22 @@ class AssistantMessageStreamAttemptIT extends AssistantMessageStreamITBase {
                         .header("X-User-Id", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.conversation_messages[1].status").value("aborted"));
+    }
+
+    @Test
+    void oversizedAbortStreamIdIsRejectedAtProductApiLayer() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("assistant-abort-stream-cap");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId()).path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        String binding = binding(project.getId(), work);
+
+        // abort 端点同样在 Product API 层校验 stream_id ≤64，超长收 100002。
+        postStream(runId, "abort", "{\"stream_id\":\"" + "s".repeat(65) + "\","
+                + "\"idempotency_key\":\"abort-cap\",\"reason_code\":\"CANCELLED\","
+                + binding + "}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(100002))
+                .andExpect(jsonPath("$.success").value(false));
     }
 }

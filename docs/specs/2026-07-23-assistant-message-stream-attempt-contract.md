@@ -18,6 +18,8 @@
    `aborted` 之一收口，`review_failed` 是可重试的中间态。
 2. `stream_id` 由 Worker 为每次尝试生成，是不透明标识，**不得可从 AgentRun ID 推导**。
    同一尝试的传输重试复用同一 `stream_id`；abort 后的新尝试必须使用新 `stream_id`。
+   `stream_id` 长度上限 64 字符（与 `idempotency_key` 一致），超长在 Product API 层被
+   拒绝（`100002 PARAM_BIND_ERROR`）。
 3. 每次尝试在 `start` 时建立自己的 `ConversationMessage`；任何尝试不得续写或复用
    其他尝试（尤其 aborted 尝试）的消息。
 
@@ -45,7 +47,7 @@ POST /internal/agent-runs/{runId}/assistant-messages/abort
 | 字段 | 约束 | 语义 |
 |---|---|---|
 | RunBinding 七字段 | 同 start/chunk/complete | `project_id` / `user_id` / `expected_run_version` / `fencing_token` / `engine` / `engine_version` / `adapter_schema_version`，校验语义与现有流操作完全一致 |
-| `stream_id` | 必填 | 要 abort 的尝试 |
+| `stream_id` | 必填，≤64 字符 | 要 abort 的尝试 |
 | `idempotency_key` | 必填，≤64 字符 | abort 操作的幂等键 |
 | `reason_code` | 必填，≤64 字符 | 规范化原因码，见 §3.3 |
 
@@ -85,6 +87,10 @@ reason code 是稳定契约值；新增取值必须先修订本文档。
 - 键不同或 reason 不同 → `409 IDEMPOTENCY_KEY_REUSED`；
 - Worker 主动 abort 与 Java 兜底 abort 收敛到同一终态：先到者完成收口，迟到的一方
   收到稳定、可分类的 409（幂等冲突或绑定冲突），不产生二次副作用。
+- Java 兜底 abort 的 `abort_idempotency_key` 采用合成键 `java:{reason_code}:{stream_id}`
+  （如 `java:LEASE_TAKEOVER:{stream_id}`），与 Worker 自填幂等键命名空间分离，使上述收敛
+  规则可判定：兜底 abort 与同流的 Worker 主动 abort 若都已发生，按到达先后判 409，不产生
+  二次副作用。
 
 ## 4. 租约接管与 supersede 兜底
 

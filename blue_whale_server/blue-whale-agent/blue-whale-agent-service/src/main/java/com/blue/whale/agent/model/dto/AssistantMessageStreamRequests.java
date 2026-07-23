@@ -24,7 +24,7 @@ public final class AssistantMessageStreamRequests {
     }
 
     public record Start(
-            @JsonProperty("stream_id") @NotBlank String streamId,
+            @JsonProperty("stream_id") @NotBlank @Size(max = 64) String streamId,
             @JsonProperty("idempotency_key") @NotBlank @Size(max = 64) String idempotencyKey,
             @JsonProperty("project_id") @NotNull Long projectId,
             @JsonProperty("user_id") @NotNull Long userId,
@@ -41,7 +41,7 @@ public final class AssistantMessageStreamRequests {
     }
 
     public record Chunk(
-            @JsonProperty("stream_id") @NotBlank String streamId,
+            @JsonProperty("stream_id") @NotBlank @Size(max = 64) String streamId,
             @JsonProperty("idempotency_key") @NotBlank @Size(max = 64) String idempotencyKey,
             @JsonProperty("sequence_no") @NotNull @Min(1) Integer sequenceNo,
             @NotBlank String content,
@@ -61,7 +61,7 @@ public final class AssistantMessageStreamRequests {
     }
 
     public record Abort(
-            @JsonProperty("stream_id") @NotBlank String streamId,
+            @JsonProperty("stream_id") @NotBlank @Size(max = 64) String streamId,
             @JsonProperty("idempotency_key") @NotBlank @Size(max = 64) String idempotencyKey,
             @JsonProperty("reason_code") @NotBlank @Size(max = 64) String reasonCode,
             @JsonProperty("project_id") @NotNull Long projectId,
@@ -79,7 +79,7 @@ public final class AssistantMessageStreamRequests {
     }
 
     public record Complete(
-            @JsonProperty("stream_id") @NotBlank String streamId,
+            @JsonProperty("stream_id") @NotBlank @Size(max = 64) String streamId,
             @JsonProperty("idempotency_key") @NotBlank @Size(max = 64) String idempotencyKey,
             @JsonProperty("final_sequence_no") @NotNull @Min(1) Integer finalSequenceNo,
             @JsonProperty("content_digest") @NotBlank String contentDigest,
