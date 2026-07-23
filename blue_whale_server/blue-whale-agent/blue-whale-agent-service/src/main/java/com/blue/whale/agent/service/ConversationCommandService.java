@@ -54,6 +54,7 @@ public class ConversationCommandService {
     private final AssetMapper assetMapper;
     private final MessageAssetReferenceMapper messageAssetReferenceMapper;
     private final ProjectEventService projectEventService;
+    private final AssistantMessageStreamService assistantMessageStreamService;
     private final UserInputRequestService userInputRequestService;
     private final UserInputRequestMapper userInputRequestMapper;
     private final RuntimeBundleRunPinResolver runtimeBundleRunPinResolver;
@@ -243,6 +244,10 @@ public class ConversationCommandService {
                     .set(AgentRun::getLeaseOwner, null)
                     .set(AgentRun::getLeaseExpiresAt, null));
             AgentRun superseded = agentRunMapper.selectById(stale.getId());
+            // IK3GIM：supersede 后不会再有租约接管，同事务收口遗留活动回复流尝试，
+            // 避免 Snapshot 与重放留下永远"生成中"的消息残影。
+            assistantMessageStreamService.abortActiveAttemptsForRun(
+                    stale.getId(), AssistantMessageStreamService.REASON_SUPERSEDED);
             projectEventService.appendEvent(projectId, EventType.AGENT_RUN_STATUS_CHANGED,
                     AggregateType.AGENT_RUN, String.valueOf(superseded.getId()), superseded.getVersion(),
                     runPayload(superseded), clientMessageId, null);

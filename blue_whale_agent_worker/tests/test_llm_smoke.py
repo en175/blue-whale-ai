@@ -47,6 +47,11 @@ class RecordingRunGateway:
     ) -> None:
         pass
 
+    def abort_assistant_message(
+        self, run_id: int, payload: dict[str, Any]
+    ) -> None:
+        pass
+
 
 class PydanticAILiveSmokeTest(unittest.TestCase):
     @unittest.skipUnless(

@@ -15,6 +15,7 @@ public class AssistantMessageStream extends BaseEntity {
     public static final String STATUS_COMPLETED = "completed";
     public static final String STATUS_REJECTED = "rejected";
     public static final String STATUS_REVIEW_FAILED = "review_failed";
+    public static final String STATUS_ABORTED = "aborted";
 
     private String streamId;
     private Long agentRunId;
@@ -28,4 +29,6 @@ public class AssistantMessageStream extends BaseEntity {
     private String startIdempotencyKey;
     private String completeIdempotencyKey;
     private String contentDigest;
+    private String abortIdempotencyKey;
+    private String abortReasonCode;
 }

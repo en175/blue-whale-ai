@@ -8,6 +8,9 @@ from .contracts import AcceptedActionResult, RunWork, RuntimeCheckpoint, ToolGra
 # Java SystemCode.AGENT_RUN_CONFLICT（100303）：commit 因 expectedRunVersion / fencing token /
 # 租约校验失败被拒——Run 已被新目标取代（superseded）或租约失效，Worker 应确定性退出。
 AGENT_RUN_CONFLICT_CODE = 100303
+# Java SystemCode.ASSISTANT_STREAM_ATTEMPT_EXHAUSTED（100305，IK3GIM）：同一 AgentRun 的
+# 回复流尝试额度（2 次）已用尽——Worker 不得再次调用模型，应提交规范化失败。
+ASSISTANT_STREAM_ATTEMPT_EXHAUSTED_CODE = 100305
 
 
 class AgentRunConflictError(RuntimeError):
@@ -18,18 +21,29 @@ class AgentRunConflictError(RuntimeError):
     """
 
 
+class StreamAttemptExhaustedError(RuntimeError):
+    """Java 409（ASSISTANT_STREAM_ATTEMPT_EXHAUSTED）：回复流尝试额度已用尽。
+
+    与 AgentRunConflictError 区分：Run 绑定仍有效但不允许再开新尝试，调用方应在
+    不再次调用模型的情况下提交规范化错误（F1/F3 编排由 IK3BG3 实现）。
+    """
+
+
 def _optional_str(value: Any) -> Optional[str]:
     return str(value) if value is not None else None
 
 
-def _is_agent_run_conflict(detail: str) -> bool:
-    """409 响应体是 Java 统一 Result 信封（{code, msg, data}），仅 code=AGENT_RUN_CONFLICT
-    （100303）映射为确定性退出；其余 409（如 IDEMPOTENCY_KEY_REUSED）维持崩溃重试。"""
+def _envelope_code(detail: str) -> Optional[int]:
+    """错误响应体是 Java 统一 Result 信封（{code, msg, data}）时解析业务码，用于
+    409 的冲突分类；非信封（代理/网关原文）返回 None。"""
     try:
         envelope = json.loads(detail)
     except ValueError:
-        return False
-    return isinstance(envelope, dict) and envelope.get("code") == AGENT_RUN_CONFLICT_CODE
+        return None
+    if not isinstance(envelope, dict):
+        return None
+    code = envelope.get("code")
+    return code if isinstance(code, int) else None
 
 
 def _optional_seq(value: Any) -> Optional[tuple[Any, ...]]:
@@ -138,6 +152,13 @@ class JavaRunGateway:
             f"/internal/agent-runs/{run_id}/assistant-messages/complete", payload
         )
 
+    def abort_assistant_message(
+        self, run_id: int, payload: dict[str, Any]
+    ) -> None:
+        self._request(
+            f"/internal/agent-runs/{run_id}/assistant-messages/abort", payload
+        )
+
     def fetch_snapshot(self, bundle_version_id: str) -> dict[str, Any]:
         """GET /internal/runtime-bundles/versions/{bundleVersionId}：整份发布快照（camelCase）。"""
         return self._request(
@@ -236,9 +257,17 @@ class JavaRunGateway:
                 result = json.loads(response.read().decode("utf-8"))
         except HTTPError as error:
             detail = error.read().decode("utf-8")
-            if error.code == 409 and _is_agent_run_conflict(detail):
+            envelope_code = _envelope_code(detail) if error.code == 409 else None
+            # 仅 100303 / 100305 映射为专用冲突类型；其余 409（如 IDEMPOTENCY_KEY_REUSED）
+            # 与其余 HTTP 错误维持崩溃重试。
+            if envelope_code == AGENT_RUN_CONFLICT_CODE:
                 raise AgentRunConflictError(
                     f"Java Product API 返回 HTTP 409（AGENT_RUN_CONFLICT）: {detail}"
+                ) from error
+            if envelope_code == ASSISTANT_STREAM_ATTEMPT_EXHAUSTED_CODE:
+                raise StreamAttemptExhaustedError(
+                    "Java Product API 返回 HTTP 409"
+                    f"（ASSISTANT_STREAM_ATTEMPT_EXHAUSTED）: {detail}"
                 ) from error
             raise RuntimeError(
                 f"Java Product API 返回 HTTP {error.code}: {detail}"

@@ -38,6 +38,13 @@ import java.util.Objects;
 @RequiredArgsConstructor
 public class AssistantMessageStreamService {
 
+    /** IK3GIM：同一 AgentRun 的顺序尝试额度（F1/F3 共用），用尽后第三次 start 收稳定错误码。 */
+    public static final int MAX_ATTEMPTS_PER_RUN = 2;
+    /** Java 兜底 abort 的规范化原因码：租约接管收口遗留活动尝试。 */
+    public static final String REASON_LEASE_TAKEOVER = "LEASE_TAKEOVER";
+    /** Java 兜底 abort 的规范化原因码：Run 被 supersede 时收口遗留活动尝试。 */
+    public static final String REASON_SUPERSEDED = "SUPERSEDED";
+
     private final AgentRunMapper agentRunMapper;
     private final AssistantMessageStreamMapper streamMapper;
     private final AssistantMessageChunkMapper chunkMapper;
@@ -58,11 +65,19 @@ public class AssistantMessageStreamService {
             }
             return response(existing);
         }
-        AssistantMessageStream runStream = streamMapper.selectOne(
+        // IK3GIM：一个 stream_id 是一次回复流尝试。Run 行锁（requireBoundRun）内校验：
+        // 任意时刻最多一个活动尝试；顺序尝试总数不超过 MAX_ATTEMPTS_PER_RUN。
+        List<AssistantMessageStream> runAttempts = streamMapper.selectList(
                 Wrappers.<AssistantMessageStream>lambdaQuery()
                         .eq(AssistantMessageStream::getAgentRunId, runId));
-        if (runStream != null) {
-            throw idempotencyReused();
+        boolean hasActiveAttempt = runAttempts.stream().anyMatch(attempt ->
+                AssistantMessageStream.STATUS_STREAMING.equals(attempt.getStatus())
+                        || AssistantMessageStream.STATUS_REVIEW_FAILED.equals(attempt.getStatus()));
+        if (hasActiveAttempt) {
+            throw conflict();
+        }
+        if (runAttempts.size() >= MAX_ATTEMPTS_PER_RUN) {
+            throw attemptExhausted();
         }
         projectService.requireOwnedForUpdate(run.getProjectId(), run.getUserId());
         long messageCount = messageMapper.selectCount(Wrappers.<ConversationMessage>lambdaQuery()
@@ -181,6 +196,10 @@ public class AssistantMessageStreamService {
             Long runId, String workerId, AssistantMessageStreamRequests.Complete request) {
         requireBoundRun(runId, workerId, request.binding());
         AssistantMessageStream stream = requireStream(runId, request.streamId());
+        if (AssistantMessageStream.STATUS_ABORTED.equals(stream.getStatus())) {
+            // aborted 是不可重开终态：不可续写、不可 complete，重跑必须用新 stream_id。
+            throw conflict();
+        }
         if (!AssistantMessageStream.STATUS_STREAMING.equals(stream.getStatus())) {
             if (!sameCompletion(stream, request)) {
                 throw idempotencyReused();
@@ -259,6 +278,65 @@ public class AssistantMessageStreamService {
                 stream, message, EventType.CONVERSATION_MESSAGE_COMPLETED,
                 stream.getLastSequenceNo() + 1, request.idempotencyKey());
         return response(stream, cursor);
+    }
+
+    /**
+     * IK3GIM：幂等 abort。与 start/chunk/complete 相同的 RunBinding 校验；仅活动尝试
+     * （streaming/review_failed）可 abort，completed/rejected 收 409。
+     * 已 aborted 时同键同 reason 重放返回首次结果，异键或异 reason 报幂等冲突。
+     */
+    @Transactional
+    public AssistantMessageStreamResponse abort(
+            Long runId, String workerId, AssistantMessageStreamRequests.Abort request) {
+        requireBoundRun(runId, workerId, request.binding());
+        AssistantMessageStream stream = requireStream(runId, request.streamId());
+        if (AssistantMessageStream.STATUS_ABORTED.equals(stream.getStatus())) {
+            if (!Objects.equals(stream.getAbortIdempotencyKey(), request.idempotencyKey())
+                    || !Objects.equals(stream.getAbortReasonCode(), request.reasonCode())) {
+                throw idempotencyReused();
+            }
+            return response(stream);
+        }
+        if (!AssistantMessageStream.STATUS_STREAMING.equals(stream.getStatus())
+                && !AssistantMessageStream.STATUS_REVIEW_FAILED.equals(stream.getStatus())) {
+            throw conflict();
+        }
+        abortAttempt(stream, request.idempotencyKey(), request.reasonCode());
+        return response(stream);
+    }
+
+    /**
+     * Java 兜底 abort（租约接管 / supersede）：在持 Run 行锁的事务内原子收口该 Run
+     * 遗留的活动尝试。仅租约自然过期不调用本方法，不改变任何尝试状态。
+     * MANDATORY：兜底 abort 必须与接管/supersede 共用同一事务，禁止无事务调用。
+     */
+    @org.springframework.transaction.annotation.Transactional(
+            propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void abortActiveAttemptsForRun(Long runId, String reasonCode) {
+        List<AssistantMessageStream> activeAttempts = streamMapper.selectList(
+                Wrappers.<AssistantMessageStream>lambdaQuery()
+                        .eq(AssistantMessageStream::getAgentRunId, runId)
+                        .in(AssistantMessageStream::getStatus,
+                                AssistantMessageStream.STATUS_STREAMING,
+                                AssistantMessageStream.STATUS_REVIEW_FAILED));
+        for (AssistantMessageStream stream : activeAttempts) {
+            abortAttempt(stream, "java:" + reasonCode + ":" + stream.getStreamId(), reasonCode);
+        }
+    }
+
+    /** abort 终态化：保留已放行前缀、擦除未放行私有尾部、消息以 aborted 封口发终态事件。 */
+    private void abortAttempt(AssistantMessageStream stream, String idempotencyKey, String reasonCode) {
+        stream.setStatus(AssistantMessageStream.STATUS_ABORTED)
+                .setAbortIdempotencyKey(idempotencyKey)
+                .setAbortReasonCode(reasonCode);
+        streamMapper.updateById(stream);
+        discardUnreleasedChunks(chunks(stream));
+        ConversationMessage message = requireMessage(stream);
+        message.setStatus(AssistantMessageStream.STATUS_ABORTED);
+        messageMapper.updateById(message);
+        appendMessageEvent(
+                stream, message, EventType.CONVERSATION_MESSAGE_COMPLETED,
+                stream.getLastSequenceNo() + 1, idempotencyKey);
     }
 
     private AgentRun requireBoundRun(
@@ -397,6 +475,12 @@ public class AssistantMessageStreamService {
     private GlobalException conflict() {
         return new GlobalException(
                 SystemCode.AGENT_RUN_CONFLICT_CODE, SystemCode.AGENT_RUN_CONFLICT.getMsg());
+    }
+
+    private GlobalException attemptExhausted() {
+        return new GlobalException(
+                SystemCode.ASSISTANT_STREAM_ATTEMPT_EXHAUSTED_CODE,
+                SystemCode.ASSISTANT_STREAM_ATTEMPT_EXHAUSTED.getMsg());
     }
 
     private GovernanceException contentRejected() {

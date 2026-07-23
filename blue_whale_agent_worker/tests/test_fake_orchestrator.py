@@ -41,6 +41,11 @@ class RecordingRunGateway:
     ) -> None:
         self.operations.append(("complete", run_id, payload))
 
+    def abort_assistant_message(
+        self, run_id: int, payload: dict[str, object]
+    ) -> None:
+        self.operations.append(("abort", run_id, payload))
+
 
 class _StaticTextOrchestrator:
     """返回定长可见文本的编排器桩：驱动 worker 的多块切分路径。"""

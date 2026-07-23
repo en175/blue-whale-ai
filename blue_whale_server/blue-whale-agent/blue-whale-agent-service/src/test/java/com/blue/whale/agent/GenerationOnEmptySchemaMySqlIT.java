@@ -70,7 +70,8 @@ class GenerationOnEmptySchemaMySqlIT {
             "generation_result_conflicts", "generation_provider_tasks",
             "seedance_callback_inbox", "seedance_callback_security_audits",
             "cost_budget_locks", "cost_reservations", "audit_records",
-            "generation_jobs", "assets", "content_reviews");
+            "generation_jobs", "assets", "content_reviews",
+            "assistant_message_streams", "assistant_message_chunks");
 
     @Autowired
     private MockMvc mockMvc;

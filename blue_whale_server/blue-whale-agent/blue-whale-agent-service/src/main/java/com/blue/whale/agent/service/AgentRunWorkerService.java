@@ -81,6 +81,7 @@ public class AgentRunWorkerService {
     private final ConversationMapper conversationMapper;
     private final ConversationMessageMapper messageMapper;
     private final AssistantMessageStreamMapper assistantMessageStreamMapper;
+    private final AssistantMessageStreamService assistantMessageStreamService;
     private final RuntimeCheckpointMapper checkpointMapper;
     private final RunCommitRecordMapper runCommitMapper;
     private final GenerationJobMapper generationJobMapper;
@@ -138,12 +139,19 @@ public class AgentRunWorkerService {
                 continue;
             }
             LocalDateTime databaseNow = agentRunMapper.selectCurrentTime();
+            boolean leaseTakeover = AgentRun.STATUS_RUNNING.equals(run.getStatus());
             run.setStatus(AgentRun.STATUS_RUNNING)
                     .setStage("orchestrating")
                     .setLeaseOwner(workerId)
                     .setLeaseExpiresAt(databaseNow.plusSeconds(30))
                     .setFencingToken(run.getFencingToken() + 1);
             agentRunMapper.updateById(run);
+            if (leaseTakeover) {
+                // IK3GIM：断连使 Worker 主动 abort 未送达时，接管事务内先原子收口
+                // 遗留活动回复流尝试，再交付新租约；仅租约过期本身不改变尝试状态。
+                assistantMessageStreamService.abortActiveAttemptsForRun(
+                        run.getId(), AssistantMessageStreamService.REASON_LEASE_TAKEOVER);
+            }
             run = agentRunMapper.selectById(run.getId());
 
             projectEventService.appendEvent(run.getProjectId(), EventType.AGENT_RUN_STATUS_CHANGED,

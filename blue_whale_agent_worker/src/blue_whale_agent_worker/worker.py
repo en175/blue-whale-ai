@@ -12,6 +12,13 @@ logger = logging.getLogger("blue_whale_agent_worker")
 # 走完整分块协议（逐块审核、前缀放行），定长切分保证租约重领后的重放确定性。
 TEXT_CHUNK_SIZE = 64
 
+# IK3GIM 回复流尝试 abort 的规范化 reason code（契约 §3.3）。
+# LEASE_TAKEOVER / SUPERSEDED 是 Java 兜底码，不由 Worker 发出；
+# F1/F3 的检测与重跑编排由 IK3BG3 实现，此处只冻结跨进程契约值。
+ABORT_REASON_CANCELLED = "CANCELLED"
+ABORT_REASON_DISCONNECT = "DISCONNECT"
+ABORT_REASON_PROTOCOL_MIXED_STREAM = "PROTOCOL_MIXED_STREAM"
+
 
 def _split_text_chunks(text: str) -> list[str]:
     if not text:

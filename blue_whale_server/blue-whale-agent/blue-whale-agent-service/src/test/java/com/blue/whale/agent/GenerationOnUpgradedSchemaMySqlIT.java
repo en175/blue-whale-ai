@@ -75,7 +75,8 @@ class GenerationOnUpgradedSchemaMySqlIT {
             "generation_result_conflicts", "generation_provider_tasks",
             "seedance_callback_inbox", "seedance_callback_security_audits",
             "cost_budget_locks", "cost_reservations", "audit_records",
-            "generation_jobs", "assets", "content_reviews");
+            "generation_jobs", "assets", "content_reviews",
+            "assistant_message_streams", "assistant_message_chunks");
 
     /** 回退到历史形态的域表：V4 应重建缺失表、为 jobs/assets 补列 */
     private static final List<String> LEGACY_DROPPED_TABLES = List.of(

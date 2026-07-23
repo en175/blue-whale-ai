@@ -124,6 +124,16 @@ Java Product API 在 Agent 文字变为 User 可见内容前形成的产品安�
 完整回复的专用审核总预算为 5 秒；无法形成决定时丢弃未释放文字并返回安全错误，不进入后台审核。
 _Avoid_: 供应商直接向 User 流式输出、把流式安全信号直接当作产品决定、逐片调用外部审核服务。
 
+**AssistantMessageStreamAttempt（回复流尝试）**:
+一个 `stream_id` 标识的一次 Assistant 回复流尝试；同一 AgentRun 最多两个顺序尝试、任意时刻最多
+一个活动尝试（`streaming` / `review_failed`）。`stream_id` 由 Worker 为每次尝试生成，是不可从
+AgentRun ID 推导的不透明标识；abort 是幂等终态操作——保留已放行前缀、丢弃未放行私有尾部、
+以 `aborted` 封口对应 ConversationMessage 并记录规范化 reason code。Worker 在租约有效时主动
+abort；断连未送达时 Java 在租约接管（或 supersede）事务内原子兜底 abort。两次额度由 F1/F3 共用，
+第三次 start 收稳定错误码 `ASSISTANT_STREAM_ATTEMPT_EXHAUSTED`。
+契约：[`docs/specs/2026-07-23-assistant-message-stream-attempt-contract.md`](docs/specs/2026-07-23-assistant-message-stream-attempt-contract.md)。
+_Avoid_: 续写或复用 aborted 尝试、从 AgentRun ID 推导 stream_id、仅租约过期就改变尝试状态。
+
 **Asset（资产）**:
 一个必须归属 Project 的图片或视频文件单元，媒体内容身份不可变，由产品控制的对象存储持久化。
 对象永久私有；访问 URL 仅在服务端确认当前 User 有权访问所属 Project 与 Asset 后临时签发，

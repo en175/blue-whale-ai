@@ -7,6 +7,7 @@ from urllib.error import HTTPError
 from blue_whale_agent_worker.http_gateway import (
     AgentRunConflictError,
     JavaRunGateway,
+    StreamAttemptExhaustedError,
     run_work_from_payload,
 )
 
@@ -339,6 +340,84 @@ class CommitConflictClassificationTest(unittest.TestCase):
                 with self.assertRaises(RuntimeError) as caught:
                     gateway.commit(23, {"commit_id": "c-1"})
                 self.assertNotIsInstance(caught.exception, AgentRunConflictError)
+
+
+class AbortContractTest(unittest.TestCase):
+    """IK3GIM：abort 端点路径/载荷与 409 冲突分类（100303/100305/其余维持崩溃重试）。"""
+
+    @staticmethod
+    def _http_error(code: int, body: bytes) -> HTTPError:
+        return HTTPError("http://java.test/x", code, "error", None, io.BytesIO(body))
+
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_abort_uses_java_product_api_path_and_payload(self, mocked_urlopen) -> None:
+        mocked_urlopen.return_value = FakeResponse()
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+        payload = {
+            "stream_id": "stream-9",
+            "idempotency_key": "abort-key",
+            "reason_code": "CANCELLED",
+        }
+
+        gateway.abort_assistant_message(23, payload)
+
+        request = mocked_urlopen.call_args.args[0]
+        self.assertEqual(
+            "http://java.test/internal/agent-runs/23/assistant-messages/abort",
+            request.full_url,
+        )
+        body = json.loads(request.data)
+        self.assertEqual("stream-9", body["stream_id"])
+        self.assertEqual("abort-key", body["idempotency_key"])
+        self.assertEqual("CANCELLED", body["reason_code"])
+
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_abort_conflict_409_maps_to_agent_run_conflict(self, mocked_urlopen) -> None:
+        mocked_urlopen.side_effect = self._http_error(
+            409,
+            json.dumps(
+                {"code": 100303, "msg": "AgentRun 提交绑定或版本无效", "data": None}
+            ).encode("utf-8"),
+        )
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+
+        with self.assertRaises(AgentRunConflictError):
+            gateway.abort_assistant_message(23, {"stream_id": "stream-9"})
+
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_attempt_exhausted_409_maps_to_dedicated_error(self, mocked_urlopen) -> None:
+        mocked_urlopen.side_effect = self._http_error(
+            409,
+            json.dumps(
+                {"code": 100305, "msg": "回复流尝试额度已用尽", "data": None}
+            ).encode("utf-8"),
+        )
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+
+        with self.assertRaises(StreamAttemptExhaustedError):
+            gateway.start_assistant_message(23, {"stream_id": "stream-3"})
+
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_other_abort_errors_stay_crash_retry_runtime_error(self, mocked_urlopen) -> None:
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+        cases = [
+            # 同为 409 但非专用冲突码（如 IDEMPOTENCY_KEY_REUSED）维持崩溃重试
+            self._http_error(
+                409,
+                json.dumps({"code": 100302, "msg": "idempotency", "data": None}).encode("utf-8"),
+            ),
+            # 非 409 状态码
+            self._http_error(500, b"oops"),
+            # 409 但响应体非 JSON 信封（代理/网关原文）
+            self._http_error(409, b"<html>proxy</html>"),
+        ]
+        for error in cases:
+            with self.subTest(error=error.code):
+                mocked_urlopen.side_effect = error
+                with self.assertRaises(RuntimeError) as caught:
+                    gateway.abort_assistant_message(23, {"stream_id": "stream-9"})
+                self.assertNotIsInstance(caught.exception, AgentRunConflictError)
+                self.assertNotIsInstance(caught.exception, StreamAttemptExhaustedError)
 
 
 if __name__ == "__main__":
