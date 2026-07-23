@@ -1,10 +1,19 @@
 package com.blue.whale.agent.runtimebundle;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.blue.whale.agent.mapper.CreativeSkillMapper;
+import com.blue.whale.agent.mapper.CreativeSkillVersionMapper;
 import com.blue.whale.agent.model.entity.AgentRun;
+import com.blue.whale.agent.model.entity.CreativeSkill;
+import com.blue.whale.agent.model.entity.CreativeSkillVersion;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -16,20 +25,29 @@ public final class RuntimeBundleRunPinResolver {
     private final RuntimeBundleService runtimeBundleService;
     private final boolean enforcementEnabled;
     private final String defaultAgentDefinitionId;
+    private final CreativeSkillMapper creativeSkillMapper;
+    private final CreativeSkillVersionMapper creativeSkillVersionMapper;
+    private final ObjectMapper objectMapper;
 
     RuntimeBundleRunPinResolver(
             JdbcTemplate jdbcTemplate,
             RuntimeBundleService runtimeBundleService,
             @Value("${blue-whale.runtime-bundle.enforcement-enabled:true}") boolean enforcementEnabled,
             @Value("${blue-whale.runtime-bundle.default-agent-definition-id:canvas_agent}")
-                    String defaultAgentDefinitionId) {
+                    String defaultAgentDefinitionId,
+            CreativeSkillMapper creativeSkillMapper,
+            CreativeSkillVersionMapper creativeSkillVersionMapper,
+            ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
         this.runtimeBundleService = runtimeBundleService;
         this.enforcementEnabled = enforcementEnabled;
         this.defaultAgentDefinitionId = defaultAgentDefinitionId;
+        this.creativeSkillMapper = creativeSkillMapper;
+        this.creativeSkillVersionMapper = creativeSkillVersionMapper;
+        this.objectMapper = objectMapper;
     }
 
-    public RunPin resolve(AgentRun sourceRun) {
+    public RunPin resolve(AgentRun sourceRun, String forcedCreativeSkillId) {
         if (!enforcementEnabled) {
             return RunPin.disabled();
         }
@@ -61,17 +79,62 @@ public final class RuntimeBundleRunPinResolver {
         if (!pin.manifestDigest().equals(manifestInSnapshot)) {
             throw unavailable("激活 BundleVersion 的 manifest 摘要不一致");
         }
-        // Creative Skill 首次激活固定由后续运行时任务承接；契约不允许 Bundle 声明
-        // activatedCreativeSkillVersions（发布期白名单拒绝），新 Run 该字段恒为空数组。
-        // ToolGrant 从激活 BundleVersion 快照 composition.toolGrants 解析，透传给 Worker
-        // 作为当次模型可见工具集的权威；快照未声明 grants（纯文本对话）视作空集。
+        // Creative Skill 激活：forced_use 时解析当前发布版本原子固定为 0/1 单例；无 forced 时空数组。
+        // ToolGrant 从激活 BundleVersion 快照 composition.toolGrants 解析（不变）。
         JsonNode toolGrantsNode = composition.path("toolGrants");
         String toolGrantsJson = toolGrantsNode.isArray() ? toolGrantsNode.toString() : "[]";
+        String creativeSkillVersions = forcedCreativeSkillId == null
+                ? "[]"
+                : resolveForcedActivation(forcedCreativeSkillId);
         return requiredPin(
                 pin.bundleVersionId(), pin.manifestDigest(),
                 model.path("modelProfileId").asText(), model.path("version").asText(),
-                "[]",
+                creativeSkillVersions,
                 toolGrantsJson);
+    }
+
+    /**
+     * 解析 forced Creative Skill 当前发布版本，构造 {@code source=forced_use} 激活单例 JSON。
+     *
+     * <p>任何不完整或不一致均 fail closed（契约 §4.1/§8）：Skill 不存在 → 100306；
+     * 版本缺失 / 归属不符 / 摘要无效 → 100307。不换版本、不降级为空 pin。
+     */
+    private String resolveForcedActivation(String forcedCreativeSkillId) {
+        CreativeSkill skill = creativeSkillMapper.selectOne(
+                Wrappers.<CreativeSkill>lambdaQuery()
+                        .eq(CreativeSkill::getCreativeSkillId, forcedCreativeSkillId));
+        if (skill == null) {
+            throw new GlobalException(SystemCode.CREATIVE_SKILL_UNAVAILABLE_CODE, "Creative Skill 不可用");
+        }
+        String activeVersionId = skill.getActiveVersionId();
+        if (activeVersionId == null || activeVersionId.isBlank()) {
+            throw new GlobalException(SystemCode.CREATIVE_SKILL_VERSION_UNAVAILABLE_CODE,
+                    "Creative Skill 当前无发布版本");
+        }
+        CreativeSkillVersion version = creativeSkillVersionMapper.selectOne(
+                Wrappers.<CreativeSkillVersion>lambdaQuery()
+                        .eq(CreativeSkillVersion::getCreativeSkillVersionId, activeVersionId)
+                        .eq(CreativeSkillVersion::getCreativeSkillId, forcedCreativeSkillId));
+        if (version == null) {
+            throw new GlobalException(SystemCode.CREATIVE_SKILL_VERSION_UNAVAILABLE_CODE,
+                    "Creative Skill 版本不可用");
+        }
+        String resourceDigest = version.getResourceDigest();
+        if (resourceDigest == null || !resourceDigest.matches("^sha256:[0-9a-f]{64}$")) {
+            throw new GlobalException(SystemCode.CREATIVE_SKILL_VERSION_UNAVAILABLE_CODE,
+                    "Creative Skill 版本摘要无效");
+        }
+        Map<String, Object> activation = new LinkedHashMap<>();
+        activation.put("creative_skill_id", forcedCreativeSkillId);
+        activation.put("creative_skill_version_id", activeVersionId);
+        activation.put("source", "forced_use");
+        activation.put("reason", Map.of("type", "user_use"));
+        activation.put("resource_digest", resourceDigest);
+        try {
+            return objectMapper.writeValueAsString(List.of(activation));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("无法序列化 Creative Skill 激活单例", exception);
+        }
     }
 
     private RunPin inherited(AgentRun sourceRun) {

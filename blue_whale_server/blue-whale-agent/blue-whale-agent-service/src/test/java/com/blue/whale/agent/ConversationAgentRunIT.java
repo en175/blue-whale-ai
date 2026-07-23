@@ -70,7 +70,9 @@ class ConversationAgentRunIT {
                 "DELETE FROM outbox_messages",
                 "DELETE FROM project_events",
                 "DELETE FROM project_event_stream",
-                "DELETE FROM project");
+                "DELETE FROM project",
+                "DELETE FROM creative_skill_version",
+                "DELETE FROM creative_skill");
     }
 
     @Test
@@ -971,6 +973,84 @@ class ConversationAgentRunIT {
         assertThat(count("message_asset_reference", "project_id", project.getId())).isEqualTo(1);
     }
 
+    @Test
+    void sameIdempotencyKeyWithDifferentForcedSkillIsRejectedWithoutSideEffects() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("forced-idempotency");
+        projectMapper.insert(project);
+        insertCreativeSkill("cs_a", "csv_a");
+        insertCreativeSkill("cs_b", "csv_b");
+
+        mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "forced-key")
+                        .contentType("application/json")
+                        .content("{\"client_message_id\":\"c1\",\"content\":\"x\","
+                                + "\"forced_creative_skill_id\":\"cs_a\"}"))
+                .andExpect(status().isAccepted());
+
+        mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "forced-key")
+                        .contentType("application/json")
+                        .content("{\"client_message_id\":\"c1\",\"content\":\"x\","
+                                + "\"forced_creative_skill_id\":\"cs_b\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(100302));
+
+        assertThat(count("agent_runs", "project_id", project.getId())).isEqualTo(1);
+    }
+
+    @Test
+    void absentForcedAndNullForcedAreIdempoticallySameRequest() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("forced-absent-null");
+        projectMapper.insert(project);
+
+        // 第一次：body 完全不带 forced_creative_skill_id（缺省）
+        MvcResult first = mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "absent-null-key")
+                        .contentType("application/json")
+                        .content("{\"client_message_id\":\"c1\",\"content\":\"x\"}"))
+                .andExpect(status().isAccepted())
+                .andReturn();
+
+        // 第二次：同 key + 同 client_message_id/content，但显式 forced=null
+        MvcResult replay = mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "absent-null-key")
+                        .contentType("application/json")
+                        .content("{\"client_message_id\":\"c1\",\"content\":\"x\","
+                                + "\"forced_creative_skill_id\":null}"))
+                .andExpect(status().isAccepted())
+                .andReturn();
+
+        // 缺省与显式 null 同态 → 稳定回放，不冲突、无第二次副作用
+        JsonNode firstData = objectMapper.readTree(first.getResponse().getContentAsString()).path("data");
+        JsonNode replayData = objectMapper.readTree(replay.getResponse().getContentAsString()).path("data");
+        assertThat(replayData).isEqualTo(firstData);
+        assertThat(count("agent_runs", "project_id", project.getId())).isEqualTo(1);
+    }
+
+    @Test
+    void forcedWithReplyToInputRequestRejectedAsSelectionNotAllowed() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("forced-resume");
+        projectMapper.insert(project);
+
+        // 100308 校验在 confirm 之前：reply_to 非空 + forced 非空即触发，
+        // 无需真实 input_request（校验先于 confirm，不查 input_request 表）。
+        mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "resume-forced")
+                        .contentType("application/json")
+                        .content("{\"client_message_id\":\"c1\",\"content\":\"答\","
+                                + "\"reply_to_input_request_id\":999999,"
+                                + "\"forced_creative_skill_id\":\"cs_x\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(100308));
+
+        assertThat(count("agent_runs", "project_id", project.getId())).isEqualTo(0);
+    }
+
     private JsonNode postMessage(Long projectId, String idempotencyKey, String content) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/projects/{id}/conversation/messages", projectId)
                         .header("X-User-Id", "10")
@@ -1072,5 +1152,13 @@ class ConversationAgentRunIT {
         Long result = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM " + table + " WHERE " + column + " = ?", Long.class, value);
         return result == null ? 0L : result;
+    }
+
+    private void insertCreativeSkill(String skillId, String versionId) {
+        jdbcTemplate.update("INSERT INTO creative_skill (creative_skill_id, name, description, active_version_id) VALUES (?,?,?,?)",
+                skillId, skillId + "-name", "测", versionId);
+        String digest = "sha256:" + "0".repeat(64);
+        jdbcTemplate.update("INSERT INTO creative_skill_version (creative_skill_version_id, creative_skill_id, display_version, body, content_digest, resource_digest, media_type) VALUES (?,?,'0.1.0','正文',?,?,'text/markdown')",
+                versionId, skillId, digest, digest);
     }
 }

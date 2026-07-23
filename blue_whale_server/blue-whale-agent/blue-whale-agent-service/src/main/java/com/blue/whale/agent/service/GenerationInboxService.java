@@ -79,7 +79,7 @@ public class GenerationInboxService {
         AcceptConversationMessageResponse accepted = conversationCommandService.accept(
                 inbox.getId(), userId, idempotencyKey,
                 new AcceptConversationMessageRequest(req.clientMessageId(), req.content(),
-                        req.replyToInputRequestId(), conversationId, null));
+                        req.replyToInputRequestId(), conversationId, null, null));
         return new InboxMessageAcceptedResponse(inbox.getId(), conversationId,
                 accepted.messageId(), accepted.agentRunId(), accepted.cursor());
     }

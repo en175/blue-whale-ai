@@ -79,6 +79,13 @@ public class ConversationCommandService {
             }
             return response(existing);
         }
+        // 恢复消息（reply_to_input_request_id 非空）是既有创作意图的继续，必须继承来源 Run pin；
+        // 同时携带 forced_creative_skill_id 则该消息不允许选择（契约 §4.1/§8）。
+        // 校验在 confirm 之前：不确认输入请求、不建消息/Run、不改任何既有 pin。
+        if (request.forcedCreativeSkillId() != null && request.replyToInputRequestId() != null) {
+            throw new GlobalException(SystemCode.CREATIVE_SKILL_SELECTION_NOT_ALLOWED_CODE,
+                    "恢复消息不允许携带 forced_creative_skill_id");
+        }
         Long confirmedInputRequestId = request.replyToInputRequestId() == null ? null
                 : userInputRequestService.confirm(
                         projectId, userId, request.replyToInputRequestId(), request.content());
@@ -87,7 +94,8 @@ public class ConversationCommandService {
         // Worker 必须面对与来源流程一致的引擎身份与 checkpoint。
         AgentRun sourceRun = confirmedInputRequestId == null ? null
                 : sourceRunOf(confirmedInputRequestId);
-        RuntimeBundleRunPinResolver.RunPin runPin = runtimeBundleRunPinResolver.resolve(sourceRun);
+        RuntimeBundleRunPinResolver.RunPin runPin =
+                runtimeBundleRunPinResolver.resolve(sourceRun, request.forcedCreativeSkillId());
 
         Conversation conversation = resolveConversation(projectId, request.conversationId());
 
@@ -286,11 +294,13 @@ public class ConversationCommandService {
     private String requestHash(AcceptConversationMessageRequest request) {
         // 幂等键纳入去重后原始引用列表（DOM 序 distinct）；越权过滤发生在 hash 之后的落库阶段，
         // 故同幂等键不同客户端引用列表 = 冲突，与越权过滤解耦（ADR-0042 D2）。
+        // forced_creative_skill_id 并入 canonical：缺省与显式 null 同为 "null"，同态稳定回放。
         List<Long> referencedAssetIds = request.referencedAssetIds() == null
                 ? List.of()
                 : request.referencedAssetIds().stream().distinct().toList();
         String canonical = request.clientMessageId() + "\u0000" + request.content() + "\u0000"
-                + String.valueOf(request.replyToInputRequestId()) + referencedAssetIds;
+                + String.valueOf(request.replyToInputRequestId()) + referencedAssetIds
+                + "\u0000" + String.valueOf(request.forcedCreativeSkillId());
         return Sha256.hex(canonical);
     }
 
