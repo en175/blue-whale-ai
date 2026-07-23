@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 from typing import Optional
+from uuid import uuid4
 
 from .contracts import OrchestratorPort, RunGateway, RunWork
 from .http_gateway import AgentRunConflictError
@@ -53,7 +54,9 @@ class AgentWorker:
 
     def _advance_and_commit(self, work: RunWork) -> None:
         proposal = self._orchestrator.advance(work)
-        stream_id = self._stream_id(work.agent_run_id)
+        # 每次执行即一次新回复流尝试：分配本尝试专用的不透明 stream_id，
+        # 本尝试的 start/chunk/complete/commit 全部复用它。
+        stream_id = self._stream_id()
         run_binding = {
             "project_id": work.project_id,
             "user_id": work.user_id,
@@ -113,8 +116,10 @@ class AgentWorker:
         )
 
     @staticmethod
-    def _stream_id(run_id: int) -> str:
-        return f"assistant-{run_id}"
+    def _stream_id() -> str:
+        # 契约 §1.2：stream_id 是每次尝试新生成的不透明标识，不得可从 AgentRun ID
+        # 推导；同一尝试的传输重试复用它，abort 后的新尝试必须使用新 ID。
+        return f"assistant-{uuid4().hex}"
 
     @staticmethod
     def _idempotency_key(run_id: int, operation: str) -> str:
