@@ -2,6 +2,9 @@
 
 - **状态**：Accepted for implementation
 - **契约版本**：1
+- **修订记录**：2026-07-24（IK3NHU）——Creative Skill 资源形态与激活语义移出本契约，
+  由 [Creative Skill 激活跨服务契约](2026-07-24-creative-skill-activation-contract.md)
+  独立定义；schema 同步删除未被 manifest 闭包引用的 `CreativeSkill` 定义，接受集不变。
 - **关联工单**：[定稿 Runtime Agent Bundle 领域契约与资源规范](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK2D8H)
 - **机器可读契约**：[runtime-agent-bundle.schema.json](runtime-agent-bundle.schema.json)
 - **标准调研**：[Runtime Agent Bundle 外部规范调研](../research/runtime-agent-bundle-contracts.md)
@@ -30,7 +33,7 @@
 | `Rule` | 稳定 `resourceId` + 递增 `revision` | 一条 Markdown 行为规则；带唯一可选 `conflictDomain` 和 `always_on` / `on_demand` |
 | `RuleSet` | 随 BundleDraft 编辑，随 BundleVersion 固化 | Rule 的有序引用列表；数组顺序就是优先顺序，越靠后不表示可以覆盖冲突 |
 | `RuntimeSkill` | 稳定 `resourceId` + 递增 `revision` | 平台内部可执行工作流包；初始只披露元数据，正文及引用资源按需加载 |
-| `CreativeSkill` | 稳定 `creativeSkillId` + 不可变版本 | 用户可见创作方法；保留 `Use` / `auto`，激活后版本固定到 AgentRun，不属于 Runtime Bundle 快照 |
+| `CreativeSkill` | 稳定 `creativeSkillId` + 不可变版本 | 用户可见创作方法；保留 `Use` / `auto`，激活后版本固定到 AgentRun，不属于 Runtime Bundle 快照；资源形态与激活语义由 [Creative Skill 激活跨服务契约](2026-07-24-creative-skill-activation-contract.md) 独立定义 |
 | `BundleDraft` | 稳定 `draftId` + 乐观锁 `draftRevision` | 可变工作区；允许校验失败，不可被 Worker 读取 |
 | `BundleVersion` | 不可变 `bundleVersionId` + 唯一 SemVer | 一次发布产生的完整闭包；内容、顺序、引用、模型、工具和预算均不可修改 |
 | `ModelProfile` | 稳定 `modelProfileId` + 版本 | Bundle 可选择的产品中性模型能力与上下文上限；不包含凭据或供应商私有请求参数 |
@@ -63,7 +66,9 @@ AgentDefinition，也不会改写既有 AgentRun。
 
 ### 2.3 RuntimeSkill 与 CreativeSkill
 
-两者共用“元数据 + Markdown 正文 + 相对引用资源”的包形态，但边界不同：
+两者共用“元数据 + Markdown 正文 + 相对引用资源”的包形态，但边界不同（Creative Skill 的
+包形态字段与激活载荷不在本契约与配套 schema 内，见
+[Creative Skill 激活跨服务契约](2026-07-24-creative-skill-activation-contract.md)）：
 
 | 维度 | RuntimeSkill | CreativeSkill |
 |---|---|---|
@@ -154,8 +159,8 @@ Bundle 的 SemVer 公共面由三部分共同组成：本 Schema / manifest 结�
 - 上述等价性的确定性前提由 schema 显式保证，放宽任一约束即须 MAJOR 版本双侧重对齐：所有
   数值字段为 `"type":"integer"`（`formatVersion` / `schemaVersion` 为 `"const":1` 字面量，无
   浮点）；manifest 键集封闭——但**无单一顶层 `additionalProperties:false`**，封闭性由根
-  `oneOf`（`BundleDraft` / `BundleVersion`）两分支各自 `additionalProperties:false` 与五资源
-  子类型（`RoleDocument` / `Rule` / `RuntimeSkill` / `CreativeSkill` / `ReferenceResource`）的
+  `oneOf`（`BundleDraft` / `BundleVersion`）两分支各自 `additionalProperties:false` 与四资源
+  子类型（`RoleDocument` / `Rule` / `RuntimeSkill` / `ReferenceResource`）的
   `unevaluatedProperties:false` 共同实现；键全 ASCII。一旦 manifest 出现浮点（科学计数法）、
   非 BMP（代理对）键或 `U+2028` / `U+2029`，Python `json.dumps` 可能与 Jackson 分叉。
 - 归档容器的文件顺序、时间戳或压缩参数不参与身份；可复现性由 manifest 与每个资源摘要保证。
@@ -192,7 +197,8 @@ BundleVersion：
 3. 所有相对引用可确定解析、目标存在、路径不越界、内容摘要与实际字节一致。
 4. 引用图无自环、无强连通分量；错误必须返回完整循环路径。
 5. `conflictDomain` 在整个 RuleSet 内唯一。
-6. `always_on` 只允许 RoleDocument 与必要 Rule；RuntimeSkill / CreativeSkill 正文保持 `on_demand`。
+6. `always_on` 只允许 RoleDocument 与必要 Rule；RuntimeSkill 正文保持 `on_demand`（Creative
+   Skill 正文按需装载语义见激活契约）。
 7. TokenBudget 的三个门均通过。
 8. ModelProfile 与 ToolGrant 都是当前平台目录的兼容子集。
 9. Bundle 不包含凭据、供应商私有配置、绝对路径、未知资源类型或未列入 manifest 的文件。
@@ -253,7 +259,9 @@ activatedCreativeSkillVersions[]
 ```
 
 `activatedCreativeSkillVersions` 初始可为空；某个 Creative Skill 首次被 `Use` / `auto` 激活时，Java
-把当时的不可变版本追加到 Run pin。之后同一 Run 只能复用该版本，不能漂移到新版本。
+把当时的不可变版本追加到 Run pin。之后同一 Run 只能复用该版本，不能漂移到新版本。激活的时序、
+幂等与 wire 字段由
+[Creative Skill 激活跨服务契约](2026-07-24-creative-skill-activation-contract.md) 定义。
 
 Worker 认领 Run 时：
 
@@ -383,7 +391,7 @@ AgentDefinition、Draft/Version、from/to 版本、manifestDigest、结果与规
 | 调研问题 | 本契约决议 |
 |---|---|
 | SemVer 公共 API | Schema / manifest、装载与 Grant/Profile 接口、可观察 Agent 能力共同组成；规则见 3.1 |
-| Bundle 根摘要 | 采用 SHA-256(规范化(manifest 去除自身 `manifestDigest` 字段))；规范化 = 对象键递归字典序 + 数组保序 + 紧凑分隔符 + UTF-8（**非 RFC 8785 JCS**）。确定性依赖 schema：数值字段全 `"integer"`（`formatVersion` / `schemaVersion` 为 `const:1`）、键集封闭（根 `oneOf` 两分支 `additionalProperties:false` + 五资源子类型 `unevaluatedProperties:false`，**无单一顶层 `additionalProperties:false`**）、键全 ASCII；放宽任一约束须 MAJOR 双侧重对齐 |
+| Bundle 根摘要 | 采用 SHA-256(规范化(manifest 去除自身 `manifestDigest` 字段))；规范化 = 对象键递归字典序 + 数组保序 + 紧凑分隔符 + UTF-8（**非 RFC 8785 JCS**）。确定性依赖 schema：数值字段全 `"integer"`（`formatVersion` / `schemaVersion` 为 `const:1`）、键集封闭（根 `oneOf` 两分支 `additionalProperties:false` + 四资源子类型 `unevaluatedProperties:false`，**无单一顶层 `additionalProperties:false`**）、键全 ASCII；放宽任一约束须 MAJOR 双侧重对齐 |
 | 归档逐字节复现 | P0 不要求，只要求逻辑 manifest 与资源摘要往返一致 |
 | 外部引用 | 禁止；发布快照必须完全自包含且默认离线解析 |
 | 递归 Schema | P0 ToolGrant 禁止外部、动态和递归引用；关键 format 另做领域校验 |

@@ -1,0 +1,10 @@
+{
+  "creative_skill_id": "cs_poster_design",
+  "creative_skill_version_id": "csv_poster_design_1_0_0",
+  "source": "forced_use",
+  "reason": {
+    "type": "user_use",
+    "note": "用户上一轮提到想做海报"
+  },
+  "resource_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}

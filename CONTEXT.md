@@ -220,7 +220,7 @@ Runtime Agent Bundle 的不可变发布快照；AgentRun 固定具体版本，�
 _Avoid_: 原地修改的配置行、Git commit、RuntimeCheckpoint 版本。
 
 **Run pin（版本固定）**:
-AgentRun 启动时由 Java Product API 原子固定的版本锚点：`bundle_version_id` / `manifest_digest` / `model_profile_id` / `model_profile_version` / `activated_creative_skill_versions`。这些 pin 随 RunWork 下发并权威记录于 AgentRun；Worker 装载前对 `manifestDigest` 与发布快照做 fail-closed 校验，不随 commit 回传。
+AgentRun 启动时由 Java Product API 原子固定的版本锚点：`bundle_version_id` / `manifest_digest` / `model_profile_id` / `model_profile_version` / `activated_creative_skill_versions`（Creative Skill 字段形状与激活时序见 `docs/specs/2026-07-24-creative-skill-activation-contract.md`）。这些 pin 随 RunWork 下发并权威记录于 AgentRun；Worker 装载前对 `manifestDigest` 与发布快照做 fail-closed 校验，不随 commit 回传。
 _Avoid_: Worker 回显 pin、可变版本引用、运行中改写 pin。
 
 **RoleDocument（角色文档）**:
@@ -240,8 +240,16 @@ _Avoid_: 无序标签集合、运行时临时拼接的提示词。
 _Avoid_: Creative Skill、数据库 `skill` 表的用户内容、硬编码 Orchestrator 分支。
 
 **Creative Skill（创作技能）**:
-User 可见、可通过 `Use` 或 `auto` 激活的版本化创作方法；与 Runtime Skill 共用 Markdown 包形态，但生命周期、权限和发布边界独立。
+User 可见、可通过 `Use` 或 `auto` 激活的版本化创作方法；与 Runtime Skill 共用 Markdown 包形态，但生命周期、权限和发布边界独立。其选择、候选、接纳与按需读取的跨服务字段冻结于 `docs/specs/2026-07-24-creative-skill-activation-contract.md`。
 _Avoid_: Runtime Skill、内部 Rule、无修饰的“Skill”（在运行时契约中必须指明类型）。
+
+**CreativeSkillActivation（创作技能激活记录）**:
+一次 Creative Skill 激活的不可变事实：Skill 与不可变版本身份、`source`（`forced_use` / `auto`）、结构化 `reason` 与 `resource_digest`；每个 AgentRun 最多一条，固定进 Run pin 的 `activated_creative_skill_versions`（0/1 单例数组）。字段形状见 `docs/specs/2026-07-24-creative-skill-activation-contract.md`。
+_Avoid_: 多 Skill 组合、运行中切换版本、自由文本理由。
+
+**AutoCreativeSkillCandidate（自动候选）**:
+AgentRun 创建时冻结、随 RunWork 下发的 `auto` 可激活候选（Skill 与版本身份、名称、描述、展示版本与 `resource_digest`，不含正文）；Worker 只可从候选中提议，空数组（无匹配）是唯一允许基础生成的路径。字段形状见 `docs/specs/2026-07-24-creative-skill-activation-contract.md`。
+_Avoid_: Worker 发明候选外 Skill、候选随 Skill 库发布漂移、候选携带正文。
 
 **ModelProfile（模型档案）**:
 平台批准的版本化模型能力与上下文上限，供 Bundle 形成允许子集并由 AgentRun 固定；不包含凭据或供应商私有请求配置。

@@ -1,0 +1,29 @@
+{
+  "schema": "../../creative-skill-activation.schema.json",
+  "valid": [
+    { "file": "valid/message-selection-forced-use.json", "def": "MessageCreativeSkillSelection" },
+    { "file": "valid/message-selection-absent.json", "def": "MessageCreativeSkillSelection" },
+    { "file": "valid/message-selection-null.json", "def": "MessageCreativeSkillSelection" },
+    { "file": "valid/runwork-empty-candidates.json", "def": "RunWorkCreativeSkillFields" },
+    { "file": "valid/runwork-auto-candidate.json", "def": "RunWorkCreativeSkillFields" },
+    { "file": "valid/runwork-activated-forced.json", "def": "RunWorkCreativeSkillFields" },
+    { "file": "valid/activation-request-auto.json", "def": "ActivateCreativeSkillRequest" },
+    { "file": "valid/activation-response-accepted.json", "def": "ActivateCreativeSkillResponse" },
+    { "file": "valid/activation-response-replay.json", "def": "ActivateCreativeSkillResponse" },
+    { "file": "valid/activated-body-read.json", "def": "CreativeSkillBodyResponse" },
+    { "file": "valid/activated-reference-read.json", "def": "CreativeSkillReferenceResourceResponse" },
+    { "file": "valid/recommendations.json", "def": "RunCreativeSkillRecommendationsResponse" },
+    { "file": "valid/error-not-a-candidate.json", "def": "CreativeSkillActivationError" },
+    { "file": "valid/error-digest-mismatch.json", "def": "CreativeSkillActivationError" },
+    { "file": "valid/error-already-activated.json", "def": "CreativeSkillActivationError" }
+  ],
+  "invalid": [
+    { "file": "invalid/second-activation.json", "def": "RunWorkCreativeSkillFields" },
+    { "file": "invalid/forced-reason-free-text.json", "def": "CreativeSkillActivation" },
+    { "file": "invalid/auto-reason-missing-detail.json", "def": "CreativeSkillActivation" },
+    { "file": "invalid/invalid-digest.json", "def": "AutoCreativeSkillCandidate" },
+    { "file": "invalid/candidate-extra-body-field.json", "def": "AutoCreativeSkillCandidate" },
+    { "file": "invalid/recommendation-carries-version.json", "def": "RunCreativeSkillRecommendationsResponse" },
+    { "file": "invalid/source-reason-mismatch.json", "def": "CreativeSkillActivation" }
+  ]
+}
