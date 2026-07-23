@@ -2,7 +2,6 @@ import json
 import unittest
 
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
-from pydantic_ai.models.function import FunctionModel
 
 from blue_whale_agent_worker.bundle.errors import (
     BUNDLE_TOKEN_BUDGET_EXCEEDED,
@@ -12,7 +11,12 @@ from blue_whale_agent_worker.contracts import ToolGrant
 from blue_whale_agent_worker.pydantic_orchestrator import PydanticAIOrchestrator
 
 from test_bundle_gate import _gate
-from test_pydantic_orchestrator import _bundle_source, _pydantic_work
+from test_pydantic_orchestrator import (
+    _advance,
+    _bundle_source,
+    _pydantic_work,
+    streaming_model,
+)
 
 
 def _read_grant(tool_name: str = "read_conversation_summary") -> ToolGrant:
@@ -114,16 +118,14 @@ class ReadConversationSummaryToolTest(unittest.TestCase):
     def test_summary_tool_records_evidence_and_calls_source(self) -> None:
         conv = _FakeConversationSource()
         orch = PydanticAIOrchestrator(
-            FunctionModel(_summary_then_text_model),
+            streaming_model(_summary_then_text_model),
             _bundle_source(),
             conversation_source=conv,
         )
-        result = orch.advance(
-            _pydantic_work(
+        result = _advance(orch, _pydantic_work(
                 messages=({"role": "user", "content": "读摘要"},),
                 tool_grants=(_read_grant("read_conversation_summary"),),
-            )
-        )
+            ))
         self.assertIsNone(result.error)
         self.assertEqual(conv.summary_calls, [23])  # agent_run_id
         evidence = _conversation_evidence(result.bundle_evidence)
@@ -158,16 +160,14 @@ class ReadConversationHistoryToolTest(unittest.TestCase):
             return ModelResponse(parts=(TextPart("已读取历史"),))
 
         orch = PydanticAIOrchestrator(
-            FunctionModel(history_then_text_model),
+            streaming_model(history_then_text_model),
             _bundle_source(),
             conversation_source=conv,
         )
-        result = orch.advance(
-            _pydantic_work(
+        result = _advance(orch, _pydantic_work(
                 messages=({"role": "user", "content": "读历史"},),
                 tool_grants=(_read_grant("read_conversation_history"),),
-            )
-        )
+            ))
         self.assertIsNone(result.error)
         self.assertEqual(len(conv.history_calls), 2)
         evidence = _conversation_evidence(result.bundle_evidence)
@@ -218,16 +218,14 @@ class ReadConversationHistoryToolTest(unittest.TestCase):
             "has_more": False,
         })
         orch = PydanticAIOrchestrator(
-            FunctionModel(capture_then_text_model),
+            streaming_model(capture_then_text_model),
             _bundle_source(),
             conversation_source=conv,
         )
-        result = orch.advance(
-            _pydantic_work(
+        result = _advance(orch, _pydantic_work(
                 messages=({"role": "user", "content": "读历史"},),
                 tool_grants=(_read_grant("read_conversation_history"),),
-            )
-        )
+            ))
         self.assertIsNone(result.error)
         self.assertEqual(len(captured), 1)
         # _record 走 json.dumps，ToolReturnPart.content 即 LLM 可见的模型上下文 JSON
@@ -243,23 +241,21 @@ class ReadConversationBudgetAndGrantTest(unittest.TestCase):
         huge = {"conversation_id": 11, "blob": "x" * 8000}
         conv = _FakeConversationSource(summary=huge)
         orch = PydanticAIOrchestrator(
-            FunctionModel(_summary_then_text_model),
+            streaming_model(_summary_then_text_model),
             _bundle_source(),
             conversation_source=conv,
         )
-        result = orch.advance(
-            _pydantic_work(
+        result = _advance(orch, _pydantic_work(
                 messages=({"role": "user", "content": "读摘要"},),
                 tool_grants=(_read_grant("read_conversation_summary"),),
-            )
-        )
+            ))
         self.assertIsNotNone(result.error)
         self.assertEqual(result.error["code"], BUNDLE_TOKEN_BUDGET_EXCEEDED)
 
     def test_grant_effect_mismatch_fails_closed(self) -> None:
         conv = _FakeConversationSource()
         orch = PydanticAIOrchestrator(
-            FunctionModel(_summary_then_text_model),
+            streaming_model(_summary_then_text_model),
             _bundle_source(),
             conversation_source=conv,
         )
@@ -271,12 +267,10 @@ class ReadConversationBudgetAndGrantTest(unittest.TestCase):
             argument_schema={"type": "object"},
             constraints={},
         )
-        result = orch.advance(
-            _pydantic_work(
+        result = _advance(orch, _pydantic_work(
                 messages=({"role": "user", "content": "读摘要"},),
                 tool_grants=(mismatch,),
-            )
-        )
+            ))
         self.assertIsNotNone(result.error)
         self.assertEqual(result.error["code"], "ORCHESTRATOR_CONTRACT_MISMATCH")
 

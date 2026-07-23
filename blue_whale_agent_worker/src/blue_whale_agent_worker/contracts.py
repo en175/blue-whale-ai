@@ -1,5 +1,58 @@
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, Optional, Protocol, Sequence
+from typing import Any, Callable, Literal, Mapping, Optional, Protocol, Sequence
+
+
+class AgentRunConflictError(RuntimeError):
+    """Java 铁闸 409（AGENT_RUN_CONFLICT，业务码 100303）：Run 已被取代或租约失效。
+
+    与其余 RuntimeError（崩溃重试）区分：调用方捕获后打一条结构化 warn 日志并
+    exit 0，不再提交任何状态。
+    """
+
+
+class StreamAttemptExhaustedError(RuntimeError):
+    """Java 409（ASSISTANT_STREAM_ATTEMPT_EXHAUSTED，业务码 100305，契约 §2.3）。
+
+    回复流尝试额度（2 次）已用尽：Run 绑定仍有效但不允许再开新尝试，调用方应在
+    不再次调用模型的情况下提交规范化错误。
+    """
+
+
+class MixedStreamError(RuntimeError):
+    """F1（契约 §3.3 PROTOCOL_MIXED_STREAM）：流式响应混合可见文本与 deferred 动作。
+
+    pydantic-ai 2.9.0 在混流时 get_output() 静默返回 str 并丢失 deferred 请求
+    （原型 IK2D8I 实测确认）。Orchestrator 检测后抛出，Worker 捕获 → abort 当前
+    尝试（reason_code=PROTOCOL_MIXED_STREAM）→ 新 stream_id 纯动作轮重试，
+    绝不静默放行文本、绝不静默丢动作。streamed_text 携带混流轮已流出的全部
+    可见文本（含未满窗缓冲），Worker 按 abort 响应的 released_sequence_no 截取
+    未放行尾部后在重试轮确定性重放；usage 携带混流轮真实发生的模型用量，
+    由 Worker 聚合进最终 commit（工单验收：用量覆盖所有真实尝试）。
+    """
+
+    def __init__(
+        self,
+        message: str,
+        streamed_text: str = "",
+        usage: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        super().__init__(message)
+        self.streamed_text = streamed_text
+        self.usage = dict(usage) if usage is not None else None
+
+
+class ChunkDeliveryError(RuntimeError):
+    """流式期间 chunk 送达 gateway 失败（传输类错误，F3 DISCONNECT 路径）。
+
+    Worker 的 emit_chunk sink 把 gateway 传输错误包装成此类型，使 Orchestrator
+    不把它归一化为编排失败；Worker 外层捕获后 best-effort abort（DISCONNECT）
+    并原样抛出（维持崩溃重试语义），abort 未送达由 Java LEASE_TAKEOVER 兜底（契约 §4）。
+    """
+
+
+# 流式可见文本分块回调（IK3BG3）：Orchestrator 经 ChunkFormer 成块后逐块回调，
+# 由 Worker 的 sink 合并 RunBinding 并调 append_assistant_message_chunk。
+ChunkSink = Callable[[Mapping[str, Any]], None]
 
 
 @dataclass(frozen=True)
@@ -164,8 +217,24 @@ class OrchestratorResult:
 
 
 class OrchestratorPort(Protocol):
-    def advance(self, work: RunWork) -> OrchestratorResult:
-        """根据权威工作包产生产品中性提案，不直接写产品状态。"""
+    async def advance(
+        self,
+        work: RunWork,
+        *,
+        stream_id: Optional[str] = None,
+        emit_chunk: ChunkSink,
+        f1_retry_prior_text: Optional[str] = None,
+    ) -> OrchestratorResult:
+        """根据权威工作包产生产品中性提案，不直接写产品状态。
+
+        IK3BG3 流式形态：stream_id 是本回复流尝试的不透明标识（Worker 为每次新
+        尝试分配，契约 §1.2）；可见文本经 ChunkFormer 成块后由 emit_chunk 逐块
+        回调（必填：全部调用方都经分块协议提交）。f1_retry_prior_text
+        非空表示 F1 纯动作重试轮：其值是上一轮混流文本的未放行尾部（Worker 按
+        abort 响应的 released_sequence_no 截取，契约 §3.2 已放行前缀保留在
+        aborted 消息中对用户可见，不得重复重放），先把它确定性重放进新尝试，
+        再向模型追加「只输出工具调用、不输出可见文本」指令。
+        """
 
 
 class RunGateway(Protocol):
@@ -192,9 +261,11 @@ class RunGateway(Protocol):
 
     def abort_assistant_message(
         self, run_id: int, payload: dict[str, Any]
-    ) -> None:
+    ) -> Optional[Mapping[str, Any]]:
         """幂等 abort 一次回复流尝试（IK3GIM）：payload 携带 stream_id、
-        ≤64 字符幂等键与规范化 reason_code；aborted 为不可重开终态。"""
+        ≤64 字符幂等键与规范化 reason_code；aborted 为不可重开终态。
+        返回 AssistantMessageStreamResponse（含 released_sequence_no，
+        契约 §3.1），Worker F1 路径据它截取未放行尾部。"""
 
 
 class ConversationSource(Protocol):

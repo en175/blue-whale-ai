@@ -8,7 +8,9 @@ from blue_whale_agent_worker.contracts import (
     RuntimeCheckpoint,
 )
 from blue_whale_agent_worker.fake_orchestrator import FakeOrchestrator
+from blue_whale_agent_worker.streaming import emit_text_chunks
 from blue_whale_agent_worker.worker import AgentWorker
+from test_pydantic_orchestrator import _advance
 
 
 class RecordingRunGateway:
@@ -17,6 +19,9 @@ class RecordingRunGateway:
         self.committed_run_id = None
         self.commit_payload = None
         self.operations = []
+        # abort 响应（契约 §3.1 AssistantMessageStreamResponse）：默认健康 Java
+        # 形态（未放行任何前缀），测试可覆盖为缺字段或异常以走兜底路径。
+        self.abort_response = {"released_sequence_no": 0}
 
     def claim(self) -> RunWork:
         return self.work
@@ -43,8 +48,9 @@ class RecordingRunGateway:
 
     def abort_assistant_message(
         self, run_id: int, payload: dict[str, object]
-    ) -> None:
+    ) -> dict | None:
         self.operations.append(("abort", run_id, payload))
+        return self.abort_response
 
 
 class _StaticTextOrchestrator:
@@ -53,8 +59,15 @@ class _StaticTextOrchestrator:
     def __init__(self, visible_text: str) -> None:
         self._visible_text = visible_text
 
-    def advance(self, work: RunWork) -> OrchestratorResult:
-        return OrchestratorResult(
+    async def advance(
+        self,
+        work: RunWork,
+        *,
+        stream_id=None,
+        emit_chunk=None,
+        f1_retry_prior_text=None,
+    ) -> OrchestratorResult:
+        result = OrchestratorResult(
             commit_id=f"static-{work.agent_run_id}-{work.run_version}",
             visible_text=self._visible_text,
             checkpoint=RuntimeCheckpoint(
@@ -65,6 +78,13 @@ class _StaticTextOrchestrator:
             ),
             actions=(),
         )
+        emit_text_chunks(
+            result.visible_text,
+            work=work,
+            stream_id=stream_id or "",
+            emit_chunk=emit_chunk,
+        )
+        return result
 
 
 class FakeOrchestratorTest(unittest.TestCase):
@@ -84,7 +104,7 @@ class FakeOrchestratorTest(unittest.TestCase):
         )
 
     def test_fake_result_serializes_only_product_neutral_contract(self) -> None:
-        result = FakeOrchestrator().advance(self.work)
+        result = _advance(FakeOrchestrator(), self.work)
         payload = result.to_commit_payload(self.work)
 
         self.assertEqual("create_image_generation_job", payload["actions"][0]["tool_id"])
@@ -245,7 +265,7 @@ class FakeOrchestratorTest(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "engine=fake"):
-            FakeOrchestrator().advance(production_work)
+            _advance(FakeOrchestrator(), production_work)
 
     def test_clarification_proposal_serializes_only_product_neutral_fields(self) -> None:
         clarification_work = RunWork(
@@ -254,7 +274,7 @@ class FakeOrchestratorTest(unittest.TestCase):
                 "messages": ({"role": "user", "content": "澄清:蓝鲸海报"},),
             }
         )
-        result = FakeOrchestrator().advance(clarification_work)
+        result = _advance(FakeOrchestrator(), clarification_work)
         payload = result.to_commit_payload(clarification_work)
 
         # 创作澄清与动作互斥：payload 不携带 actions，只携带 user_input_request 提议。
@@ -275,7 +295,7 @@ class FakeOrchestratorTest(unittest.TestCase):
                 "messages": ({"role": "user", "content": "澄清:蓝鲸海报"},),
             }
         )
-        result = FakeOrchestrator().advance(clarification_work)
+        result = _advance(FakeOrchestrator(), clarification_work)
 
         self.assertEqual((), result.actions)
         self.assertIsNotNone(result.input_request)
@@ -289,7 +309,7 @@ class FakeOrchestratorTest(unittest.TestCase):
                 "messages": ({"role": "user", "content": "生成一张"},),
             }
         )
-        result = FakeOrchestrator().advance(incomplete_work)
+        result = _advance(FakeOrchestrator(), incomplete_work)
         payload = result.to_commit_payload(incomplete_work)
 
         self.assertEqual((), result.actions)
@@ -324,7 +344,7 @@ class FakeOrchestratorTest(unittest.TestCase):
                 "checkpoint": checkpoint,
             }
         )
-        result = FakeOrchestrator().advance(resumed_work)
+        result = _advance(FakeOrchestrator(), resumed_work)
 
         self.assertIsNone(result.input_request)
         self.assertEqual(0, len(result.actions))
@@ -342,7 +362,7 @@ class FakeOrchestratorTest(unittest.TestCase):
         resumed_work = RunWork(**{**self.work.__dict__, "checkpoint": checkpoint})
 
         with self.assertRaisesRegex(ValueError, "不匹配"):
-            FakeOrchestrator().advance(resumed_work)
+            _advance(FakeOrchestrator(), resumed_work)
 
 
 if __name__ == "__main__":

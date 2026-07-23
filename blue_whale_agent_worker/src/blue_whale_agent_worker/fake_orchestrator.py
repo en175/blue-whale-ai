@@ -1,4 +1,5 @@
 from .contracts import (
+    ChunkSink,
     OrchestratorResult,
     ProposedAction,
     REQUEST_TYPE_CREATION_CLARIFICATION,
@@ -6,6 +7,7 @@ from .contracts import (
     RuntimeCheckpoint,
     UserInputRequestProposal,
 )
+from .streaming import emit_text_chunks
 
 # 演示标记：用户消息以此前缀开头时，Fake 产出创作澄清提议而非生图动作。
 CLARIFICATION_PREFIX = "澄清:"
@@ -14,7 +16,26 @@ CLARIFICATION_PREFIX = "澄清:"
 class FakeOrchestrator:
     """用于契约测试和本地闭环的显式 Fake，不是生产默认 Adapter。"""
 
-    def advance(self, work: RunWork) -> OrchestratorResult:
+    async def advance(
+        self,
+        work: RunWork,
+        *,
+        stream_id: str | None = None,
+        emit_chunk: ChunkSink,
+        f1_retry_prior_text: str | None = None,
+    ) -> OrchestratorResult:
+        result = self._propose(work)
+        # 与生产同一成块边界：可见文本经 ChunkFormer 定长窗切块逐块回调，
+        # Worker 合并 RunBinding 后走 IK2D8M 三段式协议。
+        emit_text_chunks(
+            result.visible_text,
+            work=work,
+            stream_id=stream_id or "",
+            emit_chunk=emit_chunk,
+        )
+        return result
+
+    def _propose(self, work: RunWork) -> OrchestratorResult:
         if work.engine != "fake":
             raise ValueError("FakeOrchestrator 只能推进 engine=fake 的 AgentRun")
         latest_user_message = next(
