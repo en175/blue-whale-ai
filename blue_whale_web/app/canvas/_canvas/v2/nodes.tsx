@@ -15,12 +15,14 @@ import {
   RefreshCw,
   Sparkles,
   Video as VideoIcon,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { Handle, NodeResizer, NodeToolbar, Position, useHandleConnections, useNodesData, type NodeProps } from "@xyflow/react";
 import { useCanvasStore } from "../store";
-import type { CanvasNode, CanvasNodeData, NodeKindId, NodeStatus } from "../model";
+import type { CanvasNode, CanvasNodeData, NodeKindId, NodeStatus, MediaKind } from "../model";
 import { nodeKinds } from "../kinds";
-import { NODE_TOOLBAR_ACTIONS, NODE_TOOLBAR_VIDEO_ACTIONS, type NodeToolbarAction } from "../config";
+import { NODE_TOOLBAR_ACTIONS, NODE_TOOLBAR_VIDEO_ACTIONS, toolbarForKind, type NodeToolbarAction } from "../config";
 
 type MediaNodeData = CanvasNodeData & { content?: string; errorMessage?: string; progress?: number };
 
@@ -29,6 +31,7 @@ type NodeActionsCtx = {
   onRetry?: (id: string) => void;
   onEditPrompt?: (id: string, text: string) => void;
   picking?: boolean;
+  pickingAccept?: MediaKind[];
 };
 export const NodeActionsContext = createContext<NodeActionsCtx>({});
 
@@ -52,6 +55,7 @@ function VideoPlayer({ src, label }: { src: string; label?: string }) {
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [muted, setMuted] = useState(false);
   // 首帧就绪前显占位防黑屏（IJZY0Z「视频节点能显示首帧封面」）；src 变化重置
   const [frameReady, setFrameReady] = useState(false);
   useEffect(() => setFrameReady(false), [src]);
@@ -61,6 +65,7 @@ function VideoPlayer({ src, label }: { src: string; label?: string }) {
     if (v.paused) void v.play();
     else v.pause();
   }, []);
+  const toggleMute = useCallback(() => setMuted((m) => !m), []);
   const seekTo = useCallback(
     (clientX: number) => {
       const v = videoRef.current;
@@ -79,6 +84,7 @@ function VideoPlayer({ src, label }: { src: string; label?: string }) {
         ref={videoRef}
         src={src}
         preload="metadata"
+        muted={muted}
         aria-label={label || "视频"}
         className="h-full w-full rounded-lg object-contain"
         onClick={toggle}
@@ -126,6 +132,15 @@ function VideoPlayer({ src, label }: { src: string; label?: string }) {
         <span className="shrink-0 text-[10px] tabular-nums" style={{ color: "var(--tc-text-tertiary)" }}>
           {formatTime(current)} / {formatTime(duration)}
         </span>
+        <button
+          type="button"
+          onClick={toggleMute}
+          aria-label={muted ? "取消静音" : "静音"}
+          className="flex h-4 w-4 shrink-0 items-center justify-center"
+          style={{ color: "var(--tc-text-secondary)" }}
+        >
+          {muted ? <VolumeX width={12} height={12} /> : <Volume2 width={12} height={12} />}
+        </button>
       </div>
     </div>
   );
@@ -302,21 +317,21 @@ function NodeHandles({ kind }: { kind: NodeKindId }) {
 
 export function MediaNode({ id, data, width, height, selected }: NodeProps) {
   const d = data as unknown as MediaNodeData;
-  const { onAction, onRetry, picking } = useContext(NodeActionsContext);
+  const { onAction, onRetry, picking, pickingAccept } = useContext(NodeActionsContext);
   const asset = useNodeAsset(d);
   const src = asset?.src ?? (d.imageUrl as string | undefined);
   const isAudio = d.kind === "audio";
   const isVideo = !isAudio && (d.kind === "video" || isVideoUrl(src));
   const renderKind: "audio" | "video" | "image" = isAudio ? "audio" : isVideo ? "video" : "image";
-  const pickable = picking && !isAudio && !!d.assetId && d.status !== "running" && d.status !== "error";
+  const pickable = picking && (pickingAccept?.includes(d.kind as MediaKind) ?? true) && !!d.assetId && d.status !== "running" && d.status !== "error";
   // prompt 来源：prompt handle 连的上游 text 节点 prompt（连线驱动，富文本标签展示）
   const promptConns = useHandleConnections({ type: "target", id: "prompt" });
   const upstream = useNodesData(promptConns.map((c) => c.source)) as unknown as CanvasNode[] | undefined;
   const promptFromText = upstream?.find((n) => n.data.kind === "text")?.data.prompt as string | undefined;
   return (
     <>
-      <NodeToolbar position={Position.Top} offset={8}>
-        <NodeToolbarActions actions={isVideo ? NODE_TOOLBAR_VIDEO_ACTIONS : undefined} onAction={(a) => onAction?.(id, a)} />
+      <NodeToolbar position={Position.Top} offset={8} isVisible={selected && d.status !== "running"}>
+        <NodeToolbarActions actions={toolbarForKind(d.kind)} onAction={(a) => onAction?.(id, a)} />
       </NodeToolbar>
       <div className={["tc-image-node__media group relative overflow-visible rounded-lg", pickable ? "tc-canvas-pickable" : ""].join(" ")} style={{ width, height, outline: selected ? "2px solid var(--tc-card-selected-stroke)" : "2px solid transparent", outlineOffset: 0, border: "1px solid var(--tc-border)", boxShadow: selected ? "var(--tc-card-selected-shadow)" : "var(--tc-card-hover-shadow)", background: "var(--tc-bg-elevated)" }} role="img" aria-label={d.content || d.kind}>
         <NodeResizer nodeId={id} isVisible={selected} minWidth={40} minHeight={40} keepAspectRatio handleClassName="tc-node-resize-handle" />
