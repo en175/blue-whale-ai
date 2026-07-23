@@ -371,4 +371,20 @@ class AssistantMessageStreamingIT extends AssistantMessageStreamITBase {
         assertThat(eventTypes(project.getId()).stream()
                 .filter("conversation.message_completed"::equals).count()).isEqualTo(1);
     }
+
+    @Test
+    void oversizedStreamIdIsRejectedAtProductApiLayer() throws Exception {
+        Project project = new Project().setOwnerId(10L).setName("assistant-stream-id-cap");
+        projectMapper.insert(project);
+        long runId = postMessage(project.getId()).path("agent_run_id").asLong();
+        JsonNode work = claim(runId);
+        String binding = binding(project.getId(), work);
+
+        // stream_id 超长（>64）与 idempotency_key 同在 Product API 层被拒（100002 PARAM_BIND_ERROR）。
+        postStream(runId, "start", "{\"stream_id\":\"" + "s".repeat(65) + "\","
+                + "\"idempotency_key\":\"start-oversized-stream\"," + binding + "}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(100002))
+                .andExpect(jsonPath("$.success").value(false));
+    }
 }
