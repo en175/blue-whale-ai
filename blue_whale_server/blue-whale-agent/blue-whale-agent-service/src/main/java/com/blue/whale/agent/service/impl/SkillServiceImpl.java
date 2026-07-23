@@ -3,12 +3,14 @@ package com.blue.whale.agent.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.blue.whale.agent.mapper.CreativeSkillMapper;
 import com.blue.whale.agent.mapper.SkillMapper;
 import com.blue.whale.agent.mapper.UserSkillMapper;
 import com.blue.whale.agent.model.dto.SkillLibraryDto;
 import com.blue.whale.agent.model.dto.SkillLibraryQuery;
 import com.blue.whale.agent.model.dto.SkillMineDto;
 import com.blue.whale.agent.model.dto.SkillMineQuery;
+import com.blue.whale.agent.model.entity.CreativeSkill;
 import com.blue.whale.agent.model.entity.Skill;
 import com.blue.whale.agent.model.entity.UserSkill;
 import com.blue.whale.agent.service.SkillService;
@@ -18,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +40,7 @@ public class SkillServiceImpl implements SkillService {
 
     private final SkillMapper skillMapper;
     private final UserSkillMapper userSkillMapper;
+    private final CreativeSkillMapper creativeSkillMapper;
 
     @Override
     public Page<SkillLibraryDto> listLibrary(Long userId, SkillLibraryQuery q) {
@@ -55,6 +59,7 @@ public class SkillServiceImpl implements SkillService {
                         new LambdaQueryWrapper<UserSkill>().eq(UserSkill::getUserId, userId).select(UserSkill::getSkillId))
                 .stream().map(UserSkill::getSkillId).collect(Collectors.toSet());
 
+        Map<Long, String> creativeIds = mapCreativeSkillIds(result.getRecords());
         List<SkillLibraryDto> records = result.getRecords().stream()
                 .map(s -> new SkillLibraryDto()
                         .setId(s.getId())
@@ -62,7 +67,8 @@ public class SkillServiceImpl implements SkillService {
                         .setDescription(s.getDescription())
                         .setCoverUrl(s.getCoverUrl())
                         .setSource(s.getSource())
-                        .setAdded(mineIds.contains(s.getId())))
+                        .setAdded(mineIds.contains(s.getId()))
+                        .setCreativeSkillId(creativeIds.get(s.getId())))
                 .collect(Collectors.toList());
 
         Page<SkillLibraryDto> resp = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
@@ -90,6 +96,7 @@ public class SkillServiceImpl implements SkillService {
                 .in(Skill::getId, skillIds);
         Map<Long, Skill> skillMap = skillMapper.selectList(skillWrapper).stream()
                 .collect(Collectors.toMap(Skill::getId, Function.identity()));
+        Map<Long, String> creativeIds = mapCreativeSkillIds(skillMap.values());
         List<SkillMineDto> items = rels.stream()
                 .map(r -> {
                     Skill s = skillMap.get(r.getSkillId());
@@ -99,7 +106,8 @@ public class SkillServiceImpl implements SkillService {
                             .setName(s == null ? null : s.getName())
                             .setDescription(s == null ? null : s.getDescription())
                             .setCoverUrl(s == null ? null : s.getCoverUrl())
-                            .setSource(s == null ? null : s.getSource());
+                            .setSource(s == null ? null : s.getSource())
+                            .setCreativeSkillId(s == null ? null : creativeIds.get(s.getId()));
                 })
                 .collect(Collectors.toList());
         Page<SkillMineDto> resp = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
@@ -127,6 +135,21 @@ public class SkillServiceImpl implements SkillService {
         if (rows == 0) {
             throw new GlobalException(SystemCode.DATA_NOT_EXIST_CODE, "未添加该 Skill，无法设置 auto");
         }
+    }
+
+    /**
+     * 按 skill.id 批量回查 creative_skill（source_skill_id IN ...），建 {@code sourceSkillId → creativeSkillId} 映射。
+     * 1B 决策：旧 skill 表不动，新表自记映射，库/我的列表据此补 {@code creativeSkillId}。无映射返回空 Map。
+     */
+    private Map<Long, String> mapCreativeSkillIds(Collection<Skill> skills) {
+        if (skills.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<Long> ids = skills.stream().map(Skill::getId).collect(Collectors.toList());
+        return creativeSkillMapper.selectList(new LambdaQueryWrapper<CreativeSkill>()
+                        .in(CreativeSkill::getSourceSkillId, ids)).stream()
+                .collect(Collectors.toMap(CreativeSkill::getSourceSkillId,
+                        CreativeSkill::getCreativeSkillId, (a, b) -> a));
     }
 
     private Skill requireSkill(Long skillId) {
