@@ -23,6 +23,7 @@ from .bundle.loader import ContextLoader, LoadedContext
 from .bundle.source import BundleSource
 from .bundle.verifier import BundleVerifier, VerifiedSnapshot
 from .contracts import (
+    AcceptedActionResult,
     AgentRunConflictError,
     ChunkDeliveryError,
     ChunkSink,
@@ -64,6 +65,10 @@ READ_DIRECT_TOOL_REGISTRY_VERSION = 1
 # checkpoint pending_calls 项的 kind 标记：澄清 deferred call 恢复时用用户自然语言
 # 回答作 ToolResult 回喂，区别于动作 pending（结果来自 accepted_results）。
 _CLARIFICATION_PENDING_KIND = "clarification"
+
+# 治理拒绝回喂白名单（IK3BG5）：rejected 结果进入模型上下文前只保留规范化公开
+# 字段，内部 reasonCode、私有字段、供应商原始错误在此边界剥离。
+_REJECTED_RESULT_PUBLIC_KEYS = ("public_code", "message", "retryable")
 
 class _ContractError(Exception):
     pass
@@ -156,7 +161,22 @@ class PydanticAIOrchestrator:
         loaded = ContextLoader(self._bundle_source).load(
             verified, work.model_profile_id, work.model_profile_version
         )
+        self._require_pinned_model(loaded)
         return verified, loaded
+
+    def _require_pinned_model(self, loaded: LoadedContext) -> None:
+        """IK3BG5：进程配置的模型实例身份必须与 Run 固定的 ModelProfile（modelKey）
+        逐字节一致；进程默认模型漂移（环境变量误配 / 新档案发布后误用）时
+        fail closed，不静默用错模型续跑——首次推进与 checkpoint 恢复同门。"""
+        if self._actual_model_name() != loaded.model_key:
+            raise _ContractError("进程模型与 AgentRun 固定的 ModelProfile 不一致")
+
+    def _actual_model_name(self) -> str:
+        if isinstance(self._model, str):
+            # pydantic-ai 模型规格 "provider:model-name"：去掉 provider 前缀比对模型
+            # 名段；模型名自身可含冒号（如 "ollama:llama3.1:8b"），只剥第一段。
+            return self._model.split(":", 1)[-1]
+        return self._model.model_name
 
     async def _advance(
         self,
@@ -384,7 +404,7 @@ class PydanticAIOrchestrator:
             result = results_by_action[pending["action_id"]]
             deferred_calls[pending["tool_call_id"]] = {
                 "status": result.status,
-                "result": dict(result.result),
+                "result": self._public_result_payload(result),
             }
         clarify_pending = [
             pending for pending in restored_calls
@@ -400,7 +420,7 @@ class PydanticAIOrchestrator:
                 for pending in clarify_pending:
                     deferred_calls[pending["tool_call_id"]] = {
                         "status": "rejected",
-                        "result": dict(rejected.result),
+                        "result": self._public_result_payload(rejected),
                     }
             else:
                 answer = next(
@@ -414,6 +434,24 @@ class PydanticAIOrchestrator:
                         "result": {"answer": answer},
                     }
         return None, messages, DeferredToolResults(calls=deferred_calls)
+
+    @staticmethod
+    def _public_result_payload(result: AcceptedActionResult) -> dict[str, Any]:
+        """回喂模型的结果载荷：治理拒绝（rejected）只保留规范化公开字段
+        （IK3BG5 白名单边界），内部原因码 / 私有字段 / 供应商原始错误不进入
+        模型上下文；成功等业务结果原样透传。白名单过滤后为空说明 Java 未下发
+        任何规范化公开字段（违约/键名漂移）——fail closed，不静默回喂无信息
+        的空拒绝。"""
+        if result.status != "rejected":
+            return dict(result.result)
+        payload = {
+            key: result.result[key]
+            for key in _REJECTED_RESULT_PUBLIC_KEYS
+            if key in result.result
+        }
+        if not payload:
+            raise _ContractError("治理拒绝结果缺少规范化公开字段")
+        return payload
 
     async def _run_streaming(
         self,
@@ -484,9 +522,10 @@ class PydanticAIOrchestrator:
         例外——空尾部重试轮（allow_bridged_action）：全文已放行、无尾部可重放，
         过渡说明指令允许模型在同响应附过渡 TextPart + deferred 动作；2.9.0 下
         output 仍为 str，但动作在最后 ModelResponse 中并未丢失，显式提取为
-        DeferredToolRequests 闭环（不依赖 output 类型，无静默丢弃）。异常携带
-        混流轮已流出的全部可见文本（含未满窗缓冲）与该轮真实模型用量，供
-        Worker 截取未放行尾部重放并把用量聚合进最终 commit。"""
+        DeferredToolRequests 闭环（不依赖 output 类型，无静默丢弃）。
+        MixedStreamError 携带混流轮已流出的全部可见文本（含未满窗缓冲）与该轮
+        真实模型用量，供 Worker 截取未放行尾部重放并把用量聚合进最终 commit；
+        未授权调用的 _ContractError 路径为整轮终态，已流出文本与用量随之作废。"""
         streamed_text = former.full_text
         usage_payload = PydanticAIOrchestrator._usage_payload(usage)
         bridged_calls: list = []
@@ -496,14 +535,30 @@ class PydanticAIOrchestrator:
                 for grant in work.tool_grants
                 if grant.effect == "side_effect"
             }
-            last = messages[-1]
-            if isinstance(last, ModelResponse):
-                bridged_calls = [
+            # all_messages() 含完整历史；未知工具调用会被框架追加 retry-prompt
+            # 请求顶到末尾，因此向前找最后一个 ModelResponse 筛查。
+            last_response = next(
+                (
+                    message
+                    for message in reversed(messages)
+                    if isinstance(message, ModelResponse)
+                ),
+                None,
+            )
+            if last_response is not None:
+                tool_calls = [
                     part
-                    for part in last.parts
+                    for part in last_response.parts
                     if isinstance(part, ToolCallPart)
-                    and part.tool_name in deferred_names
                 ]
+                # 注入防线（IK3BG5）：最后响应中的任何 ToolCallPart 都必须属于当次
+                # ToolGrant 授权集合——混流中夹带的未授权调用不得被静默丢弃后
+                # 正常闭环，fail closed 且不携带内部工具身份。刻意不走 F1 规范轮
+                # 重试：未授权调用不是瞬时混流形态问题，换流重试只会重放同一份
+                # 伪造请求并烧掉尝试额度。
+                if any(part.tool_name not in deferred_names for part in tool_calls):
+                    raise _ContractError("模型提出了不在当次授权集合内的工具动作")
+                bridged_calls = tool_calls
         if action_only_retry:
             if allow_bridged_action and bridged_calls:
                 return DeferredToolRequests(calls=bridged_calls)

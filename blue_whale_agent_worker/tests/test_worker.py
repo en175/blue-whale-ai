@@ -3,10 +3,11 @@ import os
 import signal
 import unittest
 
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
 from blue_whale_agent_worker.contracts import (
+    AcceptedActionResult,
     AgentRunConflictError,
     OrchestratorResult,
     RunWork,
@@ -21,8 +22,17 @@ from blue_whale_agent_worker.streaming import emit_text_chunks
 from blue_whale_agent_worker.worker import AgentWorker
 from test_fake_orchestrator import RecordingRunGateway
 from test_pydantic_orchestrator import (
+    BUNDLE_VERSION_ID,
+    MANIFEST_DIGEST,
+    MODEL_PROFILE_ID,
+    REF_BODY,
+    REF_RESOURCE_ID,
+    ROLE_DOCUMENT_BODY,
     _bundle_source,
     _pydantic_work,
+    _sha256,
+    _skill_source,
+    _skill_work,
     image_proposal_model,
     streaming_model,
 )
@@ -398,7 +408,10 @@ class WorkerStreamAttemptTest(unittest.TestCase):
         work = _pydantic_work()
         gateway = RecordingRunGateway(work)
         orchestrator = PydanticAIOrchestrator(
-            FunctionModel(stream_function=stubborn_stream), _bundle_source()
+            FunctionModel(
+                stream_function=stubborn_stream, model_name="doubao-seed-1-6"
+            ),
+            _bundle_source(),
         )
 
         AgentWorker(gateway, orchestrator).run_once()
@@ -497,6 +510,198 @@ class WorkerStreamAttemptTest(unittest.TestCase):
         self.assertEqual(
             "DISCONNECT", gateway.operations[1][2]["reason_code"]
         )
+
+
+class WorkerCommitChannelIntegrityTest(unittest.TestCase):
+    """IK3BG5 commit 通道完整性（RecordingGateway 观测面）：成功 / 治理拒绝 /
+    checkpoint 恢复三场景，usage 与 bundle_evidence 同通道完整回传；证据含
+    资源身份 / revision / 摘要 / token 估算 / origin，不含资源正文与 Run pin。"""
+
+    @staticmethod
+    def _restored_checkpoint(commit_payload: dict) -> RuntimeCheckpoint:
+        return RuntimeCheckpoint(
+            engine="pydantic-ai",
+            engine_version="2.9.0",
+            adapter_schema_version=1,
+            opaque_payload=json.loads(
+                json.dumps(
+                    commit_payload["checkpoint"]["opaque_payload"], ensure_ascii=False
+                )
+            ),
+        )
+
+    def test_success_commit_carries_usage_and_bundle_evidence(self) -> None:
+        work = _pydantic_work()
+        gateway = RecordingRunGateway(work)
+        AgentWorker(
+            gateway,
+            PydanticAIOrchestrator(
+                streaming_model(image_proposal_model), _bundle_source()
+            ),
+        ).run_once()
+
+        payload = gateway.commit_payload
+        usage = payload["usage"]
+        self.assertIsNotNone(usage)
+        self.assertEqual(
+            {"input_units", "output_units", "requests"}, set(usage.keys())
+        )
+        self.assertGreaterEqual(usage["requests"], 1)
+        evidence = payload["bundle_evidence"]
+        self.assertTrue(evidence)
+        initial = next(e for e in evidence if e["origin"] == "initial")
+        self.assertEqual(
+            {"resource_id", "revision", "content_digest", "token_estimate", "origin"},
+            set(initial.keys()),
+        )
+        self.assertEqual("role_main", initial["resource_id"])
+        # 证据不携带资源正文与 Run pin。
+        serialized_evidence = json.dumps(evidence, ensure_ascii=False)
+        self.assertNotIn(ROLE_DOCUMENT_BODY, serialized_evidence)
+        for pin in (BUNDLE_VERSION_ID, MANIFEST_DIGEST, MODEL_PROFILE_ID):
+            self.assertNotIn(pin, serialized_evidence)
+        # checkpoint 保持框架不透明四键；commit 携带回复流标识。
+        self.assertEqual(
+            {"format", "messages", "pending_calls", "stream_id"},
+            set(payload["checkpoint"]["opaque_payload"].keys()),
+        )
+        self.assertIsNotNone(payload["assistant_message_stream_id"])
+
+    def test_rejected_commit_carries_usage_and_evidence_without_internal_codes(
+        self,
+    ) -> None:
+        initial_work = _pydantic_work()
+        initial_gateway = RecordingRunGateway(initial_work)
+        AgentWorker(
+            initial_gateway,
+            PydanticAIOrchestrator(
+                streaming_model(image_proposal_model), _bundle_source()
+            ),
+        ).run_once()
+        action_id = initial_gateway.commit_payload["actions"][0]["action_id"]
+
+        resumed_work = _pydantic_work(
+            run_version=2,
+            fencing_token=5,
+            checkpoint=self._restored_checkpoint(initial_gateway.commit_payload),
+            accepted_results=(
+                AcceptedActionResult(
+                    action_id=action_id,
+                    status="rejected",
+                    result={
+                        "public_code": "ACTION_NOT_ALLOWED",
+                        "message": "当前动作未获授权。",
+                        "retryable": False,
+                        "reasonCode": "ACTION_SCHEMA_OR_OWNERSHIP_REJECTED",
+                        "providerError": "volcengine 401 Unauthorized sk-live-secret",
+                    },
+                ),
+            ),
+        )
+
+        def safe_text_model(messages, info):
+            return ModelResponse(parts=(TextPart("当前动作未获授权。"),))
+
+        resumed_gateway = RecordingRunGateway(resumed_work)
+        AgentWorker(
+            resumed_gateway,
+            PydanticAIOrchestrator(
+                streaming_model(safe_text_model), _bundle_source()
+            ),
+        ).run_once()
+
+        payload = resumed_gateway.commit_payload
+        self.assertIsNone(payload["error"])
+        self.assertIsNotNone(payload["usage"])
+        self.assertTrue(payload["bundle_evidence"])
+        serialized = json.dumps(payload, ensure_ascii=False)
+        # 治理拒绝只以规范化公开字段闭环，内部码不进 commit 任何字段。
+        self.assertNotIn("ACTION_SCHEMA_OR_OWNERSHIP_REJECTED", serialized)
+        self.assertNotIn("sk-live-secret", serialized)
+
+    def test_resume_commit_carries_history_origin_evidence_without_double_charge(
+        self,
+    ) -> None:
+        def read_then_image_model(messages, info):
+            has_return = any(
+                isinstance(part, ToolReturnPart)
+                for message in messages
+                for part in message.parts
+            )
+            if not has_return:
+                return ModelResponse(
+                    parts=(
+                        ToolCallPart(
+                            "read_resource",
+                            {"resource_id": REF_RESOURCE_ID},
+                            "read-ref-call",
+                        ),
+                    )
+                )
+            return ModelResponse(
+                parts=(
+                    TextPart("好的，为你生成图片。"),
+                    ToolCallPart(
+                        "create_image_generation_job",
+                        {"prompt": "海报", "aspect_ratio": "1:1"},
+                        "img-call",
+                    ),
+                )
+            )
+
+        initial_work = _skill_work()
+        initial_gateway = RecordingRunGateway(initial_work)
+        AgentWorker(
+            initial_gateway,
+            PydanticAIOrchestrator(
+                streaming_model(read_then_image_model), _skill_source()
+            ),
+        ).run_once()
+        action_id = initial_gateway.commit_payload["actions"][0]["action_id"]
+
+        resumed_work = _skill_work(
+            run_version=2,
+            fencing_token=5,
+            checkpoint=self._restored_checkpoint(initial_gateway.commit_payload),
+            accepted_results=(
+                AcceptedActionResult(
+                    action_id=action_id,
+                    status="succeeded",
+                    result={"asset_ids": [91]},
+                ),
+            ),
+        )
+
+        def resume_text_model(messages, info):
+            return ModelResponse(parts=(TextPart("图片已经生成。"),))
+
+        resumed_gateway = RecordingRunGateway(resumed_work)
+        AgentWorker(
+            resumed_gateway,
+            PydanticAIOrchestrator(
+                streaming_model(resume_text_model), _skill_source()
+            ),
+        ).run_once()
+
+        payload = resumed_gateway.commit_payload
+        self.assertIsNone(payload["error"])
+        self.assertIsNotNone(payload["usage"])
+        evidence = payload["bundle_evidence"]
+        # 恢复重建的已读证据以 history origin 同通道回传，不重复计为 on_demand。
+        history = [e for e in evidence if e["origin"] == "history"]
+        self.assertEqual(1, len(history))
+        self.assertEqual(REF_RESOURCE_ID, history[0]["resource_id"])
+        self.assertEqual(_sha256(REF_BODY), history[0]["content_digest"])
+        self.assertEqual(
+            [],
+            [
+                e
+                for e in evidence
+                if e["origin"] == "on_demand" and e["resource_id"] == REF_RESOURCE_ID
+            ],
+        )
+        # 证据不含资源正文。
+        self.assertNotIn(REF_BODY, json.dumps(evidence, ensure_ascii=False))
 
 
 if __name__ == "__main__":
