@@ -173,4 +173,14 @@ describe("canvas-doc-model", () => {
     const arr = JSON.parse(serialize(doc));
     expect(arr[0].recipe).toEqual({ origin: "uploaded" });
   });
+
+  it("serialize/parse 保 taskId（视频 job 关联持久化，刷新 recover by taskId）", () => {
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({ id: "v1", type: "video", position: { x: 0, y: 0 }, data: { kind: "video", taskId: "130", status: "running", progress: 30 } });
+    const back = parse(serialize(doc));
+    expect(back.nodes[0].data.taskId).toBe("130");
+    // status/progress 临时态，serialize 剥（taskId 是持久关联，保留）
+    expect(back.nodes[0].data.status).toBeUndefined();
+    expect(back.nodes[0].data.progress).toBeUndefined();
+  });
 });

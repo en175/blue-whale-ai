@@ -3,10 +3,11 @@
  * card → 图片节点字段。不改老 recover.ts/nodeFromCard.ts（strangler 老不动）。
  */
 import { describe, it, expect } from "vitest";
-import { jobToV2Placeholder, cardToV2ImageFields, recipeToDockPrefill, buildCrossmodalRefill } from "./mappers";
+import { jobToV2Placeholder, cardToV2ImageFields, recipeToDockPrefill, buildCrossmodalRefill, dockMediaToRecipeRefs } from "./mappers";
 import type { JobListItem } from "../api/generation";
 import type { CardMessage } from "../nodeFromCard";
 import type { GenerationRecipe } from "../model";
+import type { DockMediaItem } from "../types";
 
 const job = (over: Partial<JobListItem>): JobListItem =>
   ({
@@ -19,6 +20,27 @@ const job = (over: Partial<JobListItem>): JobListItem =>
     outputAssets: null,
     ...over,
   }) as JobListItem;
+
+describe("dockMediaToRecipeRefs", () => {
+  it("从画布选（带 nodeId）→ recipe refs 带 nodeId + assetId + url", () => {
+    const refs = dockMediaToRecipeRefs([
+      { id: "d1", type: "image", name: "猫图", src: "u1.png", nodeId: "n_cat", assetId: 95 } as DockMediaItem,
+    ]);
+    expect(refs).toEqual([{ kind: "image", nodeId: "n_cat", assetId: "95", url: "u1.png" }]);
+  });
+
+  it("上传参考（无 nodeId）→ recipe refs assetId + url 兜底（无 nodeId）", () => {
+    const refs = dockMediaToRecipeRefs([
+      { id: "d2", type: "audio", name: "bgm.mp3", src: "a1.mp3", assetId: 12 } as DockMediaItem,
+    ]);
+    expect(refs).toEqual([{ kind: "audio", nodeId: undefined, assetId: "12", url: "a1.mp3" }]);
+  });
+
+  it("无 src 的跳过（防 recipe 记空 url）", () => {
+    const refs = dockMediaToRecipeRefs([{ id: "d3", type: "image", name: "无图" } as DockMediaItem]);
+    expect(refs).toEqual([]);
+  });
+});
 
 describe("jobToV2Placeholder", () => {
   it("image job：status=running（非 loading），无 progress，尺寸按 aspectRatio，id=job-{jobId}", () => {

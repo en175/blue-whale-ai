@@ -16,19 +16,15 @@ import { readMediaNaturalSize, detectMediaKind } from "@/lib/mediaSize";
 
 import { useCanvasStore } from "../../canvas/_canvas/store";
 import { useCanvasDoc } from "../../canvas/_canvas/v2/useCanvasDoc";
-import type { CanvasNode, CanvasNodeData, NodeKindId, MediaKind, NodeRecipe, RecipeInput } from "../../canvas/_canvas/model";
+import type { CanvasNode, CanvasNodeData, NodeKindId } from "../../canvas/_canvas/model";
 import { CanvasSurface } from "../../canvas/_canvas/v2/CanvasSurface";
 import type { MenuPayload } from "../../canvas/_canvas/v2/CanvasSurface";
 import { ContextMenu, type ContextMenuKind } from "../../canvas/_canvas/v2/ContextMenu";
 import { useV2Projects } from "../../canvas/_canvas/v2/useV2Projects";
-import { cardToV2ImageFields, jobToV2Placeholder, recipeToDockPrefill, buildCrossmodalRefill } from "../../canvas/_canvas/v2/mappers";
-import { resolveInputs, toRecipeInputs, buildGenerationRecipe } from "../../canvas/_canvas/engine";
-import { nodeKinds } from "../../canvas/_canvas/kinds";
+import { cardToV2ImageFields, recipeToDockPrefill, buildCrossmodalRefill } from "../../canvas/_canvas/v2/mappers";
 import { findPlacement } from "../../canvas/_canvas/placement";
 import { dockAccept } from "../../canvas/_canvas/utils";
-import { parseAspectRatio } from "../../canvas/_canvas/aspectRatio";
-import { generateImage, createVideoJob, streamJob, listJobs, getImageModels, getVideoModels, generateAudio } from "../../canvas/_canvas/api/generation";
-import { useVideoJobs } from "../../canvas/_canvas/hooks/useVideoJobs";
+import { useCanvasGeneration } from "../../canvas/_canvas/hooks/useCanvasGeneration";
 import type { MentionItem } from "../../canvas/_canvas/components/dock/mention";
 import {
   TopBar,
@@ -41,11 +37,6 @@ import {
 } from "../../canvas/_canvas";
 import type { DockMediaItem, GenerateArgs, PrefillSignal } from "../../canvas/_canvas";
 import type { CardMessage, ChatMessage } from "../../canvas/_canvas";
-
-function parseQuantity(q: string): number {
-  const n = parseInt(q, 10);
-  return Number.isNaN(n) ? 1 : n;
-}
 
 function userFriendlyErrorMessage(e: unknown): string {
   if (!(e instanceof Error)) return "生成失败，请稍后重试";
@@ -126,9 +117,6 @@ function CanvasV2ProjectInner() {
   const [agentPendingMention, setAgentPendingMention] = useState<{ name: string; nonce: number } | null>(null);
   const [pickingFor, setPickingFor] = useState<"image" | "video" | "audio" | "firstFrame" | "lastFrame" | null>(null);
   const [menu, setMenu] = useState<MenuPayload | null>(null);
-  const videoJobs = useVideoJobs();
-  const [generating, setGenerating] = useState(false);
-  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const addNode = useCallback(
     (kind: NodeKindId, extra?: { id?: string; width?: number; height?: number; data?: Partial<CanvasNodeData> }): string => {
@@ -156,118 +144,18 @@ function CanvasV2ProjectInner() {
     [nodes, viewport, addNodeFull],
   );
 
-  const updateNode = useCallback((nodeId: string, patch: Partial<CanvasNodeData>) => {
-    patchNode(nodeId, patch);
-  }, [patchNode]);
-
-  // 出图：注册 asset + 节点 assetId 引用 + status=done（assetId 全链路 String）；recipe 随生成冻结写回
-  const setNodeAsset = useCallback(
-    (nodeId: string, assetId: string, kind: MediaKind, src: string, source: "generated" | "uploaded" = "generated", recipe?: NodeRecipe) => {
-      addAsset({ id: assetId, kind, src, source });
-      patchNode(nodeId, recipe ? { assetId, status: "done", recipe } : { assetId, status: "done" });
-    },
-    [addAsset, patchNode],
-  );
-
-  // 视频 job 编排：nodeId 闭包注入 useVideoJobs 回调。recipe 已在节点上（创建即写），
-  // 此处只按 job 生命周期更新 progress / 写 assetId / 报错——不再依赖单 ref，多视频可并发。
-  const startVideoJob = useCallback(
-    (nodeId: string, jobId: number) => {
-      videoJobs.start(jobId, {
-        onProgress: (progress) => updateNode(nodeId, { progress }),
-        onSucceeded: ({ assetId, assetUrl }) => setNodeAsset(nodeId, assetId, "video", assetUrl, "generated"),
-        onFailed: (message) => {
-          updateNode(nodeId, { status: "error", errorMessage: message });
-          setGenerateError(message);
-        },
-      });
-    },
-    [videoJobs, updateNode, setNodeAsset],
-  );
-
-  const buildImageStreamHandlers = useCallback(
-    (placeholderId: string, content: string, w: number, h: number, onSettled?: () => void, recipe?: NodeRecipe) => ({
-      onImage: (url: string, assetId: number, imageIndex: number) => {
-        if (imageIndex === 0) {
-          setNodeAsset(placeholderId, String(assetId), "image", url, "generated", recipe);
-        } else {
-          const aid = String(assetId);
-          addAsset({ id: aid, kind: "image", src: url, source: "generated" });
-          addNode("image", { width: w, height: h, data: { content, status: "done", assetId: aid, recipe } });
-        }
-      },
-      onImageFailed: (imageIndex: number, _code?: string, message?: string) => {
-        addNode("image", { width: w, height: h, data: { content: `第 ${imageIndex + 1} 张`, status: "error", errorMessage: message || "该张生成失败" } });
-      },
-      onDone: () => {
-        const ph = nodes.find((n) => n.id === placeholderId);
-        if (ph && ph.data.status === "running") updateNode(placeholderId, { status: "error", errorMessage: "未生成任何图片" });
-        onSettled?.();
-      },
-      onError: (message: string) => {
-        updateNode(placeholderId, { status: "error", errorMessage: message });
-        setGenerateError(message);
-        onSettled?.();
-      },
-    }),
-    [addNode, setNodeAsset, updateNode, nodes],
-  );
-
-  // 节点「生成」：resolveInputs 取上游 text prompt（连线驱动）→ 默认 model 生成（image 非流式 / video 轮询）
-  const handleGenerateFromNode = useCallback(
-    async (nodeId: string) => {
-      const node = nodes.find((n) => n.id === nodeId);
-      if (!node || (node.data.kind !== "image" && node.data.kind !== "video")) return;
-      const inputs = resolveInputs(node, nodes, edges, assets);
-      const task = nodeKinds[node.data.kind].buildTask(node, inputs);
-      const recipeInputs = toRecipeInputs(node, nodes, edges, assets);
-      const prompt = task.prompt?.trim();
-      if (!prompt) {
-        setGenerateError("请先连一个文本节点作 prompt");
-        return;
-      }
-      setGenerating(true);
-      setGenerateError(null);
-      try {
-        if (node.data.kind === "image") {
-          const models = await getImageModels();
-          const model = models[0];
-          if (!model) throw new Error("无可用图片模型");
-          patchNode(nodeId, { status: "running" });
-          const result = await generateImage({ prompt, projectId: Number(pid), modelId: model.modelId, sizeId: model.defaultSize, aspectRatio: model.defaultAspectRatio, quantity: 1 });
-          if (result.url && result.assetId != null) {
-            const recipe = buildGenerationRecipe({ mediaKind: "image", model: model.modelId, params: { aspectRatio: model.defaultAspectRatio, resolution: model.defaultSize, quantity: 1 }, inputs: recipeInputs });
-            setNodeAsset(nodeId, String(result.assetId), "image", result.url, "generated", recipe);
-          }
-          else patchNode(nodeId, { status: "error", errorMessage: "未返回图片" });
-          setGenerating(false);
-        } else {
-          // video：createVideoJob → recipe 创建即写节点 → startVideoJob per-job 轮询（并发安全）
-          const models = await getVideoModels();
-          const model = models[0];
-          // recipe 创建即写节点：配方发起那刻全有，running/失败窗口期也带溯源（不再拖到 succeeded）
-          const videoRecipe = buildGenerationRecipe({ mediaKind: "video", model: model?.modelId ?? "", params: { aspectRatio: model?.defaultAspectRatio ?? "16:9", resolution: model?.defaultResolution ?? "1080p", duration: model?.defaultDuration ?? 5, refMode: "none" }, inputs: recipeInputs });
-          patchNode(nodeId, { status: "running", progress: 0, recipe: videoRecipe });
-          const result = await createVideoJob({
-            prompt,
-            projectId: Number(pid),
-            modelId: model?.modelId,
-            resolution: model?.defaultResolution,
-            aspectRatio: model?.defaultAspectRatio,
-            duration: model?.defaultDuration ?? 5,
-            firstFrameUrl: task.firstFrame?.src,
-          });
-          startVideoJob(nodeId, result.jobId);
-          setGenerating(false); // 视频转后台轮询（节点自身 running/progress 反馈），不阻塞后续并发生成
-        }
-      } catch (e) {
-        patchNode(nodeId, { status: "error", errorMessage: userFriendlyErrorMessage(e) });
-        setGenerateError(userFriendlyErrorMessage(e));
-        setGenerating(false);
-      }
-    },
-    [nodes, edges, assets, pid, patchNode, setNodeAsset, startVideoJob],
-  );
+  // 生成业务（generate/generateFromNode/recover + job 轮询）抽到 useCanvasGeneration（ADR-0027）；
+  // page 只调 hook 暴露的 API，不接触 setNodeAsset/startVideoJob/buildImageStreamHandlers/useVideoJobs。
+  const { generate, generateFromNode, hydrate, generating, generateError, setGenerateError } = useCanvasGeneration({
+    nodes,
+    edges,
+    assets,
+    addNode,
+    patchNode,
+    addAsset,
+    ensureAsset,
+    projectId: pid,
+  });
 
   const handleNodeAction = useCallback(
     (node: CanvasNode, actionId: string) => {
@@ -344,14 +232,14 @@ function CanvasV2ProjectInner() {
           break;
         }
         case "generate": {
-          void handleGenerateFromNode(node.id);
+          void generateFromNode(node.id);
           break;
         }
         default:
           break;
       }
     },
-    [assets, handleGenerateFromNode],
+    [assets, generateFromNode, setGenerateError],
   );
 
   // 文本节点 prompt 编辑写回
@@ -407,7 +295,7 @@ function CanvasV2ProjectInner() {
         setGenerateError(userFriendlyErrorMessage(err));
       }
     },
-    [addNode, addAsset, pid],
+    [addNode, addAsset, pid, setGenerateError],
   );
 
   const handleDockLocalUpload = useCallback(
@@ -428,7 +316,7 @@ function CanvasV2ProjectInner() {
         setGenerateError(userFriendlyErrorMessage(e));
       }
     },
-    [addNode, addAsset, pid],
+    [addNode, addAsset, pid, setGenerateError],
   );
 
   const handleFrameUpload = useCallback(
@@ -442,7 +330,7 @@ function CanvasV2ProjectInner() {
         setGenerateError(userFriendlyErrorMessage(e));
       }
     },
-    [pid],
+    [pid, setGenerateError],
   );
 
   const handleFrameClear = useCallback((slot: "first" | "last") => {
@@ -455,127 +343,23 @@ function CanvasV2ProjectInner() {
     setLastFrameUrl(firstFrameUrl);
   }, [firstFrameUrl, lastFrameUrl]);
 
+  // Dock 生成经 hook.generate；image 参考图 fallback（Dock media → referenceImages）由 page 注入
+  // （hook 不持有 imageDockMedia UI state）。其余 mode 原样透传。
   const handleGenerate = useCallback(
-    async (promptText: string, args: GenerateArgs) => {
-      const trimmed = promptText.trim();
-      if (!trimmed || !pid) return;
-      setGenerating(true);
-      setGenerateError(null);
-      let placeholderId: string | null = null;
-      try {
-        if (args.mode === "image") {
-          const ar = parseAspectRatio(args.settings.aspectRatio.id);
-          const imageRefs: RecipeInput[] = (args.referenceImages ?? imageDockMedia.map((m) => m.src).filter((s): s is string => Boolean(s))).map((u) => ({ kind: "image", url: u }));
-          const imageRecipe = buildGenerationRecipe({ mediaKind: "image", model: args.settings.model.id, params: { aspectRatio: args.settings.aspectRatio.id, resolution: args.settings.resolution.id, quantity: parseQuantity(args.settings.quantity) }, inputs: { prompt: { kind: "text", text: trimmed }, references: imageRefs.length ? imageRefs : undefined } });
-          placeholderId = addNode("image", { width: ar.width, height: ar.height, data: { content: trimmed, status: "running" } });
-          const result = await generateImage({
-            prompt: trimmed,
-            projectId: Number(pid),
-            modelId: args.settings.model.id,
-            sizeId: args.settings.resolution.id,
-            aspectRatio: args.settings.aspectRatio.id,
-            quantity: parseQuantity(args.settings.quantity),
-            referenceImages:
-              args.referenceImages ??
-              imageDockMedia.map((m) => m.src).filter((s): s is string => Boolean(s)),
-          });
-          if (result.stream && result.jobId != null) {
-            streamJob(result.jobId, buildImageStreamHandlers(placeholderId, trimmed, ar.width, ar.height, () => setGenerating(false), imageRecipe));
-          } else {
-            if (result.url && result.assetId != null) {
-              setNodeAsset(placeholderId, String(result.assetId), "image", result.url, "generated", imageRecipe);
-            } else {
-              updateNode(placeholderId, { status: "error", errorMessage: "未返回图片" });
-            }
-            setGenerating(false);
-          }
-        } else if (args.mode === "video") {
-          const result = await createVideoJob({
-            prompt: trimmed,
-            projectId: Number(pid),
-            modelId: args.settings.model.id,
-            resolution: args.settings.resolution.id,
-            aspectRatio: args.settings.aspectRatio.id,
-            duration: args.settings.duration,
-            firstFrameUrl: args.settings.firstFrameUrl,
-            lastFrameUrl: args.settings.lastFrameUrl,
-            referenceImages: args.settings.referenceImages,
-            referenceVideos: args.settings.referenceVideos,
-            referenceAudios: args.settings.referenceAudios,
-          });
-          const ar = parseAspectRatio(args.settings.aspectRatio.id);
-          const vidRefs: RecipeInput[] = [
-            ...(args.settings.referenceImages?.map((u) => ({ kind: "image" as const, url: u })) ?? []),
-            ...(args.settings.referenceVideos?.map((u) => ({ kind: "video" as const, url: u })) ?? []),
-            ...(args.settings.referenceAudios?.map((u) => ({ kind: "audio" as const, url: u })) ?? []),
-          ];
-          const videoRecipe = buildGenerationRecipe({ mediaKind: "video", model: args.settings.model.id, params: { aspectRatio: args.settings.aspectRatio.id, resolution: args.settings.resolution.id, duration: args.settings.duration, refMode: args.settings.refMode.id }, inputs: { prompt: { kind: "text", text: trimmed }, firstFrame: args.settings.firstFrameUrl ? { kind: "image", url: args.settings.firstFrameUrl } : undefined, lastFrame: args.settings.lastFrameUrl ? { kind: "image", url: args.settings.lastFrameUrl } : undefined, references: vidRefs.length ? vidRefs : undefined } });
-          placeholderId = addNode("video", { width: ar.width, height: ar.height, data: { content: trimmed, status: "running", progress: 0, recipe: videoRecipe } });
-          startVideoJob(placeholderId, result.jobId);
-          setGenerating(false); // 视频转后台轮询，不阻塞后续并发生成
-        } else if (args.mode === "audio") {
-          // 音频生成（IJZXW7-B）：generateAudio 当前 mock（后端无音频 provider），就绪切真不改签名
-          placeholderId = addNode("audio", { width: 240, height: 120, data: { content: trimmed, status: "running" } });
-          const result = await generateAudio({
-            prompt: trimmed,
-            projectId: Number(pid),
-            modelId: args.settings.model.id,
-            duration: args.settings.duration,
-            sampleRate: args.settings.sampleRate,
-            format: args.settings.format.id,
-          });
-          const audioRecipe = buildGenerationRecipe({
-            mediaKind: "audio",
-            model: args.settings.model.id,
-            params: { duration: args.settings.duration, sampleRate: args.settings.sampleRate, format: args.settings.format.id },
-            inputs: { prompt: { kind: "text", text: trimmed } },
-          });
-          setNodeAsset(placeholderId, String(result.assetId), "audio", result.url, "generated", audioRecipe);
-          setGenerating(false);
-        }
-      } catch (e) {
-        if (placeholderId && args.mode === "image") updateNode(placeholderId, { status: "error", errorMessage: userFriendlyErrorMessage(e) });
-        setGenerateError(userFriendlyErrorMessage(e));
-        setGenerating(false);
+    (promptText: string, args: GenerateArgs) => {
+      if (args.mode === "image" && !args.referenceImages) {
+        return generate(promptText, { ...args, referenceImages: imageDockMedia.map((m) => m.src).filter((s): s is string => Boolean(s)) });
       }
+      return generate(promptText, args);
     },
-    [addNode, updateNode, setNodeAsset, buildImageStreamHandlers, imageDockMedia, startVideoJob, pid],
+    [generate, imageDockMedia],
   );
 
   // 视频 job 进度 / 出图 / 报错已由 useVideoJobs 的 per-job 回调（startVideoJob）驱动，
   // 每个 job 更新自己的 nodeId，多视频并发互不干扰——不再需要单 jobState effect。
 
-  // load：useCanvasDoc 拉画布 → ensureAsset 填 assets → recover processing jobs
+  // load：useCanvasDoc 拉画布 → hydrate 统一水合（ensureAsset + recover + reconcile）
   const recoveredRef = useRef<Set<string>>(new Set());
-  const recoverProcessingJobs = useCallback(
-    async (projectId: string, existingNodeIds: Set<string>) => {
-      try {
-        const jobs = await listJobs({ projectId: Number(projectId), status: "processing", size: 50 });
-        for (const job of jobs) {
-          const ph = jobToV2Placeholder(job);
-          if (existingNodeIds.has(ph.id)) continue; // 去重：画布已 persist 该 job 占位则跳过（防重复堆积）
-          const input = (job.input ?? {}) as { prompt?: string; aspectRatio?: string; resolution?: string; duration?: number; refMode?: string };
-          if (ph.kind === "video") {
-            // recover recipe（best-effort 从 job.input 重建；model 字段 JobListItem 暂无，留空待后端补）→ 创建即写节点
-            const recoverRecipe = buildGenerationRecipe({
-              mediaKind: "video",
-              model: "",
-              params: { aspectRatio: input.aspectRatio ?? "16:9", resolution: input.resolution ?? "720p", duration: input.duration ?? 5, refMode: input.refMode ?? "omni" },
-              inputs: { prompt: { kind: "text", text: input.prompt ?? "" } },
-            });
-            addNode(ph.kind, { id: ph.id, width: ph.width, height: ph.height, data: { ...ph.data, recipe: recoverRecipe } });
-            startVideoJob(ph.id, job.jobId); // per-job 独立轮询：多个 processing 视频并发 recover，不再单 ref 覆盖
-          } else {
-            addNode(ph.kind, { id: ph.id, width: ph.width, height: ph.height, data: ph.data });
-            streamJob(job.jobId, buildImageStreamHandlers(ph.id, ph.data.content ?? "", ph.width, ph.height));
-          }
-        }
-      } catch (e) {
-        console.warn("[canvas-v2] recover processing jobs failed:", e);
-      }
-    },
-    [addNode, startVideoJob, buildImageStreamHandlers],
-  );
   useEffect(() => {
     if (!pid) return;
     if (recoveredRef.current.has(pid)) return;
@@ -585,12 +369,7 @@ function CanvasV2ProjectInner() {
       try {
         const d = await loadDoc(pid);
         if (cancelled) return;
-        await Promise.all(
-          d.nodes
-            .filter((n) => n.data.assetId)
-            .map((n) => ensureAsset(n.data.assetId as string)),
-        );
-        void recoverProcessingJobs(pid, new Set(d.nodes.map((n) => n.id)));
+        void hydrate(d.nodes);
       } catch (e) {
         console.warn("[canvas-v2] load failed", e);
       }
@@ -598,7 +377,7 @@ function CanvasV2ProjectInner() {
     return () => {
       cancelled = true;
     };
-  }, [pid, loadDoc, ensureAsset, recoverProcessingJobs]);
+  }, [pid, loadDoc, hydrate]);
 
   const handleRequestPick = useCallback((mode: "image" | "video" | "audio") => setPickingFor(mode), []);
   const handlePickFrameFromCanvas = useCallback((slot: "first" | "last") => setPickingFor(slot === "first" ? "firstFrame" : "lastFrame"), []);
@@ -610,7 +389,7 @@ function CanvasV2ProjectInner() {
         setPickingFor(null);
         return;
       }
-      const item: DockMediaItem = { id: node.id, type: "image", name: (node.data.content as string) || "图片", src };
+      const item: DockMediaItem = { id: node.id, type: "image", name: (node.data.content as string) || "图片", src, nodeId: node.id, assetId: node.data.assetId ? Number(node.data.assetId) : undefined };
       if (pickingFor === "image") setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
       else if (pickingFor === "video") setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
       else if (pickingFor === "audio") setAudioDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));

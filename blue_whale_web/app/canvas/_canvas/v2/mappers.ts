@@ -7,7 +7,7 @@
  * 位置（position）依赖视口/容器，由 page addNode 层封装，本文件只产 data + 尺寸。
  */
 import { parseAspectRatio } from "../aspectRatio";
-import type { CanvasNodeData, NodeKindId, GenerationRecipe, ImageGenParams, VideoGenParams } from "../model";
+import type { CanvasNodeData, NodeKindId, GenerationRecipe, ImageGenParams, RecipeInput, VideoGenParams } from "../model";
 import type { DockPrefill, DockMediaItem } from "../types";
 import type { JobListItem } from "../api/generation";
 import type { CardMessage } from "../nodeFromCard";
@@ -48,6 +48,21 @@ export function cardToV2ImageFields(card: CardMessage): { width: number; height:
  * recipe.generation → Dock 预填快照（P2 重新编辑：把节点生成参数带回底部栏）。
  * 纯提取：prompt + 模型/比例/分辨率/数量/时长/refMode + 首尾帧/参考图 url。字段缺失返 undefined（Dock 侧跳过）。
  */
+/**
+ * DockMediaItem → RecipeInput[]：nodeId 画布内来源（可追溯+重连感知）+ assetId 上传资产 + url 兜底。
+ * 支撑 recipe references 带 nodeId（P3，ADR-0027 REQ-6）：连线（nodeId 关联画布节点）+ 重新生成溯源。
+ */
+export function dockMediaToRecipeRefs(media: DockMediaItem[]): RecipeInput[] {
+  return media
+    .filter((m) => m.src)
+    .map((m) => ({
+      kind: m.type,
+      nodeId: m.nodeId,
+      assetId: m.assetId != null ? String(m.assetId) : undefined,
+      url: m.src,
+    }));
+}
+
 export function recipeToDockPrefill(gen: GenerationRecipe): DockPrefill {
   const params = gen.params as Partial<ImageGenParams & VideoGenParams>;
   // references 保留各自 kind（image/video/audio）——视频 Dock 按 kind 分到 referenceImages/Videos/Audios

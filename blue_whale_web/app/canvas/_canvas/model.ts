@@ -157,6 +157,7 @@ export function serialize(doc: CanvasDoc): string {
     assetId: n.data.assetId != null ? Number(n.data.assetId) : undefined,
     prompt: n.data.prompt,
     recipe: n.data.recipe,
+    taskId: n.data.taskId,
     // edges 聚合到 target 节点 references（兼容老 NodeItem[]：老忽略 references，v2 parse 派生 edges）
     references: [] as Array<{ source: string; sourceHandle?: string; targetHandle?: string }>,
   }));
@@ -209,12 +210,14 @@ function normalizeNode(n: Record<string, unknown>): CanvasNode {
   const imageUrl = data.imageUrl ?? n.imageUrl;
   const prompt = data.prompt ?? n.prompt;
   const recipe = (data.recipe ?? n.recipe) as NodeRecipe | undefined;
+  const taskId = (data.taskId ?? n.taskId) as string | undefined;
   const nodeData: CanvasNodeData = { kind };
   if (content != null) (nodeData as Record<string, unknown>).content = content;
   if (assetId != null) nodeData.assetId = assetId;
   if (imageUrl != null) (nodeData as Record<string, unknown>).imageUrl = imageUrl;
   if (prompt != null) nodeData.prompt = prompt as string;
   if (recipe) nodeData.recipe = recipe;
+  if (taskId) nodeData.taskId = taskId;
   return {
     id: (n.id as string) ?? "",
     type: kind,

@@ -63,6 +63,8 @@ export type DockMediaItem = {
   src?: string;
   /** 关联资产 ID（预埋：当前参考素材 URL 直传，assetId 为后续统一切 assetId 引用预留，spec D7） */
   assetId?: number;
+  /** 画布内来源节点 id（从画布选的参考；上传无，靠 assetId/url 兜底） */
+  nodeId?: string;
   /** 上传进度 0-100；undefined = 已完成或在 Dock 缩略图区不显示进度 */
   uploadProgress?: number;
 };
