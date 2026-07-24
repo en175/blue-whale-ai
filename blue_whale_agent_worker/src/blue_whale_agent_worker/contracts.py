@@ -88,6 +88,40 @@ class ToolGrant:
 
 
 @dataclass(frozen=True)
+class CreativeSkillActivation:
+    """一次 Creative Skill 激活的不可变事实（契约 §1.3 / §4）。
+
+    Java 在创建 AgentRun 时原子固定进 ``activated_creative_skill_versions``（0/1 单例）；
+    Worker 在 claim 解析时按冻结 schema 强类型校验（身份 / 摘要 / source-reason 判别式）。
+    ``resource_digest`` 是正文字节 SHA-256，读取正文时与响应 ``content_digest`` 双重比对
+    （契约 §6）。本工单（T3）只消费 ``source=forced_use`` 正文；``auto`` 路径归 T5/T6。
+    """
+
+    creative_skill_id: str
+    creative_skill_version_id: str
+    source: str  # "forced_use" | "auto"
+    reason: Mapping[str, Any]  # 判别式：forced_use→{type:user_use}；auto→{type:agent_match,detail:{matched_fields:[...]}}
+    resource_digest: str
+
+
+@dataclass(frozen=True)
+class AutoCreativeSkillCandidate:
+    """Run 创建时冻结的 auto 候选（契约 §1.4 / §3），不含正文。
+
+    本工单（T3）只接收保留进 ``RunWork.auto_creative_skill_candidates``，不参与选择或
+    激活（候选计算归 T5、Worker 选择归 T6）。``resource_digest`` 是正文字节摘要，供
+    后续激活时与读取正文比对。
+    """
+
+    creative_skill_id: str
+    creative_skill_version_id: str
+    name: str
+    description: str
+    display_version: str
+    resource_digest: str
+
+
+@dataclass(frozen=True)
 class RunWork:
     agent_run_id: int
     project_id: int
@@ -101,15 +135,23 @@ class RunWork:
     messages: Sequence[Mapping[str, str]]
     checkpoint: Optional[RuntimeCheckpoint]
     accepted_results: Sequence[AcceptedActionResult] = ()
-    # AgentRun 固定的 Runtime Bundle / ModelProfile / CreativeSkill pin（契约 §6）。
-    # Java 在创建 AgentRun 时原子固定；enforcement-enabled=true 时下发，测试环境
-    # （enforcement-enabled=false）为 None。Worker 按 bundle_version_id 拉取发布快照，
-    # 用 manifest_digest 与本地重算值逐字节比对；字段不再被 claim 载荷解析丢弃。
+    # AgentRun 固定的 Runtime Bundle / ModelProfile pin（契约 §6）。Java 在创建 AgentRun
+    # 时原子固定；enforcement-enabled=true 时下发，测试环境（enforcement-disabled）为 None。
+    # Worker 按 bundle_version_id 拉取发布快照，用 manifest_digest 与本地重算值逐字节比对；
+    # 字段不再被 claim 载荷解析丢弃。
     bundle_version_id: Optional[str] = None
     manifest_digest: Optional[str] = None
     model_profile_id: Optional[str] = None
     model_profile_version: Optional[str] = None
-    activated_creative_skill_versions: Optional[Sequence[Any]] = None
+    # Creative Skill 激活 pin（契约 §3）：恒数组，不随 Skill 库发布漂移。
+    # activated_creative_skill_versions 为 0/1 单例（forced_use 时 Java 原子固定当前发布
+    # 版本）；auto_creative_skill_candidates 为 Run 创建时冻结的 auto 候选（T3 只接收不
+    # 消费，选择归 T6）。Java 下发为 JSON 文本字符串（与 toolGrants 同形态），
+    # enforcement-disabled 时不下发 → gateway 解析为空元组。claim 解析按冻结 schema 强类型
+    # 校验，非法身份 / 摘要 / source-reason 判别式 / 超项 / 未知字段均 fail closed。
+    # pin 随 RunWork 下发已由 Java 权威记录，Worker commit 不回传（ADR-0042 D2）。
+    activated_creative_skill_versions: Sequence[CreativeSkillActivation] = ()
+    auto_creative_skill_candidates: Sequence[AutoCreativeSkillCandidate] = ()
     # 当次 Run 钉住的 ToolGrant 子集（契约 §2.5）：Adapter 据此动态构造模型可见工具集，
     # 未授权工具对模型完全不可见。enforcement-disabled 时 Java 不下发，gateway 解析为空集。
     tool_grants: Sequence[ToolGrant] = ()
@@ -311,3 +353,22 @@ class CreativeContextSource(Protocol):
 
     def fetch_creative_skills(self, run_id: int) -> Sequence[Mapping[str, Any]]:
         """读取 Run 固定 Bundle 快照里的 Creative Skill 紧凑元数据列表。"""
+
+
+class CreativeSkillContentSource(Protocol):
+    """已激活 Creative Skill 正文 / 引用资源只读源（契约 §6 / IK3NPD-T3）。
+
+    按 ``run_id`` 寻址：Java 服务端从 Run pin 派生精确 Skill 与版本，客户端不能改读
+    其他版本（恢复同一 Run 仍用同一 pin，不随 Skill 库发布漂移）。正文恒
+    ``text/markdown``；引用资源按规范化 POSIX 相对路径返回单个。JavaRunGateway 天然
+    满足（duck-typed）。与 ``CreativeContextSource.fetch_creative_skills``（推荐元数据，
+    §7）区分：本源只服务于已激活版本的正文 / 引用按需读取。
+    """
+
+    def fetch_creative_skill_body(self, run_id: int) -> Mapping[str, Any]:
+        """GET .../creative-skill-body：激活版本正文（含 content_digest，契约 §6）。"""
+
+    def fetch_creative_skill_reference(
+        self, run_id: int, resource_path: str
+    ) -> Mapping[str, Any]:
+        """GET .../creative-skill-references/{path}：单个引用资源（含 content_digest）。"""

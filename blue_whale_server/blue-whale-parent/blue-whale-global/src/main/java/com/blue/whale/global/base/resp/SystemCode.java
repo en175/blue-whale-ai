@@ -67,6 +67,10 @@ public enum SystemCode implements IResultCode {
     CREATIVE_SKILL_NOT_A_CANDIDATE(SystemCode.CREATIVE_SKILL_NOT_A_CANDIDATE_CODE, "Creative Skill 不在候选内"),
     /** Run 已存在激活记录，拒绝第二次激活（实现归 IK3NPF，本工单占编号） */
     CREATIVE_SKILL_ALREADY_ACTIVATED(SystemCode.CREATIVE_SKILL_ALREADY_ACTIVATED_CODE, "Creative Skill 已激活"),
+    /** 已固定版本的正文或引用资源字节缺失（fail closed，不降级默认提示词） */
+    CREATIVE_SKILL_CONTENT_MISSING(SystemCode.CREATIVE_SKILL_CONTENT_MISSING_CODE, "Creative Skill 正文缺失"),
+    /** 读取内容摘要与固定摘要不符（fail closed，不换版本 / 不用缓存替代品） */
+    CREATIVE_SKILL_DIGEST_MISMATCH(SystemCode.CREATIVE_SKILL_DIGEST_MISMATCH_CODE, "Creative Skill 摘要不符"),
     ;
 
     /** 通用 code */
@@ -108,6 +112,8 @@ public enum SystemCode implements IResultCode {
     public static final int CREATIVE_SKILL_SELECTION_NOT_ALLOWED_CODE = 100308;
     public static final int CREATIVE_SKILL_NOT_A_CANDIDATE_CODE = 100309;
     public static final int CREATIVE_SKILL_ALREADY_ACTIVATED_CODE = 100310;
+    public static final int CREATIVE_SKILL_CONTENT_MISSING_CODE = 100311;
+    public static final int CREATIVE_SKILL_DIGEST_MISMATCH_CODE = 100312;
 
     final int code;
     final String msg;

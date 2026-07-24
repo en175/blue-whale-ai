@@ -22,6 +22,7 @@ from .bundle.gate import ReadEvidence, ResourceGate
 from .bundle.loader import ContextLoader, LoadedContext
 from .bundle.source import BundleSource
 from .bundle.verifier import BundleVerifier, VerifiedSnapshot
+from .creative_skill_gate import CreativeSkillContentGate
 from .contracts import (
     AcceptedActionResult,
     AgentRunConflictError,
@@ -29,6 +30,7 @@ from .contracts import (
     ChunkSink,
     ConversationSource,
     CreativeContextSource,
+    CreativeSkillContentSource,
     MixedStreamError,
     OrchestratorResult,
     ProposedAction,
@@ -91,11 +93,13 @@ class PydanticAIOrchestrator:
         bundle_source: BundleSource,
         conversation_source: ConversationSource | None = None,
         creative_context_source: CreativeContextSource | None = None,
+        creative_content_source: CreativeSkillContentSource | None = None,
     ) -> None:
         self._model = model
         self._bundle_source = bundle_source
         self._conversation_source = conversation_source
         self._creative_context_source = creative_context_source
+        self._creative_content_source = creative_content_source
 
     async def advance(
         self,
@@ -198,10 +202,20 @@ class PydanticAIOrchestrator:
             initial_tokens=loaded.initial_tokens,
             initial_evidence=loaded.initial_evidence,
         )
+        # 已激活 Creative Skill 正文装载（契约 §6 / IK3NPD-T3）：forced 激活非空时在
+        # provider 调用前读正文（CreativeSkillContentGate 双重 digest 校验），拼进 Agent
+        # instructions 仅注入一次；空激活 / 无源不读取，既有 instructions 不变。auto 路径
+        # 归 T5/T6，本工单不消费候选、不发激活命令。读取异常经 BundleError 通道归一化。
+        creative_gate = self._load_creative_skill_body(work)
+        agent_instructions = loaded.instructions
+        if creative_gate is not None:
+            agent_instructions = self._compose_creative_skill_instructions(
+                loaded.instructions, creative_gate.read_body()
+            )
         agent = Agent(
             self._model,
             output_type=(str, DeferredToolRequests),
-            instructions=loaded.instructions,
+            instructions=agent_instructions,
             tools=(*self._build_tools(work, gate), read_resource),
             deps_type=ResourceGate,
         )
@@ -338,6 +352,7 @@ class PydanticAIOrchestrator:
                 "stream_id": stream_id,
             },
         )
+        creative_evidence = creative_gate.evidence() if creative_gate is not None else ()
         return OrchestratorResult(
             commit_id=f"pydantic-ai-{work.agent_run_id}-{work.run_version}",
             visible_text=visible_text,
@@ -345,8 +360,45 @@ class PydanticAIOrchestrator:
             actions=actions,
             usage=self._usage_payload(usage),
             input_request=input_request,
-            bundle_evidence=self._evidence_payload(gate.evidence()),
+            # Creative Skill 读取证据（origin=creative_skill_*）与 Bundle / 对话读取证据同通道
+            # 回传，区分正文 / 引用资源；pin 不回传（ADR-0042 D2）。
+            bundle_evidence=self._evidence_payload(gate.evidence() + creative_evidence),
         )
+
+    def _load_creative_skill_body(
+        self, work: RunWork
+    ) -> CreativeSkillContentGate | None:
+        """forced 激活非空时构造 Creative Skill 内容闸门（契约 §6 / IK3NPD-T3）。
+
+        空激活 / 无 creative_content_source → None，不读取、不注入（既有 instructions 不变）。
+        T3 只消费 forced_use 正文；auto 候选选择 / 激活命令归 T5/T6——本工单不发激活命令，
+        也不读取候选正文。正文按 agent_run_id 寻址，Java 从 Run pin 派生固定版本，恢复同一
+        Run 仍用同一 pin（不随 Skill 库发布漂移）。
+        """
+        if (
+            self._creative_content_source is None
+            or not work.activated_creative_skill_versions
+        ):
+            return None
+        activation = work.activated_creative_skill_versions[0]
+        if activation.source != "forced_use":
+            # auto 激活路径归 T6：候选选择未发生前不提前装载正文。
+            return None
+        return CreativeSkillContentGate(
+            self._creative_content_source, activation, work.agent_run_id
+        )
+
+    @staticmethod
+    def _compose_creative_skill_instructions(base: str, body: str) -> str:
+        """把 forced Creative Skill 正文作为指令段拼进 Agent instructions（仅注入一次）。
+
+        正文经 CreativeSkillContentGate 双重 digest 校验后才进入上下文（provider 调用前）；
+        同 Run 正文幂等（gate 缓存不可变字节），恢复同一 Run 仍用同一 pin。空正文不改变既有
+        instructions。"""
+        if not body:
+            return base
+        segment = f"# 已激活 Creative Skill 正文\n\n{body}"
+        return f"{base}\n\n{segment}" if base else segment
 
     def _build_run_input(
         self, work: RunWork, gate: ResourceGate

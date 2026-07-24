@@ -12,6 +12,7 @@ from blue_whale_agent_worker.bundle.canonical import manifest_digest
 from blue_whale_agent_worker.bundle.source import FakeBundleSource
 from blue_whale_agent_worker.contracts import (
     AcceptedActionResult,
+    CreativeSkillActivation,
     MixedStreamError,
     RunWork,
     RuntimeCheckpoint,
@@ -560,6 +561,49 @@ def rejected_then_retry_model(messages, info):
     )
 
 
+class _FakeCreativeContentSource:
+    """内存版 CreativeSkillContentSource（IK3NPD-T3）：模拟 §6 正文响应，记录拉取次数。"""
+
+    def __init__(self, body: dict | None = None, body_error: BaseException | None = None) -> None:
+        self._body = body
+        self._body_error = body_error
+        self.body_fetches = 0
+
+    def fetch_creative_skill_body(self, run_id: int) -> dict:
+        self.body_fetches += 1
+        if self._body_error is not None:
+            raise self._body_error
+        if self._body is None:
+            raise KeyError("no body")
+        return dict(self._body)
+
+    def fetch_creative_skill_reference(self, run_id: int, resource_path: str) -> dict:
+        raise KeyError(resource_path)
+
+
+CREATIVE_SKILL_BODY = "# 海报设计创作方法\n1. 明确主题 2. 版式网格 3. 主视觉草稿。"
+
+
+def _creative_activation(resource_digest: str = _sha256(CREATIVE_SKILL_BODY)) -> CreativeSkillActivation:
+    return CreativeSkillActivation(
+        creative_skill_id="cs_poster_design",
+        creative_skill_version_id="csv_poster_design_1_0_0",
+        source="forced_use",
+        reason={"type": "user_use"},
+        resource_digest=resource_digest,
+    )
+
+
+def _creative_body_response(content_digest: str = _sha256(CREATIVE_SKILL_BODY)) -> dict:
+    return {
+        "creative_skill_id": "cs_poster_design",
+        "creative_skill_version_id": "csv_poster_design_1_0_0",
+        "media_type": "text/markdown",
+        "body": CREATIVE_SKILL_BODY,
+        "content_digest": content_digest,
+    }
+
+
 class PydanticAIOrchestratorTest(unittest.TestCase):
     def test_bundle_instructions_replace_hardcoded_prompt_and_reach_model(self) -> None:
         # IK2QBJ acceptance #1/#6：instructions 由 Bundle 基础上下文生成，
@@ -582,6 +626,79 @@ class PydanticAIOrchestratorTest(unittest.TestCase):
         self.assertNotIn("Blue-Whale", instructions)
         # 纯文本输出直通为可见文本（IK2QBY 后澄清只来自显式 request_user_input 工具）。
         self.assertEqual("您想要什么风格？", result.visible_text)
+
+    def test_forced_creative_skill_body_injected_into_instructions(self) -> None:
+        # IK3NPD（契约 §6）：forced 激活非空时，正文经双重 digest 校验后在 provider 调用前
+        # 进入 Agent instructions（仅注入一次），读取证据随 bundle_evidence 回传。
+        captured = []
+
+        def capturing_model(messages, info):
+            captured.append(info.instructions)
+            return ModelResponse(parts=(TextPart("好的，按海报工作流生成。"),))
+
+        source = _FakeCreativeContentSource(body=_creative_body_response())
+        work = _pydantic_work(activated_creative_skill_versions=(_creative_activation(),))
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(capturing_model), _bundle_source(),
+            creative_content_source=source,
+        ), work)
+
+        self.assertIsNone(result.error)
+        self.assertEqual(1, source.body_fetches)  # 仅注入一次（幂等）
+        self.assertIn(CREATIVE_SKILL_BODY, captured[0])
+        origins = [entry["origin"] for entry in result.bundle_evidence]
+        self.assertIn("creative_skill_body", origins)
+
+    def test_forced_creative_skill_digest_mismatch_fail_closed(self) -> None:
+        # 正文摘要与固定摘要不符 → CREATIVE_SKILL_DIGEST_MISMATCH，归一化为失败 commit，
+        # 不降级默认提示词、不启动 provider。
+        source = _FakeCreativeContentSource(
+            body=_creative_body_response(content_digest="sha256:" + "f" * 64)
+        )
+        work = _pydantic_work(activated_creative_skill_versions=(_creative_activation(),))
+
+        def unreachable_model(messages, info):
+            return ModelResponse(parts=(TextPart("provider 不应被调用"),))
+
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(unreachable_model), _bundle_source(),
+            creative_content_source=source,
+        ), work)
+
+        self.assertEqual("CREATIVE_SKILL_DIGEST_MISMATCH", result.error["code"])
+        self.assertEqual("编排暂时无法继续。", result.visible_text)
+
+    def test_empty_activation_does_not_read_body(self) -> None:
+        # 空激活：不读取任何 Creative Skill 正文，既有 instructions / 行为不变。
+        source = _FakeCreativeContentSource(body=_creative_body_response())
+        work = _pydantic_work()  # 默认 activated_creative_skill_versions=()
+
+        def plain_model(messages, info):
+            return ModelResponse(parts=(TextPart("无激活，正常生成。"),))
+
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(plain_model), _bundle_source(),
+            creative_content_source=source,
+        ), work)
+
+        self.assertEqual(0, source.body_fetches)
+        self.assertIsNone(result.error)
+        origins = [entry.get("origin") for entry in (result.bundle_evidence or ())]
+        self.assertNotIn("creative_skill_body", origins)
+
+    def test_forced_activation_without_source_skips_injection(self) -> None:
+        # orchestrator 未配 creative_content_source：即使有 forced 激活也不读取（纯 Bundle 场景）。
+        work = _pydantic_work(activated_creative_skill_versions=(_creative_activation(),))
+
+        def plain_model(messages, info):
+            return ModelResponse(parts=(TextPart("无源，正常生成。"),))
+
+        result = _advance(PydanticAIOrchestrator(
+            streaming_model(plain_model), _bundle_source(),
+        ), work)
+
+        self.assertIsNone(result.error)
+        self.assertEqual("无源，正常生成。", result.visible_text)
 
     def test_first_turn_injects_compact_canvas_materials_context(self) -> None:
         # IK2QC8（契约 §6.1）：首轮（checkpoint None）若 claim 下发 canvas_nodes 非空，
