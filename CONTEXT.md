@@ -248,8 +248,8 @@ _Avoid_: Runtime Skill、内部 Rule、无修饰的“Skill”（在运行时契
 _Avoid_: 多 Skill 组合、运行中切换版本、自由文本理由。
 
 **AutoCreativeSkillCandidate（自动候选）**:
-AgentRun 创建时冻结、随 RunWork 下发的 `auto` 可激活候选（Skill 与版本身份、名称、描述、展示版本与 `resource_digest`，不含正文）；Worker 只可从候选中提议，空数组（无匹配）是唯一允许基础生成的路径。字段形状见 `docs/specs/2026-07-24-creative-skill-activation-contract.md`。
-_Avoid_: Worker 发明候选外 Skill、候选随 Skill 库发布漂移、候选携带正文。
+AgentRun 创建时冻结、随 RunWork 下发的 `auto` 可激活资格池（Skill 与版本身份、名称、描述、展示版本与 `resource_digest`，不含正文）；资格不等于与当前意图匹配，Worker 只可从中语义选择零个或一个。成功判断为零个时允许基础生成；候选、判断或激活故障仍 fail closed。
+_Avoid_: Worker 发明候选外 Skill、把非空资格池当作强制激活、候选随 Skill 库发布漂移、候选携带正文。
 
 **ModelProfile（模型档案）**:
 平台批准的版本化模型能力与上下文上限，供 Bundle 形成允许子集并由 AgentRun 固定；不包含凭据或供应商私有请求配置。
