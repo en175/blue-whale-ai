@@ -5,6 +5,7 @@ import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
+import com.blue.whale.tool.upload.model.ObjectHead;
 import com.blue.whale.tool.upload.model.OssConfig;
 import com.blue.whale.tool.upload.service.AbstractStorageService;
 import lombok.extern.slf4j.Slf4j;
@@ -109,6 +110,14 @@ public class AssetStorageService {
         }
     }
 
+    /** HEAD 对象元信息，commit 校验用（确认直传对象真实存在 + size + content-type）。 */
+    public ObjectHead headObject(String key) {
+        if (storageService == null) {
+            throw new GlobalException(SystemCode.ASSET_UNAVAILABLE_CODE, "对象存储未配置，无法校验资源");
+        }
+        return storageService.headObject(key);
+    }
+
     /** 下载 url 字节。主实现发网络请求；单测 override 返回假字节避免联网。 */
     protected byte[] download(String sourceUrl) {
         try {
@@ -141,6 +150,11 @@ public class AssetStorageService {
             if (lower.endsWith(".flac")) return "audio/flac";
         }
         return "image/png";
+    }
+
+    /** 生成前端直传 storageKey（path = {prefix?}/assets/{projectId}/{type}/{uuid}.{ext}），prepare 用。 */
+    public String buildStorageKey(Long projectId, String type, String mime) {
+        return buildPath(projectId, type, mime);
     }
 
     /** path = {prefix?}/assets/{projectId}/{type}/{uuid}.{ext} */

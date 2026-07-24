@@ -3,6 +3,7 @@ package com.blue.whale.tool.upload.service;
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
 import com.blue.whale.global.utils.LocalDateTimeUtils;
+import com.blue.whale.tool.upload.model.ObjectHead;
 import com.blue.whale.tool.upload.model.OssConfig;
 
 import java.io.InputStream;
@@ -11,7 +12,7 @@ import java.time.LocalDateTime;
 /**
  * 云存储抽象基类。
  *
- * <p>提供路径生成 + 上传契约。具体实现见 {@link VolcengineStorageService}。</p>
+ * <p>提供路径生成 + 上传/校验契约。具体实现见 {@link VolcengineStorageService}。</p>
  *
  * @author: Jiyeon2__
  * date: 2025/6/30
@@ -71,4 +72,14 @@ public abstract class AbstractStorageService {
 
     /** 上传输入流（指定文件名） */
     public abstract String uploadFilenameSuffix(InputStream inputStream, String filename, String suffix);
+
+    /**
+     * HEAD 对象元信息（commit 校验用：存在 + size + content-type）。
+     *
+     * <p>前端直传完成后后端确认对象真实存在且符合预期，防伪造 commit。</p>
+     *
+     * @param key 对象 key
+     * @return 元信息（不存在时 {@code exists=false}）
+     */
+    public abstract ObjectHead headObject(String key);
 }
