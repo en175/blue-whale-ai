@@ -65,6 +65,10 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
   const [generationJobsByProject, setGenerationJobsByProject] = useState<
     Record<string, Array<Record<string, unknown>>>
   >({});
+  // 当前 Run 激活的 Creative Skill 标签数据源：Snapshot/SSE 恢复的 agent_runs（含 activated_creative_skill_versions）
+  const [agentRunsByProject, setAgentRunsByProject] = useState<
+    Record<string, Array<Record<string, unknown>>>
+  >({});
 
   // 进画布时定一次登录态：有 token 才尝试连后端，否则 mock 离线 fallback。
   const [online] = useState(
@@ -165,6 +169,10 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
       setGenerationJobsByProject((current) => ({
         ...current,
         [pid]: snapshot.generation_jobs,
+      }));
+      setAgentRunsByProject((current) => ({
+        ...current,
+        [pid]: snapshot.agent_runs,
       }));
       const persistedNodes = snapshot.canvas.nodes
         ? (JSON.parse(snapshot.canvas.nodes) as NodeItem[])
@@ -326,6 +334,11 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
         delete next[id];
         return next;
       });
+      setAgentRunsByProject((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
       snapshotsRef.current = Object.fromEntries(
         Object.entries(snapshotsRef.current).filter(([pid]) => pid !== id),
       );
@@ -334,13 +347,20 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
   );
 
   const submitConversationMessageAction = useCallback(
-    async (content: string, referencedAssetIds?: number[]) => {
+    async (
+      content: string,
+      referencedAssetIds?: number[],
+      forcedCreativeSkillId?: string,
+    ) => {
       if (!backendReady) return;
       // 当前创作流程等待澄清时，下一条非空自然语言消息自动引用该请求；
       // 无活动请求时保持普通消息行为（不传绑定，由后端按普通消息处理）。
       const answerable = deriveAnswerableClarification(
         snapshotsRef.current[activeProject.id] ?? null,
       );
+      // forced 与 reply_to 互斥（契约 §4.1/§8）：有可回答澄清时不传 forced。
+      // 单一真相源在此屏蔽；组件层 answerableActive 仅控制乐观展示与 pending 清理。
+      const effectiveForced = answerable ? undefined : forcedCreativeSkillId;
       await acceptConversationMessage(
         Number(activeProject.id),
         content,
@@ -348,6 +368,7 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
         newCommandIdentity(),
         answerable?.input_request_id,
         referencedAssetIds,
+        effectiveForced,
       );
     },
     [activeProject.id, backendReady],
@@ -361,6 +382,7 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
     booting,
     backendReady,
     generationJobs: generationJobsByProject[activeProject.id] ?? [],
+    agentRuns: agentRunsByProject[activeProject.id] ?? [],
     createProjectAction,
     switchProject,
     deleteProjectAction,

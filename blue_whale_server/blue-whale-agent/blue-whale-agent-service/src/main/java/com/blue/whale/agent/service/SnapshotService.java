@@ -1,6 +1,7 @@
 package com.blue.whale.agent.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
@@ -55,6 +56,7 @@ public class SnapshotService {
     private final AssetMapper assetMapper;
     private final ProjectEventService projectEventService;
     private final CostReservationService costReservationService;
+    private final ObjectMapper objectMapper;
 
     /**
      * 读取 Project 一致快照。
@@ -98,7 +100,8 @@ public class SnapshotService {
                         run.getId(), run.getConversationId(), run.getStatus(), run.getStage(),
                         run.getEngine(), run.getEngineVersion(), run.getAdapterSchemaVersion(),
                         run.getCurrentCheckpointId(), run.getVersion(),
-                        activeRequestByRun.get(run.getId())))
+                        activeRequestByRun.get(run.getId()),
+                        CreativeSkillVersionsProjection.toArray(objectMapper, run.getActivatedCreativeSkillVersions())))
                 .toList();
 
         // 批量查 job 引用的 Asset，补产品受控访问地址（防 N+1）

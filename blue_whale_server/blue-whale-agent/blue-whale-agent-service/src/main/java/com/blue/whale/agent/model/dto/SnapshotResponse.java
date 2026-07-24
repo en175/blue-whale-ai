@@ -49,7 +49,8 @@ public record SnapshotResponse(
             Integer adapterSchemaVersion,
             Long currentCheckpointId,
             Integer version,
-            UserInputRequestDto activeInputRequest) {
+            UserInputRequestDto activeInputRequest,
+            com.fasterxml.jackson.databind.JsonNode activatedCreativeSkillVersions) {
     }
 
     /**

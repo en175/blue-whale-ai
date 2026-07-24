@@ -3,6 +3,7 @@ import type { ProjectSnapshot } from "@/lib/project-recovery";
 import {
   projectSnapshotToCanvasNodes,
   projectSnapshotToChatMessages,
+  selectCurrentRunCreativeSkillId,
 } from "./conversationRecovery";
 
 describe("Agent 对话恢复投影", () => {
@@ -350,5 +351,46 @@ describe("Agent 对话恢复投影", () => {
       }),
     ]);
     expect(projectSnapshotToCanvasNodes(snapshot, [])).toEqual([]);
+  });
+});
+
+describe("当前 Run 已激活 Creative Skill 选择器", () => {
+  it("取 agent_run_id 最大 run 的首项 creative_skill_id", () => {
+    const runs = [
+      {
+        agent_run_id: 5,
+        activated_creative_skill_versions: [
+          { creative_skill_id: "cs_a", source: "forced_use" },
+        ],
+      },
+      {
+        agent_run_id: 8,
+        activated_creative_skill_versions: [
+          { creative_skill_id: "cs_b", source: "forced_use" },
+        ],
+      },
+    ];
+    expect(selectCurrentRunCreativeSkillId(runs)).toBe("cs_b");
+  });
+
+  it("当前最大 run 无激活数组或空数组时返回 null", () => {
+    expect(
+      selectCurrentRunCreativeSkillId([
+        { agent_run_id: 5, activated_creative_skill_versions: [] },
+        { agent_run_id: 8 },
+      ]),
+    ).toBeNull();
+  });
+
+  it("激活字段非数组形态时返回 null，不抛错", () => {
+    expect(
+      selectCurrentRunCreativeSkillId([
+        { agent_run_id: 8, activated_creative_skill_versions: "[]" },
+      ]),
+    ).toBeNull();
+  });
+
+  it("空 runs 返回 null", () => {
+    expect(selectCurrentRunCreativeSkillId([])).toBeNull();
   });
 });

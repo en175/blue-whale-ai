@@ -1,6 +1,7 @@
 package com.blue.whale.agent.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.blue.whale.agent.common.crypto.Sha256;
 import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.AssetMapper;
@@ -58,6 +59,7 @@ public class ConversationCommandService {
     private final UserInputRequestService userInputRequestService;
     private final UserInputRequestMapper userInputRequestMapper;
     private final RuntimeBundleRunPinResolver runtimeBundleRunPinResolver;
+    private final ObjectMapper objectMapper;
 
     @Transactional(noRollbackFor = PersistedUserInputDecisionException.class)
     public AcceptConversationMessageResponse accept(Long projectId, Long userId, String idempotencyKey,
@@ -276,7 +278,8 @@ public class ConversationCommandService {
         payload.put("manifest_digest", run.getManifestDigest());
         payload.put("model_profile_id", run.getModelProfileId());
         payload.put("model_profile_version", run.getModelProfileVersion());
-        payload.put("activated_creative_skill_versions", run.getActivatedCreativeSkillVersions());
+        payload.put("activated_creative_skill_versions",
+                CreativeSkillVersionsProjection.toArray(objectMapper, run.getActivatedCreativeSkillVersions()));
         payload.put("auto_creative_skill_candidates", run.getAutoCreativeSkillCandidates());
         return payload;
     }

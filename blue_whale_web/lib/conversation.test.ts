@@ -98,4 +98,34 @@ describe("Conversation 命令 API", () => {
       }),
     );
   });
+
+  it("携带 forced_creative_skill_id（Use 一次性强制激活）", async () => {
+    vi.mocked(apiRequest).mockResolvedValue({
+      message_id: 1,
+      agent_run_id: 2,
+      cursor: 3,
+    });
+
+    await acceptConversationMessage(
+      7,
+      "用这个技能生成",
+      "c-5",
+      "k-5",
+      undefined,
+      undefined,
+      "cs_ugc_ads_video",
+    );
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      "/api/projects/7/conversation/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          client_message_id: "c-5",
+          content: "用这个技能生成",
+          forced_creative_skill_id: "cs_ugc_ads_video",
+        }),
+      }),
+    );
+  });
 });

@@ -1023,14 +1023,7 @@ public class AgentRunWorkerService {
     }
 
     private Object creativeSkillVersions(String value) {
-        if (value == null || value.isBlank()) {
-            return List.of();
-        }
-        try {
-            return objectMapper.readTree(value);
-        } catch (JsonProcessingException exception) {
-            throw new IllegalStateException("AgentRun 的 Creative Skill 版本钉住数据已损坏", exception);
-        }
+        return CreativeSkillVersionsProjection.toArray(objectMapper, value);
     }
 
     private RunCommitResponse response(RunCommitRecord record) {

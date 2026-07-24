@@ -15,6 +15,7 @@ import {
   type SkillLibraryItem,
   type SkillMineItem,
 } from "./api/skills";
+import { rememberCreativeSkillName } from "@/lib/creative-skill-names";
 
 /**
  * Skill 面板（IJZ7Z8）。
@@ -30,10 +31,16 @@ const COVER_PLACEHOLDER =
   "https://placehold.co/200x200/1a1a1a/FFFFFF?text=Skill";
 const PAGE_SIZE = 50;
 
+/** Use 选择：稳定 Creative Skill 身份（可空，库外项无）+ 展示名。 */
+export type UseSkillSelection = {
+  creative_skill_id: string | null;
+  name: string;
+};
+
 interface SkillPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  onUseSkill: (title: string) => void;
+  onUseSkill: (skill: UseSkillSelection) => void;
 }
 
 type TabKey = "my" | "library";
@@ -59,7 +66,7 @@ export default function SkillPanel({
   const tabBtn = (
     tab: TabKey,
     Icon: React.ComponentType<{ size?: number; className?: string }>,
-    label: string
+    label: string,
   ) => {
     const selected = activeTab === tab;
     return (
@@ -123,7 +130,7 @@ export default function SkillPanel({
 }
 
 /** 我的 Skills：分页 + 滚动加载 + auto 乐观开关（自管 state） */
-function MyContent({ onUse }: { onUse: (title: string) => void }) {
+function MyContent({ onUse }: { onUse: (skill: UseSkillSelection) => void }) {
   const [items, setItems] = useState<SkillMineItem[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -141,6 +148,9 @@ function MyContent({ onUse }: { onUse: (title: string) => void }) {
     try {
       const res = await skillsApi.mine({ pageNum, pageSize: PAGE_SIZE });
       if (id !== reqId.current) return; // 过期请求忽略
+      for (const r of res.records) {
+        rememberCreativeSkillName(r.creative_skill_id, r.name);
+      }
       setItems((prev) => (append ? [...prev, ...res.records] : res.records));
       setPage(res.current);
       setHasMore(res.current < res.pages);
@@ -157,6 +167,7 @@ function MyContent({ onUse }: { onUse: (title: string) => void }) {
 
   // 首屏（StrictMode dev 双 mount → 两次 fetchPage(1)，reqId 让首次响应失效，prod 单次）
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 首屏分页数据获取（异步 loading）
     fetchPage(1, false);
   }, [fetchPage]);
 
@@ -177,7 +188,7 @@ function MyContent({ onUse }: { onUse: (title: string) => void }) {
       (entries) => {
         if (entries[0].isIntersecting) loadMoreRef.current();
       },
-      { rootMargin: "240px" }
+      { rootMargin: "240px" },
     );
     io.observe(el);
     return () => io.disconnect();
@@ -188,11 +199,11 @@ function MyContent({ onUse }: { onUse: (title: string) => void }) {
     const cur = items.find((s) => s.skillId === skillId)?.auto ?? false;
     const next = !cur;
     setItems((prev) =>
-      prev.map((s) => (s.skillId === skillId ? { ...s, auto: next } : s))
+      prev.map((s) => (s.skillId === skillId ? { ...s, auto: next } : s)),
     );
     skillsApi.setAuto(skillId, next).catch(() => {
       setItems((prev) =>
-        prev.map((s) => (s.skillId === skillId ? { ...s, auto: cur } : s))
+        prev.map((s) => (s.skillId === skillId ? { ...s, auto: cur } : s)),
       );
       setError("自动开关更新失败，已回滚");
     });
@@ -227,7 +238,12 @@ function MyContent({ onUse }: { onUse: (title: string) => void }) {
                 key={skill.skillId}
                 skill={skill}
                 onToggleAuto={() => handleToggleAuto(skill.skillId)}
-                onUse={() => onUse(skill.name)}
+                onUse={() =>
+                  onUse({
+                    creative_skill_id: skill.creative_skill_id ?? null,
+                    name: skill.name,
+                  })
+                }
               />
             ))}
           </div>
@@ -253,7 +269,11 @@ function MyContent({ onUse }: { onUse: (title: string) => void }) {
 }
 
 /** Skill 库：分页 + 滚动加载 + 后端搜索（自管 state） */
-function LibraryContent({ onUse }: { onUse: (title: string) => void }) {
+function LibraryContent({
+  onUse,
+}: {
+  onUse: (skill: UseSkillSelection) => void;
+}) {
   const [items, setItems] = useState<SkillLibraryItem[]>([]);
   const [keyword, setKeyword] = useState("");
   const [inputKw, setInputKw] = useState("");
@@ -278,6 +298,9 @@ function LibraryContent({ onUse }: { onUse: (title: string) => void }) {
           keyword: kw || undefined,
         });
         if (id !== reqId.current) return; // 过期请求（keyword 已变）忽略
+        for (const r of res.records) {
+          rememberCreativeSkillName(r.creative_skill_id, r.name);
+        }
         setItems((prev) => (append ? [...prev, ...res.records] : res.records));
         setPage(res.current);
         setHasMore(res.current < res.pages);
@@ -291,11 +314,12 @@ function LibraryContent({ onUse }: { onUse: (title: string) => void }) {
         }
       }
     },
-    []
+    [],
   );
 
   // 首次 + keyword 变 → 重置第 1 页
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- keyword 变重新分页获取
     fetchPage(1, keyword, false);
   }, [keyword, fetchPage]);
 
@@ -317,7 +341,7 @@ function LibraryContent({ onUse }: { onUse: (title: string) => void }) {
       (entries) => {
         if (entries[0].isIntersecting) loadMoreRef.current();
       },
-      { rootMargin: "240px" }
+      { rootMargin: "240px" },
     );
     io.observe(el);
     return () => io.disconnect();
@@ -325,11 +349,11 @@ function LibraryContent({ onUse }: { onUse: (title: string) => void }) {
 
   const handleAdd = (id: number) => {
     setItems((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, added: true } : s))
+      prev.map((s) => (s.id === id ? { ...s, added: true } : s)),
     );
     skillsApi.add(id).catch(() => {
       setItems((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, added: false } : s))
+        prev.map((s) => (s.id === id ? { ...s, added: false } : s)),
       );
       setError("添加失败，已回滚");
     });
@@ -337,11 +361,11 @@ function LibraryContent({ onUse }: { onUse: (title: string) => void }) {
 
   const handleRemove = (id: number) => {
     setItems((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, added: false } : s))
+      prev.map((s) => (s.id === id ? { ...s, added: false } : s)),
     );
     skillsApi.remove(id).catch(() => {
       setItems((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, added: true } : s))
+        prev.map((s) => (s.id === id ? { ...s, added: true } : s)),
       );
       setError("移除失败，已回滚");
     });
@@ -355,7 +379,10 @@ function LibraryContent({ onUse }: { onUse: (title: string) => void }) {
   return (
     <div className="tc-agent-skill-panel__content tc-agent-skill-panel__content--store flex-1 min-h-0 overflow-hidden flex flex-col">
       <div className="tc-agent-skill-panel__library-tools flex items-center gap-3 p-4 border-b border-white/[0.08]">
-        <form className="tc-agent-skill-panel__search-group flex flex-1 items-center gap-2" onSubmit={onSubmitSearch}>
+        <form
+          className="tc-agent-skill-panel__search-group flex flex-1 items-center gap-2"
+          onSubmit={onSubmitSearch}
+        >
           <label className="tc-agent-skill-panel__search flex flex-1 items-center gap-2 bg-white/[0.05] rounded-lg px-3 py-2 border border-white/[0.06]">
             <Search size={14} className="text-white/40" />
             <input
@@ -410,16 +437,19 @@ function LibraryContent({ onUse }: { onUse: (title: string) => void }) {
         {loading ? (
           <StateHint text="加载中…" />
         ) : items.length === 0 ? (
-          <StateHint
-            text={keyword ? "没有匹配的 Skill。" : "Skill 库为空。"}
-          />
+          <StateHint text={keyword ? "没有匹配的 Skill。" : "Skill 库为空。"} />
         ) : (
           <div className="tc-agent-skill-panel__store-grid grid grid-cols-2 gap-3">
             {items.map((skill) => (
               <LibrarySkillRow
                 key={skill.id}
                 skill={skill}
-                onUse={() => onUse(skill.name)}
+                onUse={() =>
+                  onUse({
+                    creative_skill_id: skill.creative_skill_id ?? null,
+                    name: skill.name,
+                  })
+                }
                 onAdd={() => handleAdd(skill.id)}
                 onRemove={() => handleRemove(skill.id)}
               />

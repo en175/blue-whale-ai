@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookOpenText, Box, ChevronDown } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
-import SkillPanel from "@/components/SkillPanel";
+import SkillPanel, { type UseSkillSelection } from "@/components/SkillPanel";
 import { squirclePath } from "../utils";
 import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
 import { ComposerShell, ModelSettingsMenu } from "./Composer";
@@ -40,6 +40,8 @@ export function AgentChatPanel({
   onSetCardStatus,
   onRetryGenerationJob,
   prompt,
+  forcedSkillName,
+  answerableActive,
 }: {
   /** 受控消息流：来自当前 Project.messages（切换项目随 key remount 更换） */
   messages: ChatMessage[];
@@ -54,6 +56,7 @@ export function AgentChatPanel({
   onSubmitMessage?: (
     text: string,
     referencedAssetIds?: number[],
+    forcedCreativeSkillId?: string,
   ) => Promise<void>;
   /** 设置当前项目内某 card 的状态（重试链推进） */
   onSetCardStatus?: (cardId: number | string, status: CardStatus) => void;
@@ -61,12 +64,21 @@ export function AgentChatPanel({
   onRetryGenerationJob?: (generationJobId: number | string) => Promise<void>;
   /** 首页续上 / 模板卡点击带入的 prompt，填入 composer（可编辑后发送） */
   prompt?: string;
+  /** 当前 Run 已激活 Creative Skill 的展示名（Snapshot/SSE 权威，null 表示无激活） */
+  forcedSkillName?: string | null;
+  /** 是否存在可回答创作澄清（true 时 forced 与 reply 互斥，pending 保留不清） */
+  answerableActive?: boolean;
 }) {
   const [composerEmpty, setComposerEmpty] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [panelSize, setPanelSize] = useState({ w: 468, h: 600 });
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
+  // Use 选择的 pending forced skill：点 Use 立刻乐观展示，SSE 确认后由 forcedSkillName 接管
+  const [pendingForcedSkill, setPendingForcedSkill] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [retryingCards, setRetryingCards] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -188,7 +200,7 @@ export function AgentChatPanel({
     setComposerEmpty(text.trim().length === 0);
   };
 
-  const insertSkillIntoComposer = useCallback((skillName: string) => {
+  const insertTextIntoComposer = useCallback((text: string) => {
     const editor = composerRef.current;
     if (!editor) return;
 
@@ -198,20 +210,29 @@ export function AgentChatPanel({
       const range = selection.getRangeAt(0);
       if (editor.contains(range.commonAncestorContainer)) {
         range.deleteContents();
-        const textNode = document.createTextNode(`@${skillName} `);
+        const textNode = document.createTextNode(text);
         range.insertNode(textNode);
         range.setStartAfter(textNode);
         range.setEndAfter(textNode);
         selection.removeAllRanges();
         selection.addRange(range);
       } else {
-        editor.appendChild(document.createTextNode(`@${skillName} `));
+        editor.appendChild(document.createTextNode(text));
       }
     } else {
-      editor.appendChild(document.createTextNode(`@${skillName} `));
+      editor.appendChild(document.createTextNode(text));
     }
 
     handleComposerInput();
+    setSkillPanelOpen(false);
+  }, []);
+
+  // Skill 面板 Use：有稳定 creative_skill_id 则记 pending（随下一条允许创建目标 Run 的消息下发），
+  // 不往输入框插 @ 文本；无 id（库外项）仅关面板。
+  const handleUseSkill = useCallback((skill: UseSkillSelection) => {
+    if (skill.creative_skill_id) {
+      setPendingForcedSkill({ id: skill.creative_skill_id, name: skill.name });
+    }
     setSkillPanelOpen(false);
   }, []);
 
@@ -249,7 +270,7 @@ export function AgentChatPanel({
         handleComposerInput();
       }
     } else {
-      insertSkillIntoComposer(pendingMention.name);
+      insertTextIntoComposer(`@${pendingMention.name} `);
     }
     onMentionConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -269,10 +290,17 @@ export function AgentChatPanel({
       if (onSubmitMessage) {
         // 请求飞行期锁定发送按钮，防止重复提交（清空延后到成功回调）
         setSubmitting(true);
-        void onSubmitMessage(prompt, assetIds)
+        // forced 仅在无活动澄清时附上（reply 互斥）；成功才清 pending，失败保留供重试
+        const attachForced = !!pendingForcedSkill && !answerableActive;
+        void onSubmitMessage(
+          prompt,
+          assetIds,
+          attachForced ? pendingForcedSkill!.id : undefined,
+        )
           .then(() => {
             if (composerRef.current) composerRef.current.innerHTML = "";
             setComposerEmpty(true);
+            if (attachForced) setPendingForcedSkill(null);
           })
           .catch((error) => {
             console.error("[canvas] conversation message failed:", error);
@@ -373,6 +401,9 @@ export function AgentChatPanel({
 
   if (!isOpen) return null;
 
+  // 已选技能标签：乐观名（刚点 Use）→ 权威名（Run 已激活）→ 不显示
+  const forcedLabel = pendingForcedSkill?.name ?? forcedSkillName ?? null;
+
   const panelPath = squirclePath(panelSize.w, panelSize.h, 28.8);
 
   return (
@@ -433,6 +464,27 @@ export function AgentChatPanel({
               </div>
             </div>
           </div>
+          {forcedLabel && (
+            <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
+              <span
+                className="tc-agent-forced-skill-badge inline-flex items-center gap-1 rounded-lg border border-white/[0.06] bg-white/[0.06] px-2 py-1 text-xs text-white/75"
+                aria-label={`已选技能：${forcedLabel}`}
+              >
+                <BookOpenText size={12} />
+                <span className="max-w-[120px] truncate">{forcedLabel}</span>
+                {pendingForcedSkill && (
+                  <button
+                    type="button"
+                    onClick={() => setPendingForcedSkill(null)}
+                    className="text-white/45 hover:text-white"
+                    aria-label="取消已选技能"
+                  >
+                    <IconClose size={12} />
+                  </button>
+                )}
+              </span>
+            </div>
+          )}
           <div className="inline-flex items-center gap-0.5">
             <div className="relative inline-flex">
               <div className="relative">
@@ -656,7 +708,7 @@ export function AgentChatPanel({
       <SkillPanel
         isOpen={skillPanelOpen}
         onClose={() => setSkillPanelOpen(false)}
-        onUseSkill={insertSkillIntoComposer}
+        onUseSkill={handleUseSkill}
       />
     </div>
   );

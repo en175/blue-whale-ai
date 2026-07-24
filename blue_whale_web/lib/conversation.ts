@@ -13,6 +13,7 @@ export function acceptConversationMessage(
   idempotencyKey: string,
   replyToInputRequestId?: number,
   referencedAssetIds?: number[],
+  forcedCreativeSkillId?: string,
 ): Promise<AcceptedConversationMessage> {
   return apiRequest<AcceptedConversationMessage>(
     `/api/projects/${projectId}/conversation/messages`,
@@ -27,6 +28,9 @@ export function acceptConversationMessage(
           : { reply_to_input_request_id: replyToInputRequestId }),
         ...(referencedAssetIds?.length
           ? { referenced_asset_ids: referencedAssetIds }
+          : {}),
+        ...(forcedCreativeSkillId
+          ? { forced_creative_skill_id: forcedCreativeSkillId }
           : {}),
       }),
     },

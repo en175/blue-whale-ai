@@ -17,6 +17,12 @@ import { useAuth } from "@/components/auth/AuthContext";
 import { toast } from "@/components/Toast";
 import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
 import { newCommandIdentity } from "@/lib/command-identity";
+import { deriveAnswerableClarification } from "@/lib/project-recovery";
+import {
+  usePrefetchCreativeSkillNames,
+  lookupCreativeSkillName,
+} from "@/lib/creative-skill-names";
+import { selectCurrentRunCreativeSkillId } from "./_canvas/conversationRecovery";
 import { ArrowLeft } from "lucide-react";
 import {
   TopBar,
@@ -132,6 +138,7 @@ function CanvasPageInner() {
     booting,
     backendReady,
     generationJobs,
+    agentRuns,
     createProjectAction,
     switchProject,
     deleteProjectAction,
@@ -140,6 +147,14 @@ function CanvasPageInner() {
   // 派生：当前项目的画布与对话（读取走 active，写入走 dispatch）
   const { nodes, viewport } = activeProject.canvas;
   const messages = activeProject.messages;
+  // Creative Skill Use 标签：prefetch 灌名映射 + 当前 Run 激活 id → 展示名；澄清期 forced 互斥
+  usePrefetchCreativeSkillNames(backendReady);
+  const currentSkillId = selectCurrentRunCreativeSkillId(agentRuns);
+  const forcedSkillName = currentSkillId
+    ? (lookupCreativeSkillName(currentSkillId) ?? "已选技能")
+    : null;
+  const answerableActive =
+    deriveAnswerableClarification({ agent_runs: agentRuns }) !== null;
 
   const [isAgentOpen, setIsAgentOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
@@ -791,6 +806,8 @@ function CanvasPageInner() {
         onSubmitMessage={
           backendReady ? submitConversationMessageAction : undefined
         }
+        forcedSkillName={forcedSkillName}
+        answerableActive={answerableActive}
         onSetCardStatus={(cardId, status) =>
           dispatch({
             type: "set-card-status",

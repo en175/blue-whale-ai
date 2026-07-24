@@ -1,6 +1,7 @@
 package com.blue.whale.agent;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -159,6 +160,25 @@ class RuntimeBundleAgentRunPinIT {
         assertThat(activation.get(0).path("reason").path("type").asText()).isEqualTo("user_use");
         assertThat(activation.get(0).path("resource_digest").asText())
                 .isEqualTo("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+
+        // IK3NPE：Snapshot 与 agent_run.created 事件投影始终为数组（契约 §3），
+        // 不下发 DB 原始 JSON 字符串；前端据此渲染已激活 Skill 标签。
+        mockMvc.perform(get("/api/projects/93001/snapshot").header("X-User-Id", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.agent_runs[0].agent_run_id").value(run))
+                .andExpect(jsonPath("$.data.agent_runs[0].activated_creative_skill_versions").isArray())
+                .andExpect(jsonPath("$.data.agent_runs[0].activated_creative_skill_versions[0].creative_skill_id")
+                        .value("cs_poster_design"))
+                .andExpect(jsonPath("$.data.agent_runs[0].activated_creative_skill_versions[0].source")
+                        .value("forced_use"));
+
+        String eventPayload = jdbcTemplate.queryForObject(
+                "SELECT payload FROM project_events WHERE project_id = 93001 "
+                        + "AND event_type = 'agent_run.created'",
+                String.class);
+        JsonNode eventVersions = objectMapper.readTree(eventPayload).path("activated_creative_skill_versions");
+        assertThat(eventVersions.isArray()).isTrue();
+        assertThat(eventVersions.get(0).path("source").asText()).isEqualTo("forced_use");
     }
 
     @Test

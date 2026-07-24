@@ -39,7 +39,7 @@ export type ActiveInputRequest = {
  * 同一创作流程任一时刻至多一个 pending 请求；防御性取最新创建者。
  */
 export function deriveAnswerableClarification(
-  snapshot: ProjectSnapshot | null,
+  snapshot: { agent_runs: Array<Record<string, unknown>> } | null,
   now: Date = new Date(),
 ): ActiveInputRequest | null {
   if (!snapshot) return null;
