@@ -271,6 +271,40 @@ describe("Project 恢复状态机", () => {
     ]);
   });
 
+  it("agent_run.created 事件透传 activated_creative_skill_versions 数组（契约 §3 始终为数组）", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_run_created_forced",
+        event_type: "agent_run.created",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 0,
+        payload: {
+          agent_run_id: 9,
+          status: "queued",
+          activated_creative_skill_versions: [
+            {
+              creative_skill_id: "cs_ugc_ads_video",
+              source: "forced_use",
+              reason: { type: "user_use" },
+            },
+          ],
+        },
+      }),
+    );
+
+    const run = state.snapshot?.agent_runs.find((r) => r.agent_run_id === 9);
+    expect(Array.isArray(run?.activated_creative_skill_versions)).toBe(true);
+    expect(run?.activated_creative_skill_versions).toEqual([
+      expect.objectContaining({
+        creative_skill_id: "cs_ugc_ads_video",
+        source: "forced_use",
+      }),
+    ]);
+  });
+
   it("按 stream_id 重放 Assistant started、chunk 与 completed 且不重复文本", () => {
     let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
 

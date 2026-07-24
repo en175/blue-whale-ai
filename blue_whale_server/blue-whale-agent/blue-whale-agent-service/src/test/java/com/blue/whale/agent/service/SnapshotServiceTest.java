@@ -2,6 +2,7 @@ package com.blue.whale.agent.service;
 
 import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.mapper.AgentRunMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.blue.whale.agent.mapper.ConversationMessageMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
@@ -40,6 +41,8 @@ class SnapshotServiceTest {
     private AssetMapper assetMapper;
     @Mock
     private ProjectEventService projectEventService;
+    @Mock
+    private ObjectMapper objectMapper;
 
     @InjectMocks
     private SnapshotService snapshotService;

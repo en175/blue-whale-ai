@@ -1051,6 +1051,38 @@ class ConversationAgentRunIT {
         assertThat(count("agent_runs", "project_id", project.getId())).isEqualTo(0);
     }
 
+    @Test
+    void supersededRunStatusChangedEventProjectsActivatedVersionsAsArray() throws Exception {
+        // IK3NPE：agent_run.status_changed（supersede）事件 payload 的 activated_creative_skill_versions
+        // 始终为数组（契约 §3），与 created 同走 runPayload → CreativeSkillVersionsProjection.toArray。
+        Project project = new Project().setOwnerId(10L).setName("supersede-status-event");
+        projectMapper.insert(project);
+
+        long firstRun = objectMapper.readTree(mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "sup-1")
+                        .contentType("application/json")
+                        .content("{\"client_message_id\":\"c1\",\"content\":\"msg1\"}"))
+                .andExpect(status().isAccepted())
+                .andReturn().getResponse().getContentAsString())
+                .path("data").path("agent_run_id").asLong();
+
+        // 第二条消息 supersede 第一条（同 conversation in-flight run）
+        mockMvc.perform(post("/api/projects/{id}/conversation/messages", project.getId())
+                        .header("X-User-Id", "10")
+                        .header("Idempotency-Key", "sup-2")
+                        .contentType("application/json")
+                        .content("{\"client_message_id\":\"c2\",\"content\":\"msg2\"}"))
+                .andExpect(status().isAccepted());
+
+        String eventPayload = jdbcTemplate.queryForObject(
+                "SELECT payload FROM project_events WHERE project_id = ? "
+                        + "AND aggregate_id = ? AND event_type = 'agent_run.status_changed'",
+                String.class, project.getId(), String.valueOf(firstRun));
+        JsonNode versions = objectMapper.readTree(eventPayload).path("activated_creative_skill_versions");
+        assertThat(versions.isArray()).isTrue();
+    }
+
     private JsonNode postMessage(Long projectId, String idempotencyKey, String content) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/projects/{id}/conversation/messages", projectId)
                         .header("X-User-Id", "10")

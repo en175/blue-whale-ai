@@ -224,3 +224,35 @@ function generationAspectRatio(input: unknown): string {
   }
   return "1:1";
 }
+
+/**
+ * 取当前 Run（agent_run_id 最大）已激活的 Creative Skill 稳定身份。
+ *
+ * activated_creative_skill_versions 是 0/1 数组（契约 §3）；取首项 creative_skill_id。
+ * 非数组 / 空 / 缺字段返回 null。当前 Run 语义：新消息创建的 run id 严格递增取最大，
+ * supersede 产生更高 id 接管，用户下一条非 forced 消息创建更高 id 无激活 run → 返回 null。
+ */
+export function selectCurrentRunCreativeSkillId(
+  runs: Array<Record<string, unknown>>,
+): string | null {
+  if (!Array.isArray(runs) || runs.length === 0) return null;
+  let latest: Record<string, unknown> | null = null;
+  let latestId = -Infinity;
+  for (const run of runs) {
+    const id = run.agent_run_id;
+    if (typeof id !== "number" && typeof id !== "string") continue;
+    const numeric = typeof id === "number" ? id : Number(id);
+    if (!Number.isFinite(numeric)) continue;
+    if (numeric > latestId) {
+      latestId = numeric;
+      latest = run;
+    }
+  }
+  if (!latest) return null;
+  const versions = latest.activated_creative_skill_versions;
+  if (!Array.isArray(versions) || versions.length === 0) return null;
+  const first = versions[0];
+  if (!first || typeof first !== "object") return null;
+  const skillId = (first as Record<string, unknown>).creative_skill_id;
+  return typeof skillId === "string" ? skillId : null;
+}

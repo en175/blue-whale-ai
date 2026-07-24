@@ -87,6 +87,8 @@ async function renderRecoveredPanel(snapshot: ProjectSnapshot) {
 }
 
 describe("useCanvasProjects 创作澄清回答绑定", () => {
+  beforeEach(() => vi.clearAllMocks());
+
   it("当前流程等待澄清时，下一条非空 Composer 消息携带对应 reply_to_input_request_id", async () => {
     const { result } = await renderRecoveredPanel(
       snapshotWith([awaitingClarificationRun]),
@@ -103,6 +105,7 @@ describe("useCanvasProjects 创作澄清回答绑定", () => {
       "cmd-id",
       42,
       undefined,
+      undefined,
     );
   });
 
@@ -118,6 +121,7 @@ describe("useCanvasProjects 创作澄清回答绑定", () => {
       "生成一张蓝鲸海报",
       "cmd-id",
       "cmd-id",
+      undefined,
       undefined,
       undefined,
     );
@@ -137,6 +141,53 @@ describe("useCanvasProjects 创作澄清回答绑定", () => {
       "cmd-id",
       undefined,
       [9, 3],
+      undefined,
+    );
+  });
+
+  it("无活动澄清时 forced Creative Skill 随消息透传（forced_creative_skill_id）", async () => {
+    const { result } = await renderRecoveredPanel(snapshotWith([]));
+
+    await act(async () => {
+      await result.current.submitConversationMessageAction(
+        "用这个技能生成",
+        undefined,
+        "cs_ugc_ads_video",
+      );
+    });
+
+    expect(vi.mocked(acceptConversationMessage)).toHaveBeenCalledWith(
+      1,
+      "用这个技能生成",
+      "cmd-id",
+      "cmd-id",
+      undefined,
+      undefined,
+      "cs_ugc_ads_video",
+    );
+  });
+
+  it("有活动澄清时 forced 被屏蔽（reply 互斥），不透传 forced_creative_skill_id", async () => {
+    const { result } = await renderRecoveredPanel(
+      snapshotWith([awaitingClarificationRun]),
+    );
+
+    await act(async () => {
+      await result.current.submitConversationMessageAction(
+        "水墨风格",
+        undefined,
+        "cs_ugc_ads_video",
+      );
+    });
+
+    expect(vi.mocked(acceptConversationMessage)).toHaveBeenCalledWith(
+      1,
+      "水墨风格",
+      "cmd-id",
+      "cmd-id",
+      42,
+      undefined,
+      undefined,
     );
   });
 });

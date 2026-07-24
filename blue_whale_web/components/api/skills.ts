@@ -17,6 +17,8 @@ export type SkillLibraryItem = {
   coverUrl: string | null;
   source: string;
   added: boolean;
+  /** Creative Skill 稳定身份（IK3NPB，wire snake_case；Use 强制激活用） */
+  creative_skill_id: string | null;
 };
 
 export type SkillMineItem = {
@@ -26,6 +28,8 @@ export type SkillMineItem = {
   description: string;
   coverUrl: string | null;
   source: string;
+  /** Creative Skill 稳定身份（IK3NPB，wire snake_case；Use 强制激活用） */
+  creative_skill_id: string | null;
 };
 
 /** MyBatis-Plus Page 序列化结构（camelCase） */
@@ -45,7 +49,11 @@ export type LibraryQuery = {
 
 const API_BASE = "/api/agent/skills";
 
-async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
+async function request<T>(
+  path: string,
+  method: string,
+  body?: unknown,
+): Promise<T> {
   let res: Response;
   try {
     res = await apiFetch(`${API_BASE}${path}`, {
