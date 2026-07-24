@@ -50,13 +50,14 @@ RunWork 下发固定两个 Creative Skill 字段，**始终为数组**（不得�
 
 | 字段 | 约束 | 语义 |
 |---|---|---|
-| `auto_creative_skill_candidates` | `AutoCreativeSkillCandidate` 数组，可为空 | Run 创建时冻结的 `auto` 候选；空数组 = 无匹配 |
+| `auto_creative_skill_candidates` | `AutoCreativeSkillCandidate` 数组，可为空 | Run 创建时冻结的 `auto` 可激活资格池；空数组 = 无可激活项 |
 | `activated_creative_skill_versions` | `CreativeSkillActivation` 数组，**最多一项** | 兼容名称下的 0/1 单例数组：本 Run 已固定的激活记录 |
 
 - 单 Run 最多激活一个 CreativeSkillVersion；`activated_creative_skill_versions` 既是
   Run pin 的 wire 投影，也与既有 Run pin 列同名兼容，基数恒为 0 或 1。
-- 候选在 Run 创建时冻结，运行中不随 Skill 库发布新版而漂移；Worker 只可从候选中提议，
-  不得发明候选外的 Skill 或版本。
+- 候选在 Run 创建时冻结，运行中不随 Skill 库发布新版而漂移；候选表示可激活资格，
+  不保证与当前创作意图匹配。Worker 只可从候选中语义选择零个或一个，不得发明候选外的
+  Skill 或版本。
 - 这两个 pin 字段随 RunWork 下发时已由 Java 权威记录，Worker commit **不回传**（与
   ADR-0042 D2 的 pin 不回传规则一致）。
 
@@ -77,14 +78,17 @@ RunWork 下发固定两个 Creative Skill 字段，**始终为数组**（不得�
 
 1. 消息命令未携带 `forced_creative_skill_id` 时，Java 在创建 Run 时计算并冻结
    `auto_creative_skill_candidates`（选择算法不在本契约内）。
-2. Worker 运行中至多提议一个候选版本：发送 §5 的激活命令，携带 `idempotency_key`、
-   `expected_run_version`、候选版本身份与 `agent_match` 理由。
+2. Worker 根据候选元数据和当次可见创作上下文进行语义判断，选择零个或一个候选版本；
+   选择一个时发送 §5 的激活命令，携带 `idempotency_key`、`expected_run_version`、
+   候选版本身份与 `agent_match` 理由。
 3. Java 校验：幂等键、Run version、候选成员（版本必须属于已冻结候选）、Run 尚未激活。
    全部通过后在同一事务内原子固定 `CreativeSkillActivation{source=auto}` 并返回接纳
    响应；**固定完成前不得放行正文或引用资源读取**。
-4. 空候选（无匹配）是唯一允许基础生成的路径：Worker 不发起激活命令，正常生成。
-5. 候选计算、提议传输、接纳校验或摘要比对任一故障均 fail closed：不得静默降级、不得
-   自行换版本、不得跳过摘要校验。
+4. Worker 成功完成语义判断但选择零个候选，表示无语义匹配：无论资格池为空还是非空，
+   都不发起激活命令并正常基础生成；不得因资格池非空而强制套用无关 Creative Skill。
+5. “选择零个”必须与故障区分。候选计算或传输、模型判断、激活命令、接纳校验或摘要比对
+   任一故障均 fail closed：不得伪装成无匹配、不得静默降级、不得自行换版本、不得跳过
+   摘要校验。
 
 ### 4.3 理由对象（reason）
 
@@ -169,7 +173,8 @@ GET /internal/agent-runs/{runId}/creative-skills
 | `CREATIVE_SKILL_CONTENT_MISSING` | 500 / 100311 | 已固定版本的正文或引用资源字节缺失，fail closed |
 | `CREATIVE_SKILL_DIGEST_MISMATCH` | 500 / 100312 | 读取内容摘要与固定摘要不符，fail closed |
 
-只有「无匹配」（空候选）允许正常基础生成；上表中任何错误都不得被吞掉后降级为基础生成。
+只有 Worker 成功完成语义判断并选择零个候选的「无匹配」允许正常基础生成；资格池可以为空
+或非空。上表中任何错误都不得被吞掉或伪装成无匹配后降级为基础生成。
 
 错误载荷为封闭对象 `{code, message}`（schema `#/$defs/CreativeSkillActivationError`），
 `code` 取值被 schema 枚举锁定为上表九项（`#/$defs/CreativeSkillActivationErrorCode`），
