@@ -4,6 +4,7 @@ import {
   projectSnapshotToCanvasNodes,
   projectSnapshotToChatMessages,
   selectCurrentRunCreativeSkillId,
+  selectCurrentRunId,
 } from "./conversationRecovery";
 
 describe("Agent 对话恢复投影", () => {
@@ -392,5 +393,31 @@ describe("当前 Run 已激活 Creative Skill 选择器", () => {
 
   it("空 runs 返回 null", () => {
     expect(selectCurrentRunCreativeSkillId([])).toBeNull();
+  });
+});
+
+describe("当前 Run id 选择器", () => {
+  it("空数组返回 null", () => {
+    expect(selectCurrentRunId([])).toBeNull();
+  });
+
+  it("多 run 取 agent_run_id 数值最大者", () => {
+    expect(
+      selectCurrentRunId([
+        { agent_run_id: 5 },
+        { agent_run_id: 8 },
+        { agent_run_id: 3 },
+      ]),
+    ).toBe(8);
+  });
+
+  it("字符串 id 按数值参与比较", () => {
+    expect(
+      selectCurrentRunId([{ agent_run_id: "9" }, { agent_run_id: 4 }]),
+    ).toBe(9);
+  });
+
+  it("无有效 id 返回 null", () => {
+    expect(selectCurrentRunId([{ agent_run_id: "abc" }, {}])).toBeNull();
   });
 });

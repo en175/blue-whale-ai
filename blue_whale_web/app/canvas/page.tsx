@@ -22,7 +22,11 @@ import {
   usePrefetchCreativeSkillNames,
   lookupCreativeSkillName,
 } from "@/lib/creative-skill-names";
-import { selectCurrentRunCreativeSkillId } from "./_canvas/conversationRecovery";
+import {
+  selectCurrentRunCreativeSkillId,
+  selectCurrentRunId,
+} from "./_canvas/conversationRecovery";
+import { useCreativeSkillRecommendations } from "./_canvas/hooks/useCreativeSkillRecommendations";
 import { ArrowLeft } from "lucide-react";
 import {
   TopBar,
@@ -155,6 +159,12 @@ function CanvasPageInner() {
     : null;
   const answerableActive =
     deriveAnswerableClarification({ agent_runs: agentRuns }) !== null;
+  // 当前 Run 推荐技能（IK3NPI）：后端就绪且有当前 Run 时拉取，注入对话面板推荐区
+  const currentRunId = selectCurrentRunId(agentRuns);
+  const {
+    recommendations: skillRecommendations,
+    loading: skillRecommendationsLoading,
+  } = useCreativeSkillRecommendations(backendReady ? currentRunId : null);
 
   const [isAgentOpen, setIsAgentOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
@@ -808,6 +818,8 @@ function CanvasPageInner() {
         }
         forcedSkillName={forcedSkillName}
         answerableActive={answerableActive}
+        skillRecommendations={backendReady ? skillRecommendations : undefined}
+        skillRecommendationsLoading={skillRecommendationsLoading}
         onSetCardStatus={(cardId, status) =>
           dispatch({
             type: "set-card-status",

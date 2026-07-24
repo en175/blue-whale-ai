@@ -1,6 +1,7 @@
 package com.blue.whale.agent.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.blue.whale.agent.mapper.AgentRunMapper;
 import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.mapper.CreativeSkillVersionMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
@@ -10,8 +11,8 @@ import com.blue.whale.agent.model.dto.CanvasDto;
 import com.blue.whale.agent.model.dto.CanvasNodeDetail;
 import com.blue.whale.agent.model.dto.CanvasNodeSummary;
 import com.blue.whale.agent.model.dto.CanvasNodesResponse;
-import com.blue.whale.agent.model.dto.CreativeSkillResponse;
 import com.blue.whale.agent.model.dto.CreativeSkillBodyResponse;
+import com.blue.whale.agent.model.dto.CreativeSkillRecommendationResponse;
 import com.blue.whale.agent.model.dto.CreativeSkillReferenceResourceResponse;
 import com.blue.whale.agent.model.dto.GenerationJobStatusResponse;
 import com.blue.whale.agent.model.entity.AgentRun;
@@ -19,17 +20,18 @@ import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.agent.model.entity.CreativeSkillVersion;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.MessageAssetReference;
-import com.blue.whale.agent.runtimebundle.RuntimeBundleService;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -53,6 +55,8 @@ public class CreativeContextQueryService {
 
     private static final int DEFAULT_NODE_LIMIT = 50;
     private static final int MAX_NODE_LIMIT = 200;
+    /** §7 推荐项 activation_eligibility 恒值：推荐不构成自动激活授权，需用户显式 Use。 */
+    private static final String ACTIVATION_ELIGIBILITY_REQUIRES_USER_USE = "requires_user_use";
 
     private final RunLeaseGuard runLeaseGuard;
     private final AssetMapper assetMapper;
@@ -60,7 +64,9 @@ public class CreativeContextQueryService {
     private final MessageAssetReferenceMapper messageAssetReferenceMapper;
     private final CreativeSkillVersionMapper creativeSkillVersionMapper;
     private final CanvasService canvasService;
-    private final RuntimeBundleService runtimeBundleService;
+    private final AgentRunMapper agentRunMapper;
+    private final ProjectService projectService;
+    private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
 
     /** list_canvas_nodes：当前 Project 画布的节点摘要列表（紧凑，限流）。 */
@@ -149,29 +155,92 @@ public class CreativeContextQueryService {
                 job.getOutputAssetIds());
     }
 
-    /** list_creative_skills：Run 固定 Bundle 快照里的 Creative Skill 紧凑元数据列表。 */
-    public List<CreativeSkillResponse> listCreativeSkills(Long runId, String workerId) {
-        AgentRun run = runLeaseGuard.requireLeasedRun(runId, workerId);
-        String bundleVersionId = run.getBundleVersionId();
-        if (bundleVersionId == null || bundleVersionId.isBlank()) {
-            return List.of();
+    /**
+     * §7 list_creative_skills（IK3NPI）：Creative Skill 推荐查询，租约鉴权后走 Skill Library。
+     *
+     * <p>数据源已从 Run 固定 Bundle 快照迁到 Java Skill Library，响应为契约封闭形状
+     * （4 字段，恒 {@code requires_user_use}），不含版本 ID / 摘要 / 正文。
+     */
+    public List<CreativeSkillRecommendationResponse> listCreativeSkills(Long runId, String workerId) {
+        return queryRecommendations(runLeaseGuard.requireLeasedRun(runId, workerId));
+    }
+
+    /**
+     * §7 Web 公开推荐查询（IK3NPI）：产品侧 {@code X-User-Id} 身份 + Run 绑定 Project 归属校验，
+     * 不存在与越权统一 {@code RESOURCE_NOT_FOUND}（不泄漏资源存在性），响应同内部路由形状。
+     */
+    public List<CreativeSkillRecommendationResponse> listCreativeSkillRecommendationsForUser(
+            Long runId, Long userId) {
+        AgentRun run = agentRunMapper.selectById(runId);
+        if (run == null) {
+            throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
         }
-        JsonNode snapshot = runtimeBundleService.readVersion(bundleVersionId);
-        JsonNode resources = snapshot.path("composition").path("resourceManifest").path("resources");
-        List<CreativeSkillResponse> skills = new ArrayList<>();
-        for (JsonNode resource : resources) {
-            if (!"creative_skill".equals(textOrNull(resource, "kind"))) {
+        projectService.requireOwned(run.getProjectId(), userId);
+        return queryRecommendations(run);
+    }
+
+    /**
+     * §7 推荐集合：user 可见 Creative Skill（user_skill JOIN creative_skill，同候选冻结的
+     * JOIN 语义，去掉 auto 过滤）减去本 Run 冻结的 auto 候选。仅取 active_version_id 非空
+     * （无发布版本的 Skill 不可推荐），按 creative_skill_id 稳定排序。
+     */
+    private List<CreativeSkillRecommendationResponse> queryRecommendations(AgentRun run) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT creative_skill.creative_skill_id AS creative_skill_id,
+                       creative_skill.name AS name,
+                       creative_skill.description AS description,
+                       creative_skill.active_version_id AS active_version_id
+                FROM user_skill
+                JOIN creative_skill ON creative_skill.source_skill_id = user_skill.skill_id
+                WHERE user_skill.user_id = ? AND user_skill.is_delete = 0
+                ORDER BY creative_skill.creative_skill_id
+                """, run.getUserId());
+        Set<String> frozenIds = frozenCandidateIds(run.getAutoCreativeSkillCandidates());
+        List<CreativeSkillRecommendationResponse> recommendations = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            String creativeSkillId = (String) row.get("creative_skill_id");
+            String activeVersionId = (String) row.get("active_version_id");
+            String name = (String) row.get("name");
+            String description = (String) row.get("description");
+            // 契约 CreativeSkillRecommendation 要求 name/description 非空（SkillName pattern /
+            // SkillDescription minLength 1）；不合规行 fail closed 剔除，不输出非法推荐项。
+            if (activeVersionId == null || activeVersionId.isBlank()
+                    || name == null || name.isBlank()
+                    || description == null || description.isBlank()
+                    || frozenIds.contains(creativeSkillId)) {
                 continue;
             }
-            JsonNode metadata = resource.path("metadata");
-            skills.add(new CreativeSkillResponse(
-                    textOrNull(resource, "creative_skill_id"),
-                    textOrNull(resource, "version"),
-                    textOrNull(metadata, "name"),
-                    textOrNull(metadata, "description"),
-                    booleanOrNull(metadata, "allow_implicit_invocation")));
+            recommendations.add(new CreativeSkillRecommendationResponse(
+                    creativeSkillId,
+                    name,
+                    description,
+                    ACTIVATION_ELIGIBILITY_REQUIRES_USER_USE));
         }
-        return skills;
+        return recommendations;
+    }
+
+    /** 解析 Run 冻结的 auto 候选（JSON 文本）为 creative_skill_id 集合；空 / 缺省 → 空集。 */
+    private Set<String> frozenCandidateIds(String json) {
+        if (json == null || json.isBlank()) {
+            return Set.of();
+        }
+        JsonNode array;
+        try {
+            array = objectMapper.readTree(json);
+        } catch (Exception exception) {
+            throw new IllegalStateException("AgentRun 的 Creative Skill 候选已损坏", exception);
+        }
+        if (!array.isArray()) {
+            throw new IllegalStateException("AgentRun 的 Creative Skill 候选已损坏");
+        }
+        Set<String> ids = new HashSet<>();
+        for (JsonNode candidate : array) {
+            String creativeSkillId = textOrNull(candidate, "creative_skill_id");
+            if (creativeSkillId != null) {
+                ids.add(creativeSkillId);
+            }
+        }
+        return ids;
     }
 
     /** §6 read_creative_skill_body：按 Run pin 固定版本派生正文（content_digest 供 Worker 双重校验）。 */
@@ -320,13 +389,5 @@ public class CreativeContextQueryService {
             return null;
         }
         return node.asLong();
-    }
-
-    private static Boolean booleanOrNull(JsonNode parent, String field) {
-        JsonNode node = parent.path(field);
-        if (node.isMissingNode() || node.isNull()) {
-            return null;
-        }
-        return node.asBoolean();
     }
 }
