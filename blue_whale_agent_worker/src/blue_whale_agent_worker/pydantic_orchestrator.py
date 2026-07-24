@@ -1,6 +1,7 @@
 import json
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Literal, Mapping, Optional, Sequence
 
+from pydantic import BaseModel
 from pydantic_ai import (
     Agent,
     CallDeferred,
@@ -26,6 +27,7 @@ from .creative_skill_gate import CreativeSkillContentGate
 from .contracts import (
     AcceptedActionResult,
     AgentRunConflictError,
+    AutoCreativeSkillSelection,
     ChunkDeliveryError,
     ChunkSink,
     ConversationSource,
@@ -39,6 +41,7 @@ from .contracts import (
     StreamAttemptExhaustedError,
     ToolGrant,
     UserInputRequestProposal,
+    _MATCHED_FIELDS,
 )
 from .streaming import ChunkFormer, review_evidence_for
 
@@ -72,6 +75,30 @@ _CLARIFICATION_PENDING_KIND = "clarification"
 # 字段，内部 reasonCode、私有字段、供应商原始错误在此边界剥离。
 _REJECTED_RESULT_PUBLIC_KEYS = ("public_code", "message", "retryable")
 
+# auto 选择任务指令（契约 §4.2.2）：模型只看候选元数据 + 当次上下文做语义判断，
+# 输出封闭零或一。无明确匹配返回 chosen_version_id=null（不强套无关技能，正常基础生成）。
+_AUTO_SELECTION_INSTRUCTION = (
+    "你在为当前创作任务判断是否激活某个 Creative Skill。规则：\n"
+    "1. 仅当某候选的 name / description 与当次对话、画布、项目上下文明确吻合时，"
+    "选择它并如实标注促成匹配的 matched_fields。\n"
+    "2. 无明确匹配时返回 chosen_version_id=null，不得强套无关技能（正常基础生成）。\n"
+    "3. 禁止发明候选列表之外的 version_id。\n"
+    "4. matched_fields 取值仅限：conversation_messages / conversation_summary / "
+    "canvas_nodes / project_metadata；选定候选时必须非空。"
+)
+
+
+class CreativeSkillChoice(BaseModel):
+    """auto 选择模型的结构化输出（契约 §4.2.2）。
+
+    ``chosen_version_id`` 为 None 表示模型判定无语义匹配（零选择，§4.2.4）。
+    matched_fields 取值在程序后置校验中以 ``_MATCHED_FIELDS`` 单一来源 fail closed。
+    """
+
+    chosen_version_id: Optional[str] = None
+    matched_fields: list[str] = []
+
+
 class _ContractError(Exception):
     pass
 
@@ -100,6 +127,87 @@ class PydanticAIOrchestrator:
         self._conversation_source = conversation_source
         self._creative_context_source = creative_context_source
         self._creative_content_source = creative_content_source
+
+    async def select_auto_creative_skill(
+        self, work: RunWork
+    ) -> AutoCreativeSkillSelection:
+        """auto 选择前置独立判定（契约 §4.2）。
+
+        短路零选择（不调模型）：Run 已固定激活（§4.1.4）或候选空（§4.2.4）。否则用专用
+        轻量 Agent（output_type=CreativeSkillChoice）做单次非流式语义判断，候选仅暴露元数据
+        （version_id / name / description / display_version，不含正文），上下文信号取当次
+        messages / conversation_summary / canvas_nodes / project_metadata。程序后置校验（fail
+        closed，不静默修正）：所选 version_id 必须属于已冻结候选并返回冻结候选对象（使
+        name / description / resource_digest 权威来自 Run pin）；matched_fields 非空去重且取值
+        属封闭枚举。模型显式无匹配返回零选择（§4.2.4，正常基础生成）。
+        """
+        if (
+            work.activated_creative_skill_versions
+            or not work.auto_creative_skill_candidates
+        ):
+            return AutoCreativeSkillSelection(None, ())
+        agent: Agent = Agent(
+            self._model,
+            output_type=CreativeSkillChoice,
+            instructions=_AUTO_SELECTION_INSTRUCTION,
+        )
+        result = await agent.run(self._selection_prompt(work))
+        choice = result.output
+        if choice.chosen_version_id is None:
+            return AutoCreativeSkillSelection(None, ())
+        chosen = next(
+            (
+                candidate
+                for candidate in work.auto_creative_skill_candidates
+                if candidate.creative_skill_version_id == choice.chosen_version_id
+            ),
+            None,
+        )
+        if chosen is None:
+            raise _ContractError("模型选择了候选外的 Creative Skill 版本")
+        matched = self._validate_matched_fields(choice.matched_fields)
+        return AutoCreativeSkillSelection(chosen, matched)
+
+    def _selection_prompt(self, work: RunWork) -> str:
+        """渲染选择三段：候选元数据（不含正文）+ 当次上下文信号。任务指令走 Agent instructions。"""
+        lines = ["# 可自动激活的 Creative Skill 候选（仅元数据，不含正文）"]
+        for candidate in work.auto_creative_skill_candidates:
+            lines.append(f"- version_id={candidate.creative_skill_version_id}")
+            lines.append(
+                f"  name={candidate.name}, display_version={candidate.display_version}"
+            )
+            lines.append(f"  description: {candidate.description}")
+        lines.append("")
+        lines.append("# 当次创作上下文")
+        lines.append("[conversation_messages]")
+        for message in work.messages:
+            lines.append(f"- {message.get('role')}: {message.get('content')}")
+        if work.conversation_summary:
+            lines.append("[conversation_summary]")
+            lines.append(self._conversation_summary_prompt(work.conversation_summary))
+        if work.canvas_nodes:
+            lines.append("[canvas_nodes]")
+            lines.append(self._canvas_materials_prompt(work.canvas_nodes))
+        lines.append("[project_metadata]")
+        lines.append(
+            f"- project_id={work.project_id}, conversation_id={work.conversation_id}"
+        )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _validate_matched_fields(fields: list[str]) -> tuple[str, ...]:
+        """matched_fields 后置校验（契约 §4.3）：非空、去重、取值属封闭枚举。
+        任一不符 fail closed（_ContractError），不静默修正。"""
+        if not fields:
+            raise _ContractError("选定候选时 matched_fields 不能为空")
+        if any(
+            not isinstance(field, str) or field not in _MATCHED_FIELDS
+            for field in fields
+        ):
+            raise _ContractError("matched_fields 取值非法")
+        if len(set(fields)) != len(fields):
+            raise _ContractError("matched_fields 必须去重")
+        return tuple(fields)
 
     async def advance(
         self,
@@ -368,12 +476,14 @@ class PydanticAIOrchestrator:
     def _load_creative_skill_body(
         self, work: RunWork
     ) -> CreativeSkillContentGate | None:
-        """forced 激活非空时构造 Creative Skill 内容闸门（契约 §6 / IK3NPD-T3）。
+        """已激活（forced_use 或 auto）非空时构造 Creative Skill 内容闸门（契约 §6）。
 
         空激活 / 无 creative_content_source → None，不读取、不注入（既有 instructions 不变）。
-        T3 只消费 forced_use 正文；auto 候选选择 / 激活命令归 T5/T6——本工单不发激活命令，
-        也不读取候选正文。正文按 agent_run_id 寻址，Java 从 Run pin 派生固定版本，恢复同一
-        Run 仍用同一 pin（不随 Skill 库发布漂移）。
+        forced 激活在 Run 创建时由 Java 固定（IK3NPD-T3）；auto 激活在 Worker 语义选择并发
+        激活命令被 Java 接纳后，由 Worker 更新进 work.activated_creative_skill_versions
+        （IK3NPH）。两种 source 走同一套 CreativeSkillContentGate 双重 digest 校验 + 注入
+        （source 中立，只认 activation.resource_digest）。正文按 agent_run_id 寻址，Java 从
+        Run pin 派生固定版本，恢复同一 Run 仍用同一 pin（不随 Skill 库发布漂移）。
         """
         if (
             self._creative_content_source is None
@@ -381,9 +491,6 @@ class PydanticAIOrchestrator:
         ):
             return None
         activation = work.activated_creative_skill_versions[0]
-        if activation.source != "forced_use":
-            # auto 激活路径归 T6：候选选择未发生前不提前装载正文。
-            return None
         return CreativeSkillContentGate(
             self._creative_content_source, activation, work.agent_run_id
         )

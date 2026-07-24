@@ -50,6 +50,22 @@ class ChunkDeliveryError(RuntimeError):
     """
 
 
+class CreativeSkillActivationError(RuntimeError):
+    """auto 激活被 Java 确定性拒绝（契约 §8）。
+
+    携带稳定 ``code``（契约 §8 符号名，如 CREATIVE_SKILL_NOT_A_CANDIDATE /
+    CREATIVE_SKILL_ALREADY_ACTIVATED / IDEMPOTENCY_KEY_REUSED 等）与人类可读
+    ``message``。Worker 捕获后走 error commit 通道使 Run 进入 failed 终态——
+    确定性拒绝崩溃重试会无限循环，error commit 才是「不降级」的正确体现（契约 §4.2.5）。
+    与 AgentRunConflictError（确定性退出 / Run 已终态）、RuntimeError（瞬态崩溃重试）区分。
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"{code}: {message}")
+        self.code = code
+        self.message = message
+
+
 # 流式可见文本分块回调（IK3BG3）：Orchestrator 经 ChunkFormer 成块后逐块回调，
 # 由 Worker 的 sink 合并 RunBinding 并调 append_assistant_message_chunk。
 ChunkSink = Callable[[Mapping[str, Any]], None]
@@ -87,6 +103,20 @@ class ToolGrant:
     constraints: Mapping[str, Any]
 
 
+# auto reason.detail.matched_fields 的封闭枚举（契约 §4.3）。
+# 单一来源：选择模型的结构化 schema 与 http_gateway 的 reason 解析校验共用此元组。
+MATCHED_FIELD_CONVERSATION_MESSAGES = "conversation_messages"
+MATCHED_FIELD_CONVERSATION_SUMMARY = "conversation_summary"
+MATCHED_FIELD_CANVAS_NODES = "canvas_nodes"
+MATCHED_FIELD_PROJECT_METADATA = "project_metadata"
+_MATCHED_FIELDS = (
+    MATCHED_FIELD_CONVERSATION_MESSAGES,
+    MATCHED_FIELD_CONVERSATION_SUMMARY,
+    MATCHED_FIELD_CANVAS_NODES,
+    MATCHED_FIELD_PROJECT_METADATA,
+)
+
+
 @dataclass(frozen=True)
 class CreativeSkillActivation:
     """一次 Creative Skill 激活的不可变事实（契约 §1.3 / §4）。
@@ -119,6 +149,65 @@ class AutoCreativeSkillCandidate:
     description: str
     display_version: str
     resource_digest: str
+
+
+@dataclass(frozen=True)
+class ActivateCreativeSkillRequest:
+    """auto 激活命令请求体（契约 §5 / ``ActivateCreativeSkillRequest``）。
+
+    Worker 语义选择一个候选后构造：``expected_run_version`` 取激活前 Run version
+    （乐观并发）；``reason`` 是 ``agent_match`` 结构化理由（``detail.matched_fields``
+    非空去重枚举）。``idempotency_key`` + 载荷均确定性，支撑 §4.4 重放幂等。
+    """
+
+    idempotency_key: str
+    expected_run_version: int
+    creative_skill_id: str
+    creative_skill_version_id: str
+    reason: Mapping[str, Any]
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "idempotency_key": self.idempotency_key,
+            "expected_run_version": self.expected_run_version,
+            "creative_skill_id": self.creative_skill_id,
+            "creative_skill_version_id": self.creative_skill_version_id,
+            "reason": dict(self.reason),
+        }
+
+
+@dataclass(frozen=True)
+class ActivateCreativeSkillResponse:
+    """激活接纳响应（契约 §5 / ``ActivateCreativeSkillResponse``）。
+
+    ``accepted`` 恒 ``true``（拒绝走标准错误通道，映射为 CreativeSkillActivationError）；
+    ``activation`` 是 Java 已固定的权威激活记录（回写权威 ``resource_digest``）；
+    ``run_version`` 是固定后的新 Run version，Worker 据此更新 work 流入流式管道。
+    """
+
+    accepted: bool
+    activation: CreativeSkillActivation
+    run_version: int
+
+
+@dataclass(frozen=True)
+class AutoCreativeSkillSelection:
+    """auto 选择结果：封闭的零或一个候选（契约 §4.2）。
+
+    不变量：``chosen is None`` 表示零选择（无语义匹配，正常基础生成，§4.2.4）；
+    ``chosen`` 非空时 ``matched_fields`` 必非空（§4.3）。chosen 返回冻结的候选对象
+    （而非模型原始数据），使 name / description / resource_digest 权威来自 Run pin。
+    零选择与故障严格区分（§4.2.5）：故障经异常 fail closed，绝不伪装成零选择。
+    """
+
+    chosen: Optional[AutoCreativeSkillCandidate]
+    matched_fields: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if self.chosen is not None and not self.matched_fields:
+            raise ValueError("选定候选时 matched_fields 必须非空（契约 §4.3）")
+        if self.chosen is None and self.matched_fields:
+            raise ValueError("零选择不得携带 matched_fields（契约 §4.2.4）")
 
 
 @dataclass(frozen=True)
@@ -278,6 +367,16 @@ class OrchestratorPort(Protocol):
         再向模型追加「只输出工具调用、不输出可见文本」指令。
         """
 
+    async def select_auto_creative_skill(self, work: RunWork) -> "AutoCreativeSkillSelection":
+        """auto 选择的前置独立判定阶段（契约 §4.2）。
+
+        输入 RunWork 的候选元数据 + 当次可见创作上下文信号（messages / 摘要 / 画布 /
+        项目元数据），输出封闭的零或一个候选。程序不变量：``activated_creative_skill_versions``
+        非空或候选空时短路返回零选择，不调用模型（§4.1.4 / §4.2.4）。模型语义判断后程序
+        后置校验：所选 version_id 必须属于已冻结候选，返回冻结候选对象使身份 / 摘要权威；
+        matched_fields 非空去重且取值属封闭枚举。零选择与故障严格区分（§4.2.5）。
+        """
+
 
 class RunGateway(Protocol):
     def claim(self) -> RunWork:
@@ -308,6 +407,18 @@ class RunGateway(Protocol):
         ≤64 字符幂等键与规范化 reason_code；aborted 为不可重开终态。
         返回 AssistantMessageStreamResponse（含 released_sequence_no，
         契约 §3.1），Worker F1 路径据它截取未放行尾部。"""
+
+    def activate_creative_skill(
+        self, run_id: int, request: ActivateCreativeSkillRequest
+    ) -> ActivateCreativeSkillResponse:
+        """POST .../creative-skill-activations：auto 激活命令（契约 §5）。
+
+        Java 校验幂等键 / Run version / 候选成员 / Run 尚未激活后原子固定激活记录并
+        返回接纳响应（含权威 resource_digest 与固定后的 run_version）。确定性拒绝
+        （NOT_A_CANDIDATE / KEY_REUSED / ALREADY_ACTIVATED 等）映射为
+        CreativeSkillActivationError；Run 已终态 / 版本冲突映射为 AgentRunConflictError；
+        其余 enveloped / 非 409 / 网络异常维持 RuntimeError（瞬态崩溃重试，契约 §8）。
+        """
 
 
 class ConversationSource(Protocol):

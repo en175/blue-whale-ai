@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import json
 import logging
 import signal
@@ -7,8 +8,10 @@ from typing import Any, Mapping, Optional
 from uuid import uuid4
 
 from .contracts import (
+    ActivateCreativeSkillRequest,
     AgentRunConflictError,
     ChunkDeliveryError,
+    CreativeSkillActivationError,
     MixedStreamError,
     OrchestratorPort,
     OrchestratorResult,
@@ -34,6 +37,10 @@ MAX_STREAM_ATTEMPTS_PER_RUN = 2
 # ADR-0043 规范化失败码：回复流尝试额度用尽（本地计数或 Java 100305 权威防线），
 # 不再调用模型，经 error commit 通道使 Run 进入 failed。
 ERROR_ASSISTANT_STREAM_ATTEMPT_EXHAUSTED = "ASSISTANT_STREAM_ATTEMPT_EXHAUSTED"
+# ADR-0043 规范化失败码：auto 选择阶段故障（候选计算 / 传输 / 模型判断，契约 §4.2.5）
+# fail closed，经 error commit 使 Run 进入 failed（不崩溃重试——确定性模型违约会在
+# 同一上下文无限循环）。与 pydantic_orchestrator 的通用编排失败码一致。
+ERROR_ORCHESTRATION_FAILED = "ORCHESTRATION_FAILED"
 
 
 class StreamInterruptedError(BaseException):
@@ -105,6 +112,14 @@ class AgentWorker:
                 signal.signal(sig, handler)
 
     async def _advance_and_commit(self, work: RunWork) -> None:
+        # auto 选择 + 激活的前置独立阶段（IK3NPH，契约 §4.2）：claim 后、流式管道前。
+        # 激活接纳使 Java 侧 run_version 递增，故必须在 start 之前完成——前置激活用旧
+        # run_version 作 expected_run_version，接纳后更新 work 使整条流式用一致新版本，
+        # 避免 start 用旧版本 / complete-commit 用新版本的流式版本断裂。
+        activated = await self._maybe_activate_auto_creative_skill(work)
+        if activated is None:
+            return  # 激活确定性失败已 error commit（激活在开流前，无打开的流）
+        work = activated
         run_binding = {
             "project_id": work.project_id,
             "user_id": work.user_id,
@@ -232,17 +247,83 @@ class AgentWorker:
                 )
             raise
 
-    def _commit_attempt_exhausted(
-        self, work: RunWork, prior_usages: list[Mapping[str, Any]]
+    async def _maybe_activate_auto_creative_skill(
+        self, work: RunWork
+    ) -> Optional[RunWork]:
+        """auto 选择 + 激活前置阶段（契约 §4.2 / §4.4，IK3NPH）。
+
+        返回语义：原 work（守卫跳过或零选择，基础生成，激活数组不变）/ 更新后的 work
+        （激活接纳，run_version 与 activated_creative_skill_versions 替换为 Java 权威值）/
+        None（激活确定性失败已 error commit，应停止）。激活用激活前 run_version 作
+        expected_run_version（§5 乐观并发），idempotency_key + 载荷均确定性支撑 §4.4 重放。
+        """
+        if (
+            work.activated_creative_skill_versions
+            or not work.auto_creative_skill_candidates
+        ):
+            return work
+        try:
+            selection = await self._orchestrator.select_auto_creative_skill(work)
+        except Exception:
+            # 契约 §4.2.5：选择阶段（候选计算 / 传输 / 模型判断）任一故障 fail closed，
+            # 与 activate 被拒对称走 error commit——不崩溃重试（确定性模型违约会在同一
+            # 上下文无限循环）。StreamInterruptedError 继承 BaseException 不被此 except
+            # 捕获，信号中断仍正确冒泡（select 在流式管道前本不会触发它）。
+            self._commit_failure_result(
+                work,
+                kind="selection-failed",
+                error={
+                    "code": ERROR_ORCHESTRATION_FAILED,
+                    "message": "auto Creative Skill 选择阶段故障。",
+                },
+            )
+            return None
+        if selection.chosen is None:
+            return work  # 零选择：无语义匹配，正常基础生成
+        request = ActivateCreativeSkillRequest(
+            idempotency_key=operation_idempotency_key(
+                work.agent_run_id, "activate-creative-skill"
+            ),
+            expected_run_version=work.run_version,
+            creative_skill_id=selection.chosen.creative_skill_id,
+            creative_skill_version_id=selection.chosen.creative_skill_version_id,
+            reason={
+                "type": "agent_match",
+                "detail": {"matched_fields": list(selection.matched_fields)},
+            },
+        )
+        try:
+            response = self._gateway.activate_creative_skill(
+                work.agent_run_id, request
+            )
+        except AgentRunConflictError:
+            raise  # Run 已终态 / 版本冲突：确定性退出（run_once 现有 warn + exit 0）
+        except CreativeSkillActivationError as error:
+            # 契约 §4.2.5 / §8：Java 确定性拒绝 fail closed——崩溃重试会无限循环，
+            # error commit 使 Run 进入 failed 终态才是「不降级」。
+            self._commit_creative_skill_activation_failure(work, error)
+            return None
+        return dataclasses.replace(
+            work,
+            run_version=response.run_version,
+            activated_creative_skill_versions=(response.activation,),
+        )
+
+    def _commit_failure_result(
+        self,
+        work: RunWork,
+        *,
+        kind: str,
+        error: Mapping[str, str],
+        usage: Optional[Mapping[str, Any]] = None,
     ) -> None:
-        # 契约 §2.3 / ADR-0043：尝试额度用尽的规范化 error commit——不再调用模型、
-        # 不再开新尝试（commit 不携带 assistant_message_stream_id），Run 进入 failed。
-        # usage 聚合所有真实发生的尝试（工单验收：用量不随失败尝试丢失）。
-        usage = None
-        for prior_usage in prior_usages:
-            usage = self._merge_usage(prior_usage, usage)
+        # ADR-0043 规范化失败 commit：不携带 assistant_message_stream_id（或无新 stream），
+        # Run 进入 failed 终态。kind 区分 commit_id 前缀（exhausted / activation-failed /
+        # selection-failed）；usage 聚合真实发生的尝试（额度用尽场景），其余场景 None。
+        # error.code 透传契约符号名或规范化失败码，Java 按 ADR-0043 原样持久化（截断兜底，
+        # 无白名单）。三处 fail-closed 路径（额度用尽 / 激活被拒 / 选择故障）共用此骨架。
         result = OrchestratorResult(
-            commit_id=f"worker-exhausted-{work.agent_run_id}-{work.run_version}",
+            commit_id=f"worker-{kind}-{work.agent_run_id}-{work.run_version}",
             visible_text="编排暂时无法继续。",
             checkpoint=work.checkpoint
             or RuntimeCheckpoint(
@@ -253,12 +334,38 @@ class AgentWorker:
             ),
             actions=(),
             usage=usage,
+            error=dict(error),
+        )
+        self._gateway.commit(work.agent_run_id, result.to_commit_payload(work))
+
+    def _commit_creative_skill_activation_failure(
+        self, work: RunWork, error: CreativeSkillActivationError
+    ) -> None:
+        # 契约 §4.2.5 / §8：auto 激活被 Java 确定性拒绝 fail closed——error.code 透传
+        # 契约 §8 符号名（NOT_A_CANDIDATE / KEY_REUSED / ALREADY_ACTIVATED 等）。
+        self._commit_failure_result(
+            work,
+            kind="activation-failed",
+            error={"code": error.code, "message": error.message},
+        )
+
+    def _commit_attempt_exhausted(
+        self, work: RunWork, prior_usages: list[Mapping[str, Any]]
+    ) -> None:
+        # 契约 §2.3 / ADR-0043：尝试额度用尽的规范化 error commit——不再调用模型、
+        # 不再开新尝试，Run 进入 failed。usage 聚合所有真实发生的尝试（不随失败丢失）。
+        usage = None
+        for prior_usage in prior_usages:
+            usage = self._merge_usage(prior_usage, usage)
+        self._commit_failure_result(
+            work,
+            kind="exhausted",
+            usage=usage,
             error={
                 "code": ERROR_ASSISTANT_STREAM_ATTEMPT_EXHAUSTED,
                 "message": "回复流尝试额度已用尽，不再调用模型。",
             },
         )
-        self._gateway.commit(work.agent_run_id, result.to_commit_payload(work))
 
     @staticmethod
     def _merge_usage(base: Any, extra: Any) -> dict:
