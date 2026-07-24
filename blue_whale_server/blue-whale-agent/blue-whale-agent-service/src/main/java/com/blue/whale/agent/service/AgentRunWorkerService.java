@@ -10,10 +10,13 @@ import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.mapper.GenerationJobOutputMapper;
 import com.blue.whale.agent.mapper.GenerationModelCapabilityMapper;
 import com.blue.whale.agent.mapper.RunCommitRecordMapper;
+import com.blue.whale.agent.mapper.RunCreativeSkillActivationMapper;
 import com.blue.whale.agent.mapper.RuntimeCheckpointMapper;
 import com.blue.whale.agent.mapper.UserInputRequestMapper;
 import com.blue.whale.agent.model.constant.AggregateType;
 import com.blue.whale.agent.model.constant.EventType;
+import com.blue.whale.agent.model.dto.ActivateCreativeSkillRequest;
+import com.blue.whale.agent.model.dto.ActivateCreativeSkillResponse;
 import com.blue.whale.agent.model.dto.CanvasNodeSummary;
 import com.blue.whale.agent.model.dto.RunCommitRequest;
 import com.blue.whale.agent.model.dto.RunCommitResponse;
@@ -28,6 +31,7 @@ import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.GenerationJobOutput;
 import com.blue.whale.agent.model.entity.GenerationModelCapability;
 import com.blue.whale.agent.model.entity.RunCommitRecord;
+import com.blue.whale.agent.model.entity.RunCreativeSkillActivation;
 import com.blue.whale.agent.model.entity.RuntimeCheckpoint;
 import com.blue.whale.agent.model.entity.UserInputRequest;
 import com.blue.whale.agent.service.governance.AuditRecordWriter;
@@ -47,6 +51,7 @@ import com.blue.whale.agent.runtimebundle.ToolRegistry;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -57,11 +62,13 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 
 @Service
@@ -106,6 +113,7 @@ public class AgentRunWorkerService {
     // guard / mapper / CanvasService / RuntimeBundleService，无循环依赖。
     private final ConversationQueryService conversationQueryService;
     private final CreativeContextQueryService creativeContextQueryService;
+    private final RunCreativeSkillActivationMapper runCreativeSkillActivationMapper;
 
     @Transactional(noRollbackFor = ClaimQueueExhaustedAfterQuarantine.class)
     public RunWorkResponse claim(String workerId, String engine) {
@@ -174,7 +182,8 @@ public class AgentRunWorkerService {
                     run.getVersion(), run.getFencingToken(), run.getEngine(), run.getEngineVersion(),
                     run.getAdapterSchemaVersion(), run.getBundleVersionId(), run.getManifestDigest(),
                     run.getModelProfileId(), run.getModelProfileVersion(),
-                    creativeSkillVersions(run.getActivatedCreativeSkillVersions()), messages,
+                    creativeSkillVersions(run.getActivatedCreativeSkillVersions()),
+                    creativeSkillVersions(run.getAutoCreativeSkillCandidates()), messages,
                     checkpoint == null ? null
                             : new RunWorkResponse.Checkpoint(
                                     checkpoint.getId(), checkpoint.getEngine(), checkpoint.getEngineVersion(),
@@ -496,6 +505,173 @@ public class AgentRunWorkerService {
                 .setCommittedCursor(projectEventService.highWatermark(run.getProjectId()));
         runCommitMapper.insert(committed);
         return response(committed);
+    }
+
+    /**
+     * IK3NPF：Worker→Java 自动激活 Creative Skill（契约 §5）。
+     *
+     * <p>持有租约的 Worker 提议一个候选版本，Java 幂等接纳为 {@code source=auto} 激活单例：租约 /
+     * version / 候选成员 / 单激活校验全过后，同事务原子固定 activation（@Version 递增 run version）并落
+     * {@link RunCreativeSkillActivation} 幂等记账。同 idempotency_key 同载逐字节回放首次响应（§4.4），
+     * 同键异载 100302。激活不改 run status/stage、不发 SSE 事件——version 由 Worker 自跟踪，Web 展示
+     * Out of scope。selectForUpdate(runId) 锁串行化同 Run 的并发激活，幂等键 UNIQUE 兜底。
+     */
+    @Transactional
+    public ActivateCreativeSkillResponse activate(
+            Long runId, String workerId, ActivateCreativeSkillRequest request) {
+        requireWorker(workerId);
+        AgentRun run = agentRunMapper.selectForUpdate(runId);
+        if (run == null) {
+            throw new GlobalException(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在");
+        }
+        String requestHash = requestDigest(request);
+        RunCreativeSkillActivation existing = runCreativeSkillActivationMapper.selectOne(
+                Wrappers.<RunCreativeSkillActivation>lambdaQuery()
+                        .eq(RunCreativeSkillActivation::getAgentRunId, runId)
+                        .eq(RunCreativeSkillActivation::getIdempotencyKey, request.idempotencyKey()));
+        if (existing != null) {
+            if (!requestHash.equals(existing.getRequestHash())) {
+                throw new GlobalException(SystemCode.IDEMPOTENCY_KEY_REUSED_CODE,
+                        SystemCode.IDEMPOTENCY_KEY_REUSED.getMsg());
+            }
+            return readResponse(existing.getResponseJson());
+        }
+        validateReason(request);
+        validateActivation(run, workerId, request, agentRunMapper.selectCurrentTime());
+        // 单激活铁闸优先于候选成员校验（契约 §4.1 第 4 条）：forced Run 候选空但已激活，
+        // 任何激活请求须返回 100310，不因候选不匹配降级为 100309。
+        if (isActivated(run)) {
+            throw new GlobalException(SystemCode.CREATIVE_SKILL_ALREADY_ACTIVATED_CODE,
+                    SystemCode.CREATIVE_SKILL_ALREADY_ACTIVATED.getMsg());
+        }
+        String resourceDigest = matchCandidate(run, request);
+        Map<String, Object> reason = new LinkedHashMap<>();
+        reason.put("type", request.reason().type());
+        reason.put("detail", Map.of("matched_fields", request.reason().detail().matchedFields()));
+        Map<String, Object> activation = new LinkedHashMap<>();
+        activation.put("creative_skill_id", request.creativeSkillId());
+        activation.put("creative_skill_version_id", request.creativeSkillVersionId());
+        activation.put("source", "auto");
+        activation.put("reason", reason);
+        activation.put("resource_digest", resourceDigest);
+        run.setActivatedCreativeSkillVersions(writeJson(List.of(activation)));
+        agentRunMapper.updateById(run);
+        run = agentRunMapper.selectById(runId);
+        ActivateCreativeSkillResponse response = new ActivateCreativeSkillResponse(
+                true,
+                new ActivateCreativeSkillResponse.CreativeSkillActivationView(
+                        request.creativeSkillId(),
+                        request.creativeSkillVersionId(),
+                        "auto",
+                        new ActivateCreativeSkillResponse.CreativeSkillActivationView.Reason(
+                                request.reason().type(),
+                                new ActivateCreativeSkillResponse.CreativeSkillActivationView.Reason.Detail(
+                                        request.reason().detail().matchedFields())),
+                        resourceDigest),
+                run.getVersion());
+        String responseJson = writeJson(response);
+        runCreativeSkillActivationMapper.insert(new RunCreativeSkillActivation()
+                .setAgentRunId(runId)
+                .setIdempotencyKey(request.idempotencyKey())
+                .setRequestHash(requestHash)
+                .setResponseJson(responseJson)
+                .setRunVersion(run.getVersion())
+                .setCreativeSkillId(request.creativeSkillId())
+                .setCreativeSkillVersionId(request.creativeSkillVersionId()));
+        return response;
+    }
+
+    /** reason 判别式校验（契约 §4.3）：type 须为 agent_match，matched_fields 去重枚举；@Valid 已保证结构非空。 */
+    private void validateReason(ActivateCreativeSkillRequest request) {
+        if (!"agent_match".equals(request.reason().type())) {
+            throw new GlobalException(SystemCode.PARAM_MISS_CODE, "reason.type 必须为 agent_match");
+        }
+        List<String> fields = request.reason().detail().matchedFields();
+        Set<String> allowed = Set.of(
+                "conversation_messages", "conversation_summary", "canvas_nodes", "project_metadata");
+        if (fields.stream().anyMatch(field -> !allowed.contains(field))
+                || new HashSet<>(fields).size() != fields.size()) {
+            throw new GlobalException(SystemCode.PARAM_MISS_CODE, "matched_fields 非法");
+        }
+    }
+
+    /** 租约 owner / 未过期 / status=RUNNING / version==expected（validateCommit 子集，契约 §4.4/§8）。 */
+    private void validateActivation(
+            AgentRun run, String workerId, ActivateCreativeSkillRequest request, LocalDateTime databaseNow) {
+        boolean matches = workerId.equals(run.getLeaseOwner())
+                && AgentRun.STATUS_RUNNING.equals(run.getStatus())
+                && run.getLeaseExpiresAt() != null
+                && run.getLeaseExpiresAt().isAfter(databaseNow)
+                && run.getVersion().equals(request.expectedRunVersion());
+        if (!matches) {
+            throw new GlobalException(SystemCode.AGENT_RUN_CONFLICT_CODE,
+                    SystemCode.AGENT_RUN_CONFLICT.getMsg());
+        }
+    }
+
+    /** 候选成员校验：反序列化 run.autoCreativeSkillCandidates，返回双匹配项的权威 resource_digest；无匹配 100309。 */
+    private String matchCandidate(AgentRun run, ActivateCreativeSkillRequest request) {
+        JsonNode candidates = readCandidates(run.getAutoCreativeSkillCandidates());
+        for (JsonNode candidate : candidates) {
+            if (request.creativeSkillId().equals(candidate.path("creative_skill_id").asText())
+                    && request.creativeSkillVersionId().equals(
+                            candidate.path("creative_skill_version_id").asText())) {
+                return candidate.path("resource_digest").asText();
+            }
+        }
+        throw new GlobalException(SystemCode.CREATIVE_SKILL_NOT_A_CANDIDATE_CODE,
+                SystemCode.CREATIVE_SKILL_NOT_A_CANDIDATE.getMsg());
+    }
+
+    private JsonNode readCandidates(String json) {
+        if (json == null || json.isBlank()) {
+            throw new GlobalException(SystemCode.CREATIVE_SKILL_NOT_A_CANDIDATE_CODE,
+                    SystemCode.CREATIVE_SKILL_NOT_A_CANDIDATE.getMsg());
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (!node.isArray()) {
+                throw new GlobalException(SystemCode.CREATIVE_SKILL_NOT_A_CANDIDATE_CODE,
+                        SystemCode.CREATIVE_SKILL_NOT_A_CANDIDATE.getMsg());
+            }
+            return node;
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("AgentRun 的 Creative Skill 候选已损坏", exception);
+        }
+    }
+
+    /** run.activatedCreativeSkillVersions 非空数组即视为已激活（契约 §4.1/§8：单 Run 最多一次）。 */
+    private boolean isActivated(AgentRun run) {
+        String activated = run.getActivatedCreativeSkillVersions();
+        if (activated == null || activated.isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(activated);
+            return node.isArray() && !node.isEmpty();
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("AgentRun 的 Creative Skill 激活数据已损坏", exception);
+        }
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("无法序列化 JSON", exception);
+        }
+    }
+
+    private ActivateCreativeSkillResponse readResponse(String json) {
+        try {
+            return objectMapper.readValue(json, ActivateCreativeSkillResponse.class);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("无法反序列化激活响应", exception);
+        }
+    }
+
+    private String requestDigest(ActivateCreativeSkillRequest request) {
+        return digest(canonicalize(objectMapper.convertValue(request, Object.class)));
     }
 
     private void validateCommit(
@@ -840,6 +1016,8 @@ public class AgentRunWorkerService {
         payload.put("model_profile_version", run.getModelProfileVersion());
         payload.put("activated_creative_skill_versions",
                 creativeSkillVersions(run.getActivatedCreativeSkillVersions()));
+        payload.put("auto_creative_skill_candidates",
+                creativeSkillVersions(run.getAutoCreativeSkillCandidates()));
         payload.put("current_checkpoint_id", run.getCurrentCheckpointId());
         return payload;
     }

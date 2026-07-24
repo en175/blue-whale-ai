@@ -11,6 +11,7 @@ import com.blue.whale.global.exception.GlobalException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,7 +48,7 @@ public final class RuntimeBundleRunPinResolver {
         this.objectMapper = objectMapper;
     }
 
-    public RunPin resolve(AgentRun sourceRun, String forcedCreativeSkillId) {
+    public RunPin resolve(AgentRun sourceRun, String forcedCreativeSkillId, Long userId) {
         if (!enforcementEnabled) {
             return RunPin.disabled();
         }
@@ -79,16 +80,24 @@ public final class RuntimeBundleRunPinResolver {
         if (!pin.manifestDigest().equals(manifestInSnapshot)) {
             throw unavailable("激活 BundleVersion 的 manifest 摘要不一致");
         }
-        // Creative Skill 激活：forced_use 时解析当前发布版本原子固定为 0/1 单例；无 forced 时空数组。
+        // Creative Skill 激活：forced_use 时候选恒空（forced Run 不算 auto 候选），activated 解析
+        // 当前发布版本原子固定为 0/1 单例；无 forced 时 activated 空，按 userId 冻结 auto 候选。
         // ToolGrant 从激活 BundleVersion 快照 composition.toolGrants 解析（不变）。
         JsonNode toolGrantsNode = composition.path("toolGrants");
         String toolGrantsJson = toolGrantsNode.isArray() ? toolGrantsNode.toString() : "[]";
-        String creativeSkillVersions = forcedCreativeSkillId == null
-                ? "[]"
-                : resolveForcedActivation(forcedCreativeSkillId);
+        String autoCandidates;
+        String creativeSkillVersions;
+        if (forcedCreativeSkillId != null) {
+            autoCandidates = "[]";
+            creativeSkillVersions = resolveForcedActivation(forcedCreativeSkillId);
+        } else {
+            autoCandidates = resolveAutoCandidates(userId);
+            creativeSkillVersions = "[]";
+        }
         return requiredPin(
                 pin.bundleVersionId(), pin.manifestDigest(),
                 model.path("modelProfileId").asText(), model.path("version").asText(),
+                autoCandidates,
                 creativeSkillVersions,
                 toolGrantsJson);
     }
@@ -137,10 +146,69 @@ public final class RuntimeBundleRunPinResolver {
         }
     }
 
+    /**
+     * 解析 user 的 auto Creative Skill 候选快照（契约 §4.2/§4.2.5）。
+     *
+     * <p>user_skill(auto=1, is_delete=0) JOIN creative_skill ON source_skill_id = user_skill.skill_id
+     * → (creative_skill_id, name, description, active_version_id)；逐个双 eq 查 creative_skill_version
+     * 取 display_version 与 resource_digest，构造 6 字段候选（snake_case，无正文）。任一候选
+     * active_version_id 空 / 版本行缺失 / 归属不符 / digest 无效 → fail closed 100307，整个 accept
+     * 回滚，不留部分候选。forced Run 不调用本方法（候选恒空）。
+     */
+    private String resolveAutoCandidates(Long userId) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT creative_skill.creative_skill_id AS creative_skill_id,
+                       creative_skill.name AS name,
+                       creative_skill.description AS description,
+                       creative_skill.active_version_id AS active_version_id
+                FROM user_skill
+                JOIN creative_skill ON creative_skill.source_skill_id = user_skill.skill_id
+                WHERE user_skill.user_id = ?
+                  AND user_skill.auto = 1
+                  AND user_skill.is_delete = 0
+                """, userId);
+        List<Map<String, Object>> candidates = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            String creativeSkillId = (String) row.get("creative_skill_id");
+            String activeVersionId = (String) row.get("active_version_id");
+            if (activeVersionId == null || activeVersionId.isBlank()) {
+                throw new GlobalException(SystemCode.CREATIVE_SKILL_VERSION_UNAVAILABLE_CODE,
+                        "Creative Skill 候选无发布版本");
+            }
+            CreativeSkillVersion version = creativeSkillVersionMapper.selectOne(
+                    Wrappers.<CreativeSkillVersion>lambdaQuery()
+                            .eq(CreativeSkillVersion::getCreativeSkillVersionId, activeVersionId)
+                            .eq(CreativeSkillVersion::getCreativeSkillId, creativeSkillId));
+            if (version == null) {
+                throw new GlobalException(SystemCode.CREATIVE_SKILL_VERSION_UNAVAILABLE_CODE,
+                        "Creative Skill 候选版本不可用");
+            }
+            String resourceDigest = version.getResourceDigest();
+            if (resourceDigest == null || !resourceDigest.matches("^sha256:[0-9a-f]{64}$")) {
+                throw new GlobalException(SystemCode.CREATIVE_SKILL_VERSION_UNAVAILABLE_CODE,
+                        "Creative Skill 候选版本摘要无效");
+            }
+            Map<String, Object> candidate = new LinkedHashMap<>();
+            candidate.put("creative_skill_id", creativeSkillId);
+            candidate.put("creative_skill_version_id", activeVersionId);
+            candidate.put("name", row.get("name"));
+            candidate.put("description", row.get("description"));
+            candidate.put("display_version", version.getDisplayVersion());
+            candidate.put("resource_digest", resourceDigest);
+            candidates.add(candidate);
+        }
+        try {
+            return objectMapper.writeValueAsString(candidates);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("无法序列化 Creative Skill 候选", exception);
+        }
+    }
+
     private RunPin inherited(AgentRun sourceRun) {
         return requiredPin(
                 sourceRun.getBundleVersionId(), sourceRun.getManifestDigest(),
                 sourceRun.getModelProfileId(), sourceRun.getModelProfileVersion(),
+                sourceRun.getAutoCreativeSkillCandidates(),
                 sourceRun.getActivatedCreativeSkillVersions(),
                 sourceRun.getToolGrants());
     }
@@ -150,6 +218,7 @@ public final class RuntimeBundleRunPinResolver {
             String manifestDigest,
             String modelProfileId,
             String modelProfileVersion,
+            String autoCreativeSkillCandidates,
             String creativeSkillVersions,
             String toolGrants) {
         if (blank(bundleVersionId) || blank(manifestDigest)
@@ -157,6 +226,7 @@ public final class RuntimeBundleRunPinResolver {
             throw unavailable("Runtime Bundle 运行身份不完整");
         }
         return new RunPin(bundleVersionId, manifestDigest, modelProfileId, modelProfileVersion,
+                blank(autoCreativeSkillCandidates) ? "[]" : autoCreativeSkillCandidates,
                 blank(creativeSkillVersions) ? "[]" : creativeSkillVersions,
                 blank(toolGrants) ? "[]" : toolGrants);
     }
@@ -174,11 +244,12 @@ public final class RuntimeBundleRunPinResolver {
             String manifestDigest,
             String modelProfileId,
             String modelProfileVersion,
+            String autoCreativeSkillCandidates,
             String activatedCreativeSkillVersions,
             String toolGrants) {
 
         static RunPin disabled() {
-            return new RunPin(null, null, null, null, null, null);
+            return new RunPin(null, null, null, null, null, null, null);
         }
     }
 

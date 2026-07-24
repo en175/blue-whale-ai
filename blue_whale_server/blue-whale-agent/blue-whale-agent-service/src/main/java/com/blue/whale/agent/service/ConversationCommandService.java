@@ -95,7 +95,7 @@ public class ConversationCommandService {
         AgentRun sourceRun = confirmedInputRequestId == null ? null
                 : sourceRunOf(confirmedInputRequestId);
         RuntimeBundleRunPinResolver.RunPin runPin =
-                runtimeBundleRunPinResolver.resolve(sourceRun, request.forcedCreativeSkillId());
+                runtimeBundleRunPinResolver.resolve(sourceRun, request.forcedCreativeSkillId(), userId);
 
         Conversation conversation = resolveConversation(projectId, request.conversationId());
 
@@ -115,6 +115,7 @@ public class ConversationCommandService {
                 .setModelProfileId(runPin.modelProfileId())
                 .setModelProfileVersion(runPin.modelProfileVersion())
                 .setActivatedCreativeSkillVersions(runPin.activatedCreativeSkillVersions())
+                .setAutoCreativeSkillCandidates(runPin.autoCreativeSkillCandidates())
                 .setToolGrants(runPin.toolGrants())
                 .setConfirmedInputRequestId(confirmedInputRequestId)
                 .setFencingToken(0L);
@@ -276,6 +277,7 @@ public class ConversationCommandService {
         payload.put("model_profile_id", run.getModelProfileId());
         payload.put("model_profile_version", run.getModelProfileVersion());
         payload.put("activated_creative_skill_versions", run.getActivatedCreativeSkillVersions());
+        payload.put("auto_creative_skill_candidates", run.getAutoCreativeSkillCandidates());
         return payload;
     }
 
