@@ -11,6 +11,8 @@ import com.blue.whale.agent.model.dto.CanvasNodesResponse;
 import com.blue.whale.agent.model.dto.ConversationHistoryResponse;
 import com.blue.whale.agent.model.dto.ConversationSummaryResponse;
 import com.blue.whale.agent.model.dto.CreativeSkillResponse;
+import com.blue.whale.agent.model.dto.CreativeSkillBodyResponse;
+import com.blue.whale.agent.model.dto.CreativeSkillReferenceResourceResponse;
 import com.blue.whale.agent.model.dto.GenerationJobStatusResponse;
 import com.blue.whale.agent.service.AssistantMessageStreamService;
 import com.blue.whale.agent.service.CreativeContextQueryService;
@@ -27,6 +29,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
 import java.util.List;
 
@@ -108,6 +111,25 @@ public class AgentRunWorkerController {
             @PathVariable Long runId,
             @RequestHeader(value = "X-Worker-Id", required = false) String workerId) {
         return Result.ok(creativeContextQueryService.listCreativeSkills(runId, workerId));
+    }
+
+    @GetMapping("/{runId}/creative-skill-body")
+    public Result<CreativeSkillBodyResponse> readCreativeSkillBody(
+            @PathVariable Long runId,
+            @RequestHeader(value = "X-Worker-Id", required = false) String workerId) {
+        return Result.ok(creativeContextQueryService.readCreativeSkillBody(runId, workerId));
+    }
+
+    @GetMapping("/{runId}/creative-skill-references/**")
+    public Result<CreativeSkillReferenceResourceResponse> readCreativeSkillReference(
+            @PathVariable Long runId,
+            HttpServletRequest request,
+            @RequestHeader(value = "X-Worker-Id", required = false) String workerId) {
+        // resourcePath 为规范化 POSIX 相对路径（含 /）：PathPatternParser 下 {var:.+} 不跨路径段，
+        // 故用 /** 捕获多段路径后从 URI 提取（schema ResourcePath 仅 [A-Za-z0-9._-] 与 /，无需 decode）。
+        String resourcePath = request.getRequestURI().replaceFirst(
+                ".*/creative-skill-references/", "");
+        return Result.ok(creativeContextQueryService.readCreativeSkillReference(runId, workerId, resourcePath));
     }
 
     @PostMapping("/{runId}/assistant-messages/start")

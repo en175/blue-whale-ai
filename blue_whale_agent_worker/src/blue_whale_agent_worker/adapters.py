@@ -2,7 +2,12 @@ from pydantic_ai.models import Model
 
 from .bundle.cache import CachingBundleSource, default_cache_dir
 from .bundle.source import BundleSource
-from .contracts import ConversationSource, CreativeContextSource, OrchestratorPort
+from .contracts import (
+    ConversationSource,
+    CreativeContextSource,
+    CreativeSkillContentSource,
+    OrchestratorPort,
+)
 from .fake_orchestrator import FakeOrchestrator
 from .pydantic_orchestrator import PydanticAIOrchestrator
 
@@ -13,6 +18,7 @@ def create_orchestrator(
     bundle_source: BundleSource | None = None,
     conversation_source: ConversationSource | None = None,
     creative_context_source: CreativeContextSource | None = None,
+    creative_content_source: CreativeSkillContentSource | None = None,
 ) -> OrchestratorPort:
     if adapter == "fake":
         return FakeOrchestrator()
@@ -29,5 +35,6 @@ def create_orchestrator(
             caching_source,
             conversation_source=conversation_source,
             creative_context_source=creative_context_source,
+            creative_content_source=creative_content_source,
         )
     raise ValueError(f"未知编排 Adapter: {adapter}")

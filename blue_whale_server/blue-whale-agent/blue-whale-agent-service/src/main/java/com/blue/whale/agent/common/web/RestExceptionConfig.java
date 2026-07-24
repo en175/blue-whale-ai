@@ -70,6 +70,10 @@ public class RestExceptionConfig {
                 ? HttpStatus.NOT_FOUND
                 : exception.code() == SystemCode.CREATIVE_SKILL_VERSION_UNAVAILABLE_CODE
                 ? HttpStatus.NOT_FOUND
+                : exception.code() == SystemCode.CREATIVE_SKILL_CONTENT_MISSING_CODE
+                ? HttpStatus.INTERNAL_SERVER_ERROR
+                : exception.code() == SystemCode.CREATIVE_SKILL_DIGEST_MISMATCH_CODE
+                ? HttpStatus.INTERNAL_SERVER_ERROR
                 : exception.code() == SystemCode.AGENT_ACTION_REJECTED_CODE
                 ? HttpStatus.UNPROCESSABLE_ENTITY
                 : HttpStatus.OK;

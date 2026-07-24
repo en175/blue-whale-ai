@@ -2,6 +2,7 @@ package com.blue.whale.agent.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.blue.whale.agent.mapper.AssetMapper;
+import com.blue.whale.agent.mapper.CreativeSkillVersionMapper;
 import com.blue.whale.agent.mapper.GenerationJobMapper;
 import com.blue.whale.agent.mapper.MessageAssetReferenceMapper;
 import com.blue.whale.agent.model.dto.AgentAssetResponse;
@@ -10,9 +11,12 @@ import com.blue.whale.agent.model.dto.CanvasNodeDetail;
 import com.blue.whale.agent.model.dto.CanvasNodeSummary;
 import com.blue.whale.agent.model.dto.CanvasNodesResponse;
 import com.blue.whale.agent.model.dto.CreativeSkillResponse;
+import com.blue.whale.agent.model.dto.CreativeSkillBodyResponse;
+import com.blue.whale.agent.model.dto.CreativeSkillReferenceResourceResponse;
 import com.blue.whale.agent.model.dto.GenerationJobStatusResponse;
 import com.blue.whale.agent.model.entity.AgentRun;
 import com.blue.whale.agent.model.entity.Asset;
+import com.blue.whale.agent.model.entity.CreativeSkillVersion;
 import com.blue.whale.agent.model.entity.GenerationJob;
 import com.blue.whale.agent.model.entity.MessageAssetReference;
 import com.blue.whale.agent.runtimebundle.RuntimeBundleService;
@@ -54,6 +58,7 @@ public class CreativeContextQueryService {
     private final AssetMapper assetMapper;
     private final GenerationJobMapper generationJobMapper;
     private final MessageAssetReferenceMapper messageAssetReferenceMapper;
+    private final CreativeSkillVersionMapper creativeSkillVersionMapper;
     private final CanvasService canvasService;
     private final RuntimeBundleService runtimeBundleService;
     private final ObjectMapper objectMapper;
@@ -168,6 +173,66 @@ public class CreativeContextQueryService {
         }
         return skills;
     }
+
+    /** §6 read_creative_skill_body：按 Run pin 固定版本派生正文（content_digest 供 Worker 双重校验）。 */
+    public CreativeSkillBodyResponse readCreativeSkillBody(Long runId, String workerId) {
+        AgentRun run = runLeaseGuard.requireLeasedRun(runId, workerId);
+        CreativeSkillActivationPin pin = resolveActivatedPin(run);
+        CreativeSkillVersion version = creativeSkillVersionMapper.selectOne(
+                Wrappers.<CreativeSkillVersion>lambdaQuery()
+                        .eq(CreativeSkillVersion::getCreativeSkillVersionId, pin.versionId())
+                        .eq(CreativeSkillVersion::getCreativeSkillId, pin.skillId()));
+        if (version == null) {
+            // 固定版本不存在 / 不再可读 → VERSION_UNAVAILABLE（契约 §8：fail closed，不换版本）。
+            throw new GlobalException(SystemCode.CREATIVE_SKILL_VERSION_UNAVAILABLE_CODE, "Creative Skill 版本不可读");
+        }
+        if (version.getBody() == null || version.getBody().isBlank()) {
+            throw new GlobalException(SystemCode.CREATIVE_SKILL_CONTENT_MISSING_CODE, "Creative Skill 正文缺失");
+        }
+        String mediaType = version.getMediaType() == null || version.getMediaType().isBlank()
+                ? "text/markdown" : version.getMediaType();
+        return new CreativeSkillBodyResponse(
+                pin.skillId(), pin.versionId(), mediaType, version.getBody(), version.getContentDigest());
+    }
+
+    /** §6 read_creative_skill_reference：单个引用资源（首批 seed 无引用资源 → CONTENT_MISSING，不伪造）。 */
+    public CreativeSkillReferenceResourceResponse readCreativeSkillReference(
+            Long runId, String workerId, String resourcePath) {
+        AgentRun run = runLeaseGuard.requireLeasedRun(runId, workerId);
+        // 确认 Run 已激活固定版本（身份从 pin 派生，客户端不能指定版本）；首批 seed 无引用资源，
+        // 请求任何引用资源 fail closed（契约 §6/§8），不伪造引用内容。
+        resolveActivatedPin(run);
+        throw new GlobalException(SystemCode.CREATIVE_SKILL_CONTENT_MISSING_CODE, "引用资源不存在");
+    }
+
+    /**
+     * 从 Run pin 的 {@code activatedCreativeSkillVersions}（JSON 文本，0/1 单例）派生固定激活记录。
+     *
+     * <p>Java 按 {@code runId} 寻址、从 Run pin 派生精确 Skill 与版本——客户端不能改读其他版本
+     * （契约 §6）。无激活（空数组 / 缺省 / 解析失败）→ {@code CREATIVE_SKILL_CONTENT_MISSING}，
+     * 不回退默认提示词。
+     */
+    private CreativeSkillActivationPin resolveActivatedPin(AgentRun run) {
+        String json = run.getActivatedCreativeSkillVersions();
+        if (json == null || json.isBlank()) {
+            throw new GlobalException(SystemCode.CREATIVE_SKILL_CONTENT_MISSING_CODE, "Run 未激活 Creative Skill");
+        }
+        JsonNode array;
+        try {
+            array = objectMapper.readTree(json);
+        } catch (Exception exception) {
+            throw new GlobalException(SystemCode.CREATIVE_SKILL_CONTENT_MISSING_CODE, "Creative Skill 激活 pin 解析失败");
+        }
+        if (!array.isArray() || array.isEmpty()) {
+            throw new GlobalException(SystemCode.CREATIVE_SKILL_CONTENT_MISSING_CODE, "Run 未激活 Creative Skill");
+        }
+        JsonNode activation = array.get(0);
+        return new CreativeSkillActivationPin(
+                textOrNull(activation, "creative_skill_id"),
+                textOrNull(activation, "creative_skill_version_id"));
+    }
+
+    private record CreativeSkillActivationPin(String skillId, String versionId) {}
 
     /**
      * 当前 Run 的放行 Asset 白名单三源并集：

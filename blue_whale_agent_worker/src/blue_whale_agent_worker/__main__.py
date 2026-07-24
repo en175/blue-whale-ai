@@ -21,6 +21,7 @@ def main() -> None:
         gateway,
         conversation_source=gateway,
         creative_context_source=gateway,
+        creative_content_source=gateway,
     )
     AgentWorker(gateway, orchestrator).run_once()
 

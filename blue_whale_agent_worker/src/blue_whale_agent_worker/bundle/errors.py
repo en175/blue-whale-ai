@@ -20,6 +20,12 @@ BUNDLE_RESOURCE_UNKNOWN = "BUNDLE_RESOURCE_UNKNOWN"
 BUNDLE_RESOURCE_DIGEST_MISMATCH = "BUNDLE_RESOURCE_DIGEST_MISMATCH"
 # 发布快照结构损坏：必需字段缺失 / 类型不符 / Run pin 指向对象不在快照内。
 BUNDLE_SNAPSHOT_MALFORMED = "BUNDLE_SNAPSHOT_MALFORMED"
+# 已固定 Creative Skill 版本的正文或引用资源字节缺失（契约 §8：100311，fail closed）。
+# Creative Skill 独立于 Runtime Bundle，但其读取错误同样经 BundleError → Orchestrator
+# _failure 通道归一化为 commit error.code（不并入 Bundle manifest）。
+CREATIVE_SKILL_CONTENT_MISSING = "CREATIVE_SKILL_CONTENT_MISSING"
+# Creative Skill 读取内容摘要与固定摘要不符（契约 §8：100312，fail closed）。
+CREATIVE_SKILL_DIGEST_MISMATCH = "CREATIVE_SKILL_DIGEST_MISMATCH"
 
 
 class BundleError(Exception):
