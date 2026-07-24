@@ -66,6 +66,10 @@ public class RestExceptionConfig {
                 ? HttpStatus.CONFLICT
                 : exception.code() == SystemCode.CREATIVE_SKILL_SELECTION_NOT_ALLOWED_CODE
                 ? HttpStatus.CONFLICT
+                : exception.code() == SystemCode.CREATIVE_SKILL_NOT_A_CANDIDATE_CODE
+                ? HttpStatus.CONFLICT
+                : exception.code() == SystemCode.CREATIVE_SKILL_ALREADY_ACTIVATED_CODE
+                ? HttpStatus.CONFLICT
                 : exception.code() == SystemCode.CREATIVE_SKILL_UNAVAILABLE_CODE
                 ? HttpStatus.NOT_FOUND
                 : exception.code() == SystemCode.CREATIVE_SKILL_VERSION_UNAVAILABLE_CODE

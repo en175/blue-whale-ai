@@ -18,6 +18,7 @@ public record RunWorkResponse(
         String modelProfileId,
         String modelProfileVersion,
         Object activatedCreativeSkillVersions,
+        Object autoCreativeSkillCandidates,
         List<RunMessage> messages,
         Checkpoint checkpoint,
         List<AcceptedResult> acceptedResults,

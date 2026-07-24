@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS agent_runs
     model_profile_id VARCHAR(80) NULL,
     model_profile_version VARCHAR(64) NULL,
     activated_creative_skill_versions CLOB NULL,
+    auto_creative_skill_candidates CLOB NULL,
     tool_grants CLOB NULL,
     current_checkpoint_id BIGINT NULL,
     confirmed_input_request_id BIGINT NULL,
@@ -766,4 +767,23 @@ CREATE TABLE IF NOT EXISTS creative_skill_version
     gmt_modified              DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_creative_skill_version_id UNIQUE (creative_skill_version_id),
     CONSTRAINT uk_creative_skill_version_semver UNIQUE (creative_skill_id, display_version)
+);
+
+-- Creative Skill auto 激活幂等记账（V18 镜像，IK3NPF）。同 (agent_run_id, idempotency_key)
+-- 逐字节回放首次接纳响应（契约 §4.4）；CLOB 代 JSON，去 MySQL 专有 ENGINE/ON UPDATE 语法。
+CREATE TABLE IF NOT EXISTS run_creative_skill_activations
+(
+    id                        BIGINT PRIMARY KEY AUTO_INCREMENT,
+    agent_run_id              BIGINT      NOT NULL,
+    idempotency_key           VARCHAR(64) NOT NULL,
+    request_hash              VARCHAR(64) NOT NULL,
+    response_json             CLOB        NOT NULL,
+    run_version               INT         NOT NULL,
+    creative_skill_id         VARCHAR(80) NOT NULL,
+    creative_skill_version_id VARCHAR(80) NOT NULL,
+    gmt_create                DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified              DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version                   INT         NOT NULL DEFAULT 0,
+    is_delete                 TINYINT     NOT NULL DEFAULT 0,
+    CONSTRAINT uk_run_csa UNIQUE (agent_run_id, idempotency_key)
 );

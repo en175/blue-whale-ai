@@ -1,5 +1,7 @@
 package com.blue.whale.agent.controller;
 
+import com.blue.whale.agent.model.dto.ActivateCreativeSkillRequest;
+import com.blue.whale.agent.model.dto.ActivateCreativeSkillResponse;
 import com.blue.whale.agent.model.dto.RunCommitRequest;
 import com.blue.whale.agent.model.dto.RunCommitResponse;
 import com.blue.whale.agent.model.dto.RunWorkResponse;
@@ -56,6 +58,14 @@ public class AgentRunWorkerController {
             @RequestHeader(value = "X-Worker-Id", required = false) String workerId,
             @RequestBody @Valid RunCommitRequest request) {
         return Result.ok(workerService.commit(runId, workerId, request));
+    }
+
+    @PostMapping("/{runId}/creative-skill-activations")
+    public Result<ActivateCreativeSkillResponse> activateCreativeSkill(
+            @PathVariable Long runId,
+            @RequestHeader(value = "X-Worker-Id", required = false) String workerId,
+            @RequestBody @Valid ActivateCreativeSkillRequest request) {
+        return Result.ok(workerService.activate(runId, workerId, request));
     }
 
     @GetMapping("/{runId}/conversation/history")
