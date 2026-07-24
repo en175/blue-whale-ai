@@ -6,13 +6,17 @@ from urllib.request import Request, urlopen
 
 from .contracts import (
     AcceptedActionResult,
+    ActivateCreativeSkillRequest,
+    ActivateCreativeSkillResponse,
     AgentRunConflictError,
     AutoCreativeSkillCandidate,
     CreativeSkillActivation,
+    CreativeSkillActivationError,
     RunWork,
     RuntimeCheckpoint,
     StreamAttemptExhaustedError,
     ToolGrant,
+    _MATCHED_FIELDS,
 )
 
 __all__ = [
@@ -32,6 +36,20 @@ AGENT_RUN_CONFLICT_CODE = 100303
 # Java SystemCode.ASSISTANT_STREAM_ATTEMPT_EXHAUSTED（100305，IK3GIM）：同一 AgentRun 的
 # 回复流尝试额度（2 次）已用尽——Worker 不得再次调用模型，应提交规范化失败。
 ASSISTANT_STREAM_ATTEMPT_EXHAUSTED_CODE = 100305
+
+# Creative Skill 激活端点业务码（契约 §8）→ 稳定符号名。100303（AGENT_RUN_CONFLICT）
+# 单独映射为 AgentRunConflictError（确定性退出，复用现有 Worker 冲突处理）；下列激活
+# 确定性拒绝映射为 CreativeSkillActivationError（error commit fail closed，崩溃重试会
+# 无限循环）。100311 / 100312（正文 / 摘要不符，500）只在正文读取路径出现，走 BundleError，
+# 不经激活端点返回，故不在此映射。
+_ACTIVATION_ERROR_CODES = {
+    100302: "IDEMPOTENCY_KEY_REUSED",
+    100306: "CREATIVE_SKILL_UNAVAILABLE",
+    100307: "CREATIVE_SKILL_VERSION_UNAVAILABLE",
+    100308: "CREATIVE_SKILL_SELECTION_NOT_ALLOWED",
+    100309: "CREATIVE_SKILL_NOT_A_CANDIDATE",
+    100310: "CREATIVE_SKILL_ALREADY_ACTIVATED",
+}
 
 
 def _optional_str(value: Any) -> Optional[str]:
@@ -60,13 +78,6 @@ _DISPLAY_VERSION_RE = re.compile(
     r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
-)
-# auto reason.detail.matched_fields 的封闭枚举（契约 §4.3）。
-_MATCHED_FIELDS = (
-    "conversation_messages",
-    "conversation_summary",
-    "canvas_nodes",
-    "project_metadata",
 )
 
 
@@ -124,6 +135,30 @@ def _activation_from(item: Any) -> CreativeSkillActivation:
         source=source,
         reason=dict(item["reason"]),
         resource_digest=resource_digest,
+    )
+
+
+def _activation_response_from(data: Any) -> ActivateCreativeSkillResponse:
+    """§5 接纳响应强类型解析（镜像 ``_activation_from`` 风格，复用其 reason / 身份校验）。
+
+    ``accepted`` 恒 ``true``（拒绝走标准错误通道，已在 ``activate_creative_skill`` 映射为
+    CreativeSkillActivationError）；``run_version`` 整数 ≥1；``activation`` 复用
+    ``_activation_from`` 按 frozen schema 强类型校验（additionalProperties:false）。
+    任一不符 raise → 调用方崩溃重试（响应形态违约，瞬态）。
+    """
+    if not isinstance(data, dict):
+        raise ValueError("激活接纳响应不是对象")
+    if set(data.keys()) != {"accepted", "activation", "run_version"}:
+        raise ValueError("激活接纳响应字段不匹配冻结 schema")
+    if data["accepted"] is not True:
+        raise ValueError("激活接纳响应 accepted 必须为 true")
+    run_version = data["run_version"]
+    if not isinstance(run_version, int) or run_version < 1:
+        raise ValueError("激活接纳响应 run_version 非法")
+    return ActivateCreativeSkillResponse(
+        accepted=True,
+        activation=_activation_from(data["activation"]),
+        run_version=run_version,
     )
 
 
@@ -404,6 +439,54 @@ class JavaRunGateway:
             f"/internal/agent-runs/{run_id}/creative-skill-references/{resource_path}",
             method="GET",
         )
+
+    def activate_creative_skill(
+        self, run_id: int, request: ActivateCreativeSkillRequest
+    ) -> ActivateCreativeSkillResponse:
+        """POST /internal/agent-runs/{runId}/creative-skill-activations（契约 §5）。
+
+        不复用 ``_request`` 的错误处理：激活端点的确定性拒绝必须按契约 §8 分级——
+        100303（AGENT_RUN_CONFLICT）映射为 AgentRunConflictError（确定性退出，Run 已终态 /
+        版本冲突）；``_ACTIVATION_ERROR_CODES`` 内的码（NOT_A_CANDIDATE / KEY_REUSED /
+        ALREADY_ACTIVATED / UNAVAILABLE / VERSION_UNAVAILABLE / SELECTION_NOT_ALLOWED）
+        映射为 CreativeSkillActivationError（error commit fail closed，崩溃重试会无限循环）；
+        其余 enveloped / 非 409-404 / 网络异常维持 RuntimeError（瞬态崩溃重试）。
+        成功响应经 ``_activation_response_from`` 强类型解析（含权威 resource_digest）。
+        """
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-Worker-Id": self._worker_id,
+            "X-Orchestrator-Engine": self._orchestrator_engine,
+        }
+        raw = json.dumps(request.to_payload(), ensure_ascii=False).encode("utf-8")
+        http_request = Request(
+            f"{self._base_url}/internal/agent-runs/{run_id}/creative-skill-activations",
+            data=raw,
+            method="POST",
+            headers=headers,
+        )
+        try:
+            with urlopen(http_request, timeout=30) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except HTTPError as error:
+            detail = error.read().decode("utf-8")
+            envelope_code = _envelope_code(detail)
+            if envelope_code == AGENT_RUN_CONFLICT_CODE:
+                raise AgentRunConflictError(
+                    f"Java Product API 返回 HTTP 409（AGENT_RUN_CONFLICT）: {detail}"
+                ) from error
+            if envelope_code in _ACTIVATION_ERROR_CODES:
+                raise CreativeSkillActivationError(
+                    _ACTIVATION_ERROR_CODES[envelope_code],
+                    f"Creative Skill 激活被 Java 拒绝: {detail}",
+                ) from error
+            raise RuntimeError(
+                f"Java Product API 返回 HTTP {error.code}: {detail}"
+            ) from error
+        if result.get("code") != 200 or not isinstance(result.get("data"), dict):
+            raise RuntimeError(result.get("msg") or "Java Product API 拒绝激活请求")
+        return _activation_response_from(result["data"])
 
     def _request(
         self,

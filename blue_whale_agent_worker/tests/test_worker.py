@@ -8,7 +8,13 @@ from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
 from blue_whale_agent_worker.contracts import (
     AcceptedActionResult,
+    ActivateCreativeSkillRequest,
+    ActivateCreativeSkillResponse,
     AgentRunConflictError,
+    AutoCreativeSkillCandidate,
+    AutoCreativeSkillSelection,
+    CreativeSkillActivation,
+    CreativeSkillActivationError,
     OrchestratorResult,
     RunWork,
     RuntimeCheckpoint,
@@ -87,6 +93,78 @@ class _StaticOrchestrator:
             emit_chunk=emit_chunk,
         )
         return self._result
+
+
+_AUTO_DIGEST = "sha256:" + "0123456789abcdef" * 4
+
+
+def _auto_candidate_work(**overrides) -> RunWork:
+    """带单个 auto 候选的 work（IK3NPH），run_version=3（激活前）。"""
+    fields = dict(
+        agent_run_id=23,
+        project_id=7,
+        conversation_id=11,
+        user_id=10,
+        run_version=3,
+        fencing_token=4,
+        engine="fake",
+        engine_version="1",
+        adapter_schema_version=1,
+        messages=({"role": "user", "content": "做一张海报"},),
+        checkpoint=None,
+        auto_creative_skill_candidates=(
+            AutoCreativeSkillCandidate(
+                creative_skill_id="cs_poster_design",
+                creative_skill_version_id="csv_poster_design_1_0_0",
+                name="poster-design",
+                description="海报设计创作方法。",
+                display_version="1.0.0",
+                resource_digest=_AUTO_DIGEST,
+            ),
+        ),
+    )
+    fields.update(overrides)
+    return RunWork(**fields)
+
+
+def _accepted_activation(run_version: int = 4) -> ActivateCreativeSkillResponse:
+    return ActivateCreativeSkillResponse(
+        accepted=True,
+        activation=CreativeSkillActivation(
+            creative_skill_id="cs_poster_design",
+            creative_skill_version_id="csv_poster_design_1_0_0",
+            source="auto",
+            reason={
+                "type": "agent_match",
+                "detail": {"matched_fields": ["canvas_nodes"]},
+            },
+            resource_digest=_AUTO_DIGEST,
+        ),
+        run_version=run_version,
+    )
+
+
+class _SelectOrchestrator(_StaticOrchestrator):
+    """可控 select_auto_creative_skill 的编排器桩（IK3NPH）：select 返回注入的选择，
+    或在 select_error 非空时抛（验证 §4.2.5 选择阶段 fail closed）。advance 复用
+    _StaticOrchestrator 的固定可见文本。"""
+
+    def __init__(
+        self,
+        result: OrchestratorResult,
+        selection: AutoCreativeSkillSelection,
+        select_error: BaseException | None = None,
+    ) -> None:
+        super().__init__(result)
+        self._selection = selection
+        self._select_error = select_error
+        self.select_calls = 0
+
+    async def select_auto_creative_skill(self, work: RunWork) -> AutoCreativeSkillSelection:
+        self.select_calls += 1
+        if self._select_error is not None:
+            raise self._select_error
+        return self._selection
 
 
 class _ConflictAtCommitGateway(RecordingRunGateway):
@@ -702,6 +780,152 @@ class WorkerCommitChannelIntegrityTest(unittest.TestCase):
         )
         # 证据不含资源正文。
         self.assertNotIn(REF_BODY, json.dumps(evidence, ensure_ascii=False))
+
+
+class WorkerAutoCreativeSkillActivationTest(unittest.TestCase):
+    """auto 选择 + 激活前置独立阶段（契约 §4.2/§4.4/§5，IK3NPH）：激活在 start 前、
+    commit 用新 run_version；零选择 / 已激活跳过；激活拒绝 fail closed（无流）；
+    冲突确定性退出；传输错崩溃重试；幂等键确定性。"""
+
+    @staticmethod
+    def _selected(work: RunWork) -> AutoCreativeSkillSelection:
+        return AutoCreativeSkillSelection(
+            chosen=work.auto_creative_skill_candidates[0],
+            matched_fields=("canvas_nodes",),
+        )
+
+    def test_activate_precedes_start_and_commit_uses_new_run_version(self) -> None:
+        work = _auto_candidate_work(run_version=3)
+        gateway = RecordingRunGateway(work)
+        gateway.activation_response = _accepted_activation(run_version=4)
+        AgentWorker(
+            gateway, _SelectOrchestrator(_static_result(), self._selected(work))
+        ).run_once()
+
+        self.assertEqual(
+            ["activate", "start", "chunk", "complete", "commit"],
+            [op[0] for op in gateway.operations],
+        )
+        activate_request = gateway.operations[0][2]
+        # 激活用激活前 run_version（乐观并发，契约 §5）
+        self.assertEqual(3, activate_request.expected_run_version)
+        self.assertEqual("cs_poster_design", activate_request.creative_skill_id)
+        self.assertEqual(
+            ["canvas_nodes"], activate_request.reason["detail"]["matched_fields"]
+        )
+        # commit 用激活接纳后的新 run_version（整条流式用一致新版本，避免断裂）
+        self.assertEqual(4, gateway.commit_payload["expected_run_version"])
+
+    def test_zero_selection_skips_activation_and_proceeds_to_basic_generation(self) -> None:
+        work = _auto_candidate_work()
+        gateway = RecordingRunGateway(work)
+        AgentWorker(
+            gateway,
+            _SelectOrchestrator(_static_result(), AutoCreativeSkillSelection(None, ())),
+        ).run_once()
+
+        self.assertEqual(
+            ["start", "chunk", "complete", "commit"],
+            [op[0] for op in gateway.operations],
+        )
+        self.assertIsNone(gateway.commit_payload["error"])
+
+    def test_already_activated_skips_selection(self) -> None:
+        work = _auto_candidate_work(
+            activated_creative_skill_versions=(_accepted_activation().activation,),
+        )
+        gateway = RecordingRunGateway(work)
+        orchestrator = _SelectOrchestrator(
+            _static_result(), AutoCreativeSkillSelection(None, ())
+        )
+        AgentWorker(gateway, orchestrator).run_once()
+
+        self.assertEqual(0, orchestrator.select_calls)  # 守卫短路，不调模型选择
+        self.assertEqual(
+            ["start", "chunk", "complete", "commit"],
+            [op[0] for op in gateway.operations],
+        )
+
+    def test_selection_failure_commits_error_without_opening_stream(self) -> None:
+        # §4.2.5：选择阶段故障（候选计算 / 传输 / 模型判断）fail closed——与 activate
+        # 被拒对称走 error commit，不开流、不崩溃重试（确定性违约会在同一上下文无限循环）。
+        work = _auto_candidate_work()
+        gateway = RecordingRunGateway(work)
+        orchestrator = _SelectOrchestrator(
+            _static_result(),
+            AutoCreativeSkillSelection(None, ()),
+            select_error=RuntimeError("provider down"),
+        )
+        AgentWorker(gateway, orchestrator).run_once()
+
+        self.assertEqual(["commit"], [op[0] for op in gateway.operations])
+        self.assertEqual(
+            "ORCHESTRATION_FAILED", gateway.commit_payload["error"]["code"]
+        )
+        self.assertNotIn("assistant_message_stream_id", gateway.commit_payload)
+
+    def test_activation_rejection_commits_error_without_opening_stream(self) -> None:
+        # §4.2.5：Java 确定性拒绝 fail closed——激活在开流前，仅 error commit，无流打开。
+        work = _auto_candidate_work()
+        gateway = RecordingRunGateway(work)
+        gateway.activation_error = CreativeSkillActivationError(
+            "CREATIVE_SKILL_NOT_A_CANDIDATE", "候选外版本"
+        )
+        AgentWorker(
+            gateway, _SelectOrchestrator(_static_result(), self._selected(work))
+        ).run_once()
+
+        self.assertEqual(["activate", "commit"], [op[0] for op in gateway.operations])
+        self.assertEqual(
+            "CREATIVE_SKILL_NOT_A_CANDIDATE",
+            gateway.commit_payload["error"]["code"],
+        )
+        self.assertNotIn("assistant_message_stream_id", gateway.commit_payload)
+
+    def test_activation_conflict_exits_deterministically(self) -> None:
+        # 100303：Run 已终态 / 版本冲突 → 确定性退出（exit 0 + 一条 warn），不再提交。
+        work = _auto_candidate_work()
+        gateway = RecordingRunGateway(work)
+        gateway.activation_error = AgentRunConflictError("HTTP 409 AGENT_RUN_CONFLICT")
+        with self.assertLogs("blue_whale_agent_worker", level="WARNING") as logs:
+            AgentWorker(
+                gateway, _SelectOrchestrator(_static_result(), self._selected(work))
+            ).run_once()
+
+        self.assertEqual(["activate"], [op[0] for op in gateway.operations])
+        self.assertIsNone(gateway.committed_run_id)
+        record = json.loads(logs.records[0].getMessage())
+        self.assertEqual("agent_run_conflict", record["event"])
+
+    def test_activation_transport_error_propagates_for_crash_retry(self) -> None:
+        # 传输类错误维持崩溃重试语义（契约 §8：瞬态）。
+        work = _auto_candidate_work()
+        gateway = RecordingRunGateway(work)
+        gateway.activation_error = RuntimeError("connection reset by peer")
+        with self.assertRaises(RuntimeError):
+            AgentWorker(
+                gateway, _SelectOrchestrator(_static_result(), self._selected(work))
+            ).run_once()
+        self.assertEqual(["activate"], [op[0] for op in gateway.operations])
+
+    def test_activation_idempotency_key_is_deterministic_across_runs(self) -> None:
+        # 契约 §4.4：键确定性（run_id + 操作派生，≤64 字符），支撑发送与读响应间崩溃的重放。
+        work = _auto_candidate_work()
+        first = RecordingRunGateway(work)
+        first.activation_response = _accepted_activation()
+        AgentWorker(
+            first, _SelectOrchestrator(_static_result(), self._selected(work))
+        ).run_once()
+        reclaimed = RecordingRunGateway(work)
+        reclaimed.activation_response = _accepted_activation()
+        AgentWorker(
+            reclaimed, _SelectOrchestrator(_static_result(), self._selected(work))
+        ).run_once()
+
+        first_key = first.operations[0][2].idempotency_key
+        reclaimed_key = reclaimed.operations[0][2].idempotency_key
+        self.assertEqual(first_key, reclaimed_key)
+        self.assertLessEqual(len(first_key), 64)
 
 
 if __name__ == "__main__":

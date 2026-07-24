@@ -12,6 +12,8 @@ from blue_whale_agent_worker.bundle.canonical import manifest_digest
 from blue_whale_agent_worker.bundle.source import FakeBundleSource
 from blue_whale_agent_worker.contracts import (
     AcceptedActionResult,
+    AutoCreativeSkillCandidate,
+    AutoCreativeSkillSelection,
     CreativeSkillActivation,
     MixedStreamError,
     RunWork,
@@ -22,6 +24,7 @@ from blue_whale_agent_worker.pydantic_orchestrator import (
     ACTION_ONLY_RETRY_INSTRUCTION,
     ACTION_ONLY_RETRY_WITH_BRIDGING_INSTRUCTION,
     PydanticAIOrchestrator,
+    _ContractError,
 )
 
 
@@ -602,6 +605,60 @@ def _creative_body_response(content_digest: str = _sha256(CREATIVE_SKILL_BODY)) 
         "body": CREATIVE_SKILL_BODY,
         "content_digest": content_digest,
     }
+
+
+def selection_model(choice_fn, model_name: str = "doubao-seed-1-6"):
+    """把结构化选择夹具包装成支持 agent.run 的 FunctionModel（IK3NPH）。
+
+    ``choice_fn()`` 返回 ``(chosen_version_id, matched_fields)`` 或 None（模型显式无匹配）。
+    FunctionModel 产出一个 ``output_type=CreativeSkillChoice`` 的 final_result 工具调用，
+    工具名从 ``info.output_tools`` 取（pydantic-ai 2.9.0 结构化输出工具名约定）。
+    """
+
+    def model_fn(messages, info):
+        result = choice_fn()
+        tool_name = info.output_tools[0].name
+        if result is None:
+            args = {"chosen_version_id": None, "matched_fields": []}
+        else:
+            version_id, matched = result
+            args = {"chosen_version_id": version_id, "matched_fields": list(matched)}
+        return ModelResponse(parts=(ToolCallPart(tool_name, args, "selection-call"),))
+
+    return FunctionModel(model_fn, model_name=model_name)
+
+
+def _select(orchestrator, work):
+    """同步驱动 async select_auto_creative_skill。"""
+    return asyncio.run(orchestrator.select_auto_creative_skill(work))
+
+
+def _auto_candidate(
+    version_id: str = "csv_poster_design_1_0_0",
+) -> AutoCreativeSkillCandidate:
+    return AutoCreativeSkillCandidate(
+        creative_skill_id="cs_poster_design",
+        creative_skill_version_id=version_id,
+        name="poster-design",
+        description="海报设计创作方法。",
+        display_version="1.0.0",
+        resource_digest="sha256:" + "0123456789abcdef" * 4,
+    )
+
+
+def _auto_activation(
+    resource_digest: str = _sha256(CREATIVE_SKILL_BODY),
+) -> CreativeSkillActivation:
+    return CreativeSkillActivation(
+        creative_skill_id="cs_poster_design",
+        creative_skill_version_id="csv_poster_design_1_0_0",
+        source="auto",
+        reason={
+            "type": "agent_match",
+            "detail": {"matched_fields": ["canvas_nodes"]},
+        },
+        resource_digest=resource_digest,
+    )
 
 
 class PydanticAIOrchestratorTest(unittest.TestCase):
@@ -2930,6 +2987,182 @@ class CheckpointVersionDeterminismTest(unittest.TestCase):
             MODEL_PROFILE_VERSION,
         ):
             self.assertNotIn(pin, serialized)
+
+
+class AutoCreativeSkillSelectionTest(unittest.TestCase):
+    """auto 选择前置判定（契约 §4.2，IK3NPH）：短路零选择、模型语义判断、程序后置
+    校验 fail closed、auto 激活正文装载复用 forced 路径（source 中立）。"""
+
+    def test_empty_candidates_short_circuits_to_zero_without_model(self) -> None:
+        # §4.2.4：候选空 = 无可激活项，零选择，不调模型。
+        calls: list = []
+
+        def choice_fn():
+            calls.append(True)
+            return None
+
+        work = _pydantic_work()  # auto_creative_skill_candidates 默认空
+        selection = _select(
+            PydanticAIOrchestrator(selection_model(choice_fn), _bundle_source()), work
+        )
+        self.assertIsNone(selection.chosen)
+        self.assertEqual((), selection.matched_fields)
+        self.assertEqual(0, len(calls))
+
+    def test_already_activated_short_circuits_to_zero_without_model(self) -> None:
+        # §4.1.4：Run 已固定激活（forced 或 auto），零选择，不调模型。
+        calls: list = []
+
+        def choice_fn():
+            calls.append(True)
+            return None
+
+        work = _pydantic_work(
+            auto_creative_skill_candidates=(_auto_candidate(),),
+            activated_creative_skill_versions=(_auto_activation(),),
+        )
+        selection = _select(
+            PydanticAIOrchestrator(selection_model(choice_fn), _bundle_source()), work
+        )
+        self.assertIsNone(selection.chosen)
+        self.assertEqual(0, len(calls))
+
+    def test_selects_candidate_returns_frozen_object_with_matched_fields(self) -> None:
+        def choice_fn():
+            return ("csv_poster_design_1_0_0", ["conversation_messages", "canvas_nodes"])
+
+        work = _pydantic_work(auto_creative_skill_candidates=(_auto_candidate(),))
+        selection = _select(
+            PydanticAIOrchestrator(selection_model(choice_fn), _bundle_source()), work
+        )
+        self.assertIsNotNone(selection.chosen)
+        self.assertEqual(
+            "csv_poster_design_1_0_0", selection.chosen.creative_skill_version_id
+        )
+        # 返回冻结候选对象：name / description / resource_digest 权威来自 Run pin，
+        # 非模型原始数据（程序后置校验用候选 version_id 反查得到冻结对象）。
+        self.assertEqual("poster-design", selection.chosen.name)
+        self.assertEqual("海报设计创作方法。", selection.chosen.description)
+        self.assertEqual(
+            "sha256:" + "0123456789abcdef" * 4, selection.chosen.resource_digest
+        )
+        self.assertEqual(
+            ("conversation_messages", "canvas_nodes"), selection.matched_fields
+        )
+
+    def test_explicit_no_match_returns_zero_selection(self) -> None:
+        # 模型判定无语义匹配 → 零选择，正常基础生成（§4.2.4）。
+        def choice_fn():
+            return None
+
+        work = _pydantic_work(auto_creative_skill_candidates=(_auto_candidate(),))
+        selection = _select(
+            PydanticAIOrchestrator(selection_model(choice_fn), _bundle_source()), work
+        )
+        self.assertIsNone(selection.chosen)
+        self.assertEqual((), selection.matched_fields)
+
+    def test_choice_outside_candidates_fails_closed(self) -> None:
+        # 模型发明候选外 version_id → fail closed（不静默修正、不降级，§4.2.5）。
+        def choice_fn():
+            return ("csv_invented_9_9_9", ["canvas_nodes"])
+
+        work = _pydantic_work(auto_creative_skill_candidates=(_auto_candidate(),))
+        with self.assertRaises(_ContractError):
+            _select(
+                PydanticAIOrchestrator(selection_model(choice_fn), _bundle_source()),
+                work,
+            )
+
+    def test_invalid_matched_fields_fails_closed(self) -> None:
+        def choice_fn():
+            return ("csv_poster_design_1_0_0", ["bogus_field"])
+
+        work = _pydantic_work(auto_creative_skill_candidates=(_auto_candidate(),))
+        with self.assertRaises(_ContractError):
+            _select(
+                PydanticAIOrchestrator(selection_model(choice_fn), _bundle_source()),
+                work,
+            )
+
+    def test_duplicate_matched_fields_fails_closed(self) -> None:
+        # §4.3：matched_fields 必须去重，重复 fail closed（不静默去重修正）。
+        def choice_fn():
+            return ("csv_poster_design_1_0_0", ["canvas_nodes", "canvas_nodes"])
+
+        work = _pydantic_work(auto_creative_skill_candidates=(_auto_candidate(),))
+        with self.assertRaises(_ContractError):
+            _select(
+                PydanticAIOrchestrator(selection_model(choice_fn), _bundle_source()),
+                work,
+            )
+
+    def test_empty_matched_fields_when_chosen_fails_closed(self) -> None:
+        # §4.3：选定候选时 matched_fields 必须非空。
+        def choice_fn():
+            return ("csv_poster_design_1_0_0", [])
+
+        work = _pydantic_work(auto_creative_skill_candidates=(_auto_candidate(),))
+        with self.assertRaises(_ContractError):
+            _select(
+                PydanticAIOrchestrator(selection_model(choice_fn), _bundle_source()),
+                work,
+            )
+
+    def test_auto_activation_body_injected_same_as_forced_path(self) -> None:
+        # §6：source=auto 激活接纳后，正文装载与 forced 同走 CreativeSkillContentGate
+        # 双重 digest 校验 + 注入（source 中立，只认 resource_digest）。
+        captured: list = []
+
+        def capturing_model(messages, info):
+            captured.append(info.instructions)
+            return ModelResponse(parts=(TextPart("按 auto 激活的工作流生成。"),))
+
+        source = _FakeCreativeContentSource(body=_creative_body_response())
+        work = _pydantic_work(activated_creative_skill_versions=(_auto_activation(),))
+        result = _advance(
+            PydanticAIOrchestrator(
+                streaming_model(capturing_model), _bundle_source(),
+                creative_content_source=source,
+            ), work
+        )
+
+        self.assertIsNone(result.error)
+        self.assertEqual(1, source.body_fetches)
+        self.assertIn(CREATIVE_SKILL_BODY, captured[0])
+        self.assertIn(
+            "creative_skill_body", [entry["origin"] for entry in result.bundle_evidence]
+        )
+
+    def test_selection_prompt_carries_candidates_and_context_signals(self) -> None:
+        # 选择 prompt 三段：候选元数据（不含正文）+ 上下文信号（messages / 摘要 / 画布 / 项目）。
+        captured: list = []
+
+        def capturing_choice():
+            return None
+
+        def model_fn(messages, info):
+            captured.append(messages[-1].parts[-1].content)
+            tool_name = info.output_tools[0].name
+            return ModelResponse(
+                parts=(ToolCallPart(
+                    tool_name, {"chosen_version_id": None, "matched_fields": []},
+                    "sel-call"),)
+            )
+
+        work = _pydantic_work(
+            messages=({"role": "user", "content": "做一张海报"},),
+            auto_creative_skill_candidates=(_auto_candidate(),),
+            canvas_nodes=({"node_id": "n1", "type": "image", "asset_id": 77},),
+        )
+        _select(PydanticAIOrchestrator(FunctionModel(model_fn, model_name="doubao-seed-1-6"), _bundle_source()), work)
+        prompt = captured[0]
+        self.assertIn("csv_poster_design_1_0_0", prompt)
+        self.assertIn("poster-design", prompt)
+        self.assertIn("海报设计创作方法。", prompt)
+        self.assertIn("做一张海报", prompt)
+        self.assertIn("asset_id=77", prompt)
+        self.assertIn("project_id=7", prompt)
 
 
 if __name__ == "__main__":

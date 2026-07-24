@@ -3,6 +3,8 @@ import json
 import unittest
 
 from blue_whale_agent_worker.contracts import (
+    ActivateCreativeSkillRequest,
+    ActivateCreativeSkillResponse,
     OrchestratorResult,
     RunWork,
     RuntimeCheckpoint,
@@ -22,6 +24,11 @@ class RecordingRunGateway:
         # abort 响应（契约 §3.1 AssistantMessageStreamResponse）：默认健康 Java
         # 形态（未放行任何前缀），测试可覆盖为缺字段或异常以走兜底路径。
         self.abort_response = {"released_sequence_no": 0}
+        # auto 激活端点响应（IK3NPH）：默认 None——FakeOrchestrator 恒零选择不会触发
+        # activate；Worker auto 测试覆盖 activation_response（成功）或 activation_error
+        # （AgentRunConflictError / CreativeSkillActivationError / RuntimeError）。
+        self.activation_response: ActivateCreativeSkillResponse | None = None
+        self.activation_error: BaseException | None = None
 
     def claim(self) -> RunWork:
         return self.work
@@ -51,6 +58,15 @@ class RecordingRunGateway:
     ) -> dict | None:
         self.operations.append(("abort", run_id, payload))
         return self.abort_response
+
+    def activate_creative_skill(
+        self, run_id: int, request: ActivateCreativeSkillRequest
+    ) -> ActivateCreativeSkillResponse:
+        self.operations.append(("activate", run_id, request))
+        if self.activation_error is not None:
+            raise self.activation_error
+        assert self.activation_response is not None, "测试未配置 activation_response"
+        return self.activation_response
 
 
 class _StaticTextOrchestrator:

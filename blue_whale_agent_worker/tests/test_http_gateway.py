@@ -10,6 +10,10 @@ from blue_whale_agent_worker.http_gateway import (
     StreamAttemptExhaustedError,
     run_work_from_payload,
 )
+from blue_whale_agent_worker.contracts import (
+    ActivateCreativeSkillRequest,
+    CreativeSkillActivationError,
+)
 
 
 class FakeResponse:
@@ -645,6 +649,199 @@ class AbortContractTest(unittest.TestCase):
                     gateway.abort_assistant_message(23, {"stream_id": "stream-9"})
                 self.assertNotIsInstance(caught.exception, AgentRunConflictError)
                 self.assertNotIsInstance(caught.exception, StreamAttemptExhaustedError)
+
+
+class CreativeSkillActivationCallTest(unittest.TestCase):
+    """§5 激活命令 POST（契约 §5/§8，IK3NPH）：URL/method/header/请求体（对齐
+    activation-request-auto fixture）、接纳响应解析、错误码分级（确定性拒绝→
+    CreativeSkillActivationError；AGENT_RUN_CONFLICT→AgentRunConflictError；其余→RuntimeError）。"""
+
+    @staticmethod
+    def _request() -> ActivateCreativeSkillRequest:
+        return ActivateCreativeSkillRequest(
+            idempotency_key="act_7f3c9d2e_run_42",
+            expected_run_version=3,
+            creative_skill_id="cs_poster_design",
+            creative_skill_version_id="csv_poster_design_1_0_0",
+            reason={
+                "type": "agent_match",
+                "detail": {"matched_fields": ["conversation_messages", "canvas_nodes"]},
+            },
+        )
+
+    @staticmethod
+    def _accepted_data() -> dict:
+        return {
+            "accepted": True,
+            "activation": {
+                "creative_skill_id": "cs_poster_design",
+                "creative_skill_version_id": "csv_poster_design_1_0_0",
+                "source": "auto",
+                "reason": {
+                    "type": "agent_match",
+                    "detail": {
+                        "matched_fields": ["conversation_messages", "canvas_nodes"]
+                    },
+                },
+                "resource_digest": "sha256:" + "0123456789abcdef" * 4,
+            },
+            "run_version": 4,
+        }
+
+    @staticmethod
+    def _http_error(code: int, body: bytes) -> HTTPError:
+        return HTTPError("http://java.test/x", code, "error", None, io.BytesIO(body))
+
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_activate_posts_fixture_body_to_activation_endpoint(self, mocked_urlopen) -> None:
+        mocked_urlopen.return_value = FakeResponse(
+            json.dumps({"code": 200, "data": self._accepted_data()}).encode("utf-8")
+        )
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+
+        gateway.activate_creative_skill(23, self._request())
+
+        request = mocked_urlopen.call_args.args[0]
+        self.assertEqual(
+            "http://java.test/internal/agent-runs/23/creative-skill-activations",
+            request.full_url,
+        )
+        self.assertEqual("POST", request.method)
+        self.assertEqual("worker-1", request.get_header("X-worker-id"))
+        # 请求体逐字段对齐 activation-request-auto.json fixture（契约 §5 snake_case）
+        self.assertEqual(
+            {
+                "idempotency_key": "act_7f3c9d2e_run_42",
+                "expected_run_version": 3,
+                "creative_skill_id": "cs_poster_design",
+                "creative_skill_version_id": "csv_poster_design_1_0_0",
+                "reason": {
+                    "type": "agent_match",
+                    "detail": {
+                        "matched_fields": ["conversation_messages", "canvas_nodes"]
+                    },
+                },
+            },
+            json.loads(request.data),
+        )
+
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_activate_parses_accepted_response(self, mocked_urlopen) -> None:
+        mocked_urlopen.return_value = FakeResponse(
+            json.dumps({"code": 200, "data": self._accepted_data()}).encode("utf-8")
+        )
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+
+        response = gateway.activate_creative_skill(23, self._request())
+
+        self.assertTrue(response.accepted)
+        self.assertEqual(4, response.run_version)
+        activation = response.activation
+        self.assertEqual("cs_poster_design", activation.creative_skill_id)
+        self.assertEqual("csv_poster_design_1_0_0", activation.creative_skill_version_id)
+        self.assertEqual("auto", activation.source)
+        self.assertEqual(
+            ["conversation_messages", "canvas_nodes"],
+            activation.reason["detail"]["matched_fields"],
+        )
+        self.assertEqual(
+            "sha256:" + "0123456789abcdef" * 4, activation.resource_digest
+        )
+
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_activate_replay_returns_identical_response(self, mocked_urlopen) -> None:
+        # 契约 §4.4：同键同载重放回放首次接纳结果（activation-response-replay 与首次逐字节一致）。
+        mocked_urlopen.return_value = FakeResponse(
+            json.dumps({"code": 200, "data": self._accepted_data()}).encode("utf-8")
+        )
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+
+        first = gateway.activate_creative_skill(23, self._request())
+        second = gateway.activate_creative_skill(23, self._request())
+
+        self.assertEqual(first.run_version, second.run_version)
+        self.assertEqual(first.activation, second.activation)
+
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_activation_error_codes_map_to_creative_skill_activation_error(self, mocked_urlopen) -> None:
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+        codes = {
+            100302: "IDEMPOTENCY_KEY_REUSED",
+            100306: "CREATIVE_SKILL_UNAVAILABLE",
+            100307: "CREATIVE_SKILL_VERSION_UNAVAILABLE",
+            100308: "CREATIVE_SKILL_SELECTION_NOT_ALLOWED",
+            100309: "CREATIVE_SKILL_NOT_A_CANDIDATE",
+            100310: "CREATIVE_SKILL_ALREADY_ACTIVATED",
+        }
+        for biz_code, symbol in codes.items():
+            with self.subTest(code=biz_code):
+                mocked_urlopen.side_effect = self._http_error(
+                    409,
+                    json.dumps({"code": biz_code, "msg": symbol, "data": None}).encode("utf-8"),
+                )
+                with self.assertRaises(CreativeSkillActivationError) as caught:
+                    gateway.activate_creative_skill(23, self._request())
+                self.assertEqual(symbol, caught.exception.code)
+
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_unavailable_codes_on_404_also_fail_closed(self, mocked_urlopen) -> None:
+        # 100306/100307 是 404（契约 §8）：envelope_code 对所有 status 解析 → 同样 fail closed。
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+        for biz_code, symbol in [
+            (100306, "CREATIVE_SKILL_UNAVAILABLE"),
+            (100307, "CREATIVE_SKILL_VERSION_UNAVAILABLE"),
+        ]:
+            with self.subTest(code=biz_code):
+                mocked_urlopen.side_effect = self._http_error(
+                    404,
+                    json.dumps({"code": biz_code, "msg": symbol, "data": None}).encode("utf-8"),
+                )
+                with self.assertRaises(CreativeSkillActivationError) as caught:
+                    gateway.activate_creative_skill(23, self._request())
+                self.assertEqual(symbol, caught.exception.code)
+
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_agent_run_conflict_maps_to_dedicated_error(self, mocked_urlopen) -> None:
+        mocked_urlopen.side_effect = self._http_error(
+            409,
+            json.dumps({"code": 100303, "msg": "AgentRun 状态冲突", "data": None}).encode("utf-8"),
+        )
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+
+        with self.assertRaises(AgentRunConflictError):
+            gateway.activate_creative_skill(23, self._request())
+
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_other_errors_stay_runtime_error(self, mocked_urlopen) -> None:
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+        cases = [
+            self._http_error(500, b"oops"),
+            self._http_error(409, b"<html>proxy</html>"),
+        ]
+        for error in cases:
+            with self.subTest(code=error.code):
+                mocked_urlopen.side_effect = error
+                with self.assertRaises(RuntimeError) as caught:
+                    gateway.activate_creative_skill(23, self._request())
+                self.assertNotIsInstance(caught.exception, AgentRunConflictError)
+                self.assertNotIsInstance(caught.exception, CreativeSkillActivationError)
+
+    @patch("blue_whale_agent_worker.http_gateway.urlopen")
+    def test_malformed_response_strongly_rejected(self, mocked_urlopen) -> None:
+        gateway = JavaRunGateway("http://java.test", "worker-1", "fake")
+        bad_datas = [
+            {"accepted": False, "activation": self._accepted_data()["activation"], "run_version": 4},
+            {"accepted": True, "activation": {}, "run_version": 4},
+            {"accepted": True, "activation": self._accepted_data()["activation"], "run_version": 0},
+            {"accepted": True, "run_version": 4},
+        ]
+        for data in bad_datas:
+            with self.subTest(data=data):
+                mocked_urlopen.return_value = FakeResponse(
+                    json.dumps({"code": 200, "data": data}).encode("utf-8")
+                )
+                with self.assertRaises((ValueError, RuntimeError)):
+                    gateway.activate_creative_skill(23, self._request())
 
 
 if __name__ == "__main__":

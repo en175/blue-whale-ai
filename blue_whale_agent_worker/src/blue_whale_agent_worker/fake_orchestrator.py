@@ -1,4 +1,5 @@
 from .contracts import (
+    AutoCreativeSkillSelection,
     ChunkSink,
     OrchestratorResult,
     ProposedAction,
@@ -15,6 +16,11 @@ CLARIFICATION_PREFIX = "澄清:"
 
 class FakeOrchestrator:
     """用于契约测试和本地闭环的显式 Fake，不是生产默认 Adapter。"""
+
+    async def select_auto_creative_skill(self, work: RunWork) -> AutoCreativeSkillSelection:
+        # Fake 显式不做 auto（契约 §4.2 / 本地闭环测试用）：恒返回零选择，基础生成。
+        # auto 语义选择是生产 PydanticAIOrchestrator 的职责，Fake 只驱动契约形态。
+        return AutoCreativeSkillSelection(None, ())
 
     async def advance(
         self,
