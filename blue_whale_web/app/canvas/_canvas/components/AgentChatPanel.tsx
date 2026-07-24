@@ -10,6 +10,8 @@ import SkillPanel, { type UseSkillSelection } from "@/components/SkillPanel";
 import { squirclePath } from "../utils";
 import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
 import { ComposerShell, ModelSettingsMenu } from "./Composer";
+import { SkillRecommendationSection } from "./SkillRecommendationSection";
+import type { CreativeSkillRecommendation } from "@/components/api/skills";
 import {
   UserMessageBubble,
   AgentMessageBubble,
@@ -42,6 +44,8 @@ export function AgentChatPanel({
   prompt,
   forcedSkillName,
   answerableActive,
+  skillRecommendations,
+  skillRecommendationsLoading,
 }: {
   /** 受控消息流：来自当前 Project.messages（切换项目随 key remount 更换） */
   messages: ChatMessage[];
@@ -68,6 +72,10 @@ export function AgentChatPanel({
   forcedSkillName?: string | null;
   /** 是否存在可回答创作澄清（true 时 forced 与 reply 互斥，pending 保留不清） */
   answerableActive?: boolean;
+  /** 当前 Run 的 Creative Skill 推荐列表（IK3NPI）；未传则不渲染推荐区 */
+  skillRecommendations?: CreativeSkillRecommendation[];
+  /** 推荐列表拉取中（仅配合 skillRecommendations 展示加载态） */
+  skillRecommendationsLoading?: boolean;
 }) {
   const [composerEmpty, setComposerEmpty] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -566,6 +574,13 @@ export function AgentChatPanel({
             className="tc-agent-chat-body tc-panel-textarea-scrollbar flex flex-col gap-2 overflow-y-auto overflow-x-hidden px-3 py-2"
             style={{ flex: "1 1 0%", minHeight: 0 }}
           >
+            {skillRecommendations !== undefined && (
+              <SkillRecommendationSection
+                recommendations={skillRecommendations}
+                loading={skillRecommendationsLoading ?? false}
+                onUse={handleUseSkill}
+              />
+            )}
             {messages.map((msg) => {
               if (msg.type === "user")
                 return <UserMessageBubble key={msg.id} text={msg.text} />;

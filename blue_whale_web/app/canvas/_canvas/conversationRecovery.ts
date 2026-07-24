@@ -226,6 +226,27 @@ function generationAspectRatio(input: unknown): string {
 }
 
 /**
+ * 取当前 Run 的 agent_run_id（数值最大者）。
+ *
+ * 当前 Run 语义：新消息创建的 run id 严格递增取最大，supersede 产生更高 id 接管。
+ * 空数组 / 无有效 id 返回 null。
+ */
+export function selectCurrentRunId(
+  runs: Array<Record<string, unknown>>,
+): number | null {
+  if (!Array.isArray(runs) || runs.length === 0) return null;
+  let latestId = -Infinity;
+  for (const run of runs) {
+    const id = run.agent_run_id;
+    if (typeof id !== "number" && typeof id !== "string") continue;
+    const numeric = typeof id === "number" ? id : Number(id);
+    if (!Number.isFinite(numeric)) continue;
+    if (numeric > latestId) latestId = numeric;
+  }
+  return latestId === -Infinity ? null : latestId;
+}
+
+/**
  * 取当前 Run（agent_run_id 最大）已激活的 Creative Skill 稳定身份。
  *
  * activated_creative_skill_versions 是 0/1 数组（契约 §3）；取首项 creative_skill_id。
@@ -235,19 +256,9 @@ function generationAspectRatio(input: unknown): string {
 export function selectCurrentRunCreativeSkillId(
   runs: Array<Record<string, unknown>>,
 ): string | null {
-  if (!Array.isArray(runs) || runs.length === 0) return null;
-  let latest: Record<string, unknown> | null = null;
-  let latestId = -Infinity;
-  for (const run of runs) {
-    const id = run.agent_run_id;
-    if (typeof id !== "number" && typeof id !== "string") continue;
-    const numeric = typeof id === "number" ? id : Number(id);
-    if (!Number.isFinite(numeric)) continue;
-    if (numeric > latestId) {
-      latestId = numeric;
-      latest = run;
-    }
-  }
+  const currentRunId = selectCurrentRunId(runs);
+  if (currentRunId === null) return null;
+  const latest = runs.find((run) => Number(run.agent_run_id) === currentRunId);
   if (!latest) return null;
   const versions = latest.activated_creative_skill_versions;
   if (!Array.isArray(versions) || versions.length === 0) return null;

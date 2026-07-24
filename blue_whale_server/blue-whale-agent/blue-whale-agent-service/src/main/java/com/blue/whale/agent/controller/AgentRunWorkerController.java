@@ -12,7 +12,7 @@ import com.blue.whale.agent.model.dto.CanvasNodeDetail;
 import com.blue.whale.agent.model.dto.CanvasNodesResponse;
 import com.blue.whale.agent.model.dto.ConversationHistoryResponse;
 import com.blue.whale.agent.model.dto.ConversationSummaryResponse;
-import com.blue.whale.agent.model.dto.CreativeSkillResponse;
+import com.blue.whale.agent.model.dto.CreativeSkillRecommendationResponse;
 import com.blue.whale.agent.model.dto.CreativeSkillBodyResponse;
 import com.blue.whale.agent.model.dto.CreativeSkillReferenceResourceResponse;
 import com.blue.whale.agent.model.dto.GenerationJobStatusResponse;
@@ -117,7 +117,7 @@ public class AgentRunWorkerController {
     }
 
     @GetMapping("/{runId}/creative-skills")
-    public Result<List<CreativeSkillResponse>> listCreativeSkills(
+    public Result<List<CreativeSkillRecommendationResponse>> listCreativeSkills(
             @PathVariable Long runId,
             @RequestHeader(value = "X-Worker-Id", required = false) String workerId) {
         return Result.ok(creativeContextQueryService.listCreativeSkills(runId, workerId));
