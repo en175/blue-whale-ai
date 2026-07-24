@@ -285,17 +285,27 @@ function CanvasV2ProjectInner() {
       if (!file || !pid) return;
       e.target.value = "";
       const kind = detectMediaKind(file);
+      // 读 file 原始尺寸（本地 createObjectURL，快），占位节点按原尺寸
+      const blobUrl = URL.createObjectURL(file);
+      let size: { width: number; height: number };
       try {
-        const result = await uploadAsset(file, Number(pid), kind);
-        const size = await readMediaNaturalSize(result.url, kind);
+        size = await readMediaNaturalSize(blobUrl, kind);
+      } catch {
+        size = { width: 256, height: 200 };
+      }
+      URL.revokeObjectURL(blobUrl);
+      // 先占位 loading 节点（原尺寸 + 实时进度，图片/音频/视频统一，IK3PKB）
+      const nodeId = addNode(kind, { width: size.width, height: size.height, data: { content: file.name, status: "running", progress: 0, recipe: { origin: "uploaded" } } });
+      try {
+        const result = await uploadAsset(file, Number(pid), kind, (pct) => patchNode(nodeId, { progress: pct }));
         const aid = String(result.id);
         addAsset({ id: aid, kind, src: result.url, source: "uploaded" });
-        addNode(kind, { width: size.width, height: size.height, data: { content: file.name, status: "done", assetId: aid, recipe: { origin: "uploaded" } } });
+        patchNode(nodeId, { status: "done", progress: undefined, assetId: aid });
       } catch (err) {
-        setGenerateError(userFriendlyErrorMessage(err));
+        patchNode(nodeId, { status: "error", progress: undefined, errorMessage: userFriendlyErrorMessage(err) });
       }
     },
-    [addNode, addAsset, pid, setGenerateError],
+    [addNode, addAsset, patchNode, pid],
   );
 
   const handleDockLocalUpload = useCallback(

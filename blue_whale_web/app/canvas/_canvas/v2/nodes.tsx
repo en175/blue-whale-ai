@@ -225,9 +225,10 @@ type MediaStateBodyProps = {
   content?: string;
   errorMessage?: string;
   progress?: number;
+  origin?: string;
   onRetry?: () => void;
 };
-export function MediaStateBody({ kind, status, src, content, errorMessage, progress, onRetry }: MediaStateBodyProps) {
+export function MediaStateBody({ kind, status, src, content, errorMessage, progress, origin, onRetry }: MediaStateBodyProps) {
   if (status === "error") {
     return (
       <div data-testid="node-error" className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center" style={{ color: "var(--tc-text-secondary)" }}>
@@ -240,11 +241,12 @@ export function MediaStateBody({ kind, status, src, content, errorMessage, progr
     );
   }
   if (status === "running") {
-    const showProgress = kind === "video" && typeof progress === "number" && progress >= 0;
+    const showProgress = typeof progress === "number" && progress >= 0;
+    const label = origin === "uploaded" ? "上传中" : "生成中";
     return (
       <div data-testid="node-loading" className="flex h-full w-full flex-col items-center justify-center gap-2" style={{ color: "var(--tc-text-secondary)" }}>
         <Loader2 width={28} height={28} stroke="currentColor" strokeWidth={1.5} className="animate-spin" />
-        <span className="text-xs leading-4" style={{ color: "var(--tc-text-tertiary)" }}>{showProgress ? `生成中 ${Math.round(progress as number)}%` : "生成中…"}</span>
+        <span className="text-xs leading-4" style={{ color: "var(--tc-text-tertiary)" }}>{showProgress ? `${label} ${Math.round(progress as number)}%` : `${label}…`}</span>
       </div>
     );
   }
@@ -343,7 +345,7 @@ export function MediaNode({ id, data, width, height, selected }: NodeProps) {
             <span className="tc-node-label-bar__name relative inline-block max-w-[216px] cursor-text overflow-hidden text-ellipsis whitespace-nowrap">{d.content || `${d.kind}节点`}</span>
           </div>
         </div>
-        <MediaStateBody kind={renderKind} status={d.status} src={src} content={d.content} errorMessage={d.errorMessage} progress={d.progress} onRetry={() => onRetry?.(id)} />
+        <MediaStateBody kind={renderKind} status={d.status} src={src} content={d.content} errorMessage={d.errorMessage} progress={d.progress} origin={d.recipe?.origin as string | undefined} onRetry={() => onRetry?.(id)} />
         {promptFromText && (
           <div className="nodrag absolute -bottom-7 left-0 max-w-full truncate rounded px-1.5 py-0.5 text-[10px] leading-tight" style={{ background: "var(--tc-bg-surface)", color: "var(--tc-text-tertiary)", border: "1px solid var(--tc-border-subtle)" }}>
             <Sparkles width={9} height={9} className="mr-0.5 inline-block align-text-bottom" />

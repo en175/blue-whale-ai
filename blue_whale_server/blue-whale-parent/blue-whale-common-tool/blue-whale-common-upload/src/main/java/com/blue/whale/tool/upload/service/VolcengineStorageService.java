@@ -1,12 +1,16 @@
 package com.blue.whale.tool.upload.service;
 
+import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
+import com.blue.whale.tool.upload.model.ObjectHead;
 import com.blue.whale.tool.upload.model.OssConfig;
 import com.volcengine.tos.TOSV2;
 import com.volcengine.tos.TOSV2ClientBuilder;
 import com.volcengine.tos.TosClientException;
 import com.volcengine.tos.TosServerException;
 import com.volcengine.tos.comm.common.ACLType;
+import com.volcengine.tos.model.object.HeadObjectV2Input;
+import com.volcengine.tos.model.object.HeadObjectV2Output;
 import com.volcengine.tos.model.object.ObjectMetaRequestOptions;
 import com.volcengine.tos.model.object.PutObjectInput;
 import com.volcengine.tos.model.object.PutObjectOutput;
@@ -105,6 +109,35 @@ public class VolcengineStorageService extends AbstractStorageService {
             throw new GlobalException("上传文件失败，未知错误: " + t.getMessage(), t);
         }
         return config.getDomain() + "/" + path;
+    }
+
+    /**
+     * HEAD 对象元信息，commit 校验用（确认对象存在 + size + content-type）。
+     *
+     * <p>TODO(IK3PKB): {@code HeadObjectV2Input}/{@code HeadObjectV2Output} 及
+     * {@code getContentLength}/{@code getContentType} 以 ve-tos-java-sdk 实际版本为准核实；
+     * 配好 TOS 凭证后联调校正。当前按 TOSV2 命名规范（XxxV2Input/Output）编写。</p>
+     */
+    @Override
+    public ObjectHead headObject(String key) {
+        try {
+            HeadObjectV2Input input = new HeadObjectV2Input()
+                    .setBucket(config.getBucketName())
+                    .setKey(key);
+            HeadObjectV2Output output = client.headObject(input);
+            return new ObjectHead(true, output.getContentLength(), output.getContentType());
+        } catch (TosServerException e) {
+            if (e.getStatusCode() == 404) {
+                return new ObjectHead(false, null, null);
+            }
+            log.error("TOS headObject 服务端错误: bucket={}, key={}, status={}, code={}, requestId={}",
+                    config.getBucketName(), key, e.getStatusCode(), e.getCode(), e.getRequestID(), e);
+            throw new GlobalException(SystemCode.ASSET_UNAVAILABLE_CODE,
+                    String.format("校验对象失败(status=%d, code=%s)", e.getStatusCode(), e.getCode()));
+        } catch (TosClientException e) {
+            log.error("TOS headObject 客户端错误: bucket={}, key={}", config.getBucketName(), key, e);
+            throw new GlobalException(SystemCode.ASSET_UNAVAILABLE_CODE, "校验对象失败: " + e.getMessage());
+        }
     }
 
     @Override
