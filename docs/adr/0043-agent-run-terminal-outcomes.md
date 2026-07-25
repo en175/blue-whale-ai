@@ -3,6 +3,7 @@
 - **状态**：Accepted
 - **日期**：2026-07-23
 - **决策者**：用户（触发工单：IK3BG2 实现任意多次澄清与 Run 三种收场规范化）
+- **Node 目标架构修订**：[ADR-0046 调用错误证据、执行权与 AgentRun 终态分离](0046-runtime-error-evidence-policy-and-terminal-boundary.md)
 
 ## 背景
 

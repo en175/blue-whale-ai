@@ -196,8 +196,8 @@ _Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeIt
 多轮对话暂停并恢复，终态不可重开，后续修订或无关新目标创建关联的新 AgentRun。
 收场只有三种规范化终态（ADR-0043）：`completed`（模型给出无动作提议的收尾轮，零动作 commit
 无条件合法）、`superseded`（被同 Conversation 新目标取代——fencing token 递增、释放租约，在途旧
-Worker 后续 commit 收 409 并确定性退出）、`failed`（Worker 错误 commit 接纳为终态，error_code /
-error_message 落列归因）；checkpoint 损坏隔离的 `recovery_failed` 同属终态。
+Worker 后续 commit 收 409 并确定性退出）、`failed`（Product API 通过 RunCommit 接纳符合
+RuntimeErrorPolicy 的 AgentRunFailure）；checkpoint 损坏隔离的 `recovery_failed` 同属终态。
 其生命周期状态只表达运行、等待及终态；理解素材、选择技能、规划和生成等属于独立的展示阶段。
 AgentRun 可关联多个 GenerationJob 及其输出用途，但不拥有 Job 的执行生命周期；恢复时吸收
 Job 已持久化的结果事实。创建时固定 Runtime Agent Bundle 与 ModelProfile；Creative Skill
@@ -301,6 +301,7 @@ _Avoid_: 只按 checkpoint 推导 `advance_id`、每次 claim 生成新身份、
 **RunCommit（运行提交）**:
 Product API 接纳 AgentRun 推进事实的唯一边界：每个 AgentAdvance 只允许接纳一个 RunCommit，以 Product API 分配的 `advance_id` 作为语义幂等身份并校验规范化请求摘要；同轮次同摘要回放首次结果，同轮次不同摘要 fail closed。请求携带 RuntimeCheckpoint、一个判别式下一状态，以及可选的单值 `auto` CreativeSkillActivation 附属事实；接纳成功时三者同事务生效，冲突或校验失败时均不持久化。
 存在完整可见模型输出时，请求还可选择一个 `provisional_completed` AssistantDeliveryAttempt；Product API 仅在其绑定的 InvocationAttempt 已保存完整结果、序号连续且结果与消息摘要一致时，才在同一事务内创建 AssistantMessage。没有可见消息的 outcome 可以省略该选择。
+下一状态为 `failed` 时，Product API 还必须校验 RuntimeErrorPolicy 版本、InvocationErrorEvidence 引用、强制恢复步骤耗尽状态与当前 fence，才接纳 AgentRunFailure。
 _Avoid_: Worker 自造独立 `commit_id` 领域身份、把传输关联 ID 当作新提交资格、把 RunCommit 误称为 Product API 的唯一写接口、独立 Activation 写事务、`accepted_actions`、`activations[]`、部分提交、拼接多个 DeliveryAttempt、在 commit 前创建 ConversationMessage。
 
 **RuntimeInvocation（运行时外部调用）**:
@@ -320,8 +321,32 @@ Product API 对一次可能产生 Provider 执行或计费的 InvocationAttempt 
 _Avoid_: 把 Permit 当作多次调用额度、准入后修改请求、使用过期 fence、先 dispatch 再补 Permit、让 reconciliation 查询复用为新执行许可。
 
 **RuntimeAdapter（运行时适配器）**:
-可替换的模型或远程只读工具协议实现；其身份与能力版本随 AgentRun 固定并进入 RuntimeInvocation 的请求摘要。Adapter 可使用 AI SDK 完成消息转换、tool-call 解析、结构化输出、流式消费与 usage 解析，但只返回 dispatch 确定性、Provider 引用、完整规范化结果、usage、错误分类及 `Retry-After` 等事实，不拥有持久状态、调用身份、AgentRun 状态或 retry 决定。SDK 内建自动重试必须关闭；只有能在每次物理 dispatch 前重新经过 InvocationCoordinator 的实现才可等价接管。发送前必须按 ModelProfile 对完整规范化请求作保守 token 校验，并受已消费 AttemptPermit 约束。
+可替换的模型或远程只读工具协议实现；其身份与能力版本随 AgentRun 固定并进入 RuntimeInvocation 的请求摘要。Adapter 可使用 AI SDK 完成消息转换、tool-call 解析、结构化输出、流式消费与 usage 解析，但只返回 dispatch 确定性、Provider 引用、完整规范化结果、usage、InvocationErrorEvidence 及 `Retry-After` 等事实，不拥有持久状态、调用身份、AgentRun 状态或 retry 决定。SDK 内建自动重试必须关闭；只有能在每次物理 dispatch 前重新经过 InvocationCoordinator 的实现才可等价接管。发送前必须按 ModelProfile 对完整规范化请求作保守 token 校验，并受已消费 AttemptPermit 约束。
 _Avoid_: `retryable: true` 作为 Adapter 决策、运行中静默更换 Adapter、Provider / SDK 私有对象跨边界、以 telemetry 事后补记未获准的调用。
+
+**InvocationErrorEvidence（调用错误证据）**:
+RuntimeAdapter 对一次 InvocationAttempt 所观察到错误事实的版本化、安全归一化记录，包括调用阶段、
+dispatch 确定性、Provider 引用、受控错误类别与代码、`Retry-After`、partial result 和 usage 完整性；
+它只描述发生了什么，不决定 retry、fallback 或 AgentRun 终态。
+_Avoid_: `retryable`、`shouldFailRun`、原始 Provider payload、不受控错误消息、堆栈、提示词、凭据或 Secret。
+
+**RuntimeErrorPolicy（运行时错误策略）**:
+Product API 在 AgentRun 创建时固定的版本化错误处置规则，定义 InvocationErrorEvidence 如何形成
+RuntimeErrorDisposition、哪些恢复步骤为强制或可选，以及何时允许 terminal candidate；Runtime 只能执行
+该版本，Product API 在 RunCommit 时保持最终校验权威。
+_Avoid_: Worker 本地默认策略、运行中切换策略版本、仅凭 HTTP 状态码决定 Run 终态、把可选 retry 当作强制 retry。
+
+**RuntimeErrorDisposition（运行时错误处置）**:
+Runtime ErrorClassifier 按固定 RuntimeErrorPolicy 产生的内部控制指令，只能是 `retry`、`reconcile`、
+`await_authoritative_state`、`stop_fence_lost` 或 `terminal_candidate`；它不是 RuntimeCheckpoint、
+AgentAdvance outcome 或产品终态。只有 `terminal_candidate` 可形成 failed RunCommit，`retry` 仍须取得 AttemptPermit。
+_Avoid_: 第五种 AgentAdvance 状态、Adapter 直接返回处置、把 fence 丢失或 outcome_unknown 当作 failed。
+
+**AgentRunFailure（运行失败事实）**:
+Product API 通过 RunCommit 接纳的 AgentRun `failed` 终态事实，包含稳定内部错误码、公开安全错误码与
+消息键、证据引用、RuntimeErrorPolicy 版本和准确 terminal reason；它表示 Run 无法按策略安全继续，
+不反向声称某次 Provider 调用一定失败。
+_Avoid_: 原始 Provider 错误、Worker 堆栈、自由文本用户消息、从 InvocationAttempt 状态直接推导 failed、迟到结果自动重开终态 Run。
 
 **InvocationAttempt（调用尝试）**:
 RuntimeInvocation 下单次可能越过 Provider 边界并产生执行或计费的具体尝试，拥有独立 `attempt_id`。状态查询、既有结果取回、可靠幂等身份下的原请求恢复及可证明尚未 dispatch 的安全重连属于原 attempt 的 reconciliation；只有可能触发第二次 Provider 执行时才创建关联 attempt。Invocation fence 与 AgentRun fence 分离：失去 AgentRun lease 的 Worker 不得创建新 attempt 或 RunCommit，但可凭精确 attempt 的受限证据能力幂等回报迟到结果；该能力不能推进 Run、改写其他 attempt 或绕过结果校验。
