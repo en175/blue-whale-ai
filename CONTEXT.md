@@ -174,7 +174,8 @@ GenerationJob 必须归属 Project；由 AgentChatPanel 触发时关联 AgentRun
 带重试关系的新 Job，原 Job 终态不可变。
 供应商结果等待 ContentReview 时，Job 仍为 `processing`，内部阶段为 `reviewing`；审核暂时不可用
 只重试同一隔离结果，不重新调用生成供应商，也不产生第二次生成费用。自动恢复窗口为 15 分钟；
-耗尽后 Job 以 `CONTENT_REVIEW_UNAVAILABLE` 失败，隔离结果再保留 24 小时供仅重试审核。
+耗尽后原 Job 以 `CONTENT_REVIEW_UNAVAILABLE` 失败并封口，隔离结果再保留 24 小时供用户创建关联的
+GenerationReviewRetry；超期后删除隔离结果。
 取消请求只表达意图；只有供应商确认取消或产品能证明调用尚未发生时，Job 才进入 `cancelled`。
 取消确认前已完成的真实结果仍按成功或部分成功接纳，已产生的 Asset 永久保留。
 **Card 的展示状态是 Job 状态的视图映射**:`processing`→`generating`、
@@ -187,6 +188,11 @@ GenerationJob 必须归属 Project；由 AgentChatPanel 触发时关联 AgentRun
 `cancelled`。
 _Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeItem 是结果视图;
 把 Job 与 Asset 混为一谈 —— Job 是过程,Asset 是它的产物。
+
+**GenerationReviewRetry（生成结果审核重试）**:
+原 GenerationJob 因审核恢复超时失败后，用户在 24 小时隔离期内创建的关联新 GenerationJob；它复用
+原结果，只重试 ContentReview 与发布，不创建 ProviderGenerationAttempt 或第二次生成费用。
+_Avoid_: 自动后台重试；重开原 Job；重新调用生成供应商；隔离结果超期后继续复用。
 
 **ProviderGenerationAttempt（供应商生成尝试）**:
 GenerationJob 为调用生成供应商而发起的一次可能计费的物理副作用事实；一个 Attempt 可覆盖一个或
