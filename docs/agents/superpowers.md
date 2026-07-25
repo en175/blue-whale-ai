@@ -98,5 +98,5 @@ scripts/sync-superpowers-skills.sh --dry-run # 仅报告差异，不写入
 
 superpowers 是**可选方法论技能**，不替代 CLAUDE.md 的 git/issue 工作流硬规则。关键约束：
 
-- **`using-git-worktrees`**：declared preference = `scripts/start-task-worktree.sh`（满足该 skill Step 1a）。本 skill 检测到 declared preference 后跳过自带 `git worktree add` 兜底（Step 1b 在本项目永不执行），所有可写任务仍走 CLAUDE.md 红线 #4 入口。
+- **`using-git-worktrees`**：declared preference = `scripts/start-task-worktree.sh`（满足该 skill Step 1a）。本 skill 检测到 declared preference 后跳过自带 `git worktree add` 兜底（Step 1b 在本项目永不执行），所有可写任务仍走 CLAUDE.md 红线 #4 入口（该红线含 [ADR-0025](../adr/0025-doc-on-master-allowlist.md) 文档白名单例外：编辑 `CONTEXT.md` / `docs/**/*.md` 不需 worktree）。
 - **`using-superpowers` 的「任何回应前先调 skill」**：服从 CLAUDE.md「先完整读 CLAUDE.md」与红线 #4。CLAUDE.md 保持团队 Agent 规则唯一权威源。

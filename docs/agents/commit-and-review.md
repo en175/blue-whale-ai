@@ -160,7 +160,7 @@ ________
 | 检查项 | 类型 | 说明 |
 |---|---|---|
 | 禁提交生成物 | 🔴 硬挡 | `dist*` `.next/` `__pycache__/` `*.pyc` `.pytest_cache/`（`.claude/` 进仓共享，仅 `settings.local.json` 由 `.gitignore` 忽略，非 hook 拦；`graphify-out/` 整个由 `.gitignore` 忽略，非 hook 拦） |
-| 本地 master 提交 | 🟢 放行 | pre-commit：允许用户在本地 `master` 上提交，作为用户本地集成区。Agent 不得把本地 `master` 当任务写入区；Agent 写入任务必须先用 [worktree-workflow.md](worktree-workflow.md) 创建 task worktree + 工单分支 |
+| 本地 master 提交 | 🟢 放行 | pre-commit：允许用户在本地 `master` 上提交，作为用户本地集成区。Agent 不得把本地 `master` 当任务写入区；Agent 写入任务必须先用 [worktree-workflow.md](worktree-workflow.md) 创建 task worktree + 工单分支（散文文档例外 [ADR-0025](../adr/0025-doc-on-master-allowlist.md)：根 `CONTEXT.md` + `docs/**/*.md` 可直改 master，走 `commit-spec-on-master.sh`） |
 | commit 规范 | 🔴 硬挡 | Conventional Commits，格式不符拦截 |
 | 前端 lint | 🟡 软提醒 | 改 `blue_whale_web/` 时跑 `npm run lint`，失败只警告不拦 |
 | 后端 mvn compile | 🟡 软提醒 | 改 `blue_whale_server/` 下 `.java` 时跑 `./mvnw compile`，失败只警告不拦 |
