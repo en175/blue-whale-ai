@@ -201,6 +201,12 @@ GenerationJob 为调用生成供应商而发起的一次可能计费的物理副
 _Avoid_: 把 GenerationJob 当成一次供应商调用；覆盖旧 Attempt；复用 Attempt 身份重发；
 把供应商 task id 当作 Attempt 身份。
 
+**ProviderObservation（供应商结果观察）**:
+供应商回调或平台主动查询针对原 ProviderGenerationAttempt 形成的规范化、可去重结果证据；它只供
+Product API 验证和推进统一状态机，不直接授予作品发布或费用结算资格。相互冲突的 Observation
+形成 GenerationResultConflict，并进入原 Attempt 的核对流程。
+_Avoid_: 回调直接改 Job；轮询另建状态机；最后写入者获胜；把供应商原始响应当作产品决定。
+
 **GenerationAttemptReconciliation（生成尝试核对）**:
 ProviderGenerationAttempt 进入 `outcome_unknown` 后，围绕原 Attempt 通过同一幂等键、异步 task 查询、
 回调或账单证据收敛结果的持久恢复过程。只有能够证明不会重复生成或重复计费时才可安全恢复；核对
