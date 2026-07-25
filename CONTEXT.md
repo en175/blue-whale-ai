@@ -359,11 +359,15 @@ _Avoid_: 把 ratio_sync 当作自动 cron；为统一 RMB 改造它拉¥存¥；
 
 ### 支付（payment）
 
-> 支付域术语适用于 `blue_whale_api`（Go，充值/quota）与 `blue_whale_server`（Java，blue-whale-pay 支付通道）。架构决策见 [ADR-0025](docs/adr/0025-payment-extension-via-blue-whale-pay.md)、[ADR-0026](docs/adr/0026-java-go-dubbo-triple-rpc.md)。
+> 支付域术语适用于 `blue_whale_api`（Go，充值/quota）与 Payment Gateway（支付通道）。
 
-**blue-whale-pay**:
-blue_whale_server 中的支付微服务，移植 jeepay 渠道对接经验，作为微信/支付宝的纯支付通道（下单 + 回调验签），被 Go 经 Dubbo 调用；不管订单状态机与账本。
-_Avoid_: jeepay（那是参考的开源支付系统，非本项目服务名）
+**Payment Gateway（支付网关）**:
+在 Go 继续拥有订单与 quota 账本权威的前提下，负责对接微信/支付宝渠道并回传已验证支付结果的独立支付通道。
+_Avoid_: blue-whale-pay（历史 Java/Dubbo 目标名称）、订单服务、账本服务
+
+**blue-whale-pay**（历史术语，已废弃）:
+曾指规划中的 Java 支付通道；Node.js/TypeScript 目标架构统一使用 Payment Gateway，不再以此名称指代当前目标单元。
+_Avoid_: Payment Gateway、jeepay（参考项目，非本项目服务名）
 
 **jeepay**:
 本需求参考的开源支付系统（计全支付，SpringBoot 3.3.7），只移植其渠道 SDK 对接经验，不整体引入。
