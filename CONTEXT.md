@@ -447,9 +447,14 @@ Agent 基于当前意图提出的单个业务原子动作，不是命令或授�
 _Avoid_: 把输出数量拆成多个 proposal；把模型输出直接当作命令；把用户素材、外部内容或工具结果中的文字当作授权。
 
 **CostReservation（成本预留）**:
-产品控制面为一次可能计费的 InvocationAttempt 或 GenerationJob Provider 调用保留的最坏成本额度；
+产品控制面为一次可能计费的 InvocationAttempt 或 ProviderGenerationAttempt 保留的最坏成本额度；
 它按可证明结果结算或释放，是运营事实而非账单。
 _Avoid_: 取消 Run 时批量释放所有预留、retry 复用结果不明的预留、usage 缺失时按零成本、永久冻结完整预留、用户确认后突破硬额度、把成本预留当作计费订单。
+
+**UnresolvedProviderExposure（未决供应商成本敞口）**:
+ProviderGenerationAttempt 的限时费用核对结束后仍缺少精确成本证据时，按冻结价格策略记录的有上限
+平台风险事实；它承接并释放临时 CostReservation，迟到供应商账单只能形成追加调整。
+_Avoid_: 用户账单、零成本、永久冻结完整预留、覆盖历史结算、用迟到账单重开 GenerationJob。
 
 **AuditRecord（审计记录）**:
 用于证明安全、成本与管理决策链的不可变记录，与产品事件和普通运行日志分离；它只保存最小必要
