@@ -220,8 +220,8 @@ Runtime Agent Bundle 的不可变发布快照；AgentRun 固定具体版本，�
 _Avoid_: 原地修改的配置行、Git commit、RuntimeCheckpoint 版本。
 
 **Run pin（版本固定）**:
-AgentRun 启动时由 Java Product API 原子固定的版本锚点：`bundle_version_id` / `manifest_digest` / `model_profile_id` / `model_profile_version` / `activated_creative_skill_versions`（Creative Skill 字段形状与激活时序见 `docs/specs/2026-07-24-creative-skill-activation-contract.md`）。这些 pin 随 RunWork 下发并权威记录于 AgentRun；Worker 装载前对 `manifestDigest` 与发布快照做 fail-closed 校验，不随 commit 回传。
-_Avoid_: Worker 回显 pin、可变版本引用、运行中改写 pin。
+AgentRun 生命周期内由 Java Product API 权威固定的版本锚点：创建时固定 `bundle_version_id` / `manifest_digest` / `model_profile_id` / `model_profile_version`，`forced_use` Creative Skill 同事务固定；`auto` Creative Skill 只能在后续 RunCommit 中作为单值附属事实原子固定。已固定 pin 随 RunWork 下发，Worker 装载前对摘要与不可变发布快照做 fail-closed 校验；静态 pin 不随 commit 回传。
+_Avoid_: Worker 回显静态 pin、可变版本引用、独立改写 pin、把尚未接纳的 `auto` Activation 当作既成事实。
 
 **RoleDocument（角色文档）**:
 定义内部 Agent 身份、职责和任务边界的根 Markdown 资源；每个 BundleVersion 恰好一个并始终装载。
@@ -244,12 +244,12 @@ User 可见、可通过 `Use` 或 `auto` 激活的版本化创作方法；与 Ru
 _Avoid_: Runtime Skill、内部 Rule、无修饰的“Skill”（在运行时契约中必须指明类型）。
 
 **CreativeSkillActivation（创作技能激活记录）**:
-一次 Creative Skill 激活的不可变事实：Skill 与不可变版本身份、`source`（`forced_use` / `auto`）、结构化 `reason` 与 `resource_digest`；每个 AgentRun 最多一条，固定进 Run pin 的 `activated_creative_skill_versions`（0/1 单例数组）。字段形状见 `docs/specs/2026-07-24-creative-skill-activation-contract.md`。
-_Avoid_: 多 Skill 组合、运行中切换版本、自由文本理由。
+一次 Creative Skill 激活的 AgentRun 所属、可审计、不可变产品事实：含 Creative Skill 与不可变版本身份、`source`（`forced_use` / `auto`）、结构化 `reason` 与 `resource_digest`。`forced_use` 在 AgentRun 创建事务中固定；`auto` 只能作为可选单值 `creative_skill_activation` 附着于 RunCommit，并与 RuntimeCheckpoint 和唯一下一状态原子接纳。每个 AgentRun 最多一条，wire 兼容字段 `activated_creative_skill_versions` 保持 0/1 单例数组；Runtime 没有独立 Activation 写权限。
+_Avoid_: `activations[]`、独立 `activate` 写接口、普通 metadata、AgentActionProposal、多 Creative Skill 组合、运行中切换版本、自由文本理由。
 
 **AutoCreativeSkillCandidate（自动候选）**:
-AgentRun 创建时冻结、随 RunWork 下发的 `auto` 可激活资格池（Skill 与版本身份、名称、描述、展示版本与 `resource_digest`，不含正文）；资格不等于与当前意图匹配，Worker 只可从中语义选择零个或一个。成功判断为零个时允许基础生成；候选、判断或激活故障仍 fail closed。
-_Avoid_: Worker 发明候选外 Skill、把非空资格池当作强制激活、候选随 Skill 库发布漂移、候选携带正文。
+AgentRun 创建时冻结、随 RunWork 下发的 `auto` 可激活资格池（Creative Skill 与版本身份、名称、描述、展示版本与 `resource_digest`，不含正文）；资格不等于与当前意图匹配，Worker 只可从中语义选择零个或一个。有效 lease 下的 Runtime 可在 RunCommit 前读取所选候选的精确不可变版本，读取授权来自候选 pin 而非既存 Activation；Runtime 必须校验摘要，任何候选、读取、判断或摘要故障均 fail closed。
+_Avoid_: Worker 发明候选外 Creative Skill、把非空资格池当作强制激活、候选随 Creative Skill Library 发布漂移、候选携带正文、要求先持久化 Activation 才能读取候选正文。
 
 **ModelProfile（模型档案）**:
 平台批准的版本化模型能力与上下文上限，供 Bundle 形成允许子集并由 AgentRun 固定；不包含凭据或供应商私有请求配置。
@@ -287,11 +287,16 @@ _Avoid_: AgentRun 最终状态权威、常驻 Run Actor、持久工作流引擎�
 Agent Runtime Executor 从一个已接纳恢复点推进到下一个产品边界的执行片段；进程中断时允许从上一个恢复点整轮重放，模型调用重复风险由独立 invocation ledger 与结果不明恢复机制约束。
 _Avoid_: 长驻执行会话、逐 step checkpoint、用 RuntimeCheckpoint 记录产品事实。
 
+**RunCommit（运行提交）**:
+Product API 接纳一次 AgentAdvance 的唯一写边界：请求携带 RuntimeCheckpoint、一个判别式下一状态，以及可选的单值 `auto` CreativeSkillActivation 附属事实；Activation 必须进入请求摘要、幂等与 lease / fence 校验。接纳成功时三者同事务生效，冲突或校验失败时均不持久化；Product API 负责最终校验与持久化，Runtime 只能提出待接纳内容。
+_Avoid_: 独立 Activation 写事务、`accepted_actions`、`activations[]`、部分提交、把模型调用已发生误当作 RunCommit 已接纳。
+
 **Single Proposal Commit Boundary（单提议提交边界）**:
 一次 AgentAdvance 只能以 `completed`、`awaiting_input`、携带单个 AgentActionProposal 的
 `awaiting_action_result` 或 `failed` 之一结束；内部可执行多个只读工具，但不得提交多个副作用提议
-或形成多状态结果。
-_Avoid_: `actions[]`、部分接纳多个动作、隐式 fan-out/fan-in、把有依赖的动作提前批量提交。
+或形成多状态结果。可选的单值 `auto` CreativeSkillActivation 是 RunCommit 附属产品事实，
+不是第二个 outcome、UserInputRequest 或 AgentActionProposal。
+_Avoid_: `actions[]`、部分接纳多个动作、把 Activation 放入 proposal、隐式 fan-out/fan-in、把有依赖的动作提前批量提交。
 
 **RuntimeCheckpoint**（运行时检查点）:
 与活动 AgentRun 绑定的版本化、不透明执行状态，只用于恢复运行，不是 Run、Job、Asset 或产品事件的权威事实。
