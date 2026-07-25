@@ -1,6 +1,7 @@
 # Assistant 回复流尝试（AssistantMessageStreamAttempt）abort 与重跑契约
 
-- **状态**：Accepted for implementation
+- **状态**：Superseded for Node target architecture；仅作为旧 Java/Python 实现契约保留
+- **替代决策**：[ADR-0045 Provisional Assistant Delivery 只经 RunCommit 提升为正式消息](../adr/0045-provisional-assistant-delivery-runcommit-boundary.md)
 - **契约版本**：2
 - **修订记录**：版本 2（2026-07-23，IK3BG3 实施定稿）——明确 F1 重试轮的文本承接
   规则：新尝试以新 stream_id 经新尝试审核门确定性重放「未放行尾部」，已放行前缀

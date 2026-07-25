@@ -124,15 +124,18 @@ Java Product API 在 Agent 文字变为 User 可见内容前形成的产品安�
 完整回复的专用审核总预算为 5 秒；无法形成决定时丢弃未释放文字并返回安全错误，不进入后台审核。
 _Avoid_: 供应商直接向 User 流式输出、把流式安全信号直接当作产品决定、逐片调用外部审核服务。
 
-**AssistantMessageStreamAttempt（回复流尝试）**:
-一个 `stream_id` 标识的一次 Assistant 回复流尝试；同一 AgentRun 最多两个顺序尝试、任意时刻最多
-一个活动尝试（`streaming` / `review_failed`）。`stream_id` 由 Worker 为每次尝试生成，是不可从
-AgentRun ID 推导的不透明标识；abort 是幂等终态操作——保留已放行前缀、丢弃未放行私有尾部、
-以 `aborted` 封口对应 ConversationMessage 并记录规范化 reason code。Worker 在租约有效时主动
-abort；断连未送达时 Java 在租约接管（或 supersede）事务内原子兜底 abort。两次额度由 F1/F3 共用，
-第三次 start 收稳定错误码 `ASSISTANT_STREAM_ATTEMPT_EXHAUSTED`。
-契约：[`docs/specs/2026-07-23-assistant-message-stream-attempt-contract.md`](docs/specs/2026-07-23-assistant-message-stream-attempt-contract.md)。
-_Avoid_: 续写或复用 aborted 尝试、从 AgentRun ID 推导 stream_id、仅租约过期就改变尝试状态。
+**AssistantDeliveryAttempt（助手交付尝试）**:
+Product API 为一次 AgentAdvance 中的临时 Assistant 输出建立的短期交付投影；文本与 chunk 在
+RunCommit 前始终是 provisional，只能支持实时展示、断线重连与恢复观察，不属于永久会话、Snapshot、
+后续模型上下文或授权事实。每个尝试独立经历 `streaming → provisional_completed → committed`
+或以 `interrupted` / `discarded` 收口；旧 fence 不得续写，多个尝试的文本不得拼接为正式消息。
+_Avoid_: AssistantMessageStreamAttempt、把 Provider stream 当作交付身份、把 provisional 前缀当作 ConversationMessage、续接旧 Worker 持有的 Provider stream。
+
+**AssistantMessage（正式助手消息）**:
+Product API 在 RunCommit 中从当前 AgentAdvance 唯一胜出的 AssistantDeliveryAttempt 原子创建的
+永久会话事实；只有它可以进入 Conversation 历史、Snapshot 与后续模型上下文。没有完整可见输出的
+RunCommit 可以不创建 AssistantMessage，中断或丢弃的 provisional 内容永不自动提升为正式消息。
+_Avoid_: interrupted AssistantMessage、半成品消息、把 DeliveryAttempt 或 chunk 直接写入永久会话。
 
 **Asset（资产）**:
 一个必须归属 Project 的图片或视频文件单元，媒体内容身份不可变，由产品控制的对象存储持久化。
@@ -297,7 +300,8 @@ _Avoid_: 只按 checkpoint 推导 `advance_id`、每次 claim 生成新身份、
 
 **RunCommit（运行提交）**:
 Product API 接纳 AgentRun 推进事实的唯一边界：每个 AgentAdvance 只允许接纳一个 RunCommit，以 Product API 分配的 `advance_id` 作为语义幂等身份并校验规范化请求摘要；同轮次同摘要回放首次结果，同轮次不同摘要 fail closed。请求携带 RuntimeCheckpoint、一个判别式下一状态，以及可选的单值 `auto` CreativeSkillActivation 附属事实；接纳成功时三者同事务生效，冲突或校验失败时均不持久化。
-_Avoid_: Worker 自造独立 `commit_id` 领域身份、把传输关联 ID 当作新提交资格、把 RunCommit 误称为 Product API 的唯一写接口、独立 Activation 写事务、`accepted_actions`、`activations[]`、部分提交。
+存在完整可见模型输出时，请求还可选择一个 `provisional_completed` AssistantDeliveryAttempt；Product API 仅在其绑定的 InvocationAttempt 已保存完整结果、序号连续且结果与消息摘要一致时，才在同一事务内创建 AssistantMessage。没有可见消息的 outcome 可以省略该选择。
+_Avoid_: Worker 自造独立 `commit_id` 领域身份、把传输关联 ID 当作新提交资格、把 RunCommit 误称为 Product API 的唯一写接口、独立 Activation 写事务、`accepted_actions`、`activations[]`、部分提交、拼接多个 DeliveryAttempt、在 commit 前创建 ConversationMessage。
 
 **RuntimeInvocation（运行时外部调用）**:
 Agent Runtime Executor 在一次 AgentAdvance 内提出的、具有成本或结果不可重建风险的逻辑外部调用，以 `(advance_id, call_slot)` 唯一定位；覆盖主模型、Creative Skill 自动选择、协议修复模型及符合条件的远程只读工具。规范化 `request_digest` 是重放一致性约束而非身份组成；同槽位同摘要恢复原调用，同槽位不同摘要以 `INVOCATION_REPLAY_DIVERGED` fail closed。本地确定性查询、普通 Product API 读取、AgentActionProposal 及由 GenerationJob 管理的供应商调用不属于它。
