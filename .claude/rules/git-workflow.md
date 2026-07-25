@@ -33,7 +33,7 @@
 
 ## Task Worktree
 
-- 只读任务不要求 Work Tree；可写任务在任何写入前必须从主 checkout 运行：
+- 只读任务不要求 Work Tree；可写任务在任何写入前必须从主 checkout 运行（散文文档例外见本节末 [ADR-0025](docs/adr/0025-doc-on-master-allowlist.md)）：
   `scripts/start-task-worktree.sh --type <feature|fix|hotfix|docs|chore> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>`。
 - 入口要求本地 `master` 干净，fetch 后融合本地与远程历史，再从同步后的精确 SHA 创建 Work Tree，固定在 `../blue-whale-worktrees/`。
 - 本地领先时保留本地提交；远程领先时 fast-forward；分叉时普通 merge；冲突自动 abort 且不创建 Work Tree。
@@ -41,6 +41,7 @@
 - 子 issue 完成即直接走提交入口落盘 commit（无需用户先确认/授权），停在 commit 等 review；用户确认环节后移到 merge 本地 master 前。
 - 提交流程：`scripts/commit-task-for-review.sh -m "<message>"`（完成即提交，无需授权）→ 用户确认后 `scripts/merge-task-to-local-master.sh --user-authorized <branch>`（合入门槛保持不变）
 - 完整流程：`docs/agents/worktree-workflow.md`，决策：`docs/adr/0010-local-master-is-user-integration-zone.md`
+- **散文文档例外（[ADR-0025](docs/adr/0025-doc-on-master-allowlist.md)）**：仅编辑根 `CONTEXT.md` + `docs/**/*.md` 时，AI 可在本地 master 直改并用 `scripts/commit-spec-on-master.sh -m "<描述>"` 落盘，不需 Work Tree；规则源（`.claude/`）、代码、`docs/**/*.json` 契约仍必须 Work Tree。
 
 ## 同族工单串行与契约先行
 
