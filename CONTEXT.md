@@ -213,7 +213,8 @@ _Avoid_: 把每条用户消息都当作新的 AgentRun；把 AgentRun 与具体�
 Product API 首次接纳 `completed`、`failed`、`cancelled`、`superseded` 或 `recovery_failed` 后形成的
 不可逆边界：终态状态、原因与版本不可改写，当前 advance 永久关闭，旧 Run 不再产生新调用、消息、
 checkpoint 或推进；其他 owner 的既有聚合与运营事实可以继续追加收敛。
-_Avoid_: 重开终态 Run、通用 `agent_run.updated` 事件、把独立聚合收敛误报为 Run 进展、阻止新消息创建新 AgentRun。
+该封口不覆盖或改写 Project 所有权状态；Project ownership fence 是更高层的写入资格约束。
+_Avoid_: 重开终态 Run、通用 `agent_run.updated` 事件、把独立聚合收敛误报为 Run 进展、阻止新消息创建新 AgentRun、把 Project 删除映射为 AgentRun 终态。
 
 **AgentRunCancellation（运行取消事实）**:
 Product API 对停止继续推进 AgentRun 的幂等产品命令及其终态接纳记录，包含取消时间、主体、来源、
@@ -312,6 +313,15 @@ _Avoid_: 资源正文、私有文件路径、Bundle / ModelProfile / CreativeSki
 **Agent Runtime Executor（Agent 运行执行器）**:
 从 Product API 领取 AgentRun、由最近一次已接纳 RuntimeCheckpoint 恢复并执行一次 AgentAdvance 的无状态执行角色；只有原子 RunCommit 被接纳后，新 checkpoint 或下一状态才成为产品事实。
 _Avoid_: AgentRun 最终状态权威、常驻 Run Actor、持久工作流引擎、把模型 step / 工具中间状态 / 流式 chunk 当作 checkpoint。
+
+**ProjectOwnershipFence（Project 所有权围栏）**:
+Product API 对 Project 是否仍有资格接纳新产品事实维护的权威前置条件；Agent Runtime 的 claim、
+AttemptPermit、AssistantDeliveryAttempt 与 RunCommit 都必须受当前 fence / deletion epoch 校验。
+Project 已进入删除围栏时，Runtime 立即停止推进，不得创建新 InvocationAttempt、AssistantMessage、
+RuntimeCheckpoint、AgentActionProposal 或其他 Project 产品投影。既有已 dispatch 调用的精确迟到证据
+仍可进入独立 InvocationLedger 与成本核对，但不能恢复或重开 AgentRun。该围栏不改写既有 AgentRun
+终态；Project 删除、保留期限、隔离结果和物理清理的完整语义由 Project 所有权删除决策负责。
+_Avoid_: 把 Project 删除当作 AgentRunCancellation、让 Runtime 决定删除状态、删除围栏后接纳新产品投影、在本边界推导 Conversation 独立删除语义。
 
 **AgentAdvance（Agent 单次推进）**:
 AgentRun 从首次可运行、已接纳用户输入或已接纳动作结果进入新可运行轮次时，由 Product API 持久化稳定 `advance_id`；claim 与 lease reclaim 复用该身份，RunCommit 接纳后轮次结束。Agent Runtime Executor 在该逻辑轮次内从已接纳恢复点推进到下一个产品边界；进程中断时允许整轮重放，模型调用重复风险由 InvocationLedger 与结果不明恢复机制约束。

@@ -5,6 +5,7 @@
 - **决策者**：KimJohn
 - **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)
 - **关联决策**：[ADR-0047 AgentRun 用户取消](0047-agent-run-user-cancellation-boundary.md)、[ADR-0048 时间、Deadline 与 Lease](0048-time-deadline-and-lease-facts.md)
+- **后续调查**：[确定 ProjectDeletionFence 与异步物理清理模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK40DP)
 
 ## 背景
 
@@ -129,6 +130,23 @@ Product API 接纳 terminal RunCommit 前，必须在同一权威事务视图中
 | ContentReview 结果 | Job / Asset 接纳状态 | Conversation 消息历史 |
 | 旧 Worker RunCommit | 精确 RunCommitReceipt 回放 | 新版本、新终态或新事件 |
 
+### 10. Project ownership fence 是外部写入资格，不是 Run 终态
+
+Agent Runtime 的 claim、AttemptPermit、AssistantDeliveryAttempt 与 RunCommit 都必须通过 Product API
+权威 Project ownership fence 校验。Project 已进入删除围栏时：
+
+- Runtime 必须停止推进；
+- 不得创建新 InvocationAttempt、AssistantMessage、RuntimeCheckpoint、AgentActionProposal 或其他
+  Project 产品投影；
+- 既有已 dispatch 调用的精确迟到证据仍可进入 InvocationLedger 与成本核对；
+- 迟到证据不得恢复、重开或改写 AgentRun。
+
+Project 删除围栏不把 `completed` 改成 `cancelled`，不把 `failed` 改成其他状态，也不重写 Run 历史。
+它只是更高层的写入资格约束。Project 删除的用户可见语义、owner/tombstone、数据保留期限、
+GenerationJob / Asset / 对象存储清理、Go 计费记录与物理删除后回调处理不在本 ADR 冻结，统一由
+[确定 ProjectDeletionFence 与异步物理清理模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK40DP)
+继续调查。当前不存在的 Conversation 独立删除入口也不得从本技术边界推导。
+
 ## 验收测试矩阵
 
 后续实现必须覆盖：
@@ -138,6 +156,8 @@ Product API 接纳 terminal RunCommit 前，必须在同一权威事务视图中
 3. **迟到 Invocation**：既有 attempt 可收敛结果和 usage、结算成本，但不能产生新 attempt、消息或 Run 状态。
 4. **独立聚合**：Job / Review / Asset / 存储 / 成本继续接纳迟到结果，既有 Card 投影可更新，Run 与消息历史不变。
 5. **终态竞态**：事务先观察到策略要求采用的成功结果时拒绝不可恢复失败；终态先提交时，后到成功只进入 owner-specific 事实。
+6. **Project ownership fence**：删除围栏先被接纳后，claim、Permit、Delivery 与 RunCommit 全部拒绝；
+   已 dispatch attempt 的精确迟到证据仍可进入 Ledger / Cost，但不能产生任何 Project 产品投影或重开 Run。
 
 Wayfinder 阶段只冻结验收要求，不提前修改业务测试制造预期失败。
 
