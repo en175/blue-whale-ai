@@ -1889,6 +1889,77 @@ assert_exit 0 "master-edit(real): 非 master 仓库不存在子目录 Write 放�
 rm -rf "$FEATURE_REPO"
 unset REAL_REPO FEATURE_REPO
 
+# Slice 4.6.5 — block-master-edit 文档白名单（ADR-0025）
+# 真实 master 仓库：根 CONTEXT.md + docs/**/*.md 放行；代码 / .claude 规则源 / 契约仍拦。
+DOCALLO_REPO="$(mktemp -d)"
+git -C "$DOCALLO_REPO" init -q
+git -C "$DOCALLO_REPO" symbolic-ref HEAD refs/heads/master
+mkdir -p "$DOCALLO_REPO/docs/adr" "$DOCALLO_REPO/docs/specs" "$DOCALLO_REPO/.claude/rules" "$DOCALLO_REPO/src"
+SAVED_CLAUDE_PROJECT_DIR_DOCALLO="${CLAUDE_PROJECT_DIR:-}"
+export CLAUDE_PROJECT_DIR="$DOCALLO_REPO"
+
+# 放行：根 CONTEXT.md + 审计 reason=allowed-doc-allowlist
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_ctx","session_id":"s_doc","tool_input":{"file_path":"'"$DOCALLO_REPO"'/CONTEXT.md"}}'
+assert_exit 0 "doc-allowlist: master Edit 根 CONTEXT.md 放行（ADR-0025）"
+DOCALLO_LOG="$(audit_log_path "$DOCALLO_REPO" "$MASTER_EDIT_HOOK")"
+assert_audit_has_field "$DOCALLO_LOG" reason allowed-doc-allowlist "doc-allowlist: CONTEXT.md 放行审计 reason=allowed-doc-allowlist"
+
+# 放行：docs 任意层级 .md（含子目录、全新文件 Write）
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/docs/adr/0001.md"}}'
+assert_exit 0 "doc-allowlist: master Edit docs/adr/0001.md 放行"
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Write","tool_input":{"file_path":"'"$DOCALLO_REPO"'/docs/new.md"}}'
+assert_exit 0 "doc-allowlist: master Write docs/new.md 放行"
+
+# 仍拦：代码 / 规则源（CLAUDE.md + .claude/rules）/ 契约（docs/**/*.json 非 .md 散文）
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/src/a.py"}}'
+assert_exit 2 "doc-allowlist: master Edit 代码 src/a.py 仍拦"
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/CLAUDE.md"}}'
+assert_exit 2 "doc-allowlist: master Edit 根 CLAUDE.md 规则源仍拦"
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/.claude/rules/git-workflow.md"}}'
+assert_exit 2 "doc-allowlist: master Edit .claude/rules 规则源仍拦"
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/docs/specs/schema.json"}}'
+assert_exit 2 "doc-allowlist: master Edit docs/specs/*.json 契约仍拦（非 .md 散文）"
+
+# 路径穿越回归：docs/../src/a.py 经 pwd -P 折叠 .. 后落 src/a.py → 非白名单 → 拦
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/docs/../src/a.py"}}'
+assert_exit 2 "doc-allowlist: 路径穿越 docs/../src/a.py 经 pwd -P 折叠后仍拦"
+
+export CLAUDE_PROJECT_DIR="$SAVED_CLAUDE_PROJECT_DIR_DOCALLO"
+rm -rf "$DOCALLO_REPO"
+unset DOCALLO_REPO SAVED_CLAUDE_PROJECT_DIR_DOCALLO DOCALLO_LOG
+
+# Slice 4.6.6 — commit-spec-on-master.sh（ADR-0025 落盘入口）
+# 真实 master 仓库端到端：doc-only 通过 + docs: 前缀；git mv 代码进 docs/ 被 --no-renames 捕获拒。
+commit_spec_setup() {
+  local repo="$1"
+  git -C "$repo" init -q
+  git -C "$repo" symbolic-ref HEAD refs/heads/master
+  git -C "$repo" config user.email t@t
+  git -C "$repo" config user.name t
+  mkdir -p "$repo/docs" "$repo/src"
+  printf 'old\n' > "$repo/src/a.py"
+  git -C "$repo" add -A && git -C "$repo" commit -q -m "feat: baseline"
+}
+
+# 用例1：doc-only CONTEXT.md → 落盘 master + docs: 前缀
+SPEC1="$(mktemp -d)"; commit_spec_setup "$SPEC1"
+printf 'ctx\n' > "$SPEC1/CONTEXT.md"
+( cd "$SPEC1" && bash "$REPO_ROOT/scripts/commit-spec-on-master.sh" -m "补领域语言" ) >/dev/null 2>&1
+RUN_EXIT=$?
+assert_exit 0 "commit-spec: doc-only CONTEXT.md 落盘 master（exit 0）"
+git -C "$SPEC1" log -1 --format=%s | grep -q '^docs: 补领域语言' && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[commit-spec: docs: 前缀自动添加]"); }
+rm -rf "$SPEC1"
+
+# 用例2：git mv 代码进 docs/（rename）→ --no-renames 捕获旧路径 src/a.py → 拒绝（ADR-0025 威胁边界回归）
+SPEC2="$(mktemp -d)"; commit_spec_setup "$SPEC2"
+git -C "$SPEC2" mv src/a.py docs/malicious.md 2>/dev/null || { FAIL=$((FAIL + 1)); FAILURES+=("[commit-spec: 预置 git mv 失败]"); }
+( cd "$SPEC2" && bash "$REPO_ROOT/scripts/commit-spec-on-master.sh" -m "改名" ) >/dev/null 2>&1
+RUN_EXIT=$?
+assert_exit 1 "commit-spec: git mv 代码进 docs/ rename 被拒（--no-renames 捕获旧路径 src/a.py）"
+rm -rf "$SPEC2"
+unset -f commit_spec_setup 2>/dev/null || true
+unset SPEC1 SPEC2
+
 # Slice 4.7 — block-master-edit 审计闭环（IK10CW）
 # 用真实 git 仓库（stub git 不支持 rev-parse --git-common-dir，审计 helper 依赖它）。
 # 覆盖 AC：阻断记录、放行记录、字段安全、stdout 契约、降级、轮转、并发、不被跟踪。

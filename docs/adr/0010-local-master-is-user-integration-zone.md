@@ -7,6 +7,7 @@
   - 2026-07-12，任务 Work Tree 基线改为同步后的本地 `master`，以保留团队本地优先的模块化开发方式。
   - 2026-07-12，任务验收 commit 门槛移除（IK0E1A）：完成子 issue 即直接走 `commit-task-for-review.sh` 落盘 commit（无需 `--user-authorized`），用户确认环节后移到 merge 本地 master 前。
   - 2026-07-14，PreToolUse Hook 的 merge/pull 拦截改为分支感知（IK0SPN）：`mode_task_acceptance_git` 调用 `current_branch()` 区分 master 集成区与任务分支，master 上 `git merge origin/master` 和 `git pull` 不再被拦截，消除此前 master 双方分叉时 Hook 硬拦与无标准入口放行之间的死锁。任务分支上仍拦截并指向 `sync-task-from-origin.sh`。
+  - 2026-07-25，文档白名单窄例外（[ADR-0025](0025-doc-on-master-allowlist.md)）：AI 可在本地 master 直改散文规格文档（根 `CONTEXT.md` + `docs/**/*.md`），落盘走 `scripts/commit-spec-on-master.sh -m "<描述>"`；规则源（`.claude/`）、代码、`docs/**/*.json` 契约仍必须走 task worktree。
 
 > 授权交互方式已由 [ADR-0012](0012-agent-noninteractive-authorization.md) 更新：标准入口带 `--user-authorized` 时无二次确认，直接 Git 绕过仍由 Hook 硬拦。
 
