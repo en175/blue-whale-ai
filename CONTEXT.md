@@ -213,6 +213,12 @@ Product API 接纳 GenerationJob 终态后形成的不可逆封口；它保持�
 改写原 Job。
 _Avoid_: 以迟到回调复活 Job；把内部恢复阶段暴露为公开状态；终态后重新取得原 Job 执行权。
 
+**GenerationWorkItem（生成工作项）**:
+Product API 从 MySQL 权威事实发放给 Generation Worker 的短租约单步骤执行单元，固定关联 Job、
+Attempt、输出槽集合、动作、fence 与 deadline。等待期间不持有执行权；恢复与异常核对只重新领取
+尚未完成的 WorkItem，并遵循同一幂等接纳流程。
+_Avoid_: 认领整个 Job 长时间执行；以内存 timer 作为权威；Reconciler 绕过 WorkItem；无 fence 回报。
+
 **AgentRun（创作运行）**:
 围绕一个创作意图持续推进、可跨多轮对话暂停与恢复的工作单元；它拥有创作推进状态，但不拥有
 InvocationAttempt 或 GenerationJob 的完整生命周期。终态为 `completed`、`superseded`、`failed`、
