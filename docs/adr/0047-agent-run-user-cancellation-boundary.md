@@ -5,6 +5,7 @@
 - **决策者**：KimJohn
 - **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)
 - **修订**：[ADR-0043 AgentRun 三种规范化收场](0043-agent-run-terminal-outcomes.md)、[ADR-0045 Provisional Assistant Delivery](0045-provisional-assistant-delivery-runcommit-boundary.md)
+- **时间与租约边界**：[ADR-0048 Timeout、Deadline、Lease 与 Cancellation 分属不同事实](0048-time-deadline-and-lease-facts.md)
 
 ## 背景
 
@@ -42,6 +43,8 @@ cancel_command_id
 ```
 
 状态名称保持通用 `cancelled`，来源与规范化原因码说明本次由用户请求。
+系统或管理员需要终止 Run 时也必须提交显式取消产品命令并记录不同 `cancellation_source`；
+timeout、deadline 或 lease expiry 不得隐式映射为取消。
 
 ### 2. 原子取消事务
 
