@@ -9,6 +9,7 @@
 # 放行：
 #   - 目标文件在非 master 分支的工作树（工单分支 worktree / detached HEAD）
 #   - 目标文件不在任何 git 工作树内（仓库外 dotfile，如 ~/.codex/config.toml）
+#   - master 分支但目标在文档白名单（根 CONTEXT.md + docs/**/*.md；ADR-0025）
 #   - 非 Edit/Write 工具
 #
 # 为什么拦：Agent 不得在本地 master 直接修改文件。
@@ -89,6 +90,23 @@ fi
 if [ "$BRANCH" != "master" ]; then
   audit 0 "allowed-non-master"
   exit 0
+fi
+
+# master 分支但目标在文档白名单 → 放行（AI 可直改散文规格文档；ADR-0025）
+#   白名单：根 CONTEXT.md（领域语言权威源）+ docs/**/*.md（纯记录散文）。
+#   仍拦：.claude/（hooks/settings/rules/CLAUDE.md 规则源）、scripts/、代码、
+#         docs/specs/*.json schema/契约、fixtures、PDF——改这些=改行为，走 worktree。
+#   实化 FILE_PATH 目录（解 macOS /var→/private/var 等 symlink）再剥离 TOPLEVEL 前缀；
+#   剥离失败（文件不在本工作树根下）→ 不命中，落入下方硬拦（fail closed）。
+if REAL_DIR="$(cd "$FILE_DIR" 2>/dev/null && pwd -P)" && [ -n "$REAL_DIR" ]; then
+  REL_PATH="${REAL_DIR%/}/$(basename "$FILE_PATH")"
+  REL_PATH="${REL_PATH#$TOPLEVEL/}"
+  case "$REL_PATH" in
+    CONTEXT.md|docs/*.md)
+      audit 0 "allowed-doc-allowlist"
+      exit 0
+      ;;
+  esac
 fi
 
 # master 分支 + 仓库内 Edit/Write → 硬拦并审计

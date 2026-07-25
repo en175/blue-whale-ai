@@ -9,6 +9,10 @@
 
 上述文件不存在时**静默继续**——不报告缺失、不预先建议创建。`/domain-modeling`（经 `/grill-with-docs`、`/improve-codebase-architecture` 触达）会在术语 / 决策真正落地时惰性创建它们。
 
+## 编辑这些文档
+
+根 `CONTEXT.md` 与 `docs/**/*.md` 是散文规格文档，编辑它们**无需开 task worktree**：AI 可在本地 master 直改，落盘走 `scripts/commit-spec-on-master.sh -m "<描述>"`（[ADR-0025](../adr/0025-doc-on-master-allowlist.md)，不 push、不开 PR）。`docs/**/*.json` schema / 契约、fixtures 不是散文，仍走 worktree。
+
 ## 文件结构
 
 单上下文（多数仓库）：
