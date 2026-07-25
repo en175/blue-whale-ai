@@ -289,9 +289,11 @@ _Avoid_: 长驻执行会话、逐 step checkpoint、用 RuntimeCheckpoint 记录
 
 **RuntimeCheckpoint**（运行时检查点）:
 与活动 AgentRun 绑定的版本化、不透明执行状态，只用于恢复运行，不是 Run、Job、Asset 或产品事件的权威事实。
-AgentRun 只从当前已接纳版本恢复，不自动回退旧版本；创建时固定运行引擎及版本，错误引擎或版本
-必须拒绝恢复，活动检查点不跨引擎迁移，终态 Run 不再使用 checkpoint。
-_Avoid_: 把 RuntimeCheckpoint 当作产品事实；让运行时检查点独立推进产品状态；由其他引擎解析其内部内容。
+payload 采用 Blue Whale 自有 `agent-runtime-checkpoint/v1`：只含规范化模型消息、已提交 proposal
+与待回传工具结果的绑定、粗粒度推进游标及格式版本；Product API 将 payload 视为不透明数据，Runtime
+负责 Schema 校验、编解码和版本迁移。AgentRun 只从当前已接纳版本恢复，不自动回退旧版本；错误引擎
+或版本必须拒绝恢复，活动检查点不跨引擎迁移，终态 Run 不再使用 checkpoint。
+_Avoid_: 把 RuntimeCheckpoint 当作产品事实；直接序列化 AI SDK / Provider 内部对象；保存 pin、stream、usage、资源正文、凭据或临时 Secret；让运行时检查点独立推进产品状态。
 
 **AgentActionProposal（Agent 动作提议）**:
 Agent 基于当前意图提出的结构化候选动作，不是可直接执行的命令或授权；只有产品控制面按 User、
