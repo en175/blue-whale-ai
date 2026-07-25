@@ -195,6 +195,12 @@ GenerationJob 为调用生成供应商而发起的一次可能计费的物理副
 _Avoid_: 把 GenerationJob 当成一次供应商调用；覆盖旧 Attempt；复用 Attempt 身份重发；
 把供应商 task id 当作 Attempt 身份。
 
+**GenerationAttemptReconciliation（生成尝试核对）**:
+ProviderGenerationAttempt 进入 `outcome_unknown` 后，围绕原 Attempt 通过同一幂等键、异步 task 查询、
+回调或账单证据收敛结果的持久恢复过程。只有能够证明不会重复生成或重复计费时才可安全恢复；核对
+期限耗尽后 GenerationJob 按失败收口，禁止以队列重试自动创建新 Attempt。
+_Avoid_: 把超时当作供应商未接纳；换幂等键重发；无证据释放 CostReservation；把核对伪装成重试。
+
 **AgentRun（创作运行）**:
 围绕一个创作意图持续推进、可跨多轮对话暂停与恢复的工作单元；它拥有创作推进状态，但不拥有
 InvocationAttempt 或 GenerationJob 的完整生命周期。终态为 `completed`、`superseded`、`failed`、
