@@ -1,11 +1,37 @@
 import { describe, expect, it } from "vitest";
-import type { ProjectSnapshot } from "@/lib/project-recovery";
+import {
+  applyProductEvent,
+  applySnapshot,
+  initialProjectRecoveryState,
+  type ProductEventEnvelope,
+  type ProjectSnapshot,
+} from "@/lib/project-recovery";
 import {
   projectSnapshotToCanvasNodes,
   projectSnapshotToChatMessages,
   selectCurrentRunCreativeSkillId,
   selectCurrentRunId,
 } from "./conversationRecovery";
+
+function envelope(
+  overrides: Partial<ProductEventEnvelope>,
+): ProductEventEnvelope {
+  return {
+    schema_version: 1,
+    event_id: "evt",
+    event_type: "project.renamed",
+    cursor: 6,
+    project_id: 1,
+    aggregate_type: "project",
+    aggregate_id: "1",
+    aggregate_version: 1,
+    correlation_id: null,
+    causation_id: null,
+    occurred_at: "2026-07-25T00:00:00",
+    payload: {},
+    ...overrides,
+  };
+}
 
 describe("Agent 对话恢复投影", () => {
   it("从 Snapshot 重建消息与 agent_run 生成中卡片", () => {
@@ -393,6 +419,93 @@ describe("当前 Run 已激活 Creative Skill 选择器", () => {
 
   it("空 runs 返回 null", () => {
     expect(selectCurrentRunCreativeSkillId([])).toBeNull();
+  });
+
+  it("Snapshot 首载 + SSE 重连 replay 后选择器仍指向同一 creative_skill_id", () => {
+    const initial: ProjectSnapshot = {
+      project: { id: 1, name: "P", thumb: null, created_at: "now" },
+      canvas: { id: null, project_id: 1, viewport: null, nodes: "[]" },
+      conversation_messages: [],
+      agent_runs: [
+        {
+          agent_run_id: 5,
+          activated_creative_skill_versions: [{ creative_skill_id: "cs_a" }],
+        },
+      ],
+      generation_jobs: [],
+      assets: {},
+      high_watermark_cursor: 5,
+    };
+    let state = applySnapshot(initialProjectRecoveryState(1), initial);
+
+    // 模拟刷新/断线重连后回放的非 run 事件：不得冲掉当前 Run 的技能标签。
+    state = applyProductEvent(
+      state,
+      envelope({
+        event_id: "evt_rename",
+        cursor: 6,
+        event_type: "project.renamed",
+        aggregate_type: "project",
+        aggregate_id: "1",
+        aggregate_version: 2,
+        payload: { name: "改名" },
+      }),
+    );
+    state = applyProductEvent(
+      state,
+      envelope({
+        event_id: "evt_canvas",
+        cursor: 7,
+        event_type: "canvas.updated",
+        aggregate_type: "canvas",
+        aggregate_id: "2",
+        aggregate_version: 0,
+        payload: { viewport: '{"zoom":2}', nodes: "[]" },
+      }),
+    );
+
+    expect(
+      selectCurrentRunCreativeSkillId(state.snapshot?.agent_runs ?? []),
+    ).toBe("cs_a");
+  });
+
+  it("更高 Run 经 agent_run.created 接管后选择器返回新 id", () => {
+    const initial: ProjectSnapshot = {
+      project: { id: 1, name: "P", thumb: null, created_at: "now" },
+      canvas: { id: null, project_id: 1, viewport: null, nodes: "[]" },
+      conversation_messages: [],
+      agent_runs: [
+        {
+          agent_run_id: 5,
+          activated_creative_skill_versions: [{ creative_skill_id: "cs_a" }],
+        },
+      ],
+      generation_jobs: [],
+      assets: {},
+      high_watermark_cursor: 5,
+    };
+    let state = applySnapshot(initialProjectRecoveryState(1), initial);
+
+    state = applyProductEvent(
+      state,
+      envelope({
+        event_id: "evt_run_created",
+        cursor: 6,
+        event_type: "agent_run.created",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 0,
+        payload: {
+          agent_run_id: 9,
+          status: "queued",
+          activated_creative_skill_versions: [{ creative_skill_id: "cs_b" }],
+        },
+      }),
+    );
+
+    expect(
+      selectCurrentRunCreativeSkillId(state.snapshot?.agent_runs ?? []),
+    ).toBe("cs_b");
   });
 });
 

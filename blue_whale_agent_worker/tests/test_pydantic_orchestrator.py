@@ -3062,6 +3062,74 @@ class AutoCreativeSkillSelectionTest(unittest.TestCase):
         self.assertIsNone(selection.chosen)
         self.assertEqual((), selection.matched_fields)
 
+    def test_generic_cat_image_request_yields_zero_selection_against_video_ad_skill(self) -> None:
+        # 模型决策用 fake（chosen_version_id=None，等价 choice_fn=lambda: None）：
+        # 验证「模型看见视频广告候选后主动说不匹配 → Worker 尊重零选择 + 不读 Skill
+        # 正文」的产品级闭环（契约 §4.2.4 零选择 / §6 正文仅在激活时装载）。真实模型
+        # 识别质量归 IK2D8U（Out of scope）。引用工单 IK3NPJ。
+        captured: list = []
+
+        def capturing_choice(messages, info):
+            # 捕获选择提示词，同时产出 chosen_version_id=None 的零选择工具调用
+            # （与 selection_model(lambda: None) 同语义，额外暴露 prompt 用于断言）。
+            captured.append(messages[-1].parts[-1].content)
+            tool_name = info.output_tools[0].name
+            return ModelResponse(
+                parts=(ToolCallPart(
+                    tool_name, {"chosen_version_id": None, "matched_fields": []},
+                    "sel-call"),)
+            )
+
+        video_ad_candidate = AutoCreativeSkillCandidate(
+            creative_skill_id="cs_video_ad",
+            creative_skill_version_id="csv_video_ad_1_0_0",
+            name="video-ad",
+            description="视频广告创作工作流",
+            display_version="1.0.0",
+            resource_digest="sha256:" + "fedcba9876543210" * 4,
+        )
+        work = _pydantic_work(
+            messages=({"role": "user", "content": "生成一张猫图"},),
+            auto_creative_skill_candidates=(video_ad_candidate,),
+        )
+        selection = _select(
+            PydanticAIOrchestrator(
+                FunctionModel(capturing_choice, model_name="doubao-seed-1-6"),
+                _bundle_source(),
+            ), work
+        )
+
+        # 1. 零选择：模型主动不匹配 → chosen 为 None、matched_fields 为空。
+        self.assertIsNone(selection.chosen)
+        self.assertEqual((), selection.matched_fields)
+        # 2. 选择提示词携带视频广告候选元数据：证明模型确实「看见」候选再主动放弃。
+        prompt = captured[0]
+        self.assertIn("csv_video_ad_1_0_0", prompt)
+        self.assertIn("video-ad", prompt)
+        self.assertIn("视频广告创作工作流", prompt)
+        self.assertIn("生成一张猫图", prompt)
+
+        # 3/4. 下游 §6 形状：零选择 → Worker 不写激活 → work 保持空 activated →
+        # advance 不读 Skill 正文、证据不含 creative_skill_body。本测在「零选择 work」
+        # 上直接验证下游闸门形状（与 test_empty_activation_does_not_read_body 同一不变
+        # 量，此处复用同一 work 闭合产品叙事）；「零选择 → 不写激活」的因果链由 Worker
+        # 主循环实现，见 test_zero_selection_skips_activation_and_proceeds_to_basic_generation。
+        source = _FakeCreativeContentSource(body=_creative_body_response())
+
+        def plain_model(messages, info):
+            return ModelResponse(parts=(TextPart("好的，为你生成一张猫图。"),))
+
+        advance_result = _advance(
+            PydanticAIOrchestrator(
+                streaming_model(plain_model), _bundle_source(),
+                creative_content_source=source,
+            ), work
+        )
+        self.assertIsNone(advance_result.error)
+        self.assertEqual(0, source.body_fetches)
+        origins = [entry["origin"] for entry in advance_result.bundle_evidence]
+        self.assertNotIn("creative_skill_body", origins)
+
     def test_choice_outside_candidates_fails_closed(self) -> None:
         # 模型发明候选外 version_id → fail closed（不静默修正、不降级，§4.2.5）。
         def choice_fn():
