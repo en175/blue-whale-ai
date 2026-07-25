@@ -78,7 +78,7 @@ mvn clean package -pl blue-whale-agent/blue-whale-agent-service -am
 ## 关联文档
 
 - **后端编码规范 + agent 约束**：[`CLAUDE.md`](CLAUDE.md)（改后端代码前必读）
-- 工作流（分支/PR/发布/worktree）：仓库根 `.claude/rules/git-workflow.md`
+- 工作流（分支/PR/发布/worktree）：仓库根 `docs/agents/git-workflow.md`
 - Gitee Issue / MCP：`.claude/rules/issue-tracker.md`
-- 代码理解工具（CBM + graphify）：`.claude/rules/code-intelligence.md`
+- 代码理解工具（CBM + graphify）：`docs/agents/code-intelligence.md`
 - 架构决策记录（ADR）：`docs/adr/`
