@@ -292,20 +292,28 @@ Product API 接纳 AgentRun 推进事实的唯一边界：每个 AgentAdvance �
 _Avoid_: Worker 自造独立 `commit_id` 领域身份、把传输关联 ID 当作新提交资格、把 RunCommit 误称为 Product API 的唯一写接口、独立 Activation 写事务、`accepted_actions`、`activations[]`、部分提交。
 
 **RuntimeInvocation（运行时外部调用）**:
-Agent Runtime Executor 在一次 AgentAdvance 内提出的、具有成本或结果不可重建风险的逻辑外部调用，以 `(advance_id, call_slot)` 唯一定位；规范化 `request_digest` 是重放一致性约束而非身份组成。同槽位同摘要恢复原调用，同槽位不同摘要以 `INVOCATION_REPLAY_DIVERGED` fail closed；本地确定性查询、AgentActionProposal 及由 GenerationJob 管理的供应商调用不属于它。
+Agent Runtime Executor 在一次 AgentAdvance 内提出的、具有成本或结果不可重建风险的逻辑外部调用，以 `(advance_id, call_slot)` 唯一定位；覆盖主模型、Creative Skill 自动选择、协议修复模型及符合条件的远程只读工具。规范化 `request_digest` 是重放一致性约束而非身份组成；同槽位同摘要恢复原调用，同槽位不同摘要以 `INVOCATION_REPLAY_DIVERGED` fail closed。本地确定性查询、普通 Product API 读取、AgentActionProposal 及由 GenerationJob 管理的供应商调用不属于它。
 _Avoid_: 把 `request_digest` 拼进身份、用 AI SDK step ID / Provider response ID / 随机 UUID 定位调用、分歧时静默创建新 Invocation、重复记录 GenerationJob / ProviderTask 已拥有的调用事实。
 
 **CallSlot（调用槽位）**:
 Blue Whale Runtime 在统一 Adapter 边界为 AgentAdvance 内每个逻辑外部调用分配的确定性语义位置或序号，例如 Creative Skill 选择、主模型轮次与协议修复轮次；所有真实模型请求必须经过该边界，框架或 SDK 不得隐式发起 Ledger 不可见的 retry。
 _Avoid_: Provider 私有标识、随进程变化的计数、让 SDK 绕过 InvocationLedger 自动重试、把一次协议修复覆盖原模型槽位。
 
+**InvocationCoordinator（调用协调职责）**:
+Blue Whale Runtime 在所有 RuntimeInvocation 外围承担的统一职责边界，而非预先冻结的独立类或服务；它先向 Product API 申请或恢复权威 InvocationAttempt，再允许版本化 RuntimeAdapter 越过 Provider 边界。Runtime 可依据 AgentRun 已冻结策略提出 retry，但任何可能产生新执行的 attempt 都必须由 Product API 原子校验 invocation fence、尝试上限、deadline 与成本预算后准入。
+_Avoid_: 只在进程启动时读取一次策略后自行重试、两个 Worker 并发创建 attempt、让 Adapter 或 SDK 直接获得 retry 权威、把职责名称当作代码拓扑。
+
+**RuntimeAdapter（运行时适配器）**:
+可替换的模型或远程只读工具协议实现；其身份与能力版本随 AgentRun 固定并进入 RuntimeInvocation 的请求摘要。Adapter 可使用 AI SDK 完成消息转换、tool-call 解析、结构化输出、流式消费与 usage 解析，但只返回 dispatch 确定性、Provider 引用、完整规范化结果、usage、错误分类及 `Retry-After` 等事实，不拥有持久状态、调用身份、AgentRun 状态或 retry 决定。SDK 内建自动重试必须关闭；只有能在每次物理 dispatch 前重新经过 InvocationCoordinator 的实现才可等价接管。
+_Avoid_: `retryable: true` 作为 Adapter 决策、运行中静默更换 Adapter、Provider / SDK 私有对象跨边界、以 telemetry 事后补记未获准的调用。
+
 **InvocationAttempt（调用尝试）**:
-RuntimeInvocation 下单次可能越过 Provider 边界并产生执行或计费的具体尝试，拥有独立 `attempt_id`。状态查询、既有结果取回及可靠幂等身份下的原请求恢复属于原 attempt 的 reconciliation；只有可能触发第二次 Provider 执行时才创建关联 attempt。Invocation fence 与 AgentRun fence 分离：失去 AgentRun lease 的 Worker 不得创建新 attempt 或 RunCommit，但可凭精确 attempt 的受限证据能力幂等回报迟到结果；该能力不能推进 Run、改写其他 attempt 或绕过结果校验。
+RuntimeInvocation 下单次可能越过 Provider 边界并产生执行或计费的具体尝试，拥有独立 `attempt_id`。状态查询、既有结果取回、可靠幂等身份下的原请求恢复及可证明尚未 dispatch 的安全重连属于原 attempt 的 reconciliation；只有可能触发第二次 Provider 执行时才创建关联 attempt。Invocation fence 与 AgentRun fence 分离：失去 AgentRun lease 的 Worker 不得创建新 attempt 或 RunCommit，但可凭精确 attempt 的受限证据能力幂等回报迟到结果；该能力不能推进 Run、改写其他 attempt 或绕过结果校验。
 _Avoid_: retry 覆盖原 attempt、把 reconciliation 当作新调用、用过期 AgentRun lease 创建 attempt、让迟到证据回报权限升级为产品状态写权限。
 
 **InvocationLedger（调用台账）**:
-Product API 拥有的 RuntimeInvocation 与 InvocationAttempt 运营事实，保留请求摘要、Adapter 身份、已观察到的供应商引用、调用生命周期及可证明的结果；每个 attempt 的主生命周期为 `prepared → in_flight → succeeded | failed_definitive | outcome_unknown`。`prepared` 尚未越过外部调用边界，可由新执行者安全接管；`in_flight` 的 lease 过期只表示执行权丢失，必须在冻结的 `reconciliation_deadline` 内优先按 Adapter 能力查询供应商状态、恢复结果或以同一幂等身份取回原调用，无法取得决定性证据才进入 `outcome_unknown`。`succeeded` 必须保存可恢复的规范化结果或其持久引用与摘要；`outcome_unknown` 曾经发生的最小审计事实不可抹除，迟到的决定性证据可以使当前结果收敛，但必须保留先前的不确定历史。InvocationLedger 不推进 AgentRun，不替代 RuntimeCheckpoint、RunCommit、AgentActionProposal 或 GenerationJob。
-_Avoid_: 从调用成功直接推导 AgentRun 完成、把超时或 lease 过期等同于失败或未调用、无限期核对、把状态查询或原结果取回误算成 retry、覆盖结果不明的原 attempt、只保存完成状态、永久保存完整提示词 / 结果、保存供应商私有对象、凭据或 Secret。
+Product API 拥有的 RuntimeInvocation 与 InvocationAttempt 运营事实，保留请求摘要、Adapter 身份、已观察到的供应商引用、调用生命周期及可证明的结果；每个 attempt 的主生命周期为 `prepared → in_flight → succeeded | failed_definitive | outcome_unknown`。`prepared` 尚未越过外部调用边界，可由新执行者安全接管；`in_flight` 的 lease 过期只表示执行权丢失，必须在冻结的 `reconciliation_deadline` 内优先按 Adapter 能力查询供应商状态、恢复结果或以同一幂等身份取回原调用，无法取得决定性证据才进入 `outcome_unknown`。partial chunks 只是流观察，不能构成成功结果；只有完整规范化结果或其持久引用与摘要落入 Ledger 后，attempt 才能进入 `succeeded`。一旦请求可能已经 dispatch，timeout、AbortSignal 或本地取消只表示停止等待，不能单独证明失败，必须进入 reconciliation。`outcome_unknown` 曾经发生的最小审计事实不可抹除，迟到的决定性证据可以使当前结果收敛，但必须保留先前的不确定历史。InvocationLedger 不推进 AgentRun，不替代 RuntimeCheckpoint、RunCommit、AgentActionProposal 或 GenerationJob。
+_Avoid_: 从调用成功直接推导 AgentRun 完成、把超时 / AbortSignal / lease 过期等同于失败或未调用、无限期核对、把状态查询或原结果取回误算成 retry、用 partial chunks 标记成功、覆盖结果不明的原 attempt、只保存完成状态、永久保存完整提示词 / 结果、保存供应商私有对象、凭据或 Secret。
 
 **Single Proposal Commit Boundary（单提议提交边界）**:
 一次 AgentAdvance 只能以 `completed`、`awaiting_input`、携带单个 AgentActionProposal 的
