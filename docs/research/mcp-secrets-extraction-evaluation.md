@@ -12,7 +12,7 @@
 - `.mcp.json` 含 2 字段：`GITEE_ENT_API_BASE`（公开 API 地址，非密钥）+ `GITEE_ENT_MCP_ACCESS_TOKEN`（唯一密钥，明文）。
 - `.mcp.json` 未被 git 追踪，token **从未进入 git 历史**（全历史 grep = 0 命中）——token 仅存于本地工作副本。
 - CBM 在用户级 `~/.claude.json` 顶层 `mcpServers`，command 为个人本机绝对路径 `/Users/kimjohn/.local/bin/...`。
-- `.gitignore` 第 9 行 ignore `.mcp.json`，但**未显式列 `.env` / `*.key` / `*.pem`**（仅靠 `docs/agents/commit-and-review.md` + `.claude/rules/git-workflow.md` 文档纪律约束）。
+- `.gitignore` 第 9 行 ignore `.mcp.json`，但**未显式列 `.env` / `*.key` / `*.pem`**（仅靠 `docs/agents/commit-and-review.md` + `docs/agents/git-workflow.md` 文档纪律约束）。
 
 ## (a) 密钥抽到 .env / 环境变量
 

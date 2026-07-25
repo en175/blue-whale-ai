@@ -1,22 +1,36 @@
 ## 代码理解工具
 
-两套代码理解工具，分工见 `.claude/rules/code-intelligence.md`：
+两套代码理解工具，分工见 `docs/agents/code-intelligence.md`（渐进式，碰代码理解任务前 Must Read）：
 
 - **codebase-memory-mcp（CBM）= 默认第一站**：结构查询（找定义 / 调用链 / 复杂度 / 影响分析 / 架构全景），常驻零冷启动。
 - **graphify = 按需进阶**：可视化 HTML 报告、跨文档导航、自然语言模糊探索。
 
 结构查询不盲 grep/glob，先 CBM（`search_graph` / `trace_path` / `get_architecture`）。改代码后 `graphify update .` 刷新（AST-only，零费用）。
 
-## 路由表：按场景查对应规则文件
+## 路由表：按场景 Must Read 对应规则文件
 
-| 场景                              | 文件                                                  |
-| ------------------------------- | --------------------------------------------------- |
-| 代码理解（查结构 / 调用链 / 架构）            | `.claude/rules/code-intelligence.md`                |
-| Gitee 工作流（提交/分支/PR/发布/worktree） | `.claude/rules/git-workflow.md`                     |
-| Gitee Issue / MCP 工具操作          | `.claude/rules/issue-tracker.md`                    |
-| 前端 UI 修改（`blue_whale_web/`）     | `.claude/rules/frontend.md`（路径作用域，改前端文件时自动加载，无需手动查） |
-| PR 模板 / Hook 兜底清单 / 低频细节        | `docs/agents/commit-and-review.md`                  |
+> **渐进式加载**：本表 + 下方 ID 兜底常量 + 最高红线摘要常驻上下文；规则全文按需读。碰对应场景前 **Must Read** 指向的文件，不凭记忆操作。加载策略与分层决策见 [ADR-0044](docs/adr/0044-rules-progressive-loading.md)。
+
+| 场景（碰这类操作前 Must Read） | 规则文件（加载方式） |
+| --- | --- |
+| 代码理解（查结构 / 调用链 / 架构） | `docs/agents/code-intelligence.md`（渐进式） |
+| Gitee 工作流（提交/分支/PR/发布/worktree） | `docs/agents/git-workflow.md`（渐进式） |
+| Gitee Issue / MCP 工具操作 | `.claude/rules/issue-tracker.md`（常驻） |
+| 前端 UI 修改（`blue_whale_web/`） | `.claude/rules/frontend.md`（路径作用域，改前端文件时自动加载） |
+| PR 模板 / Hook 兜底清单 / 低频细节 | `docs/agents/commit-and-review.md` |
 | 文档直改 master（`CONTEXT.md` / `docs` 散文） | `docs/adr/0025-doc-on-master-allowlist.md` + `scripts/commit-spec-on-master.sh` |
+
+## Gitee ID 兜底常量
+
+本仓固定 ID（长期稳定，模型可直接用；碰到 401 或疑似变更时以 `list` API 为准，校验走 `scripts/gitee-resolve-ids.sh`）：
+
+| ID | 值 | 含义 | 动态查法 |
+| --- | --- | --- | --- |
+| `enterprise_id` | `16660949` | 杭州玄浮科技 | `list_enterprises` |
+| `project_id` | `48854568` | blue-whale-ai 仓库 | `list_enterprise_repositories` |
+| `program_id` | `883843` | Blue-Whale-AI 项目 | `list_programs` |
+
+⚠️ URL 里的 `883843` 是 **program_id**（项目路由），**不是** `enterprise_id` / `project_id`——误当后两者传入会触发误导性 401。完整 ID 解析约定见 `.claude/rules/issue-tracker.md`。
 
 ## 最高红线（摘要，细节见 rules 文件）
 
@@ -27,7 +41,7 @@
 5. **Worktree 基于同步后的本地 master** — 入口要求主 checkout 位于干净 `master`，先 fetch `origin/master`；远程领先则 fast-forward，本地领先则保留，双方分叉则普通 merge。冲突自动 abort 且不创建 Work Tree；成功后从同步后的精确 SHA 创建中文任务分支。
 6. **授权无二次弹框** — 只认当前对话中的人类授权；Agent 自动使用 `--user-authorized` 或一次性凭证（提交入口除外：worktree 工单分支 commit 本地可逆，出现即放行），Hook 只纠偏和硬拦，不返回 ASK。
 7. **文档驱动、Hook 兜底** — Agent 优先依据本文件及路由规则主动调用标准入口；Hook 只在检测到绕过、缺授权、缺模式或危险 Git 操作时阻断，禁止让 Hook 自动同步、选择策略或推进正常状态机。
-8. **同族工单串行、契约先行** — 同一契约章节的基础设施先合入，功能工单再开工；跨进程字段先在契约文档定死后实现。细则见 `.claude/rules/git-workflow.md`。
+8. **同族工单串行、契约先行** — 同一契约章节的基础设施先合入，功能工单再开工；跨进程字段先在契约文档定死后实现。细则见 `docs/agents/git-workflow.md`（路由表 Must Read）。
 
 ## 写入前自检（每次写操作前强制执行）
 
@@ -44,7 +58,7 @@
 
 ## Agent skills
 
-> mattpocock/skills 工程技能的配置锚点。技能运行时读 `docs/agents/` 下三份配置；与上方「路由表」的 `.claude/rules/` 是两套——rules 管 git 工作流硬规则，`docs/agents/` 管 matt 技能运行时配置。
+> mattpocock/skills 工程技能的配置锚点。技能运行时读 `docs/agents/` 下三份配置（issue-tracker / triage-labels / domain 手册）；这与路由表里的规则文件是两套——规则文件管项目工作流硬规则（issue-tracker 常驻、git-workflow/code-intelligence 渐进式），本节三份配置管 matt 技能运行时。
 
 ### Issue tracker
 

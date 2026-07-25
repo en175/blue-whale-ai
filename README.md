@@ -8,7 +8,7 @@
 
 代码理解工具（结构查询 / 调用链 / 架构全景）。配置在**用户级**（`~/.claude.json`），二进制 + server 注册各成员自行安装。
 
-完整 onboarding（安装 / 配置 / 重启 / 建索引 / worktree 独立索引 / 降级路径）见 [`.claude/rules/code-intelligence.md`](.claude/rules/code-intelligence.md)「团队 onboarding」章节。
+完整 onboarding（安装 / 配置 / 重启 / 建索引 / worktree 独立索引 / 降级路径）见 [`docs/agents/code-intelligence.md`](docs/agents/code-intelligence.md)「团队 onboarding」章节。
 
 ### gitee-ent
 
