@@ -54,6 +54,13 @@ class AutoCreativeSkillActivationIT {
     private static final long LEGACY_SKILL_ID = 5001L;
     private static final long PROJECT_ID = 93001L;
     private static final long USER_ID = 10L;
+    private static final long USER_ID_2 = 11L;
+    private static final long PROJECT_ID_2 = 93002L;
+    private static final long LEGACY_SKILL_ID_2 = 5002L;
+    private static final String CS_ID_2 = "cs_video_cut";
+    private static final String CSV_ID_2 = "csv_video_1_0_0";
+    private static final String DIGEST_2 =
+            "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 
     @Autowired
     private MockMvc mockMvc;
@@ -307,6 +314,64 @@ class AutoCreativeSkillActivationIT {
                 .andExpect(jsonPath("$.code").value(100302));
     }
 
+    @Test
+    void autoCandidatesIsolatedAcrossUsers() throws Exception {
+        // user 10：cs_poster_design auto 关系（autoSkillFixture 内置 description="海报设计技能"）。
+        autoSkillFixture();
+        // user 11：独立 cs_video_cut auto 关系，name/description/version_id/digest 均不同。
+        jdbcTemplate.update("INSERT INTO project (id, owner_id, name) VALUES (?, ?, 'auto-skill-test-2')",
+                PROJECT_ID_2, USER_ID_2);
+        insertLegacySkill(LEGACY_SKILL_ID_2, "legacy-video");
+        insertUserSkillAuto(USER_ID_2, LEGACY_SKILL_ID_2, 1);
+        insertCreativeSkillWithSource(CS_ID_2, "video-cut", LEGACY_SKILL_ID_2, CSV_ID_2, "视频剪辑技能");
+        insertCreativeSkillVersion(CSV_ID_2, CS_ID_2, DIGEST_2);
+
+        long runUser10 = postMessage("iso-user-10", "生成海报");
+        long runUser11 = postMessage(USER_ID_2, PROJECT_ID_2, "iso-user-11", "生成视频");
+
+        // 各 Run 候选只含自己的 1 条，6 字段不串扰。
+        JsonNode candidatesUser10 = objectMapper.readTree(jdbcTemplate.queryForObject(
+                "SELECT auto_creative_skill_candidates FROM agent_runs WHERE id = ?", String.class, runUser10));
+        assertThat(candidatesUser10.isArray()).isTrue();
+        assertThat(candidatesUser10).hasSize(1);
+        assertThat(candidatesUser10.get(0).path("creative_skill_id").asText()).isEqualTo(CS_ID);
+        assertThat(candidatesUser10.get(0).path("creative_skill_version_id").asText()).isEqualTo(CSV_ID);
+        assertThat(candidatesUser10.get(0).path("name").asText()).isEqualTo("poster-design");
+        assertThat(candidatesUser10.get(0).path("description").asText()).isEqualTo("海报设计技能");
+        assertThat(candidatesUser10.get(0).path("display_version").asText()).isEqualTo("1.0.0");
+        assertThat(candidatesUser10.get(0).path("resource_digest").asText()).isEqualTo(DIGEST);
+
+        JsonNode candidatesUser11 = objectMapper.readTree(jdbcTemplate.queryForObject(
+                "SELECT auto_creative_skill_candidates FROM agent_runs WHERE id = ?", String.class, runUser11));
+        assertThat(candidatesUser11.isArray()).isTrue();
+        assertThat(candidatesUser11).hasSize(1);
+        assertThat(candidatesUser11.get(0).path("creative_skill_id").asText()).isEqualTo(CS_ID_2);
+        assertThat(candidatesUser11.get(0).path("creative_skill_version_id").asText()).isEqualTo(CSV_ID_2);
+        assertThat(candidatesUser11.get(0).path("name").asText()).isEqualTo("video-cut");
+        assertThat(candidatesUser11.get(0).path("description").asText()).isEqualTo("视频剪辑技能");
+        assertThat(candidatesUser11.get(0).path("display_version").asText()).isEqualTo("1.0.0");
+        assertThat(candidatesUser11.get(0).path("resource_digest").asText()).isEqualTo(DIGEST_2);
+    }
+
+    @Test
+    void forcedUseDoesNotRewriteAutoRelation() throws Exception {
+        autoSkillFixture();
+        Integer autoBefore = jdbcTemplate.queryForObject(
+                "SELECT auto FROM user_skill WHERE user_id = ? AND skill_id = ?",
+                Integer.class, USER_ID, LEGACY_SKILL_ID);
+
+        long forcedRun = postForcedMessage("forced-no-rewrite", "强制海报", CS_ID);
+
+        Integer autoAfter = jdbcTemplate.queryForObject(
+                "SELECT auto FROM user_skill WHERE user_id = ? AND skill_id = ?",
+                Integer.class, USER_ID, LEGACY_SKILL_ID);
+        assertThat(autoAfter).isEqualTo(autoBefore);
+        // forced Run 候选为空：forced 路径只读，不改写 auto 关系。
+        assertThat(objectMapper.readTree(jdbcTemplate.queryForObject(
+                "SELECT auto_creative_skill_candidates FROM agent_runs WHERE id = ?", String.class, forcedRun)))
+                .isEmpty();
+    }
+
     // ===== 夹具与工具 =====
 
     /** pin_agent 发布基线 + user 10 的 auto 关系（legacy skill 5001 → cs_poster_design/csv_poster_1_0_0）。 */
@@ -347,10 +412,15 @@ class AutoCreativeSkillActivationIT {
 
     private void insertCreativeSkillWithSource(
             String skillId, String name, long sourceSkillId, String activeVersionId) {
+        insertCreativeSkillWithSource(skillId, name, sourceSkillId, activeVersionId, "海报设计技能");
+    }
+
+    private void insertCreativeSkillWithSource(
+            String skillId, String name, long sourceSkillId, String activeVersionId, String description) {
         jdbcTemplate.update("""
                 INSERT INTO creative_skill (creative_skill_id, name, description, source_skill_id, active_version_id)
                 VALUES (?, ?, ?, ?, ?)
-                """, skillId, name, "海报设计技能", sourceSkillId, activeVersionId);
+                """, skillId, name, description, sourceSkillId, activeVersionId);
     }
 
     private void insertCreativeSkillVersion(String versionId, String skillId, String resourceDigest) {
@@ -363,8 +433,13 @@ class AutoCreativeSkillActivationIT {
     }
 
     private long postMessage(String idempotencyKey, String content) throws Exception {
-        return objectMapper.readTree(mockMvc.perform(post("/api/projects/" + PROJECT_ID + "/conversation/messages")
-                        .header("X-User-Id", String.valueOf(USER_ID))
+        return postMessage(USER_ID, PROJECT_ID, idempotencyKey, content);
+    }
+
+    private long postMessage(long userId, long projectId, String idempotencyKey, String content)
+            throws Exception {
+        return objectMapper.readTree(mockMvc.perform(post("/api/projects/" + projectId + "/conversation/messages")
+                        .header("X-User-Id", String.valueOf(userId))
                         .header("Idempotency-Key", idempotencyKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"client_message_id\":\"client-" + idempotencyKey
