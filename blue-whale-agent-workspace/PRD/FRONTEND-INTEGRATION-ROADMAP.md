@@ -1,5 +1,7 @@
 # 前端接通后端 PRD 模块路线图
 
+> **⚠️ 部分替代（2026-07-24，IK2D8R）**：本路线图挂的 #IJZ7Z7（Agent 对话交付）已由 IK2D8R 及其同族工单承接：旧 `agent/turn` 公开协议、`decision_context`、L1 与固定九分支废弃，唯一公开对话协议为 Conversation message 命令 + Project Snapshot/SSE（ADR-0016/0039）。本文其余进度记录保留历史价值。
+
 > 🔗 **关联**：wayfinder map #IK29RN（三链路总图）· 需求 #IJZ7Z7 / #IJZ7Z8 / #IJZ7Z9
 > **同批 PRD**：[AGENT-CONVERSATION-PRD.md](./AGENT-CONVERSATION-PRD.md) · [BACKEND-API-PRD.md](./BACKEND-API-PRD.md) · [FRONTEND-SKILL-PANEL-PRD.md](./FRONTEND-SKILL-PANEL-PRD.md)
 

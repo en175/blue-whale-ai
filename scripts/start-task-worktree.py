@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import os
 import re
 import subprocess
 import sys
@@ -111,8 +112,13 @@ def active_git_operations(root):
 
 
 def ensure_primary_master(root):
-    toplevel = Path(git(root, "rev-parse", "--show-toplevel").stdout.strip()).resolve()
-    if toplevel != root.resolve():
+    # 路径判等一律 samefile（inode 比较），禁跨来源字面串比较：大小写不敏感
+    # 文件系统上 git toplevel（getcwd 规范大小写）与 BASH_SOURCE/pwd 推导的
+    # root（逻辑拼写）可能仅大小写不同，字符串比较会把同一目录误判为不同目录。
+    # realpath/resolve 保留输入大小写，换用它们不能替代 samefile。
+    # 见 docs/adr/0039-path-identity-via-inode-comparison.md
+    toplevel = Path(git(root, "rev-parse", "--show-toplevel").stdout.strip())
+    if not os.path.samefile(root, toplevel):
         raise WorkflowError("脚本必须从主 checkout 所在仓库执行。")
 
     git_dir = absolute_git_path(root, git(root, "rev-parse", "--git-dir").stdout.strip())

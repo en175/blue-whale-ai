@@ -4,96 +4,75 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 import { AspectRatioIcon } from "./icons/AspectRatioIcon";
-import {
-  getImageModels,
-  type ImageModelCapability,
-} from "@/app/canvas/_canvas/api/generation";
-
-// --- 对外类型（名字保留，形状对齐 API 映射后的 UI 模型） ---
-
-export type ImageResolution = { id: string; label: string };
-export type ImageAspectRatio = { id: string; label: string };
-
-export type ImageModel = {
-  /** 真实模型 id（如 doubao-seedream-5-0-260128），映射自 capability.modelId */
-  id: string;
-  label: string;
-  defaultResolutionId: string;
-  stream: boolean;
-  resolutions: ImageResolution[];
-  /** 该模型支持的宽高比（从 capability.supportedAspectRatios 映射） */
-  aspectRatios: ImageAspectRatio[];
-  /** 原始 API 能力（含 supportedFormats/features 等高级字段，供消费方按需读取） */
-  capability: ImageModelCapability;
-};
-
-// --- API → UI 模型映射 ---
-
-function capabilityToModel(cap: ImageModelCapability): ImageModel {
-  return {
-    id: cap.modelId,
-    label: cap.modelLabel,
-    defaultResolutionId: cap.defaultSize,
-    stream: cap.features.stream,
-    resolutions: cap.supportedSizes.map((s) => ({ id: s.id, label: s.label })),
-    aspectRatios: cap.supportedAspectRatios.map((r) => ({ id: r, label: r })),
-    capability: cap,
-  };
-}
-
-// --- 数据获取（模块级缓存，多消费方共享单次请求） ---
-
-let imageModelsPromise: Promise<ImageModel[]> | null = null;
-
-function fetchImageModels(): Promise<ImageModel[]> {
-  if (!imageModelsPromise) {
-    imageModelsPromise = getImageModels()
-      .then((caps) => caps.map(capabilityToModel))
-      .catch((err) => {
-        imageModelsPromise = null; // 失败清缓存，允许下次重试
-        throw err;
-      });
-  }
-  return imageModelsPromise;
-}
+import type { ImageModelCapability } from "@/app/canvas/_canvas/api/generation";
 
 /**
- * 拉取 DB 驱动的图片模型能力列表。
- * 模块级缓存保证多消费方（Popover / ImageDockContent / AgentComposer）共享单次请求。
+ * 桥接期常量：BottomDock 图片表单已迁移到 getImageModels() 能力表（IK21O6），
+ * 此处仅 AgentComposer（Agent 入口，IK21O6 out of scope）继续消费。
+ * 待后续子工单把 AgentComposer 迁到能力表后整体删除。
  */
-export function useImageModels(): {
-  models: ImageModel[];
-  loading: boolean;
-  error: string | null;
-} {
-  const [models, setModels] = useState<ImageModel[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+export const IMAGE_MODELS = [
+  {
+    id: "doubao-seedream-5-0-260128",
+    label: "Seedream 5.0 Lite",
+    defaultResolutionId: "2k",
+    stream: true,
+    resolutions: [
+      { id: "2k", label: "2K" },
+      { id: "3k", label: "3K" },
+      { id: "4k", label: "4K" },
+    ],
+  },
+  {
+    id: "doubao-seedream-4-5-251128",
+    label: "Seedream 4.5",
+    defaultResolutionId: "2k",
+    stream: true,
+    resolutions: [
+      { id: "2k", label: "2K" },
+      { id: "4k", label: "4K" },
+    ],
+  },
+  {
+    id: "doubao-seedream-4-0-250828",
+    label: "Seedream 4.0",
+    defaultResolutionId: "2k",
+    stream: true,
+    resolutions: [
+      { id: "1k", label: "1K" },
+      { id: "2k", label: "2K" },
+      { id: "4k", label: "4K" },
+    ],
+  },
+  {
+    id: "doubao-seedream-3-0-t2i-250415",
+    label: "Seedream 3.0 T2I",
+    defaultResolutionId: "1024x1024",
+    stream: false,
+    resolutions: [
+      { id: "512x512", label: "512 × 512" },
+      { id: "1024x1024", label: "1024 × 1024" },
+      { id: "2048x2048", label: "2048 × 2048" },
+    ],
+  },
+];
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchImageModels()
-      .then((mapped) => {
-        if (!cancelled) {
-          setModels(mapped);
-          setLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "加载图片模型失败");
-          setLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+export const IMAGE_ASPECT_RATIOS = [
+  { id: "9:16", label: "9:16" },
+  { id: "3:4", label: "3:4" },
+  { id: "1:1", label: "1:1" },
+  { id: "4:3", label: "4:3" },
+  { id: "16:9", label: "16:9" },
+  { id: "2:3", label: "2:3" },
+  { id: "3:2", label: "3:2" },
+  { id: "21:9", label: "21:9" },
+];
 
-  return { models, loading, error };
-}
+export type ImageModel = (typeof IMAGE_MODELS)[number];
+export type ImageResolution = ImageModel["resolutions"][number];
+export type ImageAspectRatio = (typeof IMAGE_ASPECT_RATIOS)[number];
 
-/** 取模型默认分辨率；缺省回退到第一个。签名保持兼容（消费方依赖）。 */
+/** 取模型默认分辨率；缺省回退到第一个。 */
 export function defaultResolutionOf(model: ImageModel): ImageResolution {
   return (
     model.resolutions.find((r) => r.id === model.defaultResolutionId) ??
@@ -105,31 +84,49 @@ export interface ImageModelSettingsPopoverProps {
   triggerRef: React.RefObject<HTMLElement | null>;
   open: boolean;
   onClose: () => void;
-  selectedModel: ImageModel;
-  onModelChange: (model: ImageModel) => void;
-  selectedResolution: ImageResolution;
-  onResolutionChange: (resolution: ImageResolution) => void;
+  /** 可选模型列表（能力表驱动，getImageModels() 返回）。 */
+  models: ImageModelCapability[];
+  selectedModel: ImageModelCapability;
+  onModelChange: (model: ImageModelCapability) => void;
+  /** 所选分辨率档位（selectedModel.supported_sizes 的某项）。 */
+  selectedSize: { id: string; label: string };
+  onSizeChange: (size: { id: string; label: string }) => void;
   selectedAspectRatio: ImageAspectRatio;
   onAspectRatioChange: (ratio: ImageAspectRatio) => void;
+  /** 联网搜索开关态。 */
+  webSearch: boolean;
+  onWebSearchChange: (v: boolean) => void;
+  /** 是否显示联网开关（依所选模型 features.tools）。 */
+  showWebSearch: boolean;
+  /** 组图模式开关态。 */
+  sequential: boolean;
+  onSequentialChange: (v: boolean) => void;
+  /** 是否显示组图开关（依所选模型 features.sequential_image_generation）。 */
+  showSequential: boolean;
 }
 
 export function ImageModelSettingsPopover({
   triggerRef,
   open,
   onClose,
+  models,
   selectedModel,
   onModelChange,
-  selectedResolution,
-  onResolutionChange,
+  selectedSize,
+  onSizeChange,
   selectedAspectRatio,
   onAspectRatioChange,
+  webSearch,
+  onWebSearchChange,
+  showWebSearch,
+  sequential,
+  onSequentialChange,
+  showSequential,
 }: ImageModelSettingsPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: 16, bottom: 64 });
   const [modelOpen, setModelOpen] = useState(false);
   const [resolutionOpen, setResolutionOpen] = useState(false);
-  // DB 驱动的模型列表（模块级缓存，与 ImageDockContent/AgentComposer 共享单次请求）
-  const { models } = useImageModels();
 
   useEffect(() => {
     if (open && triggerRef.current) {
@@ -246,7 +243,7 @@ export function ImageModelSettingsPopover({
                   textOverflow: "ellipsis",
                 }}
               >
-                {selectedModel.label}
+                {selectedModel.model_label}
               </span>
               <ChevronDown
                 width={14}
@@ -274,7 +271,7 @@ export function ImageModelSettingsPopover({
               >
                 {models.map((model) => (
                   <button
-                    key={model.id}
+                    key={model.model_id}
                     type="button"
                     onClick={() => {
                       onModelChange(model);
@@ -286,7 +283,7 @@ export function ImageModelSettingsPopover({
                       borderRadius: 6,
                       border: 0,
                       background:
-                        selectedModel.id === model.id
+                        selectedModel.model_id === model.model_id
                           ? "rgba(255, 255, 255, 0.08)"
                           : "transparent",
                       color: "rgb(255, 255, 255)",
@@ -299,7 +296,7 @@ export function ImageModelSettingsPopover({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    <span style={{ fontWeight: 600 }}>{model.label}</span>
+                    <span style={{ fontWeight: 600 }}>{model.model_label}</span>
                   </button>
                 ))}
               </div>
@@ -355,7 +352,7 @@ export function ImageModelSettingsPopover({
                   textAlign: "left",
                 }}
               >
-                {selectedResolution.label}
+                {selectedSize.label}
               </span>
               <ChevronDown
                 width={14}
@@ -381,12 +378,12 @@ export function ImageModelSettingsPopover({
                   gap: 2,
                 }}
               >
-                {selectedModel.resolutions.map((res) => (
+                {selectedModel.supported_sizes.map((res) => (
                   <button
                     key={res.id}
                     type="button"
                     onClick={() => {
-                      onResolutionChange(res);
+                      onSizeChange(res);
                       setResolutionOpen(false);
                     }}
                     style={{
@@ -395,7 +392,7 @@ export function ImageModelSettingsPopover({
                       borderRadius: 6,
                       border: 0,
                       background:
-                        selectedResolution.id === res.id
+                        selectedSize.id === res.id
                           ? "rgba(255, 255, 255, 0.08)"
                           : "transparent",
                       color: "rgb(255, 255, 255)",
@@ -447,7 +444,7 @@ export function ImageModelSettingsPopover({
             gap: 2,
           }}
         >
-          {selectedModel.aspectRatios.map((ratio) => {
+          {IMAGE_ASPECT_RATIOS.map((ratio) => {
             const selected = selectedAspectRatio.id === ratio.id;
             return (
               <button
@@ -500,8 +497,158 @@ export function ImageModelSettingsPopover({
           })}
         </div>
       </div>
-    </div>
-  ,
-  body
-);
+
+      {/* 联网搜索 */}
+      {showWebSearch && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            padding: "4px 0",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--tc-text-muted)",
+              fontWeight: 500,
+              padding: "0px 4px",
+            }}
+          >
+            联网搜索
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              padding: "7px 4px",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 12,
+                color: "var(--tc-text-secondary)",
+                fontWeight: 400,
+              }}
+            >
+              搜索最新网络信息辅助生成
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={webSearch}
+              aria-label="联网搜索"
+              onClick={() => onWebSearchChange(!webSearch)}
+              style={{
+                position: "relative",
+                width: 36,
+                height: 20,
+                borderRadius: 9999,
+                border: 0,
+                background: webSearch
+                  ? "var(--tc-accent)"
+                  : "var(--tc-border-active)",
+                cursor: "pointer",
+                transition: "background 150ms",
+                flexShrink: 0,
+                padding: 0,
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  top: 2,
+                  left: webSearch ? 18 : 2,
+                  width: 16,
+                  height: 16,
+                  borderRadius: "50%",
+                  background: "var(--tc-on-accent)",
+                  transition: "left 150ms",
+                }}
+              />
+            </button>
+          </div>
+        </div>
+      )}
+      {/* 组图模式 */}
+      {showSequential && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            padding: "4px 0",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--tc-text-muted)",
+              fontWeight: 500,
+              padding: "0px 4px",
+            }}
+          >
+            组图模式
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              padding: "7px 4px",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 12,
+                color: "var(--tc-text-secondary)",
+                fontWeight: 400,
+              }}
+            >
+              单次调用生成多张关联图
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={sequential}
+              aria-label="组图模式"
+              onClick={() => onSequentialChange(!sequential)}
+              style={{
+                position: "relative",
+                width: 36,
+                height: 20,
+                borderRadius: 9999,
+                border: 0,
+                background: sequential
+                  ? "var(--tc-accent)"
+                  : "var(--tc-border-active)",
+                cursor: "pointer",
+                transition: "background 150ms",
+                flexShrink: 0,
+                padding: 0,
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  top: 2,
+                  left: sequential ? 18 : 2,
+                  width: 16,
+                  height: 16,
+                  borderRadius: "50%",
+                  background: "var(--tc-on-accent)",
+                  transition: "left 150ms",
+                }}
+              />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>,
+    body,
+  );
 }

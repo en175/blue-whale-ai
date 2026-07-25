@@ -1,0 +1,9 @@
+[
+  {
+    "creative_skill_id": "cs_poster_design",
+    "creative_skill_version_id": "csv_poster_design_1_0_0",
+    "name": "poster-design",
+    "description": "海报设计创作方法：从主题到版式的分步工作流。",
+    "activation_eligibility": "requires_user_use"
+  }
+]

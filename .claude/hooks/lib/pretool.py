@@ -96,8 +96,15 @@ def value(key: str) -> int:
         # tool_name 保留 tool_input 回退以兼容旧测试夹具。
         if key == "tool_name":
             result = data.get("tool_name", tool_input.get("tool_name"))
+        elif key == "tool_use_id":
+            # Kimi CLI 载荷的关联 id 字段是 tool_call_id（无 tool_use_id）；
+            # Claude Code / Codex / ZCode 均带 tool_use_id，优先取之。
+            result = data.get("tool_use_id") or data.get("tool_call_id")
         else:
             result = data.get(key)
+    elif key == "file_path":
+        # Kimi CLI 的 Write/Edit 参数名是 path（无 file_path）。
+        result = tool_input.get("file_path") or tool_input.get("path")
     else:
         result = tool_input.get(key)
     if result is None:
@@ -582,12 +589,8 @@ def is_task_branch(cwd: str | None) -> bool:
 def mode_task_acceptance_git(command: str) -> int:
     for invocation in git_invocations(command):
         if invocation.subcommand == "commit":
-            # 工单分支放行手动 commit（长期特性分支频繁连续提交，非 worktree 原子模型）；
-            # master/非工单分支仍拦（保护用户集成区）。与下方 merge/pull 分支感知一致。
-            if not is_task_branch(invocation.cwd):
-                print("git commit")
-                return 0
-            continue
+            print("git commit")
+            return 0
         if invocation.subcommand == "merge" and not has_ff_only(invocation.args):
             if "origin/master" in invocation.args and not is_task_branch(invocation.cwd):
                 continue

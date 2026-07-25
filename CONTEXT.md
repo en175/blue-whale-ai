@@ -1,8 +1,8 @@
 # Blue-Whale 前端
 
-一个面向 AI Agent / Canvas 交互的纯客户端单页应用（SPA）。项目与画布状态已对接后端
-（project/canvas CRUD 经网关 `/api/agent/**` 路由到 agent-service），生成链路对接后端生成服务；
-Agent 对话回复仍含本地 mock（`messages.ts` 的 `buildMockReplyForMode`）。
+一个面向 AI Agent / Canvas 交互的单页应用（SPA）。前端承载 Canvas、AgentChatPanel
+与 BottomDock 等入口；生成、审核、成本与审计由 Java Product API 与 Python 运行时组成的
+后端统一处理（详见 ADR-0015），生图入口共享统一的生图工具包与 GenerationJob 队列流水线。
 
 ## Language
 
@@ -33,14 +33,28 @@ _Avoid_: 把 Card 与 NodeItem 当作两个独立概念。
 **BottomDock**（底部生成 Dock）:
 Canvas 底部的生成工具面板，由 `LeftToolbar` 的 ai-image / ai-video 工具触发，
 含 image / video 两种 mode。它是**纯生成工具**：手填参数（模型、比例、分辨率、
-时长、数量、联网搜索等）做确定式生成，不涉及对话流。
+时长、数量、联网搜索等；参数随 GenerationJob 提交真实生效）做确定式生成，不涉及对话流。
 对应 `_canvas/components/dock/`。
 
-**生成能力的两个入口（职责边界不同，非同一功能）**:
+**生图入口（职责边界不同，非同一功能）**:
 - **BottomDock**：纯生成工具，参数驱动，不暴露对话上下文。
 - **AgentChatPanel**：编排 + 生成，对话/技能/上下文驱动，不暴露细粒度参数。
-两者产物都是 Card / NodeItem，但**职责边界不同、是两个独立功能**，
-后续对接后端应为两套独立的生成路径，不应强行合并为同一 API。
+- **/generate（GenerationInbox）**：Agent 对话式生成，承载独立 Conversation 与恢复语义。
+三者产物都是 Card / NodeItem，**入口职责独立、是不同功能**；但执行层不各自维护独立生成路径，
+统一进入生图工具包与 GenerationJob 队列流水线（成本预留 + 内容审核 + 失败重试）。
+
+**生图工具包（generation toolkit）**:
+三个生图入口共享的执行层，与入口的产品职责边界正交。由三部分组成：
+- **GenerationProvider** —— 图片执行层的产品中性请求/结果契约；具体实现（Fake、OpenAI、
+  火山方舟 Agent Plan 等）按运行 mode（`GENERATION_MODE`）装配，当前没有独立的运行时 Provider Registry。
+- **generation_model_capability** —— Provider、模型与尺寸/格式/数量/参考图/tools 能力的权威数据表；
+  前端选项从后端 `/api/generation/models` 拉取，不再写死。
+- **公共治理流水线** —— 成本预留（CostReservation）、内容审核（ContentReview）、失败重试与多输出，
+  由统一的 GenerationJob 队列承接。
+火山方舟 Agent Plan 使用专属 `/api/plan/v3` 端点与专属 API Key；退役的 `/api/generation/image`
+直连因绕过成本预留与内容审核不再提供（详见 [ADR-0038](docs/adr/0038-generation-toolkit-and-image-direct-retirement.md)）。
+_Avoid_: 把工具包写成独立的 Provider Registry 运行时组件；把入口产品职责边界与执行层统一混为一谈；
+新增供应商时不走能力表与队列流水线。
 
 **Project**（项目，产品归属根）:
 领域顶层的归属、授权与生命周期范围；Canvas、Conversation、AgentRun、GenerationJob 与 Asset 均归属于 Project，但各自保持独立的一致性边界。
@@ -48,8 +62,14 @@ Canvas 底部的生成工具面板，由 `LeftToolbar` 的 ai-image / ai-video �
 _Avoid_: 把 Canvas 当作顶层概念；把 Project 理解为包住全部对象的单一强一致事务聚合。
 
 **Conversation**（对话）:
-Project 内唯一的 AgentChatPanel 持久化消息流；按顺序记录用户与 Agent 的对话事实，并关联多个先后发生的 AgentRun。
-_Avoid_: 把消息直接挂到 Project；把每个 AgentRun 当作独立对话；首版为一个 Project 建立多个 Conversation。
+普通 Canvas Project 内唯一的 AgentChatPanel 持久化消息流；按顺序记录用户与 Agent 的对话事实，并关联多个先后发生的 AgentRun。
+GenerationInbox 允许并存多段独立 Conversation（新对话/历史切换），每段消息流独立排序与恢复。
+_Avoid_: 把消息直接挂到 Project；把每个 AgentRun 当作独立对话；为普通 Canvas Project 建立多个 Conversation。
+
+**GenerationInbox**（生成收件箱）:
+每位 User 最多一个活动实例的系统用途 Project（`purpose=generation_inbox`，识别不依赖名称，改名不影响定位）；承载 /generate 页 Agent 对话式创作的 Conversation、AgentRun、GenerationJob 与产出 Asset。
+惰性创建：仅打开页面不创建，首条被系统接收的消息原子地查找或创建并持久化；从项目列表隐藏；删除为永久删除——物理移除其对话、生成记录与作品（保留最小审计事件），之后首条消息创建全新实例。
+_Avoid_: 把收件箱当作普通 Canvas Project 展示或编辑；通过通用项目端点软删收件箱绕过永久删除；按名称查找收件箱。
 
 **Card 生命周期状态**: `generating` → `normal` | `failed` | `cancelled`。
 失败后的恢复入口仍在原 Card 上，但后端以关联的新 GenerationJob 执行重试；取消且没有产物的
@@ -61,14 +81,69 @@ _Avoid_: 把消息直接挂到 Project；把每个 AgentRun 当作独立对话�
 _Avoid_: 访客、匿名 User、客户端自报 `userId`、把浏览器本地标识当作身份。
 
 **ContentReview（内容审核）**:
-对进入 Agent 或供应商的输入及即将向 User 展示的输出形成的产品安全决定；只有明确通过的内容
-才能继续或可见，审核拒绝、超时或不可用均不得默认放行。
-_Avoid_: 把供应商审核结果直接当作产品权威；审核不可用时默认通过。
+Java Product API 对产品策略纳入审核范围的内容形成的安全决定；普通用户文字消息和提示词不做
+独立前置审核，Agent 或生成供应商的安全结果可以成为后续 ReviewEvidence。受审内容可以复用匹配的
+既有结果或依据充分的证据，不要求人工逐条审批，也不等于每次都调用外部审核服务。
+内容决定只有 `pass` 或 `reject`；超时、不可用或无效证据属于审核运行故障，不得伪装成内容拒绝。
+规范化决定随关联产品事实保留并参与未来 Project 删除流程；最小化 AuditRecord 独立保留 365 天。
+同一 Project 内相同受审主体、内容摘要、模态、输入/输出方向和策略版本共享一个逻辑审核；其
+`pending` 只能进入不可变的 `decided` 或 `failed` 终态，终态失败后的 User 重试创建关联的新审核。
+_Avoid_: 人工审核、把供应商审核结果直接当作产品权威、把产品决定理解为全量外部调用、审核不可用时默认通过。
+
+**ContentReviewPolicy（内容审核策略）**:
+Java Product API 形成 ContentReview 决定时采用的不可变、版本化规则包，包含适用模态与方向、
+产品判定规则、供应商配置引用、阈值、ReviewReasonCode 映射版本和证据要求。候选版本依次经过
+`draft`、`validated`、`active`、`retired`；新审核绑定创建时的活动版本，后续尝试和历史决定不漂移。
+_Avoid_: 原地修改已发布策略、让供应商配置隐式改变产品决定、回滚时改写既有审核或重审历史 Asset。
+
+**ReviewReasonCode（审核原因码）**:
+ContentReview 作出 `reject` 决定时记录的一个或多个产品级安全分类，稳定取值为
+`sexual_content`、`minor_safety`、`violence`、`self_harm`、`hate_or_harassment`、
+`illegal_or_regulated`、`privacy_or_sensitive_data`、`fraud_or_impersonation`、
+`cyber_abuse`、`prompt_attack`、`resource_abuse`、`custom_policy` 或
+`unclassified_policy_risk`。供应商标签必须经版本化映射转换；未知标签归入
+`unclassified_policy_risk` 并拒绝。ReviewReasonCode 只对具备安全运营权限的内部角色可见，
+普通 User 和公开 API 只得到稳定错误码与安全提示。
+_Avoid_: 供应商原始标签、把超时或不可用等运行故障当作审核原因码、未知标签默认放行、向普通 User 暴露内部原因码或命中规则。
+
+**ReviewEvidence（审核证据）**:
+Java Product API 形成 ContentReview 时采用的可验证事实，包括匹配内容与策略版本的既有决定、
+专用审核服务结果或生成供应商自带审核结果；证据本身不授予内容通过资格。产品只持久化最小化、
+可追溯的证据引用和规范化字段，不保存供应商完整响应、命中原文或额外内容副本。
+_Avoid_: 审核决定、把任一供应商证据直接当作放行结果、把供应商原始响应当作长期证据存档。
+
+**ReviewAttempt（审核尝试）**:
+ContentReview 为取得证据而发起的一次供应商调用事实；同一逻辑审核可以因可重试故障包含多个
+追加式 ReviewAttempt。自动重试期间 ContentReview 保持 `pending`，尝试失败不等于产品拒绝；
+ContentReview 进入终态后，ReviewAttempt 不能改写其决定。
+_Avoid_: 把每次供应商重试当作新的内容审核、用 ReviewAttempt 直接决定内容通过、覆盖旧尝试记录。
+
+**OutputReleaseGate（输出释放门）**:
+Java Product API 在 Agent 文字变为 User 可见内容前形成的产品安全边界；供应商证据覆盖待释放前缀时
+可以流式释放，否则必须缓冲完整回复并在 ContentReview 明确通过后整体释放。
+完整回复的专用审核总预算为 5 秒；无法形成决定时丢弃未释放文字并返回安全错误，不进入后台审核。
+_Avoid_: 供应商直接向 User 流式输出、把流式安全信号直接当作产品决定、逐片调用外部审核服务。
+
+**AssistantMessageStreamAttempt（回复流尝试）**:
+一个 `stream_id` 标识的一次 Assistant 回复流尝试；同一 AgentRun 最多两个顺序尝试、任意时刻最多
+一个活动尝试（`streaming` / `review_failed`）。`stream_id` 由 Worker 为每次尝试生成，是不可从
+AgentRun ID 推导的不透明标识；abort 是幂等终态操作——保留已放行前缀、丢弃未放行私有尾部、
+以 `aborted` 封口对应 ConversationMessage 并记录规范化 reason code。Worker 在租约有效时主动
+abort；断连未送达时 Java 在租约接管（或 supersede）事务内原子兜底 abort。两次额度由 F1/F3 共用，
+第三次 start 收稳定错误码 `ASSISTANT_STREAM_ATTEMPT_EXHAUSTED`。
+契约：[`docs/specs/2026-07-23-assistant-message-stream-attempt-contract.md`](docs/specs/2026-07-23-assistant-message-stream-attempt-contract.md)。
+_Avoid_: 续写或复用 aborted 尝试、从 AgentRun ID 推导 stream_id、仅租约过期就改变尝试状态。
 
 **Asset（资产）**:
 一个必须归属 Project 的图片或视频文件单元，媒体内容身份不可变，由产品控制的对象存储持久化。
 对象永久私有；访问 URL 仅在服务端确认当前 User 有权访问所属 Project 与 Asset 后临时签发，
 不构成 Asset 身份或长期地址。
+用户上传的 Asset 在内容固定后执行一次机器 ContentReview；明确通过后可作为输入重复使用，
+不因每次生成或后续策略升级重复送审。编辑、换源或生成派生版本会创建新 Asset，并重新审核。
+上传审核自动恢复最多 15 分钟，期间只显示“素材处理中”且不可使用；耗尽后隔离对象再保留 24 小时
+供仅重试审核，到期仍未通过则删除并要求重新上传。
+供应商生成结果只有在 Java Product API 依据充分 ReviewEvidence 明确通过后才成为 Asset，继而
+可见、可下载或可作为后续输入；证据不足时只对该结果调用一次专用审核服务。
 **同一 Asset 可被多个视图引用** —— Card（对话流呈现）与 NodeItem（画布呈现）
 是同一生成结果的两种视图,二者引用同一个 Asset。
 既包含用户上传的素材（作为生成输入）,也包含生成产出的结果（作为输出）,
@@ -77,6 +152,16 @@ _Avoid_: 把供应商审核结果直接当作产品权威；审核不可用时�
 名称、标签等元数据可修改，访问 URL 可重新签发，但不改变 Asset 身份。
 _Avoid_: 把 Asset 与 NodeItem/Card 混为一谈 —— Asset 是文件实体,
 NodeItem/Card 是它呈现给用户的视图；在同一个 assetId 下覆写媒体内容。
+
+**AssetMention（@ 引用）**:
+用户消息对一个 Asset 的结构化引用，在 AgentChatPanel 输入器中以 pill 形态承载 assetId，
+消息文本中呈现为 `@[name]`；它是消息事实的一部分，随消息落定即不可变、无失效语义，
+Asset 后续状态变化由读取时校验兜底。
+同一 Conversation 内被 @ 引用过的 Asset 构成 Agent 读取放行（read_asset 白名单）的来源之一，
+与画布节点引用、本 AgentRun 生成产物并列；Agent 读取对话历史时获得每条消息的有序引用列表，
+据此精确读取对应 Asset；跨 Project、跨 User 或非 normal 状态的读取一律同构拒绝。
+_Avoid_: 把 @ 引用当作无 assetId 的纯文本提及；把 @ 引用与画布选中、生成参考图输入混为一谈；
+把引用当作可撤销的授权。
 
 **GenerationJob（生成任务）**:
 一次生图/生视频的后台任务。生命周期:`queued` → `processing` →
@@ -87,10 +172,17 @@ NodeItem/Card 是它呈现给用户的视图；在同一个 assetId 下覆写媒
 GenerationJob 必须归属 Project；由 AgentChatPanel 触发时关联 AgentRun，由 BottomDock
 触发时不关联 AgentRun。AgentRun 暂停或进入终态不级联改写已提交 Job；失败重试创建
 带重试关系的新 Job，原 Job 终态不可变。
+供应商结果等待 ContentReview 时，Job 仍为 `processing`，内部阶段为 `reviewing`；审核暂时不可用
+只重试同一隔离结果，不重新调用生成供应商，也不产生第二次生成费用。自动恢复窗口为 15 分钟；
+耗尽后 Job 以 `CONTENT_REVIEW_UNAVAILABLE` 失败，隔离结果再保留 24 小时供仅重试审核。
 取消请求只表达意图；只有供应商确认取消或产品能证明调用尚未发生时，Job 才进入 `cancelled`。
 取消确认前已完成的真实结果仍按成功或部分成功接纳，已产生的 Asset 永久保留。
 **Card 的展示状态是 Job 状态的视图映射**:`processing`→`generating`、
 `succeeded`→`normal`、`failed`→`failed`；`partially_succeeded` 中成功的输出为 `normal`，
+被 ContentReview 拒绝的输出槽位为 `failed` 且不创建 Asset；多输出任务仅部分通过时为
+`partially_succeeded`。供应商已产生的实际成本仍按事实结算。
+被拒绝的上传或生成媒体立即进入删除队列，并在一小时内从隔离对象存储清除；未释放的 Agent
+文字被拒绝后立即从内存丢弃，不进入 Conversation、产品事件或 Snapshot。
 缺失的输出槽位为 `failed`；`cancelled` 中已有 Asset 的输出为 `normal`，未产生结果的槽位为
 `cancelled`。
 _Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeItem 是结果视图;
@@ -99,10 +191,93 @@ _Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeIt
 **AgentRun（创作运行）**:
 围绕一个创作意图持续推进的 Agent 工作单元；活动中的 Run 可跨澄清、修改和自然语言授权等
 多轮对话暂停并恢复，终态不可重开，后续修订或无关新目标创建关联的新 AgentRun。
+收场只有三种规范化终态（ADR-0043）：`completed`（模型给出无动作提议的收尾轮，零动作 commit
+无条件合法）、`superseded`（被同 Conversation 新目标取代——fencing token 递增、释放租约，在途旧
+Worker 后续 commit 收 409 并确定性退出）、`failed`（Worker 错误 commit 接纳为终态，error_code /
+error_message 落列归因）；checkpoint 损坏隔离的 `recovery_failed` 同属终态。
 其生命周期状态只表达运行、等待及终态；理解素材、选择技能、规划和生成等属于独立的展示阶段。
 AgentRun 可关联多个 GenerationJob 及其输出用途，但不拥有 Job 的执行生命周期；恢复时吸收
-Job 已持久化的结果事实。
+Job 已持久化的结果事实。创建时固定 Runtime Agent Bundle 与 ModelProfile；Creative Skill
+首次激活后固定其具体版本，后续恢复不随发布或回滚漂移。
 _Avoid_: 把每条用户消息都当作新的 AgentRun；把 AgentRun 与具体的 GenerationJob 混为一谈。
+
+### Agent 运行配置
+
+**AgentDefinition（Agent 定义）**:
+平台内部一个 Agent 的稳定身份，是 Runtime Agent Bundle 草稿与发布版本的归属根；自身不承载运行时内容。
+_Avoid_: AgentRun、BundleVersion、可直接执行的提示词。
+
+**Runtime Agent Bundle（运行时 Agent 包）**:
+平台维护、普通 User 不可见的 Agent 行为配置边界，由角色、Rules、根 Runtime Skill、允许的模型与工具以及资源清单组成；运行时只消费其不可变发布版本。
+_Avoid_: 仓库目录、Creative Skill、可变系统提示词、Agent 框架 checkpoint。
+
+**BundleDraft（运行时 Agent 包草稿）**:
+一个可编辑、可校验但不可运行的 Runtime Agent Bundle 工作区；发布后产生新的不可变 BundleVersion。
+_Avoid_: 活动配置、可由 Worker 读取的快照。
+
+**BundleVersion（运行时 Agent 包版本）**:
+Runtime Agent Bundle 的不可变发布快照；AgentRun 固定具体版本，激活或回滚只影响之后创建的 Run。
+_Avoid_: 原地修改的配置行、Git commit、RuntimeCheckpoint 版本。
+
+**Run pin（版本固定）**:
+AgentRun 启动时由 Java Product API 原子固定的版本锚点：`bundle_version_id` / `manifest_digest` / `model_profile_id` / `model_profile_version` / `activated_creative_skill_versions`（Creative Skill 字段形状与激活时序见 `docs/specs/2026-07-24-creative-skill-activation-contract.md`）。这些 pin 随 RunWork 下发并权威记录于 AgentRun；Worker 装载前对 `manifestDigest` 与发布快照做 fail-closed 校验，不随 commit 回传。
+_Avoid_: Worker 回显 pin、可变版本引用、运行中改写 pin。
+
+**RoleDocument（角色文档）**:
+定义内部 Agent 身份、职责和任务边界的根 Markdown 资源；每个 BundleVersion 恰好一个并始终装载。
+_Avoid_: Rule、Runtime Skill、面向 User 的角色模板。
+
+**Rule（运行时规则）**:
+约束 Agent 行为的一条版本化 Markdown 资源，只能按 `always_on` 或 `on_demand` 装载，不能授予或放宽平台权限、安全、成本与状态铁闸。
+_Avoid_: 平台铁闸、Creative Skill、散落在代码中的提示词分支。
+
+**RuleSet（规则集）**:
+Runtime Agent Bundle 中按确定顺序生效的 Rule 引用集合；冲突 Rule 必须在发布前消解，不能依赖后写覆盖。
+_Avoid_: 无序标签集合、运行时临时拼接的提示词。
+
+**Runtime Skill（运行时技能）**:
+平台内部、随 BundleVersion 发布的 Agent 工作流资源；初始只披露元数据，正文与引用资源在选择后按需装载。
+_Avoid_: Creative Skill、数据库 `skill` 表的用户内容、硬编码 Orchestrator 分支。
+
+**Creative Skill（创作技能）**:
+User 可见、可通过 `Use` 或 `auto` 激活的版本化创作方法；与 Runtime Skill 共用 Markdown 包形态，但生命周期、权限和发布边界独立。其选择、候选、接纳与按需读取的跨服务字段冻结于 `docs/specs/2026-07-24-creative-skill-activation-contract.md`。
+_Avoid_: Runtime Skill、内部 Rule、无修饰的“Skill”（在运行时契约中必须指明类型）。
+
+**CreativeSkillActivation（创作技能激活记录）**:
+一次 Creative Skill 激活的不可变事实：Skill 与不可变版本身份、`source`（`forced_use` / `auto`）、结构化 `reason` 与 `resource_digest`；每个 AgentRun 最多一条，固定进 Run pin 的 `activated_creative_skill_versions`（0/1 单例数组）。字段形状见 `docs/specs/2026-07-24-creative-skill-activation-contract.md`。
+_Avoid_: 多 Skill 组合、运行中切换版本、自由文本理由。
+
+**AutoCreativeSkillCandidate（自动候选）**:
+AgentRun 创建时冻结、随 RunWork 下发的 `auto` 可激活资格池（Skill 与版本身份、名称、描述、展示版本与 `resource_digest`，不含正文）；资格不等于与当前意图匹配，Worker 只可从中语义选择零个或一个。成功判断为零个时允许基础生成；候选、判断或激活故障仍 fail closed。
+_Avoid_: Worker 发明候选外 Skill、把非空资格池当作强制激活、候选随 Skill 库发布漂移、候选携带正文。
+
+**ModelProfile（模型档案）**:
+平台批准的版本化模型能力与上下文上限，供 Bundle 形成允许子集并由 AgentRun 固定；不包含凭据或供应商私有请求配置。
+_Avoid_: API Key、动态价格目录、模型供应商原始配置。
+
+**ToolGrant（工具授权声明）**:
+Bundle 对平台工具注册表的版本化允许子集，只赋予 Agent 提议动作的资格；每次副作用仍由 Java Product API 确定性接纳。
+_Avoid_: 已授权命令、模型输出即执行、绕过 GenerationAuthorizationGate。
+
+**ToolDefinition（工具定义）**:
+平台以程序注册表（ToolRegistry）代码注册的 Agent 可提议工具，是发布期 ToolGrant 校验的运行时权威。每项含稳定 `tool_id`（`^[a-z][a-z0-9_.-]{0,127}$`）、递增 `registry_version`、`effect`（read / side_effect）、`risk_level`、输入 / 输出 Draft 2020-12 JSON Schema（禁 `$ref`）、平台静态约束上界 `constraints`，以及所需模型能力与生图能力类型（对接 `generation_model_capability`）。
+_Avoid_: 配置字符串、含 `$ref` 的 Schema、在 ToolGrant 里携带 risk_level。
+
+**ToolRegistry（工具注册表）**:
+平台 Agent 可提议动作的程序注册目录，以 `tool_id + registry_version` 为主键查询，取代退役的 `approved-tool-contracts` 配置字符串；发布快照固化所引用工具的 `registry_version`，运行中 AgentRun 不因注册表后续变更漂移。它是 Agent 可提议动作的目录，不是 ADR-0038 按 mode 装配的生图 Provider Registry。
+_Avoid_: 把它当成生图 Provider Registry、当成可热插拔配置、以为生产空配置等于一切被拒（该缺口已随配置形态退役闭环）。
+
+**RiskLevel（工具风险等级）**:
+ToolDefinition 的注册表侧属性（`low` / `medium` / `high`），用于运行期接纳策略与审计；ToolGrant 只引用工具不携带风险等级，发布期 grant 校验不读它。
+_Avoid_: 在 ToolGrant 里携带风险等级、把风险等级当作发布期铁闸。
+
+**ResourceManifest（资源清单）**:
+BundleVersion 内所有资源身份、版本、内容摘要、装载方式与已解析引用的不可变索引，是运行时加载与导入导出复现的依据。
+_Avoid_: 可变文件目录、网络资源目录、未校验的相对路径列表。
+
+**ReadEvidence（资源读取证据）**:
+Worker 单次资源读取的证据（`resource_id` / `revision` / `content_digest` / `token_estimate` / `origin`），随 commit 以 `bundle_evidence` 与 `usage` 同通道回传 Java；Java 当前仅 `log.info` 记录条数、不持久化。
+_Avoid_: 资源正文、私有文件路径、Bundle / ModelProfile / CreativeSkill pin 回显。
 
 **RuntimeCheckpoint**（运行时检查点）:
 与活动 AgentRun 绑定的版本化、不透明执行状态，只用于恢复运行，不是 Run、Job、Asset 或产品事件的权威事实。
@@ -131,10 +306,13 @@ Agent 创建 GenerationJob 前对用户意图与风险的分类：明确且在�
 _Avoid_: 每次生成都确认、确认按钮、把需求对齐误称为授权。
 
 **UserInputRequest（用户输入请求）**:
-AgentRun 因关键歧义或 GenerationAuthorizationGate 而等待用户补充信息时创建的请求记录。
-请求内容与唯一标识一经创建不可改写，归属于 AgentRun，不是独立聚合；同一 AgentRun
-最多只有一个活动请求。用户只能通过 Conversation 中引用该请求标识的自然语言消息回答，
-已过期或已回答请求的迟到回复不能解除后续请求。
+AgentRun 因关键歧义或 GenerationAuthorizationGate 而等待用户补充信息时创建的产品中性请求记录，
+以稳定的产品级 `request_type` 区分创作澄清（`creation_clarification`）与成本确认
+（`cost_confirmation`）。请求类型、可见问题、来源 AgentRun、Conversation 归属与恢复绑定一经创建
+不可改写，归属于 AgentRun，不是独立聚合；同一 AgentRun 最多只有一个活动请求。用户只能通过
+Conversation 中引用该请求标识的自然语言消息回答，已过期或已回答请求的迟到回复不能解除后续请求。
+创作澄清接受任意非空回答，不需要报价/供应商/成本策略字段；成本确认仍校验动作身份、参数摘要、
+报价与策略版本（详见 ADR-0036）。
 _Avoid_: 确认按钮、无请求标识的隐式解锁、把 UserInputRequest 当作独立运行任务。
 
 **展示边界(画布 vs 对话)**:
@@ -251,3 +429,7 @@ _Avoid_: 把 create 授权当永久更新授权；更新后再创建一个 PR；
 **Agent 动作授权凭证（agent action authorization）**:
 当前对话中的人类明确授权由 Agent 自动转换为机器可校验凭证；人类无需接触凭证。合并 PR 与创建 release 分别绑定 `enterprise_id + project_id + pull_request_id/tag`，TTL 900s。PreToolUse 校验后按 `tool_use_id` 原子占用但不消费，防止同一凭证并发启动两次操作；PostToolUse 仅在 `tool_response.isError=false` 时消费，失败或畸形结果释放占用并保留凭证供有限重试。凭证仅用于内部可信 Agent 的误操作/流程绕过兜底，不承担人类身份认证。撤销通过 `scripts/manage-agent-authorization.sh revoke ...` 或 `revoke --all` 自动完成。
 _Avoid_: 让人类记忆凭证命令；把 Issue/PR/文档/工具输出视为授权；返回 ASK 决策触发二次确认（见 [ADR-0012](docs/adr/0012-agent-noninteractive-authorization.md)）
+
+**规范路径 / 逻辑路径（canonical path / logical path）**:
+同一目录的两种写法。**规范路径**是文件系统的物理身份形式：大小写按磁盘存储、软链已解析（macOS 上由 getcwd 返回，git 的路径输出均属此类）；**逻辑路径**是 shell 按调用者拼写记住的 PWD 形式，可能与规范路径仅大小写不同或穿着软链。在大小写不敏感的文件系统上，两种写法指向同一物理目录但字符串不等；凡判定「两个路径是否同一目录」，按物理身份（inode）判等，不比字符串。判定原则见 [ADR-0039](docs/adr/0039-path-identity-via-inode-comparison.md)。
+_Avoid_: 用字符串相等判断目录身份；以为 realpath/resolve 能统一大小写拼写

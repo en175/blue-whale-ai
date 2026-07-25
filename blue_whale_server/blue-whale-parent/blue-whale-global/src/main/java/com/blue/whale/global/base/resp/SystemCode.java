@@ -45,6 +45,32 @@ public enum SystemCode implements IResultCode {
     CONTENT_MODERATION_REJECTED(SystemCode.CONTENT_MODERATION_REJECTED_CODE, "内容审核未通过"),
     /** 资源不可用 */
     ASSET_UNAVAILABLE(SystemCode.ASSET_UNAVAILABLE_CODE, "资源不可用"),
+    /** 游标已过期 */
+    CURSOR_EXPIRED(SystemCode.CURSOR_EXPIRED_CODE, "游标已过期，请重新获取快照"),
+    /** 资源不存在 */
+    RESOURCE_NOT_FOUND(SystemCode.RESOURCE_NOT_FOUND_CODE, "资源不存在"),
+    /** 幂等键被不同请求复用 */
+    IDEMPOTENCY_KEY_REUSED(SystemCode.IDEMPOTENCY_KEY_REUSED_CODE, "Idempotency-Key 已用于其他请求"),
+    /** AgentRun 提交与当前权威版本或运行时绑定冲突 */
+    AGENT_RUN_CONFLICT(SystemCode.AGENT_RUN_CONFLICT_CODE, "AgentRun 提交绑定或版本无效"),
+    /** Agent 动作提案不在产品允许范围内 */
+    AGENT_ACTION_REJECTED(SystemCode.AGENT_ACTION_REJECTED_CODE, "非法 Agent 动作提案"),
+    /** AgentRun 的回复流尝试额度已用尽，不得再次调用模型 */
+    ASSISTANT_STREAM_ATTEMPT_EXHAUSTED(SystemCode.ASSISTANT_STREAM_ATTEMPT_EXHAUSTED_CODE, "回复流尝试额度已用尽"),
+    /** forced/auto 指向的 Creative Skill 不存在、已退役或对当前 User/Project 不可见 */
+    CREATIVE_SKILL_UNAVAILABLE(SystemCode.CREATIVE_SKILL_UNAVAILABLE_CODE, "Creative Skill 不可用"),
+    /** 指定 Creative Skill 版本不存在或不再可读；激活路径 fail closed，不换版本 */
+    CREATIVE_SKILL_VERSION_UNAVAILABLE(SystemCode.CREATIVE_SKILL_VERSION_UNAVAILABLE_CODE, "Creative Skill 版本不可用"),
+    /** 该消息 / 目标 Run 不允许携带 forced_creative_skill_id */
+    CREATIVE_SKILL_SELECTION_NOT_ALLOWED(SystemCode.CREATIVE_SKILL_SELECTION_NOT_ALLOWED_CODE, "该消息不允许选择 Creative Skill"),
+    /** 激活请求的版本不属于本 Run 已冻结的 auto 候选（实现归 IK3NPF，本工单占编号） */
+    CREATIVE_SKILL_NOT_A_CANDIDATE(SystemCode.CREATIVE_SKILL_NOT_A_CANDIDATE_CODE, "Creative Skill 不在候选内"),
+    /** Run 已存在激活记录，拒绝第二次激活（实现归 IK3NPF，本工单占编号） */
+    CREATIVE_SKILL_ALREADY_ACTIVATED(SystemCode.CREATIVE_SKILL_ALREADY_ACTIVATED_CODE, "Creative Skill 已激活"),
+    /** 已固定版本的正文或引用资源字节缺失（fail closed，不降级默认提示词） */
+    CREATIVE_SKILL_CONTENT_MISSING(SystemCode.CREATIVE_SKILL_CONTENT_MISSING_CODE, "Creative Skill 正文缺失"),
+    /** 读取内容摘要与固定摘要不符（fail closed，不换版本 / 不用缓存替代品） */
+    CREATIVE_SKILL_DIGEST_MISMATCH(SystemCode.CREATIVE_SKILL_DIGEST_MISMATCH_CODE, "Creative Skill 摘要不符"),
     ;
 
     /** 通用 code */
@@ -71,6 +97,23 @@ public enum SystemCode implements IResultCode {
     public static final int UPSTREAM_TIMEOUT_CODE = 100200;
     public static final int CONTENT_MODERATION_REJECTED_CODE = 100201;
     public static final int ASSET_UNAVAILABLE_CODE = 100202;
+
+    /** 产品事件流 code（ADR-0016 游标恢复） */
+    public static final int CURSOR_EXPIRED_CODE = 100300;
+    public static final int RESOURCE_NOT_FOUND_CODE = 100301;
+    public static final int IDEMPOTENCY_KEY_REUSED_CODE = 100302;
+    public static final int AGENT_RUN_CONFLICT_CODE = 100303;
+    public static final int AGENT_ACTION_REJECTED_CODE = 100304;
+    public static final int ASSISTANT_STREAM_ATTEMPT_EXHAUSTED_CODE = 100305;
+
+    /** Creative Skill 激活 code（契约 §8，IK3NPC/IK3NPF） */
+    public static final int CREATIVE_SKILL_UNAVAILABLE_CODE = 100306;
+    public static final int CREATIVE_SKILL_VERSION_UNAVAILABLE_CODE = 100307;
+    public static final int CREATIVE_SKILL_SELECTION_NOT_ALLOWED_CODE = 100308;
+    public static final int CREATIVE_SKILL_NOT_A_CANDIDATE_CODE = 100309;
+    public static final int CREATIVE_SKILL_ALREADY_ACTIVATED_CODE = 100310;
+    public static final int CREATIVE_SKILL_CONTENT_MISSING_CODE = 100311;
+    public static final int CREATIVE_SKILL_DIGEST_MISMATCH_CODE = 100312;
 
     final int code;
     final String msg;

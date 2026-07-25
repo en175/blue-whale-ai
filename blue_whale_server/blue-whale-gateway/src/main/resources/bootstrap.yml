@@ -7,13 +7,13 @@ spring:
     active: blue-whale-dev
   cloud:
     nacos:
-      server-addr: 115.190.244.91:8848
+      # 本地 Docker Compose 默认连容器服务名 nacos:8848；远端用 NACOS_SERVER_ADDR 覆盖
+      server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
       discovery:
-        # namespace 用 Nacos namespace ID（UUID），非名字；与 agent-service 一致才能发现彼此
-        # 本地开发传 NACOS_NAMESPACE=<隔离 namespace ID> 注册到独立 namespace，避免串线上流量
-        namespace: ${NACOS_NAMESPACE:1bb06cf5-c1ad-4054-b022-49358a2f49aa}
+        # namespace 用 Nacos namespace ID（UUID）或 public 空 namespace（本地默认空）；与 agent-service 一致才能发现彼此
+        namespace: ${NACOS_NAMESPACE:}
       config:
-        namespace: 65639ed4-3cac-4e6c-ae42-c7d25c5e1127
+        namespace: ${NACOS_NAMESPACE:}
         file-extension: yml
         group: BLUE_WHALE
     gateway:
@@ -32,7 +32,11 @@ spring:
         - id: blue-whale-agent
           uri: lb://blue-whale-agent
           predicates:
-            - Path=/api/agent/**
+            # agent-service 端点前缀：/api/agent/**（skill/template）、/api/projects/**（project/snapshot/events）、
+            # /api/generation-inbox/**（GenerationInboxController，生成收件箱 IK21O9）、
+            # /api/canvases/**（CanvasController，画布读写）、
+            # /api/jobs/**、/api/generation/**、/api/assets/**、/api/webhooks/**
+            - Path=/api/agent/**,/api/projects/**,/api/generation-inbox/**,/api/canvases/**,/api/jobs/**,/api/generation/**,/api/assets/**,/api/webhooks/**
         - id: blue-whale-user
           uri: lb://blue-whale-user
           predicates:

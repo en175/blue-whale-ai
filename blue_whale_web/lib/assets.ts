@@ -1,11 +1,10 @@
 /**
- * assets —— 资产库列表请求层 + 素材上传（前端分片直传 TOS，IK3PKB）。字段 camelCase 对齐后端。
+ * assets —— 资产库列表请求层（assets 页用）。字段 snake_case 对齐后端。
  */
 
 import { request, type Paged } from "./api";
-import { uploadToTos } from "./uploadTos";
 
-/** 资产列表项（GET /api/agent/assets records，不含 storageKey）。 */
+/** 资产列表项（GET /api/assets records，不含 storageKey）。 */
 export type AssetItem = {
   id: number;
   type: string;
@@ -14,7 +13,7 @@ export type AssetItem = {
   height: number | null;
   duration: number | null;
   source: string | null;
-  createdAt: string | null;
+  created_at: string | null;
 };
 
 /** 资产列表：按 type 过滤 + 分页，按创建时间倒序。 */
@@ -29,25 +28,19 @@ export function listAssets(
 }
 
 /**
- * 上传素材（前端分片直传 TOS，IK3PKB）：
- *   1. uploadToTos：Next.js 签预签名 → 浏览器分片直传 TOS（进度 + 断点续传待补）
- *   2. commit：后端 HEAD 校验 + 落 Asset → {id, url}
- *
- * 返回 url 为 TOS 永久地址，可持久化到 canvas 节点，刷新不丢。
- * onProgress 回调直传百分比（0-100）。
+ * 把资产复制到目标普通 canvas 项目（生成页「添加到项目」用）。
+ * Idempotency-Key 必传：同一资产→同一项目的重试须复用同一键（生命周期由调用点管理）。
+ * 返回目标项目内的新副本；响应字段与 AssetItem 一致。
  */
-export async function uploadAsset(
-  file: File,
+export function copyAssetToProject(
   projectId: number,
-  type: "image" | "video" | "audio",
-  onProgress?: (pct: number) => void,
-): Promise<{ id: number; url: string }> {
-  const { storageKey } = await uploadToTos(file, projectId, type, onProgress);
-  return request<{ id: number; url: string }>("/assets/upload/commit", "POST", {
-    projectId,
-    type,
-    storageKey,
-    contentType: file.type,
-    size: file.size,
-  });
+  sourceAssetId: number,
+  idempotencyKey: string,
+): Promise<AssetItem> {
+  return request<AssetItem>(
+    `/projects/${projectId}/assets`,
+    "POST",
+    { source_asset_id: sourceAssetId },
+    { "Idempotency-Key": idempotencyKey },
+  );
 }

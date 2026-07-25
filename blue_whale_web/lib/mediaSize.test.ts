@@ -1,9 +1,9 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   scaleToShortSide,
   fallbackMediaSize,
   readMediaNaturalSize,
-  detectMediaKind,
   MEDIA_SHORT_SIDE,
 } from "./mediaSize";
 
@@ -109,7 +109,10 @@ describe("scaleToShortSide", () => {
     expect(scaleToShortSide(1080, 1920)).toEqual({ width: 200, height: 356 });
   });
   it("自定义 base 生效", () => {
-    expect(scaleToShortSide(200, 100, 100)).toEqual({ width: 200, height: 100 });
+    expect(scaleToShortSide(200, 100, 100)).toEqual({
+      width: 200,
+      height: 100,
+    });
   });
   it("0 尺寸 → null", () => {
     expect(scaleToShortSide(0, 100)).toBeNull();
@@ -123,13 +126,16 @@ describe("scaleToShortSide", () => {
 
 describe("fallbackMediaSize", () => {
   it("image → 1:1（短边 base）", () => {
-    expect(fallbackMediaSize("image")).toEqual({ width: MEDIA_SHORT_SIDE, height: MEDIA_SHORT_SIDE });
+    expect(fallbackMediaSize("image")).toEqual({
+      width: MEDIA_SHORT_SIDE,
+      height: MEDIA_SHORT_SIDE,
+    });
   });
   it("video → 16:9（短边 base）", () => {
-    expect(fallbackMediaSize("video")).toEqual({ width: 356, height: MEDIA_SHORT_SIDE });
-  });
-  it("audio → 卡片尺寸（无像素维度）", () => {
-    expect(fallbackMediaSize("audio")).toEqual({ width: 240, height: 120 });
+    expect(fallbackMediaSize("video")).toEqual({
+      width: 356,
+      height: MEDIA_SHORT_SIDE,
+    });
   });
 });
 
@@ -163,7 +169,9 @@ describe("readMediaNaturalSize", () => {
 
   it("video loadedmetadata → 真实比例缩放尺寸", async () => {
     const fake = makeFakeVideo(1920, 1080);
-    const spy = vi.spyOn(document, "createElement").mockReturnValue(fake as unknown as HTMLVideoElement);
+    const spy = vi
+      .spyOn(document, "createElement")
+      .mockReturnValue(fake as unknown as HTMLVideoElement);
     const p = readMediaNaturalSize("http://x/a.mp4", "video");
     await vi.runAllTimersAsync();
     expect(await p).toEqual({ width: 356, height: 200 });
@@ -175,24 +183,5 @@ describe("readMediaNaturalSize", () => {
     const p = readMediaNaturalSize("http://x/never.png", "image");
     await vi.advanceTimersByTimeAsync(3000);
     expect(await p).toEqual(fallbackMediaSize("image"));
-  });
-
-  it("audio → 直返 fallback（不读媒体，无 natural size）", async () => {
-    const p = readMediaNaturalSize("http://x/a.mp3", "audio");
-    expect(await p).toEqual(fallbackMediaSize("audio"));
-  });
-});
-
-describe("detectMediaKind", () => {
-  it("image/video/audio MIME 正确分类", () => {
-    expect(detectMediaKind(new File(["x"], "a.png", { type: "image/png" }))).toBe("image");
-    expect(detectMediaKind(new File(["x"], "a.mp4", { type: "video/mp4" }))).toBe("video");
-    expect(detectMediaKind(new File(["x"], "a.mp3", { type: "audio/mpeg" }))).toBe("audio");
-    expect(detectMediaKind(new File(["x"], "a.wav", { type: "audio/wav" }))).toBe("audio");
-  });
-
-  it("无 / 未知 MIME 回退 image", () => {
-    expect(detectMediaKind(new File(["x"], "a", { type: "" }))).toBe("image");
-    expect(detectMediaKind(new File(["x"], "a.bin", { type: "application/octet-stream" }))).toBe("image");
   });
 });

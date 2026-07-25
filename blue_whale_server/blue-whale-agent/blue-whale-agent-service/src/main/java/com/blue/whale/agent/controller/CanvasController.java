@@ -2,7 +2,7 @@ package com.blue.whale.agent.controller;
 
 import com.blue.whale.agent.common.context.UserContext;
 import com.blue.whale.agent.model.dto.CanvasDto;
-import com.blue.whale.agent.model.request.SaveCanvasRequest;
+import com.blue.whale.agent.model.dto.SaveCanvasRequest;
 import com.blue.whale.agent.service.CanvasService;
 import com.blue.whale.agent.service.ProjectService;
 import com.blue.whale.global.base.resp.Result;
@@ -26,7 +26,7 @@ import javax.validation.Valid;
  */
 @Tag(name = "画布接口", description = "画布状态 GET/PUT（ADR-0011，与 project 1:1）")
 @RestController
-@RequestMapping("/api/agent/canvases")
+@RequestMapping("/api/canvases")
 @RequiredArgsConstructor
 public class CanvasController {
 
@@ -46,7 +46,6 @@ public class CanvasController {
                                   @PathVariable("projectId") Long projectId,
                                   @RequestBody @Valid SaveCanvasRequest req) {
         Long uid = UserContext.requireUserId(userId);
-        projectService.requireOwned(projectId, uid);
-        return Result.ok(canvasService.save(projectId, req));
+        return Result.ok(canvasService.save(projectId, uid, req));
     }
 }

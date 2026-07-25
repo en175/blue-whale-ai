@@ -83,11 +83,19 @@ export function removeMention(el: HTMLElement, id: string): void {
 
   // 移除 pill 前可能的前导换行/空格，以及之后的空格
   const prev = pill.previousSibling;
-  if (prev && prev.nodeType === Node.TEXT_NODE && prev.textContent?.trim() === "") {
+  if (
+    prev &&
+    prev.nodeType === Node.TEXT_NODE &&
+    prev.textContent?.trim() === ""
+  ) {
     prev.remove();
   }
   const next = pill.nextSibling;
-  if (next && next.nodeType === Node.TEXT_NODE && next.textContent?.trim() === "") {
+  if (
+    next &&
+    next.nodeType === Node.TEXT_NODE &&
+    next.textContent?.trim() === ""
+  ) {
     next.remove();
   }
   pill.remove();
@@ -97,14 +105,18 @@ export function removeMention(el: HTMLElement, id: string): void {
 }
 
 /**
- * 从编辑器 DOM 中提取纯文本 prompt 与参考图 URL 列表。
- * mention pill 在 prompt 中替换为占位符 `@[name]`，referenceImages 返回其 src 列表。
+ * 从编辑器 DOM 中提取纯文本 prompt、参考图 URL 列表与素材 assetId 列表。
+ * mention pill 在 prompt 中替换为占位符 `@[name]`；assetIds 按 DOM 出现顺序去重，
+ * 与后端 referenced_asset_ids（List<Long>）对齐。
  */
 export function extractEditor(el: HTMLElement): {
   prompt: string;
   referenceImages: string[];
+  assetIds: number[];
 } {
   const referenceImages: string[] = [];
+  const assetIds: number[] = [];
+  const seenAssetIds = new Set<number>();
   const parts: string[] = [];
 
   const walk = (node: Node) => {
@@ -116,10 +128,21 @@ export function extractEditor(el: HTMLElement): {
       const elem = node as HTMLElement;
       const mentionId = elem.getAttribute(MENTION_ATTR);
       if (mentionId) {
+        const assetIdAttr = elem.getAttribute("data-mention-asset-id");
+        const assetId = assetIdAttr === null ? null : Number(assetIdAttr);
+        // 同 assetId 重复 pill 整个跳过（如用户复制粘贴 pill DOM）：
+        // 保证 content @[name] 数 = assetIds 数，与后端 mention_seq 一一对应
+        if (assetId !== null && seenAssetIds.has(assetId)) {
+          return;
+        }
         const name = elem.getAttribute("data-mention-name") ?? mentionId;
         const src = elem.getAttribute("data-mention-src");
         parts.push(`@[${name}]`);
         if (src) referenceImages.push(src);
+        if (assetId !== null) {
+          seenAssetIds.add(assetId);
+          assetIds.push(assetId);
+        }
         return;
       }
       // 递归子节点
@@ -134,16 +157,19 @@ export function extractEditor(el: HTMLElement): {
   return {
     prompt: parts.join("").replace(/ /g, " ").trim(),
     referenceImages,
+    assetIds,
   };
 }
 
 // ---- helpers ----
 
-function buildPill(item: MentionItem): HTMLElement {
+export function buildPill(item: MentionItem): HTMLElement {
   const pill = document.createElement("span");
   pill.setAttribute(MENTION_ATTR, item.id);
   pill.setAttribute("data-mention-name", item.name);
   if (item.src) pill.setAttribute("data-mention-src", item.src);
+  if (item.assetId != null)
+    pill.setAttribute("data-mention-asset-id", String(item.assetId));
   pill.setAttribute("contenteditable", "false");
   pill.setAttribute("data-mention-type", item.type);
   pill.style.cssText = [
@@ -152,9 +178,9 @@ function buildPill(item: MentionItem): HTMLElement {
     "gap:3px",
     "padding:1px 6px 1px 4px",
     "margin:0 2px",
-    "border-radius:5px",
-    "background:rgba(255,255,255,0.1)",
-    "color:rgba(255,255,255,0.85)",
+    "border-radius:6px",
+    "background:var(--tc-border)",
+    "color:var(--tc-text-secondary)",
     "font-size:13px",
     "line-height:20px",
     "vertical-align:middle",
@@ -178,13 +204,15 @@ function buildPill(item: MentionItem): HTMLElement {
   } else {
     // 图标占位
     const icon = document.createElement("span");
-    icon.textContent = item.type === "image" ? "🖼" : item.type === "video" ? "🎬" : "🎵";
+    icon.textContent =
+      item.type === "image" ? "🖼" : item.type === "video" ? "🎬" : "🎵";
     icon.style.cssText = "font-size:12px;line-height:1;";
     pill.appendChild(icon);
   }
 
   const label = document.createElement("span");
-  label.textContent = item.name.length > 12 ? item.name.slice(0, 12) + "…" : item.name;
+  label.textContent =
+    item.name.length > 12 ? item.name.slice(0, 12) + "…" : item.name;
   pill.appendChild(label);
 
   return pill;

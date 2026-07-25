@@ -16,8 +16,18 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { useAuth } from "@/components/auth/AuthContext";
 import { toast } from "@/components/Toast";
 import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
+import { newCommandIdentity } from "@/lib/command-identity";
+import { deriveAnswerableClarification } from "@/lib/project-recovery";
+import {
+  usePrefetchCreativeSkillNames,
+  lookupCreativeSkillName,
+} from "@/lib/creative-skill-names";
+import {
+  selectCurrentRunCreativeSkillId,
+  selectCurrentRunId,
+} from "./_canvas/conversationRecovery";
+import { useCreativeSkillRecommendations } from "./_canvas/hooks/useCreativeSkillRecommendations";
 import { ArrowLeft } from "lucide-react";
-import type { MentionItem } from "./_canvas/components/dock/mention";
 import {
   TopBar,
   TopBarCenter,
@@ -28,34 +38,65 @@ import {
   AgentChatPanel,
   ZoomControls,
 } from "./_canvas";
-import type { Viewport, NodeItem, NodeType, DockMediaItem, CardMessage, ChatMessage } from "./_canvas";
+import type {
+  Viewport,
+  NodeItem,
+  NodeType,
+  DockMediaItem,
+  CardMessage,
+  ChatMessage,
+  PendingMention,
+} from "./_canvas";
 import { nodeFromCard, useCanvasProjects } from "./_canvas";
 import type { GenerateArgs } from "./_canvas";
-import { generateImage, createVideoJob, streamJob, listJobs } from "./_canvas/api/generation";
-import { findPlacement } from "./_canvas/placement";
-import { parseAspectRatio } from "./_canvas/aspectRatio";
-import { jobToPlaceholder } from "./_canvas/recover";
-import { uploadAsset } from "@/lib/assets";
-import { readMediaNaturalSize } from "@/lib/mediaSize";
-import { useJobStatus } from "./_canvas/hooks/useJobStatus";
-
-/** "1x"/"2x" → 数字；解析失败回落 1。 */
-function parseQuantity(q: string): number {
-  const n = parseInt(q, 10);
-  return Number.isNaN(n) ? 1 : n;
-}
+import {
+  cancelProjectGenerationJob,
+  createProjectGenerationJob,
+  retryMissingProjectGenerationJobOutputs,
+} from "./_canvas/api/generation";
+import {
+  setProjectSubmitting,
+  type ProjectSubmissionState,
+} from "./_canvas/projectGenerationState";
+import { isApiError } from "@/lib/api/errors";
 
 /** 把后端/网络错误映射为用户友好提示，避免暴露内部配置。 */
 function userFriendlyErrorMessage(e: unknown): string {
+  // ApiError：诊断事实（code + request_id）只进日志，不回传用户（IK2BCH）。
+  if (isApiError(e)) {
+    console.error(
+      "[generate] ApiError code=%s requestId=%s msg=%s",
+      e.code,
+      e.requestId ?? "-",
+      e.message,
+    );
+  }
   if (!(e instanceof Error)) return "生成失败，请稍后重试";
   const msg = e.message;
   if (msg.includes("后端未启动") || msg.includes("无法连接")) {
     return "无法连接到服务，请检查网络或稍后重试";
   }
+  if (msg.includes("参考素材尚未成为可用 Asset")) {
+    return "参考素材尚未上传完成，请先使用已有资产";
+  }
+  if (msg.includes("当前闭环仅支持单图生成")) {
+    return "当前仅支持每次生成 1 张图片";
+  }
+  if (msg.includes("当前闭环仅支持单视频生成")) {
+    return "当前仅支持每次生成 1 个视频";
+  }
   if (msg.includes("ARK_API_KEY") || msg.includes("数据库")) {
     return "服务暂时不可用，请稍后重试";
   }
   return "生成失败，请稍后重试";
+}
+
+function expectedOutputCount(quantity: string): number {
+  const count = Number(quantity.replace(/x$/i, ""));
+  if (!Number.isInteger(count) || count < 1 || count > 4) {
+    throw new Error("输出数量无效");
+  }
+  return count;
 }
 
 function CanvasPageInner() {
@@ -65,6 +106,7 @@ function CanvasPageInner() {
   const guardRouter = useRouter();
   // 画布视口容器：addNode 据其中心换算 world 坐标（viewport 为受控 {x,y,zoom}）。
   const containerRef = useRef<HTMLDivElement>(null);
+  const retryIdempotencyKeysRef = useRef<Record<string, string>>({});
 
   // gating：未登录直访 /canvas 时，先空白守卫再决定渲染或跳转，避免画布内容首帧闪烁。
   // TODO: 接真实数据后改为路由守卫（middleware 或 server component 检查登录态）。
@@ -73,12 +115,17 @@ function CanvasPageInner() {
     const storedUser = loadUser();
     // 本地开发跳过鉴权（SKIP_AUTH）时，不做未登录跳转
     if (!SKIP_AUTH && !storedUser) {
-      console.warn("[Canvas] gate: loadUser()=null → 踢回首页 + 弹登录。localStorage keys:",
-        Object.keys(localStorage).filter(k => k.startsWith("bw-")));
+      console.warn(
+        "[Canvas] gate: loadUser()=null → 踢回首页 + 弹登录。localStorage keys:",
+        Object.keys(localStorage).filter((k) => k.startsWith("bw-")),
+      );
       guardRouter.replace("/");
       openLogin();
     } else {
-      console.log("[Canvas] gate: loadUser() 成功，user:", storedUser?.username);
+      console.log(
+        "[Canvas] gate: loadUser() 成功，user:",
+        storedUser?.username,
+      );
     }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setGated(false);
@@ -86,6 +133,7 @@ function CanvasPageInner() {
   }, []);
 
   // Project 聚合根：多项目画布+对话的单一真相源（hook 缝合后端持久化，见 useCanvasProjects）
+  // ?project=<id>：URL 指定初始活动项目（生成页「打开项目」闭环），无效则忽略回退默认。
   const {
     state: projectState,
     dispatch,
@@ -93,126 +141,187 @@ function CanvasPageInner() {
     saveStatus,
     booting,
     backendReady,
-    loadedCanvasId,
-    loadError,
-    retry,
+    generationJobs,
+    agentRuns,
     createProjectAction,
-    renameProjectAction,
     switchProject,
     deleteProjectAction,
-  } = useCanvasProjects();
-  // 派生：当前项目的画布与对话（空列表时 activeProject=undefined，给空默认避免崩；空态在下方 return 处理）
-  const { nodes, viewport } = activeProject?.canvas ?? { nodes: [], viewport: { x: 0, y: 0, zoom: 1 } };
-  const messages = activeProject?.messages ?? [];
+    submitConversationMessageAction,
+  } = useCanvasProjects(searchParams.get("project"));
+  // 派生：当前项目的画布与对话（读取走 active，写入走 dispatch）
+  const { nodes, viewport } = activeProject.canvas;
+  const messages = activeProject.messages;
+  // Creative Skill Use 标签：prefetch 灌名映射 + 当前 Run 激活 id → 展示名；澄清期 forced 互斥
+  usePrefetchCreativeSkillNames(backendReady);
+  const currentSkillId = selectCurrentRunCreativeSkillId(agentRuns);
+  const forcedSkillName = currentSkillId
+    ? (lookupCreativeSkillName(currentSkillId) ?? "已选技能")
+    : null;
+  const answerableActive =
+    deriveAnswerableClarification({ agent_runs: agentRuns }) !== null;
+  // 当前 Run 推荐技能（IK3NPI）：后端就绪且有当前 Run 时拉取，注入对话面板推荐区
+  const currentRunId = selectCurrentRunId(agentRuns);
+  const {
+    recommendations: skillRecommendations,
+    loading: skillRecommendationsLoading,
+  } = useCreativeSkillRecommendations(backendReady ? currentRunId : null);
 
   const [isAgentOpen, setIsAgentOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
-  const [bottomDockMode, setBottomDockMode] = useState<"image" | "video">("image");
+  const [bottomDockMode, setBottomDockMode] = useState<"image" | "video">(
+    "image",
+  );
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
-  /** 重新编辑（refresh）触发 dock 输入框聚焦 + 闪烁信号（nonce，递增触发 effect） */
-  const [dockFocusSignal, setDockFocusSignal] = useState(0);
-  /** 插入参考图 mention pill 信号（nonce 触发 BottomDock insertMention effect，X3） */
-  const [dockMentionSignal, setDockMentionSignal] = useState<{ nonce: number; item: MentionItem | null; replace?: boolean }>({
-    nonce: 0,
-    item: null,
-  });
   const [videoDockMedia, setVideoDockMedia] = useState<DockMediaItem[]>([]);
-  // 视频首尾帧模式：已上传首/尾帧的 TOS url（后端可访问，非本地 blob）
-  const [firstFrameUrl, setFirstFrameUrl] = useState<string | undefined>(undefined);
-  const [lastFrameUrl, setLastFrameUrl] = useState<string | undefined>(undefined);
-  const [agentPendingMention, setAgentPendingMention] = useState<{ name: string; nonce: number } | null>(null);
+  const [agentPendingMention, setAgentPendingMention] =
+    useState<PendingMention | null>(null);
   // 「从画布选择」模式：非 null 表示正在为哪个 Dock 挑图（image/video）
   const [pickingFor, setPickingFor] = useState<"image" | "video" | null>(null);
-  // 生成：视频异步轮询 hook + 生成中状态 + 待落节点的 prompt
-  const { state: jobState, start: startJob, reset: resetJob } = useJobStatus();
-  const [generating, setGenerating] = useState(false);
+  const [submittingByProject, setSubmittingByProject] =
+    useState<ProjectSubmissionState>({});
   const [generateError, setGenerateError] = useState<string | null>(null);
-  const pendingVideoNodeRef = useRef<string | null>(null);
+  const [activeVideoJobIdByProject, setActiveVideoJobIdByProject] = useState<
+    Record<string, number>
+  >({});
+  const [cancellingVideo, setCancellingVideo] = useState(false);
+  const generating = Boolean(submittingByProject[activeProject.id]);
+  const activeVideoJobId = activeVideoJobIdByProject[activeProject.id];
 
-  // 受控流写回适配：CanvasSurface 的 onNodes_commit / onViewportChange 解析后整体写回当前 active project。
+  const videoJobs = generationJobs.filter(
+    (job) => job.source === "bottom_dock" && job.type === "video",
+  );
+  const activeVideoJob = videoJobs.find(
+    (job) => Number(job.job_id) === activeVideoJobId,
+  );
+  const currentVideoJob =
+    activeVideoJob ??
+    (generating || activeVideoJobId
+      ? undefined
+      : [...videoJobs].sort(
+          (left, right) => Number(right.job_id) - Number(left.job_id),
+        )[0]);
+  const currentVideoJobId = Number(currentVideoJob?.job_id);
+  const currentVideoStatus =
+    typeof currentVideoJob?.status === "string" ? currentVideoJob.status : null;
+  const videoJobActive =
+    (activeVideoJobId !== undefined && !activeVideoJob) ||
+    currentVideoStatus === "queued" ||
+    currentVideoStatus === "processing" ||
+    currentVideoStatus === "cancel_requested";
+  const currentVideoError =
+    currentVideoJob?.error && typeof currentVideoJob.error === "object"
+      ? (currentVideoJob.error as Record<string, unknown>)
+      : null;
+  const currentVideoErrorMessage =
+    typeof currentVideoError?.message === "string"
+      ? currentVideoError.message
+      : null;
+
+  // 受控流写回适配：CanvasSurface 的 onNodesCommit / onViewportChange 解析后整体写回当前 active project。
   const setViewport = useCallback(
     (next: Viewport) => {
-      if (!activeProject) return;
-      dispatch({ type: "set-viewport", projectId: activeProject.id, viewport: next });
+      dispatch({
+        type: "set-viewport",
+        projectId: activeProject.id,
+        viewport: next,
+      });
     },
-    [activeProject?.id]
+    [activeProject.id, dispatch],
   );
   const setNodes = useCallback(
     (next: NodeItem[]) => {
-      if (!activeProject) return;
       dispatch({ type: "set-nodes", projectId: activeProject.id, nodes: next });
     },
-    [activeProject?.id]
+    [activeProject.id, dispatch],
   );
 
   // 画布素材节点操作面板的统一动作分发（按 nodeId 反查 node）
-  const handleNodeAction = useCallback(
-    (node: NodeItem, actionId: string) => {
-      const name = node.content || "未命名素材";
-      switch (actionId) {
-        case "refresh": {
-          // 重新编辑（X4）：唤起底部图片 Dock（不带素材）+ 聚焦输入框原生 caret
-          setBottomDockMode("image");
-          setIsBottomDockOpen(true);
-          setDockFocusSignal((n) => n + 1);
-          break;
-        }
-        case "shuffle":
-        case "image": {
-          // 生成图片 / 再创作：唤起图片 Dock + 参考图累积（去重）+ mention pill
-          setBottomDockMode("image");
-          setIsBottomDockOpen(true);
-          setDockFocusSignal((n) => n + 1);
-          if (node.imageUrl) {
-            const mediaType: DockMediaItem["type"] = node.type === "video" || /\.(mp4|webm|mov|m4v|ogg)(\?.*)?$/i.test(node.imageUrl) ? "video" : "image";
-            const item: DockMediaItem = { id: node.id, type: mediaType, name, src: node.imageUrl };
-            setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
-            setDockMentionSignal({ nonce: Date.now(), item: { src: node.imageUrl, name, id: node.id, type: mediaType }, replace: false });
-          }
-          break;
-        }
-        case "mention": {
-          // 添加到对话：打开右侧面板并 @ 素材名
-          setIsAgentOpen(true);
-          setAgentPendingMention({ name, nonce: Date.now() });
-          break;
-        }
-        case "video": {
-          // 生成视频：带入参考图（按 node.type 分 image/video）+ mention pill + 唤起视频 Dock
-          if (node.imageUrl) {
-            const mediaType: DockMediaItem["type"] = node.type === "video" || /\.(mp4|webm|mov|m4v|ogg)(\?.*)?$/i.test(node.imageUrl) ? "video" : "image";
-            const item: DockMediaItem = { id: node.id, type: mediaType, name, src: node.imageUrl };
-            setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
-            setDockMentionSignal({ nonce: Date.now(), item: { src: node.imageUrl, name, id: node.id, type: mediaType }, replace: false });
-          }
-          setBottomDockMode("video");
-          setIsBottomDockOpen(true);
-          break;
-        }
-        case "info": {
-          // 详情信息：暂忽略，后续补充
-          break;
-        }
-        case "download": {
-          // 下载：仅图片素材
-          if (node.imageUrl) {
-            const a = document.createElement("a");
-            a.href = node.imageUrl;
-            a.download = name || "image";
-            a.target = "_blank";
-            a.rel = "noopener noreferrer";
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-          }
-          break;
-        }
-        default:
-          break;
+  const handleNodeAction = useCallback((node: NodeItem, actionId: string) => {
+    const name = node.content || "未命名素材";
+    switch (actionId) {
+      case "refresh": {
+        // 重新编辑：唤起底部图片 Dock（不带素材）
+        setBottomDockMode("image");
+        setIsBottomDockOpen(true);
+        break;
       }
-    },
-    []
-  );
+      case "shuffle": {
+        // 再创作：带入参考图占位 + 唤起图片 Dock
+        if (node.imageUrl) {
+          setImageDockMedia([
+            {
+              id: node.id,
+              type: "image",
+              name,
+              assetId: node.assetId,
+              src: node.imageUrl,
+            },
+          ]);
+        }
+        setBottomDockMode("image");
+        setIsBottomDockOpen(true);
+        break;
+      }
+      case "mention": {
+        // 添加到对话：打开右侧面板并插入素材 pill（携带 assetId）
+        setIsAgentOpen(true);
+        const assetId = Number(node.assetId);
+        if (
+          node.assetId != null &&
+          Number.isSafeInteger(assetId) &&
+          assetId > 0
+        ) {
+          setAgentPendingMention({
+            name,
+            nonce: Date.now(),
+            assetId,
+            src: node.imageUrl,
+            type: node.type === "video" ? "video" : "image",
+          });
+        } else {
+          setAgentPendingMention({ name, nonce: Date.now() });
+        }
+        break;
+      }
+      case "video": {
+        // 生成视频：带入参考图占位 + 唤起视频 Dock
+        if (node.imageUrl) {
+          setVideoDockMedia([
+            {
+              id: node.id,
+              type: "image",
+              name,
+              assetId: node.assetId,
+              src: node.imageUrl,
+            },
+          ]);
+        }
+        setBottomDockMode("video");
+        setIsBottomDockOpen(true);
+        break;
+      }
+      case "info": {
+        // 详情信息：暂忽略，后续补充
+        break;
+      }
+      case "download": {
+        // 下载：仅图片素材
+        if (node.imageUrl) {
+          const a = document.createElement("a");
+          a.href = node.imageUrl;
+          a.download = name || "image";
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }, []);
 
   // Esc 退出「从画布选择」模式（节点删除由 RF deleteKeyCode 承接）
   useEffect(() => {
@@ -233,60 +342,53 @@ function CanvasPageInner() {
       // world 坐标 = (屏幕中心 - 视口平移) / zoom；等价于 RF screenToFlowPosition({cx,cy})。
       const worldX = (cx - viewport.x) / viewport.zoom;
       const worldY = (cy - viewport.y) / viewport.zoom;
-      const id = extra?.id ?? `${type}-${Date.now()}`;
-      // 节点尺寸：text 固定 200×48；媒体取 extra（生成 parseAspectRatio / 上传 readMediaNaturalSize），默认 200×200
-      const w = extra?.width ?? 200;
-      const h = extra?.height ?? (type === "text" ? 48 : 200);
-      // 媒体节点：视口中心锚 + 行优先网格不重叠搜索（design D2），绝不覆盖已有节点；text 居中
-      const position =
+      const id = `${type}-${Date.now()}`;
+      const base: NodeItem =
         type === "text"
-          ? { x: worldX - w / 2, y: worldY - h / 2 }
-          : findPlacement({
-              existing: (activeProject?.canvas.nodes ?? []).map((n) => ({
-                x: n.position.x,
-                y: n.position.y,
-                width: n.width,
-                height: n.height,
-              })),
-              anchor: { x: worldX, y: worldY },
-              nodeWidth: w,
-              nodeHeight: h,
-            });
-      const base: NodeItem = {
-        id,
-        type,
-        position,
-        width: w,
-        height: h,
-        content: type === "text" ? "文本节点" : type === "video" ? "占位视频节点" : "占位图片节点",
-      };
+          ? {
+              id,
+              type,
+              position: { x: worldX - 100, y: worldY - 24 },
+              width: 200,
+              height: 48,
+              content: "文本节点",
+            }
+          : {
+              id,
+              type,
+              position: { x: worldX - 120, y: worldY - 120 },
+              width: 240,
+              height: 240,
+              content: "占位图片节点",
+            };
       const node: NodeItem = { ...base, ...extra, id: base.id };
       // 写入走 reducer：节点归属当前 active project（位置在此算好作为 position 传入）
-      if (!activeProject) return id;
       dispatch({ type: "add-node", projectId: activeProject.id, node });
       return id;
     },
-    [viewport, activeProject]
-  );
-
-  // 占位→出图/失败原地流转（design D1/D7）：按 nodeId patch，不删重建保位置。
-  const updateNode = useCallback(
-    (nodeId: string, patch: Partial<NodeItem>) => {
-      console.log("[DEBUG-genbug] updateNode", nodeId, patch);
-      if (!activeProject) return;
-      dispatch({ type: "update-node", projectId: activeProject.id, nodeId, patch });
-    },
-    [activeProject?.id],
+    [viewport, activeProject.id, dispatch],
   );
 
   // 对话流出现 card 的同一时刻，在画布同步创建对应图片 NodeItem（同一生成结果两种视图）。
   // 仅透 content/width/height；position/id 留给 addNode。
   const handleCardGenerated = useCallback(
     (card: CardMessage) => {
+      if (
+        card.assetId &&
+        activeProject.canvas.nodes.some((node) => node.assetId === card.assetId)
+      ) {
+        return;
+      }
       const partial = nodeFromCard(card, () => 0);
-      addNode("image", { content: partial.content, width: partial.width, height: partial.height });
+      addNode("image", {
+        content: partial.content,
+        width: partial.width,
+        height: partial.height,
+        assetId: partial.assetId,
+        imageUrl: partial.imageUrl,
+      });
     },
-    [addNode]
+    [activeProject.canvas.nodes, addNode],
   );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -295,299 +397,192 @@ function CanvasPageInner() {
     fileInputRef.current?.click();
   }, []);
 
-  // 左工具栏「上传」：图片/视频都收，上传 TOS 拿持久 url 建画布节点（视频由 ImageNode 按 url 后缀自动切 <video>）
   const handleFileChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
+    (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      e.target.value = "";
-      if (!activeProject) return;
-      const mediaType: "image" | "video" = file.type.startsWith("video/") ? "video" : "image";
-      try {
-        const result = await uploadAsset(file, Number(activeProject.id), mediaType);
-        const size = await readMediaNaturalSize(result.url, mediaType);
-        addNode("image", { content: file.name, imageUrl: result.url, width: size.width, height: size.height });
-      } catch (err) {
-        setGenerateError(userFriendlyErrorMessage(err));
-      }
-    },
-    [addNode, activeProject?.id]
-  );
-
-  // Dock「本地上传」：上传 TOS 拿持久 url，按 MIME 分 image/video/audio；
-  // 图片/视频建画布节点，音频只入 Dock media（画布暂不承载音频节点）。
-  // 上传前校验大小（视频 ≤ 50MB），上传中显示缩略图进度百分比。
-  const handleDockLocalUpload = useCallback(
-    async (file: File, mode: "image" | "video") => {
-      if (!activeProject) return;
-      const mediaType: DockMediaItem["type"] = file.type.startsWith("image/")
-        ? "image"
-        : file.type.startsWith("video/")
-          ? "video"
-          : "audio";
-
-      // 校验：视频 ≤ 50MB
-      const MAX_VIDEO_MB = 50;
-      if (mediaType === "video" && file.size > MAX_VIDEO_MB * 1024 * 1024) {
-        toast.error(`视频大小不能超过 ${MAX_VIDEO_MB}MB`);
-        return;
-      }
-
-      // 占位 item（上传前先入 Dock media 列表，显示进度）
-      const placeholderId = `${mediaType}-upload-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      const placeholder: DockMediaItem = {
-        id: placeholderId,
-        type: mediaType,
-        name: file.name,
-        uploadProgress: 0,
-      };
-      const setMedia = mode === "image" ? setImageDockMedia : setVideoDockMedia;
-      setMedia((prev) => [...prev, placeholder]);
-
-      try {
-        const result = await uploadAsset(file, Number(activeProject.id), mediaType, (pct) => {
-          setMedia((prev) => prev.map((m) => (m.id === placeholderId ? { ...m, uploadProgress: pct } : m)));
-        });
-
-        // 上传成功：移除占位，替换为真实 item
-        setMedia((prev) => prev.filter((m) => m.id !== placeholderId));
-
-        const onCanvas = mediaType === "image" || mediaType === "video";
-        let id: string;
-        if (onCanvas) {
-          const size = await readMediaNaturalSize(result.url, mediaType as "image" | "video");
-          id = addNode("image", {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const url = ev.target?.result as string | undefined;
+        if (url) {
+          addNode("image", {
             content: file.name,
-            imageUrl: result.url,
-            width: size.width,
-            height: size.height,
+            imageUrl: url,
           });
-        } else {
-          id = `${mediaType}-${Date.now()}`;
         }
-        const item: DockMediaItem = { id, type: mediaType, name: file.name, src: result.url, assetId: result.id };
-        setMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
-      } catch (e) {
-        // 上传失败：移除占位 + toast 提示
-        setMedia((prev) => prev.filter((m) => m.id !== placeholderId));
-        toast.error(`上传失败：${userFriendlyErrorMessage(e)}`);
-      }
+      };
+      reader.readAsDataURL(file);
+      e.target.value = "";
     },
-    [addNode, activeProject?.id]
+    [addNode],
   );
 
-  // 首尾帧上传：调后端 asset upload 拿 TOS url 回填（后端可访问，非本地 blob）
-  const handleFrameUpload = useCallback(
-    async (file: File, slot: "first" | "last") => {
-      if (!activeProject) return;
-      try {
-        const result = await uploadAsset(file, Number(activeProject.id), "image");
-        if (slot === "first") setFirstFrameUrl(result.url);
-        else setLastFrameUrl(result.url);
-      } catch (e) {
-        setGenerateError(userFriendlyErrorMessage(e));
+  // Dock「本地上传」：既建画布节点，又把同一资产塞进对应 Dock 的参考 media（共享 id/src）
+  const handleDockLocalUpload = useCallback(
+    (file: File, mode: "image" | "video") => {
+      const url = URL.createObjectURL(file);
+      const id = addNode("image", { content: file.name, imageUrl: url });
+      const item: DockMediaItem = {
+        id,
+        type: "image",
+        name: file.name,
+        src: url,
+      };
+      if (mode === "image") {
+        setImageDockMedia((prev) =>
+          prev.some((m) => m.id === id) ? prev : [...prev, item],
+        );
+      } else {
+        setVideoDockMedia((prev) =>
+          prev.some((m) => m.id === id) ? prev : [...prev, item],
+        );
       }
     },
-    [activeProject?.id],
+    [addNode],
   );
 
-  const handleFrameClear = useCallback((slot: "first" | "last") => {
-    if (slot === "first") setFirstFrameUrl(undefined);
-    else setLastFrameUrl(undefined);
-  }, []);
-
-  const handleSwapFrames = useCallback(() => {
-    const tmp = firstFrameUrl;
-    setFirstFrameUrl(lastFrameUrl);
-    setLastFrameUrl(tmp);
-  }, [firstFrameUrl, lastFrameUrl]);
-
-  // 生成：占位节点即时上屏（loading）→ 出图/失败原地 update（design D1/D3/D14）
-  // 图片非流式同步、图片流式 SSE 逐张、视频异步轮询三路径。
+  // 图片与视频统一提交 Project 命令；结果都由 Snapshot/SSE 恢复。
   const handleGenerate = useCallback(
     async (promptText: string, args: GenerateArgs) => {
       const trimmed = promptText.trim();
       if (!trimmed) return;
-      if (!activeProject) return;
-      setGenerating(true);
-      setGenerateError(null);
-      let placeholderId: string | null = null;
+      const submittingProjectId = activeProject.id;
+      setSubmittingByProject((current) =>
+        setProjectSubmitting(current, submittingProjectId, true),
+      );
       try {
+        if (!backendReady) {
+          throw new Error("后端未启动或无法连接");
+        }
         if (args.mode === "image") {
-          // 图片：先放占位 loading 节点（design D1），按目标宽高比放（aspect-ratio-frame D8），出图原地 update
-          const ar = parseAspectRatio(args.settings.aspectRatio.id);
-          placeholderId = addNode("image", { content: trimmed, status: "loading", ...ar });
-          const result = await generateImage({
-            prompt: trimmed,
-            projectId: Number(activeProject.id),
-            modelId: args.settings.model.id,
-            sizeId: args.settings.resolution.id,
-            aspectRatio: args.settings.aspectRatio.id,
-            quantity: parseQuantity(args.settings.quantity),
-            referenceImages: args.referenceImages ?? imageDockMedia
-              .map((m) => m.src)
-              .filter((s): s is string => Boolean(s)),
-          });
-          console.log("[DEBUG-genbug] generateImage result", { stream: result.stream, jobId: result.jobId, url: result.url, assetId: result.assetId, placeholderId });
-          if (result.stream && result.jobId != null) {
-            // 流式（design D14）：1 占位代表首张 + 增量新增；中间失败建独立 error 节点
-            let firstReady = false;
-            streamJob(result.jobId, {
-              onImage: (url, assetId, imageIndex) => {
-                if (imageIndex === 0) {
-                  firstReady = true;
-                  updateNode(placeholderId!, { imageUrl: url, assetId, status: "ready" });
-                } else {
-                  addNode("image", { content: trimmed, imageUrl: url, assetId, status: "ready", ...ar });
-                }
-              },
-              onImageFailed: (imageIndex, _code, message) => {
-                addNode("image", {
-                  content: `第 ${imageIndex + 1} 张`,
-                  status: "error",
-                  errorMessage: message || "该张生成失败",
-                });
-              },
-              onDone: () => {
-                // 占位仍 loading（0 张成功）→ 转 error（design D14）
-                if (!firstReady && placeholderId) {
-                  updateNode(placeholderId, { status: "error", errorMessage: "未生成任何图片" });
-                }
-                setGenerating(false);
-              },
-              onError: (message) => {
-                if (placeholderId) updateNode(placeholderId, { status: "error", errorMessage: message });
-                setGenerateError(message);
-                setGenerating(false);
-              },
-            });
-          } else {
-            // 非流式：同步单图，占位 → ready/error
-            if (result.url) {
-              updateNode(placeholderId, {
-                imageUrl: result.url,
-                assetId: result.assetId,
-                status: "ready",
-              });
-            } else {
-              updateNode(placeholderId, { status: "error", errorMessage: "未返回图片" });
-            }
-            setGenerating(false);
+          const projectId = Number(activeProject.id);
+          const outputCount = expectedOutputCount(args.settings.quantity);
+          const inputAssetIds = imageDockMedia.map((media) =>
+            Number(media.assetId),
+          );
+          if (
+            !Number.isSafeInteger(projectId) ||
+            projectId <= 0 ||
+            inputAssetIds.some(
+              (assetId) => !Number.isSafeInteger(assetId) || assetId <= 0,
+            )
+          ) {
+            throw new Error("参考素材尚未成为可用 Asset");
           }
+          await createProjectGenerationJob(
+            projectId,
+            {
+              type: "image",
+              input_asset_ids: inputAssetIds,
+              parameters: {
+                prompt: trimmed,
+                aspect_ratio: args.settings.aspectRatio.id,
+                model_id: args.settings.modelId,
+                size: args.settings.size,
+                web_search: args.settings.webSearch,
+                sequential_image_generation: args.settings.sequential,
+              },
+              expected_output_count: outputCount,
+            },
+            newCommandIdentity(),
+          );
+          setGenerateError(null);
         } else if (args.mode === "video") {
-          // 视频（design D1/D16）：createVideoJob 成功后放 video 占位 loading，轮询流转
-          const result = await createVideoJob({
-            prompt: trimmed,
-            projectId: Number(activeProject.id),
-            modelId: args.settings.model.id,
-            resolution: args.settings.resolution.id,
-            aspectRatio: args.settings.aspectRatio.id,
-            duration: args.settings.duration,
-            firstFrameUrl: args.settings.firstFrameUrl,
-            lastFrameUrl: args.settings.lastFrameUrl,
-            referenceImages: args.settings.referenceImages,
-            referenceVideos: args.settings.referenceVideos,
-            referenceAudios: args.settings.referenceAudios,
-          });
-          // 视频占位按目标宽高比（aspect-ratio-frame D8）
-          const ar = parseAspectRatio(args.settings.aspectRatio.id);
-          placeholderId = addNode("video", { content: trimmed, status: "loading", progress: 0, ...ar });
-          pendingVideoNodeRef.current = placeholderId;
-          startJob(result.jobId);
-          // generating 在 jobState 终态时由下方 effect 复位
+          if (videoDockMedia.length > 1) {
+            throw new Error("视频参考素材数量超出限制");
+          }
+          const projectId = Number(activeProject.id);
+          const outputCount = expectedOutputCount(args.settings.quantity);
+          const inputAssetIds = videoDockMedia.map((media) =>
+            Number(media.assetId),
+          );
+          if (
+            !Number.isSafeInteger(projectId) ||
+            projectId <= 0 ||
+            inputAssetIds.some(
+              (assetId) => !Number.isSafeInteger(assetId) || assetId <= 0,
+            )
+          ) {
+            throw new Error("参考素材尚未成为可用 Asset");
+          }
+          const result = await createProjectGenerationJob(
+            projectId,
+            {
+              type: "video",
+              input_asset_ids: inputAssetIds,
+              parameters: {
+                prompt: trimmed,
+                aspect_ratio: args.settings.aspectRatio.id,
+                resolution: args.settings.resolution.id,
+                duration: args.settings.duration,
+              },
+              expected_output_count: outputCount,
+            },
+            newCommandIdentity(),
+          );
+          setActiveVideoJobIdByProject((current) => ({
+            ...current,
+            [submittingProjectId]: result.generation_job_id,
+          }));
+          setGenerateError(null);
         }
       } catch (e) {
         console.error("generate failed", e);
-        // 图片非流式：generateImage 抛错时占位已建 → 转 error（video 占位在 createVideoJob 后才建，抛错时尚未建）
-        if (placeholderId && args.mode === "image") {
-          updateNode(placeholderId, { status: "error", errorMessage: userFriendlyErrorMessage(e) });
-        }
         setGenerateError(userFriendlyErrorMessage(e));
-        setGenerating(false);
+      } finally {
+        setSubmittingByProject((current) =>
+          setProjectSubmitting(current, submittingProjectId, false),
+        );
       }
     },
-    [addNode, updateNode, imageDockMedia, startJob, activeProject?.id]
+    [activeProject.id, backendReady, imageDockMedia, videoDockMedia],
   );
 
-  // 视频任务轮询流转（design D16）：polling 更新 progress；succeeded 占位→ready；failed 占位→error
+  const handleRetryGenerationJob = useCallback(
+    async (generationJobId: number | string) => {
+      if (!backendReady) throw new Error("后端未启动或无法连接");
+      const projectId = Number(activeProject.id);
+      const jobId = Number(generationJobId);
+      if (
+        !Number.isSafeInteger(projectId) ||
+        projectId <= 0 ||
+        !Number.isSafeInteger(jobId) ||
+        jobId <= 0
+      ) {
+        throw new Error("GenerationJob 身份无效");
+      }
+      const identity =
+        retryIdempotencyKeysRef.current[String(jobId)] ?? newCommandIdentity();
+      retryIdempotencyKeysRef.current[String(jobId)] = identity;
+      await retryMissingProjectGenerationJobOutputs(projectId, jobId, identity);
+    },
+    [activeProject.id, backendReady],
+  );
+
+  // Project SSE 到达终态后呈现稳定错误；节点由恢复投影统一创建。
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
-    const nodeId = pendingVideoNodeRef.current;
-    if (jobState.status === "polling" && nodeId) {
-      updateNode(nodeId, { progress: jobState.progress });
-    } else if (jobState.status === "succeeded") {
-      if (nodeId) updateNode(nodeId, { imageUrl: jobState.assetUrl, status: "ready" });
-      setGenerating(false);
-      resetJob();
-    } else if (jobState.status === "failed") {
-      const msg = jobState.message || "视频生成失败";
-      if (nodeId) updateNode(nodeId, { status: "error", errorMessage: msg });
-      setGenerateError(msg);
-      setGenerating(false);
-      resetJob();
+    if (currentVideoStatus === "failed") {
+      setGenerateError(currentVideoErrorMessage || "视频生成失败，请稍后重试");
     }
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [jobState, updateNode, resetJob]);
+  }, [currentVideoErrorMessage, currentVideoStatus]);
 
-  // 刷新恢复（design D12 方案 A）：进 project 扫 processing job，重建占位 + 续轮询/SSE。
-  // recoveredRef 防同 project 重入（切走切回不重复恢复）；刷新=重挂载，ref 重置→恢复。
-  const recoveredRef = useRef<Set<string>>(new Set());
-  const recoverProcessingJobs = useCallback(
-    async (pid: string) => {
-      try {
-        const jobs = await listJobs({ projectId: Number(pid), status: "processing", size: 50 });
-        for (const job of jobs) {
-          const ph = jobToPlaceholder(job);
-          addNode(ph.type, { id: ph.id, ...ph.patch });
-          if (ph.type === "video") {
-            // 视频续轮询（useJobStatus 单 job：多个 video processing 时续最后一个，MVP 限制）
-            pendingVideoNodeRef.current = ph.id;
-            startJob(job.jobId);
-          } else {
-            // 图片流式重连：后端 JobStreamBus 补发历史 image/done（方案 A 零后端改动）
-            let firstReady = false;
-            streamJob(job.jobId, {
-              onImage: (url, assetId, imageIndex) => {
-                if (imageIndex === 0) {
-                  firstReady = true;
-                  updateNode(ph.id, { imageUrl: url, assetId, status: "ready" });
-                } else {
-                  addNode("image", {
-                    content: ph.patch.content ?? "",
-                    imageUrl: url,
-                    assetId,
-                    status: "ready",
-                    width: ph.patch.width,
-                    height: ph.patch.height,
-                  });
-                }
-              },
-              onImageFailed: (imageIndex, _code, message) =>
-                addNode("image", {
-                  content: `第 ${imageIndex + 1} 张`,
-                  status: "error",
-                  errorMessage: message || "该张生成失败",
-                }),
-              onDone: () => {
-                if (!firstReady) updateNode(ph.id, { status: "error", errorMessage: "未生成任何图片" });
-              },
-              onError: (message) => updateNode(ph.id, { status: "error", errorMessage: message }),
-            });
-          }
-        }
-      } catch (e) {
-        console.warn("[canvas] recover processing jobs failed:", e);
-      }
-    },
-    [addNode, updateNode, startJob],
-  );
-  useEffect(() => {
-    // 等 loadCanvas 完成（loadedCanvasId）再恢复：避免 set-canvas 覆盖 recover 占位
-    if (!loadedCanvasId) return;
-    if (recoveredRef.current.has(loadedCanvasId)) return;
-    recoveredRef.current.add(loadedCanvasId);
-    void recoverProcessingJobs(loadedCanvasId);
-  }, [loadedCanvasId, recoverProcessingJobs]);
+  const handleCancelVideo = useCallback(async () => {
+    if (!Number.isSafeInteger(currentVideoJobId) || currentVideoJobId <= 0)
+      return;
+    setCancellingVideo(true);
+    try {
+      await cancelProjectGenerationJob(
+        Number(activeProject.id),
+        currentVideoJobId,
+      );
+    } catch (error) {
+      setGenerateError(userFriendlyErrorMessage(error));
+    } finally {
+      setCancellingVideo(false);
+    }
+  }, [activeProject.id, currentVideoJobId]);
 
   // 进入/退出「从画布选择」模式
   const handleRequestPick = useCallback((mode: "image" | "video") => {
@@ -606,16 +601,21 @@ function CanvasPageInner() {
         id: node.id,
         type: "image",
         name: node.content || "图片",
+        assetId: node.assetId,
         src: node.imageUrl,
       };
       if (pickingFor === "image") {
-        setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+        setImageDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
       } else if (pickingFor === "video") {
-        setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+        setVideoDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
       }
       setPickingFor(null);
     },
-    [pickingFor]
+    [pickingFor],
   );
 
   // CanvasSurface 节点点击：选择模式下拦截为挑图，否则交 RF 默认选中
@@ -625,7 +625,7 @@ function CanvasPageInner() {
         handlePickNode(node);
       }
     },
-    [pickingFor, handlePickNode]
+    [pickingFor, handlePickNode],
   );
 
   // 操作浮层动作：按 nodeId 反查 node 后走 handleNodeAction
@@ -634,22 +634,13 @@ function CanvasPageInner() {
       const node = nodes.find((n) => n.id === nodeId);
       if (node) handleNodeAction(node, actionId);
     },
-    [nodes, handleNodeAction]
-  );
-
-  // 占位/error 节点重试（design D13）：唤起对应 Dock 重配（节点 content 已存 prompt）
-  const handleNodeRetry = useCallback(
-    (nodeId: string) => {
-      const node = nodes.find((n) => n.id === nodeId);
-      if (!node) return;
-      setBottomDockMode(node.type === "video" ? "video" : "image");
-      setIsBottomDockOpen(true);
-    },
-    [nodes],
+    [nodes, handleNodeAction],
   );
 
   // 可选图片节点数（带 imageUrl），用于胶囊空态提示
-  const pickableCount = nodes.filter((n) => n.type === "image" && n.imageUrl).length;
+  const pickableCount = nodes.filter(
+    (n) => n.type === "image" && n.imageUrl,
+  ).length;
 
   const handleToolClick = useCallback(
     (id: string) => {
@@ -675,7 +666,7 @@ function CanvasPageInner() {
         addNode("text");
       }
     },
-    [addNode, bottomDockMode, handleUploadClick]
+    [addNode, bottomDockMode, handleUploadClick],
   );
 
   if (gated) {
@@ -688,55 +679,13 @@ function CanvasPageInner() {
       </div>
     );
   }
-  if (!activeProject) {
-    // 空态：后端不可达（loadError）或未登录无 token。显示重试 + 引导新建，不露写死的假数据。
-    return (
-      <div className="flex h-screen w-screen flex-col items-center justify-center gap-5 bg-black">
-        <p className="text-sm" style={{ color: "var(--tc-text-secondary)" }}>
-          {loadError ? "项目加载失败" : "暂无项目"}
-        </p>
-        <div className="flex items-center gap-3">
-          {loadError && (
-            <button
-              type="button"
-              onClick={retry}
-              className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm transition-colors"
-              style={{
-                background: "var(--tc-bg-surface)",
-                border: "1px solid var(--tc-border-subtle)",
-                color: "var(--tc-text-secondary)",
-              }}
-            >
-              重试
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={createProjectAction}
-            className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm transition-colors"
-            style={{
-              background: "var(--tc-accent)",
-              color: "var(--tc-on-accent)",
-            }}
-          >
-            新建项目
-          </button>
-        </div>
-        {saveStatus === "error" && (
-          <p className="text-xs" style={{ color: "var(--tc-destructive)" }}>
-            操作失败，请检查服务是否可用
-          </p>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-black text-white">
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,video/*"
+        accept="image/*"
         className="sr-only"
         onChange={handleFileChange}
         aria-hidden="true"
@@ -747,7 +696,6 @@ function CanvasPageInner() {
         onSwitch={switchProject}
         onCreate={createProjectAction}
         onDelete={deleteProjectAction}
-        onRename={renameProjectAction}
       />
       <TopBarCenter />
       <TopBarRight
@@ -765,7 +713,6 @@ function CanvasPageInner() {
             onNodeClick={handleCanvasNodeClick}
             onPaneClick={handleExitPick}
             onNodeAction={handleCanvasNodeAction}
-            onNodeRetry={handleNodeRetry}
             picking={pickingFor !== null}
           />
         </div>
@@ -795,9 +742,13 @@ function CanvasPageInner() {
             whiteSpace: "nowrap",
           }}
         >
-          <span style={{ color: "var(--tc-accent)", fontWeight: 600 }}>从画布选择</span>
+          <span style={{ color: "var(--tc-accent)", fontWeight: 600 }}>
+            从画布选择
+          </span>
           <span style={{ color: "var(--tc-text-tertiary)" }}>
-            {pickableCount === 0 ? "画布上还没有可用的图片" : "点击画布中的图片加入"}
+            {pickableCount === 0
+              ? "画布上还没有可用的图片"
+              : "点击画布中的图片加入"}
           </span>
           <span style={{ color: "var(--tc-text-muted)" }}>·</span>
           <button
@@ -824,23 +775,26 @@ function CanvasPageInner() {
           onClose={() => setIsBottomDockOpen(false)}
           imageMedia={imageDockMedia}
           videoMedia={videoDockMedia}
-          focusSignal={dockFocusSignal}
-          dockMentionSignal={dockMentionSignal}
-          onRemoveImageMedia={(id) => setImageDockMedia((prev) => prev.filter((m) => m.id !== id))}
-          onRemoveVideoMedia={(id) => setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))}
-          firstFrameUrl={firstFrameUrl}
-          lastFrameUrl={lastFrameUrl}
-          onFrameUpload={handleFrameUpload}
-          onFrameClear={handleFrameClear}
-          onSwapFrames={handleSwapFrames}
+          onRemoveImageMedia={(id) =>
+            setImageDockMedia((prev) => prev.filter((m) => m.id !== id))
+          }
+          onRemoveVideoMedia={(id) =>
+            setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))
+          }
           onLocalUpload={(file) => handleDockLocalUpload(file, bottomDockMode)}
           onPickFromCanvas={() => handleRequestPick(bottomDockMode)}
           onExitPick={handleExitPick}
           isPicking={pickingFor === bottomDockMode}
           onGenerate={handleGenerate}
-          generating={generating}
+          generating={
+            generating || (bottomDockMode === "video" && videoJobActive)
+          }
           generateError={generateError}
           onClearGenerateError={() => setGenerateError(null)}
+          videoJobStatus={currentVideoStatus}
+          videoJobError={currentVideoErrorMessage}
+          onCancelVideoJob={handleCancelVideo}
+          cancellingVideo={cancellingVideo}
         />
       </div>
       <AgentChatPanel
@@ -853,18 +807,38 @@ function CanvasPageInner() {
         onMentionConsumed={() => setAgentPendingMention(null)}
         onCardGenerated={handleCardGenerated}
         onAppendMessages={(msgs: ChatMessage[]) =>
-          dispatch({ type: "append-messages", projectId: activeProject.id, messages: msgs })
+          dispatch({
+            type: "append-messages",
+            projectId: activeProject.id,
+            messages: msgs,
+          })
         }
+        onSubmitMessage={
+          backendReady ? submitConversationMessageAction : undefined
+        }
+        forcedSkillName={forcedSkillName}
+        answerableActive={answerableActive}
+        skillRecommendations={backendReady ? skillRecommendations : undefined}
+        skillRecommendationsLoading={skillRecommendationsLoading}
         onSetCardStatus={(cardId, status) =>
-          dispatch({ type: "set-card-status", projectId: activeProject.id, cardId, status })
+          dispatch({
+            type: "set-card-status",
+            projectId: activeProject.id,
+            cardId,
+            status,
+          })
         }
+        onRetryGenerationJob={handleRetryGenerationJob}
       />
 
       <div className="absolute bottom-4 left-4 z-[400] flex items-center gap-2">
         <Link
           href="/"
           className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-white/70 backdrop-blur-md transition-colors hover:text-white"
-          style={{ background: "var(--tc-bg-surface)", border: "1px solid var(--tc-menu-pill-border)" }}
+          style={{
+            background: "var(--tc-bg-surface)",
+            border: "1px solid var(--tc-menu-pill-border)",
+          }}
         >
           <ArrowLeft width={14} height={14} />
           返回首页
@@ -874,7 +848,9 @@ function CanvasPageInner() {
             className="text-xs"
             style={{
               color:
-                saveStatus === "error" ? "var(--tc-destructive)" : "var(--tc-text-muted)",
+                saveStatus === "error"
+                  ? "var(--tc-destructive)"
+                  : "var(--tc-text-muted)",
             }}
           >
             {saveStatus === "saving"

@@ -31,7 +31,8 @@ export function loadHistory(): HistoryItem[] {
     return parsed.filter(
       (item: unknown): item is HistoryItem =>
         typeof (item as HistoryItem)?.id === "string" &&
-        ((item as HistoryItem)?.type === "canvas" || (item as HistoryItem)?.type === "chat") &&
+        ((item as HistoryItem)?.type === "canvas" ||
+          (item as HistoryItem)?.type === "chat") &&
         typeof (item as HistoryItem)?.title === "string" &&
         typeof (item as HistoryItem)?.createdAt === "number",
     );

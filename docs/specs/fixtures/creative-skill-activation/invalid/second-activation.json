@@ -1,0 +1,26 @@
+{
+  "auto_creative_skill_candidates": [],
+  "activated_creative_skill_versions": [
+    {
+      "creative_skill_id": "cs_poster_design",
+      "creative_skill_version_id": "csv_poster_design_1_0_0",
+      "source": "forced_use",
+      "reason": {
+        "type": "user_use"
+      },
+      "resource_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    {
+      "creative_skill_id": "cs_storyboard",
+      "creative_skill_version_id": "csv_storyboard_2_1_0",
+      "source": "auto",
+      "reason": {
+        "type": "agent_match",
+        "detail": {
+          "matched_fields": ["conversation_messages"]
+        }
+      },
+      "resource_digest": "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+    }
+  ]
+}

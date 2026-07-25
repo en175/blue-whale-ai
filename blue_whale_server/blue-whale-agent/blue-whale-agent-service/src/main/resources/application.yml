@@ -8,29 +8,24 @@ spring:
     active: blue-whale-dev
   cloud:
     nacos:
-      server-addr: 115.190.244.91:8848
+      # 本地 Docker Compose 默认连容器服务名 nacos:8848；远端用 NACOS_SERVER_ADDR 覆盖
+      server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
       discovery:
         register-enabled: true
-        # namespace 必须用 Nacos 的 namespace ID（UUID），用名字会注册到 console 看不见的隐式命名空间
-        # 本地开发传 NACOS_NAMESPACE=<隔离 namespace ID> 注册到独立 namespace，避免串线上流量
-        namespace: ${NACOS_NAMESPACE:1bb06cf5-c1ad-4054-b022-49358a2f49aa}
+        # namespace 必须用 Nacos 的 namespace ID（UUID）或 public 空 namespace（本地默认空）；
+        # 用名字会注册到 console 看不见的隐式命名空间
+        namespace: ${NACOS_NAMESPACE:}
         timeout: 10000
-      config:
-        server-addr: 115.190.244.91:8848
-        namespace: ${NACOS_NAMESPACE:1bb06cf5-c1ad-4054-b022-49358a2f49aa}
-        file-extension: yml
-        group: BLUE_WHALE
-
-
   datasource:
     dynamic:
       primary: master
       strict: false
       datasource:
         master:
-          url: jdbc:mysql://115.190.244.91:3306/blue_whale?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-          username: root
-          password: weitian1024
+          # 本地默认连容器服务名 mysql:3306；远端用 MYSQL_HOST/MYSQL_PORT/MYSQL_DB 覆盖
+          url: jdbc:mysql://${MYSQL_HOST:mysql}:${MYSQL_PORT:3306}/${MYSQL_DB:blue_whale}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+          username: ${MYSQL_USER:root}
+          password: ${MYSQL_PASSWORD:blue_whale}
           driver-class-name: com.mysql.cj.jdbc.Driver
           type: com.zaxxer.hikari.HikariDataSource
           hikari:
@@ -40,18 +35,15 @@ spring:
             idle-timeout: 300000
             max-lifetime: 1200000
   redis:
-    host: 115.190.244.91
-    port: 6379
-    password: weitian1024
+    # 本地默认连容器服务名 redis:6379（无密码）；远端用 REDIS_HOST/REDIS_PORT/REDIS_PASSWORD 覆盖
+    host: ${REDIS_HOST:redis}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
     database: 0
-  servlet:
-    multipart:
-      # 素材上传上限：图片≤2MB / 视频≤50MB（与 AssetService 校验对齐），放开 Spring/Tomcat 默认 1MB 限制
-      max-file-size: 50MB
-      max-request-size: 55MB
-  # HTTP 对外 JSON 默认 camelCase（合规 CLAUDE.md 后端规范）。
-  # DB JSON 列的 snake↔camel 映射由 MybatisJacksonConfig 注入独立 SNAKE_CASE ObjectMapper 给
-  # JacksonTypeHandler 处理，与 HTTP 隔离；普通列靠 mybatis-plus map-underscore-to-camel-case（见下）。
+  jackson:
+    # 前端字段全 snake_case，必须 SNAKE_CASE 才能映射到后端 camelCase（model_id→modelId）。
+    # MybatisJacksonConfig 复用此 ObjectMapper 给 JacksonTypeHandler，DB 的 JSON 列也是 snake_case。
+    property-naming-strategy: SNAKE_CASE
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
@@ -68,38 +60,66 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 oss:
-  tos:
-    access-key: AKLTYjI2ZjM3NDU1NTBiNDQwMDkwNjFhZmQxOWVhOGYyODg
-    secret-key: WVdVMU9UTmhaREppTWpSa05EWmlOVGxoT1RNMFlqVTVOR00xWkRKalpqaw==
-    bucket-name: bluewhale-assets
+  volcengine:
+    access-key: ${TOS_ACCESS_KEY}
+    secret-key: ${TOS_SECRET_KEY}
+    bucket-name: ${TOS_BUCKET_NAME}
+    domain: ${TOS_DOMAIN:https://sweet-oa.tos-cn-beijing.volces.com}
 
 logging:
   level:
     com.blue.whale.agent.mapper: info
 
+blue-whale:
+  generation:
+    # disabled | openai-tos | fake（fake 仅限非生产，需同时显式置 fake-allowed=true）
+    mode: ${GENERATION_MODE:disabled}
+    fake-allowed: ${GENERATION_FAKE_ALLOWED:false}
+    # 受控真实图片验收（IK1NS3）：仅 mode=openai-tos 的非生产环境可显式置 true，
+    # 以非生产确定性证据源替换 fail-closed 占位证据源；生产 profile 拒绝该组合
+    acceptance-allowed: ${GENERATION_ACCEPTANCE_ALLOWED:false}
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      model: ${OPENAI_IMAGE_MODEL:gpt-image-2}
+      max-image-bytes: ${OPENAI_IMAGE_MAX_BYTES:20971520}
+    tos:
+      access-key: ${GENERATION_TOS_ACCESS_KEY:}
+      secret-key: ${GENERATION_TOS_SECRET_KEY:}
+      region: ${GENERATION_TOS_REGION:}
+      endpoint: ${GENERATION_TOS_ENDPOINT:}
+      bucket: ${GENERATION_TOS_BUCKET:}
+      prefix: ${GENERATION_TOS_PREFIX:generation}
+      signed-url-ttl-seconds: ${GENERATION_TOS_SIGNED_URL_TTL_SECONDS:300}
+      max-read-bytes: ${GENERATION_TOS_MAX_READ_BYTES:20971520}
+      max-video-bytes: ${GENERATION_TOS_MAX_VIDEO_BYTES:209715200}
+    seedance:
+      account-id: ${SEEDANCE_ACCOUNT_ID:default}
+      callback-base-url: ${SEEDANCE_CALLBACK_BASE_URL:}
+      initial-poll-seconds: 5
+      max-poll-seconds: 30
+      allowed-result-host-suffixes: ${SEEDANCE_ALLOWED_RESULT_HOST_SUFFIXES:volces.com}
+    agent-plan:
+      # 本地磁盘生成存储根目录（Docker 卷挂载，重启不丢）；仅 mode=agent-plan 时由 LocalDiskGenerationStorage 使用
+      storage-root: ${GENERATION_LOCAL_STORAGE_ROOT:/var/lib/blue-whale/generation}
+    worker-scheduled: ${GENERATION_WORKER_SCHEDULED:true}
+  project-events:
+    redis-enabled: true
+    channel: blue-whale:project-events
+  # ContentReview 策略版本（ADR-0029）：本地非生产固定确定性策略；生产由专门 issue 接入真实供应商
+  content-review:
+    policy-version: ${CONTENT_REVIEW_POLICY_VERSION:local-fake-v1}
+  agent-orchestrator:
+    engine: ${AGENT_ORCHESTRATOR_ENGINE:pydantic-ai}
+    engine-version: ${AGENT_ORCHESTRATOR_ENGINE_VERSION:2.9.0}
+    adapter-schema-version: ${AGENT_ORCHESTRATOR_SCHEMA_VERSION:1}
+  runtime-bundle:
+    # 运行钉版强制开关（IK2D8J）：默认开启与 @Value 缺省一致；隔离验收栈无激活
+    # BundleVersion 种子（与 test profile 一致），经 compose 显式置 false。
+    enforcement-enabled: ${RUNTIME_BUNDLE_ENFORCEMENT_ENABLED:true}
+
 # 火山方舟 Ark：图片/视频生成。api-key 必填，否则 ArkService bean 不创建、生成接口报配置缺失
 volcengine:
   ark:
-    base-url: https://ark.cn-beijing.volces.com/api/v3
-    api-key: ark-90702f0d-327b-4d76-890c-7dc81efd5721-e0494
-
-# 模板标签：原 TemplateTagEnum 枚举迁为配置项，增删标签改此处即可，无需改代码
-# tagCode 值须与 DB template_card.tag_code 现有数据保持一致
-bluewhale:
-  template:
-    tags:
-      - tag-code: marketing
-        label: 营销视频
-        sort-order: 0
-      - tag-code: short
-        label: 微短片
-        sort-order: 1
-      - tag-code: replicate
-        label: 视频复刻
-        sort-order: 2
-      - tag-code: social
-        label: 社媒视频
-        sort-order: 3
-      - tag-code: image
-        label: 图片设计
-        sort-order: 4
+    base-url: ${ARK_BASE_URL:https://ark.cn-beijing.volces.com/api/v3}
+    api-key: ${ARK_API_KEY:}

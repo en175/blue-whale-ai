@@ -17,23 +17,20 @@ import {
 } from "lucide-react";
 import { AspectRatioIcon } from "@/components/icons/AspectRatioIcon";
 import { CreditIcon, IconClose, IconPlus } from "../../icons";
-import { VIDEO_ASPECT_RATIOS, REF_MODES, QUANTITIES } from "../../constants";
+import {
+  VIDEO_MODELS,
+  VIDEO_ASPECT_RATIOS,
+  VIDEO_RESOLUTIONS,
+  VIDEO_DURATION_MIN,
+  VIDEO_DURATION_MAX,
+  VIDEO_DURATION_STEP,
+  VIDEO_DURATION_TICKS,
+  REF_MODES,
+  QUANTITIES,
+} from "../../constants";
 import type { VideoDockContentProps } from "../../types";
-import { FrameUploadButton, MediaCategoryButton, MediaSection } from "./parts";
+import { DockMediaThumb, FrameUploadButton, MediaUploadButton } from "./parts";
 import { UploadSourceMenu } from "./UploadSourceMenu";
-
-type MediaCategory = "image" | "video" | "audio";
-
-const MEDIA_CATEGORY_SPECS: Record<MediaCategory, { label: string; spec: string; accept: string; uploadedMax: number }> = {
-  image: { label: "图片", spec: "Max 9 images · 350×350 – 7680×7680", accept: "image/*", uploadedMax: 9 },
-  video: {
-    label: "视频",
-    spec: "Max 3 videos · ≤15.2s total · ≥2s each · ≤50MB · ≤6000×6000",
-    accept: "video/*",
-    uploadedMax: 3,
-  },
-  audio: { label: "音频", spec: "Max 3 audios · ≤15.2s total · ≥2s each", accept: "audio/*", uploadedMax: 3 },
-};
 
 export function VideoDockContent(props: VideoDockContentProps) {
   const {
@@ -46,14 +43,13 @@ export function VideoDockContent(props: VideoDockContentProps) {
     refModeOpen,
     setRefModeOpen,
     selectedModel,
-    onSelectModel,
+    setSelectedModel,
     modelSettingsOpen,
     setModelSettingsOpen,
     aspectRatio,
     setAspectRatio,
     resolution,
     setResolution,
-    videoModels,
     duration,
     setDuration,
     quantity,
@@ -64,12 +60,6 @@ export function VideoDockContent(props: VideoDockContentProps) {
     setAdvancedOpen,
     internetSearch,
     setInternetSearch,
-    firstFrameUrl,
-    lastFrameUrl,
-    onFrameUpload,
-    onFrameClear,
-    onSwapFrames,
-    onPickFrameFromCanvas,
     media = [],
     onRemoveMedia,
     onLocalUpload,
@@ -81,20 +71,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
     onPreviewMedia,
   } = props;
 
-  // 当前模型的 capability（DB 驱动）：下拉数据源 + 联动。比例用平台固定集合常量。
-  const currentCap = videoModels.find((m) => m.modelId === selectedModel.id) ?? videoModels[0];
-  const resolutions = currentCap?.supportedResolutions ?? [];
-  const drMin = currentCap?.durationRange?.min ?? 4;
-  const drMax = currentCap?.durationRange?.max ?? 15;
-  const drStep = currentCap?.durationRange?.step ?? 1;
-  const durationTicks = Array.from({ length: (drMax - drMin) / drStep + 1 }, (_, i) => drMin + i * drStep);
-
-  // omni 全能参考：按类型从 media 收集 url（图片/视频/音频分别打 reference_image/reference_video/reference_audio）
-  const collectRefs = (type: MediaCategory): string[] =>
-    media.filter((m) => m.type === type).map((m) => m.src).filter((s): s is string => Boolean(s));
-
   // 上传来源菜单（参考图占位 + 加号共用）
   const localFileRef = useRef<HTMLInputElement>(null);
+  const placeholderRef = useRef<HTMLButtonElement>(null);
   const plusRef = useRef<HTMLButtonElement>(null);
   const uploadTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
@@ -125,20 +104,12 @@ export function VideoDockContent(props: VideoDockContentProps) {
   const modelSettingsMenuRef = useRef<HTMLDivElement>(null);
   const quantityRef = useRef<HTMLDivElement>(null);
   const quantityMenuRef = useRef<HTMLDivElement>(null);
-  const mediaCategoryRefs = useRef<Record<MediaCategory, HTMLButtonElement | null>>({
-    image: null,
-    video: null,
-    audio: null,
-  });
-  const mediaCategoryMenuRef = useRef<HTMLDivElement>(null);
 
   const [refModePos, setRefModePos] = useState<{ left: number; bottom: number }>({ left: 0, bottom: 0 });
   const [modelSettingsPos, setModelSettingsPos] = useState<{ left: number; bottom: number }>({ left: 0, bottom: 0 });
   const [quantityPos, setQuantityPos] = useState<{ left: number; bottom: number }>({ left: 0, bottom: 0 });
-  const [mediaCategoryPos, setMediaCategoryPos] = useState<{ left: number; bottom: number }>({ left: 0, bottom: 0 });
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [resolutionDropdownOpen, setResolutionDropdownOpen] = useState(false);
-  const [openMediaCategory, setOpenMediaCategory] = useState<MediaCategory | null>(null);
 
   useEffect(() => {
     if (refModeOpen && refModeRef.current) {
@@ -160,13 +131,6 @@ export function VideoDockContent(props: VideoDockContentProps) {
       setQuantityPos({ left: rect.left, bottom: window.innerHeight - rect.top + 8 });
     }
   }, [quantityOpen]);
-
-  useEffect(() => {
-    if (openMediaCategory && mediaCategoryRefs.current[openMediaCategory]) {
-      const rect = mediaCategoryRefs.current[openMediaCategory]!.getBoundingClientRect();
-      setMediaCategoryPos({ left: rect.left, bottom: window.innerHeight - rect.top + 8 });
-    }
-  }, [openMediaCategory]);
 
   useEffect(() => {
     if (!refModeOpen) return;
@@ -205,18 +169,6 @@ export function VideoDockContent(props: VideoDockContentProps) {
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
   }, [quantityOpen, setQuantityOpen]);
-
-  useEffect(() => {
-    if (!openMediaCategory) return;
-    const handle = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (mediaCategoryRefs.current[openMediaCategory]?.contains(t)) return;
-      if (mediaCategoryMenuRef.current?.contains(t)) return;
-      setOpenMediaCategory(null);
-    };
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  }, [openMediaCategory]);
 
   return (
     <>
@@ -295,17 +247,10 @@ export function VideoDockContent(props: VideoDockContentProps) {
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 0%", minWidth: 0 }}>
-                    <FrameUploadButton
-                      label="首帧"
-                      value={firstFrameUrl}
-                      onPick={(f) => onFrameUpload?.(f, "first")}
-                      onClear={() => onFrameClear?.("first")}
-                      onPickFromCanvas={() => onPickFrameFromCanvas?.("first")}
-                    />
+                    <FrameUploadButton label="首帧" />
                     <button
                       type="button"
                       aria-label="交换首尾帧"
-                      onClick={onSwapFrames}
                       style={{
                         width: 26,
                         height: 26,
@@ -324,13 +269,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                     >
                       <ArrowLeftRight width={13} height={13} strokeWidth={2} aria-hidden="true" />
                     </button>
-                    <FrameUploadButton
-                      label="尾帧"
-                      value={lastFrameUrl}
-                      onPick={(f) => onFrameUpload?.(f, "last")}
-                      onClear={() => onFrameClear?.("last")}
-                      onPickFromCanvas={() => onPickFrameFromCanvas?.("last")}
-                    />
+                    <FrameUploadButton label="尾帧" />
                   </div>
                 </div>
               ) : (
@@ -338,41 +277,59 @@ export function VideoDockContent(props: VideoDockContentProps) {
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: 8,
-                    padding: "0px 32px 0px 4px",
+                    gap: 4,
+                    paddingLeft: 4,
+                    paddingRight: 32,
+                    minHeight: 44,
                     width: "100%",
                     boxSizing: "border-box",
+                    flexWrap: "wrap",
                   }}
                 >
-                  <MediaCategoryButton
-                    triggerRef={(el) => {
-                      mediaCategoryRefs.current.image = el;
-                    }}
-                    icon={<ImageIcon width={15} height={15} strokeWidth={2} aria-hidden="true" />}
-                    label="图片"
-                    active={openMediaCategory === "image"}
-                    hasItems={media.some((m) => m.type === "image")}
-                    onClick={() => setOpenMediaCategory((c) => (c === "image" ? null : "image"))}
-                  />
-                  <MediaCategoryButton
-                    triggerRef={(el) => {
-                      mediaCategoryRefs.current.video = el;
-                    }}
-                    icon={<Video width={15} height={15} strokeWidth={2} aria-hidden="true" />}
+                  {media.length > 0
+                    ? media.map((m) => <DockMediaThumb key={m.id} item={m} onRemove={onRemoveMedia} />)
+                    : (
+                      <div style={{ position: "relative", flexShrink: 0 }}>
+                        <button
+                          ref={placeholderRef}
+                          type="button"
+                          aria-label="参考图片"
+                          aria-haspopup="menu"
+                          aria-expanded={uploadMenuOpen}
+                          onClick={() => handleTriggerClick(placeholderRef)}
+                          style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 9,
+                            border: "1px solid rgba(255, 255, 255, 0.02)",
+                            background: "rgba(255, 255, 255, 0.043)",
+                            color: "rgba(255, 255, 255, 0.62)",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 6,
+                            padding: 0,
+                            cursor: "pointer",
+                            opacity: 1,
+                            transition: "background 120ms, color 120ms",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <ImageIcon width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />
+                        </button>
+                      </div>
+                    )}
+                  <span style={{ color: "rgba(255, 255, 255, 0.22)", fontSize: 14, lineHeight: 1 }}>·</span>
+                  <MediaUploadButton
                     label="视频"
-                    active={openMediaCategory === "video"}
-                    hasItems={media.some((m) => m.type === "video")}
-                    onClick={() => setOpenMediaCategory((c) => (c === "video" ? null : "video"))}
+                    accept=".mp4,video/mp4"
+                    icon={<Video width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />}
                   />
-                  <MediaCategoryButton
-                    triggerRef={(el) => {
-                      mediaCategoryRefs.current.audio = el;
-                    }}
-                    icon={<AudioLines width={15} height={15} strokeWidth={2} aria-hidden="true" />}
+                  <span style={{ color: "rgba(255, 255, 255, 0.22)", fontSize: 14, lineHeight: 1 }}>·</span>
+                  <MediaUploadButton
                     label="音频"
-                    active={openMediaCategory === "audio"}
-                    hasItems={media.some((m) => m.type === "audio")}
-                    onClick={() => setOpenMediaCategory((c) => (c === "audio" ? null : "audio"))}
+                    accept=".mp3,.wav,.m4a,audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/mp4,audio/x-m4a"
+                    icon={<AudioLines width={15} height={15} stroke="currentColor" strokeWidth={1.8} aria-hidden="true" />}
                   />
                 </div>
               )}
@@ -699,8 +656,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
             <button
               type="button"
               disabled={isEmpty || generating}
-              onClick={() => {
-                const isOmni = refMode.id === "omni";
+              onClick={() =>
                 onGenerate?.({
                   model: selectedModel,
                   resolution,
@@ -708,14 +664,8 @@ export function VideoDockContent(props: VideoDockContentProps) {
                   duration,
                   quantity,
                   refMode,
-                  // 互斥：首尾帧模式发 frame url，omni 模式发参考素材（火山三场景不可混用）
-                  firstFrameUrl: isOmni ? undefined : firstFrameUrl,
-                  lastFrameUrl: isOmni ? undefined : lastFrameUrl,
-                  referenceImages: isOmni ? collectRefs("image") : undefined,
-                  referenceVideos: isOmni ? collectRefs("video") : undefined,
-                  referenceAudios: isOmni ? collectRefs("audio") : undefined,
-                });
-              }}
+                })
+              }
               style={{
                 height: 32,
                 padding: "0px 12px",
@@ -931,12 +881,12 @@ export function VideoDockContent(props: VideoDockContentProps) {
                         gap: 2,
                       }}
                     >
-                      {videoModels.map((m) => (
+                      {VIDEO_MODELS.map((m) => (
                         <button
-                          key={m.modelId}
+                          key={m.id}
                           type="button"
                           onClick={() => {
-                            onSelectModel(m);
+                            setSelectedModel(m);
                             setModelDropdownOpen(false);
                           }}
                           style={{
@@ -945,7 +895,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                             borderRadius: 6,
                             border: 0,
                             background:
-                              selectedModel.id === m.modelId ? "rgba(255, 255, 255, 0.08)" : "transparent",
+                              selectedModel.id === m.id ? "rgba(255, 255, 255, 0.08)" : "transparent",
                             color: "rgb(255, 255, 255)",
                             fontSize: 12,
                             cursor: "pointer",
@@ -957,7 +907,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                             textAlign: "left",
                           }}
                         >
-                          <span style={{ fontWeight: 600 }}>{m.modelLabel}</span>
+                          <span style={{ fontWeight: 600 }}>{m.label}</span>
                         </button>
                       ))}
                     </div>
@@ -1038,12 +988,12 @@ export function VideoDockContent(props: VideoDockContentProps) {
                         gap: 2,
                       }}
                     >
-                      {resolutions.map((r) => (
+                      {VIDEO_RESOLUTIONS.map((r) => (
                         <button
                           key={r.id}
                           type="button"
                           onClick={() => {
-                            setResolution({ id: r.id, label: r.label });
+                            setResolution(r);
                             setResolutionDropdownOpen(false);
                           }}
                           style={{
@@ -1082,9 +1032,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
               </div>
               <input
                 className="tc-duration-slider__input"
-                min={drMin}
-                max={drMax}
-                step={drStep}
+                min={VIDEO_DURATION_MIN}
+                max={VIDEO_DURATION_MAX}
+                step={VIDEO_DURATION_STEP}
                 aria-label="时长"
                 aria-valuetext={`${duration}s`}
                 type="range"
@@ -1092,19 +1042,19 @@ export function VideoDockContent(props: VideoDockContentProps) {
                 onChange={(e) => setDuration(Number(e.target.value))}
                 style={{
                   ["--tc-duration-slider-progress" as string]: `${
-                    ((duration - drMin) / (drMax - drMin)) * 100
+                    ((duration - VIDEO_DURATION_MIN) / (VIDEO_DURATION_MAX - VIDEO_DURATION_MIN)) * 100
                   }%`,
                 }}
               />
               <div className="tc-duration-slider__ticks" aria-hidden="true">
                 <div className="tc-duration-slider__tick-track">
-                  {durationTicks.map((t) => (
+                  {VIDEO_DURATION_TICKS.map((t) => (
                     <span
                       key={t}
                       className={`tc-duration-slider__tick${t === duration ? " tc-duration-slider__tick--active" : ""}`}
                       style={{
                         ["--tc-duration-slider-tick-position" as string]: `${
-                          ((t - drMin) / (drMax - drMin)) * 100
+                          ((t - VIDEO_DURATION_MIN) / (VIDEO_DURATION_MAX - VIDEO_DURATION_MIN)) * 100
                         }%`,
                       }}
                     />
@@ -1112,8 +1062,8 @@ export function VideoDockContent(props: VideoDockContentProps) {
                 </div>
               </div>
               <div className="tc-duration-slider__limits" aria-hidden="true">
-                <span>{drMin}s</span>
-                <span>{drMax}s</span>
+                <span>{VIDEO_DURATION_MIN}s</span>
+                <span>{VIDEO_DURATION_MAX}s</span>
               </div>
             </div>
 
@@ -1240,51 +1190,6 @@ export function VideoDockContent(props: VideoDockContentProps) {
           document.body,
         )}
 
-      {openMediaCategory &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <div
-            ref={mediaCategoryMenuRef}
-            data-tc-dock-popover=""
-            role="dialog"
-            aria-label={`${MEDIA_CATEGORY_SPECS[openMediaCategory].label}素材`}
-            style={{
-              position: "fixed",
-              left: mediaCategoryPos.left,
-              bottom: mediaCategoryPos.bottom,
-              width: "max-content",
-              minWidth: 260,
-              maxWidth: 320,
-              padding: 12,
-              borderRadius: 10,
-              background: "rgb(30, 30, 30)",
-              border: "1px solid rgba(255, 255, 255, 0.04)",
-              boxShadow: "rgba(0, 0, 0, 0.25) 0px 4px 16px",
-              zIndex: 2147483602,
-              boxSizing: "border-box",
-              opacity: 1,
-              transform: "scale(1) translateY(0px)",
-              transformOrigin: "left bottom",
-              transition:
-                "opacity 250ms cubic-bezier(0.16, 1, 0.3, 1), transform 250ms cubic-bezier(0.16, 1, 0.3, 1)",
-            }}
-          >
-            <MediaSection
-              spec={MEDIA_CATEGORY_SPECS[openMediaCategory].spec}
-              accept={MEDIA_CATEGORY_SPECS[openMediaCategory].accept}
-              items={media.filter((m) => m.type === openMediaCategory)}
-              uploadedMax={MEDIA_CATEGORY_SPECS[openMediaCategory].uploadedMax}
-              total={media.length}
-              totalMax={15}
-              onRemove={onRemoveMedia}
-              onUpload={onLocalUpload}
-              onPickFromCanvas={onPickFromCanvas}
-              onPreview={onPreviewMedia}
-            />
-          </div>,
-          document.body,
-        )}
-
       <div
         style={{
           display: "grid",
@@ -1350,3 +1255,4 @@ export function VideoDockContent(props: VideoDockContentProps) {
     </>
   );
 }
+

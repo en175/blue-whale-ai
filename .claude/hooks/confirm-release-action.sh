@@ -82,8 +82,14 @@ try:
     data = json.load(sys.stdin)
 except Exception:
     raise SystemExit(1)
-response = data.get("tool_response")
-raise SystemExit(0 if isinstance(response, dict) and response.get("isError") is False else 1)
+if "tool_response" in data:
+    response = data.get("tool_response")
+    raise SystemExit(0 if isinstance(response, dict) and response.get("isError") is False else 1)
+# Kimi CLI：PostToolUse 仅在工具成功时触发（失败走 PostToolUseFailure），
+# 载荷成功输出字段是 tool_output（无 tool_response），事件本身即成功证明。
+if "tool_output" in data:
+    raise SystemExit(0)
+raise SystemExit(1)
 ' 2>/dev/null
 }
 

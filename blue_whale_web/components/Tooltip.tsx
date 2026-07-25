@@ -27,7 +27,10 @@ export function Tooltip({
   gap = 10,
 }: {
   content: string;
-  children: ReactElement<{ onMouseEnter?: (e: MouseEvent) => void; onMouseLeave?: () => void }>;
+  children: ReactElement<{
+    onMouseEnter?: (e: MouseEvent) => void;
+    onMouseLeave?: () => void;
+  }>;
   side?: "right" | "top" | "bottom";
   gap?: number;
 }) {
@@ -44,7 +47,7 @@ export function Tooltip({
           ? { x: r.right + gap, y: r.top + r.height / 2 }
           : side === "top"
             ? { x: r.left + r.width / 2, y: r.top - gap }
-            : { x: r.left + r.width / 2, y: r.bottom + gap }
+            : { x: r.left + r.width / 2, y: r.bottom + gap },
       );
     },
     onMouseLeave: () => setPos(null),
@@ -82,7 +85,7 @@ export function Tooltip({
           >
             {content}
           </div>,
-          document.body
+          document.body,
         )}
     </>
   );

@@ -3,11 +3,14 @@ package com.blue.whale.agent.common.web;
 import com.blue.whale.global.base.resp.Result;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
+import com.blue.whale.agent.service.governance.GovernanceException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataAccessException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.transaction.TransactionException;
 import org.springframework.validation.BindException;
@@ -17,6 +20,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import javax.validation.ConstraintViolation;
@@ -32,12 +36,52 @@ import java.util.Set;
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class RestExceptionConfig {
 
+    @ExceptionHandler(GovernanceException.class)
+    public ResponseEntity<Result<Object>> handleGovernanceException(GovernanceException exception) {
+        log.debug("governance exception", exception);
+        Result<Object> failed = Result.failed(
+                SystemCode.AGENT_ACTION_REJECTED_CODE, exception.getMessage());
+        failed.setData(exception.publicEnvelope());
+        return ResponseEntity.status(exception.getHttpStatus()).body(failed);
+    }
+
     @ExceptionHandler(GlobalException.class)
-    public Result<Object> handlerGlobalException(GlobalException exception) {
+    public ResponseEntity<Result<Object>> handlerGlobalException(GlobalException exception) {
         log.debug("global exception", exception);
         Result<Object> failed = Result.failed(exception.code(), exception.msg());
         failed.setData(exception.getData());
-        return failed;
+        HttpStatus status = exception.code() == SystemCode.UNAUTHORIZED_CODE
+                ? HttpStatus.UNAUTHORIZED
+                : exception.code() == SystemCode.PARAM_MISS_CODE
+                ? HttpStatus.BAD_REQUEST
+                : exception.code() == SystemCode.RESOURCE_NOT_FOUND_CODE
+                ? HttpStatus.NOT_FOUND
+                : exception.code() == SystemCode.CURSOR_EXPIRED_CODE
+                ? HttpStatus.GONE
+                : exception.code() == SystemCode.IDEMPOTENCY_KEY_REUSED_CODE
+                ? HttpStatus.CONFLICT
+                : exception.code() == SystemCode.AGENT_RUN_CONFLICT_CODE
+                ? HttpStatus.CONFLICT
+                : exception.code() == SystemCode.ASSISTANT_STREAM_ATTEMPT_EXHAUSTED_CODE
+                ? HttpStatus.CONFLICT
+                : exception.code() == SystemCode.CREATIVE_SKILL_SELECTION_NOT_ALLOWED_CODE
+                ? HttpStatus.CONFLICT
+                : exception.code() == SystemCode.CREATIVE_SKILL_NOT_A_CANDIDATE_CODE
+                ? HttpStatus.CONFLICT
+                : exception.code() == SystemCode.CREATIVE_SKILL_ALREADY_ACTIVATED_CODE
+                ? HttpStatus.CONFLICT
+                : exception.code() == SystemCode.CREATIVE_SKILL_UNAVAILABLE_CODE
+                ? HttpStatus.NOT_FOUND
+                : exception.code() == SystemCode.CREATIVE_SKILL_VERSION_UNAVAILABLE_CODE
+                ? HttpStatus.NOT_FOUND
+                : exception.code() == SystemCode.CREATIVE_SKILL_CONTENT_MISSING_CODE
+                ? HttpStatus.INTERNAL_SERVER_ERROR
+                : exception.code() == SystemCode.CREATIVE_SKILL_DIGEST_MISMATCH_CODE
+                ? HttpStatus.INTERNAL_SERVER_ERROR
+                : exception.code() == SystemCode.AGENT_ACTION_REJECTED_CODE
+                ? HttpStatus.UNPROCESSABLE_ENTITY
+                : HttpStatus.OK;
+        return ResponseEntity.status(status).body(failed);
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)
@@ -74,24 +118,29 @@ public class RestExceptionConfig {
 
     @ExceptionHandler(DataAccessException.class)
     public Result<Object> handleError(DataAccessException e) {
-        log.error("data access error", e);
-        Throwable root = e.getMostSpecificCause() != null ? e.getMostSpecificCause() : e;
-        String rootMsg = root.getMessage() != null ? root.getMessage() : e.getMessage();
-        return Result.failed(500, "数据库错误: " + rootMsg);
+        // User 提示保持脱敏；日志携带 Request ID（PublicRequestIdFilter 写入），
+        // 可用响应头 X-Request-Id 反查底层数据库原因（IK1W1K）
+        log.error("data access error, requestId={}", PublicRequestId.current(), e);
+        return Result.failed(500, "服务暂时不可用");
     }
 
     @ExceptionHandler(TransactionException.class)
     public Result<Object> handleError(TransactionException e) {
-        log.error("transaction error", e);
-        Throwable root = e.getMostSpecificCause() != null ? e.getMostSpecificCause() : e;
-        String rootMsg = root.getMessage() != null ? root.getMessage() : e.getMessage();
-        return Result.failed(500, "数据库错误: " + rootMsg);
+        log.error("transaction error, requestId={}", PublicRequestId.current(), e);
+        return Result.failed(500, "服务暂时不可用");
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public Result<Object> handleError(HttpMessageNotReadableException e) {
         log.debug("param read error", e);
         return Result.failed(SystemCode.MSG_NOT_READABLE);
+    }
+
+    /** SSE 异步请求超时：优雅降级，不抛 500（ADR-0016 §3 SSE 长连接）。 */
+    @ExceptionHandler(AsyncRequestTimeoutException.class)
+    public Result<Object> handleError(AsyncRequestTimeoutException e) {
+        log.debug("async request timeout (sse)", e);
+        return Result.failed(SystemCode.SYSTEM_BUSY, "请求超时");
     }
 
     /** 处理 BindingResult（@RequestBody @Valid 与表单绑定）。 */

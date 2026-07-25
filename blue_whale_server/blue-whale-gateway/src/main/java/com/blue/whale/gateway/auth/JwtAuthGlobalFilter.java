@@ -6,11 +6,8 @@ import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
-import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.cloud.context.config.annotation.RefreshScope;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
@@ -26,45 +23,39 @@ import reactor.core.publisher.Mono;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
-import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 网关统一 JWT 鉴权过滤器。
- * 白名单路径放行（前缀匹配），其余 /api/** 校验 token，通过后传 X-User-Id 给下游。
+ * 白名单路径放行，其余 /api/** 校验 token，通过后传 X-User-Id 给下游。
  */
 @Slf4j
 @Component
-@RefreshScope
 @Order(Ordered.HIGHEST_PRECEDENCE + 50)
-@ConfigurationProperties(prefix = "gateway.auth")
 public class JwtAuthGlobalFilter implements GlobalFilter {
 
-    /** 白名单路径列表（前缀匹配），由 {@code gateway.auth.whitelist} 配置注入 */
-    @Setter
-    private List<String> whitelist;
+    private static final Set<String> WHITELIST = Set.of(
+            "/api/auth/send-code",
+            "/api/auth/login",
+            "/api/auth/captcha",
+            "/api/auth/refresh"
+    );
+    private static final Pattern SEEDANCE_CALLBACK_PATH = Pattern.compile(
+            "^/api/webhooks/seedance/[A-Za-z0-9._-]+/[1-9][0-9]*$");
 
     private final SecretKey secretKey;
 
-    public JwtAuthGlobalFilter(
-            @Value("${jwt.secret:blue-whale-dev-secret-key-at-least-256-bits!!}") String secret) {
+    public JwtAuthGlobalFilter(@Value("${jwt.secret:blue-whale-dev-secret-key-at-least-256-bits!!}") String secret) {
         this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private Set<String> whitelistSet() {
-        if (whitelist == null || whitelist.isEmpty()) {
-            return Collections.emptySet();
-        }
-        return Set.copyOf(whitelist);
     }
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         String path = exchange.getRequest().getURI().getPath();
 
-        // 白名单放行（前缀匹配：/api/agent/templates 放行 /api/agent/templates/page 等子路径）
-        if (whitelistSet().stream().anyMatch(path::startsWith)) {
+        // 白名单放行
+        if (WHITELIST.contains(path) || SEEDANCE_CALLBACK_PATH.matcher(path).matches()) {
             return chain.filter(exchange);
         }
 

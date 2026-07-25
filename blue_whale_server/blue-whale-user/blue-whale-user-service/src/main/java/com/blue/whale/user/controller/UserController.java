@@ -1,7 +1,6 @@
 package com.blue.whale.user.controller;
 
 import com.blue.whale.global.base.resp.Result;
-import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
 import com.blue.whale.user.config.SecurityUtils;
 import com.blue.whale.user.dto.*;
@@ -11,7 +10,6 @@ import com.blue.whale.user.service.UserService;
 import com.blue.whale.web.utils.IpUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
@@ -32,39 +30,29 @@ public class UserController {
         Long userId = SecurityUtils.getCurrentUserId();
         User user = userService.getById(userId);
         if (user == null) {
-            throw new GlobalException(SystemCode.UNAUTHORIZED_CODE, "用户不存在");
+            throw new GlobalException(401, "用户不存在");
         }
 
         return Result.ok(UserInfoResponse.builder()
                 .userId(user.getId())
                 .username(user.getUsername())
                 .phone(user.getPhone())
-                .avatar(user.getAvatar())
+                .hasPassword(user.getPassword() != null)
                 .build());
     }
 
     /**
-     * 上传头像
-     * PUT /api/user/avatar
-     */
-    @PutMapping("/api/user/avatar")
-    public Result<Map<String, String>> uploadAvatar(@RequestParam("file") MultipartFile file) {
-        Long userId = SecurityUtils.getCurrentUserId();
-        String url = userService.uploadAvatar(userId, file);
-        return Result.ok(Map.of("url", url));
-    }
-
-    /**
-     * 换绑手机号——发验证
+     * 换绑手机号——发验证码
      * POST /api/user/phone/send-code
      */
     @PostMapping("/api/user/phone/send-code")
     public Result<Map<String, Object>> sendChangePhoneCode(
             @Valid @RequestBody ChangePhoneSendCodeRequest req,
             HttpServletRequest request) {
-        Long userId = SecurityUtils.getCurrentUserId();
+        String userId = String.valueOf(SecurityUtils.getCurrentUserId());
         String ip = IpUtils.getIpAddr(request);
-        authService.sendChangePhoneCode(userId, req.getNewPhone(), ip);
+        authService.sendChangePhoneCode(userId, req.getNewPhone(), ip,
+                req.getCaptchaToken(), req.getCaptchaAnswer());
         return Result.ok(Map.of("success", true, "expires_in", 300));
     }
 
@@ -74,7 +62,7 @@ public class UserController {
      */
     @PutMapping("/api/user/phone")
     public Result<Void> changePhone(@Valid @RequestBody ChangePhoneRequest req) {
-        Long userId = SecurityUtils.getCurrentUserId();
+        String userId = String.valueOf(SecurityUtils.getCurrentUserId());
         authService.changePhone(userId, req.getNewPhone(), req.getCode());
         return Result.ok();
     }
@@ -95,11 +83,20 @@ public class UserController {
      * PUT /api/user/password
      */
     @PutMapping("/api/user/password")
-    public Result<Void> changePassword(@Valid @RequestBody ChangePasswordRequest req,
-                                        HttpServletRequest request) {
+    public Result<Void> changePassword(@Valid @RequestBody ChangePasswordRequest req) {
         Long userId = SecurityUtils.getCurrentUserId();
-        String ip = IpUtils.getIpAddr(request);
-        authService.changePassword(userId, req.getCode(), req.getOldPassword(), req.getNewPassword(), ip);
+        authService.changePassword(userId, req.getCode(), req.getOldPassword(), req.getNewPassword());
+        return Result.ok();
+    }
+
+    /**
+     * 设置密码：首次设置，短信验证码校验
+     * POST /api/user/password/set
+     */
+    @PostMapping("/api/user/password/set")
+    public Result<Void> setPassword(@Valid @RequestBody SetPasswordRequest req) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        authService.setPassword(userId, req.getCode(), req.getNewPassword());
         return Result.ok();
     }
 }

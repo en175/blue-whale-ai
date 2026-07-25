@@ -24,8 +24,7 @@ public interface GenerationModelCapabilityMapper extends BaseMapper<GenerationMo
     default List<GenerationModelCapability> selectEnabledByCapabilityType(String capabilityType) {
         return selectList(Wrappers.<GenerationModelCapability>lambdaQuery()
                 .eq(GenerationModelCapability::getCapabilityType, capabilityType)
-                .eq(GenerationModelCapability::getEnabled, true)
-                .orderByAsc(GenerationModelCapability::getSortOrder));
+                .eq(GenerationModelCapability::getEnabled, true));
     }
 
     /**

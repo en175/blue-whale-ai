@@ -1,7 +1,7 @@
 package com.blue.whale.agent.controller;
 
 import com.blue.whale.agent.model.dto.CanvasDto;
-import com.blue.whale.agent.model.request.SaveCanvasRequest;
+import com.blue.whale.agent.model.dto.SaveCanvasRequest;
 import com.blue.whale.agent.model.entity.Project;
 import com.blue.whale.agent.service.CanvasService;
 import com.blue.whale.agent.service.ProjectService;
@@ -19,8 +19,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 /**
- * {@link CanvasController} 单测：直调方法，验证「先校验 project 归属，再查/存 canvas」的顺序
- * （越权时 {@link CanvasService} 不应被调用），以及 401（ADR-0011 D5）。全 mock service 层。
+ * {@link CanvasController} 单测：读取先校验归属；写入把 userId 交给事务内的 CanvasService 校验。
  */
 @ExtendWith(MockitoExtension.class)
 class CanvasControllerTest {
@@ -73,26 +72,24 @@ class CanvasControllerTest {
 
     @Test
     void saveThrowsWhenProjectNotOwned() {
-        when(projectService.requireOwned(1L, 10L))
+        SaveCanvasRequest req = new SaveCanvasRequest("{}", "[]");
+        when(canvasService.save(1L, 10L, req))
                 .thenThrow(new GlobalException(SystemCode.DATA_NO_PERMISSION_OPERATE_CODE, "无权限操作该项目"));
 
-        assertThatThrownBy(() -> controller.save(10L, 1L, new SaveCanvasRequest("{}", "[]")))
+        assertThatThrownBy(() -> controller.save(10L, 1L, req))
                 .isInstanceOf(GlobalException.class);
-        verifyNoInteractions(canvasService);
+        verify(canvasService).save(1L, 10L, req);
     }
 
     @Test
     void saveReturnsCanvasWhenOwned() {
-        Project p = new Project().setOwnerId(10L);
-        p.setId(1L);
-        when(projectService.requireOwned(1L, 10L)).thenReturn(p);
         SaveCanvasRequest req = new SaveCanvasRequest("{\"zoom\":1}", "[{\"id\":\"n1\"}]");
         CanvasDto dto = new CanvasDto(5L, 1L, req.viewport(), req.nodes());
-        when(canvasService.save(1L, req)).thenReturn(dto);
+        when(canvasService.save(1L, 10L, req)).thenReturn(dto);
 
         Result<CanvasDto> result = controller.save(10L, 1L, req);
 
         assertThat(result.getData().nodes()).isEqualTo("[{\"id\":\"n1\"}]");
-        verify(canvasService).save(1L, req);
+        verify(canvasService).save(1L, 10L, req);
     }
 }

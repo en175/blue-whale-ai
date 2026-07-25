@@ -6,23 +6,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookOpenText, Box, ChevronDown } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
-import SkillPanel from "@/components/SkillPanel";
+import SkillPanel, { type UseSkillSelection } from "@/components/SkillPanel";
 import { squirclePath } from "../utils";
 import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
 import { ComposerShell, ModelSettingsMenu } from "./Composer";
+import { SkillRecommendationSection } from "./SkillRecommendationSection";
+import type { CreativeSkillRecommendation } from "@/components/api/skills";
 import {
   UserMessageBubble,
   AgentMessageBubble,
   ThinkingBlock,
   AgentCard,
 } from "./ChatBubbles";
-import type { ChatMessage } from "../types";
+import type { ChatMessage, PendingMention } from "../types";
 import type { CardStatus } from "@/types/domain";
 import { buildMockReplyForMode } from "../messages";
 import { createMessageIdGenerator } from "../idGen";
 import type { MessageIdGenerator } from "../idGen";
 import { useAuth } from "@/components/auth/AuthContext";
 import type { CardMessage } from "../nodeFromCard";
+import { extractEditor, insertMention } from "./dock/mention";
+
+/** @ 素材 pill 数量上限，对齐后端 referenced_asset_ids @Size(max=10)。 */
+const MENTION_LIMIT = 10;
 
 export function AgentChatPanel({
   messages,
@@ -32,27 +38,58 @@ export function AgentChatPanel({
   onMentionConsumed,
   onCardGenerated,
   onAppendMessages,
+  onSubmitMessage,
   onSetCardStatus,
+  onRetryGenerationJob,
   prompt,
+  forcedSkillName,
+  answerableActive,
+  skillRecommendations,
+  skillRecommendationsLoading,
 }: {
   /** 受控消息流：来自当前 Project.messages（切换项目随 key remount 更换） */
   messages: ChatMessage[];
   isOpen: boolean;
   onClose: () => void;
-  pendingMention?: { name: string; nonce: number } | null;
+  pendingMention?: PendingMention | null;
   onMentionConsumed?: () => void;
   onCardGenerated?: (card: CardMessage) => void;
   /** 追加消息到当前项目（user 消息 + 逐条生成的 agent 回复均经此上抛） */
   onAppendMessages?: (messages: ChatMessage[]) => void;
+  /** 后端可用时提交权威 Conversation 命令；缺省时保留既有离线 mock。 */
+  onSubmitMessage?: (
+    text: string,
+    referencedAssetIds?: number[],
+    forcedCreativeSkillId?: string,
+  ) => Promise<void>;
   /** 设置当前项目内某 card 的状态（重试链推进） */
   onSetCardStatus?: (cardId: number | string, status: CardStatus) => void;
+  /** 权威失败 Card 的真实重试命令；新 Job 由 Snapshot/SSE 恢复。 */
+  onRetryGenerationJob?: (generationJobId: number | string) => Promise<void>;
   /** 首页续上 / 模板卡点击带入的 prompt，填入 composer（可编辑后发送） */
   prompt?: string;
+  /** 当前 Run 已激活 Creative Skill 的展示名（Snapshot/SSE 权威，null 表示无激活） */
+  forcedSkillName?: string | null;
+  /** 是否存在可回答创作澄清（true 时 forced 与 reply 互斥，pending 保留不清） */
+  answerableActive?: boolean;
+  /** 当前 Run 的 Creative Skill 推荐列表（IK3NPI）；未传则不渲染推荐区 */
+  skillRecommendations?: CreativeSkillRecommendation[];
+  /** 推荐列表拉取中（仅配合 skillRecommendations 展示加载态） */
+  skillRecommendationsLoading?: boolean;
 }) {
   const [composerEmpty, setComposerEmpty] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [panelSize, setPanelSize] = useState({ w: 468, h: 600 });
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
+  // Use 选择的 pending forced skill：点 Use 立刻乐观展示，SSE 确认后由 forcedSkillName 接管
+  const [pendingForcedSkill, setPendingForcedSkill] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [retryingCards, setRetryingCards] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
 
   const CREATION_MODES = useMemo(
     () => [
@@ -171,7 +208,7 @@ export function AgentChatPanel({
     setComposerEmpty(text.trim().length === 0);
   };
 
-  const insertSkillIntoComposer = useCallback((skillName: string) => {
+  const insertTextIntoComposer = useCallback((text: string) => {
     const editor = composerRef.current;
     if (!editor) return;
 
@@ -181,49 +218,120 @@ export function AgentChatPanel({
       const range = selection.getRangeAt(0);
       if (editor.contains(range.commonAncestorContainer)) {
         range.deleteContents();
-        const textNode = document.createTextNode(`@${skillName} `);
+        const textNode = document.createTextNode(text);
         range.insertNode(textNode);
         range.setStartAfter(textNode);
         range.setEndAfter(textNode);
         selection.removeAllRanges();
         selection.addRange(range);
       } else {
-        editor.appendChild(document.createTextNode(`@${skillName} `));
+        editor.appendChild(document.createTextNode(text));
       }
     } else {
-      editor.appendChild(document.createTextNode(`@${skillName} `));
+      editor.appendChild(document.createTextNode(text));
     }
 
     handleComposerInput();
     setSkillPanelOpen(false);
   }, []);
 
-  // 外部（如画布节点操作面板）请求把素材名 @ 插入输入框
+  // Skill 面板 Use：有稳定 creative_skill_id 则记 pending（随下一条允许创建目标 Run 的消息下发），
+  // 不往输入框插 @ 文本；无 id（库外项）仅关面板。
+  const handleUseSkill = useCallback((skill: UseSkillSelection) => {
+    if (skill.creative_skill_id) {
+      setPendingForcedSkill({ id: skill.creative_skill_id, name: skill.name });
+    }
+    setSkillPanelOpen(false);
+  }, []);
+
+  // 外部（画布节点操作菜单「添加到对话」）请求把素材插入输入框：
+  // 带 assetId 走 pill 路径（发送时写入 referenced_asset_ids），无 assetId 回退纯文本。
   useEffect(() => {
     if (!pendingMention) return;
-    insertSkillIntoComposer(pendingMention.name);
+    const editor = composerRef.current;
+    if (pendingMention.assetId != null && editor) {
+      const existing = editor.querySelectorAll("[data-mention-id]").length;
+      const dup = editor.querySelector(
+        `[data-mention-asset-id="${pendingMention.assetId}"]`,
+      );
+      if (existing >= MENTION_LIMIT) {
+        // 超上限静默忽略，后端 @Size(max=10) 兜底
+        console.warn(
+          "[canvas] mention pill 超过上限，已忽略",
+          MENTION_LIMIT,
+          pendingMention.name,
+        );
+      } else if (dup) {
+        // 同素材已插入：不重复，保证 content @[name] 与 assetIds 一一对应
+        console.warn(
+          "[canvas] mention pill 已存在，忽略重复插入",
+          pendingMention.name,
+        );
+      } else {
+        insertMention(editor, {
+          id: String(pendingMention.assetId),
+          type: pendingMention.type ?? "image",
+          name: pendingMention.name,
+          src: pendingMention.src,
+          assetId: pendingMention.assetId,
+        });
+        handleComposerInput();
+      }
+    } else {
+      insertTextIntoComposer(`@${pendingMention.name} `);
+    }
     onMentionConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingMention?.nonce]);
 
   const handleSend = () => {
-    const text = composerRef.current?.innerText.trim() || "";
-    if (!text) return;
+    const { prompt, assetIds } = composerRef.current
+      ? extractEditor(composerRef.current)
+      : { prompt: "", assetIds: [] as number[] };
+    if (!prompt && assetIds.length === 0) return;
 
-    requireAuth({ kind: "canvas-send", text }, () => {
+    requireAuth({ kind: "canvas-send", text: prompt }, () => {
       // 重新发送前清掉上一轮尚未触发的逐条追加定时器
       for (const id of pendingTimers.current) clearTimeout(id);
       pendingTimers.current = [];
 
-      const userMsg: ChatMessage = { id: nextMessageId(), type: "user", text };
+      if (onSubmitMessage) {
+        // 请求飞行期锁定发送按钮，防止重复提交（清空延后到成功回调）
+        setSubmitting(true);
+        // forced 仅在无活动澄清时附上（reply 互斥）；成功才清 pending，失败保留供重试
+        const attachForced = !!pendingForcedSkill && !answerableActive;
+        void onSubmitMessage(
+          prompt,
+          assetIds,
+          attachForced ? pendingForcedSkill!.id : undefined,
+        )
+          .then(() => {
+            if (composerRef.current) composerRef.current.innerHTML = "";
+            setComposerEmpty(true);
+            if (attachForced) setPendingForcedSkill(null);
+          })
+          .catch((error) => {
+            console.error("[canvas] conversation message failed:", error);
+          })
+          .finally(() => {
+            setSubmitting(false);
+          });
+        return;
+      }
+
+      const userMsg: ChatMessage = {
+        id: nextMessageId(),
+        type: "user",
+        text: prompt,
+      };
       onAppendMessages?.([userMsg]);
-      if (composerRef.current) composerRef.current.innerText = "";
+      if (composerRef.current) composerRef.current.innerHTML = "";
       setComposerEmpty(true);
 
       // 按当前创作模式生成 mock 回复，错开逐条追加模拟逐步生成
       const reply = buildMockReplyForMode(
         selectedMode.id as "agent" | "direct",
-        text,
+        prompt,
         nextMessageId,
       );
       reply.forEach((msg, index) => {
@@ -247,13 +355,36 @@ export function AgentChatPanel({
   /**
    * 手动应用 / 重试：用户点 card 主按钮的统一入口。
    * 按 card 当前 status 分发：
-   *   failed/generating → 走重试状态机 failed→generating→normal（DEMO 固定成功，不创建画布节点）
+   *   权威 failed → 创建仅含缺失槽的新 Job，原 Card 保持失败事实
+   *   离线 failed/generating → 保留既有 DEMO 状态机
    *   normal            → 把 card 作为 NodeItem 应用到画布（复用既有 onCardGenerated，page.tsx 零改）
    */
   const handleReapply = (card: CardMessage) => {
     const current = card.status ?? "normal";
+    if (current === "cancelled") return;
     if (current === "normal") {
       onCardGenerated?.(card);
+      return;
+    }
+    if (
+      current === "failed" &&
+      card.generationJobId !== undefined &&
+      onRetryGenerationJob
+    ) {
+      const cardKey = String(card.id);
+      if (retryingCards.has(cardKey)) return;
+      setRetryingCards((currentCards) => new Set(currentCards).add(cardKey));
+      void onRetryGenerationJob(card.generationJobId)
+        .catch((error) => {
+          console.error("[canvas] generation retry failed:", error);
+        })
+        .finally(() => {
+          setRetryingCards((currentCards) => {
+            const next = new Set(currentCards);
+            next.delete(cardKey);
+            return next;
+          });
+        });
       return;
     }
     // 重试链：清掉上一轮残留 timer，立即进入 generating，再排一步推进到终态 normal
@@ -277,6 +408,9 @@ export function AgentChatPanel({
   };
 
   if (!isOpen) return null;
+
+  // 已选技能标签：乐观名（刚点 Use）→ 权威名（Run 已激活）→ 不显示
+  const forcedLabel = pendingForcedSkill?.name ?? forcedSkillName ?? null;
 
   const panelPath = squirclePath(panelSize.w, panelSize.h, 28.8);
 
@@ -338,6 +472,27 @@ export function AgentChatPanel({
               </div>
             </div>
           </div>
+          {forcedLabel && (
+            <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
+              <span
+                className="tc-agent-forced-skill-badge inline-flex items-center gap-1 rounded-lg border border-white/[0.06] bg-white/[0.06] px-2 py-1 text-xs text-white/75"
+                aria-label={`已选技能：${forcedLabel}`}
+              >
+                <BookOpenText size={12} />
+                <span className="max-w-[120px] truncate">{forcedLabel}</span>
+                {pendingForcedSkill && (
+                  <button
+                    type="button"
+                    onClick={() => setPendingForcedSkill(null)}
+                    className="text-white/45 hover:text-white"
+                    aria-label="取消已选技能"
+                  >
+                    <IconClose size={12} />
+                  </button>
+                )}
+              </span>
+            </div>
+          )}
           <div className="inline-flex items-center gap-0.5">
             <div className="relative inline-flex">
               <div className="relative">
@@ -419,6 +574,13 @@ export function AgentChatPanel({
             className="tc-agent-chat-body tc-panel-textarea-scrollbar flex flex-col gap-2 overflow-y-auto overflow-x-hidden px-3 py-2"
             style={{ flex: "1 1 0%", minHeight: 0 }}
           >
+            {skillRecommendations !== undefined && (
+              <SkillRecommendationSection
+                recommendations={skillRecommendations}
+                loading={skillRecommendationsLoading ?? false}
+                onUse={handleUseSkill}
+              />
+            )}
             {messages.map((msg) => {
               if (msg.type === "user")
                 return <UserMessageBubble key={msg.id} text={msg.text} />;
@@ -426,7 +588,12 @@ export function AgentChatPanel({
                 return <ThinkingBlock key={msg.id} msg={msg} />;
               if (msg.type === "card")
                 return (
-                  <AgentCard key={msg.id} msg={msg} onReapply={handleReapply} />
+                  <AgentCard
+                    key={msg.id}
+                    msg={msg}
+                    busy={retryingCards.has(String(msg.id))}
+                    onReapply={handleReapply}
+                  />
                 );
               return <AgentMessageBubble key={msg.id} text={msg.text} />;
             })}
@@ -488,7 +655,7 @@ export function AgentChatPanel({
                       </button>
                       <button
                         type="button"
-                        onClick={() => requireAuth({ kind: "skill-panel" }, () => setSkillPanelOpen(true))}
+                        onClick={() => setSkillPanelOpen(true)}
                         className="tc-agent-skill-btn tc-agent-composer-pill-btn inline-flex h-8 items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.05] px-3 text-xs font-medium text-white/85 transition-colors hover:bg-white/[0.08]"
                         aria-label="技能"
                         aria-haspopup="dialog"
@@ -537,10 +704,10 @@ export function AgentChatPanel({
                       <button
                         type="button"
                         onClick={handleSend}
-                        disabled={composerEmpty}
+                        disabled={composerEmpty || submitting}
                         className="tc-agent-send-btn tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-black transition-colors hover:bg-white/90 disabled:cursor-default disabled:bg-white/[0.1] disabled:text-white/[0.25]"
                         aria-label="发送"
-                        aria-disabled={composerEmpty}
+                        aria-disabled={composerEmpty || submitting}
                       >
                         <IconSend size={14} />
                       </button>
@@ -556,7 +723,7 @@ export function AgentChatPanel({
       <SkillPanel
         isOpen={skillPanelOpen}
         onClose={() => setSkillPanelOpen(false)}
-        onUseSkill={insertSkillIntoComposer}
+        onUseSkill={handleUseSkill}
       />
     </div>
   );

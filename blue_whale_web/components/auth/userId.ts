@@ -73,7 +73,11 @@ export function isPhoneBound(newPhone: string, sameUserId?: string): boolean {
  * - 删除 oldPhone 映射
  * - 写入 newPhone → uid 映射
  */
-export function rebindPhone(oldPhone: string, newPhone: string, userId: string): void {
+export function rebindPhone(
+  oldPhone: string,
+  newPhone: string,
+  userId: string,
+): void {
   const map = loadPhoneIdMap();
   delete map[oldPhone];
   map[newPhone] = userId;

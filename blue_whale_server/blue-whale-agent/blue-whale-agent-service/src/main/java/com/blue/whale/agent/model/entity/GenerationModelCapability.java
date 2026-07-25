@@ -48,10 +48,6 @@ public class GenerationModelCapability extends BaseEntity {
     @TableField(typeHandler = JacksonTypeHandler.class)
     private List<String> supportedAspectRatios;
 
-    /** 视频时长区间 {@code {min,max,step}}；image 行为 null */
-    @TableField(typeHandler = JacksonTypeHandler.class)
-    private DurationRange supportedDurations;
-
     /** 支持的输出格式；空数组表示不支持自定义格式 */
     @TableField(typeHandler = JacksonTypeHandler.class)
     private List<String> supportedFormats;
@@ -65,18 +61,12 @@ public class GenerationModelCapability extends BaseEntity {
     /** 默认宽高比 */
     private String defaultAspectRatio;
 
-    /** 视频默认时长（秒）；image 行为 null */
-    private Integer defaultDuration;
-
-    /** 特性开关：image 用参考图/水印/数量/组图/流式/工具；video 用首帧/首尾帧/参考图/水印/音频/工具 */
+    /** 特性开关：参考图、水印、数量上限、组图、流式、工具等 */
     @TableField(typeHandler = JacksonTypeHandler.class)
     private Features features;
 
     /** 是否启用 */
     private Boolean enabled;
-
-    /** 展示排序（升序，越小越靠前；最新模型设小值，前端默认取列表第一项） */
-    private Integer sortOrder;
 
     /** 尺寸选项 JSON 结构 */
     @Getter
@@ -89,31 +79,31 @@ public class GenerationModelCapability extends BaseEntity {
         private Integer height;
     }
 
-    /** 特性开关 JSON 结构（image/video 共用，按 capability 取各自子集） */
+    /** 特性开关 JSON 结构 */
     @Getter
     @Setter
     public static class Features {
-        /** 视频图生视频-首帧（video 语义，image 行 null） */
-        private Boolean firstFrame;
-        /** 视频图生视频-首尾帧（video 语义，image 行 null） */
-        private Boolean firstLastFrame;
-        /** 参考图：image=图生图参考，video=多模态参考 */
         private Boolean referenceImage;
         private Boolean watermark;
         private Integer quantityMax;
         private Boolean sequentialImageGeneration;
         private Boolean stream;
         private Boolean tools;
-        /** 视频生成同步音频（video 语义，image 行 null） */
-        private Boolean audio;
     }
 
-    /** 视频时长区间 JSON 结构（video 专用，image 行 null） */
-    @Getter
-    @Setter
-    public static class DurationRange {
-        private Integer min;
-        private Integer max;
-        private Integer step;
+    /**
+     * 按 size_id 查尺寸选项（大小写不敏感）；命中返回该选项，否则 null。
+     * BottomDock 服务端校验与 Provider 路由共用，避免白名单解析逻辑双份。
+     */
+    public SizeOption findSizeById(String sizeId) {
+        if (supportedSizes == null || supportedSizes.isEmpty() || sizeId == null || sizeId.isBlank()) {
+            return null;
+        }
+        for (SizeOption option : supportedSizes) {
+            if (option.getId() != null && option.getId().equalsIgnoreCase(sizeId)) {
+                return option;
+            }
+        }
+        return null;
     }
 }

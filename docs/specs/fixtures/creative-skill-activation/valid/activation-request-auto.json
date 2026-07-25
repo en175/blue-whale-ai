@@ -1,0 +1,12 @@
+{
+  "idempotency_key": "act_7f3c9d2e_run_42",
+  "expected_run_version": 3,
+  "creative_skill_id": "cs_poster_design",
+  "creative_skill_version_id": "csv_poster_design_1_0_0",
+  "reason": {
+    "type": "agent_match",
+    "detail": {
+      "matched_fields": ["conversation_messages", "canvas_nodes"]
+    }
+  }
+}

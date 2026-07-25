@@ -29,18 +29,22 @@ describe("nodeFromCard", () => {
     expect(node.content).toBe("画一只猫");
   });
 
-  it("宽高由 meta 派生（16:9 → 356×200，短边基准 200，独立算出）", () => {
+  it("宽高由 meta 派生（16:9 → 427×240，独立算出）", () => {
     const node = nodeFromCard(makeCard({ meta: "16:9" }), idGen);
 
-    // 期望值独立算出：短边(高)基准 200，长边 round(200 * 16 / 9) = 356
-    expect(node.width).toBe(356);
-    expect(node.height).toBe(200);
+    // 期望值独立算出：round(240 * 16 / 9) = 427
+    expect(node.width).toBe(427);
+    expect(node.height).toBe(240);
   });
 
-  it("不渲染真实图片：imageUrl 不存在（渲染为灰色占位）", () => {
-    const node = nodeFromCard(makeCard(), idGen);
+  it("把 card 的 asset_id 与受控图片地址原样交给 NodeItem", () => {
+    const node = nodeFromCard(
+      makeCard({ assetId: "asset-9", imageUrl: "/assets/9/content" }),
+      idGen,
+    );
 
-    expect(node.imageUrl).toBeUndefined();
+    expect(node.assetId).toBe("asset-9");
+    expect(node.imageUrl).toBe("/assets/9/content");
   });
 
   it("id 来自注入的 idGen（验注入生效，非硬编码）", () => {
@@ -49,9 +53,9 @@ describe("nodeFromCard", () => {
     expect(node.id).toBe(FIXED_ID);
   });
 
-  it("未知 meta 回退传导到 200×200", () => {
+  it("未知 meta 回退传导到 240×240", () => {
     const node = nodeFromCard(makeCard({ meta: "横向" }), idGen);
 
-    expect(node).toMatchObject({ width: 200, height: 200 });
+    expect(node).toMatchObject({ width: 240, height: 240 });
   });
 });

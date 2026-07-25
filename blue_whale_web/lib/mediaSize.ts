@@ -7,7 +7,7 @@
  * 不阻塞落节点。
  */
 
-export type MediaKind = "image" | "video" | "audio";
+export type MediaKind = "image" | "video";
 export type PixelSize = { width: number; height: number };
 
 /** 短边基准边长（与 `ASPECT_RATIO_BASE` 一致）。 */
@@ -16,20 +16,11 @@ export const MEDIA_SHORT_SIDE = 200;
 /** 元数据读取超时：超过即回退，避免阻塞节点落地。 */
 const READ_TIMEOUT_MS = 3000;
 
-/** 读不上来时的默认回退比例（图 1:1 / 视频 16:9 / 音频卡片）。 */
+/** 读不上来时的默认回退比例（图 1:1 / 视频 16:9）。 */
 export function fallbackMediaSize(kind: MediaKind): PixelSize {
-  if (kind === "audio") return { width: 240, height: 120 }; // 音频无像素维度，用固定卡片
   return kind === "image"
     ? { width: MEDIA_SHORT_SIDE, height: MEDIA_SHORT_SIDE }
     : { width: 356, height: MEDIA_SHORT_SIDE }; // 16:9 短边 200
-}
-
-/** 上传文件 MIME → 媒体 kind（无/未知 MIME 回退 image）。 */
-export function detectMediaKind(file: File): MediaKind {
-  const t = file.type || "";
-  if (t.startsWith("video/")) return "video";
-  if (t.startsWith("audio/")) return "audio";
-  return "image";
 }
 
 /**
@@ -41,7 +32,8 @@ export function scaleToShortSide(
   h: number,
   base = MEDIA_SHORT_SIDE,
 ): PixelSize | null {
-  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null;
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0)
+    return null;
   if (w >= h) return { width: Math.round((base * w) / h), height: base };
   return { width: base, height: Math.round((base * h) / w) };
 }
@@ -51,26 +43,30 @@ export function scaleToShortSide(
  * 图片用 `new Image()` onload；视频用 `<video>` onloadedmetadata。
  * 超时(~3s) / onerror / 0 尺寸 → 回退默认比例。永不 reject。
  */
-export function readMediaNaturalSize(url: string, kind: MediaKind): Promise<PixelSize> {
+export function readMediaNaturalSize(
+  url: string,
+  kind: MediaKind,
+): Promise<PixelSize> {
   return new Promise<PixelSize>((resolve) => {
-    // audio 无像素维度，直返 fallback（不创建 Image/video 读元数据）
-    if (kind === "audio") {
-      resolve(fallbackMediaSize("audio"));
-      return;
-    }
     let done = false;
     const finish = (size: PixelSize) => {
       if (done) return;
       done = true;
       resolve(size);
     };
-    const timer = setTimeout(() => finish(fallbackMediaSize(kind)), READ_TIMEOUT_MS);
+    const timer = setTimeout(
+      () => finish(fallbackMediaSize(kind)),
+      READ_TIMEOUT_MS,
+    );
 
     if (kind === "image") {
       const img = new Image();
       img.onload = () => {
         clearTimeout(timer);
-        finish(scaleToShortSide(img.naturalWidth, img.naturalHeight) ?? fallbackMediaSize(kind));
+        finish(
+          scaleToShortSide(img.naturalWidth, img.naturalHeight) ??
+            fallbackMediaSize(kind),
+        );
       };
       img.onerror = () => {
         clearTimeout(timer);
@@ -82,7 +78,10 @@ export function readMediaNaturalSize(url: string, kind: MediaKind): Promise<Pixe
       vid.preload = "metadata";
       vid.onloadedmetadata = () => {
         clearTimeout(timer);
-        finish(scaleToShortSide(vid.videoWidth, vid.videoHeight) ?? fallbackMediaSize(kind));
+        finish(
+          scaleToShortSide(vid.videoWidth, vid.videoHeight) ??
+            fallbackMediaSize(kind),
+        );
       };
       vid.onerror = () => {
         clearTimeout(timer);

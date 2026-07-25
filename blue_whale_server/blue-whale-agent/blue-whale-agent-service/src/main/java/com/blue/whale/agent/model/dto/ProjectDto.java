@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
  * @param name      项目名
  * @param thumb     缩略图 url
  * @param createdAt 创建时间（前端 snake_case：{@code created_at}）
+ * @param purpose   项目用途（{@code canvas} / {@code generation_inbox}）
  */
-public record ProjectDto(Long id, String name, String thumb, LocalDateTime createdAt) {
+public record ProjectDto(Long id, String name, String thumb, LocalDateTime createdAt, String purpose) {
 }

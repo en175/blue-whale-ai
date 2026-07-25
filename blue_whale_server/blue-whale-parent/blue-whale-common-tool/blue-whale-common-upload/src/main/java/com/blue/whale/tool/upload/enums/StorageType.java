@@ -1,20 +1,26 @@
 package com.blue.whale.tool.upload.enums;
 
+
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 云存储厂商类型。
+ * StorageType
  *
  * @author: Jiyeon2__
  * date: 2025/06/30
+ * description:
  */
 @Getter
 @RequiredArgsConstructor
 public enum StorageType {
-    /** 阿里云 OSS（待接入） */
+    /**
+     * 阿里
+     */
     ALI_YUN(1),
-    /** 火山引擎 TOS */
+    /**
+     * 火山引擎
+     */
     VOLCENGINE(2),
     ;
 

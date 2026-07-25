@@ -5,138 +5,85 @@ import com.blue.whale.agent.mapper.AssetMapper;
 import com.blue.whale.agent.model.entity.Asset;
 import com.blue.whale.global.base.resp.SystemCode;
 import com.blue.whale.global.exception.GlobalException;
-import com.blue.whale.tool.upload.model.ObjectHead;
-import com.blue.whale.tool.upload.model.OssConfig;
-import com.blue.whale.tool.upload.service.AbstractStorageService;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URLConnection;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.UUID;
 
 /**
- * 资源下载转存 + 上传中转：统一走 TOS 对象存储（{@link AbstractStorageService}）。
+ * 资源下载转存：Ark video_url 24h 过期，succeeded 时立即下载落本地，{@code assets.url} 存转存后地址。
  *
- * <p>生成结果（{@link #downloadAndStore}）与上传素材（{@link #storeUploaded}）都转存到 TOS，
- * path = {@code assets/{projectId}/{type}/{uuid}.{ext}}（{@code ossConfig.prefix} 存在时加前缀）。
- * 对象存储未配置（无凭证、{@code storageService=null}）时 fail loud（{@code ASSET_UNAVAILABLE_CODE}）。
+ * <p>本地落盘 {@code ${volcengine.asset.storage-dir:./data/assets}}，通过 {@code /assets/**} 静态映射暴露。
+ * 对象存储后续替换实现，接口不变。
  *
- * <p>MIME 优先按调用方传入值，其次按 URL 扩展名推导（不发网络请求，避免下载阶段额外联网）。
+ * <p>MIME 优先按调用方传入值，其次按 HTTP {@code Content-Type}，再按 URL 扩展名推导，避免把 JPEG 等强制存为 PNG。
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class AssetStorageService {
 
     private final AssetMapper assetMapper;
-    private final AbstractStorageService storageService;
-    private final OssConfig ossConfig;
 
-    public AssetStorageService(AssetMapper assetMapper,
-                               @Autowired(required = false) AbstractStorageService storageService,
-                               @Autowired(required = false) OssConfig ossConfig) {
-        this.assetMapper = assetMapper;
-        this.storageService = storageService;
-        this.ossConfig = ossConfig;
-    }
+    @Value("${volcengine.asset.storage-dir:./data/assets}")
+    private String storageDir;
 
-    /** 下载 sourceUrl 转存 TOS，insert asset（source=generated），返回 asset。 */
-    public Asset downloadAndStore(String sourceUrl, Long userId, Long projectId, String type, String mime) {
-        if (storageService == null) {
-            throw new GlobalException(SystemCode.ASSET_UNAVAILABLE_CODE, "对象存储未配置，无法转存资源");
-        }
-        if (projectId == null) {
-            throw new GlobalException(SystemCode.PARAM_VALID_ERROR_CODE, "projectId 必填");
-        }
+    @Value("${volcengine.asset.url-prefix:/assets}")
+    private String urlPrefix;
+
+    /** 下载 sourceUrl 落本地，insert asset，返回 asset。 */
+    public Asset downloadAndStore(String sourceUrl, Long userId, String type, String mime) {
+        Path dir = Paths.get(storageDir);
         try {
-            byte[] data = download(sourceUrl);
-            String detectedMime = detectMime(mime, sourceUrl);
-            String path = buildPath(projectId, type, detectedMime);
-            String url = storageService.upload(data, path);
+            Files.createDirectories(dir);
+            URI uri = URI.create(sourceUrl);
+            URLConnection conn = uri.toURL().openConnection();
+            String detectedMime = detectMime(mime, conn, uri);
+            String filename = type + "-" + UUID.randomUUID() + extension(detectedMime);
+            Path target = dir.resolve(filename);
+            try (InputStream in = conn.getInputStream()) {
+                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            long size = Files.size(target);
             Asset asset = new Asset()
                     .setUserId(userId)
-                    .setProjectId(projectId)
                     .setType(type)
-                    .setStorageKey(path)
-                    .setUrl(url)
+                    .setStorageKey(filename)
+                    .setUrl(urlPrefix + "/" + filename)
                     .setMime(detectedMime)
-                    .setSize((long) data.length)
+                    .setSize(size)
                     .setSource(Asset.SOURCE_GENERATED)
                     .setStatus(Asset.STATUS_NORMAL);
             assetMapper.insert(asset);
             log.info("asset stored: id={}, type={}, mime={}, size={}, url={}",
-                    asset.getId(), type, detectedMime, data.length, url);
+                    asset.getId(), type, detectedMime, size, asset.getUrl());
             return asset;
-        } catch (GlobalException e) {
-            throw e;
         } catch (Exception e) {
             log.error("download asset failed: {}", sourceUrl, e);
             throw new GlobalException(SystemCode.ASSET_UNAVAILABLE_CODE, "资源下载转存失败: " + e.getMessage());
         }
     }
 
-    /** 上传素材转存 TOS（source=uploaded），返回 asset。 */
-    public Asset storeUploaded(MultipartFile file, Long userId, Long projectId, String type) {
-        if (storageService == null) {
-            throw new GlobalException(SystemCode.ASSET_UNAVAILABLE_CODE, "对象存储未配置，无法上传资源");
-        }
-        try {
-            String mime = file.getContentType();
-            byte[] data = file.getBytes();
-            String path = buildPath(projectId, type, mime);
-            String url = storageService.upload(data, path);
-            Asset asset = new Asset()
-                    .setUserId(userId)
-                    .setProjectId(projectId)
-                    .setType(type)
-                    .setStorageKey(path)
-                    .setUrl(url)
-                    .setMime(mime)
-                    .setSize((long) data.length)
-                    .setSource(Asset.SOURCE_UPLOADED)
-                    .setStatus(Asset.STATUS_NORMAL);
-            assetMapper.insert(asset);
-            log.info("asset uploaded: id={}, type={}, mime={}, size={}, url={}",
-                    asset.getId(), type, mime, data.length, url);
-            return asset;
-        } catch (GlobalException e) {
-            throw e;
-        } catch (IOException e) {
-            log.error("read uploaded file failed", e);
-            throw new GlobalException(SystemCode.ASSET_UNAVAILABLE_CODE, "读取上传文件失败: " + e.getMessage());
-        }
-    }
-
-    /** HEAD 对象元信息，commit 校验用（确认直传对象真实存在 + size + content-type）。 */
-    public ObjectHead headObject(String key) {
-        if (storageService == null) {
-            throw new GlobalException(SystemCode.ASSET_UNAVAILABLE_CODE, "对象存储未配置，无法校验资源");
-        }
-        return storageService.headObject(key);
-    }
-
-    /** 下载 url 字节。主实现发网络请求；单测 override 返回假字节避免联网。 */
-    protected byte[] download(String sourceUrl) {
-        try {
-            URI uri = URI.create(sourceUrl);
-            try (InputStream in = uri.toURL().openStream()) {
-                return in.readAllBytes();
-            }
-        } catch (Exception e) {
-            throw new GlobalException(SystemCode.ASSET_UNAVAILABLE_CODE, "下载资源失败: " + e.getMessage());
-        }
-    }
-
-    /** MIME：explicit > URL 后缀推导，不发网络。 */
-    private String detectMime(String explicitMime, String sourceUrl) {
+    private String detectMime(String explicitMime, URLConnection conn, URI uri) {
         if (explicitMime != null && !explicitMime.isBlank()) {
             return normalizeMime(explicitMime);
         }
-        if (sourceUrl != null) {
-            String lower = sourceUrl.toLowerCase();
+        String contentType = conn.getContentType();
+        if (contentType != null && !contentType.isBlank()) {
+            return normalizeMime(contentType);
+        }
+        String path = uri.getPath();
+        if (path != null) {
+            String lower = path.toLowerCase();
             if (lower.endsWith(".png")) return "image/png";
             if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
             if (lower.endsWith(".webp")) return "image/webp";
@@ -150,21 +97,6 @@ public class AssetStorageService {
             if (lower.endsWith(".flac")) return "audio/flac";
         }
         return "image/png";
-    }
-
-    /** 生成前端直传 storageKey（path = {prefix?}/assets/{projectId}/{type}/{uuid}.{ext}），prepare 用。 */
-    public String buildStorageKey(Long projectId, String type, String mime) {
-        return buildPath(projectId, type, mime);
-    }
-
-    /** path = {prefix?}/assets/{projectId}/{type}/{uuid}.{ext} */
-    private String buildPath(Long projectId, String type, String mime) {
-        String prefix = "";
-        if (ossConfig != null && ossConfig.getPrefix() != null && !ossConfig.getPrefix().isBlank()) {
-            prefix = ossConfig.getPrefix() + "/";
-        }
-        String uuid = UUID.randomUUID().toString().replace("-", "");
-        return prefix + "assets/" + projectId + "/" + type + "/" + uuid + extension(mime);
     }
 
     private String normalizeMime(String mime) {

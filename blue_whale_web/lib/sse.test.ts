@@ -8,7 +8,10 @@ const enc = (s: string) => new TextEncoder().encode(s);
 function makeReader(chunks: Uint8Array[]): SseReader {
   let i = 0;
   return {
-    read: async () => (i < chunks.length ? { done: false, value: chunks[i++] } : { done: true, value: undefined }),
+    read: async () =>
+      i < chunks.length
+        ? { done: false, value: chunks[i++] }
+        : { done: true, value: undefined },
   } as SseReader;
 }
 
@@ -32,7 +35,9 @@ describe("readSseStream", () => {
   });
 
   it("多 data 行用换行拼接", async () => {
-    expect(await drain([enc("data: line1\ndata: line2\n\n")])).toEqual(["line1\nline2"]);
+    expect(await drain([enc("data: line1\ndata: line2\n\n")])).toEqual([
+      "line1\nline2",
+    ]);
   });
 
   it("冒号后仅去一个前导空格", async () => {
@@ -49,7 +54,9 @@ describe("readSseStream", () => {
   });
 
   it("CRLF 多 data 行", async () => {
-    expect(await drain([enc("data: l1\r\ndata: l2\r\n\r\n")])).toEqual(["l1\nl2"]);
+    expect(await drain([enc("data: l1\r\ndata: l2\r\n\r\n")])).toEqual([
+      "l1\nl2",
+    ]);
   });
 
   it("无 data 行不派发", async () => {

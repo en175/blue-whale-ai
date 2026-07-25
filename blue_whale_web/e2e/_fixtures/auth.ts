@@ -5,7 +5,8 @@
  * addInitScript 在任何页面 JS 之前执行（每个 navigation 都会重跑），
  * 与 authStorage.ts:9 的 USER_KEY = "bw-user" 保持一致。
  *
- * 注意：seed 的 username/phone 是占位值，App 不会校验其真实性 —— 仅需非空 string。
+ * 注意：seed 值均为占位，App 不校验其真实性；userId 必须存在
+ * （authStorage.ts 的 loadUser() 缺少 userId 会判为未登录）。
  */
 import type { Page } from "@playwright/test";
 

@@ -6,7 +6,7 @@
  * 本函数只产出除位置（position）外的字段——位置依赖视口与容器（副作用源），
  * 由编排层 addNode 封装，纯函数不碰。
  *
- * 不带 imageUrl：渲染成 ImageNode 既有的灰色占位图标，content 取 card.text 作标题。
+ * 已产出 Asset 的 card 会透传 assetId 与受控 imageUrl；生成中 card 仍使用灰色占位。
  */
 import type { ChatMessage, NodeItem } from "./types";
 import { parseAspectRatio } from "./aspectRatio";
@@ -29,5 +29,7 @@ export function nodeFromCard(card: CardMessage, idGen: IdGenerator): NodeItem {
     width,
     height,
     content: card.text,
+    ...(card.assetId ? { assetId: card.assetId } : {}),
+    ...(card.imageUrl ? { imageUrl: card.imageUrl } : {}),
   };
 }

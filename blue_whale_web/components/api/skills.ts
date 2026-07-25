@@ -17,6 +17,8 @@ export type SkillLibraryItem = {
   coverUrl: string | null;
   source: string;
   added: boolean;
+  /** Creative Skill 稳定身份（IK3NPB，wire snake_case；Use 强制激活用） */
+  creative_skill_id: string | null;
 };
 
 export type SkillMineItem = {
@@ -26,6 +28,8 @@ export type SkillMineItem = {
   description: string;
   coverUrl: string | null;
   source: string;
+  /** Creative Skill 稳定身份（IK3NPB，wire snake_case；Use 强制激活用） */
+  creative_skill_id: string | null;
 };
 
 /** MyBatis-Plus Page 序列化结构（camelCase） */
@@ -43,12 +47,35 @@ export type LibraryQuery = {
   keyword?: string;
 };
 
+/** Run 级 Creative Skill 推荐项（IK3NPI，wire snake_case；后端四字段契约） */
+export type CreativeSkillRecommendation = {
+  /** Creative Skill 稳定身份（Use 强制激活用） */
+  creative_skill_id: string;
+  name: string;
+  description: string;
+  /** 激活资格，契约恒为 requires_user_use（仅用户点 Use 可激活） */
+  activation_eligibility: "requires_user_use";
+};
+
 const API_BASE = "/api/agent/skills";
 
-async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
+async function request<T>(
+  path: string,
+  method: string,
+  body?: unknown,
+): Promise<T> {
+  return requestUrl<T>(`${API_BASE}${path}`, method, body);
+}
+
+/** 全路径请求（推荐端点等在 /api/agent/skills 之外的 Run 级 API 复用） */
+async function requestUrl<T>(
+  url: string,
+  method: string,
+  body?: unknown,
+): Promise<T> {
   let res: Response;
   try {
-    res = await apiFetch(`${API_BASE}${path}`, {
+    res = await apiFetch(url, {
       method,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
@@ -81,4 +108,10 @@ export const skillsApi = {
   /** 切换 auto（关系属性，持久化） */
   setAuto: (id: number, auto: boolean) =>
     request<void>(`/mine/${id}`, "PATCH", { auto }),
+  /** 当前 Run 的 Creative Skill 推荐列表（IK3NPI，GET，Run 级端点不在 skills base 下） */
+  recommendations: (runId: number) =>
+    requestUrl<CreativeSkillRecommendation[]>(
+      `/api/agent/runs/${runId}/creative-skill-recommendations`,
+      "GET",
+    ),
 };

@@ -12,7 +12,12 @@ const REFRESH_TOKEN_KEY = "bw-refresh-token";
 export const SKIP_AUTH = process.env.NEXT_PUBLIC_SKIP_AUTH === "1";
 
 /** SKIP_AUTH 模式下注入的占位用户，让 UI 呈现已登录态。 */
-export const MOCK_USER: User = { userId: 1, uid: "U-0000", username: "本地测试用户", phone: "13800000000" };
+export const MOCK_USER: User = {
+  userId: 1,
+  username: "本地测试用户",
+  phone: "13800000000",
+  hasPassword: false,
+};
 
 // ---- user ----
 
@@ -22,19 +27,31 @@ export function loadUser(): User | null {
     const raw = localStorage.getItem(USER_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (!parsed || typeof parsed.username !== "string" || typeof parsed.phone !== "string") {
+    if (
+      !parsed ||
+      typeof parsed.username !== "string" ||
+      typeof parsed.phone !== "string"
+    ) {
       return null;
     }
     // userId 兼容 number 和 string（Fastjson2 可能将 Long 序列化为字符串）
     const uid = parsed.userId;
-    const userId = typeof uid === "number" ? uid : typeof uid === "string" ? Number(uid) : null;
+    const userId =
+      typeof uid === "number"
+        ? uid
+        : typeof uid === "string"
+          ? Number(uid)
+          : null;
     if (userId == null || Number.isNaN(userId)) return null;
-    // uid（前端 U-xxxx）：旧数据可能无此字段，回填空串，由 AuthContext 补全
-    const storedUid = typeof parsed.uid === "string" ? parsed.uid : "";
-    // avatar：空 / "0" 视为无头像
-    const avatar = typeof parsed.avatar === "string" && parsed.avatar && parsed.avatar !== "0"
-      ? parsed.avatar : undefined;
-    return { username: parsed.username as string, phone: parsed.phone as string, userId, uid: storedUid, avatar };
+    return {
+      username: parsed.username as string,
+      phone: parsed.phone as string,
+      userId,
+      hasPassword:
+        typeof parsed.hasPassword === "boolean"
+          ? parsed.hasPassword
+          : undefined,
+    };
   } catch {
     return null;
   }
@@ -44,15 +61,22 @@ export function saveUser(u: User): void {
   if (typeof window === "undefined") return;
   try {
     // 归一化 userId 为 number（Fastjson2 可能序列化 Long 为字符串）
-    localStorage.setItem(USER_KEY, JSON.stringify({ ...u, userId: Number(u.userId) }));
-  } catch { /* ignore */ }
+    localStorage.setItem(
+      USER_KEY,
+      JSON.stringify({ ...u, userId: Number(u.userId) }),
+    );
+  } catch {
+    /* ignore */
+  }
 }
 
 export function clearUser(): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.removeItem(USER_KEY);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 // ---- tokens ----
@@ -72,7 +96,9 @@ export function saveTokens(accessToken: string, refreshToken: string): void {
   try {
     localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
     localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 export function clearTokens(): void {
@@ -80,25 +106,7 @@ export function clearTokens(): void {
   try {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
-  } catch { /* ignore */ }
-}
-
-// ---- last phone ----
-
-const LAST_PHONE_KEY = "bw-last-phone";
-
-export function loadLastPhone(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    return localStorage.getItem(LAST_PHONE_KEY) ?? "";
   } catch {
-    return "";
+    /* ignore */
   }
-}
-
-export function saveLastPhone(phone: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(LAST_PHONE_KEY, phone);
-  } catch { /* ignore */ }
 }

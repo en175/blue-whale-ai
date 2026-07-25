@@ -6,16 +6,18 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
+import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 import { squirclePath } from "../../utils";
-import { REF_MODES } from "../../constants";
-import { getVideoModels } from "../../api/generation";
-import type { VideoModelCapability } from "../../api/generation";
-import type { DockMediaItem, GenerateArgs, PrefillSignal, SelectOption } from "../../types";
+import {
+  VIDEO_MODELS,
+  VIDEO_ASPECT_RATIOS,
+  VIDEO_RESOLUTIONS,
+  REF_MODES,
+} from "../../constants";
+import type { DockMediaItem, GenerateArgs } from "../../types";
 import { ImageDockContent } from "./ImageDockContent";
 import { VideoDockContent } from "./VideoDockContent";
 import { AudioDockContent } from "./AudioDockContent";
-import { extractEditor, insertMention, removeMention, type MentionItem } from "./mention";
-import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 
 export function BottomDock({
   mode,
@@ -34,15 +36,10 @@ export function BottomDock({
   generating = false,
   generateError,
   onClearGenerateError,
-  firstFrameUrl,
-  lastFrameUrl,
-  onFrameUpload,
-  onFrameClear,
-  onSwapFrames,
-  onPickFrameFromCanvas,
-  focusSignal,
-  dockMentionSignal,
-  prefillSignal,
+  videoJobStatus,
+  videoJobError,
+  onCancelVideoJob,
+  cancellingVideo = false,
 }: {
   mode: "image" | "video" | "audio";
   onClose: () => void;
@@ -68,66 +65,29 @@ export function BottomDock({
   generateError?: string | null;
   /** 关闭生成错误提示 */
   onClearGenerateError?: () => void;
-  /** 首尾帧（视频首尾帧模式，page 层上传后回填 TOS url）。 */
-  firstFrameUrl?: string;
-  lastFrameUrl?: string;
-  onFrameUpload?: (file: File, slot: "first" | "last") => void;
-  onFrameClear?: (slot: "first" | "last") => void;
-  onSwapFrames?: () => void;
-  onPickFrameFromCanvas?: (slot: "first" | "last") => void;
-  /** 重新编辑/带图生成触发：递增 nonce → 聚焦 contentEditable，显示原生 caret（X4） */
-  focusSignal?: number;
-  /** 插入参考图 mention：nonce 递增触发 effect，item 为待插参考图（X3 mention pill）。replace=true 清空 editor 只留一个 */
-  dockMentionSignal?: { nonce: number; item: MentionItem | null; replace?: boolean };
-  /** 重新编辑预填（P2）：nonce 递增 → 应用 recipe 参数到 Dock（prompt + video 设置；image 透传 ImageDockContent） */
-  prefillSignal?: PrefillSignal;
+  /** 当前 Project 中最近一次 BottomDock 视频任务的权威状态。 */
+  videoJobStatus?: string | null;
+  videoJobError?: string | null;
+  onCancelVideoJob?: () => void;
+  cancellingVideo?: boolean;
 }) {
   const [input, setInput] = useState("");
-  /** 从 editor pill 抽取的参考图 URL（提交 referenceImages），随 handleInput 更新 */
-  const [mentions, setMentions] = useState<string[]>([]);
   const [dockSize, setDockSize] = useState({ w: 680, h: 164 });
   const editorRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
   const [refMode, setRefMode] = useState(REF_MODES[0]);
   const [refModeOpen, setRefModeOpen] = useState(false);
-  const [videoModels, setVideoModels] = useState<VideoModelCapability[]>([]);
-  const [selectedModel, setSelectedModel] = useState<SelectOption>({ id: "", label: "" });
+  const [selectedModel, setSelectedModel] = useState(VIDEO_MODELS[0]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const [aspectRatio, setAspectRatio] = useState<SelectOption>({ id: "", label: "" });
-  const [resolution, setResolution] = useState<SelectOption>({ id: "", label: "" });
-  const [duration, setDuration] = useState(5);
+  const [aspectRatio, setAspectRatio] = useState(VIDEO_ASPECT_RATIOS[0]);
+  const [resolution, setResolution] = useState(VIDEO_RESOLUTIONS[1]);
+  const [duration, setDuration] = useState(10);
   const [quantity, setQuantity] = useState("1x");
   const [quantityOpen, setQuantityOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [internetSearch, setInternetSearch] = useState(false);
   const [previewItem, setPreviewItem] = useState<DockMediaItem | null>(null);
-
-  /** 应用某个视频模型：联动重置 分辨率/比例/时长 到该模型默认值（DB 驱动）。 */
-  const applyModel = (cap: VideoModelCapability) => {
-    const defRes = cap.supportedResolutions.find((r) => r.id === cap.defaultResolution) ?? cap.supportedResolutions[0];
-    const defRatio = cap.supportedAspectRatios.includes(cap.defaultAspectRatio)
-      ? cap.defaultAspectRatio
-      : cap.supportedAspectRatios[0];
-    setSelectedModel({ id: cap.modelId, label: cap.modelLabel });
-    setResolution(defRes ? { id: defRes.id, label: defRes.label } : { id: "", label: "" });
-    setAspectRatio({ id: defRatio, label: defRatio });
-    setDuration(cap.defaultDuration ?? cap.durationRange?.min ?? 5);
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    getVideoModels()
-      .then((ms) => {
-        if (cancelled || ms.length === 0) return;
-        setVideoModels(ms);
-        applyModel(ms[0]);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     const el = contentRef.current;
@@ -140,85 +100,21 @@ export function BottomDock({
     return () => ro.disconnect();
   }, []);
 
-  // 重新编辑/带图生成（X4）：focusSignal 变化 → 聚焦输入框，只显示浏览器原生 caret
-  useEffect(() => {
-    if (!focusSignal) return;
-    const raf = requestAnimationFrame(() => editorRef.current?.focus());
-    return () => cancelAnimationFrame(raf);
-  }, [focusSignal]);
-
-  // 插入参考图 mention pill（X3）：dockMentionSignal.nonce 变化 → editor 光标处插 pill
-  useEffect(() => {
-    const sig = dockMentionSignal;
-    const item = sig?.item;
-    if (!sig?.nonce || !item) return;
-    const raf = requestAnimationFrame(() => {
-      const el = editorRef.current;
-      if (!el) return;
-      insertMention(el, item, { replace: sig.replace });
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [dockMentionSignal]);
-
-  // 重新编辑预填（P2）：prefillSignal.nonce → prompt+参考图命令式写进 contentEditable（非受控）+ video 设置
-  useEffect(() => {
-    if (!prefillSignal?.prefill) return;
-    const p = prefillSignal.prefill;
-    const el = editorRef.current;
-    /* eslint-disable react-hooks/set-state-in-effect */
-    if (el) {
-      el.innerHTML = "";
-      el.focus();
-      if (p.prompt) document.execCommand("insertText", false, p.prompt);
-      // 参考图 pill 只插 image 模式（image 生成用 editor mentions）；video 走 videoDockMedia（page 按 ref.kind 设，分到 referenceImages/Videos/Audios）
-      if (mode === "image") {
-        p.references?.forEach((r) => insertMention(el, { id: `prefill-${r.url}`, type: r.kind, name: "", src: r.url }));
-      }
-      const { prompt: pp, referenceImages } = extractEditor(el);
-      setInput(pp);
-      setMentions(referenceImages);
-    }
-    if (mode === "video") {
-      if (p.modelId) {
-        const vm = videoModels.find((v) => v.modelId === p.modelId);
-        setSelectedModel({ id: p.modelId, label: vm?.modelLabel ?? p.modelId });
-      }
-      if (p.aspectRatio) setAspectRatio({ id: p.aspectRatio, label: p.aspectRatio });
-      if (p.resolution) {
-        const vm = videoModels.find((v) => v.modelId === p.modelId);
-        const res = vm?.supportedResolutions.find((r) => r.id === p.resolution);
-        setResolution({ id: p.resolution, label: res?.label ?? p.resolution });
-      }
-      if (p.refMode) {
-        const rm = REF_MODES.find((r) => r.id === p.refMode);
-        if (rm) setRefMode(rm);
-      }
-      if (typeof p.duration === "number") setDuration(p.duration);
-      if (p.quantity != null) setQuantity(`${p.quantity}x`);
-    }
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, [prefillSignal?.nonce, videoModels, mode]);
-
   const path = squirclePath(dockSize.w, dockSize.h, 28.8);
-  const isEmpty = input.trim().length === 0 && mentions.length === 0;
+  const isEmpty = input.trim().length === 0;
+  const canCancelVideo =
+    videoJobStatus === "queued" || videoJobStatus === "processing";
 
   const handleInput = () => {
-    const el = editorRef.current;
-    if (!el) return;
-    const { prompt, referenceImages } = extractEditor(el);
-    setInput(prompt);
-    setMentions(referenceImages);
-  };
-
-  const handleRemoveImageMedia = (id: string) => {
-    const el = editorRef.current;
-    if (el) removeMention(el, id);
-    onRemoveImageMedia?.(id);
+    const text = editorRef.current?.innerText ?? "";
+    setInput(text);
   };
 
   return (
     <div
-      data-canvas-reference-drop-target={mode === "image" ? "image-dock" : "video-dock"}
+      data-canvas-reference-drop-target={
+        mode === "image" ? "image-dock" : "video-dock"
+      }
       style={{
         position: "absolute",
         bottom: 16,
@@ -232,7 +128,8 @@ export function BottomDock({
         style={{
           clipPath: "inset(0%)",
           opacity: 1,
-          transition: "clip-path 120ms cubic-bezier(0.16, 1, 0.3, 1), opacity 120ms cubic-bezier(0.16, 1, 0.3, 1)",
+          transition:
+            "clip-path 120ms cubic-bezier(0.16, 1, 0.3, 1), opacity 120ms cubic-bezier(0.16, 1, 0.3, 1)",
         }}
       >
         <div style={{ position: "relative" }}>
@@ -254,8 +151,65 @@ export function BottomDock({
             <div
               ref={contentRef}
               className="nodrag nopan nowheel"
-              style={{ width: 680, background: "transparent", display: "flex", flexDirection: "column" }}
+              style={{
+                width: 680,
+                background: "transparent",
+                display: "flex",
+                flexDirection: "column",
+              }}
             >
+              {mode === "video" && videoJobStatus && (
+                <div
+                  aria-live="polite"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    padding: "8px 12px",
+                    background: "var(--tc-bg-elevated)",
+                    borderBottom: "1px solid var(--tc-border-subtle)",
+                    color:
+                      videoJobStatus === "failed"
+                        ? "var(--tc-destructive)"
+                        : "var(--tc-text-secondary)",
+                    fontSize: 12,
+                    lineHeight: "16px",
+                  }}
+                >
+                  <span>
+                    {videoJobStatus === "queued"
+                      ? "视频任务等待提交"
+                      : videoJobStatus === "processing"
+                        ? "视频生成中"
+                        : videoJobStatus === "cancel_requested"
+                          ? "正在取消视频任务"
+                          : videoJobStatus === "cancelled"
+                            ? "视频生成已取消"
+                            : videoJobStatus === "succeeded"
+                              ? "视频已生成并加入画布"
+                              : videoJobError || "视频生成失败"}
+                  </span>
+                  {canCancelVideo && (
+                    <button
+                      type="button"
+                      onClick={onCancelVideoJob}
+                      disabled={cancellingVideo}
+                      style={{
+                        border: "1px solid var(--tc-border-active)",
+                        borderRadius: 6,
+                        background: "var(--tc-menu-item-hover)",
+                        color: "var(--tc-text-secondary)",
+                        padding: "3px 9px",
+                        cursor: cancellingVideo ? "wait" : "pointer",
+                        opacity: cancellingVideo ? 0.6 : 1,
+                      }}
+                    >
+                      {cancellingVideo ? "取消中…" : "取消生成"}
+                    </button>
+                  )}
+                </div>
+              )}
               {generateError && (
                 <div
                   style={{
@@ -302,15 +256,16 @@ export function BottomDock({
                   onInput={handleInput}
                   onClose={onClose}
                   media={imageMedia}
-                  onRemoveMedia={handleRemoveImageMedia}
+                  onRemoveMedia={onRemoveImageMedia}
                   onLocalUpload={onLocalUpload}
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
-                  onGenerate={(s) => onGenerate?.(input, { mode: "image", settings: s, referenceImages: mentions })}
+                  onGenerate={(s) =>
+                    onGenerate?.(input, { mode: "image", settings: s })
+                  }
                   generating={generating}
                   onPreviewMedia={setPreviewItem}
-                  prefillSignal={prefillSignal}
                 />
               ) : mode === "audio" ? (
                 <AudioDockContent
@@ -324,10 +279,11 @@ export function BottomDock({
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
-                  onGenerate={(s) => onGenerate?.(input, { mode: "audio", settings: s })}
+                  onGenerate={(s) =>
+                    onGenerate?.(input, { mode: "audio", settings: s })
+                  }
                   generating={generating}
                   onPreviewMedia={setPreviewItem}
-                  prefillSignal={prefillSignal}
                 />
               ) : (
                 <VideoDockContent
@@ -340,8 +296,7 @@ export function BottomDock({
                   refModeOpen={refModeOpen}
                   setRefModeOpen={setRefModeOpen}
                   selectedModel={selectedModel}
-                  onSelectModel={applyModel}
-                  videoModels={videoModels}
+                  setSelectedModel={setSelectedModel}
                   modelSettingsOpen={modelSettingsOpen}
                   setModelSettingsOpen={setModelSettingsOpen}
                   aspectRatio={aspectRatio}
@@ -358,19 +313,15 @@ export function BottomDock({
                   setAdvancedOpen={setAdvancedOpen}
                   internetSearch={internetSearch}
                   setInternetSearch={setInternetSearch}
-                  firstFrameUrl={firstFrameUrl}
-                  lastFrameUrl={lastFrameUrl}
-                  onFrameUpload={onFrameUpload}
-                  onFrameClear={onFrameClear}
-                  onSwapFrames={onSwapFrames}
-                  onPickFrameFromCanvas={onPickFrameFromCanvas}
                   media={videoMedia}
                   onRemoveMedia={onRemoveVideoMedia}
                   onLocalUpload={onLocalUpload}
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
-                  onGenerate={(s) => onGenerate?.(input, { mode: "video", settings: s })}
+                  onGenerate={(s) =>
+                    onGenerate?.(input, { mode: "video", settings: s })
+                  }
                   generating={generating}
                   onPreviewMedia={setPreviewItem}
                 />
@@ -380,7 +331,10 @@ export function BottomDock({
         </div>
       </div>
       {previewItem && (
-        <MediaPreviewModal item={previewItem} onClose={() => setPreviewItem(null)} />
+        <MediaPreviewModal
+          item={previewItem}
+          onClose={() => setPreviewItem(null)}
+        />
       )}
     </div>
   );

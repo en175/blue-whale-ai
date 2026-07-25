@@ -1,0 +1,9 @@
+{
+  "creative_skill_id": "cs_poster_design",
+  "creative_skill_version_id": "csv_poster_design_1_0_0",
+  "source": "auto",
+  "reason": {
+    "type": "agent_match"
+  },
+  "resource_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}

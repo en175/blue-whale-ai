@@ -17,16 +17,13 @@ import { useRouter } from "next/navigation";
 import SkillPanel from "./SkillPanel";
 import { AspectRatioIcon } from "./icons/AspectRatioIcon";
 import {
-  useImageModels,
+  IMAGE_MODELS,
+  IMAGE_ASPECT_RATIOS,
   defaultResolutionOf,
   type ImageModel,
   type ImageResolution,
   type ImageAspectRatio,
 } from "./ImageModelSettingsPopover";
-import {
-  getVideoModels,
-  type VideoModelCapability,
-} from "@/app/canvas/_canvas/api/generation";
 
 const TABS = [
   { id: "agent", label: "视频智能体", hasCanvas: true },
@@ -34,81 +31,11 @@ const TABS = [
   { id: "image", label: "AI 图片" },
 ];
 
-// --- 视频模型（DB 驱动，对齐后端 VideoModelCapability） ---
-
-type VideoModelOption = {
-  /** 真实模型 id（如 doubao-seedance-2-0-260128），映射自 capability.modelId */
-  id: string;
-  label: string;
-  resolutions: { id: string; label: string }[];
-  aspectRatios: { id: string; label: string }[];
-  durationRange: { min: number; max: number; step: number } | null;
-  defaultResolution: string;
-  defaultAspectRatio: string;
-  defaultDuration: number | null;
-  /** 原始 API 能力（含 features 等高级字段，供消费方按需读取） */
-  capability: VideoModelCapability;
-};
-
-function capabilityToVideoModel(cap: VideoModelCapability): VideoModelOption {
-  return {
-    id: cap.modelId,
-    label: cap.modelLabel,
-    resolutions: cap.supportedResolutions.map((r) => ({ id: r.id, label: r.label })),
-    aspectRatios: cap.supportedAspectRatios.map((r) => ({ id: r, label: r })),
-    durationRange: cap.durationRange,
-    defaultResolution: cap.defaultResolution,
-    defaultAspectRatio: cap.defaultAspectRatio,
-    defaultDuration: cap.defaultDuration,
-    capability: cap,
-  };
-}
-
-let videoModelsPromise: Promise<VideoModelOption[]> | null = null;
-
-function fetchVideoModels(): Promise<VideoModelOption[]> {
-  if (!videoModelsPromise) {
-    videoModelsPromise = getVideoModels()
-      .then((caps) => caps.map(capabilityToVideoModel))
-      .catch((err) => {
-        videoModelsPromise = null; // 失败清缓存，允许下次重试
-        throw err;
-      });
-  }
-  return videoModelsPromise;
-}
-
-function useVideoModels(): {
-  models: VideoModelOption[];
-  loading: boolean;
-  error: string | null;
-} {
-  const [models, setModels] = useState<VideoModelOption[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchVideoModels()
-      .then((mapped) => {
-        if (!cancelled) {
-          setModels(mapped);
-          setLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "加载视频模型失败");
-          setLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return { models, loading, error };
-}
+const MODELS = [
+  { id: "seedance-2", label: "Seedance 2.0", premium: true },
+  { id: "seedance-mini", label: "Seedance 2.0 Mini" },
+  { id: "seedance-fast", label: "Seedance 2.0 Fast" },
+];
 
 const AGENT_MODELS = [
   { id: "claude-opus-4-7", label: "Claude Opus 4.7", costMultiplier: "5x" },
@@ -116,7 +43,11 @@ const AGENT_MODELS = [
   { id: "gemini-3-5-flash", label: "Gemini 3.5 Flash", costMultiplier: "2x" },
   { id: "qwen-3-7-max", label: "Qwen 3.7 Max", costMultiplier: "1.3x" },
   { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", costMultiplier: "1x" },
-  { id: "gemini-3-1-flash-lite", label: "Gemini 3.1 Flash Lite", costMultiplier: "0.3x" },
+  {
+    id: "gemini-3-1-flash-lite",
+    label: "Gemini 3.1 Flash Lite",
+    costMultiplier: "0.3x",
+  },
 ];
 
 const VIDEO_ASPECT_RATIOS = [
@@ -126,6 +57,13 @@ const VIDEO_ASPECT_RATIOS = [
   { id: "3:4", label: "3:4" },
   { id: "9:16", label: "9:16" },
   { id: "21:9", label: "21:9" },
+];
+
+const RESOLUTIONS = [
+  { id: "480p", label: "480p" },
+  { id: "720p", label: "720p" },
+  { id: "1080p", label: "1080p" },
+  { id: "2160p", label: "2160p" },
 ];
 
 const VIDEO_REF_MODES = [
@@ -176,18 +114,14 @@ export default function AgentComposer({
   const [isFocused, setIsFocused] = useState(false);
   const [indicator, setIndicator] = useState({ width: 0, x: 0, opacity: 0 });
   const [modelOpen, setModelOpen] = useState(false);
-  // 视频模型 DB 驱动；selectedModel.id 是真实模型 id（如 doubao-seedance-2-0-260128）
-  const { models: videoModels } = useVideoModels();
-  const [selectedModel, setSelectedModel] = useState<VideoModelOption | null>(null);
+  const [selectedModel, setSelectedModel] = useState(MODELS[0]);
   const [videoModelOpen, setVideoModelOpen] = useState(false);
   const [refModeOpen, setRefModeOpen] = useState(false);
   const [resolutionOpen, setResolutionOpen] = useState(false);
   const [aspectRatioOpen, setAspectRatioOpen] = useState(false);
   const [durationOpen, setDurationOpen] = useState(false);
   const [agentModelOpen, setAgentModelOpen] = useState(false);
-  const [selectedAgentModel, setSelectedAgentModel] = useState(
-    AGENT_MODELS[3]
-  );
+  const [selectedAgentModel, setSelectedAgentModel] = useState(AGENT_MODELS[3]);
   const [mediaList, setMediaList] = useState<MediaItem[]>([]);
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
 
@@ -196,51 +130,26 @@ export default function AgentComposer({
 
   const tabDisabled = disabledTabs.includes(activeTab);
 
-  // AI 视频 tab params（宽高比为平台固定集合；分辨率/时长由选中模型决定）
+  // AI 视频 tab params
   const [refMode, setRefMode] = useState(VIDEO_REF_MODES[1]);
   const [aspectRatio, setAspectRatio] = useState(VIDEO_ASPECT_RATIOS[0]);
-  const [resolution, setResolution] = useState<{ id: string; label: string } | null>(null);
+  const [resolution, setResolution] = useState(RESOLUTIONS[0]);
   const [videoDuration, setVideoDuration] = useState(15);
 
-  // AI 图片 tab params（模型/分辨率/宽高比均 DB 驱动，经 useImageModels 拉取）
-  const { models: imageModels } = useImageModels();
-  const [selectedImageModel, setSelectedImageModel] = useState<ImageModel | null>(null);
+  // AI 图片 tab params（模型/分辨率/宽高比均复用画布 ImageModelSettingsPopover 的 seedream 映射）
+  const [selectedImageModel, setSelectedImageModel] = useState<ImageModel>(
+    IMAGE_MODELS[0],
+  );
   const [imageModelOpen, setImageModelOpen] = useState(false);
 
-  const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio | null>(null);
+  const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(
+    IMAGE_ASPECT_RATIOS.find((r) => r.id === "16:9")!,
+  );
   const [imageAspectRatioOpen, setImageAspectRatioOpen] = useState(false);
-  const [imageResolution, setImageResolution] = useState<ImageResolution | null>(null);
+  const [imageResolution, setImageResolution] = useState<ImageResolution>(
+    defaultResolutionOf(IMAGE_MODELS[0]),
+  );
   const [imageResolutionOpen, setImageResolutionOpen] = useState(false);
-
-  // 视频模型加载后初始化默认选择（首个模型 + 其默认分辨率/时长）
-  useEffect(() => {
-    if (selectedModel || videoModels.length === 0) return;
-    const first = videoModels[0];
-    // 异步数据加载后初始化默认选择；set-state-in-effect 对此异步初始化场景误报。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelectedModel(first);
-    setResolution(
-      first.resolutions.find((r) => r.id === first.defaultResolution) ??
-        first.resolutions[0] ??
-        null,
-    );
-    if (first.defaultDuration != null) setVideoDuration(first.defaultDuration);
-  }, [videoModels, selectedModel]);
-
-  // 图片模型加载后初始化默认选择（首个模型 + 其默认分辨率/宽高比）
-  useEffect(() => {
-    if (selectedImageModel || imageModels.length === 0) return;
-    const first = imageModels[0];
-    // 异步数据加载后初始化默认选择；set-state-in-effect 对此异步初始化场景误报。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelectedImageModel(first);
-    setImageResolution(defaultResolutionOf(first));
-    setImageAspectRatio(
-      first.aspectRatios.find((r) => r.id === first.capability.defaultAspectRatio) ??
-        first.aspectRatios[0] ??
-        null,
-    );
-  }, [imageModels, selectedImageModel]);
 
   const handleGenerate = useCallback(() => {
     // 视频/agent tab 后端未就绪：占位静默（仅图片 tab 真生成）。
@@ -248,8 +157,6 @@ export default function AgentComposer({
     const prompt = content.trim();
     requireAuth({ kind: "home-generate", prompt }, () => {
       if (onGenerate) {
-        // 图片生成需模型/宽高比/分辨率均已加载
-        if (!selectedImageModel || !imageAspectRatio || !imageResolution) return;
         onGenerate({
           tab: activeTab,
           prompt,
@@ -282,7 +189,7 @@ export default function AgentComposer({
     if (editorRef.current.innerText.trim() === defaultPrompt.trim()) return;
     editorRef.current.innerText = defaultPrompt;
     // 一次性 URL 预填是官方认可模式；set-state-in-effect 规则对此误报。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+     
     setContent(defaultPrompt);
   }, [defaultPrompt]);
 
@@ -555,11 +462,6 @@ export default function AgentComposer({
     ? "bottom-[calc(100%+6px)] shadow-[0_-12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-top-1 duration-150"
     : "top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150";
 
-  // 时长范围由选中视频模型决定（缺省 4–15s step 1）。
-  const durMin = selectedModel?.durationRange?.min ?? 4;
-  const durMax = selectedModel?.durationRange?.max ?? 15;
-  const durStep = selectedModel?.durationRange?.step ?? 1;
-
   return (
     <div
       className={`w-full max-w-[920px] bg-[#1d1d1d] rounded-[18px] border transition-[border-color] duration-300 overflow-visible ${
@@ -717,11 +619,7 @@ export default function AgentComposer({
                         className="shrink-0 w-[88px] h-[88px] mt-4 ml-4 flex flex-col items-center justify-center gap-1 border-none rounded-lg text-white/30 bg-white/[0.025] cursor-pointer transition-all duration-150 self-start p-0 hover:text-white/50 hover:bg-white/[0.05]"
                         aria-label="上传参考图片"
                       >
-                        <Plus
-                          width={20}
-                          height={20}
-                          className="opacity-80"
-                        />
+                        <Plus width={20} height={20} className="opacity-80" />
                         <span className="text-[10.5px] font-medium opacity-70">
                           图片
                         </span>
@@ -749,7 +647,11 @@ export default function AgentComposer({
                     <div className="flex items-center gap-2 flex-1 justify-start">
                       {/* 模型 */}
                       {/* 模型 */}
-                      <div className="relative" ref={imageModelContainerRef} data-param-dropdown-root="true">
+                      <div
+                        className="relative"
+                        ref={imageModelContainerRef}
+                        data-param-dropdown-root="true"
+                      >
                         <button
                           type="button"
                           onClick={() => setImageModelOpen((v) => !v)}
@@ -758,7 +660,7 @@ export default function AgentComposer({
                           aria-expanded={imageModelOpen}
                           aria-label="模型"
                         >
-                          <span>{selectedImageModel?.label ?? "…"}</span>
+                          <span>{selectedImageModel.label}</span>
                           <ChevronDown width={11} height={11} />
                         </button>
                         {imageModelOpen && (
@@ -767,8 +669,9 @@ export default function AgentComposer({
                             role="listbox"
                             aria-label="模型"
                           >
-                            {imageModels.map((model) => {
-                              const selected = selectedImageModel?.id === model.id;
+                            {IMAGE_MODELS.map((model) => {
+                              const selected =
+                                selectedImageModel.id === model.id;
                               return (
                                 <button
                                   key={model.id}
@@ -777,15 +680,14 @@ export default function AgentComposer({
                                   aria-selected={selected}
                                   onClick={() => {
                                     setSelectedImageModel(model);
-                                    // 切模型：当前分辨率/宽高比不在新模型可用集合则重置为该模型默认。
-                                    if (!model.resolutions.some((r) => r.id === imageResolution?.id)) {
-                                      setImageResolution(defaultResolutionOf(model));
-                                    }
-                                    if (!model.aspectRatios.some((r) => r.id === imageAspectRatio?.id)) {
-                                      setImageAspectRatio(
-                                        model.aspectRatios.find((r) => r.id === model.capability.defaultAspectRatio) ??
-                                          model.aspectRatios[0] ??
-                                          null,
+                                    // 切模型：当前分辨率不在新模型可用集合则重置为该模型默认分辨率。
+                                    if (
+                                      !model.resolutions.some(
+                                        (r) => r.id === imageResolution.id,
+                                      )
+                                    ) {
+                                      setImageResolution(
+                                        defaultResolutionOf(model),
                                       );
                                     }
                                     setImageModelOpen(false);
@@ -797,7 +699,9 @@ export default function AgentComposer({
                                   }`}
                                 >
                                   <span className="inline-flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate">{model.label}</span>
+                                    <span className="truncate">
+                                      {model.label}
+                                    </span>
                                   </span>
                                 </button>
                               );
@@ -807,7 +711,11 @@ export default function AgentComposer({
                       </div>
 
                       {/* 宽高比 */}
-                      <div className="relative" ref={imageAspectRatioContainerRef} data-param-dropdown-root="true">
+                      <div
+                        className="relative"
+                        ref={imageAspectRatioContainerRef}
+                        data-param-dropdown-root="true"
+                      >
                         <button
                           type="button"
                           onClick={() => setImageAspectRatioOpen((v) => !v)}
@@ -816,8 +724,8 @@ export default function AgentComposer({
                           aria-expanded={imageAspectRatioOpen}
                           aria-label="宽高比"
                         >
-                          <AspectRatioIcon ratio={imageAspectRatio?.id ?? "1:1"} />
-                          <span>{imageAspectRatio?.label ?? "—"}</span>
+                          <AspectRatioIcon ratio={imageAspectRatio.id} />
+                          <span>{imageAspectRatio.label}</span>
                           <ChevronDown width={11} height={11} />
                         </button>
                         {imageAspectRatioOpen && (
@@ -826,8 +734,8 @@ export default function AgentComposer({
                             role="listbox"
                             aria-label="宽高比"
                           >
-                            {(selectedImageModel?.aspectRatios ?? []).map((r) => {
-                              const selected = imageAspectRatio?.id === r.id;
+                            {IMAGE_ASPECT_RATIOS.map((r) => {
+                              const selected = imageAspectRatio.id === r.id;
                               return (
                                 <button
                                   key={r.id}
@@ -856,7 +764,11 @@ export default function AgentComposer({
                       </div>
 
                       {/* 分辨率 */}
-                      <div className="relative" ref={imageResolutionContainerRef} data-param-dropdown-root="true">
+                      <div
+                        className="relative"
+                        ref={imageResolutionContainerRef}
+                        data-param-dropdown-root="true"
+                      >
                         <button
                           type="button"
                           onClick={() => setImageResolutionOpen((v) => !v)}
@@ -865,7 +777,7 @@ export default function AgentComposer({
                           aria-expanded={imageResolutionOpen}
                           aria-label="分辨率"
                         >
-                          <span>{imageResolution?.label ?? "—"}</span>
+                          <span>{imageResolution.label}</span>
                           <ChevronDown width={11} height={11} />
                         </button>
                         {imageResolutionOpen && (
@@ -874,8 +786,8 @@ export default function AgentComposer({
                             role="listbox"
                             aria-label="分辨率"
                           >
-                            {(selectedImageModel?.resolutions ?? []).map((res) => {
-                              const selected = imageResolution?.id === res.id;
+                            {selectedImageModel.resolutions.map((res) => {
+                              const selected = imageResolution.id === res.id;
                               return (
                                 <button
                                   key={res.id}
@@ -893,7 +805,9 @@ export default function AgentComposer({
                                   }`}
                                 >
                                   <span className="inline-flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate">{res.label}</span>
+                                    <span className="truncate">
+                                      {res.label}
+                                    </span>
                                   </span>
                                 </button>
                               );
@@ -1005,11 +919,7 @@ export default function AgentComposer({
                           className="shrink-0 w-[88px] h-[88px] mt-4 ml-4 flex flex-col items-center justify-center gap-1 border-none rounded-lg text-white/30 bg-white/[0.025] cursor-pointer transition-all duration-150 self-start p-0 hover:text-white/50 hover:bg-white/[0.05]"
                           aria-label="上传参考"
                         >
-                          <Plus
-                            width={20}
-                            height={20}
-                            className="opacity-80"
-                          />
+                          <Plus width={20} height={20} className="opacity-80" />
                           <span className="text-[10.5px] font-medium opacity-70 whitespace-nowrap">
                             参考
                           </span>
@@ -1035,7 +945,11 @@ export default function AgentComposer({
                   <div className="flex items-center gap-2 py-3 mt-auto px-4">
                     <div className="flex items-center gap-2 flex-1 justify-start">
                       {/* 模型 */}
-                      <div className="relative" ref={videoModelContainerRef} data-param-dropdown-root="true">
+                      <div
+                        className="relative"
+                        ref={videoModelContainerRef}
+                        data-param-dropdown-root="true"
+                      >
                         <button
                           type="button"
                           onClick={() => setVideoModelOpen((v) => !v)}
@@ -1045,7 +959,7 @@ export default function AgentComposer({
                           aria-label="模型"
                         >
                           <span className="inline-flex items-center gap-1.5 min-w-0">
-                            <span>{selectedModel?.label ?? "…"}</span>
+                            <span>{selectedModel.label}</span>
                           </span>
                           <ChevronDown width={11} height={11} />
                         </button>
@@ -1055,8 +969,8 @@ export default function AgentComposer({
                             role="listbox"
                             aria-label="模型"
                           >
-                            {videoModels.map((model) => {
-                              const selected = selectedModel?.id === model.id;
+                            {MODELS.map((model) => {
+                              const selected = selectedModel.id === model.id;
                               return (
                                 <button
                                   key={model.id}
@@ -1065,14 +979,6 @@ export default function AgentComposer({
                                   aria-selected={selected}
                                   onClick={() => {
                                     setSelectedModel(model);
-                                    // 切模型：当前分辨率不在新模型可用集合则重置为该模型默认分辨率。
-                                    if (!model.resolutions.some((r) => r.id === resolution?.id)) {
-                                      setResolution(
-                                        model.resolutions.find((r) => r.id === model.defaultResolution) ??
-                                          model.resolutions[0] ??
-                                          null,
-                                      );
-                                    }
                                     setVideoModelOpen(false);
                                   }}
                                   className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
@@ -1082,7 +988,30 @@ export default function AgentComposer({
                                   }`}
                                 >
                                   <span className="inline-flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate">{model.label}</span>
+                                    <span className="truncate">
+                                      {model.label}
+                                    </span>
+                                    {selected && model.premium && (
+                                      <span
+                                        aria-label="PREMIUM"
+                                        className="inline-flex items-center shrink-0 select-none whitespace-nowrap font-bold uppercase"
+                                        style={{
+                                          background:
+                                            "linear-gradient(to right, rgb(99, 102, 241), rgb(168, 85, 247))",
+                                          color: "rgb(255, 255, 255)",
+                                          fontSize: "9px",
+                                          fontWeight: 700,
+                                          letterSpacing: "0.025em",
+                                          padding: "1px 8px",
+                                          borderRadius: "4px",
+                                          lineHeight: "14px",
+                                          boxShadow:
+                                            "rgba(0, 0, 0, 0.15) 0px 1px 2px 0px",
+                                        }}
+                                      >
+                                        PREMIUM
+                                      </span>
+                                    )}
                                   </span>
                                 </button>
                               );
@@ -1092,7 +1021,11 @@ export default function AgentComposer({
                       </div>
 
                       {/* 参考模式 */}
-                      <div className="relative" ref={refModeContainerRef} data-param-dropdown-root="true">
+                      <div
+                        className="relative"
+                        ref={refModeContainerRef}
+                        data-param-dropdown-root="true"
+                      >
                         <button
                           type="button"
                           onClick={() => setRefModeOpen((v) => !v)}
@@ -1129,7 +1062,9 @@ export default function AgentComposer({
                                   }`}
                                 >
                                   <span className="inline-flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate">{mode.label}</span>
+                                    <span className="truncate">
+                                      {mode.label}
+                                    </span>
                                   </span>
                                 </button>
                               );
@@ -1139,7 +1074,11 @@ export default function AgentComposer({
                       </div>
 
                       {/* 宽高比 */}
-                      <div className="relative" ref={aspectRatioContainerRef} data-param-dropdown-root="true">
+                      <div
+                        className="relative"
+                        ref={aspectRatioContainerRef}
+                        data-param-dropdown-root="true"
+                      >
                         <button
                           type="button"
                           onClick={() => setAspectRatioOpen((v) => !v)}
@@ -1188,7 +1127,11 @@ export default function AgentComposer({
                       </div>
 
                       {/* 分辨率 */}
-                      <div className="relative" ref={resolutionContainerRef} data-param-dropdown-root="true">
+                      <div
+                        className="relative"
+                        ref={resolutionContainerRef}
+                        data-param-dropdown-root="true"
+                      >
                         <button
                           type="button"
                           onClick={() => setResolutionOpen((v) => !v)}
@@ -1197,7 +1140,7 @@ export default function AgentComposer({
                           aria-expanded={resolutionOpen}
                           aria-label="分辨率"
                         >
-                          <span>{resolution?.label ?? "—"}</span>
+                          <span>{resolution.label}</span>
                           <ChevronDown width={11} height={11} />
                         </button>
                         {resolutionOpen && (
@@ -1206,8 +1149,8 @@ export default function AgentComposer({
                             role="listbox"
                             aria-label="分辨率"
                           >
-                            {(selectedModel?.resolutions ?? []).map((res) => {
-                              const selected = resolution?.id === res.id;
+                            {RESOLUTIONS.map((res) => {
+                              const selected = resolution.id === res.id;
                               return (
                                 <button
                                   key={res.id}
@@ -1225,7 +1168,9 @@ export default function AgentComposer({
                                   }`}
                                 >
                                   <span className="inline-flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate">{res.label}</span>
+                                    <span className="truncate">
+                                      {res.label}
+                                    </span>
                                   </span>
                                 </button>
                               );
@@ -1235,7 +1180,11 @@ export default function AgentComposer({
                       </div>
 
                       {/* 时长 */}
-                      <div className="relative" ref={durationContainerRef} data-param-dropdown-root="true">
+                      <div
+                        className="relative"
+                        ref={durationContainerRef}
+                        data-param-dropdown-root="true"
+                      >
                         <button
                           type="button"
                           onClick={() => setDurationOpen((v) => !v)}
@@ -1254,20 +1203,28 @@ export default function AgentComposer({
                             role="listbox"
                             aria-label="时长"
                           >
-                            <span className="text-[20px] font-semibold text-white tabular-nums">{videoDuration}s</span>
+                            <span className="text-[20px] font-semibold text-white tabular-nums">
+                              {videoDuration}s
+                            </span>
                             <div className="flex items-center gap-2 w-full">
-                              <span className="text-[10px] text-white/[0.35] shrink-0 tabular-nums">{durMin}s</span>
+                              <span className="text-[10px] text-white/[0.35] shrink-0 tabular-nums">
+                                4s
+                              </span>
                               <input
                                 type="range"
-                                min={durMin}
-                                max={durMax}
-                                step={durStep}
+                                min="4"
+                                max="15"
+                                step="1"
                                 value={videoDuration}
                                 aria-label="时长"
-                                onChange={(e) => setVideoDuration(parseInt(e.target.value, 10))}
+                                onChange={(e) =>
+                                  setVideoDuration(parseInt(e.target.value, 10))
+                                }
                                 className="flex-1 h-1 appearance-none rounded-[2px] bg-white/[0.12] cursor-pointer outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-[0_1px_4px_rgba(0,0,0,0.3)] [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:duration-[120ms] [&::-webkit-slider-thumb]:ease-out [&:hover::-webkit-slider-thumb]:scale-[1.2] [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:shadow-[0_1px_4px_rgba(0,0,0,0.3)] [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-[2px] [&::-moz-range-track]:bg-white/[0.12]"
                               />
-                              <span className="text-[10px] text-white/[0.35] shrink-0 tabular-nums">{durMax}s</span>
+                              <span className="text-[10px] text-white/[0.35] shrink-0 tabular-nums">
+                                15s
+                              </span>
                             </div>
                             <button
                               type="button"
@@ -1427,7 +1384,7 @@ export default function AgentComposer({
                   </button>
                   <button
                     type="button"
-                    onClick={() => requireAuth({ kind: "skill-panel" }, () => setSkillPanelOpen(true))}
+                    onClick={() => setSkillPanelOpen(true)}
                     className="inline-flex items-center gap-1 h-8 px-3 text-[13px] font-medium text-white/35 rounded-lg bg-transparent border border-white/[0.06] cursor-pointer transition-colors duration-150 whitespace-nowrap hover:bg-white/[0.05] hover:text-white/70"
                     aria-label="Skills"
                     aria-haspopup="dialog"
@@ -1452,7 +1409,7 @@ export default function AgentComposer({
                         aria-expanded={modelOpen}
                       >
                         <span className="whitespace-nowrap">
-                          {selectedModel?.label ?? "…"}
+                          {selectedModel.label}
                         </span>
                         <ChevronDown
                           width={11}
@@ -1464,7 +1421,7 @@ export default function AgentComposer({
                       </button>
                       {modelOpen && (
                         <div className="ncs-thin-scrollbar absolute bg-[rgb(35,35,54)] border border-white/10 rounded-lg p-1 z-[100] max-h-[240px] overflow-y-auto bottom-[calc(100%+6px)] shadow-[0_-12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-top-1 duration-150 left-0 right-auto w-max min-w-[220px]">
-                          {videoModels.map((model) => (
+                          {MODELS.map((model) => (
                             <button
                               key={model.id}
                               type="button"
@@ -1473,7 +1430,7 @@ export default function AgentComposer({
                                 setModelOpen(false);
                               }}
                               className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
-                                selectedModel?.id === model.id
+                                selectedModel.id === model.id
                                   ? "text-white bg-white/[0.04]"
                                   : "text-white/80 bg-transparent"
                               }`}
@@ -1521,7 +1478,8 @@ export default function AgentComposer({
                                 选择驱动 Agent 的模型
                               </div>
                               {AGENT_MODELS.map((model) => {
-                                const selected = selectedAgentModel.id === model.id;
+                                const selected =
+                                  selectedAgentModel.id === model.id;
                                 return (
                                   <button
                                     key={model.id}
@@ -1601,7 +1559,7 @@ export default function AgentComposer({
       <SkillPanel
         isOpen={skillPanelOpen}
         onClose={() => setSkillPanelOpen(false)}
-        onUseSkill={insertSkillIntoEditor}
+        onUseSkill={(skill) => insertSkillIntoEditor(skill.name)}
       />
     </div>
   );

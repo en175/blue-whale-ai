@@ -5,7 +5,7 @@ import com.blue.whale.global.exception.GlobalException;
 
 /**
  * 当前用户上下文：MVP 无鉴权，用户身份走 {@code X-User-Id} 请求头（网关注入，前端直传）。
- * 统一 {@code GenerationController} 的未授权处理，缺失抛 {@link GlobalException}（401）。
+ * 统一各 Controller 的未授权处理，缺失抛 {@link GlobalException}（401）。
  */
 public final class UserContext {
 

@@ -1,8 +1,7 @@
 /**
  * Utils —— 画布模块的公共工具方法（工具层）
- * 提供 squircle（超椭圆圆角）SVG 路径 + dockAccept（Dock 选参考类型过滤）。
+ * 提供 squircle（超椭圆圆角）SVG 路径生成函数，供需要平滑圆角的组件复用。
  */
-import type { MediaKind } from "./model";
 
 export function squirclePath(width: number, height: number, radius: number): string {
   const r = Math.min(radius, width / 2, height / 2);
@@ -36,12 +35,4 @@ export function squirclePath(width: number, height: number, radius: number): str
     `c ${c6} ${-c4} ${c7} ${-c4} ${c3} ${-c4}`,
     "Z",
   ].join(" ");
-}
-
-/**
- * Dock「从画布选」按类型过滤（D-3 IJZY24）：image Dock / 首尾帧只图；video/audio Dock 图视音。
- * 独立于 kinds ports.accept（那是连线规则 connection rule；此处是 Dock 选参考过滤 dock pick filter）。
- */
-export function dockAccept(mode: "image" | "video" | "audio" | "firstFrame" | "lastFrame"): MediaKind[] {
-  return mode === "video" || mode === "audio" ? ["image", "video", "audio"] : ["image"];
 }

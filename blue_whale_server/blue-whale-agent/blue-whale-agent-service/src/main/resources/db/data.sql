@@ -1,3 +1,8 @@
+-- ⚠️ 已归档（IK1W1K）：模板种子已并入版本化迁移 db/migrations/V5__template-unify-fields-and-seed.sql，
+-- 由 SchemaMigrationService 统一执行；V5 同时为模板与图片建立了唯一键逻辑身份，幂等由
+-- uk_template_card_tag_title / uk_template_card_image_card_sort 保证。
+-- 历史保留供追溯，不再手动执行。
+
 -- 模板初始化数据（配合 schema.sql 使用，可重复执行：INSERT IGNORE）
 -- 标签元数据不在此处，见 TemplateTagEnum 枚举
 
@@ -141,44 +146,3 @@ INSERT IGNORE INTO template_card_image (card_id, image_url, sort_order) SELECT i
 INSERT IGNORE INTO template_card_image (card_id, image_url, sort_order) SELECT id, 'https://dj5nb01yl89hl.cloudfront.net/media/images/xEPEqZnU1gZoAVHx.webp', 0 FROM template_card WHERE tag_code = 'image' AND title = '创作现代品牌 logo';
 INSERT IGNORE INTO template_card_image (card_id, image_url, sort_order) SELECT id, 'https://dj5nb01yl89hl.cloudfront.net/media/images/Hy89VuSzZW12qIJQ.webp', 1 FROM template_card WHERE tag_code = 'image' AND title = '创作现代品牌 logo';
 INSERT IGNORE INTO template_card_image (card_id, image_url, sort_order) SELECT id, 'https://dj5nb01yl89hl.cloudfront.net/media/images/_Y4JcvCCrrkZD5SF.webp', 2 FROM template_card WHERE tag_code = 'image' AND title = '创作现代品牌 logo';
-
--- ===== 模型能力种子（generation_model_capability）=====
--- 图片：5Pro(默认首选) → 5lite → 4.5 → 4.0；3.0 已被火山下线(enabled=0 保留不显示)。
--- 视频：Seedance 2.0(默认) → Fast → Mini。
--- INSERT IGNORE 可重复执行（uk_provider_model 去重）。supported_sizes/features 为 JSON 字面量。
--- 变更能力/排序时同步改这里 + 线上表。sort_order 越小越靠前，前端默认取列表第一项。
-INSERT IGNORE INTO generation_model_capability
-    (provider_id, model_id, capability_type, model_label, icon, supported_sizes, supported_aspect_ratios, supported_durations, supported_formats, default_size, default_format, default_aspect_ratio, default_duration, features, enabled, sort_order)
-VALUES
-('volcengine', 'doubao-seedream-5-0-pro-260628', 'image', 'Seedream 5.0 Pro', NULL,
- '[{"id":"1k","label":"1K","api_value":"1K"},{"id":"2k","label":"2K","api_value":"2K"},{"id":"4k","label":"4K","api_value":"4K"}]',
- '["1:1","4:3","3:4","16:9","9:16","3:2","2:3","21:9"]', NULL, '["png","jpeg"]', '2k', 'png', '1:1', NULL,
- '{"reference_image":true,"watermark":true,"quantity_max":1,"sequential_image_generation":false,"stream":false,"tools":false}', 1, 1),
-('volcengine', 'doubao-seedream-5-0-260128', 'image', 'Seedream 5.0 Lite', NULL,
- '[{"id":"2k","label":"2K","api_value":"2K"},{"id":"3k","label":"3K","api_value":"3K"},{"id":"4k","label":"4K","api_value":"4K"}]',
- '["1:1","4:3","3:4","16:9","9:16","3:2","2:3","21:9"]', NULL, '["png","jpeg"]', '2k', 'jpeg', '1:1', NULL,
- '{"reference_image":true,"watermark":true,"quantity_max":15,"sequential_image_generation":true,"stream":true,"tools":true}', 1, 2),
-('volcengine', 'doubao-seedream-4-5-251128', 'image', 'Seedream 4.5', NULL,
- '[{"id":"2k","label":"2K","api_value":"2K"},{"id":"4k","label":"4K","api_value":"4K"}]',
- '["1:1","4:3","3:4","16:9","9:16","3:2","2:3","21:9"]', NULL, '[]', '2k', NULL, '1:1', NULL,
- '{"reference_image":true,"watermark":true,"quantity_max":15,"sequential_image_generation":true,"stream":true,"tools":false}', 1, 3),
-('volcengine', 'doubao-seedream-4-0-250828', 'image', 'Seedream 4.0', NULL,
- '[{"id":"1k","label":"1K","api_value":"1K"},{"id":"2k","label":"2K","api_value":"2K"},{"id":"4k","label":"4K","api_value":"4K"}]',
- '["1:1","4:3","3:4","16:9","9:16","3:2","2:3","21:9"]', NULL, '[]', '2k', NULL, '1:1', NULL,
- '{"reference_image":true,"watermark":true,"quantity_max":15,"sequential_image_generation":true,"stream":true,"tools":false}', 1, 4),
-('volcengine', 'doubao-seedream-3-0-t2i-250415', 'image', 'Seedream 3.0 T2I (已下线)', NULL,
- '[{"id":"512x512","label":"512 × 512","width":512,"height":512,"api_value":"512x512"},{"id":"1024x1024","label":"1024 × 1024","width":1024,"height":1024,"api_value":"1024x1024"},{"id":"2048x2048","label":"2048 × 2048","width":2048,"height":2048,"api_value":"2048x2048"}]',
- '["1:1","4:3","3:4","16:9","9:16","3:2","2:3","21:9"]', NULL, '[]', '1024x1024', NULL, '1:1', NULL,
- '{"reference_image":false,"watermark":true,"quantity_max":1,"sequential_image_generation":false,"stream":false,"tools":false}', 0, 99),
-('volcengine', 'doubao-seedance-2-0-260128', 'video', 'Seedance 2.0', NULL,
- '[{"id":"480p","label":"480P","api_value":"480p"},{"id":"720p","label":"720P","api_value":"720p"},{"id":"1080p","label":"1080P","api_value":"1080p"}]',
- '["16:9","9:16","1:1"]', '{"min":4,"max":15,"step":1}', '[]', '720p', NULL, '16:9', 5,
- '{"first_frame":true,"first_last_frame":true,"reference_image":true,"watermark":false,"audio":true,"tools":false}', 1, 1),
-('volcengine', 'doubao-seedance-2-0-fast-260128', 'video', 'Seedance 2.0 Fast', NULL,
- '[{"id":"480p","label":"480P","api_value":"480p"},{"id":"720p","label":"720P","api_value":"720p"}]',
- '["16:9","9:16","1:1"]', '{"min":4,"max":15,"step":1}', '[]', '720p', NULL, '16:9', 5,
- '{"first_frame":true,"first_last_frame":true,"reference_image":true,"watermark":false,"audio":true,"tools":false}', 1, 2),
-('volcengine', 'doubao-seedance-2-0-mini-260615', 'video', 'Seedance 2.0 Mini', NULL,
- '[{"id":"480p","label":"480P","api_value":"480p"},{"id":"720p","label":"720P","api_value":"720p"}]',
- '["16:9","9:16","1:1"]', '{"min":4,"max":15,"step":1}', '[]', '720p', NULL, '16:9', 5,
- '{"first_frame":true,"first_last_frame":true,"reference_image":true,"watermark":false,"audio":true,"tools":false}', 1, 3);

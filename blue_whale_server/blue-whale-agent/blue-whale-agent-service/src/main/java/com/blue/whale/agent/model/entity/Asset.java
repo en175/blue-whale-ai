@@ -30,16 +30,18 @@ public class Asset extends BaseEntity {
     public static final String STATUS_NORMAL = "normal";
     public static final String STATUS_FAILED = "failed";
 
-    private Long userId;
-
-    /** 所属项目 ID */
     private Long projectId;
+    private Long userId;
+    private Long generationJobId;
 
     /** image / video / audio */
     private String type;
 
     /** 存储 key（本地路径或对象存储 key） */
     private String storageKey;
+
+    /** 已接纳媒体内容的 SHA-256，不可变对象身份的一部分。 */
+    private String contentSha256;
 
     /** 可访问 url */
     private String url;
@@ -55,4 +57,7 @@ public class Asset extends BaseEntity {
     /** generated / uploaded */
     private String source;
     private String status;
+
+    /** 跨项目复制来源：源 Asset ID（跨项目复制时写入，其余为 null） */
+    private Long sourceAssetId;
 }

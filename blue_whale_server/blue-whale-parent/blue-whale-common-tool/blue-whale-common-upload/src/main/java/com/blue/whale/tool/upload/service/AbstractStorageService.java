@@ -1,85 +1,109 @@
 package com.blue.whale.tool.upload.service;
 
+
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
 import com.blue.whale.global.utils.LocalDateTimeUtils;
-import com.blue.whale.tool.upload.model.ObjectHead;
 import com.blue.whale.tool.upload.model.OssConfig;
 
 import java.io.InputStream;
 import java.time.LocalDateTime;
 
 /**
- * 云存储抽象基类。
- *
- * <p>提供路径生成 + 上传/校验契约。具体实现见 {@link VolcengineStorageService}。</p>
+ * AbstractCloudService
  *
  * @author: Jiyeon2__
  * date: 2025/6/30
+ * description: 云存储
  */
 public abstract class AbstractStorageService {
-    /** 云存储配置 */
-    protected OssConfig config;
+    /**
+     * 云存储配置信息
+     */
+    OssConfig config;
 
     /**
-     * 生成上传路径（UUID 文件名）。
+     * 文件路径
      *
-     * @param prefix 路径前缀
-     * @param suffix 文件后缀（不含点）
-     * @return 上传路径，格式 {@code prefix/yyyyMMdd/uuid.suffix}
+     * @param prefix 前缀
+     * @param suffix 后缀
+     * @return 返回上传路径
      */
     public String getPath(String prefix, String suffix) {
+        //生成uuid
         String uuid = IdUtil.fastSimpleUUID();
-        String path = LocalDateTimeUtils.parseDateStr(LocalDateTime.now(),
-                LocalDateTimeUtils.DEFAULT_DATE_INT_PATTERN) + "/" + uuid;
+        //文件路径
+        String path = LocalDateTimeUtils.parseDateStr(LocalDateTime.now(), LocalDateTimeUtils.DEFAULT_DATE_INT_PATTERN) + "/" + uuid;
+
         if (StrUtil.isNotBlank(prefix)) {
             path = prefix + "/" + path;
         }
+
+        return path + "." + suffix;
+    }
+
+    public String getFilenamePath(String prefix, String filename, String suffix) {
+        //文件路径
+        String path = LocalDateTimeUtils.parseDateStr(LocalDateTime.now(), LocalDateTimeUtils.DEFAULT_DATE_INT_PATTERN) + "/" + filename;
+
+        if (StrUtil.isNotBlank(prefix)) {
+            path = prefix + "/" + path;
+        }
+
         return path + "." + suffix;
     }
 
     /**
-     * 生成上传路径（指定文件名）。
+     * 文件上传
      *
-     * @param prefix   路径前缀
-     * @param filename 文件名（调用方保证不含 {@code ../}）
-     * @param suffix   文件后缀（不含点）
-     * @return 上传路径，格式 {@code prefix/yyyyMMdd/filename.suffix}
+     * @param data 文件字节数组
+     * @param path 文件路径，包含文件名
+     * @return 返回http地址
      */
-    public String getFilenamePath(String prefix, String filename, String suffix) {
-        String path = LocalDateTimeUtils.parseDateStr(LocalDateTime.now(),
-                LocalDateTimeUtils.DEFAULT_DATE_INT_PATTERN) + "/" + filename;
-        if (StrUtil.isNotBlank(prefix)) {
-            path = prefix + "/" + path;
-        }
-        return path + "." + suffix;
-    }
-
-    /** 上传字节数组 */
     public abstract String upload(byte[] data, String path);
 
-    /** 上传字节数组（自动生成路径） */
+    /**
+     * 文件上传
+     *
+     * @param data   文件字节数组
+     * @param suffix 后缀
+     * @return 返回http地址
+     */
     public abstract String uploadSuffix(byte[] data, String suffix);
 
-    /** 上传字节数组（指定文件名） */
+    /**
+     * 文件上传
+     *
+     * @param data   文件字节数组
+     * @param suffix 后缀
+     * @return 返回http地址
+     */
     public abstract String uploadFilenameSuffix(byte[] data, String filename, String suffix);
 
-    /** 上传输入流 */
+    /**
+     * 文件上传
+     *
+     * @param inputStream 字节流
+     * @param path        文件路径，包含文件名
+     * @return 返回http地址
+     */
     public abstract String upload(InputStream inputStream, String path);
 
-    /** 上传输入流（自动生成路径） */
+    /**
+     * 文件上传
+     *
+     * @param inputStream 字节流
+     * @param suffix      后缀
+     * @return 返回http地址
+     */
     public abstract String uploadSuffix(InputStream inputStream, String suffix);
 
-    /** 上传输入流（指定文件名） */
-    public abstract String uploadFilenameSuffix(InputStream inputStream, String filename, String suffix);
-
     /**
-     * HEAD 对象元信息（commit 校验用：存在 + size + content-type）。
+     * 文件上传
      *
-     * <p>前端直传完成后后端确认对象真实存在且符合预期，防伪造 commit。</p>
-     *
-     * @param key 对象 key
-     * @return 元信息（不存在时 {@code exists=false}）
+     * @param inputStream 字节流
+     * @param suffix      后缀
+     * @return 返回http地址
      */
-    public abstract ObjectHead headObject(String key);
+    public abstract String uploadFilenameSuffix(InputStream inputStream, String filename, String suffix);
 }

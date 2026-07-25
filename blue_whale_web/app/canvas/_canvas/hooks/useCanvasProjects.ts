@@ -1,47 +1,50 @@
 /**
- * useCanvasProjects —— 画布多项目持久化数据流 hook
+ * useCanvasProjects —— 画布多项目持久化数据流 hook（任务 4）
  *
  * 把 projectReducer（本地真相源）与后端 project/canvas API 缝合：
- * - 后端可用（listProjects 成功）：覆盖初始空列表 → 切换/首次 loadCanvas 恢复 →
+ * - 后端可用（listProjects 成功）：覆盖 mock → 切换/首次 Snapshot + SSE 恢复 →
  *   canvas 变化 800ms debounce 整体 PUT → beforeunload flush。
- * - 后端不可达 / 未登录（无 token）：projects 停空，activeProject 为 undefined，
- *   页层渲染空态（加载失败重试 / 引导新建），不露任何写死的假数据。
+ * - 后端不可达 / 未登录（无 token）：保留 PROJECTS mock 作离线 fallback，不连后端。
  *
- * 两级判断：
- * - online（有 access token）：决定是否尝试 listProjects。
- * - backendReady（listProjects 成功）：决定 loadCanvas/saveCanvas/CRUD 是否连后端。
- *   有 token 但后端不可达时 online=true、backendReady=false → 空态 + loadError，可重试。
+ * 两级降级判断：
+ * - online（有 access token）：决定是否**尝试** listProjects。
+ * - backendReady（listProjects 成功）：决定 Snapshot/SSE/saveCanvas/CRUD 是否连后端。
+ *   有 token 但后端不可达时 online=true、backendReady=false → 仍走 mock，不刷报错
+ *   （避免 mock id "1" 等纯数字 id 误判为后端 id 而触发恢复请求失败）。
  *
  * id 适配：后端 ProjectDto.id:number ↔ 前端 Project.id:string。API 边界 String()/Number() 转换，
- * reducer/types 不动。backendReady=true 时 projects 已是后端真 id。
+ * reducer/types 不动。backendReady=true 时 projects 已是后端真 id；false 时是 mock id（不连后端）。
  *
- * 保存守卫：loadCanvas 恢复的 canvas 用 lastSavedRef 快照同步，使保存 effect 判定无变化而跳过；
+ * 保存守卫：Snapshot/SSE 恢复的 canvas 用 lastSavedRef 快照同步，使保存 effect 判定无变化而跳过；
  * loadingProjectRef 标记加载中的 project，避免慢网络下空 canvas 回存覆盖后端。
  */
 "use client";
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { loadAccessToken } from "@/components/auth/authStorage";
-import { buildAuthHeaders } from "@/lib/api-client";
 import { projectReducer, initialProjectState } from "../projectReducer";
+import { PROJECTS } from "../constants";
 import type { NodeItem, Project, Viewport } from "../types";
-import { filterPersistableNodes } from "../persist";
+import {
+  projectSnapshotToCanvasNodes,
+  projectSnapshotToChatMessages,
+} from "../conversationRecovery";
 import * as canvasApi from "@/lib/canvas";
+import { acceptConversationMessage } from "@/lib/conversation";
+import { newCommandIdentity } from "@/lib/command-identity";
+import {
+  deriveAnswerableClarification,
+  projectRecoveryTransport,
+  runProjectRecovery,
+  type ProjectRecoveryState,
+  type ProjectSnapshot,
+} from "@/lib/project-recovery";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 const EMPTY_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 
-/** 撞名时追加 (2)(3)… 递增至不撞现有名集合；不撞则原样返回。新建/重命名共用。 */
-function dedupeName(name: string, existing: string[]): string {
-  const taken = new Set(existing);
-  if (!taken.has(name)) return name;
-  let suffix = 2;
-  while (taken.has(`${name} (${suffix})`)) suffix++;
-  return `${name} (${suffix})`;
-}
-
-/** 后端 ProjectDto → 前端 Project（id number→string；canvas 未加载先给空，loadCanvas 再填）。 */
+/** 后端 ProjectDto → 前端 Project（id number→string；canvas 先置空，再由恢复闭环填充）。 */
 function dtoToProject(dto: canvasApi.ProjectDto): Project {
   return {
     id: String(dto.id),
@@ -52,33 +55,42 @@ function dtoToProject(dto: canvasApi.ProjectDto): Project {
   };
 }
 
-export function useCanvasProjects() {
-  const [state, dispatch] = useReducer(projectReducer, [], initialProjectState);
+export function useCanvasProjects(preferredProjectId?: string | null) {
+  const [state, dispatch] = useReducer(
+    projectReducer,
+    PROJECTS,
+    initialProjectState,
+  );
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  // listProjects 失败或未登录无 token 时为 true，页层据此渲染「加载失败重试」空态
-  const [loadError, setLoadError] = useState(false);
-  // retry 触发器：+1 让 listProjects effect 重跑（effect 依赖它）
-  const [retryKey, setRetryKey] = useState(0);
+  const [generationJobsByProject, setGenerationJobsByProject] = useState<
+    Record<string, Array<Record<string, unknown>>>
+  >({});
+  // 当前 Run 激活的 Creative Skill 标签数据源：Snapshot/SSE 恢复的 agent_runs（含 activated_creative_skill_versions）
+  const [agentRunsByProject, setAgentRunsByProject] = useState<
+    Record<string, Array<Record<string, unknown>>>
+  >({});
 
-  // 进画布时定一次登录态：有 token 才尝试连后端，否则空态。
-  const [online] = useState(() => typeof window !== "undefined" && !!loadAccessToken());
-  // 后端真正可用（listProjects 成功）才 true；有 token 但后端不可达时仍 false → 空态
+  // 进画布时定一次登录态：有 token 才尝试连后端，否则 mock 离线 fallback。
+  const [online] = useState(
+    () => typeof window !== "undefined" && !!loadAccessToken(),
+  );
+  // 后端真正可用（listProjects 成功）才 true；有 token 但后端不可达时仍 false → 走 mock
   const [backendReady, setBackendReady] = useState(false);
   // offline（无 token）不需要拉取，booting 直接 false；online 等列表到位才 false
   const [booting, setBooting] = useState(online);
-  // 最近 loadCanvas 完成的 projectId（成功/失败都 set）：供页层刷新恢复在 loadCanvas
-  // 之后触发，避免 set-canvas 覆盖 recover 重建的 loading 占位（design D12）。
-  const [loadedCanvasId, setLoadedCanvasId] = useState<string | null>(null);
+  const tokenRef = useRef<string | null>(null);
 
-  // 空列表时为 undefined（页层据此渲染空态，不读 canvas/messages）
   const activeProject =
-    state.projects.find((p) => p.id === state.activeProjectId) ?? state.projects[0];
+    state.projects.find((p) => p.id === state.activeProjectId) ??
+    state.projects[0];
 
-  // 已加载 canvas 的 projectId 集合（避免重复 loadCanvas）
+  // 已建立恢复循环的 projectId 集合（避免重复连接）
   const loadedRef = useRef<Set<string>>(new Set());
-  // 正在 loadCanvas 的 projectId：加载期间禁止保存 effect 回存空 canvas 覆盖后端
+  // 每个 project 最新 Snapshot：Composer 提交时派生活动创作澄清请求用（参照 generationJobsByProject 模式）
+  const snapshotsRef = useRef<Record<string, ProjectSnapshot>>({});
+  // 正在恢复 Snapshot 的 projectId：加载期间禁止保存 effect 回存空 canvas 覆盖后端
   const loadingProjectRef = useRef<string | null>(null);
-  // 上次落库的 canvas 快照（JSON）：loadCanvas 恢复后同步，使保存 effect 判定「无变化」跳过回存
+  // 上次落库的 canvas 快照（JSON）：恢复后同步，使保存 effect 判定「无变化」跳过回存
   const lastSavedRef = useRef<string>("");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 最新 state 的 ref（beforeunload flush 读最新值，不依赖闭包过期的 state）。
@@ -88,8 +100,9 @@ export function useCanvasProjects() {
     stateRef.current = state;
   });
 
-  // 初始 token + 首次拉列表（online 才尝试；失败设 loadError，不阻塞画布显示空态）
+  // 初始 token + 首次拉列表（online 才尝试；失败降级 mock，不阻塞画布）
   useEffect(() => {
+    tokenRef.current = loadAccessToken();
     if (!online) {
       return;
     }
@@ -106,13 +119,10 @@ export function useCanvasProjects() {
         } else {
           dispatch({ type: "replace-all", projects: list.map(dtoToProject) });
         }
-        setLoadError(false);
-        setBackendReady(true); // 后端可用，后续 loadCanvas/saveCanvas/CRUD 连后端
+        setBackendReady(true); // 后端可用，后续 Snapshot/SSE/saveCanvas/CRUD 连后端
       } catch (e) {
-        if (cancelled) return;
-        // 后端不可达（未启动/token 过期/网关异常）：空态 + loadError，可重试，不露假数据
-        console.warn("[canvas] listProjects failed, showing empty state:", e);
-        setLoadError(true);
+        // 后端不可达（未启动/token 过期/网关异常）：降级 mock，不阻塞画布使用
+        console.warn("[canvas] backend unreachable, using mock:", e);
       } finally {
         if (!cancelled) setBooting(false);
       }
@@ -120,55 +130,91 @@ export function useCanvasProjects() {
     return () => {
       cancelled = true;
     };
-  }, [online, retryKey]);
+  }, [online]);
 
-  /** 重试：重置 booting + 抖动 retryKey 触发 listProjects effect 重跑。 */
-  const retry = useCallback(() => {
-    setLoadError(false);
-    setBooting(true);
-    setRetryKey((k) => k + 1);
-  }, []);
-
-  // active 变化 → loadCanvas 恢复（仅 backendReady + 有 activeProject + 未加载过）
+  // ?project=<id> 初始定位（/generate「打开项目」闭环）：列表加载完成后应用一次，
+  // 把 active 切到 URL 指定的项目；id 不存在于列表时忽略，回退默认 active（首项）。
+  // 只应用一次：此后用户经 ProjectMenu 手动切换不被弹回。
+  const preferredAppliedRef = useRef(false);
   useEffect(() => {
-    if (!backendReady || !activeProject) return; // 空态/后端不可达时不 loadCanvas
+    if (preferredAppliedRef.current || booting) return;
+    preferredAppliedRef.current = true;
+    if (
+      preferredProjectId &&
+      preferredProjectId !== state.activeProjectId &&
+      state.projects.some((p) => p.id === preferredProjectId)
+    ) {
+      dispatch({ type: "switch", projectId: preferredProjectId });
+    }
+  }, [booting, preferredProjectId, state.projects, state.activeProjectId]);
+
+  // active 变化 → Snapshot + SSE 恢复（仅 backendReady + 未建立恢复循环）
+  useEffect(() => {
+    if (!backendReady) return; // 后端不可达时走 mock，不建立 SSE
     const pid = activeProject.id;
     if (!pid || loadedRef.current.has(pid)) return;
-    loadedRef.current.add(pid);
-    let cancelled = false;
-    loadingProjectRef.current = pid; // 加载期间禁止保存 effect 回存
-    canvasApi
-      .loadCanvas(Number(pid))
-      .then((dto) => {
-        if (cancelled) return;
-        const nodes = dto.nodes ? (JSON.parse(dto.nodes) as NodeItem[]) : [];
-        const viewport = dto.viewport ? (JSON.parse(dto.viewport) as Viewport) : EMPTY_VIEWPORT;
-        dispatch({ type: "set-canvas", projectId: pid, nodes, viewport });
-        // 同步快照：加载的数据视为「已存」，避免触发回存覆盖
-        lastSavedRef.current = JSON.stringify({ nodes, viewport });
-        loadingProjectRef.current = null;
-        setLoadedCanvasId(pid); // 通知页层：loadCanvas 完成，可触发刷新恢复
-      })
-      .catch((e) => {
-        console.error("[canvas] loadCanvas failed:", e);
-        lastSavedRef.current = JSON.stringify({ nodes: [], viewport: EMPTY_VIEWPORT });
-        loadingProjectRef.current = null;
-        setLoadedCanvasId(pid); // 失败也算加载完成，让恢复可重建占位
+    const loadedProjects = loadedRef.current;
+    loadedProjects.add(pid);
+    const controller = new AbortController();
+    loadingProjectRef.current = pid;
+    const applyRecoveredState = (recovery: ProjectRecoveryState) => {
+      if (controller.signal.aborted || !recovery.snapshot) return;
+      if (recovery.deleted) {
+        dispatch({ type: "delete", projectId: pid });
+        controller.abort();
+        return;
+      }
+      const snapshot = recovery.snapshot;
+      snapshotsRef.current = { ...snapshotsRef.current, [pid]: snapshot };
+      setGenerationJobsByProject((current) => ({
+        ...current,
+        [pid]: snapshot.generation_jobs,
+      }));
+      setAgentRunsByProject((current) => ({
+        ...current,
+        [pid]: snapshot.agent_runs,
+      }));
+      const persistedNodes = snapshot.canvas.nodes
+        ? (JSON.parse(snapshot.canvas.nodes) as NodeItem[])
+        : [];
+      const nodes = projectSnapshotToCanvasNodes(snapshot, persistedNodes);
+      const viewport = snapshot.canvas.viewport
+        ? (JSON.parse(snapshot.canvas.viewport) as Viewport)
+        : EMPTY_VIEWPORT;
+      const messages = projectSnapshotToChatMessages(snapshot);
+      dispatch({
+        type: "recover-project",
+        projectId: pid,
+        name: snapshot.project.name,
+        thumb: snapshot.project.thumb,
+        nodes,
+        viewport,
+        messages,
       });
+      lastSavedRef.current = JSON.stringify({ nodes, viewport });
+      loadingProjectRef.current = null;
+    };
+    void runProjectRecovery(
+      Number(pid),
+      projectRecoveryTransport,
+      applyRecoveredState,
+      controller.signal,
+    );
     return () => {
-      cancelled = true;
+      controller.abort();
+      loadedProjects.delete(pid);
       if (loadingProjectRef.current === pid) loadingProjectRef.current = null;
     };
-  }, [activeProject?.id, backendReady]);
+  }, [activeProject.id, backendReady]);
 
   // canvas 变化 → 800ms debounce 整体 PUT（仅 backendReady + 已加载 + 快照有变化）
   useEffect(() => {
-    if (!backendReady || booting || !activeProject) return;
+    if (!backendReady || booting) return;
     const pid = activeProject.id;
     if (!pid || !loadedRef.current.has(pid)) return;
     if (loadingProjectRef.current === pid) return; // 加载中：避免回存空 canvas 覆盖后端
     const snap = JSON.stringify({
-      nodes: filterPersistableNodes(activeProject.canvas.nodes),
+      nodes: activeProject.canvas.nodes,
       viewport: activeProject.canvas.viewport,
     });
     if (snap === lastSavedRef.current) return; // 无变化（含刚加载的数据）
@@ -178,15 +224,14 @@ export function useCanvasProjects() {
     saveTimerRef.current = setTimeout(async () => {
       const p = stateRef.current.projects.find((x) => x.id === pid);
       if (!p) return;
-      const persistNodes = filterPersistableNodes(p.canvas.nodes);
       try {
         await canvasApi.saveCanvas(
           Number(pid),
           JSON.stringify(p.canvas.viewport),
-          JSON.stringify(persistNodes)
+          JSON.stringify(p.canvas.nodes),
         );
         lastSavedRef.current = JSON.stringify({
-          nodes: persistNodes,
+          nodes: p.canvas.nodes,
           viewport: p.canvas.viewport,
         });
         setSaveStatus("saved");
@@ -198,7 +243,13 @@ export function useCanvasProjects() {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [activeProject?.canvas?.nodes, activeProject?.canvas?.viewport, activeProject?.id, backendReady, booting]);
+  }, [
+    activeProject.canvas.nodes,
+    activeProject.canvas.viewport,
+    activeProject.id,
+    backendReady,
+    booting,
+  ]);
 
   // beforeunload：flush 未保存改动（fetch keepalive，不阻塞卸载）
   useEffect(() => {
@@ -207,21 +258,23 @@ export function useCanvasProjects() {
       const s = stateRef.current;
       const p = s.projects.find((x) => x.id === s.activeProjectId);
       if (!p) return;
-      const persistNodes = filterPersistableNodes(p.canvas.nodes);
-      const snap = JSON.stringify({ nodes: persistNodes, viewport: p.canvas.viewport });
+      const snap = JSON.stringify({
+        nodes: p.canvas.nodes,
+        viewport: p.canvas.viewport,
+      });
       if (snap === lastSavedRef.current) return; // 已存，不重复
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      const token = loadAccessToken();
-      fetch(`/api/agent/canvases/${p.id}`, {
+      const token = tokenRef.current;
+      fetch(`/api/canvases/${p.id}`, {
         method: "PUT",
         keepalive: true,
         headers: {
           "Content-Type": "application/json",
-          ...buildAuthHeaders(token),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           viewport: JSON.stringify(p.canvas.viewport),
-          nodes: JSON.stringify(persistNodes),
+          nodes: JSON.stringify(p.canvas.nodes),
         }),
       }).catch(() => {});
     };
@@ -231,64 +284,95 @@ export function useCanvasProjects() {
 
   // ---- CRUD actions ----
 
-  /** 新建项目：落库拿真 id 再 dispatch。后端不可达时报错（saveStatus=error），不造假项目。 */
+  /** 新建项目：backendReady 先落库拿真 id 再 dispatch；否则用本地 idGen（mock）。 */
   const createProjectAction = useCallback(async () => {
-    // 命名 = 当前时间「YYYY-MM-DD HH:mm」（无「项目」前缀）；撞名 dedupeName 加 (2)(3)
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const base = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-    const name = dedupeName(base, stateRef.current.projects.map((p) => p.name));
+    const name = `项目 ${Date.now().toString().slice(-4)}`;
+    if (!backendReady) {
+      dispatch({ type: "create", name, idGen: () => `p-${Date.now()}` });
+      return;
+    }
     try {
       const dto = await canvasApi.createProject(name);
       const pid = String(dto.id);
       dispatch({ type: "create", name: dto.name, idGen: () => pid });
       loadedRef.current.add(pid); // 新项目空 canvas，标记已加载
-      lastSavedRef.current = JSON.stringify({ nodes: [], viewport: EMPTY_VIEWPORT });
+      lastSavedRef.current = JSON.stringify({
+        nodes: [],
+        viewport: EMPTY_VIEWPORT,
+      });
     } catch (e) {
       console.error("[canvas] createProject failed:", e);
-      setSaveStatus("error");
     }
-  }, []);
-
-  /**
-   * 重命名项目：trim→空名/同名回退→重名 dedupeName 加序号→调 renameProject→dispatch。
-   * 返回是否成功落库（供组件决定退出编辑态；失败/空名/同名均 false，state 不变显原名）。
-   */
-  const renameProjectAction = useCallback(
-    async (id: string, rawName: string): Promise<boolean> => {
-      const trimmed = rawName.trim();
-      const current = stateRef.current.projects.find((p) => p.id === id);
-      if (!current) return false;
-      if (!trimmed || trimmed === current.name) return false;
-      const existing = stateRef.current.projects.filter((p) => p.id !== id).map((p) => p.name);
-      const name = dedupeName(trimmed, existing);
-      try {
-        await canvasApi.renameProject(Number(id), name);
-        dispatch({ type: "rename", projectId: id, name });
-        return true;
-      } catch (e) {
-        console.error("[canvas] renameProject failed:", e);
-        setSaveStatus("error");
-        return false;
-      }
-    },
-    []
-  );
+  }, [backendReady]);
 
   const switchProject = useCallback((id: string) => {
     dispatch({ type: "switch", projectId: id });
   }, []);
 
-  /** 删除项目：后端删 + 本地乐观删（失败仅记日志，不回滚本地删）。 */
-  const deleteProjectAction = useCallback(async (id: string) => {
-    loadedRef.current.delete(id);
-    try {
-      await canvasApi.deleteProject(Number(id));
-    } catch (e) {
-      console.error("[canvas] deleteProject failed:", e);
-    }
-    dispatch({ type: "delete", projectId: id });
-  }, []);
+  /** 删除项目：永久删除不可恢复（IK25EG），先二次确认；确认后 backendReady 先删库再 dispatch；否则直接 dispatch（mock）。 */
+  const deleteProjectAction = useCallback(
+    async (id: string) => {
+      const target = stateRef.current.projects.find((p) => p.id === id);
+      if (
+        !window.confirm(
+          `将永久删除项目「${target?.name ?? id}」及其画布、对话、生成记录和作品，不可恢复。确定删除？`,
+        )
+      ) {
+        return;
+      }
+      loadedRef.current.delete(id);
+      if (backendReady) {
+        try {
+          await canvasApi.deleteProject(Number(id));
+        } catch (e) {
+          console.error("[canvas] deleteProject failed:", e);
+        }
+      }
+      dispatch({ type: "delete", projectId: id });
+      setGenerationJobsByProject((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      setAgentRunsByProject((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      snapshotsRef.current = Object.fromEntries(
+        Object.entries(snapshotsRef.current).filter(([pid]) => pid !== id),
+      );
+    },
+    [backendReady],
+  );
+
+  const submitConversationMessageAction = useCallback(
+    async (
+      content: string,
+      referencedAssetIds?: number[],
+      forcedCreativeSkillId?: string,
+    ) => {
+      if (!backendReady) return;
+      // 当前创作流程等待澄清时，下一条非空自然语言消息自动引用该请求；
+      // 无活动请求时保持普通消息行为（不传绑定，由后端按普通消息处理）。
+      const answerable = deriveAnswerableClarification(
+        snapshotsRef.current[activeProject.id] ?? null,
+      );
+      // forced 与 reply_to 互斥（契约 §4.1/§8）：有可回答澄清时不传 forced。
+      // 单一真相源在此屏蔽；组件层 answerableActive 仅控制乐观展示与 pending 清理。
+      const effectiveForced = answerable ? undefined : forcedCreativeSkillId;
+      await acceptConversationMessage(
+        Number(activeProject.id),
+        content,
+        newCommandIdentity(),
+        newCommandIdentity(),
+        answerable?.input_request_id,
+        referencedAssetIds,
+        effectiveForced,
+      );
+    },
+    [activeProject.id, backendReady],
+  );
 
   return {
     state,
@@ -297,12 +381,11 @@ export function useCanvasProjects() {
     saveStatus,
     booting,
     backendReady,
-    loadedCanvasId,
-    loadError,
-    retry,
+    generationJobs: generationJobsByProject[activeProject.id] ?? [],
+    agentRuns: agentRunsByProject[activeProject.id] ?? [],
     createProjectAction,
-    renameProjectAction,
     switchProject,
     deleteProjectAction,
+    submitConversationMessageAction,
   };
 }

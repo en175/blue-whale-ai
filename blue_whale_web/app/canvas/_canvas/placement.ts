@@ -51,7 +51,10 @@ function overlapsAny(rect: Rect, existing: Rect[]): boolean {
  * 行优先网格搜索：起点格对齐视口中心（节点中心≈anchor），同行向右，行满换下行。
  * 返回第一个不与 existing 相交的格左上角坐标。网格步长按候选节点宽/高分别计算。
  */
-export function findPlacement(opts: FindPlacementOptions): { x: number; y: number } {
+export function findPlacement(opts: FindPlacementOptions): {
+  x: number;
+  y: number;
+} {
   const { existing, anchor } = opts;
   const nw = opts.nodeWidth ?? DEFAULT_NODE_WIDTH;
   const nh = opts.nodeHeight ?? DEFAULT_NODE_HEIGHT;

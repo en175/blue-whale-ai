@@ -13,11 +13,15 @@ import type { NextConfig } from "next";
  *
  * output: 'standalone' 供 Dockerfile 产出最小运行包（.next/standalone/server.js），不影响 dev。
  */
-const GATEWAY = process.env.GATEWAY_URL || "http://115.190.244.91:8686";
+const GATEWAY = process.env.GATEWAY_URL || "http://localhost:8686";
 
 const nextConfig: NextConfig = {
-  reactStrictMode: false,
   output: "standalone",
+  // SSE 必须实时流式到达：Next 默认对 rewrite 代理的响应按浏览器 Accept-Encoding 做 gzip，
+  // 压缩器会缓冲 text/event-stream 的小事件块，导致 Project SSE（/api/projects/:id/events）
+  // 在浏览器端永远收不到增量事件（curl 不带 Accept-Encoding 所以掩盖了问题）。
+  // 本地 MVP 直接关压缩；未来有 ingress/CDN 时在边缘层重新启用。
+  compress: false,
   images: {
     remotePatterns: [
       {

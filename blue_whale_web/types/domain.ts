@@ -26,7 +26,7 @@
  * Card 生命周期状态机。
  * 状态转移见 `_canvas/cardStatus.ts` 的 `nextRetryStatus` 函数。
  */
-export type CardStatus = "failed" | "generating" | "normal";
+export type CardStatus = "failed" | "generating" | "normal" | "cancelled";
 
 // ---------- GenerationJob 状态枚举（CONTEXT.md L74）----------
 
@@ -38,7 +38,10 @@ export type CardStatus = "failed" | "generating" | "normal";
 export type GenerationJobStatus =
   | "queued"
   | "processing"
+  | "cancel_requested"
+  | "cancelled"
   | "succeeded"
+  | "partially_succeeded"
   | "failed";
 
 // ---------- Asset（CONTEXT.md L64-72）----------
@@ -80,7 +83,7 @@ export type GenerationJob = {
 
 // ---------- NodeItem（CONTEXT.md L22-24）----------
 
-export type NodeType = "image" | "text";
+export type NodeType = "image" | "video" | "text";
 
 /**
  * 画布上的素材单元（图片或文本节点）。
@@ -127,7 +130,7 @@ export type ChatMessage =
       text: string;
       meta: string;
       collapsed?: boolean;
-      /** Card 视图状态；与 GenerationJob 状态的视图映射见 `lib/jobs.ts` */
+      /** Card 视图状态；与 GenerationJob 状态的视图映射见 `app/canvas/_canvas/conversationRecovery.ts` 与 `app/generate/inboxMessages.ts` 的 outputStatus */
       status?: CardStatus;
     };
 

@@ -17,23 +17,6 @@
 | 前端 UI 修改（`blue_whale_web/`）     | `.claude/rules/frontend.md`（路径作用域，改前端文件时自动加载，无需手动查） |
 | PR 模板 / Hook 兜底清单 / 低频细节        | `docs/agents/commit-and-review.md`                  |
 
-## Agent skills
-
-> mattpocock/skills 工程技能的配置锚点。技能运行时读 `docs/agents/` 下三份配置；与上方「路由表」的 `.claude/rules/` 是两套——rules 管 git 工作流硬规则，`docs/agents/` 管 matt 技能运行时配置。
-
-### Issue tracker
-
-Issues / PRD 存 Gitee 仓库 Issues，无 `gh`/`glab` CLI，走 Gitee MCP（企业版优先，普通版回退）。见 `docs/agents/issue-tracker.md`。
-
-### Triage labels
-
-五规范角色（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`）直映 Gitee 同名标签。见 `docs/agents/triage-labels.md`。
-
-### Domain docs
-
-Single-context：根 `CONTEXT.md` + `docs/adr/`，技能探索前读这俩。见 `docs/agents/domain.md`。
-
-
 ## 最高红线（摘要，细节见 rules 文件）
 
 1. **禁直推 master** — 全走分支 → PR → merge。`hotfix/*` 无特权。
@@ -43,6 +26,7 @@ Single-context：根 `CONTEXT.md` + `docs/adr/`，技能探索前读这俩。见
 5. **Worktree 基于同步后的本地 master** — 入口要求主 checkout 位于干净 `master`，先 fetch `origin/master`；远程领先则 fast-forward，本地领先则保留，双方分叉则普通 merge。冲突自动 abort 且不创建 Work Tree；成功后从同步后的精确 SHA 创建中文任务分支。
 6. **授权无二次弹框** — 只认当前对话中的人类授权；Agent 自动使用 `--user-authorized` 或一次性凭证（提交入口除外：worktree 工单分支 commit 本地可逆，出现即放行），Hook 只纠偏和硬拦，不返回 ASK。
 7. **文档驱动、Hook 兜底** — Agent 优先依据本文件及路由规则主动调用标准入口；Hook 只在检测到绕过、缺授权、缺模式或危险 Git 操作时阻断，禁止让 Hook 自动同步、选择策略或推进正常状态机。
+8. **同族工单串行、契约先行** — 同一契约章节的基础设施先合入，功能工单再开工；跨进程字段先在契约文档定死后实现。细则见 `.claude/rules/git-workflow.md`。
 
 ## 写入前自检（每次写操作前强制执行）
 
@@ -56,6 +40,8 @@ Single-context：根 `CONTEXT.md` + `docs/adr/`，技能探索前读这俩。见
 任一项不满足，尤其可写任务尚未进入工单分支或目标路径指向 master 主检出区，立即停止写入，先通过唯一入口创建并进入任务 Work Tree。自检不得新增审批弹框；Hook 继续只在违规时兜底，不自动同步、选择策略或推进工作流。
 
 ## Agent skills
+
+> mattpocock/skills 工程技能的配置锚点。技能运行时读 `docs/agents/` 下三份配置；与上方「路由表」的 `.claude/rules/` 是两套——rules 管 git 工作流硬规则，`docs/agents/` 管 matt 技能运行时配置。
 
 ### Issue tracker
 
