@@ -189,6 +189,12 @@ GenerationReviewRetry；超期后删除隔离结果。
 _Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeItem 是结果视图;
 把 Job 与 Asset 混为一谈 —— Job 是过程,Asset 是它的产物。
 
+**GenerationCancellationIntent（生成取消意图）**:
+Product API 对用户“停止 GenerationJob 后续工作”请求形成的幂等事实；它立即阻止新的供应商调用，
+但不证明已 dispatch 的调用已经取消。只有供应商确认取消或平台证明请求从未发出时，Job 才能进入
+`cancelled`；既有真实结果与成本继续按事实收敛。
+_Avoid_: 取消证明；抹除 ProviderGenerationAttempt；丢弃真实成本；以用户请求直接改写供应商事实。
+
 **GenerationReviewRetry（生成结果审核重试）**:
 原 GenerationJob 因审核恢复超时失败后，用户在 24 小时隔离期内创建的关联新 GenerationJob；它复用
 原结果，只重试 ContentReview 与发布，不创建 ProviderGenerationAttempt 或第二次生成费用。
