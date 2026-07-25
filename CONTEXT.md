@@ -201,6 +201,12 @@ ProviderGenerationAttempt 进入 `outcome_unknown` 后，围绕原 Attempt 通�
 期限耗尽后 GenerationJob 按失败收口，禁止以队列重试自动创建新 Attempt。
 _Avoid_: 把超时当作供应商未接纳；换幂等键重发；无证据释放 CostReservation；把核对伪装成重试。
 
+**GenerationJobTerminalSeal（生成任务终态封口）**:
+Product API 接纳 GenerationJob 终态后形成的不可逆封口；它保持用户可见状态简单稳定，并关闭原 Job
+的后续推进资格。迟到的 ProviderGenerationAttempt 与成本证据可以继续核对和结算，但不得重开或
+改写原 Job。
+_Avoid_: 以迟到回调复活 Job；把内部恢复阶段暴露为公开状态；终态后重新取得原 Job 执行权。
+
 **AgentRun（创作运行）**:
 围绕一个创作意图持续推进、可跨多轮对话暂停与恢复的工作单元；它拥有创作推进状态，但不拥有
 InvocationAttempt 或 GenerationJob 的完整生命周期。终态为 `completed`、`superseded`、`failed`、
