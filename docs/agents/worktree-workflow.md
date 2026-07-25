@@ -5,7 +5,7 @@
 ## 原则
 
 - 本地 `master` 是**用户本地集成区**：用户可以在这里开发、commit、整理或集成本地改动。
-- Agent 不得把本地 `master` 当任务写入区；Agent 可写任务必须先创建独立 task worktree 和工单分支。
+- Agent 不得把本地 `master` 当任务写入区；Agent 可写任务必须先创建独立 task worktree 和工单分支（散文文档例外见下条）。
 - **文档白名单例外（[ADR-0025](../adr/0025-doc-on-master-allowlist.md)）**：仅编辑散文规格文档（根 `CONTEXT.md` + `docs/**/*.md`）时，AI 可在本地 master 直改，用 `scripts/commit-spec-on-master.sh -m "<描述>"` 落盘（不 push、不开 PR）；`.claude/`（规则源）、代码、`docs/**/*.json` 契约仍必须走 worktree。
 - 所有 task worktree 固定放在主仓同级目录：`../blue-whale-worktrees/`。
 - 一个 task worktree 只承载一个任务分支，用完即清理。

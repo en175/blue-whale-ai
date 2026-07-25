@@ -33,7 +33,7 @@
 
 **摘要是约束声明，自检是执行机制。** 在调用 Edit、Write 或任何会改变 Git 状态的操作前，必须逐项完成以下检查：
 
-1. **确认当前分支** — 读取当前分支；可写任务必须位于由唯一入口创建的结构化中文工单分支，不得在 `master` / `main` 执行。
+1. **确认当前分支** — 读取当前分支；可写任务必须位于由唯一入口创建的结构化中文工单分支，不得在 `master` / `main` 执行（**散文文档例外见本节末 [ADR-0025](docs/adr/0025-doc-on-master-allowlist.md)**）。
 2. **确认 Agent 任务区** — 确认已从主 checkout 通过唯一入口 `scripts/start-task-worktree.sh --type <类型> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>` 创建并进入独立 task worktree。
 3. **确认目标路径** — 对每个写入目标确认其所属 Work Tree；目标路径不得指向用户本地集成区（master 主检出区）。
 4. **确认 Git 写入区域** — 任何会改变 Git 状态的操作只在正确的 Agent 任务区及其工单分支执行。
