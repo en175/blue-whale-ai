@@ -29,7 +29,8 @@ AssistantDeliveryAttempt
 AssistantMessage
 ```
 
-- `InvocationAttempt` 记录实际 Provider 调用及完整可恢复结果，继续采用 Decision 6 已冻结的
+- `InvocationAttempt` 记录实际 Provider 调用及完整可恢复结果，继续采用
+  [ADR-0050 §6](0050-stateless-agent-advance-and-invocation-boundary.md) 已冻结的
   `prepared → abandoned_before_dispatch`，或 `prepared → in_flight → succeeded | failed_definitive | outcome_unknown`；
   `abandoned_before_dispatch` 只适用于可证明从未 dispatch 的尝试，不简化或掩盖结果不明。
 - `AssistantDeliveryAttempt` 是 Product API 管理的短期运营投影。其 chunk 可实时展示并支持

@@ -55,7 +55,7 @@ Provider 没有执行。任何安全 retry 仍创建新的 InvocationAttempt，�
 - 可选远程读取：RuntimeErrorPolicy 可以忽略、fallback 或降级；
 - 存在可靠替代路径：Product API 按独立预算、deadline 与 fence 决定是否签发新 AttemptPermit。
 
-`outcome_unknown` 的审计历史与 CostReservation 继续遵循 Decision 6 / 9。
+`outcome_unknown` 的审计历史与 CostReservation 继续遵循 [ADR-0050 §6 / §8](0050-stateless-agent-advance-and-invocation-boundary.md)。
 
 ### 4. Lease expiry 与 takeover 分离
 

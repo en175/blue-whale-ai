@@ -64,9 +64,7 @@ _Avoid_: 把 Canvas 当作顶层概念；把 Project 理解为包住全部对象
 **Conversation**（对话）:
 普通 Canvas Project 内唯一的 AgentChatPanel 持久化消息流；按顺序记录用户与 Agent 的对话事实，并关联多个先后发生的 AgentRun。
 GenerationInbox 允许并存多段独立 Conversation（新对话/历史切换），每段消息流独立排序与恢复。
-终态 AgentRun 不阻止 User 在同一 Conversation 发送新消息并创建新 Run；GenerationJob / Asset 状态
-可以更新既有 Card 视图，但不追加旧 Run 的 AssistantMessage 或改写消息历史。
-_Avoid_: 把消息直接挂到 Project；把每个 AgentRun 当作独立对话；为普通 Canvas Project 建立多个 Conversation；把新 Run 当作重开旧终态 Run。
+_Avoid_: 把消息直接挂到 Project；把每个 AgentRun 当作独立对话；为普通 Canvas Project 建立多个 Conversation。
 
 **GenerationInbox**（生成收件箱）:
 每位 User 最多一个活动实例的系统用途 Project（`purpose=generation_inbox`，识别不依赖名称，改名不影响定位）；承载 /generate 页 Agent 对话式创作的 Conversation、AgentRun、GenerationJob 与产出 Asset。
@@ -127,17 +125,13 @@ Java Product API 在 Agent 文字变为 User 可见内容前形成的产品安�
 _Avoid_: 供应商直接向 User 流式输出、把流式安全信号直接当作产品决定、逐片调用外部审核服务。
 
 **AssistantDeliveryAttempt（助手交付尝试）**:
-Product API 为一次 AgentAdvance 中的临时 Assistant 输出建立的短期交付投影；文本与 chunk 在
-RunCommit 前始终是 provisional，只能支持实时展示、断线重连与恢复观察，不属于永久会话、Snapshot、
-后续模型上下文或授权事实。每个尝试独立经历 `streaming → provisional_completed → committed`
-或以 `interrupted` / `discarded` 收口；用户取消使当前尝试进入
-`interrupted(reason=user_cancelled)`，旧 fence 不得续写，多个尝试的文本不得拼接为正式消息。
+一次 AgentAdvance 中尚未被 RunCommit 接纳的临时 Assistant 输出交付身份；其内容只用于实时展示与
+断线重连，不属于 Conversation、Snapshot 或后续模型上下文。详见 [ADR-0045](docs/adr/0045-provisional-assistant-delivery-runcommit-boundary.md)。
 _Avoid_: AssistantMessageStreamAttempt、把 Provider stream 当作交付身份、把 provisional 前缀当作 ConversationMessage、续接旧 Worker 持有的 Provider stream。
 
 **AssistantMessage（正式助手消息）**:
-Product API 在 RunCommit 中从当前 AgentAdvance 唯一胜出的 AssistantDeliveryAttempt 原子创建的
-永久会话事实；只有它可以进入 Conversation 历史、Snapshot 与后续模型上下文。没有完整可见输出的
-RunCommit 可以不创建 AssistantMessage，中断或丢弃的 provisional 内容永不自动提升为正式消息。
+RunCommit 从唯一胜出 AssistantDeliveryAttempt 创建的永久会话事实；只有它可以进入 Conversation、
+Snapshot 与后续模型上下文。详见 [ADR-0045](docs/adr/0045-provisional-assistant-delivery-runcommit-boundary.md)。
 _Avoid_: interrupted AssistantMessage、半成品消息、把 DeliveryAttempt 或 chunk 直接写入永久会话。
 
 **Asset（资产）**:
@@ -191,36 +185,23 @@ GenerationJob 必须归属 Project；由 AgentChatPanel 触发时关联 AgentRun
 文字被拒绝后立即从内存丢弃，不进入 Conversation、产品事件或 Snapshot。
 缺失的输出槽位为 `failed`；`cancelled` 中已有 Asset 的输出为 `normal`，未产生结果的槽位为
 `cancelled`。
-关联 AgentRun 终态后，Job、输出槽位、内容审核、Asset、存储转存与成本仍按自身状态机接纳迟到事实；
-既有 Card / NodeItem 可以继续投影这些状态，但不得反向推进 Run 或追加 AssistantMessage。
 _Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeItem 是结果视图;
 把 Job 与 Asset 混为一谈 —— Job 是过程,Asset 是它的产物。
 
 **AgentRun（创作运行）**:
-围绕一个创作意图持续推进的 Agent 工作单元；活动中的 Run 可跨澄清、修改和自然语言授权等
-多轮对话暂停并恢复，终态不可重开，后续修订或无关新目标创建关联的新 AgentRun。
-规范化终态包括：`completed`（RunCommit 接纳正常收尾）、`superseded`（被同 Conversation 新目标取代）、
-`failed`（RunCommit 接纳符合 RuntimeErrorPolicy 的 AgentRunFailure）和 `cancelled`（Product API
-接纳停止继续推进的取消命令）；checkpoint 损坏隔离的 `recovery_failed` 仍为专用终态。
-`cancelled` 不经过 RunCommit，也不证明 InvocationAttempt、Provider 或关联 GenerationJob 已实际取消。
-其生命周期状态只表达运行、等待及终态；理解素材、选择技能、规划和生成等属于独立的展示阶段。
-AgentRun 可关联多个 GenerationJob 及其输出用途，但不拥有 Job 的执行生命周期；恢复时吸收
-Job 已持久化的结果事实。创建时固定 Runtime Agent Bundle 与 ModelProfile；Creative Skill
-首次激活后固定其具体版本，后续恢复不随发布或回滚漂移。
+围绕一个创作意图持续推进、可跨多轮对话暂停与恢复的工作单元；它拥有创作推进状态，但不拥有
+InvocationAttempt 或 GenerationJob 的完整生命周期。终态为 `completed`、`superseded`、`failed`、
+`cancelled` 或专用 `recovery_failed`，均不可重开。
 _Avoid_: 把每条用户消息都当作新的 AgentRun；把 AgentRun 与具体的 GenerationJob 混为一谈；新增模糊的 `timed_out` 或 `system_cancelled` 终态。
 
 **AgentRunTerminalSeal（运行终态封口）**:
-Product API 首次接纳 `completed`、`failed`、`cancelled`、`superseded` 或 `recovery_failed` 后形成的
-不可逆边界：终态状态、原因与版本不可改写，当前 advance 永久关闭，旧 Run 不再产生新调用、消息、
-checkpoint 或推进；其他 owner 的既有聚合与运营事实可以继续追加收敛。
-该封口不覆盖或改写 Project 所有权状态；Project ownership fence 是更高层的写入资格约束。
+Product API 接纳 AgentRun 终态后形成的不可逆封口；它关闭旧 Run 的推进资格，但不阻止其他 owner
+的既有聚合与运营事实继续收敛。详见 [ADR-0049](docs/adr/0049-agent-run-terminal-seal-and-independent-convergence.md)。
 _Avoid_: 重开终态 Run、通用 `agent_run.updated` 事件、把独立聚合收敛误报为 Run 进展、阻止新消息创建新 AgentRun、把 Project 删除映射为 AgentRun 终态。
 
 **AgentRunCancellation（运行取消事实）**:
-Product API 对停止继续推进 AgentRun 的幂等产品命令及其终态接纳记录，包含取消时间、主体、来源、
-规范化原因码与命令幂等身份；初始来源为 `user_requested`。它只撤销未来推进与 dispatch 权限，
-不抹除已经发生的 Invocation、Delivery、Job、Asset 或成本事实。系统或管理员只有提交同类显式产品
-命令并记录各自 `cancellation_source`，才能使 Run 进入 `cancelled`；timeout 与 lease expiry 不得隐式取消。
+Product API 对“停止继续推进 AgentRun”的幂等产品命令及其 `cancelled` 终态事实；它不证明 Provider、
+InvocationAttempt 或 GenerationJob 已实际取消。详见 [ADR-0047](docs/adr/0047-agent-run-user-cancellation-boundary.md)。
 _Avoid_: Provider 取消证明、GenerationJob 终态、RunCommit、`cancelling` AgentRun 状态、删除迟到证据。
 
 ### Agent 运行配置
@@ -242,7 +223,8 @@ Runtime Agent Bundle 的不可变发布快照；AgentRun 固定具体版本，�
 _Avoid_: 原地修改的配置行、Git commit、RuntimeCheckpoint 版本。
 
 **Run pin（版本固定）**:
-AgentRun 生命周期内由 Java Product API 权威固定的版本锚点：创建时固定 `bundle_version_id` / `manifest_digest` / `model_profile_id` / `model_profile_version`，`forced_use` Creative Skill 同事务固定；`auto` Creative Skill 只能在后续 RunCommit 中作为单值附属事实原子固定。已固定 pin 随 RunWork 下发，Worker 装载前对摘要与不可变发布快照做 fail-closed 校验；静态 pin 不随 commit 回传。
+Product API 为 AgentRun 固定的不可变运行版本锚点，覆盖 Runtime Agent Bundle、ModelProfile 与已激活
+Creative Skill；这些身份在 Run 生命周期内不随发布或恢复漂移。
 _Avoid_: Worker 回显静态 pin、可变版本引用、独立改写 pin、把尚未接纳的 `auto` Activation 当作既成事实。
 
 **RoleDocument（角色文档）**:
@@ -266,24 +248,28 @@ User 可见、可通过 `Use` 或 `auto` 激活的版本化创作方法；与 Ru
 _Avoid_: Runtime Skill、内部 Rule、无修饰的“Skill”（在运行时契约中必须指明类型）。
 
 **CreativeSkillActivation（创作技能激活记录）**:
-一次 Creative Skill 激活的 AgentRun 所属、可审计、不可变产品事实：含 Creative Skill 与不可变版本身份、`source`（`forced_use` / `auto`）、结构化 `reason` 与 `resource_digest`。`forced_use` 在 AgentRun 创建事务中固定；`auto` 只能作为可选单值 `creative_skill_activation` 附着于 RunCommit，并与 RuntimeCheckpoint 和唯一下一状态原子接纳。每个 AgentRun 最多一条，wire 兼容字段 `activated_creative_skill_versions` 保持 0/1 单例数组；Runtime 没有独立 Activation 写权限。
+AgentRun 所属、可审计且不可变的 Creative Skill 版本选择事实，记录来源与结构化原因；`forced_use`
+在创建时接纳，`auto` 只随 RunCommit 接纳。详见 [ADR-0050](docs/adr/0050-stateless-agent-advance-and-invocation-boundary.md)。
 _Avoid_: `activations[]`、独立 `activate` 写接口、普通 metadata、AgentActionProposal、多 Creative Skill 组合、运行中切换版本、自由文本理由。
 
 **AutoCreativeSkillCandidate（自动候选）**:
-AgentRun 创建时冻结、随 RunWork 下发的 `auto` 可激活资格池（Creative Skill 与版本身份、名称、描述、展示版本与 `resource_digest`，不含正文）；资格不等于与当前意图匹配，Worker 只可从中语义选择零个或一个。有效 lease 下的 Runtime 可在 RunCommit 前读取所选候选的精确不可变版本，读取授权来自候选 pin 而非既存 Activation；Runtime 必须校验摘要，任何候选、读取、判断或摘要故障均 fail closed。
+AgentRun 创建时冻结的不可变 Creative Skill 自动激活资格池；资格不表示当前意图匹配，Runtime 只能
+从中选择零个或一个。
 _Avoid_: Worker 发明候选外 Creative Skill、把非空资格池当作强制激活、候选随 Creative Skill Library 发布漂移、候选携带正文、要求先持久化 Activation 才能读取候选正文。
 
 **ModelProfile（模型档案）**:
-平台批准的版本化模型能力、上下文上限与 tokenizer / 保守计量版本，供 Bundle 形成允许子集并由 AgentRun 固定；RuntimeAdapter 必须按该版本估算完整规范化请求，Provider 返回的可证明 usage 用于最终成本结算。
+平台批准并由 AgentRun 固定的版本化模型能力、上下文上限与 tokenizer / 计量身份；不承载凭据或
+供应商私有请求对象。
 _Avoid_: API Key、动态价格目录、模型供应商原始配置、用通用字符估算冒充所有模型的精确 token 数、流中断且 usage 缺失时按零消耗。
 
 **RuntimeBudgetPolicy（运行预算策略）**:
-Product API 在 AgentRun 上固定并随 RunWork 下发的版本化硬限制：Runtime 执行单次请求与单次 AgentAdvance 的 context、token、资源读取、模型轮数和协议修复限制，Product API 持久化跨 Advance 的 InvocationAttempt 总数、累计成本与 AgentRun 活动执行时间。单 Advance 消耗必须能从 RuntimeCheckpoint、CallSlot、InvocationLedger 与读取历史确定性重建，不能只存在进程内；Runtime 只能收紧，不能自行扩大策略。
+Product API 为 AgentRun 固定的版本化硬限制，统一约束请求、单次 AgentAdvance 与跨推进累计预算；
+Runtime 只能在其范围内执行或进一步收紧。
 _Avoid_: Worker 重启后计数归零、把本地计数当跨进程权威、把 RuntimeBudgetPolicy 放进 RuntimeCheckpoint、运行中采用新策略追溯改写旧 Run。
 
 **RuntimeBudgetSnapshot（运行预算快照）**:
-Product API 根据 RuntimeBudgetPolicy 与已持久化消耗生成、随 RunWork 下发的当前可用预算投影；Runtime 用它进行本地 fail-fast，但每个可能产生新 Provider 执行的 attempt 仍须重新经过 Product API 准入。时间边界分为 `attempt_timeout`、`advance_deadline`、`run_active_execution_budget` 与 `reconciliation_deadline`；lease 过期只改变执行权，等待用户输入或 GenerationJob 结果不计入活动执行时间。
-所有绝对 deadline、累计活动时间与策略版本由 Product API 按数据库时间判定；Runtime 本地时钟只负责及时停止，不拥有终态权威。无 Worker 持有 lease 的空闲时间也不计入活动执行预算。
+Product API 根据 RuntimeBudgetPolicy 与已持久化消耗形成的当前可用预算投影；它供 Runtime
+本地 fail-fast，不授予新的 Provider dispatch 权限。
 _Avoid_: 把快照当预授权重试额度、混淆 lease 与预算、让等待外部产品结果或无执行者空闲时间消耗活动执行预算、用单一模糊 `deadline` 覆盖四种语义、以 Worker 墙钟决定终态。
 
 **ToolGrant（工具授权声明）**:
@@ -310,131 +296,116 @@ _Avoid_: 可变文件目录、网络资源目录、未校验的相对路径列�
 Worker 单次资源读取的证据（`resource_id` / `revision` / `content_digest` / `token_estimate` / `origin`），随 commit 以 `bundle_evidence` 与 `usage` 同通道回传 Java；Java 当前仅 `log.info` 记录条数、不持久化。
 _Avoid_: 资源正文、私有文件路径、Bundle / ModelProfile / CreativeSkill pin 回显。
 
+### Agent 运行机制
+
 **Agent Runtime Executor（Agent 运行执行器）**:
-从 Product API 领取 AgentRun、由最近一次已接纳 RuntimeCheckpoint 恢复并执行一次 AgentAdvance 的无状态执行角色；只有原子 RunCommit 被接纳后，新 checkpoint 或下一状态才成为产品事实。
+从已接纳 RuntimeCheckpoint 恢复并执行一次 AgentAdvance 的无状态角色；它不拥有 AgentRun 或任何
+产品事实的最终写入权威。
 _Avoid_: AgentRun 最终状态权威、常驻 Run Actor、持久工作流引擎、把模型 step / 工具中间状态 / 流式 chunk 当作 checkpoint。
 
 **ProjectOwnershipFence（Project 所有权围栏）**:
-Product API 对 Project 是否仍有资格接纳新产品事实维护的权威前置条件；Agent Runtime 的 claim、
-AttemptPermit、AssistantDeliveryAttempt 与 RunCommit 都必须受当前 fence / deletion epoch 校验。
-Project 已进入删除围栏时，Runtime 立即停止推进，不得创建新 InvocationAttempt、AssistantMessage、
-RuntimeCheckpoint、AgentActionProposal 或其他 Project 产品投影。既有已 dispatch 调用的精确迟到证据
-仍可进入独立 InvocationLedger 与成本核对，但不能恢复或重开 AgentRun。该围栏不改写既有 AgentRun
-终态；Project 删除、保留期限、隔离结果和物理清理的完整语义由 Project 所有权删除决策负责。
+Product API 对 Project 是否仍有资格接纳新产品事实维护的权威前置条件；关闭后 Runtime 只能回报既有
+调用证据，不能继续推进或创建 Project 产品投影。
 _Avoid_: 把 Project 删除当作 AgentRunCancellation、让 Runtime 决定删除状态、删除围栏后接纳新产品投影、在本边界推导 Conversation 独立删除语义。
 
 **AgentAdvance（Agent 单次推进）**:
-AgentRun 从首次可运行、已接纳用户输入或已接纳动作结果进入新可运行轮次时，由 Product API 持久化稳定 `advance_id`；claim 与 lease reclaim 复用该身份，RunCommit 接纳后轮次结束。Agent Runtime Executor 在该逻辑轮次内从已接纳恢复点推进到下一个产品边界；进程中断时允许整轮重放，模型调用重复风险由 InvocationLedger 与结果不明恢复机制约束。
+AgentRun 从一个已接纳恢复点推进到下一个产品边界的稳定逻辑轮次；claim 与 lease reclaim 复用其
+`advance_id`，RunCommit 接纳后该轮次结束。
 _Avoid_: 只按 checkpoint 推导 `advance_id`、每次 claim 生成新身份、Worker 随机生成 `advance_id`、长驻执行会话、逐 step checkpoint。
 
 **RunCommit（运行提交）**:
-Product API 接纳 AgentRun 推进事实的唯一边界：每个 AgentAdvance 只允许接纳一个 RunCommit，以 Product API 分配的 `advance_id` 作为语义幂等身份并校验规范化请求摘要；同轮次同摘要回放首次结果，同轮次不同摘要 fail closed。请求携带 RuntimeCheckpoint、一个判别式下一状态，以及可选的单值 `auto` CreativeSkillActivation 附属事实；接纳成功时三者同事务生效，冲突或校验失败时均不持久化。
-存在完整可见模型输出时，请求还可选择一个 `provisional_completed` AssistantDeliveryAttempt；Product API 仅在其绑定的 InvocationAttempt 已保存完整结果、序号连续且结果与消息摘要一致时，才在同一事务内创建 AssistantMessage。没有可见消息的 outcome 可以省略该选择。
-下一状态为 `failed` 时，Product API 还必须校验 RuntimeErrorPolicy 版本、InvocationErrorEvidence 引用、强制恢复步骤耗尽状态与当前 fence，才接纳 AgentRunFailure。
+Product API 接纳 AgentRun 推进事实的唯一原子边界，将 RuntimeCheckpoint、一个判别式 outcome 与可选
+附属事实纳入同一提交；每个 AgentAdvance 最多接纳一次。
 _Avoid_: Worker 自造独立 `commit_id` 领域身份、把传输关联 ID 当作新提交资格、把 RunCommit 误称为 Product API 的唯一写接口、独立 Activation 写事务、`accepted_actions`、`activations[]`、部分提交、拼接多个 DeliveryAttempt、在 commit 前创建 ConversationMessage。
 
 **RunCommitReceipt（运行提交回执）**:
-Product API 为首次接纳的 `(advance_id, request_digest)` 保存的不可变响应；终态后收到相同身份与摘要时
-只返回该回执，不增加 Run version，也不产生消息、checkpoint、事件或第二次提交。同一 `advance_id`
-携带不同摘要仍 fail closed。
+Product API 为首次接纳的 `(advance_id, request_digest)` 保存的不可变响应；精确回放只返回该回执，
+不构成新的提交或产品变化。
 _Avoid_: 把幂等回放当作新 RunCommit、重算首次响应、回放时补发事件、仅按传输 request ID 去重。
 
 **SettlementOnlyRunCommit（仅收敛运行提交）**:
-尚未终态的 AgentRun 在 `advance_deadline` 或活动执行预算耗尽后，当前有效执行者只使用适用 deadline / 预算耗尽 cutoff 前已由
-Product API 数据库时间持久化为 `succeeded` 的 Ledger 结果及确定性本地计算完成的普通 RunCommit；它不产生新 InvocationAttempt、
-Provider dispatch、retry 或副作用 AgentActionProposal，也不是新的 outcome 类型。
+尚未终态的 AgentRun 在执行 cutoff 后，只使用 cutoff 前已持久化成功结果完成的普通 RunCommit；
+它不产生新的外部执行、proposal 或 outcome 类型。
 _Avoid_: 对终态 Run 使用、cutoff 后补发模型请求、使用 cutoff 后才成功的结果、接受会启动 GenerationJob 的新 proposal、绕过 fence、第二次 RunCommit。
 
 **RuntimeInvocation（运行时外部调用）**:
-Agent Runtime Executor 在一次 AgentAdvance 内提出的、具有成本或结果不可重建风险的逻辑外部调用，以 `(advance_id, call_slot)` 唯一定位；覆盖主模型、Creative Skill 自动选择、协议修复模型及符合条件的远程只读工具。规范化 `request_digest` 是重放一致性约束而非身份组成；同槽位同摘要恢复原调用，同槽位不同摘要以 `INVOCATION_REPLAY_DIVERGED` fail closed。本地确定性查询、普通 Product API 读取、AgentActionProposal 及由 GenerationJob 管理的供应商调用不属于它。
+AgentAdvance 内具有成本或结果不可重建风险的逻辑外部调用，以 `(advance_id, call_slot)` 唯一定位；
+由 GenerationJob 拥有的供应商调用不属于它。
 _Avoid_: 把 `request_digest` 拼进身份、用 AI SDK step ID / Provider response ID / 随机 UUID 定位调用、分歧时静默创建新 Invocation、重复记录 GenerationJob / ProviderTask 已拥有的调用事实。
 
 **CallSlot（调用槽位）**:
-Blue Whale Runtime 在统一 Adapter 边界为 AgentAdvance 内每个逻辑外部调用分配的确定性语义位置或序号，例如 Creative Skill 选择、主模型轮次与协议修复轮次；所有真实模型请求必须经过该边界，框架或 SDK 不得隐式发起 Ledger 不可见的 retry。
+Blue Whale Runtime 为 AgentAdvance 内每个逻辑外部调用分配的确定性语义位置；它不依赖进程、
+SDK 或 Provider 私有身份。
 _Avoid_: Provider 私有标识、随进程变化的计数、让 SDK 绕过 InvocationLedger 自动重试、把一次协议修复覆盖原模型槽位。
 
 **InvocationCoordinator（调用协调职责）**:
-Blue Whale Runtime 在所有 RuntimeInvocation 外围承担的统一职责边界，而非预先冻结的独立类或服务；它先向 Product API 申请或恢复权威 InvocationAttempt，并在可能产生新 Provider 执行前取得和消费 AttemptPermit，才允许版本化 RuntimeAdapter 越过 Provider 边界。Runtime 可依据 AgentRun 已冻结策略提出 retry，但 Product API 保持最终准入权威。
+Runtime 在所有 RuntimeInvocation 外围承担的统一协调职责，确保每次物理 dispatch 都先取得 Product API
+权威 InvocationAttempt 与 AttemptPermit；该名称不预设代码拓扑。
 _Avoid_: 只在进程启动时读取一次策略后自行重试、两个 Worker 并发创建 attempt、让 Adapter 或 SDK 直接获得 retry 权威、把职责名称当作代码拓扑。
 
 **AgentRunLeaseTakeover（运行租约接管）**:
-Product API 在过期 lease 被新 Worker 实际 claim 时执行的原子所有权转移：递增 AgentRun fence、拒绝旧
-Worker 推进、中断旧 AssistantDeliveryAttempt、撤销未消费 Permit，并以同一 `advance_id` 重新调度。
-自然 lease expiry 本身不改变 Run、Delivery 或 Invocation 状态；已 dispatch attempt 的迟到证据能力继续有效。
+Product API 在新 Worker 实际 claim 过期 lease 时完成的 AgentAdvance 执行权转移；它更新 Run fence，
+但不把自然 lease expiry 本身解释为产品状态变化。详见 [ADR-0048](docs/adr/0048-time-deadline-and-lease-facts.md)。
 _Avoid_: 把 expiry 当 takeover、生成新 `advance_id`、把接管当 failed / cancelled、撤销已消费 Permit 来伪造未 dispatch。
 
 **AttemptPermit（调用尝试许可）**:
-Product API 对一次可能产生 Provider 执行或计费的 InvocationAttempt 签发的受限、单次消费能力，绑定 `attempt_id`、invocation fence、`request_digest`、RuntimeAdapter / 模型身份、最大输出、`attempt_timeout`、最坏成本上界与 CostReservation。Coordinator 必须在 dispatch 前原子消费 Permit 并把 attempt 置为 `in_flight`；Product API 同事务校验 attempt 上限、`advance_deadline`、`run_active_execution_budget`、账户额度和价格策略。Adapter 不得在准入后更换模型、扩大输出或超时。
-AgentRun 取消时，尚未消费的 Permit 必须撤销；已经消费的 Permit 只能通过 InvocationAttempt 的证据与核对收敛，不能倒退成未 dispatch。
+Product API 为一次可能产生 Provider 执行或计费的 InvocationAttempt 签发的受限单次能力；它绑定请求、
+执行边界与成本上界，并必须在物理 dispatch 前消费。
 _Avoid_: 把 Permit 当作多次调用额度、准入后修改请求、使用过期 fence、先 dispatch 再补 Permit、让 reconciliation 查询复用为新执行许可、撤销已消费 Permit 来伪造未调用。
 
 **RuntimeAdapter（运行时适配器）**:
-可替换的模型或远程只读工具协议实现；其身份与能力版本随 AgentRun 固定并进入 RuntimeInvocation 的请求摘要。Adapter 可使用 AI SDK 完成消息转换、tool-call 解析、结构化输出、流式消费与 usage 解析，但只返回 dispatch 确定性、Provider 引用、完整规范化结果、usage、InvocationErrorEvidence 及 `Retry-After` 等事实，不拥有持久状态、调用身份、AgentRun 状态或 retry 决定。SDK 内建自动重试必须关闭；只有能在每次物理 dispatch 前重新经过 InvocationCoordinator 的实现才可等价接管。发送前必须按 ModelProfile 对完整规范化请求作保守 token 校验，并受已消费 AttemptPermit 约束。
+可替换的模型或远程只读工具协议实现，负责规范化请求、结果与调用证据；它不拥有持久状态、
+调用身份、retry 或 AgentRun 决策权。
 _Avoid_: `retryable: true` 作为 Adapter 决策、运行中静默更换 Adapter、Provider / SDK 私有对象跨边界、以 telemetry 事后补记未获准的调用。
 
 **InvocationErrorEvidence（调用错误证据）**:
-RuntimeAdapter 对一次 InvocationAttempt 所观察到错误事实的版本化、安全归一化记录，包括调用阶段、
-dispatch 确定性、Provider 引用、受控错误类别与代码、`Retry-After`、partial result 和 usage 完整性；
-它只描述发生了什么，不决定 retry、fallback 或 AgentRun 终态。
+RuntimeAdapter 对 InvocationAttempt 错误事实的版本化安全记录；它只描述观察证据，不决定 retry、
+fallback 或 AgentRun 终态。
 _Avoid_: `retryable`、`shouldFailRun`、原始 Provider payload、不受控错误消息、堆栈、提示词、凭据或 Secret。
 
 **RuntimeErrorPolicy（运行时错误策略）**:
-Product API 在 AgentRun 创建时固定的版本化错误处置规则，定义 InvocationErrorEvidence 如何形成
-RuntimeErrorDisposition、哪些恢复步骤为强制或可选，以及何时允许 terminal candidate；Runtime 只能执行
-该版本，Product API 在 RunCommit 时保持最终校验权威。
+Product API 为 AgentRun 固定的版本化错误处置规则，将 InvocationErrorEvidence 映射为允许的
+RuntimeErrorDisposition。
 _Avoid_: Worker 本地默认策略、运行中切换策略版本、仅凭 HTTP 状态码决定 Run 终态、把可选 retry 当作强制 retry。
 
 **RuntimeErrorDisposition（运行时错误处置）**:
-Runtime ErrorClassifier 按固定 RuntimeErrorPolicy 产生的内部控制指令，只能是 `retry`、`reconcile`、
-`await_authoritative_state`、`stop_fence_lost` 或 `terminal_candidate`；它不是 RuntimeCheckpoint、
-AgentAdvance outcome 或产品终态。只有 `terminal_candidate` 可形成 failed RunCommit，`retry` 仍须取得 AttemptPermit。
+Runtime 按 RuntimeErrorPolicy 产生的内部控制分类：`retry`、`reconcile`、
+`await_authoritative_state`、`stop_fence_lost` 或 `terminal_candidate`；它不是产品状态。
 _Avoid_: 第五种 AgentAdvance 状态、Adapter 直接返回处置、把 fence 丢失或 outcome_unknown 当作 failed。
 
 **AgentRunFailure（运行失败事实）**:
-Product API 通过 RunCommit 接纳的 AgentRun `failed` 终态事实，包含稳定内部错误码、公开安全错误码与
-消息键、证据引用、RuntimeErrorPolicy 版本和准确 terminal reason；它表示 Run 无法按策略安全继续，
-不反向声称某次 Provider 调用一定失败。
+Product API 通过 RunCommit 接纳的 AgentRun `failed` 终态事实，关联稳定错误身份、证据与策略版本；
+它表示 Run 无法安全继续，不表示某次 Provider 调用一定失败。
 _Avoid_: 原始 Provider 错误、Worker 堆栈、自由文本用户消息、从 InvocationAttempt 状态直接推导 failed、迟到结果自动重开终态 Run。
 
 **InvocationAttempt（调用尝试）**:
-RuntimeInvocation 下单次可能越过 Provider 边界并产生执行或计费的具体尝试，拥有独立 `attempt_id`；
-主生命周期为 `prepared → abandoned_before_dispatch`，或
-`prepared → in_flight → succeeded | failed_definitive | outcome_unknown`。`abandoned_before_dispatch` 只能在有持久证据证明
-请求从未 dispatch 时使用并释放对应预留；状态查询、既有结果取回、可靠幂等身份下的原请求恢复及可证明
-尚未 dispatch 的安全重连属于原 attempt 的 reconciliation。Invocation fence 与 AgentRun fence 分离：
-失去 AgentRun lease 的 Worker 不得创建新 attempt 或 RunCommit，但可凭精确 attempt 的受限证据能力
-幂等回报迟到结果；该能力不能推进 Run、改写其他 attempt 或绕过结果校验。
+RuntimeInvocation 下单次可能越过 Provider 边界并产生执行或计费的追加式事实；它区分未 dispatch、
+执行中、成功、确定失败与结果不明，不被 retry 覆盖。
 _Avoid_: retry 覆盖原 attempt、让 `outcome_unknown` 的 attempt 复用原成本预留、把 reconciliation 当作新调用或 Provider attempt、用过期 AgentRun lease 创建 attempt、让迟到证据回报权限升级为产品状态写权限。
 
 **InvocationLedger（调用台账）**:
-Product API 拥有的 RuntimeInvocation 与 InvocationAttempt 运营事实，保留请求摘要、Adapter 身份、已观察到的供应商引用、调用生命周期及可证明的结果。`prepared` 尚未越过外部调用边界，可由新执行者安全接管或在证明未 dispatch 后进入 `abandoned_before_dispatch`；Provider 明确返回失败才可形成 `failed_definitive`。`attempt_timeout` 只表示本地停止等待：若能证明未 dispatch，则进入 `abandoned_before_dispatch` 并可按策略安全 retry；若可能已 dispatch，则进入 reconciliation。`in_flight` 的 lease 过期只表示执行权丢失，必须在冻结的 `reconciliation_deadline` 内优先按 Adapter 能力查询供应商状态、恢复结果或以同一幂等身份取回原调用，核对窗口耗尽才进入 `outcome_unknown`。partial chunks 只是流观察，不能构成成功结果；只有完整规范化结果或其持久引用与摘要落入 Ledger 后，attempt 才能进入 `succeeded`。`outcome_unknown` 曾经发生的最小审计事实不可抹除，迟到的决定性证据可以使当前结果收敛，但必须保留先前的不确定历史；是否令 AgentRun 失败仍由 RuntimeErrorPolicy 决定。InvocationLedger 不推进 AgentRun，不替代 RuntimeCheckpoint、RunCommit、AgentActionProposal 或 GenerationJob。
-AgentRun 终态后，既有 attempt 仍可查询状态、取回原结果、接纳迟到 evidence / usage 并结算成本，
-但不得创建新 attempt、AssistantMessage、RuntimeCheckpoint 或 RunCommit。
+Product API 拥有的 RuntimeInvocation 与 InvocationAttempt 持久运营记录；它保存外部调用与结果不明
+事实，但不推进 AgentRun 或替代 RuntimeCheckpoint。
 _Avoid_: 从调用成功直接推导 AgentRun 完成、把超时 / AbortSignal / lease 过期等同于失败或未调用、用 `abandoned_before_dispatch` 掩盖可能已 dispatch 的请求、终态后创建新 attempt、无限期核对、把状态查询或原结果取回误算成 retry、用 partial chunks 标记成功、覆盖结果不明的原 attempt、只保存完成状态、永久保存完整提示词 / 结果、保存供应商私有对象、凭据或 Secret。
 
 **Single Proposal Commit Boundary（单提议提交边界）**:
-一次 AgentAdvance 只能以 `completed`、`awaiting_input`、携带单个 AgentActionProposal 的
-`awaiting_action_result` 或 `failed` 之一结束；内部可执行多个只读工具，但不得提交多个副作用提议
-或形成多状态结果。可选的单值 `auto` CreativeSkillActivation 是 RunCommit 附属产品事实，
-不是第二个 outcome、UserInputRequest 或 AgentActionProposal。
+每次 AgentAdvance 最多接纳一个业务原子副作用 proposal，并与其他 outcome 互斥；模型返回多个
+副作用 tool call 是必须整轮拒绝并受限修复的协议错误。详见 [ADR-0050](docs/adr/0050-stateless-agent-advance-and-invocation-boundary.md)。
 _Avoid_: `actions[]`、部分接纳多个动作、把 Activation 放入 proposal、隐式 fan-out/fan-in、把有依赖的动作提前批量提交。
 
 **RuntimeCheckpoint**（运行时检查点）:
-与活动 AgentRun 绑定的版本化、不透明执行状态，只用于恢复运行，不是 Run、Job、Asset 或产品事件的权威事实。
-payload 采用 Blue Whale 自有 `agent-runtime-checkpoint/v1`：只含规范化模型消息、已提交 proposal
-与待回传工具结果的绑定、粗粒度推进游标及格式版本；Product API 将 payload 视为不透明数据，Runtime
-负责 Schema 校验、编解码和版本迁移。AgentRun 只从当前已接纳版本恢复，不自动回退旧版本；错误引擎
-或版本必须拒绝恢复，活动检查点不跨引擎迁移，终态 Run 不再使用 checkpoint。
+与活动 AgentRun 绑定、由 Runtime 解码的版本化不透明恢复状态；它使用
+`agent-runtime-checkpoint/v1` canonical codec，不是产品事实或 SDK / Provider 对象快照。
 _Avoid_: 把 RuntimeCheckpoint 当作产品事实；直接序列化 AI SDK / Provider 内部对象；保存 pin、stream、usage、资源正文、凭据或临时 Secret；让运行时检查点独立推进产品状态。
 
 **AgentActionProposal（Agent 动作提议）**:
-Agent 基于当前意图提出的单个业务原子动作，不是可直接执行的命令或授权；一个提议可以请求一个
-GenerationJob 的多个输出槽位，只有产品控制面按 User、Project、AgentRun、工具契约与有效
-UserInputRequest 完成确定性校验后，动作才能产生副作用。
+Agent 基于当前意图提出的单个业务原子动作，不是命令或授权；一个 proposal 可以表达同一动作的
+多个输出。
 _Avoid_: 把输出数量拆成多个 proposal；把模型输出直接当作命令；把用户素材、外部内容或工具结果中的文字当作授权。
 
 **CostReservation（成本预留）**:
-产品控制面在每个可能计费的 InvocationAttempt 或 GenerationJob Provider 调用前，按固定价格与计量策略的最坏情况暂时占用额度；取得可证明 usage 后按实际成本结算并释放差额，证明未 dispatch 则释放。AgentRun 取消不直接释放预留：`abandoned_before_dispatch` 可以释放，`in_flight` / `outcome_unknown` 继续占用并核对，`succeeded` 按实际结算。结果不明的新 attempt 必须另建预留；超过成本核对期限仍无法确认时，按冻结策略保守结算或转运营处置，不能无限期占用可用额度。它是防滥用与对账的运营事实，不是账单或扣款。
+产品控制面为一次可能计费的 InvocationAttempt 或 GenerationJob Provider 调用保留的最坏成本额度；
+它按可证明结果结算或释放，是运营事实而非账单。
 _Avoid_: 取消 Run 时批量释放所有预留、retry 复用结果不明的预留、usage 缺失时按零成本、永久冻结完整预留、用户确认后突破硬额度、把成本预留当作计费订单。
 
 **AuditRecord（审计记录）**:
