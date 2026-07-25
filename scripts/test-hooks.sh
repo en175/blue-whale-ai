@@ -1915,7 +1915,7 @@ run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$
 assert_exit 2 "doc-allowlist: master Edit 代码 src/a.py 仍拦"
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/CLAUDE.md"}}'
 assert_exit 2 "doc-allowlist: master Edit 根 CLAUDE.md 规则源仍拦"
-run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/.claude/rules/git-workflow.md"}}'
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/.claude/rules/issue-tracker.md"}}'
 assert_exit 2 "doc-allowlist: master Edit .claude/rules 规则源仍拦"
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/docs/specs/schema.json"}}'
 assert_exit 2 "doc-allowlist: master Edit docs/specs/*.json 契约仍拦（非 .md 散文）"
@@ -2341,7 +2341,7 @@ assert_codex_hooks_valid "codex: hooks.json 与 Claude matcher 同步"
 for runtime_hook in .claude/hooks/*.sh .codex/hooks/*.sh .kimi-code/hooks/*.sh .claude/settings.json .codex/hooks.json .kimi-code/hooks.toml; do
   assert_file_not_matches "$runtime_hook" 'permissionDecision[^[:alnum:]]*[=:][^[:alnum:]]*ask' "hooks: $runtime_hook 不包含 ask 运行机制"
 done
-for active_doc in CLAUDE.md CONTEXT.md .claude/rules/git-workflow.md docs/agents/commit-and-review.md docs/agents/worktree-workflow.md docs/agents/hooks/README.md; do
+for active_doc in CLAUDE.md CONTEXT.md docs/agents/git-workflow.md docs/agents/commit-and-review.md docs/agents/worktree-workflow.md docs/agents/hooks/README.md; do
   assert_file_not_has_text "$active_doc" 'permissionDecision=ask' "docs: $active_doc 不再描述 ask 为活跃机制"
 done
 assert_git_not_ignored ".codex/hooks.json" "codex: hooks.json 可提交"
@@ -2427,7 +2427,7 @@ assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "用户�
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "确认 Git 写入区域" "workflow: 自检确认 Git 写入区域"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "工单分支" "workflow: 自检要求工单分支"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "立即停止写入" "workflow: 自检失败时停止写入"
-assert_file_has_text ".claude/rules/git-workflow.md" "防御顺序：规范前置 → Hook 兜底" "workflow: Git 规则保持规范前置"
+assert_file_has_text "docs/agents/git-workflow.md" "防御顺序：规范前置 → Hook 兜底" "workflow: Git 规则保持规范前置"
 assert_file_has_text "docs/agents/commit-and-review.md" "规范前置 → Hook 兜底" "workflow: 协作文档保持规范前置"
 assert_file_not_has_text ".githooks/pre-commit" "禁止在 master/main 上提交" "workflow: pre-commit 不再拦用户本地 master commit"
 assert_file_not_has_text "scripts/start-task-worktree.sh" "git worktree" "workflow: shell 入口不复制 Git 业务逻辑"
