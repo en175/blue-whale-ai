@@ -296,8 +296,8 @@ Agent Runtime Executor 在一次 AgentAdvance 内亲自发出的、具有成本�
 _Avoid_: 把模型 step 当作独立 AgentRun 状态、把所有只读工具一律记账、重复记录 GenerationJob / ProviderTask 已拥有的调用事实。
 
 **InvocationLedger（调用台账）**:
-Product API 拥有的 RuntimeInvocation 运营事实，按稳定调用身份保留请求摘要、Adapter 身份、已观察到的供应商引用、调用生命周期及可证明的结果；成功调用必须保存可恢复的规范化结果或其持久引用与摘要。它不推进 AgentRun，不替代 RuntimeCheckpoint、RunCommit、AgentActionProposal 或 GenerationJob；结果不明时保留不确定事实，后续重试作为受策略与预算约束的关联 attempt，不覆盖原调用。
-_Avoid_: 从调用成功直接推导 AgentRun 完成、把超时或 lease 过期等同于未调用、盲目重放结果不明的外部调用、保存原始提示词、供应商私有对象、凭据或 Secret。
+Product API 拥有的 RuntimeInvocation 运营事实，按稳定调用身份保留请求摘要、Adapter 身份、已观察到的供应商引用、调用生命周期及可证明的结果；主生命周期为 `prepared → in_flight → succeeded | failed_definitive | outcome_unknown`。`prepared` 尚未越过外部调用边界，可由新执行者安全接管；`in_flight` 的 lease 过期只表示执行权丢失，必须在冻结的 `reconciliation_deadline` 内优先按 Adapter 能力查询供应商状态、恢复结果或以同一幂等身份取回原调用，无法取得决定性证据才进入 `outcome_unknown`。`succeeded` 必须保存可恢复的规范化结果或其持久引用与摘要；真正可能产生第二次外部执行的 retry 必须创建关联 attempt，不覆盖原调用。`outcome_unknown` 曾经发生的最小审计事实不可抹除；迟到的决定性证据可以使当前结果收敛为 `succeeded` 或 `failed_definitive`，但必须保留先前的不确定历史，完整载荷仍遵守分层保留与数据最小化策略。InvocationLedger 不推进 AgentRun，不替代 RuntimeCheckpoint、RunCommit、AgentActionProposal 或 GenerationJob。
+_Avoid_: 从调用成功直接推导 AgentRun 完成、把超时或 lease 过期等同于失败或未调用、无限期核对、把状态查询或原结果取回误算成 retry、覆盖结果不明的原 attempt、只保存完成状态、永久保存完整提示词 / 结果、保存供应商私有对象、凭据或 Secret。
 
 **Single Proposal Commit Boundary（单提议提交边界）**:
 一次 AgentAdvance 只能以 `completed`、`awaiting_input`、携带单个 AgentActionProposal 的
