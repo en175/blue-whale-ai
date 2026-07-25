@@ -188,6 +188,13 @@ GenerationJob 必须归属 Project；由 AgentChatPanel 触发时关联 AgentRun
 _Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeItem 是结果视图;
 把 Job 与 Asset 混为一谈 —— Job 是过程,Asset 是它的产物。
 
+**ProviderGenerationAttempt（供应商生成尝试）**:
+GenerationJob 为调用生成供应商而发起的一次可能计费的物理副作用事实；一个 Attempt 可覆盖一个或
+多个输出槽位，并以稳定身份独立绑定 CostReservation、调度许可与可对账结果。明确未接纳后的重试
+创建新 Attempt；`outcome_unknown` 只能核对原 Attempt，不能伪装成重新提交。
+_Avoid_: 把 GenerationJob 当成一次供应商调用；覆盖旧 Attempt；复用 Attempt 身份重发；
+把供应商 task id 当作 Attempt 身份。
+
 **AgentRun（创作运行）**:
 围绕一个创作意图持续推进、可跨多轮对话暂停与恢复的工作单元；它拥有创作推进状态，但不拥有
 InvocationAttempt 或 GenerationJob 的完整生命周期。终态为 `completed`、`superseded`、`failed`、
