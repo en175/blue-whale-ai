@@ -4,7 +4,7 @@
 - **日期**：2026-07-25
 - **决策者**：KimJohn
 - **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)
-- **修订**：[ADR-0043 AgentRun 规范化收场](0043-agent-run-terminal-outcomes.md)、[ADR-0045 Provisional Assistant Delivery](0045-provisional-assistant-delivery-runcommit-boundary.md)
+- **修订**：[ADR-0043 AgentRun 三种规范化收场](0043-agent-run-terminal-outcomes.md)、[ADR-0045 Provisional Assistant Delivery](0045-provisional-assistant-delivery-runcommit-boundary.md)
 - **时间与租约边界**：[ADR-0048 Timeout、Deadline、Lease 与 Cancellation 分属不同事实](0048-time-deadline-and-lease-facts.md)
 - **终态后收敛**：[ADR-0049 AgentRun 终态封口与独立收敛](0049-agent-run-terminal-seal-and-independent-convergence.md)
 

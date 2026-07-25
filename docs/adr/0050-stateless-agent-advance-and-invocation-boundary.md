@@ -87,15 +87,16 @@ AttemptPermit 与 CostReservation 边界。
 
 模型同一响应返回两个或更多副作用 tool call 时，Runtime 必须：
 
-1. 将整次响应识别为 `MULTIPLE_SIDE_EFFECT_TOOL_CALLS` 协议错误；
+1. 将整次响应识别为多副作用 tool call 协议错误；
 2. 不执行任何一个调用，不选择第一个，不创建 proposal，不保存部分进展；
 3. 按 AgentRun 固定的 RuntimeBudgetPolicy 所给 protocol repair 上限发起受限修复；
 4. 要求修复响应只选择一个业务原子副作用动作，或选择其他单一合法 outcome；
-5. 修复仍返回多个副作用调用且上限耗尽时，形成
-   `MODEL_PROTOCOL_REPAIR_EXHAUSTED` terminal candidate，并通过正常 failed RunCommit 接纳。
+5. 修复仍返回多个副作用调用且上限耗尽时，形成协议修复耗尽 terminal candidate，并通过正常
+   failed RunCommit 接纳。
 
 每次 protocol repair 模型调用使用确定性 CallSlot、新的 InvocationAttempt、AttemptPermit 与
 CostReservation。修复不得复用原调用槽位，也不得把原响应中的任一动作带入最终 proposal。
+本 ADR 只冻结协议错误分类与处理语义，不冻结具体错误码名称。
 
 ### 5. Creative Skill 激活附着于 commit
 
@@ -187,8 +188,8 @@ Provider 状态核对与可靠幂等恢复不增加 Provider attempt，但可以
 5. **多副作用响应**：两个副作用 tool call 时零执行、零 proposal、零部分 checkpoint，并进入
    protocol repair；多个只读 tool call 仍合法。
 6. **协议修复成功**：修复响应只返回一个副作用动作时，仅该动作进入唯一 proposal，原响应动作全部丢弃。
-7. **协议修复耗尽**：修复持续返回多个副作用调用直到策略上限时，形成
-   `MODEL_PROTOCOL_REPAIR_EXHAUSTED` failed RunCommit，且没有任何副作用调用被执行。
+7. **协议修复耗尽**：修复持续返回多个副作用调用直到策略上限时，形成 failed RunCommit，且没有任何
+   副作用调用被执行。
 8. **Invocation 重放**：同 slot / 同 digest 恢复原调用；同 slot / 不同 digest fail closed；SDK 隐式 retry
    无法绕过 Ledger。
 9. **attempt 生命周期**：只有证明未 dispatch 才能 abandoned；成功必须可恢复；timeout 与断连不能把
