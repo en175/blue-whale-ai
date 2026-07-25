@@ -284,12 +284,20 @@ _Avoid_: 资源正文、私有文件路径、Bundle / ModelProfile / CreativeSki
 _Avoid_: AgentRun 最终状态权威、常驻 Run Actor、持久工作流引擎、把模型 step / 工具中间状态 / 流式 chunk 当作 checkpoint。
 
 **AgentAdvance（Agent 单次推进）**:
-Agent Runtime Executor 从一个已接纳恢复点推进到下一个产品边界的执行片段；进程中断时允许从上一个恢复点整轮重放，模型调用重复风险由独立 invocation ledger 与结果不明恢复机制约束。
+Agent Runtime Executor 从一个已接纳恢复点推进到下一个产品边界的执行片段；进程中断时允许从上一个恢复点整轮重放，模型调用重复风险由独立 InvocationLedger 与结果不明恢复机制约束。
 _Avoid_: 长驻执行会话、逐 step checkpoint、用 RuntimeCheckpoint 记录产品事实。
 
 **RunCommit（运行提交）**:
-Product API 接纳一次 AgentAdvance 的唯一写边界：请求携带 RuntimeCheckpoint、一个判别式下一状态，以及可选的单值 `auto` CreativeSkillActivation 附属事实；Activation 必须进入请求摘要、幂等与 lease / fence 校验。接纳成功时三者同事务生效，冲突或校验失败时均不持久化；Product API 负责最终校验与持久化，Runtime 只能提出待接纳内容。
-_Avoid_: 独立 Activation 写事务、`accepted_actions`、`activations[]`、部分提交、把模型调用已发生误当作 RunCommit 已接纳。
+Product API 接纳 AgentRun 推进事实的唯一边界：请求携带 RuntimeCheckpoint、一个判别式下一状态，以及可选的单值 `auto` CreativeSkillActivation 附属事实；Activation 必须进入请求摘要、幂等与 lease / fence 校验。接纳成功时三者同事务生效，冲突或校验失败时均不持久化；Product API 负责最终校验与持久化，Runtime 只能提出待接纳内容。
+_Avoid_: 把 RunCommit 误称为 Product API 的唯一写接口、独立 Activation 写事务、`accepted_actions`、`activations[]`、部分提交、把模型调用已发生误当作 RunCommit 已接纳。
+
+**RuntimeInvocation（运行时外部调用）**:
+Agent Runtime Executor 在一次 AgentAdvance 内亲自发出的、具有成本或结果不可重建风险的单次外部调用，主要是模型调用，也包括符合该条件的远程只读工具；本地确定性查询、AgentActionProposal 及由 GenerationJob 管理的供应商调用不属于它。
+_Avoid_: 把模型 step 当作独立 AgentRun 状态、把所有只读工具一律记账、重复记录 GenerationJob / ProviderTask 已拥有的调用事实。
+
+**InvocationLedger（调用台账）**:
+Product API 拥有的 RuntimeInvocation 运营事实，按稳定调用身份保留请求摘要、Adapter 身份、已观察到的供应商引用、调用生命周期及可证明的结果；成功调用必须保存可恢复的规范化结果或其持久引用与摘要。它不推进 AgentRun，不替代 RuntimeCheckpoint、RunCommit、AgentActionProposal 或 GenerationJob；结果不明时保留不确定事实，后续重试作为受策略与预算约束的关联 attempt，不覆盖原调用。
+_Avoid_: 从调用成功直接推导 AgentRun 完成、把超时或 lease 过期等同于未调用、盲目重放结果不明的外部调用、保存原始提示词、供应商私有对象、凭据或 Secret。
 
 **Single Proposal Commit Boundary（单提议提交边界）**:
 一次 AgentAdvance 只能以 `completed`、`awaiting_input`、携带单个 AgentActionProposal 的
