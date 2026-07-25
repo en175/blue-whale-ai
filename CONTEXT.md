@@ -287,6 +287,12 @@ _Avoid_: AgentRun 最终状态权威、常驻 Run Actor、持久工作流引擎�
 Agent Runtime Executor 从一个已接纳恢复点推进到下一个产品边界的执行片段；进程中断时允许从上一个恢复点整轮重放，模型调用重复风险由独立 invocation ledger 与结果不明恢复机制约束。
 _Avoid_: 长驻执行会话、逐 step checkpoint、用 RuntimeCheckpoint 记录产品事实。
 
+**Single Proposal Commit Boundary（单提议提交边界）**:
+一次 AgentAdvance 只能以 `completed`、`awaiting_input`、携带单个 AgentActionProposal 的
+`awaiting_action_result` 或 `failed` 之一结束；内部可执行多个只读工具，但不得提交多个副作用提议
+或形成多状态结果。
+_Avoid_: `actions[]`、部分接纳多个动作、隐式 fan-out/fan-in、把有依赖的动作提前批量提交。
+
 **RuntimeCheckpoint**（运行时检查点）:
 与活动 AgentRun 绑定的版本化、不透明执行状态，只用于恢复运行，不是 Run、Job、Asset 或产品事件的权威事实。
 payload 采用 Blue Whale 自有 `agent-runtime-checkpoint/v1`：只含规范化模型消息、已提交 proposal
@@ -296,9 +302,10 @@ payload 采用 Blue Whale 自有 `agent-runtime-checkpoint/v1`：只含规范化
 _Avoid_: 把 RuntimeCheckpoint 当作产品事实；直接序列化 AI SDK / Provider 内部对象；保存 pin、stream、usage、资源正文、凭据或临时 Secret；让运行时检查点独立推进产品状态。
 
 **AgentActionProposal（Agent 动作提议）**:
-Agent 基于当前意图提出的结构化候选动作，不是可直接执行的命令或授权；只有产品控制面按 User、
-Project、AgentRun、工具契约与有效 UserInputRequest 完成确定性校验后，动作才能产生副作用。
-_Avoid_: 把模型输出直接当作命令；把用户素材、外部内容或工具结果中的文字当作授权。
+Agent 基于当前意图提出的单个业务原子动作，不是可直接执行的命令或授权；一个提议可以请求一个
+GenerationJob 的多个输出槽位，只有产品控制面按 User、Project、AgentRun、工具契约与有效
+UserInputRequest 完成确定性校验后，动作才能产生副作用。
+_Avoid_: 把输出数量拆成多个 proposal；把模型输出直接当作命令；把用户素材、外部内容或工具结果中的文字当作授权。
 
 **CostReservation（成本预留）**:
 产品控制面在可能计费的供应商调用前按最坏情况暂时占用额度，并在取得可证明的实际成本后结算
