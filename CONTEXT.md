@@ -279,6 +279,14 @@ _Avoid_: 可变文件目录、网络资源目录、未校验的相对路径列�
 Worker 单次资源读取的证据（`resource_id` / `revision` / `content_digest` / `token_estimate` / `origin`），随 commit 以 `bundle_evidence` 与 `usage` 同通道回传 Java；Java 当前仅 `log.info` 记录条数、不持久化。
 _Avoid_: 资源正文、私有文件路径、Bundle / ModelProfile / CreativeSkill pin 回显。
 
+**Agent Runtime Executor（Agent 运行执行器）**:
+从 Product API 领取 AgentRun、由最近一次已接纳 RuntimeCheckpoint 恢复并执行一次 AgentAdvance 的无状态执行角色；只有原子 RunCommit 被接纳后，新 checkpoint 或下一状态才成为产品事实。
+_Avoid_: AgentRun 最终状态权威、常驻 Run Actor、持久工作流引擎、把模型 step / 工具中间状态 / 流式 chunk 当作 checkpoint。
+
+**AgentAdvance（Agent 单次推进）**:
+Agent Runtime Executor 从一个已接纳恢复点推进到下一个产品边界的执行片段；进程中断时允许从上一个恢复点整轮重放，模型调用重复风险由独立 invocation ledger 与结果不明恢复机制约束。
+_Avoid_: 长驻执行会话、逐 step checkpoint、用 RuntimeCheckpoint 记录产品事实。
+
 **RuntimeCheckpoint**（运行时检查点）:
 与活动 AgentRun 绑定的版本化、不透明执行状态，只用于恢复运行，不是 Run、Job、Asset 或产品事件的权威事实。
 AgentRun 只从当前已接纳版本恢复，不自动回退旧版本；创建时固定运行引擎及版本，错误引擎或版本
