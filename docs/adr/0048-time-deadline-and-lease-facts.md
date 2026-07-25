@@ -5,6 +5,7 @@
 - **决策者**：KimJohn
 - **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)
 - **关联决策**：[ADR-0046 Runtime 错误与终态边界](0046-runtime-error-evidence-policy-and-terminal-boundary.md)、[ADR-0047 AgentRun 用户取消](0047-agent-run-user-cancellation-boundary.md)
+- **终态后收敛**：[ADR-0049 AgentRun 终态封口与独立收敛](0049-agent-run-terminal-seal-and-independent-convergence.md)
 
 ## 背景
 
@@ -81,6 +82,7 @@ takeover 不产生 AgentRun failed / cancelled，也不创建新 advance。
 - 没有可恢复结果时，RuntimeErrorPolicy 才形成 deadline / budget terminal candidate。
 
 SettlementOnlyRunCommit 仍是当前 `advance_id` 唯一的普通 RunCommit，不新增 outcome、checkpoint 类型或第二次提交。
+它只适用于尚未终态的 AgentRun；任何终态一经接纳，后续事实只能进入各 owner 的收敛入口。
 若旧 Worker 已因 takeover 失去 fence，其 deadline 后提交仍被拒绝；新执行者从 Ledger 恢复并收敛。
 
 ### 6. Product API 数据库时间是唯一权威
