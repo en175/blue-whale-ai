@@ -216,6 +216,11 @@ Generation Worker 将供应商结果写入私有隔离区后形成的不可变�
 发布为正式 Asset。
 _Avoid_: 隔离对象即 Asset；Worker 直接发布；未审核先展示；在同一候选身份下覆写媒体内容。
 
+**GenerationDeliveryIdentity（生成交付身份）**:
+Product API 为一次 Worker 结果回报签发的稳定身份，绑定 Project fence、Job version、WorkItem、Attempt、
+输出槽、Schema version 与预期来源；同身份同摘要重放返回首次结果，同身份异内容必须冲突并停止。
+_Avoid_: Worker 自建重试身份；网络异常后换键；最后写入者获胜；用旧 lease 或 fence 提权。
+
 **AssetPublicationCommit（作品发布提交）**:
 Product API 将审核通过的 GenerationResultCandidate 一次性接纳为 Asset，并原子确认输出槽、Job 聚合
 状态、ProductEvent、Outbox 与 AuditRecord 的产品提交边界；供应商成本结算独立按 Attempt 收敛。
