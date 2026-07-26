@@ -9,6 +9,7 @@
 # 放行：
 #   - 目标文件在非 master 分支的工作树（工单分支 worktree / detached HEAD）
 #   - 目标文件不在任何 git 工作树内（仓库外 dotfile，如 ~/.codex/config.toml）
+#   - master 分支但目标是已被 Git 忽略的根 CLAUDE.local.md 或 .codex/config.toml
 #   - master 分支但目标在文档白名单（根 CONTEXT.md + docs/**/*.md；ADR-0025）
 #   - 非 Edit/Write 工具
 #
@@ -101,6 +102,18 @@ fi
 if REAL_DIR="$(cd "$FILE_DIR" 2>/dev/null && pwd -P)" && [ -n "$REAL_DIR" ]; then
   REL_PATH="${REAL_DIR%/}/$(basename "$FILE_PATH")"
   REL_PATH="${REL_PATH#$TOPLEVEL/}"
+
+  # 本地个人配置只有同时满足「精确路径 + Git 已忽略」才放行。
+  # 路径白名单防止扩大 master 写面；check-ignore 防止配置意外进入团队仓库。
+  case "$REL_PATH" in
+    CLAUDE.local.md|.codex/config.toml)
+      if git -C "$TOPLEVEL" check-ignore -q -- "$REL_PATH" 2>/dev/null; then
+        audit 0 "allowed-local-personal-config"
+        exit 0
+      fi
+      ;;
+  esac
+
   case "$REL_PATH" in
     CONTEXT.md|docs/*.md)
       audit 0 "allowed-doc-allowlist"

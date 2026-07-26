@@ -37,7 +37,7 @@
 1. **禁直推 master** — 全走分支 → PR → merge。`hotfix/*` 无特权。
 2. **发布须用户授权** — 未经明确授权禁止 push/PR/merge/release。
 3. **合并只用 merge** — 禁 squash/rebase。合并不自动删源分支，事后手动清理。
-4. **可写任务先建 task worktree** — 只读调查/审查可直接进行；一旦任务可能写文件或改变 Git 状态，必须先从主 checkout 运行唯一入口：`scripts/start-task-worktree.sh --type <类型> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>`。入口成功前禁止写入。**例外（[ADR-0025](docs/adr/0025-doc-on-master-allowlist.md)）**：仅编辑散文规格文档（根 `CONTEXT.md` + `docs/**/*.md`）时，AI 可在本地 master 直改并用 `scripts/commit-spec-on-master.sh -m "<描述>"` 落盘；规则源（`.claude/`）、代码、`docs/**/*.json` 契约仍必须走 worktree。
+4. **可写任务先建 task worktree** — 只读调查/审查可直接进行；一旦任务可能写文件或改变 Git 状态，必须先从主 checkout 运行唯一入口：`scripts/start-task-worktree.sh --type <类型> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>`。入口成功前禁止写入。**散文文档例外（[ADR-0025](docs/adr/0025-doc-on-master-allowlist.md)）**：仅编辑根 `CONTEXT.md` + `docs/**/*.md` 时可直改并用 `scripts/commit-spec-on-master.sh -m "<描述>"` 落盘；规则源、代码和契约仍必须走 worktree。**本地个人配置例外（[ADR-0010](docs/adr/0010-local-master-is-user-integration-zone.md)）**：仅根 `CLAUDE.local.md` 与 `.codex/config.toml` 在 `git check-ignore` 确认已忽略时可直改；不得暂存或提交。其他忽略文件仍必须走 worktree。
 5. **Worktree 基于同步后的本地 master** — 入口要求主 checkout 位于干净 `master`，先 fetch `origin/master`；远程领先则 fast-forward，本地领先则保留，双方分叉则普通 merge。冲突自动 abort 且不创建 Work Tree；成功后从同步后的精确 SHA 创建中文任务分支。
 6. **授权无二次弹框** — 只认当前对话中的人类授权；Agent 自动使用 `--user-authorized` 或一次性凭证（提交入口除外：worktree 工单分支 commit 本地可逆，出现即放行），Hook 只纠偏和硬拦，不返回 ASK。
 7. **文档驱动、Hook 兜底** — Agent 优先依据本文件及路由规则主动调用标准入口；Hook 只在检测到绕过、缺授权、缺模式或危险 Git 操作时阻断，禁止让 Hook 自动同步、选择策略或推进正常状态机。
@@ -55,6 +55,8 @@
 任一项不满足，尤其可写任务尚未进入工单分支或目标路径指向 master 主检出区，立即停止写入，先通过唯一入口创建并进入任务 Work Tree。自检不得新增审批弹框；Hook 继续只在违规时兜底，不自动同步、选择策略或推进工作流。
 
 **例外（[ADR-0025](docs/adr/0025-doc-on-master-allowlist.md)）**：若写入目标仅是散文规格文档（根 `CONTEXT.md` + `docs/**/*.md`），不适用上述 worktree 自检——AI 可在本地 master 直改，落盘走 `scripts/commit-spec-on-master.sh -m "<描述>"`。`.claude/`（规则源）、代码、`docs/**/*.json` 契约仍适用自检。
+
+**本地个人配置例外（[ADR-0010](docs/adr/0010-local-master-is-user-integration-zone.md)）**：根 `CLAUDE.local.md` 与 `.codex/config.toml` 仅在 `git check-ignore` 明确命中时不适用上述 worktree 自检。Agent 必须保持文件未跟踪、不得输出其中凭证；路径不精确、未被忽略或属于其他本地文件时仍按普通写入任务处理。
 
 ## Agent skills
 

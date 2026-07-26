@@ -8,6 +8,7 @@
   - 2026-07-12，任务验收 commit 门槛移除（IK0E1A）：完成子 issue 即直接走 `commit-task-for-review.sh` 落盘 commit（无需 `--user-authorized`），用户确认环节后移到 merge 本地 master 前。
   - 2026-07-14，PreToolUse Hook 的 merge/pull 拦截改为分支感知（IK0SPN）：`mode_task_acceptance_git` 调用 `current_branch()` 区分 master 集成区与任务分支，master 上 `git merge origin/master` 和 `git pull` 不再被拦截，消除此前 master 双方分叉时 Hook 硬拦与无标准入口放行之间的死锁。任务分支上仍拦截并指向 `sync-task-from-origin.sh`。
   - 2026-07-25，文档白名单窄例外（[ADR-0025](0025-doc-on-master-allowlist.md)）：AI 可在本地 master 直改散文规格文档（根 `CONTEXT.md` + `docs/**/*.md`），落盘走 `scripts/commit-spec-on-master.sh -m "<描述>"`；规则源（`.claude/`）、代码、`docs/**/*.json` 契约仍必须走 task worktree。
+  - 2026-07-26，本地个人配置窄例外：根 `CLAUDE.local.md` 与 `.codex/config.toml` 仅在 `git check-ignore` 明确命中时允许 Agent 在本地 master 直改；两者保持未跟踪，其他 ignored 文件仍硬拦。
 
 > 授权交互方式已由 [ADR-0012](0012-agent-noninteractive-authorization.md) 更新：标准入口带 `--user-authorized` 时无二次确认，直接 Git 绕过仍由 Hook 硬拦。
 
@@ -19,6 +20,8 @@ PRD 会拆成多个子 issue。旧流程把每个 Agent 可写任务和工单分
 
 本地 `master` 是**用户本地集成区**：用户可以在这里开发、commit、整理或集成本地改动，Agent 不自动清理、stash、rebase 或发布。Agent 执行写入任务必须先使用唯一入口创建独立 task worktree 和结构化中文工单分支。
 
+本地个人 Agent 配置是窄例外：Agent 可以直接写根 `CLAUDE.local.md` 与 `.codex/config.toml`，但必须同时满足精确路径与 `git check-ignore` 命中。例外不扩展到 `.env`、其他 ignored 文件、相似文件名或未忽略的同名文件；个人配置不得暂存、提交或输出其中凭证。
+
 入口要求主 checkout 位于干净的 `master`，先 fetch `origin/master`，再按历史关系执行最小同步：本地包含远程则不改写，本地落后则 fast-forward，双方分叉则普通 merge。冲突时自动 abort 且不创建 Work Tree。同步成功后记录精确 SHA，并从该 SHA 创建任务分支，从而同时保留本地领先提交与远程最新提交。
 
 Agent 完成子 issue 后直接通过 `scripts/commit-task-for-review.sh -m "<message>"` 在任务分支落盘 commit（本地可逆，无需授权门槛），默认交付一个 commit 和验证结果。用户确认 commit 无问题后，Agent 才能通过 `scripts/merge-task-to-local-master.sh --user-authorized <任务分支>` 以 `git merge --no-ff` 合入用户本地 `master`；合入前本地 `master` 必须干净。用户决定发布时，仍通过同一入口从本地 `master` 当前状态创建结构化中文发布包装 Work Tree，再推 PR 到 `origin/master`。PR 合并进远程 `master` 必须单独授权。
@@ -27,6 +30,7 @@ Agent 完成子 issue 后直接通过 `scripts/commit-task-for-review.sh -m "<me
 
 - 用户保留本地 `master` 的自由度，可把多个子 issue 先集成到本地再统一发布模块 PR。
 - Agent 写入仍被隔离在 task worktree，不会污染用户本地集成区。
+- 个人可以在不修改团队规则内容的前提下，由 Agent 自动维护当前仓库的 Claude Code 与 Codex 本地配置；精确路径和 Git ignore 双重校验防止例外扩大。
 - `scripts/start-task-worktree.py` 是同步、命名与创建的唯一逻辑入口；`.sh` 仅负责跨环境寻找 Python 3。
 - 创建前要求本地 `master` 干净，但不要求它与远程完全相同；本地 ahead 是合法且必须保留的状态。
 - merge 冲突会中止开工，不允许 Agent 绕过同步后直接写入。
