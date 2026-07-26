@@ -10,7 +10,7 @@ AgentChatPanel 通过 Conversation 驱动 AgentRun，BottomDock 通过显式参�
 GenerationJob。二者需要共享 Project、GenerationJob、Asset 和状态推送基础设施，同时不能被
 压成同一条应用命令路径。
 
-Java Product API 已被确定为唯一公开控制面。Python Agent Worker、Java Generation Worker、
+Product API 已被确定为唯一公开控制面。Agent Worker、Generation Worker、
 供应商任务和运行时 checkpoint 都是内部实现，不得成为浏览器可见的事实来源。仓库现有 Demo
 中的 FastAPI 桩、内存 `JobStreamBus` 与按 Job 建立的临时 SSE 只作为迁移盘点，不定义目标协议。
 
@@ -24,23 +24,23 @@ Java Product API 已被确定为唯一公开控制面。Python Agent Worker、Ja
    - 请求携带客户端消息标识、自然语言内容，以及可选的 `reply_to_input_request_id`。
    - 新目标、修改、暂停、恢复、重试、澄清和授权都通过 Conversation 消息表达，不另设
      AgentRun 创建、推进、确认或恢复端点。
-   - Java 先持久化消息，再异步判断它应创建、继续、暂停或排队哪个 AgentRun。
+   - Product API 先持久化消息，再异步判断它应创建、继续、暂停或排队哪个 AgentRun。
    - 接口返回 `202 Accepted`、权威 `message_id` 与接受该命令后的 `cursor`，不等待 AgentRun
      或 GenerationJob 完成。
 
 2. **BottomDock**：`POST /api/projects/{projectId}/generation-jobs`
    - 请求只接受产品中性的生成类型、输入 Asset、参数与预期输出数量；供应商私有字段不得进入
      公开 DTO。
-   - Java 固定写入 `source=bottom_dock`，客户端不能提交或覆盖来源。
+   - Product API 固定写入 `source=bottom_dock`，客户端不能提交或覆盖来源。
    - 重试通过创建带 `retry_of_job_id` 的新 GenerationJob 表达，原 Job 终态不可改写。
    - 接口返回 `202 Accepted`、`generation_job_id` 与接受该命令后的 `cursor`。
 
-AgentRun 需要生成时，由 Python Agent Worker 提交内部 RunCommit，Java 校验并创建
+AgentRun 需要生成时，由 Agent Worker 提交内部 RunCommit，Product API 校验并创建
 `source=agent_run` 且关联 AgentRun 的 GenerationJob。AgentChatPanel 不直接调用 BottomDock
 端点，BottomDock 也不创建 Conversation 或 AgentRun。
 
-所有公开命令都必须携带 `Idempotency-Key`；键的存储期限、冲突响应和事务细节由后续的
-持久化与幂等决策负责，不在本 ADR 内预先绑定实现。
+公开命令优先使用领域原生身份；只有缺少原生身份的副作用命令才使用 `Idempotency-Key`。身份 scope、
+指纹、冲突响应、持久化与留存遵循 [ADR-0052](0052-cross-process-contracts-and-versioning.md)。
 
 ### 2. 查询以一致快照为恢复起点
 
@@ -77,7 +77,7 @@ Asset 查询返回产品控制的元数据和带明确 `expires_at` 的签名访
   `410 CURSOR_EXPIRED`；客户端必须重新获取快照，不允许静默跳到最新位置。
 - SSE 心跳使用注释帧，不写事件表、不占游标，也不作为业务进度。
 
-### 4. 事件是 Java 已接纳的产品事实
+### 4. 事件是 Product API 已接纳的产品事实
 
 每个事件使用下列稳定封套；不发送 JSON Patch、完整快照、供应商原始回调或框架内部消息：
 
@@ -117,7 +117,7 @@ Asset 查询返回产品控制的元数据和带明确 `expires_at` 的签名访
   `generation_job.progress_changed`、`generation_job.output_attached`；
 - Asset：`asset.created`、`asset.metadata_changed`。
 
-Agent 文本只发送 Java 已持久化并接纳的合并文本块，不逐 token 转发，不暴露原始 reasoning。
+Agent 文本只发送 Product API 已持久化并接纳的合并文本块，不逐 token 转发，不暴露原始 reasoning。
 `message_chunk_appended` 必须携带消息内单调序号或偏移，重复重放不得重复拼接。生成进度只有在
 供应商提供可靠事实时才发送，并进行节流；不得伪造百分比或预计时间。终态与输出关联不得节流
 或丢弃。
@@ -128,7 +128,7 @@ Agent 文本只发送 Java 已持久化并接纳的合并文本块，不逐 toke
 `input_request_id` 的不可改写 UserInputRequest。同一 AgentRun 最多一个活动请求；它不是独立
 聚合，因此相关事件仍使用 AgentRun 的 `aggregate_id` 和 `aggregate_version`。
 
-用户通过 Conversation 消息的 `reply_to_input_request_id` 回答。Java 只有在该标识仍是当前
+用户通过 Conversation 消息的 `reply_to_input_request_id` 回答。Product API 只有在该标识仍是当前
 活动请求时才接纳解锁；已回答、已过期或属于旧请求的迟到回复会保留为消息事实，但不能解除
 新的等待状态。公开 API 不提供确认按钮端点或布尔 `confirmed` 命令。
 
@@ -152,7 +152,7 @@ Agent 文本只发送 Java 已持久化并接纳的合并文本块，不逐 toke
 ## 后果
 
 - AgentChatPanel 与 BottomDock 保持两条清晰应用路径，但前端只维护一个 Project 级恢复协议。
-- Java 持久化产品事件成为查询、断线恢复和实时 UI 的共同事实来源，Worker 与供应商不能绕过。
+- Product API 持久化产品事件成为查询、断线恢复和实时 UI 的共同事实来源，Worker 与供应商不能绕过。
 - 需要事件日志、Project 游标、一致快照和保留窗口；其数据库、队列、幂等期限及重试实现由后续
   票据决定。
 - 现有按 Job 的内存 SSE 和直接转发 token/供应商状态的做法不能迁移为公开兼容层。
