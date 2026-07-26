@@ -216,6 +216,11 @@ Generation Worker 将供应商结果写入私有隔离区后形成的不可变�
 发布为正式 Asset。
 _Avoid_: 隔离对象即 Asset；Worker 直接发布；未审核先展示；在同一候选身份下覆写媒体内容。
 
+**AssetPublicationCommit（作品发布提交）**:
+Product API 将审核通过的 GenerationResultCandidate 一次性接纳为 Asset，并原子确认输出槽、Job 聚合
+状态、ProductEvent、Outbox 与 AuditRecord 的产品提交边界；供应商成本结算独立按 Attempt 收敛。
+_Avoid_: Worker 直接发布；部分创建作品事实；把成本结算失败用于回滚 Asset；以未发布抹去真实成本。
+
 **ProviderGenerationAttempt（供应商生成尝试）**:
 GenerationJob 为调用生成供应商而发起的一次可能计费的物理副作用事实；一个 Attempt 可覆盖一个或
 多个输出槽位，并以稳定身份独立绑定 CostReservation、调度许可与可对账结果。明确未接纳后的重试
