@@ -582,13 +582,13 @@ _Avoid_: Payment Gateway、jeepay（参考项目，非本项目服务名）
 本需求参考的开源支付系统（计全支付，SpringBoot 3.3.7），只移植其渠道 SDK 对接经验，不整体引入。
 _Avoid_: 当作本项目服务；认为要整套搬入或独立部署
 
-**充值链路（topup flow，Go 发起 Java 当通道）**:
-Go 充值页发起、Java blue-whale-pay 当纯支付通道、Go 仍是订单与 quota 账本唯一权威的支付数据流；Java 只负责下单与回调验签，结果经 Dubbo 回写 Go。
-_Avoid_: 把订单或账本权威挪到 Java；前端直发 Java 绕过 Go
+**充值链路（Top-up Flow）**:
+Go 先创建待支付 TopUp 并始终拥有订单与 quota 账本权威；Payment Gateway 只接受 Go 授权的支付请求，并在验签渠道回调后请求 Go 确认充值。
+_Avoid_: Payment Gateway 创建业务订单；前端绕过 Go 发起支付；Payment Gateway 直写 Go 数据
 
-**confirmTopUp**:
-Go 暴露给 Java 的 Dubbo 回写接口，带订单级幂等守卫（仅 top_ups.status==pending 时加 quota），是支付成功回写 quota 的唯一入口。
-_Avoid_: 裸调 IncreaseUserQuota 做回写（它非幂等，重复调会多加 quota，见 service/funding_source.go:61）
+**ConfirmTopUp（充值确认）**:
+Go 对支付成功证据的事务化、幂等接纳边界；同一成功事实只能将匹配的待支付 TopUp 完成并增加一次 quota。
+_Avoid_: 裸调 IncreaseUserQuota；由 Payment Gateway 标记订单成功或增加 quota；以 Epay/Dubbo 协议冒充领域命令
 
 ### Agent 协作语言
 
