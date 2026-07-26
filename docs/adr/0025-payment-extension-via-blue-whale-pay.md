@@ -1,6 +1,7 @@
 # 支付扩展：移植 jeepay 渠道核心重写 blue-whale-pay，Go 发起、Java 当通道
 
-> **状态：Superseded** — 本 ADR 描述的是未落地的历史目标；当前支付边界以 [确定 Node 支付通道与 Go 的稳定边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWF) 为准。
+> **状态：Superseded** — 本 ADR 描述的是未落地的历史目标。支付不属于 IK3UUX，范围以
+> [ADR-0055](0055-prelaunch-typescript-unification-scope.md) 为准；不得把本文或已取消的 IK3UWF 当作重构前置条件。
 
 blue_whale_api（Go，new-api 二开）要加微信/支付宝充值。开源 jeepay（SpringBoot 3.3.7，强依赖 MQ）是成熟支付系统，但与 blue_whale_server（SpringBoot 2.7.7，无 MQ）技术栈断层。决定**不整体搬入 jeepay**，只移植其渠道支付核心（微信 weixin-java-pay / 支付宝 alipay-sdk-java 的下单、签名、回调验签），用 server 现有栈重写为 **blue-whale-pay** 微服务；充值由 **Go 发起、Java 当纯支付通道**，Go 仍是订单（`top_ups`）与 quota 账本的唯一权威。
 

@@ -4,6 +4,10 @@
 - **日期**：2026-07-10
 - **决策者**：JJNNReno
 
+> **IK3UUX 范围状态**：保留“Project 是归属根、Asset 归属 Project”以及 Canvas 只保存共享布局；
+> 精确 NodeItem API 与浏览器合同由后续实施 Spec 按最小需要定义，见
+> [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
+
 ## 背景
 
 对标竞品 topview.ai。topview 是「workspace/项目」模型（用户→多项目→素材/场景/成片），canvas 本身即 asset 容器；而即梦是「工具生成」模型（灵感/生成/资产/画布并列，资产为用户级全局库）。两者信息架构不同，不能混抄。

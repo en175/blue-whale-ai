@@ -1,6 +1,8 @@
 # ADR-0046：调用错误证据、执行权与 AgentRun 终态分离
 
 - **状态**：Accepted
+- **IK3UUX 范围状态**：Superseded — 不迁移错误证据/策略/处置分层；结果无法确认时明确失败并允许
+  User 重试，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-25
 - **决策者**：KimJohn
 - **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)

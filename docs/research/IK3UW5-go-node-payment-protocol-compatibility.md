@@ -1,5 +1,9 @@
 # Go 与 Node 支付通道协议兼容性研究
 
+> **IK3UUX 范围状态**：Out of scope。本文仅作为未来支付工作研究记录；Go 支付代码、Node Payment
+> Gateway、ConfirmTopUp 与渠道接入不属于当前重构，见
+> [ADR-0055](../adr/0055-prelaunch-typescript-unification-scope.md)。
+
 关联议题：[IK3UW5：评估 Go 与 Node 支付通道的协议兼容方案](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UW5)
 
 ## 结论

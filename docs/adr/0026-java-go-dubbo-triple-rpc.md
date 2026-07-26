@@ -1,6 +1,7 @@
 # java<>go 统一 RPC：Dubbo3 Triple + dubbo-go
 
-> **状态：Superseded** — 本 ADR 描述的是未落地的历史目标；当前支付边界以 [确定 Node 支付通道与 Go 的稳定边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWF) 为准。
+> **状态：Superseded** — 本 ADR 描述的是未落地的历史目标。IK3UUX 不建设 Java/Go RPC 或支付通道，
+> 范围以 [ADR-0055](0055-prelaunch-typescript-unification-scope.md) 为准。
 
 blue_whale_server（Java 微服务）与 blue_whale_api（Go）当前完全不互通（独立 DB、无互调、路径前缀 `/api/user` `/api/agent` 两边都有）。决定用 **Dubbo3 Triple + dubbo-go** 建立跨语言 RPC：Java 与 Go 注册到同一 Nacos，共享 `.proto` 契约，走 Triple（HTTP/2 + protobuf）；顺带启用 Java 侧 parent 已备但业务零使用的 Dubbo（`blue-whale-common-dubbo-rpc`）。
 

@@ -1,13 +1,15 @@
 # Blue-Whale 前端
 
-一个面向 AI Agent / Canvas 交互的单页应用（SPA）。前端承载 Canvas、AgentChatPanel
-与 BottomDock 等入口；生成、审核、成本与审计由 Java Product API 与 Python 运行时组成的
-后端统一处理（详见 ADR-0015），生图入口共享统一的生图工具包与 GenerationJob 队列流水线。
+一个处于上线前研发阶段、面向 AI Agent / Canvas 交互的产品。目标运行时由 Next.js Web 与
+TypeScript `product-api`、`agent-worker`、`generation-worker` 组成；三者属于同一模块化单体代码库。
+现有 Go 计费系统保持独立且不在 IK3UUX 中改造。范围以
+[ADR-0055](docs/adr/0055-prelaunch-typescript-unification-scope.md) 为准。
 
 ## Language
 
 **Canvas**:
-应用的核心交互界面（工作台），承载素材节点编排、视口变换、Agent 创作。
+应用的核心交互界面（工作台），承载 Asset 素材与用户主动创建的文本便签的共享编排、
+个人视口变换和 Agent 创作。
 路由 `app/canvas/`：`page.tsx` 为编排层，UI 实现在 `app/canvas/_canvas/` 子模块下。
 _Avoid_: 画布（口语可用，文档中用 Canvas）、编辑器（指代不同概念）
 
@@ -20,15 +22,33 @@ _Avoid_: 对话区（口语可用，文档中用 AgentChatPanel）、编排器�
 曾指 Canvas 中与 Agent 交互的编排组件，对应旧文件 `components/AgentComposer.tsx`。
 Canvas 现已改用 AgentChatPanel，此术语不再用于指代当前右侧对话面板。
 
-**NodeItem**（画布素材节点）:
-画布上的一个素材单元（图片或文本），对应 `NodeItem` 类型（`_canvas/types.ts`）。
-承载位置、尺寸、内容，可被选中、删除、带入 Dock 再创作，或 @ 进 AgentChatPanel。
+**NodeItem**（Project 内可放入 Canvas 的资源）:
+Product API 管理的 `asset | text` 判别资源；`kind` 创建后不可改变。两类都有服务端身份、强版本、
+创建来源与最小审计信息，且都不承载位置、尺寸或层级。`asset` 必须引用已正式接纳的 `asset_id`，
+不得包含文本内容；`text` 必须包含合同限长的纯文本，不得包含 `asset_id`，只表示用户明确创建的
+标题、说明或创意便签。系统和 Agent 不得把推理、Brief、审核说明、任务状态或其他过程文字自动
+创建为 text NodeItem；text 也不自动成为生成素材或 Agent 上下文。
+Canvas 共享布局文档以 NodeItem ID 记录位置、尺寸与层级；从布局移除不删除 NodeItem，永久删除
+必须使用独立的条件式操作，并在仍被当前布局引用时拒绝。同一 Asset 可以对应多个独立 NodeItem。
+_Avoid_: 浏览器生成或推导 NodeItem ID；把布局信息或签名地址写入 NodeItem；给 text 写入 HTML 或
+隐式富文本；把过程文字创建为 NodeItem；把移出布局当作删除。
+
+**InitialPlacementStatus（NodeItem 首次放置状态）**:
+NodeItem 创建后的一次性流程状态：`pending`、`placed` 或 `dismissed`。它只记录首次放置流程的结果，
+不表示 NodeItem 当前是否在 Canvas；当前布局始终只由 Canvas 共享布局文档决定。Product API 接纳
+首次包含 pending NodeItem 的完整 Canvas PUT 时，必须在同一提交中保存布局并把状态改为 `placed`；
+用户明确选择“暂不放置”时改为 `dismissed`。`placed` 与 `dismissed` 都是终态，后续放入或移出
+Canvas 均不改变它。只有持有原创建请求或 GenerationJob 接纳回执的页面可以自动尝试首次放置；
+这是 Web 的多页面协调规则，不是服务端权限。
+_Avoid_: 从该状态推导当前布局；移出 Canvas 后重置为 pending；自动过期、自动删除、后台放置；
+在 Canvas 冲突后自动合并或绕过完整 PUT 增量放置。
 
 **Card**（对话卡片消息）:
-AgentChatPanel 消息流里的一种消息形态（`ChatMessage` 的 `card` 变体），
-表示一次生成结果（图片/视频）。**Card 与 NodeItem 是同一生成结果的两种视图**：
-Card 是结果在对话流里的呈现，NodeItem 是同一结果在画布上的呈现。
-_Avoid_: 把 Card 与 NodeItem 当作两个独立概念。
+Web 依据 Conversation、GenerationOutputSlot、GenerationJob 与 Asset 形成的界面投影；生成中、
+失败或取消的输出即使没有 Asset 也可以显示 Card。Card 没有服务端身份、强版本、存储表或修改接口；
+用于界面去重的 `projection_key` 只能由权威来源身份确定，不是产品资源 ID。Card 与 NodeItem 是
+不同概念：前者是可重建的界面投影，后者是 Product API 管理的 Project 资源。
+_Avoid_: 持久化 Card；为 Card 设计资源接口；让浏览器随机生成 `projection_key`；把 Card 当作 NodeItem。
 
 **BottomDock**（底部生成 Dock）:
 Canvas 底部的生成工具面板，由 `LeftToolbar` 的 ai-image / ai-video 工具触发，
@@ -40,8 +60,9 @@ Canvas 底部的生成工具面板，由 `LeftToolbar` 的 ai-image / ai-video �
 - **BottomDock**：纯生成工具，参数驱动，不暴露对话上下文。
 - **AgentChatPanel**：编排 + 生成，对话/技能/上下文驱动，不暴露细粒度参数。
 - **/generate（GenerationInbox）**：Agent 对话式生成，承载独立 Conversation 与恢复语义。
-三者产物都是 Card / NodeItem，**入口职责独立、是不同功能**；但执行层不各自维护独立生成路径，
-统一进入生图工具包与 GenerationJob 队列流水线（成本预留 + 内容审核 + 失败重试）。
+三者都统一进入生图工具包与 GenerationJob 队列流水线（成本预留 + 内容审核 + 失败重试）；
+Web 可从权威状态投影 Card，只有 GenerationJob 创建时已记录“进入 Canvas”意图的输出，才在
+Asset 正式发布时原子创建初始 NodeItem。**入口职责独立、是不同功能**。
 
 **生图工具包（generation toolkit）**:
 三个生图入口共享的执行层，与入口的产品职责边界正交。由三部分组成：
@@ -66,6 +87,16 @@ _Avoid_: 把 Canvas 当作顶层概念；把 Project 理解为包住全部对象
 GenerationInbox 允许并存多段独立 Conversation（新对话/历史切换），每段消息流独立排序与恢复。
 _Avoid_: 把消息直接挂到 Project；把每个 AgentRun 当作独立对话；为普通 Canvas Project 建立多个 Conversation。
 
+**ConversationMessage（正式会话消息）**:
+Product API 接纳的不可变用户或助手消息，拥有服务端身份，并按同一 Conversation 内的服务端顺序读取。
+刷新、重连或 Worker 重启不得丢失已接纳消息；本地草稿、临时流式片段和客户端时间不属于正式消息。
+_Avoid_: 用浏览器生成值或 SSE 到达顺序充当消息身份与排序依据。
+
+**CommandId（业务命令身份）**:
+写请求使用的稳定幂等键。同一业务操作的网络重试保持同一键和请求内容；Product API 返回首次结果，
+不得重复创建消息、任务、Asset 或其他产品事实。精确格式、摘要算法和保留期由后续实施 Spec 按最小需要定义。
+_Avoid_: 每次重试换键；把幂等键当资源身份、排序依据或权限凭证。
+
 **GenerationInbox**（生成收件箱）:
 每位 User 最多一个活动实例的系统用途 Project（`purpose=generation_inbox`，识别不依赖名称，改名不影响定位）；承载 /generate 页 Agent 对话式创作的 Conversation、AgentRun、GenerationJob 与产出 Asset。
 惰性创建：仅打开页面不创建，首条被系统接收的消息原子地查找或创建并持久化；从项目列表隐藏；删除为永久删除——物理移除其对话、生成记录与作品（保留最小审计事件），之后首条消息创建全新实例。
@@ -81,63 +112,24 @@ _Avoid_: 把收件箱当作普通 Canvas Project 展示或编辑；通过通用�
 _Avoid_: 访客、匿名 User、客户端自报 `userId`、把浏览器本地标识当作身份。
 
 **ContentReview（内容审核）**:
-Java Product API 对产品策略纳入审核范围的内容形成的安全决定；普通用户文字消息和提示词不做
+Product API 对产品策略纳入审核范围的内容形成的安全决定；普通用户文字消息和提示词不做
 独立前置审核，Agent 或生成供应商的安全结果可以成为后续 ReviewEvidence。受审内容可以复用匹配的
 既有结果或依据充分的证据，不要求人工逐条审批，也不等于每次都调用外部审核服务。
 内容决定只有 `pass` 或 `reject`；超时、不可用或无效证据属于审核运行故障，不得伪装成内容拒绝。
-规范化决定随关联产品事实保留并参与未来 Project 删除流程；最小化 AuditRecord 独立保留 365 天。
-同一 Project 内相同受审主体、内容摘要、模态、输入/输出方向和策略版本共享一个逻辑审核；其
-`pending` 只能进入不可变的 `decided` 或 `failed` 终态，终态失败后的 User 重试创建关联的新审核。
+审核明确通过后才可发布用户可见结果；审核无法形成决定时本次操作失败，由 User 重试。
 _Avoid_: 人工审核、把供应商审核结果直接当作产品权威、把产品决定理解为全量外部调用、审核不可用时默认通过。
 
-**ContentReviewPolicy（内容审核策略）**:
-Java Product API 形成 ContentReview 决定时采用的不可变、版本化规则包，包含适用模态与方向、
-产品判定规则、供应商配置引用、阈值、ReviewReasonCode 映射版本和证据要求。候选版本依次经过
-`draft`、`validated`、`active`、`retired`；新审核绑定创建时的活动版本，后续尝试和历史决定不漂移。
-_Avoid_: 原地修改已发布策略、让供应商配置隐式改变产品决定、回滚时改写既有审核或重审历史 Asset。
-
-**ReviewReasonCode（审核原因码）**:
-ContentReview 作出 `reject` 决定时记录的一个或多个产品级安全分类，稳定取值为
-`sexual_content`、`minor_safety`、`violence`、`self_harm`、`hate_or_harassment`、
-`illegal_or_regulated`、`privacy_or_sensitive_data`、`fraud_or_impersonation`、
-`cyber_abuse`、`prompt_attack`、`resource_abuse`、`custom_policy` 或
-`unclassified_policy_risk`。供应商标签必须经版本化映射转换；未知标签归入
-`unclassified_policy_risk` 并拒绝。ReviewReasonCode 只对具备安全运营权限的内部角色可见，
-普通 User 和公开 API 只得到稳定错误码与安全提示。
-_Avoid_: 供应商原始标签、把超时或不可用等运行故障当作审核原因码、未知标签默认放行、向普通 User 暴露内部原因码或命中规则。
-
 **ReviewEvidence（审核证据）**:
-Java Product API 形成 ContentReview 时采用的可验证事实，包括匹配内容与策略版本的既有决定、
+Product API 形成 ContentReview 时采用的可验证事实，包括匹配内容与策略版本的既有决定、
 专用审核服务结果或生成供应商自带审核结果；证据本身不授予内容通过资格。产品只持久化最小化、
 可追溯的证据引用和规范化字段，不保存供应商完整响应、命中原文或额外内容副本。
 _Avoid_: 审核决定、把任一供应商证据直接当作放行结果、把供应商原始响应当作长期证据存档。
 
-**ReviewAttempt（审核尝试）**:
-ContentReview 为取得证据而发起的一次供应商调用事实；同一逻辑审核可以因可重试故障包含多个
-追加式 ReviewAttempt。自动重试期间 ContentReview 保持 `pending`，尝试失败不等于产品拒绝；
-ContentReview 进入终态后，ReviewAttempt 不能改写其决定。
-_Avoid_: 把每次供应商重试当作新的内容审核、用 ReviewAttempt 直接决定内容通过、覆盖旧尝试记录。
-
-**ReviewWorkItem（审核工作项）**:
-ContentReview owner 发放、由 Generation Worker 的审核执行器处理的一次短租约外部审核步骤；它只
-返回 ReviewEvidence，并与 GenerationWorkItem 使用独立容量、故障隔离、lease/fence 和 Adapter。
-_Avoid_: 与生成任务共享容量池；由 Worker 作审核决定；Generation Reconciler 管理；审核失败触发重新生成。
-
 **OutputReleaseGate（输出释放门）**:
-Java Product API 在 Agent 文字变为 User 可见内容前形成的产品安全边界；供应商证据覆盖待释放前缀时
+Product API 在 Agent 文字变为 User 可见内容前形成的产品安全边界；供应商证据覆盖待释放前缀时
 可以流式释放，否则必须缓冲完整回复并在 ContentReview 明确通过后整体释放。
 完整回复的专用审核总预算为 5 秒；无法形成决定时丢弃未释放文字并返回安全错误，不进入后台审核。
 _Avoid_: 供应商直接向 User 流式输出、把流式安全信号直接当作产品决定、逐片调用外部审核服务。
-
-**AssistantDeliveryAttempt（助手交付尝试）**:
-一次 AgentAdvance 中尚未被 RunCommit 接纳的临时 Assistant 输出交付身份；其内容只用于实时展示与
-断线重连，不属于 Conversation、Snapshot 或后续模型上下文。详见 [ADR-0045](docs/adr/0045-provisional-assistant-delivery-runcommit-boundary.md)。
-_Avoid_: AssistantMessageStreamAttempt、把 Provider stream 当作交付身份、把 provisional 前缀当作 ConversationMessage、续接旧 Worker 持有的 Provider stream。
-
-**AssistantMessage（正式助手消息）**:
-RunCommit 从唯一胜出 AssistantDeliveryAttempt 创建的永久会话事实；只有它可以进入 Conversation、
-Snapshot 与后续模型上下文。详见 [ADR-0045](docs/adr/0045-provisional-assistant-delivery-runcommit-boundary.md)。
-_Avoid_: interrupted AssistantMessage、半成品消息、把 DeliveryAttempt 或 chunk 直接写入永久会话。
 
 **Asset（资产）**:
 一个必须归属 Project 的图片或视频文件单元，媒体内容身份不可变，由产品控制的对象存储持久化。
@@ -145,155 +137,47 @@ _Avoid_: interrupted AssistantMessage、半成品消息、把 DeliveryAttempt �
 不构成 Asset 身份或长期地址。
 用户上传的 Asset 在内容固定后执行一次机器 ContentReview；明确通过后可作为输入重复使用，
 不因每次生成或后续策略升级重复送审。编辑、换源或生成派生版本会创建新 Asset，并重新审核。
-上传审核自动恢复最多 15 分钟，期间只显示“素材处理中”且不可使用；耗尽后隔离对象再保留 24 小时
-供仅重试审核，到期仍未通过则删除并要求重新上传。
-供应商生成结果只有在 Java Product API 依据充分 ReviewEvidence 明确通过后才成为 Asset，继而
+上传内容必须在审核明确通过后才可使用；审核无法形成决定时本次上传失败，由 User 重新上传。
+供应商生成结果只有在 Product API 依据充分 ReviewEvidence 明确通过后才成为 Asset，继而
 可见、可下载或可作为后续输入；证据不足时只对该结果调用一次专用审核服务。
-**同一 Asset 可被多个视图引用** —— Card（对话流呈现）与 NodeItem（画布呈现）
-是同一生成结果的两种视图,二者引用同一个 Asset。
+**同一 Asset 可被多个消费者引用** —— Card 可以把它投影到对话流；一个或多个独立 asset NodeItem
+可以引用它并由 Canvas 布局放置。Card 不是产品资源，NodeItem 是 Product API 管理的 Project 资源。
 既包含用户上传的素材（作为生成输入）,也包含生成产出的结果（作为输出）,
 二者是同一种 Asset,以来源属性区分。
 重生成、编辑、换源或生成衍生版本时创建带来源关系的新 Asset，再切换视图引用；
 名称、标签等元数据可修改，访问 URL 可重新签发，但不改变 Asset 身份。
-_Avoid_: 把 Asset 与 NodeItem/Card 混为一谈 —— Asset 是文件实体,
-NodeItem/Card 是它呈现给用户的视图；在同一个 assetId 下覆写媒体内容。
+_Avoid_: 把 Asset、NodeItem 与 Card 混为一谈 —— Asset 是文件实体，NodeItem 是引用 Asset 的
+Project 资源，Card 是可重建的界面投影；在同一个 assetId 下覆写媒体内容。
 
 **AssetMention（@ 引用）**:
 用户消息对一个 Asset 的结构化引用，在 AgentChatPanel 输入器中以 pill 形态承载 assetId，
 消息文本中呈现为 `@[name]`；它是消息事实的一部分，随消息落定即不可变、无失效语义，
 Asset 后续状态变化由读取时校验兜底。
 同一 Conversation 内被 @ 引用过的 Asset 构成 Agent 读取放行（read_asset 白名单）的来源之一，
-与画布节点引用、本 AgentRun 生成产物并列；Agent 读取对话历史时获得每条消息的有序引用列表，
+与 Canvas 中 asset NodeItem 的引用、本 AgentRun 生成产物并列；text NodeItem 不自动进入该白名单。
+Agent 读取对话历史时获得每条消息的有序引用列表，
 据此精确读取对应 Asset；跨 Project、跨 User 或非 normal 状态的读取一律同构拒绝。
 _Avoid_: 把 @ 引用当作无 assetId 的纯文本提及；把 @ 引用与画布选中、生成参考图输入混为一谈；
 把引用当作可撤销的授权。
 
 **GenerationJob（生成任务）**:
-一次生图/生视频的后台任务。生命周期:`queued` → `processing` →
-`succeeded` | `partially_succeeded` | `failed` | `cancelled`。
-任务在**后台持久化**:用户刷新页面、切换 Project、关闭浏览器后任务仍继续执行,
-回到该 Project 仍可查到状态与结果。一个 GenerationJob 可产出一个或多个 Asset，
-每个 Asset 分别通过 Card / NodeItem 呈现。
-GenerationJob 必须归属 Project；由 AgentChatPanel 触发时关联 AgentRun，由 BottomDock
-触发时不关联 AgentRun。AgentRun 暂停或进入终态不级联改写已提交 Job；失败重试创建
-带重试关系的新 Job，原 Job 终态不可变。
-供应商结果等待 ContentReview 时，Job 仍为 `processing`，内部阶段为 `reviewing`；审核暂时不可用
-只重试同一隔离结果，不重新调用生成供应商，也不产生第二次生成费用。自动恢复窗口为 15 分钟；
-耗尽后原 Job 以 `CONTENT_REVIEW_UNAVAILABLE` 失败并封口，隔离结果再保留 24 小时供用户创建关联的
-GenerationReviewRetry；超期后删除隔离结果。
-取消请求只表达意图；只有供应商确认取消或产品能证明调用尚未发生时，Job 才进入 `cancelled`。
-取消确认前已完成的真实结果仍按成功或部分成功接纳，已产生的 Asset 永久保留。
-**Card 的展示状态是 Job 状态的视图映射**:`processing`→`generating`、
-`succeeded`→`normal`、`failed`→`failed`；`partially_succeeded` 中成功的输出为 `normal`，
-被 ContentReview 拒绝的输出槽位为 `failed` 且不创建 Asset；多输出任务仅部分通过时为
-`partially_succeeded`。供应商已产生的实际成本仍按事实结算。
-被拒绝的上传或生成媒体立即进入删除队列，并在一小时内从隔离对象存储清除；未释放的 Agent
-文字被拒绝后立即从内存丢弃，不进入 Conversation、产品事件或 Snapshot。
-缺失的输出槽位为 `failed`；`cancelled` 中已有 Asset 的输出为 `normal`，未产生结果的槽位为
-`cancelled`。
-_Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeItem 是结果视图;
-把 Job 与 Asset 混为一谈 —— Job 是过程,Asset 是它的产物。
+一次持久化的图片或视频后台任务。任务归属于 Project，页面刷新、浏览器关闭或服务重启后，
+已接纳状态与结果仍可恢复；同一请求或供应商回调重放不得产生重复任务、结果或费用。
+Worker 通过短租约领取任务；租约过期后可由新 Worker 重新领取，旧 Worker 的迟到写入由 fence 拒绝。
+外部调用结果无法确认时任务明确失败，由 User 在原 Card 上手动重试，不建设自动核对系统。
+_Avoid_: 把 Job 与 Card、NodeItem 或 Asset 混为一谈；用内存状态作为任务权威；自动复活终态任务。
 
 **GenerationOutputSlot（生成输出槽）**:
-GenerationJob 创建时固定的稳定输出身份，独立承接候选结果、ContentReview、Asset 或无结果终态；
-ProviderGenerationAttempt 必须在调用前声明覆盖的槽集合。
-_Avoid_: 运行中增删或重排槽位；覆盖成功槽；批量结果猜测映射；把一个槽发布为多个 Asset。
-
-**GenerationCancellationIntent（生成取消意图）**:
-Product API 对用户“停止 GenerationJob 后续工作”请求形成的幂等事实；它立即阻止新的供应商调用，
-但不证明已 dispatch 的调用已经取消。只有供应商确认取消或平台证明请求从未发出时，Job 才能进入
-`cancelled`；既有真实结果与成本继续按事实收敛。
-_Avoid_: 取消证明；抹除 ProviderGenerationAttempt；丢弃真实成本；以用户请求直接改写供应商事实。
-
-**GenerationReviewRetry（生成结果审核重试）**:
-原 GenerationJob 因审核恢复超时失败后，用户在 24 小时隔离期内创建的关联新 GenerationJob；它复用
-原结果，只重试 ContentReview 与发布，不创建 ProviderGenerationAttempt 或第二次生成费用。
-_Avoid_: 自动后台重试；重开原 Job；重新调用生成供应商；隔离结果超期后继续复用。
-
-**GenerationResultCandidate（生成结果候选）**:
-Generation Worker 将供应商结果写入私有隔离区后形成的不可变候选，关联原 Attempt、输出槽、交付身份
-与内容摘要，但尚不是用户作品。只有 Product API 验证来源且 ContentReview 明确通过后，才能一次性
-发布为正式 Asset。
-_Avoid_: 隔离对象即 Asset；Worker 直接发布；未审核先展示；在同一候选身份下覆写媒体内容。
-
-**GenerationDeliveryIdentity（生成交付身份）**:
-Product API 为一次 Worker 结果回报签发的稳定身份，绑定 Project fence、Job version、WorkItem、Attempt、
-输出槽、Schema version 与预期来源；同身份同摘要重放返回首次结果，同身份异内容必须冲突并停止。
-_Avoid_: Worker 自建重试身份；网络异常后换键；最后写入者获胜；用旧 lease 或 fence 提权。
-
-**AssetPublicationCommit（作品发布提交）**:
-Product API 将审核通过的 GenerationResultCandidate 一次性接纳为 Asset，并原子确认输出槽、Job 聚合
-状态、ProductEvent、Outbox 与 AuditRecord 的产品提交边界；供应商成本结算独立按 Attempt 收敛。
-_Avoid_: Worker 直接发布；部分创建作品事实；把成本结算失败用于回滚 Asset；以未发布抹去真实成本。
-
-**ProviderGenerationAttempt（供应商生成尝试）**:
-GenerationJob 为调用生成供应商而发起的一次可能计费的物理副作用事实；一个 Attempt 可覆盖一个或
-多个输出槽位，并以稳定身份独立绑定 CostReservation、调度许可与可对账结果。明确未接纳后的重试
-创建新 Attempt；`outcome_unknown` 只能核对原 Attempt，不能伪装成重新提交。
-_Avoid_: 把 GenerationJob 当成一次供应商调用；覆盖旧 Attempt；复用 Attempt 身份重发；
-把供应商 task id 当作 Attempt 身份。
-
-**GenerationProviderAdapter（生成供应商适配器）**:
-Generation Worker 中声明供应商能力、转换协议并把调用结果归一为标准证据的边界；不支持的幂等、
-查询、取消或回调能力必须显式缺失，结果不明必须如实返回 `outcome_unknown`。
-_Avoid_: 决定 Job 状态、重试、ContentReview、Asset 发布或费用结算；SDK 隐式重发；伪造供应商能力。
-
-**ProviderObservation（供应商结果观察）**:
-供应商回调或平台主动查询针对原 ProviderGenerationAttempt 形成的规范化、可去重结果证据；它只供
-Product API 验证和推进统一状态机，不直接授予作品发布或费用结算资格。相互冲突的 Observation
-形成 GenerationResultConflict，并进入原 Attempt 的核对流程。
-_Avoid_: 回调直接改 Job；轮询另建状态机；最后写入者获胜；把供应商原始响应当作产品决定。
-
-**GenerationAttemptReconciliation（生成尝试核对）**:
-ProviderGenerationAttempt 进入 `outcome_unknown` 后，围绕原 Attempt 通过同一幂等键、异步 task 查询、
-回调或账单证据收敛结果的持久恢复过程。只有能够证明不会重复生成或重复计费时才可安全恢复；核对
-期限耗尽后 GenerationJob 按失败收口，禁止以队列重试自动创建新 Attempt。
-_Avoid_: 把超时当作供应商未接纳；换幂等键重发；无证据释放 CostReservation；把核对伪装成重试。
-
-**GenerationRetryPolicy（生成重试策略）**:
-GenerationJob 创建时固定的不可变策略版本，由 Product API 据此按错误类别、次数、退避、绝对期限与
-预算统一决定 `retry`、`reconcile` 或 `fail`。每次真实重发创建新 ProviderGenerationAttempt 与
-CostReservation；结果不明只核对，策略耗尽后原 Job 永久收口。
-_Avoid_: Provider SDK 隐式重试；运行中漂移策略；复用 Attempt 重发；终态 Job 自动复活。
-
-**GenerationDeadlineSet（生成期限集合）**:
-Product API 以数据库绝对时间分别持久化的 Job 执行、Attempt 结果核对、ContentReview 恢复、隔离对象
-保留与费用核对边界；各期限只收口自身职责，不能相互替代。
-_Avoid_: Worker 本地累计时长；把 lease 过期当作供应商失败；把传输 timeout 当作未 dispatch；
-以 Job 终态截断迟到成本核对。
-
-**GenerationJobTerminalSeal（生成任务终态封口）**:
-Product API 接纳 GenerationJob 终态后形成的不可逆封口；它保持用户可见状态简单稳定，并关闭原 Job
-的后续推进资格。迟到的 ProviderGenerationAttempt 与成本证据可以继续核对和结算，但不得重开或
-改写原 Job。
-_Avoid_: 以迟到回调复活 Job；把内部恢复阶段暴露为公开状态；终态后重新取得原 Job 执行权。
-
-**GenerationWorkItem（生成工作项）**:
-Product API 从 MySQL 权威事实发放给 Generation Worker 的短租约单步骤执行单元，固定关联 Job、
-Attempt、输出槽集合、动作、fence 与 deadline。等待期间不持有执行权；恢复与异常核对只重新领取
-尚未完成的 WorkItem，并遵循同一幂等接纳流程。
-_Avoid_: 认领整个 Job 长时间执行；以内存 timer 作为权威；Reconciler 绕过 WorkItem；无 fence 回报。
-
-**GenerationReconciler（生成核对器）**:
-GenerationJob owner 基于 MySQL 权威事实发现遗漏、过期 lease 与到期动作，并通过正常命令幂等恢复
-缺失 GenerationWorkItem 的持久修复规划器；通知全部丢失不影响其巡检恢复能力。
-_Avoid_: 直接调用供应商、审核或对象存储；发布 Asset；处理其他 owner 的费用或审核记录；万能核对器。
+GenerationJob 创建时固定的输出位置，用于让多输出任务稳定关联 Card、审核结果与 Asset。
+重试可以关联原输出槽，但必须创建新的 GenerationJob；成功结果不得被后续重试覆盖。
+_Avoid_: 运行中增删或重排槽位；由 Web 猜测结果映射；在同一槽位发布多个 Asset。
 
 **AgentRun（创作运行）**:
-围绕一个创作意图持续推进、可跨多轮对话暂停与恢复的工作单元；它拥有创作推进状态，但不拥有
-InvocationAttempt 或 GenerationJob 的完整生命周期。终态为 `completed`、`superseded`、`failed`、
-`cancelled` 或专用 `recovery_failed`，均不可重开。
-_Avoid_: 把每条用户消息都当作新的 AgentRun；把 AgentRun 与具体的 GenerationJob 混为一谈；新增模糊的 `timed_out` 或 `system_cancelled` 终态。
-
-**AgentRunTerminalSeal（运行终态封口）**:
-Product API 接纳 AgentRun 终态后形成的不可逆封口；它关闭旧 Run 的推进资格，但不阻止其他 owner
-的既有聚合与运营事实继续收敛。详见 [ADR-0049](docs/adr/0049-agent-run-terminal-seal-and-independent-convergence.md)。
-_Avoid_: 重开终态 Run、通用 `agent_run.updated` 事件、把独立聚合收敛误报为 Run 进展、阻止新消息创建新 AgentRun、把 Project 删除映射为 AgentRun 终态。
-
-**AgentRunCancellation（运行取消事实）**:
-Product API 对“停止继续推进 AgentRun”的幂等产品命令及其 `cancelled` 终态事实；它不证明 Provider、
-InvocationAttempt 或 GenerationJob 已实际取消。详见 [ADR-0047](docs/adr/0047-agent-run-user-cancellation-boundary.md)。
-_Avoid_: Provider 取消证明、GenerationJob 终态、RunCommit、`cancelling` AgentRun 状态、删除迟到证据。
+围绕 Conversation 中一个创作意图推进的持久工作单元。已接纳消息与用户可见结果由 Product API 保存；
+Worker 崩溃后可以按当前权威状态重新领取，旧 Worker 不得覆盖新结果。完成、失败或取消后不自动重开；
+后续用户输入需要继续处理时，由 Product API 明确创建或继续相应运行。
+_Avoid_: 把每条网络请求或模型调用当作独立 AgentRun；从 Worker 本地状态推导产品终态；
+为结果不明建设自动迟到证据收敛。
 
 ### Agent 运行配置
 
@@ -340,7 +224,7 @@ _Avoid_: Runtime Skill、内部 Rule、无修饰的“Skill”（在运行时契
 
 **CreativeSkillActivation（创作技能激活记录）**:
 AgentRun 所属、可审计且不可变的 Creative Skill 版本选择事实，记录来源与结构化原因；`forced_use`
-在创建时接纳，`auto` 只随 RunCommit 接纳。详见 [ADR-0050](docs/adr/0050-stateless-agent-advance-and-invocation-boundary.md)。
+在创建时接纳，`auto` 只在 Product API 接纳本轮结果时落定。
 _Avoid_: `activations[]`、独立 `activate` 写接口、普通 metadata、AgentActionProposal、多 Creative Skill 组合、运行中切换版本、自由文本理由。
 
 **AutoCreativeSkillCandidate（自动候选）**:
@@ -354,17 +238,11 @@ _Avoid_: Worker 发明候选外 Creative Skill、把非空资格池当作强制�
 _Avoid_: API Key、动态价格目录、模型供应商原始配置、用通用字符估算冒充所有模型的精确 token 数、流中断且 usage 缺失时按零消耗。
 
 **RuntimeBudgetPolicy（运行预算策略）**:
-Product API 为 AgentRun 固定的版本化硬限制，统一约束请求、单次 AgentAdvance 与跨推进累计预算；
-Runtime 只能在其范围内执行或进一步收紧。
-_Avoid_: Worker 重启后计数归零、把本地计数当跨进程权威、把 RuntimeBudgetPolicy 放进 RuntimeCheckpoint、运行中采用新策略追溯改写旧 Run。
-
-**RuntimeBudgetSnapshot（运行预算快照）**:
-Product API 根据 RuntimeBudgetPolicy 与已持久化消耗形成的当前可用预算投影；它供 Runtime
-本地 fail-fast，不授予新的 Provider dispatch 权限。
-_Avoid_: 把快照当预授权重试额度、混淆 lease 与预算、让等待外部产品结果或无执行者空闲时间消耗活动执行预算、用单一模糊 `deadline` 覆盖四种语义、以 Worker 墙钟决定终态。
+Product API 为 AgentRun 固定的 Provider 调用、上下文与成本硬限制；Worker 只能在其范围内执行。
+_Avoid_: Worker 重启后计数归零；把本地计数当权威；用户确认后突破系统硬限制。
 
 **ToolGrant（工具授权声明）**:
-Bundle 对平台工具注册表的版本化允许子集，只赋予 Agent 提议动作的资格；每次副作用仍由 Java Product API 确定性接纳。
+Bundle 对平台工具注册表的版本化允许子集，只赋予 Agent 提议动作的资格；每次副作用仍由 Product API 确定性接纳。
 _Avoid_: 已授权命令、模型输出即执行、绕过 GenerationAuthorizationGate。
 
 **ToolDefinition（工具定义）**:
@@ -384,129 +262,28 @@ BundleVersion 内所有资源身份、版本、内容摘要、装载方式与已
 _Avoid_: 可变文件目录、网络资源目录、未校验的相对路径列表。
 
 **ReadEvidence（资源读取证据）**:
-Worker 单次资源读取的证据（`resource_id` / `revision` / `content_digest` / `token_estimate` / `origin`），随 commit 以 `bundle_evidence` 与 `usage` 同通道回传 Java；Java 当前仅 `log.info` 记录条数、不持久化。
+Worker 单次资源读取的最小证据（资源身份、版本、内容摘要与来源），用于确认运行时读取的是已固定资源；
+不要求在 IK3UUX 中建设独立证据存储或长期生命周期。
 _Avoid_: 资源正文、私有文件路径、Bundle / ModelProfile / CreativeSkill pin 回显。
 
 ### Agent 运行机制
 
-**Agent Runtime Executor（Agent 运行执行器）**:
-从已接纳 RuntimeCheckpoint 恢复并执行一次 AgentAdvance 的无状态角色；它不拥有 AgentRun 或任何
-产品事实的最终写入权威。
-_Avoid_: AgentRun 最终状态权威、常驻 Run Actor、持久工作流引擎、把模型 step / 工具中间状态 / 流式 chunk 当作 checkpoint。
-
-**ProjectOwnershipFence（Project 所有权围栏）**:
-Product API 对 Project 是否仍有资格接纳新产品事实维护的权威前置条件；关闭后 Runtime 只能回报既有
-调用证据，不能继续推进或创建 Project 产品投影。
-_Avoid_: 把 Project 删除当作 AgentRunCancellation、让 Runtime 决定删除状态、删除围栏后接纳新产品投影、在本边界推导 Conversation 独立删除语义。
-
-**AgentAdvance（Agent 单次推进）**:
-AgentRun 从一个已接纳恢复点推进到下一个产品边界的稳定逻辑轮次；claim 与 lease reclaim 复用其
-`advance_id`，RunCommit 接纳后该轮次结束。
-_Avoid_: 只按 checkpoint 推导 `advance_id`、每次 claim 生成新身份、Worker 随机生成 `advance_id`、长驻执行会话、逐 step checkpoint。
-
-**RunCommit（运行提交）**:
-Product API 接纳 AgentRun 推进事实的唯一原子边界，将 RuntimeCheckpoint、一个判别式 outcome 与可选
-附属事实纳入同一提交；每个 AgentAdvance 最多接纳一次。
-_Avoid_: Worker 自造独立 `commit_id` 领域身份、把传输关联 ID 当作新提交资格、把 RunCommit 误称为 Product API 的唯一写接口、独立 Activation 写事务、`accepted_actions`、`activations[]`、部分提交、拼接多个 DeliveryAttempt、在 commit 前创建 ConversationMessage。
-
-**RunCommitReceipt（运行提交回执）**:
-Product API 为首次接纳的 `(advance_id, request_digest)` 保存的不可变响应；精确回放只返回该回执，
-不构成新的提交或产品变化。
-_Avoid_: 把幂等回放当作新 RunCommit、重算首次响应、回放时补发事件、仅按传输 request ID 去重。
-
-**SettlementOnlyRunCommit（仅收敛运行提交）**:
-尚未终态的 AgentRun 在执行 cutoff 后，只使用 cutoff 前已持久化成功结果完成的普通 RunCommit；
-它不产生新的外部执行、proposal 或 outcome 类型。
-_Avoid_: 对终态 Run 使用、cutoff 后补发模型请求、使用 cutoff 后才成功的结果、接受会启动 GenerationJob 的新 proposal、绕过 fence、第二次 RunCommit。
-
-**RuntimeInvocation（运行时外部调用）**:
-AgentAdvance 内具有成本或结果不可重建风险的逻辑外部调用，以 `(advance_id, call_slot)` 唯一定位；
-由 GenerationJob 拥有的供应商调用不属于它。
-_Avoid_: 把 `request_digest` 拼进身份、用 AI SDK step ID / Provider response ID / 随机 UUID 定位调用、分歧时静默创建新 Invocation、重复记录 GenerationJob / ProviderTask 已拥有的调用事实。
-
-**CallSlot（调用槽位）**:
-Blue Whale Runtime 为 AgentAdvance 内每个逻辑外部调用分配的确定性语义位置；它不依赖进程、
-SDK 或 Provider 私有身份。
-_Avoid_: Provider 私有标识、随进程变化的计数、让 SDK 绕过 InvocationLedger 自动重试、把一次协议修复覆盖原模型槽位。
-
-**InvocationCoordinator（调用协调职责）**:
-Runtime 在所有 RuntimeInvocation 外围承担的统一协调职责，确保每次物理 dispatch 都先取得 Product API
-权威 InvocationAttempt 与 AttemptPermit；该名称不预设代码拓扑。
-_Avoid_: 只在进程启动时读取一次策略后自行重试、两个 Worker 并发创建 attempt、让 Adapter 或 SDK 直接获得 retry 权威、把职责名称当作代码拓扑。
-
-**AgentRunLeaseTakeover（运行租约接管）**:
-Product API 在新 Worker 实际 claim 过期 lease 时完成的 AgentAdvance 执行权转移；它更新 Run fence，
-但不把自然 lease expiry 本身解释为产品状态变化。详见 [ADR-0048](docs/adr/0048-time-deadline-and-lease-facts.md)。
-_Avoid_: 把 expiry 当 takeover、生成新 `advance_id`、把接管当 failed / cancelled、撤销已消费 Permit 来伪造未 dispatch。
-
-**AttemptPermit（调用尝试许可）**:
-Product API 为一次可能产生 Provider 执行或计费的 InvocationAttempt 签发的受限单次能力；它绑定请求、
-执行边界与成本上界，并必须在物理 dispatch 前消费。
-_Avoid_: 把 Permit 当作多次调用额度、准入后修改请求、使用过期 fence、先 dispatch 再补 Permit、让 reconciliation 查询复用为新执行许可、撤销已消费 Permit 来伪造未调用。
-
-**RuntimeAdapter（运行时适配器）**:
-可替换的模型或远程只读工具协议实现，负责规范化请求、结果与调用证据；它不拥有持久状态、
-调用身份、retry 或 AgentRun 决策权。
-_Avoid_: `retryable: true` 作为 Adapter 决策、运行中静默更换 Adapter、Provider / SDK 私有对象跨边界、以 telemetry 事后补记未获准的调用。
-
-**InvocationErrorEvidence（调用错误证据）**:
-RuntimeAdapter 对 InvocationAttempt 错误事实的版本化安全记录；它只描述观察证据，不决定 retry、
-fallback 或 AgentRun 终态。
-_Avoid_: `retryable`、`shouldFailRun`、原始 Provider payload、不受控错误消息、堆栈、提示词、凭据或 Secret。
-
-**RuntimeErrorPolicy（运行时错误策略）**:
-Product API 为 AgentRun 固定的版本化错误处置规则，将 InvocationErrorEvidence 映射为允许的
-RuntimeErrorDisposition。
-_Avoid_: Worker 本地默认策略、运行中切换策略版本、仅凭 HTTP 状态码决定 Run 终态、把可选 retry 当作强制 retry。
-
-**RuntimeErrorDisposition（运行时错误处置）**:
-Runtime 按 RuntimeErrorPolicy 产生的内部控制分类：`retry`、`reconcile`、
-`await_authoritative_state`、`stop_fence_lost` 或 `terminal_candidate`；它不是产品状态。
-_Avoid_: 第五种 AgentAdvance 状态、Adapter 直接返回处置、把 fence 丢失或 outcome_unknown 当作 failed。
-
-**AgentRunFailure（运行失败事实）**:
-Product API 通过 RunCommit 接纳的 AgentRun `failed` 终态事实，关联稳定错误身份、证据与策略版本；
-它表示 Run 无法安全继续，不表示某次 Provider 调用一定失败。
-_Avoid_: 原始 Provider 错误、Worker 堆栈、自由文本用户消息、从 InvocationAttempt 状态直接推导 failed、迟到结果自动重开终态 Run。
-
-**InvocationAttempt（调用尝试）**:
-RuntimeInvocation 下单次可能越过 Provider 边界并产生执行或计费的追加式事实；它区分未 dispatch、
-执行中、成功、确定失败与结果不明，不被 retry 覆盖。
-_Avoid_: retry 覆盖原 attempt、让 `outcome_unknown` 的 attempt 复用原成本预留、把 reconciliation 当作新调用或 Provider attempt、用过期 AgentRun lease 创建 attempt、让迟到证据回报权限升级为产品状态写权限。
-
-**InvocationLedger（调用台账）**:
-Product API 拥有的 RuntimeInvocation 与 InvocationAttempt 持久运营记录；它保存外部调用与结果不明
-事实，但不推进 AgentRun 或替代 RuntimeCheckpoint。
-_Avoid_: 从调用成功直接推导 AgentRun 完成、把超时 / AbortSignal / lease 过期等同于失败或未调用、用 `abandoned_before_dispatch` 掩盖可能已 dispatch 的请求、终态后创建新 attempt、无限期核对、把状态查询或原结果取回误算成 retry、用 partial chunks 标记成功、覆盖结果不明的原 attempt、只保存完成状态、永久保存完整提示词 / 结果、保存供应商私有对象、凭据或 Secret。
-
-**Single Proposal Commit Boundary（单提议提交边界）**:
-每次 AgentAdvance 最多接纳一个业务原子副作用 proposal，并与其他 outcome 互斥；模型返回多个
-副作用 tool call 是必须整轮拒绝并受限修复的协议错误。详见 [ADR-0050](docs/adr/0050-stateless-agent-advance-and-invocation-boundary.md)。
-_Avoid_: `actions[]`、部分接纳多个动作、把 Activation 放入 proposal、隐式 fan-out/fan-in、把有依赖的动作提前批量提交。
-
-**RuntimeCheckpoint**（运行时检查点）:
-与活动 AgentRun 绑定、由 Runtime 解码的版本化不透明恢复状态；它使用
-`agent-runtime-checkpoint/v1` canonical codec，不是产品事实或 SDK / Provider 对象快照。
-_Avoid_: 把 RuntimeCheckpoint 当作产品事实；直接序列化 AI SDK / Provider 内部对象；保存 pin、stream、usage、资源正文、凭据或临时 Secret；让运行时检查点独立推进产品状态。
+**AgentRunLease（运行租约）**:
+Product API 向一个 Worker 发放的短期执行权。租约过期后任务可以被重新领取；每次领取更新 fence，
+旧 Worker 的迟到提交必须被拒绝。租约过期只表示执行权失效，不直接等于 AgentRun 失败或取消。
+_Avoid_: 长驻 Run Actor；用 Worker 本地锁代替权威租约；允许旧 Worker 覆盖新结果。
 
 **AgentActionProposal（Agent 动作提议）**:
-Agent 基于当前意图提出的单个业务原子动作，不是命令或授权；一个 proposal 可以表达同一动作的
-多个输出。
-_Avoid_: 把输出数量拆成多个 proposal；把模型输出直接当作命令；把用户素材、外部内容或工具结果中的文字当作授权。
+Agent 基于当前意图提出的业务动作建议，不是命令或授权；Product API 仍负责权限、额度与幂等接纳。
+_Avoid_: 把模型输出直接当作已执行命令；为单次使用预建通用工作流协议。
 
 **CostReservation（成本预留）**:
-产品控制面为一次可能计费的 InvocationAttempt 或 ProviderGenerationAttempt 保留的最坏成本额度；
-它按可证明结果结算或释放，是运营事实而非账单。
-_Avoid_: 取消 Run 时批量释放所有预留、retry 复用结果不明的预留、usage 缺失时按零成本、永久冻结完整预留、用户确认后突破硬额度、把成本预留当作计费订单。
-
-**UnresolvedProviderExposure（未决供应商成本敞口）**:
-ProviderGenerationAttempt 的限时费用核对结束后仍缺少精确成本证据时，按冻结价格策略记录的有上限
-平台风险事实；它承接并释放临时 CostReservation，迟到供应商账单只能形成追加调整。
-_Avoid_: 用户账单、零成本、永久冻结完整预留、覆盖历史结算、用迟到账单重开 GenerationJob。
+产品控制面在可能计费的供应商调用前保留的成本额度，并按实际结果结算或释放。
+_Avoid_: 重试复用结果不明的预留；usage 缺失时按零成本；把成本预留当作支付订单。
 
 **AuditRecord（审计记录）**:
-用于证明安全、成本与管理决策链的不可变记录，与产品事件和普通运行日志分离；它只保存最小必要
-的主体、目标、决定、策略版本与关联标识，不承载原始用户内容或凭证。
+用于记录必要安全、成本与管理决定的最小事实；它与产品事件和普通运行日志分离，
+不保存原始用户内容、供应商完整响应或凭据。
 _Avoid_: 把 AuditRecord 当作产品事件、调试日志或原始提示词存档。
 
 **GenerationAuthorizationGate（生成授权门）**:
@@ -525,10 +302,10 @@ Conversation 中引用该请求标识的自然语言消息回答，已过期或�
 _Avoid_: 确认按钮、无请求标识的隐式解锁、把 UserInputRequest 当作独立运行任务。
 
 **展示边界(画布 vs 对话)**:
-Canvas 只承载 Asset(图片 / 视频)节点 —— 即生成素材(中间结果或最终结果)。
+Canvas 承载 Asset 素材节点与用户主动创建的标题、说明或创意便签。
 所有过程性文字内容(Brief 摘要、Skill 推荐、脚本 / 分镜、图片理解摘要、Review、
-visible_reasoning 思考过程)都在 AgentChatPanel 对话流里以文字或文字卡展示,
-**不进画布**。一句话:**画布 = 素材,对话 = 过程**。
+visible_reasoning 思考过程、审核说明、任务状态)都在 AgentChatPanel 对话流里以文字或文字卡展示，
+系统和 Agent 不得自动把这些内容创建为 text NodeItem。一句话:**Canvas = 素材与用户便签，对话 = 过程**。
 确认 / 修改 / 重试一律通过对话自然语言表达，并遵循 GenerationAuthorizationGate，
 画布节点与对话区都**不设确认按钮**。
 _Avoid_: 把 Brief / Skill / 分镜 / Review 做成画布节点;在画布或对话里加确认按钮;
@@ -540,7 +317,8 @@ _Avoid_: 原型、demo、试验（这些含义更宽）
 
 ### 计费与货币
 
-> 计费域术语适用于 `blue_whale_api`（开源 new-api 二开）。统一 RMB 决策见 [ADR-0021](docs/adr/0021-unified-rmb-billing.md)。
+> 计费域术语适用于 `blue_whale_api`（开源 new-api 二开）。IK3UUX 不迁移或改造该 Go 领域，
+> 只在核心生成流程中复用现有能力。统一 RMB 决策见 [ADR-0021](docs/adr/0021-unified-rmb-billing.md)。
 
 **quota（额度）**:
 new-api 内部中性计费单位（无货币属性，类比游戏币）；默认锚点 500000 quota = $1（`QuotaPerUnit`）只是换算系数，非 quota 固有的美元属性。所有扣费、充值、余额最终落到 quota 整数。
@@ -565,38 +343,6 @@ _Avoid_: 把按秒计费当作二开新功能
 **ratio_sync（上游价格同步）**:
 从 models.dev 拉上游官方定价（USD）的功能，手动触发（非自动 cron）。**保持美元锚点不动**：拉 USD 官方价 → ratio，不改造成拉¥存¥。美元模型（claude 等）上游有官方 USD 价，自动同步正常。
 _Avoid_: 把 ratio_sync 当作自动 cron；为统一 RMB 改造它拉¥存¥；在 RMB 体系下直接禁用它
-
-### 支付（payment）
-
-> 支付域术语适用于 `blue_whale_api`（Go，充值/quota）与 Payment Gateway（支付通道）。
-
-**Payment Gateway（支付网关）**:
-在 Go 继续拥有订单与 quota 账本权威的前提下，负责对接微信/支付宝渠道并回传已验证支付结果的独立支付通道。
-_Avoid_: blue-whale-pay（历史 Java/Dubbo 目标名称）、订单服务、账本服务
-
-**blue-whale-pay**（历史术语，已废弃）:
-曾指规划中的 Java 支付通道；Node.js/TypeScript 目标架构统一使用 Payment Gateway，不再以此名称指代当前目标单元。
-_Avoid_: Payment Gateway、jeepay（参考项目，非本项目服务名）
-
-**jeepay**:
-本需求参考的开源支付系统（计全支付，SpringBoot 3.3.7），只移植其渠道 SDK 对接经验，不整体引入。
-_Avoid_: 当作本项目服务；认为要整套搬入或独立部署
-
-**充值链路（Top-up Flow）**:
-Go 先创建待支付 TopUp 并始终拥有订单与 quota 账本权威；Payment Gateway 只接受 Go 授权的支付请求，并在验签渠道回调后请求 Go 确认充值。
-_Avoid_: Payment Gateway 创建业务订单；前端绕过 Go 发起支付；Payment Gateway 直写 Go 数据
-
-**ConfirmTopUp（充值确认）**:
-Go 对支付成功证据的事务化、幂等接纳边界；匹配的待支付 TopUp 只能完成并增加一次 quota，已成功且证据一致时只返回确认结果。
-_Avoid_: 裸调 IncreaseUserQuota；由 Payment Gateway 传入 quota 或标记订单成功；以 Epay/Dubbo 协议冒充领域命令
-
-**TopUpConfirmation（充值确认凭证）**:
-Go 对一次规范化支付成功证据及其接纳结果形成的不可变记录，用于识别幂等重放、冲突证据和渠道交易号复用。
-_Avoid_: TopUp；Payment Gateway Inbox 事件；可被覆盖的渠道回调日志
-
-**PaymentReconciliation（支付对账）**:
-已付款事件因 TopUp 失败、过期或证据冲突而不能自动接纳时的人工收敛过程；事件只能以成功到账、完成退款或人工确认驳回之一封口。
-_Avoid_: 自动复活终态 TopUp；无限挂起；超时丢弃；停止重试即视为处理完成
 
 ### Agent 协作语言
 

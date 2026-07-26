@@ -3,6 +3,10 @@
 - **状态**：Accepted
 - **日期**：2026-07-14
 
+> **IK3UUX 范围状态**：Limited — 只保留短数据库事务、稳定幂等键、持久任务与简单 lease/fence；
+> Outbox/Reconciler、精确幂等 scope、长期回执和结果不明收敛不作为实施前置，见
+> [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
+
 ## 背景
 
 ADR-0015 已确定 Java Product API 是唯一公开产品控制面，Python Agent Worker 与 Java

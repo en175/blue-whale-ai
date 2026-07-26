@@ -3,6 +3,10 @@
 - **状态**：Accepted
 - **日期**：2026-07-14
 
+> **IK3UUX 范围状态**：Limited — 只保留 Product API 是唯一控制面，以及页面刷新/重连后能恢复
+> 已接纳状态；Snapshot、SSE、路径、状态码和分页形状由后续实施 Spec 按最小需要定义，见
+> [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
+
 ## 背景
 
 AgentChatPanel 与 BottomDock 都会在同一 Project 内产生长耗时工作，但两者的产品职责不同：

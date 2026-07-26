@@ -1,12 +1,15 @@
 # ADR-0051：Node Generation Worker 的单步执行、供应商尝试与分域恢复边界
 
 - **状态**：Accepted
+- **IK3UUX 范围状态**：Limited — 只保留 MySQL 持久任务、短 lease/fence、重复回调去重与 Provider
+  适配；WorkItem/Reconciler、多期限、结果不明核对和 24 小时审核恢复不实施，见
+  [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-26
 - **决策者**：KimJohn
 - **关联工单**：[确定 Node Generation Worker 的执行与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWE)
 - **技术选型前置**：[评估 Generation Worker 的 Node.js 队列与供应商适配方案](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UW2)
 - **关联决策**：[ADR-0026 生成媒体审核失败恢复](0026-content-rejected-generation-output-is-failed-slot.md)、[ADR-0029 ContentReview 契约](0029-content-review-separates-decision-from-failure.md)、[ADR-0038 统一生成流水线](0038-generation-toolkit-and-image-direct-retirement.md)、[ADR-0048 时间、Deadline 与 Lease](0048-time-deadline-and-lease-facts.md)
-- **后续边界**：[确定 ProjectDeletionFence 与异步物理清理模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK40DP)
+- **历史后续**：ProjectDeletionFence 调查已从 IK3UUX 取消，不再构成前置。
 
 ## 背景
 

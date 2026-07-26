@@ -1,6 +1,8 @@
 # ADR-0048：Timeout、Deadline、Lease 与 Cancellation 分属不同事实
 
 - **状态**：Accepted
+- **IK3UUX 范围状态**：Superseded — 只保留短 lease/fence 及旧 Worker 写入拒绝；多种 deadline、
+  AttemptPermit、结果核对与 SettlementOnlyRunCommit 不实施，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-26
 - **决策者**：KimJohn
 - **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)

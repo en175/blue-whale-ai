@@ -4,6 +4,10 @@
 - **日期**：2026-07-20
 - **关联工单**：[定稿 Runtime Agent Bundle 领域契约与资源规范](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK2D8H)
 
+> **IK3UUX 范围状态**：Bundle 与 Creative Skill 的核心语义保留；浏览器路径、恢复接口与精确合同
+> 由后续实施 Spec 按最小需要定义，本文中的 Java/Python 路径只记录迁移前实现，见
+> [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
+
 ## 背景
 
 Python Agent Worker 当前把角色提示与 `generate_image` 工具硬编码在 Adapter 中；仓库
@@ -76,4 +80,3 @@ Product API 执行，Bundle 无权覆盖或放宽。
 - 运行环境必须保留所有非终态 AgentRun 固定的 Bundle、ModelProfile、CreativeSkill 与 Adapter 版本；
   安全强制退役只能显式终止受影响 Run，不能让它们静默漂移。
 - 旧 `decision_context`、`/agent/turn` 和整包 workspace 发布方案由后续迁移票据清理，不建立双轨兼容层。
-

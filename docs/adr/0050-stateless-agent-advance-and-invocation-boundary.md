@@ -1,12 +1,15 @@
 # ADR-0050：无状态 AgentAdvance、InvocationLedger 与单提议提交边界
 
 - **状态**：Accepted
+- **IK3UUX 范围状态**：Superseded — InvocationLedger、AttemptPermit、单提议协议、精确 RunCommit
+  与多层恢复不实施；只迁移持久消息、幂等与简单 lease/fence，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-26
 - **决策者**：KimJohn
 - **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)
 - **消息交付**：[ADR-0045 Provisional Assistant Delivery](0045-provisional-assistant-delivery-runcommit-boundary.md)
 - **错误与恢复**：[ADR-0046 Runtime 错误边界](0046-runtime-error-evidence-policy-and-terminal-boundary.md)、[ADR-0048 时间与 Lease](0048-time-deadline-and-lease-facts.md)
 - **终态封口**：[ADR-0049 AgentRun 终态封口](0049-agent-run-terminal-seal-and-independent-convergence.md)
+- **消息与输入队列**：[ADR-0053 Conversation 消息排序与 AgentRun 待处理输入队列](0053-conversation-message-ordering-and-agent-run-input-queue.md)
 
 ## 背景
 
@@ -24,13 +27,18 @@ Single Proposal Commit Boundary。
 
 Product API 在 AgentRun 每次进入可运行轮次时持久化稳定 `advance_id`：
 
-- 首次可运行、用户输入被接纳或动作结果被接纳时创建新 `advance_id`；
+- Run 首次可运行，或上一 Advance 接纳后仍有待处理输入 / 已接纳动作结果时，创建新 `advance_id`；
 - claim 与 lease reclaim 复用当前 `advance_id`；
 - RunCommit 接纳后关闭当前 advance；
 - Worker 崩溃只重放当前 advance，不创建新的运行事实。
 
 Worker 从最近一次已接纳 RuntimeCheckpoint 恢复，执行一次 AgentAdvance，然后只通过 RunCommit 提交
 唯一下一状态。模型调用、只读工具调用和 SDK step 都是该推进的内部实现，不成为 checkpoint 或产品事实。
+
+每个 AgentAdvance 创建时必须从 ADR-0053 定义的待处理输入队列取得一个按 Message `sequence_no`
+排序的有序前缀，并持久化不可变的输入消息集合与 `input_high_watermark_sequence_no`。Advance 创建后
+到达的消息不得改变本轮模型输入，只能等待当前 Advance 接纳后由后续 Advance 消费。消息接纳本身
+不得在已有 Advance 执行时创建并行 advance。
 
 ### 2. RunCommit 是 AgentRun 推进的唯一接纳边界
 
@@ -52,6 +60,14 @@ failed
 
 Product API 以 `advance_id` 和规范化 `request_digest` 线性化接纳。相同身份与摘要返回原
 RunCommitReceipt，不增加 version 或重复事件；相同身份、不同摘要 fail closed。
+
+`completed` 是 Runtime 对当前冻结输入的完成候选，不再无条件等于 AgentRun 终态。Product API 接纳
+RunCommit 时必须在同一权威事务顺序中检查 ADR-0053 的待处理输入：没有未消费输入才封口为
+`completed`；存在未消费输入时，当前 commit 的合法 Message、checkpoint 与附属事实仍可原子接纳，
+但 Run 保持活动并创建消费下一有序输入的新 AgentAdvance。这不会新增第五种 Runtime outcome。
+
+`failed`、`cancelled` 或 `recovery_failed` 的终态接纳不被普通待处理输入阻止，但封口事务必须按
+ADR-0053 同时为未消费输入创建唯一后继 Run 并转交处理归属；不得让已接纳 Message 失去处理 Run。
 
 ### 3. RuntimeCheckpoint 使用 Blue Whale canonical codec
 
@@ -178,7 +194,8 @@ Provider 状态核对与可靠幂等恢复不增加 Provider attempt，但可以
 
 后续实现必须覆盖：
 
-1. **advance 重领**：lease reclaim 复用 `advance_id`；接纳输入或动作结果才创建新 advance。
+1. **advance 重领与输入冻结**：lease reclaim 复用 `advance_id`；Advance 创建时固定有序输入集合与
+   输入水位；之后接纳的 Message 不改变当前模型输入，也不创建并行 advance。
 2. **checkpoint codec**：只接受 `agent-runtime-checkpoint/v1` canonical payload；所有产品 pin、SDK /
    Provider 对象、stream、usage、资源正文与 Secret 均被拒绝。
 3. **RunCommit 幂等**：同 advance / 同摘要返回首次 receipt 且零副作用；同 advance / 不同摘要返回
@@ -197,12 +214,16 @@ Provider 状态核对与可靠幂等恢复不增加 Provider attempt，但可以
 10. **Permit 与预算**：每次物理 dispatch 都消费独立 Permit；结果不明的新 attempt 使用新预留；
     reconciliation 不增加 Provider attempt。
 11. **Creative Skill**：auto 只能选择固定候选 0/1，并与 RunCommit 原子接纳；独立 activation 写入被拒绝。
+12. **completed 再裁决**：无待处理输入时 completed 封口；消息先接纳时只接纳完成候选并创建下一
+    Advance；失败类终态与未消费输入的后继 Run 转交原子成功或原子失败。
 
 Wayfinder 阶段只冻结验收要求，不提前修改业务测试制造预期失败。
 
 ## 后果
 
 - Product API 继续掌握 AgentRun、调用准入、预算与成本的最终权威，Worker 可以随时被替换或重启。
+- Product API 还负责冻结每个 Advance 的输入水位，并在 RunCommit 时把 `completed` 候选与并发消息
+  线性化；Worker 不判断是否仍有后到输入。
 - crash replay 仍可能重复本地只读步骤；模型与远程调用通过稳定身份和 Ledger 避免不可见重复。
 - 维护 canonical message / tool-call codec、InvocationLedger、Permit 与 reconciliation 增加实现成本，
   但避免 checkpoint 被 AI SDK、Provider 或编排框架内部结构锁定。

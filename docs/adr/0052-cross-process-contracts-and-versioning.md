@@ -1,10 +1,12 @@
 # ADR-0052：跨进程契约、行为规范与不可绕过发布链
 
 - **状态**：Accepted
+- **IK3UUX 范围状态**：Limited — 只保留同一 TypeScript 代码库中的共享 DTO/Schema 与边界测试；
+  不建设四套合同族、滚动版本矩阵、支付合同或独立发布链，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-26
 - **决策者**：KimJohn
 - **关联工单**：[确定跨进程 TypeScript 契约与版本策略](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWG)
-- **关联决策**：[ADR-0016 Project 公开 API 与可重放产品事件流](0016-project-api-and-replayable-event-stream.md)、[ADR-0050 无状态 AgentAdvance](0050-stateless-agent-advance-and-invocation-boundary.md)、[ADR-0051 Generation Worker 恢复边界](0051-node-generation-worker-execution-and-recovery-boundary.md)
+- **关联决策**：[ADR-0016 Project 公开 API 与可重放产品事件流](0016-project-api-and-replayable-event-stream.md)、[ADR-0050 无状态 AgentAdvance](0050-stateless-agent-advance-and-invocation-boundary.md)、[ADR-0051 Generation Worker 恢复边界](0051-node-generation-worker-execution-and-recovery-boundary.md)、[ADR-0054 public-api v1 浏览器产品合同](0054-public-api-v1-browser-product-contract.md)
 
 ## 背景
 
@@ -126,16 +128,19 @@ TypeBox + structured metadata + behavioral spec refs
 不固化临时 URL、令牌或估时；临时 URL 只允许出现在实时查询。
 
 所有 Blue Whale 应用生成的 HTTP 错误使用 RFC 9457 `application/problem+json`。错误类型目录不可变；
-`type` 与 `code` 是前端业务判断和本地化键，`detail` 只供人读。校验错误使用严格 `violations` 结构且不得
-回显用户数据。网络中断、TLS 失败和 timeout 是“无响应”的传输故障，不伪造 Problem Details。SSE 建连后
-的订阅级致命错误使用 `event: problem`，不写入产品事件日志。
+`type` 与 `code` 是前端业务判断和本地化键，`detail` 只供人读。public-api 字段校验错误固定使用
+ADR-0054 的 `errors[]`；其他合同族使用各自声明的严格结构，均不得回显用户数据。网络中断、TLS 失败、
+timeout 和 SSE 建连后的流中断是“无响应”的传输故障，不伪造 Problem Details；SSE 控制信息也不得伪装
+成持久产品事件或推进 cursor。
 
 合同版本和 Manifest 摘要响应 header 只用于诊断和部署预检，不能参与运行时拒绝、协商或部署信任。
 
 ### 8. 领域身份与幂等
 
-优先使用领域原生身份；只有缺少原生身份的副作用命令才使用 `Idempotency-Key`。键的 scope 至少包含契约
-族、major、operation、认证主体和资源，但键本身不授予权限。
+public-api 中所有创建或修改产品事实的浏览器请求统一使用 ADR-0054 自有的 `Idempotency-Key` 合同，scope
+精确为 `(authenticated_subject, public_api_major, command_id)`；operation、path、合同 query、业务 headers
+与业务 body 进入 JCS + SHA-256 摘要而不进入 scope。其他合同族继续优先使用领域原生身份；只有缺少原生
+身份的副作用命令才使用各自明确冻结的幂等键。任何键本身都不授予权限。
 
 幂等指纹只包含登记的业务语义字段，排除授权、追踪和传输信息；严格校验后使用跨语言 canonical JSON 和
 SHA-256，金额、大整数及时间先按本 ADR 的精确格式表示。身份、digest、权威事实、事件、Outbox 和稳定
@@ -163,9 +168,10 @@ v1 不提供自动退款。未知状态、冲突、晚到付款、渠道交易�
 
 ### 10. 持久事件与 SSE
 
-ADR-0016 定义的完整持久事件封套继续有效：`contract_version` 是 `public-api` 完整合同版本，`cursor` 是
-唯一排序依据，`occurred_at` 是 Product API 接纳时间，`content_digest` 覆盖除自身外的完整持久事件且只作
-一致性指纹，`causation_id` 可引用命令、消息或事件，无直接原因时缺省。
+ADR-0054 定义的完整持久事件封套继续有效：`contract_version` 是 `public-api` 完整合同版本，`cursor` 是
+唯一排序依据，`event_id` 是事件去重身份，`occurred_at` 是 Product API 接纳时间，内容摘要覆盖合同声明的
+完整持久事件且只作一致性指纹；直接由命令产生的事件可以携带 `causation_command_id`，后台后续事件只将
+它作为诊断关联，无直接命令原因时缺省。
 
 SSE `id=cursor`、`event=event_type`、`data=完整封套`，只保证 Project 内按 cursor 有序，至少一次交付。
 未知事件不得应用或推进 cursor。消费者只允许一次同 major Snapshot 恢复；Snapshot 完整校验成功后，才可
@@ -246,7 +252,7 @@ Manifest 声明的 decoder；历史版本只读归档，禁止动态下载或执
 
 ## 验收矩阵
 
-后续合同与实现必须至少覆盖：
+以下是历史完整方案曾要求的验收范围，不适用于 IK3UUX：
 
 1. Draft 2020-12 meta-schema、OpenAPI 3.1.2、Ajv 2020-12 和 serializer 投影对同一正反 fixtures 得出等价结果。
 2. Fastify 默认 coercion/default/removal 全部被测试证明关闭；未知内部字段和判别值 fail closed。
@@ -258,13 +264,7 @@ Manifest 声明的 decoder；历史版本只读归档，禁止动态下载或执
 8. 部署和回滚对滚动期间全部活动版本、制品 digest、环境状态版本及已产生数据执行同一预检。
 9. 每个历史版本均可离线核验；未知或摘要异常数据隔离，迁移任务不可被普通运行时触发。
 
-## 后续边界
+## IK3UUX 处置
 
-- 分别通过 [public-api 合同票](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK41WU)、
-  [agent-work 合同票](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK41WV)、
-  [generation-work 合同票](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK41WW) 与
-  [payment-control 合同票](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK41WX) 编写精确
-  Schema、行为场景和 fixtures；`payment-control` 同时冻结 HMAC 字段表与 canonicalization。
-- 在公开 v1 GA 前通过[公开 major 支持期限决策](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK41WT)
-  决定支持期限、弃用通知、支持责任和退役证据。
-- 后续实现票必须被相应合同编写票阻塞；合同未关闭前不得进入 `ready-for-agent` 或修改生产者/消费者代码。
+原计划的四份精确合同、支付合同、major 支持期限和合同先行阻塞链均已取消。后续实施 Spec 只在实际
+切片中定义共享 TypeScript DTO/Schema 与必要边界测试，不单独创建合同票作为前置。

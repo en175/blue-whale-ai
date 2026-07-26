@@ -1,6 +1,8 @@
 # ADR-0047：AgentRun 用户取消是独立产品终态
 
 - **状态**：Accepted
+- **IK3UUX 范围状态**：Limited — 只保留“取消停止新的 Agent 工作且终态不自动重开”；Provider
+  取消证明与迟到证据收敛不属于本次重构，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-25
 - **决策者**：KimJohn
 - **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)

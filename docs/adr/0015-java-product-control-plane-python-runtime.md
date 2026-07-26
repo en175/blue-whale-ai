@@ -1,6 +1,9 @@
 # ADR-0015：Java 产品控制面与双 Worker 运行时分层
 
 - **状态**：Accepted
+- **IK3UUX 范围状态**：Superseded — 本文只记录迁移前 Java/Python 基线；目标改为同一 TypeScript
+  代码库中的 `product-api`、`agent-worker`、`generation-worker`，见
+  [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-13
 
 Blue-Whale 已合入承载 Project、Canvas、GenerationJob 和 Asset 的 Java 后端，同时此前 Spike 验证了 Python Agent 编排与不透明 checkpoint 的可替换边界。为避免双公开后端和双重事实权威，决定由 **Java Product API** 作为唯一公开产品控制面，由 **Python Agent Worker** 执行 LLM、Skill、Tool 和 Agent 编排，由 **Java Generation Worker** 执行图片/视频 GenerationJob 与供应商 Adapter；三个运行单元通过产品中性的窄 Interface 协作。

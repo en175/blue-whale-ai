@@ -1,5 +1,9 @@
 # IK3UVW：Node.js 服务框架与 TypeScript Monorepo 方案评估
 
+> **IK3UUX 范围状态**：保留为选型输入；最终范围是模块化单体代码库与三个必要 Node 入口，
+> 不把研究中的独立部署、版本治理或扩展能力自动纳入实施，见
+> [ADR-0055](../adr/0055-prelaunch-typescript-unification-scope.md)。
+
 > 仓库基线：`8caaba40b6be535831be14c100e8ebd9ef9c122d`
 >
 > 研究日期：2026-07-25

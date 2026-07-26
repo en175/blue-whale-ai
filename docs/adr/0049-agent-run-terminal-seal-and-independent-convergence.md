@@ -1,11 +1,14 @@
 # ADR-0049：AgentRun 终态封口，关联独立聚合与运营事实继续收敛
 
 - **状态**：Accepted
+- **IK3UUX 范围状态**：Limited — 只保留 AgentRun 终态不可自动重开；InvocationLedger、迟到成本/结果
+  收敛与 SettlementOnlyRunCommit 不属于本次重构，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-26
 - **决策者**：KimJohn
 - **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)
 - **关联决策**：[ADR-0047 AgentRun 用户取消](0047-agent-run-user-cancellation-boundary.md)、[ADR-0048 时间、Deadline 与 Lease](0048-time-deadline-and-lease-facts.md)
-- **后续调查**：[确定 ProjectDeletionFence 与异步物理清理模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK40DP)
+- **消息竞态修订**：[ADR-0053 Conversation 消息排序与 AgentRun 待处理输入队列](0053-conversation-message-ordering-and-agent-run-input-queue.md)
+- **历史后续**：ProjectDeletionFence 调查已从 IK3UUX 取消，不再构成前置。
 
 ## 背景
 
@@ -77,8 +80,11 @@ AssistantMessage 或 AgentRun 推进事件。
 ### 5. Conversation 边界
 
 禁止的是迟到事实追加或改写原 AgentRun 派生的 AssistantMessage、UserInputRequest 与正式消息历史。
-User 仍可在同一 Conversation 发送新消息并创建新的 AgentRun；未来若要利用迟到 Asset 继续创作，
-也必须显式创建新 Run，而不是恢复旧终态 Run。
+User 仍可在同一 Conversation 发送新消息，但其处理归属必须按 ADR-0053 与终态事务线性化：消息先被
+接纳时进入当前唯一非终态 Run 的待处理输入；终态先封口时，随后消息创建新 Run；failed、cancelled
+或 recovery_failed 封口时，既有未消费输入必须在同一事务中转交唯一后继 Run。任何情况都不得重开
+已经封口的 Run。未来若要利用迟到 Asset 继续创作，也必须通过仍活动的 Run 或新 Run 的正式输入，
+而不是恢复旧终态 Run。
 
 ### 6. 终态后事件语义
 
@@ -143,9 +149,8 @@ Agent Runtime 的 claim、AttemptPermit、AssistantDeliveryAttempt 与 RunCommit
 
 Project 删除围栏不把 `completed` 改成 `cancelled`，不把 `failed` 改成其他状态，也不重写 Run 历史。
 它只是更高层的写入资格约束。Project 删除的用户可见语义、owner/tombstone、数据保留期限、
-GenerationJob / Asset / 对象存储清理、Go 计费记录与物理删除后回调处理不在本 ADR 冻结，统一由
-[确定 ProjectDeletionFence 与异步物理清理模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK40DP)
-继续调查。当前不存在的 Conversation 独立删除入口也不得从本技术边界推导。
+GenerationJob / Asset / 对象存储清理、Go 计费记录与物理删除后回调处理不在本 ADR 冻结，且不属于
+IK3UUX；需要时由未来独立任务重新设计。当前不存在的 Conversation 独立删除入口也不得从本技术边界推导。
 
 ## 验收测试矩阵
 

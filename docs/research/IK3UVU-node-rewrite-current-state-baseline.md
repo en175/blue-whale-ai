@@ -1,5 +1,8 @@
 # IK3UVU：Node 重构现状基线与必须保留的领域不变量
 
+> **IK3UUX 范围状态**：历史现状盘点。本文中的“必须保留”已由
+> [ADR-0055](../adr/0055-prelaunch-typescript-unification-scope.md) 收窄；支付、历史数据、生产治理与复杂恢复不得回流为实施前置。
+
 > 研究基线：`d5c125cbc8d5c4717aba05f540e646f64181211b`
 >
 > 目的：盘点 Node 重建 Java Product API、Python Agent Worker、Generation Worker

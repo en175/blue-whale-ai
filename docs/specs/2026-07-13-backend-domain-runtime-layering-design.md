@@ -62,6 +62,9 @@ Project Module 不负责：
 
 首版一个 Project 对应一个 Canvas。Canvas 是独立的版本化文档聚合，保存节点、位置、尺寸、层级和视口等画布事实。NodeItem 通过 Asset ID 引用媒体，不保存供应商临时 URL。
 
+> **核心语义修订**：Canvas 共享文档只保存 NodeItem ID 的位置、尺寸与层级；NodeItem 是
+> Product API 管理且不含布局的独立 Project 资源。viewport、当前选择、面板和拖动过程默认是个人界面状态。
+
 ### 4.3 Conversation
 
 首版一个 Project 对应一个显式 Conversation。Conversation 是 AgentChatPanel 的持久化有序消息流，一个 Conversation 可先后关联多个 AgentRun。
@@ -103,7 +106,8 @@ GenerationJob 是一次独立、持久化、可恢复的图片或视频后台任
 
 ### 4.6 Asset
 
-Asset 是归属于 Project 的持久化媒体身份，可以来自用户上传或生成结果。Card 与 NodeItem 是同一 Asset 的不同视图。
+Asset 是归属于 Project 的持久化媒体身份，可以来自用户上传或生成结果。Card 是无服务端身份的界面投影，
+NodeItem 是可以引用 Asset 的独立权威资源；text NodeItem 不引用 Asset，三者不得视为同一产品事实。
 
 - 产品控制的对象存储持有媒体内容。
 - 供应商临时 URL 只用于转存，不成为 Asset 权威地址。

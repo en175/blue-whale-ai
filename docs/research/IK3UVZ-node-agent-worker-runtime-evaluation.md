@@ -1,5 +1,9 @@
 # IK3UVZ：Agent Worker 的 Node.js 运行时替代方案评估
 
+> **IK3UUX 范围状态**：保留“TypeScript 薄 Worker”方向；InvocationLedger、AttemptPermit、
+> 精确 RunCommit、复杂 checkpoint 与多层恢复只是历史研究假设，不属于当前实施，见
+> [ADR-0055](../adr/0055-prelaunch-typescript-unification-scope.md)。
+
 > 研究日期：2026-07-25
 >
 > 研究问题：哪一种 Node.js 运行时最适合承载 Blue Whale 的 Agent Worker，同时不夺走产品层对 claim、流式提交、审批、checkpoint、资源预算和错误收场的事实权威？

@@ -1,10 +1,13 @@
 # ADR-0043：AgentRun 三种规范化收场与任意多次澄清
 
 - **状态**：Accepted
+- **IK3UUX 范围状态**：Limited — 只保留 AgentRun 可完成、失败或由 User 取消，终态不自动重开；
+  `recovery_failed`、错误证据分层、迟到结果收敛与 PendingConversationInput 不作为实施前置，见
+  [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-23
 - **决策者**：用户（触发工单：IK3BG2 实现任意多次澄清与 Run 三种收场规范化）
-- **Node 目标架构修订**：[ADR-0046 调用错误证据、执行权与 AgentRun 终态分离](0046-runtime-error-evidence-policy-and-terminal-boundary.md)
-- **Node 目标架构扩展**：[ADR-0047 AgentRun 用户取消是独立产品终态](0047-agent-run-user-cancellation-boundary.md)
+- **历史扩展**：[ADR-0046](0046-runtime-error-evidence-policy-and-terminal-boundary.md)、
+  [ADR-0047](0047-agent-run-user-cancellation-boundary.md)、[ADR-0053](0053-conversation-message-ordering-and-agent-run-input-queue.md)
 
 ## 背景
 
@@ -27,6 +30,10 @@
 任何无动作、无输入请求提议、无错误的 commit 即合法完成（completed），契约级无条件放行、不限引擎与 checkpoint 形态。`ACTION_MISSING` 闸门与 `supportsNoActionCompletion` 的引擎 / checkpoint 形态限制退役。`PROPOSAL_ACTION_MUTEX` 不变。
 
 ### D3. 新消息原子取代在途 Run（superseded）
+
+> **目标架构已废止本节触发规则**：根据 ADR-0053，普通新消息不再 supersede 非终态 Run，而是由
+> Product API 按 Conversation 排序并登记到唯一活动 Run 的待处理输入队列。本节保留为历史决策记录；
+> `superseded` 终态本身仍可供其他经过独立定义的显式替代流程使用。
 
 新用户消息创建新 Run 时，同 Conversation 其余非终态 Run（`queued` / `running` / `awaiting_job` / `awaiting_input`）在同一事务内原子置为 `superseded` 新终态：fencing token 递增、显式释放租约（`lease_owner` / `lease_expires_at` 置空——MyBatis-Plus `updateById` 的 NOT_NULL 字段策略不持久化 null，须 lambdaUpdate 显式置空，commit 主路径同步修正）、逐个发 `AGENT_RUN_STATUS_CHANGED` 事件。在途旧 Worker 下次 commit 因 version / fencing / 租约 / 状态校验失败收到 409（`AGENT_RUN_CONFLICT`）。已提交 GenerationJob 不级联改写（CONTEXT.md 既有语义不变）。
 

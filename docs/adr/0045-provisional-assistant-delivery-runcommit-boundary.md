@@ -1,6 +1,8 @@
 # ADR-0045：Provisional Assistant Delivery 只经 RunCommit 提升为正式消息
 
 - **状态**：Accepted
+- **IK3UUX 范围状态**：Limited — 只保留“临时流式片段不是正式消息”；不要求 DeliveryAttempt、
+  RunCommit 或迟到交付收敛机制，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-25
 - **决策者**：KimJohn
 - **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)
