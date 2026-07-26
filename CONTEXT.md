@@ -243,6 +243,11 @@ Attempt、输出槽集合、动作、fence 与 deadline。等待期间不持有�
 尚未完成的 WorkItem，并遵循同一幂等接纳流程。
 _Avoid_: 认领整个 Job 长时间执行；以内存 timer 作为权威；Reconciler 绕过 WorkItem；无 fence 回报。
 
+**GenerationReconciler（生成核对器）**:
+GenerationJob owner 基于 MySQL 权威事实发现遗漏、过期 lease 与到期动作，并通过正常命令幂等恢复
+缺失 GenerationWorkItem 的持久修复规划器；通知全部丢失不影响其巡检恢复能力。
+_Avoid_: 直接调用供应商、审核或对象存储；发布 Asset；处理其他 owner 的费用或审核记录；万能核对器。
+
 **AgentRun（创作运行）**:
 围绕一个创作意图持续推进、可跨多轮对话暂停与恢复的工作单元；它拥有创作推进状态，但不拥有
 InvocationAttempt 或 GenerationJob 的完整生命周期。终态为 `completed`、`superseded`、`failed`、
