@@ -225,6 +225,12 @@ ProviderGenerationAttempt 进入 `outcome_unknown` 后，围绕原 Attempt 通�
 期限耗尽后 GenerationJob 按失败收口，禁止以队列重试自动创建新 Attempt。
 _Avoid_: 把超时当作供应商未接纳；换幂等键重发；无证据释放 CostReservation；把核对伪装成重试。
 
+**GenerationRetryPolicy（生成重试策略）**:
+GenerationJob 创建时固定的不可变策略版本，由 Product API 据此按错误类别、次数、退避、绝对期限与
+预算统一决定 `retry`、`reconcile` 或 `fail`。每次真实重发创建新 ProviderGenerationAttempt 与
+CostReservation；结果不明只核对，策略耗尽后原 Job 永久收口。
+_Avoid_: Provider SDK 隐式重试；运行中漂移策略；复用 Attempt 重发；终态 Job 自动复活。
+
 **GenerationJobTerminalSeal（生成任务终态封口）**:
 Product API 接纳 GenerationJob 终态后形成的不可逆封口；它保持用户可见状态简单稳定，并关闭原 Job
 的后续推进资格。迟到的 ProviderGenerationAttempt 与成本证据可以继续核对和结算，但不得重开或
