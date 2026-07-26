@@ -11,7 +11,7 @@
 
 | 脚本 | 挂载 matcher | 触发事件 | 作用 | 关联硬约束 |
 |---|---|---|---|---|
-| `block-master-edit.sh` | ZCode / Claude Code / Codex `Edit\|Write` | `PreToolUse` | 三端主检出区写入兜底；Codex 将 `tool_name=apply_patch`、`tool_input.command` 中的目标路径适配为 Gate 接受的 `Write + file_path`。对仓库内写入的阻断/放行判定追加单行结构化审计记录到 `.git/hook-audit/`（IK10CW），审计只记判定元数据、不改变原 exit code/stdout 契约 | `CLAUDE.md`「可写任务先建 task worktree」 |
+| `block-master-edit.sh` | ZCode / Claude Code / Codex `Edit\|Write` | `PreToolUse` | 三端主检出区写入兜底；仅精确放行 Git 已忽略的根 `CLAUDE.local.md` 与 `.codex/config.toml`，其他 ignored 文件仍拦。Codex 将 `tool_name=apply_patch`、`tool_input.command` 中的目标路径适配为 Gate 接受的 `Write + file_path`。对仓库内写入的阻断/放行判定追加单行结构化审计记录到 `.git/hook-audit/`（IK10CW），审计只记判定元数据、不改变原 exit code/stdout 契约 | `CLAUDE.md`「可写任务先建 task worktree」 |
 | `block-dangerous-git.sh` | `Bash` | `PreToolUse` | 拦裸 `--force`、`reset --hard`、`clean -f`、`branch -D`、`checkout .`、`restore .`；放行/阻断均审计，但只记工具名、稳定操作类别和决定，不记完整命令 | CLAUDE.md「提交与审查」 |
 | `block-push-to-master.sh` | `Bash` | `PreToolUse` | 拦任何对 `master`/`main` 的 push（显式 + 隐式）；放行/阻断均审计，但不记完整命令或目标 ref 值 | [ADR-0003](../../adr/0003-no-direct-push-to-master.md) |
 | `confirm-release-action.sh` | `Bash` / `mcp__gitee-ent__create_enterprise_repo_pull` / `mcp__gitee-ent__merge_enterprise_pull` / `mcp__gitee-ent__create_enterprise_repo_release` | `PreToolUse` / `PostToolUse` | 提交入口 `commit-task-for-review.sh` 出现即放行（worktree commit 本地可逆，无需授权）；发布/合入标准入口带 `--user-authorized` 无交互放行；直接 push/commit/非 ff-only merge（含复合命令和 Git alias）硬拦；**`merge_enterprise_pull` 的 `squash`/`rebase` 方法检查在凭证校验前**（原 `block-squash-merge.sh` 已并入，消除多 hook 执行顺序不确定）；所有 Pre 判定均审计且不记 Bash 命令或 MCP 参数值；PR 标记在 Pre 校验，合并/release 凭证按 `tool_use_id` 原子占用；明确成功 Post 消费，失败/畸形 Post 保留，Post 不审计 | CLAUDE.md「发布动作必须先获用户授权」 / [ADR-0010](../../adr/0010-local-master-is-user-integration-zone.md) / [ADR-0011](../../adr/0011-release-marker-consume-after-pr-success.md) / [ADR-0012](../../adr/0012-agent-noninteractive-authorization.md) |
@@ -73,7 +73,7 @@ Codex 挂载点写在 `.codex/hooks.json`，但**不要复制脚本实现到 `.c
 原因：
 - `.claude/hooks` 是 ZCode / Claude Code / Codex 的唯一脚本源，避免三套实现漂移。
 - `.codex/hooks/run-claude-pretool.sh` 对普通 Gate 透明转发；仅对 `apply_patch → block-master-edit.sh` 做目标路径适配。三端都使用“stdout 空 + exit 0 放行 / stderr 原因 + exit 2 阻断”的契约，不产生或转换 ASK。
-- `.codex/config.toml` 属于本机私密配置，可能含 token，不进仓；项目共享的只有 `.codex/hooks.json`。
+- `CLAUDE.local.md` 与 `.codex/config.toml` 属于本机私密配置，可能含个人指令或 token，不进仓；master 写入 Gate 只有在 `git check-ignore` 命中时才允许 Agent 修改它们。项目共享的只有 `.codex/hooks.json`。
 - Codex 首次拉取或 hook 变更后，用户需要在 Codex 里运行 `/hooks` review/trust 项目 hook，否则新挂载点不会执行。
 
 ---
@@ -184,7 +184,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 - `bash scripts/probe-codex-write-hook.sh` 必须读取真实 `.codex/hooks.json`，以官方 `apply_patch` 形状探测真实 wrapper → 共享 Gate，证明 master 创建/修改阻断、任务区创建/修改放行且不实际执行补丁。
 - Kimi CLI shim 在参数异常、非 git 目录、无 `.kimi-code/hooks.toml` opt-in 标记、Gate 缺失时一律静默放行；标记与 Gate 齐备时 stdin 与 exit code/stderr 原样透传（Slice 7）。
 - 可执行 Hook、wrapper 和活跃规则禁止返回 ASK 决策；标准授权路径必须在 ZCode / Claude Code / Codex / Kimi CLI 均无交互放行。
-- `.gitignore` 必须只放行 `.codex/hooks.json` 和 `.codex/hooks/run-claude-pretool.sh`；`.codex/config.toml`、其它 `.codex/*`、其它 `.codex/hooks/*` 均保持忽略。`.kimi-code/hooks.toml` 与 `.kimi-code/hooks/` 可提交，`.kimi-code/local.toml` 保持忽略。
+- `.gitignore` 必须忽略根 `CLAUDE.local.md`；`.codex/` 只放行 `.codex/hooks.json` 和 `.codex/hooks/run-claude-pretool.sh`，`.codex/config.toml`、其它 `.codex/*`、其它 `.codex/hooks/*` 均保持忽略。`.kimi-code/hooks.toml` 与 `.kimi-code/hooks/` 可提交，`.kimi-code/local.toml` 保持忽略。
 
 ### 字段类型以 MCP schema 为准（核心教训）
 

@@ -1889,7 +1889,33 @@ assert_exit 0 "master-edit(real): 非 master 仓库不存在子目录 Write 放�
 rm -rf "$FEATURE_REPO"
 unset REAL_REPO FEATURE_REPO
 
-# Slice 4.6.5 — block-master-edit 文档白名单（ADR-0025）
+# Slice 4.6.5 — block-master-edit 本地个人配置白名单
+# 只放行根 CLAUDE.local.md + .codex/config.toml，且必须先被 Git 明确忽略；
+# 其他 ignored 文件与未忽略的同名配置仍按 master 写入硬拦。
+LOCALCFG_REPO="$(mktemp -d)"
+git -C "$LOCALCFG_REPO" init -q
+git -C "$LOCALCFG_REPO" symbolic-ref HEAD refs/heads/master
+mkdir -p "$LOCALCFG_REPO/.codex"
+printf '/CLAUDE.local.md\n/.codex/config.toml\n/.env\n' > "$LOCALCFG_REPO/.gitignore"
+SAVED_CLAUDE_PROJECT_DIR_LOCALCFG="${CLAUDE_PROJECT_DIR:-}"
+export CLAUDE_PROJECT_DIR="$LOCALCFG_REPO"
+
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Write","tool_input":{"file_path":"'"$LOCALCFG_REPO"'/CLAUDE.local.md"}}'
+assert_exit 0 "local-config: 已忽略根 CLAUDE.local.md 放行"
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$LOCALCFG_REPO"'/.codex/config.toml"}}'
+assert_exit 0 "local-config: 已忽略 .codex/config.toml 放行"
+
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$LOCALCFG_REPO"'/.env"}}'
+assert_exit 2 "local-config: 其他已忽略文件仍拦"
+printf '/CLAUDE.local.md\n/.env\n' > "$LOCALCFG_REPO/.gitignore"
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$LOCALCFG_REPO"'/.codex/config.toml"}}'
+assert_exit 2 "local-config: 未忽略 .codex/config.toml 仍拦"
+
+export CLAUDE_PROJECT_DIR="$SAVED_CLAUDE_PROJECT_DIR_LOCALCFG"
+rm -rf "$LOCALCFG_REPO"
+unset LOCALCFG_REPO SAVED_CLAUDE_PROJECT_DIR_LOCALCFG
+
+# Slice 4.6.6 — block-master-edit 文档白名单（ADR-0025）
 # 真实 master 仓库：根 CONTEXT.md + docs/**/*.md 放行；代码 / .claude 规则源 / 契约仍拦。
 DOCALLO_REPO="$(mktemp -d)"
 git -C "$DOCALLO_REPO" init -q
@@ -1928,7 +1954,7 @@ export CLAUDE_PROJECT_DIR="$SAVED_CLAUDE_PROJECT_DIR_DOCALLO"
 rm -rf "$DOCALLO_REPO"
 unset DOCALLO_REPO SAVED_CLAUDE_PROJECT_DIR_DOCALLO DOCALLO_LOG
 
-# Slice 4.6.6 — commit-spec-on-master.sh（ADR-0025 落盘入口）
+# Slice 4.6.7 — commit-spec-on-master.sh（ADR-0025 落盘入口）
 # 真实 master 仓库端到端：doc-only 通过 + docs: 前缀；git mv 代码进 docs/ 被 --no-renames 捕获拒。
 commit_spec_setup() {
   local repo="$1"
@@ -2346,6 +2372,7 @@ for active_doc in CLAUDE.md CONTEXT.md docs/agents/git-workflow.md docs/agents/c
 done
 assert_git_not_ignored ".codex/hooks.json" "codex: hooks.json 可提交"
 assert_git_not_ignored ".codex/hooks/run-claude-pretool.sh" "codex: wrapper 可提交"
+assert_git_ignored "CLAUDE.local.md" "claude: CLAUDE.local.md 保持本机私有"
 assert_git_ignored ".codex/config.toml" "codex: config.toml 保持私密"
 assert_git_ignored ".codex/local.json" "codex: 其它本机配置保持私密"
 assert_git_ignored ".codex/hooks/other.sh" "codex: 禁止提交复制出来的 hook 实现"
