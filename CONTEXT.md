@@ -118,6 +118,11 @@ ContentReview 为取得证据而发起的一次供应商调用事实；同一逻
 ContentReview 进入终态后，ReviewAttempt 不能改写其决定。
 _Avoid_: 把每次供应商重试当作新的内容审核、用 ReviewAttempt 直接决定内容通过、覆盖旧尝试记录。
 
+**ReviewWorkItem（审核工作项）**:
+ContentReview owner 发放、由 Generation Worker 的审核执行器处理的一次短租约外部审核步骤；它只
+返回 ReviewEvidence，并与 GenerationWorkItem 使用独立容量、故障隔离、lease/fence 和 Adapter。
+_Avoid_: 与生成任务共享容量池；由 Worker 作审核决定；Generation Reconciler 管理；审核失败触发重新生成。
+
 **OutputReleaseGate（输出释放门）**:
 Java Product API 在 Agent 文字变为 User 可见内容前形成的产品安全边界；供应商证据覆盖待释放前缀时
 可以流式释放，否则必须缓冲完整回复并在 ContentReview 明确通过后整体释放。
