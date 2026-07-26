@@ -241,6 +241,12 @@ GenerationJob 创建时固定的不可变策略版本，由 Product API 据此�
 CostReservation；结果不明只核对，策略耗尽后原 Job 永久收口。
 _Avoid_: Provider SDK 隐式重试；运行中漂移策略；复用 Attempt 重发；终态 Job 自动复活。
 
+**GenerationDeadlineSet（生成期限集合）**:
+Product API 以数据库绝对时间分别持久化的 Job 执行、Attempt 结果核对、ContentReview 恢复、隔离对象
+保留与费用核对边界；各期限只收口自身职责，不能相互替代。
+_Avoid_: Worker 本地累计时长；把 lease 过期当作供应商失败；把传输 timeout 当作未 dispatch；
+以 Job 终态截断迟到成本核对。
+
 **GenerationJobTerminalSeal（生成任务终态封口）**:
 Product API 接纳 GenerationJob 终态后形成的不可逆封口；它保持用户可见状态简单稳定，并关闭原 Job
 的后续推进资格。迟到的 ProviderGenerationAttempt 与成本证据可以继续核对和结算，但不得重开或
