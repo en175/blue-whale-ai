@@ -83,20 +83,28 @@ Asset 查询返回产品控制的元数据和带明确 `expires_at` 的签名访
 
 ```json
 {
-  "schema_version": 1,
+  "schema_id": "https://schemas.blue-whale.ai/public-api/events/generation-job-status-changed/v1",
+  "contract_version": "1.3.0",
+  "schema_digest": "sha256:...",
+  "content_digest": "sha256:...",
   "event_id": "evt_...",
   "event_type": "generation_job.status_changed",
-  "cursor": "cur_...",
+  "cursor": "12345",
   "project_id": "prj_...",
   "aggregate_type": "generation_job",
   "aggregate_id": "job_...",
-  "aggregate_version": 4,
+  "aggregate_version": "4",
   "correlation_id": "cor_...",
-  "causation_id": "evt_...",
-  "occurred_at": "2026-07-14T10:00:00Z",
+  "causation_id": "cmd_...",
+  "occurred_at": "2026-07-14T10:00:00.000Z",
   "payload": {}
 }
 ```
+
+`contract_version` 是 `public-api` 契约族的完整发布版本；`schema_digest` 标识发布合同，
+`content_digest` 覆盖除自身外的完整持久事件，只作为一致性指纹。`occurred_at` 固定为 Product API
+接纳该产品事实的时间，事件排序只使用 Project 内单调递增的 `cursor`。`causation_id` 可以引用直接
+导致该事件的命令、消息或事件；没有直接原因时缺省，不使用 `null`。
 
 首版公开事件族为：
 
@@ -126,7 +134,7 @@ Agent 文本只发送 Java 已持久化并接纳的合并文本块，不逐 toke
 
 ### 6. 版本兼容规则
 
-- `schema_version=1` 内允许增加可选字段；新增事件类型必须先登记 Schema、升级接收方，再通过
+- 同一 `public-api` major 内允许增加可选字段；新增事件类型必须先登记 Schema、升级接收方，再通过
   默认关闭的发送开关启用。未知 `event_type`、Schema、major 或内容指纹异常时，客户端不得应用
   事件，也不得推进已应用游标。
 - 遇到上述不兼容事件时，客户端只允许进行一次同 major 的 Snapshot 恢复。只有 Snapshot 完整
@@ -136,7 +144,7 @@ Agent 文本只发送 Java 已持久化并接纳的合并文本块，不逐 toke
 - 只有事件类型已在当前 major 中登记，并且消费者明确声明该事件对自身是安全 no-op 时，消费者
   才能不更新本地状态而推进游标；未知事件不能被事后推断为 no-op。
 - 删除字段、改变字段含义或类型、复用旧事件名表达新事实属于破坏性变更，必须发布新的
-  `schema_version`，并在迁移窗口内并行支持旧版本。
+  `public-api` major，并在迁移窗口内并行支持旧版本。
 - Snapshot 与事件流必须使用兼容的 schema；服务不得让客户端以旧快照接续只支持新 schema
   的事件流。
 - `correlation_id` 贯穿一条用户意图，`causation_id` 指向直接原因；二者用于追踪，不参与排序。
