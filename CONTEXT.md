@@ -587,12 +587,16 @@ Go 先创建待支付 TopUp 并始终拥有订单与 quota 账本权威；Paymen
 _Avoid_: Payment Gateway 创建业务订单；前端绕过 Go 发起支付；Payment Gateway 直写 Go 数据
 
 **ConfirmTopUp（充值确认）**:
-Go 对支付成功证据的事务化、幂等接纳边界；同一成功事实只能将匹配的待支付 TopUp 完成并增加一次 quota。
-_Avoid_: 裸调 IncreaseUserQuota；由 Payment Gateway 标记订单成功或增加 quota；以 Epay/Dubbo 协议冒充领域命令
+Go 对支付成功证据的事务化、幂等接纳边界；匹配的待支付 TopUp 只能完成并增加一次 quota，已成功且证据一致时只返回确认结果。
+_Avoid_: 裸调 IncreaseUserQuota；由 Payment Gateway 传入 quota 或标记订单成功；以 Epay/Dubbo 协议冒充领域命令
 
 **TopUpConfirmation（充值确认凭证）**:
 Go 对一次规范化支付成功证据及其接纳结果形成的不可变记录，用于识别幂等重放、冲突证据和渠道交易号复用。
 _Avoid_: TopUp；Payment Gateway Inbox 事件；可被覆盖的渠道回调日志
+
+**PaymentReconciliation（支付对账）**:
+已付款事件因 TopUp 失败、过期或证据冲突而不能自动接纳时的人工收敛过程；事件只能以成功到账、完成退款或人工确认驳回之一封口。
+_Avoid_: 自动复活终态 TopUp；无限挂起；超时丢弃；停止重试即视为处理完成
 
 ### Agent 协作语言
 
