@@ -189,6 +189,11 @@ GenerationReviewRetry；超期后删除隔离结果。
 _Avoid_: 把 Job 与 Card/NodeItem 混为一谈 —— Job 是过程,Card/NodeItem 是结果视图;
 把 Job 与 Asset 混为一谈 —— Job 是过程,Asset 是它的产物。
 
+**GenerationOutputSlot（生成输出槽）**:
+GenerationJob 创建时固定的稳定输出身份，独立承接候选结果、ContentReview、Asset 或无结果终态；
+ProviderGenerationAttempt 必须在调用前声明覆盖的槽集合。
+_Avoid_: 运行中增删或重排槽位；覆盖成功槽；批量结果猜测映射；把一个槽发布为多个 Asset。
+
 **GenerationCancellationIntent（生成取消意图）**:
 Product API 对用户“停止 GenerationJob 后续工作”请求形成的幂等事实；它立即阻止新的供应商调用，
 但不证明已 dispatch 的调用已经取消。只有供应商确认取消或平台证明请求从未发出时，Job 才能进入
