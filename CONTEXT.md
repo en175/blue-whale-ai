@@ -213,6 +213,11 @@ GenerationJob 为调用生成供应商而发起的一次可能计费的物理副
 _Avoid_: 把 GenerationJob 当成一次供应商调用；覆盖旧 Attempt；复用 Attempt 身份重发；
 把供应商 task id 当作 Attempt 身份。
 
+**GenerationProviderAdapter（生成供应商适配器）**:
+Generation Worker 中声明供应商能力、转换协议并把调用结果归一为标准证据的边界；不支持的幂等、
+查询、取消或回调能力必须显式缺失，结果不明必须如实返回 `outcome_unknown`。
+_Avoid_: 决定 Job 状态、重试、ContentReview、Asset 发布或费用结算；SDK 隐式重发；伪造供应商能力。
+
 **ProviderObservation（供应商结果观察）**:
 供应商回调或平台主动查询针对原 ProviderGenerationAttempt 形成的规范化、可去重结果证据；它只供
 Product API 验证和推进统一状态机，不直接授予作品发布或费用结算资格。相互冲突的 Observation
