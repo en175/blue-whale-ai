@@ -590,6 +590,10 @@ _Avoid_: Payment Gateway 创建业务订单；前端绕过 Go 发起支付；Pay
 Go 对支付成功证据的事务化、幂等接纳边界；同一成功事实只能将匹配的待支付 TopUp 完成并增加一次 quota。
 _Avoid_: 裸调 IncreaseUserQuota；由 Payment Gateway 标记订单成功或增加 quota；以 Epay/Dubbo 协议冒充领域命令
 
+**TopUpConfirmation（充值确认凭证）**:
+Go 对一次规范化支付成功证据及其接纳结果形成的不可变记录，用于识别幂等重放、冲突证据和渠道交易号复用。
+_Avoid_: TopUp；Payment Gateway Inbox 事件；可被覆盖的渠道回调日志
+
 ### Agent 协作语言
 
 **用户本地集成区**:
