@@ -42,6 +42,7 @@
 - 提交流程：`scripts/commit-task-for-review.sh -m "<message>"`（完成即提交，无需授权）→ 用户确认后 `scripts/merge-task-to-local-master.sh --user-authorized <branch>`（合入门槛保持不变）
 - 完整流程：`docs/agents/worktree-workflow.md`，决策：`docs/adr/0010-local-master-is-user-integration-zone.md`
 - **散文文档例外（[ADR-0025](docs/adr/0025-doc-on-master-allowlist.md)）**：仅编辑根 `CONTEXT.md` + `docs/**/*.md` 时，AI 可在本地 master 直改并用 `scripts/commit-spec-on-master.sh -m "<描述>"` 落盘，不需 Work Tree；规则源（`.claude/`）、代码、`docs/**/*.json` 契约仍必须 Work Tree。
+- **本地个人配置例外（[ADR-0010](../adr/0010-local-master-is-user-integration-zone.md)）**：仅根 `CLAUDE.local.md` 与 `.codex/config.toml` 在 `git check-ignore` 确认已忽略时可由 Agent 在本地 master 直改；不得暂存、提交或输出其中凭证。其他 ignored 文件不在例外内。
 
 ## 同族工单串行与契约先行
 

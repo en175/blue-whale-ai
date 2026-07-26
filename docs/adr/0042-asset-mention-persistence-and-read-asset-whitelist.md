@@ -4,6 +4,10 @@
 - **日期**：2026-07-22
 - **决策者**：用户（与 Agent grill-with-docs 会话共同得出，触发工单：IK33ZV，IK2QC7 AC#2 follow-up；实施规格见 IK33ZV description）
 
+> **IK3UUX 范围状态**：保留消息中不可变的 Asset 引用，以及从权威 NodeItem/Asset 关系计算读取范围；
+> PendingConversationInput、精确浏览器路径和 command 格式不作为前置，见
+> [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
+
 ## 背景
 
 IK2QC7 落地 read_asset 白名单 = 画布节点 `data.assetId` ∪ 本 AgentRun 的 `agent_run` 来源 GenerationJob 输出。AC#2 要求「仅对选中或 @ 引用的 Asset 放行」，但纯对话 @ 引用进不了白名单。根因链：
@@ -14,7 +18,8 @@ IK2QC7 落地 read_asset 白名单 = 画布节点 `data.assetId` ∪ 本 AgentRu
 
 同时，仅放行不够：Agent 在文本里看到 `@[图1]` 也拿不到 assetId——`CanvasNodeSummary` 无名称、`history` 的 `MessageItem` 无引用字段，名称匹配在「@ 后删除画布节点」场景整个失效。
 
-关键前提：持久化模型为每条用户消息创建一个 AgentRun（消息 : Run ≈ 1:1），故「Run 范围」等价于「本条消息」。
+历史实现曾假设每条用户消息创建一个 AgentRun；目标模型已取消这一前提。同一 Run 可以按服务端顺序消费
+多条 PendingConversationInput，因此引用的可见范围必须由 Conversation 与 Advance 输入水位明确决定。
 
 ## 决策
 

@@ -363,6 +363,9 @@ AgentDefinition、Draft/Version、from/to 版本、manifestDigest、结果与规
 | 旧 `POST /api/projects/{projectId}/agent/turn` 文档 | `POST /api/projects/{projectId}/conversation/messages` + Project SSE | **废弃且不实现兼容端点**；代码中不存在该 route，文档与前端残留由迁移票据清理 |
 | `/api/projects/{projectId}/conversation/messages` | 保留 | 继续是用户消息唯一命令入口，不让 Bundle 变成第二个公开控制面 |
 
+> **IK3UUX 范围说明**：本规范不冻结重构后的浏览器路径或精确传输合同；这些形状由后续实施 Spec
+> 按最小需要定义。Bundle 仍不获得第二公开控制面。
+
 旧 `decision_context` 中可验证的产品事实可以作为受控上下文字段或读取工具继续提供，但
 `intent_direction`、`suggested_route`、`decision_branch` 与固定 L1 classifier 不进入新契约。
 

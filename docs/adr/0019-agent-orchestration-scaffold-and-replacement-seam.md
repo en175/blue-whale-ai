@@ -1,6 +1,8 @@
 # ADR-0019：Agent 编排脚手架采用与替换 seam
 
 - **状态**：Accepted
+- **IK3UUX 范围状态**：Superseded — Python/Pydantic AI/AgentScope 只作为迁移前研究基线；目标使用
+  TypeScript 薄 Worker，且不预建框架替换治理，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-14
 
 ## 背景

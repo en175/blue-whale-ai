@@ -3,6 +3,8 @@
 - **状态**：Accepted
 - **日期**：2026-07-18
 - **关联工单**：[IK1W1E](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK1W1E)
+- **IK3UUX 范围状态**：仅作为旧 Java 本地开发环境的历史修复保留；Node 重构使用 fresh Schema，
+  不执行旧库升级或历史数据迁移，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 
 ## 背景
 

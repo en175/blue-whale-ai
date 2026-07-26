@@ -1,5 +1,9 @@
 # IK3UW2：Node Generation Worker 队列与供应商适配方案评估
 
+> **IK3UUX 范围状态**：只保留 MySQL 持久任务、TypeScript Worker、Provider 适配和简单 lease/fence；
+> WorkItem/Reconciler、多期限、结果不明核对与生产恢复验收不属于当前实施，见
+> [ADR-0055](../adr/0055-prelaunch-typescript-unification-scope.md)。
+
 - **工单**：[评估 Generation Worker 的 Node.js 队列与供应商适配方案](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UW2)
 - **父地图**：[Wayfinder：Node.js/TypeScript 全栈重构决策蓝图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UUX)
 - **类型**：wayfinder-research（AFK）

@@ -8,7 +8,8 @@
 # MCP
 .mcp.json
 
-# 本地私人配置（codex CLI 等，勿入库）
+# 本地私人 Agent 配置（勿入库）
+CLAUDE.local.md
 .codex/*
 !.codex/
 !.codex/hooks.json

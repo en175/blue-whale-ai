@@ -3,6 +3,10 @@
 - **状态**：Accepted
 - **日期**：2026-07-17
 
+> **IK3UUX 范围状态**：保留“User 通过 Conversation 自然语言回答当前有效请求”；精确路径、字段、
+> 状态码与输入队列协议由后续实施 Spec 按最小需要定义，见
+> [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
+
 ## 背景
 
 [ADR-0016 §5](0016-project-api-and-replayable-event-stream.md) 早已规定："UserInputRequest

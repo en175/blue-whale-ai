@@ -1,6 +1,9 @@
 # ADR-0018：安全、成本、内容审核与可观测性基线
 
 - **状态**：Accepted
+- **IK3UUX 范围状态**：Limited — 保留当前核心流程直接需要的认证、Project/Asset 隔离、内容审核与
+  成本硬限制；生产 SLO、完整告警/可观测性、长期审计与灾备验收留待上线准备，见
+  [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-14
 
 ## 背景

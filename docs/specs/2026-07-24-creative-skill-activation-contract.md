@@ -8,6 +8,9 @@
 - **机器可读契约**：[creative-skill-activation.schema.json](creative-skill-activation.schema.json)（Draft 2020-12）
 - **示例**：[fixtures/creative-skill-activation/](fixtures/creative-skill-activation/)（`manifest.json` 索引，Java / Python / TypeScript 三端一致性测试共同消费）
 
+> **IK3UUX 范围说明**：本规范继续记录 Creative Skill 的产品语义，但不冻结重构后的浏览器路径、
+> 精确提交格式或独立跨进程合同包；这些形状由后续实施 Spec 按最小需要定义。
+
 本文冻结 Web → Java、Java → Worker、Worker → Java 三个方向上 Creative Skill 选择与激活的
 跨进程字段：一次性 `Use` 如何随创建目标 AgentRun 的消息下达、`auto` 候选如何随 RunWork
 冻结、Worker 如何提议、Java 如何幂等接纳并固定，以及激活后正文与引用资源如何按需读取。

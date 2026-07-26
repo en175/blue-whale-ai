@@ -34,7 +34,7 @@
 ## 禁提交清单（hook 会挡）
 
 - **生成物**：`graphify-out/`、`dist*`、`.next/`（前端构建产物）、`__pycache__/`、`*.pyc`、`.pytest_cache/`（后端 Python 缓存）、`target/`、`*.iml`（后端 Java 构建产物 / IDE）；`graphify-out/` 整个不入库（本地产物，由 `.gitignore` 忽略，各 worktree / clone 各自生成或共享）
-- **个人本机配置**：`.claude/settings.local.json`（`.gitignore` 忽略；其余 `.claude/` 进仓共享，见根 `CLAUDE.md`）
+- **个人本机配置**：`CLAUDE.local.md`、`.codex/config.toml`、`.claude/settings.local.json`（均由 `.gitignore` 忽略；其余 `.claude/` 进仓共享，见根 `CLAUDE.md`）
 - **密钥凭证**：`.env`、`*.key`、`*.pem`、含明文密码的配置文件（敏感配置走环境变量，不进仓）
 
 ---
@@ -160,7 +160,7 @@ ________
 | 检查项 | 类型 | 说明 |
 |---|---|---|
 | 禁提交生成物 | 🔴 硬挡 | `dist*` `.next/` `__pycache__/` `*.pyc` `.pytest_cache/`（`.claude/` 进仓共享，仅 `settings.local.json` 由 `.gitignore` 忽略，非 hook 拦；`graphify-out/` 整个由 `.gitignore` 忽略，非 hook 拦） |
-| 本地 master 提交 | 🟢 放行 | pre-commit：允许用户在本地 `master` 上提交，作为用户本地集成区。Agent 不得把本地 `master` 当任务写入区；Agent 写入任务必须先用 [worktree-workflow.md](worktree-workflow.md) 创建 task worktree + 工单分支（散文文档例外 [ADR-0025](../adr/0025-doc-on-master-allowlist.md)：根 `CONTEXT.md` + `docs/**/*.md` 可直改 master，走 `commit-spec-on-master.sh`） |
+| 本地 master 提交 | 🟢 放行 | pre-commit：允许用户在本地 `master` 上提交，作为用户本地集成区。Agent 写入任务必须先创建 task worktree；仅散文文档（[ADR-0025](../adr/0025-doc-on-master-allowlist.md)）及经 Git 确认已忽略的根 `CLAUDE.local.md` / `.codex/config.toml`（[ADR-0010](../adr/0010-local-master-is-user-integration-zone.md)）可直改 master，后两者不得提交。 |
 | commit 规范 | 🔴 硬挡 | Conventional Commits，格式不符拦截 |
 | 前端 lint | 🟡 软提醒 | 改 `blue_whale_web/` 时跑 `npm run lint`，失败只警告不拦 |
 | 后端 mvn compile | 🟡 软提醒 | 改 `blue_whale_server/` 下 `.java` 时跑 `./mvnw compile`，失败只警告不拦 |

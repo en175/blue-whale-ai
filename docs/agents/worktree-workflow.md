@@ -7,6 +7,7 @@
 - 本地 `master` 是**用户本地集成区**：用户可以在这里开发、commit、整理或集成本地改动。
 - Agent 不得把本地 `master` 当任务写入区；Agent 可写任务必须先创建独立 task worktree 和工单分支（散文文档例外见下条）。
 - **文档白名单例外（[ADR-0025](../adr/0025-doc-on-master-allowlist.md)）**：仅编辑散文规格文档（根 `CONTEXT.md` + `docs/**/*.md`）时，AI 可在本地 master 直改，用 `scripts/commit-spec-on-master.sh -m "<描述>"` 落盘（不 push、不开 PR）；`.claude/`（规则源）、代码、`docs/**/*.json` 契约仍必须走 worktree。
+- **本地个人配置例外（[ADR-0010](../adr/0010-local-master-is-user-integration-zone.md)）**：仅根 `CLAUDE.local.md` 与 `.codex/config.toml` 在 Git 明确认定为 ignored 时可在本地 master 直改。两者保持未跟踪且不得提交；其他 ignored 文件仍不放行。
 - 所有 task worktree 固定放在主仓同级目录：`../blue-whale-worktrees/`。
 - 一个 task worktree 只承载一个任务分支，用完即清理。
 - task worktree 基于同步后的本地 `master` 精确 SHA 创建，以同时保留个人本地更新和最新远程更新。
@@ -137,7 +138,7 @@ scripts/merge-task-to-local-master.sh --user-authorized <任务分支>
 
 4. 如有 merge conflict，Agent 可在本次合入授权范围内解决并运行验证；解决后停在本地 `master` 汇报结果，不继续远程发布。
 
-ZCode / Claude Code / Codex Hook 会硬拦直接 `git commit`、非 `--ff-only` 的直接 `git merge` 以及缺少 `--user-authorized` 的合入本地 master 入口，并指引 Agent 改走标准入口；提交入口出现即放行，合入入口带授权参数无交互放行。Codex 写入仍由 `Edit|Write` matcher 接入，但实际 `tool_name=apply_patch`、补丁位于 `tool_input.command`；薄 wrapper 只提取目标路径，分支与工作树判定继续复用 `block-master-edit.sh` 权威 Gate。
+ZCode / Claude Code / Codex Hook 会硬拦直接 `git commit`、非 `--ff-only` 的直接 `git merge` 以及缺少 `--user-authorized` 的合入本地 master 入口，并指引 Agent 改走标准入口；提交入口出现即放行，合入入口带授权参数无交互放行。master 写入 Gate 仅额外放行已忽略的根 `CLAUDE.local.md` 与 `.codex/config.toml`。Codex 写入仍由 `Edit|Write` matcher 接入，但实际 `tool_name=apply_patch`、补丁位于 `tool_input.command`；薄 wrapper 只提取目标路径，分支与工作树判定继续复用 `block-master-edit.sh` 权威 Gate。
 
 三端阻断等价只比较阻断型 `PreToolUse` / `PostToolUse`。提醒型 `Grep|Glob` 只注入代码发现 context、不阻断，且 Codex 无对应 CBM MCP；`SessionStart` 只在会话启动/恢复时注入 context，不是工具调用 Gate，各平台生命周期挂载也不同，因此两类事件显式排除。
 
