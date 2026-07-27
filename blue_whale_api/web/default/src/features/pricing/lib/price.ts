@@ -139,6 +139,22 @@ function applyRechargeRate(
 }
 
 /**
+ * DIRECTORY 固定使用人民币。输入为系统 USD 价格；priceRate 表示 1 USD
+ * 额度对应的人民币价格，避免受全站额度显示方式（如 TOKENS）影响。
+ */
+export function formatRmbPriceFromUSD(
+  amountUSD: number,
+  priceRate: number,
+  options: { digitsLarge?: number; digitsSmall?: number } = {}
+): string {
+  const digits =
+    Math.abs(amountUSD * priceRate) >= 1
+      ? (options.digitsLarge ?? 4)
+      : (options.digitsSmall ?? 6)
+  return `¥${(amountUSD * priceRate).toFixed(digits).replace(/\.?0+$/, '')}`
+}
+
+/**
  * Format token-based price for display
  */
 export function formatPrice(
@@ -166,8 +182,9 @@ export function formatPrice(
 
   const price = priceInUSD / TOKEN_UNIT_DIVISORS[tokenUnit]
   return formatCurrencyFromUSD(price, {
-    digitsLarge: 4,
-    digitsSmall: 6,
+    digitsLarge: 2,
+    digitsSmall: 2,
+    minimumFractionDigits: 2,
     abbreviate: false,
   })
 }
@@ -201,10 +218,27 @@ export function formatGroupPrice(
 
   const price = priceInUSD / TOKEN_UNIT_DIVISORS[tokenUnit]
   return formatCurrencyFromUSD(price, {
-    digitsLarge: 4,
-    digitsSmall: 6,
+    digitsLarge: 2,
+    digitsSmall: 2,
+    minimumFractionDigits: 2,
     abbreviate: false,
   })
+}
+
+/** DIRECTORY 专用：以人民币展示指定分组的 token 价格。 */
+export function formatRmbGroupPrice(
+  model: PricingModel,
+  group: string,
+  type: PriceType,
+  tokenUnit: TokenUnit,
+  priceRate: number,
+  groupRatio: Record<string, number>
+): string {
+  if (model.quota_type === QUOTA_TYPE_VALUES.REQUEST) return '-'
+  const ratio = getConfiguredGroupRatio(groupRatio, group)
+  const priceInUSD =
+    calculateTokenPrice(model, type, ratio) / TOKEN_UNIT_DIVISORS[tokenUnit]
+  return formatRmbPriceFromUSD(priceInUSD, priceRate)
 }
 
 /**
@@ -233,9 +267,25 @@ export function formatFixedPrice(
   )
 
   return formatCurrencyFromUSD(priceInUSD, {
+    digitsLarge: 2,
+    digitsSmall: 2,
+    minimumFractionDigits: 2,
+    abbreviate: false,
+  })
+}
+
+/** DIRECTORY 专用：以人民币展示指定分组的按次价格。 */
+export function formatRmbFixedPrice(
+  model: PricingModel,
+  group: string,
+  priceRate: number,
+  groupRatio: Record<string, number>
+): string {
+  if (model.quota_type !== QUOTA_TYPE_VALUES.REQUEST) return '-'
+  const ratio = getConfiguredGroupRatio(groupRatio, group)
+  return formatRmbPriceFromUSD((model.model_price || 0) * ratio, priceRate, {
     digitsLarge: 4,
     digitsSmall: 4,
-    abbreviate: false,
   })
 }
 
@@ -265,8 +315,9 @@ export function formatRequestPrice(
   )
 
   return formatCurrencyFromUSD(priceInUSD, {
-    digitsLarge: 4,
-    digitsSmall: 4,
+    digitsLarge: 2,
+    digitsSmall: 2,
+    minimumFractionDigits: 2,
     abbreviate: false,
   })
 }
