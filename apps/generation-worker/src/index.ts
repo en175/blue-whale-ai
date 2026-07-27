@@ -1,19 +1,93 @@
 import { readinessResponseSchema } from "@blue-whale/contracts";
-import { checkReadiness } from "@blue-whale/core";
-import { createFakeGenerationAdapter } from "@blue-whale/generation-runtime";
+import { checkReadiness, openGenerationCredential } from "@blue-whale/core";
 import {
-  createMySqlPool,
-  createMySqlReadinessProbe,
+  createFakeGenerationAdapter,
+  createNewApiVideoTaskProvider,
+  createTosVideoMediaRelay,
+  loadGenerationTosConfig,
+  runVideoJobStep,
+  runVideoWorkerLoop,
+} from "@blue-whale/generation-runtime";
+import {
+  createWorkerRepo,
+  getPrismaClient,
 } from "@blue-whale/persistence";
 import { createServer } from "node:http";
+import { hostname } from "node:os";
 
-if ((process.env.GENERATION_RUNTIME_MODE ?? "fake") !== "fake") {
-  throw new Error("Slice 0 only supports GENERATION_RUNTIME_MODE=fake");
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) throw new Error("DATABASE_URL required");
+
+const prisma = getPrismaClient(databaseUrl);
+const repo = createWorkerRepo(prisma);
+const runtimeMode =
+  process.env.GENERATION_RUNTIME_MODE ??
+  (process.env.NEW_API_BASE_URL ? "new-api" : "fake");
+const fakeRuntime = createFakeGenerationAdapter();
+const mysql = {
+  name: "mysql",
+  async check() {
+    try {
+      await prisma.$queryRawUnsafe("SELECT 1");
+      return true;
+    } catch {
+      return false;
+    }
+  },
+};
+
+let stopping = false;
+let loop: Promise<void> = Promise.resolve();
+let runtime = fakeRuntime;
+
+if (runtimeMode === "new-api") {
+  const baseUrl = process.env.NEW_API_BASE_URL;
+  const tosConfig = loadGenerationTosConfig();
+  const credentialSecret =
+    process.env.GENERATION_CREDENTIAL_SECRET ??
+    process.env.JWT_SECRET ??
+    "blue-whale-dev-secret-key-at-least-256-bits!!";
+  if (!baseUrl) throw new Error("NEW_API_BASE_URL required");
+  if (!tosConfig) throw new Error("TOS configuration required");
+
+  const mediaRelay = createTosVideoMediaRelay(tosConfig);
+  const workerId = `generation-${hostname()}-${process.pid}`;
+  runtime = {
+    name: "new-api-video-runtime",
+    async ready() {
+      return true;
+    },
+    async generate() {
+      throw new Error("new-api runtime uses durable video job steps");
+    },
+  };
+  loop = runVideoWorkerLoop({
+    shouldStop: () => stopping,
+    runStep: async () => {
+      try {
+        return await runVideoJobStep({
+          repo,
+          workerId,
+          createProvider: (token) =>
+            createNewApiVideoTaskProvider({ baseUrl, token }),
+          credentialVault: {
+            open: (ciphertext) =>
+              openGenerationCredential(ciphertext, credentialSecret),
+          },
+          mediaRelay,
+        });
+      } catch (error) {
+        console.error(
+          "[generation-worker] step failed:",
+          error instanceof Error ? error.message : "unknown",
+        );
+        return null;
+      }
+    },
+  });
+} else if (runtimeMode !== "fake") {
+  throw new Error(`Unsupported GENERATION_RUNTIME_MODE: ${runtimeMode}`);
 }
-
-const pool = createMySqlPool();
-const mysql = createMySqlReadinessProbe(pool);
-const runtime = createFakeGenerationAdapter();
 
 const server = createServer((request, response) => {
   void (async () => {
@@ -36,10 +110,12 @@ const server = createServer((request, response) => {
 });
 
 async function shutdown(): Promise<void> {
+  stopping = true;
+  await loop;
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });
-  await pool.end();
+  await prisma.$disconnect();
 }
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

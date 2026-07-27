@@ -33,11 +33,11 @@ fail() {
 
 # Compose 子命令统一通过此函数，注入 --env-file 与 -f
 dc() {
-  local env_args=()
   if [ -f "$ENV_FILE" ]; then
-    env_args=(--env-file "$ENV_FILE")
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+    return
   fi
-  docker compose "${env_args[@]}" -f "$COMPOSE_FILE" "$@"
+  docker compose -f "$COMPOSE_FILE" "$@"
 }
 
 usage() {
@@ -58,7 +58,7 @@ EOF
 
 require_env() {
   if [ ! -f "$ENV_FILE" ]; then
-    echo "⚠️  未找到 $ENV_FILE，使用 .env.example 的默认值继续。" >&2
+    echo "⚠️  未找到 ${ENV_FILE}，使用 .env.example 的默认值继续。" >&2
     echo "   如需自定义端口或密码：cp $ENV_EXAMPLE $ENV_FILE" >&2
   fi
 }

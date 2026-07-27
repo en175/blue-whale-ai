@@ -71,6 +71,7 @@ describe("BottomDock GenerationJob 命令 API", () => {
         input_asset_ids: [3],
         parameters: {
           prompt: "蓝鲸跃出海面",
+          model_id: "video-model",
           aspect_ratio: "16:9",
           resolution: "480p",
           duration: 4,

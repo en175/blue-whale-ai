@@ -1,4 +1,4 @@
-# ADR-0056：业务 API 折进 Next.js Route Handlers，退役独立 product-api 进程与 Java/Python 核心链路
+# ADR-0059：业务 API 折进 Next.js Route Handlers，退役独立 product-api 进程与 Java/Python 核心链路
 
 - **状态**：Accepted
 - **日期**：2026-07-27
@@ -18,7 +18,7 @@ IK4AJJ 与 ADR-0055 原定目标架构为三个独立 Node 入口：Fastify `pro
 1. **业务 API 由 Next.js Route Handlers 承载**。浏览器可见的 HTTP 查询、命令与（后续）SSE 路由落在 `blue_whale_web/app/api/**`，路由本身只是薄适配器，调用 `packages/core` 的应用用例与 `packages/persistence`（Prisma）。**产品事实的唯一权威性不因进程合并而丧失**——权威来自共享 `packages` 的领域规则，而非哪个进程持有它。
 2. **退役 `apps/product-api`（Fastify 桩，删除）、Java `blue_whale_server`、Python `blue_whale_agent_worker`**。
 3. **`agent-worker` 与 `generation-worker` 保持独立 Node 进程**。两者是 lease-based 长循环，不能塞进 Next.js 请求生命周期。
-4. **接口走最小信封**（见 ADR-0057 与后续 OpenSpec）：沿用 Java `Result<T>` 的 `{ code, msg, data }` + `PageVo` 分页。不采纳 ADR-0054 的 `application/problem+json` / JCS 摘要 / `Idempotency-Key: cmd_...` / 强 ETag 机器等冻结细节——这部分已被 ADR-0055 Superseded，本次只定义够用的最小接口。
+4. **接口走最小信封**（见 ADR-0060 与后续 OpenSpec）：沿用 Java `Result<T>` 的 `{ code, msg, data }` + `PageVo` 分页。不采纳 ADR-0054 的 `application/problem+json` / JCS 摘要 / `Idempotency-Key: cmd_...` / 强 ETag 机器等冻结细节——这部分已被 ADR-0055 Superseded，本次只定义够用的最小接口。
 
 ## 连锁影响
 

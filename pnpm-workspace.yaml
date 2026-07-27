@@ -7,8 +7,12 @@ nodeVersion: 24.18.0
 engineStrict: true
 
 allowBuilds:
+  '@prisma/engines': true
   esbuild: true
+  msgpackr-extract: false
+  prisma: true
   sharp: true
+  tos-crc64-js: false
   unrs-resolver: true
 
 patchedDependencies:
