@@ -1,5 +1,7 @@
 # Confirmation Gate Rule
 
+> **⚠️ 已替代（2026-07-24，IK2D8R）**：本文件已**重写**为 Bundle Rule `rule_natural_confirmation`，不再是运行时实现权威。统一弱继续口径（弱继续不构成高成本/不可逆授权），废固定确认门与 ready-node 状态机，铁闸归平台。运行时以 `runtime-bundle/` 为准；目录级说明见 `skill/SKILL.md` 顶部横幅，迁移结论见 `docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md`（rules/ 段）。
+
 确认门是 Blue-Whale Agent Canvas 的硬规则。
 
 ## 一句话规则
