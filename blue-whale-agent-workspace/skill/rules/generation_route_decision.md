@@ -1,5 +1,7 @@
 # Generation Route Decision Rule
 
+> **⚠️ 已替代（2026-07-24，IK2D8R）**：本文件已**归档**，不再是运行时实现权威。Dock 直生 vs Agent 对话的入口划分是产品路由，L1 分流废弃；非模型行为规则。运行时以 `runtime-bundle/` 为准；目录级说明见 `skill/SKILL.md` 顶部横幅，迁移结论见 `docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md`（rules/ 段）。
+
 本规则定义用户要生成图片或视频时，**走 Dock 直生还是 Agent 对话**，以及 Agent 内部如何分流。
 
 ## 一句话规则

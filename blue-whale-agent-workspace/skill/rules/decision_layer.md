@@ -1,5 +1,7 @@
 # Decision Layer Rule（判定分层架构）
 
+> **⚠️ 已替代（2026-07-24，IK2D8R）**：本文件已**归档**，不再是运行时实现权威。`decision_context` / L1 classifier / 固定九分支整体废弃，不做兼容 DTO（契约 §9）。运行时以 `runtime-bundle/` 为准；目录级说明见 `skill/SKILL.md` 顶部横幅，迁移结论见 `docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md`（rules/ 段）。
+
 本规则是主 Agent 判定分层的权威。它把「这一轮 turn 该干什么」拆成三层：硬状态由后端代码算（铁闸，不靠模型）、意图方向由 L1 轻量 classifier 给（软建议）、最终分支由主 Agent 收口（确认门细判 + 调度 + 输出）。
 
 > 设计动机：硬状态判定（多变量结构化分支）是 LLM 弱项，判错率高、难调试；确认门本质是「状态约束」，不该靠模型自觉。于是硬状态下沉后端代码，主 Agent 瘦到「读 `decision_context` → `switch(decision_branch)` → 确认门细判」。

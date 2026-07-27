@@ -1,5 +1,7 @@
 # Video Agent Canvas Workflow
 
+> **⚠️ 已替代（2026-07-24，IK2D8R）**：本文件已**归档**，不再是运行时实现权威。固定 stage 硬停/软过流程废弃；完整广告编排属 Creative Skill 领域。运行时以 `runtime-bundle/` 为准；目录级说明见 `skill/SKILL.md` 顶部横幅，迁移结论见 `docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md`（workflows/ 段）。
+
 目标：把用户一句自然语言视频需求，编排成可确认、可修改、可续跑的画布式创作流程。
 
 ## 阶段总览
