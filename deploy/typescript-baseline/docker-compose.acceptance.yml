@@ -1,0 +1,103 @@
+name: blue-whale-typescript-baseline
+
+x-node-service: &node-service
+  build:
+    context: ../..
+    dockerfile: Dockerfile.typescript-baseline
+  image: blue-whale-typescript-baseline:acceptance
+  environment: &node-environment
+    MYSQL_HOST: mysql
+    MYSQL_PORT: "3306"
+    MYSQL_DATABASE: blue_whale
+    MYSQL_USER: root
+    MYSQL_PASSWORD: blue_whale
+  depends_on:
+    mysql:
+      condition: service_healthy
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: blue_whale
+      MYSQL_ROOT_PASSWORD: blue_whale
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - baseline-mysql-data:/var/lib/mysql
+      - ../../packages/persistence/schema/001_baseline.sql:/docker-entrypoint-initdb.d/001_baseline.sql:ro
+      - ../../packages/persistence/schema/002_seed.sql:/docker-entrypoint-initdb.d/002_seed.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pblue_whale"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+
+  product-api:
+    <<: *node-service
+    command: ["node", "apps/product-api/dist/index.js"]
+    environment:
+      <<: *node-environment
+      PORT: "4000"
+    ports:
+      - "4310:4000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  agent-worker:
+    <<: *node-service
+    command: ["node", "apps/agent-worker/dist/index.js"]
+    environment:
+      <<: *node-environment
+      PORT: "4001"
+      AGENT_RUNTIME_MODE: fake
+    ports:
+      - "4311:4001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4001/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  generation-worker:
+    <<: *node-service
+    command: ["node", "apps/generation-worker/dist/index.js"]
+    environment:
+      <<: *node-environment
+      PORT: "4002"
+      GENERATION_RUNTIME_MODE: fake
+    ports:
+      - "4312:4002"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4002/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  web:
+    <<: *node-service
+    command: ["pnpm", "--filter", "blue_whale", "start:lan"]
+    environment:
+      <<: *node-environment
+      PORT: "3000"
+      GATEWAY_URL: http://product-api:4000
+      GIT_COMMIT: ${GIT_COMMIT:-baseline}
+      BUILD_TIME: ${BUILD_TIME:-baseline}
+    ports:
+      - "3101:3000"
+    depends_on:
+      product-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/build-info').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  baseline-mysql-data:

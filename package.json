@@ -1,0 +1,26 @@
+{
+  "name": "blue-whale-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": "24.18.0",
+    "pnpm": "11.17.0"
+  },
+  "scripts": {
+    "build": "pnpm build:node && pnpm --filter blue_whale build",
+    "build:node": "tsc -b --pretty false",
+    "typecheck": "tsc -b --force --pretty false",
+    "test": "pnpm test:node && pnpm --filter blue_whale test",
+    "test:node": "vitest run packages",
+    "db:fresh": "bash scripts/init-typescript-baseline-db.sh",
+    "test:acceptance": "bash scripts/run-typescript-baseline-acceptance.sh",
+    "verify": "bash scripts/verify-typescript-baseline.sh"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "5.9.3",
+    "vitest": "2.1.9"
+  }
+}

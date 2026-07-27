@@ -1,0 +1,19 @@
+{
+  "name": "@blue-whale/persistence",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@blue-whale/core": "workspace:*",
+    "mysql2": "3.23.1"
+  }
+}

@@ -1,0 +1,15 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "blue_whale_web"
+
+nodeVersion: 24.18.0
+engineStrict: true
+
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+
+patchedDependencies:
+  "@google/design.md@0.3.0": "blue_whale_web/patches/@google+design.md+0.3.0.patch"

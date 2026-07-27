@@ -1,8 +1,8 @@
-diff --git a/node_modules/@google/design.md/dist/spec.md b/node_modules/@google/design.md/dist/spec.md
+diff --git a/dist/spec.md b/dist/spec.md
 new file mode 100644
 index 0000000..41b6d08
 --- /dev/null
-+++ b/node_modules/@google/design.md/dist/spec.md
++++ b/dist/spec.md
 @@ -0,0 +1,365 @@
 +<!-- Generated from spec.mdx + spec-config.ts | version: alpha -->
 +<!-- Do not edit directly. Run `bun run spec:gen` to regenerate. -->
