@@ -104,8 +104,9 @@ _Avoid_: 用浏览器生成值或 SSE 到达顺序充当消息身份与排序依
 
 **PlanMessage（计划卡消息）**:
 Conversation 中由 Agent 提交的独立正式消息类别，以 Markdown 与稳定素材引用表达可应用的场景计划；
-它随对话历史持久保留，可继续讨论，并可由 User 手动应用或重新应用为 SceneCard。
-_Avoid_: 生成结果 Card、SceneCard 本体、可变草稿、把素材失效等同于消息失效
+它随对话历史持久保留，可继续讨论，并冻结“新建 SceneCard”或“覆盖所引用 SceneCard”的应用意图；
+任何应用或重新应用都必须由 User 手动触发。
+_Avoid_: 生成结果 Card、SceneCard 本体、可变草稿、自动应用、应用时重新猜测目标、把素材失效等同于消息失效
 
 **CommandId（业务命令身份）**:
 写请求使用的稳定幂等键。同一业务操作的网络重试保持同一键和请求内容；Product API 返回首次结果，
