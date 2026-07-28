@@ -48,6 +48,11 @@ GenerationJob 从 SceneCard 发起时冻结的来源事实，使 SceneCard 能�
 它不转移 Asset 的 Project 归属，SceneCard 删除或修改也不删除、改写既有 GenerationJob 与 Asset。
 _Avoid_: 作品归 SceneCard 所有、SceneCard 删除级联删除作品、用 SceneCard 最新正文解释历史生成
 
+**SceneCardGenerationRecord（场景卡生成记录）**:
+User 从 SceneCard 发起的一次新生成及其后续重试的用户可见聚合；成功作品固定保留，重试只补齐失败或
+缺失位置，“再次生成”形成新记录。
+_Avoid_: 每个 GenerationJob 各算一条记录、重试覆盖成功作品、把再次生成当作重试
+
 **InitialPlacementStatus（NodeItem 首次放置状态）**:
 NodeItem 创建后的一次性流程状态：`pending`、`placed` 或 `dismissed`。它只记录首次放置流程的结果，
 不表示 NodeItem 当前是否在 Canvas；当前布局始终只由 Canvas 共享布局文档决定。Product API 接纳
