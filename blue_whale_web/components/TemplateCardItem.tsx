@@ -1,16 +1,16 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { useRouter } from "next/navigation";
-import { useAuth } from "./auth/AuthContext";
 import type { TemplateCard } from "@/types/template";
 
 export function TemplateCardItem({
   card,
   index,
+  onAppendPrompt,
 }: {
   card: TemplateCard;
   index: number;
+  onAppendPrompt?: (text: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -30,12 +30,8 @@ export function TemplateCardItem({
     }
   };
 
-  const router = useRouter();
-  const { requireAuth } = useAuth();
   const handleSelect = () => {
-    requireAuth({ kind: "template-select", prompt: card.title }, () =>
-      router.push(`/canvas?prompt=${encodeURIComponent(card.title)}`),
-    );
+    onAppendPrompt?.(card.title);
   };
 
   const cardShape = social
