@@ -12,6 +12,7 @@ import { maskPhone } from "./format";
 import { ModalShell } from "./ModalShell";
 import { RebindPhoneModal } from "./RebindPhoneModal";
 import { ChangePasswordModal } from "./ChangePasswordModal";
+import { RechargeModal } from "@/components/recharge";
 
 interface AccountModalProps {
   onClose: () => void;
@@ -43,14 +44,16 @@ export function AccountModal({ onClose }: AccountModalProps) {
   const { user } = useAuth();
   const [rebindOpen, setRebindOpen] = useState(false);
   const [changePwdOpen, setChangePwdOpen] = useState(false);
+  const [rechargeOpen, setRechargeOpen] = useState(false);
 
   const maskedPhone = user ? maskPhone(user.phone) : "";
+  const hasNestedModal = rebindOpen || changePwdOpen || rechargeOpen;
 
   return (
     <ModalShell
       ariaLabel="账号信息"
       onClose={onClose}
-      closeOnEscape={!rebindOpen && !changePwdOpen}
+      closeOnEscape={!hasNestedModal}
     >
       <h2 className="text-[24px] font-semibold leading-tight mb-6 text-white">
         账号信息
@@ -89,6 +92,19 @@ export function AccountModal({ onClose }: AccountModalProps) {
             </button>
           }
         />
+        <Row
+          label="积分余额"
+          value={user?.credits != null ? String(user.credits) : "—"}
+          action={
+            <button
+              type="button"
+              onClick={() => setRechargeOpen(true)}
+              className="text-[12px] text-[var(--tc-accent,#3b82f6)] hover:opacity-80 underline-offset-4 hover:underline transition-colors"
+            >
+              去充值
+            </button>
+          }
+        />
       </div>
 
       {SKIP_AUTH && (
@@ -100,6 +116,9 @@ export function AccountModal({ onClose }: AccountModalProps) {
       {rebindOpen && <RebindPhoneModal onClose={() => setRebindOpen(false)} />}
       {changePwdOpen && (
         <ChangePasswordModal onClose={() => setChangePwdOpen(false)} />
+      )}
+      {rechargeOpen && (
+        <RechargeModal onClose={() => setRechargeOpen(false)} />
       )}
     </ModalShell>
   );
