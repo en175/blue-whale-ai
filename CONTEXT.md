@@ -50,7 +50,7 @@ _Avoid_: 作品归 SceneCard 所有、SceneCard 删除级联删除作品、用 S
 
 **SceneCardGenerationRecord（场景卡生成记录）**:
 User 从 SceneCard 发起的一次新生成及其后续重试的用户可见聚合；成功作品固定保留，重试只补齐失败或
-缺失位置，“再次生成”形成新记录。
+缺失位置，“再次生成”形成新记录。其汇总状态只使用“生成中、部分完成、全部成功、全部失败”。
 _Avoid_: 每个 GenerationJob 各算一条记录、重试覆盖成功作品、把再次生成当作重试
 
 **InitialPlacementStatus（NodeItem 首次放置状态）**:
@@ -65,7 +65,7 @@ _Avoid_: 从该状态推导当前布局；移出 Canvas 后重置为 pending；�
 
 **Card**（对话卡片消息）:
 Web 依据 Conversation、GenerationOutputSlot、GenerationJob 与 Asset 形成的界面投影；生成中、
-失败或取消的输出即使没有 Asset 也可以显示 Card。Card 没有服务端身份、强版本、存储表或修改接口；
+失败的输出即使没有 Asset 也可以显示 Card。Card 没有服务端身份、强版本、存储表或修改接口；
 用于界面去重的 `projection_key` 只能由权威来源身份确定，不是产品资源 ID。Card 与 NodeItem 是
 不同概念：前者是可重建的界面投影，后者是 Product API 管理的 Project 资源。
 _Avoid_: 持久化 Card；为 Card 设计资源接口；让浏览器随机生成 `projection_key`；把 Card 当作 NodeItem。
@@ -138,9 +138,8 @@ _Avoid_: 每次重试换键；把幂等键当资源身份、排序依据或权�
 惰性创建：仅打开页面不创建，首条被系统接收的消息原子地查找或创建并持久化；从项目列表隐藏；删除为永久删除——物理移除其对话、生成记录与作品（保留最小审计事件），之后首条消息创建全新实例。
 _Avoid_: 把收件箱当作普通 Canvas Project 展示或编辑；通过通用项目端点软删收件箱绕过永久删除；按名称查找收件箱。
 
-**Card 生命周期状态**: `generating` → `normal` | `failed` | `cancelled`。
-失败后的恢复入口仍在原 Card 上，但后端以关联的新 GenerationJob 执行重试；取消且没有产物的
-输出槽位显示为 `cancelled`，不创建 NodeItem，也不计为生成失败。
+**Card 生命周期状态**: `generating` → `normal` | `failed`。
+失败后的恢复入口仍在原 Card 上，但后端以关联的新 GenerationJob 执行重试；已提交的生成不提供取消状态。
 
 **User（用户）**:
 已完成注册并通过登录建立身份的服务使用者；未注册或未登录者不能使用受保护的产品能力。
@@ -206,7 +205,8 @@ _Avoid_: 始终指向最新版的活动引用、SceneCard 版本历史、用旧�
 已接纳状态与结果仍可恢复；同一请求或供应商回调重放不得产生重复任务、结果或费用。
 Worker 通过短租约领取任务；租约过期后可由新 Worker 重新领取，旧 Worker 的迟到写入由 fence 拒绝。
 外部调用结果无法确认时任务明确失败，由 User 在原 Card 上手动重试，不建设自动核对系统。
-_Avoid_: 把 Job 与 Card、NodeItem 或 Asset 混为一谈；用内存状态作为任务权威；自动复活终态任务。
+任务一经接纳即运行到全部成功、部分完成或全部失败；关闭面板、切换页面或退出 Project 均不取消任务。
+_Avoid_: 把 Job 与 Card、NodeItem 或 Asset 混为一谈；用内存状态作为任务权威；提供取消按钮或取消状态；自动复活终态任务。
 
 **GenerationOutputSlot（生成输出槽）**:
 GenerationJob 创建时固定的输出位置，用于让多输出任务稳定关联 Card、审核结果与 Asset。
