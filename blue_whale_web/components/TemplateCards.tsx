@@ -31,7 +31,7 @@ function Skeleton() {
 
 export { TAG_CONFIG };
 
-export default function TemplateCards({ activeTag }: { activeTag: string }) {
+export default function TemplateCards({ activeTag, onAppendPrompt }: { activeTag: string; onAppendPrompt?: (text: string) => void }) {
   const [cards, setCards] = useState<TemplateCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +75,7 @@ export default function TemplateCards({ activeTag }: { activeTag: string }) {
       <div className="ncs-thin-scrollbar -mx-4 w-[calc(100%+2rem)] overflow-x-auto px-4 pb-1">
         <div className="flex w-max min-w-full justify-center gap-3">
           {cards.map((card, idx) => (
-            <TemplateCardItem key={`${activeTag}-${idx}`} card={card} index={idx} />
+            <TemplateCardItem key={`${activeTag}-${idx}`} card={card} index={idx} onAppendPrompt={onAppendPrompt} />
           ))}
         </div>
       </div>
@@ -85,7 +85,7 @@ export default function TemplateCards({ activeTag }: { activeTag: string }) {
   return (
     <div className={`grid grid-cols-2 gap-3 ${container.cols}`}>
       {cards.map((card, idx) => (
-        <TemplateCardItem key={`${activeTag}-${idx}`} card={card} index={idx} />
+        <TemplateCardItem key={`${activeTag}-${idx}`} card={card} index={idx} onAppendPrompt={onAppendPrompt} />
       ))}
     </div>
   );

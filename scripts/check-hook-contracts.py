@@ -61,6 +61,19 @@ EXPECTED_CONTRACTS: tuple[Contract, ...] = (
         "mcp__gitee-ent__create_enterprise_repo_release",
         "confirm-release-action.sh",
     ),
+    # 纯提醒型（恒 exit 0，不阻断）：工单状态机流转提醒，
+    # 规则见 .claude/rules/issue-tracker.md「任务状态机」。
+    ("PostToolUse", "Bash", "remind-issue-state.sh"),
+    (
+        "PostToolUse",
+        "mcp__gitee-ent__create_enterprise_repo_pull",
+        "remind-issue-state.sh",
+    ),
+    (
+        "PostToolUse",
+        "mcp__gitee-ent__merge_enterprise_pull",
+        "remind-issue-state.sh",
+    ),
 )
 
 GATE_NAME = re.compile(r"[A-Za-z0-9._-]+\.sh")

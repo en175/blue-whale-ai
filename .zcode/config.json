@@ -86,11 +86,24 @@
       ],
       "PostToolUse": [
         {
+          "matcher": "Bash",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/remind-issue-state.sh"
+            }
+          ]
+        },
+        {
           "matcher": "mcp__gitee-ent__create_enterprise_repo_pull",
           "hooks": [
             {
               "type": "command",
               "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/confirm-release-action.sh"
+            },
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/remind-issue-state.sh"
             }
           ]
         },
@@ -100,6 +113,10 @@
             {
               "type": "command",
               "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/confirm-release-action.sh"
+            },
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/remind-issue-state.sh"
             }
           ]
         },
