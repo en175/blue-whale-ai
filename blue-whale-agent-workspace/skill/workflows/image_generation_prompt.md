@@ -1,5 +1,7 @@
 # Image Generation Prompt Workflow
 
+> **⚠️ 已替代（2026-07-24，IK2D8R）**：本文件已**重写**为 Bundle Reference `ref_generation_action_guide`，不再是运行时实现权威。图片动作参数指引归并到生成动作指南。运行时以 `runtime-bundle/` 为准；目录级说明见 `skill/SKILL.md` 顶部横幅，迁移结论见 `docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md`（workflows/ 段）。
+
 目标：把用户的图片生成需求转成稳定、可执行、可确认的生图提示词。
 
 ## 触发条件

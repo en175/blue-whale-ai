@@ -9,14 +9,15 @@
  * - className 透传到外层，调用方控制定位（首页 fixed 右上 / 画布 TopBar flex 内）。
  */
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, LogOut, History, User as UserIcon, IdCard } from "lucide-react";
+import { ChevronDown, LogOut, History, User as UserIcon, IdCard, Coins } from "lucide-react";
 import { useAuth } from "./AuthContext";
 import { maskPhone } from "./format";
 import { ProfileModal } from "./ProfileModal";
 import { HistoryModal } from "./HistoryModal";
 import { AccountModal } from "./AccountModal";
+import { RechargeModal } from "@/components/recharge";
 
-type ActiveModal = "profile" | "history" | "account" | null;
+type ActiveModal = "profile" | "history" | "account" | "recharge" | null;
 
 export function UserMenu({ className = "" }: { className?: string }) {
   const { user, openLogin, signOut } = useAuth();
@@ -109,11 +110,21 @@ export function UserMenu({ className = "" }: { className?: string }) {
             </div>
           </div>
 
+          {/* 余额行 */}
+          <div className="flex items-center gap-2 px-2.5 py-2 mb-1 rounded-lg bg-white/[0.03] border border-white/[0.05]">
+            <Coins size={14} className="text-[var(--tc-accent,#3b82f6)] shrink-0" />
+            <span className="text-[12px] text-white/50">积分余额</span>
+            <span className="text-[13px] text-white/85 font-medium tabular-nums ml-auto">
+              {user.credits ?? "—"}
+            </span>
+          </div>
+
           <div className="h-px bg-white/[0.08] my-1" />
 
           <MenuItem icon={<UserIcon size={15} />} label="个人资料" onClick={() => selectItem("profile")} />
           <MenuItem icon={<History size={15} />} label="历史记录" onClick={() => selectItem("history")} />
           <MenuItem icon={<IdCard size={15} />} label="账号信息" onClick={() => selectItem("account")} />
+          <MenuItem icon={<Coins size={15} />} label="积分充值" onClick={() => selectItem("recharge")} />
 
           <div className="h-px bg-white/[0.08] my-1" />
 
@@ -126,10 +137,11 @@ export function UserMenu({ className = "" }: { className?: string }) {
         </div>
       )}
 
-      {/* 三个 modal（由 activeModal 控制，全局唯一同时只开一个） */}
+      {/* modals（由 activeModal 控制，全局唯一同时只开一个） */}
       {activeModal === "profile" && <ProfileModal onClose={() => setActiveModal(null)} />}
       {activeModal === "history" && <HistoryModal onClose={() => setActiveModal(null)} />}
       {activeModal === "account" && <AccountModal onClose={() => setActiveModal(null)} />}
+      {activeModal === "recharge" && <RechargeModal onClose={() => setActiveModal(null)} />}
     </div>
   );
 }

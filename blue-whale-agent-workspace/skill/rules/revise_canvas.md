@@ -1,5 +1,7 @@
 # Revise Canvas Rule
 
+> **⚠️ 已替代（2026-07-24，IK2D8R）**：本文件已**归档**，不再是运行时实现权威。局部修改是顾问式对话的自然行为，由根 Skill 吸收；L1 依赖废弃。运行时以 `runtime-bundle/` 为准；目录级说明见 `skill/SKILL.md` 顶部横幅，迁移结论见 `docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md`（rules/ 段）。
+
 本规则定义 `revise_canvas` 分支的处理——对当前画布已有结果做局部修改。与 `product_switch_p0.md` 对偶：product_switch 管「换产品」，本规则管「改当前画布」。
 
 ## 一句话规则
