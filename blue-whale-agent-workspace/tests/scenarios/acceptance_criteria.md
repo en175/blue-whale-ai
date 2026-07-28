@@ -1,5 +1,7 @@
 # Acceptance Criteria
 
+> **⚠️ 已替代（2026-07-24，IK2D8R）**：本文件验证的是已废弃的 IJZ7Z7 体系（判定分层 / `switch(decision_branch)` / 固定九分支 / 固定确认门），**验收标准随体系一并废弃**，不再作为编排是否跑偏的依据。运行时以 `runtime-bundle/` 为准，迁移结论见 `docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md`。
+
 这些验收标准用于测试 Blue-Whale Agent Workspace 的编排是否跑偏。
 
 当前阶段是“文档级测试”，但每条场景都要写成后续可转接口断言的形式。

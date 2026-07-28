@@ -1,5 +1,7 @@
 # 轻量生成编排（Lightweight Generation Workflow）
 
+> **⚠️ 已替代（2026-07-24，IK2D8R）**：本文件已**重写**为根 Skill `skill_director_workflow` + Reference `ref_generation_action_guide`，不再是运行时实现权威。剔除 decision_context 路由判断与固定 stage 表，改为顾问式多轮工作流。运行时以 `runtime-bundle/` 为准；目录级说明见 `skill/SKILL.md` 顶部横幅，迁移结论见 `docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md`（workflows/ 段）。
+
 > 这是 Agent 对话里的**轻量编排链路**（`decision_branch=new_task` + `suggested_route=lightweight`），**不是 BottomDock 直生**。
 >
 > - 用户要快、自负责 prompt → **Dock 直生**（零优化、零 understanding，直传 Provider），见 `BACKEND-API-PRD.md` §5.4 / §6
