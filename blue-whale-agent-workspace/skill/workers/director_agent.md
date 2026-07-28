@@ -1,5 +1,7 @@
 # 主 Agent(别名:Director Agent / CEO 路由器 / 主控)
 
+> **⚠️ 已替代（2026-07-24，IK2D8R）**：本文件已**重写**为 Bundle RoleDocument `role_director`（`runtime-bundle/resources/AGENTS.md`），不再是运行时实现权威。保留身份/职责/协作边界/输出原则；剔除 decision_context 收口、分支动作表、L1 推翻规则与确认门铁闸。运行时以 `runtime-bundle/` 为准；目录级说明见 `skill/SKILL.md` 顶部横幅，迁移结论见 `docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md`（workers/ 段）。
+
 > **正名:主 Agent**。Director Agent / CEO 路由器 / 主控 都指同一个角色,定义在本文件。
 >
 > **运行方式**:在主对话中运行(不是 Task subagent)。
