@@ -8,6 +8,8 @@ export type User = {
   username: string;
   phone: string;
   hasPassword?: boolean;
+  /** 积分余额（后端 /api/me 返回，未对接时为 undefined） */
+  credits?: number;
 };
 
 /**
