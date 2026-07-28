@@ -387,6 +387,18 @@ _Avoid_: 把按秒计费当作二开新功能
 从 models.dev 拉上游官方定价（USD）的功能，手动触发（非自动 cron）。**保持美元锚点不动**：拉 USD 官方价 → ratio，不改造成拉¥存¥。美元模型（claude 等）上游有官方 USD 价，自动同步正常。
 _Avoid_: 把 ratio_sync 当作自动 cron；为统一 RMB 改造它拉¥存¥；在 RMB 体系下直接禁用它
 
+**定价巡检（docs patrol）**:
+定时抓取火山官方 docs 页（SSR 全量，免登录免 key），检测模型价格与上下线变动，产出变更待审记录，**不直接落库**。面向火山官方全量（含未开通模型），与 `ratio_sync`（手动同步覆盖库）和 `channel_upstream_update`（已开通渠道模型检测）职责不同：它是只读检测 + 报警，覆盖官方全量而非已开通接入点。
+_Avoid_: 把定价巡检当作自动同步（它不写库）；与 ratio_sync 混为一谈；以为它检测已开通渠道模型（那是 channel_upstream_update 的职责）
+
+**归一价（normalized price）**:
+火山各模型官方价按计费单位（元/千 token、元/万 token、元/每 10K TPM/小时、元/秒、元/张等）归一到统一单位，再经 `USDExchangeRate` ÷汇率 → $ → ×`QuotaPerUnit` → quota ratio，用于与库内定价同维度比较。归一先于汇率换算。
+_Avoid_: 直接比¥价和库内 $ 锚点；忽略单位归一导致误判；把归一当作汇率换算
+
+**变更待审（pending change）**:
+定价巡检产出的待人工确认记录（价格变动 / 新模型上线 / 模型下线），状态：待审 → 已确认（落库）/ 已忽略（带理由）。只报警不自动改，防解析错误批量写错；有独立待审表，不复用 channel.settings 暂存。
+_Avoid_: 把待审当作自动落库；忽略理由留存；与 channel_upstream_update 的 channel.settings 暂存混为一谈
+
 ### Agent 协作语言
 
 **用户本地集成区**:
