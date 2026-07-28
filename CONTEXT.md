@@ -33,6 +33,16 @@ Canvas 共享布局文档以 NodeItem ID 记录位置、尺寸与层级；从布
 _Avoid_: 浏览器生成或推导 NodeItem ID；把布局信息或签名地址写入 NodeItem；给 text 写入 HTML 或
 隐式富文本；把过程文字创建为 NodeItem；把移出布局当作删除。
 
+**SceneCard（场景卡）**:
+Project 内持久化的场景创作内容，以 Markdown 作为权威正文；它是独立产品资源，不是对话 Card，
+也不是 NodeItem。
+_Avoid_: 把 SceneCard 当作 Card 的持久化版本；把 SceneCard 内容复制进 Canvas 布局；归入 NodeItem
+
+**SceneCardNode（场景卡节点）**:
+SceneCard 在 Canvas 中的布局投影，只引用一个 SceneCard 并承载布局，不拥有场景内容；它是
+“Canvas 只编排 NodeItem”规则的显式例外。
+_Avoid_: NodeItem、SceneCard 本体、在节点中保存 Markdown 副本
+
 **InitialPlacementStatus（NodeItem 首次放置状态）**:
 NodeItem 创建后的一次性流程状态：`pending`、`placed` 或 `dismissed`。它只记录首次放置流程的结果，
 不表示 NodeItem 当前是否在 Canvas；当前布局始终只由 Canvas 共享布局文档决定。Product API 接纳
@@ -306,6 +316,7 @@ Canvas 承载 Asset 素材节点与用户主动创建的标题、说明或创意
 所有过程性文字内容(Brief 摘要、Skill 推荐、脚本 / 分镜、图片理解摘要、Review、
 visible_reasoning 思考过程、审核说明、任务状态)都在 AgentChatPanel 对话流里以文字或文字卡展示，
 系统和 Agent 不得自动把这些内容创建为 text NodeItem。一句话:**Canvas = 素材与用户便签，对话 = 过程**。
+User 明确应用对话中的计划后形成的 SceneCard 是此边界的唯一例外，并通过 SceneCardNode 进入 Canvas。
 确认 / 修改 / 重试一律通过对话自然语言表达，并遵循 GenerationAuthorizationGate，
 画布节点与对话区都**不设确认按钮**。
 _Avoid_: 把 Brief / Skill / 分镜 / Review 做成画布节点;在画布或对话里加确认按钮;
