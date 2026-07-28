@@ -44,7 +44,7 @@ SceneCard 在 Canvas 中的布局投影，只引用一个 SceneCard 并承载布
 _Avoid_: NodeItem、SceneCard 本体、在节点中保存 Markdown 副本
 
 **SceneCardGenerationOrigin（场景卡生成来源）**:
-GenerationJob 从 SceneCard 发起时冻结的来源事实，使 SceneCard 能按生成时内容版本展示历史任务与作品；
+GenerationJob 从 SceneCard 发起时冻结的来源事实，使 SceneCard 能按生成时内容快照展示历史任务与作品；
 它不转移 Asset 的 Project 归属，SceneCard 删除或修改也不删除、改写既有 GenerationJob 与 Asset。
 _Avoid_: 作品归 SceneCard 所有、SceneCard 删除级联删除作品、用 SceneCard 最新正文解释历史生成
 
