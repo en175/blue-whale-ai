@@ -101,6 +101,10 @@ export interface AgentComposerProps {
   defaultPrompt?: string;
   /** 参数下拉向上展开（/generate 底部固定挂载避开视口底）；缺省向下（首页）。 */
   dropUp?: boolean;
+  /** 受控 prompt 值（传则受控，不传回退内部 state）。 */
+  prompt?: string;
+  /** 受控 prompt 变更回调（与 prompt 配合使用）。 */
+  onPromptChange?: (value: string) => void;
 }
 
 export default function AgentComposer({
@@ -108,9 +112,14 @@ export default function AgentComposer({
   disabledTabs = [],
   defaultPrompt,
   dropUp = false,
+  prompt,
+  onPromptChange,
 }: AgentComposerProps = {}) {
   const [activeTab, setActiveTab] = useState("agent");
   const [content, setContent] = useState("");
+  const isControlled = prompt !== undefined;
+  const resolvedPrompt = prompt ?? content;
+  const handlePromptChange = onPromptChange ?? setContent;
   const [isFocused, setIsFocused] = useState(false);
   const [indicator, setIndicator] = useState({ width: 0, x: 0, opacity: 0 });
   const [modelOpen, setModelOpen] = useState(false);
@@ -154,12 +163,12 @@ export default function AgentComposer({
   const handleGenerate = useCallback(() => {
     // 视频/agent tab 后端未就绪：占位静默（仅图片 tab 真生成）。
     if (tabDisabled) return;
-    const prompt = content.trim();
-    requireAuth({ kind: "home-generate", prompt }, () => {
+    const promptText = resolvedPrompt.trim();
+    requireAuth({ kind: "home-generate", prompt: promptText }, () => {
       if (onGenerate) {
         onGenerate({
           tab: activeTab,
-          prompt,
+          prompt: promptText,
           image: {
             modelId: selectedImageModel.id,
             aspectRatioId: imageAspectRatio.id,
@@ -168,12 +177,12 @@ export default function AgentComposer({
         });
         return;
       }
-      const query = prompt ? `?prompt=${encodeURIComponent(prompt)}` : "";
+      const query = promptText ? `?prompt=${encodeURIComponent(promptText)}` : "";
       router.push(`/generate${query}`);
     });
   }, [
     tabDisabled,
-    content,
+    resolvedPrompt,
     requireAuth,
     onGenerate,
     activeTab,
@@ -184,14 +193,22 @@ export default function AgentComposer({
   ]);
 
   // 预填 prompt（/generate 读 ?prompt 传入；首页不传跳过）。contentEditable 写入需 ref 就绪。
+  // 受控模式下由外部管理 prompt，此处仅非受控时生效。
   useEffect(() => {
-    if (!defaultPrompt || !editorRef.current) return;
+    if (isControlled || !defaultPrompt || !editorRef.current) return;
     if (editorRef.current.innerText.trim() === defaultPrompt.trim()) return;
     editorRef.current.innerText = defaultPrompt;
     // 一次性 URL 预填是官方认可模式；set-state-in-effect 规则对此误报。
-     
+
     setContent(defaultPrompt);
-  }, [defaultPrompt]);
+  }, [defaultPrompt, isControlled]);
+
+  // 受控模式下外部 prompt 变更→回写 contentEditable DOM，避免追加文本不可见且被下次按键覆盖。
+  useEffect(() => {
+    if (!isControlled || !editorRef.current) return;
+    if (editorRef.current.innerText === (prompt ?? "")) return;
+    editorRef.current.innerText = prompt ?? "";
+  }, [prompt, isControlled]);
 
   const tabRefs = useRef<(HTMLElement | null)[]>([]);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -377,7 +394,7 @@ export default function AgentComposer({
 
   const handleInput = () => {
     if (editorRef.current) {
-      setContent(editorRef.current.innerText || "");
+      handlePromptChange(editorRef.current.innerText || "");
     }
   };
 
