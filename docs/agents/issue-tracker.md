@@ -48,6 +48,7 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 - **评论**：`comment_enterprise_issue(enterprise_id, issue_id, body)`。
 - **标签**：`update_enterprise_issue(label_ids=...)`，数字 ID。
 - **关闭**：`update_enterprise_issue(issue_state_id=...)`，**非 `state`**（工具无此入参）。状态枚举随工作项类型变——先 `list_issue_type_states(enterprise_id, issue_type_id)` 查（本仓「需求」= 意向/进行中/已完成/已拒绝，无 closed/open），完成传「已完成」id；完成后 `state` 字段变 `"closed"`。
+- **状态流转（开工/完成）**：权威规则在 `.claude/rules/issue-tracker.md`「任务状态机」——白名单流转、前置状态错位处理、失败处理、禁设状态（已验收/已拒绝/已取消归人）以该文件为准，本节不重复。
 
 ## 术语映射
 

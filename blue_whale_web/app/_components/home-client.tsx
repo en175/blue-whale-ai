@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import PromoCapsule from "@/components/PromoCapsule";
 import { UserMenu } from "@/components/auth/UserMenu";
 import AgentComposer from "@/components/AgentComposer";
 import QuickTags from "@/components/QuickTags";
 import TemplateCards, { TAG_CONFIG } from "@/components/TemplateCards";
+import { appendPrompt } from "@/lib/appendPrompt";
 
 /**
  * HomeClient —— 首页 client 部分（IJZYVT）
@@ -27,6 +28,7 @@ import TemplateCards, { TAG_CONFIG } from "@/components/TemplateCards";
 export default function HomeClient() {
   const [activeTag, setActiveTag] = useState("short");
   const [shouldThrow, setShouldThrow] = useState(false);
+  const [prompt, setPrompt] = useState("");
 
   useEffect(() => {
     if (window.location.search.includes("e2e_error=1")) {
@@ -38,6 +40,10 @@ export default function HomeClient() {
   if (shouldThrow) {
     throw new Error("e2e: route-fallback");
   }
+
+  const handleAppendPrompt = useCallback((text: string) => {
+    setPrompt((prev) => appendPrompt(prev, text));
+  }, []);
 
   const { wrapMaxWidth } = TAG_CONFIG[activeTag] ?? TAG_CONFIG.marketing;
 
@@ -56,13 +62,13 @@ export default function HomeClient() {
 
       <div className="w-full px-4 mb-10">
         <div className="w-full flex flex-col items-center">
-          <AgentComposer />
+          <AgentComposer prompt={prompt} onPromptChange={setPrompt} />
 
           <div
             className={`mt-3 flex w-full flex-col gap-3 ${wrapMaxWidth}`}
           >
             <QuickTags active={activeTag} onSelect={setActiveTag} />
-            <TemplateCards activeTag={activeTag} />
+            <TemplateCards activeTag={activeTag} onAppendPrompt={handleAppendPrompt} />
           </div>
         </div>
       </div>
