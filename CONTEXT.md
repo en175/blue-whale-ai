@@ -40,7 +40,7 @@ _Avoid_: 把 SceneCard 当作 Card 的持久化版本；把 SceneCard 内容复�
 
 **SceneCardNode（场景卡节点）**:
 SceneCard 在 Canvas 中的布局投影，只引用一个 SceneCard 并承载布局，不拥有场景内容；它是
-“Canvas 只编排 NodeItem”规则的显式例外。
+“Canvas 只编排 NodeItem”规则的显式例外；同一 Canvas 中一张 SceneCard 最多有一个 SceneCardNode。
 _Avoid_: NodeItem、SceneCard 本体、在节点中保存 Markdown 副本
 
 **InitialPlacementStatus（NodeItem 首次放置状态）**:
