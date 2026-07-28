@@ -43,6 +43,11 @@ SceneCard 在 Canvas 中的布局投影，只引用一个 SceneCard 并承载布
 “Canvas 只编排 NodeItem”规则的显式例外；同一 Canvas 中一张 SceneCard 最多有一个 SceneCardNode。
 _Avoid_: NodeItem、SceneCard 本体、在节点中保存 Markdown 副本
 
+**SceneCardGenerationOrigin（场景卡生成来源）**:
+GenerationJob 从 SceneCard 发起时冻结的来源事实，使 SceneCard 能按生成时内容版本展示历史任务与作品；
+它不转移 Asset 的 Project 归属，SceneCard 删除或修改也不删除、改写既有 GenerationJob 与 Asset。
+_Avoid_: 作品归 SceneCard 所有、SceneCard 删除级联删除作品、用 SceneCard 最新正文解释历史生成
+
 **InitialPlacementStatus（NodeItem 首次放置状态）**:
 NodeItem 创建后的一次性流程状态：`pending`、`placed` 或 `dismissed`。它只记录首次放置流程的结果，
 不表示 NodeItem 当前是否在 Canvas；当前布局始终只由 Canvas 共享布局文档决定。Product API 接纳
