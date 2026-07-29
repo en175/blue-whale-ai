@@ -90,6 +90,7 @@ function VideoPlayer({ src, label }: { src: string; label?: string }) {
   const [muted, setMuted] = useState(false);
   // 首帧就绪前显占位防黑屏（IJZY0Z「视频节点能显示首帧封面」）；src 变化重置
   const [frameReady, setFrameReady] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setFrameReady(false), [src]);
   const toggle = useCallback(() => {
     const v = videoRef.current;
@@ -379,8 +380,8 @@ export function MediaStateBody({
           style={{ color: "var(--tc-text-tertiary)" }}
         >
           {showProgress
-            ? `生成中 ${Math.round(progress as number)}%`
-            : "生成中…"}
+            ? `处理中 ${Math.round(progress as number)}%`
+            : "处理中…"}
         </span>
       </div>
     );
@@ -703,6 +704,7 @@ export function TextNode({ id, data, width, height, selected }: NodeProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(d.prompt ?? d.content ?? "");
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft(d.prompt ?? d.content ?? "");
   }, [d.prompt, d.content]);
   const commit = () => {

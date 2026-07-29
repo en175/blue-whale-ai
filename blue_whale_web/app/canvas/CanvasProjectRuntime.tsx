@@ -12,16 +12,20 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { useAuth } from "@/components/auth/AuthContext";
 import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
 import { uploadAsset } from "@/lib/assets";
-import { readMediaNaturalSize, detectMediaKind } from "@/lib/mediaSize";
 
 import { useCanvasStore } from "./_canvas/store";
+import { uploadMediaToCanvas } from "./_canvas/uploadMedia";
 import { useCanvasDoc } from "./_canvas/v2/useCanvasDoc";
 import type { CanvasNode, CanvasNodeData, NodeKindId } from "./_canvas/model";
 import { CanvasSurface } from "./_canvas/v2/CanvasSurface";
 import type { MenuPayload } from "./_canvas/v2/CanvasSurface";
 import { ContextMenu, type ContextMenuKind } from "./_canvas/v2/ContextMenu";
 import { useV2Projects } from "./_canvas/v2/useV2Projects";
-import { cardToV2ImageFields, recipeToDockPrefill, buildCrossmodalRefill } from "./_canvas/v2/mappers";
+import {
+  cardToV2ImageFields,
+  recipeToDockPrefill,
+  buildCrossmodalRefill,
+} from "./_canvas/v2/mappers";
 import { findPlacement } from "./_canvas/placement";
 import { dockAccept } from "./_canvas/utils";
 import { useCanvasGeneration } from "./_canvas/hooks/useCanvasGeneration";
@@ -43,12 +47,18 @@ import { canonicalCanvasHref } from "./canonical-project";
 function userFriendlyErrorMessage(e: unknown): string {
   if (!(e instanceof Error)) return "生成失败，请稍后重试";
   const msg = e.message;
-  if (msg.includes("后端未启动") || msg.includes("无法连接")) return "无法连接到服务，请检查网络或稍后重试";
-  if (msg.includes("ARK_API_KEY") || msg.includes("数据库")) return "服务暂时不可用，请稍后重试";
+  if (msg.includes("后端未启动") || msg.includes("无法连接"))
+    return "无法连接到服务，请检查网络或稍后重试";
+  if (msg.includes("ARK_API_KEY") || msg.includes("数据库"))
+    return "服务暂时不可用，请稍后重试";
   return "生成失败，请稍后重试";
 }
 
-export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) {
+export function CanvasProjectRuntime({
+  projectId: pid,
+}: {
+  projectId: string;
+}) {
   const searchParams = useSearchParams();
   const prompt = searchParams.get("prompt") || "";
   const { openLogin } = useAuth();
@@ -63,6 +73,8 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
       openLogin();
       return;
     }
+    // Authentication is read from external storage after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setGated(false);
   }, [openLogin, router]);
 
@@ -82,45 +94,95 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
   } = useV2Projects(pid);
 
   // canvas 数据 = useCanvasDoc hook（本地 state，不卡）；assets = zustand（业务缓存）
-  const { nodes, edges, viewport, saveState, onNodesChange, onEdgesChange, onConnect, addNodeFull, addEdgeFull, patchNode, patchNodeAndSave, setViewport: setViewportAction, load: loadDoc } = useCanvasDoc();
+  const {
+    nodes,
+    edges,
+    viewport,
+    saveState,
+    onNodesChange,
+    onEdgesChange,
+    onConnect,
+    addNodeFull,
+    addEdgeFull,
+    patchNode,
+    resizeNode,
+    patchNodeAndSave,
+    setViewport: setViewportAction,
+    load: loadDoc,
+  } = useCanvasDoc();
   const assets = useCanvasStore((s) => s.assets);
   const addAsset = useCanvasStore((s) => s.addAsset);
 
-  const switchProject = useCallback((id: string) => {
-    router.push(canonicalCanvasHref(id));
-  }, [router]);
+  const switchProject = useCallback(
+    (id: string) => {
+      router.push(canonicalCanvasHref(id));
+    },
+    [router],
+  );
   const createProject = useCallback(async () => {
     const id = await createProjectAction();
     if (id) router.push(canonicalCanvasHref(id));
   }, [createProjectAction, router]);
-  const deleteProject = useCallback(async (id: string) => {
-    await deleteProjectAction(id);
-    if (id === pid) router.replace("/canvas");
-  }, [deleteProjectAction, pid, router]);
+  const deleteProject = useCallback(
+    async (id: string) => {
+      await deleteProjectAction(id);
+      if (id === pid) router.replace("/canvas");
+    },
+    [deleteProjectAction, pid, router],
+  );
 
   const [isAgentOpen, setIsAgentOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
-  const [bottomDockMode, setBottomDockMode] = useState<"image" | "video" | "audio">("image");
+  const [bottomDockMode, setBottomDockMode] = useState<
+    "image" | "video" | "audio"
+  >("image");
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
   const [dockFocusSignal, setDockFocusSignal] = useState(0);
   /** 重新编辑预填（P2）：recipe.generation → Dock 参数回填信号 */
-  const [prefillSignal, setPrefillSignal] = useState<PrefillSignal | null>(null);
-  const [dockMentionSignal, setDockMentionSignal] = useState<{ nonce: number; item: MentionItem | null; replace?: boolean }>({
+  const [prefillSignal, setPrefillSignal] = useState<PrefillSignal | null>(
+    null,
+  );
+  const [dockMentionSignal, setDockMentionSignal] = useState<{
+    nonce: number;
+    item: MentionItem | null;
+    replace?: boolean;
+  }>({
     nonce: 0,
     item: null,
   });
   const [videoDockMedia, setVideoDockMedia] = useState<DockMediaItem[]>([]);
   const [audioDockMedia, setAudioDockMedia] = useState<DockMediaItem[]>([]);
-  const [firstFrameUrl, setFirstFrameUrl] = useState<string | undefined>(undefined);
-  const [lastFrameUrl, setLastFrameUrl] = useState<string | undefined>(undefined);
-  const [firstFrameAssetId, setFirstFrameAssetId] = useState<number | undefined>(undefined);
-  const [lastFrameAssetId, setLastFrameAssetId] = useState<number | undefined>(undefined);
-  const [agentPendingMention, setAgentPendingMention] = useState<{ name: string; nonce: number } | null>(null);
-  const [pickingFor, setPickingFor] = useState<"image" | "video" | "audio" | "firstFrame" | "lastFrame" | null>(null);
+  const [firstFrameUrl, setFirstFrameUrl] = useState<string | undefined>(
+    undefined,
+  );
+  const [lastFrameUrl, setLastFrameUrl] = useState<string | undefined>(
+    undefined,
+  );
+  const [firstFrameAssetId, setFirstFrameAssetId] = useState<
+    number | undefined
+  >(undefined);
+  const [lastFrameAssetId, setLastFrameAssetId] = useState<number | undefined>(
+    undefined,
+  );
+  const [agentPendingMention, setAgentPendingMention] = useState<{
+    name: string;
+    nonce: number;
+  } | null>(null);
+  const [pickingFor, setPickingFor] = useState<
+    "image" | "video" | "audio" | "firstFrame" | "lastFrame" | null
+  >(null);
   const [menu, setMenu] = useState<MenuPayload | null>(null);
 
   const addNode = useCallback(
-    (kind: NodeKindId, extra?: { id?: string; width?: number; height?: number; data?: Partial<CanvasNodeData> }): string => {
+    (
+      kind: NodeKindId,
+      extra?: {
+        id?: string;
+        width?: number;
+        height?: number;
+        data?: Partial<CanvasNodeData>;
+      },
+    ): string => {
       const rect = containerRef.current?.getBoundingClientRect();
       const cx = rect ? rect.width / 2 : 0;
       const cy = rect ? rect.height / 2 : 0;
@@ -133,12 +195,24 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
         kind === "text"
           ? { x: worldX - w / 2, y: worldY - h / 2 }
           : findPlacement({
-              existing: nodes.map((n) => ({ x: n.position.x, y: n.position.y, width: n.width ?? 200, height: n.height ?? 200 })),
+              existing: nodes.map((n) => ({
+                x: n.position.x,
+                y: n.position.y,
+                width: n.width ?? 200,
+                height: n.height ?? 200,
+              })),
               anchor: { x: worldX, y: worldY },
               nodeWidth: w,
               nodeHeight: h,
             });
-      const node: CanvasNode = { id, type: kind, position, width: w, height: h, data: { kind, ...(extra?.data ?? {}) } };
+      const node: CanvasNode = {
+        id,
+        type: kind,
+        position,
+        width: w,
+        height: h,
+        data: { kind, ...(extra?.data ?? {}) },
+      };
       addNodeFull(node);
       return id;
     },
@@ -168,7 +242,9 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
   const handleNodeAction = useCallback(
     (node: CanvasNode, actionId: string) => {
       const name = (node.data.content as string) || "未命名素材";
-      const src = node.data.assetId ? assets[node.data.assetId]?.src : undefined;
+      const src = node.data.assetId
+        ? assets[node.data.assetId]?.src
+        : undefined;
       switch (actionId) {
         case "refresh": {
           const gen = node.data.recipe?.generation;
@@ -176,10 +252,16 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
             // P2：从 recipe 回填底部栏（prompt+参数经 prefillSignal；首尾帧+参考图是 page 受控）
             const p = recipeToDockPrefill(gen);
             setBottomDockMode(gen.mediaKind === "video" ? "video" : "image");
-            if (p.firstFrameUrl !== undefined) setFirstFrameUrl(p.firstFrameUrl);
+            if (p.firstFrameUrl !== undefined)
+              setFirstFrameUrl(p.firstFrameUrl);
             if (p.lastFrameUrl !== undefined) setLastFrameUrl(p.lastFrameUrl);
             if (p.references?.length) {
-              const items: DockMediaItem[] = p.references.map((r, i) => ({ id: `prefill-${Date.now()}-${i}`, type: r.kind, name: "", src: r.url }));
+              const items: DockMediaItem[] = p.references.map((r, i) => ({
+                id: `prefill-${Date.now()}-${i}`,
+                type: r.kind,
+                name: "",
+                src: r.url,
+              }));
               if (gen.mediaKind === "video") setVideoDockMedia(items);
               else setImageDockMedia(items);
             }
@@ -197,7 +279,13 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
           setIsBottomDockOpen(true);
           setDockFocusSignal((n) => n + 1);
           if (src) {
-            const item: DockMediaItem = { id: node.id, type: "image", name, src, assetId: node.data.assetId };
+            const item: DockMediaItem = {
+              id: node.id,
+              type: "image",
+              name,
+              src,
+              assetId: node.data.assetId,
+            };
             setImageDockMedia([item]);
             setDockMentionSignal({
               nonce: Date.now(),
@@ -206,7 +294,9 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
                 name,
                 id: node.id,
                 type: "image",
-                assetId: node.data.assetId ? Number(node.data.assetId) : undefined,
+                assetId: node.data.assetId
+                  ? Number(node.data.assetId)
+                  : undefined,
               },
               replace: true,
             });
@@ -262,24 +352,43 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
   );
 
   // 文本节点 prompt 编辑写回
-  const onEditPrompt = useCallback((id: string, text: string) => {
-    patchNode(id, { prompt: text });
-  }, [patchNode]);
+  const onEditPrompt = useCallback(
+    (id: string, text: string) => {
+      patchNode(id, { prompt: text });
+    },
+    [patchNode],
+  );
 
   // 右键/drop 菜单：插节点（+ drop 时连边 source→newNode.prompt）
-  const onMenuInsert = useCallback((kind: ContextMenuKind) => {
-    if (!menu) return;
-    const m = menu;
-    setMenu(null);
-    const w = kind === "text" ? 200 : 256;
-    const h = kind === "text" ? 48 : 200;
-    const node: CanvasNode = { id: `n_${Math.random().toString(36).slice(2, 10)}`, type: kind, position: { x: m.x - w / 2, y: m.y - h / 2 }, width: w, height: h, data: { kind } };
-    addNodeFull(node);
-    const targetHandle = kind === "text" ? undefined : "prompt";
-    if (m.source && targetHandle) {
-      addEdgeFull({ id: `e_${m.source}_${node.id}`, source: m.source, target: node.id, sourceHandle: m.sourceHandle, targetHandle });
-    }
-  }, [menu, addNodeFull, addEdgeFull]);
+  const onMenuInsert = useCallback(
+    (kind: ContextMenuKind) => {
+      if (!menu) return;
+      const m = menu;
+      setMenu(null);
+      const w = kind === "text" ? 200 : 256;
+      const h = kind === "text" ? 48 : 200;
+      const node: CanvasNode = {
+        id: `n_${Math.random().toString(36).slice(2, 10)}`,
+        type: kind,
+        position: { x: m.x - w / 2, y: m.y - h / 2 },
+        width: w,
+        height: h,
+        data: { kind },
+      };
+      addNodeFull(node);
+      const targetHandle = kind === "text" ? undefined : "prompt";
+      if (m.source && targetHandle) {
+        addEdgeFull({
+          id: `e_${m.source}_${node.id}`,
+          source: m.source,
+          target: node.id,
+          sourceHandle: m.sourceHandle,
+          targetHandle,
+        });
+      }
+    },
+    [menu, addNodeFull, addEdgeFull],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -298,44 +407,56 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
     input.click();
   }, []);
 
+  const uploadCanvasMedia = useCallback(
+    (file: File) =>
+      uploadMediaToCanvas({
+        file,
+        projectId: Number(pid),
+        addNode,
+        patchNode,
+        resizeNode,
+        addAsset,
+        onError: setGenerateError,
+      }),
+    [addAsset, addNode, patchNode, pid, resizeNode, setGenerateError],
+  );
+
   const handleFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file || !pid) return;
       e.target.value = "";
-      const kind = detectMediaKind(file);
-      try {
-        const result = await uploadAsset(file, Number(pid), kind);
-        const size = await readMediaNaturalSize(result.url, kind);
-        const aid = String(result.id);
-        addAsset({ id: aid, kind, src: result.url, source: "uploaded" });
-        addNode(kind, { width: size.width, height: size.height, data: { content: file.name, status: "done", assetId: aid, recipe: { origin: "uploaded" } } });
-      } catch (err) {
-        setGenerateError(userFriendlyErrorMessage(err));
-      }
+      await uploadCanvasMedia(file);
     },
-    [addNode, addAsset, pid, setGenerateError],
+    [pid, uploadCanvasMedia],
   );
 
   const handleDockLocalUpload = useCallback(
     async (file: File, mode: "image" | "video" | "audio") => {
       if (!pid) return;
-      const mediaType = detectMediaKind(file); // image/video/audio 均建画布节点（IJZY0Z 上传落画布）
-      try {
-        const result = await uploadAsset(file, Number(pid), mediaType);
-        const size = await readMediaNaturalSize(result.url, mediaType);
-        const aid = String(result.id);
-        addAsset({ id: aid, kind: mediaType, src: result.url, source: "uploaded" });
-        const id = addNode(mediaType, { width: size.width, height: size.height, data: { content: file.name, status: "done", assetId: aid, recipe: { origin: "uploaded" } } });
-        const item: DockMediaItem = { id, type: mediaType, name: file.name, src: result.url, assetId: result.id };
-        if (mode === "image") setImageDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
-        else if (mode === "audio") setAudioDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
-        else setVideoDockMedia((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, item]));
-      } catch (e) {
-        setGenerateError(userFriendlyErrorMessage(e));
-      }
+      const result = await uploadCanvasMedia(file);
+      if (!result.asset) return;
+      const item: DockMediaItem = {
+        id: result.nodeId,
+        type: result.asset.kind,
+        name: file.name,
+        src: result.asset.url,
+        assetId: result.asset.id,
+      };
+      if (mode === "image")
+        setImageDockMedia((prev) =>
+          prev.some((m) => m.id === result.nodeId) ? prev : [...prev, item],
+        );
+      else if (mode === "audio")
+        setAudioDockMedia((prev) =>
+          prev.some((m) => m.id === result.nodeId) ? prev : [...prev, item],
+        );
+      else
+        setVideoDockMedia((prev) =>
+          prev.some((m) => m.id === result.nodeId) ? prev : [...prev, item],
+        );
     },
-    [addNode, addAsset, pid, setGenerateError],
+    [pid, uploadCanvasMedia],
   );
 
   const handleFrameUpload = useCallback(
@@ -346,10 +467,14 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
         const assetId = Number(result.id);
         if (slot === "first") {
           setFirstFrameUrl(result.url);
-          setFirstFrameAssetId(Number.isSafeInteger(assetId) ? assetId : undefined);
+          setFirstFrameAssetId(
+            Number.isSafeInteger(assetId) ? assetId : undefined,
+          );
         } else {
           setLastFrameUrl(result.url);
-          setLastFrameAssetId(Number.isSafeInteger(assetId) ? assetId : undefined);
+          setLastFrameAssetId(
+            Number.isSafeInteger(assetId) ? assetId : undefined,
+          );
         }
       } catch (e) {
         setGenerateError(userFriendlyErrorMessage(e));
@@ -380,7 +505,12 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
   const handleGenerate = useCallback(
     (promptText: string, args: GenerateArgs) => {
       if (args.mode === "image" && !args.referenceImages) {
-        return generate(promptText, { ...args, referenceImages: imageDockMedia.map((m) => m.src).filter((s): s is string => Boolean(s)) });
+        return generate(promptText, {
+          ...args,
+          referenceImages: imageDockMedia
+            .map((m) => m.src)
+            .filter((s): s is string => Boolean(s)),
+        });
       }
       return generate(promptText, args);
     },
@@ -390,28 +520,62 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
   // 视频 job 进度 / 出图 / 报错已由 useVideoJobs 的 per-job 回调（startVideoJob）驱动，
   // 每个 job 更新自己的 nodeId，多视频并发互不干扰——不再需要单 jobState effect。
 
-  useCanvasProjectHydration({ projectId: pid, loadDoc, hydrate });
+  const [hydrationRetryKey, setHydrationRetryKey] = useState(0);
+  const hydrationState = useCanvasProjectHydration({
+    projectId: pid,
+    loadDoc,
+    hydrate,
+    retryKey: hydrationRetryKey,
+  });
 
-  const handleRequestPick = useCallback((mode: "image" | "video" | "audio") => setPickingFor(mode), []);
-  const handlePickFrameFromCanvas = useCallback((slot: "first" | "last") => setPickingFor(slot === "first" ? "firstFrame" : "lastFrame"), []);
+  const handleRequestPick = useCallback(
+    (mode: "image" | "video" | "audio") => setPickingFor(mode),
+    [],
+  );
+  const handlePickFrameFromCanvas = useCallback(
+    (slot: "first" | "last") =>
+      setPickingFor(slot === "first" ? "firstFrame" : "lastFrame"),
+    [],
+  );
   const handleExitPick = useCallback(() => setPickingFor(null), []);
   const handlePickNode = useCallback(
     (node: CanvasNode) => {
-      const src = node.data.assetId ? assets[node.data.assetId]?.src : undefined;
+      const src = node.data.assetId
+        ? assets[node.data.assetId]?.src
+        : undefined;
       if (!src) {
         setPickingFor(null);
         return;
       }
-      const item: DockMediaItem = { id: node.id, type: "image", name: (node.data.content as string) || "图片", src, assetId: node.data.assetId };
-      if (pickingFor === "image") setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
-      else if (pickingFor === "video") setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
-      else if (pickingFor === "audio") setAudioDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+      const item: DockMediaItem = {
+        id: node.id,
+        type: "image",
+        name: (node.data.content as string) || "图片",
+        src,
+        assetId: node.data.assetId,
+      };
+      if (pickingFor === "image")
+        setImageDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
+      else if (pickingFor === "video")
+        setVideoDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
+      else if (pickingFor === "audio")
+        setAudioDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
       else if (pickingFor === "firstFrame") {
         setFirstFrameUrl(src);
-        setFirstFrameAssetId(node.data.assetId ? Number(node.data.assetId) : undefined);
+        setFirstFrameAssetId(
+          node.data.assetId ? Number(node.data.assetId) : undefined,
+        );
       } else if (pickingFor === "lastFrame") {
         setLastFrameUrl(src);
-        setLastFrameAssetId(node.data.assetId ? Number(node.data.assetId) : undefined);
+        setLastFrameAssetId(
+          node.data.assetId ? Number(node.data.assetId) : undefined,
+        );
       }
       setPickingFor(null);
     },
@@ -443,12 +607,21 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
   const handleCardGenerated = useCallback(
     (card: CardMessage) => {
       const f = cardToV2ImageFields(card);
-      addNode("image", { width: f.width, height: f.height, data: { content: f.content, recipe: { origin: "generated" } } });
+      addNode("image", {
+        width: f.width,
+        height: f.height,
+        data: { content: f.content, recipe: { origin: "generated" } },
+      });
     },
     [addNode],
   );
 
-  const pickableCount = nodes.filter((n) => n.data.assetId && n.data.status !== "running" && n.data.status !== "error").length;
+  const pickableCount = nodes.filter(
+    (n) =>
+      n.data.assetId &&
+      n.data.status !== "running" &&
+      n.data.status !== "error",
+  ).length;
 
   const handleToolClick = useCallback(
     (id: string) => {
@@ -456,13 +629,19 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
         openFilePicker("image/*,video/*,audio/*");
       } else if (id === "audio") {
         setBottomDockMode("audio");
-        setIsBottomDockOpen((open) => (bottomDockMode === "audio" && open ? false : true));
+        setIsBottomDockOpen((open) =>
+          bottomDockMode === "audio" && open ? false : true,
+        );
       } else if (id === "ai-image") {
         setBottomDockMode("image");
-        setIsBottomDockOpen((open) => (bottomDockMode === "image" && open ? false : true));
+        setIsBottomDockOpen((open) =>
+          bottomDockMode === "image" && open ? false : true,
+        );
       } else if (id === "ai-video") {
         setBottomDockMode("video");
-        setIsBottomDockOpen((open) => (bottomDockMode === "video" && open ? false : true));
+        setIsBottomDockOpen((open) =>
+          bottomDockMode === "video" && open ? false : true,
+        );
       } else if (id === "text") {
         addNode("text");
       }
@@ -489,7 +668,11 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
             type="button"
             onClick={retry}
             className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm transition-colors"
-            style={{ background: "var(--tc-bg-surface)", border: "1px solid var(--tc-border-subtle)", color: "var(--tc-text-secondary)" }}
+            style={{
+              background: "var(--tc-bg-surface)",
+              border: "1px solid var(--tc-border-subtle)",
+              color: "var(--tc-text-secondary)",
+            }}
           >
             重试
           </button>
@@ -497,7 +680,34 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
         <Link
           href="/canvas"
           className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm transition-colors"
-          style={{ background: "var(--tc-accent)", color: "var(--tc-on-accent)" }}
+          style={{
+            background: "var(--tc-accent)",
+            color: "var(--tc-on-accent)",
+          }}
+        >
+          返回项目列表
+        </Link>
+      </div>
+    );
+  }
+  if (hydrationState !== "ready") {
+    return (
+      <div className="flex h-screen w-screen flex-col items-center justify-center gap-5 bg-black">
+        <p className="text-sm text-[var(--tc-text-secondary)]">
+          {hydrationState === "error" ? "画布加载失败" : "正在加载画布…"}
+        </p>
+        {hydrationState === "error" && (
+          <button
+            type="button"
+            onClick={() => setHydrationRetryKey((value) => value + 1)}
+            className="inline-flex h-9 items-center rounded-full border border-[var(--tc-border)] bg-[var(--tc-bg-surface)] px-4 text-sm text-[var(--tc-text-secondary)] transition-colors hover:text-[var(--tc-text-primary)]"
+          >
+            重试
+          </button>
+        )}
+        <Link
+          href="/canvas"
+          className="inline-flex h-9 items-center rounded-full bg-[var(--tc-accent)] px-4 text-sm text-[var(--tc-on-accent)]"
         >
           返回项目列表
         </Link>
@@ -507,7 +717,14 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
 
   return (
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-black text-white">
-      <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*" className="sr-only" onChange={handleFileChange} aria-hidden="true" />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,video/*,audio/*"
+        className="sr-only"
+        onChange={handleFileChange}
+        aria-hidden="true"
+      />
       <TopBar
         activeProject={activeProject}
         projects={projects}
@@ -517,7 +734,10 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
         onRename={renameProject}
       />
       <TopBarCenter />
-      <TopBarRight isAgentOpen={isAgentOpen} onAgentToggle={() => setIsAgentOpen((v) => !v)} />
+      <TopBarRight
+        isAgentOpen={isAgentOpen}
+        onAgentToggle={() => setIsAgentOpen((v) => !v)}
+      />
 
       <ReactFlowProvider>
         <div ref={containerRef} className="absolute inset-0 z-0">
@@ -574,9 +794,13 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
             whiteSpace: "nowrap",
           }}
         >
-          <span style={{ color: "var(--tc-accent)", fontWeight: 600 }}>从画布选择</span>
+          <span style={{ color: "var(--tc-accent)", fontWeight: 600 }}>
+            从画布选择
+          </span>
           <span style={{ color: "var(--tc-text-tertiary)" }}>
-            {pickableCount === 0 ? "画布上还没有可用的图片" : "点击画布中的图片加入"}
+            {pickableCount === 0
+              ? "画布上还没有可用的图片"
+              : "点击画布中的图片加入"}
           </span>
           <span style={{ color: "var(--tc-text-muted)" }}>·</span>
           <button
@@ -606,9 +830,15 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
           focusSignal={dockFocusSignal}
           dockMentionSignal={dockMentionSignal}
           prefillSignal={prefillSignal ?? undefined}
-          onRemoveImageMedia={(id) => setImageDockMedia((prev) => prev.filter((m) => m.id !== id))}
-          onRemoveVideoMedia={(id) => setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))}
-          onRemoveAudioMedia={(id) => setAudioDockMedia((prev) => prev.filter((m) => m.id !== id))}
+          onRemoveImageMedia={(id) =>
+            setImageDockMedia((prev) => prev.filter((m) => m.id !== id))
+          }
+          onRemoveVideoMedia={(id) =>
+            setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))
+          }
+          onRemoveAudioMedia={(id) =>
+            setAudioDockMedia((prev) => prev.filter((m) => m.id !== id))
+          }
           firstFrameUrl={firstFrameUrl}
           lastFrameUrl={lastFrameUrl}
           firstFrameAssetId={firstFrameAssetId}
@@ -644,7 +874,10 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
         <Link
           href="/"
           className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-white/70 backdrop-blur-md transition-colors hover:text-white"
-          style={{ background: "var(--tc-bg-surface)", border: "1px solid var(--tc-menu-pill-border)" }}
+          style={{
+            background: "var(--tc-bg-surface)",
+            border: "1px solid var(--tc-menu-pill-border)",
+          }}
         >
           <ArrowLeft width={14} height={14} />
           返回首页

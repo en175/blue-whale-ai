@@ -63,6 +63,8 @@ export interface PendingUploadAsset {
 
 export interface AssetRepo {
   listByUser(userId: string, filter: AssetListFilter): Promise<AssetPage>;
+  /** 逻辑删除当前用户自己的未删除 Asset；不存在或不归属返回 false。 */
+  softDeleteOwned(assetId: string, userId: string): Promise<boolean>;
   /** 取当前用户在指定项目下的正常资产（access/content 用）；不存在/不归属/已删 → null。 */
   findAccessible(
     projectId: string,
@@ -70,7 +72,10 @@ export interface AssetRepo {
     userId: string,
   ): Promise<AssetInternal | null>;
   /** 取当前用户拥有的正常源资产（跨项目复制用）；不存在/不归属/非正常 → null。 */
-  findOwnedSource(sourceAssetId: string, userId: string): Promise<AssetSourceFields | null>;
+  findOwnedSource(
+    sourceAssetId: string,
+    userId: string,
+  ): Promise<AssetSourceFields | null>;
   /** 在目标项目落下资产副本行（与源共享 storage_key 物理对象），返回新副本视图。 */
   insertCopy(
     projectId: string,
@@ -85,9 +90,15 @@ export interface AssetRepo {
     storageKey: string;
     url: string;
   }): Promise<string>;
-  findPendingUpload(assetId: string, userId: string): Promise<PendingUploadAsset | null>;
+  findPendingUpload(
+    assetId: string,
+    userId: string,
+  ): Promise<PendingUploadAsset | null>;
   markUploadReady(assetId: string, userId: string): Promise<boolean>;
-  findCommittedUpload(userId: string, storageKey: string): Promise<PendingUploadAsset | null>;
+  findCommittedUpload(
+    userId: string,
+    storageKey: string,
+  ): Promise<PendingUploadAsset | null>;
   createUploadedAsset(input: {
     userId: string;
     projectId: string;
@@ -131,6 +142,21 @@ function toUploadAsset(row: {
 
 export function createAssetRepo(prisma: PrismaClient): AssetRepo {
   return {
+    async softDeleteOwned(assetId, userId) {
+      const result = await prisma.assets.updateMany({
+        where: {
+          id: BigInt(assetId),
+          user_id: BigInt(userId),
+          is_delete: false,
+        },
+        data: {
+          is_delete: true,
+          version: { increment: 1 },
+          gmt_modified: new Date(),
+        },
+      });
+      return result.count === 1;
+    },
     async listByUser(userId, filter) {
       const where = {
         user_id: BigInt(userId),
