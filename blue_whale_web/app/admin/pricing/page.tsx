@@ -30,22 +30,30 @@ const MODEL_OPTIONS = [
   { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
 ];
 
-const IMAGE_QUALITY_OPTIONS = [
-  { value: "sd", label: "SD" },
-  { value: "hd", label: "HD" },
-  { value: "4k", label: "4K" },
+const CUSTOM_RESOLUTION_VALUE = "__custom__";
+
+const IMAGE_RESOLUTION_OPTIONS = [
+  { value: "1280×960", label: "1280×960" },
+  { value: "1920×1080", label: "1920×1080" },
+  { value: "4096×2160", label: "4096×2160" },
+  { value: CUSTOM_RESOLUTION_VALUE, label: "自定义" },
 ];
 
-const VIDEO_QUALITY_OPTIONS = [
-  { value: "720p", label: "720p" },
-  { value: "1080p", label: "1080p" },
-  { value: "4k", label: "4K" },
+const VIDEO_RESOLUTION_OPTIONS = [
+  { value: "1280×720", label: "1280×720" },
+  { value: "1920×1080", label: "1920×1080" },
+  { value: "4096×2160", label: "4096×2160" },
+  { value: CUSTOM_RESOLUTION_VALUE, label: "自定义" },
 ];
 
 const EMPTY_FORM: PricingFormData = {
   generationType: "image", modelId: "gpt-4o", modelName: "GPT-4o",
-  paramsSchema: { quality: "hd" }, baseCost: 10, unit: "张", description: "", enabled: true,
+  paramsSchema: { resolution: "1920×1080" }, baseCost: 10, unit: "张", description: "", enabled: true,
 };
+
+function resolveResolution(resolution: string, custom: string): string {
+  return resolution === CUSTOM_RESOLUTION_VALUE ? custom : resolution;
+}
 
 export default function AdminPricingPage() {
   const [rules, setRules] = useState<PricingRule[]>([]);
@@ -53,13 +61,15 @@ export default function AdminPricingPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<PricingFormData>(EMPTY_FORM);
-  const [formQuality, setFormQuality] = useState("hd");
+  const [formResolution, setFormResolution] = useState("1920×1080");
+  const [formCustomResolution, setFormCustomResolution] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);
 
   // Preview calculator state
   const [previewType, setPreviewType] = useState<GenerationType>("image");
   const [previewModel, setPreviewModel] = useState("gpt-4o");
-  const [previewQuality, setPreviewQuality] = useState("hd");
+  const [previewResolution, setPreviewResolution] = useState("1920×1080");
+  const [previewCustomResolution, setPreviewCustomResolution] = useState("");
   const [previewCount, setPreviewCount] = useState(4);
   const [previewDuration, setPreviewDuration] = useState(10);
   const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null);
@@ -72,20 +82,30 @@ export default function AdminPricingPage() {
     return rules.filter((r) => r.generationType === genFilter);
   }, [rules, genFilter]);
 
-  const openCreate = () => { setEditingId(null); setForm(EMPTY_FORM); setFormQuality("hd"); setDialogOpen(true); };
+  const openCreate = () => { setEditingId(null); setForm(EMPTY_FORM); setFormResolution("1920×1080"); setFormCustomResolution(""); setDialogOpen(true); };
   const openEdit = (r: PricingRule) => {
     setEditingId(r.id);
     setForm({
       generationType: r.generationType, modelId: r.modelId, modelName: r.modelName,
       paramsSchema: r.paramsSchema, baseCost: r.baseCost, unit: r.unit, description: r.description, enabled: r.enabled,
     });
-    setFormQuality(String(r.paramsSchema.quality || "hd"));
+    const res = String(r.paramsSchema.resolution || "1920×1080");
+    const isPreset = (r.generationType === "image" ? IMAGE_RESOLUTION_OPTIONS : VIDEO_RESOLUTION_OPTIONS)
+      .some((o) => o.value !== CUSTOM_RESOLUTION_VALUE && o.value === res);
+    if (isPreset) {
+      setFormResolution(res);
+      setFormCustomResolution("");
+    } else {
+      setFormResolution(CUSTOM_RESOLUTION_VALUE);
+      setFormCustomResolution(res);
+    }
     setDialogOpen(true);
   };
 
   const handleSave = () => {
-    const data: PricingFormData = { ...form, paramsSchema: { quality: formQuality } };
-    if (!data.description.trim()) data.description = `${form.generationType === "image" ? "图片" : "视频"} — ${form.modelName} — ${formQuality}`;
+    const resolution = resolveResolution(formResolution, formCustomResolution);
+    const data: PricingFormData = { ...form, paramsSchema: { resolution } };
+    if (!data.description.trim()) data.description = `${form.generationType === "image" ? "图片" : "视频"} — ${form.modelName} — ${resolution}`;
     if (editingId) { updatePricingRule(editingId, data); } else { createPricingRule(data); }
     setRules(getPricingRules()); setDialogOpen(false);
   };
@@ -96,7 +116,9 @@ export default function AdminPricingPage() {
     setPreviewAttempted(true);
     const r = calculatePreview({
       generationType: previewType, modelId: previewModel,
-      params: previewType === "image" ? { quality: previewQuality, count: previewCount } : { quality: previewQuality, duration_seconds: previewDuration },
+      params: previewType === "image"
+        ? { resolution: resolveResolution(previewResolution, previewCustomResolution), count: previewCount }
+        : { resolution: resolveResolution(previewResolution, previewCustomResolution), duration_seconds: previewDuration },
     });
     setPreviewResult(r);
   };
@@ -106,7 +128,7 @@ export default function AdminPricingPage() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-[var(--tc-text-primary)]">定价规则</h1>
-          <p className="mt-1 text-sm text-[var(--tc-text-muted)]">按生成类型 + 模型 + 清晰度设定积分单价，支持消耗预览</p>
+          <p className="mt-1 text-sm text-[var(--tc-text-muted)]">按生成类型 + 模型 + 分辨率设定积分单价，支持消耗预览</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => { setPreviewOpen(true); setPreviewResult(null); setPreviewAttempted(false); }} className="inline-flex items-center gap-2 rounded-lg border border-[var(--tc-border)] px-4 py-2 text-sm font-medium text-[var(--tc-text-secondary)] hover:bg-[var(--tc-bg-elevated)] transition-colors">
@@ -175,7 +197,8 @@ export default function AdminPricingPage() {
             <Select value={form.generationType} onChange={(e) => {
               const gt = e.target.value as GenerationType;
               setForm({ ...form, generationType: gt });
-              setFormQuality(gt === "image" ? "hd" : "1080p");
+              setFormResolution(gt === "image" ? "1920×1080" : "1920×1080");
+              setFormCustomResolution("");
             }} options={GEN_TYPE_FORM_OPTIONS} />
           </div>
           <div>
@@ -186,10 +209,18 @@ export default function AdminPricingPage() {
             }} options={MODEL_OPTIONS} />
           </div>
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-[var(--tc-text-secondary)]">清晰度</label>
-            <Select value={formQuality} onChange={(e) => setFormQuality(e.target.value)}
-              options={form.generationType === "image" ? IMAGE_QUALITY_OPTIONS : VIDEO_QUALITY_OPTIONS} />
+            <label className="mb-1.5 block text-sm font-medium text-[var(--tc-text-secondary)]">分辨率</label>
+            <Select value={formResolution} onChange={(e) => {
+              setFormResolution(e.target.value);
+              if (e.target.value !== CUSTOM_RESOLUTION_VALUE) setFormCustomResolution("");
+            }} options={form.generationType === "image" ? IMAGE_RESOLUTION_OPTIONS : VIDEO_RESOLUTION_OPTIONS} />
           </div>
+          {formResolution === CUSTOM_RESOLUTION_VALUE && (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-[var(--tc-text-secondary)]">自定义分辨率</label>
+              <Input value={formCustomResolution} onChange={(e) => setFormCustomResolution(e.target.value)} placeholder="如：2560×1440" />
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1.5 block text-sm font-medium text-[var(--tc-text-secondary)]">单价 (积分)</label>
@@ -202,7 +233,7 @@ export default function AdminPricingPage() {
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-[var(--tc-text-secondary)]">说明</label>
-            <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="如：HD 清晰度图片 × 1" />
+            <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="如：1920×1080 图片 × 1" />
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setDialogOpen(false)} className="rounded-lg border border-[var(--tc-border)] px-4 py-2 text-sm text-[var(--tc-text-secondary)] hover:bg-[var(--tc-bg-elevated)]">取消</button>
@@ -228,9 +259,12 @@ export default function AdminPricingPage() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-[var(--tc-text-secondary)]">清晰度</label>
-              <Select value={previewQuality} onChange={(e) => { setPreviewQuality(e.target.value); setPreviewResult(null); setPreviewAttempted(false); }}
-                options={previewType === "image" ? IMAGE_QUALITY_OPTIONS : VIDEO_QUALITY_OPTIONS} />
+              <label className="mb-1.5 block text-sm font-medium text-[var(--tc-text-secondary)]">分辨率</label>
+              <Select value={previewResolution} onChange={(e) => {
+                setPreviewResolution(e.target.value);
+                if (e.target.value !== CUSTOM_RESOLUTION_VALUE) setPreviewCustomResolution("");
+                setPreviewResult(null); setPreviewAttempted(false);
+              }} options={previewType === "image" ? IMAGE_RESOLUTION_OPTIONS : VIDEO_RESOLUTION_OPTIONS} />
             </div>
             {previewType === "image" ? (
               <div>
@@ -244,6 +278,12 @@ export default function AdminPricingPage() {
               </div>
             )}
           </div>
+          {previewResolution === CUSTOM_RESOLUTION_VALUE && (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-[var(--tc-text-secondary)]">自定义分辨率</label>
+              <Input value={previewCustomResolution} onChange={(e) => { setPreviewCustomResolution(e.target.value); setPreviewResult(null); setPreviewAttempted(false); }} placeholder="如：2560×1440" />
+            </div>
+          )}
           <button onClick={handlePreview} className="w-full rounded-lg bg-[var(--tc-accent,#3b82f6)] py-2.5 text-sm font-medium text-white hover:opacity-90 transition-opacity">
             <Zap className="inline h-4 w-4 mr-1" />计算消耗
           </button>
@@ -272,7 +312,7 @@ export default function AdminPricingPage() {
             </div>
           ) : previewAttempted ? (
             <div className="rounded-xl border border-[#f59e0b]/30 bg-[#f59e0b]/5 p-5 text-center text-sm text-[#f59e0b]">
-              未找到匹配的定价规则 — 请检查生成类型、模型与清晰度组合是否存在启用规则。
+              未找到匹配的定价规则 — 请检查生成类型、模型与分辨率组合是否存在启用规则。
             </div>
           ) : null}
         </div>
