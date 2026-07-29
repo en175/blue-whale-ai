@@ -17,6 +17,7 @@ export const MOCK_USER: User = {
   username: "本地测试用户",
   phone: "13800000000",
   hasPassword: false,
+  credits: 1000,
 };
 
 // ---- user ----

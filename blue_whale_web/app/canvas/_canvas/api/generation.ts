@@ -59,6 +59,7 @@ export type CreateProjectGenerationJobPayload = {
       type: "video";
       parameters: {
         prompt: string;
+        model_id: string;
         aspect_ratio: string;
         resolution: string;
         duration: number;
@@ -174,4 +175,69 @@ export function generateAudio(
       MOCK_AUDIO_DELAY_MS,
     );
   });
+}
+
+// ---------- Node GenerationJob 轮询 / 列表（IK4AK6 接 Node，取代 v2 老 Java 接口）----------
+
+/** GET /api/jobs/{id} 返回——对齐 Node `handleGetJobStatus` JobStatusData。
+ *  succeeded→asset.url 是产物；failed→error；processing→progress。 */
+export type JobStatusData = {
+  job_id: string;
+  status: string;
+  progress: number;
+  asset: { id: string; url: string; type: string } | null;
+  error: { code: string; message: string; retryable?: boolean } | null;
+};
+
+/** 轮询任务状态（image/video 通用，取代 v2 SSE streamJob / getJobStatus 旧骨架）。 */
+export function getJobStatus(jobId: number | string): Promise<JobStatusData> {
+  return apiRequest<JobStatusData>(`/api/jobs/${jobId}`);
+}
+
+/** GET /api/jobs 列表项（recover/reconcile 用；对齐 Node JobListItem，snake_case）。 */
+export type JobListItem = {
+  job_id: string;
+  type: string;
+  status: string;
+  progress: number;
+  input: unknown;
+  created_at: string;
+  output_assets: {
+    id: string;
+    url: string;
+    type: string;
+    width: number | null;
+    height: number | null;
+  }[];
+};
+
+type JobListPage = {
+  records: JobListItem[];
+  total: number;
+  size: number;
+  current: number;
+};
+
+/** 列任务（recover processing / reconcile succeeded）；展平 records 数组返回。 */
+export function listJobs(opts: {
+  projectId: number | string;
+  status?: string;
+  size?: number;
+}): Promise<JobListItem[]> {
+  const qs = new URLSearchParams({
+    projectId: String(opts.projectId),
+    size: String(opts.size ?? 50),
+  });
+  if (opts.status) qs.set("status", opts.status);
+  return request<JobListPage>(`/jobs?${qs.toString()}`, "GET").then(
+    (p) => p.records,
+  );
+}
+
+/** 视频模型能力（capability=video；shape 同 ImageModelCapability——后端共用 ModelCapabilityView）。 */
+export function getVideoModels(): Promise<ImageModelCapability[]> {
+  return request<ImageModelCapability[]>(
+    "/generation/models?capability=video",
+    "GET",
+  );
 }

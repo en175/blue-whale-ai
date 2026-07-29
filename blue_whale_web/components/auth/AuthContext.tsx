@@ -14,20 +14,13 @@ import {
   clearUser,
   clearTokens,
   loadAccessToken,
-  loadRefreshToken,
   loadUser,
   saveTokens,
   saveUser,
   SKIP_AUTH,
   MOCK_USER,
 } from "./authStorage";
-import {
-  loginWithCode,
-  logoutApi,
-  refreshToken,
-  fetchMe,
-  ApiError,
-} from "@/lib/auth";
+import { loginWithPassword, fetchMe } from "@/lib/auth";
 import {
   subscribeToAuthFailure,
   getAccessTokenSilently,
@@ -39,7 +32,7 @@ interface AuthContextValue {
   isLoginOpen: boolean;
   pendingAction: PendingAction | null;
   requireAuth: (action: PendingAction, run: () => void) => void;
-  signIn: (phone: string, code: string) => Promise<void>;
+  signIn: (username: string, password: string) => Promise<void>;
   signOut: () => void;
   /** 从后端拉最新用户信息并同步本地。换绑成功后用（手机号变更需后端确认）。改昵称不用——用 updateLocalUser（乐观更新）。 */
   refreshUser: () => Promise<void>;
@@ -67,68 +60,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(
     null,
   );
-  const [authLoading, setAuthLoading] = useState(false);
   const executorRef = useRef<(() => void) | null>(null);
-  const hasMountedRef = useRef(false); // StrictMode 下 useEffect 双重火守卫
 
-  // mount: 尝试用 refresh_token 恢复完整 session
+  // mount: new-api token 没有 Node refresh 链路，直接恢复本地登录态。
   useEffect(() => {
-    // 本地开发：跳过鉴权，user 已由 useState lazy init 注入（避免 effect 内 setState）
     if (SKIP_AUTH) return;
     const u = loadUser();
-
-    // 乐观：有 user 数据立刻恢复 UI 登录态，不等刷新结果
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount 从 storage 恢复是合法 effect 用途
     if (u) setUser(u);
-
-    // 如果 ref 已标记（StrictMode 双重火），跳过第二次 refresh 请求
-    const rt = u ? loadRefreshToken() : null;
-    if (!u || !rt) return;
-    if (hasMountedRef.current) {
-      console.log("[Auth] mount: hasMountedRef=true，跳过重复 refresh");
-      return;
-    }
-    hasMountedRef.current = true;
-    console.log("[Auth] mount: 发送 refresh 请求...");
-
-    // 后台静默换新 token
-    refreshToken(rt)
-      .then((data) => {
-        saveTokens(data.access_token, data.refresh_token);
-        saveUser({
-          userId: data.user_id,
-          username: data.username,
-          phone: data.phone,
-          hasPassword: data.has_password,
-        });
-        setUser({
-          userId: data.user_id,
-          username: data.username,
-          phone: data.phone,
-          hasPassword: data.has_password,
-        });
-      })
-      .catch((e) => {
-        // 仅当存储中 RT 仍是同一份时才处理，避免竞态误伤新登录
-        const currentRt = loadRefreshToken();
-        if (currentRt !== rt) return;
-
-        // 只有后端明确 401（token 无效/已轮换）才清 tokens
-        // 网络错误 / 后端未启动 → 保留本地登录态，下次操作时 api-client 自动重试
-        if (e instanceof ApiError && e.code === 401) {
-          console.warn(
-            "[Auth] mount refresh → 后端 401，清理 tokens",
-            e.message,
-          );
-          clearTokens();
-        } else {
-          console.warn(
-            "[Auth] mount refresh 失败但保留登录态",
-            e instanceof Error ? e.message : e,
-          );
-        }
-        // 无论如何，user 保留（乐观恢复的 UI 仍可展示）
-      });
   }, []);
 
   // 订阅 API 层通知：401 后 refresh 也失败 → 清空状态，弹出登录
@@ -188,14 +126,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [user],
   );
 
-  const signIn = useCallback(async (phone: string, code: string) => {
-    setAuthLoading(true);
+  const signIn = useCallback(async (username: string, password: string) => {
     try {
-      const data = await loginWithCode(phone, code);
+      const data = await loginWithPassword(username, password);
       const u: User = {
         userId: data.user_id,
         username: data.username,
-        phone: data.phone,
+        phone: data.phone ?? "",
         hasPassword: data.has_password,
       };
       saveUser(u);
@@ -211,17 +148,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (e) {
       throw e; // 抛给 LoginModal 展示
-    } finally {
-      setAuthLoading(false);
     }
   }, []);
 
   const signOut = useCallback(() => {
-    const rt = loadRefreshToken();
-    if (rt)
-      logoutApi(rt).catch(() => {
-        /* ignore */
-      });
     clearUser();
     clearTokens();
     setUser(null);

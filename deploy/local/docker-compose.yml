@@ -295,6 +295,10 @@ services:
     restart: unless-stopped
     environment:
       GATEWAY_URL: http://blue-whale-gateway:8686
+      DATABASE_URL: mysql://root:${MYSQL_PASSWORD:-blue_whale}@mysql:3306/${MYSQL_DB:-blue_whale}
+      # new-api relay runs separately from the Java MVP stack; on macOS Docker
+      # reaches a host-published new-api through host.docker.internal.
+      NEW_API_BASE_URL: ${NEW_API_BASE_URL:-http://host.docker.internal:3001}
       NODE_ENV: production
     ports:
       - "${WEB_PUBLISH_PORT:-3000}:3000"

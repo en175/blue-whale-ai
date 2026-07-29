@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
+import { CreditBalance } from "@/components/credits/CreditBalance";
 import { squirclePath } from "../../utils";
 import {
   VIDEO_MODELS,
@@ -14,10 +15,17 @@ import {
   VIDEO_RESOLUTIONS,
   REF_MODES,
 } from "../../constants";
-import type { DockMediaItem, GenerateArgs } from "../../types";
+import type { DockMediaItem, GenerateArgs, PrefillSignal } from "../../types";
 import { ImageDockContent } from "./ImageDockContent";
 import { VideoDockContent } from "./VideoDockContent";
 import { AudioDockContent } from "./AudioDockContent";
+import {
+  extractEditor,
+  insertMention,
+  removeMention,
+  type MentionItem,
+} from "./mention";
+import { selectDockInputAssetIds } from "./generation-input";
 
 export function BottomDock({
   mode,
@@ -36,6 +44,17 @@ export function BottomDock({
   generating = false,
   generateError,
   onClearGenerateError,
+  firstFrameUrl,
+  lastFrameUrl,
+  firstFrameAssetId,
+  lastFrameAssetId,
+  onFrameUpload,
+  onFrameClear,
+  onSwapFrames,
+  onPickFrameFromCanvas,
+  focusSignal,
+  dockMentionSignal,
+  prefillSignal,
   videoJobStatus,
   videoJobError,
   onCancelVideoJob,
@@ -65,6 +84,25 @@ export function BottomDock({
   generateError?: string | null;
   /** 关闭生成错误提示 */
   onClearGenerateError?: () => void;
+  /** 首尾帧（视频首尾帧模式，page 层上传后回填 TOS url；当前 VideoDockContent 未渲染首尾帧 UI，留位）。 */
+  firstFrameUrl?: string;
+  lastFrameUrl?: string;
+  firstFrameAssetId?: number;
+  lastFrameAssetId?: number;
+  onFrameUpload?: (file: File, slot: "first" | "last") => void;
+  onFrameClear?: (slot: "first" | "last") => void;
+  onSwapFrames?: () => void;
+  onPickFrameFromCanvas?: (slot: "first" | "last") => void;
+  /** 重新编辑/带图生成触发：递增 nonce → 聚焦 contentEditable（X4） */
+  focusSignal?: number;
+  /** 插入参考图 mention：nonce 递增触发 effect，item 为待插参考图（X3 mention pill）。 */
+  dockMentionSignal?: {
+    nonce: number;
+    item: MentionItem | null;
+    replace?: boolean;
+  };
+  /** 重新编辑预填（P2）：nonce 递增 → 应用 recipe 参数到 Dock（prompt + video 设置；image 透传 ImageDockContent 由其自行消费） */
+  prefillSignal?: PrefillSignal;
   /** 当前 Project 中最近一次 BottomDock 视频任务的权威状态。 */
   videoJobStatus?: string | null;
   videoJobError?: string | null;
@@ -72,6 +110,8 @@ export function BottomDock({
   cancellingVideo?: boolean;
 }) {
   const [input, setInput] = useState("");
+  /** 从 editor pill 抽取的参考图 URL（提交 referenceImages），随 handleInput 更新 */
+  const [mentions, setMentions] = useState<string[]>([]);
   const [dockSize, setDockSize] = useState({ w: 680, h: 164 });
   const editorRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -100,14 +140,87 @@ export function BottomDock({
     return () => ro.disconnect();
   }, []);
 
+  // 重新编辑/带图生成（X4）：focusSignal 变化 → 聚焦输入框，只显示浏览器原生 caret
+  useEffect(() => {
+    if (!focusSignal) return;
+    const raf = requestAnimationFrame(() => editorRef.current?.focus());
+    return () => cancelAnimationFrame(raf);
+  }, [focusSignal]);
+
+  // 插入参考图 mention pill（X3）：dockMentionSignal.nonce 变化 → editor 光标处插 pill
+  useEffect(() => {
+    const sig = dockMentionSignal;
+    const item = sig?.item;
+    if (!sig?.nonce || !item) return;
+    const raf = requestAnimationFrame(() => {
+      const el = editorRef.current;
+      if (!el) return;
+      insertMention(el, item, { replace: sig.replace });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [dockMentionSignal]);
+
+  // 重新编辑预填（P2）：prefillSignal.nonce → prompt+参考图命令式写进 contentEditable + video 设置。
+  // image 模型/分辨率预填由 ImageDockContent 自行消费 prefillSignal（透传）；video 设置在容器侧应用。
+  useEffect(() => {
+    if (!prefillSignal?.prefill) return;
+    const p = prefillSignal.prefill;
+    const el = editorRef.current;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (el) {
+      el.innerHTML = "";
+      el.focus();
+      if (p.prompt) document.execCommand("insertText", false, p.prompt);
+      if (mode === "image") {
+        p.references?.forEach((r) =>
+          insertMention(el, {
+            id: `prefill-${r.url}`,
+            type: r.kind,
+            name: "",
+            src: r.url,
+          }),
+        );
+      }
+      const { prompt: pp, referenceImages } = extractEditor(el);
+      setInput(pp);
+      setMentions(referenceImages);
+    }
+    if (mode === "video") {
+      if (p.aspectRatio) {
+        const ar = VIDEO_ASPECT_RATIOS.find((r) => r.id === p.aspectRatio);
+        if (ar) setAspectRatio(ar);
+      }
+      if (p.resolution) {
+        const res = VIDEO_RESOLUTIONS.find((r) => r.id === p.resolution);
+        if (res) setResolution(res);
+      }
+      if (p.refMode) {
+        const rm = REF_MODES.find((r) => r.id === p.refMode);
+        if (rm) setRefMode(rm);
+      }
+      if (typeof p.duration === "number") setDuration(p.duration);
+      if (p.quantity != null) setQuantity(`${p.quantity}x`);
+    }
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [prefillSignal?.nonce, mode]);
+
   const path = squirclePath(dockSize.w, dockSize.h, 28.8);
-  const isEmpty = input.trim().length === 0;
+  const isEmpty = input.trim().length === 0 && mentions.length === 0;
   const canCancelVideo =
     videoJobStatus === "queued" || videoJobStatus === "processing";
 
   const handleInput = () => {
-    const text = editorRef.current?.innerText ?? "";
-    setInput(text);
+    const el = editorRef.current;
+    if (!el) return;
+    const { prompt, referenceImages } = extractEditor(el);
+    setInput(prompt);
+    setMentions(referenceImages);
+  };
+
+  const handleRemoveImageMedia = (id: string) => {
+    const el = editorRef.current;
+    if (el) removeMention(el, id);
+    onRemoveImageMedia?.(id);
   };
 
   return (
@@ -158,6 +271,9 @@ export function BottomDock({
                 flexDirection: "column",
               }}
             >
+              <div className="flex h-8 items-center justify-end border-b border-[var(--tc-border-subtle)] px-3">
+                <CreditBalance compact />
+              </div>
               {mode === "video" && videoJobStatus && (
                 <div
                   aria-live="polite"
@@ -256,13 +372,27 @@ export function BottomDock({
                   onInput={handleInput}
                   onClose={onClose}
                   media={imageMedia}
-                  onRemoveMedia={onRemoveImageMedia}
+                  onRemoveMedia={handleRemoveImageMedia}
                   onLocalUpload={onLocalUpload}
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
                   onGenerate={(s) =>
-                    onGenerate?.(input, { mode: "image", settings: s })
+                    onGenerate?.(input, {
+                      mode: "image",
+                      settings: s,
+                      referenceImages: [
+                        ...mentions,
+                        ...imageMedia
+                          .map((item) => item.src)
+                          .filter((src): src is string => Boolean(src)),
+                      ],
+                      inputAssetIds: selectDockInputAssetIds(
+                        "image",
+                        editorRef.current ? extractEditor(editorRef.current).assetIds : [],
+                        imageMedia,
+                      ),
+                    })
                   }
                   generating={generating}
                   onPreviewMedia={setPreviewItem}
@@ -284,6 +414,7 @@ export function BottomDock({
                   }
                   generating={generating}
                   onPreviewMedia={setPreviewItem}
+                  prefillSignal={prefillSignal}
                 />
               ) : (
                 <VideoDockContent
@@ -320,7 +451,26 @@ export function BottomDock({
                   onExitPick={onExitPick}
                   isPicking={isPicking}
                   onGenerate={(s) =>
-                    onGenerate?.(input, { mode: "video", settings: s })
+                    onGenerate?.(input, {
+                      mode: "video",
+                      settings: {
+                        ...s,
+                        firstFrameUrl,
+                        lastFrameUrl,
+                        referenceImages: videoMedia
+                          .filter((item) => item.type === "image")
+                          .map((item) => item.src)
+                          .filter((src): src is string => Boolean(src)),
+                      },
+                      inputAssetIds: selectDockInputAssetIds(
+                        "video",
+                        editorRef.current ? extractEditor(editorRef.current).assetIds : [],
+                        videoMedia,
+                        [firstFrameAssetId, lastFrameAssetId].filter(
+                          (id): id is number => id !== undefined,
+                        ),
+                      ),
+                    })
                   }
                   generating={generating}
                   onPreviewMedia={setPreviewItem}

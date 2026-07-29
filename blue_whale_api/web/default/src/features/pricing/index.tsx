@@ -159,7 +159,7 @@ export function Pricing() {
     )
   }
 
-  // DIRECTORY 视图：竞品式厂商导航 + 分组下拉 + 精简价表，独立布局，不走 sidebar/toolbar。
+  // DIRECTORY 视图：厂商导航 + 等宽分组卡片 + 精简价表，独立布局，不走 sidebar/toolbar。
   if (viewMode === VIEW_MODES.DIRECTORY) {
     return (
       <PublicLayout showMainContainer={false}>
@@ -169,10 +169,8 @@ export function Pricing() {
           groupRatio={groupRatio || {}}
           usableGroup={usableGroup || {}}
           priceRate={priceRate ?? 1}
-          usdExchangeRate={usdExchangeRate ?? 1}
           tokenUnit={tokenUnit}
           onModelClick={handleModelClick}
-          onViewModeChange={setViewMode}
         />
         {selectedModel && (
           <ModelDetailsDrawer
