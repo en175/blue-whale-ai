@@ -10,6 +10,8 @@ vi.mock("@/lib/api-client", () => ({ apiFetch: vi.fn() }));
 expect.extend(jestDomMatchers);
 
 const PROTECTED_URL = "/api/projects/1/assets/9/content";
+const PUBLIC_TOS_URL =
+  "https://bluewhale-assets.tos-cn-beijing.volces.com/uploads/9/image/reference.jpg";
 
 function referenceItem(overrides: Partial<DockMediaItem> = {}): DockMediaItem {
   return {
@@ -28,7 +30,7 @@ describe("DockMediaThumb", () => {
       createObjectURL: vi.fn(() => "blob:asset-9"),
       revokeObjectURL: vi.fn(),
     });
-    vi.mocked(apiFetch).mockResolvedValue(
+    vi.mocked(apiFetch).mockImplementation(async () =>
       new Response(new Blob(["fake-image"], { type: "image/png" }), {
         status: 200,
       }),
@@ -68,6 +70,16 @@ describe("DockMediaThumb", () => {
     expect(screen.getByRole("img", { name: "蓝鲸参考图" })).toHaveAttribute(
       "src",
       "blob:local-upload",
+    );
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it("公网 TOS Asset 即使有 assetId 也直接展示，不附加产品 Authorization", () => {
+    render(<DockMediaThumb item={referenceItem({ src: PUBLIC_TOS_URL })} />);
+
+    expect(screen.getByRole("img", { name: "蓝鲸参考图" })).toHaveAttribute(
+      "src",
+      PUBLIC_TOS_URL,
     );
     expect(apiFetch).not.toHaveBeenCalled();
   });

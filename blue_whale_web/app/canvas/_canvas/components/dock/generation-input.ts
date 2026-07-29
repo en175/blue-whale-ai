@@ -24,5 +24,5 @@ export function selectDockInputAssetIds(
     if (id !== null && !result.includes(id)) result.push(id);
     return result;
   }, []);
-  return ids.slice(0, mode === "video" ? 1 : 4);
+  return ids.slice(0, mode === "video" ? 6 : 4);
 }

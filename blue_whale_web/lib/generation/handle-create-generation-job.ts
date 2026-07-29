@@ -26,12 +26,31 @@ export interface GenerationParameters {
 export interface CreateGenerationJobBody {
   type?: unknown;
   input_asset_ids?: unknown;
+  first_frame_asset_id?: unknown;
+  last_frame_asset_id?: unknown;
+  reference_asset_ids?: unknown;
   parameters?: unknown;
   expected_output_count?: unknown;
 }
 
 function isStr(v: unknown): v is string {
   return typeof v === "string";
+}
+
+function assetId(v: unknown): string | null {
+  if (typeof v === "number" && Number.isSafeInteger(v) && v > 0) return String(v);
+  if (typeof v === "string" && /^[1-9][0-9]*$/.test(v)) return v;
+  return null;
+}
+
+function assetIds(v: unknown): string[] {
+  return Array.isArray(v)
+    ? v.map(assetId).filter((id): id is string => id !== null)
+    : [];
+}
+
+function uniqueAssetIds(ids: string[]): string[] {
+  return ids.filter((id, index) => ids.indexOf(id) === index);
 }
 
 /** 校验请求体，返回错误信息或 null。对齐 Java CreateGenerationJobRequest 约束。 */
@@ -49,8 +68,26 @@ function validate(body: CreateGenerationJobBody): string | null {
   const count = Number(body.expected_output_count);
   if (!Number.isInteger(count) || count < 1 || count > 4) return "expected_output_count 须为 1-4";
   const inputAssetIds = Array.isArray(body.input_asset_ids) ? body.input_asset_ids : [];
-  if (inputAssetIds.length > 4) return "参考图最多 4 张";
-  if (type === "video" && inputAssetIds.length > 1) return "视频生成仅支持 0 或 1 个参考图";
+  if (type === "image" && inputAssetIds.length > 4) return "参考图最多 4 张";
+  if (type === "video") {
+    const firstFrameAssetId = assetId(body.first_frame_asset_id);
+    const lastFrameAssetId = assetId(body.last_frame_asset_id);
+    const hasExplicitFrames = body.first_frame_asset_id !== undefined || body.last_frame_asset_id !== undefined;
+    const hasExplicitInputs = hasExplicitFrames || body.reference_asset_ids !== undefined;
+    if (body.first_frame_asset_id !== undefined && firstFrameAssetId === null) return "首帧素材无效";
+    if (body.last_frame_asset_id !== undefined && lastFrameAssetId === null) return "尾帧素材无效";
+    if (body.reference_asset_ids !== undefined && assetIds(body.reference_asset_ids).length !== (Array.isArray(body.reference_asset_ids) ? body.reference_asset_ids.length : -1)) return "参考素材无效";
+    if (hasExplicitInputs && inputAssetIds.length > 6) return "视频素材最多 6 个";
+    const compatibilityReferenceIds = assetIds(inputAssetIds).filter(
+      (id) => id !== firstFrameAssetId && id !== lastFrameAssetId,
+    );
+    const normalizedReferenceIds = uniqueAssetIds([
+      ...assetIds(body.reference_asset_ids),
+      ...compatibilityReferenceIds,
+    ]);
+    if (hasExplicitInputs && normalizedReferenceIds.length > 4) return "参考图最多 4 张";
+    if (!hasExplicitInputs && inputAssetIds.length > 1) return "视频生成仅支持 0 或 1 个参考图";
+  }
   return null;
 }
 
@@ -97,7 +134,21 @@ export async function handleCreateGenerationJob(
       input.provider_credential = internal.providerCredential;
     }
   }
-  if (inputAssetIds.length > 0) input.reference_asset_ids = inputAssetIds;
+  const explicitReferenceIds = assetIds(body.reference_asset_ids);
+  const firstFrameAssetId = assetId(body.first_frame_asset_id);
+  const lastFrameAssetId = assetId(body.last_frame_asset_id);
+  const hasExplicitFrame = firstFrameAssetId !== null || lastFrameAssetId !== null;
+  const compatibilityReferenceIds = assetIds(inputAssetIds).filter(
+    (id) => id !== firstFrameAssetId && id !== lastFrameAssetId,
+  );
+  const referenceAssetIds = body.reference_asset_ids !== undefined
+    ? uniqueAssetIds([...explicitReferenceIds, ...compatibilityReferenceIds])
+    : hasExplicitFrame
+      ? compatibilityReferenceIds
+      : inputAssetIds;
+  if (firstFrameAssetId) input.first_frame_asset_id = firstFrameAssetId;
+  if (lastFrameAssetId) input.last_frame_asset_id = lastFrameAssetId;
+  if (referenceAssetIds.length > 0) input.reference_asset_ids = referenceAssetIds;
   input.expected_output_count = expectedOutputCount;
 
   const actionSeed = `${projectId}\0${idempotencyKey ?? ""}\0${Date.now()}`;

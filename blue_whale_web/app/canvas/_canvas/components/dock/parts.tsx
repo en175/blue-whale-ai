@@ -104,10 +104,9 @@ export function DockMediaThumb({
   item: DockMediaItem;
   onRemove?: (id: string) => void;
 }) {
-  // 参考图身份以不可变 assetId 为准：有 Asset 身份的 src 即受保护 access_url，
-  // 必须复用带身份媒体读取（裸 <img> 无身份稳定 401）；
-  // 本地上传项无 assetId、src 为本地临时 URL（blob:/data:）：直显，不走带身份读取。
-  const protectedUrl = item.assetId && item.src ? item.src : null;
+  // Product API 内容地址需要身份；公网 TOS 与本地 blob/data URL 必须直显，
+  // 否则 apiFetch 注入的产品 Authorization 会被对象存储当成非法签名。
+  const protectedUrl = item.src?.startsWith("/api/projects/") ? item.src : null;
   const imageStyle = {
     width: 44,
     height: 44,
