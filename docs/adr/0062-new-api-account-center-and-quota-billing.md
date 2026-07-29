@@ -31,6 +31,10 @@ blue-whale 正把画布业务从 Java 迁移到 Node。`canvas-v2` 的项目、�
    蓝鲸账户 BFF、Token → User ID 解析以及登录所需的最小前端改动；不接管正在并行建设的 API Key
    管理、管理员用户管理和复杂账户配置界面。手机号登录/换绑、OAuth、Passkey 与 2FA 延后集成，
    即使 new-api 已具备对应能力也不在首版展示。
+9. **保留现有蓝鲸账户 HTTP 合同并补齐缺口**。首版使用 `GET /api/auth/capabilities`、
+   `POST /api/auth/register`、`POST /api/auth/login`、`POST /api/auth/logout`、`GET /api/me` 与
+   `GET /api/usage/token`；内部统一委托账户 typed client。移除旧手机号短信入口与换绑能力；
+   默认 API Key 无 refresh 语义，因此不保留或伪造 `/api/auth/refresh`。
 
 ## 连锁影响
 
