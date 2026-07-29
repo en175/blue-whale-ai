@@ -38,6 +38,10 @@ blue-whale 正把画布业务从 Java 迁移到 Node。`canvas-v2` 的项目、�
 10. **普通 logout 不撤销默认 API Key**。首版只清除浏览器 `localStorage`、蓝鲸内存账户状态与
     相应客户端缓存；new-api 中的默认 Key 保持有效，避免中断后台 GenerationJob 或制造废弃 Key。
     凭证泄露后的轮换属于独立管理员安全操作，不与退出登录混用。
+11. **GenerationJob 保存提交时的加密执行凭证**。BFF 以 AES-256-GCM 封装 `sk-xxx` 后随任务
+    持久化，独立 worker 只在调用 new-api relay 前于内存解密；图片与视频统一采用该机制。
+    任务查询、快照、日志与错误不得暴露凭证或密文。worker 不按 User ID 回查或导出用户 Key；
+    logout 不影响已接纳任务，管理员轮换导致旧任务凭证失效时任务明确失败并由 User 重新提交。
 
 ## 连锁影响
 
