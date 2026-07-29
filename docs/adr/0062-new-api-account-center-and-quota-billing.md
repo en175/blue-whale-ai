@@ -27,6 +27,10 @@ blue-whale 正把画布业务从 Java 迁移到 Node。`canvas-v2` 的项目、�
 7. **蓝鲸账户 UI 由 new-api 能力配置驱动**。BFF 从 new-api `/api/status` 投影蓝鲸已适配的公开
    认证能力，浏览器不直接访问 new-api，也不维护重复开关。首版密码登录使用单一标识输入，
    同时接受用户名或邮箱；注册、邮箱验证及后续 OAuth 入口仅在上游启用且蓝鲸已适配时展示。
+8. **第一实施切片只建设账户适配 seam 与最小登录闭环**。范围是可注入 new-api typed client、
+   蓝鲸账户 BFF、Token → User ID 解析以及登录所需的最小前端改动；不接管正在并行建设的 API Key
+   管理、管理员用户管理和复杂账户配置界面。手机号登录/换绑、OAuth、Passkey 与 2FA 延后集成，
+   即使 new-api 已具备对应能力也不在首版展示。
 
 ## 连锁影响
 
