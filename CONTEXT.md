@@ -159,7 +159,8 @@ _Avoid_: Token 指纹、用户名、邮箱、浏览器本地 ID、客户端自�
 
 **默认 API Key（用户执行凭证）**:
 new-api 在 User 登录后提供、以 `sk-` 开头的默认 Token，用于 relay 调用、quota 扣减以及由
-new-api 解析所属 User ID；它对普通蓝鲸 User 隐藏，但可因安全或运维原因轮换。
+new-api 解析所属 User ID；上线前所有新 User 在注册事务中必须自动获得一把，创建失败则注册失败。
+它对普通蓝鲸 User 隐藏，但可因安全或运维原因轮换；登录发现缺失时返回配置错误，不做历史补建。
 _Avoid_: 永久用户身份、产品资源所有者 ID、不可轮换密钥。
 
 **产品事实（Product Facts）**:

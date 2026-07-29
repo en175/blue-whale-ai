@@ -21,6 +21,9 @@ blue-whale 正把画布业务从 Java 迁移到 Node。`canvas-v2` 的项目、�
    浏览器只提交凭证、不提交 `user_id`；BFF 不信任任何客户端身份声明，也不再用 Token 指纹派生身份。
    除这条身份 seam 外，账户能力继续
    复用 new-api 现有接口，不在蓝鲸复制账户规则。
+6. **默认 API Key 是上线前注册不变量**。`GENERATE_DEFAULT_TOKEN` 默认开启；注册事务必须同时创建
+   默认 `sk-xxx`，创建失败则注册失败。当前无生产 User，不建设历史补建或登录自愈；登录发现缺少
+   Token 时返回明确配置错误。蓝鲸普通 User 界面不展示 API Key 管理入口。
 
 ## 连锁影响
 
