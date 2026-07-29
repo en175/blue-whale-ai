@@ -40,6 +40,7 @@ import type {
   CanvasNode,
   CanvasNodeData,
   NodeKindId,
+  NodeOrigin,
   NodeStatus,
   MediaKind,
 } from "../model";
@@ -51,16 +52,19 @@ import {
   type NodeToolbarAction,
 } from "../config";
 import { AuthenticatedImage } from "../components/AuthenticatedImage";
+import { UploadCardBody } from "./uploadCard";
 
 type MediaNodeData = CanvasNodeData & {
   content?: string;
   errorMessage?: string;
   progress?: number;
+  previewUrl?: string;
 };
 
 type NodeActionsCtx = {
   onAction?: (id: string, actionId: string) => void;
   onRetry?: (id: string) => void;
+  onRemoveNode?: (id: string) => void;
   onEditPrompt?: (id: string, text: string) => void;
   picking?: boolean;
   pickingAccept?: MediaKind[];
@@ -312,7 +316,12 @@ type MediaStateBodyProps = {
   content?: string;
   errorMessage?: string;
   progress?: number;
+  /** 产物来源（recipe.origin）；uploaded 的 running/error 走上传占位卡（IK55VE 变体 C）。 */
+  origin?: NodeOrigin;
+  /** 上传占位卡本地缩略图（object URL，不持久化）。 */
+  previewUrl?: string;
   onRetry?: () => void;
+  onRemove?: () => void;
 };
 export function MediaStateBody({
   kind,
@@ -321,8 +330,25 @@ export function MediaStateBody({
   content,
   errorMessage,
   progress,
+  origin,
+  previewUrl,
   onRetry,
+  onRemove,
 }: MediaStateBodyProps) {
+  // 上传占位卡：仅 uploaded 来源的 running/error；生成卡外观保持原样
+  if (origin === "uploaded" && (status === "running" || status === "error")) {
+    return (
+      <UploadCardBody
+        kind={kind}
+        status={status}
+        progress={progress}
+        errorMessage={errorMessage}
+        previewUrl={previewUrl}
+        onRetry={onRetry}
+        onRemove={onRemove}
+      />
+    );
+  }
   if (status === "error") {
     return (
       <div
@@ -574,7 +600,7 @@ function NodeHandles({ kind }: { kind: NodeKindId }) {
 
 export function MediaNode({ id, data, width, height, selected }: NodeProps) {
   const d = data as unknown as MediaNodeData;
-  const { onAction, onRetry, picking, pickingAccept } =
+  const { onAction, onRetry, onRemoveNode, picking, pickingAccept } =
     useContext(NodeActionsContext);
   const asset = useNodeAsset(d);
   const src = asset?.src ?? (d.imageUrl as string | undefined);
@@ -671,7 +697,10 @@ export function MediaNode({ id, data, width, height, selected }: NodeProps) {
           content={d.content}
           errorMessage={d.errorMessage}
           progress={d.progress}
+          origin={d.recipe?.origin}
+          previewUrl={d.previewUrl}
           onRetry={() => onRetry?.(id)}
+          onRemove={() => onRemoveNode?.(id)}
         />
         {promptFromText && (
           <div

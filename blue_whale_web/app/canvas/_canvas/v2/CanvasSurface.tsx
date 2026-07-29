@@ -56,6 +56,7 @@ export type CanvasSurfaceProps = {
   onPaneClick?: () => void;
   onNodeAction?: (id: string, actionId: string) => void;
   onNodeRetry?: (id: string) => void;
+  onNodeRemove?: (id: string) => void;
   onEditPrompt?: (id: string, text: string) => void;
   onPaneMenu?: (payload: MenuPayload) => void;
   onEdgeDropMenu?: (payload: MenuPayload) => void;
@@ -79,6 +80,7 @@ export function CanvasSurface({
   onPaneClick,
   onNodeAction,
   onNodeRetry,
+  onNodeRemove,
   onEditPrompt,
   onPaneMenu,
   onEdgeDropMenu,
@@ -190,11 +192,19 @@ export function CanvasSurface({
     () => ({
       onAction: onNodeAction,
       onRetry: onNodeRetry,
+      onRemoveNode: onNodeRemove,
       onEditPrompt,
       picking,
       pickingAccept,
     }),
-    [onNodeAction, onNodeRetry, onEditPrompt, picking, pickingAccept],
+    [
+      onNodeAction,
+      onNodeRetry,
+      onNodeRemove,
+      onEditPrompt,
+      picking,
+      pickingAccept,
+    ],
   );
 
   return (
