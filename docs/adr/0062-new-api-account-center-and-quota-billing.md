@@ -35,6 +35,9 @@ blue-whale 正把画布业务从 Java 迁移到 Node。`canvas-v2` 的项目、�
    `POST /api/auth/register`、`POST /api/auth/login`、`POST /api/auth/logout`、`GET /api/me` 与
    `GET /api/usage/token`；内部统一委托账户 typed client。移除旧手机号短信入口与换绑能力；
    默认 API Key 无 refresh 语义，因此不保留或伪造 `/api/auth/refresh`。
+10. **普通 logout 不撤销默认 API Key**。首版只清除浏览器 `localStorage`、蓝鲸内存账户状态与
+    相应客户端缓存；new-api 中的默认 Key 保持有效，避免中断后台 GenerationJob 或制造废弃 Key。
+    凭证泄露后的轮换属于独立管理员安全操作，不与退出登录混用。
 
 ## 连锁影响
 
