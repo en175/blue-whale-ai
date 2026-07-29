@@ -1,0 +1,79 @@
+// @vitest-environment jsdom
+import { createRef } from "react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import * as jestDomMatchers from "@testing-library/jest-dom/matchers";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { VideoDockContentProps } from "../../types";
+import { VideoDockContent } from "./VideoDockContent";
+
+expect.extend(jestDomMatchers);
+
+function props(
+  overrides: Partial<VideoDockContentProps> = {},
+): VideoDockContentProps {
+  return {
+    editorRef: createRef<HTMLDivElement>(),
+    isEmpty: false,
+    onInput: vi.fn(),
+    onClose: vi.fn(),
+    refMode: { id: "omni", label: "全能参考" },
+    setRefMode: vi.fn(),
+    refModeOpen: false,
+    setRefModeOpen: vi.fn(),
+    selectedModel: { id: "seedance-2", label: "Seedance 2.0" },
+    setSelectedModel: vi.fn(),
+    modelSettingsOpen: false,
+    setModelSettingsOpen: vi.fn(),
+    aspectRatio: { id: "16:9", label: "16:9" },
+    setAspectRatio: vi.fn(),
+    resolution: { id: "720p", label: "720p" },
+    setResolution: vi.fn(),
+    duration: 8,
+    setDuration: vi.fn(),
+    quantity: "1x",
+    setQuantity: vi.fn(),
+    quantityOpen: false,
+    setQuantityOpen: vi.fn(),
+    advancedOpen: false,
+    setAdvancedOpen: vi.fn(),
+    internetSearch: false,
+    setInternetSearch: vi.fn(),
+    ...overrides,
+  };
+}
+
+describe("VideoDockContent references", () => {
+  afterEach(() => cleanup());
+
+  it("offers a working MP4/MOV upload entry and no audio reference entry", () => {
+    const onLocalUpload = vi.fn();
+    const { container } = render(
+      <VideoDockContent {...props({ onLocalUpload })} />,
+    );
+
+    expect(screen.queryByRole("button", { name: "音频" })).toBeNull();
+    const button = screen.getByRole("button", { name: "视频" });
+    fireEvent.click(button);
+    const input = Array.from(
+      container.querySelectorAll<HTMLInputElement>('input[type="file"]'),
+    ).find((candidate) => candidate.accept.includes("video/quicktime"));
+    expect(input?.accept).toBe(".mp4,.mov,video/mp4,video/quicktime");
+
+    const file = new File(["video"], "reference.mov", {
+      type: "video/quicktime",
+    });
+    fireEvent.change(input!, { target: { files: [file] } });
+    expect(onLocalUpload).toHaveBeenCalledWith(file);
+  });
+
+  it("offers canvas selection from the video reference source menu", () => {
+    const onPickFromCanvas = vi.fn();
+    render(<VideoDockContent {...props({ onPickFromCanvas })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "参考图片" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "从画布选择" }));
+
+    expect(onPickFromCanvas).toHaveBeenCalledTimes(1);
+  });
+});

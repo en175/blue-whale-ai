@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { NewApiError, createNewApiClient } from "./new-api-client.js";
 
@@ -156,6 +156,8 @@ describe("new-api client", () => {
       duration: 5,
       width: 1280,
       height: 720,
+      resolution: "720p",
+      ratio: "16:9",
       responseFormat: "url",
     });
     const completed = await client.getVideoTask("sk-test", submitted.taskId);
@@ -179,28 +181,124 @@ describe("new-api client", () => {
     ).toBe(true);
   });
 
-  it("does not silently collapse unsupported first/last-frame video inputs", async () => {
+  it("maps ordered image and video references into Seedance metadata.content", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
     const client = createNewApiClient({
       baseUrl: "http://new-api.test",
-      fetchImpl: async () => jsonResponse({ task_id: "task-frames", status: "queued" }),
+      fetchImpl: async (input, init = {}) => {
+        requests.push({ url: String(input), init });
+        return jsonResponse({ task_id: "task-references", status: "queued" });
+      },
     });
 
-    await expect(
-      client.submitVideo("sk-test", {
-        model: "video-model",
-        prompt: "从首帧到尾帧",
-        duration: 5,
-        width: 1280,
-        height: 720,
-        firstFrameImage: "https://cdn.test/first.png",
-        lastFrameImage: "https://cdn.test/last.png",
-        referenceImages: [],
-      }),
-    ).rejects.toEqual(
+    await client.submitVideo("sk-test", {
+      model: "doubao-seedance-2-0-260128",
+      prompt: "修改视频风格",
+      duration: 8,
+      width: 1280,
+      height: 720,
+      resolution: "720p",
+      ratio: "16:9",
+      references: [
+        { type: "image", url: "https://cdn.test/a.png" },
+        { type: "video", url: "https://cdn.test/b.mp4" },
+        { type: "image", url: "https://cdn.test/c.png" },
+      ],
+    });
+
+    expect(JSON.parse(String(requests[0]?.init.body))).toEqual({
+      model: "doubao-seedance-2-0-260128",
+      prompt: "修改视频风格",
+      duration: 8,
+      response_format: "url",
+      metadata: {
+        duration: 8,
+        resolution: "720p",
+        ratio: "16:9",
+        content: [
+          {
+            type: "image_url",
+            image_url: { url: "https://cdn.test/a.png" },
+            role: "reference_image",
+          },
+          {
+            type: "video_url",
+            video_url: { url: "https://cdn.test/b.mp4" },
+            role: "reference_video",
+          },
+          {
+            type: "image_url",
+            image_url: { url: "https://cdn.test/c.png" },
+            role: "reference_image",
+          },
+        ],
+      },
+    });
+  });
+
+  it("maps first and last frames into Seedance metadata.content", async () => {
+    const requests: RequestInit[] = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (_input, init = {}) => {
+        requests.push(init);
+        return jsonResponse({ task_id: "task-frames", status: "queued" });
+      },
+    });
+
+    await client.submitVideo("sk-test", {
+      model: "doubao-seedance-2-0-260128",
+      prompt: "从首帧到尾帧",
+      duration: 5,
+      width: 1280,
+      height: 720,
+      resolution: "720p",
+      ratio: "16:9",
+      firstFrameImage: "https://cdn.test/first.png",
+      lastFrameImage: "https://cdn.test/last.png",
+    });
+
+    expect(JSON.parse(String(requests[0]?.body))).toMatchObject({
+      metadata: {
+        content: [
+          {
+            type: "image_url",
+            image_url: { url: "https://cdn.test/first.png" },
+            role: "first_frame",
+          },
+          {
+            type: "image_url",
+            image_url: { url: "https://cdn.test/last.png" },
+            role: "last_frame",
+          },
+        ],
+      },
+    });
+  });
+
+  it("rejects frame inputs mixed with ordinary references before fetch", async () => {
+    const fetchImpl = vi.fn();
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl,
+    });
+
+    await expect(client.submitVideo("sk-test", {
+      model: "doubao-seedance-2-0-260128",
+      prompt: "含糊输入",
+      duration: 5,
+      width: 1280,
+      height: 720,
+      resolution: "720p",
+      ratio: "16:9",
+      firstFrameImage: "https://cdn.test/first.png",
+      references: [{ type: "video", url: "https://cdn.test/reference.mp4" }],
+    })).rejects.toEqual(
       expect.objectContaining<Partial<NewApiError>>({
         status: 422,
         code: "unsupported_video_inputs",
       }),
     );
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

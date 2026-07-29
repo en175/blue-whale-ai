@@ -59,6 +59,7 @@ model assets {
   width             Int?
   height            Int?
   duration          Int?
+  duration_ms       Int?
   source            String   @default("generated") @db.VarChar(32)
   status            String   @default("normal") @db.VarChar(32)
   gmt_create        DateTime @default(now()) @db.DateTime(0)

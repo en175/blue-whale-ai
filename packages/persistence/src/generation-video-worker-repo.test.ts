@@ -190,6 +190,41 @@ describe("generation video worker repo", () => {
     expect(createAsset).not.toHaveBeenCalled();
   });
 
+  it("persists generated video duration for future reference validation", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const createAsset = vi.fn().mockResolvedValue({ id: 901n });
+    const update = vi.fn().mockResolvedValue({});
+    const transaction = vi.fn(async (callback: (tx: unknown) => unknown) =>
+      callback({
+        generation_jobs: { updateMany, update },
+        assets: { create: createAsset },
+        cost_reservations: { updateMany: vi.fn() },
+        generation_job_logs: { create: vi.fn() },
+      }),
+    );
+    const repo = createWorkerRepo({ $transaction: transaction } as never);
+
+    await expect(
+      repo.publishVideoResult({
+        jobId: "300",
+        projectId: "55",
+        userId: "9",
+        workerId: "worker-1",
+        fencingToken: 5,
+        url: "https://bucket.test/result.mp4",
+        storageKey: "generated/9/video/result.mp4",
+        mime: "video/mp4",
+        size: 11,
+        width: 1280,
+        height: 720,
+        duration: 8,
+      }),
+    ).resolves.toBe(true);
+    expect(createAsset).toHaveBeenCalledWith({
+      data: expect.objectContaining({ duration: 8 }),
+    });
+  });
+
   it("cancels a video before provider dispatch under the active fence", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const repo = createWorkerRepo({ generation_jobs: { updateMany } } as never) as

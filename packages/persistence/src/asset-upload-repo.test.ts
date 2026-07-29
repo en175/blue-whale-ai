@@ -79,6 +79,42 @@ describe("AssetRepo upload persistence", () => {
     expect(created).toMatchObject({ id: "42" });
   });
 
+  it("stores precise browser duration without changing the legacy seconds column", async () => {
+    const committed = {
+      id: BigInt(43),
+      type: "video",
+      storage_key: "uploads/9/video/reference.mp4",
+      url: "https://bucket.tos.test/uploads/9/video/reference.mp4",
+      mime: "video/mp4",
+      size: BigInt(1024),
+      width: 1920,
+      height: 1080,
+      duration: 7,
+    };
+    const assets = {
+      create: vi.fn().mockResolvedValue(committed),
+    };
+    const repo = createAssetRepo({ assets } as never);
+
+    await repo.createUploadedAsset({
+      userId: "9",
+      projectId: "55",
+      type: "video",
+      mime: "video/mp4",
+      size: 1024,
+      storageKey: "uploads/9/video/reference.mp4",
+      url: "https://bucket.tos.test/uploads/9/video/reference.mp4",
+      width: 1920,
+      height: 1080,
+      duration: 6.5,
+    });
+
+    expect(assets.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ duration: 7, duration_ms: 6500 }),
+      select: expect.any(Object),
+    });
+  });
+
   it("creates, reads, and completes an owner-scoped pending upload", async () => {
     const assets = {
       create: vi.fn().mockResolvedValue({ id: BigInt(41) }),

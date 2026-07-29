@@ -39,13 +39,23 @@ export function squirclePath(width: number, height: number, radius: number): str
 }
 
 /**
- * Dock「从画布选」按类型过滤（D-3 IJZY24）：image Dock / 首尾帧只图；video/audio Dock 图视音。
+ * Dock「从画布选」按类型过滤（D-3 IJZY24）：image Dock / 首尾帧只图；video Dock 图视；audio Dock 图视音。
  * 独立于 kinds ports.accept（那是连线规则 connection rule；此处是 Dock 选参考过滤 dock pick filter）。
  */
 export function dockAccept(
   mode: "image" | "video" | "audio" | "firstFrame" | "lastFrame",
 ): MediaKind[] {
-  return mode === "video" || mode === "audio"
-    ? ["image", "video", "audio"]
-    : ["image"];
+  if (mode === "video") return ["image", "video"];
+  if (mode === "audio") return ["image", "video", "audio"];
+  return ["image"];
+}
+
+export function dockPickHint(
+  mode: "image" | "video" | "audio" | "firstFrame" | "lastFrame",
+  pickableCount: number,
+): string {
+  const media = mode === "video" ? "图片或视频" : "图片";
+  return pickableCount === 0
+    ? `画布上还没有可用的${media}`
+    : `点击画布中的${media}加入`;
 }

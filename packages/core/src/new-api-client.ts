@@ -50,16 +50,26 @@ export interface NewApiImageEditInput {
   n: number;
 }
 
+export type NewApiVideoReference = {
+  type: "image" | "video";
+  url: string;
+};
+
 export interface NewApiVideoInput {
   model: string;
   prompt: string;
+  /** @deprecated Use references. Kept for the legacy worker adapter. */
   image?: string;
   firstFrameImage?: string;
   lastFrameImage?: string;
+  /** @deprecated Use references. Kept for the legacy worker adapter. */
   referenceImages?: string[];
+  references?: NewApiVideoReference[];
   duration: number;
   width: number;
   height: number;
+  resolution: string;
+  ratio: string;
   responseFormat?: "url";
 }
 
@@ -229,30 +239,66 @@ export function createNewApiClient(options: NewApiClientOptions) {
     },
 
     async submitVideo(token: string, input: NewApiVideoInput): Promise<NewApiVideoSubmission> {
-      const explicitImages = [input.firstFrameImage, ...(input.referenceImages ?? [])].filter(
-        (value): value is string => typeof value === "string" && value.length > 0,
-      );
+      const references = input.references ?? [
+        ...(input.image ? [{ type: "image" as const, url: input.image }] : []),
+        ...(input.referenceImages ?? []).map((url) => ({
+          type: "image" as const,
+          url,
+        })),
+      ];
+      const hasFrames = Boolean(input.firstFrameImage || input.lastFrameImage);
       if (
-        input.lastFrameImage ||
-        explicitImages.length > 1 ||
-        (input.image && explicitImages.length > 0)
+        (input.lastFrameImage && !input.firstFrameImage) ||
+        (hasFrames && references.length > 0)
       ) {
         throw new NewApiError(
-          "当前 new-api 视频接口不支持首尾帧或多参考素材",
+          "首尾帧模式不能与普通参考素材混用",
           422,
           "unsupported_video_inputs",
+        );
+      }
+      const content: Array<Record<string, unknown>> = [];
+      if (input.firstFrameImage) {
+        content.push({
+          type: "image_url",
+          image_url: { url: input.firstFrameImage },
+          role: "first_frame",
+        });
+      }
+      if (input.lastFrameImage) {
+        content.push({
+          type: "image_url",
+          image_url: { url: input.lastFrameImage },
+          role: "last_frame",
+        });
+      }
+      for (const reference of references) {
+        content.push(
+          reference.type === "image"
+            ? {
+                type: "image_url",
+                image_url: { url: reference.url },
+                role: "reference_image",
+              }
+            : {
+                type: "video_url",
+                video_url: { url: reference.url },
+                role: "reference_video",
+              },
         );
       }
       const body: Record<string, unknown> = {
         model: input.model,
         prompt: input.prompt,
         duration: input.duration,
-        width: input.width,
-        height: input.height,
         response_format: input.responseFormat ?? "url",
+        metadata: {
+          duration: input.duration,
+          resolution: input.resolution,
+          ratio: input.ratio,
+          content,
+        },
       };
-      const image = explicitImages[0] ?? input.image;
-      if (image) body.image = image;
 
       const response = await request<Record<string, unknown>>("/v1/video/generations", {
         method: "POST",

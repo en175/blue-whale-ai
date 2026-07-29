@@ -17,12 +17,36 @@ export function selectDockInputAssetIds(
   const candidates = [
     ...frameAssetIds,
     ...mentionAssetIds,
-    ...media.filter((item) => !item.type || item.type === "image").map((item) => item.assetId),
+    ...media
+      .filter(
+        (item) =>
+          !item.type ||
+          item.type === "image" ||
+          (mode === "video" && item.type === "video"),
+      )
+      .map((item) => item.assetId),
   ];
   const ids = candidates.reduce<number[]>((result, candidate) => {
     const id = positiveAssetId(candidate);
     if (id !== null && !result.includes(id)) result.push(id);
     return result;
   }, []);
-  return ids.slice(0, mode === "video" ? 6 : 4);
+  return ids.slice(0, mode === "video" ? 12 : 4);
+}
+
+export function selectVideoDockAssetIds(
+  refModeId: string,
+  mentionAssetIds: number[],
+  media: AssetReference[],
+): { referenceAssetIds: number[] } {
+  if (refModeId === "first-last") {
+    return { referenceAssetIds: [] };
+  }
+
+  const referenceAssetIds = selectDockInputAssetIds(
+    "video",
+    mentionAssetIds,
+    media,
+  );
+  return { referenceAssetIds };
 }

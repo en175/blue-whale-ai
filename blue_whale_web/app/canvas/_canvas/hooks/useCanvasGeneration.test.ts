@@ -83,7 +83,6 @@ const imageArgs: GenerateArgs = {
 
 const videoArgs: GenerateArgs = {
   mode: "video",
-  inputAssetIds: [11],
   settings: {
     model: { id: "v1", label: "V1" },
     resolution: { id: "720p", label: "720p" },
@@ -96,10 +95,8 @@ const videoArgs: GenerateArgs = {
 
 const videoFrameArgs: GenerateArgs = {
   mode: "video",
-  inputAssetIds: [11, 12, 13],
   firstFrameAssetId: 11,
   lastFrameAssetId: 12,
-  referenceAssetIds: [13],
   settings: {
     model: { id: "v1", label: "V1" },
     resolution: { id: "720p", label: "720p" },
@@ -107,6 +104,8 @@ const videoFrameArgs: GenerateArgs = {
     duration: 5,
     quantity: "1",
     refMode: { id: "firstlast", label: "首尾帧" },
+    firstFrameUrl: "https://assets.test/first.png",
+    lastFrameUrl: "https://assets.test/last.png",
   },
 };
 
@@ -194,11 +193,14 @@ describe("useCanvasGeneration.generate", () => {
       1,
       expect.objectContaining({
         type: "video",
-        input_asset_ids: [11],
         parameters: expect.objectContaining({ prompt: "做个视频", model_id: "v1", aspect_ratio: "16:9", resolution: "720p", duration: 5 }),
       }),
       expect.any(String),
     );
+    expect(
+      (generation.createProjectGenerationJob as ReturnType<typeof vi.fn>).mock
+        .calls[0]?.[1],
+    ).not.toHaveProperty("input_asset_ids");
     // 建占位（running + progress 0 + recipe）
     const vCall = addNode.mock.calls.find((c) => c[0] === "video");
     expect(vCall?.[1]).toMatchObject({ data: expect.objectContaining({ content: "做个视频", status: "running", progress: 0 }) });
@@ -207,6 +209,46 @@ describe("useCanvasGeneration.generate", () => {
     expect(mockJobs.start).toHaveBeenCalledWith(888, expect.objectContaining({ onSucceeded: expect.any(Function), onFailed: expect.any(Function) }));
     expect(patchNodeAndSave).toHaveBeenCalledWith("n_ph", { taskId: "888" });
     expect(result.current.generating).toBe(false);
+  });
+
+  it("video：recipe 保留图片与视频参考素材的 Dock 混排顺序", async () => {
+    (generation.createProjectGenerationJob as ReturnType<typeof vi.fn>).mockResolvedValue({
+      generation_job_id: 890,
+      cursor: 0,
+    });
+    const orderedArgs = {
+      ...videoArgs,
+      settings: {
+        ...videoArgs.settings,
+        referenceMedia: [
+          { kind: "image", url: "https://assets.test/a.png" },
+          { kind: "video", url: "https://assets.test/b.mp4" },
+          { kind: "image", url: "https://assets.test/c.png" },
+        ],
+      },
+    } as unknown as GenerateArgs;
+    const { result, addNode } = renderGen();
+
+    await act(async () => {
+      await result.current.generate("按顺序参考", orderedArgs);
+    });
+
+    const videoCall = addNode.mock.calls.find((call) => call[0] === "video");
+    expect(videoCall?.[1]).toMatchObject({
+      data: {
+        recipe: {
+          generation: {
+            inputs: {
+              references: [
+                { kind: "image", url: "https://assets.test/a.png" },
+                { kind: "video", url: "https://assets.test/b.mp4" },
+                { kind: "image", url: "https://assets.test/c.png" },
+              ],
+            },
+          },
+        },
+      },
+    });
   });
 
   it("video：任务接纳后公开 processing 状态并可请求取消", async () => {
@@ -228,9 +270,9 @@ describe("useCanvasGeneration.generate", () => {
     expect(result.current.cancellingVideo).toBe(false);
   });
 
-  it("video：首帧、尾帧和普通参考素材分别进入 job payload", async () => {
+  it("video：首尾帧身份进入 recipe 和独立 job 字段，不双写普通素材契约", async () => {
     (generation.createProjectGenerationJob as ReturnType<typeof vi.fn>).mockResolvedValue({ generation_job_id: 889, cursor: 0 });
-    const { result } = renderGen();
+    const { result, addNode } = renderGen();
 
     await act(async () => {
       await result.current.generate("首尾帧视频", videoFrameArgs);
@@ -239,13 +281,40 @@ describe("useCanvasGeneration.generate", () => {
     expect(generation.createProjectGenerationJob).toHaveBeenCalledWith(
       1,
       expect.objectContaining({
-        input_asset_ids: [11, 12, 13],
         first_frame_asset_id: 11,
         last_frame_asset_id: 12,
-        reference_asset_ids: [13],
       }),
       expect.any(String),
     );
+    expect(
+      (generation.createProjectGenerationJob as ReturnType<typeof vi.fn>).mock
+        .calls[0]?.[1],
+    ).not.toHaveProperty("reference_asset_ids");
+    expect(
+      (generation.createProjectGenerationJob as ReturnType<typeof vi.fn>).mock
+        .calls[0]?.[1],
+    ).not.toHaveProperty("input_asset_ids");
+    const videoCall = addNode.mock.calls.find((call) => call[0] === "video");
+    expect(videoCall?.[1]).toMatchObject({
+      data: {
+        recipe: {
+          generation: {
+            inputs: {
+              firstFrame: {
+                kind: "image",
+                url: "https://assets.test/first.png",
+                assetId: "11",
+              },
+              lastFrame: {
+                kind: "image",
+                url: "https://assets.test/last.png",
+                assetId: "12",
+              },
+            },
+          },
+        },
+      },
+    });
   });
 
   it("audio：建占位 + generateAudio + 写 assetId/done/recipe", async () => {

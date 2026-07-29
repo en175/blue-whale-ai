@@ -41,12 +41,13 @@ describe("handleListJobs", () => {
     expect(result).toEqual({
       code: 200,
       msg: null,
-      data: { records: [listItem], total: 1, size: 20, current: 1 },
+      data: { records: [{ ...listItem, error: null }], total: 1, size: 20, current: 1 },
     });
     expect(deps.jobs.listByUser).toHaveBeenCalledWith("9", {
       type: "image",
       status: undefined,
       projectId: undefined,
+      ids: undefined,
       page: 1,
       size: 20,
     });
@@ -58,6 +59,41 @@ describe("handleListJobs", () => {
     const result = await handleListJobs("9", { page: 1, size: 20 }, deps);
     expect(result.code).toBe(200);
     expect(result.data).toEqual({ records: [], total: 0, size: 20, current: 1 });
+  });
+
+  it("ids 精确批量查询透传且返回公开错误，不泄漏 stored_error", async () => {
+    const deps = makeDeps();
+    deps.jobs.listByUser.mockResolvedValue({
+      records: [{ ...listItem, type: "video", status: "failed", stored_error: { code: "provider_failed", detail: "secret" } }],
+      total: 1,
+      size: 2,
+      current: 1,
+    });
+    const result = await handleListJobs("9", { ids: ["101", "102"], page: 1, size: 2 }, deps);
+    expect(deps.jobs.listByUser).toHaveBeenCalledWith("9", {
+      type: undefined,
+      status: undefined,
+      projectId: undefined,
+      ids: ["101", "102"],
+      page: 1,
+      size: 2,
+    });
+    expect(result.data?.records[0]).toMatchObject({
+      job_id: "101",
+      error: { code: "provider_failed", message: "视频生成失败" },
+    });
+    expect(result.data?.records[0]).not.toHaveProperty("stored_error");
+  });
+
+  it("ids 去重后超过 100 个 → 400，且不查数据库", async () => {
+    const deps = makeDeps();
+    const result = await handleListJobs(
+      "9",
+      { ids: Array.from({ length: 101 }, (_, i) => String(i + 1)), page: 1, size: 101 },
+      deps,
+    );
+    expect(result).toEqual({ code: 400, msg: "最多查询 100 个任务", data: null });
+    expect(deps.jobs.listByUser).not.toHaveBeenCalled();
   });
 });
 

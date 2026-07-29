@@ -11,6 +11,14 @@ const KNOWN_CODES = new Set([
   "all_outputs_failed",
   "content_rejected",
   "content_review_unavailable",
+  "invalid_video_inputs",
+  "reference_asset_unavailable",
+  "unsupported_reference_type",
+  "reference_limit_exceeded",
+  "invalid_reference_video",
+  "unsupported_video_inputs",
+  "provider_credential_missing",
+  "invalid_input",
 ]);
 
 function fallbackCode(type: string): string {
@@ -35,6 +43,22 @@ function messageFor(code: string, type: string): string {
       return "生成内容未通过安全审核";
     case "content_review_unavailable":
       return "内容审核不可用";
+    case "invalid_video_inputs":
+      return "视频输入参数无效";
+    case "reference_asset_unavailable":
+      return "参考素材不可用";
+    case "unsupported_reference_type":
+      return "不支持的参考素材类型";
+    case "reference_limit_exceeded":
+      return "参考素材数量超过限制";
+    case "invalid_reference_video":
+      return "参考视频无效";
+    case "unsupported_video_inputs":
+      return "不支持的视频输入";
+    case "provider_credential_missing":
+      return "生成服务凭证未配置";
+    case "invalid_input":
+      return "输入参数无效";
     default:
       return type === "video" ? "视频生成失败" : "图像生成失败";
   }

@@ -50,6 +50,8 @@ describe("new-api video provider", () => {
         duration: 5,
         width: 1280,
         height: 720,
+        resolution: "720p",
+        ratio: "16:9",
       }),
     ).resolves.toEqual({
       url: "https://cdn.test/video.mp4",
@@ -62,6 +64,16 @@ describe("new-api video provider", () => {
       "http://new-api.test/v1/video/generations/task-1",
       "http://new-api.test/v1/video/generations/task-1",
     ]);
+    expect(
+      JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)),
+    ).toMatchObject({
+      duration: 5,
+      metadata: {
+        duration: 5,
+        resolution: "720p",
+        ratio: "16:9",
+      },
+    });
   });
 
   it("fails with provider_timeout after the bounded polling attempts", async () => {
@@ -90,6 +102,8 @@ describe("new-api video provider", () => {
         duration: 5,
         width: 1280,
         height: 720,
+        resolution: "720p",
+        ratio: "16:9",
       }),
     ).rejects.toEqual(
       expect.objectContaining<Partial<VideoProviderError>>({

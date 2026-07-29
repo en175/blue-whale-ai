@@ -60,4 +60,29 @@ describe("new-api video task provider", () => {
     });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
+
+  it("maps NewAPI FAILURE status to a terminal failed observation", async () => {
+    const module = await import("./new-api-video-task-provider.js");
+    const provider = module.createNewApiVideoTaskProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockResolvedValue(
+        jsonResponse({
+          code: "success",
+          data: {
+            task_id: "task-failure",
+            status: "FAILURE",
+            error: { code: "OutputAudioSensitiveContentDetected.PolicyViolation", message: "版权审核失败" },
+          },
+        }),
+      ),
+    });
+
+    await expect(provider.poll("task-failure")).resolves.toEqual({
+      status: "failed",
+      progress: 100,
+      url: null,
+      error: { code: "OutputAudioSensitiveContentDetected.PolicyViolation", message: "版权审核失败" },
+    });
+  });
 });

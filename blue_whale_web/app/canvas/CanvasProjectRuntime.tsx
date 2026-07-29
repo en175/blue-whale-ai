@@ -24,12 +24,13 @@ import { effectiveToolMode, type ToolMode } from "./_canvas/v2/toolMode";
 import { useSpaceHeld } from "./_canvas/v2/useSpaceHeld";
 import { useV2Projects } from "./_canvas/v2/useV2Projects";
 import {
+  buildCrossmodalRefill,
+  canvasNodeToDockMedia,
   cardToV2ImageFields,
   recipeToDockPrefill,
-  buildCrossmodalRefill,
 } from "./_canvas/v2/mappers";
 import { findPlacement } from "./_canvas/placement";
-import { dockAccept } from "./_canvas/utils";
+import { dockAccept, dockPickHint } from "./_canvas/utils";
 import { useCanvasGeneration } from "./_canvas/hooks/useCanvasGeneration";
 import { useCanvasProjectHydration } from "./_canvas/hooks/useCanvasProjectHydration";
 import type { MentionItem } from "./_canvas/components/dock/mention";
@@ -259,19 +260,29 @@ export function CanvasProjectRuntime({
             // P2：从 recipe 回填底部栏（prompt+参数经 prefillSignal；首尾帧+参考图是 page 受控）
             const p = recipeToDockPrefill(gen);
             setBottomDockMode(gen.mediaKind === "video" ? "video" : "image");
-            if (p.firstFrameUrl !== undefined)
-              setFirstFrameUrl(p.firstFrameUrl);
-            if (p.lastFrameUrl !== undefined) setLastFrameUrl(p.lastFrameUrl);
-            if (p.references?.length) {
-              const items: DockMediaItem[] = p.references.map((r, i) => ({
-                id: `prefill-${Date.now()}-${i}`,
-                type: r.kind,
-                name: "",
-                src: r.url,
-              }));
-              if (gen.mediaKind === "video") setVideoDockMedia(items);
-              else setImageDockMedia(items);
-            }
+            setFirstFrameUrl(p.firstFrameUrl);
+            setLastFrameUrl(p.lastFrameUrl);
+            const firstFrameId = Number(p.firstFrameAssetId);
+            const lastFrameId = Number(p.lastFrameAssetId);
+            setFirstFrameAssetId(
+              Number.isSafeInteger(firstFrameId) && firstFrameId > 0
+                ? firstFrameId
+                : undefined,
+            );
+            setLastFrameAssetId(
+              Number.isSafeInteger(lastFrameId) && lastFrameId > 0
+                ? lastFrameId
+                : undefined,
+            );
+            const items: DockMediaItem[] = (p.references ?? []).map((r, i) => ({
+              id: `prefill-${Date.now()}-${i}`,
+              type: r.kind,
+              name: "",
+              src: r.url,
+              assetId: r.assetId,
+            }));
+            if (gen.mediaKind === "video") setVideoDockMedia(items);
+            else setImageDockMedia(items);
             setPrefillSignal({ nonce: Date.now(), prefill: p });
           } else {
             setBottomDockMode(node.data.kind === "video" ? "video" : "image");
@@ -554,25 +565,14 @@ export function CanvasProjectRuntime({
         setPickingFor(null);
         return;
       }
-      const item: DockMediaItem = {
-        id: node.id,
-        type: "image",
-        name: (node.data.content as string) || "图片",
-        src,
-        assetId: node.data.assetId,
-      };
-      if (pickingFor === "image")
-        setImageDockMedia((prev) =>
-          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
-        );
-      else if (pickingFor === "video")
-        setVideoDockMedia((prev) =>
-          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
-        );
-      else if (pickingFor === "audio")
-        setAudioDockMedia((prev) =>
-          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
-        );
+      const item = canvasNodeToDockMedia(node, src);
+      if (!item) {
+        setPickingFor(null);
+        return;
+      }
+      if (pickingFor === "image") setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+      else if (pickingFor === "video") setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+      else if (pickingFor === "audio") setAudioDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
       else if (pickingFor === "firstFrame") {
         setFirstFrameUrl(src);
         setFirstFrameAssetId(
@@ -811,9 +811,7 @@ export function CanvasProjectRuntime({
             从画布选择
           </span>
           <span style={{ color: "var(--tc-text-tertiary)" }}>
-            {pickableCount === 0
-              ? "画布上还没有可用的图片"
-              : "点击画布中的图片加入"}
+            {pickingFor ? dockPickHint(pickingFor, pickableCount) : null}
           </span>
           <span style={{ color: "var(--tc-text-muted)" }}>·</span>
           <button

@@ -8,9 +8,19 @@ vi.mock("./api/endpoints", () => ({
   presignAsset: vi.fn(),
   completeAsset: vi.fn(),
 }));
+import { readLocalMediaMetadata } from "./mediaSize";
+vi.mock("./mediaSize", () => ({
+  detectMediaKind: vi.fn(() => "image"),
+  readLocalMediaMetadata: vi.fn(),
+}));
 
 describe("Assets API", () => {
-  beforeEach(() => vi.mocked(request).mockReset());
+  beforeEach(() => {
+    vi.mocked(request).mockReset();
+    vi.mocked(presignAsset).mockReset();
+    vi.mocked(completeAsset).mockReset();
+    vi.mocked(readLocalMediaMetadata).mockReset();
+  });
 
   it("添加到项目：POST /api/projects/{id}/assets 携带 source_asset_id 与 Idempotency-Key", async () => {
     vi.mocked(request).mockResolvedValue({
@@ -75,5 +85,89 @@ describe("Assets API", () => {
     await deleteAsset(42);
 
     expect(request).toHaveBeenCalledWith("/assets/42", "DELETE");
+  });
+
+  it("视频上传 complete 携带浏览器读取的宽高和时长", async () => {
+    vi.mocked(presignAsset).mockResolvedValue({
+      storage_key: "uploads/9/video/reference.mp4",
+      upload_url: "https://upload.test/reference.mp4",
+      headers: { "Content-Type": "video/mp4" },
+      expires_in: 600,
+    });
+    vi.mocked(readLocalMediaMetadata).mockResolvedValue({
+      width: 1920,
+      height: 1080,
+      duration: 6.5,
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 200 })));
+    vi.mocked(completeAsset).mockResolvedValue({
+      asset_id: "42",
+      status: "ready",
+      type: "video",
+      url: "https://tos.test/reference.mp4",
+      width: 1920,
+      height: 1080,
+      duration: 6.5,
+      mime: "video/mp4",
+      size: 5,
+    });
+    const file = new File(["video"], "reference.mp4", {
+      type: "video/mp4",
+    });
+
+    await uploadAsset(file, 55, "video");
+
+    expect(completeAsset).toHaveBeenCalledWith({
+      project_id: "55",
+      type: "video",
+      mime: "video/mp4",
+      size: file.size,
+      storage_key: "uploads/9/video/reference.mp4",
+      width: 1920,
+      height: 1080,
+      duration: 6.5,
+    });
+  });
+
+  it("空 MIME 的 MOV 按扩展名使用 video/quicktime", async () => {
+    vi.mocked(presignAsset).mockResolvedValue({
+      storage_key: "uploads/9/video/reference.mov",
+      upload_url: "https://upload.test/reference.mov",
+      headers: { "Content-Type": "video/quicktime" },
+      expires_in: 600,
+    });
+    vi.mocked(readLocalMediaMetadata).mockResolvedValue({
+      width: 1280,
+      height: 720,
+      duration: 3,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
+    );
+    vi.mocked(completeAsset).mockResolvedValue({
+      asset_id: "43",
+      status: "ready",
+      type: "video",
+      url: "https://tos.test/reference.mov",
+      width: 1280,
+      height: 720,
+      duration: 3,
+      mime: "video/quicktime",
+      size: 5,
+    });
+
+    await uploadAsset(
+      new File(["video"], "reference.MOV", { type: "" }),
+      55,
+      "video",
+    );
+
+    expect(presignAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ mime: "video/quicktime" }),
+    );
+    expect(completeAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ mime: "video/quicktime" }),
+    );
   });
 });

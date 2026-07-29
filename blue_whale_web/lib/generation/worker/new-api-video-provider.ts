@@ -16,7 +16,7 @@ type VideoProviderOptions = {
 };
 
 const SUCCESS_STATUSES = new Set(["success", "succeeded", "completed"]);
-const FAILED_STATUSES = new Set(["failed", "error", "cancelled", "canceled"]);
+const FAILED_STATUSES = new Set(["failed", "failure", "error", "cancelled", "canceled"]);
 
 function defaultSleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
