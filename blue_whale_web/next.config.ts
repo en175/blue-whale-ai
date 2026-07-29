@@ -32,16 +32,31 @@ const nextConfig: NextConfig = {
     ],
   },
   async rewrites() {
-    // 全走网关（Nacos 服务发现）。specific 规则在前，catch-all 在后（先命中先转发）。
+    // 只代理尚未迁移到 Node 的 Java 路径前缀。
+    // Node 已实现的路径（/api/auth/*, /api/projects/*, /api/canvases/*, /api/me）
+    // 不在此列——Next.js 文件路由自然优先，不会走代理。
+    const javaOnlyPrefixes = [
+      "/api/agent/runs/:path*",
+      "/api/generation-inbox/:path*",
+      "/api/webhooks/:path*",
+      "/api/user/:path*",
+      // /api/assets 列表已迁 Node（Java AssetController 仅此一个端点），不再代理；
+      // /api/projects/{id}/assets/*（copy/access/content）仍是 Java，见下方代理。
+      // /api/jobs/{id}/stream SSE 仍由 Java JobStreamBus 推送；
+      // /api/jobs 列表与 /api/jobs/{id} 状态已迁 Node，不再代理。
+      "/api/jobs/:path*/stream",
+      // /api/generation/models 已迁 Node（Java GenerationController 仅此一个端点），不再代理。
+      // /api/projects/* 下未迁移的 Java 子资源（agent 对话/SSE）。
+      "/api/projects/:path*/conversation/:path*",
+      "/api/projects/:path*/input-requests/:path*",
+      "/api/projects/:path*/events",
+    ];
     return [
-      {
-        source: "/api/:path*",
-        destination: `${GATEWAY}/api/:path*`,
-      },
-      {
-        source: "/assets/:path*",
-        destination: `${GATEWAY}/assets/:path*`,
-      },
+      ...javaOnlyPrefixes.map((source) => ({
+        source,
+        destination: `${GATEWAY}${source}`,
+      })),
+      { source: "/assets/:path*", destination: `${GATEWAY}/assets/:path*` },
     ];
   },
 };

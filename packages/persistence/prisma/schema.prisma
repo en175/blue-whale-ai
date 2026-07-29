@@ -1,0 +1,321 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model api_key {
+  id            BigInt   @id @default(autoincrement())
+  user_id       BigInt
+  name          String   @default("") @db.VarChar(128)
+  consumer_name String   @unique(map: "uk_consumer_name") @default("") @db.VarChar(64)
+  key_prefix    String   @default("") @db.VarChar(32)
+  key_hash      String   @unique(map: "uk_key_hash") @db.VarChar(128)
+  status        String   @default("ACTIVE") @db.VarChar(32)
+  token_quota   BigInt?
+  remark        String?  @db.VarChar(255)
+  gmt_create    DateTime @default(now()) @db.DateTime(0)
+  gmt_modified  DateTime @default(now()) @db.DateTime(0)
+  version       Int      @default(0)
+  is_delete     Int      @default(0) @db.TinyInt
+
+  @@index([user_id], map: "idx_user_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model api_key_usage {
+  id            BigInt   @id @default(autoincrement())
+  api_key_id    BigInt
+  user_id       BigInt
+  model         String?  @db.VarChar(64)
+  provider      String?  @db.VarChar(64)
+  input_tokens  BigInt   @default(0)
+  output_tokens BigInt   @default(0)
+  request_id    String   @unique(map: "uk_request_id") @db.VarChar(64)
+  gmt_create    DateTime @default(now()) @db.DateTime(0)
+  gmt_modified  DateTime @default(now()) @db.DateTime(0)
+  version       Int      @default(0)
+  is_delete     Int      @default(0) @db.TinyInt
+
+  @@index([api_key_id], map: "idx_api_key_id")
+  @@index([user_id], map: "idx_user_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model assets {
+  id                BigInt   @id @default(autoincrement())
+  user_id           BigInt
+  project_id        BigInt   @default(0)
+  generation_job_id BigInt?
+  type              String   @db.VarChar(16)
+  storage_key       String?  @db.VarChar(512)
+  content_sha256    String?  @db.VarChar(64)
+  url               String   @db.VarChar(512)
+  mime              String?  @db.VarChar(64)
+  size              BigInt?
+  width             Int?
+  height            Int?
+  duration          Int?
+  source            String   @default("generated") @db.VarChar(32)
+  status            String   @default("normal") @db.VarChar(32)
+  gmt_create        DateTime @default(now()) @db.DateTime(0)
+  gmt_modified      DateTime @default(now()) @db.DateTime(0)
+  version           Int      @default(0)
+  is_delete         Boolean  @default(false)
+
+  @@index([project_id], map: "idx_asset_project")
+  @@index([project_id, type], map: "idx_asset_project_type")
+  @@index([generation_job_id], map: "idx_asset_generation_job")
+  @@index([type], map: "idx_type")
+  @@index([user_id], map: "idx_user_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model canvas {
+  id            BigInt   @id @default(autoincrement())
+  project_id    BigInt   @unique(map: "uk_canvas_project")
+  viewport_json Json?
+  nodes_json    Json?
+  gmt_create    DateTime @default(now()) @db.DateTime(0)
+  gmt_modified  DateTime @default(now()) @db.DateTime(0)
+  version       Int      @default(0)
+  is_delete     Int      @default(0) @db.TinyInt
+}
+
+model captcha_challenges {
+  id          BigInt   @id @default(autoincrement())
+  token       String   @db.VarChar(36)
+  answer      String   @db.VarChar(10)
+  gmt_expire  DateTime @db.DateTime(0)
+  is_verified Boolean  @default(false)
+  gmt_create  DateTime @default(now()) @db.DateTime(0)
+
+  @@index([token], map: "idx_token")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model generation_jobs {
+  id                      BigInt    @id @default(autoincrement())
+  project_id              BigInt?
+  user_id                 BigInt
+  agent_run_id            BigInt?
+  action_identity         String?   @db.VarChar(128)
+  project_action_identity String?   @db.VarChar(128)
+  expected_output_count   Int       @default(1)
+  retry_of_job_id         BigInt?
+  type                    String    @db.VarChar(32)
+  source                  String    @default("dock") @db.VarChar(32)
+  status                  String    @default("queued") @db.VarChar(32)
+  progress                Int       @default(0)
+  output_asset_ids        Json?
+  provider                String?   @db.VarChar(64)
+  provider_task_id        String?   @db.VarChar(128)
+  poll_count              Int       @default(0)
+  next_poll_at            DateTime? @db.DateTime(0)
+  retry_count             Int       @default(0)
+  last_polled_at          DateTime? @db.DateTime(0)
+  error                   Json?
+  stage_id                String?   @db.VarChar(64)
+  lease_owner             String?   @db.VarChar(128)
+  lease_expires_at        DateTime? @db.DateTime(0)
+  fencing_token           BigInt    @default(0)
+  strategy_version        String?   @db.VarChar(64)
+  execution_deadline_at   DateTime? @db.DateTime(0)
+  evidence_reconcile_until DateTime? @db.DateTime(0)
+  next_action_at          DateTime? @db.DateTime(0)
+  cancel_requested_at     DateTime? @db.DateTime(0)
+  gmt_create              DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified            DateTime  @default(now()) @db.DateTime(0)
+  version                 Int       @default(0)
+  is_delete               Boolean   @default(false)
+  input                   Json?
+
+  @@index([project_id], map: "idx_project_id")
+  @@index([provider_task_id], map: "idx_provider_task_id")
+  @@index([status, next_poll_at], map: "idx_status_next_poll")
+  @@index([user_id], map: "idx_user_id")
+  @@index([next_action_at], map: "idx_generation_next_action")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model generation_model_capability {
+  id                      BigInt   @id @default(autoincrement())
+  provider_id             String   @db.VarChar(32)
+  model_id                String   @db.VarChar(128)
+  capability_type         String   @db.VarChar(16)
+  model_label             String   @db.VarChar(64)
+  icon                    String?  @db.VarChar(512)
+  supported_sizes         Json
+  supported_aspect_ratios Json
+  supported_durations     Json?
+  supported_formats       Json
+  default_size            String   @db.VarChar(32)
+  default_format          String?  @db.VarChar(16)
+  default_aspect_ratio    String   @db.VarChar(16)
+  default_duration        Int?
+  features                Json
+  enabled                 Boolean  @default(true)
+  sort_order              Int      @default(0)
+  gmt_create              DateTime @default(now()) @db.DateTime(0)
+  gmt_modified            DateTime @default(now()) @db.DateTime(0)
+  version                 Int      @default(0)
+  is_delete               Boolean  @default(false)
+
+  @@unique([provider_id, model_id], map: "uk_provider_model")
+  @@index([capability_type, enabled], map: "idx_capability_type_enabled")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model project {
+  id           BigInt   @id @default(autoincrement())
+  owner_id     BigInt
+  name         String   @db.VarChar(128)
+  thumb        String?  @db.VarChar(512)
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Int      @default(0) @db.TinyInt
+
+  @@index([owner_id], map: "idx_project_owner")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model skill {
+  id           BigInt   @id @default(autoincrement())
+  name         String   @unique(map: "uk_name") @db.VarChar(255)
+  description  String?  @db.Text
+  content      String?  @db.LongText
+  source       String   @default("official") @db.VarChar(32)
+  sort_order   Int      @default(0)
+  cover_url    String?  @db.VarChar(512)
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Int      @default(0) @db.TinyInt
+
+  @@index([sort_order], map: "idx_sort")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model template_card {
+  id           BigInt    @id @default(autoincrement())
+  tag_code     String    @db.VarChar(64)
+  title        String    @db.VarChar(255)
+  video_url    String?   @db.VarChar(512)
+  content      String?   @db.LongText
+  layout       String    @db.VarChar(32)
+  sort_order   Int       @default(0)
+  create_time  DateTime  @default(now()) @db.DateTime(0)
+  update_time  DateTime  @default(now()) @db.DateTime(0)
+  deleted      Int       @default(0) @db.TinyInt
+  is_delete    Int       @default(0) @db.TinyInt
+  gmt_create   DateTime? @default(now()) @db.DateTime(0)
+  gmt_modified DateTime? @default(now()) @db.DateTime(0)
+  version      BigInt?
+
+  @@index([tag_code], map: "idx_tag_id")
+  @@index([tag_code, sort_order], map: "idx_tag_sort")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model template_card_image {
+  id           BigInt    @id @default(autoincrement())
+  card_id      BigInt
+  image_url    String    @db.VarChar(512)
+  sort_order   Int       @default(0)
+  create_time  DateTime  @default(now()) @db.DateTime(0)
+  update_time  DateTime  @default(now()) @db.DateTime(0)
+  deleted      Int       @default(0) @db.TinyInt
+  is_delete    Int       @default(0) @db.TinyInt
+  gmt_create   DateTime? @default(now()) @db.DateTime(0)
+  gmt_modified DateTime? @default(now()) @db.DateTime(0)
+  version      BigInt?
+
+  @@index([card_id], map: "idx_card_id")
+  @@index([card_id, sort_order], map: "idx_card_sort")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model user_skill {
+  id           BigInt   @id @default(autoincrement())
+  user_id      BigInt
+  skill_id     BigInt
+  auto         Int      @default(0) @db.TinyInt
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Int      @default(0) @db.TinyInt
+
+  @@unique([user_id, skill_id], map: "uk_user_skill")
+  @@index([skill_id], map: "idx_skill")
+  @@index([user_id], map: "idx_user")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model users {
+  id           BigInt   @id @default(autoincrement())
+  phone        String   @unique(map: "idx_phone") @db.VarChar(20)
+  username     String   @db.VarChar(50)
+  status       String   @default("NORMAL") @db.VarChar(30)
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(1)
+  is_delete    Boolean  @default(false)
+  avatar       String?  @default("0") @db.VarChar(255)
+  password     String?  @db.VarChar(63)
+}
+
+model verification_codes {
+  id         BigInt   @id @default(autoincrement())
+  phone      String   @db.VarChar(20)
+  code       String   @db.VarChar(6)
+  ip         String   @db.VarChar(50)
+  gmt_expire DateTime @db.DateTime(0)
+  is_used    Boolean  @default(false)
+  gmt_create DateTime @default(now()) @db.DateTime(0)
+
+  @@index([ip, gmt_create], map: "idx_ip_created")
+  @@index([phone, gmt_create], map: "idx_phone_created")
+  @@index([phone, is_used, gmt_expire], map: "idx_phone_unused")
+}
+
+// ===== 生成子系统（简化版，Node 自有 worker）：流水 + 日志 + 素材关联 + 点数 =====
+
+model cost_reservations {
+  id                    BigInt   @id @default(autoincrement())
+  generation_job_id     BigInt
+  user_id               BigInt
+  project_id            BigInt
+  action_identity       String   @db.VarChar(128)
+  action_type           String   @db.VarChar(64)
+  provider              String   @db.VarChar(64)
+  reserved_amount_fen   BigInt
+  actual_amount_fen     BigInt?
+  status                String   @db.VarChar(32)
+  price_catalog_version String   @db.VarChar(64)
+  exchange_rate_version String   @db.VarChar(64)
+  model_policy_version  String   @db.VarChar(64)
+  cost_rule_version     String   @db.VarChar(64)
+  gmt_create            DateTime @default(now()) @db.DateTime(0)
+  gmt_modified          DateTime @default(now()) @db.DateTime(0)
+  version               Int      @default(0)
+  is_delete             Int      @default(0) @db.TinyInt
+
+  @@unique([generation_job_id], map: "uk_cost_reservation_job")
+}
+
+/// 生成任务操作日志（append-only，追溯还原）：每次状态变更 / provider 调用记一行。
+model generation_job_logs {
+  id                BigInt   @id @default(autoincrement())
+  generation_job_id BigInt
+  event             String   @db.VarChar(64)
+  status            String?  @db.VarChar(32)
+  payload           Json?
+  message           String?  @db.Text
+  occurred_at       DateTime @default(now()) @db.DateTime(0)
+
+  @@index([generation_job_id, occurred_at], map: "idx_gen_job_log_job_time")
+}
