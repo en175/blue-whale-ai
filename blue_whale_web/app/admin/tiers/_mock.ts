@@ -1,3 +1,4 @@
+import { writeAuditLog } from "../_lib/audit-log";
 import type { RechargeTier } from "@/components/recharge/types";
 
 export type AdminTier = RechargeTier & {
@@ -51,6 +52,7 @@ export function createTier(data: TierFormData): AdminTier {
     updatedAt: new Date().toISOString(),
   };
   tiers.push(tier);
+  writeAuditLog({ category: "tier", action: "创建", target: `${tier.amount} 积分 / ¥${tier.price}`, detail: `赠送 ${tier.bonus}`, operator: "admin" });
   return tier;
 }
 
@@ -58,12 +60,14 @@ export function updateTier(id: string, data: TierFormData): AdminTier | null {
   const idx = tiers.findIndex((t) => t.id === id);
   if (idx === -1) return null;
   tiers[idx] = { ...tiers[idx], ...data, startTime: data.startTime || null, endTime: data.endTime || null, updatedAt: new Date().toISOString() };
+  writeAuditLog({ category: "tier", action: "编辑", target: `${tiers[idx].amount} 积分 / ¥${tiers[idx].price}`, detail: `赠送 ${tiers[idx].bonus}`, operator: "admin" });
   return tiers[idx];
 }
 
 export function deleteTier(id: string): boolean {
   const idx = tiers.findIndex((t) => t.id === id);
   if (idx === -1) return false;
+  writeAuditLog({ category: "tier", action: "删除", target: `${tiers[idx].amount} 积分 / ¥${tiers[idx].price}`, detail: `赠送 ${tiers[idx].bonus}`, operator: "admin" });
   tiers.splice(idx, 1);
   return true;
 }
@@ -76,6 +80,7 @@ export function moveTier(id: string, direction: "up" | "down"): boolean {
   [tiers[idx], tiers[target]] = [tiers[target], tiers[idx]];
   // Re-number all sortOrder values sequentially to keep them in sync with array order
   tiers.forEach((t, i) => { t.sortOrder = i + 1; });
+  writeAuditLog({ category: "tier", action: "排序", target: `${tiers[idx].amount} 积分 / ¥${tiers[idx].price}`, detail: `${direction === "up" ? "上移" : "下移"}`, operator: "admin" });
   return true;
 }
 

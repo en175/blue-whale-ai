@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Layers, Coins, Users, Receipt, Settings, Shield } from "lucide-react";
+import { LayoutDashboard, Layers, Coins, Users, Receipt, Settings, Shield, FileText } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/admin", label: "仪表盘", icon: LayoutDashboard },
@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: "/admin/pricing", label: "定价规则", icon: Coins },
   { href: "/admin/users", label: "用户管理", icon: Users },
   { href: "/admin/orders", label: "订单管理", icon: Receipt },
+  { href: "/admin/logs", label: "操作日志", icon: FileText },
   { href: "/admin/settings", label: "系统设置", icon: Settings },
 ];
 

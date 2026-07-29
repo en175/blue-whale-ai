@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Search, Eye, Coins, Lock, Unlock } from "lucide-react";
+import { Search, Coins, Lock, Unlock } from "lucide-react";
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from "../_components/ui/table";
 import { Badge } from "../_components/ui/badge";
 import { Dialog } from "../_components/ui/dialog";
@@ -17,12 +17,51 @@ const STATUS_OPTIONS = [
   { value: "active", label: "正常" },
   { value: "disabled", label: "已冻结" },
 ];
-const BALANCE_RANGES = [
+
+const BALANCE_STORAGE_KEY = "admin_balance_filter";
+
+type BalanceFilterState = { preset: string; min: string; max: string };
+
+function loadBalanceState(): BalanceFilterState {
+  try {
+    const raw = localStorage.getItem(BALANCE_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return { preset: "all", min: "", max: "" };
+}
+
+function saveBalanceState(state: BalanceFilterState) {
+  try {
+    localStorage.setItem(BALANCE_STORAGE_KEY, JSON.stringify(state));
+  } catch { /* ignore */ }
+}
+
+const BALANCE_PRESETS = [
   { value: "all", label: "全部余额" },
-  { value: "zero", label: "余额为 0" },
-  { value: "low", label: "1 — 5,000" },
-  { value: "mid", label: "5,000 — 50,000" },
-  { value: "high", label: "> 50,000" },
+  { value: "0-1000", label: "0 — 1,000" },
+  { value: "1000-5000", label: "1,000 — 5,000" },
+  { value: "5000-10000", label: "5,000 — 10,000" },
+  { value: "10000-50000", label: "10,000 — 50,000" },
+  { value: "50000+", label: "> 50,000" },
+  { value: "custom", label: "自定义区间" },
+];
+
+const RC_STATUS_OPTIONS = [
+  { value: "all", label: "全部状态" },
+  { value: "paid", label: "已支付" },
+  { value: "pending", label: "待支付" },
+];
+
+const RC_PAYMENT_OPTIONS = [
+  { value: "all", label: "全部方式" },
+  { value: "wechat", label: "微信支付" },
+  { value: "alipay", label: "支付宝" },
+];
+
+const CS_TYPE_OPTIONS = [
+  { value: "all", label: "全部类型" },
+  { value: "image", label: "图片" },
+  { value: "video", label: "视频" },
 ];
 
 const DETAIL_TABS = [
@@ -37,7 +76,33 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUserInfo[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [balanceFilter, setBalanceFilter] = useState("all");
+
+  // Balance filter with localStorage
+  const [balancePreset, setBalancePreset] = useState("all");
+  const [balanceMin, setBalanceMin] = useState("");
+  const [balanceMax, setBalanceMax] = useState("");
+
+  // Restore balance filter on mount
+  useEffect(() => {
+    const saved = loadBalanceState();
+    setBalancePreset(saved.preset);
+    setBalanceMin(saved.min);
+    setBalanceMax(saved.max);
+  }, []);
+
+  // Persist balance filter changes to localStorage
+  useEffect(() => {
+    saveBalanceState({ preset: balancePreset, min: balanceMin, max: balanceMax });
+  }, [balancePreset, balanceMin, balanceMax]);
+
+  // Record filters
+  const [rcDateFrom, setRcDateFrom] = useState("");
+  const [rcDateTo, setRcDateTo] = useState("");
+  const [rcStatus, setRcStatus] = useState("all");
+  const [rcPayment, setRcPayment] = useState("all");
+  const [csDateFrom, setCsDateFrom] = useState("");
+  const [csDateTo, setCsDateTo] = useState("");
+  const [csType, setCsType] = useState("all");
 
   const [detailUser, setDetailUser] = useState<AdminUserInfo | null>(null);
   const [detailTab, setDetailTab] = useState("info");
@@ -62,16 +127,57 @@ export default function AdminUsersPage() {
   const filtered = useMemo(() => {
     let list = users;
     if (statusFilter !== "all") list = list.filter((u) => u.status === statusFilter);
-    if (balanceFilter === "zero") list = list.filter((u) => u.balance === 0);
-    else if (balanceFilter === "low") list = list.filter((u) => u.balance > 0 && u.balance <= 5000);
-    else if (balanceFilter === "mid") list = list.filter((u) => u.balance > 5000 && u.balance <= 50000);
-    else if (balanceFilter === "high") list = list.filter((u) => u.balance > 50000);
+
+    // Balance filter
+    if (balancePreset === "custom") {
+      const mn = Number(balanceMin);
+      const mx = Number(balanceMax);
+      if (!isNaN(mn)) list = list.filter((u) => u.balance >= mn);
+      if (!isNaN(mx)) list = list.filter((u) => u.balance <= mx);
+    } else if (balancePreset !== "all") {
+      if (balancePreset === "50000+") {
+        list = list.filter((u) => u.balance > 50000);
+      } else {
+        const [lo, hi] = balancePreset.split("-").map(Number);
+        list = list.filter((u) => u.balance >= lo && u.balance <= hi);
+      }
+    }
+
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((u) => u.nickname.toLowerCase().includes(q) || u.phone.includes(q) || String(u.userId).includes(q));
     }
     return list;
-  }, [users, search, statusFilter, balanceFilter]);
+  }, [users, search, statusFilter, balancePreset, balanceMin, balanceMax]);
+
+  const filteredRecharges = useMemo(() => {
+    let list = recharges;
+    if (rcStatus !== "all") list = list.filter((r) => r.status === rcStatus);
+    if (rcPayment !== "all") list = list.filter((r) => r.paymentMethod === rcPayment);
+    if (rcDateFrom) {
+      const from = new Date(rcDateFrom).getTime();
+      list = list.filter((r) => new Date(r.createdAt).getTime() >= from);
+    }
+    if (rcDateTo) {
+      const to = new Date(rcDateTo).getTime() + 86400000;
+      list = list.filter((r) => new Date(r.createdAt).getTime() <= to);
+    }
+    return list;
+  }, [recharges, rcStatus, rcPayment, rcDateFrom, rcDateTo]);
+
+  const filteredConsumes = useMemo(() => {
+    let list = consumes;
+    if (csType !== "all") list = list.filter((c) => c.generationType === csType);
+    if (csDateFrom) {
+      const from = new Date(csDateFrom).getTime();
+      list = list.filter((c) => new Date(c.createdAt).getTime() >= from);
+    }
+    if (csDateTo) {
+      const to = new Date(csDateTo).getTime() + 86400000;
+      list = list.filter((c) => new Date(c.createdAt).getTime() <= to);
+    }
+    return list;
+  }, [consumes, csType, csDateFrom, csDateTo]);
 
   const openDetail = (u: AdminUserInfo) => {
     setDetailUser(u); setDetailTab("info");
@@ -79,6 +185,9 @@ export default function AdminUsersPage() {
     setConsumes(getConsumeRecords(u.userId));
     setAdjustLogs(getAdjustLogs(u.userId));
     setOpLogs(getOperationLogs(u.userId));
+    // Reset record filters
+    setRcDateFrom(""); setRcDateTo(""); setRcStatus("all"); setRcPayment("all");
+    setCsDateFrom(""); setCsDateTo(""); setCsType("all");
   };
 
   const handleFreeze = () => {
@@ -119,7 +228,14 @@ export default function AdminUsersPage() {
           <Input className="pl-9" placeholder="搜索昵称/手机号/用户ID..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} options={STATUS_OPTIONS} />
-        <Select value={balanceFilter} onChange={(e) => setBalanceFilter(e.target.value)} options={BALANCE_RANGES} />
+        <Select value={balancePreset} onChange={(e) => setBalancePreset(e.target.value)} options={BALANCE_PRESETS} />
+        {balancePreset === "custom" && (
+          <>
+            <Input className="w-24" type="number" value={balanceMin} onChange={(e) => setBalanceMin(e.target.value)} placeholder="最小值" />
+            <span className="text-[var(--tc-text-muted)]">—</span>
+            <Input className="w-24" type="number" value={balanceMax} onChange={(e) => setBalanceMax(e.target.value)} placeholder="最大值" />
+          </>
+        )}
       </div>
 
       <div className="rounded-xl border border-[var(--tc-border)] bg-[var(--tc-bg-surface)]">
@@ -144,7 +260,11 @@ export default function AdminUsersPage() {
               filtered.map((u) => (
                 <TableRow key={u.id}>
                   <TableCell className="font-mono text-xs text-[var(--tc-text-tertiary)]">#{u.userId}</TableCell>
-                  <TableCell className="font-medium">{u.nickname}</TableCell>
+                  <TableCell className="font-medium">
+                    <button onClick={() => openDetail(u)} className="text-[var(--tc-accent,#3b82f6)] hover:underline text-left">
+                      {u.nickname}
+                    </button>
+                  </TableCell>
                   <TableCell className="text-[var(--tc-text-secondary)]">{u.phone}</TableCell>
                   <TableCell className="font-mono font-medium">{u.balance.toLocaleString()}</TableCell>
                   <TableCell className="text-[var(--tc-text-secondary)]">{u.totalRecharge.toLocaleString()}</TableCell>
@@ -153,7 +273,6 @@ export default function AdminUsersPage() {
                   <TableCell><Badge variant={u.status === "active" ? "success" : "secondary"}>{u.status === "active" ? "正常" : "已冻结"}</Badge></TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
-                      <button onClick={() => openDetail(u)} className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[var(--tc-text-primary)] hover:bg-[var(--tc-bg-elevated)]" title="详情"><Eye className="h-4 w-4" /></button>
                       <button onClick={() => setAdjustUser(u)} className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[#22c55e] hover:bg-[#22c55e]/10" title="调整积分"><Coins className="h-4 w-4" /></button>
                       {u.status === "active" ? (
                         <button onClick={() => { setFreezeUserTarget(u); setFreezeReason(""); }} className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[#f59e0b] hover:bg-[#f59e0b]/10" title="冻结账户"><Lock className="h-4 w-4" /></button>
@@ -170,7 +289,7 @@ export default function AdminUsersPage() {
       </div>
 
       {/* Detail Drawer with Tabs */}
-      <Dialog open={!!detailUser} onOpenChange={(o) => { if (!o) setDetailUser(null); }} title="用户详情" width={640}>
+      <Dialog open={!!detailUser} onOpenChange={(o) => { if (!o) setDetailUser(null); }} title="用户详情" width={700}>
         {detailUser && (
           <div className="space-y-4">
             <Tabs tabs={DETAIL_TABS} active={detailTab} onChange={setDetailTab} />
@@ -189,39 +308,56 @@ export default function AdminUsersPage() {
             )}
 
             {detailTab === "recharge" && (
-              <Table>
-                <TableHeader><TableRow><TableHead>交易号</TableHead><TableHead>档位</TableHead><TableHead>金额</TableHead><TableHead>积分</TableHead><TableHead>方式</TableHead><TableHead>状态</TableHead><TableHead>创建时间</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {recharges.length === 0 ? <TableRow><TableCell colSpan={7} className="text-center text-[var(--tc-text-muted)]">暂无充值记录</TableCell></TableRow> : recharges.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="font-mono text-xs">{r.tradeNo}</TableCell>
-                      <TableCell className="text-sm">{r.tierName}</TableCell>
-                      <TableCell>¥{r.amount}</TableCell>
-                      <TableCell className="font-medium">{r.points.toLocaleString()}</TableCell>
-                      <TableCell>{r.paymentMethod === "wechat" ? "微信" : "支付宝"}</TableCell>
-                      <TableCell><Badge variant={r.status === "paid" ? "success" : "secondary"}>{r.status === "paid" ? "已支付" : "待支付"}</Badge></TableCell>
-                      <TableCell className="text-xs text-[var(--tc-text-tertiary)]">{new Date(r.createdAt).toLocaleString("zh-CN")}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input className="w-32" type="date" value={rcDateFrom} onChange={(e) => setRcDateFrom(e.target.value)} placeholder="开始" />
+                  <span className="text-[var(--tc-text-muted)] text-xs">—</span>
+                  <Input className="w-32" type="date" value={rcDateTo} onChange={(e) => setRcDateTo(e.target.value)} placeholder="结束" />
+                  <Select value={rcStatus} onChange={(e) => setRcStatus(e.target.value)} options={RC_STATUS_OPTIONS} />
+                  <Select value={rcPayment} onChange={(e) => setRcPayment(e.target.value)} options={RC_PAYMENT_OPTIONS} />
+                </div>
+                <Table>
+                  <TableHeader><TableRow><TableHead>交易号</TableHead><TableHead>档位</TableHead><TableHead>金额</TableHead><TableHead>积分</TableHead><TableHead>方式</TableHead><TableHead>状态</TableHead><TableHead>创建时间</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {filteredRecharges.length === 0 ? <TableRow><TableCell colSpan={7} className="text-center text-[var(--tc-text-muted)]">暂无充值记录</TableCell></TableRow> : filteredRecharges.map((r) => (
+                      <TableRow key={r.id}>
+                        <TableCell className="font-mono text-xs">{r.tradeNo}</TableCell>
+                        <TableCell className="text-sm">{r.tierName}</TableCell>
+                        <TableCell>¥{r.amount}</TableCell>
+                        <TableCell className="font-medium">{r.points.toLocaleString()}</TableCell>
+                        <TableCell>{r.paymentMethod === "wechat" ? "微信" : "支付宝"}</TableCell>
+                        <TableCell><Badge variant={r.status === "paid" ? "success" : "secondary"}>{r.status === "paid" ? "已支付" : "待支付"}</Badge></TableCell>
+                        <TableCell className="text-xs text-[var(--tc-text-tertiary)]">{new Date(r.createdAt).toLocaleString("zh-CN")}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
 
             {detailTab === "consume" && (
-              <Table>
-                <TableHeader><TableRow><TableHead>时间</TableHead><TableHead>类型</TableHead><TableHead>描述</TableHead><TableHead>消耗积分</TableHead><TableHead>参数快照</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {consumes.length === 0 ? <TableRow><TableCell colSpan={5} className="text-center text-[var(--tc-text-muted)]">暂无消费记录</TableCell></TableRow> : consumes.map((c) => (
-                    <TableRow key={c.id}>
-                      <TableCell className="text-xs text-[var(--tc-text-tertiary)]">{new Date(c.createdAt).toLocaleString("zh-CN")}</TableCell>
-                      <TableCell><Badge variant={c.generationType === "image" ? "default" : "outline"}>{c.generationType === "image" ? "图片" : "视频"}</Badge></TableCell>
-                      <TableCell className="text-sm">{c.description}</TableCell>
-                      <TableCell className="font-medium text-[#ef4444]">-{c.points.toLocaleString()}</TableCell>
-                      <TableCell className="max-w-[140px] truncate font-mono text-xs text-[var(--tc-text-muted)]">{JSON.stringify(c.paramsSnapshot)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input className="w-32" type="date" value={csDateFrom} onChange={(e) => setCsDateFrom(e.target.value)} placeholder="开始" />
+                  <span className="text-[var(--tc-text-muted)] text-xs">—</span>
+                  <Input className="w-32" type="date" value={csDateTo} onChange={(e) => setCsDateTo(e.target.value)} placeholder="结束" />
+                  <Select value={csType} onChange={(e) => setCsType(e.target.value)} options={CS_TYPE_OPTIONS} />
+                </div>
+                <Table>
+                  <TableHeader><TableRow><TableHead>时间</TableHead><TableHead>类型</TableHead><TableHead>描述</TableHead><TableHead>消耗积分</TableHead><TableHead>参数快照</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {filteredConsumes.length === 0 ? <TableRow><TableCell colSpan={5} className="text-center text-[var(--tc-text-muted)]">暂无消费记录</TableCell></TableRow> : filteredConsumes.map((c) => (
+                      <TableRow key={c.id}>
+                        <TableCell className="text-xs text-[var(--tc-text-tertiary)]">{new Date(c.createdAt).toLocaleString("zh-CN")}</TableCell>
+                        <TableCell><Badge variant={c.generationType === "image" ? "default" : "outline"}>{c.generationType === "image" ? "图片" : "视频"}</Badge></TableCell>
+                        <TableCell className="text-sm">{c.description}</TableCell>
+                        <TableCell className="font-medium text-[#ef4444]">-{c.points.toLocaleString()}</TableCell>
+                        <TableCell className="max-w-[140px] truncate font-mono text-xs text-[var(--tc-text-muted)]">{JSON.stringify(c.paramsSnapshot)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
 
             {detailTab === "adjust" && (
