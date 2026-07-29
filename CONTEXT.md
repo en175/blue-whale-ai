@@ -167,6 +167,11 @@ _Avoid_: 永久用户身份、产品资源所有者 ID、不可轮换密钥。
 它们只引用 new-api 的稳定 User ID 作为所有者，不由 new-api 保存或管理。
 _Avoid_: 把 Canvas 等产品数据纳入账户中心、在产品表复制用户名、邮箱、quota 或订阅状态。
 
+**认证用户上下文（Authenticated User Context）**:
+蓝鲸 BFF 从请求凭证向 new-api 解析得到的可信 User ID 与账户状态；所有受保护的产品操作只使用
+该上下文确定所有者，浏览器不提交 `user_id`，蓝鲸也不接受其他客户端身份声明。
+_Avoid_: 请求体或查询参数中的 `user_id`、客户端自报所有者、Token 指纹派生身份。
+
 **ContentReview（内容审核）**:
 Product API 对产品策略纳入审核范围的内容形成的安全决定；普通用户文字消息和提示词不做
 独立前置审核，Agent 或生成供应商的安全结果可以成为后续 ReviewEvidence。受审内容可以复用匹配的

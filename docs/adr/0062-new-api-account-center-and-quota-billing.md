@@ -18,7 +18,8 @@ blue-whale 正把画布业务从 Java 迁移到 Node。`canvas-v2` 的项目、�
 4. **用户持有凭证采用 MVP 方案 A**。前端 localStorage 保存 `sk-xxx`，每次调用 Node 带 `Authorization: Bearer sk-xxx`；Node 不实现 refresh token。后续若改为 Node 终结凭证，替换认证适配层，不改变画布 API 和 worker provider 端口。
 5. **只对 `blue_whale_api/` 增加最小身份解析接口**。new-api 提供一个受 `sk-xxx` 鉴权的只读接口，
    返回该 Token 所属的稳定 `user_id` 与账户状态；蓝鲸 BFF 使用服务端解析结果建立产品归属，
-   不信任客户端自报 `user_id`，也不再用 Token 指纹派生身份。除这条身份 seam 外，账户能力继续
+   浏览器只提交凭证、不提交 `user_id`；BFF 不信任任何客户端身份声明，也不再用 Token 指纹派生身份。
+   除这条身份 seam 外，账户能力继续
    复用 new-api 现有接口，不在蓝鲸复制账户规则。
 
 ## 连锁影响
