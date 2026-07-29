@@ -2,21 +2,32 @@
  * LeftToolbar —— 左侧竖向工具条（展示层）
  * 渲染选择/上传/文本/AI 图片/AI 视频等工具按钮，使用 squirclePath 绘制平滑外框。
  * 点击通过 onToolClick 回调上抛工具 id，由页面层分发处理。
+ * IK55VD：按钮 1（select）无任何高亮，仅图标随有效模式切换——handActive 时显示 Hand(18px)。
  */
 import { useMemo } from "react";
+import { Hand } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import { squirclePath } from "../utils";
 import { TOOLBAR_BUTTON_PATH } from "../constants";
 import { LEFT_TOOLS } from "../config";
 
-export function LeftToolbar({ onToolClick }: { onToolClick?: (id: string) => void }) {
+export function LeftToolbar({
+  onToolClick,
+  handActive,
+}: {
+  onToolClick?: (id: string) => void;
+  handActive?: boolean;
+}) {
   const toolbarHeight = useMemo(() => {
     return LEFT_TOOLS.reduce((sum, tool, index) => {
       const isLast = index === LEFT_TOOLS.length - 1;
       return sum + 32 + (tool.divider ? 9 : 0) + (isLast ? 0 : 4);
     }, 16);
   }, []);
-  const toolbarPath = useMemo(() => squirclePath(48, toolbarHeight, 18), [toolbarHeight]);
+  const toolbarPath = useMemo(
+    () => squirclePath(48, toolbarHeight, 18),
+    [toolbarHeight],
+  );
 
   return (
     <aside
@@ -38,7 +49,10 @@ export function LeftToolbar({ onToolClick }: { onToolClick?: (id: string) => voi
         }}
       >
         {LEFT_TOOLS.map((tool) => (
-          <div key={tool.id} className="relative flex flex-col items-center gap-1">
+          <div
+            key={tool.id}
+            className="relative flex flex-col items-center gap-1"
+          >
             <SmoothCorners
               width={32}
               height={32}
@@ -51,13 +65,27 @@ export function LeftToolbar({ onToolClick }: { onToolClick?: (id: string) => voi
                 onClick={() => onToolClick?.(tool.id)}
                 className="tc-ui-glow-btn flex h-[32px] w-[32px] items-center justify-center bg-transparent text-white/95 transition-colors duration-150 hover:bg-white/[0.08]"
               >
-                {tool.icon}
+                {tool.id === "select" && handActive ? (
+                  <Hand
+                    width={18}
+                    height={18}
+                    stroke="rgba(255, 255, 255, 0.8)"
+                    strokeWidth={1.5}
+                  />
+                ) : (
+                  tool.icon
+                )}
               </button>
             </SmoothCorners>
             {tool.divider && (
               <div
                 className="shrink-0"
-                style={{ width: 24, height: 1, background: "rgba(255, 255, 255, 0.06)", margin: "4px 0" }}
+                style={{
+                  width: 24,
+                  height: 1,
+                  background: "rgba(255, 255, 255, 0.06)",
+                  margin: "4px 0",
+                }}
               />
             )}
           </div>

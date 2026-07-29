@@ -104,26 +104,6 @@ export function VideoGenIcon({ className }: { className?: string }) {
   );
 }
 
-export function SelectIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      width={20}
-      height={20}
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-    >
-      <path
-        d="M4.58594 4.58594C5.14848 4.02339 5.99097 3.84779 6.73145 4.13867L19.7314 9.24609C20.5224 9.55694 21.0311 10.3334 20.999 11.1826C20.9668 12.0321 20.4004 12.7686 19.5879 13.0186C19.5705 13.0239 19.5529 13.0288 19.5352 13.0332L14.3252 14.3252L13.0332 19.5352C13.0288 19.5529 13.0239 19.5705 13.0186 19.5879C12.7686 20.4004 12.0321 20.9668 11.1826 20.999C10.3334 21.0311 9.55694 20.5224 9.24609 19.7314L4.13867 6.73145C3.84779 5.99097 4.02339 5.14848 4.58594 4.58594ZM6.36523 5.06934C5.99509 4.92411 5.57414 5.01179 5.29297 5.29297L5.19629 5.4043C4.99309 5.67831 4.94226 6.04136 5.06934 6.36523L10.1768 19.3652C10.3128 19.7115 10.6271 19.95 10.9883 19.9932L11.1455 19.999C11.5701 19.9827 11.9375 19.7 12.0625 19.2939L13.5 13.5L19.2939 12.0625C19.6493 11.9532 19.9109 11.6583 19.9814 11.3018L19.999 11.1455C20.0131 10.7738 19.8204 10.4294 19.5068 10.2451L19.3652 10.1768L6.36523 5.06934Z"
-        fill="currentColor"
-        fillRule="evenodd"
-        clipRule="evenodd"
-      />
-    </svg>
-  );
-}
-
 export function CreditIcon({ size = 14 }: { size?: number }) {
   return (
     <img
@@ -161,45 +141,110 @@ export function MaskIcon({
       aria-hidden={ariaHidden}
     >
       <defs>
-        <mask id={id} maskUnits="userSpaceOnUse" x="0" y="0" width={viewBox} height={viewBox}>
+        <mask
+          id={id}
+          maskUnits="userSpaceOnUse"
+          x="0"
+          y="0"
+          width={viewBox}
+          height={viewBox}
+        >
           <rect x="0" y="0" width={viewBox} height={viewBox} fill="black" />
           {maskChildren}
         </mask>
       </defs>
-      <rect x="0" y="0" width={viewBox} height={viewBox} fill="currentColor" mask={`url(#${id})`} />
+      <rect
+        x="0"
+        y="0"
+        width={viewBox}
+        height={viewBox}
+        fill="currentColor"
+        mask={`url(#${id})`}
+      />
     </svg>
   );
 }
 
 export function IconClose({ size = 16 }: { size?: number }) {
   return (
-    <MaskIcon size={size} maskChildren={
-      <>
-        <path d="M18 6 6 18" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="m6 6 12 12" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      </>
-    } />
+    <MaskIcon
+      size={size}
+      maskChildren={
+        <>
+          <path
+            d="M18 6 6 18"
+            fill="none"
+            stroke="white"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="m6 6 12 12"
+            fill="none"
+            stroke="white"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </>
+      }
+    />
   );
 }
 
 export function IconPlus({ size = 16 }: { size?: number }) {
   return (
-    <MaskIcon size={size} maskChildren={
-      <>
-        <path d="M5 12h14" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M12 5v14" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-      </>
-    } />
+    <MaskIcon
+      size={size}
+      maskChildren={
+        <>
+          <path
+            d="M5 12h14"
+            fill="none"
+            stroke="white"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M12 5v14"
+            fill="none"
+            stroke="white"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </>
+      }
+    />
   );
 }
 
 export function IconSend({ size = 14 }: { size?: number }) {
   return (
-    <MaskIcon size={size} maskChildren={
-      <>
-        <path d="M12 19V5" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="m5 12 7-7 7 7" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      </>
-    } />
+    <MaskIcon
+      size={size}
+      maskChildren={
+        <>
+          <path
+            d="M12 19V5"
+            fill="none"
+            stroke="white"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="m5 12 7-7 7 7"
+            fill="none"
+            stroke="white"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </>
+      }
+    />
   );
 }
