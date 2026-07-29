@@ -12,6 +12,7 @@ import { loadAccessToken } from "@/components/auth/authStorage";
 import * as canvasApi from "@/lib/canvas";
 import type { Project, ChatMessage, Viewport } from "../types";
 import type { CardStatus } from "@/types/domain";
+import { wireInteger } from "@/lib/wire-integer";
 
 const EMPTY_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 
@@ -112,7 +113,7 @@ export function useV2Projects(projectId: string | null) {
     if (!cur || !trimmed || trimmed === cur.name) return false;
     const name = dedupeName(trimmed, projectsRef.current.filter((p) => p.id !== id).map((p) => p.name));
     try {
-      await canvasApi.renameProject(Number(id), name);
+      await canvasApi.renameProject(wireInteger(id), name);
       setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, name } : p)));
       return true;
     } catch (e) {
@@ -124,7 +125,7 @@ export function useV2Projects(projectId: string | null) {
   /** 删除项目：后端删 + 本地删。active 被删时调用方应跳转。 */
   const deleteProject = useCallback(async (id: string): Promise<void> => {
     try {
-      await canvasApi.deleteProject(Number(id));
+      await canvasApi.deleteProject(wireInteger(id));
     } catch (e) {
       console.error("[canvas-v2] deleteProject failed", e);
     }

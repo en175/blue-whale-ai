@@ -31,7 +31,6 @@ describe("POST /api/agent/assets/:assetId/complete", () => {
       new Request("http://localhost/api/agent/assets/41/complete", {
         method: "POST",
       }),
-      { params: Promise.resolve({ assetId: "41" }) },
     );
 
     expect(response.status).toBe(401);
@@ -46,7 +45,6 @@ describe("POST /api/agent/assets/:assetId/complete", () => {
           "X-User-Id": "999",
         },
       }),
-      { params: Promise.resolve({ assetId: "41" }) },
     );
 
     expect(response.status).toBe(410);

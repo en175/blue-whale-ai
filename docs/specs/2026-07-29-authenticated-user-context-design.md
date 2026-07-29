@@ -112,12 +112,12 @@ interface IdentityResolver {
 
 认证模块保留故障类型，Route Handler 使用同一个响应映射：
 
-| 场景 | HTTP | 语义 |
-| --- | --- | --- |
-| 缺失、格式错误、无效或已删除 Token | 401 | 登录凭证无效 |
-| User 已禁用 | 403 | 账户已停用 |
-| new-api 返回畸形或非合同响应 | 502 | 账户服务响应异常 |
-| new-api 连接失败或超时 | 503 | 账户服务暂不可用 |
+| 场景                               | HTTP | 语义             |
+| ---------------------------------- | ---- | ---------------- |
+| 缺失、格式错误、无效或已删除 Token | 401  | 登录凭证无效     |
+| User 已禁用                        | 403  | 账户已停用       |
+| new-api 返回畸形或非合同响应       | 502  | 账户服务响应异常 |
+| new-api 连接失败或超时             | 503  | 账户服务暂不可用 |
 
 不得把 `502/503` 转成 `401`，否则上游故障会被伪装成登录过期。错误响应不得包含 Token、摘要、
 new-api 内部地址、HTML、堆栈或上游原始响应。
@@ -137,16 +137,18 @@ new-api 内部地址、HTML、堆栈或上游原始响应。
 迁移同时删除 Token 指纹 owner、Java JWT fallback、Route Handler 级 `JWT_SECRET` 和浏览器
 `X-User-Id` 注入。
 
-### 6.2 仍由 Java 承载的活跃产品接口
+### 6.2 IK50GB-B 剩余产品接口处置
 
-以下接口先迁到 Next.js/TypeScript，再删除 rewrite：
+以下产品能力迁到 Next.js/TypeScript：
 
 - `/api/generation-inbox/**`
 - `/api/projects/*/conversation/**`
-- `/api/projects/*/input-requests/**`
 - `/api/projects/*/events`
-- `/api/jobs/*/stream`
-- `/api/agent/runs/**`
+
+UserInputRequest 只保留通过 Conversation 消息的
+`reply_to_input_request_id` 回答语义，不迁移独立 confirm 接口。AgentRun 改为 TypeScript
+Worker 直接通过共享应用/持久化层 claim/commit，不迁移 Java HTTP 控制接口。按 Job 的内存 SSE
+没有浏览器消费者且不可重放，直接退役；浏览器只使用持久 Project SSE。
 
 迁移必须复用 `packages/core` 与 `packages/persistence` 的领域和持久化模块，不在 Route Handler
 重写第二套业务规则。SSE 保留所有权校验、游标恢复、禁止缓冲和断线清理语义。
@@ -180,7 +182,8 @@ new-api 内部地址、HTML、堆栈或上游原始响应。
 
 ### IK50GB-B：剩余产品 API 迁移
 
-- 迁移 GenerationInbox、Conversation、InputRequest、AgentRun 和 Project/Job SSE。
+- 迁移 GenerationInbox、Conversation、Conversation 内 InputRequest 回复、持久 AgentRun Worker
+  与 Project SSE；退役独立 InputRequest confirm、AgentRun HTTP 和 Job SSE。
 - 补齐缺失的 TypeScript Conversation、AgentRun 与事件持久化/应用用例。
 - 每一类接口使用同一个认证用户上下文。
 

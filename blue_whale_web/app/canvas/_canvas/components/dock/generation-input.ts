@@ -1,11 +1,17 @@
+import {
+  isWireInteger,
+  wireInteger,
+  type WireInteger,
+} from "@/lib/wire-integer";
+
 type AssetReference = {
-  assetId?: string | number;
+  assetId?: WireInteger;
   type?: "image" | "video" | "audio";
 };
 
-function positiveAssetId(value: unknown): number | null {
-  const id = Number(value);
-  return Number.isSafeInteger(id) && id > 0 ? id : null;
+function positiveAssetId(value: unknown): WireInteger | null {
+  if (!isWireInteger(value) || BigInt(value) <= BigInt(0)) return null;
+  return wireInteger(String(value));
 }
 
 function orderedReferences(
@@ -67,10 +73,10 @@ export function validateVideoDockReferences(
 
 export function selectDockInputAssetIds(
   mode: "image" | "video",
-  mentionAssetIds: number[],
+  mentionAssetIds: WireInteger[],
   media: AssetReference[],
-  frameAssetIds: number[] = [],
-): number[] {
+  frameAssetIds: WireInteger[] = [],
+): WireInteger[] {
   const candidates = [
     ...frameAssetIds,
     ...mentionAssetIds,
@@ -83,9 +89,14 @@ export function selectDockInputAssetIds(
       )
       .map((item) => item.assetId),
   ];
-  const ids = candidates.reduce<number[]>((result, candidate) => {
+  const seen = new Set<string>();
+  const ids = candidates.reduce<WireInteger[]>((result, candidate) => {
     const id = positiveAssetId(candidate);
-    if (id !== null && !result.includes(id)) result.push(id);
+    const key = id === null ? null : String(id);
+    if (id !== null && key !== null && !seen.has(key)) {
+      seen.add(key);
+      result.push(id);
+    }
     return result;
   }, []);
   return ids.slice(0, mode === "video" ? 12 : 4);

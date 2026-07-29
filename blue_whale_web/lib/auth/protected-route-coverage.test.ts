@@ -203,4 +203,23 @@ describe("protected product route coverage", () => {
 
     expect(violations).toEqual([]);
   });
+
+  it("forbids retired Java Conversation, GenerationInbox, AgentRun, InputRequest, and SSE rewrites", () => {
+    const nextConfig = readFileSync(
+      path.join(webRoot, "next.config.ts"),
+      "utf8",
+    );
+    const retiredPatterns = [
+      "/api/agent/runs/",
+      "/api/generation-inbox/",
+      "/api/jobs/:path*/stream",
+      "/api/projects/:path*/conversation/",
+      "/api/projects/:path*/input-requests/",
+      "/api/projects/:path*/events",
+    ];
+
+    expect(
+      retiredPatterns.filter((pattern) => nextConfig.includes(pattern)),
+    ).toEqual([]);
+  });
 });

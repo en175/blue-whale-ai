@@ -125,6 +125,57 @@ const imageModelCapability = {
 };
 
 describe("useCanvasGeneration.generate", () => {
+  it("超大 asset ID 在视频生成 payload 中保持十进制字符串精度", async () => {
+    const assetId = "9007199254740993";
+    (generation.createProjectGenerationJob as ReturnType<typeof vi.fn>).mockResolvedValue({ generation_job_id: 888, cursor: 0 });
+    const { result } = renderGen();
+
+    await act(async () => {
+      await result.current.generate("首尾帧视频", {
+        ...videoArgs,
+        inputAssetIds: [assetId],
+        firstFrameAssetId: assetId,
+        lastFrameAssetId: assetId,
+        referenceAssetIds: [assetId],
+      });
+    });
+
+    expect(generation.createProjectGenerationJob).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        input_asset_ids: [assetId],
+        first_frame_asset_id: assetId,
+        last_frame_asset_id: assetId,
+        reference_asset_ids: [assetId],
+      }),
+      expect.any(String),
+    );
+  });
+
+  it("超大项目 ID 创建和取消生成任务时保持十进制字符串精度", async () => {
+    const projectId = "9007199254740993";
+    (generation.createProjectGenerationJob as ReturnType<typeof vi.fn>).mockResolvedValue({ generation_job_id: 888, cursor: 0 });
+    (generation.cancelProjectGenerationJob as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const { result } = renderGen({ projectId });
+
+    await act(async () => {
+      await result.current.generate("画一只猫", imageArgs);
+    });
+    expect(generation.createProjectGenerationJob).toHaveBeenCalledWith(
+      projectId,
+      expect.any(Object),
+      expect.any(String),
+    );
+
+    await act(async () => {
+      await result.current.generate("做个视频", videoArgs);
+    });
+    await act(async () => {
+      await result.current.cancelVideoJob();
+    });
+    expect(generation.cancelProjectGenerationJob).toHaveBeenCalledWith(projectId, 888);
+  });
+
   it("image：建 running 占位 + createProjectGenerationJob(model_id/size) + startJob；轮询 succeeded → 写 assetId/done", async () => {
     (generation.createProjectGenerationJob as ReturnType<typeof vi.fn>).mockResolvedValue({ generation_job_id: 777, cursor: 0 });
     const { result, addNode, patchNode, patchNodeAndSave, addAsset } = renderGen();
@@ -395,6 +446,46 @@ describe("useCanvasGeneration.generateFromNode", () => {
 });
 
 describe("useCanvasGeneration.recover", () => {
+  it("超大 job ID 恢复轮询时保持十进制字符串精度", async () => {
+    const jobId = "9007199254740993";
+    (generation.listJobs as ReturnType<typeof vi.fn>).mockImplementation(
+      ({ status }: { status: string }) =>
+        Promise.resolve(
+          status === "processing"
+            ? [{ job_id: jobId, type: "video", status, progress: 30, input: {}, created_at: "", output_assets: [] }]
+            : [],
+        ),
+    );
+    const existing = { id: "n_vid", type: "video", position: { x: 0, y: 0 }, data: { kind: "video", taskId: jobId } } as unknown as CanvasNode;
+    const { result } = renderGen({ nodes: [existing] });
+
+    await act(async () => {
+      await result.current.recover([existing]);
+    });
+
+    expect(mockJobs.start).toHaveBeenCalledWith(
+      jobId,
+      expect.objectContaining({ onSucceeded: expect.any(Function) }),
+    );
+  });
+
+  it("超大项目 ID 恢复任务时保持十进制字符串精度", async () => {
+    const projectId = "9007199254740993";
+    (generation.listJobs as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const existing = { id: "n_vid", type: "video", position: { x: 0, y: 0 }, data: { kind: "video", taskId: "130" } } as unknown as CanvasNode;
+    const { result } = renderGen({ nodes: [existing], projectId });
+
+    await act(async () => {
+      await result.current.recover([existing]);
+    });
+
+    expect(generation.listJobs).toHaveBeenCalledWith({
+      projectId,
+      status: "queued",
+      size: 50,
+    });
+  });
+
   it("existing 节点 taskId 匹配 job → 恢复 status=running + 续轮询（不建重复）", async () => {
     (generation.listJobs as ReturnType<typeof vi.fn>).mockResolvedValue([
       { job_id: "130", type: "video", status: "processing", progress: 30, input: { parameters: { prompt: "猫" } }, created_at: "", output_assets: [] },
@@ -406,7 +497,7 @@ describe("useCanvasGeneration.recover", () => {
     });
     // 恢复 running + 续轮询
     expect(patchNode).toHaveBeenCalledWith("n_vid", expect.objectContaining({ status: "running", progress: 0 }));
-    expect(mockJobs.start).toHaveBeenCalledWith(130, expect.objectContaining({ onSucceeded: expect.any(Function) }));
+    expect(mockJobs.start).toHaveBeenCalledWith("130", expect.objectContaining({ onSucceeded: expect.any(Function) }));
     expect(addNode).not.toHaveBeenCalled(); // byTaskId 匹配 → 不建重复占位
   });
 
@@ -469,6 +560,20 @@ describe("useCanvasGeneration.reconcile", () => {
 });
 
 describe("useCanvasGeneration.hydrate", () => {
+  it("超大项目 ID 加载快照时保持十进制字符串精度", async () => {
+    const projectId = "9007199254740993";
+    const { result } = renderGen({ projectId });
+
+    await act(async () => {
+      await result.current.hydrate([]);
+    });
+
+    expect(mockLoadSnapshot).toHaveBeenCalledWith(
+      projectId,
+      expect.any(AbortSignal),
+    );
+  });
+
   it("同批两个图片任务和两个视频任务按各自 taskId 独立恢复", async () => {
     const nodes = [
       { id: "img_active", type: "image", position: { x: 0, y: 0 }, data: { kind: "image", taskId: "701" } } as CanvasNode,
@@ -505,8 +610,8 @@ describe("useCanvasGeneration.hydrate", () => {
 
     expect(patchNode).toHaveBeenCalledWith("img_active", { status: "running", progress: 0 });
     expect(patchNode).toHaveBeenCalledWith("video_active", { status: "running", progress: 0 });
-    expect(mockJobs.start).toHaveBeenCalledWith(701, expect.objectContaining({ onSucceeded: expect.any(Function) }));
-    expect(mockJobs.start).toHaveBeenCalledWith(703, expect.objectContaining({ onSucceeded: expect.any(Function) }));
+    expect(mockJobs.start).toHaveBeenCalledWith("701", expect.objectContaining({ onSucceeded: expect.any(Function) }));
+    expect(mockJobs.start).toHaveBeenCalledWith("703", expect.objectContaining({ onSucceeded: expect.any(Function) }));
     expect(patchNode).toHaveBeenCalledWith("img_done", expect.objectContaining({ assetId: "802", status: "done" }));
     expect(patchNode).toHaveBeenCalledWith("video_done", expect.objectContaining({ assetId: "804", status: "done" }));
     expect(addAsset).toHaveBeenCalledWith(expect.objectContaining({ id: "802", kind: "image", src: "image-802.png" }));
@@ -601,7 +706,7 @@ describe("useCanvasGeneration.hydrate", () => {
     });
 
     expect(refreshed.patchNode).toHaveBeenCalledWith("n_ph", { status: "running", progress: 0 });
-    expect(mockJobs.start).toHaveBeenCalledWith(777, expect.objectContaining({ onSucceeded: expect.any(Function) }));
+    expect(mockJobs.start).toHaveBeenCalledWith("777", expect.objectContaining({ onSucceeded: expect.any(Function) }));
 
     const callbacks = mockJobs.start.mock.calls[0][1] as { onSucceeded: (result: { assetId: string; assetUrl: string; assetType: string }) => void };
     await act(async () => {
@@ -671,7 +776,7 @@ describe("useCanvasGeneration.hydrate", () => {
       progress: 0,
     });
     expect(mockJobs.start).toHaveBeenCalledWith(
-      888,
+      "888",
       expect.objectContaining({ onSucceeded: expect.any(Function) }),
     );
   });

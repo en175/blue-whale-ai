@@ -30,8 +30,40 @@ export {
   type SnapshotRepo,
   type SnapshotJobView,
   type SnapshotJobAggregate,
+  type SnapshotConversationState,
   type SnapshotAssetRow,
 } from "./snapshot-repo.js";
+export {
+  appendProjectEvent,
+  createProductEventRepo,
+  type AppendProjectEventInput,
+  type ProductEventRepo,
+  type ProductEventView,
+} from "./product-event-repo.js";
+export {
+  createConversationRepo,
+  transactionWithUniqueRetry,
+  type AcceptConversationMessageRecord,
+  type AcceptedConversationRecord,
+  type ConversationRepo,
+} from "./conversation-repo.js";
+export {
+  createGenerationInboxRepo,
+  type AcceptInboxMessageRecord,
+  type CreateInboxConversationResult,
+  type GenerationInboxRepo,
+  type GenerationInboxView,
+  type InboxConversationView,
+} from "./generation-inbox-repo.js";
+export {
+  createAgentRunRepo,
+  type AgentRunRepo,
+  type AgentRunWork,
+  type ClaimAgentRunInput,
+  type CommitAgentRunResult,
+  type CommitAgentRunSuccessInput,
+  type RenewAgentRunLeaseInput,
+} from "./agent-run-repo.js";
 export {
   createModelCapabilityRepo,
   type ModelCapabilityRepo,

@@ -43,6 +43,7 @@ import {
   runProjectRecovery,
   type ProjectSnapshot,
 } from "@/lib/project-recovery";
+import { wireIntegersEqual, type WireInteger } from "@/lib/wire-integer";
 import { inboxSnapshotToChatMessages } from "./inboxMessages";
 
 const PILL_BTN =
@@ -108,7 +109,9 @@ function InboxComposer({
 export default function GeneratePage() {
   const [phase, setPhase] = useState<"loading" | "ready">("loading");
   const [inbox, setInbox] = useState<GenerationInbox | null>(null);
-  const [conversationId, setConversationId] = useState<number | null>(null);
+  const [conversationId, setConversationId] = useState<WireInteger | null>(
+    null,
+  );
   const [snapshot, setSnapshot] = useState<ProjectSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -303,7 +306,7 @@ export default function GeneratePage() {
     }
   }, [historyOpen, conversations]);
 
-  const handleSelectConversation = useCallback((id: number) => {
+  const handleSelectConversation = useCallback((id: WireInteger) => {
     setConversationId(id);
     setHistoryOpen(false);
   }, []);
@@ -381,11 +384,7 @@ export default function GeneratePage() {
           const opKey = `${addTargetAssetId}:${project.id}`;
           const identity = (copyIdempotencyKeysRef.current[opKey] ??=
             newCommandIdentity());
-          await copyAssetToProject(
-            project.id,
-            Number(addTargetAssetId),
-            identity,
-          );
+          await copyAssetToProject(project.id, addTargetAssetId, identity);
           setCopiedProject(project);
         } catch (e) {
           setCopyError(e instanceof Error ? e.message : "添加失败");
@@ -520,10 +519,14 @@ export default function GeneratePage() {
                             key={c.id}
                             type="button"
                             onClick={() => handleSelectConversation(c.id)}
-                            aria-current={c.id === conversationId}
+                            aria-current={
+                              conversationId !== null &&
+                              wireIntegersEqual(c.id, conversationId)
+                            }
                             className={
                               "flex w-full flex-col gap-0.5 rounded-md px-3 py-2 text-left hover:bg-[var(--tc-menu-item-hover)]" +
-                              (c.id === conversationId
+                              (conversationId !== null &&
+                              wireIntegersEqual(c.id, conversationId)
                                 ? " bg-[var(--tc-menu-item-hover)]"
                                 : "")
                             }

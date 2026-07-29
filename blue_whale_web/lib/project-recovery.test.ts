@@ -806,7 +806,7 @@ describe("Project 恢复协调器", () => {
         controller.abort();
       }),
     };
-    const states: number[] = [];
+    const states: Array<number | string> = [];
 
     await runProjectRecovery(
       1,

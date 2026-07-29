@@ -91,8 +91,8 @@ export function BottomDock({
   /** 首尾帧（视频首尾帧模式，page 层上传后回填 TOS url；当前 VideoDockContent 未渲染首尾帧 UI，留位）。 */
   firstFrameUrl?: string;
   lastFrameUrl?: string;
-  firstFrameAssetId?: number;
-  lastFrameAssetId?: number;
+  firstFrameAssetId?: WireInteger;
+  lastFrameAssetId?: WireInteger;
   onFrameUpload?: (file: File, slot: "first" | "last") => void;
   onFrameClear?: (slot: "first" | "last") => void;
   onSwapFrames?: () => void;

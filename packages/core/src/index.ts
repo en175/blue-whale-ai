@@ -76,3 +76,20 @@ export {
   type LoginResult,
   type AuthUser,
 } from "./auth/login-with-code.js";
+export {
+  acceptConversationMessage,
+  prepareConversationMessage,
+  type AcceptConversationMessageResult,
+  type ConversationCommandStore,
+  type ConversationCommandStoreInput,
+  type ConversationCommandStoreResult,
+  type PreparedConversationMessage,
+} from "./conversation/accept-conversation-message.js";
+export {
+  acceptGenerationInboxMessage,
+  createGenerationInboxConversation,
+  type GenerationInboxProjectView,
+  type GenerationInboxStore,
+  type GenerationInboxView,
+  type InboxConversationView,
+} from "./conversation/generation-inbox.js";

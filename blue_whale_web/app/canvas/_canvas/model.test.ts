@@ -39,6 +39,20 @@ describe("canvas-doc-model", () => {
     expect(json).toContain('"assetId":95');
   });
 
+  it("serialize 保留超大 asset ID 的十进制字符串精度", () => {
+    const assetId = "9007199254740993";
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({
+      id: "n1",
+      type: "image",
+      position: { x: 0, y: 0 },
+      data: { kind: "image", assetId },
+    });
+
+    expect(JSON.parse(serialize(doc))[0].assetId).toBe(assetId);
+    expect(parse(serialize(doc)).nodes[0].data.assetId).toBe(assetId);
+  });
+
   it("parse 兼容老 NodeItem[]（数组，老 /canvas 写的）", () => {
     const oldJson = JSON.stringify([
       { id: "n1", type: "image", position: { x: 1, y: 2 }, width: 100, height: 100, content: "猫", assetId: 95 },

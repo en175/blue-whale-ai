@@ -112,7 +112,7 @@ Token。GenerationJob 保存提交时经 AES-256-GCM 加密的执行凭证，wor
 - Phone login and rebinding, OAuth, Passkey and 2FA integration are deferred even when new-api already supports them.
 - All protected product routes are registered and tested against the shared Authenticated User Context. New protected routes may not parse credentials or accept User IDs independently.
 - Java JWT, Token-fingerprint ownership and browser `X-User-Id` are removed rather than retained behind compatibility switches.
-- GenerationInbox, Conversation, InputRequest, AgentRun and Project/Job SSE migrate to TypeScript before their Java rewrites are removed.
+- GenerationInbox, Conversation, Conversation-bound InputRequest replies, the persistent AgentRun Worker and Project SSE migrate to TypeScript before their Java rewrites are removed. Standalone InputRequest confirmation, AgentRun HTTP control and per-Job in-memory SSE retire instead of being copied.
 - `/api/user/**` retires with the old account model. Webhooks use independent machine authentication, not User Context.
 - IK50GB is complete only when the core browser, product and generation flow passes without starting Java Gateway, User Service or Product API.
 
