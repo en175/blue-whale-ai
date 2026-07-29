@@ -56,6 +56,8 @@ export {
   type AccessTokenClaims,
 } from "./jwt.js";
 export {
+  GenerationCredentialConfigurationError,
+  loadGenerationCredentialSecret,
   openGenerationCredential,
   sealGenerationCredential,
 } from "./generation-credential.js";

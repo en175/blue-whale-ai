@@ -1,8 +1,8 @@
 /**
  * canvas —— project / canvas 持久化请求层（照 lib/auth.ts 的 fetchWithTimeout + ApiResult 模式）。
  *
- * 走 Next rewrite /api/projects、/api/canvases → agent-service（见 next.config.ts）。
- * 浏览器只发送 Authorization；X-User-Id 必须由网关基于已验证 JWT 注入。
+ * 走 Next `/api/projects`、`/api/canvases` 产品路由。
+ * 浏览器只发送 Authorization；服务端路由通过 new-api 校验凭据并解析用户身份。
  */
 import { loadAccessToken } from "@/components/auth/authStorage";
 

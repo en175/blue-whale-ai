@@ -1,5 +1,11 @@
 # 前端接通后端 PRD 模块路线图
 
+> **⚠️ 认证基线已替代（2026-07-29，IK50GB）**：本文记录的匿名 `X-User-Id`、手机号
+> 双 Token、自动 refresh 和 Java Gateway 链路不是当前目标。当前权威是
+> [ADR-0062](../../docs/adr/0062-new-api-account-center-and-quota-billing.md) 与
+> [IK50GB 认证用户上下文设计](../../docs/specs/2026-07-29-authenticated-user-context-design.md)。
+> 历史进度记录保留，不得据此新增兼容代码。
+
 > **⚠️ 部分替代（2026-07-24，IK2D8R）**：本路线图挂的 #IJZ7Z7（Agent 对话交付）已由 IK2D8R 及其同族工单承接：旧 `agent/turn` 公开协议、`decision_context`、L1 与固定九分支废弃，唯一公开对话协议为 Conversation message 命令 + Project Snapshot/SSE（ADR-0016/0039）。本文其余进度记录保留历史价值。
 
 > 🔗 **关联**：wayfinder map #IK29RN（三链路总图）· 需求 #IJZ7Z7 / #IJZ7Z8 / #IJZ7Z9

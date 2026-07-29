@@ -9,12 +9,32 @@ import {
   type NewApiUsage,
 } from "@blue-whale/core";
 
+import { parseNewApiBearerToken } from "@/lib/auth/bearer-token";
+
 export interface AccountClient {
   getAccountCapabilities(): Promise<NewApiAccountCapabilities>;
   register(input: NewApiRegisterInput): Promise<NewApiLoginResult>;
   login(input: NewApiLoginInput): Promise<NewApiLoginResult>;
   resolveTokenIdentity(token: string): Promise<NewApiAccountIdentity>;
   getTokenUsage(token: string): Promise<NewApiUsage>;
+}
+
+type AuthenticationErrorStatus = 401 | 403 | 502 | 503;
+
+const authenticationErrorMessages: Record<AuthenticationErrorStatus, string> = {
+  401: "登录凭证无效",
+  403: "账户已停用",
+  502: "账户服务响应异常",
+  503: "账户服务暂不可用",
+};
+
+export function authenticationErrorResponse(
+  status: AuthenticationErrorStatus,
+): Response {
+  return Response.json(
+    { code: status, msg: authenticationErrorMessages[status], data: null },
+    { status },
+  );
 }
 
 export function createAccountClient(): AccountClient {
@@ -26,28 +46,21 @@ export function createAccountClient(): AccountClient {
 }
 
 export function bearerToken(request: Request): string | null {
-  const authorization = request.headers.get("authorization") ?? "";
-  const token = authorization.startsWith("Bearer ")
-    ? authorization.slice(7).trim()
-    : "";
-  return token.startsWith("sk-") ? token : null;
+  return parseNewApiBearerToken(request.headers.get("authorization"));
 }
 
 export function accountErrorResponse(error: unknown): Response {
-  const status =
-    error instanceof NewApiError && [401, 403, 502, 503].includes(error.status)
-      ? error.status
-      : 502;
-  const messages: Record<number, string> = {
-    401: "登录凭证无效",
-    403: "账户已停用",
-    502: "账户服务响应异常",
-    503: "账户服务暂不可用",
-  };
-  return Response.json(
-    { code: status, msg: messages[status], data: null },
-    { status },
-  );
+  if (error instanceof NewApiError) {
+    switch (error.status) {
+      case 401:
+      case 403:
+      case 502:
+      case 503:
+        return authenticationErrorResponse(error.status);
+    }
+  }
+
+  return authenticationErrorResponse(502);
 }
 
 export function loginEnvelope(result: NewApiLoginResult, isNewUser: boolean) {

@@ -1,5 +1,11 @@
 # Blue-Whale 后端接口 PRD（P0）
 
+> **⚠️ 身份与运行时章节已替代（2026-07-29，IK50GB）**：本文中的匿名 `X-User-Id`、
+> 手机号 JWT、refresh 和 Java Gateway/Product API 描述只保留为历史基线。当前权威是
+> [ADR-0062](../../docs/adr/0062-new-api-account-center-and-quota-billing.md) 与
+> [IK50GB 认证用户上下文设计](../../docs/specs/2026-07-29-authenticated-user-context-design.md)：
+> 浏览器只提交 `sk-xxx`，Next.js 从 new-api 解析稳定 User ID，核心链路完全断开 Java。
+
 > **⚠️ 部分替代（2026-07-24，IK2D8R）**：本文 §5.6 的 Agent turn 接口（`POST .../agent/turn`）与 L1 分流相关内容是历史记录，不再是实现权威——该公开协议废弃且不实现兼容端点，唯一公开对话协议为 Conversation message 命令 + Project Snapshot/SSE（ADR-0016/0039，[Runtime Agent Bundle 契约](../../docs/specs/2026-07-20-runtime-agent-bundle-contract.md) §9）。其余章节（用户/资产/目录/直生链路/传输约定）的有效性以各自后续工单与 ADR 为准。
 
 > 🔗 **关联**：需求 #IJZ7Z9 · wayfinder map #IK29RN（前端接后端三链路总图）

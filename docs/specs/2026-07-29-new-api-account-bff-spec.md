@@ -21,6 +21,10 @@ BFF；BFF 通过一个可注入的 new-api typed client 完成能力发现、注
 new-api 解析可信 User ID 与状态，并以最长 60 秒的服务端短缓存降低跨服务鉴权成本。BlueWhale
 产品事实只引用稳定的 new-api User ID，绝不使用 Token 指纹、用户名或邮箱作为所有者身份。
 
+受保护产品接口统一通过 Next.js 的 Authenticated User Context 取得身份。旧 Java JWT、浏览器
+`X-User-Id`、Token 指纹 owner 和 Node→Java 认证代理均不提供兼容；仍由 Java 承载的活跃产品
+接口必须迁到 TypeScript 后删除 rewrite，BlueWhale 核心链路最终完全不启动 Java。
+
 new-api 注册事务默认创建一把隐藏的默认 API Key，并统一返回 User ID、用户名、可选邮箱和完整
 Token。GenerationJob 保存提交时经 AES-256-GCM 加密的执行凭证，worker 不通过 User ID 回查或
 导出密钥。生产环境只公开 BlueWhale，new-api 作为内部账户与 relay 服务，管理入口独立受控。
@@ -83,8 +87,9 @@ Token。GenerationJob 保存提交时经 AES-256-GCM 加密的执行凭证，wor
 - The browser sends `Authorization: Bearer sk-xxx` and never sends a User ID for authorization.
 - new-api adds one minimal read-only identity-resolution interface authenticated by `sk-xxx`; it returns the stable User ID and account status.
 - BFF builds Authenticated User Context only from the identity-resolution result.
+- The Authenticated User Context is exposed to routes through one `getAuthenticatedUser()` deep module; routes do not receive the credential, digest, cache or upstream status representation.
 - Ordinary product requests may cache `{user_id, status}` for at most 60 seconds under a Token digest key.
-- Security and administrator operations bypass the cache. Invalid, deleted or disabled credential results evict matching cache state.
+- `GET /api/me`, security operations and administrator operations bypass the cache. Invalid, deleted or disabled credential results evict matching cache state.
 - Valid cache entries may be used while new-api is temporarily unavailable. Expired entries are never used stale.
 - Missing or invalid credentials map to `401`, disabled Users to `403`, malformed upstream behavior to `502`, and connection failure or timeout to `503`.
 - new-api password login continues to accept username or email through one identifier field.
@@ -105,6 +110,11 @@ Token。GenerationJob 保存提交时经 AES-256-GCM 加密的执行凭证，wor
 - The first implementation slice builds the account typed client, BFF routes, identity resolution and minimal login UI integration.
 - API Key management, administrator user management and complex account configuration UI are developed separately.
 - Phone login and rebinding, OAuth, Passkey and 2FA integration are deferred even when new-api already supports them.
+- All protected product routes are registered and tested against the shared Authenticated User Context. New protected routes may not parse credentials or accept User IDs independently.
+- Java JWT, Token-fingerprint ownership and browser `X-User-Id` are removed rather than retained behind compatibility switches.
+- GenerationInbox, Conversation, InputRequest, AgentRun and Project/Job SSE migrate to TypeScript before their Java rewrites are removed.
+- `/api/user/**` retires with the old account model. Webhooks use independent machine authentication, not User Context.
+- IK50GB is complete only when the core browser, product and generation flow passes without starting Java Gateway, User Service or Product API.
 
 ## Testing Decisions
 
@@ -115,12 +125,13 @@ Token。GenerationJob 保存提交时经 AES-256-GCM 加密的执行凭证，wor
 - BFF tests prove that client-supplied User IDs are ignored and never influence product ownership.
 - Error tests verify stable `401`, `403`, `502` and `503` responses without upstream HTML, stack traces, internal URLs or secrets.
 - Cache tests use a controllable clock and cover hit, miss, 60-second expiry, immediate eviction, sensitive-operation bypass and fail-closed expiry.
-- Browser tests cover registration auto-login, refresh persistence, username/email login, account/quota display and logout.
+- Browser tests cover registration auto-login, browser-reload persistence, username/email login, account/quota display and logout.
 - Browser tests assert that no request is sent directly to new-api.
 - Generation tests extend the existing GenerationJob seam for both image and video credentials.
 - Generation tests prove logout/browser closure does not cancel accepted jobs and prove rotated credentials produce explicit failure.
 - Snapshot, list, error and logging regressions scan for both `sk-` plaintext and encrypted credential fields.
 - Completion requires a local real-service smoke flow: register, login, me, quota and create a generation task against an actual new-api process.
+- Completion also requires static and runtime evidence that protected routes contain no Java rewrite, Java JWT fallback, browser `X-User-Id` authorization or Token-fingerprint owner.
 
 ## Out of Scope
 

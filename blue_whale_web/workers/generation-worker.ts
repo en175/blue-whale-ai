@@ -2,7 +2,10 @@ import { Worker } from "bullmq";
 import { createServer } from "node:http";
 import { hostname } from "node:os";
 
-import { openGenerationCredential } from "@blue-whale/core";
+import {
+  loadGenerationCredentialSecret,
+  openGenerationCredential,
+} from "@blue-whale/core";
 import {
   createNewApiVideoTaskProvider,
   createTosVideoMediaRelay,
@@ -29,10 +32,7 @@ if (!databaseUrl) throw new Error("DATABASE_URL required");
 if (!baseUrl) throw new Error("NEW_API_BASE_URL required");
 if (!tosConfig) throw new Error("TOS configuration required");
 
-const credentialSecret =
-  process.env.GENERATION_CREDENTIAL_SECRET ??
-  process.env.JWT_SECRET ??
-  "blue-whale-dev-secret-key-at-least-256-bits!!";
+const credentialSecret = loadGenerationCredentialSecret();
 const prisma = getPrismaClient(databaseUrl);
 const repo = createWorkerRepo(prisma);
 const mediaRelay = createTosVideoMediaRelay(tosConfig);
@@ -52,14 +52,16 @@ const processor = createVideoJobProcessor({
           openGenerationCredential(ciphertext, credentialSecret),
       },
       mediaRelay,
-      scheduleNext: (id, delayMs) =>
-        enqueueVideoGenerationJob(id, { delayMs }),
+      scheduleNext: (id, delayMs) => enqueueVideoGenerationJob(id, { delayMs }),
     }),
 });
 
 const worker = new Worker(VIDEO_GENERATION_QUEUE, processor, {
   connection: loadRedisConnection(process.env, true),
-  concurrency: Number.parseInt(process.env.GENERATION_WORKER_CONCURRENCY ?? "8", 10),
+  concurrency: Number.parseInt(
+    process.env.GENERATION_WORKER_CONCURRENCY ?? "8",
+    10,
+  ),
 });
 
 worker.on("failed", (job, error) => {
@@ -76,21 +78,26 @@ worker.on("error", (error) => {
 
 await worker.waitUntilReady();
 await recoverDueVideoJobs(repo, producer);
-const recoveryTimer = setInterval(() => {
-  void recoverDueVideoJobs(repo, producer).catch((error) =>
-    console.error(
-      "[generation-worker] recovery scan failed:",
-      error instanceof Error ? error.message : "unknown",
-    ),
-  );
-}, Number.parseInt(process.env.GENERATION_RECOVERY_INTERVAL_MS ?? "60000", 10));
+const recoveryTimer = setInterval(
+  () => {
+    void recoverDueVideoJobs(repo, producer).catch((error) =>
+      console.error(
+        "[generation-worker] recovery scan failed:",
+        error instanceof Error ? error.message : "unknown",
+      ),
+    );
+  },
+  Number.parseInt(process.env.GENERATION_RECOVERY_INTERVAL_MS ?? "60000", 10),
+);
 
 const server = createServer((request, response) => {
   if (request.method === "GET" && request.url === "/ready") {
     response.writeHead(worker.isRunning() ? 200 : 503, {
       "content-type": "application/json",
     });
-    response.end(JSON.stringify({ status: worker.isRunning() ? "ready" : "not_ready" }));
+    response.end(
+      JSON.stringify({ status: worker.isRunning() ? "ready" : "not_ready" }),
+    );
     return;
   }
   response.writeHead(404).end();

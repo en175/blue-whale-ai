@@ -4,11 +4,14 @@
 - **日期**：2026-07-28
 - **决策者**：朱建业（trueBurger）
 - **关联工单**：[IK4JX2](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/tasks/list?issue=IK4JX2)
-- **取代**：[ADR-0060](0060-node-user-identity-and-credits-ledger.md)（原 ADR-0057）
+- **取代**：[ADR-0057](0057-node-user-identity-and-credits-ledger.md)、[ADR-0060](0060-node-user-identity-and-credits-ledger.md)
 
 ## 背景
 
-blue-whale 正把画布业务从 Java 迁移到 Node。`canvas-v2` 的项目、画布、生成任务和生成 worker 由 Node 控制；Java 仅保留尚未迁移的 MCP/遗留能力。旧 ADR-0060 设计了 Node 自建 `users` 与 `user_credits` 账本，与 new-api 的账户和 quota 分离，会产生双重身份、双重余额和生成扣费不一致。
+blue-whale 正把全部公开产品链路从 Java 迁移到 TypeScript。`canvas-v2` 的项目、画布、生成任务和
+generation worker 已由 Node 控制；仍存在的 Java rewrite 是待关闭的迁移缺口，不是目标架构允许
+长期保留的遗留能力。旧 ADR-0057/0060 设计了 Node 自建 `users` 与 `user_credits` 账本，与
+new-api 的账户和 quota 分离，会产生双重身份、双重余额和生成扣费不一致。
 
 ## 决策
 
@@ -62,17 +65,21 @@ blue-whale 正把画布业务从 Java 迁移到 Node。`canvas-v2` 的项目、�
     `401/403/502/503` 映射测试；注册自动登录、刷新恢复、账户/quota、logout 的最小浏览器闭环；
     图片/视频加密凭证及无泄露回归；以及蓝鲸与真实本地 new-api 的注册→登录→me→quota→生成任务
     联调。只有 mock 通过不算接口打通。
+17. **BlueWhale 完全断开 Java 账户与产品运行链**。受保护产品接口统一在 Next.js/TypeScript
+    构建 Authenticated User Context；不兼容 Java JWT、不把 `sk-xxx` 代理给 Java、不信任浏览器
+    `X-User-Id`。Conversation、GenerationInbox、AgentRun 与 SSE 等活跃入口迁到 TypeScript 后
+    删除对应 rewrite；核心验收不启动 Java Gateway、User Service 或 Product API。
 
 ## 连锁影响
 
 - ADR-0060 的 Node `users` / `user_credits` / JWT 账本实现不再落地；已存在的旧基线文档仅作为历史记录保留。
 - Node 需要提供可注入的 new-api typed client，覆盖登录、token usage、token logs 和 relay。
 - typed client 还需覆盖 Token → 稳定 `user_id` 的身份解析；默认 API Key 可轮换，但蓝鲸产品归属不变。
-- `blue_whale_web` 的登录 UI 改用 username/password；旧手机号验证码用例保留，但不再是入口。
+- `blue_whale_web` 的登录 UI 改用 username/password；旧手机号验证码、refresh 和 Java JWT 用例由 new-api 账户合同测试替换。
 - quota 查询和 `quotaToCredits` 展示共用同一 Node usage 路由。
-- Java MCP/遗留接口继续通过既有 gateway rewrite 使用，不纳入本次生成链路。
+- 现有 Java rewrite 仅是迁移现状，必须在对应 TypeScript 接口接管后删除；不得建设长期兼容层。
 
 ## 错误与测试边界
 
 - new-api 的 HTTP 错误和业务错误都必须转换为稳定 Node 错误，不把上游 HTML 或内部堆栈返回浏览器。
-- 测试覆盖登录拿到 `sk-xxx`、usage 查询、relay 带 token、relay 失败和 fallback；端到端验收使用 mock new-api，不修改 Go 服务。
+- 测试覆盖登录拿到 `sk-xxx`、usage 查询、稳定身份、relay 带 token、relay 失败和 fallback；端到端验收必须包含真实本地 new-api，且 BlueWhale 核心链路不启动 Java。

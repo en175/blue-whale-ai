@@ -3,7 +3,7 @@
  *
  * 对齐 BACKEND-API-PRD.md §4 通用约定:
  *   - 前缀 `/api`（可被 `baseUrl` 覆盖,便于测试）
- *   - 自动带 `X-User-Id` 匿名身份（来自 `getOrCreateUserId`）
+ *   - 不发送浏览器侧 `X-User-Id`，服务端产品路由从 Authorization 解析身份
  *   - 业务错误体 `{ error: { code, message, detail } }` → ApiError
  *   - 非业务错误（无 error 段 / 非 JSON）→ 兜底 `http_<status>` code
  *   - 204 No Content → 返回 undefined
@@ -14,7 +14,6 @@
  *   - 运行时校验（zod）— 不引依赖
  */
 
-import { getOrCreateUserId } from "./userId";
 import { ApiError } from "./errors";
 
 const DEFAULT_BASE = "/api";
@@ -64,14 +63,15 @@ export async function apiFetch<T = unknown>(
   const base = baseUrl ?? DEFAULT_BASE;
   const url = buildUrl(path, base, query);
 
+  const sanitizedHeaders = Object.fromEntries(
+    Object.entries(headers ?? {}).filter(
+      ([key]) => key.toLowerCase() !== "x-user-id",
+    ),
+  );
   const finalHeaders: Record<string, string> = {
     Accept: "application/json",
-    ...headers,
+    ...sanitizedHeaders,
   };
-
-  // 匿名身份 header（PRD §4）—— SSR 时 userId 为空,跳过
-  const userId = getOrCreateUserId();
-  if (userId) finalHeaders["X-User-Id"] = userId;
 
   let payload: BodyInit | undefined;
   if (body !== undefined) {
@@ -99,7 +99,9 @@ export async function apiFetch<T = unknown>(
       typeof parsed === "object" &&
       "error" in (parsed as Record<string, unknown>)
         ? (
-            parsed as { error?: { code?: string; message?: string; detail?: unknown } }
+            parsed as {
+              error?: { code?: string; message?: string; detail?: unknown };
+            }
           ).error
         : null;
     throw new ApiError({
