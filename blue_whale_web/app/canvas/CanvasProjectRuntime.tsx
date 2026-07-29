@@ -136,6 +136,11 @@ export function CanvasProjectRuntime({
 
   const [isAgentOpen, setIsAgentOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
+  /** 曾打开即常驻挂载（keep-alive）：关闭仅 display:none 隐藏，
+   *  BottomDock 内 prompt/mentions 与各面板设置 state 原样保留（IK55VF） */
+  const [dockEverOpened, setDockEverOpened] = useState(false);
+  // keep-alive 闩锁：任何路径打开过 Dock 即置位（render 期调整 state 的官方模式）
+  if (isBottomDockOpen && !dockEverOpened) setDockEverOpened(true);
   const [bottomDockMode, setBottomDockMode] = useState<
     "image" | "video" | "audio"
   >("image");
@@ -570,9 +575,18 @@ export function CanvasProjectRuntime({
         setPickingFor(null);
         return;
       }
-      if (pickingFor === "image") setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
-      else if (pickingFor === "video") setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
-      else if (pickingFor === "audio") setAudioDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+      if (pickingFor === "image")
+        setImageDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
+      else if (pickingFor === "video")
+        setVideoDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
+      else if (pickingFor === "audio")
+        setAudioDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
       else if (pickingFor === "firstFrame") {
         setFirstFrameUrl(src);
         setFirstFrameAssetId(
@@ -831,42 +845,46 @@ export function CanvasProjectRuntime({
           </button>
         </div>
       )}
-      {isBottomDockOpen && (
-        <BottomDock
-          mode={bottomDockMode}
-          onClose={() => setIsBottomDockOpen(false)}
-          imageMedia={imageDockMedia}
-          videoMedia={videoDockMedia}
-          audioMedia={audioDockMedia}
-          focusSignal={dockFocusSignal}
-          dockMentionSignal={dockMentionSignal}
-          prefillSignal={prefillSignal ?? undefined}
-          onRemoveImageMedia={(id) =>
-            setImageDockMedia((prev) => prev.filter((m) => m.id !== id))
-          }
-          onRemoveVideoMedia={(id) =>
-            setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))
-          }
-          onRemoveAudioMedia={(id) =>
-            setAudioDockMedia((prev) => prev.filter((m) => m.id !== id))
-          }
-          firstFrameUrl={firstFrameUrl}
-          lastFrameUrl={lastFrameUrl}
-          firstFrameAssetId={firstFrameAssetId}
-          lastFrameAssetId={lastFrameAssetId}
-          onFrameUpload={handleFrameUpload}
-          onFrameClear={handleFrameClear}
-          onSwapFrames={handleSwapFrames}
-          onPickFrameFromCanvas={handlePickFrameFromCanvas}
-          onLocalUpload={(file) => handleDockLocalUpload(file, bottomDockMode)}
-          onPickFromCanvas={() => handleRequestPick(bottomDockMode)}
-          onExitPick={handleExitPick}
-          isPicking={pickingFor === bottomDockMode}
-          onGenerate={handleGenerate}
-          generating={generating}
-          generateError={generateError}
-          onClearGenerateError={() => setGenerateError(null)}
-        />
+      {dockEverOpened && (
+        <div style={{ display: isBottomDockOpen ? "contents" : "none" }}>
+          <BottomDock
+            mode={bottomDockMode}
+            onClose={() => setIsBottomDockOpen(false)}
+            imageMedia={imageDockMedia}
+            videoMedia={videoDockMedia}
+            audioMedia={audioDockMedia}
+            focusSignal={dockFocusSignal}
+            dockMentionSignal={dockMentionSignal}
+            prefillSignal={prefillSignal ?? undefined}
+            onRemoveImageMedia={(id) =>
+              setImageDockMedia((prev) => prev.filter((m) => m.id !== id))
+            }
+            onRemoveVideoMedia={(id) =>
+              setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))
+            }
+            onRemoveAudioMedia={(id) =>
+              setAudioDockMedia((prev) => prev.filter((m) => m.id !== id))
+            }
+            firstFrameUrl={firstFrameUrl}
+            lastFrameUrl={lastFrameUrl}
+            firstFrameAssetId={firstFrameAssetId}
+            lastFrameAssetId={lastFrameAssetId}
+            onFrameUpload={handleFrameUpload}
+            onFrameClear={handleFrameClear}
+            onSwapFrames={handleSwapFrames}
+            onPickFrameFromCanvas={handlePickFrameFromCanvas}
+            onLocalUpload={(file) =>
+              handleDockLocalUpload(file, bottomDockMode)
+            }
+            onPickFromCanvas={() => handleRequestPick(bottomDockMode)}
+            onExitPick={handleExitPick}
+            isPicking={pickingFor === bottomDockMode}
+            onGenerate={handleGenerate}
+            generating={generating}
+            generateError={generateError}
+            onClearGenerateError={() => setGenerateError(null)}
+          />
+        </div>
       )}
       <AgentChatPanel
         key={activeProject.id}
