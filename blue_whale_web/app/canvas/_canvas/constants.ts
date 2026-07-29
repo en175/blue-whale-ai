@@ -110,3 +110,9 @@ export const REF_MODES = [
 ];
 
 export const QUANTITIES = ["1x", "2x", "3x", "4x"];
+
+/** 音频子功能清单（IK55VM）：工具栏悬浮列表与 Dock 面板内模式切换下拉共用同一份（IK54R1 决议）。 */
+export const AUDIO_SUB_MODES: { id: "audio" | "music"; label: string }[] = [
+  { id: "audio", label: "音频生成" },
+  { id: "music", label: "AI 音乐" },
+];

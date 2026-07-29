@@ -4,7 +4,11 @@
  */
 import type { MediaKind } from "./model";
 
-export function squirclePath(width: number, height: number, radius: number): string {
+export function squirclePath(
+  width: number,
+  height: number,
+  radius: number,
+): string {
   const r = Math.min(radius, width / 2, height / 2);
   const w = width;
   const h = height;
@@ -40,21 +44,38 @@ export function squirclePath(width: number, height: number, radius: number): str
 
 /**
  * Dock「从画布选」按类型过滤（D-3 IJZY24）：image Dock / 首尾帧只图；video Dock 图视；audio Dock 图视音。
+ * IK55VM 音频双参考槽：audioRef 只音频节点，audioImageRef 只图片节点。
  * 独立于 kinds ports.accept（那是连线规则 connection rule；此处是 Dock 选参考过滤 dock pick filter）。
  */
 export function dockAccept(
-  mode: "image" | "video" | "audio" | "firstFrame" | "lastFrame",
+  mode:
+    | "image"
+    | "video"
+    | "audio"
+    | "firstFrame"
+    | "lastFrame"
+    | "audioRef"
+    | "audioImageRef",
 ): MediaKind[] {
   if (mode === "video") return ["image", "video"];
   if (mode === "audio") return ["image", "video", "audio"];
+  if (mode === "audioRef") return ["audio"];
   return ["image"];
 }
 
 export function dockPickHint(
-  mode: "image" | "video" | "audio" | "firstFrame" | "lastFrame",
+  mode:
+    | "image"
+    | "video"
+    | "audio"
+    | "firstFrame"
+    | "lastFrame"
+    | "audioRef"
+    | "audioImageRef",
   pickableCount: number,
 ): string {
-  const media = mode === "video" ? "图片或视频" : "图片";
+  const media =
+    mode === "video" ? "图片或视频" : mode === "audioRef" ? "音频" : "图片";
   return pickableCount === 0
     ? `画布上还没有可用的${media}`
     : `点击画布中的${media}加入`;

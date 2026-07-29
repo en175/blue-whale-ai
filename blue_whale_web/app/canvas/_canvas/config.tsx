@@ -8,6 +8,7 @@ import type { ToolDef } from "./types";
 import type { NodeKindId } from "./model";
 import type { ReactNode } from "react";
 import { SparkleIcon, VideoGenIcon } from "./icons";
+import { AUDIO_SUB_MODES } from "./constants";
 import {
   AtSign,
   AudioLines,
@@ -15,6 +16,7 @@ import {
   Info,
   Lightbulb,
   MousePointer2,
+  Music,
   Paintbrush,
   RefreshCw,
   Shuffle,
@@ -72,7 +74,47 @@ export const LEFT_TOOLS: ToolDef[] = [
     label: "AI 视频",
     icon: <VideoGenIcon className="text-white" />,
   },
+  {
+    id: "audio",
+    label: "音频",
+    icon: (
+      <AudioLines
+        width={20}
+        height={20}
+        stroke="rgba(255, 255, 255, 0.8)"
+        strokeWidth={1.5}
+      />
+    ),
+  },
 ];
+
+/**
+ * 音频按钮悬浮列表子功能清单（IK55VM）：与音频 Dock 面板内模式切换下拉同一份
+ * （id/label 源自 constants.AUDIO_SUB_MODES，此处只补图标 JSX）。
+ * 资产库/商品卡后续票复用 ToolbarFlyout 时各自定义自己的清单。
+ */
+const AUDIO_FLYOUT_ICONS: Record<string, ReactNode> = {
+  audio: (
+    <AudioLines
+      width={15}
+      height={15}
+      stroke="rgba(255, 255, 255, 0.7)"
+      strokeWidth={1.8}
+    />
+  ),
+  music: (
+    <Music
+      width={15}
+      height={15}
+      stroke="rgba(255, 255, 255, 0.7)"
+      strokeWidth={1.8}
+    />
+  ),
+};
+export const AUDIO_FLYOUT_ITEMS = AUDIO_SUB_MODES.map((m) => ({
+  ...m,
+  icon: AUDIO_FLYOUT_ICONS[m.id],
+}));
 export const NODE_TOOLBAR_ACTIONS = [
   {
     id: "refresh",

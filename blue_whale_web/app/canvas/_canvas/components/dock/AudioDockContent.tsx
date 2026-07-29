@@ -1,95 +1,215 @@
 "use client";
 /**
- * AudioDockContent —— AI 音频生成 Dock（IJZXW7-B 占位）。
- * 后端无音频生成 provider，模型/参数 mock；prompt + 参考素材 + 生成。仿 ImageDockContent 结构。
- * 后端音频生成就绪后：mock 模型列表换 catalog，onGenerate 经 page 接真 generateAudio（签名不变）。
+ * AudioDockContent —— 音频 Dock 双子面板（IK55VM）。
+ * 音频生成（mode=audio）：音频参考槽 + 图片参考槽（均可选，本地上传/画布选取双通道）+ prompt。
+ * AI 音乐（mode=music）：参考音频槽（可选）+ 曲风 prompt + 独立歌词区 + 纯伴奏开关（开则歌词禁用）+ 数量选择。
+ * 底栏统一：模式切换下拉（与工具栏悬浮列表同一份清单）+ 模型下拉（各 1 个 mock 模型）+ 生成按钮（带积分标识）。
+ * 不设显式时长/格式控件：时长上限 120s 由模型能力决定，输出默认 mp3（IK54R1 决议）。
+ * 未提交输入全部由 BottomDock 提升持有（panel/setPanel），切子模式/关板/切模式往返不丢（IK55VF keep-alive）。
+ * 后端无音频生成 provider：模型/生成 mock；就绪后模型换 catalog、onGenerate 接真接口（签名不变）。
  */
 import { useEffect, useRef, useState } from "react";
-import { AudioLines, ChevronDown, Plus, X } from "lucide-react";
+import {
+  AudioLines,
+  ChevronDown,
+  Image as ImageIcon,
+  Music,
+  X,
+} from "lucide-react";
 import { CreditIcon } from "../../icons";
 import type {
   AudioDockContentProps,
-  AudioGenerateSettings,
+  AudioSubMode,
   SelectOption,
 } from "../../types";
+import { AUDIO_SUB_MODES } from "../../constants";
 import { DockMediaThumb } from "./parts";
 import { UploadSourceMenu } from "./UploadSourceMenu";
 
-/** mock 音频模型（后端无音频生成；就绪换 catalog）。 */
-const MOCK_AUDIO_MODELS: SelectOption[] = [
-  { id: "mock-tts-v1", label: "语音 TTS（mock）" },
-  { id: "mock-music-v1", label: "音乐（mock）" },
-  { id: "mock-sfx-v1", label: "音效（mock）" },
-];
-const MOCK_DURATIONS = [5, 10, 30];
-const MOCK_FORMATS: SelectOption[] = [
-  { id: "mp3", label: "mp3" },
-  { id: "wav", label: "wav" },
-];
-const MOCK_SAMPLE_RATE = 44100;
+/** mock 音频模型（IK55VM：各子模式挂 1 个；后端就绪换 catalog）。 */
+export const MOCK_AUDIO_MODEL: SelectOption = {
+  id: "mock-audio-v1",
+  label: "音频模型（mock）",
+};
+export const MOCK_MUSIC_MODEL: SelectOption = {
+  id: "mock-music-v1",
+  label: "音乐模型（mock）",
+};
+
+/** 子功能清单来自 constants.AUDIO_SUB_MODES（与工具栏悬浮列表同一份）。 */
+export const MUSIC_QUANTITIES = ["1x", "2x", "3x", "4x"];
+
+const AUDIO_PROMPT_PLACEHOLDER =
+  "描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型。支持音频或图片参考。最长 120 秒。";
+const MUSIC_PROMPT_PLACEHOLDER = "描述音乐曲风、情绪、节奏和乐器等...";
+const LYRICS_PLACEHOLDER = "输入或粘贴歌词...";
+
+/** 底栏通用小下拉（向上展开，点外/Esc 关闭）。 */
+function MiniDropdown({
+  label,
+  options,
+  value,
+  onChange,
+  icon,
+  ariaLabel,
+}: {
+  label: string;
+  options: SelectOption[];
+  value: string;
+  onChange: (id: string) => void;
+  icon?: React.ReactNode;
+  ariaLabel: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => {
+      // 容器包住按钮+列表：点选项不算点外（真实浏览器 mousedown 先于 click）
+      if (wrapRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const k = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    document.addEventListener("keydown", k);
+    return () => {
+      document.removeEventListener("mousedown", h);
+      document.removeEventListener("keydown", k);
+    };
+  }, [open]);
+  return (
+    <div ref={wrapRef} style={{ position: "relative", flexShrink: 0 }}>
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          height: 32,
+          borderRadius: 8,
+          padding: "0 8px",
+          border: 0,
+          background: "var(--tc-dock-control-bg, transparent)",
+          color: "rgba(255, 255, 255, 0.85)",
+          fontSize: 12,
+          fontWeight: 500,
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {icon}
+        <span>{label}</span>
+        <ChevronDown width={12} height={12} />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          aria-label={ariaLabel}
+          style={{
+            position: "absolute",
+            bottom: "calc(100% + 4px)",
+            left: 0,
+            minWidth: 120,
+            padding: 4,
+            borderRadius: 8,
+            background: "rgb(30, 30, 30)",
+            border: "1px solid rgba(255, 255, 255, 0.04)",
+            boxShadow: "var(--tc-dropdown-shadow-up)",
+            zIndex: 2147483602,
+            display: "flex",
+            flexDirection: "column",
+            gap: 0,
+          }}
+        >
+          {options.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              role="option"
+              aria-selected={o.id === value}
+              onClick={() => {
+                onChange(o.id);
+                setOpen(false);
+              }}
+              style={{
+                width: "100%",
+                padding: "7px 10px",
+                border: 0,
+                borderRadius: 6,
+                background:
+                  o.id === value ? "rgba(255, 255, 255, 0.08)" : "transparent",
+                color:
+                  o.id === value
+                    ? "rgba(255, 255, 255, 0.85)"
+                    : "rgba(255, 255, 255, 0.45)",
+                fontSize: 12,
+                cursor: "pointer",
+                textAlign: "left",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type SlotKind = "audioRef" | "audioImageRef";
 
 export function AudioDockContent({
-  editorRef,
-  isEmpty,
-  onInput,
+  panel,
+  setPanel,
   onClose,
   media = [],
   onRemoveMedia,
   onLocalUpload,
-  onPickFromCanvas,
+  onPickSlot,
   onExitPick,
   isPicking = false,
   onGenerate,
   generating = false,
-  prefillSignal,
 }: AudioDockContentProps) {
-  const [model, setModel] = useState<SelectOption>(MOCK_AUDIO_MODELS[0]);
-  const [duration, setDuration] = useState<number>(5);
-  const [format, setFormat] = useState<SelectOption>(MOCK_FORMATS[0]);
-  const [modelOpen, setModelOpen] = useState(false);
-
-  const localFileRef = useRef<HTMLInputElement>(null);
-  const placeholderRef = useRef<HTMLButtonElement>(null);
-  const plusRef = useRef<HTMLButtonElement>(null);
-  const modelBtnRef = useRef<HTMLButtonElement>(null);
+  const audioFileRef = useRef<HTMLInputElement>(null);
+  const imageFileRef = useRef<HTMLInputElement>(null);
+  const audioSlotRef = useRef<HTMLButtonElement>(null);
+  const imageSlotRef = useRef<HTMLButtonElement>(null);
   const uploadTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
+  const [activeSlot, setActiveSlot] = useState<SlotKind>("audioRef");
 
-  // 重新编辑预填（recipe → audio 模型/时长/格式）
-  useEffect(() => {
-    if (!prefillSignal?.prefill) return;
-    const p = prefillSignal.prefill;
-    if (p.modelId) {
-      const m = MOCK_AUDIO_MODELS.find((mm) => mm.id === p.modelId);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (m) setModel(m);
-    }
-    if (typeof p.duration === "number") {
-       
-      setDuration(p.duration);
-    }
-    if (p.format) {
-      const f = MOCK_FORMATS.find((ff) => ff.id === p.format);
-       
-      if (f) setFormat(f);
-    }
-  }, [prefillSignal?.nonce]);
+  const isMusic = panel.subMode === "music";
+  const model = isMusic ? panel.musicModel : panel.audioModel;
+  const prompt = isMusic ? panel.musicPrompt : panel.audioPrompt;
 
-  const openUploadMenuFrom = (
-    ref: React.RefObject<HTMLButtonElement | null>,
-  ) => {
-    uploadTriggerRef.current = ref.current;
-    setUploadMenuOpen(true);
-  };
-  const handleTriggerClick = (
+  // 参考槽：media 按类型分槽；music 模式只用音频参考
+  const audioRefItems = media.filter((m) => m.type === "audio");
+  const imageRefItems = media.filter((m) => m.type === "image");
+  const refItems = isMusic
+    ? audioRefItems
+    : [...audioRefItems, ...imageRefItems];
+
+  const openUploadMenu = (
+    slot: SlotKind,
     ref: React.RefObject<HTMLButtonElement | null>,
   ) => {
     if (isPicking) {
       onExitPick?.();
       return;
     }
-    openUploadMenuFrom(ref);
+    setActiveSlot(slot);
+    uploadTriggerRef.current = ref.current;
+    setUploadMenuOpen(true);
   };
+
   const handleLocalFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -97,23 +217,85 @@ export function AudioDockContent({
     e.target.value = "";
   };
 
-  // 模型下拉点外关闭
-  useEffect(() => {
-    if (!modelOpen) return;
-    const h = (e: MouseEvent) => {
-      if (modelBtnRef.current?.contains(e.target as Node)) return;
-      setModelOpen(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [modelOpen]);
+  const handleGenerate = () => {
+    onGenerate?.({
+      mode: panel.subMode,
+      model,
+      lyrics: isMusic && !panel.instrumental ? panel.lyrics : undefined,
+      instrumental: isMusic ? panel.instrumental : undefined,
+      quantity: isMusic ? panel.quantity : undefined,
+      references: refItems.map((m) => ({
+        kind: m.type,
+        assetId: m.assetId,
+        url: m.src,
+      })),
+    });
+  };
+
+  const slotButtonStyle: React.CSSProperties = {
+    width: 44,
+    height: 44,
+    padding: 0,
+    borderRadius: 9,
+    border: "1px solid rgba(255, 255, 255, 0.02)",
+    background: "rgba(255, 255, 255, 0.043)",
+    color: "rgba(255, 255, 255, 0.62)",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  };
+
+  const promptArea = (
+    value: string,
+    onChange: (v: string) => void,
+    placeholder: string,
+    opts?: { minHeight?: number; disabled?: boolean; ariaLabel?: string },
+  ) => (
+    <textarea
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      disabled={opts?.disabled}
+      aria-label={opts?.ariaLabel}
+      className="tc-panel-textarea-scrollbar"
+      style={{
+        width: "100%",
+        minHeight: opts?.minHeight ?? 56,
+        maxHeight: 200,
+        overflowY: "auto",
+        padding: "6px 8px",
+        background: "transparent",
+        color: "rgb(255, 255, 255)",
+        fontSize: 14,
+        lineHeight: "22px",
+        outline: "none",
+        border: 0,
+        resize: "none",
+        wordBreak: "break-word",
+        boxSizing: "border-box",
+        fontFamily: "inherit",
+        opacity: opts?.disabled ? 0.4 : 1,
+      }}
+    />
+  );
 
   return (
     <>
       <input
-        ref={localFileRef}
+        ref={audioFileRef}
         type="file"
         accept="audio/*"
+        multiple
+        className="sr-only"
+        aria-hidden="true"
+        onChange={handleLocalFileChange}
+      />
+      <input
+        ref={imageFileRef}
+        type="file"
+        accept="image/*"
         multiple
         className="sr-only"
         aria-hidden="true"
@@ -123,8 +305,13 @@ export function AudioDockContent({
         triggerRef={uploadTriggerRef}
         open={uploadMenuOpen}
         onClose={() => setUploadMenuOpen(false)}
-        onLocalUpload={() => localFileRef.current?.click()}
-        onPickFromCanvas={() => onPickFromCanvas?.()}
+        onLocalUpload={() =>
+          (activeSlot === "audioRef"
+            ? audioFileRef
+            : imageFileRef
+          ).current?.click()
+        }
+        onPickFromCanvas={() => onPickSlot?.(activeSlot)}
       />
       <div
         style={{
@@ -158,17 +345,18 @@ export function AudioDockContent({
               <X width={13} height={13} />
             </button>
           </div>
+          {/* 参考槽：音频参考 +（audio 模式）图片参考，均可选，双通道 */}
           <div
             style={{
               display: "flex",
-              alignItems: "flex-start",
+              alignItems: "center",
               flexWrap: "wrap",
               gap: 8,
               paddingLeft: 8,
               paddingTop: 4,
             }}
           >
-            {media.map((item) => (
+            {audioRefItems.map((item) => (
               <DockMediaThumb
                 key={item.id}
                 item={item}
@@ -176,24 +364,12 @@ export function AudioDockContent({
               />
             ))}
             <button
-              ref={placeholderRef}
+              ref={audioSlotRef}
               type="button"
-              aria-label="上传参考音频"
-              onClick={() => handleTriggerClick(placeholderRef)}
-              style={{
-                width: 44,
-                height: 44,
-                padding: 0,
-                borderRadius: 9,
-                border: "1px solid rgba(255, 255, 255, 0.02)",
-                background: "rgba(255, 255, 255, 0.043)",
-                color: "rgba(255, 255, 255, 0.62)",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-              }}
+              aria-label="音频参考（可选）"
+              title="音频参考（可选）"
+              onClick={() => openUploadMenu("audioRef", audioSlotRef)}
+              style={slotButtonStyle}
             >
               <AudioLines
                 width={18}
@@ -202,50 +378,84 @@ export function AudioDockContent({
                 strokeWidth={1.8}
               />
             </button>
+            {!isMusic && (
+              <>
+                {imageRefItems.map((item) => (
+                  <DockMediaThumb
+                    key={item.id}
+                    item={item}
+                    onRemove={onRemoveMedia}
+                  />
+                ))}
+                <button
+                  ref={imageSlotRef}
+                  type="button"
+                  aria-label="图片参考（可选）"
+                  title="图片参考（可选）"
+                  onClick={() => openUploadMenu("audioImageRef", imageSlotRef)}
+                  style={slotButtonStyle}
+                >
+                  <ImageIcon
+                    width={18}
+                    height={18}
+                    stroke="currentColor"
+                    strokeWidth={1.8}
+                  />
+                </button>
+              </>
+            )}
+            <span
+              style={{
+                fontSize: 11,
+                color: "rgba(255, 255, 255, 0.3)",
+                userSelect: "none",
+              }}
+            >
+              {isMusic ? "参考音频（可选）" : "音频参考 / 图片参考（均可选）"}
+            </span>
           </div>
           <div style={{ position: "relative", flex: "1 1 0%", minWidth: 0 }}>
-            <div
-              ref={editorRef}
-              contentEditable
-              suppressContentEditableWarning
-              className="tc-panel-textarea-scrollbar"
-              onInput={onInput}
-              style={{
-                width: "100%",
-                minHeight: 56,
-                maxHeight: 452,
-                overflowY: "auto",
-                padding: "6px 8px",
-                background: "transparent",
-                color: "rgb(255, 255, 255)",
-                fontSize: 14,
-                lineHeight: "22px",
-                outline: "none",
-                wordBreak: "break-word",
-                whiteSpace: "pre-wrap",
-                boxSizing: "border-box",
-                fontFamily: "inherit",
-              }}
-            />
-            {isEmpty && (
-              <div
-                style={{
-                  position: "absolute",
-                  left: 8,
-                  top: 6,
-                  color: "rgba(255, 255, 255, 0.3)",
-                  fontSize: 14,
-                  lineHeight: "22px",
-                  pointerEvents: "none",
-                }}
-              >
-                描述要生成的音频（旁白 / 音乐 / 音效）...
+            {isMusic
+              ? promptArea(
+                  panel.musicPrompt,
+                  (v) => setPanel({ musicPrompt: v }),
+                  MUSIC_PROMPT_PLACEHOLDER,
+                  { ariaLabel: "曲风描述" },
+                )
+              : promptArea(
+                  panel.audioPrompt,
+                  (v) => setPanel({ audioPrompt: v }),
+                  AUDIO_PROMPT_PLACEHOLDER,
+                  { ariaLabel: "音频描述" },
+                )}
+            {isMusic && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "rgba(255, 255, 255, 0.55)",
+                    paddingLeft: 8,
+                  }}
+                >
+                  歌词（可选）
+                </span>
+                {promptArea(
+                  panel.lyrics,
+                  (v) => setPanel({ lyrics: v }),
+                  LYRICS_PLACEHOLDER,
+                  {
+                    minHeight: 44,
+                    disabled: panel.instrumental,
+                    ariaLabel: "歌词",
+                  },
+                )}
               </div>
             )}
           </div>
         </div>
       </div>
 
+      {/* 底栏：模式切换下拉 + 模型下拉 +（music：纯伴奏 + 数量）+ 生成按钮 */}
       <div
         style={{
           padding: "8px 8px 8px 12px",
@@ -256,190 +466,108 @@ export function AudioDockContent({
           position: "relative",
         }}
       >
-        <button
-          ref={plusRef}
-          type="button"
-          aria-label="上传音频"
-          onClick={() => handleTriggerClick(plusRef)}
-          style={{
-            width: 24,
-            height: 24,
-            padding: 0,
-            border: 0,
-            borderRadius: "50%",
-            background: "rgba(255, 255, 255, 0.07)",
-            color: "rgba(255, 255, 255, 0.72)",
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-          }}
-        >
-          <Plus width={14} height={14} />
-        </button>
-
-        {/* 模型选择（mock 下拉） */}
-        <div style={{ position: "relative", flexShrink: 0 }}>
-          <button
-            ref={modelBtnRef}
-            type="button"
-            aria-label="音频模型（mock）"
-            aria-haspopup="listbox"
-            aria-expanded={modelOpen}
-            onClick={() => setModelOpen((v) => !v)}
-            style={{
-              height: 32,
-              borderRadius: 8,
-              padding: "0 8px",
-              border: 0,
-              background: "var(--tc-dock-control-bg, transparent)",
-              color: "rgba(255, 255, 255, 0.85)",
-              fontSize: 12,
-              fontWeight: 500,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-              whiteSpace: "nowrap",
-            }}
-          >
-            <AudioLines
-              width={14}
-              height={14}
-              stroke="currentColor"
-              strokeWidth={2}
-            />
-            <span>{model.label}</span>
-            <ChevronDown width={12} height={12} />
-          </button>
-          {modelOpen && (
-            <div
-              role="listbox"
-              aria-label="音频模型"
+        <MiniDropdown
+          ariaLabel="音频模式"
+          label={
+            AUDIO_SUB_MODES.find((m) => m.id === panel.subMode)?.label ?? ""
+          }
+          options={AUDIO_SUB_MODES}
+          value={panel.subMode}
+          onChange={(id) => setPanel({ subMode: id as AudioSubMode })}
+          icon={
+            panel.subMode === "audio" ? (
+              <AudioLines
+                width={14}
+                height={14}
+                stroke="currentColor"
+                strokeWidth={2}
+              />
+            ) : (
+              <Music
+                width={14}
+                height={14}
+                stroke="currentColor"
+                strokeWidth={2}
+              />
+            )
+          }
+        />
+        <MiniDropdown
+          ariaLabel="音频模型"
+          label={model.label}
+          options={[isMusic ? MOCK_MUSIC_MODEL : MOCK_AUDIO_MODEL]}
+          value={model.id}
+          onChange={(id) =>
+            setPanel(
+              isMusic
+                ? { musicModel: { ...MOCK_MUSIC_MODEL, id } }
+                : { audioModel: { ...MOCK_AUDIO_MODEL, id } },
+            )
+          }
+        />
+        {isMusic && (
+          <>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={panel.instrumental}
+              aria-label="纯伴奏"
+              onClick={() => setPanel({ instrumental: !panel.instrumental })}
               style={{
-                position: "absolute",
-                bottom: "calc(100% + 4px)",
-                left: 0,
-                minWidth: 160,
-                padding: 4,
+                height: 32,
                 borderRadius: 8,
-                background: "rgb(30, 30, 30)",
-                border: "1px solid rgba(255, 255, 255, 0.04)",
-                boxShadow: "0 4px 16px rgba(0, 0, 0, 0.25)",
-                zIndex: 2147483602,
+                padding: "0 8px",
+                border: 0,
+                background: "var(--tc-dock-control-bg, transparent)",
+                color: panel.instrumental
+                  ? "rgba(255, 255, 255, 0.85)"
+                  : "rgba(255, 255, 255, 0.55)",
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: "pointer",
                 display: "flex",
-                flexDirection: "column",
-                gap: 0,
+                alignItems: "center",
+                gap: 6,
+                whiteSpace: "nowrap",
+                flexShrink: 0,
               }}
             >
-              {MOCK_AUDIO_MODELS.map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  role="option"
-                  aria-selected={m.id === model.id}
-                  onClick={() => {
-                    setModel(m);
-                    setModelOpen(false);
-                  }}
+              <span
+                style={{
+                  position: "relative",
+                  width: 26,
+                  height: 14,
+                  borderRadius: 9999,
+                  background: panel.instrumental
+                    ? "var(--tc-accent)"
+                    : "rgba(255, 255, 255, 0.16)",
+                  transition: "background 120ms",
+                }}
+              >
+                <span
                   style={{
-                    width: "100%",
-                    padding: "7px 10px",
-                    border: 0,
-                    borderRadius: 6,
-                    background:
-                      m.id === model.id
-                        ? "rgba(255, 255, 255, 0.08)"
-                        : "transparent",
-                    color:
-                      m.id === model.id
-                        ? "rgba(255, 255, 255, 0.85)"
-                        : "rgba(255, 255, 255, 0.45)",
-                    fontSize: 12,
-                    cursor: "pointer",
-                    textAlign: "left",
-                    whiteSpace: "nowrap",
+                    position: "absolute",
+                    top: 2,
+                    left: panel.instrumental ? 14 : 2,
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    background: "rgb(255, 255, 255)",
+                    transition: "left 120ms",
                   }}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* 时长选择（按钮组，mock） */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 2,
-            flexShrink: 0,
-          }}
-        >
-          {MOCK_DURATIONS.map((d) => (
-            <button
-              key={d}
-              type="button"
-              aria-pressed={d === duration}
-              onClick={() => setDuration(d)}
-              style={{
-                height: 28,
-                padding: "0 8px",
-                borderRadius: 6,
-                border: 0,
-                background:
-                  d === duration ? "rgba(255, 255, 255, 0.08)" : "transparent",
-                color:
-                  d === duration
-                    ? "rgba(255, 255, 255, 0.85)"
-                    : "rgba(255, 255, 255, 0.45)",
-                fontSize: 12,
-                cursor: "pointer",
-              }}
-            >
-              {d}s
+                />
+              </span>
+              纯伴奏
             </button>
-          ))}
-        </div>
-
-        {/* 格式选择（按钮组，mock） */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 2,
-            flexShrink: 0,
-          }}
-        >
-          {MOCK_FORMATS.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              aria-pressed={f.id === format.id}
-              onClick={() => setFormat(f)}
-              style={{
-                height: 28,
-                padding: "0 8px",
-                borderRadius: 6,
-                border: 0,
-                background:
-                  f.id === format.id
-                    ? "rgba(255, 255, 255, 0.08)"
-                    : "transparent",
-                color:
-                  f.id === format.id
-                    ? "rgba(255, 255, 255, 0.85)"
-                    : "rgba(255, 255, 255, 0.45)",
-                fontSize: 12,
-                cursor: "pointer",
-              }}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+            <MiniDropdown
+              ariaLabel="数量"
+              label={panel.quantity}
+              options={MUSIC_QUANTITIES.map((q) => ({ id: q, label: q }))}
+              value={panel.quantity}
+              onChange={(id) => setPanel({ quantity: id })}
+            />
+          </>
+        )}
 
         <div style={{ flex: "1 1 0%" }} />
 
@@ -455,15 +583,8 @@ export function AudioDockContent({
         </span>
         <button
           type="button"
-          disabled={isEmpty || generating}
-          onClick={() =>
-            onGenerate?.({
-              model,
-              duration,
-              sampleRate: MOCK_SAMPLE_RATE,
-              format,
-            })
-          }
+          disabled={prompt.trim().length === 0 || generating}
+          onClick={handleGenerate}
           style={{
             height: 32,
             padding: "0 14px",
@@ -475,14 +596,15 @@ export function AudioDockContent({
             alignItems: "center",
             gap: 6,
             background:
-              isEmpty || generating
+              prompt.trim().length === 0 || generating
                 ? "rgba(255, 255, 255, 0.06)"
                 : "var(--tc-accent)",
             color:
-              isEmpty || generating
+              prompt.trim().length === 0 || generating
                 ? "rgba(255, 255, 255, 0.32)"
                 : "rgb(255, 255, 255)",
-            cursor: isEmpty || generating ? "default" : "pointer",
+            cursor:
+              prompt.trim().length === 0 || generating ? "default" : "pointer",
           }}
         >
           <CreditIcon size={14} />
