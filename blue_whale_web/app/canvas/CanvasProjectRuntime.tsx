@@ -20,6 +20,8 @@ import type { CanvasNode, CanvasNodeData, NodeKindId } from "./_canvas/model";
 import { CanvasSurface } from "./_canvas/v2/CanvasSurface";
 import type { MenuPayload } from "./_canvas/v2/CanvasSurface";
 import { ContextMenu, type ContextMenuKind } from "./_canvas/v2/ContextMenu";
+import { effectiveToolMode, type ToolMode } from "./_canvas/v2/toolMode";
+import { useSpaceHeld } from "./_canvas/v2/useSpaceHeld";
 import { useV2Projects } from "./_canvas/v2/useV2Projects";
 import {
   cardToV2ImageFields,
@@ -172,6 +174,11 @@ export function CanvasProjectRuntime({
     "image" | "video" | "audio" | "firstFrame" | "lastFrame" | null
   >(null);
   const [menu, setMenu] = useState<MenuPayload | null>(null);
+
+  // IK55VD 工具模式：持久模式不持久化；按住空格临时切入抓手，有效模式 = 持久 OR 空格
+  const [toolMode, setToolMode] = useState<ToolMode>("mouse");
+  const spaceHeld = useSpaceHeld();
+  const effectiveMode = effectiveToolMode(toolMode, spaceHeld);
 
   const addNode = useCallback(
     (
@@ -625,7 +632,9 @@ export function CanvasProjectRuntime({
 
   const handleToolClick = useCallback(
     (id: string) => {
-      if (id === "upload") {
+      if (id === "select") {
+        setToolMode((m) => (m === "mouse" ? "hand" : "mouse"));
+      } else if (id === "upload") {
         openFilePicker("image/*,video/*,audio/*");
       } else if (id === "audio") {
         setBottomDockMode("audio");
@@ -756,6 +765,7 @@ export function CanvasProjectRuntime({
             onEditPrompt={onEditPrompt}
             picking={pickingFor !== null}
             pickingAccept={pickingFor ? dockAccept(pickingFor) : undefined}
+            toolMode={effectiveMode}
           />
         </div>
         <ZoomControls />
@@ -771,7 +781,10 @@ export function CanvasProjectRuntime({
         />
       )}
 
-      <LeftToolbar onToolClick={handleToolClick} />
+      <LeftToolbar
+        onToolClick={handleToolClick}
+        handActive={effectiveMode === "hand"}
+      />
       {pickingFor && (
         <div
           style={{
