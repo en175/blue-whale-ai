@@ -39,6 +39,6 @@ describe("LeftToolbar 工具模式按钮", () => {
     const onToolClick = vi.fn();
     render(<LeftToolbar onToolClick={onToolClick} />);
     fireEvent.click(selectButton());
-    expect(onToolClick).toHaveBeenCalledWith("select");
+    expect(onToolClick).toHaveBeenCalledWith("select", expect.anything());
   });
 });

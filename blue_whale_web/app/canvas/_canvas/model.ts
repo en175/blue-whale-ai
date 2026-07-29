@@ -61,8 +61,12 @@ export interface VideoGenParams {
   internetSearch?: boolean;
 }
 
+/** 音频生成参数（IK55VM）：子模式 + music 专属字段；不设显式时长/格式（模型能力决定，默认 mp3）。 */
 export interface AudioGenParams {
-  [key: string]: unknown;
+  mode?: "audio" | "music";
+  lyrics?: string;
+  instrumental?: boolean;
+  quantity?: number;
 }
 
 /** 生成记录：模型 + 参数 + 输入引用 + 绑定 job。 */
