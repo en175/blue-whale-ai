@@ -43,6 +43,11 @@ SceneCard 在 Canvas 中的布局投影，只引用一个 SceneCard 并承载布
 “Canvas 只编排 NodeItem”规则的显式例外；同一 Canvas 中一张 SceneCard 最多有一个 SceneCardNode。
 _Avoid_: NodeItem、SceneCard 本体、在节点中保存 Markdown 副本
 
+**SceneCardGenerationOrigin（场景卡生成来源）**:
+GenerationJob 从 SceneCard 发起时冻结的来源事实，使 SceneCard 能按生成时内容版本展示历史任务与作品；
+它不转移 Asset 的 Project 归属，SceneCard 删除或修改也不删除、改写既有 GenerationJob 与 Asset。
+_Avoid_: 作品归 SceneCard 所有、SceneCard 删除级联删除作品、用 SceneCard 最新正文解释历史生成
+
 **InitialPlacementStatus（NodeItem 首次放置状态）**:
 NodeItem 创建后的一次性流程状态：`pending`、`placed` 或 `dismissed`。它只记录首次放置流程的结果，
 不表示 NodeItem 当前是否在 Canvas；当前布局始终只由 Canvas 共享布局文档决定。Product API 接纳
@@ -101,6 +106,22 @@ _Avoid_: 把消息直接挂到 Project；把每个 AgentRun 当作独立对话�
 Product API 接纳的不可变用户或助手消息，拥有服务端身份，并按同一 Conversation 内的服务端顺序读取。
 刷新、重连或 Worker 重启不得丢失已接纳消息；本地草稿、临时流式片段和客户端时间不属于正式消息。
 _Avoid_: 用浏览器生成值或 SSE 到达顺序充当消息身份与排序依据。
+
+**PlanPhase（计划阶段）**:
+Agent 创作入口内由 Agent 按对话意图自主进入或退出的内部行为阶段；User 可以用自然语言要求立即产出
+PlanMessage、继续讨论或不产出 PlanMessage，但不需要理解或切换独立模式。
+_Avoid_: Plan Mode、模式开关、直接生成入口、把普通问答或素材分析自动转成计划卡
+
+**PlanMessage（计划卡消息）**:
+Conversation 中由 Agent 提交的独立正式消息类别，以 Markdown 与稳定素材引用表达可应用的场景计划；
+它随对话历史持久保留，可记录直接参考的另一 PlanMessage，并冻结“新建 SceneCard”或“覆盖所引用
+SceneCard”的默认应用意图；User 也可明确选择另存为新 SceneCard，任何应用都必须手动触发。
+_Avoid_: 生成结果 Card、SceneCard 本体、可变草稿、唯一最新版、自动应用、自动改写正文、把素材失效等同于消息失效
+
+**PlanApplicationReceipt（计划应用记录）**:
+一次成功应用 PlanMessage 的不可变事实，记录实际的新建或覆盖操作、结果 SceneCard、结果版本、内容摘要
+与应用时间；它不修改 PlanMessage，Canvas 放置也不属于其成功条件。
+_Avoid_: PlanMessage 状态、失败尝试、Canvas 放置记录、用网络响应充当唯一成功证据
 
 **CommandId（业务命令身份）**:
 写请求使用的稳定幂等键。同一业务操作的网络重试保持同一键和请求内容；Product API 返回首次结果，
@@ -169,6 +190,11 @@ Agent 读取对话历史时获得每条消息的有序引用列表，
 据此精确读取对应 Asset；跨 Project、跨 User 或非 normal 状态的读取一律同构拒绝。
 _Avoid_: 把 @ 引用当作无 assetId 的纯文本提及；把 @ 引用与画布选中、生成参考图输入混为一谈；
 把引用当作可撤销的授权。
+
+**SceneCardMention（@ 场景卡引用）**:
+User 提交消息时对一张 SceneCard 的结构化引用，冻结其当时的身份、内容版本、显示摘要与 Markdown，
+作为本轮 Agent 输入及历史证据；后续 SceneCard 修改或删除不得使该引用漂移。
+_Avoid_: 始终指向最新版的活动引用、SceneCard 版本历史、用旧引用读取后来内容、AssetMention
 
 **GenerationJob（生成任务）**:
 一次持久化的图片或视频后台任务。任务归属于 Project，页面刷新、浏览器关闭或服务重启后，
