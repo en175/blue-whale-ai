@@ -7,7 +7,6 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowLeftRight,
-  AudioLines,
   ChevronDown,
   ChevronUp,
   Image as ImageIcon,
@@ -69,6 +68,12 @@ export function VideoDockContent(props: VideoDockContentProps) {
     onGenerate,
     generating = false,
     onPreviewMedia,
+    firstFrameUrl,
+    lastFrameUrl,
+    onFrameUpload,
+    onFrameClear,
+    onSwapFrames,
+    onPickFrameFromCanvas,
   } = props;
 
   // 上传来源菜单（参考图占位 + 加号共用）
@@ -175,7 +180,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
       <input
         ref={localFileRef}
         type="file"
-        accept="image/*,video/*"
+        accept="image/*"
         multiple
         className="sr-only"
         aria-hidden="true"
@@ -247,10 +252,11 @@ export function VideoDockContent(props: VideoDockContentProps) {
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 0%", minWidth: 0 }}>
-                    <FrameUploadButton label="首帧" />
+                    <FrameUploadButton label="首帧" previewUrl={firstFrameUrl} onFile={(file) => onFrameUpload?.(file, "first")} onClear={() => onFrameClear?.("first")} onPick={() => onPickFrameFromCanvas?.("first")} />
                     <button
                       type="button"
                       aria-label="交换首尾帧"
+                      onClick={onSwapFrames}
                       style={{
                         width: 26,
                         height: 26,
@@ -269,7 +275,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                     >
                       <ArrowLeftRight width={13} height={13} strokeWidth={2} aria-hidden="true" />
                     </button>
-                    <FrameUploadButton label="尾帧" />
+                    <FrameUploadButton label="尾帧" previewUrl={lastFrameUrl} onFile={(file) => onFrameUpload?.(file, "last")} onClear={() => onFrameClear?.("last")} onPick={() => onPickFrameFromCanvas?.("last")} />
                   </div>
                 </div>
               ) : (
@@ -322,14 +328,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
                   <span style={{ color: "rgba(255, 255, 255, 0.22)", fontSize: 14, lineHeight: 1 }}>·</span>
                   <MediaUploadButton
                     label="视频"
-                    accept=".mp4,video/mp4"
+                    accept=".mp4,.mov,video/mp4,video/quicktime"
                     icon={<Video width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />}
-                  />
-                  <span style={{ color: "rgba(255, 255, 255, 0.22)", fontSize: 14, lineHeight: 1 }}>·</span>
-                  <MediaUploadButton
-                    label="音频"
-                    accept=".mp3,.wav,.m4a,audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/mp4,audio/x-m4a"
-                    icon={<AudioLines width={15} height={15} stroke="currentColor" strokeWidth={1.8} aria-hidden="true" />}
+                    onFiles={(file) => onLocalUpload?.(file)}
                   />
                 </div>
               )}
@@ -1255,4 +1256,3 @@ export function VideoDockContent(props: VideoDockContentProps) {
     </>
   );
 }
-

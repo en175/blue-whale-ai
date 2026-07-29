@@ -91,7 +91,11 @@ async function processClaimedJob(
         await repo.failJob(job.id, "provider_config", "视频 provider 未配置");
         return job.id;
       }
-      const dimensions = videoDimensions(input.resolution, input.aspect_ratio);
+      const resolution =
+        typeof input.resolution === "string" ? input.resolution : "";
+      const ratio =
+        typeof input.aspect_ratio === "string" ? input.aspect_ratio : "";
+      const dimensions = videoDimensions(resolution, ratio);
       const duration = Number(input.duration);
       if (!dimensions || !Number.isFinite(duration) || duration <= 0) {
         await repo.failJob(job.id, "invalid_input", "视频尺寸或时长无效");
@@ -103,6 +107,8 @@ async function processClaimedJob(
         duration,
         width: dimensions.width,
         height: dimensions.height,
+        resolution,
+        ratio,
         ...(sourceAssets[0] ? { image: sourceAssets[0].url } : {}),
       });
       const storedVideo = await persistProviderMedia(

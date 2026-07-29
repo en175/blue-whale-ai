@@ -14,6 +14,8 @@ export interface JobListItem {
   input: unknown;
   created_at: string;
   output_assets: JobOutputAsset[];
+  /** Node handler projects this internal field into a public error envelope. */
+  stored_error?: Record<string, unknown> | null;
 }
 
 export interface JobOutputAsset {
@@ -47,6 +49,7 @@ export interface JobListFilter {
   type?: string;
   status?: string;
   projectId?: string;
+  ids?: string[];
   page: number;
   size: number;
 }
@@ -88,6 +91,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         ...(filter.type ? { type: filter.type } : {}),
         ...(filter.status ? { status: filter.status } : {}),
         ...(filter.projectId ? { project_id: BigInt(filter.projectId) } : {}),
+        ...(filter.ids ? { id: { in: [...new Set(filter.ids)].map((id) => BigInt(id)) } } : {}),
       };
       const [total, rows] = await Promise.all([
         prisma.generation_jobs.count({ where }),
@@ -120,6 +124,10 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
             width: a.width,
             height: a.height,
           })),
+        stored_error:
+          r.error && typeof r.error === "object" && !Array.isArray(r.error)
+            ? (r.error as Record<string, unknown>)
+            : null,
       }));
 
       return { records, total, size: filter.size, current: filter.page };

@@ -123,6 +123,7 @@ const uploadAssetSelect = {
   width: true,
   height: true,
   duration: true,
+  duration_ms: true,
 } as const;
 
 function toUploadAsset(row: {
@@ -135,9 +136,16 @@ function toUploadAsset(row: {
   width: number | null;
   height: number | null;
   duration: number | null;
+  duration_ms: number | null;
 }): PendingUploadAsset | null {
   if (!row.storage_key) return null;
-  return { ...row, id: row.id.toString(), storage_key: row.storage_key };
+  const { duration_ms: durationMs, ...asset } = row;
+  return {
+    ...asset,
+    id: row.id.toString(),
+    storage_key: row.storage_key,
+    duration: durationMs == null ? row.duration : durationMs / 1000,
+  };
 }
 
 export function createAssetRepo(prisma: PrismaClient): AssetRepo {
@@ -330,7 +338,10 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           size: BigInt(input.size),
           ...(input.width == null ? {} : { width: input.width }),
           ...(input.height == null ? {} : { height: input.height }),
-          ...(input.duration == null ? {} : { duration: input.duration }),
+          ...(input.duration == null ? {} : { duration: Math.round(input.duration) }),
+          ...(input.duration == null
+            ? {}
+            : { duration_ms: Math.round(input.duration * 1000) }),
           source: "uploaded",
           status: "normal",
         },

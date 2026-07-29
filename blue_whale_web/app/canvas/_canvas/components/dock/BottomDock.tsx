@@ -25,7 +25,10 @@ import {
   removeMention,
   type MentionItem,
 } from "./mention";
-import { selectDockInputAssetIds } from "./generation-input";
+import {
+  selectDockInputAssetIds,
+  selectVideoDockAssetIds,
+} from "./generation-input";
 
 export function BottomDock({
   mode,
@@ -387,40 +390,62 @@ export function BottomDock({
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
-                  onGenerate={(s) =>
+                  firstFrameUrl={firstFrameUrl}
+                  lastFrameUrl={lastFrameUrl}
+                  onFrameUpload={onFrameUpload}
+                  onFrameClear={onFrameClear}
+                  onSwapFrames={onSwapFrames}
+                  onPickFrameFromCanvas={onPickFrameFromCanvas}
+                  onGenerate={(s) => {
+                    const ordinaryReferenceMode = refMode.id !== "first-last";
+                    const assetIds = selectVideoDockAssetIds(
+                      refMode.id,
+                      editorRef.current
+                        ? extractEditor(editorRef.current).assetIds
+                        : [],
+                      videoMedia,
+                    );
                     onGenerate?.(input, {
                       mode: "video",
                       settings: {
                         ...s,
-                        firstFrameUrl,
-                        lastFrameUrl,
-                        referenceImages: videoMedia
-                          .filter((item) => item.type === "image")
-                          .map((item) => item.src)
-                          .filter((src): src is string => Boolean(src)),
+                        firstFrameUrl: ordinaryReferenceMode
+                          ? undefined
+                          : firstFrameUrl,
+                        lastFrameUrl: ordinaryReferenceMode
+                          ? undefined
+                          : lastFrameUrl,
+                        referenceMedia: ordinaryReferenceMode
+                          ? [
+                              ...mentions.map((url) => ({
+                                kind: "image" as const,
+                                url,
+                              })),
+                              ...videoMedia.flatMap((item) =>
+                                item.src &&
+                                (item.type === "image" ||
+                                  item.type === "video")
+                                  ? [
+                                      {
+                                        kind: item.type,
+                                        url: item.src,
+                                        assetId: item.assetId,
+                                      },
+                                    ]
+                                  : [],
+                              ),
+                            ]
+                          : [],
                       },
-                      inputAssetIds: selectDockInputAssetIds(
-                        "video",
-                        editorRef.current ? extractEditor(editorRef.current).assetIds : [],
-                        videoMedia,
-                        [firstFrameAssetId, lastFrameAssetId].filter(
-                          (id): id is number => id !== undefined,
-                        ),
-                      ),
-                      firstFrameAssetId,
-                      lastFrameAssetId,
-                      referenceAssetIds: videoMedia
-                        .filter(
-                          (item) =>
-                            item.type === "image" &&
-                            item.assetId !== undefined &&
-                            Number(item.assetId) !== firstFrameAssetId &&
-                            Number(item.assetId) !== lastFrameAssetId,
-                        )
-                        .map((item) => Number(item.assetId))
-                        .filter((id) => Number.isSafeInteger(id) && id > 0),
-                    })
-                  }
+                      firstFrameAssetId: ordinaryReferenceMode
+                        ? undefined
+                        : firstFrameAssetId,
+                      lastFrameAssetId: ordinaryReferenceMode
+                        ? undefined
+                        : lastFrameAssetId,
+                      referenceAssetIds: assetIds.referenceAssetIds,
+                    });
+                  }}
                   generating={generating}
                   onPreviewMedia={setPreviewItem}
                 />

@@ -76,16 +76,15 @@ function validate(body: CreateGenerationJobBody): string | null {
     const hasExplicitInputs = hasExplicitFrames || body.reference_asset_ids !== undefined;
     if (body.first_frame_asset_id !== undefined && firstFrameAssetId === null) return "首帧素材无效";
     if (body.last_frame_asset_id !== undefined && lastFrameAssetId === null) return "尾帧素材无效";
+    if (lastFrameAssetId !== null && firstFrameAssetId === null) return "尾帧必须与首帧一起使用";
     if (body.reference_asset_ids !== undefined && assetIds(body.reference_asset_ids).length !== (Array.isArray(body.reference_asset_ids) ? body.reference_asset_ids.length : -1)) return "参考素材无效";
-    if (hasExplicitInputs && inputAssetIds.length > 6) return "视频素材最多 6 个";
-    const compatibilityReferenceIds = assetIds(inputAssetIds).filter(
-      (id) => id !== firstFrameAssetId && id !== lastFrameAssetId,
-    );
-    const normalizedReferenceIds = uniqueAssetIds([
-      ...assetIds(body.reference_asset_ids),
-      ...compatibilityReferenceIds,
-    ]);
-    if (hasExplicitInputs && normalizedReferenceIds.length > 4) return "参考图最多 4 张";
+    const explicitReferenceIds = uniqueAssetIds(assetIds(body.reference_asset_ids));
+    if (hasExplicitFrames && explicitReferenceIds.length > 0) {
+      return "首尾帧模式不能与普通参考素材混用";
+    }
+    if (body.reference_asset_ids !== undefined && explicitReferenceIds.length > 12) {
+      return "参考素材最多 12 个";
+    }
     if (!hasExplicitInputs && inputAssetIds.length > 1) return "视频生成仅支持 0 或 1 个参考图";
   }
   return null;
@@ -138,13 +137,10 @@ export async function handleCreateGenerationJob(
   const firstFrameAssetId = assetId(body.first_frame_asset_id);
   const lastFrameAssetId = assetId(body.last_frame_asset_id);
   const hasExplicitFrame = firstFrameAssetId !== null || lastFrameAssetId !== null;
-  const compatibilityReferenceIds = assetIds(inputAssetIds).filter(
-    (id) => id !== firstFrameAssetId && id !== lastFrameAssetId,
-  );
   const referenceAssetIds = body.reference_asset_ids !== undefined
-    ? uniqueAssetIds([...explicitReferenceIds, ...compatibilityReferenceIds])
+    ? uniqueAssetIds(explicitReferenceIds)
     : hasExplicitFrame
-      ? compatibilityReferenceIds
+      ? []
       : inputAssetIds;
   if (firstFrameAssetId) input.first_frame_asset_id = firstFrameAssetId;
   if (lastFrameAssetId) input.last_frame_asset_id = lastFrameAssetId;

@@ -3,7 +3,14 @@
  * card → 图片节点字段。不改老 recover.ts/nodeFromCard.ts（strangler 老不动）。
  */
 import { describe, it, expect } from "vitest";
-import { jobToV2Placeholder, cardToV2ImageFields, recipeToDockPrefill, buildCrossmodalRefill, dockMediaToRecipeRefs } from "./mappers";
+import {
+  jobToV2Placeholder,
+  cardToV2ImageFields,
+  recipeToDockPrefill,
+  buildCrossmodalRefill,
+  canvasNodeToDockMedia,
+  dockMediaToRecipeRefs,
+} from "./mappers";
 import type { JobListItem } from "../api/generation";
 import type { CardMessage } from "../nodeFromCard";
 import type { GenerationRecipe } from "../model";
@@ -100,13 +107,23 @@ describe("recipeToDockPrefill", () => {
       params: { aspectRatio: "16:9", resolution: "1080p", duration: 5, refMode: "firstlast" },
       inputs: {
         prompt: { kind: "text", text: "动起来" },
-        firstFrame: { kind: "image", url: "https://tos/ff.png" },
-        references: [{ kind: "image", url: "https://tos/r.png" }],
+        firstFrame: { kind: "image", assetId: "90", url: "https://tos/ff.png" },
+        lastFrame: { kind: "image", assetId: "92", url: "https://tos/lf.png" },
+        references: [{ kind: "image", assetId: "91", url: "https://tos/r.png" }],
       },
     };
     const p = recipeToDockPrefill(gen);
-    expect(p).toMatchObject({ duration: 5, refMode: "firstlast", firstFrameUrl: "https://tos/ff.png" });
-    expect(p.references).toEqual([{ url: "https://tos/r.png", kind: "image" }]);
+    expect(p).toMatchObject({
+      duration: 5,
+      refMode: "firstlast",
+      firstFrameUrl: "https://tos/ff.png",
+      firstFrameAssetId: "90",
+      lastFrameUrl: "https://tos/lf.png",
+      lastFrameAssetId: "92",
+    });
+    expect(p.references).toEqual([
+      { url: "https://tos/r.png", kind: "image", assetId: "91" },
+    ]);
   });
 
   it("带参考图的 image recipe → referenceUrls", () => {
@@ -143,7 +160,7 @@ describe("buildCrossmodalRefill（D 跨模态点击式）", () => {
     expect(buildCrossmodalRefill(vid, "video", "url-v")).toEqual({ mode: "video", media: { id: "v1", type: "video", name: "风景", src: "url-v" } });
   });
   it("音频→生成视频: mode=video, media[type=audio]", () => {
-    expect(buildCrossmodalRefill(aud, "video", "url-u")).toEqual({ mode: "video", media: { id: "u1", type: "audio", name: "旁白", src: "url-u" } });
+    expect(buildCrossmodalRefill(aud, "video", "url-u")).toBeNull();
   });
   it("视频→提取音频: derived=true", () => {
     expect(buildCrossmodalRefill(vid, "extract-audio", "url-v")).toEqual({ derived: true });
@@ -153,5 +170,29 @@ describe("buildCrossmodalRefill（D 跨模态点击式）", () => {
   });
   it("非跨模态 action → null", () => {
     expect(buildCrossmodalRefill(img, "download", "url")).toBeNull();
+  });
+});
+
+describe("canvasNodeToDockMedia", () => {
+  it("preserves a selected video node's trusted kind and Asset identity", () => {
+    expect(
+      canvasNodeToDockMedia(
+        {
+          id: "video-node",
+          data: {
+            kind: "video",
+            content: "参考运镜",
+            assetId: "42",
+          },
+        },
+        "https://tos.test/reference.mp4",
+      ),
+    ).toEqual({
+      id: "video-node",
+      type: "video",
+      name: "参考运镜",
+      src: "https://tos.test/reference.mp4",
+      assetId: "42",
+    });
   });
 });

@@ -6,7 +6,7 @@ import type {
 } from "./video-job-runner.js";
 
 const SUCCESS_STATUSES = new Set(["success", "succeeded", "completed"]);
-const FAILED_STATUSES = new Set(["failed", "error", "cancelled", "canceled"]);
+const FAILED_STATUSES = new Set(["failed", "failure", "error", "cancelled", "canceled"]);
 
 export function createNewApiVideoTaskProvider(options: {
   baseUrl: string;

@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as jestDomMatchers from "@testing-library/jest-dom/matchers";
 import { apiFetch } from "@/lib/api-client";
-import { DockMediaThumb } from "./parts";
+import { DockMediaThumb, MediaUploadButton } from "./parts";
 import type { DockMediaItem } from "../../types";
 
 vi.mock("@/lib/api-client", () => ({ apiFetch: vi.fn() }));
@@ -132,5 +132,37 @@ describe("DockMediaThumb", () => {
 
     screen.getByRole("button", { name: "移除 蓝鲸参考图" }).click();
     expect(onRemove).toHaveBeenCalledWith("node-1");
+  });
+
+  it("视频参考使用 video 元素展示首帧", () => {
+    render(
+      <DockMediaThumb
+        item={referenceItem({
+          type: "video",
+          name: "参考视频",
+          src: "https://tos.test/reference.mp4",
+        })}
+      />,
+    );
+
+    const video = document.querySelector("video");
+    expect(video).not.toBeNull();
+    expect(video).toHaveAttribute("src", "https://tos.test/reference.mp4");
+    expect(video).toHaveAttribute("preload", "metadata");
+  });
+
+  it("可见上传按钮会触发限定格式的 file input", () => {
+    const click = vi.spyOn(HTMLInputElement.prototype, "click");
+    render(
+      <MediaUploadButton
+        label="视频"
+        accept=".mp4,.mov,video/mp4,video/quicktime"
+        icon={<span>video</span>}
+        onFiles={vi.fn()}
+      />,
+    );
+
+    screen.getByRole("button", { name: "视频" }).click();
+    expect(click).toHaveBeenCalledTimes(1);
   });
 });

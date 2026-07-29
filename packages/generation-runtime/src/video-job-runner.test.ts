@@ -9,7 +9,7 @@ type JobState = {
 };
 
 describe("video job runner recovery", () => {
-  it("passes first frame, last frame, and references to the provider separately", async () => {
+  it("passes first and last frames to the provider without ordinary references", async () => {
     const { runVideoJobStep } = await import("./video-job-runner.js");
     const submit = vi.fn().mockResolvedValue({ taskId: "upstream-frames", status: "queued" });
     const repo = {
@@ -25,7 +25,6 @@ describe("video job runner recovery", () => {
           duration: 5,
           first_frame_asset_id: "11",
           last_frame_asset_id: "12",
-          reference_asset_ids: ["13"],
           provider_credential: "sealed-token",
         },
         providerTaskId: null,
@@ -37,7 +36,6 @@ describe("video job runner recovery", () => {
       resolveInputAssets: vi.fn().mockResolvedValue([
         { id: "11", type: "image", url: "https://tos.test/first.png" },
         { id: "12", type: "image", url: "https://tos.test/last.png" },
-        { id: "13", type: "image", url: "https://tos.test/reference.png" },
       ]),
       markVideoSubmitted: vi.fn().mockResolvedValue(true),
       rescheduleVideoPoll: vi.fn(),
@@ -56,17 +54,354 @@ describe("video job runner recovery", () => {
       scheduleNext: vi.fn().mockResolvedValue(undefined),
     });
 
-    expect(repo.resolveInputAssets).toHaveBeenCalledWith(["11", "12", "13"], "9", "55");
+    expect(repo.resolveInputAssets).toHaveBeenCalledWith(["11", "12"], "9", "55");
     expect(submit).toHaveBeenCalledWith({
       model: "seedance-2",
       prompt: "从首帧过渡到尾帧",
       duration: 5,
       width: 1280,
       height: 720,
+      resolution: "720p",
+      ratio: "16:9",
       firstFrameImage: "https://tos.test/first.png",
       lastFrameImage: "https://tos.test/last.png",
-      referenceImages: ["https://tos.test/reference.png"],
+      references: [],
     });
+  });
+
+  it("preserves ordered image and video references from trusted Assets", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "upstream-references", status: "queued" });
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "302",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "修改视频风格",
+          model_id: "doubao-seedance-2-0-260128",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 8,
+          reference_asset_ids: ["11", "12", "13"],
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-references",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([
+        { id: "11", type: "image", url: "https://tos.test/a.png", mime: "image/png" },
+        { id: "12", type: "video", url: "https://tos.test/b.mp4", mime: "video/mp4", size: 100, duration: 7 },
+        { id: "13", type: "image", url: "https://tos.test/c.png", mime: "image/png" },
+      ]),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-references",
+      jobId: "302",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(submit).toHaveBeenCalledWith({
+      model: "doubao-seedance-2-0-260128",
+      prompt: "修改视频风格",
+      duration: 8,
+      width: 1280,
+      height: 720,
+      resolution: "720p",
+      ratio: "16:9",
+      references: [
+        { type: "image", url: "https://tos.test/a.png" },
+        { type: "video", url: "https://tos.test/b.mp4" },
+        { type: "image", url: "https://tos.test/c.png" },
+      ],
+    });
+  });
+
+  it("accepts the Seedance 2.0 boundary of nine images and three videos", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "upstream-boundary", status: "queued" });
+    const assets = [
+      ...Array.from({ length: 9 }, (_, index) => ({
+        id: String(index + 1),
+        type: "image",
+        url: `https://tos.test/${index + 1}.png`,
+        mime: "image/png",
+      })),
+      ...Array.from({ length: 3 }, (_, index) => ({
+        id: String(index + 10),
+        type: "video",
+        url: `https://tos.test/${index + 10}.mp4`,
+        mime: "video/mp4",
+        size: 100,
+        duration: 5,
+      })),
+    ];
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "305",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "边界混合参考",
+          model_id: "doubao-seedance-2-0-260128",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          reference_asset_ids: assets.map((asset) => asset.id),
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-boundary",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue(assets),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-boundary",
+      jobId: "305",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+    });
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        references: assets.map((asset) => ({
+          type: asset.type,
+          url: asset.url,
+        })),
+      }),
+    );
+  });
+
+  it.each([
+    {
+      name: "ten images",
+      model: "doubao-seedance-2-0-260128",
+      assets: Array.from({ length: 10 }, (_, index) => ({
+        id: String(index + 1),
+        type: "image",
+        url: `https://tos.test/${index + 1}.png`,
+        mime: "image/png",
+      })),
+      code: "reference_limit_exceeded",
+    },
+    {
+      name: "four videos",
+      model: "doubao-seedance-2-0-260128",
+      assets: Array.from({ length: 4 }, (_, index) => ({
+        id: String(index + 1),
+        type: "video",
+        url: `https://tos.test/${index + 1}.mp4`,
+        mime: "video/mp4",
+        size: 100,
+        duration: 3,
+      })),
+      code: "reference_limit_exceeded",
+    },
+    {
+      name: "audio Asset",
+      model: "doubao-seedance-2-0-260128",
+      assets: [{ id: "1", type: "audio", url: "https://tos.test/1.mp3", mime: "audio/mpeg" }],
+      code: "unsupported_reference_type",
+    },
+    {
+      name: "video on a non-2.0 model",
+      model: "doubao-seedance-1-5-pro-251215",
+      assets: [{ id: "1", type: "video", url: "https://tos.test/1.mp4", mime: "video/mp4", size: 100, duration: 3 }],
+      code: "unsupported_video_inputs",
+    },
+    {
+      name: "unsupported video MIME",
+      model: "doubao-seedance-2-0-260128",
+      assets: [{ id: "1", type: "video", url: "https://tos.test/1.webm", mime: "video/webm", size: 100, duration: 3 }],
+      code: "invalid_reference_video",
+    },
+    {
+      name: "video larger than 200 MB",
+      model: "doubao-seedance-2-0-260128",
+      assets: [{
+        id: "1",
+        type: "video",
+        url: "https://tos.test/1.mp4",
+        mime: "video/mp4",
+        size: 200 * 1024 * 1024 + 1,
+        duration: 3,
+      }],
+      code: "invalid_reference_video",
+    },
+    {
+      name: "video shorter than two seconds",
+      model: "doubao-seedance-2-0-260128",
+      assets: [{ id: "1", type: "video", url: "https://tos.test/1.mp4", mime: "video/mp4", size: 100, duration: 1.9 }],
+      code: "invalid_reference_video",
+    },
+    {
+      name: "video with a side shorter than 300 pixels",
+      model: "doubao-seedance-2-0-260128",
+      assets: [{
+        id: "1",
+        type: "video",
+        url: "https://tos.test/1.mp4",
+        mime: "video/mp4",
+        size: 100,
+        width: 1280,
+        height: 180,
+        duration: 3,
+      }],
+      code: "invalid_reference_video",
+    },
+    {
+      name: "video below the minimum total pixel count",
+      model: "doubao-seedance-2-0-260128",
+      assets: [{
+        id: "1",
+        type: "video",
+        url: "https://tos.test/1.mp4",
+        mime: "video/mp4",
+        size: 100,
+        width: 640,
+        height: 360,
+        duration: 3,
+      }],
+      code: "invalid_reference_video",
+    },
+    {
+      name: "known total duration above 15 seconds",
+      model: "doubao-seedance-2-0-260128",
+      assets: [
+        { id: "1", type: "video", url: "https://tos.test/1.mp4", mime: "video/mp4", size: 100, duration: 8 },
+        { id: "2", type: "video", url: "https://tos.test/2.mov", mime: "video/quicktime", size: 100, duration: 8 },
+      ],
+      code: "invalid_reference_video",
+    },
+  ])("fails $name before provider submit", async ({ model, assets, code }) => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn();
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "303",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "非法参考素材",
+          model_id: model,
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          reference_asset_ids: assets.map((asset) => asset.id),
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-invalid",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue(assets),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn().mockResolvedValue(true),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-invalid",
+      jobId: "303",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+    });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(repo.failVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ code }),
+    );
+  });
+
+  it.each([
+    {
+      name: "frame inputs mixed with ordinary references",
+      input: {
+        first_frame_asset_id: "1",
+        reference_asset_ids: ["2"],
+      },
+    },
+    {
+      name: "a non-array reference_asset_ids value",
+      input: {
+        reference_asset_ids: "2",
+      },
+    },
+  ])("rejects $name as invalid_video_inputs before provider submit", async ({ input }) => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn();
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "304",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "含糊输入",
+          model_id: "doubao-seedance-2-0-260128",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          ...input,
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-mixed",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn(),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn().mockResolvedValue(true),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-mixed",
+      jobId: "304",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+    });
+
+    expect(repo.resolveInputAssets).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    expect(repo.failVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "invalid_video_inputs" }),
+    );
   });
 
   it("persists the provider task id so another worker can resume polling", async () => {
@@ -212,6 +547,9 @@ describe("video job runner recovery", () => {
       status: "succeeded",
       outputUrl: "https://bucket.test/generated/9/video/result.mp4",
     });
+    expect(repo.publishVideoResult).toHaveBeenCalledWith(
+      expect.objectContaining({ duration: 5 }),
+    );
   });
 
   it("schedules another BullMQ step when the provider is still processing", async () => {

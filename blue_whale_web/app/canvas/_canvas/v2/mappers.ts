@@ -71,9 +71,15 @@ export function dockMediaToRecipeRefs(media: DockMediaItem[]): RecipeInput[] {
 
 export function recipeToDockPrefill(gen: GenerationRecipe): DockPrefill {
   const params = gen.params as Partial<ImageGenParams & VideoGenParams>;
-  // references 保留各自 kind（image/video/audio）——视频 Dock 按 kind 分到 referenceImages/Videos/Audios
+  // references 保留原始 kind 与顺序，供 Dock 刷新后原样回填。
   const refs = gen.inputs.references?.flatMap((r) =>
-    r.url && r.kind !== "text" ? [{ url: r.url, kind: r.kind as "image" | "video" | "audio" }] : [],
+    r.url && r.kind !== "text"
+      ? [{
+          url: r.url,
+          kind: r.kind as "image" | "video" | "audio",
+          ...(r.assetId ? { assetId: r.assetId } : {}),
+        }]
+      : [],
   );
   return {
     prompt: gen.inputs.prompt?.text,
@@ -85,7 +91,36 @@ export function recipeToDockPrefill(gen: GenerationRecipe): DockPrefill {
     refMode: params.refMode,
     firstFrameUrl: gen.inputs.firstFrame?.url,
     lastFrameUrl: gen.inputs.lastFrame?.url,
+    firstFrameAssetId: gen.inputs.firstFrame?.assetId,
+    lastFrameAssetId: gen.inputs.lastFrame?.assetId,
     references: refs && refs.length ? refs : undefined,
+  };
+}
+
+export function canvasNodeToDockMedia(
+  node: {
+    id: string;
+    data: {
+      kind: NodeKindId;
+      content?: string;
+      assetId?: string;
+    };
+  },
+  src: string,
+): DockMediaItem | null {
+  if (
+    node.data.kind !== "image" &&
+    node.data.kind !== "video" &&
+    node.data.kind !== "audio"
+  ) {
+    return null;
+  }
+  return {
+    id: node.id,
+    type: node.data.kind,
+    name: node.data.content || "未命名素材",
+    src,
+    assetId: node.data.assetId,
   };
 }
 
@@ -102,7 +137,10 @@ export function buildCrossmodalRefill(
   const name = node.data.content || "未命名素材";
   const type = node.data.kind; // image|video|audio ∈ DockMediaItem["type"]
   switch (actionId) {
-    case "video": // 生成视频（图/视/音 → video Dock 带参考）
+    case "video": // 生成视频（图/视 → video Dock 带参考）
+      if (type === "audio") return null;
+      if (!src) return null;
+      return { mode: actionId, media: { id: node.id, type, name, src } };
     case "audio": // 生成音频（图/视/音 → audio Dock 带参考，mock）
       if (!src) return null;
       return { mode: actionId, media: { id: node.id, type, name, src } };
