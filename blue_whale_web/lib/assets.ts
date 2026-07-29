@@ -58,6 +58,37 @@ function uploadMime(file: File, type: "image" | "video" | "audio"): string {
 }
 
 /**
+ * PUT 直连 TOS 带上传进度（fetch 无 upload 进度，需 XHR）。
+ * onprogress 按 loaded/total 回报 0-100 百分比；非 2xx / 网络错误 / 中止均 reject。
+ */
+function putWithProgress(
+  url: string,
+  headers: Record<string, string>,
+  file: File,
+  onProgress: (pct: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    for (const [key, value] of Object.entries(headers)) {
+      xhr.setRequestHeader(key, value);
+    }
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) {
+        onProgress((e.loaded / e.total) * 100);
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`上传失败: ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error("上传失败: 网络错误"));
+    xhr.onabort = () => reject(new Error("上传失败: 已取消"));
+    xhr.send(file);
+  });
+}
+
+/**
  * 上传媒体文件到对象存储（Node 资产 presign + PUT + complete 三步流）。
  *
  * 流程：① POST /api/agent/assets/uploads/presign → { storage_key, upload_url, headers }；
@@ -67,11 +98,13 @@ function uploadMime(file: File, type: "image" | "video" | "audio"): string {
  * url 为 TOS 永久地址，可持久化到画布节点，刷新不丢。
  *
  * projectId 在 complete 时校验归属并写入 Asset.project_id。
+ * 传入 onProgress 时 PUT 改走 XHR 以回报上传百分比（占位卡进度环）；不传保持 fetch 原路径。
  */
 export async function uploadAsset(
   file: File,
   projectId?: number,
   declaredType?: "image" | "video" | "audio",
+  onProgress?: (pct: number) => void,
 ): Promise<{ id: string; url: string }> {
   const type = declaredType ?? detectMediaKind(file);
   const metadata =
@@ -82,12 +115,21 @@ export async function uploadAsset(
     mime,
     size: file.size,
   });
-  const putResp = await fetch(presign.upload_url, {
-    method: "PUT",
-    headers: presign.headers,
-    body: file,
-  });
-  if (!putResp.ok) throw new Error(`上传失败: ${putResp.status}`);
+  if (onProgress) {
+    await putWithProgress(
+      presign.upload_url,
+      presign.headers,
+      file,
+      onProgress,
+    );
+  } else {
+    const putResp = await fetch(presign.upload_url, {
+      method: "PUT",
+      headers: presign.headers,
+      body: file,
+    });
+    if (!putResp.ok) throw new Error(`上传失败: ${putResp.status}`);
+  }
   const asset = await completeAsset({
     ...(projectId == null ? {} : { project_id: String(projectId) }),
     type,

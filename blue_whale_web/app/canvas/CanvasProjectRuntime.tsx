@@ -11,7 +11,9 @@ import { ArrowLeft } from "lucide-react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useAuth } from "@/components/auth/AuthContext";
 import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
+import { toast } from "@/components/Toast";
 import { uploadAsset } from "@/lib/assets";
+import { UPLOAD_ACCEPT, selectUploadFiles } from "@/lib/uploadRules";
 
 import { useCanvasStore } from "./_canvas/store";
 import { uploadMediaToCanvas } from "./_canvas/uploadMedia";
@@ -29,7 +31,7 @@ import {
   cardToV2ImageFields,
   recipeToDockPrefill,
 } from "./_canvas/v2/mappers";
-import { findPlacement } from "./_canvas/placement";
+import { findPlacement, type Rect } from "./_canvas/placement";
 import { dockAccept, dockPickHint } from "./_canvas/utils";
 import { useCanvasGeneration } from "./_canvas/hooks/useCanvasGeneration";
 import { useCanvasProjectHydration } from "./_canvas/hooks/useCanvasProjectHydration";
@@ -181,6 +183,16 @@ export function CanvasProjectRuntime({
   const spaceHeld = useSpaceHeld();
   const effectiveMode = effectiveToolMode(toolMode, spaceHeld);
 
+  /** 上传失败重试/移除用：nodeId → 原 File + 本地预览 object URL（成功后 revoke 并删条目）。 */
+  const uploadFilesRef = useRef(
+    new Map<string, { file: File; previewUrl: string }>(),
+  );
+  /** 同一 tick 内连续 addNode（多选上传）时，nodes state 尚未更新，已放占位累积在此防重叠。 */
+  const extraPlacedRef = useRef<Rect[]>([]);
+  useEffect(() => {
+    extraPlacedRef.current = [];
+  }, [nodes]);
+
   const addNode = useCallback(
     (
       kind: NodeKindId,
@@ -203,16 +215,28 @@ export function CanvasProjectRuntime({
         kind === "text"
           ? { x: worldX - w / 2, y: worldY - h / 2 }
           : findPlacement({
-              existing: nodes.map((n) => ({
-                x: n.position.x,
-                y: n.position.y,
-                width: n.width ?? 200,
-                height: n.height ?? 200,
-              })),
+              // 同一 tick 内多选上传的占位还没进 nodes state，用 extraPlacedRef 补齐防重叠
+              existing: [
+                ...nodes.map((n) => ({
+                  x: n.position.x,
+                  y: n.position.y,
+                  width: n.width ?? 200,
+                  height: n.height ?? 200,
+                })),
+                ...extraPlacedRef.current,
+              ],
               anchor: { x: worldX, y: worldY },
               nodeWidth: w,
               nodeHeight: h,
             });
+      if (kind !== "text") {
+        extraPlacedRef.current.push({
+          x: position.x,
+          y: position.y,
+          width: w,
+          height: h,
+        });
+      }
       const node: CanvasNode = {
         id,
         type: kind,
@@ -426,25 +450,44 @@ export function CanvasProjectRuntime({
   }, []);
 
   const uploadCanvasMedia = useCallback(
-    (file: File) =>
-      uploadMediaToCanvas({
+    (file: File) => {
+      const previewUrl = URL.createObjectURL(file);
+      const pending = uploadMediaToCanvas({
         file,
         projectId: Number(pid),
+        previewUrl,
         addNode,
         patchNode,
         resizeNode,
         addAsset,
         onError: setGenerateError,
-      }),
+      });
+      // 成功：revoke 预览 URL 并弃 File；失败：留存 File+URL 供错误卡重试/移除
+      void pending.then((result) => {
+        if (result.asset) {
+          URL.revokeObjectURL(previewUrl);
+          uploadFilesRef.current.delete(result.nodeId);
+        } else {
+          uploadFilesRef.current.set(result.nodeId, { file, previewUrl });
+        }
+      });
+      return pending;
+    },
     [addAsset, addNode, patchNode, pid, resizeNode, setGenerateError],
   );
 
   const handleFileChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file || !pid) return;
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
       e.target.value = "";
-      await uploadCanvasMedia(file);
+      if (!files.length || !pid) return;
+      // 白名单+大小校验：合法逐个上传落画布，非法 toast 拒绝（不发请求）
+      selectUploadFiles(files, {
+        upload: (file) => {
+          void uploadCanvasMedia(file);
+        },
+        reject: (reason) => toast.error(reason),
+      });
     },
     [pid, uploadCanvasMedia],
   );
@@ -605,10 +648,45 @@ export function CanvasProjectRuntime({
     (nodeId: string) => {
       const node = nodes.find((n) => n.id === nodeId);
       if (!node) return;
+      // 上传失败卡：用留存的 File 原地重传（不新建节点）；其余维持打开底部 Dock
+      const entry = uploadFilesRef.current.get(nodeId);
+      if (node.data.recipe?.origin === "uploaded" && entry) {
+        const pending = uploadMediaToCanvas({
+          file: entry.file,
+          projectId: Number(pid),
+          existingNodeId: nodeId,
+          previewUrl: entry.previewUrl,
+          addNode,
+          patchNode,
+          resizeNode,
+          addAsset,
+          onError: setGenerateError,
+        });
+        void pending.then((result) => {
+          if (result.asset) {
+            URL.revokeObjectURL(entry.previewUrl);
+            uploadFilesRef.current.delete(nodeId);
+          }
+        });
+        return;
+      }
       setBottomDockMode(node.data.kind === "video" ? "video" : "image");
       setIsBottomDockOpen(true);
     },
-    [nodes],
+    [nodes, pid, addNode, patchNode, resizeNode, addAsset, setGenerateError],
+  );
+
+  /** 上传错误卡「移除」：删节点 + 清留存的 File/预览 URL。 */
+  const handleNodeRemove = useCallback(
+    (nodeId: string) => {
+      const entry = uploadFilesRef.current.get(nodeId);
+      if (entry) {
+        URL.revokeObjectURL(entry.previewUrl);
+        uploadFilesRef.current.delete(nodeId);
+      }
+      onNodesChange([{ type: "remove", id: nodeId }]);
+    },
+    [onNodesChange],
   );
 
   const handleCardGenerated = useCallback(
@@ -635,7 +713,7 @@ export function CanvasProjectRuntime({
       if (id === "select") {
         setToolMode((m) => (m === "mouse" ? "hand" : "mouse"));
       } else if (id === "upload") {
-        openFilePicker("image/*,video/*,audio/*");
+        openFilePicker(UPLOAD_ACCEPT);
       } else if (id === "audio") {
         setBottomDockMode("audio");
         setIsBottomDockOpen((open) =>
@@ -729,7 +807,8 @@ export function CanvasProjectRuntime({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,video/*,audio/*"
+        accept={UPLOAD_ACCEPT}
+        multiple
         className="sr-only"
         onChange={handleFileChange}
         aria-hidden="true"
@@ -762,6 +841,7 @@ export function CanvasProjectRuntime({
             onPaneClick={handleExitPick}
             onNodeAction={handleCanvasNodeAction}
             onNodeRetry={handleNodeRetry}
+            onNodeRemove={handleNodeRemove}
             onEditPrompt={onEditPrompt}
             picking={pickingFor !== null}
             pickingAccept={pickingFor ? dockAccept(pickingFor) : undefined}
