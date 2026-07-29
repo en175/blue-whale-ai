@@ -77,3 +77,81 @@ describe("VideoDockContent references", () => {
     expect(onPickFromCanvas).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("VideoDockContent 首尾帧槽（IK55VL）", () => {
+  afterEach(() => cleanup());
+
+  const frameProps = (overrides: Partial<VideoDockContentProps> = {}) =>
+    props({
+      refMode: { id: "first-last", label: "首尾帧" },
+      onFrameUpload: vi.fn(),
+      onFrameClear: vi.fn(),
+      onSwapFrames: vi.fn(),
+      onPickFrameFromCanvas: vi.fn(),
+      ...overrides,
+    });
+
+  it("first-last 模式渲染首帧/尾帧槽；非 first-last 不渲染", () => {
+    const { unmount } = render(<VideoDockContent {...frameProps()} />);
+    expect(screen.getByRole("button", { name: "首帧" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "尾帧" })).toBeInTheDocument();
+    unmount();
+
+    render(
+      <VideoDockContent
+        {...frameProps({ refMode: { id: "omni", label: "全能参考" } })}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "首帧" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "尾帧" })).toBeNull();
+  });
+
+  it("本地上传入槽：首帧文件进入 onFrameUpload(file, 'first')", () => {
+    const onFrameUpload = vi.fn();
+    const { container } = render(
+      <VideoDockContent {...frameProps({ onFrameUpload })} />,
+    );
+    const inputs = Array.from(
+      container.querySelectorAll<HTMLInputElement>('input[type="file"]'),
+    ).filter((candidate) => candidate.accept.includes("image/jpeg"));
+    expect(inputs).toHaveLength(2);
+
+    const file = new File(["img"], "first.png", { type: "image/png" });
+    fireEvent.change(inputs[0], { target: { files: [file] } });
+    expect(onFrameUpload).toHaveBeenCalledWith(file, "first");
+
+    fireEvent.change(inputs[1], { target: { files: [file] } });
+    expect(onFrameUpload).toHaveBeenCalledWith(file, "last");
+  });
+
+  it("已填槽显示预览，清除按钮触发 onFrameClear", () => {
+    const onFrameClear = vi.fn();
+    render(
+      <VideoDockContent
+        {...frameProps({
+          firstFrameUrl: "https://tos/first.png",
+          onFrameClear,
+        })}
+      />,
+    );
+    expect(screen.getByRole("img", { name: "首帧" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "清除首帧" }));
+    expect(onFrameClear).toHaveBeenCalledWith("first");
+  });
+
+  it("交换按钮触发 onSwapFrames", () => {
+    const onSwapFrames = vi.fn();
+    render(<VideoDockContent {...frameProps({ onSwapFrames })} />);
+    fireEvent.click(screen.getByRole("button", { name: "交换首尾帧" }));
+    expect(onSwapFrames).toHaveBeenCalledTimes(1);
+  });
+
+  it("画布选取入槽：触发 onPickFrameFromCanvas(slot)", () => {
+    const onPickFrameFromCanvas = vi.fn();
+    render(<VideoDockContent {...frameProps({ onPickFrameFromCanvas })} />);
+    fireEvent.click(screen.getByRole("button", { name: "从画布选择首帧" }));
+    expect(onPickFrameFromCanvas).toHaveBeenCalledWith("first");
+    fireEvent.click(screen.getByRole("button", { name: "从画布选择尾帧" }));
+    expect(onPickFrameFromCanvas).toHaveBeenCalledWith("last");
+  });
+});

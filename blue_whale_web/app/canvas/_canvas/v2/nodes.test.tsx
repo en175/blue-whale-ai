@@ -241,3 +241,30 @@ describe("MediaStateBody / image 回归", () => {
     );
   });
 });
+
+describe("MediaStateBody / 视频生成中进度与取消（IK55VL）", () => {
+  it("video running 带 progress：显示「处理中 X%」", () => {
+    render(<MediaStateBody kind="video" status="running" progress={45} />);
+    expect(screen.getByTestId("node-loading")).toBeInTheDocument();
+    expect(screen.getByText("处理中 45%")).toBeInTheDocument();
+  });
+
+  it("提供 onCancel：渲染「取消生成」入口，点击触发 onCancel", () => {
+    const onCancel = vi.fn();
+    render(
+      <MediaStateBody
+        kind="video"
+        status="running"
+        progress={45}
+        onCancel={onCancel}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "取消生成" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("未提供 onCancel：不渲染取消入口（image / 无 taskId 场景）", () => {
+    render(<MediaStateBody kind="image" status="running" />);
+    expect(screen.queryByRole("button", { name: "取消生成" })).toBeNull();
+  });
+});
