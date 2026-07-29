@@ -3,6 +3,28 @@ import { describe, expect, it, vi } from "vitest";
 import { createAssetRepo } from "./asset-repo.js";
 
 describe("AssetRepo upload persistence", () => {
+  it("soft-deletes only an active Asset owned by the requested user", async () => {
+    const assets = {
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    };
+    const repo = createAssetRepo({ assets } as never);
+
+    await expect(repo.softDeleteOwned("42", "9")).resolves.toBe(true);
+
+    expect(assets.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: BigInt(42),
+        user_id: BigInt(9),
+        is_delete: false,
+      },
+      data: {
+        is_delete: true,
+        version: { increment: 1 },
+        gmt_modified: expect.any(Date),
+      },
+    });
+  });
+
   it("commits a verified upload directly into the owner's project", async () => {
     const committed = {
       id: BigInt(42),

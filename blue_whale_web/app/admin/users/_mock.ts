@@ -1,3 +1,5 @@
+import { writeAuditLog } from "../_lib/audit-log";
+
 export type AdminUserInfo = {
   id: string;
   userId: number;
@@ -71,14 +73,14 @@ export const MOCK_RECHARGE_RECORDS: RechargeRecord[] = [
 ];
 
 export const MOCK_CONSUME_RECORDS: ConsumeRecord[] = [
-  { id: "cs_1", userId: 1001, generationType: "image", description: "AI 图片生成 — 4张 · HD", points: 40, paramsSnapshot: { count: 4, quality: "hd", model: "gpt-4o" }, createdAt: "2026-07-27T09:00:00Z" },
-  { id: "cs_2", userId: 1001, generationType: "video", description: "AI 视频生成 — 10s · 1080p", points: 500, paramsSnapshot: { duration_seconds: 10, quality: "1080p", model: "claude-sonnet-5" }, createdAt: "2026-07-26T15:00:00Z" },
-  { id: "cs_3", userId: 1001, generationType: "image", description: "AI 图片生成 — 2张 · 4K", points: 60, paramsSnapshot: { count: 2, quality: "4k", model: "claude-fable-5" }, createdAt: "2026-07-25T11:00:00Z" },
-  { id: "cs_4", userId: 1002, generationType: "image", description: "AI 图片生成 — 1张 · HD", points: 10, paramsSnapshot: { count: 1, quality: "hd", model: "gpt-4o-mini" }, createdAt: "2026-07-27T10:30:00Z" },
-  { id: "cs_5", userId: 1002, generationType: "image", description: "AI 图片生成 — 6张 · HD", points: 60, paramsSnapshot: { count: 6, quality: "hd", model: "gpt-4o" }, createdAt: "2026-07-25T14:00:00Z" },
-  { id: "cs_6", userId: 1003, generationType: "video", description: "AI 视频生成 — 30s · 4K", points: 3000, paramsSnapshot: { duration_seconds: 30, quality: "4k", model: "claude-opus-5" }, createdAt: "2026-07-27T08:00:00Z" },
-  { id: "cs_7", userId: 1003, generationType: "image", description: "AI 图片生成 — 8张 · HD", points: 80, paramsSnapshot: { count: 8, quality: "hd", model: "gpt-4o" }, createdAt: "2026-07-26T20:00:00Z" },
-  { id: "cs_8", userId: 1004, generationType: "image", description: "AI 图片生成 — 2张 · SD", points: 5, paramsSnapshot: { count: 2, quality: "sd", model: "gpt-4o-mini" }, createdAt: "2026-07-26T12:00:00Z" },
+  { id: "cs_1", userId: 1001, generationType: "image", description: "AI 图片生成 — 4张 · 1920×1080", points: 40, paramsSnapshot: { count: 4, resolution: "1920×1080", model: "gpt-4o" }, createdAt: "2026-07-27T09:00:00Z" },
+  { id: "cs_2", userId: 1001, generationType: "video", description: "AI 视频生成 — 10s · 1920×1080", points: 500, paramsSnapshot: { duration_seconds: 10, resolution: "1920×1080", model: "claude-sonnet-5" }, createdAt: "2026-07-26T15:00:00Z" },
+  { id: "cs_3", userId: 1001, generationType: "image", description: "AI 图片生成 — 2张 · 4096×2160", points: 60, paramsSnapshot: { count: 2, resolution: "4096×2160", model: "claude-fable-5" }, createdAt: "2026-07-25T11:00:00Z" },
+  { id: "cs_4", userId: 1002, generationType: "image", description: "AI 图片生成 — 1张 · 1920×1080", points: 10, paramsSnapshot: { count: 1, resolution: "1920×1080", model: "gpt-4o-mini" }, createdAt: "2026-07-27T10:30:00Z" },
+  { id: "cs_5", userId: 1002, generationType: "image", description: "AI 图片生成 — 6张 · 1920×1080", points: 60, paramsSnapshot: { count: 6, resolution: "1920×1080", model: "gpt-4o" }, createdAt: "2026-07-25T14:00:00Z" },
+  { id: "cs_6", userId: 1003, generationType: "video", description: "AI 视频生成 — 30s · 4096×2160", points: 3000, paramsSnapshot: { duration_seconds: 30, resolution: "4096×2160", model: "claude-opus-5" }, createdAt: "2026-07-27T08:00:00Z" },
+  { id: "cs_7", userId: 1003, generationType: "image", description: "AI 图片生成 — 8张 · 1920×1080", points: 80, paramsSnapshot: { count: 8, resolution: "1920×1080", model: "gpt-4o" }, createdAt: "2026-07-26T20:00:00Z" },
+  { id: "cs_8", userId: 1004, generationType: "image", description: "AI 图片生成 — 2张 · 1280×960", points: 5, paramsSnapshot: { count: 2, resolution: "1280×960", model: "gpt-4o-mini" }, createdAt: "2026-07-26T12:00:00Z" },
 ];
 
 export const MOCK_USERS: AdminUserInfo[] = [
@@ -132,6 +134,7 @@ export function adjustBalance(userId: number, amount: number, reason: string, op
   const log: AdjustLog = { id: nextLogId(), userId, nickname: u.nickname, amount, reason, operatorId, operatorName, createdAt: new Date().toISOString() };
   adjustLogs.unshift(log);
   operationLogs.unshift({ id: nextLogId(), userId, action: "adjust", detail: { amount, reason }, operatorName, createdAt: new Date().toISOString() });
+  writeAuditLog({ category: "user", action: "调整积分", target: u.nickname, detail: `${amount > 0 ? "+" : ""}${amount} 积分 — ${reason}`, operator: operatorName });
   return u;
 }
 
@@ -142,6 +145,7 @@ export function freezeUser(userId: number, reason: string, operatorName = "admin
   u.status = "disabled";
   u.updatedAt = new Date().toISOString();
   operationLogs.unshift({ id: nextLogId(), userId, action: "freeze", detail: { reason, previous_status: previous, new_status: "disabled" }, operatorName, createdAt: new Date().toISOString() });
+  writeAuditLog({ category: "user", action: "冻结", target: u.nickname, detail: reason, operator: operatorName });
   return u;
 }
 
@@ -152,5 +156,6 @@ export function unfreezeUser(userId: number, reason: string, operatorName = "adm
   u.status = "active";
   u.updatedAt = new Date().toISOString();
   operationLogs.unshift({ id: nextLogId(), userId, action: "unfreeze", detail: { reason, previous_status: previous, new_status: "active" }, operatorName, createdAt: new Date().toISOString() });
+  writeAuditLog({ category: "user", action: "解冻", target: u.nickname, detail: reason, operator: operatorName });
   return u;
 }

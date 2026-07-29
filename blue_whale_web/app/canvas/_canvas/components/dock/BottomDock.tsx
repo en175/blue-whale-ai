@@ -55,10 +55,6 @@ export function BottomDock({
   focusSignal,
   dockMentionSignal,
   prefillSignal,
-  videoJobStatus,
-  videoJobError,
-  onCancelVideoJob,
-  cancellingVideo = false,
 }: {
   mode: "image" | "video" | "audio";
   onClose: () => void;
@@ -103,11 +99,6 @@ export function BottomDock({
   };
   /** 重新编辑预填（P2）：nonce 递增 → 应用 recipe 参数到 Dock（prompt + video 设置；image 透传 ImageDockContent 由其自行消费） */
   prefillSignal?: PrefillSignal;
-  /** 当前 Project 中最近一次 BottomDock 视频任务的权威状态。 */
-  videoJobStatus?: string | null;
-  videoJobError?: string | null;
-  onCancelVideoJob?: () => void;
-  cancellingVideo?: boolean;
 }) {
   const [input, setInput] = useState("");
   /** 从 editor pill 抽取的参考图 URL（提交 referenceImages），随 handleInput 更新 */
@@ -206,8 +197,6 @@ export function BottomDock({
 
   const path = squirclePath(dockSize.w, dockSize.h, 28.8);
   const isEmpty = input.trim().length === 0 && mentions.length === 0;
-  const canCancelVideo =
-    videoJobStatus === "queued" || videoJobStatus === "processing";
 
   const handleInput = () => {
     const el = editorRef.current;
@@ -274,58 +263,6 @@ export function BottomDock({
               <div className="flex h-8 items-center justify-end border-b border-[var(--tc-border-subtle)] px-3">
                 <CreditBalance compact />
               </div>
-              {mode === "video" && videoJobStatus && (
-                <div
-                  aria-live="polite"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    padding: "8px 12px",
-                    background: "var(--tc-bg-elevated)",
-                    borderBottom: "1px solid var(--tc-border-subtle)",
-                    color:
-                      videoJobStatus === "failed"
-                        ? "var(--tc-destructive)"
-                        : "var(--tc-text-secondary)",
-                    fontSize: 12,
-                    lineHeight: "16px",
-                  }}
-                >
-                  <span>
-                    {videoJobStatus === "queued"
-                      ? "视频任务等待提交"
-                      : videoJobStatus === "processing"
-                        ? "视频生成中"
-                        : videoJobStatus === "cancel_requested"
-                          ? "正在取消视频任务"
-                          : videoJobStatus === "cancelled"
-                            ? "视频生成已取消"
-                            : videoJobStatus === "succeeded"
-                              ? "视频已生成并加入画布"
-                              : videoJobError || "视频生成失败"}
-                  </span>
-                  {canCancelVideo && (
-                    <button
-                      type="button"
-                      onClick={onCancelVideoJob}
-                      disabled={cancellingVideo}
-                      style={{
-                        border: "1px solid var(--tc-border-active)",
-                        borderRadius: 6,
-                        background: "var(--tc-menu-item-hover)",
-                        color: "var(--tc-text-secondary)",
-                        padding: "3px 9px",
-                        cursor: cancellingVideo ? "wait" : "pointer",
-                        opacity: cancellingVideo ? 0.6 : 1,
-                      }}
-                    >
-                      {cancellingVideo ? "取消中…" : "取消生成"}
-                    </button>
-                  )}
-                </div>
-              )}
               {generateError && (
                 <div
                   style={{
@@ -470,6 +407,18 @@ export function BottomDock({
                           (id): id is number => id !== undefined,
                         ),
                       ),
+                      firstFrameAssetId,
+                      lastFrameAssetId,
+                      referenceAssetIds: videoMedia
+                        .filter(
+                          (item) =>
+                            item.type === "image" &&
+                            item.assetId !== undefined &&
+                            Number(item.assetId) !== firstFrameAssetId &&
+                            Number(item.assetId) !== lastFrameAssetId,
+                        )
+                        .map((item) => Number(item.assetId))
+                        .filter((id) => Number.isSafeInteger(id) && id > 0),
                     })
                   }
                   generating={generating}

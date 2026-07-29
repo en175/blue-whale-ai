@@ -94,6 +94,22 @@ const videoArgs: GenerateArgs = {
   },
 };
 
+const videoFrameArgs: GenerateArgs = {
+  mode: "video",
+  inputAssetIds: [11, 12, 13],
+  firstFrameAssetId: 11,
+  lastFrameAssetId: 12,
+  referenceAssetIds: [13],
+  settings: {
+    model: { id: "v1", label: "V1" },
+    resolution: { id: "720p", label: "720p" },
+    aspectRatio: { id: "16:9", label: "16:9" },
+    duration: 5,
+    quantity: "1",
+    refMode: { id: "firstlast", label: "首尾帧" },
+  },
+};
+
 const imageModelCapability = {
   model_id: "m1",
   provider_id: "p",
@@ -212,6 +228,26 @@ describe("useCanvasGeneration.generate", () => {
     expect(result.current.cancellingVideo).toBe(false);
   });
 
+  it("video：首帧、尾帧和普通参考素材分别进入 job payload", async () => {
+    (generation.createProjectGenerationJob as ReturnType<typeof vi.fn>).mockResolvedValue({ generation_job_id: 889, cursor: 0 });
+    const { result } = renderGen();
+
+    await act(async () => {
+      await result.current.generate("首尾帧视频", videoFrameArgs);
+    });
+
+    expect(generation.createProjectGenerationJob).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        input_asset_ids: [11, 12, 13],
+        first_frame_asset_id: 11,
+        last_frame_asset_id: 12,
+        reference_asset_ids: [13],
+      }),
+      expect.any(String),
+    );
+  });
+
   it("audio：建占位 + generateAudio + 写 assetId/done/recipe", async () => {
     (generation.generateAudio as ReturnType<typeof vi.fn>).mockResolvedValue({ url: "a.mp3", assetId: 9 });
     const { result, addNode, patchNode, addAsset } = renderGen();
@@ -304,6 +340,30 @@ describe("useCanvasGeneration.recover", () => {
     expect(addNode).not.toHaveBeenCalled(); // byTaskId 匹配 → 不建重复占位
   });
 
+  it("刷新发现 failed job → 收敛为 error 且不重新启动轮询", async () => {
+    (generation.listJobs as ReturnType<typeof vi.fn>).mockImplementation(
+      ({ status }: { status: string }) =>
+        Promise.resolve(
+          status === "failed"
+            ? [{ job_id: "131", type: "video", status: "failed", progress: 0, input: {}, created_at: "", output_assets: [] }]
+            : [],
+        ),
+    );
+    const existing = { id: "n_failed", type: "video", position: { x: 0, y: 0 }, data: { kind: "video", taskId: "131" } } as unknown as CanvasNode;
+    const { result, patchNode } = renderGen({ nodes: [existing] });
+
+    await act(async () => {
+      await result.current.recover([existing]);
+    });
+
+    expect(generation.listJobs).toHaveBeenCalledWith({ projectId: 1, status: "failed", size: 50 });
+    expect(patchNode).toHaveBeenCalledWith("n_failed", {
+      status: "error",
+      errorMessage: "生成失败",
+    });
+    expect(mockJobs.start).not.toHaveBeenCalled();
+  });
+
   it("无 taskId 候选 → recover 提前返回（不查 listJobs、不建占位）", async () => {
     const { result, addNode } = renderGen({ nodes: [] });
     await act(async () => {
@@ -339,6 +399,50 @@ describe("useCanvasGeneration.reconcile", () => {
 });
 
 describe("useCanvasGeneration.hydrate", () => {
+  it("同批两个图片任务和两个视频任务按各自 taskId 独立恢复", async () => {
+    const nodes = [
+      { id: "img_active", type: "image", position: { x: 0, y: 0 }, data: { kind: "image", taskId: "701" } } as CanvasNode,
+      { id: "img_done", type: "image", position: { x: 0, y: 0 }, data: { kind: "image", taskId: "702" } } as CanvasNode,
+      { id: "video_active", type: "video", position: { x: 0, y: 0 }, data: { kind: "video", taskId: "703" } } as CanvasNode,
+      { id: "video_done", type: "video", position: { x: 0, y: 0 }, data: { kind: "video", taskId: "704" } } as CanvasNode,
+    ];
+    (generation.listJobs as ReturnType<typeof vi.fn>).mockImplementation(
+      ({ status }: { status: string }) => {
+        if (status === "queued") {
+          return Promise.resolve([
+            { job_id: "701", type: "image", status, progress: 0, input: {}, created_at: "", output_assets: [] },
+          ]);
+        }
+        if (status === "processing") {
+          return Promise.resolve([
+            { job_id: "703", type: "video", status, progress: 40, input: {}, created_at: "", output_assets: [] },
+          ]);
+        }
+        if (status === "succeeded") {
+          return Promise.resolve([
+            { job_id: "702", type: "image", status, progress: 100, input: {}, created_at: "", output_assets: [{ id: "802", url: "image-802.png", type: "image", width: null, height: null }] },
+            { job_id: "704", type: "video", status, progress: 100, input: {}, created_at: "", output_assets: [{ id: "804", url: "video-804.mp4", type: "video", width: null, height: null }] },
+          ]);
+        }
+        return Promise.resolve([]);
+      },
+    );
+    const { result, patchNode, addAsset } = renderGen({ nodes });
+
+    await act(async () => {
+      await result.current.hydrate(nodes);
+    });
+
+    expect(patchNode).toHaveBeenCalledWith("img_active", { status: "running", progress: 0 });
+    expect(patchNode).toHaveBeenCalledWith("video_active", { status: "running", progress: 0 });
+    expect(mockJobs.start).toHaveBeenCalledWith(701, expect.objectContaining({ onSucceeded: expect.any(Function) }));
+    expect(mockJobs.start).toHaveBeenCalledWith(703, expect.objectContaining({ onSucceeded: expect.any(Function) }));
+    expect(patchNode).toHaveBeenCalledWith("img_done", expect.objectContaining({ assetId: "802", status: "done" }));
+    expect(patchNode).toHaveBeenCalledWith("video_done", expect.objectContaining({ assetId: "804", status: "done" }));
+    expect(addAsset).toHaveBeenCalledWith(expect.objectContaining({ id: "802", kind: "image", src: "image-802.png" }));
+    expect(addAsset).toHaveBeenCalledWith(expect.objectContaining({ id: "804", kind: "video", src: "video-804.mp4" }));
+  });
+
   it("refresh batch-hydrates uploaded canvas assets from one project snapshot without per-node GETs", async () => {
     mockLoadSnapshot.mockResolvedValueOnce({
       assets: {
@@ -514,7 +618,7 @@ describe("useCanvasGeneration.hydrate", () => {
       await result.current.hydrate(nodes);
     });
     expect(mockLoadSnapshot).toHaveBeenCalledTimes(1);
-    // recover(queued + processing) + reconcile(succeeded)
-    expect(generation.listJobs).toHaveBeenCalledTimes(3);
+    // recover(queued + processing + failed) + reconcile(succeeded)
+    expect(generation.listJobs).toHaveBeenCalledTimes(4);
   });
 });

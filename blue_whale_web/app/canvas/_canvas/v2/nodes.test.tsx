@@ -17,6 +17,13 @@ vi.mock("@/lib/api-client", () => ({ apiFetch: vi.fn() }));
  * 视频首帧封面（preload=metadata + 首帧就绪前占位防黑）。纯展示组件，无 RF/store 依赖。
  */
 describe("MediaStateBody / audio 播放", () => {
+  it("running 使用与媒体来源无关的处理中占位文案", () => {
+    render(<MediaStateBody kind="image" status="running" content="cat.png" />);
+
+    expect(screen.getByTestId("node-loading")).toBeInTheDocument();
+    expect(screen.getByText("处理中…")).toBeInTheDocument();
+  });
+
   it("audio 有 src：渲染 AudioPlayer（<audio preload=metadata> + 控制条），可播放", () => {
     const { container } = render(
       <MediaStateBody

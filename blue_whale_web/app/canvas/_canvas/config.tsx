@@ -73,10 +73,9 @@ export const NODE_TOOLBAR_IMAGE_ACTIONS: NodeToolbarAction[] = [
   { id: "mention", label: "添加到对话", icon: <AtSign width={16} height={16} className="tc-node-toolbar-icon" />, iconOnly: true },
 ];
 
-/** v2 视频节点操作菜单（跨模态：提取音频 / 生成视频）。 */
+/** v2 视频节点操作菜单（跨模态：生成视频）。 */
 export const NODE_TOOLBAR_VIDEO_ACTIONS: NodeToolbarAction[] = [
   { id: "refresh", label: "重新编辑", icon: <RefreshCw width={16} height={16} className="tc-node-toolbar-icon" /> },
-  { id: "extract-audio", label: "提取音频", icon: <AudioLines width={16} height={16} className="tc-node-toolbar-icon" /> },
   { id: "video", label: "生成视频", icon: <Video width={16} height={16} className="tc-node-toolbar-icon" /> },
   { id: "divider", label: "", icon: null },
   { id: "info", label: "信息", icon: <Info width={16} height={16} className="tc-node-toolbar-icon" />, iconOnly: true },

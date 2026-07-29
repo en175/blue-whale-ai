@@ -51,6 +51,7 @@ describe("new-api client", () => {
     expect(JSON.parse(String(requests[3]?.init.body))).toMatchObject({
       model: "image-model",
       prompt: "a whale",
+      n: 1,
       response_format: "url",
       stream: false,
     });
@@ -64,6 +65,32 @@ describe("new-api client", () => {
 
     await expect(client.generateImages("sk-test", { model: "m", prompt: "p", n: 1 })).rejects.toEqual(
       expect.objectContaining<Partial<NewApiError>>({ status: 402, message: "余额不足" }),
+    );
+  });
+
+  it("preserves nested gateway error details from failed requests", async () => {
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async () =>
+        jsonResponse(
+          {
+            error: {
+              code: "invalid_size",
+              message: "size must be one of 1024x1024, 2048x2048",
+            },
+          },
+          400,
+        ),
+    });
+
+    await expect(
+      client.generateImages("sk-test", { model: "m", prompt: "p", size: "2K", n: 1 }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<NewApiError>>({
+        status: 400,
+        code: "invalid_size",
+        message: "size must be one of 1024x1024, 2048x2048",
+      }),
     );
   });
 
@@ -150,5 +177,30 @@ describe("new-api client", () => {
           new Headers(init.headers).get("Authorization") === "Bearer sk-test",
       ),
     ).toBe(true);
+  });
+
+  it("does not silently collapse unsupported first/last-frame video inputs", async () => {
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async () => jsonResponse({ task_id: "task-frames", status: "queued" }),
+    });
+
+    await expect(
+      client.submitVideo("sk-test", {
+        model: "video-model",
+        prompt: "从首帧到尾帧",
+        duration: 5,
+        width: 1280,
+        height: 720,
+        firstFrameImage: "https://cdn.test/first.png",
+        lastFrameImage: "https://cdn.test/last.png",
+        referenceImages: [],
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<NewApiError>>({
+        status: 422,
+        code: "unsupported_video_inputs",
+      }),
+    );
   });
 });

@@ -5,7 +5,7 @@ export function Table({ children }: { children: React.ReactNode }) {
 }
 
 export function TableHeader({ children }: { children: React.ReactNode }) {
-  return <thead><tr className="border-b border-[var(--tc-border)] bg-[var(--tc-bg-surface)]">{children}</tr></thead>;
+  return <thead className="border-b border-[var(--tc-border)] bg-[var(--tc-bg-surface)]">{children}</thead>;
 }
 
 export function TableHead({ children, className = "" }: { children: React.ReactNode; className?: string }) {

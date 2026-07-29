@@ -1,3 +1,5 @@
+import { writeAuditLog } from "../_lib/audit-log";
+
 export type AdminOrder = {
   id: string;
   tradeNo: string;
@@ -71,6 +73,7 @@ export function confirmOrder(tradeNo: string, reason: string, operatorName = "ad
   o.arrivedAt = new Date().toISOString();
   o.platformRefNo = `MANUAL_${tradeNo}_${Date.now()}`;
   operationLogs.unshift({ id: nextOpLogId(), tradeNo, action: "confirm", reason, operatorName, createdAt: new Date().toISOString() });
+  writeAuditLog({ category: "order", action: "手动确认", target: tradeNo, detail: reason, operator: operatorName });
   return o;
 }
 

@@ -48,7 +48,7 @@ export type PresignAssetResponse = {
 
 /** `POST /api/agent/assets/uploads/complete` 请求 */
 export type CompleteAssetRequest = PresignAssetRequest & {
-  project_id: string;
+  project_id?: string;
   storage_key: string;
   width?: number;
   height?: number;

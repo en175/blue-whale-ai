@@ -68,6 +68,50 @@ describe("handlePresignAsset", () => {
 });
 
 describe("handleCompleteAsset", () => {
+  it("submits a user-global library Asset without project ownership lookup", async () => {
+    const deps = makeDeps();
+    deps.uploads.findCommittedUpload.mockResolvedValue(null);
+    deps.storage.inspectObject.mockResolvedValue({
+      size: 12,
+      mime: "image/png",
+      publicUrl: "https://bucket.tos.test/uploads/9/image/global.png",
+    });
+    deps.uploads.createUploadedAsset.mockResolvedValue({
+      id: "91",
+      type: "image",
+      storage_key: "uploads/9/image/global.png",
+      url: "https://bucket.tos.test/uploads/9/image/global.png",
+      mime: "image/png",
+      size: BigInt(12),
+      width: null,
+      height: null,
+      duration: null,
+    });
+
+    const result = await handleCompleteAsset(
+      "9",
+      {
+        type: "image",
+        mime: "image/png",
+        size: 12,
+        storage_key: "uploads/9/image/global.png",
+      },
+      deps,
+    );
+
+    expect(deps.projects.findOwnedById).not.toHaveBeenCalled();
+    expect(deps.uploads.createUploadedAsset).toHaveBeenCalledWith({
+      userId: "9",
+      projectId: "0",
+      type: "image",
+      mime: "image/png",
+      size: 12,
+      storageKey: "uploads/9/image/global.png",
+      url: "https://bucket.tos.test/uploads/9/image/global.png",
+    });
+    expect(result.data).toMatchObject({ asset_id: "91", status: "ready" });
+  });
+
   it("checks project ownership and TOS metadata before submitting an Asset", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue({ id: "55" });

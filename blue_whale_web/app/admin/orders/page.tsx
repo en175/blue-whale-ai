@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Eye, CheckCircle, Download, Search } from "lucide-react";
+import { CheckCircle, Download, Search } from "lucide-react";
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from "../_components/ui/table";
 import { Badge } from "../_components/ui/badge";
 import { Dialog } from "../_components/ui/dialog";
@@ -138,7 +138,11 @@ export default function AdminOrdersPage() {
             ) : (
               filtered.map((o) => (
                 <TableRow key={o.id}>
-                  <TableCell className="font-mono text-xs text-[var(--tc-text-secondary)]">{o.tradeNo}</TableCell>
+                  <TableCell className="font-mono text-xs">
+                    <button onClick={() => openDetail(o)} className="text-[var(--tc-accent,#3b82f6)] hover:underline text-left">
+                      {o.tradeNo}
+                    </button>
+                  </TableCell>
                   <TableCell className="font-medium">{o.nickname}</TableCell>
                   <TableCell className="text-[var(--tc-text-secondary)] text-sm max-w-[160px] truncate">{o.tierName}</TableCell>
                   <TableCell>¥{o.price}</TableCell>
@@ -151,7 +155,6 @@ export default function AdminOrdersPage() {
                   <TableCell className="text-xs text-[var(--tc-text-tertiary)]">{new Date(o.createdAt).toLocaleString("zh-CN")}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
-                      <button onClick={() => openDetail(o)} className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[var(--tc-text-primary)] hover:bg-[var(--tc-bg-elevated)]" title="详情"><Eye className="h-4 w-4" /></button>
                       {o.status === "pending" && (
                         <button onClick={() => { setConfirmOrderTarget(o); setConfirmReason(""); }}
                           className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[#22c55e] hover:bg-[#22c55e]/10" title="手动确认">
