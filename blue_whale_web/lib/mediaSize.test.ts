@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   scaleToShortSide,
   fallbackMediaSize,
+  readLocalMediaMetadata,
   readMediaNaturalSize,
   MEDIA_SHORT_SIDE,
 } from "./mediaSize";
@@ -63,11 +64,12 @@ function makeFakeImageError() {
 }
 
 /** 假 <video>：src 赋值后微任务触发 onloadedmetadata（带 video 尺寸）。 */
-function makeFakeVideo(videoWidth: number, videoHeight: number) {
+function makeFakeVideo(videoWidth: number, videoHeight: number, duration = 0) {
   const obj: {
     preload: string;
     videoWidth: number;
     videoHeight: number;
+    duration: number;
     onloadedmetadata: (() => void) | null;
     onerror: (() => void) | null;
     _src: string;
@@ -76,6 +78,7 @@ function makeFakeVideo(videoWidth: number, videoHeight: number) {
     preload: "",
     videoWidth: 0,
     videoHeight: 0,
+    duration: 0,
     onloadedmetadata: null,
     onerror: null,
     _src: "",
@@ -91,6 +94,7 @@ function makeFakeVideo(videoWidth: number, videoHeight: number) {
       setTimeout(() => {
         this.videoWidth = videoWidth;
         this.videoHeight = videoHeight;
+        this.duration = duration;
         this.onloadedmetadata?.();
       }, 0);
     },
@@ -183,5 +187,32 @@ describe("readMediaNaturalSize", () => {
     const p = readMediaNaturalSize("http://x/never.png", "image");
     await vi.advanceTimersByTimeAsync(3000);
     expect(await p).toEqual(fallbackMediaSize("image"));
+  });
+});
+
+describe("readLocalMediaMetadata", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("reads trusted video dimensions and duration before upload", async () => {
+    const fake = makeFakeVideo(1920, 1080, 6.5);
+    vi.spyOn(document, "createElement").mockReturnValue(
+      fake as unknown as HTMLVideoElement,
+    );
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn(() => "blob:reference-video"),
+      revokeObjectURL,
+    });
+
+    await expect(
+      readLocalMediaMetadata(
+        new File(["video"], "reference.mp4", { type: "video/mp4" }),
+        "video",
+      ),
+    ).resolves.toEqual({ width: 1920, height: 1080, duration: 6.5 });
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:reference-video");
   });
 });

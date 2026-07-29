@@ -9,6 +9,7 @@
 
 export type MediaKind = "image" | "video" | "audio";
 export type PixelSize = { width: number; height: number };
+export type LocalMediaMetadata = Partial<PixelSize> & { duration?: number };
 
 /** 短边基准边长（与 `ASPECT_RATIO_BASE` 一致）。 */
 export const MEDIA_SHORT_SIDE = 200;
@@ -104,5 +105,55 @@ export function readMediaNaturalSize(
       };
       vid.src = url;
     }
+  });
+}
+
+export function readLocalMediaMetadata(
+  file: File,
+  kind: MediaKind,
+): Promise<LocalMediaMetadata> {
+  if (kind !== "video") return Promise.resolve({});
+
+  return new Promise<LocalMediaMetadata>((resolve) => {
+    let objectUrl: string;
+    try {
+      objectUrl = URL.createObjectURL(file);
+    } catch {
+      resolve({});
+      return;
+    }
+
+    let done = false;
+    const finish = (metadata: LocalMediaMetadata) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      URL.revokeObjectURL(objectUrl);
+      resolve(metadata);
+    };
+    const timer = setTimeout(() => finish({}), READ_TIMEOUT_MS);
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      const width =
+        Number.isFinite(video.videoWidth) && video.videoWidth > 0
+          ? video.videoWidth
+          : undefined;
+      const height =
+        Number.isFinite(video.videoHeight) && video.videoHeight > 0
+          ? video.videoHeight
+          : undefined;
+      const duration =
+        Number.isFinite(video.duration) && video.duration > 0
+          ? video.duration
+          : undefined;
+      finish({
+        ...(width !== undefined ? { width } : {}),
+        ...(height !== undefined ? { height } : {}),
+        ...(duration !== undefined ? { duration } : {}),
+      });
+    };
+    video.onerror = () => finish({});
+    video.src = objectUrl;
   });
 }

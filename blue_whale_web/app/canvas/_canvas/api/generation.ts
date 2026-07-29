@@ -36,12 +36,11 @@ export type ImageModelCapability = {
   };
 };
 
-export type CreateProjectGenerationJobPayload = {
-  input_asset_ids: number[];
-  expected_output_count: number;
-} & (
+export type CreateProjectGenerationJobPayload =
   | {
       type: "image";
+      input_asset_ids: number[];
+      expected_output_count: number;
       parameters: {
         prompt: string;
         aspect_ratio: string;
@@ -57,6 +56,7 @@ export type CreateProjectGenerationJobPayload = {
     }
   | {
       type: "video";
+      expected_output_count: number;
       parameters: {
         prompt: string;
         model_id: string;
@@ -67,8 +67,7 @@ export type CreateProjectGenerationJobPayload = {
       first_frame_asset_id?: number;
       last_frame_asset_id?: number;
       reference_asset_ids?: number[];
-    }
-);
+    };
 
 export type AcceptedProjectGenerationJob = {
   generation_job_id: number;
@@ -212,6 +211,7 @@ export type JobListItem = {
     width: number | null;
     height: number | null;
   }[];
+  error: { code: string; message: string; retryable?: boolean } | null;
 };
 
 type JobListPage = {
@@ -223,15 +223,16 @@ type JobListPage = {
 
 /** 列任务（recover processing / reconcile succeeded）；展平 records 数组返回。 */
 export function listJobs(opts: {
-  projectId: number | string;
+  projectId?: number | string;
   status?: string;
   size?: number;
+  jobIds?: Array<number | string>;
 }): Promise<JobListItem[]> {
-  const qs = new URLSearchParams({
-    projectId: String(opts.projectId),
-    size: String(opts.size ?? 50),
-  });
+  const jobIds = opts.jobIds?.map(String) ?? [];
+  const qs = new URLSearchParams({ size: String(opts.size ?? (jobIds.length || 50)) });
+  if (opts.projectId !== undefined) qs.set("projectId", String(opts.projectId));
   if (opts.status) qs.set("status", opts.status);
+  if (jobIds.length > 0) qs.set("ids", jobIds.join(","));
   return request<JobListPage>(`/jobs?${qs.toString()}`, "GET").then(
     (p) => p.records,
   );

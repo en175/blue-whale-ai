@@ -588,6 +588,7 @@ CREATE TABLE IF NOT EXISTS assets
     width             INT NULL,
     height            INT NULL,
     duration          INT NULL,
+    duration_ms       INT NULL,
     source            VARCHAR(32) NOT NULL,
     status            VARCHAR(32) NOT NULL,
     gmt_create        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

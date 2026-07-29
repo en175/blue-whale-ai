@@ -13,6 +13,16 @@ export type VideoWorkerInputAsset = {
   id: string;
   type: string;
   url: string;
+  mime?: string | null;
+  size?: number | null;
+  width?: number | null;
+  height?: number | null;
+  duration?: number | null;
+};
+
+export type VideoReference = {
+  type: "image" | "video";
+  url: string;
 };
 
 export type StoredVideo = {
@@ -36,9 +46,11 @@ export interface VideoTaskProvider {
     duration: number;
     width: number;
     height: number;
+    resolution: string;
+    ratio: string;
     firstFrameImage?: string;
     lastFrameImage?: string;
-    referenceImages: string[];
+    references: VideoReference[];
   }): Promise<{ taskId: string; status: string }>;
   poll(taskId: string): Promise<VideoTaskObservation>;
 }
@@ -75,6 +87,7 @@ export interface VideoJobRunnerRepo {
     size: number | null;
     width: number;
     height: number;
+    duration: number;
   }): Promise<boolean>;
   failVideoJob(input: {
     jobId: string;
@@ -96,6 +109,16 @@ export interface GenerationCredentialVault {
 
 export interface VideoMediaRelay {
   persist(sourceUrl: string, userId: string): Promise<StoredVideo>;
+}
+
+class VideoInputError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "VideoInputError";
+  }
 }
 
 export async function runVideoJobStep(deps: {
@@ -171,13 +194,14 @@ export async function runVideoJobStep(deps: {
       userId: claim.userId,
       ...stored,
       ...dimensions,
+      duration: Number(claim.input.duration),
     });
     return claim.id;
   } catch (error) {
     await fail(
       deps.repo,
       claim,
-      "provider_failed",
+      error instanceof VideoInputError ? error.code : "provider_failed",
       error instanceof Error ? error.message : "视频生成失败",
     );
     return claim.id;
@@ -215,46 +239,222 @@ async function buildSubmitRequest(
 
   const firstFrameAssetId = readAssetId(claim.input.first_frame_asset_id);
   const lastFrameAssetId = readAssetId(claim.input.last_frame_asset_id);
-  const referenceAssetIds = readAssetIds(claim.input.reference_asset_ids);
+  const referenceAssetIds = uniqueAssetIds(readAssetIds(claim.input.reference_asset_ids));
+  if (lastFrameAssetId && !firstFrameAssetId) {
+    throw new VideoInputError("invalid_video_inputs", "尾帧必须与首帧一起使用");
+  }
+  if ((firstFrameAssetId || lastFrameAssetId) && referenceAssetIds.length > 0) {
+    throw new VideoInputError(
+      "invalid_video_inputs",
+      "首尾帧模式不能与普通参考素材混用",
+    );
+  }
   const assetIds = uniqueAssetIds([
     firstFrameAssetId,
     lastFrameAssetId,
     ...referenceAssetIds,
   ]);
   const assets = await repo.resolveInputAssets(assetIds, claim.userId, claim.projectId);
-  if (assets.length !== assetIds.length || assets.some((asset) => asset.type !== "image")) {
-    throw new Error("参考素材不存在或无权访问");
+  if (assets.length !== assetIds.length) {
+    throw new VideoInputError(
+      "reference_asset_unavailable",
+      "参考素材不存在或无权访问",
+    );
   }
 
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
   const firstFrame = firstFrameAssetId ? assetsById.get(firstFrameAssetId) : undefined;
   const lastFrame = lastFrameAssetId ? assetsById.get(lastFrameAssetId) : undefined;
-  const referenceImages = referenceAssetIds.map((id) => assetsById.get(id)?.url).filter(
-    (url): url is string => typeof url === "string",
-  );
+  if (
+    (firstFrame && firstFrame.type !== "image") ||
+    (lastFrame && lastFrame.type !== "image")
+  ) {
+    throw new VideoInputError(
+      "unsupported_reference_type",
+      "首尾帧素材必须是图片",
+    );
+  }
+  const referenceAssets = referenceAssetIds.map((id) => {
+    const asset = assetsById.get(id);
+    if (!asset) {
+      throw new VideoInputError(
+        "reference_asset_unavailable",
+        "参考素材不存在或无权访问",
+      );
+    }
+    return asset;
+  });
+  const references = validateReferences(model, referenceAssets);
+  const resolution = claim.input.resolution as string;
+  const ratio = claim.input.aspect_ratio as string;
 
   return {
     model,
     prompt,
     duration,
     ...dimensions,
+    resolution,
+    ratio,
     ...(firstFrame ? { firstFrameImage: firstFrame.url } : {}),
     ...(lastFrame ? { lastFrameImage: lastFrame.url } : {}),
-    referenceImages,
+    references,
   };
+}
+
+const MAX_REFERENCE_IMAGES = 9;
+const MAX_REFERENCE_VIDEOS = 3;
+const MAX_REFERENCE_VIDEO_BYTES = 200 * 1024 * 1024;
+const MAX_REFERENCE_VIDEO_SECONDS = 15;
+const MIN_REFERENCE_VIDEO_SIDE = 300;
+const MAX_REFERENCE_VIDEO_SIDE = 6000;
+const MIN_REFERENCE_VIDEO_PIXELS = 409_600;
+const MAX_REFERENCE_VIDEO_PIXELS = 8_295_044;
+const MIN_REFERENCE_VIDEO_RATIO = 0.4;
+const MAX_REFERENCE_VIDEO_RATIO = 2.5;
+const REFERENCE_VIDEO_MIMES = new Set(["video/mp4", "video/quicktime"]);
+
+function validateReferences(
+  model: string,
+  assets: VideoWorkerInputAsset[],
+): VideoReference[] {
+  let imageCount = 0;
+  let videoCount = 0;
+  let knownVideoDuration = 0;
+  const references = assets.map<VideoReference>((asset) => {
+    if (asset.type === "image") {
+      imageCount += 1;
+      return { type: "image", url: asset.url };
+    }
+    if (asset.type !== "video") {
+      throw new VideoInputError(
+        "unsupported_reference_type",
+        "视频生成只支持图片或视频参考素材",
+      );
+    }
+    videoCount += 1;
+    validateReferenceVideo(asset);
+    if (asset.duration !== null && asset.duration !== undefined) {
+      knownVideoDuration += asset.duration;
+    }
+    return { type: "video", url: asset.url };
+  });
+
+  if (imageCount > MAX_REFERENCE_IMAGES || videoCount > MAX_REFERENCE_VIDEOS) {
+    throw new VideoInputError(
+      "reference_limit_exceeded",
+      "Seedance 2.0 最多支持 9 张参考图片和 3 个参考视频",
+    );
+  }
+  if (videoCount > 0 && !isSeedance2Model(model)) {
+    throw new VideoInputError(
+      "unsupported_video_inputs",
+      "只有 Seedance 2.0 支持参考视频",
+    );
+  }
+  if (knownVideoDuration > MAX_REFERENCE_VIDEO_SECONDS) {
+    throw new VideoInputError(
+      "invalid_reference_video",
+      "参考视频已知总时长不能超过 15 秒",
+    );
+  }
+  return references;
+}
+
+function validateReferenceVideo(asset: VideoWorkerInputAsset): void {
+  const mime = asset.mime?.split(";", 1)[0]?.trim().toLowerCase();
+  if (mime && !REFERENCE_VIDEO_MIMES.has(mime)) {
+    throw new VideoInputError(
+      "invalid_reference_video",
+      "参考视频只支持 MP4 或 MOV",
+    );
+  }
+  if (
+    asset.size !== null &&
+    asset.size !== undefined &&
+    (!Number.isFinite(asset.size) ||
+      asset.size <= 0 ||
+      asset.size > MAX_REFERENCE_VIDEO_BYTES)
+  ) {
+    throw new VideoInputError(
+      "invalid_reference_video",
+      "单个参考视频不能超过 200 MB",
+    );
+  }
+  if (
+    asset.duration !== null &&
+    asset.duration !== undefined &&
+    (!Number.isFinite(asset.duration) ||
+      asset.duration < 2 ||
+      asset.duration > MAX_REFERENCE_VIDEO_SECONDS)
+  ) {
+    throw new VideoInputError(
+      "invalid_reference_video",
+      "单个参考视频时长必须为 2 至 15 秒",
+    );
+  }
+  validateReferenceVideoDimensions(asset);
+}
+
+function validateReferenceVideoDimensions(asset: VideoWorkerInputAsset): void {
+  const width = asset.width;
+  const height = asset.height;
+  const knownSides = [width, height].filter(
+    (side): side is number => side !== null && side !== undefined,
+  );
+  if (
+    knownSides.some(
+      (side) =>
+        !Number.isInteger(side) ||
+        side < MIN_REFERENCE_VIDEO_SIDE ||
+        side > MAX_REFERENCE_VIDEO_SIDE,
+    )
+  ) {
+    throw new VideoInputError(
+      "invalid_reference_video",
+      "参考视频单边像素必须为 300 至 6000",
+    );
+  }
+  if (width === null || width === undefined || height === null || height === undefined) {
+    return;
+  }
+  const pixels = width * height;
+  const ratio = width / height;
+  if (
+    pixels < MIN_REFERENCE_VIDEO_PIXELS ||
+    pixels > MAX_REFERENCE_VIDEO_PIXELS ||
+    ratio < MIN_REFERENCE_VIDEO_RATIO ||
+    ratio > MAX_REFERENCE_VIDEO_RATIO
+  ) {
+    throw new VideoInputError(
+      "invalid_reference_video",
+      "参考视频宽高比或总像素不满足 Seedance 2.0 要求",
+    );
+  }
+}
+
+function isSeedance2Model(model: string): boolean {
+  return model === "seedance-2" || /^doubao-seedance-2-0(?:-|$)/.test(model);
 }
 
 function readAssetId(value: unknown): string | null {
   if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return String(value);
   if (typeof value === "string" && /^[1-9][0-9]*$/.test(value)) return value;
   if (value === undefined || value === null) return null;
-  throw new Error("视频素材 ID 无效");
+  throw new VideoInputError("invalid_video_inputs", "视频素材 ID 无效");
 }
 
 function readAssetIds(value: unknown): string[] {
   if (value === undefined || value === null) return [];
-  if (!Array.isArray(value)) throw new Error("视频参考素材无效");
-  return value.map(readAssetId).filter((id): id is string => id !== null);
+  if (!Array.isArray(value)) {
+    throw new VideoInputError("invalid_video_inputs", "视频参考素材无效");
+  }
+  return value.map((candidate) => {
+    const id = readAssetId(candidate);
+    if (id === null) {
+      throw new VideoInputError("invalid_video_inputs", "视频参考素材 ID 无效");
+    }
+    return id;
+  });
 }
 
 function uniqueAssetIds(ids: Array<string | null>): string[] {

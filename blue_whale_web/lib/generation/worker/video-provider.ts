@@ -5,6 +5,8 @@ export interface GenerateVideoInput {
   duration: number;
   width: number;
   height: number;
+  resolution: string;
+  ratio: string;
   /** 已通过项目/用户归属校验的图片，使用 URL 或 data URI。 */
   image?: string;
 }

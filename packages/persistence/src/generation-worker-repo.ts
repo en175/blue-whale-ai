@@ -24,6 +24,10 @@ export interface WorkerInputAsset {
   type: string;
   url: string;
   mime: string | null;
+  size: number | null;
+  width: number | null;
+  height: number | null;
+  duration: number | null;
 }
 
 export interface ClaimedVideoJob {
@@ -77,6 +81,7 @@ export interface WorkerRepo {
     size: number | null;
     width: number;
     height: number;
+    duration: number;
   }): Promise<boolean>;
   failVideoJob(input: {
     jobId: string;
@@ -435,6 +440,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
             size: input.size === null ? null : BigInt(input.size),
             width: input.width,
             height: input.height,
+            duration: input.duration,
             source: "generated",
             status: "normal",
           },
@@ -524,13 +530,33 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
           status: "normal",
           is_delete: false,
         },
-        select: { id: true, type: true, url: true, mime: true },
+        select: {
+          id: true,
+          type: true,
+          url: true,
+          mime: true,
+          size: true,
+          width: true,
+          height: true,
+          duration: true,
+          duration_ms: true,
+        },
       });
       const byId = new Map(rows.map((row) => [row.id.toString(), row]));
       return assetIds.flatMap((id) => {
         const row = byId.get(id);
         return row
-          ? [{ id, type: row.type, url: row.url, mime: row.mime }]
+          ? [{
+              id,
+              type: row.type,
+              url: row.url,
+              mime: row.mime,
+              size: row.size === null ? null : Number(row.size),
+              width: row.width,
+              height: row.height,
+              duration:
+                row.duration_ms === null ? row.duration : row.duration_ms / 1000,
+            }]
           : [];
       });
     },

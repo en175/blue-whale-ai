@@ -4,7 +4,7 @@
 
 import { request, type Paged } from "./api";
 import { presignAsset, completeAsset } from "./api/endpoints";
-import { detectMediaKind } from "./mediaSize";
+import { detectMediaKind, readLocalMediaMetadata } from "./mediaSize";
 
 /** 资产列表项（GET /api/assets records，不含 storageKey）。 */
 export type AssetItem = {
@@ -47,6 +47,16 @@ export function copyAssetToProject(
   );
 }
 
+function uploadMime(file: File, type: "image" | "video" | "audio"): string {
+  if (file.type.trim()) return file.type;
+  if (type === "video") {
+    const name = file.name.toLowerCase();
+    if (name.endsWith(".mov")) return "video/quicktime";
+    if (name.endsWith(".mp4")) return "video/mp4";
+  }
+  return "application/octet-stream";
+}
+
 /**
  * 上传媒体文件到对象存储（Node 资产 presign + PUT + complete 三步流）。
  *
@@ -64,7 +74,9 @@ export async function uploadAsset(
   declaredType?: "image" | "video" | "audio",
 ): Promise<{ id: string; url: string }> {
   const type = declaredType ?? detectMediaKind(file);
-  const mime = file.type || "application/octet-stream";
+  const metadata =
+    type === "video" ? await readLocalMediaMetadata(file, type) : {};
+  const mime = uploadMime(file, type);
   const presign = await presignAsset({
     type,
     mime,
@@ -82,6 +94,7 @@ export async function uploadAsset(
     mime,
     size: file.size,
     storage_key: presign.storage_key,
+    ...metadata,
   });
   return { id: asset.asset_id, url: asset.url };
 }

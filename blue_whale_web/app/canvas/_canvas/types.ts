@@ -72,7 +72,13 @@ export type DockPrefill = {
   refMode?: string;
   firstFrameUrl?: string;
   lastFrameUrl?: string;
-  references?: { url: string; kind: "image" | "video" | "audio" }[];
+  firstFrameAssetId?: string;
+  lastFrameAssetId?: string;
+  references?: {
+    url: string;
+    kind: "image" | "video" | "audio";
+    assetId?: string;
+  }[];
 };
 
 /** 预填信号：nonce 递增触发 effect 把 prefill 应用到 Dock（仿 focusSignal/dockMentionSignal）。 */
@@ -164,10 +170,12 @@ export type VideoGenerateSettings = {
   /** 首帧 / 尾帧 URL（首尾帧生成；接线到 Node input_asset_ids 待 P3）。 */
   firstFrameUrl?: string;
   lastFrameUrl?: string;
-  /** 参考素材 URL（多模态引用；接线到 Node input_asset_ids 待 P3）。 */
-  referenceImages?: string[];
-  referenceVideos?: string[];
-  referenceAudios?: string[];
+  /** 一般多模态参考，顺序与 Dock 及 reference_asset_ids 一致。 */
+  referenceMedia?: {
+    kind: "image" | "video";
+    url: string;
+    assetId?: string;
+  }[];
 };
 
 /** 生成请求参数：discriminated union，按 mode narrow settings。 */
@@ -181,7 +189,6 @@ export type GenerateArgs =
   | {
       mode: "video";
       settings: VideoGenerateSettings;
-      inputAssetIds?: number[];
       firstFrameAssetId?: number;
       lastFrameAssetId?: number;
       referenceAssetIds?: number[];
@@ -274,4 +281,10 @@ export type VideoDockContentProps = {
   generating?: boolean;
   /** 点击缩略图预览素材 */
   onPreviewMedia?: (item: DockMediaItem) => void;
+  firstFrameUrl?: string;
+  lastFrameUrl?: string;
+  onFrameUpload?: (file: File, slot: "first" | "last") => void;
+  onFrameClear?: (slot: "first" | "last") => void;
+  onSwapFrames?: () => void;
+  onPickFrameFromCanvas?: (slot: "first" | "last") => void;
 };

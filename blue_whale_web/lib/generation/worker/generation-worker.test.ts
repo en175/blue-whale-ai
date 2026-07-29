@@ -306,6 +306,8 @@ describe("processNextJob - 成功路径", () => {
       duration: 5,
       width: 1280,
       height: 720,
+      resolution: "720p",
+      ratio: "16:9",
     });
     expect(repo.createAsset).toHaveBeenCalledWith(
       expect.objectContaining({

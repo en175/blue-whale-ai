@@ -5,6 +5,7 @@ import {
   createProjectGenerationJob,
   generateAudio,
   retryMissingProjectGenerationJobOutputs,
+  listJobs,
 } from "./generation";
 
 vi.mock("@/lib/api-client", () => ({
@@ -109,6 +110,18 @@ describe("BottomDock GenerationJob 命令 API", () => {
         headers: { "Idempotency-Key": "retry-command-1" },
       },
     );
+  });
+});
+
+describe("listJobs", () => {
+  beforeEach(() => vi.mocked(apiRequest).mockReset());
+
+  it("ids 批量查询只发一个精确列表请求", async () => {
+    vi.mocked(apiRequest).mockResolvedValue({ records: [], total: 0, size: 2, current: 1 });
+    await listJobs({ projectId: 7, jobIds: [11, 12] });
+    expect(apiRequest).toHaveBeenCalledWith("/api/jobs?size=2&projectId=7&ids=11%2C12", {
+      method: "GET",
+    });
   });
 });
 

@@ -3,7 +3,8 @@
  * FrameUploadButton：首尾帧上传按钮；
  * DockMediaThumb：素材缩略图（含删除）。供 ImageDockContent / VideoDockContent 复用。
  */
-import { X } from "lucide-react";
+import { useRef } from "react";
+import { Image as ImageIcon, X } from "lucide-react";
 import { IconPlus } from "../../icons";
 import type { DockMediaItem } from "../../types";
 import { AuthenticatedImage } from "../AuthenticatedImage";
@@ -12,23 +13,37 @@ export function MediaUploadButton({
   label,
   accept,
   icon,
+  onFiles,
 }: {
   label: string;
   accept: string;
   icon: React.ReactNode;
+  onFiles: (file: File) => void;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
   return (
     <div style={{ position: "relative", flexShrink: 0 }}>
       <input
+        ref={inputRef}
         type="file"
         accept={accept}
         multiple
         aria-hidden="true"
         style={{ display: "none" }}
+        onChange={(event) => {
+          const files = event.target.files;
+          if (!files) return;
+          for (let index = 0; index < files.length; index += 1) {
+            onFiles(files[index]);
+          }
+          event.target.value = "";
+        }}
       />
       <button
         type="button"
         aria-label={label}
+        onClick={() => inputRef.current?.click()}
         style={{
           width: 44,
           height: 44,
@@ -53,18 +68,38 @@ export function MediaUploadButton({
   );
 }
 
-export function FrameUploadButton({ label }: { label: string }) {
+export function FrameUploadButton({
+  label,
+  previewUrl,
+  onFile,
+  onPick,
+  onClear,
+}: {
+  label: string;
+  previewUrl?: string;
+  onFile?: (file: File) => void;
+  onPick?: () => void;
+  onClear?: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div style={{ position: "relative", flexShrink: 0 }}>
       <input
+        ref={inputRef}
         type="file"
         accept=".jpg,.jpeg,.png,image/jpeg,image/png"
         aria-hidden="true"
         style={{ display: "none" }}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) onFile?.(file);
+          event.target.value = "";
+        }}
       />
       <button
         type="button"
         aria-label={label}
+        onClick={() => inputRef.current?.click()}
         style={{
           width: 48,
           height: 48,
@@ -87,11 +122,21 @@ export function FrameUploadButton({ label }: { label: string }) {
           transition: "120ms",
         }}
       >
-        <span style={{ opacity: 0.4, flexShrink: 0 }}>
-          <IconPlus size={14} />
-        </span>
-        <span style={{ color: "rgba(255, 255, 255, 0.25)" }}>{label}</span>
+        {previewUrl ? (
+          <img src={previewUrl} alt={label} style={{ width: 46, height: 46, objectFit: "cover", borderRadius: 10 }} />
+        ) : (
+          <>
+            <span style={{ opacity: 0.4, flexShrink: 0 }}><IconPlus size={14} /></span>
+            <span style={{ color: "rgba(255, 255, 255, 0.25)" }}>{label}</span>
+          </>
+        )}
       </button>
+      {previewUrl && onClear ? (
+        <button type="button" aria-label={`清除${label}`} onClick={onClear} style={{ position: "absolute", top: -6, right: -6, width: 16, height: 16, border: 0, borderRadius: "50%", background: "rgba(0, 0, 0, 0.7)", color: "rgba(255, 255, 255, 0.85)", cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><X size={11} /></button>
+      ) : null}
+      {onPick ? (
+        <button type="button" aria-label={`从画布选择${label}`} onClick={onPick} style={{ position: "absolute", right: -8, bottom: -8, width: 20, height: 20, border: "1px solid rgba(255, 255, 255, 0.16)", borderRadius: "50%", background: "var(--tc-bg-surface)", color: "var(--tc-text-secondary)", cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><ImageIcon size={11} /></button>
+      ) : null}
     </div>
   );
 }
@@ -118,7 +163,17 @@ export function DockMediaThumb({
   } as const;
   return (
     <div style={{ position: "relative", flexShrink: 0 }}>
-      {protectedUrl ? (
+      {item.type === "video" ? (
+        <video
+          src={item.src}
+          title={item.name}
+          aria-label={item.name}
+          preload="metadata"
+          muted
+          playsInline
+          style={imageStyle}
+        />
+      ) : protectedUrl ? (
         <AuthenticatedImage
           accessUrl={protectedUrl}
           alt={item.name}

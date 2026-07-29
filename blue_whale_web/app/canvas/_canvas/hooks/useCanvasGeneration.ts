@@ -6,7 +6,7 @@
  * - image/video 都走 createProjectGenerationJob（Node 全异步，无同步 url / 无 SSE stream）→ 轮询 getJobStatus。
  * - audio 仍 mock（后端无音频 provider，generateAudio 占位）。
  * - recover/reconcile 走 listJobs（Node /api/jobs，records[] + snake_case input/output_assets）。
- * - 参考图/首尾帧 → Node 显式 Asset ID 字段；input_asset_ids 保留兼容。
+ * - 视频参考/首尾帧 → 只提交显式角色字段；input_asset_ids 仅保留给旧客户端兼容。
  *
  * 分层：useCanvasDoc（L4 数据层，纯 RF state+persist）→ useCanvasGeneration（L3 业务层，本 hook）
  *       → useCanvasStore（缓存层 assets）→ page（L5 编排，UI + 调本 hook）。
@@ -64,7 +64,7 @@ export type UseCanvasGenerationDeps = {
 
 export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
   const { nodes, edges, assets, addNode, patchNode, patchNodeAndSave, addAsset, projectId } = deps;
-  const jobs = useVideoJobs(); // 通用 job 轮询（image/video 共用，原名 useVideoJobs 遗留）
+  const jobs = useVideoJobs(projectId); // 通用 job 轮询（image/video 共用，原名 useVideoJobs 遗留）
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [videoJob, setVideoJob] = useState<{
@@ -189,26 +189,42 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
         } else if (args.mode === "video") {
           const s = args.settings;
           const ar = parseAspectRatio(s.aspectRatio.id);
-          const vidRefs: RecipeInput[] = [
-            ...(s.referenceImages?.map((u) => ({ kind: "image" as const, url: u })) ?? []),
-            ...(s.referenceVideos?.map((u) => ({ kind: "video" as const, url: u })) ?? []),
-            ...(s.referenceAudios?.map((u) => ({ kind: "audio" as const, url: u })) ?? []),
-          ];
+          const vidRefs: RecipeInput[] =
+            s.referenceMedia?.map((reference) => ({
+              kind: reference.kind,
+              url: reference.url,
+              ...(reference.assetId ? { assetId: reference.assetId } : {}),
+            })) ?? [];
           const videoRecipe = buildGenerationRecipe({
             mediaKind: "video",
             model: s.model.id,
             params: { aspectRatio: s.aspectRatio.id, resolution: s.resolution.id, duration: s.duration, refMode: s.refMode.id },
             inputs: {
               prompt: { kind: "text", text: trimmed },
-              firstFrame: s.firstFrameUrl ? { kind: "image", url: s.firstFrameUrl } : undefined,
-              lastFrame: s.lastFrameUrl ? { kind: "image", url: s.lastFrameUrl } : undefined,
+              firstFrame: s.firstFrameUrl
+                ? {
+                    kind: "image",
+                    url: s.firstFrameUrl,
+                    ...(args.firstFrameAssetId !== undefined
+                      ? { assetId: String(args.firstFrameAssetId) }
+                      : {}),
+                  }
+                : undefined,
+              lastFrame: s.lastFrameUrl
+                ? {
+                    kind: "image",
+                    url: s.lastFrameUrl,
+                    ...(args.lastFrameAssetId !== undefined
+                      ? { assetId: String(args.lastFrameAssetId) }
+                      : {}),
+                  }
+                : undefined,
               references: vidRefs.length ? vidRefs : undefined,
             },
           });
           placeholderId = addNode("video", { width: ar.width, height: ar.height, data: { content: trimmed, status: "running", progress: 0, recipe: videoRecipe } });
           const payload: CreateProjectGenerationJobPayload = {
             type: "video",
-            input_asset_ids: args.inputAssetIds ?? [],
             expected_output_count: parseQuantity(s.quantity),
             parameters: { prompt: trimmed, model_id: s.model.id, aspect_ratio: s.aspectRatio.id, resolution: s.resolution.id, duration: s.duration },
             ...(args.firstFrameAssetId !== undefined ? { first_frame_asset_id: args.firstFrameAssetId } : {}),
@@ -281,7 +297,6 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
           patchNode(nodeId, { status: "running", progress: 0, recipe: videoRecipe });
           const payload: CreateProjectGenerationJobPayload = {
             type: "video",
-            input_asset_ids: [],
             expected_output_count: 1,
             parameters: { prompt, model_id: model.model_id, aspect_ratio: aspectRatio, resolution, duration },
           };
