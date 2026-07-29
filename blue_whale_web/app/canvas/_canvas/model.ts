@@ -77,7 +77,8 @@ export interface GenerationRecipe {
 
 /** 派生变换记录（origin=derived；本轮类型就位，派生动作属后续子工单）。 */
 export interface DerivedRecipe extends GenerationRecipe {
-  transform: "upscale" | "snapshot" | "extract-audio" | "inpaint" | "regenerate";
+  transform:
+    "upscale" | "snapshot" | "extract-audio" | "inpaint" | "regenerate";
   sourceNodeId?: string;
   sourceAssetId?: string;
 }
@@ -95,6 +96,7 @@ export interface CanvasNodeData {
   kind: NodeKindId;
   label?: string;
   prompt?: string; // 节点自带；有引用时让位（见 engine resolveInputs）
+  richDoc?: unknown; // IK55VH 富文本卡 TipTap JSON doc；连线进 prompt 时由 richDocToPlainText 派生纯文本
   model?: string;
   providerId?: string;
   assetId?: string; // ★ 媒体引用 store.assets[id]（非 url 直存）
@@ -156,14 +158,24 @@ export function serialize(doc: CanvasDoc): string {
     content: n.data.content,
     assetId: n.data.assetId != null ? Number(n.data.assetId) : undefined,
     prompt: n.data.prompt,
+    richDoc: n.data.richDoc,
     recipe: n.data.recipe,
     taskId: n.data.taskId,
     // edges 聚合到 target 节点 references（兼容老 NodeItem[]：老忽略 references，v2 parse 派生 edges）
-    references: [] as Array<{ source: string; sourceHandle?: string; targetHandle?: string }>,
+    references: [] as Array<{
+      source: string;
+      sourceHandle?: string;
+      targetHandle?: string;
+    }>,
   }));
   for (const e of doc.edges) {
     const t = items.find((i) => i.id === e.target);
-    if (t) t.references.push({ source: e.source, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle });
+    if (t)
+      t.references.push({
+        source: e.source,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+      });
   }
   return JSON.stringify(items);
 }
@@ -175,13 +187,21 @@ export function serialize(doc: CanvasDoc): string {
  */
 export function parse(json: string): CanvasDoc {
   const raw = JSON.parse(json) as unknown;
-  const arr = (Array.isArray(raw) ? raw : ((raw as { nodes?: unknown[] })?.nodes ?? [])) as Record<string, unknown>[];
-  const obj = (Array.isArray(raw) ? {} : (raw as Record<string, unknown>)) ?? {};
+  const arr = (
+    Array.isArray(raw) ? raw : ((raw as { nodes?: unknown[] })?.nodes ?? [])
+  ) as Record<string, unknown>[];
+  const obj =
+    (Array.isArray(raw) ? {} : (raw as Record<string, unknown>)) ?? {};
   // edges：数组从 references 派生（兼容老 NodeItem[]），对象从 obj.edges
   const edges: CanvasEdge[] = Array.isArray(raw)
     ? arr.flatMap((n) => {
         const id = (n.id as string) ?? "";
-        const refs = (n.references as Array<{ source: string; sourceHandle?: string; targetHandle?: string }>) ?? [];
+        const refs =
+          (n.references as Array<{
+            source: string;
+            sourceHandle?: string;
+            targetHandle?: string;
+          }>) ?? [];
         return refs.map((r, idx) => ({
           id: `e_${id}_${r.source}_${idx}`,
           source: r.source,
@@ -202,20 +222,25 @@ export function parse(json: string): CanvasDoc {
 /** 兼容老 NodeItem（content/assetId 平铺 + type）+ 新 CanvasNode（data.*）→ CanvasNode。 */
 function normalizeNode(n: Record<string, unknown>): CanvasNode {
   const data = (n.data ?? {}) as Record<string, unknown>;
-  const rawType = ((data.kind as NodeKindId) ?? (n.type as NodeKindId) ?? "text") as NodeKindId;
+  const rawType = ((data.kind as NodeKindId) ??
+    (n.type as NodeKindId) ??
+    "text") as NodeKindId;
   const kind: NodeKindId = rawType === "group" ? "image" : rawType;
   const content = data.content ?? n.content;
   const rawAsset = data.assetId ?? n.assetId;
   const assetId = rawAsset != null ? String(rawAsset) : undefined;
   const imageUrl = data.imageUrl ?? n.imageUrl;
   const prompt = data.prompt ?? n.prompt;
+  const richDoc = data.richDoc ?? n.richDoc;
   const recipe = (data.recipe ?? n.recipe) as NodeRecipe | undefined;
   const taskId = (data.taskId ?? n.taskId) as string | undefined;
   const nodeData: CanvasNodeData = { kind };
   if (content != null) (nodeData as Record<string, unknown>).content = content;
   if (assetId != null) nodeData.assetId = assetId;
-  if (imageUrl != null) (nodeData as Record<string, unknown>).imageUrl = imageUrl;
+  if (imageUrl != null)
+    (nodeData as Record<string, unknown>).imageUrl = imageUrl;
   if (prompt != null) nodeData.prompt = prompt as string;
+  if (richDoc != null) nodeData.richDoc = richDoc;
   if (recipe) nodeData.recipe = recipe;
   if (taskId) nodeData.taskId = taskId;
   return {
@@ -227,4 +252,52 @@ function normalizeNode(n: Record<string, unknown>): CanvasNode {
     parentId: n.parentId as string | undefined,
     data: nodeData,
   };
+}
+
+/** IK55VH 富文本卡 JSON doc 节点结构（TipTap getJSON 输出，宽松遍历）。 */
+type RichDocNode = {
+  type?: string;
+  text?: string;
+  attrs?: Record<string, unknown>;
+  content?: RichDocNode[];
+};
+
+/**
+ * IK55VH 富文本卡 JSON doc → 纯文本（连线进下游节点 prompt 用）。
+ * mention → @[name]（与 dock/mention.ts extractEditor 契约一致），
+ * heading/paragraph 按行，列表/引用展平，分割线 → `---`。
+ */
+export function richDocToPlainText(doc: unknown): string {
+  const lines: string[] = [];
+  const inline = (n: RichDocNode): string => {
+    if (n.type === "text") return n.text ?? "";
+    if (n.type === "mention")
+      return `@[${(n.attrs?.label as string) ?? (n.attrs?.id as string) ?? ""}]`;
+    if (n.type === "hardBreak") return "\n";
+    return (n.content ?? []).map(inline).join("");
+  };
+  const blocks = (n: RichDocNode) => {
+    for (const c of n.content ?? []) {
+      if (c.type === "paragraph" || c.type === "heading") lines.push(inline(c));
+      else if (c.type === "horizontalRule") lines.push("---");
+      else if (
+        c.type === "blockquote" ||
+        c.type === "bulletList" ||
+        c.type === "orderedList" ||
+        c.type === "listItem"
+      )
+        blocks(c);
+      else lines.push(inline(c));
+    }
+  };
+  blocks(doc as RichDocNode);
+  return lines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** IK55VH：空卡判定（纯文本派生为空即为空卡，用于「添加笔记...」占位）。 */
+export function isEmptyRichDoc(doc: unknown): boolean {
+  return richDocToPlainText(doc).length === 0;
 }

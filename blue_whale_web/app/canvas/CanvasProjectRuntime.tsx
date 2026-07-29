@@ -4,7 +4,7 @@
  * canvas 数据走 useCanvasDoc hook（React state，本地快，不卡）；assets 走 zustand（业务/接口缓存）。
  * 切项目 = router.push；load 按 URL projectId 触发。
  */
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
@@ -197,6 +197,17 @@ export function CanvasProjectRuntime({
   useEffect(() => {
     extraPlacedRef.current = [];
   }, [nodes]);
+  // IK55VH findPlacement 的 existing 矩形投影（addNode/onMenuInsert 共用）
+  const existingRects = useCallback(
+    () =>
+      nodes.map((n) => ({
+        x: n.position.x,
+        y: n.position.y,
+        width: n.width ?? 200,
+        height: n.height ?? 200,
+      })),
+    [nodes],
+  );
 
   const addNode = useCallback(
     (
@@ -216,32 +227,20 @@ export function CanvasProjectRuntime({
       const w = extra?.width ?? (kind === "text" ? 200 : 256);
       const h = extra?.height ?? (kind === "text" ? 48 : 200);
       const id = extra?.id ?? `n_${Math.random().toString(36).slice(2, 10)}`;
-      const position =
-        kind === "text"
-          ? { x: worldX - w / 2, y: worldY - h / 2 }
-          : findPlacement({
-              // 同一 tick 内多选上传的占位还没进 nodes state，用 extraPlacedRef 补齐防重叠
-              existing: [
-                ...nodes.map((n) => ({
-                  x: n.position.x,
-                  y: n.position.y,
-                  width: n.width ?? 200,
-                  height: n.height ?? 200,
-                })),
-                ...extraPlacedRef.current,
-              ],
-              anchor: { x: worldX, y: worldY },
-              nodeWidth: w,
-              nodeHeight: h,
-            });
-      if (kind !== "text") {
-        extraPlacedRef.current.push({
-          x: position.x,
-          y: position.y,
-          width: w,
-          height: h,
-        });
-      }
+      // IK55VH：text 与媒体同路径走 findPlacement 网格（视口中心锚，多次点击不重叠）；
+      // 同一 tick 内多选上传的占位还没进 nodes state，用 extraPlacedRef 补齐防重叠
+      const position = findPlacement({
+        existing: [...existingRects(), ...extraPlacedRef.current],
+        anchor: { x: worldX, y: worldY },
+        nodeWidth: w,
+        nodeHeight: h,
+      });
+      extraPlacedRef.current.push({
+        x: position.x,
+        y: position.y,
+        width: w,
+        height: h,
+      });
       const node: CanvasNode = {
         id,
         type: kind,
@@ -253,7 +252,7 @@ export function CanvasProjectRuntime({
       addNodeFull(node);
       return id;
     },
-    [nodes, viewport, addNodeFull],
+    [existingRects, viewport, addNodeFull],
   );
 
   // 生成业务（generate/generateFromNode/recover + job 轮询）抽到 useCanvasGeneration（ADR-0027）；
@@ -398,12 +397,31 @@ export function CanvasProjectRuntime({
     [assets, generateFromNode, setGenerateError],
   );
 
-  // 文本节点 prompt 编辑写回
-  const onEditPrompt = useCallback(
-    (id: string, text: string) => {
-      patchNode(id, { prompt: text });
+  // IK55VH 富文本卡 commit：richDoc 存文档，派生纯文本沿用 prompt 字段（连线进下游 prompt，engine/kinds 不动）
+  const onEditRichText = useCallback(
+    (id: string, richDoc: unknown, plainText: string) => {
+      patchNode(id, { richDoc, prompt: plainText });
     },
     [patchNode],
+  );
+
+  // IK55VH 富文本卡 @ 建议素材：画布内 image/video/audio 节点投影
+  const textMentionItems = useMemo(
+    () =>
+      nodes
+        .filter(
+          (n) =>
+            n.data.kind === "image" ||
+            n.data.kind === "video" ||
+            n.data.kind === "audio",
+        )
+        .map((n) => ({
+          id: n.id,
+          type: n.data.kind as "image" | "video" | "audio",
+          name: (n.data.content as string) || "未命名素材",
+          assetId: n.data.assetId,
+        })),
+    [nodes],
   );
 
   // 右键/drop 菜单：插节点（+ drop 时连边 source→newNode.prompt）
@@ -417,7 +435,16 @@ export function CanvasProjectRuntime({
       const node: CanvasNode = {
         id: `n_${Math.random().toString(36).slice(2, 10)}`,
         type: kind,
-        position: { x: m.x - w / 2, y: m.y - h / 2 },
+        // IK55VH：仅文本卡走 findPlacement 网格（菜单点锚，不重叠）；媒体保持菜单点精确落位
+        position:
+          kind === "text"
+            ? findPlacement({
+                existing: existingRects(),
+                anchor: { x: m.x, y: m.y },
+                nodeWidth: w,
+                nodeHeight: h,
+              })
+            : { x: m.x - w / 2, y: m.y - h / 2 },
         width: w,
         height: h,
         data: { kind },
@@ -434,7 +461,7 @@ export function CanvasProjectRuntime({
         });
       }
     },
-    [menu, addNodeFull, addEdgeFull],
+    [menu, existingRects, addNodeFull, addEdgeFull],
   );
 
   useEffect(() => {
@@ -856,7 +883,8 @@ export function CanvasProjectRuntime({
             onNodeAction={handleCanvasNodeAction}
             onNodeRetry={handleNodeRetry}
             onNodeRemove={handleNodeRemove}
-            onEditPrompt={onEditPrompt}
+            onEditRichText={onEditRichText}
+            mentionItems={textMentionItems}
             picking={pickingFor !== null}
             pickingAccept={pickingFor ? dockAccept(pickingFor) : undefined}
             toolMode={effectiveMode}
