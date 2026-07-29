@@ -466,3 +466,69 @@ body {
 .tool-mode-hand .react-flow__nodesselection-rect {
   display: none;
 }
+
+/* IK55VH 富文本卡：TipTap 编辑器内容样式（三态卡 + 展开模态共用），全部走 --tc-* token */
+.tc-rich-editor {
+  outline: none;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--tc-text-secondary);
+}
+.tc-rich-editor p {
+  margin: 0 0 2px;
+}
+.tc-rich-editor h1 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 4px 0;
+  color: var(--tc-text-primary);
+}
+.tc-rich-editor h2 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 4px 0;
+  color: var(--tc-text-primary);
+}
+.tc-rich-editor h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 4px 0;
+  color: var(--tc-text-primary);
+}
+.tc-rich-editor ul,
+.tc-rich-editor ol {
+  padding-left: 18px;
+  margin: 2px 0;
+}
+.tc-rich-editor ul {
+  list-style: disc;
+}
+.tc-rich-editor ol {
+  list-style: decimal;
+}
+.tc-rich-editor blockquote {
+  border-left: 2px solid var(--tc-border-active);
+  padding-left: 10px;
+  margin: 4px 0;
+  color: var(--tc-text-tertiary);
+}
+.tc-rich-editor hr {
+  border: 0;
+  border-top: 1px solid var(--tc-border);
+  margin: 8px 0;
+}
+.tc-rich-mention {
+  background: var(--tc-bg-elevated);
+  border: 1px solid var(--tc-border-subtle);
+  border-radius: 9999px;
+  padding: 0 6px;
+  color: var(--tc-text-primary);
+  white-space: nowrap;
+}
+.tc-rich-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--tc-text-muted);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

@@ -43,6 +43,7 @@ import type {
   NodeStatus,
   MediaKind,
 } from "../model";
+import { richDocToPlainText, isEmptyRichDoc } from "../model";
 import { nodeKinds } from "../kinds";
 import {
   NODE_TOOLBAR_ACTIONS,
@@ -51,6 +52,12 @@ import {
   type NodeToolbarAction,
 } from "../config";
 import { AuthenticatedImage } from "../components/AuthenticatedImage";
+import { EditorContent } from "@tiptap/react";
+import { useRichEditor, plainTextToDoc } from "./text/RichTextEditor";
+import { TextFormatToolbar } from "./text/TextFormatToolbar";
+import { ExpandModal } from "./text/ExpandModal";
+import type { TextMentionItem } from "./text/types";
+export type { TextMentionItem } from "./text/types";
 
 type MediaNodeData = CanvasNodeData & {
   content?: string;
@@ -61,7 +68,10 @@ type MediaNodeData = CanvasNodeData & {
 type NodeActionsCtx = {
   onAction?: (id: string, actionId: string) => void;
   onRetry?: (id: string) => void;
-  onEditPrompt?: (id: string, text: string) => void;
+  /** IK55VH 富文本卡 commit：写回 richDoc + 派生纯文本（进 prompt）。 */
+  onEditRichText?: (id: string, richDoc: unknown, plainText: string) => void;
+  /** IK55VH 富文本卡 @ 建议素材列表。 */
+  mentionItems?: TextMentionItem[];
   picking?: boolean;
   pickingAccept?: MediaKind[];
 };
@@ -695,64 +705,122 @@ export function MediaNode({ id, data, width, height, selected }: NodeProps) {
   );
 }
 
+/**
+ * IK55VH 富文本卡（三态状态机，移植自原型变体 A=浮动工具栏）：
+ * idle 只读渲染（空卡占位「添加笔记...」）→ 单击选中浮出格式工具栏（不可输入）
+ * → 双击进编辑 → 失焦 commit（onEditRichText 写回 richDoc + 派生纯文本）。
+ * 旧卡兼容：无 richDoc 时以 prompt/content 纯文本播种初始 doc。
+ */
 export function TextNode({ id, data, width, height, selected }: NodeProps) {
   const d = data as unknown as CanvasNodeData & {
     content?: string;
     prompt?: string;
+    richDoc?: unknown;
   };
-  const { onEditPrompt } = useContext(NodeActionsContext);
+  const { onEditRichText, mentionItems } = useContext(NodeActionsContext);
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(d.prompt ?? d.content ?? "");
+  const [expanded, setExpandedState] = useState(false);
+  // expanded 的同步镜像：onBlur 在 React 状态提交前也可能触发，须用 ref 判定
+  const expandedRef = useRef(false);
+  const setExpanded = useCallback((v: boolean) => {
+    expandedRef.current = v;
+    setExpandedState(v);
+  }, []);
+  // 初始 doc 只播种一次（编辑器持有内容，commit 后 data.richDoc 回写不再反灌）
+  const [initialDoc] = useState<unknown>(
+    () => d.richDoc ?? plainTextToDoc(d.prompt ?? d.content ?? ""),
+  );
+  const commit = useCallback(
+    (doc: unknown) => {
+      setEditing(false);
+      setExpanded(false);
+      onEditRichText?.(id, doc, richDocToPlainText(doc));
+    },
+    [id, onEditRichText, setExpanded],
+  );
+  // 失焦 commit；展开态失焦不塌缩（模态由 X/Esc/点遮罩关闭并 commit）
+  const handleEditorBlur = useCallback(
+    (doc: unknown) => {
+      if (expandedRef.current) return;
+      commit(doc);
+    },
+    [commit],
+  );
+  const editor = useRichEditor({
+    doc: initialDoc,
+    editable: editing || expanded,
+    mentionItems: mentionItems ?? [],
+    onCommit: handleEditorBlur,
+  });
+  // 选中态（未进编辑）工具栏命令后立即写回，不改变 editing/expanded 状态
+  const syncCommit = useCallback(() => {
+    if (!editor) return;
+    const doc = editor.getJSON();
+    onEditRichText?.(id, doc, richDocToPlainText(doc));
+  }, [editor, id, onEditRichText]);
+  // 进入编辑/展开后聚焦文末
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDraft(d.prompt ?? d.content ?? "");
-  }, [d.prompt, d.content]);
-  const commit = () => {
-    setEditing(false);
-    onEditPrompt?.(id, draft);
-  };
+    if (editing || expanded) editor?.commands.focus("end");
+  }, [editing, expanded, editor]);
+  const empty = isEmptyRichDoc(editor ? editor.getJSON() : initialDoc);
   return (
-    <div
-      className="tc-text-node relative flex items-center justify-center rounded-xl px-4"
-      style={{
-        width,
-        height,
-        outline: selected
-          ? "2px solid var(--tc-card-selected-stroke)"
-          : "2px solid transparent",
-        outlineOffset: 0,
-        background: "var(--tc-bg-surface)",
-      }}
-    >
-      <NodeHandles kind="text" />
-      {editing ? (
-        <textarea
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              commit();
-            }
+    <>
+      <NodeResizer
+        nodeId={id}
+        isVisible={selected}
+        minWidth={160}
+        minHeight={48}
+        handleClassName="tc-node-resize-handle"
+      />
+      <NodeToolbar
+        isVisible={selected && !expanded}
+        position={Position.Top}
+        offset={8}
+      >
+        <TextFormatToolbar
+          editor={editor}
+          applyToAll={!editing}
+          onAnyCommand={syncCommit}
+          onExpand={() => {
+            setEditing(false);
+            setExpanded(true);
           }}
-          rows={1}
-          className="nodrag w-full resize-none bg-transparent text-center text-sm leading-5 outline-none"
-          style={{ color: "var(--tc-text-secondary)" }}
         />
-      ) : (
-        <span
-          onDoubleClick={() => setEditing(true)}
-          className="cursor-text text-center text-sm leading-5"
-          style={{
-            color: draft ? "var(--tc-text-secondary)" : "var(--tc-text-muted)",
+      </NodeToolbar>
+      <div
+        onDoubleClick={() => setEditing(true)}
+        className="tc-text-node relative flex flex-col overflow-hidden rounded-xl"
+        style={{
+          width,
+          height,
+          outline: selected
+            ? "2px solid var(--tc-card-selected-stroke)"
+            : "2px solid transparent",
+          outlineOffset: 0,
+          background: "var(--tc-bg-surface)",
+        }}
+      >
+        <NodeHandles kind="text" />
+        <div className="nodrag nowheel flex-1 overflow-auto px-3 py-2.5">
+          {empty && !editing && !expanded ? (
+            <span className="text-sm" style={{ color: "var(--tc-text-muted)" }}>
+              添加笔记...
+            </span>
+          ) : (
+            !expanded && <EditorContent editor={editor} />
+          )}
+        </div>
+      </div>
+      {expanded && (
+        <ExpandModal
+          editor={editor}
+          onClose={() => {
+            if (editor) commit(editor.getJSON());
+            else setExpanded(false);
           }}
-        >
-          {draft || "双击输入 prompt"}
-        </span>
+        />
       )}
-    </div>
+    </>
   );
 }
 

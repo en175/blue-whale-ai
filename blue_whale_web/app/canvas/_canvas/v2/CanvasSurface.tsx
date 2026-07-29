@@ -22,6 +22,7 @@ import {
 } from "@xyflow/react";
 import type { CanvasNode, CanvasEdge, MediaKind } from "../model";
 import { MediaNode, TextNode, GroupNode, NodeActionsContext } from "./nodes";
+import type { TextMentionItem } from "./nodes";
 import { SelectionBounds } from "./SelectionBounds";
 import { toolModeInteractionProps, type ToolMode } from "./toolMode";
 
@@ -56,7 +57,10 @@ export type CanvasSurfaceProps = {
   onPaneClick?: () => void;
   onNodeAction?: (id: string, actionId: string) => void;
   onNodeRetry?: (id: string) => void;
-  onEditPrompt?: (id: string, text: string) => void;
+  /** IK55VH 富文本卡 commit：richDoc + 派生纯文本写回。 */
+  onEditRichText?: (id: string, richDoc: unknown, plainText: string) => void;
+  /** IK55VH 富文本卡 @ 建议素材列表。 */
+  mentionItems?: TextMentionItem[];
   onPaneMenu?: (payload: MenuPayload) => void;
   onEdgeDropMenu?: (payload: MenuPayload) => void;
   picking?: boolean;
@@ -79,7 +83,8 @@ export function CanvasSurface({
   onPaneClick,
   onNodeAction,
   onNodeRetry,
-  onEditPrompt,
+  onEditRichText,
+  mentionItems,
   onPaneMenu,
   onEdgeDropMenu,
   picking,
@@ -190,11 +195,19 @@ export function CanvasSurface({
     () => ({
       onAction: onNodeAction,
       onRetry: onNodeRetry,
-      onEditPrompt,
+      onEditRichText,
+      mentionItems,
       picking,
       pickingAccept,
     }),
-    [onNodeAction, onNodeRetry, onEditPrompt, picking, pickingAccept],
+    [
+      onNodeAction,
+      onNodeRetry,
+      onEditRichText,
+      mentionItems,
+      picking,
+      pickingAccept,
+    ],
   );
 
   return (
