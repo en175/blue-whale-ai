@@ -54,6 +54,9 @@ export interface NewApiVideoInput {
   model: string;
   prompt: string;
   image?: string;
+  firstFrameImage?: string;
+  lastFrameImage?: string;
+  referenceImages?: string[];
   duration: number;
   width: number;
   height: number;
@@ -89,6 +92,10 @@ type NewApiEnvelope = {
   code?: boolean | number | string;
   message?: string;
   msg?: string;
+  error?: {
+    code?: boolean | number | string;
+    message?: string;
+  };
   data?: unknown;
 };
 
@@ -101,7 +108,18 @@ function messageFrom(payload: NewApiEnvelope | null, fallback: string): string {
     ? payload.message
     : typeof payload?.msg === "string"
       ? payload.msg
+      : typeof payload?.error?.message === "string"
+        ? payload.error.message
       : fallback;
+}
+
+function codeFrom(payload: NewApiEnvelope | null): string | number | undefined {
+  if (typeof payload?.code === "string" || typeof payload?.code === "number") {
+    return payload.code;
+  }
+  return typeof payload?.error?.code === "string" || typeof payload?.error?.code === "number"
+    ? payload.error.code
+    : undefined;
 }
 
 function isBusinessFailure(payload: NewApiEnvelope | null): boolean {
@@ -130,7 +148,7 @@ export function createNewApiClient(options: NewApiClientOptions) {
       throw new NewApiError(
         messageFrom(payload, `new-api 请求失败: ${response.status}`),
         response.status,
-        typeof payload?.code === "string" || typeof payload?.code === "number" ? payload.code : undefined,
+        codeFrom(payload),
         payload,
       );
     }
@@ -178,7 +196,7 @@ export function createNewApiClient(options: NewApiClientOptions) {
         stream: false,
       };
       if (input.size) body.size = input.size;
-      if (input.n > 1) body.n = input.n;
+      body.n = input.n;
       if (input.webSearch) body.tools = [{ type: "web_search" }];
 
       const response = await request<NewApiEnvelope>("/v1/images/generations", {
@@ -211,6 +229,20 @@ export function createNewApiClient(options: NewApiClientOptions) {
     },
 
     async submitVideo(token: string, input: NewApiVideoInput): Promise<NewApiVideoSubmission> {
+      const explicitImages = [input.firstFrameImage, ...(input.referenceImages ?? [])].filter(
+        (value): value is string => typeof value === "string" && value.length > 0,
+      );
+      if (
+        input.lastFrameImage ||
+        explicitImages.length > 1 ||
+        (input.image && explicitImages.length > 0)
+      ) {
+        throw new NewApiError(
+          "当前 new-api 视频接口不支持首尾帧或多参考素材",
+          422,
+          "unsupported_video_inputs",
+        );
+      }
       const body: Record<string, unknown> = {
         model: input.model,
         prompt: input.prompt,
@@ -219,7 +251,8 @@ export function createNewApiClient(options: NewApiClientOptions) {
         height: input.height,
         response_format: input.responseFormat ?? "url",
       };
-      if (input.image) body.image = input.image;
+      const image = explicitImages[0] ?? input.image;
+      if (image) body.image = image;
 
       const response = await request<Record<string, unknown>>("/v1/video/generations", {
         method: "POST",

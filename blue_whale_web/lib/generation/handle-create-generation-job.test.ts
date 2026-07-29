@@ -127,6 +127,189 @@ describe("handleCreateGenerationJob", () => {
       }),
     );
   });
+
+  it("video 保留首帧、尾帧和普通参考素材的独立语义", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+    deps.command.createJob.mockResolvedValue({ generation_job_id: "202", cursor: 0 });
+    const body = {
+      type: "video",
+      input_asset_ids: [],
+      first_frame_asset_id: "11",
+      last_frame_asset_id: "12",
+      reference_asset_ids: ["13"],
+      parameters: {
+        prompt: "从首帧过渡到尾帧",
+        model_id: "seedance-2",
+        aspect_ratio: "16:9",
+        resolution: "720p",
+        duration: 5,
+      },
+      expected_output_count: 1,
+    };
+
+    await handleCreateGenerationJob("9", "55", body, "key-frames", deps, {
+      providerCredential: "sealed-token",
+    });
+
+    expect(deps.command.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          first_frame_asset_id: "11",
+          last_frame_asset_id: "12",
+          reference_asset_ids: ["13"],
+        }),
+      }),
+    );
+  });
+
+  it("video 显式首帧不会从兼容 input_asset_ids 重复投影为普通参考图", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+    deps.command.createJob.mockResolvedValue({ generation_job_id: "203", cursor: 0 });
+
+    await handleCreateGenerationJob(
+      "9",
+      "55",
+      {
+        type: "video",
+        input_asset_ids: [11],
+        first_frame_asset_id: 11,
+        parameters: {
+          prompt: "让首帧动起来",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+        },
+        expected_output_count: 1,
+      },
+      "key-first-frame",
+      deps,
+      { providerCredential: "sealed-token" },
+    );
+
+    expect(deps.command.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({ first_frame_asset_id: "11" }),
+      }),
+    );
+    expect(deps.command.createJob.mock.calls[0]?.[0].input).not.toHaveProperty(
+      "reference_asset_ids",
+    );
+  });
+
+  it("video 从兼容 input_asset_ids 中保留首尾帧之外的普通参考素材", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+    deps.command.createJob.mockResolvedValue({ generation_job_id: "206", cursor: 0 });
+
+    await handleCreateGenerationJob(
+      "9",
+      "55",
+      {
+        type: "video",
+        input_asset_ids: [11, 13],
+        first_frame_asset_id: 11,
+        parameters: {
+          prompt: "让首帧参考另一个素材动起来",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+        },
+        expected_output_count: 1,
+      },
+      "key-first-frame-with-reference",
+      deps,
+      { providerCredential: "sealed-token" },
+    );
+
+    expect(deps.command.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          first_frame_asset_id: "11",
+          reference_asset_ids: ["13"],
+        }),
+      }),
+    );
+  });
+
+  it("video 允许首尾帧之外再携带最多四个普通参考素材", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+    deps.command.createJob.mockResolvedValue({ generation_job_id: "204", cursor: 0 });
+
+    const result = await handleCreateGenerationJob(
+      "9",
+      "55",
+      {
+        type: "video",
+        input_asset_ids: [11, 12, 13, 14, 15, 16],
+        first_frame_asset_id: 11,
+        last_frame_asset_id: 12,
+        reference_asset_ids: [13, 14, 15, 16],
+        parameters: {
+          prompt: "让四个参考素材约束首尾帧视频",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+        },
+        expected_output_count: 1,
+      },
+      "key-six-video-assets",
+      deps,
+      { providerCredential: "sealed-token" },
+    );
+
+    expect(result.code).toBe(200);
+    expect(deps.command.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          first_frame_asset_id: "11",
+          last_frame_asset_id: "12",
+          reference_asset_ids: ["13", "14", "15", "16"],
+        }),
+      }),
+    );
+  });
+
+  it("video 显式普通参考素材交给 Worker 做 provider 能力判定", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+    deps.command.createJob.mockResolvedValue({ generation_job_id: "205", cursor: 0 });
+
+    const result = await handleCreateGenerationJob(
+      "9",
+      "55",
+      {
+        type: "video",
+        input_asset_ids: [13, 14],
+        reference_asset_ids: [13, 14],
+        parameters: {
+          prompt: "用两个参考素材生成视频",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+        },
+        expected_output_count: 1,
+      },
+      "key-multi-reference-video",
+      deps,
+      { providerCredential: "sealed-token" },
+    );
+
+    expect(result.code).toBe(200);
+    expect(deps.command.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          reference_asset_ids: ["13", "14"],
+        }),
+      }),
+    );
+  });
 });
 
 describe("handleCancelGenerationJob", () => {

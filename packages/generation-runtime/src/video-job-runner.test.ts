@@ -9,6 +9,66 @@ type JobState = {
 };
 
 describe("video job runner recovery", () => {
+  it("passes first frame, last frame, and references to the provider separately", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "upstream-frames", status: "queued" });
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "301",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "从首帧过渡到尾帧",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          first_frame_asset_id: "11",
+          last_frame_asset_id: "12",
+          reference_asset_ids: ["13"],
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-frames",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([
+        { id: "11", type: "image", url: "https://tos.test/first.png" },
+        { id: "12", type: "image", url: "https://tos.test/last.png" },
+        { id: "13", type: "image", url: "https://tos.test/reference.png" },
+      ]),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-frames",
+      jobId: "301",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(repo.resolveInputAssets).toHaveBeenCalledWith(["11", "12", "13"], "9", "55");
+    expect(submit).toHaveBeenCalledWith({
+      model: "seedance-2",
+      prompt: "从首帧过渡到尾帧",
+      duration: 5,
+      width: 1280,
+      height: 720,
+      firstFrameImage: "https://tos.test/first.png",
+      lastFrameImage: "https://tos.test/last.png",
+      referenceImages: ["https://tos.test/reference.png"],
+    });
+  });
+
   it("persists the provider task id so another worker can resume polling", async () => {
     const module = await import("./video-job-runner.js").catch(() => ({}));
     const runVideoJobStep = (module as {

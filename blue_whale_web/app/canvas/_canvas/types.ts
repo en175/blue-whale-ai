@@ -178,7 +178,14 @@ export type GenerateArgs =
       referenceImages?: string[];
       inputAssetIds?: number[];
     }
-  | { mode: "video"; settings: VideoGenerateSettings; inputAssetIds?: number[] }
+  | {
+      mode: "video";
+      settings: VideoGenerateSettings;
+      inputAssetIds?: number[];
+      firstFrameAssetId?: number;
+      lastFrameAssetId?: number;
+      referenceAssetIds?: number[];
+    }
   | { mode: "audio"; settings: AudioGenerateSettings };
 
 export type ImageDockContentProps = {

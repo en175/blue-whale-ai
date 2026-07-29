@@ -64,6 +64,9 @@ export type CreateProjectGenerationJobPayload = {
         resolution: string;
         duration: number;
       };
+      first_frame_asset_id?: number;
+      last_frame_asset_id?: number;
+      reference_asset_ids?: number[];
     }
 );
 

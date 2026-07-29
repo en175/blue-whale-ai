@@ -36,7 +36,9 @@ export interface VideoTaskProvider {
     duration: number;
     width: number;
     height: number;
-    image?: string;
+    firstFrameImage?: string;
+    lastFrameImage?: string;
+    referenceImages: string[];
   }): Promise<{ taskId: string; status: string }>;
   poll(taskId: string): Promise<VideoTaskObservation>;
 }
@@ -211,24 +213,55 @@ async function buildSubmitRequest(
     throw new Error("视频生成参数无效");
   }
 
-  const assetIds = Array.isArray(claim.input.reference_asset_ids)
-    ? claim.input.reference_asset_ids
-        .filter((id): id is string | number => typeof id === "string" || typeof id === "number")
-        .map(String)
-    : [];
-  if (assetIds.length > 1) throw new Error("当前视频模型仅支持一张参考图");
+  const firstFrameAssetId = readAssetId(claim.input.first_frame_asset_id);
+  const lastFrameAssetId = readAssetId(claim.input.last_frame_asset_id);
+  const referenceAssetIds = readAssetIds(claim.input.reference_asset_ids);
+  const assetIds = uniqueAssetIds([
+    firstFrameAssetId,
+    lastFrameAssetId,
+    ...referenceAssetIds,
+  ]);
   const assets = await repo.resolveInputAssets(assetIds, claim.userId, claim.projectId);
   if (assets.length !== assetIds.length || assets.some((asset) => asset.type !== "image")) {
     throw new Error("参考素材不存在或无权访问");
   }
+
+  const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+  const firstFrame = firstFrameAssetId ? assetsById.get(firstFrameAssetId) : undefined;
+  const lastFrame = lastFrameAssetId ? assetsById.get(lastFrameAssetId) : undefined;
+  const referenceImages = referenceAssetIds.map((id) => assetsById.get(id)?.url).filter(
+    (url): url is string => typeof url === "string",
+  );
 
   return {
     model,
     prompt,
     duration,
     ...dimensions,
-    ...(assets[0] ? { image: assets[0].url } : {}),
+    ...(firstFrame ? { firstFrameImage: firstFrame.url } : {}),
+    ...(lastFrame ? { lastFrameImage: lastFrame.url } : {}),
+    referenceImages,
   };
+}
+
+function readAssetId(value: unknown): string | null {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return String(value);
+  if (typeof value === "string" && /^[1-9][0-9]*$/.test(value)) return value;
+  if (value === undefined || value === null) return null;
+  throw new Error("视频素材 ID 无效");
+}
+
+function readAssetIds(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new Error("视频参考素材无效");
+  return value.map(readAssetId).filter((id): id is string => id !== null);
+}
+
+function uniqueAssetIds(ids: Array<string | null>): string[] {
+  return ids.reduce<string[]>((result, id) => {
+    if (id && !result.includes(id)) result.push(id);
+    return result;
+  }, []);
 }
 
 function videoDimensions(

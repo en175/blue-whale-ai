@@ -9,9 +9,9 @@ describe("selectDockInputAssetIds", () => {
     ).toEqual([9, 10]);
   });
 
-  it("uses one first-frame or image reference for image-to-video", () => {
+  it("preserves all selected video asset identities for explicit role mapping", () => {
     expect(
-      selectDockInputAssetIds("video", [12], [{ assetId: "13" }], [11]),
-    ).toEqual([11]);
+      selectDockInputAssetIds("video", [12], [{ assetId: "13" }, { assetId: "14" }], [11]),
+    ).toEqual([11, 12, 13, 14]);
   });
 });

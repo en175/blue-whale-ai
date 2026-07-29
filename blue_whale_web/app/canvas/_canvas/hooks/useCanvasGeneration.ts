@@ -6,7 +6,7 @@
  * - image/video 都走 createProjectGenerationJob（Node 全异步，无同步 url / 无 SSE stream）→ 轮询 getJobStatus。
  * - audio 仍 mock（后端无音频 provider，generateAudio 占位）。
  * - recover/reconcile 走 listJobs（Node /api/jobs，records[] + snake_case input/output_assets）。
- * - 参考图/首尾帧 → Node input_asset_ids 的 asset-id 接线待 P3（当前 Dock 仅有 URL）。
+ * - 参考图/首尾帧 → Node 显式 Asset ID 字段；input_asset_ids 保留兼容。
  *
  * 分层：useCanvasDoc（L4 数据层，纯 RF state+persist）→ useCanvasGeneration（L3 业务层，本 hook）
  *       → useCanvasStore（缓存层 assets）→ page（L5 编排，UI + 调本 hook）。
@@ -211,6 +211,9 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
             input_asset_ids: args.inputAssetIds ?? [],
             expected_output_count: parseQuantity(s.quantity),
             parameters: { prompt: trimmed, model_id: s.model.id, aspect_ratio: s.aspectRatio.id, resolution: s.resolution.id, duration: s.duration },
+            ...(args.firstFrameAssetId !== undefined ? { first_frame_asset_id: args.firstFrameAssetId } : {}),
+            ...(args.lastFrameAssetId !== undefined ? { last_frame_asset_id: args.lastFrameAssetId } : {}),
+            ...(args.referenceAssetIds?.length ? { reference_asset_ids: args.referenceAssetIds } : {}),
           };
           const { generation_job_id } = await createProjectGenerationJob(Number(projectId), payload, newIdempotencyKey());
           await patchNodeAndSave(placeholderId, { taskId: String(generation_job_id) });
@@ -308,9 +311,10 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
           if (tid) byTaskId.set(tid, n);
         }
         if (byTaskId.size === 0) return; // 无持久 taskId → 跳过 listJobs
-        const [queued, processing] = await Promise.all([
+        const [queued, processing, failed] = await Promise.all([
           listJobs({ projectId: Number(projectId), status: "queued", size: 50 }),
           listJobs({ projectId: Number(projectId), status: "processing", size: 50 }),
+          listJobs({ projectId: Number(projectId), status: "failed", size: 50 }),
         ]);
         const activeJobs = new Map(
           [...queued, ...processing].map((job) => [job.job_id, job]),
@@ -320,6 +324,11 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
           if (!existing) continue;
           patchNode(existing.id, { status: "running", progress: 0 });
           startJob(existing.id, Number(job.job_id), existing.data.kind === "video" ? "video" : "image");
+        }
+        for (const job of failed) {
+          const existing = byTaskId.get(job.job_id);
+          if (!existing) continue;
+          patchNode(existing.id, { status: "error", errorMessage: "生成失败" });
         }
       } catch (e) {
         console.warn("[canvas-v2] recover processing jobs failed:", e);

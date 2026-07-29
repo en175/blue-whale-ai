@@ -154,10 +154,6 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
     generating,
     generateError,
     setGenerateError,
-    videoJobStatus,
-    videoJobError,
-    cancelVideoJob,
-    cancellingVideo,
   } = useCanvasGeneration({
     nodes,
     edges,
@@ -629,10 +625,6 @@ export function CanvasProjectRuntime({ projectId: pid }: { projectId: string }) 
           generating={generating}
           generateError={generateError}
           onClearGenerateError={() => setGenerateError(null)}
-          videoJobStatus={videoJobStatus}
-          videoJobError={videoJobError}
-          onCancelVideoJob={() => void cancelVideoJob()}
-          cancellingVideo={cancellingVideo}
         />
       )}
       <AgentChatPanel
