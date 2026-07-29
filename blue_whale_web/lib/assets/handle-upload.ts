@@ -7,7 +7,7 @@ export type PresignAssetInput = {
 };
 
 export type CompleteAssetInput = PresignAssetInput & {
-  project_id: string;
+  project_id?: string;
   storage_key: string;
   width?: number;
   height?: number;
@@ -27,7 +27,10 @@ export type PendingUpload = {
 };
 
 export interface AssetUploadRepo {
-  findCommittedUpload(userId: string, storageKey: string): Promise<PendingUpload | null>;
+  findCommittedUpload(
+    userId: string,
+    storageKey: string,
+  ): Promise<PendingUpload | null>;
   createUploadedAsset(input: {
     userId: string;
     projectId: string;
@@ -69,11 +72,18 @@ const MAX_BYTES = {
 } as const;
 
 type ProjectOwnership = {
-  findOwnedById(projectId: string, userId: string): Promise<{ id: string } | null>;
+  findOwnedById(
+    projectId: string,
+    userId: string,
+  ): Promise<{ id: string } | null>;
 };
 
 function validateUploadInput(input: PresignAssetInput) {
-  if (input.type !== "image" && input.type !== "video" && input.type !== "audio") {
+  if (
+    input.type !== "image" &&
+    input.type !== "video" &&
+    input.type !== "audio"
+  ) {
     return fail(400, "不支持的素材类型");
   }
   if (!input.mime.startsWith(`${input.type}/`)) {
@@ -122,8 +132,12 @@ export async function handleCompleteAsset(
 ) {
   const invalid = validateUploadInput(input);
   if (invalid) return invalid;
-  if (!input.project_id || !input.storage_key) return fail(400, "缺少项目或存储键");
-  if (!(await deps.projects.findOwnedById(input.project_id, userId))) {
+  if (!input.storage_key) return fail(400, "缺少存储键");
+  const projectId = input.project_id || "0";
+  if (
+    projectId !== "0" &&
+    !(await deps.projects.findOwnedById(projectId, userId))
+  ) {
     return fail(100301, "资源不存在");
   }
   if (!input.storage_key.startsWith(`uploads/${userId}/${input.type}/`)) {
@@ -131,7 +145,10 @@ export async function handleCompleteAsset(
   }
 
   if (!deps.storage) return fail(100202, "对象存储未配置");
-  const existing = await deps.uploads.findCommittedUpload(userId, input.storage_key);
+  const existing = await deps.uploads.findCommittedUpload(
+    userId,
+    input.storage_key,
+  );
   if (existing) {
     await deps.storage.makePublic(input.storage_key);
     return ok(toAssetResponse(existing));
@@ -143,14 +160,17 @@ export async function handleCompleteAsset(
   if (object.size !== input.size) {
     return fail(400, "文件大小与实际上传不符");
   }
-  if (object.mime?.split(";", 1)[0]?.trim().toLowerCase() !== input.mime.toLowerCase()) {
+  if (
+    object.mime?.split(";", 1)[0]?.trim().toLowerCase() !==
+    input.mime.toLowerCase()
+  ) {
     return fail(400, "文件类型与实际上传不符");
   }
 
   await deps.storage.makePublic(input.storage_key);
   const asset = await deps.uploads.createUploadedAsset({
     userId,
-    projectId: input.project_id,
+    projectId,
     type: input.type,
     mime: input.mime,
     size: input.size,

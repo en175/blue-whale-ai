@@ -2,9 +2,8 @@
 /**
  * 项目管理页组件测试（IK25EG）。
  *
- * 请求层（canvas / generation-inbox）与 next/navigation 全部 mock；
- * 覆盖：双数据源合并展示、生成空间标识、打开目标、新建、改名、
- * 二次确认删除与各类失败不误报成功。
+ * 请求层与 next/navigation 全部 mock；
+ * 覆盖：只读 projects list、打开 Canvas、新建、改名、二次确认删除与失败态。
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,10 +13,7 @@ import {
   listProjects,
   renameProject,
 } from "@/lib/canvas";
-import {
-  deleteGenerationInbox,
-  getGenerationInbox,
-} from "@/lib/generation-inbox";
+import { getGenerationInbox } from "@/lib/generation-inbox";
 import ProjectsPage from "./page";
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
@@ -43,51 +39,31 @@ const CANVAS_PROJECTS = [
   { id: 2, name: "Logo 设计", thumb: null, created_at: "2026-07-19T08:00:00Z" },
 ];
 
-const INBOX = {
-  project: {
-    id: 42,
-    name: "生成收件箱",
-    thumb: null,
-    created_at: "2026-07-19T10:00:00Z",
-    purpose: "generation_inbox",
-  },
-  active_conversation_id: 2,
-};
-
 const mockedListProjects = vi.mocked(listProjects);
 const mockedGetInbox = vi.mocked(getGenerationInbox);
 const mockedCreateProject = vi.mocked(createProject);
 const mockedRenameProject = vi.mocked(renameProject);
 const mockedDeleteProject = vi.mocked(deleteProject);
-const mockedDeleteInbox = vi.mocked(deleteGenerationInbox);
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockedListProjects.mockResolvedValue(CANVAS_PROJECTS);
-  mockedGetInbox.mockResolvedValue(INBOX);
+  mockedGetInbox.mockResolvedValue(null);
 });
 
 describe("ProjectsPage 列表", () => {
-  it("加载后同时显示普通项目与生成收件箱，收件箱带「生成空间」标识", async () => {
+  it("只加载画布 Project，不请求 generation inbox", async () => {
     render(<ProjectsPage />);
 
     await screen.findByText("海报项目");
     expect(screen.getByText("Logo 设计")).toBeInTheDocument();
-    expect(screen.getByText("生成收件箱")).toBeInTheDocument();
-    expect(screen.getByText("生成空间")).toBeInTheDocument();
-  });
-
-  it("收件箱不存在（null）时只显示普通项目，且不显示生成空间标识", async () => {
-    mockedGetInbox.mockResolvedValue(null);
-    render(<ProjectsPage />);
-
-    await screen.findByText("海报项目");
+    expect(mockedListProjects).toHaveBeenCalledTimes(1);
+    expect(mockedGetInbox).not.toHaveBeenCalled();
     expect(screen.queryByText("生成空间")).not.toBeInTheDocument();
   });
 
   it("空列表显示空态文案与新建提示", async () => {
     mockedListProjects.mockResolvedValue([]);
-    mockedGetInbox.mockResolvedValue(null);
     render(<ProjectsPage />);
 
     await screen.findByText(/还没有项目/);
@@ -103,7 +79,7 @@ describe("ProjectsPage 列表", () => {
     expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
   });
 
-  it("普通项目链接进入对应 Canvas（稳定身份），收件箱链接进入生成页", async () => {
+  it("所有项目链接进入对应 Canvas（稳定身份）", async () => {
     render(<ProjectsPage />);
 
     await screen.findByText("海报项目");
@@ -114,10 +90,6 @@ describe("ProjectsPage 列表", () => {
     expect(screen.getByRole("link", { name: "Logo 设计" })).toHaveAttribute(
       "href",
       "/canvas?project=2",
-    );
-    expect(screen.getByRole("link", { name: "生成收件箱" })).toHaveAttribute(
-      "href",
-      "/generate",
     );
   });
 });
@@ -200,32 +172,6 @@ describe("ProjectsPage 改名", () => {
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.getByText("海报项目")).toBeInTheDocument();
   });
-
-  it("生成收件箱同样可在管理页改名，走通用项目改名接口", async () => {
-    mockedRenameProject.mockResolvedValue({
-      id: 42,
-      name: "我的生成空间",
-      thumb: null,
-      created_at: "2026-07-19T10:00:00Z",
-    });
-    render(<ProjectsPage />);
-    await screen.findByText("生成收件箱");
-
-    fireEvent.click(screen.getByRole("button", { name: "重命名 生成收件箱" }));
-    fireEvent.change(screen.getByLabelText("项目名称"), {
-      target: { value: "我的生成空间" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
-
-    await screen.findByText("我的生成空间");
-    expect(mockedRenameProject).toHaveBeenCalledWith(42, "我的生成空间");
-    // 改名不改变用途标识与打开目标
-    expect(screen.getByText("生成空间")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "我的生成空间" })).toHaveAttribute(
-      "href",
-      "/generate",
-    );
-  });
 });
 
 describe("ProjectsPage 删除", () => {
@@ -247,21 +193,6 @@ describe("ProjectsPage 删除", () => {
     );
     expect(mockedDeleteProject).toHaveBeenCalledWith(1);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("删除生成收件箱走收件箱删除入口，不走通用项目删除", async () => {
-    mockedDeleteInbox.mockResolvedValue(undefined);
-    render(<ProjectsPage />);
-    await screen.findByText("生成收件箱");
-
-    fireEvent.click(screen.getByRole("button", { name: "删除 生成收件箱" }));
-    fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
-
-    await waitFor(() =>
-      expect(screen.queryByText("生成收件箱")).not.toBeInTheDocument(),
-    );
-    expect(mockedDeleteInbox).toHaveBeenCalledTimes(1);
-    expect(mockedDeleteProject).not.toHaveBeenCalled();
   });
 
   it("删除失败显示错误且不移除列表项", async () => {

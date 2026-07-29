@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useCanvasDoc } from "./useCanvasDoc";
 import type { CanvasNode, NodeRecipe } from "../model";
-import { saveCanvas } from "../../../../lib/canvas";
+import { loadCanvas, saveCanvas } from "../../../../lib/canvas";
 
 vi.mock("../../../../lib/canvas", () => ({
   loadCanvas: vi.fn().mockResolvedValue({ nodes: "[]", viewport: null }),
@@ -21,8 +21,16 @@ const recipe: NodeRecipe = {
   origin: "generated",
   generation: {
     model: "doubao-seedance",
-    inputs: { prompt: { kind: "text", text: "橘猫凑进来" }, firstFrame: { kind: "image", url: "ff.png" } },
-    params: { refMode: "first-last", duration: 5, resolution: "720p", aspectRatio: "16:9" },
+    inputs: {
+      prompt: { kind: "text", text: "橘猫凑进来" },
+      firstFrame: { kind: "image", url: "ff.png" },
+    },
+    params: {
+      refMode: "first-last",
+      duration: 5,
+      resolution: "720p",
+      aspectRatio: "16:9",
+    },
     mediaKind: "video",
     generatedAt: "2026-07-23T08:10:51.057Z",
   },
@@ -34,12 +42,124 @@ const runningVideoNode: CanvasNode = {
   position: { x: 0, y: 0 },
   width: 356,
   height: 200,
-  data: { content: "橘猫凑进来", kind: "video", status: "running", progress: 0, recipe },
+  data: {
+    content: "橘猫凑进来",
+    kind: "video",
+    status: "running",
+    progress: 0,
+    recipe,
+  },
 } as unknown as CanvasNode;
 
 beforeEach(() => vi.clearAllMocks());
 
 describe("useCanvasDoc 视频 recipe 生命周期", () => {
+  it("切换项目会取消上一项目尚未触发的保存", async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useCanvasDoc());
+      await act(async () => {
+        await result.current.load("1");
+      });
+      act(() => result.current.addNodeFull(runningVideoNode));
+
+      await act(async () => {
+        await result.current.load("2");
+        await vi.advanceTimersByTimeAsync(800);
+      });
+
+      expect(saveCanvas).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("加载返回时保留加载期间新建的上传占位", async () => {
+    vi.useFakeTimers();
+    let resolveLoad!: (value: { nodes: string; viewport: null }) => void;
+    vi.mocked(loadCanvas).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveLoad = resolve;
+      }),
+    );
+    try {
+      const { result } = renderHook(() => useCanvasDoc());
+
+      let loading!: Promise<unknown>;
+      act(() => {
+        loading = result.current.load("1");
+      });
+      act(() => result.current.addNodeFull(runningVideoNode));
+      await act(async () => {
+        await result.current.patchNodeAndSave("n_vid", { taskId: "777" });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+      expect(saveCanvas).not.toHaveBeenCalled();
+
+      resolveLoad({
+        nodes: JSON.stringify([
+          {
+            id: "server_node",
+            type: "text",
+            position: { x: 0, y: 0 },
+            data: { kind: "text", content: "已保存" },
+          },
+        ]),
+        viewport: null,
+      });
+      await act(async () => {
+        await loading;
+        await vi.advanceTimersByTimeAsync(800);
+      });
+
+      expect(result.current.nodes.map((node) => node.id)).toEqual([
+        "server_node",
+        "n_vid",
+      ]);
+      const serializedNodes = (
+        saveCanvas as ReturnType<typeof vi.fn>
+      ).mock.calls.at(-1)?.[2] as string;
+      expect(
+        JSON.parse(serializedNodes).map((node: { id: string }) => node.id),
+      ).toEqual(["server_node", "n_vid"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("加载失败进入错误态，重试成功后恢复", async () => {
+    vi.mocked(loadCanvas)
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce({ nodes: "[]", viewport: null });
+    const { result } = renderHook(() => useCanvasDoc());
+
+    await act(async () => {
+      await expect(result.current.load("1")).rejects.toThrow("network down");
+    });
+    expect(result.current.loadState).toBe("error");
+
+    await act(async () => {
+      await result.current.load("1");
+    });
+    expect(result.current.loadState).toBe("ready");
+  });
+
+  it("原位更新上传占位节点尺寸", () => {
+    const { result } = renderHook(() => useCanvasDoc());
+    act(() => result.current.addNodeFull(runningVideoNode));
+
+    act(() => result.current.resizeNode("n_vid", 480, 270));
+
+    expect(
+      result.current.nodes.find((node) => node.id === "n_vid"),
+    ).toMatchObject({
+      width: 480,
+      height: 270,
+    });
+  });
+
   it("running 占位创建即带 recipe（不等 succeeded）", () => {
     const { result } = renderHook(() => useCanvasDoc());
     act(() => result.current.addNodeFull(runningVideoNode));
@@ -53,7 +173,9 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
     const { result } = renderHook(() => useCanvasDoc());
     act(() => result.current.addNodeFull(runningVideoNode));
     // 模拟 setNodeAsset 的 patch（不传 recipe，对应新流程）
-    act(() => result.current.patchNode("n_vid", { assetId: "167", status: "done" }));
+    act(() =>
+      result.current.patchNode("n_vid", { assetId: "167", status: "done" }),
+    );
     const n = result.current.nodes.find((x) => x.id === "n_vid");
     expect(n?.data.status).toBe("done");
     expect(n?.data.assetId).toBe("167");
@@ -63,7 +185,12 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
   it("failed 窗口期节点仍带 recipe（溯源不丢）", () => {
     const { result } = renderHook(() => useCanvasDoc());
     act(() => result.current.addNodeFull(runningVideoNode));
-    act(() => result.current.patchNode("n_vid", { status: "error", errorMessage: "生成失败" }));
+    act(() =>
+      result.current.patchNode("n_vid", {
+        status: "error",
+        errorMessage: "生成失败",
+      }),
+    );
     const n = result.current.nodes.find((x) => x.id === "n_vid");
     expect(n?.data.status).toBe("error");
     expect(n?.data.recipe).toEqual(recipe); // 失败也保留配方，可重试/溯源
@@ -89,7 +216,9 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
         await vi.advanceTimersByTimeAsync(800);
       });
 
-      const serializedNodes = (saveCanvas as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[2] as string;
+      const serializedNodes = (
+        saveCanvas as ReturnType<typeof vi.fn>
+      ).mock.calls.at(-1)?.[2] as string;
       expect(JSON.parse(serializedNodes)[0]).toMatchObject({
         id: "n_img",
         taskId: "777",
@@ -121,7 +250,8 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
       });
 
       expect(saveCanvas).toHaveBeenCalledTimes(1);
-      const serializedNodes = (saveCanvas as ReturnType<typeof vi.fn>).mock.calls[0][2] as string;
+      const serializedNodes = (saveCanvas as ReturnType<typeof vi.fn>).mock
+        .calls[0][2] as string;
       expect(JSON.parse(serializedNodes)[0]).toMatchObject({
         id: "n_img",
         taskId: "777",

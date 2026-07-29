@@ -1,12 +1,11 @@
 "use client";
 
 /**
- * 项目管理页（IK25EG）—— 集中管理当前用户的普通 Canvas Project 与唯一的生成收件箱。
+ * 项目管理页（IK25EG）—— 集中管理当前用户的 Canvas Project。
  *
- * 数据来源：普通 Project 走 GET /api/projects（后端已排除收件箱），
- * 收件箱走 GET /api/generation-inbox（只读，不存在返回 null，本页绝不创建）。
- * 打开目标：普通 Project → /canvas?project=<id>（刷新可恢复同一项目）；
- * 生成收件箱 → /generate。删除为不可撤销的永久删除，本页二次确认并列出影响；
+ * 数据来源仅为 GET /api/projects。打开目标为
+ * /canvas?project=<id>（刷新可恢复同一项目）。
+ * 删除为不可撤销的永久删除，本页二次确认并列出影响；
  * 操作失败只呈现错误，不把列表更新为成功状态。
  */
 
@@ -20,16 +19,11 @@ import {
   listProjects,
   renameProject,
 } from "@/lib/canvas";
-import {
-  deleteGenerationInbox,
-  getGenerationInbox,
-} from "@/lib/generation-inbox";
 
 type ProjectRow = {
   id: number;
   name: string;
   createdAt: string;
-  purpose: "canvas" | "generation_inbox";
 };
 
 const PILL_BTN =
@@ -47,28 +41,16 @@ function formatCreatedAt(iso: string): string {
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("zh-CN");
 }
 
-/** 拉取普通项目（后端已排除收件箱）+ 生成收件箱（只读，不存在为 null），按创建时间倒序合并。 */
+/** 拉取当前用户的 Canvas Project，按创建时间倒序。 */
 async function fetchProjectRows(): Promise<ProjectRow[]> {
-  const [projects, inbox] = await Promise.all([
-    listProjects(),
-    getGenerationInbox(),
-  ]);
-  const next: ProjectRow[] = projects.map((p) => ({
-    id: p.id,
-    name: p.name,
-    createdAt: p.created_at,
-    purpose: "canvas",
-  }));
-  if (inbox != null) {
-    next.push({
-      id: inbox.project.id,
-      name: inbox.project.name,
-      createdAt: inbox.project.created_at,
-      purpose: "generation_inbox",
-    });
-  }
-  next.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return next;
+  const projects = await listProjects();
+  return projects
+    .map((project) => ({
+      id: project.id,
+      name: project.name,
+      createdAt: project.created_at,
+    }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export default function ProjectsPage() {
@@ -91,7 +73,7 @@ export default function ProjectsPage() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // 首屏与重试：拉取普通项目 + 收件箱（只读探测，绝不创建收件箱），合并为一表
+  // 首屏与重试：只拉取 Canvas Project 列表。
   useEffect(() => {
     let cancelled = false;
     fetchProjectRows()
@@ -126,7 +108,6 @@ export default function ProjectsPage() {
     setCreateError(null);
     void (async () => {
       try {
-        // 管理页只创建普通 Project；生成收件箱只能由生成页首条消息自动创建
         const dto = await createProject(name);
         router.push(`/canvas?project=${dto.id}`);
       } catch (e) {
@@ -180,11 +161,7 @@ export default function ProjectsPage() {
     const target = deleteTarget;
     void (async () => {
       try {
-        if (target.purpose === "generation_inbox") {
-          await deleteGenerationInbox();
-        } else {
-          await deleteProject(target.id);
-        }
+        await deleteProject(target.id);
         setRows((current) => current.filter((row) => row.id !== target.id));
         setDeleteTarget(null);
       } catch (e) {
@@ -243,96 +220,86 @@ export default function ProjectsPage() {
           </div>
         ) : rows.length === 0 ? (
           <p className="py-12 text-center text-sm text-[var(--tc-text-muted)]">
-            还没有项目。输入名称新建一个项目开始创作；生成收件箱会在生成页收到首条消息后自动出现。
+            还没有项目。输入名称新建一个项目开始创作。
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
-            {rows.map((row) => {
-              const isInbox = row.purpose === "generation_inbox";
-              return (
-                <li
-                  key={row.id}
-                  className="flex items-center gap-3 rounded-xl border border-[var(--tc-border)] bg-[var(--tc-bg-surface)] px-4 py-3"
-                >
-                  {renamingId === row.id ? (
-                    <form
-                      className="flex flex-1 flex-wrap items-center gap-2"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        submitRename();
-                      }}
+            {rows.map((row) => (
+              <li
+                key={row.id}
+                className="flex items-center gap-3 rounded-xl border border-[var(--tc-border)] bg-[var(--tc-bg-surface)] px-4 py-3"
+              >
+                {renamingId === row.id ? (
+                  <form
+                    className="flex flex-1 flex-wrap items-center gap-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      submitRename();
+                    }}
+                  >
+                    <input
+                      value={renameDraft}
+                      onChange={(e) => setRenameDraft(e.target.value)}
+                      aria-label="项目名称"
+                      autoFocus
+                      className="rounded-md border border-[var(--tc-border)] bg-[var(--tc-bg-elevated)] px-2 py-1 text-sm text-[var(--tc-text-primary)] outline-none"
+                    />
+                    <button
+                      type="submit"
+                      disabled={renaming}
+                      className={PILL_BTN}
                     >
-                      <input
-                        value={renameDraft}
-                        onChange={(e) => setRenameDraft(e.target.value)}
-                        aria-label="项目名称"
-                        autoFocus
-                        className="rounded-md border border-[var(--tc-border)] bg-[var(--tc-bg-elevated)] px-2 py-1 text-sm text-[var(--tc-text-primary)] outline-none"
-                      />
-                      <button
-                        type="submit"
-                        disabled={renaming}
-                        className={PILL_BTN}
+                      {renaming ? "保存中…" : "保存"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRenamingId(null)}
+                      disabled={renaming}
+                      className={PILL_BTN}
+                    >
+                      取消
+                    </button>
+                    {renameError && (
+                      <p className="w-full text-xs text-[var(--tc-destructive)]">
+                        {renameError}
+                      </p>
+                    )}
+                  </form>
+                ) : (
+                  <>
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <Link
+                        href={`/canvas?project=${row.id}`}
+                        className="truncate text-sm font-medium text-[var(--tc-text-primary)] hover:underline"
                       >
-                        {renaming ? "保存中…" : "保存"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setRenamingId(null)}
-                        disabled={renaming}
-                        className={PILL_BTN}
-                      >
-                        取消
-                      </button>
-                      {renameError && (
-                        <p className="w-full text-xs text-[var(--tc-destructive)]">
-                          {renameError}
-                        </p>
-                      )}
-                    </form>
-                  ) : (
-                    <>
-                      <div className="flex min-w-0 flex-1 items-center gap-2">
-                        <Link
-                          href={
-                            isInbox ? "/generate" : `/canvas?project=${row.id}`
-                          }
-                          className="truncate text-sm font-medium text-[var(--tc-text-primary)] hover:underline"
-                        >
-                          {row.name}
-                        </Link>
-                        {isInbox && (
-                          <span className="shrink-0 rounded-full border border-[var(--tc-border)] px-2 py-0.5 text-[11px] text-[var(--tc-text-secondary)]">
-                            生成空间
-                          </span>
-                        )}
-                      </div>
-                      <span className="shrink-0 text-xs text-[var(--tc-text-muted)]">
-                        {formatCreatedAt(row.createdAt)}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label={`重命名 ${row.name}`}
-                        title="重命名"
-                        onClick={() => openRename(row)}
-                        className={ICON_BTN}
-                      >
-                        <Pencil width={13} height={13} aria-hidden="true" />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`删除 ${row.name}`}
-                        title="删除"
-                        onClick={() => openDelete(row)}
-                        className={ICON_BTN}
-                      >
-                        <Trash2 width={13} height={13} aria-hidden="true" />
-                      </button>
-                    </>
-                  )}
-                </li>
-              );
-            })}
+                        {row.name}
+                      </Link>
+                    </div>
+                    <span className="shrink-0 text-xs text-[var(--tc-text-muted)]">
+                      {formatCreatedAt(row.createdAt)}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`重命名 ${row.name}`}
+                      title="重命名"
+                      onClick={() => openRename(row)}
+                      className={ICON_BTN}
+                    >
+                      <Pencil width={13} height={13} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`删除 ${row.name}`}
+                      title="删除"
+                      onClick={() => openDelete(row)}
+                      className={ICON_BTN}
+                    >
+                      <Trash2 width={13} height={13} aria-hidden="true" />
+                    </button>
+                  </>
+                )}
+              </li>
+            ))}
           </ul>
         )}
       </div>
@@ -349,9 +316,7 @@ export default function ProjectsPage() {
               永久删除「{deleteTarget.name}」？
             </h2>
             <p className="mt-2 text-xs leading-5 text-[var(--tc-text-secondary)]">
-              {deleteTarget.purpose === "generation_inbox"
-                ? "将永久删除该生成收件箱及其中全部对话、生成记录和作品，不可恢复。已复制到其他项目的作品不受影响；下次在生成页发送消息将创建全新的生成收件箱。"
-                : "将永久删除该项目及其画布、对话、生成记录和作品，不可恢复。其他项目中已有的作品副本不受影响。"}
+              将永久删除该项目及其画布、对话、生成记录和作品，不可恢复。其他项目中已有的作品副本不受影响。
             </p>
             {deleteError && (
               <p className="mt-2 text-xs text-[var(--tc-destructive)]">

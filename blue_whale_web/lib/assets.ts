@@ -4,10 +4,11 @@
 
 import { request, type Paged } from "./api";
 import { presignAsset, completeAsset } from "./api/endpoints";
+import { detectMediaKind } from "./mediaSize";
 
 /** 资产列表项（GET /api/assets records，不含 storageKey）。 */
 export type AssetItem = {
-  id: number;
+  id: number | string;
   type: string;
   url: string;
   width: number | null;
@@ -59,12 +60,14 @@ export function copyAssetToProject(
  */
 export async function uploadAsset(
   file: File,
-  projectId: number,
-  type: "image" | "video" | "audio",
+  projectId?: number,
+  declaredType?: "image" | "video" | "audio",
 ): Promise<{ id: string; url: string }> {
+  const type = declaredType ?? detectMediaKind(file);
+  const mime = file.type || "application/octet-stream";
   const presign = await presignAsset({
     type,
-    mime: file.type || "application/octet-stream",
+    mime,
     size: file.size,
   });
   const putResp = await fetch(presign.upload_url, {
@@ -74,11 +77,16 @@ export async function uploadAsset(
   });
   if (!putResp.ok) throw new Error(`上传失败: ${putResp.status}`);
   const asset = await completeAsset({
-    project_id: String(projectId),
+    ...(projectId == null ? {} : { project_id: String(projectId) }),
     type,
-    mime: file.type || "application/octet-stream",
+    mime,
     size: file.size,
     storage_key: presign.storage_key,
   });
   return { id: asset.asset_id, url: asset.url };
+}
+
+/** 逻辑删除当前用户素材；服务端负责归属校验。 */
+export function deleteAsset(assetId: number | string): Promise<void> {
+  return request<void>(`/assets/${assetId}`, "DELETE");
 }
