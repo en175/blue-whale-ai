@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
-import { apiRequest } from "./api-client";
+import { apiFetch, apiRequest } from "./api-client";
 import { ApiError, isApiError } from "./api/errors";
 
 /** 替换 globalThis.fetch,每次调用经 responder 产出新 Response。 */
@@ -160,5 +160,20 @@ describe("apiRequest —— 成功 / 网络层", () => {
       expect(isApiError(e)).toBe(false);
       expect((e as Error).message).toBe("后端未启动或无法连接");
     }
+  });
+});
+
+describe("apiFetch —— new-api sk token 认证失败", () => {
+  it("401 时不调用已退役的 refresh route，保留稳定 401 错误", async () => {
+    window.localStorage.setItem("bw-access-token", "sk-expired");
+    const fetchMock = stubFetch(() =>
+      jsonRes({ code: 401, msg: "token 无效", data: null }, { status: 401 }),
+    );
+
+    const response = await apiFetch("/api/projects");
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem("bw-access-token")).toBeNull();
   });
 });

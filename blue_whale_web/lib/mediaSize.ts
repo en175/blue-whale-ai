@@ -7,7 +7,7 @@
  * 不阻塞落节点。
  */
 
-export type MediaKind = "image" | "video";
+export type MediaKind = "image" | "video" | "audio";
 export type PixelSize = { width: number; height: number };
 
 /** 短边基准边长（与 `ASPECT_RATIO_BASE` 一致）。 */
@@ -16,11 +16,24 @@ export const MEDIA_SHORT_SIDE = 200;
 /** 元数据读取超时：超过即回退，避免阻塞节点落地。 */
 const READ_TIMEOUT_MS = 3000;
 
-/** 读不上来时的默认回退比例（图 1:1 / 视频 16:9）。 */
+/** 读不上来时的默认回退比例（图 1:1 / 视频 16:9 / 音频卡片）。 */
 export function fallbackMediaSize(kind: MediaKind): PixelSize {
+  if (kind === "audio") return { width: 240, height: 120 }; // 音频无像素维度，用固定卡片
   return kind === "image"
     ? { width: MEDIA_SHORT_SIDE, height: MEDIA_SHORT_SIDE }
     : { width: 356, height: MEDIA_SHORT_SIDE }; // 16:9 短边 200
+}
+
+/** 上传文件 MIME → 媒体 kind（无/未知 MIME 回退 image）。 */
+export function detectMediaKind(file: File): MediaKind {
+  const t = file.type || "";
+  if (t.startsWith("video/")) return "video";
+  if (t.startsWith("audio/")) return "audio";
+  // MIME 缺省时按扩展名兜底（部分浏览器对特殊格式不填 MIME）
+  const name = file.name.toLowerCase();
+  if (/\.(mp4|webm|mov|m4v|ogg)$/.test(name)) return "video";
+  if (/\.(mp3|wav|flac|aac|m4a|ogg|opus)$/.test(name)) return "audio";
+  return "image";
 }
 
 /**
@@ -47,6 +60,8 @@ export function readMediaNaturalSize(
   url: string,
   kind: MediaKind,
 ): Promise<PixelSize> {
+  // 音频无像素维度，直接回退固定卡片（不创建 <img>/<video>）。
+  if (kind === "audio") return Promise.resolve(fallbackMediaSize(kind));
   return new Promise<PixelSize>((resolve) => {
     let done = false;
     const finish = (size: PixelSize) => {

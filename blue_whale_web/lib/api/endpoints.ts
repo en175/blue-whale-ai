@@ -17,6 +17,7 @@ import { apiRequest } from "../api-client";
 import type {
   AssetResponse,
   CatalogResponse,
+  CompleteAssetRequest,
   CreateProjectRequest,
   CreateProjectResponse,
   GenerateRequest,
@@ -41,15 +42,16 @@ export function getMe(): Promise<MeResponse> {
 export function presignAsset(
   req: PresignAssetRequest,
 ): Promise<PresignAssetResponse> {
-  return apiFetch<PresignAssetResponse>("/agent/assets/presign", {
+  return apiRequest<PresignAssetResponse>("/api/agent/assets/uploads/presign", {
     method: "POST",
-    body: req,
+    body: JSON.stringify(req),
   });
 }
 
-export function completeAsset(assetId: string): Promise<AssetResponse> {
-  return apiFetch<AssetResponse>(`/agent/assets/${enc(assetId)}/complete`, {
+export function completeAsset(req: CompleteAssetRequest): Promise<AssetResponse> {
+  return apiRequest<AssetResponse>("/api/agent/assets/uploads/complete", {
     method: "POST",
+    body: JSON.stringify(req),
   });
 }
 

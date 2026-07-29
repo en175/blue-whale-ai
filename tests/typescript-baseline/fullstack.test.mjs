@@ -40,14 +40,31 @@ async function waitUntilReady(url) {
   throw new Error(`${url} did not become ready within 60 seconds`);
 }
 
-test("验收拓扑只包含 Web、三个 Node 入口与 fresh MySQL", () => {
+test("验收拓扑包含 Web、三个 Node 入口、fresh MySQL 与 BullMQ Redis", () => {
   assert.deepEqual(compose("config", "--services").split("\n").sort(), [
     "agent-worker",
     "generation-worker",
     "mysql",
     "product-api",
+    "redis",
     "web",
   ]);
+});
+
+test("Web 与 BullMQ generation worker 由同一镜像启动为两个进程", () => {
+  const config = JSON.parse(compose("config", "--format", "json"));
+  const web = config.services.web;
+  const generationWorker = config.services["generation-worker"];
+
+  assert.equal(generationWorker.image, web.image);
+  assert.deepEqual(generationWorker.command, [
+    "pnpm",
+    "--filter",
+    "blue_whale",
+    "start:worker",
+  ]);
+  assert.equal(generationWorker.environment.REDIS_HOST, "redis");
+  assert.ok(generationWorker.depends_on.redis);
 });
 
 test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子", () => {
@@ -102,7 +119,7 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
   );
 });
 
-test("Web 与三个 Node 入口就绪且验收运行时固定为 Fake", async () => {
+test("Web 与三个 Node 入口就绪", async () => {
   const product = await readJson(endpoints["product-api"]);
   const agent = await readJson(endpoints["agent-worker"]);
   const generation = await readJson(endpoints["generation-worker"]);
@@ -118,10 +135,7 @@ test("Web 与三个 Node 入口就绪且验收运行时固定为 Fake", async ()
     agent.dependencies.map(({ name }) => name),
     ["mysql", "fake-agent-runtime"],
   );
-  assert.deepEqual(
-    generation.dependencies.map(({ name }) => name),
-    ["mysql", "fake-generation-runtime"],
-  );
+  assert.equal(generation.status, "ready");
   assert.equal(proxiedProduct.service, "product-api");
   assert.equal(typeof web.git_commit, "string");
 });

@@ -35,6 +35,14 @@ services:
       retries: 60
       start_period: 10s
 
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   product-api:
     <<: *node-service
     command: ["node", "apps/product-api/dist/index.js"]
@@ -66,13 +74,26 @@ services:
 
   generation-worker:
     <<: *node-service
-    command: ["node", "apps/generation-worker/dist/index.js"]
+    command: ["pnpm", "--filter", "blue_whale", "start:worker"]
     environment:
       <<: *node-environment
-      PORT: "4002"
-      GENERATION_RUNTIME_MODE: fake
+      DATABASE_URL: mysql://root:blue_whale@mysql:3306/blue_whale
+      GENERATION_WORKER_PORT: "4002"
+      NEW_API_BASE_URL: http://new-api.invalid
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      VOLC_ACCESS_KEY_ID: acceptance-placeholder
+      VOLC_SECRET_ACCESS_KEY: acceptance-placeholder
+      VOLC_TOS_ENDPOINT: tos.invalid
+      VOLC_TOS_BUCKET: acceptance-placeholder
+      VOLC_TOS_REGION: cn-beijing
     ports:
       - "4312:4002"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4002/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 2s

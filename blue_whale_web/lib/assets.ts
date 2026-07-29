@@ -3,6 +3,7 @@
  */
 
 import { request, type Paged } from "./api";
+import { presignAsset, completeAsset } from "./api/endpoints";
 
 /** 资产列表项（GET /api/assets records，不含 storageKey）。 */
 export type AssetItem = {
@@ -43,4 +44,41 @@ export function copyAssetToProject(
     { source_asset_id: sourceAssetId },
     { "Idempotency-Key": idempotencyKey },
   );
+}
+
+/**
+ * 上传媒体文件到对象存储（Node 资产 presign + PUT + complete 三步流）。
+ *
+ * 流程：① POST /api/agent/assets/uploads/presign → { storage_key, upload_url, headers }；
+ *      ② PUT upload_url 直连 TOS（headers 由 presign 给，不走网关鉴权）；
+ *      ③ POST /api/agent/assets/uploads/complete → HEAD 校验并落 Asset。
+ * 返回 { id, url }：id = asset_id（string，全链路与 DockMediaItem.assetId / store key 对齐），
+ * url 为 TOS 永久地址，可持久化到画布节点，刷新不丢。
+ *
+ * projectId 在 complete 时校验归属并写入 Asset.project_id。
+ */
+export async function uploadAsset(
+  file: File,
+  projectId: number,
+  type: "image" | "video" | "audio",
+): Promise<{ id: string; url: string }> {
+  const presign = await presignAsset({
+    type,
+    mime: file.type || "application/octet-stream",
+    size: file.size,
+  });
+  const putResp = await fetch(presign.upload_url, {
+    method: "PUT",
+    headers: presign.headers,
+    body: file,
+  });
+  if (!putResp.ok) throw new Error(`上传失败: ${putResp.status}`);
+  const asset = await completeAsset({
+    project_id: String(projectId),
+    type,
+    mime: file.type || "application/octet-stream",
+    size: file.size,
+    storage_key: presign.storage_key,
+  });
+  return { id: asset.asset_id, url: asset.url };
 }

@@ -1,34 +1,13 @@
 /**
- * API Client — 基于 fetch 的双 Token 自动刷新封装。
+ * API Client — 基于 fetch 的 new-api sk token 封装。
  *
  * 特性：
  * - 请求自动附带 Authorization: Bearer <access_token>
- * - 收到 401 → 单例锁 + 请求队列，静默刷新 token
- * - 刷新成功 → 重放队列中所有请求，用户无感
- * - 刷新失败 → 清空 tokens，通知 AuthContext 弹出登录
+ * - 收到 401 → 清空 sk token，通知 AuthContext 弹出登录
  * - 跳过 auth 端点（/api/auth/*），避免无限循环
  */
-import {
-  loadAccessToken,
-  loadRefreshToken,
-  saveTokens,
-  clearTokens,
-} from "@/components/auth/authStorage";
-import type { LoginData } from "./auth";
+import { loadAccessToken, clearTokens } from "@/components/auth/authStorage";
 import { ApiError } from "./api/errors";
-
-// ---------------------------------------------------------------------------
-// Singleton lock & request queue
-// ---------------------------------------------------------------------------
-
-let isRefreshing = false;
-let refreshPromise: Promise<string> | null = null;
-
-type QueueItem = {
-  resolve: (token: string) => void;
-  reject: (error: Error) => void;
-};
-let failedQueue: QueueItem[] = [];
 
 // ---------------------------------------------------------------------------
 // Auth failure callback
@@ -51,14 +30,6 @@ export function subscribeToAuthFailure(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-function processQueue(error: Error | null, token?: string) {
-  failedQueue.forEach(({ resolve, reject }) => {
-    if (error) reject(error);
-    else resolve(token!);
-  });
-  failedQueue = [];
-}
-
 /** auth 端点不触发 401 拦截，防止 refresh 自身 401 导致无限循环。 */
 function isAuthEndpoint(url: string): boolean {
   const authPaths = [
@@ -71,38 +42,13 @@ function isAuthEndpoint(url: string): boolean {
   return authPaths.some((p) => url.includes(p));
 }
 
-/** 调用后端 /api/auth/refresh，返回新的 access_token。不经过 apiFetch 自身。 */
-async function doRefreshToken(): Promise<string> {
-  const rt = loadRefreshToken();
-  if (!rt) throw new Error("No refresh token");
-
-  const res = await fetch("/api/auth/refresh", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${rt}`,
-    },
-  });
-
-  if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
-
-  const json = await res.json();
-  if (!json || json.code !== 200) {
-    throw new Error(json?.msg ?? "Refresh token 已过期");
-  }
-
-  const data = json.data as LoginData;
-  saveTokens(data.access_token, data.refresh_token);
-  return data.access_token;
-}
-
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /**
- * 带 401 自动刷新的 fetch 封装。
- * 用法同 fetch，自动附加 Authorization 头，401 时自动刷新 token 并重试。
+ * 带 new-api sk token 的 fetch 封装。
+ * 用法同 fetch，自动附加 Authorization 头；401 时返回原响应并清理登录态。
  */
 export async function apiFetch(
   url: string,
@@ -123,43 +69,10 @@ export async function apiFetch(
   const accessToken = loadAccessToken();
   let res = await makeRequest(accessToken);
 
-  // 非 401 / 是 auth 端点 → 直接返回
-  if (res.status !== 401 || isAuthEndpoint(url)) {
-    return res;
+  if (res.status === 401 && !isAuthEndpoint(url)) {
+    clearTokens();
+    onAuthFailure?.();
   }
-
-  // 401 on 受保护端点 → 启动刷新（单例）
-  if (!isRefreshing) {
-    isRefreshing = true;
-    refreshPromise = doRefreshToken()
-      .then((token) => {
-        processQueue(null, token);
-        return token;
-      })
-      .catch((err) => {
-        processQueue(err);
-        console.warn(
-          "[api-client] apiFetch 401 → refresh 也失败，清理 tokens",
-          err instanceof Error ? err.message : err,
-        );
-        clearTokens();
-        onAuthFailure?.();
-        throw err;
-      })
-      .finally(() => {
-        isRefreshing = false;
-        refreshPromise = null;
-      });
-  }
-
-  // 等待刷新完成（正在进行的或刚启动的）
-  try {
-    const newToken = await refreshPromise;
-    res = await makeRequest(newToken);
-  } catch {
-    throw new Error("认证已过期，请重新登录");
-  }
-
   return res;
 }
 
@@ -238,37 +151,8 @@ export async function apiRequest<T>(
 }
 
 /**
- * 静默获取有效 access token（无则尝试 refresh）。
- * 用于 requireAuth 等场景，失败返回 null 而非抛错。
+ * 获取当前 sk token。没有 refresh 链路，缺失时返回 null。
  */
 export async function getAccessTokenSilently(): Promise<string | null> {
-  const at = loadAccessToken();
-  if (at) return at;
-
-  const rt = loadRefreshToken();
-  if (!rt) return null;
-
-  if (!isRefreshing) {
-    isRefreshing = true;
-    refreshPromise = doRefreshToken()
-      .then((token) => {
-        processQueue(null, token);
-        return token;
-      })
-      .catch((err) => {
-        processQueue(err);
-        throw err; // silent：抛错由下方 await catch 兜底 return null；不 clearTokens/onAuthFailure
-      })
-      .finally(() => {
-        isRefreshing = false;
-        refreshPromise = null;
-      });
-  }
-
-  // refreshPromise 可能由 apiFetch 发起（失败会 reject），这里兜底 catch
-  try {
-    return await refreshPromise;
-  } catch {
-    return null;
-  }
+  return loadAccessToken();
 }
