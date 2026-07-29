@@ -11,5 +11,8 @@
   },
   "scripts": {
     "build": "tsc -b"
+  },
+  "dependencies": {
+    "jose": "^6.2.4"
   }
 }

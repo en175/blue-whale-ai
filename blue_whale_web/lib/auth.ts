@@ -21,6 +21,17 @@ export interface LoginData {
   is_new_user: boolean;
   has_password: boolean;
 }
+
+/** new-api username/password 登录，Node route 只返回兼容旧存储层的字段。 */
+export function loginWithPassword(
+  username: string,
+  password: string,
+): Promise<LoginData> {
+  return getResult<LoginData>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
 export interface UserInfo {
   user_id: number;
   username: string;

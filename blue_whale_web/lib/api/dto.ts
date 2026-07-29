@@ -26,7 +26,7 @@ export type MeResponse = {
 
 // ---------- §5.2 assets ----------
 /** Asset 文件类型,与后端 storage_kind 对齐。 */
-export type AssetKind = "image" | "video";
+export type AssetKind = "image" | "video" | "audio";
 
 /** Asset 来源:用户上传 vs 生成产出（同一实体,以来源区分）。 */
 export type AssetSource = "uploaded" | "generated";
@@ -40,10 +40,19 @@ export type PresignAssetRequest = {
 
 /** `POST /api/assets/presign` 响应 */
 export type PresignAssetResponse = {
-  asset_id: string;
+  storage_key: string;
   upload_url: string;
   headers: Record<string, string>;
   expires_in: number;
+};
+
+/** `POST /api/agent/assets/uploads/complete` 请求 */
+export type CompleteAssetRequest = PresignAssetRequest & {
+  project_id: string;
+  storage_key: string;
+  width?: number;
+  height?: number;
+  duration?: number;
 };
 
 /** `POST /api/assets/{id}/complete` + `GET /api/assets/{id}` 响应 */

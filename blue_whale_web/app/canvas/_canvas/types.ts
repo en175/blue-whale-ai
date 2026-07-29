@@ -161,6 +161,13 @@ export type VideoGenerateSettings = {
   duration: number;
   quantity: string;
   refMode: SelectOption;
+  /** 首帧 / 尾帧 URL（首尾帧生成；接线到 Node input_asset_ids 待 P3）。 */
+  firstFrameUrl?: string;
+  lastFrameUrl?: string;
+  /** 参考素材 URL（多模态引用；接线到 Node input_asset_ids 待 P3）。 */
+  referenceImages?: string[];
+  referenceVideos?: string[];
+  referenceAudios?: string[];
 };
 
 /** 生成请求参数：discriminated union，按 mode narrow settings。 */
@@ -169,8 +176,9 @@ export type GenerateArgs =
       mode: "image";
       settings: ImageGenerateSettings;
       referenceImages?: string[];
+      inputAssetIds?: number[];
     }
-  | { mode: "video"; settings: VideoGenerateSettings }
+  | { mode: "video"; settings: VideoGenerateSettings; inputAssetIds?: number[] }
   | { mode: "audio"; settings: AudioGenerateSettings };
 
 export type ImageDockContentProps = {

@@ -5,15 +5,19 @@
  * 因包含 JSX，须以 .tsx 承载。
  */
 import type { ToolDef } from "./types";
+import type { NodeKindId } from "./model";
+import type { ReactNode } from "react";
 import { SelectIcon, SparkleIcon, VideoGenIcon } from "./icons";
 import {
   AtSign,
+  AudioLines,
   Download,
   Info,
   Lightbulb,
   Paintbrush,
   RefreshCw,
   Shuffle,
+  Sparkles,
   SquarePlus,
   Type,
   Video,
@@ -44,3 +48,55 @@ export const NODE_TOOLBAR_ACTIONS = [
   { id: "info", label: "信息", icon: <Info width={16} height={16} className="tc-node-toolbar-icon" /> },
   { id: "download", label: "下载", icon: <Download width={16} height={16} className="tc-node-toolbar-icon" /> },
 ];
+
+// ---------- v2 节点 toolbar（canvas-v2/nodes.tsx 用；跨模态：图/视/音节点各自操作集）----------
+// 与上面老 NODE_TOOLBAR_ACTIONS（老 /canvas v1 用）并存：v2 走 toolbarForKind(kind) 选操作集，
+// 老页面继续直接引用 NODE_TOOLBAR_ACTIONS，strangler 互不干扰。
+/** v2 toolbar 项类型：icon 必填；iconOnly=true 只渲染图标（无文字）。 */
+export type NodeToolbarAction = {
+  id: string;
+  label: string;
+  icon: ReactNode;
+  /** 纯图标项：只渲染图标，不显示文字（如 信息 / 下载 / 添加到对话）。 */
+  iconOnly?: boolean;
+};
+
+/** v2 图片节点操作菜单（跨模态：生成视频/音频）。 */
+export const NODE_TOOLBAR_IMAGE_ACTIONS: NodeToolbarAction[] = [
+  { id: "refresh", label: "重新编辑", icon: <RefreshCw width={16} height={16} className="tc-node-toolbar-icon" /> },
+  { id: "image", label: "生成图片", icon: <Sparkles width={16} height={16} className="tc-node-toolbar-icon" /> },
+  { id: "video", label: "生成视频", icon: <Video width={16} height={16} className="tc-node-toolbar-icon" /> },
+  { id: "audio", label: "生成音频", icon: <AudioLines width={16} height={16} className="tc-node-toolbar-icon" /> },
+  { id: "divider", label: "", icon: null },
+  { id: "info", label: "信息", icon: <Info width={16} height={16} className="tc-node-toolbar-icon" />, iconOnly: true },
+  { id: "download", label: "下载", icon: <Download width={16} height={16} className="tc-node-toolbar-icon" />, iconOnly: true },
+  { id: "mention", label: "添加到对话", icon: <AtSign width={16} height={16} className="tc-node-toolbar-icon" />, iconOnly: true },
+];
+
+/** v2 视频节点操作菜单（跨模态：提取音频 / 生成视频）。 */
+export const NODE_TOOLBAR_VIDEO_ACTIONS: NodeToolbarAction[] = [
+  { id: "refresh", label: "重新编辑", icon: <RefreshCw width={16} height={16} className="tc-node-toolbar-icon" /> },
+  { id: "extract-audio", label: "提取音频", icon: <AudioLines width={16} height={16} className="tc-node-toolbar-icon" /> },
+  { id: "video", label: "生成视频", icon: <Video width={16} height={16} className="tc-node-toolbar-icon" /> },
+  { id: "divider", label: "", icon: null },
+  { id: "info", label: "信息", icon: <Info width={16} height={16} className="tc-node-toolbar-icon" />, iconOnly: true },
+  { id: "download", label: "下载", icon: <Download width={16} height={16} className="tc-node-toolbar-icon" />, iconOnly: true },
+  { id: "mention", label: "添加到对话", icon: <AtSign width={16} height={16} className="tc-node-toolbar-icon" />, iconOnly: true },
+];
+
+/** v2 音频节点操作菜单（跨模态：生成视频）。 */
+export const NODE_TOOLBAR_AUDIO_ACTIONS: NodeToolbarAction[] = [
+  { id: "refresh", label: "重新编辑", icon: <RefreshCw width={16} height={16} className="tc-node-toolbar-icon" /> },
+  { id: "video", label: "生成视频", icon: <Video width={16} height={16} className="tc-node-toolbar-icon" /> },
+  { id: "divider", label: "", icon: null },
+  { id: "info", label: "信息", icon: <Info width={16} height={16} className="tc-node-toolbar-icon" />, iconOnly: true },
+  { id: "download", label: "下载", icon: <Download width={16} height={16} className="tc-node-toolbar-icon" />, iconOnly: true },
+  { id: "mention", label: "添加到对话", icon: <AtSign width={16} height={16} className="tc-node-toolbar-icon" />, iconOnly: true },
+];
+
+/** 按 node kind 选 v2 toolbar（audio→AUDIO / video→VIDEO / else image）。 */
+export function toolbarForKind(kind: NodeKindId): NodeToolbarAction[] {
+  if (kind === "audio") return NODE_TOOLBAR_AUDIO_ACTIONS;
+  if (kind === "video") return NODE_TOOLBAR_VIDEO_ACTIONS;
+  return NODE_TOOLBAR_IMAGE_ACTIONS;
+}

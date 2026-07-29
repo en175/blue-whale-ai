@@ -4,10 +4,17 @@
  * 中部占位 TopBarCenter、右侧 Agent 入口 TopBarRight。
  */
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, MessageSquare, Pencil, Settings, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  MessageSquare,
+  Pencil,
+  Settings,
+  Trash2,
+} from "lucide-react";
 import type { Project } from "../types";
 import { IconPlus, TopviewLogo } from "../icons";
 import { UserMenu } from "@/components/auth/UserMenu";
+import { CreditBalance } from "@/components/credits/CreditBalance";
 
 export function ProjectMenu({
   open,
@@ -17,6 +24,7 @@ export function ProjectMenu({
   onSwitch,
   onCreate,
   onDelete,
+  onRename,
 }: {
   open: boolean;
   onClose: () => void;
@@ -25,6 +33,7 @@ export function ProjectMenu({
   onSwitch: (id: string) => void;
   onCreate: () => void;
   onDelete: (id: string) => void;
+  onRename?: (id: string, rawName: string) => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -71,126 +80,148 @@ export function ProjectMenu({
         {projects.map((p) => {
           const isActive = p.id === activeProjectId;
           return (
-          <div
-            key={p.id}
-            className="group/project relative flex items-center"
-            style={{
-              padding: "6px 16px",
-              borderRadius: 6,
-              background: isActive ? "rgba(255, 255, 255, 0.12)" : "transparent",
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => {
-                onSwitch(p.id);
-                onClose();
-              }}
+            <div
+              key={p.id}
+              className="group/project relative flex items-center"
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                flex: "1 1 0%",
-                minWidth: 0,
-                padding: 0,
-                background: "none",
-                border: 0,
-                outline: "none",
-                cursor: "pointer",
-                textAlign: "left",
-                color: isActive ? "rgb(255, 255, 255)" : "rgba(255, 255, 255, 0.7)",
-                fontSize: 14,
+                padding: "6px 16px",
+                borderRadius: 6,
+                background: isActive
+                  ? "rgba(255, 255, 255, 0.12)"
+                  : "transparent",
               }}
             >
-              <div
+              <button
+                type="button"
+                onClick={() => {
+                  onSwitch(p.id);
+                  onClose();
+                }}
                 style={{
-                  width: 32,
-                  height: 32,
-                  flexShrink: 0,
-                  borderRadius: 6,
-                  overflow: "hidden",
-                  background: "rgba(255, 255, 255, 0.06)",
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                {p.thumb ? (
-                  <img
-                    alt=""
-                    src={p.thumb}
-                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                  />
-                ) : (
-                  <svg
-                    width={14}
-                    height={14}
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.5}
-                    strokeLinecap="round"
-                    aria-hidden="true"
-                    style={{ opacity: 0.35, flexShrink: 0 }}
-                  >
-                    <line x1="5" y1="1" x2="5" y2="15" />
-                    <line x1="11" y1="1" x2="11" y2="15" />
-                    <line x1="1" y1="5" x2="15" y2="5" />
-                    <line x1="1" y1="11" x2="15" y2="11" />
-                  </svg>
-                )}
-              </div>
-              <span
-                style={{
+                  gap: 10,
                   flex: "1 1 0%",
                   minWidth: 0,
-                  overflow: "hidden",
-                  whiteSpace: "nowrap",
-                  fontWeight: isActive ? 600 : 400,
-                  WebkitMaskImage:
-                    "linear-gradient(to right, black calc(100% - 12px), transparent calc(100% + 0px))",
-                  maskImage:
-                    "linear-gradient(to right, black calc(100% - 12px), transparent calc(100% + 0px))",
-                  transition: "mask-image 0.1s, -webkit-mask-image 0.1s",
+                  padding: 0,
+                  background: "none",
+                  border: 0,
+                  outline: "none",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  color: isActive
+                    ? "rgb(255, 255, 255)"
+                    : "rgba(255, 255, 255, 0.7)",
+                  fontSize: 14,
                 }}
               >
-                {p.name}
-              </span>
-            </button>
-            <button
-              type="button"
-              aria-label="Delete project"
-              onClick={() => onDelete(p.id)}
-              className="opacity-0 pointer-events-none group-hover/project:opacity-100 group-hover/project:pointer-events-auto"
-              style={{
-                position: "absolute",
-                right: 12,
-                top: "50%",
-                transform: "translateY(-50%)",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                height: 24,
-                width: 24,
-                background: "rgba(239, 68, 68, 0.12)",
-                border: 0,
-                borderRadius: 6,
-                color: "rgb(239, 68, 68)",
-                fontSize: 12,
-                cursor: "pointer",
-                outline: "none",
-                transition: "background 0.1s, color 0.1s, opacity 0.1s",
-              }}
-            >
-              <Trash2 width={14} height={14} aria-hidden="true" />
-            </button>
-          </div>
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    flexShrink: 0,
+                    borderRadius: 6,
+                    overflow: "hidden",
+                    background: "rgba(255, 255, 255, 0.06)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {p.thumb ? (
+                    <img
+                      alt=""
+                      src={p.thumb}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        display: "block",
+                      }}
+                    />
+                  ) : (
+                    <svg
+                      width={14}
+                      height={14}
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={1.5}
+                      strokeLinecap="round"
+                      aria-hidden="true"
+                      style={{ opacity: 0.35, flexShrink: 0 }}
+                    >
+                      <line x1="5" y1="1" x2="5" y2="15" />
+                      <line x1="11" y1="1" x2="11" y2="15" />
+                      <line x1="1" y1="5" x2="15" y2="5" />
+                      <line x1="1" y1="11" x2="15" y2="11" />
+                    </svg>
+                  )}
+                </div>
+                <span
+                  style={{
+                    flex: "1 1 0%",
+                    minWidth: 0,
+                    overflow: "hidden",
+                    whiteSpace: "nowrap",
+                    fontWeight: isActive ? 600 : 400,
+                    WebkitMaskImage:
+                      "linear-gradient(to right, black calc(100% - 12px), transparent calc(100% + 0px))",
+                    maskImage:
+                      "linear-gradient(to right, black calc(100% - 12px), transparent calc(100% + 0px))",
+                    transition: "mask-image 0.1s, -webkit-mask-image 0.1s",
+                  }}
+                >
+                  {p.name}
+                </span>
+              </button>
+              <button
+                type="button"
+                aria-label="Delete project"
+                onClick={() => onDelete(p.id)}
+                className="opacity-0 pointer-events-none group-hover/project:opacity-100 group-hover/project:pointer-events-auto"
+                style={{
+                  position: "absolute",
+                  right: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  height: 24,
+                  width: 24,
+                  background: "rgba(239, 68, 68, 0.12)",
+                  border: 0,
+                  borderRadius: 6,
+                  color: "rgb(239, 68, 68)",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  outline: "none",
+                  transition: "background 0.1s, color 0.1s, opacity 0.1s",
+                }}
+              >
+                <Trash2 width={14} height={14} aria-hidden="true" />
+              </button>
+            </div>
           );
         })}
       </div>
-      <div style={{ height: 1, background: "rgba(255, 255, 255, 0.06)", margin: "8px 0" }} />
+      <div
+        style={{
+          height: 1,
+          background: "rgba(255, 255, 255, 0.06)",
+          margin: "8px 0",
+        }}
+      />
       <button
         type="button"
+        onClick={() => {
+          if (!onRename) return;
+          const current =
+            projects.find((p) => p.id === activeProjectId)?.name ?? "";
+          const raw = window.prompt("重命名项目", current);
+          if (raw != null && raw.trim()) onRename(activeProjectId, raw.trim());
+        }}
         style={{
           display: "flex",
           alignItems: "center",
@@ -269,12 +300,14 @@ export function TopBar({
   onSwitch,
   onCreate,
   onDelete,
+  onRename,
 }: {
   activeProject: Project;
   projects: Project[];
   onSwitch: (id: string) => void;
   onCreate: () => void;
   onDelete: (id: string) => void;
+  onRename?: (id: string, rawName: string) => void;
 }) {
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
 
@@ -334,7 +367,14 @@ export function TopBar({
           flexShrink: 0,
         }}
       />
-      <div style={{ display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          position: "relative",
+        }}
+      >
         <button
           type="button"
           onClick={() => setProjectMenuOpen((v) => !v)}
@@ -390,6 +430,7 @@ export function TopBar({
           onSwitch={onSwitch}
           onCreate={onCreate}
           onDelete={onDelete}
+          onRename={onRename}
         />
       </div>
       <div style={{ position: "relative", display: "inline-flex" }}>
@@ -427,7 +468,6 @@ export function TopBar({
   );
 }
 
-
 export function TopBarCenter() {
   return null;
 }
@@ -442,6 +482,7 @@ export function TopBarRight({
   return (
     <div className="tc-top-bar-right absolute top-4 right-4 z-[100] flex items-center">
       <div className="tc-top-bar-right__actions flex items-center gap-2">
+        <CreditBalance />
         <UserMenu />
         <button
           type="button"
@@ -450,8 +491,15 @@ export function TopBarRight({
           aria-label="Canvas Agent"
           data-active={isAgentOpen ? "" : undefined}
         >
-          <MessageSquare width={18} height={18} stroke="rgba(255,255,255,0.8)" strokeWidth={1.5} />
-          <span className="tc-shell-btn__label text-[13px] font-medium">Agent</span>
+          <MessageSquare
+            width={18}
+            height={18}
+            stroke="rgba(255,255,255,0.8)"
+            strokeWidth={1.5}
+          />
+          <span className="tc-shell-btn__label text-[13px] font-medium">
+            Agent
+          </span>
         </button>
       </div>
     </div>
