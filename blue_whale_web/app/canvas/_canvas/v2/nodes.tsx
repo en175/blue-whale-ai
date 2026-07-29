@@ -25,6 +25,7 @@ import {
   Video as VideoIcon,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
 import {
   Handle,
@@ -72,6 +73,8 @@ type NodeActionsCtx = {
   onAction?: (id: string, actionId: string) => void;
   onRetry?: (id: string) => void;
   onRemoveNode?: (id: string) => void;
+  /** IK55VL 视频卡生成中取消入口：按节点 taskId 取消 GenerationJob。 */
+  onCancelJob?: (id: string) => void;
   /** IK55VH 富文本卡 commit：写回 richDoc + 派生纯文本（进 prompt）。 */
   onEditRichText?: (id: string, richDoc: unknown, plainText: string) => void;
   /** IK55VH 富文本卡 @ 建议素材列表。 */
@@ -332,6 +335,8 @@ type MediaStateBodyProps = {
   previewUrl?: string;
   onRetry?: () => void;
   onRemove?: () => void;
+  /** IK55VL 生成中取消入口（仅视频生成卡提供；hover 显示）。 */
+  onCancel?: () => void;
 };
 export function MediaStateBody({
   kind,
@@ -344,6 +349,7 @@ export function MediaStateBody({
   previewUrl,
   onRetry,
   onRemove,
+  onCancel,
 }: MediaStateBodyProps) {
   // 上传占位卡：仅 uploaded 来源的 running/error；生成卡外观保持原样
   if (origin === "uploaded" && (status === "running" || status === "error")) {
@@ -404,6 +410,21 @@ export function MediaStateBody({
         className="flex h-full w-full flex-col items-center justify-center gap-2"
         style={{ color: "var(--tc-text-secondary)" }}
       >
+        {onCancel && (
+          <button
+            type="button"
+            aria-label="取消生成"
+            onClick={onCancel}
+            className="nodrag absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100"
+            style={{
+              background: "var(--tc-bg-surface)",
+              border: "1px solid var(--tc-border-subtle)",
+              color: "var(--tc-text-secondary)",
+            }}
+          >
+            <X width={12} height={12} stroke="currentColor" />
+          </button>
+        )}
         <Loader2
           width={28}
           height={28}
@@ -610,8 +631,14 @@ function NodeHandles({ kind }: { kind: NodeKindId }) {
 
 export function MediaNode({ id, data, width, height, selected }: NodeProps) {
   const d = data as unknown as MediaNodeData;
-  const { onAction, onRetry, onRemoveNode, picking, pickingAccept } =
-    useContext(NodeActionsContext);
+  const {
+    onAction,
+    onRetry,
+    onRemoveNode,
+    onCancelJob,
+    picking,
+    pickingAccept,
+  } = useContext(NodeActionsContext);
   const asset = useNodeAsset(d);
   const src = asset?.src ?? (d.imageUrl as string | undefined);
   const isAudio = d.kind === "audio";
@@ -711,6 +738,11 @@ export function MediaNode({ id, data, width, height, selected }: NodeProps) {
           previewUrl={d.previewUrl}
           onRetry={() => onRetry?.(id)}
           onRemove={() => onRemoveNode?.(id)}
+          onCancel={
+            d.status === "running" && renderKind === "video" && d.taskId
+              ? () => onCancelJob?.(id)
+              : undefined
+          }
         />
         {promptFromText && (
           <div

@@ -264,6 +264,7 @@ export function CanvasProjectRuntime({
     generating,
     generateError,
     setGenerateError,
+    cancelVideoJob,
   } = useCanvasGeneration({
     nodes,
     edges,
@@ -685,6 +686,16 @@ export function CanvasProjectRuntime({
     },
     [nodes, handleNodeAction],
   );
+  // IK55VL：视频卡生成中取消入口——按节点持久 taskId 取消（刷新后也可用）
+  const handleNodeCancelJob = useCallback(
+    (nodeId: string) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      const taskId = Number(node?.data.taskId);
+      if (Number.isSafeInteger(taskId) && taskId > 0) cancelVideoJob(taskId);
+    },
+    [nodes, cancelVideoJob],
+  );
+
   const handleNodeRetry = useCallback(
     (nodeId: string) => {
       const node = nodes.find((n) => n.id === nodeId);
@@ -883,6 +894,7 @@ export function CanvasProjectRuntime({
             onNodeAction={handleCanvasNodeAction}
             onNodeRetry={handleNodeRetry}
             onNodeRemove={handleNodeRemove}
+            onNodeCancelJob={handleNodeCancelJob}
             onEditRichText={onEditRichText}
             mentionItems={textMentionItems}
             picking={pickingFor !== null}

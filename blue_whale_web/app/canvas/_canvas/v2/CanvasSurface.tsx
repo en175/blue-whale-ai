@@ -58,6 +58,8 @@ export type CanvasSurfaceProps = {
   onNodeAction?: (id: string, actionId: string) => void;
   onNodeRetry?: (id: string) => void;
   onNodeRemove?: (id: string) => void;
+  /** IK55VL 视频卡生成中取消入口（按节点 taskId 取消任务）。 */
+  onNodeCancelJob?: (id: string) => void;
   /** IK55VH 富文本卡 commit：richDoc + 派生纯文本写回。 */
   onEditRichText?: (id: string, richDoc: unknown, plainText: string) => void;
   /** IK55VH 富文本卡 @ 建议素材列表。 */
@@ -85,6 +87,7 @@ export function CanvasSurface({
   onNodeAction,
   onNodeRetry,
   onNodeRemove,
+  onNodeCancelJob,
   onEditRichText,
   mentionItems,
   onPaneMenu,
@@ -198,6 +201,7 @@ export function CanvasSurface({
       onAction: onNodeAction,
       onRetry: onNodeRetry,
       onRemoveNode: onNodeRemove,
+      onCancelJob: onNodeCancelJob,
       onEditRichText,
       mentionItems,
       picking,
@@ -207,6 +211,7 @@ export function CanvasSurface({
       onNodeAction,
       onNodeRetry,
       onNodeRemove,
+      onNodeCancelJob,
       onEditRichText,
       mentionItems,
       picking,

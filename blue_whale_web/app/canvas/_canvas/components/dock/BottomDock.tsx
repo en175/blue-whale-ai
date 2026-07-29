@@ -83,7 +83,7 @@ export function BottomDock({
   generateError?: string | null;
   /** 关闭生成错误提示 */
   onClearGenerateError?: () => void;
-  /** 首尾帧（视频首尾帧模式，page 层上传后回填 TOS url；当前 VideoDockContent 未渲染首尾帧 UI，留位）。 */
+  /** 首尾帧（视频首尾帧模式，page 层上传后回填 TOS url；VideoDockContent 在 first-last 模式渲染槽 UI）。 */
   firstFrameUrl?: string;
   lastFrameUrl?: string;
   firstFrameAssetId?: number;
@@ -160,7 +160,7 @@ export function BottomDock({
     if (!prefillSignal?.prefill) return;
     const p = prefillSignal.prefill;
     const el = editorRef.current;
-    /* eslint-disable react-hooks/set-state-in-effect */
+     
     if (el) {
       el.innerHTML = "";
       el.focus();
@@ -195,7 +195,7 @@ export function BottomDock({
       if (typeof p.duration === "number") setDuration(p.duration);
       if (p.quantity != null) setQuantity(`${p.quantity}x`);
     }
-    /* eslint-enable react-hooks/set-state-in-effect */
+     
   }, [prefillSignal?.nonce, mode]);
 
   const path = squirclePath(dockSize.w, dockSize.h, 28.8);
@@ -329,7 +329,9 @@ export function BottomDock({
                       ],
                       inputAssetIds: selectDockInputAssetIds(
                         "image",
-                        editorRef.current ? extractEditor(editorRef.current).assetIds : [],
+                        editorRef.current
+                          ? extractEditor(editorRef.current).assetIds
+                          : [],
                         imageMedia,
                       ),
                     })
@@ -423,8 +425,7 @@ export function BottomDock({
                               })),
                               ...videoMedia.flatMap((item) =>
                                 item.src &&
-                                (item.type === "image" ||
-                                  item.type === "video")
+                                (item.type === "image" || item.type === "video")
                                   ? [
                                       {
                                         kind: item.type,
