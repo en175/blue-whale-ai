@@ -147,6 +147,16 @@ _Avoid_: 把收件箱当作普通 Canvas Project 展示或编辑；通过通用�
 一个 User 拥有多个 Project，产品资源与操作均按服务端认证的 User 归属。
 _Avoid_: 访客、匿名 User、客户端自报 `userId`、把浏览器本地标识当作身份。
 
+**账户事实（Account Facts）**:
+由 new-api 唯一维护的 User 账户信息，包括身份、凭证、资料、角色、quota、订阅、充值与支付；
+蓝鲸只通过账户适配接口读取或发起变更，不建立副本或第二套账户权威。
+_Avoid_: 蓝鲸用户表、Node 用户账本、双向用户同步、把账户事实复制为产品事实。
+
+**产品事实（Product Facts）**:
+由蓝鲸唯一维护的 User 产品数据，包括 Project、Canvas、Asset、Conversation 与 GenerationJob；
+它们只引用 new-api 的稳定 User ID 作为所有者，不由 new-api 保存或管理。
+_Avoid_: 把 Canvas 等产品数据纳入账户中心、在产品表复制用户名、邮箱、quota 或订阅状态。
+
 **ContentReview（内容审核）**:
 Product API 对产品策略纳入审核范围的内容形成的安全决定；普通用户文字消息和提示词不做
 独立前置审核，Agent 或生成供应商的安全结果可以成为后续 ReviewEvidence。受审内容可以复用匹配的
