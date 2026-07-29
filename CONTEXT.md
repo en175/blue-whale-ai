@@ -152,6 +152,16 @@ _Avoid_: 访客、匿名 User、客户端自报 `userId`、把浏览器本地标
 蓝鲸只通过账户适配接口读取或发起变更，不建立副本或第二套账户权威。
 _Avoid_: 蓝鲸用户表、Node 用户账本、双向用户同步、把账户事实复制为产品事实。
 
+**User ID（用户身份）**:
+new-api 为 User 分配的稳定整数身份，是蓝鲸产品事实的唯一所有者引用；凭证轮换、用户名或邮箱变化
+均不得改变 User ID。
+_Avoid_: Token 指纹、用户名、邮箱、浏览器本地 ID、客户端自报且未经验证的 `user_id`。
+
+**默认 API Key（用户执行凭证）**:
+new-api 在 User 登录后提供、以 `sk-` 开头的默认 Token，用于 relay 调用、quota 扣减以及由
+new-api 解析所属 User ID；它对普通蓝鲸 User 隐藏，但可因安全或运维原因轮换。
+_Avoid_: 永久用户身份、产品资源所有者 ID、不可轮换密钥。
+
 **产品事实（Product Facts）**:
 由蓝鲸唯一维护的 User 产品数据，包括 Project、Canvas、Asset、Conversation 与 GenerationJob；
 它们只引用 new-api 的稳定 User ID 作为所有者，不由 new-api 保存或管理。

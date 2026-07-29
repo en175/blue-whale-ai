@@ -16,12 +16,16 @@ blue-whale 正把画布业务从 Java 迁移到 Node。`canvas-v2` 的项目、�
 2. **quota 是唯一余额真相**。Node 不创建或维护 `users`、`user_credits`、credits ledger；前端只用配置系数把 quota 换算成展示积分。
 3. **生成由 Node 编排，计费由 new-api relay 执行**。Node generation worker 调用 new-api `/v1/*`，把用户 `sk-xxx` 透传给 relay，由 new-api 自动扣 quota；Node 保留显式环境开关控制的直连 provider fallback，仅用于本地故障隔离。
 4. **用户持有凭证采用 MVP 方案 A**。前端 localStorage 保存 `sk-xxx`，每次调用 Node 带 `Authorization: Bearer sk-xxx`；Node 不实现 refresh token。后续若改为 Node 终结凭证，替换认证适配层，不改变画布 API 和 worker provider 端口。
-5. **不修改 `blue_whale_api/`**。本 ADR 只约束 Node 和前端如何调用已存在的 new-api 接口。
+5. **只对 `blue_whale_api/` 增加最小身份解析接口**。new-api 提供一个受 `sk-xxx` 鉴权的只读接口，
+   返回该 Token 所属的稳定 `user_id` 与账户状态；蓝鲸 BFF 使用服务端解析结果建立产品归属，
+   不信任客户端自报 `user_id`，也不再用 Token 指纹派生身份。除这条身份 seam 外，账户能力继续
+   复用 new-api 现有接口，不在蓝鲸复制账户规则。
 
 ## 连锁影响
 
 - ADR-0060 的 Node `users` / `user_credits` / JWT 账本实现不再落地；已存在的旧基线文档仅作为历史记录保留。
 - Node 需要提供可注入的 new-api typed client，覆盖登录、token usage、token logs 和 relay。
+- typed client 还需覆盖 Token → 稳定 `user_id` 的身份解析；默认 API Key 可轮换，但蓝鲸产品归属不变。
 - `blue_whale_web` 的登录 UI 改用 username/password；旧手机号验证码用例保留，但不再是入口。
 - quota 查询和 `quotaToCredits` 展示共用同一 Node usage 路由。
 - Java MCP/遗留接口继续通过既有 gateway rewrite 使用，不纳入本次生成链路。
