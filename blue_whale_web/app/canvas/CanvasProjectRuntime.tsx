@@ -30,6 +30,7 @@ import {
 import { findPlacement } from "./_canvas/placement";
 import { dockAccept, dockPickHint } from "./_canvas/utils";
 import { useCanvasGeneration } from "./_canvas/hooks/useCanvasGeneration";
+import { BootProgress } from "./BootProgress";
 import { useCanvasProjectHydration } from "./_canvas/hooks/useCanvasProjectHydration";
 import type { MentionItem } from "./_canvas/components/dock/mention";
 import {
@@ -226,6 +227,7 @@ export function CanvasProjectRuntime({
     generate,
     generateFromNode,
     hydrate,
+    retryNode,
     generating,
     generateError,
     setGenerateError,
@@ -596,12 +598,10 @@ export function CanvasProjectRuntime({
   );
   const handleNodeRetry = useCallback(
     (nodeId: string) => {
-      const node = nodes.find((n) => n.id === nodeId);
-      if (!node) return;
-      setBottomDockMode(node.data.kind === "video" ? "video" : "image");
-      setIsBottomDockOpen(true);
+      // 调后端 retry（仅终态失败 job 有效）→ 节点回 running + 续轮询；不再只是重开 dock。
+      void retryNode(nodeId);
     },
-    [nodes],
+    [retryNode],
   );
 
   const handleCardGenerated = useCallback(
@@ -650,13 +650,7 @@ export function CanvasProjectRuntime({
   );
 
   if (gated) return null;
-  if (booting) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center bg-black text-white/60 text-sm">
-        加载画布 v2…
-      </div>
-    );
-  }
+  if (booting) return <BootProgress label="正在加载项目" />;
   if (!activeProject) {
     return (
       <div className="flex h-screen w-screen flex-col items-center justify-center gap-5 bg-black">
@@ -690,21 +684,17 @@ export function CanvasProjectRuntime({
       </div>
     );
   }
-  if (hydrationState !== "ready") {
+  if (hydrationState === "error") {
     return (
       <div className="flex h-screen w-screen flex-col items-center justify-center gap-5 bg-black">
-        <p className="text-sm text-[var(--tc-text-secondary)]">
-          {hydrationState === "error" ? "画布加载失败" : "正在加载画布…"}
-        </p>
-        {hydrationState === "error" && (
-          <button
-            type="button"
-            onClick={() => setHydrationRetryKey((value) => value + 1)}
-            className="inline-flex h-9 items-center rounded-full border border-[var(--tc-border)] bg-[var(--tc-bg-surface)] px-4 text-sm text-[var(--tc-text-secondary)] transition-colors hover:text-[var(--tc-text-primary)]"
-          >
-            重试
-          </button>
-        )}
+        <p className="text-sm text-[var(--tc-text-secondary)]">画布加载失败</p>
+        <button
+          type="button"
+          onClick={() => setHydrationRetryKey((value) => value + 1)}
+          className="inline-flex h-9 items-center rounded-full border border-[var(--tc-border)] bg-[var(--tc-bg-surface)] px-4 text-sm text-[var(--tc-text-secondary)] transition-colors hover:text-[var(--tc-text-primary)]"
+        >
+          重试
+        </button>
         <Link
           href="/canvas"
           className="inline-flex h-9 items-center rounded-full bg-[var(--tc-accent)] px-4 text-sm text-[var(--tc-on-accent)]"
@@ -714,6 +704,7 @@ export function CanvasProjectRuntime({
       </div>
     );
   }
+  if (hydrationState !== "ready") return <BootProgress />;
 
   return (
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-black text-white">

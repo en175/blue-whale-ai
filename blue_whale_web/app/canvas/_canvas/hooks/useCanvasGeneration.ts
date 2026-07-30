@@ -23,6 +23,7 @@ import {
   getImageModels,
   getVideoModels,
   listJobs,
+  retryMissingProjectGenerationJobOutputs,
   type CreateProjectGenerationJobPayload,
 } from "../api/generation";
 import { useVideoJobs } from "./useVideoJobs";
@@ -56,7 +57,7 @@ export type UseCanvasGenerationDeps = {
   assets: Record<string, Asset>;
   /** 建占位节点（含 placement，page 注入——位置是 UI 编排，不属生成业务）。 */
   addNode: (kind: NodeKindId, extra?: { id?: string; width?: number; height?: number; data?: Partial<CanvasNodeData> }) => string;
-  patchNode: (id: string, patch: Partial<CanvasNodeData>) => void;
+  patchNode: (id: string, patch: Partial<CanvasNodeData>, options?: { persist?: boolean }) => void;
   patchNodeAndSave: (id: string, patch: Partial<CanvasNodeData>) => Promise<void>;
   addAsset: (asset: { id: string; kind: MediaKind; src?: string; source?: "generated" | "uploaded" }) => void;
   projectId: string;
@@ -91,7 +92,8 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
       }
       jobs.start(jobId, {
         onProgress: (progress) => {
-          patchNode(nodeId, { progress });
+          // progress 是瞬时态：只更新内存节点，不触发画布持久化（避免每轮轮询都 PUT 整张画布）。
+          patchNode(nodeId, { progress }, { persist: false });
           if (kind === "video") {
             setVideoJob({ id: jobId, status: "processing", error: null });
           }
@@ -143,6 +145,33 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
       setCancellingVideo(false);
     }
   }, [projectId, videoJob]);
+
+  /** 重试失败节点：调后端 retry（仅终态 failed/partially_succeeded 的 job 有效——「真失败才允许重试」），
+   *  拿新 job id → 节点回 running + 续轮询。无 taskId（无关联 job）时直接返回。 */
+  const retryNode = useCallback(
+    async (nodeId: string) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      const originalJobId = node?.data.taskId;
+      if (!node || !originalJobId || !projectId) return;
+      const kind: "image" | "video" = node.data.kind === "video" ? "video" : "image";
+      try {
+        setGenerateError(null);
+        patchNode(nodeId, { status: "running", errorMessage: undefined, progress: 0 });
+        const { generation_job_id } = await retryMissingProjectGenerationJobOutputs(
+          Number(projectId),
+          Number(originalJobId),
+          newIdempotencyKey(),
+        );
+        await patchNodeAndSave(nodeId, { taskId: String(generation_job_id) });
+        startJob(nodeId, generation_job_id, kind, node.data.recipe);
+      } catch (error) {
+        const message = userFriendlyErrorMessage(error);
+        patchNode(nodeId, { status: "error", errorMessage: message });
+        setGenerateError(message);
+      }
+    },
+    [nodes, projectId, patchNode, patchNodeAndSave, startJob],
+  );
 
   // Dock 生成：image / video（createProjectGenerationJob + 后台轮询）/ audio（mock）
   const generate = useCallback(
@@ -406,6 +435,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
     recover,
     reconcile,
     hydrate,
+    retryNode,
     generating,
     generateError,
     setGenerateError,

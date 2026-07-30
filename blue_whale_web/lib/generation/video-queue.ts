@@ -20,6 +20,9 @@ export function loadRedisConnection(
     db: Number.parseInt(env.REDIS_DB ?? "0", 10),
     ...(env.REDIS_PASSWORD ? { password: env.REDIS_PASSWORD } : {}),
     maxRetriesPerRequest: worker ? null : 1,
+    // 远端 Redis 会杀空闲阻塞连接；keepAlive 让 ioredis 探活到静默断连后自动重连，
+    // BullMQ 随之重建阻塞消费者——否则 worker 看似 /ready 却不再消费，job 全成孤儿（假失败）。
+    keepAlive: 30_000,
   };
 }
 
