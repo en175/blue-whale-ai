@@ -23,6 +23,8 @@ vi.mock("./VideoDockContent", () => ({
 }));
 vi.mock("./AudioDockContent", () => ({
   AudioDockContent: () => <div>audio dock</div>,
+  MOCK_AUDIO_MODEL: { id: "mock-audio-v1", label: "音频模型（mock）" },
+  MOCK_MUSIC_MODEL: { id: "mock-music-v1", label: "音乐模型（mock）" },
 }));
 
 type LegacyCancellationProps = {

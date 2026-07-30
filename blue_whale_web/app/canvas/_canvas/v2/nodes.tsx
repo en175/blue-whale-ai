@@ -223,7 +223,7 @@ function VideoPlayer({ src, label }: { src: string; label?: string }) {
 }
 
 /**
- * 音频节点播放器（IJZXW7-B）：无画面，AudioLines 图标 + 自定义控制条（播放/暂停 + 进度 + 时长）。
+ * 音频节点播放器（IK55VM）：封面（图标占位）+ 播放条（播放/暂停 + 进度 + 时长），不做波形。
  * 隐藏原生 `<audio>`（shadow DOM 无法隔离 RF 拖拽），控制条 nodrag/nopan 隔离（同 VideoPlayer）。
  */
 function AudioPlayer({ src, label }: { src: string; label?: string }) {
@@ -257,15 +257,25 @@ function AudioPlayer({ src, label }: { src: string; label?: string }) {
   return (
     <div
       data-testid="node-audio-player"
-      className="flex h-full w-full flex-col items-center justify-center gap-2 px-3"
+      className="flex h-full w-full flex-col"
       style={{ color: "var(--tc-text-secondary)" }}
     >
-      <AudioLines
-        width={28}
-        height={28}
-        stroke="currentColor"
-        strokeWidth={1.5}
-      />
+      {/* 封面区（mock 无封面图，图标占位） */}
+      <div
+        className="flex min-h-0 flex-1 items-center justify-center"
+        style={{
+          backgroundImage:
+            "linear-gradient(135deg, var(--tc-bg-elevated) 0%, var(--tc-bg-surface) 60%, var(--tc-bg-elevated) 100%)",
+          color: "var(--tc-text-tertiary)",
+        }}
+      >
+        <AudioLines
+          width={28}
+          height={28}
+          stroke="currentColor"
+          strokeWidth={1.5}
+        />
+      </div>
       <audio
         ref={audioRef}
         src={src}
@@ -277,7 +287,8 @@ function AudioPlayer({ src, label }: { src: string; label?: string }) {
         onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)}
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
       />
-      <div className="nodrag nopan flex w-full items-center gap-2">
+      {/* 播放条 */}
+      <div className="nodrag nopan flex w-full items-center gap-2 px-3 pb-2.5">
         <button
           type="button"
           onClick={toggle}

@@ -15,7 +15,8 @@ export function LeftToolbar({
   onToolClick,
   handActive,
 }: {
-  onToolClick?: (id: string) => void;
+  /** 点击上抛工具 id 与按钮元素（悬浮列表锚点定位用，IK55VM）。 */
+  onToolClick?: (id: string, el?: HTMLButtonElement) => void;
   handActive?: boolean;
 }) {
   const toolbarHeight = useMemo(() => {
@@ -62,7 +63,7 @@ export function LeftToolbar({
               <button
                 type="button"
                 aria-label={tool.label}
-                onClick={() => onToolClick?.(tool.id)}
+                onClick={(e) => onToolClick?.(tool.id, e.currentTarget)}
                 className="tc-ui-glow-btn flex h-[32px] w-[32px] items-center justify-center bg-transparent text-white/95 transition-colors duration-150 hover:bg-white/[0.08]"
               >
                 {tool.id === "select" && handActive ? (

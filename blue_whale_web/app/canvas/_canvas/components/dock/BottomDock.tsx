@@ -15,10 +15,19 @@ import {
   VIDEO_RESOLUTIONS,
   REF_MODES,
 } from "../../constants";
-import type { DockMediaItem, GenerateArgs, PrefillSignal } from "../../types";
+import type {
+  AudioPanelState,
+  DockMediaItem,
+  GenerateArgs,
+  PrefillSignal,
+} from "../../types";
 import { ImageDockContent } from "./ImageDockContent";
 import { VideoDockContent } from "./VideoDockContent";
-import { AudioDockContent } from "./AudioDockContent";
+import {
+  AudioDockContent,
+  MOCK_AUDIO_MODEL,
+  MOCK_MUSIC_MODEL,
+} from "./AudioDockContent";
 import {
   extractEditor,
   insertMention,
@@ -41,8 +50,10 @@ export function BottomDock({
   onRemoveAudioMedia,
   onLocalUpload,
   onPickFromCanvas,
+  onPickAudioSlot,
   onExitPick,
   isPicking = false,
+  audioModeSignal,
   onGenerate,
   generating = false,
   generateError,
@@ -71,10 +82,14 @@ export function BottomDock({
   onLocalUpload?: (file: File) => void;
   /** 进入画布选择模式 */
   onPickFromCanvas?: () => void;
+  /** 音频参考槽画布选择（IK55VM）：audioRef=音频节点，audioImageRef=图片节点 */
+  onPickAudioSlot?: (slot: "audioRef" | "audioImageRef") => void;
   /** 退出画布选择模式 */
   onExitPick?: () => void;
   /** 当前 Dock 是否处于选择模式 */
   isPicking?: boolean;
+  /** 悬浮列表点选 → 音频子模式切换信号（IK55VM，nonce 递增触发） */
+  audioModeSignal?: { nonce: number; subMode: "audio" | "music" };
   /** 生成：prompt 由本组件 input state 取，settings 由各 Dock Content 拼 */
   onGenerate?: (prompt: string, args: GenerateArgs) => void;
   /** 生成进行中（禁用按钮防重复提交） */
@@ -123,6 +138,27 @@ export function BottomDock({
   const [internetSearch, setInternetSearch] = useState(false);
   const [previewItem, setPreviewItem] = useState<DockMediaItem | null>(null);
 
+  /** 音频双子面板提升态（IK55VM）：切子模式/关板/切模式往返均保留未提交输入。 */
+  const [audioPanel, setAudioPanelRaw] = useState<AudioPanelState>({
+    subMode: "audio",
+    audioPrompt: "",
+    musicPrompt: "",
+    lyrics: "",
+    instrumental: false,
+    quantity: "1x",
+    audioModel: MOCK_AUDIO_MODEL,
+    musicModel: MOCK_MUSIC_MODEL,
+  });
+  const setAudioPanel = (patch: Partial<AudioPanelState>) =>
+    setAudioPanelRaw((p) => ({ ...p, ...patch }));
+
+  // 悬浮列表点选 → 切音频子模式（IK55VM；面板不关闭、未提交输入保留）
+  useEffect(() => {
+    if (!audioModeSignal?.nonce) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAudioPanel({ subMode: audioModeSignal.subMode });
+  }, [audioModeSignal]);
+
   useEffect(() => {
     const el = contentRef.current;
     if (!el) return;
@@ -160,7 +196,7 @@ export function BottomDock({
     if (!prefillSignal?.prefill) return;
     const p = prefillSignal.prefill;
     const el = editorRef.current;
-     
+
     if (el) {
       el.innerHTML = "";
       el.focus();
@@ -195,7 +231,26 @@ export function BottomDock({
       if (typeof p.duration === "number") setDuration(p.duration);
       if (p.quantity != null) setQuantity(`${p.quantity}x`);
     }
-     
+    if (mode === "audio") {
+      // 音频预填（IK55VM）：子模式/prompt/歌词/纯伴奏/数量/模型回填到提升态
+      const sub = p.audioMode ?? "audio";
+      const patch: Partial<AudioPanelState> = { subMode: sub };
+      if (p.prompt != null) {
+        if (sub === "music") patch.musicPrompt = p.prompt;
+        else patch.audioPrompt = p.prompt;
+      }
+      if (p.lyrics != null) patch.lyrics = p.lyrics;
+      if (p.instrumental != null) patch.instrumental = p.instrumental;
+      if (p.quantity != null) patch.quantity = `${p.quantity}x`;
+      if (p.modelId) {
+        const mock = sub === "music" ? MOCK_MUSIC_MODEL : MOCK_AUDIO_MODEL;
+        const opt =
+          p.modelId === mock.id ? mock : { id: p.modelId, label: p.modelId };
+        if (sub === "music") patch.musicModel = opt;
+        else patch.audioModel = opt;
+      }
+      setAudioPanel(patch);
+    }
   }, [prefillSignal?.nonce, mode]);
 
   const path = squirclePath(dockSize.w, dockSize.h, 28.8);
@@ -217,9 +272,7 @@ export function BottomDock({
 
   return (
     <div
-      data-canvas-reference-drop-target={
-        mode === "image" ? "image-dock" : "video-dock"
-      }
+      data-canvas-reference-drop-target={`${mode}-dock`}
       style={{
         position: "absolute",
         bottom: 16,
@@ -341,22 +394,24 @@ export function BottomDock({
                 />
               ) : mode === "audio" ? (
                 <AudioDockContent
-                  editorRef={editorRef}
-                  isEmpty={isEmpty}
-                  onInput={handleInput}
+                  panel={audioPanel}
+                  setPanel={setAudioPanel}
                   onClose={onClose}
                   media={audioMedia}
                   onRemoveMedia={onRemoveAudioMedia}
                   onLocalUpload={onLocalUpload}
-                  onPickFromCanvas={onPickFromCanvas}
+                  onPickSlot={onPickAudioSlot}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
                   onGenerate={(s) =>
-                    onGenerate?.(input, { mode: "audio", settings: s })
+                    onGenerate?.(
+                      s.mode === "music"
+                        ? audioPanel.musicPrompt
+                        : audioPanel.audioPrompt,
+                      { mode: "audio", settings: s },
+                    )
                   }
                   generating={generating}
-                  onPreviewMedia={setPreviewItem}
-                  prefillSignal={prefillSignal}
                 />
               ) : (
                 <VideoDockContent

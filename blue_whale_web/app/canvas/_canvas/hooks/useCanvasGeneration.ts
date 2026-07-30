@@ -346,39 +346,60 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
           startJob(placeholderId, generation_job_id, "video", videoRecipe);
           setGenerating(false);
         } else if (args.mode === "audio") {
-          // 音频生成（IJZXW7-B）：generateAudio 当前 mock（后端无音频 provider），就绪切真不改签名
+          // 音频生成（IK55VM）：generateAudio 当前 mock（后端无音频 provider），就绪切真不改签名
           const s = args.settings;
-          placeholderId = addNode("audio", {
-            width: 240,
-            height: 120,
-            data: { content: trimmed, status: "running" },
-          });
-          const result = await generateAudio({
-            prompt: trimmed,
-            projectId: Number(projectId),
-            modelId: s.model.id,
-            duration: s.duration,
-            sampleRate: s.sampleRate,
-            format: s.format.id,
-          });
+          const count = s.quantity ? parseQuantity(s.quantity) : 1;
+          const referenceAssetIds = s.references
+            ?.map((r) => Number(r.assetId))
+            .filter((n) => Number.isSafeInteger(n) && n > 0);
           const audioRecipe = buildGenerationRecipe({
             mediaKind: "audio",
             model: s.model.id,
             params: {
-              duration: s.duration,
-              sampleRate: s.sampleRate,
-              format: s.format.id,
+              mode: s.mode,
+              lyrics: s.lyrics,
+              instrumental: s.instrumental,
+              quantity: count,
             },
-            inputs: { prompt: { kind: "text", text: trimmed } },
+            inputs: {
+              prompt: { kind: "text", text: trimmed },
+              ...(s.references?.length
+                ? {
+                    references: s.references.map((r) => ({
+                      kind: r.kind,
+                      assetId: r.assetId,
+                      url: r.url,
+                    })),
+                  }
+                : {}),
+            },
           });
-          setNodeAsset(
-            placeholderId,
-            String(result.assetId),
-            "audio",
-            result.url,
-            "generated",
-            audioRecipe,
-          );
+          // 数量选择（1x 起）：mock 逐张落卡（真接口就绪后由 job 多产物取代）
+          for (let i = 0; i < count; i++) {
+            placeholderId = addNode("audio", {
+              width: 240,
+              height: 120,
+              data: { content: trimmed, status: "running" },
+            });
+            const result = await generateAudio({
+              prompt: trimmed,
+              projectId: Number(projectId),
+              mode: s.mode,
+              modelId: s.model.id,
+              lyrics: s.lyrics,
+              instrumental: s.instrumental,
+              quantity: count,
+              referenceAssetIds,
+            });
+            setNodeAsset(
+              placeholderId,
+              String(result.assetId),
+              "audio",
+              result.url,
+              "generated",
+              audioRecipe,
+            );
+          }
           setGenerating(false);
         }
       } catch (e) {

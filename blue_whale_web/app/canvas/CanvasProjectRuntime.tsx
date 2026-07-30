@@ -45,6 +45,8 @@ import {
   AgentChatPanel,
   ZoomControls,
 } from "./_canvas";
+import { ToolbarFlyout } from "./_canvas/components/ToolbarFlyout";
+import { AUDIO_FLYOUT_ITEMS } from "./_canvas/config";
 import type { DockMediaItem, GenerateArgs, PrefillSignal } from "./_canvas";
 import type { CardMessage, ChatMessage } from "./_canvas";
 import { canonicalCanvasHref } from "./canonical-project";
@@ -146,6 +148,14 @@ export function CanvasProjectRuntime({
   const [bottomDockMode, setBottomDockMode] = useState<
     "image" | "video" | "audio"
   >("image");
+  /** 音频按钮悬浮列表锚点（IK55VM）：非 null 即展开；再点按钮/点外/Esc 关闭。 */
+  const [audioFlyoutAnchor, setAudioFlyoutAnchor] =
+    useState<HTMLButtonElement | null>(null);
+  /** 悬浮列表点选 → BottomDock 音频子模式切换信号（仿 prefillSignal nonce 模式）。 */
+  const [audioModeSignal, setAudioModeSignal] = useState<{
+    nonce: number;
+    subMode: "audio" | "music";
+  }>({ nonce: 0, subMode: "audio" });
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
   const [dockFocusSignal, setDockFocusSignal] = useState(0);
   /** 重新编辑预填（P2）：recipe.generation → Dock 参数回填信号 */
@@ -179,7 +189,14 @@ export function CanvasProjectRuntime({
     nonce: number;
   } | null>(null);
   const [pickingFor, setPickingFor] = useState<
-    "image" | "video" | "audio" | "firstFrame" | "lastFrame" | null
+    | "image"
+    | "video"
+    | "audio"
+    | "firstFrame"
+    | "lastFrame"
+    | "audioRef"
+    | "audioImageRef"
+    | null
   >(null);
   const [menu, setMenu] = useState<MenuPayload | null>(null);
 
@@ -654,7 +671,11 @@ export function CanvasProjectRuntime({
         setVideoDockMedia((prev) =>
           prev.some((m) => m.id === item.id) ? prev : [...prev, item],
         );
-      else if (pickingFor === "audio")
+      else if (
+        pickingFor === "audio" ||
+        pickingFor === "audioRef" ||
+        pickingFor === "audioImageRef"
+      )
         setAudioDockMedia((prev) =>
           prev.some((m) => m.id === item.id) ? prev : [...prev, item],
         );
@@ -761,16 +782,14 @@ export function CanvasProjectRuntime({
   ).length;
 
   const handleToolClick = useCallback(
-    (id: string) => {
+    (id: string, el?: HTMLButtonElement) => {
       if (id === "select") {
         setToolMode((m) => (m === "mouse" ? "hand" : "mouse"));
       } else if (id === "upload") {
         openFilePicker(UPLOAD_ACCEPT);
       } else if (id === "audio") {
-        setBottomDockMode("audio");
-        setIsBottomDockOpen((open) =>
-          bottomDockMode === "audio" && open ? false : true,
-        );
+        // IK55VM：音频按钮不再直开 Dock，而是 toggle 悬浮列表（音频生成/AI 音乐）
+        setAudioFlyoutAnchor((a) => (a ? null : (el ?? null)));
       } else if (id === "ai-image") {
         setBottomDockMode("image");
         setIsBottomDockOpen((open) =>
@@ -786,6 +805,20 @@ export function CanvasProjectRuntime({
       }
     },
     [addNode, bottomDockMode, openFilePicker],
+  );
+
+  /** 悬浮列表点选（IK55VM）：开 Dock 到 audio 模式并切到对应子面板（经 signal 通知 BottomDock）。 */
+  const handleAudioFlyoutSelect = useCallback((subMode: "audio" | "music") => {
+    setAudioFlyoutAnchor(null);
+    setBottomDockMode("audio");
+    setAudioModeSignal((s) => ({ nonce: s.nonce + 1, subMode }));
+    setIsBottomDockOpen(true);
+  }, []);
+
+  /** 音频参考槽画布选取（IK55VM）：audioRef=音频节点，audioImageRef=图片节点。 */
+  const handlePickAudioSlot = useCallback(
+    (slot: "audioRef" | "audioImageRef") => setPickingFor(slot),
+    [],
   );
 
   if (gated) return null;
@@ -919,6 +952,15 @@ export function CanvasProjectRuntime({
         onToolClick={handleToolClick}
         handActive={effectiveMode === "hand"}
       />
+      {/* 音频按钮悬浮列表（IK55VM）：音频生成/AI 音乐；资产库/商品卡后续票复用 ToolbarFlyout */}
+      <ToolbarFlyout
+        open={audioFlyoutAnchor !== null}
+        anchor={audioFlyoutAnchor}
+        items={AUDIO_FLYOUT_ITEMS}
+        onSelect={(id) => handleAudioFlyoutSelect(id as "audio" | "music")}
+        onClose={() => setAudioFlyoutAnchor(null)}
+        ariaLabel="音频功能"
+      />
       {pickingFor && (
         <div
           style={{
@@ -997,8 +1039,14 @@ export function CanvasProjectRuntime({
               handleDockLocalUpload(file, bottomDockMode)
             }
             onPickFromCanvas={() => handleRequestPick(bottomDockMode)}
+            onPickAudioSlot={handlePickAudioSlot}
             onExitPick={handleExitPick}
-            isPicking={pickingFor === bottomDockMode}
+            isPicking={
+              pickingFor === bottomDockMode ||
+              pickingFor === "audioRef" ||
+              pickingFor === "audioImageRef"
+            }
+            audioModeSignal={audioModeSignal}
             onGenerate={handleGenerate}
             generating={generating}
             generateError={generateError}

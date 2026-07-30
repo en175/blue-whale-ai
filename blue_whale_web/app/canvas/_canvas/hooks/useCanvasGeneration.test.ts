@@ -435,15 +435,18 @@ describe("useCanvasGeneration.generate", () => {
     const args: GenerateArgs = {
       mode: "audio",
       settings: {
+        mode: "music",
         model: { id: "a1", label: "A1" },
-        duration: 5,
-        sampleRate: 44100,
-        format: { id: "mp3", label: "MP3" },
+        lyrics: "啦啦啦",
+        instrumental: false,
+        quantity: "2x",
       },
     };
     await act(async () => {
       await result.current.generate("生成音乐", args);
     });
+    // 数量 2x → mock 逐张落 2 张卡
+    expect(addNode).toHaveBeenCalledTimes(2);
     expect(addNode).toHaveBeenCalledWith(
       "audio",
       expect.objectContaining({
@@ -453,14 +456,15 @@ describe("useCanvasGeneration.generate", () => {
         }),
       }),
     );
+    expect(generation.generateAudio).toHaveBeenCalledTimes(2);
     expect(generation.generateAudio).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: "生成音乐",
         projectId: 1,
+        mode: "music",
         modelId: "a1",
-        duration: 5,
-        sampleRate: 44100,
-        format: "mp3",
+        lyrics: "啦啦啦",
+        quantity: 2,
       }),
     );
     expect(addAsset).toHaveBeenCalledWith(
