@@ -305,6 +305,27 @@ describe("useCanvasGeneration.generate", () => {
     });
   });
 
+  it("轮询进度只更新内存节点，不持久化 Canvas", async () => {
+    (
+      generation.createProjectGenerationJob as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({ generation_job_id: 777, cursor: 0 });
+    const { result, patchNode } = renderGen();
+    await act(async () => {
+      await result.current.generate("画一只猫", imageArgs);
+    });
+
+    const callbacks = mockJobs.start.mock.calls[0][1] as {
+      onProgress: (progress: number) => void;
+    };
+    act(() => callbacks.onProgress(35));
+
+    expect(patchNode).toHaveBeenCalledWith(
+      "n_ph",
+      { progress: 35 },
+      { persist: false },
+    );
+  });
+
   it("video：createProjectGenerationJob + 建占位带 recipe/progress/taskId + startJob 后台轮询", async () => {
     (
       generation.createProjectGenerationJob as ReturnType<typeof vi.fn>

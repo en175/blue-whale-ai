@@ -50,7 +50,11 @@ export type CanvasDocApi = {
   onConnect(connection: Connection): void;
   addNodeFull(node: CanvasNode): void;
   addEdgeFull(edge: CanvasEdge): void;
-  patchNode(id: string, patch: Partial<CanvasNodeData>): void;
+  patchNode(
+    id: string,
+    patch: Partial<CanvasNodeData>,
+    options?: { persist?: boolean },
+  ): void;
   resizeNode(id: string, width: number, height: number): void;
   patchNodeAndSave(id: string, patch: Partial<CanvasNodeData>): Promise<void>;
   setNodes(nodes: CanvasNode[]): void;
@@ -264,13 +268,18 @@ export function useCanvasDoc(): CanvasDocApi {
   );
 
   const patchNode = useCallback(
-    (id: string, patch: Partial<CanvasNodeData>) => {
+    (
+      id: string,
+      patch: Partial<CanvasNodeData>,
+      options: { persist?: boolean } = {},
+    ) => {
       setNodes((prev) => {
         const next = prev.map((n) =>
           n.id === id ? { ...n, data: { ...n.data, ...patch } } : n,
         );
         nodesRef.current = next;
-        persist();
+        // 默认为持久化；轮询进度等瞬时态显式关闭。
+        if (options.persist !== false) persist();
         return next;
       });
     },
