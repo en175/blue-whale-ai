@@ -46,7 +46,12 @@ import {
   ZoomControls,
 } from "./_canvas";
 import { ToolbarFlyout } from "./_canvas/components/ToolbarFlyout";
-import { AUDIO_FLYOUT_ITEMS } from "./_canvas/config";
+import {
+  ASSET_LIBRARY_FLYOUT_ITEMS,
+  AUDIO_FLYOUT_ITEMS,
+} from "./_canvas/config";
+import { REFERENCE_CARD_WIDTH, referenceCardHeight } from "./_canvas/constants";
+import type { ReferenceCardType } from "./_canvas/model";
 import type { DockMediaItem, GenerateArgs, PrefillSignal } from "./_canvas";
 import type { CardMessage, ChatMessage } from "./_canvas";
 import { canonicalCanvasHref } from "./canonical-project";
@@ -150,6 +155,9 @@ export function CanvasProjectRuntime({
   >("image");
   /** 音频按钮悬浮列表锚点（IK55VM）：非 null 即展开；再点按钮/点外/Esc 关闭。 */
   const [audioFlyoutAnchor, setAudioFlyoutAnchor] =
+    useState<HTMLButtonElement | null>(null);
+  /** 资产库按钮悬浮列表锚点（IK55VS）：语义同音频锚点。 */
+  const [assetFlyoutAnchor, setAssetFlyoutAnchor] =
     useState<HTMLButtonElement | null>(null);
   /** 悬浮列表点选 → BottomDock 音频子模式切换信号（仿 prefillSignal nonce 模式）。 */
   const [audioModeSignal, setAudioModeSignal] = useState<{
@@ -419,6 +427,14 @@ export function CanvasProjectRuntime({
   const onEditRichText = useCallback(
     (id: string, richDoc: unknown, plainText: string) => {
       patchNode(id, { richDoc, prompt: plainText });
+    },
+    [patchNode],
+  );
+
+  // IK55VS 参考卡描述 commit：双击就地编辑失焦写回 description
+  const onEditDescription = useCallback(
+    (id: string, text: string) => {
+      patchNode(id, { description: text });
     },
     [patchNode],
   );
@@ -790,6 +806,9 @@ export function CanvasProjectRuntime({
       } else if (id === "audio") {
         // IK55VM：音频按钮不再直开 Dock，而是 toggle 悬浮列表（音频生成/AI 音乐）
         setAudioFlyoutAnchor((a) => (a ? null : (el ?? null)));
+      } else if (id === "asset-library") {
+        // IK55VS：资产库按钮 toggle 悬浮列表（导入卡片 + 五类参考卡）
+        setAssetFlyoutAnchor((a) => (a ? null : (el ?? null)));
       } else if (id === "ai-image") {
         setBottomDockMode("image");
         setIsBottomDockOpen((open) =>
@@ -814,6 +833,19 @@ export function CanvasProjectRuntime({
     setAudioModeSignal((s) => ({ nonce: s.nonce + 1, subMode }));
     setIsBottomDockOpen(true);
   }, []);
+
+  /** 资产库悬浮列表点选（IK55VS）：五类参考卡在视口中心起网格新增空卡；导入卡片置灰不会触发。 */
+  const handleAssetFlyoutSelect = useCallback(
+    (cardType: ReferenceCardType) => {
+      setAssetFlyoutAnchor(null);
+      addNode("reference", {
+        width: REFERENCE_CARD_WIDTH,
+        height: referenceCardHeight(cardType),
+        data: { cardType },
+      });
+    },
+    [addNode],
+  );
 
   /** 音频参考槽画布选取（IK55VM）：audioRef=音频节点，audioImageRef=图片节点。 */
   const handlePickAudioSlot = useCallback(
@@ -929,6 +961,7 @@ export function CanvasProjectRuntime({
             onNodeRemove={handleNodeRemove}
             onNodeCancelJob={handleNodeCancelJob}
             onEditRichText={onEditRichText}
+            onEditDescription={onEditDescription}
             mentionItems={textMentionItems}
             picking={pickingFor !== null}
             pickingAccept={pickingFor ? dockAccept(pickingFor) : undefined}
@@ -960,6 +993,15 @@ export function CanvasProjectRuntime({
         onSelect={(id) => handleAudioFlyoutSelect(id as "audio" | "music")}
         onClose={() => setAudioFlyoutAnchor(null)}
         ariaLabel="音频功能"
+      />
+      {/* 资产库按钮悬浮列表（IK55VS）：导入卡片(置灰,IK55VX) + 五类参考卡空卡新建 */}
+      <ToolbarFlyout
+        open={assetFlyoutAnchor !== null}
+        anchor={assetFlyoutAnchor}
+        items={ASSET_LIBRARY_FLYOUT_ITEMS}
+        onSelect={(id) => handleAssetFlyoutSelect(id as ReferenceCardType)}
+        onClose={() => setAssetFlyoutAnchor(null)}
+        ariaLabel="资产库"
       />
       {pickingFor && (
         <div

@@ -11,6 +11,10 @@ export type ToolbarFlyoutItem = {
   id: string;
   label: string;
   icon?: React.ReactNode;
+  /** IK55VS：置灰项（如「导入卡片」功能后续票）——不可点、不触发 onSelect/onClose。 */
+  disabled?: boolean;
+  /** 置灰项右侧小字标注（如「后续」）。 */
+  hint?: string;
 };
 
 export function ToolbarFlyout({
@@ -83,7 +87,9 @@ export function ToolbarFlyout({
           key={item.id}
           type="button"
           role="menuitem"
+          disabled={item.disabled}
           onClick={() => {
+            if (item.disabled) return;
             onClose();
             onSelect(item.id);
           }}
@@ -93,8 +99,10 @@ export function ToolbarFlyout({
             borderRadius: 6,
             border: 0,
             background: "transparent",
-            color: "var(--tc-menu-item-label)",
-            cursor: "pointer",
+            color: item.disabled
+              ? "var(--tc-text-muted)"
+              : "var(--tc-menu-item-label)",
+            cursor: item.disabled ? "not-allowed" : "pointer",
             fontSize: 12,
             textAlign: "left",
             display: "flex",
@@ -103,9 +111,10 @@ export function ToolbarFlyout({
             whiteSpace: "nowrap",
             transition: "background 80ms",
           }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.background = "var(--tc-menu-item-hover)")
-          }
+          onMouseEnter={(e) => {
+            if (!item.disabled)
+              e.currentTarget.style.background = "var(--tc-menu-item-hover)";
+          }}
           onMouseLeave={(e) =>
             (e.currentTarget.style.background = "transparent")
           }
@@ -115,14 +124,21 @@ export function ToolbarFlyout({
               aria-hidden="true"
               style={{
                 display: "inline-flex",
-                color: "var(--tc-text-secondary)",
+                color: item.disabled
+                  ? "var(--tc-text-muted)"
+                  : "var(--tc-text-secondary)",
                 flexShrink: 0,
               }}
             >
               {item.icon}
             </span>
           )}
-          <span>{item.label}</span>
+          <span style={{ flex: 1 }}>{item.label}</span>
+          {item.hint && (
+            <span style={{ fontSize: 10, color: "var(--tc-text-muted)" }}>
+              {item.hint}
+            </span>
+          )}
         </button>
       ))}
     </div>,

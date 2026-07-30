@@ -3,6 +3,7 @@
  * 包含工具条面板/按钮的 SVG 路径、示例项目列表、视频生成模型/宽高比/分辨率/时长等配置。
  */
 import type { Project } from "./types";
+import type { ReferenceCardType } from "./model";
 
 export const TOOLBAR_PANEL_PATH =
   "M 18 0 L 30 0 c 7.4995 0 11.2492 0 13.8779 1.9098 a 10 10 0 0 1 2.2123 2.2123 c 1.9098 2.6287 1.9098 6.3784 1.9098 13.8779 L 48 18 L 48 272 c 0 7.4995 0 11.2492 -1.9098 13.8779 a 10 10 0 0 1 -2.2123 2.2123 c -2.6287 1.9098 -6.3784 1.9098 -13.8779 1.9098 L 30 290 L 18 290 c -7.4995 0 -11.2492 0 -13.8779 -1.9098 a 10 10 0 0 1 -2.2123 -2.2123 c -1.9098 -2.6287 -1.9098 -6.3784 -1.9098 -13.8779 L 0 272 L 0 18 c 0 -7.4995 0 -11.2492 1.9098 -13.8779 a 10 10 0 0 1 2.2123 -2.2123 c 2.6287 -1.9098 6.3784 -1.9098 13.8779 -1.9098 Z";
@@ -116,3 +117,61 @@ export const AUDIO_SUB_MODES: { id: "audio" | "music"; label: string }[] = [
   { id: "audio", label: "音频生成" },
   { id: "music", label: "AI 音乐" },
 ];
+
+/**
+ * IK55VS 参考卡五类（单 kind=reference + cardType；后续新卡类只扩清单不改节点模型）。
+ * 头部英文名 / 描述区占位文案以产品截图为权威（IK54R3 决议）。
+ */
+export const REFERENCE_CARD_TYPES: {
+  id: ReferenceCardType;
+  /** 卡头英文名（截图权威）。 */
+  label: string;
+  /** 资产库悬浮列表项名。 */
+  flyoutLabel: string;
+  /** 描述区占位文案（截图权威）。 */
+  placeholder: string;
+}[] = [
+  {
+    id: "style",
+    label: "Style",
+    flyoutLabel: "风格卡",
+    placeholder: "描述视觉风格、配色与艺术方向…",
+  },
+  {
+    id: "character",
+    label: "Character",
+    flyoutLabel: "角色卡",
+    placeholder: "描述外观、性格、角色弧光、语音风格…",
+  },
+  {
+    id: "object",
+    label: "Object",
+    flyoutLabel: "物体卡",
+    placeholder: "描述形状、材质与颜色…",
+  },
+  {
+    id: "environment",
+    label: "Environment",
+    flyoutLabel: "环境卡",
+    placeholder: "描述布局、氛围、光照与情绪…",
+  },
+  {
+    id: "custom",
+    label: "Custom",
+    flyoutLabel: "自定义卡",
+    placeholder: "添加此资产的备注或细节…",
+  },
+];
+
+/** IK55VS 参考卡默认尺寸；character 底部音色区额外加高。 */
+export const REFERENCE_CARD_WIDTH = 280;
+export const REFERENCE_CARD_HEIGHT = 240;
+export const REFERENCE_VOICE_SECTION_HEIGHT = 76;
+
+/** IK55VS 参考卡默认总高（character 含音色区）；新建落点与节点兜底共用。 */
+export function referenceCardHeight(cardType: ReferenceCardType): number {
+  return (
+    REFERENCE_CARD_HEIGHT +
+    (cardType === "character" ? REFERENCE_VOICE_SECTION_HEIGHT : 0)
+  );
+}

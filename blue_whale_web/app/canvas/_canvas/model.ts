@@ -9,8 +9,12 @@
  * 决策见 ADR-0021；规格见 openspec/changes/canvas-frontend-architecture/specs/canvas-doc-model。
  */
 
-export type NodeKindId = "text" | "image" | "video" | "audio" | "group";
+export type NodeKindId =
+  "text" | "image" | "video" | "audio" | "group" | "reference";
 export type MediaKind = "text" | "image" | "video" | "audio";
+/** IK55VS 参考卡类型（单 kind=reference + cardType；后续新卡类只扩此联合，不改节点模型）。 */
+export type ReferenceCardType =
+  "style" | "character" | "object" | "environment" | "custom";
 export type NodeStatus = "idle" | "running" | "done" | "error"; // 投影态，不持久化
 
 /** 蓝鲸 Asset 独立实体（对齐后端 assets 表）；节点只存 assetId 引用，src 惰性重签。 */
@@ -101,6 +105,8 @@ export interface CanvasNodeData {
   label?: string;
   prompt?: string; // 节点自带；有引用时让位（见 engine resolveInputs）
   richDoc?: unknown; // IK55VH 富文本卡 TipTap JSON doc；连线进 prompt 时由 richDocToPlainText 派生纯文本
+  cardType?: ReferenceCardType; // IK55VS 参考卡类型（仅 kind=reference 时有意义）
+  description?: string; // IK55VS 参考卡描述文本（双击就地编辑写回）
   model?: string;
   providerId?: string;
   assetId?: string; // ★ 媒体引用 store.assets[id]（非 url 直存）
@@ -149,8 +155,9 @@ export function createEmptyDoc(id = ""): CanvasDoc {
  * 兼容期产 NodeItem[]：assetId String→Number，剥临时态（status/progress/selected 自然不映射）。
  * edges/version 暂不入库（工作流未开，edges 恒空；开后再扩展结构）。
  *
- * type 透传 kind（image/video/audio/text）；group 无独立产物 → 降级 image（老 NodeItem 无 group，
- * 老画布遇未知 type 走 RF 默认节点不崩）。audio 不降级：IJZY0Z 音频节点须持久化重载保留 kind。
+ * type 透传 kind（image/video/audio/text/reference）；group 无独立产物 → 降级 image（老 NodeItem 无 group，
+ * 老画布遇未知 type 走 RF 默认节点不崩）。audio/reference 不降级：IJZY0Z 音频节点与 IK55VS 参考卡
+ * 须持久化重载保留 kind。
  */
 export function serialize(doc: CanvasDoc): string {
   const items = doc.nodes.map((n) => ({
@@ -163,6 +170,8 @@ export function serialize(doc: CanvasDoc): string {
     assetId: n.data.assetId != null ? Number(n.data.assetId) : undefined,
     prompt: n.data.prompt,
     richDoc: n.data.richDoc,
+    cardType: n.data.cardType,
+    description: n.data.description,
     recipe: n.data.recipe,
     taskId: n.data.taskId,
     // edges 聚合到 target 节点 references（兼容老 NodeItem[]：老忽略 references，v2 parse 派生 edges）
@@ -236,6 +245,9 @@ function normalizeNode(n: Record<string, unknown>): CanvasNode {
   const imageUrl = data.imageUrl ?? n.imageUrl;
   const prompt = data.prompt ?? n.prompt;
   const richDoc = data.richDoc ?? n.richDoc;
+  const cardType = (data.cardType ?? n.cardType) as
+    ReferenceCardType | undefined;
+  const description = (data.description ?? n.description) as string | undefined;
   const recipe = (data.recipe ?? n.recipe) as NodeRecipe | undefined;
   const taskId = (data.taskId ?? n.taskId) as string | undefined;
   const nodeData: CanvasNodeData = { kind };
@@ -245,6 +257,8 @@ function normalizeNode(n: Record<string, unknown>): CanvasNode {
     (nodeData as Record<string, unknown>).imageUrl = imageUrl;
   if (prompt != null) nodeData.prompt = prompt as string;
   if (richDoc != null) nodeData.richDoc = richDoc;
+  if (cardType != null) nodeData.cardType = cardType;
+  if (description != null) nodeData.description = description;
   if (recipe) nodeData.recipe = recipe;
   if (taskId) nodeData.taskId = taskId;
   return {

@@ -8,21 +8,29 @@ import type { ToolDef } from "./types";
 import type { NodeKindId } from "./model";
 import type { ReactNode } from "react";
 import { SparkleIcon, VideoGenIcon } from "./icons";
-import { AUDIO_SUB_MODES } from "./constants";
+import { AUDIO_SUB_MODES, REFERENCE_CARD_TYPES } from "./constants";
+import type { ToolbarFlyoutItem } from "./components/ToolbarFlyout";
 import {
   AtSign,
   AudioLines,
+  Box,
   Download,
+  Import,
   Info,
+  Library,
   Lightbulb,
+  Mountain,
   MousePointer2,
   Music,
   Paintbrush,
+  Palette,
+  PenLine,
   RefreshCw,
   Shuffle,
   Sparkles,
   SquarePlus,
   Type,
+  User,
   Video,
 } from "lucide-react";
 
@@ -86,6 +94,18 @@ export const LEFT_TOOLS: ToolDef[] = [
       />
     ),
   },
+  {
+    id: "asset-library",
+    label: "资产库",
+    icon: (
+      <Library
+        width={20}
+        height={20}
+        stroke="rgba(255, 255, 255, 0.8)"
+        strokeWidth={1.5}
+      />
+    ),
+  },
 ];
 
 /**
@@ -115,6 +135,75 @@ export const AUDIO_FLYOUT_ITEMS = AUDIO_SUB_MODES.map((m) => ({
   ...m,
   icon: AUDIO_FLYOUT_ICONS[m.id],
 }));
+
+/**
+ * 资产库按钮悬浮列表清单（IK55VS）：导入卡片(置灰,功能在 IK55VX) + 五类参考卡。
+ * id/label 源自 constants.REFERENCE_CARD_TYPES，此处只补图标 JSX（与 AUDIO_FLYOUT_ITEMS 同模式）。
+ */
+const ASSET_LIBRARY_FLYOUT_ICONS: Record<string, ReactNode> = {
+  import: (
+    <Import
+      width={15}
+      height={15}
+      stroke="rgba(255, 255, 255, 0.7)"
+      strokeWidth={1.8}
+    />
+  ),
+  style: (
+    <Palette
+      width={15}
+      height={15}
+      stroke="rgba(255, 255, 255, 0.7)"
+      strokeWidth={1.8}
+    />
+  ),
+  character: (
+    <User
+      width={15}
+      height={15}
+      stroke="rgba(255, 255, 255, 0.7)"
+      strokeWidth={1.8}
+    />
+  ),
+  object: (
+    <Box
+      width={15}
+      height={15}
+      stroke="rgba(255, 255, 255, 0.7)"
+      strokeWidth={1.8}
+    />
+  ),
+  environment: (
+    <Mountain
+      width={15}
+      height={15}
+      stroke="rgba(255, 255, 255, 0.7)"
+      strokeWidth={1.8}
+    />
+  ),
+  custom: (
+    <PenLine
+      width={15}
+      height={15}
+      stroke="rgba(255, 255, 255, 0.7)"
+      strokeWidth={1.8}
+    />
+  ),
+};
+export const ASSET_LIBRARY_FLYOUT_ITEMS: ToolbarFlyoutItem[] = [
+  {
+    id: "import",
+    label: "导入卡片",
+    disabled: true,
+    hint: "后续",
+    icon: ASSET_LIBRARY_FLYOUT_ICONS.import,
+  },
+  ...REFERENCE_CARD_TYPES.map((t) => ({
+    id: t.id as string,
+    label: t.flyoutLabel,
+    icon: ASSET_LIBRARY_FLYOUT_ICONS[t.id],
+  })),
+];
 export const NODE_TOOLBAR_ACTIONS = [
   {
     id: "refresh",

@@ -127,4 +127,27 @@ describe("ToolbarFlyout（IK55VM 悬浮列表公共组件）", () => {
     expect(onClose).not.toHaveBeenCalled();
     anchor.remove();
   });
+
+  it("disabled 项（IK55VS 导入卡片置灰）：不可点、不触发 onSelect/onClose、呈现 hint", () => {
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <ToolbarFlyout
+        open
+        anchor={makeAnchor()}
+        items={[
+          { id: "import", label: "导入卡片", disabled: true, hint: "后续" },
+          ...ITEMS,
+        ]}
+        onSelect={onSelect}
+        onClose={onClose}
+      />,
+    );
+    const btn = screen.getByRole("menuitem", { name: /导入卡片/ });
+    expect(btn).toBeDisabled();
+    expect(screen.getByText("后续")).toBeInTheDocument();
+    fireEvent.click(btn);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });
