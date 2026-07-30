@@ -10,8 +10,12 @@
  */
 import { wireInteger } from "@/lib/wire-integer";
 
-export type NodeKindId = "text" | "image" | "video" | "audio" | "group";
+export type NodeKindId =
+  "text" | "image" | "video" | "audio" | "group" | "reference";
 export type MediaKind = "text" | "image" | "video" | "audio";
+/** IK55VS 参考卡类型（单 kind=reference + cardType；后续新卡类只扩此联合，不改节点模型）。 */
+export type ReferenceCardType =
+  "style" | "character" | "object" | "environment" | "custom";
 export type NodeStatus = "idle" | "running" | "done" | "error"; // 投影态，不持久化
 
 /** 蓝鲸 Asset 独立实体（对齐后端 assets 表）；节点只存 assetId 引用，src 惰性重签。 */
@@ -62,8 +66,12 @@ export interface VideoGenParams {
   internetSearch?: boolean;
 }
 
+/** 音频生成参数（IK55VM）：子模式 + music 专属字段；不设显式时长/格式（模型能力决定，默认 mp3）。 */
 export interface AudioGenParams {
-  [key: string]: unknown;
+  mode?: "audio" | "music";
+  lyrics?: string;
+  instrumental?: boolean;
+  quantity?: number;
 }
 
 /** 生成记录：模型 + 参数 + 输入引用 + 绑定 job。 */
@@ -78,7 +86,8 @@ export interface GenerationRecipe {
 
 /** 派生变换记录（origin=derived；本轮类型就位，派生动作属后续子工单）。 */
 export interface DerivedRecipe extends GenerationRecipe {
-  transform: "upscale" | "snapshot" | "extract-audio" | "inpaint" | "regenerate";
+  transform:
+    "upscale" | "snapshot" | "extract-audio" | "inpaint" | "regenerate";
   sourceNodeId?: string;
   sourceAssetId?: string;
 }
@@ -96,6 +105,9 @@ export interface CanvasNodeData {
   kind: NodeKindId;
   label?: string;
   prompt?: string; // 节点自带；有引用时让位（见 engine resolveInputs）
+  richDoc?: unknown; // IK55VH 富文本卡 TipTap JSON doc；连线进 prompt 时由 richDocToPlainText 派生纯文本
+  cardType?: ReferenceCardType; // IK55VS 参考卡类型（仅 kind=reference 时有意义）
+  description?: string; // IK55VS 参考卡描述文本（双击就地编辑写回）
   model?: string;
   providerId?: string;
   assetId?: string; // ★ 媒体引用 store.assets[id]（非 url 直存）
@@ -144,8 +156,9 @@ export function createEmptyDoc(id = ""): CanvasDoc {
  * 兼容期产 NodeItem[]：安全 assetId 用 number，超大 ID 保留十进制 string，剥临时态。
  * edges/version 暂不入库（工作流未开，edges 恒空；开后再扩展结构）。
  *
- * type 透传 kind（image/video/audio/text）；group 无独立产物 → 降级 image（老 NodeItem 无 group，
- * 老画布遇未知 type 走 RF 默认节点不崩）。audio 不降级：IJZY0Z 音频节点须持久化重载保留 kind。
+ * type 透传 kind（image/video/audio/text/reference）；group 无独立产物 → 降级 image（老 NodeItem 无 group，
+ * 老画布遇未知 type 走 RF 默认节点不崩）。audio/reference 不降级：IJZY0Z 音频节点与 IK55VS 参考卡
+ * 须持久化重载保留 kind。
  */
 export function serialize(doc: CanvasDoc): string {
   const items = doc.nodes.map((n) => ({
@@ -155,17 +168,28 @@ export function serialize(doc: CanvasDoc): string {
     width: n.width ?? 200,
     height: n.height ?? 200,
     content: n.data.content,
-    assetId:
-      n.data.assetId != null ? wireInteger(n.data.assetId) : undefined,
+    assetId: n.data.assetId != null ? wireInteger(n.data.assetId) : undefined,
     prompt: n.data.prompt,
+    richDoc: n.data.richDoc,
+    cardType: n.data.cardType,
+    description: n.data.description,
     recipe: n.data.recipe,
     taskId: n.data.taskId,
     // edges 聚合到 target 节点 references（兼容老 NodeItem[]：老忽略 references，v2 parse 派生 edges）
-    references: [] as Array<{ source: string; sourceHandle?: string; targetHandle?: string }>,
+    references: [] as Array<{
+      source: string;
+      sourceHandle?: string;
+      targetHandle?: string;
+    }>,
   }));
   for (const e of doc.edges) {
     const t = items.find((i) => i.id === e.target);
-    if (t) t.references.push({ source: e.source, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle });
+    if (t)
+      t.references.push({
+        source: e.source,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+      });
   }
   return JSON.stringify(items);
 }
@@ -177,13 +201,21 @@ export function serialize(doc: CanvasDoc): string {
  */
 export function parse(json: string): CanvasDoc {
   const raw = JSON.parse(json) as unknown;
-  const arr = (Array.isArray(raw) ? raw : ((raw as { nodes?: unknown[] })?.nodes ?? [])) as Record<string, unknown>[];
-  const obj = (Array.isArray(raw) ? {} : (raw as Record<string, unknown>)) ?? {};
+  const arr = (
+    Array.isArray(raw) ? raw : ((raw as { nodes?: unknown[] })?.nodes ?? [])
+  ) as Record<string, unknown>[];
+  const obj =
+    (Array.isArray(raw) ? {} : (raw as Record<string, unknown>)) ?? {};
   // edges：数组从 references 派生（兼容老 NodeItem[]），对象从 obj.edges
   const edges: CanvasEdge[] = Array.isArray(raw)
     ? arr.flatMap((n) => {
         const id = (n.id as string) ?? "";
-        const refs = (n.references as Array<{ source: string; sourceHandle?: string; targetHandle?: string }>) ?? [];
+        const refs =
+          (n.references as Array<{
+            source: string;
+            sourceHandle?: string;
+            targetHandle?: string;
+          }>) ?? [];
         return refs.map((r, idx) => ({
           id: `e_${id}_${r.source}_${idx}`,
           source: r.source,
@@ -204,20 +236,30 @@ export function parse(json: string): CanvasDoc {
 /** 兼容老 NodeItem（content/assetId 平铺 + type）+ 新 CanvasNode（data.*）→ CanvasNode。 */
 function normalizeNode(n: Record<string, unknown>): CanvasNode {
   const data = (n.data ?? {}) as Record<string, unknown>;
-  const rawType = ((data.kind as NodeKindId) ?? (n.type as NodeKindId) ?? "text") as NodeKindId;
+  const rawType = ((data.kind as NodeKindId) ??
+    (n.type as NodeKindId) ??
+    "text") as NodeKindId;
   const kind: NodeKindId = rawType === "group" ? "image" : rawType;
   const content = data.content ?? n.content;
   const rawAsset = data.assetId ?? n.assetId;
   const assetId = rawAsset != null ? String(rawAsset) : undefined;
   const imageUrl = data.imageUrl ?? n.imageUrl;
   const prompt = data.prompt ?? n.prompt;
+  const richDoc = data.richDoc ?? n.richDoc;
+  const cardType = (data.cardType ?? n.cardType) as
+    ReferenceCardType | undefined;
+  const description = (data.description ?? n.description) as string | undefined;
   const recipe = (data.recipe ?? n.recipe) as NodeRecipe | undefined;
   const taskId = (data.taskId ?? n.taskId) as string | undefined;
   const nodeData: CanvasNodeData = { kind };
   if (content != null) (nodeData as Record<string, unknown>).content = content;
   if (assetId != null) nodeData.assetId = assetId;
-  if (imageUrl != null) (nodeData as Record<string, unknown>).imageUrl = imageUrl;
+  if (imageUrl != null)
+    (nodeData as Record<string, unknown>).imageUrl = imageUrl;
   if (prompt != null) nodeData.prompt = prompt as string;
+  if (richDoc != null) nodeData.richDoc = richDoc;
+  if (cardType != null) nodeData.cardType = cardType;
+  if (description != null) nodeData.description = description;
   if (recipe) nodeData.recipe = recipe;
   if (taskId) nodeData.taskId = taskId;
   return {
@@ -229,4 +271,52 @@ function normalizeNode(n: Record<string, unknown>): CanvasNode {
     parentId: n.parentId as string | undefined,
     data: nodeData,
   };
+}
+
+/** IK55VH 富文本卡 JSON doc 节点结构（TipTap getJSON 输出，宽松遍历）。 */
+type RichDocNode = {
+  type?: string;
+  text?: string;
+  attrs?: Record<string, unknown>;
+  content?: RichDocNode[];
+};
+
+/**
+ * IK55VH 富文本卡 JSON doc → 纯文本（连线进下游节点 prompt 用）。
+ * mention → @[name]（与 dock/mention.ts extractEditor 契约一致），
+ * heading/paragraph 按行，列表/引用展平，分割线 → `---`。
+ */
+export function richDocToPlainText(doc: unknown): string {
+  const lines: string[] = [];
+  const inline = (n: RichDocNode): string => {
+    if (n.type === "text") return n.text ?? "";
+    if (n.type === "mention")
+      return `@[${(n.attrs?.label as string) ?? (n.attrs?.id as string) ?? ""}]`;
+    if (n.type === "hardBreak") return "\n";
+    return (n.content ?? []).map(inline).join("");
+  };
+  const blocks = (n: RichDocNode) => {
+    for (const c of n.content ?? []) {
+      if (c.type === "paragraph" || c.type === "heading") lines.push(inline(c));
+      else if (c.type === "horizontalRule") lines.push("---");
+      else if (
+        c.type === "blockquote" ||
+        c.type === "bulletList" ||
+        c.type === "orderedList" ||
+        c.type === "listItem"
+      )
+        blocks(c);
+      else lines.push(inline(c));
+    }
+  };
+  blocks(doc as RichDocNode);
+  return lines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** IK55VH：空卡判定（纯文本派生为空即为空卡，用于「添加笔记...」占位）。 */
+export function isEmptyRichDoc(doc: unknown): boolean {
+  return richDocToPlainText(doc).length === 0;
 }

@@ -26,7 +26,9 @@ describe("withAuthenticatedUser", () => {
       userId: "42",
       status: "enabled",
     });
-    const handler = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const handler = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
 
     const response = await withAuthenticatedUser(request, handler);
 
@@ -39,14 +41,19 @@ describe("withAuthenticatedUser", () => {
     [403, "账户已停用"],
     [502, "账户服务响应异常"],
     [503, "账户服务暂不可用"],
-  ] as const)("maps authentication status %i to the product error envelope", async (status, msg) => {
-    mockedGetAuthenticatedUser.mockRejectedValue(new AuthenticationError(status));
+  ] as const)(
+    "maps authentication status %i to the product error envelope",
+    async (status, msg) => {
+      mockedGetAuthenticatedUser.mockRejectedValue(
+        new AuthenticationError(status),
+      );
 
-    const response = await withAuthenticatedUser(request, vi.fn());
+      const response = await withAuthenticatedUser(request, vi.fn());
 
-    expect(response.status).toBe(status);
-    expect(await response.json()).toEqual({ code: status, msg, data: null });
-  });
+      expect(response.status).toBe(status);
+      expect(await response.json()).toEqual({ code: status, msg, data: null });
+    },
+  );
 
   it("rethrows unknown authentication resolver errors", async () => {
     const error = new Error("resolver programming error");

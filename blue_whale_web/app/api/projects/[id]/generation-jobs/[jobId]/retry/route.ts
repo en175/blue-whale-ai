@@ -1,5 +1,8 @@
 import { withAuthenticatedUser } from "@/lib/auth/product-route-auth";
-import { createGenerationCommandDeps, createGenerationWorkerDeps } from "@/lib/generation/deps";
+import {
+  createGenerationCommandDeps,
+  createGenerationWorkerDeps,
+} from "@/lib/generation/deps";
 import { handleRetryGenerationJob } from "@/lib/generation/handle-retry-generation-job";
 import { processJob } from "@/lib/generation/worker/generation-worker";
 import { enqueueVideoGenerationJob } from "@/lib/generation/video-queue";

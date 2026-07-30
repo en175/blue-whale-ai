@@ -56,6 +56,7 @@ describe("video generation queue producer", () => {
     });
     expect(loadRedisConnection(env, true)).toMatchObject({
       maxRetriesPerRequest: null,
+      keepAlive: 30_000,
     });
   });
 

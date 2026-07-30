@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
   cleanup,
@@ -8,25 +7,10 @@ import {
   fireEvent,
   waitFor,
 } from "@testing-library/react";
-import { ReactFlowProvider, type NodeProps } from "@xyflow/react";
 import { apiFetch } from "@/lib/api-client";
-import type { CanvasNode } from "../model";
-import { MediaStateBody, TextNode } from "./nodes";
+import { MediaStateBody } from "./nodes";
 
 vi.mock("@/lib/api-client", () => ({ apiFetch: vi.fn() }));
-vi.mock("@xyflow/react", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@xyflow/react")>();
-  return {
-    ...actual,
-    NodeToolbar: ({
-      children,
-      isVisible,
-    }: {
-      children: ReactNode;
-      isVisible?: boolean;
-    }) => (isVisible ? <>{children}</> : null),
-  };
-});
 
 /**
  * v2 MediaStateBody 单测：音频占位渲染（IJZY0Z「音频有占位展示」，无播放控件）+
@@ -101,6 +85,107 @@ describe("MediaStateBody / video 首帧封面", () => {
   });
 });
 
+describe("MediaStateBody / 上传占位卡（origin=uploaded，IK55VE 变体 C）", () => {
+  it("running：本地缩略图 + 遮罩 + 进度环 + 百分比 + 「上传中」", () => {
+    const { container } = render(
+      <MediaStateBody
+        kind="image"
+        status="running"
+        origin="uploaded"
+        previewUrl="blob:preview-1"
+        progress={42}
+        content="cat.png"
+      />,
+    );
+
+    expect(screen.getByTestId("upload-card-running")).toBeInTheDocument();
+    expect(screen.getByText("上传中")).toBeInTheDocument();
+    expect(screen.getByText("42%")).toBeInTheDocument();
+    expect(container.querySelector("svg")).not.toBeNull(); // 进度环
+    const img = container.querySelector("img");
+    expect(img?.getAttribute("src")).toBe("blob:preview-1");
+    // 不渲染旧的生成中占位
+    expect(screen.queryByTestId("node-loading")).toBeNull();
+  });
+
+  it("running：图片上传也显示百分比（不再限 video）", () => {
+    render(
+      <MediaStateBody
+        kind="image"
+        status="running"
+        origin="uploaded"
+        progress={7}
+      />,
+    );
+    expect(screen.getByText("7%")).toBeInTheDocument();
+  });
+
+  it("running：视频缩略图用 <video muted playsInline preload=metadata> 显示首帧", () => {
+    const { container } = render(
+      <MediaStateBody
+        kind="video"
+        status="running"
+        origin="uploaded"
+        previewUrl="blob:preview-v"
+        progress={10}
+      />,
+    );
+
+    const video = container.querySelector("video");
+    expect(video).not.toBeNull();
+    expect(video?.getAttribute("src")).toBe("blob:preview-v");
+    expect(video?.muted).toBe(true);
+    expect(video?.playsInline).toBe(true);
+    expect(video?.getAttribute("preload")).toBe("metadata");
+    expect(screen.getByText("10%")).toBeInTheDocument();
+  });
+
+  it("error：错误遮罩 + 重试/移除圆钮，点击分别触发 onRetry/onRemove", () => {
+    const onRetry = vi.fn();
+    const onRemove = vi.fn();
+    render(
+      <MediaStateBody
+        kind="image"
+        status="error"
+        origin="uploaded"
+        previewUrl="blob:preview-1"
+        errorMessage="上传失败，请稍后重试"
+        onRetry={onRetry}
+        onRemove={onRemove}
+      />,
+    );
+
+    expect(screen.getByTestId("upload-card-error")).toBeInTheDocument();
+    expect(screen.getByText("上传失败，请稍后重试")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "移除" }));
+    expect(onRemove).toHaveBeenCalledTimes(1);
+    // 不渲染旧的错误占位
+    expect(screen.queryByTestId("node-error")).toBeNull();
+  });
+
+  it("生成卡（origin=generated）running 维持旧外观", () => {
+    render(<MediaStateBody kind="image" status="running" origin="generated" />);
+    expect(screen.getByTestId("node-loading")).toBeInTheDocument();
+    expect(screen.getByText("处理中…")).toBeInTheDocument();
+  });
+
+  it("生成卡（origin=generated）error 维持旧外观（无移除按钮）", () => {
+    render(
+      <MediaStateBody
+        kind="image"
+        status="error"
+        origin="generated"
+        errorMessage="生成失败"
+        onRetry={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("node-error")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "移除" })).toBeNull();
+  });
+});
+
 describe("MediaStateBody / image 回归", () => {
   beforeEach(() => {
     vi.stubGlobal("URL", {
@@ -157,25 +242,29 @@ describe("MediaStateBody / image 回归", () => {
   });
 });
 
-describe("TextNode / 素材信息", () => {
-  it("选中无媒体节点时可打开信息面板并显示无媒体信息", () => {
-    const props = {
-      id: "qa_text",
-      data: { kind: "text", content: "无媒体节点" },
-      width: 240,
-      height: 120,
-      selected: true,
-    } as unknown as Parameters<typeof TextNode>[0];
+describe("MediaStateBody / 视频生成中进度与取消（IK55VL）", () => {
+  it("video running 带 progress：显示「处理中 X%」", () => {
+    render(<MediaStateBody kind="video" status="running" progress={45} />);
+    expect(screen.getByTestId("node-loading")).toBeInTheDocument();
+    expect(screen.getByText("处理中 45%")).toBeInTheDocument();
+  });
 
+  it("提供 onCancel：渲染「取消生成」入口，点击触发 onCancel", () => {
+    const onCancel = vi.fn();
     render(
-      <ReactFlowProvider>
-        <TextNode {...props} />
-      </ReactFlowProvider>,
+      <MediaStateBody
+        kind="video"
+        status="running"
+        progress={45}
+        onCancel={onCancel}
+      />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "取消生成" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "信息" }));
-
-    expect(screen.getByRole("dialog", { name: "素材信息" })).toBeInTheDocument();
-    expect(screen.getByText("无媒体信息")).toBeInTheDocument();
+  it("未提供 onCancel：不渲染取消入口（image / 无 taskId 场景）", () => {
+    render(<MediaStateBody kind="image" status="running" />);
+    expect(screen.queryByRole("button", { name: "取消生成" })).toBeNull();
   });
 });

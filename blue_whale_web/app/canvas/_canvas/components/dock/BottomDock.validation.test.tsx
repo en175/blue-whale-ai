@@ -40,9 +40,13 @@ vi.mock("./VideoDockContent", () => ({
     );
   },
 }));
-vi.mock("./AudioDockContent", () => ({
-  AudioDockContent: () => <div>audio dock</div>,
-}));
+vi.mock("./AudioDockContent", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./AudioDockContent")>();
+  return {
+    ...actual,
+    AudioDockContent: () => <div>audio dock</div>,
+  };
+});
 
 import { BottomDock } from "./BottomDock";
 

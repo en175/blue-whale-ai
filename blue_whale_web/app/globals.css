@@ -446,3 +446,89 @@ body {
   font-size: 10px;
 }
 
+/* IK55VD 工具模式光标（v2 画布 wrapper 按有效模式挂 tool-mode-mouse/hand）：
+   鼠标模式 = 系统默认箭头（含节点上方）；抓手模式（含空格临时）= grab，拖动中 = grabbing。
+   双类选择器优先于上面全局 .react-flow__node 的 grab，老 v1 画布不受影响。 */
+.tool-mode-mouse .react-flow__pane,
+.tool-mode-mouse .react-flow__node {
+  cursor: default;
+}
+.tool-mode-hand .react-flow__pane,
+.tool-mode-hand .react-flow__node {
+  cursor: grab;
+}
+.tool-mode-hand .react-flow__pane.dragging,
+.tool-mode-hand .react-flow__node.dragging {
+  cursor: grabbing;
+}
+/* IK55VD：隐藏 RF 内置多选包围框，改由 SelectionBounds 按节点并集外扩 2px 自绘虚线框 */
+.tool-mode-mouse .react-flow__nodesselection-rect,
+.tool-mode-hand .react-flow__nodesselection-rect {
+  display: none;
+}
+
+/* IK55VH 富文本卡：TipTap 编辑器内容样式（三态卡 + 展开模态共用），全部走 --tc-* token */
+.tc-rich-editor {
+  outline: none;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--tc-text-secondary);
+}
+.tc-rich-editor p {
+  margin: 0 0 2px;
+}
+.tc-rich-editor h1 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 4px 0;
+  color: var(--tc-text-primary);
+}
+.tc-rich-editor h2 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 4px 0;
+  color: var(--tc-text-primary);
+}
+.tc-rich-editor h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 4px 0;
+  color: var(--tc-text-primary);
+}
+.tc-rich-editor ul,
+.tc-rich-editor ol {
+  padding-left: 18px;
+  margin: 2px 0;
+}
+.tc-rich-editor ul {
+  list-style: disc;
+}
+.tc-rich-editor ol {
+  list-style: decimal;
+}
+.tc-rich-editor blockquote {
+  border-left: 2px solid var(--tc-border-active);
+  padding-left: 10px;
+  margin: 4px 0;
+  color: var(--tc-text-tertiary);
+}
+.tc-rich-editor hr {
+  border: 0;
+  border-top: 1px solid var(--tc-border);
+  margin: 8px 0;
+}
+.tc-rich-mention {
+  background: var(--tc-bg-elevated);
+  border: 1px solid var(--tc-border-subtle);
+  border-radius: 9999px;
+  padding: 0 6px;
+  color: var(--tc-text-primary);
+  white-space: nowrap;
+}
+.tc-rich-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--tc-text-muted);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

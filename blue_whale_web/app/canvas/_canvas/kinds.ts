@@ -37,11 +37,15 @@ export interface NodeKindSpec {
 /** 从 text Asset 取文本（src 即文本；data:text 解码）。 */
 export function textOf(a: Asset): string {
   if (a.kind === "text") return a.src ?? "";
-  if (a.src?.startsWith("data:text/")) return decodeURIComponent(a.src.split(",").slice(1).join(","));
+  if (a.src?.startsWith("data:text/"))
+    return decodeURIComponent(a.src.split(",").slice(1).join(","));
   return a.src ?? "";
 }
 
-const promptOr = (node: CanvasNode, inputs: Record<string, Asset>): string | undefined =>
+const promptOr = (
+  node: CanvasNode,
+  inputs: Record<string, Asset>,
+): string | undefined =>
   inputs.prompt ? textOf(inputs.prompt) : node.data.prompt;
 
 export const nodeKinds: Record<NodeKindId, NodeKindSpec> = {
@@ -49,7 +53,11 @@ export const nodeKinds: Record<NodeKindId, NodeKindSpec> = {
     media: "text",
     inputs: [],
     outputs: [{ id: "text", direction: "out", accept: ["text"] }],
-    buildTask: (n) => ({ kind: "text", prompt: n.data.prompt, model: n.data.model }),
+    buildTask: (n) => ({
+      kind: "text",
+      prompt: n.data.prompt,
+      model: n.data.model,
+    }),
   },
   image: {
     media: "image",
@@ -99,6 +107,17 @@ export const nodeKinds: Record<NodeKindId, NodeKindSpec> = {
     outputs: [],
     buildTask: () => {
       throw new Error("group has no buildTask — run it via runGroup");
+    },
+  },
+  /** IK55VS 参考卡：组织型节点（非 producer），无端口、不参与生成（卡片作生成输入属后续票）。 */
+  reference: {
+    media: null,
+    inputs: [],
+    outputs: [],
+    buildTask: () => {
+      throw new Error(
+        "reference card has no buildTask — it is an organizational node",
+      );
     },
   },
 };

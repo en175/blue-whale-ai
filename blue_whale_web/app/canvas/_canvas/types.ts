@@ -68,9 +68,11 @@ export type DockPrefill = {
   resolution?: string;
   quantity?: number;
   duration?: number;
-  sampleRate?: number;
-  format?: string;
   refMode?: string;
+  /** 音频（IK55VM）：子模式/歌词/纯伴奏。 */
+  audioMode?: "audio" | "music";
+  lyrics?: string;
+  instrumental?: boolean;
   firstFrameUrl?: string;
   lastFrameUrl?: string;
   firstFrameAssetId?: string;
@@ -154,12 +156,43 @@ export type ImageGenerateSettings = {
   referenceImageSupported: boolean;
 };
 
-/** 音频 Dock 生成设置（IJZXW7-B；模型/参数 mock，后端音频生成就绪换 catalog）。 */
+/** 音频子模式（IK55VM）：audio=音频生成，music=AI 音乐。 */
+export type AudioSubMode = "audio" | "music";
+
+/** 音频 Dock 面板提升态（IK55VM）：两子模式未提交输入全部托管在 BottomDock，切子模式/关板/切模式往返不丢。 */
+export type AudioPanelState = {
+  subMode: AudioSubMode;
+  audioPrompt: string;
+  musicPrompt: string;
+  /** music：歌词（可选；纯伴奏开启时输入区禁用）。 */
+  lyrics: string;
+  /** music：纯伴奏开关。 */
+  instrumental: boolean;
+  /** music：数量（"1x" 起）。 */
+  quantity: string;
+  audioModel: SelectOption;
+  musicModel: SelectOption;
+};
+
+/**
+ * 音频 Dock 生成设置（IK55VM；模型/生成 mock，后端就绪换真接口）。
+ * 接口期望（仅供后端日后参考）：generation-jobs 扩展 mediaKind=audio，
+ * settings 形状 { mode, modelId, prompt, lyrics?, instrumental?, referenceAssetIds[] }。
+ * 不设显式时长/格式控件：时长上限 120s 由模型能力决定，输出默认 mp3。
+ */
 export type AudioGenerateSettings = {
+  mode: AudioSubMode;
   model: SelectOption;
-  duration: number;
-  sampleRate: number;
-  format: SelectOption;
+  lyrics?: string;
+  instrumental?: boolean;
+  /** music：数量（"1x" 起）。 */
+  quantity?: string;
+  /** 参考素材（audio：音频参考+图片参考；music：参考音频），计入 recipe 溯源；referenceAssetIds 由调用方从此派生。 */
+  references?: {
+    kind: "image" | "video" | "audio";
+    assetId?: string;
+    url?: string;
+  }[];
 };
 
 /** 视频 Dock 生成设置（BottomDock 自持 state 透传）。 */
@@ -221,24 +254,21 @@ export type ImageDockContentProps = {
   onPreviewMedia?: (item: DockMediaItem) => void;
 };
 
-/** 音频 Dock 内容 props（IJZXW7-B；自持 mock 模型/参数，仿 ImageDockContentProps）。 */
+/** 音频 Dock 内容 props（IK55VM：双子面板，未提交输入全部由 BottomDock 提升持有）。 */
 export type AudioDockContentProps = {
-  editorRef: React.RefObject<HTMLDivElement | null>;
-  isEmpty: boolean;
-  onInput: () => void;
+  panel: AudioPanelState;
+  setPanel: (patch: Partial<AudioPanelState>) => void;
   onClose: () => void;
   media?: DockMediaItem[];
   onRemoveMedia?: (id: string) => void;
-  /** 本地上传音频：Dock 内 file input 选定文件后上抛，由页面层建画布节点 + 入 media */
+  /** 本地上传参考素材：file input 按槽位 accept 过滤后上抛，由页面层建画布节点 + 入 media */
   onLocalUpload?: (file: File) => void;
-  /** 从画布选择：可选图/视/音节点作参考 */
-  onPickFromCanvas?: () => void;
+  /** 从画布选择参考素材：audioRef=音频节点，audioImageRef=图片节点 */
+  onPickSlot?: (slot: "audioRef" | "audioImageRef") => void;
   onExitPick?: () => void;
   isPicking?: boolean;
   onGenerate?: (settings: AudioGenerateSettings) => void;
   generating?: boolean;
-  onPreviewMedia?: (item: DockMediaItem) => void;
-  prefillSignal?: PrefillSignal;
 };
 
 export type VideoDockContentProps = {

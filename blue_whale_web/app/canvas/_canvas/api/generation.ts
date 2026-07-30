@@ -149,17 +149,21 @@ export function retryMissingProjectGenerationJobOutputs(
   );
 }
 
-/** 音频生成 payload（IJZXW7-B；签名对齐 image/video，后端音频生成就绪后直接用）。 */
+/**
+ * 音频生成 payload（IK55VM；签名对齐 image/video，后端音频生成就绪后直接用）。
+ * 接口期望（仅供后端日后参考，本次不设计后端）：对齐图/视的 Job 模式，
+ * generation-jobs 扩展 mediaKind=audio，settings 形状
+ * { mode: "audio" | "music", modelId, prompt, lyrics?, instrumental?, referenceAssetIds[] }。
+ */
 export type AudioGeneratePayload = {
   prompt: string;
   projectId: WireInteger;
+  mode: "audio" | "music";
   modelId?: string;
-  duration?: number;
-  sampleRate?: number;
-  format?: string;
-  referenceAudios?: string[];
-  referenceImages?: string[];
-  referenceVideos?: string[];
+  lyrics?: string;
+  instrumental?: boolean;
+  quantity?: number;
+  referenceAssetIds?: number[];
 };
 
 export type AudioGenerateResponse = {
@@ -169,7 +173,7 @@ export type AudioGenerateResponse = {
 };
 
 /**
- * ⚠️ MOCK（IJZXW7-B 占位）：后端暂无音频生成 provider，前端 mock 兜底——
+ * ⚠️ MOCK（IK55VM）：后端暂无音频生成 provider，前端 mock 兜底——
  * 固定延迟 + 固定 sample url + 假 assetId，**不发真请求**。签名对齐 generateImage，
  * 后端音频生成就绪后把实现改为 `request<AudioGenerateResponse>("/generation/audio", "POST", payload)`，
  * 签名不变。sample 用公开音频（TODO：换本地 public/audio/sample.mp3 fixture）。
@@ -240,7 +244,9 @@ export function listJobs(opts: {
   jobIds?: Array<number | string>;
 }): Promise<JobListItem[]> {
   const jobIds = opts.jobIds?.map(String) ?? [];
-  const qs = new URLSearchParams({ size: String(opts.size ?? (jobIds.length || 50)) });
+  const qs = new URLSearchParams({
+    size: String(opts.size ?? (jobIds.length || 50)),
+  });
   if (opts.projectId !== undefined) qs.set("projectId", String(opts.projectId));
   if (opts.status) qs.set("status", opts.status);
   if (jobIds.length > 0) qs.set("ids", jobIds.join(","));

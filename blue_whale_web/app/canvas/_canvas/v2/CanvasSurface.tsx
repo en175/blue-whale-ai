@@ -4,9 +4,16 @@
  * ctrl/cmd +/- 缩放、0 自适应（拦截浏览器）。
  */
 "use client";
-import { useCallback, useMemo, useState, useEffect, type ReactNode } from "react";
+import {
+  useCallback,
+  useMemo,
+  useState,
+  useEffect,
+  type ReactNode,
+} from "react";
 import {
   ReactFlow,
+  SelectionMode,
   useReactFlow,
   type NodeChange,
   type EdgeChange,
@@ -14,13 +21,36 @@ import {
   type OnConnectEnd,
 } from "@xyflow/react";
 import type { CanvasNode, CanvasEdge, MediaKind } from "../model";
-import { MediaNode, TextNode, GroupNode, NodeActionsContext } from "./nodes";
+import {
+  MediaNode,
+  TextNode,
+  GroupNode,
+  ReferenceNode,
+  NodeActionsContext,
+} from "./nodes";
+import type { TextMentionItem } from "./nodes";
+import { SelectionBounds } from "./SelectionBounds";
+import { toolModeInteractionProps, type ToolMode } from "./toolMode";
 
 type Viewport = { x: number; y: number; zoom: number };
-const nodeTypes = { image: MediaNode, video: MediaNode, audio: MediaNode, text: TextNode, group: GroupNode } as const;
+const nodeTypes = {
+  image: MediaNode,
+  video: MediaNode,
+  audio: MediaNode,
+  text: TextNode,
+  group: GroupNode,
+  reference: ReferenceNode,
+} as const;
 
 /** 右键/drop 菜单位置（x/y=画布世界坐标供建节点，screenX/Y=屏幕坐标供浮层定位）。 */
-export type MenuPayload = { x: number; y: number; screenX: number; screenY: number; source?: string; sourceHandle?: string };
+export type MenuPayload = {
+  x: number;
+  y: number;
+  screenX: number;
+  screenY: number;
+  source?: string;
+  sourceHandle?: string;
+};
 
 export type CanvasSurfaceProps = {
   nodes: CanvasNode[];
@@ -34,12 +64,22 @@ export type CanvasSurfaceProps = {
   onPaneClick?: () => void;
   onNodeAction?: (id: string, actionId: string) => void;
   onNodeRetry?: (id: string) => void;
-  onEditPrompt?: (id: string, text: string) => void;
+  onNodeRemove?: (id: string) => void;
+  /** IK55VL 视频卡生成中取消入口（按节点 taskId 取消任务）。 */
+  onNodeCancelJob?: (id: string) => void;
+  /** IK55VH 富文本卡 commit：richDoc + 派生纯文本写回。 */
+  onEditRichText?: (id: string, richDoc: unknown, plainText: string) => void;
+  /** IK55VS 参考卡描述 commit 写回。 */
+  onEditDescription?: (id: string, text: string) => void;
+  /** IK55VH 富文本卡 @ 建议素材列表。 */
+  mentionItems?: TextMentionItem[];
   onPaneMenu?: (payload: MenuPayload) => void;
   onEdgeDropMenu?: (payload: MenuPayload) => void;
   picking?: boolean;
   /** D-3 picking 按 Dock 类型过滤（dockAccept）；undefined = 不过滤（任何媒体可选） */
   pickingAccept?: MediaKind[];
+  /** IK55VD 有效工具模式（页面层已合成 持久模式 OR 空格），默认鼠标。 */
+  toolMode?: ToolMode;
   children?: ReactNode;
 };
 
@@ -55,21 +95,39 @@ export function CanvasSurface({
   onPaneClick,
   onNodeAction,
   onNodeRetry,
-  onEditPrompt,
+  onNodeRemove,
+  onNodeCancelJob,
+  onEditRichText,
+  onEditDescription,
+  mentionItems,
   onPaneMenu,
   onEdgeDropMenu,
   picking,
   pickingAccept,
+  toolMode = "mouse",
   children,
 }: CanvasSurfaceProps) {
   const { zoomIn, zoomOut, fitView, screenToFlowPosition } = useReactFlow();
 
-  const [measured, setMeasured] = useState<Map<string, { width?: number; height?: number }>>(() => new Map());
+  // IK55VD：按有效模式展开交互 props；nodesDraggable 再叠加 picking 约束
+  const { nodesDraggable: toolNodesDraggable, ...toolInteraction } =
+    toolModeInteractionProps(toolMode);
+
+  const [measured, setMeasured] = useState<
+    Map<string, { width?: number; height?: number }>
+  >(() => new Map());
   const rfNodes = useMemo(
     () =>
       nodes.map((n) => {
         const m = measured.get(n.id);
-        return m ? { ...n, measured: m, width: m.width ?? n.width, height: m.height ?? n.height } : n;
+        return m
+          ? {
+              ...n,
+              measured: m,
+              width: m.width ?? n.width,
+              height: m.height ?? n.height,
+            }
+          : n;
       }),
     [nodes, measured],
   );
@@ -79,7 +137,11 @@ export function CanvasSurface({
       if (changes.some((c) => c.type === "dimensions")) {
         const m = new Map(measured);
         for (const c of changes) {
-          if (c.type === "dimensions" && c.dimensions) m.set(c.id, { width: c.dimensions.width, height: c.dimensions.height });
+          if (c.type === "dimensions" && c.dimensions)
+            m.set(c.id, {
+              width: c.dimensions.width,
+              height: c.dimensions.height,
+            });
         }
         setMeasured(m);
       }
@@ -98,7 +160,14 @@ export function CanvasSurface({
           : (event as MouseEvent);
       if (!("clientX" in pt)) return;
       const pos = screenToFlowPosition({ x: pt.clientX, y: pt.clientY });
-      onEdgeDropMenu?.({ x: pos.x, y: pos.y, screenX: pt.clientX, screenY: pt.clientY, source: cs.fromNode?.id, sourceHandle: cs.fromHandle?.id ?? undefined });
+      onEdgeDropMenu?.({
+        x: pos.x,
+        y: pos.y,
+        screenX: pt.clientX,
+        screenY: pt.clientY,
+        source: cs.fromNode?.id,
+        sourceHandle: cs.fromHandle?.id ?? undefined,
+      });
     },
     [screenToFlowPosition, onEdgeDropMenu],
   );
@@ -107,7 +176,12 @@ export function CanvasSurface({
     (event: React.MouseEvent | MouseEvent) => {
       event.preventDefault();
       const pos = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      onPaneMenu?.({ x: pos.x, y: pos.y, screenX: event.clientX, screenY: event.clientY });
+      onPaneMenu?.({
+        x: pos.x,
+        y: pos.y,
+        screenX: event.clientX,
+        screenY: event.clientY,
+      });
     },
     [screenToFlowPosition, onPaneMenu],
   );
@@ -133,12 +207,34 @@ export function CanvasSurface({
   }, [zoomIn, zoomOut, fitView]);
 
   const nodeActionsValue = useMemo(
-    () => ({ onAction: onNodeAction, onRetry: onNodeRetry, onEditPrompt, picking, pickingAccept }),
-    [onNodeAction, onNodeRetry, onEditPrompt, picking, pickingAccept],
+    () => ({
+      onAction: onNodeAction,
+      onRetry: onNodeRetry,
+      onRemoveNode: onNodeRemove,
+      onCancelJob: onNodeCancelJob,
+      onEditRichText,
+      onEditDescription,
+      mentionItems,
+      picking,
+      pickingAccept,
+    }),
+    [
+      onNodeAction,
+      onNodeRetry,
+      onNodeRemove,
+      onNodeCancelJob,
+      onEditRichText,
+      onEditDescription,
+      mentionItems,
+      picking,
+      pickingAccept,
+    ],
   );
 
   return (
-    <div className="tc-canvas-surface absolute inset-0 z-0 select-none">
+    <div
+      className={`tc-canvas-surface absolute inset-0 z-0 select-none ${toolMode === "hand" ? "tool-mode-hand" : "tool-mode-mouse"}`}
+    >
       <NodeActionsContext.Provider value={nodeActionsValue}>
         <ReactFlow
           nodes={rfNodes}
@@ -151,25 +247,31 @@ export function CanvasSurface({
           onViewportChange={onViewportChange}
           onPaneContextMenu={handlePaneContextMenu}
           nodeTypes={nodeTypes}
-          defaultEdgeOptions={{ style: { stroke: "#ffffff", strokeWidth: 2.5 } }}
+          defaultEdgeOptions={{
+            style: { stroke: "#ffffff", strokeWidth: 2.5 },
+          }}
           nodesConnectable={false}
-          nodesDraggable={!picking}
+          {...toolInteraction}
+          nodesDraggable={toolNodesDraggable && !picking}
           minZoom={0.1}
           maxZoom={3}
           deleteKeyCode={["Backspace", "Delete"]}
-          selectionOnDrag
-          panOnDrag={[1, 2]}
+          panActivationKeyCode="Space"
           panOnScroll
           zoomOnScroll={false}
           zoomOnPinch
           zoomActivationKeyCode="Control"
           multiSelectionKeyCode={["Meta", "Control", "Shift"]}
+          selectionMode={SelectionMode.Partial}
           elevateNodesOnSelect
           colorMode="dark"
-          onNodeClick={(_e, node) => onNodeClick?.(node as unknown as CanvasNode)}
+          onNodeClick={(_e, node) =>
+            onNodeClick?.(node as unknown as CanvasNode)
+          }
           onPaneClick={() => onPaneClick?.()}
           proOptions={{ hideAttribution: true }}
         >
+          <SelectionBounds />
           {children}
         </ReactFlow>
       </NodeActionsContext.Provider>

@@ -16,7 +16,13 @@ import type { WireInteger } from "@/lib/wire-integer";
 export type JobPollState =
   | { status: "idle" }
   | { status: "polling"; jobId: WireInteger; progress: number }
-  | { status: "succeeded"; jobId: WireInteger; assetId: string; assetUrl: string; assetType: string }
+  | {
+      status: "succeeded";
+      jobId: WireInteger;
+      assetId: string;
+      assetUrl: string;
+      assetType: string;
+    }
   | { status: "failed"; jobId: WireInteger; message: string };
 
 const POLL_INTERVAL_MS = 3000;

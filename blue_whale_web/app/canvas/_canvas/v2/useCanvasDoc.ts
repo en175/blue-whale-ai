@@ -50,7 +50,7 @@ export type CanvasDocApi = {
   onConnect(connection: Connection): void;
   addNodeFull(node: CanvasNode): void;
   addEdgeFull(edge: CanvasEdge): void;
-  patchNode(id: string, patch: Partial<CanvasNodeData>, options?: { persist?: boolean }): void;
+  patchNode(id: string, patch: Partial<CanvasNodeData>): void;
   resizeNode(id: string, width: number, height: number): void;
   patchNodeAndSave(id: string, patch: Partial<CanvasNodeData>): Promise<void>;
   setNodes(nodes: CanvasNode[]): void;
@@ -264,14 +264,13 @@ export function useCanvasDoc(): CanvasDocApi {
   );
 
   const patchNode = useCallback(
-    (id: string, patch: Partial<CanvasNodeData>, options?: { persist?: boolean }) => {
+    (id: string, patch: Partial<CanvasNodeData>) => {
       setNodes((prev) => {
         const next = prev.map((n) =>
           n.id === id ? { ...n, data: { ...n.data, ...patch } } : n,
         );
         nodesRef.current = next;
-        // persist 默认 true；progress 等瞬时态传 { persist: false } 避免「每轮轮询都 PUT 整张画布」。
-        if (options?.persist !== false) persist();
+        persist();
         return next;
       });
     },

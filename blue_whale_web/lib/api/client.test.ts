@@ -82,7 +82,9 @@ describe("apiFetch —— 成功路径", () => {
     await apiFetch("/me", { headers: { Accept: "text/plain" } });
 
     const [, init] = fetchMock.mock.calls.at(-1)!;
-    expect((init.headers as Record<string, string>)["Accept"]).toBe("text/plain");
+    expect((init.headers as Record<string, string>)["Accept"]).toBe(
+      "text/plain",
+    );
   });
 
   it("透传 AbortSignal 给 fetch", async () => {
@@ -100,7 +102,13 @@ describe("apiFetch —— 失败路径（业务错误体）", () => {
   it("非 2xx + 业务 error 体 → ApiError 带 code/message/detail/status", async () => {
     stubFetch(() =>
       jsonResponse(
-        { error: { code: "not_found", message: "asset 不存在", detail: { id: "ast_x" } } },
+        {
+          error: {
+            code: "not_found",
+            message: "asset 不存在",
+            detail: { id: "ast_x" },
+          },
+        },
         { status: 404 },
       ),
     );
@@ -115,7 +123,11 @@ describe("apiFetch —— 失败路径（业务错误体）", () => {
 
   it("非 2xx + 无 error 段（纯 HTML/文本）→ 兜底 http_<status>", async () => {
     stubFetch(
-      () => new Response("<html>500</html>", { status: 500, headers: { "Content-Type": "text/html" } }),
+      () =>
+        new Response("<html>500</html>", {
+          status: 500,
+          headers: { "Content-Type": "text/html" },
+        }),
     );
 
     try {
@@ -158,7 +170,9 @@ describe("apiFetch —— X-User-Id header", () => {
     const [, init] = fetchMock.mock.calls.at(-1)!;
     const headers = init.headers as Record<string, string>;
     expect(headers["X-User-Id"]).toBeUndefined();
-    expect(Object.keys(headers).some((key) => key.toLowerCase() === "x-user-id")).toBe(false);
+    expect(
+      Object.keys(headers).some((key) => key.toLowerCase() === "x-user-id"),
+    ).toBe(false);
     expect(headers["X-Trace-Id"]).toBe("trace-123");
   });
 });

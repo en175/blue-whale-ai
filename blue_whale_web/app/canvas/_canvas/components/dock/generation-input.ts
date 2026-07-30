@@ -22,7 +22,10 @@ function orderedReferences(
   const references: Array<{ id: WireInteger; type: "image" | "video" }> = [];
   const add = (value: unknown, type: "image" | "video") => {
     const id = positiveAssetId(value);
-    if (id !== null && !references.some((item) => wireIntegersEqual(item.id, id))) {
+    if (
+      id !== null &&
+      !references.some((item) => wireIntegersEqual(item.id, id))
+    ) {
       references.push({ id, type });
     }
   };

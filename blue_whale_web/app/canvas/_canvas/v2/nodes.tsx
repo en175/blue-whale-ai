@@ -14,17 +14,22 @@ import {
 } from "react";
 import {
   AlertCircle,
+  AtSign,
   AudioLines,
   Image as ImageIcon,
+  Info,
   Loader2,
+  Music,
   Pause,
   Play,
   Plus,
   RefreshCw,
   Sparkles,
+  Upload,
   Video as VideoIcon,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
 import {
   Handle,
@@ -40,10 +45,18 @@ import type {
   CanvasNode,
   CanvasNodeData,
   NodeKindId,
+  NodeOrigin,
   NodeStatus,
   MediaKind,
 } from "../model";
+import { richDocToPlainText, isEmptyRichDoc } from "../model";
 import { nodeKinds } from "../kinds";
+import {
+  REFERENCE_CARD_TYPES,
+  REFERENCE_CARD_WIDTH,
+  referenceCardHeight,
+} from "../constants";
+import type { ReferenceCardType } from "../model";
 import {
   NODE_TOOLBAR_ACTIONS,
   NODE_TOOLBAR_VIDEO_ACTIONS,
@@ -51,18 +64,33 @@ import {
   type NodeToolbarAction,
 } from "../config";
 import { AuthenticatedImage } from "../components/AuthenticatedImage";
-import { AssetInfoPanel } from "../components/AssetInfoPanel";
+import { UploadCardBody } from "./uploadCard";
+import { EditorContent } from "@tiptap/react";
+import { useRichEditor, plainTextToDoc } from "./text/RichTextEditor";
+import { TextFormatToolbar } from "./text/TextFormatToolbar";
+import { ExpandModal } from "./text/ExpandModal";
+import type { TextMentionItem } from "./text/types";
+export type { TextMentionItem } from "./text/types";
 
 type MediaNodeData = CanvasNodeData & {
   content?: string;
   errorMessage?: string;
   progress?: number;
+  previewUrl?: string;
 };
 
 type NodeActionsCtx = {
   onAction?: (id: string, actionId: string) => void;
   onRetry?: (id: string) => void;
-  onEditPrompt?: (id: string, text: string) => void;
+  onRemoveNode?: (id: string) => void;
+  /** IK55VL 视频卡生成中取消入口：按节点 taskId 取消 GenerationJob。 */
+  onCancelJob?: (id: string) => void;
+  /** IK55VH 富文本卡 commit：写回 richDoc + 派生纯文本（进 prompt）。 */
+  onEditRichText?: (id: string, richDoc: unknown, plainText: string) => void;
+  /** IK55VS 参考卡描述 commit：写回 description。 */
+  onEditDescription?: (id: string, text: string) => void;
+  /** IK55VH 富文本卡 @ 建议素材列表。 */
+  mentionItems?: TextMentionItem[];
   picking?: boolean;
   pickingAccept?: MediaKind[];
 };
@@ -207,7 +235,7 @@ function VideoPlayer({ src, label }: { src: string; label?: string }) {
 }
 
 /**
- * 音频节点播放器（IJZXW7-B）：无画面，AudioLines 图标 + 自定义控制条（播放/暂停 + 进度 + 时长）。
+ * 音频节点播放器（IK55VM）：封面（图标占位）+ 播放条（播放/暂停 + 进度 + 时长），不做波形。
  * 隐藏原生 `<audio>`（shadow DOM 无法隔离 RF 拖拽），控制条 nodrag/nopan 隔离（同 VideoPlayer）。
  */
 function AudioPlayer({ src, label }: { src: string; label?: string }) {
@@ -241,15 +269,25 @@ function AudioPlayer({ src, label }: { src: string; label?: string }) {
   return (
     <div
       data-testid="node-audio-player"
-      className="flex h-full w-full flex-col items-center justify-center gap-2 px-3"
+      className="flex h-full w-full flex-col"
       style={{ color: "var(--tc-text-secondary)" }}
     >
-      <AudioLines
-        width={28}
-        height={28}
-        stroke="currentColor"
-        strokeWidth={1.5}
-      />
+      {/* 封面区（mock 无封面图，图标占位） */}
+      <div
+        className="flex min-h-0 flex-1 items-center justify-center"
+        style={{
+          backgroundImage:
+            "linear-gradient(135deg, var(--tc-bg-elevated) 0%, var(--tc-bg-surface) 60%, var(--tc-bg-elevated) 100%)",
+          color: "var(--tc-text-tertiary)",
+        }}
+      >
+        <AudioLines
+          width={28}
+          height={28}
+          stroke="currentColor"
+          strokeWidth={1.5}
+        />
+      </div>
       <audio
         ref={audioRef}
         src={src}
@@ -261,7 +299,8 @@ function AudioPlayer({ src, label }: { src: string; label?: string }) {
         onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)}
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
       />
-      <div className="nodrag nopan flex w-full items-center gap-2">
+      {/* 播放条 */}
+      <div className="nodrag nopan flex w-full items-center gap-2 px-3 pb-2.5">
         <button
           type="button"
           onClick={toggle}
@@ -313,7 +352,14 @@ type MediaStateBodyProps = {
   content?: string;
   errorMessage?: string;
   progress?: number;
+  /** 产物来源（recipe.origin）；uploaded 的 running/error 走上传占位卡（IK55VE 变体 C）。 */
+  origin?: NodeOrigin;
+  /** 上传占位卡本地缩略图（object URL，不持久化）。 */
+  previewUrl?: string;
   onRetry?: () => void;
+  onRemove?: () => void;
+  /** IK55VL 生成中取消入口（仅视频生成卡提供；hover 显示）。 */
+  onCancel?: () => void;
 };
 export function MediaStateBody({
   kind,
@@ -322,8 +368,26 @@ export function MediaStateBody({
   content,
   errorMessage,
   progress,
+  origin,
+  previewUrl,
   onRetry,
+  onRemove,
+  onCancel,
 }: MediaStateBodyProps) {
+  // 上传占位卡：仅 uploaded 来源的 running/error；生成卡外观保持原样
+  if (origin === "uploaded" && (status === "running" || status === "error")) {
+    return (
+      <UploadCardBody
+        kind={kind}
+        status={status}
+        progress={progress}
+        errorMessage={errorMessage}
+        previewUrl={previewUrl}
+        onRetry={onRetry}
+        onRemove={onRemove}
+      />
+    );
+  }
   if (status === "error") {
     return (
       <div
@@ -369,6 +433,21 @@ export function MediaStateBody({
         className="flex h-full w-full flex-col items-center justify-center gap-2"
         style={{ color: "var(--tc-text-secondary)" }}
       >
+        {onCancel && (
+          <button
+            type="button"
+            aria-label="取消生成"
+            onClick={onCancel}
+            className="nodrag absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100"
+            style={{
+              background: "var(--tc-bg-surface)",
+              border: "1px solid var(--tc-border-subtle)",
+              color: "var(--tc-text-secondary)",
+            }}
+          >
+            <X width={12} height={12} stroke="currentColor" />
+          </button>
+        )}
         <Loader2
           width={28}
           height={28}
@@ -448,11 +527,9 @@ export function MediaStateBody({
 function NodeToolbarActions({
   onAction,
   actions = NODE_TOOLBAR_ACTIONS,
-  expandedActionId,
 }: {
   onAction: (id: string) => void;
   actions?: NodeToolbarAction[];
-  expandedActionId?: string;
 }) {
   return (
     <div
@@ -483,12 +560,6 @@ function NodeToolbarActions({
               key={action.id}
               type="button"
               aria-label={action.label}
-              aria-haspopup={action.id === "info" ? "dialog" : undefined}
-              aria-expanded={
-                action.id === "info"
-                  ? expandedActionId === action.id
-                  : undefined
-              }
               onClick={() => onAction(action.id)}
               className="tc-node-toolbar-button tc-ui-glow-btn flex items-center justify-center rounded-lg hover:bg-[var(--tc-menu-item-hover)] hover:text-white"
               style={{
@@ -583,13 +654,15 @@ function NodeHandles({ kind }: { kind: NodeKindId }) {
 
 export function MediaNode({ id, data, width, height, selected }: NodeProps) {
   const d = data as unknown as MediaNodeData;
-  const { onAction, onRetry, picking, pickingAccept } =
-    useContext(NodeActionsContext);
+  const {
+    onAction,
+    onRetry,
+    onRemoveNode,
+    onCancelJob,
+    picking,
+    pickingAccept,
+  } = useContext(NodeActionsContext);
   const asset = useNodeAsset(d);
-  const ensureAsset = useCanvasStore((s) => s.ensureAsset);
-  const [infoOpen, setInfoOpen] = useState(false);
-  const [infoLoading, setInfoLoading] = useState(false);
-  const toolbarRef = useRef<HTMLDivElement>(null);
   const src = asset?.src ?? (d.imageUrl as string | undefined);
   const isAudio = d.kind === "audio";
   const isVideo = !isAudio && (d.kind === "video" || isVideoUrl(src));
@@ -610,40 +683,6 @@ export function MediaNode({ id, data, width, height, selected }: NodeProps) {
     CanvasNode[] | undefined;
   const promptFromText = upstream?.find((n) => n.data.kind === "text")?.data
     .prompt as string | undefined;
-  useEffect(() => {
-    if (!infoOpen) return;
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!toolbarRef.current?.contains(event.target as Node)) {
-        setInfoOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setInfoOpen(false);
-    };
-    document.addEventListener("mousedown", closeOnOutsideClick);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("mousedown", closeOnOutsideClick);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [infoOpen]);
-  const handleToolbarAction = useCallback(
-    (actionId: string) => {
-      if (actionId !== "info") {
-        setInfoOpen(false);
-        onAction?.(id, actionId);
-        return;
-      }
-      const nextOpen = !infoOpen;
-      setInfoOpen(nextOpen);
-      if (!nextOpen || !d.assetId || asset?.mimeType) return;
-      setInfoLoading(true);
-      void ensureAsset(d.assetId)
-        .catch(() => undefined)
-        .finally(() => setInfoLoading(false));
-    },
-    [asset?.mimeType, d.assetId, ensureAsset, id, infoOpen, onAction],
-  );
   return (
     <>
       <NodeToolbar
@@ -651,16 +690,10 @@ export function MediaNode({ id, data, width, height, selected }: NodeProps) {
         offset={8}
         isVisible={selected && d.status !== "running"}
       >
-        <div ref={toolbarRef} className="nodrag nopan relative">
-          <NodeToolbarActions
-            actions={toolbarForKind(d.kind)}
-            expandedActionId={infoOpen ? "info" : undefined}
-            onAction={handleToolbarAction}
-          />
-          {infoOpen && (
-            <AssetInfoPanel asset={asset} loading={infoLoading} />
-          )}
-        </div>
+        <NodeToolbarActions
+          actions={toolbarForKind(d.kind)}
+          onAction={(a) => onAction?.(id, a)}
+        />
       </NodeToolbar>
       <div
         className={[
@@ -724,7 +757,15 @@ export function MediaNode({ id, data, width, height, selected }: NodeProps) {
           content={d.content}
           errorMessage={d.errorMessage}
           progress={d.progress}
+          origin={d.recipe?.origin}
+          previewUrl={d.previewUrl}
           onRetry={() => onRetry?.(id)}
+          onRemove={() => onRemoveNode?.(id)}
+          onCancel={
+            d.status === "running" && renderKind === "video" && d.taskId
+              ? () => onCancelJob?.(id)
+              : undefined
+          }
         />
         {promptFromText && (
           <div
@@ -748,61 +789,91 @@ export function MediaNode({ id, data, width, height, selected }: NodeProps) {
   );
 }
 
+/**
+ * IK55VH 富文本卡（三态状态机，移植自原型变体 A=浮动工具栏）：
+ * idle 只读渲染（空卡占位「添加笔记...」）→ 单击选中浮出格式工具栏（不可输入）
+ * → 双击进编辑 → 失焦 commit（onEditRichText 写回 richDoc + 派生纯文本）。
+ * 旧卡兼容：无 richDoc 时以 prompt/content 纯文本播种初始 doc。
+ */
 export function TextNode({ id, data, width, height, selected }: NodeProps) {
   const d = data as unknown as CanvasNodeData & {
     content?: string;
     prompt?: string;
+    richDoc?: unknown;
   };
-  const { onEditPrompt } = useContext(NodeActionsContext);
+  const { onEditRichText, mentionItems } = useContext(NodeActionsContext);
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(d.prompt ?? d.content ?? "");
-  const [infoOpen, setInfoOpen] = useState(false);
-  const toolbarRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpandedState] = useState(false);
+  // expanded 的同步镜像：onBlur 在 React 状态提交前也可能触发，须用 ref 判定
+  const expandedRef = useRef(false);
+  const setExpanded = useCallback((v: boolean) => {
+    expandedRef.current = v;
+    setExpandedState(v);
+  }, []);
+  // 初始 doc 只播种一次（编辑器持有内容，commit 后 data.richDoc 回写不再反灌）
+  const [initialDoc] = useState<unknown>(
+    () => d.richDoc ?? plainTextToDoc(d.prompt ?? d.content ?? ""),
+  );
+  const commit = useCallback(
+    (doc: unknown) => {
+      setEditing(false);
+      setExpanded(false);
+      onEditRichText?.(id, doc, richDocToPlainText(doc));
+    },
+    [id, onEditRichText, setExpanded],
+  );
+  // 失焦 commit；展开态失焦不塌缩（模态由 X/Esc/点遮罩关闭并 commit）
+  const handleEditorBlur = useCallback(
+    (doc: unknown) => {
+      if (expandedRef.current) return;
+      commit(doc);
+    },
+    [commit],
+  );
+  const editor = useRichEditor({
+    doc: initialDoc,
+    editable: editing || expanded,
+    mentionItems: mentionItems ?? [],
+    onCommit: handleEditorBlur,
+  });
+  // 选中态（未进编辑）工具栏命令后立即写回，不改变 editing/expanded 状态
+  const syncCommit = useCallback(() => {
+    if (!editor) return;
+    const doc = editor.getJSON();
+    onEditRichText?.(id, doc, richDocToPlainText(doc));
+  }, [editor, id, onEditRichText]);
+  // 进入编辑/展开后聚焦文末
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDraft(d.prompt ?? d.content ?? "");
-  }, [d.prompt, d.content]);
-  useEffect(() => {
-    if (!infoOpen) return;
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!toolbarRef.current?.contains(event.target as Node)) {
-        setInfoOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setInfoOpen(false);
-    };
-    document.addEventListener("mousedown", closeOnOutsideClick);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("mousedown", closeOnOutsideClick);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [infoOpen]);
-  const commit = () => {
-    setEditing(false);
-    onEditPrompt?.(id, draft);
-  };
+    if (editing || expanded) editor?.commands.focus("end");
+  }, [editing, expanded, editor]);
+  const empty = isEmptyRichDoc(editor ? editor.getJSON() : initialDoc);
   return (
     <>
+      <NodeResizer
+        nodeId={id}
+        isVisible={selected}
+        minWidth={160}
+        minHeight={48}
+        handleClassName="tc-node-resize-handle"
+      />
       <NodeToolbar
+        isVisible={selected && !expanded}
         position={Position.Top}
         offset={8}
-        isVisible={selected}
       >
-        <div ref={toolbarRef} className="nodrag nopan relative">
-          <NodeToolbarActions
-            actions={toolbarForKind("image").filter(
-              (action) => action.id === "info",
-            )}
-            expandedActionId={infoOpen ? "info" : undefined}
-            onAction={() => setInfoOpen((open) => !open)}
-          />
-          {infoOpen && <AssetInfoPanel />}
-        </div>
+        <TextFormatToolbar
+          editor={editor}
+          applyToAll={!editing}
+          onAnyCommand={syncCommit}
+          onExpand={() => {
+            setEditing(false);
+            setExpanded(true);
+          }}
+        />
       </NodeToolbar>
       <div
-        className="tc-text-node relative flex items-center justify-center rounded-xl px-4"
+        onDoubleClick={() => setEditing(true)}
+        className="tc-text-node relative flex flex-col overflow-hidden rounded-xl"
         style={{
           width,
           height,
@@ -814,34 +885,25 @@ export function TextNode({ id, data, width, height, selected }: NodeProps) {
         }}
       >
         <NodeHandles kind="text" />
-        {editing ? (
-          <textarea
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                commit();
-              }
-            }}
-            rows={1}
-            className="nodrag w-full resize-none bg-transparent text-center text-sm leading-5 outline-none"
-            style={{ color: "var(--tc-text-secondary)" }}
-          />
-        ) : (
-          <span
-            onDoubleClick={() => setEditing(true)}
-            className="cursor-text text-center text-sm leading-5"
-            style={{
-              color: draft ? "var(--tc-text-secondary)" : "var(--tc-text-muted)",
-            }}
-          >
-            {draft || "双击输入 prompt"}
-          </span>
-        )}
+        <div className="nodrag nowheel flex-1 overflow-auto px-3 py-2.5">
+          {empty && !editing && !expanded ? (
+            <span className="text-sm" style={{ color: "var(--tc-text-muted)" }}>
+              添加笔记...
+            </span>
+          ) : (
+            !expanded && <EditorContent editor={editor} />
+          )}
+        </div>
       </div>
+      {expanded && (
+        <ExpandModal
+          editor={editor}
+          onClose={() => {
+            if (editor) commit(editor.getJSON());
+            else setExpanded(false);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -860,6 +922,173 @@ export function GroupNode({ data }: NodeProps) {
       >
         {d.label || "Group"}
       </div>
+    </div>
+  );
+}
+
+/**
+ * IK55VS 参考卡（单 kind=reference + cardType 五类，空卡形态以产品截图为权威 IK54R3）：
+ * 头部 @ 圆 chip + 英文类型名；卡身居中栈 =「从画布拖入」+ 描述行（双击就地编辑、失焦 commit）
+ * +「添加图片/生成图片」呈现态按钮（三通道补图功能在 IK55VT，本票不接线）+「ⓘ 1 张参考图」；
+ * character 独有底部「音色」区（选择器形态与数据后续，mock 占位）。
+ */
+export function ReferenceNode({
+  id,
+  data,
+  width,
+  height,
+  selected,
+}: NodeProps) {
+  const d = data as unknown as CanvasNodeData;
+  const cardType: ReferenceCardType = d.cardType ?? "custom";
+  const meta =
+    REFERENCE_CARD_TYPES.find((t) => t.id === cardType) ??
+    REFERENCE_CARD_TYPES[REFERENCE_CARD_TYPES.length - 1];
+  const { onEditDescription } = useContext(NodeActionsContext);
+  const [editing, setEditing] = useState(false);
+  /** Esc 取消标记：置位后 blur 不 commit（Esc=取消，失焦=保存）。 */
+  const cancelEditRef = useRef(false);
+  const description = d.description ?? "";
+  const empty = description.trim() === "";
+  const isCharacter = cardType === "character";
+  return (
+    <div
+      className="tc-reference-node relative flex flex-col overflow-hidden rounded-xl"
+      style={{
+        width: width ?? REFERENCE_CARD_WIDTH,
+        height: height ?? referenceCardHeight(cardType),
+        outline: selected
+          ? "2px solid var(--tc-card-selected-stroke)"
+          : "2px solid transparent",
+        outlineOffset: 0,
+        border: "1px solid var(--tc-border-subtle)",
+        background: "var(--tc-bg-surface)",
+      }}
+    >
+      <NodeHandles kind="reference" />
+      {/* 头部:@ 圆 chip + 英文类型名 */}
+      <div className="flex items-center gap-2 px-3 pt-3">
+        <span
+          className="flex items-center justify-center rounded-full"
+          style={{
+            width: 20,
+            height: 20,
+            background: "var(--tc-bg-elevated)",
+            color: "var(--tc-text-tertiary)",
+          }}
+        >
+          <AtSign width={11} height={11} />
+        </span>
+        <span
+          className="text-sm font-semibold"
+          style={{ color: "var(--tc-text-primary)" }}
+        >
+          {meta.label}
+        </span>
+      </div>
+
+      {/* 卡身:垂直居中栈 */}
+      <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-5">
+        <span
+          className="text-[13px]"
+          style={{ color: "var(--tc-text-secondary)" }}
+        >
+          从画布拖入
+        </span>
+        {editing ? (
+          <textarea
+            autoFocus
+            defaultValue={description}
+            placeholder={meta.placeholder}
+            rows={2}
+            onBlur={(e) => {
+              if (!cancelEditRef.current)
+                onEditDescription?.(id, e.target.value);
+              cancelEditRef.current = false;
+              setEditing(false);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                cancelEditRef.current = true;
+                e.currentTarget.blur();
+              }
+            }}
+            className="nodrag nowheel w-full resize-none bg-transparent text-center text-xs leading-normal outline-none"
+            style={{ color: "var(--tc-text-primary)" }}
+          />
+        ) : (
+          <div
+            onDoubleClick={() => setEditing(true)}
+            className="w-full text-center text-xs leading-normal"
+            style={{
+              color: empty
+                ? "var(--tc-text-muted)"
+                : "var(--tc-text-secondary)",
+              whiteSpace: "pre-wrap",
+              cursor: "text",
+            }}
+          >
+            {empty ? meta.placeholder : description}
+          </div>
+        )}
+        {/* 呈现态按钮(置灰防误点):三通道补图功能在 IK55VT,本票不接线 */}
+        <div className="flex gap-2">
+          {(
+            [
+              { icon: <Upload width={12} height={12} />, label: "添加图片" },
+              { icon: <Sparkles width={12} height={12} />, label: "生成图片" },
+            ] as const
+          ).map((b) => (
+            <button
+              key={b.label}
+              type="button"
+              disabled
+              className="nodrag flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs"
+              style={{
+                border: "1px solid var(--tc-border-subtle)",
+                background: "var(--tc-bg-elevated)",
+                color: "var(--tc-text-secondary)",
+              }}
+            >
+              {b.icon}
+              {b.label}
+            </button>
+          ))}
+        </div>
+        <span
+          className="flex items-center gap-1 text-[11px]"
+          style={{ color: "var(--tc-text-muted)" }}
+        >
+          <Info width={10} height={10} />1 张参考图
+        </span>
+      </div>
+
+      {/* character 独有:音色区(mock 占位,选择器形态与数据后续) */}
+      {isCharacter && (
+        <div
+          className="px-3 pb-3 pt-2"
+          style={{ borderTop: "1px solid var(--tc-border-subtle)" }}
+        >
+          <div
+            className="mb-1.5 flex items-center gap-1 text-[11px]"
+            style={{ color: "var(--tc-text-tertiary)" }}
+          >
+            <Music width={11} height={11} />
+            音色
+          </div>
+          <div
+            className="flex h-9 items-center justify-center gap-1.5 rounded-lg text-xs"
+            style={{
+              border: "1px solid var(--tc-border-subtle)",
+              background: "var(--tc-bg-elevated)",
+              color: "var(--tc-text-tertiary)",
+            }}
+          >
+            <Music width={12} height={12} />
+            设置角色音色
+          </div>
+        </div>
+      )}
     </div>
   );
 }

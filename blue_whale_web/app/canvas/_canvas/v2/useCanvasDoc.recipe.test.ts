@@ -13,10 +13,22 @@ import type { CanvasNode, NodeRecipe } from "../model";
 import { loadCanvas, saveCanvas } from "../../../../lib/canvas";
 import type { CanvasDto } from "../../../../lib/canvas";
 
+const emptyCanvasDto: CanvasDto = {
+  id: null,
+  project_id: 1,
+  nodes: "[]",
+  viewport: "null",
+};
+
 vi.mock("../../../../lib/canvas", () => ({
   loadCanvas: vi
     .fn()
-    .mockResolvedValue({ id: null, project_id: 1, nodes: "[]", viewport: "null" }),
+    .mockResolvedValue({
+      id: null,
+      project_id: 1,
+      nodes: "[]",
+      viewport: "null",
+    }),
   saveCanvas: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -127,8 +139,7 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
       expect(saveCanvas).not.toHaveBeenCalled();
 
       resolveLoad({
-        id: 1,
-        project_id: 1,
+        ...emptyCanvasDto,
         nodes: JSON.stringify([
           {
             id: "server_node",
@@ -137,7 +148,6 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
             data: { kind: "text", content: "已保存" },
           },
         ]),
-        viewport: "null",
       });
       await act(async () => {
         await loading;
@@ -162,12 +172,7 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
   it("加载失败进入错误态，重试成功后恢复", async () => {
     vi.mocked(loadCanvas)
       .mockRejectedValueOnce(new Error("network down"))
-      .mockResolvedValueOnce({
-        id: null,
-        project_id: 1,
-        nodes: "[]",
-        viewport: "null",
-      });
+      .mockResolvedValueOnce(emptyCanvasDto);
     const { result } = renderHook(() => useCanvasDoc());
 
     await act(async () => {
@@ -292,35 +297,6 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
         taskId: "777",
         recipe,
       });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("★patchNode 带 {persist:false} 不触发保存（progress 等瞬时态，修每轮轮询 PUT 画布）", async () => {
-    vi.useFakeTimers();
-    try {
-      const { result } = renderHook(() => useCanvasDoc());
-      await act(async () => {
-        await result.current.load("1");
-      });
-      act(() => result.current.addNodeFull(runningVideoNode));
-      // 先让 addNodeFull 的 persist 落地，避免污染断言
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(800);
-      });
-      vi.clearAllMocks();
-      // progress 等瞬时更新：不应触发画布持久化
-      act(() =>
-        result.current.patchNode("n_vid", { progress: 42 }, { persist: false }),
-      );
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(800);
-      });
-      expect(saveCanvas).not.toHaveBeenCalled();
-      // 但节点 progress 确实更新了
-      const n = result.current.nodes.find((x) => x.id === "n_vid");
-      expect(n?.data.progress).toBe(42);
     } finally {
       vi.useRealTimers();
     }

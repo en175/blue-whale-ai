@@ -7,7 +7,15 @@
  * 位置（position）依赖视口/容器，由 page addNode 层封装，本文件只产 data + 尺寸。
  */
 import { parseAspectRatio } from "../aspectRatio";
-import type { CanvasNodeData, NodeKindId, GenerationRecipe, ImageGenParams, RecipeInput, VideoGenParams } from "../model";
+import type {
+  CanvasNodeData,
+  NodeKindId,
+  GenerationRecipe,
+  ImageGenParams,
+  AudioGenParams,
+  RecipeInput,
+  VideoGenParams,
+} from "../model";
 import type { DockPrefill, DockMediaItem } from "../types";
 import type { JobListItem } from "../api/generation";
 import type { CardMessage } from "../nodeFromCard";
@@ -35,7 +43,8 @@ export function jobToV2Placeholder(job: JobListItem): V2Placeholder {
   };
   const params = input.parameters ?? {};
   const prompt = typeof params.prompt === "string" ? params.prompt : "";
-  const aspectToken = typeof params.aspect_ratio === "string" ? params.aspect_ratio : "1:1";
+  const aspectToken =
+    typeof params.aspect_ratio === "string" ? params.aspect_ratio : "1:1";
   const { width, height } = parseAspectRatio(aspectToken);
   const kind: NodeKindId = job.type === "video" ? "video" : "image";
   const data: V2Placeholder["data"] = { content: prompt, status: "running" };
@@ -46,7 +55,11 @@ export function jobToV2Placeholder(job: JobListItem): V2Placeholder {
 }
 
 /** card → v2 图片节点字段（位置外）：尺寸按 card.meta 比例，content=card.text。 */
-export function cardToV2ImageFields(card: CardMessage): { width: number; height: number; content: string } {
+export function cardToV2ImageFields(card: CardMessage): {
+  width: number;
+  height: number;
+  content: string;
+} {
   const { width, height } = parseAspectRatio(card.meta);
   return { width, height, content: card.text };
 }
@@ -70,15 +83,19 @@ export function dockMediaToRecipeRefs(media: DockMediaItem[]): RecipeInput[] {
 }
 
 export function recipeToDockPrefill(gen: GenerationRecipe): DockPrefill {
-  const params = gen.params as Partial<ImageGenParams & VideoGenParams>;
+  const params = gen.params as Partial<
+    ImageGenParams & VideoGenParams & AudioGenParams
+  >;
   // references 保留原始 kind 与顺序，供 Dock 刷新后原样回填。
   const refs = gen.inputs.references?.flatMap((r) =>
     r.url && r.kind !== "text"
-      ? [{
-          url: r.url,
-          kind: r.kind as "image" | "video" | "audio",
-          ...(r.assetId ? { assetId: r.assetId } : {}),
-        }]
+      ? [
+          {
+            url: r.url,
+            kind: r.kind as "image" | "video" | "audio",
+            ...(r.assetId ? { assetId: r.assetId } : {}),
+          },
+        ]
       : [],
   );
   return {
@@ -89,6 +106,10 @@ export function recipeToDockPrefill(gen: GenerationRecipe): DockPrefill {
     quantity: typeof params.quantity === "number" ? params.quantity : undefined,
     duration: typeof params.duration === "number" ? params.duration : undefined,
     refMode: params.refMode,
+    // 音频（IK55VM）：子模式/歌词/纯伴奏回填
+    audioMode: params.mode,
+    lyrics: params.lyrics,
+    instrumental: params.instrumental,
     firstFrameUrl: gen.inputs.firstFrame?.url,
     lastFrameUrl: gen.inputs.lastFrame?.url,
     firstFrameAssetId: gen.inputs.firstFrame?.assetId,
@@ -125,7 +146,11 @@ export function canvasNodeToDockMedia(
 }
 
 /** 点击式跨模态 refill（D IJZY24）：节点 + action → 唤起 Dock mode + 带参考 media / derived。 */
-export type CrossmodalRefill = { mode?: "image" | "video" | "audio"; media?: DockMediaItem; derived?: boolean };
+export type CrossmodalRefill = {
+  mode?: "image" | "video" | "audio";
+  media?: DockMediaItem;
+  derived?: boolean;
+};
 
 export function buildCrossmodalRefill(
   node: { id: string; data: { kind: NodeKindId; content?: string } },
@@ -133,7 +158,12 @@ export function buildCrossmodalRefill(
   src?: string,
 ): CrossmodalRefill | null {
   // 只 image/video/audio 媒体节点参与跨模态（text/group 无跨模态 toolbar action）
-  if (node.data.kind !== "image" && node.data.kind !== "video" && node.data.kind !== "audio") return null;
+  if (
+    node.data.kind !== "image" &&
+    node.data.kind !== "video" &&
+    node.data.kind !== "audio"
+  )
+    return null;
   const name = node.data.content || "未命名素材";
   const type = node.data.kind; // image|video|audio ∈ DockMediaItem["type"]
   switch (actionId) {

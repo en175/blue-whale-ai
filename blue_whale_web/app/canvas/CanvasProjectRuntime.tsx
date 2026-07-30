@@ -4,14 +4,16 @@
  * canvas 数据走 useCanvasDoc hook（React state，本地快，不卡）；assets 走 zustand（业务/接口缓存）。
  * 切项目 = router.push；load 按 URL projectId 触发。
  */
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useAuth } from "@/components/auth/AuthContext";
 import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
+import { toast } from "@/components/Toast";
 import { uploadAsset } from "@/lib/assets";
+import { UPLOAD_ACCEPT, selectUploadFiles } from "@/lib/uploadRules";
 import { wireInteger, type WireInteger } from "@/lib/wire-integer";
 
 import { useCanvasStore } from "./_canvas/store";
@@ -21,6 +23,8 @@ import type { CanvasNode, CanvasNodeData, NodeKindId } from "./_canvas/model";
 import { CanvasSurface } from "./_canvas/v2/CanvasSurface";
 import type { MenuPayload } from "./_canvas/v2/CanvasSurface";
 import { ContextMenu, type ContextMenuKind } from "./_canvas/v2/ContextMenu";
+import { effectiveToolMode, type ToolMode } from "./_canvas/v2/toolMode";
+import { useSpaceHeld } from "./_canvas/v2/useSpaceHeld";
 import { useV2Projects } from "./_canvas/v2/useV2Projects";
 import {
   buildCrossmodalRefill,
@@ -28,10 +32,9 @@ import {
   cardToV2ImageFields,
   recipeToDockPrefill,
 } from "./_canvas/v2/mappers";
-import { findPlacement } from "./_canvas/placement";
+import { findPlacement, type Rect } from "./_canvas/placement";
 import { dockAccept, dockPickHint } from "./_canvas/utils";
 import { useCanvasGeneration } from "./_canvas/hooks/useCanvasGeneration";
-import { BootProgress } from "./BootProgress";
 import { useCanvasProjectHydration } from "./_canvas/hooks/useCanvasProjectHydration";
 import type { MentionItem } from "./_canvas/components/dock/mention";
 import {
@@ -43,6 +46,13 @@ import {
   AgentChatPanel,
   ZoomControls,
 } from "./_canvas";
+import { ToolbarFlyout } from "./_canvas/components/ToolbarFlyout";
+import {
+  ASSET_LIBRARY_FLYOUT_ITEMS,
+  AUDIO_FLYOUT_ITEMS,
+} from "./_canvas/config";
+import { REFERENCE_CARD_WIDTH, referenceCardHeight } from "./_canvas/constants";
+import type { ReferenceCardType } from "./_canvas/model";
 import type { DockMediaItem, GenerateArgs, PrefillSignal } from "./_canvas";
 import type { CardMessage, ChatMessage } from "./_canvas";
 import { canonicalCanvasHref } from "./canonical-project";
@@ -136,9 +146,25 @@ export function CanvasProjectRuntime({
 
   const [isAgentOpen, setIsAgentOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
+  /** 曾打开即常驻挂载（keep-alive）：关闭仅 display:none 隐藏，
+   *  BottomDock 内 prompt/mentions 与各面板设置 state 原样保留（IK55VF） */
+  const [dockEverOpened, setDockEverOpened] = useState(false);
+  // keep-alive 闩锁：任何路径打开过 Dock 即置位（render 期调整 state 的官方模式）
+  if (isBottomDockOpen && !dockEverOpened) setDockEverOpened(true);
   const [bottomDockMode, setBottomDockMode] = useState<
     "image" | "video" | "audio"
   >("image");
+  /** 音频按钮悬浮列表锚点（IK55VM）：非 null 即展开；再点按钮/点外/Esc 关闭。 */
+  const [audioFlyoutAnchor, setAudioFlyoutAnchor] =
+    useState<HTMLButtonElement | null>(null);
+  /** 资产库按钮悬浮列表锚点（IK55VS）：语义同音频锚点。 */
+  const [assetFlyoutAnchor, setAssetFlyoutAnchor] =
+    useState<HTMLButtonElement | null>(null);
+  /** 悬浮列表点选 → BottomDock 音频子模式切换信号（仿 prefillSignal nonce 模式）。 */
+  const [audioModeSignal, setAudioModeSignal] = useState<{
+    nonce: number;
+    subMode: "audio" | "music";
+  }>({ nonce: 0, subMode: "audio" });
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
   const [dockFocusSignal, setDockFocusSignal] = useState(0);
   /** 重新编辑预填（P2）：recipe.generation → Dock 参数回填信号 */
@@ -164,17 +190,50 @@ export function CanvasProjectRuntime({
   const [firstFrameAssetId, setFirstFrameAssetId] = useState<
     WireInteger | undefined
   >(undefined);
-  const [lastFrameAssetId, setLastFrameAssetId] = useState<WireInteger | undefined>(
-    undefined,
-  );
+  const [lastFrameAssetId, setLastFrameAssetId] = useState<
+    WireInteger | undefined
+  >(undefined);
   const [agentPendingMention, setAgentPendingMention] = useState<{
     name: string;
     nonce: number;
   } | null>(null);
   const [pickingFor, setPickingFor] = useState<
-    "image" | "video" | "audio" | "firstFrame" | "lastFrame" | null
+    | "image"
+    | "video"
+    | "audio"
+    | "firstFrame"
+    | "lastFrame"
+    | "audioRef"
+    | "audioImageRef"
+    | null
   >(null);
   const [menu, setMenu] = useState<MenuPayload | null>(null);
+
+  // IK55VD 工具模式：持久模式不持久化；按住空格临时切入抓手，有效模式 = 持久 OR 空格
+  const [toolMode, setToolMode] = useState<ToolMode>("mouse");
+  const spaceHeld = useSpaceHeld();
+  const effectiveMode = effectiveToolMode(toolMode, spaceHeld);
+
+  /** 上传失败重试/移除用：nodeId → 原 File + 本地预览 object URL（成功后 revoke 并删条目）。 */
+  const uploadFilesRef = useRef(
+    new Map<string, { file: File; previewUrl: string }>(),
+  );
+  /** 同一 tick 内连续 addNode（多选上传）时，nodes state 尚未更新，已放占位累积在此防重叠。 */
+  const extraPlacedRef = useRef<Rect[]>([]);
+  useEffect(() => {
+    extraPlacedRef.current = [];
+  }, [nodes]);
+  // IK55VH findPlacement 的 existing 矩形投影（addNode/onMenuInsert 共用）
+  const existingRects = useCallback(
+    () =>
+      nodes.map((n) => ({
+        x: n.position.x,
+        y: n.position.y,
+        width: n.width ?? 200,
+        height: n.height ?? 200,
+      })),
+    [nodes],
+  );
 
   const addNode = useCallback(
     (
@@ -194,20 +253,20 @@ export function CanvasProjectRuntime({
       const w = extra?.width ?? (kind === "text" ? 200 : 256);
       const h = extra?.height ?? (kind === "text" ? 48 : 200);
       const id = extra?.id ?? `n_${Math.random().toString(36).slice(2, 10)}`;
-      const position =
-        kind === "text"
-          ? { x: worldX - w / 2, y: worldY - h / 2 }
-          : findPlacement({
-              existing: nodes.map((n) => ({
-                x: n.position.x,
-                y: n.position.y,
-                width: n.width ?? 200,
-                height: n.height ?? 200,
-              })),
-              anchor: { x: worldX, y: worldY },
-              nodeWidth: w,
-              nodeHeight: h,
-            });
+      // IK55VH：text 与媒体同路径走 findPlacement 网格（视口中心锚，多次点击不重叠）；
+      // 同一 tick 内多选上传的占位还没进 nodes state，用 extraPlacedRef 补齐防重叠
+      const position = findPlacement({
+        existing: [...existingRects(), ...extraPlacedRef.current],
+        anchor: { x: worldX, y: worldY },
+        nodeWidth: w,
+        nodeHeight: h,
+      });
+      extraPlacedRef.current.push({
+        x: position.x,
+        y: position.y,
+        width: w,
+        height: h,
+      });
       const node: CanvasNode = {
         id,
         type: kind,
@@ -219,7 +278,7 @@ export function CanvasProjectRuntime({
       addNodeFull(node);
       return id;
     },
-    [nodes, viewport, addNodeFull],
+    [existingRects, viewport, addNodeFull],
   );
 
   // 生成业务（generate/generateFromNode/recover + job 轮询）抽到 useCanvasGeneration（ADR-0027）；
@@ -228,10 +287,10 @@ export function CanvasProjectRuntime({
     generate,
     generateFromNode,
     hydrate,
-    retryNode,
     generating,
     generateError,
     setGenerateError,
+    cancelVideoJob,
   } = useCanvasGeneration({
     nodes,
     edges,
@@ -365,12 +424,39 @@ export function CanvasProjectRuntime({
     [assets, generateFromNode, setGenerateError],
   );
 
-  // 文本节点 prompt 编辑写回
-  const onEditPrompt = useCallback(
-    (id: string, text: string) => {
-      patchNode(id, { prompt: text });
+  // IK55VH 富文本卡 commit：richDoc 存文档，派生纯文本沿用 prompt 字段（连线进下游 prompt，engine/kinds 不动）
+  const onEditRichText = useCallback(
+    (id: string, richDoc: unknown, plainText: string) => {
+      patchNode(id, { richDoc, prompt: plainText });
     },
     [patchNode],
+  );
+
+  // IK55VS 参考卡描述 commit：双击就地编辑失焦写回 description
+  const onEditDescription = useCallback(
+    (id: string, text: string) => {
+      patchNode(id, { description: text });
+    },
+    [patchNode],
+  );
+
+  // IK55VH 富文本卡 @ 建议素材：画布内 image/video/audio 节点投影
+  const textMentionItems = useMemo(
+    () =>
+      nodes
+        .filter(
+          (n) =>
+            n.data.kind === "image" ||
+            n.data.kind === "video" ||
+            n.data.kind === "audio",
+        )
+        .map((n) => ({
+          id: n.id,
+          type: n.data.kind as "image" | "video" | "audio",
+          name: (n.data.content as string) || "未命名素材",
+          assetId: n.data.assetId,
+        })),
+    [nodes],
   );
 
   // 右键/drop 菜单：插节点（+ drop 时连边 source→newNode.prompt）
@@ -384,7 +470,16 @@ export function CanvasProjectRuntime({
       const node: CanvasNode = {
         id: `n_${Math.random().toString(36).slice(2, 10)}`,
         type: kind,
-        position: { x: m.x - w / 2, y: m.y - h / 2 },
+        // IK55VH：仅文本卡走 findPlacement 网格（菜单点锚，不重叠）；媒体保持菜单点精确落位
+        position:
+          kind === "text"
+            ? findPlacement({
+                existing: existingRects(),
+                anchor: { x: m.x, y: m.y },
+                nodeWidth: w,
+                nodeHeight: h,
+              })
+            : { x: m.x - w / 2, y: m.y - h / 2 },
         width: w,
         height: h,
         data: { kind },
@@ -401,7 +496,7 @@ export function CanvasProjectRuntime({
         });
       }
     },
-    [menu, addNodeFull, addEdgeFull],
+    [menu, existingRects, addNodeFull, addEdgeFull],
   );
 
   useEffect(() => {
@@ -422,25 +517,44 @@ export function CanvasProjectRuntime({
   }, []);
 
   const uploadCanvasMedia = useCallback(
-    (file: File) =>
-      uploadMediaToCanvas({
+    (file: File) => {
+      const previewUrl = URL.createObjectURL(file);
+      const pending = uploadMediaToCanvas({
         file,
         projectId: wireInteger(pid),
+        previewUrl,
         addNode,
         patchNode,
         resizeNode,
         addAsset,
         onError: setGenerateError,
-      }),
+      });
+      // 成功：revoke 预览 URL 并弃 File；失败：留存 File+URL 供错误卡重试/移除
+      void pending.then((result) => {
+        if (result.asset) {
+          URL.revokeObjectURL(previewUrl);
+          uploadFilesRef.current.delete(result.nodeId);
+        } else {
+          uploadFilesRef.current.set(result.nodeId, { file, previewUrl });
+        }
+      });
+      return pending;
+    },
     [addAsset, addNode, patchNode, pid, resizeNode, setGenerateError],
   );
 
   const handleFileChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file || !pid) return;
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
       e.target.value = "";
-      await uploadCanvasMedia(file);
+      if (!files.length || !pid) return;
+      // 白名单+大小校验：合法逐个上传落画布，非法 toast 拒绝（不发请求）
+      selectUploadFiles(files, {
+        upload: (file) => {
+          void uploadCanvasMedia(file);
+        },
+        reject: (reason) => toast.error(reason),
+      });
     },
     [pid, uploadCanvasMedia],
   );
@@ -562,9 +676,22 @@ export function CanvasProjectRuntime({
         setPickingFor(null);
         return;
       }
-      if (pickingFor === "image") setImageDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
-      else if (pickingFor === "video") setVideoDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
-      else if (pickingFor === "audio") setAudioDockMedia((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
+      if (pickingFor === "image")
+        setImageDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
+      else if (pickingFor === "video")
+        setVideoDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
+      else if (
+        pickingFor === "audio" ||
+        pickingFor === "audioRef" ||
+        pickingFor === "audioImageRef"
+      )
+        setAudioDockMedia((prev) =>
+          prev.some((m) => m.id === item.id) ? prev : [...prev, item],
+        );
       else if (pickingFor === "firstFrame") {
         setFirstFrameUrl(src);
         setFirstFrameAssetId(
@@ -593,12 +720,59 @@ export function CanvasProjectRuntime({
     },
     [nodes, handleNodeAction],
   );
+  // IK55VL：视频卡生成中取消入口——按节点持久 taskId 取消（刷新后也可用）
+  const handleNodeCancelJob = useCallback(
+    (nodeId: string) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      const taskId = Number(node?.data.taskId);
+      if (Number.isSafeInteger(taskId) && taskId > 0) cancelVideoJob(taskId);
+    },
+    [nodes, cancelVideoJob],
+  );
+
   const handleNodeRetry = useCallback(
     (nodeId: string) => {
-      // 调后端 retry（仅终态失败 job 有效）→ 节点回 running + 续轮询；不再只是重开 dock。
-      void retryNode(nodeId);
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+      // 上传失败卡：用留存的 File 原地重传（不新建节点）；其余维持打开底部 Dock
+      const entry = uploadFilesRef.current.get(nodeId);
+      if (node.data.recipe?.origin === "uploaded" && entry) {
+        const pending = uploadMediaToCanvas({
+          file: entry.file,
+          projectId: Number(pid),
+          existingNodeId: nodeId,
+          previewUrl: entry.previewUrl,
+          addNode,
+          patchNode,
+          resizeNode,
+          addAsset,
+          onError: setGenerateError,
+        });
+        void pending.then((result) => {
+          if (result.asset) {
+            URL.revokeObjectURL(entry.previewUrl);
+            uploadFilesRef.current.delete(nodeId);
+          }
+        });
+        return;
+      }
+      setBottomDockMode(node.data.kind === "video" ? "video" : "image");
+      setIsBottomDockOpen(true);
     },
-    [retryNode],
+    [nodes, pid, addNode, patchNode, resizeNode, addAsset, setGenerateError],
+  );
+
+  /** 上传错误卡「移除」：删节点 + 清留存的 File/预览 URL。 */
+  const handleNodeRemove = useCallback(
+    (nodeId: string) => {
+      const entry = uploadFilesRef.current.get(nodeId);
+      if (entry) {
+        URL.revokeObjectURL(entry.previewUrl);
+        uploadFilesRef.current.delete(nodeId);
+      }
+      onNodesChange([{ type: "remove", id: nodeId }]);
+    },
+    [onNodesChange],
   );
 
   const handleCardGenerated = useCallback(
@@ -621,14 +795,17 @@ export function CanvasProjectRuntime({
   ).length;
 
   const handleToolClick = useCallback(
-    (id: string) => {
-      if (id === "upload") {
-        openFilePicker("image/*,video/*,audio/*");
+    (id: string, el?: HTMLButtonElement) => {
+      if (id === "select") {
+        setToolMode((m) => (m === "mouse" ? "hand" : "mouse"));
+      } else if (id === "upload") {
+        openFilePicker(UPLOAD_ACCEPT);
       } else if (id === "audio") {
-        setBottomDockMode("audio");
-        setIsBottomDockOpen((open) =>
-          bottomDockMode === "audio" && open ? false : true,
-        );
+        // IK55VM：音频按钮不再直开 Dock，而是 toggle 悬浮列表（音频生成/AI 音乐）
+        setAudioFlyoutAnchor((a) => (a ? null : (el ?? null)));
+      } else if (id === "asset-library") {
+        // IK55VS：资产库按钮 toggle 悬浮列表（导入卡片 + 五类参考卡）
+        setAssetFlyoutAnchor((a) => (a ? null : (el ?? null)));
       } else if (id === "ai-image") {
         setBottomDockMode("image");
         setIsBottomDockOpen((open) =>
@@ -646,8 +823,41 @@ export function CanvasProjectRuntime({
     [addNode, bottomDockMode, openFilePicker],
   );
 
+  /** 悬浮列表点选（IK55VM）：开 Dock 到 audio 模式并切到对应子面板（经 signal 通知 BottomDock）。 */
+  const handleAudioFlyoutSelect = useCallback((subMode: "audio" | "music") => {
+    setAudioFlyoutAnchor(null);
+    setBottomDockMode("audio");
+    setAudioModeSignal((s) => ({ nonce: s.nonce + 1, subMode }));
+    setIsBottomDockOpen(true);
+  }, []);
+
+  /** 资产库悬浮列表点选（IK55VS）：五类参考卡在视口中心起网格新增空卡；导入卡片置灰不会触发。 */
+  const handleAssetFlyoutSelect = useCallback(
+    (cardType: ReferenceCardType) => {
+      setAssetFlyoutAnchor(null);
+      addNode("reference", {
+        width: REFERENCE_CARD_WIDTH,
+        height: referenceCardHeight(cardType),
+        data: { cardType },
+      });
+    },
+    [addNode],
+  );
+
+  /** 音频参考槽画布选取（IK55VM）：audioRef=音频节点，audioImageRef=图片节点。 */
+  const handlePickAudioSlot = useCallback(
+    (slot: "audioRef" | "audioImageRef") => setPickingFor(slot),
+    [],
+  );
+
   if (gated) return null;
-  if (booting) return <BootProgress label="正在加载项目" />;
+  if (booting) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-black text-white/60 text-sm">
+        加载画布 v2…
+      </div>
+    );
+  }
   if (!activeProject) {
     return (
       <div className="flex h-screen w-screen flex-col items-center justify-center gap-5 bg-black">
@@ -681,17 +891,21 @@ export function CanvasProjectRuntime({
       </div>
     );
   }
-  if (hydrationState === "error") {
+  if (hydrationState !== "ready") {
     return (
       <div className="flex h-screen w-screen flex-col items-center justify-center gap-5 bg-black">
-        <p className="text-sm text-[var(--tc-text-secondary)]">画布加载失败</p>
-        <button
-          type="button"
-          onClick={() => setHydrationRetryKey((value) => value + 1)}
-          className="inline-flex h-9 items-center rounded-full border border-[var(--tc-border)] bg-[var(--tc-bg-surface)] px-4 text-sm text-[var(--tc-text-secondary)] transition-colors hover:text-[var(--tc-text-primary)]"
-        >
-          重试
-        </button>
+        <p className="text-sm text-[var(--tc-text-secondary)]">
+          {hydrationState === "error" ? "画布加载失败" : "正在加载画布…"}
+        </p>
+        {hydrationState === "error" && (
+          <button
+            type="button"
+            onClick={() => setHydrationRetryKey((value) => value + 1)}
+            className="inline-flex h-9 items-center rounded-full border border-[var(--tc-border)] bg-[var(--tc-bg-surface)] px-4 text-sm text-[var(--tc-text-secondary)] transition-colors hover:text-[var(--tc-text-primary)]"
+          >
+            重试
+          </button>
+        )}
         <Link
           href="/canvas"
           className="inline-flex h-9 items-center rounded-full bg-[var(--tc-accent)] px-4 text-sm text-[var(--tc-on-accent)]"
@@ -701,14 +915,14 @@ export function CanvasProjectRuntime({
       </div>
     );
   }
-  if (hydrationState !== "ready") return <BootProgress />;
 
   return (
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-black text-white">
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,video/*,audio/*"
+        accept={UPLOAD_ACCEPT}
+        multiple
         className="sr-only"
         onChange={handleFileChange}
         aria-hidden="true"
@@ -741,9 +955,14 @@ export function CanvasProjectRuntime({
             onPaneClick={handleExitPick}
             onNodeAction={handleCanvasNodeAction}
             onNodeRetry={handleNodeRetry}
-            onEditPrompt={onEditPrompt}
+            onNodeRemove={handleNodeRemove}
+            onNodeCancelJob={handleNodeCancelJob}
+            onEditRichText={onEditRichText}
+            onEditDescription={onEditDescription}
+            mentionItems={textMentionItems}
             picking={pickingFor !== null}
             pickingAccept={pickingFor ? dockAccept(pickingFor) : undefined}
+            toolMode={effectiveMode}
           />
         </div>
         <ZoomControls />
@@ -759,7 +978,28 @@ export function CanvasProjectRuntime({
         />
       )}
 
-      <LeftToolbar onToolClick={handleToolClick} />
+      <LeftToolbar
+        onToolClick={handleToolClick}
+        handActive={effectiveMode === "hand"}
+      />
+      {/* 音频按钮悬浮列表（IK55VM）：音频生成/AI 音乐；资产库/商品卡后续票复用 ToolbarFlyout */}
+      <ToolbarFlyout
+        open={audioFlyoutAnchor !== null}
+        anchor={audioFlyoutAnchor}
+        items={AUDIO_FLYOUT_ITEMS}
+        onSelect={(id) => handleAudioFlyoutSelect(id as "audio" | "music")}
+        onClose={() => setAudioFlyoutAnchor(null)}
+        ariaLabel="音频功能"
+      />
+      {/* 资产库按钮悬浮列表（IK55VS）：导入卡片(置灰,IK55VX) + 五类参考卡空卡新建 */}
+      <ToolbarFlyout
+        open={assetFlyoutAnchor !== null}
+        anchor={assetFlyoutAnchor}
+        items={ASSET_LIBRARY_FLYOUT_ITEMS}
+        onSelect={(id) => handleAssetFlyoutSelect(id as ReferenceCardType)}
+        onClose={() => setAssetFlyoutAnchor(null)}
+        ariaLabel="资产库"
+      />
       {pickingFor && (
         <div
           style={{
@@ -806,43 +1046,53 @@ export function CanvasProjectRuntime({
           </button>
         </div>
       )}
-      {isBottomDockOpen && (
-        <BottomDock
-          mode={bottomDockMode}
-          onClose={() => setIsBottomDockOpen(false)}
-          imageMedia={imageDockMedia}
-          videoMedia={videoDockMedia}
-          audioMedia={audioDockMedia}
-          focusSignal={dockFocusSignal}
-          dockMentionSignal={dockMentionSignal}
-          prefillSignal={prefillSignal ?? undefined}
-          onRemoveImageMedia={(id) =>
-            setImageDockMedia((prev) => prev.filter((m) => m.id !== id))
-          }
-          onRemoveVideoMedia={(id) =>
-            setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))
-          }
-          onRemoveAudioMedia={(id) =>
-            setAudioDockMedia((prev) => prev.filter((m) => m.id !== id))
-          }
-          firstFrameUrl={firstFrameUrl}
-          lastFrameUrl={lastFrameUrl}
-          firstFrameAssetId={firstFrameAssetId}
-          lastFrameAssetId={lastFrameAssetId}
-          onFrameUpload={handleFrameUpload}
-          onFrameClear={handleFrameClear}
-          onSwapFrames={handleSwapFrames}
-          onPickFrameFromCanvas={handlePickFrameFromCanvas}
-          onLocalUpload={(file) => handleDockLocalUpload(file, bottomDockMode)}
-          onPickFromCanvas={() => handleRequestPick(bottomDockMode)}
-          onExitPick={handleExitPick}
-          isPicking={pickingFor === bottomDockMode}
-          onGenerate={handleGenerate}
-          onGenerateError={setGenerateError}
-          generating={generating}
-          generateError={generateError}
-          onClearGenerateError={() => setGenerateError(null)}
-        />
+      {dockEverOpened && (
+        <div style={{ display: isBottomDockOpen ? "contents" : "none" }}>
+          <BottomDock
+            mode={bottomDockMode}
+            onClose={() => setIsBottomDockOpen(false)}
+            imageMedia={imageDockMedia}
+            videoMedia={videoDockMedia}
+            audioMedia={audioDockMedia}
+            focusSignal={dockFocusSignal}
+            dockMentionSignal={dockMentionSignal}
+            prefillSignal={prefillSignal ?? undefined}
+            onRemoveImageMedia={(id) =>
+              setImageDockMedia((prev) => prev.filter((m) => m.id !== id))
+            }
+            onRemoveVideoMedia={(id) =>
+              setVideoDockMedia((prev) => prev.filter((m) => m.id !== id))
+            }
+            onRemoveAudioMedia={(id) =>
+              setAudioDockMedia((prev) => prev.filter((m) => m.id !== id))
+            }
+            firstFrameUrl={firstFrameUrl}
+            lastFrameUrl={lastFrameUrl}
+            firstFrameAssetId={firstFrameAssetId}
+            lastFrameAssetId={lastFrameAssetId}
+            onFrameUpload={handleFrameUpload}
+            onFrameClear={handleFrameClear}
+            onSwapFrames={handleSwapFrames}
+            onPickFrameFromCanvas={handlePickFrameFromCanvas}
+            onLocalUpload={(file) =>
+              handleDockLocalUpload(file, bottomDockMode)
+            }
+            onPickFromCanvas={() => handleRequestPick(bottomDockMode)}
+            onPickAudioSlot={handlePickAudioSlot}
+            onExitPick={handleExitPick}
+            isPicking={
+              pickingFor === bottomDockMode ||
+              pickingFor === "audioRef" ||
+              pickingFor === "audioImageRef"
+            }
+            audioModeSignal={audioModeSignal}
+            onGenerate={handleGenerate}
+            onGenerateError={setGenerateError}
+            generating={generating}
+            generateError={generateError}
+            onClearGenerateError={() => setGenerateError(null)}
+          />
+        </div>
       )}
       <AgentChatPanel
         key={activeProject.id}

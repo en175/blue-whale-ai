@@ -3,7 +3,11 @@ import { Queue, type ConnectionOptions, type JobsOptions } from "bullmq";
 export const VIDEO_GENERATION_QUEUE = "generation-video";
 
 type QueuePort = {
-  add(name: string, data: { jobId: string }, options: JobsOptions): Promise<unknown>;
+  add(
+    name: string,
+    data: { jobId: string },
+    options: JobsOptions,
+  ): Promise<unknown>;
 };
 
 export type VideoQueueProducer = {
@@ -48,14 +52,18 @@ export function createVideoQueueProducer(
     async enqueue(jobId, options = {}) {
       const delay = Math.max(0, options.delayMs ?? 0);
       const runAt = now() + delay;
-      await queue.add("step", { jobId }, {
-        jobId: `video-${jobId}-${runAt}`,
-        delay,
-        attempts: 3,
-        backoff: { type: "exponential", delay: 1_000 },
-        removeOnComplete: 1_000,
-        removeOnFail: 5_000,
-      });
+      await queue.add(
+        "step",
+        { jobId },
+        {
+          jobId: `video-${jobId}-${runAt}`,
+          delay,
+          attempts: 3,
+          backoff: { type: "exponential", delay: 1_000 },
+          removeOnComplete: 1_000,
+          removeOnFail: 5_000,
+        },
+      );
     },
   };
 }

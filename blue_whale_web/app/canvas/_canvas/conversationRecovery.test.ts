@@ -544,15 +544,11 @@ describe("当前 Run id 选择器", () => {
       selectCurrentRunCreativeSkillId([
         {
           agent_run_id: "9007199254740992",
-          activated_creative_skill_versions: [
-            { creative_skill_id: "old" },
-          ],
+          activated_creative_skill_versions: [{ creative_skill_id: "old" }],
         },
         {
           agent_run_id: "9007199254740993",
-          activated_creative_skill_versions: [
-            { creative_skill_id: "latest" },
-          ],
+          activated_creative_skill_versions: [{ creative_skill_id: "latest" }],
         },
       ]),
     ).toBe("latest");

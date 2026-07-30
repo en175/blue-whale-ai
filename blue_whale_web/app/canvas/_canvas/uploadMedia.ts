@@ -18,6 +18,10 @@ export type UploadMediaResult = {
 type UploadMediaInput = {
   file: File;
   projectId: WireInteger;
+  /** 重试既有失败占位节点：跳过 addNode，原地 patch 回 running 重走管线。 */
+  existingNodeId?: string;
+  /** 本地预览 object URL（占位卡缩略图）；仅进节点 data，serialize 白名单不映射、不持久化。 */
+  previewUrl?: string;
   addNode: (
     kind: NodeKindId,
     extra: {
@@ -47,26 +51,42 @@ function uploadErrorMessage(error: unknown): string {
 
 /**
  * Canvas 本地媒体上传状态机：同步创建占位节点，完成后原位补全，失败后原位报错。
+ * existingNodeId（重试）：不新建节点，原地 patch 回 running 重走管线。
+ * 上传中经 upload 的 onProgress 把百分比 patch 到占位卡；完成/失败时清掉 progress。
  */
 export async function uploadMediaToCanvas(
   input: UploadMediaInput,
 ): Promise<UploadMediaResult> {
   const kind = detectMediaKind(input.file);
-  const initialSize = fallbackMediaSize(kind);
-  const nodeId = input.addNode(kind, {
-    width: initialSize.width,
-    height: initialSize.height,
-    data: {
-      content: input.file.name,
+  let nodeId: string;
+  if (input.existingNodeId) {
+    nodeId = input.existingNodeId;
+    input.patchNode(nodeId, {
       status: "running",
-      recipe: { origin: "uploaded" },
-    },
-  });
+      progress: 0,
+      errorMessage: undefined,
+      ...(input.previewUrl ? { previewUrl: input.previewUrl } : {}),
+    });
+  } else {
+    const initialSize = fallbackMediaSize(kind);
+    nodeId = input.addNode(kind, {
+      width: initialSize.width,
+      height: initialSize.height,
+      data: {
+        content: input.file.name,
+        status: "running",
+        recipe: { origin: "uploaded" },
+        ...(input.previewUrl ? { previewUrl: input.previewUrl } : {}),
+      },
+    });
+  }
 
   try {
     const upload = input.upload ?? uploadAsset;
     const readSize = input.readSize ?? readMediaNaturalSize;
-    const result = await upload(input.file, input.projectId, kind);
+    const result = await upload(input.file, input.projectId, kind, (pct) =>
+      input.patchNode(nodeId, { progress: pct }),
+    );
     const size = await readSize(result.url, kind);
     input.addAsset({
       id: result.id,
@@ -75,14 +95,22 @@ export async function uploadMediaToCanvas(
       source: "uploaded",
     });
     input.resizeNode(nodeId, size.width, size.height);
-    input.patchNode(nodeId, { status: "done", assetId: result.id });
+    input.patchNode(nodeId, {
+      status: "done",
+      assetId: result.id,
+      progress: undefined,
+    });
     return {
       nodeId,
       asset: { id: result.id, url: result.url, kind },
     };
   } catch (error) {
     const message = uploadErrorMessage(error);
-    input.patchNode(nodeId, { status: "error", errorMessage: message });
+    input.patchNode(nodeId, {
+      status: "error",
+      errorMessage: message,
+      progress: undefined,
+    });
     input.onError(message);
     return { nodeId, asset: null };
   }
