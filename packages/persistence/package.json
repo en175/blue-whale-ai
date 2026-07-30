@@ -10,7 +10,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -b"
+    "build": "prisma generate && tsc -b"
   },
   "dependencies": {
     "@blue-whale/core": "workspace:*",

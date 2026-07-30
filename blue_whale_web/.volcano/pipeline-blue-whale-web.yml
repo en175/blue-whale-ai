@@ -22,7 +22,7 @@ stages:
             displayName: blue-whale-web 镜像构建推送
             component: buildkit-cr@5.0.0
             inputs:
-              contextPath: blue_whale_web
+              contextPath: .
               dockerfiles:
                 default:
                   path: blue_whale_web/Dockerfile
