@@ -40,6 +40,7 @@ COPY packages/persistence packages/persistence
 COPY blue_whale_web blue_whale_web
 
 # 构建期给一个占位让 rewrite 函数能编译；运行时由 ENV GATEWAY_URL 覆盖真实地址
+ENV NEXT_PUBLIC_SKIP_AUTH=1
 ENV GATEWAY_URL=http://blue-whale-gateway:8686
 
 # 先编译 workspace 包（Next.js 通过 exports 字段引用 dist/ 输出）
@@ -61,7 +62,8 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
 
 # standalone 模式只产出最小依赖 + server.js
 COPY --from=builder /app/blue_whale_web/.next/standalone ./
-COPY --from=builder /app/blue_whale_web/.next/static ./.next/static
+COPY --from=builder /app/blue_whale_web/.next/static ./blue_whale_web/.next/static
+COPY --from=builder /app/blue_whale_web/.worker-dist ./blue_whale_web/.worker-dist
 
 EXPOSE 3000
 # 容器内 server.js 默认监听 3000；通过 HOSTNAME=0.0.0.0 暴露到 LAN
