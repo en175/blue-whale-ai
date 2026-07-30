@@ -70,6 +70,11 @@ worker.on("failed", (job, error) => {
     error.message,
   );
 });
+// Redis 连接/消费者级错误必须显式监听，否则 Node 默认会把无 listener 的 'error' 事件抛成崩溃，
+// 或静默丢消费者（job 全孤儿、看似 /ready 却不消费）。
+worker.on("error", (error) => {
+  console.error("[generation-worker] worker error:", error.message);
+});
 
 await worker.waitUntilReady();
 await recoverDueVideoJobs(repo, producer);

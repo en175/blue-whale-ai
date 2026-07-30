@@ -3,7 +3,11 @@ import { Queue, type ConnectionOptions, type JobsOptions } from "bullmq";
 export const VIDEO_GENERATION_QUEUE = "generation-video";
 
 type QueuePort = {
-  add(name: string, data: { jobId: string }, options: JobsOptions): Promise<unknown>;
+  add(
+    name: string,
+    data: { jobId: string },
+    options: JobsOptions,
+  ): Promise<unknown>;
 };
 
 export type VideoQueueProducer = {
@@ -34,6 +38,9 @@ export function loadRedisConnection(
     db: Number.parseInt(REDIS_DB ?? "0", 10),
     ...(REDIS_PASSWORD ? { password: REDIS_PASSWORD } : {}),
     maxRetriesPerRequest: worker ? null : 1,
+    // 远端 Redis 会杀空闲阻塞连接；keepAlive 让 ioredis 探活到静默断连后自动重连，
+    // BullMQ 随之重建阻塞消费者——否则 worker 看似 /ready 却不再消费，job 全成孤儿（假失败）。
+    keepAlive: 30_000,
   };
 }
 
@@ -45,14 +52,18 @@ export function createVideoQueueProducer(
     async enqueue(jobId, options = {}) {
       const delay = Math.max(0, options.delayMs ?? 0);
       const runAt = now() + delay;
-      await queue.add("step", { jobId }, {
-        jobId: `video-${jobId}-${runAt}`,
-        delay,
-        attempts: 3,
-        backoff: { type: "exponential", delay: 1_000 },
-        removeOnComplete: 1_000,
-        removeOnFail: 5_000,
-      });
+      await queue.add(
+        "step",
+        { jobId },
+        {
+          jobId: `video-${jobId}-${runAt}`,
+          delay,
+          attempts: 3,
+          backoff: { type: "exponential", delay: 1_000 },
+          removeOnComplete: 1_000,
+          removeOnFail: 5_000,
+        },
+      );
     },
   };
 }
