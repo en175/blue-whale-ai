@@ -12,6 +12,13 @@ export interface ModelSizeOption {
   height: number | null;
 }
 
+/** 视频时长档（DB supported_durations JSON：{min,max,step}）。图片模型为 null。 */
+export interface ModelDurationRange {
+  min: number;
+  max: number;
+  step: number;
+}
+
 export interface ModelFeatures {
   reference_image: boolean;
   watermark: boolean;
@@ -19,6 +26,12 @@ export interface ModelFeatures {
   sequential_image_generation: boolean;
   stream: boolean;
   tools: boolean;
+  /** 视频首帧引用（video features.first_frame）。图片恒 false。 */
+  first_frame: boolean;
+  /** 视频首尾帧引用（video features.first_last_frame）。图片恒 false。 */
+  first_last_frame: boolean;
+  /** 视频带音频（video features.audio）。图片恒 false。 */
+  audio: boolean;
 }
 
 export interface ModelCapabilityView {
@@ -29,9 +42,11 @@ export interface ModelCapabilityView {
   supported_sizes: ModelSizeOption[];
   supported_aspect_ratios: string[];
   supported_formats: string[];
+  supported_durations: ModelDurationRange | null;
   default_size: string;
   default_format: string | null;
   default_aspect_ratio: string;
+  default_duration: number | null;
   features: ModelFeatures;
 }
 
@@ -58,6 +73,17 @@ type FeaturesJson = {
   sequential_image_generation?: boolean;
   stream?: boolean;
   tools?: boolean;
+  firstFrame?: boolean;
+  first_frame?: boolean;
+  firstLastFrame?: boolean;
+  first_last_frame?: boolean;
+  audio?: boolean;
+};
+
+type DurationRangeJson = {
+  min?: unknown;
+  max?: unknown;
+  step?: unknown;
 };
 
 function toSizes(json: unknown): ModelSizeOption[] {
@@ -82,11 +108,28 @@ function toFeatures(json: unknown): ModelFeatures {
       f.sequential_image_generation === true,
     stream: f.stream === true,
     tools: f.tools === true,
+    first_frame: f.firstFrame === true || f.first_frame === true,
+    first_last_frame: f.firstLastFrame === true || f.first_last_frame === true,
+    audio: f.audio === true,
   };
 }
 
 function asStringArray(json: unknown): string[] {
   return Array.isArray(json) ? json.filter((v): v is string => typeof v === "string") : [];
+}
+
+/** 解析 supported_durations JSON（{min,max,step}，均须为有限正数且 max>=min）；
+ *  非法或缺省返回 null（图片模型无时长）。 */
+function toDurationRange(json: unknown): ModelDurationRange | null {
+  const d = (json ?? {}) as DurationRangeJson;
+  const min = Number(d.min);
+  const max = Number(d.max);
+  const step = Number(d.step ?? 1);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(step)) {
+    return null;
+  }
+  if (step <= 0 || max < min) return null;
+  return { min, max, step };
 }
 
 export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapabilityRepo {
@@ -104,9 +147,11 @@ export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapability
         supported_sizes: toSizes(cap.supported_sizes),
         supported_aspect_ratios: asStringArray(cap.supported_aspect_ratios),
         supported_formats: asStringArray(cap.supported_formats),
+        supported_durations: toDurationRange(cap.supported_durations),
         default_size: cap.default_size,
         default_format: cap.default_format,
         default_aspect_ratio: cap.default_aspect_ratio,
+        default_duration: cap.default_duration,
         features: toFeatures(cap.features),
       }));
     },
