@@ -8,6 +8,8 @@
 
 /** input[accept] 值：图片 .jpg/.jpeg/.png/.webp/.gif，视频 .mp4/.mov/.webm（无音频）。 */
 export const UPLOAD_ACCEPT = ".jpg,.jpeg,.png,.webp,.gif,.mp4,.mov,.webm";
+/** IK55VT 参考卡参考图上传：仅图片白名单。 */
+export const IMAGE_UPLOAD_ACCEPT = ".jpg,.jpeg,.png,.webp,.gif";
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 

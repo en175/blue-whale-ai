@@ -79,3 +79,15 @@ export function findPlacement(opts: FindPlacementOptions): {
   // 兜底：existing 极密搜索穷尽，回起点格（有落点优于无落点）
   return { x: baseX, y: baseY };
 }
+
+/**
+ * IK55VT 通道一：画布内拖素材节点上参考卡落槽的目标判定（纯函数）。
+ * 仅图片素材（有 assetId 的完成态）可落；相交候选（RF getIntersectingNodes 结果）中取第一个参考卡。
+ */
+export function pickReferenceDropTarget(
+  dragged: { kind: string; assetId?: string },
+  intersecting: Array<{ id: string; kind: string }>,
+): string | null {
+  if (dragged.kind !== "image" || !dragged.assetId) return null;
+  return intersecting.find((n) => n.kind === "reference")?.id ?? null;
+}

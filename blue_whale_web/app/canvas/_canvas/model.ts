@@ -108,6 +108,9 @@ export interface CanvasNodeData {
   richDoc?: unknown; // IK55VH 富文本卡 TipTap JSON doc；连线进 prompt 时由 richDocToPlainText 派生纯文本
   cardType?: ReferenceCardType; // IK55VS 参考卡类型（仅 kind=reference 时有意义）
   description?: string; // IK55VS 参考卡描述文本（双击就地编辑写回）
+  name?: string; // IK55VT 参考卡名称（双击改名；默认=类型名，持久化显式改过的）
+  referenceAssetId?: string; // IK55VT 参考卡参考图引用 store.assets[id]（非 url 直存）
+  referenceImageAspect?: number; // IK55VT 参考图宽高比（width/height），已填态高度按比自适应
   model?: string;
   providerId?: string;
   assetId?: string; // ★ 媒体引用 store.assets[id]（非 url 直存）
@@ -173,6 +176,12 @@ export function serialize(doc: CanvasDoc): string {
     richDoc: n.data.richDoc,
     cardType: n.data.cardType,
     description: n.data.description,
+    name: n.data.name,
+    referenceAssetId:
+      n.data.referenceAssetId != null
+        ? Number(n.data.referenceAssetId)
+        : undefined,
+    referenceImageAspect: n.data.referenceImageAspect,
     recipe: n.data.recipe,
     taskId: n.data.taskId,
     // edges 聚合到 target 节点 references（兼容老 NodeItem[]：老忽略 references，v2 parse 派生 edges）
@@ -249,6 +258,12 @@ function normalizeNode(n: Record<string, unknown>): CanvasNode {
   const cardType = (data.cardType ?? n.cardType) as
     ReferenceCardType | undefined;
   const description = (data.description ?? n.description) as string | undefined;
+  const name = (data.name ?? n.name) as string | undefined;
+  const rawRefAsset = data.referenceAssetId ?? n.referenceAssetId;
+  const referenceAssetId =
+    rawRefAsset != null ? String(rawRefAsset) : undefined;
+  const referenceImageAspect = (data.referenceImageAspect ??
+    n.referenceImageAspect) as number | undefined;
   const recipe = (data.recipe ?? n.recipe) as NodeRecipe | undefined;
   const taskId = (data.taskId ?? n.taskId) as string | undefined;
   const nodeData: CanvasNodeData = { kind };
@@ -260,6 +275,10 @@ function normalizeNode(n: Record<string, unknown>): CanvasNode {
   if (richDoc != null) nodeData.richDoc = richDoc;
   if (cardType != null) nodeData.cardType = cardType;
   if (description != null) nodeData.description = description;
+  if (name != null) nodeData.name = name;
+  if (referenceAssetId != null) nodeData.referenceAssetId = referenceAssetId;
+  if (referenceImageAspect != null)
+    nodeData.referenceImageAspect = referenceImageAspect;
   if (recipe) nodeData.recipe = recipe;
   if (taskId) nodeData.taskId = taskId;
   return {
