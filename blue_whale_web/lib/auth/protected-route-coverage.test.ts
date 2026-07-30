@@ -204,22 +204,29 @@ describe("protected product route coverage", () => {
     expect(violations).toEqual([]);
   });
 
-  it("forbids retired Java Conversation, GenerationInbox, AgentRun, InputRequest, and SSE rewrites", () => {
+  it("forbids any Java gateway rewrite and GATEWAY_URL wiring (IK50GB 断链)", () => {
     const nextConfig = readFileSync(
       path.join(webRoot, "next.config.ts"),
       "utf8",
     );
-    const retiredPatterns = [
+    const javaRewriteSources = [
+      // B 已退役：Conversation / GenerationInbox / AgentRun / InputRequest / SSE
       "/api/agent/runs/",
       "/api/generation-inbox/",
       "/api/jobs/:path*/stream",
       "/api/projects/:path*/conversation/",
       "/api/projects/:path*/input-requests/",
       "/api/projects/:path*/events",
+      // C 断链：账户 / 回调 / Asset 文件代理（生产零消费者，均已迁 Node 或退役）
+      "/api/user/:path*",
+      "/api/webhooks/:path*",
+      "/assets/:path*",
     ];
 
     expect(
-      retiredPatterns.filter((pattern) => nextConfig.includes(pattern)),
+      javaRewriteSources.filter((pattern) => nextConfig.includes(pattern)),
     ).toEqual([]);
+    // §6.4.1：浏览器与 Next.js 不得再注入或请求 Java 网关地址。
+    expect(nextConfig).not.toContain("process.env.GATEWAY_URL");
   });
 });

@@ -12,8 +12,6 @@ RUN npm install --global pnpm@11.17.0
 WORKDIR /workspace
 COPY . .
 
-ENV GATEWAY_URL=http://product-api:4000
-
 RUN pnpm install --frozen-lockfile \
     && pnpm --filter @blue-whale/persistence exec prisma generate --schema prisma/schema.prisma \
     && pnpm build:node \

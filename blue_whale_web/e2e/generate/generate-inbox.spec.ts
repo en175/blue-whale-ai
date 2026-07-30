@@ -303,7 +303,7 @@ test.describe("/generate — 对话式创作页", () => {
         result({
           id: 101,
           type: "image",
-          url: "/assets/101/content",
+          url: "/api/projects/77/assets/101/content",
           width: 1024,
           height: 1024,
           duration: null,

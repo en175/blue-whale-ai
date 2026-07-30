@@ -53,26 +53,6 @@ services:
       timeout: 3s
       retries: 30
 
-  product-api:
-    <<: *node-service
-    command: ["node", "apps/product-api/dist/index.js"]
-    environment:
-      <<: *node-environment
-      PORT: "4000"
-    ports:
-      - "4310:4000"
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "fetch('http://127.0.0.1:4000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
-        ]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-
   agent-worker:
     <<: *node-service
     command: ["node", "apps/agent-worker/dist/index.js"]
@@ -136,13 +116,12 @@ services:
       <<: *node-environment
       PORT: "3000"
       DATABASE_URL: mysql://root:blue_whale@mysql:3306/blue_whale
-      GATEWAY_URL: http://product-api:4000
       GIT_COMMIT: ${GIT_COMMIT:-baseline}
       BUILD_TIME: ${BUILD_TIME:-baseline}
     ports:
       - "3101:3000"
     depends_on:
-      product-api:
+      mysql:
         condition: service_healthy
     healthcheck:
       test:

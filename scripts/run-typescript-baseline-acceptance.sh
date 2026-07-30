@@ -24,12 +24,12 @@ export BW_TS_COMPOSE_FILE="$COMPOSE_FILE"
 export BW_TS_COMPOSE_PROJECT="$PROJECT"
 
 "$ROOT/scripts/init-typescript-baseline-db.sh"
-dc up -d --build product-api agent-worker generation-worker web
+dc up -d --build agent-worker generation-worker web
 
 deadline=$((SECONDS + 180))
 while [ "$SECONDS" -lt "$deadline" ]; do
   pending=0
-  for service in product-api agent-worker generation-worker web; do
+  for service in agent-worker generation-worker web; do
     container_id="$(dc ps -q "$service")"
     if [ -z "$container_id" ] || [ "$(docker inspect -f '{{.State.Health.Status}}' "$container_id")" != "healthy" ]; then
       pending=1
