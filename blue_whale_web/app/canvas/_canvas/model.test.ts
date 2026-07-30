@@ -513,6 +513,33 @@ describe("canvas-doc-model", () => {
     expect(back.nodes[0].data.referenceImageAspect).toBe(1.5);
   });
 
+  it("IK55VX 非数字 referenceAssetId(卡片库 mock 快照 id)serialize→parse round-trip 不丢", () => {
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({
+      id: "r1",
+      type: "reference",
+      position: { x: 0, y: 0 },
+      width: 280,
+      height: 240,
+      data: {
+        kind: "reference",
+        cardType: "character",
+        name: "Apollo",
+        description: "外观描述",
+        referenceAssetId: "libimg-c1-snap-3f7a9c2e-0000-4000-8000-abcdefabcdef",
+        referenceImageAspect: 1.78,
+      },
+    });
+    const arr = JSON.parse(serialize(doc));
+    expect(arr[0].referenceAssetId).toBe(
+      "libimg-c1-snap-3f7a9c2e-0000-4000-8000-abcdefabcdef",
+    );
+    const back = parse(serialize(doc));
+    expect(back.nodes[0].data.referenceAssetId).toBe(
+      "libimg-c1-snap-3f7a9c2e-0000-4000-8000-abcdefabcdef",
+    );
+  });
+
   it("老数据无 name/referenceAssetId/referenceImageAspect → undefined 不崩（向前兼容）", () => {
     const old = JSON.stringify([
       {

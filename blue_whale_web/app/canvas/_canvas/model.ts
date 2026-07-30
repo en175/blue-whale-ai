@@ -8,7 +8,7 @@
  *
  * 决策见 ADR-0021；规格见 openspec/changes/canvas-frontend-architecture/specs/canvas-doc-model。
  */
-import { wireInteger } from "@/lib/wire-integer";
+import { isWireInteger, wireInteger } from "@/lib/wire-integer";
 
 export type NodeKindId =
   "text" | "image" | "video" | "audio" | "group" | "reference";
@@ -179,7 +179,9 @@ export function serialize(doc: CanvasDoc): string {
     name: n.data.name,
     referenceAssetId:
       n.data.referenceAssetId != null
-        ? Number(n.data.referenceAssetId)
+        ? isWireInteger(n.data.referenceAssetId)
+          ? wireInteger(String(n.data.referenceAssetId))
+          : n.data.referenceAssetId // IK55VX 卡片库 mock 快照 id(非数字)按字符串透传
         : undefined,
     referenceImageAspect: n.data.referenceImageAspect,
     recipe: n.data.recipe,
