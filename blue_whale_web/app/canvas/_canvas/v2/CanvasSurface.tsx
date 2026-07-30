@@ -83,6 +83,12 @@ export type CanvasSurfaceProps = {
   onRemoveReferenceImage?: (id: string) => void;
   /** IK55VT 通道一：图片素材节点拖放落到参考卡（refNodeId, sourceNodeId）。 */
   onReferenceImageDrop?: (refNodeId: string, sourceNodeId: string) => void;
+  /** IK55VZ 商品卡详情 commit 写回。 */
+  onEditProductDetail?: (id: string, text: string) => void;
+  /** IK55VZ 商品卡移除单张图。 */
+  onRemoveProductImage?: (id: string, assetId: string) => void;
+  /** IK55VZ 商品卡链接导入（runtime mock 解析填充）。 */
+  onImportProductLink?: (id: string, url: string) => void;
   /** IK55VH 富文本卡 @ 建议素材列表。 */
   mentionItems?: TextMentionItem[];
   onPaneMenu?: (payload: MenuPayload) => void;
@@ -116,6 +122,9 @@ export function CanvasSurface({
   onGenerateReferenceImage,
   onRemoveReferenceImage,
   onReferenceImageDrop,
+  onEditProductDetail,
+  onRemoveProductImage,
+  onImportProductLink,
   mentionItems,
   onPaneMenu,
   onEdgeDropMenu,
@@ -170,10 +179,16 @@ export function CanvasSurface({
       const d = node.data as CanvasNode["data"];
       const target = pickReferenceDropTarget(
         { kind: d.kind, assetId: d.assetId },
-        getIntersectingNodes(node).map((n) => ({
-          id: n.id,
-          kind: (n.data as CanvasNode["data"]).kind,
-        })),
+        getIntersectingNodes(node).map((n) => {
+          const nd = n.data as CanvasNode["data"];
+          return {
+            id: n.id,
+            kind: nd.kind,
+            // IK55VZ:product 满 8 图跳过(追加语义上限)
+            cardType: nd.cardType,
+            imageCount: nd.imageAssetIds?.length,
+          };
+        }),
       );
       if (target !== referenceDropTargetId) setReferenceDropTargetId(target);
     },
@@ -278,6 +293,9 @@ export function CanvasSurface({
       onUploadReferenceImage,
       onGenerateReferenceImage,
       onRemoveReferenceImage,
+      onEditProductDetail,
+      onRemoveProductImage,
+      onImportProductLink,
       referenceDropTargetId,
       mentionItems,
       picking,
@@ -294,6 +312,9 @@ export function CanvasSurface({
       onUploadReferenceImage,
       onGenerateReferenceImage,
       onRemoveReferenceImage,
+      onEditProductDetail,
+      onRemoveProductImage,
+      onImportProductLink,
       referenceDropTargetId,
       mentionItems,
       picking,

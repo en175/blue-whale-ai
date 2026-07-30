@@ -15,7 +15,7 @@ export type NodeKindId =
 export type MediaKind = "text" | "image" | "video" | "audio";
 /** IK55VS 参考卡类型（单 kind=reference + cardType；后续新卡类只扩此联合，不改节点模型）。 */
 export type ReferenceCardType =
-  "style" | "character" | "object" | "environment" | "custom";
+  "style" | "character" | "object" | "environment" | "custom" | "product";
 export type NodeStatus = "idle" | "running" | "done" | "error"; // 投影态，不持久化
 
 /** 蓝鲸 Asset 独立实体（对齐后端 assets 表）；节点只存 assetId 引用，src 惰性重签。 */
@@ -111,6 +111,9 @@ export interface CanvasNodeData {
   name?: string; // IK55VT 参考卡名称（双击改名；默认=类型名，持久化显式改过的）
   referenceAssetId?: string; // IK55VT 参考卡参考图引用 store.assets[id]（非 url 直存）
   referenceImageAspect?: number; // IK55VT 参考图宽高比（width/height），已填态高度按比自适应
+  detail?: string; // IK55VZ 商品卡详情文本（名称/品类/参数/卖点/人群，就地编辑写回）
+  imageAssetIds?: string[]; // IK55VZ 商品卡图片引用列表（≤8，各 id 独立 snap asset）
+  sourceUrl?: string; // IK55VZ 商品卡来源链接（链接导入解析时记录）
   model?: string;
   providerId?: string;
   assetId?: string; // ★ 媒体引用 store.assets[id]（非 url 直存）
@@ -184,6 +187,9 @@ export function serialize(doc: CanvasDoc): string {
           : n.data.referenceAssetId // IK55VX 卡片库 mock 快照 id(非数字)按字符串透传
         : undefined,
     referenceImageAspect: n.data.referenceImageAspect,
+    detail: n.data.detail,
+    imageAssetIds: n.data.imageAssetIds,
+    sourceUrl: n.data.sourceUrl,
     recipe: n.data.recipe,
     taskId: n.data.taskId,
     // edges 聚合到 target 节点 references（兼容老 NodeItem[]：老忽略 references，v2 parse 派生 edges）
@@ -266,6 +272,13 @@ function normalizeNode(n: Record<string, unknown>): CanvasNode {
     rawRefAsset != null ? String(rawRefAsset) : undefined;
   const referenceImageAspect = (data.referenceImageAspect ??
     n.referenceImageAspect) as number | undefined;
+  const detail = (data.detail ?? n.detail) as string | undefined;
+  const rawImageAssetIds = data.imageAssetIds ?? n.imageAssetIds;
+  // IK55VZ：非数组兜底 undefined；数组内过滤非字符串项（对齐文件内字段校验惯例）
+  const imageAssetIds = Array.isArray(rawImageAssetIds)
+    ? rawImageAssetIds.filter((id): id is string => typeof id === "string")
+    : undefined;
+  const sourceUrl = (data.sourceUrl ?? n.sourceUrl) as string | undefined;
   const recipe = (data.recipe ?? n.recipe) as NodeRecipe | undefined;
   const taskId = (data.taskId ?? n.taskId) as string | undefined;
   const nodeData: CanvasNodeData = { kind };
@@ -281,6 +294,9 @@ function normalizeNode(n: Record<string, unknown>): CanvasNode {
   if (referenceAssetId != null) nodeData.referenceAssetId = referenceAssetId;
   if (referenceImageAspect != null)
     nodeData.referenceImageAspect = referenceImageAspect;
+  if (detail != null) nodeData.detail = detail;
+  if (imageAssetIds != null) nodeData.imageAssetIds = imageAssetIds;
+  if (sourceUrl != null) nodeData.sourceUrl = sourceUrl;
   if (recipe) nodeData.recipe = recipe;
   if (taskId) nodeData.taskId = taskId;
   return {
@@ -340,4 +356,33 @@ export function richDocToPlainText(doc: unknown): string {
 /** IK55VH：空卡判定（纯文本派生为空即为空卡，用于「添加笔记...」占位）。 */
 export function isEmptyRichDoc(doc: unknown): boolean {
   return richDocToPlainText(doc).length === 0;
+}
+
+/**
+ * IK55VZ「商品 N」自动编号：扫描 product 卡名匹配 `商品 <数字>` 取最大编号 +1；
+ * 无匹配返回「商品 1」；非商品卡与自定义名（如「运动鞋」）不参与编号。
+ */
+export function nextProductName(
+  nodes: Iterable<{ data: CanvasNodeData }>,
+): string {
+  let max = 0;
+  for (const n of nodes) {
+    if (n.data.cardType !== "product") continue;
+    const m = /^商品\s*(\d+)$/.exec(n.data.name ?? "");
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `商品 ${max + 1}`;
+}
+
+/** IK55VZ 新建商品卡默认节点数据（工具栏/资产库悬浮列表分发共用）。 */
+export function newProductCardData(
+  nodes: Iterable<{ data: CanvasNodeData }>,
+): CanvasNodeData {
+  return {
+    kind: "reference",
+    cardType: "product",
+    name: nextProductName(nodes),
+    detail: "",
+    imageAssetIds: [],
+  };
 }

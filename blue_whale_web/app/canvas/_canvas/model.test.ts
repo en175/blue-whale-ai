@@ -5,7 +5,10 @@ import {
   createEmptyDoc,
   richDocToPlainText,
   isEmptyRichDoc,
+  nextProductName,
+  newProductCardData,
   type CanvasDoc,
+  type CanvasNodeData,
   type NodeRecipe,
 } from "./model";
 
@@ -556,6 +559,135 @@ describe("canvas-doc-model", () => {
     expect(node.data.name).toBeUndefined();
     expect(node.data.referenceAssetId).toBeUndefined();
     expect(node.data.referenceImageAspect).toBeUndefined();
+  });
+
+  it("IK55VZ product 卡 detail/imageAssetIds/sourceUrl serialize→parse round-trip 无损", () => {
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({
+      id: "p1",
+      type: "reference",
+      position: { x: 0, y: 0 },
+      width: 280,
+      height: 560,
+      data: {
+        kind: "reference",
+        cardType: "product",
+        name: "商品 1",
+        detail: "品类：便携蓝牙音箱",
+        imageAssetIds: ["libimg-p1-snap-a", "libimg-p2-snap-b"],
+        sourceUrl: "https://example.com/item/42",
+      },
+    });
+    const arr = JSON.parse(serialize(doc));
+    expect(arr[0].cardType).toBe("product");
+    expect(arr[0].detail).toBe("品类：便携蓝牙音箱");
+    expect(arr[0].imageAssetIds).toEqual([
+      "libimg-p1-snap-a",
+      "libimg-p2-snap-b",
+    ]);
+    expect(arr[0].sourceUrl).toBe("https://example.com/item/42");
+    const back = parse(serialize(doc));
+    expect(back.nodes[0].data.cardType).toBe("product");
+    expect(back.nodes[0].data.detail).toBe("品类：便携蓝牙音箱");
+    expect(back.nodes[0].data.imageAssetIds).toEqual([
+      "libimg-p1-snap-a",
+      "libimg-p2-snap-b",
+    ]);
+    expect(back.nodes[0].data.sourceUrl).toBe("https://example.com/item/42");
+  });
+
+  it("老数据无 detail/imageAssetIds/sourceUrl → undefined 不崩（向前兼容）", () => {
+    const old = JSON.stringify([
+      {
+        id: "r1",
+        type: "reference",
+        position: { x: 0, y: 0 },
+        width: 280,
+        height: 240,
+        cardType: "character",
+        description: "旧描述",
+      },
+    ]);
+    const node = parse(old).nodes[0];
+    expect(node.data.detail).toBeUndefined();
+    expect(node.data.imageAssetIds).toBeUndefined();
+    expect(node.data.sourceUrl).toBeUndefined();
+  });
+
+  it("normalize：imageAssetIds 非数组 → undefined；含非字符串项 → 过滤", () => {
+    const badShape = JSON.stringify([
+      {
+        id: "p1",
+        type: "reference",
+        position: { x: 0, y: 0 },
+        cardType: "product",
+        imageAssetIds: "not-an-array",
+      },
+      {
+        id: "p2",
+        type: "reference",
+        position: { x: 0, y: 0 },
+        cardType: "product",
+        imageAssetIds: ["a1", 7, null, "a2", { id: "x" }],
+      },
+    ]);
+    const doc = parse(badShape);
+    expect(doc.nodes[0].data.imageAssetIds).toBeUndefined();
+    expect(doc.nodes[1].data.imageAssetIds).toEqual(["a1", "a2"]);
+  });
+});
+
+/** IK55VZ「商品 N」自动编号：扫描 product 卡名取最大编号 +1（纯函数）。 */
+describe("nextProductName", () => {
+  const ref = (name?: string): { data: CanvasNodeData } => ({
+    data: { kind: "reference", cardType: "product", ...(name ? { name } : {}) },
+  });
+
+  it("空画布 → 商品 1", () => {
+    expect(nextProductName([])).toBe("商品 1");
+  });
+
+  it("已有「商品 1」「商品 3」→ 商品 4（取最大编号 +1）", () => {
+    expect(nextProductName([ref("商品 1"), ref("商品 3")])).toBe("商品 4");
+  });
+
+  it("改名卡「运动鞋」不参与编号；「商品 2」→ 商品 3", () => {
+    expect(nextProductName([ref("运动鞋"), ref("商品 2")])).toBe("商品 3");
+  });
+
+  it("非商品卡（其他 cardType / 无 cardType）不影响编号", () => {
+    const nodes = [
+      { data: { kind: "reference", cardType: "character", name: "商品 9" } },
+      { data: { kind: "image", name: "商品 9" } },
+      ref("商品 2"),
+    ] as { data: CanvasNodeData }[];
+    expect(nextProductName(nodes)).toBe("商品 3");
+  });
+
+  it("编号连续时取 max+1；无 name 的商品卡不计", () => {
+    expect(nextProductName([ref("商品 1"), ref("商品 2"), ref()])).toBe(
+      "商品 3",
+    );
+  });
+});
+
+/** IK55VZ 新建商品卡默认节点数据（工具栏/资产库悬浮列表分发共用）。 */
+describe("newProductCardData", () => {
+  it("空画布 → product 空卡:name=商品 1、detail 空串、imageAssetIds=[]", () => {
+    expect(newProductCardData([])).toEqual({
+      kind: "reference",
+      cardType: "product",
+      name: "商品 1",
+      detail: "",
+      imageAssetIds: [],
+    });
+  });
+
+  it("已有「商品 2」→ name=商品 3(自动编号接入)", () => {
+    const nodes = [
+      { data: { kind: "reference", cardType: "product", name: "商品 2" } },
+    ] as { data: CanvasNodeData }[];
+    expect(newProductCardData(nodes).name).toBe("商品 3");
   });
 });
 

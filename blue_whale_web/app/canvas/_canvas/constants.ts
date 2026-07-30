@@ -121,6 +121,7 @@ export const AUDIO_SUB_MODES: { id: "audio" | "music"; label: string }[] = [
 /**
  * IK55VS 参考卡五类（单 kind=reference + cardType；后续新卡类只扩清单不改节点模型）。
  * 头部英文名 / 描述区占位文案以产品截图为权威（IK54R3 决议）。
+ * IK55VZ 新增 product（商品卡）：卡头中文名「商品」，悬浮列表两项文案「新建商品」/「导入商品」。
  */
 export const REFERENCE_CARD_TYPES: {
   id: ReferenceCardType;
@@ -128,6 +129,8 @@ export const REFERENCE_CARD_TYPES: {
   label: string;
   /** 资产库悬浮列表项名。 */
   flyoutLabel: string;
+  /** 悬浮列表第二项「导入」文案（仅 product 等带导入入口的卡类有）。 */
+  flyoutImportLabel?: string;
   /** 描述区占位文案（截图权威）。 */
   placeholder: string;
 }[] = [
@@ -161,15 +164,25 @@ export const REFERENCE_CARD_TYPES: {
     flyoutLabel: "自定义卡",
     placeholder: "添加此资产的备注或细节…",
   },
+  {
+    id: "product",
+    label: "商品",
+    flyoutLabel: "新建商品",
+    flyoutImportLabel: "导入商品",
+    placeholder: "商品名称、品类、核心参数、卖点、目标人群…",
+  },
 ];
 
 /** IK55VS 参考卡默认尺寸；character 底部音色区额外加高。 */
 export const REFERENCE_CARD_WIDTH = 280;
 export const REFERENCE_CARD_HEIGHT = 240;
 export const REFERENCE_VOICE_SECTION_HEIGHT = 76;
+/** IK55VZ 商品卡默认总高：图片区（约 150px）+ 详情区 + 链接导入区，高于单图参考卡。 */
+export const REFERENCE_PRODUCT_HEIGHT = 560;
 
-/** IK55VS 参考卡默认总高（character 含音色区）；新建落点与节点兜底共用。 */
+/** IK55VS 参考卡默认总高（character 含音色区，product 独立高）；新建落点与节点兜底共用。 */
 export function referenceCardHeight(cardType: ReferenceCardType): number {
+  if (cardType === "product") return REFERENCE_PRODUCT_HEIGHT;
   return (
     REFERENCE_CARD_HEIGHT +
     (cardType === "character" ? REFERENCE_VOICE_SECTION_HEIGHT : 0)
