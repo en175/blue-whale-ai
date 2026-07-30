@@ -15,6 +15,10 @@ COPY packages/contracts/package.json packages/contracts/
 COPY packages/core/package.json packages/core/
 COPY packages/generation-runtime/package.json packages/generation-runtime/
 COPY packages/persistence/package.json packages/persistence/
+# 非依赖链但 pnpm workspaces 必需——缺文件 filter 匹配失败，"No projects matched the filters"
+COPY packages/agent-runtime/package.json packages/agent-runtime/
+COPY apps/agent-worker/package.json apps/agent-worker/
+COPY apps/generation-worker/package.json apps/generation-worker/
 # 目标应用
 COPY blue_whale_web/package.json blue_whale_web/
 COPY blue_whale_web/patches blue_whale_web/patches
