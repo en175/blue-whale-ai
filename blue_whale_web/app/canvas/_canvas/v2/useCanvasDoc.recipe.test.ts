@@ -271,4 +271,33 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
       vi.useRealTimers();
     }
   });
+
+  it("★patchNode 带 {persist:false} 不触发保存（progress 等瞬时态，修每轮轮询 PUT 画布）", async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useCanvasDoc());
+      await act(async () => {
+        await result.current.load("1");
+      });
+      act(() => result.current.addNodeFull(runningVideoNode));
+      // 先让 addNodeFull 的 persist 落地，避免污染断言
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+      vi.clearAllMocks();
+      // progress 等瞬时更新：不应触发画布持久化
+      act(() =>
+        result.current.patchNode("n_vid", { progress: 42 }, { persist: false }),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+      expect(saveCanvas).not.toHaveBeenCalled();
+      // 但节点 progress 确实更新了
+      const n = result.current.nodes.find((x) => x.id === "n_vid");
+      expect(n?.data.progress).toBe(42);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

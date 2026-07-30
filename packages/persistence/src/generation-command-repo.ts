@@ -23,8 +23,9 @@ export interface GenerationCommandRepo {
   createJob(input: CreateJobInput): Promise<CreatedJob>;
   /** 软取消：置 cancel_requested_at，状态不变（worker 读到后停止）。返回是否命中可取消的任务。 */
   requestCancel(jobId: string, userId: string): Promise<boolean>;
-  /** 重试缺失产出：复制原 job 入参，建新 job（retry_of_job_id 指向原 job），状态 queued。 */
-  retryJob(originalJobId: string, userId: string, idempotencyKey: string): Promise<CreatedJob | null>;
+  /** 重试缺失产出：复制原 job 入参，建新 job（retry_of_job_id 指向原 job），状态 queued。
+   *  返回值带 type，供路由按 image/video 重新入队。 */
+  retryJob(originalJobId: string, userId: string, idempotencyKey: string): Promise<(CreatedJob & { type: "image" | "video" }) | null>;
   appendLog(jobId: string, event: string, status: string | null, message?: string, payload?: unknown): Promise<void>;
 }
 
@@ -123,7 +124,7 @@ export function createGenerationCommandRepo(prisma: PrismaClient): GenerationCom
       });
       const retryId = retry.id.toString();
       await this.appendLog(retryId, "retry_created", "queued", `重试 ${originalJobId}`);
-      return { generation_job_id: retryId, cursor: 0 };
+      return { generation_job_id: retryId, cursor: 0, type: original.type as "image" | "video" };
     },
 
     async appendLog(jobId, event, status, message, payload) {

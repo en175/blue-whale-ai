@@ -47,15 +47,17 @@ function props(
 describe("VideoDockContent references", () => {
   afterEach(() => cleanup());
 
-  it("offers a working MP4/MOV upload entry and no audio reference entry", () => {
+  it("视频参考按钮与图片一致：弹「上传来源」菜单，本地上传走 MP4/MOV", () => {
     const onLocalUpload = vi.fn();
     const { container } = render(
       <VideoDockContent {...props({ onLocalUpload })} />,
     );
 
     expect(screen.queryByRole("button", { name: "音频" })).toBeNull();
-    const button = screen.getByRole("button", { name: "视频" });
-    fireEvent.click(button);
+    // 点视频按钮先弹菜单（和图片入口一致），再选「本地上传」
+    fireEvent.click(screen.getByRole("button", { name: "参考视频" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "本地上传" }));
+
     const input = Array.from(
       container.querySelectorAll<HTMLInputElement>('input[type="file"]'),
     ).find((candidate) => candidate.accept.includes("video/quicktime"));
@@ -66,6 +68,16 @@ describe("VideoDockContent references", () => {
     });
     fireEvent.change(input!, { target: { files: [file] } });
     expect(onLocalUpload).toHaveBeenCalledWith(file);
+  });
+
+  it("视频参考按钮支持从画布选择（与图片入口对齐）", () => {
+    const onPickFromCanvas = vi.fn();
+    render(<VideoDockContent {...props({ onPickFromCanvas })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "参考视频" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "从画布选择" }));
+
+    expect(onPickFromCanvas).toHaveBeenCalledTimes(1);
   });
 
   it("offers canvas selection from the video reference source menu", () => {

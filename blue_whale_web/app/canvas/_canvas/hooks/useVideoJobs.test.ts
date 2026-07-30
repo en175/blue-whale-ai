@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useVideoJobs } from "./useVideoJobs";
 import { listJobs } from "../api/generation";
+import { ApiError } from "@/lib/api/errors";
 
 vi.mock("../api/generation", () => ({ listJobs: vi.fn() }));
 const mockList = listJobs as ReturnType<typeof vi.fn>;
@@ -101,14 +102,35 @@ describe("useVideoJobs", () => {
     expect(result.current.activeCount()).toBe(0);
   });
 
-  it("轮询异常（listJobs reject）→ 所有在途 Job onFailed + 清理", async () => {
-    mockList.mockRejectedValue(new Error("boom"));
+  it("★轮询瞬时异常（listJobs reject）→ 不判死任何 Job，保留并下轮重试（修假失败）", async () => {
+    mockList.mockRejectedValueOnce(new Error("network boom"));
+    const { result } = renderHook(() => useVideoJobs());
+    const onFailed = vi.fn();
+    const onProgress = vi.fn();
+    act(() => result.current.start(10, { onSucceeded: vi.fn(), onFailed, onProgress }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(onFailed).not.toHaveBeenCalled(); // 瞬时错误不把 job 判死
+    expect(result.current.activeCount()).toBe(1); // job 仍在途
+    // 下一轮恢复后正常推进
+    mockList.mockResolvedValueOnce([job({ job_id: "10", status: "processing", progress: 50 })]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(onProgress).toHaveBeenCalledWith(50);
+  });
+
+  it("★轮询遇 401（token 过期）→ 不判死 Job 且暂停轮询，避免 401 风暴（修假失败）", async () => {
+    // 真实链路：/api/jobs 在 token 过期时返回 HTTP 200 + body {code:401}，
+    // apiRequest 据此抛 ApiError(status=200, code="401")。
+    mockList.mockRejectedValue(new ApiError({ status: 200, code: "401", message: "未登录或 token 已过期" }));
     const { result } = renderHook(() => useVideoJobs());
     const onFailed = vi.fn();
     act(() => result.current.start(10, { onSucceeded: vi.fn(), onFailed }));
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
-    expect(onFailed).toHaveBeenCalledWith("boom");
-    expect(result.current.activeCount()).toBe(0);
+    expect(onFailed).not.toHaveBeenCalled(); // 认证失效不把 job 判死
+    expect(result.current.activeCount()).toBe(1); // job 保留（刷新后 recover 续上）
+    // 轮询已暂停：再推进 9s 不应再发 listJobs（避免每 3s 重复 401）
+    const callsAfter = mockList.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
+    expect(mockList.mock.calls.length).toBe(callsAfter);
   });
 
   it("同 jobId 重复 start 幂等：只保留一个 timer（不重复轮询）", async () => {

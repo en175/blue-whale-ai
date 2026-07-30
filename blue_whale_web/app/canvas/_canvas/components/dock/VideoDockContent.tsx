@@ -32,7 +32,7 @@ import {
   QUANTITIES,
 } from "../../constants";
 import type { VideoDockContentProps } from "../../types";
-import { DockMediaThumb, FrameUploadButton, MediaUploadButton } from "./parts";
+import { DockMediaThumb, FrameUploadButton } from "./parts";
 import { UploadSourceMenu } from "./UploadSourceMenu";
 
 export function VideoDockContent(props: VideoDockContentProps) {
@@ -215,23 +215,33 @@ export function VideoDockContent(props: VideoDockContentProps) {
     }
   };
 
-  // 上传来源菜单（参考图占位 + 加号共用）
+  // 上传来源菜单（参考图占位 + 参考视频按钮 + 加号共用）。kind 决定「本地上传」打开哪个 file input。
   const localFileRef = useRef<HTMLInputElement>(null);
+  const videoFileRef = useRef<HTMLInputElement>(null);
   const placeholderRef = useRef<HTMLButtonElement>(null);
+  const videoTriggerRef = useRef<HTMLButtonElement>(null);
   const plusRef = useRef<HTMLButtonElement>(null);
   const uploadTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
+  const [uploadKind, setUploadKind] = useState<"image" | "video">("image");
 
-  const openUploadMenuFrom = (ref: React.RefObject<HTMLButtonElement | null>) => {
+  const openUploadMenuFrom = (
+    ref: React.RefObject<HTMLButtonElement | null>,
+    kind: "image" | "video" = "image",
+  ) => {
     uploadTriggerRef.current = ref.current;
+    setUploadKind(kind);
     setUploadMenuOpen(true);
   };
-  const handleTriggerClick = (ref: React.RefObject<HTMLButtonElement | null>) => {
+  const handleTriggerClick = (
+    ref: React.RefObject<HTMLButtonElement | null>,
+    kind: "image" | "video" = "image",
+  ) => {
     if (isPicking) {
       onExitPick?.();
       return;
     }
-    openUploadMenuFrom(ref);
+    openUploadMenuFrom(ref, kind);
   };
   const handleLocalFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -325,11 +335,22 @@ export function VideoDockContent(props: VideoDockContentProps) {
         aria-hidden="true"
         onChange={handleLocalFileChange}
       />
+      <input
+        ref={videoFileRef}
+        type="file"
+        accept=".mp4,.mov,video/mp4,video/quicktime"
+        multiple
+        className="sr-only"
+        aria-hidden="true"
+        onChange={handleLocalFileChange}
+      />
       <UploadSourceMenu
         triggerRef={uploadTriggerRef}
         open={uploadMenuOpen}
         onClose={() => setUploadMenuOpen(false)}
-        onLocalUpload={() => localFileRef.current?.click()}
+        onLocalUpload={() =>
+          (uploadKind === "video" ? videoFileRef : localFileRef).current?.click()
+        }
         onPickFromCanvas={() => onPickFromCanvas?.()}
       />
       <div
@@ -465,12 +486,33 @@ export function VideoDockContent(props: VideoDockContentProps) {
                       </div>
                     )}
                   <span style={{ color: "rgba(255, 255, 255, 0.22)", fontSize: 14, lineHeight: 1 }}>·</span>
-                  <MediaUploadButton
-                    label="视频"
-                    accept=".mp4,.mov,video/mp4,video/quicktime"
-                    icon={<Video width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />}
-                    onFiles={(file) => onLocalUpload?.(file)}
-                  />
+                  <button
+                    ref={videoTriggerRef}
+                    type="button"
+                    aria-label="参考视频"
+                    aria-haspopup="menu"
+                    aria-expanded={uploadMenuOpen && uploadKind === "video"}
+                    onClick={() => handleTriggerClick(videoTriggerRef, "video")}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 9,
+                      border: "1px solid rgba(255, 255, 255, 0.02)",
+                      background: "rgba(255, 255, 255, 0.043)",
+                      color: "rgba(255, 255, 255, 0.62)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                      padding: 0,
+                      cursor: "pointer",
+                      opacity: 1,
+                      transition: "background 120ms, color 120ms",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Video width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />
+                  </button>
                 </div>
               )}
 
