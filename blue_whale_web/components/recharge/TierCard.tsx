@@ -21,7 +21,7 @@ export function TierCard({ tier, isSelected, onSelect }: TierCardProps) {
       type="button"
       onClick={() => onSelect(tier)}
       className={`
-        relative flex flex-col items-center gap-2 p-4 rounded-xl border text-center transition-all duration-150
+        relative flex items-center gap-4 px-5 py-4 rounded-xl border transition-all duration-150
         ${
           isSelected
             ? "border-[var(--tc-accent,#3b82f6)] bg-[var(--tc-accent,#3b82f6)]/8 ring-1 ring-[var(--tc-ring,rgba(59,130,246,0.5))]"
@@ -43,20 +43,27 @@ export function TierCard({ tier, isSelected, onSelect }: TierCardProps) {
         </span>
       )}
 
-      {/* 价格（大字） */}
-      <span className="text-[28px] font-semibold leading-tight text-[var(--tc-primary,#ffffff)] mt-2">
+      {/* 左侧：价格 */}
+      <span className="text-[26px] font-semibold leading-tight text-[var(--tc-primary,#ffffff)] min-w-[80px] text-left">
         ¥{tier.price}
       </span>
 
-      {/* 获得积分 */}
-      <span className="text-[13px] text-[var(--tc-secondary,rgba(255,255,255,0.7))]">
-        {tier.amount} 积分
-      </span>
+      {/* 右侧：积分信息 */}
+      <div className="flex flex-col items-start gap-0.5 min-w-0">
+        <span className="text-[14px] text-[var(--tc-secondary,rgba(255,255,255,0.7))]">
+          {tier.amount.toLocaleString()} 积分
+        </span>
+        {hasBonus && (
+          <span className="text-[12px] text-[var(--tc-success,#22c55e)]">
+            含赠送 {tier.bonus.toLocaleString()} 积分
+          </span>
+        )}
+      </div>
 
-      {/* 赠送说明 */}
-      {hasBonus && (
-        <span className="text-[11px] text-[var(--tc-success,#22c55e)]">
-          含赠送 {tier.bonus} 积分
+      {/* 选中标记 */}
+      {isSelected && (
+        <span className="ml-auto text-[var(--tc-accent,#3b82f6)] text-[18px]">
+          ✓
         </span>
       )}
     </button>

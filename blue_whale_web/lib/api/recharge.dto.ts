@@ -9,8 +9,10 @@
 
 export type RechargeTierDto = {
   id: string; // "tier_100"
+  name: string; // 档位名称
   amount: number; // 购买积分数
   price: number; // 价格（元）
+  original_price?: number | null; // 原价
   bonus: number; // 赠送积分，0 = 无赠送
   is_recommended: boolean; // 推荐档位
   sort_order: number;
