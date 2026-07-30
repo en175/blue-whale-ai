@@ -21,14 +21,12 @@ const emptyCanvasDto: CanvasDto = {
 };
 
 vi.mock("../../../../lib/canvas", () => ({
-  loadCanvas: vi
-    .fn()
-    .mockResolvedValue({
-      id: null,
-      project_id: 1,
-      nodes: "[]",
-      viewport: "null",
-    }),
+  loadCanvas: vi.fn().mockResolvedValue({
+    id: null,
+    project_id: 1,
+    nodes: "[]",
+    viewport: "null",
+  }),
   saveCanvas: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -234,6 +232,57 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
     const n = result.current.nodes.find((x) => x.id === "n_vid");
     expect(n?.data.status).toBe("error");
     expect(n?.data.recipe).toEqual(recipe); // 失败也保留配方，可重试/溯源
+  });
+
+  it("patchNode persist:false 只更新内存，不保存 Canvas", async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useCanvasDoc());
+      await act(async () => {
+        await result.current.load("1");
+      });
+      act(() => result.current.addNodeFull(runningVideoNode));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+      vi.mocked(saveCanvas).mockClear();
+
+      act(() =>
+        result.current.patchNode("n_vid", { progress: 45 }, { persist: false }),
+      );
+      expect(result.current.nodes[0]?.data.progress).toBe(45);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+
+      expect(saveCanvas).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("patchNode 默认仍持久化 Canvas", async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useCanvasDoc());
+      await act(async () => {
+        await result.current.load("1");
+      });
+      act(() => result.current.addNodeFull(runningVideoNode));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+      vi.mocked(saveCanvas).mockClear();
+
+      act(() => result.current.patchNode("n_vid", { status: "done" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+
+      expect(saveCanvas).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("save 持久化 running 图片节点的 recipe + taskId", async () => {

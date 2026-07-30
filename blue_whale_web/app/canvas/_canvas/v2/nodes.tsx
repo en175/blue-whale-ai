@@ -89,6 +89,16 @@ type NodeActionsCtx = {
   onEditRichText?: (id: string, richDoc: unknown, plainText: string) => void;
   /** IK55VS 参考卡描述 commit：写回 description。 */
   onEditDescription?: (id: string, text: string) => void;
+  /** IK55VT 参考卡卡名 commit：写回 name。 */
+  onEditReferenceName?: (id: string, name: string) => void;
+  /** IK55VT 参考图通道二：本地上传（runtime 开 file picker，结果落该卡槽）。 */
+  onUploadReferenceImage?: (id: string) => void;
+  /** IK55VT 参考图通道三：打开图像生成 Dock（无预填，结果回落该卡槽）。 */
+  onGenerateReferenceImage?: (id: string) => void;
+  /** IK55VT 删除参考图：回空态（历史描述保留）。 */
+  onRemoveReferenceImage?: (id: string) => void;
+  /** IK55VT 通道一画布拖入：正被拖拽素材命中的参考卡 id（高亮落槽提示）。 */
+  referenceDropTargetId?: string | null;
   /** IK55VH 富文本卡 @ 建议素材列表。 */
   mentionItems?: TextMentionItem[];
   picking?: boolean;
@@ -927,10 +937,13 @@ export function GroupNode({ data }: NodeProps) {
 }
 
 /**
- * IK55VS 参考卡（单 kind=reference + cardType 五类，空卡形态以产品截图为权威 IK54R3）：
- * 头部 @ 圆 chip + 英文类型名；卡身居中栈 =「从画布拖入」+ 描述行（双击就地编辑、失焦 commit）
- * +「添加图片/生成图片」呈现态按钮（三通道补图功能在 IK55VT，本票不接线）+「ⓘ 1 张参考图」；
- * character 独有底部「音色」区（选择器形态与数据后续，mock 占位）。
+ * IK55VT 参考卡（单 kind=reference + cardType 五类，三态以产品截图为权威）：
+ * ① 全新空卡 = 头部 + 居中栈（从画布拖入 + 静态不可编辑占位 + 添加/生成按钮 + ⓘ1张参考图），无可编辑文字；
+ * ② 有参考图 = 头部 + 顶部描述编辑区（双击就地编辑）+ 分隔线 + 大图（宽撑满、高按宽高比自适应、不裁剪）
+ *    + 悬停替换（添加图片/生成图片）·删除控件；卡高内容驱动（CanvasSurface 不钉 wrapper 高度）；
+ * ③ 删图留史 = 历史描述保留在顶部 + 干净居中栈（无占位文案）。
+ * chrome：选中时顶部居中浮出 @ 按钮（点击无行为，预留）；不做「重新编辑」。
+ * character 独有底部「音色」区（常显虚线框，悬停展开上传态；选择器数据后续，mock）。
  */
 export function ReferenceNode({
   id,
@@ -944,151 +957,375 @@ export function ReferenceNode({
   const meta =
     REFERENCE_CARD_TYPES.find((t) => t.id === cardType) ??
     REFERENCE_CARD_TYPES[REFERENCE_CARD_TYPES.length - 1];
-  const { onEditDescription } = useContext(NodeActionsContext);
-  const [editing, setEditing] = useState(false);
+  const {
+    onEditDescription,
+    onEditReferenceName,
+    onUploadReferenceImage,
+    onGenerateReferenceImage,
+    onRemoveReferenceImage,
+    referenceDropTargetId,
+  } = useContext(NodeActionsContext);
+  const refAsset = useCanvasStore((s) =>
+    d.referenceAssetId ? s.assets[d.referenceAssetId] : undefined,
+  );
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [replaceMenuOpen, setReplaceMenuOpen] = useState(false);
   /** Esc 取消标记：置位后 blur 不 commit（Esc=取消，失焦=保存）。 */
-  const cancelEditRef = useRef(false);
+  const cancelDescRef = useRef(false);
+  const cancelNameRef = useRef(false);
+  const hasImage = !!d.referenceAssetId;
   const description = d.description ?? "";
-  const empty = description.trim() === "";
+  const emptyDesc = description.trim() === "";
+  /** 描述区存在条件：有参考图，或删图后留有历史描述（全新空卡无描述区）。 */
+  const showDescription = hasImage || !emptyDesc;
+  const name = d.name ?? meta.label;
   const isCharacter = cardType === "character";
+  const dropHighlight = referenceDropTargetId === id;
+  const cardWidth = width ?? REFERENCE_CARD_WIDTH;
+  const aspect = d.referenceImageAspect;
   return (
-    <div
-      className="tc-reference-node relative flex flex-col overflow-hidden rounded-xl"
-      style={{
-        width: width ?? REFERENCE_CARD_WIDTH,
-        height: height ?? referenceCardHeight(cardType),
-        outline: selected
-          ? "2px solid var(--tc-card-selected-stroke)"
-          : "2px solid transparent",
-        outlineOffset: 0,
-        border: "1px solid var(--tc-border-subtle)",
-        background: "var(--tc-bg-surface)",
-      }}
-    >
-      <NodeHandles kind="reference" />
-      {/* 头部:@ 圆 chip + 英文类型名 */}
-      <div className="flex items-center gap-2 px-3 pt-3">
-        <span
-          className="flex items-center justify-center rounded-full"
+    <>
+      {/* chrome：选中时顶部居中 @ 按钮（IK55VT 预留，点击无引用行为） */}
+      <NodeToolbar position={Position.Top} offset={8} isVisible={selected}>
+        <button
+          type="button"
+          aria-label="引用卡片"
+          className="nodrag flex items-center justify-center rounded-full"
           style={{
-            width: 20,
-            height: 20,
+            width: 28,
+            height: 28,
             background: "var(--tc-bg-elevated)",
-            color: "var(--tc-text-tertiary)",
+            border: "1px solid var(--tc-border-subtle)",
+            color: "var(--tc-text-secondary)",
+          }}
+          onClick={() => {
+            /* 预留：@ 引用行为属后续工单 */
           }}
         >
-          <AtSign width={11} height={11} />
-        </span>
-        <span
-          className="text-sm font-semibold"
-          style={{ color: "var(--tc-text-primary)" }}
-        >
-          {meta.label}
-        </span>
-      </div>
-
-      {/* 卡身:垂直居中栈 */}
-      <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-5">
-        <span
-          className="text-[13px]"
-          style={{ color: "var(--tc-text-secondary)" }}
-        >
-          从画布拖入
-        </span>
-        {editing ? (
-          <textarea
-            autoFocus
-            defaultValue={description}
-            placeholder={meta.placeholder}
-            rows={2}
-            onBlur={(e) => {
-              if (!cancelEditRef.current)
-                onEditDescription?.(id, e.target.value);
-              cancelEditRef.current = false;
-              setEditing(false);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                cancelEditRef.current = true;
-                e.currentTarget.blur();
-              }
-            }}
-            className="nodrag nowheel w-full resize-none bg-transparent text-center text-xs leading-normal outline-none"
-            style={{ color: "var(--tc-text-primary)" }}
-          />
-        ) : (
-          <div
-            onDoubleClick={() => setEditing(true)}
-            className="w-full text-center text-xs leading-normal"
+          <AtSign width={13} height={13} />
+        </button>
+      </NodeToolbar>
+      <div
+        className="tc-reference-node relative flex flex-col overflow-hidden rounded-xl"
+        style={{
+          width: cardWidth,
+          // 已填态高度内容驱动（图高随宽高比）；空/留史态用持久高度或默认
+          height: hasImage
+            ? undefined
+            : (height ?? referenceCardHeight(cardType)),
+          outline: dropHighlight
+            ? "2px solid var(--tc-accent)"
+            : selected
+              ? "2px solid var(--tc-card-selected-stroke)"
+              : "2px solid transparent",
+          outlineOffset: 0,
+          border: "1px solid var(--tc-border-subtle)",
+          background: "var(--tc-bg-surface)",
+        }}
+      >
+        <NodeHandles kind="reference" />
+        {/* 头部:@ 圆 chip + 卡名（默认=类型名，双击改名） */}
+        <div className="flex items-center gap-2 px-3 pt-3">
+          <span
+            className="flex items-center justify-center rounded-full"
             style={{
-              color: empty
-                ? "var(--tc-text-muted)"
-                : "var(--tc-text-secondary)",
-              whiteSpace: "pre-wrap",
-              cursor: "text",
-            }}
-          >
-            {empty ? meta.placeholder : description}
-          </div>
-        )}
-        {/* 呈现态按钮(置灰防误点):三通道补图功能在 IK55VT,本票不接线 */}
-        <div className="flex gap-2">
-          {(
-            [
-              { icon: <Upload width={12} height={12} />, label: "添加图片" },
-              { icon: <Sparkles width={12} height={12} />, label: "生成图片" },
-            ] as const
-          ).map((b) => (
-            <button
-              key={b.label}
-              type="button"
-              disabled
-              className="nodrag flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs"
-              style={{
-                border: "1px solid var(--tc-border-subtle)",
-                background: "var(--tc-bg-elevated)",
-                color: "var(--tc-text-secondary)",
-              }}
-            >
-              {b.icon}
-              {b.label}
-            </button>
-          ))}
-        </div>
-        <span
-          className="flex items-center gap-1 text-[11px]"
-          style={{ color: "var(--tc-text-muted)" }}
-        >
-          <Info width={10} height={10} />1 张参考图
-        </span>
-      </div>
-
-      {/* character 独有:音色区(mock 占位,选择器形态与数据后续) */}
-      {isCharacter && (
-        <div
-          className="px-3 pb-3 pt-2"
-          style={{ borderTop: "1px solid var(--tc-border-subtle)" }}
-        >
-          <div
-            className="mb-1.5 flex items-center gap-1 text-[11px]"
-            style={{ color: "var(--tc-text-tertiary)" }}
-          >
-            <Music width={11} height={11} />
-            音色
-          </div>
-          <div
-            className="flex h-9 items-center justify-center gap-1.5 rounded-lg text-xs"
-            style={{
-              border: "1px solid var(--tc-border-subtle)",
+              width: 20,
+              height: 20,
               background: "var(--tc-bg-elevated)",
               color: "var(--tc-text-tertiary)",
             }}
           >
-            <Music width={12} height={12} />
-            设置角色音色
-          </div>
+            <AtSign width={11} height={11} />
+          </span>
+          {editingName ? (
+            <input
+              autoFocus
+              defaultValue={name}
+              className="nodrag nowheel w-full bg-transparent text-sm font-semibold outline-none"
+              style={{ color: "var(--tc-text-primary)" }}
+              onBlur={(e) => {
+                if (!cancelNameRef.current)
+                  onEditReferenceName?.(id, e.target.value);
+                cancelNameRef.current = false;
+                setEditingName(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  cancelNameRef.current = true;
+                  e.currentTarget.blur();
+                } else if (e.key === "Enter") {
+                  e.currentTarget.blur();
+                }
+              }}
+            />
+          ) : (
+            <span
+              onDoubleClick={() => setEditingName(true)}
+              className="text-sm font-semibold"
+              style={{ color: "var(--tc-text-primary)", cursor: "text" }}
+            >
+              {name}
+            </span>
+          )}
         </div>
-      )}
-    </div>
+
+        {/* 描述区（有图或留史时存在）：顶部左对齐，双击就地编辑 */}
+        {showDescription &&
+          (editingDesc ? (
+            <textarea
+              autoFocus
+              defaultValue={description}
+              placeholder={meta.placeholder}
+              rows={3}
+              onBlur={(e) => {
+                if (!cancelDescRef.current)
+                  onEditDescription?.(id, e.target.value);
+                cancelDescRef.current = false;
+                setEditingDesc(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  cancelDescRef.current = true;
+                  e.currentTarget.blur();
+                }
+              }}
+              className="nodrag nowheel mx-3 mt-2 resize-none bg-transparent text-xs leading-normal outline-none"
+              style={{ color: "var(--tc-text-primary)" }}
+            />
+          ) : (
+            <div
+              onDoubleClick={() => setEditingDesc(true)}
+              className="mx-3 mt-2 text-xs leading-normal"
+              style={{
+                color: emptyDesc
+                  ? "var(--tc-text-muted)"
+                  : "var(--tc-text-primary)",
+                whiteSpace: "pre-wrap",
+                cursor: "text",
+              }}
+            >
+              {emptyDesc ? meta.placeholder : description}
+            </div>
+          ))}
+        {showDescription && (
+          <div
+            className="mx-3 mt-2"
+            style={{ borderTop: "1px solid var(--tc-border-subtle)" }}
+          />
+        )}
+
+        {hasImage ? (
+          /* 已填态：大图（宽撑满、高按宽高比、不裁剪）+ 悬停替换/删除 */
+          <div className="px-3 pb-3 pt-2">
+            <div
+              className="group relative overflow-hidden rounded-lg"
+              style={{
+                border: "1px solid var(--tc-border-subtle)",
+                background: "var(--tc-bg-elevated)",
+              }}
+            >
+              {refAsset?.src ? (
+                // eslint-disable-next-line @next/next/no-img-element -- asset src 为签名 URL，不交 next/image 优化器
+                <img
+                  src={refAsset.src}
+                  alt={name}
+                  className="nodrag block w-full"
+                  style={{
+                    aspectRatio: aspect ? String(aspect) : undefined,
+                    objectFit: aspect ? "cover" : undefined,
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: "100%",
+                    aspectRatio: aspect ? String(aspect) : "16/9",
+                  }}
+                />
+              )}
+              <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                <button
+                  type="button"
+                  aria-label="替换参考图"
+                  className="nodrag flex items-center justify-center rounded-md"
+                  style={{
+                    width: 24,
+                    height: 24,
+                    background: "var(--tc-bg-elevated)",
+                    border: "1px solid var(--tc-border-subtle)",
+                    color: "var(--tc-text-secondary)",
+                  }}
+                  onClick={() => setReplaceMenuOpen((v) => !v)}
+                >
+                  <RefreshCw width={12} height={12} />
+                </button>
+                <button
+                  type="button"
+                  aria-label="删除参考图"
+                  className="nodrag flex items-center justify-center rounded-md"
+                  style={{
+                    width: 24,
+                    height: 24,
+                    background: "var(--tc-bg-elevated)",
+                    border: "1px solid var(--tc-border-subtle)",
+                    color: "var(--tc-text-secondary)",
+                  }}
+                  onClick={() => onRemoveReferenceImage?.(id)}
+                >
+                  <X width={12} height={12} />
+                </button>
+              </div>
+              {replaceMenuOpen && (
+                <div
+                  role="menu"
+                  className="nodrag absolute right-2 top-9 flex flex-col overflow-hidden rounded-md"
+                  style={{
+                    background: "var(--tc-bg-elevated)",
+                    border: "1px solid var(--tc-border-subtle)",
+                  }}
+                >
+                  {(
+                    [
+                      {
+                        icon: <Upload width={12} height={12} />,
+                        label: "添加图片",
+                        run: onUploadReferenceImage,
+                      },
+                      {
+                        icon: <Sparkles width={12} height={12} />,
+                        label: "生成图片",
+                        run: onGenerateReferenceImage,
+                      },
+                    ] as const
+                  ).map((item) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      role="menuitem"
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs"
+                      style={{ color: "var(--tc-text-secondary)" }}
+                      onClick={() => {
+                        setReplaceMenuOpen(false);
+                        item.run?.(id);
+                      }}
+                    >
+                      {item.icon}
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* 空卡/留史态：居中栈（占位文案仅全新空卡显示，静态不可编辑） */
+          <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-5">
+            <span
+              className="text-[13px]"
+              style={{ color: "var(--tc-text-secondary)" }}
+            >
+              从画布拖入
+            </span>
+            {!showDescription && (
+              <span
+                className="text-center text-xs leading-normal"
+                style={{ color: "var(--tc-text-muted)" }}
+              >
+                {meta.placeholder}
+              </span>
+            )}
+            <div className="flex gap-2">
+              {(
+                [
+                  {
+                    icon: <Upload width={12} height={12} />,
+                    label: "添加图片",
+                    run: onUploadReferenceImage,
+                  },
+                  {
+                    icon: <Sparkles width={12} height={12} />,
+                    label: "生成图片",
+                    run: onGenerateReferenceImage,
+                  },
+                ] as const
+              ).map((b) => (
+                <button
+                  key={b.label}
+                  type="button"
+                  className="nodrag flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs"
+                  style={{
+                    border: "1px solid var(--tc-border-subtle)",
+                    background: "var(--tc-bg-elevated)",
+                    color: "var(--tc-text-secondary)",
+                  }}
+                  onClick={() => b.run?.(id)}
+                >
+                  {b.icon}
+                  {b.label}
+                </button>
+              ))}
+            </div>
+            <span
+              className="flex items-center gap-1 text-[11px]"
+              style={{ color: "var(--tc-text-muted)" }}
+            >
+              <Info width={10} height={10} />1 张参考图
+            </span>
+          </div>
+        )}
+
+        {/* character 独有:音色区（mock：常显虚线框，悬停展开上传态；选择器数据后续） */}
+        {isCharacter && (
+          <div
+            className="px-3 pb-3 pt-2"
+            style={{ borderTop: "1px solid var(--tc-border-subtle)" }}
+          >
+            <div
+              className="mb-1.5 flex items-center gap-1 text-[11px]"
+              style={{ color: "var(--tc-text-tertiary)" }}
+            >
+              <Music width={11} height={11} />
+              音色
+            </div>
+            <div className="group">
+              <div
+                className="flex h-9 items-center justify-center gap-1.5 rounded-lg text-xs group-hover:hidden"
+                style={{
+                  border: "1px dashed var(--tc-border-subtle)",
+                  background: "var(--tc-bg-elevated)",
+                  color: "var(--tc-text-tertiary)",
+                }}
+              >
+                <Music width={12} height={12} />
+                设置角色音色
+              </div>
+              <div
+                className="hidden flex-col items-center justify-center gap-1.5 rounded-lg px-2 py-2 group-hover:flex"
+                style={{
+                  border: "1px dashed var(--tc-border-subtle)",
+                  background: "var(--tc-bg-elevated)",
+                  color: "var(--tc-text-tertiary)",
+                }}
+              >
+                <span className="text-xs">从画布拖入音频</span>
+                <button
+                  type="button"
+                  className="nodrag flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs"
+                  style={{
+                    border: "1px solid var(--tc-border-subtle)",
+                    color: "var(--tc-text-secondary)",
+                  }}
+                >
+                  <Upload width={12} height={12} />
+                  上传音色音频
+                </button>
+                <span className="text-[10px]">2–15.2 秒 · 建议 ≤ 5 秒</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 }

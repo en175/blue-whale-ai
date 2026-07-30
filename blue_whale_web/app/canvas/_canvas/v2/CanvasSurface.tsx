@@ -19,8 +19,10 @@ import {
   type EdgeChange,
   type Connection,
   type OnConnectEnd,
+  type Node as RFNode,
 } from "@xyflow/react";
 import type { CanvasNode, CanvasEdge, MediaKind } from "../model";
+import { pickReferenceDropTarget } from "../placement";
 import {
   MediaNode,
   TextNode,
@@ -71,6 +73,16 @@ export type CanvasSurfaceProps = {
   onEditRichText?: (id: string, richDoc: unknown, plainText: string) => void;
   /** IK55VS 参考卡描述 commit 写回。 */
   onEditDescription?: (id: string, text: string) => void;
+  /** IK55VT 参考卡卡名 commit 写回。 */
+  onEditReferenceName?: (id: string, name: string) => void;
+  /** IK55VT 参考图通道二：本地上传（runtime 开 file picker）。 */
+  onUploadReferenceImage?: (id: string) => void;
+  /** IK55VT 参考图通道三：打开图像生成 Dock（结果回落该卡槽）。 */
+  onGenerateReferenceImage?: (id: string) => void;
+  /** IK55VT 删除参考图：回空态（历史描述保留）。 */
+  onRemoveReferenceImage?: (id: string) => void;
+  /** IK55VT 通道一：图片素材节点拖放落到参考卡（refNodeId, sourceNodeId）。 */
+  onReferenceImageDrop?: (refNodeId: string, sourceNodeId: string) => void;
   /** IK55VH 富文本卡 @ 建议素材列表。 */
   mentionItems?: TextMentionItem[];
   onPaneMenu?: (payload: MenuPayload) => void;
@@ -99,6 +111,11 @@ export function CanvasSurface({
   onNodeCancelJob,
   onEditRichText,
   onEditDescription,
+  onEditReferenceName,
+  onUploadReferenceImage,
+  onGenerateReferenceImage,
+  onRemoveReferenceImage,
+  onReferenceImageDrop,
   mentionItems,
   onPaneMenu,
   onEdgeDropMenu,
@@ -107,7 +124,13 @@ export function CanvasSurface({
   toolMode = "mouse",
   children,
 }: CanvasSurfaceProps) {
-  const { zoomIn, zoomOut, fitView, screenToFlowPosition } = useReactFlow();
+  const {
+    zoomIn,
+    zoomOut,
+    fitView,
+    screenToFlowPosition,
+    getIntersectingNodes,
+  } = useReactFlow();
 
   // IK55VD：按有效模式展开交互 props；nodesDraggable 再叠加 picking 约束
   const { nodesDraggable: toolNodesDraggable, ...toolInteraction } =
@@ -116,11 +139,15 @@ export function CanvasSurface({
   const [measured, setMeasured] = useState<
     Map<string, { width?: number; height?: number }>
   >(() => new Map());
+  // IK55VT 通道一：拖拽素材命中参考卡的高亮目标（经 context 下发，ReferenceNode 高亮）
+  const [referenceDropTargetId, setReferenceDropTargetId] = useState<
+    string | null
+  >(null);
   const rfNodes = useMemo(
     () =>
       nodes.map((n) => {
         const m = measured.get(n.id);
-        return m
+        const withMeasured = m
           ? {
               ...n,
               measured: m,
@@ -128,8 +155,41 @@ export function CanvasSurface({
               height: m.height ?? n.height,
             }
           : n;
+        // IK55VT：参考卡高度内容驱动（已填态图高随宽高比自适应），不钉死 wrapper 高度，
+        // 让 RF ResizeObserver 测量接管；空/留史态由组件内 style 定高
+        return n.data.kind === "reference"
+          ? { ...withMeasured, height: undefined }
+          : withMeasured;
       }),
     [nodes, measured],
+  );
+
+  /** IK55VT 通道一：拖动中实时算参考卡命中（图片素材才高亮）。 */
+  const handleNodeDrag = useCallback(
+    (_e: MouseEvent | TouchEvent, node: RFNode) => {
+      const d = node.data as CanvasNode["data"];
+      const target = pickReferenceDropTarget(
+        { kind: d.kind, assetId: d.assetId },
+        getIntersectingNodes(node).map((n) => ({
+          id: n.id,
+          kind: (n.data as CanvasNode["data"]).kind,
+        })),
+      );
+      if (target !== referenceDropTargetId) setReferenceDropTargetId(target);
+    },
+    [getIntersectingNodes, referenceDropTargetId],
+  );
+
+  /** IK55VT 通道一：拖放结束命中参考卡 → 回调 runtime 落槽。 */
+  const handleNodeDragStop = useCallback(
+    (_e: MouseEvent | TouchEvent, node: RFNode) => {
+      const target = referenceDropTargetId;
+      setReferenceDropTargetId(null);
+      const d = node.data as CanvasNode["data"];
+      if (target && d.kind === "image" && d.assetId)
+        onReferenceImageDrop?.(target, node.id);
+    },
+    [referenceDropTargetId, onReferenceImageDrop],
   );
 
   const handleNodesChange = useCallback(
@@ -214,6 +274,11 @@ export function CanvasSurface({
       onCancelJob: onNodeCancelJob,
       onEditRichText,
       onEditDescription,
+      onEditReferenceName,
+      onUploadReferenceImage,
+      onGenerateReferenceImage,
+      onRemoveReferenceImage,
+      referenceDropTargetId,
       mentionItems,
       picking,
       pickingAccept,
@@ -225,6 +290,11 @@ export function CanvasSurface({
       onNodeCancelJob,
       onEditRichText,
       onEditDescription,
+      onEditReferenceName,
+      onUploadReferenceImage,
+      onGenerateReferenceImage,
+      onRemoveReferenceImage,
+      referenceDropTargetId,
       mentionItems,
       picking,
       pickingAccept,
@@ -268,6 +338,8 @@ export function CanvasSurface({
           onNodeClick={(_e, node) =>
             onNodeClick?.(node as unknown as CanvasNode)
           }
+          onNodeDrag={handleNodeDrag}
+          onNodeDragStop={handleNodeDragStop}
           onPaneClick={() => onPaneClick?.()}
           proOptions={{ hideAttribution: true }}
         >
