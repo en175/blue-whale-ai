@@ -8,6 +8,63 @@ function positiveAssetId(value: unknown): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+function orderedReferences(
+  mentionAssetIds: number[],
+  media: AssetReference[],
+): Array<{ id: number; type: "image" | "video" }> {
+  const references: Array<{ id: number; type: "image" | "video" }> = [];
+  const add = (value: unknown, type: "image" | "video") => {
+    const id = positiveAssetId(value);
+    if (id !== null && !references.some((item) => item.id === id)) {
+      references.push({ id, type });
+    }
+  };
+  for (const id of mentionAssetIds) add(id, "image");
+  for (const item of media) {
+    if (!item.type || item.type === "image") add(item.assetId, "image");
+    else if (item.type === "video") add(item.assetId, "video");
+  }
+  return references;
+}
+
+export function validateImageDockReferences(
+  mentionAssetIds: number[],
+  media: AssetReference[],
+  referenceImageSupported = true,
+): string | null {
+  const references = orderedReferences(mentionAssetIds, media);
+  if (!referenceImageSupported && references.length > 0) {
+    return "当前模型不支持参考图";
+  }
+  return references.length > 4 ? "图片生成最多支持 4 张参考图" : null;
+}
+
+export function validateVideoDockReferences(
+  refModeId: string,
+  mentionAssetIds: number[],
+  media: AssetReference[],
+  frames: {
+    firstFrameAssetId?: number;
+    lastFrameAssetId?: number;
+    firstFrameUrl?: string;
+    lastFrameUrl?: string;
+  } = {},
+): string | null {
+  if (refModeId === "first-last") {
+    const hasFirst = Boolean(frames.firstFrameAssetId || frames.firstFrameUrl);
+    const hasLast = Boolean(frames.lastFrameAssetId || frames.lastFrameUrl);
+    return hasLast && !hasFirst ? "请先添加首帧，再添加尾帧" : null;
+  }
+  const references = orderedReferences(mentionAssetIds, media);
+  if (references.filter((item) => item.type === "image").length > 9) {
+    return "视频生成最多支持 9 张参考图";
+  }
+  if (references.filter((item) => item.type === "video").length > 3) {
+    return "视频生成最多支持 3 个参考视频";
+  }
+  return null;
+}
+
 export function selectDockInputAssetIds(
   mode: "image" | "video",
   mentionAssetIds: number[],

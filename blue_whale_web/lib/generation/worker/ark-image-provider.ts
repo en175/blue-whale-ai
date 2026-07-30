@@ -30,7 +30,7 @@ export function createArkImageProvider(
   }
   return {
     async generate(input: GenerateImageInput): Promise<GeneratedImage[]> {
-      if (input.sourceImage) {
+      if (input.sourceImage || input.sourceImages?.length) {
         throw new ImageProviderError(
           "unsupported_input",
           "Ark fallback 不支持图片编辑输入",
@@ -45,6 +45,7 @@ export function createArkImageProvider(
             size: input.size ?? undefined,
             n: input.n,
             webSearch: input.webSearch,
+            sequential: input.sequential,
           },
           options.fetchImpl,
         );
@@ -83,14 +84,18 @@ function createNewApiImageProvider(options: ProviderOptions): ImageProvider {
   return {
     async generate(input) {
       try {
-        const images = input.sourceImage
+        const sourceImages =
+          input.sourceImages ??
+          (input.sourceImage ? [input.sourceImage] : []);
+        const images = sourceImages.length > 0
           ? await client.editImages(options.token!, {
               model: input.model,
               prompt: input.prompt,
-              image: input.sourceImage.blob,
-              fileName: input.sourceImage.fileName,
+              images: sourceImages,
               size: input.size,
               n: input.n,
+              webSearch: input.webSearch,
+              sequential: input.sequential,
             })
           : await client.generateImages(options.token!, input);
         return images.map((image) => ({

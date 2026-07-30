@@ -17,11 +17,13 @@ const emptyCanvasDto: CanvasDto = {
   id: null,
   project_id: 1,
   nodes: "[]",
-  viewport: "",
+  viewport: "null",
 };
 
 vi.mock("../../../../lib/canvas", () => ({
-  loadCanvas: vi.fn().mockResolvedValue({ nodes: "[]", viewport: null }),
+  loadCanvas: vi
+    .fn()
+    .mockResolvedValue({ id: null, project_id: 1, nodes: "[]", viewport: "null" }),
   saveCanvas: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -84,7 +86,7 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
 
   it("加载返回时保留加载期间新建的上传占位", async () => {
     vi.useFakeTimers();
-    let resolveLoad!: (value: CanvasDto) => void;
+    let resolveLoad!: (value: CanvasDto | PromiseLike<CanvasDto>) => void;
     vi.mocked(loadCanvas).mockReturnValueOnce(
       new Promise((resolve) => {
         resolveLoad = resolve;

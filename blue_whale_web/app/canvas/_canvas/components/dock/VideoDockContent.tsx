@@ -17,6 +17,10 @@ import {
 import { AspectRatioIcon } from "@/components/icons/AspectRatioIcon";
 import { CreditIcon, IconClose, IconPlus } from "../../icons";
 import {
+  getVideoModels,
+  type ImageModelCapability,
+} from "../../api/generation";
+import {
   VIDEO_MODELS,
   VIDEO_ASPECT_RATIOS,
   VIDEO_RESOLUTIONS,
@@ -74,7 +78,142 @@ export function VideoDockContent(props: VideoDockContentProps) {
     onFrameClear,
     onSwapFrames,
     onPickFrameFromCanvas,
+    models: injectedModels,
+    resolutions: injectedResolutions,
+    aspectRatios: injectedAspectRatios,
+    quantityMax: injectedQuantityMax,
   } = props;
+  const [modelCapabilities, setModelCapabilities] = useState<
+    ImageModelCapability[]
+  >([]);
+  const modelOptions =
+    injectedModels ??
+    (modelCapabilities.length > 0
+      ? modelCapabilities.map((model) => ({
+          id: model.model_id,
+          label: model.model_label,
+        }))
+      : VIDEO_MODELS);
+  const selectedCapability = modelCapabilities.find(
+    (model) => model.model_id === selectedModel.id,
+  );
+  const resolutionOptions =
+    injectedResolutions ??
+    selectedCapability?.supported_sizes.map((size) => ({
+      id: size.id,
+      label: size.label,
+    })) ??
+    VIDEO_RESOLUTIONS;
+  const aspectRatioOptions =
+    injectedAspectRatios ??
+    selectedCapability?.supported_aspect_ratios.map((ratio) => ({
+      id: ratio,
+      label: ratio,
+    })) ??
+    VIDEO_ASPECT_RATIOS;
+  const quantityMax =
+    injectedQuantityMax ?? selectedCapability?.features.quantity_max ?? 1;
+
+  useEffect(() => {
+    if (injectedModels) return;
+    let cancelled = false;
+    getVideoModels()
+      .then((models) => {
+        if (cancelled || models.length === 0) return;
+        setModelCapabilities(models);
+        const capability =
+          models.find((model) => model.model_id === selectedModel.id) ??
+          models[0];
+        const model = {
+          id: capability.model_id,
+          label: capability.model_label,
+        };
+        setSelectedModel(model);
+        const supportedResolutions = capability.supported_sizes.map(
+          (size) => ({ id: size.id, label: size.label }),
+        );
+        if (
+          !supportedResolutions.some((option) => option.id === resolution.id)
+        ) {
+          setResolution(
+            supportedResolutions.find(
+              (option) => option.id === capability.default_size,
+            ) ??
+              supportedResolutions[0] ??
+              resolution,
+          );
+        }
+        const supportedRatios = capability.supported_aspect_ratios.map(
+          (ratio) => ({ id: ratio, label: ratio }),
+        );
+        if (!supportedRatios.some((option) => option.id === aspectRatio.id)) {
+          setAspectRatio(
+            supportedRatios.find(
+              (option) => option.id === capability.default_aspect_ratio,
+            ) ??
+              supportedRatios[0] ??
+              aspectRatio,
+          );
+        }
+        const currentQuantity = Number.parseInt(quantity, 10);
+        if (
+          Number.isFinite(currentQuantity) &&
+          currentQuantity > capability.features.quantity_max
+        ) {
+          setQuantity(`${capability.features.quantity_max}x`);
+        }
+      })
+      .catch((error) => {
+        console.error("getVideoModels failed", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Initial capability hydration follows ImageDockContent: subsequent changes
+    // are handled explicitly by the model picker below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [injectedModels]);
+
+  const handleModelChange = (model: { id: string; label: string }) => {
+    setSelectedModel(model);
+    const capability = modelCapabilities.find(
+      (candidate) => candidate.model_id === model.id,
+    );
+    if (!capability) return;
+    const supportedResolutions = capability.supported_sizes.map((size) => ({
+      id: size.id,
+      label: size.label,
+    }));
+    if (!supportedResolutions.some((option) => option.id === resolution.id)) {
+      setResolution(
+        supportedResolutions.find(
+          (option) => option.id === capability.default_size,
+        ) ??
+          supportedResolutions[0] ??
+          resolution,
+      );
+    }
+    const supportedRatios = capability.supported_aspect_ratios.map((ratio) => ({
+      id: ratio,
+      label: ratio,
+    }));
+    if (!supportedRatios.some((option) => option.id === aspectRatio.id)) {
+      setAspectRatio(
+        supportedRatios.find(
+          (option) => option.id === capability.default_aspect_ratio,
+        ) ??
+          supportedRatios[0] ??
+          aspectRatio,
+      );
+    }
+    const currentQuantity = Number.parseInt(quantity, 10);
+    if (
+      Number.isFinite(currentQuantity) &&
+      currentQuantity > capability.features.quantity_max
+    ) {
+      setQuantity(`${capability.features.quantity_max}x`);
+    }
+  };
 
   // 上传来源菜单（参考图占位 + 加号共用）
   const localFileRef = useRef<HTMLInputElement>(null);
@@ -882,12 +1021,12 @@ export function VideoDockContent(props: VideoDockContentProps) {
                         gap: 2,
                       }}
                     >
-                      {VIDEO_MODELS.map((m) => (
+                      {modelOptions.map((m) => (
                         <button
                           key={m.id}
                           type="button"
                           onClick={() => {
-                            setSelectedModel(m);
+                            handleModelChange(m);
                             setModelDropdownOpen(false);
                           }}
                           style={{
@@ -989,7 +1128,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                         gap: 2,
                       }}
                     >
-                      {VIDEO_RESOLUTIONS.map((r) => (
+                      {resolutionOptions.map((r) => (
                         <button
                           key={r.id}
                           type="button"
@@ -1082,7 +1221,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                   gap: 2,
                 }}
               >
-                {VIDEO_ASPECT_RATIOS.map((r) => {
+                {aspectRatioOptions.map((r) => {
                   const selected = aspectRatio.id === r.id;
                   return (
                     <button
@@ -1152,7 +1291,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
                 "opacity 250ms cubic-bezier(0.16, 1, 0.3, 1), transform 250ms cubic-bezier(0.16, 1, 0.3, 1)",
             }}
           >
-            {QUANTITIES.map((q) => {
+            {QUANTITIES.filter(
+              (q) => Number.parseInt(q, 10) <= quantityMax,
+            ).map((q) => {
               const selected = quantity === q;
               return (
                 <button

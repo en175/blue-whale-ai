@@ -6,6 +6,7 @@ export interface GenerateImageInput {
   size?: string | null;
   n: number;
   webSearch?: boolean;
+  sequential?: boolean;
   /** 能力表给出的尺寸宽高（url 模式 provider 不回宽高时兜底）。 */
   width?: number | null;
   height?: number | null;
@@ -14,6 +15,11 @@ export interface GenerateImageInput {
     blob: Blob;
     fileName: string;
   };
+  /** Ordered, authorized reference images. */
+  sourceImages?: Array<{
+    blob: Blob;
+    fileName: string;
+  }>;
 }
 
 export interface GeneratedImage {
