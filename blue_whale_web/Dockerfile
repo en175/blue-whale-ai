@@ -32,6 +32,9 @@ FROM node:24-alpine AS builder
 RUN corepack enable
 WORKDIR /app
 
+# 阿里云 npm 镜像加速（与 deps 阶段一致，builder 的 pnpm install 也需要）
+ENV npm_config_registry=https://registry.npmmirror.com
+
 COPY --from=deps /app ./
 # TypeScript 配置
 COPY tsconfig.json tsconfig.base.json ./
