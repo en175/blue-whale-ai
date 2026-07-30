@@ -18,9 +18,41 @@ describe("canvas-store / assets 缓存", () => {
   });
 
   it("ensureAsset cache hit 不 fetch", async () => {
-    useCanvasStore.getState().addAsset({ id: "a1", kind: "image", src: "u" });
+    useCanvasStore.getState().addAsset({
+      id: "a1",
+      kind: "image",
+      src: "u",
+      mimeType: "image/png",
+    });
     await useCanvasStore.getState().ensureAsset("a1");
     expect(getAsset).not.toHaveBeenCalled();
+  });
+
+  it("ensureAsset cache hit 但元数据不完整时重新 fetch", async () => {
+    useCanvasStore.getState().addAsset({ id: "99", kind: "image", src: "old" });
+    (getAsset as ReturnType<typeof vi.fn>).mockResolvedValue({
+      asset_id: "99",
+      status: "ready",
+      type: "image",
+      url: "u99",
+      width: 1024,
+      height: 768,
+      duration: null,
+      mime: "image/jpeg",
+      size: 12345,
+    });
+
+    await useCanvasStore.getState().ensureAsset("99");
+
+    expect(getAsset).toHaveBeenCalledWith("99");
+    expect(useCanvasStore.getState().assets["99"]).toMatchObject({
+      id: "99",
+      kind: "image",
+      src: "u99",
+      width: 1024,
+      height: 768,
+      mimeType: "image/jpeg",
+    });
   });
 
   it("ensureAsset cache miss → getAsset 填（r.asset_id → String key）", async () => {
@@ -37,6 +69,13 @@ describe("canvas-store / assets 缓存", () => {
     });
     await useCanvasStore.getState().ensureAsset("99");
     expect(getAsset).toHaveBeenCalledWith("99");
-    expect(useCanvasStore.getState().assets["99"]).toMatchObject({ id: "99", kind: "image", src: "u99" });
+    expect(useCanvasStore.getState().assets["99"]).toMatchObject({
+      id: "99",
+      kind: "image",
+      src: "u99",
+      width: 1024,
+      height: 1024,
+      mimeType: "image/png",
+    });
   });
 });

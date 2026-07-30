@@ -34,6 +34,7 @@ export interface NewApiImageInput {
   size?: string | null;
   n: number;
   webSearch?: boolean;
+  sequential?: boolean;
 }
 
 export interface NewApiImage {
@@ -44,10 +45,14 @@ export interface NewApiImage {
 export interface NewApiImageEditInput {
   model: string;
   prompt: string;
-  image: Blob;
-  fileName: string;
+  /** Legacy single-image shape. Prefer images for new callers. */
+  image?: Blob;
+  fileName?: string;
+  images?: Array<{ blob: Blob; fileName: string }>;
   size?: string | null;
   n: number;
+  webSearch?: boolean;
+  sequential?: boolean;
 }
 
 export type NewApiVideoReference = {
@@ -208,6 +213,10 @@ export function createNewApiClient(options: NewApiClientOptions) {
       if (input.size) body.size = input.size;
       body.n = input.n;
       if (input.webSearch) body.tools = [{ type: "web_search" }];
+      if (input.sequential) {
+        body.sequential_image_generation = "auto";
+        body.sequential_image_generation_options = { max_images: input.n };
+      }
 
       const response = await request<NewApiEnvelope>("/v1/images/generations", {
         method: "POST",
@@ -223,10 +232,31 @@ export function createNewApiClient(options: NewApiClientOptions) {
       const body = new FormData();
       body.append("model", input.model);
       body.append("prompt", input.prompt);
-      body.append("image", input.image, input.fileName);
+      const images =
+        input.images ??
+        (input.image && input.fileName
+          ? [{ blob: input.image, fileName: input.fileName }]
+          : []);
+      if (images.length === 0) {
+        throw new NewApiError("图片编辑至少需要一张参考图", 400, "invalid_input");
+      }
+      const imageField = images.length === 1 ? "image" : "image[]";
+      for (const image of images) {
+        body.append(imageField, image.blob, image.fileName);
+      }
       body.append("n", String(input.n));
       body.append("response_format", "url");
       if (input.size) body.append("size", input.size);
+      if (input.webSearch) {
+        body.append("tools", JSON.stringify([{ type: "web_search" }]));
+      }
+      if (input.sequential) {
+        body.append("sequential_image_generation", "auto");
+        body.append(
+          "sequential_image_generation_options",
+          JSON.stringify({ max_images: input.n }),
+        );
+      }
 
       const response = await request<NewApiEnvelope>("/v1/images/edits", {
         method: "POST",

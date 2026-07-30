@@ -39,6 +39,7 @@ function props(
     setAdvancedOpen: vi.fn(),
     internetSearch: false,
     setInternetSearch: vi.fn(),
+    models: [{ id: "seedance-2", label: "Seedance 2.0" }],
     ...overrides,
   };
 }
@@ -75,5 +76,31 @@ describe("VideoDockContent references", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "从画布选择" }));
 
     expect(onPickFromCanvas).toHaveBeenCalledTimes(1);
+  });
+
+  it("only exposes model-supported options and quantity", () => {
+    render(
+      <VideoDockContent
+        {...props({
+          selectedModel: {
+            id: "doubao-seedance-2-0-fast-260128",
+            label: "Seedance 2.0 Fast",
+          },
+          models: [
+            {
+              id: "doubao-seedance-2-0-fast-260128",
+              label: "Seedance 2.0 Fast",
+            },
+          ],
+          resolutions: [{ id: "480p", label: "480p" }],
+          aspectRatios: [{ id: "9:16", label: "9:16" }],
+          quantityMax: 1,
+          quantityOpen: true,
+        })}
+      />,
+    );
+
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    expect(screen.getByRole("option", { name: "1x" })).toBeInTheDocument();
   });
 });

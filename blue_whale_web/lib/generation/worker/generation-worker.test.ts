@@ -60,6 +60,11 @@ const queuedImageJob = {
   expected_output_count: 1,
 };
 
+const ONE_PIXEL_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64",
+);
+
 describe("processJob - request-scoped token dispatch", () => {
   it("claims only the requested job for the authenticated owner", async () => {
     type ProcessJob = (
@@ -101,6 +106,159 @@ describe("processJob - request-scoped token dispatch", () => {
 });
 
 describe("processNextJob - 成功路径", () => {
+  it("把模型分辨率和宽高比映射为火山官方像素尺寸", async () => {
+    const repo = makeRepo();
+    repo.claimNextJob.mockResolvedValue({
+      ...queuedImageJob,
+      input: {
+        ...queuedImageJob.input,
+        model_id: "doubao-seedream-5-0-260128",
+        size: "2k",
+        aspect_ratio: "4:3",
+      },
+    });
+    repo.findImageCapability.mockResolvedValue({
+      model_id: "doubao-seedream-5-0-260128",
+      api_size: "2K",
+      width: null,
+      height: null,
+    });
+    repo.createAsset.mockResolvedValue("700");
+    const provider = mockProvider([
+      { url: "https://ark/x.png", width: null, height: null },
+    ]);
+
+    await processNextJob({ repo, provider, workerId: "w1" });
+
+    expect(provider.generate).toHaveBeenCalledWith(
+      expect.objectContaining({ size: "2304x1728" }),
+    );
+  });
+
+  it("把连续组图开关传给图片 provider", async () => {
+    const repo = makeRepo();
+    repo.claimNextJob.mockResolvedValue({
+      ...queuedImageJob,
+      expected_output_count: 4,
+      input: {
+        ...queuedImageJob.input,
+        sequential_image_generation: true,
+      },
+    });
+    repo.findImageCapability.mockResolvedValue({
+      model_id: "doubao-seedream-4-0",
+      api_size: "1024x1024",
+      width: 1024,
+      height: 1024,
+    });
+    repo.createAsset.mockResolvedValue("700");
+    const provider = mockProvider([
+      { url: "https://ark/x.png", width: 1024, height: 1024 },
+    ]);
+
+    await processNextJob({ repo, provider, workerId: "w1" });
+
+    expect(provider.generate).toHaveBeenCalledWith(
+      expect.objectContaining({ n: 4, sequential: true }),
+    );
+  });
+
+  it("普通多图返回不足时按剩余数量补请求并完整建素材", async () => {
+    const repo = makeRepo();
+    repo.claimNextJob.mockResolvedValue({
+      ...queuedImageJob,
+      expected_output_count: 2,
+    });
+    repo.findImageCapability.mockResolvedValue({
+      model_id: "doubao-seedream-4-0",
+      api_size: "1024x1024",
+      width: 1024,
+      height: 1024,
+    });
+    repo.createAsset.mockResolvedValueOnce("701").mockResolvedValueOnce("702");
+    const provider: ImageProvider = {
+      generate: vi
+        .fn()
+        .mockResolvedValueOnce([
+          {
+            url: "https://ark/first.png",
+            width: 1024,
+            height: 1024,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            url: "https://ark/second.png",
+            width: 1024,
+            height: 1024,
+          },
+        ]),
+    };
+
+    await processNextJob({ repo, provider, workerId: "w1" });
+
+    expect(provider.generate).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ n: 2, sequential: false }),
+    );
+    expect(provider.generate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ n: 1, sequential: false }),
+    );
+    expect(repo.completeJob).toHaveBeenCalledWith("300", ["701", "702"]);
+    expect(repo.failJob).not.toHaveBeenCalled();
+  });
+
+  it("连续组图返回数量不足时按剩余数量补请求并完整建素材", async () => {
+    const repo = makeRepo();
+    repo.claimNextJob.mockResolvedValue({
+      ...queuedImageJob,
+      expected_output_count: 2,
+      input: {
+        ...queuedImageJob.input,
+        sequential_image_generation: true,
+      },
+    });
+    repo.findImageCapability.mockResolvedValue({
+      model_id: "doubao-seedream-4-0",
+      api_size: "1024x1024",
+      width: 1024,
+      height: 1024,
+    });
+    repo.createAsset.mockResolvedValueOnce("701").mockResolvedValueOnce("702");
+    const provider: ImageProvider = {
+      generate: vi
+        .fn()
+        .mockResolvedValueOnce([
+          {
+            url: "https://ark/first.png",
+            width: 1024,
+            height: 1024,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            url: "https://ark/second.png",
+            width: 1024,
+            height: 1024,
+          },
+        ]),
+    };
+
+    await processNextJob({ repo, provider, workerId: "w1" });
+
+    expect(provider.generate).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ n: 2, sequential: true }),
+    );
+    expect(provider.generate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ n: 1, sequential: true }),
+    );
+    expect(repo.completeJob).toHaveBeenCalledWith("300", ["701", "702"]);
+    expect(repo.failJob).not.toHaveBeenCalled();
+  });
+
   it("provider 图片先转存 TOS，再用对象键创建 Asset", async () => {
     const repo = makeRepo();
     repo.claimNextJob.mockResolvedValue(queuedImageJob);
@@ -166,6 +324,56 @@ describe("processNextJob - 成功路径", () => {
         mime: "image/png",
         size: 11,
       }),
+    );
+  });
+
+  it("能力表和 provider 不含宽高时，从真实图片字节读取尺寸再创建 Asset", async () => {
+    const repo = makeRepo();
+    repo.claimNextJob.mockResolvedValue(queuedImageJob);
+    repo.findImageCapability.mockResolvedValue({
+      model_id: "doubao-seedream-4-0",
+      api_size: "2K",
+      width: null,
+      height: null,
+    });
+    repo.createAsset.mockResolvedValue("700");
+    const provider = mockProvider([
+      {
+        url: "https://provider.test/result.png",
+        width: null,
+        height: null,
+      },
+    ]);
+    const mediaStorage = {
+      prepareUpload: vi.fn().mockResolvedValue({
+        storageKey: "generated/9/image/result.png",
+        publicUrl: "https://bucket.test/generated/9/image/result.png",
+        uploadUrl: "https://bucket.test/signed-put",
+        headers: { "Content-Type": "image/png" },
+        expiresIn: 600,
+      }),
+      makePublic: vi.fn(),
+    };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(ONE_PIXEL_PNG, {
+          status: 200,
+          headers: { "Content-Type": "image/png" },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+
+    await processNextJob({
+      repo,
+      provider,
+      mediaStorage,
+      fetchImpl,
+      workerId: "w1",
+    });
+
+    expect(repo.createAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ width: 1, height: 1 }),
     );
   });
 
@@ -275,6 +483,66 @@ describe("processNextJob - 成功路径", () => {
         sourceImage: expect.objectContaining({ fileName: "asset-41.png" }),
       }),
     );
+  });
+
+  it("image job with four authorized Assets preserves their order for image edits", async () => {
+    const repo = makeRepo();
+    repo.claimNextJob.mockResolvedValue({
+      ...queuedImageJob,
+      input: {
+        ...queuedImageJob.input,
+        reference_asset_ids: [41, 42, 43, 44],
+      },
+    });
+    repo.resolveInputAssets.mockResolvedValue(
+      [41, 42, 43, 44].map((id) => ({
+        id: String(id),
+        type: "image",
+        url: `https://cdn.test/source-${id}.png`,
+        mime: "image/png",
+      })),
+    );
+    repo.findImageCapability.mockResolvedValue({
+      model_id: "image-model",
+      api_size: "1024x1024",
+      width: 1024,
+      height: 1024,
+    });
+    repo.createAsset.mockResolvedValue("700");
+    const provider = mockProvider([
+      { url: "https://cdn.test/edited.png", width: 1024, height: 1024 },
+    ]);
+    const fetchImpl = vi.fn().mockImplementation(
+      async () =>
+        new Response("image-bytes", {
+          status: 200,
+          headers: { "Content-Type": "image/png" },
+        }),
+    );
+
+    await processNextJob({
+      repo,
+      provider,
+      workerId: "w1",
+      fetchImpl,
+    });
+
+    expect(repo.resolveInputAssets).toHaveBeenCalledWith(
+      ["41", "42", "43", "44"],
+      "9",
+      "55",
+    );
+    expect(provider.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceImages: [
+          expect.objectContaining({ fileName: "asset-41.png" }),
+          expect.objectContaining({ fileName: "asset-42.png" }),
+          expect.objectContaining({ fileName: "asset-43.png" }),
+          expect.objectContaining({ fileName: "asset-44.png" }),
+        ],
+      }),
+    );
+    expect(repo.failJob).not.toHaveBeenCalled();
   });
 
   it("text-to-video calls the video provider and creates a video Asset", async () => {
