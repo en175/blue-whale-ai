@@ -19,7 +19,6 @@ export type VideoJobCallbacks = {
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_DURATION_MS = 10 * 60 * 1000;
 const MAX_BATCH_IDS = 100;
-const MISSING_RECORD_GRACE_POLLS = 3;
 
 /**
  * 认证失效判定。真实链路：token 过期时 /api/jobs 返回 HTTP 200 + body {code:401}，
@@ -77,10 +76,15 @@ export function useVideoJobs(projectId?: number | string) {
         for (const [jobId, entry] of [...jobsRef.current.entries()]) {
           const record = byId.get(jobId);
           if (!record) {
+            // 记录缺失 ≠ 任务失败：可能是刚建未可见 / 查询时序 / 批量边界。
+            // 不判死、继续轮询；真正失败由 record.status === "failed" 判定，
+            // 长期不出现由 MAX_POLL_DURATION 超时兜底。避免「任务不存在」假失败。
             entry.missingPolls += 1;
-            if (entry.missingPolls < MISSING_RECORD_GRACE_POLLS) continue;
-            stop(jobId);
-            entry.callbacks.onFailed("任务不存在或已不可见");
+            if (entry.missingPolls === 1) {
+              console.warn(
+                `[useVideoJobs] job ${jobId} not in listJobs response, keep polling (not a failure)`,
+              );
+            }
             continue;
           }
           entry.missingPolls = 0;
