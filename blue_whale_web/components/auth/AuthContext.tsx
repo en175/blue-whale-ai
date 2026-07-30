@@ -26,6 +26,7 @@ import {
   fetchMe,
   type RegisterInput,
 } from "@/lib/auth";
+import { apiRequest } from "@/lib/api-client";
 import {
   subscribeToAuthFailure,
   getAccessTokenSilently,
@@ -138,14 +139,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = useCallback(async (username: string, password: string) => {
     try {
       const data = await loginWithPassword(username, password);
+
+      // 先存 token，apiRequest 从 storage 读取
+      saveTokens(data.access_token, data.refresh_token);
+
+      // 登录后拉取配额
+      let credits: number | undefined;
+      try {
+        const usage = await apiRequest<{ quota: number }>("/api/usage/token");
+        credits = usage.quota;
+      } catch {
+        // 静默失败，credits 保持 undefined
+      }
+
       const u: User = {
         userId: data.user_id,
         username: data.username,
         phone: data.phone ?? "",
         hasPassword: data.has_password,
+        credits,
       };
       saveUser(u);
-      saveTokens(data.access_token, data.refresh_token);
       setUser(u);
       setLoginOpen(false);
       // 回放被拦动作
@@ -162,11 +176,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = useCallback(async (input: RegisterInput) => {
     const data = await registerWithPassword(input);
+    saveTokens(data.access_token, data.refresh_token);
+    // 注册后同样拉取配额，与 signIn 对称
+    let credits: number | undefined;
+    try {
+      const usage = await apiRequest<{ quota: number }>("/api/usage/token");
+      credits = usage.quota;
+    } catch {
+      // 静默失败
+    }
     const u: User = {
       userId: data.user_id,
       username: data.username,
       phone: data.phone ?? "",
       hasPassword: data.has_password,
+      credits,
     };
     saveUser(u);
     saveTokens(data.access_token, data.refresh_token);
@@ -193,11 +217,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshUser = useCallback(async () => {
     if (SKIP_AUTH) return; // 本地开发模式无后端，跳过
     const info = await fetchMe();
+    let credits: number | undefined;
+    try {
+      const usage = await apiRequest<{ quota: number }>("/api/usage/token");
+      credits = usage.quota;
+    } catch {
+      // 静默
+    }
     const u: User = {
       userId: info.user_id,
       username: info.username,
       phone: info.phone,
       hasPassword: info.has_password,
+      credits,
     };
     saveUser(u);
     setUser(u);

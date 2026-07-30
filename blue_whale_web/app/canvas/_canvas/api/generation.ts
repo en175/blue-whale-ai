@@ -40,7 +40,7 @@ export type ImageModelCapability = {
 export type CreateProjectGenerationJobPayload =
   | {
       type: "image";
-      input_asset_ids: number[];
+      input_asset_ids: WireInteger[];
       expected_output_count: number;
       parameters: {
         prompt: string;

@@ -14,13 +14,16 @@ import type {
   RechargeTierDto,
   RechargeTiersResponse,
 } from "./recharge.dto";
-import { MOCK_TIERS, MOCK_INITIAL_CREDITS } from "@/components/recharge/constants";
+import {
+  MOCK_TIERS,
+  MOCK_INITIAL_CREDITS,
+} from "@/components/recharge/constants";
 
 // ---------------------------------------------------------------------------
 // Mock toggle
 // ---------------------------------------------------------------------------
 
-const USE_MOCK = process.env.NEXT_PUBLIC_MOCK_RECHARGE !== "false";
+const USE_MOCK = process.env.NEXT_PUBLIC_MOCK_RECHARGE === "true";
 
 // ---------------------------------------------------------------------------
 // Mock state (shared across calls in same session)
@@ -30,12 +33,14 @@ let mockCredits = MOCK_INITIAL_CREDITS;
 let mockOrderCounter = 0;
 const mockOrderPollCounts = new Map<string, number>();
 const mockOrderMeta = new Map<string, { points: number; price: number }>();
+const mockOrderCredited = new Set<string>();
 
 function resetMockState() {
   mockCredits = MOCK_INITIAL_CREDITS;
   mockOrderCounter = 0;
   mockOrderPollCounts.clear();
   mockOrderMeta.clear();
+  mockOrderCredited.clear();
 }
 
 // Expose for tests
@@ -65,9 +70,7 @@ export async function createRechargeOrder(
     mockOrderCounter++;
     const tradeNo = `MOCK_${Date.now()}_${mockOrderCounter}`;
     const points = tier.amount + tier.bonus;
-    const expireTime = new Date(
-      Date.now() + 15 * 60 * 1000,
-    ).toISOString();
+    const expireTime = new Date(Date.now() + 15 * 60 * 1000).toISOString();
     mockOrderPollCounts.set(tradeNo, 0);
     mockOrderMeta.set(tradeNo, { points, price: tier.price });
     return {
@@ -96,7 +99,8 @@ export async function getOrderStatus(
     const status: OrderStatus = count >= 4 ? "paid" : "pending";
     if (status === "paid") {
       const meta = mockOrderMeta.get(tradeNo);
-      if (meta) {
+      if (meta && !mockOrderCredited.has(tradeNo)) {
+        mockOrderCredited.add(tradeNo);
         mockCredits += meta.points;
       }
     }
@@ -112,9 +116,7 @@ export async function getOrderStatus(
 }
 
 /** 取消未支付订单 */
-export async function cancelRechargeOrder(
-  tradeNo: string,
-): Promise<void> {
+export async function cancelRechargeOrder(tradeNo: string): Promise<void> {
   if (USE_MOCK) {
     mockOrderPollCounts.delete(tradeNo);
     mockOrderMeta.delete(tradeNo);
@@ -153,11 +155,20 @@ function mockDelay(ms: number): Promise<void> {
 }
 
 /** 将前端域类型 RechargeTier 转为 DTO 契约类型 */
-function toTierDto(t: { id: string; amount: number; price: number; bonus: number; isRecommended: boolean; sortOrder: number }): RechargeTierDto {
+function toTierDto(t: {
+  id: string;
+  amount: number;
+  price: number;
+  bonus: number;
+  isRecommended: boolean;
+  sortOrder: number;
+}): RechargeTierDto {
   return {
     id: t.id,
+    name: t.id,
     amount: t.amount,
     price: t.price,
+    original_price: null,
     bonus: t.bonus,
     is_recommended: t.isRecommended,
     sort_order: t.sortOrder,

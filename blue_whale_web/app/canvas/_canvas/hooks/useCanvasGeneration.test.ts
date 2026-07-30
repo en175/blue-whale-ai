@@ -133,7 +133,6 @@ describe("useCanvasGeneration.generate", () => {
     await act(async () => {
       await result.current.generate("首尾帧视频", {
         ...videoArgs,
-        inputAssetIds: [assetId],
         firstFrameAssetId: assetId,
         lastFrameAssetId: assetId,
         referenceAssetIds: [assetId],

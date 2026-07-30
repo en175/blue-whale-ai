@@ -52,6 +52,7 @@ export function loadUser(): User | null {
         typeof parsed.hasPassword === "boolean"
           ? parsed.hasPassword
           : undefined,
+      credits: typeof parsed.credits === "number" ? parsed.credits : undefined,
     };
   } catch {
     return null;

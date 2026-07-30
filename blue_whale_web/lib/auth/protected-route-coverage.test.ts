@@ -18,6 +18,12 @@ const EXEMPT = new Set([
   "auth/send-code/route.ts",
   "me/route.ts",
   "usage/token/route.ts",
+  // IK587T 充值模块：自有 sk-xxx token 鉴权（直传 new-api），不属 IK50GB 统一认证范围。
+  "recharge/agreement/route.ts",
+  "recharge/order/route.ts",
+  "recharge/order/[tradeNo]/cancel/route.ts",
+  "recharge/order/[tradeNo]/status/route.ts",
+  "recharge/tiers/route.ts",
 ]);
 
 const SKIPPED_DIRECTORIES = new Set([

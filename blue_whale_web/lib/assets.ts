@@ -5,6 +5,7 @@
 import { request, type Paged } from "./api";
 import { presignAsset, completeAsset } from "./api/endpoints";
 import { detectMediaKind, readLocalMediaMetadata } from "./mediaSize";
+import type { WireInteger } from "./wire-integer";
 
 /** 资产列表项（GET /api/assets records，不含 storageKey）。 */
 export type AssetItem = {

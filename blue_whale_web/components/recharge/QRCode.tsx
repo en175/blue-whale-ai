@@ -2,13 +2,15 @@
 /**
  * QRCode — 二维码展示 + 倒计时 + 过期覆盖层
  *
- * 展示后端返回的二维码图片，同时运行 15 分钟倒计时。
- * 过期后显示蒙层 + 「点击刷新」按钮。
+ * 后端返回支付链接（如 weixin://wxpay/...），前端用 qrcode 库将其转为
+ * data URI 二维码图片展示。同时运行倒计时，过期后显示蒙层 + 刷新按钮。
  */
 import { useEffect, useRef, useState } from "react";
+import QRCodeLib from "qrcode";
 import { QR_EXPIRE_SECONDS } from "./constants";
 
 interface QRCodeProps {
+  /** 支付链接或图片 URL */
   qrCodeUrl: string;
   /** ISO 8601 过期时间 */
   expireTime: string;
@@ -22,7 +24,22 @@ function fmtTime(seconds: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+/** 支付链接 → QR data URI */
+async function generateQRDataUri(url: string): Promise<string> {
+  // 已是 data URI 直接返回
+  if (url.startsWith("data:")) {
+    return url;
+  }
+  // 支付链接（weixin:// / https:// 等）→ 生成二维码
+  return QRCodeLib.toDataURL(url, {
+    width: 400,
+    margin: 2,
+    color: { dark: "#000000", light: "#ffffff" },
+  });
+}
+
 export function QRCode({ qrCodeUrl, expireTime, onRegenerate }: QRCodeProps) {
+  const [qrDataUri, setQrDataUri] = useState<string>("");
   const [remaining, setRemaining] = useState(() => {
     const initial = Math.floor(
       (new Date(expireTime).getTime() - Date.now()) / 1000,
@@ -30,6 +47,17 @@ export function QRCode({ qrCodeUrl, expireTime, onRegenerate }: QRCodeProps) {
     return Math.max(0, Math.min(initial, QR_EXPIRE_SECONDS));
   });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 生成二维码图片
+  useEffect(() => {
+    let cancelled = false;
+    generateQRDataUri(qrCodeUrl).then((uri) => {
+      if (!cancelled) setQrDataUri(uri);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [qrCodeUrl]);
 
   useEffect(() => {
     if (remaining <= 0) {
@@ -53,11 +81,17 @@ export function QRCode({ qrCodeUrl, expireTime, onRegenerate }: QRCodeProps) {
     <div className="relative flex flex-col items-center gap-3">
       {/* 二维码图片 */}
       <div className="relative w-[200px] h-[200px] rounded-xl border border-[var(--tc-border-subtle,rgba(255,255,255,0.08))] bg-white p-2">
-        <img
-          src={qrCodeUrl}
-          alt="支付二维码"
-          className="w-full h-full object-contain"
-        />
+        {qrDataUri ? (
+          <img
+            src={qrDataUri}
+            alt="支付二维码"
+            className="w-full h-full object-contain"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <div className="w-6 h-6 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+          </div>
+        )}
 
         {/* 过期覆盖层 */}
         {isExpired && (

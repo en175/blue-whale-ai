@@ -1,6 +1,7 @@
 import {
   isWireInteger,
   wireInteger,
+  wireIntegersEqual,
   type WireInteger,
 } from "@/lib/wire-integer";
 
@@ -15,13 +16,13 @@ function positiveAssetId(value: unknown): WireInteger | null {
 }
 
 function orderedReferences(
-  mentionAssetIds: number[],
+  mentionAssetIds: WireInteger[],
   media: AssetReference[],
-): Array<{ id: number; type: "image" | "video" }> {
-  const references: Array<{ id: number; type: "image" | "video" }> = [];
+): Array<{ id: WireInteger; type: "image" | "video" }> {
+  const references: Array<{ id: WireInteger; type: "image" | "video" }> = [];
   const add = (value: unknown, type: "image" | "video") => {
     const id = positiveAssetId(value);
-    if (id !== null && !references.some((item) => item.id === id)) {
+    if (id !== null && !references.some((item) => wireIntegersEqual(item.id, id))) {
       references.push({ id, type });
     }
   };
@@ -34,7 +35,7 @@ function orderedReferences(
 }
 
 export function validateImageDockReferences(
-  mentionAssetIds: number[],
+  mentionAssetIds: WireInteger[],
   media: AssetReference[],
   referenceImageSupported = true,
 ): string | null {
@@ -47,11 +48,11 @@ export function validateImageDockReferences(
 
 export function validateVideoDockReferences(
   refModeId: string,
-  mentionAssetIds: number[],
+  mentionAssetIds: WireInteger[],
   media: AssetReference[],
   frames: {
-    firstFrameAssetId?: number;
-    lastFrameAssetId?: number;
+    firstFrameAssetId?: WireInteger;
+    lastFrameAssetId?: WireInteger;
     firstFrameUrl?: string;
     lastFrameUrl?: string;
   } = {},
@@ -104,9 +105,9 @@ export function selectDockInputAssetIds(
 
 export function selectVideoDockAssetIds(
   refModeId: string,
-  mentionAssetIds: number[],
+  mentionAssetIds: WireInteger[],
   media: AssetReference[],
-): { referenceAssetIds: number[] } {
+): { referenceAssetIds: WireInteger[] } {
   if (refModeId === "first-last") {
     return { referenceAssetIds: [] };
   }
