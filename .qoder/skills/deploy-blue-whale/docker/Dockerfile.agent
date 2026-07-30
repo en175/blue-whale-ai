@@ -1,0 +1,8 @@
+# jar-based Dockerfile（远程 build 用）。TOS_* 由 compose env_file 注入。
+FROM docker.m.daocloud.io/library/eclipse-temurin:21-jre
+WORKDIR /app
+COPY jars/blue-whale-agent.jar app.jar
+EXPOSE 8082
+ENTRYPOINT ["java", "-jar", "app.jar"]
+
+
