@@ -53,6 +53,12 @@ import {
   ZoomControls,
 } from "./_canvas";
 import { ToolbarFlyout } from "./_canvas/components/ToolbarFlyout";
+import { CardLibraryPicker } from "./_canvas/components/CardLibraryPicker";
+import {
+  cloneCardSnapshot,
+  getCardLibraryAsset,
+  type CardLibraryItem,
+} from "./_canvas/cardLibrary";
 import {
   ASSET_LIBRARY_FLYOUT_ITEMS,
   AUDIO_FLYOUT_ITEMS,
@@ -181,6 +187,8 @@ export function CanvasProjectRuntime({
   /** 资产库按钮悬浮列表锚点（IK55VS）：语义同音频锚点。 */
   const [assetFlyoutAnchor, setAssetFlyoutAnchor] =
     useState<HTMLButtonElement | null>(null);
+  /** 卡片库（共享资产）选择器开关（IK55VX）。 */
+  const [cardPickerOpen, setCardPickerOpen] = useState(false);
   /** 悬浮列表点选 → BottomDock 音频子模式切换信号（仿 prefillSignal nonce 模式）。 */
   const [audioModeSignal, setAudioModeSignal] = useState<{
     nonce: number;
@@ -931,7 +939,7 @@ export function CanvasProjectRuntime({
         // IK55VM：音频按钮不再直开 Dock，而是 toggle 悬浮列表（音频生成/AI 音乐）
         setAudioFlyoutAnchor((a) => (a ? null : (el ?? null)));
       } else if (id === "asset-library") {
-        // IK55VS：资产库按钮 toggle 悬浮列表（导入卡片 + 五类参考卡）
+        // IK55VS：资产库按钮 toggle 悬浮列表（共享资产 + 五类参考卡）
         setAssetFlyoutAnchor((a) => (a ? null : (el ?? null)));
       } else if (id === "ai-image") {
         referenceGenTargetRef.current = null; // 工具栏开 Dock：解除参考卡生成目标
@@ -959,10 +967,15 @@ export function CanvasProjectRuntime({
     setIsBottomDockOpen(true);
   }, []);
 
-  /** 资产库悬浮列表点选（IK55VS）：五类参考卡在视口中心起网格新增空卡；导入卡片置灰不会触发。 */
+  /** 资产库悬浮列表点选（IK55VS/IK55VX）：共享资产=打开卡片库选择器；五类参考卡在视口中心起网格新增空卡。 */
   const handleAssetFlyoutSelect = useCallback(
-    (cardType: ReferenceCardType) => {
+    (id: string) => {
       setAssetFlyoutAnchor(null);
+      if (id === "import") {
+        setCardPickerOpen(true);
+        return;
+      }
+      const cardType = id as ReferenceCardType;
       addNode("reference", {
         width: REFERENCE_CARD_WIDTH,
         height: referenceCardHeight(cardType),
@@ -971,6 +984,51 @@ export function CanvasProjectRuntime({
     },
     [addNode],
   );
+
+  /** 卡片库导入（IK55VX）：复制快照落画布——带图卡先登记独立 asset 再让节点引用，编辑不回写库。 */
+  const handleCardLibraryImport = useCallback(
+    (item: CardLibraryItem) => {
+      const snap = cloneCardSnapshot(item);
+      if (snap.referenceAssetId) {
+        const asset = getCardLibraryAsset(snap.referenceAssetId);
+        if (asset) {
+          addAsset({
+            id: snap.referenceAssetId,
+            kind: "image",
+            src: asset.src,
+            source: "uploaded",
+          });
+        }
+      }
+      addNode("reference", {
+        width: REFERENCE_CARD_WIDTH,
+        height: referenceCardHeight(snap.cardType),
+        data: {
+          cardType: snap.cardType,
+          name: snap.name,
+          description: snap.description,
+          ...(snap.referenceAssetId
+            ? {
+                referenceAssetId: snap.referenceAssetId,
+                referenceImageAspect: snap.referenceImageAspect,
+              }
+            : {}),
+        },
+      });
+      setCardPickerOpen(false);
+    },
+    [addAsset, addNode],
+  );
+
+  // IK55VX：mock 快照 asset 持久化重载后再水合（画布 JSON 只存 id,src 从 mock 注册表确定性重建）
+  useEffect(() => {
+    for (const n of nodes) {
+      const id = n.data.referenceAssetId;
+      if (!id || !id.startsWith("libimg-") || assets[id]) continue;
+      const a = getCardLibraryAsset(id);
+      if (a) addAsset({ id, kind: "image", src: a.src, source: "uploaded" });
+    }
+  }, [nodes, assets, addAsset]);
 
   /** 音频参考槽画布选取（IK55VM）：audioRef=音频节点，audioImageRef=图片节点。 */
   const handlePickAudioSlot = useCallback(
@@ -1124,15 +1182,22 @@ export function CanvasProjectRuntime({
         onClose={() => setAudioFlyoutAnchor(null)}
         ariaLabel="音频功能"
       />
-      {/* 资产库按钮悬浮列表（IK55VS）：导入卡片(置灰,IK55VX) + 五类参考卡空卡新建 */}
+      {/* 资产库按钮悬浮列表（IK55VS）：共享资产(IK55VX 卡片库选择器) + 五类参考卡空卡新建 */}
       <ToolbarFlyout
         open={assetFlyoutAnchor !== null}
         anchor={assetFlyoutAnchor}
         items={ASSET_LIBRARY_FLYOUT_ITEMS}
-        onSelect={(id) => handleAssetFlyoutSelect(id as ReferenceCardType)}
+        onSelect={handleAssetFlyoutSelect}
         onClose={() => setAssetFlyoutAnchor(null)}
         ariaLabel="资产库"
       />
+      {/* 卡片库（共享资产）选择器（IK55VX）：导入=复制快照，编辑不回写库 */}
+      {cardPickerOpen && (
+        <CardLibraryPicker
+          onClose={() => setCardPickerOpen(false)}
+          onImport={handleCardLibraryImport}
+        />
+      )}
       {pickingFor && (
         <div
           style={{
