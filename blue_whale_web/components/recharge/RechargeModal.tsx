@@ -40,6 +40,7 @@ export function RechargeModal({
     flow,
     selectTier,
     setPaymentMethod,
+    confirmOrder,
     onPollSuccess: rawOnPollSuccess,
     cancelOrder,
     regenerateQR,
@@ -113,24 +114,19 @@ export function RechargeModal({
       )}
 
       {/* 档位 + 支付：桌面双栏，移动端纵向堆叠 */}
-      <div
-        className={
-          isMobile
-            ? "flex flex-col gap-4"
-            : "flex gap-6"
-        }
-      >
-        <div className="flex-1 min-w-0">
+      <div className={isMobile ? "flex flex-col gap-4" : "flex gap-6"}>
+        <div className={isMobile ? "w-full" : "w-[340px] shrink-0"}>
           <TierGrid
             selectedTierId={flow.selectedTier?.id ?? null}
             onSelectTier={handleSelectTier}
             autoSelectPredicate={autoSelectPredicate}
           />
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="w-[360px] shrink-0">
           <PaymentPanel
             flow={flow}
             onPaymentMethodChange={setPaymentMethod}
+            onConfirmOrder={confirmOrder}
             onPollSuccess={onPollSuccess}
             onRegenerateQR={regenerateQR}
             onClose={handleClose}
@@ -151,7 +147,6 @@ export function RechargeModal({
         </button>
       </p>
     </>
-
   );
 
   // 移动端用 BottomSheet，桌面端用 ModalShell

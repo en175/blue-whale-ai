@@ -90,6 +90,40 @@ export interface NewApiVideoTask {
   error: { code: string | number | null; message: string } | null;
 }
 
+export interface NewApiRechargeTierItem {
+  id: string;
+  name: string;
+  amount: number;
+  price: number;
+  original_price?: number | null;
+  bonus: number;
+  is_recommended: boolean;
+  sort_order: number;
+}
+
+export interface NewApiRechargeTiersResult {
+  tiers: NewApiRechargeTierItem[];
+}
+
+export interface NewApiRechargeOrderResult {
+  trade_no: string;
+  qr_code_data: string;
+  expire_time: number;
+  amount: number;
+  points: number;
+}
+
+export interface NewApiRechargeOrderStatus {
+  trade_no: string;
+  status: string;
+  credits_after?: number | null;
+}
+
+export interface NewApiRechargeAgreement {
+  title: string;
+  content: string;
+}
+
 export class NewApiError extends Error {
   constructor(
     message: string,
@@ -385,6 +419,59 @@ export function createNewApiClient(options: NewApiClientOptions) {
               : null,
         error,
       };
+    },
+
+    // ---- recharge ----
+
+    async getRechargeTiers(): Promise<NewApiRechargeTiersResult> {
+      const response = await request<NewApiEnvelope>("/api/recharge/tiers", { method: "GET" });
+      const data = (response.data ?? {}) as NewApiRechargeTiersResult;
+      if (!Array.isArray(data.tiers)) {
+        throw new NewApiError("new-api recharge tiers 响应缺少 tiers", 502, "invalid_tiers_response", response);
+      }
+      return data;
+    },
+
+    async createRechargeOrder(token: string, tierId: string, paymentMethod: string): Promise<NewApiRechargeOrderResult> {
+      const response = await request<NewApiEnvelope>("/api/recharge/order", {
+        method: "POST",
+        body: JSON.stringify({ tier_id: tierId, payment_method: paymentMethod }),
+      }, token);
+      const data = (response.data ?? {}) as NewApiRechargeOrderResult;
+      if (typeof data.trade_no !== "string" || typeof data.qr_code_data !== "string") {
+        throw new NewApiError("new-api recharge order 响应无效", 502, "invalid_order_response", response);
+      }
+      return data;
+    },
+
+    async getRechargeOrderStatus(token: string, tradeNo: string): Promise<NewApiRechargeOrderStatus> {
+      const response = await request<NewApiEnvelope>(
+        `/api/recharge/order/${encodeURIComponent(tradeNo)}/status`,
+        { method: "GET" },
+        token,
+      );
+      const data = (response.data ?? {}) as NewApiRechargeOrderStatus;
+      if (typeof data.trade_no !== "string" || typeof data.status !== "string") {
+        throw new NewApiError("new-api recharge order status 响应无效", 502, "invalid_status_response", response);
+      }
+      return data;
+    },
+
+    async cancelRechargeOrder(token: string, tradeNo: string): Promise<void> {
+      await request<NewApiEnvelope>(
+        `/api/recharge/order/${encodeURIComponent(tradeNo)}/cancel`,
+        { method: "POST" },
+        token,
+      );
+    },
+
+    async getRechargeAgreement(): Promise<NewApiRechargeAgreement> {
+      const response = await request<NewApiEnvelope>("/api/recharge/agreement", { method: "GET" });
+      const data = (response.data ?? {}) as NewApiRechargeAgreement;
+      if (typeof data.title !== "string") {
+        throw new NewApiError("new-api recharge agreement 响应无效", 502, "invalid_agreement_response", response);
+      }
+      return data;
     },
   };
 }

@@ -21,6 +21,7 @@ import {
   MOCK_USER,
 } from "./authStorage";
 import { loginWithPassword, fetchMe } from "@/lib/auth";
+import { apiRequest } from "@/lib/api-client";
 import {
   subscribeToAuthFailure,
   getAccessTokenSilently,
@@ -66,6 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (SKIP_AUTH) return;
     const u = loadUser();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (u) setUser(u);
   }, []);
 
@@ -129,14 +131,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = useCallback(async (username: string, password: string) => {
     try {
       const data = await loginWithPassword(username, password);
+
+      // 先存 token，apiRequest 从 storage 读取
+      saveTokens(data.access_token, data.refresh_token);
+
+      // 登录后拉取配额
+      let credits: number | undefined;
+      try {
+        const usage = await apiRequest<{ quota: number }>("/api/usage/token");
+        credits = usage.quota;
+      } catch {
+        // 静默失败，credits 保持 undefined
+      }
+
       const u: User = {
         userId: data.user_id,
         username: data.username,
         phone: data.phone ?? "",
         hasPassword: data.has_password,
+        credits,
       };
       saveUser(u);
-      saveTokens(data.access_token, data.refresh_token);
       setUser(u);
       setLoginOpen(false);
       // 回放被拦动作
@@ -164,11 +179,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshUser = useCallback(async () => {
     if (SKIP_AUTH) return; // 本地开发模式无后端，跳过
     const info = await fetchMe();
+    let credits: number | undefined;
+    try {
+      const usage = await apiRequest<{ quota: number }>("/api/usage/token");
+      credits = usage.quota;
+    } catch {
+      // 静默
+    }
     const u: User = {
       userId: info.user_id,
       username: info.username,
       phone: info.phone,
       hasPassword: info.has_password,
+      credits,
     };
     saveUser(u);
     setUser(u);
