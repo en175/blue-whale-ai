@@ -31,6 +31,7 @@ import { buildGenerationRecipe, resolveInputs, toRecipeInputs } from "../engine"
 import { nodeKinds } from "../kinds";
 import { parseAspectRatio } from "../aspectRatio";
 import { projectRecoveryTransport } from "@/lib/project-recovery";
+import { wireInteger, type WireInteger } from "@/lib/wire-integer";
 
 function parseQuantity(q: string): number {
   const n = parseInt(q, 10);
@@ -69,7 +70,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [videoJob, setVideoJob] = useState<{
-    id: number;
+    id: WireInteger;
     status: string;
     error: string | null;
   } | null>(null);
@@ -86,7 +87,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
 
   /** 启动一个 Node GenerationJob 的轮询：succeeded→写 asset+done；failed→报错。image/video 通用。 */
   const startJob = useCallback(
-    (nodeId: string, jobId: number, kind: "image" | "video", recipe?: NodeRecipe) => {
+    (nodeId: string, jobId: WireInteger, kind: "image" | "video", recipe?: NodeRecipe) => {
       if (kind === "video") {
         setVideoJob({ id: jobId, status: "processing", error: null });
       }
@@ -129,7 +130,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
     if (!videoJob || !projectId) return;
     setCancellingVideo(true);
     try {
-      await cancelProjectGenerationJob(Number(projectId), videoJob.id);
+      await cancelProjectGenerationJob(wireInteger(projectId), videoJob.id);
       setVideoJob((current) =>
         current?.id === videoJob.id
           ? { ...current, status: "cancel_requested" }
@@ -211,7 +212,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
               sequential_image_generation: s.sequential,
             },
           };
-          const { generation_job_id } = await createProjectGenerationJob(Number(projectId), payload, newIdempotencyKey());
+          const { generation_job_id } = await createProjectGenerationJob(wireInteger(projectId), payload, newIdempotencyKey());
           await patchNodeAndSave(placeholderId, { taskId: String(generation_job_id) });
           startJob(placeholderId, generation_job_id, "image", imageRecipe);
           setGenerating(false); // 转后台轮询，不阻塞并发生成
@@ -260,7 +261,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
             ...(args.lastFrameAssetId !== undefined ? { last_frame_asset_id: args.lastFrameAssetId } : {}),
             ...(args.referenceAssetIds?.length ? { reference_asset_ids: args.referenceAssetIds } : {}),
           };
-          const { generation_job_id } = await createProjectGenerationJob(Number(projectId), payload, newIdempotencyKey());
+          const { generation_job_id } = await createProjectGenerationJob(wireInteger(projectId), payload, newIdempotencyKey());
           await patchNodeAndSave(placeholderId, { taskId: String(generation_job_id) });
           startJob(placeholderId, generation_job_id, "video", videoRecipe);
           setGenerating(false);
@@ -268,7 +269,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
           // 音频生成（IJZXW7-B）：generateAudio 当前 mock（后端无音频 provider），就绪切真不改签名
           const s = args.settings;
           placeholderId = addNode("audio", { width: 240, height: 120, data: { content: trimmed, status: "running" } });
-          const result = await generateAudio({ prompt: trimmed, projectId: Number(projectId), modelId: s.model.id, duration: s.duration, sampleRate: s.sampleRate, format: s.format.id });
+          const result = await generateAudio({ prompt: trimmed, projectId: wireInteger(projectId), modelId: s.model.id, duration: s.duration, sampleRate: s.sampleRate, format: s.format.id });
           const audioRecipe = buildGenerationRecipe({ mediaKind: "audio", model: s.model.id, params: { duration: s.duration, sampleRate: s.sampleRate, format: s.format.id }, inputs: { prompt: { kind: "text", text: trimmed } } });
           setNodeAsset(placeholderId, String(result.assetId), "audio", result.url, "generated", audioRecipe);
           setGenerating(false);
@@ -310,7 +311,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
             expected_output_count: 1,
             parameters: { prompt, aspect_ratio: model.default_aspect_ratio, model_id: model.model_id, size: model.default_size, web_search: false, sequential_image_generation: false },
           };
-          const { generation_job_id } = await createProjectGenerationJob(Number(projectId), payload, newIdempotencyKey());
+          const { generation_job_id } = await createProjectGenerationJob(wireInteger(projectId), payload, newIdempotencyKey());
           await patchNodeAndSave(nodeId, { taskId: String(generation_job_id) });
           startJob(nodeId, generation_job_id, "image", recipe);
           setGenerating(false);
@@ -329,7 +330,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
             expected_output_count: 1,
             parameters: { prompt, model_id: model.model_id, aspect_ratio: aspectRatio, resolution, duration },
           };
-          const { generation_job_id } = await createProjectGenerationJob(Number(projectId), payload, newIdempotencyKey());
+          const { generation_job_id } = await createProjectGenerationJob(wireInteger(projectId), payload, newIdempotencyKey());
           await patchNodeAndSave(nodeId, { taskId: String(generation_job_id) });
           startJob(nodeId, generation_job_id, "video", videoRecipe);
           setGenerating(false);
@@ -356,21 +357,21 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
         }
         if (byTaskId.size === 0) return; // 无持久 taskId → 跳过 listJobs
         const [queued, processing, failed] = await Promise.all([
-          listJobs({ projectId: Number(projectId), status: "queued", size: 50 }),
-          listJobs({ projectId: Number(projectId), status: "processing", size: 50 }),
-          listJobs({ projectId: Number(projectId), status: "failed", size: 50 }),
+          listJobs({ projectId: wireInteger(projectId), status: "queued", size: 50 }),
+          listJobs({ projectId: wireInteger(projectId), status: "processing", size: 50 }),
+          listJobs({ projectId: wireInteger(projectId), status: "failed", size: 50 }),
         ]);
         const activeJobs = new Map(
           [...queued, ...processing].map((job) => [job.job_id, job]),
         );
         for (const job of activeJobs.values()) {
-          const existing = byTaskId.get(job.job_id);
+          const existing = byTaskId.get(String(job.job_id));
           if (!existing) continue;
           patchNode(existing.id, { status: "running", progress: 0 });
-          startJob(existing.id, Number(job.job_id), existing.data.kind === "video" ? "video" : "image");
+          startJob(existing.id, job.job_id, existing.data.kind === "video" ? "video" : "image");
         }
         for (const job of failed) {
-          const existing = byTaskId.get(job.job_id);
+          const existing = byTaskId.get(String(job.job_id));
           if (!existing) continue;
           patchNode(existing.id, { status: "error", errorMessage: "生成失败" });
         }
@@ -391,9 +392,9 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
           if (n.data.taskId && !n.data.assetId) byTaskId.set(n.data.taskId, n);
         }
         if (byTaskId.size === 0) return;
-        const list = await listJobs({ projectId: Number(projectId), status: "succeeded", size: 50 });
+        const list = await listJobs({ projectId: wireInteger(projectId), status: "succeeded", size: 50 });
         for (const job of list) {
-          const node = byTaskId.get(job.job_id);
+          const node = byTaskId.get(String(job.job_id));
           if (!node) continue;
           const asset = job.output_assets?.[0];
           if (asset) {
@@ -414,7 +415,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
   const hydrate = useCallback(
     async (ns: CanvasNode[]) => {
       const snapshot = await projectRecoveryTransport.loadSnapshot(
-        Number(projectId),
+        wireInteger(projectId),
         new AbortController().signal,
       );
       for (const asset of Object.values(snapshot.assets)) {

@@ -2,10 +2,15 @@ import { createFakeAgentAdapter } from "@blue-whale/agent-runtime";
 import { readinessResponseSchema } from "@blue-whale/contracts";
 import { checkReadiness } from "@blue-whale/core";
 import {
+  createAgentRunRepo,
   createMySqlPool,
   createMySqlReadinessProbe,
+  getPrismaClient,
 } from "@blue-whale/persistence";
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
+
+import { runAgentWorkerLoop } from "./worker-loop.js";
 
 if ((process.env.AGENT_RUNTIME_MODE ?? "fake") !== "fake") {
   throw new Error("Slice 0 only supports AGENT_RUNTIME_MODE=fake");
@@ -14,6 +19,17 @@ if ((process.env.AGENT_RUNTIME_MODE ?? "fake") !== "fake") {
 const pool = createMySqlPool();
 const mysql = createMySqlReadinessProbe(pool);
 const runtime = createFakeAgentAdapter();
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error("DATABASE_URL required");
+}
+const workerAbort = new AbortController();
+const workerLoop = runAgentWorkerLoop({
+  repo: createAgentRunRepo(getPrismaClient(databaseUrl)),
+  runtime,
+  workerId: process.env.AGENT_WORKER_ID ?? `agent-${randomUUID()}`,
+  signal: workerAbort.signal,
+});
 
 const server = createServer((request, response) => {
   void (async () => {
@@ -36,6 +52,8 @@ const server = createServer((request, response) => {
 });
 
 async function shutdown(): Promise<void> {
+  workerAbort.abort();
+  await workerLoop;
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });

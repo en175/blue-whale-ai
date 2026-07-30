@@ -74,3 +74,76 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     ]);
   });
 });
+
+describe("SnapshotRepo.loadConversationState", () => {
+  it("returns persisted messages, runs, active input requests, and the real high-watermark", async () => {
+    const findInputRequests = vi.fn().mockResolvedValue([
+      {
+        id: 10n,
+        source_agent_run_id: 9n,
+        request_type: "creation_clarification",
+        question: "需要什么风格？",
+        status: "pending",
+        expires_at: new Date("2026-07-30T00:00:00.000Z"),
+      },
+    ]);
+    const prisma = {
+      conversation_messages: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 8n,
+            conversation_id: 7n,
+            agent_run_id: 9n,
+            role: "user",
+            content: "蓝鲸海报",
+            sequence_no: 1,
+            gmt_create: new Date("2026-07-29T00:00:00.000Z"),
+          },
+        ]),
+      },
+      agent_runs: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 9n,
+            conversation_id: 7n,
+            status: "awaiting_input",
+            stage: "clarifying",
+            version: 2,
+          },
+        ]),
+      },
+      user_input_requests: {
+        findMany: findInputRequests,
+      },
+      project_event_stream: {
+        findUnique: vi.fn().mockResolvedValue({ high_watermark: 12n }),
+      },
+    } as unknown as PrismaClient;
+
+    await expect(
+      createSnapshotRepo(prisma).loadConversationState("42"),
+    ).resolves.toEqual({
+      conversation_messages: [
+        expect.objectContaining({ message_id: "8", sequence_no: 1 }),
+      ],
+      agent_runs: [
+        expect.objectContaining({
+          agent_run_id: "9",
+          active_input_request: expect.objectContaining({
+            input_request_id: "10",
+          }),
+        }),
+      ],
+      high_watermark_cursor: "12",
+    });
+    expect(findInputRequests).toHaveBeenCalledWith({
+      where: {
+        project_id: 42n,
+        status: "pending",
+        expires_at: { gt: expect.any(Date) },
+        is_delete: 0,
+      },
+      orderBy: { id: "asc" },
+    });
+  });
+});

@@ -8,18 +8,23 @@
  * 仅做数据映射，不含请求/副作用，供 generate 页与组件测试直接复用。
  */
 import type { ProjectSnapshot } from "@/lib/project-recovery";
+import {
+  isWireInteger,
+  wireIntegersEqual,
+  type WireInteger,
+} from "@/lib/wire-integer";
 import type { ChatMessage } from "@/app/canvas/_canvas/types";
 
 export function inboxSnapshotToChatMessages(
   snapshot: ProjectSnapshot,
-  conversationId: number,
+  conversationId: WireInteger,
 ): ChatMessage[] {
   const messages = snapshot.conversation_messages
     .filter(isConversationMessage)
     .filter((message) => {
       const owner = message.conversation_id;
       // 历史数据缺 conversation_id 时不过滤（不丢消息）；否则按当前对话过滤
-      return typeof owner !== "number" || owner === conversationId;
+      return !isWireInteger(owner) || wireIntegersEqual(owner, conversationId);
     })
     .sort((left, right) => left.sequence_no - right.sequence_no)
     .map<ChatMessage>((message) => ({
@@ -28,14 +33,11 @@ export function inboxSnapshotToChatMessages(
       text: message.content,
     }));
 
-  const runConversation = new Map<string, number>();
+  const runConversation = new Map<string, WireInteger>();
   for (const run of snapshot.agent_runs) {
     const runId = run.agent_run_id;
     const owner = run.conversation_id;
-    if (
-      (typeof runId === "number" || typeof runId === "string") &&
-      typeof owner === "number"
-    ) {
+    if (isWireInteger(runId) && isWireInteger(owner)) {
       runConversation.set(String(runId), owner);
     }
   }
@@ -53,7 +55,7 @@ export function inboxSnapshotToChatMessages(
         return false;
       }
       const owner = runConversation.get(String(job.agent_run_id));
-      return owner === undefined || owner === conversationId;
+      return owner === undefined || wireIntegersEqual(owner, conversationId);
     })
     .flatMap<ChatMessage>((job) =>
       generationOutputs(job).map((output) => {

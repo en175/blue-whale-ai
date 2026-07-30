@@ -1,5 +1,11 @@
 # IJZYVR — [ARCH-7] feat: API 客户端骨架
 
+> **历史实施记录**：本文记录 2026-07-10 已完成工单，不是当前认证合同。匿名 UUID、
+> `X-User-Id` 和旧 API 客户端身份方案已由
+> [ADR-0062](../../adr/0062-new-api-account-center-and-quota-billing.md) 与
+> [IK50GB 认证用户上下文设计](../../specs/2026-07-29-authenticated-user-context-design.md)
+> 取代。
+
 > **工单**：[IJZYVR — API 客户端骨架](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IJZYVR)
 > **父 issue**：[IJZYUL](./README.md)（子 issue #7）
 > **状态**：✅ 已合并到 master（PR #45，merge commit `3035948`）

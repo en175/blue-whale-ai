@@ -11,12 +11,13 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getJobStatus, type JobStatusData } from "../api/generation";
+import type { WireInteger } from "@/lib/wire-integer";
 
 export type JobPollState =
   | { status: "idle" }
-  | { status: "polling"; jobId: number; progress: number }
-  | { status: "succeeded"; jobId: number; assetId: string; assetUrl: string; assetType: string }
-  | { status: "failed"; jobId: number; message: string };
+  | { status: "polling"; jobId: WireInteger; progress: number }
+  | { status: "succeeded"; jobId: WireInteger; assetId: string; assetUrl: string; assetType: string }
+  | { status: "failed"; jobId: WireInteger; message: string };
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_DURATION_MS = 10 * 60 * 1000;
@@ -36,7 +37,7 @@ export function useJobStatus() {
   }, []);
 
   const poll = useCallback(
-    async (jobId: number) => {
+    async (jobId: WireInteger) => {
       try {
         const job: JobStatusData = await getJobStatus(jobId);
         if (job.status === "succeeded" && job.asset) {
@@ -68,7 +69,7 @@ export function useJobStatus() {
   );
 
   const start = useCallback(
-    (jobId: number) => {
+    (jobId: WireInteger) => {
       stop();
       startedAtRef.current = Date.now();
       setState({ status: "polling", jobId, progress: 0 });

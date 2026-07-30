@@ -1,5 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 
+import { appendProjectEvent } from "./product-event-repo.js";
+
 /** 生成 worker 的 DB port：轮询认领 queued 任务 + 调 provider 后落产出/状态/结算。
  *  简化模型：一次任务整体处理（产出多张图时全写 output_asset_ids 数组，不做多槽）。 */
 
@@ -51,7 +53,10 @@ export interface WorkerRepo {
   /** 认领一个 queued 任务（next_action_at<=now），置 processing + lease。无则 null。 */
   claimNextJob(workerId: string): Promise<ClaimedJob | null>;
   /** 按 BullMQ 消息中的 DB jobId 领取一个待 submit/poll 的视频短步骤。 */
-  claimVideoJobById(jobId: string, workerId: string): Promise<ClaimedVideoJob | null>;
+  claimVideoJobById(
+    jobId: string,
+    workerId: string,
+  ): Promise<ClaimedVideoJob | null>;
   /** Redis 消息丢失或 Worker 重启后的低频补偿扫描。 */
   listDueVideoJobIds(limit: number): Promise<string[]>;
   /** 领取一个待 submit/poll 的视频短步骤；过期 processing 可被新 Worker 接管。 */
@@ -295,7 +300,9 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
         projectId: candidate.project_id?.toString() ?? "0",
         userId: candidate.user_id.toString(),
         input:
-          candidate.input && typeof candidate.input === "object" && !Array.isArray(candidate.input)
+          candidate.input &&
+          typeof candidate.input === "object" &&
+          !Array.isArray(candidate.input)
             ? (candidate.input as Record<string, unknown>)
             : {},
         providerTaskId: candidate.provider_task_id,
@@ -351,7 +358,9 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
         projectId: candidate.project_id?.toString() ?? "0",
         userId: candidate.user_id.toString(),
         input:
-          candidate.input && typeof candidate.input === "object" && !Array.isArray(candidate.input)
+          candidate.input &&
+          typeof candidate.input === "object" &&
+          !Array.isArray(candidate.input)
             ? (candidate.input as Record<string, unknown>)
             : {},
         providerTaskId: candidate.provider_task_id,
@@ -465,37 +474,109 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
             payload: { asset_ids: [asset.id.toString()] },
           } as never,
         });
+        const job = await tx.generation_jobs.findUnique({
+          where: { id: BigInt(input.jobId) },
+        });
+        if (job?.project_id !== null && job?.project_id !== undefined) {
+          await appendProjectEvent(tx, {
+            projectId: job.project_id.toString(),
+            eventType: "asset.created",
+            aggregateType: "asset",
+            aggregateId: asset.id.toString(),
+            aggregateVersion: asset.version,
+            correlationId: `job_${job.id.toString()}`,
+            payload: {
+              asset_id: asset.id.toString(),
+              generation_job_id: job.id.toString(),
+              type: asset.type,
+              access_url: asset.url,
+            },
+          });
+          await appendProjectEvent(tx, {
+            projectId: job.project_id.toString(),
+            eventType: "generation_job.status_changed",
+            aggregateType: "generation_job",
+            aggregateId: job.id.toString(),
+            aggregateVersion: job.version,
+            correlationId: `job_${job.id.toString()}`,
+            payload: {
+              job_id: job.id.toString(),
+              type: job.type,
+              source: job.source,
+              status: job.status,
+              progress: job.progress,
+              output_asset_ids: [asset.id.toString()],
+            },
+          });
+          await appendProjectEvent(tx, {
+            projectId: job.project_id.toString(),
+            eventType: "generation_job.output_attached",
+            aggregateType: "generation_job_output",
+            aggregateId: `${job.id.toString()}:0`,
+            aggregateVersion: 0,
+            correlationId: `job_${job.id.toString()}`,
+            payload: {
+              job_id: job.id.toString(),
+              slot_index: 0,
+              asset_id: asset.id.toString(),
+            },
+          });
+        }
         return true;
       });
     },
 
     async failVideoJob(input) {
-      const updated = await prisma.generation_jobs.updateMany({
-        where: {
-          id: BigInt(input.jobId),
-          status: "processing",
-          lease_owner: input.workerId,
-          fencing_token: BigInt(input.fencingToken),
-        },
-        data: {
-          status: "failed",
-          error: { code: input.code, message: input.message } as never,
-          next_action_at: null,
-          next_poll_at: null,
-          lease_owner: null,
-          lease_expires_at: null,
-          version: { increment: 1 },
-        },
+      return prisma.$transaction(async (tx) => {
+        const updated = await tx.generation_jobs.updateMany({
+          where: {
+            id: BigInt(input.jobId),
+            status: "processing",
+            lease_owner: input.workerId,
+            fencing_token: BigInt(input.fencingToken),
+          },
+          data: {
+            status: "failed",
+            error: { code: input.code, message: input.message } as never,
+            next_action_at: null,
+            next_poll_at: null,
+            lease_owner: null,
+            lease_expires_at: null,
+            version: { increment: 1 },
+          },
+        });
+        if (updated.count !== 1) return false;
+        const job = await tx.generation_jobs.findUnique({
+          where: { id: BigInt(input.jobId) },
+        });
+        await tx.generation_job_logs.create({
+          data: {
+            generation_job_id: BigInt(input.jobId),
+            event: "failed",
+            status: "failed",
+            message: `${input.code}: ${input.message}`,
+          },
+        });
+        if (job?.project_id !== null && job?.project_id !== undefined) {
+          await appendProjectEvent(tx, {
+            projectId: job.project_id.toString(),
+            eventType: "generation_job.status_changed",
+            aggregateType: "generation_job",
+            aggregateId: job.id.toString(),
+            aggregateVersion: job.version,
+            correlationId: `job_${job.id.toString()}`,
+            payload: {
+              job_id: job.id.toString(),
+              type: job.type,
+              source: job.source,
+              status: job.status,
+              progress: job.progress,
+              error: { code: input.code, message: input.message },
+            },
+          });
+        }
+        return true;
       });
-      if (updated.count === 1) {
-        await this.appendLog(
-          input.jobId,
-          "failed",
-          "failed",
-          `${input.code}: ${input.message}`,
-        );
-      }
-      return updated.count === 1;
     },
 
     async cancelVideoBeforeDispatch(input) {
@@ -589,58 +670,130 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
     },
 
     async createAsset(input) {
-      const a = await prisma.assets.create({
-        data: {
-          user_id: BigInt(input.user_id),
-          project_id: BigInt(input.project_id),
-          generation_job_id: BigInt(input.generation_job_id),
-          type: input.type,
-          url: input.url,
-          storage_key: input.storage_key,
-          mime: input.mime,
-          size: input.size == null ? null : BigInt(input.size),
-          width: input.width,
-          height: input.height,
-          source: "generated",
-          status: "normal",
-        },
+      return prisma.$transaction(async (tx) => {
+        const asset = await tx.assets.create({
+          data: {
+            user_id: BigInt(input.user_id),
+            project_id: BigInt(input.project_id),
+            generation_job_id: BigInt(input.generation_job_id),
+            type: input.type,
+            url: input.url,
+            storage_key: input.storage_key,
+            mime: input.mime,
+            size: input.size == null ? null : BigInt(input.size),
+            width: input.width,
+            height: input.height,
+            source: "generated",
+            status: "normal",
+          },
+        });
+        await appendProjectEvent(tx, {
+          projectId: input.project_id,
+          eventType: "asset.created",
+          aggregateType: "asset",
+          aggregateId: asset.id.toString(),
+          aggregateVersion: asset.version,
+          correlationId: `job_${input.generation_job_id}`,
+          payload: {
+            asset_id: asset.id.toString(),
+            generation_job_id: input.generation_job_id,
+            type: asset.type,
+            access_url: asset.url,
+          },
+        });
+        return asset.id.toString();
       });
-      return a.id.toString();
     },
 
     async completeJob(jobId, assetIds) {
-      await prisma.generation_jobs.update({
-        where: { id: BigInt(jobId) },
-        data: {
-          status: "succeeded",
-          progress: 100,
-          output_asset_ids: assetIds.map((id) => Number(id)),
-          next_action_at: null,
-          lease_owner: null,
-          lease_expires_at: null,
-          version: { increment: 1 },
-        },
+      await prisma.$transaction(async (tx) => {
+        const job = await tx.generation_jobs.update({
+          where: { id: BigInt(jobId) },
+          data: {
+            status: "succeeded",
+            progress: 100,
+            output_asset_ids: assetIds.map((id) => Number(id)),
+            next_action_at: null,
+            lease_owner: null,
+            lease_expires_at: null,
+            version: { increment: 1 },
+          },
+        });
+        if (job.project_id === null) return;
+        await appendProjectEvent(tx, {
+          projectId: job.project_id.toString(),
+          eventType: "generation_job.status_changed",
+          aggregateType: "generation_job",
+          aggregateId: job.id.toString(),
+          aggregateVersion: job.version,
+          correlationId: `job_${job.id.toString()}`,
+          payload: {
+            job_id: job.id.toString(),
+            type: job.type,
+            source: job.source,
+            status: job.status,
+            progress: job.progress,
+            output_asset_ids: assetIds,
+          },
+        });
+        for (const [slotIndex, assetId] of assetIds.entries()) {
+          await appendProjectEvent(tx, {
+            projectId: job.project_id.toString(),
+            eventType: "generation_job.output_attached",
+            aggregateType: "generation_job_output",
+            aggregateId: `${job.id.toString()}:${slotIndex}`,
+            aggregateVersion: 0,
+            correlationId: `job_${job.id.toString()}`,
+            payload: {
+              job_id: job.id.toString(),
+              slot_index: slotIndex,
+              asset_id: assetId,
+            },
+          });
+        }
       });
     },
 
     async failJob(jobId, errorCode, errorMessage) {
-      await prisma.generation_jobs.update({
-        where: { id: BigInt(jobId) },
-        data: {
-          status: "failed",
-          error: { code: errorCode, message: errorMessage } as never,
-          next_action_at: null,
-          lease_owner: null,
-          lease_expires_at: null,
-          version: { increment: 1 },
-        },
+      await prisma.$transaction(async (tx) => {
+        const job = await tx.generation_jobs.update({
+          where: { id: BigInt(jobId) },
+          data: {
+            status: "failed",
+            error: { code: errorCode, message: errorMessage } as never,
+            next_action_at: null,
+            lease_owner: null,
+            lease_expires_at: null,
+            version: { increment: 1 },
+          },
+        });
+        await tx.generation_job_logs.create({
+          data: {
+            generation_job_id: job.id,
+            event: "failed",
+            status: "failed",
+            message: `${errorCode}: ${errorMessage}`,
+          },
+        });
+        if (job.project_id !== null) {
+          await appendProjectEvent(tx, {
+            projectId: job.project_id.toString(),
+            eventType: "generation_job.status_changed",
+            aggregateType: "generation_job",
+            aggregateId: job.id.toString(),
+            aggregateVersion: job.version,
+            correlationId: `job_${job.id.toString()}`,
+            payload: {
+              job_id: job.id.toString(),
+              type: job.type,
+              source: job.source,
+              status: job.status,
+              progress: job.progress,
+              error: { code: errorCode, message: errorMessage },
+            },
+          });
+        }
       });
-      await this.appendLog(
-        jobId,
-        "failed",
-        "failed",
-        `${errorCode}: ${errorMessage}`,
-      );
     },
 
     async settleReservation(jobId) {

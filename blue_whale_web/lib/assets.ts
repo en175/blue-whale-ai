@@ -5,6 +5,7 @@
 import { request, type Paged } from "./api";
 import { presignAsset, completeAsset } from "./api/endpoints";
 import { detectMediaKind, readLocalMediaMetadata } from "./mediaSize";
+import type { WireInteger } from "./wire-integer";
 
 /** 资产列表项（GET /api/assets records，不含 storageKey）。 */
 export type AssetItem = {
@@ -35,8 +36,8 @@ export function listAssets(
  * 返回目标项目内的新副本；响应字段与 AssetItem 一致。
  */
 export function copyAssetToProject(
-  projectId: number,
-  sourceAssetId: number,
+  projectId: WireInteger,
+  sourceAssetId: WireInteger,
   idempotencyKey: string,
 ): Promise<AssetItem> {
   return request<AssetItem>(
@@ -70,7 +71,7 @@ function uploadMime(file: File, type: "image" | "video" | "audio"): string {
  */
 export async function uploadAsset(
   file: File,
-  projectId?: number,
+  projectId?: WireInteger,
   declaredType?: "image" | "video" | "audio",
 ): Promise<{ id: string; url: string }> {
   const type = declaredType ?? detectMediaKind(file);
@@ -100,6 +101,6 @@ export async function uploadAsset(
 }
 
 /** 逻辑删除当前用户素材；服务端负责归属校验。 */
-export function deleteAsset(assetId: number | string): Promise<void> {
+export function deleteAsset(assetId: WireInteger): Promise<void> {
   return request<void>(`/assets/${assetId}`, "DELETE");
 }

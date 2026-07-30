@@ -1,6 +1,6 @@
 # ADR-0060：Node user 身份（UUID + 简化鉴权）与 Node-owned credits 账本
 
-- **状态**：Accepted
+- **状态**：Superseded by [ADR-0062](0062-new-api-account-center-and-quota-billing.md)
 - **日期**：2026-07-27
 - **决策者**：朱建业（trueBurger）
 - **关联工单**：[IK4AJJ](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK4AJJ)

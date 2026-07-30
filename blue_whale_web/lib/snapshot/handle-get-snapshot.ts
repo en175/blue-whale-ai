@@ -7,8 +7,8 @@ import type {
   SnapshotAssetRow,
   SnapshotRepo,
 } from "@blue-whale/persistence";
-
 import { projectPublicError, type PublicJobError } from "../jobs/public-error";
+import { wireInteger, type WireInteger } from "../wire-integer";
 
 /** Java SystemCode.RESOURCE_NOT_FOUND_CODE：归属/资源不存在一律不泄漏。 */
 const RESOURCE_NOT_FOUND_CODE = 100301;
@@ -32,17 +32,18 @@ export interface SnapshotAssetSummary {
   type: string;
 }
 
-/** GET /api/projects/{id}/snapshot 返回的快照（对齐 Java SnapshotResponse + 前端 ProjectSnapshot）。
- *  conversation_messages / agent_runs 在部署 schema 无对应表 → 暂空（SSE 增量补齐）。
- *  high_watermark_cursor 同理暂返 0（project_events 表未建）。 */
+/** GET /api/projects/{id}/snapshot 返回的恢复快照。 */
 export interface SnapshotData {
-  project: ProjectView;
-  canvas: CanvasView;
+  project: Omit<ProjectView, "id"> & { id: WireInteger };
+  canvas: Omit<CanvasView, "id" | "project_id"> & {
+    id: WireInteger | null;
+    project_id: WireInteger;
+  };
   conversation_messages: readonly unknown[];
   agent_runs: readonly unknown[];
   generation_jobs: SnapshotGenerationJob[];
   assets: Record<string, SnapshotAssetSummary>;
-  high_watermark_cursor: number;
+  high_watermark_cursor: WireInteger;
 }
 
 export interface SnapshotDeps {
@@ -99,8 +100,10 @@ export async function handleGetSnapshot(
   if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
 
   const canvas = await deps.canvas.getByProject(projectId);
-  const { generation_jobs, assets } =
-    await deps.snapshot.loadJobsAndAssets(projectId);
+  const [{ generation_jobs, assets }, conversation] = await Promise.all([
+    deps.snapshot.loadJobsAndAssets(projectId),
+    deps.snapshot.loadConversationState(projectId),
+  ]);
 
   const assetMap: Record<string, SnapshotAssetSummary> = {};
   for (const asset of assets) {
@@ -112,13 +115,40 @@ export async function handleGetSnapshot(
   }
 
   return ok({
-    project,
-    canvas,
-    conversation_messages: [],
-    agent_runs: [],
+    project: { ...project, id: wireInteger(project.id) },
+    canvas: {
+      ...canvas,
+      id: canvas.id === null ? null : wireInteger(canvas.id),
+      project_id: wireInteger(canvas.project_id),
+    },
+    conversation_messages: conversation.conversation_messages.map(
+      (message) => ({
+        ...message,
+        message_id: wireInteger(message.message_id),
+        conversation_id: wireInteger(message.conversation_id),
+        agent_run_id:
+          message.agent_run_id === null
+            ? null
+            : wireInteger(message.agent_run_id),
+      }),
+    ),
+    agent_runs: conversation.agent_runs.map((run) => ({
+      ...run,
+      agent_run_id: wireInteger(run.agent_run_id),
+      conversation_id: wireInteger(run.conversation_id),
+      active_input_request:
+        run.active_input_request === null
+          ? null
+          : {
+              ...run.active_input_request,
+              input_request_id: wireInteger(
+                run.active_input_request.input_request_id,
+              ),
+            },
+    })),
     generation_jobs: generation_jobs.map(toWireJob),
     assets: assetMap,
-    high_watermark_cursor: 0,
+    high_watermark_cursor: wireInteger(conversation.high_watermark_cursor),
   });
 }
 

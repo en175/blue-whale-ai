@@ -5,6 +5,7 @@
  */
 import type React from "react";
 import type { CardStatus } from "@/types/domain";
+import type { WireInteger } from "@/lib/wire-integer";
 
 export type ToolDef = {
   id: string;
@@ -54,7 +55,7 @@ export type DockMediaItem = {
 export type PendingMention = {
   name: string;
   nonce: number;
-  assetId?: number;
+  assetId?: WireInteger;
   src?: string;
   type?: "image" | "video" | "audio";
 };
@@ -105,7 +106,7 @@ export type ChatMessage =
       assetId?: string;
       imageUrl?: string;
       /** 权威 GenerationJob 身份；失败 Card 以此触发缺失槽重试。 */
-      generationJobId?: number | string;
+      generationJobId?: WireInteger;
       /** Card 对应的稳定输出槽。 */
       slotIndex?: number;
       /** 产品规范化失败文案（来自后端公开错误信封）；失败 Card 向 User 展示，不泄漏内部信息。 */
@@ -186,14 +187,14 @@ export type GenerateArgs =
       mode: "image";
       settings: ImageGenerateSettings;
       referenceImages?: string[];
-      inputAssetIds?: number[];
+      inputAssetIds?: WireInteger[];
     }
   | {
       mode: "video";
       settings: VideoGenerateSettings;
-      firstFrameAssetId?: number;
-      lastFrameAssetId?: number;
-      referenceAssetIds?: number[];
+      firstFrameAssetId?: WireInteger;
+      lastFrameAssetId?: WireInteger;
+      referenceAssetIds?: WireInteger[];
     }
   | { mode: "audio"; settings: AudioGenerateSettings };
 

@@ -1,17 +1,18 @@
 /**
  * canvas —— project / canvas 持久化请求层（照 lib/auth.ts 的 fetchWithTimeout + ApiResult 模式）。
  *
- * 走 Next rewrite /api/projects、/api/canvases → agent-service（见 next.config.ts）。
- * 浏览器只发送 Authorization；X-User-Id 必须由网关基于已验证 JWT 注入。
+ * 走 Next `/api/projects`、`/api/canvases` 产品路由。
+ * 浏览器只发送 Authorization；服务端路由通过 new-api 校验凭据并解析用户身份。
  */
 import { loadAccessToken } from "@/components/auth/authStorage";
+import type { WireInteger } from "./wire-integer";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 const FETCH_TIMEOUT = 10000;
 
 /** 项目响应（列表/详情），对齐后端 ProjectDto。 */
 export interface ProjectDto {
-  id: number;
+  id: WireInteger;
   name: string;
   thumb: string | null;
   created_at: string;
@@ -19,9 +20,9 @@ export interface ProjectDto {
 
 /** 画布响应（整体 GET），对齐后端 CanvasDto；viewport/nodes 为 JSON 字符串。 */
 export interface CanvasDto {
-  id: number | null;
-  project_id: number;
-  viewport: string;
+  id: WireInteger | null;
+  project_id: WireInteger;
+  viewport: string | null;
   nodes: string;
 }
 
@@ -100,14 +101,17 @@ export function listProjects(): Promise<ProjectDto[]> {
 }
 
 /** 项目详情。 */
-export function getProject(id: number): Promise<ProjectDto> {
+export function getProject(id: WireInteger): Promise<ProjectDto> {
   return getResult<ProjectDto>(`/api/projects/${id}`, {
     headers: authHeaders(loadAccessToken()),
   });
 }
 
 /** 重命名项目。 */
-export function renameProject(id: number, name: string): Promise<ProjectDto> {
+export function renameProject(
+  id: WireInteger,
+  name: string,
+): Promise<ProjectDto> {
   return getResult<ProjectDto>(`/api/projects/${id}`, {
     method: "PUT",
     headers: authHeaders(loadAccessToken()),
@@ -116,7 +120,7 @@ export function renameProject(id: number, name: string): Promise<ProjectDto> {
 }
 
 /** 删除项目。 */
-export function deleteProject(id: number): Promise<void> {
+export function deleteProject(id: WireInteger): Promise<void> {
   return getResult<void>(`/api/projects/${id}`, {
     method: "DELETE",
     headers: authHeaders(loadAccessToken()),
@@ -124,7 +128,7 @@ export function deleteProject(id: number): Promise<void> {
 }
 
 /** 加载画布（按 projectId，无记录时 id 为 null）。 */
-export function loadCanvas(projectId: number): Promise<CanvasDto> {
+export function loadCanvas(projectId: WireInteger): Promise<CanvasDto> {
   return getResult<CanvasDto>(`/api/canvases?projectId=${projectId}`, {
     headers: authHeaders(loadAccessToken()),
   });
@@ -135,7 +139,7 @@ export function loadCanvas(projectId: number): Promise<CanvasDto> {
  * （后端 SaveCanvasRequest 按透明字符串存，不解析结构，见 ADR-0011 D3）。
  */
 export function saveCanvas(
-  projectId: number,
+  projectId: WireInteger,
   viewport: string,
   nodes: string,
 ): Promise<CanvasDto> {

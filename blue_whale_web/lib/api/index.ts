@@ -9,6 +9,5 @@
  */
 
 export * from "./errors";
-export * from "./userId";
 export * from "./dto";
 export * from "./endpoints";

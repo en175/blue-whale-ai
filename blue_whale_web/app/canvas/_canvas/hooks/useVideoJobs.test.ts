@@ -35,6 +35,25 @@ function job(over: Partial<{ job_id: string; status: string; progress: number; a
 }
 
 describe("useVideoJobs", () => {
+  it("超大 job ID 轮询时保持十进制字符串精度", async () => {
+    const jobId = "9007199254740993";
+    mockList.mockResolvedValue([job({ job_id: jobId, status: "processing" })]);
+    const { result } = renderHook(() => useVideoJobs());
+
+    act(() =>
+      result.current.start(jobId, {
+        onSucceeded: vi.fn(),
+        onFailed: vi.fn(),
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+
+    expect(mockList).toHaveBeenCalledWith({ jobIds: [jobId] });
+    expect(result.current.activeCount()).toBe(1);
+  });
+
   it("单 job succeeded：回调带 String(asset.id) + url/type", async () => {
     mockList.mockResolvedValue([job({ job_id: "7", status: "succeeded", progress: 100, asset: { id: "42", url: "u42", type: "video" } })]);
     const { result } = renderHook(() => useVideoJobs());

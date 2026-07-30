@@ -32,6 +32,28 @@ export function loginWithPassword(
     body: JSON.stringify({ username, password }),
   });
 }
+
+export interface RegisterInput {
+  username: string;
+  password: string;
+  email?: string;
+  verificationCode?: string;
+}
+
+/** new-api 注册；成功响应与登录相同，可立即建立本地登录态。 */
+export function registerWithPassword(input: RegisterInput): Promise<LoginData> {
+  return getResult<LoginData>("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({
+      username: input.username,
+      password: input.password,
+      ...(input.email ? { email: input.email } : {}),
+      ...(input.verificationCode
+        ? { verification_code: input.verificationCode }
+        : {}),
+    }),
+  });
+}
 export interface UserInfo {
   user_id: number;
   username: string;
@@ -132,10 +154,9 @@ export function refreshToken(refreshToken: string): Promise<LoginData> {
 }
 
 /** 登出 */
-export function logoutApi(refreshToken: string): Promise<void> {
+export function logoutApi(): Promise<void> {
   return getResult<void>("/api/auth/logout", {
     method: "POST",
-    headers: { Authorization: `Bearer ${refreshToken}` },
   });
 }
 

@@ -8,6 +8,13 @@ import {
 } from "./generation-input";
 
 describe("selectDockInputAssetIds", () => {
+  it("keeps a large asset identity as its precise decimal string", () => {
+    const assetId = "9007199254740993";
+    expect(
+      selectDockInputAssetIds("video", [assetId], [{ assetId }], [assetId]),
+    ).toEqual([assetId]);
+  });
+
   it("keeps unique image references from mentions and Dock media", () => {
     expect(
       selectDockInputAssetIds("image", [9], [{ assetId: "10" }, { assetId: "9" }]),

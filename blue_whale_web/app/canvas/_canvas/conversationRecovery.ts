@@ -1,4 +1,11 @@
 import type { ProjectSnapshot } from "@/lib/project-recovery";
+import {
+  compareWireIntegers,
+  isWireInteger,
+  wireInteger,
+  wireIntegersEqual,
+  type WireInteger,
+} from "@/lib/wire-integer";
 import type { ChatMessage, NodeItem } from "./types";
 import { parseAspectRatio } from "./aspectRatio";
 
@@ -233,17 +240,18 @@ function generationAspectRatio(input: unknown): string {
  */
 export function selectCurrentRunId(
   runs: Array<Record<string, unknown>>,
-): number | null {
+): WireInteger | null {
   if (!Array.isArray(runs) || runs.length === 0) return null;
-  let latestId = -Infinity;
+  let latestId: WireInteger | null = null;
   for (const run of runs) {
     const id = run.agent_run_id;
-    if (typeof id !== "number" && typeof id !== "string") continue;
-    const numeric = typeof id === "number" ? id : Number(id);
-    if (!Number.isFinite(numeric)) continue;
-    if (numeric > latestId) latestId = numeric;
+    if (!isWireInteger(id)) continue;
+    const normalized = wireInteger(String(id));
+    if (latestId === null || compareWireIntegers(normalized, latestId) > 0) {
+      latestId = normalized;
+    }
   }
-  return latestId === -Infinity ? null : latestId;
+  return latestId;
 }
 
 /**
@@ -258,7 +266,11 @@ export function selectCurrentRunCreativeSkillId(
 ): string | null {
   const currentRunId = selectCurrentRunId(runs);
   if (currentRunId === null) return null;
-  const latest = runs.find((run) => Number(run.agent_run_id) === currentRunId);
+  const latest = runs.find(
+    (run) =>
+      isWireInteger(run.agent_run_id) &&
+      wireIntegersEqual(run.agent_run_id, currentRunId),
+  );
   if (!latest) return null;
   const versions = latest.activated_creative_skill_versions;
   if (!Array.isArray(versions) || versions.length === 0) return null;

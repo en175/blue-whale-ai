@@ -94,7 +94,7 @@ describe("VideoDockContent references", () => {
         model_label: "Seedance 2.0",
         icon: null,
         supported_sizes: [
-          { id: "720p", label: "720p", api_value: "720p", width: null, height: null },
+          { id: "720p", label: "720p", api_value: "720p", width: undefined, height: undefined },
         ],
         supported_aspect_ratios: ["16:9"],
         supported_formats: [],

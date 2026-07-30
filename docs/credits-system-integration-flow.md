@@ -1,6 +1,11 @@
 # 积分体系集成流程：蓝鲸 ↔ new-api 网关
 
 > 2026-07-28 方案讨论纪要。关联 IK4JX2 / IK39SS / IK39ZT。核心架构已收敛，待团队细聊确认后落地。
+>
+> **认证决策更新（2026-07-29）**：账户与 quota 使用 new-api 的方向继续有效；手机号/SMS、
+> Java User 映射和 Java Gateway 兼容不再是实施前提。认证与运行时权威见
+> [ADR-0062](adr/0062-new-api-account-center-and-quota-billing.md) 和
+> [IK50GB 认证用户上下文设计](specs/2026-07-29-authenticated-user-context-design.md)。
 
 ## 状态
 

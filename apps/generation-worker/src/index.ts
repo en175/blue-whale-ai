@@ -1,5 +1,9 @@
 import { readinessResponseSchema } from "@blue-whale/contracts";
-import { checkReadiness, openGenerationCredential } from "@blue-whale/core";
+import {
+  checkReadiness,
+  loadGenerationCredentialSecret,
+  openGenerationCredential,
+} from "@blue-whale/core";
 import {
   createFakeGenerationAdapter,
   createNewApiVideoTaskProvider,
@@ -8,10 +12,7 @@ import {
   runVideoJobStep,
   runVideoWorkerLoop,
 } from "@blue-whale/generation-runtime";
-import {
-  createWorkerRepo,
-  getPrismaClient,
-} from "@blue-whale/persistence";
+import { createWorkerRepo, getPrismaClient } from "@blue-whale/persistence";
 import { createServer } from "node:http";
 import { hostname } from "node:os";
 
@@ -43,10 +44,7 @@ let runtime = fakeRuntime;
 if (runtimeMode === "new-api") {
   const baseUrl = process.env.NEW_API_BASE_URL;
   const tosConfig = loadGenerationTosConfig();
-  const credentialSecret =
-    process.env.GENERATION_CREDENTIAL_SECRET ??
-    process.env.JWT_SECRET ??
-    "blue-whale-dev-secret-key-at-least-256-bits!!";
+  const credentialSecret = loadGenerationCredentialSecret();
   if (!baseUrl) throw new Error("NEW_API_BASE_URL required");
   if (!tosConfig) throw new Error("TOS configuration required");
 

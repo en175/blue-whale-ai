@@ -6,8 +6,33 @@ import {
 } from "node:crypto";
 
 const VERSION = "v1";
+type GenerationCredentialEnvironment = Readonly<
+  Record<string, string | undefined>
+>;
 
-export function sealGenerationCredential(token: string, secret: string): string {
+export class GenerationCredentialConfigurationError extends Error {
+  constructor() {
+    super(
+      "GENERATION_CREDENTIAL_SECRET must be configured with at least 16 characters",
+    );
+    this.name = "GenerationCredentialConfigurationError";
+  }
+}
+
+export function loadGenerationCredentialSecret(
+  environment: GenerationCredentialEnvironment = process.env,
+): string {
+  const secret = environment.GENERATION_CREDENTIAL_SECRET;
+  if (!secret || secret.length < 16) {
+    throw new GenerationCredentialConfigurationError();
+  }
+  return secret;
+}
+
+export function sealGenerationCredential(
+  token: string,
+  secret: string,
+): string {
   const key = credentialKey(secret);
   const nonce = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, nonce);
@@ -29,12 +54,7 @@ export function openGenerationCredential(
   secret: string,
 ): string {
   const [version, nonceValue, tagValue, encryptedValue] = ciphertext.split(".");
-  if (
-    version !== VERSION ||
-    !nonceValue ||
-    !tagValue ||
-    !encryptedValue
-  ) {
+  if (version !== VERSION || !nonceValue || !tagValue || !encryptedValue) {
     throw new Error("生成凭证密文无效");
   }
   const decipher = createDecipheriv(

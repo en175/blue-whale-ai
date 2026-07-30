@@ -8,10 +8,11 @@
  * 字段全 snake_case 对齐后端 Jackson SNAKE_CASE 序列化；鉴权走 api-client。
  */
 import { apiRequest } from "./api-client";
+import type { WireInteger } from "./wire-integer";
 
 /** 收件箱 Project 摘要（purpose 固定为 generation_inbox，前端不消费故不建模枚举）。 */
 export type GenerationInboxProject = {
-  id: number;
+  id: WireInteger;
   name: string;
   thumb: string | null;
   created_at: string;
@@ -21,23 +22,23 @@ export type GenerationInboxProject = {
 /** GET /api/generation-inbox 的 data；无收件箱时 data=null（HTTP 200）。 */
 export type GenerationInbox = {
   project: GenerationInboxProject;
-  active_conversation_id: number | null;
+  active_conversation_id: WireInteger | null;
 };
 
 /** 对话列表项（id 倒序；preview 为首条用户消息截 50 字）。 */
 export type InboxConversation = {
-  id: number;
+  id: WireInteger;
   created_at: string;
   preview: string;
 };
 
 /** POST messages 的 202 受理回执；首条消息同时给回新建的 project/conversation 身份。 */
 export type AcceptedInboxMessage = {
-  project_id: number;
-  conversation_id: number;
-  message_id: number;
-  agent_run_id: number;
-  accepted_cursor: number;
+  project_id: WireInteger;
+  conversation_id: WireInteger;
+  message_id: WireInteger;
+  agent_run_id: WireInteger;
+  accepted_cursor: WireInteger;
 };
 
 /** 探测当前用户的生成收件箱；无收件箱返回 null（绝不创建）。 */
@@ -54,8 +55,8 @@ export function postInboxMessage(params: {
   content: string;
   clientMessageId: string;
   idempotencyKey: string;
-  conversationId?: number;
-  replyToInputRequestId?: number;
+  conversationId?: number | string;
+  replyToInputRequestId?: number | string;
 }): Promise<AcceptedInboxMessage> {
   return apiRequest<AcceptedInboxMessage>("/api/generation-inbox/messages", {
     method: "POST",

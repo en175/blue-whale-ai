@@ -36,12 +36,15 @@ export {
   createNewApiClient,
   NewApiError,
   type NewApiClientOptions,
+  type NewApiAccountCapabilities,
+  type NewApiAccountIdentity,
   type NewApiImage,
   type NewApiImageEditInput,
   type NewApiImageInput,
   type NewApiLog,
   type NewApiLoginInput,
   type NewApiLoginResult,
+  type NewApiRegisterInput,
   type NewApiUsage,
   type NewApiVideoInput,
   type NewApiVideoSubmission,
@@ -53,6 +56,8 @@ export {
   type AccessTokenClaims,
 } from "./jwt.js";
 export {
+  GenerationCredentialConfigurationError,
+  loadGenerationCredentialSecret,
   openGenerationCredential,
   sealGenerationCredential,
 } from "./generation-credential.js";
@@ -71,3 +76,20 @@ export {
   type LoginResult,
   type AuthUser,
 } from "./auth/login-with-code.js";
+export {
+  acceptConversationMessage,
+  prepareConversationMessage,
+  type AcceptConversationMessageResult,
+  type ConversationCommandStore,
+  type ConversationCommandStoreInput,
+  type ConversationCommandStoreResult,
+  type PreparedConversationMessage,
+} from "./conversation/accept-conversation-message.js";
+export {
+  acceptGenerationInboxMessage,
+  createGenerationInboxConversation,
+  type GenerationInboxProjectView,
+  type GenerationInboxStore,
+  type GenerationInboxView,
+  type InboxConversationView,
+} from "./conversation/generation-inbox.js";

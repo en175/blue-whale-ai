@@ -8,6 +8,7 @@ import {
 } from "@/lib/mediaSize";
 
 import type { Asset, CanvasNodeData, NodeKindId } from "./model";
+import type { WireInteger } from "@/lib/wire-integer";
 
 export type UploadMediaResult = {
   nodeId: string;
@@ -16,7 +17,7 @@ export type UploadMediaResult = {
 
 type UploadMediaInput = {
   file: File;
-  projectId: number;
+  projectId: WireInteger;
   addNode: (
     kind: NodeKindId,
     extra: {

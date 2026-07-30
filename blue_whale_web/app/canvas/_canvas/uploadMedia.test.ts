@@ -3,6 +3,25 @@ import { describe, expect, it, vi } from "vitest";
 import { uploadMediaToCanvas } from "./uploadMedia";
 
 describe("uploadMediaToCanvas", () => {
+  it("超大项目 ID 上传时保持十进制字符串精度", async () => {
+    const projectId = "9007199254740993";
+    const upload = vi.fn().mockResolvedValue({ id: "9", url: "asset.png" });
+
+    await uploadMediaToCanvas({
+      file: new File(["x"], "asset.png", { type: "image/png" }),
+      projectId,
+      addNode: vi.fn().mockReturnValue("node-1"),
+      patchNode: vi.fn(),
+      resizeNode: vi.fn(),
+      addAsset: vi.fn(),
+      onError: vi.fn(),
+      upload,
+      readSize: vi.fn().mockResolvedValue({ width: 10, height: 10 }),
+    });
+
+    expect(upload).toHaveBeenCalledWith(expect.any(File), projectId, "image");
+  });
+
   it.each([
     ["image/png", "cat.png", "image", 200, 200],
     ["video/mp4", "clip.mp4", "video", 356, 200],

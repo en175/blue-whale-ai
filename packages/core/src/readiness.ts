@@ -1,5 +1,4 @@
 export const serviceNames = [
-  "product-api",
   "agent-worker",
   "generation-worker",
 ] as const;

@@ -1,12 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAssetsDeps } from "@/lib/assets/deps";
-import { getUserIdFromRequest } from "@/lib/auth/user-from-request";
 
 import { GET } from "./route";
 
-vi.mock("@/lib/auth/user-from-request", () => ({
-  getUserIdFromRequest: vi.fn(),
+vi.mock("@/lib/auth/product-route-auth", () => ({
+  withAuthenticatedUser: vi.fn(
+    async (
+      _request: Request,
+      handler: (user: {
+        userId: string;
+        status: "enabled";
+      }) => Promise<Response> | Response,
+    ) => handler({ userId: "9", status: "enabled" }),
+  ),
 }));
 vi.mock("@/lib/assets/deps", () => ({
   createAssetsDeps: vi.fn(),
@@ -16,7 +23,6 @@ describe("GET /api/agent/assets/:assetId", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns the authenticated owner's ready Asset for canvas hydration", async () => {
-    vi.mocked(getUserIdFromRequest).mockResolvedValue("9");
     const assets = {
       findOwnedSource: vi.fn().mockResolvedValue({
         type: "image",
@@ -34,7 +40,10 @@ describe("GET /api/agent/assets/:assetId", () => {
 
     const response = await GET(
       new Request("http://localhost/api/agent/assets/41", {
-        headers: { Authorization: "Bearer sk-test" },
+        headers: {
+          Authorization: "Bearer sk-test",
+          "X-User-Id": "999",
+        },
       }),
       { params: Promise.resolve({ assetId: "41" }) },
     );

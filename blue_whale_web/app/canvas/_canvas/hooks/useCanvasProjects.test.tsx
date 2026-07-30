@@ -99,7 +99,7 @@ describe("useCanvasProjects 创作澄清回答绑定", () => {
     });
 
     expect(vi.mocked(acceptConversationMessage)).toHaveBeenCalledWith(
-      1,
+      "1",
       "水墨风格带留白",
       "cmd-id",
       "cmd-id",
@@ -117,7 +117,7 @@ describe("useCanvasProjects 创作澄清回答绑定", () => {
     });
 
     expect(vi.mocked(acceptConversationMessage)).toHaveBeenCalledWith(
-      1,
+      "1",
       "生成一张蓝鲸海报",
       "cmd-id",
       "cmd-id",
@@ -135,7 +135,7 @@ describe("useCanvasProjects 创作澄清回答绑定", () => {
     });
 
     expect(vi.mocked(acceptConversationMessage)).toHaveBeenCalledWith(
-      1,
+      "1",
       "参考这张",
       "cmd-id",
       "cmd-id",
@@ -157,7 +157,7 @@ describe("useCanvasProjects 创作澄清回答绑定", () => {
     });
 
     expect(vi.mocked(acceptConversationMessage)).toHaveBeenCalledWith(
-      1,
+      "1",
       "用这个技能生成",
       "cmd-id",
       "cmd-id",
@@ -181,7 +181,7 @@ describe("useCanvasProjects 创作澄清回答绑定", () => {
     });
 
     expect(vi.mocked(acceptConversationMessage)).toHaveBeenCalledWith(
-      1,
+      "1",
       "水墨风格",
       "cmd-id",
       "cmd-id",
@@ -193,6 +193,38 @@ describe("useCanvasProjects 创作澄清回答绑定", () => {
 });
 
 describe("useCanvasProjects ?project 初始定位（/generate「打开项目」闭环）", () => {
+  it("超过安全整数的 Project ID 在 recovery 与消息命令中保持精确字符串", async () => {
+    const huge = "9007199254740993";
+    vi.mocked(listProjects).mockResolvedValue([
+      { id: huge, name: "大 ID 项目", thumb: null, created_at: "2026-07-17" },
+    ]);
+
+    const { result } = renderHook(() => useCanvasProjects(huge));
+    await waitFor(() => expect(result.current.backendReady).toBe(true));
+    await waitFor(() =>
+      expect(vi.mocked(runProjectRecovery)).toHaveBeenCalledWith(
+        huge,
+        expect.anything(),
+        expect.any(Function),
+        expect.any(AbortSignal),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.submitConversationMessageAction("保持精确 ID");
+    });
+
+    expect(vi.mocked(acceptConversationMessage)).toHaveBeenCalledWith(
+      huge,
+      "保持精确 ID",
+      "cmd-id",
+      "cmd-id",
+      undefined,
+      undefined,
+      undefined,
+    );
+  });
+
   it("preferred id 存在于列表时 active 切到该项目；只应用一次，手动切换不被弹回", async () => {
     vi.mocked(listProjects).mockResolvedValue([
       { id: 1, name: "demo", thumb: null, created_at: "2026-07-17" },

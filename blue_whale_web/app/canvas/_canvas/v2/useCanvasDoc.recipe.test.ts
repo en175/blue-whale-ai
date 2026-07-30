@@ -57,6 +57,31 @@ const runningVideoNode: CanvasNode = {
 beforeEach(() => vi.clearAllMocks());
 
 describe("useCanvasDoc 视频 recipe 生命周期", () => {
+  it("超大项目 ID 加载和保存时保持十进制字符串精度", async () => {
+    vi.useFakeTimers();
+    const projectId = "9007199254740993";
+    try {
+      const { result } = renderHook(() => useCanvasDoc());
+      await act(async () => {
+        await result.current.load(projectId);
+      });
+      expect(loadCanvas).toHaveBeenCalledWith(projectId);
+
+      act(() => result.current.addNodeFull(runningVideoNode));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+
+      expect(saveCanvas).toHaveBeenCalledWith(
+        projectId,
+        expect.any(String),
+        expect.any(String),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("切换项目会取消上一项目尚未触发的保存", async () => {
     vi.useFakeTimers();
     try {

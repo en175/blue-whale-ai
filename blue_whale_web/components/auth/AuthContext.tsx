@@ -20,7 +20,12 @@ import {
   SKIP_AUTH,
   MOCK_USER,
 } from "./authStorage";
-import { loginWithPassword, fetchMe } from "@/lib/auth";
+import {
+  loginWithPassword,
+  registerWithPassword,
+  fetchMe,
+  type RegisterInput,
+} from "@/lib/auth";
 import { apiRequest } from "@/lib/api-client";
 import {
   subscribeToAuthFailure,
@@ -34,6 +39,7 @@ interface AuthContextValue {
   pendingAction: PendingAction | null;
   requireAuth: (action: PendingAction, run: () => void) => void;
   signIn: (username: string, password: string) => Promise<void>;
+  signUp: (input: RegisterInput) => Promise<void>;
   signOut: () => void;
   /** 从后端拉最新用户信息并同步本地。换绑成功后用（手机号变更需后端确认）。改昵称不用——用 updateLocalUser（乐观更新）。 */
   refreshUser: () => Promise<void>;
@@ -63,12 +69,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
   const executorRef = useRef<(() => void) | null>(null);
 
-  // mount: new-api token 没有 Node refresh 链路，直接恢复本地登录态。
+  // Keep SSR and the first browser render identical, then restore local MVP state.
   useEffect(() => {
     if (SKIP_AUTH) return;
-    const u = loadUser();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (u) setUser(u);
+    const timer = window.setTimeout(() => {
+      const stored = loadUser();
+      if (stored) setUser(stored);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   // 订阅 API 层通知：401 后 refresh 也失败 → 清空状态，弹出登录
@@ -166,6 +174,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const signUp = useCallback(async (input: RegisterInput) => {
+    const data = await registerWithPassword(input);
+    saveTokens(data.access_token, data.refresh_token);
+    // 注册后同样拉取配额，与 signIn 对称
+    let credits: number | undefined;
+    try {
+      const usage = await apiRequest<{ quota: number }>("/api/usage/token");
+      credits = usage.quota;
+    } catch {
+      // 静默失败
+    }
+    const u: User = {
+      userId: data.user_id,
+      username: data.username,
+      phone: data.phone ?? "",
+      hasPassword: data.has_password,
+      credits,
+    };
+    saveUser(u);
+    saveTokens(data.access_token, data.refresh_token);
+    setUser(u);
+    setLoginOpen(false);
+    const exec = executorRef.current;
+    if (exec) {
+      executorRef.current = null;
+      setPendingAction(null);
+      exec();
+    }
+  }, []);
+
   const signOut = useCallback(() => {
     clearUser();
     clearTokens();
@@ -213,6 +251,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     pendingAction,
     requireAuth,
     signIn,
+    signUp,
     signOut,
     refreshUser,
     updateLocalUser,
