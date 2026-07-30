@@ -13,9 +13,9 @@ import type { ToolbarFlyoutItem } from "./components/ToolbarFlyout";
 import {
   AtSign,
   AudioLines,
+  BarChart3,
   Box,
   Download,
-  Import,
   Info,
   Library,
   Lightbulb,
@@ -137,12 +137,12 @@ export const AUDIO_FLYOUT_ITEMS = AUDIO_SUB_MODES.map((m) => ({
 }));
 
 /**
- * 资产库按钮悬浮列表清单（IK55VS）：导入卡片(置灰,功能在 IK55VX) + 五类参考卡。
+ * 资产库按钮悬浮列表清单（IK55VS）：共享资产(IK55VX 卡片库选择器) + 五类参考卡。
  * id/label 源自 constants.REFERENCE_CARD_TYPES，此处只补图标 JSX（与 AUDIO_FLYOUT_ITEMS 同模式）。
  */
 const ASSET_LIBRARY_FLYOUT_ICONS: Record<string, ReactNode> = {
   import: (
-    <Import
+    <BarChart3
       width={15}
       height={15}
       stroke="rgba(255, 255, 255, 0.7)"
@@ -193,9 +193,7 @@ const ASSET_LIBRARY_FLYOUT_ICONS: Record<string, ReactNode> = {
 export const ASSET_LIBRARY_FLYOUT_ITEMS: ToolbarFlyoutItem[] = [
   {
     id: "import",
-    label: "导入卡片",
-    disabled: true,
-    hint: "后续",
+    label: "共享资产",
     icon: ASSET_LIBRARY_FLYOUT_ICONS.import,
   },
   ...REFERENCE_CARD_TYPES.map((t) => ({
