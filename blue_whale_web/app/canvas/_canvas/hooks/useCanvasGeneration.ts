@@ -81,7 +81,11 @@ export type UseCanvasGenerationDeps = {
       data?: Partial<CanvasNodeData>;
     },
   ) => string;
-  patchNode: (id: string, patch: Partial<CanvasNodeData>) => void;
+  patchNode: (
+    id: string,
+    patch: Partial<CanvasNodeData>,
+    options?: { persist?: boolean },
+  ) => void;
   patchNodeAndSave: (
     id: string,
     patch: Partial<CanvasNodeData>,
@@ -153,7 +157,8 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
       }
       jobs.start(jobId, {
         onProgress: (progress) => {
-          patchNode(nodeId, { progress });
+          // progress 是轮询瞬时态，避免每个 tick 都 PUT 整张 Canvas。
+          patchNode(nodeId, { progress }, { persist: false });
           if (kind === "video") {
             setVideoJob({ id: jobId, status: "processing", error: null });
           }
