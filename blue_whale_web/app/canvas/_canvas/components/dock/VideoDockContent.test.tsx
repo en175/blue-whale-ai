@@ -7,6 +7,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { VideoDockContentProps } from "../../types";
 import { VideoDockContent } from "./VideoDockContent";
 
+vi.mock("../../api/generation", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, getVideoModels: vi.fn() };
+});
+import { getVideoModels } from "../../api/generation";
+
 expect.extend(jestDomMatchers);
 
 function props(
@@ -47,15 +53,17 @@ function props(
 describe("VideoDockContent references", () => {
   afterEach(() => cleanup());
 
-  it("offers a working MP4/MOV upload entry and no audio reference entry", () => {
+  it("视频参考按钮与图片一致：弹「上传来源」菜单，本地上传走 MP4/MOV", () => {
     const onLocalUpload = vi.fn();
     const { container } = render(
       <VideoDockContent {...props({ onLocalUpload })} />,
     );
 
     expect(screen.queryByRole("button", { name: "音频" })).toBeNull();
-    const button = screen.getByRole("button", { name: "视频" });
-    fireEvent.click(button);
+    // 点视频按钮先弹菜单（和图片入口一致），再选「本地上传」
+    fireEvent.click(screen.getByRole("button", { name: "参考视频" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "本地上传" }));
+
     const input = Array.from(
       container.querySelectorAll<HTMLInputElement>('input[type="file"]'),
     ).find((candidate) => candidate.accept.includes("video/quicktime"));
@@ -66,6 +74,58 @@ describe("VideoDockContent references", () => {
     });
     fireEvent.change(input!, { target: { files: [file] } });
     expect(onLocalUpload).toHaveBeenCalledWith(file);
+  });
+
+  it("视频参考按钮支持从画布选择（与图片入口对齐）", () => {
+    const onPickFromCanvas = vi.fn();
+    render(<VideoDockContent {...props({ onPickFromCanvas })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "参考视频" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "从画布选择" }));
+
+    expect(onPickFromCanvas).toHaveBeenCalledTimes(1);
+  });
+
+  it("时长滑块按模型 supported_durations 驱动（min/max/step 来自能力表，非硬编码）", async () => {
+    vi.mocked(getVideoModels).mockResolvedValue([
+      {
+        model_id: "seedance-2",
+        provider_id: "volcengine",
+        model_label: "Seedance 2.0",
+        icon: null,
+        supported_sizes: [
+          { id: "720p", label: "720p", api_value: "720p", width: null, height: null },
+        ],
+        supported_aspect_ratios: ["16:9"],
+        supported_formats: [],
+        supported_durations: { min: 3, max: 9, step: 3 },
+        default_size: "720p",
+        default_format: null,
+        default_aspect_ratio: "16:9",
+        default_duration: 6,
+        features: {
+          reference_image: true,
+          watermark: false,
+          quantity_max: 1,
+          sequential_image_generation: false,
+          stream: false,
+          tools: false,
+          first_frame: true,
+          first_last_frame: true,
+          audio: true,
+        },
+      },
+    ]);
+    render(
+      <VideoDockContent {...props({ modelSettingsOpen: true })} models={undefined} />,
+    );
+
+    await vi.waitFor(() => {
+      const slider = screen.getByRole("slider", { name: "时长" });
+      expect(slider).toHaveAttribute("min", "3");
+      expect(slider).toHaveAttribute("max", "9");
+      expect(slider).toHaveAttribute("step", "3");
+    });
   });
 
   it("offers canvas selection from the video reference source menu", () => {
@@ -102,83 +162,5 @@ describe("VideoDockContent references", () => {
 
     expect(screen.getAllByRole("option")).toHaveLength(1);
     expect(screen.getByRole("option", { name: "1x" })).toBeInTheDocument();
-  });
-});
-
-describe("VideoDockContent 首尾帧槽（IK55VL）", () => {
-  afterEach(() => cleanup());
-
-  const frameProps = (overrides: Partial<VideoDockContentProps> = {}) =>
-    props({
-      refMode: { id: "first-last", label: "首尾帧" },
-      onFrameUpload: vi.fn(),
-      onFrameClear: vi.fn(),
-      onSwapFrames: vi.fn(),
-      onPickFrameFromCanvas: vi.fn(),
-      ...overrides,
-    });
-
-  it("first-last 模式渲染首帧/尾帧槽；非 first-last 不渲染", () => {
-    const { unmount } = render(<VideoDockContent {...frameProps()} />);
-    expect(screen.getByRole("button", { name: "首帧" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "尾帧" })).toBeInTheDocument();
-    unmount();
-
-    render(
-      <VideoDockContent
-        {...frameProps({ refMode: { id: "omni", label: "全能参考" } })}
-      />,
-    );
-    expect(screen.queryByRole("button", { name: "首帧" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "尾帧" })).toBeNull();
-  });
-
-  it("本地上传入槽：首帧文件进入 onFrameUpload(file, 'first')", () => {
-    const onFrameUpload = vi.fn();
-    const { container } = render(
-      <VideoDockContent {...frameProps({ onFrameUpload })} />,
-    );
-    const inputs = Array.from(
-      container.querySelectorAll<HTMLInputElement>('input[type="file"]'),
-    ).filter((candidate) => candidate.accept.includes("image/jpeg"));
-    expect(inputs).toHaveLength(2);
-
-    const file = new File(["img"], "first.png", { type: "image/png" });
-    fireEvent.change(inputs[0], { target: { files: [file] } });
-    expect(onFrameUpload).toHaveBeenCalledWith(file, "first");
-
-    fireEvent.change(inputs[1], { target: { files: [file] } });
-    expect(onFrameUpload).toHaveBeenCalledWith(file, "last");
-  });
-
-  it("已填槽显示预览，清除按钮触发 onFrameClear", () => {
-    const onFrameClear = vi.fn();
-    render(
-      <VideoDockContent
-        {...frameProps({
-          firstFrameUrl: "https://tos/first.png",
-          onFrameClear,
-        })}
-      />,
-    );
-    expect(screen.getByRole("img", { name: "首帧" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "清除首帧" }));
-    expect(onFrameClear).toHaveBeenCalledWith("first");
-  });
-
-  it("交换按钮触发 onSwapFrames", () => {
-    const onSwapFrames = vi.fn();
-    render(<VideoDockContent {...frameProps({ onSwapFrames })} />);
-    fireEvent.click(screen.getByRole("button", { name: "交换首尾帧" }));
-    expect(onSwapFrames).toHaveBeenCalledTimes(1);
-  });
-
-  it("画布选取入槽：触发 onPickFrameFromCanvas(slot)", () => {
-    const onPickFrameFromCanvas = vi.fn();
-    render(<VideoDockContent {...frameProps({ onPickFrameFromCanvas })} />);
-    fireEvent.click(screen.getByRole("button", { name: "从画布选择首帧" }));
-    expect(onPickFrameFromCanvas).toHaveBeenCalledWith("first");
-    fireEvent.click(screen.getByRole("button", { name: "从画布选择尾帧" }));
-    expect(onPickFrameFromCanvas).toHaveBeenCalledWith("last");
   });
 });

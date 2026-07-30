@@ -27,13 +27,43 @@ import {
   VIDEO_DURATION_MIN,
   VIDEO_DURATION_MAX,
   VIDEO_DURATION_STEP,
-  VIDEO_DURATION_TICKS,
   REF_MODES,
   QUANTITIES,
 } from "../../constants";
 import type { VideoDockContentProps } from "../../types";
-import { DockMediaThumb, FrameUploadButton, MediaUploadButton } from "./parts";
+import { DockMediaThumb, FrameUploadButton } from "./parts";
 import { UploadSourceMenu } from "./UploadSourceMenu";
+
+/** 时长边界：优先用模型 supported_durations，缺省回落硬编码常量。 */
+function durationBounds(cap: ImageModelCapability | undefined) {
+  const d = cap?.supported_durations;
+  return d
+    ? { min: d.min, max: d.max, step: d.step }
+    : { min: VIDEO_DURATION_MIN, max: VIDEO_DURATION_MAX, step: VIDEO_DURATION_STEP };
+}
+function durationTicks(cap: ImageModelCapability | undefined) {
+  const { min, max, step } = durationBounds(cap);
+  const ticks: number[] = [];
+  for (let v = min; v <= max; v += step) ticks.push(v);
+  return ticks;
+}
+/** 切模型时把时长收进新区间：在区间内保留，否则回 default_duration（再不行回 min）。 */
+function resolveDuration(cap: ImageModelCapability | undefined, current: number) {
+  const { min, max } = durationBounds(cap);
+  if (current >= min && current <= max) return current;
+  const def = cap?.default_duration;
+  if (def != null && def >= min && def <= max) return def;
+  return min;
+}
+
+/** 是否 Seedance 2.0 系模型——只有它们支持参考视频（对齐 worker validateReferences
+ *  的 isSeedance2Model，video-job-runner.ts）。TODO: 改用 capability reference_video 字段。 */
+function isSeedance2Model(modelId: string | undefined): boolean {
+  return (
+    !!modelId &&
+    (modelId === "seedance-2" || /^doubao-seedance-2-0(?:-|$)/.test(modelId))
+  );
+}
 
 export function VideoDockContent(props: VideoDockContentProps) {
   const {
@@ -113,6 +143,16 @@ export function VideoDockContent(props: VideoDockContentProps) {
     VIDEO_ASPECT_RATIOS;
   const quantityMax =
     injectedQuantityMax ?? selectedCapability?.features.quantity_max ?? 1;
+  const { min: durMin, max: durMax, step: durStep } =
+    durationBounds(selectedCapability);
+  const durTicks = durationTicks(selectedCapability);
+  // 首尾帧 ref 模式仅在该模型支持 first_last_frame 时可选。
+  const refModeOptions = REF_MODES.filter(
+    (m) => m.id !== "first-last" || selectedCapability?.features.first_last_frame !== false,
+  );
+  // 参考视频：只有 Seedance 2.0 支持参考视频（镜像 worker isSeedance2Model，
+  // video-job-runner.ts validateReferences）。TODO: 改用 capability reference_video 字段。
+  const supportsReferenceVideo = isSeedance2Model(selectedModel?.id);
 
   useEffect(() => {
     if (injectedModels) return;
@@ -162,6 +202,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
         ) {
           setQuantity(`${capability.features.quantity_max}x`);
         }
+        setDuration(resolveDuration(capability, duration));
       })
       .catch((error) => {
         console.error("getVideoModels failed", error);
@@ -213,25 +254,39 @@ export function VideoDockContent(props: VideoDockContentProps) {
     ) {
       setQuantity(`${capability.features.quantity_max}x`);
     }
+    setDuration(resolveDuration(capability, duration));
+    if (refMode.id === "first-last" && !capability.features.first_last_frame) {
+      setRefMode(REF_MODES[0]);
+    }
   };
 
-  // 上传来源菜单（参考图占位 + 加号共用）
+  // 上传来源菜单（参考图占位 + 参考视频按钮 + 加号共用）。kind 决定「本地上传」打开哪个 file input。
   const localFileRef = useRef<HTMLInputElement>(null);
+  const videoFileRef = useRef<HTMLInputElement>(null);
   const placeholderRef = useRef<HTMLButtonElement>(null);
+  const videoTriggerRef = useRef<HTMLButtonElement>(null);
   const plusRef = useRef<HTMLButtonElement>(null);
   const uploadTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
+  const [uploadKind, setUploadKind] = useState<"image" | "video">("image");
 
-  const openUploadMenuFrom = (ref: React.RefObject<HTMLButtonElement | null>) => {
+  const openUploadMenuFrom = (
+    ref: React.RefObject<HTMLButtonElement | null>,
+    kind: "image" | "video" = "image",
+  ) => {
     uploadTriggerRef.current = ref.current;
+    setUploadKind(kind);
     setUploadMenuOpen(true);
   };
-  const handleTriggerClick = (ref: React.RefObject<HTMLButtonElement | null>) => {
+  const handleTriggerClick = (
+    ref: React.RefObject<HTMLButtonElement | null>,
+    kind: "image" | "video" = "image",
+  ) => {
     if (isPicking) {
       onExitPick?.();
       return;
     }
-    openUploadMenuFrom(ref);
+    openUploadMenuFrom(ref, kind);
   };
   const handleLocalFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -325,11 +380,22 @@ export function VideoDockContent(props: VideoDockContentProps) {
         aria-hidden="true"
         onChange={handleLocalFileChange}
       />
+      <input
+        ref={videoFileRef}
+        type="file"
+        accept=".mp4,.mov,video/mp4,video/quicktime"
+        multiple
+        className="sr-only"
+        aria-hidden="true"
+        onChange={handleLocalFileChange}
+      />
       <UploadSourceMenu
         triggerRef={uploadTriggerRef}
         open={uploadMenuOpen}
         onClose={() => setUploadMenuOpen(false)}
-        onLocalUpload={() => localFileRef.current?.click()}
+        onLocalUpload={() =>
+          (uploadKind === "video" ? videoFileRef : localFileRef).current?.click()
+        }
         onPickFromCanvas={() => onPickFromCanvas?.()}
       />
       <div
@@ -464,13 +530,38 @@ export function VideoDockContent(props: VideoDockContentProps) {
                         </button>
                       </div>
                     )}
-                  <span style={{ color: "rgba(255, 255, 255, 0.22)", fontSize: 14, lineHeight: 1 }}>·</span>
-                  <MediaUploadButton
-                    label="视频"
-                    accept=".mp4,.mov,video/mp4,video/quicktime"
-                    icon={<Video width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />}
-                    onFiles={(file) => onLocalUpload?.(file)}
-                  />
+                  {supportsReferenceVideo && (
+                    <>
+                      <span style={{ color: "rgba(255, 255, 255, 0.22)", fontSize: 14, lineHeight: 1 }}>·</span>
+                      <button
+                        ref={videoTriggerRef}
+                        type="button"
+                        aria-label="参考视频"
+                        aria-haspopup="menu"
+                        aria-expanded={uploadMenuOpen && uploadKind === "video"}
+                        onClick={() => handleTriggerClick(videoTriggerRef, "video")}
+                        style={{
+                          width: 44,
+                          height: 44,
+                          borderRadius: 9,
+                          border: "1px solid rgba(255, 255, 255, 0.02)",
+                          background: "rgba(255, 255, 255, 0.043)",
+                          color: "rgba(255, 255, 255, 0.62)",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          padding: 0,
+                          cursor: "pointer",
+                          opacity: 1,
+                          transition: "background 120ms, color 120ms",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Video width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -887,7 +978,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
               gap: 0,
             }}
           >
-            {REF_MODES.map((m) => {
+            {refModeOptions.map((m) => {
               const selected = refMode.id === m.id;
               return (
                 <button
@@ -1172,9 +1263,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
               </div>
               <input
                 className="tc-duration-slider__input"
-                min={VIDEO_DURATION_MIN}
-                max={VIDEO_DURATION_MAX}
-                step={VIDEO_DURATION_STEP}
+                min={durMin}
+                max={durMax}
+                step={durStep}
                 aria-label="时长"
                 aria-valuetext={`${duration}s`}
                 type="range"
@@ -1182,19 +1273,19 @@ export function VideoDockContent(props: VideoDockContentProps) {
                 onChange={(e) => setDuration(Number(e.target.value))}
                 style={{
                   ["--tc-duration-slider-progress" as string]: `${
-                    ((duration - VIDEO_DURATION_MIN) / (VIDEO_DURATION_MAX - VIDEO_DURATION_MIN)) * 100
+                    ((duration - durMin) / (durMax - durMin)) * 100
                   }%`,
                 }}
               />
               <div className="tc-duration-slider__ticks" aria-hidden="true">
                 <div className="tc-duration-slider__tick-track">
-                  {VIDEO_DURATION_TICKS.map((t) => (
+                  {durTicks.map((t) => (
                     <span
                       key={t}
                       className={`tc-duration-slider__tick${t === duration ? " tc-duration-slider__tick--active" : ""}`}
                       style={{
                         ["--tc-duration-slider-tick-position" as string]: `${
-                          ((t - VIDEO_DURATION_MIN) / (VIDEO_DURATION_MAX - VIDEO_DURATION_MIN)) * 100
+                          ((t - durMin) / (durMax - durMin)) * 100
                         }%`,
                       }}
                     />
@@ -1202,8 +1293,8 @@ export function VideoDockContent(props: VideoDockContentProps) {
                 </div>
               </div>
               <div className="tc-duration-slider__limits" aria-hidden="true">
-                <span>{VIDEO_DURATION_MIN}s</span>
-                <span>{VIDEO_DURATION_MAX}s</span>
+                <span>{durMin}s</span>
+                <span>{durMax}s</span>
               </div>
             </div>
 
