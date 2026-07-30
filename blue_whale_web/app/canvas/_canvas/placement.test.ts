@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   findPlacement,
+  pickReferenceDropTarget,
   DEFAULT_NODE_WIDTH,
   DEFAULT_NODE_HEIGHT,
   DEFAULT_GAP,
@@ -111,5 +112,42 @@ describe("findPlacement / 视口中心锚 (D2)", () => {
       gap,
     });
     expect(p).toEqual({ x: baseX + stepX, y: baseY });
+  });
+});
+
+describe("pickReferenceDropTarget（IK55VT 通道一：画布拖素材上参考卡落槽）", () => {
+  it("图片素材（有 assetId）拖到参考卡上 → 返回参考卡 id", () => {
+    expect(
+      pickReferenceDropTarget({ kind: "image", assetId: "9" }, [
+        { id: "n_img2", kind: "image" },
+        { id: "r1", kind: "reference" },
+      ]),
+    ).toBe("r1");
+  });
+
+  it("无 assetId 的占位图片节点 → null（生成中不可落槽）", () => {
+    expect(
+      pickReferenceDropTarget({ kind: "image" }, [
+        { id: "r1", kind: "reference" },
+      ]),
+    ).toBeNull();
+  });
+
+  it("非图片 kind（video/audio/text/reference）→ null", () => {
+    for (const kind of ["video", "audio", "text", "reference"]) {
+      expect(
+        pickReferenceDropTarget({ kind, assetId: "9" }, [
+          { id: "r1", kind: "reference" },
+        ]),
+      ).toBeNull();
+    }
+  });
+
+  it("相交候选中无参考卡 → null", () => {
+    expect(
+      pickReferenceDropTarget({ kind: "image", assetId: "9" }, [
+        { id: "n_img2", kind: "image" },
+      ]),
+    ).toBeNull();
   });
 });

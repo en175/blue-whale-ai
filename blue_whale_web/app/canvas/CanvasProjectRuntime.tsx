@@ -13,7 +13,12 @@ import { useAuth } from "@/components/auth/AuthContext";
 import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
 import { toast } from "@/components/Toast";
 import { uploadAsset } from "@/lib/assets";
-import { UPLOAD_ACCEPT, selectUploadFiles } from "@/lib/uploadRules";
+import {
+  IMAGE_UPLOAD_ACCEPT,
+  UPLOAD_ACCEPT,
+  selectUploadFiles,
+  validateUploadFile,
+} from "@/lib/uploadRules";
 import { wireInteger, type WireInteger } from "@/lib/wire-integer";
 
 import { useCanvasStore } from "./_canvas/store";
@@ -65,6 +70,21 @@ function userFriendlyErrorMessage(e: unknown): string {
   if (msg.includes("ARK_API_KEY") || msg.includes("数据库"))
     return "服务暂时不可用，请稍后重试";
   return "生成失败，请稍后重试";
+}
+
+/** IK55VT：图片自然宽高比探测（参考图落槽存 aspect，已填态高度按比自适应）；失败回 undefined。 */
+function probeImageAspect(url: string): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () =>
+      resolve(
+        img.naturalWidth > 0 && img.naturalHeight > 0
+          ? img.naturalWidth / img.naturalHeight
+          : undefined,
+      );
+    img.onerror = () => resolve(undefined);
+    img.src = url;
+  });
 }
 
 export function CanvasProjectRuntime({
@@ -218,6 +238,18 @@ export function CanvasProjectRuntime({
   const uploadFilesRef = useRef(
     new Map<string, { file: File; previewUrl: string }>(),
   );
+  /** IK55VT 通道三：参考卡「生成图片」目标节点 id（一次性消费；无预填开 Dock 时武装）。 */
+  const referenceGenTargetRef = useRef<string | null>(null);
+  const consumeReferenceGenTarget = useCallback(() => {
+    const target = referenceGenTargetRef.current;
+    referenceGenTargetRef.current = null;
+    return target;
+  }, []);
+  // IK55VT：Dock 关闭或切离 image 模式时解除武装（防陈旧目标劫持后续图像生成）
+  useEffect(() => {
+    if (!isBottomDockOpen || bottomDockMode !== "image")
+      referenceGenTargetRef.current = null;
+  }, [isBottomDockOpen, bottomDockMode]);
   /** 同一 tick 内连续 addNode（多选上传）时，nodes state 尚未更新，已放占位累积在此防重叠。 */
   const extraPlacedRef = useRef<Rect[]>([]);
   useEffect(() => {
@@ -299,6 +331,7 @@ export function CanvasProjectRuntime({
     patchNode,
     patchNodeAndSave,
     addAsset,
+    consumeReferenceGenTarget,
     projectId: pid,
   });
 
@@ -308,6 +341,8 @@ export function CanvasProjectRuntime({
       const src = node.data.assetId
         ? assets[node.data.assetId]?.src
         : undefined;
+      // 其他路径打开 Dock 时解除参考卡生成目标武装（防陈旧目标劫持后续生成）
+      referenceGenTargetRef.current = null;
       switch (actionId) {
         case "refresh": {
           const gen = node.data.recipe?.generation;
@@ -438,6 +473,97 @@ export function CanvasProjectRuntime({
       patchNode(id, { description: text });
     },
     [patchNode],
+  );
+
+  // IK55VT 参考卡卡名 commit：双击改名失焦写回 name
+  const onEditReferenceName = useCallback(
+    (id: string, name: string) => {
+      patchNode(id, { name });
+    },
+    [patchNode],
+  );
+
+  // IK55VT 删除参考图：清空槽位回空态（历史 description 保留）
+  const handleRemoveReferenceImage = useCallback(
+    (id: string) => {
+      patchNode(id, {
+        referenceAssetId: undefined,
+        referenceImageAspect: undefined,
+      });
+    },
+    [patchNode],
+  );
+
+  // IK55VT 通道一：画布图片素材拖放上卡落槽（宽高比取 asset 尺寸，回退节点框尺寸）
+  const handleReferenceImageDrop = useCallback(
+    (refNodeId: string, sourceNodeId: string) => {
+      const source = nodes.find((n) => n.id === sourceNodeId);
+      const assetId = source?.data.assetId;
+      if (!source || !assetId) return;
+      const asset = assets[assetId];
+      const aspect =
+        asset?.width && asset.height
+          ? asset.width / asset.height
+          : source.width && source.height
+            ? source.width / source.height
+            : undefined;
+      patchNode(refNodeId, {
+        referenceAssetId: assetId,
+        referenceImageAspect: aspect,
+      });
+    },
+    [nodes, assets, patchNode],
+  );
+
+  // IK55VT 通道三：参考卡「生成图片」→ 武装目标 + 无预填开图像 Dock（结果回落卡槽，见 useCanvasGeneration）
+  const handleGenerateReferenceImage = useCallback((id: string) => {
+    referenceGenTargetRef.current = id;
+    setBottomDockMode("image");
+    setIsBottomDockOpen(true);
+    setDockFocusSignal((n) => n + 1);
+  }, []);
+
+  // IK55VT 通道二：参考卡「添加图片」→ 隐藏 file input（仅图片白名单）→ uploadAsset 落槽（不建画布节点）
+  const refImageInputRef = useRef<HTMLInputElement>(null);
+  const pendingRefUploadNodeIdRef = useRef<string | null>(null);
+  const handleUploadReferenceImage = useCallback((id: string) => {
+    pendingRefUploadNodeIdRef.current = id;
+    const input = refImageInputRef.current;
+    if (!input) return;
+    input.accept = IMAGE_UPLOAD_ACCEPT;
+    input.click();
+  }, []);
+  const handleRefImageFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      const nodeId = pendingRefUploadNodeIdRef.current;
+      pendingRefUploadNodeIdRef.current = null;
+      if (!file || !nodeId || !pid) return;
+      const validation = validateUploadFile(file);
+      if (!validation.ok || validation.kind !== "image") {
+        toast.error(validation.ok ? "仅支持图片格式" : validation.reason);
+        return;
+      }
+      try {
+        const result = await uploadAsset(file, Number(pid), "image");
+        const aspect = await probeImageAspect(result.url);
+        const assetId = String(result.id);
+        addAsset({
+          id: assetId,
+          kind: "image",
+          src: result.url,
+          source: "uploaded",
+        });
+        patchNode(nodeId, {
+          referenceAssetId: assetId,
+          referenceImageAspect: aspect,
+        });
+      } catch (err) {
+        toast.error(userFriendlyErrorMessage(err));
+      }
+    },
+    [pid, addAsset, patchNode],
   );
 
   // IK55VH 富文本卡 @ 建议素材：画布内 image/video/audio 节点投影
@@ -807,6 +933,7 @@ export function CanvasProjectRuntime({
         // IK55VS：资产库按钮 toggle 悬浮列表（导入卡片 + 五类参考卡）
         setAssetFlyoutAnchor((a) => (a ? null : (el ?? null)));
       } else if (id === "ai-image") {
+        referenceGenTargetRef.current = null; // 工具栏开 Dock：解除参考卡生成目标
         setBottomDockMode("image");
         setIsBottomDockOpen((open) =>
           bottomDockMode === "image" && open ? false : true,
@@ -927,6 +1054,15 @@ export function CanvasProjectRuntime({
         onChange={handleFileChange}
         aria-hidden="true"
       />
+      {/* IK55VT 参考卡「添加图片」专用 input（仅图片白名单，单选；accept 命令式设置） */}
+      <input
+        ref={refImageInputRef}
+        type="file"
+        accept={IMAGE_UPLOAD_ACCEPT}
+        className="sr-only"
+        onChange={(e) => void handleRefImageFileChange(e)}
+        aria-hidden="true"
+      />
       <TopBar
         activeProject={activeProject}
         projects={projects}
@@ -959,6 +1095,11 @@ export function CanvasProjectRuntime({
             onNodeCancelJob={handleNodeCancelJob}
             onEditRichText={onEditRichText}
             onEditDescription={onEditDescription}
+            onEditReferenceName={onEditReferenceName}
+            onUploadReferenceImage={handleUploadReferenceImage}
+            onGenerateReferenceImage={handleGenerateReferenceImage}
+            onRemoveReferenceImage={handleRemoveReferenceImage}
+            onReferenceImageDrop={handleReferenceImageDrop}
             mentionItems={textMentionItems}
             picking={pickingFor !== null}
             pickingAccept={pickingFor ? dockAccept(pickingFor) : undefined}

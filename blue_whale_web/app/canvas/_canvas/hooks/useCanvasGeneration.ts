@@ -92,6 +92,8 @@ export type UseCanvasGenerationDeps = {
     src?: string;
     source?: "generated" | "uploaded";
   }) => void;
+  /** IK55VT 通道三：取出并清除参考卡「生成图片」目标节点 id（一次性消费；null=无目标走画布占位）。 */
+  consumeReferenceGenTarget?: () => string | null;
   projectId: string;
 };
 
@@ -104,6 +106,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
     patchNode,
     patchNodeAndSave,
     addAsset,
+    consumeReferenceGenTarget,
     projectId,
   } = deps;
   const jobs = useVideoJobs(projectId); // 通用 job 轮询（image/video 共用，原名 useVideoJobs 遗留）
@@ -220,28 +223,6 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
           const s = args.settings;
           const ar = parseAspectRatio(s.aspectRatio.id);
           const referenceImages = args.referenceImages ?? [];
-          const imageRefs: RecipeInput[] = referenceImages.map((u) => ({
-            kind: "image",
-            url: u,
-          }));
-          const imageRecipe = buildGenerationRecipe({
-            mediaKind: "image",
-            model: s.modelId,
-            params: {
-              aspectRatio: s.aspectRatio.id,
-              resolution: s.size,
-              quantity: parseQuantity(s.quantity),
-            },
-            inputs: {
-              prompt: { kind: "text", text: trimmed },
-              references: imageRefs.length ? imageRefs : undefined,
-            },
-          });
-          placeholderId = addNode("image", {
-            width: ar.width,
-            height: ar.height,
-            data: { content: trimmed, status: "running", recipe: imageRecipe },
-          });
           const payload: CreateProjectGenerationJobPayload = {
             type: "image",
             input_asset_ids: args.inputAssetIds ?? [],
@@ -255,15 +236,81 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
               sequential_image_generation: s.sequential,
             },
           };
+          // IK55VT 通道三：参考卡「生成图片」目标存在 → 不建画布占位，成功结果直接回落该卡参考图槽
+          const refTarget = consumeReferenceGenTarget?.() ?? null;
+          let placeholder: { id: string; recipe: NodeRecipe } | null = null;
+          if (!refTarget) {
+            const imageRefs: RecipeInput[] = referenceImages.map((u) => ({
+              kind: "image",
+              url: u,
+            }));
+            const imageRecipe = buildGenerationRecipe({
+              mediaKind: "image",
+              model: s.modelId,
+              params: {
+                aspectRatio: s.aspectRatio.id,
+                resolution: s.size,
+                quantity: parseQuantity(s.quantity),
+              },
+              inputs: {
+                prompt: { kind: "text", text: trimmed },
+                references: imageRefs.length ? imageRefs : undefined,
+              },
+            });
+            placeholderId = addNode("image", {
+              width: ar.width,
+              height: ar.height,
+              data: {
+                content: trimmed,
+                status: "running",
+                recipe: imageRecipe,
+              },
+            });
+            placeholder = { id: placeholderId, recipe: imageRecipe };
+          }
           const { generation_job_id } = await createProjectGenerationJob(
             wireInteger(projectId),
             payload,
             newIdempotencyKey(),
           );
-          await patchNodeAndSave(placeholderId, {
-            taskId: String(generation_job_id),
-          });
-          startJob(placeholderId, generation_job_id, "image", imageRecipe);
+          if (refTarget) {
+            // 先按请求档宽高比落槽（布局预留），再按生成图真实尺寸校正
+            const refAspect = ar.height > 0 ? ar.width / ar.height : undefined;
+            jobs.start(generation_job_id, {
+              onSucceeded: ({ assetId, assetUrl }) => {
+                addAsset({
+                  id: assetId,
+                  kind: "image",
+                  src: assetUrl,
+                  source: "generated",
+                });
+                patchNode(refTarget, {
+                  referenceAssetId: assetId,
+                  referenceImageAspect: refAspect,
+                });
+                const probe = new Image();
+                probe.onload = () => {
+                  if (probe.naturalWidth > 0 && probe.naturalHeight > 0)
+                    patchNode(refTarget, {
+                      referenceImageAspect:
+                        probe.naturalWidth / probe.naturalHeight,
+                    });
+                };
+                probe.src = assetUrl;
+              },
+              onFailed: (message) => setGenerateError(message),
+            });
+          } else if (placeholder) {
+            await patchNodeAndSave(placeholder.id, {
+              taskId: String(generation_job_id),
+            });
+            startJob(
+              placeholder.id,
+              generation_job_id,
+              "image",
+              placeholder.recipe,
+            );
+          }
           setGenerating(false); // 转后台轮询，不阻塞并发生成
         } else if (args.mode === "video") {
           const s = args.settings;
@@ -413,7 +460,17 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
         setGenerating(false);
       }
     },
-    [addNode, patchNode, patchNodeAndSave, setNodeAsset, startJob, projectId],
+    [
+      addNode,
+      patchNode,
+      patchNodeAndSave,
+      addAsset,
+      consumeReferenceGenTarget,
+      jobs,
+      setNodeAsset,
+      startJob,
+      projectId,
+    ],
   );
 
   // 节点 toolbar「生成」：resolveInputs 取上游 text prompt（连线驱动）→ 默认 model 生成（image/video 均轮询）

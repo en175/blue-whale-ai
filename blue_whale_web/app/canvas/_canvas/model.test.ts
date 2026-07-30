@@ -485,6 +485,51 @@ describe("canvas-doc-model", () => {
     expect(node.data.cardType).toBeUndefined();
     expect(node.data.description).toBeUndefined();
   });
+
+  it("IK55VT reference 节点 name/referenceAssetId/referenceImageAspect serialize→parse round-trip", () => {
+    const doc = createEmptyDoc("c1");
+    doc.nodes.push({
+      id: "r1",
+      type: "reference",
+      position: { x: 0, y: 0 },
+      width: 280,
+      height: 240,
+      data: {
+        kind: "reference",
+        cardType: "character",
+        name: "Zeus",
+        description: "外观描述",
+        referenceAssetId: "77",
+        referenceImageAspect: 1.5,
+      },
+    });
+    const arr = JSON.parse(serialize(doc));
+    expect(arr[0].name).toBe("Zeus");
+    expect(arr[0].referenceAssetId).toBe(77);
+    expect(arr[0].referenceImageAspect).toBe(1.5);
+    const back = parse(serialize(doc));
+    expect(back.nodes[0].data.name).toBe("Zeus");
+    expect(back.nodes[0].data.referenceAssetId).toBe("77");
+    expect(back.nodes[0].data.referenceImageAspect).toBe(1.5);
+  });
+
+  it("老数据无 name/referenceAssetId/referenceImageAspect → undefined 不崩（向前兼容）", () => {
+    const old = JSON.stringify([
+      {
+        id: "r1",
+        type: "reference",
+        position: { x: 0, y: 0 },
+        width: 280,
+        height: 240,
+        cardType: "style",
+        description: "旧描述",
+      },
+    ]);
+    const node = parse(old).nodes[0];
+    expect(node.data.name).toBeUndefined();
+    expect(node.data.referenceAssetId).toBeUndefined();
+    expect(node.data.referenceImageAspect).toBeUndefined();
+  });
 });
 
 /** IK55VH richDocToPlainText：连线进下游 prompt 的纯文本派生契约。 */
