@@ -21,7 +21,13 @@ import {
   type OnConnectEnd,
 } from "@xyflow/react";
 import type { CanvasNode, CanvasEdge, MediaKind } from "../model";
-import { MediaNode, TextNode, GroupNode, NodeActionsContext } from "./nodes";
+import {
+  MediaNode,
+  TextNode,
+  GroupNode,
+  ReferenceNode,
+  NodeActionsContext,
+} from "./nodes";
 import type { TextMentionItem } from "./nodes";
 import { SelectionBounds } from "./SelectionBounds";
 import { toolModeInteractionProps, type ToolMode } from "./toolMode";
@@ -33,6 +39,7 @@ const nodeTypes = {
   audio: MediaNode,
   text: TextNode,
   group: GroupNode,
+  reference: ReferenceNode,
 } as const;
 
 /** 右键/drop 菜单位置（x/y=画布世界坐标供建节点，screenX/Y=屏幕坐标供浮层定位）。 */
@@ -62,6 +69,8 @@ export type CanvasSurfaceProps = {
   onNodeCancelJob?: (id: string) => void;
   /** IK55VH 富文本卡 commit：richDoc + 派生纯文本写回。 */
   onEditRichText?: (id: string, richDoc: unknown, plainText: string) => void;
+  /** IK55VS 参考卡描述 commit 写回。 */
+  onEditDescription?: (id: string, text: string) => void;
   /** IK55VH 富文本卡 @ 建议素材列表。 */
   mentionItems?: TextMentionItem[];
   onPaneMenu?: (payload: MenuPayload) => void;
@@ -89,6 +98,7 @@ export function CanvasSurface({
   onNodeRemove,
   onNodeCancelJob,
   onEditRichText,
+  onEditDescription,
   mentionItems,
   onPaneMenu,
   onEdgeDropMenu,
@@ -203,6 +213,7 @@ export function CanvasSurface({
       onRemoveNode: onNodeRemove,
       onCancelJob: onNodeCancelJob,
       onEditRichText,
+      onEditDescription,
       mentionItems,
       picking,
       pickingAccept,
@@ -213,6 +224,7 @@ export function CanvasSurface({
       onNodeRemove,
       onNodeCancelJob,
       onEditRichText,
+      onEditDescription,
       mentionItems,
       picking,
       pickingAccept,
