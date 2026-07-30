@@ -15,10 +15,30 @@ const ITEMS = [
 describe("ToolbarFlyout（IK55VM 悬浮列表公共组件）", () => {
   afterEach(() => cleanup());
 
+  /** 真实锚点元素（组件渲染期直读 getBoundingClientRect，null 不渲染）。 */
+  function makeAnchor() {
+    const el = document.createElement("button");
+    document.body.appendChild(el);
+    return el;
+  }
+
   it("open=false 不渲染", () => {
     render(
       <ToolbarFlyout
         open={false}
+        anchor={makeAnchor()}
+        items={ITEMS}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("anchor=null 不渲染", () => {
+    render(
+      <ToolbarFlyout
+        open
         anchor={null}
         items={ITEMS}
         onSelect={vi.fn()}
@@ -32,7 +52,7 @@ describe("ToolbarFlyout（IK55VM 悬浮列表公共组件）", () => {
     render(
       <ToolbarFlyout
         open
-        anchor={null}
+        anchor={makeAnchor()}
         items={ITEMS}
         onSelect={vi.fn()}
         onClose={vi.fn()}
@@ -47,7 +67,7 @@ describe("ToolbarFlyout（IK55VM 悬浮列表公共组件）", () => {
     render(
       <ToolbarFlyout
         open
-        anchor={null}
+        anchor={makeAnchor()}
         items={ITEMS}
         onSelect={(id) => calls.push(`select:${id}`)}
         onClose={() => calls.push("close")}
@@ -62,7 +82,7 @@ describe("ToolbarFlyout（IK55VM 悬浮列表公共组件）", () => {
     render(
       <ToolbarFlyout
         open
-        anchor={null}
+        anchor={makeAnchor()}
         items={ITEMS}
         onSelect={vi.fn()}
         onClose={onClose}
@@ -79,7 +99,7 @@ describe("ToolbarFlyout（IK55VM 悬浮列表公共组件）", () => {
         <div data-testid="outside" />
         <ToolbarFlyout
           open
-          anchor={null}
+          anchor={makeAnchor()}
           items={ITEMS}
           onSelect={vi.fn()}
           onClose={onClose}
