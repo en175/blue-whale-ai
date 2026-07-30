@@ -2,17 +2,22 @@
 /**
  * useRechargeFlow — 充值流程状态机 hook
  *
- * 管理从选档位到支付成功的完整流程。内部用 useReducer 驱动 8 状态 FSM。
+ * 管理从选档位到支付成功的完整流程。内部用 useReducer 驱动 FSM。
  *
  * Transitions:
- *   IDLE → CREATING_ORDER → QR_READY
+ *   IDLE → CONFIRMING（选档位）→ CREATING_ORDER（确认）→ QR_READY
  *   CREATING_ORDER → PAYMENT_FAILED
  *   QR_READY → PAYMENT_SUCCESS | EXPIRED | CANCELLED
- *   EXPIRED → CREATING_ORDER (重新生成)
+ *   EXPIRED → CONFIRMING（重新选择）
  */
 import { useReducer, useCallback, useRef, useEffect } from "react";
-import { createRechargeOrder, getOrderStatus, cancelRechargeOrder } from "@/lib/api/recharge";
-import type { PaymentMethod, RechargeOrder, FlowState, RechargeTier } from "./types";
+import { createRechargeOrder, cancelRechargeOrder } from "@/lib/api/recharge";
+import type {
+  PaymentMethod,
+  RechargeOrder,
+  FlowState,
+  RechargeTier,
+} from "./types";
 
 // ---- state ----
 
@@ -39,6 +44,7 @@ const initialState: FlowStateData = {
 type Action =
   | { type: "SELECT_TIER"; tier: RechargeTier }
   | { type: "SET_PAYMENT_METHOD"; method: PaymentMethod }
+  | { type: "CONFIRM_ORDER" }
   | { type: "CREATING_ORDER" }
   | { type: "ORDER_CREATED"; order: RechargeOrder }
   | { type: "ORDER_FAILED"; error: string }
@@ -56,16 +62,16 @@ function reducer(state: FlowStateData, action: Action): FlowStateData {
       return {
         ...state,
         selectedTier: action.tier,
-        state: "CREATING_ORDER",
+        state: "CONFIRMING",
         order: null,
         error: null,
       };
 
     case "SET_PAYMENT_METHOD":
-      if (state.selectedTier) {
-        return { ...state, paymentMethod: action.method, state: "CREATING_ORDER" };
-      }
       return { ...state, paymentMethod: action.method };
+
+    case "CONFIRM_ORDER":
+      return { ...state, state: "CREATING_ORDER", error: null };
 
     case "CREATING_ORDER":
       return { ...state, state: "CREATING_ORDER", error: null };
@@ -77,7 +83,11 @@ function reducer(state: FlowStateData, action: Action): FlowStateData {
       return { ...state, state: "PAYMENT_FAILED", error: action.error };
 
     case "POLL_PAID":
-      return { ...state, state: "PAYMENT_SUCCESS", newBalance: action.newBalance };
+      return {
+        ...state,
+        state: "PAYMENT_SUCCESS",
+        newBalance: action.newBalance,
+      };
 
     case "EXPIRE":
       return { ...state, state: "EXPIRED" };
@@ -86,7 +96,7 @@ function reducer(state: FlowStateData, action: Action): FlowStateData {
       return { ...state, state: "CANCELLED" };
 
     case "REGENERATE":
-      return { ...state, state: "CREATING_ORDER", error: null };
+      return { ...state, state: "CONFIRMING", error: null };
 
     case "RESET":
       return initialState;
@@ -121,20 +131,28 @@ async function createOrder(
 export function useRechargeFlow() {
   const [flow, dispatch] = useReducer(reducer, initialState);
   const flowRef = useRef(flow);
-  flowRef.current = flow;
+  useEffect(() => {
+    flowRef.current = flow;
+  });
 
-  /** 选择档位 → 触发自动建单 */
+  /** 选择档位 → 进入确认状态 */
   const selectTier = useCallback((tier: RechargeTier) => {
     dispatch({ type: "SELECT_TIER", tier });
   }, []);
 
-  /** 切换支付方式 → 取消旧订单 + 重新建单 */
+  /** 切换支付方式。已有订单时取消旧订单并回到确认状态。 */
   const setPaymentMethod = useCallback((method: PaymentMethod) => {
-    const order = flowRef.current.order;
-    if (order?.tradeNo) {
-      cancelRechargeOrder(order.tradeNo).catch(() => {});
+    const cur = flowRef.current;
+    if (cur.order?.tradeNo) {
+      cancelRechargeOrder(cur.order.tradeNo).catch(() => {});
+      dispatch({ type: "SELECT_TIER", tier: cur.selectedTier! });
     }
     dispatch({ type: "SET_PAYMENT_METHOD", method });
+  }, []);
+
+  /** 确认下单 */
+  const confirmOrder = useCallback(() => {
+    dispatch({ type: "CONFIRM_ORDER" });
   }, []);
 
   // 当进入 CREATING_ORDER 状态时，自动调用 createOrder API
@@ -187,7 +205,7 @@ export function useRechargeFlow() {
     dispatch({ type: "CANCEL" });
   }, []);
 
-  /** 重新生成 QR → 取消旧订单 + 新建单 */
+  /** 重新生成 → 回到确认状态 */
   const regenerateQR = useCallback(() => {
     const order = flowRef.current.order;
     if (order?.tradeNo) {
@@ -205,6 +223,7 @@ export function useRechargeFlow() {
     flow,
     selectTier,
     setPaymentMethod,
+    confirmOrder,
     onPollSuccess,
     cancelOrder,
     regenerateQR,

@@ -49,8 +49,8 @@ export function TierGrid({
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchTiers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 不足拦截：档位加载完成后自动选中首个覆盖差额的档位（仅触发一次）
@@ -95,7 +95,10 @@ export function TierGrid({
       {/* ---- empty ---- */}
       {loadState === "empty" && (
         <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
-          <Store size={40} className="text-[var(--tc-muted,rgba(255,255,255,0.4))]" />
+          <Store
+            size={40}
+            className="text-[var(--tc-muted,rgba(255,255,255,0.4))]"
+          />
           <p className="text-[14px] text-[var(--tc-secondary,rgba(255,255,255,0.7))]">
             暂无可用充值档位
           </p>
@@ -127,7 +130,7 @@ export function TierGrid({
 
       {/* ---- normal: 2 列网格 ---- */}
       {loadState === "normal" && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-3">
           {tiers.map((tier) => (
             <TierCard
               key={tier.id}

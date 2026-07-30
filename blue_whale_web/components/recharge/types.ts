@@ -33,6 +33,7 @@ export type RechargeOrder = {
 /** 充值流程状态机 */
 export type FlowState =
   | "IDLE"
+  | "CONFIRMING"
   | "CREATING_ORDER"
   | "QR_READY"
   | "PAYMENT_SUCCESS"
