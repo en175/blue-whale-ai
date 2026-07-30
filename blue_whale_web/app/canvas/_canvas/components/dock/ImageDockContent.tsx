@@ -55,6 +55,8 @@ export function ImageDockContent({
     useState<ImageAspectRatio>(IMAGE_ASPECT_RATIOS[2]);
   const [webSearch, setWebSearch] = useState(false);
   const [sequential, setSequential] = useState(false);
+  // 参考图入口按模型能力显隐：不支持参考图的模型（如 Seedream 5.0 Pro）不显示上传入口。
+  const canReferenceImage = selectedModel?.features.reference_image ?? false;
 
   // 取模型默认分辨率档位（能力表 default_size，缺省回退首个）。
   const pickDefaultSize = (m: ImageModelCapability) =>
@@ -252,7 +254,7 @@ export function ImageDockContent({
                         onRemove={onRemoveMedia}
                       />
                     ))
-                  ) : (
+                  ) : canReferenceImage ? (
                     <div style={{ position: "relative", flexShrink: 0 }}>
                       <button
                         ref={placeholderRef}
@@ -289,7 +291,7 @@ export function ImageDockContent({
                         />
                       </button>
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
                 <div
@@ -358,33 +360,35 @@ export function ImageDockContent({
           position: "relative",
         }}
       >
-        <div style={{ position: "relative", flexShrink: 0 }}>
-          <button
-            ref={plusRef}
-            type="button"
-            aria-label="上传图片"
-            aria-haspopup="menu"
-            aria-expanded={uploadMenuOpen}
-            onClick={() => handleTriggerClick(plusRef)}
-            style={{
-              width: 24,
-              height: 24,
-              padding: 0,
-              border: 0,
-              borderRadius: "50%",
-              background: "rgba(255, 255, 255, 0.07)",
-              color: "rgba(255, 255, 255, 0.72)",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-              transition: "background 120ms, color 120ms",
-            }}
-          >
-            <Plus width={14} height={14} />
-          </button>
-        </div>
+        {canReferenceImage && (
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            <button
+              ref={plusRef}
+              type="button"
+              aria-label="上传图片"
+              aria-haspopup="menu"
+              aria-expanded={uploadMenuOpen}
+              onClick={() => handleTriggerClick(plusRef)}
+              style={{
+                width: 24,
+                height: 24,
+                padding: 0,
+                border: 0,
+                borderRadius: "50%",
+                background: "rgba(255, 255, 255, 0.07)",
+                color: "rgba(255, 255, 255, 0.72)",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                transition: "background 120ms, color 120ms",
+              }}
+            >
+              <Plus width={14} height={14} />
+            </button>
+          </div>
+        )}
 
         <button
           ref={settingsRef}
