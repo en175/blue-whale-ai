@@ -1,14 +1,45 @@
-import { getUserIdFromRequest } from "@/lib/auth/user-from-request";
-import { createUserDeps } from "@/lib/user/deps";
-import { handleGetMe } from "@/lib/user/handle-get-me";
-
-const JWT_SECRET =
-  process.env.JWT_SECRET ?? "blue-whale-dev-secret-key-at-least-256-bits!!";
+import {
+  accountErrorResponse,
+  bearerToken,
+  createAccountClient,
+  type AccountClient,
+} from "@/lib/account/bff";
 
 // GET /api/me
+export function createMeHandler(
+  client: Pick<AccountClient, "resolveTokenIdentity">,
+) {
+  return async function GET(request: Request) {
+    const token = bearerToken(request);
+    if (!token) {
+      return Response.json(
+        { code: 401, msg: "缺少登录凭证", data: null },
+        { status: 401 },
+      );
+    }
+    try {
+      const identity = await client.resolveTokenIdentity(token);
+      return Response.json({
+        code: 200,
+        msg: null,
+        data: {
+          user_id: identity.userId,
+          username: identity.username,
+          email: identity.email,
+          phone: "",
+          has_password: true,
+        },
+      });
+    } catch (error) {
+      return accountErrorResponse(error);
+    }
+  };
+}
+
 export async function GET(request: Request) {
-  const userId = await getUserIdFromRequest(request, JWT_SECRET);
-  if (!userId)
-    return Response.json({ code: 401, msg: "未登录或 token 已过期", data: null });
-  return Response.json(await handleGetMe(userId, createUserDeps()));
+  try {
+    return await createMeHandler(createAccountClient())(request);
+  } catch (error) {
+    return accountErrorResponse(error);
+  }
 }

@@ -1,15 +1,22 @@
 import { apiFetch } from "./api-client";
+import {
+  compareWireIntegers as compareWireInteger,
+  isWireInteger,
+  type WireInteger,
+} from "./wire-integer";
+
+export type { WireInteger } from "./wire-integer";
 
 export type ProjectSnapshot = {
   project: {
-    id: number;
+    id: WireInteger;
     name: string;
     thumb: string | null;
     created_at: string;
   };
   canvas: {
-    id: number | null;
-    project_id: number;
+    id: WireInteger | null;
+    project_id: WireInteger;
     viewport: string | null;
     nodes: string | null;
   };
@@ -20,11 +27,11 @@ export type ProjectSnapshot = {
     string,
     { asset_id: number | string; type: string; access_url: string }
   >;
-  high_watermark_cursor: number;
+  high_watermark_cursor: WireInteger;
 };
 
 export type ActiveInputRequest = {
-  input_request_id: number;
+  input_request_id: WireInteger;
   request_type: string;
   question: string | null;
   status: string;
@@ -51,7 +58,7 @@ export function deriveAnswerableClarification(
     if (
       candidate.request_type !== "creation_clarification" ||
       candidate.status !== "pending" ||
-      typeof candidate.input_request_id !== "number" ||
+      !isWireInteger(candidate.input_request_id) ||
       typeof candidate.expires_at !== "string" ||
       !(new Date(candidate.expires_at).getTime() > now.getTime())
     ) {
@@ -59,7 +66,10 @@ export function deriveAnswerableClarification(
     }
     if (
       answerable === null ||
-      candidate.input_request_id > answerable.input_request_id
+      compareWireInteger(
+        candidate.input_request_id,
+        answerable.input_request_id,
+      ) > 0
     ) {
       answerable = candidate as unknown as ActiveInputRequest;
     }
@@ -71,8 +81,8 @@ export type ProductEventEnvelope = {
   schema_version: number;
   event_id: string;
   event_type: string;
-  cursor: number;
-  project_id: number;
+  cursor: WireInteger;
+  project_id: WireInteger;
   aggregate_type: string;
   aggregate_id: string;
   aggregate_version: number;
@@ -83,9 +93,9 @@ export type ProductEventEnvelope = {
 };
 
 export type ProjectRecoveryState = {
-  projectId: number;
+  projectId: WireInteger;
   snapshot: ProjectSnapshot | null;
-  lastCursor: number;
+  lastCursor: WireInteger;
   seenEventIds: ReadonlySet<string>;
   aggregateVersions: ReadonlyMap<string, number>;
   deleted: boolean;
@@ -93,12 +103,12 @@ export type ProjectRecoveryState = {
 
 export type ProjectRecoveryTransport = {
   loadSnapshot(
-    projectId: number,
+    projectId: WireInteger,
     signal: AbortSignal,
   ): Promise<ProjectSnapshot>;
   consumeEvents(
-    projectId: number,
-    after: number,
+    projectId: WireInteger,
+    after: WireInteger,
     signal: AbortSignal,
     onEvent: (event: ProductEventEnvelope) => void,
   ): Promise<void>;
@@ -114,7 +124,7 @@ export class CursorExpiredError extends Error {
 }
 
 export function initialProjectRecoveryState(
-  projectId: number,
+  projectId: WireInteger,
 ): ProjectRecoveryState {
   return {
     projectId,
@@ -130,7 +140,7 @@ export function applySnapshot(
   state: ProjectRecoveryState,
   snapshot: ProjectSnapshot,
 ): ProjectRecoveryState {
-  if (snapshot.project.id !== state.projectId) {
+  if (compareWireInteger(snapshot.project.id, state.projectId) !== 0) {
     throw new Error("Snapshot does not belong to the requested Project");
   }
   return {
@@ -148,8 +158,8 @@ export function applyProductEvent(
   event: ProductEventEnvelope,
 ): ProjectRecoveryState {
   if (
-    event.project_id !== state.projectId ||
-    event.cursor <= state.lastCursor
+    String(event.project_id) !== String(state.projectId) ||
+    compareWireInteger(event.cursor, state.lastCursor) <= 0
   ) {
     return state;
   }
@@ -393,7 +403,7 @@ function applyUserInputRequestedEvent(
   const runId = payload.agent_run_id;
   if (
     (typeof runId !== "number" && typeof runId !== "string") ||
-    typeof payload.input_request_id !== "number"
+    !isWireInteger(payload.input_request_id)
   ) {
     return runs;
   }
@@ -425,14 +435,14 @@ function applyUserInputAnsweredEvent(
   payload: Record<string, unknown>,
 ): Array<Record<string, unknown>> {
   const requestId = payload.input_request_id;
-  if (typeof requestId !== "number") return runs;
+  if (!isWireInteger(requestId)) return runs;
   const status =
     typeof payload.status === "string" ? payload.status : "confirmed";
   return runs.map((run) => {
     const active = run.active_input_request;
     if (!active || typeof active !== "object") return run;
     const current = active as Record<string, unknown>;
-    if (current.input_request_id !== requestId) return run;
+    if (String(current.input_request_id) !== String(requestId)) return run;
     return { ...run, active_input_request: { ...current, status } };
   });
 }
@@ -541,8 +551,8 @@ function isProductEventEnvelope(value: unknown): value is ProductEventEnvelope {
     event.schema_version === 1 &&
     typeof event.event_id === "string" &&
     typeof event.event_type === "string" &&
-    typeof event.cursor === "number" &&
-    typeof event.project_id === "number" &&
+    isWireInteger(event.cursor) &&
+    isWireInteger(event.project_id) &&
     typeof event.aggregate_type === "string" &&
     typeof event.aggregate_id === "string" &&
     typeof event.aggregate_version === "number" &&
@@ -553,7 +563,7 @@ function isProductEventEnvelope(value: unknown): value is ProductEventEnvelope {
 }
 
 export async function runProjectRecovery(
-  projectId: number,
+  projectId: WireInteger,
   transport: ProjectRecoveryTransport,
   onState: (state: ProjectRecoveryState) => void,
   signal: AbortSignal,

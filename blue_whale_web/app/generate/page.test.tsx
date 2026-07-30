@@ -296,7 +296,7 @@ describe("/generate 对话式创作页", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "我的项目" }));
     await waitFor(() =>
-      expect(copyAssetToProject).toHaveBeenCalledWith(77, 9, "cmd-id"),
+      expect(copyAssetToProject).toHaveBeenCalledWith(77, "9", "cmd-id"),
     );
     await screen.findByText(/已添加到/);
     expect(screen.getByRole("link", { name: "打开项目" })).toHaveAttribute(

@@ -6,8 +6,13 @@
  */
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { listJobs } from "../api/generation";
+import { wireIntegersEqual, type WireInteger } from "@/lib/wire-integer";
 
-export type VideoJobResult = { assetId: string; assetUrl: string; assetType: string };
+export type VideoJobResult = {
+  assetId: string;
+  assetUrl: string;
+  assetType: string;
+};
 export type VideoJobCallbacks = {
   onProgress?: (progress: number) => void;
   onSucceeded: (result: VideoJobResult) => void;
@@ -19,15 +24,22 @@ const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_DURATION_MS = 10 * 60 * 1000;
 const MAX_BATCH_IDS = 100;
 
-type Entry = { callbacks: VideoJobCallbacks; startedAt: number; missingPolls: number };
+type Entry = {
+  callbacks: VideoJobCallbacks;
+  startedAt: number;
+  missingPolls: number;
+};
 
 export function useVideoJobs(projectId?: number | string) {
-  const jobsRef = useRef<Map<number, Entry>>(new Map());
+  const jobsRef = useRef<Map<string, { id: WireInteger; entry: Entry }>>(
+    new Map(),
+  );
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inFlightRef = useRef<Promise<void> | null>(null);
 
-  const stop = useCallback((jobId: number) => {
-    jobsRef.current.delete(jobId);
+  const stop = useCallback((jobId: WireInteger) => {
+    const key = String(jobId);
+    jobsRef.current.delete(key);
     if (jobsRef.current.size === 0 && timerRef.current !== null) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -42,23 +54,29 @@ export function useVideoJobs(projectId?: number | string) {
 
   const pollAll = useCallback(async () => {
     if (inFlightRef.current) return inFlightRef.current;
-    const ids = [...jobsRef.current.keys()];
+    const ids = [...jobsRef.current.values()].map(({ id }) => id);
     if (ids.length === 0) return;
     const run = (async () => {
       try {
         const records = (
           await Promise.all(
-            Array.from({ length: Math.ceil(ids.length / MAX_BATCH_IDS) }, (_, index) =>
-              listJobs({
-                projectId,
-                jobIds: ids.slice(index * MAX_BATCH_IDS, (index + 1) * MAX_BATCH_IDS),
-              }),
+            Array.from(
+              { length: Math.ceil(ids.length / MAX_BATCH_IDS) },
+              (_, index) =>
+                listJobs({
+                  projectId,
+                  jobIds: ids.slice(
+                    index * MAX_BATCH_IDS,
+                    (index + 1) * MAX_BATCH_IDS,
+                  ),
+                }),
             ),
           )
         ).flat();
-        const byId = new Map(records.map((record) => [Number(record.job_id), record]));
-        for (const [jobId, entry] of [...jobsRef.current.entries()]) {
-          const record = byId.get(jobId);
+        for (const { id: jobId, entry } of [...jobsRef.current.values()]) {
+          const record = records.find((candidate) =>
+            wireIntegersEqual(candidate.job_id, jobId),
+          );
           if (!record) {
             // 记录缺失 ≠ 任务失败：可能是刚建未可见 / 查询时序 / 批量边界。
             // 不判死、继续轮询；真正失败由 record.status === "failed" 判定，
@@ -75,7 +93,11 @@ export function useVideoJobs(projectId?: number | string) {
           if (record.status === "succeeded" && record.output_assets[0]) {
             stop(jobId);
             const asset = record.output_assets[0];
-            entry.callbacks.onSucceeded({ assetId: String(asset.id), assetUrl: asset.url, assetType: asset.type });
+            entry.callbacks.onSucceeded({
+              assetId: String(asset.id),
+              assetUrl: asset.url,
+              assetType: asset.type,
+            });
           } else if (record.status === "failed") {
             stop(jobId);
             entry.callbacks.onFailed(record.error?.message ?? "生成失败");
@@ -88,7 +110,7 @@ export function useVideoJobs(projectId?: number | string) {
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "轮询失败";
-        for (const [jobId, entry] of [...jobsRef.current.entries()]) {
+        for (const [jobId, { entry }] of [...jobsRef.current.entries()]) {
           stop(jobId);
           entry.callbacks.onFailed(message);
         }
@@ -102,7 +124,7 @@ export function useVideoJobs(projectId?: number | string) {
 
   const tick = useCallback(() => {
     const now = Date.now();
-    for (const [jobId, entry] of [...jobsRef.current.entries()]) {
+    for (const { id: jobId, entry } of [...jobsRef.current.values()]) {
       if (now - entry.startedAt > MAX_POLL_DURATION_MS) {
         stop(jobId);
         entry.callbacks.onFailed("轮询超时");
@@ -118,9 +140,12 @@ export function useVideoJobs(projectId?: number | string) {
   }, [tick]);
 
   const start = useCallback(
-    (jobId: number, callbacks: VideoJobCallbacks) => {
+    (jobId: WireInteger, callbacks: VideoJobCallbacks) => {
       stop(jobId);
-      jobsRef.current.set(jobId, { callbacks, startedAt: Date.now(), missingPolls: 0 });
+      jobsRef.current.set(String(jobId), {
+        id: jobId,
+        entry: { callbacks, startedAt: Date.now(), missingPolls: 0 },
+      });
       ensureTimer();
     },
     [ensureTimer, stop],
@@ -130,5 +155,8 @@ export function useVideoJobs(projectId?: number | string) {
 
   useEffect(() => stopAll, [stopAll]);
 
-  return useMemo(() => ({ start, stop, stopAll, activeCount }), [start, stop, stopAll, activeCount]);
+  return useMemo(
+    () => ({ start, stop, stopAll, activeCount }),
+    [start, stop, stopAll, activeCount],
+  );
 }

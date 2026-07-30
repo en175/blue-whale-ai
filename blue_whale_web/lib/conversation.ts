@@ -1,18 +1,19 @@
 import { apiRequest } from "./api-client";
+import type { WireInteger } from "./wire-integer";
 
 export type AcceptedConversationMessage = {
-  message_id: number;
-  agent_run_id: number;
-  cursor: number;
+  message_id: WireInteger;
+  agent_run_id: WireInteger;
+  cursor: WireInteger;
 };
 
 export function acceptConversationMessage(
-  projectId: number,
+  projectId: WireInteger,
   content: string,
   clientMessageId: string,
   idempotencyKey: string,
-  replyToInputRequestId?: number,
-  referencedAssetIds?: number[],
+  replyToInputRequestId?: number | string,
+  referencedAssetIds?: WireInteger[],
   forcedCreativeSkillId?: string,
 ): Promise<AcceptedConversationMessage> {
   return apiRequest<AcceptedConversationMessage>(

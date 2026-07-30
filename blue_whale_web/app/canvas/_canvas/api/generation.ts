@@ -8,6 +8,7 @@
  * 字段全 snake_case 对齐后端 Jackson SNAKE_CASE 序列化（见 application.yml）。
  */
 import { apiRequest } from "@/lib/api-client";
+import type { WireInteger } from "@/lib/wire-integer";
 
 export type ImageModelCapability = {
   model_id: string;
@@ -49,7 +50,7 @@ export type ImageModelCapability = {
 export type CreateProjectGenerationJobPayload =
   | {
       type: "image";
-      input_asset_ids: number[];
+      input_asset_ids: WireInteger[];
       expected_output_count: number;
       parameters: {
         prompt: string;
@@ -74,14 +75,14 @@ export type CreateProjectGenerationJobPayload =
         resolution: string;
         duration: number;
       };
-      first_frame_asset_id?: number;
-      last_frame_asset_id?: number;
-      reference_asset_ids?: number[];
+      first_frame_asset_id?: WireInteger;
+      last_frame_asset_id?: WireInteger;
+      reference_asset_ids?: WireInteger[];
     };
 
 export type AcceptedProjectGenerationJob = {
-  generation_job_id: number;
-  cursor: number;
+  generation_job_id: WireInteger;
+  cursor: WireInteger;
 };
 
 const API_BASE = "/api";
@@ -108,7 +109,7 @@ export function getImageModels(): Promise<ImageModelCapability[]> {
 
 /** BottomDock 单图命令：服务端固定 source，后续结果由 Project Snapshot/SSE 恢复。 */
 export function createProjectGenerationJob(
-  projectId: number,
+  projectId: WireInteger,
   payload: CreateProjectGenerationJobPayload,
   idempotencyKey: string,
 ): Promise<AcceptedProjectGenerationJob> {
@@ -124,8 +125,8 @@ export function createProjectGenerationJob(
 
 /** BottomDock 视频取消命令；状态仍由 Project Snapshot/SSE 恢复。 */
 export function cancelProjectGenerationJob(
-  projectId: number,
-  generationJobId: number,
+  projectId: WireInteger,
+  generationJobId: WireInteger,
 ): Promise<void> {
   return apiRequest<void>(
     `/api/projects/${projectId}/generation-jobs/${generationJobId}/cancel`,
@@ -135,8 +136,8 @@ export function cancelProjectGenerationJob(
 
 /** 为终态 GenerationJob 仅创建缺失/失败输出槽的新任务。 */
 export function retryMissingProjectGenerationJobOutputs(
-  projectId: number,
-  generationJobId: number,
+  projectId: WireInteger,
+  generationJobId: WireInteger,
   idempotencyKey: string,
 ): Promise<AcceptedProjectGenerationJob> {
   return apiRequest<AcceptedProjectGenerationJob>(
@@ -156,7 +157,7 @@ export function retryMissingProjectGenerationJobOutputs(
  */
 export type AudioGeneratePayload = {
   prompt: string;
-  projectId: number;
+  projectId: WireInteger;
   mode: "audio" | "music";
   modelId?: string;
   lyrics?: string;
@@ -167,8 +168,8 @@ export type AudioGeneratePayload = {
 
 export type AudioGenerateResponse = {
   url: string;
-  assetId: number;
-  jobId?: number;
+  assetId: WireInteger;
+  jobId?: WireInteger;
 };
 
 /**
@@ -198,7 +199,7 @@ export function generateAudio(
 /** GET /api/jobs/{id} 返回——对齐 Node `handleGetJobStatus` JobStatusData。
  *  succeeded→asset.url 是产物；failed→error；processing→progress。 */
 export type JobStatusData = {
-  job_id: string;
+  job_id: WireInteger;
   status: string;
   progress: number;
   asset: { id: string; url: string; type: string } | null;
@@ -206,13 +207,13 @@ export type JobStatusData = {
 };
 
 /** 轮询任务状态（image/video 通用，取代 v2 SSE streamJob / getJobStatus 旧骨架）。 */
-export function getJobStatus(jobId: number | string): Promise<JobStatusData> {
+export function getJobStatus(jobId: WireInteger): Promise<JobStatusData> {
   return apiRequest<JobStatusData>(`/api/jobs/${jobId}`);
 }
 
 /** GET /api/jobs 列表项（recover/reconcile 用；对齐 Node JobListItem，snake_case）。 */
 export type JobListItem = {
-  job_id: string;
+  job_id: WireInteger;
   type: string;
   status: string;
   progress: number;

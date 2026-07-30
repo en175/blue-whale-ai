@@ -34,8 +34,36 @@ export interface SnapshotJobAggregate {
   assets: SnapshotAssetRow[];
 }
 
+export interface SnapshotConversationState {
+  conversation_messages: Array<{
+    message_id: string;
+    conversation_id: string;
+    agent_run_id: string | null;
+    role: string;
+    content: string;
+    sequence_no: number;
+    created_at: string;
+  }>;
+  agent_runs: Array<{
+    agent_run_id: string;
+    conversation_id: string;
+    status: string;
+    stage: string | null;
+    version: number;
+    active_input_request: {
+      input_request_id: string;
+      request_type: string;
+      question: string | null;
+      status: string;
+      expires_at: string;
+    } | null;
+  }>;
+  high_watermark_cursor: string;
+}
+
 export interface SnapshotRepo {
   loadJobsAndAssets(projectId: string): Promise<SnapshotJobAggregate>;
+  loadConversationState(projectId: string): Promise<SnapshotConversationState>;
 }
 
 /** output_asset_ids（Json 数组）→ string[]。容忍 number/string 混合（历史数据）。 */
@@ -95,6 +123,66 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
       }));
 
       return { generation_jobs, assets };
+    },
+    async loadConversationState(projectId) {
+      const pid = BigInt(projectId);
+      const [messages, runs, inputRequests, stream] = await Promise.all([
+        prisma.conversation_messages.findMany({
+          where: { project_id: pid, is_delete: 0 },
+          orderBy: { sequence_no: "asc" },
+        }),
+        prisma.agent_runs.findMany({
+          where: { project_id: pid, is_delete: 0 },
+          orderBy: { id: "asc" },
+        }),
+        prisma.user_input_requests.findMany({
+          where: {
+            project_id: pid,
+            status: "pending",
+            expires_at: { gt: new Date() },
+            is_delete: 0,
+          },
+          orderBy: { id: "asc" },
+        }),
+        prisma.project_event_stream.findUnique({
+          where: { project_id: pid },
+          select: { high_watermark: true },
+        }),
+      ]);
+      const activeByRun = new Map(
+        inputRequests
+          .filter((request) => request.source_agent_run_id !== null)
+          .map((request) => [
+            request.source_agent_run_id!.toString(),
+            {
+              input_request_id: request.id.toString(),
+              request_type: request.request_type,
+              question: request.question,
+              status: request.status,
+              expires_at: request.expires_at.toISOString(),
+            },
+          ]),
+      );
+      return {
+        conversation_messages: messages.map((message) => ({
+          message_id: message.id.toString(),
+          conversation_id: message.conversation_id.toString(),
+          agent_run_id: message.agent_run_id?.toString() ?? null,
+          role: message.role,
+          content: message.content,
+          sequence_no: message.sequence_no,
+          created_at: message.gmt_create.toISOString(),
+        })),
+        agent_runs: runs.map((run) => ({
+          agent_run_id: run.id.toString(),
+          conversation_id: run.conversation_id.toString(),
+          status: run.status,
+          stage: run.stage,
+          version: run.version,
+          active_input_request: activeByRun.get(run.id.toString()) ?? null,
+        })),
+        high_watermark_cursor: (stream?.high_watermark ?? 0n).toString(),
+      };
     },
   };
 }

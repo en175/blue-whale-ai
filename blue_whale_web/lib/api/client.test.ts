@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
+import * as api from "./index";
 import { apiFetch } from "./client";
 import { ApiError, isApiError } from "./errors";
-
-const FIXED_USER_ID = "11111111-1111-4111-8111-111111111111";
 
 /** 替换 globalThis.fetch,返回 vi.fn Mock 供用例断言 url/init。 */
 function stubFetch(responder: () => Response): Mock {
@@ -20,13 +19,8 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   });
 }
 
-beforeEach(() => {
-  // 每次测试前清空 localStorage,确保 userId 是本次 setItem 的产物
-  window.localStorage.clear();
-});
-
 describe("apiFetch —— 成功路径", () => {
-  it("GET 默认 base /api + 透传 path,自动带 X-User-Id", async () => {
+  it("GET 默认 base /api + 透传 path,不带 X-User-Id", async () => {
     const fetchMock = stubFetch(() => jsonResponse({ ok: true }));
 
     const data = await apiFetch<{ ok: boolean }>("/me");
@@ -35,10 +29,7 @@ describe("apiFetch —— 成功路径", () => {
     const [calledUrl, calledInit] = fetchMock.mock.calls.at(-1)!;
     expect(calledUrl).toBe(`/api/me`);
     const headers = (calledInit.headers ?? {}) as Record<string, string>;
-    expect(headers["X-User-Id"]).toBeDefined();
-    expect(headers["X-User-Id"]).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    );
+    expect(headers["X-User-Id"]).toBeUndefined();
     expect(headers["Accept"]).toBe("application/json");
   });
 
@@ -91,7 +82,9 @@ describe("apiFetch —— 成功路径", () => {
     await apiFetch("/me", { headers: { Accept: "text/plain" } });
 
     const [, init] = fetchMock.mock.calls.at(-1)!;
-    expect((init.headers as Record<string, string>)["Accept"]).toBe("text/plain");
+    expect((init.headers as Record<string, string>)["Accept"]).toBe(
+      "text/plain",
+    );
   });
 
   it("透传 AbortSignal 给 fetch", async () => {
@@ -109,7 +102,13 @@ describe("apiFetch —— 失败路径（业务错误体）", () => {
   it("非 2xx + 业务 error 体 → ApiError 带 code/message/detail/status", async () => {
     stubFetch(() =>
       jsonResponse(
-        { error: { code: "not_found", message: "asset 不存在", detail: { id: "ast_x" } } },
+        {
+          error: {
+            code: "not_found",
+            message: "asset 不存在",
+            detail: { id: "ast_x" },
+          },
+        },
         { status: 404 },
       ),
     );
@@ -124,7 +123,11 @@ describe("apiFetch —— 失败路径（业务错误体）", () => {
 
   it("非 2xx + 无 error 段（纯 HTML/文本）→ 兜底 http_<status>", async () => {
     stubFetch(
-      () => new Response("<html>500</html>", { status: 500, headers: { "Content-Type": "text/html" } }),
+      () =>
+        new Response("<html>500</html>", {
+          status: 500,
+          headers: { "Content-Type": "text/html" },
+        }),
     );
 
     try {
@@ -152,14 +155,30 @@ describe("apiFetch —— 失败路径（业务错误体）", () => {
   });
 });
 
-describe("apiFetch —— userId header", () => {
-  it("本地已存合法 UUID → 请求 header 复用该值", async () => {
-    window.localStorage.setItem("bw-user-id", FIXED_USER_ID);
+describe("apiFetch —— X-User-Id header", () => {
+  it("移除调用方传入的大小写变体,其余 headers 保持", async () => {
     const fetchMock = stubFetch(() => jsonResponse({}));
 
-    await apiFetch("/me");
+    await apiFetch("/me", {
+      headers: {
+        "x-user-id": "spoofed-lowercase",
+        "X-USER-ID": "spoofed-uppercase",
+        "X-Trace-Id": "trace-123",
+      },
+    });
 
     const [, init] = fetchMock.mock.calls.at(-1)!;
-    expect((init.headers as Record<string, string>)["X-User-Id"]).toBe(FIXED_USER_ID);
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-User-Id"]).toBeUndefined();
+    expect(
+      Object.keys(headers).some((key) => key.toLowerCase() === "x-user-id"),
+    ).toBe(false);
+    expect(headers["X-Trace-Id"]).toBe("trace-123");
+  });
+});
+
+describe("api public barrel", () => {
+  it("does not export getOrCreateUserId", () => {
+    expect("getOrCreateUserId" in api).toBe(false);
   });
 });

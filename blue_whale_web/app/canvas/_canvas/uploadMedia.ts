@@ -8,6 +8,7 @@ import {
 } from "@/lib/mediaSize";
 
 import type { Asset, CanvasNodeData, NodeKindId } from "./model";
+import type { WireInteger } from "@/lib/wire-integer";
 
 export type UploadMediaResult = {
   nodeId: string;
@@ -16,7 +17,7 @@ export type UploadMediaResult = {
 
 type UploadMediaInput = {
   file: File;
-  projectId: number;
+  projectId: WireInteger;
   /** 重试既有失败占位节点：跳过 addNode，原地 patch 回 running 重走管线。 */
   existingNodeId?: string;
   /** 本地预览 object URL（占位卡缩略图）；仅进节点 data，serialize 白名单不映射、不持久化。 */

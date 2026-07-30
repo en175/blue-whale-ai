@@ -8,6 +8,7 @@
  *
  * 决策见 ADR-0021；规格见 openspec/changes/canvas-frontend-architecture/specs/canvas-doc-model。
  */
+import { wireInteger } from "@/lib/wire-integer";
 
 export type NodeKindId =
   "text" | "image" | "video" | "audio" | "group" | "reference";
@@ -152,7 +153,7 @@ export function createEmptyDoc(id = ""): CanvasDoc {
 /**
  * 序列化 CanvasDoc → NodeItem[] JSON（兼容老 /canvas：老 filterPersistableNodes 对数组
  * 调 .filter；若存 {nodes,edges} 对象则崩 `xxx.filter is not a function`）。
- * 兼容期产 NodeItem[]：assetId String→Number，剥临时态（status/progress/selected 自然不映射）。
+ * 兼容期产 NodeItem[]：安全 assetId 用 number，超大 ID 保留十进制 string，剥临时态。
  * edges/version 暂不入库（工作流未开，edges 恒空；开后再扩展结构）。
  *
  * type 透传 kind（image/video/audio/text/reference）；group 无独立产物 → 降级 image（老 NodeItem 无 group，
@@ -167,7 +168,7 @@ export function serialize(doc: CanvasDoc): string {
     width: n.width ?? 200,
     height: n.height ?? 200,
     content: n.data.content,
-    assetId: n.data.assetId != null ? Number(n.data.assetId) : undefined,
+    assetId: n.data.assetId != null ? wireInteger(n.data.assetId) : undefined,
     prompt: n.data.prompt,
     richDoc: n.data.richDoc,
     cardType: n.data.cardType,

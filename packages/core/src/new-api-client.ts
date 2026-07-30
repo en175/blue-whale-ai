@@ -1,6 +1,7 @@
 export interface NewApiClientOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
 }
 
 export interface NewApiLoginInput {
@@ -8,10 +9,31 @@ export interface NewApiLoginInput {
   password: string;
 }
 
+export interface NewApiRegisterInput {
+  username: string;
+  password: string;
+  email?: string;
+  verificationCode?: string;
+}
+
 export interface NewApiLoginResult {
   token: string;
   userId: number | null;
   username: string | null;
+  email?: string | null;
+}
+
+export interface NewApiAccountCapabilities {
+  passwordLogin: boolean;
+  passwordRegister: boolean;
+  emailVerification: boolean;
+}
+
+export interface NewApiAccountIdentity {
+  userId: number;
+  username: string;
+  email: string | null;
+  status: number;
 }
 
 export interface NewApiUsage {
@@ -175,10 +197,25 @@ function isBusinessFailure(payload: NewApiEnvelope | null): boolean {
   return payload?.success === false || payload?.code === false;
 }
 
+function positiveInteger(value: unknown): number | null {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim() !== ""
+        ? Number(value)
+        : Number.NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 export function createNewApiClient(options: NewApiClientOptions) {
   const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 10_000;
 
-  async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
+  async function request<T>(
+    path: string,
+    init: RequestInit = {},
+    token?: string,
+  ): Promise<T> {
     const headers = new Headers(init.headers);
     if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
@@ -186,13 +223,44 @@ export function createNewApiClient(options: NewApiClientOptions) {
     if (token) headers.set("Authorization", `Bearer ${token}`);
 
     let response: Response;
+    let payload: NewApiEnvelope | null;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const forwardAbort = () => controller.abort();
+    if (init.signal?.aborted) {
+      controller.abort();
+    } else {
+      init.signal?.addEventListener("abort", forwardAbort, { once: true });
+    }
     try {
-      response = await fetchImpl(joinUrl(options.baseUrl, path), { ...init, headers });
-    } catch {
+      response = await fetchImpl(joinUrl(options.baseUrl, path), {
+        ...init,
+        headers,
+        signal: controller.signal,
+      });
+      try {
+        payload = (await response.json()) as NewApiEnvelope;
+      } catch {
+        if (controller.signal.aborted) {
+          throw new NewApiError("new-api 不可达", 503);
+        }
+        payload = null;
+      }
+    } catch (error) {
+      if (error instanceof NewApiError) throw error;
       throw new NewApiError("new-api 不可达", 503);
+    } finally {
+      clearTimeout(timeout);
+      init.signal?.removeEventListener("abort", forwardAbort);
     }
 
-    const payload = (await response.json().catch(() => null)) as NewApiEnvelope | null;
+    if (payload === null) {
+      throw new NewApiError(
+        "new-api 响应不是有效 JSON",
+        502,
+        "invalid_json_response",
+      );
+    }
     if (!response.ok || isBusinessFailure(payload)) {
       throw new NewApiError(
         messageFrom(payload, `new-api 请求失败: ${response.status}`),
@@ -205,39 +273,150 @@ export function createNewApiClient(options: NewApiClientOptions) {
   }
 
   return {
+    async getAccountCapabilities(): Promise<NewApiAccountCapabilities> {
+      const response = await request<NewApiEnvelope>("/api/status", {
+        method: "GET",
+      });
+      const data = (response.data ?? {}) as Record<string, unknown>;
+      return {
+        passwordLogin: data.password_login_enabled === true,
+        passwordRegister:
+          data.register_enabled === true &&
+          data.password_register_enabled === true,
+        emailVerification: data.email_verification === true,
+      };
+    },
+
+    async register(input: NewApiRegisterInput): Promise<NewApiLoginResult> {
+      const response = await request<NewApiEnvelope>("/api/user/register", {
+        method: "POST",
+        body: JSON.stringify({
+          username: input.username,
+          password: input.password,
+          ...(input.email ? { email: input.email } : {}),
+          ...(input.verificationCode
+            ? { verification_code: input.verificationCode }
+            : {}),
+        }),
+      });
+      const data = (response.data ?? {}) as Record<string, unknown>;
+      const userId = positiveInteger(data.user_id);
+      if (
+        userId === null ||
+        typeof data.token !== "string" ||
+        !data.token.startsWith("sk-") ||
+        typeof data.username !== "string"
+      ) {
+        throw new NewApiError(
+          "new-api 注册响应无效",
+          502,
+          "invalid_register_response",
+          response,
+        );
+      }
+      return {
+        token: data.token,
+        userId,
+        username: data.username,
+        email: typeof data.email === "string" ? data.email : null,
+      };
+    },
+
+    async resolveTokenIdentity(token: string): Promise<NewApiAccountIdentity> {
+      const response = await request<NewApiEnvelope>(
+        "/api/token/identity",
+        { method: "GET" },
+        token,
+      );
+      const data = (response.data ?? {}) as Record<string, unknown>;
+      const userId = positiveInteger(data.user_id);
+      if (
+        userId === null ||
+        typeof data.username !== "string" ||
+        typeof data.status !== "number"
+      ) {
+        throw new NewApiError(
+          "new-api 身份响应无效",
+          502,
+          "invalid_identity_response",
+          response,
+        );
+      }
+      return {
+        userId,
+        username: data.username,
+        email: typeof data.email === "string" ? data.email : null,
+        status: data.status,
+      };
+    },
+
     async login(input: NewApiLoginInput): Promise<NewApiLoginResult> {
       const response = await request<NewApiEnvelope>("/api/user/login", {
         method: "POST",
         body: JSON.stringify(input),
       });
-      const data = (response.data ?? {}) as { token?: unknown; id?: unknown; username?: unknown };
+      const data = (response.data ?? {}) as {
+        token?: unknown;
+        id?: unknown;
+        user_id?: unknown;
+        username?: unknown;
+        email?: unknown;
+      };
       const token = data.token;
-      if (typeof token !== "string" || !token.startsWith("sk-")) {
-        throw new NewApiError("new-api 登录未返回 sk-xxx token", 502, "invalid_token_response", response);
+      const userId = positiveInteger(data.user_id ?? data.id);
+      if (
+        typeof token !== "string" ||
+        !token.startsWith("sk-") ||
+        userId === null ||
+        typeof data.username !== "string"
+      ) {
+        throw new NewApiError(
+          "new-api 登录响应无效",
+          502,
+          "invalid_login_response",
+          response,
+        );
       }
       return {
         token,
-        userId: typeof data.id === "number" ? data.id : typeof data.id === "string" ? Number(data.id) : null,
-        username: typeof data.username === "string" ? data.username : null,
+        userId,
+        username: data.username,
+        email: typeof data.email === "string" ? data.email : null,
       };
     },
 
     async getTokenUsage(token: string): Promise<NewApiUsage> {
-      const response = await request<NewApiEnvelope>("/api/usage/token/", { method: "GET" }, token);
+      const response = await request<NewApiEnvelope>(
+        "/api/usage/token/",
+        { method: "GET" },
+        token,
+      );
       const data = (response.data ?? {}) as Record<string, unknown>;
       const quota = data.user_quota ?? data.quota ?? data.total_available;
       if (typeof quota !== "number" || !Number.isFinite(quota)) {
-        throw new NewApiError("new-api usage 响应缺少 quota", 502, "invalid_usage_response", response);
+        throw new NewApiError(
+          "new-api usage 响应缺少 quota",
+          502,
+          "invalid_usage_response",
+          response,
+        );
       }
       return { userQuota: quota, raw: response.data };
     },
 
     async getTokenLogs(token: string): Promise<NewApiLog[]> {
-      const response = await request<NewApiEnvelope>("/api/log/token", { method: "GET" }, token);
+      const response = await request<NewApiEnvelope>(
+        "/api/log/token",
+        { method: "GET" },
+        token,
+      );
       return Array.isArray(response.data) ? (response.data as NewApiLog[]) : [];
     },
 
-    async generateImages(token: string, input: NewApiImageInput): Promise<NewApiImage[]> {
+    async generateImages(
+      token: string,
+      input: NewApiImageInput,
+    ): Promise<NewApiImage[]> {
       const body: Record<string, unknown> = {
         model: input.model,
         prompt: input.prompt,
@@ -252,17 +431,28 @@ export function createNewApiClient(options: NewApiClientOptions) {
         body.sequential_image_generation_options = { max_images: input.n };
       }
 
-      const response = await request<NewApiEnvelope>("/v1/images/generations", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }, token);
+      const response = await request<NewApiEnvelope>(
+        "/v1/images/generations",
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        },
+        token,
+      );
       const data = Array.isArray(response.data) ? response.data : [];
       return data.filter((item): item is NewApiImage => {
-        return typeof item === "object" && item !== null && typeof (item as { url?: unknown }).url === "string";
+        return (
+          typeof item === "object" &&
+          item !== null &&
+          typeof (item as { url?: unknown }).url === "string"
+        );
       });
     },
 
-    async editImages(token: string, input: NewApiImageEditInput): Promise<NewApiImage[]> {
+    async editImages(
+      token: string,
+      input: NewApiImageEditInput,
+    ): Promise<NewApiImage[]> {
       const body = new FormData();
       body.append("model", input.model);
       body.append("prompt", input.prompt);
@@ -292,13 +482,21 @@ export function createNewApiClient(options: NewApiClientOptions) {
         );
       }
 
-      const response = await request<NewApiEnvelope>("/v1/images/edits", {
-        method: "POST",
-        body,
-      }, token);
+      const response = await request<NewApiEnvelope>(
+        "/v1/images/edits",
+        {
+          method: "POST",
+          body,
+        },
+        token,
+      );
       const data = Array.isArray(response.data) ? response.data : [];
       return data.filter((item): item is NewApiImage => {
-        return typeof item === "object" && item !== null && typeof (item as { url?: unknown }).url === "string";
+        return (
+          typeof item === "object" &&
+          item !== null &&
+          typeof (item as { url?: unknown }).url === "string"
+        );
       });
     },
 
@@ -364,16 +562,26 @@ export function createNewApiClient(options: NewApiClientOptions) {
         },
       };
 
-      const response = await request<Record<string, unknown>>("/v1/video/generations", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }, token);
-      const data = response.data && typeof response.data === "object"
-        ? response.data as Record<string, unknown>
-        : response;
+      const response = await request<Record<string, unknown>>(
+        "/v1/video/generations",
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        },
+        token,
+      );
+      const data =
+        response.data && typeof response.data === "object"
+          ? (response.data as Record<string, unknown>)
+          : response;
       const taskId = data.task_id ?? data.id;
       if (typeof taskId !== "string" || taskId.length === 0) {
-        throw new NewApiError("new-api 视频提交响应缺少 task_id", 502, "invalid_video_response", response);
+        throw new NewApiError(
+          "new-api 视频提交响应缺少 task_id",
+          502,
+          "invalid_video_response",
+          response,
+        );
       }
       return {
         taskId,
@@ -381,33 +589,49 @@ export function createNewApiClient(options: NewApiClientOptions) {
       };
     },
 
-    async getVideoTask(token: string, taskId: string): Promise<NewApiVideoTask> {
+    async getVideoTask(
+      token: string,
+      taskId: string,
+    ): Promise<NewApiVideoTask> {
       const response = await request<Record<string, unknown>>(
         `/v1/video/generations/${encodeURIComponent(taskId)}`,
         { method: "GET" },
         token,
       );
-      const data = response.data && typeof response.data === "object"
-        ? response.data as Record<string, unknown>
-        : response;
+      const data =
+        response.data && typeof response.data === "object"
+          ? (response.data as Record<string, unknown>)
+          : response;
       const responseTaskId = data.task_id ?? data.id;
-      if (typeof responseTaskId !== "string" || typeof data.status !== "string") {
-        throw new NewApiError("new-api 视频任务响应无效", 502, "invalid_video_response", response);
+      if (
+        typeof responseTaskId !== "string" ||
+        typeof data.status !== "string"
+      ) {
+        throw new NewApiError(
+          "new-api 视频任务响应无效",
+          502,
+          "invalid_video_response",
+          response,
+        );
       }
       const rawError = data.error;
-      const error = rawError && typeof rawError === "object"
-        ? {
-            code:
-              typeof (rawError as Record<string, unknown>).code === "string" ||
-              typeof (rawError as Record<string, unknown>).code === "number"
-                ? (rawError as Record<string, unknown>).code as string | number
-                : null,
-            message:
-              typeof (rawError as Record<string, unknown>).message === "string"
-                ? (rawError as Record<string, unknown>).message as string
-                : "视频生成失败",
-          }
-        : null;
+      const error =
+        rawError && typeof rawError === "object"
+          ? {
+              code:
+                typeof (rawError as Record<string, unknown>).code ===
+                  "string" ||
+                typeof (rawError as Record<string, unknown>).code === "number"
+                  ? ((rawError as Record<string, unknown>).code as
+                      string | number)
+                  : null,
+              message:
+                typeof (rawError as Record<string, unknown>).message ===
+                "string"
+                  ? ((rawError as Record<string, unknown>).message as string)
+                  : "视频生成失败",
+            }
+          : null;
       return {
         taskId: responseTaskId,
         status: data.status,

@@ -72,9 +72,10 @@ describe("AccountModal 密码 Row", () => {
         <AccountModal onClose={vi.fn()} />
       </AuthProvider>,
     );
-    await waitFor(() => screen.getByText("账号信息"));
-    expect(screen.getByText("已设置")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "修改" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("已设置")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "修改" })).toBeInTheDocument();
+    });
   });
 
   it("点「设置」→ 挂载 ChangePasswordModal", async () => {

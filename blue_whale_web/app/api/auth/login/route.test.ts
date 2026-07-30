@@ -68,8 +68,32 @@ describe("POST /api/auth/login", () => {
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({
       code: 401,
-      msg: "用户名或密码错误",
+      msg: "登录凭证无效",
       data: null,
     });
+  });
+
+  it("maps an unreachable account service to a safe 503 response", async () => {
+    process.env.NEW_API_BASE_URL = "http://internal-new-api.test";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("ECONNREFUSED")),
+    );
+
+    const response = await POST(
+      new Request("http://web.test/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ username: "alice", password: "secret" }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({
+      code: 503,
+      msg: "账户服务暂不可用",
+      data: null,
+    });
+    expect(JSON.stringify(body)).not.toContain("internal-new-api");
   });
 });

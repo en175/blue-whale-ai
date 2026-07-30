@@ -3,22 +3,16 @@ import {
   handlePresignAsset,
   type PresignAssetInput,
 } from "@/lib/assets/handle-upload";
-import { getUserIdFromRequest } from "@/lib/auth/user-from-request";
-
-const JWT_SECRET =
-  process.env.JWT_SECRET ?? "blue-whale-dev-secret-key-at-least-256-bits!!";
+import { withAuthenticatedUser } from "@/lib/auth/product-route-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const userId = await getUserIdFromRequest(request, JWT_SECRET);
-  if (!userId) {
+  return withAuthenticatedUser(request, async ({ userId }) => {
+    const input = (await request.json().catch(() => ({}))) as PresignAssetInput;
     return Response.json(
-      { code: 401, msg: "未登录或 token 已过期", data: null },
-      { status: 401 },
+      await handlePresignAsset(userId, input, createAssetPresignDeps()),
     );
-  }
-  const input = (await request.json().catch(() => ({}))) as PresignAssetInput;
-  return Response.json(await handlePresignAsset(userId, input, createAssetPresignDeps()));
+  });
 }

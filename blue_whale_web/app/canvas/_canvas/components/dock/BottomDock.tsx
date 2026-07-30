@@ -8,6 +8,7 @@ import { X } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 import { CreditBalance } from "@/components/credits/CreditBalance";
+import type { WireInteger } from "@/lib/wire-integer";
 import { squirclePath } from "../../utils";
 import {
   VIDEO_MODELS,
@@ -106,8 +107,8 @@ export function BottomDock({
   /** 首尾帧（视频首尾帧模式，page 层上传后回填 TOS url；VideoDockContent 在 first-last 模式渲染槽 UI）。 */
   firstFrameUrl?: string;
   lastFrameUrl?: string;
-  firstFrameAssetId?: number;
-  lastFrameAssetId?: number;
+  firstFrameAssetId?: WireInteger;
+  lastFrameAssetId?: WireInteger;
   onFrameUpload?: (file: File, slot: "first" | "last") => void;
   onFrameClear?: (slot: "first" | "last") => void;
   onSwapFrames?: () => void;

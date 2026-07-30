@@ -99,40 +99,40 @@ model captcha_challenges {
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model generation_jobs {
-  id                      BigInt    @id @default(autoincrement())
-  project_id              BigInt?
-  user_id                 BigInt
-  agent_run_id            BigInt?
-  action_identity         String?   @db.VarChar(128)
-  project_action_identity String?   @db.VarChar(128)
-  expected_output_count   Int       @default(1)
-  retry_of_job_id         BigInt?
-  type                    String    @db.VarChar(32)
-  source                  String    @default("dock") @db.VarChar(32)
-  status                  String    @default("queued") @db.VarChar(32)
-  progress                Int       @default(0)
-  output_asset_ids        Json?
-  provider                String?   @db.VarChar(64)
-  provider_task_id        String?   @db.VarChar(128)
-  poll_count              Int       @default(0)
-  next_poll_at            DateTime? @db.DateTime(0)
-  retry_count             Int       @default(0)
-  last_polled_at          DateTime? @db.DateTime(0)
-  error                   Json?
-  stage_id                String?   @db.VarChar(64)
-  lease_owner             String?   @db.VarChar(128)
-  lease_expires_at        DateTime? @db.DateTime(0)
-  fencing_token           BigInt    @default(0)
-  strategy_version        String?   @db.VarChar(64)
-  execution_deadline_at   DateTime? @db.DateTime(0)
+  id                       BigInt    @id @default(autoincrement())
+  project_id               BigInt?
+  user_id                  BigInt
+  agent_run_id             BigInt?
+  action_identity          String?   @db.VarChar(128)
+  project_action_identity  String?   @db.VarChar(128)
+  expected_output_count    Int       @default(1)
+  retry_of_job_id          BigInt?
+  type                     String    @db.VarChar(32)
+  source                   String    @default("dock") @db.VarChar(32)
+  status                   String    @default("queued") @db.VarChar(32)
+  progress                 Int       @default(0)
+  output_asset_ids         Json?
+  provider                 String?   @db.VarChar(64)
+  provider_task_id         String?   @db.VarChar(128)
+  poll_count               Int       @default(0)
+  next_poll_at             DateTime? @db.DateTime(0)
+  retry_count              Int       @default(0)
+  last_polled_at           DateTime? @db.DateTime(0)
+  error                    Json?
+  stage_id                 String?   @db.VarChar(64)
+  lease_owner              String?   @db.VarChar(128)
+  lease_expires_at         DateTime? @db.DateTime(0)
+  fencing_token            BigInt    @default(0)
+  strategy_version         String?   @db.VarChar(64)
+  execution_deadline_at    DateTime? @db.DateTime(0)
   evidence_reconcile_until DateTime? @db.DateTime(0)
-  next_action_at          DateTime? @db.DateTime(0)
-  cancel_requested_at     DateTime? @db.DateTime(0)
-  gmt_create              DateTime  @default(now()) @db.DateTime(0)
-  gmt_modified            DateTime  @default(now()) @db.DateTime(0)
-  version                 Int       @default(0)
-  is_delete               Boolean   @default(false)
-  input                   Json?
+  next_action_at           DateTime? @db.DateTime(0)
+  cancel_requested_at      DateTime? @db.DateTime(0)
+  gmt_create               DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified             DateTime  @default(now()) @db.DateTime(0)
+  version                  Int       @default(0)
+  is_delete                Boolean   @default(false)
+  input                    Json?
 
   @@index([project_id], map: "idx_project_id")
   @@index([provider_task_id], map: "idx_provider_task_id")
@@ -175,12 +175,151 @@ model project {
   owner_id     BigInt
   name         String   @db.VarChar(128)
   thumb        String?  @db.VarChar(512)
+  purpose      String   @default("canvas") @db.VarChar(32)
+  inbox_guard  BigInt?  @unique(map: "uk_project_inbox_guard")
   gmt_create   DateTime @default(now()) @db.DateTime(0)
   gmt_modified DateTime @default(now()) @db.DateTime(0)
   version      Int      @default(0)
   is_delete    Int      @default(0) @db.TinyInt
 
   @@index([owner_id], map: "idx_project_owner")
+}
+
+model conversations {
+  id           BigInt   @id @default(autoincrement())
+  project_id   BigInt
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Int      @default(0) @db.TinyInt
+
+  @@index([project_id], map: "idx_conversation_project")
+}
+
+model conversation_messages {
+  id                BigInt   @id @default(autoincrement())
+  conversation_id   BigInt
+  project_id        BigInt
+  agent_run_id      BigInt?
+  client_message_id String?  @db.VarChar(64)
+  role              String   @db.VarChar(16)
+  content           String   @db.Text
+  sequence_no       Int
+  gmt_create        DateTime @default(now()) @db.DateTime(0)
+  gmt_modified      DateTime @default(now()) @db.DateTime(0)
+  version           Int      @default(0)
+  is_delete         Int      @default(0) @db.TinyInt
+
+  @@unique([conversation_id, sequence_no], map: "uk_conversation_sequence")
+  @@index([project_id], map: "idx_message_project")
+}
+
+model agent_runs {
+  id                         BigInt    @id @default(autoincrement())
+  project_id                 BigInt
+  conversation_id            BigInt
+  active_guard               BigInt?   @unique(map: "uk_agent_run_active_guard")
+  user_id                    BigInt
+  status                     String    @db.VarChar(32)
+  stage                      String?   @db.VarChar(32)
+  engine                     String    @db.VarChar(64)
+  engine_version             String    @db.VarChar(64)
+  adapter_schema_version     Int
+  current_checkpoint_id      BigInt?
+  confirmed_input_request_id BigInt?
+  input_sequence_no          Int       @default(0)
+  lease_owner                String?   @db.VarChar(128)
+  lease_expires_at           DateTime? @db.DateTime(0)
+  fencing_token              BigInt    @default(0)
+  terminal_reason            String?   @db.VarChar(64)
+  failure_code               String?   @db.VarChar(128)
+  failure_message            String?   @db.Text
+  gmt_create                 DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified               DateTime  @default(now()) @db.DateTime(0)
+  version                    Int       @default(0)
+  is_delete                  Int       @default(0) @db.TinyInt
+
+  @@index([project_id, status], map: "idx_agent_run_project_status")
+  @@index([status, engine, is_delete, id], map: "idx_agent_run_claim")
+}
+
+model user_input_requests {
+  id                    BigInt    @id @default(autoincrement())
+  project_id            BigInt
+  user_id               BigInt
+  request_type          String    @default("clarification") @db.VarChar(32)
+  conversation_id       BigInt?
+  source_agent_run_id   BigInt?
+  resumed_agent_run_id  BigInt?
+  request_target_type   String?   @db.VarChar(64)
+  question              String?   @db.Text
+  action_identity       String    @db.VarChar(128)
+  action_type           String    @db.VarChar(64)
+  arguments_digest      String    @db.VarChar(64)
+  quoted_amount_fen     BigInt?
+  quoted_provider       String?   @db.VarChar(64)
+  price_catalog_version String?   @db.VarChar(64)
+  exchange_rate_version String?   @db.VarChar(64)
+  model_policy_version  String?   @db.VarChar(64)
+  cost_rule_version     String?   @db.VarChar(64)
+  status                String    @db.VarChar(32)
+  expires_at            DateTime  @db.DateTime(0)
+  confirmed_at          DateTime? @db.DateTime(0)
+  consumed_at           DateTime? @db.DateTime(0)
+  answer_message_id     BigInt?
+  gmt_create            DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified          DateTime  @default(now()) @db.DateTime(0)
+  version               Int       @default(0)
+  is_delete             Int       @default(0) @db.TinyInt
+
+  @@unique([resumed_agent_run_id], map: "uk_input_request_resumed_run")
+  @@index([project_id, user_id, status], map: "idx_input_request_owner")
+}
+
+model command_idempotency {
+  id                BigInt   @id @default(autoincrement())
+  project_id        BigInt
+  operation         String   @db.VarChar(64)
+  idempotency_key   String   @db.VarChar(128)
+  request_hash      String   @db.VarChar(64)
+  message_id        BigInt?
+  agent_run_id      BigInt?
+  generation_job_id BigInt?
+  resource_id       BigInt?
+  accepted_cursor   BigInt
+  gmt_create        DateTime @default(now()) @db.DateTime(0)
+  gmt_modified      DateTime @default(now()) @db.DateTime(0)
+  version           Int      @default(0)
+  is_delete         Int      @default(0) @db.TinyInt
+
+  @@unique([project_id, operation, idempotency_key], map: "uk_command_idempotency")
+}
+
+model project_event_stream {
+  project_id     BigInt @id
+  high_watermark BigInt @default(0)
+}
+
+model project_events {
+  id                BigInt   @id @default(autoincrement())
+  project_id        BigInt
+  cursor            BigInt
+  event_id          String   @unique(map: "uk_event_id") @db.VarChar(64)
+  event_type        String   @db.VarChar(64)
+  aggregate_type    String   @db.VarChar(32)
+  aggregate_id      String   @db.VarChar(64)
+  aggregate_version Int      @default(0)
+  correlation_id    String?  @db.VarChar(64)
+  causation_id      String?  @db.VarChar(64)
+  occurred_at       DateTime @db.DateTime(0)
+  payload           Json?
+  gmt_create        DateTime @default(now()) @db.DateTime(0)
+  gmt_modified      DateTime @default(now()) @db.DateTime(0)
+  version           Int      @default(0)
+  is_delete         Int      @default(0) @db.TinyInt
+
+  @@unique([project_id, cursor], map: "uk_project_cursor")
+  @@index([project_id, occurred_at], map: "idx_project_occurred")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments

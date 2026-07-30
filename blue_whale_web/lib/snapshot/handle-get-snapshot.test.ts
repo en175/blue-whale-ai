@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
+import {
+  applySnapshot,
+  initialProjectRecoveryState,
+  type ProjectSnapshot,
+} from "../project-recovery";
 import { assetAccessUrl, handleGetSnapshot } from "./handle-get-snapshot.js";
 
 const sampleProject = {
@@ -30,6 +35,7 @@ describe("handleGetSnapshot 归属校验", () => {
       loadJobsAndAssets: vi
         .fn()
         .mockResolvedValue({ generation_jobs: [], assets: [] }),
+      loadConversationState: vi.fn(),
     };
 
     const res = await handleGetSnapshot("9", "7", {
@@ -42,10 +48,47 @@ describe("handleGetSnapshot 归属校验", () => {
     expect(projects.findOwnedById).toHaveBeenCalledWith("7", "9");
     expect(canvas.getByProject).not.toHaveBeenCalled();
     expect(snapshot.loadJobsAndAssets).not.toHaveBeenCalled();
+    expect(snapshot.loadConversationState).not.toHaveBeenCalled();
   });
 });
 
 describe("handleGetSnapshot 成功快照", () => {
+  it("handler 返回的 Project/Canvas ID 可直接进入恢复状态机", async () => {
+    const huge = "9007199254740993";
+    const res = await handleGetSnapshot("9", huge, {
+      projects: makeProjectRepo({ ...sampleProject, id: huge }),
+      canvas: {
+        getByProject: vi.fn().mockResolvedValue({
+          ...sampleCanvas,
+          id: huge,
+          project_id: huge,
+        }),
+      },
+      snapshot: {
+        loadJobsAndAssets: vi
+          .fn()
+          .mockResolvedValue({ generation_jobs: [], assets: [] }),
+        loadConversationState: vi.fn().mockResolvedValue({
+          conversation_messages: [],
+          agent_runs: [],
+          high_watermark_cursor: "0",
+        }),
+      },
+    });
+
+    expect(() =>
+      applySnapshot(
+        initialProjectRecoveryState(huge),
+        res.data as unknown as ProjectSnapshot,
+      ),
+    ).not.toThrow();
+    expect(res.data?.project.id).toBe(huge);
+    expect(res.data?.canvas).toMatchObject({
+      id: huge,
+      project_id: huge,
+    });
+  });
+
   it("归属通过 → 200 + 完整信封（project/canvas 透传，jobs 映射，assets 含受控地址，cursor=0，messages/runs 空）", async () => {
     const projects = makeProjectRepo();
     const canvas = makeCanvasRepo();
@@ -69,6 +112,11 @@ describe("handleGetSnapshot 成功快照", () => {
       loadJobsAndAssets: vi
         .fn()
         .mockResolvedValue({ generation_jobs: [job], assets: [asset] }),
+      loadConversationState: vi.fn().mockResolvedValue({
+        conversation_messages: [],
+        agent_runs: [],
+        high_watermark_cursor: "0",
+      }),
     };
 
     const res = await handleGetSnapshot("9", "7", {
@@ -83,8 +131,8 @@ describe("handleGetSnapshot 成功快照", () => {
       code: 200,
       msg: null,
       data: {
-        project: sampleProject,
-        canvas: sampleCanvas,
+        project: { ...sampleProject, id: 7 },
+        canvas: { ...sampleCanvas, id: 3, project_id: 7 },
         conversation_messages: [],
         agent_runs: [],
         generation_jobs: [
@@ -128,6 +176,11 @@ describe("handleGetSnapshot 成功快照", () => {
       loadJobsAndAssets: vi
         .fn()
         .mockResolvedValue({ generation_jobs: [job], assets: [] }),
+      loadConversationState: vi.fn().mockResolvedValue({
+        conversation_messages: [],
+        agent_runs: [],
+        high_watermark_cursor: "0",
+      }),
     };
 
     const res = await handleGetSnapshot("9", "7", {
@@ -141,6 +194,61 @@ describe("handleGetSnapshot 成功快照", () => {
     expect(wireJob?.error?.code).toBe("timed_out");
     // 不泄漏 DB 原始 stored_error 到 wire
     expect(wireJob).not.toHaveProperty("stored_error");
+  });
+
+  it("超出安全整数的消息、Run、InputRequest 与 cursor ID 保持字符串", async () => {
+    const huge = "9007199254740993";
+    const res = await handleGetSnapshot("9", "7", {
+      projects: makeProjectRepo(),
+      canvas: makeCanvasRepo(),
+      snapshot: {
+        loadJobsAndAssets: vi
+          .fn()
+          .mockResolvedValue({ generation_jobs: [], assets: [] }),
+        loadConversationState: vi.fn().mockResolvedValue({
+          conversation_messages: [
+            {
+              message_id: huge,
+              conversation_id: huge,
+              agent_run_id: huge,
+              role: "assistant",
+              content: "蓝鲸",
+              sequence_no: 1,
+              created_at: "2026-07-29T00:00:00.000Z",
+            },
+          ],
+          agent_runs: [
+            {
+              agent_run_id: huge,
+              conversation_id: huge,
+              status: "awaiting_input",
+              stage: null,
+              input_sequence_no: 1,
+              active_input_request: {
+                input_request_id: huge,
+                request_type: "creation_clarification",
+                question: "什么风格？",
+                status: "pending",
+                expires_at: "2026-07-30T00:00:00.000Z",
+              },
+            },
+          ],
+          high_watermark_cursor: huge,
+        }),
+      },
+    });
+
+    expect(res.data?.high_watermark_cursor).toBe(huge);
+    expect(res.data?.conversation_messages[0]).toMatchObject({
+      message_id: huge,
+      conversation_id: huge,
+      agent_run_id: huge,
+    });
+    expect(res.data?.agent_runs[0]).toMatchObject({
+      agent_run_id: huge,
+      conversation_id: huge,
+      active_input_request: { input_request_id: huge },
+    });
   });
 });
 

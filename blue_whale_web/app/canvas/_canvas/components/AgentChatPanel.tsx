@@ -19,6 +19,7 @@ import {
   AgentCard,
 } from "./ChatBubbles";
 import type { ChatMessage, PendingMention } from "../types";
+import type { WireInteger } from "@/lib/wire-integer";
 import type { CardStatus } from "@/types/domain";
 import { buildMockReplyForMode } from "../messages";
 import { createMessageIdGenerator } from "../idGen";
@@ -59,13 +60,13 @@ export function AgentChatPanel({
   /** 后端可用时提交权威 Conversation 命令；缺省时保留既有离线 mock。 */
   onSubmitMessage?: (
     text: string,
-    referencedAssetIds?: number[],
+    referencedAssetIds?: WireInteger[],
     forcedCreativeSkillId?: string,
   ) => Promise<void>;
   /** 设置当前项目内某 card 的状态（重试链推进） */
   onSetCardStatus?: (cardId: number | string, status: CardStatus) => void;
   /** 权威失败 Card 的真实重试命令；新 Job 由 Snapshot/SSE 恢复。 */
-  onRetryGenerationJob?: (generationJobId: number | string) => Promise<void>;
+  onRetryGenerationJob?: (generationJobId: WireInteger) => Promise<void>;
   /** 首页续上 / 模板卡点击带入的 prompt，填入 composer（可编辑后发送） */
   prompt?: string;
   /** 当前 Run 已激活 Creative Skill 的展示名（Snapshot/SSE 权威，null 表示无激活） */
@@ -287,7 +288,7 @@ export function AgentChatPanel({
   const handleSend = () => {
     const { prompt, assetIds } = composerRef.current
       ? extractEditor(composerRef.current)
-      : { prompt: "", assetIds: [] as number[] };
+      : { prompt: "", assetIds: [] as WireInteger[] };
     if (!prompt && assetIds.length === 0) return;
 
     requireAuth({ kind: "canvas-send", text: prompt }, () => {

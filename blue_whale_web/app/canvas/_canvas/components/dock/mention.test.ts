@@ -27,7 +27,7 @@ function setup(html: string): HTMLElement {
 function pill(attrs: {
   id: string;
   name: string;
-  assetId?: number;
+  assetId?: number | string;
   label?: string;
 }): string {
   const asset =
@@ -60,6 +60,13 @@ describe("buildPill", () => {
 });
 
 describe("extractEditor", () => {
+  it("超大 asset ID 保持十进制字符串精度", () => {
+    const assetId = "9007199254740993";
+    const editor = setup(pill({ id: "a", name: "蓝鲸", assetId }));
+
+    expect(extractEditor(editor).assetIds).toEqual([assetId]);
+  });
+
   it("单 pill 序列化为 @[name] 并返回数字 assetIds", () => {
     const editor = setup(pill({ id: "a", name: "蓝鲸", assetId: 9 }));
     const result = extractEditor(editor);

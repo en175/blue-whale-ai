@@ -147,6 +147,37 @@ _Avoid_: 把收件箱当作普通 Canvas Project 展示或编辑；通过通用�
 一个 User 拥有多个 Project，产品资源与操作均按服务端认证的 User 归属。
 _Avoid_: 访客、匿名 User、客户端自报 `userId`、把浏览器本地标识当作身份。
 
+**账户事实（Account Facts）**:
+由 new-api 唯一维护的 User 账户信息，包括身份、凭证、资料、角色、quota、订阅、充值与支付；
+蓝鲸只通过账户适配接口读取或发起变更，不建立副本或第二套账户权威。
+_Avoid_: 蓝鲸用户表、Node 用户账本、双向用户同步、把账户事实复制为产品事实。
+
+**User ID（用户身份）**:
+new-api 为 User 分配的稳定整数身份，是蓝鲸产品事实的唯一所有者引用；凭证轮换、用户名或邮箱变化
+均不得改变 User ID。
+_Avoid_: Token 指纹、用户名、邮箱、浏览器本地 ID、客户端自报且未经验证的 `user_id`。
+
+**默认 API Key（用户执行凭证）**:
+new-api 在 User 登录后提供、以 `sk-` 开头的默认 Token，用于 relay 调用、quota 扣减以及由
+new-api 解析所属 User ID；上线前所有新 User 在注册事务中必须自动获得一把，创建失败则注册失败。
+它对普通蓝鲸 User 隐藏，但可因安全或运维原因轮换；登录发现缺失时返回配置错误，不做历史补建。
+_Avoid_: 永久用户身份、产品资源所有者 ID、不可轮换密钥。
+
+**产品事实（Product Facts）**:
+由蓝鲸唯一维护的 User 产品数据，包括 Project、Canvas、Asset、Conversation 与 GenerationJob；
+它们只引用 new-api 的稳定 User ID 作为所有者，不由 new-api 保存或管理。
+_Avoid_: 把 Canvas 等产品数据纳入账户中心、在产品表复制用户名、邮箱、quota 或订阅状态。
+
+**认证用户上下文（Authenticated User Context）**:
+蓝鲸 BFF 从请求凭证向 new-api 解析得到的可信 User ID 与账户状态；所有受保护的产品操作只使用
+该上下文确定所有者，浏览器不提交 `user_id`，蓝鲸也不接受其他客户端身份声明。
+_Avoid_: 请求体或查询参数中的 `user_id`、客户端自报所有者、Token 指纹派生身份。
+
+**账户能力（Account Capabilities）**:
+new-api 公开配置中蓝鲸已适配并允许 User 使用的登录、注册与验证能力集合；蓝鲸 BFF 只投影该子集，
+账户 UI 据此动态展示，不维护第二套功能开关。首版密码登录的同一标识输入同时接受用户名或邮箱。
+_Avoid_: 蓝鲸写死认证方式、浏览器直接读取 new-api 地址、展示蓝鲸尚未适配的 new-api 能力。
+
 **ContentReview（内容审核）**:
 Product API 对产品策略纳入审核范围的内容形成的安全决定；普通用户文字消息和提示词不做
 独立前置审核，Agent 或生成供应商的安全结果可以成为后续 ReviewEvidence。受审内容可以复用匹配的

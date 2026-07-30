@@ -19,9 +19,10 @@ import {
   listProjects,
   renameProject,
 } from "@/lib/canvas";
+import { wireIntegersEqual, type WireInteger } from "@/lib/wire-integer";
 
 type ProjectRow = {
-  id: number;
+  id: WireInteger;
   name: string;
   createdAt: string;
 };
@@ -64,7 +65,7 @@ export default function ProjectsPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renamingId, setRenamingId] = useState<WireInteger | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
@@ -137,7 +138,9 @@ export default function ProjectsPage() {
         const dto = await renameProject(renamingId, name);
         setRows((current) =>
           current.map((row) =>
-            row.id === renamingId ? { ...row, name: dto.name } : row,
+            wireIntegersEqual(row.id, renamingId)
+              ? { ...row, name: dto.name }
+              : row,
           ),
         );
         setRenamingId(null);
@@ -162,7 +165,9 @@ export default function ProjectsPage() {
     void (async () => {
       try {
         await deleteProject(target.id);
-        setRows((current) => current.filter((row) => row.id !== target.id));
+        setRows((current) =>
+          current.filter((row) => !wireIntegersEqual(row.id, target.id)),
+        );
         setDeleteTarget(null);
       } catch (e) {
         setDeleteError(errorMessage(e, "删除失败"));
@@ -229,7 +234,8 @@ export default function ProjectsPage() {
                 key={row.id}
                 className="flex items-center gap-3 rounded-xl border border-[var(--tc-border)] bg-[var(--tc-bg-surface)] px-4 py-3"
               >
-                {renamingId === row.id ? (
+                {renamingId !== null &&
+                wireIntegersEqual(renamingId, row.id) ? (
                   <form
                     className="flex flex-1 flex-wrap items-center gap-2"
                     onSubmit={(e) => {

@@ -14,6 +14,7 @@ import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
 import { toast } from "@/components/Toast";
 import { uploadAsset } from "@/lib/assets";
 import { UPLOAD_ACCEPT, selectUploadFiles } from "@/lib/uploadRules";
+import { wireInteger, type WireInteger } from "@/lib/wire-integer";
 
 import { useCanvasStore } from "./_canvas/store";
 import { uploadMediaToCanvas } from "./_canvas/uploadMedia";
@@ -187,11 +188,11 @@ export function CanvasProjectRuntime({
     undefined,
   );
   const [firstFrameAssetId, setFirstFrameAssetId] = useState<
-    number | undefined
+    WireInteger | undefined
   >(undefined);
-  const [lastFrameAssetId, setLastFrameAssetId] = useState<number | undefined>(
-    undefined,
-  );
+  const [lastFrameAssetId, setLastFrameAssetId] = useState<
+    WireInteger | undefined
+  >(undefined);
   const [agentPendingMention, setAgentPendingMention] = useState<{
     name: string;
     nonce: number;
@@ -367,7 +368,7 @@ export function CanvasProjectRuntime({
                 id: node.id,
                 type: "image",
                 assetId: node.data.assetId
-                  ? Number(node.data.assetId)
+                  ? wireInteger(node.data.assetId)
                   : undefined,
               },
               replace: true,
@@ -520,7 +521,7 @@ export function CanvasProjectRuntime({
       const previewUrl = URL.createObjectURL(file);
       const pending = uploadMediaToCanvas({
         file,
-        projectId: Number(pid),
+        projectId: wireInteger(pid),
         previewUrl,
         addNode,
         patchNode,
@@ -590,18 +591,14 @@ export function CanvasProjectRuntime({
     async (file: File, slot: "first" | "last") => {
       if (!pid) return;
       try {
-        const result = await uploadAsset(file, Number(pid), "image");
-        const assetId = Number(result.id);
+        const result = await uploadAsset(file, wireInteger(pid), "image");
+        const assetId = wireInteger(result.id);
         if (slot === "first") {
           setFirstFrameUrl(result.url);
-          setFirstFrameAssetId(
-            Number.isSafeInteger(assetId) ? assetId : undefined,
-          );
+          setFirstFrameAssetId(assetId);
         } else {
           setLastFrameUrl(result.url);
-          setLastFrameAssetId(
-            Number.isSafeInteger(assetId) ? assetId : undefined,
-          );
+          setLastFrameAssetId(assetId);
         }
       } catch (e) {
         setGenerateError(userFriendlyErrorMessage(e));
@@ -698,12 +695,12 @@ export function CanvasProjectRuntime({
       else if (pickingFor === "firstFrame") {
         setFirstFrameUrl(src);
         setFirstFrameAssetId(
-          node.data.assetId ? Number(node.data.assetId) : undefined,
+          node.data.assetId ? wireInteger(node.data.assetId) : undefined,
         );
       } else if (pickingFor === "lastFrame") {
         setLastFrameUrl(src);
         setLastFrameAssetId(
-          node.data.assetId ? Number(node.data.assetId) : undefined,
+          node.data.assetId ? wireInteger(node.data.assetId) : undefined,
         );
       }
       setPickingFor(null);

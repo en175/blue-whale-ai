@@ -530,6 +530,30 @@ describe("当前 Run id 选择器", () => {
     ).toBe(9);
   });
 
+  it("相邻超大 run ID 精确选择数值最大者", () => {
+    expect(
+      selectCurrentRunId([
+        { agent_run_id: "9007199254740992" },
+        { agent_run_id: "9007199254740993" },
+      ]),
+    ).toBe("9007199254740993");
+  });
+
+  it("相邻超大 run ID 精确选择最新 Creative Skill", () => {
+    expect(
+      selectCurrentRunCreativeSkillId([
+        {
+          agent_run_id: "9007199254740992",
+          activated_creative_skill_versions: [{ creative_skill_id: "old" }],
+        },
+        {
+          agent_run_id: "9007199254740993",
+          activated_creative_skill_versions: [{ creative_skill_id: "latest" }],
+        },
+      ]),
+    ).toBe("latest");
+  });
+
   it("无有效 id 返回 null", () => {
     expect(selectCurrentRunId([{ agent_run_id: "abc" }, {}])).toBeNull();
   });

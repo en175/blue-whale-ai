@@ -4,6 +4,11 @@
  * 在 contentEditable 编辑器内插入/移除参考图 mention pill，
  * 并从编辑器 DOM 中提取纯文本 prompt 与参考图 URL 列表。
  */
+import {
+  isWireInteger,
+  wireInteger,
+  type WireInteger,
+} from "@/lib/wire-integer";
 
 /** 参考图 mention 条目 */
 export type MentionItem = {
@@ -11,7 +16,7 @@ export type MentionItem = {
   type: "image" | "video" | "audio";
   name: string;
   src?: string;
-  assetId?: number;
+  assetId?: WireInteger;
 };
 
 const MENTION_ATTR = "data-mention-id";
@@ -112,11 +117,11 @@ export function removeMention(el: HTMLElement, id: string): void {
 export function extractEditor(el: HTMLElement): {
   prompt: string;
   referenceImages: string[];
-  assetIds: number[];
+  assetIds: WireInteger[];
 } {
   const referenceImages: string[] = [];
-  const assetIds: number[] = [];
-  const seenAssetIds = new Set<number>();
+  const assetIds: WireInteger[] = [];
+  const seenAssetIds = new Set<string>();
   const parts: string[] = [];
 
   const walk = (node: Node) => {
@@ -129,10 +134,13 @@ export function extractEditor(el: HTMLElement): {
       const mentionId = elem.getAttribute(MENTION_ATTR);
       if (mentionId) {
         const assetIdAttr = elem.getAttribute("data-mention-asset-id");
-        const assetId = assetIdAttr === null ? null : Number(assetIdAttr);
+        const assetId =
+          assetIdAttr !== null && isWireInteger(assetIdAttr)
+            ? wireInteger(assetIdAttr)
+            : null;
         // 同 assetId 重复 pill 整个跳过（如用户复制粘贴 pill DOM）：
         // 保证 content @[name] 数 = assetIds 数，与后端 mention_seq 一一对应
-        if (assetId !== null && seenAssetIds.has(assetId)) {
+        if (assetId !== null && seenAssetIds.has(String(assetId))) {
           return;
         }
         const name = elem.getAttribute("data-mention-name") ?? mentionId;
@@ -140,7 +148,7 @@ export function extractEditor(el: HTMLElement): {
         parts.push(`@[${name}]`);
         if (src) referenceImages.push(src);
         if (assetId !== null) {
-          seenAssetIds.add(assetId);
+          seenAssetIds.add(String(assetId));
           assetIds.push(assetId);
         }
         return;

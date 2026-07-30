@@ -43,6 +43,7 @@ import {
 import { nodeKinds } from "../kinds";
 import { parseAspectRatio } from "../aspectRatio";
 import { projectRecoveryTransport } from "@/lib/project-recovery";
+import { wireInteger, type WireInteger } from "@/lib/wire-integer";
 
 function parseQuantity(q: string): number {
   const n = parseInt(q, 10);
@@ -109,7 +110,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [videoJob, setVideoJob] = useState<{
-    id: number;
+    id: WireInteger;
     status: string;
     error: string | null;
   } | null>(null);
@@ -140,7 +141,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
   const startJob = useCallback(
     (
       nodeId: string,
-      jobId: number,
+      jobId: WireInteger,
       kind: "image" | "video",
       recipe?: NodeRecipe,
     ) => {
@@ -183,11 +184,11 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
 
   // IK55VL：取消入口在画布视频卡上（面板状态条评审后移除），按节点 taskId 取消。
   const cancelVideoJob = useCallback(
-    async (taskId: number) => {
+    async (taskId: WireInteger) => {
       if (!projectId) return;
       setCancellingVideo(true);
       try {
-        await cancelProjectGenerationJob(Number(projectId), taskId);
+        await cancelProjectGenerationJob(wireInteger(projectId), taskId);
         setVideoJob((current) =>
           current?.id === taskId
             ? { ...current, status: "cancel_requested" }
@@ -255,7 +256,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
             },
           };
           const { generation_job_id } = await createProjectGenerationJob(
-            Number(projectId),
+            wireInteger(projectId),
             payload,
             newIdempotencyKey(),
           );
@@ -336,7 +337,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
               : {}),
           };
           const { generation_job_id } = await createProjectGenerationJob(
-            Number(projectId),
+            wireInteger(projectId),
             payload,
             newIdempotencyKey(),
           );
@@ -383,7 +384,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
             });
             const result = await generateAudio({
               prompt: trimmed,
-              projectId: Number(projectId),
+              projectId: wireInteger(projectId),
               mode: s.mode,
               modelId: s.model.id,
               lyrics: s.lyrics,
@@ -461,7 +462,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
             },
           };
           const { generation_job_id } = await createProjectGenerationJob(
-            Number(projectId),
+            wireInteger(projectId),
             payload,
             newIdempotencyKey(),
           );
@@ -499,7 +500,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
             },
           };
           const { generation_job_id } = await createProjectGenerationJob(
-            Number(projectId),
+            wireInteger(projectId),
             payload,
             newIdempotencyKey(),
           );
@@ -533,17 +534,17 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
         if (byTaskId.size === 0) return; // 无持久 taskId → 跳过 listJobs
         const [queued, processing, failed] = await Promise.all([
           listJobs({
-            projectId: Number(projectId),
+            projectId: wireInteger(projectId),
             status: "queued",
             size: 50,
           }),
           listJobs({
-            projectId: Number(projectId),
+            projectId: wireInteger(projectId),
             status: "processing",
             size: 50,
           }),
           listJobs({
-            projectId: Number(projectId),
+            projectId: wireInteger(projectId),
             status: "failed",
             size: 50,
           }),
@@ -552,17 +553,17 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
           [...queued, ...processing].map((job) => [job.job_id, job]),
         );
         for (const job of activeJobs.values()) {
-          const existing = byTaskId.get(job.job_id);
+          const existing = byTaskId.get(String(job.job_id));
           if (!existing) continue;
           patchNode(existing.id, { status: "running", progress: 0 });
           startJob(
             existing.id,
-            Number(job.job_id),
+            job.job_id,
             existing.data.kind === "video" ? "video" : "image",
           );
         }
         for (const job of failed) {
-          const existing = byTaskId.get(job.job_id);
+          const existing = byTaskId.get(String(job.job_id));
           if (!existing) continue;
           patchNode(existing.id, { status: "error", errorMessage: "生成失败" });
         }
@@ -584,12 +585,12 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
         }
         if (byTaskId.size === 0) return;
         const list = await listJobs({
-          projectId: Number(projectId),
+          projectId: wireInteger(projectId),
           status: "succeeded",
           size: 50,
         });
         for (const job of list) {
-          const node = byTaskId.get(job.job_id);
+          const node = byTaskId.get(String(job.job_id));
           if (!node) continue;
           const asset = job.output_assets?.[0];
           if (asset) {
@@ -615,7 +616,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
   const hydrate = useCallback(
     async (ns: CanvasNode[]) => {
       const snapshot = await projectRecoveryTransport.loadSnapshot(
-        Number(projectId),
+        wireInteger(projectId),
         new AbortController().signal,
       );
       for (const asset of Object.values(snapshot.assets)) {

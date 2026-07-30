@@ -17,6 +17,7 @@ import {
   type Connection,
 } from "@xyflow/react";
 import { loadCanvas, saveCanvas } from "../../../../lib/canvas";
+import { wireInteger } from "@/lib/wire-integer";
 import {
   parse,
   serialize,
@@ -118,7 +119,7 @@ export function useCanvasDoc(): CanvasDocApi {
       };
       try {
         await saveCanvas(
-          Number(snapshot.projectId),
+          wireInteger(snapshot.projectId),
           JSON.stringify(snapshot.viewport),
           serialize(doc),
         );
@@ -340,7 +341,7 @@ export function useCanvasDoc(): CanvasDocApi {
       setLoadState("loading");
 
       try {
-        const dto = await loadCanvas(Number(projectId));
+        const dto = await loadCanvas(wireInteger(projectId));
         if (
           projectIdRef.current !== projectId ||
           loadGenerationRef.current !== generation

@@ -6,7 +6,6 @@
     { "path": "./packages/persistence" },
     { "path": "./packages/agent-runtime" },
     { "path": "./packages/generation-runtime" },
-    { "path": "./apps/product-api" },
     { "path": "./apps/agent-worker" },
     { "path": "./apps/generation-worker" }
   ]

@@ -12,6 +12,7 @@ import { loadAccessToken } from "@/components/auth/authStorage";
 import * as canvasApi from "@/lib/canvas";
 import type { Project, ChatMessage, Viewport } from "../types";
 import type { CardStatus } from "@/types/domain";
+import { wireInteger } from "@/lib/wire-integer";
 
 const EMPTY_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 
@@ -45,12 +46,16 @@ function nowName(): string {
  */
 export function useV2Projects(projectId: string | null) {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [messagesByPid, setMessagesByPid] = useState<Record<string, ChatMessage[]>>({});
+  const [messagesByPid, setMessagesByPid] = useState<
+    Record<string, ChatMessage[]>
+  >({});
   const [booting, setBooting] = useState(true);
   const [backendReady, setBackendReady] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
-  const [online] = useState(() => typeof window !== "undefined" && !!loadAccessToken());
+  const [online] = useState(
+    () => typeof window !== "undefined" && !!loadAccessToken(),
+  );
 
   const projectsRef = useRef<Project[]>([]);
   useEffect(() => {
@@ -60,6 +65,7 @@ export function useV2Projects(projectId: string | null) {
   // list（online 才尝试；失败 loadError）— 不再 setActiveId（URL 路由控制 active）
   useEffect(() => {
     if (!online) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setBooting(false);
       return;
     }
@@ -90,11 +96,16 @@ export function useV2Projects(projectId: string | null) {
     setRetryKey((k) => k + 1);
   }, []);
 
-  const activeProject = projectId ? projects.find((p) => p.id === projectId) : undefined;
+  const activeProject = projectId
+    ? projects.find((p) => p.id === projectId)
+    : undefined;
 
   /** 新建项目：落库 + 入列，返回新 id（调用方 router.push）。 */
   const createProject = useCallback(async (): Promise<string | null> => {
-    const name = dedupeName(nowName(), projectsRef.current.map((p) => p.name));
+    const name = dedupeName(
+      nowName(),
+      projectsRef.current.map((p) => p.name),
+    );
     try {
       const dto = await canvasApi.createProject(name);
       const p = dtoToProject(dto);
@@ -106,25 +117,33 @@ export function useV2Projects(projectId: string | null) {
     }
   }, []);
 
-  const renameProject = useCallback(async (id: string, rawName: string): Promise<boolean> => {
-    const trimmed = rawName.trim();
-    const cur = projectsRef.current.find((p) => p.id === id);
-    if (!cur || !trimmed || trimmed === cur.name) return false;
-    const name = dedupeName(trimmed, projectsRef.current.filter((p) => p.id !== id).map((p) => p.name));
-    try {
-      await canvasApi.renameProject(Number(id), name);
-      setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, name } : p)));
-      return true;
-    } catch (e) {
-      console.error("[canvas-v2] renameProject failed", e);
-      return false;
-    }
-  }, []);
+  const renameProject = useCallback(
+    async (id: string, rawName: string): Promise<boolean> => {
+      const trimmed = rawName.trim();
+      const cur = projectsRef.current.find((p) => p.id === id);
+      if (!cur || !trimmed || trimmed === cur.name) return false;
+      const name = dedupeName(
+        trimmed,
+        projectsRef.current.filter((p) => p.id !== id).map((p) => p.name),
+      );
+      try {
+        await canvasApi.renameProject(wireInteger(id), name);
+        setProjects((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, name } : p)),
+        );
+        return true;
+      } catch (e) {
+        console.error("[canvas-v2] renameProject failed", e);
+        return false;
+      }
+    },
+    [],
+  );
 
   /** 删除项目：后端删 + 本地删。active 被删时调用方应跳转。 */
   const deleteProject = useCallback(async (id: string): Promise<void> => {
     try {
-      await canvasApi.deleteProject(Number(id));
+      await canvasApi.deleteProject(wireInteger(id));
     } catch (e) {
       console.error("[canvas-v2] deleteProject failed", e);
     }
@@ -134,7 +153,10 @@ export function useV2Projects(projectId: string | null) {
   const appendMessages = useCallback(
     (msgs: ChatMessage[]) => {
       if (!projectId) return;
-      setMessagesByPid((prev) => ({ ...prev, [projectId]: [...(prev[projectId] ?? []), ...msgs] }));
+      setMessagesByPid((prev) => ({
+        ...prev,
+        [projectId]: [...(prev[projectId] ?? []), ...msgs],
+      }));
     },
     [projectId],
   );
@@ -144,13 +166,16 @@ export function useV2Projects(projectId: string | null) {
       if (!projectId) return;
       setMessagesByPid((prev) => ({
         ...prev,
-        [projectId]: (prev[projectId] ?? []).map((m) => (m.type === "card" && m.id === cardId ? { ...m, status } : m)),
+        [projectId]: (prev[projectId] ?? []).map((m) =>
+          m.type === "card" && m.id === cardId ? { ...m, status } : m,
+        ),
       }));
     },
     [projectId],
   );
 
-  const messages = activeProject && projectId ? messagesByPid[projectId] ?? [] : [];
+  const messages =
+    activeProject && projectId ? (messagesByPid[projectId] ?? []) : [];
 
   return {
     projects,

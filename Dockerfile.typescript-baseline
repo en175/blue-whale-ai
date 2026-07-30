@@ -1,13 +1,19 @@
 FROM node:24.18.0-bookworm-slim
 
+RUN sed -i \
+        's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g; s|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security|g' \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install --yes --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN npm install --global pnpm@11.17.0
 
 WORKDIR /workspace
 COPY . .
 
-ENV GATEWAY_URL=http://product-api:4000
-
 RUN pnpm install --frozen-lockfile \
+    && pnpm --filter @blue-whale/persistence exec prisma generate --schema prisma/schema.prisma \
     && pnpm build:node \
     && pnpm --filter blue_whale build
 

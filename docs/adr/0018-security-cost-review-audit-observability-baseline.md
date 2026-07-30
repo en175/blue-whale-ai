@@ -4,6 +4,9 @@
 - **IK3UUX 范围状态**：Limited — 保留当前核心流程直接需要的认证、Project/Asset 隔离、内容审核与
   成本硬限制；生产 SLO、完整告警/可观测性、长期审计与灾备验收留待上线准备，见
   [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
+- **身份部分取代**：手机号、refresh、Java Product API 与 Java JWT 身份方案由
+  [ADR-0062](0062-new-api-account-center-and-quota-billing.md) 取代；本 ADR 的服务端认证上下文、
+  对象级授权、审核、成本与审计原则继续有效。
 - **日期**：2026-07-14
 
 ## 背景

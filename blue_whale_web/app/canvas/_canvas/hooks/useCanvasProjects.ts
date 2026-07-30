@@ -12,7 +12,7 @@
  *   有 token 但后端不可达时 online=true、backendReady=false → 仍走 mock，不刷报错
  *   （避免 mock id "1" 等纯数字 id 误判为后端 id 而触发恢复请求失败）。
  *
- * id 适配：后端 ProjectDto.id:number ↔ 前端 Project.id:string。API 边界 String()/Number() 转换，
+ * id 适配：后端 ProjectDto.id:WireInteger ↔ 前端 Project.id:string。API 边界只做 String()，
  * reducer/types 不动。backendReady=true 时 projects 已是后端真 id；false 时是 mock id（不连后端）。
  *
  * 保存守卫：Snapshot/SSE 恢复的 canvas 用 lastSavedRef 快照同步，使保存 effect 判定无变化而跳过；
@@ -39,6 +39,7 @@ import {
   type ProjectRecoveryState,
   type ProjectSnapshot,
 } from "@/lib/project-recovery";
+import { wireInteger, type WireInteger } from "@/lib/wire-integer";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -195,7 +196,7 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
       loadingProjectRef.current = null;
     };
     void runProjectRecovery(
-      Number(pid),
+      pid,
       projectRecoveryTransport,
       applyRecoveredState,
       controller.signal,
@@ -226,7 +227,7 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
       if (!p) return;
       try {
         await canvasApi.saveCanvas(
-          Number(pid),
+          wireInteger(pid),
           JSON.stringify(p.canvas.viewport),
           JSON.stringify(p.canvas.nodes),
         );
@@ -323,7 +324,7 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
       loadedRef.current.delete(id);
       if (backendReady) {
         try {
-          await canvasApi.deleteProject(Number(id));
+          await canvasApi.deleteProject(wireInteger(id));
         } catch (e) {
           console.error("[canvas] deleteProject failed:", e);
         }
@@ -349,7 +350,7 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
   const submitConversationMessageAction = useCallback(
     async (
       content: string,
-      referencedAssetIds?: number[],
+      referencedAssetIds?: WireInteger[],
       forcedCreativeSkillId?: string,
     ) => {
       if (!backendReady) return;
@@ -362,7 +363,7 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
       // 单一真相源在此屏蔽；组件层 answerableActive 仅控制乐观展示与 pending 清理。
       const effectiveForced = answerable ? undefined : forcedCreativeSkillId;
       await acceptConversationMessage(
-        Number(activeProject.id),
+        activeProject.id,
         content,
         newCommandIdentity(),
         newCommandIdentity(),

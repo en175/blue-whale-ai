@@ -14,7 +14,9 @@ vi.mock("@/lib/canvas", () => ({
   loadCanvas: vi.fn(),
   saveCanvas: vi.fn(),
 }));
-vi.mock("@/components/auth/authStorage", () => ({ loadAccessToken: () => "tok" }));
+vi.mock("@/components/auth/authStorage", () => ({
+  loadAccessToken: () => "tok",
+}));
 
 import { useV2Projects } from "./useV2Projects";
 import * as canvasApi from "@/lib/canvas";
@@ -22,7 +24,12 @@ import * as canvasApi from "@/lib/canvas";
 const listProjects = canvasApi.listProjects as ReturnType<typeof vi.fn>;
 const createProjectApi = canvasApi.createProject as ReturnType<typeof vi.fn>;
 
-const dto = (id: number, name: string) => ({ id, name, thumb: null as null, createdAt: "" });
+const dto = (id: number | string, name: string) => ({
+  id,
+  name,
+  thumb: null as null,
+  created_at: "",
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -40,9 +47,13 @@ describe("useV2Projects", () => {
 
   it("messages 按 projectId 隔离（rerender 模拟 URL 切换）", async () => {
     listProjects.mockResolvedValue([dto(1, "A"), dto(2, "B")]);
-    const { result, rerender } = renderHook(({ pid }) => useV2Projects(pid), { initialProps: { pid: "1" as string | null } });
+    const { result, rerender } = renderHook(({ pid }) => useV2Projects(pid), {
+      initialProps: { pid: "1" as string | null },
+    });
     await waitFor(() => expect(result.current.backendReady).toBe(true));
-    act(() => result.current.appendMessages([{ id: "m1", type: "user", text: "hi" }]));
+    act(() =>
+      result.current.appendMessages([{ id: "m1", type: "user", text: "hi" }]),
+    );
     expect(result.current.messages).toHaveLength(1);
     rerender({ pid: "2" });
     expect(result.current.activeProject?.id).toBe("2");
@@ -62,5 +73,22 @@ describe("useV2Projects", () => {
     });
     expect(result.current.projects).toHaveLength(2);
     expect(id).toBe("5");
+  });
+
+  it("超大项目 ID 重命名和删除时保持十进制字符串精度", async () => {
+    const projectId = "9007199254740993";
+    listProjects.mockResolvedValue([dto(projectId, "A")]);
+    vi.mocked(canvasApi.renameProject).mockResolvedValue(dto(projectId, "B"));
+    vi.mocked(canvasApi.deleteProject).mockResolvedValue(undefined);
+    const { result } = renderHook(() => useV2Projects(projectId));
+    await waitFor(() => expect(result.current.backendReady).toBe(true));
+
+    await act(async () => {
+      await result.current.renameProject(projectId, "B");
+      await result.current.deleteProject(projectId);
+    });
+
+    expect(canvasApi.renameProject).toHaveBeenCalledWith(projectId, "B");
+    expect(canvasApi.deleteProject).toHaveBeenCalledWith(projectId);
   });
 });
