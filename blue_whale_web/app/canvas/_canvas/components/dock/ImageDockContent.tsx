@@ -92,6 +92,8 @@ export function ImageDockContent({
     if (!Number.isNaN(currentQty) && currentQty > model.features.quantity_max) {
       setQuantity(`${model.features.quantity_max}x`);
     }
+    if (!model.features.tools) setWebSearch(false);
+    if (!model.features.sequential_image_generation) setSequential(false);
   };
 
   // 上传来源菜单（占位按钮 + 加号共用）
@@ -640,6 +642,8 @@ export function ImageDockContent({
                   size: selectedSize.id,
                   webSearch: webSearch,
                   sequential: sequential,
+                  referenceImageSupported:
+                    selectedModel.features.reference_image,
                   aspectRatio: selectedAspectRatio,
                   quantity,
                 });

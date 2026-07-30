@@ -46,6 +46,7 @@ export interface AssetSourceFields {
   width: number | null;
   height: number | null;
   duration: number | null;
+  duration_ms?: number | null;
   source: string;
 }
 
@@ -126,6 +127,13 @@ const uploadAssetSelect = {
   duration_ms: true,
 } as const;
 
+export function assetDurationSeconds(
+  duration: number | null,
+  durationMs: number | null | undefined,
+): number | null {
+  return durationMs == null ? duration : durationMs / 1000;
+}
+
 function toUploadAsset(row: {
   id: bigint;
   type: string;
@@ -144,7 +152,7 @@ function toUploadAsset(row: {
     ...asset,
     id: row.id.toString(),
     storage_key: row.storage_key,
-    duration: durationMs == null ? row.duration : durationMs / 1000,
+    duration: assetDurationSeconds(row.duration, durationMs),
   };
 }
 
@@ -187,7 +195,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           url: a.url,
           width: a.width,
           height: a.height,
-          duration: a.duration,
+          duration: assetDurationSeconds(a.duration, a.duration_ms),
           source: a.source ?? null,
           created_at: a.gmt_create?.toISOString() ?? null,
         })),
@@ -228,6 +236,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         width: row.width,
         height: row.height,
         duration: row.duration,
+        duration_ms: row.duration_ms,
         source: row.source,
       };
     },
@@ -244,6 +253,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           width: source.width,
           height: source.height,
           duration: source.duration,
+          duration_ms: source.duration_ms ?? null,
           source: source.source,
           status: "normal",
         },
@@ -254,7 +264,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         url: row.url,
         width: row.width,
         height: row.height,
-        duration: row.duration,
+        duration: assetDurationSeconds(row.duration, row.duration_ms),
         source: row.source ?? null,
         created_at: row.gmt_create?.toISOString() ?? null,
       };

@@ -28,6 +28,8 @@ import {
 import {
   selectDockInputAssetIds,
   selectVideoDockAssetIds,
+  validateImageDockReferences,
+  validateVideoDockReferences,
 } from "./generation-input";
 
 export function BottomDock({
@@ -44,6 +46,7 @@ export function BottomDock({
   onExitPick,
   isPicking = false,
   onGenerate,
+  onGenerateError,
   generating = false,
   generateError,
   onClearGenerateError,
@@ -77,6 +80,8 @@ export function BottomDock({
   isPicking?: boolean;
   /** 生成：prompt 由本组件 input state 取，settings 由各 Dock Content 拼 */
   onGenerate?: (prompt: string, args: GenerateArgs) => void;
+  /** 前端能力边界校验失败，不创建 Job。 */
+  onGenerateError?: (message: string) => void;
   /** 生成进行中（禁用按钮防重复提交） */
   generating?: boolean;
   /** 生成错误提示（用户友好，非内部错误） */
@@ -317,7 +322,19 @@ export function BottomDock({
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
-                  onGenerate={(s) =>
+                  onGenerate={(s) => {
+                    const mentionAssetIds = editorRef.current
+                      ? extractEditor(editorRef.current).assetIds
+                      : [];
+                    const validationError = validateImageDockReferences(
+                      mentionAssetIds,
+                      imageMedia,
+                      s.referenceImageSupported,
+                    );
+                    if (validationError) {
+                      onGenerateError?.(validationError);
+                      return;
+                    }
                     onGenerate?.(input, {
                       mode: "image",
                       settings: s,
@@ -329,11 +346,11 @@ export function BottomDock({
                       ],
                       inputAssetIds: selectDockInputAssetIds(
                         "image",
-                        editorRef.current ? extractEditor(editorRef.current).assetIds : [],
+                        mentionAssetIds,
                         imageMedia,
                       ),
-                    })
-                  }
+                    });
+                  }}
                   generating={generating}
                   onPreviewMedia={setPreviewItem}
                 />
@@ -398,11 +415,27 @@ export function BottomDock({
                   onPickFrameFromCanvas={onPickFrameFromCanvas}
                   onGenerate={(s) => {
                     const ordinaryReferenceMode = refMode.id !== "first-last";
+                    const mentionAssetIds = editorRef.current
+                      ? extractEditor(editorRef.current).assetIds
+                      : [];
+                    const validationError = validateVideoDockReferences(
+                      refMode.id,
+                      mentionAssetIds,
+                      videoMedia,
+                      {
+                        firstFrameAssetId,
+                        lastFrameAssetId,
+                        firstFrameUrl,
+                        lastFrameUrl,
+                      },
+                    );
+                    if (validationError) {
+                      onGenerateError?.(validationError);
+                      return;
+                    }
                     const assetIds = selectVideoDockAssetIds(
                       refMode.id,
-                      editorRef.current
-                        ? extractEditor(editorRef.current).assetIds
-                        : [],
+                      mentionAssetIds,
                       videoMedia,
                     );
                     onGenerate?.(input, {

@@ -68,6 +68,30 @@ describe("new-api client", () => {
     );
   });
 
+  it("sends sequential image generation options", async () => {
+    const requests: RequestInit[] = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (_input, init = {}) => {
+        requests.push(init);
+        return jsonResponse({ data: [{ url: "https://cdn.test/sequence.png" }] });
+      },
+    });
+
+    await client.generateImages("sk-test", {
+      model: "image-model",
+      prompt: "four related scenes",
+      n: 4,
+      sequential: true,
+    });
+
+    expect(JSON.parse(String(requests[0]?.body))).toMatchObject({
+      n: 4,
+      sequential_image_generation: "auto",
+      sequential_image_generation_options: { max_images: 4 },
+    });
+  });
+
   it("preserves nested gateway error details from failed requests", async () => {
     const client = createNewApiClient({
       baseUrl: "http://new-api.test",
@@ -125,6 +149,59 @@ describe("new-api client", () => {
     expect((form as FormData).get("prompt")).toBe("turn it blue");
     expect((form as FormData).get("image")).toBeInstanceOf(Blob);
     expect(images).toEqual([{ url: "https://cdn.test/edited.png" }]);
+  });
+
+  it("sends sequential options for image edits", async () => {
+    const requests: RequestInit[] = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (_input, init = {}) => {
+        requests.push(init);
+        return jsonResponse({ data: [{ url: "https://cdn.test/edited.png" }] });
+      },
+    });
+
+    await client.editImages("sk-test", {
+      model: "image-model",
+      prompt: "four related edits",
+      image: new Blob(["image-bytes"], { type: "image/png" }),
+      fileName: "source.png",
+      n: 4,
+      sequential: true,
+      webSearch: true,
+    });
+
+    const form = requests[0]?.body as FormData;
+    expect(form.get("tools")).toBe(JSON.stringify([{ type: "web_search" }]));
+    expect(form.get("sequential_image_generation")).toBe("auto");
+    expect(form.get("sequential_image_generation_options")).toBe(
+      JSON.stringify({ max_images: 4 }),
+    );
+  });
+
+  it("sends multiple reference images with the gateway array field", async () => {
+    const requests: RequestInit[] = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (_input, init = {}) => {
+        requests.push(init);
+        return jsonResponse({ data: [{ url: "https://cdn.test/edited.png" }] });
+      },
+    });
+
+    await client.editImages("sk-test", {
+      model: "image-model",
+      prompt: "combine four references",
+      images: [
+        { blob: new Blob(["one"], { type: "image/png" }), fileName: "one.png" },
+        { blob: new Blob(["two"], { type: "image/png" }), fileName: "two.png" },
+      ],
+      n: 1,
+    });
+
+    const form = requests[0]?.body as FormData;
+    expect(form.getAll("image[]")).toHaveLength(2);
+    expect(form.getAll("image")).toHaveLength(0);
   });
 
   it("submits and polls authenticated video tasks", async () => {

@@ -51,6 +51,7 @@ import {
   type NodeToolbarAction,
 } from "../config";
 import { AuthenticatedImage } from "../components/AuthenticatedImage";
+import { AssetInfoPanel } from "../components/AssetInfoPanel";
 
 type MediaNodeData = CanvasNodeData & {
   content?: string;
@@ -447,9 +448,11 @@ export function MediaStateBody({
 function NodeToolbarActions({
   onAction,
   actions = NODE_TOOLBAR_ACTIONS,
+  expandedActionId,
 }: {
   onAction: (id: string) => void;
   actions?: NodeToolbarAction[];
+  expandedActionId?: string;
 }) {
   return (
     <div
@@ -480,6 +483,12 @@ function NodeToolbarActions({
               key={action.id}
               type="button"
               aria-label={action.label}
+              aria-haspopup={action.id === "info" ? "dialog" : undefined}
+              aria-expanded={
+                action.id === "info"
+                  ? expandedActionId === action.id
+                  : undefined
+              }
               onClick={() => onAction(action.id)}
               className="tc-node-toolbar-button tc-ui-glow-btn flex items-center justify-center rounded-lg hover:bg-[var(--tc-menu-item-hover)] hover:text-white"
               style={{
@@ -577,6 +586,10 @@ export function MediaNode({ id, data, width, height, selected }: NodeProps) {
   const { onAction, onRetry, picking, pickingAccept } =
     useContext(NodeActionsContext);
   const asset = useNodeAsset(d);
+  const ensureAsset = useCanvasStore((s) => s.ensureAsset);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [infoLoading, setInfoLoading] = useState(false);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const src = asset?.src ?? (d.imageUrl as string | undefined);
   const isAudio = d.kind === "audio";
   const isVideo = !isAudio && (d.kind === "video" || isVideoUrl(src));
@@ -597,6 +610,40 @@ export function MediaNode({ id, data, width, height, selected }: NodeProps) {
     CanvasNode[] | undefined;
   const promptFromText = upstream?.find((n) => n.data.kind === "text")?.data
     .prompt as string | undefined;
+  useEffect(() => {
+    if (!infoOpen) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!toolbarRef.current?.contains(event.target as Node)) {
+        setInfoOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setInfoOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [infoOpen]);
+  const handleToolbarAction = useCallback(
+    (actionId: string) => {
+      if (actionId !== "info") {
+        setInfoOpen(false);
+        onAction?.(id, actionId);
+        return;
+      }
+      const nextOpen = !infoOpen;
+      setInfoOpen(nextOpen);
+      if (!nextOpen || !d.assetId || asset?.mimeType) return;
+      setInfoLoading(true);
+      void ensureAsset(d.assetId)
+        .catch(() => undefined)
+        .finally(() => setInfoLoading(false));
+    },
+    [asset?.mimeType, d.assetId, ensureAsset, id, infoOpen, onAction],
+  );
   return (
     <>
       <NodeToolbar
@@ -604,10 +651,16 @@ export function MediaNode({ id, data, width, height, selected }: NodeProps) {
         offset={8}
         isVisible={selected && d.status !== "running"}
       >
-        <NodeToolbarActions
-          actions={toolbarForKind(d.kind)}
-          onAction={(a) => onAction?.(id, a)}
-        />
+        <div ref={toolbarRef} className="nodrag nopan relative">
+          <NodeToolbarActions
+            actions={toolbarForKind(d.kind)}
+            expandedActionId={infoOpen ? "info" : undefined}
+            onAction={handleToolbarAction}
+          />
+          {infoOpen && (
+            <AssetInfoPanel asset={asset} loading={infoLoading} />
+          )}
+        </div>
       </NodeToolbar>
       <div
         className={[
@@ -703,56 +756,93 @@ export function TextNode({ id, data, width, height, selected }: NodeProps) {
   const { onEditPrompt } = useContext(NodeActionsContext);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(d.prompt ?? d.content ?? "");
+  const [infoOpen, setInfoOpen] = useState(false);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft(d.prompt ?? d.content ?? "");
   }, [d.prompt, d.content]);
+  useEffect(() => {
+    if (!infoOpen) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!toolbarRef.current?.contains(event.target as Node)) {
+        setInfoOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setInfoOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [infoOpen]);
   const commit = () => {
     setEditing(false);
     onEditPrompt?.(id, draft);
   };
   return (
-    <div
-      className="tc-text-node relative flex items-center justify-center rounded-xl px-4"
-      style={{
-        width,
-        height,
-        outline: selected
-          ? "2px solid var(--tc-card-selected-stroke)"
-          : "2px solid transparent",
-        outlineOffset: 0,
-        background: "var(--tc-bg-surface)",
-      }}
-    >
-      <NodeHandles kind="text" />
-      {editing ? (
-        <textarea
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              commit();
-            }
-          }}
-          rows={1}
-          className="nodrag w-full resize-none bg-transparent text-center text-sm leading-5 outline-none"
-          style={{ color: "var(--tc-text-secondary)" }}
-        />
-      ) : (
-        <span
-          onDoubleClick={() => setEditing(true)}
-          className="cursor-text text-center text-sm leading-5"
-          style={{
-            color: draft ? "var(--tc-text-secondary)" : "var(--tc-text-muted)",
-          }}
-        >
-          {draft || "双击输入 prompt"}
-        </span>
-      )}
-    </div>
+    <>
+      <NodeToolbar
+        position={Position.Top}
+        offset={8}
+        isVisible={selected}
+      >
+        <div ref={toolbarRef} className="nodrag nopan relative">
+          <NodeToolbarActions
+            actions={toolbarForKind("image").filter(
+              (action) => action.id === "info",
+            )}
+            expandedActionId={infoOpen ? "info" : undefined}
+            onAction={() => setInfoOpen((open) => !open)}
+          />
+          {infoOpen && <AssetInfoPanel />}
+        </div>
+      </NodeToolbar>
+      <div
+        className="tc-text-node relative flex items-center justify-center rounded-xl px-4"
+        style={{
+          width,
+          height,
+          outline: selected
+            ? "2px solid var(--tc-card-selected-stroke)"
+            : "2px solid transparent",
+          outlineOffset: 0,
+          background: "var(--tc-bg-surface)",
+        }}
+      >
+        <NodeHandles kind="text" />
+        {editing ? (
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                commit();
+              }
+            }}
+            rows={1}
+            className="nodrag w-full resize-none bg-transparent text-center text-sm leading-5 outline-none"
+            style={{ color: "var(--tc-text-secondary)" }}
+          />
+        ) : (
+          <span
+            onDoubleClick={() => setEditing(true)}
+            className="cursor-text text-center text-sm leading-5"
+            style={{
+              color: draft ? "var(--tc-text-secondary)" : "var(--tc-text-muted)",
+            }}
+          >
+            {draft || "双击输入 prompt"}
+          </span>
+        )}
+      </div>
+    </>
   );
 }
 

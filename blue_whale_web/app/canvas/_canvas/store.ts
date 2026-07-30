@@ -22,7 +22,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set((s) => (s.assets[id] ? { assets: { ...s.assets, [id]: { ...s.assets[id], src } } } : s)),
 
   ensureAsset: async (assetId) => {
-    if (get().assets[assetId]) return;
+    // mimeType marks an authoritative API hydration. Locally inserted assets only
+    // carry id/src, so the first info-panel open still fetches complete metadata.
+    if (get().assets[assetId]?.mimeType) return;
     const r = await getAsset(assetId);
     // AssetResponse 用 asset_id（非 id）；type 为 image|video，转 Asset.kind（MediaKind 含 text/audio 兜底）
     const a: Asset = {
@@ -32,6 +34,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       width: r.width ?? undefined,
       height: r.height ?? undefined,
       duration: r.duration ?? undefined,
+      mimeType: r.mime,
     };
     set((s) => ({ assets: { ...s.assets, [a.id]: a } }));
   },

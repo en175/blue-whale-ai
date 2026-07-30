@@ -149,6 +149,8 @@ export type ImageGenerateSettings = {
   webSearch: boolean;
   /** 组图模式开关，真传 payload.parameters.sequential_image_generation。 */
   sequential: boolean;
+  /** 当前模型是否允许参考图；仅用于 Dock 提交前能力校验。 */
+  referenceImageSupported: boolean;
 };
 
 /** 音频 Dock 生成设置（IJZXW7-B；模型/参数 mock，后端音频生成就绪换 catalog）。 */
@@ -287,4 +289,9 @@ export type VideoDockContentProps = {
   onFrameClear?: (slot: "first" | "last") => void;
   onSwapFrames?: () => void;
   onPickFrameFromCanvas?: (slot: "first" | "last") => void;
+  /** 可选测试/上层注入；生产默认从视频模型能力表解析。 */
+  models?: SelectOption[];
+  resolutions?: SelectOption[];
+  aspectRatios?: SelectOption[];
+  quantityMax?: number;
 };

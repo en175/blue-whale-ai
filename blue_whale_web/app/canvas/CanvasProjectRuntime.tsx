@@ -850,6 +850,7 @@ export function CanvasProjectRuntime({
           onExitPick={handleExitPick}
           isPicking={pickingFor === bottomDockMode}
           onGenerate={handleGenerate}
+          onGenerateError={setGenerateError}
           generating={generating}
           generateError={generateError}
           onClearGenerateError={() => setGenerateError(null)}

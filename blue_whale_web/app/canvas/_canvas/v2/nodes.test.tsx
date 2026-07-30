@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
   cleanup,
@@ -7,10 +8,25 @@ import {
   fireEvent,
   waitFor,
 } from "@testing-library/react";
+import { ReactFlowProvider, type NodeProps } from "@xyflow/react";
 import { apiFetch } from "@/lib/api-client";
-import { MediaStateBody } from "./nodes";
+import type { CanvasNode } from "../model";
+import { MediaStateBody, TextNode } from "./nodes";
 
 vi.mock("@/lib/api-client", () => ({ apiFetch: vi.fn() }));
+vi.mock("@xyflow/react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@xyflow/react")>();
+  return {
+    ...actual,
+    NodeToolbar: ({
+      children,
+      isVisible,
+    }: {
+      children: ReactNode;
+      isVisible?: boolean;
+    }) => (isVisible ? <>{children}</> : null),
+  };
+});
 
 /**
  * v2 MediaStateBody 单测：音频占位渲染（IJZY0Z「音频有占位展示」，无播放控件）+
@@ -138,5 +154,28 @@ describe("MediaStateBody / image 回归", () => {
       "/api/projects/55/assets/200/content",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+});
+
+describe("TextNode / 素材信息", () => {
+  it("选中无媒体节点时可打开信息面板并显示无媒体信息", () => {
+    const props = {
+      id: "qa_text",
+      data: { kind: "text", content: "无媒体节点" },
+      width: 240,
+      height: 120,
+      selected: true,
+    } as unknown as Parameters<typeof TextNode>[0];
+
+    render(
+      <ReactFlowProvider>
+        <TextNode {...props} />
+      </ReactFlowProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "信息" }));
+
+    expect(screen.getByRole("dialog", { name: "素材信息" })).toBeInTheDocument();
+    expect(screen.getByText("无媒体信息")).toBeInTheDocument();
   });
 });

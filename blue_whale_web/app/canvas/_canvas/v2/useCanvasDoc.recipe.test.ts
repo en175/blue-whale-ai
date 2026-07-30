@@ -11,9 +11,12 @@ import { renderHook, act } from "@testing-library/react";
 import { useCanvasDoc } from "./useCanvasDoc";
 import type { CanvasNode, NodeRecipe } from "../model";
 import { loadCanvas, saveCanvas } from "../../../../lib/canvas";
+import type { CanvasDto } from "../../../../lib/canvas";
 
 vi.mock("../../../../lib/canvas", () => ({
-  loadCanvas: vi.fn().mockResolvedValue({ nodes: "[]", viewport: null }),
+  loadCanvas: vi
+    .fn()
+    .mockResolvedValue({ id: null, project_id: 1, nodes: "[]", viewport: "null" }),
   saveCanvas: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -76,7 +79,7 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
 
   it("加载返回时保留加载期间新建的上传占位", async () => {
     vi.useFakeTimers();
-    let resolveLoad!: (value: { nodes: string; viewport: null }) => void;
+    let resolveLoad!: (value: CanvasDto | PromiseLike<CanvasDto>) => void;
     vi.mocked(loadCanvas).mockReturnValueOnce(
       new Promise((resolve) => {
         resolveLoad = resolve;
@@ -99,6 +102,8 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
       expect(saveCanvas).not.toHaveBeenCalled();
 
       resolveLoad({
+        id: 1,
+        project_id: 1,
         nodes: JSON.stringify([
           {
             id: "server_node",
@@ -107,7 +112,7 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
             data: { kind: "text", content: "已保存" },
           },
         ]),
-        viewport: null,
+        viewport: "null",
       });
       await act(async () => {
         await loading;
@@ -132,7 +137,12 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
   it("加载失败进入错误态，重试成功后恢复", async () => {
     vi.mocked(loadCanvas)
       .mockRejectedValueOnce(new Error("network down"))
-      .mockResolvedValueOnce({ nodes: "[]", viewport: null });
+      .mockResolvedValueOnce({
+        id: null,
+        project_id: 1,
+        nodes: "[]",
+        viewport: "null",
+      });
     const { result } = renderHook(() => useCanvasDoc());
 
     await act(async () => {

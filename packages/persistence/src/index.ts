@@ -41,6 +41,7 @@ export {
 } from "./model-capability-repo.js";
 export {
   createAssetRepo,
+  assetDurationSeconds,
   type AssetRepo,
   type AssetView,
   type AssetPage,

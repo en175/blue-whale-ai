@@ -1,5 +1,8 @@
 import { fail, ok } from "@blue-whale/contracts";
-import type { AssetRepo } from "@blue-whale/persistence";
+import {
+  assetDurationSeconds,
+  type AssetRepo,
+} from "@blue-whale/persistence";
 
 export async function handleGetAsset(
   userId: string,
@@ -15,7 +18,7 @@ export async function handleGetAsset(
     url: asset.url,
     width: asset.width ?? 0,
     height: asset.height ?? 0,
-    duration: asset.duration,
+    duration: assetDurationSeconds(asset.duration, asset.duration_ms),
     mime: asset.mime ?? "application/octet-stream",
     size: Number(asset.size ?? BigInt(0)),
   });
