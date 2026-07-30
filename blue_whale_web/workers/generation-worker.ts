@@ -76,45 +76,54 @@ worker.on("error", (error) => {
   console.error("[generation-worker] worker error:", error.message);
 });
 
-await worker.waitUntilReady();
-await recoverDueVideoJobs(repo, producer);
-const recoveryTimer = setInterval(
-  () => {
-    void recoverDueVideoJobs(repo, producer).catch((error) =>
-      console.error(
-        "[generation-worker] recovery scan failed:",
-        error instanceof Error ? error.message : "unknown",
-      ),
-    );
-  },
-  Number.parseInt(process.env.GENERATION_RECOVERY_INTERVAL_MS ?? "60000", 10),
-);
+let recoveryTimer: ReturnType<typeof setInterval>;
+let server: ReturnType<typeof createServer>;
 
-const server = createServer((request, response) => {
-  if (request.method === "GET" && request.url === "/ready") {
-    response.writeHead(worker.isRunning() ? 200 : 503, {
-      "content-type": "application/json",
-    });
-    response.end(
-      JSON.stringify({ status: worker.isRunning() ? "ready" : "not_ready" }),
-    );
-    return;
-  }
-  response.writeHead(404).end();
-});
+async function main(): Promise<void> {
+  await worker.waitUntilReady();
+  await recoverDueVideoJobs(repo, producer);
+  recoveryTimer = setInterval(
+    () => {
+      void recoverDueVideoJobs(repo, producer).catch((error) =>
+        console.error(
+          "[generation-worker] recovery scan failed:",
+          error instanceof Error ? error.message : "unknown",
+        ),
+      );
+    },
+    Number.parseInt(process.env.GENERATION_RECOVERY_INTERVAL_MS ?? "60000", 10),
+  );
 
-server.listen(
-  Number.parseInt(process.env.GENERATION_WORKER_PORT ?? "4002", 10),
-  process.env.HOST ?? "0.0.0.0",
-);
+  server = createServer((request, response) => {
+    if (request.method === "GET" && request.url === "/ready") {
+      response.writeHead(worker.isRunning() ? 200 : 503, {
+        "content-type": "application/json",
+      });
+      response.end(
+        JSON.stringify({ status: worker.isRunning() ? "ready" : "not_ready" }),
+      );
+      return;
+    }
+    response.writeHead(404).end();
+  });
+
+  server.listen(
+    Number.parseInt(process.env.GENERATION_WORKER_PORT ?? "4002", 10),
+    process.env.HOST ?? "0.0.0.0",
+  );
+}
+
+void main();
 
 async function shutdown(): Promise<void> {
-  clearInterval(recoveryTimer);
+  if (recoveryTimer) clearInterval(recoveryTimer);
   await worker.close();
   await closeVideoGenerationQueue();
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
+  if (server) {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
   await prisma.$disconnect();
 }
 
