@@ -25,8 +25,8 @@ COPY blue_whale_web/patches blue_whale_web/patches
 
 # 阿里云 npm 镜像加速（ENV 覆盖 lockfile 中已解析的 registry.npmjs.org URL）
 ENV npm_config_registry=https://registry.npmmirror.com
-# --filter ... 只安装 blue_whale_web 及其依赖链，避免触及 apps/* 等无关包
-RUN pnpm install --frozen-lockfile --filter blue_whale_web...
+# --filter ... 匹配包名 blue_whale（不是目录名 blue_whale_web），安装其依赖链
+RUN pnpm install --frozen-lockfile --filter blue_whale...
 
 FROM node:24-alpine AS builder
 RUN corepack enable
