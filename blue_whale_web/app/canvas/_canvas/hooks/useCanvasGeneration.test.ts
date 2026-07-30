@@ -94,6 +94,7 @@ const imageArgs: GenerateArgs = {
     size: "2k",
     webSearch: false,
     sequential: false,
+    referenceImageSupported: true,
   },
 };
 

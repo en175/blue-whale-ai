@@ -4,6 +4,7 @@ import {
   cancelProjectGenerationJob,
   createProjectGenerationJob,
   generateAudio,
+  getVideoModels,
   retryMissingProjectGenerationJobOutputs,
   listJobs,
 } from "./generation";
@@ -69,7 +70,7 @@ describe("BottomDock GenerationJob 命令 API", () => {
       7,
       {
         type: "video",
-        input_asset_ids: [3],
+        reference_asset_ids: [3],
         parameters: {
           prompt: "蓝鲸跃出海面",
           model_id: "video-model",
@@ -109,6 +110,21 @@ describe("BottomDock GenerationJob 命令 API", () => {
         method: "POST",
         headers: { "Idempotency-Key": "retry-command-1" },
       },
+    );
+  });
+});
+
+describe("generation model catalog", () => {
+  beforeEach(() => vi.mocked(apiRequest).mockReset());
+
+  it("视频模型来自后端能力表", async () => {
+    vi.mocked(apiRequest).mockResolvedValue([]);
+
+    await getVideoModels();
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      "/api/generation/models?capability=video",
+      { method: "GET" },
     );
   });
 });

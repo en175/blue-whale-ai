@@ -1,6 +1,8 @@
 import type { WorkerRepo } from "@blue-whale/persistence";
 import type { AssetUploadStorage } from "../../assets/handle-upload";
+import sharp from "sharp";
 
+import { resolveSeedreamImageSize } from "../seedream-image-size";
 import { ImageProviderError, type ImageProvider } from "./image-provider";
 import { VideoProviderError, type VideoProvider } from "./video-provider";
 
@@ -69,7 +71,8 @@ async function processClaimedJob(
         )
         .map(String)
     : [];
-  if (referenceIds.length > 1) {
+  const maxReferenceCount = job.type === "image" ? 4 : 1;
+  if (referenceIds.length > maxReferenceCount) {
     await repo.failJob(job.id, "unsupported_input", "当前模型仅支持一张参考图");
     return job.id;
   }
@@ -144,32 +147,69 @@ async function processClaimedJob(
       );
       return job.id;
     }
+    const aspectRatio =
+      typeof input.aspect_ratio === "string" ? input.aspect_ratio : null;
+    const providerSize =
+      cap.api_size && aspectRatio
+        ? resolveSeedreamImageSize(cap.model_id, cap.api_size, aspectRatio)
+        : cap.api_size;
+    if (cap.api_size && aspectRatio && !providerSize) {
+      await repo.failJob(
+        job.id,
+        "invalid_input",
+        "模型、分辨率与宽高比组合不受支持",
+      );
+      return job.id;
+    }
     const n = Math.max(1, Math.min(4, job.expected_output_count || 1));
-    const source = sourceAssets[0];
-    let sourceImage;
-    if (source) {
+    const sourceImages = [];
+    for (const source of sourceAssets) {
       const response = await fetchImpl(source.url);
       if (!response.ok) {
         throw new ImageProviderError("unsupported_input", "参考图片读取失败");
       }
       const blob = await response.blob();
-      sourceImage = {
+      sourceImages.push({
         blob,
         fileName: `asset-${source.id}.${imageExtension(source.mime ?? blob.type)}`,
-      };
+      });
     }
-    const images = await provider.generate({
+    const sequential = input.sequential_image_generation === true;
+    const providerInput = {
       model: cap.model_id,
       prompt,
-      size: cap.api_size,
-      n,
+      size: providerSize,
       webSearch: input.web_search === true,
+      sequential,
       width: cap.width,
       height: cap.height,
-      ...(sourceImage ? { sourceImage } : {}),
-    });
+      ...(sourceImages.length === 1
+        ? { sourceImage: sourceImages[0] }
+        : sourceImages.length > 1
+          ? { sourceImages }
+          : {}),
+    };
+    const images = [];
+    let remaining = n;
+    for (let attempt = 0; remaining > 0 && attempt < n; attempt += 1) {
+      const batch = await provider.generate({
+        ...providerInput,
+        n: remaining,
+      });
+      images.push(...batch);
+      if (batch.length === 0) break;
+      remaining = n - images.length;
+    }
     if (images.length === 0) {
       await repo.failJob(job.id, "no_result", "生成服务未返回结果");
+      return job.id;
+    }
+    if (images.length !== n) {
+      await repo.failJob(
+        job.id,
+        "output_count_mismatch",
+        `生成服务返回 ${images.length} 张，期望 ${n} 张`,
+      );
       return job.id;
     }
     const assetIds: string[] = [];
@@ -187,8 +227,8 @@ async function processClaimedJob(
         generation_job_id: job.id,
         url: storedImage.url,
         type: "image",
-        width: img.width,
-        height: img.height,
+        width: positiveDimension(img.width) ?? storedImage.width,
+        height: positiveDimension(img.height) ?? storedImage.height,
         storage_key: storedImage.storageKey,
         mime: storedImage.mime,
         size: storedImage.size,
@@ -222,9 +262,18 @@ async function persistProviderMedia(
   storageKey: string | null;
   mime: string | null;
   size: number | null;
+  width: number | null;
+  height: number | null;
 }> {
   if (!storage) {
-    return { url: sourceUrl, storageKey: null, mime: null, size: null };
+    return {
+      url: sourceUrl,
+      storageKey: null,
+      mime: null,
+      size: null,
+      width: null,
+      height: null,
+    };
   }
 
   const source = await fetchImpl(sourceUrl);
@@ -237,6 +286,18 @@ async function persistProviderMedia(
   }
   const content = new Uint8Array(await source.arrayBuffer());
   if (content.byteLength === 0) throw new Error("生成结果为空");
+  let width: number | null = null;
+  let height: number | null = null;
+  if (type === "image") {
+    try {
+      const metadata = await sharp(content).metadata();
+      width = positiveDimension(metadata.width);
+      height = positiveDimension(metadata.height);
+    } catch {
+      // Unknown provider formats still persist; the info panel reports unknown
+      // rather than failing an otherwise valid generation.
+    }
+  }
 
   const prepared = await storage.prepareUpload({ userId, type, mime });
   const uploaded = await fetchImpl(prepared.uploadUrl, {
@@ -252,7 +313,15 @@ async function persistProviderMedia(
     storageKey: prepared.storageKey,
     mime,
     size: content.byteLength,
+    width,
+    height,
   };
+}
+
+function positiveDimension(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.round(value)
+    : null;
 }
 
 async function finishJob(

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   selectDockInputAssetIds,
   selectVideoDockAssetIds,
+  validateImageDockReferences,
+  validateVideoDockReferences,
 } from "./generation-input";
 
 describe("selectDockInputAssetIds", () => {
@@ -47,5 +49,70 @@ describe("selectDockInputAssetIds", () => {
     ).toEqual({
       referenceAssetIds: [],
     });
+  });
+
+  it("accepts one to four image references and rejects the fifth", () => {
+    expect(
+      validateImageDockReferences(
+        [1, 2],
+        [
+          { assetId: "3", type: "image" },
+          { assetId: "4", type: "image" },
+        ],
+      ),
+    ).toBeNull();
+    expect(
+      validateImageDockReferences(
+        [1, 2],
+        [
+          { assetId: "3", type: "image" },
+          { assetId: "4", type: "image" },
+          { assetId: "5", type: "image" },
+        ],
+      ),
+    ).toBe("图片生成最多支持 4 张参考图");
+  });
+
+  it("rejects references when the selected image model does not support edits", () => {
+    expect(
+      validateImageDockReferences(
+        [1],
+        [],
+        false,
+      ),
+    ).toBe("当前模型不支持参考图");
+  });
+
+  it("enforces nine image and three video references", () => {
+    const images = Array.from({ length: 10 }, (_, index) => ({
+      assetId: String(index + 1),
+      type: "image" as const,
+    }));
+    const videos = Array.from({ length: 4 }, (_, index) => ({
+      assetId: String(index + 101),
+      type: "video" as const,
+    }));
+
+    expect(validateVideoDockReferences("omni", [], images)).toBe(
+      "视频生成最多支持 9 张参考图",
+    );
+    expect(validateVideoDockReferences("omni", [], videos)).toBe(
+      "视频生成最多支持 3 个参考视频",
+    );
+  });
+
+  it("requires a first frame before a last frame", () => {
+    expect(
+      validateVideoDockReferences("first-last", [], [], {
+        firstFrameAssetId: undefined,
+        lastFrameAssetId: 42,
+      }),
+    ).toBe("请先添加首帧，再添加尾帧");
+    expect(
+      validateVideoDockReferences("first-last", [], [], {
+        firstFrameAssetId: 41,
+        lastFrameAssetId: 42,
+      }),
+    ).toBeNull();
   });
 });

@@ -13,6 +13,7 @@ export interface ArkImageRequest {
   size?: string;
   n?: number;
   webSearch?: boolean;
+  sequential?: boolean;
 }
 
 export interface ArkImageResult {
@@ -44,6 +45,10 @@ export async function generateImages(
   if (req.size) body.size = req.size;
   if (req.n && req.n > 1) body.n = req.n;
   if (req.webSearch) body.tools = [{ type: "web_search" }];
+  if (req.sequential) {
+    body.sequential_image_generation = "auto";
+    body.sequential_image_generation_options = { max_images: req.n ?? 1 };
+  }
 
   let res: Response;
   try {

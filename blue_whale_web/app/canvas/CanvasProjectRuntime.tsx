@@ -1048,6 +1048,7 @@ export function CanvasProjectRuntime({
             }
             audioModeSignal={audioModeSignal}
             onGenerate={handleGenerate}
+            onGenerateError={setGenerateError}
             generating={generating}
             generateError={generateError}
             onClearGenerateError={() => setGenerateError(null)}
