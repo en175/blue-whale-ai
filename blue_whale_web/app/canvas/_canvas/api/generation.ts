@@ -24,9 +24,13 @@ export type ImageModelCapability = {
   }[];
   supported_aspect_ratios: string[];
   supported_formats: string[];
+  /** 视频时长档（DB supported_durations）；图片模型为 null。 */
+  supported_durations: { min: number; max: number; step: number } | null;
   default_size: string;
   default_format: string | null;
   default_aspect_ratio: string;
+  /** 视频默认时长（秒）；图片模型为 null。 */
+  default_duration: number | null;
   features: {
     reference_image: boolean;
     watermark: boolean;
@@ -34,6 +38,12 @@ export type ImageModelCapability = {
     sequential_image_generation: boolean;
     stream: boolean;
     tools: boolean;
+    /** 视频首帧引用（图片恒 false）。 */
+    first_frame: boolean;
+    /** 视频首尾帧引用（图片恒 false）。 */
+    first_last_frame: boolean;
+    /** 视频带音频（图片恒 false）。 */
+    audio: boolean;
   };
 };
 

@@ -7,6 +7,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { VideoDockContentProps } from "../../types";
 import { VideoDockContent } from "./VideoDockContent";
 
+vi.mock("../../api/generation", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, getVideoModels: vi.fn() };
+});
+import { getVideoModels } from "../../api/generation";
+
 expect.extend(jestDomMatchers);
 
 function props(
@@ -78,6 +84,48 @@ describe("VideoDockContent references", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "从画布选择" }));
 
     expect(onPickFromCanvas).toHaveBeenCalledTimes(1);
+  });
+
+  it("时长滑块按模型 supported_durations 驱动（min/max/step 来自能力表，非硬编码）", async () => {
+    vi.mocked(getVideoModels).mockResolvedValue([
+      {
+        model_id: "seedance-2",
+        provider_id: "volcengine",
+        model_label: "Seedance 2.0",
+        icon: null,
+        supported_sizes: [
+          { id: "720p", label: "720p", api_value: "720p", width: undefined, height: undefined },
+        ],
+        supported_aspect_ratios: ["16:9"],
+        supported_formats: [],
+        supported_durations: { min: 3, max: 9, step: 3 },
+        default_size: "720p",
+        default_format: null,
+        default_aspect_ratio: "16:9",
+        default_duration: 6,
+        features: {
+          reference_image: true,
+          watermark: false,
+          quantity_max: 1,
+          sequential_image_generation: false,
+          stream: false,
+          tools: false,
+          first_frame: true,
+          first_last_frame: true,
+          audio: true,
+        },
+      },
+    ]);
+    render(
+      <VideoDockContent {...props({ modelSettingsOpen: true })} models={undefined} />,
+    );
+
+    await vi.waitFor(() => {
+      const slider = screen.getByRole("slider", { name: "时长" });
+      expect(slider).toHaveAttribute("min", "3");
+      expect(slider).toHaveAttribute("max", "9");
+      expect(slider).toHaveAttribute("step", "3");
+    });
   });
 
   it("offers canvas selection from the video reference source menu", () => {
