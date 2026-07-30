@@ -183,7 +183,7 @@ describe("useVideoJobs", () => {
     expect(mockList).toHaveBeenCalledWith({ projectId: 7, jobIds: Array.from({ length: 10 }, (_, i) => i + 1) });
   });
 
-  it("批量响应连续缺少 Job 时失败并清理，容忍创建后的短暂可见性延迟", async () => {
+  it("★批量响应连续缺少 Job 时不判死，保持轮询（修假失败：missing ≠ failed）", async () => {
     mockList.mockResolvedValue([job({ job_id: "1", status: "processing" })]);
     const { result } = renderHook(() => useVideoJobs());
     const onFailed = vi.fn();
@@ -192,8 +192,8 @@ describe("useVideoJobs", () => {
       result.current.start(2, { onSucceeded: vi.fn(), onFailed });
     });
     await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
-    expect(onFailed).toHaveBeenCalledWith("任务不存在或已不可见");
-    expect(result.current.activeCount()).toBe(1);
+    expect(onFailed).not.toHaveBeenCalled(); // missing 不判死
+    expect(result.current.activeCount()).toBe(2); // 两个 job 都保留继续轮询
   });
 
   it("超过 100 个在途 Job 时按 API 上限分批请求", async () => {
