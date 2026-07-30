@@ -6,6 +6,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { listJobs } from "../api/generation";
+import { isApiError } from "@/lib/api/errors";
 import { wireIntegersEqual, type WireInteger } from "@/lib/wire-integer";
 
 export type VideoJobResult = {
@@ -29,6 +30,16 @@ type Entry = {
   startedAt: number;
   missingPolls: number;
 };
+
+function isAuthError(error: unknown): boolean {
+  if (!isApiError(error)) return false;
+  return (
+    error.status === 401 ||
+    error.code === "401" ||
+    error.code === "http_401" ||
+    error.code === "unauthorized"
+  );
+}
 
 export function useVideoJobs(projectId?: number | string) {
   const jobsRef = useRef<Map<string, { id: WireInteger; entry: Entry }>>(
@@ -109,11 +120,13 @@ export function useVideoJobs(projectId?: number | string) {
           }
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : "轮询失败";
-        for (const [jobId, { entry }] of [...jobsRef.current.entries()]) {
-          stop(jobId);
-          entry.callbacks.onFailed(message);
+        // 认证失效时保留任务但暂停 timer；重新登录后的 recover/start 会续上。
+        if (isAuthError(error)) {
+          if (timerRef.current !== null) clearInterval(timerRef.current);
+          timerRef.current = null;
+          return;
         }
+        // 网络抖动或服务端瞬时错误只跳过本轮，下个 tick 自动重试。
       } finally {
         inFlightRef.current = null;
       }

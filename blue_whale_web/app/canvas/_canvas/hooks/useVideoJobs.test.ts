@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useVideoJobs } from "./useVideoJobs";
 import { listJobs } from "../api/generation";
+import { ApiError } from "@/lib/api/errors";
 
 vi.mock("../api/generation", () => ({ listJobs: vi.fn() }));
 const mockList = listJobs as ReturnType<typeof vi.fn>;
@@ -179,16 +180,76 @@ describe("useVideoJobs", () => {
     expect(result.current.activeCount()).toBe(0);
   });
 
-  it("轮询异常（listJobs reject）→ 所有在途 Job onFailed + 清理", async () => {
-    mockList.mockRejectedValue(new Error("boom"));
+  it("单次网络错误不判死任务，下一 tick 自动续上", async () => {
+    mockList
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValueOnce([
+        job({ job_id: "10", status: "processing", progress: 40 }),
+      ]);
     const { result } = renderHook(() => useVideoJobs());
     const onFailed = vi.fn();
-    act(() => result.current.start(10, { onSucceeded: vi.fn(), onFailed }));
+    const onProgress = vi.fn();
+    act(() =>
+      result.current.start(10, {
+        onProgress,
+        onSucceeded: vi.fn(),
+        onFailed,
+      }),
+    );
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
-    expect(onFailed).toHaveBeenCalledWith("boom");
-    expect(result.current.activeCount()).toBe(0);
+    expect(onFailed).not.toHaveBeenCalled();
+    expect(result.current.activeCount()).toBe(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(onProgress).toHaveBeenCalledWith(40);
+    expect(mockList).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["HTTP 401", { status: 401, code: "http_401" }],
+    ["响应体 code=401", { status: 200, code: "401" }],
+    ["unauthorized 错误码", { status: 200, code: "unauthorized" }],
+  ])("%s 时暂停轮询，重新 start 后恢复", async (_label, authError) => {
+    mockList.mockRejectedValueOnce(
+      new ApiError({
+        ...authError,
+        message: "登录已过期",
+        detail: null,
+      }),
+    );
+    const { result } = renderHook(() => useVideoJobs());
+    const onFailed = vi.fn();
+    const onProgress = vi.fn();
+    const callbacks = {
+      onProgress,
+      onSucceeded: vi.fn(),
+      onFailed,
+    };
+    act(() => result.current.start(10, callbacks));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(onFailed).not.toHaveBeenCalled();
+    expect(result.current.activeCount()).toBe(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9000);
+    });
+    expect(mockList).toHaveBeenCalledTimes(1);
+
+    mockList.mockResolvedValueOnce([
+      job({ job_id: "10", status: "processing", progress: 60 }),
+    ]);
+    act(() => result.current.start(10, callbacks));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(onProgress).toHaveBeenCalledWith(60);
   });
 
   it("同 jobId 重复 start 幂等：只保留一个 timer（不重复轮询）", async () => {
