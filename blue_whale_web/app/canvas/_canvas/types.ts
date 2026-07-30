@@ -192,9 +192,9 @@ export type GenerateArgs =
   | {
       mode: "video";
       settings: VideoGenerateSettings;
-      firstFrameAssetId?: number;
-      lastFrameAssetId?: number;
-      referenceAssetIds?: number[];
+      firstFrameAssetId?: WireInteger;
+      lastFrameAssetId?: WireInteger;
+      referenceAssetIds?: WireInteger[];
     }
   | { mode: "audio"; settings: AudioGenerateSettings };
 

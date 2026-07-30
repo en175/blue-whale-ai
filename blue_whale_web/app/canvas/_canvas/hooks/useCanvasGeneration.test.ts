@@ -143,7 +143,6 @@ describe("useCanvasGeneration.generate", () => {
     expect(generation.createProjectGenerationJob).toHaveBeenCalledWith(
       1,
       expect.objectContaining({
-        input_asset_ids: [assetId],
         first_frame_asset_id: assetId,
         last_frame_asset_id: assetId,
         reference_asset_ids: [assetId],

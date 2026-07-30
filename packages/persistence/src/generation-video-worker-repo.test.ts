@@ -196,7 +196,13 @@ describe("generation video worker repo", () => {
     const update = vi.fn().mockResolvedValue({});
     const transaction = vi.fn(async (callback: (tx: unknown) => unknown) =>
       callback({
-        generation_jobs: { updateMany, update },
+        // findUnique 来自 IK50GB-B（视频成功后查 job 追加 project event）；
+        // 本测试只验 duration 持久化，project_id: null 跳过 event 分支。
+        generation_jobs: {
+          updateMany,
+          update,
+          findUnique: vi.fn().mockResolvedValue({ id: 300n, project_id: null }),
+        },
         assets: { create: createAsset },
         cost_reservations: { updateMany: vi.fn() },
         generation_job_logs: { create: vi.fn() },

@@ -37,7 +37,7 @@ function job(over: Partial<{ job_id: string; status: string; progress: number; a
 describe("useVideoJobs", () => {
   it("超大 job ID 轮询时保持十进制字符串精度", async () => {
     const jobId = "9007199254740993";
-    mockGet.mockResolvedValue(job({ job_id: jobId, status: "processing" }));
+    mockList.mockResolvedValue([job({ job_id: jobId, status: "processing" })]);
     const { result } = renderHook(() => useVideoJobs());
 
     act(() =>
@@ -50,7 +50,7 @@ describe("useVideoJobs", () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
 
-    expect(mockGet).toHaveBeenCalledWith(jobId);
+    expect(mockList).toHaveBeenCalledWith({ jobIds: [jobId] });
     expect(result.current.activeCount()).toBe(1);
   });
 
