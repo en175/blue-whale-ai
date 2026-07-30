@@ -14,11 +14,25 @@ export function loadRedisConnection(
   env: Readonly<Record<string, string | undefined>> = process.env,
   worker = false,
 ): ConnectionOptions {
+  // 优先显式 REDIS_HOST/PORT/DB/PASSWORD；缺失时回退解析 REDIS_CONN_STRING（redis://[:pw@]host[:port][/db]）。
+  // prod 容器常只给 REDIS_CONN_STRING，不回退会默认 127.0.0.1 → enqueue/消费都连不上。
+  let { REDIS_HOST, REDIS_PORT, REDIS_DB, REDIS_PASSWORD } = env;
+  if (!REDIS_HOST && env.REDIS_CONN_STRING) {
+    try {
+      const u = new URL(env.REDIS_CONN_STRING);
+      REDIS_HOST = u.hostname;
+      REDIS_PORT = u.port;
+      REDIS_DB = u.pathname.replace(/^\//, "");
+      if (u.password) REDIS_PASSWORD = decodeURIComponent(u.password);
+    } catch {
+      // 解析失败则走下面的默认（127.0.0.1）
+    }
+  }
   return {
-    host: env.REDIS_HOST ?? "127.0.0.1",
-    port: Number.parseInt(env.REDIS_PORT ?? "6379", 10),
-    db: Number.parseInt(env.REDIS_DB ?? "0", 10),
-    ...(env.REDIS_PASSWORD ? { password: env.REDIS_PASSWORD } : {}),
+    host: REDIS_HOST ?? "127.0.0.1",
+    port: Number.parseInt(REDIS_PORT ?? "6379", 10),
+    db: Number.parseInt(REDIS_DB ?? "0", 10),
+    ...(REDIS_PASSWORD ? { password: REDIS_PASSWORD } : {}),
     maxRetriesPerRequest: worker ? null : 1,
   };
 }

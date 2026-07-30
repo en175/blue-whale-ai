@@ -58,4 +58,22 @@ describe("video generation queue producer", () => {
       maxRetriesPerRequest: null,
     });
   });
+
+  it("falls back to REDIS_CONN_STRING when REDIS_HOST is absent (prod env)", () => {
+    const env = { REDIS_CONN_STRING: "redis://:pw@redis-host:6380/3" };
+    expect(loadRedisConnection(env)).toMatchObject({
+      host: "redis-host",
+      port: 6380,
+      db: 3,
+      password: "pw",
+    });
+  });
+
+  it("prefers explicit REDIS_HOST over REDIS_CONN_STRING", () => {
+    const env = {
+      REDIS_HOST: "explicit-host",
+      REDIS_CONN_STRING: "redis://other-host:6379/0",
+    };
+    expect(loadRedisConnection(env)).toMatchObject({ host: "explicit-host" });
+  });
 });
