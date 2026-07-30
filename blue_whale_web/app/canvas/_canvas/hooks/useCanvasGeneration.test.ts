@@ -63,6 +63,7 @@ function renderGen(
     edges?: CanvasEdge[];
     assets?: Record<string, Asset>;
     projectId?: string;
+    consumeReferenceGenTarget?: () => string | null;
   } = {},
 ) {
   // addNode 返回占位 id（page 真实 addNode 返回 n_xxx；mock 须尊重该返回值契约）
@@ -79,6 +80,9 @@ function renderGen(
     patchNodeAndSave: patchNodeAndSave as unknown as Deps["patchNodeAndSave"],
     addAsset: addAsset as unknown as Deps["addAsset"],
     projectId: overrides.projectId ?? "1",
+    ...(overrides.consumeReferenceGenTarget
+      ? { consumeReferenceGenTarget: overrides.consumeReferenceGenTarget }
+      : {}),
   };
   const { result } = renderHook(() => useCanvasGeneration(deps));
   return { result, addNode, patchNode, patchNodeAndSave, addAsset };
@@ -483,6 +487,80 @@ describe("useCanvasGeneration.generate", () => {
         },
       },
     });
+  });
+
+  it("IK55VT 通道三：有参考卡目标时不建画布占位，成功结果直接回落卡槽", async () => {
+    (
+      generation.createProjectGenerationJob as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({ generation_job_id: 778, cursor: 0 });
+    const consumeReferenceGenTarget = vi.fn().mockReturnValue("r1");
+    const { result, addNode, patchNode, patchNodeAndSave, addAsset } =
+      renderGen({ consumeReferenceGenTarget });
+
+    await act(async () => {
+      await result.current.generate("宙斯立绘", imageArgs);
+    });
+
+    // 不建画布占位节点、不写 taskId
+    expect(addNode).not.toHaveBeenCalled();
+    expect(patchNodeAndSave).not.toHaveBeenCalled();
+    // 任务照常创建 + 轮询
+    expect(generation.createProjectGenerationJob).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        type: "image",
+        parameters: expect.objectContaining({ prompt: "宙斯立绘" }),
+      }),
+      expect.any(String),
+    );
+    expect(mockJobs.start).toHaveBeenCalledWith(
+      778,
+      expect.objectContaining({ onSucceeded: expect.any(Function) }),
+    );
+    expect(result.current.generating).toBe(false);
+
+    // succeeded → 注册 asset + patchNode 写 referenceAssetId/宽高比（不落画布）
+    const cb = mockJobs.start.mock.calls[0][1] as {
+      onSucceeded: (r: {
+        assetId: string;
+        assetUrl: string;
+        assetType: string;
+      }) => void;
+    };
+    await act(async () => {
+      cb.onSucceeded({
+        assetId: "43",
+        assetUrl: "https://cdn.example/zeus.png",
+        assetType: "image",
+      });
+    });
+    expect(addAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "43",
+        kind: "image",
+        src: "https://cdn.example/zeus.png",
+        source: "generated",
+      }),
+    );
+    expect(patchNode).toHaveBeenCalledWith("r1", {
+      referenceAssetId: "43",
+      referenceImageAspect: 1, // imageArgs aspectRatio=1:1
+    });
+    // 目标一次性消费（generate 内取出即清）
+    expect(consumeReferenceGenTarget).toHaveBeenCalledTimes(1);
+  });
+
+  it("IK55VT 通道三：目标返回 null 时走原画布占位路径", async () => {
+    (
+      generation.createProjectGenerationJob as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({ generation_job_id: 779, cursor: 0 });
+    const { result, addNode } = renderGen({
+      consumeReferenceGenTarget: () => null,
+    });
+    await act(async () => {
+      await result.current.generate("画一只猫", imageArgs);
+    });
+    expect(addNode).toHaveBeenCalledWith("image", expect.anything());
   });
 
   it("audio：建占位 + generateAudio + 写 assetId/done/recipe", async () => {
