@@ -27,6 +27,7 @@ import {
   Palette,
   PenLine,
   RefreshCw,
+  ShoppingBag,
   Shuffle,
   Sparkles,
   SquarePlus,
@@ -35,10 +36,16 @@ import {
   Video,
 } from "lucide-react";
 
+/**
+ * IK56MS 定稿（原型变体 D，经需求方确认）：8 入口固定顺序 + 三段分组——
+ * 工具（工具模式/上传附件）｜生成（图像/视频/音频/文本编辑卡）｜库（资产库/商品卡），
+ * 组间各一条分隔线（挂在组末按钮 divider 上）。label 即规格名，同时作 aria-label 与悬浮提示。
+ * 截图片号 7/8/9 属父票 Out of Scope，不渲染。
+ */
 export const LEFT_TOOLS: ToolDef[] = [
   {
     id: "select",
-    label: "选择",
+    label: "工具模式",
     icon: (
       <MousePointer2
         width={20}
@@ -50,21 +57,9 @@ export const LEFT_TOOLS: ToolDef[] = [
   },
   {
     id: "upload",
-    label: "上传",
+    label: "上传附件",
     icon: (
       <SquarePlus
-        width={20}
-        height={20}
-        stroke="rgba(255, 255, 255, 0.8)"
-        strokeWidth={1.5}
-      />
-    ),
-  },
-  {
-    id: "text",
-    label: "文本",
-    icon: (
-      <Type
         width={20}
         height={20}
         stroke="rgba(255, 255, 255, 0.8)"
@@ -75,17 +70,17 @@ export const LEFT_TOOLS: ToolDef[] = [
   },
   {
     id: "ai-image",
-    label: "AI 图片",
+    label: "图像生成",
     icon: <SparkleIcon className="text-white" />,
   },
   {
     id: "ai-video",
-    label: "AI 视频",
+    label: "视频生成",
     icon: <VideoGenIcon className="text-white" />,
   },
   {
     id: "audio",
-    label: "音频",
+    label: "音频生成",
     icon: (
       <AudioLines
         width={20}
@@ -94,6 +89,19 @@ export const LEFT_TOOLS: ToolDef[] = [
         strokeWidth={1.5}
       />
     ),
+  },
+  {
+    id: "text",
+    label: "文本编辑卡",
+    icon: (
+      <Type
+        width={20}
+        height={20}
+        stroke="rgba(255, 255, 255, 0.8)"
+        strokeWidth={1.5}
+      />
+    ),
+    divider: true,
   },
   {
     id: "asset-library",
@@ -108,11 +116,11 @@ export const LEFT_TOOLS: ToolDef[] = [
     ),
   },
   {
-    // IK55VZ：商品卡按钮(toggle 悬浮列表:新建商品/导入商品)
+    // IK55VZ：商品卡按钮(toggle 悬浮列表:新建商品/导入商品)；IK56MS 定稿图标=购物袋
     id: "product-card",
     label: "商品卡",
     icon: (
-      <Package
+      <ShoppingBag
         width={20}
         height={20}
         stroke="rgba(255, 255, 255, 0.8)"

@@ -150,4 +150,55 @@ describe("ToolbarFlyout（IK55VM 悬浮列表公共组件）", () => {
     expect(onSelect).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it("点外关闭走捕获阶段：冒泡链被 stopPropagation（如画布 pane）也能关闭（IK56MS 反馈 5）", () => {
+    const onClose = vi.fn();
+    render(
+      <div>
+        <div data-testid="canvas-pane" />
+        <ToolbarFlyout
+          open
+          anchor={makeAnchor()}
+          items={ITEMS}
+          onSelect={vi.fn()}
+          onClose={onClose}
+        />
+      </div>,
+    );
+    // 模拟 React Flow pane：原生冒泡阶段 stopPropagation，冒泡监听将收不到此次点击
+    const pane = screen.getByTestId("canvas-pane");
+    pane.addEventListener("mousedown", (e) => e.stopPropagation());
+    fireEvent.mouseDown(pane);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("定位：与锚定按钮顶对齐、距工具栏外框 6px（left=按钮右缘+14，无垂直居中 transform）", () => {
+    const anchor = makeAnchor();
+    anchor.getBoundingClientRect = () =>
+      ({
+        right: 40,
+        top: 100,
+        height: 32,
+        left: 8,
+        bottom: 132,
+        width: 32,
+        x: 8,
+        y: 100,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    render(
+      <ToolbarFlyout
+        open
+        anchor={anchor}
+        items={ITEMS}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const menu = screen.getByRole("menu");
+    expect(menu.style.left).toBe("54px");
+    expect(menu.style.top).toBe("100px");
+    expect(menu.style.transform).toBe("");
+    anchor.remove();
+  });
 });
