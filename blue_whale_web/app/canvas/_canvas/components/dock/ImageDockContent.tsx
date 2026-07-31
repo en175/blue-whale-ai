@@ -50,10 +50,10 @@ function ExpandToggleButton({
         height: 24,
         borderRadius: 6,
         border: 0,
-        background: hovered ? "rgba(255, 255, 255, 0.12)" : "transparent",
+        background: hovered ? "var(--tc-dock-control-hover-bg)" : "transparent",
         color: hovered
-          ? "rgba(255, 255, 255, 0.85)"
-          : "rgba(255, 255, 255, 0.35)",
+          ? "var(--tc-dock-text-strong)"
+          : "var(--tc-dock-text-faint)",
         cursor: "pointer",
         display: "flex",
         alignItems: "center",
