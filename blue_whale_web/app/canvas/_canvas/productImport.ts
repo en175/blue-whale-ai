@@ -6,16 +6,13 @@
  * 空串/非法 url 走确定性兜底,不抛异常。
  */
 
-/** 链接导入区空态显示的平台占位(原型:a/抖/t/e/s/淘/拼/红)。 */
+/** 链接导入区空态显示的平台占位（IK5JV4 定稿：抖音/淘宝/天猫/京东/亚马逊，固定 5 个）。 */
 export const PRODUCT_PLATFORMS: { id: string; label: string }[] = [
-  { id: "amazon", label: "a" },
   { id: "douyin", label: "抖" },
-  { id: "tiktok", label: "t" },
-  { id: "ebay", label: "e" },
-  { id: "shopee", label: "s" },
   { id: "taobao", label: "淘" },
-  { id: "pinduoduo", label: "拼" },
-  { id: "xiaohongshu", label: "红" },
+  { id: "tmall", label: "猫" },
+  { id: "jd", label: "京" },
+  { id: "amazon", label: "亚" },
 ];
 
 export interface ParsedProduct {

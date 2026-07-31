@@ -110,13 +110,13 @@ describe("ProductDetailSection(商品详情区)", () => {
 });
 
 describe("ProductLinkImportSection(从商品链接导入)", () => {
-  it("默认展开:空输入显「支持 + 8 平台图标 + …」,导入置灰禁用", () => {
+  it("默认展开:空输入显「支持 + 5 平台图标」,导入置灰禁用", () => {
     render(<ProductLinkImportSection />);
     const title = screen.getByRole("button", { name: /从商品链接导入/ });
     expect(title).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByLabelText("商品链接")).toBeInTheDocument();
     expect(screen.getByText("支持")).toBeInTheDocument();
-    for (const label of ["a", "抖", "t", "e", "s", "淘", "拼", "红"]) {
+    for (const label of ["抖", "淘", "猫", "京", "亚"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.getByRole("button", { name: "导入" })).toBeDisabled();
