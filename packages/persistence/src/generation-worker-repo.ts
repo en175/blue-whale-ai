@@ -12,6 +12,8 @@ export interface ClaimedJob {
   type: string;
   input: Record<string, unknown> | null;
   expected_output_count: number;
+  /** 已重试次数（瞬时失败回 queued 时自增）；恢复/重试据此决定是否再放行。 */
+  retry_count: number;
 }
 
 export interface ImageCapabilitySnapshot {
@@ -59,6 +61,12 @@ export interface WorkerRepo {
   ): Promise<ClaimedVideoJob | null>;
   /** Redis 消息丢失或 Worker 重启后的低频补偿扫描。 */
   listDueVideoJobIds(limit: number): Promise<string[]>;
+  /** 重置图片任务中租约过期仍 processing 的孤儿任务 → queued，供恢复扫描接回。 */
+  resetStalledImageJobs(): Promise<number>;
+  /** 认领一个到点的图片 queued 任务（next_action_at<=now），置 processing + lease。无则 null。 */
+  claimNextImageJob(workerId: string): Promise<ClaimedJob | null>;
+  /** 瞬时失败重试：processing → queued + 推迟 next_action_at + retry_count++。仅 processing 态可回退。 */
+  requeueImageJobForRetry(jobId: string, nextActionAt: Date): Promise<boolean>;
   /** 领取一个待 submit/poll 的视频短步骤；过期 processing 可被新 Worker 接管。 */
   claimNextVideoJob(workerId: string): Promise<ClaimedVideoJob | null>;
   /** submit 接纳后持久化上游 taskId，并释放租约等待下一次短 poll。 */
@@ -186,6 +194,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
         type: candidate.type,
         input: (candidate.input as Record<string, unknown> | null) ?? null,
         expected_output_count: candidate.expected_output_count ?? 1,
+        retry_count: candidate.retry_count ?? 0,
       };
     },
 
@@ -224,6 +233,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
         type: candidate.type,
         input: (candidate.input as Record<string, unknown> | null) ?? null,
         expected_output_count: candidate.expected_output_count ?? 1,
+        retry_count: candidate.retry_count ?? 0,
       };
     },
 
@@ -310,6 +320,85 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
         workerId,
         fencingToken: Number(candidate.fencing_token + 1n),
       };
+    },
+
+    async resetStalledImageJobs() {
+      const now = new Date();
+      const result = await prisma.generation_jobs
+        .updateMany({
+          where: {
+            type: "image",
+            status: "processing",
+            is_delete: false,
+            lease_expires_at: { lt: now },
+          },
+          data: {
+            status: "queued",
+            lease_owner: null,
+            lease_expires_at: null,
+            next_action_at: now,
+            version: { increment: 1 },
+          },
+        })
+        .catch(() => ({ count: 0 }));
+      return result.count;
+    },
+
+    async claimNextImageJob(workerId) {
+      // 原子认领：查一条到点的图片 queued，CAS 置 processing。镜像视频的 claimNextJob，仅限 type=image。
+      const candidate = await prisma.generation_jobs.findFirst({
+        where: {
+          type: "image",
+          status: "queued",
+          is_delete: false,
+          source: "bottom_dock",
+          next_action_at: { lte: new Date() },
+        },
+        orderBy: { id: "asc" },
+      });
+      if (!candidate) return null;
+      const now = new Date();
+      const lease = new Date(now.getTime() + LEASE_SECONDS * 1000);
+      const claimed = await prisma.generation_jobs
+        .updateMany({
+          where: { id: candidate.id, status: "queued" },
+          data: {
+            status: "processing",
+            lease_owner: workerId,
+            lease_expires_at: lease,
+            last_polled_at: now,
+            version: { increment: 1 },
+          },
+        })
+        .catch(() => ({ count: 0 }));
+      if (claimed.count === 0) return null;
+      return {
+        id: candidate.id.toString(),
+        project_id: candidate.project_id?.toString() ?? "0",
+        user_id: candidate.user_id.toString(),
+        type: candidate.type,
+        input: (candidate.input as Record<string, unknown> | null) ?? null,
+        expected_output_count: candidate.expected_output_count ?? 1,
+        retry_count: candidate.retry_count ?? 0,
+      };
+    },
+
+    async requeueImageJobForRetry(jobId, nextActionAt) {
+      // 瞬时失败重试：仅当前 processing 态可回退到 queued，避免覆盖终态/他人态。
+      const result = await prisma.generation_jobs
+        .updateMany({
+          where: { id: BigInt(jobId), status: "processing" },
+          data: {
+            status: "queued",
+            lease_owner: null,
+            lease_expires_at: null,
+            next_action_at: nextActionAt,
+            retry_count: { increment: 1 },
+            version: { increment: 1 },
+          },
+        })
+        .catch(() => ({ count: 0 }));
+      return result.count > 0;
     },
 
     async claimNextVideoJob(workerId) {

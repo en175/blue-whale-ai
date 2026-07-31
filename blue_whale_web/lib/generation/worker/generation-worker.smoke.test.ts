@@ -29,6 +29,7 @@ describe.skipIf(process.env.RUN_LIVE_SMOKE !== "1")("generation worker live smok
           model_id: "doubao-seedream-4-0-250828",
           size: "1k",
           web_search: false,
+          provider_credential: "ark",
         },
         expected_output_count: 1,
         next_action_at: new Date(),
@@ -40,7 +41,8 @@ describe.skipIf(process.env.RUN_LIVE_SMOKE !== "1")("generation worker live smok
 
     const id = await processNextJob({
       repo,
-      provider: createArkImageProvider(),
+      createImageProvider: () => createArkImageProvider(),
+      credentialVault: { open: () => "ark" },
       workerId: "smoke",
     });
     expect(id).toBe(job.id.toString());

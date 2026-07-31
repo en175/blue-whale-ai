@@ -31,6 +31,9 @@ function makeRepo() {
     publishVideoResult: vi.fn(),
     failVideoJob: vi.fn(),
     cancelVideoBeforeDispatch: vi.fn(),
+    resetStalledImageJobs: vi.fn().mockResolvedValue(0),
+    claimNextImageJob: vi.fn(),
+    requeueImageJobForRetry: vi.fn().mockResolvedValue(true),
   };
 }
 
@@ -56,8 +59,10 @@ const queuedImageJob = {
     model_id: "doubao-seedream-4-0",
     size: "1K",
     web_search: false,
+    provider_credential: "sealed-token",
   },
   expected_output_count: 1,
+  retry_count: 0,
 };
 
 const ONE_PIXEL_PNG = Buffer.from(
@@ -94,7 +99,7 @@ describe("processJob - request-scoped token dispatch", () => {
 
     await processJob({
       repo,
-      provider,
+      createImageProvider: () => provider, credentialVault: { open: () => "tok" },
       workerId: "w1",
       jobId: "300",
       userId: "9",
@@ -128,7 +133,7 @@ describe("processNextJob - 成功路径", () => {
       { url: "https://ark/x.png", width: null, height: null },
     ]);
 
-    await processNextJob({ repo, provider, workerId: "w1" });
+    await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, workerId: "w1" });
 
     expect(provider.generate).toHaveBeenCalledWith(
       expect.objectContaining({ size: "2304x1728" }),
@@ -156,7 +161,7 @@ describe("processNextJob - 成功路径", () => {
       { url: "https://ark/x.png", width: 1024, height: 1024 },
     ]);
 
-    await processNextJob({ repo, provider, workerId: "w1" });
+    await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, workerId: "w1" });
 
     expect(provider.generate).toHaveBeenCalledWith(
       expect.objectContaining({ n: 4, sequential: true }),
@@ -195,7 +200,7 @@ describe("processNextJob - 成功路径", () => {
         ]),
     };
 
-    await processNextJob({ repo, provider, workerId: "w1" });
+    await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, workerId: "w1" });
 
     expect(provider.generate).toHaveBeenNthCalledWith(
       1,
@@ -245,7 +250,7 @@ describe("processNextJob - 成功路径", () => {
         ]),
     };
 
-    await processNextJob({ repo, provider, workerId: "w1" });
+    await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, workerId: "w1" });
 
     expect(provider.generate).toHaveBeenNthCalledWith(
       1,
@@ -292,7 +297,7 @@ describe("processNextJob - 成功路径", () => {
         }),
       )
       .mockResolvedValueOnce(new Response(null, { status: 200 }));
-    const deps = { repo, provider, mediaStorage, fetchImpl, workerId: "w1" };
+    const deps = { repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, mediaStorage, fetchImpl, workerId: "w1" };
 
     await processNextJob(deps);
 
@@ -366,7 +371,7 @@ describe("processNextJob - 成功路径", () => {
 
     await processNextJob({
       repo,
-      provider,
+      createImageProvider: () => provider, credentialVault: { open: () => "tok" },
       mediaStorage,
       fetchImpl,
       workerId: "w1",
@@ -391,7 +396,7 @@ describe("processNextJob - 成功路径", () => {
       { url: "https://ark/x.png", width: 1024, height: 1024 },
     ]);
 
-    const id = await processNextJob({ repo, provider, workerId: "w1" });
+    const id = await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, workerId: "w1" });
 
     expect(id).toBe("300");
     expect(provider.generate).toHaveBeenCalledWith(
@@ -432,7 +437,7 @@ describe("processNextJob - 成功路径", () => {
       { url: "https://ark/2.png", width: null, height: null },
     ]);
 
-    await processNextJob({ repo, provider, workerId: "w1" });
+    await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, workerId: "w1" });
 
     expect(provider.generate).toHaveBeenCalledWith(
       expect.objectContaining({ n: 2 }),
@@ -467,7 +472,7 @@ describe("processNextJob - 成功路径", () => {
 
     await processNextJob({
       repo,
-      provider,
+      createImageProvider: () => provider, credentialVault: { open: () => "tok" },
       workerId: "w1",
       fetchImpl: vi.fn().mockResolvedValue(
         new Response("image-bytes", {
@@ -522,7 +527,7 @@ describe("processNextJob - 成功路径", () => {
 
     await processNextJob({
       repo,
-      provider,
+      createImageProvider: () => provider, credentialVault: { open: () => "tok" },
       workerId: "w1",
       fetchImpl,
     });
@@ -566,7 +571,7 @@ describe("processNextJob - 成功路径", () => {
       height: 720,
     });
 
-    await processNextJob({ repo, provider, videoProvider, workerId: "w1" });
+    await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, videoProvider, workerId: "w1" });
 
     expect(videoProvider.generate).toHaveBeenCalledWith({
       model: "seedance-2",
@@ -628,7 +633,7 @@ describe("processNextJob - 成功路径", () => {
       .mockResolvedValueOnce(new Response(null, { status: 200 }));
     const deps = {
       repo,
-      provider,
+      createImageProvider: () => provider, credentialVault: { open: () => "tok" },
       videoProvider,
       mediaStorage,
       fetchImpl,
@@ -686,7 +691,7 @@ describe("processNextJob - 成功路径", () => {
       height: 720,
     });
 
-    await processNextJob({ repo, provider, videoProvider, workerId: "w1" });
+    await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, videoProvider, workerId: "w1" });
 
     expect(videoProvider.generate).toHaveBeenCalledWith(
       expect.objectContaining({ image: "https://cdn.test/frame.png" }),
@@ -699,14 +704,14 @@ describe("processNextJob - 无任务", () => {
     const repo = makeRepo();
     repo.claimNextJob.mockResolvedValue(null);
     const provider = mockProvider([]);
-    const id = await processNextJob({ repo, provider, workerId: "w1" });
+    const id = await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, workerId: "w1" });
     expect(id).toBeNull();
     expect(provider.generate).not.toHaveBeenCalled();
   });
 });
 
 describe("processNextJob - 失败路径", () => {
-  it("provider 抛错 → failJob 带错误码", async () => {
+  it("provider 瞬时失败（provider_failed）→ 按退避回 queued 重试，不一次判死", async () => {
     const repo = makeRepo();
     repo.claimNextJob.mockResolvedValue(queuedImageJob);
     repo.findImageCapability.mockResolvedValue({
@@ -719,17 +724,88 @@ describe("processNextJob - 失败路径", () => {
       generate: vi
         .fn()
         .mockRejectedValue(
-          new ImageProviderError("provider_failed", "生成服务返回 500"),
+          new ImageProviderError("provider_failed", "new-api 不可达"),
         ),
     };
-    const id = await processNextJob({ repo, provider, workerId: "w1" });
+    const id = await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, workerId: "w1" });
     expect(id).toBe("300");
+    expect(repo.requeueImageJobForRetry).toHaveBeenCalledWith(
+      "300",
+      expect.any(Date),
+    );
+    expect(repo.appendLog).toHaveBeenCalledWith(
+      "300",
+      "retry_scheduled",
+      "queued",
+      expect.stringContaining("瞬时失败"),
+    );
+    // 未到最大次数时不判死，也不结成功。
+    expect(repo.failJob).not.toHaveBeenCalled();
+    expect(repo.completeJob).not.toHaveBeenCalled();
+  });
+
+  it("瞬时失败已达最大重试次数 → failJob 判死", async () => {
+    const repo = makeRepo();
+    repo.claimNextJob.mockResolvedValue({ ...queuedImageJob, retry_count: 3 });
+    repo.findImageCapability.mockResolvedValue({
+      model_id: "m",
+      api_size: null,
+      width: null,
+      height: null,
+    });
+    const provider: ImageProvider = {
+      generate: vi
+        .fn()
+        .mockRejectedValue(
+          new ImageProviderError("provider_failed", "new-api 不可达"),
+        ),
+    };
+    await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, workerId: "w1" });
+    expect(repo.requeueImageJobForRetry).not.toHaveBeenCalled();
     expect(repo.failJob).toHaveBeenCalledWith(
       "300",
       "provider_failed",
-      "生成服务返回 500",
+      "new-api 不可达",
     );
-    expect(repo.completeJob).not.toHaveBeenCalled();
+  });
+
+  it("非瞬时错误（quota_exhausted）→ 直接 failJob 不重试", async () => {
+    const repo = makeRepo();
+    repo.claimNextJob.mockResolvedValue(queuedImageJob);
+    repo.findImageCapability.mockResolvedValue({
+      model_id: "m",
+      api_size: null,
+      width: null,
+      height: null,
+    });
+    const provider: ImageProvider = {
+      generate: vi
+        .fn()
+        .mockRejectedValue(
+          new ImageProviderError("quota_exhausted", "额度不足"),
+        ),
+    };
+    await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, workerId: "w1" });
+    expect(repo.requeueImageJobForRetry).not.toHaveBeenCalled();
+    expect(repo.failJob).toHaveBeenCalledWith("300", "quota_exhausted", "额度不足");
+  });
+
+  it("缺少 provider_credential → failJob provider_credential_missing", async () => {
+    const repo = makeRepo();
+    repo.claimNextJob.mockResolvedValue({
+      ...queuedImageJob,
+      input: { ...queuedImageJob.input, provider_credential: undefined },
+    });
+    const provider = mockProvider([
+      { url: "https://ark/x.png", width: 1, height: 1 },
+    ]);
+    await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, workerId: "w1" });
+    expect(provider.generate).not.toHaveBeenCalled();
+    expect(repo.failJob).toHaveBeenCalledWith(
+      "300",
+      "provider_credential_missing",
+      expect.any(String),
+    );
   });
 
   it("model 不在能力表 → failJob model_unavailable", async () => {
@@ -737,7 +813,7 @@ describe("processNextJob - 失败路径", () => {
     repo.claimNextJob.mockResolvedValue(queuedImageJob);
     repo.findImageCapability.mockResolvedValue(null);
     const provider = mockProvider([]);
-    await processNextJob({ repo, provider, workerId: "w1" });
+    await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, workerId: "w1" });
     expect(repo.failJob).toHaveBeenCalledWith(
       "300",
       "model_unavailable",
@@ -754,7 +830,7 @@ describe("processNextJob - 失败路径", () => {
     });
     repo.resolveInputAssets.mockResolvedValue([]);
     const provider = mockProvider([]);
-    await processNextJob({ repo, provider, workerId: "w1" });
+    await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, workerId: "w1" });
     expect(repo.failJob).toHaveBeenCalledWith(
       "300",
       "unsupported_input",
@@ -773,7 +849,7 @@ describe("processNextJob - 失败路径", () => {
       height: null,
     });
     const provider = mockProvider([]);
-    await processNextJob({ repo, provider, workerId: "w1" });
+    await processNextJob({ repo, createImageProvider: () => provider, credentialVault: { open: () => "tok" }, workerId: "w1" });
     expect(repo.failJob).toHaveBeenCalledWith(
       "300",
       "no_result",

@@ -129,9 +129,11 @@ export async function handleCreateGenerationJob(
   } else {
     if (isStr(params.resolution)) input.resolution = params.resolution;
     if (params.duration !== undefined) input.duration = params.duration;
-    if (internal.providerCredential) {
-      input.provider_credential = internal.providerCredential;
-    }
+  }
+  // 图片与视频一致：sk token 密封进 job.input.provider_credential，处理时由 worker 解出。
+  // 这样进程内即时调度与重启后的恢复扫描共用同一套凭据来源。
+  if (internal.providerCredential) {
+    input.provider_credential = internal.providerCredential;
   }
   const explicitReferenceIds = assetIds(body.reference_asset_ids);
   const firstFrameAssetId = assetId(body.first_frame_asset_id);
