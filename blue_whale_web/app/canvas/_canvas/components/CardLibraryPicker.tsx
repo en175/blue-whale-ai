@@ -17,6 +17,7 @@ import {
   LayoutGrid,
   MoreHorizontal,
   Mountain,
+  Package,
   Palette,
   Plus,
   Search,
@@ -40,6 +41,7 @@ const TYPE_ORDER: ReferenceCardType[] = [
   "object",
   "environment",
   "custom",
+  "product",
 ];
 
 const TYPE_ICONS: Record<ReferenceCardType, typeof User> = {
@@ -48,6 +50,7 @@ const TYPE_ICONS: Record<ReferenceCardType, typeof User> = {
   object: Box,
   environment: Mountain,
   custom: LayoutGrid,
+  product: Package,
 };
 
 /** 截图 tabs 行:卡片挂在「资产」下,其余媒体 tab 本票无数据(空态)。 */

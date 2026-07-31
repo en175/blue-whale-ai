@@ -2,7 +2,7 @@
 /**
  * IK55VS 资产库按钮 + 悬浮列表清单配置测试。
  * seam = 配置层外部可观察形状:LEFT_TOOLS 含资产库入口;
- * ASSET_LIBRARY_FLYOUT_ITEMS 六项完整(共享资产入口 + 五类卡),与 REFERENCE_CARD_TYPES 同源。
+ * ASSET_LIBRARY_FLYOUT_ITEMS 七项完整(共享资产入口 + 六类卡,含 IK55VZ 商品卡),与 REFERENCE_CARD_TYPES 同源。
  * IK55VX:「共享资产」项启用(打开卡片库选择器)。
  */
 import { describe, expect, it } from "vitest";
@@ -17,8 +17,8 @@ describe("IK55VS 资产库入口配置", () => {
     expect(tool?.label).toBe("资产库");
   });
 
-  it("悬浮列表六项完整:共享资产(启用) + 五类卡", () => {
-    expect(ASSET_LIBRARY_FLYOUT_ITEMS).toHaveLength(6);
+  it("悬浮列表七项完整:共享资产(启用) + 六类卡(含 IK55VZ 商品卡)", () => {
+    expect(ASSET_LIBRARY_FLYOUT_ITEMS).toHaveLength(7);
     const [first, ...cards] = ASSET_LIBRARY_FLYOUT_ITEMS;
     expect(first.id).toBe("import");
     expect(first.label).toBe("共享资产");

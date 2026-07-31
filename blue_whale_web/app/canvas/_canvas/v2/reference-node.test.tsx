@@ -111,7 +111,10 @@ describe("ReferenceNode 空卡态（IK55VT：全新空卡无可编辑文字）",
     "$cardType：头部 @$label（默认卡名=类型名）+ 静态占位文案",
     ({ cardType, label, placeholder }) => {
       renderReferenceNode({ cardType });
-      expect(screen.getByText(label)).toBeInTheDocument();
+      // selector 限定头部名(IK55VZ 商品卡 chrome 左上也有「商品」标签,防多匹配)
+      expect(
+        screen.getByText(label, { selector: "span.truncate" }),
+      ).toBeInTheDocument();
       expect(screen.getByText(placeholder)).toBeInTheDocument();
     },
   );

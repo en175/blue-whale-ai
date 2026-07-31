@@ -150,4 +150,26 @@ describe("pickReferenceDropTarget（IK55VT 通道一：画布拖素材上参考�
       ]),
     ).toBeNull();
   });
+
+  it("IK55VZ 商品卡未满 8 图 → 可落槽(追加语义)", () => {
+    expect(
+      pickReferenceDropTarget({ kind: "image", assetId: "9" }, [
+        { id: "p1", kind: "reference", cardType: "product", imageCount: 3 },
+      ]),
+    ).toBe("p1");
+  });
+
+  it("IK55VZ 商品卡已满 8 图 → 跳过(满了不再追加),命中后一个可用参考卡或 null", () => {
+    expect(
+      pickReferenceDropTarget({ kind: "image", assetId: "9" }, [
+        { id: "p1", kind: "reference", cardType: "product", imageCount: 8 },
+        { id: "r1", kind: "reference", cardType: "style" },
+      ]),
+    ).toBe("r1");
+    expect(
+      pickReferenceDropTarget({ kind: "image", assetId: "9" }, [
+        { id: "p1", kind: "reference", cardType: "product", imageCount: 8 },
+      ]),
+    ).toBeNull();
+  });
 });

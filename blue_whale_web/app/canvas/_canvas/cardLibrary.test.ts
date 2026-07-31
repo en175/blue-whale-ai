@@ -10,6 +10,7 @@ import {
   listCardLibrary,
   removeCardLibraryItem,
   resetCardLibrary,
+  snapshotToNodeData,
 } from "./cardLibrary";
 
 beforeEach(() => resetCardLibrary());
@@ -28,6 +29,17 @@ describe("listCardLibrary", () => {
     const styles = listCardLibrary({ cardType: "style" });
     expect(styles.length).toBeGreaterThan(0);
     expect(styles.every((c) => c.cardType === "style")).toBe(true);
+  });
+
+  it('IK55VZ mock 库含商品卡示例(listCardLibrary({ cardType: "product" }) 复用)', () => {
+    const products = listCardLibrary({ cardType: "product" });
+    expect(products.length).toBeGreaterThanOrEqual(1);
+    expect(products.every((c) => c.cardType === "product")).toBe(true);
+    // 至少一张带多图 + detail + sourceUrl
+    const filled = products.find(
+      (c) => (c.imageAssetIds?.length ?? 0) >= 2 && c.detail && c.sourceUrl,
+    );
+    expect(filled).toBeDefined();
   });
 });
 
@@ -73,6 +85,99 @@ describe("cloneCardSnapshot(导入=复制快照)", () => {
     const again = cloneCardSnapshot(card);
     expect(again.name).toBe(card.name);
     expect(again.description).toBe(card.description);
+  });
+
+  it("IK55VZ 商品卡快照:imageAssetIds 长度一致且 id 全部重新生成、与库内原 id 不同且可解析", () => {
+    const card = listCardLibrary({ cardType: "product" }).find(
+      (c) => (c.imageAssetIds?.length ?? 0) >= 3,
+    )!;
+    const snap = cloneCardSnapshot(card);
+    expect(snap.cardType).toBe("product");
+    expect(snap.imageAssetIds).toHaveLength(card.imageAssetIds!.length);
+    for (const [i, newId] of snap.imageAssetIds!.entries()) {
+      expect(newId).not.toBe(card.imageAssetIds![i]);
+      expect(card.imageAssetIds).not.toContain(newId);
+      // 新 id 已登记进注册表,可解析出 src/aspect
+      expect(getCardLibraryAsset(newId)?.src).toBeTruthy();
+    }
+  });
+
+  it("IK55VZ 商品卡快照:detail/sourceUrl/name 透传", () => {
+    const card = listCardLibrary({ cardType: "product" }).find(
+      (c) => c.detail && c.sourceUrl,
+    )!;
+    const snap = cloneCardSnapshot(card);
+    expect(snap.name).toBe(card.name);
+    expect(snap.detail).toBe(card.detail);
+    expect(snap.sourceUrl).toBe(card.sourceUrl);
+  });
+
+  it("IK55VZ 商品卡快照:0 图边界 → imageAssetIds 缺省或空数组,不产悬空 id", () => {
+    const card = listCardLibrary({ cardType: "product" }).find(
+      (c) => !c.imageAssetIds || c.imageAssetIds.length === 0,
+    )!;
+    const snap = cloneCardSnapshot(card);
+    expect(snap.imageAssetIds ?? []).toHaveLength(0);
+  });
+
+  it("IK55VZ 商品卡快照:改快照 imageAssetIds 不影响库内项(深拷贝语义),再次导入仍重新生成", () => {
+    const card = listCardLibrary({ cardType: "product" }).find(
+      (c) => (c.imageAssetIds?.length ?? 0) >= 2,
+    )!;
+    const snap = cloneCardSnapshot(card);
+    snap.imageAssetIds!.push("user-added-id");
+    const again = cloneCardSnapshot(card);
+    expect(again.imageAssetIds).toHaveLength(card.imageAssetIds!.length);
+    expect(again.imageAssetIds).not.toContain("user-added-id");
+    // 两次导入各自独立的新 id
+    for (const id of again.imageAssetIds!) {
+      expect(snap.imageAssetIds).not.toContain(id);
+    }
+    // 库内原数组未被污染
+    expect(
+      listCardLibrary({ cardType: "product" }).find((c) => c.id === card.id)!
+        .imageAssetIds,
+    ).toEqual(card.imageAssetIds);
+  });
+});
+
+describe("snapshotToNodeData(快照 → 画布节点 data,runtime 导入分发共用)", () => {
+  it("商品卡快照字段齐全:cardType/name/description/detail/imageAssetIds/sourceUrl", () => {
+    const card = listCardLibrary({ cardType: "product" }).find(
+      (c) => (c.imageAssetIds?.length ?? 0) >= 3 && c.detail && c.sourceUrl,
+    )!;
+    const data = snapshotToNodeData(cloneCardSnapshot(card));
+    expect(data.cardType).toBe("product");
+    expect(data.name).toBe(card.name);
+    expect(data.description).toBe(card.description);
+    expect(data.detail).toBe(card.detail);
+    expect(data.sourceUrl).toBe(card.sourceUrl);
+    expect(data.imageAssetIds).toHaveLength(card.imageAssetIds!.length);
+    // 快照 id 已重新生成(非库内原 id)
+    for (const id of data.imageAssetIds!) {
+      expect(card.imageAssetIds).not.toContain(id);
+    }
+  });
+
+  it("单图参考卡快照:referenceAssetId/referenceImageAspect 携带,无商品字段", () => {
+    const card = listCardLibrary({ cardType: "character" }).find(
+      (c) => c.imageAssetId,
+    )!;
+    const data = snapshotToNodeData(cloneCardSnapshot(card));
+    expect(data.referenceAssetId).toBeDefined();
+    expect(data.referenceImageAspect).toBeGreaterThan(0);
+    expect(data.detail).toBeUndefined();
+    expect(data.imageAssetIds).toBeUndefined();
+    expect(data.sourceUrl).toBeUndefined();
+  });
+
+  it("无图无详情卡(自定义卡)快照:只带基础字段", () => {
+    const card = listCardLibrary({ cardType: "custom" })[0];
+    const data = snapshotToNodeData(cloneCardSnapshot(card));
+    expect(data.cardType).toBe("custom");
+    expect(data.name).toBe(card.name);
+    expect(data.referenceAssetId).toBeUndefined();
+    expect(data.imageAssetIds).toBeUndefined();
   });
 });
 
