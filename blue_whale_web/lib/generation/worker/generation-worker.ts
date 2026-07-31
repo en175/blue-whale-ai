@@ -6,14 +6,32 @@ import { resolveSeedreamImageSize } from "../seedream-image-size";
 import { ImageProviderError, type ImageProvider } from "./image-provider";
 import { VideoProviderError, type VideoProvider } from "./video-provider";
 
-type WorkerDeps = {
+export type WorkerDeps = {
   repo: WorkerRepo;
-  provider: ImageProvider;
+  /** 按 job 密封凭证构建图片 provider（与 video 一致：sk token 来自 job，不来自请求闭包，
+   *  这样请求内即时调度与进程重启后的恢复扫描可用同一套逻辑）。 */
+  createImageProvider: (token: string) => ImageProvider;
+  /** 解密 job.input.provider_credential → sk token。 */
+  credentialVault: { open: (ciphertext: string) => string };
   videoProvider?: VideoProvider;
   workerId: string;
   fetchImpl?: typeof fetch;
   mediaStorage?: Pick<AssetUploadStorage, "prepareUpload" | "makePublic"> | null;
 };
+
+/** 瞬时失败码：网络不可达 / 结果转存失败等——重试有意义。quota/config/校验类不算瞬时。 */
+const TRANSIENT_IMAGE_ERROR_CODES = new Set(["provider_failed"]);
+/** 图片任务最大重试次数（瞬时失败回 queued 后由恢复扫描或下次调度再领）。 */
+const MAX_IMAGE_RETRIES = 3;
+
+function isTransientImageError(code: string): boolean {
+  return TRANSIENT_IMAGE_ERROR_CODES.has(code);
+}
+
+/** 指数退避：30s → 60s → 120s，封顶 5min。 */
+function imageRetryBackoffMs(retryCount: number): number {
+  return Math.min(30_000 * 2 ** retryCount, 300_000);
+}
 
 /** 生成 worker：认领一个 queued 任务 → 调 provider 出图 → 建素材 → 结任务 → 结算。
  *  返回处理的 jobId，无任务返回 null。纯编排，provider/repo 注入，可单测。 */
@@ -22,6 +40,16 @@ export async function processNextJob(deps: WorkerDeps): Promise<string | null> {
   const job = await repo.claimNextJob(workerId);
   if (!job) return null;
 
+  return processClaimedJob(job, deps);
+}
+
+/** 恢复扫描用：认领一个到点的图片 queued 任务（claimNextImageJob）并处理。
+ *  与 processNextJob 的区别——只领图片，不误领视频（视频归独立 BullMQ worker）。 */
+export async function processNextImageJob(
+  deps: WorkerDeps,
+): Promise<string | null> {
+  const job = await deps.repo.claimNextImageJob(deps.workerId);
+  if (!job) return null;
   return processClaimedJob(job, deps);
 }
 
@@ -45,7 +73,8 @@ async function processClaimedJob(
 ): Promise<string> {
   const {
     repo,
-    provider,
+    createImageProvider,
+    credentialVault,
     videoProvider,
     fetchImpl = fetch,
     mediaStorage,
@@ -136,6 +165,20 @@ async function processClaimedJob(
       await finishJob(repo, job.id, [assetId]);
       return job.id;
     }
+
+    // 图片：sk token 从 job 密封凭证解出（不依赖请求闭包），恢复扫描也能重放。
+    const sealedCredential = job.input?.provider_credential;
+    if (typeof sealedCredential !== "string" || sealedCredential.length === 0) {
+      await repo.failJob(
+        job.id,
+        "provider_credential_missing",
+        "图片任务缺少供应商凭证",
+      );
+      return job.id;
+    }
+    const provider = createImageProvider(
+      credentialVault.open(sealedCredential),
+    );
 
     const sizeId = typeof input.size === "string" ? input.size : null;
     const cap = await repo.findImageCapability(modelId, sizeId);
@@ -243,6 +286,30 @@ async function processClaimedJob(
         ? e.code
         : "provider_failed";
     const msg = e instanceof Error ? e.message : "unknown";
+    // 图片瞬时失败（网络不可达 / 转存失败等）按指数退避回 queued 重试，不再一次判死。
+    // 对应线上 job 416「new-api 不可达」类：实际下次调用即可成功（已 curl 验证 new-api 可达）。
+    if (
+      job.type === "image" &&
+      isTransientImageError(code) &&
+      job.retry_count < MAX_IMAGE_RETRIES
+    ) {
+      const nextActionAt = new Date(
+        Date.now() + imageRetryBackoffMs(job.retry_count),
+      );
+      const requeued = await repo.requeueImageJobForRetry(
+        job.id,
+        nextActionAt,
+      );
+      if (requeued) {
+        await repo.appendLog(
+          job.id,
+          "retry_scheduled",
+          "queued",
+          `瞬时失败第 ${job.retry_count + 1}/${MAX_IMAGE_RETRIES} 次重试已排队: ${code}: ${msg}`,
+        );
+        return job.id;
+      }
+    }
     await repo.failJob(job.id, code, msg);
     return job.id;
   }

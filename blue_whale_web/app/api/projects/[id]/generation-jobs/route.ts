@@ -31,7 +31,10 @@ export async function POST(
       ? authHeader.slice(7).trim()
       : undefined;
     let providerCredential: string | undefined;
-    if (body.type === "video" && newApiToken?.startsWith("sk-")) {
+    if (
+      (body.type === "video" || body.type === "image") &&
+      newApiToken?.startsWith("sk-")
+    ) {
       try {
         providerCredential = sealGenerationCredential(
           newApiToken,
@@ -68,7 +71,9 @@ export async function POST(
         );
       }
     } else if (result.code === 200 && result.data) {
-      const worker = createGenerationWorkerDeps(newApiToken);
+      // 图片：请求内立即调度一次（低延迟）；token 从 job 密封凭证解出，不依赖请求闭包。
+      // 进程重启导致的孤儿 queued 任务 + 瞬时失败重试，由 instrumentation.ts 的恢复扫描兜底。
+      const worker = createGenerationWorkerDeps();
       void processJob({
         ...worker,
         workerId: `next-${Date.now()}`,
