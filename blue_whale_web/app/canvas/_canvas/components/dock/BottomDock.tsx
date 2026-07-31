@@ -3,7 +3,7 @@
  * 持有图片/视频 Dock 的共享状态（模型/宽高比/分辨率/参考模式等），
  * 按 mode 切换渲染 ImageDockContent 或 VideoDockContent，并提供关闭与素材删除回调。
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
@@ -16,6 +16,7 @@ import {
   VIDEO_ASPECT_RATIOS,
   VIDEO_RESOLUTIONS,
   REF_MODES,
+  DEFAULT_MAX_REFERENCE_IMAGES,
 } from "../../constants";
 import type {
   AudioPanelState,
@@ -131,12 +132,54 @@ export function BottomDock({
   const [input, setInput] = useState("");
   /** 从 editor pill 抽取的参考图 URL（提交 referenceImages），随 handleInput 更新 */
   const [mentions, setMentions] = useState<string[]>([]);
+  /** 图片模型参考图上限（由 ImageDockContent 切模型时回调更新） */
+  const [imageMaxRefImages, setImageMaxRefImages] = useState(
+    DEFAULT_MAX_REFERENCE_IMAGES,
+  );
   const [dockSize, setDockSize] = useState({ w: 680, h: 164 });
+  /** 放大态（IK5OWV）：仅图片 Dock，面板居中悬浮放大；Esc/点外部收起。 */
+  const [expanded, setExpanded] = useState(false);
+  const expandedRef = useRef(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const dockRootRef = useRef<HTMLDivElement>(null);
 
-  useDockClickOutside(dockRootRef, onClose, { isOpen, isPicking });
+  // 供 ResizeObserver 回调读取当前放大态（避免闭包过期）。
+  useEffect(() => {
+    expandedRef.current = expanded;
+  }, [expanded]);
+
+  // 点击外部：放大态 → 收起（回普通态）；普通态 → 隐藏（IK5OWS）。
+  const handleDockClickOutside = useCallback(() => {
+    if (expanded) setExpanded(false);
+    else onClose();
+  }, [expanded, onClose]);
+  useDockClickOutside(dockRootRef, handleDockClickOutside, {
+    isOpen,
+    isPicking,
+  });
+
+  // Esc 收起放大态（IK5OWV）。
+  useEffect(() => {
+    if (!expanded) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setExpanded(false);
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [expanded]);
+
+  // 切离图片模式时收起放大态（放大按钮仅图片 Dock，IK5OWV）。
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (mode !== "image") setExpanded(false);
+  }, [mode]);
+
+  // Dock 被隐藏（如经侧边栏关闭，命中点击外部例外）时重置放大态，重开回普通态（IK5OWV）。
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!isOpen) setExpanded(false);
+  }, [isOpen]);
 
   const [refMode, setRefMode] = useState(REF_MODES[0]);
   const [refModeOpen, setRefModeOpen] = useState(false);
@@ -176,6 +219,8 @@ export function BottomDock({
     const el = contentRef.current;
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
+      // 放大态不追踪自然高度：dockSize 始终保存收起态的内容尺寸（IK5OWV）。
+      if (expandedRef.current) return;
       const cr = entries[0].contentRect;
       setDockSize({ w: 680, h: Math.round(cr.height) });
     });
@@ -198,9 +243,15 @@ export function BottomDock({
     const raf = requestAnimationFrame(() => {
       const el = editorRef.current;
       if (!el) return;
+      if (mode === "image") {
+        const currentCount =
+          extractEditor(el).referenceImages.length + imageMedia.length;
+        if (currentCount >= imageMaxRefImages) return;
+      }
       insertMention(el, item, { replace: sig.replace });
     });
     return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dockMentionSignal]);
 
   // 重新编辑预填（P2）：prefillSignal.nonce → prompt+参考图命令式写进 contentEditable + video 设置。
@@ -266,7 +317,10 @@ export function BottomDock({
     }
   }, [prefillSignal?.nonce, mode]);
 
-  const path = squirclePath(dockSize.w, dockSize.h, 28.8);
+  // 放大态尺寸（IK5OWV，方案 B：960×480 视口居中）。
+  const dockW = expanded ? 960 : dockSize.w;
+  const dockH = expanded ? 480 : dockSize.h;
+  const path = squirclePath(dockW, dockH, 28.8);
   const isEmpty = input.trim().length === 0 && mentions.length === 0;
 
   const handleInput = () => {
@@ -289,11 +343,13 @@ export function BottomDock({
       data-canvas-reference-drop-target={`${mode}-dock`}
       style={{
         position: "absolute",
-        bottom: 16,
+        // 放大态垂直居中：底边位于 (50% - 半高 240px)；bottom 可平滑过渡（IK5OWV）。
+        bottom: expanded ? "calc(50% - 240px)" : 16,
         left: "50%",
         transform: "translateX(-50%)",
         zIndex: 2147483601,
-        width: 680,
+        width: dockW,
+        transition: "bottom 280ms cubic-bezier(0.34, 1.56, 0.64, 1)",
       }}
     >
       <div
@@ -306,8 +362,8 @@ export function BottomDock({
       >
         <div style={{ position: "relative" }}>
           <SmoothCorners
-            width={dockSize.w}
-            height={dockSize.h}
+            width={dockW}
+            height={dockH}
             path={path}
             overlay={false}
             stroke={{ color: "#ffffff", width: 2, opacity: 0.04 }}
@@ -324,7 +380,9 @@ export function BottomDock({
               ref={contentRef}
               className="nodrag nopan nowheel"
               style={{
-                width: 680,
+                width: dockW,
+                // 放大态固定高度 480，内容经 flex 填满（IK5OWV）。
+                height: expanded ? 480 : undefined,
                 background: "transparent",
                 display: "flex",
                 flexDirection: "column",
@@ -384,6 +442,8 @@ export function BottomDock({
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
+                  referenceCount={mentions.length + imageMedia.length}
+                  onMaxReferenceImagesChange={setImageMaxRefImages}
                   onGenerate={(s) => {
                     const mentionAssetIds = editorRef.current
                       ? extractEditor(editorRef.current).assetIds
@@ -392,6 +452,7 @@ export function BottomDock({
                       mentionAssetIds,
                       imageMedia,
                       s.referenceImageSupported,
+                      imageMaxRefImages,
                     );
                     if (validationError) {
                       onGenerateError?.(validationError);
@@ -415,6 +476,8 @@ export function BottomDock({
                   }}
                   generating={generating}
                   onPreviewMedia={setPreviewItem}
+                  expanded={expanded}
+                  onToggleExpand={() => setExpanded((v) => !v)}
                 />
               ) : mode === "audio" ? (
                 <AudioDockContent

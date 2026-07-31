@@ -42,6 +42,11 @@ import {
   nodeToPendingMention,
   recipeToDockPrefill,
 } from "./_canvas/v2/mappers";
+import {
+  cloneNodeWithOffset,
+  parseClipboardNodes,
+  serializeNodesForClipboard,
+} from "./_canvas/v2/clipboard";
 import { findPlacement, type Rect } from "./_canvas/placement";
 import { dockAccept, dockPickHint } from "./_canvas/utils";
 import { useCanvasGeneration } from "./_canvas/hooks/useCanvasGeneration";
@@ -62,6 +67,7 @@ import { CardLibraryPicker } from "./_canvas/components/CardLibraryPicker";
 import {
   cloneCardSnapshot,
   getCardLibraryAsset,
+  savedAssetsToastText,
   saveToSharedAssets,
   snapshotToNodeData,
   type CardLibraryItem,
@@ -114,6 +120,11 @@ function probeImageAspect(url: string): Promise<number | undefined> {
     img.onerror = () => resolve(undefined);
     img.src = url;
   });
+}
+
+/** ReactFlow 节点 selected 标记（CanvasNode 类型未声明，运行时存在）。 */
+function isNodeSelected(n: CanvasNode): boolean | undefined {
+  return (n as CanvasNode & { selected?: boolean }).selected;
 }
 
 export function CanvasProjectRuntime({
@@ -1005,9 +1016,6 @@ export function CanvasProjectRuntime({
     [onNodesChange],
   );
 
-  const isNodeSelected = (n: CanvasNode) =>
-    (n as CanvasNode & { selected?: boolean }).selected;
-
   const handleNodeMenuOpen = useCallback(
     (payload: MenuPayload & { nodeId: string }) => {
       setMenu(null);
@@ -1025,6 +1033,30 @@ export function CanvasProjectRuntime({
     },
     [nodes],
   );
+
+  /** 拷贝节点到系统剪贴板（菜单「拷贝」与 ⌘C 共用）。 */
+  const copyNodesToClipboard = useCallback((targets: CanvasNode[]) => {
+    void navigator.clipboard.writeText(serializeNodesForClipboard(targets));
+  }, []);
+
+  /** 复制节点：偏移落点生成副本（菜单「复制」与 ⌘D 共用）。 */
+  const duplicateNodes = useCallback(
+    (targets: CanvasNode[]) => {
+      for (const src of targets) addNodeFull(cloneNodeWithOffset(src));
+    },
+    [addNodeFull],
+  );
+
+  /** 粘贴（⌘V）：读剪贴板节点 JSON 重建落画布；非本格式/无权限静默忽略。 */
+  const pasteNodesFromClipboard = useCallback(async () => {
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      return;
+    }
+    for (const node of parseClipboardNodes(text)) addNodeFull(node);
+  }, [addNodeFull]);
 
   const handleNodeMenuAction = useCallback(
     (action: NodeMenuAction) => {
@@ -1047,45 +1079,23 @@ export function CanvasProjectRuntime({
           );
           break;
         }
-        case "copy": {
-          const payload = targets.map((n) => ({
-            id: n.id,
-            data: n.data,
-            position: n.position,
-            width: n.width,
-            height: n.height,
-          }));
-          void navigator.clipboard.writeText(JSON.stringify(payload));
+        case "copy":
+          copyNodesToClipboard(targets);
           break;
-        }
-        case "duplicate": {
-          const OFFSET = 20;
-          for (const src of targets) {
-            const clone: CanvasNode = {
-              ...src,
-              id: crypto.randomUUID(),
-              position: {
-                x: src.position.x + OFFSET,
-                y: src.position.y + OFFSET,
-              },
-              data: { ...src.data, status: undefined },
-            };
-            addNodeFull(clone);
-          }
+        case "duplicate":
+          duplicateNodes(targets);
           break;
-        }
         case "save-to-assets": {
-          const count = saveToSharedAssets(targets);
-          if (count > 0) {
-            toast.success(
-              count === 1 ? "已保存到共享资产" : `已保存 ${count} 项到共享资产`,
-            );
-          }
+          const text = savedAssetsToastText(saveToSharedAssets(targets));
+          if (text) toast.success(text);
           break;
         }
         case "add-to-chat": {
+          // 分组无内容可引用，与保存语义一致跳过
+          const mentionTargets = targets.filter((n) => n.data.kind !== "group");
+          if (mentionTargets.length === 0) break;
           const batchId = Date.now();
-          const mentions: PendingMention[] = targets.map((n, i) =>
+          const mentions: PendingMention[] = mentionTargets.map((n, i) =>
             nodeToPendingMention(n, assets, batchId + i),
           );
           setIsAgentOpen(true);
@@ -1096,8 +1106,41 @@ export function CanvasProjectRuntime({
           break;
       }
     },
-    [nodeMenu, nodes, onNodesChange, addNodeFull, assets],
+    [
+      nodeMenu,
+      nodes,
+      onNodesChange,
+      copyNodesToClipboard,
+      duplicateNodes,
+      assets,
+    ],
   );
+
+  /** ⌘C/⌘D/⌘V 节点级快捷键：与右键菜单共用同一套拷贝/复制/粘贴逻辑。 */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key !== "c" && key !== "d" && key !== "v") return;
+      // 输入框/富文本内保留系统默认编辑行为
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.('input, textarea, [contenteditable="true"]')) return;
+      if (key === "v") {
+        e.preventDefault();
+        void pasteNodesFromClipboard();
+        return;
+      }
+      // 页面上有文本选区时放行系统拷贝（如聊天文本），不劫持 ⌘C/⌘D
+      if (window.getSelection()?.toString()) return;
+      const selected = nodes.filter(isNodeSelected);
+      if (selected.length === 0) return;
+      e.preventDefault();
+      if (key === "c") copyNodesToClipboard(selected);
+      else duplicateNodes(selected);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [nodes, copyNodesToClipboard, duplicateNodes, pasteNodesFromClipboard]);
 
   const handleCardGenerated = useCallback(
     (card: CardMessage) => {

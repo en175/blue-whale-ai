@@ -8,6 +8,8 @@ import { createPortal } from "react-dom";
 import {
   ChevronUp,
   Image as ImageIcon,
+  Maximize2,
+  Minimize2,
   Plus,
   Settings2,
   X,
@@ -22,10 +24,54 @@ import {
   type ImageModelCapability,
 } from "../../api/generation";
 import { CreditIcon } from "../../icons";
-import { QUANTITIES } from "../../constants";
+import { DEFAULT_MAX_REFERENCE_IMAGES, QUANTITIES } from "../../constants";
 import type { ImageDockContentProps } from "../../types";
 import { DockMediaThumb } from "./parts";
 import { UploadSourceMenu } from "./UploadSourceMenu";
+
+/** 放大/收起切换按钮（IK5OWV，方案 B）：hover 高亮 + 轻微上浮投影。 */
+function ExpandToggleButton({
+  expanded,
+  onToggle,
+}: {
+  expanded: boolean;
+  onToggle?: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={expanded ? "收起面板" : "放大面板"}
+      onClick={onToggle}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        width: 24,
+        height: 24,
+        borderRadius: 6,
+        border: 0,
+        background: hovered ? "var(--tc-dock-control-hover-bg)" : "transparent",
+        color: hovered
+          ? "var(--tc-dock-text-strong)"
+          : "var(--tc-dock-text-faint)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        transform: hovered ? "translateY(-1px) scale(1.08)" : "none",
+        boxShadow: hovered ? "0 2px 8px rgba(0, 0, 0, 0.3)" : "none",
+        transition: "all 120ms ease",
+      }}
+    >
+      {expanded ? (
+        <Minimize2 width={13} height={13} />
+      ) : (
+        <Maximize2 width={13} height={13} />
+      )}
+    </button>
+  );
+}
 
 export function ImageDockContent({
   editorRef,
@@ -41,6 +87,10 @@ export function ImageDockContent({
   onGenerate,
   generating = false,
   onPreviewMedia,
+  referenceCount = 0,
+  onMaxReferenceImagesChange,
+  expanded = false,
+  onToggleExpand,
 }: ImageDockContentProps) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
@@ -57,6 +107,15 @@ export function ImageDockContent({
   const [sequential, setSequential] = useState(false);
   // 参考图入口按模型能力显隐：不支持参考图的模型（如 Seedream 5.0 Pro）不显示上传入口。
   const canReferenceImage = selectedModel?.features.reference_image ?? false;
+  const maxReferenceImages =
+    selectedModel?.features.max_reference_images ??
+    DEFAULT_MAX_REFERENCE_IMAGES;
+  const atReferenceLimit =
+    canReferenceImage && referenceCount >= maxReferenceImages;
+
+  useEffect(() => {
+    onMaxReferenceImagesChange?.(maxReferenceImages);
+  }, [maxReferenceImages, onMaxReferenceImagesChange]);
 
   // 取模型默认分辨率档位（能力表 default_size，缺省回退首个）。
   const pickDefaultSize = (m: ImageModelCapability) =>
@@ -115,6 +174,7 @@ export function ImageDockContent({
   const handleTriggerClick = (
     ref: React.RefObject<HTMLButtonElement | null>,
   ) => {
+    if (atReferenceLimit) return;
     if (isPicking) {
       onExitPick?.();
       return;
@@ -162,6 +222,15 @@ export function ImageDockContent({
     return () => document.removeEventListener("mousedown", handle);
   }, [quantityOpen]);
 
+  // 放大态让输入区填满面板高度：逐层向下传递 flex（IK5OWV）。
+  // fillColumn 把普通块级 div 变成可拉伸的 flex 列；fillFlex 给已是 flex 的 div 补 flex:1。
+  const fillColumn: React.CSSProperties = expanded
+    ? { flex: "1 1 0%", minHeight: 0, display: "flex", flexDirection: "column" }
+    : {};
+  const fillFlex: React.CSSProperties = expanded
+    ? { flex: "1 1 0%", minHeight: 0 }
+    : {};
+
   return (
     <>
       <input
@@ -191,14 +260,15 @@ export function ImageDockContent({
           justifyContent: "flex-start",
         }}
       >
-        <div>
-          <div>
+        <div style={fillColumn}>
+          <div style={fillColumn}>
             <div
               style={{
                 display: "flex",
                 flexDirection: "column",
                 gap: 8,
                 width: "100%",
+                ...fillFlex,
               }}
             >
               <div
@@ -208,33 +278,48 @@ export function ImageDockContent({
                   gap: 8,
                   borderRadius: 10,
                   position: "relative",
+                  ...fillFlex,
                 }}
               >
                 <div
-                  style={{ position: "absolute", top: 0, right: 0, zIndex: 1 }}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    right: 0,
+                    zIndex: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 2,
+                  }}
                 >
-                  <button
-                    type="button"
-                    aria-label="Close"
-                    onClick={onClose}
-                    style={{
-                      width: 24,
-                      height: 24,
-                      borderRadius: 6,
-                      border: 0,
-                      background: "transparent",
-                      color: "rgba(255, 255, 255, 0.35)",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                      transition: "background 100ms, color 100ms",
-                      fontSize: 13,
-                    }}
-                  >
-                    <X width={13} height={13} />
-                  </button>
+                  <ExpandToggleButton
+                    expanded={expanded}
+                    onToggle={onToggleExpand}
+                  />
+                  {!expanded && (
+                    <button
+                      type="button"
+                      aria-label="Close"
+                      onClick={onClose}
+                      style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: 6,
+                        border: 0,
+                        background: "transparent",
+                        color: "rgba(255, 255, 255, 0.35)",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                        transition: "background 100ms, color 100ms",
+                        fontSize: 13,
+                      }}
+                    >
+                      <X width={13} height={13} />
+                    </button>
+                  )}
                 </div>
 
                 <div
@@ -262,6 +347,12 @@ export function ImageDockContent({
                         aria-label="Upload reference image"
                         aria-haspopup="menu"
                         aria-expanded={uploadMenuOpen}
+                        disabled={atReferenceLimit}
+                        title={
+                          atReferenceLimit
+                            ? `最多添加 ${maxReferenceImages} 张参考图`
+                            : undefined
+                        }
                         onClick={() => handleTriggerClick(placeholderRef)}
                         style={{
                           position: "relative",
@@ -272,8 +363,8 @@ export function ImageDockContent({
                           border: "1px solid rgba(255, 255, 255, 0.02)",
                           background: "rgba(255, 255, 255, 0.043)",
                           color: "rgba(255, 255, 255, 0.62)",
-                          cursor: "pointer",
-                          opacity: 1,
+                          cursor: atReferenceLimit ? "default" : "pointer",
+                          opacity: atReferenceLimit ? 0.4 : 1,
                           display: "inline-flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -306,7 +397,9 @@ export function ImageDockContent({
                     style={{
                       width: "100%",
                       minHeight: 56,
-                      maxHeight: 452,
+                      // 放大态填满可用高度，收起态按内容自适应（上限 452）。
+                      height: expanded ? "100%" : undefined,
+                      maxHeight: expanded ? "none" : 452,
                       overflowY: "auto",
                       padding: "6px 8px",
                       margin: 0,
@@ -368,6 +461,12 @@ export function ImageDockContent({
               aria-label="上传图片"
               aria-haspopup="menu"
               aria-expanded={uploadMenuOpen}
+              disabled={atReferenceLimit}
+              title={
+                atReferenceLimit
+                  ? `最多添加 ${maxReferenceImages} 张参考图`
+                  : undefined
+              }
               onClick={() => handleTriggerClick(plusRef)}
               style={{
                 width: 24,
@@ -377,7 +476,8 @@ export function ImageDockContent({
                 borderRadius: "50%",
                 background: "rgba(255, 255, 255, 0.07)",
                 color: "rgba(255, 255, 255, 0.72)",
-                cursor: "pointer",
+                cursor: atReferenceLimit ? "default" : "pointer",
+                opacity: atReferenceLimit ? 0.4 : 1,
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",

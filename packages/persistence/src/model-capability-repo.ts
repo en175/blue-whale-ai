@@ -21,6 +21,7 @@ export interface ModelDurationRange {
 
 export interface ModelFeatures {
   reference_image: boolean;
+  max_reference_images: number;
   watermark: boolean;
   quantity_max: number;
   sequential_image_generation: boolean;
@@ -66,6 +67,8 @@ type SizeJson = {
 type FeaturesJson = {
   referenceImage?: boolean;
   reference_image?: boolean;
+  maxReferenceImages?: number;
+  max_reference_images?: number;
   watermark?: boolean;
   quantityMax?: number;
   quantity_max?: number;
@@ -101,6 +104,7 @@ function toFeatures(json: unknown): ModelFeatures {
   const f = (json ?? {}) as FeaturesJson;
   return {
     reference_image: f.referenceImage === true || f.reference_image === true,
+    max_reference_images: f.maxReferenceImages ?? f.max_reference_images ?? 0,
     watermark: f.watermark === true,
     quantity_max: f.quantityMax ?? f.quantity_max ?? 1,
     sequential_image_generation:

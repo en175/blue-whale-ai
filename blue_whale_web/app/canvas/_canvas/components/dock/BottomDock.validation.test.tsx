@@ -1,21 +1,29 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const childProps = vi.hoisted(() => ({
-  image: null as null | { onGenerate?: (settings: object) => void },
+  image: null as null | {
+    onGenerate?: (settings: object) => void;
+    onMaxReferenceImagesChange?: (max: number) => void;
+  },
   video: null as null | { onGenerate?: (settings: object) => void },
 }));
 
 vi.mock("@/components/SmoothCorners", () => ({
-  SmoothCorners: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  SmoothCorners: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
 }));
 vi.mock("@/components/credits/CreditBalance", () => ({
   CreditBalance: () => <div>credits</div>,
 }));
 vi.mock("./ImageDockContent", () => ({
-  ImageDockContent: (props: { onGenerate?: (settings: object) => void }) => {
+  ImageDockContent: (props: {
+    onGenerate?: (settings: object) => void;
+    onMaxReferenceImagesChange?: (max: number) => void;
+  }) => {
     childProps.image = props;
     return <button onClick={() => props.onGenerate?.({})}>submit image</button>;
   },
@@ -103,5 +111,34 @@ describe("BottomDock reference validation", () => {
 
     expect(onGenerateError).toHaveBeenCalledWith("请先添加首帧，再添加尾帧");
     expect(onGenerate).not.toHaveBeenCalled();
+  });
+
+  it("allows more references when model reports higher max (IK5OWU dynamic limit)", () => {
+    const onGenerate = vi.fn();
+    const onGenerateError = vi.fn();
+    render(
+      <BottomDock
+        mode="image"
+        onClose={vi.fn()}
+        onGenerate={onGenerate}
+        onGenerateError={onGenerateError}
+        imageMedia={Array.from({ length: 5 }, (_, index) => ({
+          id: `node-${index}`,
+          type: "image",
+          name: "",
+          src: `https://tos.example.com/img-${index}.png`,
+          assetId: String(index + 1),
+        }))}
+      />,
+    );
+
+    act(() => {
+      childProps.image?.onMaxReferenceImagesChange?.(10);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "submit image" }));
+
+    expect(onGenerateError).not.toHaveBeenCalled();
+    expect(onGenerate).toHaveBeenCalled();
   });
 });
