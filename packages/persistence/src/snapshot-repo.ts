@@ -126,7 +126,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
     },
     async loadConversationState(projectId) {
       const pid = BigInt(projectId);
-      const [messages, runs, inputRequests, stream] = await Promise.all([
+      const [messages, runs, inputRequests, maxCursorRow] = await Promise.all([
         prisma.conversation_messages.findMany({
           where: { project_id: pid, is_delete: 0 },
           orderBy: { sequence_no: "asc" },
@@ -144,9 +144,11 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           },
           orderBy: { id: "asc" },
         }),
-        prisma.project_event_stream.findUnique({
-          where: { project_id: pid },
-          select: { high_watermark: true },
+        // cursor 改雪花后 project_event_stream.high_watermark 不再维护；
+        // 当前水位直接取 project_events 的最大 cursor。
+        prisma.project_events.aggregate({
+          where: { project_id: pid, is_delete: 0 },
+          _max: { cursor: true },
         }),
       ]);
       const activeByRun = new Map(
@@ -181,7 +183,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           version: run.version,
           active_input_request: activeByRun.get(run.id.toString()) ?? null,
         })),
-        high_watermark_cursor: (stream?.high_watermark ?? 0n).toString(),
+        high_watermark_cursor: (maxCursorRow?._max?.cursor ?? 0n).toString(),
       };
     },
   };
