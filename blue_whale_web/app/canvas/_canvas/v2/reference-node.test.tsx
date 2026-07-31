@@ -31,7 +31,12 @@ vi.mock("@xyflow/react", async (importOriginal) => {
 });
 
 import { ReferenceNode, NodeActionsContext } from "./nodes";
-import { REFERENCE_CARD_TYPES } from "../constants";
+import {
+  REFERENCE_CARD_HEIGHT,
+  REFERENCE_CARD_TYPES,
+  REFERENCE_PRODUCT_HEIGHT,
+  REFERENCE_VOICE_SECTION_HEIGHT,
+} from "../constants";
 import { useCanvasStore } from "../store";
 import type { ReferenceCardType } from "../model";
 
@@ -49,6 +54,8 @@ type RenderOpts = {
   referenceAssetId?: string;
   referenceImageAspect?: number;
   selected?: boolean;
+  /** 模拟 RF v12 NodeProps.height 回读(getNodeDimensions:首测前 0,塌缩测量 2) */
+  height?: number;
   onEditDescription?: (id: string, text: string) => void;
   onEditReferenceName?: (id: string, name: string) => void;
   onUploadReferenceImage?: (id: string) => void;
@@ -73,6 +80,7 @@ function renderReferenceNode(opts: RenderOpts) {
         : {}),
     },
     selected: opts.selected ?? false,
+    ...(opts.height != null ? { height: opts.height } : {}),
   } as unknown as NodeProps;
   return render(
     <NodeActionsContext.Provider
@@ -172,6 +180,32 @@ describe("ReferenceNode 空卡态（IK55VT：全新空卡无可编辑文字）",
   it("无「重新编辑」按钮（工单明确不做）", () => {
     renderReferenceNode({ cardType: "style" });
     expect(screen.queryByText("重新编辑")).toBeNull();
+  });
+
+  // 回归:CanvasSurface 对 reference 节点剥离 height 后,RF v12 getNodeDimensions
+  // 回读 0(首测前);若把该 prop 钉进内联样式,会形成 0→测得 2px→钉 2px 的
+  // 自反馈塌缩环——空卡渲染成一条线(内容被 overflow-hidden 裁掉)。
+  it.each([0, 2])(
+    "RF 回读 height=%i 时空卡不塌缩：内联高度=默认卡高（不消费 measured 回读）",
+    (h) => {
+      renderReferenceNode({ cardType: "style", height: h });
+      const root = document.querySelector(".tc-reference-node") as HTMLElement;
+      expect(root.style.height).toBe(`${REFERENCE_CARD_HEIGHT}px`);
+    },
+  );
+
+  it("character 空卡同理不塌缩：默认高=卡高+音色区", () => {
+    renderReferenceNode({ cardType: "character", height: 0 });
+    const root = document.querySelector(".tc-reference-node") as HTMLElement;
+    expect(root.style.height).toBe(
+      `${REFERENCE_CARD_HEIGHT + REFERENCE_VOICE_SECTION_HEIGHT}px`,
+    );
+  });
+
+  it("商品卡 minHeight 不吃 RF 回读 0：仍兜底默认 560", () => {
+    renderReferenceNode({ cardType: "product", height: 0 });
+    const root = document.querySelector(".tc-reference-node") as HTMLElement;
+    expect(root.style.minHeight).toBe(`${REFERENCE_PRODUCT_HEIGHT}px`);
   });
 });
 

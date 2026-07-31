@@ -181,6 +181,11 @@ test("点六类卡项新增对应空卡：形态齐全、落点不重叠、角�
     styleCard.getByText("描述视觉风格、配色与艺术方向…"),
   ).toBeVisible();
   await expect(styleCard.getByText(/1 张参考图/)).toBeVisible();
+  // 回归(RF measured 回读塌缩环):空卡渲染高度≈默认卡高 242,不得塌缩成一条线
+  // (可见性断言拦不住——文本在 overflow-hidden 的 2px 高卡片内仍算 visible)
+  const styleBox = await styleCard.boundingBox();
+  expect(styleBox).not.toBeNull();
+  expect(styleBox!.height).toBeGreaterThan(200);
 
   // 角色卡：第二张卡、落点与第一张不重叠、带音色区
   await spawn("角色卡");
@@ -192,6 +197,8 @@ test("点六类卡项新增对应空卡：形态齐全、落点不重叠、角�
   const box2 = await charCard.boundingBox();
   expect(box1).not.toBeNull();
   expect(box2).not.toBeNull();
+  // 同塌缩回归:角色卡(默认 316+音色区)也不得渲染成一条线
+  expect(box2!.height).toBeGreaterThan(200);
   const overlap =
     box1!.x < box2!.x + box2!.width &&
     box2!.x < box1!.x + box1!.width &&
