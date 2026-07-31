@@ -8,6 +8,7 @@ import { X } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 import { CreditBalance } from "@/components/credits/CreditBalance";
+import { useDockClickOutside } from "./useDockClickOutside";
 import type { WireInteger } from "@/lib/wire-integer";
 import { squirclePath } from "../../utils";
 import {
@@ -56,6 +57,7 @@ export function BottomDock({
   onPickAudioSlot,
   onExitPick,
   isPicking = false,
+  isOpen = true,
   audioModeSignal,
   onGenerate,
   onGenerateError,
@@ -92,6 +94,8 @@ export function BottomDock({
   onExitPick?: () => void;
   /** 当前 Dock 是否处于选择模式 */
   isPicking?: boolean;
+  /** 当前 Dock 是否可见（点击外部隐藏机制的激活条件，IK5OWS） */
+  isOpen?: boolean;
   /** 悬浮列表点选 → 音频子模式切换信号（IK55VM，nonce 递增触发） */
   audioModeSignal?: { nonce: number; subMode: "audio" | "music" };
   /** 生成：prompt 由本组件 input state 取，settings 由各 Dock Content 拼 */
@@ -130,6 +134,9 @@ export function BottomDock({
   const [dockSize, setDockSize] = useState({ w: 680, h: 164 });
   const editorRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const dockRootRef = useRef<HTMLDivElement>(null);
+
+  useDockClickOutside(dockRootRef, onClose, { isOpen, isPicking });
 
   const [refMode, setRefMode] = useState(REF_MODES[0]);
   const [refModeOpen, setRefModeOpen] = useState(false);
@@ -278,6 +285,7 @@ export function BottomDock({
 
   return (
     <div
+      ref={dockRootRef}
       data-canvas-reference-drop-target={`${mode}-dock`}
       style={{
         position: "absolute",
