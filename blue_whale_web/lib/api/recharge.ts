@@ -69,7 +69,7 @@ export async function createRechargeOrder(
     if (!tier) throw new Error(`Unknown tier: ${req.tier_id}`);
     mockOrderCounter++;
     const tradeNo = `MOCK_${Date.now()}_${mockOrderCounter}`;
-    const points = tier.amount + tier.bonus;
+    const points = tier.amount;
     const expireTime = new Date(Date.now() + 15 * 60 * 1000).toISOString();
     mockOrderPollCounts.set(tradeNo, 0);
     mockOrderMeta.set(tradeNo, { points, price: tier.price });
@@ -158,8 +158,9 @@ function mockDelay(ms: number): Promise<void> {
 function toTierDto(t: {
   id: string;
   amount: number;
+  originalPrice: number;
+  discount: number;
   price: number;
-  bonus: number;
   isRecommended: boolean;
   sortOrder: number;
 }): RechargeTierDto {
@@ -168,8 +169,8 @@ function toTierDto(t: {
     name: t.id,
     amount: t.amount,
     price: t.price,
-    original_price: null,
-    bonus: t.bonus,
+    original_price: t.originalPrice,
+    discount: t.discount,
     is_recommended: t.isRecommended,
     sort_order: t.sortOrder,
   };

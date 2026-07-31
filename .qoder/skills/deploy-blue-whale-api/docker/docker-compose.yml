@@ -13,6 +13,9 @@ services:
       - .env
     environment:
       - TZ=Asia/Shanghai
+      # 测试服放宽登录等关键接口限流（默认 20 次/20 分钟，多人联调会 429）。
+      # 生产环境应在生产 compose 单独配置更严格的值，而非继承此文件。
+      - CRITICAL_RATE_LIMIT=2000
     volumes:
       - ./data:/data
       - ./logs:/app/logs
