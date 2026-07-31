@@ -28,7 +28,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 
 const worker = start(
   process.execPath,
-  [".worker-dist/generation-worker.mjs"],
+  [".worker-dist/generation-worker.js"],
   webDir,
   {
     ...process.env,
