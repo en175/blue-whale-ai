@@ -492,7 +492,106 @@
 
 ## 票10 ⏳ 直生 轻量交付呈现（IK5LV0，blocked by 8）
 
-## 票11 ⏳ 拆解报告 / 结构配方卡 呈现（IK5LV3，blocked by 1）
+## 票11 ✅ 拆解报告 / 结构配方卡 呈现（[IK5LV3](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LV3)，blocked by 1）
+
+### 核心决策：一张合并卡（拆解报告 = 配方人读呈现）
+
+- 拆解报告与结构配方**合并为一张「拆解报告卡」**：配方 5 模块的人读呈现（hook/beats/卖点/节奏/cta）+ meta（confidence/uncertainties）。拆解报告就是配方的自然语言版，schema 字段（`references/structure-recipe-spec.md`）是其结构底座；分两张是冗余、用户看两遍。
+- 卡定位：复刻链路**第一道确认点产物**（票1 已列结构配方/拆解报告为出卡产物）——拆解完出卡 → 用户确认拆解准确 → 进复刻决策门（票13）。
+
+### 卡内布局：5 模块平铺分段
+
+对齐 `workflows/video-decode-replicate.md` 步骤3 现状文本（钩子/叙事/卖点/节奏/转化分段），改纯文本为结构化分段：
+
+| 段 | 内容 | 呈现 |
+|---|---|---|
+| ① 钩子 hook | type（人读名）+ content + timing | 一行 |
+| ② 叙事 narrative | pattern（人读名 + 对应 Skill 提示）+ beats 表 + total_duration | pattern 一行 + beats 表 |
+| ③ 卖点 selling_points[] | 每条 point + evidence_type + evidence + timing | 列表 |
+| ④ 节奏 pacing | overall + cut_density（整体级） | 一行 |
+| ⑤ 转化 cta[] | 每条 type + content + timing，primary 标主转化点 | 列表 |
+
+- **pattern 呈现**（票6 衔接）：叙事段标 pattern 人读名（如「痛点解决 problem_solution」）+「识别结构是 X，要改告诉我」（票6 拆解卡内 pattern 告知+可确认微调）。
+- **meta（source_video / decode_method）**：卡底小字区。
+
+### beats 可视化：纵向表格 + energy 并入
+
+叙事段内 beats 表，每拍一行：
+
+| timing | label | intent | energy |
+|---|---|---|---|
+| 0-3s | 痛点 | 引发共鸣 | 4 |
+
+- **energy_curve 并入 beats 表**（加 energy 列），避免与 pacing 段重复；pacing 段只留整体级（overall/cut_density）。
+- 双层：本地 markdown 表格 / 平台真卡同表（beats 在叙事段内，横向空间有限，不做横向甘特；前端可给 timing 加视觉条增强，非强制）。
+
+### confidence + uncertainties 披露
+
+- **卡顶 confidence 标签**：如「置信度：高/中/低」（醒目角标）。
+- **非 high 时卡内「⚠️ 待确认点」节**：列出 `uncertainties[]`，每条标「需你确认」，衔接复刻决策门（票13 逐条确认/纠正）。
+- **high 时不显该节**（uncertainties 空，不噪音）。
+- 双层：本地卡顶 `> 置信度：中` + 待确认节；平台卡顶角标 + 警示色列表。
+
+### 局部改 & 确认门衔接
+
+- **卡完全只读**：改走对话框自然语言说 → agent 更新对应段（套票2/5 卡只读范式）。
+- **纠正 uncertainties**：走复刻决策门（票13），不在此卡内联编辑。
+- **确认按钮**：卡底「确认拆解准确，进复刻决策」→ 推进到复刻决策门（票13：确认配方/选复刻度/绑定产品）。按钮文字 = 将执行动作（票2 范式）。
+
+### 双层映射（拆解报告卡）
+
+| 元素 | 本地 CC（markdown） | 平台 UI |
+|---|---|---|
+| 拆解报告卡 | 5 段平铺 + beats 表 + 卡顶置信度 + 卡底 meta + 卡底确认行 | 结构化真卡（只读，分段 + beats 表） |
+| beats 表 | markdown 表（timing/label/intent/energy） | 真卡同表（timing 可加视觉条） |
+| confidence | 卡顶 `> 置信度：中` | 卡顶角标/标签 |
+| uncertainties（非 high） | 「⚠️ 待确认点」节列表 | 警示色列表 |
+| pattern 告知 | 叙事段「识别结构是 X，要改告诉我」 | 叙事段字段 + 可改 |
+| 确认按钮 | 卡底「确认拆解准确，进复刻决策」 | 确认按钮（=将执行动作） |
+
+### 本地 markdown 模板样例
+
+**拆解报告卡（confidence=high）**
+````markdown
+> 置信度：高
+
+## 🔍 拆解报告
+**① 钩子**：痛点（夏天出门保温杯装冰水两小时就化了）· 0-3s
+**② 叙事**：痛点解决 problem_solution · 对应 Skill：problem-solution-commercial（要改告诉我）
+| timing | label | intent | energy |
+|---|---|---|---|
+| 0-3s | 痛点 | 引发共鸣 | 4 |
+| 3-8s | 方案 | 引出保温杯 | 3 |
+| 8-18s | 证据 | 6小时仍冰冷实测 | 5 |
+| 18-20s | CTA | 引导购买 | 4 |
+总时长 20s
+**③ 卖点**：6小时保冷（前后对比 · 实测冰块前后对比 · 8-18s）
+**④ 节奏**：快 · 切镜中密度
+**⑤ 转化**：购买「点击下方链接」· 18-20s ·【主转化点】
+_源：用户上传保温杯爆款片段 · 拆解方式：direct_multimodal_
+👉 确认拆解准确，进复刻决策；要改直接说。
+````
+
+**confidence=medium（带待确认节）**
+````markdown
+> 置信度：中
+
+## 🔍 拆解报告
+…（5 段同上）…
+
+### ⚠️ 待确认点
+- 第3拍「证据」evidence_type 推断为前后对比，但画面有产品特写，可能是视觉展示——需你确认
+- CTA timing 18-20s 不确定，可能更早出现
+👉 进复刻决策时逐条确认/纠正；或现在直接说。
+````
+
+### 编排源调和
+
+- `workflows/video-decode-replicate.md` 步骤3 拆解报告现状是**纯文本** → 改**结构化卡**（5 段平铺 + beats 表 + confidence/uncertainties 呈现 + 确认按钮衔接复刻决策门）→ 涌现修订工单（待开，改 video-decode-replicate.md）。
+- `references/structure-recipe-spec.md` 是机读 schema，**不改**（人读卡呈现归本规格）。
+- 其余（卡只读 / 确认按钮 / pattern 告知）已在票2/6 定，video-decode-replicate.md 据此对齐。
+
+→ 编排源修订待开工单（票11 涌现），map 收口后或就近单独开。
 
 ## 票12 ⏳ 视频理解过程呈现（IK5LV6，blocked by 4）
 
