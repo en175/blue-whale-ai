@@ -2,9 +2,10 @@
  * IK55VZ 商品卡 mock 链接导入解析(L0 纯函数,后端就绪前的确定性 mock)。
  *
  * parseProductUrl:同一 url 恒同输出(简单 hash 派生变体);images 为 4 张内联
- * SVG data-URL 占位图(不同色相渐变,合法 data URL,不依赖网络);
+ * SVG data-URL 占位图(共享 svgPlaceholder,不同色相渐变,合法 data URL,不依赖网络);
  * 空串/非法 url 走确定性兜底,不抛异常。
  */
+import { svgPlaceholder } from "./svgPlaceholder";
 
 /** 链接导入区空态显示的平台占位（IK5JV4 定稿：抖音/淘宝/天猫/京东/亚马逊，固定 5 个）。 */
 export const PRODUCT_PLATFORMS: { id: string; label: string }[] = [
@@ -26,12 +27,6 @@ function hashOf(s: string): number {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return h;
-}
-
-/** 内联 SVG 占位图(同 cardLibrary svgCover 思路,不同色相渐变)。 */
-function svgPlaceholder(hue: number, label: string): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},45%,28%)"/><stop offset="1" stop-color="hsl(${hue + 40},50%,16%)"/></linearGradient></defs><rect width="320" height="180" fill="url(#g)"/><text x="160" y="96" font-size="20" fill="rgba(255,255,255,0.75)" text-anchor="middle" font-family="sans-serif">${label}</text></svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
 const MOCK_CATEGORIES = [
