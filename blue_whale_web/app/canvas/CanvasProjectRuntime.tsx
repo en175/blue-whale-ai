@@ -57,14 +57,24 @@ import { CardLibraryPicker } from "./_canvas/components/CardLibraryPicker";
 import {
   cloneCardSnapshot,
   getCardLibraryAsset,
+  snapshotToNodeData,
   type CardLibraryItem,
 } from "./_canvas/cardLibrary";
 import {
   ASSET_LIBRARY_FLYOUT_ITEMS,
   AUDIO_FLYOUT_ITEMS,
+  PRODUCT_FLYOUT_ITEMS,
 } from "./_canvas/config";
 import { REFERENCE_CARD_WIDTH, referenceCardHeight } from "./_canvas/constants";
+import { newProductCardData } from "./_canvas/model";
 import type { ReferenceCardType } from "./_canvas/model";
+import {
+  mergeProductImageIds,
+  parseProductUrl,
+  productImportHydrationAssets,
+  productImportImageId,
+  productImportPatch,
+} from "./_canvas/productImport";
 import type { DockMediaItem, GenerateArgs, PrefillSignal } from "./_canvas";
 import type { CardMessage, ChatMessage } from "./_canvas";
 import { canonicalCanvasHref } from "./canonical-project";
@@ -187,8 +197,15 @@ export function CanvasProjectRuntime({
   /** 资产库按钮悬浮列表锚点（IK55VS）：语义同音频锚点。 */
   const [assetFlyoutAnchor, setAssetFlyoutAnchor] =
     useState<HTMLButtonElement | null>(null);
+  /** 商品卡按钮悬浮列表锚点（IK55VZ）：新建商品/导入商品。 */
+  const [productFlyoutAnchor, setProductFlyoutAnchor] =
+    useState<HTMLButtonElement | null>(null);
   /** 卡片库（共享资产）选择器开关（IK55VX）。 */
   const [cardPickerOpen, setCardPickerOpen] = useState(false);
+  /** 选择器类型筛选（IK55VZ「导入商品」传 ["product"]；资产库入口为 undefined=全部）。 */
+  const [cardPickerFilter, setCardPickerFilter] = useState<
+    ReferenceCardType[] | undefined
+  >(undefined);
   /** 悬浮列表点选 → BottomDock 音频子模式切换信号（仿 prefillSignal nonce 模式）。 */
   const [audioModeSignal, setAudioModeSignal] = useState<{
     nonce: number;
@@ -509,6 +526,16 @@ export function CanvasProjectRuntime({
       const source = nodes.find((n) => n.id === sourceNodeId);
       const assetId = source?.data.assetId;
       if (!source || !assetId) return;
+      const target = nodes.find((n) => n.id === refNodeId);
+      // IK55VZ 商品卡：追加进 imageAssetIds(≤8,满了不再追加)而非覆盖单槽
+      if (target?.data.cardType === "product") {
+        const merged = mergeProductImageIds(target.data.imageAssetIds, [
+          assetId,
+        ]);
+        if (merged.length !== (target.data.imageAssetIds?.length ?? 0))
+          patchNode(refNodeId, { imageAssetIds: merged });
+        return;
+      }
       const asset = assets[assetId];
       const aspect =
         asset?.width && asset.height
@@ -556,7 +583,6 @@ export function CanvasProjectRuntime({
       }
       try {
         const result = await uploadAsset(file, Number(pid), "image");
-        const aspect = await probeImageAspect(result.url);
         const assetId = String(result.id);
         addAsset({
           id: assetId,
@@ -564,6 +590,17 @@ export function CanvasProjectRuntime({
           src: result.url,
           source: "uploaded",
         });
+        // IK55VZ 商品卡:追加进 imageAssetIds(≤8)而非覆盖单槽(无需探测宽高比)
+        const target = nodes.find((n) => n.id === nodeId);
+        if (target?.data.cardType === "product") {
+          patchNode(nodeId, {
+            imageAssetIds: mergeProductImageIds(target.data.imageAssetIds, [
+              assetId,
+            ]),
+          });
+          return;
+        }
+        const aspect = await probeImageAspect(result.url);
         patchNode(nodeId, {
           referenceAssetId: assetId,
           referenceImageAspect: aspect,
@@ -572,7 +609,46 @@ export function CanvasProjectRuntime({
         toast.error(userFriendlyErrorMessage(err));
       }
     },
-    [pid, addAsset, patchNode],
+    [pid, nodes, addAsset, patchNode],
+  );
+
+  // IK55VZ 商品卡详情 commit：写回 detail
+  const handleEditProductDetail = useCallback(
+    (id: string, text: string) => {
+      patchNode(id, { detail: text });
+    },
+    [patchNode],
+  );
+
+  // IK55VZ 商品卡移除单张图：从 imageAssetIds 摘除(asset 保留在 store,画布其他引用不受影响)
+  const handleRemoveProductImage = useCallback(
+    (id: string, assetId: string) => {
+      const node = nodes.find((n) => n.id === id);
+      if (!node) return;
+      patchNode(id, {
+        imageAssetIds: (node.data.imageAssetIds ?? []).filter(
+          (a) => a !== assetId,
+        ),
+      });
+    },
+    [nodes, patchNode],
+  );
+
+  // IK55VZ 商品卡链接导入:mock 解析 → 注册 4 张图 assets(确定性 id,刷新后可重建) →
+  // 填充 imageAssetIds/detail/sourceUrl(名称仅当仍是「商品 N」自动编号或未填时才用解析名)
+  const handleImportProductLink = useCallback(
+    (id: string, url: string) => {
+      const node = nodes.find((n) => n.id === id);
+      if (!node) return;
+      const parsed = parseProductUrl(url);
+      const newIds = parsed.images.map((src, i) => {
+        const aid = productImportImageId(url, i);
+        addAsset({ id: aid, kind: "image", src, source: "uploaded" });
+        return aid;
+      });
+      patchNode(id, productImportPatch(node.data, parsed, url, newIds));
+    },
+    [nodes, addAsset, patchNode],
   );
 
   // IK55VH 富文本卡 @ 建议素材：画布内 image/video/audio 节点投影
@@ -941,6 +1017,9 @@ export function CanvasProjectRuntime({
       } else if (id === "asset-library") {
         // IK55VS：资产库按钮 toggle 悬浮列表（共享资产 + 五类参考卡）
         setAssetFlyoutAnchor((a) => (a ? null : (el ?? null)));
+      } else if (id === "product-card") {
+        // IK55VZ：商品卡按钮 toggle 悬浮列表（新建商品/导入商品）
+        setProductFlyoutAnchor((a) => (a ? null : (el ?? null)));
       } else if (id === "ai-image") {
         referenceGenTargetRef.current = null; // 工具栏开 Dock：解除参考卡生成目标
         setBottomDockMode("image");
@@ -967,22 +1046,53 @@ export function CanvasProjectRuntime({
     setIsBottomDockOpen(true);
   }, []);
 
+  /** IK55VZ 新建商品空卡:名称自动编号 + detail/imageAssetIds 默认,findPlacement 落视口中心。 */
+  const addEmptyProductCard = useCallback(() => {
+    addNode("reference", {
+      width: REFERENCE_CARD_WIDTH,
+      height: referenceCardHeight("product"),
+      data: newProductCardData(nodes),
+    });
+  }, [addNode, nodes]);
+
   /** 资产库悬浮列表点选（IK55VS/IK55VX）：共享资产=打开卡片库选择器；五类参考卡在视口中心起网格新增空卡。 */
   const handleAssetFlyoutSelect = useCallback(
     (id: string) => {
       setAssetFlyoutAnchor(null);
       if (id === "import") {
+        setCardPickerFilter(undefined);
         setCardPickerOpen(true);
         return;
       }
       const cardType = id as ReferenceCardType;
+      // IK55VZ：商品卡走专属新建（名称自动编号 + detail/imageAssetIds 默认）
+      if (cardType === "product") {
+        addEmptyProductCard();
+        return;
+      }
       addNode("reference", {
         width: REFERENCE_CARD_WIDTH,
         height: referenceCardHeight(cardType),
         data: { cardType },
       });
     },
-    [addNode],
+    [addNode, addEmptyProductCard],
+  );
+
+  /** 商品卡悬浮列表点选（IK55VZ）：新建商品=空卡落视口中心；导入商品=卡片库选择器限 product。 */
+  const handleProductFlyoutSelect = useCallback(
+    (id: string) => {
+      setProductFlyoutAnchor(null);
+      if (id === "new") {
+        addEmptyProductCard();
+        return;
+      }
+      if (id === "import") {
+        setCardPickerFilter(["product"]);
+        setCardPickerOpen(true);
+      }
+    },
+    [addEmptyProductCard],
   );
 
   /** 卡片库导入（IK55VX）：复制快照落画布——带图卡先登记独立 asset 再让节点引用，编辑不回写库。 */
@@ -1000,20 +1110,22 @@ export function CanvasProjectRuntime({
           });
         }
       }
+      // IK55VZ 商品卡多图:每个 snap asset 同样先登记再引用
+      for (const aid of snap.imageAssetIds ?? []) {
+        const asset = getCardLibraryAsset(aid);
+        if (asset) {
+          addAsset({
+            id: aid,
+            kind: "image",
+            src: asset.src,
+            source: "uploaded",
+          });
+        }
+      }
       addNode("reference", {
         width: REFERENCE_CARD_WIDTH,
         height: referenceCardHeight(snap.cardType),
-        data: {
-          cardType: snap.cardType,
-          name: snap.name,
-          description: snap.description,
-          ...(snap.referenceAssetId
-            ? {
-                referenceAssetId: snap.referenceAssetId,
-                referenceImageAspect: snap.referenceImageAspect,
-              }
-            : {}),
-        },
+        data: snapshotToNodeData(snap),
       });
       setCardPickerOpen(false);
     },
@@ -1023,11 +1135,19 @@ export function CanvasProjectRuntime({
   // IK55VX：mock 快照 asset 持久化重载后再水合（画布 JSON 只存 id,src 从 mock 注册表确定性重建）
   useEffect(() => {
     for (const n of nodes) {
-      const id = n.data.referenceAssetId;
-      if (!id || !id.startsWith("libimg-") || assets[id]) continue;
-      const a = getCardLibraryAsset(id);
-      if (a) addAsset({ id, kind: "image", src: a.src, source: "uploaded" });
+      // IK55VZ:商品卡多图(imageAssetIds)与单图参考卡(referenceAssetId)同通道水合
+      const ids = [
+        ...(n.data.referenceAssetId ? [n.data.referenceAssetId] : []),
+        ...(n.data.imageAssetIds ?? []),
+      ];
+      for (const id of ids) {
+        if (!id.startsWith("libimg-") || assets[id]) continue;
+        const a = getCardLibraryAsset(id);
+        if (a) addAsset({ id, kind: "image", src: a.src, source: "uploaded" });
+      }
     }
+    // IK55VZ:链接导入图(impimg-)按 sourceUrl 确定性重建缺失 asset
+    for (const a of productImportHydrationAssets(nodes, assets)) addAsset(a);
   }, [nodes, assets, addAsset]);
 
   /** 音频参考槽画布选取（IK55VM）：audioRef=音频节点，audioImageRef=图片节点。 */
@@ -1150,6 +1270,9 @@ export function CanvasProjectRuntime({
             onGenerateReferenceImage={handleGenerateReferenceImage}
             onRemoveReferenceImage={handleRemoveReferenceImage}
             onReferenceImageDrop={handleReferenceImageDrop}
+            onEditProductDetail={handleEditProductDetail}
+            onRemoveProductImage={handleRemoveProductImage}
+            onImportProductLink={handleImportProductLink}
             mentionItems={textMentionItems}
             picking={pickingFor !== null}
             pickingAccept={pickingFor ? dockAccept(pickingFor) : undefined}
@@ -1191,11 +1314,21 @@ export function CanvasProjectRuntime({
         onClose={() => setAssetFlyoutAnchor(null)}
         ariaLabel="资产库"
       />
+      {/* 商品卡按钮悬浮列表（IK55VZ）：新建商品(空卡) / 导入商品(卡片库选择器限 product) */}
+      <ToolbarFlyout
+        open={productFlyoutAnchor !== null}
+        anchor={productFlyoutAnchor}
+        items={PRODUCT_FLYOUT_ITEMS}
+        onSelect={handleProductFlyoutSelect}
+        onClose={() => setProductFlyoutAnchor(null)}
+        ariaLabel="商品卡"
+      />
       {/* 卡片库（共享资产）选择器（IK55VX）：导入=复制快照，编辑不回写库 */}
       {cardPickerOpen && (
         <CardLibraryPicker
           onClose={() => setCardPickerOpen(false)}
           onImport={handleCardLibraryImport}
+          cardTypeFilter={cardPickerFilter}
         />
       )}
       {pickingFor && (

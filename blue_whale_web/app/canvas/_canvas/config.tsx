@@ -22,6 +22,7 @@ import {
   Mountain,
   MousePointer2,
   Music,
+  Package,
   Paintbrush,
   Palette,
   PenLine,
@@ -99,6 +100,19 @@ export const LEFT_TOOLS: ToolDef[] = [
     label: "资产库",
     icon: (
       <Library
+        width={20}
+        height={20}
+        stroke="rgba(255, 255, 255, 0.8)"
+        strokeWidth={1.5}
+      />
+    ),
+  },
+  {
+    // IK55VZ：商品卡按钮(toggle 悬浮列表:新建商品/导入商品)
+    id: "product-card",
+    label: "商品卡",
+    icon: (
+      <Package
         width={20}
         height={20}
         stroke="rgba(255, 255, 255, 0.8)"
@@ -189,6 +203,14 @@ const ASSET_LIBRARY_FLYOUT_ICONS: Record<string, ReactNode> = {
       strokeWidth={1.8}
     />
   ),
+  product: (
+    <Package
+      width={15}
+      height={15}
+      stroke="rgba(255, 255, 255, 0.7)"
+      strokeWidth={1.8}
+    />
+  ),
 };
 export const ASSET_LIBRARY_FLYOUT_ITEMS: ToolbarFlyoutItem[] = [
   {
@@ -201,6 +223,38 @@ export const ASSET_LIBRARY_FLYOUT_ITEMS: ToolbarFlyoutItem[] = [
     label: t.flyoutLabel,
     icon: ASSET_LIBRARY_FLYOUT_ICONS[t.id],
   })),
+];
+
+/**
+ * 商品卡按钮悬浮列表清单（IK55VZ）：新建商品(空卡落视口中心)/导入商品(卡片库选择器
+ * cardTypeFilter=["product"])。文案与 constants.REFERENCE_CARD_TYPES product meta 同源。
+ */
+const PRODUCT_META = REFERENCE_CARD_TYPES.find((t) => t.id === "product")!;
+export const PRODUCT_FLYOUT_ITEMS: ToolbarFlyoutItem[] = [
+  {
+    id: "new",
+    label: PRODUCT_META.flyoutLabel,
+    icon: (
+      <SquarePlus
+        width={15}
+        height={15}
+        stroke="rgba(255, 255, 255, 0.7)"
+        strokeWidth={1.8}
+      />
+    ),
+  },
+  {
+    id: "import",
+    label: PRODUCT_META.flyoutImportLabel ?? "导入商品",
+    icon: (
+      <Download
+        width={15}
+        height={15}
+        stroke="rgba(255, 255, 255, 0.7)"
+        strokeWidth={1.8}
+      />
+    ),
+  },
 ];
 export const NODE_TOOLBAR_ACTIONS = [
   {

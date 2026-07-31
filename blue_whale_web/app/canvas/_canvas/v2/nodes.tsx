@@ -20,6 +20,7 @@ import {
   Info,
   Loader2,
   Music,
+  Package,
   Pause,
   Play,
   Plus,
@@ -65,6 +66,11 @@ import {
 } from "../config";
 import { AuthenticatedImage } from "../components/AuthenticatedImage";
 import { UploadCardBody } from "./uploadCard";
+import {
+  ProductDetailSection,
+  ProductImageSection,
+  ProductLinkImportSection,
+} from "./product-card-sections";
 import { EditorContent } from "@tiptap/react";
 import { useRichEditor, plainTextToDoc } from "./text/RichTextEditor";
 import { TextFormatToolbar } from "./text/TextFormatToolbar";
@@ -99,6 +105,12 @@ type NodeActionsCtx = {
   onRemoveReferenceImage?: (id: string) => void;
   /** IK55VT 通道一画布拖入：正被拖拽素材命中的参考卡 id（高亮落槽提示）。 */
   referenceDropTargetId?: string | null;
+  /** IK55VZ 商品卡详情 commit：写回 detail。 */
+  onEditProductDetail?: (id: string, text: string) => void;
+  /** IK55VZ 商品卡移除单张图：从 imageAssetIds 摘除 assetId。 */
+  onRemoveProductImage?: (id: string, assetId: string) => void;
+  /** IK55VZ 商品卡链接导入：runtime mock 解析填充图片/详情/来源链接。 */
+  onImportProductLink?: (id: string, url: string) => void;
   /** IK55VH 富文本卡 @ 建议素材列表。 */
   mentionItems?: TextMentionItem[];
   picking?: boolean;
@@ -964,13 +976,20 @@ export function ReferenceNode({
     onGenerateReferenceImage,
     onRemoveReferenceImage,
     referenceDropTargetId,
+    onEditProductDetail,
+    onRemoveProductImage,
+    onImportProductLink,
   } = useContext(NodeActionsContext);
   const refAsset = useCanvasStore((s) =>
     d.referenceAssetId ? s.assets[d.referenceAssetId] : undefined,
   );
+  /** IK55VZ 商品卡多图:imageAssetIds → store.assets 解析 src(整 map 选择,引用稳定)。 */
+  const assetsMap = useCanvasStore((s) => s.assets);
   const [editingDesc, setEditingDesc] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [replaceMenuOpen, setReplaceMenuOpen] = useState(false);
+  /** IK55VZ 商品卡 chrome 悬停态(selected || hovered 浮出「商品」标签 + 「@ 添加到对话」胶囊)。 */
+  const [hovered, setHovered] = useState(false);
   /** Esc 取消标记：置位后 blur 不 commit（Esc=取消，失焦=保存）。 */
   const cancelDescRef = useRef(false);
   const cancelNameRef = useRef(false);
@@ -981,39 +1000,90 @@ export function ReferenceNode({
   const showDescription = hasImage || !emptyDesc;
   const name = d.name ?? meta.label;
   const isCharacter = cardType === "character";
+  const isProduct = cardType === "product";
+  const productImages = (d.imageAssetIds ?? []).map((aid) => ({
+    id: aid,
+    src: assetsMap[aid]?.src,
+  }));
   const dropHighlight = referenceDropTargetId === id;
   const cardWidth = width ?? REFERENCE_CARD_WIDTH;
   const aspect = d.referenceImageAspect;
   return (
     <>
-      {/* chrome：选中时顶部居中 @ 按钮（IK55VT 预留，点击无引用行为） */}
-      <NodeToolbar position={Position.Top} offset={8} isVisible={selected}>
-        <button
-          type="button"
-          aria-label="引用卡片"
-          className="nodrag flex items-center justify-center rounded-full"
+      {/* chrome：选中时顶部居中 @ 按钮（IK55VT 预留，点击无引用行为）；商品卡用自己的浮出层(见下) */}
+      {!isProduct && (
+        <NodeToolbar position={Position.Top} offset={8} isVisible={selected}>
+          <button
+            type="button"
+            aria-label="引用卡片"
+            className="nodrag flex items-center justify-center rounded-full"
+            style={{
+              width: 28,
+              height: 28,
+              background: "var(--tc-bg-elevated)",
+              border: "1px solid var(--tc-border-subtle)",
+              color: "var(--tc-text-secondary)",
+            }}
+            onClick={() => {
+              /* 预留：@ 引用行为属后续工单 */
+            }}
+          >
+            <AtSign width={13} height={13} />
+          </button>
+        </NodeToolbar>
+      )}
+      {/* IK55VZ 商品卡 chrome(原型定稿):选中或悬停浮出——左上「商品」标签 + 居中「@ 添加到对话」胶囊(预留无行为) */}
+      {isProduct && (
+        <div
+          data-testid="product-chrome"
+          className="nodrag absolute -top-10 right-0 left-0 z-10 flex items-center transition-opacity duration-150"
           style={{
-            width: 28,
-            height: 28,
-            background: "var(--tc-bg-elevated)",
-            border: "1px solid var(--tc-border-subtle)",
-            color: "var(--tc-text-secondary)",
-          }}
-          onClick={() => {
-            /* 预留：@ 引用行为属后续工单 */
+            opacity: selected || hovered ? 1 : 0,
+            pointerEvents: selected || hovered ? "auto" : "none",
           }}
         >
-          <AtSign width={13} height={13} />
-        </button>
-      </NodeToolbar>
+          <span
+            className="flex items-center gap-1 text-xs"
+            style={{ color: "var(--tc-text-secondary)" }}
+          >
+            <Package width={12} height={12} />
+            商品
+          </span>
+          <button
+            type="button"
+            aria-label="@ 添加到对话"
+            className="absolute left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs"
+            style={{
+              background: "var(--tc-bg-elevated)",
+              border: "1px solid var(--tc-border-subtle)",
+              color: "var(--tc-text-secondary)",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+            }}
+            onClick={() => {
+              /* 预留：@ 引用行为属后续工单 */
+            }}
+          >
+            <AtSign width={12} height={12} />
+            添加到对话
+          </button>
+        </div>
+      )}
       <div
         className="tc-reference-node relative flex flex-col overflow-hidden rounded-xl"
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={() => setHovered(false)}
         style={{
           width: cardWidth,
-          // 已填态高度内容驱动（图高随宽高比）；空/留史态用持久高度或默认
-          height: hasImage
+          // 已填态高度内容驱动（图高随宽高比）；空/留史态用持久高度或默认；
+          // IK55VZ 商品卡:内容驱动 + minHeight 兜底(新建落点 560)
+          height: isProduct
             ? undefined
-            : (height ?? referenceCardHeight(cardType)),
+            : hasImage
+              ? undefined
+              : (height ?? referenceCardHeight(cardType)),
+          minHeight: isProduct
+            ? (height ?? referenceCardHeight(cardType))
+            : undefined,
           outline: dropHighlight
             ? "2px solid var(--tc-accent)"
             : selected
@@ -1025,24 +1095,26 @@ export function ReferenceNode({
         }}
       >
         <NodeHandles kind="reference" />
-        {/* 头部:@ 圆 chip + 卡名（默认=类型名，双击改名） */}
+        {/* 头部:@ 圆 chip + 卡名（默认=类型名，双击改名）；商品卡按原型 28px chip + 大号粗体 */}
         <div className="flex items-center gap-2 px-3 pt-3">
           <span
-            className="flex items-center justify-center rounded-full"
+            className="flex shrink-0 items-center justify-center rounded-full"
             style={{
-              width: 20,
-              height: 20,
+              width: isProduct ? 28 : 20,
+              height: isProduct ? 28 : 20,
               background: "var(--tc-bg-elevated)",
               color: "var(--tc-text-tertiary)",
             }}
           >
-            <AtSign width={11} height={11} />
+            <AtSign width={isProduct ? 14 : 11} height={isProduct ? 14 : 11} />
           </span>
           {editingName ? (
             <input
               autoFocus
               defaultValue={name}
-              className="nodrag nowheel w-full bg-transparent text-sm font-semibold outline-none"
+              className={`nodrag nowheel w-full bg-transparent outline-none ${
+                isProduct ? "text-base font-bold" : "text-sm font-semibold"
+              }`}
               style={{ color: "var(--tc-text-primary)" }}
               onBlur={(e) => {
                 if (!cancelNameRef.current)
@@ -1062,7 +1134,9 @@ export function ReferenceNode({
           ) : (
             <span
               onDoubleClick={() => setEditingName(true)}
-              className="text-sm font-semibold"
+              className={`truncate ${
+                isProduct ? "text-base font-bold" : "text-sm font-semibold"
+              }`}
               style={{ color: "var(--tc-text-primary)", cursor: "text" }}
             >
               {name}
@@ -1070,121 +1144,197 @@ export function ReferenceNode({
           )}
         </div>
 
-        {/* 描述区（有图或留史时存在）：顶部左对齐，双击就地编辑 */}
-        {showDescription &&
-          (editingDesc ? (
-            <textarea
-              autoFocus
-              defaultValue={description}
-              placeholder={meta.placeholder}
-              rows={3}
-              onBlur={(e) => {
-                if (!cancelDescRef.current)
-                  onEditDescription?.(id, e.target.value);
-                cancelDescRef.current = false;
-                setEditingDesc(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  cancelDescRef.current = true;
-                  e.currentTarget.blur();
-                }
-              }}
-              className="nodrag nowheel mx-3 mt-2 resize-none bg-transparent text-xs leading-normal outline-none"
-              style={{ color: "var(--tc-text-primary)" }}
+        {isProduct ? (
+          /* IK55VZ 商品卡:图片区 + 详情区 + 「从商品链接导入」折叠区(原型纵向三段);
+             不渲染单图槽/三按钮空态/替换菜单 */
+          <>
+            <ProductImageSection
+              images={productImages}
+              onAdd={() => onUploadReferenceImage?.(id)}
+              onRemove={(assetId) => onRemoveProductImage?.(id, assetId)}
             />
-          ) : (
+            <ProductDetailSection
+              detail={d.detail ?? ""}
+              placeholder={meta.placeholder}
+              onCommit={(text) => onEditProductDetail?.(id, text)}
+            />
             <div
-              onDoubleClick={() => setEditingDesc(true)}
-              className="mx-3 mt-2 text-xs leading-normal"
-              style={{
-                color: emptyDesc
-                  ? "var(--tc-text-muted)"
-                  : "var(--tc-text-primary)",
-                whiteSpace: "pre-wrap",
-                cursor: "text",
-              }}
-            >
-              {emptyDesc ? meta.placeholder : description}
-            </div>
-          ))}
-        {showDescription && (
-          <div
-            className="mx-3 mt-2"
-            style={{ borderTop: "1px solid var(--tc-border-subtle)" }}
-          />
-        )}
-
-        {hasImage ? (
-          /* 已填态：大图（宽撑满、高按宽高比、不裁剪）+ 悬停替换/删除 */
-          <div className="px-3 pb-3 pt-2">
-            <div
-              className="group relative overflow-hidden rounded-lg"
-              style={{
-                border: "1px solid var(--tc-border-subtle)",
-                background: "var(--tc-bg-elevated)",
-              }}
-            >
-              {refAsset?.src ? (
-                // eslint-disable-next-line @next/next/no-img-element -- asset src 为签名 URL，不交 next/image 优化器
-                <img
-                  src={refAsset.src}
-                  alt={name}
-                  className="nodrag block w-full"
-                  style={{
-                    aspectRatio: aspect ? String(aspect) : undefined,
-                    objectFit: aspect ? "cover" : undefined,
+              className="mx-3 mt-2"
+              style={{ borderTop: "1px solid var(--tc-border-subtle)" }}
+            />
+            <ProductLinkImportSection
+              initialUrl={d.sourceUrl}
+              onImport={(url) => onImportProductLink?.(id, url)}
+            />
+          </>
+        ) : (
+          <>
+            {/* 描述区（有图或留史时存在）：顶部左对齐，双击就地编辑 */}
+            {showDescription &&
+              (editingDesc ? (
+                <textarea
+                  autoFocus
+                  defaultValue={description}
+                  placeholder={meta.placeholder}
+                  rows={3}
+                  onBlur={(e) => {
+                    if (!cancelDescRef.current)
+                      onEditDescription?.(id, e.target.value);
+                    cancelDescRef.current = false;
+                    setEditingDesc(false);
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      cancelDescRef.current = true;
+                      e.currentTarget.blur();
+                    }
+                  }}
+                  className="nodrag nowheel mx-3 mt-2 resize-none bg-transparent text-xs leading-normal outline-none"
+                  style={{ color: "var(--tc-text-primary)" }}
                 />
               ) : (
                 <div
+                  onDoubleClick={() => setEditingDesc(true)}
+                  className="mx-3 mt-2 text-xs leading-normal"
                   style={{
-                    width: "100%",
-                    aspectRatio: aspect ? String(aspect) : "16/9",
+                    color: emptyDesc
+                      ? "var(--tc-text-muted)"
+                      : "var(--tc-text-primary)",
+                    whiteSpace: "pre-wrap",
+                    cursor: "text",
                   }}
-                />
-              )}
-              <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                <button
-                  type="button"
-                  aria-label="替换参考图"
-                  className="nodrag flex items-center justify-center rounded-md"
-                  style={{
-                    width: 24,
-                    height: 24,
-                    background: "var(--tc-bg-elevated)",
-                    border: "1px solid var(--tc-border-subtle)",
-                    color: "var(--tc-text-secondary)",
-                  }}
-                  onClick={() => setReplaceMenuOpen((v) => !v)}
                 >
-                  <RefreshCw width={12} height={12} />
-                </button>
-                <button
-                  type="button"
-                  aria-label="删除参考图"
-                  className="nodrag flex items-center justify-center rounded-md"
-                  style={{
-                    width: 24,
-                    height: 24,
-                    background: "var(--tc-bg-elevated)",
-                    border: "1px solid var(--tc-border-subtle)",
-                    color: "var(--tc-text-secondary)",
-                  }}
-                  onClick={() => onRemoveReferenceImage?.(id)}
-                >
-                  <X width={12} height={12} />
-                </button>
-              </div>
-              {replaceMenuOpen && (
+                  {emptyDesc ? meta.placeholder : description}
+                </div>
+              ))}
+            {showDescription && (
+              <div
+                className="mx-3 mt-2"
+                style={{ borderTop: "1px solid var(--tc-border-subtle)" }}
+              />
+            )}
+
+            {hasImage ? (
+              /* 已填态：大图（宽撑满、高按宽高比、不裁剪）+ 悬停替换/删除 */
+              <div className="px-3 pb-3 pt-2">
                 <div
-                  role="menu"
-                  className="nodrag absolute right-2 top-9 flex flex-col overflow-hidden rounded-md"
+                  className="group relative overflow-hidden rounded-lg"
                   style={{
-                    background: "var(--tc-bg-elevated)",
                     border: "1px solid var(--tc-border-subtle)",
+                    background: "var(--tc-bg-elevated)",
                   }}
                 >
+                  {refAsset?.src ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- asset src 为签名 URL，不交 next/image 优化器
+                    <img
+                      src={refAsset.src}
+                      alt={name}
+                      className="nodrag block w-full"
+                      style={{
+                        aspectRatio: aspect ? String(aspect) : undefined,
+                        objectFit: aspect ? "cover" : undefined,
+                      }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        width: "100%",
+                        aspectRatio: aspect ? String(aspect) : "16/9",
+                      }}
+                    />
+                  )}
+                  <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                    <button
+                      type="button"
+                      aria-label="替换参考图"
+                      className="nodrag flex items-center justify-center rounded-md"
+                      style={{
+                        width: 24,
+                        height: 24,
+                        background: "var(--tc-bg-elevated)",
+                        border: "1px solid var(--tc-border-subtle)",
+                        color: "var(--tc-text-secondary)",
+                      }}
+                      onClick={() => setReplaceMenuOpen((v) => !v)}
+                    >
+                      <RefreshCw width={12} height={12} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="删除参考图"
+                      className="nodrag flex items-center justify-center rounded-md"
+                      style={{
+                        width: 24,
+                        height: 24,
+                        background: "var(--tc-bg-elevated)",
+                        border: "1px solid var(--tc-border-subtle)",
+                        color: "var(--tc-text-secondary)",
+                      }}
+                      onClick={() => onRemoveReferenceImage?.(id)}
+                    >
+                      <X width={12} height={12} />
+                    </button>
+                  </div>
+                  {replaceMenuOpen && (
+                    <div
+                      role="menu"
+                      className="nodrag absolute right-2 top-9 flex flex-col overflow-hidden rounded-md"
+                      style={{
+                        background: "var(--tc-bg-elevated)",
+                        border: "1px solid var(--tc-border-subtle)",
+                      }}
+                    >
+                      {(
+                        [
+                          {
+                            icon: <Upload width={12} height={12} />,
+                            label: "添加图片",
+                            run: onUploadReferenceImage,
+                          },
+                          {
+                            icon: <Sparkles width={12} height={12} />,
+                            label: "生成图片",
+                            run: onGenerateReferenceImage,
+                          },
+                        ] as const
+                      ).map((item) => (
+                        <button
+                          key={item.label}
+                          type="button"
+                          role="menuitem"
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs"
+                          style={{ color: "var(--tc-text-secondary)" }}
+                          onClick={() => {
+                            setReplaceMenuOpen(false);
+                            item.run?.(id);
+                          }}
+                        >
+                          {item.icon}
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* 空卡/留史态：居中栈（占位文案仅全新空卡显示，静态不可编辑） */
+              <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-5">
+                <span
+                  className="text-[13px]"
+                  style={{ color: "var(--tc-text-secondary)" }}
+                >
+                  从画布拖入
+                </span>
+                {!showDescription && (
+                  <span
+                    className="text-center text-xs leading-normal"
+                    style={{ color: "var(--tc-text-muted)" }}
+                  >
+                    {meta.placeholder}
+                  </span>
+                )}
+                <div className="flex gap-2">
                   {(
                     [
                       {
@@ -1198,132 +1348,83 @@ export function ReferenceNode({
                         run: onGenerateReferenceImage,
                       },
                     ] as const
-                  ).map((item) => (
+                  ).map((b) => (
                     <button
-                      key={item.label}
+                      key={b.label}
                       type="button"
-                      role="menuitem"
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs"
-                      style={{ color: "var(--tc-text-secondary)" }}
-                      onClick={() => {
-                        setReplaceMenuOpen(false);
-                        item.run?.(id);
+                      className="nodrag flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs"
+                      style={{
+                        border: "1px solid var(--tc-border-subtle)",
+                        background: "var(--tc-bg-elevated)",
+                        color: "var(--tc-text-secondary)",
                       }}
+                      onClick={() => b.run?.(id)}
                     >
-                      {item.icon}
-                      {item.label}
+                      {b.icon}
+                      {b.label}
                     </button>
                   ))}
                 </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          /* 空卡/留史态：居中栈（占位文案仅全新空卡显示，静态不可编辑） */
-          <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-5">
-            <span
-              className="text-[13px]"
-              style={{ color: "var(--tc-text-secondary)" }}
-            >
-              从画布拖入
-            </span>
-            {!showDescription && (
-              <span
-                className="text-center text-xs leading-normal"
-                style={{ color: "var(--tc-text-muted)" }}
-              >
-                {meta.placeholder}
-              </span>
+                <span
+                  className="flex items-center gap-1 text-[11px]"
+                  style={{ color: "var(--tc-text-muted)" }}
+                >
+                  <Info width={10} height={10} />1 张参考图
+                </span>
+              </div>
             )}
-            <div className="flex gap-2">
-              {(
-                [
-                  {
-                    icon: <Upload width={12} height={12} />,
-                    label: "添加图片",
-                    run: onUploadReferenceImage,
-                  },
-                  {
-                    icon: <Sparkles width={12} height={12} />,
-                    label: "生成图片",
-                    run: onGenerateReferenceImage,
-                  },
-                ] as const
-              ).map((b) => (
-                <button
-                  key={b.label}
-                  type="button"
-                  className="nodrag flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs"
-                  style={{
-                    border: "1px solid var(--tc-border-subtle)",
-                    background: "var(--tc-bg-elevated)",
-                    color: "var(--tc-text-secondary)",
-                  }}
-                  onClick={() => b.run?.(id)}
-                >
-                  {b.icon}
-                  {b.label}
-                </button>
-              ))}
-            </div>
-            <span
-              className="flex items-center gap-1 text-[11px]"
-              style={{ color: "var(--tc-text-muted)" }}
-            >
-              <Info width={10} height={10} />1 张参考图
-            </span>
-          </div>
-        )}
 
-        {/* character 独有:音色区（mock：常显虚线框，悬停展开上传态；选择器数据后续） */}
-        {isCharacter && (
-          <div
-            className="px-3 pb-3 pt-2"
-            style={{ borderTop: "1px solid var(--tc-border-subtle)" }}
-          >
-            <div
-              className="mb-1.5 flex items-center gap-1 text-[11px]"
-              style={{ color: "var(--tc-text-tertiary)" }}
-            >
-              <Music width={11} height={11} />
-              音色
-            </div>
-            <div className="group">
+            {/* character 独有:音色区（mock：常显虚线框，悬停展开上传态；选择器数据后续） */}
+            {isCharacter && (
               <div
-                className="flex h-9 items-center justify-center gap-1.5 rounded-lg text-xs group-hover:hidden"
-                style={{
-                  border: "1px dashed var(--tc-border-subtle)",
-                  background: "var(--tc-bg-elevated)",
-                  color: "var(--tc-text-tertiary)",
-                }}
+                className="px-3 pb-3 pt-2"
+                style={{ borderTop: "1px solid var(--tc-border-subtle)" }}
               >
-                <Music width={12} height={12} />
-                设置角色音色
-              </div>
-              <div
-                className="hidden flex-col items-center justify-center gap-1.5 rounded-lg px-2 py-2 group-hover:flex"
-                style={{
-                  border: "1px dashed var(--tc-border-subtle)",
-                  background: "var(--tc-bg-elevated)",
-                  color: "var(--tc-text-tertiary)",
-                }}
-              >
-                <span className="text-xs">从画布拖入音频</span>
-                <button
-                  type="button"
-                  className="nodrag flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs"
-                  style={{
-                    border: "1px solid var(--tc-border-subtle)",
-                    color: "var(--tc-text-secondary)",
-                  }}
+                <div
+                  className="mb-1.5 flex items-center gap-1 text-[11px]"
+                  style={{ color: "var(--tc-text-tertiary)" }}
                 >
-                  <Upload width={12} height={12} />
-                  上传音色音频
-                </button>
-                <span className="text-[10px]">2–15.2 秒 · 建议 ≤ 5 秒</span>
+                  <Music width={11} height={11} />
+                  音色
+                </div>
+                <div className="group">
+                  <div
+                    className="flex h-9 items-center justify-center gap-1.5 rounded-lg text-xs group-hover:hidden"
+                    style={{
+                      border: "1px dashed var(--tc-border-subtle)",
+                      background: "var(--tc-bg-elevated)",
+                      color: "var(--tc-text-tertiary)",
+                    }}
+                  >
+                    <Music width={12} height={12} />
+                    设置角色音色
+                  </div>
+                  <div
+                    className="hidden flex-col items-center justify-center gap-1.5 rounded-lg px-2 py-2 group-hover:flex"
+                    style={{
+                      border: "1px dashed var(--tc-border-subtle)",
+                      background: "var(--tc-bg-elevated)",
+                      color: "var(--tc-text-tertiary)",
+                    }}
+                  >
+                    <span className="text-xs">从画布拖入音频</span>
+                    <button
+                      type="button"
+                      className="nodrag flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs"
+                      style={{
+                        border: "1px solid var(--tc-border-subtle)",
+                        color: "var(--tc-text-secondary)",
+                      }}
+                    >
+                      <Upload width={12} height={12} />
+                      上传音色音频
+                    </button>
+                    <span className="text-[10px]">2–15.2 秒 · 建议 ≤ 5 秒</span>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            )}
+          </>
         )}
       </div>
     </>

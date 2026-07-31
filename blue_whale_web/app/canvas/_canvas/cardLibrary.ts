@@ -7,7 +7,7 @@
  * 「移除资产」:removeCardLibraryItem 从 mock 库删除(内存态,刷新页面还原)。
  * 复用:商品卡导入(IK55VZ)直接以 listCardLibrary({ cardType: "product" }) 复用本模块。
  */
-import type { ReferenceCardType } from "./model";
+import type { CanvasNodeData, ReferenceCardType } from "./model";
 
 export interface CardLibraryItem {
   id: string;
@@ -18,6 +18,12 @@ export interface CardLibraryItem {
   imageAssetId?: string;
   /** 角色卡音色(选择器数据 mock 先行,与 IK55VS 音色区一致) */
   voiceId?: string;
+  /** IK55VZ 商品卡详情文本(名称/品类/参数/卖点/人群) */
+  detail?: string;
+  /** IK55VZ 商品卡图片 asset id 列表(≤8;查 MOCK_CARD_LIBRARY_ASSETS) */
+  imageAssetIds?: string[];
+  /** IK55VZ 商品卡来源链接 */
+  sourceUrl?: string;
   /** 创建日期(截图卡片显示,YYYY-MM-DD) */
   createdAt: string;
 }
@@ -29,6 +35,7 @@ export const CARD_LIBRARY_TYPE_LABELS: Record<ReferenceCardType, string> = {
   object: "物体",
   environment: "环境",
   custom: "自定义",
+  product: "商品",
 };
 
 /** mock 图 asset:内联 data-URL SVG 占位图(无网络依赖,测试/e2e 可跑)。 */
@@ -48,6 +55,11 @@ export const MOCK_CARD_LIBRARY_ASSETS: Record<string, CardLibraryAsset> = {
   "libimg-c1": { src: svgCover(45, "角色 · Apollo"), aspect: 320 / 180 },
   "libimg-o1": { src: svgCover(40, "物体 · 相机"), aspect: 320 / 180 },
   "libimg-e1": { src: svgCover(20, "环境 · 日出"), aspect: 320 / 180 },
+  // IK55VZ 商品卡 mock 图(同一 svgCover 生成方式)
+  "libimg-p1": { src: svgCover(200, "商品 · 音箱主图"), aspect: 320 / 180 },
+  "libimg-p2": { src: svgCover(160, "商品 · 音箱细节"), aspect: 320 / 180 },
+  "libimg-p3": { src: svgCover(120, "商品 · 音箱场景"), aspect: 320 / 180 },
+  "libimg-p4": { src: svgCover(90, "商品 · 露营灯"), aspect: 320 / 180 },
 };
 
 const MOCK_CARDS: CardLibraryItem[] = [
@@ -114,6 +126,26 @@ const MOCK_CARDS: CardLibraryItem[] = [
     description: "主色 #6E56CF,禁用纯黑背景",
     createdAt: "2026-07-15",
   },
+  {
+    id: "lib-p1",
+    cardType: "product",
+    name: "户外蓝牙音箱",
+    description: "露营氛围灯便携音箱",
+    detail:
+      "品类:便携蓝牙音箱\n核心参数:40h 续航 · IPX7 防水 · 360° 声场\n卖点:露营氛围灯 / 双机串联\n目标人群:18–35 岁户外爱好者",
+    imageAssetIds: ["libimg-p1", "libimg-p2", "libimg-p3"],
+    sourceUrl: "https://example.com/item/speaker-42",
+    createdAt: "2026-07-29",
+  },
+  {
+    id: "lib-p2",
+    cardType: "product",
+    name: "露营氛围灯",
+    description: "暖光多档调光露营灯",
+    detail: "品类:露营灯\n核心参数:1200lm · Type-C 充电",
+    sourceUrl: "https://example.com/item/lamp-7",
+    createdAt: "2026-07-26",
+  },
 ];
 
 /** 可变内存库(支持「移除资产」);初始=MOCK_CARDS 副本。 */
@@ -163,6 +195,10 @@ export interface CardSnapshot {
   voiceId?: string;
   referenceAssetId?: string;
   referenceImageAspect?: number;
+  /** IK55VZ 商品卡:详情/多图(新 snap id 数组)/来源链接 */
+  detail?: string;
+  imageAssetIds?: string[];
+  sourceUrl?: string;
 }
 
 export function cloneCardSnapshot(item: CardLibraryItem): CardSnapshot {
@@ -172,6 +208,8 @@ export function cloneCardSnapshot(item: CardLibraryItem): CardSnapshot {
     description: item.description,
   };
   if (item.voiceId) snap.voiceId = item.voiceId;
+  if (item.detail != null) snap.detail = item.detail;
+  if (item.sourceUrl != null) snap.sourceUrl = item.sourceUrl;
   if (item.imageAssetId) {
     const source = MOCK_CARD_LIBRARY_ASSETS[item.imageAssetId];
     if (source) {
@@ -181,5 +219,40 @@ export function cloneCardSnapshot(item: CardLibraryItem): CardSnapshot {
       snap.referenceImageAspect = source.aspect;
     }
   }
+  // IK55VZ 商品卡多图:每个 asset 复制为独立新 snap id(同单图注册表模式)
+  if (item.imageAssetIds) {
+    snap.imageAssetIds = item.imageAssetIds.flatMap((srcId) => {
+      const source = MOCK_CARD_LIBRARY_ASSETS[srcId];
+      if (!source) return [];
+      const newId = `${srcId}-snap-${crypto.randomUUID()}`;
+      assetRegistry.set(newId, { ...source });
+      return [newId];
+    });
+  }
   return snap;
+}
+
+/**
+ * 快照 → 画布节点 data(IK55VX/IK55VZ 导入分发共用):
+ * 基础字段全带;单图卡带 referenceAssetId/Aspect;商品卡带 detail/imageAssetIds/sourceUrl。
+ */
+export function snapshotToNodeData(
+  snap: CardSnapshot,
+): Partial<CanvasNodeData> & {
+  cardType: ReferenceCardType;
+} {
+  return {
+    cardType: snap.cardType,
+    name: snap.name,
+    description: snap.description,
+    ...(snap.referenceAssetId
+      ? {
+          referenceAssetId: snap.referenceAssetId,
+          referenceImageAspect: snap.referenceImageAspect,
+        }
+      : {}),
+    ...(snap.detail != null ? { detail: snap.detail } : {}),
+    ...(snap.imageAssetIds ? { imageAssetIds: [...snap.imageAssetIds] } : {}),
+    ...(snap.sourceUrl != null ? { sourceUrl: snap.sourceUrl } : {}),
+  };
 }

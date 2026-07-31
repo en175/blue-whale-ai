@@ -132,4 +132,30 @@ describe("CardLibraryPicker(IK55VX 共享资产选择器)", () => {
     expect(screen.getByText("赛博朋克霓虹")).toBeInTheDocument();
     expect(screen.queryByText("Apollo")).toBeNull();
   });
+
+  it('IK55VZ cardTypeFilter=["product"] 只看到商品卡;导入回调带商品卡原数据(快照由调用方 clone)', () => {
+    const onImport = vi.fn();
+    render(
+      <CardLibraryPicker
+        onImport={onImport}
+        onClose={vi.fn()}
+        cardTypeFilter={["product"]}
+      />,
+    );
+    expect(screen.getByText("户外蓝牙音箱")).toBeInTheDocument();
+    expect(screen.getByText("露营氛围灯")).toBeInTheDocument();
+    expect(screen.queryByText("Apollo")).toBeNull();
+    expect(screen.queryByText("赛博朋克霓虹")).toBeNull();
+    // 导入:详情 → 添加到画布,回调查到库内商品卡(detail/imageAssetIds/sourceUrl 原数据)
+    fireEvent.click(screen.getByText("户外蓝牙音箱"));
+    const detail = screen.getByRole("dialog", { name: "户外蓝牙音箱详情" });
+    fireEvent.click(within(detail).getByRole("button", { name: "添加到画布" }));
+    expect(onImport).toHaveBeenCalledTimes(1);
+    expect(onImport.mock.calls[0][0]).toMatchObject({
+      id: "lib-p1",
+      cardType: "product",
+      sourceUrl: "https://example.com/item/speaker-42",
+    });
+    expect(onImport.mock.calls[0][0].imageAssetIds).toHaveLength(3);
+  });
 });
