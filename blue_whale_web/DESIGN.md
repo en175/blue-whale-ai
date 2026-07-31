@@ -29,6 +29,28 @@ colors:
   # 登录弹窗专用色
   login-modal-bg: "#141414"
   login-primary-hover: "#3d33d1"
+  # Dock 组件层级（IK5JV5：VideoDockContent / config 硬编码替换）
+  dock-text-strong: "rgba(255, 255, 255, 0.85)"
+  dock-text: "rgba(255, 255, 255, 0.72)"
+  dock-text-label: "rgba(255, 255, 255, 0.65)"
+  dock-text-hint: "rgba(255, 255, 255, 0.62)"
+  dock-text-caption: "rgba(255, 255, 255, 0.45)"
+  dock-text-faint: "rgba(255, 255, 255, 0.35)"
+  dock-text-disabled: "rgba(255, 255, 255, 0.32)"
+  dock-text-placeholder: "rgba(255, 255, 255, 0.3)"
+  dock-text-ghost: "rgba(255, 255, 255, 0.22)"
+  dock-fill: "rgba(255, 255, 255, 0.07)"
+  dock-fill-subtle: "rgba(255, 255, 255, 0.06)"
+  dock-fill-ghost: "rgba(255, 255, 255, 0.043)"
+  dock-fill-faint: "rgba(255, 255, 255, 0.04)"
+  dock-border-ghost: "rgba(255, 255, 255, 0.02)"
+  dock-divider: "rgba(255, 255, 255, 0.07)"
+  dock-toggle-on: "rgba(255, 255, 255, 0.5)"
+  dock-toggle-off: "rgba(255, 255, 255, 0.15)"
+  dock-popover-bg: "rgba(41, 41, 41, 0.92)"
+  dock-popup-bg: "rgb(30, 30, 30)"
+  dock-panel-bg: "rgb(29, 29, 29)"
+  icon-stroke: "rgba(255, 255, 255, 0.8)"
 typography:
   body-md:
     fontFamily: Outfit
@@ -160,14 +182,18 @@ Canvas 工作台采用绝对定位的三区布局：左侧工具栏、底部生�
 
 语义层级表（投影强度由浅到深）：
 
-| Token | 语义 | 值（`globals.css` `:root`） | 典型用途 |
-|---|---|---|---|
-| `--tc-menu-pill-shadow` | 顶部菜单胶囊 | `0 8px 24px rgba(0,0,0,0.4)` | TopBar menu-pill |
-| `--tc-dropdown-shadow` | 下拉 / 弹出菜单（向下） | `0 12px 32px rgba(0,0,0,0.4)` | popover、下拉菜单（AgentComposer） |
-| `--tc-dropdown-shadow-up` | 向上弹出下拉（底部触发） | `0 -12px 32px rgba(0,0,0,0.4)` | AgentComposer 向上 popover |
-| `--tc-modal-shadow` | 全屏遮罩浮层 | `0 24px 80px rgba(0,0,0,0.5)` | modal、大面板（LoginModal / SkillPanel） |
-| `--tc-card-hover-shadow` | 卡片 hover 抬升 | 多层 ring + 投影 | 卡片网格 hover |
-| `--tc-card-selected-shadow` | 卡片选中态 | 多层 ring + 投影 | 卡片网格选中 |
+| Token                       | 语义                     | 值（`globals.css` `:root`）    | 典型用途                                 |
+| --------------------------- | ------------------------ | ------------------------------ | ---------------------------------------- |
+| `--tc-menu-pill-shadow`     | 顶部菜单胶囊             | `0 8px 24px rgba(0,0,0,0.4)`   | TopBar menu-pill                         |
+| `--tc-dropdown-shadow`      | 下拉 / 弹出菜单（向下）  | `0 12px 32px rgba(0,0,0,0.4)`  | popover、下拉菜单（AgentComposer）       |
+| `--tc-dropdown-shadow-up`   | 向上弹出下拉（底部触发） | `0 -12px 32px rgba(0,0,0,0.4)` | AgentComposer 向上 popover               |
+| `--tc-modal-shadow`         | 全屏遮罩浮层             | `0 24px 80px rgba(0,0,0,0.5)`  | modal、大面板（LoginModal / SkillPanel） |
+| `--tc-card-hover-shadow`    | 卡片 hover 抬升          | 多层 ring + 投影               | 卡片网格 hover                           |
+| `--tc-card-selected-shadow` | 卡片选中态               | 多层 ring + 投影               | 卡片网格选中                             |
+| `--tc-dock-popover-shadow`  | Dock 参考模式弹出        | `0 8px 24px rgba(0,0,0,0.6)`   | VideoDockContent refMode menu            |
+| `--tc-dock-popup-shadow`    | Dock 设置/数量弹出       | `0 4px 16px rgba(0,0,0,0.25)`  | VideoDockContent settings / quantity     |
+| `--tc-dock-knob-shadow`     | Dock 开关旋钮            | `0 1px 3px rgba(0,0,0,0.3)`    | VideoDockContent toggle knob             |
+| `--tc-chrome-float-shadow`  | 节点浮动胶囊             | `0 4px 12px rgba(0,0,0,0.4)`   | ReferenceNode product chrome pill        |
 
 > dropdown 向上弹出（底部触发的菜单）方向相反，用独立变体 token `--tc-dropdown-shadow-up`（`0 -12px 32px ...`）；`--tc-dropdown-shadow` 仅定义向下基础值。
 
@@ -177,15 +203,15 @@ Canvas 工作台采用绝对定位的三区布局：左侧工具栏、底部生�
 
 并非所有阴影都该 token 化。判定：**重复出现 + 语义可复用** → token 化；**一次性装饰、值各异、配 transform 精心调校** → 豁免。
 
-| 簇 | 现状锚点 | 判定 | 归属 |
-|---|---|---|---|
-| 全屏 modal / 大面板 | LoginModal / SkillPanel `0 24px 80px rgba(0,0,0,0.5)` × 2 | 重复 + 语义 → token | T2 → `--tc-modal-shadow` |
-| 下拉 / popover | AgentComposer `0 12px 32px rgba(0,0,0,0.4)` × 8 向下 → `--tc-dropdown-shadow`；1 向上变体 → `--tc-dropdown-shadow-up` | 高重复 → token | T3 |
-| 卡片 hover / 选中 | `--tc-card-hover-shadow` / `--tc-card-selected-shadow` | 已 token，纳入文档不改值 | — |
-| 顶部菜单胶囊 | TopBar `var(--tc-menu-pill-shadow)` | 已 token 引用 | — |
-| 旋转图片阴影 | TemplateCards 多处配 `rotate`，值各异 | 装饰性一次性 → 豁免 | T4 |
-| 亮色按钮发光 | AgentComposer send 按钮 `0 2px 8px rgba(255,255,255,0.1)` × 3 + hover | 亮色控件发光（白色按钮浅投影），语义独立于暗色浮层体系 → 豁免 | T4 |
-| slider thumb / inset 分隔线 / popover 0.32 变体 | 单次或结构独特（`inset`、负 spread） | 装饰性 → 豁免 | T4 |
+| 簇                                              | 现状锚点                                                                                                              | 判定                                                          | 归属                     |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------ |
+| 全屏 modal / 大面板                             | LoginModal / SkillPanel `0 24px 80px rgba(0,0,0,0.5)` × 2                                                             | 重复 + 语义 → token                                           | T2 → `--tc-modal-shadow` |
+| 下拉 / popover                                  | AgentComposer `0 12px 32px rgba(0,0,0,0.4)` × 8 向下 → `--tc-dropdown-shadow`；1 向上变体 → `--tc-dropdown-shadow-up` | 高重复 → token                                                | T3                       |
+| 卡片 hover / 选中                               | `--tc-card-hover-shadow` / `--tc-card-selected-shadow`                                                                | 已 token，纳入文档不改值                                      | —                        |
+| 顶部菜单胶囊                                    | TopBar `var(--tc-menu-pill-shadow)`                                                                                   | 已 token 引用                                                 | —                        |
+| 旋转图片阴影                                    | TemplateCards 多处配 `rotate`，值各异                                                                                 | 装饰性一次性 → 豁免                                           | T4                       |
+| 亮色按钮发光                                    | AgentComposer send 按钮 `0 2px 8px rgba(255,255,255,0.1)` × 3 + hover                                                 | 亮色控件发光（白色按钮浅投影），语义独立于暗色浮层体系 → 豁免 | T4                       |
+| slider thumb / inset 分隔线 / popover 0.32 变体 | 单次或结构独特（`inset`、负 spread）                                                                                  | 装饰性 → 豁免                                                 | T4                       |
 
 ## Shapes
 
