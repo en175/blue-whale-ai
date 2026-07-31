@@ -30,7 +30,8 @@ blue_whale_api（new-api 二开）需要把 new-api 系上游厂商（首个：n
 1. **同步（chat/completions 等）**：`ChannelTypeNewAPI → APITypeOpenAI`，复用 `openai.Adaptor`，零改动。
 2. **视频任务**：`relay/relay_adaptor.go` `GetTaskAdaptor` 把 `ChannelTypeNewAPI` 路由到新适配器 `tasknewapi`：
    - submit `POST {base}/v1/video/generations`，fetch `GET {base}/v1/video/generations/{id}`（**核心修复，不再打 `/v1/videos`**）。
-   - `ParseTaskResult` 解析 new-api 信封 `{code,data:{status, data:{usage:{completion_tokens}}}}`：状态复用 `task_polling.go:471` 已有的信封解析（不重写），并从 `completion_tokens` 取 int token 填 `taskResult.TotalTokens`。
+   - 原生端点返回 new-api Task 信封（**token 字段扁平，非嵌套 `usage:{}`**）：`{code, data:{status, usage_total_tokens, usage_completion_tokens, result_url, ...}}`。状态由 `task_polling.go:471` 的 try-1 信封解析处理（复用，不重写）。
+   - **token 提取在 `AdjustBillingOnComplete`（非 `ParseTaskResult`）**：try-1 把信封解析进 `model.Task` 时会丢弃 token（`model.Task` 无 `usage_*_tokens` 字段）且跳过 `ParseTaskResult`，故在 `AdjustBillingOnComplete` 从原始 `task.Data` 提取 `usage_total_tokens`（`usage_completion_tokens` 兜底）写入 `taskResult.TotalTokens` 并 `return 0`，落到结算路径 #2 `RecalculateTaskQuotaByTokens`（与 doubao 同函数同公式）。`flexInt` 兼容 int/字符串形态 token，缺省/非法兜底 0。
 3. **计费回 doubao 式 token**：结算 `RecalculateTaskQuotaByTokens` → `quota = tokens × modelRatio × groupRatio`。`seedance-2.0` modelRatio=37.5 是 token 量纲，在此公式下天然正确，**无需改定价配置**，且与 doubao 直连渠道同公式同量纲、运营心智统一。
 4. **Phase 2 预留**：`EstimateBilling` 加 doubao 式 `video_input`（分辨率档）倍率；同步多协议透传（Claude/Gemini 原样进上游）；默认模型列表。
 
@@ -53,7 +54,7 @@ blue_whale_api（new-api 二开）需要把 new-api 系上游厂商（首个：n
 
 ## 错误与测试边界
 
-- 信封解析三态（SUCCESS/IN_PROGRESS/FAILURE）+ token 提取单测；`completion_tokens` 为字符串或缺省时兜底为 0（不 panic、不触发误重算）。
+- 信封三态（SUCCESS/IN_PROGRESS/FAILURE）+ token 提取单测（`ParseTaskResult` 兜底 + `AdjustBillingOnComplete` 生产主路径）；`flexInt` 兼容 int/字符串 token，缺省/非法兜底 0（不 panic、不触发误重算）。
 - 计费单测：`tokens × modelRatio × groupRatio` 与 doubao 直连渠道同公式同量纲。
 - e2e：dev 盒加 New API 渠道，跑 `seedance-2.0` 5s 720p → 期望 SUCCESS + 有效 mp4 + `tokens × 37.5` 量级扣费。
 - 不依赖上游 `/v1/videos`（视作永久坏）。
