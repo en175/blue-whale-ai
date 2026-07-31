@@ -21,14 +21,20 @@ export function UploadSourceMenu({
   onPickFromCanvas: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; bottom: number }>({ left: 0, bottom: 0 });
+  const [pos, setPos] = useState<{ left: number; bottom: number }>({
+    left: 0,
+    bottom: 0,
+  });
   const [visible, setVisible] = useState(false);
 
-  // 按触发按钮定位，向上展开（Dock 贴底）
+  // 按触发按钮定位，向上展开（Dock 贴底），水平居中对齐触发按钮
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) return;
     const r = triggerRef.current.getBoundingClientRect();
-    setPos({ left: r.left, bottom: window.innerHeight - r.top + 8 });
+    setPos({
+      left: r.left + r.width / 2,
+      bottom: window.innerHeight - r.top + 8,
+    });
     setVisible(true);
   }, [open, triggerRef]);
 
@@ -54,7 +60,6 @@ export function UploadSourceMenu({
   if (!open || typeof document === "undefined") return null;
 
   const itemStyle: React.CSSProperties = {
-    width: "100%",
     padding: "6px 10px",
     borderRadius: 5,
     background: "transparent",
@@ -87,15 +92,16 @@ export function UploadSourceMenu({
         border: "1px solid rgba(255, 255, 255, 0.08)",
         boxShadow: "0 8px 24px rgba(0, 0, 0, 0.5)",
         zIndex: 2147483602,
-        minWidth: 200,
         width: "max-content",
         whiteSpace: "nowrap",
         display: "flex",
-        flexDirection: "column",
-        gap: 0,
+        flexDirection: "row",
+        gap: 2,
         opacity: visible ? 1 : 0,
-        transform: visible ? "scale(1) translateY(0)" : "scale(0.96) translateY(4px)",
-        transformOrigin: "left bottom",
+        transform: visible
+          ? "translateX(-50%) scale(1) translateY(0)"
+          : "translateX(-50%) scale(0.96) translateY(4px)",
+        transformOrigin: "center bottom",
         transition:
           "opacity 180ms cubic-bezier(0.16, 1, 0.3, 1), transform 180ms cubic-bezier(0.16, 1, 0.3, 1)",
       }}
@@ -104,28 +110,44 @@ export function UploadSourceMenu({
         type="button"
         role="menuitem"
         style={itemStyle}
-        onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)")}
+        onMouseEnter={(e) =>
+          (e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)")
+        }
         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
         onClick={() => {
           onClose();
           onLocalUpload();
         }}
       >
-        <Upload width={13} height={13} strokeWidth={2} aria-hidden="true" style={{ opacity: 0.5, flexShrink: 0 }} />
+        <Upload
+          width={13}
+          height={13}
+          strokeWidth={2}
+          aria-hidden="true"
+          style={{ opacity: 0.5, flexShrink: 0 }}
+        />
         <span>本地上传</span>
       </button>
       <button
         type="button"
         role="menuitem"
         style={itemStyle}
-        onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)")}
+        onMouseEnter={(e) =>
+          (e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)")
+        }
         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
         onClick={() => {
           onClose();
           onPickFromCanvas();
         }}
       >
-        <Move width={13} height={13} strokeWidth={2} aria-hidden="true" style={{ opacity: 0.5, flexShrink: 0 }} />
+        <Move
+          width={13}
+          height={13}
+          strokeWidth={2}
+          aria-hidden="true"
+          style={{ opacity: 0.5, flexShrink: 0 }}
+        />
         <span>从画布选择</span>
       </button>
     </div>,
