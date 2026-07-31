@@ -39,7 +39,11 @@ function durationBounds(cap: ImageModelCapability | undefined) {
   const d = cap?.supported_durations;
   return d
     ? { min: d.min, max: d.max, step: d.step }
-    : { min: VIDEO_DURATION_MIN, max: VIDEO_DURATION_MAX, step: VIDEO_DURATION_STEP };
+    : {
+        min: VIDEO_DURATION_MIN,
+        max: VIDEO_DURATION_MAX,
+        step: VIDEO_DURATION_STEP,
+      };
 }
 function durationTicks(cap: ImageModelCapability | undefined) {
   const { min, max, step } = durationBounds(cap);
@@ -48,7 +52,10 @@ function durationTicks(cap: ImageModelCapability | undefined) {
   return ticks;
 }
 /** 切模型时把时长收进新区间：在区间内保留，否则回 default_duration（再不行回 min）。 */
-function resolveDuration(cap: ImageModelCapability | undefined, current: number) {
+function resolveDuration(
+  cap: ImageModelCapability | undefined,
+  current: number,
+) {
   const { min, max } = durationBounds(cap);
   if (current >= min && current <= max) return current;
   const def = cap?.default_duration;
@@ -143,12 +150,17 @@ export function VideoDockContent(props: VideoDockContentProps) {
     VIDEO_ASPECT_RATIOS;
   const quantityMax =
     injectedQuantityMax ?? selectedCapability?.features.quantity_max ?? 1;
-  const { min: durMin, max: durMax, step: durStep } =
-    durationBounds(selectedCapability);
+  const {
+    min: durMin,
+    max: durMax,
+    step: durStep,
+  } = durationBounds(selectedCapability);
   const durTicks = durationTicks(selectedCapability);
   // 首尾帧 ref 模式仅在该模型支持 first_last_frame 时可选。
   const refModeOptions = REF_MODES.filter(
-    (m) => m.id !== "first-last" || selectedCapability?.features.first_last_frame !== false,
+    (m) =>
+      m.id !== "first-last" ||
+      selectedCapability?.features.first_last_frame !== false,
   );
   // 参考视频：只有 Seedance 2.0 支持参考视频（镜像 worker isSeedance2Model，
   // video-job-runner.ts validateReferences）。TODO: 改用 capability reference_video 字段。
@@ -169,9 +181,10 @@ export function VideoDockContent(props: VideoDockContentProps) {
           label: capability.model_label,
         };
         setSelectedModel(model);
-        const supportedResolutions = capability.supported_sizes.map(
-          (size) => ({ id: size.id, label: size.label }),
-        );
+        const supportedResolutions = capability.supported_sizes.map((size) => ({
+          id: size.id,
+          label: size.label,
+        }));
         if (
           !supportedResolutions.some((option) => option.id === resolution.id)
         ) {
@@ -304,30 +317,48 @@ export function VideoDockContent(props: VideoDockContentProps) {
   const quantityRef = useRef<HTMLDivElement>(null);
   const quantityMenuRef = useRef<HTMLDivElement>(null);
 
-  const [refModePos, setRefModePos] = useState<{ left: number; bottom: number }>({ left: 0, bottom: 0 });
-  const [modelSettingsPos, setModelSettingsPos] = useState<{ left: number; bottom: number }>({ left: 0, bottom: 0 });
-  const [quantityPos, setQuantityPos] = useState<{ left: number; bottom: number }>({ left: 0, bottom: 0 });
+  const [refModePos, setRefModePos] = useState<{
+    left: number;
+    bottom: number;
+  }>({ left: 0, bottom: 0 });
+  const [modelSettingsPos, setModelSettingsPos] = useState<{
+    left: number;
+    bottom: number;
+  }>({ left: 0, bottom: 0 });
+  const [quantityPos, setQuantityPos] = useState<{
+    left: number;
+    bottom: number;
+  }>({ left: 0, bottom: 0 });
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [resolutionDropdownOpen, setResolutionDropdownOpen] = useState(false);
 
   useEffect(() => {
     if (refModeOpen && refModeRef.current) {
       const rect = refModeRef.current.getBoundingClientRect();
-      setRefModePos({ left: rect.left, bottom: window.innerHeight - rect.top + 8 });
+      setRefModePos({
+        left: rect.left,
+        bottom: window.innerHeight - rect.top + 8,
+      });
     }
   }, [refModeOpen]);
 
   useEffect(() => {
     if (modelSettingsOpen && modelSettingsRef.current) {
       const rect = modelSettingsRef.current.getBoundingClientRect();
-      setModelSettingsPos({ left: rect.left, bottom: window.innerHeight - rect.top + 8 });
+      setModelSettingsPos({
+        left: rect.left,
+        bottom: window.innerHeight - rect.top + 8,
+      });
     }
   }, [modelSettingsOpen]);
 
   useEffect(() => {
     if (quantityOpen && quantityRef.current) {
       const rect = quantityRef.current.getBoundingClientRect();
-      setQuantityPos({ left: rect.left, bottom: window.innerHeight - rect.top + 8 });
+      setQuantityPos({
+        left: rect.left,
+        bottom: window.innerHeight - rect.top + 8,
+      });
     }
   }, [quantityOpen]);
 
@@ -394,7 +425,10 @@ export function VideoDockContent(props: VideoDockContentProps) {
         open={uploadMenuOpen}
         onClose={() => setUploadMenuOpen(false)}
         onLocalUpload={() =>
-          (uploadKind === "video" ? videoFileRef : localFileRef).current?.click()
+          (uploadKind === "video"
+            ? videoFileRef
+            : localFileRef
+          ).current?.click()
         }
         onPickFromCanvas={() => onPickFromCanvas?.()}
       />
@@ -410,7 +444,14 @@ export function VideoDockContent(props: VideoDockContentProps) {
         }}
       >
         <div style={{ marginBottom: 8 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 0, width: "100%" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 0,
+              width: "100%",
+            }}
+          >
             <div
               style={{
                 display: "flex",
@@ -420,7 +461,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
                 position: "relative",
               }}
             >
-              <div style={{ position: "absolute", top: 0, right: 0, zIndex: 1 }}>
+              <div
+                style={{ position: "absolute", top: 0, right: 0, zIndex: 1 }}
+              >
                 <button
                   type="button"
                   aria-label="Close"
@@ -431,7 +474,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                     borderRadius: 6,
                     border: 0,
                     background: "transparent",
-                    color: "rgba(255, 255, 255, 0.35)",
+                    color: "var(--tc-dock-text-faint)",
                     cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
@@ -456,8 +499,22 @@ export function VideoDockContent(props: VideoDockContentProps) {
                     boxSizing: "border-box",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 0%", minWidth: 0 }}>
-                    <FrameUploadButton label="首帧" previewUrl={firstFrameUrl} onFile={(file) => onFrameUpload?.(file, "first")} onClear={() => onFrameClear?.("first")} onPick={() => onPickFrameFromCanvas?.("first")} />
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      flex: "1 1 0%",
+                      minWidth: 0,
+                    }}
+                  >
+                    <FrameUploadButton
+                      label="首帧"
+                      previewUrl={firstFrameUrl}
+                      onFile={(file) => onFrameUpload?.(file, "first")}
+                      onClear={() => onFrameClear?.("first")}
+                      onPick={() => onPickFrameFromCanvas?.("first")}
+                    />
                     <button
                       type="button"
                       aria-label="交换首尾帧"
@@ -468,8 +525,8 @@ export function VideoDockContent(props: VideoDockContentProps) {
                         borderRadius: "50%",
                         border: 0,
                         outline: "none",
-                        background: "rgba(255, 255, 255, 0.08)",
-                        color: "rgba(255, 255, 255, 0.7)",
+                        background: "var(--tc-menu-item-hover)",
+                        color: "var(--tc-text-secondary)",
                         cursor: "pointer",
                         display: "flex",
                         alignItems: "center",
@@ -478,9 +535,20 @@ export function VideoDockContent(props: VideoDockContentProps) {
                         transition: "background 120ms, color 120ms",
                       }}
                     >
-                      <ArrowLeftRight width={13} height={13} strokeWidth={2} aria-hidden="true" />
+                      <ArrowLeftRight
+                        width={13}
+                        height={13}
+                        strokeWidth={2}
+                        aria-hidden="true"
+                      />
                     </button>
-                    <FrameUploadButton label="尾帧" previewUrl={lastFrameUrl} onFile={(file) => onFrameUpload?.(file, "last")} onClear={() => onFrameClear?.("last")} onPick={() => onPickFrameFromCanvas?.("last")} />
+                    <FrameUploadButton
+                      label="尾帧"
+                      previewUrl={lastFrameUrl}
+                      onFile={(file) => onFrameUpload?.(file, "last")}
+                      onClear={() => onFrameClear?.("last")}
+                      onPick={() => onPickFrameFromCanvas?.("last")}
+                    />
                   </div>
                 </div>
               ) : (
@@ -497,56 +565,30 @@ export function VideoDockContent(props: VideoDockContentProps) {
                     flexWrap: "wrap",
                   }}
                 >
-                  {media.length > 0
-                    ? media.map((m) => <DockMediaThumb key={m.id} item={m} onRemove={onRemoveMedia} />)
-                    : (
-                      <div style={{ position: "relative", flexShrink: 0 }}>
-                        <button
-                          ref={placeholderRef}
-                          type="button"
-                          aria-label="参考图片"
-                          aria-haspopup="menu"
-                          aria-expanded={uploadMenuOpen}
-                          onClick={() => handleTriggerClick(placeholderRef)}
-                          style={{
-                            width: 44,
-                            height: 44,
-                            borderRadius: 9,
-                            border: "1px solid rgba(255, 255, 255, 0.02)",
-                            background: "rgba(255, 255, 255, 0.043)",
-                            color: "rgba(255, 255, 255, 0.62)",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            gap: 6,
-                            padding: 0,
-                            cursor: "pointer",
-                            opacity: 1,
-                            transition: "background 120ms, color 120ms",
-                            flexShrink: 0,
-                          }}
-                        >
-                          <ImageIcon width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />
-                        </button>
-                      </div>
-                    )}
-                  {supportsReferenceVideo && (
-                    <>
-                      <span style={{ color: "rgba(255, 255, 255, 0.22)", fontSize: 14, lineHeight: 1 }}>·</span>
+                  {media.length > 0 ? (
+                    media.map((m) => (
+                      <DockMediaThumb
+                        key={m.id}
+                        item={m}
+                        onRemove={onRemoveMedia}
+                      />
+                    ))
+                  ) : (
+                    <div style={{ position: "relative", flexShrink: 0 }}>
                       <button
-                        ref={videoTriggerRef}
+                        ref={placeholderRef}
                         type="button"
-                        aria-label="参考视频"
+                        aria-label="参考图片"
                         aria-haspopup="menu"
-                        aria-expanded={uploadMenuOpen && uploadKind === "video"}
-                        onClick={() => handleTriggerClick(videoTriggerRef, "video")}
+                        aria-expanded={uploadMenuOpen}
+                        onClick={() => handleTriggerClick(placeholderRef)}
                         style={{
                           width: 44,
                           height: 44,
                           borderRadius: 9,
-                          border: "1px solid rgba(255, 255, 255, 0.02)",
-                          background: "rgba(255, 255, 255, 0.043)",
-                          color: "rgba(255, 255, 255, 0.62)",
+                          border: "1px solid var(--tc-dock-border-ghost)",
+                          background: "var(--tc-dock-fill-ghost)",
+                          color: "var(--tc-dock-text-hint)",
                           display: "inline-flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -558,14 +600,70 @@ export function VideoDockContent(props: VideoDockContentProps) {
                           flexShrink: 0,
                         }}
                       >
-                        <Video width={15} height={15} stroke="currentColor" strokeWidth={2} aria-hidden="true" />
+                        <ImageIcon
+                          width={15}
+                          height={15}
+                          stroke="currentColor"
+                          strokeWidth={2}
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </div>
+                  )}
+                  {supportsReferenceVideo && (
+                    <>
+                      <span
+                        style={{
+                          color: "var(--tc-dock-text-ghost)",
+                          fontSize: 14,
+                          lineHeight: 1,
+                        }}
+                      >
+                        ·
+                      </span>
+                      <button
+                        ref={videoTriggerRef}
+                        type="button"
+                        aria-label="参考视频"
+                        aria-haspopup="menu"
+                        aria-expanded={uploadMenuOpen && uploadKind === "video"}
+                        onClick={() =>
+                          handleTriggerClick(videoTriggerRef, "video")
+                        }
+                        style={{
+                          width: 44,
+                          height: 44,
+                          borderRadius: 9,
+                          border: "1px solid var(--tc-dock-border-ghost)",
+                          background: "var(--tc-dock-fill-ghost)",
+                          color: "var(--tc-dock-text-hint)",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          padding: 0,
+                          cursor: "pointer",
+                          opacity: 1,
+                          transition: "background 120ms, color 120ms",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Video
+                          width={15}
+                          height={15}
+                          stroke="currentColor"
+                          strokeWidth={2}
+                          aria-hidden="true"
+                        />
                       </button>
                     </>
                   )}
                 </div>
               )}
 
-              <div style={{ position: "relative", flex: "1 1 0%", minWidth: 0 }}>
+              <div
+                style={{ position: "relative", flex: "1 1 0%", minWidth: 0 }}
+              >
                 <div
                   ref={editorRef}
                   contentEditable
@@ -584,7 +682,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                     borderColor: "currentcolor",
                     borderImage: "initial",
                     background: "transparent",
-                    color: "rgb(255, 255, 255)",
+                    color: "var(--tc-text-primary)",
                     fontSize: 14,
                     lineHeight: "22px",
                     outline: "none",
@@ -600,7 +698,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                       position: "absolute",
                       left: 4,
                       top: 6,
-                      color: "rgba(255, 255, 255, 0.3)",
+                      color: "var(--tc-dock-text-placeholder)",
                       fontSize: 14,
                       lineHeight: "22px",
                       pointerEvents: "none",
@@ -645,8 +743,8 @@ export function VideoDockContent(props: VideoDockContentProps) {
               padding: 0,
               border: 0,
               borderRadius: "50%",
-              background: "rgba(255, 255, 255, 0.07)",
-              color: "rgba(255, 255, 255, 0.72)",
+              background: "var(--tc-dock-fill)",
+              color: "var(--tc-dock-text)",
               cursor: "pointer",
               display: "inline-flex",
               alignItems: "center",
@@ -673,7 +771,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
               padding: "0px 8px",
               border: 0,
               background: "var(--tc-dock-control-bg, transparent)",
-              color: "rgb(255, 255, 255)",
+              color: "var(--tc-text-primary)",
               fontSize: 12,
               fontWeight: 600,
               cursor: "pointer",
@@ -710,7 +808,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
             padding: "0px 8px",
             border: 0,
             background: "var(--tc-dock-control-bg, transparent)",
-            color: "rgba(255, 255, 255, 0.85)",
+            color: "var(--tc-dock-text-strong)",
             fontSize: 12,
             lineHeight: "16px",
             fontWeight: 500,
@@ -761,7 +859,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
               height: 8,
               flexShrink: 0,
               alignSelf: "center",
-              background: "rgba(255, 255, 255, 0.08)",
+              background: "var(--tc-menu-item-hover)",
               borderRadius: 1,
             }}
           />
@@ -783,7 +881,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
               height: 8,
               flexShrink: 0,
               alignSelf: "center",
-              background: "rgba(255, 255, 255, 0.08)",
+              background: "var(--tc-menu-item-hover)",
               borderRadius: 1,
             }}
           />
@@ -805,7 +903,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
               height: 8,
               flexShrink: 0,
               alignSelf: "center",
-              background: "rgba(255, 255, 255, 0.08)",
+              background: "var(--tc-menu-item-hover)",
               borderRadius: 1,
             }}
           />
@@ -832,7 +930,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
             borderRadius: 6,
             border: 0,
             background: "var(--tc-dock-control-bg, transparent)",
-            color: "rgba(255, 255, 255, 0.4)",
+            color: "var(--tc-text-muted)",
             cursor: "pointer",
             display: "none",
             alignItems: "center",
@@ -841,7 +939,13 @@ export function VideoDockContent(props: VideoDockContentProps) {
             flexShrink: 0,
           }}
         >
-          <Settings width={14} height={14} stroke="currentColor" strokeWidth={2} aria-hidden="true" />
+          <Settings
+            width={14}
+            height={14}
+            stroke="currentColor"
+            strokeWidth={2}
+            aria-hidden="true"
+          />
         </button>
 
         <div style={{ flex: "1 1 0%" }} />
@@ -863,7 +967,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
               padding: 0,
               border: 0,
               background: "var(--tc-dock-control-bg, transparent)",
-              color: "rgba(255, 255, 255, 0.85)",
+              color: "var(--tc-dock-text-strong)",
               fontSize: 12,
               lineHeight: "16px",
               fontWeight: 500,
@@ -878,7 +982,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
               overflow: "hidden",
             }}
           >
-            <span style={{ fontSize: 12, lineHeight: "16px", fontWeight: 600 }}>{quantity}</span>
+            <span style={{ fontSize: 12, lineHeight: "16px", fontWeight: 600 }}>
+              {quantity}
+            </span>
           </button>
         </div>
 
@@ -909,15 +1015,33 @@ export function VideoDockContent(props: VideoDockContentProps) {
                 justifyContent: "center",
                 gap: 6,
                 transition: "120ms",
-                background: isEmpty || generating ? "rgba(255, 255, 255, 0.06)" : "var(--tc-accent)",
-                color: isEmpty || generating ? "rgba(255, 255, 255, 0.32)" : "rgb(255, 255, 255)",
+                background:
+                  isEmpty || generating
+                    ? "var(--tc-dock-fill-subtle)"
+                    : "var(--tc-accent)",
+                color:
+                  isEmpty || generating
+                    ? "var(--tc-dock-text-disabled)"
+                    : "var(--tc-text-primary)",
                 cursor: isEmpty || generating ? "default" : "pointer",
                 opacity: 1,
               }}
             >
               <CreditIcon size={14} />
-              <span style={{ fontSize: 12, fontWeight: 600, lineHeight: "16px" }}>15</span>
-              <span style={{ lineHeight: "16px", marginLeft: 2, display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <span
+                style={{ fontSize: 12, fontWeight: 600, lineHeight: "16px" }}
+              >
+                15
+              </span>
+              <span
+                style={{
+                  lineHeight: "16px",
+                  marginLeft: 2,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
                 生成
               </span>
             </button>
@@ -932,19 +1056,25 @@ export function VideoDockContent(props: VideoDockContentProps) {
               borderRadius: "0px 8px 8px 0px",
               borderWidth: "medium medium medium 1px",
               borderStyle: "none none none solid",
-              borderColor: "currentcolor currentcolor currentcolor rgba(255, 255, 255, 0.08)",
+              borderColor:
+                "currentcolor currentcolor currentcolor var(--tc-border-subtle)",
               borderImage: "initial",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               flexShrink: 0,
               transition: "background 100ms, color 100ms",
-              background: "rgba(255, 255, 255, 0.06)",
-              color: "rgba(255, 255, 255, 0.32)",
+              background: "var(--tc-dock-fill-subtle)",
+              color: "var(--tc-dock-text-disabled)",
               cursor: "default",
             }}
           >
-            <ChevronUp width={16} height={16} strokeWidth={2.25} aria-hidden="true" />
+            <ChevronUp
+              width={16}
+              height={16}
+              strokeWidth={2.25}
+              aria-hidden="true"
+            />
           </button>
         </div>
       </div>
@@ -961,13 +1091,13 @@ export function VideoDockContent(props: VideoDockContentProps) {
               bottom: refModePos.bottom,
               minWidth: 168,
               height: "fit-content",
-              background: "rgba(41, 41, 41, 0.92)",
+              background: "var(--tc-dock-popover-bg)",
               backdropFilter: "blur(40px)",
-              border: "1px solid rgba(255, 255, 255, 0.04)",
+              border: "1px solid var(--tc-menu-pill-border)",
               borderRadius: 8,
               padding: "8px 4px",
               zIndex: 2147483602,
-              boxShadow: "rgba(0, 0, 0, 0.6) 0px 8px 24px",
+              boxShadow: "var(--tc-dock-popover-shadow)",
               opacity: 1,
               transform: "scale(1) translateY(0px)",
               transformOrigin: "left bottom",
@@ -996,8 +1126,12 @@ export function VideoDockContent(props: VideoDockContentProps) {
                     padding: "8px 16px",
                     border: 0,
                     borderRadius: 4,
-                    background: selected ? "rgba(255, 255, 255, 0.08)" : "transparent",
-                    color: selected ? "rgb(255, 255, 255)" : "rgba(255, 255, 255, 0.7)",
+                    background: selected
+                      ? "var(--tc-menu-item-hover)"
+                      : "transparent",
+                    color: selected
+                      ? "var(--tc-text-primary)"
+                      : "var(--tc-text-secondary)",
                     fontSize: 12,
                     fontWeight: selected ? 600 : 500,
                     cursor: "pointer",
@@ -1030,9 +1164,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
               minWidth: 320,
               padding: "4px 8px",
               borderRadius: 8,
-              background: "rgb(30, 30, 30)",
-              border: "1px solid rgba(255, 255, 255, 0.04)",
-              boxShadow: "rgba(0, 0, 0, 0.25) 0px 4px 16px",
+              background: "var(--tc-dock-popup-bg)",
+              border: "1px solid var(--tc-menu-pill-border)",
+              boxShadow: "var(--tc-dock-popup-shadow)",
               zIndex: 2147483602,
               display: "flex",
               flexDirection: "column",
@@ -1045,13 +1179,29 @@ export function VideoDockContent(props: VideoDockContentProps) {
             }}
           >
             {/* 模型与质量 */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "4px 0" }}>
-              <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.45)", fontWeight: 500, padding: "0px 4px" }}>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+                padding: "4px 0",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--tc-dock-text-caption)",
+                  fontWeight: 500,
+                  padding: "0px 4px",
+                }}
+              >
                 模型与质量
               </div>
               <div style={{ display: "flex", gap: 12 }}>
                 {/* 模型下拉 */}
-                <div style={{ width: 224, flexShrink: 0, position: "relative" }}>
+                <div
+                  style={{ width: 224, flexShrink: 0, position: "relative" }}
+                >
                   <button
                     type="button"
                     onClick={() => {
@@ -1062,9 +1212,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
                       height: 36,
                       padding: "0px 8px",
                       borderRadius: 8,
-                      border: "1px solid rgba(255, 255, 255, 0.08)",
-                      background: "rgba(255, 255, 255, 0.04)",
-                      color: "rgb(255, 255, 255)",
+                      border: "1px solid var(--tc-border-subtle)",
+                      background: "var(--tc-dock-fill-faint)",
+                      color: "var(--tc-text-primary)",
                       fontSize: 12,
                       lineHeight: "16px",
                       fontWeight: 400,
@@ -1082,7 +1232,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                   >
                     <span
                       style={{
-                        color: "rgb(255, 255, 255)",
+                        color: "var(--tc-text-primary)",
                         fontSize: 12,
                         lineHeight: "16px",
                         fontWeight: 600,
@@ -1092,7 +1242,11 @@ export function VideoDockContent(props: VideoDockContentProps) {
                     >
                       {selectedModel.label}
                     </span>
-                    <ChevronDown width={14} height={14} style={{ opacity: 0.6, marginLeft: "auto" }} />
+                    <ChevronDown
+                      width={14}
+                      height={14}
+                      style={{ opacity: 0.6, marginLeft: "auto" }}
+                    />
                   </button>
                   {modelDropdownOpen && (
                     <div
@@ -1101,11 +1255,11 @@ export function VideoDockContent(props: VideoDockContentProps) {
                         top: "calc(100% + 6px)",
                         left: 0,
                         zIndex: 10,
-                        background: "rgb(30, 30, 30)",
-                        border: "1px solid rgba(255, 255, 255, 0.04)",
+                        background: "var(--tc-dock-popup-bg)",
+                        border: "1px solid var(--tc-menu-pill-border)",
                         borderRadius: 8,
                         padding: 4,
-                        boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
+                        boxShadow: "var(--tc-dock-popup-shadow)",
                         minWidth: 224,
                         display: "flex",
                         flexDirection: "column",
@@ -1126,8 +1280,10 @@ export function VideoDockContent(props: VideoDockContentProps) {
                             borderRadius: 6,
                             border: 0,
                             background:
-                              selectedModel.id === m.id ? "rgba(255, 255, 255, 0.08)" : "transparent",
-                            color: "rgb(255, 255, 255)",
+                              selectedModel.id === m.id
+                                ? "var(--tc-menu-item-hover)"
+                                : "transparent",
+                            color: "var(--tc-text-primary)",
                             fontSize: 12,
                             cursor: "pointer",
                             display: "flex",
@@ -1167,9 +1323,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
                       height: 36,
                       padding: "0px 8px",
                       borderRadius: 8,
-                      border: "1px solid rgba(255, 255, 255, 0.08)",
-                      background: "rgba(255, 255, 255, 0.04)",
-                      color: "rgb(255, 255, 255)",
+                      border: "1px solid var(--tc-border-subtle)",
+                      background: "var(--tc-dock-fill-faint)",
+                      color: "var(--tc-text-primary)",
                       fontSize: 12,
                       lineHeight: "16px",
                       fontWeight: 400,
@@ -1186,7 +1342,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                   >
                     <span
                       style={{
-                        color: "rgb(255, 255, 255)",
+                        color: "var(--tc-text-primary)",
                         fontSize: 12,
                         lineHeight: "16px",
                         fontWeight: 600,
@@ -1199,7 +1355,11 @@ export function VideoDockContent(props: VideoDockContentProps) {
                     >
                       {resolution.label}
                     </span>
-                    <ChevronDown width={14} height={14} style={{ opacity: 0.6, marginLeft: "auto" }} />
+                    <ChevronDown
+                      width={14}
+                      height={14}
+                      style={{ opacity: 0.6, marginLeft: "auto" }}
+                    />
                   </button>
                   {resolutionDropdownOpen && (
                     <div
@@ -1208,11 +1368,11 @@ export function VideoDockContent(props: VideoDockContentProps) {
                         top: "calc(100% + 6px)",
                         left: 0,
                         zIndex: 10,
-                        background: "rgb(30, 30, 30)",
-                        border: "1px solid rgba(255, 255, 255, 0.04)",
+                        background: "var(--tc-dock-popup-bg)",
+                        border: "1px solid var(--tc-menu-pill-border)",
                         borderRadius: 8,
                         padding: 4,
-                        boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
+                        boxShadow: "var(--tc-dock-popup-shadow)",
                         minWidth: 224,
                         display: "flex",
                         flexDirection: "column",
@@ -1233,8 +1393,10 @@ export function VideoDockContent(props: VideoDockContentProps) {
                             borderRadius: 6,
                             border: 0,
                             background:
-                              resolution.id === r.id ? "rgba(255, 255, 255, 0.08)" : "transparent",
-                            color: "rgb(255, 255, 255)",
+                              resolution.id === r.id
+                                ? "var(--tc-menu-item-hover)"
+                                : "transparent",
+                            color: "var(--tc-text-primary)",
                             fontSize: 12,
                             cursor: "pointer",
                             display: "flex",
@@ -1299,14 +1461,28 @@ export function VideoDockContent(props: VideoDockContentProps) {
             </div>
 
             {/* 宽高比 */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "4px 0" }}>
-              <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.45)", fontWeight: 500, padding: "0px 4px" }}>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                padding: "4px 0",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--tc-dock-text-caption)",
+                  fontWeight: 500,
+                  padding: "0px 4px",
+                }}
+              >
                 宽高比
               </div>
               <div
                 style={{
                   display: "flex",
-                  background: "rgba(255, 255, 255, 0.04)",
+                  background: "var(--tc-dock-fill-faint)",
                   borderRadius: 8,
                   padding: 4,
                   gap: 2,
@@ -1324,8 +1500,12 @@ export function VideoDockContent(props: VideoDockContentProps) {
                         height: 44,
                         border: 0,
                         borderRadius: 6,
-                        background: selected ? "rgba(255, 255, 255, 0.08)" : "transparent",
-                        color: selected ? "rgb(255, 255, 255)" : "rgba(255, 255, 255, 0.45)",
+                        background: selected
+                          ? "var(--tc-menu-item-hover)"
+                          : "transparent",
+                        color: selected
+                          ? "var(--tc-text-primary)"
+                          : "var(--tc-dock-text-caption)",
                         display: "flex",
                         flexDirection: "column",
                         alignItems: "center",
@@ -1336,10 +1516,23 @@ export function VideoDockContent(props: VideoDockContentProps) {
                         padding: 0,
                       }}
                     >
-                      <span style={{ opacity: selected ? 1 : 0.6, flexShrink: 0 }}>
-                        <AspectRatioIcon ratio={r.id} width={14} height={14} filled={false} />
+                      <span
+                        style={{ opacity: selected ? 1 : 0.6, flexShrink: 0 }}
+                      >
+                        <AspectRatioIcon
+                          ratio={r.id}
+                          width={14}
+                          height={14}
+                          filled={false}
+                        />
                       </span>
-                      <span style={{ fontSize: 11, fontWeight: selected ? 600 : 500, lineHeight: "12px" }}>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: selected ? 600 : 500,
+                          lineHeight: "12px",
+                        }}
+                      >
                         {r.label}
                       </span>
                     </button>
@@ -1367,9 +1560,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
               minWidth: 120,
               padding: "4px 8px",
               borderRadius: 8,
-              background: "rgb(30, 30, 30)",
-              border: "1px solid rgba(255, 255, 255, 0.04)",
-              boxShadow: "rgba(0, 0, 0, 0.25) 0px 4px 16px",
+              background: "var(--tc-dock-popup-bg)",
+              border: "1px solid var(--tc-menu-pill-border)",
+              boxShadow: "var(--tc-dock-popup-shadow)",
               zIndex: 2147483602,
               display: "flex",
               flexDirection: "column",
@@ -1401,8 +1594,12 @@ export function VideoDockContent(props: VideoDockContentProps) {
                     padding: "7px 10px",
                     border: 0,
                     borderRadius: 6,
-                    background: selected ? "rgba(255, 255, 255, 0.08)" : "transparent",
-                    color: selected ? "rgba(255, 255, 255, 0.85)" : "rgba(255, 255, 255, 0.45)",
+                    background: selected
+                      ? "var(--tc-menu-item-hover)"
+                      : "transparent",
+                    color: selected
+                      ? "var(--tc-dock-text-strong)"
+                      : "var(--tc-dock-text-caption)",
                     fontSize: 12,
                     lineHeight: "16px",
                     fontWeight: selected ? 500 : 400,
@@ -1435,8 +1632,8 @@ export function VideoDockContent(props: VideoDockContentProps) {
         <div style={{ overflow: "hidden" }}>
           <div
             style={{
-              borderTop: "1px solid rgba(255, 255, 255, 0.07)",
-              background: "rgb(29, 29, 29)",
+              borderTop: "1px solid var(--tc-dock-divider)",
+              background: "var(--tc-dock-panel-bg)",
               borderRadius: "0px 0px 12px 12px",
               padding: "4px 12px 8px",
             }}
@@ -1450,7 +1647,15 @@ export function VideoDockContent(props: VideoDockContentProps) {
                 gap: 12,
               }}
             >
-              <span style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.65)", fontWeight: 400 }}>联网搜索</span>
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "var(--tc-dock-text-label)",
+                  fontWeight: 400,
+                }}
+              >
+                联网搜索
+              </span>
               <button
                 type="button"
                 onClick={() => setInternetSearch(!internetSearch)}
@@ -1460,7 +1665,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
                   height: 20,
                   borderRadius: 10,
                   border: 0,
-                  background: internetSearch ? "rgba(255, 255, 255, 0.5)" : "rgba(255, 255, 255, 0.15)",
+                  background: internetSearch
+                    ? "var(--tc-dock-toggle-on)"
+                    : "var(--tc-dock-toggle-off)",
                   cursor: "pointer",
                   transition: "background 150ms",
                   flexShrink: 0,
@@ -1475,9 +1682,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
                     width: 16,
                     height: 16,
                     borderRadius: "50%",
-                    background: "rgb(255, 255, 255)",
+                    background: "var(--tc-text-primary)",
                     transition: "left 150ms, background 150ms",
-                    boxShadow: "rgba(0, 0, 0, 0.3) 0px 1px 3px",
+                    boxShadow: "var(--tc-dock-knob-shadow)",
                   }}
                 />
               </button>
