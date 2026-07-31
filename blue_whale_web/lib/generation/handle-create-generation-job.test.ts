@@ -364,6 +364,20 @@ describe("handleCreateGenerationJob", () => {
   });
 });
 
+describe("actionIdentity 列宽回归", () => {
+  // 回归:bottom-dock:sha256(76 字符)写入 correlation_id VarChar(64) 触发 Prisma P2000 → 生成任务 500。
+  // actionIdentity 同时写 action_identity/project_action_identity(均 128)与 correlation_id(64),
+  // 故其长度须 ≤ 64。bottom-dock 前缀无任何代码消费,来源由 event_type/aggregate_type 记录。
+  it("actionIdentity 长度须 ≤ correlation_id 列宽 64", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+    deps.command.createJob.mockResolvedValue({ generation_job_id: "207", cursor: 0 });
+    await handleCreateGenerationJob("9", "55", validBody, "key-1", deps);
+    const cmdInput = deps.command.createJob.mock.calls[0]?.[0];
+    expect(cmdInput.actionIdentity.length).toBeLessThanOrEqual(64);
+  });
+});
+
 describe("handleCancelGenerationJob", () => {
   it("命中可取消任务 → 200", async () => {
     const deps = makeDeps();
