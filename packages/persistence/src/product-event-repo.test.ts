@@ -7,16 +7,16 @@ import {
 } from "./product-event-repo.js";
 
 describe("ProductEventRepo", () => {
-  it("allocates the next project cursor and persists the event in the caller transaction", async () => {
-    const upsert = vi.fn().mockResolvedValue({ high_watermark: 4n });
-    const update = vi.fn().mockResolvedValue({ high_watermark: 5n });
+  it("allocates a snowflake cursor (no project_event_stream lock) and persists the event in the caller transaction", async () => {
     const create = vi.fn().mockImplementation(({ data }) => ({
       id: 9n,
       gmt_create: new Date("2026-07-29T00:00:00.000Z"),
       ...data,
     }));
+    const streamUpsert = vi.fn();
+    const streamUpdate = vi.fn();
     const tx = {
-      project_event_stream: { upsert, update },
+      project_event_stream: { upsert: streamUpsert, update: streamUpdate },
       project_events: { create },
     };
 
@@ -30,20 +30,15 @@ describe("ProductEventRepo", () => {
       payload: { message_id: "8" },
     });
 
-    expect(upsert).toHaveBeenCalledWith({
-      where: { project_id: 42n },
-      create: { project_id: 42n, high_watermark: 0n },
-      update: {},
-    });
-    expect(update).toHaveBeenCalledWith({
-      where: { project_id: 42n },
-      data: { high_watermark: { increment: 1n } },
-      select: { high_watermark: true },
-    });
+    // 关键：cursor 用雪花，不再碰 project_event_stream（去掉了那把 per-project 行锁）
+    expect(streamUpsert).not.toHaveBeenCalled();
+    expect(streamUpdate).not.toHaveBeenCalled();
+    const cursor = BigInt(event.cursor);
+    expect(cursor).toBeGreaterThan(0n);
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         project_id: 42n,
-        cursor: 5n,
+        cursor,
         event_type: "conversation.message_accepted",
         aggregate_type: "conversation",
         aggregate_id: "7",
@@ -52,8 +47,29 @@ describe("ProductEventRepo", () => {
         payload: { message_id: "8" },
       }),
     });
-    expect(event.cursor).toBe("5");
     expect(event.event_id).toMatch(/^evt_[0-9a-f]{32}$/);
+  });
+
+  it("连续分配的 cursor 两两不同（雪花全局唯一，不撞 uk_project_cursor）", async () => {
+    const create = vi.fn().mockImplementation(({ data }) => ({
+      id: 9n,
+      gmt_create: new Date(),
+      ...data,
+    }));
+    const tx = { project_events: { create } };
+    const cursors = new Set<string>();
+    for (let i = 0; i < 1000; i += 1) {
+      const e = await appendProjectEvent(tx as never, {
+        projectId: "42",
+        eventType: "t",
+        aggregateType: "a",
+        aggregateId: String(i),
+        aggregateVersion: 0,
+        payload: {},
+      });
+      cursors.add(e.cursor);
+    }
+    expect(cursors.size).toBe(1000);
   });
 
   it("lists replay events in cursor order and returns the project high-watermark", async () => {
@@ -72,10 +88,9 @@ describe("ProductEventRepo", () => {
         payload: { status: "completed" },
       },
     ]);
-    const findUnique = vi.fn().mockResolvedValue({ high_watermark: 8n });
+    const aggregate = vi.fn().mockResolvedValue({ _max: { cursor: 8n } });
     const prisma = {
-      project_events: { findMany },
-      project_event_stream: { findUnique },
+      project_events: { findMany, aggregate },
     } as unknown as PrismaClient;
     const repo = createProductEventRepo(prisma);
 

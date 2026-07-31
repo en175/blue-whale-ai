@@ -105,7 +105,7 @@ export function createGenerationCommandRepo(
           generation_job_id: job.id.toString(),
           cursor: Number(event.cursor),
         };
-      });
+      }, { maxWait: 10_000, timeout: 30_000 });
     },
 
     async requestCancel(jobId, userId) {
