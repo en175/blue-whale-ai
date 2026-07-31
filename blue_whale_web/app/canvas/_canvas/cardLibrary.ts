@@ -15,6 +15,7 @@ import type {
   ReferenceCardType,
 } from "./model";
 import { richDocToPlainText } from "./model";
+import { svgPlaceholder } from "./svgPlaceholder";
 
 /** IK5MC9 共享资产类型 = 参考卡 6 类 + 媒体 4 类。 */
 export type SharedAssetType = ReferenceCardType | MediaKind;
@@ -69,21 +70,28 @@ export interface CardLibraryAsset {
   aspect: number;
 }
 
-function svgCover(hue: number, label: string): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},45%,28%)"/><stop offset="1" stop-color="hsl(${hue + 40},50%,16%)"/></linearGradient></defs><rect width="320" height="180" fill="url(#g)"/><text x="160" y="96" font-size="20" fill="rgba(255,255,255,0.75)" text-anchor="middle" font-family="sans-serif">${label}</text></svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
-
 export const MOCK_CARD_LIBRARY_ASSETS: Record<string, CardLibraryAsset> = {
-  "libimg-s1": { src: svgCover(280, "风格 · 赛博朋克"), aspect: 320 / 180 },
-  "libimg-c1": { src: svgCover(45, "角色 · Apollo"), aspect: 320 / 180 },
-  "libimg-o1": { src: svgCover(40, "物体 · 相机"), aspect: 320 / 180 },
-  "libimg-e1": { src: svgCover(20, "环境 · 日出"), aspect: 320 / 180 },
-  // IK55VZ 商品卡 mock 图(同一 svgCover 生成方式)
-  "libimg-p1": { src: svgCover(200, "商品 · 音箱主图"), aspect: 320 / 180 },
-  "libimg-p2": { src: svgCover(160, "商品 · 音箱细节"), aspect: 320 / 180 },
-  "libimg-p3": { src: svgCover(120, "商品 · 音箱场景"), aspect: 320 / 180 },
-  "libimg-p4": { src: svgCover(90, "商品 · 露营灯"), aspect: 320 / 180 },
+  "libimg-s1": {
+    src: svgPlaceholder(280, "风格 · 赛博朋克"),
+    aspect: 320 / 180,
+  },
+  "libimg-c1": { src: svgPlaceholder(45, "角色 · Apollo"), aspect: 320 / 180 },
+  "libimg-o1": { src: svgPlaceholder(40, "物体 · 相机"), aspect: 320 / 180 },
+  "libimg-e1": { src: svgPlaceholder(20, "环境 · 日出"), aspect: 320 / 180 },
+  // IK55VZ 商品卡 mock 图(同一共享 svgPlaceholder 生成)
+  "libimg-p1": {
+    src: svgPlaceholder(200, "商品 · 音箱主图"),
+    aspect: 320 / 180,
+  },
+  "libimg-p2": {
+    src: svgPlaceholder(160, "商品 · 音箱细节"),
+    aspect: 320 / 180,
+  },
+  "libimg-p3": {
+    src: svgPlaceholder(120, "商品 · 音箱场景"),
+    aspect: 320 / 180,
+  },
+  "libimg-p4": { src: svgPlaceholder(90, "商品 · 露营灯"), aspect: 320 / 180 },
 };
 
 const MOCK_CARDS: CardLibraryItem[] = [

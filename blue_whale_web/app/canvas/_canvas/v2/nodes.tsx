@@ -71,6 +71,7 @@ import {
   ProductImageSection,
   ProductLinkImportSection,
 } from "./product-card-sections";
+import { useInlineEdit } from "./useInlineEdit";
 import { EditorContent } from "@tiptap/react";
 import { useRichEditor, plainTextToDoc } from "./text/RichTextEditor";
 import { TextFormatToolbar } from "./text/TextFormatToolbar";
@@ -985,14 +986,12 @@ export function ReferenceNode({
   );
   /** IK55VZ 商品卡多图:imageAssetIds → store.assets 解析 src(整 map 选择,引用稳定)。 */
   const assetsMap = useCanvasStore((s) => s.assets);
-  const [editingDesc, setEditingDesc] = useState(false);
-  const [editingName, setEditingName] = useState(false);
+  /** IK5JV6:描述/卡名内联编辑共用 useInlineEdit(Esc 取消/失焦保存)。 */
+  const descEdit = useInlineEdit((text) => onEditDescription?.(id, text));
+  const nameEdit = useInlineEdit((text) => onEditReferenceName?.(id, text));
   const [replaceMenuOpen, setReplaceMenuOpen] = useState(false);
   /** IK55VZ 商品卡 chrome 悬停态(selected || hovered 浮出「商品」标签 + 「@ 添加到对话」胶囊)。 */
   const [hovered, setHovered] = useState(false);
-  /** Esc 取消标记：置位后 blur 不 commit（Esc=取消，失焦=保存）。 */
-  const cancelDescRef = useRef(false);
-  const cancelNameRef = useRef(false);
   const hasImage = !!d.referenceAssetId;
   const description = d.description ?? "";
   const emptyDesc = description.trim() === "";
@@ -1108,7 +1107,7 @@ export function ReferenceNode({
           >
             <AtSign width={isProduct ? 14 : 11} height={isProduct ? 14 : 11} />
           </span>
-          {editingName ? (
+          {nameEdit.editing ? (
             <input
               autoFocus
               defaultValue={name}
@@ -1116,24 +1115,17 @@ export function ReferenceNode({
                 isProduct ? "text-base font-bold" : "text-sm font-semibold"
               }`}
               style={{ color: "var(--tc-text-primary)" }}
-              onBlur={(e) => {
-                if (!cancelNameRef.current)
-                  onEditReferenceName?.(id, e.target.value);
-                cancelNameRef.current = false;
-                setEditingName(false);
-              }}
+              onBlur={nameEdit.handleBlur}
               onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  cancelNameRef.current = true;
-                  e.currentTarget.blur();
-                } else if (e.key === "Enter") {
+                nameEdit.handleKeyDown(e);
+                if (e.key === "Enter") {
                   e.currentTarget.blur();
                 }
               }}
             />
           ) : (
             <span
-              onDoubleClick={() => setEditingName(true)}
+              onDoubleClick={nameEdit.startEditing}
               className={`truncate ${
                 isProduct ? "text-base font-bold" : "text-sm font-semibold"
               }`}
@@ -1171,30 +1163,20 @@ export function ReferenceNode({
           <>
             {/* 描述区（有图或留史时存在）：顶部左对齐，双击就地编辑 */}
             {showDescription &&
-              (editingDesc ? (
+              (descEdit.editing ? (
                 <textarea
                   autoFocus
                   defaultValue={description}
                   placeholder={meta.placeholder}
                   rows={3}
-                  onBlur={(e) => {
-                    if (!cancelDescRef.current)
-                      onEditDescription?.(id, e.target.value);
-                    cancelDescRef.current = false;
-                    setEditingDesc(false);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") {
-                      cancelDescRef.current = true;
-                      e.currentTarget.blur();
-                    }
-                  }}
+                  onBlur={descEdit.handleBlur}
+                  onKeyDown={descEdit.handleKeyDown}
                   className="nodrag nowheel mx-3 mt-2 resize-none bg-transparent text-xs leading-normal outline-none"
                   style={{ color: "var(--tc-text-primary)" }}
                 />
               ) : (
                 <div
-                  onDoubleClick={() => setEditingDesc(true)}
+                  onDoubleClick={descEdit.startEditing}
                   className="mx-3 mt-2 text-xs leading-normal"
                   style={{
                     color: emptyDesc
