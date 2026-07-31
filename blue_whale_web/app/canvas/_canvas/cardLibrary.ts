@@ -55,14 +55,6 @@ export const CARD_LIBRARY_TYPE_LABELS: Record<SharedAssetType, string> = {
   text: "文本",
 };
 
-/** 媒体节点自动命名前缀（"图片 3"格式）。 */
-const MEDIA_KIND_LABELS: Record<MediaKind, string> = {
-  image: "图片",
-  video: "视频",
-  audio: "音频",
-  text: "文本",
-};
-
 /** mock 图 asset:内联 data-URL SVG 占位图(无网络依赖,测试/e2e 可跑)。 */
 export interface CardLibraryAsset {
   src: string;
@@ -291,7 +283,7 @@ export function snapshotToNodeData(
 
 /** IK5MC9 自动命名：统计库中同类型媒体条目最大编号 +1（如"图片 3"）。 */
 function nextMediaName(kind: MediaKind): string {
-  const prefix = MEDIA_KIND_LABELS[kind];
+  const prefix = CARD_LIBRARY_TYPE_LABELS[kind];
   let max = 0;
   for (const item of library) {
     if (item.cardType !== kind) continue;
@@ -355,4 +347,10 @@ export function saveToSharedAssets(nodes: CanvasNode[]): number {
   }
 
   return count;
+}
+
+/** 保存结果 toast 文案：0 项返回 null（不提示）；单数/复数分文案（runtime 与测试共用契约）。 */
+export function savedAssetsToastText(count: number): string | null {
+  if (count <= 0) return null;
+  return count === 1 ? "已保存到共享资产" : `已保存 ${count} 项到共享资产`;
 }

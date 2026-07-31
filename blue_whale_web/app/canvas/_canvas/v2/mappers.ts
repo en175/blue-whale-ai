@@ -196,9 +196,7 @@ export function nodeToPendingMention(
   if (kind === "image" || kind === "video" || kind === "audio") {
     const src = node.data.assetId ? assets[node.data.assetId]?.src : undefined;
     return {
-      name:
-        (node.data.content as string) ||
-        (kind === "image" ? "图片" : kind === "video" ? "视频" : "音频"),
+      name: (node.data.content as string) || CARD_LIBRARY_TYPE_LABELS[kind],
       nonce,
       assetId: node.data.assetId ? wireInteger(node.data.assetId) : undefined,
       src,
