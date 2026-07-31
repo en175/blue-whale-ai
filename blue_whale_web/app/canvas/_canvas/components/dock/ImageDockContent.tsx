@@ -12,7 +12,6 @@ import {
   Minimize2,
   Plus,
   Settings2,
-  X,
 } from "lucide-react";
 import {
   ImageModelSettingsPopover,
@@ -77,7 +76,6 @@ export function ImageDockContent({
   editorRef,
   isEmpty,
   onInput,
-  onClose,
   media = [],
   onRemoveMedia,
   onLocalUpload,
@@ -296,30 +294,6 @@ export function ImageDockContent({
                     expanded={expanded}
                     onToggle={onToggleExpand}
                   />
-                  {!expanded && (
-                    <button
-                      type="button"
-                      aria-label="Close"
-                      onClick={onClose}
-                      style={{
-                        width: 24,
-                        height: 24,
-                        borderRadius: 6,
-                        border: 0,
-                        background: "transparent",
-                        color: "rgba(255, 255, 255, 0.35)",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flexShrink: 0,
-                        transition: "background 100ms, color 100ms",
-                        fontSize: 13,
-                      }}
-                    >
-                      <X width={13} height={13} />
-                    </button>
-                  )}
                 </div>
 
                 <div
