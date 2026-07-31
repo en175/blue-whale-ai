@@ -258,6 +258,10 @@ export type ImageDockContentProps = {
   generating?: boolean;
   /** 点击缩略图预览素材 */
   onPreviewMedia?: (item: DockMediaItem) => void;
+  /** 当前参考图总数（mentions + media），用于上限判断 */
+  referenceCount?: number;
+  /** 所选模型的参考图上限变化时回调（切模型联动） */
+  onMaxReferenceImagesChange?: (max: number) => void;
 };
 
 /** 音频 Dock 内容 props（IK55VM：双子面板，未提交输入全部由 BottomDock 提升持有）。 */

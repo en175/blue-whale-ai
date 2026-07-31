@@ -22,7 +22,7 @@ import {
   type ImageModelCapability,
 } from "../../api/generation";
 import { CreditIcon } from "../../icons";
-import { QUANTITIES } from "../../constants";
+import { DEFAULT_MAX_REFERENCE_IMAGES, QUANTITIES } from "../../constants";
 import type { ImageDockContentProps } from "../../types";
 import { DockMediaThumb } from "./parts";
 import { UploadSourceMenu } from "./UploadSourceMenu";
@@ -41,6 +41,8 @@ export function ImageDockContent({
   onGenerate,
   generating = false,
   onPreviewMedia,
+  referenceCount = 0,
+  onMaxReferenceImagesChange,
 }: ImageDockContentProps) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
@@ -57,6 +59,15 @@ export function ImageDockContent({
   const [sequential, setSequential] = useState(false);
   // 参考图入口按模型能力显隐：不支持参考图的模型（如 Seedream 5.0 Pro）不显示上传入口。
   const canReferenceImage = selectedModel?.features.reference_image ?? false;
+  const maxReferenceImages =
+    selectedModel?.features.max_reference_images ??
+    DEFAULT_MAX_REFERENCE_IMAGES;
+  const atReferenceLimit =
+    canReferenceImage && referenceCount >= maxReferenceImages;
+
+  useEffect(() => {
+    onMaxReferenceImagesChange?.(maxReferenceImages);
+  }, [maxReferenceImages, onMaxReferenceImagesChange]);
 
   // 取模型默认分辨率档位（能力表 default_size，缺省回退首个）。
   const pickDefaultSize = (m: ImageModelCapability) =>
@@ -115,6 +126,7 @@ export function ImageDockContent({
   const handleTriggerClick = (
     ref: React.RefObject<HTMLButtonElement | null>,
   ) => {
+    if (atReferenceLimit) return;
     if (isPicking) {
       onExitPick?.();
       return;
@@ -262,6 +274,12 @@ export function ImageDockContent({
                         aria-label="Upload reference image"
                         aria-haspopup="menu"
                         aria-expanded={uploadMenuOpen}
+                        disabled={atReferenceLimit}
+                        title={
+                          atReferenceLimit
+                            ? `最多添加 ${maxReferenceImages} 张参考图`
+                            : undefined
+                        }
                         onClick={() => handleTriggerClick(placeholderRef)}
                         style={{
                           position: "relative",
@@ -272,8 +290,8 @@ export function ImageDockContent({
                           border: "1px solid rgba(255, 255, 255, 0.02)",
                           background: "rgba(255, 255, 255, 0.043)",
                           color: "rgba(255, 255, 255, 0.62)",
-                          cursor: "pointer",
-                          opacity: 1,
+                          cursor: atReferenceLimit ? "default" : "pointer",
+                          opacity: atReferenceLimit ? 0.4 : 1,
                           display: "inline-flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -368,6 +386,12 @@ export function ImageDockContent({
               aria-label="上传图片"
               aria-haspopup="menu"
               aria-expanded={uploadMenuOpen}
+              disabled={atReferenceLimit}
+              title={
+                atReferenceLimit
+                  ? `最多添加 ${maxReferenceImages} 张参考图`
+                  : undefined
+              }
               onClick={() => handleTriggerClick(plusRef)}
               style={{
                 width: 24,
@@ -377,7 +401,8 @@ export function ImageDockContent({
                 borderRadius: "50%",
                 background: "rgba(255, 255, 255, 0.07)",
                 color: "rgba(255, 255, 255, 0.72)",
-                cursor: "pointer",
+                cursor: atReferenceLimit ? "default" : "pointer",
+                opacity: atReferenceLimit ? 0.4 : 1,
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
