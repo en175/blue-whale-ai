@@ -16,6 +16,7 @@ import {
   VIDEO_ASPECT_RATIOS,
   VIDEO_RESOLUTIONS,
   REF_MODES,
+  DEFAULT_MAX_REFERENCE_IMAGES,
 } from "../../constants";
 import type {
   AudioPanelState,
@@ -131,6 +132,10 @@ export function BottomDock({
   const [input, setInput] = useState("");
   /** 从 editor pill 抽取的参考图 URL（提交 referenceImages），随 handleInput 更新 */
   const [mentions, setMentions] = useState<string[]>([]);
+  /** 图片模型参考图上限（由 ImageDockContent 切模型时回调更新） */
+  const [imageMaxRefImages, setImageMaxRefImages] = useState(
+    DEFAULT_MAX_REFERENCE_IMAGES,
+  );
   const [dockSize, setDockSize] = useState({ w: 680, h: 164 });
   const editorRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -198,9 +203,15 @@ export function BottomDock({
     const raf = requestAnimationFrame(() => {
       const el = editorRef.current;
       if (!el) return;
+      if (mode === "image") {
+        const currentCount =
+          extractEditor(el).referenceImages.length + imageMedia.length;
+        if (currentCount >= imageMaxRefImages) return;
+      }
       insertMention(el, item, { replace: sig.replace });
     });
     return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dockMentionSignal]);
 
   // 重新编辑预填（P2）：prefillSignal.nonce → prompt+参考图命令式写进 contentEditable + video 设置。
@@ -384,6 +395,8 @@ export function BottomDock({
                   onPickFromCanvas={onPickFromCanvas}
                   onExitPick={onExitPick}
                   isPicking={isPicking}
+                  referenceCount={mentions.length + imageMedia.length}
+                  onMaxReferenceImagesChange={setImageMaxRefImages}
                   onGenerate={(s) => {
                     const mentionAssetIds = editorRef.current
                       ? extractEditor(editorRef.current).assetIds
@@ -392,6 +405,7 @@ export function BottomDock({
                       mentionAssetIds,
                       imageMedia,
                       s.referenceImageSupported,
+                      imageMaxRefImages,
                     );
                     if (validationError) {
                       onGenerateError?.(validationError);

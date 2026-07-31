@@ -4,6 +4,7 @@ import {
   wireIntegersEqual,
   type WireInteger,
 } from "@/lib/wire-integer";
+import { DEFAULT_MAX_REFERENCE_IMAGES } from "../../constants";
 
 type AssetReference = {
   assetId?: WireInteger;
@@ -41,12 +42,15 @@ export function validateImageDockReferences(
   mentionAssetIds: WireInteger[],
   media: AssetReference[],
   referenceImageSupported = true,
+  maxReferenceImages = DEFAULT_MAX_REFERENCE_IMAGES,
 ): string | null {
   const references = orderedReferences(mentionAssetIds, media);
   if (!referenceImageSupported && references.length > 0) {
     return "当前模型不支持参考图";
   }
-  return references.length > 4 ? "图片生成最多支持 4 张参考图" : null;
+  return references.length > maxReferenceImages
+    ? `图片生成最多支持 ${maxReferenceImages} 张参考图`
+    : null;
 }
 
 export function validateVideoDockReferences(
