@@ -285,8 +285,8 @@ services:
 
   blue-whale-web:
     build:
-      context: ../../blue_whale_web
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: blue_whale_web/Dockerfile
       args:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         BUILD_TIME: ${BUILD_TIME:-unknown}
