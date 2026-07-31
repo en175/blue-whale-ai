@@ -4,9 +4,8 @@
 # 调 new-api 出片、写 DB/TOS 的是这个独立 worker 进程。prod 不跑 worker → 视频 job 永远 pending。
 #
 # 为什么不复用 web 的 standalone：Next standalone 构建把 @blue-whale/* 打进了 server.js
-# （node_modules 里没有），worker（esbuild --packages=external，运行时 import @blue-whale/*
-# /bullmq/ioredis/@prisma/client）无法用 standalone 的 node_modules 跑。
-# 所以这里单阶段 pnpm install + build:worker，带完整 node_modules。
+# （node_modules 里没有），worker 需要独立的 Prisma client + Redis 运行时，
+# 所以这里单阶段 pnpm install + build:worker（esbuild 全量打包，无 external）。
 #
 # 构建（context = 仓库根）：
 #   docker build -f blue_whale_web/Dockerfile.worker -t blue-whale-worker:latest .
@@ -28,7 +27,7 @@ COPY blue_whale_web/patches blue_whale_web/patches
 # 阿里云 npm 镜像加速（覆盖 lockfile 里 registry.npmjs.org 的 URL）
 ENV npm_config_registry=https://registry.npmmirror.com
 # 只装 blue_whale_web 及其依赖链
-RUN pnpm install --frozen-lockfile --filter blue_whale_web...
+RUN pnpm install --frozen-lockfile --filter blue_whale...
 
 # 源码 + tsconfig
 COPY tsconfig.json tsconfig.base.json ./
@@ -38,11 +37,11 @@ COPY packages/generation-runtime packages/generation-runtime
 COPY packages/persistence packages/persistence
 COPY blue_whale_web blue_whale_web
 
-# Prisma client + worker bundle（esbuild --packages=external → .worker-dist/generation-worker.mjs）
+# Prisma client + worker bundle（esbuild 全量打包 → .worker-dist/generation-worker.js）
 RUN pnpm --dir packages/persistence exec prisma generate
 RUN pnpm --dir blue_whale_web build:worker
 
 WORKDIR /app/blue_whale_web
 # worker 自带一个 /ready HTTP 探活（默认 4002，可用 GENERATION_WORKER_PORT 覆盖）
 EXPOSE 4002
-CMD ["node", ".worker-dist/generation-worker.mjs"]
+CMD ["node", ".worker-dist/generation-worker.js"]
