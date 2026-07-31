@@ -295,12 +295,6 @@ export function ProductLinkImportSection({
                       {p.label}
                     </span>
                   ))}
-                  <span
-                    className="text-[10px]"
-                    style={{ color: "var(--tc-text-muted)" }}
-                  >
-                    …
-                  </span>
                 </span>
               </span>
             )}
