@@ -309,8 +309,8 @@ model project_events {
   aggregate_type    String   @db.VarChar(32)
   aggregate_id      String   @db.VarChar(64)
   aggregate_version Int      @default(0)
-  correlation_id    String?  @db.VarChar(64)
-  causation_id      String?  @db.VarChar(64)
+  correlation_id    String?  @db.VarChar(128)
+  causation_id      String?  @db.VarChar(128)
   occurred_at       DateTime @db.DateTime(0)
   payload           Json?
   gmt_create        DateTime @default(now()) @db.DateTime(0)
