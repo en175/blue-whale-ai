@@ -1517,6 +1517,7 @@ export function CanvasProjectRuntime({
           <BottomDock
             mode={bottomDockMode}
             onClose={() => setIsBottomDockOpen(false)}
+            isOpen={isBottomDockOpen}
             imageMedia={imageDockMedia}
             videoMedia={videoDockMedia}
             audioMedia={audioDockMedia}

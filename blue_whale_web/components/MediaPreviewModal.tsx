@@ -34,6 +34,7 @@ export function MediaPreviewModal({
     <div
       role="dialog"
       aria-label={`预览 ${item.name}`}
+      data-tc-dock-popover=""
       onClick={onClose}
       style={{
         position: "fixed",

@@ -340,3 +340,28 @@ test("生成中关闭面板：任务继续（不发取消）且结果照常落�
   await expect(page.locator(IMAGE_DOCK)).toBeHidden();
   expect(cancelCalls, "关闭面板不得取消进行中的生成任务").toBe(0);
 });
+
+test("IK5OWS 点击面板外部隐藏，再打开后提示词保留", async ({ page }) => {
+  await bootstrap(page);
+  await page.goto("/canvas");
+
+  await page.getByRole("button", { name: "图像生成" }).click();
+  await expect(page.locator(IMAGE_DOCK)).toBeVisible();
+
+  // 输入提示词
+  await page.locator(`${IMAGE_DOCK} [contenteditable="true"]`).click();
+  await page.keyboard.type("一只橘猫");
+
+  // 点击画布空白区域（面板外部）→ 面板隐藏
+  await page
+    .locator(".react-flow__pane")
+    .click({ position: { x: 300, y: 100 } });
+  await expect(page.locator(IMAGE_DOCK)).toBeHidden();
+
+  // 重新打开面板 → 内容保留
+  await page.getByRole("button", { name: "图像生成" }).click();
+  await expect(page.locator(IMAGE_DOCK)).toBeVisible();
+  await expect(
+    page.locator(`${IMAGE_DOCK} [contenteditable="true"]`),
+  ).toHaveText("一只橘猫");
+});
