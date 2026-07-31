@@ -226,7 +226,7 @@ export const ASSET_LIBRARY_FLYOUT_ITEMS: ToolbarFlyoutItem[] = [
     label: "共享资产",
     icon: ASSET_LIBRARY_FLYOUT_ICONS.import,
   },
-  ...REFERENCE_CARD_TYPES.map((t) => ({
+  ...REFERENCE_CARD_TYPES.filter((t) => t.id !== "product").map((t) => ({
     id: t.id as string,
     label: t.flyoutLabel,
     icon: ASSET_LIBRARY_FLYOUT_ICONS[t.id],
