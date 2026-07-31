@@ -28,6 +28,10 @@ import type { CanvasNode, CanvasNodeData, NodeKindId } from "./_canvas/model";
 import { CanvasSurface } from "./_canvas/v2/CanvasSurface";
 import type { MenuPayload } from "./_canvas/v2/CanvasSurface";
 import { ContextMenu, type ContextMenuKind } from "./_canvas/v2/ContextMenu";
+import {
+  NodeContextMenu,
+  type NodeMenuAction,
+} from "./_canvas/v2/NodeContextMenu";
 import { effectiveToolMode, type ToolMode } from "./_canvas/v2/toolMode";
 import { useSpaceHeld } from "./_canvas/v2/useSpaceHeld";
 import { useV2Projects } from "./_canvas/v2/useV2Projects";
@@ -254,6 +258,11 @@ export function CanvasProjectRuntime({
     | null
   >(null);
   const [menu, setMenu] = useState<MenuPayload | null>(null);
+  const [nodeMenu, setNodeMenu] = useState<{
+    screenX: number;
+    screenY: number;
+    targetIds: string[];
+  } | null>(null);
 
   // IK55VD 工具模式：持久模式不持久化；按住空格临时切入抓手，有效模式 = 持久 OR 空格
   const [toolMode, setToolMode] = useState<ToolMode>("mouse");
@@ -986,6 +995,83 @@ export function CanvasProjectRuntime({
     [onNodesChange],
   );
 
+  const isNodeSelected = (n: CanvasNode) =>
+    (n as CanvasNode & { selected?: boolean }).selected;
+
+  const handleNodeMenuOpen = useCallback(
+    (payload: MenuPayload & { nodeId: string }) => {
+      setMenu(null);
+      const clickedSelected = nodes.some(
+        (n) => n.id === payload.nodeId && isNodeSelected(n),
+      );
+      const targetIds = clickedSelected
+        ? nodes.filter(isNodeSelected).map((n) => n.id)
+        : [payload.nodeId];
+      setNodeMenu({
+        screenX: payload.screenX,
+        screenY: payload.screenY,
+        targetIds,
+      });
+    },
+    [nodes],
+  );
+
+  const handleNodeMenuAction = useCallback(
+    (action: NodeMenuAction) => {
+      if (!nodeMenu) return;
+      const { targetIds } = nodeMenu;
+      setNodeMenu(null);
+
+      switch (action) {
+        case "delete": {
+          for (const id of targetIds) {
+            const entry = uploadFilesRef.current.get(id);
+            if (entry) {
+              URL.revokeObjectURL(entry.previewUrl);
+              uploadFilesRef.current.delete(id);
+            }
+          }
+          onNodesChange(
+            targetIds.map((id) => ({ type: "remove" as const, id })),
+          );
+          break;
+        }
+        case "copy": {
+          const targets = nodes.filter((n) => targetIds.includes(n.id));
+          const payload = targets.map((n) => ({
+            id: n.id,
+            data: n.data,
+            position: n.position,
+            width: n.width,
+            height: n.height,
+          }));
+          void navigator.clipboard.writeText(JSON.stringify(payload));
+          break;
+        }
+        case "duplicate": {
+          const targets = nodes.filter((n) => targetIds.includes(n.id));
+          const OFFSET = 20;
+          for (const src of targets) {
+            const clone: CanvasNode = {
+              ...src,
+              id: crypto.randomUUID(),
+              position: {
+                x: src.position.x + OFFSET,
+                y: src.position.y + OFFSET,
+              },
+              data: { ...src.data, status: undefined },
+            };
+            addNodeFull(clone);
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    },
+    [nodeMenu, nodes, onNodesChange, addNodeFull],
+  );
+
   const handleCardGenerated = useCallback(
     (card: CardMessage) => {
       const f = cardToV2ImageFields(card);
@@ -1277,6 +1363,7 @@ export function CanvasProjectRuntime({
             picking={pickingFor !== null}
             pickingAccept={pickingFor ? dockAccept(pickingFor) : undefined}
             toolMode={effectiveMode}
+            onNodeMenu={handleNodeMenuOpen}
           />
         </div>
         <ZoomControls />
@@ -1289,6 +1376,18 @@ export function CanvasProjectRuntime({
           hasSource={!!menu.source}
           onInsert={onMenuInsert}
           onClose={() => setMenu(null)}
+        />
+      )}
+
+      {nodeMenu && (
+        <NodeContextMenu
+          screenX={nodeMenu.screenX}
+          screenY={nodeMenu.screenY}
+          hideSaveToAssets={nodes.some(
+            (n) => nodeMenu.targetIds.includes(n.id) && n.data.kind === "group",
+          )}
+          onAction={handleNodeMenuAction}
+          onClose={() => setNodeMenu(null)}
         />
       )}
 
