@@ -90,3 +90,35 @@ describe("ImageDockContent model capability changes", () => {
     );
   });
 });
+
+describe("ImageDockContent portal 浮层携带 data-tc-dock-popover（IK5OWS 例外②）", () => {
+  beforeEach(() => {
+    vi.mocked(getImageModels).mockResolvedValue([
+      capability("capable", "完整能力模型", {
+        tools: true,
+        sequential_image_generation: true,
+      }),
+    ]);
+  });
+
+  it("数量菜单 portal 根节点带 data-tc-dock-popover", async () => {
+    render(
+      <ImageDockContent
+        editorRef={createRef<HTMLDivElement>()}
+        isEmpty={false}
+        onInput={vi.fn()}
+        onClose={vi.fn()}
+        onGenerate={vi.fn()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("完整能力模型")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "生成数量" }));
+
+    const menu = document.querySelector("[data-tc-dock-popover]");
+    expect(menu).not.toBeNull();
+    expect(menu?.getAttribute("role")).toBe("listbox");
+  });
+});

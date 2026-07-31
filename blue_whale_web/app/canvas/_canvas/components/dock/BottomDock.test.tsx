@@ -106,3 +106,94 @@ describe("BottomDock Dock 规范定位契约（IK55VF）", () => {
     ).toBeNull();
   });
 });
+
+describe("BottomDock 点击外部隐藏（IK5OWS）", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  function firePointerDown(target: Element) {
+    target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  }
+
+  it("点击面板外 → onClose 触发", () => {
+    const onClose = vi.fn();
+    render(<BottomDock mode="image" onClose={onClose} isOpen />);
+
+    firePointerDown(document.body);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("点击面板内部 → 不触发 onClose", () => {
+    const onClose = vi.fn();
+    const { container } = render(
+      <BottomDock mode="image" onClose={onClose} isOpen />,
+    );
+
+    firePointerDown(container.firstElementChild!);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("例外①：picking 模式激活时不隐藏", () => {
+    const onClose = vi.fn();
+    render(<BottomDock mode="image" onClose={onClose} isOpen isPicking />);
+
+    firePointerDown(document.body);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("例外②：data-tc-dock-popover 浮层上的点击不隐藏", () => {
+    const onClose = vi.fn();
+    render(<BottomDock mode="image" onClose={onClose} isOpen />);
+
+    const popover = document.createElement("div");
+    popover.setAttribute("data-tc-dock-popover", "");
+    document.body.appendChild(popover);
+
+    firePointerDown(popover);
+    expect(onClose).not.toHaveBeenCalled();
+
+    popover.remove();
+  });
+
+  it("例外③：左侧工具栏点击不隐藏", () => {
+    const onClose = vi.fn();
+    render(<BottomDock mode="image" onClose={onClose} isOpen />);
+
+    const toolbar = document.createElement("aside");
+    toolbar.setAttribute("data-tour-target", "creation-sidebar");
+    document.body.appendChild(toolbar);
+
+    firePointerDown(toolbar);
+    expect(onClose).not.toHaveBeenCalled();
+
+    toolbar.remove();
+  });
+
+  it("生成中点击外部照样隐藏", () => {
+    const onClose = vi.fn();
+    render(<BottomDock mode="image" onClose={onClose} isOpen generating />);
+
+    firePointerDown(document.body);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("isOpen=false 时不监听点击", () => {
+    const onClose = vi.fn();
+    render(<BottomDock mode="image" onClose={onClose} isOpen={false} />);
+
+    firePointerDown(document.body);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
