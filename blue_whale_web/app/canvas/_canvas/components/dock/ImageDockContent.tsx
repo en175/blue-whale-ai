@@ -8,6 +8,8 @@ import { createPortal } from "react-dom";
 import {
   ChevronUp,
   Image as ImageIcon,
+  Maximize2,
+  Minimize2,
   Plus,
   Settings2,
   X,
@@ -27,6 +29,50 @@ import type { ImageDockContentProps } from "../../types";
 import { DockMediaThumb } from "./parts";
 import { UploadSourceMenu } from "./UploadSourceMenu";
 
+/** 放大/收起切换按钮（IK5OWV，方案 B）：hover 高亮 + 轻微上浮投影。 */
+function ExpandToggleButton({
+  expanded,
+  onToggle,
+}: {
+  expanded: boolean;
+  onToggle?: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={expanded ? "收起面板" : "放大面板"}
+      onClick={onToggle}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        width: 24,
+        height: 24,
+        borderRadius: 6,
+        border: 0,
+        background: hovered ? "rgba(255, 255, 255, 0.12)" : "transparent",
+        color: hovered
+          ? "rgba(255, 255, 255, 0.85)"
+          : "rgba(255, 255, 255, 0.35)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        transform: hovered ? "translateY(-1px) scale(1.08)" : "none",
+        boxShadow: hovered ? "0 2px 8px rgba(0, 0, 0, 0.3)" : "none",
+        transition: "all 120ms ease",
+      }}
+    >
+      {expanded ? (
+        <Minimize2 width={13} height={13} />
+      ) : (
+        <Maximize2 width={13} height={13} />
+      )}
+    </button>
+  );
+}
+
 export function ImageDockContent({
   editorRef,
   isEmpty,
@@ -41,6 +87,8 @@ export function ImageDockContent({
   onGenerate,
   generating = false,
   onPreviewMedia,
+  expanded = false,
+  onToggleExpand,
 }: ImageDockContentProps) {
   const settingsRef = useRef<HTMLButtonElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
@@ -162,6 +210,15 @@ export function ImageDockContent({
     return () => document.removeEventListener("mousedown", handle);
   }, [quantityOpen]);
 
+  // 放大态让输入区填满面板高度：逐层向下传递 flex（IK5OWV）。
+  // fillColumn 把普通块级 div 变成可拉伸的 flex 列；fillFlex 给已是 flex 的 div 补 flex:1。
+  const fillColumn: React.CSSProperties = expanded
+    ? { flex: "1 1 0%", minHeight: 0, display: "flex", flexDirection: "column" }
+    : {};
+  const fillFlex: React.CSSProperties = expanded
+    ? { flex: "1 1 0%", minHeight: 0 }
+    : {};
+
   return (
     <>
       <input
@@ -191,14 +248,15 @@ export function ImageDockContent({
           justifyContent: "flex-start",
         }}
       >
-        <div>
-          <div>
+        <div style={fillColumn}>
+          <div style={fillColumn}>
             <div
               style={{
                 display: "flex",
                 flexDirection: "column",
                 gap: 8,
                 width: "100%",
+                ...fillFlex,
               }}
             >
               <div
@@ -208,33 +266,48 @@ export function ImageDockContent({
                   gap: 8,
                   borderRadius: 10,
                   position: "relative",
+                  ...fillFlex,
                 }}
               >
                 <div
-                  style={{ position: "absolute", top: 0, right: 0, zIndex: 1 }}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    right: 0,
+                    zIndex: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 2,
+                  }}
                 >
-                  <button
-                    type="button"
-                    aria-label="Close"
-                    onClick={onClose}
-                    style={{
-                      width: 24,
-                      height: 24,
-                      borderRadius: 6,
-                      border: 0,
-                      background: "transparent",
-                      color: "rgba(255, 255, 255, 0.35)",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                      transition: "background 100ms, color 100ms",
-                      fontSize: 13,
-                    }}
-                  >
-                    <X width={13} height={13} />
-                  </button>
+                  <ExpandToggleButton
+                    expanded={expanded}
+                    onToggle={onToggleExpand}
+                  />
+                  {!expanded && (
+                    <button
+                      type="button"
+                      aria-label="Close"
+                      onClick={onClose}
+                      style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: 6,
+                        border: 0,
+                        background: "transparent",
+                        color: "rgba(255, 255, 255, 0.35)",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                        transition: "background 100ms, color 100ms",
+                        fontSize: 13,
+                      }}
+                    >
+                      <X width={13} height={13} />
+                    </button>
+                  )}
                 </div>
 
                 <div
@@ -306,7 +379,9 @@ export function ImageDockContent({
                     style={{
                       width: "100%",
                       minHeight: 56,
-                      maxHeight: 452,
+                      // 放大态填满可用高度，收起态按内容自适应（上限 452）。
+                      height: expanded ? "100%" : undefined,
+                      maxHeight: expanded ? "none" : 452,
                       overflowY: "auto",
                       padding: "6px 8px",
                       margin: 0,

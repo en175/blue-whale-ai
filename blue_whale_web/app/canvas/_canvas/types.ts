@@ -258,6 +258,10 @@ export type ImageDockContentProps = {
   generating?: boolean;
   /** 点击缩略图预览素材 */
   onPreviewMedia?: (item: DockMediaItem) => void;
+  /** 面板是否处于放大态（IK5OWV：居中悬浮放大，Esc/点外部收起） */
+  expanded?: boolean;
+  /** 切换放大/收起（IK5OWV） */
+  onToggleExpand?: () => void;
 };
 
 /** 音频 Dock 内容 props（IK55VM：双子面板，未提交输入全部由 BottomDock 提升持有）。 */

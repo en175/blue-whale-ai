@@ -123,3 +123,77 @@ describe("ImageDockContent portal 浮层携带 data-tc-dock-popover（IK5OWS 例
     expect(menu?.getAttribute("role")).toBe("listbox");
   });
 });
+
+describe("ImageDockContent 放大按钮（IK5OWV）", () => {
+  beforeEach(() => {
+    vi.mocked(getImageModels).mockResolvedValue([
+      capability("capable", "完整能力模型", {
+        tools: true,
+        sequential_image_generation: true,
+      }),
+    ]);
+  });
+
+  it("普通态：放大按钮存在，X 关闭按钮存在", async () => {
+    render(
+      <ImageDockContent
+        editorRef={createRef<HTMLDivElement>()}
+        isEmpty={false}
+        onInput={vi.fn()}
+        onClose={vi.fn()}
+        onGenerate={vi.fn()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("完整能力模型")).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("button", { name: "放大面板" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+  });
+
+  it("点击放大按钮 → 触发 onToggleExpand", async () => {
+    const onToggleExpand = vi.fn();
+    render(
+      <ImageDockContent
+        editorRef={createRef<HTMLDivElement>()}
+        isEmpty={false}
+        onInput={vi.fn()}
+        onClose={vi.fn()}
+        onGenerate={vi.fn()}
+        onToggleExpand={onToggleExpand}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("完整能力模型")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "放大面板" }));
+    expect(onToggleExpand).toHaveBeenCalledTimes(1);
+  });
+
+  it("放大态：X 关闭按钮隐藏，切换按钮显示收起", async () => {
+    render(
+      <ImageDockContent
+        editorRef={createRef<HTMLDivElement>()}
+        isEmpty={false}
+        onInput={vi.fn()}
+        onClose={vi.fn()}
+        onGenerate={vi.fn()}
+        expanded
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("完整能力模型")).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Close" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "收起面板" }),
+    ).toBeInTheDocument();
+  });
+});
