@@ -35,7 +35,7 @@ export interface ImageCommandCapture {
 
 /** 打开 LeftToolbar「AI 图片」Dock，并等能力表加载完成（触发钮不再显示加载中）。 */
 export async function openImageDock(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "AI 图片" }).click();
+  await page.getByRole("button", { name: "图像生成" }).click();
   await expect(page.locator(IMAGE_DOCK)).toBeVisible({ timeout: 10_000 });
   await expect(
     page.getByRole("button", { name: SETTINGS_TRIGGER }),

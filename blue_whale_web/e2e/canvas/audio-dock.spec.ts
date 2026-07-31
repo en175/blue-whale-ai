@@ -103,7 +103,7 @@ async function bootstrap(page: Page) {
 }
 
 const audioButton = (page: Page) =>
-  page.getByRole("button", { name: "音频", exact: true });
+  page.getByRole("button", { name: "音频生成", exact: true });
 
 test("悬浮列表：点击展开、再点/点外/Esc 关闭、点选开 Dock", async ({
   page,

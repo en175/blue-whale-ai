@@ -3,6 +3,8 @@
 import {
   cloneElement,
   isValidElement,
+  useEffect,
+  useRef,
   useState,
   type MouseEvent,
   type ReactElement,
@@ -19,12 +21,14 @@ import { createPortal } from "react-dom";
  * Portal 直接挂到 body，避开整条祖先链的 transform / clipPath / overflow。
  *
  * 触发器事件通过 cloneElement 注入，不增加额外 DOM 层、不破坏调用方布局。
+ * delay（IK56MS 工具栏）：悬停满 delay 毫秒才显示，期间移出则不显示；默认 0=即时。
  */
 export function Tooltip({
   content,
   children,
   side = "right",
   gap = 10,
+  delay = 0,
 }: {
   content: string;
   children: ReactElement<{
@@ -33,24 +37,43 @@ export function Tooltip({
   }>;
   side?: "right" | "top" | "bottom";
   gap?: number;
+  /** 延迟显示毫秒数（默认 0=即时）。 */
+  delay?: number;
 }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearTimer = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  // 卸载兜底：避免延迟计时器在组件销毁后触发 setState。
+  useEffect(() => clearTimer, []);
 
   if (!isValidElement(children)) return children;
 
+  // eslint-disable-next-line react-hooks/refs -- 注入的是 onMouseEnter/onMouseLeave 事件处理器，只在事件时读写 timer.current，渲染期不调用
   const trigger = cloneElement(children, {
     onMouseEnter: (e: MouseEvent) => {
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
       if (!r) return;
-      setPos(
+      const next =
         side === "right"
           ? { x: r.right + gap, y: r.top + r.height / 2 }
           : side === "top"
             ? { x: r.left + r.width / 2, y: r.top - gap }
-            : { x: r.left + r.width / 2, y: r.bottom + gap },
-      );
+            : { x: r.left + r.width / 2, y: r.bottom + gap };
+      clearTimer();
+      if (delay > 0) {
+        timer.current = setTimeout(() => setPos(next), delay);
+      } else {
+        setPos(next);
+      }
     },
-    onMouseLeave: () => setPos(null),
+    onMouseLeave: () => {
+      clearTimer();
+      setPos(null);
+    },
   });
 
   if (typeof document === "undefined") return trigger;
