@@ -33,6 +33,7 @@ export type ImageModelCapability = {
   default_duration: number | null;
   features: {
     reference_image: boolean;
+    max_reference_images: number;
     watermark: boolean;
     quantity_max: number;
     sequential_image_generation: boolean;
