@@ -2,7 +2,10 @@
  * ToolbarFlyout —— 工具栏按钮悬浮列表（公共组件，IK55VM）。
  * 规范（IK54R1 决议，音频/资产库/商品卡三按钮共用）：点击按钮展开悬浮列表，
  * 点选即回调并关闭；再次点击按钮（调用方 toggle open）/点外/Esc 关闭。
- * 定位：锚定按钮右侧、垂直居中，createPortal 到 body。
+ * 定位（IK56MS 定稿）：与锚定按钮顶对齐向下展开，距工具栏外框 6px——
+ * 锚点是按钮本体，left = 按钮右缘 + 容器 padding(8) + 6 = r.right + 14；createPortal 到 body。
+ * 点外关闭用捕获阶段监听（IK56MS 反馈 5）：React Flow 画布 pane 在冒泡链上
+ * stopPropagation，冒泡监听收不到画布空白处点击。
  */
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
@@ -46,19 +49,21 @@ export function ToolbarFlyout({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("mousedown", onPointer, true);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("mousedown", onPointer, true);
       document.removeEventListener("keydown", onKey);
     };
   }, [open, onClose, anchor]);
 
   if (!open || !anchor || typeof document === "undefined") return null;
 
-  // 按锚定按钮定位：右侧 8px、垂直居中（渲染期直读，无需 effect+state）
+  // 按锚定按钮定位（渲染期直读，无需 effect+state）：
+  // 顶对齐向下展开；距工具栏外框 6px = 容器 padding 8 + 6，即按钮右缘 +14。
+  // （耦合 LeftToolbar 容器 padding:8——若调整需同步此处的 14。）
   const r = anchor.getBoundingClientRect();
-  const pos = { left: r.right + 8, top: r.top + r.height / 2 };
+  const pos = { left: r.right + 14, top: r.top };
 
   return createPortal(
     <div
@@ -69,7 +74,6 @@ export function ToolbarFlyout({
         position: "fixed",
         left: pos.left,
         top: pos.top,
-        transform: "translateY(-50%)",
         padding: 4,
         borderRadius: 10,
         background: "var(--tc-bg-surface)",
