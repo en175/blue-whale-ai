@@ -10,6 +10,7 @@
 
 # 本地私人 Agent 配置（勿入库）
 CLAUDE.local.md
+AGENTS.local.md
 .codex/*
 !.codex/
 !.codex/hooks.json
