@@ -1,3 +1,5 @@
+import { hostname } from "node:os";
+
 import {
   createGenerationCommandRepo,
   createModelCapabilityRepo,
@@ -42,6 +44,11 @@ export function createGenerationWorkerDeps() {
   const tosConfig = loadTosStorageConfig();
   const credentialSecret = loadGenerationCredentialSecret();
   return {
+    // 进程内恢复扫描（instrumentation.ts）直接用这份 deps，必须自带 workerId，
+    // 否则 claimNextImageJob(undefined) → lease_owner 落 NULL，租约归属混乱、恢复不稳。
+    // 命名参照独立 worker（workers/generation-worker.ts:39 generation-${hostname}-${pid}），
+    // 用 image-recovery- 前缀区分进程内恢复扫描与 BullMQ worker 的租约归属。
+    workerId: `image-recovery-${hostname()}-${process.pid}`,
     repo: createWorkerRepo(getPrismaClient(databaseUrl)),
     createImageProvider: (token: string) =>
       createGenerationImageProvider({ token }),
