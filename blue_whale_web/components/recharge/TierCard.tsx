@@ -1,9 +1,10 @@
 "use client";
 /**
- * TierCard — 单张档位卡片
+ * TierCard — 单张档位卡片（对齐 admin/tiers 用户端预览布局）
  *
- * 展示：价格（大字）、获得积分、赠送徽章、推荐角标。
- * 选中态：accent 色边框 + 微弱背景高亮。
+ * 左侧：积分数（大字）+ 折扣标签
+ * 右侧：实付价格（accent）+ 原价划线
+ * 选中态：accent 色边框 + 微弱背景高亮 + ✓ 标记
  */
 import type { RechargeTier } from "./types";
 
@@ -13,15 +14,20 @@ interface TierCardProps {
   onSelect: (tier: RechargeTier) => void;
 }
 
+/** 折扣显示：0.85 → "8.5折" */
+function discountLabel(d: number): string {
+  return `${Math.round(d * 100) / 10}折`;
+}
+
 export function TierCard({ tier, isSelected, onSelect }: TierCardProps) {
-  const hasBonus = tier.bonus > 0;
+  const hasDiscount = tier.discount < 1;
 
   return (
     <button
       type="button"
       onClick={() => onSelect(tier)}
       className={`
-        relative flex items-center gap-4 px-5 py-4 rounded-xl border transition-all duration-150
+        relative rounded-xl border p-4 transition-all duration-150 text-left w-full
         ${
           isSelected
             ? "border-[var(--tc-accent,#3b82f6)] bg-[var(--tc-accent,#3b82f6)]/8 ring-1 ring-[var(--tc-ring,rgba(59,130,246,0.5))]"
@@ -31,41 +37,48 @@ export function TierCard({ tier, isSelected, onSelect }: TierCardProps) {
     >
       {/* 推荐角标 */}
       {tier.isRecommended && (
-        <span className="absolute -top-1.5 right-3 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-[var(--tc-accent,#3b82f6)] text-[var(--tc-on-accent,#ffffff)]">
-          推荐
+        <span className="absolute -top-2.5 left-4 inline-flex items-center px-3 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--tc-accent,#3b82f6)] text-[var(--tc-on-accent,#ffffff)]">
+          ⭐ 推荐
         </span>
       )}
 
-      {/* 赠送徽章 */}
-      {hasBonus && (
-        <span className="absolute top-3 left-3 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--tc-success,#22c55e)]/15 text-[var(--tc-success,#22c55e)]">
-          送 {tier.bonus}
-        </span>
-      )}
+      <div className="flex items-center justify-between">
+        {/* 左侧：积分 + 折扣 */}
+        <div>
+          <div className="text-lg font-bold text-[var(--tc-primary,#ffffff)]">
+            {tier.amount.toLocaleString()}{" "}
+            <span className="text-sm font-normal text-[var(--tc-secondary,rgba(255,255,255,0.7))]">
+              积分
+            </span>
+          </div>
+          {hasDiscount && (
+            <div className="mt-0.5 text-xs text-[var(--tc-success,#22c55e)]">
+              {discountLabel(tier.discount)}优惠
+            </div>
+          )}
+        </div>
 
-      {/* 左侧：价格 */}
-      <span className="text-[26px] font-semibold leading-tight text-[var(--tc-primary,#ffffff)] min-w-[80px] text-left">
-        ¥{tier.price}
-      </span>
-
-      {/* 右侧：积分信息 */}
-      <div className="flex flex-col items-start gap-0.5 min-w-0">
-        <span className="text-[14px] text-[var(--tc-secondary,rgba(255,255,255,0.7))]">
-          {tier.amount.toLocaleString()} 积分
-        </span>
-        {hasBonus && (
-          <span className="text-[12px] text-[var(--tc-success,#22c55e)]">
-            含赠送 {tier.bonus.toLocaleString()} 积分
-          </span>
-        )}
+        {/* 右侧：价格 + 选中标记 */}
+        <div className="flex items-center gap-2">
+          <div className="text-right">
+            <div className="flex items-baseline gap-1.5 justify-end">
+              <span className="text-lg font-bold text-[var(--tc-accent,#3b82f6)]">
+                ¥{tier.price}
+              </span>
+              {hasDiscount && (
+                <span className="text-xs text-[var(--tc-muted,rgba(255,255,255,0.4))] line-through">
+                  ¥{tier.originalPrice}
+                </span>
+              )}
+            </div>
+          </div>
+          {isSelected && (
+            <span className="text-[var(--tc-accent,#3b82f6)] text-[16px]">
+              ✓
+            </span>
+          )}
+        </div>
       </div>
-
-      {/* 选中标记 */}
-      {isSelected && (
-        <span className="ml-auto text-[var(--tc-accent,#3b82f6)] text-[18px]">
-          ✓
-        </span>
-      )}
     </button>
   );
 }

@@ -5,15 +5,17 @@
 /** 支付方式 */
 export type PaymentMethod = "wechat" | "alipay";
 
-/** 充值档位（来自运营后台 IK39UN） */
+/** 充值档位（来自运营后台 IK39UN / IK51OP） */
 export type RechargeTier = {
   id: string;
   /** 购买积分数 */
   amount: number;
-  /** 价格（元） */
+  /** 原价（元） */
+  originalPrice: number;
+  /** 折扣比例，1 = 无折扣，0.85 = 八五折 */
+  discount: number;
+  /** 实付价格（元）= originalPrice × discount */
   price: number;
-  /** 赠送积分数，0 = 无赠送 */
-  bonus: number;
   /** 推荐档位（运营勾选） */
   isRecommended: boolean;
   /** 排序权重 */
