@@ -1,5 +1,5 @@
 import { randomUUID as nodeRandomUUID } from "node:crypto";
-import { createRequire } from "node:module";
+import { TosClient } from "@volcengine/tos-sdk";
 
 import type { VideoMediaRelay } from "./video-job-runner.js";
 
@@ -33,8 +33,6 @@ type TosClientConstructor = new (input: {
   endpoint: string;
   region: string;
 }) => TosVideoClient;
-
-const require = createRequire(import.meta.url);
 
 export function loadGenerationTosConfig(
   env: NodeJS.ProcessEnv = process.env,
@@ -113,10 +111,7 @@ function createTosClient(
   config: GenerationTosConfig,
   endpoint: string,
 ): TosVideoClient {
-  const sdk = require("@volcengine/tos-sdk") as {
-    TosClient: TosClientConstructor;
-  };
-  return new sdk.TosClient({
+  return new (TosClient as unknown as TosClientConstructor)({
     accessKeyId: config.accessKeyId,
     accessKeySecret: config.secretAccessKey,
     endpoint,
