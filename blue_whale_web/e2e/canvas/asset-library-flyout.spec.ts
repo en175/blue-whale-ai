@@ -1,13 +1,13 @@
 /**
  * asset-library-flyout.spec.ts —— IK55VS：资产库悬浮列表 + 空卡新建冒烟；
- * IK5JMN 对齐 IK55VX（卡片库选择器）/ IK55VZ（商品卡）交付后的真实现状。
+ * IK5JMN 对齐 IK55VX（卡片库选择器）交付后的真实现状。
  *
  * route-intercept 模式（模板参照 audio-dock.spec.ts），锁定验收：
- *  1. 资产库按钮展开悬浮列表七项：首项「共享资产」可用，点击打开卡片库选择器
+ *  1. 资产库按钮展开悬浮列表六项：首项「共享资产」可用，点击打开卡片库选择器
  *    （导入=复制快照、编辑不回写库由 IK55VX 票覆盖，本票只锁定入口可达）；
  *    再点按钮/Esc 关闭；
- *  2. 点六类卡项 → 画布新增对应类型空卡（头部 @+名称、从画布拖入、占位文案；
- *     商品卡入口与「商品卡」悬浮列表新建商品同一行为：名称自动编号 + 三段空态）；
+ *  2. 点五类卡项 → 画布新增对应类型空卡（头部 @+名称、从画布拖入、占位文案）；
+ *     商品卡入口由独立的「商品卡」按钮悬浮列表承载，本票不再覆盖；
  *  3. 多次新建落点不重叠（网格错开）；角色卡显示「设置角色音色」区。
  */
 import { expect, test, type Page, type Route } from "@playwright/test";
@@ -108,7 +108,7 @@ async function bootstrap(page: Page) {
 const assetButton = (page: Page) =>
   page.getByRole("button", { name: "资产库", exact: true });
 
-test("悬浮列表：七项完整、共享资产打开卡片库选择器、再点/Esc 关闭", async ({
+test("悬浮列表：六项完整、共享资产打开卡片库选择器、再点/Esc 关闭", async ({
   page,
 }) => {
   await bootstrap(page);
@@ -117,7 +117,7 @@ test("悬浮列表：七项完整、共享资产打开卡片库选择器、再�
   await assetButton(page).click();
   await expect(page.locator(FLYOUT)).toBeVisible();
   const items = page.locator(`${FLYOUT} [role="menuitem"]`);
-  await expect(items).toHaveCount(7);
+  await expect(items).toHaveCount(6);
   // 首项「共享资产」可用（IK55VX：打开卡片库选择器）
   await expect(items.first()).toHaveText("共享资产");
   const sharedItem = page.getByRole("menuitem", {
@@ -125,14 +125,7 @@ test("悬浮列表：七项完整、共享资产打开卡片库选择器、再�
     exact: true,
   });
   await expect(sharedItem).toBeEnabled();
-  for (const name of [
-    "风格卡",
-    "角色卡",
-    "物体卡",
-    "环境卡",
-    "自定义卡",
-    "新建商品",
-  ]) {
+  for (const name of ["风格卡", "角色卡", "物体卡", "环境卡", "自定义卡"]) {
     await expect(
       page.getByRole("menuitem", { name, exact: true }),
     ).toBeVisible();
@@ -159,7 +152,7 @@ test("悬浮列表：七项完整、共享资产打开卡片库选择器、再�
   await expect(page.locator(FLYOUT)).toBeHidden();
 });
 
-test("点六类卡项新增对应空卡：形态齐全、落点不重叠、角色卡带音色区", async ({
+test("点五类卡项新增对应空卡：形态齐全、落点不重叠、角色卡带音色区", async ({
   page,
 }) => {
   await bootstrap(page);
@@ -216,17 +209,4 @@ test("点六类卡项新增对应空卡：形态齐全、落点不重叠、角�
     page.locator(REF_NODE).nth(3).getByText("Environment"),
   ).toBeVisible();
   await expect(page.locator(REF_NODE).nth(4).getByText("Custom")).toBeVisible();
-
-  // 商品卡（IK55VZ）：与「商品卡」悬浮列表新建商品同一行为——名称自动编号 + 三段空态
-  await spawn("新建商品");
-  await expect(page.locator(REF_NODE)).toHaveCount(6);
-  const productCard = page.locator(REF_NODE).nth(5);
-  await expect(productCard.getByText("商品 1")).toBeVisible();
-  await expect(productCard.getByText("已启用 0/8")).toBeVisible();
-  await expect(
-    productCard.getByText("商品名称、品类、核心参数、卖点、目标人群…"),
-  ).toBeVisible();
-  await expect(
-    productCard.getByRole("button", { name: /从商品链接导入/ }),
-  ).toBeVisible();
 });
