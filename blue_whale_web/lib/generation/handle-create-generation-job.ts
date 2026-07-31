@@ -148,7 +148,9 @@ export async function handleCreateGenerationJob(
   input.expected_output_count = expectedOutputCount;
 
   const actionSeed = `${projectId}\0${idempotencyKey ?? ""}\0${Date.now()}`;
-  const actionIdentity = `bottom-dock:${createHash("sha256").update(actionSeed).digest("hex")}`;
+  // 须 ≤ correlation_id VarChar(64);勿再加前缀(曾用 `bottom-dock:` 撑到 76 触发 Prisma P2000 → 生成任务 500)。
+  // 来源由 event_type/aggregate_type 记录,前缀无代码消费。
+  const actionIdentity = createHash("sha256").update(actionSeed).digest("hex");
   const actionType = type === "video" ? "generate_video" : "generate_image";
 
   const cmdInput: CreateJobInput = {
