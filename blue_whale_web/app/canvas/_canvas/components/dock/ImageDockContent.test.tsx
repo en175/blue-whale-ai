@@ -66,7 +66,6 @@ describe("ImageDockContent model capability changes", () => {
         editorRef={createRef<HTMLDivElement>()}
         isEmpty={false}
         onInput={vi.fn()}
-        onClose={vi.fn()}
         onGenerate={onGenerate}
       />,
     );
@@ -108,7 +107,6 @@ describe("ImageDockContent portal 浮层携带 data-tc-dock-popover（IK5OWS 例
         editorRef={createRef<HTMLDivElement>()}
         isEmpty={false}
         onInput={vi.fn()}
-        onClose={vi.fn()}
         onGenerate={vi.fn()}
       />,
     );
@@ -140,7 +138,6 @@ describe("ImageDockContent 参考图上限（IK5OWU）", () => {
         editorRef={createRef<HTMLDivElement>()}
         isEmpty={false}
         onInput={vi.fn()}
-        onClose={vi.fn()}
         onGenerate={vi.fn()}
         referenceCount={4}
       />,
@@ -160,7 +157,6 @@ describe("ImageDockContent 参考图上限（IK5OWU）", () => {
         editorRef={createRef<HTMLDivElement>()}
         isEmpty={false}
         onInput={vi.fn()}
-        onClose={vi.fn()}
         onGenerate={vi.fn()}
         referenceCount={3}
       />,
@@ -206,7 +202,6 @@ describe("ImageDockContent 参考图上限（IK5OWU）", () => {
         editorRef={createRef<HTMLDivElement>()}
         isEmpty={false}
         onInput={vi.fn()}
-        onClose={vi.fn()}
         onGenerate={vi.fn()}
         onMaxReferenceImagesChange={onMaxChange}
       />,
@@ -247,7 +242,6 @@ describe("ImageDockContent 放大按钮（IK5OWV）", () => {
         editorRef={createRef<HTMLDivElement>()}
         isEmpty={false}
         onInput={vi.fn()}
-        onClose={vi.fn()}
         onGenerate={vi.fn()}
       />,
     );
@@ -258,7 +252,6 @@ describe("ImageDockContent 放大按钮（IK5OWV）", () => {
     expect(
       screen.getByRole("button", { name: "放大面板" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
   });
 
   it("点击放大按钮 → 触发 onToggleExpand", async () => {
@@ -268,7 +261,6 @@ describe("ImageDockContent 放大按钮（IK5OWV）", () => {
         editorRef={createRef<HTMLDivElement>()}
         isEmpty={false}
         onInput={vi.fn()}
-        onClose={vi.fn()}
         onGenerate={vi.fn()}
         onToggleExpand={onToggleExpand}
       />,
@@ -281,13 +273,12 @@ describe("ImageDockContent 放大按钮（IK5OWV）", () => {
     expect(onToggleExpand).toHaveBeenCalledTimes(1);
   });
 
-  it("放大态：X 关闭按钮隐藏，切换按钮显示收起", async () => {
+  it("放大态：切换按钮显示收起", async () => {
     render(
       <ImageDockContent
         editorRef={createRef<HTMLDivElement>()}
         isEmpty={false}
         onInput={vi.fn()}
-        onClose={vi.fn()}
         onGenerate={vi.fn()}
         expanded
       />,
@@ -296,9 +287,6 @@ describe("ImageDockContent 放大按钮（IK5OWV）", () => {
     await waitFor(() =>
       expect(screen.getByText("完整能力模型")).toBeInTheDocument(),
     );
-    expect(
-      screen.queryByRole("button", { name: "Close" }),
-    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "收起面板" }),
     ).toBeInTheDocument();

@@ -241,7 +241,6 @@ export type ImageDockContentProps = {
   editorRef: React.RefObject<HTMLDivElement | null>;
   isEmpty: boolean;
   onInput: () => void;
-  onClose: () => void;
   media?: DockMediaItem[];
   onRemoveMedia?: (id: string) => void;
   /** 本地上传：Dock 内 file input 选定文件后上抛，由页面层建画布节点 + 入 media */

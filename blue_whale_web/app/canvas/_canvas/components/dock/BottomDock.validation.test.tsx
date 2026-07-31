@@ -16,9 +16,6 @@ vi.mock("@/components/SmoothCorners", () => ({
     <div>{children}</div>
   ),
 }));
-vi.mock("@/components/credits/CreditBalance", () => ({
-  CreditBalance: () => <div>credits</div>,
-}));
 vi.mock("./ImageDockContent", () => ({
   ImageDockContent: (props: {
     onGenerate?: (settings: object) => void;

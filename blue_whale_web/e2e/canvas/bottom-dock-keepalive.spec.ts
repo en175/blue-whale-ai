@@ -195,7 +195,9 @@ test("关闭再重开图像 Dock：未提交 prompt 与生成设置原样恢复"
   ).toContainText("16:9");
 
   // 关闭 → 重开
-  await page.locator(IMAGE_DOCK).getByRole("button", { name: "Close" }).click();
+  await page
+    .locator(".react-flow__pane")
+    .click({ position: { x: 300, y: 100 } });
   await expect(page.locator(IMAGE_DOCK)).toBeHidden();
   await page.getByRole("button", { name: "图像生成" }).click();
   await expect(page.locator(IMAGE_DOCK)).toBeVisible();
@@ -329,7 +331,9 @@ test("生成中关闭面板：任务继续（不发取消）且结果照常落�
     .click();
 
   // 生成中关闭面板
-  await page.locator(IMAGE_DOCK).getByRole("button", { name: "Close" }).click();
+  await page
+    .locator(".react-flow__pane")
+    .click({ position: { x: 300, y: 100 } });
   await expect(page.locator(IMAGE_DOCK)).toBeHidden();
 
   // 任务完成 → 结果照常落画布（面板保持关闭）

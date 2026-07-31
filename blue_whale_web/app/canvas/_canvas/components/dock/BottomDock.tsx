@@ -7,7 +7,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
-import { CreditBalance } from "@/components/credits/CreditBalance";
 import { useDockClickOutside } from "./useDockClickOutside";
 import type { WireInteger } from "@/lib/wire-integer";
 import { squirclePath } from "../../utils";
@@ -388,9 +387,6 @@ export function BottomDock({
                 flexDirection: "column",
               }}
             >
-              <div className="flex h-8 items-center justify-end border-b border-[var(--tc-border-subtle)] px-3">
-                <CreditBalance compact />
-              </div>
               {generateError && (
                 <div
                   style={{
@@ -435,7 +431,6 @@ export function BottomDock({
                   editorRef={editorRef}
                   isEmpty={isEmpty}
                   onInput={handleInput}
-                  onClose={onClose}
                   media={imageMedia}
                   onRemoveMedia={handleRemoveImageMedia}
                   onLocalUpload={onLocalUpload}
