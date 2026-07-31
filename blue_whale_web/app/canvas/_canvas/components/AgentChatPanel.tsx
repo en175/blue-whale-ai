@@ -18,7 +18,11 @@ import {
   ThinkingBlock,
   AgentCard,
 } from "./ChatBubbles";
-import type { ChatMessage, PendingMention } from "../types";
+import type {
+  ChatMessage,
+  PendingMention,
+  PendingMentionBatch,
+} from "../types";
 import type { WireInteger } from "@/lib/wire-integer";
 import type { CardStatus } from "@/types/domain";
 import { buildMockReplyForMode } from "../messages";
@@ -52,7 +56,7 @@ export function AgentChatPanel({
   messages: ChatMessage[];
   isOpen: boolean;
   onClose: () => void;
-  pendingMention?: PendingMention | null;
+  pendingMention?: PendingMentionBatch | null;
   onMentionConsumed?: () => void;
   onCardGenerated?: (card: CardMessage) => void;
   /** 追加消息到当前项目（user 消息 + 逐条生成的 agent 回复均经此上抛） */
@@ -250,40 +254,40 @@ export function AgentChatPanel({
   useEffect(() => {
     if (!pendingMention) return;
     const editor = composerRef.current;
-    if (pendingMention.assetId != null && editor) {
-      const existing = editor.querySelectorAll("[data-mention-id]").length;
-      const dup = editor.querySelector(
-        `[data-mention-asset-id="${pendingMention.assetId}"]`,
-      );
-      if (existing >= MENTION_LIMIT) {
-        // 超上限静默忽略，后端 @Size(max=10) 兜底
-        console.warn(
-          "[canvas] mention pill 超过上限，已忽略",
-          MENTION_LIMIT,
-          pendingMention.name,
+    for (const mention of pendingMention.mentions) {
+      if (mention.assetId != null && editor) {
+        const existing = editor.querySelectorAll("[data-mention-id]").length;
+        const dup = editor.querySelector(
+          `[data-mention-asset-id="${mention.assetId}"]`,
         );
-      } else if (dup) {
-        // 同素材已插入：不重复，保证 content @[name] 与 assetIds 一一对应
-        console.warn(
-          "[canvas] mention pill 已存在，忽略重复插入",
-          pendingMention.name,
-        );
+        if (existing >= MENTION_LIMIT) {
+          console.warn(
+            "[canvas] mention pill 超过上限，已忽略",
+            MENTION_LIMIT,
+            mention.name,
+          );
+        } else if (dup) {
+          console.warn(
+            "[canvas] mention pill 已存在，忽略重复插入",
+            mention.name,
+          );
+        } else {
+          insertMention(editor, {
+            id: String(mention.assetId),
+            type: mention.type ?? "image",
+            name: mention.name,
+            src: mention.src,
+            assetId: mention.assetId,
+          });
+        }
       } else {
-        insertMention(editor, {
-          id: String(pendingMention.assetId),
-          type: pendingMention.type ?? "image",
-          name: pendingMention.name,
-          src: pendingMention.src,
-          assetId: pendingMention.assetId,
-        });
-        handleComposerInput();
+        insertTextIntoComposer(`@${mention.name} `);
       }
-    } else {
-      insertTextIntoComposer(`@${pendingMention.name} `);
     }
+    handleComposerInput();
     onMentionConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingMention?.nonce]);
+  }, [pendingMention?.batchId]);
 
   const handleSend = () => {
     const { prompt, assetIds } = composerRef.current
