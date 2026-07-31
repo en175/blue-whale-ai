@@ -1057,7 +1057,7 @@ export function ReferenceNode({
               background: "var(--tc-bg-elevated)",
               border: "1px solid var(--tc-border-subtle)",
               color: "var(--tc-text-secondary)",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+              boxShadow: "var(--tc-chrome-float-shadow)",
             }}
             onClick={() => {
               /* 预留：@ 引用行为属后续工单 */
