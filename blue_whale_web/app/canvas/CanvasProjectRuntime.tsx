@@ -1295,6 +1295,15 @@ export function CanvasProjectRuntime({
       <LeftToolbar
         onToolClick={handleToolClick}
         handActive={effectiveMode === "hand"}
+        activeFlyoutToolId={
+          audioFlyoutAnchor
+            ? "audio"
+            : assetFlyoutAnchor
+              ? "asset-library"
+              : productFlyoutAnchor
+                ? "product-card"
+                : null
+        }
       />
       {/* 音频按钮悬浮列表（IK55VM）：音频生成/AI 音乐；资产库/商品卡后续票复用 ToolbarFlyout */}
       <ToolbarFlyout

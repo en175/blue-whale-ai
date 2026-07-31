@@ -216,7 +216,7 @@ async function mockVideoJob(
 
 /** 打开视频 Dock 并提交一次生成（prompt「蓝鲸跃出海面」）。 */
 async function submitVideoGeneration(page: Page) {
-  await page.getByRole("button", { name: "AI 视频" }).click();
+  await page.getByRole("button", { name: "视频生成" }).click();
   await expect(page.locator(VIDEO_DOCK)).toBeVisible();
   await page.locator(`${VIDEO_DOCK} [contenteditable="true"]`).click();
   await page.keyboard.type("蓝鲸跃出海面");
@@ -233,7 +233,7 @@ test("首尾帧槽：入槽可用，关闭再重开 Dock 输入与首尾帧原�
   await mockFrameUpload(page);
   await page.goto("/canvas");
 
-  await page.getByRole("button", { name: "AI 视频" }).click();
+  await page.getByRole("button", { name: "视频生成" }).click();
   await expect(page.locator(VIDEO_DOCK)).toBeVisible();
 
   // 切 refMode → 首尾帧，槽 UI 出现
@@ -267,7 +267,7 @@ test("首尾帧槽：入槽可用，关闭再重开 Dock 输入与首尾帧原�
   // 关闭 → 重开：prompt / refMode / 首尾帧预览原样保留（keep-alive）
   await page.locator(VIDEO_DOCK).getByRole("button", { name: "Close" }).click();
   await expect(page.locator(VIDEO_DOCK)).toBeHidden();
-  await page.getByRole("button", { name: "AI 视频" }).click();
+  await page.getByRole("button", { name: "视频生成" }).click();
   await expect(page.locator(VIDEO_DOCK)).toBeVisible();
 
   await expect(
@@ -299,7 +299,7 @@ test("生成中关板：任务继续（不发取消）、进度上画布视频�
   expect(state.cancelCalls, "关闭面板不得取消进行中的生成任务").toBe(0);
 
   // 重开面板：任务权威状态仍呈现在画布视频卡上（评审决议 R1：状态不进面板）
-  await page.getByRole("button", { name: "AI 视频" }).click();
+  await page.getByRole("button", { name: "视频生成" }).click();
   await expect(page.locator(VIDEO_DOCK)).toBeVisible();
   await expect(page.locator(".react-flow__node")).toContainText("处理中 40%");
 

@@ -184,7 +184,7 @@ test("BottomDock 私有参考图：鉴权预览 → 提交当前选中 Asset →
   });
 
   // 打开图片 Dock →「从画布选择」→ 点中节点
-  await page.getByRole("button", { name: "AI 图片" }).click();
+  await page.getByRole("button", { name: "图像生成" }).click();
   await expect(page.locator(IMAGE_DOCK)).toBeVisible();
   await page
     .locator(IMAGE_DOCK)

@@ -136,8 +136,8 @@ test("工具栏按钮 toggle：点一次开、同模式再点关、异模式切�
   await bootstrap(page);
   await page.goto("/canvas");
 
-  const imageButton = page.getByRole("button", { name: "AI 图片" });
-  const videoButton = page.getByRole("button", { name: "AI 视频" });
+  const imageButton = page.getByRole("button", { name: "图像生成" });
+  const videoButton = page.getByRole("button", { name: "视频生成" });
 
   // 点一次开
   await imageButton.click();
@@ -160,7 +160,7 @@ test("关闭再重开图像 Dock：未提交 prompt 与生成设置原样恢复"
   await bootstrap(page);
   await page.goto("/canvas");
 
-  await page.getByRole("button", { name: "AI 图片" }).click();
+  await page.getByRole("button", { name: "图像生成" }).click();
   await expect(page.locator(IMAGE_DOCK)).toBeVisible();
 
   // 输入 prompt + 改生成设置（数量 1x → 2x；比例 → 16:9；联网搜索 → 开）
@@ -197,7 +197,7 @@ test("关闭再重开图像 Dock：未提交 prompt 与生成设置原样恢复"
   // 关闭 → 重开
   await page.locator(IMAGE_DOCK).getByRole("button", { name: "Close" }).click();
   await expect(page.locator(IMAGE_DOCK)).toBeHidden();
-  await page.getByRole("button", { name: "AI 图片" }).click();
+  await page.getByRole("button", { name: "图像生成" }).click();
   await expect(page.locator(IMAGE_DOCK)).toBeVisible();
 
   // prompt 与设置原样恢复
@@ -226,7 +226,7 @@ test("无遮罩：面板打开时画布可继续交互（滚轮平移生效、Do
   await bootstrap(page);
   await page.goto("/canvas");
 
-  await page.getByRole("button", { name: "AI 图片" }).click();
+  await page.getByRole("button", { name: "图像生成" }).click();
   await expect(page.locator(IMAGE_DOCK)).toBeVisible();
 
   const viewport = page.locator(".react-flow__viewport");
@@ -317,7 +317,7 @@ test("生成中关闭面板：任务继续（不发取消）且结果照常落�
   );
 
   await page.goto("/canvas");
-  await page.getByRole("button", { name: "AI 图片" }).click();
+  await page.getByRole("button", { name: "图像生成" }).click();
   await expect(page.locator(IMAGE_DOCK)).toBeVisible();
 
   // 提交生成
