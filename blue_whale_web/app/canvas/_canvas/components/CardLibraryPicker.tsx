@@ -32,6 +32,7 @@ import {
   listCardLibrary,
   removeCardLibraryItem,
   type CardLibraryItem,
+  type SharedAssetType,
 } from "../cardLibrary";
 import type { ReferenceCardType } from "../model";
 
@@ -53,7 +54,7 @@ const TYPE_ICONS: Record<ReferenceCardType, typeof User> = {
   product: Package,
 };
 
-/** 截图 tabs 行:卡片挂在「资产」下,其余媒体 tab 本票无数据(空态)。 */
+/** 截图 tabs 行:卡片挂在「资产」下,媒体 tab 按类型过滤(IK5MC9 保存后有条目)。 */
 const MEDIA_TABS = [
   "图片",
   "视频",
@@ -64,6 +65,15 @@ const MEDIA_TABS = [
   "其他",
 ] as const;
 type MediaTab = "全部" | "资产" | (typeof MEDIA_TABS)[number];
+
+/** 媒体 tab 中文名 → 库 cardType 映射（IK5MC9）。 */
+const TAB_TO_TYPE: Partial<Record<MediaTab, SharedAssetType>> = {
+  图片: "image",
+  视频: "video",
+  音频: "audio",
+  文本: "text",
+  商品: "product",
+};
 
 /** 遮罩壳:点外关闭 + 居中(画布 modal 惯例,同 ExpandModal)。 */
 function Overlay({
@@ -136,7 +146,7 @@ function CardDetailOverlay({
   onClose: () => void;
   onImport: (card: CardLibraryItem) => void;
 }) {
-  const TypeIcon = TYPE_ICONS[card.cardType];
+  const TypeIcon = TYPE_ICONS[card.cardType as ReferenceCardType] ?? ImageIcon;
   const cover = cardCover(card);
   return (
     <Overlay
@@ -273,11 +283,18 @@ export function CardLibraryPicker({
   }, [menuForId]);
 
   const shown = useMemo(() => {
-    if (mediaTab !== "全部" && mediaTab !== "资产") return []; // 其他媒体 tab 本票无数据
     let list = items;
+    if (mediaTab !== "全部" && mediaTab !== "资产") {
+      const typeKey = TAB_TO_TYPE[mediaTab];
+      if (!typeKey) return [];
+      list = list.filter((c) => c.cardType === typeKey);
+    }
     if (cardTypeFilter)
-      list = list.filter((c) => cardTypeFilter.includes(c.cardType));
-    if (cardType !== "all") list = list.filter((c) => c.cardType === cardType);
+      list = list.filter((c) =>
+        cardTypeFilter.includes(c.cardType as ReferenceCardType),
+      );
+    if (mediaTab === "资产" && cardType !== "all")
+      list = list.filter((c) => c.cardType === cardType);
     if (query.trim()) list = list.filter((c) => c.name.includes(query.trim()));
     return list;
   }, [items, mediaTab, cardType, cardTypeFilter, query]);

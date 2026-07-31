@@ -61,6 +61,7 @@ import { CardLibraryPicker } from "./_canvas/components/CardLibraryPicker";
 import {
   cloneCardSnapshot,
   getCardLibraryAsset,
+  saveToSharedAssets,
   snapshotToNodeData,
   type CardLibraryItem,
 } from "./_canvas/cardLibrary";
@@ -1065,6 +1066,16 @@ export function CanvasProjectRuntime({
           }
           break;
         }
+        case "save-to-assets": {
+          const targets = nodes.filter((n) => targetIds.includes(n.id));
+          const count = saveToSharedAssets(targets);
+          if (count > 0) {
+            toast.success(
+              count === 1 ? "已保存到共享资产" : `已保存 ${count} 项到共享资产`,
+            );
+          }
+          break;
+        }
         default:
           break;
       }
@@ -1383,9 +1394,9 @@ export function CanvasProjectRuntime({
         <NodeContextMenu
           screenX={nodeMenu.screenX}
           screenY={nodeMenu.screenY}
-          hideSaveToAssets={nodes.some(
-            (n) => nodeMenu.targetIds.includes(n.id) && n.data.kind === "group",
-          )}
+          hideSaveToAssets={nodes
+            .filter((n) => nodeMenu.targetIds.includes(n.id))
+            .every((n) => n.data.kind === "group")}
           onAction={handleNodeMenuAction}
           onClose={() => setNodeMenu(null)}
         />
