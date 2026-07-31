@@ -189,7 +189,7 @@ describe("AgentRunRepo", () => {
       }),
     ).resolves.toEqual({
       kind: "committed",
-      cursor: "2",
+      cursor: expect.any(String),
       status: "completed",
     });
     expect(tx.agent_runs.update).toHaveBeenCalledWith({

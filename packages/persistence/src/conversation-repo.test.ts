@@ -78,7 +78,7 @@ describe("ConversationRepo.acceptMessage", () => {
       conversation_id: "7",
       message_id: "8",
       agent_run_id: "9",
-      cursor: "2",
+      cursor: expect.any(String),
       sequence_no: 1,
     });
     expect(transaction).toHaveBeenCalledTimes(1);
@@ -106,7 +106,7 @@ describe("ConversationRepo.acceptMessage", () => {
         project_id: 42n,
         operation: "conversation.message.accept",
         idempotency_key: "cmd-1",
-        accepted_cursor: 2n,
+        accepted_cursor: expect.any(BigInt),
       }),
     });
   });

@@ -115,8 +115,9 @@ describe("SnapshotRepo.loadConversationState", () => {
       user_input_requests: {
         findMany: findInputRequests,
       },
-      project_event_stream: {
-        findUnique: vi.fn().mockResolvedValue({ high_watermark: 12n }),
+      project_events: {
+        findMany: vi.fn().mockResolvedValue([]),
+        aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 12n } }),
       },
     } as unknown as PrismaClient;
 
