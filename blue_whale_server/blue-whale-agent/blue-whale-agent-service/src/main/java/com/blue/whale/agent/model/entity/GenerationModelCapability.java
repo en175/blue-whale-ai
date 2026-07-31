@@ -84,6 +84,7 @@ public class GenerationModelCapability extends BaseEntity {
     @Setter
     public static class Features {
         private Boolean referenceImage;
+        private Integer maxReferenceImages;
         private Boolean watermark;
         private Integer quantityMax;
         private Boolean sequentialImageGeneration;

@@ -40,7 +40,7 @@ import java.util.Map;
 public class VolcEngineImageGenerationProvider implements GenerationProvider {
 
     private static final int MAX_IMAGE_BYTES = 20 * 1024 * 1024;
-    private static final int MAX_REFERENCE_IMAGES = 4;
+    private static final int DEFAULT_MAX_REFERENCE_IMAGES = 4;
     private static final String WEB_SEARCH_TOOL_TYPE = "web_search";
     private static final String SEQUENTIAL_MODE = "auto";
 
@@ -76,6 +76,13 @@ public class VolcEngineImageGenerationProvider implements GenerationProvider {
             return GenerationProviderResult.failure("invalid_size", "模型不支持该尺寸");
         }
         Boolean webSearch = input.get("web_search") instanceof Boolean flag ? flag : null;
+        int maxRefImages = resolveMaxReferenceImages(capability);
+        if (input.get("reference_asset_ids") instanceof List<?> refList
+                && refList.size() > maxRefImages) {
+            return GenerationProviderResult.failure(
+                    "reference_images_exceed_limit",
+                    "参考图数量超出模型上限（最多 " + maxRefImages + " 张）");
+        }
         List<String> referenceDataUrls = resolveReferenceDataUrls(request, input, capability);
         if (referenceDataUrls == null) {
             return GenerationProviderResult.failure("reference_image_unavailable", "参考资源不可用");
@@ -122,6 +129,15 @@ public class VolcEngineImageGenerationProvider implements GenerationProvider {
         return 1;
     }
 
+    private int resolveMaxReferenceImages(GenerationModelCapability capability) {
+        GenerationModelCapability.Features features = capability.getFeatures();
+        if (features != null && features.getMaxReferenceImages() != null
+                && features.getMaxReferenceImages() > 0) {
+            return features.getMaxReferenceImages();
+        }
+        return DEFAULT_MAX_REFERENCE_IMAGES;
+    }
+
     private GenerationModelCapability resolveCapability(String requestedModelId) {
         if (requestedModelId != null) {
             return capabilityMapper.selectEnabledByModelId(requestedModelId).orElse(null);
@@ -148,9 +164,6 @@ public class VolcEngineImageGenerationProvider implements GenerationProvider {
         }
         GenerationModelCapability.Features features = capability.getFeatures();
         if (features == null || !Boolean.TRUE.equals(features.getReferenceImage())) {
-            return null;
-        }
-        if (list.size() > MAX_REFERENCE_IMAGES) {
             return null;
         }
         List<String> dataUrls = new ArrayList<>(list.size());

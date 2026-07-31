@@ -33,6 +33,7 @@ const capability = (
   default_duration: null,
   features: {
     reference_image: true,
+    max_reference_images: 4,
     watermark: false,
     quantity_max: 4,
     stream: false,

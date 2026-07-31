@@ -111,6 +111,7 @@ describe("VideoDockContent references", () => {
         default_duration: 6,
         features: {
           reference_image: true,
+          max_reference_images: 0,
           watermark: false,
           quantity_max: 1,
           sequential_image_generation: false,
