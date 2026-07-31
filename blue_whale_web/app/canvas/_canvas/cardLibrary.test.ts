@@ -10,8 +10,10 @@ import {
   listCardLibrary,
   removeCardLibraryItem,
   resetCardLibrary,
+  saveToSharedAssets,
   snapshotToNodeData,
 } from "./cardLibrary";
+import type { CanvasNode, CanvasNodeData } from "./model";
 
 beforeEach(() => resetCardLibrary());
 
@@ -209,5 +211,146 @@ describe("getCardLibraryAsset 快照 id 兜底(刷新后注册表丢失场景)",
     expect(a!.aspect).toBeGreaterThan(0);
     expect(getCardLibraryAsset("libimg-s1-snap-bad")).toBeUndefined();
     expect(getCardLibraryAsset("not-a-library-asset")).toBeUndefined();
+  });
+});
+
+function makeNode(
+  kind: string,
+  data: Partial<CanvasNodeData> = {},
+): CanvasNode {
+  return {
+    id: crypto.randomUUID(),
+    type: kind as CanvasNode["type"],
+    position: { x: 0, y: 0 },
+    data: { kind: kind as CanvasNodeData["kind"], ...data },
+  };
+}
+
+describe("saveToSharedAssets(IK5MC9 保存到共享资产)", () => {
+  it("参考卡保存:name 取卡片名称,cardType 取 cardType,description 取描述", () => {
+    const node = makeNode("reference", {
+      cardType: "style",
+      name: "赛博朋克",
+      description: "霓虹配色",
+      referenceAssetId: "libimg-s1",
+    });
+    const count = saveToSharedAssets([node]);
+    expect(count).toBe(1);
+    const saved = listCardLibrary({ cardType: "style" }).find(
+      (c) => c.name === "赛博朋克",
+    );
+    expect(saved).toBeDefined();
+    expect(saved!.description).toBe("霓虹配色");
+    expect(saved!.imageAssetId).toBe("libimg-s1");
+  });
+
+  it("商品卡保存:detail/imageAssetIds/sourceUrl 透传", () => {
+    const node = makeNode("reference", {
+      cardType: "product",
+      name: "音箱",
+      description: "便携音箱",
+      detail: "品类:音箱",
+      imageAssetIds: ["libimg-p1", "libimg-p2"],
+      sourceUrl: "https://example.com/item/1",
+    });
+    saveToSharedAssets([node]);
+    const saved = listCardLibrary({ cardType: "product" }).find(
+      (c) => c.name === "音箱",
+    );
+    expect(saved).toBeDefined();
+    expect(saved!.detail).toBe("品类:音箱");
+    expect(saved!.imageAssetIds).toEqual(["libimg-p1", "libimg-p2"]);
+    expect(saved!.sourceUrl).toBe("https://example.com/item/1");
+  });
+
+  it("图片节点保存:自动命名「图片 1」,cardType=image,assetId 携带", () => {
+    const node = makeNode("image", { assetId: "ast_123", prompt: "一只猫" });
+    const count = saveToSharedAssets([node]);
+    expect(count).toBe(1);
+    const saved = listCardLibrary({ cardType: "image" });
+    expect(saved).toHaveLength(1);
+    expect(saved[0].name).toBe("图片 1");
+    expect(saved[0].assetId).toBe("ast_123");
+    expect(saved[0].description).toBe("一只猫");
+  });
+
+  it("多个同类型媒体节点:自动递增编号", () => {
+    const nodes = [
+      makeNode("image", { assetId: "a1" }),
+      makeNode("image", { assetId: "a2" }),
+      makeNode("image", { assetId: "a3" }),
+    ];
+    saveToSharedAssets(nodes);
+    const saved = listCardLibrary({ cardType: "image" });
+    expect(saved).toHaveLength(3);
+    expect(saved.map((c) => c.name)).toEqual(["图片 1", "图片 2", "图片 3"]);
+  });
+
+  it("视频/音频/文本节点各自独立编号", () => {
+    saveToSharedAssets([
+      makeNode("video", { assetId: "v1" }),
+      makeNode("audio", { assetId: "au1" }),
+      makeNode("text", { prompt: "hello" }),
+    ]);
+    expect(listCardLibrary({ cardType: "video" })[0].name).toBe("视频 1");
+    expect(listCardLibrary({ cardType: "audio" })[0].name).toBe("音频 1");
+    expect(listCardLibrary({ cardType: "text" })[0].name).toBe("文本 1");
+  });
+
+  it("文本节点描述取 richDoc 纯文本(截断 100 字)", () => {
+    const richDoc = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "这是一段富文本内容" }],
+        },
+      ],
+    };
+    saveToSharedAssets([makeNode("text", { richDoc })]);
+    const saved = listCardLibrary({ cardType: "text" })[0];
+    expect(saved.description).toBe("这是一段富文本内容");
+  });
+
+  it("分组节点被静默跳过,返回 0", () => {
+    const count = saveToSharedAssets([makeNode("group")]);
+    expect(count).toBe(0);
+    expect(listCardLibrary().length).toBe(listCardLibrary().length);
+  });
+
+  it("批量含分组:分组跳过,其余正常保存,返回实际数量", () => {
+    const nodes = [
+      makeNode("group"),
+      makeNode("image", { assetId: "a1" }),
+      makeNode("group"),
+      makeNode("reference", {
+        cardType: "character",
+        name: "角色A",
+        description: "desc",
+      }),
+    ];
+    const count = saveToSharedAssets(nodes);
+    expect(count).toBe(2);
+  });
+
+  it("空数组返回 0", () => {
+    expect(saveToSharedAssets([])).toBe(0);
+  });
+
+  it("保存后条目出现在对应类型 tab 查询中", () => {
+    saveToSharedAssets([
+      makeNode("reference", {
+        cardType: "environment",
+        name: "森林",
+        description: "d",
+      }),
+      makeNode("video", { assetId: "v1" }),
+    ]);
+    expect(
+      listCardLibrary({ cardType: "environment" }).some(
+        (c) => c.name === "森林",
+      ),
+    ).toBe(true);
+    expect(listCardLibrary({ cardType: "video" })).toHaveLength(1);
   });
 });
