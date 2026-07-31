@@ -1031,6 +1031,7 @@ export function CanvasProjectRuntime({
       if (!nodeMenu) return;
       const { targetIds } = nodeMenu;
       setNodeMenu(null);
+      const targets = nodes.filter((n) => targetIds.includes(n.id));
 
       switch (action) {
         case "delete": {
@@ -1047,7 +1048,6 @@ export function CanvasProjectRuntime({
           break;
         }
         case "copy": {
-          const targets = nodes.filter((n) => targetIds.includes(n.id));
           const payload = targets.map((n) => ({
             id: n.id,
             data: n.data,
@@ -1059,7 +1059,6 @@ export function CanvasProjectRuntime({
           break;
         }
         case "duplicate": {
-          const targets = nodes.filter((n) => targetIds.includes(n.id));
           const OFFSET = 20;
           for (const src of targets) {
             const clone: CanvasNode = {
@@ -1076,7 +1075,6 @@ export function CanvasProjectRuntime({
           break;
         }
         case "save-to-assets": {
-          const targets = nodes.filter((n) => targetIds.includes(n.id));
           const count = saveToSharedAssets(targets);
           if (count > 0) {
             toast.success(
@@ -1086,7 +1084,6 @@ export function CanvasProjectRuntime({
           break;
         }
         case "add-to-chat": {
-          const targets = nodes.filter((n) => targetIds.includes(n.id));
           const batchId = Date.now();
           const mentions: PendingMention[] = targets.map((n, i) =>
             nodeToPendingMention(n, assets, batchId + i),
