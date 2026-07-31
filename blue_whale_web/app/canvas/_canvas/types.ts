@@ -60,6 +60,12 @@ export type PendingMention = {
   type?: "image" | "video" | "audio";
 };
 
+/** 批量 mention 投递（右键多选「添加到聊天」），batchId 触发 effect 消费。 */
+export type PendingMentionBatch = {
+  mentions: PendingMention[];
+  batchId: number;
+};
+
 /** 重新编辑时从节点 recipe 回填底部栏的参数快照（P2：recipe.generation → Dock 预填）。 */
 export type DockPrefill = {
   prompt?: string;
