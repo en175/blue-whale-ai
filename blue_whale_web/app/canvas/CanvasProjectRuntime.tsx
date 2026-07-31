@@ -39,6 +39,7 @@ import {
   buildCrossmodalRefill,
   canvasNodeToDockMedia,
   cardToV2ImageFields,
+  nodeToPendingMention,
   recipeToDockPrefill,
 } from "./_canvas/v2/mappers";
 import { findPlacement, type Rect } from "./_canvas/placement";
@@ -80,7 +81,13 @@ import {
   productImportImageId,
   productImportPatch,
 } from "./_canvas/productImport";
-import type { DockMediaItem, GenerateArgs, PrefillSignal } from "./_canvas";
+import type {
+  DockMediaItem,
+  GenerateArgs,
+  PendingMention,
+  PendingMentionBatch,
+  PrefillSignal,
+} from "./_canvas";
 import type { CardMessage, ChatMessage } from "./_canvas";
 import { canonicalCanvasHref } from "./canonical-project";
 
@@ -244,10 +251,8 @@ export function CanvasProjectRuntime({
   const [lastFrameAssetId, setLastFrameAssetId] = useState<
     WireInteger | undefined
   >(undefined);
-  const [agentPendingMention, setAgentPendingMention] = useState<{
-    name: string;
-    nonce: number;
-  } | null>(null);
+  const [agentPendingMention, setAgentPendingMention] =
+    useState<PendingMentionBatch | null>(null);
   const [pickingFor, setPickingFor] = useState<
     | "image"
     | "video"
@@ -449,7 +454,11 @@ export function CanvasProjectRuntime({
         }
         case "mention": {
           setIsAgentOpen(true);
-          setAgentPendingMention({ name, nonce: Date.now() });
+          const batchId = Date.now();
+          setAgentPendingMention({
+            mentions: [{ name, nonce: batchId }],
+            batchId,
+          });
           break;
         }
         case "video":
@@ -1076,11 +1085,21 @@ export function CanvasProjectRuntime({
           }
           break;
         }
+        case "add-to-chat": {
+          const targets = nodes.filter((n) => targetIds.includes(n.id));
+          const batchId = Date.now();
+          const mentions: PendingMention[] = targets.map((n, i) =>
+            nodeToPendingMention(n, assets, batchId + i),
+          );
+          setIsAgentOpen(true);
+          setAgentPendingMention({ mentions, batchId });
+          break;
+        }
         default:
           break;
       }
     },
-    [nodeMenu, nodes, onNodesChange, addNodeFull],
+    [nodeMenu, nodes, onNodesChange, addNodeFull, assets],
   );
 
   const handleCardGenerated = useCallback(

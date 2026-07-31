@@ -57,6 +57,32 @@ describe("buildPill", () => {
     expect(el.style.cssText).toContain("var(--tc-text-secondary)");
     expect(el.style.cssText).not.toContain("rgba(255,255,255,0.1)");
   });
+
+  it("video 类型 pill 渲染 🎬 图标占位且 type 属性正确", () => {
+    const el = buildPill({ id: "v1", type: "video", name: "产品演示" });
+    expect(el.getAttribute("data-mention-type")).toBe("video");
+    expect(el.textContent).toContain("🎬");
+    expect(el.textContent).toContain("产品演示");
+  });
+
+  it("audio 类型 pill 渲染 🎵 图标占位且 type 属性正确", () => {
+    const el = buildPill({ id: "a1", type: "audio", name: "背景音乐" });
+    expect(el.getAttribute("data-mention-type")).toBe("audio");
+    expect(el.textContent).toContain("🎵");
+    expect(el.textContent).toContain("背景音乐");
+  });
+
+  it("video 带 src 时渲染缩略图而非图标", () => {
+    const el = buildPill({
+      id: "v2",
+      type: "video",
+      name: "视频",
+      src: "/vid/thumb.png",
+    });
+    const img = el.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.src).toContain("/vid/thumb.png");
+  });
 });
 
 describe("extractEditor", () => {
