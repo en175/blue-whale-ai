@@ -2,7 +2,8 @@
  * bottom-dock-reference.spec.ts —— IK2BCU：BottomDock 私有参考图鉴权预览与提交。
  *
  * 用户动线全覆盖（route-intercept 模式，参照 e2e/generate/generate-inbox.spec.ts）：
- *  1. 画布已有私有 Asset 图片节点（Snapshot 持久化，access_url 受保护）；
+ *  1. 画布已有私有 Asset 图片节点（/api/canvases doc 持久化节点，Snapshot 提供
+ *     assets access_url 水合，access_url 受保护）；
  *  2. 打开图片 Dock →「从画布选择」→ 点中节点 → Dock 缩略图经带身份读取展示
  *     （断言内容请求携带 Authorization、缩略图 src 为 blob: 临时资源、
  *     Dock 内不存在以受保护地址为 src 的普通图片请求）；
@@ -34,7 +35,19 @@ function fulfillJson(route: Route, body: string, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body });
 }
 
-/** Snapshot：项目 42 画布持久化一张私有图片节点（Asset 9，受保护 access_url）。 */
+/** 画布 doc 持久化的私有图片节点（Asset 9，受保护 access_url；老 NodeItem 平铺格式）。 */
+const PERSISTED_IMAGE_NODE = {
+  id: "node-img-1",
+  type: "image",
+  position: { x: 120, y: 120 },
+  width: 240,
+  height: 240,
+  content: "蓝鲸参考图",
+  assetId: "9",
+  imageUrl: ASSET_CONTENT_URL,
+};
+
+/** Snapshot：画布节点由 /api/canvases doc 提供，这里只提供 assets（access_url 水合）。 */
 function snapshot() {
   return {
     project: {
@@ -47,18 +60,7 @@ function snapshot() {
       id: 1,
       project_id: 42,
       viewport: null,
-      nodes: JSON.stringify([
-        {
-          id: "node-img-1",
-          type: "image",
-          position: { x: 120, y: 120 },
-          width: 240,
-          height: 240,
-          content: "蓝鲸参考图",
-          assetId: "9",
-          imageUrl: ASSET_CONTENT_URL,
-        },
-      ]),
+      nodes: null,
     },
     conversation_messages: [],
     agent_runs: [],
@@ -123,7 +125,12 @@ test("BottomDock 私有参考图：鉴权预览 → 提交当前选中 Asset →
   await page.route("**/api/canvases**", (route) =>
     fulfillJson(
       route,
-      result({ id: 1, project_id: 42, nodes: null, viewport: null }),
+      result({
+        id: 1,
+        project_id: 42,
+        nodes: JSON.stringify([PERSISTED_IMAGE_NODE]),
+        viewport: null,
+      }),
     ),
   );
   await page.route("**/api/generation/models?**", (route) =>
