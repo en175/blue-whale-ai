@@ -1,28 +1,28 @@
-import { createNewApiClient, NewApiError } from "@blue-whale/core";
+import { createTopupTierDeps } from "@/lib/topup-tier/deps";
 
-export async function GET(_request: Request) {
-  const baseUrl = process.env.NEW_API_BASE_URL;
-  if (!baseUrl) {
-    return Response.json(
-      { code: 503, msg: "NEW_API_BASE_URL 未配置", data: null },
-      { status: 503 },
-    );
-  }
+/**
+ * GET /api/recharge/tiers — 用户端充值档位列表
+ *
+ * 数据源：blue_whale DB topup_tiers（仅 active + 时间窗口内）。
+ * 响应沿用 { code, msg, data: { tiers } } 信封，与前端 apiRequest 对齐。
+ */
+export async function GET() {
   try {
-    const result = await createNewApiClient({ baseUrl }).getRechargeTiers();
-    return Response.json({ code: 200, msg: null, data: result });
-  } catch (error) {
-    const status =
-      error instanceof NewApiError && error.status >= 400 && error.status < 500
-        ? error.status
-        : 502;
-    return Response.json(
-      {
-        code: status,
-        msg: error instanceof Error ? error.message : "档位服务不可用",
-        data: null,
-      },
-      { status },
-    );
+    const { db } = createTopupTierDeps();
+    const rows = await db.listActive();
+    const tiers = rows.map((t) => ({
+      id: t.id,
+      name: t.name,
+      amount: t.amount,
+      price: t.price,
+      original_price: t.originalPrice,
+      discount: t.discount,
+      is_recommended: t.isRecommended,
+      sort_order: t.sortOrder,
+    }));
+    return Response.json({ code: 200, msg: null, data: { tiers } });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "档位服务不可用";
+    return Response.json({ code: 500, msg, data: null }, { status: 500 });
   }
 }

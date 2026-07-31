@@ -11,9 +11,9 @@ export type RechargeTierDto = {
   id: string; // "tier_100"
   name: string; // 档位名称
   amount: number; // 购买积分数
-  price: number; // 价格（元）
+  price: number; // 实付价格（元）
   original_price?: number | null; // 原价
-  bonus: number; // 赠送积分，0 = 无赠送
+  discount?: number; // 折扣比例，1 = 无折扣
   is_recommended: boolean; // 推荐档位
   sort_order: number;
 };

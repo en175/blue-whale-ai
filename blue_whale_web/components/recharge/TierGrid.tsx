@@ -34,8 +34,9 @@ export function TierGrid({
         const mapped: RechargeTier[] = res.tiers.map((t) => ({
           id: t.id,
           amount: t.amount,
+          originalPrice: t.original_price ?? t.price,
+          discount: t.discount ?? 1,
           price: t.price,
-          bonus: t.bonus,
           isRecommended: t.is_recommended,
           sortOrder: t.sort_order,
         }));

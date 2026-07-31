@@ -152,15 +152,22 @@ export function PaymentPanel({
               </p>
               <p className="text-[16px] font-medium text-[var(--tc-primary,#ffffff)] mt-0.5">
                 {selectedTier.amount.toLocaleString()} 积分
-                {selectedTier.bonus > 0 && (
+                {selectedTier.discount < 1 && (
                   <span className="text-[12px] text-[var(--tc-accent,#3b82f6)] ml-1">
-                    +{selectedTier.bonus} 赠送
+                    {Math.round(selectedTier.discount * 100) / 10}折
                   </span>
                 )}
               </p>
-              <p className="text-[22px] font-semibold text-[var(--tc-primary,#ffffff)] mt-2">
-                ¥{selectedTier.price}
-              </p>
+              <div className="flex items-baseline gap-2 mt-2">
+                <span className="text-[22px] font-semibold text-[var(--tc-primary,#ffffff)]">
+                  ¥{selectedTier.price}
+                </span>
+                {selectedTier.discount < 1 && (
+                  <span className="text-[14px] text-[var(--tc-muted,rgba(255,255,255,0.4))] line-through">
+                    ¥{selectedTier.originalPrice}
+                  </span>
+                )}
+              </div>
             </div>
 
             <button

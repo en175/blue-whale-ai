@@ -422,6 +422,28 @@ model verification_codes {
   @@index([phone, is_used, gmt_expire], map: "idx_phone_unused")
 }
 
+// ===== 充值档位（blue_whale 侧 CRUD，支付执行走 Go new-api） =====
+
+model topup_tiers {
+  id             BigInt    @id @default(autoincrement())
+  name           String    @default("") @db.VarChar(100)
+  amount         BigInt
+  original_price Float
+  discount       Float     @default(1)
+  price          Float
+  is_recommended Boolean   @default(false)
+  status         String    @default("active") @db.VarChar(16)
+  start_time     DateTime? @db.DateTime(0)
+  end_time       DateTime? @db.DateTime(0)
+  sort_order     Int       @default(0)
+  gmt_create     DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified   DateTime  @default(now()) @db.DateTime(0)
+  version        Int       @default(0)
+  is_delete      Int       @default(0) @db.TinyInt
+
+  @@index([status, sort_order], map: "idx_tier_status_sort")
+}
+
 // ===== 生成子系统（简化版，Node 自有 worker）：流水 + 日志 + 素材关联 + 点数 =====
 
 model cost_reservations {

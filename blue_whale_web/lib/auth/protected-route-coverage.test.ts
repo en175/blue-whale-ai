@@ -24,6 +24,11 @@ const EXEMPT = new Set([
   "recharge/order/[tradeNo]/cancel/route.ts",
   "recharge/order/[tradeNo]/status/route.ts",
   "recharge/tiers/route.ts",
+  // IK51OP 充值档位管理：管理端 API，鉴权后续接入（当前先打通 CRUD）。
+  "admin/topup-tiers/route.ts",
+  "admin/topup-tiers/[id]/route.ts",
+  "admin/topup-tiers/sort/route.ts",
+  "admin/topup-tiers/preview/route.ts",
 ]);
 
 const SKIPPED_DIRECTORIES = new Set([
