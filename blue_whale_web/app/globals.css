@@ -160,6 +160,39 @@ body {
   --tc-dock-control-hover-bg: rgba(255, 255, 255, 0.12);
   --tc-dock-control-active-bg: rgba(255, 255, 255, 0.12);
 
+  /* Dock 文字层级（IK5JV5：VideoDockContent 硬编码替换） */
+  --tc-dock-text-strong: rgba(255, 255, 255, 0.85);
+  --tc-dock-text: rgba(255, 255, 255, 0.72);
+  --tc-dock-text-label: rgba(255, 255, 255, 0.65);
+  --tc-dock-text-hint: rgba(255, 255, 255, 0.62);
+  --tc-dock-text-caption: rgba(255, 255, 255, 0.45);
+  --tc-dock-text-faint: rgba(255, 255, 255, 0.35);
+  --tc-dock-text-disabled: rgba(255, 255, 255, 0.32);
+  --tc-dock-text-placeholder: rgba(255, 255, 255, 0.3);
+  --tc-dock-text-ghost: rgba(255, 255, 255, 0.22);
+
+  /* Dock 填充 / 边框 */
+  --tc-dock-fill: rgba(255, 255, 255, 0.07);
+  --tc-dock-fill-subtle: rgba(255, 255, 255, 0.06);
+  --tc-dock-fill-ghost: rgba(255, 255, 255, 0.043);
+  --tc-dock-fill-faint: rgba(255, 255, 255, 0.04);
+  --tc-dock-border-ghost: rgba(255, 255, 255, 0.02);
+  --tc-dock-divider: rgba(255, 255, 255, 0.07);
+  --tc-dock-toggle-on: rgba(255, 255, 255, 0.5);
+  --tc-dock-toggle-off: rgba(255, 255, 255, 0.15);
+
+  /* Dock 弹出层背景 / 投影 */
+  --tc-dock-popover-bg: rgba(41, 41, 41, 0.92);
+  --tc-dock-popup-bg: rgb(30, 30, 30);
+  --tc-dock-panel-bg: rgb(29, 29, 29);
+  --tc-dock-popover-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --tc-dock-popup-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  --tc-dock-knob-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --tc-chrome-float-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+
+  /* 图标 stroke（IK5JV5：config.tsx 硬编码替换） */
+  --tc-icon-stroke: rgba(255, 255, 255, 0.8);
+
   /* Toast 通知 —— 对齐 DESIGN.md destructive / success token */
   --tc-toast-error-bg: rgba(239, 68, 68, 0.92);
   --tc-toast-success-bg: rgba(34, 197, 94, 0.92);
