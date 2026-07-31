@@ -958,13 +958,7 @@ export function GroupNode({ data }: NodeProps) {
  * chrome：选中时顶部居中浮出 @ 按钮（点击无行为，预留）；不做「重新编辑」。
  * character 独有底部「音色」区（常显虚线框，悬停展开上传态；选择器数据后续，mock）。
  */
-export function ReferenceNode({
-  id,
-  data,
-  width,
-  height,
-  selected,
-}: NodeProps) {
+export function ReferenceNode({ id, data, width, selected }: NodeProps) {
   const d = data as unknown as CanvasNodeData;
   const cardType: ReferenceCardType = d.cardType ?? "custom";
   const meta =
@@ -1073,16 +1067,16 @@ export function ReferenceNode({
         onPointerLeave={() => setHovered(false)}
         style={{
           width: cardWidth,
-          // 已填态高度内容驱动（图高随宽高比）；空/留史态用持久高度或默认；
-          // IK55VZ 商品卡:内容驱动 + minHeight 兜底(新建落点 560)
+          // 已填态高度内容驱动（图高随宽高比）；空/留史态用默认卡高；
+          // IK55VZ 商品卡:内容驱动 + minHeight 兜底(新建落点 560)。
+          // 禁用 RF NodeProps.height:它是 measured 回读(CanvasSurface 剥离 node.height 后
+          // 首测前为 0),钉进内联样式会形成 0→测得 2px→钉 2px 的自反馈塌缩环。
           height: isProduct
             ? undefined
             : hasImage
               ? undefined
-              : (height ?? referenceCardHeight(cardType)),
-          minHeight: isProduct
-            ? (height ?? referenceCardHeight(cardType))
-            : undefined,
+              : referenceCardHeight(cardType),
+          minHeight: isProduct ? referenceCardHeight(cardType) : undefined,
           outline: dropHighlight
             ? "2px solid var(--tc-accent)"
             : selected
