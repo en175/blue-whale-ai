@@ -6,6 +6,8 @@
 >
 > **双层载体**：本地 CC（markdown 模拟卡片，可跑验证）↔ 平台 UI（真卡片）。**卡片概念归属平台 UI**，本地版是对齐验证；每条规格须说明两层各如何呈现，字段一一对应。
 >
+> **载体架构（代码现状，2026-08-01 核实）**：蓝鲸 UI 三层——① **画布 `CanvasSurface`（主区 ReactFlow）**：平铺**素材节点**（image/video/audio 媒体）+ reference 参考卡 / product 产品卡（素材绑定卡），**素材平铺区，非卡载体**；② **右侧 `AgentChatPanel`（侧边对话框）**：消息流（UserMessage/AgentMessage + ThinkingBlock 思考摘要）+ **`AgentCard`（确认产物卡）**，**本规格所有「卡」承载于此（消息流里的 AgentCard）**；③ **底部 `BottomDock`**：生成输入栏（prompt + 模型 + `@素材` mention，@图片N 引用入口）。即本规格「平台 UI 真卡」= AgentChatPanel 的 AgentCard（消息流里的卡），**不在画布**；画布素材展示归票15。`scene-card` prototype（IK4Q4E）「卡在画布」是废弃旧方案（注释「评审后删除」）。
+>
 > **PM 边界（红线）**：本规格只定产品行为（看到什么 / 怎么操作 / 各场景响应）；数据模型 / branch 路由 / 状态机 / AgentRun 持久化归后端（如 IK2D7Z）。生成管线本身（平台生成 API）也归后端，本地止于提示词交付包。
 
 ## 目的
@@ -903,9 +905,9 @@ _源：用户上传保温杯爆款片段 · 拆解方式：direct_multimodal_
 - `workflows/video-decode-replicate.md` 复刻阶段步骤1 brief(replicate) 与本规格一致，**无修订**（票13 涌现的复刻决策门修订另计）。
 - **无涌现修订工单**（票14 全部从既有编排源 + 已填票推导）。
 
-## 票15 ⏳ 多模态输入展示 + @图片N 引用（IK5LVJ，blocked by 1）
+## 票15 ⏳ 多模态输入展示 + @图片N 引用（IK5LVB，blocked by 1）
 
-## 票16 ⏳ 阶段回退 / 局部改镜 / Stop 交互（IK5LVK，blocked by 1）
+## 票16 ⏳ 阶段回退 / 局部改镜 / Stop 交互（IK5LVJ，blocked by 1）
 
 ## 票17 ⏳ 一键复制提示词 交互（IK5LVK，blocked by 8）
 
