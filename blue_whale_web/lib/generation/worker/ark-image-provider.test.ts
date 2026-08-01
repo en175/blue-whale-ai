@@ -39,12 +39,14 @@ describe("generation image provider routing", () => {
   });
 
   it("uses new-api multipart edits when the worker supplies a source image", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({ data: [{ url: "https://cdn.test/edited.png" }] }),
-        { status: 200 },
-      ),
-    );
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ data: [{ url: "https://cdn.test/edited.png" }] }),
+          { status: 200 },
+        ),
+      );
     const provider = createGenerationImageProvider({
       env: { NEW_API_BASE_URL: "http://new-api.test" },
       token: "sk-user",

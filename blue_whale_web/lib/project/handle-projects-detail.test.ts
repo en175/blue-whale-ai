@@ -14,7 +14,12 @@ function makeRepo() {
   };
 }
 
-const sample = { id: "1", name: "p", thumb: null, created_at: "2026-07-27T00:00:00.000Z" };
+const sample = {
+  id: "1",
+  name: "p",
+  thumb: null,
+  created_at: "2026-07-27T00:00:00.000Z",
+};
 
 describe("handleGetProject", () => {
   it("找到且归属对 → 200 + ProjectView", async () => {
@@ -36,21 +41,30 @@ describe("handleRenameProject", () => {
   it("合法 name + 找到 → 200", async () => {
     const db = makeRepo();
     db.rename.mockResolvedValue({ ...sample, name: "改名" });
-    const result = await handleRenameProject("9", "1", { name: "改名" }, { db });
+    const result = await handleRenameProject(
+      "9",
+      "1",
+      { name: "改名" },
+      { db },
+    );
     expect(result.code).toBe(200);
     expect(db.rename).toHaveBeenCalledWith("1", "9", "改名");
   });
 
   it("空 name → 400", async () => {
     const db = makeRepo();
-    expect((await handleRenameProject("9", "1", { name: "  " }, { db })).code).toBe(400);
+    expect(
+      (await handleRenameProject("9", "1", { name: "  " }, { db })).code,
+    ).toBe(400);
     expect(db.rename).not.toHaveBeenCalled();
   });
 
   it("找不到 → 100100", async () => {
     const db = makeRepo();
     db.rename.mockResolvedValue(null);
-    expect((await handleRenameProject("9", "1", { name: "x" }, { db })).code).toBe(100100);
+    expect(
+      (await handleRenameProject("9", "1", { name: "x" }, { db })).code,
+    ).toBe(100100);
   });
 });
 

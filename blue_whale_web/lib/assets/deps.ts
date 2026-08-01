@@ -21,7 +21,9 @@ export function createAssetsDeps() {
 }
 
 /** 用户直传签名依赖：只构造 TOS，不触碰 Prisma。 */
-export function createAssetPresignDeps(): { storage: AssetUploadStorage | null } {
+export function createAssetPresignDeps(): {
+  storage: AssetUploadStorage | null;
+} {
   const tosConfig = loadTosStorageConfig();
   return {
     storage: tosConfig ? createTosStorage(tosConfig).uploads : null,
@@ -48,7 +50,9 @@ export function createAssetCommitDeps(): {
 export function createProjectAssetsDeps() {
   const db = prisma();
   const tosConfig = loadTosStorageConfig();
-  const tos = tosConfig ? createTosStorage(tosConfig) : { signer: null, reader: null };
+  const tos = tosConfig
+    ? createTosStorage(tosConfig)
+    : { signer: null, reader: null };
   return {
     project: createProjectRepo(db),
     assets: createAssetRepo(db),

@@ -15,11 +15,7 @@
  * SKIP_AUTH 模式下：所有操作禁用 + 提示（整个 modal 不可交互，由 AccountModal 的换绑按钮已禁用兜底）。
  */
 import { useEffect, useRef, useState } from "react";
-import {
-  fetchCaptcha,
-  sendChangePhoneCode,
-  changePhone,
-} from "@/lib/auth";
+import { fetchCaptcha, sendChangePhoneCode, changePhone } from "@/lib/auth";
 import { useAuth } from "./AuthContext";
 import { SKIP_AUTH } from "./authStorage";
 import { getErrorMessage, maskPhone } from "./format";
@@ -70,7 +66,10 @@ export function RebindPhoneModal({ onClose }: RebindPhoneModalProps) {
       }
       return;
     }
-    timerRef.current = setTimeout(() => setCountdown((c) => Math.max(0, c - 1)), 1000);
+    timerRef.current = setTimeout(
+      () => setCountdown((c) => Math.max(0, c - 1)),
+      1000,
+    );
     return () => {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
@@ -201,7 +200,8 @@ export function RebindPhoneModal({ onClose }: RebindPhoneModalProps) {
         </h2>
         {step !== "done" && (
           <span className="text-[12px] text-white/40 tabular-nums">
-            步骤 {step === "confirm-identity" ? 1 : step === "input-new" ? 2 : 3} / 3
+            步骤{" "}
+            {step === "confirm-identity" ? 1 : step === "input-new" ? 2 : 3} / 3
           </span>
         )}
       </div>
@@ -220,7 +220,9 @@ export function RebindPhoneModal({ onClose }: RebindPhoneModalProps) {
           </p>
           <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-4">
             <div className="text-[11px] text-white/40 mb-1">当前绑定手机号</div>
-            <div className="text-[16px] text-white/90 tabular-nums">{maskPhone(oldPhone)}</div>
+            <div className="text-[16px] text-white/90 tabular-nums">
+              {maskPhone(oldPhone)}
+            </div>
           </div>
           <button
             type="button"
@@ -241,7 +243,9 @@ export function RebindPhoneModal({ onClose }: RebindPhoneModalProps) {
           </p>
           {/* 新手机号 */}
           <div>
-            <label className="block text-[13px] text-white/55 mb-1.5">新手机号</label>
+            <label className="block text-[13px] text-white/55 mb-1.5">
+              新手机号
+            </label>
             <div className="flex items-center bg-white/[0.05] rounded-lg px-3 border border-white/[0.06] focus-within:border-white/20 transition-colors">
               <span className="inline-flex items-center text-sm text-white/55 border-r border-white/[0.06] pr-2 mr-1 select-none">
                 +86
@@ -256,12 +260,16 @@ export function RebindPhoneModal({ onClose }: RebindPhoneModalProps) {
               />
             </div>
             {newPhoneError && (
-              <p className="mt-1 text-[12px] text-[var(--tc-destructive)]">{newPhoneError}</p>
+              <p className="mt-1 text-[12px] text-[var(--tc-destructive)]">
+                {newPhoneError}
+              </p>
             )}
           </div>
           {/* 短信验证码 */}
           <div>
-            <label className="block text-[13px] text-white/55 mb-1.5">短信验证码</label>
+            <label className="block text-[13px] text-white/55 mb-1.5">
+              短信验证码
+            </label>
             <div className="flex items-center gap-2">
               <div className="flex-1 flex items-center bg-white/[0.05] rounded-lg px-3 border border-white/[0.06] focus-within:border-white/20 transition-colors">
                 <input
@@ -278,11 +286,17 @@ export function RebindPhoneModal({ onClose }: RebindPhoneModalProps) {
                 onClick={handleSendCode}
                 className="h-10 px-3 rounded-lg text-[13px] text-white/85 border border-white/[0.08] hover:bg-white/[0.05] disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
               >
-                {countdown > 0 ? `${countdown}s 后重发` : loading ? "获取中…" : "获取验证码"}
+                {countdown > 0
+                  ? `${countdown}s 后重发`
+                  : loading
+                    ? "获取中…"
+                    : "获取验证码"}
               </button>
             </div>
             {smsCodeError && (
-              <p className="mt-1 text-[12px] text-[var(--tc-destructive)]">{smsCodeError}</p>
+              <p className="mt-1 text-[12px] text-[var(--tc-destructive)]">
+                {smsCodeError}
+              </p>
             )}
           </div>
           <div className="flex gap-2">
@@ -314,7 +328,9 @@ export function RebindPhoneModal({ onClose }: RebindPhoneModalProps) {
           <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-4 flex items-center justify-center gap-3">
             <div className="text-center">
               <div className="text-[11px] text-white/40 mb-1">当前</div>
-              <div className="text-[15px] text-white/70 tabular-nums">{maskPhone(oldPhone)}</div>
+              <div className="text-[15px] text-white/70 tabular-nums">
+                {maskPhone(oldPhone)}
+              </div>
             </div>
             <span className="text-white/40 text-lg">→</span>
             <div className="text-center">
@@ -353,7 +369,9 @@ export function RebindPhoneModal({ onClose }: RebindPhoneModalProps) {
         <div className="py-6 text-center">
           <div className="text-4xl mb-4">✅</div>
           <p className="text-[15px] text-white/90 mb-1">手机号换绑成功</p>
-          <p className="text-[13px] text-white/45 tabular-nums">新绑定：{maskPhone(newPhone)}</p>
+          <p className="text-[13px] text-white/45 tabular-nums">
+            新绑定：{maskPhone(newPhone)}
+          </p>
         </div>
       )}
 
@@ -378,7 +396,9 @@ export function RebindPhoneModal({ onClose }: RebindPhoneModalProps) {
             maxLength={6}
           />
           {captchaError && (
-            <p className="text-[12px] text-[var(--tc-destructive)]">{captchaError}</p>
+            <p className="text-[12px] text-[var(--tc-destructive)]">
+              {captchaError}
+            </p>
           )}
           <div className="flex gap-2">
             <button

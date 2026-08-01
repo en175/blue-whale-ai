@@ -24,7 +24,8 @@ export function AuthenticatedImage({
     let currentObjectUrl: string | null = null;
     void apiFetch(accessUrl, { signal: controller.signal })
       .then((response) => {
-        if (!response.ok) throw new Error(`Asset request failed: ${response.status}`);
+        if (!response.ok)
+          throw new Error(`Asset request failed: ${response.status}`);
         return response.blob();
       })
       .then((blob) => {

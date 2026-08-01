@@ -7,7 +7,11 @@ interface CanvasDeps {
 }
 
 /** GET /api/canvases?projectId=：先验 project 归属 → 返回 canvas（无记录 id=null）。 */
-export async function handleGetCanvas(ownerId: string, projectId: string, deps: CanvasDeps) {
+export async function handleGetCanvas(
+  ownerId: string,
+  projectId: string,
+  deps: CanvasDeps,
+) {
   const owned = await deps.project.findOwnedById(projectId, ownerId);
   if (!owned) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
   return ok(await deps.canvas.getByProject(projectId));

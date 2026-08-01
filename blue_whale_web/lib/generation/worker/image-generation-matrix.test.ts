@@ -130,12 +130,7 @@ describe("image generation contract matrix", () => {
                     },
                     expected_output_count: quantity,
                   };
-                  const repo = matrixRepo(
-                    job,
-                    model.id,
-                    size,
-                    referenceCount,
-                  );
+                  const repo = matrixRepo(job, model.id, size, referenceCount);
                   const provider: ImageProvider = {
                     generate: vi
                       .fn()

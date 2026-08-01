@@ -48,7 +48,9 @@ export function presignAsset(
   });
 }
 
-export function completeAsset(req: CompleteAssetRequest): Promise<AssetResponse> {
+export function completeAsset(
+  req: CompleteAssetRequest,
+): Promise<AssetResponse> {
   return apiRequest<AssetResponse>("/api/agent/assets/uploads/complete", {
     method: "POST",
     body: JSON.stringify(req),

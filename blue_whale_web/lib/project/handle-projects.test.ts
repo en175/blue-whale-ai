@@ -14,7 +14,12 @@ function makeRepo() {
   };
 }
 
-const sample = { id: "1", name: "我的画布", thumb: null, created_at: "2026-07-27T00:00:00.000Z" };
+const sample = {
+  id: "1",
+  name: "我的画布",
+  thumb: null,
+  created_at: "2026-07-27T00:00:00.000Z",
+};
 
 describe("handleListProjects", () => {
   it("列出 owner 的项目 → 200 + ProjectView[]", async () => {

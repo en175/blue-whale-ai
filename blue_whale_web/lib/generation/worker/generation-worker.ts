@@ -16,7 +16,10 @@ export type WorkerDeps = {
   videoProvider?: VideoProvider;
   workerId: string;
   fetchImpl?: typeof fetch;
-  mediaStorage?: Pick<AssetUploadStorage, "prepareUpload" | "makePublic"> | null;
+  mediaStorage?: Pick<
+    AssetUploadStorage,
+    "prepareUpload" | "makePublic"
+  > | null;
 };
 
 /** 瞬时失败码：网络不可达 / 结果转存失败等——重试有意义。quota/config/校验类不算瞬时。 */
@@ -296,10 +299,7 @@ async function processClaimedJob(
       const nextActionAt = new Date(
         Date.now() + imageRetryBackoffMs(job.retry_count),
       );
-      const requeued = await repo.requeueImageJobForRetry(
-        job.id,
-        nextActionAt,
-      );
+      const requeued = await repo.requeueImageJobForRetry(job.id, nextActionAt);
       if (requeued) {
         await repo.appendLog(
           job.id,
@@ -320,9 +320,7 @@ async function persistProviderMedia(
   type: "image" | "video",
   userId: string,
   storage:
-    | Pick<AssetUploadStorage, "prepareUpload" | "makePublic">
-    | null
-    | undefined,
+    Pick<AssetUploadStorage, "prepareUpload" | "makePublic"> | null | undefined,
   fetchImpl: typeof fetch,
 ): Promise<{
   url: string;

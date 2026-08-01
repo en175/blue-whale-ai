@@ -11,19 +11,37 @@ type Container = { type: "grid"; cols: string } | { type: "scroll" };
  * 各标签的容器布局与外层最大宽度（纯前端视图配置，不落库）。
  * cards 数据由后端 /templates/page 接口按 tagCode 分页返回。
  */
-const TAG_CONFIG: Record<string, { container: Container; wrapMaxWidth: string }> = {
-  marketing: { container: { type: "grid", cols: "md:grid-cols-4" }, wrapMaxWidth: "max-w-[1135px]" },
-  short: { container: { type: "grid", cols: "md:grid-cols-3" }, wrapMaxWidth: "max-w-[848px]" },
-  replicate: { container: { type: "grid", cols: "md:grid-cols-3" }, wrapMaxWidth: "max-w-[848px]" },
+const TAG_CONFIG: Record<
+  string,
+  { container: Container; wrapMaxWidth: string }
+> = {
+  marketing: {
+    container: { type: "grid", cols: "md:grid-cols-4" },
+    wrapMaxWidth: "max-w-[1135px]",
+  },
+  short: {
+    container: { type: "grid", cols: "md:grid-cols-3" },
+    wrapMaxWidth: "max-w-[848px]",
+  },
+  replicate: {
+    container: { type: "grid", cols: "md:grid-cols-3" },
+    wrapMaxWidth: "max-w-[848px]",
+  },
   social: { container: { type: "scroll" }, wrapMaxWidth: "" },
-  image: { container: { type: "grid", cols: "md:grid-cols-3" }, wrapMaxWidth: "max-w-[848px]" },
+  image: {
+    container: { type: "grid", cols: "md:grid-cols-3" },
+    wrapMaxWidth: "max-w-[848px]",
+  },
 };
 
 function Skeleton() {
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
       {Array.from({ length: 8 }).map((_, i) => (
-        <div key={i} className="aspect-[4/5] animate-pulse rounded-xl bg-white/[0.04]" />
+        <div
+          key={i}
+          className="aspect-[4/5] animate-pulse rounded-xl bg-white/[0.04]"
+        />
       ))}
     </div>
   );
@@ -31,7 +49,13 @@ function Skeleton() {
 
 export { TAG_CONFIG };
 
-export default function TemplateCards({ activeTag, onAppendPrompt }: { activeTag: string; onAppendPrompt?: (text: string) => void }) {
+export default function TemplateCards({
+  activeTag,
+  onAppendPrompt,
+}: {
+  activeTag: string;
+  onAppendPrompt?: (text: string) => void;
+}) {
   const [cards, setCards] = useState<TemplateCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +80,8 @@ export default function TemplateCards({ activeTag, onAppendPrompt }: { activeTag
     };
   }, [activeTag]);
 
-  const container = TAG_CONFIG[activeTag]?.container ?? TAG_CONFIG.marketing.container;
+  const container =
+    TAG_CONFIG[activeTag]?.container ?? TAG_CONFIG.marketing.container;
 
   if (loading) {
     return <Skeleton />;
@@ -75,7 +100,12 @@ export default function TemplateCards({ activeTag, onAppendPrompt }: { activeTag
       <div className="ncs-thin-scrollbar -mx-4 w-[calc(100%+2rem)] overflow-x-auto px-4 pb-1">
         <div className="flex w-max min-w-full justify-center gap-3">
           {cards.map((card, idx) => (
-            <TemplateCardItem key={`${activeTag}-${idx}`} card={card} index={idx} onAppendPrompt={onAppendPrompt} />
+            <TemplateCardItem
+              key={`${activeTag}-${idx}`}
+              card={card}
+              index={idx}
+              onAppendPrompt={onAppendPrompt}
+            />
           ))}
         </div>
       </div>
@@ -85,7 +115,12 @@ export default function TemplateCards({ activeTag, onAppendPrompt }: { activeTag
   return (
     <div className={`grid grid-cols-2 gap-3 ${container.cols}`}>
       {cards.map((card, idx) => (
-        <TemplateCardItem key={`${activeTag}-${idx}`} card={card} index={idx} onAppendPrompt={onAppendPrompt} />
+        <TemplateCardItem
+          key={`${activeTag}-${idx}`}
+          card={card}
+          index={idx}
+          onAppendPrompt={onAppendPrompt}
+        />
       ))}
     </div>
   );

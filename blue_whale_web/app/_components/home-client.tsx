@@ -64,11 +64,12 @@ export default function HomeClient() {
         <div className="w-full flex flex-col items-center">
           <AgentComposer prompt={prompt} onPromptChange={setPrompt} />
 
-          <div
-            className={`mt-3 flex w-full flex-col gap-3 ${wrapMaxWidth}`}
-          >
+          <div className={`mt-3 flex w-full flex-col gap-3 ${wrapMaxWidth}`}>
             <QuickTags active={activeTag} onSelect={setActiveTag} />
-            <TemplateCards activeTag={activeTag} onAppendPrompt={handleAppendPrompt} />
+            <TemplateCards
+              activeTag={activeTag}
+              onAppendPrompt={handleAppendPrompt}
+            />
           </div>
         </div>
       </div>

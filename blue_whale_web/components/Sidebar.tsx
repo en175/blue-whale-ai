@@ -36,7 +36,8 @@ const NAV_ITEMS: NavItem[] = [
 export default function Sidebar() {
   const pathname = usePathname();
   // canvas 全屏工作台：左栏自隐藏，避免挤压/遮挡其内容。
-  if (pathname?.startsWith("/canvas") || pathname?.startsWith("/admin")) return null;
+  if (pathname?.startsWith("/canvas") || pathname?.startsWith("/admin"))
+    return null;
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname?.startsWith(href);

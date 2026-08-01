@@ -96,8 +96,7 @@ describe("resolveSeedreamImageSize", () => {
   it.each(
     CASES.flatMap(([model, size, dimensions]) =>
       RATIOS.map(
-        (ratio, index) =>
-          [model, size, ratio, dimensions[index]] as const,
+        (ratio, index) => [model, size, ratio, dimensions[index]] as const,
       ),
     ),
   )("%s %s %s -> %s", (model, size, ratio, expected) => {
@@ -106,21 +105,11 @@ describe("resolveSeedreamImageSize", () => {
 
   it("rejects unsupported model, resolution, and ratio combinations", () => {
     expect(
-      resolveSeedreamImageSize(
-        "doubao-seedream-5-0-pro-260628",
-        "4K",
-        "1:1",
-      ),
+      resolveSeedreamImageSize("doubao-seedream-5-0-pro-260628", "4K", "1:1"),
     ).toBeNull();
+    expect(resolveSeedreamImageSize("unknown-model", "2K", "1:1")).toBeNull();
     expect(
-      resolveSeedreamImageSize("unknown-model", "2K", "1:1"),
-    ).toBeNull();
-    expect(
-      resolveSeedreamImageSize(
-        "doubao-seedream-5-0-260128",
-        "2K",
-        "5:4",
-      ),
+      resolveSeedreamImageSize("doubao-seedream-5-0-260128", "2K", "5:4"),
     ).toBeNull();
   });
 });

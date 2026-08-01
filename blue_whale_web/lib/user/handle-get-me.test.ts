@@ -18,7 +18,12 @@ describe("handleGetMe", () => {
     expect(result).toEqual({
       code: 200,
       msg: null,
-      data: { user_id: "13", username: "用户ABCD", phone: "13047660776", has_password: false },
+      data: {
+        user_id: "13",
+        username: "用户ABCD",
+        phone: "13047660776",
+        has_password: false,
+      },
     });
   });
 

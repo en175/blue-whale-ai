@@ -21,7 +21,9 @@ describe("buildAssetInfoRows", () => {
       mimeType: "image/png",
     });
 
-    expect(Object.fromEntries(rows.map((row) => [row.label, row.value]))).toEqual({
+    expect(
+      Object.fromEntries(rows.map((row) => [row.label, row.value])),
+    ).toEqual({
       类型: "图片",
       尺寸: "1920 × 1080",
       格式: "PNG",
