@@ -132,6 +132,28 @@ describe("TextNode 三态状态机", () => {
     );
   });
 
+  it("只读态整卡可拖（IK5U3K）：内容区与编辑器根不带 nodrag；编辑态才附加", async () => {
+    const { container } = renderTextNode({
+      data: { prompt: "画一只猫" },
+      selected: true,
+    });
+    await waitFor(() => expect(richEditor(container)).not.toBeNull());
+    const contentArea = container.querySelector<HTMLElement>(
+      ".tc-text-node > div",
+    );
+    expect(contentArea?.className).not.toContain("nodrag");
+    expect(richEditor(container)?.className).not.toContain("nodrag");
+    // 进编辑态：nodrag 附加（文本选区不触发卡片拖拽）
+    fireEvent.doubleClick(container.querySelector(".tc-text-node")!);
+    await waitFor(() =>
+      expect(richEditor(container)?.getAttribute("contenteditable")).toBe(
+        "true",
+      ),
+    );
+    expect(contentArea?.className).toContain("nodrag");
+    expect(richEditor(container)?.className).toContain("nodrag");
+  });
+
   it("编辑态失焦：commit 回调带 richDoc(JSON doc) + 派生纯文本", async () => {
     const onEditRichText = vi.fn();
     const { container } = renderTextNode({
