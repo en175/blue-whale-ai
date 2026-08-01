@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import * as jestDomMatchers from "@testing-library/jest-dom/matchers";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { AuthProvider } from "./AuthContext";
 import { RebindPhoneModal } from "./RebindPhoneModal";
 import { saveUser } from "./authStorage";
@@ -18,11 +24,20 @@ vi.mock("@/lib/auth", () => ({
     captcha_token: "tok-1",
     captcha_image: "data:image/png;base64,xxx",
   }),
-  sendChangePhoneCode: vi.fn().mockResolvedValue({ success: true, expires_in: 300 }),
+  sendChangePhoneCode: vi
+    .fn()
+    .mockResolvedValue({ success: true, expires_in: 300 }),
   changePhone: vi.fn(),
-  fetchMe: vi.fn().mockResolvedValue({ user_id: 123, username: "用户7281", phone: "13800001234" }),
+  fetchMe: vi.fn().mockResolvedValue({
+    user_id: 123,
+    username: "用户7281",
+    phone: "13800001234",
+  }),
   ApiError: class ApiError extends Error {
-    constructor(message: string, public code?: number) {
+    constructor(
+      message: string,
+      public code?: number,
+    ) {
       super(message);
     }
   },
@@ -46,7 +61,7 @@ function renderWithLogin() {
   render(
     <AuthProvider>
       <RebindPhoneModal onClose={vi.fn()} />
-    </AuthProvider>
+    </AuthProvider>,
   );
 }
 
@@ -63,11 +78,15 @@ async function proceedToConfirm() {
   fireEvent.click(screen.getByRole("button", { name: "获取验证码" }));
   // 图形验证码叠加层：填图形码 + 发送短信
   await waitFor(() => screen.getByPlaceholderText("验证码"));
-  fireEvent.change(screen.getByPlaceholderText("验证码"), { target: { value: "ab12" } });
+  fireEvent.change(screen.getByPlaceholderText("验证码"), {
+    target: { value: "ab12" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "发送短信" }));
   // 短信码倒计时开始后填短信码
   await waitFor(() => screen.getByPlaceholderText("6 位验证码"));
-  fireEvent.change(screen.getByPlaceholderText("6 位验证码"), { target: { value: "123456" } });
+  fireEvent.change(screen.getByPlaceholderText("6 位验证码"), {
+    target: { value: "123456" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "下一步" }));
 
   // 应进入 confirm 步
@@ -89,7 +108,9 @@ describe("RebindPhoneModal", () => {
 
   it("S1: 换绑失败 → 清空短信码，回退 step2（不留旧码残留）", async () => {
     // changePhone 失败（如占用）
-    vi.mocked(changePhone).mockRejectedValueOnce(new Error("该手机号已被其他账号绑定"));
+    vi.mocked(changePhone).mockRejectedValueOnce(
+      new Error("该手机号已被其他账号绑定"),
+    );
     renderWithLogin();
     await proceedToConfirm();
 

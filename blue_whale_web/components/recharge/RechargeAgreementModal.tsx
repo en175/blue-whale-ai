@@ -43,7 +43,10 @@ export function RechargeAgreementModal({
       {error ? (
         /* error */
         <div className="flex flex-col items-center gap-3 py-8">
-          <AlertCircle size={36} className="text-[var(--tc-destructive,#ef4444)]" />
+          <AlertCircle
+            size={36}
+            className="text-[var(--tc-destructive,#ef4444)]"
+          />
           <p className="text-[14px] text-[var(--tc-secondary,rgba(255,255,255,0.7))]">
             {error}
           </p>
@@ -58,7 +61,10 @@ export function RechargeAgreementModal({
       ) : !title ? (
         /* loading */
         <div className="flex flex-col items-center gap-3 py-8">
-          <Loader2 size={36} className="animate-spin text-[var(--tc-accent,#3b82f6)]" />
+          <Loader2
+            size={36}
+            className="animate-spin text-[var(--tc-accent,#3b82f6)]"
+          />
           <p className="text-[14px] text-[var(--tc-muted,rgba(255,255,255,0.4))]">
             加载协议...
           </p>

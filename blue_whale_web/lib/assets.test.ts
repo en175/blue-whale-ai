@@ -152,7 +152,10 @@ describe("Assets API", () => {
       height: 1080,
       duration: 6.5,
     });
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 200 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
+    );
     vi.mocked(completeAsset).mockResolvedValue({
       asset_id: "42",
       status: "ready",

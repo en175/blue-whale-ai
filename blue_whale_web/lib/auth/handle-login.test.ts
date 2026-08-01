@@ -21,7 +21,10 @@ function makeDeps() {
 describe("handleLogin", () => {
   it("合法 phone+code → 200 + {accessToken, user}", async () => {
     const deps = makeDeps();
-    const result = await handleLogin({ phone: "15079999999", code: "123456" }, deps);
+    const result = await handleLogin(
+      { phone: "15079999999", code: "123456" },
+      deps,
+    );
     expect(result).toEqual({
       code: 200,
       msg: null,
@@ -35,7 +38,10 @@ describe("handleLogin", () => {
   it("验证码无效 → 400", async () => {
     const deps = makeDeps();
     deps.db.findValidCode = vi.fn().mockResolvedValue(null);
-    const result = await handleLogin({ phone: "15079999999", code: "wrong" }, deps);
+    const result = await handleLogin(
+      { phone: "15079999999", code: "wrong" },
+      deps,
+    );
     expect(result.code).toBe(400);
   });
 

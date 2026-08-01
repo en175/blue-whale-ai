@@ -18,7 +18,9 @@ export function getAdminUser(): AdminUser | null {
   try {
     const raw = localStorage.getItem("bw-admin-user");
     return raw ? (JSON.parse(raw) as AdminUser) : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 export function saveAdminSession(token: string, user: AdminUser) {

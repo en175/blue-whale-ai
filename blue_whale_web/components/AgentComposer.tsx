@@ -177,7 +177,9 @@ export default function AgentComposer({
         });
         return;
       }
-      const query = promptText ? `?prompt=${encodeURIComponent(promptText)}` : "";
+      const query = promptText
+        ? `?prompt=${encodeURIComponent(promptText)}`
+        : "";
       router.push(`/generate${query}`);
     });
   }, [

@@ -22,7 +22,7 @@ export type IdGenerator = () => number | string;
 export function buildMockReplyForMode(
   mode: CreationMode,
   userText: string,
-  idGen: IdGenerator
+  idGen: IdGenerator,
 ): ChatMessage[] {
   if (mode === "direct") {
     return [

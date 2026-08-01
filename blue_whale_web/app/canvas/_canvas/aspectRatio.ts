@@ -19,7 +19,10 @@ const RATIO_RE = /^(\d+):(\d+)$/;
  * 回退（空串 / 非数字 / 缺冒号 / 含 0 避免除零）一律返回 {240, 240}。
  */
 export function parseAspectRatio(meta: string): PixelSize {
-  const fallback: PixelSize = { width: ASPECT_RATIO_BASE, height: ASPECT_RATIO_BASE };
+  const fallback: PixelSize = {
+    width: ASPECT_RATIO_BASE,
+    height: ASPECT_RATIO_BASE,
+  };
   if (typeof meta !== "string") return fallback;
 
   const match = RATIO_RE.exec(meta.trim());
@@ -30,7 +33,13 @@ export function parseAspectRatio(meta: string): PixelSize {
   if (Number.isNaN(w) || Number.isNaN(h) || w <= 0 || h <= 0) return fallback;
 
   if (w >= h) {
-    return { width: Math.round((ASPECT_RATIO_BASE * w) / h), height: ASPECT_RATIO_BASE };
+    return {
+      width: Math.round((ASPECT_RATIO_BASE * w) / h),
+      height: ASPECT_RATIO_BASE,
+    };
   }
-  return { width: ASPECT_RATIO_BASE, height: Math.round((ASPECT_RATIO_BASE * h) / w) };
+  return {
+    width: ASPECT_RATIO_BASE,
+    height: Math.round((ASPECT_RATIO_BASE * h) / w),
+  };
 }

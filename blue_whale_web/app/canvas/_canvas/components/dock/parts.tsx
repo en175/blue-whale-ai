@@ -123,19 +123,74 @@ export function FrameUploadButton({
         }}
       >
         {previewUrl ? (
-          <img src={previewUrl} alt={label} style={{ width: 46, height: 46, objectFit: "cover", borderRadius: 10 }} />
+          <img
+            src={previewUrl}
+            alt={label}
+            style={{
+              width: 46,
+              height: 46,
+              objectFit: "cover",
+              borderRadius: 10,
+            }}
+          />
         ) : (
           <>
-            <span style={{ opacity: 0.4, flexShrink: 0 }}><IconPlus size={14} /></span>
+            <span style={{ opacity: 0.4, flexShrink: 0 }}>
+              <IconPlus size={14} />
+            </span>
             <span style={{ color: "rgba(255, 255, 255, 0.25)" }}>{label}</span>
           </>
         )}
       </button>
       {previewUrl && onClear ? (
-        <button type="button" aria-label={`清除${label}`} onClick={onClear} style={{ position: "absolute", top: -6, right: -6, width: 16, height: 16, border: 0, borderRadius: "50%", background: "rgba(0, 0, 0, 0.7)", color: "rgba(255, 255, 255, 0.85)", cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><X size={11} /></button>
+        <button
+          type="button"
+          aria-label={`清除${label}`}
+          onClick={onClear}
+          style={{
+            position: "absolute",
+            top: -6,
+            right: -6,
+            width: 16,
+            height: 16,
+            border: 0,
+            borderRadius: "50%",
+            background: "rgba(0, 0, 0, 0.7)",
+            color: "rgba(255, 255, 255, 0.85)",
+            cursor: "pointer",
+            padding: 0,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <X size={11} />
+        </button>
       ) : null}
       {onPick ? (
-        <button type="button" aria-label={`从画布选择${label}`} onClick={onPick} style={{ position: "absolute", right: -8, bottom: -8, width: 20, height: 20, border: "1px solid rgba(255, 255, 255, 0.16)", borderRadius: "50%", background: "var(--tc-bg-surface)", color: "var(--tc-text-secondary)", cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><ImageIcon size={11} /></button>
+        <button
+          type="button"
+          aria-label={`从画布选择${label}`}
+          onClick={onPick}
+          style={{
+            position: "absolute",
+            right: -8,
+            bottom: -8,
+            width: 20,
+            height: 20,
+            border: "1px solid rgba(255, 255, 255, 0.16)",
+            borderRadius: "50%",
+            background: "var(--tc-bg-surface)",
+            color: "var(--tc-text-secondary)",
+            cursor: "pointer",
+            padding: 0,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <ImageIcon size={11} />
+        </button>
       ) : null}
     </div>
   );

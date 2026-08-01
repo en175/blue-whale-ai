@@ -91,8 +91,8 @@ describe("TOS direct upload storage", () => {
     };
     const storage = createTosStorage(config, { client });
 
-    await expect(storage.uploads.inspectObject("uploads/9/image/missing.png")).resolves.toBe(
-      null,
-    );
+    await expect(
+      storage.uploads.inspectObject("uploads/9/image/missing.png"),
+    ).resolves.toBe(null);
   });
 });

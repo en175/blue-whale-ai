@@ -16,7 +16,9 @@ describe("new-api video provider", () => {
   it("submits and polls until the task returns a video URL", async () => {
     const fetchImpl = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ task_id: "task-1", status: "queued" }))
+      .mockResolvedValueOnce(
+        jsonResponse({ task_id: "task-1", status: "queued" }),
+      )
       .mockResolvedValueOnce(
         jsonResponse({
           code: "success",
@@ -79,7 +81,9 @@ describe("new-api video provider", () => {
   it("fails with provider_timeout after the bounded polling attempts", async () => {
     const fetchImpl = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ task_id: "task-1", status: "queued" }))
+      .mockResolvedValueOnce(
+        jsonResponse({ task_id: "task-1", status: "queued" }),
+      )
       .mockImplementation(async () =>
         jsonResponse({
           code: "success",

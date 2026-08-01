@@ -40,7 +40,9 @@ export function HistoryModal({ onClose }: HistoryModalProps) {
 
   return (
     <ModalShell ariaLabel="历史记录" onClose={onClose}>
-      <h2 className="text-[24px] font-semibold leading-tight mb-6 text-white">历史记录</h2>
+      <h2 className="text-[24px] font-semibold leading-tight mb-6 text-white">
+        历史记录
+      </h2>
 
       {items.length === 0 ? (
         <div className="py-10 text-center text-[13px] text-white/40">
@@ -57,7 +59,9 @@ export function HistoryModal({ onClose }: HistoryModalProps) {
               <span className="inline-flex items-center justify-center min-w-[44px] h-6 px-2 rounded text-[11px] text-white/65 bg-white/[0.06] border border-white/[0.08] select-none">
                 {TYPE_LABEL[it.type]}
               </span>
-              <span className="flex-1 text-[13px] text-white/85 truncate">{it.title}</span>
+              <span className="flex-1 text-[13px] text-white/85 truncate">
+                {it.title}
+              </span>
               <span className="text-[12px] text-white/35 tabular-nums select-none">
                 {formatTime(it.createdAt)}
               </span>
@@ -66,7 +70,9 @@ export function HistoryModal({ onClose }: HistoryModalProps) {
         </ul>
       )}
 
-      <p className="mt-4 text-[11px] text-white/30 text-center">历史功能即将上线</p>
+      <p className="mt-4 text-[11px] text-white/30 text-center">
+        历史功能即将上线
+      </p>
     </ModalShell>
   );
 }

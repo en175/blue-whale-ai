@@ -45,7 +45,10 @@ export function PaymentStatus({
   if (status === "creating") {
     return (
       <div className="flex flex-col items-center gap-2 py-6">
-        <Loader2 size={24} className="animate-spin text-[var(--tc-accent,#3b82f6)]" />
+        <Loader2
+          size={24}
+          className="animate-spin text-[var(--tc-accent,#3b82f6)]"
+        />
         <p className="text-[13px] text-[var(--tc-secondary,rgba(255,255,255,0.7))]">
           正在生成二维码…
         </p>
@@ -59,8 +62,14 @@ export function PaymentStatus({
         {/* 呼吸动画点 */}
         <span className="inline-flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full bg-[var(--tc-accent,#3b82f6)] animate-breathe" />
-          <span className="w-2 h-2 rounded-full bg-[var(--tc-accent,#3b82f6)] animate-breathe" style={{ animationDelay: "0.5s" }} />
-          <span className="w-2 h-2 rounded-full bg-[var(--tc-accent,#3b82f6)] animate-breathe" style={{ animationDelay: "1s" }} />
+          <span
+            className="w-2 h-2 rounded-full bg-[var(--tc-accent,#3b82f6)] animate-breathe"
+            style={{ animationDelay: "0.5s" }}
+          />
+          <span
+            className="w-2 h-2 rounded-full bg-[var(--tc-accent,#3b82f6)] animate-breathe"
+            style={{ animationDelay: "1s" }}
+          />
         </span>
         <p className="text-[13px] text-[var(--tc-muted,rgba(255,255,255,0.4))]">
           等待支付结果…

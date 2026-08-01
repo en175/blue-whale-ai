@@ -30,10 +30,11 @@ describe("DockMediaThumb", () => {
       createObjectURL: vi.fn(() => "blob:asset-9"),
       revokeObjectURL: vi.fn(),
     });
-    vi.mocked(apiFetch).mockImplementation(async () =>
-      new Response(new Blob(["fake-image"], { type: "image/png" }), {
-        status: 200,
-      }),
+    vi.mocked(apiFetch).mockImplementation(
+      async () =>
+        new Response(new Blob(["fake-image"], { type: "image/png" }), {
+          status: 200,
+        }),
     );
   });
 

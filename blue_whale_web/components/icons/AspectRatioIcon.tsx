@@ -5,7 +5,12 @@ export interface AspectRatioIconProps {
   filled?: boolean;
 }
 
-export function AspectRatioIcon({ ratio, width = 16, height = 16, filled = true }: AspectRatioIconProps) {
+export function AspectRatioIcon({
+  ratio,
+  width = 16,
+  height = 16,
+  filled = true,
+}: AspectRatioIconProps) {
   const rect: Record<
     string,
     { x: number; y: number; width: number; height: number; rx: number }
@@ -15,8 +20,20 @@ export function AspectRatioIcon({ ratio, width = 16, height = 16, filled = true 
     "1:1": { x: 1, y: 1, width: 14, height: 14, rx: 1.5 },
     "4:3": { x: 1, y: 2.75, width: 14, height: 10.5, rx: 1.5 },
     "16:9": { x: 1, y: 4.0625, width: 14, height: 7.875, rx: 1.5 },
-    "2:3": { x: 3.333333333333333, y: 1, width: 9.333333333333334, height: 14, rx: 1.5 },
-    "3:2": { x: 1, y: 3.333333333333333, width: 14, height: 9.333333333333334, rx: 1.5 },
+    "2:3": {
+      x: 3.333333333333333,
+      y: 1,
+      width: 9.333333333333334,
+      height: 14,
+      rx: 1.5,
+    },
+    "3:2": {
+      x: 1,
+      y: 3.333333333333333,
+      width: 14,
+      height: 9.333333333333334,
+      rx: 1.5,
+    },
     "5:4": { x: 1, y: 2.4000000000000004, width: 14, height: 11.2, rx: 1.5 },
     "4:5": { x: 2.4000000000000004, y: 1, width: 11.2, height: 14, rx: 1.5 },
     "21:9": { x: 1, y: 5, width: 14, height: 6, rx: 1.5 },

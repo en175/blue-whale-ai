@@ -52,7 +52,9 @@ export function ComposerShell({ children }: { children: React.ReactNode }) {
       >
         {null}
       </SmoothCorners>
-      <div className="relative overflow-hidden rounded-[25.2px]">{children}</div>
+      <div className="relative overflow-hidden rounded-[25.2px]">
+        {children}
+      </div>
     </div>
   );
 }
@@ -67,12 +69,19 @@ export function ModelSettingsMenu({
 }: {
   model: { id: string; label: string; costMultiplier: string };
   models: { id: string; label: string; costMultiplier: string }[];
-  onModelChange: (model: { id: string; label: string; costMultiplier: string }) => void;
+  onModelChange: (model: {
+    id: string;
+    label: string;
+    costMultiplier: string;
+  }) => void;
   onClose: () => void;
   menuRef: React.RefObject<HTMLDivElement | null>;
   triggerRef: React.RefObject<HTMLButtonElement | null>;
 }) {
-  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const [position, setPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const [isVisible, setIsVisible] = useState(false);
 
   useLayoutEffect(() => {
@@ -149,11 +158,16 @@ export function ModelSettingsMenu({
                   className="tc-model-tier-option__cost inline-flex items-center gap-1 text-[11px] text-white/45"
                   aria-label={`消耗 ${m.costMultiplier}`}
                 >
-                  <span className="tc-model-tier-option__cost-icon" aria-hidden="true">
+                  <span
+                    className="tc-model-tier-option__cost-icon"
+                    aria-hidden="true"
+                  >
                     💰
                   </span>
                   <span className="tc-model-tier-option__cost-label">消耗</span>
-                  <span className="tc-model-tier-option__cost-rate">{m.costMultiplier}</span>
+                  <span className="tc-model-tier-option__cost-rate">
+                    {m.costMultiplier}
+                  </span>
                 </span>
               </span>
             </button>

@@ -26,7 +26,8 @@ export async function handleCopyAsset(
     return fail(PARAM_MISSING_CODE, "缺少 Idempotency-Key");
   }
   const sourceAssetId =
-    typeof body.source_asset_id === "number" || typeof body.source_asset_id === "string"
+    typeof body.source_asset_id === "number" ||
+    typeof body.source_asset_id === "string"
       ? String(body.source_asset_id)
       : "";
   if (!sourceAssetId) {

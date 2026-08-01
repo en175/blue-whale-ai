@@ -15,11 +15,18 @@ function makeDeps() {
 describe("handleSendCode", () => {
   it("合法手机号 → 200 信封 + 触发 SMS", async () => {
     const deps = makeDeps();
-    const result = await handleSendCode({ phone: "15079999999", ip: "1.2.3.4" }, deps);
+    const result = await handleSendCode(
+      { phone: "15079999999", ip: "1.2.3.4" },
+      deps,
+    );
     expect(result).toEqual({ code: 200, msg: null, data: null });
     expect(deps.sms.send).toHaveBeenCalledWith("15079999999", "123456");
     expect(deps.db.createVerificationCode).toHaveBeenCalledWith(
-      expect.objectContaining({ phone: "15079999999", code: "123456", ip: "1.2.3.4" }),
+      expect.objectContaining({
+        phone: "15079999999",
+        code: "123456",
+        ip: "1.2.3.4",
+      }),
     );
   });
 
@@ -33,7 +40,10 @@ describe("handleSendCode", () => {
   it("SMS 失败 → 400 信封（不抛到外层）", async () => {
     const deps = makeDeps();
     deps.sms.send = vi.fn().mockRejectedValue(new Error("upstream down"));
-    const result = await handleSendCode({ phone: "15079999999", ip: "1.2.3.4" }, deps);
+    const result = await handleSendCode(
+      { phone: "15079999999", ip: "1.2.3.4" },
+      deps,
+    );
     expect(result.code).toBe(400);
   });
 });
