@@ -32,6 +32,8 @@
 
 ⚠️ URL 里的 `883843` 是 **program_id**（项目路由），**不是** `enterprise_id` / `project_id`——误当后两者传入会触发误导性 401。完整 ID 解析约定见 `.claude/rules/issue-tracker.md`。
 
+⚠️ 所有 `mcp__gitee-ent__*` 写操作：未知/错名参数被**静默忽略**——描述误传 `body` 会建成空描述工单（正确参数名 `description`）。写调用后必须回读验证关键字段已生效，细则见 `.claude/rules/issue-tracker.md`「写操作回读验证」。
+
 ## 最高红线（摘要，细节见 rules 文件）
 
 1. **禁直推 master** — 全走分支 → PR → merge。`hotfix/*` 无特权。

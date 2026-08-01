@@ -4,6 +4,7 @@
 #
 # 拦截：
 #   - create_enterprise_issue 根 issue 的 project_id 或 program_id 缺失 / 为空 / = 0
+#   - create_enterprise_issue 的 description 缺失 / 为空（防错名参数被静默忽略建成空工单）
 #   - create_enterprise_issue / update_enterprise_issue 带 parent_id，
 #     但 project_id 或 program_id 缺失 / 为空 / = 0
 #   - update_enterprise_issue 显式 project_id=0 或 program_id=0
@@ -21,6 +22,7 @@
 # 配套：settings.json PreToolUse matcher = mcp__gitee-ent__create_enterprise_issue /
 #      mcp__gitee-ent__update_enterprise_issue。
 # 退出码 2 = 阻断 Claude 执行该工具调用。
+# 同步：.qoder/hooks/ 有本文件的手动同步副本，任何改动必须双份同改。
 
 INPUT=$(cat)
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -101,6 +103,28 @@ if [ "$HAS_PARENT" -eq 1 ]; then
   fi
 fi
 
+block_empty_description() {
+  printf '%s' "$INPUT" | python3 "$AUDIT" \
+    --project-dir "$PROJECT_DIR" \
+    --hook "$HOOK_NAME" \
+    --operation "$AUDIT_OPERATION" \
+    --exit-code 2 \
+    --reason "blocked-empty-description" >/dev/null || true
+  cat >&2 <<'EOF'
+BLOCKED: create_enterprise_issue 的 description 缺失或为空。
+
+Gitee MCP 写工具对未知/错名参数静默忽略、不报错——把描述传到 body 等错名参数，
+工单会建成空描述（历史事件 IK5THP）。
+
+改法：
+- 描述入参名是 description（不是 body），创建必传且非空
+- 创建后 get_enterprise_issue_detail 回读确认 description 非空
+
+详见 .claude/rules/issue-tracker.md「写操作回读验证」。
+EOF
+  exit 2
+}
+
 # create 根 issue：project_id 缺失 / 空字符串 / = 0 → 拦截。
 # update 普通字段不要求重复传 project_id，避免拦状态/标签/标题更新。
 if [ "$IS_UPDATE" -eq 0 ] && [ -z "$PROJECT_ID" ]; then
@@ -112,6 +136,16 @@ fi
 if [ "$IS_UPDATE" -eq 0 ] && [ "$HAS_PARENT" -eq 0 ]; then
   if [ -z "$PROGRAM_ID" ] || [ "$PROGRAM_ID" = "0" ]; then
     block "创建根 issue 未归属项目（program_id 缺失或为 0）。"
+  fi
+fi
+
+# create：description 缺失 / 为空 → 拦截。错名参数（如把描述传到 body）被 MCP 静默忽略，
+# 会建成空描述工单（历史事件 IK5THP）。update 常只改状态/标签，不要求 description。
+# 放在归属校验之后，让 project_id/program_id 的具体报错优先暴露。
+if [ "$IS_UPDATE" -eq 0 ]; then
+  DESCRIPTION=$(extract_json_value "description")
+  if [ -z "$DESCRIPTION" ]; then
+    block_empty_description
   fi
 fi
 

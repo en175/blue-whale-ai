@@ -4,6 +4,13 @@ Issues 追踪在 Gitee 仓库 `git@gitee.com:hangzhou_xuanfu_1/blue-whale-ai.git
 
 > ⚠️ **所有 `mcp__gitee-ent__*` 调用**：`enterprise_id` / `project_id` / `program_id` 的兜底值见 CLAUDE.md「Gitee ID 兜底常量」（日常直接用）。**永不从网页 URL 抄**——URL 的 `883843` 是 program_id，误当 `enterprise_id` / `project_id` 传入会触发误导性 401。疑似变更或 401 时，用 `list` API 动态查 + `scripts/gitee-resolve-ids.sh resolve <URL>` 校验。详见 `docs/agents/issue-tracker.md`「ID 解析约定」。
 
+## 写操作回读验证（防静默忽略）
+
+`mcp__gitee-ent__*` 写工具对未知/错名参数**静默忽略**、不报错。已踩坑：创建 issue 把描述传到 `body`（正确参数名 `description`），建成空描述工单（IK5THP）。
+
+- **任何写调用后必须回读验证关键字段已生效**：创建 issue 后 `get_enterprise_issue_detail` 确认 `description` 非空、标签已上；创建 PR / Release 后同样回读确认标题、描述、目标分支。
+- 入参名以工具 schema 为准，不凭印象。同族已知静默陷阱：`create` 的 `labels`（见「创建 Issue」）。
+
 ## 创建 Issue
 
 - `mcp__gitee-ent__create_enterprise_issue` — **必传 `project_id`**（值用 `list_enterprise_repositories` 查），否则工单只在企业工作项可见、仓库 Issues 页看不到。
