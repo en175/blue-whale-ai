@@ -371,6 +371,7 @@ export function CanvasProjectRuntime({
     generate,
     generateFromNode,
     hydrate,
+    retryNode,
     generating,
     generateError,
     setGenerateError,
@@ -975,7 +976,7 @@ export function CanvasProjectRuntime({
     (nodeId: string) => {
       const node = nodes.find((n) => n.id === nodeId);
       if (!node) return;
-      // 上传失败卡：用留存的 File 原地重传（不新建节点）；其余维持打开底部 Dock
+      // 上传失败卡：用留存的 File 原地重传（不新建节点）；生成失败卡走下方 retryNode 后端重试
       const entry = uploadFilesRef.current.get(nodeId);
       if (node.data.recipe?.origin === "uploaded" && entry) {
         const pending = uploadMediaToCanvas({
@@ -997,10 +998,19 @@ export function CanvasProjectRuntime({
         });
         return;
       }
-      setBottomDockMode(node.data.kind === "video" ? "video" : "image");
-      setIsBottomDockOpen(true);
+      // 生成失败：调后端 retry（仅终态失败 job 有效）→ 节点回 running + 续轮询；不再只是重开 dock。
+      void retryNode(nodeId);
     },
-    [nodes, pid, addNode, patchNode, resizeNode, addAsset, setGenerateError],
+    [
+      nodes,
+      pid,
+      addNode,
+      patchNode,
+      resizeNode,
+      addAsset,
+      setGenerateError,
+      retryNode,
+    ],
   );
 
   /** 上传错误卡「移除」：删节点 + 清留存的 File/预览 URL。 */

@@ -46,6 +46,7 @@ vi.mock("../api/generation", () => ({
   getVideoModels: vi.fn(),
   listJobs: vi.fn(),
   getJobStatus: vi.fn(),
+  retryMissingProjectGenerationJobOutputs: vi.fn(),
 }));
 
 beforeEach(() => vi.clearAllMocks());
@@ -1393,5 +1394,147 @@ describe("useCanvasGeneration.hydrate", () => {
     expect(mockLoadSnapshot).toHaveBeenCalledTimes(1);
     // recover(queued + processing + failed) + reconcile(succeeded)
     expect(generation.listJobs).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("useCanvasGeneration.retryNode", () => {
+  it("成功：调 retry API → 节点回 running → 写新 taskId → startJob 续轮询", async () => {
+    (
+      generation.retryMissingProjectGenerationJobOutputs as ReturnType<
+        typeof vi.fn
+      >
+    ).mockResolvedValue({ generation_job_id: 999, cursor: 0 });
+    const failed = {
+      id: "n_img",
+      type: "image",
+      position: { x: 0, y: 0 },
+      data: {
+        kind: "image",
+        status: "error",
+        taskId: "130",
+        recipe: {
+          origin: "generated",
+          generation: { mediaKind: "image", model: "m1" },
+        },
+      },
+    } as unknown as CanvasNode;
+    const { result, patchNode, patchNodeAndSave } = renderGen({
+      nodes: [failed],
+      projectId: "55",
+    });
+
+    await act(async () => {
+      await result.current.retryNode("n_img");
+    });
+
+    expect(
+      generation.retryMissingProjectGenerationJobOutputs,
+    ).toHaveBeenCalledWith(55, 130, expect.any(String));
+    expect(patchNode).toHaveBeenCalledWith("n_img", {
+      status: "running",
+      errorMessage: undefined,
+      progress: 0,
+    });
+    expect(patchNodeAndSave).toHaveBeenCalledWith("n_img", { taskId: "999" });
+    expect(mockJobs.start).toHaveBeenCalledWith(
+      999,
+      expect.objectContaining({ onSucceeded: expect.any(Function) }),
+    );
+    expect(result.current.generateError).toBeNull();
+  });
+
+  it("超大 job ID 重试时保持十进制字符串精度", async () => {
+    const jobId = "9007199254740993";
+    (
+      generation.retryMissingProjectGenerationJobOutputs as ReturnType<
+        typeof vi.fn
+      >
+    ).mockResolvedValue({ generation_job_id: jobId, cursor: 0 });
+    const failed = {
+      id: "n_vid",
+      type: "video",
+      position: { x: 0, y: 0 },
+      data: { kind: "video", status: "error", taskId: jobId },
+    } as unknown as CanvasNode;
+    const { result, patchNodeAndSave } = renderGen({ nodes: [failed] });
+
+    await act(async () => {
+      await result.current.retryNode("n_vid");
+    });
+
+    expect(
+      generation.retryMissingProjectGenerationJobOutputs,
+    ).toHaveBeenCalledWith(1, jobId, expect.any(String));
+    expect(patchNodeAndSave).toHaveBeenCalledWith("n_vid", { taskId: jobId });
+    expect(mockJobs.start).toHaveBeenCalledWith(
+      jobId,
+      expect.objectContaining({ onSucceeded: expect.any(Function) }),
+    );
+  });
+
+  it("节点无 taskId（无关联 job）→ 直接返回，不发请求、不改状态", async () => {
+    const noTask = {
+      id: "n_img",
+      type: "image",
+      position: { x: 0, y: 0 },
+      data: { kind: "image", status: "error" },
+    } as unknown as CanvasNode;
+    const { result, patchNode } = renderGen({ nodes: [noTask] });
+
+    await act(async () => {
+      await result.current.retryNode("n_img");
+    });
+
+    expect(
+      generation.retryMissingProjectGenerationJobOutputs,
+    ).not.toHaveBeenCalled();
+    expect(patchNode).not.toHaveBeenCalled();
+    expect(mockJobs.start).not.toHaveBeenCalled();
+  });
+
+  it("节点非 error 状态（如 running）→ 直接返回，不发请求、不改状态", async () => {
+    const running = {
+      id: "n_img",
+      type: "image",
+      position: { x: 0, y: 0 },
+      data: { kind: "image", status: "running", taskId: "130" },
+    } as unknown as CanvasNode;
+    const { result, patchNode } = renderGen({ nodes: [running] });
+
+    await act(async () => {
+      await result.current.retryNode("n_img");
+    });
+
+    expect(
+      generation.retryMissingProjectGenerationJobOutputs,
+    ).not.toHaveBeenCalled();
+    expect(patchNode).not.toHaveBeenCalled();
+    expect(mockJobs.start).not.toHaveBeenCalled();
+  });
+
+  it("API 失败 → 节点回 error + setGenerateError，不续轮询", async () => {
+    (
+      generation.retryMissingProjectGenerationJobOutputs as ReturnType<
+        typeof vi.fn
+      >
+    ).mockRejectedValue(new Error("job 非终态，不可重试"));
+    const failed = {
+      id: "n_img",
+      type: "image",
+      position: { x: 0, y: 0 },
+      data: { kind: "image", status: "error", taskId: "130" },
+    } as unknown as CanvasNode;
+    const { result, patchNode } = renderGen({ nodes: [failed] });
+
+    await act(async () => {
+      await result.current.retryNode("n_img");
+    });
+
+    expect(patchNode).toHaveBeenCalledWith("n_img", {
+      status: "error",
+      errorMessage: "生成失败，请稍后重试",
+    });
+    expect(result.current.generateError).toBe("生成失败，请稍后重试");
+    expect(mockJobs.start).not.toHaveBeenCalled();
   });
 });
