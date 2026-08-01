@@ -32,6 +32,7 @@ import {
   getImageModels,
   getVideoModels,
   listJobs,
+  retryMissingProjectGenerationJobOutputs,
   type CreateProjectGenerationJobPayload,
 } from "../api/generation";
 import { useVideoJobs } from "./useVideoJobs";
@@ -582,6 +583,41 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
     [nodes, edges, assets, projectId, patchNode, patchNodeAndSave, startJob],
   );
 
+  /** 重试失败节点：调后端 retry（仅终态 failed/partially_succeeded 的 job 有效），
+   *  拿新 job id → 节点回 running + 续轮询。无 taskId（无关联 job）或非 error 状态时直接返回。 */
+  const retryNode = useCallback(
+    async (nodeId: string) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      const originalJobId = node?.data.taskId;
+      if (!node || !originalJobId || !projectId) return;
+      // 仅终态失败节点可重试：防止误调把正在轮询的 running 节点 patch 成 error。
+      if (node.data.status !== "error") return;
+      const kind: "image" | "video" =
+        node.data.kind === "video" ? "video" : "image";
+      try {
+        setGenerateError(null);
+        patchNode(nodeId, {
+          status: "running",
+          errorMessage: undefined,
+          progress: 0,
+        });
+        const { generation_job_id } =
+          await retryMissingProjectGenerationJobOutputs(
+            wireInteger(projectId),
+            wireInteger(originalJobId),
+            newIdempotencyKey(),
+          );
+        await patchNodeAndSave(nodeId, { taskId: String(generation_job_id) });
+        startJob(nodeId, generation_job_id, kind, node.data.recipe);
+      } catch (error) {
+        const message = userFriendlyErrorMessage(error);
+        patchNode(nodeId, { status: "error", errorMessage: message });
+        setGenerateError(message);
+      }
+    },
+    [nodes, projectId, patchNode, patchNodeAndSave, startJob],
+  );
+
   // recover（刷新恢复）：独立 Worker 接管前是 queued、接管后是 processing；两种都按 taskId 续轮询。
   // MVP 仅恢复已知 taskId 节点（serialize 持久 taskId）；孤儿 processing（无对应节点）不重建占位——
   // v2 清表后无老数据；重建占位待 job.input 形状稳定后再做。
@@ -696,6 +732,7 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
   return {
     generate,
     generateFromNode,
+    retryNode,
     recover,
     reconcile,
     hydrate,
