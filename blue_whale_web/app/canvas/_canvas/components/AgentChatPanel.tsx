@@ -3,7 +3,14 @@
  * 承载消息列表（复用 ChatBubbles）、输入器（复用 Composer）、技能面板（SkillPanel），
  * 处理对话流、@ 素材提及、模型/技能开关等交互，并通过 createPortal 渲染浮层。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { BookOpenText, Box, ChevronDown } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import SkillPanel, { type UseSkillSelection } from "@/components/SkillPanel";
@@ -168,6 +175,15 @@ export function AgentChatPanel({
     });
     ro.observe(el);
     return () => ro.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      setPanelSize({ w: Math.round(rect.width), h: Math.round(rect.height) });
+    }
   }, []);
 
   useEffect(() => {
