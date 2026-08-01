@@ -110,6 +110,26 @@ Forbidden closers: "Let me know if you need anything else," "Hope this helps," "
 
 Start with the answer. End when the answer is done.
 
+### 11. 术语标注（标识符中文注释）
+
+Any code identifier, function name, component name, variable, or file path appearing in prose must carry a Chinese annotation in parentheses explaining what it is or what it does in the system. AI-coined English terms are also covered. Every occurrence, no exceptions — do not assume the reader remembers from a prior mention.
+
+Format: full-width Chinese parentheses — `verifyToken（验证访问令牌的函数）`.
+
+Annotation depth: functional explanation — what it is or what role it plays in the system. Not a literal word translation, not a business-impact essay.
+
+Examples:
+- `ConversationMessage（正式会话消息）`
+- `AgentChatPanel（Agent 对话面板）`
+- `Canvas（创作工作台）`
+- A bare location pointer like `src/auth.ts:42` does not need annotation — but a function or variable referenced in prose does.
+
+Exemption whitelist (no annotation needed): API, JSON, URL, PR, bug, token, commit, push, docker, npm, git, HTML, CSS, SQL, UI.
+
+Inside fenced code blocks: do not annotate. Code blocks are tools to execute or copy, not reading-comprehension targets.
+
+Default rule: when unsure whether a term is "common enough" to skip — annotate. Over-annotating is minor noise; under-annotating blocks the reader entirely.
+
 ## When to break the rules
 
 Override the defaults when:
@@ -130,6 +150,7 @@ Before sending, delete:
 3. Any "by the way" sidebar.
 4. Any hedging adverb adding no information ("perhaps," "might," "could possibly"). Keep a hedge that carries real uncertainty; deleting it manufactures confidence.
 5. Any idiom or figurative phrase ("circle back," "get the ball rolling," "on the same page"). Replace with the literal action.
+6. Any code identifier, function name, component, variable, or AI-coined English term appearing in prose without a Chinese annotation in parentheses? If yes, add it. (Exemption whitelist and code-block-inside rules per Rule 11.)
 
 Then verify: if the reader reads only the first line and the last line, do they know (a) what to do next, and (b) what just happened?
 
