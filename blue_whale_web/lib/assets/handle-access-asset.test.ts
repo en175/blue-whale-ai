@@ -12,20 +12,28 @@ import type { AssetSigner } from "./ports.js";
 // GET /api/projects/{projectId}/assets/{assetId}：签发短期可访问 URL。
 // 对齐 Java ProjectAssetAccessService.sign → AssetAccessResponse { url, expires_at }。
 
-function makeDeps(overrides: {
-  project?: Partial<ProjectRepo>;
-  assets?: Partial<AssetRepo>;
-  signer?: AssetSigner | null;
-} = {}) {
+function makeDeps(
+  overrides: {
+    project?: Partial<ProjectRepo>;
+    assets?: Partial<AssetRepo>;
+    signer?: AssetSigner | null;
+  } = {},
+) {
   return {
     project: {
-      findOwnedById: vi.fn().mockResolvedValue({ id: "5", name: "p", thumb: null, created_at: "x" }),
+      findOwnedById: vi.fn().mockResolvedValue({
+        id: "5",
+        name: "p",
+        thumb: null,
+        created_at: "x",
+      }),
       ...overrides.project,
     } as unknown as ProjectRepo,
     assets: {
-      findAccessible: vi
-        .fn()
-        .mockResolvedValue({ storage_key: "gen/sha256/abc.png", mime: "image/png" }),
+      findAccessible: vi.fn().mockResolvedValue({
+        storage_key: "gen/sha256/abc.png",
+        mime: "image/png",
+      }),
       ...overrides.assets,
     } as unknown as AssetRepo,
     signer:
@@ -42,21 +50,29 @@ function makeDeps(overrides: {
 
 describe("handleAccessAsset", () => {
   it("项目不归属 → 100301", async () => {
-    const deps = makeDeps({ project: { findOwnedById: vi.fn().mockResolvedValue(null) } });
+    const deps = makeDeps({
+      project: { findOwnedById: vi.fn().mockResolvedValue(null) },
+    });
     const result = await handleAccessAsset("9", "5", "101", deps);
     expect(result.code).toBe(RESOURCE_NOT_FOUND_CODE);
     expect(deps.assets.findAccessible).not.toHaveBeenCalled();
   });
 
   it("资产不存在/不归属 → 100301", async () => {
-    const deps = makeDeps({ assets: { findAccessible: vi.fn().mockResolvedValue(null) } });
+    const deps = makeDeps({
+      assets: { findAccessible: vi.fn().mockResolvedValue(null) },
+    });
     const result = await handleAccessAsset("9", "5", "101", deps);
     expect(result.code).toBe(RESOURCE_NOT_FOUND_CODE);
   });
 
   it("storage_key 为空 → 100202 资源不可用", async () => {
     const deps = makeDeps({
-      assets: { findAccessible: vi.fn().mockResolvedValue({ storage_key: null, mime: null }) },
+      assets: {
+        findAccessible: vi
+          .fn()
+          .mockResolvedValue({ storage_key: null, mime: null }),
+      },
     });
     const result = await handleAccessAsset("9", "5", "101", deps);
     expect(result.code).toBe(ASSET_UNAVAILABLE_CODE);
@@ -70,7 +86,9 @@ describe("handleAccessAsset", () => {
 
   it("signer 抛错 → 100202", async () => {
     const deps = makeDeps({
-      signer: { sign: vi.fn().mockRejectedValue(new Error("tos down")) } as unknown as AssetSigner,
+      signer: {
+        sign: vi.fn().mockRejectedValue(new Error("tos down")),
+      } as unknown as AssetSigner,
     });
     const result = await handleAccessAsset("9", "5", "101", deps);
     expect(result.code).toBe(ASSET_UNAVAILABLE_CODE);
@@ -82,7 +100,10 @@ describe("handleAccessAsset", () => {
     expect(result).toEqual({
       code: 200,
       msg: null,
-      data: { url: "https://tos/abc?signed=1", expires_at: "2026-07-27T12:10:00.000Z" },
+      data: {
+        url: "https://tos/abc?signed=1",
+        expires_at: "2026-07-27T12:10:00.000Z",
+      },
     });
     expect(deps.assets.findAccessible).toHaveBeenCalledWith("5", "101", "9");
     expect(deps.signer!.sign).toHaveBeenCalledWith("gen/sha256/abc.png");

@@ -82,7 +82,9 @@ async function main() {
   requireEnv();
 
   if (cmd !== "list") {
-    die(`unknown command: ${cmd ?? "(none)"}\nusage: gitee-issues.mjs list [open|closed|progressing|rejected|all]`);
+    die(
+      `unknown command: ${cmd ?? "(none)"}\nusage: gitee-issues.mjs list [open|closed|progressing|rejected|all]`,
+    );
   }
 
   const filterState = rest[0] ?? "all";
@@ -92,7 +94,9 @@ async function main() {
   }
 
   const issues = await listIssues(filterState);
-  console.log(`# ${issues.length} issue(s) with state=${filterState} in ${OWNER}/${REPO}`);
+  console.log(
+    `# ${issues.length} issue(s) with state=${filterState} in ${OWNER}/${REPO}`,
+  );
   for (const i of issues) console.log(formatIssue(i));
 }
 

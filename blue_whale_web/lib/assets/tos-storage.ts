@@ -87,7 +87,8 @@ export function loadTosStorageConfig(
   const endpoint = env.VOLC_TOS_ENDPOINT;
   const bucket = env.VOLC_TOS_BUCKET;
   const region = env.VOLC_TOS_REGION;
-  if (!accessKeyId || !secretAccessKey || !endpoint || !bucket || !region) return null;
+  if (!accessKeyId || !secretAccessKey || !endpoint || !bucket || !region)
+    return null;
   return { accessKeyId, secretAccessKey, endpoint, bucket, region };
 }
 
@@ -178,7 +179,8 @@ export function createTosStorage(
             key: storageKey,
           });
           const contentLength =
-            response.data?.contentLength ?? response.headers?.["content-length"];
+            response.data?.contentLength ??
+            response.headers?.["content-length"];
           const size = Number(contentLength);
           if (!Number.isFinite(size) || size < 0) {
             throw new Error("TOS HEAD response is missing content length");

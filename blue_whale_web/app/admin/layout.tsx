@@ -5,14 +5,24 @@ import { useRouter, usePathname } from "next/navigation";
 import { AdminSidebar } from "./_components/admin-sidebar";
 import { isAdminAuthenticated } from "./_lib/auth";
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
+export default function AdminLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (pathname === "/admin/login") { setReady(true); return; }
-    if (!isAdminAuthenticated()) { router.replace("/admin/login"); return; }
+    if (pathname === "/admin/login") {
+      setReady(true);
+      return;
+    }
+    if (!isAdminAuthenticated()) {
+      router.replace("/admin/login");
+      return;
+    }
     setReady(true);
   }, [pathname, router]);
 

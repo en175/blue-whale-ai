@@ -98,19 +98,19 @@ function createNewApiImageProvider(options: ProviderOptions): ImageProvider {
     async generate(input) {
       try {
         const sourceImages =
-          input.sourceImages ??
-          (input.sourceImage ? [input.sourceImage] : []);
-        const images = sourceImages.length > 0
-          ? await client.editImages(options.token!, {
-              model: input.model,
-              prompt: input.prompt,
-              images: sourceImages,
-              size: input.size,
-              n: input.n,
-              webSearch: input.webSearch,
-              sequential: input.sequential,
-            })
-          : await client.generateImages(options.token!, input);
+          input.sourceImages ?? (input.sourceImage ? [input.sourceImage] : []);
+        const images =
+          sourceImages.length > 0
+            ? await client.editImages(options.token!, {
+                model: input.model,
+                prompt: input.prompt,
+                images: sourceImages,
+                size: input.size,
+                n: input.n,
+                webSearch: input.webSearch,
+                sequential: input.sequential,
+              })
+            : await client.generateImages(options.token!, input);
         return images.map((image) => ({
           url: image.url,
           width: input.width ?? null,

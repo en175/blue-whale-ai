@@ -24,22 +24,28 @@ export async function handleContentAsset(
   },
 ): Promise<ContentResult> {
   const project = await deps.project.findOwnedById(projectId, userId);
-  if (!project) return { ok: false, code: RESOURCE_NOT_FOUND_CODE, msg: "资源不存在" };
+  if (!project)
+    return { ok: false, code: RESOURCE_NOT_FOUND_CODE, msg: "资源不存在" };
 
   const asset = await deps.assets.findAccessible(projectId, assetId, userId);
-  if (!asset) return { ok: false, code: RESOURCE_NOT_FOUND_CODE, msg: "资源不存在" };
+  if (!asset)
+    return { ok: false, code: RESOURCE_NOT_FOUND_CODE, msg: "资源不存在" };
 
   if (!asset.storage_key || asset.storage_key.trim() === "") {
     return { ok: false, code: ASSET_UNAVAILABLE_CODE, msg: "资源不可用" };
   }
-  if (!deps.reader) return { ok: false, code: ASSET_UNAVAILABLE_CODE, msg: "资源不可用" };
+  if (!deps.reader)
+    return { ok: false, code: ASSET_UNAVAILABLE_CODE, msg: "资源不可用" };
 
   try {
     const content = await deps.reader.read(asset.storage_key);
     return {
       ok: true,
       content,
-      mime: asset.mime && asset.mime.length > 0 ? asset.mime : "application/octet-stream",
+      mime:
+        asset.mime && asset.mime.length > 0
+          ? asset.mime
+          : "application/octet-stream",
     };
   } catch {
     return { ok: false, code: ASSET_UNAVAILABLE_CODE, msg: "资源不可用" };

@@ -1,17 +1,24 @@
 import type { ApiResult, TemplatePage, TemplateTag } from "@/types/template";
 import { apiFetch } from "@/lib/api-client";
 
-const API_URL = process.env.NEXT_PUBLIC_TEMPLATE_API_URL ?? "/api/agent/templates";
+const API_URL =
+  process.env.NEXT_PUBLIC_TEMPLATE_API_URL ?? "/api/agent/templates";
 const FETCH_TIMEOUT = 8000;
 
 export class TemplateApiError extends Error {
-  constructor(message: string, public status?: number) {
+  constructor(
+    message: string,
+    public status?: number,
+  ) {
     super(message);
     this.name = "TemplateApiError";
   }
 }
 
-async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  timeoutMs: number,
+): Promise<Response> {
   return apiFetch(url, { signal: AbortSignal.timeout(timeoutMs) });
 }
 
@@ -21,7 +28,10 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
 async function getResult<T>(url: string): Promise<T> {
   const res = await fetchWithTimeout(url, FETCH_TIMEOUT);
   if (!res.ok) {
-    throw new TemplateApiError(`请求失败: ${res.status} ${res.statusText}`, res.status);
+    throw new TemplateApiError(
+      `请求失败: ${res.status} ${res.statusText}`,
+      res.status,
+    );
   }
   const result = (await res.json()) as ApiResult<T>;
   if (!result || result.code !== 200) {
@@ -36,7 +46,11 @@ export function fetchTemplateTags(): Promise<TemplateTag[]> {
 }
 
 /** 按标签分页查询卡片 */
-export function fetchTemplatePage(tagCode: string, page = 1, size = 50): Promise<TemplatePage> {
+export function fetchTemplatePage(
+  tagCode: string,
+  page = 1,
+  size = 50,
+): Promise<TemplatePage> {
   const qs = new URLSearchParams({
     tagCode,
     page: String(page),

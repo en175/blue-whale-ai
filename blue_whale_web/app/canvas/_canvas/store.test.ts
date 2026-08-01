@@ -14,7 +14,11 @@ beforeEach(() => {
 describe("canvas-store / assets 缓存", () => {
   it("addAsset 填缓存", () => {
     useCanvasStore.getState().addAsset({ id: "a1", kind: "image", src: "u" });
-    expect(useCanvasStore.getState().assets["a1"]).toMatchObject({ id: "a1", kind: "image", src: "u" });
+    expect(useCanvasStore.getState().assets["a1"]).toMatchObject({
+      id: "a1",
+      kind: "image",
+      src: "u",
+    });
   });
 
   it("ensureAsset cache hit 不 fetch", async () => {

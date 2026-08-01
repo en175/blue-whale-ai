@@ -19,7 +19,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   addAsset: (a) => set((s) => ({ assets: { ...s.assets, [a.id]: a } })),
 
   setAssetSrc: (id, src) =>
-    set((s) => (s.assets[id] ? { assets: { ...s.assets, [id]: { ...s.assets[id], src } } } : s)),
+    set((s) =>
+      s.assets[id]
+        ? { assets: { ...s.assets, [id]: { ...s.assets[id], src } } }
+        : s,
+    ),
 
   ensureAsset: async (assetId) => {
     // mimeType marks an authoritative API hydration. Locally inserted assets only

@@ -11,7 +11,10 @@ export interface ListJobsQuery {
   size: number;
 }
 
-export type PublicJobListItem = Omit<Awaited<ReturnType<JobRepo["listByUser"]>>["records"][number], "stored_error"> & {
+export type PublicJobListItem = Omit<
+  Awaited<ReturnType<JobRepo["listByUser"]>>["records"][number],
+  "stored_error"
+> & {
   error: PublicJobError | null;
 };
 
@@ -33,7 +36,12 @@ export async function handleListJobs(
       uniqueIds.length > MAX_BATCH_IDS ||
       uniqueIds.some((id) => !VALID_ID.test(id))
     ) {
-      return fail(400, uniqueIds.length > MAX_BATCH_IDS ? "最多查询 100 个任务" : "ids 参数无效");
+      return fail(
+        400,
+        uniqueIds.length > MAX_BATCH_IDS
+          ? "最多查询 100 个任务"
+          : "ids 参数无效",
+      );
     }
   }
   const page = await deps.jobs.listByUser(userId, {
@@ -46,9 +54,11 @@ export async function handleListJobs(
   });
   return ok({
     ...page,
-    records: page.records.map(({ stored_error: storedError, ...record }): PublicJobListItem => ({
-      ...record,
-      error: projectPublicError(storedError ?? null, record.type),
-    })),
+    records: page.records.map(
+      ({ stored_error: storedError, ...record }): PublicJobListItem => ({
+        ...record,
+        error: projectPublicError(storedError ?? null, record.type),
+      }),
+    ),
   });
 }

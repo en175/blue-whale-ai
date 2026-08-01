@@ -21,7 +21,10 @@ export function ZoomControls() {
     <div className="tc-ui-fade-in absolute bottom-4 right-4 z-[150] opacity-100">
       <div
         className="tc-bottom-right-panel flex items-center gap-1 rounded-[18px] p-1"
-        style={{ background: "var(--tc-menu-pill-bg)", border: "1px solid var(--tc-menu-pill-border)" }}
+        style={{
+          background: "var(--tc-menu-pill-bg)",
+          border: "1px solid var(--tc-menu-pill-border)",
+        }}
       >
         <div className="flex items-center">
           <button
@@ -41,8 +44,14 @@ export function ZoomControls() {
             className="tc-ui-glow-btn inline-flex h-7 w-16 items-center justify-end gap-1.5 rounded-lg px-1.5 text-xs font-medium transition-colors hover:bg-[var(--tc-menu-item-hover)]"
             style={{ color: "var(--tc-text-primary)" }}
           >
-            <span className="relative z-[1] flex-1 text-right">{Math.round(zoom * 100)}%</span>
-            <ChevronDown width={11} height={11} stroke="var(--tc-text-tertiary)" />
+            <span className="relative z-[1] flex-1 text-right">
+              {Math.round(zoom * 100)}%
+            </span>
+            <ChevronDown
+              width={11}
+              height={11}
+              stroke="var(--tc-text-tertiary)"
+            />
           </button>
           <button
             type="button"
@@ -54,7 +63,10 @@ export function ZoomControls() {
             <Plus width={12} height={12} />
           </button>
         </div>
-        <div className="mx-0.5 h-4 w-px" style={{ background: "var(--tc-border-subtle)" }} />
+        <div
+          className="mx-0.5 h-4 w-px"
+          style={{ background: "var(--tc-border-subtle)" }}
+        />
         <button
           type="button"
           aria-label="键盘快捷键"

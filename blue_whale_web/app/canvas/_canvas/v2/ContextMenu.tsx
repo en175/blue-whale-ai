@@ -22,7 +22,13 @@ const OPTIONS: { kind: ContextMenuKind; label: string }[] = [
   { kind: "video", label: "视频" },
 ];
 
-export function ContextMenu({ screenX, screenY, hasSource, onInsert, onClose }: ContextMenuProps) {
+export function ContextMenu({
+  screenX,
+  screenY,
+  hasSource,
+  onInsert,
+  onClose,
+}: ContextMenuProps) {
   useEffect(() => {
     const close = () => onClose();
     const onEsc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -40,8 +46,14 @@ export function ContextMenu({ screenX, screenY, hasSource, onInsert, onClose }: 
     <div
       style={{
         position: "fixed",
-        left: Math.min(screenX, (typeof window !== "undefined" ? window.innerWidth : 9999) - 160),
-        top: Math.min(screenY, (typeof window !== "undefined" ? window.innerHeight : 9999) - 160),
+        left: Math.min(
+          screenX,
+          (typeof window !== "undefined" ? window.innerWidth : 9999) - 160,
+        ),
+        top: Math.min(
+          screenY,
+          (typeof window !== "undefined" ? window.innerHeight : 9999) - 160,
+        ),
         zIndex: 2147483647,
         background: "var(--tc-bg-surface)",
         border: "1px solid var(--tc-border-subtle)",
@@ -54,7 +66,10 @@ export function ContextMenu({ screenX, screenY, hasSource, onInsert, onClose }: 
       onClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <div className="px-3 py-1 text-xs" style={{ color: "var(--tc-text-tertiary)" }}>
+      <div
+        className="px-3 py-1 text-xs"
+        style={{ color: "var(--tc-text-tertiary)" }}
+      >
         {hasSource ? "连接并创建" : "插入"}
       </div>
       {OPTIONS.map((o) => (
@@ -63,7 +78,11 @@ export function ContextMenu({ screenX, screenY, hasSource, onInsert, onClose }: 
           type="button"
           onClick={() => onInsert(o.kind)}
           className="tc-ui-glow-btn block w-full rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--tc-menu-item-hover)] hover:text-white"
-          style={{ color: "var(--tc-text-secondary)", border: 0, background: "transparent" }}
+          style={{
+            color: "var(--tc-text-secondary)",
+            border: 0,
+            background: "transparent",
+          }}
         >
           {o.label}节点
         </button>

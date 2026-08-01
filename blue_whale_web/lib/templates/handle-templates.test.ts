@@ -19,7 +19,12 @@ describe("handleListTags", () => {
 });
 
 describe("handlePageTemplates", () => {
-  const card = { title: "T1", video: null, images: ["https://x/1.png"], layout: "wide" };
+  const card = {
+    title: "T1",
+    video: null,
+    images: ["https://x/1.png"],
+    layout: "wide",
+  };
 
   it("合法 tagCode → 200 + PageVo", async () => {
     const repo = {
@@ -31,7 +36,9 @@ describe("handlePageTemplates", () => {
         pages: 1,
       }),
     };
-    const result = await handlePageTemplates("marketing", 1, 10, { templates: repo });
+    const result = await handlePageTemplates("marketing", 1, 10, {
+      templates: repo,
+    });
     expect(result).toEqual({
       code: 200,
       msg: null,
@@ -42,7 +49,9 @@ describe("handlePageTemplates", () => {
 
   it("非法 tagCode → 400，不查库", async () => {
     const repo = { pageByTagCode: vi.fn() };
-    const result = await handlePageTemplates("bogus", 1, 10, { templates: repo });
+    const result = await handlePageTemplates("bogus", 1, 10, {
+      templates: repo,
+    });
     expect(result.code).toBe(400);
     expect(result.msg).toContain("非法标签");
     expect(repo.pageByTagCode).not.toHaveBeenCalled();

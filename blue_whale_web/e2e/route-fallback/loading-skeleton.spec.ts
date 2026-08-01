@@ -11,7 +11,9 @@ import { expect, test } from "@playwright/test";
 test.setTimeout(30_000);
 
 test.describe("Route fallback — loading skeleton", () => {
-  test("renders loading.tsx with 7+ skeleton blocks during slow route", async ({ page }) => {
+  test("renders loading.tsx with 7+ skeleton blocks during slow route", async ({
+    page,
+  }) => {
     // 拦截所有请求，延迟 1500ms 再放行
     await page.route("**/*", async (route) => {
       await new Promise((r) => setTimeout(r, 1500));

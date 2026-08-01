@@ -52,13 +52,17 @@ export function getAuditLogs(filter?: {
       (l) =>
         l.target.toLowerCase().includes(q) ||
         l.detail.toLowerCase().includes(q) ||
-        l.operator.toLowerCase().includes(q)
+        l.operator.toLowerCase().includes(q),
     );
   }
-  return result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return result.sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
 }
 
-export function writeAuditLog(entry: Omit<AuditLogEntry, "id" | "createdAt">): void {
+export function writeAuditLog(
+  entry: Omit<AuditLogEntry, "id" | "createdAt">,
+): void {
   logs.unshift({
     ...entry,
     id: `audit_${String(++logSeed)}`,

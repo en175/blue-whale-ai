@@ -19,14 +19,22 @@ describe("ApiError", () => {
   });
 
   it("detail 可省略（业务错误体无 detail 段时）", () => {
-    const e = new ApiError({ status: 404, code: "not_found", message: "asset 不存在" });
+    const e = new ApiError({
+      status: 404,
+      code: "not_found",
+      message: "asset 不存在",
+    });
     expect(e.detail).toBeUndefined();
   });
 });
 
 describe("isApiError", () => {
   it("ApiError 实例 → true", () => {
-    const e = new ApiError({ status: 500, code: "internal_error", message: "x" });
+    const e = new ApiError({
+      status: 500,
+      code: "internal_error",
+      message: "x",
+    });
     expect(isApiError(e)).toBe(true);
   });
 

@@ -1,5 +1,8 @@
 import { fail, ok } from "@blue-whale/contracts";
-import type { GenerationCommandRepo, ProjectRepo } from "@blue-whale/persistence";
+import type {
+  GenerationCommandRepo,
+  ProjectRepo,
+} from "@blue-whale/persistence";
 
 const RESOURCE_NOT_FOUND_CODE = 100301;
 

@@ -16,7 +16,13 @@ type VideoProviderOptions = {
 };
 
 const SUCCESS_STATUSES = new Set(["success", "succeeded", "completed"]);
-const FAILED_STATUSES = new Set(["failed", "failure", "error", "cancelled", "canceled"]);
+const FAILED_STATUSES = new Set([
+  "failed",
+  "failure",
+  "error",
+  "cancelled",
+  "canceled",
+]);
 
 function defaultSleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -56,7 +62,10 @@ export function createNewApiVideoProvider(
         });
 
         for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
-          const task = await client.getVideoTask(options.token, submitted.taskId);
+          const task = await client.getVideoTask(
+            options.token,
+            submitted.taskId,
+          );
           const status = task.status.toLowerCase();
           if (SUCCESS_STATUSES.has(status)) {
             if (!task.url) {
@@ -82,10 +91,7 @@ export function createNewApiVideoProvider(
           }
         }
 
-        throw new VideoProviderError(
-          "provider_timeout",
-          "视频生成轮询超时",
-        );
+        throw new VideoProviderError("provider_timeout", "视频生成轮询超时");
       } catch (error) {
         throw providerError(error);
       }

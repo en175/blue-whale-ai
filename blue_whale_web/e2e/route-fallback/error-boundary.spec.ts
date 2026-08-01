@@ -14,7 +14,9 @@ import { expect, test } from "@playwright/test";
 test.setTimeout(30_000);
 
 test.describe("Route fallback — error boundary", () => {
-  test("renders error.tsx when query string triggers throw", async ({ page }) => {
+  test("renders error.tsx when query string triggers throw", async ({
+    page,
+  }) => {
     await page.goto("/?e2e_error=1");
 
     // 错误页主区：直接定位 error.tsx 的 <main role="alert">，避开 Next.js route announcer div

@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Clapperboard, Copy, Image as ImageIcon, Megaphone, Share2, type LucideIcon } from "lucide-react";
+import {
+  Clapperboard,
+  Copy,
+  Image as ImageIcon,
+  Megaphone,
+  Share2,
+  type LucideIcon,
+} from "lucide-react";
 import { fetchTemplateTags } from "@/lib/templates";
 import type { TemplateTag } from "@/types/template";
 
