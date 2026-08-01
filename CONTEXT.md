@@ -14,9 +14,9 @@ TypeScript `product-api`、`agent-worker`、`generation-worker` 组成；三者�
 _Avoid_: 画布（口语可用，文档中用 Canvas）、编辑器（指代不同概念）
 
 **AgentChatPanel**:
-Canvas 右侧的 Agent 对话面板（右侧对话区）。承载消息列表、输入器（Composer）、
-技能面板与模式/模型选择。对应 `app/canvas/_canvas/components/AgentChatPanel.tsx`。
-_Avoid_: 对话区（口语可用，文档中用 AgentChatPanel）、编排器、Agent 面板
+Canvas 右侧的 Agent 对话面板（右侧对话区）。它只有一种需求对齐与创作策划模式，承载多轮澄清、
+方案迭代以及 PlanMessage 的生成与修改，不提供图片或视频生成能力，也不直接创建 SceneCard。
+_Avoid_: 对话区（口语可用，文档中用 AgentChatPanel）、Direct Gen、媒体生成操作面板、Agent 本体
 
 **AgentComposer**（历史术语，已废弃）:
 曾指 Canvas 中与 Agent 交互的编排组件，对应旧文件 `components/AgentComposer.tsx`。
@@ -245,6 +245,11 @@ GenerationJob 创建时固定的输出位置，用于让多输出任务稳定关
 重试可以关联原输出槽，但必须创建新的 GenerationJob；成功结果不得被后续重试覆盖。
 _Avoid_: 运行中增删或重排槽位；由 Web 猜测结果映射；在同一槽位发布多个 Asset。
 
+**Agent（创作编排者）**:
+面向 User 的创作协作者，负责持续对齐需求、澄清预期并生成或迭代 PlanMessage；
+它不拥有 Canvas 状态，不能直接创建 SceneCard 或 GenerationJob，也不执行图片和视频生成。
+_Avoid_: AgentChatPanel、画布状态所有者、SceneCard 创建方、GenerationJob 发起方、媒体生成执行器。
+
 **AgentRun（创作运行）**:
 围绕 Conversation 中一个创作意图推进的持久工作单元。已接纳消息与用户可见结果由 Product API 保存；
 Worker 崩溃后可以按当前权威状态重新领取，旧 Worker 不得覆盖新结果。完成、失败或取消后不自动重开；
@@ -360,9 +365,9 @@ _Avoid_: 重试复用结果不明的预留；usage 缺失时按零成本；把�
 _Avoid_: 把 AuditRecord 当作产品事件、调试日志或原始提示词存档。
 
 **GenerationAuthorizationGate（生成授权门）**:
-Agent 创建 GenerationJob 前对用户意图与风险的分类：明确且在默认成本额度内则直接执行；
+Product API 接纳 Canvas 图片或视频操作面板提交的 GenerationJob 前，对用户意图与风险进行分类：明确且在默认成本额度内则直接执行；
 存在关键歧义则继续对齐；高成本或不可逆操作则先取得自然语言确认，但确认不能突破系统硬额度。
-_Avoid_: 每次生成都确认、确认按钮、把需求对齐误称为授权。
+_Avoid_: 允许 Agent 创建 GenerationJob、每次生成都确认、把需求对齐误称为授权。
 
 **UserInputRequest（用户输入请求）**:
 AgentRun 因关键歧义或 GenerationAuthorizationGate 而等待用户补充信息时创建的产品中性请求记录，
@@ -380,10 +385,10 @@ Canvas 承载 Asset 素材节点与用户主动创建的标题、说明或创意
 visible_reasoning 思考过程、审核说明、任务状态)都在 AgentChatPanel 对话流里以文字或文字卡展示，
 系统和 Agent 不得自动把这些内容创建为 text NodeItem。一句话:**Canvas = 素材与用户便签，对话 = 过程**。
 User 明确应用对话中的计划后形成的 SceneCard 是此边界的唯一例外，并通过 SceneCardNode 进入 Canvas。
-确认 / 修改 / 重试一律通过对话自然语言表达，并遵循 GenerationAuthorizationGate，
-画布节点与对话区都**不设确认按钮**。
-_Avoid_: 把 Brief / Skill / 分镜 / Review 做成画布节点;在画布或对话里加确认按钮;
-把提示词、worker 名、文件路径等内部信息展示给用户。
+PlanMessage 通过卡片上的显式操作由 User 手动新建、覆盖或另存 SceneCard，点击后不再弹二次确认；
+继续修改仍通过对话产生新的 PlanMessage，不直接改写历史消息。
+_Avoid_: 把 Brief / Skill / 分镜 / Review 做成普通 text NodeItem；Agent 自动应用计划；
+直接编辑历史 PlanMessage；把提示词、worker 名、文件路径等内部信息展示给用户。
 
 **Spike**:
 为验证某个高风险点而做的最小可运行验证，**不是正式功能交付**。
