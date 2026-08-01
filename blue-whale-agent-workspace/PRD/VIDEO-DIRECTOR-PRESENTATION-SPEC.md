@@ -45,7 +45,7 @@
 | 结构配方 | 卡 | schema 字段 | 结构配方卡 | 票11 |
 | 拆解报告 | 卡 | 分段结构 | 拆解报告卡 | 票11 |
 | 提示词交付包 | 卡（视频镜头终点） | 分镜表+每镜视频提示词+使用指引 | 交付包卡 | 票8 |
-| 审核摘要 | 卡 | 检查项清单 | 审核摘要卡 | 票9 |
+| 审核摘要 | 流式（票9 订正，原「卡」基于旧语义已废） | 普通段落 | 流式消息 | 票9 |
 | 思考摘要 visible_reasoning | 流式 | 普通段落（细字） | 流式消息（顶部折叠） | 票4 |
 | 追问/确认 | 流式（依附卡） | 普通段落 | 确认追问 UI | 票2 |
 | 一句话轻告知 | 流式 | 普通段落 | 流式消息 | — |
@@ -603,7 +603,54 @@
 
 → 编排源修订独立于本 map，map 收口后或就近单独开。
 
-## 票9 ⏳ 审核摘要卡 呈现（IK5LUN，blocked by 1）
+## 票9 ✅ 审核摘要呈现 · 流式过程消息（非卡）（[IK5LUN](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LUN)，blocked by 1）
+
+### 核心决策：审核走流式，不出独立审核卡（推翻票1 产物表该行）
+
+- runtime-bundle AGENTS.md 明确「**审核与解释是对话过程内容**」（非卡载体），且 runtime-bundle **无独立 Review Agent**——Director 结果跟进里自然含审核判断，不设独立审核环节/审核卡。
+- 据此票9 定：**审核摘要走流式过程消息**（票1 过程→流式），**不出独立审核摘要卡**。**推翻票1 产物表「审核摘要 = 卡」那一行**（票1 该行基于旧 skill 语义：独立 Review Agent 产结构化审核摘要卡；runtime-bundle 已废弃）。票1 产物表该行已订正见下。
+- **不定结构化审核维度/分类**（归档版 `review_agent.md` 的 Brief/Skill/连贯性维度 + 通过/修改/重做三分类，随 Review Agent 废弃；runtime-bundle 无此环节，PM 不硬塞）。
+
+### 呈现要点（流式自然语言，不结构化）
+
+- **出现时机**：生成结果 ready 后，Director 结果跟进里**自然含审核判断**（不独立触发、不独立环节）——对齐 runtime-bundle「完成后把结果交给用户判断」。
+- **修改建议指向具体镜头**（ticket grill ②）：流式自然语言指**具体镜头号**+改什么+为什么（如「镜头2 口播『最强』建议改『较强』，更贴卖点」）；用户对话框说改 → agent 局部刷该镜（套票8 改某镜 / 票10 改 prompt 范式）。
+- **风险标注**（ticket grill ③）：
+  - **Brief 对齐风险**（跑题/夸大）→ 流式轻提示一句（套票13 faithful 版权轻提示范式：不判商用纯知情）。
+  - **内容安全审核** → **平台铁闸**（AGENTS.md：权限/安全/成本不由 Agent 判），Agent 不管、平台拦截；Agent 不在流式里做内容安全判断。
+
+### 双层映射（流式过程消息，无卡）
+
+| 元素 | 本地 CC（markdown） | 平台 UI |
+|---|---|---|
+| 审核消息 | 普通段落（AgentMessage） | 流式消息（AgentMessage，票4 正常过程权重） |
+| 修改建议 | 段落内指向镜头号 | 流式消息内指向镜头号 |
+| Brief 风险提示 | 段落内轻提示 | 流式消息内轻提示 |
+
+### 本地 markdown 模板样例（流式消息）
+
+**审核通过**
+````markdown
+✅ 整体符合 Brief 和选定 Skill，可以交付。要改哪镜直接说。
+````
+
+**建议修改（指向具体镜头）**
+````markdown
+镜头2 口播「最强」建议改「较强」（更贴卖点、避夸大）；镜头3 画面跟 Brief 的「户外」不太符，建议加自然光背景。改不改你说，要改我直接刷这两镜。
+````
+
+**Brief 对齐风险轻提示**
+````markdown
+⚠️ 整体偏卖点堆砌、钩子不够，建议镜头1 先抛痛点再上产品。
+````
+
+### 编排源调和
+
+- runtime-bundle（IK2D8R 后权威）AGENTS.md 第17行明确「审核与解释是对话过程内容」，`director-workflow/SKILL.md` Director 职责含「结果跟进：完成后把结果交给用户判断，按反馈修改、重做或继续扩展」——审核归结果跟进的对话内容，**非独立卡、非独立环节、无独立 Review Agent**。
+- 归档版 `skill/workers/review_agent.md`（独立 Review Agent + 检查维度 + 三分类输出）已随 IK2D8R 迁移废弃；本票不定结构化审核维度/分类（避免 PM 单方面加 runtime-bundle 没有的环节，对齐 [[blue-whale-pm-implementation-boundary]]）。
+- **推翻并订正票1 产物表「审核摘要 = 卡」行**：票1 该行基于旧 skill 语义，runtime-bundle 已变；票9 据实订正为流式（见票1 产物表该行标注）。
+- 内容安全审核归平台铁闸（AGENTS.md），不在 Agent 呈现规格内。
+- **无涌现编排源修订**（全从 runtime-bundle 既有规则 + 票1/8/10/13 既有范式推导）。
 
 ## 票10 ✅ 直生轻量交付呈现 · 单次生成结果卡（[IK5LV0](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LV0)，blocked by 8）
 
