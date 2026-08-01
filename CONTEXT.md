@@ -113,6 +113,10 @@ Product API 接纳的不可变用户或助手消息，拥有服务端身份，�
 刷新、重连或 Worker 重启不得丢失已接纳消息；本地草稿、临时流式片段和客户端时间不属于正式消息。
 _Avoid_: 用浏览器生成值或 SSE 到达顺序充当消息身份与排序依据。
 
+**ReasoningSummary（思考摘要）**:
+Agent 面向 User 主动整理的简短依据或进度说明，不是模型内部逐步思考链；内部思考链不展示、不持久化。
+_Avoid_: Chain of Thought、visible_reasoning、原始思考过程
+
 **PlanPhase（计划阶段）**:
 Agent 创作入口内由 Agent 按对话意图自主进入或退出的内部行为阶段；User 可以用自然语言要求立即产出
 PlanMessage、继续讨论或不产出 PlanMessage，但不需要理解或切换独立模式。
@@ -381,7 +385,7 @@ _Avoid_: 确认按钮、无请求标识的隐式解锁、把 UserInputRequest �
 **展示边界(画布 vs 对话)**:
 Canvas 承载 Asset 素材节点与用户主动创建的标题、说明或创意便签。
 所有过程性文字内容(Brief 摘要、Skill 推荐、脚本 / 分镜、图片理解摘要、Review、
-visible_reasoning 思考过程、审核说明、任务状态)都在 AgentChatPanel 对话流里以文字或文字卡展示，
+ReasoningSummary 思考摘要、审核说明、任务状态)都在 AgentChatPanel 对话流里以文字或文字卡展示，
 系统和 Agent 不得自动把这些内容创建为 text NodeItem。一句话:**Canvas = 素材与用户便签，对话 = 过程**。
 User 明确应用对话中的计划后形成的 SceneCard 是此边界的唯一例外，并通过 SceneCardNode 进入 Canvas。
 PlanMessage 通过卡片上的显式操作由 User 手动新建、覆盖或另存 SceneCard，点击后不再弹二次确认；
