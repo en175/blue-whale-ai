@@ -905,7 +905,54 @@ _源：用户上传保温杯爆款片段 · 拆解方式：direct_multimodal_
 - `workflows/video-decode-replicate.md` 复刻阶段步骤1 brief(replicate) 与本规格一致，**无修订**（票13 涌现的复刻决策门修订另计）。
 - **无涌现修订工单**（票14 全部从既有编排源 + 已填票推导）。
 
-## 票15 ⏳ 多模态输入展示 + @图片N 引用（IK5LVB，blocked by 1）
+## 票15 ✅ 多模态输入展示 + @图片N 引用（[IK5LVB](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LVB)，blocked by 1）
+
+### 核心决策：画布素材展示（现状）+ 平台 @素材名引用 + @图片N 本地版双层映射
+
+- **画布是素材平铺区**（载体架构见顶部）：用户上传/生成的图、视频作为节点平铺在画布主区，**非卡载体**（卡在右侧 AgentChatPanel）。
+- **平台版用户全程看「@素材名」**，不接触 @图片N：对话框/Dock 用 @ 关联画布素材，显示素材名（上传=文件命名；生成=生成素材名），assetId 关联传 seedance 生成。
+- **@图片N 是本地版（CC markdown）交付包提示词语法**（seedance 外部工具语法），平台版用户不接触；双层映射由 agent 内部维护（assetId ↔ @图片N 编号）。
+
+### 画布素材节点展示（现状，已实现）
+
+| 元素 | 呈现 |
+|---|---|
+| 缩略 | 图/视频首帧缩略（视频可播放/动效） |
+| 顶部素材名 | 上传=文件命名（如「产品图.png」）；生成=生成素材名（如「镜头1 产品特写」） |
+| 媒体类型 | image / video / audio（NodeKindId） |
+
+- 画布节点现状**不显 @图片N 编号**（编号是本地版/seedance 内部，非用户视角）。
+- reference 参考卡 / product 产品卡（素材绑定卡）也在画布，可挂多图（product 满 8 图上限）。
+
+### @引用机制（平台版，对话框 + Dock）
+
+| 场景 | 形态 |
+|---|---|
+| 对话框 @素材 | AgentChatPanel 输入器输 @ → 弹画布素材列表（缩略+名）→ 选 → @pill 显示**素材名**（关联 assetId） |
+| Dock 参考素材 | 底部 BottomDock 引用素材（首尾帧/参考图），同 @素材名 + assetId |
+| 传生成 | @pill 的 assetId → referenced_asset_ids → seedance 生成（agent 内部翻译，用户不接触 @图片N） |
+
+- **@一致性**：画布素材名 = 对话框 @pill 名 = Dock 引用名（同一 asset 显示一致）。素材改名/重传时 assetId 不变，@引用跟随 assetId，显示名同步更新。
+- **上限 ≤10**（代码现状 `MENTION_LIMIT=10`，对齐后端 `referenced_asset_ids` `@Size(max=10)`）。
+- **范围**：当前项目画布所有素材（上传 + 生成）。
+- **多图消歧**：用户 @ 多张且意图不明时，image-understanding 不猜，走对话框追问（票2）确认 @哪张/各用于哪。
+
+### @图片N 本地版双层映射（CC markdown ↔ 平台）
+
+| 维度 | 本地 CC（markdown） | 平台 UI |
+|---|---|---|
+| 素材引用 | @图片N（按上传顺序全局连续编号，seedance 语法） | @素材名（画布素材关联，assetId） |
+| 编号稳定性 | 全局连续 + 删除不重排（保留失效标记，已生成提示词不错位） | 不涉及（平台用 assetId，无编号错位问题） |
+| 双层映射 | agent 维护 assetId ↔ @图片N 编号（本地版交付包生成时翻译） | — |
+| 交付包提示词 | @图片N 正文（用户复制去外部 seedance/即梦） | 平台内直接生成（agent 传 assetId 给 seedance API，用户不看 @图片N） |
+
+- **票1-14 的 @图片N 均为本地版 markdown 模拟**；各票双层映射表「平台 UI」列涉及素材引用时，平台版用 @素材名（assetId 关联），非 @图片N。
+- 编号机制（票15-1 决策）：本地版 @图片N 按上传顺序全局连续，删除不重排（失效标记保留）。
+
+### 编排源调和
+
+- **无修订**。`agents/image-understanding.md`（asset_understanding + 多图消歧不猜）与本规格一致；`references/seedance-prompt-optimizer.md`（@图片N/@视频N 语法）是本地版提示词语法，平台版 agent 据此翻译 assetId→@图片N 给 seedance，呈现归本规格。
+- 画布素材展示 / @mention pill（assetId 关联）/ Dock 参考素材均为代码现状（CanvasSurface / AgentChatPanel / BottomDock），PM 仅确认呈现规格，不重复定实现。
 
 ## 票16 ⏳ 阶段回退 / 局部改镜 / Stop 交互（IK5LVJ，blocked by 1）
 
