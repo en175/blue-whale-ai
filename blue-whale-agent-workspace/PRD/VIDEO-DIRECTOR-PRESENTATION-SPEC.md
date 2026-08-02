@@ -1182,7 +1182,117 @@ _源：用户上传保温杯爆款片段 · 拆解方式：direct_multimodal_
 - **无修订**。`agents/image-understanding.md`（asset_understanding + 多图消歧不猜）与本规格一致；`references/seedance-prompt-optimizer.md`（@图片N/@视频N 语法）是本地版提示词语法，平台版 agent 据此翻译 assetId→@图片N 给 seedance，呈现归本规格。
 - 画布素材展示 / @mention pill（assetId 关联）/ Dock 参考素材均为代码现状（CanvasSurface / AgentChatPanel / BottomDock），PM 仅确认呈现规格，不重复定实现。
 
-## 票16 ⏳ 阶段回退 / 局部改镜 / Stop 交互（IK5LVJ，blocked by 1）
+## 票16 ✅ 阶段回退 / 局部改镜 / Stop 交互（[IK5LVJ](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LVJ)，blocked by 1）
+
+### 核心决策：三件事 = 「用户改变主意」的统一纠正范式
+
+阶段回退 / 局部改镜 / Stop 本质都是**用户改变主意 / 纠正 / 中止**，runtime-bundle「对话任意往返 + 用户随时纠正」（AGENTS.md:18「用户随时可以纠正你」）是共同基础。本票定**统一纠正范式总则 + 三件事各特化**，不另立载体。落地票6「改的出口 = 文字说，或后续阶段回退（票16）」伏笔。
+
+**三条总则**（跨三件事）：
+
+1. **走对话框自然语言**：所有改 / 回退 / 停的发起 = 用户文字说（套票2 卡只读 + 对话框改范式）。**无显式回退 / 改镜 / Stop 按钮**（卡上不加新交互）。
+2. **旧产物保留 + 标失效**：被新决策覆盖的已确认卡不删，灰显 + 角标「已被新决策覆盖」（套票15 @图片N「删除不重排、保留失效标记」先例）。对话 / 画布是事实层（AGENTS.md:16「事实以平台记录为准」），不悄悄变。
+3. **对话大白话**（票12 通用原则）：纠正措辞不蹦「revert / rollback / abort / undo」，说「把镜头 N 换掉 / 回到 Brief 改 / 停掉这个」。术语只在卡内字段 + agent 内部。
+
+### 阶段回退：纯对话 + 旧卡标失效 + 首门轻带
+
+- **触发**：用户文字说回某已确认阶段（如「分镜先别定，我回 Brief 改下卖点」「拆解那个 pattern 我想再调」）→ agent 重新进该阶段。
+- **改的方式 = 该阶段卡字段局部刷**（套票5 Brief 卡 / 票7 分镜卡 / 票11 拆解卡 / 票13 复刻决策卡的「文字说改 → 卡字段更新」范式），**不重出整张卡、不产生新卡**。
+- **下游旧卡处理**：改完旧阶段，agent 判断是否影响下游（**影响范围判定归 agent 运行时，PM 只定呈现**）：
+  - 影响 → 下游已确认卡**保留 + 标失效**（灰显 + 角标「已被新决策覆盖」）+ agent 流式告知「改了卖点，分镜要重出」（套票9 结果跟进流式告知范式）。
+  - 不影响 → 下游卡保留不动。
+- **discoverability**：首个确认门（Brief 卡首次确认）agent 流式轻带一句「之后想改 Brief / 分镜随时说我」，建立「可回退」心智；**后续确认门不重复**（避免刷屏，对齐 runtime-bundle「输出短、克制」）。用户主动回退则直接处理，不再提示。
+- **跨链路**：回退基本在同链路内（standard / 复刻各自）；「直生 → 完整广告」是**前进非回退**（票10 扩展为完整广告已定），不另定退回。
+
+### 局部改镜：统一总则（套票7/8/10，无新规则）
+
+- **总则**：用户随时文字说改某镜 / 某字段 → agent **局部刷该区块**（卡不重生成）。
+  - 分镜卡改某镜（画面 / 口播 / 时长）→ 刷该行（票7）。
+  - 交付包改某镜提示词 → 刷该镜块（票8）。
+  - 直生卡改 prompt → 重生成新结果落画布、卡 prompt 区更新（票10）。
+- **多镜批量改** = 单镜范式逐镜刷（如「镜头2、3 改横屏」→ 逐镜刷），无新规则。
+- **指代消歧**：分镜表多卡分组用**全局连续镜号**（票7 已定），「镜头 N」唯一，无歧义。
+- **改内容 vs 改结构**：套票2/3 不可逆判据——改内容（单镜画面 / 口播 / 时长微调）局部刷可逆；改结构（增删镜 / 调序 / 改时长意图偏离）覆盖已确认结构化结果 = 不可逆 → 聚合确认卡（票2/3/7 已定）。faithful 改结构额外触发「切 method?」门（票3 已定）。
+- 本票贡献 = 把散定局部改凝成上述总则，**不新增规则**。
+
+### Stop：归平台铁闸 + cancelled 沿用 + agent 流式跟进
+
+- **PM 边界**：Stop（停止生成中 job）归**平台铁闸**（AGENTS.md:15「权限 / 安全 / 成本 / 幂等与生成任务生命周期是平台铁闸，不由 Agent 判」）。runtime-bundle 全工具集（`bundle-source.json:55`）**无 cancel job 工具**——Agent 只能 `read_generation_job_status`（读），不能停。用户停止 = 平台 UI 行为（Dock / 画布取消按钮），**非 Agent 卡片交互**。
+- **cancelled 呈现沿用代码现状**：后端 job status 含 `cancelled` → CardStatus `cancelled` 终态（`cardStatus.ts`：cancelled → cancelled 不重试）→ AgentCard 按钮显「已取消」禁用（`ChatBubbles.tsx:112-119`；票10 已定「取消态沿用现状无按钮」）。
+- **Stop 后 agent 跟进**（票16 增量，补票10 未定）：cancelled 后 agent **流式轻跟进一句**给开放出口（如「已停掉。要改 prompt 重来、还是换个方向，直接说」），套票9 结果跟进范式 + 票1 过程→流式。**不出卡、不追问、不弹选项**（cancelled 非确认点产物）。用户说「重来」→ 同 prompt 重跑（票10 重新生成）；说「改横屏再重来」→ 改 prompt 重生成（票10 改 prompt）。
+- **范围**：Stop 只针对**单次生成 job**（直生 / 图生视频等，票10 场景）；完整广告交付包是提示词外带（票8），无平台 job 可停。
+
+### 生成中改镜：引导先停再改
+
+- 生成中（generating / queued / processing）用户想改 → agent **流式引导「正在生成，要改先把这个停掉」**（Agent 无 cancel 工具，不能替用户停）。用户在平台 UI 停 → cancelled → 套上述 Stop 跟进。
+- 不绕过：agent 不「排队下次用新 prompt」、不「自动停当前重生成」（皆因 Agent 无 cancel 工具 + 一次只跑当前 job）。
+
+### 双层映射（纠正 / 回退 / Stop）
+
+| 元素 | 本地 CC（markdown） | 平台 UI |
+|---|---|---|
+| 回退发起 | 文字说「回 Brief 改」→ agent 刷该阶段卡字段 | 对话框说 → 卡字段更新 |
+| 下游旧卡标失效 | 旧卡灰显 + 角标 `⚠️ 已被新决策覆盖` | 旧卡灰显 + 失效角标 |
+| 影响范围告知 | 流式段落「改了卖点，分镜要重出」 | 流式消息气泡 |
+| 首门 discoverability | Brief 卡确认后流式一句「之后想改随时说」 | 流式消息气泡（仅首次） |
+| 局部改镜 | 文字说改某镜 → agent 刷该区块 | 对话框说改 → 卡区块更新 |
+| Stop 触发 | （本地版无平台 job，不适用） | Dock / 画布取消按钮（平台铁闸） |
+| cancelled 呈现 | 卡显 `已取消`（票10） | AgentCard「已取消」禁用按钮 |
+| Stop 后跟进 | 流式一句给开放出口 | 流式消息气泡 |
+| 生成中改镜 | 流式「正在生成，要改先停」 | 流式消息气泡 |
+
+### 本地 markdown 模板样例
+
+**回退发起 + 下游标失效**
+````markdown
+（用户：「分镜先别定，我回 Brief 改下核心卖点——主打成分安全」）
+
+## 📋 Brief 摘要（已更新）
+- 核心卖点：成分安全（改）  ← 其余不动
+👉 确认无误我重出分镜。
+
+（下游分镜卡标失效）
+> ⚠️ 第1段·钩子（镜头1-3）·已被新决策覆盖（Brief 改了卖点，需重出分镜）
+````
+
+**首门 discoverability（Brief 卡首次确认后流式一句）**
+````markdown
+## 📋 Brief 摘要
+- …
+👉 确认无误我进 Skill 选择；要改或补充直接说。
+
+（确认后流式一句，仅首次）
+之后做到分镜、提示词阶段，想回来改 Brief 随时跟我说就行。
+````
+
+**Stop 后跟进（cancelled 后流式）**
+````markdown
+（用户在 Dock 停了生成 → 卡 cancelled）
+## 🎬 直生结果（视频）
+> ⚠️ 已取消
+
+（agent 流式跟进）
+已停掉。要改 prompt 重来、还是换个方向，直接说。
+````
+
+**生成中改镜引导**
+````markdown
+（用户[生成中]：「镜头2 改横屏」）
+
+正在生成镜头，要改的话先把这个停掉（Dock 里取消），停了跟我说，我改 prompt 重来。
+````
+
+### 编排源调和
+
+- runtime-bundle（IK2D8R 后权威）：Director 单一顾问式 Agent，「用户随时可以纠正你」（AGENTS.md:18）+「生成任务生命周期是平台铁闸不由 Agent 判」（AGENTS.md:15）→ 回退 / 纠正走对话任意往返（**无状态机、无显式回退入口**），Stop 归平台铁闸（Agent 无 cancel 工具，全工具集见 `bundle-source.json:55`）。本票据 runtime-bundle 真实链路定，**不基于归档版状态机**。
+- 归档版 `video-director-local/` 的 director 状态机 + canvas-state 规则（显式阶段流转 / 回退门）→ 随 IK2D8R 迁移收敛；runtime-bundle 无独立状态机文档，**回退 = 对话自然行为**。归档版状态机仅参考产品语义，非权威（对齐 [[blue-whale-pm-implementation-boundary]]：状态机实现归后端）。
+- 代码现状（`cardStatus.ts` / `ChatBubbles.tsx` AgentCard）cancelled 已是终态 + 按钮显「已取消」禁用 → 与本票 Stop 呈现一致，**无修订**。
+- 局部改镜总则全从票7/8/10 既有范式推导，**无新规则、无涌现修订**。
+- **回退旧卡标失效**套票15 @图片N「保留失效标记」先例，不新立机制。
+- **首门 discoverability 轻带一句**是 agent 对话行为（非 UI 按钮、非固定确认门），不违反 `natural-confirmation`「不设固定确认门话术」——一次性首门提示，非每轮门。
+- 对齐 [[blue-whale-pm-implementation-boundary]]：影响范围判定 / cancel job 执行 / 状态机持久化归后端运行时，PM 只定用户可见呈现。
+
+→ **无涌现编排源修订工单**（全从 runtime-bundle 既有规则 + 票2/3/5/7/8/9/10/11/13/15 既有范式推导）。
 
 ## 票17 ✅ 一键复制提示词 交互（[IK5LVK](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LVK)，blocked by 8）
 
