@@ -167,9 +167,10 @@ _Avoid_: Plan Mode、模式开关、直接生成入口、把普通问答或素�
 Conversation 中由 Agent 提交的独立正式消息类别，以 Markdown 与稳定素材引用表达可应用的图片或视频计划；
 `write_plan_cards` 工具调用只在 AgentRun 中暂存完整候选，不直接创建正式消息；Product API 完成整批验证后，
 只有 RunCommit 能原子接纳全部 PlanMessage。验证失败、User 停止或提交前中断均零消息，恢复可复用已保存
-的完整候选而不重新调用模型。
-一次方案可以按顺序提交一条或多条 PlanMessage，每条都有独立消息身份并可独立应用，整批只作为原子
-接纳边界，不形成新的持久化批次资源。
+的完整候选而不重新调用模型。图片与视频 PlanMessage 的 `content_type` 统一为 `plan_message`，不得使用
+把图片计划误建模为场景卡计划的 `scene_card_plan`。
+一次方案可以按顺序提交一条或多条 PlanMessage，每条都有独立消息身份、独立 PlanApplicationKind 并可
+独立应用；不含覆盖的批次可以混合图片与视频计划。整批只作为原子接纳边界，不形成新的持久化批次资源。
 每条 PlanMessage 在提交时都必须冻结一套完整、可执行的生成参数：User 明确指定的值必须保留，
 未指定项在计划卡生成时补齐有效默认值；首次应用直接使用这套参数，不在应用时重新猜测默认值。
 参数必须来自 Product API 提供的版本化生成能力快照并记录其版本；明确要求不受支持时必须先通过
@@ -180,27 +181,44 @@ Conversation 中由 Agent 提交的独立正式消息类别，以 Markdown 与�
 默认值为一，只有 User 明确要求多个结果时才增加。
 多卡批次可带一个由 Agent 生成的短序号名词；服务端根据卡片顺序派生并在每条 PlanMessage 中持久保存
 名词、序号与总数，单卡不显示序号，多卡缺少名词时只显示序号与总数。
-它随对话历史持久保留，可记录直接参考的另一 PlanMessage，并按生成类型冻结应用意图：图片计划直接创建
-图片 GenerationJob，不创建 SceneCard；视频计划新建 SceneCard，或覆盖本轮明确要求修改且唯一 available
-的 SceneCardMention。仅把 SceneCard 作为风格或内容参考时仍然新建；零引用只能新建，多个引用或修改意图
+它随对话历史持久保留，可记录直接参考的另一 PlanMessage，并按生成类型冻结 PlanApplicationKind：图片计划
+使用 `image_generate`，直接创建图片 GenerationJob，不创建 SceneCard；视频计划使用 `scene_card_create` 新建
+SceneCard，或使用 `scene_card_replace` 覆盖本轮明确要求修改且唯一 available 的 SceneCardMention。仅把
+SceneCard 作为风格或内容参考时仍然新建；零引用只能新建，多个引用或修改意图
 不明确时必须先自然语言澄清，并要求 User 只重新引用目标 SceneCard。图片计划不支持覆盖 SceneCard，
 视频覆盖不提供另存分支，任何应用都必须由 User 手动触发。
 Agent 只能通过本轮已冻结的 SceneCardMention 句柄声明覆盖目标，不能自行填写 SceneCard 身份或版本；
 Product API 从引用事实解析目标与基准版本；手动应用不得替换计划卡冻结的目标。
 应用覆盖时必须重新比较目标当前版本；版本变化、目标删除或越权均零写入，并要求 User 重新引用当前
 SceneCard 生成新的 PlanMessage。成功覆盖复用原 SceneCardNode，既有生成记录与 Asset 保持不变。
-图片直接生成或视频新建意图可以原子提交多条 PlanMessage；视频覆盖意图一次只能提交一条，不能为同一
-SceneCard 创建可被连续应用的多个替代覆盖方案。
+`image_generate` 与 `scene_card_create` 可以在同一次 `write_plan_cards` 中混合并原子提交多条 PlanMessage；
+每个 `cards[]` 元素独立携带 PlanApplicationKind。`scene_card_replace` 必须独占一次提交且只能包含一张卡，
+不能与其他应用类型混合，也不能为同一 SceneCard 创建可被连续应用的多个替代覆盖方案。
 本次方案中每张卡的全部必需素材引用都有效时，Agent 才能原子提交整批 PlanMessage；任一必需引用无效时，
 不得产生任何 PlanMessage，Agent 必须在 PlanPhase 通过自然语言让 User 移除或替换该引用后重新生成。
 模型输出的素材引用只能来自本次已验证可用的引用集合；集合外素材 ID 属于契约错误，整批候选不得展示，
 系统应在内部修复或重试，不能把引用幻觉交给 User 处理。
 _Avoid_: 生成结果 Card、SceneCard 本体、把所有计划卡都落成 SceneCard、可变草稿、唯一最新版、自动应用、自动改写正文、把素材失效等同于消息失效、部分提交计划卡、静默删除或忽略无效引用、展示含幻觉引用的候选卡
 
+**PlanApplicationKind（计划应用类型）**:
+PlanMessage、PlanApplicationReceipt 与应用事件共享的 `application_kind` 判别字段，只允许
+`image_generate`（直接生成图片）、`scene_card_create`（新建场景卡并生成视频）或
+`scene_card_replace`（覆盖场景卡并生成视频）。只有后两类携带结果 `scene_card_id`，覆盖类还必须绑定
+本轮唯一可用的 SceneCardMention。
+_Avoid_: 用无媒体语义的 `create` / `replace`；要求图片路径携带 `scene_card_id`；各层使用不同判别词。
+
+**PlanApplicationAvailability（计划应用可用性）**:
+系统根据当前资源、权限、额度与模型能力实时形成的 PlanMessage 应用投影，只允许 `available`（可应用）、
+`retryable_blocked`（修复后可重试）或 `requires_new_plan`（必须生成新计划）。它不改写 PlanMessage 的
+“未应用 / 已应用”持久事实；额度等可修复的零写入失败在修复后可用新 CommandId 重试，素材失效、
+SceneCard 版本变化或能力不再支持则必须生成新的 PlanMessage。
+_Avoid_: 第三种计划卡生命周期状态、失败时创建 PlanApplicationReceipt、让不可恢复的旧计划继续应用。
+
 **PlanApplicationReceipt（计划应用记录）**:
-一次成功应用 PlanMessage 的不可变事实，记录图片直接生成或视频新建/覆盖的实际路径、内容摘要、应用时间、
-首次 GenerationJob 与 CommandId；视频路径还记录结果 SceneCard、结果版本与生成预设摘要。它证明正文和
-完整参数来自被点击的 PlanMessage，不修改 PlanMessage，Canvas 放置也不属于其成功条件。
+一次成功应用 PlanMessage 的不可变事实，记录 PlanApplicationKind、内容摘要、应用时间、首次 GenerationJob
+与 CommandId；视频路径还记录结果 SceneCard、结果版本、`scene_card_id` 与生成预设摘要，图片路径不携带
+`scene_card_id`。它证明正文和完整参数来自被点击的 PlanMessage，不修改 PlanMessage，Canvas 放置也不属于
+其成功条件。
 应用前必须重新验证冻结素材与生成能力；任一项失效时，图片路径的 PlanApplicationReceipt 与 GenerationJob
 全部零写入，视频路径的 SceneCard、SceneCardGenerationPreset、PlanApplicationReceipt 与 GenerationJob
 全部零写入，不能静默替换参数或留下半成品。
@@ -213,7 +231,8 @@ _Avoid_: PlanMessage 状态、失败尝试、Canvas 放置记录、用网络响�
 
 **CommandId（业务命令身份）**:
 写请求使用的稳定幂等键。同一业务操作的网络重试保持同一键和请求内容；Product API 返回首次结果，
-不得重复创建消息、任务、Asset 或其他产品事实。精确格式、摘要算法和保留期由后续实施 Spec 按最小需要定义。
+不得重复创建消息、任务、Asset 或其他产品事实。网络结果未知时必须复用原键恢复首次结果；已明确零写入
+失败且 User 修复阻断条件后，新的手动操作使用新的 CommandId。
 _Avoid_: 每次重试换键；把幂等键当资源身份、排序依据或权限凭证。
 
 **GenerationInbox**（生成收件箱）:
@@ -285,7 +304,8 @@ _Avoid_: 供应商直接向 User 流式输出、把流式安全信号直接当�
 对象永久私有；访问 URL 仅在服务端确认当前 User 有权访问所属 Project 与 Asset 后临时签发，
 不构成 Asset 身份或长期地址。
 开发测试首版不对用户上传的 Asset 执行蓝鲸产品级 ContentReview；上传并持久化成功后即可使用。
-编辑或换源会创建新 Asset，但同样不因上传来源触发产品级审核；上线前是否增加该边界另行决策。
+编辑或换源会创建新 Asset，但同样不因上传来源触发产品级审核。用户上传内容审核属于独立的生产上线
+阻断决策；该决策完成前，开发测试链路不得被宣称已取得生产上线许可。
 供应商生成结果只有在 Product API 依据充分 ReviewEvidence 明确通过后才成为 Asset，继而
 可见、可下载或可作为后续输入；证据不足时只对该结果调用一次专用审核服务。
 **同一 Asset 可被多个消费者引用** —— Card 可以把它投影到对话流；一个或多个独立 asset NodeItem
@@ -391,8 +411,9 @@ _Avoid_: AgentChatPanel、画布状态所有者、SceneCard 创建方、Generati
 并可包含多个先后发生的 AgentAdvance。已接纳消息与用户可见结果由 Product API 保存；Worker 崩溃后
 可以按当前权威状态重新领取，旧 Worker 不得覆盖新结果。单次 AgentAdvance 的模型结果无法确认时，
 AgentRun 进入 `awaiting_retry`（等待重试），不自动再次调用模型；User 手动重试会在同一 AgentRun
-创建新的 AgentAdvance。完成、不可恢复失败或取消后不自动重开；后续新的创作目标由 Product API
-创建新的 AgentRun。
+创建新的 AgentAdvance。User 对当前澄清或最终确认请求的回答继续同一 AgentRun，并创建下一次
+AgentAdvance，不为每条回答新建 AgentRun。完成、不可恢复失败或取消后不自动重开；后续新的创作目标
+由 Product API 创建新的 AgentRun。
 _Avoid_: 把每条网络请求或模型调用当作独立 AgentRun；从 Worker 本地状态推导产品终态；
 为结果不明建设自动迟到证据收敛。
 
@@ -400,35 +421,33 @@ _Avoid_: 把每条网络请求或模型调用当作独立 AgentRun；从 Worker 
 AgentRun 内一次冻结输入的执行轮次。Product API 在开始时固定本轮有序消息输入与 MentionInputSnapshot；
 新到消息只能等待后续推进。Worker 租约接管必须继续同一推进，不能创建新的运行事实或改变冻结输入。
 已持久化完整模型结果时可以直接复用；只有部分文本或调用结果不明时必须清除临时文本并等待 User
-手动重试，禁止租约接管自动再次调用模型。
+手动重试，禁止租约接管自动再次调用模型。每个 AgentAdvance 最多成功执行一次 RunCommit；同一个
+AgentRun 可以随多个 AgentAdvance 产生多次 RunCommit。
 _Avoid_: 每次 Worker 领取都新建推进；运行中追加消息或引用；把 AgentAdvance 当作独立 Conversation 或 AgentRun；
 在结果不明时自动重调模型。
 
+**RunCommit（运行提交）**:
+Product API 对单个 AgentAdvance 的唯一正式接纳边界；每次推进最多成功一次，可原子接纳一条正式
+AssistantMessage，或一组完整有序的 PlanMessage。同一 AgentRun 可随多次推进拥有多个 RunCommit，
+精确重放必须返回该推进首次接纳的相同结果。
+_Avoid_: 按 AgentRun 限制只能提交一次；跨 AgentAdvance 拼接结果；把临时交付文本当作正式提交。
+
 ### Agent 运行配置
 
-**AgentDefinition（Agent 定义）**:
-平台内部一个 Agent 的稳定身份，是 Runtime Agent Bundle 草稿与发布版本的归属根；自身不承载运行时内容。
-_Avoid_: AgentRun、BundleVersion、可直接执行的提示词。
+**AgentRuntimeManifest（智能体运行清单）**:
+随应用发布候选交付并在启动时完整校验的只读运行配置，确定角色文档、规则集、运行时技能、允许的模型与
+工具，以及全部运行资源身份和内容摘要。它只作为 Product API 创建 RunPin 的来源，不提供在线草稿、发布、
+导入、导出或回滚管理能力。
+_Avoid_: Runtime Agent Bundle、BundleDraft、BundleVersion、运行时查询 latest、把 Creative Skill 纳入清单。
 
-**Runtime Agent Bundle（运行时 Agent 包）**:
-平台维护、普通 User 不可见的 Agent 行为配置边界，由角色、Rules、根 Runtime Skill、允许的模型与工具以及资源清单组成；运行时只消费其不可变发布版本。
-_Avoid_: 仓库目录、Creative Skill、可变系统提示词、Agent 框架 checkpoint。
-
-**BundleDraft（运行时 Agent 包草稿）**:
-一个可编辑、可校验但不可运行的 Runtime Agent Bundle 工作区；发布后产生新的不可变 BundleVersion。
-_Avoid_: 活动配置、可由 Worker 读取的快照。
-
-**BundleVersion（运行时 Agent 包版本）**:
-Runtime Agent Bundle 的不可变发布快照；AgentRun 固定具体版本，激活或回滚只影响之后创建的 Run。
-_Avoid_: 原地修改的配置行、Git commit、RuntimeCheckpoint 版本。
-
-**Run pin（版本固定）**:
-Product API 为 AgentRun 固定的不可变运行版本锚点，覆盖 Runtime Agent Bundle、ModelProfile 与已激活
-Creative Skill；这些身份在 Run 生命周期内不随发布或恢复漂移。
-_Avoid_: Worker 回显静态 pin、可变版本引用、独立改写 pin、把尚未接纳的 `auto` Activation 当作既成事实。
+**RunPin（运行版本快照）**:
+Product API 在创建 AgentRun 时从 AgentRuntimeManifest 复制的自包含不可变快照，冻结提示资源与摘要、
+ModelProfile、RuntimeBudgetPolicy、ToolGrant，以及本次运行采用的 Creative Skill 版本事实。Worker 恢复时
+只消费该快照，不查询最新配置或依赖已退役的运行包平台。
+_Avoid_: BundleVersion、可变版本引用、独立改写快照、Worker 回显拼装、把尚未接纳的 `auto` Activation 当作既成事实。
 
 **RoleDocument（角色文档）**:
-定义内部 Agent 身份、职责和任务边界的根 Markdown 资源；每个 BundleVersion 恰好一个并始终装载。
+定义内部 Agent 身份、职责和任务边界的根 Markdown 资源；每份 AgentRuntimeManifest 恰好引用一个并始终装载。
 _Avoid_: Rule、Runtime Skill、面向 User 的角色模板。
 
 **Rule（运行时规则）**:
@@ -436,11 +455,12 @@ _Avoid_: Rule、Runtime Skill、面向 User 的角色模板。
 _Avoid_: 平台铁闸、Creative Skill、散落在代码中的提示词分支。
 
 **RuleSet（规则集）**:
-Runtime Agent Bundle 中按确定顺序生效的 Rule 引用集合；冲突 Rule 必须在发布前消解，不能依赖后写覆盖。
+AgentRuntimeManifest 中按确定顺序生效的 Rule 引用集合；冲突 Rule 必须在构建校验时消解，不能依赖后写覆盖。
 _Avoid_: 无序标签集合、运行时临时拼接的提示词。
 
 **Runtime Skill（运行时技能）**:
-平台内部、随 BundleVersion 发布的 Agent 工作流资源；初始只披露元数据，正文与引用资源在选择后按需装载。
+平台内部、由 AgentRuntimeManifest 定位并随 RunPin 冻结的 Agent 工作流资源；初始只披露元数据，正文与
+引用资源在选择后按需装载。
 _Avoid_: Creative Skill、数据库 `skill` 表的用户内容、硬编码 Orchestrator 分支。
 
 **Creative Skill（创作技能）**:
@@ -489,7 +509,7 @@ Manual Personal Skill Creation 的编写模式内由 User 按需触发的小型 
 _Avoid_: Conversation-Summarized Personal Skill、User 自定义格式模板、自动触发、应用前二次确认、保存动作
 
 **Official Creative Skill Addition（官方创作技能添加关系）**:
-User 对某个 Official Creative Skill 建立的个人可用关系，使它出现在 My Creative Skills 中并具备开启 `auto` 的资格；该关系不复制官方内容或转移所有权。User 无需建立该关系即可从 Creative Skill Library `Use` 一次，单次使用只作用于下一次 Agent 请求，不会自动添加技能或开启 `auto`。如果 User 已有同名 Personal Creative Skill，则阻止建立该关系，直到 User 删除并以其他名称重新创建个人技能；冲突期间仍允许从 Creative Skill Library 单次 `Use` 官方技能。关系建立后继续停留在 Creative Skill Library，卡片的“添加”变为不可点击的“已添加”状态并显示成功提示；移除只能从 My Creative Skills 发起。后续创建的 AgentRun 使用当时生效的官方发布版本，既有 AgentRun 继续保持其 Run pin。User 从 My Creative Skills 移除它时只删除该关系，操作立即执行且不要求二次确认，完成后显示成功提示；Official Creative Skill 继续保留在 Creative Skill Library，仍可再次单次使用或重新添加。
+User 对某个 Official Creative Skill 建立的个人可用关系，使它出现在 My Creative Skills 中并具备开启 `auto` 的资格；该关系不复制官方内容或转移所有权。User 无需建立该关系即可从 Creative Skill Library `Use` 一次，单次使用只作用于下一次 Agent 请求，不会自动添加技能或开启 `auto`。如果 User 已有同名 Personal Creative Skill，则阻止建立该关系，直到 User 删除并以其他名称重新创建个人技能；冲突期间仍允许从 Creative Skill Library 单次 `Use` 官方技能。关系建立后继续停留在 Creative Skill Library，卡片的“添加”变为不可点击的“已添加”状态并显示成功提示；移除只能从 My Creative Skills 发起。后续创建的 AgentRun 使用当时生效的官方发布版本，既有 AgentRun 继续保持其 RunPin。User 从 My Creative Skills 移除它时只删除该关系，操作立即执行且不要求二次确认，完成后显示成功提示；Official Creative Skill 继续保留在 Creative Skill Library，仍可再次单次使用或重新添加。
 _Avoid_: 直接使用即自动添加、点击“已添加”移除、同名冲突时仍添加、冻结副本、个人所有权、独立发布分支
 
 **Direct Creative Skill Use（直接使用创作技能）**:
@@ -516,7 +536,7 @@ Product API 为 AgentRun 固定的 Provider 调用、上下文与成本硬限制
 _Avoid_: Worker 重启后计数归零；把本地计数当权威；用户确认后突破系统硬限制。
 
 **ToolGrant（工具授权声明）**:
-Bundle 对平台工具注册表的版本化允许子集，只赋予 Agent 提议动作的资格；每次副作用仍由 Product API 确定性接纳。
+AgentRuntimeManifest 对平台工具注册表的版本化允许子集，只赋予 Agent 提议动作的资格；每次副作用仍由 Product API 确定性接纳。
 _Avoid_: 已授权命令、模型输出即执行、绕过 GenerationAuthorizationGate。
 
 **ToolDefinition（工具定义）**:
@@ -532,13 +552,14 @@ ToolDefinition 的注册表侧属性（`low` / `medium` / `high`），用于运�
 _Avoid_: 在 ToolGrant 里携带风险等级、把风险等级当作发布期铁闸。
 
 **ResourceManifest（资源清单）**:
-BundleVersion 内所有资源身份、版本、内容摘要、装载方式与已解析引用的不可变索引，是运行时加载与导入导出复现的依据。
-_Avoid_: 可变文件目录、网络资源目录、未校验的相对路径列表。
+AgentRuntimeManifest 内所有资源身份、版本、内容摘要、装载方式与已解析引用的不可变索引，是构建校验与
+RunPin 复现的依据。
+_Avoid_: 可变文件目录、网络资源目录、未校验的相对路径列表、在线导入导出载荷。
 
 **ReadEvidence（资源读取证据）**:
 Worker 单次资源读取的最小证据（资源身份、版本、内容摘要与来源），用于确认运行时读取的是已固定资源；
 不要求在 IK3UUX 中建设独立证据存储或长期生命周期。
-_Avoid_: 资源正文、私有文件路径、Bundle / ModelProfile / CreativeSkill pin 回显。
+_Avoid_: 资源正文、私有文件路径、RunPin / ModelProfile / CreativeSkill 回显。
 
 ### Agent 运行机制
 
