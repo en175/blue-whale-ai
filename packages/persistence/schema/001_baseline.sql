@@ -516,11 +516,13 @@ CREATE TABLE `creative_skill` (
     `active_version_id` VARCHAR(80) NULL,
     `owner_user_id` BIGINT NOT NULL DEFAULT 0,
     `asset_domain` VARCHAR(16) NOT NULL DEFAULT 'official',
+    `name_key` VARCHAR(255) NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 
     UNIQUE INDEX `uk_creative_skill_id`(`creative_skill_id`),
     INDEX `idx_owner_domain`(`owner_user_id`, `asset_domain`),
+    INDEX `idx_owner_name_key`(`owner_user_id`, `name_key`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

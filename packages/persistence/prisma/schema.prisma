@@ -411,10 +411,12 @@ model creative_skill {
   active_version_id String?  @db.VarChar(80)
   owner_user_id     BigInt   @default(0)
   asset_domain      String   @default("official") @db.VarChar(16)
+  name_key          String?  @db.VarChar(255)
   gmt_create        DateTime @default(now()) @db.DateTime(0)
   gmt_modified      DateTime @default(now()) @db.DateTime(0)
 
   @@index([owner_user_id, asset_domain], map: "idx_owner_domain")
+  @@index([owner_user_id, name_key], map: "idx_owner_name_key")
 }
 
 /// Creative Skill 不可变版本快照（IK60WS，资产契约 §1）：

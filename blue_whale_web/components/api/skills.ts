@@ -121,6 +121,9 @@ export const skillsApi = {
   /** 切换 auto（关系属性，持久化）；creativeSkillId 即 creative_skill_id */
   setAuto: (creativeSkillId: string, auto: boolean) =>
     request<void>(`/mine/${creativeSkillId}`, "PATCH", { auto }),
+  /** 创建个人技能（IK60WU）；content 为完整 SKILL.md 文本（含 frontmatter） */
+  createPersonalSkill: (content: string) =>
+    request<SkillMineItem>("/personal", "POST", { content }),
   /** 当前 Run 的 Creative Skill 推荐列表（IK3NPI，GET，Run 级端点不在 skills base 下） */
   recommendations: (runId: number) =>
     requestUrl<CreativeSkillRecommendation[]>(

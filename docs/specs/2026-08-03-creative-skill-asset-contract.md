@@ -87,8 +87,9 @@
    原样保留用于展示。
 2. **冲突域**：同一账户内个人技能 Name Key 唯一；官方技能名称在官方库全局唯一，并对
    个人技能创建/上传形成保留名称。不同账户的个人 Name Key 互不影响。
-3. 本工单只冻结算法与语义；`name_key` 存储列与创建时校验随个人技能创建工单落地，
-   本契约不定义其 DDL。
+3. `name_key` 存储列与创建时校验已由 IK60WU 落地：`creative_skill.name_key VARCHAR(255)`，
+   索引 `idx_owner_name_key(owner_user_id, name_key)`；创建时应用层校验同用户个人唯一 +
+   官方保留名。
 
 ## 6. 接口形状（BFF）
 
@@ -97,14 +98,14 @@
 | 端点 | 变更 |
 |---|---|
 | `POST /api/agent/skills/library` | 响应记录按 §3 白名单，主键 `creative_skill_id`；v2 起请求体扩展 `{ keyword?, category?, sort?, lang?, pageNum?, pageSize? }`（§11.5） |
-| `POST /api/agent/skills/mine` | 响应为官方引用 ∪ 名下个人技能的并集，主键 `creative_skill_id`，含 `asset_domain` |
+| `POST /api/agent/skills/mine` | 响应为官方引用 ∪ 名下个人技能的并集，主键 `creative_skill_id`，含 `asset_domain`；IK60WU 起统一按添加/创建时间倒序 |
 | `POST /api/agent/skills/library/{id}/add` | `{id}` 语义改为 `creative_skill_id`；非官方域或未知 ID → 100100 |
 | `DELETE /api/agent/skills/mine/{id}` | `{id}` 语义改为 `creative_skill_id`；仅删引用，不删技能本体 |
 | `PATCH /api/agent/skills/mine/{id}` | `{id}` 语义改为 `creative_skill_id`；仅改自己引用的 `auto` |
+| `POST /api/agent/skills/personal` | IK60WU 新增。body `{ content }` 为完整 SKILL.md 文本；解析 frontmatter → 校验 → 创建个人技能（§12） |
 
 - `creative_skill_id` 入参先按 `^[a-z][a-z0-9_]{2,79}$` 校验，非法即「不存在」。
-- 个人技能的创建、只读正文、删除端点**不在本契约范围**（创建工单定义）；本工单仅在
-  持久化层落地 owner 谓词方法并以测试锁定隔离语义。
+- 个人技能只读正文、删除端点不在本契约范围（后续工单定义）。
 
 > **适用面说明**：本节端点指 Next BFF（`blue_whale_web/app/api/agent/skills/*`）——产品的
 > 唯一用户可达面。Java/Python 栈已退役，其旧 `SkillController` 同路径数字 id 变体随之
@@ -117,6 +118,8 @@
 | 注册命令指向未知、个人域或格式非法的 ID | `100100`（数据不存在，沿用现有语义） |
 | 跨用户 forced 激活个人技能 / Skill 对当前用户不可见 | `100306`（BFF 统一 envelope，HTTP 200 承载业务码；语义对齐激活契约 §8 的 `CREATIVE_SKILL_UNAVAILABLE`） |
 | 跨用户读/改/删个人技能（持久化层） | 0 命中，按不存在处理，不泄露存在性 |
+| 个人技能名称与同用户已有技能 Name Key 冲突 | `100101`（IK60WU 新增） |
+| 个人技能名称与官方技能保留名冲突（§5.2） | `100102`（IK60WU 新增） |
 
 ## 8. 与激活契约的关系
 
@@ -130,10 +133,12 @@ Node 运行时接通激活后，同一校验在其 pin 解析点重复执行（�
 
 ## 9. 非目标
 
-- 个人技能的创建、上传、AI 格式化、只读正文与复制、在线编辑端点与 UI。
+- ~~个人技能的创建、上传、AI 格式化、只读正文与复制、在线编辑端点与 UI。~~
+  → 创建已由 IK60WU 落地（§12）；只读正文/复制/在线编辑归后续工单。
 - 「我的技能」的搜索/筛选/排序控件；个人技能 auto 候选。
 - 官方技能运营后台、详情页。
-- `name_key` 持久化列与创建时冲突校验实现（§5 仅冻结算法）。
+- ~~`name_key` 持久化列与创建时冲突校验实现（§5 仅冻结算法）。~~
+  → 已由 IK60WU 落地（§5.3）。
 - Creative Skill 的 Node 运行时激活接通（pin 固定、正文按需读取）与官方目录 seed
   （`skill` 目录行与 `creative_skill` 版本化库回填）——均属 Java→Node parity 迁移工单。
 
@@ -174,6 +179,14 @@ CREATE TABLE creative_skill_activation (
   gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_skill_user (creative_skill_id, user_id)
 ) COMMENT='技能成功激活埋点（IK60WT）';
+```
+
+v3（IK60WU）存量库补列（全新环境已由 `001_baseline.sql` 含列/索引，无需执行）：
+
+```sql
+ALTER TABLE creative_skill
+  ADD COLUMN name_key VARCHAR(255) NULL COMMENT '归一化名称键，用于冲突判断（IK60WU）',
+  ADD INDEX idx_owner_name_key (owner_user_id, name_key);
 ```
 
 ## 11. 技能库浏览扩展（v2，IK60WT）
@@ -230,3 +243,47 @@ CREATE TABLE creative_skill_activation (
   "pageSize": 50
 }
 ```
+
+## 12. 个人技能创建端点（IK60WU）
+
+### 12.1 SKILL.md 格式
+
+用户编写的 SKILL.md 包含 YAML frontmatter 和正文两部分：
+
+```
+---
+name: 技能显示名
+description: 技能简介
+---
+
+正文内容（Markdown）...
+```
+
+- frontmatter 必须以 `---` 开头和闭合，只解析 `name` 和 `description` 两个键。
+- 正文为闭合 `---` 之后的内容（trim 首尾空白）。
+- 三者（name / description / body）均不能为空，否则返回参数错误（400）。
+
+### 12.2 创建端点
+
+`POST /api/agent/skills/personal`，body：`{ "content": "<完整 SKILL.md 文本>" }`。
+
+- 成功 → `{ code: 200, data: SkillMineView }`（`asset_domain: "personal"`，`auto: false`，
+  `cover_url: null`，`source: null`）。
+- 名称冲突 → `100101`；官方保留名 → `100102`（§7）。
+- 格式不合法 / 字段为空 → `400`。
+
+### 12.3 creative_skill_id 生成
+
+- 从 name slugify（小写、空格→下划线、仅保留 `[a-z0-9_]`）。
+- 全非 ASCII 或结果太短 → `s_` + base36(DJB2 hash)。
+- 全局碰撞 → 追加 `_2`/`_3`…（最多 99 次）。
+
+### 12.4 确定性封面
+
+个人技能 `cover_url` 恒为 `null`（§3）。前端根据技能名称确定性生成渐变色背景 +
+首字母图标（`generateSkillCover(name)`），同名永远一致。
+
+### 12.5 listMine 排序变更
+
+IK60WU 起，`POST /api/agent/skills/mine` 统一按「最近创建或添加」倒序：官方引用按
+`user_skill.gmt_create` desc，个人技能按 `creative_skill.gmt_create` desc，合并后统一排序。
