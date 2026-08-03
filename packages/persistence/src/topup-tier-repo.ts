@@ -83,6 +83,16 @@ function parseDateTime(v: string | null | undefined): Date | null {
   return new Date(v);
 }
 
+/** id 守卫：仅接受十进制正整数串。BigInt("abc") 会抛错，不能让路径参数直接炸成 500。 */
+function parseId(id: string): bigint | null {
+  if (typeof id !== "string" || !/^\d{1,19}$/.test(id)) return null;
+  try {
+    return BigInt(id);
+  } catch {
+    return null;
+  }
+}
+
 /* ---------- factory ---------- */
 
 export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
@@ -112,8 +122,10 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
     },
 
     async getById(id) {
+      const pid = parseId(id);
+      if (pid === null) return null;
       const row = await prisma.topup_tiers.findFirst({
-        where: { id: BigInt(id), is_delete: 0 },
+        where: { id: pid, is_delete: 0 },
       });
       return row ? toView(row) : null;
     },
@@ -129,7 +141,7 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
       const row = await prisma.topup_tiers.create({
         data: {
           name: input.name || `${input.amount}积分`,
-          amount: BigInt(input.amount),
+          amount: BigInt(Math.round(input.amount)),
           original_price: input.originalPrice,
           discount: input.discount,
           price,
@@ -144,8 +156,10 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
     },
 
     async update(id, input) {
+      const pid = parseId(id);
+      if (pid === null) return null;
       const existing = await prisma.topup_tiers.findFirst({
-        where: { id: BigInt(id), is_delete: 0 },
+        where: { id: pid, is_delete: 0 },
       });
       if (!existing) return null;
 
@@ -155,7 +169,7 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
 
       const data: Record<string, unknown> = { price, gmt_modified: new Date() };
       if (input.name !== undefined) data.name = input.name;
-      if (input.amount !== undefined) data.amount = BigInt(input.amount);
+      if (input.amount !== undefined) data.amount = BigInt(Math.round(input.amount));
       if (input.originalPrice !== undefined) data.original_price = input.originalPrice;
       if (input.discount !== undefined) data.discount = input.discount;
       if (input.isRecommended !== undefined) data.is_recommended = input.isRecommended;
@@ -165,25 +179,34 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
       if (input.sortOrder !== undefined) data.sort_order = input.sortOrder;
 
       const row = await prisma.topup_tiers.update({
-        where: { id: BigInt(id) },
+        where: { id: pid },
         data,
       });
       return toView(row);
     },
 
     async remove(id) {
+      const pid = parseId(id);
+      if (pid === null) return false;
       const r = await prisma.topup_tiers.updateMany({
-        where: { id: BigInt(id), is_delete: 0 },
+        where: { id: pid, is_delete: 0 },
         data: { is_delete: 1, gmt_modified: new Date() },
       });
       return r.count > 0;
     },
 
     async updateSortOrder(items) {
+      const parsed = items.map((item) => ({
+        pid: parseId(item.id),
+        sortOrder: item.sortOrder,
+        rawId: item.id,
+      }));
+      const invalid = parsed.find((p) => p.pid === null);
+      if (invalid) throw new Error(`非法档位 id: ${invalid.rawId}`);
       await prisma.$transaction(
-        items.map((item) =>
+        parsed.map((item) =>
           prisma.topup_tiers.update({
-            where: { id: BigInt(item.id) },
+            where: { id: item.pid as bigint },
             data: { sort_order: item.sortOrder, gmt_modified: new Date() },
           }),
         ),
