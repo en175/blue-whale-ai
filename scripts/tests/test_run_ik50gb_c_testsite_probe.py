@@ -46,6 +46,48 @@ class TestIk50gbCTestsiteProbe(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("must use HTTPS", result.stderr)
 
+    def test_insecure_http_switch_allows_plain_http_remote(self):
+        env = os.environ.copy()
+        env.update(
+            {
+                "BW_TEST_BASE_URL": "http://example.invalid",
+                "BW_TEST_USERNAME": "probe-user",
+                "BW_TEST_PASSWORD": "probe-password",
+                "BW_ALLOW_INSECURE_HTTP": "1",
+            }
+        )
+        result = subprocess.run(
+            ["bash", str(SCRIPT)],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        # URL 闸门放行后会在网络层失败（域名不可解析），但不得是 HTTPS 拒绝。
+        self.assertNotEqual(result.returncode, 2)
+        self.assertNotIn("must use HTTPS", result.stderr)
+
+    def test_insecure_http_switch_keeps_userinfo_blocked(self):
+        env = os.environ.copy()
+        env.update(
+            {
+                "BW_TEST_BASE_URL": "http://user:pass@example.invalid",
+                "BW_TEST_USERNAME": "probe-user",
+                "BW_TEST_PASSWORD": "probe-password",
+                "BW_ALLOW_INSECURE_HTTP": "1",
+            }
+        )
+        result = subprocess.run(
+            ["bash", str(SCRIPT)],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2)
+
     def test_rejects_localhost_userinfo_bypass_before_network(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             marker = pathlib.Path(temp_dir) / "curl-was-called"
