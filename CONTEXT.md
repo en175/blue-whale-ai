@@ -47,8 +47,10 @@ _Avoid_: 把 SceneCard 当作 Card 的持久化版本；把 SceneCard 内容复�
 PlanMessage 正文引用保存全部有效素材；预设中的生成输入只是其中经过所选模型能力验证、带明确角色的
 子集。User 明确要求素材直接参与生成但当前能力不支持时，必须先自然语言澄清，不能静默降为上下文参考。
 生成编辑器内的参数修改只形成本地临时草稿；只有 User 点击“生成”时，Product API 才原子更新预设并
-创建新的 GenerationJob，关闭编辑器不保存草稿。
-_Avoid_: SceneCardNode 数据、每次打开重新猜测的默认值、历史生成参数、改写 PlanMessage
+创建新的 GenerationJob，关闭编辑器不保存草稿。生成编辑器不编辑 SceneCard 的权威 Markdown 正文；
+正文只能在 SceneCard 编辑器中单独修改。打开后若正文或预设已经变化，提交零写入并保留本地草稿，
+User 刷新复核后再生成，不自动合并。
+_Avoid_: SceneCardNode 数据、每次打开重新猜测的默认值、历史生成参数、改写 PlanMessage、在生成面板改写正文、自动合并过期草稿
 
 **ProviderPromptProjection（供应商提示词投影）**:
 服务端从 PlanMessage 或 SceneCard 的权威 Markdown 正文确定性派生、实际提交给生成供应商的提示词；
