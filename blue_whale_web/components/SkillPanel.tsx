@@ -43,8 +43,8 @@ import {
  * add 在 library tab 内（乐观 + 回滚；成功后按钮变不可点击「已添加」+ toast，IK60WX）；
  * remove 统一在 my tab 菜单内，成功后经 refreshTrigger 重拉 library 同步 added 状态；
  * auto 在 my tab 内（乐观 + 回滚）。同名冲突（100103）展示服务端解释文案（契约 §5.4）。
- * 封面取 cover_url，空走默认图。Use 传 skill.name（forced_skill_id 真接入原依赖 IJZ7Z7；
- * IJZ7Z7 已由 IK2D8R 替代，见 docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md）。
+ * 封面取 cover_url，空走默认图。Use 即「直接使用」（IK60WY）：传稳定 creative_skill_id
+ * 绑定下一次 Agent 请求（一次性，不建引用、不改 auto）；无稳定 ID 的目录行禁用。
  *
  * 交互（IK60WT）：背景滚动锁定 + 焦点陷阱 + 初始焦点落面板 + 关闭后焦点还触发按钮；
  * 关闭三路径：ESC / 遮罩按压（onMouseDown 范式，规避拖选误关 IK2AKU）/ 右上 X。
@@ -1204,7 +1204,10 @@ function MySkillRow({
         </span>
         <span className="tc-agent-skill-row__controls flex items-center gap-2 mt-auto">
           <span className="tc-agent-skill-row__quick-actions flex items-center gap-2">
-            <UseButton onClick={onUse} />
+            <UseButton
+              onClick={onUse}
+              disabled={skill.creative_skill_id === null}
+            />
             <button
               type="button"
               className="tc-agent-skill-row__switch"
@@ -1273,7 +1276,7 @@ function LibrarySkillCard({
           </span>
         </span>
         <span className="tc-agent-skill-row__controls flex items-center gap-2 mt-auto pt-2">
-          <UseButton onClick={onUse} />
+          <UseButton onClick={onUse} disabled={!hasStableId} />
           <button
             type="button"
             data-testid="skill-library-add-btn"
@@ -1293,12 +1296,19 @@ function LibrarySkillCard({
   );
 }
 
-function UseButton({ onClick }: { onClick: () => void }) {
+function UseButton({
+  onClick,
+  disabled = false,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
-      className="tc-agent-skill-row__action tc-agent-skill-row__action--use inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-medium text-white/80 border border-white/[0.08] hover:bg-white/[0.08] hover:text-white transition-colors"
+      className="tc-agent-skill-row__action tc-agent-skill-row__action--use inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-medium text-white/80 border border-white/[0.08] hover:bg-white/[0.08] hover:text-white transition-colors disabled:opacity-40 disabled:pointer-events-none"
       onClick={onClick}
+      disabled={disabled}
     >
       <AtSign size={12} aria-hidden="true" />
       <span>直接使用</span>

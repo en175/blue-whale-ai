@@ -8,9 +8,18 @@ import {
   handleListGenerationInboxConversations,
 } from "./handlers";
 
+type SkillsStub = {
+  findAssetDomainInfo: ReturnType<typeof vi.fn>;
+  recordActivation: ReturnType<typeof vi.fn>;
+};
+
 function makeRepo(
   overrides: Partial<GenerationInboxRepo>,
-): GenerationInboxRepo {
+  skills: SkillsStub = {
+    findAssetDomainInfo: vi.fn().mockResolvedValue(null),
+    recordActivation: vi.fn().mockResolvedValue(undefined),
+  },
+): GenerationInboxRepo & { skills: SkillsStub } {
   return {
     get: vi.fn(),
     acceptMessage: vi.fn(),
@@ -18,8 +27,90 @@ function makeRepo(
     createConversation: vi.fn(),
     delete: vi.fn(),
     ...overrides,
-  } as GenerationInboxRepo;
+    skills,
+  } as GenerationInboxRepo & { skills: SkillsStub };
 }
+
+const ACCEPTED = {
+  kind: "accepted",
+  project_id: "42",
+  conversation_id: "7",
+  message_id: "8",
+  agent_run_id: "9",
+  cursor: "2",
+  sequence_no: 1,
+} as const;
+
+describe("handleAcceptGenerationInboxMessage forced skill（IK60WY）", () => {
+  const body = {
+    client_message_id: "client-1",
+    content: "生成蓝鲸",
+    forced_creative_skill_id: "official_skill",
+  };
+
+  it("forced 指向未知技能 → 100306，不触碰持久化", async () => {
+    const repo = makeRepo({});
+    const result = await handleAcceptGenerationInboxMessage(
+      "9",
+      body,
+      "command-1",
+      repo,
+    );
+
+    expect(result.code).toBe(100306);
+    expect(repo.acceptMessage).not.toHaveBeenCalled();
+  });
+
+  it("forced 指向官方技能 → 放行接纳并落 forced 激活埋点", async () => {
+    const skills: SkillsStub = {
+      findAssetDomainInfo: vi
+        .fn()
+        .mockResolvedValue({ asset_domain: "official", owner_user_id: null }),
+      recordActivation: vi.fn().mockResolvedValue(undefined),
+    };
+    const repo = makeRepo(
+      { acceptMessage: vi.fn().mockResolvedValue(ACCEPTED) },
+      skills,
+    );
+
+    const result = await handleAcceptGenerationInboxMessage(
+      "9",
+      body,
+      "command-1",
+      repo,
+    );
+
+    expect(result.code).toBe(200);
+    expect(result.data?.agent_run_id).toBe(9);
+    expect(skills.recordActivation).toHaveBeenCalledWith({
+      creativeSkillId: "official_skill",
+      userId: "9",
+      agentRunId: "9",
+      skillVersion: 1,
+      activationSource: "forced",
+    });
+  });
+
+  it("forced 指向他人个人技能 → 100306（不泄露存在性）", async () => {
+    const skills: SkillsStub = {
+      findAssetDomainInfo: vi
+        .fn()
+        .mockResolvedValue({ asset_domain: "personal", owner_user_id: "77" }),
+      recordActivation: vi.fn(),
+    };
+    const repo = makeRepo({}, skills);
+
+    const result = await handleAcceptGenerationInboxMessage(
+      "9",
+      body,
+      "command-1",
+      repo,
+    );
+
+    expect(result.code).toBe(100306);
+    expect(skills.recordActivation).not.toHaveBeenCalled();
+  });
+});
 
 describe("generation inbox wire ids", () => {
   it("preserves every database id beyond Number.MAX_SAFE_INTEGER", async () => {

@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
 
 import {
+  acceptWithForcedCreativeSkill,
   prepareConversationMessage,
   type ConversationCommandStoreResult,
+  type ForcedCreativeSkillGuard,
+  type SkillActivationRecorder,
 } from "./accept-conversation-message.js";
 
 export interface GenerationInboxProjectView {
@@ -48,6 +51,15 @@ export interface GenerationInboxStore {
   delete(userId: string): Promise<boolean>;
 }
 
+export type AcceptGenerationInboxMessageResult =
+  | ConversationCommandStoreResult
+  | { kind: "invalid"; message: string }
+  | { kind: "creative_skill_unavailable" };
+
+/**
+ * 收件箱消息接纳（IK60WY）：与 conversation 路径同走 forced 共享缝——
+ * 域/owner 守卫 fail-closed + 接纳后 forced 单次激活埋点（激活契约 §2/§4.1）。
+ */
 export async function acceptGenerationInboxMessage(
   input: {
     userId: string;
@@ -55,10 +67,18 @@ export async function acceptGenerationInboxMessage(
     body: Record<string, unknown>;
   },
   store: GenerationInboxStore,
-) {
+  forcedSkillGuard?: ForcedCreativeSkillGuard,
+  activationRecorder?: SkillActivationRecorder,
+): Promise<AcceptGenerationInboxMessageResult> {
   const prepared = prepareConversationMessage(input.body, input.idempotencyKey);
   if ("kind" in prepared) return prepared;
-  return store.acceptMessage({ userId: input.userId, ...prepared });
+  return acceptWithForcedCreativeSkill({
+    userId: input.userId,
+    body: input.body,
+    guard: forcedSkillGuard,
+    recorder: activationRecorder,
+    accept: () => store.acceptMessage({ userId: input.userId, ...prepared }),
+  });
 }
 
 export function createGenerationInboxConversation(

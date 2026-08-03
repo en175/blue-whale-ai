@@ -14,7 +14,14 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import SkillPanel from "./SkillPanel";
+import DirectSkillTag from "./DirectSkillTag";
+import SkillPanel, { type UseSkillSelection } from "./SkillPanel";
+import {
+  clearDirectSkillBinding,
+  readDirectSkillBinding,
+  writeDirectSkillBinding,
+  type DirectSkillBinding,
+} from "@/lib/direct-skill-binding";
 import { AspectRatioIcon } from "./icons/AspectRatioIcon";
 import {
   IMAGE_MODELS,
@@ -209,6 +216,7 @@ export default function AgentComposer({
   useEffect(() => {
     if (!isControlled || !editorRef.current) return;
     if (editorRef.current.innerText === (prompt ?? "")) return;
+    // eslint-disable-next-line react-hooks/immutability -- 受控回写 DOM 是本 effect 的目的，规则对 ref 属性赋值误报
     editorRef.current.innerText = prompt ?? "";
   }, [prompt, isControlled]);
 
@@ -400,31 +408,30 @@ export default function AgentComposer({
     }
   };
 
-  const insertSkillIntoEditor = useCallback((skillName: string) => {
-    const editor = editorRef.current;
-    if (!editor) return;
+  // 「直接使用」一次性绑定（IK60WY）：技能稳定 ID 只绑下一次 Agent 请求。
+  // sessionStorage 承载首页 → /generate 的传递；发送成功或移除标签后清除。
+  const [boundSkill, setBoundSkill] = useState<DirectSkillBinding | null>(null);
+  // 挂载后读 sessionStorage（跨页传递的绑定）；SSR 无存储，避免水合不一致。
+  useEffect(() => {
+    // 挂载后一次性读取是官方认可模式；set-state-in-effect 规则对此误报。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBoundSkill(readDirectSkillBinding());
+  }, []);
 
-    editor.focus();
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      if (editor.contains(range.commonAncestorContainer)) {
-        range.deleteContents();
-        const textNode = document.createTextNode(`@${skillName} `);
-        range.insertNode(textNode);
-        range.setStartAfter(textNode);
-        range.setEndAfter(textNode);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      } else {
-        editor.appendChild(document.createTextNode(`@${skillName} `));
-      }
-    } else {
-      editor.appendChild(document.createTextNode(`@${skillName} `));
-    }
-
-    handleInput();
+  const handleUseSkill = useCallback((skill: UseSkillSelection) => {
+    if (!skill.creative_skill_id) return;
+    const binding = {
+      creative_skill_id: skill.creative_skill_id,
+      name: skill.name,
+    };
+    setBoundSkill(binding);
+    writeDirectSkillBinding(binding);
     setSkillPanelOpen(false);
+  }, []);
+
+  const handleRemoveBoundSkill = useCallback(() => {
+    setBoundSkill(null);
+    clearDirectSkillBinding();
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1373,6 +1380,15 @@ export default function AgentComposer({
                 </div>
               )}
 
+              {boundSkill && (
+                <div className="px-4 pt-3">
+                  <DirectSkillTag
+                    name={boundSkill.name}
+                    onRemove={handleRemoveBoundSkill}
+                  />
+                </div>
+              )}
+
               <div className="relative min-h-[120px]">
                 <div
                   ref={editorRef}
@@ -1578,7 +1594,7 @@ export default function AgentComposer({
       <SkillPanel
         isOpen={skillPanelOpen}
         onClose={() => setSkillPanelOpen(false)}
-        onUseSkill={(skill) => insertSkillIntoEditor(skill.name)}
+        onUseSkill={handleUseSkill}
       />
     </div>
   );
