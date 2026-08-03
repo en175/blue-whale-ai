@@ -8,6 +8,7 @@ import {
   parseSkillMd,
 } from "./handle-skill-writes.js";
 import {
+  SkillAddConflictError,
   SkillNameConflictError,
   SkillNameReservedError,
 } from "@blue-whale/persistence";
@@ -46,6 +47,18 @@ describe("handleAddSkill", () => {
       data: null,
     });
     expect(repo.addReference).not.toHaveBeenCalled();
+  });
+
+  it("与同用户个人技能 Name Key 冲突 → 100103 并解释（契约 §5.4，IK60WX）", async () => {
+    const repo = makeRepo();
+    repo.resolveOfficialSkillId.mockResolvedValue("3");
+    repo.addReference.mockRejectedValue(new SkillAddConflictError("深度写作"));
+    const result = await handleAddSkill("9", "deep_writing", { skills: repo });
+    expect(result).toEqual({
+      code: 100103,
+      msg: "官方技能与你的个人技能「深度写作」同名，无法添加；你仍可直接使用",
+      data: null,
+    });
   });
 
   it.each(["BAD-ID!!", "Poster_gen", "ab", "1poster"])(
