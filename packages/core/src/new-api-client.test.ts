@@ -48,6 +48,7 @@ describe("new-api client", () => {
               username: "new-user",
               email: "new@example.com",
               status: 1,
+              role: 100,
             },
           });
         }
@@ -78,6 +79,7 @@ describe("new-api client", () => {
       username: "new-user",
       email: "new@example.com",
       status: 1,
+      role: 100,
     });
     expect(requests.map(({ url }) => url)).toEqual([
       "http://new-api.test/api/status",

@@ -6,6 +6,14 @@ set -euo pipefail
 : "${BW_TEST_USERNAME:?BW_TEST_USERNAME is required}"
 : "${BW_TEST_PASSWORD:?BW_TEST_PASSWORD is required}"
 
+terminal_timeout_seconds="${BW_PROBE_TERMINAL_TIMEOUT_SECONDS:-180}"
+case "$terminal_timeout_seconds" in
+  ''|*[!0-9]*)
+    echo "BW_PROBE_TERMINAL_TIMEOUT_SECONDS must be a positive integer (seconds)" >&2
+    exit 2
+    ;;
+esac
+
 base_url="${BW_TEST_BASE_URL%/}"
 if ! node -e '
   let url;
@@ -15,13 +23,17 @@ if ! node -e '
     process.exit(1);
   }
   const isLoopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  // BW_ALLOW_INSECURE_HTTP=1：用户知情豁免——测试站无 TLS 时允许明文 HTTP（userinfo 仍拒绝）。
+  const insecureAllowed =
+    url.protocol === "http:" &&
+    process.env.BW_ALLOW_INSECURE_HTTP === "1";
   const allowed =
     url.username === "" &&
     url.password === "" &&
-    (url.protocol === "https:" || (url.protocol === "http:" && isLoopback));
+    (url.protocol === "https:" || (url.protocol === "http:" && isLoopback) || insecureAllowed);
   process.exit(allowed ? 0 : 1);
 ' "$base_url"; then
-  echo "BW_TEST_BASE_URL must use HTTPS unless the host is localhost, and must not contain userinfo" >&2
+  echo "BW_TEST_BASE_URL must use HTTPS unless the host is localhost (set BW_ALLOW_INSECURE_HTTP=1 to knowingly waive TLS), and must not contain userinfo" >&2
   exit 2
 fi
 
@@ -195,7 +207,7 @@ if [ "${BW_ALLOW_BILLED_MEDIA_PROBE:-0}" = "1" ]; then
   done
 
   job_ids_csv="$(IFS=,; printf '%s' "${job_ids[*]}")"
-  terminal_deadline=$((SECONDS + 180))
+  terminal_deadline=$((SECONDS + terminal_timeout_seconds))
   while :; do
     code="$(json_request GET "/api/jobs?ids=$job_ids_csv" "" "$auth_header_file")"
     report "GET /api/jobs?ids=... (terminal poll)" "$code"

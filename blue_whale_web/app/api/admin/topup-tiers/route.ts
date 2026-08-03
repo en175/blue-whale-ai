@@ -6,9 +6,10 @@ import {
 import { createTopupTierDeps } from "@/lib/topup-tier/deps";
 import { syncTierDiscountToGo } from "@/lib/topup-tier/go-amount-discount";
 import { logTierCreate } from "@/lib/topup-tier/operation-log";
+import { withAdminUser } from "@/lib/auth/product-route-auth";
 
 // GET /api/admin/topup-tiers → 管理端列出全部档位（含停用）
-export async function GET() {
+async function handleListTopupTiers() {
   try {
     const { db } = createTopupTierDeps();
     const tiers = await db.listAll();
@@ -22,7 +23,7 @@ export async function GET() {
 // POST /api/admin/topup-tiers → 新建档位
 // 原价为主输入且须为正整数（N = 美元额度，Go int64，amount_discount 按整数 N 做 key）；
 // 到账积分是派生量（N × QuotaPerUnit），服务端派生落库，不接受客户端值。
-export async function POST(request: Request) {
+async function handleCreateTopupTier(request: Request) {
   try {
     const body = await request.json();
     const {
@@ -99,4 +100,12 @@ export async function POST(request: Request) {
     const msg = e instanceof Error ? e.message : "unknown";
     return Response.json({ success: false, error: msg }, { status: 500 });
   }
+}
+
+export async function GET(request: Request) {
+  return withAdminUser(request, () => handleListTopupTiers());
+}
+
+export async function POST(request: Request) {
+  return withAdminUser(request, () => handleCreateTopupTier(request));
 }

@@ -4,7 +4,7 @@ import {
   AuthenticationError,
   getAuthenticatedUser,
 } from "./authenticated-user";
-import { withAuthenticatedUser } from "./product-route-auth";
+import { withAdminUser, withAuthenticatedUser } from "./product-route-auth";
 
 vi.mock("./authenticated-user", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./authenticated-user")>();
@@ -25,6 +25,7 @@ describe("withAuthenticatedUser", () => {
     mockedGetAuthenticatedUser.mockResolvedValue({
       userId: "42",
       status: "enabled",
+      isAdmin: false,
     });
     const handler = vi
       .fn()
@@ -33,7 +34,7 @@ describe("withAuthenticatedUser", () => {
     const response = await withAuthenticatedUser(request, handler);
 
     expect(response.status).toBe(204);
-    expect(handler).toHaveBeenCalledWith({ userId: "42", status: "enabled" });
+    expect(handler).toHaveBeenCalledWith({ userId: "42", status: "enabled", isAdmin: false });
   });
 
   it.each([
@@ -66,6 +67,7 @@ describe("withAuthenticatedUser", () => {
     mockedGetAuthenticatedUser.mockResolvedValue({
       userId: "42",
       status: "enabled",
+      isAdmin: false,
     });
     const error = new Error("handler programming error");
 
@@ -84,5 +86,45 @@ describe("withAuthenticatedUser", () => {
 
     expect(body).not.toContain("sk-private-credential");
     expect(body).not.toMatch(/[a-f0-9]{64}/);
+  });
+});
+
+describe("withAdminUser", () => {
+  it("resolves identity fresh (bypassing the ordinary cache) and calls the handler for admins", async () => {
+    mockedGetAuthenticatedUser.mockResolvedValue({
+      userId: "9",
+      status: "enabled",
+      isAdmin: true,
+    });
+    const handler = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+
+    const response = await withAdminUser(request, handler);
+
+    expect(response.status).toBe(204);
+    expect(mockedGetAuthenticatedUser).toHaveBeenCalledWith(request, { policy: "fresh" });
+    expect(handler).toHaveBeenCalledWith({ userId: "9", status: "enabled", isAdmin: true });
+  });
+
+  it("rejects authenticated non-admin accounts with a 403 envelope", async () => {
+    mockedGetAuthenticatedUser.mockResolvedValue({
+      userId: "42",
+      status: "enabled",
+      isAdmin: false,
+    });
+    const handler = vi.fn();
+
+    const response = await withAdminUser(request, handler);
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ code: 403, msg: "需要管理员权限", data: null });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("maps authentication failures before the admin check", async () => {
+    mockedGetAuthenticatedUser.mockRejectedValue(new AuthenticationError(401));
+
+    const response = await withAdminUser(request, vi.fn());
+
+    expect(response.status).toBe(401);
   });
 });

@@ -137,22 +137,6 @@ export function sendVerificationCode(
   });
 }
 
-/** 登录/注册 */
-export function loginWithCode(phone: string, code: string): Promise<LoginData> {
-  return getResult<LoginData>("/api/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ phone, code }),
-  });
-}
-
-/** 刷新 token（由 api-client 内部直接 fetch，外部一般不直接调）。 */
-export function refreshToken(refreshToken: string): Promise<LoginData> {
-  return getResult<LoginData>("/api/auth/refresh", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${refreshToken}` },
-  });
-}
-
 /** 登出 */
 export function logoutApi(): Promise<void> {
   return getResult<void>("/api/auth/logout", {

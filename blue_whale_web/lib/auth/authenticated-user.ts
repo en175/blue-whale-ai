@@ -10,10 +10,13 @@ import { createIdentityCache, type CachedIdentity } from "./identity-cache";
 const TTL_MS = 60_000;
 const MAX_ENTRIES = 1_024;
 const ENABLED_STATUS = 1;
+// new-api 角色：1 普通 / 10 管理员 / 100 root；>=10 视为管理身份。
+export const ADMIN_ROLE_THRESHOLD = 10;
 
 export type AuthenticatedUser = {
   userId: string;
   status: "enabled";
+  isAdmin: boolean;
 };
 
 export type AuthenticationPolicy = "ordinary" | "fresh";
@@ -86,6 +89,7 @@ function authenticatedUser(identity: NewApiAccountIdentity): AuthenticatedUser {
   return {
     userId: String(identity.userId),
     status: "enabled",
+    isAdmin: identity.role >= ADMIN_ROLE_THRESHOLD,
   };
 }
 
@@ -118,6 +122,7 @@ export function createAuthenticatedUserResolver({
         return {
           userId: cachedIdentity.userId,
           status: cachedIdentity.status,
+          isAdmin: cachedIdentity.isAdmin,
         };
       }
     }

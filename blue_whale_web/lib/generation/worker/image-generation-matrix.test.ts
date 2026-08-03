@@ -92,6 +92,9 @@ function matrixRepo(
     publishVideoResult: vi.fn(),
     failVideoJob: vi.fn(),
     cancelVideoBeforeDispatch: vi.fn(),
+    resetStalledImageJobs: vi.fn(),
+    claimNextImageJob: vi.fn(),
+    requeueImageJobForRetry: vi.fn(),
   };
 }
 

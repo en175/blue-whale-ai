@@ -1,8 +1,9 @@
 import { createTopupTierDeps } from "@/lib/topup-tier/deps";
+import { withAdminUser } from "@/lib/auth/product-route-auth";
 
 // PUT /api/admin/topup-tiers/sort → 批量排序
 // body: { items: [{ id: "1", sortOrder: 1 }, ...] }
-export async function PUT(request: Request) {
+async function handleSortTopupTiers(request: Request) {
   try {
     const body = await request.json();
     const { items } = body as { items?: { id: string; sortOrder: number }[] };
@@ -36,4 +37,8 @@ export async function PUT(request: Request) {
     const msg = e instanceof Error ? e.message : "unknown";
     return Response.json({ success: false, error: msg }, { status: 500 });
   }
+}
+
+export async function PUT(request: Request) {
+  return withAdminUser(request, () => handleSortTopupTiers(request));
 }
