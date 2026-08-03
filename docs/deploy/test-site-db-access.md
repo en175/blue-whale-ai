@@ -35,6 +35,7 @@ mysql -h 127.0.0.1 -P 13306 -u bw_readonly -p blue_whale
 
 ## 服务器侧基线
 
-- 公网 3306 已被防火墙封禁，仅容器内网（172.16.0.0/12）与 localhost 可访问；规则存 `/etc/sysconfig/iptables.rules`，由 `iptables-restore.service`（systemd，开机自启）恢复；
+- 公网 3306 已被防火墙封禁（INPUT + FORWARD 双链；Docker 发布端口走 DNAT/FORWARD，只封 INPUT 会被绕过）；放行源仅容器内网（172.16.0.0/12）、localhost 与服务器自身公网 IP（容器经公网 IP 回环连库的 hairpin 流量）；规则存 `/etc/sysconfig/iptables.rules`，由 `iptables-restore.service`（systemd，开机自启）恢复；
+- 注意：服务配置若以公网 IP 连库（如 new-api 的 SQL_DSN），封禁时必须保留本机公网 IP 放行，否则误伤自身；根治办法是把这类 DSN 改为容器内网地址；
 - 诊断使用只读账号 `bw_readonly`（仅 SELECT），root 仅运维操作用；
 - root 密码定期轮换；凭据不进仓库、不进工单、不进聊天记录。
