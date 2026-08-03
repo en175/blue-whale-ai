@@ -45,7 +45,7 @@ let opLogSeed = 700;
 function nextOpLogId(): string {
   return `oplog_${String(++opLogSeed)}`;
 }
-let operationLogs: OperationLog[] = [];
+const operationLogs: OperationLog[] = [];
 
 export const MOCK_ORDERS: AdminOrder[] = [
   {
@@ -250,7 +250,7 @@ export const MOCK_ORDERS: AdminOrder[] = [
   },
 ];
 
-let orders = [...MOCK_ORDERS];
+const orders = [...MOCK_ORDERS];
 
 export function getOrders(): AdminOrder[] {
   return [...orders];

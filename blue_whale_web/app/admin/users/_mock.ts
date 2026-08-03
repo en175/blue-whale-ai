@@ -420,9 +420,9 @@ export const MOCK_ADJUST_LOGS: AdjustLog[] = [
   },
 ];
 
-let users = [...MOCK_USERS];
-let adjustLogs = [...MOCK_ADJUST_LOGS];
-let operationLogs: OperationLog[] = [];
+const users = [...MOCK_USERS];
+const adjustLogs = [...MOCK_ADJUST_LOGS];
+const operationLogs: OperationLog[] = [];
 
 export function getUsers(): AdminUserInfo[] {
   return [...users];

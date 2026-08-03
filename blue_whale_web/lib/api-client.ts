@@ -66,7 +66,7 @@ export async function apiFetch(
 
   // 首次请求
   const accessToken = loadAccessToken();
-  let res = await makeRequest(accessToken);
+  const res = await makeRequest(accessToken);
 
   if (res.status === 401 && !isAuthEndpoint(url)) {
     clearTokens();
