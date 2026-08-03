@@ -69,6 +69,8 @@ new-api 的账户和 quota 分离，会产生双重身份、双重余额和生�
     构建 Authenticated User Context；不兼容 Java JWT、不把 `sk-xxx` 代理给 Java、不信任浏览器
     `X-User-Id`。Conversation、GenerationInbox、AgentRun 与 SSE 等活跃入口迁到 TypeScript 后
     删除对应 rewrite；核心验收不启动 Java Gateway、User Service 或 Product API。
+    截至 2026-08-03，运行时断链和真实本地 new-api 验收已经完成；Java 源码及旧部署资产的
+    物理删除由后续独立计划处理，不构成继续兼容 Java 运行链的理由。
 
 ## 连锁影响
 

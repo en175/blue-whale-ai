@@ -8,7 +8,9 @@ import {
 } from "@blue-whale/core";
 import {
   createNewApiVideoTaskProvider,
+  createPassthroughVideoMediaRelay,
   createTosVideoMediaRelay,
+  loadGenerationMediaRelayMode,
   loadGenerationTosConfig,
   runVideoJobStep,
 } from "@blue-whale/generation-runtime";
@@ -27,15 +29,22 @@ import {
 
 const databaseUrl = process.env.DATABASE_URL;
 const baseUrl = process.env.NEW_API_BASE_URL;
-const tosConfig = loadGenerationTosConfig();
+const mediaRelayMode = loadGenerationMediaRelayMode();
+const tosConfig =
+  mediaRelayMode === "passthrough" ? null : loadGenerationTosConfig();
 if (!databaseUrl) throw new Error("DATABASE_URL required");
 if (!baseUrl) throw new Error("NEW_API_BASE_URL required");
-if (!tosConfig) throw new Error("TOS configuration required");
+if (mediaRelayMode === "tos" && !tosConfig) {
+  throw new Error("TOS configuration required");
+}
 
 const credentialSecret = loadGenerationCredentialSecret();
 const prisma = getPrismaClient(databaseUrl);
 const repo = createWorkerRepo(prisma);
-const mediaRelay = createTosVideoMediaRelay(tosConfig);
+const mediaRelay =
+  mediaRelayMode === "passthrough"
+    ? createPassthroughVideoMediaRelay()
+    : createTosVideoMediaRelay(tosConfig!);
 const workerId = `generation-${hostname()}-${process.pid}`;
 const producer = { enqueue: enqueueVideoGenerationJob };
 
