@@ -40,8 +40,9 @@ _Avoid_: 把 SceneCard 当作 Card 的持久化版本；把 SceneCard 内容复�
 
 **StoryboardPreview（分镜预览）**:
 User 从 SceneCard 显式触发、用于正式视频生成前审阅与确认的导演式静态故事板；其有序画格表达镜头顺序、
-构图与动作节拍。它是可选准备产物，不是最终图片作品或默认前置步骤，完成后不自动创建视频 GenerationJob。
-_Avoid_: 单张最终图片、视频模型关键帧组、SceneCard 图片模式、默认先出分镜、自动串联视频
+构图与动作节拍。它是可选准备产物，不是最终图片作品或默认前置步骤，完成后不自动创建视频 GenerationJob，
+也不自动成为视频模型输入；User 只能在生成编辑器中把符合模型能力的画格显式指定为首帧、尾帧或参考图。
+_Avoid_: 单张最终图片、视频模型关键帧组、SceneCard 图片模式、默认先出分镜、自动串联视频、自动绑定视频输入
 
 **SceneCardGenerationPreset（场景卡生成预设）**:
 由 SceneCard 持久拥有、供下一次直接视频生成默认使用的完整参数；首次应用 PlanMessage 时从其冻结参数创建，
