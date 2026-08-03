@@ -36,6 +36,9 @@ vi.mock("./RebindPhoneModal", () => ({
 vi.mock("./ChangePasswordModal", () => ({
   ChangePasswordModal: () => <div data-testid="change-pwd-mock" />,
 }));
+vi.mock("@/components/account-records/AccountRecordsModal", () => ({
+  AccountRecordsModal: () => <div data-testid="records-mock" />,
+}));
 
 expect.extend(jestDomMatchers);
 
@@ -89,6 +92,22 @@ describe("AccountModal 密码 Row", () => {
     fireEvent.click(screen.getByRole("button", { name: "设置" }));
     await waitFor(() => {
       expect(screen.getByTestId("change-pwd-mock")).toBeInTheDocument();
+    });
+  });
+
+  it("积分余额行有「账户记录」入口，点击挂载 AccountRecordsModal（IK39UR）", async () => {
+    saveUser({ ...BASE_USER, hasPassword: true });
+    render(
+      <AuthProvider>
+        <AccountModal onClose={vi.fn()} />
+      </AuthProvider>,
+    );
+    await waitFor(() => screen.getByText("账号信息"));
+    // 与「去充值」并列
+    expect(screen.getByRole("button", { name: "去充值" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "账户记录" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("records-mock")).toBeInTheDocument();
     });
   });
 });

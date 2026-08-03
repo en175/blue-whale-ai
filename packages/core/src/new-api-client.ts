@@ -169,6 +169,46 @@ export interface NewApiTopUpRecord {
   money: number;
   create_time: number;
   complete_time: number;
+  /** Go TopUp.payment_method（BlueWhalePay 单恒为 bluewhalepay；易支付单为 wechat/alipay 等） */
+  payment_method: string;
+}
+
+/** GET /api/user/topup/self 分页结果（Go PageInfo：按 id desc 即时间倒序）。 */
+export interface NewApiTopUpListResult {
+  items: NewApiTopUpRecord[];
+  total: number;
+}
+
+/** 用户消费流水记录（GET /api/log/self 的 items 元素，Go model.Log 子集）。 */
+export interface NewApiUserLogRecord {
+  id: number;
+  /** Go common.LogType*（2 = 消费） */
+  type: number;
+  content: string;
+  model_name: string;
+  /** 消耗 quota（正数） */
+  quota: number;
+  created_at: number;
+}
+
+/** GET /api/log/self 分页结果（Go PageInfo：按 id desc 即时间倒序）。 */
+export interface NewApiUserLogListResult {
+  items: NewApiUserLogRecord[];
+  total: number;
+}
+
+/** 把 topup/self items 的裸 JSON 元素解析成 NewApiTopUpRecord（缺字段兜底）。 */
+export function parseTopUpRecord(raw: Record<string, unknown>): NewApiTopUpRecord {
+  return {
+    trade_no: String(raw.trade_no ?? ""),
+    status: typeof raw.status === "string" ? raw.status : "",
+    amount: Number(raw.amount ?? 0),
+    money: Number(raw.money ?? 0),
+    create_time: Number(raw.create_time ?? 0),
+    complete_time: Number(raw.complete_time ?? 0),
+    payment_method:
+      typeof raw.payment_method === "string" ? raw.payment_method : "",
+  };
 }
 
 // ---- 管理端（middleware.AdminAuth：仅 role >= 10 的管理员 token 可调）----
@@ -324,6 +364,15 @@ function positiveInteger(value: unknown): number | null {
  * sk-xxx 证明账户身份；订单 User ID 由 Go 从 Token 属主解析，客户端不得
  * 发送 New-Api-User 头。（RootAuth 的 /api/option/ 管理接口仍需该头，见下方。）
  */
+
+/**
+ * 旧 UserAuth 接口（如 /api/log/self，尚未迁账户层）要求 access_token +
+ * New-Api-User 头（= 令牌属主数字 id）。仅 listUserConsumeLogs 过渡期使用；
+ * userId 缺省（sk- 令牌场景）则不加。
+ */
+function newApiUserHeader(userId: number | undefined): { headers?: Record<string, string> } {
+  return userId === undefined ? {} : { headers: { "New-Api-User": String(userId) } };
+}
 export function createNewApiClient(options: NewApiClientOptions) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 10_000;
@@ -913,13 +962,71 @@ export function createNewApiClient(options: NewApiClientOptions) {
         : [];
       const match = items.find((item) => item.trade_no === tradeNo);
       if (!match) return null;
+      return parseTopUpRecord(match);
+    },
+
+    /** 分页拉当前用户原生充值记录：GET /api/user/topup/self（Go 按 id desc，即时间倒序）。
+     *  信封 {success, data: PageInfo{page,page_size,total,items}}；page_size 上限 100（Go 侧钳制）。
+     *  接口挂账户层 AccountTokenOrUserAuth，只凭 Bearer sk- 证明身份，Go 按 Token 属主过滤，
+     *  不得发送 New-Api-User 头（ADR-0062 #18）。 */
+    async listUserTopUps(
+      token: string,
+      options: { page?: number; pageSize?: number } = {},
+    ): Promise<NewApiTopUpListResult> {
+      const page = Math.max(1, Math.trunc(options.page ?? 1));
+      const pageSize = Math.min(100, Math.max(1, Math.trunc(options.pageSize ?? 20)));
+      const response = await request<NewApiEnvelope>(
+        `/api/user/topup/self?p=${page}&page_size=${pageSize}`,
+        { method: "GET" },
+        token,
+      );
+      const data = (response.data ?? {}) as { items?: unknown; total?: unknown };
+      const rawItems = Array.isArray(data.items)
+        ? (data.items as Array<Record<string, unknown>>)
+        : [];
       return {
-        trade_no: String(match.trade_no),
-        status: typeof match.status === "string" ? match.status : "",
-        amount: Number(match.amount ?? 0),
-        money: Number(match.money ?? 0),
-        create_time: Number(match.create_time ?? 0),
-        complete_time: Number(match.complete_time ?? 0),
+        items: rawItems.map(parseTopUpRecord),
+        total: typeof data.total === "number" ? data.total : 0,
+      };
+    },
+
+    /** 分页拉当前用户消费流水：GET /api/log/self（Go 按 id desc，即时间倒序）。
+     *  type 缺省 2 = LogTypeConsume；信封同 topup/self 的 PageInfo。
+     *  ⚠️ 鉴权与充值三接口不同：log/self 仍在旧 UserAuth，只认个人 access_token +
+     *  New-Api-User 头，**不认 sk- 中继令牌**（2026-08-05 部署环境实测
+     *  "invalid access token"；ADR-0062 #18 只迁了充值三接口）。过渡期由 BFF
+     *  用 root access_token + rootUserId 代理查询；Go 迁移 log/self 到账户层后
+     *  可改为透传用户 sk- 令牌（不传 userId 即不发 New-Api-User）。 */
+    async listUserConsumeLogs(
+      token: string,
+      options: { page?: number; pageSize?: number; type?: number } = {},
+      userId?: number,
+    ): Promise<NewApiUserLogListResult> {
+      const page = Math.max(1, Math.trunc(options.page ?? 1));
+      const pageSize = Math.min(100, Math.max(1, Math.trunc(options.pageSize ?? 20)));
+      const type = options.type ?? 2;
+      const response = await request<NewApiEnvelope>(
+        `/api/log/self?p=${page}&page_size=${pageSize}&type=${type}`,
+        { method: "GET", ...newApiUserHeader(userId) },
+        token,
+      );
+      const data = (response.data ?? {}) as { items?: unknown; total?: unknown };
+      const rawItems = Array.isArray(data.items)
+        ? (data.items as Array<Record<string, unknown>>)
+        : [];
+      const items = rawItems.map(
+        (raw): NewApiUserLogRecord => ({
+          id: Number(raw.id ?? 0),
+          type: Number(raw.type ?? 0),
+          content: typeof raw.content === "string" ? raw.content : "",
+          model_name: typeof raw.model_name === "string" ? raw.model_name : "",
+          quota: Number(raw.quota ?? 0),
+          created_at: Number(raw.created_at ?? 0),
+        }),
+      );
+      return {
+        items,
+        total: typeof data.total === "number" ? data.total : 0,
       };
     },
 
