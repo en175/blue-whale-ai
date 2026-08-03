@@ -1,12 +1,17 @@
 # ADR-0042：@ 引用 Asset 持久化与 read_asset 白名单第三源
 
-- **状态**：Accepted
+- **状态**：Partially Superseded（部分已替代）
 - **日期**：2026-07-22
 - **决策者**：用户（与 Agent grill-with-docs 会话共同得出，触发工单：IK33ZV，IK2QC7 AC#2 follow-up；实施规格见 IK33ZV description）
+- **替代决策**：[锁定显式上下文与 PlanMessage 手动应用契约](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK5Q1U)
 
 > **IK3UUX 范围状态**：保留消息中不可变的 Asset 引用，以及从权威 NodeItem/Asset 关系计算读取范围；
 > PendingConversationInput、精确浏览器路径和 command 格式不作为前置，见
 > [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
+
+> **2026-08-03 替代边界**：替代决策废止 D2 的无效引用静默过滤与 D3 的 Conversation 全量历史引用
+> 持续授权；发送时全部引用改为全有或全无，只有本轮冻结输入 UserMessage 上的引用授予读取。
+> D5 的有序引用只保留为历史重建与证据，不自动延续授权。D1 的独立关联事实与 D4 的引用不可变语义保留。
 
 ## 背景
 
@@ -27,11 +32,11 @@ IK2QC7 落地 read_asset 白名单 = 画布节点 `data.assetId` ∪ 本 AgentRu
 
 新建 `message_asset_reference`（`id / message_id / conversation_id / project_id / asset_id / mention_seq` + `gmt_create / gmt_modified / version / is_delete`；索引 `(conversation_id)`、`(project_id)`）。冗余 `conversation_id / project_id` 使白名单反查无需 JOIN 消息表。不采用 `conversation_messages` 加 JSON 列。
 
-### D2. 前端 pill 结构化承载 + `referenced_asset_ids` 协议
+### D2. 前端 pill 结构化承载 + `referenced_asset_ids` 协议（接纳策略已替代）
 
 复活改造 mention pill 工具模块，pill 携带 assetId 数据属性；pill 在消息文本中序列化为 `@[name]`（与技能 mention 的 `@name` 纯文本形态区分）；消息接纳请求体新增可选 `referenced_asset_ids: number[]`（DOM 序、去重、上限 10），请求幂等 hash 纳入该字段。接纳时只做归属校验（Asset 存在且 `projectId+userId` 匹配），越权/失效 id 静默过滤 + warn 日志、持久化有效子集——不 400、不卡 status；引用行与消息、AgentRun 同一事务落库，Worker 认领 Run 时引用必然可查。
 
-### D3. 白名单第三源 = Run 所属 Conversation 全量引用
+### D3. 白名单第三源 = Run 所属 Conversation 全量引用（已替代）
 
 `read_asset` 放行集合新增第三源：按 `run.conversationId`（叠加 `projectId` 双保险）直查关联表并入既有两源；`read_asset` 主体与 `projectId+userId+status=normal` 三元组零改动。范围不扩到 Project（GenerationInbox 多段 Conversation 独立），不缩到 Run（切断多轮追问连续性）——与 Agent 可见对话上下文同边界。
 
@@ -39,7 +44,7 @@ IK2QC7 落地 read_asset 白名单 = 画布节点 `data.assetId` ∪ 本 AgentRu
 
 引用是消息事实的一部分，落定即不可变；不提供随消息编辑/删除的失效机制（用户消息 insert-only，无编辑/删除端点）；Asset 后续状态变化由读取时三元组兜底。未来若引入消息删除，以 `is_delete` 级联即可，表结构不变。
 
-### D5. Agent 感知通路：history 携带有序引用
+### D5. Agent 感知通路：history 携带有序引用（授权含义已替代）
 
 Conversation 渐进读取 `history` 的 `MessageItem` 新增 `referenced_asset_ids`（按 `mention_seq` 升序，无引用为空数组；按页单次 IN 批量查询，无 N+1），Python Worker 透传进模型上下文 JSON。`mention_seq` 使 Agent 能把文本中 `@[name]` 出现顺序与 id 列表精确对齐。不采用名称匹配。
 

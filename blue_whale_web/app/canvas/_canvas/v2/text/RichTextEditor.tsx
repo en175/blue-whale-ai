@@ -122,12 +122,14 @@ export function useRichEditor(opts: {
     immediatelyRender: false,
     onBlur: ({ editor: e }) => onCommit(e.getJSON()),
     editorProps: {
-      attributes: { class: "tc-rich-editor nodrag" },
+      attributes: { class: "tc-rich-editor" },
     },
   });
 
   useEffect(() => {
     editor?.setEditable(editable);
+    // nodrag 随可编辑态切换：编辑时保护选区不触发卡片拖拽，只读时恢复可拖（IK5U3K）
+    editor?.view?.dom.classList.toggle("nodrag", editable);
   }, [editor, editable]);
 
   return editor;

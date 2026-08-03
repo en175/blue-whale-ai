@@ -908,7 +908,12 @@ export function TextNode({ id, data, width, height, selected }: NodeProps) {
         }}
       >
         <NodeHandles kind="text" />
-        <div className="nodrag nowheel flex-1 overflow-auto px-3 py-2.5">
+        {/* nodrag 仅编辑态附加：保护文本选区不触发卡片拖拽；只读态整卡可拖（IK5U3K） */}
+        <div
+          className={`${
+            editing || expanded ? "nodrag " : ""
+          }nowheel flex-1 overflow-auto px-3 py-2.5`}
+        >
           {empty && !editing && !expanded ? (
             <span className="text-sm" style={{ color: "var(--tc-text-muted)" }}>
               添加笔记...

@@ -104,5 +104,6 @@ deploy/local/.env
 blue_whale_pay_server/conf/**/application-localremote.yml
 blue_whale_pay_server/conf/tos-local.env
 
-# Qoder CLI 本地个人配置（团队共享 .qoder/ 入库，仅忽略个人覆盖）
+# Qoder CLI 本地个人配置（团队共享 .qoder/ 入库，仅忽略个人覆盖与本地会话数据）
 .qoder/settings.local.json
+.qoder/sessions/
