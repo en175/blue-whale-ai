@@ -9,6 +9,31 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "run-ik50gb-c-testsite-probe.sh"
 
 
+class TestProbeTerminalTimeout(unittest.TestCase):
+    def test_rejects_non_numeric_terminal_timeout(self):
+        env = os.environ.copy()
+        for key in ("BW_ALLOW_INSECURE_HTTP", "BW_TEST_REGISTER", "BW_ALLOW_BILLED_MEDIA_PROBE"):
+            env.pop(key, None)
+        env.update(
+            {
+                "BW_TEST_BASE_URL": "https://probe.example",
+                "BW_TEST_USERNAME": "probe-user",
+                "BW_TEST_PASSWORD": "probe-password",
+                "BW_PROBE_TERMINAL_TIMEOUT_SECONDS": "soon",
+            }
+        )
+        result = subprocess.run(
+            ["bash", str(SCRIPT)],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("BW_PROBE_TERMINAL_TIMEOUT_SECONDS", result.stderr)
+
+
 class TestIk50gbCTestsiteProbe(unittest.TestCase):
     def test_fails_closed_without_base_url(self):
         env = os.environ.copy()
