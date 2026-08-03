@@ -63,4 +63,41 @@ describe("TOS video media relay", () => {
       acl: "public-read",
     });
   });
+
+  it("can keep provider URLs in disposable acceptance environments", async () => {
+    const { createPassthroughVideoMediaRelay } = await import(
+      "./tos-video-media-relay.js"
+    );
+
+    await expect(
+      createPassthroughVideoMediaRelay().persist(
+        "http://provider-stub/generated-video.mp4",
+        "9",
+      ),
+    ).resolves.toEqual({
+      url: "http://provider-stub/generated-video.mp4",
+      storageKey: null,
+      mime: null,
+      size: null,
+    });
+  });
+
+  it("rejects passthrough relay in production even when enabled by env", async () => {
+    const { loadGenerationMediaRelayMode } = await import(
+      "./tos-video-media-relay.js"
+    );
+
+    expect(() =>
+      loadGenerationMediaRelayMode({
+        NODE_ENV: "production",
+        GENERATION_MEDIA_RELAY_MODE: "passthrough",
+      }),
+    ).toThrow("passthrough media relay is forbidden in production");
+    expect(
+      loadGenerationMediaRelayMode({
+        NODE_ENV: "test",
+        GENERATION_MEDIA_RELAY_MODE: "passthrough",
+      }),
+    ).toBe("passthrough");
+  });
 });

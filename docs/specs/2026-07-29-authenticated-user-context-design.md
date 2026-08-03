@@ -194,6 +194,11 @@ Worker 直接通过共享应用/持久化层 claim/commit，不迁移 Java HTTP 
 - 运行 BlueWhale → real new-api 的登录、身份、quota、产品读写与生成 smoke。
 - 在 A、B、C 全部通过前不关闭 IK50GB。
 
+**2026-08-03 状态：运行时断链与真实本地验收已完成。** 本地验收在不启动任何 Java
+服务的拓扑中，通过真实 new-api 完成注册、登录、身份、quota、项目、对话、图片与视频链路，
+并由仓库静态守卫阻止 Java 服务地址重新进入 TypeScript 运行时。Java 源码与旧部署资产的物理
+删除不属于 IK50GB-C，本次不以兼容方式保留运行链；删除工作按独立计划和审查检查点执行。
+
 三个切片串行执行；不得用临时 Node→Java adapter、双 JWT 或兼容开关跨过 B。
 
 ## 8. 测试设计

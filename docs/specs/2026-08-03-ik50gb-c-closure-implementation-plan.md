@@ -387,19 +387,20 @@ Expected: guard and status documentation are committed.
 - Consumes: `BW_TEST_BASE_URL`, a dedicated test username/password or disposable registration capability, and optional provider-enabled test account.
 - Produces: HTTP-only, sanitized evidence; it never receives database or Redis administrator credentials.
 
-- [ ] **Step 1: Write failing shell contract tests**
+- [x] **Step 1: Write failing shell contract tests**
 
 Assert the script:
 
 ```text
 fails closed when BW_TEST_BASE_URL is absent
 rejects non-HTTPS URLs unless host is localhost
+rejects URL userinfo before any network request
 does not invoke mysql, redis-cli, docker compose down, migration, seed, or DELETE
 redacts sk-xxx, passwords, Authorization, Cookie, and Set-Cookie
 requires BW_ALLOW_BILLED_MEDIA_PROBE=1 before image/video requests
 ```
 
-- [ ] **Step 2: Run the contract tests and verify RED**
+- [x] **Step 2: Run the contract tests and verify RED**
 
 Run:
 
@@ -409,7 +410,7 @@ python3 -m unittest scripts.tests.test_run_ik50gb_c_testsite_probe
 
 Expected: FAIL because the probe script is absent.
 
-- [ ] **Step 3: Implement the read/write-safe HTTP probe**
+- [x] **Step 3: Implement the read/write-safe HTTP probe**
 
 The default probe runs register/login/me/quota and creates only uniquely prefixed disposable product data. Billed image/video calls require:
 
@@ -419,8 +420,10 @@ The default probe runs register/login/me/quota and creates only uniquely prefixe
 ```
 
 Pipe all output through the repository sanitizer. Do not persist environment values in evidence.
+When billed media is authorized, the probe must wait for both jobs to reach
+`succeeded`, fail on `failed`/timeout, and report only the numeric quota delta.
 
-- [ ] **Step 4: Run local contract verification**
+- [x] **Step 4: Run local contract verification**
 
 Run:
 

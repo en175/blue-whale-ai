@@ -61,6 +61,7 @@ CREATE TABLE `assets` (
     `width` INTEGER NULL,
     `height` INTEGER NULL,
     `duration` INTEGER NULL,
+    `duration_ms` INTEGER NULL,
     `source` VARCHAR(32) NOT NULL DEFAULT 'generated',
     `status` VARCHAR(32) NOT NULL DEFAULT 'normal',
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),

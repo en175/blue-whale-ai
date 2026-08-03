@@ -2,7 +2,7 @@ import { createHash, createHmac } from "node:crypto";
 
 /**
  * Volcengine API V4 (HMAC-SHA256) 签名器 —— Node 端口。
- * 忠实复刻 blue_whale_server/.../user/sms/VolcengineSigner.java 的算法，
+ * 与退役的 Java SMS 签名算法保持协议一致，
  * 用于火山 SMS（及后续 TOS/Ark）。仅负责签名，不发请求。
  */
 export interface SignVolcengineRequestInput {
