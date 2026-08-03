@@ -70,7 +70,8 @@ _Avoid_: 第二份可写提示词、把 `asset://` 地址直接发给供应商�
 SceneCard 在 Canvas 中的布局投影，只引用一个 SceneCard 并承载布局，不拥有场景内容；它是
 “Canvas 只编排 NodeItem”规则的显式例外；同一 Canvas 中一张 SceneCard 最多有一个 SceneCardNode。
 节点身份由 SceneCard 身份确定性生成；放置重试必须读取最新 Canvas 布局，只新增缺失节点，节点已存在
-即视为成功，持续失败时保留由 User 触发的“重新放入画布”入口。
+即视为成功。新建时选择当前视口中心附近的首个空位，覆盖时复用原节点且不移动；持续失败时保留由
+User 触发的“重新放入画布”入口。
 _Avoid_: NodeItem、SceneCard 本体、在节点中保存 Markdown 副本或生成参数
 
 **SceneCardGenerationOrigin（场景卡生成来源）**:
@@ -95,6 +96,8 @@ Canvas 均不改变它。只有持有原创建请求或 GenerationJob 接纳回�
 计划输出创建 Asset NodeItem，视频计划先放置 SceneCardNode，视频成功后再创建 Asset NodeItem。部分成功
 结果可以增量放置；`pending` 作品基于最新 Canvas 布局幂等重试新增，首次成功后即转为 `placed`，User
 后续移除节点不得触发自动恢复。
+图片计划结果以当前视口中心为锚点按无重叠网格排列；视频与 StoryboardPreview 结果在对应 SceneCardNode
+下方从左到右排列，满行换行。部分成功与重试只占用首个空位，不移动或覆盖既有节点。
 _Avoid_: 从该状态推导当前布局；移出 Canvas 后重置为 pending；自动过期、自动删除、后台放置；
 在 Canvas 冲突重试中移动或覆盖既有节点；绕过完整 PUT 增量放置。
 
