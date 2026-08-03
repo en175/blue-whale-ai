@@ -2,9 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   handleAddSkill,
+  handleCreateSkill,
   handleRemoveSkill,
   handleUpdateSkillAuto,
+  parseSkillMd,
 } from "./handle-skill-writes.js";
+import {
+  SkillNameConflictError,
+  SkillNameReservedError,
+} from "@blue-whale/persistence";
 
 // skills 写操作：add（加入我的）/ remove（移除）/ updateAuto（切开关）。
 // 契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §2/§6/§7：
@@ -16,6 +22,7 @@ function makeRepo() {
     addReference: vi.fn(),
     removeReferenceByCreativeSkillId: vi.fn(),
     updateAutoByCreativeSkillId: vi.fn(),
+    createPersonalSkill: vi.fn(),
   };
 }
 
@@ -145,5 +152,149 @@ describe("handleUpdateSkillAuto", () => {
       data: null,
     });
     expect(repo.updateAutoByCreativeSkillId).not.toHaveBeenCalled();
+  });
+});
+
+describe("parseSkillMd", () => {
+  it("合法 frontmatter → 提取 name/description/body", () => {
+    const result = parseSkillMd(
+      "---\nname: 我的技能\ndescription: 简介\n---\n正文内容",
+    );
+    expect(result).toEqual({
+      name: "我的技能",
+      description: "简介",
+      body: "正文内容",
+    });
+  });
+
+  it("引号包裹的值 → 去引号", () => {
+    const result = parseSkillMd(
+      "---\nname: \"带引号\"\ndescription: '简介'\n---\nbody",
+    );
+    expect(result?.name).toBe("带引号");
+    expect(result?.description).toBe("简介");
+  });
+
+  it("无 frontmatter → null", () => {
+    expect(parseSkillMd("纯正文，无 frontmatter")).toBeNull();
+  });
+
+  it("缺闭合 --- → null", () => {
+    expect(parseSkillMd("---\nname: Test\n")).toBeNull();
+  });
+
+  it("Windows 换行（\\r\\n）→ 正常解析", () => {
+    const result = parseSkillMd(
+      "---\r\nname: Test\r\ndescription: Desc\r\n---\r\nbody",
+    );
+    expect(result?.name).toBe("Test");
+    expect(result?.body).toBe("body");
+  });
+
+  it("正文中包含 --- → 正确提取", () => {
+    const result = parseSkillMd(
+      "---\nname: Test\ndescription: Desc\n---\nSome text\n---\nMore text",
+    );
+    expect(result?.body).toBe("Some text\n---\nMore text");
+  });
+
+  it("缺 name 字段 → 空字符串", () => {
+    const result = parseSkillMd("---\ndescription: Desc\n---\nbody");
+    expect(result?.name).toBe("");
+  });
+});
+
+describe("handleCreateSkill", () => {
+  it("合法 SKILL.md → 创建成功，返回 mine 视图", async () => {
+    const repo = makeRepo();
+    repo.createPersonalSkill.mockResolvedValue({
+      creative_skill_id: "my_skill",
+      name: "我的技能",
+      description: "简介",
+    });
+    const content = "---\nname: 我的技能\ndescription: 简介\n---\n正文";
+    const result = await handleCreateSkill("9", content, { skills: repo });
+    expect(result.code).toBe(200);
+    expect(result.data).toEqual({
+      creative_skill_id: "my_skill",
+      auto: false,
+      name: "我的技能",
+      description: "简介",
+      cover_url: null,
+      source: null,
+      asset_domain: "personal",
+    });
+    expect(repo.createPersonalSkill).toHaveBeenCalledWith("9", {
+      name: "我的技能",
+      description: "简介",
+      body: "正文",
+    });
+  });
+
+  it("名称冲突 → 100101", async () => {
+    const repo = makeRepo();
+    repo.createPersonalSkill.mockRejectedValue(
+      new SkillNameConflictError("my skill"),
+    );
+    const result = await handleCreateSkill(
+      "9",
+      "---\nname: My Skill\ndescription: Desc\n---\nbody",
+      { skills: repo },
+    );
+    expect(result).toEqual({
+      code: 100101,
+      msg: "同名技能已存在",
+      data: null,
+    });
+  });
+
+  it("官方保留名 → 100102", async () => {
+    const repo = makeRepo();
+    repo.createPersonalSkill.mockRejectedValue(
+      new SkillNameReservedError("poster gen"),
+    );
+    const result = await handleCreateSkill(
+      "9",
+      "---\nname: Poster Gen\ndescription: Desc\n---\nbody",
+      { skills: repo },
+    );
+    expect(result).toEqual({
+      code: 100102,
+      msg: "名称与官方技能冲突",
+      data: null,
+    });
+  });
+
+  it("无 frontmatter → 400", async () => {
+    const repo = makeRepo();
+    const result = await handleCreateSkill("9", "纯正文无 frontmatter", {
+      skills: repo,
+    });
+    expect(result.code).toBe(400);
+    expect(repo.createPersonalSkill).not.toHaveBeenCalled();
+  });
+
+  it("name 为空 → 400", async () => {
+    const repo = makeRepo();
+    const result = await handleCreateSkill(
+      "9",
+      "---\nname: \ndescription: Desc\n---\nbody",
+      { skills: repo },
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toContain("名称");
+    expect(repo.createPersonalSkill).not.toHaveBeenCalled();
+  });
+
+  it("body 为空 → 400", async () => {
+    const repo = makeRepo();
+    const result = await handleCreateSkill(
+      "9",
+      "---\nname: Test\ndescription: Desc\n---\n",
+      { skills: repo },
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toContain("正文");
+    expect(repo.createPersonalSkill).not.toHaveBeenCalled();
   });
 });

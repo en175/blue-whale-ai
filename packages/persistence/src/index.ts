@@ -84,10 +84,14 @@ export {
 } from "./asset-repo.js";
 export {
   createSkillRepo,
+  normalizeNameKey,
+  SkillNameConflictError,
+  SkillNameReservedError,
   type SkillRepo,
   type SkillLibraryView,
   type SkillMineView,
   type PersonalSkillView,
+  type PersonalSkillCreateResult,
   type SkillPage,
   type SkillLibraryCategory,
   type SkillLibrarySort,

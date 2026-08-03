@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AtSign,
   BookMarked,
+  Check,
   ChevronDown,
   Plus,
   Search,
@@ -19,6 +20,7 @@ import {
   type SkillMineItem,
 } from "./api/skills";
 import { rememberCreativeSkillName } from "@/lib/creative-skill-names";
+import { generateSkillCover } from "@/lib/skill-cover";
 
 /**
  * Skill 面板（IJZ7Z8；IK60WT 改三页签近全屏工作区 + 官方技能库浏览）。
@@ -41,6 +43,14 @@ import { rememberCreativeSkillName } from "@/lib/creative-skill-names";
 const COVER_PLACEHOLDER =
   "https://placehold.co/200x200/1a1a1a/FFFFFF?text=Skill";
 const PAGE_SIZE = 50;
+
+/** SKILL.md 编辑器初始模板（IK60WU）。 */
+const SKILL_MD_TEMPLATE = `---
+name: 
+description: 
+---
+
+`;
 
 const CATEGORY_OPTIONS: { key: SkillLibraryCategory; label: string }[] = [
   { key: "all", label: "全部" },
@@ -98,10 +108,35 @@ function SkillPanelDialog({
     () => new Set<TabKey>(["library"]),
   );
   const panelRef = useRef<HTMLDivElement>(null);
+  const createDirtyRef = useRef<() => boolean>(() => false);
+  const [myRefreshTrigger, setMyRefreshTrigger] = useState(0);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const confirmDirtyClose = (): boolean => {
+    if (mountedTabs.has("create") && createDirtyRef.current()) {
+      return window.confirm("放弃当前草稿？");
+    }
+    return true;
+  };
 
   const switchTab = (tab: TabKey) => {
+    if (activeTab === "create" && tab !== "create" && !confirmDirtyClose())
+      return;
     setActiveTab(tab);
     setMountedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+  };
+
+  const handleClose = () => {
+    if (!confirmDirtyClose()) return;
+    onClose();
+  };
+
+  const handleSkillSaved = () => {
+    setMyRefreshTrigger((v) => v + 1);
+    setToast("技能已保存");
+    setTimeout(() => setToast(null), 3000);
+    setActiveTab("my");
+    setMountedTabs((prev) => (prev.has("my") ? prev : new Set(prev).add("my")));
   };
 
   // 打开生命周期：记录触发元素、锁定背景滚动、初始焦点落到面板；
@@ -120,11 +155,11 @@ function SkillPanelDialog({
   // ESC 关闭（排序下拉等内部控件先消费并 stopPropagation 时不会冒到 window）
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") handleClose();
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [onClose]);
+  }, []);
 
   // 焦点陷阱：Tab / Shift+Tab 在面板内循环（hidden 页签内元素不参与）
   const trapTab = (e: React.KeyboardEvent) => {
@@ -182,7 +217,7 @@ function SkillPanelDialog({
         // 否则卸载 cleanup 里的焦点还给触发按钮会被随后的默认行为覆盖（IK60WT 焦点恢复验收）
         if (e.button === 0) {
           e.preventDefault();
-          onClose();
+          handleClose();
         }
       }}
     >
@@ -214,15 +249,22 @@ function SkillPanelDialog({
             data-testid="skill-panel-close"
             className="tc-agent-skill-panel__icon-btn inline-flex items-center justify-center w-8 h-8 rounded-lg text-white/45 hover:text-white/80 hover:bg-white/[0.06] transition-colors duration-150"
             aria-label="关闭技能面板"
-            onClick={onClose}
+            onClick={handleClose}
           >
             <X size={16} />
           </button>
         </div>
 
+        {toast && (
+          <div className="flex items-center gap-2 px-4 py-2 text-[12px] text-white/80 bg-success/10 border-b border-success/20">
+            <Check size={14} className="text-success" />
+            {toast}
+          </div>
+        )}
+
         {mountedTabs.has("my") && (
           <TabPane visible={activeTab === "my"}>
-            <MyContent onUse={onUseSkill} />
+            <MyContent onUse={onUseSkill} refreshTrigger={myRefreshTrigger} />
           </TabPane>
         )}
         {mountedTabs.has("library") && (
@@ -232,7 +274,12 @@ function SkillPanelDialog({
         )}
         {mountedTabs.has("create") && (
           <TabPane visible={activeTab === "create"}>
-            <CreateContent />
+            <CreateContent
+              onSaved={handleSkillSaved}
+              registerDirtyCheck={(fn) => {
+                createDirtyRef.current = fn;
+              }}
+            />
           </TabPane>
         )}
       </div>
@@ -260,22 +307,92 @@ function TabPane({
   );
 }
 
-/** 创建技能：占位空态（功能归后续工单） */
-function CreateContent() {
+/** 创建技能：SKILL.md 编辑器（IK60WU）。
+ *  用户编写含 YAML frontmatter 的完整 SKILL.md，显式保存创建个人技能。
+ *  草稿在 tab 切换/面板关闭时保留；脏草稿离开需确认。 */
+function CreateContent({
+  onSaved,
+  registerDirtyCheck,
+}: {
+  onSaved: () => void;
+  registerDirtyCheck: (fn: () => boolean) => void;
+}) {
+  const [draft, setDraft] = useState(SKILL_MD_TEMPLATE);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const isDirty = draft !== SKILL_MD_TEMPLATE;
+
+  useEffect(() => {
+    registerDirtyCheck(() => draft !== SKILL_MD_TEMPLATE);
+  }, [draft, registerDirtyCheck]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await skillsApi.createPersonalSkill(draft);
+      setDraft(SKILL_MD_TEMPLATE);
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div
-      data-testid="skill-create-placeholder"
-      className="flex flex-1 flex-col items-center justify-center gap-2 min-h-0"
+      data-testid="skill-create-editor"
+      className="tc-agent-skill-panel__content flex flex-col flex-1 min-h-0 overflow-hidden bg-[#141414]"
     >
-      <Plus size={28} className="text-white/25" aria-hidden="true" />
-      <p className="text-[14px] font-medium text-white/70">创建技能</p>
-      <p className="text-[12px] text-white/40">即将上线，敬请期待。</p>
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.08]">
+        <span className="text-[12px] text-white/40">
+          编写 SKILL.md（name / description / 正文）
+        </span>
+        <button
+          type="button"
+          data-testid="skill-save-btn"
+          disabled={saving || !isDirty}
+          onClick={handleSave}
+          className="inline-flex items-center gap-1.5 h-8 px-3.5 text-[13px] font-medium rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+        >
+          <Check size={14} />
+          保存到我的技能
+        </button>
+      </div>
+      {error && (
+        <div className="flex items-center justify-between gap-3 px-4 py-2 text-[12px] text-white/60 bg-white/[0.04] border-b border-white/[0.08]">
+          <span className="truncate">{error}</span>
+          <button
+            type="button"
+            className="shrink-0 underline underline-offset-2 hover:text-white/90"
+            onClick={() => setError(null)}
+          >
+            关闭
+          </button>
+        </div>
+      )}
+      <textarea
+        data-testid="skill-md-editor"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        spellCheck={false}
+        className="skill-md-textarea flex-1 w-full resize-none bg-transparent p-4 text-[13px] leading-relaxed text-white/90 font-mono outline-none placeholder:text-white/30 overflow-y-auto"
+        placeholder={SKILL_MD_TEMPLATE}
+      />
     </div>
   );
 }
 
-/** 我的技能：分页 + 滚动加载 + auto 乐观开关（自管 state） */
-function MyContent({ onUse }: { onUse: (skill: UseSkillSelection) => void }) {
+/** 我的技能：分页 + 滚动加载 + auto 乐观开关（自管 state；refreshTrigger 变化重拉第 1 页） */
+function MyContent({
+  onUse,
+  refreshTrigger = 0,
+}: {
+  onUse: (skill: UseSkillSelection) => void;
+  refreshTrigger?: number;
+}) {
   const [items, setItems] = useState<SkillMineItem[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -310,11 +427,11 @@ function MyContent({ onUse }: { onUse: (skill: UseSkillSelection) => void }) {
     }
   }, []);
 
-  // 首屏（StrictMode dev 双 mount → 两次 fetchPage(1)，reqId 让首次响应失效，prod 单次）
+  // 首屏 + refreshTrigger 变化（创建技能后刷新）：StrictMode dev 双 mount → 两次 fetchPage(1)，reqId 让首次响应失效
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 首屏分页数据获取（异步 loading）
     fetchPage(1, false);
-  }, [fetchPage]);
+  }, [fetchPage, refreshTrigger]);
 
   const loadMore = useCallback(() => {
     if (loading || loadingMore || !hasMore) return;
@@ -743,8 +860,28 @@ function StateHint({ text }: { text: string }) {
   );
 }
 
-function SkillCover({ url }: { url?: string | null }) {
-  // 封面直取 cover_url；空 → 默认图。
+function SkillCover({
+  url,
+  name,
+}: {
+  url?: string | null;
+  name?: string | null;
+}) {
+  // cover_url 有值 → 背景图；空 + name 有值 → 确定性渐变 + 首字母（IK60WU）；否则默认图。
+  if (!url && name) {
+    const { gradient, initials } = generateSkillCover(name);
+    return (
+      <span
+        className="tc-agent-skill-row__cover flex items-center justify-center w-full h-full rounded-lg"
+        style={{ background: gradient }}
+        aria-hidden="true"
+      >
+        <span className="text-[28px] font-bold text-white/80 select-none">
+          {initials}
+        </span>
+      </span>
+    );
+  }
   return (
     <span
       className="tc-agent-skill-row__cover block w-full h-full rounded-lg bg-cover bg-center bg-no-repeat"
@@ -775,7 +912,7 @@ function MySkillRow({
         auto ? "tc-agent-skill-row--checked " : ""
       }tc-agent-skill-row--switch-control tc-agent-skill-row--with-cover grid grid-cols-[112px_minmax(0,1fr)] gap-3.5 min-h-[142px] p-3.5 rounded-xl bg-white/[0.035] border border-white/[0.08] transition-colors duration-150 hover:bg-white/[0.05]`}
     >
-      <SkillCover url={skill.cover_url} />
+      <SkillCover url={skill.cover_url} name={skill.name} />
       <div className="tc-agent-skill-row__toggle flex flex-col min-w-0">
         <span className="tc-agent-skill-row__body flex flex-col gap-1">
           <span className="tc-agent-skill-row__title-line">

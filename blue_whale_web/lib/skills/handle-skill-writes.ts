@@ -1,7 +1,13 @@
 import { fail, ok } from "@blue-whale/contracts";
-import type { SkillRepo } from "@blue-whale/persistence";
+import {
+  SkillNameConflictError,
+  SkillNameReservedError,
+  type SkillRepo,
+} from "@blue-whale/persistence";
 
 const DATA_NOT_EXIST_CODE = 100100;
+const SKILL_NAME_CONFLICT_CODE = 100101;
+const SKILL_NAME_RESERVED_CODE = 100102;
 
 /** 稳定身份格式（契约 §2）：注册命令只接受 creative_skill_id，非法一律按不存在处理（§7）。 */
 const CREATIVE_SKILL_ID_PATTERN = /^[a-z][a-z0-9_]{2,79}$/;
@@ -69,4 +75,70 @@ export async function handleUpdateSkillAuto(
   );
   if (!hit) return fail(DATA_NOT_EXIST_CODE, "未添加该 Skill，无法设置 auto");
   return ok();
+}
+
+/** SKILL.md frontmatter 解析（IK60WU）：从原始文本提取 name/description/body。
+ *  格式：---\nname: xxx\ndescription: xxx\n---\n正文内容
+ *  返回 null 表示格式不合法（无 frontmatter 或缺闭合）。 */
+export function parseSkillMd(content: string): {
+  name: string;
+  description: string;
+  body: string;
+} | null {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const openMatch = normalized.match(/^---\s*\n/);
+  if (!openMatch) return null;
+  const afterOpen = normalized.slice(openMatch[0].length);
+  const closeIdx = afterOpen.indexOf("\n---");
+  if (closeIdx === -1) return null;
+  const frontmatter = afterOpen.slice(0, closeIdx);
+  const body = afterOpen.slice(closeIdx + 4).trim();
+  const fields: Record<string, string> = {};
+  for (const line of frontmatter.split("\n")) {
+    const m = line.match(/^(\w+)\s*:\s*(.*)$/);
+    if (m) fields[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
+  }
+  return {
+    name: fields.name ?? "",
+    description: fields.description ?? "",
+    body,
+  };
+}
+
+/** POST /api/agent/skills/personal：从 SKILL.md 文本创建个人技能（IK60WU）。
+ *  解析 frontmatter → 校验 → 创建；名称冲突 → 100101；官方保留名 → 100102。 */
+export async function handleCreateSkill(
+  userId: string,
+  content: string,
+  deps: { skills: Pick<SkillRepo, "createPersonalSkill"> },
+) {
+  const parsed = parseSkillMd(content);
+  if (!parsed) return fail(400, "SKILL.md 格式不合法：缺少 frontmatter");
+  if (!parsed.name.trim()) return fail(400, "名称不能为空");
+  if (!parsed.description.trim()) return fail(400, "简介不能为空");
+  if (!parsed.body.trim()) return fail(400, "正文不能为空");
+  try {
+    const result = await deps.skills.createPersonalSkill(userId, {
+      name: parsed.name.trim(),
+      description: parsed.description.trim(),
+      body: parsed.body,
+    });
+    return ok({
+      creative_skill_id: result.creative_skill_id,
+      auto: false,
+      name: result.name,
+      description: result.description,
+      cover_url: null,
+      source: null,
+      asset_domain: "personal" as const,
+    });
+  } catch (e) {
+    if (e instanceof SkillNameConflictError) {
+      return fail(SKILL_NAME_CONFLICT_CODE, "同名技能已存在");
+    }
+    if (e instanceof SkillNameReservedError) {
+      return fail(SKILL_NAME_RESERVED_CODE, "名称与官方技能冲突");
+    }
+    throw e;
+  }
 }
