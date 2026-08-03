@@ -48,6 +48,8 @@ _Avoid_: 单张最终图片、视频模型关键帧组、SceneCard 图片模式�
 由 SceneCard 持久拥有、供下一次直接视频生成默认使用的完整参数；首次应用 PlanMessage 时从其冻结参数创建，
 此后只能由 User 在生成编辑器中修改。每个 GenerationJob 独立冻结提交时的参数快照，修改预设不得改写
 历史 PlanMessage 或 GenerationJob。
+生成编辑器只允许调整视频模型、画面比例、分辨率、时长、生成数量、参考模式及显式首帧、尾帧与普通
+参考图；媒体类型固定为视频，SceneCard 权威正文与派生提示词保持只读。控件与组合必须受当前模型能力约束。
 预设必须具有时长与视频参考模式；视频首帧、尾帧只能指向 PlanMessage 正文中已验证的素材引用。触发
 StoryboardPreview 不会把 SceneCard 或其生成预设切换成图片生成模式。
 PlanMessage 正文引用保存全部有效素材；预设中的生成输入只是其中经过所选模型能力验证、带明确角色的
@@ -56,7 +58,7 @@ PlanMessage 正文引用保存全部有效素材；预设中的生成输入只�
 创建新的 GenerationJob，关闭编辑器不保存草稿。生成编辑器不编辑 SceneCard 的权威 Markdown 正文；
 正文只能在 SceneCard 编辑器中单独修改。打开后若正文或预设已经变化，提交零写入并保留本地草稿，
 User 刷新复核后再生成，不自动合并。
-_Avoid_: SceneCardNode 数据、图片生成预设、媒体类型切换、每次打开重新猜测的默认值、历史生成参数、改写 PlanMessage、在生成面板改写正文、自动合并过期草稿
+_Avoid_: SceneCardNode 数据、图片生成预设、媒体类型切换、编辑提示词、模型不支持的参数组合、每次打开重新猜测的默认值、历史生成参数、改写 PlanMessage、在生成面板改写正文、自动合并过期草稿
 
 **ProviderPromptProjection（供应商提示词投影）**:
 服务端从 PlanMessage 或 SceneCard 的权威 Markdown 正文确定性派生、实际提交给生成供应商的提示词；
