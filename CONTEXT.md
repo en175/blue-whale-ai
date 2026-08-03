@@ -2,7 +2,9 @@
 
 一个处于上线前研发阶段、面向 AI Agent / Canvas 交互的产品。目标运行时由 Next.js Web 与
 TypeScript `product-api`、`agent-worker`、`generation-worker` 组成；三者属于同一模块化单体代码库。
-现有 Go 计费系统保持独立且不在 IK3UUX 中改造。范围以
+`blue_whale_api`（new-api 二开，Go，承担 LLM 网关与计费）保持独立且不在 IK3UUX 中改造，是唯一保留的 Go 组件。
+`blue_whale_server`（Java）与 `blue_whale_agent_worker`（Python）已退役，禁止写入；
+`blue_whale_pay_server`（Java 支付）已冻结，待支付建设阶段另行决策。范围以
 [ADR-0055](docs/adr/0055-prelaunch-typescript-unification-scope.md) 为准。
 
 ## Language
@@ -34,21 +36,31 @@ _Avoid_: 浏览器生成或推导 NodeItem ID；把布局信息或签名地址�
 隐式富文本；把过程文字创建为 NodeItem；把移出布局当作删除。
 
 **SceneCard（场景卡）**:
-Project 内持久化的场景创作内容，以 Markdown 作为权威正文；它是独立产品资源，不是对话 Card，
-也不是 NodeItem。
-_Avoid_: 把 SceneCard 当作 Card 的持久化版本；把 SceneCard 内容复制进 Canvas 布局；归入 NodeItem
+Project 内持久化的单个视频画面片段创作内容，以 Markdown 作为权威正文；默认最终生成动作是直接生成
+视频，不提供通用图片生成。它是独立产品资源，不是对话 Card，也不是 NodeItem。
+_Avoid_: 把 SceneCard 当作 Card 的持久化版本；把 SceneCard 内容复制进 Canvas 布局；归入 NodeItem；通用图片生成容器
+
+**StoryboardPreview（分镜预览）**:
+User 从 SceneCard 显式触发、用于正式视频生成前审阅与确认的导演式静态故事板；其有序画格表达镜头顺序、
+构图与动作节拍。它是可选准备产物，不是最终图片作品或默认前置步骤，完成后不自动创建视频 GenerationJob，
+也不自动成为视频模型输入；User 只能在生成编辑器中把符合模型能力的画格显式指定为首帧、尾帧或参考图。
+_Avoid_: 单张最终图片、视频模型关键帧组、SceneCard 图片模式、默认先出分镜、自动串联视频、自动绑定视频输入
 
 **SceneCardGenerationPreset（场景卡生成预设）**:
-由 SceneCard 持久拥有、供下一次生成默认使用的完整参数；首次应用 PlanMessage 时从其冻结参数创建，
+由 SceneCard 持久拥有、供下一次直接视频生成默认使用的完整参数；首次应用 PlanMessage 时从其冻结参数创建，
 此后只能由 User 在生成编辑器中修改。每个 GenerationJob 独立冻结提交时的参数快照，修改预设不得改写
 历史 PlanMessage 或 GenerationJob。
-预设按图片或视频判别：图片不允许时长与视频参考模式，视频必须具有时长与参考模式；视频首帧、尾帧
-只能指向 PlanMessage 正文中已验证的素材引用。
+生成编辑器只允许调整视频模型、画面比例、分辨率、时长、生成数量、参考模式及显式首帧、尾帧与普通
+参考图；媒体类型固定为视频，SceneCard 权威正文与派生提示词保持只读。控件与组合必须受当前模型能力约束。
+预设必须具有时长与视频参考模式；视频首帧、尾帧只能指向 PlanMessage 正文中已验证的素材引用。触发
+StoryboardPreview 不会把 SceneCard 或其生成预设切换成图片生成模式。
 PlanMessage 正文引用保存全部有效素材；预设中的生成输入只是其中经过所选模型能力验证、带明确角色的
 子集。User 明确要求素材直接参与生成但当前能力不支持时，必须先自然语言澄清，不能静默降为上下文参考。
 生成编辑器内的参数修改只形成本地临时草稿；只有 User 点击“生成”时，Product API 才原子更新预设并
-创建新的 GenerationJob，关闭编辑器不保存草稿。
-_Avoid_: SceneCardNode 数据、每次打开重新猜测的默认值、历史生成参数、改写 PlanMessage
+创建新的 GenerationJob，关闭编辑器不保存草稿。生成编辑器不编辑 SceneCard 的权威 Markdown 正文；
+正文只能在 SceneCard 编辑器中单独修改。打开后若正文或预设已经变化，提交零写入并保留本地草稿，
+User 刷新复核后再生成，不自动合并。
+_Avoid_: SceneCardNode 数据、图片生成预设、媒体类型切换、编辑提示词、模型不支持的参数组合、每次打开重新猜测的默认值、历史生成参数、改写 PlanMessage、在生成面板改写正文、自动合并过期草稿
 
 **ProviderPromptProjection（供应商提示词投影）**:
 服务端从 PlanMessage 或 SceneCard 的权威 Markdown 正文确定性派生、实际提交给生成供应商的提示词；
@@ -60,7 +72,8 @@ _Avoid_: 第二份可写提示词、把 `asset://` 地址直接发给供应商�
 SceneCard 在 Canvas 中的布局投影，只引用一个 SceneCard 并承载布局，不拥有场景内容；它是
 “Canvas 只编排 NodeItem”规则的显式例外；同一 Canvas 中一张 SceneCard 最多有一个 SceneCardNode。
 节点身份由 SceneCard 身份确定性生成；放置重试必须读取最新 Canvas 布局，只新增缺失节点，节点已存在
-即视为成功，持续失败时保留由 User 触发的“重新放入画布”入口。
+即视为成功。新建时选择当前视口中心附近的首个空位，覆盖时复用原节点且不移动；持续失败时保留由
+User 触发的“重新放入画布”入口。
 _Avoid_: NodeItem、SceneCard 本体、在节点中保存 Markdown 副本或生成参数
 
 **SceneCardGenerationOrigin（场景卡生成来源）**:
@@ -81,8 +94,12 @@ NodeItem 创建后的一次性流程状态：`pending`、`placed` 或 `dismissed
 首次包含 pending NodeItem 的完整 Canvas PUT 时，必须在同一提交中保存布局并把状态改为 `placed`；
 用户明确选择“暂不放置”时改为 `dismissed`。`placed` 与 `dismissed` 都是终态，后续放入或移出
 Canvas 均不改变它。只有持有原创建请求或 GenerationJob 接纳回执的页面可以自动尝试首次放置；
-这是 Web 的多页面协调规则，不是服务端权限。SceneCardGenerationRecord 的作品在 `pending` 期间可基于
-最新 Canvas 布局幂等重试新增，首次成功后即转为 `placed`，User 后续移除节点不得触发自动恢复。
+这是 Web 的多页面协调规则，不是服务端权限。AgentChatPanel 手动应用始终记录进入 Canvas 的意图：图片
+计划输出创建 Asset NodeItem，视频计划先放置 SceneCardNode，视频成功后再创建 Asset NodeItem。部分成功
+结果可以增量放置；`pending` 作品基于最新 Canvas 布局幂等重试新增，首次成功后即转为 `placed`，User
+后续移除节点不得触发自动恢复。
+图片计划结果以当前视口中心为锚点按无重叠网格排列；视频与 StoryboardPreview 结果在对应 SceneCardNode
+下方从左到右排列，满行换行。部分成功与重试只占用首个空位，不移动或覆盖既有节点。
 _Avoid_: 从该状态推导当前布局；移出 Canvas 后重置为 pending；自动过期、自动删除、后台放置；
 在 Canvas 冲突重试中移动或覆盖既有节点；绕过完整 PUT 增量放置。
 
@@ -147,7 +164,7 @@ PlanMessage、继续讨论或不产出 PlanMessage，但不需要理解或切换
 _Avoid_: Plan Mode、模式开关、直接生成入口、把普通问答或素材分析自动转成计划卡
 
 **PlanMessage（计划卡消息）**:
-Conversation 中由 Agent 提交的独立正式消息类别，以 Markdown 与稳定素材引用表达可应用的场景计划；
+Conversation 中由 Agent 提交的独立正式消息类别，以 Markdown 与稳定素材引用表达可应用的图片或视频计划；
 `write_plan_cards` 工具调用只在 AgentRun 中暂存完整候选，不直接创建正式消息；Product API 完成整批验证后，
 只有 RunCommit 能原子接纳全部 PlanMessage。验证失败、User 停止或提交前中断均零消息，恢复可复用已保存
 的完整候选而不重新调用模型。
@@ -163,33 +180,35 @@ Conversation 中由 Agent 提交的独立正式消息类别，以 Markdown 与�
 默认值为一，只有 User 明确要求多个结果时才增加。
 多卡批次可带一个由 Agent 生成的短序号名词；服务端根据卡片顺序派生并在每条 PlanMessage 中持久保存
 名词、序号与总数，单卡不显示序号，多卡缺少名词时只显示序号与总数。
-它随对话历史持久保留，可记录直接参考的另一 PlanMessage，并冻结“新建 SceneCard”或“覆盖所引用
-SceneCard”的默认应用意图；覆盖要求本轮恰好一个 available SceneCardMention，且 User 明确要求修改
-该 SceneCard。仅把 SceneCard 作为风格或内容参考时仍然新建；零引用只能新建，多个引用或修改意图
-不明确时必须先自然语言澄清，并要求 User 只重新引用目标 SceneCard。覆盖不提供另存分支，任何应用
-都必须由 User 手动触发。
+它随对话历史持久保留，可记录直接参考的另一 PlanMessage，并按生成类型冻结应用意图：图片计划直接创建
+图片 GenerationJob，不创建 SceneCard；视频计划新建 SceneCard，或覆盖本轮明确要求修改且唯一 available
+的 SceneCardMention。仅把 SceneCard 作为风格或内容参考时仍然新建；零引用只能新建，多个引用或修改意图
+不明确时必须先自然语言澄清，并要求 User 只重新引用目标 SceneCard。图片计划不支持覆盖 SceneCard，
+视频覆盖不提供另存分支，任何应用都必须由 User 手动触发。
 Agent 只能通过本轮已冻结的 SceneCardMention 句柄声明覆盖目标，不能自行填写 SceneCard 身份或版本；
 Product API 从引用事实解析目标与基准版本；手动应用不得替换计划卡冻结的目标。
 应用覆盖时必须重新比较目标当前版本；版本变化、目标删除或越权均零写入，并要求 User 重新引用当前
 SceneCard 生成新的 PlanMessage。成功覆盖复用原 SceneCardNode，既有生成记录与 Asset 保持不变。
-新建意图可以原子提交多条 PlanMessage；覆盖意图一次只能提交一条，不能为同一 SceneCard 创建可被
-连续应用的多个替代覆盖方案。
+图片直接生成或视频新建意图可以原子提交多条 PlanMessage；视频覆盖意图一次只能提交一条，不能为同一
+SceneCard 创建可被连续应用的多个替代覆盖方案。
 本次方案中每张卡的全部必需素材引用都有效时，Agent 才能原子提交整批 PlanMessage；任一必需引用无效时，
 不得产生任何 PlanMessage，Agent 必须在 PlanPhase 通过自然语言让 User 移除或替换该引用后重新生成。
 模型输出的素材引用只能来自本次已验证可用的引用集合；集合外素材 ID 属于契约错误，整批候选不得展示，
 系统应在内部修复或重试，不能把引用幻觉交给 User 处理。
-_Avoid_: 生成结果 Card、SceneCard 本体、可变草稿、唯一最新版、自动应用、自动改写正文、把素材失效等同于消息失效、部分提交计划卡、静默删除或忽略无效引用、展示含幻觉引用的候选卡
+_Avoid_: 生成结果 Card、SceneCard 本体、把所有计划卡都落成 SceneCard、可变草稿、唯一最新版、自动应用、自动改写正文、把素材失效等同于消息失效、部分提交计划卡、静默删除或忽略无效引用、展示含幻觉引用的候选卡
 
 **PlanApplicationReceipt（计划应用记录）**:
-一次成功应用 PlanMessage 的不可变事实，记录实际的新建或覆盖操作、结果 SceneCard、结果版本、内容摘要
-与应用时间；同时记录首次自动 GenerationJob、生成预设摘要与 CommandId，以证明正文和完整参数来自
-被点击的 PlanMessage。它不修改 PlanMessage，Canvas 放置也不属于其成功条件。
-应用前必须重新验证冻结素材与生成能力；任一项失效时，SceneCard、SceneCardGenerationPreset、
-PlanApplicationReceipt 与 GenerationJob 全部零写入，不能静默替换参数或创建未开始生成的半成品 SceneCard。
-第一阶段应用以 CommandId 幂等接纳；重复请求只能返回首次创建的同一 SceneCard、PlanApplicationReceipt
-与 GenerationJob。Canvas 放置是提交后的可重试第二阶段，不得回滚或重复第一阶段。
-每条 PlanMessage 最多只有一次成功应用；成功后不同 CommandId 也不得再次应用，后续生成统一从
-SceneCard 的生成编辑器发起。首次 GenerationJob 后续失败不撤销应用成功，也不恢复计划卡应用入口。
+一次成功应用 PlanMessage 的不可变事实，记录图片直接生成或视频新建/覆盖的实际路径、内容摘要、应用时间、
+首次 GenerationJob 与 CommandId；视频路径还记录结果 SceneCard、结果版本与生成预设摘要。它证明正文和
+完整参数来自被点击的 PlanMessage，不修改 PlanMessage，Canvas 放置也不属于其成功条件。
+应用前必须重新验证冻结素材与生成能力；任一项失效时，图片路径的 PlanApplicationReceipt 与 GenerationJob
+全部零写入，视频路径的 SceneCard、SceneCardGenerationPreset、PlanApplicationReceipt 与 GenerationJob
+全部零写入，不能静默替换参数或留下半成品。
+第一阶段应用以 CommandId 幂等接纳；重复请求只能返回首次创建的同一路径结果与 PlanApplicationReceipt。
+Canvas 放置是提交后的可重试第二阶段，不得回滚或重复第一阶段。
+每条 PlanMessage 最多只有一次成功应用；成功后不同 CommandId 也不得再次应用。首次 GenerationJob 后续
+失败不撤销应用成功，也不恢复计划卡应用入口；后续重试或再次生成必须从应用结果的后续入口发起，不能
+重放计划卡应用命令。
 _Avoid_: PlanMessage 状态、失败尝试、Canvas 放置记录、用网络响应充当唯一成功证据、部分应用
 
 **CommandId（业务命令身份）**:
@@ -347,6 +366,11 @@ Worker 通过短租约领取任务；租约过期后可由新 Worker 重新领�
 外部调用结果无法确认时任务明确失败，由 User 在原 Card 上手动重试，不建设自动核对系统。
 任务一经接纳即运行到全部成功、部分完成或全部失败；关闭面板、切换页面或退出 Project 均不取消任务。
 _Avoid_: 把 Job 与 Card、NodeItem 或 Asset 混为一谈；用内存状态作为任务权威；提供取消按钮或取消状态；自动复活终态任务。
+
+**GenerationRecipe（生成配方）**:
+Web 从图片 GenerationJob 冻结的提示词、模型、参数与素材输入派生的只读 BottomDock 回填投影；它不是独立
+资源或持久预设。User 修改回填值只形成本地草稿，提交后创建新 GenerationJob，不改写原 PlanMessage、任务或 Asset。
+_Avoid_: 图片持久预设、NodeItem 权威参数、修改历史任务、把再次生成当作重试
 
 **GenerationOutputSlot（生成输出槽）**:
 GenerationJob 创建时固定的输出位置，用于让多输出任务稳定关联 Card、审核结果与 Asset。
@@ -537,28 +561,28 @@ _Avoid_: 重试复用结果不明的预留；usage 缺失时按零成本；把�
 _Avoid_: 把 AuditRecord 当作产品事件、调试日志或原始提示词存档。
 
 **GenerationAuthorizationGate（生成授权门）**:
-Product API 接纳 Canvas 图片或视频操作面板提交的 GenerationJob 前，对用户意图与风险进行分类：明确且在默认成本额度内则直接执行；
-存在关键歧义则继续对齐；高成本或不可逆操作则先取得自然语言确认，但确认不能突破系统硬额度。
-_Avoid_: 允许 Agent 创建 GenerationJob、每次生成都确认、把需求对齐误称为授权。
+Product API 接纳图片或视频 GenerationJob 前，验证已认证 User 的显式按钮命令、资源权限、模型能力与可用
+额度；全部满足即直接执行，不按成本高低增加确认。任一硬条件不满足则零写入并返回可修复原因，确认不能
+突破系统额度，Agent 仍无权创建 GenerationJob。
+_Avoid_: 成本分级确认、确认弹窗、允许 Agent 创建 GenerationJob、静默降级模型或参数、把需求对齐误称为授权。
 
 **UserInputRequest（用户输入请求）**:
-AgentRun 因关键歧义或 GenerationAuthorizationGate 而等待用户补充信息时创建的产品中性请求记录，
-以稳定的产品级 `request_type` 区分创作澄清（`creation_clarification`）与成本确认
-（`cost_confirmation`）。请求类型、可见问题、来源 AgentRun、Conversation 归属与恢复绑定一经创建
-不可改写，归属于 AgentRun，不是独立聚合；同一 AgentRun 最多只有一个活动请求。用户只能通过
+AgentRun 因创作关键歧义而等待用户补充信息时创建的产品中性请求记录，稳定 `request_type` 为
+`creation_clarification`。请求类型、可见问题、来源 AgentRun、Conversation 归属与恢复绑定一经创建
+不可改写，归属于 AgentRun，不是独立聚合；同一 AgentRun 最多只有一个活动请求。User 只能通过
 Conversation 中引用该请求标识的自然语言消息回答，已过期或已回答请求的迟到回复不能解除后续请求。
-创作澄清接受任意非空回答，不需要报价/供应商/成本策略字段；成本确认仍校验动作身份、参数摘要、
-报价与策略版本（详见 ADR-0036）。
-_Avoid_: 确认按钮、无请求标识的隐式解锁、把 UserInputRequest 当作独立运行任务。
+创作澄清接受任意非空回答，不需要报价、供应商或成本策略字段。
+_Avoid_: `cost_confirmation`、确认按钮、无请求标识的隐式解锁、把 UserInputRequest 当作独立运行任务。
 
 **展示边界(画布 vs 对话)**:
 Canvas 承载 Asset 素材节点与用户主动创建的标题、说明或创意便签。
 所有过程性文字内容(Brief 摘要、Skill 推荐、脚本 / 分镜、图片理解摘要、Review、
 ReasoningSummary 思考摘要、审核说明、任务状态)都在 AgentChatPanel 对话流里以文字或文字卡展示，
 系统和 Agent 不得自动把这些内容创建为 text NodeItem。一句话:**Canvas = 素材与用户便签，对话 = 过程**。
-User 明确应用对话中的计划后形成的 SceneCard 是此边界的唯一例外，并通过 SceneCardNode 进入 Canvas。
-PlanMessage 通过卡片上的唯一显式操作由 User 手动新建或覆盖 SceneCard，点击后不再弹二次确认；
-继续修改仍通过对话产生新的 PlanMessage，不直接改写历史消息。
+User 明确应用视频计划后形成的 SceneCard 是此边界的唯一内容资源例外，并通过 SceneCardNode 进入 Canvas；
+图片计划直接创建 GenerationJob，其结果仍作为普通 Asset NodeItem 进入 Canvas。PlanMessage 通过卡片上的
+唯一显式操作由 User 手动触发对应路径，点击后不再弹二次确认；继续修改仍通过对话产生新的 PlanMessage，
+不直接改写历史消息。
 _Avoid_: 把 Brief / Skill / 分镜 / Review 做成普通 text NodeItem；Agent 自动应用计划；
 直接编辑历史 PlanMessage；把提示词、worker 名、文件路径等内部信息展示给用户。
 
