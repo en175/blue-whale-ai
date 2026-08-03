@@ -154,7 +154,7 @@ PlanMessage、继续讨论或不产出 PlanMessage，但不需要理解或切换
 _Avoid_: Plan Mode、模式开关、直接生成入口、把普通问答或素材分析自动转成计划卡
 
 **PlanMessage（计划卡消息）**:
-Conversation 中由 Agent 提交的独立正式消息类别，以 Markdown 与稳定素材引用表达可应用的场景计划；
+Conversation 中由 Agent 提交的独立正式消息类别，以 Markdown 与稳定素材引用表达可应用的图片或视频计划；
 `write_plan_cards` 工具调用只在 AgentRun 中暂存完整候选，不直接创建正式消息；Product API 完成整批验证后，
 只有 RunCommit 能原子接纳全部 PlanMessage。验证失败、User 停止或提交前中断均零消息，恢复可复用已保存
 的完整候选而不重新调用模型。
@@ -170,33 +170,35 @@ Conversation 中由 Agent 提交的独立正式消息类别，以 Markdown 与�
 默认值为一，只有 User 明确要求多个结果时才增加。
 多卡批次可带一个由 Agent 生成的短序号名词；服务端根据卡片顺序派生并在每条 PlanMessage 中持久保存
 名词、序号与总数，单卡不显示序号，多卡缺少名词时只显示序号与总数。
-它随对话历史持久保留，可记录直接参考的另一 PlanMessage，并冻结“新建 SceneCard”或“覆盖所引用
-SceneCard”的默认应用意图；覆盖要求本轮恰好一个 available SceneCardMention，且 User 明确要求修改
-该 SceneCard。仅把 SceneCard 作为风格或内容参考时仍然新建；零引用只能新建，多个引用或修改意图
-不明确时必须先自然语言澄清，并要求 User 只重新引用目标 SceneCard。覆盖不提供另存分支，任何应用
-都必须由 User 手动触发。
+它随对话历史持久保留，可记录直接参考的另一 PlanMessage，并按生成类型冻结应用意图：图片计划直接创建
+图片 GenerationJob，不创建 SceneCard；视频计划新建 SceneCard，或覆盖本轮明确要求修改且唯一 available
+的 SceneCardMention。仅把 SceneCard 作为风格或内容参考时仍然新建；零引用只能新建，多个引用或修改意图
+不明确时必须先自然语言澄清，并要求 User 只重新引用目标 SceneCard。图片计划不支持覆盖 SceneCard，
+视频覆盖不提供另存分支，任何应用都必须由 User 手动触发。
 Agent 只能通过本轮已冻结的 SceneCardMention 句柄声明覆盖目标，不能自行填写 SceneCard 身份或版本；
 Product API 从引用事实解析目标与基准版本；手动应用不得替换计划卡冻结的目标。
 应用覆盖时必须重新比较目标当前版本；版本变化、目标删除或越权均零写入，并要求 User 重新引用当前
 SceneCard 生成新的 PlanMessage。成功覆盖复用原 SceneCardNode，既有生成记录与 Asset 保持不变。
-新建意图可以原子提交多条 PlanMessage；覆盖意图一次只能提交一条，不能为同一 SceneCard 创建可被
-连续应用的多个替代覆盖方案。
+图片直接生成或视频新建意图可以原子提交多条 PlanMessage；视频覆盖意图一次只能提交一条，不能为同一
+SceneCard 创建可被连续应用的多个替代覆盖方案。
 本次方案中每张卡的全部必需素材引用都有效时，Agent 才能原子提交整批 PlanMessage；任一必需引用无效时，
 不得产生任何 PlanMessage，Agent 必须在 PlanPhase 通过自然语言让 User 移除或替换该引用后重新生成。
 模型输出的素材引用只能来自本次已验证可用的引用集合；集合外素材 ID 属于契约错误，整批候选不得展示，
 系统应在内部修复或重试，不能把引用幻觉交给 User 处理。
-_Avoid_: 生成结果 Card、SceneCard 本体、可变草稿、唯一最新版、自动应用、自动改写正文、把素材失效等同于消息失效、部分提交计划卡、静默删除或忽略无效引用、展示含幻觉引用的候选卡
+_Avoid_: 生成结果 Card、SceneCard 本体、把所有计划卡都落成 SceneCard、可变草稿、唯一最新版、自动应用、自动改写正文、把素材失效等同于消息失效、部分提交计划卡、静默删除或忽略无效引用、展示含幻觉引用的候选卡
 
 **PlanApplicationReceipt（计划应用记录）**:
-一次成功应用 PlanMessage 的不可变事实，记录实际的新建或覆盖操作、结果 SceneCard、结果版本、内容摘要
-与应用时间；同时记录首次自动 GenerationJob、生成预设摘要与 CommandId，以证明正文和完整参数来自
-被点击的 PlanMessage。它不修改 PlanMessage，Canvas 放置也不属于其成功条件。
-应用前必须重新验证冻结素材与生成能力；任一项失效时，SceneCard、SceneCardGenerationPreset、
-PlanApplicationReceipt 与 GenerationJob 全部零写入，不能静默替换参数或创建未开始生成的半成品 SceneCard。
-第一阶段应用以 CommandId 幂等接纳；重复请求只能返回首次创建的同一 SceneCard、PlanApplicationReceipt
-与 GenerationJob。Canvas 放置是提交后的可重试第二阶段，不得回滚或重复第一阶段。
-每条 PlanMessage 最多只有一次成功应用；成功后不同 CommandId 也不得再次应用，后续生成统一从
-SceneCard 的生成编辑器发起。首次 GenerationJob 后续失败不撤销应用成功，也不恢复计划卡应用入口。
+一次成功应用 PlanMessage 的不可变事实，记录图片直接生成或视频新建/覆盖的实际路径、内容摘要、应用时间、
+首次 GenerationJob 与 CommandId；视频路径还记录结果 SceneCard、结果版本与生成预设摘要。它证明正文和
+完整参数来自被点击的 PlanMessage，不修改 PlanMessage，Canvas 放置也不属于其成功条件。
+应用前必须重新验证冻结素材与生成能力；任一项失效时，图片路径的 PlanApplicationReceipt 与 GenerationJob
+全部零写入，视频路径的 SceneCard、SceneCardGenerationPreset、PlanApplicationReceipt 与 GenerationJob
+全部零写入，不能静默替换参数或留下半成品。
+第一阶段应用以 CommandId 幂等接纳；重复请求只能返回首次创建的同一路径结果与 PlanApplicationReceipt。
+Canvas 放置是提交后的可重试第二阶段，不得回滚或重复第一阶段。
+每条 PlanMessage 最多只有一次成功应用；成功后不同 CommandId 也不得再次应用。首次 GenerationJob 后续
+失败不撤销应用成功，也不恢复计划卡应用入口；后续重试或再次生成必须从应用结果的后续入口发起，不能
+重放计划卡应用命令。
 _Avoid_: PlanMessage 状态、失败尝试、Canvas 放置记录、用网络响应充当唯一成功证据、部分应用
 
 **CommandId（业务命令身份）**:
