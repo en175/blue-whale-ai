@@ -1,8 +1,5 @@
 # Next.js standalone 构建（见 next.config.ts output: "standalone"）
 # 多阶段：deps（pnpm monorepo）→ builder（编译 workspace 包 + next build）→ runner（最小运行镜像）
-#
-# GATEWAY_URL 是运行时 env（next.config.ts 的 rewrites() 在 standalone server.js 启动时读取 process.env），
-# 不在构建期固化，便于同一镜像切换后端环境。
 
 FROM node:24-alpine AS deps
 RUN corepack enable
@@ -46,9 +43,7 @@ COPY packages/persistence packages/persistence
 # 目标应用源码
 COPY blue_whale_web blue_whale_web
 
-# 构建期给一个占位让 rewrite 函数能编译；运行时由 ENV GATEWAY_URL 覆盖真实地址
 ENV NEXT_PUBLIC_SKIP_AUTH=1
-ENV GATEWAY_URL=http://blue-whale-gateway:8686
 
 # 先编译 workspace 包（Next.js 通过 exports 字段引用 dist/ 输出）
 RUN pnpm --filter @blue-whale/contracts --filter @blue-whale/core --filter @blue-whale/persistence --filter @blue-whale/generation-runtime build

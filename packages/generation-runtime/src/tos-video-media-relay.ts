@@ -13,6 +13,21 @@ export interface GenerationTosConfig {
   maxVideoBytes?: number;
 }
 
+export type GenerationMediaRelayMode = "tos" | "passthrough";
+
+export function loadGenerationMediaRelayMode(
+  env: NodeJS.ProcessEnv = process.env,
+): GenerationMediaRelayMode {
+  const mode = env.GENERATION_MEDIA_RELAY_MODE ?? "tos";
+  if (mode !== "tos" && mode !== "passthrough") {
+    throw new Error(`Unsupported GENERATION_MEDIA_RELAY_MODE: ${mode}`);
+  }
+  if (mode === "passthrough" && env.NODE_ENV === "production") {
+    throw new Error("passthrough media relay is forbidden in production");
+  }
+  return mode;
+}
+
 interface TosVideoClient {
   getPreSignedUrl(input: {
     bucket: string;
@@ -102,6 +117,19 @@ export function createTosVideoMediaRelay(
         storageKey,
         mime,
         size: bytes.byteLength,
+      };
+    },
+  };
+}
+
+export function createPassthroughVideoMediaRelay(): VideoMediaRelay {
+  return {
+    async persist(sourceUrl) {
+      return {
+        url: sourceUrl,
+        storageKey: null,
+        mime: null,
+        size: null,
       };
     },
   };
