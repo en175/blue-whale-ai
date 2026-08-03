@@ -91,8 +91,10 @@ NodeItem 创建后的一次性流程状态：`pending`、`placed` 或 `dismissed
 首次包含 pending NodeItem 的完整 Canvas PUT 时，必须在同一提交中保存布局并把状态改为 `placed`；
 用户明确选择“暂不放置”时改为 `dismissed`。`placed` 与 `dismissed` 都是终态，后续放入或移出
 Canvas 均不改变它。只有持有原创建请求或 GenerationJob 接纳回执的页面可以自动尝试首次放置；
-这是 Web 的多页面协调规则，不是服务端权限。SceneCardGenerationRecord 的作品在 `pending` 期间可基于
-最新 Canvas 布局幂等重试新增，首次成功后即转为 `placed`，User 后续移除节点不得触发自动恢复。
+这是 Web 的多页面协调规则，不是服务端权限。AgentChatPanel 手动应用始终记录进入 Canvas 的意图：图片
+计划输出创建 Asset NodeItem，视频计划先放置 SceneCardNode，视频成功后再创建 Asset NodeItem。部分成功
+结果可以增量放置；`pending` 作品基于最新 Canvas 布局幂等重试新增，首次成功后即转为 `placed`，User
+后续移除节点不得触发自动恢复。
 _Avoid_: 从该状态推导当前布局；移出 Canvas 后重置为 pending；自动过期、自动删除、后台放置；
 在 Canvas 冲突重试中移动或覆盖既有节点；绕过完整 PUT 增量放置。
 
