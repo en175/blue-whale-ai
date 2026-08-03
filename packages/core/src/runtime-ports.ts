@@ -1,10 +1,19 @@
 export interface AgentRequest {
   readonly prompt: string;
+  readonly runtimeInstructions: readonly string[];
+  readonly creativeSkill: {
+    readonly creativeSkillId: string;
+    readonly creativeSkillVersionId: string;
+    readonly name: string;
+    readonly resourceDigest: string;
+    readonly body: string;
+  } | null;
 }
 
 export interface AgentResult {
   readonly provider: string;
   readonly content: string;
+  readonly reasoningSummary: string;
 }
 
 export interface AgentAdapter {

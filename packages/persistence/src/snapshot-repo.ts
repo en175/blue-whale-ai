@@ -1,4 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
+import {
+  creativeSkillActivationSchema,
+  type CreativeSkillActivation,
+} from "@blue-whale/contracts";
 
 import { publicGenerationInput } from "./generation-input.js";
 
@@ -50,6 +54,8 @@ export interface SnapshotConversationState {
     status: string;
     stage: string | null;
     version: number;
+    activated_creative_skill_versions: CreativeSkillActivation[];
+    reasoning_summary: string | null;
     active_input_request: {
       input_request_id: string;
       request_type: string;
@@ -175,14 +181,28 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           sequence_no: message.sequence_no,
           created_at: message.gmt_create.toISOString(),
         })),
-        agent_runs: runs.map((run) => ({
-          agent_run_id: run.id.toString(),
-          conversation_id: run.conversation_id.toString(),
-          status: run.status,
-          stage: run.stage,
-          version: run.version,
-          active_input_request: activeByRun.get(run.id.toString()) ?? null,
-        })),
+        agent_runs: runs.map((run) => {
+          const activations = creativeSkillActivationSchema
+            .array()
+            .max(1)
+            .safeParse(run.activated_creative_skill_versions);
+          return {
+            agent_run_id: run.id.toString(),
+            conversation_id: run.conversation_id.toString(),
+            status: run.status,
+            stage: run.stage,
+            version: run.version,
+            activated_creative_skill_versions: activations.success
+              ? activations.data
+              : [],
+            reasoning_summary:
+              typeof run.reasoning_summary === "string" &&
+              run.reasoning_summary.length <= 280
+                ? run.reasoning_summary
+                : null,
+            active_input_request: activeByRun.get(run.id.toString()) ?? null,
+          };
+        }),
         high_watermark_cursor: (maxCursorRow?._max?.cursor ?? 0n).toString(),
       };
     },

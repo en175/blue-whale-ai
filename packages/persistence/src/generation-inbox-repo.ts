@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import type { AgentRuntimeManifest } from "@blue-whale/contracts";
 
 import {
   acceptConversationMessageInTransaction,
@@ -36,6 +37,7 @@ export interface AcceptInboxMessageRecord {
   content: string;
   conversationId: string | null;
   replyToInputRequestId: string | null;
+  forcedCreativeSkillId: string | null;
 }
 
 export type CreateInboxConversationResult =
@@ -63,6 +65,7 @@ function preview(content: string | undefined): string {
 
 export function createGenerationInboxRepo(
   prisma: PrismaClient,
+  manifest: AgentRuntimeManifest,
 ): GenerationInboxRepo {
   return {
     async get(userId) {
@@ -110,10 +113,14 @@ export function createGenerationInboxRepo(
           },
           select: { id: true },
         });
-        return acceptConversationMessageInTransaction(tx, {
-          ...input,
-          projectId: inbox.id.toString(),
-        });
+        return acceptConversationMessageInTransaction(
+          tx,
+          {
+            ...input,
+            projectId: inbox.id.toString(),
+          },
+          manifest,
+        );
       });
     },
 

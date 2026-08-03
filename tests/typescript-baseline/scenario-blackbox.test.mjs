@@ -121,11 +121,23 @@ async function registerAndCreateProject(label) {
   return { token, projectId: String(created.body.data?.id), suffix };
 }
 
-async function sendMessage(projectId, token, content, suffix) {
+async function sendMessage(
+  projectId,
+  token,
+  content,
+  suffix,
+  { forcedCreativeSkillId } = {},
+) {
   const key = uniqueKey(`scenario-${suffix}`);
   const response = await postJson(
     `/api/projects/${projectId}/conversation/messages`,
-    { client_message_id: key, content },
+    {
+      client_message_id: key,
+      content,
+      ...(forcedCreativeSkillId
+        ? { forced_creative_skill_id: forcedCreativeSkillId }
+        : {}),
+    },
     token,
     { "Idempotency-Key": key },
   );
@@ -134,6 +146,7 @@ async function sendMessage(projectId, token, content, suffix) {
     202,
     "服务=web 事实=会话消息应被接纳（202）",
   );
+  return response.body.data;
 }
 
 async function fetchSnapshot(projectId, token) {
@@ -206,9 +219,12 @@ async function createGenerationJob(projectId, token, body, suffix) {
   return String(created.body.data?.generation_job_id);
 }
 
-function fakeAgentEcho(prompt) {
+function fakeAgentEcho(prompt, resourceDigest = null) {
+  const skillFingerprint = resourceDigest
+    ? `\ncreative-skill:${resourceDigest}`
+    : "";
   const fingerprint = createHash("sha256")
-    .update(`blue-whale-agent-fake-v1\n${prompt}`)
+    .update(`blue-whale-agent-fake-v1\n${prompt}${skillFingerprint}`)
     .digest("hex");
   return `fake-agent-response:${fingerprint}`;
 }
@@ -370,6 +386,180 @@ test("agent 成功：SSE 收到终态事件且 Snapshot 回显确定性哈希", 
     assistants[0].content,
     fakeAgentEcho(prompt),
     "服务=agent-worker 事实=回显应为确定性哈希",
+  );
+});
+
+test("forced 个人 Skill：首版立即激活，完整回复与安全投影原子提交", async () => {
+  resetScenarios();
+  const { token, projectId, suffix } = await registerAndCreateProject("agentforce");
+  const privateBody = `PRIVATE_FORCED_SKILL_BODY_${suffix}`;
+  const created = await postJson(
+    "/api/agent/skills/personal",
+    {
+      content: `---\nname: Forced ${suffix}\ndescription: acceptance\n---\n${privateBody}`,
+    },
+    token,
+  );
+  assert.equal(created.response.status, 200);
+  assert.equal(created.body.code, 200);
+  const creativeSkillId = created.body.data?.creative_skill_id;
+  assert.equal(typeof creativeSkillId, "string");
+  const prompt = `强制技能消息 ${suffix}`;
+  const resourceDigest = `sha256:${createHash("sha256")
+    .update(privateBody)
+    .digest("hex")}`;
+
+  const completedEvent = readSseUntil(
+    projectId,
+    token,
+    (eventType, data) =>
+      eventType === "agent_run.status_changed" &&
+      data.payload?.status === "completed"
+        ? data.payload
+        : null,
+    60_000,
+  );
+  const accepted = await sendMessage(projectId, token, prompt, suffix, {
+    forcedCreativeSkillId: creativeSkillId,
+  });
+  const event = await completedEvent;
+  const snapshot = await waitFor(
+    async () => {
+      const current = await fetchSnapshot(projectId, token);
+      return current.agent_runs?.at(-1)?.status === "completed" ? current : null;
+    },
+    60_000,
+    "服务=agent-worker 事实=forced Run 应完成",
+  );
+  const run = snapshot.agent_runs.at(-1);
+  assert.deepEqual(run.activated_creative_skill_versions, [
+    {
+      creative_skill_id: creativeSkillId,
+      creative_skill_version_id:
+        run.activated_creative_skill_versions[0].creative_skill_version_id,
+      name: `Forced ${suffix}`,
+      display_version: "1.0.0",
+      resource_digest: resourceDigest,
+      source: "forced_use",
+      reason: { type: "user_use" },
+    },
+  ]);
+  assert.equal(run.reasoning_summary, `已使用「Forced ${suffix}」完成回答。`);
+  assert.deepEqual(
+    event.activated_creative_skill_versions,
+    run.activated_creative_skill_versions,
+  );
+  assert.equal(event.reasoning_summary, run.reasoning_summary);
+  assert.equal(
+    (await assistantMessages(projectId, token))[0].content,
+    fakeAgentEcho(prompt, resourceDigest),
+  );
+
+  const publicJson = JSON.stringify({ snapshot, event });
+  for (const forbidden of [privateBody, '"run_pin"', '"body"', "runtimeInstructions"]) {
+    assert.equal(publicJson.includes(forbidden), false, `公开投影不得包含 ${forbidden}`);
+  }
+  assert.equal(
+    mysqlQuery(
+      `SELECT JSON_UNQUOTE(JSON_EXTRACT(run_pin, '$.creative_skill_resources[0].body')) FROM agent_runs WHERE id=${accepted.agent_run_id}`,
+    ),
+    privateBody,
+    "服务=mysql 事实=私有 RunPin 应保存完整 Skill 正文",
+  );
+  assert.equal(
+    mysqlQuery(
+      `SELECT CONCAT((SELECT COUNT(*) FROM agent_advances WHERE agent_run_id=${accepted.agent_run_id}), ':', (SELECT COUNT(*) FROM run_commits WHERE agent_run_id=${accepted.agent_run_id}), ':', (SELECT COUNT(*) FROM conversation_messages WHERE agent_run_id=${accepted.agent_run_id} AND role='assistant'))`,
+    ),
+    "1:1:1",
+    "服务=mysql 事实=Advance、RunCommit 与 assistant 应各一条",
+  );
+});
+
+test("auto 官方 Skill 与 RunPin 不漂移：发布新版后旧 Run 仍用冻结版本", async () => {
+  resetScenarios();
+  const { token, projectId, suffix } = await registerAndCreateProject("agentauto");
+  const added = await postJson(
+    "/api/agent/skills/library/acceptance_poster/add",
+    {},
+    token,
+  );
+  assert.equal(added.body.code, 200);
+  const enabled = await requestJson(
+    "/api/agent/skills/mine/acceptance_poster",
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ auto: true }),
+    },
+  );
+  assert.equal(enabled.body.code, 200);
+
+  serviceStop("agent-worker");
+  const prompt = "Acceptance Poster";
+  const v1Digest =
+    "sha256:131c6997ea0d081f4553e613a65ba7b047a33124784f51c5c4017cdfb9fe258b";
+  let accepted;
+  try {
+    accepted = await sendMessage(projectId, token, prompt, suffix);
+    assert.equal(
+      mysqlQuery(`SELECT status FROM agent_runs WHERE id=${accepted.agent_run_id}`),
+      "queued",
+    );
+    assert.equal(
+      mysqlQuery(
+        `SELECT JSON_UNQUOTE(JSON_EXTRACT(run_pin, '$.auto_creative_skill_candidates[0].resource_digest')) FROM agent_runs WHERE id=${accepted.agent_run_id}`,
+      ),
+      v1Digest,
+      "服务=mysql 事实=Run 创建时应冻结 v1 候选摘要",
+    );
+
+    const v2Body = "# Acceptance Poster v2\n\nNew rules published after Run creation.";
+    const v2Digest = `sha256:${createHash("sha256").update(v2Body).digest("hex")}`;
+    mysqlQuery(
+      `INSERT INTO creative_skill_version (creative_skill_version_id, creative_skill_id, display_version, body, content_digest, resource_digest) VALUES ('acceptance-poster-v2', 'acceptance_poster', '2.0.0', '${v2Body}', '${v2Digest}', '${v2Digest}'); UPDATE creative_skill SET active_version_id='acceptance-poster-v2' WHERE creative_skill_id='acceptance_poster'`,
+    );
+  } finally {
+    serviceStart("agent-worker");
+    await waitServiceReady("agent-worker");
+  }
+
+  const run = await waitForAgentRunStatus(projectId, token, ["completed"], 90_000);
+  assert.equal(run.activated_creative_skill_versions.length, 1);
+  assert.equal(run.activated_creative_skill_versions[0].source, "auto");
+  assert.equal(run.activated_creative_skill_versions[0].creative_skill_version_id, "acceptance-poster-v1");
+  assert.equal(run.activated_creative_skill_versions[0].resource_digest, v1Digest);
+  assert.deepEqual(run.activated_creative_skill_versions[0].reason, {
+    type: "agent_match",
+    detail: { matched_fields: ["conversation_messages"] },
+  });
+  assert.equal(
+    (await assistantMessages(projectId, token))[0].content,
+    fakeAgentEcho(prompt, v1Digest),
+    "服务=agent-worker 事实=新版发布后旧 Run 仍必须使用冻结 v1",
+  );
+
+  const nextPrompt = `同一 Conversation 的后续普通消息 ${suffix}`;
+  await sendMessage(projectId, token, nextPrompt, suffix);
+  await waitFor(
+    async () => {
+      const current = await fetchSnapshot(projectId, token);
+      return current.agent_runs?.length === 2 &&
+        current.agent_runs.at(-1)?.status === "completed"
+        ? current
+        : null;
+    },
+    90_000,
+    "服务=agent-worker 事实=同一 Conversation 应顺序产生第二个 AgentRun",
+  );
+  assert.equal(
+    mysqlQuery(
+      `SELECT CONCAT(COUNT(DISTINCT ar.id), ':', COUNT(DISTINCT aa.id), ':', COUNT(DISTINCT rc.id)) FROM agent_runs ar LEFT JOIN agent_advances aa ON aa.agent_run_id=ar.id LEFT JOIN run_commits rc ON rc.agent_run_id=ar.id WHERE ar.project_id=${projectId}`,
+    ),
+    "2:2:2",
+    "服务=mysql 事实=同一 Conversation 的两个 Run 各有一个 Advance 与 RunCommit",
   );
 });
 

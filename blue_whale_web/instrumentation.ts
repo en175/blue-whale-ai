@@ -7,7 +7,15 @@
  * 仅在 Node.js runtime 注册一次（globalThis 去重，防 dev 热重载多次挂载）。
  * 每 IMAGE_RECOVERY_INTERVAL_MS（默认 60s）跑一次；启动时立即跑一次接回重启前的孤儿。
  */
-export async function register(): Promise<void> {
+import {
+  bundledAgentRuntimeManifest,
+  validateAgentRuntimeManifest,
+} from "@blue-whale/agent-runtime";
+
+export async function register(
+  manifest: unknown = bundledAgentRuntimeManifest,
+): Promise<void> {
+  validateAgentRuntimeManifest(manifest);
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   const globalKey = "__blueWhaleImageRecoveryStarted";
   const g = globalThis as unknown as Record<string, unknown>;

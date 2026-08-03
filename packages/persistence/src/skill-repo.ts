@@ -669,23 +669,27 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
 
       const creativeSkillId = await generateCreativeSkillId(prisma, input.name);
       const contentDigest = `sha256:${createHash("sha256").update(input.body).digest("hex")}`;
+      const creativeSkillVersionId = randomUUID();
 
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO creative_skill (creative_skill_id, name, description, owner_user_id, asset_domain, name_key) VALUES (?, ?, ?, ?, 'personal', ?)`,
-        creativeSkillId,
-        input.name,
-        input.description,
-        BigInt(userId),
-        nameKey,
-      );
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO creative_skill_version (creative_skill_version_id, creative_skill_id, display_version, body, content_digest, resource_digest) VALUES (?, ?, '1.0.0', ?, ?, ?)`,
-        randomUUID(),
-        creativeSkillId,
-        input.body,
-        contentDigest,
-        contentDigest,
-      );
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          `INSERT INTO creative_skill (creative_skill_id, name, description, owner_user_id, asset_domain, name_key, active_version_id) VALUES (?, ?, ?, ?, 'personal', ?, ?)`,
+          creativeSkillId,
+          input.name,
+          input.description,
+          BigInt(userId),
+          nameKey,
+          creativeSkillVersionId,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO creative_skill_version (creative_skill_version_id, creative_skill_id, display_version, body, content_digest, resource_digest) VALUES (?, ?, '1.0.0', ?, ?, ?)`,
+          creativeSkillVersionId,
+          creativeSkillId,
+          input.body,
+          contentDigest,
+          contentDigest,
+        );
+      });
 
       return {
         creative_skill_id: creativeSkillId,

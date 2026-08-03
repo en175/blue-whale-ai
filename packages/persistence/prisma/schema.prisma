@@ -215,32 +215,60 @@ model conversation_messages {
 }
 
 model agent_runs {
-  id                         BigInt    @id @default(autoincrement())
-  project_id                 BigInt
-  conversation_id            BigInt
-  active_guard               BigInt?   @unique(map: "uk_agent_run_active_guard")
-  user_id                    BigInt
-  status                     String    @db.VarChar(32)
-  stage                      String?   @db.VarChar(32)
-  engine                     String    @db.VarChar(64)
-  engine_version             String    @db.VarChar(64)
-  adapter_schema_version     Int
-  current_checkpoint_id      BigInt?
-  confirmed_input_request_id BigInt?
-  input_sequence_no          Int       @default(0)
-  lease_owner                String?   @db.VarChar(128)
-  lease_expires_at           DateTime? @db.DateTime(0)
-  fencing_token              BigInt    @default(0)
-  terminal_reason            String?   @db.VarChar(64)
-  failure_code               String?   @db.VarChar(128)
-  failure_message            String?   @db.Text
-  gmt_create                 DateTime  @default(now()) @db.DateTime(0)
-  gmt_modified               DateTime  @default(now()) @db.DateTime(0)
-  version                    Int       @default(0)
-  is_delete                  Int       @default(0) @db.TinyInt
+  id                                BigInt    @id @default(autoincrement())
+  project_id                        BigInt
+  conversation_id                   BigInt
+  active_guard                      BigInt?   @unique(map: "uk_agent_run_active_guard")
+  user_id                           BigInt
+  status                            String    @db.VarChar(32)
+  stage                             String?   @db.VarChar(32)
+  engine                            String    @db.VarChar(64)
+  engine_version                    String    @db.VarChar(64)
+  adapter_schema_version            Int
+  current_checkpoint_id             BigInt?
+  confirmed_input_request_id        BigInt?
+  input_sequence_no                 Int       @default(0)
+  lease_owner                       String?   @db.VarChar(128)
+  lease_expires_at                  DateTime? @db.DateTime(0)
+  fencing_token                     BigInt    @default(0)
+  terminal_reason                   String?   @db.VarChar(64)
+  failure_code                      String?   @db.VarChar(128)
+  failure_message                   String?   @db.Text
+  run_pin                           Json?
+  activated_creative_skill_versions Json?
+  reasoning_summary                 String?   @db.VarChar(280)
+  gmt_create                        DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified                      DateTime  @default(now()) @db.DateTime(0)
+  version                           Int       @default(0)
+  is_delete                         Int       @default(0) @db.TinyInt
 
   @@index([project_id, status], map: "idx_agent_run_project_status")
   @@index([status, engine, is_delete, id], map: "idx_agent_run_claim")
+}
+
+model agent_advances {
+  id                               BigInt   @id @default(autoincrement())
+  agent_run_id                     BigInt   @unique(map: "uk_agent_advance_run")
+  ordinal                          Int
+  status                           String   @db.VarChar(16)
+  input_snapshot                   Json
+  input_high_watermark_sequence_no Int
+  gmt_create                       DateTime @default(now()) @db.DateTime(0)
+  gmt_modified                     DateTime @default(now()) @db.DateTime(0)
+
+  @@index([agent_run_id, status], map: "idx_agent_advance_run_status")
+}
+
+model run_commits {
+  id             BigInt   @id @default(autoincrement())
+  advance_id     BigInt   @unique(map: "uk_run_commit_advance")
+  agent_run_id   BigInt
+  request_digest String   @db.VarChar(71)
+  outcome        String   @db.VarChar(16)
+  receipt        Json
+  gmt_create     DateTime @default(now()) @db.DateTime(0)
+
+  @@index([agent_run_id], map: "idx_run_commit_agent_run")
 }
 
 model user_input_requests {

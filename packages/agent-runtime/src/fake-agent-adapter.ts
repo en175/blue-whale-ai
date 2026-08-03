@@ -25,13 +25,19 @@ export function createFakeAgentAdapter(): AgentAdapter {
       const delayMatch = DELAY_MARKER.exec(request.prompt);
       if (delayMatch) await sleep(Number(delayMatch[1]));
 
+      const skillFingerprint = request.creativeSkill
+        ? `\ncreative-skill:${request.creativeSkill.resourceDigest}`
+        : "";
       const fingerprint = createHash("sha256")
-        .update(`blue-whale-agent-fake-v1\n${request.prompt}`)
+        .update(`blue-whale-agent-fake-v1\n${request.prompt}${skillFingerprint}`)
         .digest("hex");
 
       return {
         provider: "fake",
         content: `fake-agent-response:${fingerprint}`,
+        reasoningSummary: request.creativeSkill
+          ? `已使用「${request.creativeSkill.name}」完成回答。`
+          : "已完成回答。",
       };
     },
   };

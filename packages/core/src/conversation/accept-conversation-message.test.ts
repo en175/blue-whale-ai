@@ -36,6 +36,7 @@ describe("acceptConversationMessage", () => {
         idempotencyKey: "cmd-1",
         clientMessageId: "client-1",
         content: "做一张蓝鲸海报",
+        forcedCreativeSkillId: null,
         requestHash: expect.stringMatching(/^[0-9a-f]{64}$/),
       }),
     );
@@ -69,15 +70,12 @@ describe("acceptConversationMessage", () => {
     expect(acceptMessage).not.toHaveBeenCalled();
   });
 
-  // Creative Skill 资产边界（资产契约 §4/§7/§8）：forced 激活跨用户个人技能或未知 ID
-  // 一律拒绝，不触碰持久化；official 与本人个人技能放行；无 forced 时不调守卫；
-  // 携带 forced 但守卫未注入时 fail-closed 拒绝。
   const validBody = {
     client_message_id: "client-1",
     content: "做一张蓝鲸海报",
   };
 
-  it("forced 守卫放行时正常接纳（official / 本人个人技能）", async () => {
+  it("passes forced Creative Skill into the atomic persistence command", async () => {
     const acceptMessage = vi.fn().mockResolvedValue({ kind: "accepted" });
 
     const result = await acceptConversationMessage(
@@ -88,16 +86,18 @@ describe("acceptConversationMessage", () => {
         body: { ...validBody, forced_creative_skill_id: "my_skill" },
       },
       { acceptMessage },
-      async () => true,
     );
 
     expect(result.kind).toBe("accepted");
-    expect(acceptMessage).toHaveBeenCalled();
+    expect(acceptMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ forcedCreativeSkillId: "my_skill" }),
+    );
   });
 
-  it("forced 守卫拒绝（跨用户个人技能 / 未知 ID）→ creative_skill_unavailable，不触碰持久化", async () => {
-    const acceptMessage = vi.fn();
-    const guard = vi.fn().mockResolvedValue(false);
+  it("returns the persistence Creative Skill rejection unchanged", async () => {
+    const acceptMessage = vi
+      .fn()
+      .mockResolvedValue({ kind: "creative_skill_unavailable" });
 
     const result = await acceptConversationMessage(
       {
@@ -107,140 +107,9 @@ describe("acceptConversationMessage", () => {
         body: { ...validBody, forced_creative_skill_id: "others_skill" },
       },
       { acceptMessage },
-      guard,
     );
 
     expect(result).toEqual({ kind: "creative_skill_unavailable" });
-    expect(guard).toHaveBeenCalledWith("100", "others_skill");
-    expect(acceptMessage).not.toHaveBeenCalled();
-  });
-
-  it("未携带 forced_creative_skill_id 时不调守卫", async () => {
-    const acceptMessage = vi.fn().mockResolvedValue({ kind: "accepted" });
-    const guard = vi.fn().mockResolvedValue(false);
-
-    await acceptConversationMessage(
-      {
-        userId: "100",
-        projectId: "42",
-        idempotencyKey: "cmd-1",
-        body: validBody,
-      },
-      { acceptMessage },
-      guard,
-    );
-    expect(guard).not.toHaveBeenCalled();
-  });
-
-  it("携带 forced 但未注入守卫 → fail-closed 拒绝，不触碰持久化", async () => {
-    const acceptMessage = vi.fn();
-
-    const result = await acceptConversationMessage(
-      {
-        userId: "100",
-        projectId: "42",
-        idempotencyKey: "cmd-1",
-        body: { ...validBody, forced_creative_skill_id: "my_skill" },
-      },
-      { acceptMessage },
-    );
-
-    expect(result).toEqual({ kind: "creative_skill_unavailable" });
-    expect(acceptMessage).not.toHaveBeenCalled();
-  });
-
-  // 激活埋点（资产契约 §11.3）：接纳一条携带 forced 激活的消息 → 落一条埋点；
-  // replayed 不重复埋点；无 forced / 守卫拒绝不埋点；埋点失败不影响接纳结果。
-  it("接纳含 forced 激活 → 落一条埋点（稳定 ID/用户/AgentRun/版本/来源）", async () => {
-    const acceptMessage = vi
-      .fn()
-      .mockResolvedValue({ kind: "accepted", agent_run_id: "9" });
-    const recorder = vi.fn().mockResolvedValue(undefined);
-
-    const result = await acceptConversationMessage(
-      {
-        userId: "100",
-        projectId: "42",
-        idempotencyKey: "cmd-1",
-        body: { ...validBody, forced_creative_skill_id: "official_skill" },
-      },
-      { acceptMessage },
-      async () => true,
-      recorder,
-    );
-
-    expect(result.kind).toBe("accepted");
-    expect(recorder).toHaveBeenCalledWith({
-      creativeSkillId: "official_skill",
-      userId: "100",
-      agentRunId: "9",
-      skillVersion: 1,
-      activationSource: "forced",
-    });
-  });
-
-  it("replayed / 无 forced / 守卫拒绝 → 不埋点", async () => {
-    const recorder = vi.fn().mockResolvedValue(undefined);
-
-    // replayed：首次接纳已埋点，幂等重放不重复记。
-    await acceptConversationMessage(
-      {
-        userId: "100",
-        projectId: "42",
-        idempotencyKey: "cmd-1",
-        body: { ...validBody, forced_creative_skill_id: "official_skill" },
-      },
-      { acceptMessage: vi.fn().mockResolvedValue({ kind: "replayed" }) },
-      async () => true,
-      recorder,
-    );
-    // 无 forced：普通消息不是激活。
-    await acceptConversationMessage(
-      {
-        userId: "100",
-        projectId: "42",
-        idempotencyKey: "cmd-2",
-        body: validBody,
-      },
-      { acceptMessage: vi.fn().mockResolvedValue({ kind: "accepted" }) },
-      async () => true,
-      recorder,
-    );
-    // 守卫拒绝：未接纳不埋点。
-    await acceptConversationMessage(
-      {
-        userId: "100",
-        projectId: "42",
-        idempotencyKey: "cmd-3",
-        body: { ...validBody, forced_creative_skill_id: "others_skill" },
-      },
-      { acceptMessage: vi.fn() },
-      async () => false,
-      recorder,
-    );
-
-    expect(recorder).not.toHaveBeenCalled();
-  });
-
-  it("埋点写失败不影响接纳结果（best-effort，不改既有错误语义）", async () => {
-    const acceptMessage = vi
-      .fn()
-      .mockResolvedValue({ kind: "accepted", agent_run_id: "9" });
-    const recorder = vi.fn().mockRejectedValue(new Error("no such table"));
-
-    const result = await acceptConversationMessage(
-      {
-        userId: "100",
-        projectId: "42",
-        idempotencyKey: "cmd-1",
-        body: { ...validBody, forced_creative_skill_id: "official_skill" },
-      },
-      { acceptMessage },
-      async () => true,
-      recorder,
-    );
-
-    expect(result.kind).toBe("accepted");
-    expect(recorder).toHaveBeenCalled();
+    expect(acceptMessage).toHaveBeenCalledTimes(1);
   });
 });

@@ -110,6 +110,39 @@ describe("useProjectConversation（画布持久化对话接线 IK67GD T02）", (
     });
   });
 
+  it("从 Snapshot/SSE 最新 Run 恢复公开状态、Skill 名称和摘要", async () => {
+    const snapshot = makeSnapshot({
+      agent_runs: [
+        {
+          agent_run_id: "9",
+          status: "completed",
+          activated_creative_skill_versions: [{ name: "海报专家" }],
+          reasoning_summary: "已使用「海报专家」完成回答。",
+        },
+      ],
+    });
+    recoveryMock.mockImplementation(async (_pid, _transport, onState) => {
+      onState({
+        projectId: "101",
+        snapshot,
+        lastCursor: "0",
+        seenEventIds: new Set(),
+        aggregateVersions: new Map(),
+        deleted: false,
+      });
+    });
+
+    const { result } = renderHook(() => useProjectConversation("101", true));
+    await waitFor(() =>
+      expect(result.current.agentRunDisplay).toEqual({
+        agentRunId: "9",
+        status: "completed",
+        skillName: "海报专家",
+        reasoningSummary: "已使用「海报专家」完成回答。",
+      }),
+    );
+  });
+
   it("sendMessage 走公开接纳 API 并携带 CommandId 幂等键", async () => {
     const { result } = renderHook(() => useProjectConversation("101", true));
     await act(async () => {
@@ -194,6 +227,26 @@ describe("useProjectConversation（画布持久化对话接线 IK67GD T02）", (
     const afterSuccess = acceptMock.mock.calls[3];
     expect(afterSuccess[2]).not.toBe(changedCall[2]);
     expect(afterSuccess[3]).not.toBe(changedCall[3]);
+  });
+
+  it("结果未知后只有完整命令相同才复用 CommandId，切换 forced Skill 使用新键", async () => {
+    recoveryMock.mockImplementation(async () => {});
+    acceptMock.mockRejectedValueOnce(new Error("结果未知"));
+    const { result } = renderHook(() => useProjectConversation("101", true));
+
+    await act(async () => {
+      await expect(
+        result.current.sendMessage("同一条内容", ["7"], "skill_a"),
+      ).rejects.toThrow();
+    });
+    const firstCall = acceptMock.mock.calls[0];
+
+    await act(async () => {
+      await result.current.sendMessage("同一条内容", ["7"], "skill_b");
+    });
+    const changedSkillCall = acceptMock.mock.calls[1];
+    expect(changedSkillCall[2]).not.toBe(firstCall[2]);
+    expect(changedSkillCall[3]).not.toBe(firstCall[3]);
   });
 
   it("卸载时中止恢复循环", async () => {

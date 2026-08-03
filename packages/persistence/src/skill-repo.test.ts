@@ -767,6 +767,35 @@ describe("SkillRepo", () => {
     });
   });
 
+  it("createPersonalSkill atomically makes its first immutable version active", async () => {
+    const executeRawUnsafe = vi.fn().mockResolvedValue(1);
+    const tx = { $executeRawUnsafe: executeRawUnsafe };
+    const prisma = {
+      skill: { findMany: vi.fn().mockResolvedValue([]) },
+      $queryRawUnsafe: vi
+        .fn()
+        .mockResolvedValueOnce([{ c: 0n }])
+        .mockResolvedValueOnce([{ c: 0n }]),
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createSkillRepo(prisma).createPersonalSkill("9", {
+        name: "Storyboard Pro",
+        description: "分镜辅助",
+        body: "# Storyboard",
+      }),
+    ).resolves.toMatchObject({ creative_skill_id: "storyboard_pro" });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(executeRawUnsafe).toHaveBeenCalledTimes(2);
+    const [skillSql, ...skillParams] = executeRawUnsafe.mock.calls[0];
+    const [versionSql, versionId] = executeRawUnsafe.mock.calls[1];
+    expect(skillSql).toContain("active_version_id");
+    expect(versionSql).toContain("creative_skill_version");
+    expect(skillParams).toContain(versionId);
+  });
+
   it("deletePersonal 命中时物理删除本体及其 creative_skill_version 行", async () => {
     const executeRawUnsafe = vi.fn().mockImplementation((sql: string) => {
       if (sql.includes("creative_skill_version")) return Promise.resolve(2);

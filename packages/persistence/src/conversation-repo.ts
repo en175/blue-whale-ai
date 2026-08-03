@@ -1,5 +1,10 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import type {
+  AgentRuntimeManifest,
+  CreativeSkillActivation,
+} from "@blue-whale/contracts";
 
+import { buildAgentRunPin } from "./agent-run-pin.js";
 import { appendProjectEvent } from "./product-event-repo.js";
 
 const OPERATION = "conversation.message.accept";
@@ -19,6 +24,7 @@ export interface AcceptConversationMessageRecord {
   content: string;
   conversationId: string | null;
   replyToInputRequestId: string | null;
+  forcedCreativeSkillId: string | null;
 }
 
 export type AcceptedConversationRecord =
@@ -33,7 +39,10 @@ export type AcceptedConversationRecord =
     }
   | { kind: "not_found" }
   | { kind: "idempotency_conflict" }
-  | { kind: "input_request_conflict" };
+  | { kind: "input_request_conflict" }
+  | { kind: "agent_run_conflict" }
+  | { kind: "creative_skill_unavailable" }
+  | { kind: "creative_skill_conflict" };
 
 export interface ConversationRepo {
   acceptMessage(
@@ -94,6 +103,7 @@ function replay(
 export async function acceptConversationMessageInTransaction(
   tx: Prisma.TransactionClient,
   input: AcceptConversationMessageRecord,
+  manifest: AgentRuntimeManifest,
 ): Promise<AcceptedConversationRecord> {
   const projectId = BigInt(input.projectId);
   const userId = BigInt(input.userId);
@@ -145,25 +155,24 @@ export async function acceptConversationMessageInTransaction(
       orderBy: { id: "desc" },
       select: { id: true, project_id: true },
     });
-    conversation ??= await tx.conversations.create({
-      data: { project_id: projectId },
-      select: { id: true, project_id: true },
-    });
   }
 
-  let run = await tx.agent_runs.findFirst({
-    where: {
-      conversation_id: conversation.id,
-      status: { in: [...ACTIVE_RUN_STATUSES] },
-      is_delete: 0,
-    },
-    orderBy: { id: "desc" },
-  });
+  let run = conversation
+    ? await tx.agent_runs.findFirst({
+        where: {
+          conversation_id: conversation.id,
+          status: { in: [...ACTIVE_RUN_STATUSES] },
+          is_delete: 0,
+        },
+        orderBy: { id: "desc" },
+      })
+    : null;
   let inputRequest: {
     id: bigint;
     source_agent_run_id: bigint | null;
   } | null = null;
   if (input.replyToInputRequestId !== null) {
+    if (!conversation) return { kind: "input_request_conflict" } as const;
     inputRequest = await tx.user_input_requests.findFirst({
       where: {
         id: BigInt(input.replyToInputRequestId),
@@ -188,7 +197,16 @@ export async function acceptConversationMessageInTransaction(
   }
 
   let createdRun = false;
+  let createdRunActivations: CreativeSkillActivation[] = [];
   if (run) {
+    if (!conversation)
+      throw new Error("active run is missing its conversation");
+    if (input.forcedCreativeSkillId != null) {
+      return { kind: "creative_skill_conflict" } as const;
+    }
+    if (run.status !== "queued") {
+      return { kind: "agent_run_conflict" } as const;
+    }
     const requeued = await tx.agent_runs.updateMany({
       where: {
         id: run.id,
@@ -197,17 +215,7 @@ export async function acceptConversationMessageInTransaction(
         active_guard: conversation.id,
         is_delete: 0,
       },
-      data: inputRequest
-        ? {
-            status: "queued",
-            stage: "understanding",
-            lease_owner: null,
-            lease_expires_at: null,
-            confirmed_input_request_id: inputRequest.id,
-            fencing_token: { increment: 1n },
-            version: { increment: 1 },
-          }
-        : { status: run.status },
+      data: { status: run.status },
     });
     run =
       requeued.count === 1
@@ -215,6 +223,20 @@ export async function acceptConversationMessageInTransaction(
         : null;
   }
   if (!run) {
+    const pinResult = await buildAgentRunPin(
+      tx,
+      userId,
+      input.forcedCreativeSkillId ?? null,
+      manifest,
+    );
+    if (pinResult.kind !== "ready") return pinResult;
+    createdRunActivations = pinResult.pin.activated_creative_skill_versions;
+    if (!conversation) {
+      conversation = await tx.conversations.create({
+        data: { project_id: projectId },
+        select: { id: true, project_id: true },
+      });
+    }
     run = await tx.agent_runs.create({
       data: {
         project_id: projectId,
@@ -226,10 +248,26 @@ export async function acceptConversationMessageInTransaction(
         engine: "typescript-agent",
         engine_version: "1",
         adapter_schema_version: 1,
+        run_pin: pinResult.pin as Prisma.InputJsonValue,
+        activated_creative_skill_versions: pinResult.pin
+          .activated_creative_skill_versions as Prisma.InputJsonValue,
       },
     });
+    const forcedActivation = pinResult.pin.activated_creative_skill_versions[0];
+    if (forcedActivation?.source === "forced_use") {
+      await tx.creative_skill_activation.create({
+        data: {
+          creative_skill_id: forcedActivation.creative_skill_id,
+          user_id: userId,
+          agent_run_id: run.id.toString(),
+          skill_version: majorVersion(forcedActivation),
+          activation_source: "forced",
+        },
+      });
+    }
     createdRun = true;
   }
+  if (!conversation) throw new Error("agent run is missing its conversation");
 
   const sequenced = await tx.conversations.update({
     where: { id: conversation.id },
@@ -310,6 +348,8 @@ export async function acceptConversationMessageInTransaction(
         conversation_id: conversation.id.toString(),
         status: run.status,
         stage: run.stage,
+        activated_creative_skill_versions: createdRunActivations,
+        reasoning_summary: null,
       },
     });
     cursor = runEvent.cursor;
@@ -339,11 +379,22 @@ export async function acceptConversationMessageInTransaction(
   } as const;
 }
 
-export function createConversationRepo(prisma: PrismaClient): ConversationRepo {
+function majorVersion(activation: CreativeSkillActivation): number {
+  const value = Number.parseInt(
+    activation.display_version.split(".")[0] ?? "1",
+    10,
+  );
+  return Number.isSafeInteger(value) && value > 0 ? value : 1;
+}
+
+export function createConversationRepo(
+  prisma: PrismaClient,
+  manifest: AgentRuntimeManifest,
+): ConversationRepo {
   return {
     acceptMessage(input) {
       return transactionWithUniqueRetry(prisma, (tx) =>
-        acceptConversationMessageInTransaction(tx, input),
+        acceptConversationMessageInTransaction(tx, input, manifest),
       );
     },
   };

@@ -173,6 +173,7 @@ export function CanvasProjectRuntime({
     messages: conversationMessages,
     sendMessage: sendConversationMessage,
     answerableActive,
+    agentRunDisplay,
   } = useProjectConversation(pid, backendReady);
 
   // canvas 数据 = useCanvasDoc hook（本地 state，不卡）；assets = zustand（业务缓存）
@@ -1630,6 +1631,9 @@ export function CanvasProjectRuntime({
         messages={backendReady ? conversationMessages : messages}
         onSubmitMessage={backendReady ? sendConversationMessage : undefined}
         answerableActive={answerableActive}
+        activeSkillName={agentRunDisplay?.skillName}
+        agentRunStatus={agentRunDisplay?.status}
+        reasoningSummary={agentRunDisplay?.reasoningSummary}
         isOpen={isAgentOpen}
         onClose={() => setIsAgentOpen(false)}
         pendingMention={agentPendingMention}

@@ -75,6 +75,36 @@ describe("AgentChatPanel 欢迎态与草稿（IK67GD T02）", () => {
     expect(document.querySelector(".tc-agent-welcome")).toBeNull();
   });
 
+  it("显示最新 Run 的 Skill、状态和安全摘要", () => {
+    renderPanel({
+      activeSkillName: "海报专家",
+      agentRunStatus: "completed",
+      reasoningSummary: "已使用「海报专家」完成回答。",
+    });
+
+    expect(screen.getByLabelText("已激活技能：海报专家")).toBeTruthy();
+    expect(screen.getByLabelText("Agent 状态：已完成")).toBeTruthy();
+    expect(screen.getByText("已使用「海报专家」完成回答。")).toBeTruthy();
+  });
+
+  it("把尚未发送的 forced Skill 标记为已选而非已激活", () => {
+    renderPanel({
+      skillRecommendations: [
+        {
+          creative_skill_id: "official.poster",
+          name: "海报专家",
+          description: "生成海报",
+          activation_eligibility: "requires_user_use",
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "使用" }));
+
+    expect(screen.getByLabelText("已选技能：海报专家")).toBeTruthy();
+    expect(screen.queryByLabelText("已激活技能：海报专家")).toBeNull();
+  });
+
   it("点预设只填入输入框，不发送、不创建产品事实", () => {
     const { onSubmitMessage } = renderPanel();
     const preset = document.querySelector<HTMLButtonElement>(

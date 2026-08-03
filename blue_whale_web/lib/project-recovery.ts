@@ -38,6 +38,53 @@ export type ActiveInputRequest = {
   expires_at: string;
 };
 
+export type AgentRunDisplay = {
+  agentRunId: WireInteger;
+  status: string;
+  skillName: string | null;
+  reasoningSummary: string | null;
+};
+
+export function deriveLatestAgentRunDisplay(
+  snapshot: { agent_runs: Array<Record<string, unknown>> } | null,
+): AgentRunDisplay | null {
+  if (!snapshot) return null;
+  let latest: Record<string, unknown> | null = null;
+  for (const run of snapshot.agent_runs) {
+    if (!isWireInteger(run.agent_run_id) || typeof run.status !== "string") {
+      continue;
+    }
+    if (
+      latest === null ||
+      compareWireInteger(run.agent_run_id, latest.agent_run_id as WireInteger) >
+        0
+    ) {
+      latest = run;
+    }
+  }
+  if (!latest) return null;
+  const activations = Array.isArray(latest.activated_creative_skill_versions)
+    ? latest.activated_creative_skill_versions
+    : [];
+  const activation = activations[0];
+  const skillName =
+    activation &&
+    typeof activation === "object" &&
+    "name" in activation &&
+    typeof activation.name === "string"
+      ? activation.name
+      : null;
+  return {
+    agentRunId: latest.agent_run_id as WireInteger,
+    status: latest.status as string,
+    skillName,
+    reasoningSummary:
+      typeof latest.reasoning_summary === "string"
+        ? latest.reasoning_summary
+        : null,
+  };
+}
+
 /**
  * 派生当前唯一可回答的创作澄清请求（AgentChatPanel Composer 下一次提交的回答绑定）。
  *

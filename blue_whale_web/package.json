@@ -35,6 +35,7 @@
     ]
   },
   "dependencies": {
+    "@blue-whale/agent-runtime": "workspace:*",
     "@blue-whale/contracts": "workspace:*",
     "@blue-whale/core": "workspace:*",
     "@blue-whale/generation-runtime": "workspace:*",

@@ -10,9 +10,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   deriveAnswerableClarification,
+  deriveLatestAgentRunDisplay,
   projectRecoveryTransport,
   runProjectRecovery,
   type ProjectSnapshot,
+  type AgentRunDisplay,
 } from "@/lib/project-recovery";
 import { acceptConversationMessage } from "@/lib/conversation";
 import { newCommandIdentity } from "@/lib/command-identity";
@@ -24,6 +26,7 @@ import type { ChatMessage } from "../types";
 type PendingAttempt = {
   projectId: string;
   content: string;
+  commandShape: string;
   clientMessageId: string;
   idempotencyKey: string;
 };
@@ -34,6 +37,8 @@ export function useProjectConversation(
 ) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [answerableActive, setAnswerableActive] = useState(false);
+  const [agentRunDisplay, setAgentRunDisplay] =
+    useState<AgentRunDisplay | null>(null);
   const snapshotRef = useRef<ProjectSnapshot | null>(null);
   // 网络结果未知/失败后用相同内容重试必须复用原键（CONTEXT.md CommandId 语义），
   // 防止首次请求实际已被服务端接纳时重复创建消息。
@@ -47,6 +52,7 @@ export function useProjectConversation(
     setMessages([]);
 
     setAnswerableActive(false);
+    setAgentRunDisplay(null);
     if (!backendReady || !projectId) return;
     const controller = new AbortController();
     const pid = projectId;
@@ -61,6 +67,7 @@ export function useProjectConversation(
         setAnswerableActive(
           deriveAnswerableClarification(state.snapshot) !== null,
         );
+        setAgentRunDisplay(deriveLatestAgentRunDisplay(state.snapshot));
       },
       controller.signal,
     );
@@ -79,11 +86,17 @@ export function useProjectConversation(
       // 有可回答澄清时绑定 reply_to 并屏蔽 forced（互斥，契约 §4.1/§8）
       const answerable = deriveAnswerableClarification(snapshotRef.current);
       const effectiveForced = answerable ? undefined : forcedCreativeSkillId;
+      const commandShape = JSON.stringify({
+        replyToInputRequestId: answerable?.input_request_id ?? null,
+        referencedAssetIds: referencedAssetIds ?? [],
+        forcedCreativeSkillId: effectiveForced ?? null,
+      });
       const attempt = pendingAttemptRef.current;
       const reuse =
         attempt !== null &&
         attempt.projectId === projectId &&
-        attempt.content === content;
+        attempt.content === content &&
+        attempt.commandShape === commandShape;
       const clientMessageId = reuse
         ? attempt.clientMessageId
         : newCommandIdentity();
@@ -93,6 +106,7 @@ export function useProjectConversation(
       pendingAttemptRef.current = {
         projectId,
         content,
+        commandShape,
         clientMessageId,
         idempotencyKey,
       };
@@ -111,5 +125,5 @@ export function useProjectConversation(
     [projectId],
   );
 
-  return { messages, sendMessage, answerableActive };
+  return { messages, sendMessage, answerableActive, agentRunDisplay };
 }
