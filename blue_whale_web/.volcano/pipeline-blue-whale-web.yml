@@ -33,7 +33,6 @@ stages:
                 - https://dockerhub.volces.com
               repo: blue_whale_web
               tag: latest
-              # 运行时通过 -e GATEWAY_URL=http://blue-whale-gateway:8686 指定后端地址
         outputs:
           - imageOutput_buildkit-cr
         resourcesPolicy: all

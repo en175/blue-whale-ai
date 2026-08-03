@@ -1,8 +1,11 @@
 export { createFakeGenerationAdapter } from "./fake-generation-adapter.js";
 export { createNewApiVideoTaskProvider } from "./new-api-video-task-provider.js";
 export {
+  createPassthroughVideoMediaRelay,
   createTosVideoMediaRelay,
+  loadGenerationMediaRelayMode,
   loadGenerationTosConfig,
+  type GenerationMediaRelayMode,
   type GenerationTosConfig,
 } from "./tos-video-media-relay.js";
 export { runVideoWorkerLoop } from "./video-worker-loop.js";

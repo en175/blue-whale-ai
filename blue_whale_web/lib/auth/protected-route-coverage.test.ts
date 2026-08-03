@@ -220,6 +220,10 @@ describe("protected product route coverage", () => {
       path.join(webRoot, "next.config.ts"),
       "utf8",
     );
+    const dockerfile = readFileSync(
+      path.join(webRoot, "Dockerfile"),
+      "utf8",
+    );
     const javaRewriteSources = [
       // B 已退役：Conversation / GenerationInbox / AgentRun / InputRequest / SSE
       "/api/agent/runs/",
@@ -239,5 +243,7 @@ describe("protected product route coverage", () => {
     ).toEqual([]);
     // §6.4.1：浏览器与 Next.js 不得再注入或请求 Java 网关地址。
     expect(nextConfig).not.toContain("process.env.GATEWAY_URL");
+    expect(dockerfile).not.toContain("GATEWAY_URL");
+    expect(dockerfile).not.toContain("blue-whale-gateway");
   });
 });
