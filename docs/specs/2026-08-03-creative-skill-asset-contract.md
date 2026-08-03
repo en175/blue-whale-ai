@@ -1,8 +1,8 @@
 # Creative Skill 资产契约（官方/个人领域边界、公开元数据与稳定身份）
 
 - **状态**：Accepted for implementation
-- **契约版本**：3（v2 纳入 IK60WT 技能库浏览扩展：分类/排序/使用人数/i18n，见 §11；v3 纳入 IK60WX 添加官方技能的同名冲突语义，见 §5.2/§6/§7）
-- **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WS)、[02 — 一比一还原官方技能库浏览体验](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WT)、[05 — 添加官方技能并统一“我的技能”资产视图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WX)
+- **契约版本**：4（v2 纳入 IK60WT 技能库浏览扩展：分类/排序/使用人数/i18n，见 §11；v3 纳入 IK60WX 添加官方技能的同名冲突语义，见 §5.2/§6/§7；v4 纳入 IK60WZ 个人技能只读正文与永久删除端点，见 §13）
+- **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WS)、[02 — 一比一还原官方技能库浏览体验](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WT)、[05 — 添加官方技能并统一“我的技能”资产视图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WX)、[07 — 个人技能只读查看、复制与永久删除](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WZ)
 - **父需求**：[一比一还原 Creative Skill 面板与个人技能资产闭环](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60US)
 - **前置契约**：[Creative Skill 激活跨服务契约](2026-07-24-creative-skill-activation-contract.md)（激活、版本固定与按需正文读取，本文不改写其字段）、[ADR-0041 同族工单串行与契约先行](../adr/0041-sibling-issues-serial-contract-first.md)
 
@@ -70,8 +70,8 @@
 |---|---|---|
 | 读公开元数据（library/mine 列表） | 所有用户 | 仅 owner（经 mine 并集返回） |
 | 添加/移除引用、设 auto | 所有用户（自己的引用） | 不适用（无引用概念） |
-| 读正文 / 复制 | 任何用户都不可（仅受信任运行时按 pin 读取） | 仅 owner（只读端点归创建工单，本文不定义） |
-| 修改 / 删除 | 任何用户都不可（运营通道不在本文范围） | 仅 owner；跨用户一律按不存在处理 |
+| 读正文 / 复制 | 任何用户都不可（仅受信任运行时按 pin 读取） | 仅 owner（§13 只读端点） |
+| 修改 / 删除 | 任何用户都不可（运营通道不在本文范围） | 修改不适用（在线编辑为非目标）；删除仅 owner 且**不可逆**（§13），跨用户一律按不存在处理 |
 | 调用（forced 激活） | 所有用户 | 仅 owner；跨用户按 `CREATIVE_SKILL_UNAVAILABLE` 拒绝 |
 | auto 候选 | `user_skill.auto` 派生，仅官方域 | 不进入候选（后续工单评估） |
 
@@ -106,9 +106,10 @@
 | `DELETE /api/agent/skills/mine/{id}` | `{id}` 语义改为 `creative_skill_id`；仅删引用，不删技能本体 |
 | `PATCH /api/agent/skills/mine/{id}` | `{id}` 语义改为 `creative_skill_id`；仅改自己引用的 `auto` |
 | `POST /api/agent/skills/personal` | IK60WU 新增。body `{ content }` 为完整 SKILL.md 文本；解析 frontmatter → 校验 → 创建个人技能（§12） |
+| `GET /api/agent/skills/personal/{id}` | IK60WZ 新增。owner-only 只读正文，返回重建的完整 SKILL.md 文本（§13） |
+| `DELETE /api/agent/skills/personal/{id}` | IK60WZ 新增。owner-only 永久删除个人技能本体与版本行，不可逆（§13） |
 
 - `creative_skill_id` 入参先按 `^[a-z][a-z0-9_]{2,79}$` 校验，非法即「不存在」。
-- 个人技能只读正文、删除端点不在本契约范围（后续工单定义）。
 
 > **适用面说明**：本节端点指 Next BFF（`blue_whale_web/app/api/agent/skills/*`）——产品的
 > 唯一用户可达面。Java/Python 栈已退役，其旧 `SkillController` 同路径数字 id 变体随之
@@ -138,7 +139,8 @@ Node 运行时接通激活后，同一校验在其 pin 解析点重复执行（�
 ## 9. 非目标
 
 - ~~个人技能的创建、上传、AI 格式化、只读正文与复制、在线编辑端点与 UI。~~
-  → 创建已由 IK60WU 落地（§12）；只读正文/复制/在线编辑归后续工单。
+  → 创建已由 IK60WU 落地（§12）；只读正文/复制/永久删除已由 IK60WZ 落地（§13）；
+  在线编辑仍为非目标。
 - 「我的技能」的搜索/筛选/排序控件；个人技能 auto 候选。
 - 官方技能运营后台、详情页。
 - ~~`name_key` 持久化列与创建时冲突校验实现（§5 仅冻结算法）。~~
@@ -291,3 +293,32 @@ description: 技能简介
 
 IK60WU 起，`POST /api/agent/skills/mine` 统一按「最近创建或添加」倒序：官方引用按
 `user_skill.gmt_create` desc，个人技能按 `creative_skill.gmt_create` desc，合并后统一排序。
+
+## 13. 个人技能只读正文与永久删除（IK60WZ）
+
+### 13.1 只读正文端点
+
+`GET /api/agent/skills/personal/{id}`，`{id}` 即 `creative_skill_id`。
+
+- **仅 owner 可读**：服务端以 `asset_domain='personal' AND owner_user_id=<当前用户>`
+  谓词取正文；官方域、非 owner、未知或格式非法 ID 一律 0 命中 → `100100`（§7），
+  不泄露存在性。这是正文首次经面向普通用户的端点出库，**豁免仅限个人域 owner 本人**；
+  §3 关于官方正文永不出库的规则不变。
+- 响应 `{ code: 200, data: { content } }`：`content` 为重建的完整 SKILL.md 文本——
+  frontmatter（`name` / `description`，来自 `creative_skill`）+ 正文（`body`，来自该
+  技能当前生效版本 `creative_skill_version`，§12.1 格式对称）。
+- 只读语义：不提供在线编辑、不提供文件下载；复制到剪贴板由浏览器端完成，不经服务端。
+
+### 13.2 永久删除端点
+
+`DELETE /api/agent/skills/personal/{id}`，`{id}` 即 `creative_skill_id`。
+
+- **仅 owner 可删**：同上谓词物理删除 `creative_skill` 本体与其全部
+  `creative_skill_version` 行；官方域、非 owner、未知或格式非法 ID → `100100`。
+  成功 → `ok()`。
+- **不可逆**：删除后正文不可查看、复制或复用；重复删除返回 `100100`（不幂等 ok）。
+- 删除不追溯历史使用事实：`creative_skill_activation` 埋点只增不改（§11.3），保留的
+  仅是曾使用过该技能的最小事实（稳定 ID、用户、Run、版本、来源），不含可恢复正文；
+  历史 AgentRun 快照中的悬空 ID 由前端名称回退文案兜底。
+- 与 `DELETE /api/agent/skills/mine/{id}` 语义互斥：后者仅逻辑删官方引用（§6），
+  个人域 ID 在其上仍按不存在处理；个人技能永久删除只走本端点。
