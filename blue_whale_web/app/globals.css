@@ -130,6 +130,7 @@ body {
   --tc-accent: #3b82f6;
   --tc-on-accent: #ffffff;
   --tc-destructive: #ef4444;
+  --tc-success: #22c55e;
 
   --tc-login-modal-bg: #141414;
   --tc-login-primary: #4e40f3;

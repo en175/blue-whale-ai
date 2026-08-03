@@ -105,6 +105,28 @@ services:
       timeout: 3s
       retries: 30
 
+  storage-stub:
+    image: node:22-alpine
+    command: ["node", "/app/tests/typescript-baseline/storage-stub.mjs"]
+    volumes:
+      - ../../:/app:ro
+    environment:
+      PORT: "4330"
+      ASSET_UPLOAD_SECRET: acceptance-storage-secret
+    ports:
+      - "4330:4330"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4330/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   agent-worker:
     <<: *node-service
     command: ["node", "apps/agent-worker/dist/index.js"]
@@ -186,6 +208,10 @@ services:
       VOLC_TOS_ENDPOINT: ""
       VOLC_TOS_BUCKET: ""
       VOLC_TOS_REGION: ""
+      # S3 兼容直传（storage-stub）：publicBase 供宿主机浏览器 PUT/GET，internalBase 供容器内 HEAD/读取。
+      ASSET_UPLOAD_PUBLIC_BASE: http://localhost:4330
+      ASSET_UPLOAD_INTERNAL_BASE: http://storage-stub:4330
+      ASSET_UPLOAD_SECRET: acceptance-storage-secret
     ports:
       - "3101:3000"
     depends_on:
@@ -194,6 +220,8 @@ services:
       new-api:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      storage-stub:
         condition: service_healthy
     healthcheck:
       test:

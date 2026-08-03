@@ -12,7 +12,18 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { useAuth } from "@/components/auth/AuthContext";
 import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
 import { toast } from "@/components/Toast";
-import { uploadAsset } from "@/lib/assets";
+import {
+  completeUploadSession,
+  ensureUploadSession,
+  uploadAsset,
+  type UploadSession,
+} from "@/lib/assets";
+import {
+  detectMediaKind,
+  fallbackMediaSize,
+  readMediaNaturalSize,
+  type MediaKind,
+} from "@/lib/mediaSize";
 import {
   IMAGE_UPLOAD_ACCEPT,
   UPLOAD_ACCEPT,
@@ -478,7 +489,22 @@ export function CanvasProjectRuntime({
           setIsAgentOpen(true);
           const batchId = Date.now();
           setAgentPendingMention({
-            mentions: [{ name, nonce: batchId }],
+            mentions: [
+              {
+                name,
+                nonce: batchId,
+                // 与右键「添加到聊天」一致：带 assetId 走 pill 路径，发送时进 referenced_asset_ids
+                ...(src ? { src } : {}),
+                ...(node.data.assetId
+                  ? { assetId: wireInteger(node.data.assetId) }
+                  : {}),
+                ...(node.data.kind === "image" ||
+                node.data.kind === "video" ||
+                node.data.kind === "audio"
+                  ? { type: node.data.kind }
+                  : {}),
+              },
+            ],
             batchId,
           });
           break;
@@ -793,6 +819,55 @@ export function CanvasProjectRuntime({
       return pending;
     },
     [addAsset, addNode, patchNode, pid, resizeNode, setGenerateError],
+  );
+
+  /**
+   * 对话面板上传（IK67GX T03）：持久化 Asset → 创建 NodeItem 并首次放置 → 面板插入 pill。
+   * 会话按 File 弱引用缓存：PUT/complete 失败后重试沿用同一 storage_key，
+   * complete 幂等 ⇒ 每个文件至多一个 Asset，重试不重复创建。
+   */
+  const composerUploadSessionsRef = useRef(new WeakMap<File, UploadSession>());
+  const handleComposerUploadFile = useCallback(
+    async (
+      file: File,
+    ): Promise<{ assetId: string; url: string; kind: MediaKind }> => {
+      const kind = detectMediaKind(file);
+      const session = await ensureUploadSession(
+        file,
+        kind,
+        composerUploadSessionsRef.current.get(file) ?? null,
+      );
+      // PUT 前先存会话：这一步之后任何失败，重试都能沿用同一 storage_key
+      composerUploadSessionsRef.current.set(file, session);
+      const { assetId, url } = await completeUploadSession({
+        file,
+        projectId: wireInteger(pid),
+        kind,
+        session,
+      });
+      addAsset({ id: assetId, kind, src: url, source: "uploaded" });
+      let size = fallbackMediaSize(kind);
+      try {
+        size = await readMediaNaturalSize(url, kind);
+      } catch {
+        // 尺寸探测失败不阻断：Asset 已持久化，节点用默认尺寸落位
+      }
+      addNode(kind, {
+        width: size.width,
+        height: size.height,
+        data: {
+          content: file.name,
+          status: "done",
+          assetId,
+          recipe: { origin: "uploaded" },
+        },
+      });
+      // 节点落地成功后才丢弃会话：此前任何失败，重试沿用同一 storage_key
+      // （complete 幂等），不会重复创建 Asset
+      composerUploadSessionsRef.current.delete(file);
+      return { assetId, url, kind };
+    },
+    [pid, addNode, addAsset],
   );
 
   const handleFileChange = useCallback(
@@ -1630,6 +1705,7 @@ export function CanvasProjectRuntime({
         projectId={activeProject.id}
         messages={backendReady ? conversationMessages : messages}
         onSubmitMessage={backendReady ? sendConversationMessage : undefined}
+        onUploadFile={backendReady ? handleComposerUploadFile : undefined}
         answerableActive={answerableActive}
         activeSkillName={agentRunDisplay?.skillName}
         agentRunStatus={agentRunDisplay?.status}

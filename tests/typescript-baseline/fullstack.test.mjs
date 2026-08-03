@@ -47,6 +47,7 @@ test("验收拓扑包含 Web、两个 Node worker、fresh MySQL 与 BullMQ Redis
     "new-api",
     "provider-stub",
     "redis",
+    "storage-stub",
     "web",
   ]);
 
