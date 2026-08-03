@@ -19,6 +19,7 @@ describe("runAgentWorkerOnce", () => {
       cursor: "8",
       status: "completed",
     });
+    const commitFailure = vi.fn().mockResolvedValue({ kind: "conflict" });
     const renewLease = vi.fn().mockResolvedValue(true);
     const invoke = vi.fn().mockResolvedValue({
       provider: "fake",
@@ -26,7 +27,7 @@ describe("runAgentWorkerOnce", () => {
     });
     await expect(
       runAgentWorkerOnce({
-        repo: { claimNext, renewLease, commitSuccess },
+        repo: { claimNext, renewLease, commitSuccess, commitFailure },
         runtime: { name: "fake", ready: async () => true, invoke },
         workerId: "worker-1",
       }),
@@ -77,6 +78,7 @@ describe("runAgentWorkerOnce", () => {
         }),
         renewLease,
         commitSuccess,
+        commitFailure: vi.fn().mockResolvedValue({ kind: "conflict" }),
       },
       runtime: { name: "slow", ready: async () => true, invoke },
       workerId: "worker-1",
@@ -99,5 +101,53 @@ describe("runAgentWorkerOnce", () => {
       status: "completed",
     });
     vi.useRealTimers();
+  });
+
+  it("commits a terminal failure when the runtime throws instead of re-claiming", async () => {
+    const commitSuccess = vi.fn();
+    const commitFailure = vi.fn().mockResolvedValue({
+      kind: "committed",
+      cursor: "9",
+      status: "failed",
+    });
+    const invoke = vi
+      .fn()
+      .mockRejectedValue(new Error("fake agent explicit failure"));
+    await expect(
+      runAgentWorkerOnce({
+        repo: {
+          claimNext: vi.fn().mockResolvedValue({
+            agentRunId: "9",
+            projectId: "42",
+            conversationId: "7",
+            userId: "100",
+            fence: "3",
+            runVersion: 4,
+            inputSequenceNo: 2,
+            prompt: "请失败 fake:failure",
+          }),
+          renewLease: vi.fn().mockResolvedValue(true),
+          commitSuccess,
+          commitFailure,
+        },
+        runtime: { name: "fake", ready: async () => true, invoke },
+        workerId: "worker-1",
+      }),
+    ).resolves.toEqual({
+      kind: "committed",
+      cursor: "9",
+      status: "failed",
+    });
+    expect(commitFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workerId: "worker-1",
+        agentRunId: "9",
+        fence: "3",
+        runVersion: 4,
+        failureCode: "runtime_error",
+        failureMessage: "fake agent explicit failure",
+      }),
+    );
+    expect(commitSuccess).not.toHaveBeenCalled();
   });
 });

@@ -5,7 +5,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT/deploy/typescript-baseline/docker-compose.acceptance.yml"
 PROJECT="${BW_TS_COMPOSE_PROJECT:-bw-ts-baseline-acceptance}"
-NEW_API_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bw-new-api-acceptance.XXXXXX")"
+# Colima 等容器运行时只挂载用户主目录，构建临时目录必须位于 $HOME 下，
+# 否则容器挂载为空导致 go.mod 不可见。
+mkdir -p "${HOME}/.cache"
+NEW_API_BUILD_DIR="$(mktemp -d "${HOME}/.cache/bw-new-api-acceptance.XXXXXX")"
 NEW_API_SOURCE_DIR="$NEW_API_BUILD_DIR/source"
 export BW_NEW_API_BINARY="$NEW_API_BUILD_DIR/new-api"
 
@@ -36,7 +39,6 @@ printf '%s\n' '<!doctype html><title>acceptance</title>' \
 printf '%s\n' '<!doctype html><title>acceptance</title>' \
   >"$NEW_API_SOURCE_DIR/web/classic/dist/index.html"
 (
-  cd "$NEW_API_SOURCE_DIR"
   docker_arch="$(docker info --format '{{.Architecture}}')"
   case "$docker_arch" in
     amd64|x86_64) new_api_goarch=amd64 ;;
@@ -46,8 +48,16 @@ printf '%s\n' '<!doctype html><title>acceptance</title>' \
       exit 1
       ;;
   esac
-  CGO_ENABLED=0 GOOS=linux GOARCH="$new_api_goarch" \
-    go build -trimpath -ldflags="-s -w" -o "$BW_NEW_API_BINARY" .
+  # 在容器内构建 new-api（宿主机无需 Go 工具链）；模块缓存挂卷复用。
+  docker run --rm \
+    -v "$NEW_API_BUILD_DIR:/build" \
+    -v bw-ts-baseline-go-mod-cache:/go/pkg/mod \
+    -w /build/source \
+    -e CGO_ENABLED=0 \
+    -e GOOS=linux \
+    -e GOARCH="$new_api_goarch" \
+    golang:1.25-alpine \
+    go build -trimpath -ldflags="-s -w" -o /build/new-api .
 )
 
 "$ROOT/scripts/init-typescript-baseline-db.sh"
@@ -107,6 +117,7 @@ while [ "$SECONDS" -lt "$deadline" ]; do
   done
   if [ "$pending" -eq 0 ]; then
     if node --test \
+      "$ROOT/tests/typescript-baseline/no-java-runtime.test.mjs" \
       "$ROOT/tests/typescript-baseline/fullstack.test.mjs" \
       "$ROOT/tests/typescript-baseline/ik50gb-c-smoke.test.mjs"; then
       provider_requests="$(dc exec -T provider-stub wget -qO- http://127.0.0.1:4329/__acceptance/requests)"
@@ -123,10 +134,16 @@ while [ "$SECONDS" -lt "$deadline" ]; do
           }
         }
       '
+      if ! node --test "$ROOT/tests/typescript-baseline/scenario-blackbox.test.mjs"; then
+        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
+          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
+        echo "black-box scenario acceptance failed" >&2
+        exit 1
+      fi
       exit 0
     fi
-    dc logs --no-color --tail=200 new-api web generation-worker \
-      | python3 "$ROOT/scripts/lib/sanitize_acceptance_logs.py" >&2
+    dc logs --no-color --tail=200 new-api web generation-worker provider-stub \
+      | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
     exit 1
   fi
   sleep 2
@@ -134,6 +151,6 @@ done
 
 dc ps >&2
 dc logs --no-color --tail=200 \
-  | python3 "$ROOT/scripts/lib/sanitize_acceptance_logs.py" >&2
+  | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
 echo "TypeScript baseline stack did not become ready" >&2
 exit 1

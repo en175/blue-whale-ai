@@ -116,6 +116,8 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
     "conversation_messages",
     "conversations",
     "cost_reservations",
+    "creative_skill",
+    "creative_skill_version",
     "generation_job_logs",
     "generation_jobs",
     "generation_model_capability",

@@ -24,11 +24,15 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL required");
 }
 const workerAbort = new AbortController();
+const rawLeaseMs = Number.parseInt(process.env.AGENT_LEASE_MS ?? "", 10);
 const workerLoop = runAgentWorkerLoop({
   repo: createAgentRunRepo(getPrismaClient(databaseUrl)),
   runtime,
   workerId: process.env.AGENT_WORKER_ID ?? `agent-${randomUUID()}`,
   signal: workerAbort.signal,
+  ...(Number.isInteger(rawLeaseMs) && rawLeaseMs > 0
+    ? { leaseMs: rawLeaseMs }
+    : {}),
 });
 
 const server = createServer((request, response) => {

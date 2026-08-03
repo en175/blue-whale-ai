@@ -35,8 +35,21 @@ export interface RenewAgentRunLeaseInput {
   leaseMs: number;
 }
 
+export interface CommitAgentRunFailureInput {
+  workerId: string;
+  agentRunId: string;
+  fence: string;
+  runVersion: number;
+  failureCode: string;
+  failureMessage: string;
+}
+
 export type CommitAgentRunResult =
-  | { kind: "committed"; cursor: string; status: "queued" | "completed" }
+  | {
+      kind: "committed";
+      cursor: string;
+      status: "queued" | "completed" | "failed";
+    }
   | { kind: "conflict" };
 
 export interface AgentRunRepo {
@@ -44,6 +57,9 @@ export interface AgentRunRepo {
   renewLease(input: RenewAgentRunLeaseInput): Promise<boolean>;
   commitSuccess(
     input: CommitAgentRunSuccessInput,
+  ): Promise<CommitAgentRunResult>;
+  commitFailure(
+    input: CommitAgentRunFailureInput,
   ): Promise<CommitAgentRunResult>;
 }
 
@@ -245,6 +261,64 @@ export function createAgentRunRepo(prisma: PrismaClient): AgentRunRepo {
           kind: "committed",
           cursor: runEvent.cursor,
           status: nextStatus,
+        } as const;
+      });
+    },
+
+    commitFailure(input) {
+      return prisma.$transaction(async (tx) => {
+        const now = await databaseNow(tx);
+        const locked = await tx.agent_runs.updateMany({
+          where: {
+            id: BigInt(input.agentRunId),
+            status: "running",
+            lease_owner: input.workerId,
+            lease_expires_at: { gt: now },
+            fencing_token: BigInt(input.fence),
+            version: input.runVersion,
+            is_delete: 0,
+          },
+          data: { version: { increment: 1 } },
+        });
+        if (locked.count !== 1) return { kind: "conflict" } as const;
+
+        const run = await tx.agent_runs.findUnique({
+          where: { id: BigInt(input.agentRunId) },
+        });
+        if (!run) return { kind: "conflict" } as const;
+        const failedRun = await tx.agent_runs.update({
+          where: { id: run.id },
+          data: {
+            status: "failed",
+            stage: null,
+            terminal_reason: "runtime_error",
+            failure_code: input.failureCode,
+            failure_message: input.failureMessage,
+            // 保持原输入水位：失败不消费输入，接管或后续处理可重放同一批输入。
+            input_sequence_no: run.input_sequence_no,
+            active_guard: null,
+            lease_owner: null,
+            lease_expires_at: null,
+          },
+        });
+        const runEvent = await appendProjectEvent(tx, {
+          projectId: run.project_id.toString(),
+          eventType: "agent_run.status_changed",
+          aggregateType: "agent_run",
+          aggregateId: run.id.toString(),
+          aggregateVersion: failedRun.version,
+          correlationId: `run_${run.id.toString()}`,
+          payload: {
+            agent_run_id: run.id.toString(),
+            conversation_id: run.conversation_id.toString(),
+            status: "failed",
+            stage: null,
+          },
+        });
+        return {
+          kind: "committed",
+          cursor: runEvent.cursor,
+          status: "failed",
         } as const;
       });
     },

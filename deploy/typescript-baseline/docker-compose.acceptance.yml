@@ -65,6 +65,9 @@ services:
       REDIS_CONN_STRING: redis://redis:6379/1
       SESSION_SECRET: acceptance-new-api-session-secret
       GENERATE_DEFAULT_TOKEN: "true"
+      # 验收拓扑多场景连续注册，放宽限流（CRITICAL 默认 20 次/20 分钟会 429；GLOBAL 默认 360 次/180s）
+      CRITICAL_RATE_LIMIT: "100000"
+      GLOBAL_API_RATE_LIMIT: "100000"
     depends_on:
       mysql:
         condition: service_healthy
@@ -108,6 +111,7 @@ services:
       <<: *node-environment
       PORT: "4001"
       AGENT_RUNTIME_MODE: fake
+      AGENT_LEASE_MS: "8000"
       DATABASE_URL: mysql://root:blue_whale@mysql:3306/blue_whale
     ports:
       - "4311:4001"
@@ -130,6 +134,7 @@ services:
       <<: *node-environment
       DATABASE_URL: mysql://root:blue_whale@mysql:3306/blue_whale
       GENERATION_WORKER_PORT: "4002"
+      GENERATION_RECOVERY_INTERVAL_MS: "5000"
       NEW_API_BASE_URL: http://new-api:3000
       GENERATION_MEDIA_RELAY_MODE: passthrough
       NODE_ENV: test
@@ -169,6 +174,8 @@ services:
       PORT: "3000"
       DATABASE_URL: mysql://root:blue_whale@mysql:3306/blue_whale
       NEW_API_BASE_URL: http://new-api:3000
+      IMAGE_RECOVERY_INTERVAL_MS: "5000"
+      IMAGE_JOB_LEASE_SECONDS: "15"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       GIT_COMMIT: ${GIT_COMMIT:-baseline}

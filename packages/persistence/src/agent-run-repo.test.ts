@@ -200,4 +200,104 @@ describe("AgentRunRepo", () => {
       }),
     });
   });
+
+  it("commits a terminal failure that releases the guard without an assistant message", async () => {
+    const run = {
+      id: 9n,
+      project_id: 42n,
+      conversation_id: 7n,
+      user_id: 100n,
+      status: "running",
+      stage: "responding",
+      version: 2,
+      fencing_token: 1n,
+      input_sequence_no: 2,
+    };
+    const tx = {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValue([{ db_now: new Date("2026-07-29T00:00:10.000Z") }]),
+      agent_runs: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue(run),
+        update: vi.fn().mockResolvedValue({
+          ...run,
+          status: "failed",
+          stage: null,
+          version: 3,
+        }),
+      },
+      conversation_messages: {
+        create: vi.fn(),
+      },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi.fn().mockResolvedValue({ high_watermark: 1n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 11n,
+          gmt_create: new Date("2026-07-29T00:00:00.000Z"),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createAgentRunRepo(prisma).commitFailure({
+        workerId: "worker-1",
+        agentRunId: "9",
+        fence: "1",
+        runVersion: 1,
+        failureCode: "runtime_error",
+        failureMessage: "fake agent explicit failure",
+      }),
+    ).resolves.toEqual({
+      kind: "committed",
+      cursor: expect.any(String),
+      status: "failed",
+    });
+    expect(tx.agent_runs.update).toHaveBeenCalledWith({
+      where: { id: 9n },
+      data: expect.objectContaining({
+        status: "failed",
+        stage: null,
+        terminal_reason: "runtime_error",
+        failure_code: "runtime_error",
+        failure_message: "fake agent explicit failure",
+        active_guard: null,
+        lease_owner: null,
+        lease_expires_at: null,
+      }),
+    });
+    expect(tx.conversation_messages.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a late failure commit whose fence or version no longer matches", async () => {
+    const now = new Date("2026-07-29T00:00:10.000Z");
+    const prisma = {
+      $transaction: vi.fn(async (callback) =>
+        callback({
+          $queryRaw: vi.fn().mockResolvedValue([{ db_now: now }]),
+          agent_runs: {
+            updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+          },
+        }),
+      ),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createAgentRunRepo(prisma).commitFailure({
+        workerId: "worker-1",
+        agentRunId: "9",
+        fence: "1",
+        runVersion: 1,
+        failureCode: "runtime_error",
+        failureMessage: "boom",
+      }),
+    ).resolves.toEqual({ kind: "conflict" });
+  });
 });
