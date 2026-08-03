@@ -82,6 +82,15 @@ export class SkillNameReservedError extends Error {
   }
 }
 
+/** 添加官方技能与同账户个人技能 Name Key 冲突（契约 §5.4，IK60WX）；
+ *  携带官方显示名供 BFF 组装解释文案。 */
+export class SkillAddConflictError extends Error {
+  constructor(public officialSkillName: string) {
+    super(`官方技能与个人技能同名，无法添加: ${officialSkillName}`);
+    this.name = "SkillAddConflictError";
+  }
+}
+
 /** Name Key 归一化（契约 §5.1）：trim → 合并连续空白 → Unicode NFC → toLowerCase。
  *  Name Key 只用于冲突判断，原始显示名原样保留。 */
 export function normalizeNameKey(name: string): string {
@@ -519,6 +528,29 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
     },
 
     async addReference(userId, skillId) {
+      // 反向冲突检查（契约 §5.4，IK60WX）：官方技能名归一为 Name Key 后与同账户
+      // 个人技能撞名 → 拒绝添加（直接使用不受影响）。旧库缺 name_key 列 → 容错跳过
+      // （与 createPersonalSkill 同模式）。
+      const official = await prisma.skill.findUnique({
+        where: { id: BigInt(skillId) },
+        select: { name: true },
+      });
+      if (official) {
+        const nameKey = normalizeNameKey(official.name);
+        try {
+          const conflicts = await prisma.$queryRawUnsafe<{ c: bigint }[]>(
+            `SELECT COUNT(*) AS c FROM creative_skill WHERE owner_user_id = ? AND asset_domain = 'personal' AND name_key = ?`,
+            BigInt(userId),
+            nameKey,
+          );
+          if (Number(conflicts[0]?.c ?? 0) > 0) {
+            throw new SkillAddConflictError(official.name);
+          }
+        } catch (e) {
+          if (e instanceof SkillAddConflictError) throw e;
+          // 表缺列不阻塞（旧库无 name_key），继续添加
+        }
+      }
       // 原生 upsert：ON DUPLICATE KEY 恢复逻辑删行 + 刷 auto（绕开 @TableLogic 过滤，对齐 Java）。
       await prisma.$executeRaw`INSERT INTO user_skill (user_id, skill_id, auto, version, is_delete) VALUES (${BigInt(userId)}, ${BigInt(skillId)}, 0, 0, 0) ON DUPLICATE KEY UPDATE auto = VALUES(auto), is_delete = 0`;
     },

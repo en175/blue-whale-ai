@@ -1,5 +1,6 @@
 import { fail, ok } from "@blue-whale/contracts";
 import {
+  SkillAddConflictError,
   SkillNameConflictError,
   SkillNameReservedError,
   type SkillRepo,
@@ -11,6 +12,7 @@ export { parseSkillMd };
 const DATA_NOT_EXIST_CODE = 100100;
 const SKILL_NAME_CONFLICT_CODE = 100101;
 const SKILL_NAME_RESERVED_CODE = 100102;
+const SKILL_ADD_CONFLICT_CODE = 100103;
 
 /** 稳定身份格式（契约 §2）：注册命令只接受 creative_skill_id，非法一律按不存在处理（§7）。 */
 const CREATIVE_SKILL_ID_PATTERN = /^[a-z][a-z0-9_]{2,79}$/;
@@ -23,7 +25,8 @@ function validateCreativeSkillId(creativeSkillId: string) {
 }
 
 /** POST /api/agent/skills/library/{id}/add：加入「我的」（auto=false），{id} 即 creative_skill_id。
- *  resolve official 域映射 → 内部 id 后 upsert；未知/个人域/格式非法 → 100100（契约 §6/§7）。 */
+ *  resolve official 域映射 → 内部 id 后 upsert；未知/个人域/格式非法 → 100100（契约 §6/§7）；
+ *  与同用户个人技能 Name Key 冲突 → 100103（契约 §5.4，IK60WX）。 */
 export async function handleAddSkill(
   userId: string,
   creativeSkillId: string,
@@ -35,7 +38,17 @@ export async function handleAddSkill(
   if (skillId === null) {
     return fail(DATA_NOT_EXIST_CODE, `Skill 不存在: ${creativeSkillId}`);
   }
-  await deps.skills.addReference(userId, skillId);
+  try {
+    await deps.skills.addReference(userId, skillId);
+  } catch (e) {
+    if (e instanceof SkillAddConflictError) {
+      return fail(
+        SKILL_ADD_CONFLICT_CODE,
+        `官方技能与你的个人技能「${e.officialSkillName}」同名，无法添加；你仍可直接使用`,
+      );
+    }
+    throw e;
+  }
   return ok();
 }
 

@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   FileText,
+  MoreHorizontal,
   Plus,
   Search,
   Store,
@@ -34,11 +35,14 @@ import {
  * 三页签：我的技能 / 技能库 / 创建技能（占位）。每次打开默认进技能库；
  * 关闭时整棵卸载 → 技能库查询与滚动状态重置。打开期间页签首次激活才挂载、
  * 之后保持挂载（hidden），切换页签不丢查询与滚动状态。
- * - 「我的技能」：mine API（POST 分页，join skill 返完整内容快照 + auto）。本票只做
- *   视觉一致性调整（移除无菜单的占位省略号按钮、窄屏网格防横向溢出），功能归 05 工单。
+ * - 「我的技能」：mine API（POST 分页，官方引用 ∪ 个人技能并集 + auto）。官方引用行
+ *   带省略号菜单，仅「移出我的技能」（IK60WX：立即生效、无确认、成功提示）；
+ *   个人技能行无菜单（删除归后续工单）。
  * - 「技能库」：library API（POST 分页，keyword + category + sort + lang，
  *   IO + sentinel 无限滚动，reqId 防过期），竖版卡片网格（3/2/1 列）。
- * add/remove 在 library tab 内（乐观 + 回滚）；auto 在 my tab 内（乐观 + 回滚）。
+ * add 在 library tab 内（乐观 + 回滚；成功后按钮变不可点击「已添加」+ toast，IK60WX）；
+ * remove 统一在 my tab 菜单内，成功后经 refreshTrigger 重拉 library 同步 added 状态；
+ * auto 在 my tab 内（乐观 + 回滚）。同名冲突（100103）展示服务端解释文案（契约 §5.4）。
  * 封面取 cover_url，空走默认图。Use 传 skill.name（forced_skill_id 真接入原依赖 IJZ7Z7；
  * IJZ7Z7 已由 IK2D8R 替代，见 docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md）。
  *
@@ -116,7 +120,16 @@ function SkillPanelDialog({
   const panelRef = useRef<HTMLDivElement>(null);
   const createDirtyRef = useRef<() => boolean>(() => false);
   const [myRefreshTrigger, setMyRefreshTrigger] = useState(0);
+  const [libraryRefreshTrigger, setLibraryRefreshTrigger] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 统一成功提示：3 秒自动消失；连续触发重置定时器（防旧定时器提前清掉新 toast）
+  const showToast = useCallback((text: string) => {
+    setToast(text);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+  }, []);
 
   const confirmDirtyClose = (): boolean => {
     if (mountedTabs.has("create") && createDirtyRef.current()) {
@@ -139,8 +152,7 @@ function SkillPanelDialog({
 
   const handleSkillSaved = () => {
     setMyRefreshTrigger((v) => v + 1);
-    setToast("技能已保存");
-    setTimeout(() => setToast(null), 3000);
+    showToast("技能已保存");
     setActiveTab("my");
     setMountedTabs((prev) => (prev.has("my") ? prev : new Set(prev).add("my")));
   };
@@ -270,12 +282,21 @@ function SkillPanelDialog({
 
         {mountedTabs.has("my") && (
           <TabPane visible={activeTab === "my"}>
-            <MyContent onUse={onUseSkill} refreshTrigger={myRefreshTrigger} />
+            <MyContent
+              onUse={onUseSkill}
+              refreshTrigger={myRefreshTrigger}
+              onToast={showToast}
+              onRemovedOfficial={() => setLibraryRefreshTrigger((v) => v + 1)}
+            />
           </TabPane>
         )}
         {mountedTabs.has("library") && (
           <TabPane visible={activeTab === "library"}>
-            <LibraryContent onUse={onUseSkill} />
+            <LibraryContent
+              onUse={onUseSkill}
+              onToast={showToast}
+              refreshTrigger={libraryRefreshTrigger}
+            />
           </TabPane>
         )}
         {mountedTabs.has("create") && (
@@ -553,9 +574,13 @@ function CreateContent({
 function MyContent({
   onUse,
   refreshTrigger = 0,
+  onToast,
+  onRemovedOfficial,
 }: {
   onUse: (skill: UseSkillSelection) => void;
   refreshTrigger?: number;
+  onToast: (text: string) => void;
+  onRemovedOfficial: () => void;
 }) {
   const [items, setItems] = useState<SkillMineItem[]>([]);
   const [page, setPage] = useState(1);
@@ -640,6 +665,24 @@ function MyContent({
     });
   };
 
+  // 移出我的技能（IK60WX，仅官方引用行）：立即生效、无确认。乐观删行 → API 移除 →
+  // 成功 toast + 通知 library 刷新 added 状态；失败重拉当前页恢复服务端状态。
+  const handleRemove = (creativeSkillId: string) => {
+    setItems((prev) =>
+      prev.filter((s) => s.creative_skill_id !== creativeSkillId),
+    );
+    skillsApi
+      .remove(creativeSkillId)
+      .then(() => {
+        onToast("已从我的技能移出");
+        onRemovedOfficial();
+      })
+      .catch(() => {
+        fetchPage(page, false);
+        setError("移除失败，已回滚");
+      });
+  };
+
   return (
     <div className="tc-agent-skill-panel__content flex flex-col flex-1 min-h-0 overflow-hidden bg-[#141414]">
       {error && (
@@ -672,6 +715,10 @@ function MyContent({
                   skill.creative_skill_id &&
                   handleToggleAuto(skill.creative_skill_id)
                 }
+                onRemove={() =>
+                  skill.creative_skill_id &&
+                  handleRemove(skill.creative_skill_id)
+                }
                 onUse={() =>
                   onUse({
                     creative_skill_id: skill.creative_skill_id ?? null,
@@ -702,11 +749,15 @@ function MyContent({
   );
 }
 
-/** 技能库：分类 + 搜索 + 排序 + 分页滚动加载（自管 state） */
+/** 技能库：分类 + 搜索 + 排序 + 分页滚动加载（自管 state；refreshTrigger 变化重拉第 1 页） */
 function LibraryContent({
   onUse,
+  onToast,
+  refreshTrigger = 0,
 }: {
   onUse: (skill: UseSkillSelection) => void;
+  onToast: (text: string) => void;
+  refreshTrigger?: number;
 }) {
   const [items, setItems] = useState<SkillLibraryItem[]>([]);
   const [keyword, setKeyword] = useState("");
@@ -764,6 +815,13 @@ function LibraryContent({
     fetchPage(1, false);
   }, [fetchPage]);
 
+  // 我的侧移除官方引用后 refreshTrigger+1 → 重拉第 1 页同步 added 状态（IK60WX）
+  useEffect(() => {
+    if (refreshTrigger === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 外部触发重新分页获取
+    fetchPage(1, false);
+  }, [refreshTrigger, fetchPage]);
+
   const loadMore = useCallback(() => {
     if (loading || loadingMore || !hasMore) return;
     fetchPage(page + 1, true);
@@ -806,30 +864,24 @@ function LibraryContent({
         s.creative_skill_id === creativeSkillId ? { ...s, added: true } : s,
       ),
     );
-    skillsApi.add(creativeSkillId).catch(() => {
-      setItems((prev) =>
-        prev.map((s) =>
-          s.creative_skill_id === creativeSkillId ? { ...s, added: false } : s,
-        ),
-      );
-      setError("添加失败，已回滚");
-    });
-  };
-
-  const handleRemove = (creativeSkillId: string) => {
-    setItems((prev) =>
-      prev.map((s) =>
-        s.creative_skill_id === creativeSkillId ? { ...s, added: false } : s,
-      ),
-    );
-    skillsApi.remove(creativeSkillId).catch(() => {
-      setItems((prev) =>
-        prev.map((s) =>
-          s.creative_skill_id === creativeSkillId ? { ...s, added: true } : s,
-        ),
-      );
-      setError("移除失败，已回滚");
-    });
+    skillsApi
+      .add(creativeSkillId)
+      .then(() => {
+        onToast("技能已添加");
+      })
+      .catch((e: unknown) => {
+        setItems((prev) =>
+          prev.map((s) =>
+            s.creative_skill_id === creativeSkillId
+              ? { ...s, added: false }
+              : s,
+          ),
+        );
+        // 同名冲突（100103）等业务失败展示服务端解释文案（契约 §5.4，IK60WX）
+        setError(
+          e instanceof Error && e.message ? e.message : "添加失败，已回滚",
+        );
+      });
   };
 
   const onSubmitSearch = (e: React.FormEvent) => {
@@ -988,10 +1040,6 @@ function LibraryContent({
                 onAdd={() =>
                   skill.creative_skill_id && handleAdd(skill.creative_skill_id)
                 }
-                onRemove={() =>
-                  skill.creative_skill_id &&
-                  handleRemove(skill.creative_skill_id)
-                }
               />
             ))}
           </div>
@@ -1058,10 +1106,12 @@ function SkillCover({
 function MySkillRow({
   skill,
   onToggleAuto,
+  onRemove,
   onUse,
 }: {
   skill: SkillMineItem;
   onToggleAuto: () => void;
+  onRemove: () => void;
   onUse: () => void;
 }) {
   const auto = skill.auto;
@@ -1070,8 +1120,22 @@ function MySkillRow({
   const canToggleAuto =
     skill.creative_skill_id !== null && skill.asset_domain !== "personal";
   const displayName = skill.name ?? "—";
+  // 官方引用行省略号菜单（IK60WX）：仅「移出我的技能」。个人行无菜单（删除归后续工单）。
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
   return (
     <div
+      data-testid="skill-my-row"
       className={`tc-agent-skill-row ${
         auto ? "tc-agent-skill-row--checked " : ""
       }tc-agent-skill-row--switch-control tc-agent-skill-row--with-cover grid grid-cols-[112px_minmax(0,1fr)] gap-3.5 min-h-[142px] p-3.5 rounded-xl bg-white/[0.035] border border-white/[0.08] transition-colors duration-150 hover:bg-white/[0.05]`}
@@ -1079,10 +1143,55 @@ function MySkillRow({
       <SkillCover url={skill.cover_url} name={skill.name} />
       <div className="tc-agent-skill-row__toggle flex flex-col min-w-0">
         <span className="tc-agent-skill-row__body flex flex-col gap-1">
-          <span className="tc-agent-skill-row__title-line">
+          <span className="tc-agent-skill-row__title-line flex items-center gap-1">
             <span className="tc-agent-skill-row__title text-[13px] font-semibold text-white/90 truncate">
               {displayName}
             </span>
+            {skill.asset_domain === "official" && (
+              <span
+                ref={menuRef}
+                className="tc-agent-skill-row__menu relative inline-flex ml-auto shrink-0"
+                onKeyDown={(e) => {
+                  // 菜单打开时 ESC 先收菜单（stopPropagation 防冒到 window 关面板）
+                  if (e.key === "Escape" && menuOpen) {
+                    e.stopPropagation();
+                    setMenuOpen(false);
+                  }
+                }}
+              >
+                <button
+                  type="button"
+                  data-testid="skill-my-row-menu"
+                  aria-label={`更多操作：${displayName}`}
+                  aria-expanded={menuOpen}
+                  aria-haspopup="menu"
+                  className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-white/45 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
+                  onClick={() => setMenuOpen((v) => !v)}
+                >
+                  <MoreHorizontal size={14} aria-hidden="true" />
+                </button>
+                {menuOpen && (
+                  <div
+                    role="menu"
+                    aria-label={`技能操作：${displayName}`}
+                    className="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-white/[0.1] bg-[#1c1c1c] py-1 shadow-[0_8px_30px_rgba(0,0,0,0.45)]"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-testid="skill-my-row-remove"
+                      className="flex w-full items-center px-3 py-1.5 text-left text-[12px] text-white/60 hover:bg-white/[0.06] hover:text-white/90 transition-colors"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onRemove();
+                      }}
+                    >
+                      移出我的技能
+                    </button>
+                  </div>
+                )}
+              </span>
+            )}
           </span>
           <span className="tc-agent-skill-row__desc text-xs text-white/50 line-clamp-2 leading-relaxed break-words">
             {skill.description || "—"}
@@ -1121,17 +1230,16 @@ function MySkillRow({
 }
 
 /** 官方技能库竖版卡片：封面 + 名称 + 简介（悬停完整提示）+ @Blue Whale + 使用人数 + 操作。
- *  卡片本体不可点击，无详情入口、无省略号菜单（IK60WT）。 */
+ *  卡片本体不可点击，无详情入口、无省略号菜单（IK60WT）；
+ *  「已添加」不可点击，移出去「我的技能」省略号菜单（IK60WX）。 */
 function LibrarySkillCard({
   skill,
   onUse,
   onAdd,
-  onRemove,
 }: {
   skill: SkillLibraryItem;
   onUse: () => void;
   onAdd: () => void;
-  onRemove: () => void;
 }) {
   const added = skill.added;
   // 目录行缺版本化映射时 creative_skill_id 为 null：注册命令按不存在处理（契约 §3），禁用添加按钮。
@@ -1168,14 +1276,14 @@ function LibrarySkillCard({
           <UseButton onClick={onUse} />
           <button
             type="button"
+            data-testid="skill-library-add-btn"
             className={`tc-agent-skill-row__action h-7 px-2.5 rounded-md text-[11px] font-medium border border-white/[0.08] transition-colors ${
               added
-                ? "text-white/45 hover:bg-white/[0.08] hover:text-white/90"
+                ? "text-white/45"
                 : "text-white/70 hover:bg-white/[0.08] hover:text-white"
             } disabled:opacity-40 disabled:pointer-events-none`}
-            title={added ? "点击从我的技能移除" : undefined}
-            disabled={!hasStableId}
-            onClick={added ? onRemove : onAdd}
+            disabled={added || !hasStableId}
+            onClick={onAdd}
           >
             {added ? "已添加" : "添加"}
           </button>
