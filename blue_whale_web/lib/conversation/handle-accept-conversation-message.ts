@@ -6,21 +6,31 @@ import {
   fail,
   ok,
 } from "@blue-whale/contracts";
-import type { ConversationRepo } from "@blue-whale/persistence";
+import type { ConversationRepo, SkillRepo } from "@blue-whale/persistence";
 import { wireInteger } from "../wire-integer";
 
 const AGENT_RUN_CONFLICT_CODE = 100303;
+/** Creative Skill 不可用（资产契约 §7：跨用户 forced 个人技能/未知 ID，不泄露存在性）。 */
+const CREATIVE_SKILL_UNAVAILABLE_CODE = 100306;
 
 export async function handleAcceptConversationMessage(
   userId: string,
   projectId: string,
   body: Record<string, unknown>,
   idempotencyKey: string | null,
-  deps: ConversationRepo,
+  deps: ConversationRepo & {
+    skills: Pick<SkillRepo, "findAssetDomainInfo">;
+  },
 ) {
   const result = await acceptConversationMessage(
     { userId, projectId, body, idempotencyKey },
     deps,
+    async (guardUserId, forcedCreativeSkillId) => {
+      const info = await deps.skills.findAssetDomainInfo(forcedCreativeSkillId);
+      if (info === null) return false;
+      if (info.asset_domain === "official") return true;
+      return info.owner_user_id === guardUserId;
+    },
   );
   switch (result.kind) {
     case "accepted":
@@ -39,6 +49,8 @@ export async function handleAcceptConversationMessage(
       );
     case "input_request_conflict":
       return fail(AGENT_RUN_CONFLICT_CODE, "输入请求已失效或不匹配");
+    case "creative_skill_unavailable":
+      return fail(CREATIVE_SKILL_UNAVAILABLE_CODE, "Creative Skill 不可用");
     case "invalid":
       return fail(
         result.message === "缺少 Idempotency-Key" ? PARAM_MISSING_CODE : 400,

@@ -2,20 +2,22 @@ import { describe, expect, it, vi } from "vitest";
 
 import { handleListLibrary, handleListMine } from "./handle-skills.js";
 
-// /api/agent/skills library/mine 只读分页。对齐 Java SkillServiceImpl。
+// /api/agent/skills library/mine 只读分页。
+// 契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §3：
+// wire 主键 creative_skill_id，响应只含白名单字段（content/body/prompt/自增 id 永不出库）。
 
 const libItem = {
-  id: "3",
+  creative_skill_id: "poster_gen",
   name: "海报生成",
   description: "一键海报",
   cover_url: null,
   source: "official",
+  asset_domain: "official",
   added: true,
-  creative_skill_id: "poster_gen",
 };
 
 describe("handleListLibrary", () => {
-  it("official + keyword 分页 → 200 + Page", async () => {
+  it("official + keyword 分页 → 200 + Page（白名单字段）", async () => {
     const repo = {
       listLibrary: vi.fn().mockResolvedValue({
         records: [libItem],
@@ -56,19 +58,73 @@ describe("handleListLibrary", () => {
       pageSize: 50,
     });
   });
+
+  it("repo 多带字段时响应只含白名单（显式 pick，不透传）", async () => {
+    const repo = {
+      listLibrary: vi.fn().mockResolvedValue({
+        records: [
+          {
+            ...libItem,
+            id: "3",
+            content: "SECRET_CONTENT",
+            prompt: "SECRET_PROMPT",
+          },
+        ],
+        total: 1,
+        size: 50,
+        current: 1,
+        pages: 99,
+      }),
+      listMine: vi.fn(),
+    };
+    const result = await handleListLibrary("9", {}, { skills: repo });
+    expect(result).toEqual({
+      code: 200,
+      msg: null,
+      data: { records: [libItem], total: 1, size: 50, current: 1 },
+    });
+  });
+
+  it("响应 JSON 序列化后不含 content/body/prompt 键（防泄露）", async () => {
+    const repo = {
+      listLibrary: vi.fn().mockResolvedValue({
+        records: [
+          {
+            ...libItem,
+            content: "SECRET_CONTENT",
+            body: "SECRET_BODY",
+            prompt: "SECRET_PROMPT",
+          },
+        ],
+        total: 1,
+        size: 50,
+        current: 1,
+      }),
+      listMine: vi.fn(),
+    };
+    const result = await handleListLibrary("9", {}, { skills: repo });
+    const json = JSON.stringify(result);
+    for (const banned of ['"content"', '"body"', '"prompt"']) {
+      expect(json).not.toContain(banned);
+    }
+    for (const secret of ["SECRET_CONTENT", "SECRET_BODY", "SECRET_PROMPT"]) {
+      expect(json).not.toContain(secret);
+    }
+  });
 });
 
 describe("handleListMine", () => {
-  it("返回我的 skills 分页 → 200", async () => {
-    const mineItem = {
-      skill_id: "3",
-      auto: true,
-      name: "海报生成",
-      description: "一键海报",
-      cover_url: null,
-      source: "official",
-      creative_skill_id: "poster_gen",
-    };
+  const mineItem = {
+    creative_skill_id: "poster_gen",
+    auto: true,
+    name: "海报生成",
+    description: "一键海报",
+    cover_url: null,
+    source: "official",
+    asset_domain: "official",
+  };
+
+  it("返回我的 skills 分页 → 200（白名单字段）", async () => {
     const repo = {
       listLibrary: vi.fn(),
       listMine: vi.fn().mockResolvedValue({
@@ -92,5 +148,58 @@ describe("handleListMine", () => {
       pageNum: 1,
       pageSize: 50,
     });
+  });
+
+  it("repo 多带字段时响应只含白名单（显式 pick，不透传）", async () => {
+    const repo = {
+      listLibrary: vi.fn(),
+      listMine: vi.fn().mockResolvedValue({
+        records: [
+          {
+            ...mineItem,
+            skill_id: "3",
+            content: "SECRET_CONTENT",
+            version: 7,
+          },
+        ],
+        total: 1,
+        size: 50,
+        current: 1,
+        pages: 99,
+      }),
+    };
+    const result = await handleListMine("9", {}, { skills: repo });
+    expect(result).toEqual({
+      code: 200,
+      msg: null,
+      data: { records: [mineItem], total: 1, size: 50, current: 1 },
+    });
+  });
+
+  it("响应 JSON 序列化后不含 content/body/prompt 键（防泄露）", async () => {
+    const repo = {
+      listLibrary: vi.fn(),
+      listMine: vi.fn().mockResolvedValue({
+        records: [
+          {
+            ...mineItem,
+            content: "SECRET_CONTENT",
+            body: "SECRET_BODY",
+            prompt: "SECRET_PROMPT",
+          },
+        ],
+        total: 1,
+        size: 50,
+        current: 1,
+      }),
+    };
+    const result = await handleListMine("9", {}, { skills: repo });
+    const json = JSON.stringify(result);
+    for (const banned of ['"content"', '"body"', '"prompt"']) {
+      expect(json).not.toContain(banned);
+    }
+    for (const secret of ["SECRET_CONTENT", "SECRET_BODY", "SECRET_PROMPT"]) {
+      expect(json).not.toContain(secret);
+    }
   });
 });

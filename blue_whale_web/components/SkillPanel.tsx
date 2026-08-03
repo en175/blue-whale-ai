@@ -24,7 +24,7 @@ import { rememberCreativeSkillName } from "@/lib/creative-skill-names";
  * - 「我的 Skills」：mine API（POST 分页，join skill 返完整内容快照 + auto）。
  * - 「Skill 库」：library API（POST 分页，可 keyword 搜 name/description）。
  * add/remove 在 library tab 内（乐观 + 回滚）；auto 在 my tab 内（乐观 + 回滚）。
- * 封面取 coverUrl，空走默认图。Use 传 skill.name（forced_skill_id 真接入原依赖 IJZ7Z7；IJZ7Z7 已由 IK2D8R 替代，见 docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md）。
+ * 封面取 cover_url，空走默认图。Use 传 skill.name（forced_skill_id 真接入原依赖 IJZ7Z7；IJZ7Z7 已由 IK2D8R 替代，见 docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md）。
  */
 
 const COVER_PLACEHOLDER =
@@ -153,7 +153,7 @@ function MyContent({ onUse }: { onUse: (skill: UseSkillSelection) => void }) {
       }
       setItems((prev) => (append ? [...prev, ...res.records] : res.records));
       setPage(res.current);
-      setHasMore(res.current < res.pages);
+      setHasMore(res.current * res.size < res.total);
     } catch (e) {
       if (id === reqId.current)
         setError(e instanceof Error ? e.message : "加载失败");
@@ -194,16 +194,21 @@ function MyContent({ onUse }: { onUse: (skill: UseSkillSelection) => void }) {
     return () => io.disconnect();
   }, []);
 
-  // auto 开关：乐观切换，失败回滚
-  const handleToggleAuto = (skillId: number) => {
-    const cur = items.find((s) => s.skillId === skillId)?.auto ?? false;
+  // auto 开关：乐观切换，失败回滚（creative_skill_id 为 null 的行不触发，UI 已禁用）
+  const handleToggleAuto = (creativeSkillId: string) => {
+    const cur =
+      items.find((s) => s.creative_skill_id === creativeSkillId)?.auto ?? false;
     const next = !cur;
     setItems((prev) =>
-      prev.map((s) => (s.skillId === skillId ? { ...s, auto: next } : s)),
+      prev.map((s) =>
+        s.creative_skill_id === creativeSkillId ? { ...s, auto: next } : s,
+      ),
     );
-    skillsApi.setAuto(skillId, next).catch(() => {
+    skillsApi.setAuto(creativeSkillId, next).catch(() => {
       setItems((prev) =>
-        prev.map((s) => (s.skillId === skillId ? { ...s, auto: cur } : s)),
+        prev.map((s) =>
+          s.creative_skill_id === creativeSkillId ? { ...s, auto: cur } : s,
+        ),
       );
       setError("自动开关更新失败，已回滚");
     });
@@ -233,15 +238,18 @@ function MyContent({ onUse }: { onUse: (skill: UseSkillSelection) => void }) {
           <StateHint text="还没有添加 Skill，去 Skill 库逛逛。" />
         ) : (
           <div className="tc-agent-skill-panel__section-list grid grid-cols-2 gap-3">
-            {items.map((skill) => (
+            {items.map((skill, index) => (
               <MySkillRow
-                key={skill.skillId}
+                key={skill.creative_skill_id ?? index}
                 skill={skill}
-                onToggleAuto={() => handleToggleAuto(skill.skillId)}
+                onToggleAuto={() =>
+                  skill.creative_skill_id &&
+                  handleToggleAuto(skill.creative_skill_id)
+                }
                 onUse={() =>
                   onUse({
                     creative_skill_id: skill.creative_skill_id ?? null,
-                    name: skill.name,
+                    name: skill.name ?? "",
                   })
                 }
               />
@@ -303,7 +311,7 @@ function LibraryContent({
         }
         setItems((prev) => (append ? [...prev, ...res.records] : res.records));
         setPage(res.current);
-        setHasMore(res.current < res.pages);
+        setHasMore(res.current * res.size < res.total);
       } catch (e) {
         if (id === reqId.current)
           setError(e instanceof Error ? e.message : "加载失败");
@@ -347,25 +355,33 @@ function LibraryContent({
     return () => io.disconnect();
   }, []);
 
-  const handleAdd = (id: number) => {
+  const handleAdd = (creativeSkillId: string) => {
     setItems((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, added: true } : s)),
+      prev.map((s) =>
+        s.creative_skill_id === creativeSkillId ? { ...s, added: true } : s,
+      ),
     );
-    skillsApi.add(id).catch(() => {
+    skillsApi.add(creativeSkillId).catch(() => {
       setItems((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, added: false } : s)),
+        prev.map((s) =>
+          s.creative_skill_id === creativeSkillId ? { ...s, added: false } : s,
+        ),
       );
       setError("添加失败，已回滚");
     });
   };
 
-  const handleRemove = (id: number) => {
+  const handleRemove = (creativeSkillId: string) => {
     setItems((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, added: false } : s)),
+      prev.map((s) =>
+        s.creative_skill_id === creativeSkillId ? { ...s, added: false } : s,
+      ),
     );
-    skillsApi.remove(id).catch(() => {
+    skillsApi.remove(creativeSkillId).catch(() => {
       setItems((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, added: true } : s)),
+        prev.map((s) =>
+          s.creative_skill_id === creativeSkillId ? { ...s, added: true } : s,
+        ),
       );
       setError("移除失败，已回滚");
     });
@@ -442,7 +458,7 @@ function LibraryContent({
           <div className="tc-agent-skill-panel__store-grid grid grid-cols-2 gap-3">
             {items.map((skill) => (
               <LibrarySkillRow
-                key={skill.id}
+                key={skill.creative_skill_id ?? skill.name}
                 skill={skill}
                 onUse={() =>
                   onUse({
@@ -450,8 +466,13 @@ function LibraryContent({
                     name: skill.name,
                   })
                 }
-                onAdd={() => handleAdd(skill.id)}
-                onRemove={() => handleRemove(skill.id)}
+                onAdd={() =>
+                  skill.creative_skill_id && handleAdd(skill.creative_skill_id)
+                }
+                onRemove={() =>
+                  skill.creative_skill_id &&
+                  handleRemove(skill.creative_skill_id)
+                }
               />
             ))}
           </div>
@@ -485,7 +506,7 @@ function StateHint({ text }: { text: string }) {
 }
 
 function SkillCover({ url }: { url?: string | null }) {
-  // 封面直取 coverUrl；空 → 默认图。
+  // 封面直取 cover_url；空 → 默认图。
   return (
     <span
       className="tc-agent-skill-row__cover w-full h-full rounded-lg bg-cover bg-center bg-no-repeat"
@@ -505,22 +526,32 @@ function MySkillRow({
   onUse: () => void;
 }) {
   const auto = skill.auto;
+  // 目录行缺版本化映射时 creative_skill_id 为 null：注册命令按不存在处理（契约 §3）；
+  // 个人技能无引用关系，auto 不适用（契约 §4）——两种情形都禁用 auto 开关。
+  const canToggleAuto =
+    skill.creative_skill_id !== null && skill.asset_domain !== "personal";
+  const displayName = skill.name ?? "—";
   return (
     <div
       className={`tc-agent-skill-row ${
         auto ? "tc-agent-skill-row--checked " : ""
       }tc-agent-skill-row--switch-control tc-agent-skill-row--with-cover grid grid-cols-[112px_minmax(0,1fr)] gap-3.5 min-h-[142px] p-3.5 rounded-xl bg-white/[0.035] border border-white/[0.08] transition-colors duration-150 hover:bg-white/[0.05]`}
     >
-      <SkillCover url={skill.coverUrl} />
+      <SkillCover url={skill.cover_url} />
       <div className="tc-agent-skill-row__toggle flex flex-col min-w-0">
         <span className="tc-agent-skill-row__body flex flex-col gap-1">
           <span className="tc-agent-skill-row__title-line">
             <span className="tc-agent-skill-row__title text-[13px] font-semibold text-white/90 truncate">
-              {skill.name}
+              {displayName}
             </span>
           </span>
           <span className="tc-agent-skill-row__desc text-xs text-white/50 line-clamp-2 leading-relaxed">
             {skill.description || "—"}
+          </span>
+          <span className="tc-agent-skill-row__library-meta flex items-center gap-3 mt-1 text-[11px] text-white/40">
+            <span className="tc-agent-skill-row__contributor">
+              @{skill.asset_domain === "personal" ? "个人" : "官方"}
+            </span>
           </span>
         </span>
         <span className="tc-agent-skill-row__controls flex items-center gap-2 mt-auto">
@@ -531,9 +562,10 @@ function MySkillRow({
               className="tc-agent-skill-row__switch"
               role="switch"
               aria-checked={auto}
-              aria-label={`${auto ? "关闭" : "开启"}自动应用：${skill.name}`}
+              aria-label={`${auto ? "关闭" : "开启"}自动应用：${displayName}`}
               aria-busy="false"
               data-tooltip="开启后，Agent 会在合适时机自动应用此 Skill。"
+              disabled={!canToggleAuto}
               onClick={onToggleAuto}
             >
               <span className="tc-agent-skill-row__switch-label">自动</span>
@@ -544,7 +576,7 @@ function MySkillRow({
             </button>
           </span>
           <span className="tc-agent-skill-row__more-wrap ml-auto">
-            <MoreButton label={`${skill.name} 的更多选项`} />
+            <MoreButton label={`${displayName} 的更多选项`} />
           </span>
         </span>
       </div>
@@ -564,13 +596,15 @@ function LibrarySkillRow({
   onRemove: () => void;
 }) {
   const added = skill.added;
+  // 目录行缺版本化映射时 creative_skill_id 为 null：注册命令按不存在处理（契约 §3），禁用添加按钮。
+  const hasStableId = skill.creative_skill_id !== null;
   return (
     <div
       className={`tc-agent-skill-row tc-agent-skill-row--no-control tc-agent-skill-row--with-cover ${
         added ? "tc-agent-skill-row--checked" : ""
       } grid grid-cols-[112px_minmax(0,1fr)] gap-3.5 min-h-[142px] p-3.5 rounded-xl bg-white/[0.035] border border-white/[0.08] hover:bg-white/[0.05] transition-colors`}
     >
-      <SkillCover url={skill.coverUrl} />
+      <SkillCover url={skill.cover_url} />
       <div className="tc-agent-skill-row__toggle flex flex-col min-w-0">
         <span className="tc-agent-skill-row__body flex flex-col gap-1">
           <span className="tc-agent-skill-row__title-line">
@@ -595,8 +629,9 @@ function LibrarySkillRow({
               added
                 ? "text-white/45 hover:bg-white/[0.08] hover:text-white/90"
                 : "text-white/70 hover:bg-white/[0.08] hover:text-white"
-            }`}
+            } disabled:opacity-40 disabled:pointer-events-none`}
             title={added ? "点击从我的 Skills 移除" : undefined}
+            disabled={!hasStableId}
             onClick={added ? onRemove : onAdd}
           >
             {added ? "已添加" : "添加"}

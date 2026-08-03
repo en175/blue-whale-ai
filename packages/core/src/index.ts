@@ -83,6 +83,7 @@ export {
   type ConversationCommandStore,
   type ConversationCommandStoreInput,
   type ConversationCommandStoreResult,
+  type ForcedCreativeSkillGuard,
   type PreparedConversationMessage,
 } from "./conversation/accept-conversation-message.js";
 export {
