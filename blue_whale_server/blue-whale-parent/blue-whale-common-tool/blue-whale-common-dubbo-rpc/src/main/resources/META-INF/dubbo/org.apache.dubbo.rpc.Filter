@@ -1,2 +1,0 @@
-dubboExceptionFilter=com.blue.whale.tool.dubbo.rpc.filter.DubboExceptionFilter
-dubboGenericFilter=com.blue.whale.tool.dubbo.rpc.filter.DubboGenericFilter

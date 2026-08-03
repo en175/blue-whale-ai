@@ -99,8 +99,6 @@ dist/
 # zcode 本地产物（plans 等，不进仓）
 .zcode/plans/
 
-# 本地 MVP 实际 env（凭据不入库；deploy/local/.env.example 入库）
-deploy/local/.env
 blue_whale_pay_server/conf/**/application-localremote.yml
 blue_whale_pay_server/conf/tos-local.env
 

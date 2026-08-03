@@ -1,6 +1,0 @@
-# jar-based Dockerfile（远程 build 用）。
-FROM docker.m.daocloud.io/library/eclipse-temurin:21-jre
-WORKDIR /app
-COPY jars/blue-whale-user.jar app.jar
-EXPOSE 8081
-ENTRYPOINT ["java", "-jar", "app.jar"]
