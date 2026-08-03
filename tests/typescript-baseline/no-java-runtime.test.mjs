@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  existsSync,
   readFileSync,
   readdirSync,
   statSync,
@@ -68,4 +69,10 @@ test("TypeScript baseline cannot reconnect executable runtime to Java services",
     });
 
   assert.deepEqual(violations, []);
+});
+
+test("retired Java source trees and deployment stacks stay physically absent", () => {
+  for (const retired of ["blue_whale_server", "deploy/local"]) {
+    assert.equal(existsSync(retired), false, `${retired} 必须保持物理删除`);
+  }
 });

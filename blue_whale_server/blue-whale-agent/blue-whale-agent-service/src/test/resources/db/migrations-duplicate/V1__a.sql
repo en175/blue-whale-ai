@@ -1,2 +1,0 @@
--- 重复版本号场景：两个 V1
-CREATE TABLE IF NOT EXISTS project (id BIGINT PRIMARY KEY);
