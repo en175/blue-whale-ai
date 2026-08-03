@@ -38,9 +38,30 @@ import type { MessageIdGenerator } from "../idGen";
 import { useAuth } from "@/components/auth/AuthContext";
 import type { CardMessage } from "../nodeFromCard";
 import { extractEditor, insertMention } from "./dock/mention";
+import {
+  clearComposerDraft,
+  loadComposerDraft,
+  saveComposerDraft,
+} from "@/lib/composer-draft";
 
 /** @ 素材 pill 数量上限，对齐后端 referenced_asset_ids @Size(max=10)。 */
 const MENTION_LIMIT = 10;
+
+/** 欢迎态预设：点击只填入输入框，不发送、不创建产品事实（IK67GD T02）。 */
+const WELCOME_PRESETS = [
+  {
+    label: "生成一张插画",
+    text: "帮我生成一张插画，主题是夏日海边的小镇，色调温暖明亮。",
+  },
+  {
+    label: "构思一个短视频",
+    text: "帮我构思一个 15 秒的短视频，用于展示一款环保水杯。",
+  },
+  {
+    label: "头脑风暴创意方向",
+    text: "我想做一个品牌视觉方案，先帮我头脑风暴几个创意方向。",
+  },
+];
 
 export function AgentChatPanel({
   messages,
@@ -54,6 +75,7 @@ export function AgentChatPanel({
   onSetCardStatus,
   onRetryGenerationJob,
   prompt,
+  projectId,
   forcedSkillName,
   answerableActive,
   skillRecommendations,
@@ -80,6 +102,8 @@ export function AgentChatPanel({
   onRetryGenerationJob?: (generationJobId: WireInteger) => Promise<void>;
   /** 首页续上 / 模板卡点击带入的 prompt，填入 composer（可编辑后发送） */
   prompt?: string;
+  /** 当前 Project 身份；传入后未发送草稿按 Project 持久化到本浏览器（IK67GD T02） */
+  projectId?: string;
   /** 当前 Run 已激活 Creative Skill 的展示名（Snapshot/SSE 权威，null 表示无激活） */
   forcedSkillName?: string | null;
   /** 是否存在可回答创作澄清（true 时 forced 与 reply 互斥，pending 保留不清） */
@@ -147,13 +171,28 @@ export function AgentChatPanel({
   const bodyRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
 
-  // prompt 带入 composer（首页续上 / 模板卡点击），可编辑后发送
+  // 挂载/展开时恢复本项目未发送草稿（IK67GD T02）；草稿优先于外部 prompt 带入。
+  // 依赖 isOpen：收起时组件返回 null、composer DOM 不存在，展开时才真正填充。
+  const draftRestoredRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!isOpen || !projectId || !composerRef.current) return;
+    const draft = loadComposerDraft(projectId);
+    if (draft && draft.trim().length > 0) {
+      composerRef.current.innerText = draft;
+      // 恢复草稿必须在首帧绘制前置位 composerEmpty，否则发送按钮状态错误
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setComposerEmpty(false);
+      draftRestoredRef.current = true;
+    }
+  }, [projectId, isOpen]);
+
+  // prompt 带入 composer（首页续上 / 模板卡点击），可编辑后发送；同理由 isOpen 触发
   useEffect(() => {
-    if (prompt && composerRef.current) {
+    if (prompt && isOpen && composerRef.current && !draftRestoredRef.current) {
       composerRef.current.innerText = prompt;
       setComposerEmpty(false);
     }
-  }, [prompt]);
+  }, [prompt, isOpen]);
 
   const { requireAuth } = useAuth();
   const modelSettingsTriggerRef = useRef<HTMLButtonElement>(null);
@@ -224,37 +263,49 @@ export function AgentChatPanel({
     };
   }, []);
 
-  const handleComposerInput = () => {
+  const handleComposerInput = useCallback(() => {
     const text = composerRef.current?.innerText ?? "";
     setComposerEmpty(text.trim().length === 0);
+    if (projectId) saveComposerDraft(projectId, text);
+  }, [projectId]);
+
+  // 欢迎预设：只填入输入框供用户审阅编辑，不发送、不创建产品事实（IK67GD T02）
+  const handleWelcomePreset = (text: string) => {
+    if (!composerRef.current) return;
+    composerRef.current.innerText = text;
+    handleComposerInput();
+    composerRef.current.focus();
   };
 
-  const insertTextIntoComposer = useCallback((text: string) => {
-    const editor = composerRef.current;
-    if (!editor) return;
+  const insertTextIntoComposer = useCallback(
+    (text: string) => {
+      const editor = composerRef.current;
+      if (!editor) return;
 
-    editor.focus();
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      if (editor.contains(range.commonAncestorContainer)) {
-        range.deleteContents();
-        const textNode = document.createTextNode(text);
-        range.insertNode(textNode);
-        range.setStartAfter(textNode);
-        range.setEndAfter(textNode);
-        selection.removeAllRanges();
-        selection.addRange(range);
+      editor.focus();
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        if (editor.contains(range.commonAncestorContainer)) {
+          range.deleteContents();
+          const textNode = document.createTextNode(text);
+          range.insertNode(textNode);
+          range.setStartAfter(textNode);
+          range.setEndAfter(textNode);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        } else {
+          editor.appendChild(document.createTextNode(text));
+        }
       } else {
         editor.appendChild(document.createTextNode(text));
       }
-    } else {
-      editor.appendChild(document.createTextNode(text));
-    }
 
-    handleComposerInput();
-    setSkillPanelOpen(false);
-  }, []);
+      handleComposerInput();
+      setSkillPanelOpen(false);
+    },
+    [handleComposerInput],
+  );
 
   // Skill 面板 Use：有稳定 creative_skill_id 则记 pending（随下一条允许创建目标 Run 的消息下发），
   // 不往输入框插 @ 文本；无 id（库外项）仅关面板。
@@ -329,6 +380,7 @@ export function AgentChatPanel({
           .then(() => {
             if (composerRef.current) composerRef.current.innerHTML = "";
             setComposerEmpty(true);
+            if (projectId) clearComposerDraft(projectId);
             if (attachForced) setPendingForcedSkill(null);
           })
           .catch((error) => {
@@ -348,6 +400,7 @@ export function AgentChatPanel({
       onAppendMessages?.([userMsg]);
       if (composerRef.current) composerRef.current.innerHTML = "";
       setComposerEmpty(true);
+      if (projectId) clearComposerDraft(projectId);
 
       // 按当前创作模式生成 mock 回复，错开逐条追加模拟逐步生成
       const reply = buildMockReplyForMode(
@@ -601,6 +654,35 @@ export function AgentChatPanel({
                 loading={skillRecommendationsLoading ?? false}
                 onUse={handleUseSkill}
               />
+            )}
+            {messages.length === 0 && (
+              <div
+                className="tc-agent-welcome flex flex-col gap-3 px-2 pt-8 pb-4"
+                lang="zh-CN"
+                dir="ltr"
+              >
+                <div className="tc-agent-welcome__title text-base font-medium text-white/90">
+                  让 Agent 帮你创作
+                </div>
+                <div className="tc-agent-welcome__desc text-xs leading-5 text-white/55">
+                  描述你想生成的图片或视频，发送第一条消息即可开始。未发送的草稿会自动保留。
+                </div>
+                <div className="tc-agent-welcome__presets mt-1 flex flex-col gap-2">
+                  {WELCOME_PRESETS.map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => handleWelcomePreset(preset.text)}
+                      className="tc-agent-welcome-preset rounded-lg border border-white/[0.08] bg-white/[0.05] px-3 py-2 text-left text-xs text-white/80 transition-colors hover:bg-white/[0.08]"
+                    >
+                      <span className="mb-0.5 block font-medium text-white/85">
+                        {preset.label}
+                      </span>
+                      <span className="block text-white/45">{preset.text}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
             {messages.map((msg) => {
               if (msg.type === "user")
