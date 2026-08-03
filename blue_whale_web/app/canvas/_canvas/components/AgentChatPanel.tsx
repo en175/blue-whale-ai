@@ -63,6 +63,11 @@ const WELCOME_PRESETS = [
   },
 ];
 
+/** 「总结当前对话」固定提示词（IK60X1，契约 §15.1）：预填进输入框供用户审阅编辑，
+ *  必须手动发送；发送时随消息体携带 skill_summarize: true 显式意图字段。 */
+const SKILL_SUMMARIZE_PROMPT =
+  "请总结当前对话中的创作方法和要点，生成一份可复用的技能，并保存为我的个人技能。";
+
 export function AgentChatPanel({
   messages,
   isOpen,
@@ -95,6 +100,7 @@ export function AgentChatPanel({
     text: string,
     referencedAssetIds?: WireInteger[],
     forcedCreativeSkillId?: string,
+    skillSummarize?: boolean,
   ) => Promise<void>;
   /** 设置当前项目内某 card 的状态（重试链推进） */
   onSetCardStatus?: (cardId: number | string, status: CardStatus) => void;
@@ -123,6 +129,8 @@ export function AgentChatPanel({
     id: string;
     name: string;
   } | null>(null);
+  // 总结当前对话的一次性意图标记（IK60X1）：预填时置位，发送成功后清除，失败保留供重试
+  const skillSummarizePendingRef = useRef(false);
   const [retryingCards, setRetryingCards] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -316,6 +324,14 @@ export function AgentChatPanel({
     setSkillPanelOpen(false);
   }, []);
 
+  // 「总结当前对话」（IK60X1，契约 §15.1）：关面板 → 预填固定提示词（可编辑、必须手动发送）
+  // → 置一次性意图标记，发送时随消息体携带 skill_summarize: true，绝不自动提交。
+  const handleSummarizeConversation = () => {
+    skillSummarizePendingRef.current = true;
+    handleWelcomePreset(SKILL_SUMMARIZE_PROMPT);
+    setSkillPanelOpen(false);
+  };
+
   // 外部（画布节点操作菜单「添加到对话」）请求把素材插入输入框：
   // 带 assetId 走 pill 路径（发送时写入 referenced_asset_ids），无 assetId 回退纯文本。
   useEffect(() => {
@@ -372,16 +388,20 @@ export function AgentChatPanel({
         setSubmitting(true);
         // forced 仅在无活动澄清时附上（reply 互斥）；成功才清 pending，失败保留供重试
         const attachForced = !!pendingForcedSkill && !answerableActive;
+        // 总结意图一次性消费（IK60X1）：同 forced 语义，成功才清除
+        const attachSummarize = skillSummarizePendingRef.current;
         void onSubmitMessage(
           prompt,
           assetIds,
           attachForced ? pendingForcedSkill!.id : undefined,
+          attachSummarize ? true : undefined,
         )
           .then(() => {
             if (composerRef.current) composerRef.current.innerHTML = "";
             setComposerEmpty(true);
             if (projectId) clearComposerDraft(projectId);
             if (attachForced) setPendingForcedSkill(null);
+            if (attachSummarize) skillSummarizePendingRef.current = false;
           })
           .catch((error) => {
             console.error("[canvas] conversation message failed:", error);
@@ -827,6 +847,7 @@ export function AgentChatPanel({
         isOpen={skillPanelOpen}
         onClose={() => setSkillPanelOpen(false)}
         onUseSkill={handleUseSkill}
+        onSummarizeConversation={handleSummarizeConversation}
       />
     </div>
   );

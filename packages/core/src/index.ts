@@ -77,6 +77,10 @@ export {
   type AuthUser,
 } from "./auth/login-with-code.js";
 export {
+  parseSkillMd,
+  serializeSkillMd,
+} from "./skills/skill-md.js";
+export {
   acceptConversationMessage,
   prepareConversationMessage,
   type AcceptConversationMessageResult,

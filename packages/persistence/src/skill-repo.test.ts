@@ -1,7 +1,12 @@
 import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
-import { createSkillRepo, SkillAddConflictError } from "./skill-repo.js";
+import {
+  createSkillRepo,
+  SkillAddConflictError,
+  SkillNameConflictError,
+  SkillNameReservedError,
+} from "./skill-repo.js";
 
 // SkillRepo 资产边界（契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §2/§3/§6/§11）：
 // wire 主键一律 creative_skill_id；自增 id/skill_id、content/body/prompt 永不出库；
@@ -889,6 +894,90 @@ describe("SkillRepo", () => {
       expect.stringContaining("owner_user_id = ?"),
       7n,
       "my_personal",
+    );
+  });
+});
+
+// 个人技能名称可用性（IK60WU 契约 §5.2；IK60X1 总结管道提议名预检 §15.4）：
+// 官方保留名 → reserved；同用户同 Name Key → conflict；否则 ok；
+// createPersonalSkill 与预检共用同一套校验。
+describe("SkillRepo.checkPersonalNameAvailable / createPersonalSkill 名称校验", () => {
+  function prismaWithNames(input: {
+    officialNames: string[];
+    personalNameKeys?: string[];
+  }) {
+    return {
+      skill: {
+        findMany: vi.fn().mockResolvedValue(
+          input.officialNames.map((name) => ({ name })),
+        ),
+      },
+      $queryRawUnsafe: vi
+        .fn()
+        .mockImplementation((_sql: string, _userId: bigint, nameKey: string) =>
+          Promise.resolve([
+            { c: BigInt(input.personalNameKeys?.includes(nameKey) ? 1 : 0) },
+          ]),
+        ),
+      $executeRawUnsafe: vi.fn().mockResolvedValue(1),
+    } as unknown as PrismaClient;
+  }
+
+  it("同用户已有同 Name Key → conflict；官方保留名 → reserved；其余 ok", async () => {
+    const repo = createSkillRepo(
+      prismaWithNames({
+        officialNames: ["深度写作"],
+        personalNameKeys: ["周报助手"],
+      }),
+    );
+    await expect(
+      repo.checkPersonalNameAvailable("100", "深度写作"),
+    ).resolves.toBe("reserved");
+    await expect(
+      repo.checkPersonalNameAvailable("100", "周报助手"),
+    ).resolves.toBe("conflict");
+    await expect(
+      repo.checkPersonalNameAvailable("100", "全新技能"),
+    ).resolves.toBe("ok");
+  });
+
+  it("createPersonalSkill 冲突抛 SkillNameConflictError、保留名抛 SkillNameReservedError", async () => {
+    const conflictRepo = createSkillRepo(
+      prismaWithNames({ officialNames: [], personalNameKeys: ["周报助手"] }),
+    );
+    await expect(
+      conflictRepo.createPersonalSkill("100", {
+        name: "周报助手",
+        description: "d",
+        body: "b",
+      }),
+    ).rejects.toBeInstanceOf(SkillNameConflictError);
+
+    const reservedRepo = createSkillRepo(
+      prismaWithNames({ officialNames: ["深度写作"] }),
+    );
+    await expect(
+      reservedRepo.createPersonalSkill("100", {
+        name: "深度写作",
+        description: "d",
+        body: "b",
+      }),
+    ).rejects.toBeInstanceOf(SkillNameReservedError);
+  });
+
+  it("跨用户隔离：同名不同 userId 互不冲突（Name Key 校验带 owner_user_id 谓词）", async () => {
+    const prisma = prismaWithNames({
+      officialNames: [],
+      personalNameKeys: [],
+    });
+    const repo = createSkillRepo(prisma);
+    await expect(
+      repo.checkPersonalNameAvailable("200", "周报助手"),
+    ).resolves.toBe("ok");
+    expect(prisma.$queryRawUnsafe).toHaveBeenCalledWith(
+      expect.stringContaining("owner_user_id = ?"),
+      200n,
+      "周报助手",
     );
   });
 });

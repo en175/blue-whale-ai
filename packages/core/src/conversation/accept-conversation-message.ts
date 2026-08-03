@@ -9,6 +9,8 @@ export interface ConversationCommandStoreInput {
   content: string;
   conversationId: string | null;
   replyToInputRequestId: string | null;
+  /** 总结当前对话意图（资产契约 §15.1）：仅 body.skill_summarize === true 置位。 */
+  skillSummarize: boolean;
 }
 
 export type ConversationCommandStoreResult =
@@ -63,6 +65,7 @@ export interface PreparedConversationMessage {
   content: string;
   conversationId: string | null;
   replyToInputRequestId: string | null;
+  skillSummarize: boolean;
 }
 
 function positiveId(value: unknown): string | null {
@@ -87,6 +90,8 @@ function canonicalRequest(body: Record<string, unknown>, content: string) {
       typeof body.forced_creative_skill_id === "string"
         ? body.forced_creative_skill_id
         : null,
+    // 总结意图参与幂等哈希（§15.1）：带与不带该字段的相同文本是两个不同请求。
+    skill_summarize: body.skill_summarize === true,
   });
 }
 
@@ -194,5 +199,6 @@ export function prepareConversationMessage(
     content,
     conversationId: positiveId(body.conversation_id),
     replyToInputRequestId: positiveId(body.reply_to_input_request_id),
+    skillSummarize: body.skill_summarize === true,
   };
 }

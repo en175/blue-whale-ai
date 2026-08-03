@@ -142,6 +142,38 @@ async function generateCreativeSkillId(
   return `${base}_${Date.now().toString(36)}`.slice(0, 79);
 }
 
+/** 个人技能 Name Key 可用性校验（契约 §5.2）：官方保留名 → "reserved"；
+ *  同用户已有同 Name Key 个人技能 → "conflict"；否则 "ok"。
+ *  部署前置：存量库必须先执行 §10 v3 补列 SQL（ADD COLUMN name_key）。
+ *  若旧库无 name_key 列：校验查询失败被容错按可用放行，但随后 INSERT 含 name_key 列也会失败 → 500。
+ *  全新环境由 001_baseline.sql 含列，无需补列。 */
+async function checkPersonalNameKeyAvailable(
+  prisma: PrismaClient,
+  userId: string,
+  nameKey: string,
+): Promise<"ok" | "conflict" | "reserved"> {
+  const officialNames = await prisma.skill.findMany({
+    where: { is_delete: 0 },
+    select: { name: true },
+  });
+  const officialNameKeys = new Set(
+    officialNames.map((s) => normalizeNameKey(s.name)),
+  );
+  if (officialNameKeys.has(nameKey)) return "reserved";
+
+  try {
+    const conflicts = await prisma.$queryRawUnsafe<{ c: bigint }[]>(
+      `SELECT COUNT(*) AS c FROM creative_skill WHERE owner_user_id = ? AND asset_domain = 'personal' AND name_key = ?`,
+      BigInt(userId),
+      nameKey,
+    );
+    if (Number(conflicts[0]?.c ?? 0) > 0) return "conflict";
+  } catch {
+    // 表缺列不阻塞（旧库无 name_key），按可用继续
+  }
+  return "ok";
+}
+
 export interface SkillPage<T> {
   records: T[];
   total: number;
@@ -209,6 +241,12 @@ export interface SkillRepo {
     userId: string,
     input: { name: string; description: string; body: string },
   ): Promise<PersonalSkillCreateResult>;
+  /** 个人技能名称可用性预检（IK60X1 总结管道提议名服务端验证，契约 §15.4）：
+   *  与 createPersonalSkill 同一套校验（官方保留名 + 同用户 Name Key 唯一）。 */
+  checkPersonalNameAvailable(
+    userId: string,
+    name: string,
+  ): Promise<"ok" | "conflict" | "reserved">;
   /** 成功激活埋点（契约 §11.3）：只增不改，best-effort（失败/旧库缺表不阻塞主路径）。 */
   recordActivation(rec: SkillActivationInput): Promise<void>;
 }
@@ -636,36 +674,13 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
 
     async createPersonalSkill(userId, input) {
       const nameKey = normalizeNameKey(input.name);
-
-      // 官方保留名校验（§5.2）：skill 表存量名经同算法归一后冲突 → 保留
-      const officialNames = await prisma.skill.findMany({
-        where: { is_delete: 0 },
-        select: { name: true },
-      });
-      const officialNameKeys = new Set(
-        officialNames.map((s) => normalizeNameKey(s.name)),
+      const availability = await checkPersonalNameKeyAvailable(
+        prisma,
+        userId,
+        nameKey,
       );
-      if (officialNameKeys.has(nameKey)) {
-        throw new SkillNameReservedError(nameKey);
-      }
-
-      // 同用户个人技能 Name Key 唯一校验（§5.2）
-      // 部署前置：存量库必须先执行 §10 v3 补列 SQL（ADD COLUMN name_key）。
-      // 若旧库无 name_key 列：校验查询失败被容错跳过，但随后 INSERT 含 name_key 列也会失败 → 500。
-      // 全新环境由 001_baseline.sql 含列，无需补列。
-      try {
-        const conflicts = await prisma.$queryRawUnsafe<{ c: bigint }[]>(
-          `SELECT COUNT(*) AS c FROM creative_skill WHERE owner_user_id = ? AND asset_domain = 'personal' AND name_key = ?`,
-          BigInt(userId),
-          nameKey,
-        );
-        if (Number(conflicts[0]?.c ?? 0) > 0) {
-          throw new SkillNameConflictError(nameKey);
-        }
-      } catch (e) {
-        if (e instanceof SkillNameConflictError) throw e;
-        // 表缺列不阻塞（旧库无 name_key），继续创建
-      }
+      if (availability === "reserved") throw new SkillNameReservedError(nameKey);
+      if (availability === "conflict") throw new SkillNameConflictError(nameKey);
 
       const creativeSkillId = await generateCreativeSkillId(prisma, input.name);
       const contentDigest = `sha256:${createHash("sha256").update(input.body).digest("hex")}`;
@@ -692,6 +707,14 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         name: input.name,
         description: input.description,
       };
+    },
+
+    checkPersonalNameAvailable(userId, name) {
+      return checkPersonalNameKeyAvailable(
+        prisma,
+        userId,
+        normalizeNameKey(name),
+      );
     },
 
     async recordActivation(rec) {

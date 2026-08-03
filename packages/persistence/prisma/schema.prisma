@@ -234,6 +234,9 @@ model agent_runs {
   terminal_reason            String?   @db.VarChar(64)
   failure_code               String?   @db.VarChar(128)
   failure_message            String?   @db.Text
+  /// 总结当前对话意图（IK60X1，资产契约 §15.2）：接纳 skill_summarize=true 的消息时置位，
+  /// Worker claim 到带标记的 Run 分流到总结管道。
+  skill_summarize            Boolean   @default(false)
   gmt_create                 DateTime  @default(now()) @db.DateTime(0)
   gmt_modified               DateTime  @default(now()) @db.DateTime(0)
   version                    Int       @default(0)
@@ -556,4 +559,23 @@ model generation_job_logs {
   occurred_at       DateTime @default(now()) @db.DateTime(0)
 
   @@index([generation_job_id, occurred_at], map: "idx_gen_job_log_job_time")
+}
+
+/// 总结当前对话名称冲突待确认会话（IK60X1，资产契约 §15.4）：
+/// 归属 conversation + user，保存 SKILL.md 草稿与提议名称；
+/// 同一会话至多一条（uk on conversation_id），新冲突覆盖旧记录；
+/// status='pending_name_confirm' 时分流该会话下一条用户消息到总结管道确认模式；
+/// 确认/取消/无关判定后 status 置 closed（行保留，逻辑关闭）。
+model skill_summarize_session {
+  id              BigInt   @id @default(autoincrement())
+  conversation_id BigInt
+  user_id         BigInt
+  draft_content   String   @db.Text
+  proposed_name   String   @db.VarChar(255)
+  status          String   @default("pending_name_confirm") @db.VarChar(32)
+  gmt_create      DateTime @default(now()) @db.DateTime(0)
+  gmt_modified    DateTime @default(now()) @db.DateTime(0)
+  is_delete       Int      @default(0) @db.TinyInt
+
+  @@unique([conversation_id], map: "uk_skill_summarize_session_conversation")
 }

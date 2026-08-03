@@ -67,6 +67,55 @@ describe("AgentRunRepo", () => {
     );
   });
 
+  it("claimNext 带出总结意图标记（IK60X1，契约 §15.2）", async () => {
+    const now = new Date("2026-07-29T00:00:00.000Z");
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ db_now: now }]),
+      agent_runs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 9n,
+          project_id: 42n,
+          conversation_id: 7n,
+          user_id: 100n,
+          status: "queued",
+          version: 0,
+          fencing_token: 0n,
+          input_sequence_no: 0,
+          skill_summarize: true,
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 9n,
+          project_id: 42n,
+          conversation_id: 7n,
+          user_id: 100n,
+          version: 1,
+          fencing_token: 1n,
+          input_sequence_no: 0,
+          skill_summarize: true,
+          lease_expires_at: new Date("2026-07-29T00:00:30.000Z"),
+        }),
+      },
+      conversation_messages: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ content: "总结当前对话", sequence_no: 1 }]),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    const work = await createAgentRunRepo(prisma).claimNext({
+      workerId: "worker-1",
+      leaseMs: 30_000,
+    });
+
+    expect(work).toEqual(
+      expect.objectContaining({ agentRunId: "9", skillSummarize: true }),
+    );
+  });
+
   it("rejects a late commit whose lease owner, fence, or version no longer matches", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const now = new Date("2026-07-29T00:00:10.000Z");

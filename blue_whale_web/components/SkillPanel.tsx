@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   FileText,
+  MessageSquareText,
   MoreHorizontal,
   Plus,
   Search,
@@ -96,6 +97,9 @@ interface SkillPanelProps {
   isOpen: boolean;
   onClose: () => void;
   onUseSkill: (skill: UseSkillSelection) => void;
+  /** 「总结当前对话」入口回调（IK60X1，契约 §15.1）；仅 canvas AgentChatPanel 宿主传入，
+   *  未传时创建技能页签不渲染该入口（首页/generate 无「当前对话」）。 */
+  onSummarizeConversation?: () => void;
 }
 
 type TabKey = "my" | "library" | "create";
@@ -104,15 +108,23 @@ export default function SkillPanel({
   isOpen,
   onClose,
   onUseSkill,
+  onSummarizeConversation,
 }: SkillPanelProps) {
   // 关闭时整棵卸载：打开会话状态（页签、技能库查询/滚动）随之重置
   if (!isOpen) return null;
-  return <SkillPanelDialog onClose={onClose} onUseSkill={onUseSkill} />;
+  return (
+    <SkillPanelDialog
+      onClose={onClose}
+      onUseSkill={onUseSkill}
+      onSummarizeConversation={onSummarizeConversation}
+    />
+  );
 }
 
 function SkillPanelDialog({
   onClose,
   onUseSkill,
+  onSummarizeConversation,
 }: Omit<SkillPanelProps, "isOpen">) {
   const [activeTab, setActiveTab] = useState<TabKey>("library");
   // 页签首次激活才挂载，之后保持挂载（hidden）以保留查询与滚动状态
@@ -150,6 +162,13 @@ function SkillPanelDialog({
   const handleClose = () => {
     if (!confirmDirtyClose()) return;
     onClose();
+  };
+
+  // 总结当前对话（IK60X1）：与任一关闭路径一致，脏草稿先确认再交给宿主关面板+预填
+  const handleSummarizeConversation = () => {
+    if (!onSummarizeConversation) return;
+    if (!confirmDirtyClose()) return;
+    onSummarizeConversation();
   };
 
   const handleSkillSaved = () => {
@@ -308,6 +327,11 @@ function SkillPanelDialog({
               registerDirtyCheck={(fn) => {
                 createDirtyRef.current = fn;
               }}
+              onSummarizeConversation={
+                onSummarizeConversation
+                  ? handleSummarizeConversation
+                  : undefined
+              }
             />
           </TabPane>
         )}
@@ -343,17 +367,21 @@ type UploadState = {
   validation: SkillUploadValidation;
 };
 
-/** 创建技能：编写 SKILL.md（IK60WU）/ 上传 SKILL.md（IK60WW）双模式。
+/** 创建技能：编写 SKILL.md（IK60WU）/ 上传 SKILL.md（IK60WW）双模式 + 总结当前对话入口（IK60X1）。
  *  编写：手写含 YAML frontmatter 的完整 SKILL.md。
  *  上传：选择或拖入单个 .md 文件，客户端预校验后显式保存。
+ *  总结当前对话：仅 canvas 宿主提供回调时渲染；点击交给宿主关面板并预填固定提示词，
+ *  由用户在对话输入框审阅后手动发送，面板内不产出本地草稿（契约 §15.1）。
  *  模式切换不清除两边状态；仅明确点击「保存到我的技能」才创建资产；
  *  草稿/已选文件在 tab 切换/面板关闭时保留，脏态离开需确认。 */
 function CreateContent({
   onSaved,
   registerDirtyCheck,
+  onSummarizeConversation,
 }: {
   onSaved: () => void;
   registerDirtyCheck: (fn: () => boolean) => void;
+  onSummarizeConversation?: () => void;
 }) {
   const [mode, setMode] = useState<"write" | "upload">("write");
   const [draft, setDraft] = useState(SKILL_MD_TEMPLATE);
@@ -449,6 +477,17 @@ function CreateContent({
           {modeBtn("upload", "上传 SKILL.md")}
         </div>
         <div className="flex items-center gap-2">
+          {onSummarizeConversation && (
+            <button
+              type="button"
+              data-testid="skill-summarize-entry"
+              onClick={onSummarizeConversation}
+              className="inline-flex items-center gap-1.5 h-8 px-3.5 text-[13px] font-medium rounded-lg border border-white/[0.12] text-white/75 hover:bg-white/[0.06] transition-colors"
+            >
+              <MessageSquareText size={14} />
+              总结当前对话
+            </button>
+          )}
           {mode === "write" && (
             <button
               type="button"

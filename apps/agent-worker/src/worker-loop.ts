@@ -1,4 +1,5 @@
 import type { AgentAdapter } from "@blue-whale/core";
+import type { SkillSummarizePipeline } from "@blue-whale/agent-runtime";
 import type {
   AgentRunRepo,
   AgentRunWork,
@@ -11,6 +12,9 @@ export async function runAgentWorkerOnce(input: {
   repo: AgentRunRepo;
   runtime: AgentAdapter;
   workerId: string;
+  /** 对话总结管道（IK60X1，契约 §15.2）：claim 到带 skill_summarize 标记的 Run
+   *  或会话存在 pending 待确认记录时分流；确认模式判定无关 → pass_through 回退 runtime。 */
+  summarize?: SkillSummarizePipeline;
   leaseMs?: number;
   heartbeatIntervalMs?: number;
 }): Promise<AgentWorkerOnceResult> {
@@ -30,9 +34,9 @@ export async function runAgentWorkerOnce(input: {
     intervalMs: input.heartbeatIntervalMs ?? Math.max(1_000, leaseMs / 3),
     signal: heartbeatAbort.signal,
   });
-  let result;
+  let content: string;
   try {
-    result = await input.runtime.invoke({ prompt: work.prompt });
+    content = await produceContent(input, work);
   } catch (error) {
     heartbeatAbort.abort();
     await heartbeat;
@@ -53,8 +57,29 @@ export async function runAgentWorkerOnce(input: {
     fence: work.fence,
     runVersion: work.runVersion,
     inputSequenceNo: work.inputSequenceNo,
-    content: result.content,
+    content,
   });
+}
+
+/** Run 正文产出路由（契约 §15.2/§15.4）：
+ *  带总结意图或存在 pending 待确认 → 总结管道；管道 pass_through 或无管道 → 既有 runtime。
+ *  总结管道内部自行消化 AI 失败（产出失败说明文案），抛出的异常按 runtime_error 处理。 */
+async function produceContent(
+  input: {
+    runtime: AgentAdapter;
+    summarize?: SkillSummarizePipeline;
+  },
+  work: AgentRunWork,
+): Promise<string> {
+  if (
+    input.summarize &&
+    (work.skillSummarize || (await input.summarize.hasPending(work)))
+  ) {
+    const outcome = await input.summarize.run(work);
+    if (outcome.kind === "handled") return outcome.content;
+  }
+  const result = await input.runtime.invoke({ prompt: work.prompt });
+  return result.content;
 }
 
 async function maintainLease(input: {
@@ -104,6 +129,7 @@ export async function runAgentWorkerLoop(input: {
   repo: AgentRunRepo;
   runtime: AgentAdapter;
   workerId: string;
+  summarize?: SkillSummarizePipeline;
   signal: AbortSignal;
   idleDelayMs?: number;
   leaseMs?: number;

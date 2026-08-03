@@ -19,6 +19,8 @@ export interface AcceptConversationMessageRecord {
   content: string;
   conversationId: string | null;
   replyToInputRequestId: string | null;
+  /** 总结当前对话意图（IK60X1，契约 §15.2）：置位所属 agent_run.skill_summarize。 */
+  skillSummarize: boolean;
 }
 
 export type AcceptedConversationRecord =
@@ -206,8 +208,13 @@ export async function acceptConversationMessageInTransaction(
             confirmed_input_request_id: inputRequest.id,
             fencing_token: { increment: 1n },
             version: { increment: 1 },
+            // 本条消息带总结意图 → 复用的活动 Run 一并置位（契约 §15.2）。
+            ...(input.skillSummarize ? { skill_summarize: true } : {}),
           }
-        : { status: run.status },
+        : {
+            status: run.status,
+            ...(input.skillSummarize ? { skill_summarize: true } : {}),
+          },
     });
     run =
       requeued.count === 1
@@ -226,6 +233,8 @@ export async function acceptConversationMessageInTransaction(
         engine: "typescript-agent",
         engine_version: "1",
         adapter_schema_version: 1,
+        // 新建 Run 直接按本条消息意图置位（契约 §15.2）。
+        skill_summarize: input.skillSummarize,
       },
     });
     createdRun = true;

@@ -162,6 +162,7 @@ describe("useProjectConversation（画布持久化对话接线 IK67GD T02）", (
       "9",
       undefined,
       undefined,
+      false,
     );
   });
 
