@@ -50,6 +50,7 @@ export function getGenerationInbox(): Promise<GenerationInbox | null> {
  * 发送消息（Idempotency-Key 必传）。
  * 不传 conversationId 时落收件箱最新对话（无则后端新建）；首条消息原子创建收件箱。
  * 有可回答的创作澄清时经 replyToInputRequestId 绑定回答。
+ * forcedCreativeSkillId 为「直接使用」一次性绑定（激活契约 §2）：只强制激活该次 Run。
  */
 export function postInboxMessage(params: {
   content: string;
@@ -57,6 +58,7 @@ export function postInboxMessage(params: {
   idempotencyKey: string;
   conversationId?: number | string;
   replyToInputRequestId?: number | string;
+  forcedCreativeSkillId?: string;
 }): Promise<AcceptedInboxMessage> {
   return apiRequest<AcceptedInboxMessage>("/api/generation-inbox/messages", {
     method: "POST",
@@ -70,6 +72,9 @@ export function postInboxMessage(params: {
       ...(params.replyToInputRequestId == null
         ? {}
         : { reply_to_input_request_id: params.replyToInputRequestId }),
+      ...(params.forcedCreativeSkillId == null
+        ? {}
+        : { forced_creative_skill_id: params.forcedCreativeSkillId }),
     }),
   });
 }

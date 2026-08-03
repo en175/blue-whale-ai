@@ -90,6 +90,48 @@ function canonicalRequest(body: Record<string, unknown>, content: string) {
   });
 }
 
+/**
+ * forced Creative Skill 共享缝（激活契约 §2/§4.1，资产契约 §4/§11.3）：
+ * 守卫校验 → 接纳 → forced 单次激活埋点。conversation 与 generation-inbox
+ * 两条接纳路径共用，保证 fail-closed 与埋点语义一致。
+ */
+export async function acceptWithForcedCreativeSkill<
+  TResult extends ConversationCommandStoreResult,
+>(input: {
+  userId: string;
+  body: Record<string, unknown>;
+  guard?: ForcedCreativeSkillGuard | undefined;
+  recorder?: SkillActivationRecorder | undefined;
+  accept: () => Promise<TResult>;
+}): Promise<TResult | { kind: "creative_skill_unavailable" }> {
+  const forced = forcedCreativeSkillIdOf(input.body);
+  if (forced !== null) {
+    // fail-closed（资产契约 §8）：守卫未注入等同拒绝，避免新调用方漏注入而静默绕过域/owner 边界。
+    const allowed =
+      input.guard !== undefined && (await input.guard(input.userId, forced));
+    if (!allowed) return { kind: "creative_skill_unavailable" };
+  }
+  const result = await input.accept();
+  if (forced !== null && result.kind === "accepted" && input.recorder) {
+    // 激活埋点（资产契约 §11.3）：只覆盖 live 缝实际可确定的路径——forced 激活。
+    // Node 运行时 pin 版本解析尚未接通（parity 工单范围），skill_version 记默认 1；
+    // live 缝当前没有 auto 命中概念，auto 来源待运行时接通后补充。
+    // 埋点 best-effort：写失败不改变已接纳结果与既有错误语义。
+    try {
+      await input.recorder({
+        creativeSkillId: forced,
+        userId: input.userId,
+        agentRunId: result.agent_run_id,
+        skillVersion: 1,
+        activationSource: "forced",
+      });
+    } catch {
+      // 吞掉：埋点失败不影响既有校验与错误语义。
+    }
+  }
+  return result;
+}
+
 export async function acceptConversationMessage(
   input: {
     userId: string;
@@ -103,41 +145,18 @@ export async function acceptConversationMessage(
 ): Promise<AcceptConversationMessageResult> {
   const prepared = prepareConversationMessage(input.body, input.idempotencyKey);
   if ("kind" in prepared) return prepared;
-  const forced = forcedCreativeSkillIdOf(input.body);
-  if (forced !== null) {
-    // fail-closed（资产契约 §8）：守卫未注入等同拒绝，避免新调用方漏注入而静默绕过域/owner 边界。
-    const allowed =
-      forcedSkillGuard !== undefined &&
-      (await forcedSkillGuard(input.userId, forced));
-    if (!allowed) return { kind: "creative_skill_unavailable" };
-  }
-  const result = await store.acceptMessage({
+  return acceptWithForcedCreativeSkill({
     userId: input.userId,
-    projectId: input.projectId,
-    ...prepared,
-  });
-  if (
-    forced !== null &&
-    result.kind === "accepted" &&
-    activationRecorder !== undefined
-  ) {
-    // 激活埋点（资产契约 §11.3）：只覆盖 live 缝实际可确定的路径——forced 激活。
-    // Node 运行时 pin 版本解析尚未接通（parity 工单范围），skill_version 记默认 1；
-    // live 缝当前没有 auto 命中概念，auto 来源待运行时接通后补充。
-    // 埋点 best-effort：写失败不改变已接纳结果与既有错误语义。
-    try {
-      await activationRecorder({
-        creativeSkillId: forced,
+    body: input.body,
+    guard: forcedSkillGuard,
+    recorder: activationRecorder,
+    accept: () =>
+      store.acceptMessage({
         userId: input.userId,
-        agentRunId: result.agent_run_id,
-        skillVersion: 1,
-        activationSource: "forced",
-      });
-    } catch {
-      // 吞掉：埋点失败不影响既有校验与错误语义。
-    }
-  }
-  return result;
+        projectId: input.projectId,
+        ...prepared,
+      }),
+  });
 }
 
 function forcedCreativeSkillIdOf(body: Record<string, unknown>): string | null {

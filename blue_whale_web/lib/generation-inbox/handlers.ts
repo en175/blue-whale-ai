@@ -9,10 +9,13 @@ import {
   fail,
   ok,
 } from "@blue-whale/contracts";
-import type { GenerationInboxRepo } from "@blue-whale/persistence";
+import type { GenerationInboxRepo, SkillRepo } from "@blue-whale/persistence";
+import { createForcedSkillGuard } from "../skills/forced-skill-guard";
 import { wireInteger, wireNullableInteger } from "../wire-integer";
 
 const AGENT_RUN_CONFLICT_CODE = 100303;
+/** Creative Skill 不可用（资产契约 §7：跨用户 forced 个人技能/未知 ID，不泄露存在性）。 */
+const CREATIVE_SKILL_UNAVAILABLE_CODE = 100306;
 
 export async function handleGetGenerationInbox(
   userId: string,
@@ -33,11 +36,16 @@ export async function handleAcceptGenerationInboxMessage(
   userId: string,
   body: Record<string, unknown>,
   idempotencyKey: string | null,
-  deps: GenerationInboxRepo,
+  deps: GenerationInboxRepo & {
+    skills: Pick<SkillRepo, "findAssetDomainInfo" | "recordActivation">;
+  },
 ) {
   const result = await acceptGenerationInboxMessage(
     { userId, body, idempotencyKey },
     deps,
+    createForcedSkillGuard(deps.skills),
+    // 激活埋点（资产契约 §11.3）：接纳成功后由 core 缝调用，best-effort。
+    (rec) => deps.skills.recordActivation(rec),
   );
   switch (result.kind) {
     case "accepted":
@@ -58,6 +66,8 @@ export async function handleAcceptGenerationInboxMessage(
       );
     case "input_request_conflict":
       return fail(AGENT_RUN_CONFLICT_CODE, "输入请求已失效或不匹配");
+    case "creative_skill_unavailable":
+      return fail(CREATIVE_SKILL_UNAVAILABLE_CODE, "Creative Skill 不可用");
     case "invalid":
       return fail(
         result.message === "缺少 Idempotency-Key" ? PARAM_MISSING_CODE : 400,

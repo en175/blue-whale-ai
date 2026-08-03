@@ -7,6 +7,7 @@ import {
   ok,
 } from "@blue-whale/contracts";
 import type { ConversationRepo, SkillRepo } from "@blue-whale/persistence";
+import { createForcedSkillGuard } from "../skills/forced-skill-guard";
 import { wireInteger } from "../wire-integer";
 
 const AGENT_RUN_CONFLICT_CODE = 100303;
@@ -25,12 +26,7 @@ export async function handleAcceptConversationMessage(
   const result = await acceptConversationMessage(
     { userId, projectId, body, idempotencyKey },
     deps,
-    async (guardUserId, forcedCreativeSkillId) => {
-      const info = await deps.skills.findAssetDomainInfo(forcedCreativeSkillId);
-      if (info === null) return false;
-      if (info.asset_domain === "official") return true;
-      return info.owner_user_id === guardUserId;
-    },
+    createForcedSkillGuard(deps.skills),
     // 激活埋点（资产契约 §11.3）：接纳成功后由 core 缝调用，best-effort。
     (rec) => deps.skills.recordActivation(rec),
   );
