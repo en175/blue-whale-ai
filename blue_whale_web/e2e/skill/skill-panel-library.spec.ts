@@ -6,7 +6,7 @@
  * POST /api/agent/skills/library 用可控 fixture 拦截并记录请求体（keyword/category/sort/pageNum）。
  *
  * 锁定验收：
- *  1. 默认技能库页签、三页签切换、创建技能占位空态；
+ *  1. 默认技能库页签、三页签切换、创建技能双模式入口；
  *  2. 同次打开切页签保留查询与滚动状态，关闭重开重置回默认；
  *  3. 分类/搜索（按钮+Enter）/排序三档触发带对应参数的请求；滚动到底 pageNum+1；
  *  4. 卡片：@Blue Whale、使用人数、简介悬停 tooltip、无链接不导航、无省略号菜单；
@@ -145,7 +145,7 @@ async function openPanel(page: Page) {
   return { trigger, panel };
 }
 
-test("页签：默认技能库、三页签切换、创建技能占位空态", async ({ page }) => {
+test("页签：默认技能库、三页签切换、创建技能双模式入口", async ({ page }) => {
   const requests = await bootstrap(page);
   await openPanel(page);
 
@@ -166,10 +166,11 @@ test("页签：默认技能库、三页签切换、创建技能占位空态", as
   );
   await expect(page.getByText("还没有添加技能，去技能库逛逛。")).toBeVisible();
 
-  // 创建技能：占位空态
+  // 创建技能：编写/上传双模式（IK60WU/IK60WW 替换占位空态）
   await page.getByTestId("skill-tab-create").click();
-  await expect(page.getByTestId("skill-create-placeholder")).toBeVisible();
-  await expect(page.getByText("即将上线，敬请期待。")).toBeVisible();
+  await expect(page.getByTestId("skill-create-editor")).toBeVisible();
+  await expect(page.getByTestId("skill-create-mode-write")).toBeVisible();
+  await expect(page.getByTestId("skill-create-mode-upload")).toBeVisible();
 });
 
 test("查询状态：同次打开切页签保留搜索，关闭重开重置回默认", async ({
