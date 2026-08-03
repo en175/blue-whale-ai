@@ -2,7 +2,9 @@
 
 一个处于上线前研发阶段、面向 AI Agent / Canvas 交互的产品。目标运行时由 Next.js Web 与
 TypeScript `product-api`、`agent-worker`、`generation-worker` 组成；三者属于同一模块化单体代码库。
-现有 Go 计费系统保持独立且不在 IK3UUX 中改造。范围以
+`blue_whale_api`（new-api 二开，Go，承担 LLM 网关与计费）保持独立且不在 IK3UUX 中改造，是唯一保留的 Go 组件。
+`blue_whale_server`（Java）与 `blue_whale_agent_worker`（Python）已退役，禁止写入；
+`blue_whale_pay_server`（Java 支付）已冻结，待支付建设阶段另行决策。范围以
 [ADR-0055](docs/adr/0055-prelaunch-typescript-unification-scope.md) 为准。
 
 ## Language
