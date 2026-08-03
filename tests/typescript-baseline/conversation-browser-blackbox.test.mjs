@@ -521,10 +521,10 @@ test("CommandId 幂等：同键同内容重放返回首次结果，同键异内�
     "服务=web 事实=同键异内容应拒绝（100302）",
   );
 
-  // projectB 只多了一条消息（重放未重复创建）
+  // 只统计本次命令创建的 user 消息；agent-worker 可能已异步写入 assistant 回复。
   const messageCount = Number(
     mysqlQuery(
-      `SELECT COUNT(*) FROM conversation_messages WHERE project_id=${projectB} AND is_delete=0`,
+      `SELECT COUNT(*) FROM conversation_messages WHERE project_id=${projectB} AND client_message_id='${key}' AND role='user' AND is_delete=0`,
     ),
   );
   assert.equal(
