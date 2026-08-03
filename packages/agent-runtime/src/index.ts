@@ -16,3 +16,7 @@ export {
   type SkillSummarizeStore,
   type SkillSummarizeWork,
 } from "./skill-summarize.js";
+export {
+  bundledAgentRuntimeManifest,
+  validateAgentRuntimeManifest,
+} from "./runtime-manifest.js";

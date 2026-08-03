@@ -56,6 +56,9 @@ importers:
 
   blue_whale_web:
     dependencies:
+      '@blue-whale/agent-runtime':
+        specifier: workspace:*
+        version: link:../packages/agent-runtime
       '@blue-whale/contracts':
         specifier: workspace:*
         version: link:../packages/contracts
@@ -189,6 +192,9 @@ importers:
 
   packages/agent-runtime:
     dependencies:
+      '@blue-whale/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@blue-whale/core':
         specifier: workspace:*
         version: link:../core
@@ -219,6 +225,9 @@ importers:
 
   packages/persistence:
     dependencies:
+      '@blue-whale/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@blue-whale/core':
         specifier: workspace:*
         version: link:../core

@@ -106,6 +106,7 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
     .sort();
 
   assert.deepEqual(tables, [
+    "agent_advances",
     "agent_runs",
     "api_key",
     "api_key_usage",
@@ -125,7 +126,9 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
     "project",
     "project_event_stream",
     "project_events",
+    "run_commits",
     "skill",
+    "skill_summarize_session",
     "template_card",
     "template_card_image",
     "user_input_requests",

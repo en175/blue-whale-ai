@@ -8,18 +8,9 @@ import {
   handleListGenerationInboxConversations,
 } from "./handlers";
 
-type SkillsStub = {
-  findAssetDomainInfo: ReturnType<typeof vi.fn>;
-  recordActivation: ReturnType<typeof vi.fn>;
-};
-
 function makeRepo(
   overrides: Partial<GenerationInboxRepo>,
-  skills: SkillsStub = {
-    findAssetDomainInfo: vi.fn().mockResolvedValue(null),
-    recordActivation: vi.fn().mockResolvedValue(undefined),
-  },
-): GenerationInboxRepo & { skills: SkillsStub } {
+): GenerationInboxRepo {
   return {
     get: vi.fn(),
     acceptMessage: vi.fn(),
@@ -27,8 +18,7 @@ function makeRepo(
     createConversation: vi.fn(),
     delete: vi.fn(),
     ...overrides,
-    skills,
-  } as GenerationInboxRepo & { skills: SkillsStub };
+  } as GenerationInboxRepo;
 }
 
 const ACCEPTED = {
@@ -48,8 +38,12 @@ describe("handleAcceptGenerationInboxMessage forced skill（IK60WY）", () => {
     forced_creative_skill_id: "official_skill",
   };
 
-  it("forced 指向未知技能 → 100306，不触碰持久化", async () => {
-    const repo = makeRepo({});
+  it("持久层原子拒绝 forced Skill → 100306", async () => {
+    const repo = makeRepo({
+      acceptMessage: vi
+        .fn()
+        .mockResolvedValue({ kind: "creative_skill_unavailable" }),
+    });
     const result = await handleAcceptGenerationInboxMessage(
       "9",
       body,
@@ -58,20 +52,15 @@ describe("handleAcceptGenerationInboxMessage forced skill（IK60WY）", () => {
     );
 
     expect(result.code).toBe(100306);
-    expect(repo.acceptMessage).not.toHaveBeenCalled();
+    expect(repo.acceptMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ forcedCreativeSkillId: "official_skill" }),
+    );
   });
 
-  it("forced 指向官方技能 → 放行接纳并落 forced 激活埋点", async () => {
-    const skills: SkillsStub = {
-      findAssetDomainInfo: vi
-        .fn()
-        .mockResolvedValue({ asset_domain: "official", owner_user_id: null }),
-      recordActivation: vi.fn().mockResolvedValue(undefined),
-    };
-    const repo = makeRepo(
-      { acceptMessage: vi.fn().mockResolvedValue(ACCEPTED) },
-      skills,
-    );
+  it("forced Skill 被原子接纳", async () => {
+    const repo = makeRepo({
+      acceptMessage: vi.fn().mockResolvedValue(ACCEPTED),
+    });
 
     const result = await handleAcceptGenerationInboxMessage(
       "9",
@@ -82,23 +71,14 @@ describe("handleAcceptGenerationInboxMessage forced skill（IK60WY）", () => {
 
     expect(result.code).toBe(200);
     expect(result.data?.agent_run_id).toBe(9);
-    expect(skills.recordActivation).toHaveBeenCalledWith({
-      creativeSkillId: "official_skill",
-      userId: "9",
-      agentRunId: "9",
-      skillVersion: 1,
-      activationSource: "forced",
-    });
   });
 
-  it("forced 指向他人个人技能 → 100306（不泄露存在性）", async () => {
-    const skills: SkillsStub = {
-      findAssetDomainInfo: vi
+  it("活动 Run 已冻结 Skill 时返回稳定冲突", async () => {
+    const repo = makeRepo({
+      acceptMessage: vi
         .fn()
-        .mockResolvedValue({ asset_domain: "personal", owner_user_id: "77" }),
-      recordActivation: vi.fn(),
-    };
-    const repo = makeRepo({}, skills);
+        .mockResolvedValue({ kind: "creative_skill_conflict" }),
+    });
 
     const result = await handleAcceptGenerationInboxMessage(
       "9",
@@ -107,8 +87,7 @@ describe("handleAcceptGenerationInboxMessage forced skill（IK60WY）", () => {
       repo,
     );
 
-    expect(result.code).toBe(100306);
-    expect(skills.recordActivation).not.toHaveBeenCalled();
+    expect(result.code).toBe(100303);
   });
 });
 

@@ -5,6 +5,7 @@ import {
   applySnapshot,
   consumeProjectEventStream,
   deriveAnswerableClarification,
+  deriveLatestAgentRunDisplay,
   initialProjectRecoveryState,
   runProjectRecovery,
   type ProductEventEnvelope,
@@ -662,6 +663,33 @@ describe("创作澄清活动请求投影", () => {
       (run?.active_input_request as { status?: string } | undefined)?.status,
     ).toBe("confirmed");
     expect(deriveAnswerableClarification(state.snapshot, NOW)).toBeNull();
+  });
+});
+
+describe("AgentRun 安全展示投影", () => {
+  it("从最新 Run 派生状态、Skill 名称和 ReasoningSummary", () => {
+    const snap: ProjectSnapshot = {
+      ...snapshot(10),
+      agent_runs: [
+        { agent_run_id: 8, status: "completed" },
+        {
+          agent_run_id: 9,
+          status: "running",
+          activated_creative_skill_versions: [
+            { name: "海报专家", source: "forced_use" },
+          ],
+          reasoning_summary: "正在使用已冻结技能。",
+          run_pin: { private: true },
+        },
+      ],
+    };
+
+    expect(deriveLatestAgentRunDisplay(snap)).toEqual({
+      agentRunId: 9,
+      status: "running",
+      skillName: "海报专家",
+      reasoningSummary: "正在使用已冻结技能。",
+    });
   });
 });
 

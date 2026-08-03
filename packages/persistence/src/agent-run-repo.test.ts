@@ -1,7 +1,56 @@
 import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
+import { bundledAgentRuntimeManifest } from "../../agent-runtime/src/runtime-manifest.js";
+import {
+  canonicalAgentRunPinDigestInput,
+  type AgentRunPin,
+} from "@blue-whale/contracts";
+import { createHash } from "node:crypto";
 
 import { createAgentRunRepo } from "./agent-run-repo.js";
+
+const runPinSource: Omit<AgentRunPin, "pin_digest"> = {
+  schema_version: 1 as const,
+  manifest_id: bundledAgentRuntimeManifest.manifest_id,
+  manifest_version: bundledAgentRuntimeManifest.manifest_version,
+  manifest_digest: bundledAgentRuntimeManifest.manifest_digest,
+  resources: structuredClone(bundledAgentRuntimeManifest.resources),
+  role_resource_id: bundledAgentRuntimeManifest.role_resource_id,
+  rule_resource_ids: structuredClone(
+    bundledAgentRuntimeManifest.rule_resource_ids,
+  ),
+  runtime_skill_resource_ids: structuredClone(
+    bundledAgentRuntimeManifest.runtime_skill_resource_ids,
+  ),
+  model_profile: structuredClone(
+    bundledAgentRuntimeManifest.model_profiles[0]!,
+  ),
+  runtime_budget_policy: bundledAgentRuntimeManifest.runtime_budget_policy,
+  tool_grants: [],
+  auto_creative_skill_candidates: [],
+  activated_creative_skill_versions: [],
+  creative_skill_resources: [],
+};
+function signRunPin(source: Omit<AgentRunPin, "pin_digest">): AgentRunPin {
+  return {
+    ...source,
+    pin_digest: `sha256:${createHash("sha256")
+      .update(canonicalAgentRunPinDigestInput(source))
+      .digest("hex")}`,
+  };
+}
+
+const runPin = signRunPin(runPinSource);
+const requestDigest = `sha256:${"d".repeat(64)}`;
+const forcedActivation = {
+  creative_skill_id: "official.poster",
+  creative_skill_version_id: "version.poster.1",
+  name: "海报专家",
+  display_version: "1.0.0",
+  resource_digest: `sha256:${"a".repeat(64)}`,
+  source: "forced_use" as const,
+  reason: { type: "user_use" as const },
+};
 
 describe("AgentRunRepo", () => {
   it("claims one queued run with a higher fence and a stable input watermark", async () => {
@@ -18,6 +67,7 @@ describe("AgentRunRepo", () => {
           version: 0,
           fencing_token: 0n,
           input_sequence_no: 0,
+          run_pin: runPin,
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({
@@ -28,14 +78,48 @@ describe("AgentRunRepo", () => {
           version: 1,
           fencing_token: 1n,
           input_sequence_no: 0,
+          run_pin: runPin,
           lease_expires_at: new Date("2026-07-29T00:00:30.000Z"),
         }),
       },
       conversation_messages: {
         findMany: vi.fn().mockResolvedValue([
-          { content: "第一条", sequence_no: 1 },
-          { content: "第二条", sequence_no: 2 },
+          { id: 20n, role: "user", content: "第一条", sequence_no: 1 },
+          { id: 21n, role: "user", content: "第二条", sequence_no: 2 },
         ]),
+      },
+      agent_advances: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({
+          id: 30n,
+          ordinal: 1,
+          input_high_watermark_sequence_no: 2,
+          input_snapshot: [
+            {
+              message_id: "20",
+              sequence_no: 1,
+              role: "user",
+              content: "第一条",
+            },
+            {
+              message_id: "21",
+              sequence_no: 2,
+              role: "user",
+              content: "第二条",
+            },
+          ],
+        }),
+      },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi.fn().mockResolvedValue({ high_watermark: 1n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 11n,
+          gmt_create: now,
+          ...data,
+        })),
       },
     };
     const prisma = {
@@ -58,13 +142,219 @@ describe("AgentRunRepo", () => {
     });
     expect(work).toEqual(
       expect.objectContaining({
-        agentRunId: "9",
-        fence: "1",
-        runVersion: 1,
-        inputSequenceNo: 2,
+        agent_run_id: "9",
+        advance_id: "30",
+        fencing_token: "1",
+        run_version: 1,
+        input_high_watermark_sequence_no: 2,
         prompt: "第一条\n\n第二条",
+        run_pin: runPin,
       }),
     );
+    expect(tx.agent_advances.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        agent_run_id: 9n,
+        ordinal: 1,
+        input_high_watermark_sequence_no: 2,
+        input_snapshot: [
+          { message_id: "20", sequence_no: 1, role: "user", content: "第一条" },
+          { message_id: "21", sequence_no: 2, role: "user", content: "第二条" },
+        ],
+      }),
+    });
+    expect(tx.project_events.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        event_type: "agent_run.status_changed",
+        payload: expect.objectContaining({
+          status: "running",
+          stage: "responding",
+          activated_creative_skill_versions: [],
+          reasoning_summary: null,
+        }),
+      }),
+    });
+  });
+
+  it("reuses the same frozen Advance snapshot when taking over an expired lease", async () => {
+    const now = new Date("2026-07-29T00:01:00.000Z");
+    const snapshot = [
+      { message_id: "20", sequence_no: 1, role: "user", content: "冻结输入" },
+    ];
+    const findMany = vi.fn();
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ db_now: now }]),
+      agent_runs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 9n,
+          status: "running",
+          version: 1,
+          lease_expires_at: new Date("2026-07-29T00:00:30.000Z"),
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 9n,
+          project_id: 42n,
+          conversation_id: 7n,
+          user_id: 100n,
+          version: 2,
+          fencing_token: 2n,
+          input_sequence_no: 0,
+          run_pin: runPin,
+        }),
+      },
+      agent_advances: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 30n,
+          ordinal: 1,
+          status: "running",
+          input_snapshot: snapshot,
+          input_high_watermark_sequence_no: 1,
+        }),
+        create: vi.fn(),
+      },
+      conversation_messages: { findMany },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi.fn().mockResolvedValue({ high_watermark: 1n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 11n,
+          gmt_create: now,
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createAgentRunRepo(prisma).claimNext({
+        workerId: "worker-2",
+        leaseMs: 30_000,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        advance_id: "30",
+        fencing_token: "2",
+        input_messages: snapshot,
+        prompt: "冻结输入",
+      }),
+    );
+    expect(tx.agent_advances.create).not.toHaveBeenCalled();
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed instead of creating ordinal 2 for a queued Run with an Advance", async () => {
+    const create = vi.fn();
+    const tx = {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValue([{ db_now: new Date("2026-07-29T00:01:00.000Z") }]),
+      agent_runs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 9n,
+          status: "queued",
+          version: 1,
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 9n,
+          project_id: 42n,
+          conversation_id: 7n,
+          version: 2,
+          fencing_token: 2n,
+          input_sequence_no: 0,
+          run_pin: runPin,
+        }),
+      },
+      agent_advances: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 30n,
+          ordinal: 1,
+          status: "completed",
+        }),
+        create,
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createAgentRunRepo(prisma).claimNext({
+        workerId: "worker-2",
+        leaseMs: 30_000,
+      }),
+    ).rejects.toThrow("queued AgentRun already has an Advance");
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("fails a legacy active run closed when its RunPin is missing", async () => {
+    const update = vi.fn().mockResolvedValue({ version: 2 });
+    const tx = {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValue([{ db_now: new Date("2026-07-29T00:00:00.000Z") }]),
+      agent_runs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 9n,
+          status: "queued",
+          version: 0,
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 9n,
+          project_id: 42n,
+          conversation_id: 7n,
+          version: 1,
+          fencing_token: 1n,
+          run_pin: null,
+          activated_creative_skill_versions: [forcedActivation],
+          reasoning_summary: null,
+        }),
+        update,
+      },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi.fn().mockResolvedValue({ high_watermark: 1n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 11n,
+          gmt_create: new Date("2026-07-29T00:00:00.000Z"),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createAgentRunRepo(prisma).claimNext({
+        workerId: "worker-1",
+        leaseMs: 30_000,
+      }),
+    ).resolves.toBeNull();
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 9n },
+      data: expect.objectContaining({
+        status: "failed",
+        failure_code: "runtime_pin_missing",
+        active_guard: null,
+      }),
+    });
+    expect(tx.project_events.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        payload: expect.objectContaining({
+          status: "failed",
+          activated_creative_skill_versions: [forcedActivation],
+          reasoning_summary: null,
+        }),
+      }),
+    });
   });
 
   it("claimNext 带出总结意图标记（IK60X1，契约 §15.2）", async () => {
@@ -82,6 +372,7 @@ describe("AgentRunRepo", () => {
           fencing_token: 0n,
           input_sequence_no: 0,
           skill_summarize: true,
+          run_pin: runPin,
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({
@@ -93,13 +384,46 @@ describe("AgentRunRepo", () => {
           fencing_token: 1n,
           input_sequence_no: 0,
           skill_summarize: true,
+          run_pin: runPin,
           lease_expires_at: new Date("2026-07-29T00:00:30.000Z"),
         }),
       },
       conversation_messages: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([{ content: "总结当前对话", sequence_no: 1 }]),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 20n,
+            role: "user",
+            content: "总结当前对话",
+            sequence_no: 1,
+          },
+        ]),
+      },
+      agent_advances: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({
+          id: 30n,
+          ordinal: 1,
+          input_high_watermark_sequence_no: 1,
+          input_snapshot: [
+            {
+              message_id: "20",
+              sequence_no: 1,
+              role: "user",
+              content: "总结当前对话",
+            },
+          ],
+        }),
+      },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi.fn().mockResolvedValue({ high_watermark: 1n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 11n,
+          gmt_create: now,
+          ...data,
+        })),
       },
     };
     const prisma = {
@@ -112,7 +436,7 @@ describe("AgentRunRepo", () => {
     });
 
     expect(work).toEqual(
-      expect.objectContaining({ agentRunId: "9", skillSummarize: true }),
+      expect.objectContaining({ agent_run_id: "9", skillSummarize: true }),
     );
   });
 
@@ -123,7 +447,18 @@ describe("AgentRunRepo", () => {
       $transaction: vi.fn(async (callback) =>
         callback({
           $queryRaw: vi.fn().mockResolvedValue([{ db_now: now }]),
-          agent_runs: { updateMany },
+          run_commits: { findUnique: vi.fn().mockResolvedValue(null) },
+          agent_advances: {
+            findUnique: vi.fn().mockResolvedValue({
+              id: 30n,
+              agent_run_id: 9n,
+              input_high_watermark_sequence_no: 2,
+            }),
+          },
+          agent_runs: {
+            findUnique: vi.fn().mockResolvedValue({ id: 9n, run_pin: runPin }),
+            updateMany,
+          },
         }),
       ),
     } as unknown as PrismaClient;
@@ -132,10 +467,50 @@ describe("AgentRunRepo", () => {
       createAgentRunRepo(prisma).commitSuccess({
         workerId: "worker-1",
         agentRunId: "9",
+        advanceId: "30",
         fence: "1",
         runVersion: 1,
-        inputSequenceNo: 2,
+        requestDigest,
         content: "完成",
+        reasoningSummary: "已完成回答。",
+        autoCreativeSkillActivation: null,
+      }),
+    ).resolves.toEqual({ kind: "conflict" });
+  });
+
+  it("replays the first RunCommit receipt for the same digest and rejects a different digest", async () => {
+    const existing = {
+      request_digest: requestDigest,
+      receipt: { cursor: "88", status: "completed" },
+    };
+    const findUnique = vi.fn().mockResolvedValue(existing);
+    const prisma = {
+      $transaction: vi.fn(async (callback) =>
+        callback({ run_commits: { findUnique } }),
+      ),
+    } as unknown as PrismaClient;
+    const repo = createAgentRunRepo(prisma);
+    const command = {
+      workerId: "worker-1",
+      agentRunId: "9",
+      advanceId: "30",
+      fence: "1",
+      runVersion: 1,
+      requestDigest,
+      content: "完成",
+      reasoningSummary: "已完成回答。",
+      autoCreativeSkillActivation: null,
+    };
+
+    await expect(repo.commitSuccess(command)).resolves.toEqual({
+      kind: "replayed",
+      cursor: "88",
+      status: "completed",
+    });
+    await expect(
+      repo.commitSuccess({
+        ...command,
+        requestDigest: `sha256:${"e".repeat(64)}`,
       }),
     ).resolves.toEqual({ kind: "conflict" });
   });
@@ -186,6 +561,7 @@ describe("AgentRunRepo", () => {
       stage: "responding",
       version: 2,
       fencing_token: 1n,
+      run_pin: runPin,
     };
     const tx = {
       $queryRaw: vi
@@ -200,6 +576,18 @@ describe("AgentRunRepo", () => {
           stage: "completed",
           version: 3,
         }),
+      },
+      agent_advances: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 30n,
+          agent_run_id: 9n,
+          input_high_watermark_sequence_no: 2,
+        }),
+        update: vi.fn(),
+      },
+      run_commits: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
       },
       conversation_messages: {
         findFirst: vi.fn().mockResolvedValue(null),
@@ -231,10 +619,13 @@ describe("AgentRunRepo", () => {
       createAgentRunRepo(prisma).commitSuccess({
         workerId: "worker-1",
         agentRunId: "9",
+        advanceId: "30",
         fence: "1",
         runVersion: 1,
-        inputSequenceNo: 2,
+        requestDigest,
         content: "完成",
+        reasoningSummary: "已完成回答。",
+        autoCreativeSkillActivation: null,
       }),
     ).resolves.toEqual({
       kind: "committed",
@@ -246,7 +637,143 @@ describe("AgentRunRepo", () => {
       data: expect.objectContaining({
         status: "completed",
         active_guard: null,
+        activated_creative_skill_versions: [],
+        reasoning_summary: "已完成回答。",
       }),
+    });
+    expect(tx.run_commits.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        advance_id: 30n,
+        request_digest: requestDigest,
+        outcome: "completed",
+      }),
+    });
+  });
+
+  it("rebuilds auto activation metadata from the frozen candidate", async () => {
+    const body = "# Frozen poster skill";
+    const skillDigest = `sha256:${createHash("sha256").update(body).digest("hex")}`;
+    const candidate = {
+      creative_skill_id: "official.poster",
+      creative_skill_version_id: "version.poster.1",
+      name: "海报专家",
+      description: null,
+      display_version: "1.0.0",
+      resource_digest: skillDigest,
+    };
+    const autoPin = signRunPin({
+      ...runPinSource,
+      auto_creative_skill_candidates: [candidate],
+      creative_skill_resources: [
+        {
+          ...candidate,
+          media_type: "text/markdown",
+          body,
+          content_digest: skillDigest,
+        },
+      ],
+    });
+    const run = {
+      id: 9n,
+      project_id: 42n,
+      conversation_id: 7n,
+      user_id: 100n,
+      version: 2,
+      run_pin: autoPin,
+    };
+    const update = vi.fn().mockResolvedValue({
+      ...run,
+      status: "completed",
+      stage: "completed",
+      version: 3,
+    });
+    const createActivation = vi.fn();
+    const tx = {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValue([{ db_now: new Date("2026-07-29T00:00:10.000Z") }]),
+      agent_runs: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue(run),
+        update,
+      },
+      agent_advances: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 30n,
+          agent_run_id: 9n,
+          input_high_watermark_sequence_no: 2,
+        }),
+        update: vi.fn(),
+      },
+      run_commits: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+      },
+      conversation_messages: {
+        create: vi.fn().mockResolvedValue({ id: 10n }),
+      },
+      conversations: {
+        update: vi.fn().mockResolvedValue({ version: 3 }),
+      },
+      creative_skill_activation: { create: createActivation },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi
+          .fn()
+          .mockResolvedValueOnce({ high_watermark: 1n })
+          .mockResolvedValueOnce({ high_watermark: 2n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 11n,
+          gmt_create: new Date("2026-07-29T00:00:00.000Z"),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createAgentRunRepo(prisma).commitSuccess({
+        workerId: "worker-1",
+        agentRunId: "9",
+        advanceId: "30",
+        fence: "1",
+        runVersion: 1,
+        requestDigest,
+        content: "完成",
+        reasoningSummary: "已使用技能完成回答。",
+        autoCreativeSkillActivation: {
+          creative_skill_id: candidate.creative_skill_id,
+          creative_skill_version_id: candidate.creative_skill_version_id,
+          name: "伪造名称",
+          display_version: "9.0.0",
+          resource_digest: candidate.resource_digest,
+          source: "auto",
+          reason: {
+            type: "agent_match",
+            detail: { matched_fields: ["conversation_messages"] },
+          },
+        },
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({ kind: "committed", status: "completed" }),
+    );
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 9n },
+      data: expect.objectContaining({
+        activated_creative_skill_versions: [
+          expect.objectContaining({
+            name: "海报专家",
+            display_version: "1.0.0",
+          }),
+        ],
+      }),
+    });
+    expect(createActivation).toHaveBeenCalledWith({
+      data: expect.objectContaining({ skill_version: 1 }),
     });
   });
 
@@ -276,6 +803,18 @@ describe("AgentRunRepo", () => {
           version: 3,
         }),
       },
+      agent_advances: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 30n,
+          agent_run_id: 9n,
+          input_high_watermark_sequence_no: 2,
+        }),
+        update: vi.fn(),
+      },
+      run_commits: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+      },
       conversation_messages: {
         create: vi.fn(),
       },
@@ -299,8 +838,10 @@ describe("AgentRunRepo", () => {
       createAgentRunRepo(prisma).commitFailure({
         workerId: "worker-1",
         agentRunId: "9",
+        advanceId: "30",
         fence: "1",
         runVersion: 1,
+        requestDigest,
         failureCode: "runtime_error",
         failureMessage: "fake agent explicit failure",
       }),
@@ -323,6 +864,16 @@ describe("AgentRunRepo", () => {
       }),
     });
     expect(tx.conversation_messages.create).not.toHaveBeenCalled();
+    expect(tx.project_events.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        event_type: "agent_run.status_changed",
+        payload: expect.objectContaining({
+          status: "failed",
+          activated_creative_skill_versions: [],
+          reasoning_summary: null,
+        }),
+      }),
+    });
   });
 
   it("rejects a late failure commit whose fence or version no longer matches", async () => {
@@ -331,7 +882,16 @@ describe("AgentRunRepo", () => {
       $transaction: vi.fn(async (callback) =>
         callback({
           $queryRaw: vi.fn().mockResolvedValue([{ db_now: now }]),
+          run_commits: { findUnique: vi.fn().mockResolvedValue(null) },
+          agent_advances: {
+            findUnique: vi.fn().mockResolvedValue({
+              id: 30n,
+              agent_run_id: 9n,
+              input_high_watermark_sequence_no: 2,
+            }),
+          },
           agent_runs: {
+            findUnique: vi.fn().mockResolvedValue({ id: 9n }),
             updateMany: vi.fn().mockResolvedValue({ count: 0 }),
           },
         }),
@@ -342,8 +902,10 @@ describe("AgentRunRepo", () => {
       createAgentRunRepo(prisma).commitFailure({
         workerId: "worker-1",
         agentRunId: "9",
+        advanceId: "30",
         fence: "1",
         runVersion: 1,
+        requestDigest,
         failureCode: "runtime_error",
         failureMessage: "boom",
       }),

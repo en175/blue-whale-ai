@@ -1,11 +1,8 @@
 import { createHash } from "node:crypto";
 
 import {
-  acceptWithForcedCreativeSkill,
   prepareConversationMessage,
   type ConversationCommandStoreResult,
-  type ForcedCreativeSkillGuard,
-  type SkillActivationRecorder,
 } from "./accept-conversation-message.js";
 
 export interface GenerationInboxProjectView {
@@ -37,6 +34,7 @@ export interface GenerationInboxStore {
     content: string;
     conversationId: string | null;
     replyToInputRequestId: string | null;
+    forcedCreativeSkillId: string | null;
   }): Promise<ConversationCommandStoreResult>;
   listConversations(userId: string): Promise<InboxConversationView[] | null>;
   createConversation(
@@ -52,13 +50,11 @@ export interface GenerationInboxStore {
 }
 
 export type AcceptGenerationInboxMessageResult =
-  | ConversationCommandStoreResult
-  | { kind: "invalid"; message: string }
-  | { kind: "creative_skill_unavailable" };
+  ConversationCommandStoreResult | { kind: "invalid"; message: string };
 
 /**
- * 收件箱消息接纳（IK60WY）：与 conversation 路径同走 forced 共享缝——
- * 域/owner 守卫 fail-closed + 接纳后 forced 单次激活埋点（激活契约 §2/§4.1）。
+ * 收件箱消息接纳（IK67GG）：forced 选择随消息一起交给持久层，
+ * 由同一事务完成权限校验、RunPin 冻结、消息接纳和激活事实写入。
  */
 export async function acceptGenerationInboxMessage(
   input: {
@@ -67,18 +63,10 @@ export async function acceptGenerationInboxMessage(
     body: Record<string, unknown>;
   },
   store: GenerationInboxStore,
-  forcedSkillGuard?: ForcedCreativeSkillGuard,
-  activationRecorder?: SkillActivationRecorder,
 ): Promise<AcceptGenerationInboxMessageResult> {
   const prepared = prepareConversationMessage(input.body, input.idempotencyKey);
   if ("kind" in prepared) return prepared;
-  return acceptWithForcedCreativeSkill({
-    userId: input.userId,
-    body: input.body,
-    guard: forcedSkillGuard,
-    recorder: activationRecorder,
-    accept: () => store.acceptMessage({ userId: input.userId, ...prepared }),
-  });
+  return store.acceptMessage({ userId: input.userId, ...prepared });
 }
 
 export function createGenerationInboxConversation(

@@ -6,8 +6,7 @@ import {
   fail,
   ok,
 } from "@blue-whale/contracts";
-import type { ConversationRepo, SkillRepo } from "@blue-whale/persistence";
-import { createForcedSkillGuard } from "../skills/forced-skill-guard";
+import type { ConversationRepo } from "@blue-whale/persistence";
 import { wireInteger } from "../wire-integer";
 
 const AGENT_RUN_CONFLICT_CODE = 100303;
@@ -19,16 +18,11 @@ export async function handleAcceptConversationMessage(
   projectId: string,
   body: Record<string, unknown>,
   idempotencyKey: string | null,
-  deps: ConversationRepo & {
-    skills: Pick<SkillRepo, "findAssetDomainInfo" | "recordActivation">;
-  },
+  deps: ConversationRepo,
 ) {
   const result = await acceptConversationMessage(
     { userId, projectId, body, idempotencyKey },
     deps,
-    createForcedSkillGuard(deps.skills),
-    // 激活埋点（资产契约 §11.3）：接纳成功后由 core 缝调用，best-effort。
-    (rec) => deps.skills.recordActivation(rec),
   );
   switch (result.kind) {
     case "accepted":
@@ -47,6 +41,13 @@ export async function handleAcceptConversationMessage(
       );
     case "input_request_conflict":
       return fail(AGENT_RUN_CONFLICT_CODE, "输入请求已失效或不匹配");
+    case "agent_run_conflict":
+      return fail(AGENT_RUN_CONFLICT_CODE, "AgentRun 正在运行");
+    case "creative_skill_conflict":
+      return fail(
+        AGENT_RUN_CONFLICT_CODE,
+        "活动中的 AgentRun 已冻结 Skill 配置",
+      );
     case "creative_skill_unavailable":
       return fail(CREATIVE_SKILL_UNAVAILABLE_CODE, "Creative Skill 不可用");
     case "invalid":

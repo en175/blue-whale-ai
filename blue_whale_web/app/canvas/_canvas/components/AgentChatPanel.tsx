@@ -25,11 +25,7 @@ import {
   ThinkingBlock,
   AgentCard,
 } from "./ChatBubbles";
-import type {
-  ChatMessage,
-  PendingMention,
-  PendingMentionBatch,
-} from "../types";
+import type { ChatMessage, PendingMentionBatch } from "../types";
 import type { WireInteger } from "@/lib/wire-integer";
 import type { CardStatus } from "@/types/domain";
 import { buildMockReplyForMode } from "../messages";
@@ -46,6 +42,17 @@ import {
 
 /** @ 素材 pill 数量上限，对齐后端 referenced_asset_ids @Size(max=10)。 */
 const MENTION_LIMIT = 10;
+
+const AGENT_RUN_STATUS_LABELS: Record<string, string> = {
+  queued: "排队中",
+  running: "运行中",
+  awaiting_input: "等待输入",
+  awaiting_job: "等待任务",
+  completed: "已完成",
+  failed: "失败",
+  cancelled: "已取消",
+  recovery_failed: "恢复失败",
+};
 
 /** 欢迎态预设：点击只填入输入框，不发送、不创建产品事实（IK67GD T02）。 */
 const WELCOME_PRESETS = [
@@ -81,7 +88,9 @@ export function AgentChatPanel({
   onRetryGenerationJob,
   prompt,
   projectId,
-  forcedSkillName,
+  activeSkillName,
+  agentRunStatus,
+  reasoningSummary,
   answerableActive,
   skillRecommendations,
   skillRecommendationsLoading,
@@ -110,8 +119,12 @@ export function AgentChatPanel({
   prompt?: string;
   /** 当前 Project 身份；传入后未发送草稿按 Project 持久化到本浏览器（IK67GD T02） */
   projectId?: string;
-  /** 当前 Run 已激活 Creative Skill 的展示名（Snapshot/SSE 权威，null 表示无激活） */
-  forcedSkillName?: string | null;
+  /** 当前 Run 已激活 Creative Skill 的展示名（forced/auto 统一，Snapshot/SSE 权威） */
+  activeSkillName?: string | null;
+  /** 当前 Run 的公开状态（Snapshot/SSE 权威） */
+  agentRunStatus?: string | null;
+  /** 安全的用户可见运行摘要；不包含内部思维链。 */
+  reasoningSummary?: string | null;
   /** 是否存在可回答创作澄清（true 时 forced 与 reply 互斥，pending 保留不清） */
   answerableActive?: boolean;
   /** 当前 Run 的 Creative Skill 推荐列表（IK3NPI）；未传则不渲染推荐区 */
@@ -124,7 +137,7 @@ export function AgentChatPanel({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [panelSize, setPanelSize] = useState({ w: 468, h: 600 });
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
-  // Use 选择的 pending forced skill：点 Use 立刻乐观展示，SSE 确认后由 forcedSkillName 接管
+  // Use 选择的 pending forced skill：点 Use 立刻乐观展示，SSE 确认后由 activeSkillName 接管
   const [pendingForcedSkill, setPendingForcedSkill] = useState<{
     id: string;
     name: string;
@@ -504,7 +517,11 @@ export function AgentChatPanel({
   if (!isOpen) return null;
 
   // 已选技能标签：乐观名（刚点 Use）→ 权威名（Run 已激活）→ 不显示
-  const forcedLabel = pendingForcedSkill?.name ?? forcedSkillName ?? null;
+  const skillLabel = pendingForcedSkill?.name ?? activeSkillName ?? null;
+  const skillStateLabel = pendingForcedSkill ? "已选技能" : "已激活技能";
+  const runStatusLabel = agentRunStatus
+    ? (AGENT_RUN_STATUS_LABELS[agentRunStatus] ?? agentRunStatus)
+    : null;
 
   const panelPath = squirclePath(panelSize.w, panelSize.h, 28.8);
 
@@ -566,14 +583,14 @@ export function AgentChatPanel({
               </div>
             </div>
           </div>
-          {forcedLabel && (
+          {skillLabel && (
             <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
               <span
                 className="tc-agent-forced-skill-badge inline-flex items-center gap-1 rounded-lg border border-white/[0.06] bg-white/[0.06] px-2 py-1 text-xs text-white/75"
-                aria-label={`已选技能：${forcedLabel}`}
+                aria-label={`${skillStateLabel}：${skillLabel}`}
               >
                 <BookOpenText size={12} />
-                <span className="max-w-[120px] truncate">{forcedLabel}</span>
+                <span className="max-w-[120px] truncate">{skillLabel}</span>
                 {pendingForcedSkill && (
                   <button
                     type="button"
@@ -586,6 +603,19 @@ export function AgentChatPanel({
                 )}
               </span>
             </div>
+          )}
+          {runStatusLabel && (
+            <span
+              className="tc-agent-run-status inline-flex items-center rounded-lg px-2 py-1 text-xs"
+              aria-label={`Agent 状态：${runStatusLabel}`}
+              style={{
+                border: "1px solid var(--tc-border-subtle)",
+                background: "var(--tc-menu-item-hover)",
+                color: "var(--tc-text-secondary)",
+              }}
+            >
+              {runStatusLabel}
+            </span>
           )}
           <div className="inline-flex items-center gap-0.5">
             <div className="relative inline-flex">
@@ -674,6 +704,19 @@ export function AgentChatPanel({
                 loading={skillRecommendationsLoading ?? false}
                 onUse={handleUseSkill}
               />
+            )}
+            {reasoningSummary && (
+              <div
+                className="tc-agent-reasoning-summary rounded-lg px-3 py-2 text-xs leading-5"
+                role="status"
+                style={{
+                  border: "1px solid var(--tc-border-subtle)",
+                  background: "var(--tc-menu-item-hover)",
+                  color: "var(--tc-text-secondary)",
+                }}
+              >
+                {reasoningSummary}
+              </div>
             )}
             {messages.length === 0 && (
               <div

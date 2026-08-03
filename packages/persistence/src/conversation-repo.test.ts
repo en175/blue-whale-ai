@@ -1,10 +1,14 @@
 import type { PrismaClient } from "@prisma/client";
+import { bundledAgentRuntimeManifest } from "../../agent-runtime/src/runtime-manifest.js";
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 import { createConversationRepo } from "./conversation-repo.js";
 
 describe("ConversationRepo.acceptMessage", () => {
   it("atomically persists a sequenced message, queued run, events, and receipt", async () => {
+    const skillBody = "# Poster Skill";
+    const skillDigest = `sha256:${createHash("sha256").update(skillBody).digest("hex")}`;
     const tx = {
       project: {
         findFirst: vi.fn().mockResolvedValue({ id: 42n }),
@@ -29,6 +33,35 @@ describe("ConversationRepo.acceptMessage", () => {
           stage: "understanding",
           version: 0,
         }),
+      },
+      user_skill: {
+        findMany: vi.fn().mockResolvedValue([{ skill_id: 11n }]),
+      },
+      creative_skill: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            creative_skill_id: "official.poster",
+            name: "海报专家",
+            description: "海报排版",
+            source_skill_id: 11n,
+            active_version_id: "version.poster.1",
+            owner_user_id: 0n,
+            asset_domain: "official",
+          },
+        ]),
+      },
+      creative_skill_version: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            creative_skill_version_id: "version.poster.1",
+            creative_skill_id: "official.poster",
+            display_version: "1.0.0",
+            body: skillBody,
+            content_digest: skillDigest,
+            resource_digest: skillDigest,
+            media_type: "text/markdown",
+          },
+        ]),
       },
       conversation_messages: {
         create: vi.fn().mockResolvedValue({
@@ -61,7 +94,10 @@ describe("ConversationRepo.acceptMessage", () => {
     const transaction = vi.fn(async (callback) => callback(tx));
     const prisma = { $transaction: transaction } as unknown as PrismaClient;
 
-    const result = await createConversationRepo(prisma).acceptMessage({
+    const result = await createConversationRepo(
+      prisma,
+      bundledAgentRuntimeManifest,
+    ).acceptMessage({
       userId: "100",
       projectId: "42",
       idempotencyKey: "cmd-1",
@@ -71,6 +107,7 @@ describe("ConversationRepo.acceptMessage", () => {
       conversationId: null,
       replyToInputRequestId: null,
       skillSummarize: false,
+      forcedCreativeSkillId: null,
     });
 
     expect(result).toEqual({
@@ -100,6 +137,16 @@ describe("ConversationRepo.acceptMessage", () => {
         conversation_id: 7n,
         active_guard: 7n,
         status: "queued",
+        run_pin: expect.objectContaining({
+          manifest_digest: bundledAgentRuntimeManifest.manifest_digest,
+          auto_creative_skill_candidates: [
+            expect.objectContaining({
+              creative_skill_id: "official.poster",
+              resource_digest: skillDigest,
+            }),
+          ],
+          activated_creative_skill_versions: [],
+        }),
       }),
     });
     expect(tx.command_idempotency.create).toHaveBeenCalledWith({
@@ -110,6 +157,202 @@ describe("ConversationRepo.acceptMessage", () => {
         accepted_cursor: expect.any(BigInt),
       }),
     });
+    expect(tx.creative_skill.findMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        asset_domain: "official",
+        owner_user_id: 0n,
+      }),
+    });
+  });
+
+  it("freezes one authorized forced Skill and records its activation in the transaction", async () => {
+    const skillBody = "# Personal Storyboard";
+    const skillDigest = `sha256:${createHash("sha256").update(skillBody).digest("hex")}`;
+    const tx = {
+      project: { findFirst: vi.fn().mockResolvedValue({ id: 42n }) },
+      command_idempotency: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+      },
+      conversations: {
+        findFirst: vi.fn().mockResolvedValue({ id: 7n, project_id: 42n }),
+        update: vi.fn().mockResolvedValue({ id: 7n, version: 1 }),
+      },
+      agent_runs: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({
+          id: 9n,
+          conversation_id: 7n,
+          status: "queued",
+          stage: "understanding",
+          version: 0,
+        }),
+      },
+      creative_skill: {
+        findFirst: vi.fn().mockResolvedValue({
+          creative_skill_id: "personal.storyboard",
+          name: "我的分镜",
+          description: null,
+          active_version_id: "version.storyboard.1",
+          owner_user_id: 100n,
+          asset_domain: "personal",
+        }),
+      },
+      creative_skill_version: {
+        findFirst: vi.fn().mockResolvedValue({
+          creative_skill_version_id: "version.storyboard.1",
+          creative_skill_id: "personal.storyboard",
+          display_version: "1.0.0",
+          body: skillBody,
+          content_digest: skillDigest,
+          resource_digest: skillDigest,
+          media_type: "text/markdown",
+        }),
+      },
+      creative_skill_activation: { create: vi.fn() },
+      conversation_messages: {
+        create: vi.fn().mockResolvedValue({ id: 8n }),
+      },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi
+          .fn()
+          .mockResolvedValueOnce({ high_watermark: 1n })
+          .mockResolvedValueOnce({ high_watermark: 2n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 1n,
+          gmt_create: new Date("2026-08-04T00:00:00.000Z"),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    const result = await createConversationRepo(
+      prisma,
+      bundledAgentRuntimeManifest,
+    ).acceptMessage({
+      userId: "100",
+      projectId: "42",
+      idempotencyKey: "cmd-forced",
+      requestHash: "f".repeat(64),
+      clientMessageId: "client-forced",
+      content: "使用我的分镜",
+      conversationId: "7",
+      replyToInputRequestId: null,
+      forcedCreativeSkillId: "personal.storyboard",
+    });
+
+    expect(result.kind).toBe("accepted");
+    expect(tx.creative_skill.findFirst).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        creative_skill_id: "personal.storyboard",
+        OR: expect.arrayContaining([
+          { asset_domain: "personal", owner_user_id: 100n },
+        ]),
+      }),
+    });
+    expect(tx.agent_runs.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        run_pin: expect.objectContaining({
+          auto_creative_skill_candidates: [],
+          activated_creative_skill_versions: [
+            expect.objectContaining({
+              creative_skill_version_id: "version.storyboard.1",
+              source: "forced_use",
+              reason: { type: "user_use" },
+            }),
+          ],
+        }),
+      }),
+    });
+    expect(tx.creative_skill_activation.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        creative_skill_id: "personal.storyboard",
+        user_id: 100n,
+        agent_run_id: "9",
+        activation_source: "forced",
+      }),
+    });
+  });
+
+  it("rejects a forced Skill on an already-active run before writing the message", async () => {
+    const tx = {
+      project: { findFirst: vi.fn().mockResolvedValue({ id: 42n }) },
+      command_idempotency: { findUnique: vi.fn().mockResolvedValue(null) },
+      conversations: {
+        findFirst: vi.fn().mockResolvedValue({ id: 7n, project_id: 42n }),
+      },
+      agent_runs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 9n,
+          conversation_id: 7n,
+          active_guard: 7n,
+          status: "running",
+          version: 1,
+        }),
+        updateMany: vi.fn(),
+      },
+      conversation_messages: { create: vi.fn() },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createConversationRepo(prisma, bundledAgentRuntimeManifest).acceptMessage(
+        {
+          userId: "100",
+          projectId: "42",
+          idempotencyKey: "cmd-conflict",
+          requestHash: "e".repeat(64),
+          clientMessageId: "client-conflict",
+          content: "改用这个技能",
+          conversationId: "7",
+          replyToInputRequestId: null,
+          forcedCreativeSkillId: "official.poster",
+        },
+      ),
+    ).resolves.toEqual({ kind: "creative_skill_conflict" });
+    expect(tx.agent_runs.updateMany).not.toHaveBeenCalled();
+    expect(tx.conversation_messages.create).not.toHaveBeenCalled();
+  });
+
+  it("does not create a conversation when a forced Skill is unavailable", async () => {
+    const tx = {
+      project: { findFirst: vi.fn().mockResolvedValue({ id: 42n }) },
+      command_idempotency: { findUnique: vi.fn().mockResolvedValue(null) },
+      conversations: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: 7n, project_id: 42n }),
+      },
+      agent_runs: { findFirst: vi.fn().mockResolvedValue(null) },
+      creative_skill: { findFirst: vi.fn().mockResolvedValue(null) },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createConversationRepo(prisma, bundledAgentRuntimeManifest).acceptMessage(
+        {
+          userId: "100",
+          projectId: "42",
+          idempotencyKey: "cmd-unavailable",
+          requestHash: "d".repeat(64),
+          clientMessageId: "client-unavailable",
+          content: "使用不存在的技能",
+          conversationId: null,
+          replyToInputRequestId: null,
+          forcedCreativeSkillId: "missing.skill",
+        },
+      ),
+    ).resolves.toEqual({ kind: "creative_skill_unavailable" });
+    expect(tx.conversations.create).not.toHaveBeenCalled();
   });
 
   it("returns the first receipt for an identical replay and rejects a changed request", async () => {
@@ -130,7 +373,7 @@ describe("ConversationRepo.acceptMessage", () => {
     const prisma = {
       $transaction: vi.fn(async (callback) => callback(tx)),
     } as unknown as PrismaClient;
-    const repo = createConversationRepo(prisma);
+    const repo = createConversationRepo(prisma, bundledAgentRuntimeManifest);
     const base = {
       userId: "100",
       projectId: "42",
@@ -174,7 +417,10 @@ describe("ConversationRepo.acceptMessage", () => {
     const prisma = { $transaction: transaction } as unknown as PrismaClient;
 
     await expect(
-      createConversationRepo(prisma).acceptMessage({
+      createConversationRepo(
+        prisma,
+        bundledAgentRuntimeManifest,
+      ).acceptMessage({
         userId: "100",
         projectId: "42",
         idempotencyKey: "cmd-1",
@@ -189,7 +435,7 @@ describe("ConversationRepo.acceptMessage", () => {
     expect(transaction).toHaveBeenCalledTimes(2);
   });
 
-  it("locks an active run before attaching a later message", async () => {
+  it("rejects a later message once the sole Advance is already running", async () => {
     const running = {
       id: 9n,
       project_id: 42n,
@@ -244,7 +490,10 @@ describe("ConversationRepo.acceptMessage", () => {
     } as unknown as PrismaClient;
 
     await expect(
-      createConversationRepo(prisma).acceptMessage({
+      createConversationRepo(
+        prisma,
+        bundledAgentRuntimeManifest,
+      ).acceptMessage({
         userId: "100",
         projectId: "42",
         idempotencyKey: "cmd-2",
@@ -255,24 +504,14 @@ describe("ConversationRepo.acceptMessage", () => {
         replyToInputRequestId: null,
         skillSummarize: false,
       }),
-    ).resolves.toEqual(
-      expect.objectContaining({ kind: "accepted", agent_run_id: "9" }),
-    );
+    ).resolves.toEqual({ kind: "agent_run_conflict" });
 
-    expect(tx.agent_runs.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: 9n,
-        version: 3,
-        status: { in: [...ACTIVE_RUN_STATUSES_FOR_TEST] },
-        active_guard: 7n,
-        is_delete: 0,
-      },
-      data: { status: "running" },
-    });
+    expect(tx.agent_runs.updateMany).not.toHaveBeenCalled();
+    expect(tx.conversation_messages.create).not.toHaveBeenCalled();
     expect(tx.agent_runs.create).not.toHaveBeenCalled();
   });
 
-  it("emits the input-answered event in the message acceptance transaction", async () => {
+  it("rejects a reply that would require a second Advance", async () => {
     const run = {
       id: 9n,
       project_id: 42n,
@@ -338,28 +577,24 @@ describe("ConversationRepo.acceptMessage", () => {
       $transaction: vi.fn(async (callback) => callback(tx)),
     } as unknown as PrismaClient;
 
-    await createConversationRepo(prisma).acceptMessage({
-      userId: "100",
-      projectId: "42",
-      idempotencyKey: "cmd-answer",
-      requestHash: "c".repeat(64),
-      clientMessageId: "client-answer",
-      content: "极简风格",
-      conversationId: "7",
-      replyToInputRequestId: "12",
-      skillSummarize: false,
-    });
-
-    expect(createEvent).toHaveBeenLastCalledWith({
-      data: expect.objectContaining({
-        event_type: "agent_run.user_input_answered",
-        payload: expect.objectContaining({
-          input_request_id: "12",
-          answer_message_id: "10",
-          status: "answered",
-        }),
+    await expect(
+      createConversationRepo(
+        prisma,
+        bundledAgentRuntimeManifest,
+      ).acceptMessage({
+        userId: "100",
+        projectId: "42",
+        idempotencyKey: "cmd-answer",
+        requestHash: "c".repeat(64),
+        clientMessageId: "client-answer",
+        content: "极简风格",
+        conversationId: "7",
+        replyToInputRequestId: "12",
       }),
-    });
+    ).resolves.toEqual({ kind: "agent_run_conflict" });
+    expect(createEvent).not.toHaveBeenCalled();
+    expect(tx.user_input_requests.update).not.toHaveBeenCalled();
+    expect(tx.conversation_messages.create).not.toHaveBeenCalled();
   });
 
   // 总结当前对话意图持久化（IK60X1，契约 §15.2）：接纳 skill_summarize=true 的消息
@@ -387,6 +622,9 @@ describe("ConversationRepo.acceptMessage", () => {
           version: 0,
         }),
       },
+      user_skill: { findMany: vi.fn().mockResolvedValue([]) },
+      creative_skill: { findMany: vi.fn().mockResolvedValue([]) },
+      creative_skill_version: { findMany: vi.fn().mockResolvedValue([]) },
       conversation_messages: {
         create: vi.fn().mockResolvedValue({ id: 8n, sequence_no: 1 }),
       },
@@ -409,7 +647,10 @@ describe("ConversationRepo.acceptMessage", () => {
       $transaction: vi.fn(async (callback) => callback(tx)),
     } as unknown as PrismaClient;
 
-    await createConversationRepo(prisma).acceptMessage({
+    await createConversationRepo(
+      prisma,
+      bundledAgentRuntimeManifest,
+    ).acceptMessage({
       userId: "100",
       projectId: "42",
       idempotencyKey: "cmd-sum",
@@ -426,7 +667,7 @@ describe("ConversationRepo.acceptMessage", () => {
     });
   });
 
-  it("复用活动 Run 且本条消息带意图 → updateMany 置位 skill_summarize", async () => {
+  it("运行中的单 Advance 拒绝追加总结意图", async () => {
     const running = {
       id: 9n,
       project_id: 42n,
@@ -472,29 +713,25 @@ describe("ConversationRepo.acceptMessage", () => {
       $transaction: vi.fn(async (callback) => callback(tx)),
     } as unknown as PrismaClient;
 
-    await createConversationRepo(prisma).acceptMessage({
-      userId: "100",
-      projectId: "42",
-      idempotencyKey: "cmd-sum-2",
-      requestHash: "e".repeat(64),
-      clientMessageId: "client-sum-2",
-      content: "总结当前对话并保存为我的技能",
-      conversationId: "7",
-      replyToInputRequestId: null,
-      skillSummarize: true,
-    });
+    await expect(
+      createConversationRepo(
+        prisma,
+        bundledAgentRuntimeManifest,
+      ).acceptMessage({
+        userId: "100",
+        projectId: "42",
+        idempotencyKey: "cmd-sum-2",
+        requestHash: "e".repeat(64),
+        clientMessageId: "client-sum-2",
+        content: "总结当前对话并保存为我的技能",
+        conversationId: "7",
+        replyToInputRequestId: null,
+        skillSummarize: true,
+      }),
+    ).resolves.toEqual({ kind: "agent_run_conflict" });
 
-    expect(tx.agent_runs.updateMany).toHaveBeenCalledWith({
-      where: expect.objectContaining({ id: 9n }),
-      data: { status: "running", skill_summarize: true },
-    });
+    expect(tx.agent_runs.updateMany).not.toHaveBeenCalled();
+    expect(tx.conversation_messages.create).not.toHaveBeenCalled();
     expect(tx.agent_runs.create).not.toHaveBeenCalled();
   });
 });
-
-const ACTIVE_RUN_STATUSES_FOR_TEST = [
-  "queued",
-  "running",
-  "awaiting_input",
-  "awaiting_job",
-] as const;

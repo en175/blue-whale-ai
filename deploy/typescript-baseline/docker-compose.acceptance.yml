@@ -30,6 +30,7 @@ services:
       - ./init/000_create_new_api_database.sql:/docker-entrypoint-initdb.d/000_create_new_api_database.sql:ro
       - ../../packages/persistence/schema/001_baseline.sql:/docker-entrypoint-initdb.d/001_baseline.sql:ro
       - ../../packages/persistence/schema/002_seed.sql:/docker-entrypoint-initdb.d/002_seed.sql:ro
+      - ./init/003_acceptance_agent_skill.sql:/docker-entrypoint-initdb.d/003_acceptance_agent_skill.sql:ro
     healthcheck:
       test:
         [

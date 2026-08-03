@@ -127,9 +127,12 @@ async function fetchSnapshot(projectId, token) {
   return body.data;
 }
 
-function fakeAgentEcho(prompt) {
+function fakeAgentEcho(prompt, resourceDigest = null) {
+  const skillFingerprint = resourceDigest
+    ? `\ncreative-skill:${resourceDigest}`
+    : "";
   const fingerprint = createHash("sha256")
-    .update(`blue-whale-agent-fake-v1\n${prompt}`)
+    .update(`blue-whale-agent-fake-v1\n${prompt}${skillFingerprint}`)
     .digest("hex");
   return `fake-agent-response:${fingerprint}`;
 }
@@ -338,6 +341,8 @@ test("第一条消息经公开 API 接纳：欢迎态消失，UI/Snapshot/持久
     expectedReply,
     { timeout: 90_000 },
   );
+  await page.getByLabel("Agent 状态：已完成").waitFor();
+  await page.getByText("已完成回答。", { exact: true }).waitFor();
 
   // 草稿应已清除
   const draftKeyA = `blue-whale:canvas-composer-draft:${projectA}`;
@@ -398,6 +403,83 @@ test("第一条消息经公开 API 接纳：欢迎态消失，UI/Snapshot/持久
     "服务=mysql 事实=正式消息应使用服务端身份与 Conversation 内顺序",
   );
 }, 240_000);
+
+test("forced 与 auto Skill 经公开 API 后在 AgentChatPanel 安全恢复", async () => {
+  const forcedProject = await createProject("浏览器强制 Skill", user.token);
+  const privateBody = `BROWSER_PRIVATE_SKILL_${Date.now()}`;
+  const created = await postJson(
+    "/api/agent/skills/personal",
+    {
+      content: `---\nname: Browser Forced\ndescription: acceptance\n---\n${privateBody}`,
+    },
+    user.token,
+  );
+  assert.equal(created.body.code, 200);
+  const forcedSkillId = created.body.data?.creative_skill_id;
+  const forcedKey = uniqueKey("browser-forced");
+  await postJson(
+    `/api/projects/${forcedProject}/conversation/messages`,
+    {
+      client_message_id: forcedKey,
+      content: "浏览器强制技能消息",
+      forced_creative_skill_id: forcedSkillId,
+    },
+    user.token,
+    { "Idempotency-Key": forcedKey },
+  );
+  const forcedSnapshot = await waitFor(
+    async () => {
+      const current = await fetchSnapshot(forcedProject, user.token);
+      return current.agent_runs?.at(-1)?.status === "completed" ? current : null;
+    },
+    90_000,
+    "服务=agent-worker 事实=浏览器 forced Run 应完成",
+  );
+  assert.equal(JSON.stringify(forcedSnapshot).includes(privateBody), false);
+  await openCanvas(forcedProject);
+  await page.getByLabel("已激活技能：Browser Forced").waitFor();
+  await page.getByLabel("Agent 状态：已完成").waitFor();
+  await page.getByText("已使用「Browser Forced」完成回答。", { exact: true }).waitFor();
+
+  const autoProject = await createProject("浏览器自动 Skill", user.token);
+  const added = await postJson(
+    "/api/agent/skills/library/acceptance_poster/add",
+    {},
+    user.token,
+  );
+  assert.equal(added.body.code, 200);
+  const enabled = await requestJson(
+    "/api/agent/skills/mine/acceptance_poster",
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${user.token}`,
+      },
+      body: JSON.stringify({ auto: true }),
+    },
+  );
+  assert.equal(enabled.body.code, 200);
+  const autoKey = uniqueKey("browser-auto");
+  await postJson(
+    `/api/projects/${autoProject}/conversation/messages`,
+    { client_message_id: autoKey, content: "Acceptance Poster" },
+    user.token,
+    { "Idempotency-Key": autoKey },
+  );
+  await waitFor(
+    async () => {
+      const current = await fetchSnapshot(autoProject, user.token);
+      return current.agent_runs?.at(-1)?.status === "completed" ? current : null;
+    },
+    90_000,
+    "服务=agent-worker 事实=浏览器 auto Run 应完成",
+  );
+  await openCanvas(autoProject);
+  await page.getByLabel("已激活技能：Acceptance Poster").waitFor();
+  await page.getByLabel("Agent 状态：已完成").waitFor();
+  await page.getByText("已使用「Acceptance Poster」完成回答。", { exact: true }).waitFor();
+}, 300_000);
 
 test("CommandId 幂等：同键同内容重放返回首次结果，同键异内容拒绝", async () => {
   const key = uniqueKey("browser-idem");

@@ -24,6 +24,9 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 
 import { runAgentWorkerLoop } from "./worker-loop.js";
+import { validateAgentWorkerStartup } from "./startup.js";
+
+validateAgentWorkerStartup();
 
 if ((process.env.AGENT_RUNTIME_MODE ?? "fake") !== "fake") {
   throw new Error("Slice 0 only supports AGENT_RUNTIME_MODE=fake");

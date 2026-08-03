@@ -109,6 +109,22 @@ describe("SnapshotRepo.loadConversationState", () => {
             status: "awaiting_input",
             stage: "clarifying",
             version: 2,
+            run_pin: { creative_skill_resources: [{ body: "private" }] },
+            activated_creative_skill_versions: [
+              {
+                creative_skill_id: "official.poster",
+                creative_skill_version_id: "version.poster.1",
+                name: "海报专家",
+                display_version: "1.0.0",
+                resource_digest: `sha256:${"a".repeat(64)}`,
+                source: "auto",
+                reason: {
+                  type: "agent_match",
+                  detail: { matched_fields: ["conversation_messages"] },
+                },
+              },
+            ],
+            reasoning_summary: "已使用「海报专家」完成回答。",
           },
         ]),
       },
@@ -133,10 +149,23 @@ describe("SnapshotRepo.loadConversationState", () => {
           active_input_request: expect.objectContaining({
             input_request_id: "10",
           }),
+          activated_creative_skill_versions: [
+            expect.objectContaining({
+              creative_skill_id: "official.poster",
+              name: "海报专家",
+              source: "auto",
+            }),
+          ],
+          reasoning_summary: "已使用「海报专家」完成回答。",
         }),
       ],
       high_watermark_cursor: "12",
     });
+    const serialized = JSON.stringify(
+      await createSnapshotRepo(prisma).loadConversationState("42"),
+    );
+    expect(serialized).not.toContain("run_pin");
+    expect(serialized).not.toContain("private");
     expect(findInputRequests).toHaveBeenCalledWith({
       where: {
         project_id: 42n,
