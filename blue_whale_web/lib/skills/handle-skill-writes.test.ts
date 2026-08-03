@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   handleAddSkill,
   handleCreateSkill,
+  handleDeletePersonalSkill,
+  handleGetPersonalSkill,
   handleRemoveSkill,
   handleUpdateSkillAuto,
   parseSkillMd,
@@ -24,6 +26,8 @@ function makeRepo() {
     removeReferenceByCreativeSkillId: vi.fn(),
     updateAutoByCreativeSkillId: vi.fn(),
     createPersonalSkill: vi.fn(),
+    findPersonalContent: vi.fn(),
+    deletePersonal: vi.fn(),
   };
 }
 
@@ -309,5 +313,102 @@ describe("handleCreateSkill", () => {
     expect(result.code).toBe(400);
     expect(result.msg).toContain("正文");
     expect(repo.createPersonalSkill).not.toHaveBeenCalled();
+  });
+});
+
+// 个人技能只读正文与永久删除（IK60WZ，契约 §13）：
+// owner 谓词在 repo 层强制；handler 只负责 ID 守卫与 100100 语义。
+
+describe("handleGetPersonalSkill", () => {
+  it("owner 命中 → 返回重建的完整 SKILL.md 文本（契约 §13.1）", async () => {
+    const repo = makeRepo();
+    repo.findPersonalContent.mockResolvedValue({
+      name: "我的技能",
+      description: "个人资产",
+      body: "正文内容",
+    });
+    const result = await handleGetPersonalSkill("9", "my_personal", {
+      skills: repo,
+    });
+    expect(result).toEqual({
+      code: 200,
+      msg: null,
+      data: {
+        content:
+          "---\nname: 我的技能\ndescription: 个人资产\n---\n\n正文内容\n",
+      },
+    });
+    expect(repo.findPersonalContent).toHaveBeenCalledWith("9", "my_personal");
+  });
+
+  it("description 为空（库内可空）→ frontmatter 输出空串", async () => {
+    const repo = makeRepo();
+    repo.findPersonalContent.mockResolvedValue({
+      name: "我的技能",
+      description: null,
+      body: "正文",
+    });
+    const result = await handleGetPersonalSkill("9", "my_personal", {
+      skills: repo,
+    });
+    expect(result.data).toEqual({
+      content: "---\nname: 我的技能\ndescription: \n---\n\n正文\n",
+    });
+  });
+
+  it("未命中（官方域/非 owner/未知）→ 100100，不泄露存在性", async () => {
+    const repo = makeRepo();
+    repo.findPersonalContent.mockResolvedValue(null);
+    const result = await handleGetPersonalSkill("7", "my_personal", {
+      skills: repo,
+    });
+    expect(result).toEqual({
+      code: 100100,
+      msg: "Skill 不存在: my_personal",
+      data: null,
+    });
+  });
+
+  it("creative_skill_id 格式非法 → 100100，不触碰 repo", async () => {
+    const repo = makeRepo();
+    const result = await handleGetPersonalSkill("9", "BAD-ID!!", {
+      skills: repo,
+    });
+    expect(result.code).toBe(100100);
+    expect(repo.findPersonalContent).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleDeletePersonalSkill", () => {
+  it("owner 命中 → 永久删除 → 200（契约 §13.2）", async () => {
+    const repo = makeRepo();
+    repo.deletePersonal.mockResolvedValue(true);
+    const result = await handleDeletePersonalSkill("9", "my_personal", {
+      skills: repo,
+    });
+    expect(result).toEqual({ code: 200, msg: null, data: null });
+    expect(repo.deletePersonal).toHaveBeenCalledWith("9", "my_personal");
+  });
+
+  it("未命中（官方域/非 owner/未知/重复删除）→ 100100", async () => {
+    const repo = makeRepo();
+    repo.deletePersonal.mockResolvedValue(false);
+    const result = await handleDeletePersonalSkill("7", "my_personal", {
+      skills: repo,
+    });
+    expect(result).toEqual({
+      code: 100100,
+      msg: "Skill 不存在: my_personal",
+      data: null,
+    });
+  });
+
+  it("creative_skill_id 格式非法 → 100100，不触碰 repo", async () => {
+    const repo = makeRepo();
+    const result = await handleDeletePersonalSkill("9", "Poster_gen", {
+      skills: repo,
+    });
+    expect(result.code).toBe(100100);
+    expect(repo.deletePersonal).not.toHaveBeenCalled();
   });
 });

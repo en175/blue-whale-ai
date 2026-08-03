@@ -846,8 +846,49 @@ describe("SkillRepo", () => {
     await expect(repo.resolveOfficialSkillId("deep_writing")).resolves.toBeNull();
     await expect(repo.listPersonalByOwner("9")).resolves.toEqual([]);
     await expect(repo.findPersonalView("9", "my_personal")).resolves.toBeNull();
+    await expect(
+      repo.findPersonalContent("9", "my_personal"),
+    ).resolves.toBeNull();
     await expect(repo.deletePersonal("9", "my_personal")).rejects.toThrow(
       "table missing",
+    );
+  });
+
+  it("findPersonalContent owner 命中返回 name/description/body（契约 §13.1）", async () => {
+    const queryRawUnsafe = vi.fn().mockResolvedValue([
+      { name: "我的技能", description: "个人资产", body: "正文内容" },
+    ]);
+    const prisma = {
+      $queryRawUnsafe: queryRawUnsafe,
+    } as unknown as PrismaClient;
+
+    await expect(
+      createSkillRepo(prisma).findPersonalContent("9", "my_personal"),
+    ).resolves.toEqual({
+      name: "我的技能",
+      description: "个人资产",
+      body: "正文内容",
+    });
+    const [sql, ...params] = queryRawUnsafe.mock.calls[0];
+    expect(sql).toContain("asset_domain = 'personal'");
+    expect(sql).toContain("owner_user_id = ?");
+    expect(sql).toContain("creative_skill_version");
+    expect(params).toEqual([9n, "my_personal"]);
+  });
+
+  it("findPersonalContent 非 owner 调用不命中（null，不泄露存在性）", async () => {
+    const queryRawUnsafe = vi.fn().mockResolvedValue([]);
+    const prisma = {
+      $queryRawUnsafe: queryRawUnsafe,
+    } as unknown as PrismaClient;
+
+    await expect(
+      createSkillRepo(prisma).findPersonalContent("7", "my_personal"),
+    ).resolves.toBeNull();
+    expect(queryRawUnsafe).toHaveBeenCalledWith(
+      expect.stringContaining("owner_user_id = ?"),
+      7n,
+      "my_personal",
     );
   });
 });

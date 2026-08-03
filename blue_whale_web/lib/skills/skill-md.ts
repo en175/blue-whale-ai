@@ -28,3 +28,13 @@ export function parseSkillMd(content: string): {
     body,
   };
 }
+
+/** parseSkillMd 的对称重建（IK60WZ 只读查看/复制，契约 §13.1）：
+ *  name/description → frontmatter，body 原样接回，产出完整 SKILL.md 文本。 */
+export function serializeSkillMd(input: {
+  name: string;
+  description: string;
+  body: string;
+}): string {
+  return `---\nname: ${input.name}\ndescription: ${input.description}\n---\n\n${input.body}\n`;
+}

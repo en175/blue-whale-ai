@@ -5,7 +5,7 @@ import {
   SkillNameReservedError,
   type SkillRepo,
 } from "@blue-whale/persistence";
-import { parseSkillMd } from "./skill-md";
+import { parseSkillMd, serializeSkillMd } from "./skill-md";
 
 export { parseSkillMd };
 
@@ -129,4 +129,46 @@ export async function handleCreateSkill(
     }
     throw e;
   }
+}
+
+/** GET /api/agent/skills/personal/{id}：owner 只读正文（契约 §13.1，IK60WZ）。
+ *  owner + personal 谓词在 repo 层强制；官方域/非 owner/未知/格式非法 → 100100，
+ *  不泄露存在性。命中时重建完整 SKILL.md 文本返回（只读，无编辑/下载语义）。 */
+export async function handleGetPersonalSkill(
+  userId: string,
+  creativeSkillId: string,
+  deps: { skills: Pick<SkillRepo, "findPersonalContent"> },
+) {
+  const invalid = validateCreativeSkillId(creativeSkillId);
+  if (invalid) return invalid;
+  const content = await deps.skills.findPersonalContent(
+    userId,
+    creativeSkillId,
+  );
+  if (!content) {
+    return fail(DATA_NOT_EXIST_CODE, `Skill 不存在: ${creativeSkillId}`);
+  }
+  return ok({
+    content: serializeSkillMd({
+      name: content.name,
+      description: content.description ?? "",
+      body: content.body,
+    }),
+  });
+}
+
+/** DELETE /api/agent/skills/personal/{id}：owner 永久删除个人技能（契约 §13.2，IK60WZ）。
+ *  物理删本体与版本行，不可逆；官方域/非 owner/未知/格式非法/重复删 → 100100。 */
+export async function handleDeletePersonalSkill(
+  userId: string,
+  creativeSkillId: string,
+  deps: { skills: Pick<SkillRepo, "deletePersonal"> },
+) {
+  const invalid = validateCreativeSkillId(creativeSkillId);
+  if (invalid) return invalid;
+  const deleted = await deps.skills.deletePersonal(userId, creativeSkillId);
+  if (!deleted) {
+    return fail(DATA_NOT_EXIST_CODE, `Skill 不存在: ${creativeSkillId}`);
+  }
+  return ok();
 }

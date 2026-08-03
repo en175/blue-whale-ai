@@ -37,7 +37,8 @@ import {
  * 之后保持挂载（hidden），切换页签不丢查询与滚动状态。
  * - 「我的技能」：mine API（POST 分页，官方引用 ∪ 个人技能并集 + auto）。官方引用行
  *   带省略号菜单，仅「移出我的技能」（IK60WX：立即生效、无确认、成功提示）；
- *   个人技能行无菜单（删除归后续工单）。
+ *   个人技能行菜单为「查看技能」（只读 SKILL.md + 复制）与「删除技能」（确认框 +
+ *   永久删除，IK60WZ，契约 §13）。
  * - 「技能库」：library API（POST 分页，keyword + category + sort + lang，
  *   IO + sentinel 无限滚动，reqId 防过期），竖版卡片网格（3/2/1 列）。
  * add 在 library tab 内（乐观 + 回滚；成功后按钮变不可点击「已添加」+ toast，IK60WX）；
@@ -683,6 +684,20 @@ function MyContent({
       });
   };
 
+  // 个人技能查看/删除（IK60WZ，契约 §13）：弹层状态；删除需先过确认框。
+  const [viewerSkill, setViewerSkill] = useState<SkillMineItem | null>(null);
+  const [deleteSkill, setDeleteSkill] = useState<SkillMineItem | null>(null);
+
+  // 永久删除：确认框确认后调用；成功立即移除卡片 + toast，失败在确认框内显示错误。
+  const handleDeleteConfirmed = async (creativeSkillId: string) => {
+    await skillsApi.deletePersonalSkill(creativeSkillId);
+    setItems((prev) =>
+      prev.filter((s) => s.creative_skill_id !== creativeSkillId),
+    );
+    setDeleteSkill(null);
+    onToast("技能已删除");
+  };
+
   return (
     <div className="tc-agent-skill-panel__content flex flex-col flex-1 min-h-0 overflow-hidden bg-[#141414]">
       {error && (
@@ -719,6 +734,8 @@ function MyContent({
                   skill.creative_skill_id &&
                   handleRemove(skill.creative_skill_id)
                 }
+                onView={() => setViewerSkill(skill)}
+                onDelete={() => setDeleteSkill(skill)}
                 onUse={() =>
                   onUse({
                     creative_skill_id: skill.creative_skill_id ?? null,
@@ -745,6 +762,19 @@ function MyContent({
           </div>
         )}
       </div>
+      {viewerSkill && (
+        <PersonalSkillViewer
+          skill={viewerSkill}
+          onClose={() => setViewerSkill(null)}
+        />
+      )}
+      {deleteSkill && (
+        <PersonalSkillDeleteDialog
+          skill={deleteSkill}
+          onCancel={() => setDeleteSkill(null)}
+          onConfirm={handleDeleteConfirmed}
+        />
+      )}
     </div>
   );
 }
@@ -1107,11 +1137,15 @@ function MySkillRow({
   skill,
   onToggleAuto,
   onRemove,
+  onView,
+  onDelete,
   onUse,
 }: {
   skill: SkillMineItem;
   onToggleAuto: () => void;
   onRemove: () => void;
+  onView: () => void;
+  onDelete: () => void;
   onUse: () => void;
 }) {
   const auto = skill.auto;
@@ -1120,7 +1154,8 @@ function MySkillRow({
   const canToggleAuto =
     skill.creative_skill_id !== null && skill.asset_domain !== "personal";
   const displayName = skill.name ?? "—";
-  // 官方引用行省略号菜单（IK60WX）：仅「移出我的技能」。个人行无菜单（删除归后续工单）。
+  // 省略号菜单（IK60WX/IK60WZ）：官方引用行仅「移出我的技能」；
+  // 个人行「查看技能」（只读正文 + 复制）与「删除技能」（确认框 + 永久删除）。
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -1147,35 +1182,35 @@ function MySkillRow({
             <span className="tc-agent-skill-row__title text-[13px] font-semibold text-white/90 truncate">
               {displayName}
             </span>
-            {skill.asset_domain === "official" && (
-              <span
-                ref={menuRef}
-                className="tc-agent-skill-row__menu relative inline-flex ml-auto shrink-0"
-                onKeyDown={(e) => {
-                  // 菜单打开时 ESC 先收菜单（stopPropagation 防冒到 window 关面板）
-                  if (e.key === "Escape" && menuOpen) {
-                    e.stopPropagation();
-                    setMenuOpen(false);
-                  }
-                }}
+            <span
+              ref={menuRef}
+              className="tc-agent-skill-row__menu relative inline-flex ml-auto shrink-0"
+              onKeyDown={(e) => {
+                // 菜单打开时 ESC 先收菜单（stopPropagation 防冒到 window 关面板）
+                if (e.key === "Escape" && menuOpen) {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                }
+              }}
+            >
+              <button
+                type="button"
+                data-testid="skill-my-row-menu"
+                aria-label={`更多操作：${displayName}`}
+                aria-expanded={menuOpen}
+                aria-haspopup="menu"
+                className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-white/45 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
+                onClick={() => setMenuOpen((v) => !v)}
               >
-                <button
-                  type="button"
-                  data-testid="skill-my-row-menu"
-                  aria-label={`更多操作：${displayName}`}
-                  aria-expanded={menuOpen}
-                  aria-haspopup="menu"
-                  className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-white/45 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
-                  onClick={() => setMenuOpen((v) => !v)}
+                <MoreHorizontal size={14} aria-hidden="true" />
+              </button>
+              {menuOpen && (
+                <div
+                  role="menu"
+                  aria-label={`技能操作：${displayName}`}
+                  className="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-white/[0.1] bg-[#1c1c1c] py-1 shadow-[0_8px_30px_rgba(0,0,0,0.45)]"
                 >
-                  <MoreHorizontal size={14} aria-hidden="true" />
-                </button>
-                {menuOpen && (
-                  <div
-                    role="menu"
-                    aria-label={`技能操作：${displayName}`}
-                    className="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-white/[0.1] bg-[#1c1c1c] py-1 shadow-[0_8px_30px_rgba(0,0,0,0.45)]"
-                  >
+                  {skill.asset_domain === "official" ? (
                     <button
                       type="button"
                       role="menuitem"
@@ -1188,10 +1223,37 @@ function MySkillRow({
                     >
                       移出我的技能
                     </button>
-                  </div>
-                )}
-              </span>
-            )}
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        data-testid="skill-my-row-view"
+                        className="flex w-full items-center px-3 py-1.5 text-left text-[12px] text-white/60 hover:bg-white/[0.06] hover:text-white/90 transition-colors"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onView();
+                        }}
+                      >
+                        查看技能
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        data-testid="skill-my-row-delete"
+                        className="flex w-full items-center px-3 py-1.5 text-left text-[12px] text-[var(--tc-destructive)] hover:bg-white/[0.06] transition-colors"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onDelete();
+                        }}
+                      >
+                        删除技能
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </span>
           </span>
           <span className="tc-agent-skill-row__desc text-xs text-white/50 line-clamp-2 leading-relaxed break-words">
             {skill.description || "—"}
@@ -1313,5 +1375,236 @@ function UseButton({
       <AtSign size={12} aria-hidden="true" />
       <span>直接使用</span>
     </button>
+  );
+}
+
+/** 个人技能只读视图（IK60WZ，契约 §13.1）：拉取重建的完整 SKILL.md 原文展示，
+ *  可复制 Markdown 到剪贴板；不可编辑、不提供下载。非 owner 端点返回 100100 → 错误态。 */
+function PersonalSkillViewer({
+  skill,
+  onClose,
+}: {
+  skill: SkillMineItem;
+  onClose: () => void;
+}) {
+  const [content, setContent] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  // 个人行正常都有稳定身份；缺失属异常数据，渲染期直接给错误态，不发请求
+  const missingId = skill.creative_skill_id === null;
+
+  useEffect(() => {
+    if (missingId) return;
+    let cancelled = false;
+    skillsApi
+      .getPersonalSkill(skill.creative_skill_id as string)
+      .then((res) => {
+        if (!cancelled) setContent(res.content);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : "加载失败");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [missingId, skill.creative_skill_id]);
+
+  const handleCopy = async () => {
+    if (content === null) return;
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError("复制失败，请手动选择文本复制");
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-150 motion-reduce:animate-none"
+      onMouseDown={(e) => {
+        if (e.button === 0) {
+          e.preventDefault();
+          onClose();
+        }
+      }}
+    >
+      <div
+        data-testid="skill-personal-viewer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`查看技能：${skill.name ?? ""}`}
+        className="bg-[#141414] border border-white/[0.12] rounded-2xl shadow-[var(--tc-modal-shadow)] w-[640px] max-w-[calc(100vw-96px)] max-h-[calc(100vh-128px)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 motion-reduce:animate-none"
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // ESC 只关本弹层，不冒到 window 关掉整个技能面板
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            onClose();
+          }
+        }}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08]">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[13px] font-semibold text-white/90 truncate">
+              {skill.name ?? "—"}
+            </span>
+            <span className="shrink-0 text-[11px] text-white/40">
+              SKILL.md · 只读
+            </span>
+          </div>
+          <button
+            type="button"
+            data-testid="skill-personal-viewer-close"
+            aria-label="关闭查看"
+            className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-white/45 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
+            onClick={onClose}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
+          {missingId ? (
+            <div
+              data-testid="skill-personal-viewer-error"
+              className="text-[12px] text-white/60"
+            >
+              该技能缺少稳定身份，无法查看
+            </div>
+          ) : error ? (
+            <div
+              data-testid="skill-personal-viewer-error"
+              className="text-[12px] text-white/60"
+            >
+              {error}
+            </div>
+          ) : content === null ? (
+            <div className="text-[12px] text-white/40">加载中…</div>
+          ) : (
+            <pre
+              data-testid="skill-personal-viewer-content"
+              className="text-[12px] leading-relaxed text-white/80 font-mono whitespace-pre-wrap break-words select-text"
+            >
+              {content}
+            </pre>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-white/[0.08]">
+          <button
+            type="button"
+            className="h-8 px-3 rounded-lg text-[12px] text-white/70 border border-white/[0.08] hover:bg-white/[0.06] hover:text-white transition-colors"
+            onClick={onClose}
+          >
+            关闭
+          </button>
+          <button
+            type="button"
+            data-testid="skill-personal-viewer-copy"
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12px] font-medium bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+            disabled={content === null}
+            onClick={handleCopy}
+          >
+            {copied ? <Check size={13} aria-hidden="true" /> : null}
+            {copied ? "已复制" : "复制 Markdown"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 个人技能永久删除确认框（IK60WZ，契约 §13.2）：显示技能名并明确不可逆后果；
+ *  确认后调删除端点，成功由调用方移除卡片；失败在框内显示错误、不关闭。 */
+function PersonalSkillDeleteDialog({
+  skill,
+  onCancel,
+  onConfirm,
+}: {
+  skill: SkillMineItem;
+  onCancel: () => void;
+  onConfirm: (creativeSkillId: string) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const displayName = skill.name ?? "—";
+
+  const handleConfirm = async () => {
+    if (!skill.creative_skill_id || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onConfirm(skill.creative_skill_id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "删除失败，请重试");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-150 motion-reduce:animate-none"
+      onMouseDown={(e) => {
+        if (e.button === 0 && !busy) {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
+    >
+      <div
+        data-testid="skill-personal-delete-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={`删除技能：${displayName}`}
+        className="bg-[#141414] border border-white/[0.12] rounded-2xl shadow-[var(--tc-modal-shadow)] w-[400px] max-w-[calc(100vw-96px)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 motion-reduce:animate-none"
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && !busy) {
+            e.stopPropagation();
+            onCancel();
+          }
+        }}
+      >
+        <div className="px-4 pt-4 pb-2">
+          <div className="text-[14px] font-semibold text-white/90">
+            删除技能
+          </div>
+          <p className="mt-2 text-[12px] leading-relaxed text-white/70 break-words">
+            确认删除「{displayName}」？
+          </p>
+          <p className="mt-1 text-[12px] leading-relaxed text-white/50">
+            删除后该技能的正文不可查看、复制或复用，且无法恢复。
+          </p>
+          {error && (
+            <p
+              data-testid="skill-personal-delete-error"
+              className="mt-2 text-[12px] text-[var(--tc-destructive)]"
+            >
+              {error}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 px-4 py-3">
+          <button
+            type="button"
+            data-testid="skill-personal-delete-cancel"
+            className="h-8 px-3 rounded-lg text-[12px] text-white/70 border border-white/[0.08] hover:bg-white/[0.06] hover:text-white transition-colors disabled:opacity-40 disabled:pointer-events-none"
+            disabled={busy}
+            onClick={onCancel}
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            data-testid="skill-personal-delete-confirm"
+            className="h-8 px-3 rounded-lg text-[12px] font-medium text-white bg-[var(--tc-destructive)] hover:opacity-90 transition-opacity disabled:opacity-40 disabled:pointer-events-none"
+            disabled={busy}
+            onClick={handleConfirm}
+          >
+            {busy ? "删除中…" : "删除"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

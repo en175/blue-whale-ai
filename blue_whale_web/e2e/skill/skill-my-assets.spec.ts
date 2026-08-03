@@ -8,7 +8,7 @@
  * 锁定验收（契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §5.4/§6）：
  *  1. 添加成功：停留技能库，按钮变不可点击「已添加」+ 成功提示；
  *  2. 「我的技能」统一显示官方引用 ∪ 个人技能，@官方 / @个人 标记区分；
- *     官方行有省略号菜单，个人行无菜单；
+ *     官方行菜单仅「移出我的技能」；个人行菜单为「查看技能/删除技能」（IK60WZ）；
  *  3. 移除：菜单仅「移出我的技能」，立即生效、无确认、成功提示；
  *     移除后技能库卡片回到「添加」可再次添加；
  *  4. 同名冲突（100103）：添加被拒并展示服务端解释，按钮回滚，直接使用不受影响。
@@ -240,7 +240,7 @@ test("添加：成功停留技能库，按钮变不可点击「已添加」并�
   expect(calls.add).toEqual(["skill_storyboard"]);
 });
 
-test("我的技能：官方引用 ∪ 个人技能统一显示，@官方/@个人 标记，官方行有菜单个人行无", async ({
+test("我的技能：官方引用 ∪ 个人技能统一显示，@官方/@个人 标记，两域菜单项不同", async ({
   page,
 }) => {
   await bootstrap(page, { preAdded: ["skill_storyboard"] });
@@ -253,15 +253,29 @@ test("我的技能：官方引用 ∪ 个人技能统一显示，@官方/@个人
   await expect(page.getByText("@官方")).toBeVisible();
   await expect(page.getByText("@个人")).toBeVisible();
 
-  // 官方引用行有省略号菜单，个人技能行无菜单
+  // 官方引用行菜单仅「移出我的技能」；个人行菜单为「查看技能/删除技能」（IK60WZ）
   const officialRow = page
     .getByTestId("skill-my-row")
     .filter({ hasText: "分镜大师" });
   const personalRow = page
     .getByTestId("skill-my-row")
     .filter({ hasText: "我的个人技能" });
-  await expect(officialRow.getByTestId("skill-my-row-menu")).toHaveCount(1);
-  await expect(personalRow.getByTestId("skill-my-row-menu")).toHaveCount(0);
+
+  await officialRow.getByTestId("skill-my-row-menu").click();
+  const officialMenu = page.locator('[role="menu"]');
+  await expect(officialMenu.getByRole("menuitem")).toHaveCount(1);
+  await expect(officialMenu.getByTestId("skill-my-row-remove")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await personalRow.getByTestId("skill-my-row-menu").click();
+  const personalMenu = page.locator('[role="menu"]');
+  await expect(personalMenu.getByRole("menuitem")).toHaveCount(2);
+  await expect(personalMenu.getByTestId("skill-my-row-view")).toHaveText(
+    "查看技能",
+  );
+  await expect(personalMenu.getByTestId("skill-my-row-delete")).toHaveText(
+    "删除技能",
+  );
 });
 
 test("移除：菜单仅「移出我的技能」，立即生效并提示；技能库可再次添加", async ({
