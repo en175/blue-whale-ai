@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@types/node": "24.13.3",
+    "playwright": "^1.48.0",
     "typescript": "5.9.3",
     "vitest": "2.1.9"
   }

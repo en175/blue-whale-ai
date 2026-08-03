@@ -30,6 +30,9 @@ export GIT_COMMIT BUILD_TIME
 export BW_TS_COMPOSE_FILE="$COMPOSE_FILE"
 export BW_TS_COMPOSE_PROJECT="$PROJECT"
 
+# 浏览器层黑盒验收（IK67GD T02）在宿主机驱动 chromium；已安装时跳过下载。
+pnpm --dir "$ROOT" exec playwright install chromium
+
 mkdir -p \
   "$NEW_API_SOURCE_DIR/web/default/dist" \
   "$NEW_API_SOURCE_DIR/web/classic/dist"
@@ -138,6 +141,12 @@ while [ "$SECONDS" -lt "$deadline" ]; do
         dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
           | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
         echo "black-box scenario acceptance failed" >&2
+        exit 1
+      fi
+      if ! node --test "$ROOT/tests/typescript-baseline/conversation-browser-blackbox.test.mjs"; then
+        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
+          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
+        echo "browser conversation acceptance failed" >&2
         exit 1
       fi
       exit 0

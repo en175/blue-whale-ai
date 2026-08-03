@@ -35,6 +35,7 @@ import {
 import { effectiveToolMode, type ToolMode } from "./_canvas/v2/toolMode";
 import { useSpaceHeld } from "./_canvas/v2/useSpaceHeld";
 import { useV2Projects } from "./_canvas/v2/useV2Projects";
+import { useProjectConversation } from "./_canvas/hooks/useProjectConversation";
 import {
   buildCrossmodalRefill,
   canvasNodeToDockMedia,
@@ -165,6 +166,14 @@ export function CanvasProjectRuntime({
     appendMessages,
     setCardStatus,
   } = useV2Projects(pid);
+
+  // 持久化 Conversation 接线（IK67GD T02）：后端可用时消息权威来自 Snapshot/SSE，
+  // 提交走公开接纳 API；后端不可达时保留既有离线 mock（messages 内存态 + 无 onSubmitMessage）。
+  const {
+    messages: conversationMessages,
+    sendMessage: sendConversationMessage,
+    answerableActive,
+  } = useProjectConversation(pid, backendReady);
 
   // canvas 数据 = useCanvasDoc hook（本地 state，不卡）；assets = zustand（业务缓存）
   const {
@@ -1617,7 +1626,10 @@ export function CanvasProjectRuntime({
       <AgentChatPanel
         key={activeProject.id}
         prompt={prompt}
-        messages={messages}
+        projectId={activeProject.id}
+        messages={backendReady ? conversationMessages : messages}
+        onSubmitMessage={backendReady ? sendConversationMessage : undefined}
+        answerableActive={answerableActive}
         isOpen={isAgentOpen}
         onClose={() => setIsAgentOpen(false)}
         pendingMention={agentPendingMention}

@@ -15,7 +15,7 @@ import { AuthenticatedImage } from "./AuthenticatedImage";
 
 export function UserMessageBubble({ text }: { text: string }) {
   return (
-    <div className="self-end max-w-[82%] whitespace-pre-wrap break-words rounded-[18px] border border-white/[0.04] bg-white/[0.1] px-3.5 py-2 text-[13px] leading-normal text-white/[0.9]">
+    <div className="tc-agent-user-bubble self-end max-w-[82%] whitespace-pre-wrap break-words rounded-[18px] border border-white/[0.04] bg-white/[0.1] px-3.5 py-2 text-[13px] leading-normal text-white/[0.9]">
       {text}
     </div>
   );
@@ -35,7 +35,7 @@ export function AgentMessageBubble({ text }: { text: string }) {
     return { segment, isFirst: priorNonEmpty === 0, isSpacer: false };
   });
   return (
-    <div className="self-start max-w-[92%] whitespace-pre-wrap break-words rounded-[12px] rounded-bl-[2px] px-2.5 py-2 text-[13px] font-normal leading-[21px] text-white/[0.9]">
+    <div className="tc-agent-agent-bubble self-start max-w-[92%] whitespace-pre-wrap break-words rounded-[12px] rounded-bl-[2px] px-2.5 py-2 text-[13px] font-normal leading-[21px] text-white/[0.9]">
       {segmentFlags.map(({ segment, isFirst, isSpacer }, i) => {
         if (isSpacer) {
           return <div key={i} style={{ height: 8 }} />;
