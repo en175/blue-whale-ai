@@ -1,8 +1,8 @@
 # Creative Skill 资产契约（官方/个人领域边界、公开元数据与稳定身份）
 
 - **状态**：Accepted for implementation
-- **契约版本**：4（v2 纳入 IK60WT 技能库浏览扩展：分类/排序/使用人数/i18n，见 §11；v3 纳入 IK60WX 添加官方技能的同名冲突语义，见 §5.2/§6/§7；v4 纳入 IK60WZ 个人技能只读正文与永久删除端点，见 §13）
-- **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WS)、[02 — 一比一还原官方技能库浏览体验](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WT)、[05 — 添加官方技能并统一“我的技能”资产视图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WX)、[07 — 个人技能只读查看、复制与永久删除](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WZ)
+- **契约版本**：5（v2 纳入 IK60WT 技能库浏览扩展：分类/排序/使用人数/i18n，见 §11；v3 纳入 IK60WX 添加官方技能的同名冲突语义，见 §5.2/§6/§7；v4 纳入 IK60WZ 个人技能只读正文与永久删除端点，见 §13；v5 纳入 IK60X0 草稿 AI 格式化端点与 `100104`，见 §6/§7/§14）
+- **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WS)、[02 — 一比一还原官方技能库浏览体验](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WT)、[05 — 添加官方技能并统一“我的技能”资产视图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WX)、[07 — 个人技能只读查看、复制与永久删除](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WZ)、[08 — 接入 SKILL.md AI 格式化工具](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X0)
 - **父需求**：[一比一还原 Creative Skill 面板与个人技能资产闭环](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60US)
 - **前置契约**：[Creative Skill 激活跨服务契约](2026-07-24-creative-skill-activation-contract.md)（激活、版本固定与按需正文读取，本文不改写其字段）、[ADR-0041 同族工单串行与契约先行](../adr/0041-sibling-issues-serial-contract-first.md)
 
@@ -108,6 +108,7 @@
 | `POST /api/agent/skills/personal` | IK60WU 新增。body `{ content }` 为完整 SKILL.md 文本；解析 frontmatter → 校验 → 创建个人技能（§12） |
 | `GET /api/agent/skills/personal/{id}` | IK60WZ 新增。owner-only 只读正文，返回重建的完整 SKILL.md 文本（§13） |
 | `DELETE /api/agent/skills/personal/{id}` | IK60WZ 新增。owner-only 永久删除个人技能本体与版本行，不可逆（§13） |
+| `POST /api/agent/skills/personal/format` | IK60X0 新增。body `{ content }` 为当前草稿；后台固定规则 + 受控 AI 接口返回完整替换文本（§14）；纯文本变换，不持久化、不创建资产 |
 
 - `creative_skill_id` 入参先按 `^[a-z][a-z0-9_]{2,79}$` 校验，非法即「不存在」。
 
@@ -125,6 +126,7 @@
 | 个人技能名称与同用户已有技能 Name Key 冲突 | `100101`（IK60WU 新增） |
 | 个人技能名称与官方技能保留名冲突（§5.2） | `100102`（IK60WU 新增） |
 | 添加官方技能与同用户个人技能 Name Key 冲突（§5.4） | `100103`（IK60WX 新增） |
+| AI 格式化失败：接口未配置、AI 抛错/超时或返回非合法 SKILL.md（§14） | `100104`（IK60X0 新增；前端保留原草稿，不产生部分覆盖） |
 
 ## 8. 与激活契约的关系
 
@@ -140,7 +142,7 @@ Node 运行时接通激活后，同一校验在其 pin 解析点重复执行（�
 
 - ~~个人技能的创建、上传、AI 格式化、只读正文与复制、在线编辑端点与 UI。~~
   → 创建已由 IK60WU 落地（§12）；只读正文/复制/永久删除已由 IK60WZ 落地（§13）；
-  在线编辑仍为非目标。
+  AI 格式化已由 IK60X0 落地（§14）；在线编辑仍为非目标。
 - 「我的技能」的搜索/筛选/排序控件；个人技能 auto 候选。
 - 官方技能运营后台、详情页。
 - ~~`name_key` 持久化列与创建时冲突校验实现（§5 仅冻结算法）。~~
@@ -322,3 +324,22 @@ IK60WU 起，`POST /api/agent/skills/mine` 统一按「最近创建或添加」�
   历史 AgentRun 快照中的悬空 ID 由前端名称回退文案兜底。
 - 与 `DELETE /api/agent/skills/mine/{id}` 语义互斥：后者仅逻辑删官方引用（§6），
   个人域 ID 在其上仍按不存在处理；个人技能永久删除只走本端点。
+
+## 14. 草稿 AI 格式化（IK60X0）
+
+`POST /api/agent/skills/personal/format`，body：`{ "content": "<当前 SKILL.md 草稿>" }`。
+
+- **语义**：编写模式的纯文本变换工具——入草稿、出完整替换文本。**不持久化、不创建
+  资产、不触碰任何 repo**；保存仍只走 `POST /api/agent/skills/personal`（§12）。
+- **规则来源**：固定场景规则由后台配置（服务端常量 + env `SKILL_FORMAT_RULES` 覆盖），
+  普通用户不可见、不可修改；规则与草稿分别作为 system / user 消息发给受控 AI 接口。
+- **受控 AI 接口**：服务端经 new-api（OpenAI 兼容 relay）`/v1/chat/completions`，
+  baseUrl / token / model 全部来自服务端 env（`NEW_API_BASE_URL` /
+  `NEW_API_ROOT_ACCESS_TOKEN` / `SKILL_FORMAT_MODEL`），浏览器不可见；调用带超时，
+  超时按失败处理。
+- **成功** → `{ code: 200, data: { content } }`：`content` 为完整替换文本，前端整段
+  替换编辑器草稿，用户可继续编辑。
+- **失败**（§7 `100104`）：env 未配置、AI 抛错/超时，或返回内容不是合法 SKILL.md
+  （frontmatter 缺失、`name` / `description` / 正文任一为空）。失败时前端保留原草稿
+  并显示错误，不产生部分覆盖。
+- 空白草稿 → 参数错误（400），不调用 AI。

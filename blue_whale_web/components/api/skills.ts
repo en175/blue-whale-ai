@@ -124,6 +124,9 @@ export const skillsApi = {
   /** 创建个人技能（IK60WU）；content 为完整 SKILL.md 文本（含 frontmatter） */
   createPersonalSkill: (content: string) =>
     request<SkillMineItem>("/personal", "POST", { content }),
+  /** AI 格式化当前草稿（IK60X0）：返回完整替换文本；不保存、不创建资产 */
+  formatSkillDraft: (content: string) =>
+    request<{ content: string }>("/personal/format", "POST", { content }),
   /** 只读查看个人技能（IK60WZ，契约 §13.1）：owner-only，返回重建的完整 SKILL.md 文本 */
   getPersonalSkill: (creativeSkillId: string) =>
     request<{ content: string }>(`/personal/${creativeSkillId}`, "GET"),
