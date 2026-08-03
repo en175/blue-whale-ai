@@ -443,6 +443,7 @@ model creative_skill {
   owner_user_id     BigInt   @default(0)
   asset_domain      String   @default("official") @db.VarChar(16)
   name_key          String?  @db.VarChar(255)
+  auto_match        Int      @default(0)
   gmt_create        DateTime @default(now()) @db.DateTime(0)
   gmt_modified      DateTime @default(now()) @db.DateTime(0)
 

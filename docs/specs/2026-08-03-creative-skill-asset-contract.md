@@ -1,8 +1,8 @@
 # Creative Skill 资产契约（官方/个人领域边界、公开元数据与稳定身份）
 
 - **状态**：Accepted for implementation
-- **契约版本**：6（v2 纳入 IK60WT 技能库浏览扩展：分类/排序/使用人数/i18n，见 §11；v3 纳入 IK60WX 添加官方技能的同名冲突语义，见 §5.2/§6/§7；v4 纳入 IK60WZ 个人技能只读正文与永久删除端点，见 §13；v5 纳入 IK60X0 草稿 AI 格式化端点与 `100104`，见 §6/§7/§14；v6 纳入 IK60X1 对话总结保存个人技能，见 §15）
-- **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WS)、[02 — 一比一还原官方技能库浏览体验](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WT)、[05 — 添加官方技能并统一“我的技能”资产视图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WX)、[07 — 个人技能只读查看、复制与永久删除](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WZ)、[08 — 接入 SKILL.md AI 格式化工具](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X0)、[09 — 从当前对话总结并保存个人技能](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X1)
+- **契约版本**：7（v2 纳入 IK60WT 技能库浏览扩展：分类/排序/使用人数/i18n，见 §11；v3 纳入 IK60WX 添加官方技能的同名冲突语义，见 §5.2/§6/§7；v4 纳入 IK60WZ 个人技能只读正文与永久删除端点，见 §13；v5 纳入 IK60X0 草稿 AI 格式化端点与 `100104`，见 §6/§7/§14；v6 纳入 IK60X1 对话总结保存个人技能，见 §15；v7 纳入 IK60X2 个人技能自动匹配与服务端确定性 auto 激活，见 §3/§4/§10/§16）
+- **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WS)、[02 — 一比一还原官方技能库浏览体验](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WT)、[05 — 添加官方技能并统一“我的技能”资产视图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WX)、[07 — 个人技能只读查看、复制与永久删除](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WZ)、[08 — 接入 SKILL.md AI 格式化工具](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X0)、[09 — 从当前对话总结并保存个人技能](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X1)、[10 — 统一自动匹配、版本事实与浏览器纵向验收](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X2)
 - **父需求**：[一比一还原 Creative Skill 面板与个人技能资产闭环](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60US)
 - **前置契约**：[Creative Skill 激活跨服务契约](2026-07-24-creative-skill-activation-contract.md)（激活、版本固定与按需正文读取，本文不改写其字段）、[ADR-0041 同族工单串行与契约先行](../adr/0041-sibling-issues-serial-contract-first.md)
 
@@ -57,7 +57,7 @@
 | `added` | ✓ | — | 当前用户是否已添加引用 |
 | `category` | ✓ | — | 目录分类（§11.1），v2 新增 |
 | `usage_count` | ✓ | — | 成功激活去重用户数（§11.3），v2 新增 |
-| `auto` | — | ✓ | 引用关系属性；个人技能行恒 `false`（个人自动匹配归后续工单） |
+| `auto` | — | ✓ | 自动匹配开关；官方行为引用关系属性，个人行为本体属性（§16，v7 起返回真实值） |
 
 - **禁止字段**：`content`、`body`、`prompt`、内部规则、版本号、digest、自增主键及任何
   未列入上表的字段，不得出现在面向普通用户的技能响应中。BFF handler 必须显式 pick
@@ -69,11 +69,12 @@
 | 操作 | 官方技能 | 个人技能 |
 |---|---|---|
 | 读公开元数据（library/mine 列表） | 所有用户 | 仅 owner（经 mine 并集返回） |
-| 添加/移除引用、设 auto | 所有用户（自己的引用） | 不适用（无引用概念） |
+| 添加/移除引用 | 所有用户（自己的引用） | 不适用（无引用概念） |
+| 设 auto | 所有用户（自己的引用） | 仅 owner（§16，v7 起） |
 | 读正文 / 复制 | 任何用户都不可（仅受信任运行时按 pin 读取） | 仅 owner（§13 只读端点） |
 | 修改 / 删除 | 任何用户都不可（运营通道不在本文范围） | 修改不适用（在线编辑为非目标）；删除仅 owner 且**不可逆**（§13），跨用户一律按不存在处理 |
 | 调用（forced 激活） | 所有用户 | 仅 owner；跨用户按 `CREATIVE_SKILL_UNAVAILABLE` 拒绝 |
-| auto 候选 | `user_skill.auto` 派生，仅官方域 | 不进入候选（后续工单评估） |
+| auto 候选 | `user_skill.auto` 派生 | `creative_skill.auto_match` 派生，仅 owner 本人（§16，v7 起） |
 
 - 跨用户读取、修改、删除或调用个人技能，服务端**必须**按「不存在 / 不可见」拒绝
   （404 语义），不得泄露资产存在性。
@@ -104,7 +105,7 @@
 | `POST /api/agent/skills/mine` | 响应为官方引用 ∪ 名下个人技能的并集，主键 `creative_skill_id`，含 `asset_domain`；IK60WU 起统一按添加/创建时间倒序 |
 | `POST /api/agent/skills/library/{id}/add` | `{id}` 语义改为 `creative_skill_id`；非官方域或未知 ID → 100100；与同用户个人技能 Name Key 冲突 → 100103（IK60WX，§5.4） |
 | `DELETE /api/agent/skills/mine/{id}` | `{id}` 语义改为 `creative_skill_id`；仅删引用，不删技能本体 |
-| `PATCH /api/agent/skills/mine/{id}` | `{id}` 语义改为 `creative_skill_id`；仅改自己引用的 `auto` |
+| `PATCH /api/agent/skills/mine/{id}` | `{id}` 语义改为 `creative_skill_id`；官方域仅改自己引用的 `auto`；v7 起个人域仅 owner 可改本体的 `auto_match`（§16） |
 | `POST /api/agent/skills/personal` | IK60WU 新增。body `{ content }` 为完整 SKILL.md 文本；解析 frontmatter → 校验 → 创建个人技能（§12） |
 | `GET /api/agent/skills/personal/{id}` | IK60WZ 新增。owner-only 只读正文，返回重建的完整 SKILL.md 文本（§13） |
 | `DELETE /api/agent/skills/personal/{id}` | IK60WZ 新增。owner-only 永久删除个人技能本体与版本行，不可逆（§13） |
@@ -143,7 +144,7 @@ Node 运行时接通激活后，同一校验在其 pin 解析点重复执行（�
 - ~~个人技能的创建、上传、AI 格式化、只读正文与复制、在线编辑端点与 UI。~~
   → 创建已由 IK60WU 落地（§12）；只读正文/复制/永久删除已由 IK60WZ 落地（§13）；
   AI 格式化已由 IK60X0 落地（§14）；在线编辑仍为非目标。
-- 「我的技能」的搜索/筛选/排序控件；个人技能 auto 候选。
+- 「我的技能」的搜索/筛选/排序控件。
 - 官方技能运营后台、详情页。
 - ~~`name_key` 持久化列与创建时冲突校验实现（§5 仅冻结算法）。~~
   → 已由 IK60WU 落地（§5.3）。
@@ -195,6 +196,13 @@ v3（IK60WU）存量库补列（全新环境已由 `001_baseline.sql` 含列/索
 ALTER TABLE creative_skill
   ADD COLUMN name_key VARCHAR(255) NULL COMMENT '归一化名称键，用于冲突判断（IK60WU）',
   ADD INDEX idx_owner_name_key (owner_user_id, name_key);
+```
+
+v7（IK60X2）存量库补列（全新环境已由 `001_baseline.sql` 含列，无需执行）：
+
+```sql
+ALTER TABLE creative_skill
+  ADD COLUMN auto_match TINYINT NOT NULL DEFAULT 0 COMMENT '个人技能自动匹配开关（IK60X2）；官方行恒 0，官方 auto 在 user_skill.auto';
 ```
 
 ## 11. 技能库浏览扩展（v2，IK60WT）
@@ -415,3 +423,45 @@ IK60WU 起，`POST /api/agent/skills/mine` 统一按「最近创建或添加」�
 - 固定规则与对话历史均不含官方技能正文；本流程不改变 §3 官方正文保密边界。
 - 总结管道只写 assistant 消息与个人技能资产，不产生 CreativeSkillActivation、
   不改变 `auto` 开关、不添加官方引用。
+
+## 16. 统一自动匹配与确定性 auto 激活（IK60X2）
+
+本节冻结官方与个人技能统一的自动匹配开关语义，以及 Node 运行时的服务端确定性
+auto 激活；不改写激活契约的字段与错误码。
+
+### 16.1 开关语义与存储
+
+- 官方与个人技能都可**独立**开启自动匹配，**默认关闭**；同一用户可开启多个候选。
+- 官方技能：开关存 `user_skill.auto`（引用关系属性，既有），经
+  `PATCH /api/agent/skills/mine/{id}` 切换（既有端点，语义不变）。
+- 个人技能：开关存 `creative_skill.auto_match TINYINT NOT NULL DEFAULT 0`
+  （本体属性，仅 personal 域使用；官方行恒 0）。切换走同一
+  `PATCH /api/agent/skills/mine/{id}` 端点，服务端按域分流：官方域走引用更新
+  （既有路径）；个人域仅 owner 可改本体 `auto_match`，谓词
+  `asset_domain='personal' AND owner_user_id=<当前用户>`，0 命中一律 `100100`
+  （§7，不泄露存在性）。
+- mine 视图两类资产的 `auto` 均返回真实开关值（§3）。
+
+### 16.2 auto 候选与确定性激活
+
+- auto 候选池 = 用户开启 auto 的官方引用技能（`user_skill.auto=1`）∪ 名下开启
+  `auto_match=1` 的个人技能；两类资产共用同一条 `active_version_id` 当前版本
+  解析链，候选在创建 Run 时冻结（激活契约 §3）。
+- **直接指定始终覆盖自动匹配**：消息携带 `forced_creative_skill_id` 时 auto
+  候选为空数组（既有行为），Run 只固定 forced 激活。
+- 无 forced 且候选非空时，服务端在创建 Run 的**同一事务**内确定性选择**至多一个**
+  候选固定激活：取按 `creative_skill_id` 排序后的首个候选，固定
+  `CreativeSkillActivation{source=auto, reason={type=agent_match, detail={matched_fields=["conversation_messages"]}}}`
+  （schema 对齐激活契约 §4.3）；候选为空则不激活，正常基础生成。
+- 版本事实：激活只携带稳定 ID，版本由服务端解析 `active_version_id` 当前发布
+  版本并固定（官方未来运行用当前版本，历史 Run 固定当次实际版本）。
+- 成功激活（forced 或 auto）均写一行 `creative_skill_activation` 埋点：
+  `activation_source` 映射 `forced_use→'forced'`、`auto→'auto'`，
+  `skill_version` 记当次固定版本的 major 号；埋点只增不改，使用人数
+  `COUNT(DISTINCT user_id)` 与 `most_used` 排序语义不变（§11.3），同一用户
+  重复激活只计一次。
+- 个人技能永久删除后：其 auto 候选资格随本体行消失自然失效；历史 Run 已固定的
+  激活数组不受影响；埋点保留最小事实（§13.2）。
+- 运行状态对用户只显示「使用技能：技能名称」，不显示激活来源（forced/auto），
+  也不写入 Agent 回复正文；auto 激活的技能名经 Run 快照 / `agent_run.created`
+  事件的 `activated_creative_skill_versions` 到达前端。

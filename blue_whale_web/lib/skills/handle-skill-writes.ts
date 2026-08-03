@@ -75,16 +75,43 @@ export async function handleRemoveSkill(
   return ok();
 }
 
-/** PATCH /api/agent/skills/mine/{id}：切 auto 开关（关系属性），{id} 即 creative_skill_id。
- *  格式非法 → 100100；resolve 未命中（未知/个人域/未添加）→ 100100（契约 §6/§7）。 */
+/** PATCH /api/agent/skills/mine/{id}：切 auto 开关，{id} 即 creative_skill_id。
+ *  官方域改引用关系属性 auto（既有）；个人域仅 owner 改本体 auto_match（§16.1，IK60X2）。
+ *  格式非法/未知 ID/个人域非 owner → 100100（契约 §6/§7，不泄露存在性）；
+ *  官方域未添加 → 100100「未添加该 Skill」。 */
 export async function handleUpdateSkillAuto(
   userId: string,
   creativeSkillId: string,
   auto: boolean,
-  deps: { skills: Pick<SkillRepo, "updateAutoByCreativeSkillId"> },
+  deps: {
+    skills: Pick<
+      SkillRepo,
+      | "findAssetDomainInfo"
+      | "updateAutoByCreativeSkillId"
+      | "updatePersonalAutoByCreativeSkillId"
+    >;
+  },
 ) {
   const invalid = validateCreativeSkillId(creativeSkillId);
   if (invalid) return invalid;
+  const info = await deps.skills.findAssetDomainInfo(creativeSkillId);
+  if (!info) {
+    return fail(DATA_NOT_EXIST_CODE, `Skill 不存在: ${creativeSkillId}`);
+  }
+  if (info.asset_domain === "personal") {
+    if (info.owner_user_id !== userId) {
+      return fail(DATA_NOT_EXIST_CODE, `Skill 不存在: ${creativeSkillId}`);
+    }
+    const hit = await deps.skills.updatePersonalAutoByCreativeSkillId(
+      userId,
+      creativeSkillId,
+      auto,
+    );
+    if (!hit) {
+      return fail(DATA_NOT_EXIST_CODE, `Skill 不存在: ${creativeSkillId}`);
+    }
+    return ok();
+  }
   const hit = await deps.skills.updateAutoByCreativeSkillId(
     userId,
     creativeSkillId,

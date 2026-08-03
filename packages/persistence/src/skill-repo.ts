@@ -218,6 +218,13 @@ export interface SkillRepo {
     creativeSkillId: string,
     auto: boolean,
   ): Promise<boolean>;
+  /** 个人技能本体 auto_match 开关（契约 §16.1，IK60X2）：
+   *  asset_domain='personal' + owner 谓词保护，0 命中返回 false（不泄露存在性）。 */
+  updatePersonalAutoByCreativeSkillId(
+    userId: string,
+    creativeSkillId: string,
+    auto: boolean,
+  ): Promise<boolean>;
   /** 名下个人技能（asset_domain='personal'），按 creative_skill_id asc。 */
   listPersonalByOwner(userId: string): Promise<PersonalSkillView[]>;
   /** owner 视角单行个人技能视图；非 owner 0 命中返回 null（不泄露存在性）。 */
@@ -511,18 +518,18 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
           sort_time: r.gmt_create,
         };
       });
-      // 个人技能按 gmt_create desc 取回
+      // 个人技能按 gmt_create desc 取回（含 auto_match 本体开关，契约 §16.1）
       let personal: (SkillMineView & { sort_time: Date })[] = [];
       try {
         const personalRows = await prisma.$queryRawUnsafe<
-          { creative_skill_id: string; name: string; description: string | null; gmt_create: Date }[]
+          { creative_skill_id: string; name: string; description: string | null; auto_match: number; gmt_create: Date }[]
         >(
-          `SELECT creative_skill_id, name, description, gmt_create FROM creative_skill WHERE owner_user_id = ? AND asset_domain = 'personal' ORDER BY gmt_create DESC`,
+          `SELECT creative_skill_id, name, description, auto_match, gmt_create FROM creative_skill WHERE owner_user_id = ? AND asset_domain = 'personal' ORDER BY gmt_create DESC`,
           BigInt(userId),
         );
         personal = personalRows.map((p) => ({
           creative_skill_id: p.creative_skill_id,
-          auto: false,
+          auto: p.auto_match === 1,
           name: p.name,
           description: p.description,
           cover_url: null,
@@ -621,6 +628,20 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
       const r = await prisma.user_skill.updateMany({
         where: { user_id: BigInt(userId), skill_id: BigInt(skillId), is_delete: 0 },
         data: { auto: auto ? 1 : 0 },
+      });
+      return r.count > 0;
+    },
+
+    async updatePersonalAutoByCreativeSkillId(userId, creativeSkillId, auto) {
+      // 个人本体开关（契约 §16.1）：asset_domain='personal' + owner 谓词保护，
+      // 跨用户/官方域/未知 ID 均 0 命中 → false（不泄露存在性，§7）。
+      const r = await prisma.creative_skill.updateMany({
+        where: {
+          creative_skill_id: creativeSkillId,
+          asset_domain: "personal",
+          owner_user_id: BigInt(userId),
+        },
+        data: { auto_match: auto ? 1 : 0 },
       });
       return r.count > 0;
     },

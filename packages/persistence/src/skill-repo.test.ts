@@ -630,7 +630,51 @@ describe("SkillRepo", () => {
     expect(missUpdateMany).not.toHaveBeenCalled();
   });
 
-  // listMine 并集夹具：1 条官方引用（auto=1）+ 1 条名下个人技能。
+  it("updatePersonalAutoByCreativeSkillId 仅 owner 可切个人本体 auto_match；0 命中返回 false（§16.1）", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const hitPrisma = {
+      creative_skill: { updateMany },
+    } as unknown as PrismaClient;
+
+    await expect(
+      createSkillRepo(hitPrisma).updatePersonalAutoByCreativeSkillId(
+        "9",
+        "my_personal",
+        true,
+      ),
+    ).resolves.toBe(true);
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        creative_skill_id: "my_personal",
+        asset_domain: "personal",
+        owner_user_id: 9n,
+      },
+      data: { auto_match: 1 },
+    });
+
+    // 跨用户 / 官方域 / 未知 ID 均 0 命中 → false，不泄露存在性（§7）。
+    const missUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const missPrisma = {
+      creative_skill: { updateMany: missUpdateMany },
+    } as unknown as PrismaClient;
+    await expect(
+      createSkillRepo(missPrisma).updatePersonalAutoByCreativeSkillId(
+        "10",
+        "my_personal",
+        false,
+      ),
+    ).resolves.toBe(false);
+    expect(missUpdateMany).toHaveBeenCalledWith({
+      where: {
+        creative_skill_id: "my_personal",
+        asset_domain: "personal",
+        owner_user_id: 10n,
+      },
+      data: { auto_match: 0 },
+    });
+  });
+
+  // listMine 并集夹具：1 条官方引用（auto=1）+ 1 条名下个人技能（auto_match=1）。
   // IK60WU §12.5：统一按最近添加/创建时间倒序；官方引用 gmt_create 更晚 → 排在前。
   function createUnionPrisma() {
     const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
@@ -640,6 +684,7 @@ describe("SkillRepo", () => {
             creative_skill_id: "my_personal",
             name: "我的技能",
             description: "个人资产",
+            auto_match: 1,
             gmt_create: new Date("2026-01-01T00:00:00Z"),
           },
         ]);
@@ -693,7 +738,7 @@ describe("SkillRepo", () => {
       },
       {
         creative_skill_id: "my_personal",
-        auto: false,
+        auto: true,
         name: "我的技能",
         description: "个人资产",
         cover_url: null,
@@ -705,9 +750,13 @@ describe("SkillRepo", () => {
     expect(userSkillFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ orderBy: { gmt_create: "desc" } }),
     );
-    // 个人技能查询带 owner 谓词：他人的个人技能不会进入结果。
+    // 个人技能查询带 owner 谓词与 auto_match 透传（§16.1）：他人的个人技能不会进入结果。
     expect(queryRawUnsafe).toHaveBeenCalledWith(
       expect.stringContaining("owner_user_id = ?"),
+      9n,
+    );
+    expect(queryRawUnsafe).toHaveBeenCalledWith(
+      expect.stringContaining("auto_match"),
       9n,
     );
   });
@@ -726,7 +775,7 @@ describe("SkillRepo", () => {
     expect(page.records).toEqual([
       {
         creative_skill_id: "my_personal",
-        auto: false,
+        auto: true,
         name: "我的技能",
         description: "个人资产",
         cover_url: null,
@@ -818,6 +867,10 @@ describe("SkillRepo", () => {
       expect.stringContaining("DELETE FROM creative_skill_version"),
       "my_personal",
     );
+    // 最小事实（§13.2/§16.2）：激活埋点只增不改，删除技能不得触碰埋点表。
+    for (const call of executeRawUnsafe.mock.calls) {
+      expect(call[0] as string).not.toContain("creative_skill_activation");
+    }
   });
 
   it("deletePersonal 非 owner 调用不命中：本体与版本行都不动", async () => {

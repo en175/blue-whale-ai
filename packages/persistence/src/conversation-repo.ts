@@ -260,15 +260,17 @@ export async function acceptConversationMessageInTransaction(
           .activated_creative_skill_versions as Prisma.InputJsonValue,
       },
     });
-    const forcedActivation = pinResult.pin.activated_creative_skill_versions[0];
-    if (forcedActivation?.source === "forced_use") {
+    // 成功激活埋点（契约 §11.3/§16.2）：forced 与 auto 均落一行，只增不改。
+    const activation = pinResult.pin.activated_creative_skill_versions[0];
+    if (activation) {
       await tx.creative_skill_activation.create({
         data: {
-          creative_skill_id: forcedActivation.creative_skill_id,
+          creative_skill_id: activation.creative_skill_id,
           user_id: userId,
           agent_run_id: run.id.toString(),
-          skill_version: majorVersion(forcedActivation),
-          activation_source: "forced",
+          skill_version: majorVersion(activation),
+          activation_source:
+            activation.source === "forced_use" ? "forced" : "auto",
         },
       });
     }

@@ -777,6 +777,140 @@ describe("AgentRunRepo", () => {
     });
   });
 
+  it("服务端接纳缝已固定的 auto 激活，commit 时不重复写激活埋点（§16.2）", async () => {
+    const body = "# Frozen poster skill";
+    const skillDigest = `sha256:${createHash("sha256").update(body).digest("hex")}`;
+    const activation = {
+      creative_skill_id: "official.poster",
+      creative_skill_version_id: "version.poster.1",
+      name: "海报专家",
+      display_version: "1.0.0",
+      resource_digest: skillDigest,
+      source: "auto" as const,
+      reason: {
+        type: "agent_match" as const,
+        detail: { matched_fields: ["conversation_messages" as const] },
+      },
+    };
+    const pinnedPin = signRunPin({
+      ...runPinSource,
+      auto_creative_skill_candidates: [
+        {
+          creative_skill_id: activation.creative_skill_id,
+          creative_skill_version_id: activation.creative_skill_version_id,
+          name: activation.name,
+          description: null,
+          display_version: activation.display_version,
+          resource_digest: activation.resource_digest,
+        },
+      ],
+      activated_creative_skill_versions: [activation],
+      creative_skill_resources: [
+        {
+          creative_skill_id: activation.creative_skill_id,
+          creative_skill_version_id: activation.creative_skill_version_id,
+          name: activation.name,
+          description: null,
+          display_version: activation.display_version,
+          resource_digest: activation.resource_digest,
+          media_type: "text/markdown" as const,
+          body,
+          content_digest: skillDigest,
+        },
+      ],
+    });
+    const run = {
+      id: 9n,
+      project_id: 42n,
+      conversation_id: 7n,
+      user_id: 100n,
+      version: 2,
+      run_pin: pinnedPin,
+    };
+    const update = vi.fn().mockResolvedValue({
+      ...run,
+      status: "completed",
+      stage: "completed",
+      version: 3,
+    });
+    const createActivation = vi.fn();
+    const tx = {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValue([{ db_now: new Date("2026-07-29T00:00:10.000Z") }]),
+      agent_runs: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue(run),
+        update,
+      },
+      agent_advances: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 30n,
+          agent_run_id: 9n,
+          input_high_watermark_sequence_no: 2,
+        }),
+        update: vi.fn(),
+      },
+      run_commits: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+      },
+      conversation_messages: {
+        create: vi.fn().mockResolvedValue({ id: 10n }),
+      },
+      conversations: {
+        update: vi.fn().mockResolvedValue({ version: 3 }),
+      },
+      creative_skill_activation: { create: createActivation },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi
+          .fn()
+          .mockResolvedValueOnce({ high_watermark: 1n })
+          .mockResolvedValueOnce({ high_watermark: 2n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 11n,
+          gmt_create: new Date("2026-07-29T00:00:00.000Z"),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createAgentRunRepo(prisma).commitSuccess({
+        workerId: "worker-1",
+        agentRunId: "9",
+        advanceId: "30",
+        fence: "1",
+        runVersion: 1,
+        requestDigest,
+        content: "完成",
+        reasoningSummary: "已使用技能完成回答。",
+        autoCreativeSkillActivation: null,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({ kind: "committed", status: "completed" }),
+    );
+    // 已固定激活随 commit 保留；埋点不重复写（接纳缝已落一行）。
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 9n },
+      data: expect.objectContaining({
+        activated_creative_skill_versions: [
+          expect.objectContaining({
+            creative_skill_id: "official.poster",
+            source: "auto",
+          }),
+        ],
+      }),
+    });
+    expect(createActivation).not.toHaveBeenCalled();
+  });
+
   it("commits a terminal failure that releases the guard without an assistant message", async () => {
     const run = {
       id: 9n,

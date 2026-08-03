@@ -70,6 +70,16 @@ function formatConversationTime(iso: string): string {
   });
 }
 
+/** 从 Run 快照行提取已激活技能名（0/1 数组，契约 §3）；缺字段/空数组 → null。 */
+function activatedSkillNameOf(run: Record<string, unknown>): string | null {
+  const versions = run.activated_creative_skill_versions;
+  if (!Array.isArray(versions) || versions.length === 0) return null;
+  const first: unknown = versions[0];
+  if (!first || typeof first !== "object") return null;
+  const name = (first as Record<string, unknown>).name;
+  return typeof name === "string" && name !== "" ? name : null;
+}
+
 /** 页面统一的消息输入框（空态/对话态共用）：Enter 发送，Shift+Enter 换行。 */
 function InboxComposer({
   draft,
@@ -259,14 +269,17 @@ export default function GeneratePage() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  // 运行状态展示（IK60WY）：「直接使用」触发的 Run 未终态时显示「使用技能：名称」。
+  // 运行状态展示（IK60WY/IK60X2）：Run 未终态时显示「使用技能：名称」。
   // 只显示技能名不显示来源（激活契约 §4），也不进入 Agent 回复正文。
+  // 名称来源：本会话「直接使用」的本地 map 优先；快照 activated_creative_skill_versions
+  // 回退覆盖 auto 激活与刷新后的 forced Run（§16.2）。
   const activeSkillStatus = useMemo(() => {
     if (!snapshot || conversationId == null) return null;
     for (const run of snapshot.agent_runs) {
       const runId = run.agent_run_id;
       if (typeof runId !== "number" && typeof runId !== "string") continue;
-      const skillName = runSkillNames[String(runId)];
+      const skillName =
+        runSkillNames[String(runId)] ?? activatedSkillNameOf(run);
       if (!skillName) continue;
       const owner = run.conversation_id;
       if (isWireInteger(owner) && !wireIntegersEqual(owner, conversationId)) {
