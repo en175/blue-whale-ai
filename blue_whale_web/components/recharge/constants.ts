@@ -1,8 +1,6 @@
 /**
  * recharge constants — 充值弹窗常量配置
  */
-import type { RechargeTier } from "./types";
-
 /** 轮询间隔（毫秒），前 10s 每 2s，之后每 5s */
 export const POLL_INTERVAL_FAST = 2000;
 export const POLL_INTERVAL_SLOW = 5000;
@@ -25,46 +23,3 @@ export const DESKTOP_MODAL_WIDTH = 780;
 
 /** 移动端断点 */
 export const MOBILE_BREAKPOINT = 768;
-
-/** Mock 初始余额 */
-export const MOCK_INITIAL_CREDITS = 1000;
-
-/** Mock 档位数据 */
-export const MOCK_TIERS: RechargeTier[] = [
-  {
-    id: "tier_100",
-    amount: 100,
-    originalPrice: 10.0,
-    discount: 1,
-    price: 10.0,
-    isRecommended: false,
-    sortOrder: 0,
-  },
-  {
-    id: "tier_200",
-    amount: 200,
-    originalPrice: 20.0,
-    discount: 0.9,
-    price: 18.0,
-    isRecommended: true,
-    sortOrder: 1,
-  },
-  {
-    id: "tier_500",
-    amount: 500,
-    originalPrice: 50.0,
-    discount: 0.85,
-    price: 42.5,
-    isRecommended: false,
-    sortOrder: 2,
-  },
-  {
-    id: "tier_1000",
-    amount: 1000,
-    originalPrice: 100.0,
-    discount: 0.8,
-    price: 80.0,
-    isRecommended: false,
-    sortOrder: 3,
-  },
-];
