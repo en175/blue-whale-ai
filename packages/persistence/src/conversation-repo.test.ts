@@ -38,17 +38,22 @@ describe("ConversationRepo.acceptMessage", () => {
         findMany: vi.fn().mockResolvedValue([{ skill_id: 11n }]),
       },
       creative_skill: {
-        findMany: vi.fn().mockResolvedValue([
-          {
-            creative_skill_id: "official.poster",
-            name: "海报专家",
-            description: "海报排版",
-            source_skill_id: 11n,
-            active_version_id: "version.poster.1",
-            owner_user_id: 0n,
-            asset_domain: "official",
-          },
-        ]),
+        findMany: vi.fn().mockImplementation((args) =>
+          // 官方引用候选查询返回海报技能；个人本体 auto_match 查询无命中。
+          args?.where?.asset_domain === "personal"
+            ? Promise.resolve([])
+            : Promise.resolve([
+                {
+                  creative_skill_id: "official.poster",
+                  name: "海报专家",
+                  description: "海报排版",
+                  source_skill_id: 11n,
+                  active_version_id: "version.poster.1",
+                  owner_user_id: 0n,
+                  asset_domain: "official",
+                },
+              ]),
+        ),
       },
       creative_skill_version: {
         findMany: vi.fn().mockResolvedValue([
@@ -63,6 +68,7 @@ describe("ConversationRepo.acceptMessage", () => {
           },
         ]),
       },
+      creative_skill_activation: { create: vi.fn() },
       conversation_messages: {
         create: vi.fn().mockResolvedValue({
           id: 8n,
@@ -145,8 +151,27 @@ describe("ConversationRepo.acceptMessage", () => {
               resource_digest: skillDigest,
             }),
           ],
-          activated_creative_skill_versions: [],
+          // 无 forced 且候选非空 → 服务端确定性激活排序后首个候选（§16.2）。
+          activated_creative_skill_versions: [
+            expect.objectContaining({
+              creative_skill_id: "official.poster",
+              source: "auto",
+              reason: {
+                type: "agent_match",
+                detail: { matched_fields: ["conversation_messages"] },
+              },
+            }),
+          ],
         }),
+      }),
+    });
+    expect(tx.creative_skill_activation.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        creative_skill_id: "official.poster",
+        user_id: 100n,
+        agent_run_id: "9",
+        skill_version: 1,
+        activation_source: "auto",
       }),
     });
     expect(tx.command_idempotency.create).toHaveBeenCalledWith({
@@ -276,6 +301,273 @@ describe("ConversationRepo.acceptMessage", () => {
         user_id: 100n,
         agent_run_id: "9",
         activation_source: "forced",
+      }),
+    });
+  });
+
+  it("个人技能 auto_match=1 进入候选并被确定性激活（§16.2）", async () => {
+    const skillBody = "# My Storyboard";
+    const skillDigest = `sha256:${createHash("sha256").update(skillBody).digest("hex")}`;
+    const tx = {
+      project: { findFirst: vi.fn().mockResolvedValue({ id: 42n }) },
+      command_idempotency: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+      },
+      conversations: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: 7n, project_id: 42n }),
+        update: vi.fn().mockResolvedValue({ id: 7n, version: 1 }),
+      },
+      agent_runs: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({
+          id: 9n,
+          conversation_id: 7n,
+          status: "queued",
+          stage: "understanding",
+          version: 0,
+        }),
+      },
+      user_skill: { findMany: vi.fn().mockResolvedValue([]) },
+      creative_skill: {
+        findMany: vi.fn().mockImplementation((args) =>
+          args?.where?.asset_domain === "personal"
+            ? Promise.resolve([
+                {
+                  creative_skill_id: "personal.storyboard",
+                  name: "我的分镜",
+                  description: null,
+                  source_skill_id: null,
+                  active_version_id: "version.storyboard.1",
+                  owner_user_id: 100n,
+                  asset_domain: "personal",
+                },
+              ])
+            : Promise.resolve([]),
+        ),
+      },
+      creative_skill_version: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            creative_skill_version_id: "version.storyboard.1",
+            creative_skill_id: "personal.storyboard",
+            display_version: "2.1.0",
+            body: skillBody,
+            content_digest: skillDigest,
+            resource_digest: skillDigest,
+            media_type: "text/markdown",
+          },
+        ]),
+      },
+      creative_skill_activation: { create: vi.fn() },
+      conversation_messages: {
+        create: vi.fn().mockResolvedValue({ id: 8n }),
+      },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi
+          .fn()
+          .mockResolvedValueOnce({ high_watermark: 1n })
+          .mockResolvedValueOnce({ high_watermark: 2n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 1n,
+          gmt_create: new Date("2026-08-04T00:00:00.000Z"),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    const result = await createConversationRepo(
+      prisma,
+      bundledAgentRuntimeManifest,
+    ).acceptMessage({
+      userId: "100",
+      projectId: "42",
+      idempotencyKey: "cmd-auto-personal",
+      requestHash: "b".repeat(64),
+      clientMessageId: "client-auto-personal",
+      content: "帮我做个分镜",
+      conversationId: null,
+      replyToInputRequestId: null,
+      forcedCreativeSkillId: null,
+    });
+
+    expect(result.kind).toBe("accepted");
+    // 个人本体开关查询带 owner 与 auto_match 谓词（§16.1）。
+    expect(tx.creative_skill.findMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        asset_domain: "personal",
+        owner_user_id: 100n,
+        auto_match: 1,
+      }),
+    });
+    expect(tx.agent_runs.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        run_pin: expect.objectContaining({
+          auto_creative_skill_candidates: [
+            expect.objectContaining({
+              creative_skill_id: "personal.storyboard",
+              display_version: "2.1.0",
+            }),
+          ],
+          activated_creative_skill_versions: [
+            expect.objectContaining({
+              creative_skill_id: "personal.storyboard",
+              source: "auto",
+            }),
+          ],
+        }),
+      }),
+    });
+    // 版本事实：埋点记当次固定版本 2.1.0 的 major 号（§16.2）。
+    expect(tx.creative_skill_activation.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        creative_skill_id: "personal.storyboard",
+        activation_source: "auto",
+        skill_version: 2,
+      }),
+    });
+  });
+
+  it("多个 auto 候选只确定性激活一个（creative_skill_id 排序首个），埋点仅一行", async () => {
+    const bodyA = "# Skill A";
+    const digestA = `sha256:${createHash("sha256").update(bodyA).digest("hex")}`;
+    const bodyB = "# Skill B";
+    const digestB = `sha256:${createHash("sha256").update(bodyB).digest("hex")}`;
+    const tx = {
+      project: { findFirst: vi.fn().mockResolvedValue({ id: 42n }) },
+      command_idempotency: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+      },
+      conversations: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: 7n, project_id: 42n }),
+        update: vi.fn().mockResolvedValue({ id: 7n, version: 1 }),
+      },
+      agent_runs: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({
+          id: 9n,
+          conversation_id: 7n,
+          status: "queued",
+          stage: "understanding",
+          version: 0,
+        }),
+      },
+      user_skill: {
+        findMany: vi.fn().mockResolvedValue([{ skill_id: 11n }]),
+      },
+      creative_skill: {
+        findMany: vi.fn().mockImplementation((args) =>
+          args?.where?.asset_domain === "personal"
+            ? Promise.resolve([
+                {
+                  creative_skill_id: "personal.b_skill",
+                  name: "技能B",
+                  description: null,
+                  source_skill_id: null,
+                  active_version_id: "version.b.1",
+                  owner_user_id: 100n,
+                  asset_domain: "personal",
+                },
+              ])
+            : Promise.resolve([
+                {
+                  creative_skill_id: "official.a_skill",
+                  name: "技能A",
+                  description: null,
+                  source_skill_id: 11n,
+                  active_version_id: "version.a.1",
+                  owner_user_id: 0n,
+                  asset_domain: "official",
+                },
+              ]),
+        ),
+      },
+      creative_skill_version: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            creative_skill_version_id: "version.a.1",
+            creative_skill_id: "official.a_skill",
+            display_version: "1.0.0",
+            body: bodyA,
+            content_digest: digestA,
+            resource_digest: digestA,
+            media_type: "text/markdown",
+          },
+          {
+            creative_skill_version_id: "version.b.1",
+            creative_skill_id: "personal.b_skill",
+            display_version: "1.0.0",
+            body: bodyB,
+            content_digest: digestB,
+            resource_digest: digestB,
+            media_type: "text/markdown",
+          },
+        ]),
+      },
+      creative_skill_activation: { create: vi.fn() },
+      conversation_messages: {
+        create: vi.fn().mockResolvedValue({ id: 8n }),
+      },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi
+          .fn()
+          .mockResolvedValueOnce({ high_watermark: 1n })
+          .mockResolvedValueOnce({ high_watermark: 2n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 1n,
+          gmt_create: new Date("2026-08-04T00:00:00.000Z"),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    const result = await createConversationRepo(
+      prisma,
+      bundledAgentRuntimeManifest,
+    ).acceptMessage({
+      userId: "100",
+      projectId: "42",
+      idempotencyKey: "cmd-auto-multi",
+      requestHash: "c".repeat(64),
+      clientMessageId: "client-auto-multi",
+      content: "随便做点什么",
+      conversationId: null,
+      replyToInputRequestId: null,
+      forcedCreativeSkillId: null,
+    });
+
+    expect(result.kind).toBe("accepted");
+    const runCreate = tx.agent_runs.create.mock.calls[0][0];
+    const pin = runCreate.data.run_pin;
+    // 候选池含两个（官方 ∪ 个人），激活恰为排序首个 official.a_skill。
+    expect(pin.auto_creative_skill_candidates).toHaveLength(2);
+    expect(pin.activated_creative_skill_versions).toHaveLength(1);
+    expect(pin.activated_creative_skill_versions[0]).toEqual(
+      expect.objectContaining({
+        creative_skill_id: "official.a_skill",
+        source: "auto",
+      }),
+    );
+    expect(tx.creative_skill_activation.create).toHaveBeenCalledTimes(1);
+    expect(tx.creative_skill_activation.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        creative_skill_id: "official.a_skill",
+        activation_source: "auto",
       }),
     });
   });

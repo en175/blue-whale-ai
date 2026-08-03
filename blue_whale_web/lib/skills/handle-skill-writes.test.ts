@@ -24,7 +24,9 @@ function makeRepo() {
     resolveOfficialSkillId: vi.fn(),
     addReference: vi.fn(),
     removeReferenceByCreativeSkillId: vi.fn(),
+    findAssetDomainInfo: vi.fn(),
     updateAutoByCreativeSkillId: vi.fn(),
+    updatePersonalAutoByCreativeSkillId: vi.fn(),
     createPersonalSkill: vi.fn(),
     findPersonalContent: vi.fn(),
     deletePersonal: vi.fn(),
@@ -131,8 +133,12 @@ describe("handleRemoveSkill", () => {
 });
 
 describe("handleUpdateSkillAuto", () => {
-  it("命中 → 200", async () => {
+  it("官方域命中 → 引用 auto 更新 → 200", async () => {
     const repo = makeRepo();
+    repo.findAssetDomainInfo.mockResolvedValue({
+      asset_domain: "official",
+      owner_user_id: "0",
+    });
     repo.updateAutoByCreativeSkillId.mockResolvedValue(true);
     const result = await handleUpdateSkillAuto("9", "poster_gen", true, {
       skills: repo,
@@ -143,10 +149,15 @@ describe("handleUpdateSkillAuto", () => {
       "poster_gen",
       true,
     );
+    expect(repo.updatePersonalAutoByCreativeSkillId).not.toHaveBeenCalled();
   });
 
-  it("未添加 → 100100", async () => {
+  it("官方域未添加 → 100100", async () => {
     const repo = makeRepo();
+    repo.findAssetDomainInfo.mockResolvedValue({
+      asset_domain: "official",
+      owner_user_id: "0",
+    });
     repo.updateAutoByCreativeSkillId.mockResolvedValue(false);
     const result = await handleUpdateSkillAuto("9", "poster_gen", false, {
       skills: repo,
@@ -156,6 +167,58 @@ describe("handleUpdateSkillAuto", () => {
       msg: "未添加该 Skill，无法设置 auto",
       data: null,
     });
+  });
+
+  it("个人域 owner → 本体 auto_match 更新 → 200（§16.1）", async () => {
+    const repo = makeRepo();
+    repo.findAssetDomainInfo.mockResolvedValue({
+      asset_domain: "personal",
+      owner_user_id: "9",
+    });
+    repo.updatePersonalAutoByCreativeSkillId.mockResolvedValue(true);
+    const result = await handleUpdateSkillAuto("9", "my_personal", true, {
+      skills: repo,
+    });
+    expect(result).toEqual({ code: 200, msg: null, data: null });
+    expect(repo.updatePersonalAutoByCreativeSkillId).toHaveBeenCalledWith(
+      "9",
+      "my_personal",
+      true,
+    );
+    expect(repo.updateAutoByCreativeSkillId).not.toHaveBeenCalled();
+  });
+
+  it("个人域非 owner → 100100，不触碰写路径（不泄露存在性）", async () => {
+    const repo = makeRepo();
+    repo.findAssetDomainInfo.mockResolvedValue({
+      asset_domain: "personal",
+      owner_user_id: "10",
+    });
+    const result = await handleUpdateSkillAuto("9", "my_personal", true, {
+      skills: repo,
+    });
+    expect(result).toEqual({
+      code: 100100,
+      msg: "Skill 不存在: my_personal",
+      data: null,
+    });
+    expect(repo.updatePersonalAutoByCreativeSkillId).not.toHaveBeenCalled();
+    expect(repo.updateAutoByCreativeSkillId).not.toHaveBeenCalled();
+  });
+
+  it("未知 ID（域信息查不到）→ 100100", async () => {
+    const repo = makeRepo();
+    repo.findAssetDomainInfo.mockResolvedValue(null);
+    const result = await handleUpdateSkillAuto("9", "no_such_skill", true, {
+      skills: repo,
+    });
+    expect(result).toEqual({
+      code: 100100,
+      msg: "Skill 不存在: no_such_skill",
+      data: null,
+    });
+    expect(repo.updateAutoByCreativeSkillId).not.toHaveBeenCalled();
+    expect(repo.updatePersonalAutoByCreativeSkillId).not.toHaveBeenCalled();
   });
 
   it("creative_skill_id 格式非法 → 100100，不触碰 repo", async () => {
@@ -168,6 +231,7 @@ describe("handleUpdateSkillAuto", () => {
       msg: "Skill 不存在: Poster_gen",
       data: null,
     });
+    expect(repo.findAssetDomainInfo).not.toHaveBeenCalled();
     expect(repo.updateAutoByCreativeSkillId).not.toHaveBeenCalled();
   });
 });

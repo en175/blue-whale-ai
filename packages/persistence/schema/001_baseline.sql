@@ -552,6 +552,7 @@ CREATE TABLE `creative_skill` (
     `owner_user_id` BIGINT NOT NULL DEFAULT 0,
     `asset_domain` VARCHAR(16) NOT NULL DEFAULT 'official',
     `name_key` VARCHAR(255) NULL,
+    `auto_match` TINYINT NOT NULL DEFAULT 0,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 

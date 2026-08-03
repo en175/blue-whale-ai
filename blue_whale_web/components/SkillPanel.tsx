@@ -1219,10 +1219,9 @@ function MySkillRow({
   onUse: () => void;
 }) {
   const auto = skill.auto;
-  // 目录行缺版本化映射时 creative_skill_id 为 null：注册命令按不存在处理（契约 §3）；
-  // 个人技能无引用关系，auto 不适用（契约 §4）——两种情形都禁用 auto 开关。
-  const canToggleAuto =
-    skill.creative_skill_id !== null && skill.asset_domain !== "personal";
+  // 目录行缺版本化映射时 creative_skill_id 为 null：注册命令按不存在处理（契约 §3）。
+  // 官方（引用 auto）与个人（本体 auto_match，§16.1）都可独立开关自动匹配。
+  const canToggleAuto = skill.creative_skill_id !== null;
   const displayName = skill.name ?? "—";
   // 省略号菜单（IK60WX/IK60WZ）：官方引用行仅「移出我的技能」；
   // 个人行「查看技能」（只读正文 + 复制）与「删除技能」（确认框 + 永久删除）。

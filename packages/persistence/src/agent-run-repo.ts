@@ -499,9 +499,11 @@ export function createAgentRunRepo(prisma: PrismaClient): AgentRunRepo {
           where: { id: advance.id },
           data: { status: "completed" },
         });
-        const autoActivation = activations.find(
-          (activation) => activation.source === "auto",
-        );
+        // 只补「Worker 提议」路径的 auto 埋点：服务端在消息接纳缝已固定的 auto 激活
+        // （资产契约 §16.2）已于接纳时落一行埋点，commit 不重复写。
+        const autoActivation = commit.auto_creative_skill_activation
+          ? activations.find((activation) => activation.source === "auto")
+          : undefined;
         if (autoActivation) {
           await tx.creative_skill_activation.create({
             data: {
