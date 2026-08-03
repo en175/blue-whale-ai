@@ -251,6 +251,7 @@ CREATE TABLE `agent_runs` (
     `terminal_reason` VARCHAR(64) NULL,
     `failure_code` VARCHAR(128) NULL,
     `failure_message` TEXT NULL,
+    `skill_summarize` BOOLEAN NOT NULL DEFAULT false,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
@@ -555,5 +556,21 @@ CREATE TABLE `creative_skill_activation` (
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 
     INDEX `idx_skill_user`(`creative_skill_id`, `user_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `skill_summarize_session` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `conversation_id` BIGINT NOT NULL,
+    `user_id` BIGINT NOT NULL,
+    `draft_content` TEXT NOT NULL,
+    `proposed_name` VARCHAR(255) NOT NULL,
+    `status` VARCHAR(32) NOT NULL DEFAULT 'pending_name_confirm',
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `is_delete` TINYINT NOT NULL DEFAULT 0,
+
+    UNIQUE INDEX `uk_skill_summarize_session_conversation`(`conversation_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

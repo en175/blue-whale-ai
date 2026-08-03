@@ -16,6 +16,8 @@ export interface AgentRunWork {
   runVersion: number;
   inputSequenceNo: number;
   prompt: string;
+  /** 总结当前对话意图（IK60X1，契约 §15.2）：为真时 Worker 分流到总结管道。 */
+  skillSummarize: boolean;
 }
 
 export interface CommitAgentRunSuccessInput {
@@ -143,6 +145,7 @@ export function createAgentRunRepo(prisma: PrismaClient): AgentRunRepo {
           runVersion: run.version,
           inputSequenceNo,
           prompt: messages.map((message) => message.content).join("\n\n"),
+          skillSummarize: run.skill_summarize,
         };
       });
     },

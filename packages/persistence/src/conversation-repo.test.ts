@@ -70,6 +70,7 @@ describe("ConversationRepo.acceptMessage", () => {
       content: "做一张蓝鲸海报",
       conversationId: null,
       replyToInputRequestId: null,
+      skillSummarize: false,
     });
 
     expect(result).toEqual({
@@ -139,6 +140,7 @@ describe("ConversationRepo.acceptMessage", () => {
       content: "做一张蓝鲸海报",
       conversationId: null,
       replyToInputRequestId: null,
+      skillSummarize: false,
     };
 
     await expect(repo.acceptMessage(base)).resolves.toEqual({
@@ -181,6 +183,7 @@ describe("ConversationRepo.acceptMessage", () => {
         content: "蓝鲸海报",
         conversationId: null,
         replyToInputRequestId: null,
+        skillSummarize: false,
       }),
     ).resolves.toEqual(replayed);
     expect(transaction).toHaveBeenCalledTimes(2);
@@ -250,6 +253,7 @@ describe("ConversationRepo.acceptMessage", () => {
         content: "再加一只蓝鲸",
         conversationId: "7",
         replyToInputRequestId: null,
+        skillSummarize: false,
       }),
     ).resolves.toEqual(
       expect.objectContaining({ kind: "accepted", agent_run_id: "9" }),
@@ -343,6 +347,7 @@ describe("ConversationRepo.acceptMessage", () => {
       content: "极简风格",
       conversationId: "7",
       replyToInputRequestId: "12",
+      skillSummarize: false,
     });
 
     expect(createEvent).toHaveBeenLastCalledWith({
@@ -355,6 +360,135 @@ describe("ConversationRepo.acceptMessage", () => {
         }),
       }),
     });
+  });
+
+  // 总结当前对话意图持久化（IK60X1，契约 §15.2）：接纳 skill_summarize=true 的消息
+  // 把所属 agent_runs 行打上总结意图标记——新建 Run 直接置位，复用活动 Run 随 updateMany 置位。
+  it("新建 Run 时按本条消息意图写入 skill_summarize", async () => {
+    const tx = {
+      project: { findFirst: vi.fn().mockResolvedValue({ id: 42n }) },
+      command_idempotency: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+      },
+      conversations: {
+        findFirst: vi.fn().mockResolvedValue({ id: 7n, project_id: 42n }),
+        update: vi.fn().mockResolvedValue({ id: 7n, version: 1 }),
+      },
+      agent_runs: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({
+          id: 9n,
+          project_id: 42n,
+          conversation_id: 7n,
+          active_guard: 7n,
+          status: "queued",
+          stage: "understanding",
+          version: 0,
+        }),
+      },
+      conversation_messages: {
+        create: vi.fn().mockResolvedValue({ id: 8n, sequence_no: 1 }),
+      },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi
+          .fn()
+          .mockResolvedValueOnce({ high_watermark: 1n })
+          .mockResolvedValueOnce({ high_watermark: 2n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 1n,
+          gmt_create: new Date("2026-07-29T00:00:00.000Z"),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await createConversationRepo(prisma).acceptMessage({
+      userId: "100",
+      projectId: "42",
+      idempotencyKey: "cmd-sum",
+      requestHash: "d".repeat(64),
+      clientMessageId: "client-sum",
+      content: "总结当前对话并保存为我的技能",
+      conversationId: "7",
+      replyToInputRequestId: null,
+      skillSummarize: true,
+    });
+
+    expect(tx.agent_runs.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ skill_summarize: true }),
+    });
+  });
+
+  it("复用活动 Run 且本条消息带意图 → updateMany 置位 skill_summarize", async () => {
+    const running = {
+      id: 9n,
+      project_id: 42n,
+      conversation_id: 7n,
+      user_id: 100n,
+      active_guard: 7n,
+      status: "running",
+      stage: "responding",
+      version: 3,
+    };
+    const tx = {
+      project: { findFirst: vi.fn().mockResolvedValue({ id: 42n }) },
+      command_idempotency: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+      },
+      conversations: {
+        findFirst: vi.fn().mockResolvedValue({ id: 7n, project_id: 42n }),
+        update: vi.fn().mockResolvedValue({ id: 7n, version: 2 }),
+      },
+      agent_runs: {
+        findFirst: vi.fn().mockResolvedValue(running),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue(running),
+        create: vi.fn(),
+      },
+      conversation_messages: {
+        create: vi.fn().mockResolvedValue({ id: 10n, sequence_no: 2 }),
+      },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi.fn().mockResolvedValue({ high_watermark: 3n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 3n,
+          gmt_create: new Date("2026-07-29T00:00:00.000Z"),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await createConversationRepo(prisma).acceptMessage({
+      userId: "100",
+      projectId: "42",
+      idempotencyKey: "cmd-sum-2",
+      requestHash: "e".repeat(64),
+      clientMessageId: "client-sum-2",
+      content: "总结当前对话并保存为我的技能",
+      conversationId: "7",
+      replyToInputRequestId: null,
+      skillSummarize: true,
+    });
+
+    expect(tx.agent_runs.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ id: 9n }),
+      data: { status: "running", skill_summarize: true },
+    });
+    expect(tx.agent_runs.create).not.toHaveBeenCalled();
   });
 });
 

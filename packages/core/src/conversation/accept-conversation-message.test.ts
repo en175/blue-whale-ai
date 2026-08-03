@@ -69,6 +69,67 @@ describe("acceptConversationMessage", () => {
     expect(acceptMessage).not.toHaveBeenCalled();
   });
 
+  // 总结当前对话意图（资产契约 §15.1，IK60X1）：body.skill_summarize === true 才置位，
+  // 省略/false/非布尔均为普通消息；该字段参与 canonicalRequest 幂等哈希。
+  it("skill_summarize: true 透传为 skillSummarize 并纳入幂等哈希", async () => {
+    const acceptMessage = vi.fn().mockResolvedValue({ kind: "accepted" });
+
+    await acceptConversationMessage(
+      {
+        userId: "100",
+        projectId: "42",
+        idempotencyKey: "cmd-1",
+        body: { ...validBody, skill_summarize: true },
+      },
+      { acceptMessage },
+    );
+
+    expect(acceptMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ skillSummarize: true }),
+    );
+  });
+
+  it("省略或非 true 的 skill_summarize 均为普通消息", async () => {
+    for (const body of [
+      validBody,
+      { ...validBody, skill_summarize: false },
+      { ...validBody, skill_summarize: "true" },
+    ]) {
+      const acceptMessage = vi.fn().mockResolvedValue({ kind: "accepted" });
+      await acceptConversationMessage(
+        {
+          userId: "100",
+          projectId: "42",
+          idempotencyKey: "cmd-1",
+          body,
+        },
+        { acceptMessage },
+      );
+      expect(acceptMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ skillSummarize: false }),
+      );
+    }
+  });
+
+  it("带与不带 skill_summarize 的相同文本是两个不同请求（哈希不同）", async () => {
+    const hashes: string[] = [];
+    for (const body of [validBody, { ...validBody, skill_summarize: true }]) {
+      const acceptMessage = vi.fn().mockResolvedValue({ kind: "accepted" });
+      await acceptConversationMessage(
+        {
+          userId: "100",
+          projectId: "42",
+          idempotencyKey: "cmd-1",
+          body,
+        },
+        { acceptMessage },
+      );
+      hashes.push(acceptMessage.mock.calls[0][0].requestHash);
+    }
+    expect(hashes[0]).toMatch(/^[0-9a-f]{64}$/);
+    expect(hashes[1]).not.toBe(hashes[0]);
+  });
+
   // Creative Skill 资产边界（资产契约 §4/§7/§8）：forced 激活跨用户个人技能或未知 ID
   // 一律拒绝，不触碰持久化；official 与本人个人技能放行；无 forced 时不调守卫；
   // 携带 forced 但守卫未注入时 fail-closed 拒绝。

@@ -15,6 +15,7 @@ export function acceptConversationMessage(
   replyToInputRequestId?: number | string,
   referencedAssetIds?: WireInteger[],
   forcedCreativeSkillId?: string,
+  skillSummarize?: boolean,
 ): Promise<AcceptedConversationMessage> {
   return apiRequest<AcceptedConversationMessage>(
     `/api/projects/${projectId}/conversation/messages`,
@@ -33,6 +34,8 @@ export function acceptConversationMessage(
         ...(forcedCreativeSkillId
           ? { forced_creative_skill_id: forcedCreativeSkillId }
           : {}),
+        // 对话总结意图（IK60X1，契约 §15.1）：省略或 false 即普通消息
+        ...(skillSummarize ? { skill_summarize: true } : {}),
       }),
     },
   );

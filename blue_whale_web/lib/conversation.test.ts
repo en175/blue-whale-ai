@@ -128,4 +128,53 @@ describe("Conversation 命令 API", () => {
       }),
     );
   });
+
+  it("携带 skill_summarize（IK60X1 对话总结保存意图，契约 §15.1）", async () => {
+    vi.mocked(apiRequest).mockResolvedValue({
+      message_id: 1,
+      agent_run_id: 2,
+      cursor: 3,
+    });
+
+    await acceptConversationMessage(
+      7,
+      "总结当前对话并保存为我的个人技能",
+      "c-6",
+      "k-6",
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      "/api/projects/7/conversation/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          client_message_id: "c-6",
+          content: "总结当前对话并保存为我的个人技能",
+          skill_summarize: true,
+        }),
+      }),
+    );
+  });
+
+  it("skillSummarize 缺省时不发送该字段（省略即普通消息）", async () => {
+    vi.mocked(apiRequest).mockResolvedValue({
+      message_id: 1,
+      agent_run_id: 2,
+      cursor: 3,
+    });
+
+    await acceptConversationMessage(7, "普通消息", "c-7", "k-7");
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      "/api/projects/7/conversation/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.not.stringContaining("skill_summarize"),
+      }),
+    );
+  });
 });

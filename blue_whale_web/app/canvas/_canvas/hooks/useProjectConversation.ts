@@ -24,6 +24,8 @@ import type { ChatMessage } from "../types";
 type PendingAttempt = {
   projectId: string;
   content: string;
+  /** skill_summarize 参与幂等语义（契约 §15.1）：带与不带该字段的相同文本是两个不同请求 */
+  skillSummarize: boolean;
   clientMessageId: string;
   idempotencyKey: string;
 };
@@ -74,16 +76,19 @@ export function useProjectConversation(
       content: string,
       referencedAssetIds?: WireInteger[],
       forcedCreativeSkillId?: string,
+      skillSummarize?: boolean,
     ) => {
       if (!projectId) return;
       // 有可回答澄清时绑定 reply_to 并屏蔽 forced（互斥，契约 §4.1/§8）
       const answerable = deriveAnswerableClarification(snapshotRef.current);
       const effectiveForced = answerable ? undefined : forcedCreativeSkillId;
+      const summarize = skillSummarize === true;
       const attempt = pendingAttemptRef.current;
       const reuse =
         attempt !== null &&
         attempt.projectId === projectId &&
-        attempt.content === content;
+        attempt.content === content &&
+        attempt.skillSummarize === summarize;
       const clientMessageId = reuse
         ? attempt.clientMessageId
         : newCommandIdentity();
@@ -93,6 +98,7 @@ export function useProjectConversation(
       pendingAttemptRef.current = {
         projectId,
         content,
+        skillSummarize: summarize,
         clientMessageId,
         idempotencyKey,
       };
@@ -104,6 +110,7 @@ export function useProjectConversation(
         answerable?.input_request_id,
         referencedAssetIds,
         effectiveForced,
+        summarize,
       );
       // 成功即消费：下一次提交（无论内容是否相同）都用新键
       pendingAttemptRef.current = null;

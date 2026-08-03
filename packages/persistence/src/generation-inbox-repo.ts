@@ -113,6 +113,8 @@ export function createGenerationInboxRepo(
         return acceptConversationMessageInTransaction(tx, {
           ...input,
           projectId: inbox.id.toString(),
+          // 生成收件箱不存在「总结当前对话」入口（契约 §15.1），恒为普通消息。
+          skillSummarize: false,
         });
       });
     },

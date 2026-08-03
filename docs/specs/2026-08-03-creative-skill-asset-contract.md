@@ -1,8 +1,8 @@
 # Creative Skill 资产契约（官方/个人领域边界、公开元数据与稳定身份）
 
 - **状态**：Accepted for implementation
-- **契约版本**：5（v2 纳入 IK60WT 技能库浏览扩展：分类/排序/使用人数/i18n，见 §11；v3 纳入 IK60WX 添加官方技能的同名冲突语义，见 §5.2/§6/§7；v4 纳入 IK60WZ 个人技能只读正文与永久删除端点，见 §13；v5 纳入 IK60X0 草稿 AI 格式化端点与 `100104`，见 §6/§7/§14）
-- **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WS)、[02 — 一比一还原官方技能库浏览体验](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WT)、[05 — 添加官方技能并统一“我的技能”资产视图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WX)、[07 — 个人技能只读查看、复制与永久删除](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WZ)、[08 — 接入 SKILL.md AI 格式化工具](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X0)
+- **契约版本**：6（v2 纳入 IK60WT 技能库浏览扩展：分类/排序/使用人数/i18n，见 §11；v3 纳入 IK60WX 添加官方技能的同名冲突语义，见 §5.2/§6/§7；v4 纳入 IK60WZ 个人技能只读正文与永久删除端点，见 §13；v5 纳入 IK60X0 草稿 AI 格式化端点与 `100104`，见 §6/§7/§14；v6 纳入 IK60X1 对话总结保存个人技能，见 §15）
+- **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WS)、[02 — 一比一还原官方技能库浏览体验](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WT)、[05 — 添加官方技能并统一“我的技能”资产视图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WX)、[07 — 个人技能只读查看、复制与永久删除](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WZ)、[08 — 接入 SKILL.md AI 格式化工具](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X0)、[09 — 从当前对话总结并保存个人技能](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X1)
 - **父需求**：[一比一还原 Creative Skill 面板与个人技能资产闭环](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60US)
 - **前置契约**：[Creative Skill 激活跨服务契约](2026-07-24-creative-skill-activation-contract.md)（激活、版本固定与按需正文读取，本文不改写其字段）、[ADR-0041 同族工单串行与契约先行](../adr/0041-sibling-issues-serial-contract-first.md)
 
@@ -343,3 +343,75 @@ IK60WU 起，`POST /api/agent/skills/mine` 统一按「最近创建或添加」�
   （frontmatter 缺失、`name` / `description` / 正文任一为空）。失败时前端保留原草稿
   并显示错误，不产生部分覆盖。
 - 空白草稿 → 参数错误（400），不调用 AI。
+
+## 15. 对话总结保存个人技能（IK60X1）
+
+用户从「创建技能」页签的「总结当前对话」入口发起，由 Agent 基于当前会话的多轮内容
+总结生成并直接保存 Personal Creative Skill。入口与生成语义见根 `CONTEXT.md`
+「Conversation-Summarized Personal Skill」；本节冻结跨进程字段与分支语义。
+
+### 15.1 入口与意图字段
+
+- 「总结当前对话」入口**始终可用**，前端不按消息数或 AgentRun 状态禁用；点击后关闭
+  技能面板，把**固定提示词**（前端常量，硬编码中文，文本需明确表达保存意图）预填进
+  canvas `AgentChatPanel` 输入框；用户可编辑，必须手动发送，系统不得自动提交。
+- 该入口只在 canvas `AgentChatPanel` 宿主提供；首页 / `/generate` 的 `AgentComposer`
+  宿主不渲染此入口（该处不存在「当前对话」）。
+- 预填动作同时在前端置一次性意图标记；发送时消息接纳 body 增加布尔字段
+  **`skill_summarize: true`**（省略或 `false` 即普通消息）。意图靠显式字段传递，
+  服务端不做提示词文本匹配；发送后前端清除标记。
+- `skill_summarize` 参与 `canonicalRequest` 幂等哈希（带与不带该字段的相同文本是
+  两个不同请求）。
+
+### 15.2 执行位置与意图持久化
+
+- 总结能力由 **agent-worker 执行**，不在 BFF 同步路径内调用 LLM。接纳时
+  `skill_summarize: true` 的消息把所属 `agent_runs` 行打上总结意图标记（新列
+  `skill_summarize`，新建或复用活动 Run 时置位）；Worker claim 到带标记的 Run 时
+  分流到总结管道，否则走既有 runtime。
+- 总结管道产出即该 Run 的 assistant 消息正文，经既有 `commitSuccess` 缝落库并广播
+  `conversation.message_completed`；Run 状态机不变。
+- 受控 AI 接口同 §14：new-api（OpenAI 兼容 relay）`/v1/chat/completions`，baseUrl /
+  token 复用 `NEW_API_BASE_URL` / `NEW_API_ROOT_ACCESS_TOKEN`，模型来自服务端 env
+  `SKILL_SUMMARIZE_MODEL`（未配置按 §15.3 失败分支处理，同 §14 `SKILL_FORMAT_MODEL`
+  先例）；固定规则有内置默认常量，`SKILL_SUMMARIZE_RULES` 可覆盖，
+  浏览器与普通用户不可见、不可修改；调用带超时。
+
+### 15.3 充分性判断与保存分支
+
+总结管道读取当前会话历史（按序的用户/assistant 消息），连后台固定规则一并交给
+受控 AI 判断并产出：
+
+- **信息不足** → 不创建技能；assistant 消息说明缺少哪些可复用信息并请求用户补充。
+- **信息充分** → AI 产出 SKILL.md 草稿；服务端用 §12.1 同一解析/校验
+  （frontmatter、非空 name / description / 正文）验收，非法输出按失败处理。
+  校验通过即调 §12 同一 `createPersonalSkill` 服务缝保存（用户发送含保存意图的
+  请求即构成创建授权，**无第二次确认**），assistant 消息返回保存成功的技能名称。
+- **名称冲突**（`100101` / `100102` 语义）→ **禁止保存**，也禁止自动追加后缀落库；
+  管道提议一个服务端验证可用的新名称，把草稿与提议名挂入待确认会话（§15.4），
+  assistant 消息说明冲突并提议新名，等待用户确认。这是无二次确认规则的唯一例外。
+  AI 提议名失败或不可用时，草稿与占用名仍挂入待确认会话，assistant 消息请用户
+  直接回复一个想要的新名称保存。
+- **失败**（env 未配置、AI 抛错/超时、输出非法且重试后仍非法）→ 不创建技能；
+  assistant 消息返回失败说明，Run 正常完成（不走 `commitFailure`，避免重放风暴）。
+
+### 15.4 名称冲突待确认会话
+
+- 新持久化结构 `skill_summarize_session`：归属 conversation + user，保存 SKILL.md
+  草稿、提议名称与状态（`pending_name_confirm`）；同一会话同一时刻至多一条
+  pending 记录，新冲突覆盖旧记录。
+- 存在 pending 记录时，该会话的下一条用户消息（无论是否带 `skill_summarize`）
+  分流到总结管道的确认模式，由受控 AI 解释用户回复：
+  - **确认**（可原样确认或另给新名）→ 用最终名称重试保存；再次冲突则重新提议并
+    继续保持 pending；
+  - **明确取消** → 关闭会话记录，assistant 消息确认未保存；
+  - **无关回复** → 关闭会话记录，该消息回退给正常 runtime 处理（pass-through）。
+- 确认流程全程不保存任何中间草稿到技能资产表；只有最终名称校验通过才落库。
+
+### 15.5 边界与不变式
+
+- 保存语义完全复用 §12：Name Key 唯一、官方保留名、跨用户隔离、确定性封面，
+  不新增资产字段；「我的技能」可见性由 §12.5 排序自然保证。
+- 固定规则与对话历史均不含官方技能正文；本流程不改变 §3 官方正文保密边界。
+- 总结管道只写 assistant 消息与个人技能资产，不产生 CreativeSkillActivation、
+  不改变 `auto` 开关、不添加官方引用。
