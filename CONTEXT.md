@@ -559,28 +559,28 @@ _Avoid_: 重试复用结果不明的预留；usage 缺失时按零成本；把�
 _Avoid_: 把 AuditRecord 当作产品事件、调试日志或原始提示词存档。
 
 **GenerationAuthorizationGate（生成授权门）**:
-Product API 接纳 Canvas 图片或视频操作面板提交的 GenerationJob 前，对用户意图与风险进行分类：明确且在默认成本额度内则直接执行；
-存在关键歧义则继续对齐；高成本或不可逆操作则先取得自然语言确认，但确认不能突破系统硬额度。
-_Avoid_: 允许 Agent 创建 GenerationJob、每次生成都确认、把需求对齐误称为授权。
+Product API 接纳图片或视频 GenerationJob 前，验证已认证 User 的显式按钮命令、资源权限、模型能力与可用
+额度；全部满足即直接执行，不按成本高低增加确认。任一硬条件不满足则零写入并返回可修复原因，确认不能
+突破系统额度，Agent 仍无权创建 GenerationJob。
+_Avoid_: 成本分级确认、确认弹窗、允许 Agent 创建 GenerationJob、静默降级模型或参数、把需求对齐误称为授权。
 
 **UserInputRequest（用户输入请求）**:
-AgentRun 因关键歧义或 GenerationAuthorizationGate 而等待用户补充信息时创建的产品中性请求记录，
-以稳定的产品级 `request_type` 区分创作澄清（`creation_clarification`）与成本确认
-（`cost_confirmation`）。请求类型、可见问题、来源 AgentRun、Conversation 归属与恢复绑定一经创建
-不可改写，归属于 AgentRun，不是独立聚合；同一 AgentRun 最多只有一个活动请求。用户只能通过
+AgentRun 因创作关键歧义而等待用户补充信息时创建的产品中性请求记录，稳定 `request_type` 为
+`creation_clarification`。请求类型、可见问题、来源 AgentRun、Conversation 归属与恢复绑定一经创建
+不可改写，归属于 AgentRun，不是独立聚合；同一 AgentRun 最多只有一个活动请求。User 只能通过
 Conversation 中引用该请求标识的自然语言消息回答，已过期或已回答请求的迟到回复不能解除后续请求。
-创作澄清接受任意非空回答，不需要报价/供应商/成本策略字段；成本确认仍校验动作身份、参数摘要、
-报价与策略版本（详见 ADR-0036）。
-_Avoid_: 确认按钮、无请求标识的隐式解锁、把 UserInputRequest 当作独立运行任务。
+创作澄清接受任意非空回答，不需要报价、供应商或成本策略字段。
+_Avoid_: `cost_confirmation`、确认按钮、无请求标识的隐式解锁、把 UserInputRequest 当作独立运行任务。
 
 **展示边界(画布 vs 对话)**:
 Canvas 承载 Asset 素材节点与用户主动创建的标题、说明或创意便签。
 所有过程性文字内容(Brief 摘要、Skill 推荐、脚本 / 分镜、图片理解摘要、Review、
 ReasoningSummary 思考摘要、审核说明、任务状态)都在 AgentChatPanel 对话流里以文字或文字卡展示，
 系统和 Agent 不得自动把这些内容创建为 text NodeItem。一句话:**Canvas = 素材与用户便签，对话 = 过程**。
-User 明确应用对话中的计划后形成的 SceneCard 是此边界的唯一例外，并通过 SceneCardNode 进入 Canvas。
-PlanMessage 通过卡片上的唯一显式操作由 User 手动新建或覆盖 SceneCard，点击后不再弹二次确认；
-继续修改仍通过对话产生新的 PlanMessage，不直接改写历史消息。
+User 明确应用视频计划后形成的 SceneCard 是此边界的唯一内容资源例外，并通过 SceneCardNode 进入 Canvas；
+图片计划直接创建 GenerationJob，其结果仍作为普通 Asset NodeItem 进入 Canvas。PlanMessage 通过卡片上的
+唯一显式操作由 User 手动触发对应路径，点击后不再弹二次确认；继续修改仍通过对话产生新的 PlanMessage，
+不直接改写历史消息。
 _Avoid_: 把 Brief / Skill / 分镜 / Review 做成普通 text NodeItem；Agent 自动应用计划；
 直接编辑历史 PlanMessage；把提示词、worker 名、文件路径等内部信息展示给用户。
 
