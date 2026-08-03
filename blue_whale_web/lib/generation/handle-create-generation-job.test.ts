@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { handleCreateGenerationJob } from "./handle-create-generation-job.js";
 import { handleCancelGenerationJob } from "./handle-cancel-generation-job.js";
+import { handleRetryGenerationJob } from "./handle-retry-generation-job.js";
 
 // 生成命令处理器：create（建 job+日志+预留）/ cancel（软取消）。
 // 对齐本仓 Java GenerationJobCommandController/Service 字段与状态语义。
@@ -477,5 +478,37 @@ describe("handleCancelGenerationJob", () => {
     deps.command.requestCancel.mockResolvedValue(false);
     const result = await handleCancelGenerationJob("9", "55", "999", deps);
     expect(result).toEqual({ code: 100301, msg: "资源不存在", data: null });
+  });
+});
+
+describe("handleRetryGenerationJob", () => {
+  it("project 不归属 → 100301 且不触发重试", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue(null);
+    const result = await handleRetryGenerationJob("9", "56", "200", "key-r1", deps);
+    expect(result).toEqual({ code: 100301, msg: "资源不存在", data: null });
+    expect(deps.command.retryJob).not.toHaveBeenCalled();
+  });
+
+  it("非本人终态任务 → 100301（retryJob 按 userId 校验）", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+    deps.command.retryJob.mockResolvedValue(null);
+    const result = await handleRetryGenerationJob("9", "55", "999", "key-r2", deps);
+    expect(result).toEqual({ code: 100301, msg: "资源不存在", data: null });
+    expect(deps.command.retryJob).toHaveBeenCalledWith("999", "9", "key-r2");
+  });
+
+  it("本人终态失败任务 → 200 + 新 job", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+    deps.command.retryJob.mockResolvedValue({
+      generation_job_id: "201",
+      type: "image",
+      cursor: 0,
+    });
+    const result = await handleRetryGenerationJob("9", "55", "200", "key-r3", deps);
+    expect(result.code).toBe(200);
+    expect(result.data).toMatchObject({ generation_job_id: "201", type: "image" });
   });
 });

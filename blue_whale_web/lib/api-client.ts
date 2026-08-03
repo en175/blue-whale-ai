@@ -16,7 +16,7 @@ import { ApiError } from "./api/errors";
 type AuthFailureHandler = () => void;
 let onAuthFailure: AuthFailureHandler | null = null;
 
-/** 注册认证失败回调（refresh token 也过期 → 需要重新登录）。返回取消订阅函数。 */
+/** 注册认证失败回调（凭证失效 → 需要重新登录）。返回取消订阅函数。 */
 export function subscribeToAuthFailure(
   handler: AuthFailureHandler,
 ): () => void {
@@ -30,13 +30,12 @@ export function subscribeToAuthFailure(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/** auth 端点不触发 401 拦截，防止 refresh 自身 401 导致无限循环。 */
+/** auth 端点不触发 401 拦截，防止认证入口自身 401 导致无限循环。 */
 function isAuthEndpoint(url: string): boolean {
   const authPaths = [
     "/api/auth/captcha",
     "/api/auth/send-code",
     "/api/auth/login",
-    "/api/auth/refresh",
     "/api/auth/logout",
   ];
   return authPaths.some((p) => url.includes(p));

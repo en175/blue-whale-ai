@@ -9,13 +9,14 @@ import {
   syncTierDiscountToGo,
 } from "@/lib/topup-tier/go-amount-discount";
 import { logTierDelete, logTierUpdate } from "@/lib/topup-tier/operation-log";
+import { withAdminUser } from "@/lib/auth/product-route-auth";
 
 type Params = { params: Promise<{ id: string }> };
 
 // PUT /api/admin/topup-tiers/:id → 更新档位（部分更新）
 // 原价为主输入且须为正整数；改价时到账积分随之服务端重派生（N × QuotaPerUnit），
 // 客户端提交的 amount 一律不接受（积分是派生量，落库以原价为准）。
-export async function PUT(request: Request, { params }: Params) {
+async function handleUpdateTopupTier(request: Request, { params }: Params) {
   try {
     const { id } = await params;
     const body = await request.json();
@@ -129,7 +130,7 @@ export async function PUT(request: Request, { params }: Params) {
 }
 
 // DELETE /api/admin/topup-tiers/:id → 删除档位（逻辑删）
-export async function DELETE(_request: Request, { params }: Params) {
+async function handleDeleteTopupTier(request: Request, { params }: Params) {
   try {
     const { id } = await params;
     const { db } = createTopupTierDeps();
@@ -165,4 +166,12 @@ export async function DELETE(_request: Request, { params }: Params) {
     const msg = e instanceof Error ? e.message : "unknown";
     return Response.json({ success: false, error: msg }, { status: 500 });
   }
+}
+
+export async function PUT(request: Request, context: Params) {
+  return withAdminUser(request, () => handleUpdateTopupTier(request, context));
+}
+
+export async function DELETE(request: Request, context: Params) {
+  return withAdminUser(request, () => handleDeleteTopupTier(request, context));
 }
