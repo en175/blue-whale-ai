@@ -37,7 +37,11 @@ import { createMessageIdGenerator } from "../idGen";
 import type { MessageIdGenerator } from "../idGen";
 import { useAuth } from "@/components/auth/AuthContext";
 import type { CardMessage } from "../nodeFromCard";
-import { extractEditor, insertMention } from "./dock/mention";
+import { extractEditor, insertMention, removeMention } from "./dock/mention";
+import { UPLOAD_ACCEPT, selectUploadFiles } from "@/lib/uploadRules";
+import { toast } from "@/components/Toast";
+import { wireInteger } from "@/lib/wire-integer";
+import type { MediaKind } from "@/lib/mediaSize";
 import {
   clearComposerDraft,
   loadComposerDraft,
@@ -63,6 +67,17 @@ const WELCOME_PRESETS = [
   },
 ];
 
+/** 输入区上传条目（IK67GX T03）：每文件一条；成功插 pill，失败可单独重试/移除。 */
+type ComposerUploadEntry = {
+  id: string;
+  name: string;
+  file: File;
+  status: "uploading" | "success" | "error";
+  assetId?: string;
+  url?: string;
+  kind?: MediaKind;
+};
+
 export function AgentChatPanel({
   messages,
   isOpen,
@@ -72,6 +87,7 @@ export function AgentChatPanel({
   onCardGenerated,
   onAppendMessages,
   onSubmitMessage,
+  onUploadFile,
   onSetCardStatus,
   onRetryGenerationJob,
   prompt,
@@ -96,6 +112,13 @@ export function AgentChatPanel({
     referencedAssetIds?: WireInteger[],
     forcedCreativeSkillId?: string,
   ) => Promise<void>;
+  /**
+   * 后端可用时执行输入区文件上传（持久化 Asset + 创建 NodeItem + Canvas 首次放置）。
+   * 缺省（离线）时上传按钮不启用。IK67GX T03。
+   */
+  onUploadFile?: (
+    file: File,
+  ) => Promise<{ assetId: string; url: string; kind: MediaKind }>;
   /** 设置当前项目内某 card 的状态（重试链推进） */
   onSetCardStatus?: (cardId: number | string, status: CardStatus) => void;
   /** 权威失败 Card 的真实重试命令；新 Job 由 Snapshot/SSE 恢复。 */
@@ -269,6 +292,135 @@ export function AgentChatPanel({
     if (projectId) saveComposerDraft(projectId, text);
   }, [projectId]);
 
+  // 输入区上传（IK67GX T03）：条目状态流 uploading → success/error；
+  // 成功即插可移除 pill（Asset 已持久化），失败条目可单独重试/移除，不损文字与其他上传。
+  const [composerUploads, setComposerUploads] = useState<ComposerUploadEntry[]>(
+    [],
+  );
+  const composerFileInputRef = useRef<HTMLInputElement>(null);
+  const composerUploadSeqRef = useRef(0);
+
+  const patchComposerUpload = useCallback(
+    (entryId: string, patch: Partial<ComposerUploadEntry>) => {
+      setComposerUploads((prev) =>
+        prev.map((u) => (u.id === entryId ? { ...u, ...patch } : u)),
+      );
+    },
+    [],
+  );
+
+  const insertUploadMention = useCallback(
+    (entry: {
+      assetId: string;
+      url: string;
+      kind: MediaKind;
+      name: string;
+    }) => {
+      const editor = composerRef.current;
+      if (!editor) return;
+      const existing = editor.querySelectorAll("[data-mention-id]").length;
+      const dup = editor.querySelector(
+        `[data-mention-asset-id="${entry.assetId}"]`,
+      );
+      if (existing >= MENTION_LIMIT) {
+        console.warn(
+          "[canvas] mention pill 超过上限，已忽略",
+          MENTION_LIMIT,
+          entry.name,
+        );
+        return;
+      }
+      if (dup) {
+        console.warn("[canvas] mention pill 已存在，忽略重复插入", entry.name);
+        return;
+      }
+      insertMention(editor, {
+        id: entry.assetId,
+        type: entry.kind,
+        name: entry.name,
+        src: entry.url,
+        assetId: wireInteger(entry.assetId),
+      });
+      handleComposerInput();
+    },
+    [handleComposerInput],
+  );
+
+  const runComposerUpload = useCallback(
+    async (entryId: string, file: File) => {
+      if (!onUploadFile) return;
+      patchComposerUpload(entryId, { status: "uploading" });
+      try {
+        const result = await onUploadFile(file);
+        patchComposerUpload(entryId, {
+          status: "success",
+          assetId: result.assetId,
+          url: result.url,
+          kind: result.kind,
+        });
+        insertUploadMention({
+          assetId: result.assetId,
+          url: result.url,
+          kind: result.kind,
+          name: file.name,
+        });
+      } catch (error) {
+        console.error("[canvas] composer upload failed:", error);
+        patchComposerUpload(entryId, { status: "error" });
+      }
+    },
+    [onUploadFile, patchComposerUpload, insertUploadMention],
+  );
+
+  const handleComposerFilePick = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      e.target.value = "";
+      if (!files.length || !onUploadFile) return;
+      selectUploadFiles(files, {
+        upload: (file) => {
+          composerUploadSeqRef.current += 1;
+          const entryId = `u_${composerUploadSeqRef.current}`;
+          setComposerUploads((prev) => [
+            ...prev,
+            { id: entryId, name: file.name, file, status: "uploading" },
+          ]);
+          void runComposerUpload(entryId, file);
+        },
+        reject: (reason) => toast.error(reason),
+      });
+    },
+    [onUploadFile, runComposerUpload],
+  );
+
+  const handleComposerUploadRetry = useCallback(
+    (entryId: string) => {
+      const entry = composerUploads.find((u) => u.id === entryId);
+      if (!entry || entry.status !== "error") return;
+      void runComposerUpload(entryId, entry.file);
+    },
+    [composerUploads, runComposerUpload],
+  );
+
+  /** 移除上传条目；成功条目同时摘掉输入区内对应 pill（Asset 持久化事实不受影响）。 */
+  const handleComposerUploadRemove = useCallback(
+    (entryId: string) => {
+      const entry = composerUploads.find((u) => u.id === entryId);
+      if (!entry || entry.status === "uploading") return;
+      if (entry.status === "success" && entry.assetId && composerRef.current) {
+        removeMention(composerRef.current, entry.assetId);
+        handleComposerInput();
+      }
+      setComposerUploads((prev) => prev.filter((u) => u.id !== entryId));
+    },
+    [composerUploads, handleComposerInput],
+  );
+
+  /** 存在未完成上传时禁用发送：正式消息永远不引用尚未接纳的 Asset（IK67GX T03）。 */
+  const anyComposerUploading = composerUploads.some(
+    (u) => u.status === "uploading",
+  );
+
   // 欢迎预设：只填入输入框供用户审阅编辑，不发送、不创建产品事实（IK67GD T02）
   const handleWelcomePreset = (text: string) => {
     if (!composerRef.current) return;
@@ -361,6 +513,8 @@ export function AgentChatPanel({
       ? extractEditor(composerRef.current)
       : { prompt: "", assetIds: [] as WireInteger[] };
     if (!prompt && assetIds.length === 0) return;
+    // 未完成上传门禁：发送按钮禁用 + Enter 路径同样拦截（IK67GX T03）
+    if (anyComposerUploading) return;
 
     requireAuth({ kind: "canvas-send", text: prompt }, () => {
       // 重新发送前清掉上一轮尚未触发的逐条追加定时器
@@ -380,6 +534,7 @@ export function AgentChatPanel({
           .then(() => {
             if (composerRef.current) composerRef.current.innerHTML = "";
             setComposerEmpty(true);
+            setComposerUploads([]);
             if (projectId) clearComposerDraft(projectId);
             if (attachForced) setPendingForcedSkill(null);
           })
@@ -400,6 +555,7 @@ export function AgentChatPanel({
       onAppendMessages?.([userMsg]);
       if (composerRef.current) composerRef.current.innerHTML = "";
       setComposerEmpty(true);
+      setComposerUploads([]);
       if (projectId) clearComposerDraft(projectId);
 
       // 按当前创作模式生成 mock 回复，错开逐条追加模拟逐步生成
@@ -742,6 +898,95 @@ export function AgentChatPanel({
                     }
                   }}
                 />
+                <input
+                  ref={composerFileInputRef}
+                  type="file"
+                  accept={UPLOAD_ACCEPT}
+                  multiple
+                  className="tc-agent-composer-file-input sr-only"
+                  onChange={handleComposerFilePick}
+                  aria-hidden="true"
+                  tabIndex={-1}
+                />
+                {composerUploads.length > 0 && (
+                  <div
+                    className="tc-agent-composer-uploads mt-2 flex flex-col gap-1"
+                    aria-label="素材上传状态"
+                  >
+                    {composerUploads.map((entry) => (
+                      <div
+                        key={entry.id}
+                        data-composer-upload-entry={entry.id}
+                        data-composer-upload-status={entry.status}
+                        data-composer-upload-asset={entry.assetId ?? undefined}
+                        className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2.5 py-1.5 text-xs"
+                      >
+                        <span
+                          className="min-w-0 flex-1 truncate"
+                          style={{ color: "var(--tc-text-secondary)" }}
+                          title={entry.name}
+                        >
+                          {entry.name}
+                        </span>
+                        {entry.status === "uploading" && (
+                          <span style={{ color: "var(--tc-text-tertiary)" }}>
+                            上传中…
+                          </span>
+                        )}
+                        {entry.status === "success" && (
+                          <>
+                            <span style={{ color: "var(--tc-success)" }}>
+                              已上传
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleComposerUploadRemove(entry.id)
+                              }
+                              data-composer-upload-remove={entry.id}
+                              className="shrink-0 rounded px-1.5 py-0.5 transition-colors hover:bg-white/[0.08]"
+                              style={{ color: "var(--tc-text-tertiary)" }}
+                              aria-label={`移除 ${entry.name}`}
+                            >
+                              移除
+                            </button>
+                          </>
+                        )}
+                        {entry.status === "error" && (
+                          <>
+                            <span style={{ color: "var(--tc-destructive)" }}>
+                              上传失败
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleComposerUploadRetry(entry.id)
+                              }
+                              data-composer-upload-retry={entry.id}
+                              className="shrink-0 rounded px-1.5 py-0.5 transition-colors hover:bg-white/[0.08]"
+                              style={{ color: "var(--tc-accent)" }}
+                              aria-label={`重试上传 ${entry.name}`}
+                            >
+                              重试
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleComposerUploadRemove(entry.id)
+                              }
+                              data-composer-upload-remove={entry.id}
+                              className="shrink-0 rounded px-1.5 py-0.5 transition-colors hover:bg-white/[0.08]"
+                              style={{ color: "var(--tc-text-tertiary)" }}
+                              aria-label={`移除 ${entry.name}`}
+                            >
+                              移除
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div
                   className="tc-agent-composer-actions mt-2 flex items-center justify-between"
                   aria-label="Composer actions"
@@ -750,7 +995,9 @@ export function AgentChatPanel({
                     <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
                       <button
                         type="button"
-                        className="tc-agent-upload-btn tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/[0.08]"
+                        onClick={() => composerFileInputRef.current?.click()}
+                        disabled={!onUploadFile}
+                        className="tc-agent-upload-btn tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/[0.08] disabled:cursor-default disabled:opacity-40"
                         aria-label="上传素材"
                         data-tooltip="上传图片、视频或音频"
                       >
@@ -807,10 +1054,14 @@ export function AgentChatPanel({
                       <button
                         type="button"
                         onClick={handleSend}
-                        disabled={composerEmpty || submitting}
+                        disabled={
+                          composerEmpty || submitting || anyComposerUploading
+                        }
                         className="tc-agent-send-btn tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-black transition-colors hover:bg-white/90 disabled:cursor-default disabled:bg-white/[0.1] disabled:text-white/[0.25]"
                         aria-label="发送"
-                        aria-disabled={composerEmpty || submitting}
+                        aria-disabled={
+                          composerEmpty || submitting || anyComposerUploading
+                        }
                       >
                         <IconSend size={14} />
                       </button>

@@ -90,6 +90,93 @@ function putWithProgress(
 }
 
 /**
+ * 上传会话：presign 结果 + 声明元数据。PUT/complete 失败后重试沿用同一会话
+ * （同一 storage_key），complete 经 findCommittedUpload 幂等 —— 每个文件会话
+ * 至多产生一个 Asset，重试不重复创建（IK67GX T03）。
+ */
+export type UploadSession = {
+  type: "image" | "video" | "audio";
+  mime: string;
+  size: number;
+  storage_key: string;
+  upload_url: string;
+  headers: Record<string, string>;
+  /** 会话创建时刻（ms），与 expires_in 一起判定 presign 是否仍有效。 */
+  created_at: number;
+  expires_in: number;
+};
+
+/** presign 到期前 30s 即视为失效，避免 PUT 飞行途中过期。 */
+function sessionStillUsable(session: UploadSession): boolean {
+  return Date.now() < session.created_at + (session.expires_in - 30) * 1000;
+}
+
+/**
+ * 取可用上传会话：existing 与文件匹配且未过期则原样复用（重试不重新 presign），
+ * 否则新签一个。调用方应在 PUT 前保存返回值，失败重试才能沿用同一 storage_key。
+ */
+export async function ensureUploadSession(
+  file: File,
+  kind: "image" | "video" | "audio",
+  existing?: UploadSession | null,
+): Promise<UploadSession> {
+  const mime = uploadMime(file, kind);
+  if (
+    existing &&
+    existing.type === kind &&
+    existing.mime === mime &&
+    existing.size === file.size &&
+    sessionStillUsable(existing)
+  ) {
+    return existing;
+  }
+  return {
+    ...(await presignAsset({ type: kind, mime, size: file.size })),
+    type: kind,
+    mime,
+    size: file.size,
+    created_at: Date.now(),
+  };
+}
+
+/** 会话内的 PUT + complete；complete 按 storage_key 幂等（findCommittedUpload）。 */
+export async function completeUploadSession(input: {
+  file: File;
+  projectId?: WireInteger;
+  kind: "image" | "video" | "audio";
+  session: UploadSession;
+  onProgress?: (pct: number) => void;
+}): Promise<{ assetId: string; url: string }> {
+  const { file, projectId, kind, session } = input;
+  const metadata =
+    kind === "video" ? await readLocalMediaMetadata(file, kind) : {};
+  if (input.onProgress) {
+    await putWithProgress(
+      session.upload_url,
+      session.headers,
+      file,
+      input.onProgress,
+    );
+  } else {
+    const putResp = await fetch(session.upload_url, {
+      method: "PUT",
+      headers: session.headers,
+      body: file,
+    });
+    if (!putResp.ok) throw new Error(`上传失败: ${putResp.status}`);
+  }
+  const asset = await completeAsset({
+    ...(projectId == null ? {} : { project_id: String(projectId) }),
+    type: kind,
+    mime: session.mime,
+    size: file.size,
+    storage_key: session.storage_key,
+    ...metadata,
+  });
+  return { assetId: asset.asset_id, url: asset.url };
+}
+
+/**
  * 上传媒体文件到对象存储（Node 资产 presign + PUT + complete 三步流）。
  *
  * 流程：① POST /api/agent/assets/uploads/presign → { storage_key, upload_url, headers }；
@@ -108,38 +195,15 @@ export async function uploadAsset(
   onProgress?: (pct: number) => void,
 ): Promise<{ id: string; url: string }> {
   const type = declaredType ?? detectMediaKind(file);
-  const metadata =
-    type === "video" ? await readLocalMediaMetadata(file, type) : {};
-  const mime = uploadMime(file, type);
-  const presign = await presignAsset({
-    type,
-    mime,
-    size: file.size,
+  const session = await ensureUploadSession(file, type);
+  const { assetId, url } = await completeUploadSession({
+    file,
+    projectId,
+    kind: type,
+    session,
+    onProgress,
   });
-  if (onProgress) {
-    await putWithProgress(
-      presign.upload_url,
-      presign.headers,
-      file,
-      onProgress,
-    );
-  } else {
-    const putResp = await fetch(presign.upload_url, {
-      method: "PUT",
-      headers: presign.headers,
-      body: file,
-    });
-    if (!putResp.ok) throw new Error(`上传失败: ${putResp.status}`);
-  }
-  const asset = await completeAsset({
-    ...(projectId == null ? {} : { project_id: String(projectId) }),
-    type,
-    mime,
-    size: file.size,
-    storage_key: presign.storage_key,
-    ...metadata,
-  });
-  return { id: asset.asset_id, url: asset.url };
+  return { id: assetId, url };
 }
 
 /** 逻辑删除当前用户素材；服务端负责归属校验。 */

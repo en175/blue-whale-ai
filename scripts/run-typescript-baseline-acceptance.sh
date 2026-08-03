@@ -65,9 +65,9 @@ printf '%s\n' '<!doctype html><title>acceptance</title>' \
 
 "$ROOT/scripts/init-typescript-baseline-db.sh"
 if [ "${BW_TS_SKIP_IMAGE_BUILD:-false}" = "true" ]; then
-  dc up -d new-api provider-stub agent-worker generation-worker web
+  dc up -d new-api provider-stub storage-stub agent-worker generation-worker web
 else
-  dc up -d --build new-api provider-stub agent-worker generation-worker web
+  dc up -d --build new-api provider-stub storage-stub agent-worker generation-worker web
 fi
 
 setup_response="$(
@@ -112,7 +112,7 @@ dc restart new-api >/dev/null
 deadline=$((SECONDS + 180))
 while [ "$SECONDS" -lt "$deadline" ]; do
   pending=0
-  for service in new-api provider-stub agent-worker generation-worker web; do
+  for service in new-api provider-stub storage-stub agent-worker generation-worker web; do
     container_id="$(dc ps -q "$service")"
     if [ -z "$container_id" ] || [ "$(docker inspect -f '{{.State.Health.Status}}' "$container_id")" != "healthy" ]; then
       pending=1
@@ -147,6 +147,12 @@ while [ "$SECONDS" -lt "$deadline" ]; do
         dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
           | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
         echo "browser conversation acceptance failed" >&2
+        exit 1
+      fi
+      if ! node --test "$ROOT/tests/typescript-baseline/composer-upload-blackbox.test.mjs"; then
+        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub storage-stub \
+          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
+        echo "composer upload acceptance failed" >&2
         exit 1
       fi
       exit 0
