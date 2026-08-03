@@ -24,11 +24,6 @@ const EXEMPT = new Set([
   "recharge/order/[tradeNo]/cancel/route.ts",
   "recharge/order/[tradeNo]/status/route.ts",
   "recharge/tiers/route.ts",
-  // IK51OP 充值档位管理：管理端 API，鉴权后续接入（当前先打通 CRUD）。
-  "admin/topup-tiers/route.ts",
-  "admin/topup-tiers/[id]/route.ts",
-  "admin/topup-tiers/sort/route.ts",
-  "admin/topup-tiers/preview/route.ts",
   // IK51OP 操作日志：管理端审计 API，鉴权后续接入。
   "admin/operation-logs/route.ts",
 ]);
@@ -83,9 +78,10 @@ function hasProtectedRouteAuth(source: string): boolean {
       ts.isNamedImports(node.importClause.namedBindings) &&
       node.importClause.namedBindings.elements.some(
         (element) =>
-          element.name.text === "withAuthenticatedUser" &&
+          (element.name.text === "withAuthenticatedUser" ||
+            element.name.text === "withAdminUser") &&
           (element.propertyName?.text ?? element.name.text) ===
-            "withAuthenticatedUser",
+            element.name.text,
       )
     ) {
       importsWithAuthenticatedUser = true;
@@ -142,7 +138,8 @@ function hasProtectedRouteAuth(source: string): boolean {
           statement.expression !== undefined &&
           ts.isCallExpression(statement.expression) &&
           ts.isIdentifier(statement.expression.expression) &&
-          statement.expression.expression.text === "withAuthenticatedUser",
+          (statement.expression.expression.text === "withAuthenticatedUser" ||
+            statement.expression.expression.text === "withAdminUser"),
       ),
     )
   );
