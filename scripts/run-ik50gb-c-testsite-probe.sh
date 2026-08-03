@@ -15,13 +15,17 @@ if ! node -e '
     process.exit(1);
   }
   const isLoopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  // BW_ALLOW_INSECURE_HTTP=1：用户知情豁免——测试站无 TLS 时允许明文 HTTP（userinfo 仍拒绝）。
+  const insecureAllowed =
+    url.protocol === "http:" &&
+    process.env.BW_ALLOW_INSECURE_HTTP === "1";
   const allowed =
     url.username === "" &&
     url.password === "" &&
-    (url.protocol === "https:" || (url.protocol === "http:" && isLoopback));
+    (url.protocol === "https:" || (url.protocol === "http:" && isLoopback) || insecureAllowed);
   process.exit(allowed ? 0 : 1);
 ' "$base_url"; then
-  echo "BW_TEST_BASE_URL must use HTTPS unless the host is localhost, and must not contain userinfo" >&2
+  echo "BW_TEST_BASE_URL must use HTTPS unless the host is localhost (set BW_ALLOW_INSECURE_HTTP=1 to knowingly waive TLS), and must not contain userinfo" >&2
   exit 2
 fi
 
