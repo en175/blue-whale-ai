@@ -44,9 +44,24 @@ test("验收拓扑包含 Web、两个 Node worker、fresh MySQL 与 BullMQ Redis
     "agent-worker",
     "generation-worker",
     "mysql",
+    "new-api",
+    "provider-stub",
     "redis",
     "web",
   ]);
+
+  const serialized = JSON.stringify(
+    JSON.parse(compose("config", "--format", "json")),
+  );
+  for (const forbidden of [
+    "blue_whale_server",
+    "blue-whale-gateway",
+    "blue-whale-user",
+    "blue-whale-product",
+    "GATEWAY_URL",
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, forbidden);
+  }
 });
 
 test("Web 与 BullMQ generation worker 由同一镜像启动为两个进程", () => {
@@ -62,7 +77,14 @@ test("Web 与 BullMQ generation worker 由同一镜像启动为两个进程", ()
     "start:worker",
   ]);
   assert.equal(generationWorker.environment.REDIS_HOST, "redis");
+  assert.equal(generationWorker.environment.NODE_ENV, "test");
+  assert.equal(
+    generationWorker.environment.GENERATION_MEDIA_RELAY_MODE,
+    "passthrough",
+  );
   assert.ok(generationWorker.depends_on.redis);
+  assert.equal(web.environment.REDIS_HOST, "redis");
+  assert.ok(web.depends_on.redis);
 });
 
 test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子", () => {
@@ -85,18 +107,28 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
 
   assert.deepEqual(tables, [
     "agent_runs",
+    "api_key",
+    "api_key_usage",
     "assets",
-    "canvas_layouts",
-    "command_receipts",
+    "canvas",
+    "captcha_challenges",
+    "command_idempotency",
     "conversation_messages",
     "conversations",
+    "cost_reservations",
+    "generation_job_logs",
     "generation_jobs",
-    "generation_model_capabilities",
-    "generation_output_slots",
-    "generation_providers",
-    "node_items",
+    "generation_model_capability",
+    "project",
+    "project_event_stream",
     "project_events",
-    "projects",
+    "skill",
+    "template_card",
+    "template_card_image",
+    "user_input_requests",
+    "user_skill",
+    "users",
+    "verification_codes",
   ]);
 
   assert.equal(
@@ -111,9 +143,26 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
       "-B",
       "blue_whale",
       "-e",
-      "SELECT CONCAT((SELECT COUNT(*) FROM generation_providers), ':', (SELECT COUNT(*) FROM generation_model_capabilities))",
+      "SELECT CONCAT(1, ':', (SELECT COUNT(*) FROM generation_model_capability WHERE enabled = 1))",
     ),
     "1:2",
+  );
+
+  assert.equal(
+    compose(
+      "exec",
+      "-T",
+      "mysql",
+      "mysql",
+      "-uroot",
+      "-pblue_whale",
+      "-N",
+      "-B",
+      "blue_whale",
+      "-e",
+      "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'blue_whale' AND table_name = 'assets' AND column_name = 'duration_ms'",
+    ),
+    "1",
   );
 });
 

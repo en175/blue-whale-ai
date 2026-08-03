@@ -88,23 +88,6 @@ if grep -q '^blue_whale_web/' <<< "$staged_files"; then
 fi
 
 # ============================================================
-# 3. 后端语法检查（软提醒，不拦提交；仅当本次改了 blue_whale_server/ 下 .py）
-#    用 python -m py_compile 做轻量语法检查（等价于"只 compile 不跑测试"）。
-# ============================================================
-if grep -q '^blue_whale_server/.*\.py$' <<< "$staged_files"; then
-  echo "ℹ️  pre-commit: 检测到后端 Python 改动，运行 py_compile（软提醒，不拦截）..." >&2
-  fail=0
-  while IFS= read -r f; do
-    [ -z "$f" ] && continue
-    if ! python3 -m py_compile "$f" 2>/dev/null; then
-      echo "⚠️  pre-commit: $f 语法检查失败。本次不拦截，请判断是否需修复。" >&2
-      fail=1
-    fi
-  done <<< "$(printf '%s\n' "$staged_files" | grep '^blue_whale_server/.*\.py$')"
-  [ "$fail" -eq 0 ] && echo "✅ 后端语法检查通过" >&2
-fi
-
-# ============================================================
 # 4. 远程落后软提醒（触发式同步——落后 origin/master 时提醒，不拦 commit）
 #    职责：commit 前告知分支落后状态，让 rebase 冲突早冒、小颗粒。
 #    不拦 commit（存档行为不被远程状态打断）；硬拦在 pre-push（出口铁闸）。

@@ -444,6 +444,26 @@ model topup_tiers {
   @@index([status, sort_order], map: "idx_tier_status_sort")
 }
 
+// ===== 管理后台操作审计（blue_whale 侧，记录管理变更操作；只记写操作，查询不记） =====
+
+model admin_operation_logs {
+  id             BigInt   @id @default(autoincrement())
+  category       String   @default("") @db.VarChar(32)
+  action         String   @db.VarChar(64)
+  target         String   @default("") @db.VarChar(255)
+  target_user_id BigInt?
+  detail         String   @db.Text
+  operator       String   @default("") @db.VarChar(64)
+  operator_id    BigInt?
+  ip_address     String?  @db.VarChar(64)
+  gmt_create     DateTime @default(now()) @db.DateTime(0)
+  gmt_modified   DateTime @default(now()) @db.DateTime(0)
+  version        Int      @default(0)
+  is_delete      Int      @default(0) @db.TinyInt
+
+  @@index([category, gmt_create], map: "idx_oplog_category_created")
+}
+
 // ===== 生成子系统（简化版，Node 自有 worker）：流水 + 日志 + 素材关联 + 点数 =====
 
 model cost_reservations {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Search } from "lucide-react";
 import {
   Table,
@@ -13,7 +13,7 @@ import {
 import { Badge } from "../_components/ui/badge";
 import { Input } from "../_components/ui/input";
 import { Select } from "../_components/ui/select";
-import type { AuditCategory } from "../_lib/audit-log";
+import type { AuditCategory, AuditLogEntry } from "../_lib/audit-log";
 import {
   getAuditLogs,
   AUDIT_CATEGORY_OPTIONS,
@@ -36,14 +36,23 @@ export default function AdminLogsPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [searchText, setSearchText] = useState("");
+  const [logs, setLogs] = useState<AuditLogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = useMemo(() => {
-    return getAuditLogs({
-      category: categoryFilter,
-      dateFrom,
-      dateTo,
-      searchText,
-    });
+  useEffect(() => {
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+    getAuditLogs({ category: categoryFilter, dateFrom, dateTo, searchText })
+      .then((rows) => {
+        if (!cancelled) setLogs(rows);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [categoryFilter, dateFrom, dateTo, searchText]);
 
   return (
@@ -103,17 +112,17 @@ export default function AdminLogsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.length === 0 ? (
+            {logs.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={6}
                   className="py-12 text-center text-[var(--tc-text-muted)]"
                 >
-                  暂无操作日志
+                  {loading ? "加载中…" : "暂无操作日志"}
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((l) => (
+              logs.map((l) => (
                 <TableRow key={l.id}>
                   <TableCell className="text-xs text-[var(--tc-text-tertiary)] whitespace-nowrap">
                     {new Date(l.createdAt).toLocaleString("zh-CN")}

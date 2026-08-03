@@ -2,9 +2,10 @@
 /**
  * ModalShell —— 账号中心 modal 通用外壳。
  *
- * 封装复刻自 LoginModal 的范式：遮罩层（点外部关闭）+ 对话框卡 + 右上 X + ESC 关闭。
+ * 封装复刻自 LoginModal 的范式：遮罩层（按压外部关闭）+ 对话框卡 + 右上 X + ESC 关闭。
+ * 遮罩关闭用 onMouseDown 而非 onClick：拖选文本移出弹窗后松开不会误关（IK2AKU）。
  * 4 个账号中心 modal（Profile/History/Account/RebindPhone）共用此壳，消除字节级重复。
- * LoginModal 暂不改用（其重构另开工单，避免动已测代码）。
+ * LoginModal 独立实现同范式（同样使用 onMouseDown 遮罩关闭，IK2AKU）。
  *
  * 不内置标题：<h2> 由 children 自由渲染（RebindPhone 有步骤计数等复杂标题区）。
  * 不内置内容：children 自由。
@@ -47,7 +48,9 @@ export function ModalShell({
     <div
       className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 motion-reduce:animate-none"
       style={{ zIndex }}
-      onClick={onClose}
+      onMouseDown={(e) => {
+        if (e.button === 0) onClose();
+      }}
     >
       <div
         className="bg-[var(--tc-login-modal-bg)] border border-white/[0.12] rounded-xl shadow-[var(--tc-modal-shadow)] max-w-[calc(100vw-32px)] p-10 px-8 relative animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none"
@@ -55,6 +58,7 @@ export function ModalShell({
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}
+        onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
         <button

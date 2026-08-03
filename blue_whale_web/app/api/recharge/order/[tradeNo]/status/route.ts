@@ -1,60 +1,97 @@
 import { createNewApiClient, NewApiError } from "@blue-whale/core";
+import { withAuthenticatedUser } from "@/lib/auth/product-route-auth";
+import { loadGoTopUpCredentials } from "@/lib/recharge/go-topup";
+
+/**
+ * GET /api/recharge/order/:tradeNo/status — 轮询充值订单状态（原生 new-api topup）
+ *
+ * 改接说明：原生充值订单（BWP...）存于 Go model.TopUp，旧的自定义 recharge status 端点
+ * 查的是另一张表、找不到 BWP 单。这里改调 GET /api/user/topup/self?keyword=<tradeNo> 精确匹配。
+ * Go 状态 success → 前端 paid；paid 时取 /api/usage/token 当前余额作 credits_after。
+ *
+ * 鉴权：查单接口 /api/user/topup/self 挂在 UserAuth（access_token + New-Api-User 头），
+ * 订单又是用 root 凭证建的，故查单也用 root 凭证（见 lib/recharge/go-topup.ts）。
+ * 前端 sk- 令牌过 withAuthenticatedUser 真校验（Go identity，60s 缓存，轮询不额外打 Go）——
+ * 余额接口 /api/usage/token 走 TokenAuthReadOnly，认前端 sk- 令牌，直接沿用。
+ */
+
+/** Go common.TopUpStatus* → 前端 OrderStatus。 */
+const STATUS_MAP: Record<string, "pending" | "paid" | "expired" | "failed"> = {
+  pending: "pending",
+  success: "paid",
+  expired: "expired",
+  failed: "failed",
+};
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ tradeNo: string }> },
 ) {
-  const authorization = request.headers.get("authorization");
-  const token = authorization?.startsWith("Bearer ")
-    ? authorization.slice(7).trim()
-    : "";
-  if (!token.startsWith("sk-")) {
+  const credentials = loadGoTopUpCredentials();
+  if (!credentials) {
     return Response.json(
-      { code: 401, msg: "缺少 sk-xxx token", data: null },
-      { status: 401 },
-    );
-  }
-
-  const baseUrl = process.env.NEW_API_BASE_URL;
-  if (!baseUrl) {
-    return Response.json(
-      { code: 503, msg: "NEW_API_BASE_URL 未配置", data: null },
+      {
+        code: 503,
+        msg: "Go 充值凭证未配置（NEW_API_ROOT_ACCESS_TOKEN / NEW_API_ROOT_USER_ID / NEW_API_BASE_URL）",
+        data: null,
+      },
       { status: 503 },
     );
   }
 
-  const { tradeNo } = await params;
-  if (!tradeNo) {
-    return Response.json(
-      { code: 400, msg: "缺少订单号", data: null },
-      { status: 400 },
-    );
-  }
+  return withAuthenticatedUser(request, async (_user) => {
+    const { tradeNo } = await params;
+    if (!tradeNo) {
+      return Response.json(
+        { code: 400, msg: "缺少订单号", data: null },
+        { status: 400 },
+      );
+    }
 
-  try {
-    const result = await createNewApiClient({ baseUrl }).getRechargeOrderStatus(
-      token,
-      tradeNo,
-    );
-    // Go 用 "success"，前端用 "paid"
-    const status = result.status === "success" ? "paid" : result.status;
-    return Response.json({
-      code: 200,
-      msg: null,
-      data: { ...result, status },
-    });
-  } catch (error) {
-    const status =
-      error instanceof NewApiError && error.status >= 400 && error.status < 500
-        ? error.status
-        : 502;
-    return Response.json(
-      {
-        code: status,
-        msg: error instanceof Error ? error.message : "订单查询不可用",
-        data: null,
-      },
-      { status },
-    );
-  }
+    try {
+      const client = createNewApiClient({ baseUrl: credentials.baseUrl });
+      // 查单走 UserAuth，用 root 凭证 + New-Api-User 头（订单即以 root 身份创建）。
+      const record = await client.getTopUpByTradeNo(
+        credentials.rootToken,
+        tradeNo,
+        credentials.rootUserId,
+      );
+      if (!record) {
+        return Response.json(
+          { code: 404, msg: "订单不存在", data: null },
+          { status: 404 },
+        );
+      }
+      const status = STATUS_MAP[record.status] ?? "pending";
+      let creditsAfter: number | null = null;
+      if (status === "paid") {
+        // 余额走 /api/usage/token（TokenAuthReadOnly，认 sk- 令牌），沿用前端令牌。
+        const token = request.headers.get("authorization")?.slice(7).trim();
+        if (token) {
+          const usage = await client.getTokenUsage(token);
+          creditsAfter = usage.userQuota;
+        }
+      }
+      return Response.json({
+        code: 200,
+        msg: null,
+        data: { trade_no: tradeNo, status, credits_after: creditsAfter },
+      });
+    } catch (error) {
+      const status =
+        error instanceof NewApiError &&
+        error.status >= 400 &&
+        error.status < 500
+          ? error.status
+          : 502;
+      return Response.json(
+        {
+          code: status,
+          msg: error instanceof Error ? error.message : "订单查询不可用",
+          data: null,
+        },
+        { status },
+      );
+    }
+  });
 }
