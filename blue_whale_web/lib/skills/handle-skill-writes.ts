@@ -4,6 +4,9 @@ import {
   SkillNameReservedError,
   type SkillRepo,
 } from "@blue-whale/persistence";
+import { parseSkillMd } from "./skill-md";
+
+export { parseSkillMd };
 
 const DATA_NOT_EXIST_CODE = 100100;
 const SKILL_NAME_CONFLICT_CODE = 100101;
@@ -75,34 +78,6 @@ export async function handleUpdateSkillAuto(
   );
   if (!hit) return fail(DATA_NOT_EXIST_CODE, "未添加该 Skill，无法设置 auto");
   return ok();
-}
-
-/** SKILL.md frontmatter 解析（IK60WU）：从原始文本提取 name/description/body。
- *  格式：---\nname: xxx\ndescription: xxx\n---\n正文内容
- *  返回 null 表示格式不合法（无 frontmatter 或缺闭合）。 */
-export function parseSkillMd(content: string): {
-  name: string;
-  description: string;
-  body: string;
-} | null {
-  const normalized = content.replace(/\r\n/g, "\n");
-  const openMatch = normalized.match(/^---\s*\n/);
-  if (!openMatch) return null;
-  const afterOpen = normalized.slice(openMatch[0].length);
-  const closeIdx = afterOpen.indexOf("\n---");
-  if (closeIdx === -1) return null;
-  const frontmatter = afterOpen.slice(0, closeIdx);
-  const body = afterOpen.slice(closeIdx + 4).trim();
-  const fields: Record<string, string> = {};
-  for (const line of frontmatter.split("\n")) {
-    const m = line.match(/^(\w+)\s*:\s*(.*)$/);
-    if (m) fields[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
-  }
-  return {
-    name: fields.name ?? "",
-    description: fields.description ?? "",
-    body,
-  };
 }
 
 /** POST /api/agent/skills/personal：从 SKILL.md 文本创建个人技能（IK60WU）。
