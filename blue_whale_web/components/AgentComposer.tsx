@@ -209,6 +209,7 @@ export default function AgentComposer({
   useEffect(() => {
     if (!isControlled || !editorRef.current) return;
     if (editorRef.current.innerText === (prompt ?? "")) return;
+    // eslint-disable-next-line react-hooks/immutability -- 受控回写 DOM 是本 effect 的目的，规则对 ref 属性赋值误报
     editorRef.current.innerText = prompt ?? "";
   }, [prompt, isControlled]);
 
@@ -662,8 +663,8 @@ export default function AgentComposer({
                   </div>
 
                   {/* Bottom param bar */}
-                  <div className="flex items-center gap-2 py-3 px-4 mt-auto">
-                    <div className="flex items-center gap-2 flex-1 justify-start">
+                  <div className="flex flex-wrap items-center gap-2 py-3 px-4 mt-auto">
+                    <div className="flex flex-wrap items-center gap-2 flex-1 justify-start">
                       {/* 模型 */}
                       {/* 模型 */}
                       <div
@@ -961,8 +962,8 @@ export default function AgentComposer({
                   </div>
 
                   {/* Bottom param bar */}
-                  <div className="flex items-center gap-2 py-3 mt-auto px-4">
-                    <div className="flex items-center gap-2 flex-1 justify-start">
+                  <div className="flex flex-wrap items-center gap-2 py-3 mt-auto px-4">
+                    <div className="flex flex-wrap items-center gap-2 flex-1 justify-start">
                       {/* 模型 */}
                       <div
                         className="relative"
@@ -1390,8 +1391,8 @@ export default function AgentComposer({
               </div>
 
               {/* Toolbar */}
-              <div className="mt-auto flex items-center gap-2 py-3 px-4">
-                <div className="flex min-w-0 flex-1 items-center gap-3">
+              <div className="mt-auto flex flex-wrap items-center gap-2 py-3 px-4">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
