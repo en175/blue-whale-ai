@@ -124,6 +124,12 @@ export const skillsApi = {
   /** 创建个人技能（IK60WU）；content 为完整 SKILL.md 文本（含 frontmatter） */
   createPersonalSkill: (content: string) =>
     request<SkillMineItem>("/personal", "POST", { content }),
+  /** 只读查看个人技能（IK60WZ，契约 §13.1）：owner-only，返回重建的完整 SKILL.md 文本 */
+  getPersonalSkill: (creativeSkillId: string) =>
+    request<{ content: string }>(`/personal/${creativeSkillId}`, "GET"),
+  /** 永久删除个人技能（IK60WZ，契约 §13.2）：owner-only，不可逆 */
+  deletePersonalSkill: (creativeSkillId: string) =>
+    request<void>(`/personal/${creativeSkillId}`, "DELETE"),
   /** 当前 Run 的 Creative Skill 推荐列表（IK3NPI，GET，Run 级端点不在 skills base 下） */
   recommendations: (runId: number) =>
     requestUrl<CreativeSkillRecommendation[]>(

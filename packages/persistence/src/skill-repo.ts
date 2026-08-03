@@ -193,6 +193,12 @@ export interface SkillRepo {
     ownerUserId: string,
     creativeSkillId: string,
   ): Promise<PersonalSkillView | null>;
+  /** owner 查看个人技能正文（契约 §13.1，IK60WZ）：owner + personal 谓词
+   *  JOIN 版本行取最新 body；非 owner/官方域/未知 → null（不泄露存在性），读路径容错。 */
+  findPersonalContent(
+    ownerUserId: string,
+    creativeSkillId: string,
+  ): Promise<{ name: string; description: string | null; body: string } | null>;
   /** 物理删除个人技能本体及其 creative_skill_version 行；
    *  asset_domain='personal' + owner 谓词保护，0 命中返回 false；写失败抛错。 */
   deletePersonal(ownerUserId: string, creativeSkillId: string): Promise<boolean>;
@@ -589,6 +595,21 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
       try {
         const rows = await prisma.$queryRawUnsafe<PersonalSkillView[]>(
           `SELECT creative_skill_id, name, description FROM creative_skill WHERE owner_user_id = ? AND creative_skill_id = ? AND asset_domain = 'personal'`,
+          BigInt(ownerUserId),
+          creativeSkillId,
+        );
+        return rows[0] ?? null;
+      } catch {
+        return null;
+      }
+    },
+
+    async findPersonalContent(ownerUserId, creativeSkillId) {
+      try {
+        const rows = await prisma.$queryRawUnsafe<
+          { name: string; description: string | null; body: string }[]
+        >(
+          `SELECT cs.name, cs.description, v.body FROM creative_skill cs JOIN creative_skill_version v ON v.creative_skill_id = cs.creative_skill_id WHERE cs.owner_user_id = ? AND cs.creative_skill_id = ? AND cs.asset_domain = 'personal' ORDER BY v.id DESC LIMIT 1`,
           BigInt(ownerUserId),
           creativeSkillId,
         );
