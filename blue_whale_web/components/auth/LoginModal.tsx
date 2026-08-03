@@ -93,13 +93,16 @@ export function LoginModal({ onClose }: LoginModalProps) {
   return (
     <div
       className="tc-login-modal-backdrop fixed inset-0 z-[2147483610] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
+      onMouseDown={(e) => {
+        if (e.button === 0) onClose();
+      }}
     >
       <div
         className="bg-[#141414] border border-white/[0.12] rounded-xl shadow-[0_24px_80px_rgba(0,0,0,0.5)] w-[420px] max-w-[calc(100vw-32px)] p-10 px-8 relative"
         role="dialog"
         aria-modal="true"
         aria-label="登录"
+        onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
         <button
