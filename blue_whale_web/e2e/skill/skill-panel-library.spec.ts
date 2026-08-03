@@ -452,12 +452,30 @@ test("响应式：3/2/1 列、无横向滚动、面板四边约 32px 间距", as
   // 窄屏：1 列
   await page.setViewportSize({ width: 500, height: 720 });
   await expect.poll(columnCount).toBe(1);
-  // 500px 处不做 document 级横向滚动断言：首页 AgentComposer 工具栏自身在
-  // 500px 已有横向溢出（预存问题，与本面板无关，scrollWidth≈589>500）。
-  // 此处锁定面板自身不引入横向溢出：面板四边在视口内 + 滚动容器无 x 溢出。
+  expect(await noHorizontalScroll()).toBe(true);
   const scroller = page.locator(STORE_SCROLL);
   await expect
     .poll(() => scroller.evaluate((el) => el.scrollWidth <= el.clientWidth))
     .toBe(true);
   await assertPanelMargins();
+});
+
+test("窄屏：首页 Composer 三种模式均无横向滚动", async ({ page }) => {
+  await page.setViewportSize({ width: 500, height: 720 });
+  await bootstrap(page);
+  const noHorizontalScroll = () =>
+    page.evaluate(
+      () =>
+        document.documentElement.scrollWidth <=
+        document.documentElement.clientWidth,
+    );
+
+  for (const tabName of ["视频智能体", "AI 视频", "AI 图片"]) {
+    await page.getByRole("button", { name: tabName, exact: true }).click();
+    await expect
+      .poll(noHorizontalScroll, {
+        message: `${tabName} 模式不应产生横向滚动`,
+      })
+      .toBe(true);
+  }
 });
