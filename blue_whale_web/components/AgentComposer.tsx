@@ -201,6 +201,20 @@ export default function AgentComposer({
     router,
   ]);
 
+  const tabRefs = useRef<(HTMLElement | null)[]>([]);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const modelContainerRef = useRef<HTMLDivElement>(null);
+  const videoModelContainerRef = useRef<HTMLDivElement>(null);
+  const refModeContainerRef = useRef<HTMLDivElement>(null);
+  const resolutionContainerRef = useRef<HTMLDivElement>(null);
+  const aspectRatioContainerRef = useRef<HTMLDivElement>(null);
+  const durationContainerRef = useRef<HTMLDivElement>(null);
+  const agentModelContainerRef = useRef<HTMLDivElement>(null);
+  const imageModelContainerRef = useRef<HTMLDivElement>(null);
+  const imageAspectRatioContainerRef = useRef<HTMLDivElement>(null);
+  const imageResolutionContainerRef = useRef<HTMLDivElement>(null);
+
   // 预填 prompt（/generate 读 ?prompt 传入；首页不传跳过）。contentEditable 写入需 ref 就绪。
   // 受控模式下由外部管理 prompt，此处仅非受控时生效。
   useEffect(() => {
@@ -216,23 +230,8 @@ export default function AgentComposer({
   useEffect(() => {
     if (!isControlled || !editorRef.current) return;
     if (editorRef.current.innerText === (prompt ?? "")) return;
-    // eslint-disable-next-line react-hooks/immutability -- 受控回写 DOM 是本 effect 的目的，规则对 ref 属性赋值误报
     editorRef.current.innerText = prompt ?? "";
   }, [prompt, isControlled]);
-
-  const tabRefs = useRef<(HTMLElement | null)[]>([]);
-  const editorRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const modelContainerRef = useRef<HTMLDivElement>(null);
-  const videoModelContainerRef = useRef<HTMLDivElement>(null);
-  const refModeContainerRef = useRef<HTMLDivElement>(null);
-  const resolutionContainerRef = useRef<HTMLDivElement>(null);
-  const aspectRatioContainerRef = useRef<HTMLDivElement>(null);
-  const durationContainerRef = useRef<HTMLDivElement>(null);
-  const agentModelContainerRef = useRef<HTMLDivElement>(null);
-  const imageModelContainerRef = useRef<HTMLDivElement>(null);
-  const imageAspectRatioContainerRef = useRef<HTMLDivElement>(null);
-  const imageResolutionContainerRef = useRef<HTMLDivElement>(null);
 
   const updateIndicator = useCallback(() => {
     const idx = TABS.findIndex((t) => t.id === activeTab);
