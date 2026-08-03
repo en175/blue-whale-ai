@@ -10,6 +10,7 @@ import {
   MoreHorizontal,
   Plus,
   Search,
+  Sparkles,
   Store,
   Upload,
   X,
@@ -358,6 +359,7 @@ function CreateContent({
   const [draft, setDraft] = useState(SKILL_MD_TEMPLATE);
   const [upload, setUpload] = useState<UploadState | null>(null);
   const [saving, setSaving] = useState(false);
+  const [formatting, setFormatting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -401,6 +403,21 @@ function CreateContent({
     }
   };
 
+  /** AI 格式化（IK60X0）：仅编写模式、显式点击触发；成功整段替换草稿，
+   *  不保存、不创建资产，用户可继续编辑；失败保留原草稿并显示错误。 */
+  const handleFormat = async () => {
+    setFormatting(true);
+    setError(null);
+    try {
+      const res = await skillsApi.formatSkillDraft(draft);
+      setDraft(res.content);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "AI 格式化失败");
+    } finally {
+      setFormatting(false);
+    }
+  };
+
   const modeBtn = (m: "write" | "upload", label: string) => (
     <button
       type="button"
@@ -431,16 +448,30 @@ function CreateContent({
           {modeBtn("write", "编写")}
           {modeBtn("upload", "上传 SKILL.md")}
         </div>
-        <button
-          type="button"
-          data-testid="skill-save-btn"
-          disabled={saving || !canSave}
-          onClick={handleSave}
-          className="inline-flex items-center gap-1.5 h-8 px-3.5 text-[13px] font-medium rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:pointer-events-none"
-        >
-          <Check size={14} />
-          保存到我的技能
-        </button>
+        <div className="flex items-center gap-2">
+          {mode === "write" && (
+            <button
+              type="button"
+              data-testid="skill-ai-format-btn"
+              disabled={saving || formatting || !draftDirty}
+              onClick={handleFormat}
+              className="inline-flex items-center gap-1.5 h-8 px-3.5 text-[13px] font-medium rounded-lg border border-white/[0.12] text-white/75 hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:pointer-events-none"
+            >
+              <Sparkles size={14} />
+              {formatting ? "格式化中…" : "AI 格式化"}
+            </button>
+          )}
+          <button
+            type="button"
+            data-testid="skill-save-btn"
+            disabled={saving || formatting || !canSave}
+            onClick={handleSave}
+            className="inline-flex items-center gap-1.5 h-8 px-3.5 text-[13px] font-medium rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+          >
+            <Check size={14} />
+            保存到我的技能
+          </button>
+        </div>
       </div>
       {error && (
         <div className="flex items-center justify-between gap-3 px-4 py-2 text-[12px] text-white/60 bg-white/[0.04] border-b border-white/[0.08]">
