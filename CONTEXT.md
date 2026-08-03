@@ -360,6 +360,11 @@ Worker 通过短租约领取任务；租约过期后可由新 Worker 重新领�
 任务一经接纳即运行到全部成功、部分完成或全部失败；关闭面板、切换页面或退出 Project 均不取消任务。
 _Avoid_: 把 Job 与 Card、NodeItem 或 Asset 混为一谈；用内存状态作为任务权威；提供取消按钮或取消状态；自动复活终态任务。
 
+**GenerationRecipe（生成配方）**:
+Web 从图片 GenerationJob 冻结的提示词、模型、参数与素材输入派生的只读 BottomDock 回填投影；它不是独立
+资源或持久预设。User 修改回填值只形成本地草稿，提交后创建新 GenerationJob，不改写原 PlanMessage、任务或 Asset。
+_Avoid_: 图片持久预设、NodeItem 权威参数、修改历史任务、把再次生成当作重试
+
 **GenerationOutputSlot（生成输出槽）**:
 GenerationJob 创建时固定的输出位置，用于让多输出任务稳定关联 Card、审核结果与 Asset。
 重试可以关联原输出槽，但必须创建新的 GenerationJob；成功结果不得被后续重试覆盖。
