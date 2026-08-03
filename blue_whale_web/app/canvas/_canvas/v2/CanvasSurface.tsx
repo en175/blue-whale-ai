@@ -93,6 +93,7 @@ export type CanvasSurfaceProps = {
   mentionItems?: TextMentionItem[];
   onPaneMenu?: (payload: MenuPayload) => void;
   onEdgeDropMenu?: (payload: MenuPayload) => void;
+  onNodeMenu?: (payload: MenuPayload & { nodeId: string }) => void;
   picking?: boolean;
   /** D-3 picking 按 Dock 类型过滤（dockAccept）；undefined = 不过滤（任何媒体可选） */
   pickingAccept?: MediaKind[];
@@ -128,6 +129,7 @@ export function CanvasSurface({
   mentionItems,
   onPaneMenu,
   onEdgeDropMenu,
+  onNodeMenu,
   picking,
   pickingAccept,
   toolMode = "mouse",
@@ -261,6 +263,21 @@ export function CanvasSurface({
     [screenToFlowPosition, onPaneMenu],
   );
 
+  const handleNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: RFNode) => {
+      event.preventDefault();
+      const pos = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      onNodeMenu?.({
+        x: pos.x,
+        y: pos.y,
+        screenX: event.clientX,
+        screenY: event.clientY,
+        nodeId: node.id,
+      });
+    },
+    [screenToFlowPosition, onNodeMenu],
+  );
+
   // ctrl/cmd +/- 缩放、0 自适应；拦截浏览器缩放
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -337,6 +354,7 @@ export function CanvasSurface({
           viewport={viewport}
           onViewportChange={onViewportChange}
           onPaneContextMenu={handlePaneContextMenu}
+          onNodeContextMenu={handleNodeContextMenu}
           nodeTypes={nodeTypes}
           defaultEdgeOptions={{
             style: { stroke: "#ffffff", strokeWidth: 2.5 },

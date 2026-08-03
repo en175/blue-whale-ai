@@ -25,7 +25,9 @@ const listItem = {
   progress: 100,
   input: { prompt: "cat" },
   created_at: "2026-07-27T00:00:00.000Z",
-  output_assets: [{ id: "7", url: "https://x/7.png", type: "image", width: 512, height: 512 }],
+  output_assets: [
+    { id: "7", url: "https://x/7.png", type: "image", width: 512, height: 512 },
+  ],
 };
 
 describe("handleListJobs", () => {
@@ -37,11 +39,20 @@ describe("handleListJobs", () => {
       size: 20,
       current: 1,
     });
-    const result = await handleListJobs("9", { type: "image", page: 1, size: 20 }, deps);
+    const result = await handleListJobs(
+      "9",
+      { type: "image", page: 1, size: 20 },
+      deps,
+    );
     expect(result).toEqual({
       code: 200,
       msg: null,
-      data: { records: [{ ...listItem, error: null }], total: 1, size: 20, current: 1 },
+      data: {
+        records: [{ ...listItem, error: null }],
+        total: 1,
+        size: 20,
+        current: 1,
+      },
     });
     expect(deps.jobs.listByUser).toHaveBeenCalledWith("9", {
       type: "image",
@@ -55,21 +66,42 @@ describe("handleListJobs", () => {
 
   it("空结果 → 200 + 空 records", async () => {
     const deps = makeDeps();
-    deps.jobs.listByUser.mockResolvedValue({ records: [], total: 0, size: 20, current: 1 });
+    deps.jobs.listByUser.mockResolvedValue({
+      records: [],
+      total: 0,
+      size: 20,
+      current: 1,
+    });
     const result = await handleListJobs("9", { page: 1, size: 20 }, deps);
     expect(result.code).toBe(200);
-    expect(result.data).toEqual({ records: [], total: 0, size: 20, current: 1 });
+    expect(result.data).toEqual({
+      records: [],
+      total: 0,
+      size: 20,
+      current: 1,
+    });
   });
 
   it("ids 精确批量查询透传且返回公开错误，不泄漏 stored_error", async () => {
     const deps = makeDeps();
     deps.jobs.listByUser.mockResolvedValue({
-      records: [{ ...listItem, type: "video", status: "failed", stored_error: { code: "provider_failed", detail: "secret" } }],
+      records: [
+        {
+          ...listItem,
+          type: "video",
+          status: "failed",
+          stored_error: { code: "provider_failed", detail: "secret" },
+        },
+      ],
       total: 1,
       size: 2,
       current: 1,
     });
-    const result = await handleListJobs("9", { ids: ["101", "102"], page: 1, size: 2 }, deps);
+    const result = await handleListJobs(
+      "9",
+      { ids: ["101", "102"], page: 1, size: 2 },
+      deps,
+    );
     expect(deps.jobs.listByUser).toHaveBeenCalledWith("9", {
       type: undefined,
       status: undefined,
@@ -89,10 +121,18 @@ describe("handleListJobs", () => {
     const deps = makeDeps();
     const result = await handleListJobs(
       "9",
-      { ids: Array.from({ length: 101 }, (_, i) => String(i + 1)), page: 1, size: 101 },
+      {
+        ids: Array.from({ length: 101 }, (_, i) => String(i + 1)),
+        page: 1,
+        size: 101,
+      },
       deps,
     );
-    expect(result).toEqual({ code: 400, msg: "最多查询 100 个任务", data: null });
+    expect(result).toEqual({
+      code: 400,
+      msg: "最多查询 100 个任务",
+      data: null,
+    });
     expect(deps.jobs.listByUser).not.toHaveBeenCalled();
   });
 });
@@ -116,7 +156,13 @@ describe("handleGetJobStatus", () => {
     expect(result).toEqual({
       code: 200,
       msg: null,
-      data: { job_id: "101", status: "processing", progress: 40, asset: null, error: null },
+      data: {
+        job_id: "101",
+        status: "processing",
+        progress: 40,
+        asset: null,
+        error: null,
+      },
     });
   });
 

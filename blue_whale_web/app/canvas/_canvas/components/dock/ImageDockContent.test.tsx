@@ -33,6 +33,7 @@ const capability = (
   default_duration: null,
   features: {
     reference_image: true,
+    max_reference_images: 4,
     watermark: false,
     quantity_max: 4,
     stream: false,
@@ -65,7 +66,6 @@ describe("ImageDockContent model capability changes", () => {
         editorRef={createRef<HTMLDivElement>()}
         isEmpty={false}
         onInput={vi.fn()}
-        onClose={vi.fn()}
         onGenerate={onGenerate}
       />,
     );
@@ -88,5 +88,207 @@ describe("ImageDockContent model capability changes", () => {
         referenceImageSupported: false,
       }),
     );
+  });
+});
+
+describe("ImageDockContent portal 浮层携带 data-tc-dock-popover（IK5OWS 例外②）", () => {
+  beforeEach(() => {
+    vi.mocked(getImageModels).mockResolvedValue([
+      capability("capable", "完整能力模型", {
+        tools: true,
+        sequential_image_generation: true,
+      }),
+    ]);
+  });
+
+  it("数量菜单 portal 根节点带 data-tc-dock-popover", async () => {
+    render(
+      <ImageDockContent
+        editorRef={createRef<HTMLDivElement>()}
+        isEmpty={false}
+        onInput={vi.fn()}
+        onGenerate={vi.fn()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("完整能力模型")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "生成数量" }));
+
+    const menu = document.querySelector("[data-tc-dock-popover]");
+    expect(menu).not.toBeNull();
+    expect(menu?.getAttribute("role")).toBe("listbox");
+  });
+});
+
+describe("ImageDockContent 参考图上限（IK5OWU）", () => {
+  beforeEach(() => {
+    vi.mocked(getImageModels).mockResolvedValue([
+      capability("capable", "完整能力模型", {
+        tools: true,
+        sequential_image_generation: true,
+      }),
+    ]);
+  });
+
+  it("达上限时上传入口禁用", async () => {
+    render(
+      <ImageDockContent
+        editorRef={createRef<HTMLDivElement>()}
+        isEmpty={false}
+        onInput={vi.fn()}
+        onGenerate={vi.fn()}
+        referenceCount={4}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("完整能力模型")).toBeInTheDocument(),
+    );
+
+    const plusBtn = screen.getByRole("button", { name: "上传图片" });
+    expect(plusBtn).toBeDisabled();
+  });
+
+  it("未达上限时上传入口可用", async () => {
+    render(
+      <ImageDockContent
+        editorRef={createRef<HTMLDivElement>()}
+        isEmpty={false}
+        onInput={vi.fn()}
+        onGenerate={vi.fn()}
+        referenceCount={3}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("完整能力模型")).toBeInTheDocument(),
+    );
+
+    const plusBtn = screen.getByRole("button", { name: "上传图片" });
+    expect(plusBtn).not.toBeDisabled();
+  });
+
+  it("切模型时 onMaxReferenceImagesChange 联动新上限", async () => {
+    vi.mocked(getImageModels).mockResolvedValue([
+      capability("capable", "完整能力模型", {
+        tools: true,
+        sequential_image_generation: true,
+      }),
+      {
+        ...capability("pro", "Pro 模型", {
+          tools: false,
+          sequential_image_generation: false,
+        }),
+        features: {
+          reference_image: true,
+          max_reference_images: 10,
+          watermark: false,
+          quantity_max: 4,
+          stream: false,
+          tools: false,
+          first_frame: false,
+          first_last_frame: false,
+          audio: false,
+          sequential_image_generation: false,
+        },
+      },
+    ]);
+
+    const onMaxChange = vi.fn();
+    render(
+      <ImageDockContent
+        editorRef={createRef<HTMLDivElement>()}
+        isEmpty={false}
+        onInput={vi.fn()}
+        onGenerate={vi.fn()}
+        onMaxReferenceImagesChange={onMaxChange}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("完整能力模型")).toBeInTheDocument(),
+    );
+    expect(onMaxChange).toHaveBeenCalledWith(4);
+
+    fireEvent.click(screen.getByRole("button", { name: "图像模型设置" }));
+    // 点击模型下拉触发器展开模型列表
+    fireEvent.click(screen.getAllByRole("button", { name: "完整能力模型" })[0]);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Pro 模型" }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Pro 模型" }));
+
+    await waitFor(() => expect(onMaxChange).toHaveBeenCalledWith(10));
+  });
+});
+
+describe("ImageDockContent 放大按钮（IK5OWV）", () => {
+  beforeEach(() => {
+    vi.mocked(getImageModels).mockResolvedValue([
+      capability("capable", "完整能力模型", {
+        tools: true,
+        sequential_image_generation: true,
+      }),
+    ]);
+  });
+
+  it("普通态：放大按钮存在，X 关闭按钮存在", async () => {
+    render(
+      <ImageDockContent
+        editorRef={createRef<HTMLDivElement>()}
+        isEmpty={false}
+        onInput={vi.fn()}
+        onGenerate={vi.fn()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("完整能力模型")).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("button", { name: "放大面板" }),
+    ).toBeInTheDocument();
+  });
+
+  it("点击放大按钮 → 触发 onToggleExpand", async () => {
+    const onToggleExpand = vi.fn();
+    render(
+      <ImageDockContent
+        editorRef={createRef<HTMLDivElement>()}
+        isEmpty={false}
+        onInput={vi.fn()}
+        onGenerate={vi.fn()}
+        onToggleExpand={onToggleExpand}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("完整能力模型")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "放大面板" }));
+    expect(onToggleExpand).toHaveBeenCalledTimes(1);
+  });
+
+  it("放大态：切换按钮显示收起", async () => {
+    render(
+      <ImageDockContent
+        editorRef={createRef<HTMLDivElement>()}
+        isEmpty={false}
+        onInput={vi.fn()}
+        onGenerate={vi.fn()}
+        expanded
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("完整能力模型")).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("button", { name: "收起面板" }),
+    ).toBeInTheDocument();
   });
 });

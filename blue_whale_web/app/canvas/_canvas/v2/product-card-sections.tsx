@@ -5,7 +5,7 @@
  */
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import {
   ChevronDown,
   Image as ImageIcon,
@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { MAX_PRODUCT_IMAGES, PRODUCT_PLATFORMS } from "../productImport";
+import { useInlineEdit } from "./useInlineEdit";
 
 /** 小区段标题行(原型:左 secondary 小字,右 muted 计数)。 */
 function SectionRow({ label, right }: { label: string; right?: string }) {
@@ -160,9 +161,7 @@ export function ProductDetailSection({
   placeholder: string;
   onCommit?: (text: string) => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  /** Esc 取消标记:置位后 blur 不 commit(对齐参考卡描述编辑机制)。 */
-  const cancelRef = useRef(false);
+  const edit = useInlineEdit(onCommit);
   const empty = detail.trim() === "";
   return (
     <div className="px-3 pt-2.5">
@@ -174,28 +173,19 @@ export function ProductDetailSection({
           minHeight: 160,
         }}
       >
-        {editing ? (
+        {edit.editing ? (
           <textarea
             autoFocus
             defaultValue={detail}
             placeholder={placeholder}
             className="nodrag nowheel block w-full resize-none bg-transparent text-xs leading-normal outline-none"
             style={{ color: "var(--tc-text-primary)", minHeight: 144 }}
-            onBlur={(e) => {
-              if (!cancelRef.current) onCommit?.(e.target.value);
-              cancelRef.current = false;
-              setEditing(false);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                cancelRef.current = true;
-                e.currentTarget.blur();
-              }
-            }}
+            onBlur={edit.handleBlur}
+            onKeyDown={edit.handleKeyDown}
           />
         ) : (
           <div
-            onDoubleClick={() => setEditing(true)}
+            onDoubleClick={edit.startEditing}
             className="text-xs leading-normal"
             style={{
               color: empty ? "var(--tc-text-muted)" : "var(--tc-text-primary)",
@@ -295,12 +285,6 @@ export function ProductLinkImportSection({
                       {p.label}
                     </span>
                   ))}
-                  <span
-                    className="text-[10px]"
-                    style={{ color: "var(--tc-text-muted)" }}
-                  >
-                    …
-                  </span>
                 </span>
               </span>
             )}

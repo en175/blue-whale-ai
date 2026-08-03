@@ -12,7 +12,11 @@ const mocks = vi.hoisted(() => ({
     ) => handler({ userId: "42", status: "enabled" }),
   ),
   createGenerationCommandDeps: vi.fn(() => ({ command: {}, projects: {} })),
-  createGenerationWorkerDeps: vi.fn(() => ({ repo: {}, provider: {} })),
+  createGenerationWorkerDeps: vi.fn(() => ({
+    repo: {},
+    createImageProvider: () => ({}),
+    credentialVault: { open: () => "tok" },
+  })),
   handleCreateGenerationJob: vi.fn(),
   processJob: vi.fn(),
   sealGenerationCredential: vi.fn(() => "sealed-token"),

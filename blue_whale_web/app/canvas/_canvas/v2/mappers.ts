@@ -7,6 +7,7 @@
  * 位置（position）依赖视口/容器，由 page addNode 层封装，本文件只产 data + 尺寸。
  */
 import { parseAspectRatio } from "../aspectRatio";
+import { wireInteger, isWireInteger } from "@/lib/wire-integer";
 import type {
   CanvasNodeData,
   NodeKindId,
@@ -16,9 +17,10 @@ import type {
   RecipeInput,
   VideoGenParams,
 } from "../model";
-import type { DockPrefill, DockMediaItem } from "../types";
+import type { DockPrefill, DockMediaItem, PendingMention } from "../types";
 import type { JobListItem } from "../api/generation";
 import type { CardMessage } from "../nodeFromCard";
+import { CARD_LIBRARY_TYPE_LABELS } from "../cardLibrary";
 
 export type V2Placeholder = {
   /** 稳定去重 id：同 jobId 刷新多次只建一个占位。 */
@@ -179,4 +181,44 @@ export function buildCrossmodalRefill(
     default:
       return null;
   }
+}
+
+/**
+ * 节点 → PendingMention 映射（右键「添加到聊天」）。
+ * 媒体节点带 assetId/src/type 走 pill；参考卡带名称 + 可选 asset；文本节点回退纯文本。
+ */
+export function nodeToPendingMention(
+  node: { id: string; data: CanvasNodeData },
+  assets: Record<string, { src?: string } | undefined>,
+  nonce: number,
+): PendingMention {
+  const kind = node.data.kind;
+  if (kind === "image" || kind === "video" || kind === "audio") {
+    const src = node.data.assetId ? assets[node.data.assetId]?.src : undefined;
+    return {
+      name: (node.data.content as string) || CARD_LIBRARY_TYPE_LABELS[kind],
+      nonce,
+      assetId: node.data.assetId ? wireInteger(node.data.assetId) : undefined,
+      src,
+      type: kind,
+    };
+  }
+  if (kind === "reference") {
+    const cardLabel = node.data.cardType
+      ? CARD_LIBRARY_TYPE_LABELS[node.data.cardType]
+      : "参考";
+    const refId = node.data.referenceAssetId;
+    const hasAsset = refId != null && isWireInteger(refId);
+    return {
+      name: node.data.name || `${cardLabel}卡`,
+      nonce,
+      assetId: hasAsset ? wireInteger(refId!) : undefined,
+      src: hasAsset ? assets[refId!]?.src : undefined,
+      type: "image",
+    };
+  }
+  return {
+    name: (node.data.content as string) || "文本",
+    nonce,
+  };
 }

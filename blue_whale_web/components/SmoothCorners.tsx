@@ -32,7 +32,9 @@ export function SmoothCorners({
   const strokeWidth = stroke?.width ?? 2;
   const strokeOpacity = stroke?.opacity ?? 0.1;
 
-  const dataProps: Record<string, string> = Object.entries(dataAttributes ?? {}).reduce(
+  const dataProps: Record<string, string> = Object.entries(
+    dataAttributes ?? {},
+  ).reduce(
     (acc, [key, value]) => {
       const dataKey = key.startsWith("data-") ? key : `data-${key}`;
       acc[dataKey] = value;
@@ -41,7 +43,7 @@ export function SmoothCorners({
     {
       "data-slot": "smooth-corners",
       "data-state": "ready",
-    } as Record<string, string>
+    } as Record<string, string>,
   );
 
   return (
@@ -103,14 +105,26 @@ export function SmoothCorners({
             />
           )}
           {stroke && (
-            <path fill="none" clipPath={`url(#${clipId})`} style={{ display: "none" }} />
+            <path
+              fill="none"
+              clipPath={`url(#${clipId})`}
+              style={{ display: "none" }}
+            />
           )}
         </g>
         {stroke && (
           <>
             <g>
-              <path fill="none" mask={`url(#${maskId})`} style={{ display: "none" }} />
-              <path fill="none" mask={`url(#${maskId})`} style={{ display: "none" }} />
+              <path
+                fill="none"
+                mask={`url(#${maskId})`}
+                style={{ display: "none" }}
+              />
+              <path
+                fill="none"
+                mask={`url(#${maskId})`}
+                style={{ display: "none" }}
+              />
             </g>
             <g>
               <path fill="none" style={{ display: "none" }} />

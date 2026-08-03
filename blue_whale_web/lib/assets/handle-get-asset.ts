@@ -1,8 +1,5 @@
 import { fail, ok } from "@blue-whale/contracts";
-import {
-  assetDurationSeconds,
-  type AssetRepo,
-} from "@blue-whale/persistence";
+import { assetDurationSeconds, type AssetRepo } from "@blue-whale/persistence";
 
 export async function handleGetAsset(
   userId: string,

@@ -118,6 +118,51 @@ class VolcEngineImageGenerationProviderTest {
     }
 
     @Test
+    void referenceImagesExceedingModelLimitRejectedWithExplicitError() {
+        GenerationModelCapability capability = seedream();
+        capability.getFeatures().setMaxReferenceImages(2);
+        GenerationModelCapabilityMapper mapper = mock(GenerationModelCapabilityMapper.class);
+        when(mapper.selectEnabledByModelId("doubao-seedream-5.0-lite"))
+                .thenReturn(Optional.of(capability));
+        ArkService arkService = mock(ArkService.class);
+        VolcEngineImageGenerationProvider provider = newProvider(arkService, mapper);
+
+        GenerationProviderResult result = provider.generate(new GenerationProviderRequest(7L, 11L, Map.of(
+                "prompt", "edit", "model_id", "doubao-seedream-5.0-lite",
+                "reference_asset_ids", List.of(1L, 2L, 3L))));
+
+        assertThat(result.status()).isEqualTo(GenerationProviderResult.Status.FAILURE);
+        assertThat(result.errorCode()).isEqualTo("reference_images_exceed_limit");
+        verify(arkService, never()).generateImages(any());
+    }
+
+    @Test
+    void referenceImagesWithinModelLimitAreAccepted() {
+        GenerationModelCapability capability = seedream();
+        capability.getFeatures().setMaxReferenceImages(10);
+        GenerationModelCapabilityMapper mapper = mock(GenerationModelCapabilityMapper.class);
+        when(mapper.selectEnabledByModelId("doubao-seedream-5.0-lite"))
+                .thenReturn(Optional.of(capability));
+        ProjectAssetContentService assetContentService = mock(ProjectAssetContentService.class);
+        when(assetContentService.read(7L, 1L, 11L)).thenReturn(
+                new AssetContent(ONE_PIXEL_PNG, "image/png"));
+        when(assetContentService.read(7L, 2L, 11L)).thenReturn(
+                new AssetContent(ONE_PIXEL_PNG, "image/png"));
+        ArkService arkService = mock(ArkService.class);
+        when(arkService.generateImages(any())).thenReturn(pngResponse(ONE_PIXEL_PNG_B64));
+        VolcEngineImageGenerationProvider provider = new VolcEngineImageGenerationProvider(
+                objectProvider(arkService), assetContentService, mapper);
+
+        GenerationProviderResult result = provider.generate(new GenerationProviderRequest(7L, 11L, Map.of(
+                "prompt", "edit", "model_id", "doubao-seedream-5.0-lite",
+                "reference_asset_ids", List.of(1L, 2L))));
+
+        assertThat(result.status()).isEqualTo(GenerationProviderResult.Status.SUCCESS);
+        GenerateImagesRequest req = captureRequest(arkService);
+        assertThat(req.getImage()).hasSize(2);
+    }
+
+    @Test
     void unavailableModelIsRejectedBeforePaidCall() {
         GenerationModelCapabilityMapper mapper = mock(GenerationModelCapabilityMapper.class);
         when(mapper.selectEnabledByModelId("unknown-model")).thenReturn(Optional.empty());

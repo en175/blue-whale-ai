@@ -25,21 +25,39 @@ describe("handleListAssets", () => {
         current: 1,
       }),
     };
-    const result = await handleListAssets("9", { type: "image", page: 1, size: 24 }, { assets: repo });
+    const result = await handleListAssets(
+      "9",
+      { type: "image", page: 1, size: 24 },
+      { assets: repo },
+    );
     expect(result).toEqual({
       code: 200,
       msg: null,
       data: { records: [item], total: 1, size: 24, current: 1 },
     });
-    expect(repo.listByUser).toHaveBeenCalledWith("9", { type: "image", page: 1, size: 24 });
+    expect(repo.listByUser).toHaveBeenCalledWith("9", {
+      type: "image",
+      page: 1,
+      size: 24,
+    });
   });
 
   it("无 type → 全类型", async () => {
     const repo = {
-      listByUser: vi.fn().mockResolvedValue({ records: [], total: 0, size: 24, current: 1 }),
+      listByUser: vi
+        .fn()
+        .mockResolvedValue({ records: [], total: 0, size: 24, current: 1 }),
     };
-    const result = await handleListAssets("9", { page: 1, size: 24 }, { assets: repo });
+    const result = await handleListAssets(
+      "9",
+      { page: 1, size: 24 },
+      { assets: repo },
+    );
     expect(result.code).toBe(200);
-    expect(repo.listByUser).toHaveBeenCalledWith("9", { type: undefined, page: 1, size: 24 });
+    expect(repo.listByUser).toHaveBeenCalledWith("9", {
+      type: undefined,
+      page: 1,
+      size: 24,
+    });
   });
 });

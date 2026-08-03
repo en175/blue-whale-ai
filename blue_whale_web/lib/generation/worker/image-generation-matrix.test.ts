@@ -122,6 +122,7 @@ describe("image generation contract matrix", () => {
                       aspect_ratio: ratio,
                       web_search: webSearch,
                       sequential_image_generation: sequential,
+                      provider_credential: "matrix-token",
                       reference_asset_ids: Array.from(
                         { length: referenceCount },
                         (_, index) => String(42 + index),
@@ -129,12 +130,7 @@ describe("image generation contract matrix", () => {
                     },
                     expected_output_count: quantity,
                   };
-                  const repo = matrixRepo(
-                    job,
-                    model.id,
-                    size,
-                    referenceCount,
-                  );
+                  const repo = matrixRepo(job, model.id, size, referenceCount);
                   const provider: ImageProvider = {
                     generate: vi
                       .fn()
@@ -149,7 +145,8 @@ describe("image generation contract matrix", () => {
 
                   await processNextJob({
                     repo,
-                    provider,
+                    createImageProvider: () => provider,
+                    credentialVault: { open: () => "tok" },
                     workerId: "matrix",
                     fetchImpl: async () =>
                       new Response(SOURCE_PNG, {

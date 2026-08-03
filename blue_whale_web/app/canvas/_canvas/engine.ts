@@ -7,7 +7,19 @@
  *
  * 规格见 openspec/changes/canvas-frontend-architecture/specs/run-engine。
  */
-import type { Asset, AudioGenParams, CanvasEdge, CanvasNode, CanvasNodeData, ImageGenParams, MediaKind, NodeRecipe, RecipeInput, RecipeInputs, VideoGenParams } from "./model";
+import type {
+  Asset,
+  AudioGenParams,
+  CanvasEdge,
+  CanvasNode,
+  CanvasNodeData,
+  ImageGenParams,
+  MediaKind,
+  NodeRecipe,
+  RecipeInput,
+  RecipeInputs,
+  VideoGenParams,
+} from "./model";
 import { nodeKinds, type TaskInput } from "./kinds";
 
 /**
@@ -32,7 +44,11 @@ export function resolveInputs(
         const a = assets[src.data.assetId];
         if (a) inputs[edge.targetHandle] = a;
       } else if (src.data.prompt) {
-        inputs[edge.targetHandle] = { id: src.id, kind: "text", src: src.data.prompt };
+        inputs[edge.targetHandle] = {
+          id: src.id,
+          kind: "text",
+          src: src.data.prompt,
+        };
       }
       continue;
     }
@@ -64,10 +80,17 @@ export function toRecipeInputs(
     if (!src) continue;
     const input = toRecipeInput(src, assets);
     switch (edge.targetHandle) {
-      case "prompt": inputs.prompt = input; break;
-      case "firstFrame": inputs.firstFrame = input; break;
-      case "lastFrame": inputs.lastFrame = input; break;
-      default: references.push(input); // reference 等归 references
+      case "prompt":
+        inputs.prompt = input;
+        break;
+      case "firstFrame":
+        inputs.firstFrame = input;
+        break;
+      case "lastFrame":
+        inputs.lastFrame = input;
+        break;
+      default:
+        references.push(input); // reference 等归 references
     }
   }
   if (references.length) inputs.references = references;
@@ -75,8 +98,12 @@ export function toRecipeInputs(
 }
 
 /** 单上游节点 → RecipeInput：nodeId 必带，assetId/url/text 按节点类型填充。 */
-function toRecipeInput(src: CanvasNode, assets: Record<string, Asset>): RecipeInput {
-  const kind: MediaKind = src.data.kind === "text" ? "text" : (src.data.kind as MediaKind);
+function toRecipeInput(
+  src: CanvasNode,
+  assets: Record<string, Asset>,
+): RecipeInput {
+  const kind: MediaKind =
+    src.data.kind === "text" ? "text" : (src.data.kind as MediaKind);
   const input: RecipeInput = { kind, nodeId: src.id };
   if (kind === "text") {
     if (src.data.assetId) {
@@ -119,7 +146,10 @@ export function buildGenerationRecipe(args: {
 }
 
 /** 拓扑排序；ids 内有环返回 null，否则返回合法序（上游在前）。 */
-export function topoSort(ids: string[], edges: { source: string; target: string }[]): string[] | null {
+export function topoSort(
+  ids: string[],
+  edges: { source: string; target: string }[],
+): string[] | null {
   const members = new Set(ids);
   const indegree = new Map(ids.map((id) => [id, 0]));
   const downstream = new Map(ids.map((id) => [id, [] as string[]]));
@@ -156,8 +186,14 @@ export interface RunCtx {
 export async function runNode(nodeId: string, ctx: RunCtx): Promise<Asset> {
   const node = ctx.getNodes().find((n) => n.id === nodeId);
   if (!node) throw new Error(`node ${nodeId} not found`);
-  if (node.data.kind === "group") throw new Error("run a group via runGroup, not runNode");
-  const inputs = resolveInputs(node, ctx.getNodes(), ctx.getEdges(), ctx.getAssets());
+  if (node.data.kind === "group")
+    throw new Error("run a group via runGroup, not runNode");
+  const inputs = resolveInputs(
+    node,
+    ctx.getNodes(),
+    ctx.getEdges(),
+    ctx.getAssets(),
+  );
   const task = nodeKinds[node.data.kind].buildTask(node, inputs);
   ctx.updateNode(nodeId, { status: "running" });
   const asset = await ctx.generate(nodeId, task);
@@ -167,9 +203,13 @@ export async function runNode(nodeId: string, ctx: RunCtx): Promise<Asset> {
 
 /** 整组运行：成员按内部 link 拓扑顺序逐个跑，下游读到上游刚产出值（级联）。有环抛错。 */
 export async function runGroup(groupId: string, ctx: RunCtx): Promise<void> {
-  const members = ctx.getNodes().filter((n) => n.parentId === groupId && n.data.kind !== "group");
+  const members = ctx
+    .getNodes()
+    .filter((n) => n.parentId === groupId && n.data.kind !== "group");
   const memberIds = new Set(members.map((m) => m.id));
-  const internal = ctx.getEdges().filter((e) => memberIds.has(e.source) && memberIds.has(e.target));
+  const internal = ctx
+    .getEdges()
+    .filter((e) => memberIds.has(e.source) && memberIds.has(e.target));
   const order = topoSort([...memberIds], internal);
   if (!order) throw new Error("group contains a cycle, cannot run");
   for (const id of order) await runNode(id, ctx);

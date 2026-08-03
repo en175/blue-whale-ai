@@ -182,6 +182,28 @@ class GenerationSchemaMigrationMySqlIT {
                         + "AND capability_type = 'image' AND enabled = 1 AND is_delete = 0"))
                 .isEqualTo(1L);
 
+        // V20（IK5OWQ）：Pro 行就位 + max_reference_images 契约
+        assertThat(queryLong(
+                "SELECT COUNT(*) FROM generation_model_capability "
+                        + "WHERE provider_id = 'volcengine' AND model_id = 'doubao-seedream-5-0-pro-260628' "
+                        + "AND capability_type = 'image' AND enabled = 1 AND is_delete = 0"))
+                .isEqualTo(1L);
+        assertThat(queryLong(
+                "SELECT JSON_EXTRACT(features, '$.max_reference_images') FROM generation_model_capability "
+                        + "WHERE provider_id = 'volcengine' AND model_id = 'doubao-seedream-5-0-pro-260628' "
+                        + "AND is_delete = 0"))
+                .isEqualTo(10L);
+        assertThat(queryLong(
+                "SELECT JSON_EXTRACT(features, '$.reference_image') FROM generation_model_capability "
+                        + "WHERE provider_id = 'volcengine' AND model_id = 'doubao-seedream-5-0-pro-260628' "
+                        + "AND is_delete = 0"))
+                .isEqualTo(1L);
+        assertThat(queryLong(
+                "SELECT JSON_EXTRACT(features, '$.max_reference_images') FROM generation_model_capability "
+                        + "WHERE provider_id = 'volcengine' AND model_id = 'doubao-seedream-5.0-lite' "
+                        + "AND is_delete = 0"))
+                .isEqualTo(4L);
+
         // 重复执行：无新版本、无漂移报错
         assertThat(service.migrate()).isEmpty();
         assertThat(appliedVersions()).containsExactlyElementsOf(ExpectedMigrationVersions.APPLIED);

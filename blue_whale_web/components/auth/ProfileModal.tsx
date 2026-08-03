@@ -81,7 +81,9 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
 
   return (
     <ModalShell ariaLabel="个人资料" onClose={onClose}>
-      <h2 className="text-[24px] font-semibold leading-tight mb-6 text-white">个人资料</h2>
+      <h2 className="text-[24px] font-semibold leading-tight mb-6 text-white">
+        个人资料
+      </h2>
 
       <div className="flex flex-col gap-5">
         {/* 头像 */}
@@ -110,12 +112,16 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
               autoFocus
             />
           </div>
-          <p className="mt-1 text-[11px] text-white/30">2-20 位，仅支持中英文和数字</p>
+          <p className="mt-1 text-[11px] text-white/30">
+            2-20 位，仅支持中英文和数字
+          </p>
         </div>
 
         {/* 手机号（只读脱敏） */}
         <div>
-          <label className="block text-[13px] text-white/55 mb-1.5">手机号</label>
+          <label className="block text-[13px] text-white/55 mb-1.5">
+            手机号
+          </label>
           <div className="flex items-center bg-white/[0.02] rounded-lg px-3 border border-white/[0.04]">
             <span className="h-10 inline-flex items-center text-sm text-white/50 tracking-wider select-none">
               {maskedPhone}
@@ -129,7 +135,9 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
           </p>
         )}
 
-        {error && <p className="text-[12px] text-[var(--tc-destructive)]">{error}</p>}
+        {error && (
+          <p className="text-[12px] text-[var(--tc-destructive)]">{error}</p>
+        )}
 
         {/* 保存 */}
         <button

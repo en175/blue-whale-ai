@@ -29,7 +29,8 @@ function CanvasPageInner() {
     void (async () => {
       try {
         const projects = await canvasApi.listProjects();
-        const target = projects[0] ?? (await canvasApi.createProject("未命名项目"));
+        const target =
+          projects[0] ?? (await canvasApi.createProject("未命名项目"));
         if (!cancelled) router.replace(canonicalCanvasHref(String(target.id)));
       } catch (error) {
         console.warn("[canvas] resolve project failed", error);

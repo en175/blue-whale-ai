@@ -38,7 +38,8 @@ function isStr(v: unknown): v is string {
 }
 
 function assetId(v: unknown): string | null {
-  if (typeof v === "number" && Number.isSafeInteger(v) && v > 0) return String(v);
+  if (typeof v === "number" && Number.isSafeInteger(v) && v > 0)
+    return String(v);
   if (typeof v === "string" && /^[1-9][0-9]*$/.test(v)) return v;
   return null;
 }
@@ -58,34 +59,65 @@ function validate(body: CreateGenerationJobBody): string | null {
   const type = body.type;
   if (type !== "image" && type !== "video") return "暂不支持该生成类型";
   const params = body.parameters as GenerationParameters | undefined;
-  if (!params || !isStr(params.prompt) || params.prompt.trim() === "" || params.prompt.length > 4000) {
+  if (
+    !params ||
+    !isStr(params.prompt) ||
+    params.prompt.trim() === "" ||
+    params.prompt.length > 4000
+  ) {
     return "prompt 无效";
   }
-  if (!isStr(params.aspect_ratio) || !/^[1-9][0-9]*:[1-9][0-9]*$/.test(params.aspect_ratio)) {
+  if (
+    !isStr(params.aspect_ratio) ||
+    !/^[1-9][0-9]*:[1-9][0-9]*$/.test(params.aspect_ratio)
+  ) {
     return "aspect_ratio 无效";
   }
-  if (!isStr(params.model_id) || params.model_id.trim() === "") return "model_id 无效";
+  if (!isStr(params.model_id) || params.model_id.trim() === "")
+    return "model_id 无效";
   const count = Number(body.expected_output_count);
-  if (!Number.isInteger(count) || count < 1 || count > 4) return "expected_output_count 须为 1-4";
-  const inputAssetIds = Array.isArray(body.input_asset_ids) ? body.input_asset_ids : [];
+  if (!Number.isInteger(count) || count < 1 || count > 4)
+    return "expected_output_count 须为 1-4";
+  const inputAssetIds = Array.isArray(body.input_asset_ids)
+    ? body.input_asset_ids
+    : [];
   if (type === "image" && inputAssetIds.length > 4) return "参考图最多 4 张";
   if (type === "video") {
     const firstFrameAssetId = assetId(body.first_frame_asset_id);
     const lastFrameAssetId = assetId(body.last_frame_asset_id);
-    const hasExplicitFrames = body.first_frame_asset_id !== undefined || body.last_frame_asset_id !== undefined;
-    const hasExplicitInputs = hasExplicitFrames || body.reference_asset_ids !== undefined;
-    if (body.first_frame_asset_id !== undefined && firstFrameAssetId === null) return "首帧素材无效";
-    if (body.last_frame_asset_id !== undefined && lastFrameAssetId === null) return "尾帧素材无效";
-    if (lastFrameAssetId !== null && firstFrameAssetId === null) return "尾帧必须与首帧一起使用";
-    if (body.reference_asset_ids !== undefined && assetIds(body.reference_asset_ids).length !== (Array.isArray(body.reference_asset_ids) ? body.reference_asset_ids.length : -1)) return "参考素材无效";
-    const explicitReferenceIds = uniqueAssetIds(assetIds(body.reference_asset_ids));
+    const hasExplicitFrames =
+      body.first_frame_asset_id !== undefined ||
+      body.last_frame_asset_id !== undefined;
+    const hasExplicitInputs =
+      hasExplicitFrames || body.reference_asset_ids !== undefined;
+    if (body.first_frame_asset_id !== undefined && firstFrameAssetId === null)
+      return "首帧素材无效";
+    if (body.last_frame_asset_id !== undefined && lastFrameAssetId === null)
+      return "尾帧素材无效";
+    if (lastFrameAssetId !== null && firstFrameAssetId === null)
+      return "尾帧必须与首帧一起使用";
+    if (
+      body.reference_asset_ids !== undefined &&
+      assetIds(body.reference_asset_ids).length !==
+        (Array.isArray(body.reference_asset_ids)
+          ? body.reference_asset_ids.length
+          : -1)
+    )
+      return "参考素材无效";
+    const explicitReferenceIds = uniqueAssetIds(
+      assetIds(body.reference_asset_ids),
+    );
     if (hasExplicitFrames && explicitReferenceIds.length > 0) {
       return "首尾帧模式不能与普通参考素材混用";
     }
-    if (body.reference_asset_ids !== undefined && explicitReferenceIds.length > 12) {
+    if (
+      body.reference_asset_ids !== undefined &&
+      explicitReferenceIds.length > 12
+    ) {
       return "参考素材最多 12 个";
     }
-    if (!hasExplicitInputs && inputAssetIds.length > 1) return "视频生成仅支持 0 或 1 个参考图";
+    if (!hasExplicitInputs && inputAssetIds.length > 1)
+      return "视频生成仅支持 0 或 1 个参考图";
   }
   return null;
 }
@@ -112,39 +144,47 @@ export async function handleCreateGenerationJob(
   const type = body.type as "image" | "video";
   const params = body.parameters as GenerationParameters;
   const expectedOutputCount = Number(body.expected_output_count);
-  const inputAssetIds = (Array.isArray(body.input_asset_ids) ? body.input_asset_ids : []) as number[];
+  const inputAssetIds = (
+    Array.isArray(body.input_asset_ids) ? body.input_asset_ids : []
+  ) as number[];
 
   const input: Record<string, unknown> = {
     prompt: params.prompt,
     aspect_ratio: params.aspect_ratio,
     model_id:
       type === "video"
-        ? VIDEO_MODEL_ALIASES[params.model_id as string] ?? params.model_id
+        ? (VIDEO_MODEL_ALIASES[params.model_id as string] ?? params.model_id)
         : params.model_id,
   };
   if (type === "image") {
     if (isStr(params.size)) input.size = params.size;
     input.web_search = params.web_search === true;
-    input.sequential_image_generation = params.sequential_image_generation === true;
+    input.sequential_image_generation =
+      params.sequential_image_generation === true;
   } else {
     if (isStr(params.resolution)) input.resolution = params.resolution;
     if (params.duration !== undefined) input.duration = params.duration;
-    if (internal.providerCredential) {
-      input.provider_credential = internal.providerCredential;
-    }
+  }
+  // 图片与视频一致：sk token 密封进 job.input.provider_credential，处理时由 worker 解出。
+  // 这样进程内即时调度与重启后的恢复扫描共用同一套凭据来源。
+  if (internal.providerCredential) {
+    input.provider_credential = internal.providerCredential;
   }
   const explicitReferenceIds = assetIds(body.reference_asset_ids);
   const firstFrameAssetId = assetId(body.first_frame_asset_id);
   const lastFrameAssetId = assetId(body.last_frame_asset_id);
-  const hasExplicitFrame = firstFrameAssetId !== null || lastFrameAssetId !== null;
-  const referenceAssetIds = body.reference_asset_ids !== undefined
-    ? uniqueAssetIds(explicitReferenceIds)
-    : hasExplicitFrame
-      ? []
-      : inputAssetIds;
+  const hasExplicitFrame =
+    firstFrameAssetId !== null || lastFrameAssetId !== null;
+  const referenceAssetIds =
+    body.reference_asset_ids !== undefined
+      ? uniqueAssetIds(explicitReferenceIds)
+      : hasExplicitFrame
+        ? []
+        : inputAssetIds;
   if (firstFrameAssetId) input.first_frame_asset_id = firstFrameAssetId;
   if (lastFrameAssetId) input.last_frame_asset_id = lastFrameAssetId;
-  if (referenceAssetIds.length > 0) input.reference_asset_ids = referenceAssetIds;
+  if (referenceAssetIds.length > 0)
+    input.reference_asset_ids = referenceAssetIds;
   input.expected_output_count = expectedOutputCount;
 
   const actionSeed = `${projectId}\0${idempotencyKey ?? ""}\0${Date.now()}`;

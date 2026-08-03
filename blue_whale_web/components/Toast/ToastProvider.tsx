@@ -10,7 +10,13 @@ import { toast, type ToastItem } from "./toast";
 import { X } from "lucide-react";
 
 /** 单条 Toast 通知（绝对定位在右上角栈中） */
-function ToastBar({ item, onDismiss }: { item: ToastItem; onDismiss: (id: string) => void }) {
+function ToastBar({
+  item,
+  onDismiss,
+}: {
+  item: ToastItem;
+  onDismiss: (id: string) => void;
+}) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {

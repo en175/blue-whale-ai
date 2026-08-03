@@ -19,6 +19,7 @@ describe("handleListModels", () => {
       default_aspect_ratio: "1:1",
       features: {
         reference_image: false,
+        max_reference_images: 0,
         watermark: false,
         quantity_max: 1,
         sequential_image_generation: false,
@@ -56,6 +57,7 @@ describe("handleListModels", () => {
       default_aspect_ratio: "1:1",
       features: {
         reference_image: true,
+        max_reference_images: 10,
         watermark: false,
         quantity_max: 4,
         sequential_image_generation: false,
@@ -71,7 +73,7 @@ describe("handleListModels", () => {
       "1k",
       "2k",
     ]);
-    expect(result.data?.[0]?.features.reference_image).toBe(false);
+    expect(result.data?.[0]?.features.reference_image).toBe(true);
   });
 
   it("图片能力表不暴露 Worker 无法完成的数量", async () => {
@@ -80,9 +82,7 @@ describe("handleListModels", () => {
       provider_id: "volc",
       model_label: "Seedream 5.0",
       icon: null,
-      supported_sizes: [
-        { id: "2k", label: "2K", api_value: "2K" },
-      ],
+      supported_sizes: [{ id: "2k", label: "2K", api_value: "2K" }],
       supported_aspect_ratios: ["1:1"],
       supported_formats: ["png"],
       default_size: "2k",
@@ -90,6 +90,7 @@ describe("handleListModels", () => {
       default_aspect_ratio: "1:1",
       features: {
         reference_image: true,
+        max_reference_images: 4,
         watermark: false,
         quantity_max: 15,
         sequential_image_generation: true,
@@ -102,5 +103,34 @@ describe("handleListModels", () => {
     const result = await handleListModels("image", { models: repo });
 
     expect(result.data?.[0]?.features.quantity_max).toBe(4);
+  });
+
+  it("API 透出 features.max_reference_images", async () => {
+    const view = {
+      model_id: "doubao-seedream-5-0-pro-260628",
+      provider_id: "volcengine",
+      model_label: "Seedream 5.0 Pro",
+      icon: null,
+      supported_sizes: [{ id: "2k", label: "2K", api_value: "2K" }],
+      supported_aspect_ratios: ["1:1"],
+      supported_formats: ["png"],
+      default_size: "2k",
+      default_format: "png",
+      default_aspect_ratio: "1:1",
+      features: {
+        reference_image: true,
+        max_reference_images: 10,
+        watermark: false,
+        quantity_max: 4,
+        sequential_image_generation: true,
+        stream: false,
+        tools: true,
+      },
+    };
+    const repo = { listEnabledByType: vi.fn().mockResolvedValue([view]) };
+
+    const result = await handleListModels("image", { models: repo });
+
+    expect(result.data?.[0]?.features.max_reference_images).toBe(10);
   });
 });

@@ -28,6 +28,10 @@ import type { CanvasNode, CanvasNodeData, NodeKindId } from "./_canvas/model";
 import { CanvasSurface } from "./_canvas/v2/CanvasSurface";
 import type { MenuPayload } from "./_canvas/v2/CanvasSurface";
 import { ContextMenu, type ContextMenuKind } from "./_canvas/v2/ContextMenu";
+import {
+  NodeContextMenu,
+  type NodeMenuAction,
+} from "./_canvas/v2/NodeContextMenu";
 import { effectiveToolMode, type ToolMode } from "./_canvas/v2/toolMode";
 import { useSpaceHeld } from "./_canvas/v2/useSpaceHeld";
 import { useV2Projects } from "./_canvas/v2/useV2Projects";
@@ -35,8 +39,14 @@ import {
   buildCrossmodalRefill,
   canvasNodeToDockMedia,
   cardToV2ImageFields,
+  nodeToPendingMention,
   recipeToDockPrefill,
 } from "./_canvas/v2/mappers";
+import {
+  cloneNodeWithOffset,
+  parseClipboardNodes,
+  serializeNodesForClipboard,
+} from "./_canvas/v2/clipboard";
 import { findPlacement, type Rect } from "./_canvas/placement";
 import { dockAccept, dockPickHint } from "./_canvas/utils";
 import { useCanvasGeneration } from "./_canvas/hooks/useCanvasGeneration";
@@ -57,6 +67,8 @@ import { CardLibraryPicker } from "./_canvas/components/CardLibraryPicker";
 import {
   cloneCardSnapshot,
   getCardLibraryAsset,
+  savedAssetsToastText,
+  saveToSharedAssets,
   snapshotToNodeData,
   type CardLibraryItem,
 } from "./_canvas/cardLibrary";
@@ -75,7 +87,13 @@ import {
   productImportImageId,
   productImportPatch,
 } from "./_canvas/productImport";
-import type { DockMediaItem, GenerateArgs, PrefillSignal } from "./_canvas";
+import type {
+  DockMediaItem,
+  GenerateArgs,
+  PendingMention,
+  PendingMentionBatch,
+  PrefillSignal,
+} from "./_canvas";
 import type { CardMessage, ChatMessage } from "./_canvas";
 import { canonicalCanvasHref } from "./canonical-project";
 
@@ -102,6 +120,11 @@ function probeImageAspect(url: string): Promise<number | undefined> {
     img.onerror = () => resolve(undefined);
     img.src = url;
   });
+}
+
+/** ReactFlow 节点 selected 标记（CanvasNode 类型未声明，运行时存在）。 */
+function isNodeSelected(n: CanvasNode): boolean | undefined {
+  return (n as CanvasNode & { selected?: boolean }).selected;
 }
 
 export function CanvasProjectRuntime({
@@ -239,10 +262,8 @@ export function CanvasProjectRuntime({
   const [lastFrameAssetId, setLastFrameAssetId] = useState<
     WireInteger | undefined
   >(undefined);
-  const [agentPendingMention, setAgentPendingMention] = useState<{
-    name: string;
-    nonce: number;
-  } | null>(null);
+  const [agentPendingMention, setAgentPendingMention] =
+    useState<PendingMentionBatch | null>(null);
   const [pickingFor, setPickingFor] = useState<
     | "image"
     | "video"
@@ -254,6 +275,11 @@ export function CanvasProjectRuntime({
     | null
   >(null);
   const [menu, setMenu] = useState<MenuPayload | null>(null);
+  const [nodeMenu, setNodeMenu] = useState<{
+    screenX: number;
+    screenY: number;
+    targetIds: string[];
+  } | null>(null);
 
   // IK55VD 工具模式：持久模式不持久化；按住空格临时切入抓手，有效模式 = 持久 OR 空格
   const [toolMode, setToolMode] = useState<ToolMode>("mouse");
@@ -345,6 +371,7 @@ export function CanvasProjectRuntime({
     generate,
     generateFromNode,
     hydrate,
+    retryNode,
     generating,
     generateError,
     setGenerateError,
@@ -439,7 +466,11 @@ export function CanvasProjectRuntime({
         }
         case "mention": {
           setIsAgentOpen(true);
-          setAgentPendingMention({ name, nonce: Date.now() });
+          const batchId = Date.now();
+          setAgentPendingMention({
+            mentions: [{ name, nonce: batchId }],
+            batchId,
+          });
           break;
         }
         case "video":
@@ -945,7 +976,7 @@ export function CanvasProjectRuntime({
     (nodeId: string) => {
       const node = nodes.find((n) => n.id === nodeId);
       if (!node) return;
-      // 上传失败卡：用留存的 File 原地重传（不新建节点）；其余维持打开底部 Dock
+      // 上传失败卡：用留存的 File 原地重传（不新建节点）；生成失败卡走下方 retryNode 后端重试
       const entry = uploadFilesRef.current.get(nodeId);
       if (node.data.recipe?.origin === "uploaded" && entry) {
         const pending = uploadMediaToCanvas({
@@ -967,10 +998,19 @@ export function CanvasProjectRuntime({
         });
         return;
       }
-      setBottomDockMode(node.data.kind === "video" ? "video" : "image");
-      setIsBottomDockOpen(true);
+      // 生成失败：调后端 retry（仅终态失败 job 有效）→ 节点回 running + 续轮询；不再只是重开 dock。
+      void retryNode(nodeId);
     },
-    [nodes, pid, addNode, patchNode, resizeNode, addAsset, setGenerateError],
+    [
+      nodes,
+      pid,
+      addNode,
+      patchNode,
+      resizeNode,
+      addAsset,
+      setGenerateError,
+      retryNode,
+    ],
   );
 
   /** 上传错误卡「移除」：删节点 + 清留存的 File/预览 URL。 */
@@ -985,6 +1025,132 @@ export function CanvasProjectRuntime({
     },
     [onNodesChange],
   );
+
+  const handleNodeMenuOpen = useCallback(
+    (payload: MenuPayload & { nodeId: string }) => {
+      setMenu(null);
+      const clickedSelected = nodes.some(
+        (n) => n.id === payload.nodeId && isNodeSelected(n),
+      );
+      const targetIds = clickedSelected
+        ? nodes.filter(isNodeSelected).map((n) => n.id)
+        : [payload.nodeId];
+      setNodeMenu({
+        screenX: payload.screenX,
+        screenY: payload.screenY,
+        targetIds,
+      });
+    },
+    [nodes],
+  );
+
+  /** 拷贝节点到系统剪贴板（菜单「拷贝」与 ⌘C 共用）。 */
+  const copyNodesToClipboard = useCallback((targets: CanvasNode[]) => {
+    void navigator.clipboard.writeText(serializeNodesForClipboard(targets));
+  }, []);
+
+  /** 复制节点：偏移落点生成副本（菜单「复制」与 ⌘D 共用）。 */
+  const duplicateNodes = useCallback(
+    (targets: CanvasNode[]) => {
+      for (const src of targets) addNodeFull(cloneNodeWithOffset(src));
+    },
+    [addNodeFull],
+  );
+
+  /** 粘贴（⌘V）：读剪贴板节点 JSON 重建落画布；非本格式/无权限静默忽略。 */
+  const pasteNodesFromClipboard = useCallback(async () => {
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      return;
+    }
+    for (const node of parseClipboardNodes(text)) addNodeFull(node);
+  }, [addNodeFull]);
+
+  const handleNodeMenuAction = useCallback(
+    (action: NodeMenuAction) => {
+      if (!nodeMenu) return;
+      const { targetIds } = nodeMenu;
+      setNodeMenu(null);
+      const targets = nodes.filter((n) => targetIds.includes(n.id));
+
+      switch (action) {
+        case "delete": {
+          for (const id of targetIds) {
+            const entry = uploadFilesRef.current.get(id);
+            if (entry) {
+              URL.revokeObjectURL(entry.previewUrl);
+              uploadFilesRef.current.delete(id);
+            }
+          }
+          onNodesChange(
+            targetIds.map((id) => ({ type: "remove" as const, id })),
+          );
+          break;
+        }
+        case "copy":
+          copyNodesToClipboard(targets);
+          break;
+        case "duplicate":
+          duplicateNodes(targets);
+          break;
+        case "save-to-assets": {
+          const text = savedAssetsToastText(saveToSharedAssets(targets));
+          if (text) toast.success(text);
+          break;
+        }
+        case "add-to-chat": {
+          // 分组无内容可引用，与保存语义一致跳过
+          const mentionTargets = targets.filter((n) => n.data.kind !== "group");
+          if (mentionTargets.length === 0) break;
+          const batchId = Date.now();
+          const mentions: PendingMention[] = mentionTargets.map((n, i) =>
+            nodeToPendingMention(n, assets, batchId + i),
+          );
+          setIsAgentOpen(true);
+          setAgentPendingMention({ mentions, batchId });
+          break;
+        }
+        default:
+          break;
+      }
+    },
+    [
+      nodeMenu,
+      nodes,
+      onNodesChange,
+      copyNodesToClipboard,
+      duplicateNodes,
+      assets,
+    ],
+  );
+
+  /** ⌘C/⌘D/⌘V 节点级快捷键：与右键菜单共用同一套拷贝/复制/粘贴逻辑。 */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key !== "c" && key !== "d" && key !== "v") return;
+      // 输入框/富文本内保留系统默认编辑行为
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.('input, textarea, [contenteditable="true"]')) return;
+      if (key === "v") {
+        e.preventDefault();
+        void pasteNodesFromClipboard();
+        return;
+      }
+      // 页面上有文本选区时放行系统拷贝（如聊天文本），不劫持 ⌘C/⌘D
+      if (window.getSelection()?.toString()) return;
+      const selected = nodes.filter(isNodeSelected);
+      if (selected.length === 0) return;
+      e.preventDefault();
+      if (key === "c") copyNodesToClipboard(selected);
+      else duplicateNodes(selected);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [nodes, copyNodesToClipboard, duplicateNodes, pasteNodesFromClipboard]);
 
   const handleCardGenerated = useCallback(
     (card: CardMessage) => {
@@ -1277,6 +1443,7 @@ export function CanvasProjectRuntime({
             picking={pickingFor !== null}
             pickingAccept={pickingFor ? dockAccept(pickingFor) : undefined}
             toolMode={effectiveMode}
+            onNodeMenu={handleNodeMenuOpen}
           />
         </div>
         <ZoomControls />
@@ -1289,6 +1456,18 @@ export function CanvasProjectRuntime({
           hasSource={!!menu.source}
           onInsert={onMenuInsert}
           onClose={() => setMenu(null)}
+        />
+      )}
+
+      {nodeMenu && (
+        <NodeContextMenu
+          screenX={nodeMenu.screenX}
+          screenY={nodeMenu.screenY}
+          hideSaveToAssets={nodes
+            .filter((n) => nodeMenu.targetIds.includes(n.id))
+            .every((n) => n.data.kind === "group")}
+          onAction={handleNodeMenuAction}
+          onClose={() => setNodeMenu(null)}
         />
       )}
 
@@ -1391,6 +1570,7 @@ export function CanvasProjectRuntime({
           <BottomDock
             mode={bottomDockMode}
             onClose={() => setIsBottomDockOpen(false)}
+            isOpen={isBottomDockOpen}
             imageMedia={imageDockMedia}
             videoMedia={videoDockMedia}
             audioMedia={audioDockMedia}

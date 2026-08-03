@@ -50,7 +50,11 @@ describe("useJobStatus", () => {
       status: "failed",
       progress: 0,
       asset: null,
-      error: { code: "PROVIDER_ERROR", message: "模型调用失败", retryable: true },
+      error: {
+        code: "PROVIDER_ERROR",
+        message: "模型调用失败",
+        retryable: true,
+      },
     });
     const { result } = renderHook(() => useJobStatus());
     act(() => {
@@ -59,7 +63,11 @@ describe("useJobStatus", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
-    expect(result.current.state).toMatchObject({ status: "failed", jobId: 8, message: "模型调用失败" });
+    expect(result.current.state).toMatchObject({
+      status: "failed",
+      jobId: 8,
+      message: "模型调用失败",
+    });
   });
 
   it("processing → state.polling + progress 持续更新（未清理）", async () => {
@@ -77,7 +85,11 @@ describe("useJobStatus", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
-    expect(result.current.state).toMatchObject({ status: "polling", jobId: 9, progress: 42 });
+    expect(result.current.state).toMatchObject({
+      status: "polling",
+      jobId: 9,
+      progress: 42,
+    });
   });
 
   it("轮询异常（getJobStatus reject）→ state.failed + 异常 message", async () => {
@@ -89,6 +101,9 @@ describe("useJobStatus", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
-    expect(result.current.state).toMatchObject({ status: "failed", message: "网络中断" });
+    expect(result.current.state).toMatchObject({
+      status: "failed",
+      message: "网络中断",
+    });
   });
 });

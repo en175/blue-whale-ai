@@ -20,7 +20,9 @@ describe("AssetInfoPanel", () => {
       />,
     );
 
-    expect(screen.getByRole("dialog", { name: "素材信息" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("dialog", { name: "素材信息" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("图片")).toBeInTheDocument();
     expect(screen.getByText("800 × 600")).toBeInTheDocument();
     expect(screen.getByText("PNG")).toBeInTheDocument();

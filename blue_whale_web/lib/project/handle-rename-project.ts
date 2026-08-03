@@ -1,4 +1,9 @@
-import { DATA_NOT_EXIST_CODE, FAILURE_CODE, fail, ok } from "@blue-whale/contracts";
+import {
+  DATA_NOT_EXIST_CODE,
+  FAILURE_CODE,
+  fail,
+  ok,
+} from "@blue-whale/contracts";
 import type { ProjectRepo } from "@blue-whale/persistence";
 
 /** PUT /api/projects/{id}：重命名（验归属）→ ok 或 400(空名) / 100100(不存在)。 */

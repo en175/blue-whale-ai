@@ -21,7 +21,12 @@ function makeDeps() {
 const validBody = {
   type: "image",
   input_asset_ids: [],
-  parameters: { prompt: "一只猫", aspect_ratio: "1:1", model_id: "doubao-seedream-4-0", size: "1K" },
+  parameters: {
+    prompt: "一只猫",
+    aspect_ratio: "1:1",
+    model_id: "doubao-seedream-4-0",
+    size: "1K",
+  },
   expected_output_count: 1,
 };
 
@@ -29,19 +34,39 @@ describe("handleCreateGenerationJob", () => {
   it("合法 image 请求 + 归属 → 202 + {generation_job_id, cursor}", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
-    deps.command.createJob.mockResolvedValue({ generation_job_id: "200", cursor: 0 });
-    const result = await handleCreateGenerationJob("9", "55", validBody, "key-1", deps);
+    deps.command.createJob.mockResolvedValue({
+      generation_job_id: "200",
+      cursor: 0,
+    });
+    const result = await handleCreateGenerationJob(
+      "9",
+      "55",
+      validBody,
+      "key-1",
+      deps,
+    );
     expect(result.code).toBe(200);
     expect(result.data).toEqual({ generation_job_id: "200", cursor: 0 });
     expect(deps.command.createJob).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: "55", userId: "9", type: "image", expectedOutputCount: 1 }),
+      expect.objectContaining({
+        projectId: "55",
+        userId: "9",
+        type: "image",
+        expectedOutputCount: 1,
+      }),
     );
   });
 
   it("project 不归属 → 100301", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue(null);
-    const result = await handleCreateGenerationJob("9", "55", validBody, "key-1", deps);
+    const result = await handleCreateGenerationJob(
+      "9",
+      "55",
+      validBody,
+      "key-1",
+      deps,
+    );
     expect(result).toEqual({ code: 100301, msg: "资源不存在", data: null });
     expect(deps.command.createJob).not.toHaveBeenCalled();
   });
@@ -49,7 +74,13 @@ describe("handleCreateGenerationJob", () => {
   it("type 非法 → 400", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
-    const result = await handleCreateGenerationJob("9", "55", { ...validBody, type: "3d" }, "k", deps);
+    const result = await handleCreateGenerationJob(
+      "9",
+      "55",
+      { ...validBody, type: "3d" },
+      "k",
+      deps,
+    );
     expect(result.code).toBe(400);
   });
 
@@ -59,7 +90,12 @@ describe("handleCreateGenerationJob", () => {
     const result = await handleCreateGenerationJob(
       "9",
       "55",
-      { type: "image", input_asset_ids: [], parameters: { aspect_ratio: "1:1" }, expected_output_count: 1 },
+      {
+        type: "image",
+        input_asset_ids: [],
+        parameters: { aspect_ratio: "1:1" },
+        expected_output_count: 1,
+      },
       "k",
       deps,
     );
@@ -85,7 +121,12 @@ describe("handleCreateGenerationJob", () => {
     const result = await handleCreateGenerationJob(
       "9",
       "55",
-      { type: "video", input_asset_ids: [1, 2], parameters: { prompt: "x", aspect_ratio: "16:9" }, expected_output_count: 1 },
+      {
+        type: "video",
+        input_asset_ids: [1, 2],
+        parameters: { prompt: "x", aspect_ratio: "16:9" },
+        expected_output_count: 1,
+      },
       "k",
       deps,
     );
@@ -95,7 +136,10 @@ describe("handleCreateGenerationJob", () => {
   it("video 将历史 UI 模型别名规范化为 new-api 的真实 model_id", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
-    deps.command.createJob.mockResolvedValue({ generation_job_id: "201", cursor: 0 });
+    deps.command.createJob.mockResolvedValue({
+      generation_job_id: "201",
+      cursor: 0,
+    });
 
     await handleCreateGenerationJob(
       "9",
@@ -131,7 +175,10 @@ describe("handleCreateGenerationJob", () => {
   it("video 拒绝首尾帧与普通参考素材混用", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
-    deps.command.createJob.mockResolvedValue({ generation_job_id: "202", cursor: 0 });
+    deps.command.createJob.mockResolvedValue({
+      generation_job_id: "202",
+      cursor: 0,
+    });
     const body = {
       type: "video",
       input_asset_ids: [],
@@ -148,9 +195,16 @@ describe("handleCreateGenerationJob", () => {
       expected_output_count: 1,
     };
 
-    const result = await handleCreateGenerationJob("9", "55", body, "key-frames", deps, {
-      providerCredential: "sealed-token",
-    });
+    const result = await handleCreateGenerationJob(
+      "9",
+      "55",
+      body,
+      "key-frames",
+      deps,
+      {
+        providerCredential: "sealed-token",
+      },
+    );
 
     expect(result).toEqual({
       code: 400,
@@ -163,7 +217,10 @@ describe("handleCreateGenerationJob", () => {
   it("video 显式首帧不会从兼容 input_asset_ids 重复投影为普通参考图", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
-    deps.command.createJob.mockResolvedValue({ generation_job_id: "203", cursor: 0 });
+    deps.command.createJob.mockResolvedValue({
+      generation_job_id: "203",
+      cursor: 0,
+    });
 
     await handleCreateGenerationJob(
       "9",
@@ -199,7 +256,10 @@ describe("handleCreateGenerationJob", () => {
   it("video 显式首帧忽略兼容 input_asset_ids 中的额外身份", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
-    deps.command.createJob.mockResolvedValue({ generation_job_id: "206", cursor: 0 });
+    deps.command.createJob.mockResolvedValue({
+      generation_job_id: "206",
+      cursor: 0,
+    });
 
     const result = await handleCreateGenerationJob(
       "9",
@@ -236,7 +296,10 @@ describe("handleCreateGenerationJob", () => {
   it("video 显式普通参考素材保持唯一顺序且不被兼容字段扩充", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
-    deps.command.createJob.mockResolvedValue({ generation_job_id: "204", cursor: 0 });
+    deps.command.createJob.mockResolvedValue({
+      generation_job_id: "204",
+      cursor: 0,
+    });
 
     const result = await handleCreateGenerationJob(
       "9",
@@ -264,7 +327,18 @@ describe("handleCreateGenerationJob", () => {
       expect.objectContaining({
         input: expect.objectContaining({
           reference_asset_ids: [
-            "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
           ],
         }),
       }),
@@ -281,7 +355,10 @@ describe("handleCreateGenerationJob", () => {
       {
         type: "video",
         input_asset_ids: [],
-        reference_asset_ids: Array.from({ length: 13 }, (_, index) => index + 1),
+        reference_asset_ids: Array.from(
+          { length: 13 },
+          (_, index) => index + 1,
+        ),
         parameters: {
           prompt: "参考素材过多",
           model_id: "seedance-2",
@@ -330,7 +407,10 @@ describe("handleCreateGenerationJob", () => {
   it("video 显式普通参考素材交给 Worker 做 provider 能力判定", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
-    deps.command.createJob.mockResolvedValue({ generation_job_id: "205", cursor: 0 });
+    deps.command.createJob.mockResolvedValue({
+      generation_job_id: "205",
+      cursor: 0,
+    });
 
     const result = await handleCreateGenerationJob(
       "9",
@@ -371,7 +451,10 @@ describe("actionIdentity 列宽回归", () => {
   it("actionIdentity 长度须 ≤ correlation_id 列宽 64", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
-    deps.command.createJob.mockResolvedValue({ generation_job_id: "207", cursor: 0 });
+    deps.command.createJob.mockResolvedValue({
+      generation_job_id: "207",
+      cursor: 0,
+    });
     await handleCreateGenerationJob("9", "55", validBody, "key-1", deps);
     const cmdInput = deps.command.createJob.mock.calls[0]?.[0];
     expect(cmdInput.actionIdentity.length).toBeLessThanOrEqual(64);

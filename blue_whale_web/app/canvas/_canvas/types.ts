@@ -60,6 +60,12 @@ export type PendingMention = {
   type?: "image" | "video" | "audio";
 };
 
+/** 批量 mention 投递（右键多选「添加到聊天」），batchId 触发 effect 消费。 */
+export type PendingMentionBatch = {
+  mentions: PendingMention[];
+  batchId: number;
+};
+
 /** 重新编辑时从节点 recipe 回填底部栏的参数快照（P2：recipe.generation → Dock 预填）。 */
 export type DockPrefill = {
   prompt?: string;
@@ -235,7 +241,6 @@ export type ImageDockContentProps = {
   editorRef: React.RefObject<HTMLDivElement | null>;
   isEmpty: boolean;
   onInput: () => void;
-  onClose: () => void;
   media?: DockMediaItem[];
   onRemoveMedia?: (id: string) => void;
   /** 本地上传：Dock 内 file input 选定文件后上抛，由页面层建画布节点 + 入 media */
@@ -252,6 +257,14 @@ export type ImageDockContentProps = {
   generating?: boolean;
   /** 点击缩略图预览素材 */
   onPreviewMedia?: (item: DockMediaItem) => void;
+  /** 当前参考图总数（mentions + media），用于上限判断 */
+  referenceCount?: number;
+  /** 所选模型的参考图上限变化时回调（切模型联动） */
+  onMaxReferenceImagesChange?: (max: number) => void;
+  /** 面板是否处于放大态（IK5OWV：居中悬浮放大，Esc/点外部收起） */
+  expanded?: boolean;
+  /** 切换放大/收起（IK5OWV） */
+  onToggleExpand?: () => void;
 };
 
 /** 音频 Dock 内容 props（IK55VM：双子面板，未提交输入全部由 BottomDock 提升持有）。 */

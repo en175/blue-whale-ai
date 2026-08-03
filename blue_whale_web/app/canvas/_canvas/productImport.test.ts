@@ -17,21 +17,18 @@ import {
 import type { CanvasNodeData } from "./model";
 
 describe("PRODUCT_PLATFORMS", () => {
-  it("8 个平台占位项(原型空态显示),每项有 id 与短标签", () => {
-    expect(PRODUCT_PLATFORMS).toHaveLength(8);
+  it("5 个平台占位项(IK5JV4 定稿,空态显示),每项有 id 与短标签", () => {
+    expect(PRODUCT_PLATFORMS).toHaveLength(5);
     for (const p of PRODUCT_PLATFORMS) {
       expect(p.id).toBeTruthy();
       expect(p.label).toBeTruthy();
     }
     expect(PRODUCT_PLATFORMS.map((p) => p.label)).toEqual([
-      "a",
       "抖",
-      "t",
-      "e",
-      "s",
       "淘",
-      "拼",
-      "红",
+      "猫",
+      "京",
+      "亚",
     ]);
   });
 });

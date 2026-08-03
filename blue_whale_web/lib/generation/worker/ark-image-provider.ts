@@ -80,24 +80,37 @@ function createNewApiImageProvider(options: ProviderOptions): ImageProvider {
       },
     };
   }
-  const client = createNewApiClient({ baseUrl, fetchImpl: options.fetchImpl });
+  // 出图是一次性长调用（2k 单图实测 ~19s，多图/大图更久），远超 new-api 客户端默认 10s 超时——
+  // 默认超时会在出图途中 abort，被误报成「new-api 不可达」(线上 job 416/421/422 即此)。
+  // 视频 submit/poll 都是短调用，不受影响。这里给图片单独放宽，留出 120s 租约内的转存余量。
+  const rawTimeout = Number(
+    options.env?.NEW_API_IMAGE_TIMEOUT_MS ??
+      process.env.NEW_API_IMAGE_TIMEOUT_MS,
+  );
+  const timeoutMs =
+    Number.isInteger(rawTimeout) && rawTimeout > 0 ? rawTimeout : 90_000;
+  const client = createNewApiClient({
+    baseUrl,
+    fetchImpl: options.fetchImpl,
+    timeoutMs,
+  });
   return {
     async generate(input) {
       try {
         const sourceImages =
-          input.sourceImages ??
-          (input.sourceImage ? [input.sourceImage] : []);
-        const images = sourceImages.length > 0
-          ? await client.editImages(options.token!, {
-              model: input.model,
-              prompt: input.prompt,
-              images: sourceImages,
-              size: input.size,
-              n: input.n,
-              webSearch: input.webSearch,
-              sequential: input.sequential,
-            })
-          : await client.generateImages(options.token!, input);
+          input.sourceImages ?? (input.sourceImage ? [input.sourceImage] : []);
+        const images =
+          sourceImages.length > 0
+            ? await client.editImages(options.token!, {
+                model: input.model,
+                prompt: input.prompt,
+                images: sourceImages,
+                size: input.size,
+                n: input.n,
+                webSearch: input.webSearch,
+                sequential: input.sequential,
+              })
+            : await client.generateImages(options.token!, input);
         return images.map((image) => ({
           url: image.url,
           width: input.width ?? null,

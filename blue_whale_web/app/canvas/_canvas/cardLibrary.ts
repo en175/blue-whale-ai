@@ -6,12 +6,23 @@
  * 「导入=复制快照」:cloneCardSnapshot 产出的字段拷贝进画布节点,编辑不回写库。
  * 「移除资产」:removeCardLibraryItem 从 mock 库删除(内存态,刷新页面还原)。
  * 复用:商品卡导入(IK55VZ)直接以 listCardLibrary({ cardType: "product" }) 复用本模块。
+ * IK5MC9「保存到共享资产」:saveToSharedAssets 将画布节点快照写入库(参考卡+媒体节点)。
  */
-import type { CanvasNodeData, ReferenceCardType } from "./model";
+import type {
+  CanvasNode,
+  CanvasNodeData,
+  MediaKind,
+  ReferenceCardType,
+} from "./model";
+import { richDocToPlainText } from "./model";
+import { svgPlaceholder } from "./svgPlaceholder";
+
+/** IK5MC9 共享资产类型 = 参考卡 6 类 + 媒体 4 类。 */
+export type SharedAssetType = ReferenceCardType | MediaKind;
 
 export interface CardLibraryItem {
   id: string;
-  cardType: ReferenceCardType;
+  cardType: SharedAssetType;
   name: string;
   description: string;
   /** 参考图 mock asset id(查 MOCK_CARD_LIBRARY_ASSETS);无图卡缺省 */
@@ -24,18 +35,24 @@ export interface CardLibraryItem {
   imageAssetIds?: string[];
   /** IK55VZ 商品卡来源链接 */
   sourceUrl?: string;
+  /** IK5MC9 媒体节点产物 assetId（画布 store.assets 引用） */
+  assetId?: string;
   /** 创建日期(截图卡片显示,YYYY-MM-DD) */
   createdAt: string;
 }
 
-/** 卡片类型中文名(选择器 UI 用;卡头英文名在 REFERENCE_CARD_TYPES.label)。 */
-export const CARD_LIBRARY_TYPE_LABELS: Record<ReferenceCardType, string> = {
+/** 类型中文名(选择器 UI 用;覆盖参考卡 + 媒体)。 */
+export const CARD_LIBRARY_TYPE_LABELS: Record<SharedAssetType, string> = {
   style: "风格",
   character: "角色",
   object: "物体",
   environment: "环境",
   custom: "自定义",
   product: "商品",
+  image: "图片",
+  video: "视频",
+  audio: "音频",
+  text: "文本",
 };
 
 /** mock 图 asset:内联 data-URL SVG 占位图(无网络依赖,测试/e2e 可跑)。 */
@@ -45,21 +62,28 @@ export interface CardLibraryAsset {
   aspect: number;
 }
 
-function svgCover(hue: number, label: string): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},45%,28%)"/><stop offset="1" stop-color="hsl(${hue + 40},50%,16%)"/></linearGradient></defs><rect width="320" height="180" fill="url(#g)"/><text x="160" y="96" font-size="20" fill="rgba(255,255,255,0.75)" text-anchor="middle" font-family="sans-serif">${label}</text></svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
-
 export const MOCK_CARD_LIBRARY_ASSETS: Record<string, CardLibraryAsset> = {
-  "libimg-s1": { src: svgCover(280, "风格 · 赛博朋克"), aspect: 320 / 180 },
-  "libimg-c1": { src: svgCover(45, "角色 · Apollo"), aspect: 320 / 180 },
-  "libimg-o1": { src: svgCover(40, "物体 · 相机"), aspect: 320 / 180 },
-  "libimg-e1": { src: svgCover(20, "环境 · 日出"), aspect: 320 / 180 },
-  // IK55VZ 商品卡 mock 图(同一 svgCover 生成方式)
-  "libimg-p1": { src: svgCover(200, "商品 · 音箱主图"), aspect: 320 / 180 },
-  "libimg-p2": { src: svgCover(160, "商品 · 音箱细节"), aspect: 320 / 180 },
-  "libimg-p3": { src: svgCover(120, "商品 · 音箱场景"), aspect: 320 / 180 },
-  "libimg-p4": { src: svgCover(90, "商品 · 露营灯"), aspect: 320 / 180 },
+  "libimg-s1": {
+    src: svgPlaceholder(280, "风格 · 赛博朋克"),
+    aspect: 320 / 180,
+  },
+  "libimg-c1": { src: svgPlaceholder(45, "角色 · Apollo"), aspect: 320 / 180 },
+  "libimg-o1": { src: svgPlaceholder(40, "物体 · 相机"), aspect: 320 / 180 },
+  "libimg-e1": { src: svgPlaceholder(20, "环境 · 日出"), aspect: 320 / 180 },
+  // IK55VZ 商品卡 mock 图(同一共享 svgPlaceholder 生成)
+  "libimg-p1": {
+    src: svgPlaceholder(200, "商品 · 音箱主图"),
+    aspect: 320 / 180,
+  },
+  "libimg-p2": {
+    src: svgPlaceholder(160, "商品 · 音箱细节"),
+    aspect: 320 / 180,
+  },
+  "libimg-p3": {
+    src: svgPlaceholder(120, "商品 · 音箱场景"),
+    aspect: 320 / 180,
+  },
+  "libimg-p4": { src: svgPlaceholder(90, "商品 · 露营灯"), aspect: 320 / 180 },
 };
 
 const MOCK_CARDS: CardLibraryItem[] = [
@@ -156,9 +180,9 @@ export function resetCardLibrary(): void {
   library = [...MOCK_CARDS];
 }
 
-/** 查询卡片;filter.cardType 限定类型(商品卡导入复用时传 "product")。 */
+/** 查询卡片;filter.cardType 限定类型(商品卡导入复用时传 "product";媒体 tab 传 image/video/audio/text)。 */
 export function listCardLibrary(filter?: {
-  cardType?: ReferenceCardType;
+  cardType?: SharedAssetType;
 }): CardLibraryItem[] {
   if (!filter?.cardType) return [...library];
   return library.filter((c) => c.cardType === filter.cardType);
@@ -203,7 +227,7 @@ export interface CardSnapshot {
 
 export function cloneCardSnapshot(item: CardLibraryItem): CardSnapshot {
   const snap: CardSnapshot = {
-    cardType: item.cardType,
+    cardType: item.cardType as ReferenceCardType,
     name: item.name,
     description: item.description,
   };
@@ -255,4 +279,78 @@ export function snapshotToNodeData(
     ...(snap.imageAssetIds ? { imageAssetIds: [...snap.imageAssetIds] } : {}),
     ...(snap.sourceUrl != null ? { sourceUrl: snap.sourceUrl } : {}),
   };
+}
+
+/** IK5MC9 自动命名：统计库中同类型媒体条目最大编号 +1（如"图片 3"）。 */
+function nextMediaName(kind: MediaKind): string {
+  const prefix = CARD_LIBRARY_TYPE_LABELS[kind];
+  let max = 0;
+  for (const item of library) {
+    if (item.cardType !== kind) continue;
+    const m = new RegExp(`^${prefix}\\s*(\\d+)$`).exec(item.name);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `${prefix} ${max + 1}`;
+}
+
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * IK5MC9 保存到共享资产：将画布节点快照写入 mock 库。
+ * - 参考卡（kind=reference）：name 取卡片名称，cardType 取 cardType。
+ * - 媒体节点（image/video/audio/text）：自动命名（如"图片 3"），cardType=kind。
+ * - 分组（kind=group）：静默跳过。
+ * 返回实际保存数量。
+ */
+export function saveToSharedAssets(nodes: CanvasNode[]): number {
+  const savable = nodes.filter((n) => n.data.kind !== "group");
+  if (savable.length === 0) return 0;
+
+  let count = 0;
+  for (const node of savable) {
+    const d = node.data;
+    let item: CardLibraryItem;
+    if (d.kind === "reference") {
+      item = {
+        id: `saved-${crypto.randomUUID()}`,
+        cardType: d.cardType ?? "custom",
+        name: d.name ?? CARD_LIBRARY_TYPE_LABELS[d.cardType ?? "custom"],
+        description: d.description ?? "",
+        createdAt: todayStr(),
+      };
+      if (d.referenceAssetId) item.imageAssetId = d.referenceAssetId;
+      if (d.voiceId) item.voiceId = d.voiceId as string;
+      if (d.detail != null) item.detail = d.detail;
+      if (d.imageAssetIds) item.imageAssetIds = [...d.imageAssetIds];
+      if (d.sourceUrl) item.sourceUrl = d.sourceUrl;
+    } else {
+      const kind = d.kind as MediaKind;
+      const desc =
+        kind === "text"
+          ? (d.richDoc ? richDocToPlainText(d.richDoc) : "").slice(0, 100) ||
+            (d.prompt ?? "")
+          : (d.prompt ?? "");
+      item = {
+        id: `saved-${crypto.randomUUID()}`,
+        cardType: kind,
+        name: nextMediaName(kind),
+        description: desc,
+        createdAt: todayStr(),
+      };
+      if (d.assetId) item.assetId = d.assetId;
+    }
+    library = [...library, item];
+    count++;
+  }
+
+  return count;
+}
+
+/** 保存结果 toast 文案：0 项返回 null（不提示）；单数/复数分文案（runtime 与测试共用契约）。 */
+export function savedAssetsToastText(count: number): string | null {
+  if (count <= 0) return null;
+  return count === 1 ? "已保存到共享资产" : `已保存 ${count} 项到共享资产`;
 }

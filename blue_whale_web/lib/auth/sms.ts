@@ -22,7 +22,9 @@ export interface VolcengineSmsConfig {
 
 const SMS_HOST = "open.volcengineapi.com";
 
-export function createVolcengineSmsProvider(config: VolcengineSmsConfig): SmsProvider {
+export function createVolcengineSmsProvider(
+  config: VolcengineSmsConfig,
+): SmsProvider {
   const region = config.region ?? "cn-beijing";
   return {
     async send(phone, code) {
@@ -48,18 +50,23 @@ export function createVolcengineSmsProvider(config: VolcengineSmsConfig): SmsPro
         ak: config.ak,
         sk: config.sk,
       });
-      const res = await fetch(`https://${SMS_HOST}/?Action=SendSms&Version=2020-01-01`, {
-        method: "POST",
-        body,
-        headers: {
-          Host: SMS_HOST,
-          "X-Date": signed.xDate,
-          "X-Content-Sha256": signed.contentHash,
-          "Content-Type": "application/json",
-          Authorization: signed.authorization,
+      const res = await fetch(
+        `https://${SMS_HOST}/?Action=SendSms&Version=2020-01-01`,
+        {
+          method: "POST",
+          body,
+          headers: {
+            Host: SMS_HOST,
+            "X-Date": signed.xDate,
+            "X-Content-Sha256": signed.contentHash,
+            "Content-Type": "application/json",
+            Authorization: signed.authorization,
+          },
         },
-      });
-      const json = (await res.json()) as { ResponseMetadata?: { Error?: { Code: string; Message: string } } };
+      );
+      const json = (await res.json()) as {
+        ResponseMetadata?: { Error?: { Code: string; Message: string } };
+      };
       const err = json?.ResponseMetadata?.Error;
       if (err) throw new Error(`${err.Code}: ${err.Message}`);
     },

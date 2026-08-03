@@ -117,9 +117,7 @@ export function AccountModal({ onClose }: AccountModalProps) {
       {changePwdOpen && (
         <ChangePasswordModal onClose={() => setChangePwdOpen(false)} />
       )}
-      {rechargeOpen && (
-        <RechargeModal onClose={() => setRechargeOpen(false)} />
-      )}
+      {rechargeOpen && <RechargeModal onClose={() => setRechargeOpen(false)} />}
     </ModalShell>
   );
 }

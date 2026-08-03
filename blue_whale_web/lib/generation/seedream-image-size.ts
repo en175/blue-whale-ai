@@ -84,27 +84,28 @@ const STANDARD_4K = sizeTable([
   "6240x2656",
 ]);
 
-const MODEL_SIZES: Readonly<Record<string, Readonly<Record<string, SizeTable>>>> =
-  {
-    "doubao-seedream-5-0-pro-260628": {
-      "1K": PRO_1K,
-      "2K": PRO_2K,
-    },
-    "doubao-seedream-5-0-260128": {
-      "2K": STANDARD_2K,
-      "3K": STANDARD_3K,
-      "4K": STANDARD_4K,
-    },
-    "doubao-seedream-4-5-251128": {
-      "2K": STANDARD_2K,
-      "4K": STANDARD_4K,
-    },
-    "doubao-seedream-4-0-250828": {
-      "1K": STANDARD_1K,
-      "2K": STANDARD_2K,
-      "4K": STANDARD_4K,
-    },
-  };
+const MODEL_SIZES: Readonly<
+  Record<string, Readonly<Record<string, SizeTable>>>
+> = {
+  "doubao-seedream-5-0-pro-260628": {
+    "1K": PRO_1K,
+    "2K": PRO_2K,
+  },
+  "doubao-seedream-5-0-260128": {
+    "2K": STANDARD_2K,
+    "3K": STANDARD_3K,
+    "4K": STANDARD_4K,
+  },
+  "doubao-seedream-4-5-251128": {
+    "2K": STANDARD_2K,
+    "4K": STANDARD_4K,
+  },
+  "doubao-seedream-4-0-250828": {
+    "1K": STANDARD_1K,
+    "2K": STANDARD_2K,
+    "4K": STANDARD_4K,
+  },
+};
 
 export function resolveSeedreamImageSize(
   modelId: string,

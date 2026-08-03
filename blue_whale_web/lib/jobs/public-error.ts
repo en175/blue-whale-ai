@@ -22,7 +22,9 @@ const KNOWN_CODES = new Set([
 ]);
 
 function fallbackCode(type: string): string {
-  return type === "video" ? "video_generation_failed" : "image_generation_failed";
+  return type === "video"
+    ? "video_generation_failed"
+    : "image_generation_failed";
 }
 
 function messageFor(code: string, type: string): string {

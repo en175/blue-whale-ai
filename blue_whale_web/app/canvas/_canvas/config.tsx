@@ -50,7 +50,7 @@ export const LEFT_TOOLS: ToolDef[] = [
       <MousePointer2
         width={20}
         height={20}
-        stroke="rgba(255, 255, 255, 0.8)"
+        stroke="var(--tc-icon-stroke)"
         strokeWidth={1.5}
       />
     ),
@@ -62,7 +62,7 @@ export const LEFT_TOOLS: ToolDef[] = [
       <SquarePlus
         width={20}
         height={20}
-        stroke="rgba(255, 255, 255, 0.8)"
+        stroke="var(--tc-icon-stroke)"
         strokeWidth={1.5}
       />
     ),
@@ -85,7 +85,7 @@ export const LEFT_TOOLS: ToolDef[] = [
       <AudioLines
         width={20}
         height={20}
-        stroke="rgba(255, 255, 255, 0.8)"
+        stroke="var(--tc-icon-stroke)"
         strokeWidth={1.5}
       />
     ),
@@ -97,7 +97,7 @@ export const LEFT_TOOLS: ToolDef[] = [
       <Type
         width={20}
         height={20}
-        stroke="rgba(255, 255, 255, 0.8)"
+        stroke="var(--tc-icon-stroke)"
         strokeWidth={1.5}
       />
     ),
@@ -110,7 +110,7 @@ export const LEFT_TOOLS: ToolDef[] = [
       <Library
         width={20}
         height={20}
-        stroke="rgba(255, 255, 255, 0.8)"
+        stroke="var(--tc-icon-stroke)"
         strokeWidth={1.5}
       />
     ),
@@ -123,7 +123,7 @@ export const LEFT_TOOLS: ToolDef[] = [
       <ShoppingBag
         width={20}
         height={20}
-        stroke="rgba(255, 255, 255, 0.8)"
+        stroke="var(--tc-icon-stroke)"
         strokeWidth={1.5}
       />
     ),
@@ -140,7 +140,7 @@ const AUDIO_FLYOUT_ICONS: Record<string, ReactNode> = {
     <AudioLines
       width={15}
       height={15}
-      stroke="rgba(255, 255, 255, 0.7)"
+      stroke="var(--tc-text-secondary)"
       strokeWidth={1.8}
     />
   ),
@@ -148,7 +148,7 @@ const AUDIO_FLYOUT_ICONS: Record<string, ReactNode> = {
     <Music
       width={15}
       height={15}
-      stroke="rgba(255, 255, 255, 0.7)"
+      stroke="var(--tc-text-secondary)"
       strokeWidth={1.8}
     />
   ),
@@ -167,7 +167,7 @@ const ASSET_LIBRARY_FLYOUT_ICONS: Record<string, ReactNode> = {
     <BarChart3
       width={15}
       height={15}
-      stroke="rgba(255, 255, 255, 0.7)"
+      stroke="var(--tc-text-secondary)"
       strokeWidth={1.8}
     />
   ),
@@ -175,7 +175,7 @@ const ASSET_LIBRARY_FLYOUT_ICONS: Record<string, ReactNode> = {
     <Palette
       width={15}
       height={15}
-      stroke="rgba(255, 255, 255, 0.7)"
+      stroke="var(--tc-text-secondary)"
       strokeWidth={1.8}
     />
   ),
@@ -183,7 +183,7 @@ const ASSET_LIBRARY_FLYOUT_ICONS: Record<string, ReactNode> = {
     <User
       width={15}
       height={15}
-      stroke="rgba(255, 255, 255, 0.7)"
+      stroke="var(--tc-text-secondary)"
       strokeWidth={1.8}
     />
   ),
@@ -191,7 +191,7 @@ const ASSET_LIBRARY_FLYOUT_ICONS: Record<string, ReactNode> = {
     <Box
       width={15}
       height={15}
-      stroke="rgba(255, 255, 255, 0.7)"
+      stroke="var(--tc-text-secondary)"
       strokeWidth={1.8}
     />
   ),
@@ -199,7 +199,7 @@ const ASSET_LIBRARY_FLYOUT_ICONS: Record<string, ReactNode> = {
     <Mountain
       width={15}
       height={15}
-      stroke="rgba(255, 255, 255, 0.7)"
+      stroke="var(--tc-text-secondary)"
       strokeWidth={1.8}
     />
   ),
@@ -207,7 +207,7 @@ const ASSET_LIBRARY_FLYOUT_ICONS: Record<string, ReactNode> = {
     <PenLine
       width={15}
       height={15}
-      stroke="rgba(255, 255, 255, 0.7)"
+      stroke="var(--tc-text-secondary)"
       strokeWidth={1.8}
     />
   ),
@@ -215,7 +215,7 @@ const ASSET_LIBRARY_FLYOUT_ICONS: Record<string, ReactNode> = {
     <Package
       width={15}
       height={15}
-      stroke="rgba(255, 255, 255, 0.7)"
+      stroke="var(--tc-text-secondary)"
       strokeWidth={1.8}
     />
   ),
@@ -226,7 +226,7 @@ export const ASSET_LIBRARY_FLYOUT_ITEMS: ToolbarFlyoutItem[] = [
     label: "共享资产",
     icon: ASSET_LIBRARY_FLYOUT_ICONS.import,
   },
-  ...REFERENCE_CARD_TYPES.map((t) => ({
+  ...REFERENCE_CARD_TYPES.filter((t) => t.id !== "product").map((t) => ({
     id: t.id as string,
     label: t.flyoutLabel,
     icon: ASSET_LIBRARY_FLYOUT_ICONS[t.id],
@@ -246,7 +246,7 @@ export const PRODUCT_FLYOUT_ITEMS: ToolbarFlyoutItem[] = [
       <SquarePlus
         width={15}
         height={15}
-        stroke="rgba(255, 255, 255, 0.7)"
+        stroke="var(--tc-text-secondary)"
         strokeWidth={1.8}
       />
     ),
@@ -258,7 +258,7 @@ export const PRODUCT_FLYOUT_ITEMS: ToolbarFlyoutItem[] = [
       <Download
         width={15}
         height={15}
-        stroke="rgba(255, 255, 255, 0.7)"
+        stroke="var(--tc-text-secondary)"
         strokeWidth={1.8}
       />
     ),

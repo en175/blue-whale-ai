@@ -71,6 +71,7 @@ import {
   ProductImageSection,
   ProductLinkImportSection,
 } from "./product-card-sections";
+import { useInlineEdit } from "./useInlineEdit";
 import { EditorContent } from "@tiptap/react";
 import { useRichEditor, plainTextToDoc } from "./text/RichTextEditor";
 import { TextFormatToolbar } from "./text/TextFormatToolbar";
@@ -957,13 +958,7 @@ export function GroupNode({ data }: NodeProps) {
  * chrome：选中时顶部居中浮出 @ 按钮（点击无行为，预留）；不做「重新编辑」。
  * character 独有底部「音色」区（常显虚线框，悬停展开上传态；选择器数据后续，mock）。
  */
-export function ReferenceNode({
-  id,
-  data,
-  width,
-  height,
-  selected,
-}: NodeProps) {
+export function ReferenceNode({ id, data, width, selected }: NodeProps) {
   const d = data as unknown as CanvasNodeData;
   const cardType: ReferenceCardType = d.cardType ?? "custom";
   const meta =
@@ -985,14 +980,12 @@ export function ReferenceNode({
   );
   /** IK55VZ 商品卡多图:imageAssetIds → store.assets 解析 src(整 map 选择,引用稳定)。 */
   const assetsMap = useCanvasStore((s) => s.assets);
-  const [editingDesc, setEditingDesc] = useState(false);
-  const [editingName, setEditingName] = useState(false);
+  /** IK5JV6:描述/卡名内联编辑共用 useInlineEdit(Esc 取消/失焦保存)。 */
+  const descEdit = useInlineEdit((text) => onEditDescription?.(id, text));
+  const nameEdit = useInlineEdit((text) => onEditReferenceName?.(id, text));
   const [replaceMenuOpen, setReplaceMenuOpen] = useState(false);
   /** IK55VZ 商品卡 chrome 悬停态(selected || hovered 浮出「商品」标签 + 「@ 添加到对话」胶囊)。 */
   const [hovered, setHovered] = useState(false);
-  /** Esc 取消标记：置位后 blur 不 commit（Esc=取消，失焦=保存）。 */
-  const cancelDescRef = useRef(false);
-  const cancelNameRef = useRef(false);
   const hasImage = !!d.referenceAssetId;
   const description = d.description ?? "";
   const emptyDesc = description.trim() === "";
@@ -1057,7 +1050,7 @@ export function ReferenceNode({
               background: "var(--tc-bg-elevated)",
               border: "1px solid var(--tc-border-subtle)",
               color: "var(--tc-text-secondary)",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+              boxShadow: "var(--tc-chrome-float-shadow)",
             }}
             onClick={() => {
               /* 预留：@ 引用行为属后续工单 */
@@ -1074,16 +1067,16 @@ export function ReferenceNode({
         onPointerLeave={() => setHovered(false)}
         style={{
           width: cardWidth,
-          // 已填态高度内容驱动（图高随宽高比）；空/留史态用持久高度或默认；
-          // IK55VZ 商品卡:内容驱动 + minHeight 兜底(新建落点 560)
+          // 已填态高度内容驱动（图高随宽高比）；空/留史态用默认卡高；
+          // IK55VZ 商品卡:内容驱动 + minHeight 兜底(新建落点 560)。
+          // 禁用 RF NodeProps.height:它是 measured 回读(CanvasSurface 剥离 node.height 后
+          // 首测前为 0),钉进内联样式会形成 0→测得 2px→钉 2px 的自反馈塌缩环。
           height: isProduct
             ? undefined
             : hasImage
               ? undefined
-              : (height ?? referenceCardHeight(cardType)),
-          minHeight: isProduct
-            ? (height ?? referenceCardHeight(cardType))
-            : undefined,
+              : referenceCardHeight(cardType),
+          minHeight: isProduct ? referenceCardHeight(cardType) : undefined,
           outline: dropHighlight
             ? "2px solid var(--tc-accent)"
             : selected
@@ -1108,7 +1101,7 @@ export function ReferenceNode({
           >
             <AtSign width={isProduct ? 14 : 11} height={isProduct ? 14 : 11} />
           </span>
-          {editingName ? (
+          {nameEdit.editing ? (
             <input
               autoFocus
               defaultValue={name}
@@ -1116,24 +1109,17 @@ export function ReferenceNode({
                 isProduct ? "text-base font-bold" : "text-sm font-semibold"
               }`}
               style={{ color: "var(--tc-text-primary)" }}
-              onBlur={(e) => {
-                if (!cancelNameRef.current)
-                  onEditReferenceName?.(id, e.target.value);
-                cancelNameRef.current = false;
-                setEditingName(false);
-              }}
+              onBlur={nameEdit.handleBlur}
               onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  cancelNameRef.current = true;
-                  e.currentTarget.blur();
-                } else if (e.key === "Enter") {
+                nameEdit.handleKeyDown(e);
+                if (e.key === "Enter") {
                   e.currentTarget.blur();
                 }
               }}
             />
           ) : (
             <span
-              onDoubleClick={() => setEditingName(true)}
+              onDoubleClick={nameEdit.startEditing}
               className={`truncate ${
                 isProduct ? "text-base font-bold" : "text-sm font-semibold"
               }`}
@@ -1171,30 +1157,20 @@ export function ReferenceNode({
           <>
             {/* 描述区（有图或留史时存在）：顶部左对齐，双击就地编辑 */}
             {showDescription &&
-              (editingDesc ? (
+              (descEdit.editing ? (
                 <textarea
                   autoFocus
                   defaultValue={description}
                   placeholder={meta.placeholder}
                   rows={3}
-                  onBlur={(e) => {
-                    if (!cancelDescRef.current)
-                      onEditDescription?.(id, e.target.value);
-                    cancelDescRef.current = false;
-                    setEditingDesc(false);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") {
-                      cancelDescRef.current = true;
-                      e.currentTarget.blur();
-                    }
-                  }}
+                  onBlur={descEdit.handleBlur}
+                  onKeyDown={descEdit.handleKeyDown}
                   className="nodrag nowheel mx-3 mt-2 resize-none bg-transparent text-xs leading-normal outline-none"
                   style={{ color: "var(--tc-text-primary)" }}
                 />
               ) : (
                 <div
-                  onDoubleClick={() => setEditingDesc(true)}
+                  onDoubleClick={descEdit.startEditing}
                   className="mx-3 mt-2 text-xs leading-normal"
                   style={{
                     color: emptyDesc

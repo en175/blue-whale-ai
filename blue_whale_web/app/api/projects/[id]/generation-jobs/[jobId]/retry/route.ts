@@ -28,10 +28,6 @@ export async function POST(
 
     if (result.code === 200 && result.data) {
       const newJobId = String(result.data.generation_job_id);
-      const authHeader = request.headers.get("authorization");
-      const newApiToken = authHeader?.startsWith("Bearer ")
-        ? authHeader.slice(7).trim()
-        : undefined;
       if (result.data.type === "video") {
         try {
           await enqueueVideoGenerationJob(newJobId);
@@ -43,7 +39,8 @@ export async function POST(
           );
         }
       } else {
-        const worker = createGenerationWorkerDeps(newApiToken);
+        // 图片：retryJob 复制原 job 入参（含密封 provider_credential），token 从 job 解出。
+        const worker = createGenerationWorkerDeps();
         void processJob({
           ...worker,
           workerId: `next-retry-${Date.now()}`,
