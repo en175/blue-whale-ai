@@ -10,7 +10,8 @@
  */
 import { apiFetch } from "@/lib/api-client";
 
-/** library 视图（契约 §3 白名单；creative_skill_id 可空：目录行缺版本化映射时为 null，命令按不存在处理） */
+/** library 视图（契约 §3 白名单；creative_skill_id 可空：目录行缺版本化映射时为 null，命令按不存在处理；
+ *  name/description 为按请求语言解析后的单值；usage_count 为成功激活去重用户数） */
 export type SkillLibraryItem = {
   creative_skill_id: string | null;
   name: string;
@@ -19,6 +20,8 @@ export type SkillLibraryItem = {
   source: string;
   asset_domain: "official";
   added: boolean;
+  category: string;
+  usage_count: number;
 };
 
 /** mine 视图（契约 §3 白名单：官方引用 ∪ 名下个人技能；personal 行 cover_url/source 为 null、auto 恒 false） */
@@ -40,10 +43,18 @@ export type Page<T> = {
   size: number;
 };
 
+/** library 浏览参数（契约 §11.5：category 缺省 all，sort 缺省 featured，lang 缺省 zh） */
+export type SkillLibraryCategory = "all" | "film" | "marketing" | "other";
+export type SkillLibrarySort = "featured" | "most_used" | "newest";
+export type SkillLibraryLang = "zh" | "en";
+
 export type LibraryQuery = {
   pageNum: number;
   pageSize: number;
   keyword?: string;
+  category?: SkillLibraryCategory;
+  sort?: SkillLibrarySort;
+  lang?: SkillLibraryLang;
 };
 
 /** Run 级 Creative Skill 推荐项（IK3NPI，wire snake_case；后端四字段契约） */
@@ -94,7 +105,8 @@ async function requestUrl<T>(
 }
 
 export const skillsApi = {
-  /** Skill 库分页（POST，默认 50/页，可 keyword 搜 name/description） */
+  /** Skill 库分页（POST，默认 50/页；keyword 搜解析语言 name/description 与 search_keywords，
+   *  category 过滤、featured/most_used/newest 排序、zh/en 语言解析，契约 §11） */
   library: (q: LibraryQuery) =>
     request<Page<SkillLibraryItem>>("/library", "POST", q),
   /** 我的 Skills 分页（POST，与 library 一致滚动加载） */

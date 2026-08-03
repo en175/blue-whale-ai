@@ -3,9 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createSkillRepo } from "./skill-repo.js";
 
-// SkillRepo 资产边界（契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §2/§3/§6）：
+// SkillRepo 资产边界（契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §2/§3/§6/§11）：
 // wire 主键一律 creative_skill_id；自增 id/skill_id、content/body/prompt 永不出库；
-// mine = 官方引用（official）∪ 名下个人技能（personal）；个人技能跨用户按不存在处理。
+// mine = 官方引用（official）∪ 名下个人技能（personal）；个人技能跨用户按不存在处理；
+// library v2（IK60WT）：分类过滤、featured/most_used/newest 排序、zh/en 语言解析、
+// keyword 命中解析语言 name/description + search_keywords（绝不匹配 content）、
+// usage_count = creative_skill_activation COUNT(DISTINCT user_id)。
 
 const FORBIDDEN_KEYS = ["content", "body", "prompt", "id", "skill_id"];
 
@@ -29,17 +32,27 @@ describe("SkillRepo", () => {
             description: "写作助手",
             cover_url: "https://x/cover.png",
             source: "official",
+            category: "marketing",
+            sort_order: 1,
+            gmt_create: new Date("2026-01-01T00:00:00Z"),
+            name_en: "Deep Writing",
+            name_zh: "深度写作",
+            description_en: "Writing assistant",
+            description_zh: "写作助手",
+            search_keywords: null,
           },
         ]),
       },
       user_skill: {
         findMany: vi.fn().mockResolvedValue([{ skill_id: 3n }]),
       },
-      $queryRawUnsafe: vi
-        .fn()
-        .mockResolvedValue([
-          { source_skill_id: 3n, creative_skill_id: "deep_writing" },
-        ]),
+      $queryRawUnsafe: vi.fn().mockImplementation((sql: string) =>
+        Promise.resolve(
+          sql.includes("creative_skill_activation")
+            ? [{ creative_skill_id: "deep_writing", usage_count: 5n }]
+            : [{ source_skill_id: 3n, creative_skill_id: "deep_writing" }],
+        ),
+      ),
     } as unknown as PrismaClient;
 
     const page = await createSkillRepo(prisma).listLibrary("9", {
@@ -57,9 +70,312 @@ describe("SkillRepo", () => {
         source: "official",
         asset_domain: "official",
         added: true,
+        category: "marketing",
+        usage_count: 5,
       },
     ]);
     expectWhitelistOnly(page.records);
+  });
+
+  // ===== library v2（IK60WT，契约 §11）夹具 =====
+
+  type LibraryRow = Record<string, unknown>;
+
+  function libraryRow(overrides: LibraryRow): LibraryRow {
+    return {
+      id: 3n,
+      name: "深度写作",
+      description: "写作助手",
+      cover_url: null,
+      source: "official",
+      category: "other",
+      sort_order: 0,
+      gmt_create: new Date("2026-01-01T00:00:00Z"),
+      name_en: null,
+      name_zh: null,
+      description_en: null,
+      description_zh: null,
+      search_keywords: null,
+      ...overrides,
+    };
+  }
+
+  /** listLibrary 夹具：skill 行 + creative 映射 + activation 聚合（按 SQL 分发）。 */
+  function createLibraryPrisma(opts: {
+    rows: LibraryRow[];
+    creativeMap?: { source_skill_id: bigint; creative_skill_id: string }[];
+    usage?: { creative_skill_id: string; usage_count: bigint }[];
+    mine?: { skill_id: bigint }[];
+  }) {
+    const skillFindMany = vi.fn().mockResolvedValue(opts.rows);
+    const queryRawUnsafe = vi.fn().mockImplementation((sql: string) =>
+      Promise.resolve(
+        sql.includes("creative_skill_activation")
+          ? (opts.usage ?? [])
+          : (opts.creativeMap ?? []),
+      ),
+    );
+    const prisma = {
+      skill: { findMany: skillFindMany },
+      user_skill: {
+        findMany: vi.fn().mockResolvedValue(opts.mine ?? []),
+      },
+      $queryRawUnsafe: queryRawUnsafe,
+    } as unknown as PrismaClient;
+    return { prisma, skillFindMany, queryRawUnsafe };
+  }
+
+  it("category=film/marketing/other 透传 where 过滤；all 或缺省不加过滤", async () => {
+    const { prisma, skillFindMany } = createLibraryPrisma({ rows: [] });
+    const repo = createSkillRepo(prisma);
+
+    await repo.listLibrary("9", { category: "film", pageNum: 1, pageSize: 10 });
+    expect(skillFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { source: "official", is_delete: 0, category: "film" },
+      }),
+    );
+
+    skillFindMany.mockClear();
+    await repo.listLibrary("9", { category: "all", pageNum: 1, pageSize: 10 });
+    await repo.listLibrary("9", { pageNum: 1, pageSize: 10 });
+    for (const call of skillFindMany.mock.calls) {
+      expect(call[0].where).toEqual({ source: "official", is_delete: 0 });
+    }
+  });
+
+  it("名称与简介按 lang 解析：取请求语言列，空则回退英文列，再回退既有单语字段", async () => {
+    const rows = [
+      libraryRow({
+        id: 1n,
+        name: "旧名A",
+        description: "旧简介A",
+        name_zh: "中文名A",
+        name_en: "Name A",
+        description_zh: "中文简介A",
+        description_en: "Desc A",
+      }),
+      // zh 列为 NULL：回退英文列
+      libraryRow({
+        id: 2n,
+        name: "旧名B",
+        description: "旧简介B",
+        name_en: "Name B",
+        description_en: "Desc B",
+      }),
+      // zh/en 均为空（空串视同 NULL）：回退既有单语字段
+      libraryRow({
+        id: 3n,
+        name: "旧名C",
+        description: "旧简介C",
+        name_zh: "",
+        description_zh: "",
+      }),
+    ];
+    const { prisma } = createLibraryPrisma({ rows });
+    const repo = createSkillRepo(prisma);
+
+    const zh = await repo.listLibrary("9", { lang: "zh", pageNum: 1, pageSize: 10 });
+    expect(zh.records.map((r) => [r.name, r.description])).toEqual([
+      ["中文名A", "中文简介A"],
+      ["Name B", "Desc B"],
+      ["旧名C", "旧简介C"],
+    ]);
+
+    const en = await repo.listLibrary("9", { lang: "en", pageNum: 1, pageSize: 10 });
+    expect(en.records.map((r) => [r.name, r.description])).toEqual([
+      ["Name A", "Desc A"],
+      ["Name B", "Desc B"],
+      ["旧名C", "旧简介C"],
+    ]);
+
+    // 缺省 lang 视同 zh
+    const dft = await repo.listLibrary("9", { pageNum: 1, pageSize: 10 });
+    expect(dft.records[0]?.name).toBe("中文名A");
+  });
+
+  it("keyword 命中解析语言的 name/description（含回退列），未参与解析的列不命中", async () => {
+    const rows = [
+      // 解析语言 zh 的 name 命中
+      libraryRow({ id: 1n, name_zh: "海报生成" }),
+      // zh 列为空回退英文列，解析值即英文列 → 命中
+      libraryRow({ id: 2n, name: "无关B", name_en: "海报Poster" }),
+      // zh 列非空时英文列不是解析值 → 不命中
+      libraryRow({ id: 3n, name_zh: "中文C", name_en: "海报Poster" }),
+      // 解析语言 zh 的 description 命中
+      libraryRow({ id: 4n, name_zh: "文案D", description_zh: "一键海报" }),
+      // description_zh 非空时 description_en 不命中
+      libraryRow({
+        id: 5n,
+        name_zh: "文案E",
+        description_zh: "简介E",
+        description_en: "海报",
+      }),
+    ];
+    const { prisma } = createLibraryPrisma({ rows });
+
+    const page = await createSkillRepo(prisma).listLibrary("9", {
+      keyword: "海报",
+      lang: "zh",
+      pageNum: 1,
+      pageSize: 10,
+    });
+
+    expect(page.records.map((r) => r.name)).toEqual([
+      "海报生成",
+      "海报Poster",
+      "文案D",
+    ]);
+    expect(page.total).toBe(3);
+    expectWhitelistOnly(page.records);
+  });
+
+  it("keyword 命中 search_keywords；查询 select 不含 content（正文绝不参与匹配）", async () => {
+    const rows = [
+      libraryRow({ id: 1n, name_zh: "海报生成", search_keywords: "病毒式 传播" }),
+      libraryRow({ id: 2n, name_zh: "海报文案" }),
+    ];
+    const { prisma, skillFindMany } = createLibraryPrisma({ rows });
+
+    const page = await createSkillRepo(prisma).listLibrary("9", {
+      keyword: "传播",
+      pageNum: 1,
+      pageSize: 10,
+    });
+
+    expect(page.records.map((r) => r.name)).toEqual(["海报生成"]);
+    const select = skillFindMany.mock.calls[0]?.[0].select as Record<string, unknown>;
+    expect(select).not.toHaveProperty("content");
+    expect(select).toMatchObject({ name_zh: true, search_keywords: true });
+  });
+
+  it("sort=featured（缺省）按 sort_order 升序取回；sort=newest 按 gmt_create 降序", async () => {
+    const rows = [
+      libraryRow({ id: 1n, name_zh: "旧", gmt_create: new Date("2026-01-01") }),
+      libraryRow({ id: 2n, name_zh: "新", gmt_create: new Date("2026-03-01") }),
+      libraryRow({ id: 3n, name_zh: "中", gmt_create: new Date("2026-02-01") }),
+    ];
+    const { prisma, skillFindMany } = createLibraryPrisma({ rows });
+    const repo = createSkillRepo(prisma);
+
+    const featured = await repo.listLibrary("9", { pageNum: 1, pageSize: 10 });
+    expect(featured.records.map((r) => r.name)).toEqual(["旧", "新", "中"]);
+    expect(skillFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { sort_order: "asc" } }),
+    );
+
+    const newest = await repo.listLibrary("9", {
+      sort: "newest",
+      pageNum: 1,
+      pageSize: 10,
+    });
+    expect(newest.records.map((r) => r.name)).toEqual(["新", "中", "旧"]);
+  });
+
+  it("sort=most_used 按去重使用人数降序，人数相同按 sort_order 升序兜底；无埋点记 0", async () => {
+    const rows = [
+      libraryRow({ id: 1n, name_zh: "甲", sort_order: 1 }),
+      libraryRow({ id: 2n, name_zh: "乙", sort_order: 2 }),
+      libraryRow({ id: 3n, name_zh: "丙", sort_order: 3 }),
+      libraryRow({ id: 4n, name_zh: "丁", sort_order: 4 }),
+    ];
+    const { prisma, queryRawUnsafe } = createLibraryPrisma({
+      rows,
+      creativeMap: [
+        { source_skill_id: 1n, creative_skill_id: "skill_a" },
+        { source_skill_id: 2n, creative_skill_id: "skill_b" },
+        { source_skill_id: 3n, creative_skill_id: "skill_c" },
+      ],
+      usage: [
+        { creative_skill_id: "skill_b", usage_count: 5n },
+        { creative_skill_id: "skill_c", usage_count: 5n },
+        { creative_skill_id: "skill_a", usage_count: 2n },
+      ],
+    });
+
+    const page = await createSkillRepo(prisma).listLibrary("9", {
+      sort: "most_used",
+      pageNum: 1,
+      pageSize: 10,
+    });
+
+    // 乙/丙同 5 人，sort_order 乙(2) < 丙(3) → 乙在前；丁无埋点记 0 垫底。
+    expect(page.records.map((r) => [r.name, r.usage_count])).toEqual([
+      ["乙", 5],
+      ["丙", 5],
+      ["甲", 2],
+      ["丁", 0],
+    ]);
+    // 去重语义由 SQL 保证：COUNT(DISTINCT user_id)。
+    expect(queryRawUnsafe).toHaveBeenCalledWith(
+      expect.stringContaining("COUNT(DISTINCT user_id)"),
+      "skill_a",
+      "skill_b",
+      "skill_c",
+    );
+    expectWhitelistOnly(page.records);
+  });
+
+  it("keyword/category/sort 组合后按 offset 内存切片分页，total 为过滤后总数", async () => {
+    const rows = [1n, 2n, 3n].map((id) =>
+      libraryRow({ id, name_zh: `海报${id}`, category: "film" }),
+    );
+    const { prisma } = createLibraryPrisma({ rows });
+
+    const page = await createSkillRepo(prisma).listLibrary("9", {
+      keyword: "海报",
+      category: "film",
+      pageNum: 2,
+      pageSize: 2,
+    });
+
+    expect(page.total).toBe(3);
+    expect(page.current).toBe(2);
+    expect(page.size).toBe(2);
+    expect(page.records.map((r) => r.name)).toEqual(["海报3"]);
+  });
+
+  it("recordActivation 以稳定 ID/用户/AgentRun/版本/来源落一行埋点", async () => {
+    const create = vi.fn().mockResolvedValue({});
+    const prisma = {
+      creative_skill_activation: { create },
+    } as unknown as PrismaClient;
+
+    await createSkillRepo(prisma).recordActivation({
+      creativeSkillId: "deep_writing",
+      userId: "9",
+      agentRunId: "42",
+      skillVersion: 1,
+      activationSource: "forced",
+    });
+
+    expect(create).toHaveBeenCalledWith({
+      data: {
+        creative_skill_id: "deep_writing",
+        user_id: 9n,
+        agent_run_id: "42",
+        skill_version: 1,
+        activation_source: "forced",
+      },
+    });
+  });
+
+  it("recordActivation 写失败容错（旧库缺表不阻塞消息接纳主路径）", async () => {
+    const prisma = {
+      creative_skill_activation: {
+        create: vi.fn().mockRejectedValue(new Error("no such table")),
+      },
+    } as unknown as PrismaClient;
+
+    await expect(
+      createSkillRepo(prisma).recordActivation({
+        creativeSkillId: "deep_writing",
+        userId: "9",
+        agentRunId: "42",
+        skillVersion: 1,
+        activationSource: "forced",
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it("resolveOfficialSkillId 命中官方映射时返回 skill.id 字符串", async () => {

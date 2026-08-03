@@ -1,16 +1,34 @@
 import type { PrismaClient } from "@prisma/client";
 
 /** Skill 资产 repo（Prisma-backed），落地 Creative Skill 资产契约
- *  （docs/specs/2026-08-03-creative-skill-asset-contract.md §2/§3/§6）：
+ *  （docs/specs/2026-08-03-creative-skill-asset-contract.md §2/§3/§6/§11）：
  *  - wire 主键一律 creative_skill_id；自增 id/skill_id、content/body/prompt 永不出库；
  *  - mine = 官方引用（user_skill join skill 快照，official）∪ 名下个人技能（personal），
  *    官方引用按 skill_id asc 在前、个人按 creative_skill_id asc 在后，合并后内存切片分页；
  *  - 注册命令（remove/setAuto）以 creative_skill_id 寻址，经 creative_skill.source_skill_id
  *    解析回目录行；个人域/未知/已删 ID 解析失败，一律按不存在处理；
- *  - 个人技能凭 owner_user_id 可见，跨用户读/删 0 命中，不泄露存在性。
+ *  - 个人技能凭 owner_user_id 可见，跨用户读/删 0 命中，不泄露存在性；
+ *  - library v2（IK60WT，§11）：category 过滤、featured/most_used/newest 排序、zh/en
+ *    语言解析（回退英文列再回退单语字段）、keyword 命中解析语言 name/description 与
+ *    search_keywords（绝不匹配 content）；usage_count = 激活埋点表 COUNT(DISTINCT user_id)；
+ *    官方目录规模小，过滤/排序/分页在内存完成（同 listMine，确定性优先）。
  *  creative_skill / creative_skill_version 已入 Node-owned schema（prisma/schema.prisma +
  *  schema/001_baseline.sql，Java 链已退役）；读路径保留 raw SQL + 查询失败回退空
- *  （旧库缺表/缺列不阻塞主路径）；写路径 deletePersonal 不容错，失败直接抛错。 */
+ *  （旧库缺表/缺列不阻塞主路径）；写路径 deletePersonal 不容错，失败直接抛错；
+ *  recordActivation 为埋点写，best-effort 容错，不阻塞消息接纳主路径。 */
+
+export type SkillLibraryCategory = "all" | "film" | "marketing" | "other";
+export type SkillLibrarySort = "featured" | "most_used" | "newest";
+export type SkillLibraryLang = "zh" | "en";
+
+/** 成功激活埋点（契约 §11.3）：稳定 ID、用户、AgentRun、当次固定版本、来源。 */
+export interface SkillActivationInput {
+  creativeSkillId: string;
+  userId: string;
+  agentRunId: string;
+  skillVersion: number;
+  activationSource: "forced" | "auto";
+}
 
 export interface SkillLibraryView {
   creative_skill_id: string | null;
@@ -20,6 +38,8 @@ export interface SkillLibraryView {
   source: string;
   asset_domain: "official";
   added: boolean;
+  category: string;
+  usage_count: number;
 }
 
 export interface SkillMineView {
@@ -48,7 +68,14 @@ export interface SkillPage<T> {
 export interface SkillRepo {
   listLibrary(
     userId: string,
-    q: { keyword?: string; pageNum: number; pageSize: number },
+    q: {
+      keyword?: string;
+      category?: SkillLibraryCategory;
+      sort?: SkillLibrarySort;
+      lang?: SkillLibraryLang;
+      pageNum: number;
+      pageSize: number;
+    },
   ): Promise<SkillPage<SkillLibraryView>>;
   listMine(
     userId: string,
@@ -85,6 +112,8 @@ export interface SkillRepo {
   /** 物理删除个人技能本体及其 creative_skill_version 行；
    *  asset_domain='personal' + owner 谓词保护，0 命中返回 false；写失败抛错。 */
   deletePersonal(ownerUserId: string, creativeSkillId: string): Promise<boolean>;
+  /** 成功激活埋点（契约 §11.3）：只增不改，best-effort（失败/旧库缺表不阻塞主路径）。 */
+  recordActivation(rec: SkillActivationInput): Promise<void>;
 }
 
 type SkillRow = {
@@ -93,6 +122,14 @@ type SkillRow = {
   description: string | null;
   cover_url: string | null;
   source: string;
+  category: string;
+  sort_order: number;
+  gmt_create: Date;
+  name_en: string | null;
+  name_zh: string | null;
+  description_en: string | null;
+  description_zh: string | null;
+  search_keywords: string | null;
 };
 
 /** 批量回查 creative_skill（source_skill_id IN ...）→ sourceSkillId → creativeSkillId。
@@ -116,6 +153,52 @@ async function mapCreativeSkillIds(
   } catch {
     return new Map();
   }
+}
+
+/** 批量聚合激活埋点 → creativeSkillId → 去重使用人数（契约 §11.3：COUNT(DISTINCT user_id)）。
+ *  表不存在/查询失败 → 空 Map（旧库缺表时 usage_count 记 0，不阻塞主路径）。 */
+async function mapUsageCounts(
+  prisma: PrismaClient,
+  creativeSkillIds: string[],
+): Promise<Map<string, number>> {
+  if (creativeSkillIds.length === 0) return new Map();
+  try {
+    const placeholders = creativeSkillIds.map(() => "?").join(",");
+    const rows = await prisma.$queryRawUnsafe<
+      { creative_skill_id: string; usage_count: bigint }[]
+    >(
+      `SELECT creative_skill_id, COUNT(DISTINCT user_id) AS usage_count FROM creative_skill_activation WHERE creative_skill_id IN (${placeholders}) GROUP BY creative_skill_id`,
+      ...creativeSkillIds,
+    );
+    return new Map(
+      rows.map((r) => [r.creative_skill_id, Number(r.usage_count)]),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+/** NULL/空串视同缺失（契约 §11.4）。 */
+function nonEmpty(value: string | null): string | null {
+  return value !== null && value !== "" ? value : null;
+}
+
+/** 语言解析（契约 §11.4）：取请求语言列，空则回退英文列，再回退既有单语字段。 */
+function resolveName(lang: SkillLibraryLang, row: SkillRow): string {
+  return lang === "zh"
+    ? (nonEmpty(row.name_zh) ?? nonEmpty(row.name_en) ?? row.name)
+    : (nonEmpty(row.name_en) ?? row.name);
+}
+
+function resolveDescription(
+  lang: SkillLibraryLang,
+  row: SkillRow,
+): string | null {
+  return lang === "zh"
+    ? (nonEmpty(row.description_zh) ??
+      nonEmpty(row.description_en) ??
+      row.description)
+    : (nonEmpty(row.description_en) ?? row.description);
 }
 
 /** 解析 official 域 creative_skill_id → 内部 skill.id；表不存在/个人域/未知/已删 → null。 */
@@ -159,36 +242,52 @@ async function queryPersonalByOwner(
 export function createSkillRepo(prisma: PrismaClient): SkillRepo {
   return {
     async listLibrary(userId, q) {
+      const lang = q.lang ?? "zh";
+      const sort = q.sort ?? "featured";
       const where = {
         source: "official",
         is_delete: 0,
-        ...(q.keyword
-          ? {
-              OR: [
-                { name: { contains: q.keyword } },
-                { description: { contains: q.keyword } },
-              ],
-            }
+        ...(q.category && q.category !== "all"
+          ? { category: q.category }
           : {}),
       };
-      const [total, rows] = await Promise.all([
-        prisma.skill.count({ where }),
-        prisma.skill.findMany({
-          where,
-          select: {
-            id: true,
-            name: true,
-            description: true,
-            cover_url: true,
-            source: true,
-          },
-          orderBy: { sort_order: "asc" },
-          skip: (q.pageNum - 1) * q.pageSize,
-          take: q.pageSize,
-        }),
-      ]);
+      // 官方目录规模小：全量取回（sort_order asc 保底确定序），语言解析/keyword/排序/分页内存完成。
+      const rows: SkillRow[] = await prisma.skill.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          cover_url: true,
+          source: true,
+          category: true,
+          sort_order: true,
+          gmt_create: true,
+          name_en: true,
+          name_zh: true,
+          description_en: true,
+          description_zh: true,
+          search_keywords: true,
+        },
+        orderBy: { sort_order: "asc" },
+      });
 
-      // 批量：我的 skill ids + creative 映射（无 N+1）。
+      // 语言解析（§11.4），keyword 只命中解析后的 name/description 与 search_keywords（§11.4，绝不匹配 content）。
+      const resolved = rows.map((row) => ({
+        row,
+        name: resolveName(lang, row),
+        description: resolveDescription(lang, row),
+      }));
+      const matched = q.keyword
+        ? resolved.filter(
+            (r) =>
+              r.name.includes(q.keyword as string) ||
+              (r.description?.includes(q.keyword as string) ?? false) ||
+              (r.row.search_keywords?.includes(q.keyword as string) ?? false),
+          )
+        : resolved;
+
+      // 批量：我的 skill ids + creative 映射 + 去重使用人数（无 N+1）。
       const mine = await prisma.user_skill.findMany({
         where: { user_id: BigInt(userId), is_delete: 0 },
         select: { skill_id: true },
@@ -196,20 +295,44 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
       const mineIds = new Set(mine.map((m) => m.skill_id.toString()));
       const creativeIds = await mapCreativeSkillIds(
         prisma,
-        rows.map((r) => r.id),
+        matched.map((r) => r.row.id),
       );
+      const usageCounts = await mapUsageCounts(prisma, [...creativeIds.values()]);
+      const usageOf = (skillId: bigint): number => {
+        const cid = creativeIds.get(skillId.toString());
+        return cid !== undefined ? (usageCounts.get(cid) ?? 0) : 0;
+      };
 
+      // 排序（§11.2）：featured=取回的 sort_order asc；newest=gmt_create desc；
+      // most_used=去重人数 desc，人数相同按 sort_order asc 兜底。
+      if (sort === "newest") {
+        matched.sort(
+          (a, b) => b.row.gmt_create.getTime() - a.row.gmt_create.getTime(),
+        );
+      } else if (sort === "most_used") {
+        matched.sort(
+          (a, b) =>
+            usageOf(b.row.id) - usageOf(a.row.id) ||
+            a.row.sort_order - b.row.sort_order,
+        );
+      }
+
+      const start = (q.pageNum - 1) * q.pageSize;
       return {
-        records: rows.map((s: SkillRow) => ({
-          creative_skill_id: creativeIds.get(s.id.toString()) ?? null,
-          name: s.name,
-          description: s.description,
-          cover_url: s.cover_url,
-          source: s.source,
-          asset_domain: "official",
-          added: mineIds.has(s.id.toString()),
-        })),
-        total,
+        records: matched
+          .slice(start, start + q.pageSize)
+          .map(({ row, name, description }) => ({
+            creative_skill_id: creativeIds.get(row.id.toString()) ?? null,
+            name,
+            description,
+            cover_url: row.cover_url,
+            source: row.source,
+            asset_domain: "official" as const,
+            added: mineIds.has(row.id.toString()),
+            category: row.category,
+            usage_count: usageOf(row.id),
+          })),
+        total: matched.length,
         size: q.pageSize,
         current: q.pageNum,
       };
@@ -358,6 +481,23 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         creativeSkillId,
       );
       return true;
+    },
+
+    async recordActivation(rec) {
+      // 埋点只增不改、best-effort：旧库缺表/写失败不阻塞消息接纳主路径（契约 §11.3）。
+      try {
+        await prisma.creative_skill_activation.create({
+          data: {
+            creative_skill_id: rec.creativeSkillId,
+            user_id: BigInt(rec.userId),
+            agent_run_id: rec.agentRunId,
+            skill_version: rec.skillVersion,
+            activation_source: rec.activationSource,
+          },
+        });
+      } catch {
+        // 吞掉：埋点失败不改变既有校验与错误语义。
+      }
     },
   };
 }

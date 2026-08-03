@@ -19,7 +19,7 @@ export async function handleAcceptConversationMessage(
   body: Record<string, unknown>,
   idempotencyKey: string | null,
   deps: ConversationRepo & {
-    skills: Pick<SkillRepo, "findAssetDomainInfo">;
+    skills: Pick<SkillRepo, "findAssetDomainInfo" | "recordActivation">;
   },
 ) {
   const result = await acceptConversationMessage(
@@ -31,6 +31,8 @@ export async function handleAcceptConversationMessage(
       if (info.asset_domain === "official") return true;
       return info.owner_user_id === guardUserId;
     },
+    // 激活埋点（资产契约 §11.3）：接纳成功后由 core 缝调用，best-effort。
+    (rec) => deps.skills.recordActivation(rec),
   );
   switch (result.kind) {
     case "accepted":

@@ -1,8 +1,8 @@
 # Creative Skill 资产契约（官方/个人领域边界、公开元数据与稳定身份）
 
 - **状态**：Accepted for implementation
-- **契约版本**：1
-- **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WS)
+- **契约版本**：2（v2 纳入 IK60WT 技能库浏览扩展：分类/排序/使用人数/i18n，见 §11）
+- **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WS)、[02 — 一比一还原官方技能库浏览体验](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WT)
 - **父需求**：[一比一还原 Creative Skill 面板与个人技能资产闭环](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60US)
 - **前置契约**：[Creative Skill 激活跨服务契约](2026-07-24-creative-skill-activation-contract.md)（激活、版本固定与按需正文读取，本文不改写其字段）、[ADR-0041 同族工单串行与契约先行](../adr/0041-sibling-issues-serial-contract-first.md)
 
@@ -49,12 +49,14 @@
 | 字段 | library 视图 | mine 视图 | 说明 |
 |---|---|---|---|
 | `creative_skill_id` | ✓（可空） | ✓（可空） | 稳定身份；目录行缺版本化映射的环境为 `null`，此时命令按不存在处理 |
-| `name` | ✓ | ✓ | 展示名 |
-| `description` | ✓ | ✓ | 公开简介 |
+| `name` | ✓ | ✓ | 展示名；library 视图按 §11.4 语言解析返回 |
+| `description` | ✓ | ✓ | 公开简介；library 视图按 §11.4 语言解析返回 |
 | `cover_url` | ✓ | ✓ | 封面；个人技能恒为 `null`（封面按名称确定性生成，归创建工单） |
 | `source` | ✓ | ✓ | 目录来源（官方恒 `official`） |
 | `asset_domain` | ✓ | ✓ | `official` / `personal`（UI 来源标记用） |
 | `added` | ✓ | — | 当前用户是否已添加引用 |
+| `category` | ✓ | — | 目录分类（§11.1），v2 新增 |
+| `usage_count` | ✓ | — | 成功激活去重用户数（§11.3），v2 新增 |
 | `auto` | — | ✓ | 引用关系属性；个人技能行恒 `false`（个人自动匹配归后续工单） |
 
 - **禁止字段**：`content`、`body`、`prompt`、内部规则、版本号、digest、自增主键及任何
@@ -94,7 +96,7 @@
 
 | 端点 | 变更 |
 |---|---|
-| `POST /api/agent/skills/library` | 响应记录按 §3 白名单，主键 `creative_skill_id` |
+| `POST /api/agent/skills/library` | 响应记录按 §3 白名单，主键 `creative_skill_id`；v2 起请求体扩展 `{ keyword?, category?, sort?, lang?, pageNum?, pageSize? }`（§11.5） |
 | `POST /api/agent/skills/mine` | 响应为官方引用 ∪ 名下个人技能的并集，主键 `creative_skill_id`，含 `asset_domain` |
 | `POST /api/agent/skills/library/{id}/add` | `{id}` 语义改为 `creative_skill_id`；非官方域或未知 ID → 100100 |
 | `DELETE /api/agent/skills/mine/{id}` | `{id}` 语义改为 `creative_skill_id`；仅删引用，不删技能本体 |
@@ -130,9 +132,8 @@ Node 运行时接通激活后，同一校验在其 pin 解析点重复执行（�
 
 - 个人技能的创建、上传、AI 格式化、只读正文与复制、在线编辑端点与 UI。
 - 「我的技能」的搜索/筛选/排序控件；个人技能 auto 候选。
-- 官方技能运营后台、分类/排序/使用人数字段、详情页。
+- 官方技能运营后台、详情页。
 - `name_key` 持久化列与创建时冲突校验实现（§5 仅冻结算法）。
-- 面板一比一还原与响应式改版。
 - Creative Skill 的 Node 运行时激活接通（pin 固定、正文按需读取）与官方目录 seed
   （`skill` 目录行与 `creative_skill` 版本化库回填）——均属 Java→Node parity 迁移工单。
 
@@ -147,4 +148,85 @@ ALTER TABLE creative_skill
   ADD COLUMN owner_user_id BIGINT NOT NULL DEFAULT 0 COMMENT '所属用户；0=平台官方资产（IK60WS）',
   ADD COLUMN asset_domain VARCHAR(16) NOT NULL DEFAULT 'official' COMMENT '资产域 official/personal（IK60WS）',
   ADD INDEX idx_owner_domain (owner_user_id, asset_domain);
+```
+
+v2（IK60WT）存量库补列（全新环境已由 `001_baseline.sql` 含列/表，无需执行）：
+
+```sql
+ALTER TABLE skill
+  ADD COLUMN category VARCHAR(32) NOT NULL DEFAULT 'other' COMMENT '目录分类 film/marketing/other（IK60WT）',
+  ADD COLUMN search_keywords TEXT NULL COMMENT '后台搜索关键词，空格分隔（IK60WT）',
+  ADD COLUMN name_en VARCHAR(255) NULL COMMENT '英文名（IK60WT）',
+  ADD COLUMN name_zh VARCHAR(255) NULL COMMENT '中文名（IK60WT）',
+  ADD COLUMN description_en TEXT NULL COMMENT '英文公开简介（IK60WT）',
+  ADD COLUMN description_zh TEXT NULL COMMENT '中文公开简介（IK60WT）';
+
+-- 存量行 backfill：zh 列继承既有单语字段
+UPDATE skill SET name_zh = name, description_zh = description WHERE name_zh IS NULL;
+
+CREATE TABLE creative_skill_activation (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  creative_skill_id VARCHAR(80) NOT NULL COMMENT '稳定技能身份',
+  user_id BIGINT NOT NULL COMMENT '激活用户',
+  agent_run_id VARCHAR(64) NOT NULL COMMENT '当次 AgentRun',
+  skill_version INT NOT NULL DEFAULT 1 COMMENT '当次固定版本',
+  activation_source VARCHAR(16) NOT NULL COMMENT 'forced/auto',
+  gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_skill_user (creative_skill_id, user_id)
+) COMMENT='技能成功激活埋点（IK60WT）';
+```
+
+## 11. 技能库浏览扩展（v2，IK60WT）
+
+本节冻结官方技能库浏览体验的查询语义；只涉及 library 视图与激活埋点，不改写其余章节。
+
+### 11.1 分类
+
+- `skill.category`：`film`（影视）| `marketing`（营销）| `other`（其他），`NOT NULL DEFAULT 'other'`。
+- 每个官方技能只归属一个实际分类；请求 `category=all`（或缺省）为聚合视图，不加过滤。
+- 非法 `category` 值按参数错误拒绝（BFF envelope 参数校验错误，不复用 100100）。
+
+### 11.2 排序
+
+- `sort`：`featured` | `most_used` | `newest`，缺省 `featured`；非法值按参数错误拒绝。
+- `featured`：后台人工权重，即既有 `skill.sort_order` 升序（不依赖用户行为推断）。
+- `most_used`：§11.3 的去重使用人数降序，人数相同按 `sort_order` 升序兜底。
+- `newest`：`skill.gmt_create` 降序。
+- 搜索（`keyword`）与分类、排序正交组合；分页沿用 offset（`pageNum`/`pageSize`）与
+  `records/total/current/size` 响应壳。
+
+### 11.3 使用人数与激活埋点
+
+- **成功激活**：Node 消息接纳缝（§8）接纳一条携带技能激活（forced 或 auto 命中）的
+  消息时，写入一行 `creative_skill_activation`（技能稳定 ID、用户、AgentRun、当次固定
+  版本、激活来源）。埋点只增不改，不影响既有校验与错误语义。
+  **当前落地范围**：live 缝仅有 forced 激活概念，本契约 v2 只埋 forced；auto 命中埋点
+  随 Node 运行时激活接通（parity 工单）补充。pin 版本解析接通前 `skill_version` 恒记 1
+  （列默认值），接通后写当次固定版本。
+- **使用人数 `usage_count`**：`creative_skill_activation` 中该技能 `COUNT(DISTINCT user_id)`；
+  同一用户重复激活只计一次。
+- 埋点表不属于面向普通用户的读取面；普通用户只能经 library 视图的 `usage_count`
+  聚合值接触该数据，单用户激活明细无任何端点暴露。
+
+### 11.4 名称与简介的语言解析（library 视图）
+
+- 存储：`skill` 表 `name_en/name_zh/description_en/description_zh`；既有单语
+  `name/description` 视为中文源（backfill 至 `_zh` 列）。
+- 请求 `lang`：`zh` | `en`，缺省 `zh`；非法值按参数错误拒绝。
+- 解析规则：取请求语言列；为空（NULL 或空串）回退英文列；英文列也为空回退既有单语
+  `name`/`description`。wire 字段仍叫 `name`/`description`，不暴露分列。
+- 搜索 `keyword` 命中**解析语言**的 name、description 以及 `search_keywords`
+  （空格分隔的后台关键词）；**绝不匹配正文 `content`**。
+
+### 11.5 library 请求体（v2 完整形状）
+
+```json
+{
+  "keyword": "可选；按钮或 Enter 触发，前端不做实时搜索",
+  "category": "all | film | marketing | other，缺省 all",
+  "sort": "featured | most_used | newest，缺省 featured",
+  "lang": "zh | en，缺省 zh",
+  "pageNum": 1,
+  "pageSize": 50
+}
 ```
