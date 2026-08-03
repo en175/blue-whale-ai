@@ -46,7 +46,7 @@ describe("PATCH /api/agent/skills/mine/:id", () => {
   it("updates the authenticated user's skill", async () => {
     const body = { auto: true };
     const response = await PATCH(
-      new Request("http://localhost/api/agent/skills/mine/77", {
+      new Request("http://localhost/api/agent/skills/mine/poster_gen", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -54,13 +54,13 @@ describe("PATCH /api/agent/skills/mine/:id", () => {
         },
         body: JSON.stringify(body),
       }),
-      { params: Promise.resolve({ id: "77" }) },
+      { params: Promise.resolve({ id: "poster_gen" }) },
     );
 
     expect(response.status).toBe(200);
     expect(mocks.handleUpdateSkillAuto).toHaveBeenCalledWith(
       "9",
-      "77",
+      "poster_gen",
       true,
       mocks.skillsDeps,
     );

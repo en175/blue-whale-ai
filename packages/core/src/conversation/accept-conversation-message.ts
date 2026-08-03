@@ -32,7 +32,15 @@ export interface ConversationCommandStore {
 }
 
 export type AcceptConversationMessageResult =
-  ConversationCommandStoreResult | { kind: "invalid"; message: string };
+  | ConversationCommandStoreResult
+  | { kind: "invalid"; message: string }
+  | { kind: "creative_skill_unavailable" };
+
+/** forced Creative Skill 域/owner 守卫（资产契约 §4）：返回 true 放行，false 按不可用拒绝。 */
+export type ForcedCreativeSkillGuard = (
+  userId: string,
+  forcedCreativeSkillId: string,
+) => Promise<boolean>;
 
 export interface PreparedConversationMessage {
   idempotencyKey: string;
@@ -76,14 +84,28 @@ export async function acceptConversationMessage(
     body: Record<string, unknown>;
   },
   store: ConversationCommandStore,
+  forcedSkillGuard?: ForcedCreativeSkillGuard,
 ): Promise<AcceptConversationMessageResult> {
   const prepared = prepareConversationMessage(input.body, input.idempotencyKey);
   if ("kind" in prepared) return prepared;
+  const forced = forcedCreativeSkillIdOf(input.body);
+  if (forced !== null) {
+    // fail-closed（资产契约 §8）：守卫未注入等同拒绝，避免新调用方漏注入而静默绕过域/owner 边界。
+    const allowed =
+      forcedSkillGuard !== undefined &&
+      (await forcedSkillGuard(input.userId, forced));
+    if (!allowed) return { kind: "creative_skill_unavailable" };
+  }
   return store.acceptMessage({
     userId: input.userId,
     projectId: input.projectId,
     ...prepared,
   });
+}
+
+function forcedCreativeSkillIdOf(body: Record<string, unknown>): string | null {
+  const value = body.forced_creative_skill_id;
+  return typeof value === "string" && value.trim() !== "" ? value : null;
 }
 
 export function prepareConversationMessage(

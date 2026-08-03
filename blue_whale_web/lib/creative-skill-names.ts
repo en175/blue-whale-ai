@@ -15,7 +15,7 @@ const namesById = new Map<string, string>();
 
 export function rememberCreativeSkillName(
   creativeSkillId: string | null | undefined,
-  name: string,
+  name: string | null | undefined,
 ): void {
   if (!creativeSkillId || !name) return;
   namesById.set(creativeSkillId, name);

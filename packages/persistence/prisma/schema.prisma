@@ -394,6 +394,40 @@ model user_skill {
   @@index([user_id], map: "idx_user")
 }
 
+/// Creative Skill 稳定身份（IK60WS，资产契约 §1）：官方与个人共用一表；
+/// owner_user_id=0 表示平台官方资产，asset_domain 区分 official/personal。
+model creative_skill {
+  id                BigInt   @id @default(autoincrement())
+  creative_skill_id String   @unique(map: "uk_creative_skill_id") @db.VarChar(80)
+  name              String   @db.VarChar(255)
+  description       String?  @db.VarChar(1000)
+  source_skill_id   BigInt?
+  active_version_id String?  @db.VarChar(80)
+  owner_user_id     BigInt   @default(0)
+  asset_domain      String   @default("official") @db.VarChar(16)
+  gmt_create        DateTime @default(now()) @db.DateTime(0)
+  gmt_modified      DateTime @default(now()) @db.DateTime(0)
+
+  @@index([owner_user_id, asset_domain], map: "idx_owner_domain")
+}
+
+/// Creative Skill 不可变版本快照（IK60WS，资产契约 §1）：
+/// body 为剥掉 frontmatter 的纯正文，digest=sha256(body)，仅受信任运行时按 pin 读取。
+model creative_skill_version {
+  id                        BigInt   @id @default(autoincrement())
+  creative_skill_version_id String   @unique(map: "uk_creative_skill_version_id") @db.VarChar(80)
+  creative_skill_id         String   @db.VarChar(80)
+  display_version           String   @db.VarChar(64)
+  body                      String   @db.LongText
+  content_digest            String   @db.VarChar(71)
+  resource_digest           String   @db.VarChar(71)
+  media_type                String   @default("text/markdown") @db.VarChar(128)
+  gmt_create                DateTime @default(now()) @db.DateTime(0)
+  gmt_modified              DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([creative_skill_id, display_version], map: "uk_creative_skill_version_semver")
+}
+
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model users {
   id           BigInt   @id @default(autoincrement())

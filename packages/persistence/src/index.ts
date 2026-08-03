@@ -87,6 +87,7 @@ export {
   type SkillRepo,
   type SkillLibraryView,
   type SkillMineView,
+  type PersonalSkillView,
   type SkillPage,
 } from "./skill-repo.js";
 export {

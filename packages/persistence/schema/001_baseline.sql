@@ -498,3 +498,39 @@ CREATE TABLE `generation_job_logs` (
     INDEX `idx_gen_job_log_job_time`(`generation_job_id`, `occurred_at`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `creative_skill` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `creative_skill_id` VARCHAR(80) NOT NULL,
+    `name` VARCHAR(255) NOT NULL,
+    `description` VARCHAR(1000) NULL,
+    `source_skill_id` BIGINT NULL,
+    `active_version_id` VARCHAR(80) NULL,
+    `owner_user_id` BIGINT NOT NULL DEFAULT 0,
+    `asset_domain` VARCHAR(16) NOT NULL DEFAULT 'official',
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_creative_skill_id`(`creative_skill_id`),
+    INDEX `idx_owner_domain`(`owner_user_id`, `asset_domain`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `creative_skill_version` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `creative_skill_version_id` VARCHAR(80) NOT NULL,
+    `creative_skill_id` VARCHAR(80) NOT NULL,
+    `display_version` VARCHAR(64) NOT NULL,
+    `body` LONGTEXT NOT NULL,
+    `content_digest` VARCHAR(71) NOT NULL,
+    `resource_digest` VARCHAR(71) NOT NULL,
+    `media_type` VARCHAR(128) NOT NULL DEFAULT 'text/markdown',
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_creative_skill_version_id`(`creative_skill_version_id`),
+    UNIQUE INDEX `uk_creative_skill_version_semver`(`creative_skill_id`, `display_version`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
