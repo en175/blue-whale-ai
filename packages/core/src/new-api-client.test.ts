@@ -575,4 +575,229 @@ describe("new-api client", () => {
     );
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  // ---- native topup（Model B：结算复用 Go 原生 new-api 充值）----
+
+  it("quotes, orders, and polls native topup through the user endpoints", async () => {
+    const requests: Array<{ url: string; body: unknown }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        const url = String(input);
+        const body = init.body ? JSON.parse(String(init.body)) : undefined;
+        requests.push({ url, body });
+        if (url.endsWith("/api/user/amount")) {
+          // 原生报价信封：{message:"success", data:"<两位小数字符串>"}
+          return jsonResponse({ message: "success", data: "85.00" });
+        }
+        if (url.endsWith("/api/user/bluewhalepay/pay")) {
+          return jsonResponse({
+            message: "success",
+            data: { pay_data: "https://pay.test/qr/BWP1", order_id: "BWP1xyz" },
+          });
+        }
+        if (url.includes("/api/user/topup/self")) {
+          return jsonResponse({
+            success: true,
+            message: "",
+            data: {
+              items: [
+                {
+                  trade_no: "BWP1xyz",
+                  status: "success",
+                  amount: 100,
+                  money: 85,
+                  create_time: 1,
+                  complete_time: 2,
+                },
+                {
+                  trade_no: "BWPother",
+                  status: "pending",
+                  amount: 50,
+                  money: 45,
+                  create_time: 1,
+                  complete_time: 0,
+                },
+              ],
+            },
+          });
+        }
+        return jsonResponse({ success: true, data: {} });
+      },
+    });
+
+    await expect(client.requestTopUpAmount("sk-t", 100)).resolves.toBe(85);
+    await expect(
+      client.createBlueWhalePayTopUp("sk-t", 100, "WX_NATIVE"),
+    ).resolves.toEqual({
+      tradeNo: "BWP1xyz",
+      payData: "https://pay.test/qr/BWP1",
+    });
+    await expect(client.getTopUpByTradeNo("sk-t", "BWP1xyz")).resolves.toEqual({
+      trade_no: "BWP1xyz",
+      status: "success",
+      amount: 100,
+      money: 85,
+      create_time: 1,
+      complete_time: 2,
+    });
+    // 精确匹配单号：其它订单不命中 → null
+    await expect(client.getTopUpByTradeNo("sk-t", "BWPnope")).resolves.toBeNull();
+
+    // 下单透传 amount + way_code；查询带 keyword
+    const orderReq = requests.find((r) =>
+      r.url.endsWith("/api/user/bluewhalepay/pay"),
+    );
+    expect(orderReq?.body).toEqual({ amount: 100, way_code: "WX_NATIVE" });
+    expect(
+      requests.some((r) =>
+        r.url.includes("/api/user/topup/self?keyword=BWP1xyz"),
+      ),
+    ).toBe(true);
+  });
+
+  it("maps native topup {message:'error'} envelopes to typed errors", async () => {
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input) => {
+        const url = String(input);
+        if (url.endsWith("/api/user/amount")) {
+          // HTTP 200 但 message=error，data 为错误字符串（无 success 布尔）
+          return jsonResponse({ message: "error", data: "充值金额过低" });
+        }
+        if (url.endsWith("/api/user/bluewhalepay/pay")) {
+          return jsonResponse({ message: "error", data: "拉起支付失败" });
+        }
+        return jsonResponse({ success: true, data: {} });
+      },
+    });
+    await expect(client.requestTopUpAmount("sk-t", 1)).rejects.toMatchObject({
+      status: 400,
+      code: "topup_amount_error",
+      message: "充值金额过低",
+    });
+    await expect(
+      client.createBlueWhalePayTopUp("sk-t", 100),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "topup_order_error",
+      message: "拉起支付失败",
+    });
+  });
+
+  it("sends New-Api-User header on native topup only when userId is provided", async () => {
+    const requests: Array<{ url: string; headers: Headers }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        const url = String(input);
+        requests.push({ url, headers: new Headers(init.headers) });
+        if (url.endsWith("/api/user/amount")) {
+          return jsonResponse({ message: "success", data: "85.00" });
+        }
+        if (url.endsWith("/api/user/bluewhalepay/pay")) {
+          return jsonResponse({
+            message: "success",
+            data: { pay_data: "https://pay.test/qr/BWP1", order_id: "BWP1xyz" },
+          });
+        }
+        if (url.includes("/api/user/topup/self")) {
+          return jsonResponse({ success: true, data: { items: [] } });
+        }
+        return jsonResponse({ success: true, data: {} });
+      },
+    });
+
+    // access_token 场景：提供 userId → 三个原生充值接口都带 New-Api-User 头
+    await client.requestTopUpAmount("root-access-token", 100, 1);
+    await client.createBlueWhalePayTopUp("root-access-token", 100, "WX_NATIVE", 1);
+    await client.getTopUpByTradeNo("root-access-token", "BWP1xyz", 1);
+    expect(requests).toHaveLength(3);
+    for (const r of requests) {
+      expect(r.headers.get("New-Api-User")).toBe("1");
+      expect(r.headers.get("Authorization")).toBe("Bearer root-access-token");
+    }
+
+    // sk- 中继令牌场景：缺省 userId → 不带 New-Api-User（TokenAuth 接口不需要）
+    requests.length = 0;
+    await client.requestTopUpAmount("sk-t", 100);
+    expect(requests[0]?.headers.get("New-Api-User")).toBeNull();
+    expect(requests[0]?.headers.get("Authorization")).toBe("Bearer sk-t");
+  });
+
+  // ---- Go 管理端 option（RootAuth）----
+
+  it("reads and writes a Go option with root token + New-Api-User header", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        const url = String(input);
+        requests.push({ url, init });
+        if (init.method === "GET") {
+          // GET /api/option/ 返回全量 [{key,value}]，value 恒为字符串
+          return jsonResponse({
+            success: true,
+            message: "",
+            data: [
+              { key: "Theme", value: "default" },
+              {
+                key: "payment_setting",
+                value: JSON.stringify({
+                  amount_options: [10, 100],
+                  amount_discount: { "100": 0.9 },
+                  compliance_confirmed: true,
+                }),
+              },
+            ],
+          });
+        }
+        // PUT /api/option/ 成功壳
+        return jsonResponse({ success: true, message: "" });
+      },
+    });
+
+    // 读：命中键返回原始字符串；未命中返回 null
+    await expect(
+      client.getRootOption("root-tok", 1, "payment_setting"),
+    ).resolves.toBe(
+      JSON.stringify({
+        amount_options: [10, 100],
+        amount_discount: { "100": 0.9 },
+        compliance_confirmed: true,
+      }),
+    );
+    await expect(
+      client.getRootOption("root-tok", 1, "no_such_key"),
+    ).resolves.toBeNull();
+
+    // 写：value 作为 JSON 字符串透传
+    await expect(
+      client.putRootOption("root-tok", 1, "payment_setting", '{"a":1}'),
+    ).resolves.toBeUndefined();
+
+    // 两个请求都带 root Authorization + New-Api-User 头
+    for (const { init } of requests) {
+      const headers = new Headers(init.headers);
+      expect(headers.get("Authorization")).toBe("Bearer root-tok");
+      expect(headers.get("New-Api-User")).toBe("1");
+    }
+    // PUT 体：{key, value}，value 为字符串（Go UpdateOption 要求字符串值）
+    const put = requests.find((r) => r.init.method === "PUT");
+    expect(JSON.parse(String(put?.init.body))).toEqual({
+      key: "payment_setting",
+      value: '{"a":1}',
+    });
+  });
+
+  it("maps a {success:false} option write to a typed error", async () => {
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async () =>
+        jsonResponse({ success: false, message: "权限不足" }, 200),
+    });
+    await expect(
+      client.putRootOption("bad-tok", 1, "payment_setting", "{}"),
+    ).rejects.toMatchObject({ message: "权限不足" });
+  });
 });

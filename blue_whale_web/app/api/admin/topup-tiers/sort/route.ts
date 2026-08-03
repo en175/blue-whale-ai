@@ -13,6 +13,18 @@ export async function PUT(request: Request) {
         { status: 400 },
       );
     }
+    const invalid = items.find(
+      (i) =>
+        typeof i.id !== "string" ||
+        !/^\d{1,19}$/.test(i.id) ||
+        !Number.isInteger(i.sortOrder),
+    );
+    if (invalid) {
+      return Response.json(
+        { success: false, error: "排序项 id 须为正整数、sortOrder 须为整数" },
+        { status: 400 },
+      );
+    }
 
     const { db } = createTopupTierDeps();
     await db.updateSortOrder(

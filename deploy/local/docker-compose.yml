@@ -299,6 +299,10 @@ services:
       # new-api relay runs separately from the Java MVP stack; on macOS Docker
       # reaches a host-published new-api through host.docker.internal.
       NEW_API_BASE_URL: ${NEW_API_BASE_URL:-http://host.docker.internal:3001}
+      # root 凭证：充值档位折扣同步（payment_setting.amount_discount）与原生充值下单。
+      # 未配置则折扣同步 no-op、充值接口 503；值只放本地 .env（见 .env.example），不入库。
+      NEW_API_ROOT_ACCESS_TOKEN: ${NEW_API_ROOT_ACCESS_TOKEN:-}
+      NEW_API_ROOT_USER_ID: ${NEW_API_ROOT_USER_ID:-}
       NODE_ENV: production
     ports:
       - "${WEB_PUBLISH_PORT:-3000}:3000"

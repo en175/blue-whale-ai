@@ -31,6 +31,8 @@ import {
   moveTier,
   getPreviewTiers,
 } from "./_mock";
+// 积分派生单一来源：与服务端 route 同一常量/公式（Go QuotaPerUnit 耦合说明在 constants.ts）。
+import { deriveTierAmount } from "@/lib/topup-tier/constants";
 
 const STATUS_OPTIONS = [
   { value: "all", label: "全部" },
@@ -39,7 +41,7 @@ const STATUS_OPTIONS = [
 ];
 
 const EMPTY_FORM: TierFormData = {
-  amount: 1000,
+  amount: deriveTierAmount(10), // 只读派生，落库以原价为准
   originalPrice: 10,
   discount: 1,
   isRecommended: false,
@@ -124,7 +126,7 @@ export default function AdminTiersPage() {
   const openEdit = (t: AdminTier) => {
     setEditingId(t.id);
     setForm({
-      amount: t.amount,
+      amount: deriveTierAmount(t.originalPrice), // 以原价重算，忽略历史存量 amount
       originalPrice: t.originalPrice,
       discount: t.discount,
       isRecommended: t.isRecommended,
@@ -138,6 +140,7 @@ export default function AdminTiersPage() {
   const handleSave = async () => {
     const data = {
       ...form,
+      amount: deriveTierAmount(form.originalPrice), // 积分只读派生，落库以原价为准
       startTime: toUTCDatetime(form.startTime),
       endTime: toUTCDatetime(form.endTime),
     };
@@ -182,6 +185,7 @@ export default function AdminTiersPage() {
 
   const computedPrice =
     Math.round(form.originalPrice * form.discount * 100) / 100;
+  const derivedPoints = deriveTierAmount(form.originalPrice);
 
   return (
     <div>
@@ -364,18 +368,6 @@ export default function AdminTiersPage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1.5 block text-sm font-medium text-[var(--tc-text-secondary)]">
-                积分数
-              </label>
-              <Input
-                type="number"
-                value={form.amount}
-                onChange={(e) =>
-                  setForm({ ...form, amount: Number(e.target.value) || 0 })
-                }
-              />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-[var(--tc-text-secondary)]">
                 原价 (元)
               </label>
               <Input
@@ -388,6 +380,15 @@ export default function AdminTiersPage() {
                   })
                 }
               />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-[var(--tc-text-secondary)]">
+                积分数{" "}
+                <span className="text-[var(--tc-text-muted)]">(派生)</span>
+              </label>
+              <div className="flex h-9 items-center rounded-lg border border-[var(--tc-border)] bg-[var(--tc-bg-elevated)] px-3 text-sm font-semibold text-[var(--tc-text-primary)]">
+                {derivedPoints.toLocaleString()}
+              </div>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -417,7 +418,8 @@ export default function AdminTiersPage() {
             </div>
           </div>
           <p className="text-xs text-[var(--tc-text-muted)]">
-            实付 = 原价 × 折扣。折扣 = 1 表示无折扣。
+            积分 = 原价 × 500000（只读派生，对应 Go 充值配额
+            QuotaPerUnit）。实付 = 原价 × 折扣，折扣 = 1 表示无折扣。
           </p>
           <div className="grid grid-cols-2 gap-3">
             <div>
