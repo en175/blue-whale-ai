@@ -1,8 +1,8 @@
 # Creative Skill 资产契约（官方/个人领域边界、公开元数据与稳定身份）
 
 - **状态**：Accepted for implementation
-- **契约版本**：2（v2 纳入 IK60WT 技能库浏览扩展：分类/排序/使用人数/i18n，见 §11）
-- **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WS)、[02 — 一比一还原官方技能库浏览体验](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WT)
+- **契约版本**：3（v2 纳入 IK60WT 技能库浏览扩展：分类/排序/使用人数/i18n，见 §11；v3 纳入 IK60WX 添加官方技能的同名冲突语义，见 §5.2/§6/§7）
+- **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WS)、[02 — 一比一还原官方技能库浏览体验](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WT)、[05 — 添加官方技能并统一“我的技能”资产视图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WX)
 - **父需求**：[一比一还原 Creative Skill 面板与个人技能资产闭环](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60US)
 - **前置契约**：[Creative Skill 激活跨服务契约](2026-07-24-creative-skill-activation-contract.md)（激活、版本固定与按需正文读取，本文不改写其字段）、[ADR-0041 同族工单串行与契约先行](../adr/0041-sibling-issues-serial-contract-first.md)
 
@@ -90,6 +90,9 @@
 3. `name_key` 存储列与创建时校验已由 IK60WU 落地：`creative_skill.name_key VARCHAR(255)`，
    索引 `idx_owner_name_key(owner_user_id, name_key)`；创建时应用层校验同用户个人唯一 +
    官方保留名。
+4. **添加官方技能的反向冲突（IK60WX）**：执行 `add` 命令时，若同账户已存在与目标官方
+   技能同 Name Key 的个人技能，拒绝添加并返回 §7 `100103`；该官方技能的直接使用
+   （forced 激活）不受影响。用户须先删除同名个人技能，才能添加该官方技能。
 
 ## 6. 接口形状（BFF）
 
@@ -99,7 +102,7 @@
 |---|---|
 | `POST /api/agent/skills/library` | 响应记录按 §3 白名单，主键 `creative_skill_id`；v2 起请求体扩展 `{ keyword?, category?, sort?, lang?, pageNum?, pageSize? }`（§11.5） |
 | `POST /api/agent/skills/mine` | 响应为官方引用 ∪ 名下个人技能的并集，主键 `creative_skill_id`，含 `asset_domain`；IK60WU 起统一按添加/创建时间倒序 |
-| `POST /api/agent/skills/library/{id}/add` | `{id}` 语义改为 `creative_skill_id`；非官方域或未知 ID → 100100 |
+| `POST /api/agent/skills/library/{id}/add` | `{id}` 语义改为 `creative_skill_id`；非官方域或未知 ID → 100100；与同用户个人技能 Name Key 冲突 → 100103（IK60WX，§5.4） |
 | `DELETE /api/agent/skills/mine/{id}` | `{id}` 语义改为 `creative_skill_id`；仅删引用，不删技能本体 |
 | `PATCH /api/agent/skills/mine/{id}` | `{id}` 语义改为 `creative_skill_id`；仅改自己引用的 `auto` |
 | `POST /api/agent/skills/personal` | IK60WU 新增。body `{ content }` 为完整 SKILL.md 文本；解析 frontmatter → 校验 → 创建个人技能（§12） |
@@ -120,6 +123,7 @@
 | 跨用户读/改/删个人技能（持久化层） | 0 命中，按不存在处理，不泄露存在性 |
 | 个人技能名称与同用户已有技能 Name Key 冲突 | `100101`（IK60WU 新增） |
 | 个人技能名称与官方技能保留名冲突（§5.2） | `100102`（IK60WU 新增） |
+| 添加官方技能与同用户个人技能 Name Key 冲突（§5.4） | `100103`（IK60WX 新增） |
 
 ## 8. 与激活契约的关系
 
