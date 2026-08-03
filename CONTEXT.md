@@ -34,23 +34,28 @@ _Avoid_: 浏览器生成或推导 NodeItem ID；把布局信息或签名地址�
 隐式富文本；把过程文字创建为 NodeItem；把移出布局当作删除。
 
 **SceneCard（场景卡）**:
-Project 内持久化的场景创作内容，以 Markdown 作为权威正文；它是独立产品资源，不是对话 Card，
-也不是 NodeItem。
-_Avoid_: 把 SceneCard 当作 Card 的持久化版本；把 SceneCard 内容复制进 Canvas 布局；归入 NodeItem
+Project 内持久化的单个视频画面片段创作内容，以 Markdown 作为权威正文；默认最终生成动作是直接生成
+视频，不提供通用图片生成。它是独立产品资源，不是对话 Card，也不是 NodeItem。
+_Avoid_: 把 SceneCard 当作 Card 的持久化版本；把 SceneCard 内容复制进 Canvas 布局；归入 NodeItem；通用图片生成容器
+
+**StoryboardPreview（分镜预览）**:
+User 从 SceneCard 显式触发、用于正式视频生成前检查构图与关键时刻的一组有序静态预览帧；它是可选准备
+产物，不是最终图片作品或默认前置步骤，完成后不自动创建视频 GenerationJob。
+_Avoid_: 单张最终图片、SceneCard 图片模式、默认先出分镜、自动串联视频
 
 **SceneCardGenerationPreset（场景卡生成预设）**:
-由 SceneCard 持久拥有、供下一次生成默认使用的完整参数；首次应用 PlanMessage 时从其冻结参数创建，
+由 SceneCard 持久拥有、供下一次直接视频生成默认使用的完整参数；首次应用 PlanMessage 时从其冻结参数创建，
 此后只能由 User 在生成编辑器中修改。每个 GenerationJob 独立冻结提交时的参数快照，修改预设不得改写
 历史 PlanMessage 或 GenerationJob。
-预设按图片或视频判别：图片不允许时长与视频参考模式，视频必须具有时长与参考模式；视频首帧、尾帧
-只能指向 PlanMessage 正文中已验证的素材引用。
+预设必须具有时长与视频参考模式；视频首帧、尾帧只能指向 PlanMessage 正文中已验证的素材引用。触发
+StoryboardPreview 不会把 SceneCard 或其生成预设切换成图片生成模式。
 PlanMessage 正文引用保存全部有效素材；预设中的生成输入只是其中经过所选模型能力验证、带明确角色的
 子集。User 明确要求素材直接参与生成但当前能力不支持时，必须先自然语言澄清，不能静默降为上下文参考。
 生成编辑器内的参数修改只形成本地临时草稿；只有 User 点击“生成”时，Product API 才原子更新预设并
 创建新的 GenerationJob，关闭编辑器不保存草稿。生成编辑器不编辑 SceneCard 的权威 Markdown 正文；
 正文只能在 SceneCard 编辑器中单独修改。打开后若正文或预设已经变化，提交零写入并保留本地草稿，
 User 刷新复核后再生成，不自动合并。
-_Avoid_: SceneCardNode 数据、每次打开重新猜测的默认值、历史生成参数、改写 PlanMessage、在生成面板改写正文、自动合并过期草稿
+_Avoid_: SceneCardNode 数据、图片生成预设、媒体类型切换、每次打开重新猜测的默认值、历史生成参数、改写 PlanMessage、在生成面板改写正文、自动合并过期草稿
 
 **ProviderPromptProjection（供应商提示词投影）**:
 服务端从 PlanMessage 或 SceneCard 的权威 Markdown 正文确定性派生、实际提交给生成供应商的提示词；
