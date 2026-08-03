@@ -42,6 +42,20 @@ export type ForcedCreativeSkillGuard = (
   forcedCreativeSkillId: string,
 ) => Promise<boolean>;
 
+/** 成功激活埋点记录（资产契约 §11.3）。 */
+export interface SkillActivationRecord {
+  creativeSkillId: string;
+  userId: string;
+  agentRunId: string;
+  skillVersion: number;
+  activationSource: "forced" | "auto";
+}
+
+/** 激活埋点写入器（资产契约 §11.3）：仅在接受纳的激活路径调用，best-effort。 */
+export type SkillActivationRecorder = (
+  rec: SkillActivationRecord,
+) => Promise<void>;
+
 export interface PreparedConversationMessage {
   idempotencyKey: string;
   requestHash: string;
@@ -85,6 +99,7 @@ export async function acceptConversationMessage(
   },
   store: ConversationCommandStore,
   forcedSkillGuard?: ForcedCreativeSkillGuard,
+  activationRecorder?: SkillActivationRecorder,
 ): Promise<AcceptConversationMessageResult> {
   const prepared = prepareConversationMessage(input.body, input.idempotencyKey);
   if ("kind" in prepared) return prepared;
@@ -96,11 +111,33 @@ export async function acceptConversationMessage(
       (await forcedSkillGuard(input.userId, forced));
     if (!allowed) return { kind: "creative_skill_unavailable" };
   }
-  return store.acceptMessage({
+  const result = await store.acceptMessage({
     userId: input.userId,
     projectId: input.projectId,
     ...prepared,
   });
+  if (
+    forced !== null &&
+    result.kind === "accepted" &&
+    activationRecorder !== undefined
+  ) {
+    // 激活埋点（资产契约 §11.3）：只覆盖 live 缝实际可确定的路径——forced 激活。
+    // Node 运行时 pin 版本解析尚未接通（parity 工单范围），skill_version 记默认 1；
+    // live 缝当前没有 auto 命中概念，auto 来源待运行时接通后补充。
+    // 埋点 best-effort：写失败不改变已接纳结果与既有错误语义。
+    try {
+      await activationRecorder({
+        creativeSkillId: forced,
+        userId: input.userId,
+        agentRunId: result.agent_run_id,
+        skillVersion: 1,
+        activationSource: "forced",
+      });
+    } catch {
+      // 吞掉：埋点失败不影响既有校验与错误语义。
+    }
+  }
+  return result;
 }
 
 function forcedCreativeSkillIdOf(body: Record<string, unknown>): string | null {

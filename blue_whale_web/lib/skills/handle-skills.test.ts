@@ -3,8 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { handleListLibrary, handleListMine } from "./handle-skills.js";
 
 // /api/agent/skills library/mine 只读分页。
-// 契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §3：
-// wire 主键 creative_skill_id，响应只含白名单字段（content/body/prompt/自增 id 永不出库）。
+// 契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §3/§11：
+// wire 主键 creative_skill_id，响应只含白名单字段（content/body/prompt/自增 id 永不出库）；
+// library v2 请求体扩展 keyword/category/sort/lang，非法枚举按参数错误拒绝。
 
 const libItem = {
   creative_skill_id: "poster_gen",
@@ -14,6 +15,8 @@ const libItem = {
   source: "official",
   asset_domain: "official",
   added: true,
+  category: "marketing",
+  usage_count: 12,
 };
 
 describe("handleListLibrary", () => {
@@ -39,9 +42,53 @@ describe("handleListLibrary", () => {
     });
     expect(repo.listLibrary).toHaveBeenCalledWith("9", {
       keyword: "海报",
+      category: undefined,
+      sort: undefined,
+      lang: undefined,
       pageNum: 1,
       pageSize: 50,
     });
+  });
+
+  it("category/sort/lang 透传给 repo", async () => {
+    const repo = {
+      listLibrary: vi
+        .fn()
+        .mockResolvedValue({ records: [], total: 0, size: 50, current: 1 }),
+      listMine: vi.fn(),
+    };
+    await handleListLibrary(
+      "9",
+      { category: "film", sort: "most_used", lang: "en" },
+      { skills: repo },
+    );
+    expect(repo.listLibrary).toHaveBeenCalledWith("9", {
+      keyword: undefined,
+      category: "film",
+      sort: "most_used",
+      lang: "en",
+      pageNum: 1,
+      pageSize: 50,
+    });
+  });
+
+  it("非法 category/sort/lang 按参数错误拒绝，不触碰 repo", async () => {
+    const repo = {
+      listLibrary: vi.fn(),
+      listMine: vi.fn(),
+    };
+    for (const query of [
+      { category: "bogus" },
+      { sort: "bogus" },
+      { lang: "fr" },
+    ]) {
+      const result = await handleListLibrary("9", query as never, {
+        skills: repo,
+      });
+      expect(result.code).toBe(400);
+      expect(result.data).toBeNull();
+    }
+    expect(repo.listLibrary).not.toHaveBeenCalled();
   });
 
   it("无 query → 默认 pageNum=1 pageSize=50 keyword=undefined", async () => {
@@ -54,6 +101,9 @@ describe("handleListLibrary", () => {
     await handleListLibrary("9", {}, { skills: repo });
     expect(repo.listLibrary).toHaveBeenCalledWith("9", {
       keyword: undefined,
+      category: undefined,
+      sort: undefined,
+      lang: undefined,
       pageNum: 1,
       pageSize: 50,
     });

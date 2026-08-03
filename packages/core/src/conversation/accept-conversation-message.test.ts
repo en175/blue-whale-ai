@@ -148,4 +148,99 @@ describe("acceptConversationMessage", () => {
     expect(result).toEqual({ kind: "creative_skill_unavailable" });
     expect(acceptMessage).not.toHaveBeenCalled();
   });
+
+  // 激活埋点（资产契约 §11.3）：接纳一条携带 forced 激活的消息 → 落一条埋点；
+  // replayed 不重复埋点；无 forced / 守卫拒绝不埋点；埋点失败不影响接纳结果。
+  it("接纳含 forced 激活 → 落一条埋点（稳定 ID/用户/AgentRun/版本/来源）", async () => {
+    const acceptMessage = vi
+      .fn()
+      .mockResolvedValue({ kind: "accepted", agent_run_id: "9" });
+    const recorder = vi.fn().mockResolvedValue(undefined);
+
+    const result = await acceptConversationMessage(
+      {
+        userId: "100",
+        projectId: "42",
+        idempotencyKey: "cmd-1",
+        body: { ...validBody, forced_creative_skill_id: "official_skill" },
+      },
+      { acceptMessage },
+      async () => true,
+      recorder,
+    );
+
+    expect(result.kind).toBe("accepted");
+    expect(recorder).toHaveBeenCalledWith({
+      creativeSkillId: "official_skill",
+      userId: "100",
+      agentRunId: "9",
+      skillVersion: 1,
+      activationSource: "forced",
+    });
+  });
+
+  it("replayed / 无 forced / 守卫拒绝 → 不埋点", async () => {
+    const recorder = vi.fn().mockResolvedValue(undefined);
+
+    // replayed：首次接纳已埋点，幂等重放不重复记。
+    await acceptConversationMessage(
+      {
+        userId: "100",
+        projectId: "42",
+        idempotencyKey: "cmd-1",
+        body: { ...validBody, forced_creative_skill_id: "official_skill" },
+      },
+      { acceptMessage: vi.fn().mockResolvedValue({ kind: "replayed" }) },
+      async () => true,
+      recorder,
+    );
+    // 无 forced：普通消息不是激活。
+    await acceptConversationMessage(
+      {
+        userId: "100",
+        projectId: "42",
+        idempotencyKey: "cmd-2",
+        body: validBody,
+      },
+      { acceptMessage: vi.fn().mockResolvedValue({ kind: "accepted" }) },
+      async () => true,
+      recorder,
+    );
+    // 守卫拒绝：未接纳不埋点。
+    await acceptConversationMessage(
+      {
+        userId: "100",
+        projectId: "42",
+        idempotencyKey: "cmd-3",
+        body: { ...validBody, forced_creative_skill_id: "others_skill" },
+      },
+      { acceptMessage: vi.fn() },
+      async () => false,
+      recorder,
+    );
+
+    expect(recorder).not.toHaveBeenCalled();
+  });
+
+  it("埋点写失败不影响接纳结果（best-effort，不改既有错误语义）", async () => {
+    const acceptMessage = vi
+      .fn()
+      .mockResolvedValue({ kind: "accepted", agent_run_id: "9" });
+    const recorder = vi.fn().mockRejectedValue(new Error("no such table"));
+
+    const result = await acceptConversationMessage(
+      {
+        userId: "100",
+        projectId: "42",
+        idempotencyKey: "cmd-1",
+        body: { ...validBody, forced_creative_skill_id: "official_skill" },
+      },
+      { acceptMessage },
+      async () => true,
+      recorder,
+    );
+
+    expect(result.kind).toBe("accepted");
+    expect(recorder).toHaveBeenCalled();
+  });
 });

@@ -332,6 +332,15 @@ body {
   opacity: 1;
 }
 
+/* 多行变体：悬停展示完整简介等长文本（IK60WT 官方技能库卡片） */
+[data-tooltip-multiline]::before {
+  white-space: normal;
+  width: max-content;
+  max-width: 280px;
+  text-align: left;
+  word-break: break-word;
+}
+
 /* Video duration slider in dock popover */
 .tc-duration-slider {
   display: flex;

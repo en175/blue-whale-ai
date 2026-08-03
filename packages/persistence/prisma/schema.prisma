@@ -324,17 +324,23 @@ model project_events {
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model skill {
-  id           BigInt   @id @default(autoincrement())
-  name         String   @unique(map: "uk_name") @db.VarChar(255)
-  description  String?  @db.Text
-  content      String?  @db.LongText
-  source       String   @default("official") @db.VarChar(32)
-  sort_order   Int      @default(0)
-  cover_url    String?  @db.VarChar(512)
-  gmt_create   DateTime @default(now()) @db.DateTime(0)
-  gmt_modified DateTime @default(now()) @db.DateTime(0)
-  version      Int      @default(0)
-  is_delete    Int      @default(0) @db.TinyInt
+  id              BigInt   @id @default(autoincrement())
+  name            String   @unique(map: "uk_name") @db.VarChar(255)
+  description     String?  @db.Text
+  content         String?  @db.LongText
+  source          String   @default("official") @db.VarChar(32)
+  sort_order      Int      @default(0)
+  cover_url       String?  @db.VarChar(512)
+  category        String   @default("other") @db.VarChar(32)
+  search_keywords String?  @db.Text
+  name_en         String?  @db.VarChar(255)
+  name_zh         String?  @db.VarChar(255)
+  description_en  String?  @db.Text
+  description_zh  String?  @db.Text
+  gmt_create      DateTime @default(now()) @db.DateTime(0)
+  gmt_modified    DateTime @default(now()) @db.DateTime(0)
+  version         Int      @default(0)
+  is_delete       Int      @default(0) @db.TinyInt
 
   @@index([sort_order], map: "idx_sort")
 }
@@ -426,6 +432,20 @@ model creative_skill_version {
   gmt_modified              DateTime @default(now()) @db.DateTime(0)
 
   @@unique([creative_skill_id, display_version], map: "uk_creative_skill_version_semver")
+}
+
+/// Creative Skill 成功激活埋点（IK60WT，资产契约 §11.3）：只增不改；
+/// 普通用户仅经 library 视图 usage_count 聚合值接触，单用户明细无端点暴露。
+model creative_skill_activation {
+  id                BigInt   @id @default(autoincrement())
+  creative_skill_id String   @db.VarChar(80)
+  user_id           BigInt
+  agent_run_id      String   @db.VarChar(64)
+  skill_version     Int      @default(1)
+  activation_source String   @db.VarChar(16)
+  gmt_create        DateTime @default(now()) @db.DateTime(0)
+
+  @@index([creative_skill_id, user_id], map: "idx_skill_user")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments

@@ -89,6 +89,10 @@ export {
   type SkillMineView,
   type PersonalSkillView,
   type SkillPage,
+  type SkillLibraryCategory,
+  type SkillLibrarySort,
+  type SkillLibraryLang,
+  type SkillActivationInput,
 } from "./skill-repo.js";
 export {
   createTemplateRepo,

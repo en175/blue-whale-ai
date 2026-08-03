@@ -360,6 +360,12 @@ CREATE TABLE `skill` (
     `source` VARCHAR(32) NOT NULL DEFAULT 'official',
     `sort_order` INTEGER NOT NULL DEFAULT 0,
     `cover_url` VARCHAR(512) NULL,
+    `category` VARCHAR(32) NOT NULL DEFAULT 'other',
+    `search_keywords` TEXT NULL,
+    `name_en` VARCHAR(255) NULL,
+    `name_zh` VARCHAR(255) NULL,
+    `description_en` TEXT NULL,
+    `description_zh` TEXT NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
@@ -533,5 +539,19 @@ CREATE TABLE `creative_skill_version` (
 
     UNIQUE INDEX `uk_creative_skill_version_id`(`creative_skill_version_id`),
     UNIQUE INDEX `uk_creative_skill_version_semver`(`creative_skill_id`, `display_version`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `creative_skill_activation` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `creative_skill_id` VARCHAR(80) NOT NULL,
+    `user_id` BIGINT NOT NULL,
+    `agent_run_id` VARCHAR(64) NOT NULL,
+    `skill_version` INTEGER NOT NULL DEFAULT 1,
+    `activation_source` VARCHAR(16) NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    INDEX `idx_skill_user`(`creative_skill_id`, `user_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

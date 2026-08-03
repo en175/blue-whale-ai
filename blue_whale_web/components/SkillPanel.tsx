@@ -5,31 +5,64 @@ import {
   AtSign,
   BookMarked,
   ChevronDown,
-  Ellipsis,
+  Plus,
   Search,
   Store,
   X,
 } from "lucide-react";
 import {
   skillsApi,
+  type SkillLibraryCategory,
   type SkillLibraryItem,
+  type SkillLibraryLang,
+  type SkillLibrarySort,
   type SkillMineItem,
 } from "./api/skills";
 import { rememberCreativeSkillName } from "@/lib/creative-skill-names";
 
 /**
- * Skill 面板（IJZ7Z8）。
+ * Skill 面板（IJZ7Z8；IK60WT 改三页签近全屏工作区 + 官方技能库浏览）。
  *
- * 两 tab 各自分页滚动加载（50/页，IntersectionObserver）：
- * - 「我的 Skills」：mine API（POST 分页，join skill 返完整内容快照 + auto）。
- * - 「Skill 库」：library API（POST 分页，可 keyword 搜 name/description）。
+ * 三页签：我的技能 / 技能库 / 创建技能（占位）。每次打开默认进技能库；
+ * 关闭时整棵卸载 → 技能库查询与滚动状态重置。打开期间页签首次激活才挂载、
+ * 之后保持挂载（hidden），切换页签不丢查询与滚动状态。
+ * - 「我的技能」：mine API（POST 分页，join skill 返完整内容快照 + auto）。本票只做
+ *   视觉一致性调整（移除无菜单的占位省略号按钮、窄屏网格防横向溢出），功能归 05 工单。
+ * - 「技能库」：library API（POST 分页，keyword + category + sort + lang，
+ *   IO + sentinel 无限滚动，reqId 防过期），竖版卡片网格（3/2/1 列）。
  * add/remove 在 library tab 内（乐观 + 回滚）；auto 在 my tab 内（乐观 + 回滚）。
- * 封面取 cover_url，空走默认图。Use 传 skill.name（forced_skill_id 真接入原依赖 IJZ7Z7；IJZ7Z7 已由 IK2D8R 替代，见 docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md）。
+ * 封面取 cover_url，空走默认图。Use 传 skill.name（forced_skill_id 真接入原依赖 IJZ7Z7；
+ * IJZ7Z7 已由 IK2D8R 替代，见 docs/wayfinder/IK2D8R-first-runtime-bundle-migration.md）。
+ *
+ * 交互（IK60WT）：背景滚动锁定 + 焦点陷阱 + 初始焦点落面板 + 关闭后焦点还触发按钮；
+ * 关闭三路径：ESC / 遮罩按压（onMouseDown 范式，规避拖选误关 IK2AKU）/ 右上 X。
  */
 
 const COVER_PLACEHOLDER =
   "https://placehold.co/200x200/1a1a1a/FFFFFF?text=Skill";
 const PAGE_SIZE = 50;
+
+const CATEGORY_OPTIONS: { key: SkillLibraryCategory; label: string }[] = [
+  { key: "all", label: "全部" },
+  { key: "film", label: "影视" },
+  { key: "marketing", label: "营销" },
+  { key: "other", label: "其他" },
+];
+
+const SORT_OPTIONS: { key: SkillLibrarySort; label: string }[] = [
+  { key: "featured", label: "精选" },
+  { key: "most_used", label: "最多使用" },
+  { key: "newest", label: "最新发布" },
+];
+
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** library lang 参数：navigator.language 以 zh 开头 → zh，其余 → en（契约 §11.5） */
+function detectLibraryLang(): SkillLibraryLang {
+  if (typeof navigator === "undefined") return "zh";
+  return navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
+}
 
 /** Use 选择：稳定 Creative Skill 身份（可空，库外项无）+ 展示名。 */
 export type UseSkillSelection = {
@@ -43,25 +76,74 @@ interface SkillPanelProps {
   onUseSkill: (skill: UseSkillSelection) => void;
 }
 
-type TabKey = "my" | "library";
+type TabKey = "my" | "library" | "create";
 
 export default function SkillPanel({
   isOpen,
   onClose,
   onUseSkill,
 }: SkillPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabKey>("my");
+  // 关闭时整棵卸载：打开会话状态（页签、技能库查询/滚动）随之重置
+  if (!isOpen) return null;
+  return <SkillPanelDialog onClose={onClose} onUseSkill={onUseSkill} />;
+}
 
+function SkillPanelDialog({
+  onClose,
+  onUseSkill,
+}: Omit<SkillPanelProps, "isOpen">) {
+  const [activeTab, setActiveTab] = useState<TabKey>("library");
+  // 页签首次激活才挂载，之后保持挂载（hidden）以保留查询与滚动状态
+  const [mountedTabs, setMountedTabs] = useState<ReadonlySet<TabKey>>(
+    () => new Set<TabKey>(["library"]),
+  );
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const switchTab = (tab: TabKey) => {
+    setActiveTab(tab);
+    setMountedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+  };
+
+  // 打开生命周期：记录触发元素、锁定背景滚动、初始焦点落到面板；
+  // 卸载（关闭）时恢复滚动、焦点还给触发按钮
   useEffect(() => {
-    if (!isOpen) return;
+    const prevFocus = document.activeElement as HTMLElement | null;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    panelRef.current?.focus();
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      prevFocus?.focus?.();
+    };
+  }, []);
+
+  // ESC 关闭（排序下拉等内部控件先消费并 stopPropagation 时不会冒到 window）
+  useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [isOpen, onClose]);
+  }, [onClose]);
 
-  if (!isOpen) return null;
+  // 焦点陷阱：Tab / Shift+Tab 在面板内循环（hidden 页签内元素不参与）
+  const trapTab = (e: React.KeyboardEvent) => {
+    if (e.key !== "Tab") return;
+    const root = panelRef.current;
+    if (!root) return;
+    const nodes = Array.from(
+      root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+    ).filter((n) => n.offsetParent !== null);
+    if (nodes.length === 0) return;
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    const active = document.activeElement;
+    const outside = !active || !root.contains(active);
+    if (e.shiftKey ? outside || active === first : outside || active === last) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    }
+  };
 
   const tabBtn = (
     tab: TabKey,
@@ -73,6 +155,7 @@ export default function SkillPanel({
       <button
         key={tab}
         type="button"
+        data-testid={`skill-tab-${tab}`}
         className={`tc-agent-skill-panel__tab inline-flex items-center gap-1.5 h-8 px-3 text-[13px] font-medium rounded-lg transition-colors duration-150 ${
           selected
             ? "tc-agent-skill-panel__tab--selected text-white/95"
@@ -80,7 +163,7 @@ export default function SkillPanel({
         }`}
         role="tab"
         aria-selected={selected}
-        onClick={() => setActiveTab(tab)}
+        onClick={() => switchTab(tab)}
       >
         <span className="tc-agent-skill-panel__tab-icon">
           <Icon size={14} />
@@ -93,43 +176,105 @@ export default function SkillPanel({
   return (
     <div
       className="tc-agent-skill-modal-backdrop fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 motion-reduce:animate-none"
-      onClick={onClose}
+      onMouseDown={(e) => {
+        // 遮罩按压关闭用 onMouseDown 而非 onClick：拖选文本移出面板后松开不误关（IK2AKU）；
+        // preventDefault：阻止 mousedown 默认焦点转移（事件后浏览器会把焦点 blur 到 body），
+        // 否则卸载 cleanup 里的焦点还给触发按钮会被随后的默认行为覆盖（IK60WT 焦点恢复验收）
+        if (e.button === 0) {
+          e.preventDefault();
+          onClose();
+        }
+      }}
     >
       <div
         id="home-canvas-skill-panel"
-        className="tc-agent-skill-panel bg-[#141414] border border-white/[0.12] rounded-2xl shadow-[0_24px_80px_rgba(0,0,0,0.5)] w-[calc(100vw-56px)] max-w-[1440px] h-[calc(100vh-56px)] max-h-[920px] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none"
+        ref={panelRef}
+        tabIndex={-1}
+        data-testid="skill-panel"
+        className="tc-agent-skill-panel bg-[#141414] border border-white/[0.12] rounded-2xl shadow-[0_24px_80px_rgba(0,0,0,0.5)] w-[calc(100vw-64px)] h-[calc(100vh-64px)] flex flex-col overflow-hidden focus:outline-none animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none"
         role="dialog"
         aria-modal="true"
-        aria-label="Skills"
+        aria-label="技能面板"
+        onKeyDown={trapTab}
+        onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="tc-agent-skill-panel__header flex items-center justify-between px-4 py-3 border-b border-white/[0.08]">
           <div
             className="tc-agent-skill-panel__tabs flex items-center gap-1"
             role="tablist"
-            aria-label="Skill 视图"
+            aria-label="技能视图"
           >
-            {tabBtn("my", BookMarked, "我的 Skills")}
-            {tabBtn("library", Store, "Skill 库")}
+            {tabBtn("my", BookMarked, "我的技能")}
+            {tabBtn("library", Store, "技能库")}
+            {tabBtn("create", Plus, "创建技能")}
           </div>
           <button
             type="button"
+            data-testid="skill-panel-close"
             className="tc-agent-skill-panel__icon-btn inline-flex items-center justify-center w-8 h-8 rounded-lg text-white/45 hover:text-white/80 hover:bg-white/[0.06] transition-colors duration-150"
-            aria-label="关闭 Skills"
+            aria-label="关闭技能面板"
             onClick={onClose}
           >
             <X size={16} />
           </button>
         </div>
 
-        {activeTab === "my" && <MyContent onUse={onUseSkill} />}
-        {activeTab === "library" && <LibraryContent onUse={onUseSkill} />}
+        {mountedTabs.has("my") && (
+          <TabPane visible={activeTab === "my"}>
+            <MyContent onUse={onUseSkill} />
+          </TabPane>
+        )}
+        {mountedTabs.has("library") && (
+          <TabPane visible={activeTab === "library"}>
+            <LibraryContent onUse={onUseSkill} />
+          </TabPane>
+        )}
+        {mountedTabs.has("create") && (
+          <TabPane visible={activeTab === "create"}>
+            <CreateContent />
+          </TabPane>
+        )}
       </div>
     </div>
   );
 }
 
-/** 我的 Skills：分页 + 滚动加载 + auto 乐观开关（自管 state） */
+/** 页签容器：保持挂载，仅切换可见性（保留列表数据与滚动位置） */
+function TabPane({
+  visible,
+  children,
+}: {
+  visible: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      role="tabpanel"
+      className={
+        visible ? "flex flex-col flex-1 min-h-0 overflow-hidden" : "hidden"
+      }
+    >
+      {children}
+    </div>
+  );
+}
+
+/** 创建技能：占位空态（功能归后续工单） */
+function CreateContent() {
+  return (
+    <div
+      data-testid="skill-create-placeholder"
+      className="flex flex-1 flex-col items-center justify-center gap-2 min-h-0"
+    >
+      <Plus size={28} className="text-white/25" aria-hidden="true" />
+      <p className="text-[14px] font-medium text-white/70">创建技能</p>
+      <p className="text-[12px] text-white/40">即将上线，敬请期待。</p>
+    </div>
+  );
+}
+
+/** 我的技能：分页 + 滚动加载 + auto 乐观开关（自管 state） */
 function MyContent({ onUse }: { onUse: (skill: UseSkillSelection) => void }) {
   const [items, setItems] = useState<SkillMineItem[]>([]);
   const [page, setPage] = useState(1);
@@ -235,9 +380,9 @@ function MyContent({ onUse }: { onUse: (skill: UseSkillSelection) => void }) {
         {loading ? (
           <StateHint text="加载中…" />
         ) : items.length === 0 ? (
-          <StateHint text="还没有添加 Skill，去 Skill 库逛逛。" />
+          <StateHint text="还没有添加技能，去技能库逛逛。" />
         ) : (
-          <div className="tc-agent-skill-panel__section-list grid grid-cols-2 gap-3">
+          <div className="tc-agent-skill-panel__section-list grid grid-cols-1 md:grid-cols-2 gap-3">
             {items.map((skill, index) => (
               <MySkillRow
                 key={skill.creative_skill_id ?? index}
@@ -276,7 +421,7 @@ function MyContent({ onUse }: { onUse: (skill: UseSkillSelection) => void }) {
   );
 }
 
-/** Skill 库：分页 + 滚动加载 + 后端搜索（自管 state） */
+/** 技能库：分类 + 搜索 + 排序 + 分页滚动加载（自管 state） */
 function LibraryContent({
   onUse,
 }: {
@@ -285,16 +430,20 @@ function LibraryContent({
   const [items, setItems] = useState<SkillLibraryItem[]>([]);
   const [keyword, setKeyword] = useState("");
   const [inputKw, setInputKw] = useState("");
+  const [category, setCategory] = useState<SkillLibraryCategory>("all");
+  const [sort, setSort] = useState<SkillLibrarySort>("featured");
+  const [sortOpen, setSortOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const sortRef = useRef<HTMLDivElement>(null);
   const reqId = useRef(0);
 
   const fetchPage = useCallback(
-    async (pageNum: number, kw: string, append: boolean) => {
+    async (pageNum: number, append: boolean) => {
       const id = ++reqId.current;
       if (append) setLoadingMore(true);
       else setLoading(true);
@@ -303,9 +452,12 @@ function LibraryContent({
         const res = await skillsApi.library({
           pageNum,
           pageSize: PAGE_SIZE,
-          keyword: kw || undefined,
+          keyword: keyword || undefined,
+          category,
+          sort,
+          lang: detectLibraryLang(),
         });
-        if (id !== reqId.current) return; // 过期请求（keyword 已变）忽略
+        if (id !== reqId.current) return; // 过期请求（查询条件已变）忽略
         for (const r of res.records) {
           rememberCreativeSkillName(r.creative_skill_id, r.name);
         }
@@ -322,19 +474,19 @@ function LibraryContent({
         }
       }
     },
-    [],
+    [keyword, category, sort],
   );
 
-  // 首次 + keyword 变 → 重置第 1 页
+  // 首次 + 查询条件（keyword/category/sort）变 → 重置第 1 页
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- keyword 变重新分页获取
-    fetchPage(1, keyword, false);
-  }, [keyword, fetchPage]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 查询条件变重新分页获取
+    fetchPage(1, false);
+  }, [fetchPage]);
 
   const loadMore = useCallback(() => {
     if (loading || loadingMore || !hasMore) return;
-    fetchPage(page + 1, keyword, true);
-  }, [loading, loadingMore, hasMore, page, keyword, fetchPage]);
+    fetchPage(page + 1, true);
+  }, [loading, loadingMore, hasMore, page, fetchPage]);
 
   // 滚动到底加载下一页。IO 只 mount 一次，回调走 ref 拿最新 loadMore
   // （否则 fetchPage 完成 state 变 → loadMore 新引用 → IO effect 重连 → sentinel 仍在视口时重复触发拉第二页）
@@ -354,6 +506,18 @@ function LibraryContent({
     io.observe(el);
     return () => io.disconnect();
   }, []);
+
+  // 排序下拉：点击面板内其他位置收起
+  useEffect(() => {
+    if (!sortOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (sortRef.current && !sortRef.current.contains(e.target as Node)) {
+        setSortOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [sortOpen]);
 
   const handleAdd = (creativeSkillId: string) => {
     setItems((prev) =>
@@ -392,44 +556,118 @@ function LibraryContent({
     setKeyword(inputKw.trim());
   };
 
+  const sortLabel = SORT_OPTIONS.find((o) => o.key === sort)?.label ?? "精选";
+
   return (
     <div className="tc-agent-skill-panel__content tc-agent-skill-panel__content--store flex-1 min-h-0 overflow-hidden flex flex-col">
-      <div className="tc-agent-skill-panel__library-tools flex items-center gap-3 p-4 border-b border-white/[0.08]">
-        <form
-          className="tc-agent-skill-panel__search-group flex flex-1 items-center gap-2"
-          onSubmit={onSubmitSearch}
+      <div className="tc-agent-skill-panel__library-tools border-b border-white/[0.08]">
+        <div className="flex items-center gap-3 px-4 pt-4 pb-3">
+          <form
+            className="tc-agent-skill-panel__search-group flex flex-1 items-center gap-2"
+            onSubmit={onSubmitSearch}
+          >
+            <label className="tc-agent-skill-panel__search flex flex-1 items-center gap-2 bg-white/[0.05] rounded-lg px-3 py-2 border border-white/[0.06]">
+              <Search size={14} className="text-white/40" />
+              <input
+                type="text"
+                data-testid="skill-search-input"
+                className="bg-transparent outline-none text-[13px] text-white/90 placeholder:text-white/30 w-full"
+                placeholder="搜索技能"
+                value={inputKw}
+                onChange={(e) => setInputKw(e.target.value)}
+              />
+            </label>
+            <button
+              type="submit"
+              data-testid="skill-search-submit"
+              className="tc-agent-skill-panel__search-submit h-8 px-3 text-[13px] font-medium text-white/80 rounded-lg bg-white/[0.08] hover:bg-white/[0.12] transition-colors"
+            >
+              搜索
+            </button>
+          </form>
+          <div
+            className="tc-agent-skill-panel__sort relative"
+            ref={sortRef}
+            onKeyDown={(e) => {
+              // 下拉打开时 ESC 先收下拉（stopPropagation 防冒到 window 关面板）
+              if (e.key === "Escape" && sortOpen) {
+                e.stopPropagation();
+                setSortOpen(false);
+              }
+            }}
+          >
+            <button
+              type="button"
+              data-testid="skill-sort-trigger"
+              className="tc-agent-skill-panel__sort-trigger inline-flex items-center gap-1.5 h-8 px-3 text-[13px] font-medium text-white/70 rounded-lg border border-white/[0.06] hover:bg-white/[0.05] transition-colors"
+              aria-label="排序方式"
+              aria-expanded={sortOpen}
+              aria-haspopup="menu"
+              onClick={() => setSortOpen((v) => !v)}
+            >
+              <span className="tc-agent-skill-panel__sort-label">排序</span>
+              <span className="tc-agent-skill-panel__sort-value text-white/90">
+                {sortLabel}
+              </span>
+              <ChevronDown
+                size={14}
+                className={`transition-transform ${sortOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+            {sortOpen && (
+              <div
+                role="menu"
+                aria-label="排序方式"
+                className="absolute right-0 top-full z-20 mt-1 w-32 rounded-lg border border-white/[0.1] bg-[#1c1c1c] py-1 shadow-[0_8px_30px_rgba(0,0,0,0.45)]"
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <button
+                    key={o.key}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={sort === o.key}
+                    data-testid={`skill-sort-option-${o.key}`}
+                    className={`flex w-full items-center px-3 py-1.5 text-left text-[12px] transition-colors ${
+                      sort === o.key
+                        ? "text-white bg-white/[0.08]"
+                        : "text-white/60 hover:bg-white/[0.06] hover:text-white/90"
+                    }`}
+                    onClick={() => {
+                      setSort(o.key);
+                      setSortOpen(false);
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div
+          className="tc-agent-skill-panel__categories flex items-center gap-2 px-4 pb-3"
+          role="group"
+          aria-label="技能分类"
         >
-          <label className="tc-agent-skill-panel__search flex flex-1 items-center gap-2 bg-white/[0.05] rounded-lg px-3 py-2 border border-white/[0.06]">
-            <Search size={14} className="text-white/40" />
-            <input
-              type="text"
-              className="bg-transparent outline-none text-[13px] text-white/90 placeholder:text-white/30 w-full"
-              placeholder="搜索 Skills"
-              value={inputKw}
-              onChange={(e) => setInputKw(e.target.value)}
-            />
-          </label>
-          <button
-            type="submit"
-            className="tc-agent-skill-panel__search-submit h-8 px-3 text-[13px] font-medium text-white/80 rounded-lg bg-white/[0.08] hover:bg-white/[0.12] transition-colors"
-          >
-            搜索
-          </button>
-        </form>
-        <div className="tc-agent-skill-panel__sort">
-          <button
-            type="button"
-            className="tc-agent-skill-panel__sort-trigger inline-flex items-center gap-1.5 h-8 px-3 text-[13px] font-medium text-white/70 rounded-lg border border-white/[0.06] hover:bg-white/[0.05] transition-colors"
-            aria-label="排序 Skills"
-            aria-expanded="false"
-            aria-haspopup="menu"
-          >
-            <span className="tc-agent-skill-panel__sort-label">排序</span>
-            <span className="tc-agent-skill-panel__sort-value text-white/90">
-              精选
-            </span>
-            <ChevronDown size={14} />
-          </button>
+          {CATEGORY_OPTIONS.map((c) => {
+            const selected = category === c.key;
+            return (
+              <button
+                key={c.key}
+                type="button"
+                data-testid={`skill-category-chip-${c.key}`}
+                aria-pressed={selected}
+                className={`h-7 px-3 rounded-full text-[12px] font-medium transition-colors ${
+                  selected
+                    ? "bg-white/[0.14] text-white/90"
+                    : "text-white/45 hover:text-white/75 hover:bg-white/[0.06]"
+                }`}
+                onClick={() => setCategory(c.key)}
+              >
+                {c.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -441,7 +679,7 @@ function LibraryContent({
             className="shrink-0 underline underline-offset-2 hover:text-white/90"
             onClick={() => {
               setError(null);
-              fetchPage(page, keyword, false);
+              fetchPage(page, false);
             }}
           >
             重试
@@ -449,15 +687,15 @@ function LibraryContent({
         </div>
       )}
 
-      <div className="tc-agent-skill-panel__store-scroll flex-1 overflow-y-auto p-4">
+      <div className="tc-agent-skill-panel__store-scroll flex-1 overflow-y-auto overflow-x-hidden p-4">
         {loading ? (
           <StateHint text="加载中…" />
         ) : items.length === 0 ? (
-          <StateHint text={keyword ? "没有匹配的 Skill。" : "Skill 库为空。"} />
+          <StateHint text={keyword ? "没有匹配的技能。" : "技能库为空。"} />
         ) : (
-          <div className="tc-agent-skill-panel__store-grid grid grid-cols-2 gap-3">
+          <div className="tc-agent-skill-panel__store-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {items.map((skill) => (
-              <LibrarySkillRow
+              <LibrarySkillCard
                 key={skill.creative_skill_id ?? skill.name}
                 skill={skill}
                 onUse={() =>
@@ -509,7 +747,7 @@ function SkillCover({ url }: { url?: string | null }) {
   // 封面直取 cover_url；空 → 默认图。
   return (
     <span
-      className="tc-agent-skill-row__cover w-full h-full rounded-lg bg-cover bg-center bg-no-repeat"
+      className="tc-agent-skill-row__cover block w-full h-full rounded-lg bg-cover bg-center bg-no-repeat"
       style={{ backgroundImage: `url("${url || COVER_PLACEHOLDER}")` }}
       aria-hidden="true"
     />
@@ -545,7 +783,7 @@ function MySkillRow({
               {displayName}
             </span>
           </span>
-          <span className="tc-agent-skill-row__desc text-xs text-white/50 line-clamp-2 leading-relaxed">
+          <span className="tc-agent-skill-row__desc text-xs text-white/50 line-clamp-2 leading-relaxed break-words">
             {skill.description || "—"}
           </span>
           <span className="tc-agent-skill-row__library-meta flex items-center gap-3 mt-1 text-[11px] text-white/40">
@@ -575,16 +813,15 @@ function MySkillRow({
               />
             </button>
           </span>
-          <span className="tc-agent-skill-row__more-wrap ml-auto">
-            <MoreButton label={`${displayName} 的更多选项`} />
-          </span>
         </span>
       </div>
     </div>
   );
 }
 
-function LibrarySkillRow({
+/** 官方技能库竖版卡片：封面 + 名称 + 简介（悬停完整提示）+ @Blue Whale + 使用人数 + 操作。
+ *  卡片本体不可点击，无详情入口、无省略号菜单（IK60WT）。 */
+function LibrarySkillCard({
   skill,
   onUse,
   onAdd,
@@ -598,30 +835,35 @@ function LibrarySkillRow({
   const added = skill.added;
   // 目录行缺版本化映射时 creative_skill_id 为 null：注册命令按不存在处理（契约 §3），禁用添加按钮。
   const hasStableId = skill.creative_skill_id !== null;
+  const desc = skill.description ?? "";
   return (
     <div
+      data-testid="skill-library-card"
       className={`tc-agent-skill-row tc-agent-skill-row--no-control tc-agent-skill-row--with-cover ${
         added ? "tc-agent-skill-row--checked" : ""
-      } grid grid-cols-[112px_minmax(0,1fr)] gap-3.5 min-h-[142px] p-3.5 rounded-xl bg-white/[0.035] border border-white/[0.08] hover:bg-white/[0.05] transition-colors`}
+      } flex flex-col overflow-hidden rounded-xl bg-white/[0.035] border border-white/[0.08] hover:bg-white/[0.05] transition-colors`}
     >
-      <SkillCover url={skill.cover_url} />
-      <div className="tc-agent-skill-row__toggle flex flex-col min-w-0">
-        <span className="tc-agent-skill-row__body flex flex-col gap-1">
-          <span className="tc-agent-skill-row__title-line">
-            <span className="tc-agent-skill-row__title text-[13px] font-semibold text-white/90 line-clamp-1">
-              {skill.name}
-            </span>
-          </span>
-          <span className="tc-agent-skill-row__desc text-xs text-white/50 line-clamp-2 leading-relaxed">
-            {skill.description || "—"}
-          </span>
-          <span className="tc-agent-skill-row__library-meta flex items-center gap-3 mt-1 text-[11px] text-white/40">
-            <span className="tc-agent-skill-row__contributor">
-              @{skill.source === "official" ? "官方" : skill.source}
-            </span>
+      <div className="tc-agent-skill-card__cover h-[140px] w-full shrink-0">
+        <SkillCover url={skill.cover_url} />
+      </div>
+      <div className="tc-agent-skill-row__toggle flex flex-col flex-1 min-w-0 gap-1 p-3.5">
+        <span className="tc-agent-skill-row__title text-[13px] font-semibold text-white/90 line-clamp-1 break-words">
+          {skill.name}
+        </span>
+        <span
+          className="tc-agent-skill-row__desc text-xs text-white/50 line-clamp-2 leading-relaxed break-words"
+          data-tooltip={desc || undefined}
+          data-tooltip-multiline={desc ? "" : undefined}
+        >
+          {desc || "—"}
+        </span>
+        <span className="tc-agent-skill-row__library-meta flex items-center gap-3 mt-1 text-[11px] text-white/40">
+          <span className="tc-agent-skill-row__contributor">@Blue Whale</span>
+          <span data-testid="skill-usage-count">
+            {skill.usage_count} 人使用
           </span>
         </span>
-        <span className="tc-agent-skill-row__controls flex items-center gap-2 mt-auto">
+        <span className="tc-agent-skill-row__controls flex items-center gap-2 mt-auto pt-2">
           <UseButton onClick={onUse} />
           <button
             type="button"
@@ -630,15 +872,12 @@ function LibrarySkillRow({
                 ? "text-white/45 hover:bg-white/[0.08] hover:text-white/90"
                 : "text-white/70 hover:bg-white/[0.08] hover:text-white"
             } disabled:opacity-40 disabled:pointer-events-none`}
-            title={added ? "点击从我的 Skills 移除" : undefined}
+            title={added ? "点击从我的技能移除" : undefined}
             disabled={!hasStableId}
             onClick={added ? onRemove : onAdd}
           >
             {added ? "已添加" : "添加"}
           </button>
-          <span className="tc-agent-skill-row__more-wrap ml-auto">
-            <MoreButton label={`${skill.name} 的更多选项`} />
-          </span>
         </span>
       </div>
     </div>
@@ -654,19 +893,6 @@ function UseButton({ onClick }: { onClick: () => void }) {
     >
       <AtSign size={12} aria-hidden="true" />
       <span>直接使用</span>
-    </button>
-  );
-}
-
-function MoreButton({ label }: { label: string }) {
-  return (
-    <button
-      type="button"
-      className="tc-agent-skill-row__more inline-flex items-center justify-center w-7 h-7 rounded-md text-white/50 hover:bg-white/[0.08] hover:text-white transition-colors"
-      aria-label={label}
-      aria-expanded="false"
-    >
-      <Ellipsis size={15} />
     </button>
   );
 }
