@@ -17,5 +17,5 @@ WORKDIR /app
 # 复制 builder 阶段安装好的 site-packages 与入口脚本
 COPY --from=builder /install /usr/local
 # Worker 本身只暴露内部 HTTP 出站调用，无对外端口
-# CMD 由 Compose entrypoint 注入循环脚本（见 deploy/local/scripts/run-worker-loop.sh）
+# CMD 由 Compose entrypoint 注入循环脚本（原 deploy/local 脚本已随 Java 退役删除）
 CMD ["python", "-m", "blue_whale_agent_worker", "--help"]

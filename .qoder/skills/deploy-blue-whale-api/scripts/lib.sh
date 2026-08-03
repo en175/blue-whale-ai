@@ -11,7 +11,7 @@ CONTAINER="blue-whale-api"
 IMAGE="blue-whale-api:latest"
 BIN_NAME="new-api"                           # 容器内二进制名
 
-# new-api 连接：容器经公网 IP 回连宿主 mysql8/redis（同 blue_whale_server 模式）
+# new-api 连接：容器经公网 IP 回连宿主 mysql8/redis
 MYSQL_DSN="${MYSQL_DSN:-root:weitian1024@tcp($DEPLOY_HOST:3306)/new-api?parseTime=true}"
 REDIS_DSN="${REDIS_DSN:-redis://:weitian1024@$DEPLOY_HOST:6379/1}"   # db1，与 Java db0 隔离
 
