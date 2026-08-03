@@ -34,6 +34,7 @@ export interface NewApiAccountIdentity {
   username: string;
   email: string | null;
   status: number;
+  role: number;
 }
 
 export interface NewApiUsage {
@@ -376,11 +377,16 @@ export function createNewApiClient(options: NewApiClientOptions) {
           response,
         );
       }
+      const role =
+        typeof data.role === "number" && Number.isInteger(data.role)
+          ? data.role
+          : 1;
       return {
         userId,
         username: data.username,
         email: typeof data.email === "string" ? data.email : null,
         status: data.status,
+        role,
       };
     },
 

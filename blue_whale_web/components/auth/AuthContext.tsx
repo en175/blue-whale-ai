@@ -141,7 +141,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await loginWithPassword(username, password);
 
       // 先存 token，apiRequest 从 storage 读取
-      saveTokens(data.access_token, data.refresh_token);
+      saveTokens(data.access_token);
 
       // 登录后拉取配额
       let credits: number | undefined;
@@ -176,7 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = useCallback(async (input: RegisterInput) => {
     const data = await registerWithPassword(input);
-    saveTokens(data.access_token, data.refresh_token);
+    saveTokens(data.access_token);
     // 注册后同样拉取配额，与 signIn 对称
     let credits: number | undefined;
     try {
@@ -193,7 +193,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       credits,
     };
     saveUser(u);
-    saveTokens(data.access_token, data.refresh_token);
+    saveTokens(data.access_token);
     setUser(u);
     setLoginOpen(false);
     const exec = executorRef.current;

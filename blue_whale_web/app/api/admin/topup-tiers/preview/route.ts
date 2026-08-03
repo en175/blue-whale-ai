@@ -1,7 +1,8 @@
 import { createTopupTierDeps } from "@/lib/topup-tier/deps";
+import { withAdminUser } from "@/lib/auth/product-route-auth";
 
 // GET /api/admin/topup-tiers/preview → 用户端预览（仅有效档位）
-export async function GET() {
+async function handlePreviewTopupTiers() {
   try {
     const { db } = createTopupTierDeps();
     const tiers = await db.listActive();
@@ -10,4 +11,8 @@ export async function GET() {
     const msg = e instanceof Error ? e.message : "unknown";
     return Response.json({ success: false, error: msg }, { status: 500 });
   }
+}
+
+export async function GET(request: Request) {
+  return withAdminUser(request, () => handlePreviewTopupTiers());
 }

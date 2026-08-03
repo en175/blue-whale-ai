@@ -1,3 +1,8 @@
+vi.mock("@/lib/auth/product-route-auth", () => ({
+  withAdminUser: (_request: unknown, handler: (user: unknown) => Promise<Response> | Response) =>
+    handler({ userId: "9", status: "enabled", isAdmin: true }),
+}));
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({

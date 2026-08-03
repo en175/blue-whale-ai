@@ -2,7 +2,6 @@ import type { User } from "./types";
 
 const USER_KEY = "bw-user";
 const ACCESS_TOKEN_KEY = "bw-access-token";
-const REFRESH_TOKEN_KEY = "bw-refresh-token";
 
 /**
  * 本地开发开关：仅当 .env.local 里 NEXT_PUBLIC_SKIP_AUTH=1 时为 true。
@@ -88,16 +87,10 @@ export function loadAccessToken(): string | null {
   return localStorage.getItem(ACCESS_TOKEN_KEY);
 }
 
-export function loadRefreshToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
-}
-
-export function saveTokens(accessToken: string, refreshToken: string): void {
+export function saveTokens(accessToken: string): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-    localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
   } catch {
     /* ignore */
   }
@@ -107,7 +100,6 @@ export function clearTokens(): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
   } catch {
     /* ignore */
   }

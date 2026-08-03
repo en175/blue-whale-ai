@@ -12,6 +12,7 @@ describe("GET /api/me", () => {
           username: "alice",
           email: "alice@example.com",
           status: 1,
+          role: 1,
         };
       },
     });

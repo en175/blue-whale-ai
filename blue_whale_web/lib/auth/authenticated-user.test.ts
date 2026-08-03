@@ -8,12 +8,13 @@ import {
   type AuthenticationPolicy,
 } from "./authenticated-user";
 
-function identity(userId = 42, status = 1): NewApiAccountIdentity {
+function identity(userId = 42, status = 1, role = 1): NewApiAccountIdentity {
   return {
     userId,
     username: "alice",
     email: null,
     status,
+    role,
   };
 }
 
@@ -42,6 +43,29 @@ function resolver(
 }
 
 describe("createAuthenticatedUserResolver", () => {
+  it("derives isAdmin from the resolved account role", async () => {
+    const resolveTokenIdentity = vi.fn().mockResolvedValue(identity(7, 1, 10));
+    const getUser = resolver(resolveTokenIdentity);
+
+    await expect(auth(getUser, "sk-admin-token")).resolves.toMatchObject({
+      userId: "7",
+      isAdmin: true,
+    });
+  });
+
+  it("treats ordinary accounts as non-admin and keeps isAdmin through the cache", async () => {
+    const resolveTokenIdentity = vi.fn().mockResolvedValue(identity(8, 1, 1));
+    const getUser = resolver(resolveTokenIdentity);
+
+    await expect(auth(getUser, "sk-user-token")).resolves.toMatchObject({
+      isAdmin: false,
+    });
+    await expect(auth(getUser, "sk-user-token")).resolves.toMatchObject({
+      isAdmin: false,
+    });
+    expect(resolveTokenIdentity).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects a missing authorization header without calling new-api", async () => {
     const resolveTokenIdentity = vi.fn();
     const getUser = resolver(resolveTokenIdentity);
@@ -102,10 +126,12 @@ describe("createAuthenticatedUserResolver", () => {
     await expect(auth(getUser, "sk-one")).resolves.toEqual({
       userId: "42",
       status: "enabled",
+      isAdmin: false,
     });
     await expect(auth(getUser, "sk-two")).resolves.toEqual({
       userId: "42",
       status: "enabled",
+      isAdmin: false,
     });
   });
 
@@ -319,6 +345,7 @@ describe("createAuthenticatedUserResolver", () => {
     await expect(auth(getUser, "sk-one")).resolves.toEqual({
       userId: "42",
       status: "enabled",
+      isAdmin: false,
     });
     expect(resolveTokenIdentity).toHaveBeenCalledTimes(2);
   });
@@ -372,8 +399,8 @@ describe("createAuthenticatedUserResolver", () => {
 
     complete(identity());
     await expect(Promise.all([first, second])).resolves.toEqual([
-      { userId: "42", status: "enabled" },
-      { userId: "42", status: "enabled" },
+      { userId: "42", status: "enabled", isAdmin: false },
+      { userId: "42", status: "enabled", isAdmin: false },
     ]);
   });
 

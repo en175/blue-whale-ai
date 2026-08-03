@@ -11,7 +11,7 @@
   "scripts": {
     "build": "pnpm build:node && pnpm --filter blue_whale build",
     "build:node": "tsc -b --pretty false",
-    "typecheck": "tsc -b --force --pretty false",
+    "typecheck": "tsc -b --force --pretty false && pnpm --filter blue_whale exec tsc --noEmit",
     "test": "pnpm test:node && pnpm --filter blue_whale test",
     "test:node": "vitest run packages",
     "db:fresh": "bash scripts/init-typescript-baseline-db.sh",
