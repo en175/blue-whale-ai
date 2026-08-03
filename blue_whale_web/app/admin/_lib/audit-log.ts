@@ -1,3 +1,11 @@
+/**
+ * admin 操作日志数据层 —— 真实 API 客户端（替换原内存 mock）
+ *
+ * 对接 /api/admin/operation-logs。导出类型与常量保持不变，
+ * 调用方（logs 页 + 各模块 mock 的 writeAuditLog）无需改动签名。
+ * 只记录写操作；查询不记。
+ */
+
 export type AuditCategory = "pricing" | "tier" | "order" | "user";
 
 export type AuditLogEntry = {
@@ -25,47 +33,51 @@ export const CATEGORY_LABELS: Record<AuditCategory, string> = {
   user: "用户管理",
 };
 
-let logSeed = 9000;
-const logs: AuditLogEntry[] = [];
+/** 后端返回行（camelCase），取 AuditLogEntry 需要的字段。 */
+type ApiRow = {
+  id: string;
+  category: string;
+  action: string;
+  target: string;
+  detail: string;
+  operator: string;
+  createdAt: string;
+};
 
-export function getAuditLogs(filter?: {
+export async function getAuditLogs(filter?: {
   category?: string;
   dateFrom?: string;
   dateTo?: string;
   searchText?: string;
-}): AuditLogEntry[] {
-  let result = [...logs];
-  if (filter?.category && filter.category !== "all") {
-    result = result.filter((l) => l.category === filter.category);
-  }
-  if (filter?.dateFrom) {
-    const from = new Date(filter.dateFrom).getTime();
-    result = result.filter((l) => new Date(l.createdAt).getTime() >= from);
-  }
-  if (filter?.dateTo) {
-    const to = new Date(filter.dateTo).getTime() + 86400000;
-    result = result.filter((l) => new Date(l.createdAt).getTime() <= to);
-  }
-  if (filter?.searchText?.trim()) {
-    const q = filter.searchText.trim().toLowerCase();
-    result = result.filter(
-      (l) =>
-        l.target.toLowerCase().includes(q) ||
-        l.detail.toLowerCase().includes(q) ||
-        l.operator.toLowerCase().includes(q),
-    );
-  }
-  return result.sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
+}): Promise<AuditLogEntry[]> {
+  const params = new URLSearchParams();
+  if (filter?.category) params.set("category", filter.category);
+  if (filter?.dateFrom) params.set("dateFrom", filter.dateFrom);
+  if (filter?.dateTo) params.set("dateTo", filter.dateTo);
+  if (filter?.searchText?.trim())
+    params.set("searchText", filter.searchText.trim());
+
+  const res = await fetch(`/api/admin/operation-logs?${params.toString()}`);
+  const json = await res.json();
+  if (!json.success) return [];
+  return (json.data as ApiRow[]).map((r) => ({
+    id: r.id,
+    category: r.category as AuditCategory,
+    action: r.action,
+    target: r.target,
+    detail: r.detail,
+    operator: r.operator,
+    createdAt: r.createdAt,
+  }));
 }
 
+/** 写一条操作审计。fire-and-forget：内部吞错，调用方无需 await，失败不阻断主流程。 */
 export function writeAuditLog(
   entry: Omit<AuditLogEntry, "id" | "createdAt">,
 ): void {
-  logs.unshift({
-    ...entry,
-    id: `audit_${String(++logSeed)}`,
-    createdAt: new Date().toISOString(),
-  });
+  void fetch("/api/admin/operation-logs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(entry),
+  }).catch(() => {});
 }

@@ -29,6 +29,8 @@ const EXEMPT = new Set([
   "admin/topup-tiers/[id]/route.ts",
   "admin/topup-tiers/sort/route.ts",
   "admin/topup-tiers/preview/route.ts",
+  // IK51OP 操作日志：管理端审计 API，鉴权后续接入。
+  "admin/operation-logs/route.ts",
 ]);
 
 const SKIPPED_DIRECTORIES = new Set([

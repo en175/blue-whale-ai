@@ -146,6 +146,30 @@ export interface NewApiRechargeAgreement {
   content: string;
 }
 
+// ---- 原生充值（Model B：catalog→web，settlement→Go 原生 new-api topup）----
+
+/** 原生 BlueWhalePay 下单结果。pay_data 与旧自定义 recharge 的 qr_code_data 同源
+ *  （都来自 BlueWhalePay 统一下单），前端直接当二维码渲染。 */
+export interface NewApiTopUpOrderResult {
+  /** Go TopUp.trade_no（BWP... 前缀） */
+  tradeNo: string;
+  /** 支付拉起数据 / 二维码 */
+  payData: string;
+}
+
+/** 原生充值订单记录（GET /api/user/topup/self 的 items 元素）。 */
+export interface NewApiTopUpRecord {
+  trade_no: string;
+  /** pending | success | failed | expired（Go common.TopUpStatus*） */
+  status: string;
+  /** 美元额度 N（加 quota = N × QuotaPerUnit） */
+  amount: number;
+  /** 实付金额（元，getPayMoney 算） */
+  money: number;
+  create_time: number;
+  complete_time: number;
+}
+
 export class NewApiError extends Error {
   constructor(
     message: string,
@@ -205,6 +229,16 @@ function positiveInteger(value: unknown): number | null {
         ? Number(value)
         : Number.NaN;
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+/**
+ * Go `middleware.authHelper` 对 access_token 鉴权额外要求 `New-Api-User` 头
+ * （= 令牌属主数字 id，校验 id == apiUserId）。原生充值接口（/api/user/amount、
+ * /api/user/bluewhalepay/pay、/api/user/topup/self）挂在 UserAuth 下，用 access_token
+ * 调用时必须带此头，否则 401。userId 缺省（如走 sk- 中继令牌的 TokenAuth 接口）则不加。
+ */
+function newApiUserHeader(userId: number | undefined): { headers?: Record<string, string> } {
+  return userId === undefined ? {} : { headers: { "New-Api-User": String(userId) } };
 }
 
 export function createNewApiClient(options: NewApiClientOptions) {
@@ -696,6 +730,161 @@ export function createNewApiClient(options: NewApiClientOptions) {
         throw new NewApiError("new-api recharge agreement 响应无效", 502, "invalid_agreement_response", response);
       }
       return data;
+    },
+
+    // ---- native topup（复用 Go 原生 new-api 充值；web 只管档位目录，结算走这里）----
+
+    /** 原生充值报价：POST /api/user/amount → 实付金额（元，Go getPayMoney 算）。
+     *  该端点信封是 {message:"success"/"error", data}（无 success 布尔、HTTP 恒 200），
+     *  通用 request() 的 isBusinessFailure 抓不到错误，这里显式判 message==="error"。 */
+    async requestTopUpAmount(
+      token: string,
+      amount: number,
+      userId?: number,
+    ): Promise<number> {
+      const response = await request<NewApiEnvelope>(
+        "/api/user/amount",
+        {
+          method: "POST",
+          body: JSON.stringify({ amount }),
+          ...newApiUserHeader(userId),
+        },
+        token,
+      );
+      if (response.message === "error") {
+        throw new NewApiError(
+          typeof response.data === "string" ? response.data : "充值报价失败",
+          400,
+          "topup_amount_error",
+          response,
+        );
+      }
+      const money = typeof response.data === "string" ? Number(response.data) : Number.NaN;
+      if (!Number.isFinite(money)) {
+        throw new NewApiError(
+          "new-api 充值报价响应无效",
+          502,
+          "invalid_topup_amount_response",
+          response,
+        );
+      }
+      return money;
+    },
+
+    /** 原生 BlueWhalePay 下单：POST /api/user/bluewhalepay/pay。
+     *  amount = 美元额度 N（CNY 显示模式直接用；加 quota = N × QuotaPerUnit）。
+     *  wayCode：wechat→WX_NATIVE、alipay→ALI_QR；留空走 Go 默认 BlueWhalePayWayCode。
+     *  信封同 /api/user/amount，显式判 message==="error"。 */
+    async createBlueWhalePayTopUp(
+      token: string,
+      amount: number,
+      wayCode?: string,
+      userId?: number,
+    ): Promise<NewApiTopUpOrderResult> {
+      const body: Record<string, unknown> = { amount };
+      if (wayCode) body.way_code = wayCode;
+      const response = await request<NewApiEnvelope>(
+        "/api/user/bluewhalepay/pay",
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+          ...newApiUserHeader(userId),
+        },
+        token,
+      );
+      if (response.message === "error") {
+        throw new NewApiError(
+          typeof response.data === "string" ? response.data : "拉起支付失败",
+          400,
+          "topup_order_error",
+          response,
+        );
+      }
+      const data = (response.data ?? {}) as { pay_data?: unknown; order_id?: unknown };
+      if (typeof data.pay_data !== "string" || typeof data.order_id !== "string") {
+        throw new NewApiError(
+          "new-api bluewhalepay 下单响应无效",
+          502,
+          "invalid_topup_order_response",
+          response,
+        );
+      }
+      return { tradeNo: data.order_id, payData: data.pay_data };
+    },
+
+    /** 按单号查原生充值订单：GET /api/user/topup/self?keyword=<tradeNo>，取精确匹配项。
+     *  未找到（或非当前用户订单）返回 null。状态枚举 pending/success/failed/expired。 */
+    async getTopUpByTradeNo(
+      token: string,
+      tradeNo: string,
+      userId?: number,
+    ): Promise<NewApiTopUpRecord | null> {
+      const response = await request<NewApiEnvelope>(
+        `/api/user/topup/self?keyword=${encodeURIComponent(tradeNo)}`,
+        { method: "GET", ...newApiUserHeader(userId) },
+        token,
+      );
+      const data = (response.data ?? {}) as { items?: unknown };
+      const items = Array.isArray(data.items)
+        ? (data.items as Array<Record<string, unknown>>)
+        : [];
+      const match = items.find((item) => item.trade_no === tradeNo);
+      if (!match) return null;
+      return {
+        trade_no: String(match.trade_no),
+        status: typeof match.status === "string" ? match.status : "",
+        amount: Number(match.amount ?? 0),
+        money: Number(match.money ?? 0),
+        create_time: Number(match.create_time ?? 0),
+        complete_time: Number(match.complete_time ?? 0),
+      };
+    },
+
+    // ---- Go 管理端 option（RootAuth）----
+    // PUT/GET /api/option/ 走 middleware.RootAuth：需 root 用户的 access_token（Authorization）
+    // + New-Api-User 头（= 令牌属主的数字 id，authHelper 校验 id == apiUserId）。
+    // 用于 web 维护 Go 全局 payment_setting.amount_discount（逐档充值折扣）。
+    // 信封是标准 {success,...}，通用 request() 的 isBusinessFailure 可判错（不同于 topup 的 {message} 壳）。
+
+    /** 读单个 option 的原始字符串值；不存在返回 null。 */
+    async getRootOption(
+      rootToken: string,
+      rootUserId: number,
+      key: string,
+    ): Promise<string | null> {
+      const response = await request<NewApiEnvelope>(
+        "/api/option/",
+        {
+          method: "GET",
+          headers: { "New-Api-User": String(rootUserId) },
+        },
+        rootToken,
+      );
+      const items = Array.isArray(response.data)
+        ? (response.data as Array<{ key?: unknown; value?: unknown }>)
+        : [];
+      const found = items.find((item) => item.key === key);
+      if (!found || found.value == null) return null;
+      return typeof found.value === "string" ? found.value : String(found.value);
+    },
+
+    /** 写单个 option。value 必须已是 JSON 字符串——Go UpdateOption 对 object 值会
+     *  `fmt.Sprintf("%v")` 损坏，必须发字符串（Go 前端即如此）。 */
+    async putRootOption(
+      rootToken: string,
+      rootUserId: number,
+      key: string,
+      value: string,
+    ): Promise<void> {
+      await request<NewApiEnvelope>(
+        "/api/option/",
+        {
+          method: "PUT",
+          headers: { "New-Api-User": String(rootUserId) },
+          body: JSON.stringify({ key, value }),
+        },
+        rootToken,
+      );
     },
   };
 }

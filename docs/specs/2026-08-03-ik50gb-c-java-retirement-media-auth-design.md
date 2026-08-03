@@ -1,7 +1,7 @@
 # IK50GB-C 收口、Java 退役与媒体鉴权设计
 
-**日期：** 2026-08-03  
-**状态：** 待用户书面评审  
+**日期：** 2026-08-03
+**状态：** 待用户书面评审
 **依据：** ADR-0059、ADR-0062、`2026-07-29-authenticated-user-context-design.md`、`2026-07-28-new-api-media-relay-design.md`
 
 ## 1. 目标与顺序
