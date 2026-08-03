@@ -1,8 +1,13 @@
 /**
- * 全栈 MVP 验收 Playwright 配置（IK1NS2）
+ * 历史先例（不再被执行）：全栈 MVP 验收 Playwright 配置（IK1NS2）
+ *
+ * 本配置的运行器 scripts/run-mvp-acceptance.sh 已随旧栈物理退役删除，
+ * 本文件与 ./e2e-fullstack 仅作为全栈黑盒验收的历史先例文本保留。
+ * 现役 Node-only 全栈验收执行体：scripts/run-typescript-baseline-acceptance.sh
+ * （pnpm test:acceptance），黑盒场景测试位于 tests/typescript-baseline/。
  *
  * 与纯前端 Mock E2E（playwright.config.ts → ./e2e）明确分离：
- * - 本配置不带 webServer —— 栈由 scripts/run-mvp-acceptance.sh 以隔离 Docker Compose 提供
+ * - 本配置不带 webServer —— 历史栈由已退役的运行器以隔离 Docker Compose 提供
  *   （Web/Gateway/User/Agent/Worker/MySQL/Redis/Nacos，Fake Provider + 测试 ContentReview）
  * - testDir ./e2e-fullstack 独立挂载，互不混入
  * - 串行单 worker、零重试：Fake 链路确定性，重试只会掩盖真实问题

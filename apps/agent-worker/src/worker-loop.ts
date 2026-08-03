@@ -33,9 +33,19 @@ export async function runAgentWorkerOnce(input: {
   let result;
   try {
     result = await input.runtime.invoke({ prompt: work.prompt });
-  } finally {
+  } catch (error) {
     heartbeatAbort.abort();
+    await heartbeat;
+    return input.repo.commitFailure({
+      workerId: input.workerId,
+      agentRunId: work.agentRunId,
+      fence: work.fence,
+      runVersion: work.runVersion,
+      failureCode: "runtime_error",
+      failureMessage: error instanceof Error ? error.message : "unknown",
+    });
   }
+  heartbeatAbort.abort();
   if (!(await heartbeat)) return { kind: "conflict" };
   return input.repo.commitSuccess({
     workerId: input.workerId,
@@ -96,6 +106,7 @@ export async function runAgentWorkerLoop(input: {
   workerId: string;
   signal: AbortSignal;
   idleDelayMs?: number;
+  leaseMs?: number;
 }): Promise<void> {
   while (!input.signal.aborted) {
     try {

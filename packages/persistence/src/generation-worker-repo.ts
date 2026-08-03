@@ -151,9 +151,13 @@ export interface WorkerRepo {
   ): Promise<void>;
 }
 
-const LEASE_SECONDS = 120;
+function imageJobLeaseSeconds(): number {
+  const raw = Number.parseInt(process.env.IMAGE_JOB_LEASE_SECONDS ?? "", 10);
+  return Number.isInteger(raw) && raw > 0 ? raw : 120;
+}
 
 export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
+  const LEASE_SECONDS = imageJobLeaseSeconds();
   return {
     async claimJobById(jobId, userId, workerId) {
       const candidate = await prisma.generation_jobs.findFirst({
