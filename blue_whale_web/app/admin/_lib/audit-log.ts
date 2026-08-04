@@ -6,6 +6,8 @@
  * 只记录写操作；查询不记。
  */
 
+import { adminRequest } from "./admin-api";
+
 export type AuditCategory = "pricing" | "tier" | "order" | "user";
 
 export type AuditLogEntry = {
@@ -57,27 +59,30 @@ export async function getAuditLogs(filter?: {
   if (filter?.searchText?.trim())
     params.set("searchText", filter.searchText.trim());
 
-  const res = await fetch(`/api/admin/operation-logs?${params.toString()}`);
-  const json = await res.json();
-  if (!json.success) return [];
-  return (json.data as ApiRow[]).map((r) => ({
-    id: r.id,
-    category: r.category as AuditCategory,
-    action: r.action,
-    target: r.target,
-    detail: r.detail,
-    operator: r.operator,
-    createdAt: r.createdAt,
-  }));
+  try {
+    const { data } = await adminRequest<ApiRow[]>(
+      `/api/admin/operation-logs?${params.toString()}`,
+    );
+    return data.map((r) => ({
+      id: r.id,
+      category: r.category as AuditCategory,
+      action: r.action,
+      target: r.target,
+      detail: r.detail,
+      operator: r.operator,
+      createdAt: r.createdAt,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 /** 写一条操作审计。fire-and-forget：内部吞错，调用方无需 await，失败不阻断主流程。 */
 export function writeAuditLog(
   entry: Omit<AuditLogEntry, "id" | "createdAt">,
 ): void {
-  void fetch("/api/admin/operation-logs", {
+  void adminRequest("/api/admin/operation-logs", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(entry),
   }).catch(() => {});
 }
