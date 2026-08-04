@@ -1,6 +1,6 @@
 "use client";
 /**
- * useCanvasGeneration —— 画布生成业务 hook（ADR-0027 / openspec canvas-generation-hook）。
+ * useCanvasGeneration —— 画布生成业务 hook（ADR-0027）。
  *
  * IK4AK6 接 Node 生成 API（取代 v2 老 Java 接口）：
  * - image/video 都走 createProjectGenerationJob（Node 全异步，无同步 url / 无 SSE stream）→ 轮询 getJobStatus。
@@ -11,7 +11,7 @@
  * 分层：useCanvasDoc（L4 数据层，纯 RF state+persist）→ useCanvasGeneration（L3 业务层，本 hook）
  *       → useCanvasStore（缓存层 assets）→ page（L5 编排，UI + 调本 hook）。
  *
- * 决策见 docs/adr/0027-canvas-generation-hook-hydrate.md；规格见 openspec/changes/canvas-generation-hook/。
+ * 决策见 docs/adr/0027-canvas-generation-hook-hydrate.md。
  */
 import { useCallback, useState } from "react";
 import type {
