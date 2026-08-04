@@ -9,7 +9,6 @@ import {
   type SkillLibraryLang,
   type SkillLibrarySort,
 } from "./api/skills";
-import { rememberCreativeSkillName } from "@/lib/creative-skill-names";
 import {
   PAGE_SIZE,
   StateHint,
@@ -81,9 +80,6 @@ export function LibraryContent({
           lang: detectLibraryLang(),
         });
         if (id !== reqId.current) return; // 过期请求（查询条件已变）忽略
-        for (const r of res.records) {
-          rememberCreativeSkillName(r.creative_skill_id, r.name);
-        }
         setItems((prev) => (append ? [...prev, ...res.records] : res.records));
         setPage(res.current);
         setHasMore(res.current * res.size < res.total);

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { skillsApi, type SkillMineItem } from "./api/skills";
-import { rememberCreativeSkillName } from "@/lib/creative-skill-names";
 import {
   PAGE_SIZE,
   StateHint,
@@ -45,9 +44,6 @@ export function MyContent({
     try {
       const res = await skillsApi.mine({ pageNum, pageSize: PAGE_SIZE });
       if (id !== reqId.current) return; // 过期请求忽略
-      for (const r of res.records) {
-        rememberCreativeSkillName(r.creative_skill_id, r.name);
-      }
       setItems((prev) => (append ? [...prev, ...res.records] : res.records));
       setPage(res.current);
       setHasMore(res.current * res.size < res.total);
