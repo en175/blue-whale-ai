@@ -5,7 +5,7 @@
  * **active projectId 由 URL 路由传入**（/canvas-v2/[projectId]），非内部 state。
  * canvas（nodes/viewport/save/load）由 store 接管，page 按 URL projectId 调 store.load。
  *
- * 规格见 openspec canvas-frontend-architecture；ADR-0022（strangler）。
+ * 决策见 ADR-0022（strangler）。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadAccessToken } from "@/components/auth/authStorage";

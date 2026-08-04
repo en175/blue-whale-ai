@@ -41,7 +41,7 @@ next-env.d.ts
 *.tsbuildinfo
 
 # 本地说明文档（agent 生成的流程说明，不进仓）
-blue-whale-agent-workspace/Description file/
+docs/skills/Description file/
 
 # superpowers 本地产物（plans 等，不进仓）
 docs/superpowers/
