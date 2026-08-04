@@ -49,7 +49,7 @@ video-director-local/
 **示例 2：完整创作**
 
 > 你：给这个保温杯做个 30 秒 UGC 广告（附产品图）
-> → full-canvas：Brief → 推荐 Skill（读 library）→ 分镜表 → 每镜 Seedance 提示词 + 关键帧生图提示词
+> → full-canvas：Brief → 推荐 Skill（读 library）→ 分镜表 → 生图提示词卡（前期独立）→ 每镜 Seedance 提示词交付包
 
 **示例 3：爆款拆解 + 复刻**
 

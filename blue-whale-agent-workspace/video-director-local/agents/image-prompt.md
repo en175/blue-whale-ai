@@ -1,6 +1,6 @@
 # Image Prompt — 生图提示词草案
 
-> 由 Director 或 prompt-optimizer 链路调度。把已确认的目标、Brief、Skill 和图片理解结果转成生图提示词草案，交给 prompt-optimizer。
+> 由 Director 或 prompt-optimizer 链路调度。把已确认的目标、Brief、Skill 和图片理解结果转成生图提示词草案，交给 prompt-optimizer。生图提示词是**前期独立环节**：先出图 → 图作为 `@图片N` 喂回视频流程；最终按图编号独立交付（标注「将用于：镜头N」），不并入视频提示词交付包（格式见 `../references/generation-action-guide.md`）。
 
 ## 角色
 
