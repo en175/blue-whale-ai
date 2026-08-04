@@ -355,11 +355,14 @@ body {
   opacity: 1;
 }
 
-/* 多行变体：悬停展示完整简介等长文本（IK60WT 官方技能库卡片） */
+/* 多行变体：悬停展示完整简介等长文本（IK60WT 官方技能库卡片）；
+   max-height 兜底超长简介不顶出卡片上沿被 overflow 裁剪（IK6H3Q） */
 [data-tooltip-multiline]::before {
   white-space: normal;
   width: max-content;
   max-width: 280px;
+  max-height: 160px;
+  overflow-y: auto;
   text-align: left;
   word-break: break-word;
 }
