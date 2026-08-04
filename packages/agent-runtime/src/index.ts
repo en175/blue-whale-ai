@@ -1,5 +1,10 @@
 export { createFakeAgentAdapter } from "./fake-agent-adapter.js";
 export {
+  createControlledChatClient,
+  type ControlledChatClient,
+  type ControlledChatMessage,
+} from "./controlled-chat-client.js";
+export {
   createSkillSummarizeChatClient,
   createSkillSummarizePipeline,
   createUnavailableSkillSummarizePipeline,

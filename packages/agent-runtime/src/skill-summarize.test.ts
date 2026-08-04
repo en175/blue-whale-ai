@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  createSkillSummarizeChatClient,
   createSkillSummarizePipeline,
   createUnavailableSkillSummarizePipeline,
   loadSkillSummarizeRules,
@@ -486,69 +485,3 @@ describe("hasPending / 兜底管道 / env", () => {
   });
 });
 
-describe("SkillSummarizeChatClient（new-api 受控接口）", () => {
-  it("POST /v1/chat/completions：system=规则，随后为会话消息；返回首条 content", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [{ message: { content: VALID_SKILL_MD } }],
-        }),
-        { status: 200 },
-      ),
-    );
-    const client = createSkillSummarizeChatClient({
-      baseUrl: "https://new-api.internal",
-      token: "root-token",
-      model: "test-model",
-      fetchImpl,
-    });
-
-    const content = await client.complete({
-      rules: "规则",
-      messages: [
-        { role: "user", content: "第一条" },
-        { role: "assistant", content: "第二条" },
-      ],
-    });
-
-    expect(content).toBe(VALID_SKILL_MD);
-    const [url, init] = fetchImpl.mock.calls[0]!;
-    expect(url).toBe("https://new-api.internal/v1/chat/completions");
-    const body = JSON.parse((init as RequestInit).body as string);
-    expect(body.model).toBe("test-model");
-    expect(body.messages).toEqual([
-      { role: "system", content: "规则" },
-      { role: "user", content: "第一条" },
-      { role: "assistant", content: "第二条" },
-    ]);
-    expect((init as RequestInit).headers).toMatchObject({
-      Authorization: "Bearer root-token",
-    });
-  });
-
-  it("HTTP 非 200 / 空内容 → 抛错（上层按失败分支处理）", async () => {
-    const httpError = createSkillSummarizeChatClient({
-      baseUrl: "https://x",
-      token: "t",
-      model: "m",
-      fetchImpl: vi.fn().mockResolvedValue(new Response("", { status: 500 })),
-    });
-    await expect(
-      httpError.complete({ rules: "r", messages: [] }),
-    ).rejects.toThrow("HTTP 500");
-
-    const empty = createSkillSummarizeChatClient({
-      baseUrl: "https://x",
-      token: "t",
-      model: "m",
-      fetchImpl: vi
-        .fn()
-        .mockResolvedValue(
-          new Response(JSON.stringify({ choices: [] }), { status: 200 }),
-        ),
-    });
-    await expect(
-      empty.complete({ rules: "r", messages: [] }),
-    ).rejects.toThrow("空内容");
-  });
-});

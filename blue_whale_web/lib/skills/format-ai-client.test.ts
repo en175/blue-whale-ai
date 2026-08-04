@@ -6,7 +6,14 @@ import {
   loadSkillFormatRules,
 } from "./format-rules.js";
 
-// 受控 chat 客户端与固定规则（IK60X0）：fetchImpl 注入即可控 AI 替身，不触网。
+vi.mock("@blue-whale/agent-runtime", () => ({
+  createControlledChatClient: vi.fn(),
+}));
+import { createControlledChatClient } from "@blue-whale/agent-runtime";
+
+// format-ai 客户端是受控 chat 客户端（共用实现见 agent-runtime）的薄包装：
+// 网络行为测试集中在 controlled-chat-client.test.ts，本文件只测包装层
+// （draft → user 消息转换、options 委托透传）。固定规则测试保留。
 
 const OPTIONS = {
   baseUrl: "http://new-api.test",
@@ -14,76 +21,22 @@ const OPTIONS = {
   model: "test-model",
 };
 
-describe("createSkillFormatChatClient", () => {
-  it("POST /v1/chat/completions：Bearer 鉴权，system=固定规则、user=草稿，返回文本", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [{ message: { content: "格式化后的 SKILL.md" } }],
-        }),
-        { status: 200 },
-      ),
-    );
-    const client = createSkillFormatChatClient({ ...OPTIONS, fetchImpl });
+describe("createSkillFormatChatClient（薄包装）", () => {
+  it("委托 createControlledChatClient：options 原样透传，draft 包装为 user 消息，返回值原样返回", async () => {
+    const complete = vi.fn().mockResolvedValue("格式化后的 SKILL.md");
+    vi.mocked(createControlledChatClient).mockReturnValue({
+      complete,
+    });
+
+    const client = createSkillFormatChatClient({ ...OPTIONS });
     const out = await client.complete({ rules: "规则R", draft: "草稿D" });
+
     expect(out).toBe("格式化后的 SKILL.md");
-
-    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("http://new-api.test/v1/chat/completions");
-    expect(init.method).toBe("POST");
-    expect((init.headers as Record<string, string>).Authorization).toBe(
-      "Bearer root-token",
-    );
-    expect(JSON.parse(init.body as string)).toEqual({
-      model: "test-model",
-      messages: [
-        { role: "system", content: "规则R" },
-        { role: "user", content: "草稿D" },
-      ],
+    expect(createControlledChatClient).toHaveBeenCalledWith(OPTIONS);
+    expect(complete).toHaveBeenCalledWith({
+      rules: "规则R",
+      messages: [{ role: "user", content: "草稿D" }],
     });
-  });
-
-  it("上游非 2xx → 抛错", async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValue(new Response("boom", { status: 500 }));
-    const client = createSkillFormatChatClient({ ...OPTIONS, fetchImpl });
-    await expect(client.complete({ rules: "r", draft: "d" })).rejects.toThrow(
-      "HTTP 500",
-    );
-  });
-
-  it("超时 → abort 抛错（上游挂起不会无限等待）", async () => {
-    const fetchImpl = vi.fn(
-      (_url: unknown, init?: RequestInit) =>
-        new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener("abort", () =>
-            reject(new DOMException("Aborted", "AbortError")),
-          );
-        }),
-    ) as unknown as typeof fetch;
-    const client = createSkillFormatChatClient({
-      ...OPTIONS,
-      fetchImpl,
-      timeoutMs: 10,
-    });
-    await expect(client.complete({ rules: "r", draft: "d" })).rejects.toThrow();
-  });
-
-  it.each([
-    ["无 choices", {}],
-    ["content 为空串", { choices: [{ message: { content: "" } }] }],
-    ["content 非字符串", { choices: [{ message: { content: 42 } }] }],
-  ])("返回畸形（%s）→ 抛错", async (_label, payload) => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify(payload), { status: 200 }),
-      );
-    const client = createSkillFormatChatClient({ ...OPTIONS, fetchImpl });
-    await expect(client.complete({ rules: "r", draft: "d" })).rejects.toThrow(
-      "返回空内容",
-    );
   });
 });
 

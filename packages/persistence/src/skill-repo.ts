@@ -53,12 +53,6 @@ export interface SkillMineView {
   asset_domain: "official" | "personal";
 }
 
-export interface PersonalSkillView {
-  creative_skill_id: string;
-  name: string;
-  description: string | null;
-}
-
 /** 个人技能创建结果（IK60WU）。 */
 export interface PersonalSkillCreateResult {
   creative_skill_id: string;
@@ -225,13 +219,6 @@ export interface SkillRepo {
     creativeSkillId: string,
     auto: boolean,
   ): Promise<boolean>;
-  /** 名下个人技能（asset_domain='personal'），按 creative_skill_id asc。 */
-  listPersonalByOwner(userId: string): Promise<PersonalSkillView[]>;
-  /** owner 视角单行个人技能视图；非 owner 0 命中返回 null（不泄露存在性）。 */
-  findPersonalView(
-    ownerUserId: string,
-    creativeSkillId: string,
-  ): Promise<PersonalSkillView | null>;
   /** owner 查看个人技能正文（契约 §13.1，IK60WZ）：owner + personal 谓词
    *  JOIN 版本行取最新 body；非 owner/官方域/未知 → null（不泄露存在性），读路径容错。 */
   findPersonalContent(
@@ -363,22 +350,6 @@ async function resolveOfficialSourceSkillId(
     where: { id: sourceSkillId, is_delete: 0 },
   });
   return c > 0 ? sourceSkillId.toString() : null;
-}
-
-/** 名下个人技能白名单行（asset_domain='personal'，按 gmt_create desc，对齐 listMine §12.5）；
- *  表不存在/查询失败 → 空数组。 */
-async function queryPersonalByOwner(
-  prisma: PrismaClient,
-  userId: string,
-): Promise<PersonalSkillView[]> {
-  try {
-    return await prisma.$queryRawUnsafe<PersonalSkillView[]>(
-      `SELECT creative_skill_id, name, description FROM creative_skill WHERE owner_user_id = ? AND asset_domain = 'personal' ORDER BY gmt_create DESC`,
-      BigInt(userId),
-    );
-  } catch {
-    return [];
-  }
 }
 
 export function createSkillRepo(prisma: PrismaClient): SkillRepo {
@@ -646,23 +617,6 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         data: { auto_match: auto ? 1 : 0 },
       });
       return r.count > 0;
-    },
-
-    async listPersonalByOwner(userId) {
-      return queryPersonalByOwner(prisma, userId);
-    },
-
-    async findPersonalView(ownerUserId, creativeSkillId) {
-      try {
-        const rows = await prisma.$queryRawUnsafe<PersonalSkillView[]>(
-          `SELECT creative_skill_id, name, description FROM creative_skill WHERE owner_user_id = ? AND creative_skill_id = ? AND asset_domain = 'personal'`,
-          BigInt(ownerUserId),
-          creativeSkillId,
-        );
-        return rows[0] ?? null;
-      } catch {
-        return null;
-      }
     },
 
     async findPersonalContent(ownerUserId, creativeSkillId) {

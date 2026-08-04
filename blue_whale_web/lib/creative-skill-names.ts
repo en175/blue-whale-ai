@@ -21,13 +21,6 @@ export function rememberCreativeSkillName(
   namesById.set(creativeSkillId, name);
 }
 
-export function lookupCreativeSkillName(
-  creativeSkillId: string | null | undefined,
-): string | null {
-  if (!creativeSkillId) return null;
-  return namesById.get(creativeSkillId) ?? null;
-}
-
 /** 测试用：清空映射。 */
 export function clearCreativeSkillNames(): void {
   namesById.clear();
