@@ -1,5 +1,17 @@
 import { z } from "zod";
 
+import {
+  assetContextProjectionSchema,
+  sceneCardContextProjectionSchema,
+} from "./context-projection.js";
+export {
+  assetContextProjectionSchema,
+  sceneCardContextProjectionSchema,
+  type AssetContextProjection,
+  type SceneCardContextProjection,
+} from "./context-projection.js";
+import { planCardCandidateSchema } from "./plan-message.js";
+
 const digestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const stableIdSchema = z.string().regex(/^[a-z][a-z0-9_.-]{0,127}$/);
 const opaqueIdentitySchema = z
@@ -235,30 +247,6 @@ const mentionFailureReasonSchema = z.enum([
   "wrong_project",
 ]);
 
-/** 资产受限投影（T08，IK67H3）：复用 T04 mention 接纳冻结的字段集，
- *  **不含 storage_key / url / user_id** —— Agent 只拿到产品投影 + 临时访问能力。 */
-export const assetContextProjectionSchema = z
-  .object({
-    asset_type: z.string().min(1),
-    mime: z.string().nullable(),
-    size: z.string().regex(/^[0-9]+$/).nullable(),
-    width: z.number().int().nullable(),
-    height: z.number().int().nullable(),
-    duration_ms: z.number().int().nullable(),
-    content_sha256: z.string().nullable(),
-  })
-  .strict();
-
-/** 场景卡片受限投影（T08）：title/summary/content_markdown/version。 */
-export const sceneCardContextProjectionSchema = z
-  .object({
-    title: z.string().min(1),
-    summary: z.string().nullable(),
-    content_markdown: z.string().min(1),
-    version: z.number().int().positive(),
-  })
-  .strict();
-
 /** 单条 mention 的输入快照条目：mention 身份 + 当前可用性 + 受限投影。
  *  projection 为可选字段；冻结路径（claimNext 事务）对 unavailable 条目不写
  *  projection，不暴露内容——schema 不强制该组合，生产者只有冻结路径。 */
@@ -356,6 +344,14 @@ export const agentRunCommitSchema = z.discriminatedUnion("outcome", [
       outcome: z.literal("cancelled"),
     })
     .strict(),
+  runCommitBase
+    .extend({
+      outcome: z.literal("completed_with_plan"),
+      reasoning_summary: z.string().min(1).max(280),
+      plan_cards: z.array(planCardCandidateSchema).min(1).max(20),
+      capability_snapshot_version: z.literal(1),
+    })
+    .strict(),
 ]);
 
 export type AgentRuntimeManifest = z.infer<typeof agentRuntimeManifestSchema>;
@@ -386,25 +382,20 @@ export type AgentProviderCallStatus = z.infer<
 export type AgentRunTerminalReason = z.infer<typeof agentRunTerminalReasonSchema>;
 export type AgentRunWork = z.infer<typeof agentRunWorkSchema>;
 export type AgentHistoryMessage = AgentRunWork["history_messages"][number];
-export type AssetContextProjection = z.infer<
-  typeof assetContextProjectionSchema
->;
-export type SceneCardContextProjection = z.infer<
-  typeof sceneCardContextProjectionSchema
->;
 export type MentionInputEntry = z.infer<typeof mentionInputEntrySchema>;
 export type MentionInputSnapshot = z.infer<typeof mentionInputSnapshotSchema>;
 export type MentionAvailability = MentionInputEntry["availability"];
 export type MentionFailureReason = z.infer<typeof mentionFailureReasonSchema>;
 export type AgentRunCommit = z.infer<typeof agentRunCommitSchema>;
 
-function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalize);
+/** JSON 值键序规范化：递归按 key 排序，得到确定性序列化输入（digest 计算的共享基元）。 */
+export function canonicalizeJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeJsonValue);
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value)
         .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, entry]) => [key, canonicalize(entry)]),
+        .map(([key, entry]) => [key, canonicalizeJsonValue(entry)]),
     );
   }
   return value;
@@ -414,5 +405,5 @@ function canonicalize(value: unknown): unknown {
 export function canonicalAgentRunPinDigestInput(
   pin: Omit<AgentRunPin, "pin_digest">,
 ): string {
-  return JSON.stringify(canonicalize(pin));
+  return JSON.stringify(canonicalizeJsonValue(pin));
 }

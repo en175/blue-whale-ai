@@ -41,6 +41,8 @@ export interface SnapshotData {
   };
   conversation_messages: readonly unknown[];
   agent_runs: readonly unknown[];
+  /** 已原子接纳的不可变计划卡（T09，IK67H6，契约 §9）。 */
+  plan_messages: readonly unknown[];
   generation_jobs: SnapshotGenerationJob[];
   assets: Record<string, SnapshotAssetSummary>;
   high_watermark_cursor: WireInteger;
@@ -149,6 +151,24 @@ export async function handleGetSnapshot(
                 run.active_input_request.input_request_id,
               ),
             },
+    })),
+    plan_messages: conversation.plan_messages.map((plan) => ({
+      ...plan,
+      message_id: wireInteger(plan.message_id),
+      conversation_id: wireInteger(plan.conversation_id),
+      agent_run_id: wireInteger(plan.agent_run_id),
+      target_scene_card_mention_id:
+        plan.target_scene_card_mention_id === null
+          ? null
+          : wireInteger(plan.target_scene_card_mention_id),
+      base_plan_message_id:
+        plan.base_plan_message_id === null
+          ? null
+          : wireInteger(plan.base_plan_message_id),
+      source_plan_message_id:
+        plan.source_plan_message_id === null
+          ? null
+          : wireInteger(plan.source_plan_message_id),
     })),
     generation_jobs: generation_jobs.map(toWireJob),
     assets: assetMap,

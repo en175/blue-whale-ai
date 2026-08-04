@@ -5,12 +5,22 @@ import {
   writePlanCardsToolInputSchema,
 } from "./write-plan-cards-tool.js";
 
-describe("executeWritePlanCardsTool (T08 占位)", () => {
+describe("executeWritePlanCardsTool", () => {
   it("validates card shape and stages a count without promoting to PlanMessage (T09)", async () => {
     const parsed = writePlanCardsToolInputSchema.parse({
       cards: [
-        { title: "镜头一", summary: "蓝鲸入水", content_markdown: "# 镜头一" },
-        { title: "镜头二", summary: null, content_markdown: "# 镜头二" },
+        {
+          application_kind: "image_generate",
+          title: "镜头一",
+          summary: "蓝鲸入水",
+          content_markdown: "# 镜头一",
+        },
+        {
+          application_kind: "scene_card_create",
+          title: "镜头二",
+          summary: null,
+          content_markdown: "# 镜头二",
+        },
       ],
     });
     const outcome = await executeWritePlanCardsTool(parsed);

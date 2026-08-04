@@ -1,7 +1,7 @@
 # Node Agent Runtime Contract v1
 
 - **状态**：Accepted
-- **关联工单**：IK67GG（T05）、IK67GY（T06，增补 §6–§7）、IK67GZ（T07，增补 §8）
+- **关联工单**：IK67GG（T05）、IK67GY（T06，增补 §6–§7）、IK67GZ（T07，增补 §8）、IK67H3（T08，增补 MentionInputSnapshot）、IK67H6（T09，增补 §7 标记 / §8.4 重放 / §9 PlanMessage 提交）
 - **消费者**：Next.js Product API、Node Agent Worker、AgentChatPanel
 
 ## 1. `AgentRuntimeManifest`
@@ -120,8 +120,17 @@ T05 的确定性指纹回显行为：
   修改请求为 `由系统选择的默认目标` / `由系统选择的默认变化`）。
 - 回答含 `不支持：Z`：`Z` 记为不受支持的明确要求，继续澄清该项，不静默降级；只有 User
   随后用必需项标记重新给出受支持的要求才解除。`你决定` 不得移除不受支持的要求。
-- `立即出计划`：可减少可选追问，但必需项缺失仍须询问，且不得绕过最终确认。
-- 对齐完成后 Runtime 复述需求并发起最终确认请求；回答含 `同意` 时提交 `completed`。
+- `立即出计划`：必需项齐备时**跳过最终确认**直接提交 `completed_with_plan`（T09 补齐：
+  §7 先前声明未实现，本次落地）；必需项缺失仍按顺序询问，不绕过澄清。
+- 提交形状标记（决定 `completed_with_plan` 的候选 `plan_cards` 形状，从创作目标段检测）：
+  - 默认：1 张 `image_generate` 卡，`content_markdown` 含对齐值，行内 `asset://<mention_id>`
+    引用本轮首个 available asset（无则省略）。
+  - `出两张`：2 卡混合 `image_generate` + `scene_card_create`，均带 `sequence_label_noun=分镜`；
+    服务端据卡片顺序派生 ordinal/total_in_batch。
+  - `覆盖场景卡`：1 张独占 `scene_card_replace`，`target_scene_card_mention_id` 绑定本轮首个
+    available scene_card mention；`base_scene_card_version` 由 Product API 从引用事实解析，Agent 不自填。
+- 对齐完成后 Runtime 复述需求并发起最终确认请求；回答含 `同意` 时提交 `completed_with_plan`
+  （正式消息即 plan_cards，不带 assistant_message；确认文本走临时交付，RunCommit 闭合不提升）。
 - 回答含 `继续讨论`：回到 `alignment` 继续澄清；回答含 `不要创建计划` 或 `停止`：提交 `cancelled`。
 
 ## 8. 临时交付、用户停止/重试与供应商调用记录（T07）
@@ -186,7 +195,8 @@ T05 的确定性指纹回显行为：
 `call_slot=0`，每 Advance 恰好一次物理调用）：
 
 - 状态机：`in_flight → succeeded | failed_definitive | outcome_unknown`。
-  `succeeded` 必须持久化完整可重放结果（content、reasoning_summary、action、usage）；
+  `succeeded` 必须持久化完整可重放结果（`content`、`reasoning_summary`、`action`、`auto_activation`，
+  submit_plan 时另带 `plan_cards`——contracts `planCardCandidateSchema.array()` 校验后的线缆形态）；
   用户停止时 `in_flight` 置 `outcome_unknown`。
 - Worker claim 后先读当前 Advance 的调用记录：
   - `succeeded` → 直接重放持久化结果，不调用 Provider，不新建记录；
@@ -213,3 +223,74 @@ T05 的确定性指纹回显行为：
 `agent_run.status_changed` 与 Snapshot 的 Run 投影增加 `terminal_reason`、
 `failure_code`、`retry_count`（见 §5）。provisional 交付永不进入 Snapshot；
 刷新恢复后活动投影中没有临时文本，只有已接纳事实与 Run 状态。
+
+## 9. PlanMessage 提交（T09，IK67H6）
+
+Agent 在最终确认后经 `write_plan_cards` 提交完整有序候选，由 RunCommit 第 5 个 outcome
+`completed_with_plan` **原子接纳**为不可变 PlanMessage。Run 终态仍 `status=completed`，
+仅 commit outcome 区分路径（保持「completed = 一条普通助手消息」不变量）。本票只冻结不应用——
+不创建 SceneCard / GenerationJob / Canvas（T10/T11/T14）。
+
+### 9.1 不可变字段与存储
+
+- `conversation_messages` 新增 `content_type`（`text` | `plan_message`，默认 `text`）；PlanMessage
+  是其计划子类型，共享对话 `sequence_no` 顺序。
+- `plan_messages`（与 `conversation_messages` 1:1，`message_id` 唯一外键）存冻结字段：
+  `ordinal` / `total_in_batch` / `sequence_label` / `application_kind` /
+  `target_scene_card_mention_id` / `base_scene_card_version` / `content_markdown`(LongText) /
+  `derived_references`(JSON) / `frozen_generation_parameters`(JSON) /
+  `capability_snapshot_version`(JSON) / `provider_prompt_projection`(JSON) /
+  `base_plan_message_id` / `source_plan_message_id`。
+- `run_commits.outcome` 加宽至 `VARCHAR(32)` 以容纳 `completed_with_plan`。
+- `PlanApplicationKind` ∈ {`image_generate`, `scene_card_create`, `scene_card_replace`}。
+  图片用 `image_generate`（直接生成图片，不建 SceneCard）；视频用 `scene_card_create`（新建 SceneCard）
+  或 `scene_card_replace`（覆盖本轮唯一 available SceneCardMention）。
+
+### 9.2 write_plan_cards 只校验、RunCommit 接纳
+
+- `write_plan_cards` 工具只校验候选形状（`planCardCandidateSchema`，`application_kind` 必填，
+  `scene_card_replace` 必带 `target_scene_card_mention_id`）并返回校验计数（`promoted=false`），
+  **不创建 PlanMessage / ConversationMessage / SceneCard / GenerationJob**（AC#1）。
+- 接纳由 RunCommit `completed_with_plan` 原子完成：载荷 `{outcome, reasoning_summary(1..280),
+  plan_cards[1..20], capability_snapshot_version:1}`，不带 `assistant_message`——正式消息即 plan_cards。
+- Agent 只提交覆盖句柄，`base_scene_card_version` 由 Product API 从 `mention.target_version` 解析冻结，
+  Agent 不自填 SceneCard 身份或版本（CONTEXT 权威约束）。
+
+### 9.3 原子验证（零写入前提，AC#2/#5）
+
+验证在 CAS 锁后、任何 `conversation_messages` / `plan_messages` 写入前；任一失败走 `failed`
+commit（`failure_code=plan_card_validation_failed`），**零 plan 行**：
+
+- 结构：`scene_card_replace` 必须独占单卡（不能与其他类型混合，也不能多张 replace）；
+  非 replace 不得带 `target` 字段。
+- 引用当前可用性（AC#5 实时闸门，不读冻结值）：复用 `loadMentionTargetFacts` +
+  `classifyMentionAvailability` 重查本轮 MentionInputSnapshot 全部条目，任一 `unavailable` → FAIL。
+- 逐卡：正则解析 `content_markdown` 的 `asset://<mention_id>`，必须命中本轮快照（幻觉→FAIL），
+  按首次出现去重 → `derived_references`；`scene_card_replace` 的 target 必须是本轮当前
+  `available`（非 stale）scene_card mention。
+- 参数 ∈ 能力枚举（AC#6）：事务内 `generation_model_capability.findMany` 按 kind 选 image/video，
+  用户 overrides + 能力 defaults 冻结并逐项校验 ∈ `supported_*`，否则 FAIL
+  （`plan_card_parameter_unsupported` 形态归并入 `plan_card_validation_failed`）；未指定项用能力默认。
+
+### 9.4 冻结的确定性派生
+
+- `capability_snapshot_version` = `{schema_version:1, capability_type, model_id, provider_id,
+  row_version, digest:sha256(canonicalize(能力视图))}`（能力表无全局版本号，用 row.version + digest 兜底）。
+- `provider_prompt_projection` 由 contracts 纯函数 `deriveProviderPromptProjection` 派生：
+  `prompt_text === content_markdown` 原文（**不改写、不调第二模型**，AC#7）；
+  `reference_assets` 按首次出现顺序、role 由 `first/last_frame_mention_seq` 反查（未指定即 `reference`）；
+  `parameters` 原样透传冻结参数。
+- 多卡批次：服务端据卡片顺序派生 `ordinal` / `total_in_batch` 并持久化 `sequence_label` 名词；
+  单卡 `sequence_label` 为 NULL。
+
+### 9.5 恢复投影与接管重放（AC#8）
+
+- Snapshot（GET /snapshot）`plan_messages` 数组按 `(agent_run_id, ordinal)` 排序透传冻结字段；
+  `conversation_messages` 投影携带 `content_type`。临时候选与验证失败候选永不进入此列表。
+- 接管重放 submit_plan：`result_payload.plan_cards` 经 `planCardCandidateSchema.array()` 校验，
+  失败 → `outcome_unknown` → failed（不把幻觉/残缺候选交给 RunCommit）。
+- 幂等：`request_digest` 纳入完整 `plan_cards` 数组——接管重放相同 cards → 相同 digest → replay；
+  不同 cards → conflict。
+- 临时交付边界：submit_plan 的确认文本（`result.content`）走 `appendProvisionalChunks` 临时交付，
+  由 `commitPlanMessages` 的 `closeStreamingDelivery(completed)` 闭合，**不提升为正式消息**
+  （正式消息只有 plan_cards）。

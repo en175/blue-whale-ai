@@ -272,4 +272,56 @@ describe("Node Agent Runtime Contract v1", () => {
       }),
     ).toThrow();
   });
+
+  it("completed_with_plan 接纳计划卡候选，且不带 assistant_message", () => {
+    const parsed = agentRunCommitSchema.parse({
+      schema_version: 1,
+      advance_id: "11",
+      fencing_token: "3",
+      expected_run_version: 2,
+      request_digest: digest,
+      outcome: "completed_with_plan",
+      reasoning_summary: "已对齐需求，提交两张计划卡。",
+      plan_cards: [
+        {
+          application_kind: "image_generate",
+          title: "海报主视觉",
+          content_markdown: "一只冲浪的蓝鲸 asset://101",
+        },
+        {
+          application_kind: "scene_card_create",
+          title: "开场分镜",
+          content_markdown: "蓝鲸跃出水面 asset://102",
+        },
+      ],
+      capability_snapshot_version: 1,
+    });
+    if (parsed.outcome !== "completed_with_plan") {
+      throw new Error("expected completed_with_plan outcome");
+    }
+    expect(parsed.plan_cards).toHaveLength(2);
+    expect(parsed.plan_cards[0].application_kind).toBe("image_generate");
+    expect(parsed.plan_cards[1].application_kind).toBe("scene_card_create");
+    // 正式消息即 plan_cards，不得携带 assistant_message。
+    expect(() =>
+      agentRunCommitSchema.parse({
+        schema_version: 1,
+        advance_id: "11",
+        fencing_token: "3",
+        expected_run_version: 2,
+        request_digest: digest,
+        outcome: "completed_with_plan",
+        reasoning_summary: "误带正文。",
+        plan_cards: [
+          {
+            application_kind: "image_generate",
+            title: "海报主视觉",
+            content_markdown: "一只冲浪的蓝鲸",
+          },
+        ],
+        capability_snapshot_version: 1,
+        assistant_message: { content: "must not coexist" },
+      }),
+    ).toThrow();
+  });
 });

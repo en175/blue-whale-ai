@@ -203,6 +203,7 @@ model conversation_messages {
   agent_run_id      BigInt?
   client_message_id String?  @db.VarChar(64)
   role              String   @db.VarChar(16)
+  content_type      String   @default("text") @db.VarChar(24)
   content           String   @db.Text
   sequence_no       Int
   gmt_create        DateTime @default(now()) @db.DateTime(0)
@@ -306,11 +307,40 @@ model run_commits {
   advance_id     BigInt   @unique(map: "uk_run_commit_advance")
   agent_run_id   BigInt
   request_digest String   @db.VarChar(71)
-  outcome        String   @db.VarChar(16)
+  outcome        String   @db.VarChar(32)
   receipt        Json
   gmt_create     DateTime @default(now()) @db.DateTime(0)
 
   @@index([agent_run_id], map: "idx_run_commit_agent_run")
+}
+
+/// 计划卡冻结态（IK67H6，契约 §9）：与 conversation_messages(content_type=plan_message) 1:1，
+/// 存不可变权威 Markdown、按首次出现去重的素材引用、完整生成参数、能力快照版本、ProviderPromptProjection 与序列标签。
+/// 手动应用（创建 SceneCard / GenerationJob）由 T10/T11 交付，本票只冻结不应用。
+model plan_messages {
+  id                           BigInt   @id @default(autoincrement())
+  message_id                   BigInt   @unique(map: "uk_plan_message_message")
+  conversation_id              BigInt
+  project_id                   BigInt
+  agent_run_id                 BigInt
+  ordinal                      Int
+  total_in_batch               Int
+  sequence_label               String?  @db.VarChar(255)
+  application_kind             String   @db.VarChar(32)
+  target_scene_card_mention_id BigInt?
+  base_scene_card_version      Int?
+  content_markdown             String   @db.LongText
+  derived_references           Json
+  frozen_generation_parameters Json
+  capability_snapshot_version  Json
+  provider_prompt_projection   Json
+  base_plan_message_id         BigInt?
+  source_plan_message_id       BigInt?
+  gmt_create                   DateTime @default(now()) @db.DateTime(0)
+
+  @@index([project_id], map: "idx_plan_message_project")
+  @@index([agent_run_id], map: "idx_plan_message_agent_run")
+  @@index([application_kind], map: "idx_plan_message_application_kind")
 }
 
 /// 临时助手交付（IK67GZ，契约 §8.1）：独立身份与顺序，永不成为 ConversationMessage。

@@ -85,6 +85,7 @@ describe("Fake Agent Adapter PlanPhase", () => {
     historyMessages,
     runtimeInstructions: [],
     creativeSkill: null,
+    mentionProjections: [] as const,
   });
   const adapter = createFakeAgentAdapter();
 
@@ -186,20 +187,26 @@ describe("Fake Agent Adapter PlanPhase", () => {
     );
   });
 
-  it("立即出计划不能绕过最终确认", async () => {
+  it("立即出计划在必需项齐备时跳过最终确认直接提交单卡", async () => {
     const result = await adapter.invoke(
       request("立即出计划", [
         { role: "user", content: "创作：一张海报，主体：蓝鲸，预期：极简海报" },
         { role: "assistant", content: "请告诉我你期望的结果是什么？" },
       ]),
     );
-    expect(result.action).toMatchObject({
-      kind: "clarify",
-      stage: "awaiting_final_confirmation",
+    expect(result.action).toEqual({
+      kind: "submit_plan",
+      cards: [
+        {
+          applicationKind: "image_generate",
+          title: "蓝鲸",
+          contentMarkdown: "主体「蓝鲸」，预期「极简海报」。",
+        },
+      ],
     });
   });
 
-  it("对确认请求回复同意后完成对齐", async () => {
+  it("对确认请求回复同意后提交计划卡候选", async () => {
     const result = await adapter.invoke(
       request("同意", [
         { role: "user", content: "创作：一张海报，主体：蓝鲸，预期：极简海报" },
@@ -210,10 +217,75 @@ describe("Fake Agent Adapter PlanPhase", () => {
         },
       ]),
     );
-    expect(result.action).toEqual({ kind: "respond" });
+    expect(result.action).toEqual({
+      kind: "submit_plan",
+      cards: [
+        {
+          applicationKind: "image_generate",
+          title: "蓝鲸",
+          contentMarkdown: "主体「蓝鲸」，预期「极简海报」。",
+        },
+      ],
+    });
     expect(result.content).toBe(
-      "已完成需求对齐：主体「蓝鲸」，预期「极简海报」。",
+      "已完成需求对齐：主体「蓝鲸」，预期「极简海报」；正式提交 1 张计划卡。",
     );
+  });
+
+  it("出两张标记产 2 卡混合 image_generate + scene_card_create 并带分镜名词", async () => {
+    const result = await adapter.invoke(
+      request(
+        "创作：主体：蓝鲸，预期：动态海报，出两张 立即出计划",
+      ),
+    );
+    expect(result.action.kind).toBe("submit_plan");
+    if (result.action.kind !== "submit_plan") return;
+    expect(result.action.cards).toHaveLength(2);
+    expect(result.action.cards[0]).toMatchObject({
+      applicationKind: "image_generate",
+      sequenceLabelNoun: "分镜",
+    });
+    expect(result.action.cards[1]).toMatchObject({
+      applicationKind: "scene_card_create",
+      sequenceLabelNoun: "分镜",
+    });
+  });
+
+  it("覆盖场景卡标记产独占 scene_card_replace 并绑定本轮场景卡句柄", async () => {
+    const result = await adapter.invoke({
+      prompt: "修改：目标：开场分镜，变化：变明亮 覆盖场景卡 立即出计划",
+      historyMessages: [],
+      runtimeInstructions: [],
+      creativeSkill: null,
+      mentionProjections: [
+        {
+          mention_id: "501",
+          type: "scene_card",
+          availability: "available",
+          projection: {
+            title: "开场分镜",
+            summary: null,
+            content_markdown: "原内容",
+            version: 3,
+          },
+        },
+      ],
+    });
+    expect(result.action.kind).toBe("submit_plan");
+    if (result.action.kind !== "submit_plan") return;
+    expect(result.action.cards).toHaveLength(1);
+    expect(result.action.cards[0]).toMatchObject({
+      applicationKind: "scene_card_replace",
+      targetSceneCardMentionId: "501",
+    });
+  });
+
+  it("覆盖场景卡但本轮无可用场景卡时回退自然语言澄清", async () => {
+    const result = await adapter.invoke(
+      request("修改：目标：开场分镜，变化：变明亮 覆盖场景卡 立即出计划"),
+    );
+    expect(result.action).toMatchObject({ kind: "clarify", stage: "alignment" });
+    expect(result.content).toContain("请先引用要覆盖的场景卡");
   });
 
   it("必需项未齐时同意不直接完成，回到缺失项", async () => {
