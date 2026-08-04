@@ -53,15 +53,15 @@ Director 呈现拆解报告后，停住让用户确认 + 做三个决策：
 | 步骤 | agent | input_mode | 动作 |
 |---|---|---|---|
 | 1 | brief | replicate | 从配方 + product understanding 预填 Brief |
-| 2 | skill-selector | replicate_faithful / replicate_method | 照搬→高置信直推 pattern 对应 Skill；差异化→推候选 |
+| 2 | skill-selector | replicate_faithful / replicate_method | 照搬→高置信直推 pattern 对应 Skill + 告知；差异化→多候选开放问方向 |
 | 3 | storyboard | replicate_faithful / replicate_method | 照搬→照抄 beats 换产品；差异化→pattern 作约束自主生成 |
 | 4 | prompt-optimizer | （零改造） | 出可复制提示词交付包 |
 | 5 | review | replicate | 对照配方检查保留度 |
 
 ### 两复刻度对 storyboard 的影响
 
-- **照搬（replicate_faithful）**：storyboard 几乎照抄配方 beats——每个 beat 的顺序 / 时长 / 意图不变，画面内容换成当前产品；钩子同 type 换内容；卖点同序同 evidence_type。Skill 高置信直推。
-- **差异化（replicate_method）**：storyboard 用 pattern 作约束自主生成——保留「强钩子 / 有证据支撑的卖点 / 节奏服务叙事」原则，beats 可重组、钩子可换 type、节奏可调；Skill 推候选让用户选。
+- **照搬（replicate_faithful）**：storyboard 几乎照抄配方 beats——每个 beat 的顺序 / 时长 / 意图不变，画面内容换成当前产品；钩子同 type 换内容；卖点同序同 evidence_type。Skill 高置信直推 + 一句话告知。
+- **差异化（replicate_method）**：storyboard 用 pattern 作约束自主生成——保留「强钩子 / 有证据支撑的卖点 / 节奏服务叙事」原则，beats 可重组、钩子可换 type、节奏可调；Skill 多候选开放问方向，不二选一。
 
 ## 多轮漂移防护
 
