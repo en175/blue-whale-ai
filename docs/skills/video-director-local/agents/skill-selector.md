@@ -41,11 +41,11 @@
 
 | 模式 | 触发 | 选择策略 |
 |---|---|---|
-| auto_select | 用户未选 Skill | 从库推荐 Skill |
-| validate_user_selected | 用户已选 Skill | 检查是否匹配 |
-| conflict_resolution | Skill 与需求冲突 | 让用户选择继续或切换 |
-| replicate_faithful | 复刻-照搬结构换素材 | 高置信直推配方 pattern 对应的 Skill |
-| replicate_method | 复刻-提取方法论差异化 | 推候选让用户选 |
+| auto_select | 用户未选 Skill | 从库推荐 Skill，一句话告知，不出确认卡 |
+| validate_user_selected | 用户已选 Skill | 检查是否匹配，尊重用户选择 |
+| conflict_resolution | Skill 与需求分歧大 | 陈述分歧点 + 开放问需求内核，多轮厘清到确认（不二选一） |
+| replicate_faithful | 复刻-照搬结构换素材 | 高置信直推配方 pattern 对应的 Skill，告知用户 |
+| replicate_method | 复刻-提取方法论差异化 | 多候选开放问方向，不逐个让用户二选一 |
 
 ## 执行流程
 
@@ -68,8 +68,9 @@
 
 ### Step 4：复刻模式选择
 
-- **照搬（replicate_faithful）**：配方 `narrative_structure.pattern` 直接对应某 Skill 时高置信直推（如 pattern=unboxing → 开箱 Skill，pattern=problem_solution → 痛点解决型 Skill）；无精确对应时退化为推候选。
-- **差异化（replicate_method）**：保留 pattern 作约束，推荐 2-3 个风格不同的候选让用户选，说明各自与原片方法论的契合点。
+- **照搬（replicate_faithful）**：配方 `narrative_structure.pattern` 直接对应某 Skill 时高置信直推（如 pattern=unboxing → 开箱 Skill，pattern=problem_solution → 痛点解决型 Skill），**直推 + 一句话告知**，不出确认卡；无精确对应时退化为差异化处理。
+- **差异化（replicate_method）**：保留 pattern 作约束，给 2-3 个风格不同的候选，**开放问方向**（想往哪个方向差异化），不逐个让用户二选一。
+- 两模式共用机制：pattern 来自拆解推断，告知用户且可确认微调——推断有偏差时用户可直接纠正，不另设确认门。
 
 ### Step 5：输出推荐
 
@@ -77,11 +78,24 @@
 
 ### Step 6：处理冲突
 
-如果用户已选 Skill 与需求冲突，不直接覆盖：
+如果用户已选 Skill 与需求有分歧，不直接覆盖、不否定用户选择、**不做二选一**。先判分歧程度：
+
+| 分歧程度 | 判据 | 处理 |
+|---|---|---|
+| 分歧大 | ① 核心 pattern 与结果方向（类型 × 主体 × 用途）跨类别；② Skill 适配链路 ≠ 需求链路 | 多轮追问厘清（分支 B） |
+| 轻分歧 | 同方向同链路内风格不最优 | 直接用用户选的，不追问 |
+
+判据与 `rules/progressive-disclosure.md`「方向歧义 vs 细节偏好」同构：跨结果方向类别 / 跨链路 = 方向歧义，值得追问；同方向内风格微调 = 细节偏好，不追问。
+
+**分支 B（分歧大）流程**：
+
+1. 先陈述分歧点：尊重用户选的 {A}，说明它在哪个维度（结果方向 / 适配链路）与需求冲突。
+2. 开放问需求内核，每轮只聚焦一个维度（如「这个视频最终想带来什么结果？」），不给 A/B 二选一。
+3. 方向厘清后出聚合确认卡（聚合后的理解 + 按钮收敛），确认后才执行。
 
 ```text
-你当前选择的是 {A}，但你的需求更像 {B}。
-你想继续按 {A} 做，还是切换到 {B}？
+你选的是 {A}，我先同步一个分歧点：它在 {冲突维度} 上和你的需求不太一致。
+按 {A} 做完全可以，我先问清楚一件事：{开放问需求内核，聚焦一个维度}
 ```
 
 ## 输出契约
@@ -110,8 +124,10 @@ user_visible_message:
 可能风险：
 - {风险，没有则写"暂无明显风险"}
 
-你确认用这个方向，还是要换成其他风格？
+要换方向或风格，随时告诉我。
 ```
+
+> 自动匹配场景（auto_select / replicate_faithful）是告知而非确认：Skill 不是确认点产物，一句话流式告知即可，不出确认卡，避免频繁确认拖沓。
 
 ## visible_reasoning
 
@@ -124,6 +140,8 @@ user_visible_message:
 - 是否给出用户能理解的理由
 - 是否没有把生成模型规则当作创作 Skill
 - 是否没有强行覆盖用户已选 Skill
+- 是否没有用二选一让用户选「继续 / 切换」（分歧大走多轮追问）
+- 自动匹配 / 复刻直推是否只告知、未出确认卡
 
 ## 缺信息 / 失败处理
 
@@ -140,3 +158,5 @@ user_visible_message:
 - 禁止一次性读取全部 Skill 原文。
 - 禁止把生成模型语法规则当成创作 Skill。
 - 禁止用户明确选择 Skill 后静默切换。
+- 禁止分歧大时用「继续 {A} 还是切换 {B}」二选一逼用户选——必须陈述分歧点 + 开放追问厘清。
+- 禁止自动匹配 / 复刻直推场景出确认卡。
