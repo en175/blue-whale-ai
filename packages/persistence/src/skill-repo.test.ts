@@ -557,6 +557,18 @@ describe("SkillRepo", () => {
     expect(sql).toMatch(/ON DUPLICATE KEY UPDATE.*is_delete = 0/s);
   });
 
+  it("addReference 移除后重加：upsert SQL 刷新 gmt_create，重加技能按最近添加时间进顶部（IK693G，spec 故事 27/30）", async () => {
+    const { prisma, executeRaw } = createAddPrisma({
+      officialName: "深度写作",
+    });
+    await createSkillRepo(prisma).addReference("9", "3");
+
+    const sql = (executeRaw.mock.calls[0][0] as string[]).join("?");
+    expect(sql).toMatch(
+      /ON DUPLICATE KEY UPDATE.*gmt_create = CURRENT_TIMESTAMP\(3\)/s,
+    );
+  });
+
   it("removeReferenceByCreativeSkillId resolve 命中后逻辑删对应 user_skill 行", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {

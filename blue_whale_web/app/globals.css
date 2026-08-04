@@ -136,6 +136,28 @@ body {
   --tc-login-primary: #4e40f3;
   --tc-login-primary-hover: #3d33d1;
 
+  /* 面板内下拉菜单底色（IK693G：SkillPanel 排序/行菜单硬编码替换） */
+  --tc-menu-bg: #1c1c1c;
+
+  /* 个人技能确定性封面渐变色板（IK693G：skill-cover.ts 硬编码替换）。
+     8 组 from→to，按名称哈希取模选取；skill-cover 组（名称驱动装饰色板）独立于品牌强调色体系。 */
+  --tc-skill-cover-1-from: #3b82f6;
+  --tc-skill-cover-1-to: #1e3a8a;
+  --tc-skill-cover-2-from: #8b5cf6;
+  --tc-skill-cover-2-to: #4c1d95;
+  --tc-skill-cover-3-from: #ec4899;
+  --tc-skill-cover-3-to: #831843;
+  --tc-skill-cover-4-from: #f59e0b;
+  --tc-skill-cover-4-to: #78350f;
+  --tc-skill-cover-5-from: #10b981;
+  --tc-skill-cover-5-to: #064e3b;
+  --tc-skill-cover-6-from: #06b6d4;
+  --tc-skill-cover-6-to: #0c4a6e;
+  --tc-skill-cover-7-from: #ef4444;
+  --tc-skill-cover-7-to: #7f1d1d;
+  --tc-skill-cover-8-from: #6366f1;
+  --tc-skill-cover-8-to: #312e81;
+
   --tc-card-hover-stroke: rgba(156, 156, 156, 0.58);
   --tc-card-hover-shadow:
     0 0 0 3px rgba(142, 142, 142, 0.12), 0 12px 32px rgba(0, 0, 0, 0.34);
