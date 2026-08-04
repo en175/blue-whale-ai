@@ -3,6 +3,10 @@ import {
   type AgentRuntimeManifest,
 } from "@blue-whale/contracts";
 import { createHash } from "node:crypto";
+import { z } from "zod";
+
+import { READ_ASSET_TOOL } from "./read-asset-tool.js";
+import { WRITE_PLAN_CARDS_TOOL } from "./write-plan-cards-tool.js";
 
 const ROLE_CONTENT =
   "# Blue Whale Agent\n\nYou are Blue Whale, a creative collaborator. Answer the user's current request clearly and safely.";
@@ -10,14 +14,31 @@ const ORDINARY_CONVERSATION_RULE =
   "# Ordinary Conversation\n\nReturn one complete assistant message. Provide a short ReasoningSummary without revealing chain of thought.";
 
 const MODEL_REGISTRY = new Set(["fake:deterministic-v1:fake-v1"]);
-const TOOL_REGISTRY = new Set<string>();
+
+/** Agent 产品工具注册表（T08，IK67H3）：限定工具表面只允许 read_asset 与
+ *  write_plan_cards（AC#6）。每项带入参/出参校验 schema。 */
+interface ToolRegistryEntry {
+  tool_id: string;
+  registry_version: number;
+  inputSchema: z.ZodType;
+  outputSchema: z.ZodType;
+}
+const TOOL_REGISTRY: readonly ToolRegistryEntry[] = [
+  READ_ASSET_TOOL,
+  WRITE_PLAN_CARDS_TOOL,
+];
+/** Agent 产品工具表面键集合（T08，AC#6）：`tool_id:registry_version`。
+ *  manifest 校验与 worker 的 RunPin 工具闸共用同一份。 */
+export const AGENT_TOOL_SURFACE_KEYS: ReadonlySet<string> = new Set(
+  TOOL_REGISTRY.map((tool) => `${tool.tool_id}:${tool.registry_version}`),
+);
 
 const bundledManifestSource = {
   schema_version: 1,
   manifest_id: "blue_whale_default",
   manifest_version: "1.0.0",
   manifest_digest:
-    "sha256:555b20ac1027311e6fce4c25a37e3f0bfd505700c1b64958e9d8b687a439b70c",
+    "sha256:45868c33ed4a1681643a24db2b356b9a1c5bd84a281db33f90f59af57c5bec79",
   resources: [
     {
       resource_id: "role.default",
@@ -59,7 +80,10 @@ const bundledManifestSource = {
     max_output_characters: 4_000,
     protocol_repair_attempts: 0,
   },
-  tool_grants: [],
+  tool_grants: TOOL_REGISTRY.map((tool) => ({
+    tool_id: tool.tool_id,
+    registry_version: tool.registry_version,
+  })),
 } as const;
 
 function sha256(value: string): string {
@@ -174,7 +198,7 @@ export function validateAgentRuntimeManifest(
     }
   }
   for (const grant of parsed.tool_grants) {
-    if (!TOOL_REGISTRY.has(`${grant.tool_id}:${grant.registry_version}`)) {
+    if (!AGENT_TOOL_SURFACE_KEYS.has(`${grant.tool_id}:${grant.registry_version}`)) {
       throw new Error("invalid AgentRuntimeManifest: tool registry reference");
     }
   }

@@ -3,6 +3,16 @@ export interface AgentHistoryMessage {
   readonly content: string;
 }
 
+/** 本轮显式引用的受限投影（T08，IK67H3）：只含 available/stale 条目，
+ *  unavailable 的内容不进入 runtime 上下文。core 不持有投影内部形状
+ *  （契约权威在 contracts），故 projection 为不透明载荷。 */
+export interface AgentMentionProjection {
+  readonly mention_id: string;
+  readonly type: "asset" | "scene_card";
+  readonly availability: "available" | "stale";
+  readonly projection: unknown;
+}
+
 export interface AgentRequest {
   readonly prompt: string;
   readonly historyMessages: readonly AgentHistoryMessage[];
@@ -14,6 +24,7 @@ export interface AgentRequest {
     readonly resourceDigest: string;
     readonly body: string;
   } | null;
+  readonly mentionProjections: readonly AgentMentionProjection[];
 }
 
 export type AgentAlignmentStage = "alignment" | "awaiting_final_confirmation";

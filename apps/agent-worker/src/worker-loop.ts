@@ -1,5 +1,8 @@
 import type { AgentAction, AgentAdapter } from "@blue-whale/core";
-import type { SkillSummarizePipeline } from "@blue-whale/agent-runtime";
+import {
+  AGENT_TOOL_SURFACE_KEYS,
+  type SkillSummarizePipeline,
+} from "@blue-whale/agent-runtime";
 import {
   agentRunWorkSchema,
   autoCreativeSkillActivationSchema,
@@ -90,8 +93,16 @@ function validateRunPin(pin: AgentRunPin, prompt: string): string[] {
   ) {
     throw new Error("runtime_pin_model_reference_invalid");
   }
-  if (pin.tool_grants.length !== 0) {
-    throw new Error("runtime_pin_tool_reference_invalid");
+  // 工具表面限定（T08，AC#6）：放开 read_asset/write_plan_cards 两道闸，但禁止
+  // 任何其它工具（数据库、任意 HTTP、SceneCard 写、生成、Canvas 写等）。
+  for (const grant of pin.tool_grants) {
+    if (
+      !AGENT_TOOL_SURFACE_KEYS.has(
+        `${grant.tool_id}:${grant.registry_version}`,
+      )
+    ) {
+      throw new Error("runtime_pin_tool_reference_invalid");
+    }
   }
   if (
     pin.runtime_budget_policy.max_provider_calls !== 1 ||
@@ -193,6 +204,21 @@ function runtimeRequest(work: AgentRunWork): {
             body: skillResource.body,
           }
         : null,
+      // 本轮受限投影（T08）：只把 available/stale 条目传给 runtime 作为上下文，
+      // unavailable 的内容不进入。模型只看到 mention identity + 投影，看不到存储身份。
+      mentionProjections: parsed.mention_input_snapshot.entries.flatMap(
+        (entry) =>
+          entry.availability === "unavailable"
+            ? []
+            : [
+                {
+                  mention_id: entry.mention_id,
+                  type: entry.type,
+                  availability: entry.availability,
+                  projection: entry.projection,
+                },
+              ],
+      ),
     },
     autoActivation,
     maxOutputCharacters:
@@ -211,6 +237,47 @@ class ProviderOutcomeUnknownError extends Error {
   constructor() {
     super("provider_outcome_unknown");
   }
+}
+
+/** MentionInputSnapshot 非权威（T08，AC#5）：实时重查发现本轮存在已删除或
+ *  已撤权的显式引用，不得产生任何外部副作用。三闸门统一抛此错误。 */
+class SnapshotNotAuthoritativeError extends Error {
+  constructor() {
+    super("mention_input_unavailable");
+  }
+}
+
+/** 硬权限闸门（T08，AC#5）：每次经过都用**当前事实**重查快照条目授权。
+ *  快照内容冻结不变（AC#1）、接管复用同一快照（AC#2），但冻结后的删除/撤权
+ *  会在此被拦截——provider/replay 闸门抛错（在 try 内被捕获）；RunCommit 闸门
+ *  直接返回 commitFailure（已过 try/catch，避免未捕获异常触发重试循环）。 */
+async function assertMentionAuthority(
+  repo: AgentRunRepo,
+  work: AgentRunWork,
+): Promise<void> {
+  const checked = await repo.recheckMentionAuthority({
+    agentRunId: work.agent_run_id,
+    snapshot: work.mention_input_snapshot,
+  });
+  if (!checked.authoritative) throw new SnapshotNotAuthoritativeError();
+}
+
+/** mention 不可用的失败提交载荷（T08，AC#5）：三闸门共用。 */
+function mentionUnavailableFailure(workerId: string, work: AgentRunWork) {
+  return {
+    workerId,
+    agentRunId: work.agent_run_id,
+    advanceId: work.advance_id,
+    fence: work.fencing_token,
+    runVersion: work.run_version,
+    requestDigest: commitDigest({
+      outcome: "failed",
+      code: "mention_input_unavailable",
+      message: "mention input snapshot is not authoritative",
+    }),
+    failureCode: "mention_input_unavailable",
+    failureMessage: "a referenced mention is unavailable; result not accepted",
+  };
 }
 
 class ReplayedProviderFailureError extends Error {
@@ -309,6 +376,8 @@ async function executeAdvance(
   );
   if (existing) {
     if (existing.status === "succeeded") {
+      // 结果复用前硬校验（T08，AC#5）：接管重放前实时重查本轮引用授权。
+      await assertMentionAuthority(input.repo, work);
       const replayed = parseReplayedProviderResult(existing.resultPayload);
       if (replayed) return replayed;
       throw new ProviderOutcomeUnknownError();
@@ -325,6 +394,9 @@ async function executeAdvance(
     );
     throw new ProviderOutcomeUnknownError();
   }
+  // 供应商调用前硬校验（T08，AC#5）：开记录前实时重查本轮引用授权，
+  // 授权失效的推进一律不产生物理调用、不接纳结果。
+  await assertMentionAuthority(input.repo, work);
   await input.repo.openProviderCall({
     agentRunId: work.agent_run_id,
     advanceId: work.advance_id,
@@ -415,6 +487,11 @@ export async function runAgentWorkerOnce(input: {
         failureMessage: "provider result unknown after takeover",
       });
     }
+    if (error instanceof SnapshotNotAuthoritativeError) {
+      return input.repo.commitFailure(
+        mentionUnavailableFailure(input.workerId, work),
+      );
+    }
     if (error instanceof ReplayedProviderFailureError) {
       return input.repo.commitFailure({
         workerId: input.workerId,
@@ -448,6 +525,19 @@ export async function runAgentWorkerOnce(input: {
   }
   heartbeatAbort.abort();
   if (!(await heartbeat)) return { kind: "conflict" };
+  // RunCommit 前硬校验（T08，AC#5）：提交正式消息/状态前实时重查本轮引用授权，
+  // 失败不接纳结果。此处已过 executeAdvance 的 try/catch，直接返回 commitFailure
+  // 以免未捕获异常触发重试循环（覆盖 summarize 等不经供应商调用的产出路径）。
+  // 闸门在临时交付之前：避免为失效推进写入任何 provisional chunk。
+  const authority = await input.repo.recheckMentionAuthority({
+    agentRunId: work.agent_run_id,
+    snapshot: work.mention_input_snapshot,
+  });
+  if (!authority.authoritative) {
+    return input.repo.commitFailure(
+      mentionUnavailableFailure(input.workerId, work),
+    );
+  }
   // 临时交付（契约 §8.1）：chunk 先落短期投影，RunCommit 才提升为正式消息。
   const appended = await input.repo.appendProvisionalChunks({
     workerId: input.workerId,

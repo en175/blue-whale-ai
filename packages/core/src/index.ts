@@ -11,6 +11,7 @@ export type {
   AgentAdapter,
   AgentAlignmentStage,
   AgentHistoryMessage,
+  AgentMentionProjection,
   AgentRequest,
   AgentResult,
   GenerationAdapter,

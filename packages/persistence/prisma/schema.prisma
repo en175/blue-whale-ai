@@ -293,6 +293,7 @@ model agent_advances {
   status                           String   @db.VarChar(16)
   input_snapshot                   Json
   input_high_watermark_sequence_no Int
+  mention_input_snapshot           Json?
   gmt_create                       DateTime @default(now()) @db.DateTime(0)
   gmt_modified                     DateTime @default(now()) @db.DateTime(0)
 

@@ -226,6 +226,66 @@ const agentHistoryMessageSchema = z
   })
   .strict();
 
+/** Mention 可用性失败原因（对齐 core MentionFailureReason）：契约层独立定义，
+ *  MentionInputSnapshot 冻结时与 availability 一起写入。 */
+const mentionFailureReasonSchema = z.enum([
+  "deleted",
+  "stale",
+  "permission_lost",
+  "wrong_project",
+]);
+
+/** 资产受限投影（T08，IK67H3）：复用 T04 mention 接纳冻结的字段集，
+ *  **不含 storage_key / url / user_id** —— Agent 只拿到产品投影 + 临时访问能力。 */
+export const assetContextProjectionSchema = z
+  .object({
+    asset_type: z.string().min(1),
+    mime: z.string().nullable(),
+    size: z.string().regex(/^[0-9]+$/).nullable(),
+    width: z.number().int().nullable(),
+    height: z.number().int().nullable(),
+    duration_ms: z.number().int().nullable(),
+    content_sha256: z.string().nullable(),
+  })
+  .strict();
+
+/** 场景卡片受限投影（T08）：title/summary/content_markdown/version。 */
+export const sceneCardContextProjectionSchema = z
+  .object({
+    title: z.string().min(1),
+    summary: z.string().nullable(),
+    content_markdown: z.string().min(1),
+    version: z.number().int().positive(),
+  })
+  .strict();
+
+/** 单条 mention 的输入快照条目：mention 身份 + 当前可用性 + 受限投影。
+ *  projection 为可选字段；冻结路径（claimNext 事务）对 unavailable 条目不写
+ *  projection，不暴露内容——schema 不强制该组合，生产者只有冻结路径。 */
+export const mentionInputEntrySchema = z
+  .object({
+    mention_id: decimalIdSchema,
+    mention_seq: z.number().int().nonnegative(),
+    type: z.enum(["asset", "scene_card"]),
+    availability: z.enum(["available", "stale", "unavailable"]),
+    reason: mentionFailureReasonSchema.nullable(),
+    projection: z
+      .union([assetContextProjectionSchema, sceneCardContextProjectionSchema])
+      .optional(),
+  })
+  .strict();
+
+/** MentionInputSnapshot（T08，IK67H3）：每次 AgentAdvance 冻结的本轮显式引用快照。
+ *  与 mention 事实同事务边界冻结（claimNext 内），接管复用，后续消息/Canvas 不改写。
+ *  entries 的 availability 是冻结时点的记录，也用于过滤模型输入投影；硬权限闸门
+ *  在供应商调用/结果复用/RunCommit 前按**当前事实**重查授权（AC#5），不读冻结值。 */
+export const mentionInputSnapshotSchema = z
+  .object({
+    capability_snapshot_version: z.literal(1),
+    entries: z.array(mentionInputEntrySchema),
+  })
+  .strict();
+
 export const agentRunWorkSchema = z
   .object({
     schema_version: z.literal(1),
@@ -242,6 +302,7 @@ export const agentRunWorkSchema = z
     activated_creative_skill_versions: z
       .array(creativeSkillActivationSchema)
       .max(1),
+    mention_input_snapshot: mentionInputSnapshotSchema,
   })
   .strict();
 
@@ -325,6 +386,16 @@ export type AgentProviderCallStatus = z.infer<
 export type AgentRunTerminalReason = z.infer<typeof agentRunTerminalReasonSchema>;
 export type AgentRunWork = z.infer<typeof agentRunWorkSchema>;
 export type AgentHistoryMessage = AgentRunWork["history_messages"][number];
+export type AssetContextProjection = z.infer<
+  typeof assetContextProjectionSchema
+>;
+export type SceneCardContextProjection = z.infer<
+  typeof sceneCardContextProjectionSchema
+>;
+export type MentionInputEntry = z.infer<typeof mentionInputEntrySchema>;
+export type MentionInputSnapshot = z.infer<typeof mentionInputSnapshotSchema>;
+export type MentionAvailability = MentionInputEntry["availability"];
+export type MentionFailureReason = z.infer<typeof mentionFailureReasonSchema>;
 export type AgentRunCommit = z.infer<typeof agentRunCommitSchema>;
 
 function canonicalize(value: unknown): unknown {

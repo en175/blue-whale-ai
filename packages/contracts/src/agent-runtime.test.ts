@@ -193,6 +193,7 @@ describe("Node Agent Runtime Contract v1", () => {
       run_pin: pin,
       auto_creative_skill_candidates: [],
       activated_creative_skill_versions: [],
+      mention_input_snapshot: { capability_snapshot_version: 1, entries: [] },
     });
 
     expect(work.advance_id).toBe("11");
