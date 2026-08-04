@@ -160,18 +160,24 @@ new-api 有现成接口 `/api/log/token`（`router/api-router.go:304`）：
 - **查自己日志**：`/api/log/token`（`router/api-router.go:304`）
 - **token 用量查询**：tokenUsageRoute（`router/api-router.go:250`）
 
+### 能调（账户层 `AccountTokenOrUserAuth`，IK65NN 起）
+- **蓝鲸充值三件套**：`/api/user/amount`（报价）、`/api/user/bluewhalepay/pay`（下单）、
+  `/api/user/topup/self`（查单）——只证明账户身份，额度耗尽仍可充值；禁用/过期 Token 仍拒绝，
+  订单 User ID 由 Go 从 Token 属主解析，不接受 `New-Api-User`。
+
 ### 不能调（要 session/access_token）
 - 改用户资料（`/api/user/self` PUT）
 - 用户维度日志（`/api/log/self`）
 - 管理 token 增删改（`/api/token/*`）
-- 充值（`/api/topup/*`）
+- 其他充值渠道（stripe/epay/waffo 等仍挂 session `UserAuth`）
 - 任何管理/系统操作
 
-### 校验逻辑（`middleware/auth.go:314`）
-`ValidateUserToken(key)` → 注入 `user_id` 到上下文 → IP 限制 → 用户状态校验（禁用拒绝） → 用户分组。
+### 校验逻辑（`middleware/auth.go`）
+- relay 层 `TokenAuth`：`ValidateUserToken(key)` → 注入 `user_id` 到上下文 → IP 限制 → 用户状态校验（禁用拒绝） → 用户分组；额度耗尽拒绝。
+- 账户层 `AccountTokenAuth`：`ValidateAccountToken(key)` → 放行 enabled/exhausted，拒绝 disabled/expired → 用户状态校验（禁用拒绝）；不查额度/IP/模型/分组。
 
 ### 安全结论
-sk-xxx = **"调 AI + 查自己用量/日志"**。泄露最多消耗 quota（撤销重建即可），不能改账户、不能管 token、不能充值。最小权限，正好够蓝鲸用。
+sk-xxx = **“调 AI + 查自己用量/日志 + 给自己充值”**。泄露最多消耗 quota 或以自己账户名义充值（撤销重建即可），不能改账户、不能管 token、不能替他人下单。最小权限，正好够蓝鲸用。
 
 ---
 

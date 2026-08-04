@@ -687,7 +687,7 @@ describe("new-api client", () => {
     });
   });
 
-  it("sends New-Api-User header on native topup only when userId is provided", async () => {
+  it("sends only the Bearer sk- token on native topup without New-Api-User", async () => {
     const requests: Array<{ url: string; headers: Headers }> = [];
     const client = createNewApiClient({
       baseUrl: "http://new-api.test",
@@ -710,21 +710,16 @@ describe("new-api client", () => {
       },
     });
 
-    // access_token 场景：提供 userId → 三个原生充值接口都带 New-Api-User 头
-    await client.requestTopUpAmount("root-access-token", 100, 1);
-    await client.createBlueWhalePayTopUp("root-access-token", 100, "WX_NATIVE", 1);
-    await client.getTopUpByTradeNo("root-access-token", "BWP1xyz", 1);
+    // 账户层契约：三个原生充值接口只发 Bearer sk-xxx，订单 User ID 由 Go
+    // 从 Token 属主解析，客户端不得伪造或透传 New-Api-User。
+    await client.requestTopUpAmount("sk-user", 100);
+    await client.createBlueWhalePayTopUp("sk-user", 100, "WX_NATIVE");
+    await client.getTopUpByTradeNo("sk-user", "BWP1xyz");
     expect(requests).toHaveLength(3);
     for (const r of requests) {
-      expect(r.headers.get("New-Api-User")).toBe("1");
-      expect(r.headers.get("Authorization")).toBe("Bearer root-access-token");
+      expect(r.headers.get("Authorization")).toBe("Bearer sk-user");
+      expect(r.headers.get("New-Api-User")).toBeNull();
     }
-
-    // sk- 中继令牌场景：缺省 userId → 不带 New-Api-User（TokenAuth 接口不需要）
-    requests.length = 0;
-    await client.requestTopUpAmount("sk-t", 100);
-    expect(requests[0]?.headers.get("New-Api-User")).toBeNull();
-    expect(requests[0]?.headers.get("Authorization")).toBe("Bearer sk-t");
   });
 
   // ---- Go 管理端 option（RootAuth）----
