@@ -697,3 +697,44 @@ CREATE TABLE `skill_summarize_session` (
     UNIQUE INDEX `uk_skill_summarize_session_conversation`(`conversation_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `admin_operation_logs` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `category` VARCHAR(32) NOT NULL DEFAULT '',
+    `action` VARCHAR(64) NOT NULL,
+    `target` VARCHAR(255) NOT NULL DEFAULT '',
+    `target_user_id` BIGINT NULL,
+    `detail` TEXT NOT NULL,
+    `operator` VARCHAR(64) NOT NULL DEFAULT '',
+    `operator_id` BIGINT NULL,
+    `ip_address` VARCHAR(64) NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `version` INTEGER NOT NULL DEFAULT 0,
+    `is_delete` TINYINT NOT NULL DEFAULT 0,
+
+    INDEX `idx_oplog_category_created`(`category`, `gmt_create`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `topup_tiers` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `name` VARCHAR(100) NOT NULL DEFAULT '',
+    `amount` BIGINT NOT NULL,
+    `original_price` DOUBLE NOT NULL,
+    `discount` DOUBLE NOT NULL DEFAULT 1,
+    `price` DOUBLE NOT NULL,
+    `is_recommended` BOOLEAN NOT NULL DEFAULT false,
+    `status` VARCHAR(16) NOT NULL DEFAULT 'active',
+    `start_time` DATETIME(0) NULL,
+    `end_time` DATETIME(0) NULL,
+    `sort_order` INTEGER NOT NULL DEFAULT 0,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `version` INTEGER NOT NULL DEFAULT 0,
+    `is_delete` TINYINT NOT NULL DEFAULT 0,
+
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

@@ -3,6 +3,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   list: vi.fn(),
+  withAdminUser: vi.fn(
+    (
+      _request: Request,
+      handler: (auth: {
+        userId: string;
+        status: string;
+        isAdmin: boolean;
+      }) => Promise<Response>,
+    ) => handler({ userId: "1", status: "enabled", isAdmin: true }),
+  ),
+}));
+
+vi.mock("@/lib/auth/product-route-auth", () => ({
+  withAdminUser: mocks.withAdminUser,
 }));
 
 vi.mock("@/lib/operation-log/deps", () => ({

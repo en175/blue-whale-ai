@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useAuth } from "@/components/auth/AuthContext";
 import { fetchTemplatePage } from "@/lib/templates";
 import type { TemplateCard } from "@/types/template";
 import { TemplateCardItem } from "./TemplateCardItem";
@@ -56,34 +57,42 @@ export default function TemplateCards({
   activeTag: string;
   onAppendPrompt?: (text: string) => void;
 }) {
-  const [cards, setCards] = useState<TemplateCard[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { user } = useAuth();
+  const requestKey = JSON.stringify([activeTag, user?.userId ?? null]);
+  const [result, setResult] = useState<{
+    requestKey: string;
+    cards: TemplateCard[];
+    error: string | null;
+  } | null>(null);
+  const isCurrentResult = result?.requestKey === requestKey;
+  const cards = isCurrentResult ? result.cards : [];
+  const error = isCurrentResult ? result.error : null;
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
     fetchTemplatePage(activeTag, 1, 50)
       .then((page) => {
         if (cancelled) return;
-        setCards(page.records);
-        setLoading(false);
+        setResult({ requestKey, cards: page.records, error: null });
       })
       .catch((e: unknown) => {
         if (cancelled) return;
-        setError(e instanceof Error ? e.message : "加载失败");
-        setLoading(false);
+        setResult({
+          requestKey,
+          cards: [],
+          error: e instanceof Error ? e.message : "加载失败",
+        });
       });
     return () => {
       cancelled = true;
     };
-  }, [activeTag]);
+    // IK6GM6：登录态变化（含首次恢复）后重拉模板，避免登录前 401 错误残留。
+  }, [activeTag, requestKey]);
 
   const container =
     TAG_CONFIG[activeTag]?.container ?? TAG_CONFIG.marketing.container;
 
-  if (loading) {
+  if (!isCurrentResult) {
     return <Skeleton />;
   }
 

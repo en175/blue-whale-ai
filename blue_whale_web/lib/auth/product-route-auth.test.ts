@@ -4,7 +4,11 @@ import {
   AuthenticationError,
   getAuthenticatedUser,
 } from "./authenticated-user";
-import { withAdminUser, withAuthenticatedUser } from "./product-route-auth";
+import {
+  withAdminUser,
+  withAuthenticatedUser,
+  withOptionalUser,
+} from "./product-route-auth";
 
 vi.mock("./authenticated-user", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./authenticated-user")>();
@@ -34,7 +38,11 @@ describe("withAuthenticatedUser", () => {
     const response = await withAuthenticatedUser(request, handler);
 
     expect(response.status).toBe(204);
-    expect(handler).toHaveBeenCalledWith({ userId: "42", status: "enabled", isAdmin: false });
+    expect(handler).toHaveBeenCalledWith({
+      userId: "42",
+      status: "enabled",
+      isAdmin: false,
+    });
   });
 
   it.each([
@@ -96,13 +104,21 @@ describe("withAdminUser", () => {
       status: "enabled",
       isAdmin: true,
     });
-    const handler = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const handler = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
 
     const response = await withAdminUser(request, handler);
 
     expect(response.status).toBe(204);
-    expect(mockedGetAuthenticatedUser).toHaveBeenCalledWith(request, { policy: "fresh" });
-    expect(handler).toHaveBeenCalledWith({ userId: "9", status: "enabled", isAdmin: true });
+    expect(mockedGetAuthenticatedUser).toHaveBeenCalledWith(request, {
+      policy: "fresh",
+    });
+    expect(handler).toHaveBeenCalledWith({
+      userId: "9",
+      status: "enabled",
+      isAdmin: true,
+    });
   });
 
   it("rejects authenticated non-admin accounts with a 403 envelope", async () => {
@@ -116,7 +132,11 @@ describe("withAdminUser", () => {
     const response = await withAdminUser(request, handler);
 
     expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ code: 403, msg: "需要管理员权限", data: null });
+    expect(await response.json()).toEqual({
+      code: 403,
+      msg: "需要管理员权限",
+      data: null,
+    });
     expect(handler).not.toHaveBeenCalled();
   });
 
@@ -126,5 +146,54 @@ describe("withAdminUser", () => {
     const response = await withAdminUser(request, vi.fn());
 
     expect(response.status).toBe(401);
+  });
+});
+
+describe("withOptionalUser", () => {
+  it("calls the handler with the authenticated user when a valid token is present", async () => {
+    mockedGetAuthenticatedUser.mockResolvedValue({
+      userId: "42",
+      status: "enabled",
+      isAdmin: false,
+    });
+    const handler = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+
+    const response = await withOptionalUser(request, handler);
+
+    expect(response.status).toBe(204);
+    expect(handler).toHaveBeenCalledWith({
+      userId: "42",
+      status: "enabled",
+      isAdmin: false,
+    });
+  });
+
+  it.each([401, 403] as const)(
+    "treats missing/invalid token (status %i) as a guest: calls handler(null)",
+    async (status) => {
+      mockedGetAuthenticatedUser.mockRejectedValue(
+        new AuthenticationError(status),
+      );
+      const handler = vi
+        .fn()
+        .mockResolvedValue(new Response(null, { status: 204 }));
+
+      const response = await withOptionalUser(request, handler);
+
+      expect(response.status).toBe(204);
+      expect(handler).toHaveBeenCalledWith(null);
+    },
+  );
+
+  it("rethrows upstream unavailability (502/503) instead of silently downgrading", async () => {
+    mockedGetAuthenticatedUser.mockRejectedValue(new AuthenticationError(503));
+    const handler = vi.fn();
+
+    await expect(withOptionalUser(request, handler)).rejects.toThrow(
+      AuthenticationError,
+    );
+    expect(handler).not.toHaveBeenCalled();
   });
 });
