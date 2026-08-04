@@ -5,23 +5,11 @@ const mocks = vi.hoisted(() => {
 
   return {
     templatesDeps,
-    withAuthenticatedUser: vi.fn(
-      async (
-        _request: Request,
-        handler: (user: {
-          userId: string;
-          status: "enabled";
-        }) => Promise<Response> | Response,
-      ) => handler({ userId: "9", status: "enabled" }),
-    ),
     createTemplatesDeps: vi.fn(() => templatesDeps),
     handlePageTemplates: vi.fn(),
   };
 });
 
-vi.mock("@/lib/auth/product-route-auth", () => ({
-  withAuthenticatedUser: mocks.withAuthenticatedUser,
-}));
 vi.mock("@/lib/templates/deps", () => ({
   createTemplatesDeps: mocks.createTemplatesDeps,
 }));
@@ -31,7 +19,7 @@ vi.mock("@/lib/templates/handle-templates", () => ({
 
 import { GET } from "./route";
 
-describe("GET /api/agent/templates/page", () => {
+describe("GET /api/agent/templates/page（公开接口，IK6GM6）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.handlePageTemplates.mockResolvedValue({
@@ -41,22 +29,38 @@ describe("GET /api/agent/templates/page", () => {
     });
   });
 
-  it("lists templates only after receiving the authenticated user", async () => {
+  it("匿名请求（无任何鉴权头）直接返回模板卡片", async () => {
     const request = new Request(
       "http://localhost/api/agent/templates/page?tagCode=marketing&page=2&size=5",
-      { headers: { "X-User-Id": "999" } },
     );
 
     const response = await GET(request);
 
     expect(response.status).toBe(200);
-    expect(mocks.withAuthenticatedUser).toHaveBeenCalledWith(
-      request,
-      expect.any(Function),
-    );
     expect(mocks.handlePageTemplates).toHaveBeenCalledWith(
       "marketing",
       2,
+      5,
+      mocks.templatesDeps,
+    );
+  });
+
+  it("非法 tagCode 透传 400 业务失败", async () => {
+    mocks.handlePageTemplates.mockResolvedValue({
+      code: 400,
+      msg: "非法标签: unknown",
+      data: null,
+    });
+    const request = new Request(
+      "http://localhost/api/agent/templates/page?tagCode=unknown&page=1&size=5",
+    );
+
+    const response = await GET(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.handlePageTemplates).toHaveBeenCalledWith(
+      "unknown",
+      1,
       5,
       mocks.templatesDeps,
     );

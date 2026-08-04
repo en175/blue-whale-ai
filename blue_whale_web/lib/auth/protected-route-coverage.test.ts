@@ -26,6 +26,9 @@ const EXEMPT = new Set([
   "recharge/tiers/route.ts",
   // IK51OP 操作日志：管理端审计 API，鉴权后续接入。
   "admin/operation-logs/route.ts",
+  // IK6GM6 模板区：首页公开内容（标签元数据 + 卡片），游客可见，显式放行。
+  "agent/templates/tags/route.ts",
+  "agent/templates/page/route.ts",
 ]);
 
 const SKIPPED_DIRECTORIES = new Set([
