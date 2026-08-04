@@ -18,16 +18,16 @@ description: 视频创作导演（本地版）。在 Claude Code / Codex 里自�
 
 ## 意图分类与分发路由
 
-| 意图 | 触发信号 | 分发 |
-|---|---|---|
-| 纯咨询 | 问问题 / 聊想法 / 要建议 | 你直接答，不进子 skill |
-| 澄清 | 方向歧义（类型 / 用途 / 主体不清） | 自然语言追问 |
-| 创作方法推荐 | 需求匹配某创作套路 | 读 `library/_index.md` 推荐 → 用户认可后进 full-canvas |
-| 简单生成 | 一张图 / 单镜头，无营销策略 | `workflows/direct-generation.md` |
-| 复杂创作 | UGC 广告 / 短剧 / 品牌片，需分镜 | `workflows/full-canvas-creation.md` |
-| 视频拆解 | 给视频 +「拆解 / 分析 / 为什么火」 | `workflows/video-decode-replicate.md` 拆解段（先 `video-understanding.md`） |
-| 视频复刻 | 拆解出配方后 +「复刻 / 照着做」 | `workflows/video-decode-replicate.md` 复刻段 |
-| 修改提示词 | 局部改当前结果 | 按自然确认处理（低成本直接改 / 重写先对齐） |
+| 意图         | 触发信号                           | 分发                                                                                         |
+| ------------ | ---------------------------------- | -------------------------------------------------------------------------------------------- |
+| 纯咨询       | 问问题 / 聊想法 / 要建议           | 你直接答，不进子 skill                                                                       |
+| 澄清         | 方向歧义（类型 / 用途 / 主体不清） | 自然语言追问                                                                                 |
+| 创作方法推荐 | 需求匹配某创作套路                 | 读 `library/_index.md` 推荐 + 一句话告知即进 full-canvas，用户可随时换；仅分歧大多轮追问厘清 |
+| 简单生成     | 一张图 / 单镜头，无营销策略        | `workflows/direct-generation.md`                                                             |
+| 复杂创作     | UGC 广告 / 短剧 / 品牌片，需分镜   | `workflows/full-canvas-creation.md`                                                          |
+| 视频拆解     | 给视频 +「拆解 / 分析 / 为什么火」 | `workflows/video-decode-replicate.md` 拆解段（先 `video-understanding.md`）                  |
+| 视频复刻     | 拆解出配方后 +「复刻 / 照着做」    | `workflows/video-decode-replicate.md` 复刻段                                                 |
+| 修改提示词   | 局部改当前结果                     | 按自然确认处理（低成本直接改 / 重写先对齐）                                                  |
 
 **所有生成类意图都止于提示词交付**（生图提示词前期独立成卡 + 提示词交付包：分镜表 + 每镜视频提示词 + 使用指引），见 `references/generation-action-guide.md`。
 
@@ -49,25 +49,25 @@ description: 视频创作导演（本地版）。在 Claude Code / Codex 里自�
 
 **agents/**（子 skill，按需调度）
 
-| 文件 | 职责 |
-|---|---|
-| `brief.md` | 需求收集（standard / replicate） |
-| `skill-selector.md` | Creative Skill 选择（读本地 library） |
-| `image-understanding.md` | 图片识别（Claude 视觉） |
-| `image-prompt.md` | 生图提示词草案 |
-| `storyboard.md` | 脚本与分镜，串行两确认门：先脚本后分镜（standard / replicate_faithful / replicate_method） |
-| `prompt-optimizer.md` | 模型语法适配 + **交付提示词包（本地版终点）** |
-| `review.md` | 交付前自检 |
+| 文件                     | 职责                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------ |
+| `brief.md`               | 需求收集（standard / replicate）                                                           |
+| `skill-selector.md`      | Creative Skill 选择（读本地 library）                                                      |
+| `image-understanding.md` | 图片识别（Claude 视觉）                                                                    |
+| `image-prompt.md`        | 生图提示词草案                                                                             |
+| `storyboard.md`          | 脚本与分镜，串行两确认门：先脚本后分镜（standard / replicate_faithful / replicate_method） |
+| `prompt-optimizer.md`    | 模型语法适配 + **交付提示词包（本地版终点）**                                              |
+| `review.md`              | 交付前自检                                                                                 |
 
 **workflows/**
 
-| 文件 | 场景 |
-|---|---|
-| `direct-generation.md` | 轻量直生 |
-| `image-generation-prompt.md` | 生图编排 |
-| `full-canvas-creation.md` | 完整创作链路 |
-| `video-understanding.md` | 视频理解（Claude 视觉） |
-| `video-decode-replicate.md` | 爆款拆解 + 复刻 |
+| 文件                         | 场景                    |
+| ---------------------------- | ----------------------- |
+| `direct-generation.md`       | 轻量直生                |
+| `image-generation-prompt.md` | 生图编排                |
+| `full-canvas-creation.md`    | 完整创作链路            |
+| `video-understanding.md`     | 视频理解（Claude 视觉） |
+| `video-decode-replicate.md`  | 爆款拆解 + 复刻         |
 
 **rules/**（行为铁律）
 
