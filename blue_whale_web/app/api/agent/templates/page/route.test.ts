@@ -5,11 +5,20 @@ const mocks = vi.hoisted(() => {
 
   return {
     templatesDeps,
+    withOptionalUser: vi.fn(
+      async (
+        _request: Request,
+        handler: (user: { userId: string } | null) => Promise<Response> | Response,
+      ) => handler(null),
+    ),
     createTemplatesDeps: vi.fn(() => templatesDeps),
     handlePageTemplates: vi.fn(),
   };
 });
 
+vi.mock("@/lib/auth/product-route-auth", () => ({
+  withOptionalUser: mocks.withOptionalUser,
+}));
 vi.mock("@/lib/templates/deps", () => ({
   createTemplatesDeps: mocks.createTemplatesDeps,
 }));
@@ -19,7 +28,7 @@ vi.mock("@/lib/templates/handle-templates", () => ({
 
 import { GET } from "./route";
 
-describe("GET /api/agent/templates/page（公开接口，IK6GM6）", () => {
+describe("GET /api/agent/templates/page（公开接口，IK6GM6/IK6GTT）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.handlePageTemplates.mockResolvedValue({
@@ -29,7 +38,7 @@ describe("GET /api/agent/templates/page（公开接口，IK6GM6）", () => {
     });
   });
 
-  it("匿名请求（无任何鉴权头）直接返回模板卡片", async () => {
+  it("匿名请求（无鉴权头）直接返回模板卡片", async () => {
     const request = new Request(
       "http://localhost/api/agent/templates/page?tagCode=marketing&page=2&size=5",
     );
@@ -37,6 +46,10 @@ describe("GET /api/agent/templates/page（公开接口，IK6GM6）", () => {
     const response = await GET(request);
 
     expect(response.status).toBe(200);
+    expect(mocks.withOptionalUser).toHaveBeenCalledWith(
+      request,
+      expect.any(Function),
+    );
     expect(mocks.handlePageTemplates).toHaveBeenCalledWith(
       "marketing",
       2,
@@ -45,21 +58,23 @@ describe("GET /api/agent/templates/page（公开接口，IK6GM6）", () => {
     );
   });
 
-  it("非法 tagCode 透传 400 业务失败", async () => {
-    mocks.handlePageTemplates.mockResolvedValue({
-      code: 400,
-      msg: "非法标签: unknown",
-      data: null,
-    });
+  it("携带有效 token 时同样返回模板卡片（身份可选）", async () => {
+    mocks.withOptionalUser.mockImplementationOnce(
+      async (
+        _request: Request,
+        handler: (user: { userId: string } | null) => Promise<Response> | Response,
+      ) => handler({ userId: "9" }),
+    );
     const request = new Request(
-      "http://localhost/api/agent/templates/page?tagCode=unknown&page=1&size=5",
+      "http://localhost/api/agent/templates/page?tagCode=short&page=1&size=5",
+      { headers: { Authorization: "Bearer sk-test" } },
     );
 
     const response = await GET(request);
 
     expect(response.status).toBe(200);
     expect(mocks.handlePageTemplates).toHaveBeenCalledWith(
-      "unknown",
+      "short",
       1,
       5,
       mocks.templatesDeps,

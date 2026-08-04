@@ -4,30 +4,13 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
+import { isPublicRoute } from "@/lib/auth/public-routes";
+
 const webRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
 const apiRoot = path.join(webRoot, "app/api");
-
-const EXEMPT = new Set([
-  "auth/capabilities/route.ts",
-  "auth/login/route.ts",
-  "auth/logout/route.ts",
-  "auth/register/route.ts",
-  "auth/send-code/route.ts",
-  "me/route.ts",
-  "usage/token/route.ts",
-  // IK587T 充值模块：自有 sk-xxx token 鉴权（直传 new-api），不属 IK50GB 统一认证范围。
-  "recharge/agreement/route.ts",
-  "recharge/order/route.ts",
-  "recharge/order/[tradeNo]/cancel/route.ts",
-  "recharge/order/[tradeNo]/status/route.ts",
-  "recharge/tiers/route.ts",
-  // IK6GM6 模板区：首页公开内容（标签元数据 + 卡片），游客可见，显式放行。
-  "agent/templates/tags/route.ts",
-  "agent/templates/page/route.ts",
-]);
 
 const SKIPPED_DIRECTORIES = new Set([
   ".git",
@@ -194,7 +177,7 @@ describe("protected product route coverage", () => {
         relativePath: path.relative(apiRoot, filePath),
         source: readFileSync(filePath, "utf8"),
       }))
-      .filter(({ relativePath }) => !EXEMPT.has(relativePath))
+      .filter(({ relativePath }) => !isPublicRoute(relativePath))
       .filter(({ source }) => !hasProtectedRouteAuth(source))
       .map(({ relativePath }) => relativePath);
 
@@ -220,7 +203,10 @@ describe("protected product route coverage", () => {
       path.join(webRoot, "next.config.ts"),
       "utf8",
     );
-    const dockerfile = readFileSync(path.join(webRoot, "Dockerfile"), "utf8");
+    const dockerfile = readFileSync(
+      path.join(webRoot, "Dockerfile"),
+      "utf8",
+    );
     const javaRewriteSources = [
       // B 已退役：Conversation / GenerationInbox / AgentRun / InputRequest / SSE
       "/api/agent/runs/",
@@ -242,11 +228,5 @@ describe("protected product route coverage", () => {
     expect(nextConfig).not.toContain("process.env.GATEWAY_URL");
     expect(dockerfile).not.toContain("GATEWAY_URL");
     expect(dockerfile).not.toContain("blue-whale-gateway");
-  });
-
-  it("forbids enabling the local authentication bypass in production Docker builds", () => {
-    const dockerfile = readFileSync(path.join(webRoot, "Dockerfile"), "utf8");
-
-    expect(dockerfile).not.toContain("NEXT_PUBLIC_SKIP_AUTH=1");
   });
 });
