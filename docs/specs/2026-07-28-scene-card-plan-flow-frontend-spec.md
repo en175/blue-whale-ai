@@ -7,7 +7,7 @@
 | 范围 | `blue_whale_web` 前端行为、前后端接口契约与恢复语义；不包含实现 |
 | 目标入口 | Canvas、AgentChatPanel、场景卡生成面板 |
 | 原型基线 | `blue_whale_web/app/prototype/scene-card/`，commit `7a72c0ad` |
-| 关联地图 | [Wayfinder: 场景卡 Plan-Mode 创作流 · 前端规格 Spec](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK4Q48) |
+| 关联地图 | [Wayfinder: 场景卡 Plan-Mode 创作流 · 前端规格 Spec](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK4Q48) |
 
 ## 0. 目的
 
@@ -566,8 +566,8 @@ type PlanApplicationReceipt = {
 
 ## 11. 决策来源
 
-- [场景卡数据模型与 scene-cards 接口契约](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK4Q4B)：SceneCard、Markdown/Asset 引用、CRUD、ETag 与 Canvas 引用边界。
-- [对话计划卡消息类型与应用节律契约](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK4Q4C)：PlanPhase、PlanMessage、SceneCardMention、应用记录与 Snapshot/SSE。
-- [场景卡生成链路与产物归属契约](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK4Q4D)：GenerationJob 来源、记录、重试、不可取消与首次放置。
-- [场景卡画布交互与视觉原型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK4Q4E)：SceneCardNode 视觉、富文本编辑、生成面板与产物几何。
+- [场景卡数据模型与 scene-cards 接口契约](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK4Q4B)：SceneCard、Markdown/Asset 引用、CRUD、ETag 与 Canvas 引用边界。
+- [对话计划卡消息类型与应用节律契约](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK4Q4C)：PlanPhase、PlanMessage、SceneCardMention、应用记录与 Snapshot/SSE。
+- [场景卡生成链路与产物归属契约](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK4Q4D)：GenerationJob 来源、记录、重试、不可取消与首次放置。
+- [场景卡画布交互与视觉原型](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK4Q4E)：SceneCardNode 视觉、富文本编辑、生成面板与产物几何。
 - [ADR-0045：Provisional Assistant Delivery 只经 RunCommit 提升为正式消息](../adr/0045-provisional-assistant-delivery-runcommit-boundary.md)：Node 目标架构下正式消息的原子提交边界。

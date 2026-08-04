@@ -2,7 +2,7 @@
 
 - **状态**：Accepted
 - **日期**：2026-07-20
-- **关联工单**：[定稿 Runtime Agent Bundle 领域契约与资源规范](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK2D8H)
+- **关联工单**：[定稿 Runtime Agent Bundle 领域契约与资源规范](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK2D8H)
 
 > **IK3UUX 范围状态**：Bundle 与 Creative Skill 的核心语义保留；浏览器路径、恢复接口与精确合同
 > 由后续实施 Spec 按最小需要定义，本文中的 Java/Python 路径只记录迁移前实现，见

@@ -5,7 +5,7 @@
 > **状态**：✅ 已合并到 master（PR #42，merge commit `c3639e9`）
 > **分支**：`feature/IJZYVQ-顶层领域类型`
 > **commit**：`65af9fc`（feat）+ `03c5ac5`（docs close-out）→ merged as `c3639e9`
-> **PR**：[#42](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/pulls/42)
+> **PR**：[#42](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/pulls/42)
 > **完成日期**：2026-07-10
 
 ## 范围

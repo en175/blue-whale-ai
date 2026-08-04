@@ -5,7 +5,7 @@
 - **修订记录**：2026-07-24（IK3NHU）——Creative Skill 资源形态与激活语义移出本契约，
   由 [Creative Skill 激活跨服务契约](2026-07-24-creative-skill-activation-contract.md)
   独立定义；schema 同步删除未被 manifest 闭包引用的 `CreativeSkill` 定义，接受集不变。
-- **关联工单**：[定稿 Runtime Agent Bundle 领域契约与资源规范](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK2D8H)
+- **关联工单**：[定稿 Runtime Agent Bundle 领域契约与资源规范](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK2D8H)
 - **机器可读契约**：[runtime-agent-bundle.schema.json](runtime-agent-bundle.schema.json)
 - **标准调研**：[Runtime Agent Bundle 外部规范调研](../research/runtime-agent-bundle-contracts.md)
 

@@ -2,8 +2,8 @@
 
 - **状态**：Accepted for implementation
 - **契约版本**：8（v2 纳入 IK60WT 技能库浏览扩展：分类/排序/使用人数/i18n，见 §11；v3 纳入 IK60WX 添加官方技能的同名冲突语义，见 §5.2/§6/§7；v4 纳入 IK60WZ 个人技能只读正文与永久删除端点，见 §13；v5 纳入 IK60X0 草稿 AI 格式化端点与 `100104`，见 §6/§7/§14；v6 纳入 IK60X1 对话总结保存个人技能，见 §15；v7 纳入 IK60X2 个人技能自动匹配与服务端确定性 auto 激活，见 §3/§4/§10/§16；v8 纳入 IK6B2H 个人技能删除的进行中禁删与终态 run_pin scrub，见 §13.2/§16.2）
-- **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WS)、[02 — 一比一还原官方技能库浏览体验](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WT)、[05 — 添加官方技能并统一“我的技能”资产视图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WX)、[07 — 个人技能只读查看、复制与永久删除](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WZ)、[08 — 接入 SKILL.md AI 格式化工具](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X0)、[09 — 从当前对话总结并保存个人技能](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X1)、[10 — 统一自动匹配、版本事实与浏览器纵向验收](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X2)
-- **父需求**：[一比一还原 Creative Skill 面板与个人技能资产闭环](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60US)
+- **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK60WS)、[02 — 一比一还原官方技能库浏览体验](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK60WT)、[05 — 添加官方技能并统一“我的技能”资产视图](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK60WX)、[07 — 个人技能只读查看、复制与永久删除](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK60WZ)、[08 — 接入 SKILL.md AI 格式化工具](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK60X0)、[09 — 从当前对话总结并保存个人技能](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK60X1)、[10 — 统一自动匹配、版本事实与浏览器纵向验收](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK60X2)
+- **父需求**：[一比一还原 Creative Skill 面板与个人技能资产闭环](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK60US)
 - **前置契约**：[Creative Skill 激活跨服务契约](2026-07-24-creative-skill-activation-contract.md)（激活、版本固定与按需正文读取，本文不改写其字段）、[ADR-0041 同族工单串行与契约先行](../adr/0041-sibling-issues-serial-contract-first.md)
 
 本文冻结 Creative Skill 作为**资产**的领域边界：官方技能、个人技能、用户添加的官方引用

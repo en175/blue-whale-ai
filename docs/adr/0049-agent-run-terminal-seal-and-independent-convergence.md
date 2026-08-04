@@ -5,7 +5,7 @@
   收敛与 SettlementOnlyRunCommit 不属于本次重构，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-26
 - **决策者**：KimJohn
-- **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)
+- **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3UWA)
 - **关联决策**：[ADR-0047 AgentRun 用户取消](0047-agent-run-user-cancellation-boundary.md)、[ADR-0048 时间、Deadline 与 Lease](0048-time-deadline-and-lease-facts.md)
 - **消息竞态修订**：[ADR-0053 Conversation 消息排序与 AgentRun 待处理输入队列](0053-conversation-message-ordering-and-agent-run-input-queue.md)
 - **历史后续**：ProjectDeletionFence 调查已从 IK3UUX 取消，不再构成前置。

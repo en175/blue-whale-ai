@@ -295,7 +295,7 @@ ADR-0019 要求不同 adapter 只在新 Run 绑定，
 不是旧 Python payload 的字节兼容。父地图已明确采用一次性迁移，并允许终止在途 Run、
 清理旧租约与 Python RuntimeCheckpoint；Node 不需要编写跨引擎 checkpoint 转换器。
 
-范围依据：[Wayfinder：Node.js/TypeScript 全栈重构决策蓝图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UUX)；
+范围依据：[Wayfinder：Node.js/TypeScript 全栈重构决策蓝图](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3UUX)；
 [ADR-0019，第 95–111 行](../adr/0019-agent-orchestration-scaffold-and-replacement-seam.md#L95-L111)。
 
 ## 6. Generation Job 与当前 Generation Worker

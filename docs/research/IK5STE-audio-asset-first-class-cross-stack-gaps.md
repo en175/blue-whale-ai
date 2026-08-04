@@ -1,7 +1,7 @@
 # 音频素材一等支持的跨栈缺口盘点
 
-- 研究工单：[盘点音频素材一等支持的跨栈缺口](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK5STE)
-- 决策地图：[Wayfinder：AgentChatPanel Node.js 全栈重构决策地图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK5Q1P)
+- 研究工单：[盘点音频素材一等支持的跨栈缺口](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK5STE)
+- 决策地图：[Wayfinder：AgentChatPanel Node.js 全栈重构决策地图](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK5Q1P)
 - 基线：本地 `master`，起始提交 `c5ff774653811b2bb137d3d0e27b8f9899954497`
 - 方法：代码知识图谱优先，辅以定点源码与现有测试核验
 
