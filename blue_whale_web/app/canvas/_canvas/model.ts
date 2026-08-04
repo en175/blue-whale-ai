@@ -6,7 +6,7 @@
  * - edges / group / recipe / parentId 为工作流留位（本轮空/占位，UI 不开放）。
  * - serialize 剥离临时态（status/progress/selected），不进持久文档。
  *
- * 决策见 ADR-0021；规格见 openspec/changes/canvas-frontend-architecture/specs/canvas-doc-model。
+ * 决策见 ADR-0021。
  */
 import { isWireInteger, wireInteger } from "@/lib/wire-integer";
 

@@ -4,8 +4,6 @@
  *
  * 蓝鲸化：resolveInputs 读上游 assetId → 查 assets 得 Asset；runNode 写回 assetId（非 value）。
  * 本轮 UI 不触发 run（工作流 UI 不开），但纯函数 + 单测就绪，未来接 UI 零改动。
- *
- * 规格见 openspec/changes/canvas-frontend-architecture/specs/run-engine。
  */
 import type {
   Asset,

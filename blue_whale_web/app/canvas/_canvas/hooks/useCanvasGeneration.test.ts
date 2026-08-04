@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * useCanvasGeneration 单测（ADR-0027 / openspec canvas-generation-hook）。
+ * useCanvasGeneration 单测（ADR-0027）。
  *
  * IK4AK6 接 Node 生成 API：image/video 都走 createProjectGenerationJob（Node 全异步）→ useVideoJobs 轮询
  * getJobStatus；audio 仍 mock（generateAudio）。本测把 useVideoJobs 整体 mock（避免真实 setInterval），

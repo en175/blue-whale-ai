@@ -2,8 +2,6 @@
  * L1 — NodeKind 注册表。每个 kind 声明端口 + 如何构造生成任务。
  * 端口（ports）在 registry（不在 node data）；node 只持 assetId/prompt/recipe/status。
  * Component 在 L2 wiring 阶段接（保持本模块纯逻辑、可测、无 RF 依赖）。
- *
- * 规格见 openspec/changes/canvas-frontend-architecture/specs/node-kind-registry。
  */
 import type { FC } from "react";
 import type { Asset, CanvasNode, MediaKind, NodeKindId } from "./model";
