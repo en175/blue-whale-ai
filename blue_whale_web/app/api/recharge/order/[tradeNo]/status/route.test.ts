@@ -40,9 +40,8 @@ const params = (tradeNo = "BWP1xyz") => ({
 describe("GET /api/recharge/order/:tradeNo/status（原生查单改接）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     vi.stubEnv("NEW_API_BASE_URL", "http://new-api.test");
-    vi.stubEnv("NEW_API_ROOT_ACCESS_TOKEN", "root-access-token");
-    vi.stubEnv("NEW_API_ROOT_USER_ID", "1");
     mocks.resolveTokenIdentity.mockResolvedValue({
       userId: 1,
       username: "root",
@@ -56,12 +55,8 @@ describe("GET /api/recharge/order/:tradeNo/status（原生查单改接）", () =
     mocks.getTokenUsage.mockResolvedValue({ userQuota: 55_000_000 });
     const res = await GET(getStatus(), params());
     expect(res.status).toBe(200);
-    // 查单用 root 凭证 + New-Api-User（订单以 root 身份创建）
-    expect(mocks.getTopUpByTradeNo).toHaveBeenCalledWith(
-      "root-access-token",
-      "BWP1xyz",
-      1,
-    );
+    // 查单用当前请求的用户 Token（订单属主由 Go 从 Token 解析），不带 userId
+    expect(mocks.getTopUpByTradeNo).toHaveBeenCalledWith("sk-test", "BWP1xyz");
     expect(await res.json()).toMatchObject({
       code: 200,
       data: { status: "paid", credits_after: 55_000_000 },
@@ -105,8 +100,8 @@ describe("GET /api/recharge/order/:tradeNo/status（原生查单改接）", () =
     expect(mocks.getTopUpByTradeNo).not.toHaveBeenCalled();
   });
 
-  it("缺少 root 凭证 → 503", async () => {
-    vi.stubEnv("NEW_API_ROOT_ACCESS_TOKEN", "");
+  it("缺少 NEW_API_BASE_URL → 503", async () => {
+    vi.stubEnv("NEW_API_BASE_URL", "");
     const res = await GET(getStatus(), params());
     expect(res.status).toBe(503);
   });
