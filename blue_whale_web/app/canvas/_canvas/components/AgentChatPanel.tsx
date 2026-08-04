@@ -14,6 +14,7 @@ import {
 import { BookOpenText, Box, ChevronDown } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import SkillPanel, { type UseSkillSelection } from "@/components/SkillPanel";
+import DirectSkillTag from "@/components/DirectSkillTag";
 import { squirclePath } from "../utils";
 import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
 import { ComposerShell, ModelSettingsMenu } from "./Composer";
@@ -540,7 +541,8 @@ export function AgentChatPanel({
   );
 
   // Skill 面板 Use：有稳定 creative_skill_id 则记 pending（随下一条允许创建目标 Run 的消息下发），
-  // 不往输入框插 @ 文本；无 id（库外项）仅关面板。
+  // 输入框上方出现可移除技能标签（DirectSkillTag，对齐首页 IK60WY 交互）；不往输入框插 @ 文本；
+  // 无 id（库外项）仅关面板。
   const handleUseSkill = useCallback((skill: UseSkillSelection) => {
     if (skill.creative_skill_id) {
       setPendingForcedSkill({ id: skill.creative_skill_id, name: skill.name });
@@ -1069,6 +1071,14 @@ export function AgentChatPanel({
           <div style={{ position: "relative" }}>
             <ComposerShell>
               <div className="relative p-2">
+                {pendingForcedSkill && (
+                  <div className="px-1 pb-1">
+                    <DirectSkillTag
+                      name={pendingForcedSkill.name}
+                      onRemove={() => setPendingForcedSkill(null)}
+                    />
+                  </div>
+                )}
                 <div
                   ref={composerRef}
                   className="tc-agent-composer-editor min-h-[40px] max-h-[120px] overflow-y-auto px-3 py-2 text-sm text-white outline-none"
