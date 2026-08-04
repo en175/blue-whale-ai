@@ -43,8 +43,6 @@ COPY packages/persistence packages/persistence
 # 目标应用源码
 COPY blue_whale_web blue_whale_web
 
-ENV NEXT_PUBLIC_SKIP_AUTH=1
-
 # 先编译 workspace 包（Next.js 通过 exports 字段引用 dist/ 输出）
 RUN pnpm --filter @blue-whale/contracts --filter @blue-whale/core --filter @blue-whale/persistence --filter @blue-whale/generation-runtime build
 # 构建 Next.js standalone

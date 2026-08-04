@@ -24,8 +24,6 @@ const EXEMPT = new Set([
   "recharge/order/[tradeNo]/cancel/route.ts",
   "recharge/order/[tradeNo]/status/route.ts",
   "recharge/tiers/route.ts",
-  // IK51OP 操作日志：管理端审计 API，鉴权后续接入。
-  "admin/operation-logs/route.ts",
 ]);
 
 const SKIPPED_DIRECTORIES = new Set([
@@ -219,10 +217,7 @@ describe("protected product route coverage", () => {
       path.join(webRoot, "next.config.ts"),
       "utf8",
     );
-    const dockerfile = readFileSync(
-      path.join(webRoot, "Dockerfile"),
-      "utf8",
-    );
+    const dockerfile = readFileSync(path.join(webRoot, "Dockerfile"), "utf8");
     const javaRewriteSources = [
       // B 已退役：Conversation / GenerationInbox / AgentRun / InputRequest / SSE
       "/api/agent/runs/",
@@ -244,5 +239,11 @@ describe("protected product route coverage", () => {
     expect(nextConfig).not.toContain("process.env.GATEWAY_URL");
     expect(dockerfile).not.toContain("GATEWAY_URL");
     expect(dockerfile).not.toContain("blue-whale-gateway");
+  });
+
+  it("forbids enabling the local authentication bypass in production Docker builds", () => {
+    const dockerfile = readFileSync(path.join(webRoot, "Dockerfile"), "utf8");
+
+    expect(dockerfile).not.toContain("NEXT_PUBLIC_SKIP_AUTH=1");
   });
 });

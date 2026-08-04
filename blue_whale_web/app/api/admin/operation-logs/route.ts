@@ -1,7 +1,8 @@
 import { createOperationLogDeps } from "@/lib/operation-log/deps";
+import { withAdminUser } from "@/lib/auth/product-route-auth";
 
 // GET /api/admin/operation-logs → 操作日志列表（按类别/时间/关键词过滤，时间倒序）
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const category = searchParams.get("category") ?? undefined;
@@ -37,7 +38,7 @@ const FIELD_LIMITS = {
 } as const;
 
 // POST /api/admin/operation-logs → 写一条操作审计（变更操作由调用方在写入成功后触发）
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   try {
     const body = await request.json();
     const {
@@ -98,4 +99,12 @@ export async function POST(request: Request) {
     const msg = e instanceof Error ? e.message : "unknown";
     return Response.json({ success: false, error: msg }, { status: 500 });
   }
+}
+
+export async function GET(request: Request) {
+  return withAdminUser(request, () => handleGet(request));
+}
+
+export async function POST(request: Request) {
+  return withAdminUser(request, () => handlePost(request));
 }
