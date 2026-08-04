@@ -15,6 +15,10 @@
  *  失败分支只产出失败说明文案，不创建技能，Run 正常 commitSuccess（§15.3）。 */
 
 import { parseSkillMd, serializeSkillMd } from "@blue-whale/core";
+import {
+  createControlledChatClient,
+  type ControlledChatMessage,
+} from "./controlled-chat-client.js";
 
 // ---------- LLM 输出协议标记 ----------
 
@@ -50,12 +54,10 @@ export function loadSkillSummarizeRules(
   return override || DEFAULT_SKILL_SUMMARIZE_RULES;
 }
 
-// ---------- 受控 chat 客户端（仿 format-ai-client.ts） ----------
+// ---------- 受控 chat 客户端（共用实现见 controlled-chat-client.ts） ----------
 
-export interface SkillSummarizeChatMessage {
-  role: string;
-  content: string;
-}
+/** 与共用实现同形状，保留为公共 API 别名（单一来源）。 */
+export type SkillSummarizeChatMessage = ControlledChatMessage;
 
 export type SkillSummarizeChatClient = {
   complete(input: {
@@ -72,45 +74,7 @@ export function createSkillSummarizeChatClient(options: {
   /** 单次请求超时（默认 30s）；超时按失败处理（§15.3 失败分支）。 */
   timeoutMs?: number;
 }): SkillSummarizeChatClient {
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const timeoutMs = options.timeoutMs ?? 30_000;
-  return {
-    async complete({ rules, messages }) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      let res: Response;
-      try {
-        res = await fetchImpl(`${options.baseUrl}/v1/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${options.token}`,
-          },
-          body: JSON.stringify({
-            model: options.model,
-            messages: [
-              { role: "system", content: rules },
-              ...messages.map((m) => ({ role: m.role, content: m.content })),
-            ],
-          }),
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timer);
-      }
-      if (!res.ok) {
-        throw new Error(`chat completions HTTP ${res.status}`);
-      }
-      const json = (await res.json()) as {
-        choices?: { message?: { content?: unknown } }[];
-      };
-      const content = json.choices?.[0]?.message?.content;
-      if (typeof content !== "string" || !content.trim()) {
-        throw new Error("chat completions 返回空内容");
-      }
-      return content;
-    },
-  };
+  return createControlledChatClient(options);
 }
 
 // ---------- 依赖端口（worker 接线时注入 persistence 实现） ----------
@@ -280,6 +244,38 @@ export function createSkillSummarizePipeline(deps: {
     return null;
   }
 
+  /** 名称冲突处理（§15.3 总结模式 / §15.4 确认模式共用）：提议验证可用的新名，
+   *  草稿与提议名挂入待确认会话；文案模板由调用点提供，各自用户可见文案逐字不变。
+   *  proposed 可用 → 记提议名 + withProposal 文案；AI 提议失败 → 记占用名 + noProposal 文案。 */
+  async function handleConflictSave(
+    work: SkillSummarizeWork,
+    draftContent: string,
+    takenName: string,
+    copy: {
+      withProposal: (takenName: string, proposed: string) => string;
+      noProposal: (takenName: string) => string;
+    },
+  ): Promise<SkillSummarizeOutcome> {
+    const proposed = await proposeAvailableName(work.userId, takenName);
+    if (proposed !== null) {
+      await deps.store.upsertPending({
+        conversationId: work.conversationId,
+        userId: work.userId,
+        draftContent,
+        proposedName: proposed,
+      });
+      return handled(copy.withProposal(takenName, proposed));
+    }
+    // AI 提议名失败：仍挂 pending（proposedName 记占用名），请用户直接给新名。
+    await deps.store.upsertPending({
+      conversationId: work.conversationId,
+      userId: work.userId,
+      draftContent,
+      proposedName: takenName,
+    });
+    return handled(copy.noProposal(takenName));
+  }
+
   async function summarizeMode(
     work: SkillSummarizeWork,
   ): Promise<SkillSummarizeOutcome> {
@@ -315,31 +311,12 @@ export function createSkillSummarizePipeline(deps: {
       }
       // 名称冲突（§15.3）：禁止保存/禁止自动追加后缀落库；提议验证可用的新名，
       // 草稿与提议名挂入待确认会话（§15.4），等待用户确认。
-      const proposed = await proposeAvailableName(
-        work.userId,
-        parsed.skill.name,
-      );
-      if (proposed !== null) {
-        await deps.store.upsertPending({
-          conversationId: work.conversationId,
-          userId: work.userId,
-          draftContent: parsed.skillMd,
-          proposedName: proposed,
-        });
-        return handled(
-          `技能名称「${parsed.skill.name}」与已有技能冲突或为保留名，本次未保存。草稿已备好，可改用名称「${proposed}」：回复"确认"保存、直接给出新名称改名保存，或回复"取消"放弃。`,
-        );
-      }
-      // AI 提议名失败：仍挂 pending（proposedName 记占用名），请用户直接给新名。
-      await deps.store.upsertPending({
-        conversationId: work.conversationId,
-        userId: work.userId,
-        draftContent: parsed.skillMd,
-        proposedName: parsed.skill.name,
+      return handleConflictSave(work, parsed.skillMd, parsed.skill.name, {
+        withProposal: (takenName, proposed) =>
+          `技能名称「${takenName}」与已有技能冲突或为保留名，本次未保存。草稿已备好，可改用名称「${proposed}」：回复"确认"保存、直接给出新名称改名保存，或回复"取消"放弃。`,
+        noProposal: (takenName) =>
+          `技能名称「${takenName}」与已有技能冲突或为保留名，本次未保存。草稿已备好：请直接回复一个你想要的新名称保存，或回复"取消"放弃。`,
       });
-      return handled(
-        `技能名称「${parsed.skill.name}」与已有技能冲突或为保留名，本次未保存。草稿已备好：请直接回复一个你想要的新名称保存，或回复"取消"放弃。`,
-      );
     }
   }
 
@@ -413,35 +390,20 @@ export function createSkillSummarizePipeline(deps: {
         return handled(FAILURE_CONTENT);
       }
       // 再次冲突：重新提议并继续保持 pending。
-      const proposed = await proposeAvailableName(work.userId, finalName);
-      if (proposed !== null) {
-        await deps.store.upsertPending({
-          conversationId: work.conversationId,
-          userId: work.userId,
-          draftContent: serializeSkillMd({
-            name: finalName,
-            description: draft.description,
-            body: draft.body,
-          }),
-          proposedName: proposed,
-        });
-        return handled(
-          `名称「${finalName}」仍与已有技能冲突或为保留名，未保存。可改用名称「${proposed}」：回复"确认"保存、直接给出新名称改名保存，或回复"取消"放弃。`,
-        );
-      }
-      // AI 提议名失败：仍挂 pending（proposedName 记占用名），请用户直接给新名。
-      await deps.store.upsertPending({
-        conversationId: work.conversationId,
-        userId: work.userId,
-        draftContent: serializeSkillMd({
+      return handleConflictSave(
+        work,
+        serializeSkillMd({
           name: finalName,
           description: draft.description,
           body: draft.body,
         }),
-        proposedName: finalName,
-      });
-      return handled(
-        `名称「${finalName}」仍与已有技能冲突或为保留名，未保存。请直接回复一个你想要的新名称保存，或回复"取消"放弃。`,
+        finalName,
+        {
+          withProposal: (takenName, proposed) =>
+            `名称「${takenName}」仍与已有技能冲突或为保留名，未保存。可改用名称「${proposed}」：回复"确认"保存、直接给出新名称改名保存，或回复"取消"放弃。`,
+          noProposal: (takenName) =>
+            `名称「${takenName}」仍与已有技能冲突或为保留名，未保存。请直接回复一个你想要的新名称保存，或回复"取消"放弃。`,
+        },
       );
     }
   }

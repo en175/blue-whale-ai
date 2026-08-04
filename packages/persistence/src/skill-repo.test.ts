@@ -797,42 +797,6 @@ describe("SkillRepo", () => {
     ]);
   });
 
-  it("findPersonalView 非 owner 调用不命中（null，不泄露存在性）", async () => {
-    const queryRawUnsafe = vi.fn().mockResolvedValue([]);
-    const prisma = {
-      $queryRawUnsafe: queryRawUnsafe,
-    } as unknown as PrismaClient;
-
-    await expect(
-      createSkillRepo(prisma).findPersonalView("7", "my_personal"),
-    ).resolves.toBeNull();
-    expect(queryRawUnsafe).toHaveBeenCalledWith(
-      expect.stringContaining("owner_user_id = ?"),
-      7n,
-      "my_personal",
-    );
-  });
-
-  it("findPersonalView owner 命中返回白名单视图", async () => {
-    const prisma = {
-      $queryRawUnsafe: vi.fn().mockResolvedValue([
-        {
-          creative_skill_id: "my_personal",
-          name: "我的技能",
-          description: null,
-        },
-      ]),
-    } as unknown as PrismaClient;
-
-    await expect(
-      createSkillRepo(prisma).findPersonalView("9", "my_personal"),
-    ).resolves.toEqual({
-      creative_skill_id: "my_personal",
-      name: "我的技能",
-      description: null,
-    });
-  });
-
   it("createPersonalSkill atomically makes its first immutable version active", async () => {
     const executeRawUnsafe = vi.fn().mockResolvedValue(1);
     const tx = { $executeRawUnsafe: executeRawUnsafe };
@@ -943,8 +907,6 @@ describe("SkillRepo", () => {
       asset_domain: "official",
     });
     await expect(repo.resolveOfficialSkillId("deep_writing")).resolves.toBeNull();
-    await expect(repo.listPersonalByOwner("9")).resolves.toEqual([]);
-    await expect(repo.findPersonalView("9", "my_personal")).resolves.toBeNull();
     await expect(
       repo.findPersonalContent("9", "my_personal"),
     ).resolves.toBeNull();

@@ -91,7 +91,6 @@ export {
   type SkillRepo,
   type SkillLibraryView,
   type SkillMineView,
-  type PersonalSkillView,
   type PersonalSkillCreateResult,
   type SkillPage,
   type SkillLibraryCategory,
