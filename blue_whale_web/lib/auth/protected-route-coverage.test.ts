@@ -24,6 +24,9 @@ const EXEMPT = new Set([
   "recharge/order/[tradeNo]/cancel/route.ts",
   "recharge/order/[tradeNo]/status/route.ts",
   "recharge/tiers/route.ts",
+  // IK6GM6 模板区：首页公开内容（标签元数据 + 卡片），游客可见，显式放行。
+  "agent/templates/tags/route.ts",
+  "agent/templates/page/route.ts",
 ]);
 
 const SKIPPED_DIRECTORIES = new Set([
