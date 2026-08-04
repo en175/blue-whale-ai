@@ -114,7 +114,7 @@ export function CreateContent({
       type="button"
       data-testid={`skill-create-mode-${m}`}
       aria-pressed={mode === m}
-      className={`h-7 px-3 rounded-full text-[12px] font-medium transition-colors ${
+      className={`h-7 px-3 rounded-full text-[12px] font-medium whitespace-nowrap shrink-0 transition-colors ${
         mode === m
           ? "bg-white/[0.14] text-white/90"
           : "text-white/45 hover:text-white/75 hover:bg-white/[0.06]"
@@ -130,7 +130,8 @@ export function CreateContent({
       data-testid="skill-create-editor"
       className="tc-agent-skill-panel__content flex flex-col flex-1 min-h-0 overflow-hidden bg-[var(--tc-login-modal-bg)]"
     >
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.08]">
+      {/* 窄断点允许整组换行，按钮文字保持不换行不竖排（IK6H3O） */}
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2 px-4 py-2.5 border-b border-white/[0.08]">
         <div
           className="flex items-center gap-1"
           role="group"
@@ -145,7 +146,7 @@ export function CreateContent({
               type="button"
               data-testid="skill-summarize-entry"
               onClick={onSummarizeConversation}
-              className="inline-flex items-center gap-1.5 h-8 px-3.5 text-[13px] font-medium rounded-lg border border-white/[0.12] text-white/75 hover:bg-white/[0.06] transition-colors"
+              className="inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 h-8 px-3.5 text-[13px] font-medium rounded-lg border border-white/[0.12] text-white/75 hover:bg-white/[0.06] transition-colors"
             >
               <MessageSquareText size={14} />
               总结当前对话
@@ -157,7 +158,7 @@ export function CreateContent({
               data-testid="skill-ai-format-btn"
               disabled={saving || formatting || !draftDirty}
               onClick={handleFormat}
-              className="inline-flex items-center gap-1.5 h-8 px-3.5 text-[13px] font-medium rounded-lg border border-white/[0.12] text-white/75 hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:pointer-events-none"
+              className="inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 h-8 px-3.5 text-[13px] font-medium rounded-lg border border-white/[0.12] text-white/75 hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:pointer-events-none"
             >
               <Sparkles size={14} />
               {formatting ? "格式化中…" : "AI 格式化"}
@@ -168,7 +169,7 @@ export function CreateContent({
             data-testid="skill-save-btn"
             disabled={saving || formatting || !canSave}
             onClick={handleSave}
-            className="inline-flex items-center gap-1.5 h-8 px-3.5 text-[13px] font-medium rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+            className="inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 h-8 px-3.5 text-[13px] font-medium rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:pointer-events-none"
           >
             <Check size={14} />
             保存到我的技能
