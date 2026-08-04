@@ -48,7 +48,7 @@ recipe:
 | `tutorial` | 教程 / 技巧 | how-to-tutorial / tutorial-video / secret-hack-reveal |
 | `drama_reversal` | 剧情反转 / 权力逆转 | revenge-power-reversal / social-argument-twist / comedy-plot |
 
-> Skill 名称对应 `library/raw/` 下的文件；复刻时 skill-selector 按此候选直推（照搬）或让用户选（差异化）。
+> Skill 名称对应 `library/raw/` 下的文件；复刻时 skill-selector 按此候选直推 + 告知（照搬）或开放问方向（差异化）。
 
 ## selling_points[]（卖点）
 
