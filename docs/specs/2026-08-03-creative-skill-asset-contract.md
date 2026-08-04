@@ -1,7 +1,7 @@
 # Creative Skill 资产契约（官方/个人领域边界、公开元数据与稳定身份）
 
 - **状态**：Accepted for implementation
-- **契约版本**：7（v2 纳入 IK60WT 技能库浏览扩展：分类/排序/使用人数/i18n，见 §11；v3 纳入 IK60WX 添加官方技能的同名冲突语义，见 §5.2/§6/§7；v4 纳入 IK60WZ 个人技能只读正文与永久删除端点，见 §13；v5 纳入 IK60X0 草稿 AI 格式化端点与 `100104`，见 §6/§7/§14；v6 纳入 IK60X1 对话总结保存个人技能，见 §15；v7 纳入 IK60X2 个人技能自动匹配与服务端确定性 auto 激活，见 §3/§4/§10/§16）
+- **契约版本**：8（v2 纳入 IK60WT 技能库浏览扩展：分类/排序/使用人数/i18n，见 §11；v3 纳入 IK60WX 添加官方技能的同名冲突语义，见 §5.2/§6/§7；v4 纳入 IK60WZ 个人技能只读正文与永久删除端点，见 §13；v5 纳入 IK60X0 草稿 AI 格式化端点与 `100104`，见 §6/§7/§14；v6 纳入 IK60X1 对话总结保存个人技能，见 §15；v7 纳入 IK60X2 个人技能自动匹配与服务端确定性 auto 激活，见 §3/§4/§10/§16；v8 纳入 IK6B2H 个人技能删除的进行中禁删与终态 run_pin scrub，见 §13.2/§16.2）
 - **关联工单**：[01 — 建立官方与个人 Creative Skill 安全边界](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WS)、[02 — 一比一还原官方技能库浏览体验](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WT)、[05 — 添加官方技能并统一“我的技能”资产视图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WX)、[07 — 个人技能只读查看、复制与永久删除](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60WZ)、[08 — 接入 SKILL.md AI 格式化工具](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X0)、[09 — 从当前对话总结并保存个人技能](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X1)、[10 — 统一自动匹配、版本事实与浏览器纵向验收](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60X2)
 - **父需求**：[一比一还原 Creative Skill 面板与个人技能资产闭环](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK60US)
 - **前置契约**：[Creative Skill 激活跨服务契约](2026-07-24-creative-skill-activation-contract.md)（激活、版本固定与按需正文读取，本文不改写其字段）、[ADR-0041 同族工单串行与契约先行](../adr/0041-sibling-issues-serial-contract-first.md)
@@ -72,7 +72,7 @@
 | 添加/移除引用 | 所有用户（自己的引用） | 不适用（无引用概念） |
 | 设 auto | 所有用户（自己的引用） | 仅 owner（§16，v7 起） |
 | 读正文 / 复制 | 任何用户都不可（仅受信任运行时按 pin 读取） | 仅 owner（§13 只读端点） |
-| 修改 / 删除 | 任何用户都不可（运营通道不在本文范围） | 修改不适用（在线编辑为非目标）；删除仅 owner 且**不可逆**（§13），跨用户一律按不存在处理 |
+| 修改 / 删除 | 任何用户都不可（运营通道不在本文范围） | 修改不适用（在线编辑为非目标）；删除仅 owner 且**不可逆**（§13），存在进行中 AgentRun 引用时拒绝删除（§13.2），跨用户一律按不存在处理 |
 | 调用（forced 激活） | 所有用户 | 仅 owner；跨用户按 `CREATIVE_SKILL_UNAVAILABLE` 拒绝 |
 | auto 候选 | `user_skill.auto` 派生 | `creative_skill.auto_match` 派生，仅 owner 本人（§16，v7 起） |
 
@@ -108,7 +108,7 @@
 | `PATCH /api/agent/skills/mine/{id}` | `{id}` 语义改为 `creative_skill_id`；官方域仅改自己引用的 `auto`；v7 起个人域仅 owner 可改本体的 `auto_match`（§16） |
 | `POST /api/agent/skills/personal` | IK60WU 新增。body `{ content }` 为完整 SKILL.md 文本；解析 frontmatter → 校验 → 创建个人技能（§12） |
 | `GET /api/agent/skills/personal/{id}` | IK60WZ 新增。owner-only 只读正文，返回重建的完整 SKILL.md 文本（§13） |
-| `DELETE /api/agent/skills/personal/{id}` | IK60WZ 新增。owner-only 永久删除个人技能本体与版本行，不可逆（§13） |
+| `DELETE /api/agent/skills/personal/{id}` | IK60WZ 新增。owner-only 永久删除个人技能本体与版本行，不可逆（§13）；进行中 Run 引用 → `100105`（v8，IK6B2H） |
 | `POST /api/agent/skills/personal/format` | IK60X0 新增。body `{ content }` 为当前草稿；后台固定规则 + 受控 AI 接口返回完整替换文本（§14）；纯文本变换，不持久化、不创建资产 |
 
 - `creative_skill_id` 入参先按 `^[a-z][a-z0-9_]{2,79}$` 校验，非法即「不存在」。
@@ -128,6 +128,7 @@
 | 个人技能名称与官方技能保留名冲突（§5.2） | `100102`（IK60WU 新增） |
 | 添加官方技能与同用户个人技能 Name Key 冲突（§5.4） | `100103`（IK60WX 新增） |
 | AI 格式化失败：接口未配置、AI 抛错/超时或返回非合法 SKILL.md（§14） | `100104`（IK60X0 新增；前端保留原草稿，不产生部分覆盖） |
+| 删除个人技能时仍被进行中的 AgentRun 引用（§13.2） | `100105`（v8，IK6B2H 新增；技能删除被拒绝，不删除任何数据） |
 
 ## 8. 与激活契约的关系
 
@@ -330,6 +331,41 @@ IK60WU 起，`POST /api/agent/skills/mine` 统一按「最近创建或添加」�
 - 删除不追溯历史使用事实：`creative_skill_activation` 埋点只增不改（§11.3），保留的
   仅是曾使用过该技能的最小事实（稳定 ID、用户、Run、版本、来源），不含可恢复正文；
   历史 AgentRun 快照中的悬空 ID 由前端名称回退文案兜底。
+
+#### 13.2.1 进行中禁删（v8，IK6B2H）
+
+- **存在进行中的 AgentRun 引用时拒绝删除**：引用指 `agent_runs.run_pin`（运行固定快照，
+  JSON 列）的 `creative_skill_resources` / `auto_creative_skill_candidates` 中出现该
+  `creative_skill_id`。进行中 = 非终态，采用 fail-closed 写法
+  `status NOT IN ('completed','failed','cancelled')`——涵盖 `queued` / `running` /
+  `awaiting_input` / `awaiting_job` / `recovery_failed`，并对未来新增状态自动兜底。
+  `awaiting_input` 用户回复后会 resume 回 `queued` 再次执行，故一并归入进行中禁删。
+- 命中返回业务错误 `100105`（§7），技能删除被拒绝，**不删除任何数据**；错误消息携带
+  技能显示名，前端据此提示「技能正在使用中，无法删除」。
+- 删除与禁删检查在**同一事务**内完成：`name SELECT` → 禁删检查 → `DELETE` 本体（X 锁）
+  → **X 锁后复检**（命中即抛错整体回滚）→ 终态 scrub → `DELETE` 版本行。复检为
+  **尽力而为**：MySQL 默认 REPEATABLE READ 下事务内快照读同视图，复检与初检等价，
+  防不住「检查后新建 run」的并发提交（READ COMMITTED 下可拦截 DELETE 后、复检前
+  提交的新 run）。残余窗口始终由 pin 正文自足兜底——快照可独立执行，语义等同现状
+  「快照寿命长于技能行」。
+- 引用查询限定 `is_delete = 0`（逻辑删 run 不参与任何流转，对齐全仓惯例）：已删 run
+  的 pin 随用户可见性消失，不阻碍技能删除、不纳入 scrub 范围。
+
+#### 13.2.2 终态 scrub（v8，IK6B2H）
+
+- **删除成功时，对引用该技能的全部终态（`completed` / `failed` / `cancelled`）历史
+  run 的 `run_pin` 移除该技能正文供应**，仅保留「曾使用」最小事实，并重算 `pin_digest`
+  保持快照内部自洽。终态 run 永不重新校验，scrub 不破坏冻结运行时机制。
+- **scrub = 移除条目而非删字段**：从 `run_pin.creative_skill_resources` 与
+  `auto_creative_skill_candidates` 移除该 `creative_skill_id` 的全部条目（正文供应随之
+  消失）；**保留 `activated_creative_skill_versions`**（不含 body，天然是「曾使用」
+  最小事实）。删 `body` 字段会因 schema `body: z.string().min(1)` + `.strict()`
+  永久不兼容；删条目保持 schema 兼容（两数组均无 min，可为空）。
+- 快照顶层投影列（`activated_creative_skill_versions` / `reasoning_summary` 等）不动，
+  前端「使用技能」展示不受影响；`pin_digest` 随 scrubbed 内容重算（契约规范化输入
+  `canonicalAgentRunPinDigestInput` + sha256），快照内部自洽不破坏。
+- 无法按 `agentRunPinSchema` 解析的 pin 行跳过（不 scrub 不报错）：该类 run 在
+  claim 时已被运行时判 invalid（`runtime_pin_missing`），正文不可达，不影响删除主线。
 - 与 `DELETE /api/agent/skills/mine/{id}` 语义互斥：后者仅逻辑删官方引用（§6），
   个人域 ID 在其上仍按不存在处理；个人技能永久删除只走本端点。
 
@@ -460,8 +496,10 @@ auto 激活；不改写激活契约的字段与错误码。
   `skill_version` 记当次固定版本的 major 号；埋点只增不改，使用人数
   `COUNT(DISTINCT user_id)` 与 `most_used` 排序语义不变（§11.3），同一用户
   重复激活只计一次。
-- 个人技能永久删除后：其 auto 候选资格随本体行消失自然失效；历史 Run 已固定的
-  激活数组不受影响；埋点保留最小事实（§13.2）。
+- 个人技能永久删除后（v8，IK6B2H）：其 auto 候选资格随本体行消失自然失效；历史
+  Run 已固定的激活数组（`activated_creative_skill_versions`）不受影响；终态历史 run
+  的 `run_pin` 已被同事务 scrub 移除正文供应（§13.2.2）；埋点保留最小事实（§13.2）；
+  存在进行中引用时删除被拒绝（§13.2.1，`100105`）。
 - 运行状态对用户只显示「使用技能：技能名称」，不显示激活来源（forced/auto），
   也不写入 Agent 回复正文；auto 激活的技能名经 Run 快照 / `agent_run.created`
   事件的 `activated_creative_skill_versions` 到达前端。
