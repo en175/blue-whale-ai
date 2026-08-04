@@ -55,7 +55,7 @@ description: 视频创作导演（本地版）。在 Claude Code / Codex 里自�
 | `skill-selector.md` | Creative Skill 选择（读本地 library） |
 | `image-understanding.md` | 图片识别（Claude 视觉） |
 | `image-prompt.md` | 生图提示词草案 |
-| `storyboard.md` | 脚本与分镜（standard / replicate_faithful / replicate_method） |
+| `storyboard.md` | 脚本与分镜，串行两确认门：先脚本后分镜（standard / replicate_faithful / replicate_method） |
 | `prompt-optimizer.md` | 模型语法适配 + **交付提示词包（本地版终点）** |
 | `review.md` | 交付前自检 |
 
