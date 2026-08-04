@@ -7,7 +7,10 @@ export {
   type ServiceName,
 } from "./readiness.js";
 export type {
+  AgentAction,
   AgentAdapter,
+  AgentAlignmentStage,
+  AgentHistoryMessage,
   AgentRequest,
   AgentResult,
   GenerationAdapter,

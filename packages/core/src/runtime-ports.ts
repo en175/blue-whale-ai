@@ -1,5 +1,11 @@
+export interface AgentHistoryMessage {
+  readonly role: "user" | "assistant";
+  readonly content: string;
+}
+
 export interface AgentRequest {
   readonly prompt: string;
+  readonly historyMessages: readonly AgentHistoryMessage[];
   readonly runtimeInstructions: readonly string[];
   readonly creativeSkill: {
     readonly creativeSkillId: string;
@@ -10,10 +16,22 @@ export interface AgentRequest {
   } | null;
 }
 
+export type AgentAlignmentStage = "alignment" | "awaiting_final_confirmation";
+
+export type AgentAction =
+  | { readonly kind: "respond" }
+  | {
+      readonly kind: "clarify";
+      readonly question: string;
+      readonly stage: AgentAlignmentStage;
+    }
+  | { readonly kind: "cancel" };
+
 export interface AgentResult {
   readonly provider: string;
   readonly content: string;
   readonly reasoningSummary: string;
+  readonly action: AgentAction;
 }
 
 export interface AgentAdapter {

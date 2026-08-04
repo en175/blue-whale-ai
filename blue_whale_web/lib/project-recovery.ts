@@ -41,6 +41,7 @@ export type ActiveInputRequest = {
 export type AgentRunDisplay = {
   agentRunId: WireInteger;
   status: string;
+  stage: string | null;
   skillName: string | null;
   reasoningSummary: string | null;
 };
@@ -77,6 +78,7 @@ export function deriveLatestAgentRunDisplay(
   return {
     agentRunId: latest.agent_run_id as WireInteger,
     status: latest.status as string,
+    stage: typeof latest.stage === "string" ? latest.stage : null,
     skillName,
     reasoningSummary:
       typeof latest.reasoning_summary === "string"

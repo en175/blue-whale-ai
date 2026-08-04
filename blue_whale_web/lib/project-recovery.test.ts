@@ -687,9 +687,37 @@ describe("AgentRun 安全展示投影", () => {
     expect(deriveLatestAgentRunDisplay(snap)).toEqual({
       agentRunId: 9,
       status: "running",
+      stage: null,
       skillName: "海报专家",
       reasoningSummary: "正在使用已冻结技能。",
     });
+  });
+
+  it("PlanPhase 阶段从 Snapshot 恢复（IK67GY T06）", () => {
+    const snap: ProjectSnapshot = {
+      ...snapshot(10),
+      agent_runs: [
+        {
+          agent_run_id: 9,
+          status: "awaiting_input",
+          stage: "awaiting_final_confirmation",
+          active_input_request: {
+            input_request_id: 42,
+            request_type: "creation_clarification",
+            question: "确认以上需求并正式提交计划吗？",
+            status: "pending",
+            expires_at: "2026-08-05T00:00:00.000Z",
+          },
+        },
+      ],
+    };
+
+    const display = deriveLatestAgentRunDisplay(snap);
+    expect(display?.stage).toBe("awaiting_final_confirmation");
+    expect(
+      deriveAnswerableClarification(snap, new Date("2026-08-04T00:00:00Z"))
+        ?.question,
+    ).toBe("确认以上需求并正式提交计划吗？");
   });
 });
 

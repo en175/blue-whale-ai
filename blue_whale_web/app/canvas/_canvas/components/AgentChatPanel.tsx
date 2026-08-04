@@ -58,6 +58,13 @@ const AGENT_RUN_STATUS_LABELS: Record<string, string> = {
   recovery_failed: "恢复失败",
 };
 
+/** PlanPhase 内部行为阶段的公开标签（IK67GY T06，契约 §6）。 */
+const AGENT_RUN_STAGE_LABELS: Record<string, string> = {
+  understanding: "理解需求",
+  alignment: "需求对齐",
+  awaiting_final_confirmation: "待最终确认",
+};
+
 /** 欢迎态预设：点击只填入输入框，不发送、不创建产品事实（IK67GD T02）。 */
 const WELCOME_PRESETS = [
   {
@@ -106,6 +113,7 @@ export function AgentChatPanel({
   projectId,
   activeSkillName,
   agentRunStatus,
+  agentRunStage,
   reasoningSummary,
   answerableActive,
   skillRecommendations,
@@ -146,6 +154,8 @@ export function AgentChatPanel({
   activeSkillName?: string | null;
   /** 当前 Run 的公开状态（Snapshot/SSE 权威） */
   agentRunStatus?: string | null;
+  /** 当前 Run 的 PlanPhase 阶段（Snapshot/SSE 权威，IK67GY T06） */
+  agentRunStage?: string | null;
   /** 安全的用户可见运行摘要；不包含内部思维链。 */
   reasoningSummary?: string | null;
   /** 是否存在可回答创作澄清（true 时 forced 与 reply 互斥，pending 保留不清） */
@@ -678,6 +688,9 @@ export function AgentChatPanel({
   const runStatusLabel = agentRunStatus
     ? (AGENT_RUN_STATUS_LABELS[agentRunStatus] ?? agentRunStatus)
     : null;
+  const runStageLabel = agentRunStage
+    ? (AGENT_RUN_STAGE_LABELS[agentRunStage] ?? null)
+    : null;
 
   const panelPath = squirclePath(panelSize.w, panelSize.h, 28.8);
 
@@ -771,6 +784,19 @@ export function AgentChatPanel({
               }}
             >
               {runStatusLabel}
+            </span>
+          )}
+          {runStageLabel && (
+            <span
+              className="tc-agent-run-stage inline-flex items-center rounded-lg px-2 py-1 text-xs"
+              aria-label={`计划阶段：${runStageLabel}`}
+              style={{
+                border: "1px solid var(--tc-border-subtle)",
+                background: "var(--tc-menu-item-hover)",
+                color: "var(--tc-text-secondary)",
+              }}
+            >
+              {runStageLabel}
             </span>
           )}
           <div className="inline-flex items-center gap-0.5">

@@ -196,6 +196,7 @@ describe("Node Agent Runtime Contract v1", () => {
     });
 
     expect(work.advance_id).toBe("11");
+    expect(work.history_messages).toEqual([]);
     expect(
       agentRunCommitSchema.parse({
         schema_version: 1,
@@ -209,6 +210,54 @@ describe("Node Agent Runtime Contract v1", () => {
         auto_creative_skill_activation: null,
       }).outcome,
     ).toBe("completed");
+    expect(
+      agentRunCommitSchema.parse({
+        schema_version: 1,
+        advance_id: "11",
+        fencing_token: "3",
+        expected_run_version: 2,
+        request_digest: digest,
+        outcome: "awaiting_input",
+        assistant_message: { content: "请告诉我这次创作的主体是什么？" },
+        reasoning_summary: "需求缺少主体，先澄清最关键的一项。",
+        input_request: { question: "请告诉我这次创作的主体是什么？" },
+        stage: "alignment",
+      }).outcome,
+    ).toBe("awaiting_input");
+    expect(
+      agentRunCommitSchema.parse({
+        schema_version: 1,
+        advance_id: "11",
+        fencing_token: "3",
+        expected_run_version: 2,
+        request_digest: digest,
+        outcome: "cancelled",
+      }).outcome,
+    ).toBe("cancelled");
+    expect(() =>
+      agentRunCommitSchema.parse({
+        schema_version: 1,
+        advance_id: "11",
+        fencing_token: "3",
+        expected_run_version: 2,
+        request_digest: digest,
+        outcome: "awaiting_input",
+        assistant_message: { content: "确认需求吗？" },
+        reasoning_summary: "等待最终确认。",
+        input_request: { question: "确认需求吗？" },
+        stage: "completed",
+      }),
+    ).toThrow();
+    expect(() =>
+      agentRunPublicProjectionSchema.parse({
+        agent_run_id: "1",
+        status: "running",
+        stage: "responding",
+        version: 1,
+        activated_creative_skill_versions: [],
+        reasoning_summary: null,
+      }),
+    ).toThrow();
     expect(() =>
       agentRunCommitSchema.parse({
         schema_version: 1,

@@ -1,4 +1,4 @@
-import type { AgentAdapter } from "@blue-whale/core";
+import type { AgentAction, AgentAdapter } from "@blue-whale/core";
 import type { SkillSummarizePipeline } from "@blue-whale/agent-runtime";
 import {
   agentRunWorkSchema,
@@ -181,6 +181,7 @@ function runtimeRequest(work: AgentRunWork): {
   return {
     request: {
       prompt: parsed.prompt,
+      historyMessages: parsed.history_messages,
       runtimeInstructions,
       creativeSkill: skillResource
         ? {
@@ -247,12 +248,42 @@ export async function runAgentWorkerOnce(input: {
   }
   heartbeatAbort.abort();
   if (!(await heartbeat)) return { kind: "conflict" };
-  return input.repo.commitSuccess({
+  const commitBase = {
     workerId: input.workerId,
     agentRunId: work.agent_run_id,
     advanceId: work.advance_id,
     fence: work.fencing_token,
     runVersion: work.run_version,
+  };
+  if (result.action.kind === "clarify") {
+    return input.repo.commitAwaitingInput({
+      ...commitBase,
+      requestDigest: commitDigest({
+        outcome: "awaiting_input",
+        content: result.content,
+        reasoning_summary: result.reasoningSummary,
+        question: result.action.question,
+        stage: result.action.stage,
+      }),
+      content: result.content,
+      reasoningSummary: result.reasoningSummary,
+      question: result.action.question,
+      stage: result.action.stage,
+    });
+  }
+  if (result.action.kind === "cancel") {
+    return input.repo.commitCancelled({
+      ...commitBase,
+      requestDigest: commitDigest({
+        outcome: "cancelled",
+        content: result.content,
+      }),
+      content: result.content,
+      reasoningSummary: result.reasoningSummary,
+    });
+  }
+  return input.repo.commitSuccess({
+    ...commitBase,
     requestDigest: commitDigest({
       outcome: "completed",
       content: result.content,
@@ -278,6 +309,7 @@ async function produceResult(
   content: string;
   reasoningSummary: string;
   autoActivation: AutoCreativeSkillActivation | null;
+  action: AgentAction;
 }> {
   const prepared = runtimeRequest(work);
   if (
@@ -293,6 +325,7 @@ async function produceResult(
         content: outcome.content,
         reasoningSummary: "已处理个人技能总结请求。",
         autoActivation: null,
+        action: { kind: "respond" },
       };
     }
   }
@@ -304,6 +337,7 @@ async function produceResult(
     content: result.content,
     reasoningSummary: result.reasoningSummary,
     autoActivation: prepared.autoActivation,
+    action: result.action,
   };
 }
 

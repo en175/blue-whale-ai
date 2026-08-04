@@ -90,6 +90,7 @@ describe("runAgentWorkerOnce", () => {
       provider: "fake",
       content: "已完成",
       reasoningSummary: "已完成回答。",
+      action: { kind: "respond" },
     });
     await expect(
       runAgentWorkerOnce({
@@ -152,6 +153,7 @@ describe("runAgentWorkerOnce", () => {
       provider: "fake",
       content: "已完成",
       reasoningSummary: "已使用「海报专家」完成回答。",
+      action: { kind: "respond" },
     });
     const commitSuccess = vi.fn().mockResolvedValue({
       kind: "committed",
@@ -276,6 +278,7 @@ describe("runAgentWorkerOnce", () => {
       provider: "fake",
       content: "已完成",
       reasoningSummary: "已完成回答。",
+      action: { kind: "respond" },
     });
 
     await runAgentWorkerOnce({
@@ -399,6 +402,7 @@ describe("runAgentWorkerOnce", () => {
       provider: "fake",
       content: "已完成",
       reasoningSummary: "已完成回答。",
+      action: { kind: "respond" },
     });
     await expect(task).resolves.toEqual({
       kind: "committed",
@@ -533,6 +537,7 @@ describe("runAgentWorkerOnce 总结分流", () => {
       provider: "fake",
       content: "runtime 回复",
       reasoningSummary: "已完成回答。",
+      action: { kind: "respond" },
     });
     const summarize = {
       hasPending: vi.fn().mockResolvedValue(true),
@@ -560,6 +565,7 @@ describe("runAgentWorkerOnce 总结分流", () => {
       provider: "fake",
       content: "runtime 回复",
       reasoningSummary: "已完成回答。",
+      action: { kind: "respond" },
     });
     const summarize = {
       hasPending: vi.fn().mockResolvedValue(false),

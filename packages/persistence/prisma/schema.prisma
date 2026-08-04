@@ -251,7 +251,7 @@ model agent_runs {
 
 model agent_advances {
   id                               BigInt   @id @default(autoincrement())
-  agent_run_id                     BigInt   @unique(map: "uk_agent_advance_run")
+  agent_run_id                     BigInt
   ordinal                          Int
   status                           String   @db.VarChar(16)
   input_snapshot                   Json
@@ -259,6 +259,7 @@ model agent_advances {
   gmt_create                       DateTime @default(now()) @db.DateTime(0)
   gmt_modified                     DateTime @default(now()) @db.DateTime(0)
 
+  @@unique([agent_run_id, ordinal], map: "uk_agent_advance_run_ordinal")
   @@index([agent_run_id, status], map: "idx_agent_advance_run_status")
 }
 
@@ -303,7 +304,6 @@ model user_input_requests {
   version               Int       @default(0)
   is_delete             Int       @default(0) @db.TinyInt
 
-  @@unique([resumed_agent_run_id], map: "uk_input_request_resumed_run")
   @@index([project_id, user_id, status], map: "idx_input_request_owner")
 }
 

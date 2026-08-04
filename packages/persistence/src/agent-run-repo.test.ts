@@ -78,18 +78,23 @@ describe("AgentRunRepo", () => {
           version: 1,
           fencing_token: 1n,
           input_sequence_no: 0,
+          stage: "understanding",
           run_pin: runPin,
           lease_expires_at: new Date("2026-07-29T00:00:30.000Z"),
         }),
       },
       conversation_messages: {
-        findMany: vi.fn().mockResolvedValue([
-          { id: 20n, role: "user", content: "第一条", sequence_no: 1 },
-          { id: 21n, role: "user", content: "第二条", sequence_no: 2 },
-        ]),
+        findMany: vi.fn().mockImplementation(({ where }) =>
+          where.sequence_no.gt !== undefined
+            ? [
+                { id: 20n, role: "user", content: "第一条", sequence_no: 1 },
+                { id: 21n, role: "user", content: "第二条", sequence_no: 2 },
+              ]
+            : [],
+        ),
       },
       agent_advances: {
-        findUnique: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({
           id: 30n,
           ordinal: 1,
@@ -147,6 +152,7 @@ describe("AgentRunRepo", () => {
         fencing_token: "1",
         run_version: 1,
         input_high_watermark_sequence_no: 2,
+        history_messages: [],
         prompt: "第一条\n\n第二条",
         run_pin: runPin,
       }),
@@ -167,7 +173,7 @@ describe("AgentRunRepo", () => {
         event_type: "agent_run.status_changed",
         payload: expect.objectContaining({
           status: "running",
-          stage: "responding",
+          stage: "understanding",
           activated_creative_skill_versions: [],
           reasoning_summary: null,
         }),
@@ -180,7 +186,7 @@ describe("AgentRunRepo", () => {
     const snapshot = [
       { message_id: "20", sequence_no: 1, role: "user", content: "冻结输入" },
     ];
-    const findMany = vi.fn();
+    const findMany = vi.fn().mockResolvedValue([]);
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([{ db_now: now }]),
       agent_runs: {
@@ -199,11 +205,12 @@ describe("AgentRunRepo", () => {
           version: 2,
           fencing_token: 2n,
           input_sequence_no: 0,
+          stage: "alignment",
           run_pin: runPin,
         }),
       },
       agent_advances: {
-        findUnique: vi.fn().mockResolvedValue({
+        findFirst: vi.fn().mockResolvedValue({
           id: 30n,
           ordinal: 1,
           status: "running",
@@ -243,11 +250,29 @@ describe("AgentRunRepo", () => {
       }),
     );
     expect(tx.agent_advances.create).not.toHaveBeenCalled();
-    expect(findMany).not.toHaveBeenCalled();
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          sequence_no: { lt: 1 },
+        }),
+      }),
+    );
   });
 
-  it("fails closed instead of creating ordinal 2 for a queued Run with an Advance", async () => {
-    const create = vi.fn();
+  it("creates ordinal 2 for a resumed queued Run after its first Advance completed", async () => {
+    const create = vi.fn().mockResolvedValue({
+      id: 31n,
+      ordinal: 2,
+      input_high_watermark_sequence_no: 3,
+      input_snapshot: [
+        { message_id: "22", sequence_no: 3, role: "user", content: "主体：蓝鲸" },
+      ],
+    });
+    const advancesFindFirst = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ordinal: 1 });
     const tx = {
       $queryRaw: vi
         .fn()
@@ -256,39 +281,81 @@ describe("AgentRunRepo", () => {
         findFirst: vi.fn().mockResolvedValue({
           id: 9n,
           status: "queued",
-          version: 1,
+          version: 3,
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({
           id: 9n,
           project_id: 42n,
           conversation_id: 7n,
-          version: 2,
-          fencing_token: 2n,
-          input_sequence_no: 0,
+          user_id: 100n,
+          version: 4,
+          fencing_token: 3n,
+          input_sequence_no: 2,
+          stage: "alignment",
           run_pin: runPin,
         }),
       },
       agent_advances: {
-        findUnique: vi.fn().mockResolvedValue({
-          id: 30n,
-          ordinal: 1,
-          status: "completed",
-        }),
+        findFirst: advancesFindFirst,
         create,
+      },
+      conversation_messages: {
+        findMany: vi.fn().mockImplementation(({ where }) =>
+          where.sequence_no.gt !== undefined
+            ? [
+                {
+                  id: 22n,
+                  role: "user",
+                  content: "主体：蓝鲸",
+                  sequence_no: 3,
+                },
+              ]
+            : [
+                { role: "user", content: "创作：一张海报", sequence_no: 1 },
+                { role: "assistant", content: "主体是什么？", sequence_no: 2 },
+              ],
+        ),
+      },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi.fn().mockResolvedValue({ high_watermark: 1n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 11n,
+          gmt_create: new Date("2026-07-29T00:01:00.000Z"),
+          ...data,
+        })),
       },
     };
     const prisma = {
       $transaction: vi.fn(async (callback) => callback(tx)),
     } as unknown as PrismaClient;
 
-    await expect(
-      createAgentRunRepo(prisma).claimNext({
-        workerId: "worker-2",
-        leaseMs: 30_000,
+    const work = await createAgentRunRepo(prisma).claimNext({
+      workerId: "worker-2",
+      leaseMs: 30_000,
+    });
+
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        agent_run_id: 9n,
+        ordinal: 2,
+        status: "running",
+        input_high_watermark_sequence_no: 3,
       }),
-    ).rejects.toThrow("queued AgentRun already has an Advance");
-    expect(create).not.toHaveBeenCalled();
+    });
+    expect(work).toEqual(
+      expect.objectContaining({
+        advance_id: "31",
+        prompt: "主体：蓝鲸",
+        history_messages: [
+          { role: "user", content: "创作：一张海报" },
+          { role: "assistant", content: "主体是什么？" },
+        ],
+      }),
+    );
   });
 
   it("fails a legacy active run closed when its RunPin is missing", async () => {
@@ -399,7 +466,7 @@ describe("AgentRunRepo", () => {
         ]),
       },
       agent_advances: {
-        findUnique: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({
           id: 30n,
           ordinal: 1,
@@ -910,5 +977,240 @@ describe("AgentRunRepo", () => {
         failureMessage: "boom",
       }),
     ).resolves.toEqual({ kind: "conflict" });
+  });
+
+  function awaitingInputTx(overrides: {
+    activeRequest?: { id: bigint } | null;
+  }) {
+    const run = {
+      id: 9n,
+      project_id: 42n,
+      conversation_id: 7n,
+      user_id: 100n,
+      status: "running",
+      stage: "understanding",
+      version: 2,
+      fencing_token: 1n,
+      input_sequence_no: 0,
+      activated_creative_skill_versions: null,
+      reasoning_summary: null,
+    };
+    const now = new Date("2026-07-29T00:00:10.000Z");
+    return {
+      run,
+      tx: {
+        $queryRaw: vi.fn().mockResolvedValue([{ db_now: now }]),
+        run_commits: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          create: vi.fn(),
+        },
+        agent_advances: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: 30n,
+            agent_run_id: 9n,
+            input_high_watermark_sequence_no: 1,
+          }),
+          update: vi.fn(),
+        },
+        agent_runs: {
+          findUnique: vi.fn().mockResolvedValue(run),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          update: vi.fn().mockResolvedValue({
+            ...run,
+            status: "awaiting_input",
+            stage: "alignment",
+            version: 3,
+          }),
+        },
+        user_input_requests: {
+          findFirst: vi.fn().mockResolvedValue(overrides.activeRequest ?? null),
+          create: vi.fn().mockResolvedValue({ id: 77n }),
+        },
+        conversations: { update: vi.fn().mockResolvedValue({ version: 2 }) },
+        conversation_messages: {
+          create: vi.fn().mockResolvedValue({ id: 10n }),
+        },
+        project_event_stream: {
+          upsert: vi.fn(),
+          update: vi.fn().mockResolvedValue({ high_watermark: 1n }),
+        },
+        project_events: {
+          create: vi.fn().mockImplementation(({ data }) => ({
+            id: 11n,
+            gmt_create: now,
+            ...data,
+          })),
+        },
+      },
+    };
+  }
+
+  it("commits awaiting_input with an assistant message and one pending clarification request", async () => {
+    const { tx } = awaitingInputTx({ activeRequest: null });
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createAgentRunRepo(prisma).commitAwaitingInput({
+        workerId: "worker-1",
+        agentRunId: "9",
+        advanceId: "30",
+        fence: "1",
+        runVersion: 2,
+        requestDigest,
+        content: "请告诉我这次创作的主体是什么？",
+        reasoningSummary: "需求缺少主体，先澄清最关键的一项。",
+        question: "请告诉我这次创作的主体是什么？",
+        stage: "alignment",
+      }),
+    ).resolves.toEqual({
+      kind: "committed",
+      cursor: expect.any(String),
+      status: "awaiting_input",
+    });
+    expect(tx.conversation_messages.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        role: "assistant",
+        content: "请告诉我这次创作的主体是什么？",
+        sequence_no: 2,
+      }),
+    });
+    expect(tx.user_input_requests.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        request_type: "creation_clarification",
+        source_agent_run_id: 9n,
+        status: "pending",
+        question: "请告诉我这次创作的主体是什么？",
+      }),
+    });
+    expect(tx.agent_runs.update).toHaveBeenCalledWith({
+      where: { id: 9n },
+      data: expect.objectContaining({
+        status: "awaiting_input",
+        stage: "alignment",
+        input_sequence_no: 1,
+        lease_owner: null,
+      }),
+    });
+    expect(tx.run_commits.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ outcome: "awaiting_input" }),
+    });
+  });
+
+  it("conflicts when the Run already holds an active input request", async () => {
+    const { tx } = awaitingInputTx({ activeRequest: { id: 76n } });
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createAgentRunRepo(prisma).commitAwaitingInput({
+        workerId: "worker-1",
+        agentRunId: "9",
+        advanceId: "30",
+        fence: "1",
+        runVersion: 2,
+        requestDigest,
+        content: "再问一次",
+        reasoningSummary: "重复请求。",
+        question: "再问一次",
+        stage: "alignment",
+      }),
+    ).resolves.toEqual({ kind: "conflict" });
+    expect(tx.user_input_requests.create).not.toHaveBeenCalled();
+    expect(tx.conversation_messages.create).not.toHaveBeenCalled();
+  });
+
+  it("commits a user-requested cancellation without an assistant message", async () => {
+    const run = {
+      id: 9n,
+      project_id: 42n,
+      conversation_id: 7n,
+      user_id: 100n,
+      status: "running",
+      stage: "alignment",
+      version: 2,
+      fencing_token: 1n,
+      activated_creative_skill_versions: null,
+      reasoning_summary: null,
+    };
+    const update = vi.fn().mockResolvedValue({
+      ...run,
+      status: "cancelled",
+      stage: "cancelled",
+      version: 3,
+    });
+    const tx = {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValue([{ db_now: new Date("2026-07-29T00:00:10.000Z") }]),
+      run_commits: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn() },
+      agent_advances: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 30n,
+          agent_run_id: 9n,
+          input_high_watermark_sequence_no: 1,
+        }),
+        update: vi.fn(),
+      },
+      agent_runs: {
+        findUnique: vi.fn().mockResolvedValue(run),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update,
+      },
+      conversations: { update: vi.fn().mockResolvedValue({ version: 3 }) },
+      conversation_messages: { create: vi.fn().mockResolvedValue({ id: 10n }) },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi.fn().mockResolvedValue({ high_watermark: 1n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 11n,
+          gmt_create: new Date("2026-07-29T00:00:10.000Z"),
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createAgentRunRepo(prisma).commitCancelled({
+        workerId: "worker-1",
+        agentRunId: "9",
+        advanceId: "30",
+        fence: "1",
+        runVersion: 2,
+        requestDigest,
+        content: "好的，已按你的要求停止，不会创建计划。",
+        reasoningSummary: "按 User 要求停止。",
+      }),
+    ).resolves.toEqual({
+      kind: "committed",
+      cursor: expect.any(String),
+      status: "cancelled",
+    });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 9n },
+      data: expect.objectContaining({
+        status: "cancelled",
+        stage: "cancelled",
+        terminal_reason: "user_requested",
+        input_sequence_no: 1,
+        active_guard: null,
+      }),
+    });
+    expect(tx.conversation_messages.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        role: "assistant",
+        content: "好的，已按你的要求停止，不会创建计划。",
+      }),
+    });
+    expect(tx.run_commits.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ outcome: "cancelled" }),
+    });
   });
 });

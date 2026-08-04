@@ -126,7 +126,7 @@ async function sendMessage(
   token,
   content,
   suffix,
-  { forcedCreativeSkillId } = {},
+  { forcedCreativeSkillId, replyToInputRequestId } = {},
 ) {
   const key = uniqueKey(`scenario-${suffix}`);
   const response = await postJson(
@@ -136,6 +136,9 @@ async function sendMessage(
       content,
       ...(forcedCreativeSkillId
         ? { forced_creative_skill_id: forcedCreativeSkillId }
+        : {}),
+      ...(replyToInputRequestId
+        ? { reply_to_input_request_id: replyToInputRequestId }
         : {}),
     },
     token,
@@ -906,4 +909,257 @@ test("video 进程重启接管：停 worker 后恢复并成功，轮询跨越重
     pollsAfter > pollsBefore,
     "服务=provider-stub 事实=轮询应跨越重启继续",
   );
+});
+
+// ── IK67GY T06：多 AgentAdvance 的 PlanPhase 对齐流程 ─────────────────────
+
+const SUBJECT_QUESTION = "请告诉我这次创作的主体是什么？";
+const OUTCOME_QUESTION = "请告诉我你期望的结果是什么？";
+const TARGET_QUESTION = "请告诉我这次修改的目标是什么？";
+const CONFIRM_QUESTION = "确认以上需求并正式提交计划吗？";
+
+async function awaitClarification(projectId, token, suffix) {
+  return waitFor(
+    async () => {
+      const snapshot = await fetchSnapshot(projectId, token);
+      const run = snapshot.agent_runs?.at(-1);
+      if (run?.status !== "awaiting_input") return null;
+      const request = run.active_input_request;
+      if (!request || request.status !== "pending") return null;
+      return { run, request };
+    },
+    30_000,
+    `服务=agent-worker 事实=澄清请求应到达（${suffix}）`,
+  );
+}
+
+test("普通问答保持普通 Conversation，不进入 PlanPhase（IK67GY）", async () => {
+  const { token, projectId, suffix } = await registerAndCreateProject("plainqa");
+  const prompt = `普通问答 ${suffix}`;
+
+  await sendMessage(projectId, token, prompt, suffix);
+  const run = await waitForAgentRunStatus(projectId, token, ["completed"], 30_000);
+  assert.equal(run.status, "completed", "服务=agent-worker 事实=普通问答应完成");
+
+  const assistants = await assistantMessages(projectId, token);
+  assert.equal(assistants.length, 1, "服务=agent-worker 事实=应恰有一条助手消息");
+  assert.equal(
+    assistants[0].content,
+    fakeAgentEcho(prompt),
+    "服务=agent-worker 事实=普通问答应保持确定性回显",
+  );
+
+  const requestCount = mysqlQuery(
+    `SELECT COUNT(*) FROM user_input_requests WHERE project_id = ${projectId};`,
+  ).trim();
+  assert.equal(requestCount, "0", "服务=持久化事实=普通问答不得创建澄清请求");
+  const advanceCount = mysqlQuery(
+    `SELECT COUNT(*) FROM agent_advances WHERE agent_run_id = ${run.agent_run_id};`,
+  ).trim();
+  assert.equal(advanceCount, "1", "服务=持久化事实=普通问答只应有一个推进");
+});
+
+test("创作对齐：逐问澄清→复述确认→同意完成，同一 Run 多个 Advance（IK67GY）", async () => {
+  const { token, projectId, suffix } = await registerAndCreateProject("alignflow");
+
+  const first = await sendMessage(projectId, token, "创作：一张海报", suffix);
+  const runId = first.agent_run_id;
+
+  const subject = await awaitClarification(projectId, token, "主体");
+  assert.equal(subject.run.agent_run_id, runId, "服务=持久化事实=应沿用同一 Run");
+  assert.equal(subject.run.stage, "alignment", "服务=Snapshot 事实=澄清阶段应为 alignment");
+  assert.equal(subject.request.question, SUBJECT_QUESTION, "服务=Snapshot 事实=应先问主体");
+
+  await sendMessage(projectId, token, "主体：蓝鲸", suffix, {
+    replyToInputRequestId: subject.request.input_request_id,
+  });
+  const outcome = await awaitClarification(projectId, token, "预期");
+  assert.equal(outcome.run.agent_run_id, runId, "服务=持久化事实=回答应继续同一 Run");
+  assert.equal(outcome.request.question, OUTCOME_QUESTION, "服务=Snapshot 事实=第二问应为预期");
+
+  await sendMessage(projectId, token, "预期：极简海报", suffix, {
+    replyToInputRequestId: outcome.request.input_request_id,
+  });
+  const confirm = await awaitClarification(projectId, token, "确认");
+  assert.equal(
+    confirm.run.stage,
+    "awaiting_final_confirmation",
+    "服务=Snapshot 事实=复述后应等待最终确认",
+  );
+  assert.equal(confirm.request.question, CONFIRM_QUESTION, "服务=Snapshot 事实=应请求最终同意");
+  const confirmAssistant = await assistantMessages(projectId, token);
+  assert.ok(
+    confirmAssistant.at(-1)?.content.startsWith("需求复述：主体「蓝鲸」，预期「极简海报」"),
+    "服务=agent-worker 事实=提交前必须复述已对齐需求",
+  );
+
+  await sendMessage(projectId, token, "立即出计划", suffix, {
+    replyToInputRequestId: confirm.request.input_request_id,
+  });
+  const stillConfirm = await awaitClarification(projectId, token, "不绕过确认");
+  assert.equal(
+    stillConfirm.run.stage,
+    "awaiting_final_confirmation",
+    "服务=agent-worker 事实=立即出计划不得绕过最终确认",
+  );
+
+  await sendMessage(projectId, token, "同意", suffix, {
+    replyToInputRequestId: stillConfirm.request.input_request_id,
+  });
+  const run = await waitForAgentRunStatus(projectId, token, ["completed"], 30_000);
+  assert.equal(run.agent_run_id, runId, "服务=持久化事实=完成仍应是同一 Run");
+  const assistants = await assistantMessages(projectId, token);
+  assert.equal(
+    assistants.at(-1)?.content,
+    "已完成需求对齐：主体「蓝鲸」，预期「极简海报」。",
+    "服务=agent-worker 事实=同意后应完成对齐",
+  );
+
+  const ordinals = mysqlQuery(
+    `SELECT ordinal FROM agent_advances WHERE agent_run_id = ${runId} ORDER BY ordinal;`,
+  ).trim().split("\n");
+  assert.deepEqual(ordinals, ["1", "2", "3", "4", "5"], "服务=持久化事实=应按序创建多个推进");
+  const commitCount = mysqlQuery(
+    `SELECT COUNT(*) FROM run_commits WHERE agent_run_id = ${runId};`,
+  ).trim();
+  assert.equal(commitCount, "5", "服务=持久化事实=RunCommit 唯一性按 AgentAdvance 生效");
+});
+
+test("你决定补默认值，不受支持的要求继续澄清而不静默降级（IK67GY）", async () => {
+  const { token, projectId, suffix } = await registerAndCreateProject("decideflow");
+
+  const first = await sendMessage(projectId, token, "创作：一张海报", suffix);
+  const runId = first.agent_run_id;
+
+  const subject = await awaitClarification(projectId, token, "主体");
+  await sendMessage(projectId, token, "你决定", suffix, {
+    replyToInputRequestId: subject.request.input_request_id,
+  });
+  const outcome = await awaitClarification(projectId, token, "预期");
+  assert.equal(outcome.run.agent_run_id, runId, "服务=持久化事实=你决定后应继续同一 Run");
+  assert.equal(outcome.request.question, OUTCOME_QUESTION, "服务=agent-worker 事实=你决定后应推进到下一缺失项");
+
+  await sendMessage(
+    projectId,
+    token,
+    "预期：动态效果，不支持：立体渲染",
+    suffix,
+    { replyToInputRequestId: outcome.request.input_request_id },
+  );
+  const unsupported = await awaitClarification(projectId, token, "不支持");
+  assert.equal(unsupported.run.stage, "alignment", "服务=Snapshot 事实=不受支持应回到澄清");
+  assert.ok(
+    unsupported.request.question.includes("立体渲染」目前不受支持"),
+    "服务=agent-worker 事实=不受支持的要求必须继续澄清",
+  );
+
+  await sendMessage(projectId, token, "你决定", suffix, {
+    replyToInputRequestId: unsupported.request.input_request_id,
+  });
+  const stillUnsupported = await awaitClarification(projectId, token, "你决定不降级");
+  assert.ok(
+    stillUnsupported.request.question.includes("立体渲染」目前不受支持"),
+    "服务=agent-worker 事实=你决定不得移除不受支持的要求",
+  );
+
+  await sendMessage(projectId, token, "预期：动态海报", suffix, {
+    replyToInputRequestId: stillUnsupported.request.input_request_id,
+  });
+  const confirm = await awaitClarification(projectId, token, "改要求后确认");
+  assert.equal(
+    confirm.run.stage,
+    "awaiting_final_confirmation",
+    "服务=Snapshot 事实=重新给出受支持要求后应进入最终确认",
+  );
+  assert.ok(
+    confirm.request.question === CONFIRM_QUESTION,
+    "服务=Snapshot 事实=应请求最终同意",
+  );
+
+  await sendMessage(projectId, token, "同意", suffix, {
+    replyToInputRequestId: confirm.request.input_request_id,
+  });
+  const run = await waitForAgentRunStatus(projectId, token, ["completed"], 30_000);
+  const assistants = await assistantMessages(projectId, token);
+  assert.equal(
+    assistants.at(-1)?.content,
+    "已完成需求对齐：主体「由系统选择的默认主体」，预期「动态海报」。",
+    "服务=agent-worker 事实=默认值与修订后的要求应进入对齐结果",
+  );
+  assert.equal(run.agent_run_id, runId, "服务=持久化事实=完成仍应是同一 Run");
+});
+
+test("修改请求必须明确目标与变化（IK67GY）", async () => {
+  const { token, projectId, suffix } = await registerAndCreateProject("modifyflow");
+
+  await sendMessage(projectId, token, "修改：海报", suffix);
+  const target = await awaitClarification(projectId, token, "目标");
+  assert.equal(target.run.stage, "alignment", "服务=Snapshot 事实=修改请求应进入澄清");
+  assert.equal(target.request.question, TARGET_QUESTION, "服务=agent-worker 事实=修改应先问目标");
+});
+
+test("继续讨论回到对齐，不要创建计划与停止取消当前 Run（IK67GY）", async () => {
+  const { token, projectId, suffix } = await registerAndCreateProject("controlflow");
+
+  const first = await sendMessage(
+    projectId,
+    token,
+    "创作：一张海报，主体：蓝鲸，预期：极简海报",
+    suffix,
+  );
+  const runId = first.agent_run_id;
+  const confirm = await awaitClarification(projectId, token, "确认");
+  assert.equal(confirm.run.stage, "awaiting_final_confirmation", "服务=Snapshot 事实=应先到最终确认");
+
+  await sendMessage(projectId, token, "继续讨论", suffix, {
+    replyToInputRequestId: confirm.request.input_request_id,
+  });
+  const discuss = await awaitClarification(projectId, token, "继续讨论");
+  assert.equal(discuss.run.stage, "alignment", "服务=Snapshot 事实=继续讨论应回到对齐阶段");
+  assert.equal(discuss.run.agent_run_id, runId, "服务=持久化事实=继续讨论应仍是同一 Run");
+
+  await sendMessage(projectId, token, "不要创建计划", suffix, {
+    replyToInputRequestId: discuss.request.input_request_id,
+  });
+  const cancelled = await waitForAgentRunStatus(projectId, token, ["cancelled"], 30_000);
+  assert.equal(cancelled.stage, "cancelled", "服务=Snapshot 事实=取消后阶段应可从 Snapshot 恢复");
+
+  const second = await sendMessage(projectId, token, "创作：另一张海报", `${suffix}b`);
+  const stopAsk = await awaitClarification(projectId, token, "停止前澄清");
+  assert.notEqual(second.agent_run_id, runId, "服务=持久化事实=取消后新目标应开新 Run");
+  assert.equal(
+    stopAsk.request.question,
+    SUBJECT_QUESTION,
+    "服务=agent-worker 事实=取消后新创作目标应重新澄清而不继承旧取值",
+  );
+  await sendMessage(projectId, token, "停止", `${suffix}b`, {
+    replyToInputRequestId: stopAsk.request.input_request_id,
+  });
+  await waitForAgentRunStatus(projectId, token, ["cancelled"], 30_000);
+});
+
+test("对齐中途 web 重启后从 Snapshot 恢复并可继续回答（IK67GY）", async () => {
+  const { token, projectId, suffix } = await registerAndCreateProject("recoverflow");
+
+  const first = await sendMessage(projectId, token, "创作：一张海报", suffix);
+  const runId = first.agent_run_id;
+  const subject = await awaitClarification(projectId, token, "重启前澄清");
+
+  serviceRestart("web");
+  await waitServiceReady("web");
+
+  const recovered = await awaitClarification(projectId, token, "重启后恢复");
+  assert.equal(recovered.run.agent_run_id, runId, "服务=Snapshot 事实=重启后应恢复同一 Run");
+  assert.equal(recovered.run.stage, "alignment", "服务=Snapshot 事实=重启后阶段应恢复");
+  assert.equal(
+    recovered.request.input_request_id,
+    subject.request.input_request_id,
+    "服务=Snapshot 事实=重启后应恢复同一澄清请求",
+  );
+
+  await sendMessage(projectId, token, "主体：蓝鲸", suffix, {
+    replyToInputRequestId: recovered.request.input_request_id,
+  });
+  const outcome = await awaitClarification(projectId, token, "恢复后继续");
+  assert.equal(outcome.request.question, OUTCOME_QUESTION, "服务=agent-worker 事实=恢复后回答应继续推进");
 });

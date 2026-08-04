@@ -521,10 +521,10 @@ test("CommandId 幂等：同键同内容重放返回首次结果，同键异内�
     "服务=web 事实=同键异内容应拒绝（100302）",
   );
 
-  // projectB 只多了一条消息（重放未重复创建）
+  // projectB 只多了一条用户消息（重放未重复创建；助手回复由 worker 时序决定，不参与幂等断言）
   const messageCount = Number(
     mysqlQuery(
-      `SELECT COUNT(*) FROM conversation_messages WHERE project_id=${projectB} AND is_delete=0`,
+      `SELECT COUNT(*) FROM conversation_messages WHERE project_id=${projectB} AND is_delete=0 AND role='user'`,
     ),
   );
   assert.equal(
@@ -632,4 +632,65 @@ test("断线后历史保持一致，恢复联网后可继续提交", async () =>
     60_000,
     "服务=web 事实=断线恢复后新消息应进入 Snapshot",
   );
+}, 300_000);
+
+test("PlanPhase 对齐在 AgentChatPanel 经自然语言推进并展示阶段（IK67GY）", async () => {
+  const projectId = await createProject("计划阶段验收", user.token);
+  await openCanvas(projectId);
+
+  await page.click(".tc-agent-composer-editor");
+  await page.keyboard.type("创作：一张海报");
+  await page.getByLabel("发送").click();
+
+  await page.getByLabel("Agent 状态：等待输入").waitFor({ timeout: 60_000 });
+  await page.getByLabel("计划阶段：需求对齐").waitFor();
+  await page.waitForFunction(
+    () =>
+      Array.from(document.querySelectorAll(".tc-agent-agent-bubble")).some(
+        (el) => el.textContent?.includes("请告诉我这次创作的主体是什么？"),
+      ),
+    null,
+    { timeout: 30_000 },
+  );
+
+  // 澄清回答经同一 composer 提交（前端自动绑定可回答的澄清请求）
+  await page.click(".tc-agent-composer-editor");
+  await page.keyboard.type("主体：蓝鲸，预期：极简海报");
+  await page.getByLabel("发送").click();
+
+  await page.getByLabel("计划阶段：待最终确认").waitFor({ timeout: 60_000 });
+  await page.waitForFunction(
+    () =>
+      Array.from(document.querySelectorAll(".tc-agent-agent-bubble")).some(
+        (el) =>
+          el.textContent?.includes("需求复述：主体「蓝鲸」，预期「极简海报」"),
+      ),
+    null,
+    { timeout: 30_000 },
+  );
+
+  await page.click(".tc-agent-composer-editor");
+  await page.keyboard.type("同意");
+  await page.getByLabel("发送").click();
+
+  await page.getByLabel("Agent 状态：已完成").waitFor({ timeout: 60_000 });
+  await page.waitForFunction(
+    () =>
+      Array.from(document.querySelectorAll(".tc-agent-agent-bubble")).some(
+        (el) =>
+          el.textContent?.includes(
+            "已完成需求对齐：主体「蓝鲸」，预期「极简海报」。",
+          ),
+      ),
+    null,
+    { timeout: 30_000 },
+  );
+
+  // Snapshot 权威事实：同一 Run 三个推进、每个推进一次 RunCommit
+  const snapshot = await fetchSnapshot(projectId, user.token);
+  const run = snapshot.agent_runs.at(-1);
+  const ordinals = mysqlQuery(
+    `SELECT ordinal FROM agent_advances WHERE agent_run_id = ${run.agent_run_id} ORDER BY ordinal;`,
+  ).trim().split("\n");
+  assert.deepEqual(ordinals, ["1", "2", "3"], "服务=持久化事实=UI 对齐流程应有三个推进");
 }, 300_000);
