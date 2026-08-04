@@ -1,44 +1,26 @@
 import { describe, expect, it } from "vitest";
 
-import { loadGoTopUpCredentials } from "./go-topup";
+import { loadGoTopUpConfig } from "./go-topup";
 
-const CONFIGURED_ENV = {
-  NEW_API_BASE_URL: "http://new-api.test",
-  NEW_API_ROOT_ACCESS_TOKEN: "root-access-token",
-  NEW_API_ROOT_USER_ID: "1",
-};
-
-describe("loadGoTopUpCredentials", () => {
-  it("env 齐全 → 解析出 baseUrl / rootToken / rootUserId", () => {
-    expect(loadGoTopUpCredentials(CONFIGURED_ENV)).toEqual({
+describe("loadGoTopUpConfig", () => {
+  it("有 NEW_API_BASE_URL → 解析出 baseUrl", () => {
+    expect(loadGoTopUpConfig({ NEW_API_BASE_URL: "http://new-api.test" })).toEqual({
       baseUrl: "http://new-api.test",
-      rootToken: "root-access-token",
-      rootUserId: 1,
     });
   });
 
-  it("缺任一凭证 / 非法 user id → null", () => {
-    expect(loadGoTopUpCredentials({})).toBeNull();
+  it("充值链路不再依赖 root 凭证 env（退役），未配置 root env 不影响解析", () => {
     expect(
-      loadGoTopUpCredentials({
-        NEW_API_BASE_URL: "http://x",
-        NEW_API_ROOT_ACCESS_TOKEN: "t",
-      }),
-    ).toBeNull();
-    expect(
-      loadGoTopUpCredentials({
-        ...CONFIGURED_ENV,
-        NEW_API_ROOT_USER_ID: "abc",
-      }),
-    ).toBeNull();
-    expect(
-      loadGoTopUpCredentials({ ...CONFIGURED_ENV, NEW_API_ROOT_USER_ID: "0" }),
-    ).toBeNull();
-    expect(
-      loadGoTopUpCredentials({
-        ...CONFIGURED_ENV,
+      loadGoTopUpConfig({
+        NEW_API_BASE_URL: "http://new-api.test",
         NEW_API_ROOT_ACCESS_TOKEN: "",
+        NEW_API_ROOT_USER_ID: "",
       }),
-    ).toBeNull();
+    ).toEqual({ baseUrl: "http://new-api.test" });
+  });
+
+  it("缺 NEW_API_BASE_URL → null（调用方按未配置返回 503）", () => {
+    expect(loadGoTopUpConfig({})).toBeNull();
+    expect(loadGoTopUpConfig({ NEW_API_BASE_URL: "" })).toBeNull();
   });
 });

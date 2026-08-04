@@ -71,6 +71,16 @@ new-api 的账户和 quota 分离，会产生双重身份、双重余额和生�
     删除对应 rewrite；核心验收不启动 Java Gateway、User Service 或 Product API。
     截至 2026-08-03，运行时断链和真实本地 new-api 验收已经完成；Java 源码及旧部署资产的
     物理删除由后续独立计划处理，不构成继续兼容 Java 运行链的理由。
+18. **充值链路单凭证、双授权层**（IK65NN，2026-08-04）。new-api 把“Token 证明账户身份”和
+    “Token 是否有资格调用模型”拆成两层：账户层 `AccountTokenAuth`/`AccountTokenOrUserAuth`
+    只验证 Token 存在、未显式禁用、未到期且属主 User 启用，不检查剩余额度/IP/模型/分组，
+    因此额度耗尽的 Token 仍可充值与查单；relay 层继续用严格 `TokenAuth`，对耗尽 Token 的
+    拒绝行为不变。蓝鲸充值报价/下单/查单（`/api/user/amount`、`/api/user/bluewhalepay/pay`、
+    `/api/user/topup/self`）改挂账户层，BFF 透传经真校验的用户 `sk-xxx`，不再发送
+    `New-Api-User`，订单 User ID 一律由 Go 从 Token 属主解析；root 代理充值
+    （`NEW_API_ROOT_ACCESS_TOKEN`/`NEW_API_ROOT_USER_ID`）在充值链路退役，仅折扣同步的
+    RootAuth 管理接口保留 root 凭证。`GET /api/token/identity` 复用账户层校验，BFF 登录态
+    不因额度耗尽失效。
 
 ## 连锁影响
 
@@ -80,6 +90,7 @@ new-api 的账户和 quota 分离，会产生双重身份、双重余额和生�
 - `blue_whale_web` 的登录 UI 改用 username/password；旧手机号验证码、refresh 和 Java JWT 用例由 new-api 账户合同测试替换。
 - quota 查询和 `quotaToCredits` 展示共用同一 Node usage 路由。
 - 现有 Java rewrite 仅是迁移现状，必须在对应 TypeScript 接口接管后删除；不得建设长期兼容层。
+- 充值链路不再依赖 root 凭证代理下单；部署环境的充值 root env 变为可选（仅折扣同步需要）。
 
 ## 错误与测试边界
 

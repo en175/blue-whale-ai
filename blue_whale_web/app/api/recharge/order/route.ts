@@ -1,7 +1,8 @@
 import { createNewApiClient, NewApiError } from "@blue-whale/core";
+import { parseNewApiBearerToken } from "@/lib/auth/bearer-token";
 import { withAuthenticatedUser } from "@/lib/auth/product-route-auth";
 import { createTopupTierDeps } from "@/lib/topup-tier/deps";
-import { loadGoTopUpCredentials } from "@/lib/recharge/go-topup";
+import { loadGoTopUpConfig } from "@/lib/recharge/go-topup";
 
 /**
  * POST /api/recharge/order — 创建充值订单（Model B：复用 Go 原生 new-api 充值）
@@ -15,11 +16,10 @@ import { loadGoTopUpCredentials } from "@/lib/recharge/go-topup";
  * 校验——这正是原 502（"档位不存在"，web 档位 vs Go recharge_tier 两套数据源）的根因，改接后消除。
  * 实付与折扣全由 Go 公式决定；web 档位折扣经 payment_setting.amount_discount 同步（见 admin topup-tiers）。
  *
- * 鉴权：调 Go 用 root 凭证（env 注入）——原生充值接口挂在 UserAuth 下只认个人 access_token +
- * New-Api-User 头，不认 sk- 中继令牌；mock 登录期固定用 root 代表当前用户，真实登录后再按用户
- * 解析（见 lib/recharge/go-topup.ts）。正因为下单方是 root，前端 sk- 令牌必须过真校验
- * （withAuthenticatedUser → Go /api/token/identity，60s 缓存）：只查 "sk- 前缀" 的话，
- * 任意伪造字符串都能以 root 身份创建订单。
+ * 鉴权：Go 原生充值接口挂在账户层 AccountTokenOrUserAuth 下，只凭 Bearer sk-xxx
+ * 证明账户身份，订单 User ID 由 Go 从 Token 属主解析。BFF 把经 withAuthenticatedUser
+ * 真校验过的同一请求 Token 透传给 Go（Go identity，60s 缓存），不再使用 root 凭证
+ * 代理下单，也不发送 New-Api-User。
  */
 
 /** 前端支付方式 → BlueWhalePay wayCode（与旧自定义 recharge 保持一致）。 */
@@ -32,12 +32,12 @@ const WAY_CODE_BY_METHOD: Record<string, string> = {
 const QR_TTL_MS = 15 * 60 * 1000;
 
 export async function POST(request: Request) {
-  const credentials = loadGoTopUpCredentials();
-  if (!credentials) {
+  const config = loadGoTopUpConfig();
+  if (!config) {
     return Response.json(
       {
         code: 503,
-        msg: "Go 充值凭证未配置（NEW_API_ROOT_ACCESS_TOKEN / NEW_API_ROOT_USER_ID / NEW_API_BASE_URL）",
+        msg: "Go 充值配置未就绪（NEW_API_BASE_URL）",
         data: null,
       },
       { status: 503 },
@@ -45,6 +45,18 @@ export async function POST(request: Request) {
   }
 
   return withAuthenticatedUser(request, async (_user) => {
+    // 认证回调内提取当前请求的 Bearer Token（刚经 withAuthenticatedUser 真校验），
+    // 同一 Token 透传给 Go 充值接口；订单 User ID 由 Go 从 Token 属主解析。
+    const userToken = parseNewApiBearerToken(
+      request.headers.get("authorization"),
+    );
+    if (!userToken) {
+      return Response.json(
+        { code: 401, msg: "未提供有效令牌", data: null },
+        { status: 401 },
+      );
+    }
+
     let body: { tier_id?: string; payment_method?: string };
     try {
       body = await request.json();
@@ -122,15 +134,10 @@ export async function POST(request: Request) {
     }
 
     try {
-      const client = createNewApiClient({ baseUrl: credentials.baseUrl });
-      // Go 原生充值接口走 UserAuth（access_token + New-Api-User 头），不认前端 sk- 令牌。
-      // mock 登录期固定用 root 凭证代表当前用户下单（见 lib/recharge/go-topup.ts）。
+      const client = createNewApiClient({ baseUrl: config.baseUrl });
+      // Go 原生充值接口走账户层 AccountTokenOrUserAuth，凭当前用户 sk- 令牌即可；
       // 先报价拿真实付（Go getPayMoney：N × Price × 分组充值倍率 × 金额折扣），再下单。
-      const payMoney = await client.requestTopUpAmount(
-        credentials.rootToken,
-        amount,
-        credentials.rootUserId,
-      );
+      const payMoney = await client.requestTopUpAmount(userToken, amount);
       // 报价与档位实付价对账：不一致说明折扣同步漂移或分组倍率变动，留痕便于排查。
       if (Math.abs(payMoney - tier.price) > 0.01) {
         console.warn(
@@ -139,10 +146,9 @@ export async function POST(request: Request) {
         );
       }
       const order = await client.createBlueWhalePayTopUp(
-        credentials.rootToken,
+        userToken,
         amount,
         wayCode,
-        credentials.rootUserId,
       );
       return Response.json({
         code: 200,
