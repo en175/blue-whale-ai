@@ -8,7 +8,7 @@ const libItem = {
   id: "3",
   name: "海报生成",
   description: "一键海报",
-  cover_url: null,
+  coverUrl: null,
   source: "official",
   added: true,
   creative_skill_id: "poster_gen",
@@ -61,11 +61,11 @@ describe("handleListLibrary", () => {
 describe("handleListMine", () => {
   it("返回我的 skills 分页 → 200", async () => {
     const mineItem = {
-      skill_id: "3",
+      skillId: "3",
       auto: true,
       name: "海报生成",
       description: "一键海报",
-      cover_url: null,
+      coverUrl: null,
       source: "official",
       creative_skill_id: "poster_gen",
     };

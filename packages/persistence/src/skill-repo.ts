@@ -9,18 +9,18 @@ export interface SkillLibraryView {
   id: string;
   name: string;
   description: string | null;
-  cover_url: string | null;
+  coverUrl: string | null;
   source: string;
   added: boolean;
   creative_skill_id: string | null;
 }
 
 export interface SkillMineView {
-  skill_id: string;
+  skillId: string;
   auto: boolean;
   name: string | null;
   description: string | null;
-  cover_url: string | null;
+  coverUrl: string | null;
   source: string | null;
   creative_skill_id: string | null;
 }
@@ -130,7 +130,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
           id: s.id.toString(),
           name: s.name,
           description: s.description,
-          cover_url: s.cover_url,
+          coverUrl: s.cover_url,
           source: s.source,
           added: mineIds.has(s.id.toString()),
           creative_skill_id: creativeIds.get(s.id.toString()) ?? null,
@@ -175,11 +175,11 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         records: rels.map((r) => {
           const s = skillMap.get(r.skill_id.toString());
           return {
-            skill_id: r.skill_id.toString(),
+            skillId: r.skill_id.toString(),
             auto: r.auto === 1,
             name: s?.name ?? null,
             description: s?.description ?? null,
-            cover_url: s?.cover_url ?? null,
+            coverUrl: s?.cover_url ?? null,
             source: s?.source ?? null,
             creative_skill_id: s
               ? (creativeIds.get(s.id.toString()) ?? null)
