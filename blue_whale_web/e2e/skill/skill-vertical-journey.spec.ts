@@ -7,7 +7,7 @@
  *
  * 锁定验收（契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §16）：
  *  1. 主旅程：技能库（最多使用排序 + 使用人数）→ 添加官方 → 开官方 auto →
- *     编写模式创建个人技能（脏草稿确认后保留）→ 开个人 auto → 多候选可同时开启；
+ *     编写模式创建个人技能（脏草稿切页签静默保留，IK693G）→ 开个人 auto → 多候选可同时开启；
  *  2. 直接指定覆盖自动匹配：携带 forced_creative_skill_id，运行状态只显示「使用技能：名称」；
  *  3. auto 激活名经快照 activated_creative_skill_versions 到达前端，同样只显示名称不显示来源；
  *  4. 视觉/响应式（3/2/1 列、无横向滚动）、会话状态（切页签保留查询）、键盘焦点（陷阱 + ESC 恢复）。
@@ -258,8 +258,6 @@ test("主旅程：浏览/添加/双域 auto/创建个人技能/脏草稿保留",
   page,
 }) => {
   const backend = await bootstrap(page);
-  // window.confirm（脏草稿）一律确认放行
-  page.on("dialog", (dialog) => void dialog.accept());
   await openPanel(page);
   await expect(page.getByTestId("skill-library-card")).toHaveCount(3);
 
@@ -296,7 +294,7 @@ test("主旅程：浏览/添加/双域 auto/创建个人技能/脏草稿保留",
     page.getByRole("switch", { name: "关闭自动应用：海报大师" }),
   ).toHaveAttribute("aria-checked", "true");
 
-  // 4) 创建技能：编写草稿 → 脏态切页签（confirm 确认）→ 切回草稿保留
+  // 4) 创建技能：编写草稿 → 脏态切页签（静默保留，IK693G）→ 切回草稿保留
   await page.getByTestId("skill-tab-create").click();
   const editor = page.getByTestId("skill-md-editor");
   await editor.fill(PERSONAL_SKILL_MD);
@@ -549,6 +547,18 @@ test("视觉/响应式/会话状态/键盘焦点", async ({ page }) => {
       }),
     )
     .toBe(true);
+
+  // 背景 inert（IK693G）：面板外顶层子树全部 inert，通知列表豁免
+  const backgroundInert = await page.evaluate(() => {
+    const panel = document.querySelector('[data-testid="skill-panel"]');
+    return Array.from(document.body.children)
+      .filter(
+        (el) =>
+          !el.contains(panel) && el.getAttribute("aria-label") !== "通知列表",
+      )
+      .every((el) => el.hasAttribute("inert"));
+  });
+  expect(backgroundInert).toBe(true);
 
   // ESC 关闭 → 焦点恢复触发按钮
   await page.keyboard.press("Escape");

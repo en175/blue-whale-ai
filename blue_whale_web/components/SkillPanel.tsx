@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AtSign,
   BookMarked,
@@ -50,11 +51,10 @@ import {
  * 绑定下一次 Agent 请求（一次性，不建引用、不改 auto）；无稳定 ID 的目录行禁用。
  *
  * 交互（IK60WT）：背景滚动锁定 + 焦点陷阱 + 初始焦点落面板 + 关闭后焦点还触发按钮；
+ * 面板经 portal 挂 body 顶层 + 背景 inert（IK693G，spec 故事 7，通知列表豁免）；
  * 关闭三路径：ESC / 遮罩按压（onMouseDown 范式，规避拖选误关 IK2AKU）/ 右上 X。
  */
 
-const COVER_PLACEHOLDER =
-  "https://placehold.co/200x200/1a1a1a/FFFFFF?text=Skill";
 const PAGE_SIZE = 50;
 
 /** SKILL.md 编辑器初始模板（IK60WU）。 */
@@ -112,12 +112,16 @@ export default function SkillPanel({
 }: SkillPanelProps) {
   // 关闭时整棵卸载：打开会话状态（页签、技能库查询/滚动）随之重置
   if (!isOpen) return null;
-  return (
+  // portal 到 body（IK693G）：配合背景 inert——面板成为 body 顶层子节点，
+  // 其余顶层子树可整体 inert 而不误伤面板。SSR 首屏 isOpen 恒为 false，不触 document。
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <SkillPanelDialog
       onClose={onClose}
       onUseSkill={onUseSkill}
       onSummarizeConversation={onSummarizeConversation}
-    />
+    />,
+    document.body,
   );
 }
 
@@ -153,8 +157,7 @@ function SkillPanelDialog({
   };
 
   const switchTab = (tab: TabKey) => {
-    if (activeTab === "create" && tab !== "create" && !confirmDirtyClose())
-      return;
+    // 切页签静默保留草稿（IK693G，spec 故事 4/46）：草稿守卫只拦关闭路径，不拦页签切换。
     setActiveTab(tab);
     setMountedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
   };
@@ -188,6 +191,24 @@ function SkillPanelDialog({
     return () => {
       document.body.style.overflow = prevOverflow;
       prevFocus?.focus?.();
+    };
+  }, []);
+
+  // 背景 inert（IK693G，spec 故事 7）：面板经 portal 挂在 body 顶层；打开期间 body
+  // 其余顶层子树全部 inert（背景对指针/键盘/辅助技术不可达），通知列表豁免
+  // （面板内的成功提示仍需对辅助技术可达）；卸载时恢复原状。
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const inerted: Element[] = [];
+    for (const el of Array.from(document.body.children)) {
+      if (el.contains(panel)) continue;
+      if (el.getAttribute("aria-label") === "通知列表") continue;
+      el.setAttribute("inert", "");
+      inerted.push(el);
+    }
+    return () => {
+      for (const el of inerted) el.removeAttribute("inert");
     };
   }, []);
 
@@ -265,7 +286,7 @@ function SkillPanelDialog({
         ref={panelRef}
         tabIndex={-1}
         data-testid="skill-panel"
-        className="tc-agent-skill-panel bg-[#141414] border border-white/[0.12] rounded-2xl shadow-[0_24px_80px_rgba(0,0,0,0.5)] w-[calc(100vw-64px)] h-[calc(100vh-64px)] flex flex-col overflow-hidden focus:outline-none animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none"
+        className="tc-agent-skill-panel bg-[var(--tc-login-modal-bg)] border border-white/[0.12] rounded-2xl shadow-[var(--tc-modal-shadow)] w-[calc(100vw-64px)] h-[calc(100vh-64px)] flex flex-col overflow-hidden focus:outline-none animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none"
         role="dialog"
         aria-modal="true"
         aria-label="技能面板"
@@ -465,7 +486,7 @@ function CreateContent({
   return (
     <div
       data-testid="skill-create-editor"
-      className="tc-agent-skill-panel__content flex flex-col flex-1 min-h-0 overflow-hidden bg-[#141414]"
+      className="tc-agent-skill-panel__content flex flex-col flex-1 min-h-0 overflow-hidden bg-[var(--tc-login-modal-bg)]"
     >
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.08]">
         <div
@@ -769,7 +790,7 @@ function MyContent({
   };
 
   return (
-    <div className="tc-agent-skill-panel__content flex flex-col flex-1 min-h-0 overflow-hidden bg-[#141414]">
+    <div className="tc-agent-skill-panel__content flex flex-col flex-1 min-h-0 overflow-hidden bg-[var(--tc-login-modal-bg)]">
       {error && (
         <div className="flex items-center justify-between gap-3 px-4 py-2 text-[12px] text-white/60 bg-white/[0.04] border-b border-white/[0.08]">
           <span className="truncate">{error}</span>
@@ -1051,7 +1072,7 @@ function LibraryContent({
               <div
                 role="menu"
                 aria-label="排序方式"
-                className="absolute right-0 top-full z-20 mt-1 w-32 rounded-lg border border-white/[0.1] bg-[#1c1c1c] py-1 shadow-[0_8px_30px_rgba(0,0,0,0.45)]"
+                className="absolute right-0 top-full z-20 mt-1 w-32 rounded-lg border border-white/[0.1] bg-[var(--tc-menu-bg)] py-1 shadow-[var(--tc-dropdown-shadow)]"
               >
                 {SORT_OPTIONS.map((o) => (
                   <button
@@ -1179,9 +1200,10 @@ function SkillCover({
   url?: string | null;
   name?: string | null;
 }) {
-  // cover_url 有值 → 背景图；空 + name 有值 → 确定性渐变 + 首字母（IK60WU）；否则默认图。
-  if (!url && name) {
-    const { gradient, initials } = generateSkillCover(name);
+  // cover_url 有值 → 背景图；空 → 名称驱动的确定性渐变 + 首字母（IK60WU/IK693G），
+  // 不依赖第三方外链占位图。name 缺失时 generateSkillCover 回退 "?"。
+  if (!url) {
+    const { gradient, initials } = generateSkillCover(name ?? "");
     return (
       <span
         className="tc-agent-skill-row__cover flex items-center justify-center w-full h-full rounded-lg"
@@ -1197,7 +1219,7 @@ function SkillCover({
   return (
     <span
       className="tc-agent-skill-row__cover block w-full h-full rounded-lg bg-cover bg-center bg-no-repeat"
-      style={{ backgroundImage: `url("${url || COVER_PLACEHOLDER}")` }}
+      style={{ backgroundImage: `url("${url}")` }}
       aria-hidden="true"
     />
   );
@@ -1277,7 +1299,7 @@ function MySkillRow({
                 <div
                   role="menu"
                   aria-label={`技能操作：${displayName}`}
-                  className="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-white/[0.1] bg-[#1c1c1c] py-1 shadow-[0_8px_30px_rgba(0,0,0,0.45)]"
+                  className="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-white/[0.1] bg-[var(--tc-menu-bg)] py-1 shadow-[var(--tc-dropdown-shadow)]"
                 >
                   {skill.asset_domain === "official" ? (
                     <button
@@ -1387,7 +1409,7 @@ function LibrarySkillCard({
       } flex flex-col overflow-hidden rounded-xl bg-white/[0.035] border border-white/[0.08] hover:bg-white/[0.05] transition-colors`}
     >
       <div className="tc-agent-skill-card__cover h-[140px] w-full shrink-0">
-        <SkillCover url={skill.cover_url} />
+        <SkillCover url={skill.cover_url} name={skill.name} />
       </div>
       <div className="tc-agent-skill-row__toggle flex flex-col flex-1 min-w-0 gap-1 p-3.5">
         <span className="tc-agent-skill-row__title text-[13px] font-semibold text-white/90 line-clamp-1 break-words">
@@ -1504,7 +1526,7 @@ function PersonalSkillViewer({
         role="dialog"
         aria-modal="true"
         aria-label={`查看技能：${skill.name ?? ""}`}
-        className="bg-[#141414] border border-white/[0.12] rounded-2xl shadow-[var(--tc-modal-shadow)] w-[640px] max-w-[calc(100vw-96px)] max-h-[calc(100vh-128px)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 motion-reduce:animate-none"
+        className="bg-[var(--tc-login-modal-bg)] border border-white/[0.12] rounded-2xl shadow-[var(--tc-modal-shadow)] w-[640px] max-w-[calc(100vw-96px)] max-h-[calc(100vh-128px)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 motion-reduce:animate-none"
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           // ESC 只关本弹层，不冒到 window 关掉整个技能面板
@@ -1625,7 +1647,7 @@ function PersonalSkillDeleteDialog({
         role="alertdialog"
         aria-modal="true"
         aria-label={`删除技能：${displayName}`}
-        className="bg-[#141414] border border-white/[0.12] rounded-2xl shadow-[var(--tc-modal-shadow)] w-[400px] max-w-[calc(100vw-96px)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 motion-reduce:animate-none"
+        className="bg-[var(--tc-login-modal-bg)] border border-white/[0.12] rounded-2xl shadow-[var(--tc-modal-shadow)] w-[400px] max-w-[calc(100vw-96px)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 motion-reduce:animate-none"
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === "Escape" && !busy) {

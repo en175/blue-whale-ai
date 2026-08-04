@@ -12,16 +12,17 @@ function djb2Hash(str: string): number {
   return Math.abs(hash);
 }
 
-/** 从设计系统色板衍生的 8 组渐变对。 */
+/** 从设计系统色板衍生的 8 组渐变对（DESIGN.md `skill-cover-N-from/to`，
+ *  值注册在 globals.css `--tc-skill-cover-N-*`，此处一律引用 CSS 变量，不硬编码 hex）。 */
 const GRADIENTS: [string, string][] = [
-  ["#3b82f6", "#1e3a8a"],
-  ["#8b5cf6", "#4c1d95"],
-  ["#ec4899", "#831843"],
-  ["#f59e0b", "#78350f"],
-  ["#10b981", "#064e3b"],
-  ["#06b6d4", "#0c4a6e"],
-  ["#ef4444", "#7f1d1d"],
-  ["#6366f1", "#312e81"],
+  ["var(--tc-skill-cover-1-from)", "var(--tc-skill-cover-1-to)"],
+  ["var(--tc-skill-cover-2-from)", "var(--tc-skill-cover-2-to)"],
+  ["var(--tc-skill-cover-3-from)", "var(--tc-skill-cover-3-to)"],
+  ["var(--tc-skill-cover-4-from)", "var(--tc-skill-cover-4-to)"],
+  ["var(--tc-skill-cover-5-from)", "var(--tc-skill-cover-5-to)"],
+  ["var(--tc-skill-cover-6-from)", "var(--tc-skill-cover-6-to)"],
+  ["var(--tc-skill-cover-7-from)", "var(--tc-skill-cover-7-to)"],
+  ["var(--tc-skill-cover-8-from)", "var(--tc-skill-cover-8-to)"],
 ];
 
 /** 根据技能名称生成确定性渐变封面和首字母。 */

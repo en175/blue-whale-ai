@@ -603,7 +603,9 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         }
       }
       // 原生 upsert：ON DUPLICATE KEY 恢复逻辑删行 + 刷 auto（绕开 @TableLogic 过滤，对齐 Java）。
-      await prisma.$executeRaw`INSERT INTO user_skill (user_id, skill_id, auto, version, is_delete) VALUES (${BigInt(userId)}, ${BigInt(skillId)}, 0, 0, 0) ON DUPLICATE KEY UPDATE auto = VALUES(auto), is_delete = 0`;
+      // 重加时同步刷 gmt_create（IK693G）：listMine 按 user_skill.gmt_create desc 排序，
+      // 不刷则重加技能仍按首次添加时间排位、进不了顶部（spec 故事 27/30）。
+      await prisma.$executeRaw`INSERT INTO user_skill (user_id, skill_id, auto, version, is_delete) VALUES (${BigInt(userId)}, ${BigInt(skillId)}, 0, 0, 0) ON DUPLICATE KEY UPDATE auto = VALUES(auto), is_delete = 0, gmt_create = CURRENT_TIMESTAMP(3)`;
     },
 
     async removeReferenceByCreativeSkillId(userId, creativeSkillId) {
