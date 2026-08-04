@@ -61,10 +61,8 @@ const ACTIVE_TIER = {
 describe("POST /api/recharge/order（原生充值改接）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     vi.stubEnv("NEW_API_BASE_URL", "http://new-api.test");
-    // mock 登录期：固定用 root 凭证代表当前用户调 Go 原生充值
-    vi.stubEnv("NEW_API_ROOT_ACCESS_TOKEN", "root-access-token");
-    vi.stubEnv("NEW_API_ROOT_USER_ID", "1");
     // sk- 令牌真校验（Go identity）：缺省放行「sk-test」
     mocks.resolveTokenIdentity.mockResolvedValue({
       userId: 1,
@@ -80,22 +78,18 @@ describe("POST /api/recharge/order（原生充值改接）", () => {
     });
   });
 
-  it("解析 web 档位 → 报价 → 原生下单（root 凭证 + New-Api-User），返回前端契约壳", async () => {
+  it("解析 web 档位 → 报价 → 原生下单（当前请求的用户 Token），返回前端契约壳", async () => {
     const response = await POST(
       postOrder({ tier_id: "1", payment_method: "wechat" }),
     );
 
-    // 报价与下单都用 root 凭证 + 美元额度 N=100 + userId=1；wechat → WX_NATIVE
-    expect(mocks.requestTopUpAmount).toHaveBeenCalledWith(
-      "root-access-token",
-      100,
-      1,
-    );
+    // 报价与下单都用当前请求的 sk- 令牌 + 美元额度 N=100；wechat → WX_NATIVE；
+    // 不带任何 userId 参数（订单 User ID 由 Go 从 Token 属主解析）
+    expect(mocks.requestTopUpAmount).toHaveBeenCalledWith("sk-test", 100);
     expect(mocks.createBlueWhalePayTopUp).toHaveBeenCalledWith(
-      "root-access-token",
+      "sk-test",
       100,
       "WX_NATIVE",
-      1,
     );
 
     expect(response.status).toBe(200);
@@ -113,15 +107,14 @@ describe("POST /api/recharge/order（原生充值改接）", () => {
   it("alipay 映射到 ALI_QR", async () => {
     await POST(postOrder({ tier_id: "1", payment_method: "alipay" }));
     expect(mocks.createBlueWhalePayTopUp).toHaveBeenCalledWith(
-      "root-access-token",
+      "sk-test",
       100,
       "ALI_QR",
-      1,
     );
   });
 
-  it("缺少 root 凭证 → 503，且不下单", async () => {
-    vi.stubEnv("NEW_API_ROOT_ACCESS_TOKEN", "");
+  it("缺少 NEW_API_BASE_URL → 503，且不下单", async () => {
+    vi.stubEnv("NEW_API_BASE_URL", "");
     const response = await POST(
       postOrder({ tier_id: "1", payment_method: "wechat" }),
     );
@@ -171,13 +164,11 @@ describe("POST /api/recharge/order（原生充值改接）", () => {
   });
 });
 
-// 下单方是 root 凭证 → 前端令牌必须过真校验，只查 sk- 前缀会放行任意伪造字符串。
+// 前端令牌必须过真校验（Go identity），伪造字符串不得到达下单链路。
 describe("POST /api/recharge/order 令牌门禁（Go identity 真校验）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("NEW_API_BASE_URL", "http://new-api.test");
-    vi.stubEnv("NEW_API_ROOT_ACCESS_TOKEN", "root-access-token");
-    vi.stubEnv("NEW_API_ROOT_USER_ID", "1");
     mocks.getById.mockResolvedValue(ACTIVE_TIER);
     mocks.requestTopUpAmount.mockResolvedValue(85);
     mocks.createBlueWhalePayTopUp.mockResolvedValue({
