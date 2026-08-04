@@ -6,17 +6,16 @@
  *
  * 仅在 Node.js runtime 注册一次（globalThis 去重，防 dev 热重载多次挂载）。
  * 每 IMAGE_RECOVERY_INTERVAL_MS（默认 60s）跑一次；启动时立即跑一次接回重启前的孤儿。
+ *
+ * 注意：本文件同时被 Next 编译进 Edge Instrumentation 包。@blue-whale/agent-runtime
+ * 依赖 node:crypto（edge 不支持），只能动态导入且必须位于 NEXT_RUNTIME 门控之后——
+ * 门控外的静态/动态导入都会被打进 edge 包导致启动报错（IK6B2T）。
  */
-import {
-  bundledAgentRuntimeManifest,
-  validateAgentRuntimeManifest,
-} from "@blue-whale/agent-runtime";
-
-export async function register(
-  manifest: unknown = bundledAgentRuntimeManifest,
-): Promise<void> {
-  validateAgentRuntimeManifest(manifest);
+export async function register(manifest?: unknown): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  const { bundledAgentRuntimeManifest, validateAgentRuntimeManifest } =
+    await import("@blue-whale/agent-runtime");
+  validateAgentRuntimeManifest(manifest ?? bundledAgentRuntimeManifest);
   const globalKey = "__blueWhaleImageRecoveryStarted";
   const g = globalThis as unknown as Record<string, unknown>;
   if (g[globalKey]) return;
