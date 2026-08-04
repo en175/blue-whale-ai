@@ -39,7 +39,7 @@
 
 ### 情况 2：Skill 要多镜头，简单路径不够
 
-保留 Skill 的多镜头结构，使用三段论表达（见 `references/seedance-prompt-optimizer.md`）。
+保留 Skill 的多镜头结构，使用每镜独立完整块表达（见 `references/seedance-prompt-optimizer.md`）。
 
 ### 情况 3：Skill 需要真实社交感，但约束要求稳定
 
