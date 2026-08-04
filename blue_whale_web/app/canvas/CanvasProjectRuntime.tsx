@@ -1709,6 +1709,7 @@ export function CanvasProjectRuntime({
         answerableActive={answerableActive}
         activeSkillName={agentRunDisplay?.skillName}
         agentRunStatus={agentRunDisplay?.status}
+        agentRunStage={agentRunDisplay?.stage}
         reasoningSummary={agentRunDisplay?.reasoningSummary}
         isOpen={isAgentOpen}
         onClose={() => setIsAgentOpen(false)}

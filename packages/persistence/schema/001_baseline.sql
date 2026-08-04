@@ -277,7 +277,7 @@ CREATE TABLE `agent_advances` (
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 
-    UNIQUE INDEX `uk_agent_advance_run`(`agent_run_id`),
+    UNIQUE INDEX `uk_agent_advance_run_ordinal`(`agent_run_id`, `ordinal`),
     INDEX `idx_agent_advance_run_status`(`agent_run_id`, `status`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -328,7 +328,6 @@ CREATE TABLE `user_input_requests` (
     `is_delete` TINYINT NOT NULL DEFAULT 0,
 
     INDEX `idx_input_request_owner`(`project_id`, `user_id`, `status`),
-    UNIQUE INDEX `uk_input_request_resumed_run`(`resumed_agent_run_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

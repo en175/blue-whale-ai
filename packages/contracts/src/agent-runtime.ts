@@ -151,6 +151,14 @@ export const agentRunPinSchema = z
   })
   .strict();
 
+export const agentRunStageSchema = z.enum([
+  "understanding",
+  "alignment",
+  "awaiting_final_confirmation",
+  "completed",
+  "cancelled",
+]);
+
 export const agentRunPublicProjectionSchema = z
   .object({
     agent_run_id: decimalIdSchema,
@@ -164,7 +172,7 @@ export const agentRunPublicProjectionSchema = z
       "cancelled",
       "recovery_failed",
     ]),
-    stage: z.string().nullable(),
+    stage: agentRunStageSchema.nullable(),
     version: z.number().int().nonnegative(),
     activated_creative_skill_versions: z
       .array(creativeSkillActivationSchema)
@@ -182,6 +190,13 @@ const agentInputMessageSchema = z
   })
   .strict();
 
+const agentHistoryMessageSchema = z
+  .object({
+    role: z.enum(["user", "assistant"]),
+    content: z.string().min(1),
+  })
+  .strict();
+
 export const agentRunWorkSchema = z
   .object({
     schema_version: z.literal(1),
@@ -191,6 +206,7 @@ export const agentRunWorkSchema = z
     run_version: z.number().int().nonnegative(),
     input_high_watermark_sequence_no: z.number().int().positive(),
     input_messages: z.array(agentInputMessageSchema).min(1),
+    history_messages: z.array(agentHistoryMessageSchema).default([]),
     prompt: z.string().min(1),
     run_pin: agentRunPinSchema,
     auto_creative_skill_candidates: z.array(autoCreativeSkillCandidateSchema),
@@ -207,6 +223,11 @@ const runCommitBase = z.object({
   expected_run_version: z.number().int().nonnegative(),
   request_digest: digestSchema,
 });
+
+export const awaitingInputStageSchema = z.enum([
+  "alignment",
+  "awaiting_final_confirmation",
+]);
 
 export const agentRunCommitSchema = z.discriminatedUnion("outcome", [
   runCommitBase
@@ -229,6 +250,22 @@ export const agentRunCommitSchema = z.discriminatedUnion("outcome", [
         .strict(),
     })
     .strict(),
+  runCommitBase
+    .extend({
+      outcome: z.literal("awaiting_input"),
+      assistant_message: z.object({ content: z.string().min(1) }).strict(),
+      reasoning_summary: z.string().min(1).max(280),
+      input_request: z
+        .object({ question: z.string().min(1).max(2000) })
+        .strict(),
+      stage: awaitingInputStageSchema,
+    })
+    .strict(),
+  runCommitBase
+    .extend({
+      outcome: z.literal("cancelled"),
+    })
+    .strict(),
 ]);
 
 export type AgentRuntimeManifest = z.infer<typeof agentRuntimeManifestSchema>;
@@ -246,7 +283,9 @@ export type CreativeSkillResource = z.infer<typeof creativeSkillResourceSchema>;
 export type AgentRunPublicProjection = z.infer<
   typeof agentRunPublicProjectionSchema
 >;
+export type AgentRunStage = z.infer<typeof agentRunStageSchema>;
 export type AgentRunWork = z.infer<typeof agentRunWorkSchema>;
+export type AgentHistoryMessage = AgentRunWork["history_messages"][number];
 export type AgentRunCommit = z.infer<typeof agentRunCommitSchema>;
 
 function canonicalize(value: unknown): unknown {

@@ -803,7 +803,7 @@ describe("ConversationRepo.acceptMessage", () => {
     expect(tx.agent_runs.create).not.toHaveBeenCalled();
   });
 
-  it("rejects a reply that would require a second Advance", async () => {
+  it("resumes an awaiting_input Run to queued when its clarification is answered", async () => {
     const run = {
       id: 9n,
       project_id: 42n,
@@ -811,8 +811,10 @@ describe("ConversationRepo.acceptMessage", () => {
       user_id: 100n,
       active_guard: 7n,
       status: "awaiting_input",
-      stage: "clarifying",
+      stage: "alignment",
       version: 2,
+      activated_creative_skill_versions: null,
+      reasoning_summary: null,
     };
     const createEvent = vi.fn().mockImplementation(({ data }) => ({
       id: 11n,
@@ -858,10 +860,7 @@ describe("ConversationRepo.acceptMessage", () => {
       },
       project_event_stream: {
         upsert: vi.fn(),
-        update: vi
-          .fn()
-          .mockResolvedValueOnce({ high_watermark: 3n })
-          .mockResolvedValueOnce({ high_watermark: 4n }),
+        update: vi.fn().mockResolvedValue({ high_watermark: 4n }),
       },
       project_events: { create: createEvent },
     };
@@ -883,10 +882,39 @@ describe("ConversationRepo.acceptMessage", () => {
         conversationId: "7",
         replyToInputRequestId: "12",
       }),
-    ).resolves.toEqual({ kind: "agent_run_conflict" });
-    expect(createEvent).not.toHaveBeenCalled();
-    expect(tx.user_input_requests.update).not.toHaveBeenCalled();
-    expect(tx.conversation_messages.create).not.toHaveBeenCalled();
+    ).resolves.toEqual(
+      expect.objectContaining({
+        kind: "accepted",
+        agent_run_id: "9",
+        message_id: "10",
+        sequence_no: 2,
+      }),
+    );
+    expect(tx.agent_runs.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: 9n,
+        status: "awaiting_input",
+        version: 2,
+      }),
+      data: expect.objectContaining({
+        status: "queued",
+        version: { increment: 1 },
+      }),
+    });
+    expect(tx.user_input_requests.update).toHaveBeenCalledWith({
+      where: { id: 12n },
+      data: expect.objectContaining({
+        status: "answered",
+        resumed_agent_run_id: 9n,
+        answer_message_id: 10n,
+      }),
+    });
+    expect(createEvent).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        event_type: "agent_run.status_changed",
+        payload: expect.objectContaining({ status: "queued" }),
+      }),
+    });
   });
 
   // 总结当前对话意图持久化（IK60X1，契约 §15.2）：接纳 skill_summarize=true 的消息

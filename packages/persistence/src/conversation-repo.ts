@@ -1,7 +1,8 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import type {
-  AgentRuntimeManifest,
-  CreativeSkillActivation,
+import {
+  creativeSkillActivationSchema,
+  type AgentRuntimeManifest,
+  type CreativeSkillActivation,
 } from "@blue-whale/contracts";
 
 import { buildAgentRunPin } from "./agent-run-pin.js";
@@ -102,6 +103,17 @@ function replay(
   };
 }
 
+function publicRunActivations(value: unknown): CreativeSkillActivation[] {
+  const parsed = creativeSkillActivationSchema.array().max(1).safeParse(value);
+  return parsed.success ? parsed.data : [];
+}
+
+function publicRunReasoningSummary(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= 280
+    ? value
+    : null;
+}
+
 export async function acceptConversationMessageInTransaction(
   tx: Prisma.TransactionClient,
   input: AcceptConversationMessageRecord,
@@ -199,6 +211,7 @@ export async function acceptConversationMessageInTransaction(
   }
 
   let createdRun = false;
+  let resumedRun = false;
   let createdRunActivations: CreativeSkillActivation[] = [];
   if (run) {
     if (!conversation)
@@ -206,26 +219,48 @@ export async function acceptConversationMessageInTransaction(
     if (input.forcedCreativeSkillId != null) {
       return { kind: "creative_skill_conflict" } as const;
     }
-    if (run.status !== "queued") {
-      return { kind: "agent_run_conflict" } as const;
+    if (run.status === "awaiting_input") {
+      const resumed = await tx.agent_runs.updateMany({
+        where: {
+          id: run.id,
+          version: run.version,
+          status: "awaiting_input",
+          active_guard: conversation.id,
+          is_delete: 0,
+        },
+        data: {
+          status: "queued",
+          version: { increment: 1 },
+          ...(input.skillSummarize ? { skill_summarize: true } : {}),
+        },
+      });
+      if (resumed.count !== 1) {
+        return { kind: "input_request_conflict" } as const;
+      }
+      run = await tx.agent_runs.findUnique({ where: { id: run.id } });
+      resumedRun = true;
+    } else {
+      if (run.status !== "queued") {
+        return { kind: "agent_run_conflict" } as const;
+      }
+      const requeued = await tx.agent_runs.updateMany({
+        where: {
+          id: run.id,
+          version: run.version,
+          status: { in: [...ACTIVE_RUN_STATUSES] },
+          active_guard: conversation.id,
+          is_delete: 0,
+        },
+        data: {
+          status: run.status,
+          ...(input.skillSummarize ? { skill_summarize: true } : {}),
+        },
+      });
+      run =
+        requeued.count === 1
+          ? await tx.agent_runs.findUnique({ where: { id: run.id } })
+          : null;
     }
-    const requeued = await tx.agent_runs.updateMany({
-      where: {
-        id: run.id,
-        version: run.version,
-        status: { in: [...ACTIVE_RUN_STATUSES] },
-        active_guard: conversation.id,
-        is_delete: 0,
-      },
-      data: {
-        status: run.status,
-        ...(input.skillSummarize ? { skill_summarize: true } : {}),
-      },
-    });
-    run =
-      requeued.count === 1
-        ? await tx.agent_runs.findUnique({ where: { id: run.id } })
-        : null;
   }
   if (!run) {
     const pinResult = await buildAgentRunPin(
@@ -343,6 +378,27 @@ export async function acceptConversationMessageInTransaction(
       },
     });
     cursor = inputAnsweredEvent.cursor;
+  }
+  if (resumedRun) {
+    const resumedEvent = await appendProjectEvent(tx, {
+      projectId: input.projectId,
+      eventType: "agent_run.status_changed",
+      aggregateType: "agent_run",
+      aggregateId: run.id.toString(),
+      aggregateVersion: run.version,
+      correlationId: input.clientMessageId,
+      payload: {
+        agent_run_id: run.id.toString(),
+        conversation_id: conversation.id.toString(),
+        status: run.status,
+        stage: run.stage,
+        activated_creative_skill_versions: publicRunActivations(
+          run.activated_creative_skill_versions,
+        ),
+        reasoning_summary: publicRunReasoningSummary(run.reasoning_summary),
+      },
+    });
+    cursor = resumedEvent.cursor;
   }
   if (createdRun) {
     const runEvent = await appendProjectEvent(tx, {

@@ -4,8 +4,12 @@ import { describe, expect, it } from "vitest";
 import { createFakeAgentAdapter } from "./fake-agent-adapter.js";
 
 describe("Fake Agent Adapter", () => {
-  const request = (prompt: string) => ({
+  const request = (
+    prompt: string,
+    historyMessages: readonly { role: "user" | "assistant"; content: string }[] = [],
+  ) => ({
     prompt,
+    historyMessages,
     runtimeInstructions: [],
     creativeSkill: null,
   });
@@ -18,6 +22,7 @@ describe("Fake Agent Adapter", () => {
       content:
         "fake-agent-response:05d37bdcd85047a772a96d21d5b472781d711e3c423e989b26da887c07895ac1",
       reasoningSummary: "已完成回答。",
+      action: { kind: "respond" },
     });
   });
 
@@ -44,6 +49,7 @@ describe("Fake Agent Adapter", () => {
       provider: "fake",
       content: `fake-agent-response:${fingerprint}`,
       reasoningSummary: "已完成回答。",
+      action: { kind: "respond" },
     });
   });
 
@@ -51,6 +57,7 @@ describe("Fake Agent Adapter", () => {
     const adapter = createFakeAgentAdapter();
     const result = await adapter.invoke({
       prompt: "海报专家",
+      historyMessages: [],
       runtimeInstructions: [],
       creativeSkill: {
         creativeSkillId: "official.poster",
@@ -64,5 +71,229 @@ describe("Fake Agent Adapter", () => {
     expect(result.reasoningSummary).toBe("已使用「海报专家」完成回答。");
     expect(result.content).not.toContain("private instructions");
     expect(result.content).not.toContain("海报专家");
+  });
+});
+
+// PlanPhase 对齐脚本（Node Agent Runtime Contract §6/§7）：
+// 创作标记驱动澄清→复述→确认→完成；普通输入保持确定性回显。
+describe("Fake Agent Adapter PlanPhase", () => {
+  const request = (
+    prompt: string,
+    historyMessages: readonly { role: "user" | "assistant"; content: string }[] = [],
+  ) => ({
+    prompt,
+    historyMessages,
+    runtimeInstructions: [],
+    creativeSkill: null,
+  });
+  const adapter = createFakeAgentAdapter();
+
+  it("创作请求缺少主体与预期时只询问第一个缺失项", async () => {
+    const result = await adapter.invoke(request("创作：一张海报"));
+    expect(result.action).toEqual({
+      kind: "clarify",
+      question: "请告诉我这次创作的主体是什么？",
+      stage: "alignment",
+    });
+    expect(result.content).toBe("请告诉我这次创作的主体是什么？");
+  });
+
+  it("修改请求缺少目标与变化时先问目标", async () => {
+    const result = await adapter.invoke(request("修改：海报"));
+    expect(result.action).toEqual({
+      kind: "clarify",
+      question: "请告诉我这次修改的目标是什么？",
+      stage: "alignment",
+    });
+  });
+
+  it("你决定为待回答的缺失项补默认值", async () => {
+    const result = await adapter.invoke(
+      request("你决定", [
+        { role: "user", content: "创作：一张海报" },
+        { role: "assistant", content: "请告诉我这次创作的主体是什么？" },
+      ]),
+    );
+    expect(result.action).toEqual({
+      kind: "clarify",
+      question: "请告诉我你期望的结果是什么？",
+      stage: "alignment",
+    });
+  });
+
+  it("不受支持的要求继续澄清而不是静默降级", async () => {
+    const result = await adapter.invoke(
+      request("创作：一张海报，主体：蓝鲸，预期：极简海报，不支持：立体渲染"),
+    );
+    expect(result.action).toMatchObject({
+      kind: "clarify",
+      stage: "alignment",
+    });
+    expect(result.content).toContain("「立体渲染」目前不受支持");
+  });
+
+  it("你决定不得移除不受支持的要求", async () => {
+    const result = await adapter.invoke(
+      request("你决定", [
+        {
+          role: "user",
+          content: "创作：一张海报，主体：蓝鲸，预期：极简海报，不支持：立体渲染",
+        },
+        {
+          role: "assistant",
+          content: "「立体渲染」目前不受支持，请改为受支持的要求后重新告诉我。",
+        },
+      ]),
+    );
+    expect(result.action).toMatchObject({ kind: "clarify", stage: "alignment" });
+    expect(result.content).toContain("「立体渲染」目前不受支持");
+  });
+
+  it("重新给出受支持的要求后解除不受支持项", async () => {
+    const result = await adapter.invoke(
+      request("预期：动态海报", [
+        {
+          role: "user",
+          content: "创作：一张海报，主体：蓝鲸，预期：极简海报，不支持：立体渲染",
+        },
+        {
+          role: "assistant",
+          content: "「立体渲染」目前不受支持，请改为受支持的要求后重新告诉我。",
+        },
+      ]),
+    );
+    expect(result.action).toEqual({
+      kind: "clarify",
+      question: "确认以上需求并正式提交计划吗？",
+      stage: "awaiting_final_confirmation",
+    });
+  });
+
+  it("对齐完成后复述需求并要求最终确认", async () => {
+    const result = await adapter.invoke(
+      request("预期：极简海报", [
+        { role: "user", content: "创作：一张海报，主体：蓝鲸" },
+        { role: "assistant", content: "请告诉我你期望的结果是什么？" },
+      ]),
+    );
+    expect(result.action).toEqual({
+      kind: "clarify",
+      question: "确认以上需求并正式提交计划吗？",
+      stage: "awaiting_final_confirmation",
+    });
+    expect(result.content).toBe(
+      "需求复述：主体「蓝鲸」，预期「极简海报」。确认无误后我将正式提交计划。",
+    );
+  });
+
+  it("立即出计划不能绕过最终确认", async () => {
+    const result = await adapter.invoke(
+      request("立即出计划", [
+        { role: "user", content: "创作：一张海报，主体：蓝鲸，预期：极简海报" },
+        { role: "assistant", content: "请告诉我你期望的结果是什么？" },
+      ]),
+    );
+    expect(result.action).toMatchObject({
+      kind: "clarify",
+      stage: "awaiting_final_confirmation",
+    });
+  });
+
+  it("对确认请求回复同意后完成对齐", async () => {
+    const result = await adapter.invoke(
+      request("同意", [
+        { role: "user", content: "创作：一张海报，主体：蓝鲸，预期：极简海报" },
+        {
+          role: "assistant",
+          content:
+            "需求复述：主体「蓝鲸」，预期「极简海报」。确认无误后我将正式提交计划。",
+        },
+      ]),
+    );
+    expect(result.action).toEqual({ kind: "respond" });
+    expect(result.content).toBe(
+      "已完成需求对齐：主体「蓝鲸」，预期「极简海报」。",
+    );
+  });
+
+  it("必需项未齐时同意不直接完成，回到缺失项", async () => {
+    const result = await adapter.invoke(
+      request("同意", [
+        { role: "user", content: "创作：一张海报，主体：蓝鲸" },
+        { role: "assistant", content: "请告诉我你期望的结果是什么？" },
+      ]),
+    );
+    expect(result.action).toEqual({
+      kind: "clarify",
+      question: "请告诉我你期望的结果是什么？",
+      stage: "alignment",
+    });
+  });
+
+  it("继续讨论回到 alignment 阶段", async () => {
+    const result = await adapter.invoke(
+      request("继续讨论", [
+        { role: "user", content: "创作：一张海报，主体：蓝鲸，预期：极简海报" },
+        {
+          role: "assistant",
+          content:
+            "需求复述：主体「蓝鲸」，预期「极简海报」。确认无误后我将正式提交计划。",
+        },
+      ]),
+    );
+    expect(result.action).toMatchObject({
+      kind: "clarify",
+      stage: "alignment",
+    });
+  });
+
+  it("不要创建计划与停止都取消当前对齐", async () => {
+    for (const prompt of ["不要创建计划", "停止"]) {
+      const result = await adapter.invoke(
+        request(prompt, [
+          { role: "user", content: "创作：一张海报" },
+          { role: "assistant", content: "请告诉我这次创作的主体是什么？" },
+        ]),
+      );
+      expect(result.action).toEqual({ kind: "cancel" });
+      expect(result.content).toBe("好的，已按你的要求停止，不会创建计划。");
+    }
+  });
+
+  it("完成对齐后的普通问答保持确定性回显", async () => {
+    const result = await adapter.invoke(
+      request("什么是蓝鲸？", [
+        { role: "user", content: "创作：一张海报，主体：蓝鲸，预期：极简海报" },
+        {
+          role: "assistant",
+          content:
+            "需求复述：主体「蓝鲸」，预期「极简海报」。确认无误后我将正式提交计划。",
+        },
+        { role: "user", content: "同意" },
+        { role: "assistant", content: "已完成需求对齐：主体「蓝鲸」，预期「极简海报」。" },
+      ]),
+    );
+    expect(result.action).toEqual({ kind: "respond" });
+    expect(result.content).toMatch(/^fake-agent-response:/);
+  });
+
+  it("取消后的新创作目标重新澄清，不继承已取消的取值", async () => {
+    const result = await adapter.invoke(
+      request("创作：另一张海报", [
+        { role: "user", content: "创作：一张海报，主体：蓝鲸，预期：极简海报" },
+        {
+          role: "assistant",
+          content:
+            "需求复述：主体「蓝鲸」，预期「极简海报」。确认无误后我将正式提交计划。",
+        },
+        { role: "user", content: "不要创建计划" },
+        { role: "assistant", content: "好的，已按你的要求停止，不会创建计划。" },
+      ]),
+    );
+    expect(result.action).toEqual({
+      kind: "clarify",
+      question: "请告诉我这次创作的主体是什么？",
+      stage: "alignment",
+    });
   });
 });

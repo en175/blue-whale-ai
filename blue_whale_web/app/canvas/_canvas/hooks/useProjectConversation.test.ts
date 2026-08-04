@@ -137,6 +137,7 @@ describe("useProjectConversation（画布持久化对话接线 IK67GD T02）", (
       expect(result.current.agentRunDisplay).toEqual({
         agentRunId: "9",
         status: "completed",
+        stage: null,
         skillName: "海报专家",
         reasoningSummary: "已使用「海报专家」完成回答。",
       }),

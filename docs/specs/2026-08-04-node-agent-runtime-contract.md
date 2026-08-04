@@ -70,9 +70,12 @@ Snapshot 与 `agent_run.created` / `agent_run.status_changed` 事件只公开：
 claim 时存在 `running` Advance 则复用（租约接管）；否则创建 `ordinal = 已有最大值 + 1` 的新 Advance，
 并冻结 `sequence_no > run.input_sequence_no` 的 user 消息为 `input_messages[]` 与输入水位。
 
-AgentWork 增加 `history_messages[]`：当前 Advance 输入水位之前的全部正式消息，按 `sequence_no`
+AgentWork 增加 `history_messages[]`：当前 Advance 首条输入消息之前的全部正式消息，按 `sequence_no`
 升序，元素为 `{ role: "user" | "assistant", content }`。`input_messages[]` 的冻结语义不变；
 history 仅供 Runtime 构造模型上下文，不是新的接纳事实。
+
+`UserInputRequest.resumed_agent_run_id` 不施加唯一约束：同一 AgentRun 可随多个 AgentAdvance
+顺序创建并回答多个请求（每次仅一个活动请求）。
 
 RunCommit 增加两个 outcome：
 
@@ -81,7 +84,8 @@ RunCommit 增加两个 outcome：
   Run 置 `awaiting_input`、更新 stage、Advance 置 completed、消费输入水位。
   同一 Run 已存在活动请求时拒绝提交。
 - `cancelled`：User 自然语言表达"不要创建计划 / 停止"时由 Runtime 提交；
-  Run 置 `cancelled`，`terminal_reason=user_requested`，不创建 AssistantMessage，不消费输入水位。
+  原子接纳一条取消确认 AssistantMessage，Run 置 `cancelled`，
+  `terminal_reason=user_requested`，消费输入水位，不创建 UserInputRequest。
 
 stage 为受控枚举，进入公开投影（Snapshot/SSE）：
 
@@ -107,11 +111,14 @@ PlanPhase 行为（意图判断、一次只问一个最关键问题、"你决定
 黑盒验收使用确定性 fake adapter，按以下标记驱动对齐流程；未命中任何创作标记的消息保持
 T05 的确定性指纹回显行为：
 
-- 意图：输入含 `创作：` 前缀为创作请求；含 `修改：` 前缀为修改请求；否则为普通问答。
+- 意图：当前输入含 `创作：` 为创作请求；含 `修改：` 为修改请求。仅当历史尾部仍是未回答的
+  对齐提问/复述时，才把当前输入视为同一创作目标的续答。已对齐事实只从当前创作目标段
+  （最近一条含创作/修改标记的用户消息起）提取，不继承此前已完成或已取消 Run 的取值。
 - 创作必需项：`主体：X` 与 `预期：Y`；修改必需项：`目标：X` 与 `变化：Y`。缺失时按列表顺序每轮只问第一个。
 - 回答含 `你决定`：该缺失项由系统补默认值（`由系统选择的默认主体` / `由系统选择的默认结果`，
   修改请求为 `由系统选择的默认目标` / `由系统选择的默认变化`）。
-- 回答含 `不支持：Z`：`Z` 记为不受支持的明确要求，继续澄清该项，不静默降级。
+- 回答含 `不支持：Z`：`Z` 记为不受支持的明确要求，继续澄清该项，不静默降级；只有 User
+  随后用必需项标记重新给出受支持的要求才解除。`你决定` 不得移除不受支持的要求。
 - `立即出计划`：可减少可选追问，但必需项缺失仍须询问，且不得绕过最终确认。
 - 对齐完成后 Runtime 复述需求并发起最终确认请求；回答含 `同意` 时提交 `completed`。
 - 回答含 `继续讨论`：回到 `alignment` 继续澄清；回答含 `不要创建计划` 或 `停止`：提交 `cancelled`。
