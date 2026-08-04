@@ -233,15 +233,11 @@ function positiveInteger(value: unknown): number | null {
 }
 
 /**
- * Go `middleware.authHelper` 对 access_token 鉴权额外要求 `New-Api-User` 头
- * （= 令牌属主数字 id，校验 id == apiUserId）。原生充值接口（/api/user/amount、
- * /api/user/bluewhalepay/pay、/api/user/topup/self）挂在 UserAuth 下，用 access_token
- * 调用时必须带此头，否则 401。userId 缺省（如走 sk- 中继令牌的 TokenAuth 接口）则不加。
+ * 原生充值接口（/api/user/amount、/api/user/bluewhalepay/pay、
+ * /api/user/topup/self）挂在账户层 AccountTokenOrUserAuth 下，只凭 Bearer
+ * sk-xxx 证明账户身份；订单 User ID 由 Go 从 Token 属主解析，客户端不得
+ * 发送 New-Api-User 头。（RootAuth 的 /api/option/ 管理接口仍需该头，见下方。）
  */
-function newApiUserHeader(userId: number | undefined): { headers?: Record<string, string> } {
-  return userId === undefined ? {} : { headers: { "New-Api-User": String(userId) } };
-}
-
 export function createNewApiClient(options: NewApiClientOptions) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 10_000;
@@ -746,14 +742,12 @@ export function createNewApiClient(options: NewApiClientOptions) {
     async requestTopUpAmount(
       token: string,
       amount: number,
-      userId?: number,
     ): Promise<number> {
       const response = await request<NewApiEnvelope>(
         "/api/user/amount",
         {
           method: "POST",
           body: JSON.stringify({ amount }),
-          ...newApiUserHeader(userId),
         },
         token,
       );
@@ -785,7 +779,6 @@ export function createNewApiClient(options: NewApiClientOptions) {
       token: string,
       amount: number,
       wayCode?: string,
-      userId?: number,
     ): Promise<NewApiTopUpOrderResult> {
       const body: Record<string, unknown> = { amount };
       if (wayCode) body.way_code = wayCode;
@@ -794,7 +787,6 @@ export function createNewApiClient(options: NewApiClientOptions) {
         {
           method: "POST",
           body: JSON.stringify(body),
-          ...newApiUserHeader(userId),
         },
         token,
       );
@@ -823,11 +815,10 @@ export function createNewApiClient(options: NewApiClientOptions) {
     async getTopUpByTradeNo(
       token: string,
       tradeNo: string,
-      userId?: number,
     ): Promise<NewApiTopUpRecord | null> {
       const response = await request<NewApiEnvelope>(
         `/api/user/topup/self?keyword=${encodeURIComponent(tradeNo)}`,
-        { method: "GET", ...newApiUserHeader(userId) },
+        { method: "GET" },
         token,
       );
       const data = (response.data ?? {}) as { items?: unknown };

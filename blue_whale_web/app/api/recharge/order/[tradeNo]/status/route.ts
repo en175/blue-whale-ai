@@ -1,6 +1,7 @@
 import { createNewApiClient, NewApiError } from "@blue-whale/core";
+import { parseNewApiBearerToken } from "@/lib/auth/bearer-token";
 import { withAuthenticatedUser } from "@/lib/auth/product-route-auth";
-import { loadGoTopUpCredentials } from "@/lib/recharge/go-topup";
+import { loadGoTopUpConfig } from "@/lib/recharge/go-topup";
 
 /**
  * GET /api/recharge/order/:tradeNo/status — 轮询充值订单状态（原生 new-api topup）
@@ -9,10 +10,10 @@ import { loadGoTopUpCredentials } from "@/lib/recharge/go-topup";
  * 查的是另一张表、找不到 BWP 单。这里改调 GET /api/user/topup/self?keyword=<tradeNo> 精确匹配。
  * Go 状态 success → 前端 paid；paid 时取 /api/usage/token 当前余额作 credits_after。
  *
- * 鉴权：查单接口 /api/user/topup/self 挂在 UserAuth（access_token + New-Api-User 头），
- * 订单又是用 root 凭证建的，故查单也用 root 凭证（见 lib/recharge/go-topup.ts）。
- * 前端 sk- 令牌过 withAuthenticatedUser 真校验（Go identity，60s 缓存，轮询不额外打 Go）——
- * 余额接口 /api/usage/token 走 TokenAuthReadOnly，认前端 sk- 令牌，直接沿用。
+ * 鉴权：查单接口挂在账户层 AccountTokenOrUserAuth 下，凭当前用户 sk- 令牌即可；
+ * Go 按 Token 属主过滤订单，天然查不到他人订单。前端令牌过 withAuthenticatedUser
+ * 真校验（Go identity，60s 缓存，轮询不额外打 Go）；余额接口 /api/usage/token 走
+ * TokenAuthReadOnly，认前端 sk- 令牌，直接沿用。
  */
 
 /** Go common.TopUpStatus* → 前端 OrderStatus。 */
@@ -27,12 +28,12 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ tradeNo: string }> },
 ) {
-  const credentials = loadGoTopUpCredentials();
-  if (!credentials) {
+  const config = loadGoTopUpConfig();
+  if (!config) {
     return Response.json(
       {
         code: 503,
-        msg: "Go 充值凭证未配置（NEW_API_ROOT_ACCESS_TOKEN / NEW_API_ROOT_USER_ID / NEW_API_BASE_URL）",
+        msg: "Go 充值配置未就绪（NEW_API_BASE_URL）",
         data: null,
       },
       { status: 503 },
@@ -40,6 +41,17 @@ export async function GET(
   }
 
   return withAuthenticatedUser(request, async (_user) => {
+    // 认证回调内提取当前请求的 Bearer Token（刚经 withAuthenticatedUser 真校验）。
+    const userToken = parseNewApiBearerToken(
+      request.headers.get("authorization"),
+    );
+    if (!userToken) {
+      return Response.json(
+        { code: 401, msg: "未提供有效令牌", data: null },
+        { status: 401 },
+      );
+    }
+
     const { tradeNo } = await params;
     if (!tradeNo) {
       return Response.json(
@@ -49,13 +61,9 @@ export async function GET(
     }
 
     try {
-      const client = createNewApiClient({ baseUrl: credentials.baseUrl });
-      // 查单走 UserAuth，用 root 凭证 + New-Api-User 头（订单即以 root 身份创建）。
-      const record = await client.getTopUpByTradeNo(
-        credentials.rootToken,
-        tradeNo,
-        credentials.rootUserId,
-      );
+      const client = createNewApiClient({ baseUrl: config.baseUrl });
+      // 查单走账户层 AccountTokenOrUserAuth，用当前用户 Token；Go 按属主过滤订单。
+      const record = await client.getTopUpByTradeNo(userToken, tradeNo);
       if (!record) {
         return Response.json(
           { code: 404, msg: "订单不存在", data: null },
@@ -66,11 +74,8 @@ export async function GET(
       let creditsAfter: number | null = null;
       if (status === "paid") {
         // 余额走 /api/usage/token（TokenAuthReadOnly，认 sk- 令牌），沿用前端令牌。
-        const token = request.headers.get("authorization")?.slice(7).trim();
-        if (token) {
-          const usage = await client.getTokenUsage(token);
-          creditsAfter = usage.userQuota;
-        }
+        const usage = await client.getTokenUsage(userToken);
+        creditsAfter = usage.userQuota;
       }
       return Response.json({
         code: 200,
