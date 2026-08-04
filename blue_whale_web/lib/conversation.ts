@@ -1,10 +1,19 @@
 import { apiRequest } from "./api-client";
+import type {
+  AcceptedConversationMention,
+  ConversationMentionInput,
+} from "@blue-whale/core";
 import type { WireInteger } from "./wire-integer";
 
 export type AcceptedConversationMessage = {
   message_id: WireInteger;
   agent_run_id: WireInteger;
   cursor: WireInteger;
+  mentions: Array<
+    Omit<AcceptedConversationMention, "mention_id"> & {
+      mention_id: WireInteger;
+    }
+  >;
 };
 
 export function acceptConversationMessage(
@@ -13,7 +22,7 @@ export function acceptConversationMessage(
   clientMessageId: string,
   idempotencyKey: string,
   replyToInputRequestId?: number | string,
-  referencedAssetIds?: WireInteger[],
+  mentions?: ConversationMentionInput[],
   forcedCreativeSkillId?: string,
   skillSummarize?: boolean,
 ): Promise<AcceptedConversationMessage> {
@@ -28,9 +37,7 @@ export function acceptConversationMessage(
         ...(replyToInputRequestId == null
           ? {}
           : { reply_to_input_request_id: replyToInputRequestId }),
-        ...(referencedAssetIds?.length
-          ? { referenced_asset_ids: referencedAssetIds }
-          : {}),
+        ...(mentions?.length ? { mentions } : {}),
         ...(forcedCreativeSkillId
           ? { forced_creative_skill_id: forcedCreativeSkillId }
           : {}),

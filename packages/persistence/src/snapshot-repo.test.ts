@@ -26,7 +26,10 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
       assets: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaClient;
 
-    const result = await createSnapshotRepo(prisma).loadJobsAndAssets("55");
+    const result = await createSnapshotRepo(prisma).loadJobsAndAssets(
+      "55",
+      "100",
+    );
 
     expect(result.generation_jobs[0]?.input).toEqual({ prompt: "鲸鱼游动" });
   });
@@ -52,11 +55,19 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
       assets: { findMany: findAssets },
     } as unknown as PrismaClient;
 
-    const result = await createSnapshotRepo(prisma).loadJobsAndAssets("55");
+    const result = await createSnapshotRepo(prisma).loadJobsAndAssets(
+      "55",
+      "100",
+    );
 
     expect(findAssets).toHaveBeenCalledTimes(1);
     expect(findAssets).toHaveBeenCalledWith({
-      where: { project_id: 55n, status: "normal", is_delete: false },
+      where: {
+        project_id: 55n,
+        user_id: 100n,
+        status: "normal",
+        is_delete: false,
+      },
     });
     expect(result.assets).toEqual([
       {
@@ -101,6 +112,9 @@ describe("SnapshotRepo.loadConversationState", () => {
           },
         ]),
       },
+      conversation_message_mentions: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
       agent_runs: {
         findMany: vi.fn().mockResolvedValue([
           {
@@ -138,7 +152,7 @@ describe("SnapshotRepo.loadConversationState", () => {
     } as unknown as PrismaClient;
 
     await expect(
-      createSnapshotRepo(prisma).loadConversationState("42"),
+      createSnapshotRepo(prisma).loadConversationState("42", "100"),
     ).resolves.toEqual({
       conversation_messages: [
         expect.objectContaining({ message_id: "8", sequence_no: 1 }),
@@ -162,7 +176,7 @@ describe("SnapshotRepo.loadConversationState", () => {
       high_watermark_cursor: "12",
     });
     const serialized = JSON.stringify(
-      await createSnapshotRepo(prisma).loadConversationState("42"),
+      await createSnapshotRepo(prisma).loadConversationState("42", "100"),
     );
     expect(serialized).not.toContain("run_pin");
     expect(serialized).not.toContain("private");
@@ -174,6 +188,147 @@ describe("SnapshotRepo.loadConversationState", () => {
         is_delete: 0,
       },
       orderBy: { id: "asc" },
+    });
+  });
+
+  it("recomputes mention availability without rewriting immutable snapshots or leaking unavailable content", async () => {
+    const assetFindMany = vi.fn().mockResolvedValue([
+      {
+        id: 1n,
+        user_id: 999n,
+        project_id: 42n,
+        status: "normal",
+        is_delete: false,
+      },
+      {
+        id: 3n,
+        user_id: 100n,
+        project_id: 42n,
+        status: "normal",
+        is_delete: false,
+      },
+    ]);
+    const prisma = {
+      conversation_messages: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 8n,
+            conversation_id: 7n,
+            agent_run_id: 9n,
+            role: "user",
+            content: "使用这些引用",
+            sequence_no: 1,
+            gmt_create: new Date("2026-08-04T00:00:00.000Z"),
+          },
+        ]),
+      },
+      conversation_message_mentions: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 101n,
+            message_id: 8n,
+            accepted_user_id: 100n,
+            mention_seq: 0,
+            mention_type: "asset",
+            target_id: 1n,
+            target_version: null,
+            display_name: "他人素材",
+            snapshot: { asset_type: "image", content_sha256: "secret-a" },
+          },
+          {
+            id: 102n,
+            message_id: 8n,
+            accepted_user_id: 100n,
+            mention_seq: 1,
+            mention_type: "scene_card",
+            target_id: 2n,
+            target_version: 3,
+            display_name: "旧版分镜",
+            snapshot: {
+              title: "冻结标题",
+              summary: "冻结摘要",
+              content_markdown: "# 冻结正文",
+              version: 3,
+            },
+          },
+          {
+            id: 103n,
+            message_id: 8n,
+            accepted_user_id: 100n,
+            mention_seq: 2,
+            mention_type: "asset",
+            target_id: 3n,
+            target_version: null,
+            display_name: "可用素材",
+            snapshot: { asset_type: "image", content_sha256: "safe-c" },
+          },
+        ]),
+      },
+      assets: { findMany: assetFindMany },
+      scene_cards: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([
+            { id: 2n, project_id: 42n, version: 4, is_delete: 0 },
+          ]),
+      },
+      agent_runs: { findMany: vi.fn().mockResolvedValue([]) },
+      user_input_requests: { findMany: vi.fn().mockResolvedValue([]) },
+      project_events: {
+        aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 12n } }),
+      },
+    } as unknown as PrismaClient;
+
+    const state = await createSnapshotRepo(prisma).loadConversationState(
+      "42",
+      "100",
+    );
+
+    expect(state.conversation_messages[0]?.mentions).toEqual([
+      {
+        mention_id: "101",
+        index: 0,
+        type: "asset",
+        display_name: "他人素材",
+        availability: "unavailable",
+        reason: "permission_lost",
+      },
+      {
+        mention_id: "102",
+        index: 1,
+        type: "scene_card",
+        display_name: "旧版分镜",
+        availability: "stale",
+        reason: "stale",
+        snapshot: {
+          title: "冻结标题",
+          summary: "冻结摘要",
+          content_markdown: "# 冻结正文",
+          version: 3,
+        },
+      },
+      {
+        mention_id: "103",
+        index: 2,
+        type: "asset",
+        display_name: "可用素材",
+        availability: "available",
+        reason: null,
+        snapshot: { asset_type: "image", content_sha256: "safe-c" },
+      },
+    ]);
+    expect(
+      JSON.stringify(state.conversation_messages[0]?.mentions[0]),
+    ).not.toContain("secret-a");
+    expect(assetFindMany).toHaveBeenCalledWith({
+      where: { id: { in: [1n, 3n] } },
+      select: {
+        id: true,
+        user_id: true,
+        project_id: true,
+        status: true,
+        is_delete: true,
+      },
     });
   });
 });

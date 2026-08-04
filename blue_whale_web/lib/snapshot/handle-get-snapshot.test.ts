@@ -126,7 +126,8 @@ describe("handleGetSnapshot 成功快照", () => {
     });
 
     expect(canvas.getByProject).toHaveBeenCalledWith("7");
-    expect(snapshot.loadJobsAndAssets).toHaveBeenCalledWith("7");
+    expect(snapshot.loadJobsAndAssets).toHaveBeenCalledWith("7", "9");
+    expect(snapshot.loadConversationState).toHaveBeenCalledWith("7", "9");
     expect(res).toEqual({
       code: 200,
       msg: null,
@@ -215,6 +216,17 @@ describe("handleGetSnapshot 成功快照", () => {
               content: "蓝鲸",
               sequence_no: 1,
               created_at: "2026-07-29T00:00:00.000Z",
+              mentions: [
+                {
+                  mention_id: huge,
+                  index: 0,
+                  type: "asset",
+                  display_name: "蓝鲸",
+                  availability: "available",
+                  reason: null,
+                  snapshot: { asset_type: "image" },
+                },
+              ],
             },
           ],
           agent_runs: [
@@ -243,6 +255,7 @@ describe("handleGetSnapshot 成功快照", () => {
       message_id: huge,
       conversation_id: huge,
       agent_run_id: huge,
+      mentions: [expect.objectContaining({ mention_id: huge })],
     });
     expect(res.data?.agent_runs[0]).toMatchObject({
       agent_run_id: huge,

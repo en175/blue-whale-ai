@@ -52,7 +52,7 @@ describe("Conversation 命令 API", () => {
     );
   });
 
-  it("携带 referenced_asset_ids（数字数组、snake_case、DOM 序）", async () => {
+  it("携带跨类型 mentions（snake_case、DOM 序）", async () => {
     vi.mocked(apiRequest).mockResolvedValue({
       message_id: 1,
       agent_run_id: 2,
@@ -65,7 +65,15 @@ describe("Conversation 命令 API", () => {
       "c-3",
       "k-3",
       undefined,
-      [9, 3],
+      [
+        { type: "asset", asset_id: "9", display_name: "蓝鲸" },
+        {
+          type: "scene_card",
+          scene_card_id: "3",
+          scene_card_version: 2,
+          display_name: "开场",
+        },
+      ],
     );
 
     expect(apiRequest).toHaveBeenCalledWith(
@@ -75,13 +83,21 @@ describe("Conversation 命令 API", () => {
         body: JSON.stringify({
           client_message_id: "c-3",
           content: "@[蓝鲸] 帮我画",
-          referenced_asset_ids: [9, 3],
+          mentions: [
+            { type: "asset", asset_id: "9", display_name: "蓝鲸" },
+            {
+              type: "scene_card",
+              scene_card_id: "3",
+              scene_card_version: 2,
+              display_name: "开场",
+            },
+          ],
         }),
       }),
     );
   });
 
-  it("referencedAssetIds 为空时不发送该字段", async () => {
+  it("mentions 为空时不发送该字段", async () => {
     vi.mocked(apiRequest).mockResolvedValue({
       message_id: 1,
       agent_run_id: 2,
@@ -94,7 +110,7 @@ describe("Conversation 命令 API", () => {
       "/api/projects/7/conversation/messages",
       expect.objectContaining({
         method: "POST",
-        body: expect.not.stringContaining("referenced_asset_ids"),
+        body: expect.not.stringContaining('"mentions"'),
       }),
     );
   });

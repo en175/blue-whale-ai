@@ -155,6 +155,12 @@ while [ "$SECONDS" -lt "$deadline" ]; do
         echo "composer upload acceptance failed" >&2
         exit 1
       fi
+      if ! node --test "$ROOT/tests/typescript-baseline/mention-blackbox.test.mjs"; then
+        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub storage-stub \
+          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
+        echo "atomic mention blackbox acceptance failed" >&2
+        exit 1
+      fi
       if ! node --test "$ROOT/tests/typescript-baseline/skill-journey-blackbox.test.mjs"; then
         dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
           | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2

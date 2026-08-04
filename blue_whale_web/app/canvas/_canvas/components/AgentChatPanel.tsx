@@ -27,13 +27,23 @@ import {
 } from "./ChatBubbles";
 import type { ChatMessage, PendingMentionBatch } from "../types";
 import type { WireInteger } from "@/lib/wire-integer";
+import type {
+  ConversationMentionInput,
+  MentionFailure,
+} from "@blue-whale/core";
 import type { CardStatus } from "@/types/domain";
 import { buildMockReplyForMode } from "../messages";
 import { createMessageIdGenerator } from "../idGen";
 import type { MessageIdGenerator } from "../idGen";
 import { useAuth } from "@/components/auth/AuthContext";
 import type { CardMessage } from "../nodeFromCard";
-import { extractEditor, insertMention, removeMention } from "./dock/mention";
+import {
+  extractEditor,
+  insertMention,
+  markMentionFailures,
+  removeMention,
+} from "./dock/mention";
+import { isApiError } from "@/lib/api/errors";
 import { UPLOAD_ACCEPT, selectUploadFiles } from "@/lib/uploadRules";
 import { toast } from "@/components/Toast";
 import { wireInteger } from "@/lib/wire-integer";
@@ -44,8 +54,35 @@ import {
   saveComposerDraft,
 } from "@/lib/composer-draft";
 
-/** @ 素材 pill 数量上限，对齐后端 referenced_asset_ids @Size(max=10)。 */
+/** 显式引用 pill 数量上限，对齐 Core mentions 最大长度 10。 */
 const MENTION_LIMIT = 10;
+
+const MENTION_FAILURE_REASONS = new Set([
+  "deleted",
+  "stale",
+  "permission_lost",
+  "wrong_project",
+]);
+
+function mentionFailuresOf(error: unknown): MentionFailure[] {
+  if (!isApiError(error) || error.code !== "mention.unavailable") return [];
+  const detail = error.detail;
+  if (!detail || typeof detail !== "object") return [];
+  const mentions = (detail as Record<string, unknown>).mentions;
+  if (!Array.isArray(mentions)) return [];
+  return mentions.filter((mention): mention is MentionFailure => {
+    if (!mention || typeof mention !== "object") return false;
+    const value = mention as Record<string, unknown>;
+    return (
+      typeof value.index === "number" &&
+      Number.isSafeInteger(value.index) &&
+      value.index >= 0 &&
+      (value.type === "asset" || value.type === "scene_card") &&
+      typeof value.reason === "string" &&
+      MENTION_FAILURE_REASONS.has(value.reason)
+    );
+  });
+}
 
 const AGENT_RUN_STATUS_LABELS: Record<string, string> = {
   queued: "排队中",
@@ -135,7 +172,7 @@ export function AgentChatPanel({
   /** 后端可用时提交权威 Conversation 命令；缺省时保留既有离线 mock。 */
   onSubmitMessage?: (
     text: string,
-    referencedAssetIds?: WireInteger[],
+    mentions?: ConversationMentionInput[],
     forcedCreativeSkillId?: string,
     skillSummarize?: boolean,
   ) => Promise<void>;
@@ -560,10 +597,10 @@ export function AgentChatPanel({
   }, [pendingMention?.batchId]);
 
   const handleSend = () => {
-    const { prompt, assetIds } = composerRef.current
+    const { prompt, mentions } = composerRef.current
       ? extractEditor(composerRef.current)
-      : { prompt: "", assetIds: [] as WireInteger[] };
-    if (!prompt && assetIds.length === 0) return;
+      : { prompt: "", mentions: [] as ConversationMentionInput[] };
+    if (!prompt && mentions.length === 0) return;
     // 未完成上传门禁：发送按钮禁用 + Enter 路径同样拦截（IK67GX T03）
     if (anyComposerUploading) return;
 
@@ -581,7 +618,7 @@ export function AgentChatPanel({
         const attachSummarize = skillSummarizePendingRef.current;
         void onSubmitMessage(
           prompt,
-          assetIds,
+          mentions,
           attachForced ? pendingForcedSkill!.id : undefined,
           attachSummarize ? true : undefined,
         )
@@ -594,6 +631,11 @@ export function AgentChatPanel({
             if (attachSummarize) skillSummarizePendingRef.current = false;
           })
           .catch((error) => {
+            const failures = mentionFailuresOf(error);
+            if (failures.length > 0 && composerRef.current) {
+              markMentionFailures(composerRef.current, failures);
+              handleComposerInput();
+            }
             console.error("[canvas] conversation message failed:", error);
           })
           .finally(() => {

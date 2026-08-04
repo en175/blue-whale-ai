@@ -1,4 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
+import type {
+  ConversationMentionType,
+  MentionFailureReason,
+} from "@blue-whale/core";
 import {
   creativeSkillActivationSchema,
   type CreativeSkillActivation,
@@ -47,6 +51,7 @@ export interface SnapshotConversationState {
     content: string;
     sequence_no: number;
     created_at: string;
+    mentions: SnapshotMentionView[];
   }>;
   agent_runs: Array<{
     agent_run_id: string;
@@ -71,8 +76,24 @@ export interface SnapshotConversationState {
 }
 
 export interface SnapshotRepo {
-  loadJobsAndAssets(projectId: string): Promise<SnapshotJobAggregate>;
-  loadConversationState(projectId: string): Promise<SnapshotConversationState>;
+  loadJobsAndAssets(
+    projectId: string,
+    userId: string,
+  ): Promise<SnapshotJobAggregate>;
+  loadConversationState(
+    projectId: string,
+    userId: string,
+  ): Promise<SnapshotConversationState>;
+}
+
+export interface SnapshotMentionView {
+  mention_id: string;
+  index: number;
+  type: ConversationMentionType;
+  display_name: string;
+  availability: "available" | "stale" | "unavailable";
+  reason: MentionFailureReason | null;
+  snapshot?: unknown;
 }
 
 /** output_asset_ids（Json 数组）→ string[]。容忍 number/string 混合（历史数据）。 */
@@ -95,15 +116,21 @@ function toStoredError(json: unknown): Record<string, unknown> | null {
 
 export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
   return {
-    async loadJobsAndAssets(projectId) {
+    async loadJobsAndAssets(projectId, userId) {
       const pid = BigInt(projectId);
+      const uid = BigInt(userId);
       const jobs = await prisma.generation_jobs.findMany({
         where: { project_id: pid, is_delete: false },
         orderBy: { gmt_create: "desc" },
       });
 
       const assetRows = await prisma.assets.findMany({
-        where: { project_id: pid, status: "normal", is_delete: false },
+        where: {
+          project_id: pid,
+          user_id: uid,
+          status: "normal",
+          is_delete: false,
+        },
       });
 
       // 对齐 Java：仅保留归属本项目的 asset（防跨项目泄漏）。
@@ -133,33 +160,147 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
 
       return { generation_jobs, assets };
     },
-    async loadConversationState(projectId) {
+    async loadConversationState(projectId, userId) {
       const pid = BigInt(projectId);
-      const [messages, runs, inputRequests, maxCursorRow] = await Promise.all([
-        prisma.conversation_messages.findMany({
-          where: { project_id: pid, is_delete: 0 },
-          orderBy: { sequence_no: "asc" },
-        }),
-        prisma.agent_runs.findMany({
-          where: { project_id: pid, is_delete: 0 },
-          orderBy: { id: "asc" },
-        }),
-        prisma.user_input_requests.findMany({
-          where: {
-            project_id: pid,
-            status: "pending",
-            expires_at: { gt: new Date() },
-            is_delete: 0,
-          },
-          orderBy: { id: "asc" },
-        }),
-        // cursor 改雪花后 project_event_stream.high_watermark 不再维护；
-        // 当前水位直接取 project_events 的最大 cursor。
-        prisma.project_events.aggregate({
-          where: { project_id: pid, is_delete: 0 },
-          _max: { cursor: true },
-        }),
+      const uid = BigInt(userId);
+      const [messages, mentionRows, runs, inputRequests, maxCursorRow] =
+        await Promise.all([
+          prisma.conversation_messages.findMany({
+            where: { project_id: pid, is_delete: 0 },
+            orderBy: { sequence_no: "asc" },
+          }),
+          prisma.conversation_message_mentions.findMany({
+            where: { project_id: pid },
+            orderBy: [{ message_id: "asc" }, { mention_seq: "asc" }],
+            select: {
+              id: true,
+              message_id: true,
+              accepted_user_id: true,
+              mention_seq: true,
+              mention_type: true,
+              target_id: true,
+              target_version: true,
+              display_name: true,
+              snapshot: true,
+            },
+          }),
+          prisma.agent_runs.findMany({
+            where: { project_id: pid, is_delete: 0 },
+            orderBy: { id: "asc" },
+          }),
+          prisma.user_input_requests.findMany({
+            where: {
+              project_id: pid,
+              status: "pending",
+              expires_at: { gt: new Date() },
+              is_delete: 0,
+            },
+            orderBy: { id: "asc" },
+          }),
+          // cursor 改雪花后 project_event_stream.high_watermark 不再维护；
+          // 当前水位直接取 project_events 的最大 cursor。
+          prisma.project_events.aggregate({
+            where: { project_id: pid, is_delete: 0 },
+            _max: { cursor: true },
+          }),
+        ]);
+      const assetIds = [
+        ...new Set(
+          mentionRows
+            .filter((mention) => mention.mention_type === "asset")
+            .map((mention) => mention.target_id),
+        ),
+      ];
+      const sceneCardIds = [
+        ...new Set(
+          mentionRows
+            .filter((mention) => mention.mention_type === "scene_card")
+            .map((mention) => mention.target_id),
+        ),
+      ];
+      const [assets, sceneCards] = await Promise.all([
+        assetIds.length === 0
+          ? []
+          : prisma.assets.findMany({
+              where: { id: { in: assetIds } },
+              select: {
+                id: true,
+                user_id: true,
+                project_id: true,
+                status: true,
+                is_delete: true,
+              },
+            }),
+        sceneCardIds.length === 0
+          ? []
+          : prisma.scene_cards.findMany({
+              where: { id: { in: sceneCardIds } },
+              select: {
+                id: true,
+                project_id: true,
+                version: true,
+                is_delete: true,
+              },
+            }),
       ]);
+      const assetById = new Map(
+        assets.map((asset) => [asset.id.toString(), asset]),
+      );
+      const sceneCardById = new Map(
+        sceneCards.map((sceneCard) => [sceneCard.id.toString(), sceneCard]),
+      );
+      const mentionsByMessage = new Map<string, SnapshotMentionView[]>();
+      for (const mention of mentionRows) {
+        if (
+          mention.mention_type !== "asset" &&
+          mention.mention_type !== "scene_card"
+        ) {
+          continue;
+        }
+        let availability: SnapshotMentionView["availability"] = "available";
+        let reason: MentionFailureReason | null = null;
+        if (mention.mention_type === "asset") {
+          const asset = assetById.get(mention.target_id.toString());
+          reason =
+            !asset || asset.is_delete || asset.status !== "normal"
+              ? "deleted"
+              : asset.project_id !== pid
+                ? "wrong_project"
+                : asset.user_id !== uid || mention.accepted_user_id !== uid
+                  ? "permission_lost"
+                  : null;
+          if (reason) availability = "unavailable";
+        } else {
+          const sceneCard = sceneCardById.get(mention.target_id.toString());
+          reason =
+            !sceneCard || sceneCard.is_delete !== 0
+              ? "deleted"
+              : sceneCard.project_id !== pid
+                ? "wrong_project"
+                : mention.accepted_user_id !== uid
+                  ? "permission_lost"
+                  : sceneCard.version !== mention.target_version
+                    ? "stale"
+                    : null;
+          if (reason === "stale") availability = "stale";
+          else if (reason) availability = "unavailable";
+        }
+        const projected: SnapshotMentionView = {
+          mention_id: mention.id.toString(),
+          index: mention.mention_seq,
+          type: mention.mention_type,
+          display_name: mention.display_name,
+          availability,
+          reason,
+          ...(availability === "unavailable"
+            ? {}
+            : { snapshot: mention.snapshot }),
+        };
+        const messageId = mention.message_id.toString();
+        const current = mentionsByMessage.get(messageId) ?? [];
+        current.push(projected);
+        mentionsByMessage.set(messageId, current);
+      }
       const activeByRun = new Map(
         inputRequests
           .filter((request) => request.source_agent_run_id !== null)
@@ -183,6 +324,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           content: message.content,
           sequence_no: message.sequence_no,
           created_at: message.gmt_create.toISOString(),
+          mentions: mentionsByMessage.get(message.id.toString()) ?? [],
         })),
         agent_runs: runs.map((run) => {
           const activations = creativeSkillActivationSchema

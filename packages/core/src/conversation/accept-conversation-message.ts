@@ -1,5 +1,34 @@
 import { createHash } from "node:crypto";
 
+export type ConversationMentionInput =
+  | {
+      type: "asset";
+      asset_id: string;
+      display_name: string;
+    }
+  | {
+      type: "scene_card";
+      scene_card_id: string;
+      scene_card_version: number;
+      display_name: string;
+    };
+
+export type ConversationMentionType = ConversationMentionInput["type"];
+export type MentionFailureReason =
+  "deleted" | "stale" | "permission_lost" | "wrong_project";
+
+export interface MentionFailure {
+  index: number;
+  type: ConversationMentionType;
+  reason: MentionFailureReason;
+}
+
+export interface AcceptedConversationMention {
+  mention_id: string;
+  index: number;
+  type: ConversationMentionType;
+}
+
 export interface ConversationCommandStoreInput {
   userId: string;
   projectId: string;
@@ -9,6 +38,7 @@ export interface ConversationCommandStoreInput {
   content: string;
   conversationId: string | null;
   replyToInputRequestId: string | null;
+  mentions: ConversationMentionInput[];
   /** 总结当前对话意图（资产契约 §15.1）：仅 body.skill_summarize === true 置位。 */
   skillSummarize: boolean;
   forcedCreativeSkillId: string | null;
@@ -23,13 +53,15 @@ export type ConversationCommandStoreResult =
       agent_run_id: string;
       cursor: string;
       sequence_no: number;
+      mentions: AcceptedConversationMention[];
     }
   | { kind: "not_found" }
   | { kind: "idempotency_conflict" }
   | { kind: "input_request_conflict" }
   | { kind: "agent_run_conflict" }
   | { kind: "creative_skill_unavailable" }
-  | { kind: "creative_skill_conflict" };
+  | { kind: "creative_skill_conflict" }
+  | { kind: "mention_unavailable"; mentions: MentionFailure[] };
 
 export interface ConversationCommandStore {
   acceptMessage(
@@ -47,6 +79,7 @@ export interface PreparedConversationMessage {
   content: string;
   conversationId: string | null;
   replyToInputRequestId: string | null;
+  mentions: ConversationMentionInput[];
   skillSummarize: boolean;
   forcedCreativeSkillId: string | null;
 }
@@ -60,15 +93,17 @@ function positiveId(value: unknown): string | null {
     : null;
 }
 
-function canonicalRequest(body: Record<string, unknown>, content: string) {
+function canonicalRequest(
+  body: Record<string, unknown>,
+  content: string,
+  mentions: ConversationMentionInput[],
+) {
   return JSON.stringify({
     client_message_id: body.client_message_id,
     content,
     conversation_id: positiveId(body.conversation_id),
     reply_to_input_request_id: positiveId(body.reply_to_input_request_id),
-    referenced_asset_ids: Array.isArray(body.referenced_asset_ids)
-      ? body.referenced_asset_ids
-      : [],
+    mentions,
     forced_creative_skill_id:
       typeof body.forced_creative_skill_id === "string"
         ? body.forced_creative_skill_id
@@ -76,6 +111,63 @@ function canonicalRequest(body: Record<string, unknown>, content: string) {
     // 总结意图参与幂等哈希（§15.1）：带与不带该字段的相同文本是两个不同请求。
     skill_summarize: body.skill_summarize === true,
   });
+}
+
+function mentionDisplayName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const name = value.trim();
+  return name.length > 0 && name.length <= 255 ? name : null;
+}
+
+function parseMentions(
+  body: Record<string, unknown>,
+): ConversationMentionInput[] | null {
+  if (body.referenced_asset_ids !== undefined) return null;
+  if (body.mentions === undefined) return [];
+  if (!Array.isArray(body.mentions) || body.mentions.length > 10) return null;
+
+  const mentions: ConversationMentionInput[] = [];
+  const identities = new Set<string>();
+  for (const raw of body.mentions) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const mention = raw as Record<string, unknown>;
+    const displayName = mentionDisplayName(mention.display_name);
+    if (!displayName) return null;
+    if (mention.type === "asset") {
+      const assetId = positiveId(mention.asset_id);
+      if (!assetId || identities.has(`asset:${assetId}`)) return null;
+      identities.add(`asset:${assetId}`);
+      mentions.push({
+        type: "asset",
+        asset_id: assetId,
+        display_name: displayName,
+      });
+      continue;
+    }
+    if (mention.type === "scene_card") {
+      const sceneCardId = positiveId(mention.scene_card_id);
+      const sceneCardVersion = mention.scene_card_version;
+      if (
+        !sceneCardId ||
+        typeof sceneCardVersion !== "number" ||
+        !Number.isSafeInteger(sceneCardVersion) ||
+        sceneCardVersion <= 0 ||
+        identities.has(`scene_card:${sceneCardId}`)
+      ) {
+        return null;
+      }
+      identities.add(`scene_card:${sceneCardId}`);
+      mentions.push({
+        type: "scene_card",
+        scene_card_id: sceneCardId,
+        scene_card_version: sceneCardVersion,
+        display_name: displayName,
+      });
+      continue;
+    }
+    return null;
+  }
+  return mentions;
 }
 
 export async function acceptConversationMessage(
@@ -120,9 +212,13 @@ export function prepareConversationMessage(
   if (!clientMessageId || clientMessageId.length > 64) {
     return { kind: "invalid", message: "client_message_id 无效" };
   }
+  const mentions = parseMentions(body);
+  if (mentions === null) {
+    return { kind: "invalid", message: "mentions 无效" };
+  }
 
   const requestHash = createHash("sha256")
-    .update(canonicalRequest(body, content))
+    .update(canonicalRequest(body, content, mentions))
     .digest("hex");
   return {
     idempotencyKey,
@@ -131,6 +227,7 @@ export function prepareConversationMessage(
     content,
     conversationId: positiveId(body.conversation_id),
     replyToInputRequestId: positiveId(body.reply_to_input_request_id),
+    mentions,
     skillSummarize: body.skill_summarize === true,
     forcedCreativeSkillId: forcedCreativeSkillIdOf(body),
   };

@@ -5,6 +5,7 @@ import {
   insertMention,
   removeMention,
   extractEditor,
+  markMentionFailures,
   type MentionItem,
 } from "./mention";
 
@@ -28,11 +29,17 @@ function pill(attrs: {
   id: string;
   name: string;
   assetId?: number | string;
+  sceneCardId?: number | string;
+  sceneCardVersion?: number;
   label?: string;
 }): string {
   const asset =
     attrs.assetId == null ? "" : ` data-mention-asset-id="${attrs.assetId}"`;
-  return `<span data-mention-id="${attrs.id}" data-mention-name="${attrs.name}"${asset} contenteditable="false">${attrs.label ?? attrs.name}</span>`;
+  const scene =
+    attrs.sceneCardId == null
+      ? ""
+      : ` data-mention-type="scene_card" data-mention-scene-card-id="${attrs.sceneCardId}" data-mention-scene-card-version="${attrs.sceneCardVersion}"`;
+  return `<span data-mention-id="${attrs.id}" data-mention-name="${attrs.name}"${asset}${scene} contenteditable="false">${attrs.label ?? attrs.name}</span>`;
 }
 
 describe("buildPill", () => {
@@ -83,6 +90,19 @@ describe("buildPill", () => {
     expect(img).not.toBeNull();
     expect(img!.src).toContain("/vid/thumb.png");
   });
+
+  it("SceneCard pill 写入稳定身份和被引用版本", () => {
+    const el = buildPill({
+      id: "scene-12",
+      type: "scene_card",
+      name: "开场分镜",
+      sceneCardId: 12,
+      sceneCardVersion: 3,
+    });
+    expect(el.getAttribute("data-mention-type")).toBe("scene_card");
+    expect(el.getAttribute("data-mention-scene-card-id")).toBe("12");
+    expect(el.getAttribute("data-mention-scene-card-version")).toBe("3");
+  });
 });
 
 describe("extractEditor", () => {
@@ -105,6 +125,21 @@ describe("extractEditor", () => {
       `${pill({ id: "a", name: "A", assetId: 3 })}x${pill({ id: "b", name: "B", assetId: 7 })}`,
     );
     expect(extractEditor(editor).assetIds).toEqual([3, 7]);
+  });
+
+  it("按 DOM 顺序提取统一 AssetMention 与 SceneCardMention 集合", () => {
+    const editor = setup(
+      `${pill({ id: "scene", name: "开场", sceneCardId: 12, sceneCardVersion: 3 })}${pill({ id: "asset", name: "蓝鲸", assetId: 9 })}`,
+    );
+    expect(extractEditor(editor).mentions).toEqual([
+      {
+        type: "scene_card",
+        scene_card_id: "12",
+        scene_card_version: 3,
+        display_name: "开场",
+      },
+      { type: "asset", asset_id: "9", display_name: "蓝鲸" },
+    ]);
   });
 
   it("重复 assetId 去重：content @[name] 与 assetIds 一一对应（防复制粘贴 pill 错位）", () => {
@@ -145,6 +180,57 @@ describe("removeMention", () => {
     removeMention(editor, "a");
     expect(editor.querySelector('[data-mention-id="a"]')).toBeNull();
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("失效 pill 标记原因并提供可点击的移除入口", () => {
+    const editor = setup(pill({ id: "a", name: "A", assetId: 3 }));
+    markMentionFailures(editor, [
+      { index: 0, type: "asset", reason: "permission_lost" },
+    ]);
+
+    const marked = editor.querySelector<HTMLElement>(
+      '[data-mention-availability="unavailable"]',
+    );
+    expect(marked?.getAttribute("data-mention-reason")).toBe("permission_lost");
+    expect(marked?.style.outline).toContain("var(--tc-destructive)");
+    expect(marked?.querySelector("[data-mention-remove]")).not.toBeNull();
+  });
+
+  it("Asset 与 SceneCard 数值 ID 相同时只移除被点击的失效 pill", () => {
+    const editor = setup(
+      `${pill({ id: "9", name: "素材", assetId: 9 })}${pill({ id: "9", name: "分镜", sceneCardId: 9, sceneCardVersion: 1 })}`,
+    );
+    markMentionFailures(editor, [
+      { index: 1, type: "scene_card", reason: "stale" },
+    ]);
+
+    editor.querySelector<HTMLButtonElement>("[data-mention-remove]")?.click();
+
+    expect(editor.querySelector('[data-mention-asset-id="9"]')).not.toBeNull();
+    expect(editor.querySelector('[data-mention-scene-card-id="9"]')).toBeNull();
+  });
+
+  it("新一轮失败集合会清理已恢复引用的旧标记", () => {
+    const editor = setup(
+      `${pill({ id: "a", name: "A", assetId: 3 })}${pill({ id: "b", name: "B", assetId: 7 })}`,
+    );
+    markMentionFailures(editor, [
+      { index: 0, type: "asset", reason: "permission_lost" },
+    ]);
+    markMentionFailures(editor, [
+      { index: 1, type: "asset", reason: "deleted" },
+    ]);
+
+    const first = editor.querySelector<HTMLElement>(
+      '[data-mention-asset-id="3"]',
+    );
+    const second = editor.querySelector<HTMLElement>(
+      '[data-mention-asset-id="7"]',
+    );
+    expect(first?.hasAttribute("data-mention-availability")).toBe(false);
+    expect(first?.querySelector("[data-mention-remove]")).toBeNull();
+    expect(first?.style.color).toBe("var(--tc-text-secondary)");
+    expect(second?.getAttribute("data-mention-reason")).toBe("deleted");
   });
 });
 

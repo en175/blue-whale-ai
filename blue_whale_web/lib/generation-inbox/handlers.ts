@@ -4,6 +4,7 @@ import {
 } from "@blue-whale/core";
 import {
   IDEMPOTENCY_KEY_REUSED_CODE,
+  ASSET_UNAVAILABLE_CODE,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   fail,
@@ -69,6 +70,8 @@ export async function handleAcceptGenerationInboxMessage(
       );
     case "creative_skill_unavailable":
       return fail(CREATIVE_SKILL_UNAVAILABLE_CODE, "Creative Skill 不可用");
+    case "mention_unavailable":
+      return fail(ASSET_UNAVAILABLE_CODE, "生成收件箱不支持显式引用");
     case "invalid":
       return fail(
         result.message === "缺少 Idempotency-Key" ? PARAM_MISSING_CODE : 400,
