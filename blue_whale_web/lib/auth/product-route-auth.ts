@@ -49,3 +49,23 @@ export async function withAdminUser(
 
   return handler(user);
 }
+
+// 公开路由统一入口（IK6GTT）：游客可访问；有有效 token 时解析身份传给 handler。
+// 无 token / 无效 token（401/403）按游客放行；上游不可用（502/503）如实抛出，不静默降级。
+export async function withOptionalUser(
+  request: Request,
+  handler: (user: AuthenticatedUser | null) => Promise<Response> | Response,
+): Promise<Response> {
+  let user: AuthenticatedUser | null = null;
+
+  try {
+    user = await getAuthenticatedUser(request);
+  } catch (error) {
+    if (error instanceof AuthenticationError && error.status !== 502 && error.status !== 503) {
+      return handler(null);
+    }
+    throw error;
+  }
+
+  return handler(user);
+}

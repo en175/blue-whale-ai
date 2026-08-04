@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useAuth } from "@/components/auth/AuthContext";
 import { fetchTemplatePage } from "@/lib/templates";
 import type { TemplateCard } from "@/types/template";
 import { TemplateCardItem } from "./TemplateCardItem";
@@ -59,6 +60,7 @@ export default function TemplateCards({
   const [cards, setCards] = useState<TemplateCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { user } = useAuth();
 
   useEffect(() => {
     let cancelled = false;
@@ -78,7 +80,8 @@ export default function TemplateCards({
     return () => {
       cancelled = true;
     };
-  }, [activeTag]);
+    // IK6GM6：登录态变化（含首次恢复）后重拉模板，避免登录前 401 错误残留。
+  }, [activeTag, user?.userId]);
 
   const container =
     TAG_CONFIG[activeTag]?.container ?? TAG_CONFIG.marketing.container;
