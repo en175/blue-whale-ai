@@ -214,6 +214,41 @@ model conversation_messages {
   @@index([project_id], map: "idx_message_project")
 }
 
+/// 用户消息接纳时冻结的有序显式引用事实。只增不改；当前可用性由读路径重算。
+model conversation_message_mentions {
+  id               BigInt   @id @default(autoincrement())
+  message_id       BigInt
+  conversation_id  BigInt
+  project_id       BigInt
+  accepted_user_id BigInt
+  mention_seq      Int
+  mention_type     String   @db.VarChar(24)
+  target_id        BigInt
+  target_version   Int?
+  display_name     String   @db.VarChar(255)
+  snapshot         Json
+  gmt_create       DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([message_id, mention_seq], map: "uk_message_mention_sequence")
+  @@index([project_id, message_id], map: "idx_mention_project_message")
+  @@index([mention_type, target_id], map: "idx_mention_target")
+}
+
+/// SceneCard 稳定身份与当前版本。T04 仅建立引用所需的最小资源边界；创建/应用行为由 T11 交付。
+model scene_cards {
+  id               BigInt   @id @default(autoincrement())
+  project_id       BigInt
+  title            String   @db.VarChar(255)
+  summary          String?  @db.Text
+  content_markdown String   @db.LongText
+  gmt_create       DateTime @default(now()) @db.DateTime(0)
+  gmt_modified     DateTime @default(now()) @db.DateTime(0)
+  version          Int      @default(1)
+  is_delete        Int      @default(0) @db.TinyInt
+
+  @@index([project_id], map: "idx_scene_card_project")
+}
+
 model agent_runs {
   id                                BigInt    @id @default(autoincrement())
   project_id                        BigInt

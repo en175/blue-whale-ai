@@ -244,13 +244,21 @@ describe("useProjectConversation（画布持久化对话接线 IK67GD T02）", (
 
     await act(async () => {
       await expect(
-        result.current.sendMessage("同一条内容", ["7"], "skill_a"),
+        result.current.sendMessage(
+          "同一条内容",
+          [{ type: "asset", asset_id: "7", display_name: "A" }],
+          "skill_a",
+        ),
       ).rejects.toThrow();
     });
     const firstCall = acceptMock.mock.calls[0];
 
     await act(async () => {
-      await result.current.sendMessage("同一条内容", ["7"], "skill_b");
+      await result.current.sendMessage(
+        "同一条内容",
+        [{ type: "asset", asset_id: "7", display_name: "A" }],
+        "skill_b",
+      );
     });
     const changedSkillCall = acceptMock.mock.calls[1];
     expect(changedSkillCall[2]).not.toBe(firstCall[2]);

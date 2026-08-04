@@ -5,7 +5,8 @@ import { test } from "node:test";
 const composeFile =
   process.env.BW_TS_COMPOSE_FILE ??
   "deploy/typescript-baseline/docker-compose.acceptance.yml";
-const project = process.env.BW_TS_COMPOSE_PROJECT ?? "bw-ts-baseline-acceptance";
+const project =
+  process.env.BW_TS_COMPOSE_PROJECT ?? "bw-ts-baseline-acceptance";
 
 const endpoints = {
   web: "http://127.0.0.1:3101/build-info",
@@ -118,6 +119,7 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
     "canvas",
     "captcha_challenges",
     "command_idempotency",
+    "conversation_message_mentions",
     "conversation_messages",
     "conversations",
     "cost_reservations",
@@ -131,6 +133,7 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
     "project_event_stream",
     "project_events",
     "run_commits",
+    "scene_cards",
     "skill",
     "skill_summarize_session",
     "template_card",

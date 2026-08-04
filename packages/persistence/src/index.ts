@@ -31,6 +31,7 @@ export {
   type SnapshotJobView,
   type SnapshotJobAggregate,
   type SnapshotConversationState,
+  type SnapshotMentionView,
   type SnapshotAssetRow,
 } from "./snapshot-repo.js";
 export {

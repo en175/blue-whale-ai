@@ -61,4 +61,28 @@ describe("acceptGenerationInboxMessage", () => {
       expect.objectContaining({ forcedCreativeSkillId: "official_skill" }),
     );
   });
+
+  it("rejects explicit mentions before the inbox store can lazily create a Project", async () => {
+    const store = acceptedStore();
+
+    const result = await acceptGenerationInboxMessage(
+      {
+        userId: "100",
+        idempotencyKey: "cmd-mention",
+        body: {
+          ...validBody,
+          mentions: [
+            { type: "asset", asset_id: "21", display_name: "蓝鲸参考图" },
+          ],
+        },
+      },
+      store,
+    );
+
+    expect(result).toEqual({
+      kind: "invalid",
+      message: "生成收件箱不支持显式引用",
+    });
+    expect(store.acceptMessage).not.toHaveBeenCalled();
+  });
 });

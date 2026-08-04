@@ -24,7 +24,7 @@ import {
   stopAgentRun,
 } from "@/lib/conversation";
 import { newCommandIdentity } from "@/lib/command-identity";
-import type { WireInteger } from "@/lib/wire-integer";
+import type { ConversationMentionInput } from "@blue-whale/core";
 import { projectSnapshotToChatMessages } from "../conversationRecovery";
 import type { ChatMessage } from "../types";
 
@@ -162,7 +162,7 @@ export function useProjectConversation(
   const sendMessage = useCallback(
     async (
       content: string,
-      referencedAssetIds?: WireInteger[],
+      mentions?: ConversationMentionInput[],
       forcedCreativeSkillId?: string,
       skillSummarize?: boolean,
     ) => {
@@ -173,7 +173,7 @@ export function useProjectConversation(
       const summarize = skillSummarize === true;
       const commandShape = JSON.stringify({
         replyToInputRequestId: answerable?.input_request_id ?? null,
-        referencedAssetIds: referencedAssetIds ?? [],
+        mentions: mentions ?? [],
         forcedCreativeSkillId: effectiveForced ?? null,
         skillSummarize: summarize,
       });
@@ -202,7 +202,7 @@ export function useProjectConversation(
         clientMessageId,
         idempotencyKey,
         answerable?.input_request_id,
-        referencedAssetIds,
+        mentions,
         effectiveForced,
         summarize,
       );

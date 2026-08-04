@@ -101,8 +101,8 @@ export async function handleGetSnapshot(
 
   const canvas = await deps.canvas.getByProject(projectId);
   const [{ generation_jobs, assets }, conversation] = await Promise.all([
-    deps.snapshot.loadJobsAndAssets(projectId),
-    deps.snapshot.loadConversationState(projectId),
+    deps.snapshot.loadJobsAndAssets(projectId, userId),
+    deps.snapshot.loadConversationState(projectId, userId),
   ]);
 
   const assetMap: Record<string, SnapshotAssetSummary> = {};
@@ -130,6 +130,10 @@ export async function handleGetSnapshot(
           message.agent_run_id === null
             ? null
             : wireInteger(message.agent_run_id),
+        mentions: message.mentions.map((mention) => ({
+          ...mention,
+          mention_id: wireInteger(mention.mention_id),
+        })),
       }),
     ),
     agent_runs: conversation.agent_runs.map((run) => ({

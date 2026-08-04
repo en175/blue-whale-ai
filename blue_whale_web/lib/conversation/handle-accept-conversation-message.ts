@@ -1,6 +1,7 @@
 import { acceptConversationMessage } from "@blue-whale/core";
 import {
   AGENT_RUN_CONFLICT_CODE,
+  ASSET_UNAVAILABLE_CODE,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
@@ -31,6 +32,10 @@ export async function handleAcceptConversationMessage(
         message_id: wireInteger(result.message_id),
         agent_run_id: wireInteger(result.agent_run_id),
         cursor: wireInteger(result.cursor),
+        mentions: result.mentions.map((mention) => ({
+          ...mention,
+          mention_id: wireInteger(mention.mention_id),
+        })),
       });
     case "not_found":
       return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
@@ -50,6 +55,12 @@ export async function handleAcceptConversationMessage(
       );
     case "creative_skill_unavailable":
       return fail(CREATIVE_SKILL_UNAVAILABLE_CODE, "Creative Skill 不可用");
+    case "mention_unavailable":
+      return fail(ASSET_UNAVAILABLE_CODE, "引用不可用", {
+        code: "mention.unavailable",
+        message: "一个或多个引用不可用",
+        mentions: result.mentions,
+      });
     case "invalid":
       return fail(
         result.message === "缺少 Idempotency-Key" ? PARAM_MISSING_CODE : 400,

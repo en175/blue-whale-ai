@@ -79,17 +79,19 @@ export {
   type LoginResult,
   type AuthUser,
 } from "./auth/login-with-code.js";
-export {
-  parseSkillMd,
-  serializeSkillMd,
-} from "./skills/skill-md.js";
+export { parseSkillMd, serializeSkillMd } from "./skills/skill-md.js";
 export {
   acceptConversationMessage,
   prepareConversationMessage,
   type AcceptConversationMessageResult,
+  type AcceptedConversationMention,
+  type ConversationMentionInput,
+  type ConversationMentionType,
   type ConversationCommandStore,
   type ConversationCommandStoreInput,
   type ConversationCommandStoreResult,
+  type MentionFailure,
+  type MentionFailureReason,
   type PreparedConversationMessage,
 } from "./conversation/accept-conversation-message.js";
 export {

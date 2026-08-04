@@ -66,6 +66,9 @@ export async function acceptGenerationInboxMessage(
 ): Promise<AcceptGenerationInboxMessageResult> {
   const prepared = prepareConversationMessage(input.body, input.idempotencyKey);
   if ("kind" in prepared) return prepared;
+  if (prepared.mentions.length > 0) {
+    return { kind: "invalid", message: "生成收件箱不支持显式引用" };
+  }
   return store.acceptMessage({ userId: input.userId, ...prepared });
 }
 

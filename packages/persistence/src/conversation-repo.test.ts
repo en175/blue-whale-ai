@@ -13,6 +13,38 @@ describe("ConversationRepo.acceptMessage", () => {
       project: {
         findFirst: vi.fn().mockResolvedValue({ id: 42n }),
       },
+      $queryRawUnsafe: vi.fn().mockImplementation((sql: string) =>
+        sql.includes("FROM assets")
+          ? Promise.resolve([
+              {
+                id: 21n,
+                user_id: 100n,
+                project_id: 42n,
+                type: "image",
+                storage_key: "private/project/42/21.png",
+                content_sha256: "a".repeat(64),
+                url: "https://storage.invalid/private/21.png",
+                mime: "image/png",
+                size: 1024n,
+                width: 1200,
+                height: 800,
+                duration_ms: null,
+                status: "normal",
+                is_delete: false,
+              },
+            ])
+          : Promise.resolve([
+              {
+                id: 22n,
+                project_id: 42n,
+                title: "开场分镜",
+                summary: "蓝鲸跃出水面",
+                content_markdown: "# 开场\n\n蓝鲸跃出水面。",
+                version: 3,
+                is_delete: 0,
+              },
+            ]),
+      ),
       command_idempotency: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockImplementation(({ data }) => data),
@@ -82,6 +114,12 @@ describe("ConversationRepo.acceptMessage", () => {
           gmt_create: new Date("2026-07-29T00:00:00.000Z"),
         }),
       },
+      conversation_message_mentions: {
+        create: vi
+          .fn()
+          .mockResolvedValueOnce({ id: 101n })
+          .mockResolvedValueOnce({ id: 102n }),
+      },
       project_event_stream: {
         upsert: vi.fn(),
         update: vi
@@ -112,6 +150,15 @@ describe("ConversationRepo.acceptMessage", () => {
       content: "做一张蓝鲸海报",
       conversationId: null,
       replyToInputRequestId: null,
+      mentions: [
+        { type: "asset", asset_id: "21", display_name: "蓝鲸参考图" },
+        {
+          type: "scene_card",
+          scene_card_id: "22",
+          scene_card_version: 3,
+          display_name: "开场分镜",
+        },
+      ],
       skillSummarize: false,
       forcedCreativeSkillId: null,
     });
@@ -124,8 +171,22 @@ describe("ConversationRepo.acceptMessage", () => {
       agent_run_id: "9",
       cursor: expect.any(String),
       sequence_no: 1,
+      mentions: [
+        { mention_id: "101", index: 0, type: "asset" },
+        { mention_id: "102", index: 1, type: "scene_card" },
+      ],
     });
     expect(transaction).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRawUnsafe).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/FROM assets[\s\S]+ORDER BY id FOR UPDATE/),
+      21n,
+    );
+    expect(tx.$queryRawUnsafe).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/FROM scene_cards[\s\S]+ORDER BY id FOR UPDATE/),
+      22n,
+    );
     expect(tx.conversations.update).toHaveBeenCalledWith({
       where: { id: 7n },
       data: { version: { increment: 1 } },
@@ -138,6 +199,56 @@ describe("ConversationRepo.acceptMessage", () => {
         content: "做一张蓝鲸海报",
       }),
     });
+    expect(tx.conversation_message_mentions.create).toHaveBeenNthCalledWith(1, {
+      data: expect.objectContaining({
+        message_id: 8n,
+        conversation_id: 7n,
+        project_id: 42n,
+        accepted_user_id: 100n,
+        mention_seq: 0,
+        mention_type: "asset",
+        target_id: 21n,
+        display_name: "蓝鲸参考图",
+        snapshot: {
+          asset_type: "image",
+          mime: "image/png",
+          size: "1024",
+          width: 1200,
+          height: 800,
+          duration_ms: null,
+          content_sha256: "a".repeat(64),
+        },
+      }),
+      select: { id: true },
+    });
+    const firstMentionData =
+      tx.conversation_message_mentions.create.mock.calls[0][0].data;
+    expect(firstMentionData).not.toHaveProperty("storage_key");
+    expect(JSON.stringify(firstMentionData.snapshot)).not.toContain(
+      "storage.invalid",
+    );
+    const acceptedEvent = tx.project_events.create.mock.calls.find(
+      ([{ data }]) => data.event_type === "conversation.message_accepted",
+    )?.[0].data;
+    expect(acceptedEvent?.payload.mentions).toEqual([
+      {
+        mention_id: "101",
+        index: 0,
+        type: "asset",
+        display_name: "蓝鲸参考图",
+        availability: "available",
+        reason: null,
+      },
+      {
+        mention_id: "102",
+        index: 1,
+        type: "scene_card",
+        display_name: "开场分镜",
+        availability: "available",
+        reason: null,
+      },
+    ]);
+    expect(JSON.stringify(acceptedEvent?.payload)).not.toContain("snapshot");
     expect(tx.agent_runs.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         conversation_id: 7n,
@@ -661,6 +772,13 @@ describe("ConversationRepo.acceptMessage", () => {
       conversation_messages: {
         findUnique: vi.fn().mockResolvedValue({ sequence_no: 1 }),
       },
+      conversation_message_mentions: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([
+            { id: 101n, mention_seq: 0, mention_type: "asset" },
+          ]),
+      },
     };
     const prisma = {
       $transaction: vi.fn(async (callback) => callback(tx)),
@@ -686,6 +804,7 @@ describe("ConversationRepo.acceptMessage", () => {
       agent_run_id: "9",
       cursor: "2",
       sequence_no: 1,
+      mentions: [{ mention_id: "101", index: 0, type: "asset" }],
     });
     await expect(
       repo.acceptMessage({ ...base, requestHash: "b".repeat(64) }),
@@ -701,6 +820,7 @@ describe("ConversationRepo.acceptMessage", () => {
       agent_run_id: "9",
       cursor: "2",
       sequence_no: 1,
+      mentions: [],
     } as const;
     const transaction = vi
       .fn()
@@ -709,20 +829,19 @@ describe("ConversationRepo.acceptMessage", () => {
     const prisma = { $transaction: transaction } as unknown as PrismaClient;
 
     await expect(
-      createConversationRepo(
-        prisma,
-        bundledAgentRuntimeManifest,
-      ).acceptMessage({
-        userId: "100",
-        projectId: "42",
-        idempotencyKey: "cmd-1",
-        requestHash: "a".repeat(64),
-        clientMessageId: "client-1",
-        content: "蓝鲸海报",
-        conversationId: null,
-        replyToInputRequestId: null,
-        skillSummarize: false,
-      }),
+      createConversationRepo(prisma, bundledAgentRuntimeManifest).acceptMessage(
+        {
+          userId: "100",
+          projectId: "42",
+          idempotencyKey: "cmd-1",
+          requestHash: "a".repeat(64),
+          clientMessageId: "client-1",
+          content: "蓝鲸海报",
+          conversationId: null,
+          replyToInputRequestId: null,
+          skillSummarize: false,
+        },
+      ),
     ).resolves.toEqual(replayed);
     expect(transaction).toHaveBeenCalledTimes(2);
   });
@@ -782,20 +901,19 @@ describe("ConversationRepo.acceptMessage", () => {
     } as unknown as PrismaClient;
 
     await expect(
-      createConversationRepo(
-        prisma,
-        bundledAgentRuntimeManifest,
-      ).acceptMessage({
-        userId: "100",
-        projectId: "42",
-        idempotencyKey: "cmd-2",
-        requestHash: "b".repeat(64),
-        clientMessageId: "client-2",
-        content: "再加一只蓝鲸",
-        conversationId: "7",
-        replyToInputRequestId: null,
-        skillSummarize: false,
-      }),
+      createConversationRepo(prisma, bundledAgentRuntimeManifest).acceptMessage(
+        {
+          userId: "100",
+          projectId: "42",
+          idempotencyKey: "cmd-2",
+          requestHash: "b".repeat(64),
+          clientMessageId: "client-2",
+          content: "再加一只蓝鲸",
+          conversationId: "7",
+          replyToInputRequestId: null,
+          skillSummarize: false,
+        },
+      ),
     ).resolves.toEqual({ kind: "agent_run_conflict" });
 
     expect(tx.agent_runs.updateMany).not.toHaveBeenCalled();
@@ -869,19 +987,18 @@ describe("ConversationRepo.acceptMessage", () => {
     } as unknown as PrismaClient;
 
     await expect(
-      createConversationRepo(
-        prisma,
-        bundledAgentRuntimeManifest,
-      ).acceptMessage({
-        userId: "100",
-        projectId: "42",
-        idempotencyKey: "cmd-answer",
-        requestHash: "c".repeat(64),
-        clientMessageId: "client-answer",
-        content: "极简风格",
-        conversationId: "7",
-        replyToInputRequestId: "12",
-      }),
+      createConversationRepo(prisma, bundledAgentRuntimeManifest).acceptMessage(
+        {
+          userId: "100",
+          projectId: "42",
+          idempotencyKey: "cmd-answer",
+          requestHash: "c".repeat(64),
+          clientMessageId: "client-answer",
+          content: "极简风格",
+          conversationId: "7",
+          replyToInputRequestId: "12",
+        },
+      ),
     ).resolves.toEqual(
       expect.objectContaining({
         kind: "accepted",
@@ -1034,24 +1151,129 @@ describe("ConversationRepo.acceptMessage", () => {
     } as unknown as PrismaClient;
 
     await expect(
-      createConversationRepo(
-        prisma,
-        bundledAgentRuntimeManifest,
-      ).acceptMessage({
-        userId: "100",
-        projectId: "42",
-        idempotencyKey: "cmd-sum-2",
-        requestHash: "e".repeat(64),
-        clientMessageId: "client-sum-2",
-        content: "总结当前对话并保存为我的技能",
-        conversationId: "7",
-        replyToInputRequestId: null,
-        skillSummarize: true,
-      }),
+      createConversationRepo(prisma, bundledAgentRuntimeManifest).acceptMessage(
+        {
+          userId: "100",
+          projectId: "42",
+          idempotencyKey: "cmd-sum-2",
+          requestHash: "e".repeat(64),
+          clientMessageId: "client-sum-2",
+          content: "总结当前对话并保存为我的技能",
+          conversationId: "7",
+          replyToInputRequestId: null,
+          skillSummarize: true,
+        },
+      ),
     ).resolves.toEqual({ kind: "agent_run_conflict" });
 
     expect(tx.agent_runs.updateMany).not.toHaveBeenCalled();
     expect(tx.conversation_messages.create).not.toHaveBeenCalled();
     expect(tx.agent_runs.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects every unavailable mention before any conversation, run, message, event, or receipt write", async () => {
+    const tx = {
+      project: { findFirst: vi.fn().mockResolvedValue({ id: 42n }) },
+      command_idempotency: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+      },
+      $queryRawUnsafe: vi.fn().mockImplementation((sql: string) =>
+        sql.includes("FROM assets")
+          ? Promise.resolve([
+              {
+                id: 20n,
+                user_id: 100n,
+                project_id: 42n,
+                status: "normal",
+                is_delete: false,
+              },
+              {
+                id: 21n,
+                user_id: 999n,
+                project_id: 42n,
+                status: "normal",
+                is_delete: false,
+              },
+            ])
+          : Promise.resolve([
+              { id: 30n, project_id: 42n, version: 4, is_delete: 0 },
+              { id: 31n, project_id: 77n, version: 1, is_delete: 0 },
+            ]),
+      ),
+      conversations: { findFirst: vi.fn(), create: vi.fn() },
+      agent_runs: { findFirst: vi.fn(), create: vi.fn() },
+      conversation_messages: { create: vi.fn() },
+      conversation_message_mentions: { create: vi.fn() },
+      project_events: { create: vi.fn() },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createConversationRepo(prisma, bundledAgentRuntimeManifest).acceptMessage(
+        {
+          userId: "100",
+          projectId: "42",
+          idempotencyKey: "cmd-invalid-mentions",
+          requestHash: "f".repeat(64),
+          clientMessageId: "client-invalid-mentions",
+          content: "引用这些素材",
+          conversationId: null,
+          replyToInputRequestId: null,
+          mentions: [
+            { type: "asset", asset_id: "20", display_name: "有效素材" },
+            { type: "asset", asset_id: "21", display_name: "他人素材" },
+            {
+              type: "scene_card",
+              scene_card_id: "30",
+              scene_card_version: 3,
+              display_name: "旧版分镜",
+            },
+            {
+              type: "scene_card",
+              scene_card_id: "31",
+              scene_card_version: 1,
+              display_name: "其他项目分镜",
+            },
+            {
+              type: "scene_card",
+              scene_card_id: "32",
+              scene_card_version: 1,
+              display_name: "已删除分镜",
+            },
+          ],
+        },
+      ),
+    ).resolves.toEqual({
+      kind: "mention_unavailable",
+      mentions: [
+        { index: 1, type: "asset", reason: "permission_lost" },
+        { index: 2, type: "scene_card", reason: "stale" },
+        { index: 3, type: "scene_card", reason: "wrong_project" },
+        { index: 4, type: "scene_card", reason: "deleted" },
+      ],
+    });
+    expect(tx.conversations.findFirst).not.toHaveBeenCalled();
+    expect(tx.conversations.create).not.toHaveBeenCalled();
+    expect(tx.agent_runs.create).not.toHaveBeenCalled();
+    expect(tx.conversation_messages.create).not.toHaveBeenCalled();
+    expect(tx.conversation_message_mentions.create).not.toHaveBeenCalled();
+    expect(tx.project_events.create).not.toHaveBeenCalled();
+    expect(tx.command_idempotency.create).not.toHaveBeenCalled();
+    expect(tx.$queryRawUnsafe).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/FROM assets[\s\S]+ORDER BY id FOR UPDATE/),
+      20n,
+      21n,
+    );
+    expect(tx.$queryRawUnsafe).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/FROM scene_cards[\s\S]+ORDER BY id FOR UPDATE/),
+      30n,
+      31n,
+      32n,
+    );
   });
 });

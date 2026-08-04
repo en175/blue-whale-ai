@@ -1,4 +1,9 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import type {
+  AcceptedConversationMention,
+  ConversationMentionInput,
+  MentionFailure,
+} from "@blue-whale/core";
 import {
   creativeSkillActivationSchema,
   type AgentRuntimeManifest,
@@ -25,6 +30,7 @@ export interface AcceptConversationMessageRecord {
   content: string;
   conversationId: string | null;
   replyToInputRequestId: string | null;
+  mentions?: ConversationMentionInput[];
   /** 总结当前对话意图（IK60X1，契约 §15.2）：置位所属 agent_run.skill_summarize。 */
   skillSummarize?: boolean;
   forcedCreativeSkillId?: string | null;
@@ -39,13 +45,15 @@ export type AcceptedConversationRecord =
       agent_run_id: string;
       cursor: string;
       sequence_no: number;
+      mentions: AcceptedConversationMention[];
     }
   | { kind: "not_found" }
   | { kind: "idempotency_conflict" }
   | { kind: "input_request_conflict" }
   | { kind: "agent_run_conflict" }
   | { kind: "creative_skill_unavailable" }
-  | { kind: "creative_skill_conflict" };
+  | { kind: "creative_skill_conflict" }
+  | { kind: "mention_unavailable"; mentions: MentionFailure[] };
 
 export interface ConversationRepo {
   acceptMessage(
@@ -84,6 +92,7 @@ function replay(
     accepted_cursor: bigint;
   },
   sequenceNo: number,
+  mentions: AcceptedConversationMention[],
 ): AcceptedConversationRecord {
   if (
     receipt.message_id === null ||
@@ -100,7 +109,163 @@ function replay(
     agent_run_id: receipt.agent_run_id.toString(),
     cursor: receipt.accepted_cursor.toString(),
     sequence_no: sequenceNo,
+    mentions,
   };
+}
+
+interface ResolvedMention {
+  input: ConversationMentionInput;
+  targetId: bigint;
+  targetVersion: number | null;
+  snapshot: Prisma.InputJsonObject;
+}
+
+interface LockedAssetMentionTarget {
+  id: bigint;
+  user_id: bigint;
+  project_id: bigint;
+  type: string;
+  content_sha256: string | null;
+  mime: string | null;
+  size: bigint | null;
+  width: number | null;
+  height: number | null;
+  duration_ms: number | null;
+  status: string;
+  is_delete: boolean | number | bigint;
+}
+
+interface LockedSceneCardMentionTarget {
+  id: bigint;
+  project_id: bigint;
+  title: string;
+  summary: string | null;
+  content_markdown: string;
+  version: number;
+  is_delete: number | bigint;
+}
+
+type ResolvedMentions =
+  | { kind: "ready"; mentions: ResolvedMention[] }
+  | { kind: "mention_unavailable"; mentions: MentionFailure[] };
+
+function isDeletedFlag(value: boolean | number | bigint): boolean {
+  return value === true || value === 1 || value === 1n;
+}
+
+async function resolveMentions(
+  tx: Prisma.TransactionClient,
+  input: AcceptConversationMessageRecord,
+  projectId: bigint,
+  userId: bigint,
+): Promise<ResolvedMentions> {
+  const mentions = input.mentions ?? [];
+  if (mentions.length === 0) return { kind: "ready", mentions: [] };
+
+  const assetIds = mentions.flatMap((mention) =>
+    mention.type === "asset" ? [BigInt(mention.asset_id)] : [],
+  );
+  const sceneCardIds = mentions.flatMap((mention) =>
+    mention.type === "scene_card" ? [BigInt(mention.scene_card_id)] : [],
+  );
+  const assets =
+    assetIds.length === 0
+      ? []
+      : await tx.$queryRawUnsafe<LockedAssetMentionTarget[]>(
+          `SELECT id, user_id, project_id, type, content_sha256, mime, size, width, height, duration_ms, status, is_delete
+           FROM assets
+           WHERE id IN (${assetIds.map(() => "?").join(",")})
+           ORDER BY id FOR UPDATE`,
+          ...assetIds,
+        );
+  const sceneCards =
+    sceneCardIds.length === 0
+      ? []
+      : await tx.$queryRawUnsafe<LockedSceneCardMentionTarget[]>(
+          `SELECT id, project_id, title, summary, content_markdown, version, is_delete
+           FROM scene_cards
+           WHERE id IN (${sceneCardIds.map(() => "?").join(",")})
+           ORDER BY id FOR UPDATE`,
+          ...sceneCardIds,
+        );
+  const assetById = new Map(
+    assets.map((asset) => [asset.id.toString(), asset]),
+  );
+  const sceneCardById = new Map(
+    sceneCards.map((sceneCard) => [sceneCard.id.toString(), sceneCard]),
+  );
+  const failures: MentionFailure[] = [];
+  const resolved: ResolvedMention[] = [];
+
+  mentions.forEach((mention, index) => {
+    if (mention.type === "asset") {
+      const asset = assetById.get(mention.asset_id);
+      if (
+        !asset ||
+        isDeletedFlag(asset.is_delete) ||
+        asset.status !== "normal"
+      ) {
+        failures.push({ index, type: mention.type, reason: "deleted" });
+        return;
+      }
+      if (asset.project_id !== projectId) {
+        failures.push({ index, type: mention.type, reason: "wrong_project" });
+        return;
+      }
+      if (asset.user_id !== userId) {
+        failures.push({
+          index,
+          type: mention.type,
+          reason: "permission_lost",
+        });
+        return;
+      }
+      resolved.push({
+        input: mention,
+        targetId: asset.id,
+        targetVersion: null,
+        snapshot: {
+          asset_type: asset.type,
+          mime: asset.mime,
+          size: asset.size?.toString() ?? null,
+          width: asset.width,
+          height: asset.height,
+          duration_ms: asset.duration_ms,
+          content_sha256: asset.content_sha256,
+        },
+      });
+      return;
+    }
+
+    const sceneCard = sceneCardById.get(mention.scene_card_id);
+    if (!sceneCard || isDeletedFlag(sceneCard.is_delete)) {
+      failures.push({ index, type: mention.type, reason: "deleted" });
+      return;
+    }
+    if (sceneCard.project_id !== projectId) {
+      failures.push({ index, type: mention.type, reason: "wrong_project" });
+      return;
+    }
+    if (sceneCard.version !== mention.scene_card_version) {
+      failures.push({ index, type: mention.type, reason: "stale" });
+      return;
+    }
+    resolved.push({
+      input: mention,
+      targetId: sceneCard.id,
+      targetVersion: mention.scene_card_version,
+      snapshot: {
+        title: sceneCard.title,
+        summary: sceneCard.summary,
+        content_markdown: sceneCard.content_markdown,
+        version: sceneCard.version,
+      },
+    });
+  });
+
+  return failures.length > 0
+    ? { kind: "mention_unavailable", mentions: failures }
+    : { kind: "ready", mentions: resolved };
 }
 
 function publicRunActivations(value: unknown): CreativeSkillActivation[] {
@@ -145,12 +310,31 @@ export async function acceptConversationMessageInTransaction(
       return { kind: "idempotency_conflict" } as const;
     }
     if (receipt.message_id === null) return { kind: "not_found" } as const;
-    const message = await tx.conversation_messages.findUnique({
-      where: { id: receipt.message_id },
-      select: { sequence_no: true },
-    });
-    return replay(input.projectId, receipt, message?.sequence_no ?? 0);
+    const [message, mentionRows] = await Promise.all([
+      tx.conversation_messages.findUnique({
+        where: { id: receipt.message_id },
+        select: { sequence_no: true },
+      }),
+      tx.conversation_message_mentions.findMany({
+        where: { message_id: receipt.message_id },
+        orderBy: { mention_seq: "asc" },
+        select: { id: true, mention_seq: true, mention_type: true },
+      }),
+    ]);
+    return replay(
+      input.projectId,
+      receipt,
+      message?.sequence_no ?? 0,
+      mentionRows.map((mention) => ({
+        mention_id: mention.id.toString(),
+        index: mention.mention_seq,
+        type: mention.mention_type as "asset" | "scene_card",
+      })),
+    );
   }
+
+  const resolvedMentions = await resolveMentions(tx, input, projectId, userId);
+  if (resolvedMentions.kind !== "ready") return resolvedMentions;
 
   let conversation: { id: bigint; project_id: bigint } | null = null;
   if (input.conversationId !== null) {
@@ -330,6 +514,29 @@ export async function acceptConversationMessageInTransaction(
       sequence_no: sequenceNo,
     },
   });
+  const acceptedMentions: AcceptedConversationMention[] = [];
+  for (const [index, mention] of resolvedMentions.mentions.entries()) {
+    const fact = await tx.conversation_message_mentions.create({
+      data: {
+        message_id: message.id,
+        conversation_id: conversation.id,
+        project_id: projectId,
+        accepted_user_id: userId,
+        mention_seq: index,
+        mention_type: mention.input.type,
+        target_id: mention.targetId,
+        target_version: mention.targetVersion,
+        display_name: mention.input.display_name,
+        snapshot: mention.snapshot,
+      },
+      select: { id: true },
+    });
+    acceptedMentions.push({
+      mention_id: fact.id.toString(),
+      index,
+      type: mention.input.type,
+    });
+  }
 
   if (inputRequest) {
     await tx.user_input_requests.update({
@@ -358,6 +565,12 @@ export async function acceptConversationMessageInTransaction(
       role: "user",
       content: input.content,
       sequence_no: sequenceNo,
+      mentions: resolvedMentions.mentions.map((mention, index) => ({
+        ...acceptedMentions[index],
+        display_name: mention.input.display_name,
+        availability: "available",
+        reason: null,
+      })),
     },
   });
   let cursor = messageEvent.cursor;
@@ -451,6 +664,7 @@ export async function acceptConversationMessageInTransaction(
     agent_run_id: run.id.toString(),
     cursor,
     sequence_no: sequenceNo,
+    mentions: acceptedMentions,
   } as const;
 }
 
