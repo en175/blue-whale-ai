@@ -1,5 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
+import {
+  agentRunPinSchema,
+  canonicalAgentRunPinDigestInput,
+  type AgentRunPin,
+} from "@blue-whale/contracts";
+import { scrubCreativeSkillFromRunPin } from "./agent-run-pin.js";
 
 /** Skill 资产 repo（Prisma-backed），落地 Creative Skill 资产契约
  *  （docs/specs/2026-08-03-creative-skill-asset-contract.md §2/§3/§6/§11）：
@@ -82,6 +88,18 @@ export class SkillAddConflictError extends Error {
   constructor(public officialSkillName: string) {
     super(`官方技能与个人技能同名，无法添加: ${officialSkillName}`);
     this.name = "SkillAddConflictError";
+  }
+}
+
+/** 删除个人技能时仍被进行中的 AgentRun 引用（契约 §13.2，IK6B2H）：
+ *  携带技能名与稳定 ID 供 BFF 组装解释文案。 */
+export class SkillInUseError extends Error {
+  constructor(
+    public skillName: string,
+    public creativeSkillId: string,
+  ) {
+    super(`技能正在使用中，无法删除: ${skillName}`);
+    this.name = "SkillInUseError";
   }
 }
 
@@ -226,7 +244,9 @@ export interface SkillRepo {
     creativeSkillId: string,
   ): Promise<{ name: string; description: string | null; body: string } | null>;
   /** 物理删除个人技能本体及其 creative_skill_version 行；
-   *  asset_domain='personal' + owner 谓词保护，0 命中返回 false；写失败抛错。 */
+   *  asset_domain='personal' + owner 谓词保护，0 命中返回 false；写失败抛错。
+   *  存在进行中 AgentRun 引用（终态之外）→ 抛 SkillInUseError（契约 §13.2，IK6B2H）；
+   *  删除成功时同事务对引用该技能的终态历史 run 执行 run_pin scrub。 */
   deletePersonal(ownerUserId: string, creativeSkillId: string): Promise<boolean>;
   /** 创建个人技能（IK60WU）：校验名称冲突 → 生成稳定身份 → 写入 creative_skill + version。
    *  名称与官方保留名冲突 → SkillNameReservedError；
@@ -350,6 +370,45 @@ async function resolveOfficialSourceSkillId(
     where: { id: sourceSkillId, is_delete: 0 },
   });
   return c > 0 ? sourceSkillId.toString() : null;
+}
+
+/** JSON_SEARCH 的 search 串通配符转义（契约 §13.2，IK6B2H）：
+ *  creative_skill_id 字符集含 `_`（JSON_SEARCH 视作任意单字符通配），加反斜杠转义为
+ *  字面量，避免误匹配形态相近的其它技能 ID（字符集不含 `%`/`\`，无需处理）。 */
+function escapeJsonSearchTerm(creativeSkillId: string): string {
+  return creativeSkillId.replace(/_/g, "\\_");
+}
+
+/** 引用该技能的进行中 AgentRun 数（fail-closed 写法，契约 §13.2）：
+ *  终态之外一律视作进行中（含 queued/running/awaiting_input/awaiting_job/
+ *  recovery_failed 与未来新增状态），命中即禁删。 */
+async function countActiveRunReferences(
+  tx: Prisma.TransactionClient,
+  creativeSkillId: string,
+): Promise<number> {
+  const rows = await tx.$queryRawUnsafe<{ c: bigint }[]>(
+    `SELECT COUNT(*) AS c FROM agent_runs WHERE is_delete = 0 AND status NOT IN ('completed', 'failed', 'cancelled') AND JSON_SEARCH(run_pin, 'one', ?) IS NOT NULL`,
+    escapeJsonSearchTerm(creativeSkillId),
+  );
+  return Number(rows[0]?.c ?? 0);
+}
+
+/** 终态 run 的 run_pin 解码（quaint 读 JSON 列可能返回字符串或已解析对象）：
+ *  统一防御解析 + schema 自检；任何失败 → null（跳过该行，不阻塞删除主线）。 */
+function decodeTerminalRunPin(
+  raw: unknown,
+): { pin: AgentRunPin; serialized: string } | null {
+  const serialized = typeof raw === "string" ? raw : JSON.stringify(raw);
+  if (serialized === undefined) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(serialized);
+  } catch {
+    return null;
+  }
+  const result = agentRunPinSchema.safeParse(parsed);
+  if (!result.success) return null;
+  return { pin: result.data, serialized };
 }
 
 export function createSkillRepo(prisma: PrismaClient): SkillRepo {
@@ -635,18 +694,69 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
     },
 
     async deletePersonal(ownerUserId, creativeSkillId) {
-      // 先删本体（asset_domain/owner 谓词保护），0 命中即不动版本行。
-      const deleted = await prisma.$executeRawUnsafe(
-        `DELETE FROM creative_skill WHERE creative_skill_id = ? AND asset_domain = 'personal' AND owner_user_id = ?`,
-        creativeSkillId,
-        BigInt(ownerUserId),
-      );
-      if (deleted === 0) return false;
-      await prisma.$executeRawUnsafe(
-        `DELETE FROM creative_skill_version WHERE creative_skill_id = ?`,
-        creativeSkillId,
-      );
-      return true;
+      // 交互事务（先例：createPersonalSkill）：删除本体 + 终态 scrub 原子提交。
+      // 顺序 = name SELECT → 禁删检查 → DELETE 本体（X 锁）→ X 锁后复检 → scrub → DELETE 版本行；
+      // 复检命中（关闭「检查后新建 run」窗口）抛错整体回滚。残余窗口（复检后提交的新 run）
+      // 语义等价现状「快照寿命长于技能行」，pin 正文自足可正常执行（契约 §13.2）。
+      return prisma.$transaction(async (tx) => {
+        // 1. 存在性 + 名称（owner 谓词保护；0 命中保持「不存在」语义，不泄露存在性）。
+        const rows = await tx.$queryRawUnsafe<{ name: string }[]>(
+          `SELECT name FROM creative_skill WHERE creative_skill_id = ? AND asset_domain = 'personal' AND owner_user_id = ? LIMIT 1`,
+          creativeSkillId,
+          BigInt(ownerUserId),
+        );
+        const skill = rows[0];
+        if (!skill) return false;
+
+        // 2. 进行中引用禁删（fail-closed：终态之外一律视作进行中）。
+        if ((await countActiveRunReferences(tx, creativeSkillId)) > 0) {
+          throw new SkillInUseError(skill.name, creativeSkillId);
+        }
+
+        // 3. 删除本体（X 锁 + owner 谓词），0 命中（并发已删）即不动版本行。
+        const deleted = await tx.$executeRawUnsafe(
+          `DELETE FROM creative_skill WHERE creative_skill_id = ? AND asset_domain = 'personal' AND owner_user_id = ?`,
+          creativeSkillId,
+          BigInt(ownerUserId),
+        );
+        if (deleted === 0) return false;
+
+        // 4. X 锁后复检（关闭「检查后新建 run」窗口，命中即抛错整体回滚）。
+        if ((await countActiveRunReferences(tx, creativeSkillId)) > 0) {
+          throw new SkillInUseError(skill.name, creativeSkillId);
+        }
+
+        // 5. 终态 scrub：引用该技能的历史 run 移除正文供应（移除条目而非删字段，
+        //    schema 兼容；activations 保留为「曾使用」最小事实）。无变化不写库。
+        const refs = await tx.$queryRawUnsafe<
+          { id: bigint; run_pin: unknown }[]
+        >(
+          `SELECT id, run_pin FROM agent_runs WHERE is_delete = 0 AND status IN ('completed', 'failed', 'cancelled') AND JSON_SEARCH(run_pin, 'one', ?) IS NOT NULL`,
+          escapeJsonSearchTerm(creativeSkillId),
+        );
+        for (const ref of refs) {
+          const decoded = decodeTerminalRunPin(ref.run_pin);
+          if (!decoded) continue;
+          const scrubbed = scrubCreativeSkillFromRunPin(
+            decoded.pin,
+            creativeSkillId,
+          );
+          const next = JSON.stringify(scrubbed);
+          if (next === decoded.serialized) continue;
+          await tx.$executeRawUnsafe(
+            `UPDATE agent_runs SET run_pin = ?, gmt_modified = CURRENT_TIMESTAMP(3) WHERE id = ?`,
+            next,
+            ref.id,
+          );
+        }
+
+        // 6. 删除版本行。
+        await tx.$executeRawUnsafe(
+          `DELETE FROM creative_skill_version WHERE creative_skill_id = ?`,
+          creativeSkillId,
+        );
+        return true;
+      });
     },
 
     async createPersonalSkill(userId, input) {

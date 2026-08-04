@@ -94,6 +94,7 @@ export {
   createSkillRepo,
   normalizeNameKey,
   SkillAddConflictError,
+  SkillInUseError,
   SkillNameConflictError,
   SkillNameReservedError,
   type SkillRepo,

@@ -11,6 +11,7 @@ import {
 } from "./handle-skill-writes.js";
 import {
   SkillAddConflictError,
+  SkillInUseError,
   SkillNameConflictError,
   SkillNameReservedError,
 } from "@blue-whale/persistence";
@@ -474,5 +475,21 @@ describe("handleDeletePersonalSkill", () => {
     });
     expect(result.code).toBe(100100);
     expect(repo.deletePersonal).not.toHaveBeenCalled();
+  });
+
+  it("仍被进行中的 AgentRun 引用 → 100105（技能「名称」正在使用中，IK6B2H）", async () => {
+    const repo = makeRepo();
+    repo.deletePersonal.mockRejectedValue(
+      new SkillInUseError("故事板助手", "story_board"),
+    );
+    const result = await handleDeletePersonalSkill("9", "story_board", {
+      skills: repo,
+    });
+    expect(result).toEqual({
+      code: 100105,
+      msg: "技能「故事板助手」正在使用中，无法删除",
+      data: null,
+    });
+    expect(repo.deletePersonal).toHaveBeenCalledWith("9", "story_board");
   });
 });

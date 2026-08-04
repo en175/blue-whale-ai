@@ -1,6 +1,7 @@
 import { fail, ok } from "@blue-whale/contracts";
 import {
   SkillAddConflictError,
+  SkillInUseError,
   SkillNameConflictError,
   SkillNameReservedError,
   type SkillRepo,
@@ -14,6 +15,7 @@ const SKILL_NAME_CONFLICT_CODE = 100101;
 const SKILL_NAME_RESERVED_CODE = 100102;
 const SKILL_ADD_CONFLICT_CODE = 100103;
 const SKILL_FORMAT_FAILED_CODE = 100104;
+const SKILL_IN_USE_CODE = 100105;
 
 /** 稳定身份格式（契约 §2）：注册命令只接受 creative_skill_id，非法一律按不存在处理（§7）。 */
 const CREATIVE_SKILL_ID_PATTERN = /^[a-z][a-z0-9_]{2,79}$/;
@@ -219,7 +221,8 @@ export async function handleGetPersonalSkill(
 }
 
 /** DELETE /api/agent/skills/personal/{id}：owner 永久删除个人技能（契约 §13.2，IK60WZ）。
- *  物理删本体与版本行，不可逆；官方域/非 owner/未知/格式非法/重复删 → 100100。 */
+ *  物理删本体与版本行，不可逆；官方域/非 owner/未知/格式非法/重复删 → 100100；
+ *  仍被进行中的 AgentRun 引用 → 100105（技能「名称」正在使用中，无法删除，IK6B2H）。 */
 export async function handleDeletePersonalSkill(
   userId: string,
   creativeSkillId: string,
@@ -227,9 +230,19 @@ export async function handleDeletePersonalSkill(
 ) {
   const invalid = validateCreativeSkillId(creativeSkillId);
   if (invalid) return invalid;
-  const deleted = await deps.skills.deletePersonal(userId, creativeSkillId);
-  if (!deleted) {
-    return fail(DATA_NOT_EXIST_CODE, `Skill 不存在: ${creativeSkillId}`);
+  try {
+    const deleted = await deps.skills.deletePersonal(userId, creativeSkillId);
+    if (!deleted) {
+      return fail(DATA_NOT_EXIST_CODE, `Skill 不存在: ${creativeSkillId}`);
+    }
+    return ok();
+  } catch (e) {
+    if (e instanceof SkillInUseError) {
+      return fail(
+        SKILL_IN_USE_CODE,
+        `技能「${e.skillName}」正在使用中，无法删除`,
+      );
+    }
+    throw e;
   }
-  return ok();
 }

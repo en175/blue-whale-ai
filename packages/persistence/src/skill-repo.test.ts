@@ -1,9 +1,17 @@
 import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
+import { bundledAgentRuntimeManifest } from "../../agent-runtime/src/runtime-manifest.js";
+import {
+  agentRunPinSchema,
+  canonicalAgentRunPinDigestInput,
+  type AgentRunPin,
+} from "@blue-whale/contracts";
+import { createHash } from "node:crypto";
 
 import {
   createSkillRepo,
   SkillAddConflictError,
+  SkillInUseError,
   SkillNameConflictError,
   SkillNameReservedError,
 } from "./skill-repo.js";
@@ -23,6 +31,119 @@ function expectWhitelistOnly(records: Record<string, unknown>[]) {
       expect(FORBIDDEN_KEYS).not.toContain(key);
     }
   }
+}
+
+// deletePersonal 交互事务 mock（先例：createPersonalSkill 的 $transaction(async cb => cb(tx))）。
+function withTransaction(
+  tx: Record<string, unknown>,
+): { $transaction: ReturnType<typeof vi.fn> } {
+  return {
+    $transaction: vi.fn(
+      async (cb: (t: Record<string, unknown>) => Promise<unknown>) => cb(tx),
+    ),
+  };
+}
+
+// RunPin fixture（复制 agent-run-repo.test.ts 的 runPinSource + signRunPin 模式）。
+const runPinSource: Omit<AgentRunPin, "pin_digest"> = {
+  schema_version: 1 as const,
+  manifest_id: bundledAgentRuntimeManifest.manifest_id,
+  manifest_version: bundledAgentRuntimeManifest.manifest_version,
+  manifest_digest: bundledAgentRuntimeManifest.manifest_digest,
+  resources: structuredClone(bundledAgentRuntimeManifest.resources),
+  role_resource_id: bundledAgentRuntimeManifest.role_resource_id,
+  rule_resource_ids: structuredClone(
+    bundledAgentRuntimeManifest.rule_resource_ids,
+  ),
+  runtime_skill_resource_ids: structuredClone(
+    bundledAgentRuntimeManifest.runtime_skill_resource_ids,
+  ),
+  model_profile: structuredClone(
+    bundledAgentRuntimeManifest.model_profiles[0]!,
+  ),
+  runtime_budget_policy: bundledAgentRuntimeManifest.runtime_budget_policy,
+  tool_grants: [],
+  auto_creative_skill_candidates: [],
+  activated_creative_skill_versions: [],
+  creative_skill_resources: [],
+};
+
+function signRunPin(source: Omit<AgentRunPin, "pin_digest">): AgentRunPin {
+  return {
+    ...source,
+    pin_digest: `sha256:${createHash("sha256")
+      .update(canonicalAgentRunPinDigestInput(source))
+      .digest("hex")}`,
+  };
+}
+
+function resourceOf(
+  creativeSkillId: string,
+  name: string,
+  body: string,
+): AgentRunPin["creative_skill_resources"][number] {
+  return {
+    creative_skill_id: creativeSkillId,
+    creative_skill_version_id: `version.${creativeSkillId}.1`,
+    name,
+    description: `${name}简介`,
+    display_version: "1.0.0",
+    resource_digest: `sha256:${"a".repeat(64)}`,
+    media_type: "text/markdown",
+    body,
+    content_digest: `sha256:${createHash("sha256").update(body).digest("hex")}`,
+  };
+}
+
+function candidateOf(
+  resource: AgentRunPin["creative_skill_resources"][number],
+): AgentRunPin["auto_creative_skill_candidates"][number] {
+  const {
+    media_type: _mediaType,
+    body: _body,
+    content_digest: _contentDigest,
+    ...candidate
+  } = resource;
+  return candidate;
+}
+
+function activationOf(
+  resource: AgentRunPin["creative_skill_resources"][number],
+): AgentRunPin["activated_creative_skill_versions"][number] {
+  return {
+    creative_skill_id: resource.creative_skill_id,
+    creative_skill_version_id: resource.creative_skill_version_id,
+    name: resource.name,
+    display_version: resource.display_version,
+    resource_digest: resource.resource_digest,
+    source: "auto",
+    reason: {
+      type: "agent_match",
+      detail: { matched_fields: ["conversation_messages"] },
+    },
+  };
+}
+
+const TARGET_BODY = "# 故事板助手\n\n分镜规划正文";
+const TARGET_RESOURCE = resourceOf("story_board", "故事板助手", TARGET_BODY);
+const OTHER_RESOURCE = resourceOf(
+  "poster_expert",
+  "海报专家",
+  "# 海报专家\n\n海报设计正文",
+);
+
+function pinWithSkills(
+  resources: AgentRunPin["creative_skill_resources"],
+): AgentRunPin {
+  return signRunPin({
+    ...runPinSource,
+    auto_creative_skill_candidates: resources.map(candidateOf),
+    // schema 约束 activated_creative_skill_versions 至多 1 个（确定性 auto 激活），fixture 对齐
+    activated_creative_skill_versions: resources
+      .slice(0, 1)
+      .map(activationOf),
+    creative_skill_resources: resources,
+  });
 }
 
 describe("SkillRepo", () => {
@@ -827,17 +948,27 @@ describe("SkillRepo", () => {
   });
 
   it("deletePersonal 命中时物理删除本体及其 creative_skill_version 行", async () => {
+    const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
+      if (sql.includes("SELECT name FROM creative_skill")) return [{ name: "故事板助手" }];
+      if (sql.includes("COUNT(*) AS c FROM agent_runs")) return [{ c: 0n }];
+      return []; // 终态引用列表为空
+    });
     const executeRawUnsafe = vi.fn().mockImplementation((sql: string) => {
-      if (sql.includes("creative_skill_version")) return Promise.resolve(2);
-      return Promise.resolve(1);
+      if (sql.includes("creative_skill_version")) return 2;
+      return 1;
     });
     const prisma = {
-      $executeRawUnsafe: executeRawUnsafe,
+      ...withTransaction({ $queryRawUnsafe: queryRawUnsafe, $executeRawUnsafe: executeRawUnsafe }),
     } as unknown as PrismaClient;
 
     await expect(
       createSkillRepo(prisma).deletePersonal("9", "my_personal"),
     ).resolves.toBe(true);
+    // 禁删检查执行两次（步骤 2 + 步骤 4 X 锁后复检）
+    const countCalls = queryRawUnsafe.mock.calls.filter((call) =>
+      (call[0] as string).includes("COUNT(*) AS c FROM agent_runs"),
+    );
+    expect(countCalls).toHaveLength(2);
     expect(executeRawUnsafe).toHaveBeenCalledTimes(2);
     expect(executeRawUnsafe).toHaveBeenCalledWith(
       expect.stringContaining("DELETE FROM creative_skill_version"),
@@ -847,38 +978,46 @@ describe("SkillRepo", () => {
     for (const call of executeRawUnsafe.mock.calls) {
       expect(call[0] as string).not.toContain("creative_skill_activation");
     }
+    for (const call of queryRawUnsafe.mock.calls) {
+      expect(call[0] as string).not.toContain("creative_skill_activation");
+    }
   });
 
   it("deletePersonal 非 owner 调用不命中：本体与版本行都不动", async () => {
-    const executeRawUnsafe = vi.fn().mockResolvedValue(0);
+    const queryRawUnsafe = vi.fn().mockResolvedValue([]); // name SELECT 0 命中
+    const executeRawUnsafe = vi.fn();
     const prisma = {
-      $executeRawUnsafe: executeRawUnsafe,
+      ...withTransaction({ $queryRawUnsafe: queryRawUnsafe, $executeRawUnsafe: executeRawUnsafe }),
     } as unknown as PrismaClient;
 
     await expect(
       createSkillRepo(prisma).deletePersonal("7", "my_personal"),
     ).resolves.toBe(false);
-    expect(executeRawUnsafe).toHaveBeenCalledTimes(1);
+    expect(queryRawUnsafe).toHaveBeenCalledTimes(1);
+    expect(executeRawUnsafe).not.toHaveBeenCalled();
   });
 
   it("deletePersonal 对 official 行不删（asset_domain 谓词保护，即使 owner 巧合匹配）", async () => {
-    const executeRawUnsafe = vi.fn().mockResolvedValue(0);
+    const queryRawUnsafe = vi.fn().mockResolvedValue([]);
+    const executeRawUnsafe = vi.fn();
     const prisma = {
-      $executeRawUnsafe: executeRawUnsafe,
+      ...withTransaction({ $queryRawUnsafe: queryRawUnsafe, $executeRawUnsafe: executeRawUnsafe }),
     } as unknown as PrismaClient;
 
     await expect(
       createSkillRepo(prisma).deletePersonal("0", "deep_writing"),
     ).resolves.toBe(false);
-    const [sql, ...params] = executeRawUnsafe.mock.calls[0];
+    const [sql, ...params] = queryRawUnsafe.mock.calls[0];
+    expect(sql).toContain("SELECT name FROM creative_skill");
     expect(sql).toContain("asset_domain = 'personal'");
     expect(sql).toContain("owner_user_id = ?");
-    expect(sql).toContain("DELETE FROM creative_skill ");
     expect(params).toEqual(["deep_writing", 0n]);
-    expect(executeRawUnsafe).toHaveBeenCalledTimes(1);
+    expect(executeRawUnsafe).not.toHaveBeenCalled();
   });
 
   it("creative_skill 读查询失败时容错为空（表不存在不阻塞主路径）；deletePersonal 写失败则抛错", async () => {
+    const queryRawUnsafe = vi.fn().mockRejectedValue(new Error("table missing"));
+    const executeRawUnsafe = vi.fn().mockRejectedValue(new Error("table missing"));
     const prisma = {
       user_skill: {
         findMany: vi.fn().mockResolvedValue([{ skill_id: 3n, auto: 0 }]),
@@ -895,8 +1034,12 @@ describe("SkillRepo", () => {
         ]),
         count: vi.fn(),
       },
-      $queryRawUnsafe: vi.fn().mockRejectedValue(new Error("table missing")),
-      $executeRawUnsafe: vi.fn().mockRejectedValue(new Error("table missing")),
+      $queryRawUnsafe: queryRawUnsafe,
+      $executeRawUnsafe: executeRawUnsafe,
+      $transaction: vi.fn(
+        async (cb: (t: Record<string, unknown>) => Promise<unknown>) =>
+          cb({ $queryRawUnsafe: queryRawUnsafe, $executeRawUnsafe: executeRawUnsafe }),
+      ),
     } as unknown as PrismaClient;
     const repo = createSkillRepo(prisma);
 
@@ -913,6 +1056,178 @@ describe("SkillRepo", () => {
     await expect(repo.deletePersonal("9", "my_personal")).rejects.toThrow(
       "table missing",
     );
+  });
+
+  it("deletePersonal 存在进行中 run 引用时抛 SkillInUseError，不执行任何删除", async () => {
+    const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
+      if (sql.includes("SELECT name FROM creative_skill")) {
+        return [{ name: "故事板助手" }];
+      }
+      return [{ c: 1n }]; // 禁删检查命中
+    });
+    const executeRawUnsafe = vi.fn();
+    const prisma = {
+      ...withTransaction({
+        $queryRawUnsafe: queryRawUnsafe,
+        $executeRawUnsafe: executeRawUnsafe,
+      }),
+    } as unknown as PrismaClient;
+
+    const promise = createSkillRepo(prisma).deletePersonal("9", "story_board");
+    await expect(promise).rejects.toThrow(SkillInUseError);
+    await expect(promise).rejects.toMatchObject({
+      skillName: "故事板助手",
+      creativeSkillId: "story_board",
+    });
+    expect(executeRawUnsafe).not.toHaveBeenCalled();
+    // fail-closed 写法：终态之外一律视为进行中（含 queued/running/awaiting_input）
+    const countSql = queryRawUnsafe.mock.calls[1][0] as string;
+    expect(countSql).toContain(
+      "status NOT IN ('completed', 'failed', 'cancelled')",
+    );
+    expect(countSql).toContain("JSON_SEARCH(run_pin, 'one', ?)");
+  });
+
+  it("deletePersonal 终态 scrub：引用技能的历史 run 移除正文供应并重算 digest", async () => {
+    const targetPin = pinWithSkills([TARGET_RESOURCE]);
+    const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
+      if (sql.includes("SELECT name FROM creative_skill")) {
+        return [{ name: "故事板助手" }];
+      }
+      if (sql.includes("COUNT(*) AS c FROM agent_runs")) return [{ c: 0n }];
+      if (sql.includes("SELECT id, run_pin FROM agent_runs")) {
+        return [{ id: 5n, run_pin: JSON.stringify(targetPin) }];
+      }
+      return [];
+    });
+    const executeRawUnsafe = vi.fn().mockReturnValue(1);
+    const prisma = {
+      ...withTransaction({
+        $queryRawUnsafe: queryRawUnsafe,
+        $executeRawUnsafe: executeRawUnsafe,
+      }),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createSkillRepo(prisma).deletePersonal("9", "story_board"),
+    ).resolves.toBe(true);
+    const updateCall = executeRawUnsafe.mock.calls.find((call) =>
+      (call[0] as string).includes("UPDATE agent_runs SET run_pin"),
+    );
+    expect(updateCall).toBeDefined();
+    const [updateSql, pinValue, runId] = updateCall as [string, string, bigint];
+    expect(updateSql).toContain("gmt_modified = CURRENT_TIMESTAMP(3)");
+    expect(runId).toBe(5n);
+    // 写回 pin：目标技能两数组移除（正文供应消失）、activations 保留（「曾使用」最小事实）
+    const written = JSON.parse(pinValue) as AgentRunPin;
+    expect(agentRunPinSchema.safeParse(written).success).toBe(true);
+    expect(written.auto_creative_skill_candidates).toEqual([]);
+    expect(written.creative_skill_resources).toEqual([]);
+    expect(written.activated_creative_skill_versions).toEqual(
+      targetPin.activated_creative_skill_versions,
+    );
+    // digest 重算正确（与契约规范化输入同构）
+    const { pin_digest: _pinDigest, ...writtenSource } = written;
+    expect(written.pin_digest).toBe(signRunPin(writtenSource).pin_digest);
+  });
+
+  it("deletePersonal 多技能 pin 只删目标技能，其他技能正文条目保留", async () => {
+    const bothPin = pinWithSkills([TARGET_RESOURCE, OTHER_RESOURCE]);
+    const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
+      if (sql.includes("SELECT name FROM creative_skill")) {
+        return [{ name: "故事板助手" }];
+      }
+      if (sql.includes("COUNT(*) AS c FROM agent_runs")) return [{ c: 0n }];
+      if (sql.includes("SELECT id, run_pin FROM agent_runs")) {
+        return [{ id: 8n, run_pin: JSON.stringify(bothPin) }];
+      }
+      return [];
+    });
+    const executeRawUnsafe = vi.fn().mockReturnValue(1);
+    const prisma = {
+      ...withTransaction({
+        $queryRawUnsafe: queryRawUnsafe,
+        $executeRawUnsafe: executeRawUnsafe,
+      }),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createSkillRepo(prisma).deletePersonal("9", "story_board"),
+    ).resolves.toBe(true);
+    const updateCall = executeRawUnsafe.mock.calls.find((call) =>
+      (call[0] as string).includes("UPDATE agent_runs SET run_pin"),
+    );
+    const written = JSON.parse(updateCall![1] as string) as AgentRunPin;
+    expect(written.creative_skill_resources).toEqual([OTHER_RESOURCE]);
+    expect(written.creative_skill_resources[0]!.body).toBe(
+      OTHER_RESOURCE.body,
+    );
+    expect(written.auto_creative_skill_candidates).toEqual([
+      candidateOf(OTHER_RESOURCE),
+    ]);
+  });
+
+  it("deletePersonal 终态引用无可 scrub 内容（NULL run_pin/不含目标技能）时不写库", async () => {
+    const otherPin = pinWithSkills([OTHER_RESOURCE]);
+    const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
+      if (sql.includes("SELECT name FROM creative_skill")) {
+        return [{ name: "故事板助手" }];
+      }
+      if (sql.includes("COUNT(*) AS c FROM agent_runs")) return [{ c: 0n }];
+      if (sql.includes("SELECT id, run_pin FROM agent_runs")) {
+        // NULL run_pin（防御兜底）与不引用目标技能的 pin（scrub 无变化）都不触发写库
+        return [
+          { id: 6n, run_pin: null },
+          { id: 7n, run_pin: JSON.stringify(otherPin) },
+        ];
+      }
+      return [];
+    });
+    const executeRawUnsafe = vi.fn().mockReturnValue(1);
+    const prisma = {
+      ...withTransaction({
+        $queryRawUnsafe: queryRawUnsafe,
+        $executeRawUnsafe: executeRawUnsafe,
+      }),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createSkillRepo(prisma).deletePersonal("9", "story_board"),
+    ).resolves.toBe(true);
+    expect(
+      executeRawUnsafe.mock.calls.some((call) =>
+        (call[0] as string).includes("UPDATE agent_runs"),
+      ),
+    ).toBe(false);
+  });
+
+  it("deletePersonal X 锁后复检命中进行中引用时整体回滚（版本行未删）", async () => {
+    const activeCounts = [0n, 1n]; // 第一次检查 0，DELETE 后复检命中 1
+    const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
+      if (sql.includes("SELECT name FROM creative_skill")) {
+        return [{ name: "故事板助手" }];
+      }
+      if (sql.includes("COUNT(*) AS c FROM agent_runs")) {
+        return [{ c: activeCounts.shift() ?? 0n }];
+      }
+      return [];
+    });
+    const executeRawUnsafe = vi.fn().mockReturnValue(1);
+    const prisma = {
+      ...withTransaction({
+        $queryRawUnsafe: queryRawUnsafe,
+        $executeRawUnsafe: executeRawUnsafe,
+      }),
+    } as unknown as PrismaClient;
+
+    const promise = createSkillRepo(prisma).deletePersonal("9", "story_board");
+    await expect(promise).rejects.toThrow(SkillInUseError);
+    // 整体回滚：版本行 DELETE 未执行
+    expect(
+      executeRawUnsafe.mock.calls.some((call) =>
+        (call[0] as string).includes("DELETE FROM creative_skill_version"),
+      ),
+    ).toBe(false);
   });
 
   it("findPersonalContent owner 命中返回 name/description/body（契约 §13.1）", async () => {
