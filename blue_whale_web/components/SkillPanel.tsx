@@ -213,7 +213,10 @@ function SkillPanelDialog({
 
   return (
     <div
-      className="tc-agent-skill-modal-backdrop fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 motion-reduce:animate-none"
+      // z-index 须在模态层带（2147483610，同 LoginModal/ModalShell 约定）：
+      // 低于 AgentChatPanel 悬浮层（2147483600）会被其视觉遮盖，而背景 inert
+      // 又使悬浮层不可点击，形成"看得见点不着"的死层
+      className="tc-agent-skill-modal-backdrop fixed inset-0 z-[2147483610] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 motion-reduce:animate-none"
       onMouseDown={(e) => {
         // 遮罩按压关闭用 onMouseDown 而非 onClick：拖选文本移出面板后松开不误关（IK2AKU）；
         // preventDefault：阻止 mousedown 默认焦点转移（事件后浏览器会把焦点 blur 到 body），
