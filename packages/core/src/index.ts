@@ -17,6 +17,9 @@ export type {
   GenerationAdapter,
   GenerationRequest,
   GenerationResult,
+  PlanApplicationKindCore,
+  PlanCardCandidateCore,
+  PlanGenerationParameterOverridesCore,
 } from "./runtime-ports.js";
 export {
   signVolcengineRequest,

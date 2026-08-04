@@ -70,6 +70,7 @@ describe("handleGetSnapshot 成功快照", () => {
           .mockResolvedValue({ generation_jobs: [], assets: [] }),
         loadConversationState: vi.fn().mockResolvedValue({
           conversation_messages: [],
+          plan_messages: [],
           agent_runs: [],
           high_watermark_cursor: "0",
         }),
@@ -114,6 +115,7 @@ describe("handleGetSnapshot 成功快照", () => {
         .mockResolvedValue({ generation_jobs: [job], assets: [asset] }),
       loadConversationState: vi.fn().mockResolvedValue({
         conversation_messages: [],
+        plan_messages: [],
         agent_runs: [],
         high_watermark_cursor: "0",
       }),
@@ -135,6 +137,7 @@ describe("handleGetSnapshot 成功快照", () => {
         project: { ...sampleProject, id: 7 },
         canvas: { ...sampleCanvas, id: 3, project_id: 7 },
         conversation_messages: [],
+        plan_messages: [],
         agent_runs: [],
         generation_jobs: [
           {
@@ -179,6 +182,7 @@ describe("handleGetSnapshot 成功快照", () => {
         .mockResolvedValue({ generation_jobs: [job], assets: [] }),
       loadConversationState: vi.fn().mockResolvedValue({
         conversation_messages: [],
+        plan_messages: [],
         agent_runs: [],
         high_watermark_cursor: "0",
       }),
@@ -245,6 +249,7 @@ describe("handleGetSnapshot 成功快照", () => {
               },
             },
           ],
+          plan_messages: [],
           high_watermark_cursor: huge,
         }),
       },

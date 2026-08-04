@@ -1,4 +1,9 @@
-import type { AgentAction, AgentAdapter } from "@blue-whale/core";
+import type {
+  AgentAction,
+  AgentAdapter,
+  PlanCardCandidateCore,
+  PlanGenerationParameterOverridesCore,
+} from "@blue-whale/core";
 import {
   AGENT_TOOL_SURFACE_KEYS,
   type SkillSummarizePipeline,
@@ -7,8 +12,11 @@ import {
   agentRunWorkSchema,
   autoCreativeSkillActivationSchema,
   canonicalAgentRunPinDigestInput,
+  planCardCandidateSchema,
   type AgentRunPin,
   type AutoCreativeSkillActivation,
+  type PlanCardCandidate,
+  type PlanGenerationParameterOverrides,
 } from "@blue-whale/contracts";
 import type {
   AgentRunRepo,
@@ -293,6 +301,9 @@ interface ProducedResult {
   reasoningSummary: string;
   autoActivation: AutoCreativeSkillActivation | null;
   action: AgentAction;
+  /** 计划卡候选（contracts 线缆形态）；仅 action.kind === "submit_plan" 时非 null。
+   *  Worker 边界从 core camelCase 转换一次，供 result_payload 重放校验与 commitPlanMessages。 */
+  planCards: PlanCardCandidate[] | null;
 }
 
 function chunkContent(content: string): string[] {
@@ -303,11 +314,63 @@ function chunkContent(content: string): string[] {
   return chunks.length > 0 ? chunks : [""];
 }
 
+/** core 计划卡（camelCase 运行时形态）→ contracts 计划卡（snake_case 线缆形态）。
+ *  Worker 边界做唯一一次转换；转换后立刻由 planCardCandidateSchema 校验，
+ *  失败视为适配器产出了非法候选（不可重放，进入 outcome_unknown）。 */
+function coreOverridesToContract(
+  overrides: PlanGenerationParameterOverridesCore,
+): PlanGenerationParameterOverrides {
+  const out: Record<string, unknown> = {};
+  if (overrides.size !== undefined) out.size = overrides.size;
+  if (overrides.aspectRatio !== undefined) out.aspect_ratio = overrides.aspectRatio;
+  if (overrides.format !== undefined) out.format = overrides.format;
+  if (overrides.duration !== undefined) out.duration = overrides.duration;
+  if (overrides.count !== undefined) out.count = overrides.count;
+  if (overrides.firstFrameMentionSeq !== undefined)
+    out.first_frame_mention_seq = overrides.firstFrameMentionSeq;
+  if (overrides.lastFrameMentionSeq !== undefined)
+    out.last_frame_mention_seq = overrides.lastFrameMentionSeq;
+  return out as PlanGenerationParameterOverrides;
+}
+
+function corePlanCardsToContract(
+  cards: readonly PlanCardCandidateCore[],
+): PlanCardCandidate[] {
+  return cards.map((card) => {
+    const out: Record<string, unknown> = {
+      application_kind: card.applicationKind,
+      title: card.title,
+      content_markdown: card.contentMarkdown,
+    };
+    if (card.summary !== undefined) out.summary = card.summary;
+    if (card.parameterOverrides !== undefined) {
+      out.parameter_overrides = coreOverridesToContract(card.parameterOverrides);
+    }
+    if (card.sequenceLabelNoun !== undefined)
+      out.sequence_label_noun = card.sequenceLabelNoun;
+    if (card.basePlanMessageId !== undefined)
+      out.base_plan_message_id = card.basePlanMessageId;
+    if (card.sourcePlanMessageId !== undefined)
+      out.source_plan_message_id = card.sourcePlanMessageId;
+    if (
+      card.applicationKind === "scene_card_replace" &&
+      card.targetSceneCardMentionId !== undefined
+    ) {
+      out.target_scene_card_mention_id = card.targetSceneCardMentionId;
+    }
+    return out as PlanCardCandidate;
+  });
+}
+
 function parseReplayedAction(value: unknown): AgentAction | null {
   if (typeof value !== "object" || value === null) return null;
   const candidate = value as Record<string, unknown>;
   if (candidate.kind === "respond") return { kind: "respond" };
   if (candidate.kind === "cancel") return { kind: "cancel" };
+  if (candidate.kind === "submit_plan") {
+    // 真实候选在 result_payload.plan_cards（契约校验）；action 只承载 kind。
+    return { kind: "submit_plan", cards: [] };
+  }
   if (
     candidate.kind === "clarify" &&
     typeof candidate.question === "string" &&
@@ -341,11 +404,23 @@ function parseReplayedProviderResult(payload: unknown): ProducedResult | null {
     if (!parsed.success) return null;
     autoActivation = parsed.data;
   }
+  // 接管重放 submit_plan（契约 §8.4）：plan_cards 必须由契约 schema 校验通过，
+  // 否则视为不可重放 → outcome_unknown → failed（不把幻觉/残缺候选交给 RunCommit）。
+  let planCards: PlanCardCandidate[] | null = null;
+  if (action.kind === "submit_plan") {
+    const parsedCards = planCardCandidateSchema
+      .array()
+      .min(1)
+      .safeParse(candidate.plan_cards);
+    if (!parsedCards.success) return null;
+    planCards = parsedCards.data;
+  }
   return {
     content: candidate.content,
     reasoningSummary: candidate.reasoning_summary,
     autoActivation,
     action,
+    planCards,
   };
 }
 
@@ -432,6 +507,9 @@ async function executeAdvance(
       reasoning_summary: produced.reasoningSummary,
       action: produced.action,
       auto_activation: produced.autoActivation,
+      ...(produced.planCards !== null
+        ? { plan_cards: produced.planCards }
+        : {}),
     },
   });
   const holdMatch = HOLD_RESULT_MARKER.exec(work.prompt);
@@ -581,6 +659,22 @@ export async function runAgentWorkerOnce(input: {
       reasoningSummary: result.reasoningSummary,
     });
   }
+  if (result.action.kind === "submit_plan" && result.planCards !== null) {
+    // 正式消息即 plan_cards（不带 assistant_message）；确认文本已作为临时交付，
+    // 由 commitPlanMessages.closeStreamingDelivery 闭合，不提升为正式消息（契约 §9）。
+    // requestDigest 必须纳入完整 cards，接管重放相同 cards → 相同 digest → replay（AC#8）。
+    return input.repo.commitPlanMessages({
+      ...commitBase,
+      requestDigest: commitDigest({
+        outcome: "completed_with_plan",
+        reasoning_summary: result.reasoningSummary,
+        plan_cards: result.planCards,
+      }),
+      reasoningSummary: result.reasoningSummary,
+      planCards: result.planCards,
+      capabilitySnapshotVersion: 1,
+    });
+  }
   return input.repo.commitSuccess({
     ...commitBase,
     requestDigest: commitDigest({
@@ -604,12 +698,7 @@ async function produceResult(
     summarize?: SkillSummarizePipeline;
   },
   work: AgentRunWork,
-): Promise<{
-  content: string;
-  reasoningSummary: string;
-  autoActivation: AutoCreativeSkillActivation | null;
-  action: AgentAction;
-}> {
+): Promise<ProducedResult> {
   const prepared = runtimeRequest(work);
   if (
     input.summarize &&
@@ -625,6 +714,7 @@ async function produceResult(
         reasoningSummary: "已处理个人技能总结请求。",
         autoActivation: null,
         action: { kind: "respond" },
+        planCards: null,
       };
     }
   }
@@ -632,11 +722,23 @@ async function produceResult(
   if (result.content.length > prepared.maxOutputCharacters) {
     throw new Error("runtime_output_budget_exceeded");
   }
+  // submit_plan：把 core camelCase 候选转成 contracts 线缆形态并校验；
+  // 校验失败视为适配器产出非法候选，按 runtime_error 抛出（不进入重放/接纳）。
+  let planCards: PlanCardCandidate[] | null = null;
+  if (result.action.kind === "submit_plan") {
+    const converted = corePlanCardsToContract(result.action.cards);
+    const parsed = planCardCandidateSchema.array().min(1).safeParse(converted);
+    if (!parsed.success) {
+      throw new Error("adapter produced invalid plan cards");
+    }
+    planCards = parsed.data;
+  }
   return {
     content: result.content,
     reasoningSummary: result.reasoningSummary,
     autoActivation: prepared.autoActivation,
     action: result.action,
+    planCards,
   };
 }
 

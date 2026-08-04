@@ -600,6 +600,253 @@ describe("AgentRunRepo", () => {
     ).resolves.toEqual({ kind: "conflict" });
   });
 
+  it("commitPlanMessages replays a matching receipt and conflicts on a different digest (IK67H6)", async () => {
+    const existing = {
+      request_digest: requestDigest,
+      receipt: { cursor: "91", status: "completed" },
+    };
+    const findUnique = vi.fn().mockResolvedValue(existing);
+    const prisma = {
+      $transaction: vi.fn(async (callback) =>
+        callback({ run_commits: { findUnique } }),
+      ),
+    } as unknown as PrismaClient;
+    const repo = createAgentRunRepo(prisma);
+    const command = {
+      workerId: "worker-1",
+      agentRunId: "9",
+      advanceId: "30",
+      fence: "1",
+      runVersion: 1,
+      requestDigest,
+      reasoningSummary: "需求已确认，提交计划卡。",
+      planCards: [
+        {
+          application_kind: "image_generate" as const,
+          title: "海报主视觉",
+          content_markdown: "一只冲浪的蓝鲸",
+        },
+      ],
+      capabilitySnapshotVersion: 1 as const,
+    };
+
+    await expect(repo.commitPlanMessages(command)).resolves.toEqual({
+      kind: "replayed",
+      cursor: "91",
+      status: "completed",
+    });
+    await expect(
+      repo.commitPlanMessages({
+        ...command,
+        requestDigest: `sha256:${"e".repeat(64)}`,
+      }),
+    ).resolves.toEqual({ kind: "conflict" });
+  });
+
+  it("commitPlanMessages atomically fails an invalid batch with zero plan rows (IK67H6 AC#2)", async () => {
+    const now = new Date("2026-08-05T00:00:00.000Z");
+    const runRow = {
+      id: 9n,
+      project_id: 42n,
+      conversation_id: 7n,
+      user_id: 100n,
+      status: "running",
+      version: 1,
+      run_pin: runPin,
+      input_sequence_no: 1,
+    };
+    const runUpdate = vi
+      .fn()
+      .mockResolvedValue({ ...runRow, status: "failed", version: 2 });
+    const conversationsCreate = vi.fn();
+    const planMessagesCreate = vi.fn();
+    const commitsCreate = vi.fn().mockResolvedValue({});
+    const advancesUpdate = vi.fn().mockResolvedValue({ id: 30n });
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ db_now: now }]),
+      run_commits: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: commitsCreate,
+      },
+      agent_advances: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ id: 30n, agent_run_id: 9n }),
+        update: advancesUpdate,
+      },
+      agent_runs: {
+        findUnique: vi.fn().mockResolvedValue(runRow),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update: runUpdate,
+      },
+      agent_provisional_deliveries: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      project_events: {
+        create: vi
+          .fn()
+          .mockImplementation(({ data }) => ({
+            id: 12n,
+            gmt_create: now,
+            ...data,
+          })),
+      },
+      conversations: { update: vi.fn() },
+      conversation_messages: { create: conversationsCreate },
+      plan_messages: { create: planMessagesCreate },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createAgentRunRepo(prisma).commitPlanMessages({
+        workerId: "worker-1",
+        agentRunId: "9",
+        advanceId: "30",
+        fence: "1",
+        runVersion: 1,
+        requestDigest,
+        reasoningSummary: "需求已确认，提交计划卡。",
+        planCards: [
+          {
+            application_kind: "image_generate" as const,
+            title: "海报主视觉",
+            content_markdown: "一只冲浪的蓝鲸",
+          },
+          {
+            application_kind: "scene_card_replace" as const,
+            title: "覆盖场景卡",
+            content_markdown: "替换后的场景描述",
+            target_scene_card_mention_id: "55",
+          },
+        ],
+        capabilitySnapshotVersion: 1 as const,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({ kind: "committed", status: "failed" }),
+    );
+    expect(runUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "failed",
+          failure_code: "plan_card_validation_failed",
+        }),
+      }),
+    );
+    expect(conversationsCreate).not.toHaveBeenCalled();
+    expect(planMessagesCreate).not.toHaveBeenCalled();
+    expect(advancesUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "failed" } }),
+    );
+    expect(commitsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ outcome: "failed" }),
+      }),
+    );
+  });
+
+  it("commitPlanMessages fails a batch whose lineage pointer misses an existing plan message (IK67H6)", async () => {
+    const now = new Date("2026-08-05T00:00:00.000Z");
+    const runRow = {
+      id: 9n,
+      project_id: 42n,
+      conversation_id: 7n,
+      user_id: 100n,
+      status: "running",
+      version: 1,
+      run_pin: runPin,
+      input_sequence_no: 1,
+    };
+    const runUpdate = vi
+      .fn()
+      .mockResolvedValue({ ...runRow, status: "failed", version: 2 });
+    const planMessagesFindMany = vi.fn().mockResolvedValue([]);
+    const conversationsCreate = vi.fn();
+    const planMessagesCreate = vi.fn();
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ db_now: now }]),
+      run_commits: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      agent_advances: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 30n,
+          agent_run_id: 9n,
+          mention_input_snapshot: emptyMentionSnapshot,
+        }),
+        update: vi.fn().mockResolvedValue({ id: 30n }),
+      },
+      agent_runs: {
+        findUnique: vi.fn().mockResolvedValue(runRow),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update: runUpdate,
+      },
+      agent_provisional_deliveries: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      project_events: {
+        create: vi
+          .fn()
+          .mockImplementation(({ data }) => ({
+            id: 13n,
+            gmt_create: now,
+            ...data,
+          })),
+      },
+      conversation_message_mentions: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      plan_messages: {
+        findMany: planMessagesFindMany,
+        create: planMessagesCreate,
+      },
+      conversations: { update: vi.fn() },
+      conversation_messages: { create: conversationsCreate },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await expect(
+      createAgentRunRepo(prisma).commitPlanMessages({
+        workerId: "worker-1",
+        agentRunId: "9",
+        advanceId: "30",
+        fence: "1",
+        runVersion: 1,
+        requestDigest,
+        reasoningSummary: "需求已确认，提交计划卡。",
+        planCards: [
+          {
+            application_kind: "image_generate" as const,
+            title: "海报主视觉",
+            content_markdown: "一只冲浪的蓝鲸",
+            source_plan_message_id: "999",
+          },
+        ],
+        capabilitySnapshotVersion: 1 as const,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({ kind: "committed", status: "failed" }),
+    );
+    expect(planMessagesFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: [999n] } },
+      }),
+    );
+    expect(runUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          failure_code: "plan_card_validation_failed",
+        }),
+      }),
+    );
+    expect(conversationsCreate).not.toHaveBeenCalled();
+    expect(planMessagesCreate).not.toHaveBeenCalled();
+  });
+
   it("renews a live lease from database time without changing its fence or version", async () => {
     const now = new Date("2026-07-29T00:00:10.000Z");
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });

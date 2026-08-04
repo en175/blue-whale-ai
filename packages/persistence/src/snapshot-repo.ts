@@ -49,11 +49,15 @@ export interface SnapshotConversationState {
     conversation_id: string;
     agent_run_id: string | null;
     role: string;
+    content_type: string;
     content: string;
     sequence_no: number;
     created_at: string;
     mentions: SnapshotMentionView[];
   }>;
+  /** 已原子接纳的不可变计划卡（T09，IK67H6，契约 §9）：按 ordinal 排序。
+   *  临时候选与验证失败的候选永不进入此列表（AC#8）。 */
+  plan_messages: SnapshotPlanMessageView[];
   agent_runs: Array<{
     agent_run_id: string;
     conversation_id: string;
@@ -95,6 +99,28 @@ export interface SnapshotMentionView {
   availability: "available" | "stale" | "unavailable";
   reason: MentionFailureReason | null;
   snapshot?: unknown;
+}
+
+/** Snapshot 计划卡投影（T09）：直接透传冻结的不可变字段（JSON 原样），
+ *  application_kind / ordinal / 序列标签供前端渲染，content_markdown 为唯一权威正文。 */
+export interface SnapshotPlanMessageView {
+  message_id: string;
+  conversation_id: string;
+  agent_run_id: string;
+  ordinal: number;
+  total_in_batch: number;
+  sequence_label: string | null;
+  application_kind: string;
+  target_scene_card_mention_id: string | null;
+  base_scene_card_version: number | null;
+  content_markdown: string;
+  derived_references: unknown;
+  frozen_generation_parameters: unknown;
+  capability_snapshot_version: unknown;
+  provider_prompt_projection: unknown;
+  base_plan_message_id: string | null;
+  source_plan_message_id: string | null;
+  created_at: string;
 }
 
 /** output_asset_ids（Json 数组）→ string[]。容忍 number/string 混合（历史数据）。 */
@@ -164,7 +190,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
     async loadConversationState(projectId, userId) {
       const pid = BigInt(projectId);
       const uid = BigInt(userId);
-      const [messages, mentionRows, runs, inputRequests, maxCursorRow] =
+      const [messages, mentionRows, runs, inputRequests, planMessageRows, maxCursorRow] =
         await Promise.all([
           prisma.conversation_messages.findMany({
             where: { project_id: pid, is_delete: 0 },
@@ -197,6 +223,10 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
               is_delete: 0,
             },
             orderBy: { id: "asc" },
+          }),
+          prisma.plan_messages.findMany({
+            where: { project_id: pid },
+            orderBy: [{ agent_run_id: "asc" }, { ordinal: "asc" }],
           }),
           // cursor 改雪花后 project_event_stream.high_watermark 不再维护；
           // 当前水位直接取 project_events 的最大 cursor。
@@ -304,10 +334,32 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           conversation_id: message.conversation_id.toString(),
           agent_run_id: message.agent_run_id?.toString() ?? null,
           role: message.role,
+          content_type: message.content_type,
           content: message.content,
           sequence_no: message.sequence_no,
           created_at: message.gmt_create.toISOString(),
           mentions: mentionsByMessage.get(message.id.toString()) ?? [],
+        })),
+        plan_messages: planMessageRows.map((plan) => ({
+          message_id: plan.message_id.toString(),
+          conversation_id: plan.conversation_id.toString(),
+          agent_run_id: plan.agent_run_id.toString(),
+          ordinal: plan.ordinal,
+          total_in_batch: plan.total_in_batch,
+          sequence_label: plan.sequence_label,
+          application_kind: plan.application_kind,
+          target_scene_card_mention_id:
+            plan.target_scene_card_mention_id?.toString() ?? null,
+          base_scene_card_version: plan.base_scene_card_version,
+          content_markdown: plan.content_markdown,
+          derived_references: plan.derived_references,
+          frozen_generation_parameters: plan.frozen_generation_parameters,
+          capability_snapshot_version: plan.capability_snapshot_version,
+          provider_prompt_projection: plan.provider_prompt_projection,
+          base_plan_message_id: plan.base_plan_message_id?.toString() ?? null,
+          source_plan_message_id:
+            plan.source_plan_message_id?.toString() ?? null,
+          created_at: plan.gmt_create.toISOString(),
         })),
         agent_runs: runs.map((run) => {
           const activations = creativeSkillActivationSchema

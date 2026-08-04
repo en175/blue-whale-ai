@@ -147,6 +147,58 @@ describe("runAgentWorkerOnce", () => {
     );
   });
 
+  it("routes submit_plan to commitPlanMessages with contract-shaped cards (IK67H6)", async () => {
+    const claimNext = vi.fn().mockResolvedValue(work());
+    const commitPlanMessages = vi.fn().mockResolvedValue({
+      kind: "committed",
+      cursor: "9",
+      status: "completed",
+    });
+    const invoke = vi.fn().mockResolvedValue({
+      provider: "fake",
+      content: "正式提交 1 张计划卡。",
+      reasoningSummary: "需求已确认，提交计划卡。",
+      action: {
+        kind: "submit_plan",
+        cards: [
+          {
+            applicationKind: "image_generate",
+            title: "海报主视觉",
+            contentMarkdown: "一只冲浪的蓝鲸",
+          },
+        ],
+      },
+    });
+    await runAgentWorkerOnce({
+      repo: {
+        claimNext,
+        renewLease: vi.fn().mockResolvedValue(true),
+        commitPlanMessages,
+        ...providerCallMocks(),
+      },
+      runtime: { name: "fake", ready: async () => true, invoke },
+      workerId: "worker-1",
+    });
+    expect(commitPlanMessages).toHaveBeenCalledTimes(1);
+    expect(commitPlanMessages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workerId: "worker-1",
+        agentRunId: "9",
+        advanceId: "30",
+        capabilitySnapshotVersion: 1,
+        reasoningSummary: "需求已确认，提交计划卡。",
+        // core camelCase 候选经 Worker 边界转为 contracts 线缆形态。
+        planCards: [
+          expect.objectContaining({
+            application_kind: "image_generate",
+            title: "海报主视觉",
+            content_markdown: "一只冲浪的蓝鲸",
+          }),
+        ],
+      }),
+    );
+  });
+
   it("selects at most one frozen auto candidate by exact name and commits the safe reason", async () => {
     const body = "# Poster instructions";
     const digest = `sha256:${createHash("sha256").update(body).digest("hex")}`;

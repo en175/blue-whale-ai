@@ -218,6 +218,7 @@ CREATE TABLE `conversation_messages` (
     `agent_run_id` BIGINT NULL,
     `client_message_id` VARCHAR(64) NULL,
     `role` VARCHAR(16) NOT NULL,
+    `content_type` VARCHAR(24) NOT NULL DEFAULT 'text',
     `content` TEXT NOT NULL,
     `sequence_no` INTEGER NOT NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
@@ -327,12 +328,41 @@ CREATE TABLE `run_commits` (
     `advance_id` BIGINT NOT NULL,
     `agent_run_id` BIGINT NOT NULL,
     `request_digest` VARCHAR(71) NOT NULL,
-    `outcome` VARCHAR(16) NOT NULL,
+    `outcome` VARCHAR(32) NOT NULL,
     `receipt` JSON NOT NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 
     UNIQUE INDEX `uk_run_commit_advance`(`advance_id`),
     INDEX `idx_run_commit_agent_run`(`agent_run_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `plan_messages` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `message_id` BIGINT NOT NULL,
+    `conversation_id` BIGINT NOT NULL,
+    `project_id` BIGINT NOT NULL,
+    `agent_run_id` BIGINT NOT NULL,
+    `ordinal` INTEGER NOT NULL,
+    `total_in_batch` INTEGER NOT NULL,
+    `sequence_label` VARCHAR(255) NULL,
+    `application_kind` VARCHAR(32) NOT NULL,
+    `target_scene_card_mention_id` BIGINT NULL,
+    `base_scene_card_version` INTEGER NULL,
+    `content_markdown` LONGTEXT NOT NULL,
+    `derived_references` JSON NOT NULL,
+    `frozen_generation_parameters` JSON NOT NULL,
+    `capability_snapshot_version` JSON NOT NULL,
+    `provider_prompt_projection` JSON NOT NULL,
+    `base_plan_message_id` BIGINT NULL,
+    `source_plan_message_id` BIGINT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_plan_message_message`(`message_id`),
+    INDEX `idx_plan_message_project`(`project_id`),
+    INDEX `idx_plan_message_agent_run`(`agent_run_id`),
+    INDEX `idx_plan_message_application_kind`(`application_kind`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
