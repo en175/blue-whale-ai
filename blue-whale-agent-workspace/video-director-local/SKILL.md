@@ -29,7 +29,7 @@ description: 视频创作导演（本地版）。在 Claude Code / Codex 里自�
 | 视频复刻 | 拆解出配方后 +「复刻 / 照着做」 | `workflows/video-decode-replicate.md` 复刻段 |
 | 修改提示词 | 局部改当前结果 | 按自然确认处理（低成本直接改 / 重写先对齐） |
 
-**所有生成类意图都止于提示词交付包**（分镜表 + 每镜提示词 + 生图提示词 + 使用指引），见 `references/generation-action-guide.md`。
+**所有生成类意图都止于提示词交付**（生图提示词前期独立成卡 + 提示词交付包：分镜表 + 每镜视频提示词 + 使用指引），见 `references/generation-action-guide.md`。
 
 ## 多轮路由漂移防护
 
