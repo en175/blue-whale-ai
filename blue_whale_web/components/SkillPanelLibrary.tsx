@@ -41,10 +41,13 @@ function detectLibraryLang(): SkillLibraryLang {
 export function LibraryContent({
   onUse,
   onToast,
+  onAddedOfficial,
   refreshTrigger = 0,
 }: {
   onUse: (skill: UseSkillSelection) => void;
   onToast: (text: string) => void;
+  /** 添加官方技能成功后回调（IK6H3L）：宿主借此失效「我的技能」列表 */
+  onAddedOfficial?: () => void;
   refreshTrigger?: number;
 }) {
   const [items, setItems] = useState<SkillLibraryItem[]>([]);
@@ -156,6 +159,7 @@ export function LibraryContent({
       .add(creativeSkillId)
       .then(() => {
         onToast("技能已添加");
+        onAddedOfficial?.();
       })
       .catch((e: unknown) => {
         setItems((prev) =>

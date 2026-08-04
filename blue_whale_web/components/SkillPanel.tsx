@@ -280,6 +280,7 @@ function SkillPanelDialog({
             <LibraryContent
               onUse={onUseSkill}
               onToast={showToast}
+              onAddedOfficial={() => setMyRefreshTrigger((v) => v + 1)}
               refreshTrigger={libraryRefreshTrigger}
             />
           </TabPane>
