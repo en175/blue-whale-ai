@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -88,7 +89,7 @@ func CreateRechargeOrder(c *gin.Context) {
 		Amount:          totalTokens, // raw tokens，回调直接加
 		Money:           tier.Price,
 		TradeNo:         tradeNo,
-		PaymentMethod:   req.PaymentMethod,
+		PaymentMethod:   model.WayCodeToPaymentMethod(wayCode),
 		PaymentProvider: model.PaymentProviderBlueWhalePay,
 		CreateTime:      common.GetTimestamp(),
 		Status:          common.TopUpStatusPending,
@@ -273,6 +274,13 @@ func RechargeBlueWhalePayNotify(c *gin.Context) {
 		}
 		if topUp.Status != common.TopUpStatusPending {
 			return fmt.Errorf("充值订单状态错误")
+		}
+
+		// 回调 ifCode 为权威渠道：与建单不一致时覆盖（ADR-0065），未知 ifCode 保持现值。
+		reconciled := model.ReconcilePaymentMethodFromIfCode(topUp.PaymentMethod, params["ifCode"])
+		if reconciled != topUp.PaymentMethod {
+			logger.LogWarn(context.Background(), fmt.Sprintf("recharge 回调渠道与建单不一致，以回调为准 trade_no=%s order_method=%s if_code=%s", mchOrderNo, topUp.PaymentMethod, params["ifCode"]))
+			topUp.PaymentMethod = reconciled
 		}
 
 		// raw tokens 直接加，不走 QuotaPerUnit

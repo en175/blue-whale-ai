@@ -1,8 +1,10 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -30,6 +32,8 @@ const (
 	PaymentMethodWaffo        = "waffo"
 	PaymentMethodWaffoPancake = "waffo_pancake"
 	PaymentMethodBlueWhalePay = "bluewhalepay"
+	PaymentMethodAlipay       = "alipay"
+	PaymentMethodWxpay        = "wxpay"
 	PaymentMethodBalance      = "balance"
 )
 
@@ -48,6 +52,30 @@ var (
 	ErrTopUpNotFound         = errors.New("topup not found")
 	ErrTopUpStatusInvalid    = errors.New("topup status invalid")
 )
+
+// WayCodeToPaymentMethod 把 bluewhalepay wayCode 映射到渠道族（topups.payment_method 值）。
+// ALI_*→alipay、WX_*→wxpay；未知返回 PaymentMethodBlueWhalePay 兜底，等回调 ifCode 校正。决策见 ADR-0065。
+func WayCodeToPaymentMethod(wayCode string) string {
+	switch {
+	case strings.HasPrefix(wayCode, "ALI_"):
+		return PaymentMethodAlipay
+	case strings.HasPrefix(wayCode, "WX_"):
+		return PaymentMethodWxpay
+	default:
+		return PaymentMethodBlueWhalePay
+	}
+}
+
+// ReconcilePaymentMethodFromIfCode 回调 ifCode 为权威渠道：ifCode 属于已知渠道族则覆盖，
+// 未知 ifCode 保持现值（防未知渠道写脏）。钱包与档位两条充值回调共用。决策见 ADR-0065。
+func ReconcilePaymentMethodFromIfCode(current, ifCode string) string {
+	switch ifCode {
+	case PaymentMethodAlipay, PaymentMethodWxpay:
+		return ifCode
+	default:
+		return current
+	}
+}
 
 func (topUp *TopUp) Insert() error {
 	var err error
@@ -593,7 +621,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 // RechargeBlueWhalePay：bluewhalepay（blue-whale-pay）支付成功回调加额度。
 // pay confirmSuccess（notifyUrl 非空）→ PayMchNotifyMQ → GET 商户 notifyUrl，
 // BlueWhalePayNotify 验签后调本函数。TopUp.Amount 为充值额度（整数 quota）。
-func RechargeBlueWhalePay(tradeNo string, callerIp string) (err error) {
+func RechargeBlueWhalePay(tradeNo string, callerIp string, ifCode string) (err error) {
 	if tradeNo == "" {
 		return errors.New("未提供支付单号")
 	}
@@ -621,6 +649,13 @@ func RechargeBlueWhalePay(tradeNo string, callerIp string) (err error) {
 
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("充值订单状态错误")
+		}
+
+		// 回调 ifCode 为权威渠道：与建单不一致时覆盖（ADR-0065），未知 ifCode 保持现值。
+		reconciled := ReconcilePaymentMethodFromIfCode(topUp.PaymentMethod, ifCode)
+		if reconciled != topUp.PaymentMethod {
+			logger.LogWarn(context.Background(), fmt.Sprintf("bluewhalepay 回调渠道与建单不一致，以回调为准 trade_no=%s order_method=%s if_code=%s", tradeNo, topUp.PaymentMethod, ifCode))
+			topUp.PaymentMethod = reconciled
 		}
 
 		quotaToAdd = int64(decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart())

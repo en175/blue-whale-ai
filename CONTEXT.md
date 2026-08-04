@@ -631,6 +631,14 @@ _Avoid_: 直接比¥价和库内 $ 锚点；忽略单位归一导致误判；把
 定价巡检产出的待人工确认记录（价格变动 / 新模型上线 / 模型下线），状态：待审 → 已确认（落库）/ 已忽略（带理由）。只报警不自动改，防解析错误批量写错；有独立待审表，不复用 channel.settings 暂存。
 _Avoid_: 把待审当作自动落库；忽略理由留存；与 channel_upstream_update 的 channel.settings 暂存混为一谈
 
+**支付方式（payment method / wayCode）**:
+用户完成充值所走的子渠道（支付宝、微信等）。聚合网关（epay / bluewhalepay）下是渠道族值 `alipay` / `wxpay`，建单按 wayCode 前缀推导、回调用 pay 返回的 ifCode 校正（见 [ADR-0065](docs/adr/0065-bluewhalepay-topup-payment-method-channel-semantics.md)）；单渠道网关（stripe / creem / waffo）下与网关同名。落 `topups.payment_method`。
+_Avoid_: 与支付网关混为一谈；对聚合网关沿用网关名充当支付方式
+
+**支付网关（payment provider）**:
+实际处理扣款的供应商 / 通道（epay、stripe、creem、waffo、bluewhalepay、balance）。判别网关一律用 `topups.payment_provider`，不随支付方式变化。
+_Avoid_: 用支付方式字段代替网关判别；以为 payment_method 就是网关名
+
 ### Agent 协作语言
 
 **用户本地集成区**:
