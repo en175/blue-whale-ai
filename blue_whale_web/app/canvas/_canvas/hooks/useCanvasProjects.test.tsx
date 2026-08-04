@@ -61,6 +61,7 @@ function recoveryState(snapshot: ProjectSnapshot): ProjectRecoveryState {
     seenEventIds: new Set(),
     aggregateVersions: new Map(),
     deleted: false,
+    provisionalDeliveries: new Map(),
   };
 }
 

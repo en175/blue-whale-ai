@@ -2,6 +2,7 @@ import type { AgentAction, AgentAdapter } from "@blue-whale/core";
 import type { SkillSummarizePipeline } from "@blue-whale/agent-runtime";
 import {
   agentRunWorkSchema,
+  autoCreativeSkillActivationSchema,
   canonicalAgentRunPinDigestInput,
   type AgentRunPin,
   type AutoCreativeSkillActivation,
@@ -199,6 +200,173 @@ function runtimeRequest(work: AgentRunWork): {
   };
 }
 
+/** 供应商调用记录槽位（契约 §8.4）：T07 基线每 Advance 恰好一次物理调用。 */
+const PROVIDER_CALL_SLOT = 0;
+/** 验收标记（契约 §8.5）：结果落库后、RunCommit 前睡眠 N ms，构造可接管窗口。 */
+const HOLD_RESULT_MARKER = /fake:hold-result:(\d+)/;
+/** 临时交付分片长度：把完整结果切成小片按序上报（契约 §8.1）。 */
+const PROVISIONAL_CHUNK_SIZE = 16;
+
+class ProviderOutcomeUnknownError extends Error {
+  constructor() {
+    super("provider_outcome_unknown");
+  }
+}
+
+class ReplayedProviderFailureError extends Error {
+  readonly failureCode: string;
+  constructor(failureCode: string, failureMessage: string) {
+    super(failureMessage);
+    this.failureCode = failureCode;
+  }
+}
+
+interface ProducedResult {
+  content: string;
+  reasoningSummary: string;
+  autoActivation: AutoCreativeSkillActivation | null;
+  action: AgentAction;
+}
+
+function chunkContent(content: string): string[] {
+  const chunks: string[] = [];
+  for (let index = 0; index < content.length; index += PROVISIONAL_CHUNK_SIZE) {
+    chunks.push(content.slice(index, index + PROVISIONAL_CHUNK_SIZE));
+  }
+  return chunks.length > 0 ? chunks : [""];
+}
+
+function parseReplayedAction(value: unknown): AgentAction | null {
+  if (typeof value !== "object" || value === null) return null;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.kind === "respond") return { kind: "respond" };
+  if (candidate.kind === "cancel") return { kind: "cancel" };
+  if (
+    candidate.kind === "clarify" &&
+    typeof candidate.question === "string" &&
+    candidate.question.length > 0 &&
+    (candidate.stage === "alignment" ||
+      candidate.stage === "awaiting_final_confirmation")
+  ) {
+    return { kind: "clarify", question: candidate.question, stage: candidate.stage };
+  }
+  return null;
+}
+
+/** 重放载荷校验（契约 §8.4）：形状不完整视为不可重放，进入结果不明路径。 */
+function parseReplayedProviderResult(payload: unknown): ProducedResult | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const candidate = payload as Record<string, unknown>;
+  if (
+    typeof candidate.content !== "string" ||
+    candidate.content.length === 0 ||
+    typeof candidate.reasoning_summary !== "string"
+  ) {
+    return null;
+  }
+  const action = parseReplayedAction(candidate.action);
+  if (!action) return null;
+  let autoActivation: AutoCreativeSkillActivation | null = null;
+  if (candidate.auto_activation !== null && candidate.auto_activation !== undefined) {
+    const parsed = autoCreativeSkillActivationSchema.safeParse(
+      candidate.auto_activation,
+    );
+    if (!parsed.success) return null;
+    autoActivation = parsed.data;
+  }
+  return {
+    content: candidate.content,
+    reasoningSummary: candidate.reasoning_summary,
+    autoActivation,
+    action,
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 调用记录驱动的推进执行（契约 §8.4）：
+ *  succeeded → 重放不再调用；failed_definitive → 重放失败；
+ *  in_flight/outcome_unknown → 置未知并失败（手动重试）；无记录 → 开记录、调用、结算。 */
+async function executeAdvance(
+  input: {
+    repo: AgentRunRepo;
+    runtime: AgentAdapter;
+    summarize?: SkillSummarizePipeline;
+  },
+  work: AgentRunWork,
+): Promise<ProducedResult> {
+  if (
+    input.summarize &&
+    (work.skillSummarize || (await input.summarize.hasPending(work)))
+  ) {
+    return produceResult(input, work);
+  }
+  const existing = await input.repo.loadProviderCall(
+    work.advance_id,
+    PROVIDER_CALL_SLOT,
+  );
+  if (existing) {
+    if (existing.status === "succeeded") {
+      const replayed = parseReplayedProviderResult(existing.resultPayload);
+      if (replayed) return replayed;
+      throw new ProviderOutcomeUnknownError();
+    }
+    if (existing.status === "failed_definitive") {
+      throw new ReplayedProviderFailureError(
+        existing.failureCode ?? "runtime_error",
+        existing.failureMessage ?? "provider failed",
+      );
+    }
+    await input.repo.markProviderCallOutcomeUnknown(
+      work.advance_id,
+      PROVIDER_CALL_SLOT,
+    );
+    throw new ProviderOutcomeUnknownError();
+  }
+  await input.repo.openProviderCall({
+    agentRunId: work.agent_run_id,
+    advanceId: work.advance_id,
+    callSlot: PROVIDER_CALL_SLOT,
+    fence: work.fencing_token,
+    requestDigest: commitDigest({
+      advance_id: work.advance_id,
+      call_slot: PROVIDER_CALL_SLOT,
+      prompt: work.prompt,
+    }),
+  });
+  let produced: ProducedResult;
+  try {
+    produced = await produceResult(input, work);
+  } catch (error) {
+    await input.repo.settleProviderCall({
+      advanceId: work.advance_id,
+      callSlot: PROVIDER_CALL_SLOT,
+      fence: work.fencing_token,
+      status: "failed_definitive",
+      failureCode: "runtime_error",
+      failureMessage: error instanceof Error ? error.message : "unknown",
+    });
+    throw error;
+  }
+  await input.repo.settleProviderCall({
+    advanceId: work.advance_id,
+    callSlot: PROVIDER_CALL_SLOT,
+    fence: work.fencing_token,
+    status: "succeeded",
+    resultPayload: {
+      content: produced.content,
+      reasoning_summary: produced.reasoningSummary,
+      action: produced.action,
+      auto_activation: produced.autoActivation,
+    },
+  });
+  const holdMatch = HOLD_RESULT_MARKER.exec(work.prompt);
+  if (holdMatch) await sleep(Number(holdMatch[1]));
+  return produced;
+}
+
 export async function runAgentWorkerOnce(input: {
   repo: AgentRunRepo;
   runtime: AgentAdapter;
@@ -225,12 +393,44 @@ export async function runAgentWorkerOnce(input: {
     intervalMs: input.heartbeatIntervalMs ?? Math.max(1_000, leaseMs / 3),
     signal: heartbeatAbort.signal,
   });
-  let result: Awaited<ReturnType<typeof produceResult>>;
+  let result: ProducedResult;
   try {
-    result = await produceResult(input, work);
+    result = await executeAdvance(input, work);
   } catch (error) {
     heartbeatAbort.abort();
     await heartbeat;
+    if (error instanceof ProviderOutcomeUnknownError) {
+      return input.repo.commitFailure({
+        workerId: input.workerId,
+        agentRunId: work.agent_run_id,
+        advanceId: work.advance_id,
+        fence: work.fencing_token,
+        runVersion: work.run_version,
+        requestDigest: commitDigest({
+          outcome: "failed",
+          code: "provider_outcome_unknown",
+          message: "provider result unknown after takeover",
+        }),
+        failureCode: "provider_outcome_unknown",
+        failureMessage: "provider result unknown after takeover",
+      });
+    }
+    if (error instanceof ReplayedProviderFailureError) {
+      return input.repo.commitFailure({
+        workerId: input.workerId,
+        agentRunId: work.agent_run_id,
+        advanceId: work.advance_id,
+        fence: work.fencing_token,
+        runVersion: work.run_version,
+        requestDigest: commitDigest({
+          outcome: "failed",
+          code: error.failureCode,
+          message: error.message,
+        }),
+        failureCode: error.failureCode,
+        failureMessage: error.message,
+      });
+    }
     return input.repo.commitFailure({
       workerId: input.workerId,
       agentRunId: work.agent_run_id,
@@ -248,6 +448,15 @@ export async function runAgentWorkerOnce(input: {
   }
   heartbeatAbort.abort();
   if (!(await heartbeat)) return { kind: "conflict" };
+  // 临时交付（契约 §8.1）：chunk 先落短期投影，RunCommit 才提升为正式消息。
+  const appended = await input.repo.appendProvisionalChunks({
+    workerId: input.workerId,
+    agentRunId: work.agent_run_id,
+    advanceId: work.advance_id,
+    fence: work.fencing_token,
+    chunks: chunkContent(result.content),
+  });
+  if (appended.kind === "conflict") return { kind: "conflict" };
   const commitBase = {
     workerId: input.workerId,
     agentRunId: work.agent_run_id,

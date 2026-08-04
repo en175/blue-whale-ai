@@ -54,6 +54,9 @@ export interface SnapshotConversationState {
     status: string;
     stage: string | null;
     version: number;
+    terminal_reason: string | null;
+    failure_code: string | null;
+    retry_count: number;
     activated_creative_skill_versions: CreativeSkillActivation[];
     reasoning_summary: string | null;
     active_input_request: {
@@ -192,6 +195,13 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
             status: run.status,
             stage: run.stage,
             version: run.version,
+            terminal_reason:
+              run.terminal_reason === "user_requested" ||
+              run.terminal_reason === "runtime_error"
+                ? run.terminal_reason
+                : null,
+            failure_code: run.failure_code,
+            retry_count: run.retry_count,
             activated_creative_skill_versions: activations.success
               ? activations.data
               : [],

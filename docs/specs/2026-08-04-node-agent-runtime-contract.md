@@ -1,7 +1,7 @@
 # Node Agent Runtime Contract v1
 
 - **状态**：Accepted
-- **关联工单**：IK67GG（T05）、IK67GY（T06，增补 §6–§7）
+- **关联工单**：IK67GG（T05）、IK67GY（T06，增补 §6–§7）、IK67GZ（T07，增补 §8）
 - **消费者**：Next.js Product API、Node Agent Worker、AgentChatPanel
 
 ## 1. `AgentRuntimeManifest`
@@ -58,6 +58,7 @@ receipt，不重复消息、激活、事件或版本；不同摘要返回冲突�
 Snapshot 与 `agent_run.created` / `agent_run.status_changed` 事件只公开：
 
 - Run 身份、状态、阶段、版本；
+- `terminal_reason`（`user_requested | runtime_error | null`）、`failure_code`、`retry_count`（T07 增补，见 §8）；
 - `activated_creative_skill_versions` 0/1 数组，其中包含 Skill/版本身份、名称、展示版本、
   `resource_digest`、来源和结构化理由；
 - 可空 `reasoning_summary`。
@@ -122,3 +123,93 @@ T05 的确定性指纹回显行为：
 - `立即出计划`：可减少可选追问，但必需项缺失仍须询问，且不得绕过最终确认。
 - 对齐完成后 Runtime 复述需求并发起最终确认请求；回答含 `同意` 时提交 `completed`。
 - 回答含 `继续讨论`：回到 `alignment` 继续澄清；回答含 `不要创建计划` 或 `停止`：提交 `cancelled`。
+
+## 8. 临时交付、用户停止/重试与供应商调用记录（T07）
+
+### 8.1 Provisional Delivery（临时交付）
+
+模型生成中的助手文本是临时交付，使用独立身份与顺序，永远不是 ConversationMessage：
+
+- 持久化表 `agent_provisional_deliveries`（`delivery_id` 独立身份，关联 `agent_run_id` /
+  `advance_id` / 创建时的 `fencing_token`）与 `agent_provisional_chunks`
+  （`(delivery_id, chunk_index)` 唯一，`chunk_index` 从 0 严格递增，是独立顺序）。
+- 状态机：`streaming → completed | interrupted`；`interruption_reason` 取
+  `user_cancelled | failed`。`completed` 只能由接纳该交付所属 Advance 的
+  `completed` RunCommit 在同事务设置；`interrupted` 由用户停止（`user_cancelled`）
+  或 `failed` RunCommit / 运行失败设置。
+- 临时交付不进入 Conversation、Snapshot、永久模型上下文；按短期运营事实保留，不物理立即删除。
+- Worker 追加 chunk 必须在短事务中校验：Run 仍 `running`、`fencing_token` 与
+  `lease_owner` 匹配。租约接管、用户停止或取消后，旧 Worker 的迟到 chunk 一律返回冲突，不落库。
+- SSE 新事件（与事实同事务发布，`aggregate_type=agent_run`）：
+  `agent_run.provisional_delivery_started`、`agent_run.provisional_chunk_appended`、
+  `agent_run.provisional_delivery_completed`、`agent_run.provisional_delivery_interrupted`。
+  chunk 事件载荷含 `delivery_id`、`chunk_index`、`content`；两个交付的内容永不拼接。
+- 交付时序：确定性 fake 适配器为一次性调用，Worker 在结果产出后、RunCommit 前把
+  完整内容切片一次性上报；接入真实流式供应商后按到达顺序上报。临时交付的身份、
+  顺序、fence 拒绝、中断与提升边界在两种时序下语义一致。
+
+### 8.2 用户停止（独立产品命令）
+
+`POST /api/projects/{projectId}/conversation/agent-runs/{agentRunId}/stop`，必带
+`Idempotency-Key`。停止是产品命令，不经过 RunCommit，不创建任何消息：
+
+1. 命令幂等：同键回放首次回执；同键不同请求摘要返回 `IDEMPOTENCY_KEY_REUSED_CODE`。
+2. 归属校验失败返回 `RESOURCE_NOT_FOUND_CODE`（不泄漏存在性）。
+3. 单事务原子接纳（仅 `queued | running` 可停止）：
+   - Run 置 `cancelled`、`stage=cancelled`、`terminal_reason=user_requested`，
+     `version` 与 `fencing_token` 各递增 1，清除 lease，清 `active_guard`；
+   - 关闭当前 `running` Advance（置 `interrupted`）；
+   - 当前 `streaming` 交付置 `interrupted(user_cancelled)` 并发布中断事件；
+   - 当前 Advance 的 `in_flight` 供应商调用置 `outcome_unknown`；
+   - 发布 `agent_run.status_changed`（载荷含 `terminal_reason`）。
+4. Run 已处于其他终态（completed/failed/cancelled/recovery_failed）返回
+   `AGENT_RUN_ALREADY_TERMINAL_CODE`（100307），不改写既有终态。
+5. 线性化：停止先提交 → fence 失效，旧 Worker 的迟到 chunk、续约与 RunCommit 全部被拒；
+   RunCommit 先提交终态 → 停止返回 `AGENT_RUN_ALREADY_TERMINAL_CODE`。
+6. 前端从活动投影清除半成品 chunk，展示非消息的「已停止生成」状态。
+
+### 8.3 手动重试（同一 AgentRun）
+
+`POST /api/projects/{projectId}/conversation/agent-runs/{agentRunId}/retry`，必带
+`Idempotency-Key`，幂等与归属规则同停止：
+
+- 仅 `failed` 的 Run 可重试：CAS `failed → queued`，`version+1`、`retry_count+1`；
+  不接纳新的 UserMessage，不改动 `conversation_messages` 与 `input_sequence_no`。
+  下一次 claim 创建新 Advance，按既有规则冻结 `sequence_no > input_sequence_no`
+  的同一批输入。
+- 非 `failed` 状态返回 `AGENT_RUN_NOT_RETRYABLE_CODE`（100308）。
+- 重试不自动执行；Run 回到队列由 Worker 正常领取。
+
+### 8.4 供应商调用记录与接管重放
+
+`agent_provider_calls` 以 `(advance_id, call_slot)` 唯一定位一次模型调用（T07 基线
+`call_slot=0`，每 Advance 恰好一次物理调用）：
+
+- 状态机：`in_flight → succeeded | failed_definitive | outcome_unknown`。
+  `succeeded` 必须持久化完整可重放结果（content、reasoning_summary、action、usage）；
+  用户停止时 `in_flight` 置 `outcome_unknown`。
+- Worker claim 后先读当前 Advance 的调用记录：
+  - `succeeded` → 直接重放持久化结果，不调用 Provider，不新建记录；
+  - `failed_definitive` → 重放失败，提交 `failed` RunCommit；
+  - `in_flight | outcome_unknown` → 置 `outcome_unknown`，提交
+    `failed(code=provider_outcome_unknown)` RunCommit，进入手动重试状态；
+  - 无记录 → 开 `in_flight` 记录 → 调用 Provider → 结算。
+- 结算绑定开记录时的 `fencing_token` 并以 `status=in_flight` 为守卫：接管侧先行
+  把 `in_flight` 记录置 `outcome_unknown` 后，任何迟到结算（含旧 Worker 持原 fence
+  的真实结果）都不得覆写；重放与置未知的竞争收敛由 claim 后的读取分支保证。
+- 成本事实：调用记录行数与状态即 Agent 调用的成本事实；接管重放 `succeeded`
+  结果不得新增记录或物理调用。fake 验收模式不经 new-api，账本断言以调用记录为准。
+
+### 8.5 验收标记增补（fake 模式）
+
+- `fake:hold-result:N`：调用结果结算为 `succeeded` 落库后、RunCommit 前睡眠 N ms，
+  构造确定性「结果已持久化、尚未提交」窗口，供停 Worker 与接管重放场景使用。
+  与既有 `fake:delay:N` / `fake:failure` 标记正交。
+- `fake:failure-once`：同一 prompt 的首次调用确定性失败，其后正常回显；供手动重试
+  场景验证 failed→重试→completed。判定优先于 `fake:failure` 子串匹配。
+
+### 8.6 公开投影增补
+
+`agent_run.status_changed` 与 Snapshot 的 Run 投影增加 `terminal_reason`、
+`failure_code`、`retry_count`（见 §5）。provisional 交付永不进入 Snapshot；
+刷新恢复后活动投影中没有临时文本，只有已接纳事实与 Run 状态。

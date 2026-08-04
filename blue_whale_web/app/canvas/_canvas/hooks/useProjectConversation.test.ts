@@ -95,6 +95,7 @@ describe("useProjectConversation（画布持久化对话接线 IK67GD T02）", (
         seenEventIds: new Set(),
         aggregateVersions: new Map(),
         deleted: false,
+        provisionalDeliveries: new Map(),
       });
     });
 
@@ -129,6 +130,7 @@ describe("useProjectConversation（画布持久化对话接线 IK67GD T02）", (
         seenEventIds: new Set(),
         aggregateVersions: new Map(),
         deleted: false,
+        provisionalDeliveries: new Map(),
       });
     });
 
@@ -138,6 +140,9 @@ describe("useProjectConversation（画布持久化对话接线 IK67GD T02）", (
         agentRunId: "9",
         status: "completed",
         stage: null,
+        terminalReason: null,
+        failureCode: null,
+        retryCount: 0,
         skillName: "海报专家",
         reasoningSummary: "已使用「海报专家」完成回答。",
       }),
@@ -180,6 +185,7 @@ describe("useProjectConversation（画布持久化对话接线 IK67GD T02）", (
         seenEventIds: new Set(),
         aggregateVersions: new Map(),
         deleted: false,
+        provisionalDeliveries: new Map(),
       });
     });
 

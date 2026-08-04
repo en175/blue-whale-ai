@@ -7,16 +7,22 @@
  * sendMessage 经公开接纳 API 提交，携带 CommandId 幂等键。
  * 浏览器值与 SSE 到达顺序不作为消息身份/排序依据（CONTEXT.md）。
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   deriveAnswerableClarification,
   deriveLatestAgentRunDisplay,
+  deriveRunControl,
   projectRecoveryTransport,
   runProjectRecovery,
   type ProjectSnapshot,
   type AgentRunDisplay,
+  type ProvisionalDeliveryView,
 } from "@/lib/project-recovery";
-import { acceptConversationMessage } from "@/lib/conversation";
+import {
+  acceptConversationMessage,
+  retryAgentRun,
+  stopAgentRun,
+} from "@/lib/conversation";
 import { newCommandIdentity } from "@/lib/command-identity";
 import type { WireInteger } from "@/lib/wire-integer";
 import { projectSnapshotToChatMessages } from "../conversationRecovery";
@@ -31,6 +37,14 @@ type PendingAttempt = {
   idempotencyKey: string;
 };
 
+/** 未确认成功的 Run 命令（stop/retry），网络未知重试复用同键（契约 §8.2/§8.3）。 */
+type PendingRunCommand = {
+  projectId: string;
+  agentRunId: string;
+  operation: "stop" | "retry";
+  idempotencyKey: string;
+};
+
 export function useProjectConversation(
   projectId: string | null,
   backendReady: boolean,
@@ -39,20 +53,26 @@ export function useProjectConversation(
   const [answerableActive, setAnswerableActive] = useState(false);
   const [agentRunDisplay, setAgentRunDisplay] =
     useState<AgentRunDisplay | null>(null);
+  const [provisionalDeliveries, setProvisionalDeliveries] = useState<
+    ReadonlyArray<ProvisionalDeliveryView>
+  >([]);
   const snapshotRef = useRef<ProjectSnapshot | null>(null);
   // 网络结果未知/失败后用相同内容重试必须复用原键（CONTEXT.md CommandId 语义），
   // 防止首次请求实际已被服务端接纳时重复创建消息。
   const pendingAttemptRef = useRef<PendingAttempt | null>(null);
+  const pendingRunCommandRef = useRef<PendingRunCommand | null>(null);
 
   useEffect(() => {
     snapshotRef.current = null;
     pendingAttemptRef.current = null;
+    pendingRunCommandRef.current = null;
     // 项目切换/离线时必须立即清掉上一项目的消息，防止串扰（同步清空是权威投影的一部分）
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMessages([]);
 
     setAnswerableActive(false);
     setAgentRunDisplay(null);
+    setProvisionalDeliveries([]);
     if (!backendReady || !projectId) return;
     const controller = new AbortController();
     const pid = projectId;
@@ -68,6 +88,9 @@ export function useProjectConversation(
           deriveAnswerableClarification(state.snapshot) !== null,
         );
         setAgentRunDisplay(deriveLatestAgentRunDisplay(state.snapshot));
+        setProvisionalDeliveries(
+          Array.from(state.provisionalDeliveries.values()),
+        );
       },
       controller.signal,
     );
@@ -75,6 +98,66 @@ export function useProjectConversation(
       controller.abort();
     };
   }, [projectId, backendReady]);
+
+  const runAgentCommand = useCallback(
+    async (operation: "stop" | "retry") => {
+      if (!projectId || !agentRunDisplay) return;
+      const target = agentRunDisplay;
+      const runId = String(target.agentRunId);
+      const pending = pendingRunCommandRef.current;
+      const reuse =
+        pending !== null &&
+        pending.projectId === projectId &&
+        pending.agentRunId === runId &&
+        pending.operation === operation;
+      const idempotencyKey = reuse
+        ? pending.idempotencyKey
+        : newCommandIdentity();
+      pendingRunCommandRef.current = {
+        projectId,
+        agentRunId: runId,
+        operation,
+        idempotencyKey,
+      };
+      if (operation === "stop") {
+        await stopAgentRun(projectId, target.agentRunId, idempotencyKey);
+      } else {
+        await retryAgentRun(projectId, target.agentRunId, idempotencyKey);
+      }
+      // 成功即消费：下一次命令（无论是否同 Run）都用新键
+      pendingRunCommandRef.current = null;
+    },
+    [projectId, agentRunDisplay],
+  );
+
+  const stopRun = useCallback(() => runAgentCommand("stop"), [runAgentCommand]);
+  const retryRun = useCallback(
+    () => runAgentCommand("retry"),
+    [runAgentCommand],
+  );
+
+  const runControl = useMemo(
+    () => deriveRunControl(agentRunDisplay),
+    [agentRunDisplay],
+  );
+
+  // 活动临时文本（契约 §8.1）：只投影最新 Run 的最新 streaming 交付。
+  const provisionalText = useMemo(() => {
+    if (!agentRunDisplay) return null;
+    const runId = String(agentRunDisplay.agentRunId);
+    for (let index = provisionalDeliveries.length - 1; index >= 0; index -= 1) {
+      const delivery = provisionalDeliveries[index];
+      if (
+        delivery &&
+        delivery.agentRunId === runId &&
+        delivery.status === "streaming" &&
+        delivery.content.length > 0
+      ) {
+        return delivery.content;
+      }
+    }
+    return null;
+  }, [agentRunDisplay, provisionalDeliveries]);
 
   const sendMessage = useCallback(
     async (
@@ -129,5 +212,14 @@ export function useProjectConversation(
     [projectId],
   );
 
-  return { messages, sendMessage, answerableActive, agentRunDisplay };
+  return {
+    messages,
+    sendMessage,
+    answerableActive,
+    agentRunDisplay,
+    runControl,
+    provisionalText,
+    stopRun,
+    retryRun,
+  };
 }

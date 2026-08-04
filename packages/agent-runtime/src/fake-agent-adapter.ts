@@ -8,7 +8,10 @@ import type {
 import { createHash } from "node:crypto";
 
 const FAILURE_MARKER = "fake:failure";
+const FAILURE_ONCE_MARKER = "fake:failure-once";
 const DELAY_MARKER = /fake:delay:(\d+)/;
+// failure-once 进程级记忆（契约 §8.5）：同一 prompt 首次调用确定性失败，重试成功。
+const failureOnceSeen = new Set<string>();
 
 // PlanPhase 验收标记约定（Node Agent Runtime Contract §7）
 const CREATE_MARKER = "创作：";
@@ -279,7 +282,12 @@ export function createFakeAgentAdapter(): AgentAdapter {
       return true;
     },
     async invoke(request) {
-      if (request.prompt.includes(FAILURE_MARKER)) {
+      if (request.prompt.includes(FAILURE_ONCE_MARKER)) {
+        if (!failureOnceSeen.has(request.prompt)) {
+          failureOnceSeen.add(request.prompt);
+          throw new Error("fake agent transient failure");
+        }
+      } else if (request.prompt.includes(FAILURE_MARKER)) {
         throw new Error("fake agent explicit failure");
       }
       const delayMatch = DELAY_MARKER.exec(request.prompt);
