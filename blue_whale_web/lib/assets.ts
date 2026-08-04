@@ -5,7 +5,7 @@
 import { request, type Paged } from "./api";
 import { presignAsset, completeAsset } from "./api/endpoints";
 import { detectMediaKind, readLocalMediaMetadata } from "./mediaSize";
-import type { WireInteger } from "./wire-integer";
+import { wireInteger, type WireInteger } from "./wire-integer";
 
 /** 资产列表项（GET /api/assets records，不含 storageKey）。 */
 export type AssetItem = {
@@ -43,7 +43,7 @@ export function copyAssetToProject(
   return request<AssetItem>(
     `/projects/${projectId}/assets`,
     "POST",
-    { source_asset_id: sourceAssetId },
+    { source_asset_id: wireInteger(String(sourceAssetId)) },
     { "Idempotency-Key": idempotencyKey },
   );
 }
