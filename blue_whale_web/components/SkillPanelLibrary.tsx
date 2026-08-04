@@ -382,12 +382,16 @@ function LibrarySkillCard({
         <span className="tc-agent-skill-row__title text-[13px] font-semibold text-white/90 line-clamp-1 break-words">
           {skill.name}
         </span>
+        {/* data-tooltip 挂在未裁剪的包裹元素上：line-clamp 的 overflow:hidden 会裁剪
+            定位到元素上方的 ::before 提示（IK6H3Q，US19） */}
         <span
-          className="tc-agent-skill-row__desc text-xs text-white/50 line-clamp-2 leading-relaxed break-words"
+          className="tc-agent-skill-row__desc-tooltip"
           data-tooltip={desc || undefined}
           data-tooltip-multiline={desc ? "" : undefined}
         >
-          {desc || "—"}
+          <span className="tc-agent-skill-row__desc text-xs text-white/50 line-clamp-2 leading-relaxed break-words">
+            {desc || "—"}
+          </span>
         </span>
         <span className="tc-agent-skill-row__library-meta flex items-center gap-3 mt-1 text-[11px] text-white/40">
           <span className="tc-agent-skill-row__contributor">@Blue Whale</span>
