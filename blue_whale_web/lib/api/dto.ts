@@ -1,7 +1,7 @@
 /**
  * dto —— 顶层 DTO 类型（IJZYVR API 客户端骨架）
  *
- * 严格对齐 `blue-whale-agent-workspace/BACKEND-API-PRD.md` §5 P0 接口契约。
+ * 严格对齐 `docs/archive/agent-workspace/BACKEND-API-PRD.md` §5 P0 接口契约。
  *
  * 命名约定:
  * - snake_case（与后端 JSON 一致,不做转换）

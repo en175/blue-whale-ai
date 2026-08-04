@@ -2,9 +2,9 @@
 
 一个处于上线前研发阶段、面向 AI Agent / Canvas 交互的产品。目标运行时由 Next.js Web 与
 TypeScript `product-api`、`agent-worker`、`generation-worker` 组成；三者属于同一模块化单体代码库。
-`blue_whale_api`（new-api 二开，Go，承担 LLM 网关与计费）保持独立且不在 IK3UUX 中改造，是唯一保留的 Go 组件。
-`blue_whale_server`（Java）与 `blue_whale_agent_worker`（Python）已退役，禁止写入；
-`blue_whale_pay_server`（Java 支付）已冻结，待支付建设阶段另行决策。范围以
+`blue_whale_api`（new-api 二开，Go，承担 LLM 网关与计费）已迁出至独立仓库 `blue-whale-api`（`hangzhou-xuanfu_1/blue-whale-api`），保持独立且不在本仓改造。
+`blue_whale_server`（Java）与 `blue_whale_agent_worker`（Python）已退役，禁止写 入；
+`blue_whale_pay_web` 与 `blue_whale_pay_server`（Java 支付）已迁出至独立仓库 `blue-whale-pay`（`hangzhou-xuanfu_1/blue-whale-pay`），其中 server 冻结、web 单独迭代。范围以
 [ADR-0055](docs/adr/0055-prelaunch-typescript-unification-scope.md) 为准。
 
 ## Language
@@ -613,7 +613,7 @@ _Avoid_: 原型、demo、试验（这些含义更宽）
 
 ### 计费与货币
 
-> 计费域术语适用于 `blue_whale_api`（开源 new-api 二开）。IK3UUX 不迁移或改造该 Go 领域，
+> 计费域术语适用于已迁出的 `blue-whale-api` 仓（开源 new-api 二开）。本仓不迁移或改造该 Go 领域，
 > 只在核心生成流程中复用现有能力。统一 RMB 决策见 [ADR-0021](docs/adr/0021-unified-rmb-billing.md)。
 
 **quota（额度）**:

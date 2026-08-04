@@ -1,7 +1,0 @@
-{
-  "title": "API Reference",
-  "description": "Blue Whale API Complete API Documentation",
-  "icon": "Code",
-  "root": true,
-  "pages": ["index", "ai-model", "management"]
-}
