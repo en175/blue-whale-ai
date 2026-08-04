@@ -652,6 +652,9 @@ describe("AgentRunRepo", () => {
         }),
         update: vi.fn(),
       },
+      agent_provisional_deliveries: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       run_commits: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn(),
@@ -771,6 +774,9 @@ describe("AgentRunRepo", () => {
           input_high_watermark_sequence_no: 2,
         }),
         update: vi.fn(),
+      },
+      agent_provisional_deliveries: {
+        findFirst: vi.fn().mockResolvedValue(null),
       },
       run_commits: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -918,6 +924,9 @@ describe("AgentRunRepo", () => {
         }),
         update: vi.fn(),
       },
+      agent_provisional_deliveries: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       run_commits: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn(),
@@ -1011,6 +1020,9 @@ describe("AgentRunRepo", () => {
           input_high_watermark_sequence_no: 2,
         }),
         update: vi.fn(),
+      },
+      agent_provisional_deliveries: {
+        findFirst: vi.fn().mockResolvedValue(null),
       },
       run_commits: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -1145,6 +1157,9 @@ describe("AgentRunRepo", () => {
             input_high_watermark_sequence_no: 1,
           }),
           update: vi.fn(),
+        },
+        agent_provisional_deliveries: {
+          findFirst: vi.fn().mockResolvedValue(null),
         },
         agent_runs: {
           findUnique: vi.fn().mockResolvedValue(run),
@@ -1287,6 +1302,9 @@ describe("AgentRunRepo", () => {
           input_high_watermark_sequence_no: 1,
         }),
         update: vi.fn(),
+      },
+      agent_provisional_deliveries: {
+        findFirst: vi.fn().mockResolvedValue(null),
       },
       agent_runs: {
         findUnique: vi.fn().mockResolvedValue(run),

@@ -6,6 +6,9 @@ export const DATA_NOT_EXIST_CODE = 100100; // 对齐 Java SystemCode.DATA_NOT_EX
 export const ASSET_UNAVAILABLE_CODE = 100202; // 对齐 Java SystemCode.ASSET_UNAVAILABLE_CODE
 export const RESOURCE_NOT_FOUND_CODE = 100301; // 对齐 Java SystemCode.RESOURCE_NOT_FOUND_CODE（不泄漏存在性）
 export const IDEMPOTENCY_KEY_REUSED_CODE = 100302; // 对齐 Java SystemCode.IDEMPOTENCY_KEY_REUSED_CODE
+export const AGENT_RUN_CONFLICT_CODE = 100303; // AgentRun 状态冲突（输入请求失效/运行中/配置冻结/当前状态不可停止）
+export const AGENT_RUN_ALREADY_TERMINAL_CODE = 100307; // AgentRun 已处于终态，停止命令不改写（契约 §8.2）
+export const AGENT_RUN_NOT_RETRYABLE_CODE = 100308; // AgentRun 非 failed 状态，不可手动重试（契约 §8.3）
 export const PARAM_MISSING_CODE = 100000; // 对齐 Java GlobalException(100000, "缺少 Idempotency-Key")
 
 export interface ResultEnvelope<T> {

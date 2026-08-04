@@ -6,6 +6,7 @@ import {
   consumeProjectEventStream,
   deriveAnswerableClarification,
   deriveLatestAgentRunDisplay,
+  deriveRunControl,
   initialProjectRecoveryState,
   runProjectRecovery,
   type ProductEventEnvelope,
@@ -688,6 +689,9 @@ describe("AgentRun 安全展示投影", () => {
       agentRunId: 9,
       status: "running",
       stage: null,
+      terminalReason: null,
+      failureCode: null,
+      retryCount: 0,
       skillName: "海报专家",
       reasoningSummary: "正在使用已冻结技能。",
     });
@@ -949,5 +953,165 @@ describe("Project 恢复协调器", () => {
 
     expect(afterValues).toEqual([5, 5, 5, 6, 6]);
     vi.useRealTimers();
+  });
+});
+
+describe("T07 临时交付与运行控制（IK67GZ，契约 §8）", () => {
+  it("临时交付事件只进入活动投影：started/chunk 累积，completed 清除，绝不并入正式消息", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_p1",
+        cursor: 11,
+        event_type: "agent_run.provisional_delivery_started",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 3,
+        payload: { agent_run_id: 9, advance_id: 30, delivery_id: 77 },
+      }),
+    );
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_p2",
+        cursor: 12,
+        event_type: "agent_run.provisional_chunk_appended",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 3,
+        payload: {
+          agent_run_id: 9,
+          delivery_id: 77,
+          chunk_index: 0,
+          content: "你好",
+        },
+      }),
+    );
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_p3",
+        cursor: 13,
+        event_type: "agent_run.provisional_chunk_appended",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 3,
+        payload: {
+          agent_run_id: 9,
+          delivery_id: 77,
+          chunk_index: 1,
+          content: "世界",
+        },
+      }),
+    );
+
+    expect(state.provisionalDeliveries.get("77")).toEqual({
+      deliveryId: "77",
+      agentRunId: "9",
+      content: "你好世界",
+      status: "streaming",
+    });
+    expect(state.snapshot?.conversation_messages).toEqual([]);
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_p4",
+        cursor: 14,
+        event_type: "agent_run.provisional_delivery_completed",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 4,
+        payload: { agent_run_id: 9, advance_id: 30, delivery_id: 77 },
+      }),
+    );
+    expect(state.provisionalDeliveries.size).toBe(0);
+    expect(state.snapshot?.conversation_messages).toEqual([]);
+  });
+
+  it("用户停止中断临时交付：interrupted 事件清除活动投影", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_s1",
+        cursor: 11,
+        event_type: "agent_run.provisional_delivery_started",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 3,
+        payload: { agent_run_id: 9, advance_id: 30, delivery_id: 88 },
+      }),
+    );
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_s2",
+        cursor: 12,
+        event_type: "agent_run.provisional_delivery_interrupted",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 4,
+        payload: { agent_run_id: 9, delivery_id: 88, reason: "user_cancelled" },
+      }),
+    );
+    expect(state.provisionalDeliveries.size).toBe(0);
+  });
+
+  it("Snapshot 恢复清空临时投影（契约 §8.6）", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_r1",
+        cursor: 11,
+        event_type: "agent_run.provisional_delivery_started",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 3,
+        payload: { agent_run_id: 9, advance_id: 30, delivery_id: 99 },
+      }),
+    );
+    expect(state.provisionalDeliveries.size).toBe(1);
+    state = applySnapshot(state, snapshot(20));
+    expect(state.provisionalDeliveries.size).toBe(0);
+  });
+});
+
+describe("deriveRunControl（IK67GZ，契约 §8.2/§8.3）", () => {
+  it("queued/running 可停止，failed 可重试，用户停止显示非消息状态", () => {
+    const base = {
+      agentRunId: 9,
+      stage: null,
+      terminalReason: null,
+      failureCode: null,
+      retryCount: 0,
+      skillName: null,
+      reasoningSummary: null,
+    };
+    expect(deriveRunControl({ ...base, status: "running" })).toEqual({
+      canStop: true,
+      canRetry: false,
+      stoppedByUser: false,
+    });
+    expect(deriveRunControl({ ...base, status: "failed" })).toEqual({
+      canStop: false,
+      canRetry: true,
+      stoppedByUser: false,
+    });
+    expect(
+      deriveRunControl({
+        ...base,
+        status: "cancelled",
+        terminalReason: "user_requested",
+      }),
+    ).toEqual({ canStop: false, canRetry: false, stoppedByUser: true });
+    expect(deriveRunControl(null)).toEqual({
+      canStop: false,
+      canRetry: false,
+      stoppedByUser: false,
+    });
   });
 });

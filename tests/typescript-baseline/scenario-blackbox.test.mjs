@@ -161,6 +161,24 @@ async function fetchSnapshot(projectId, token) {
   return body.data;
 }
 
+async function stopAgentRun(projectId, agentRunId, token, key) {
+  return postJson(
+    `/api/projects/${projectId}/conversation/agent-runs/${agentRunId}/stop`,
+    {},
+    token,
+    { "Idempotency-Key": key },
+  );
+}
+
+async function retryAgentRun(projectId, agentRunId, token, key) {
+  return postJson(
+    `/api/projects/${projectId}/conversation/agent-runs/${agentRunId}/retry`,
+    {},
+    token,
+    { "Idempotency-Key": key },
+  );
+}
+
 async function waitFor(predicate, deadlineMs, message) {
   const deadline = Date.now() + deadlineMs;
   let lastError = null;
@@ -606,15 +624,40 @@ test("agent 延迟：回显不早于注入延迟出现", async () => {
   assert.equal(assistants[0].content, fakeAgentEcho(prompt));
 });
 
-test("agent 进程重启：恢复后 assistant 消息恰一条", async () => {
+test("agent 进程重启：结果不明落失败，手动重试后 assistant 消息恰一条（T07）", async () => {
   resetScenarios();
   const { token, projectId, suffix } = await registerAndCreateProject("agentrestart");
   const prompt = `重启场景 fake:delay:15000 ${suffix}`;
 
   await sendMessage(projectId, token, prompt, suffix);
-  await waitForAgentRunStatus(projectId, token, ["running"], 30_000);
+  const running = await waitForAgentRunStatus(
+    projectId,
+    token,
+    ["running"],
+    30_000,
+  );
   serviceRestart("agent-worker");
   await waitServiceReady("agent-worker");
+  // T07（契约 §8.4）：重启后调用结果不明 → 明确失败进入手动重试状态，不自动重跑。
+  const failed = await waitForAgentRunStatus(
+    projectId,
+    token,
+    ["failed"],
+    120_000,
+  );
+  assert.equal(
+    failed.failure_code,
+    "provider_outcome_unknown",
+    "服务=agent-worker 事实=重启接管应落 provider_outcome_unknown",
+  );
+  const retried = await retryAgentRun(
+    projectId,
+    running.agent_run_id,
+    token,
+    uniqueKey(`restart-retry-${suffix}`),
+  );
+  assert.equal(retried.response.status, 202, "服务=web 事实=重试命令应被接纳（202）");
+  assert.equal(retried.body.code, 200, "服务=web 事实=重试应成功");
   await waitForAgentRunStatus(projectId, token, ["completed"], 120_000);
 
   const count = mysqlQuery(
@@ -623,11 +666,19 @@ test("agent 进程重启：恢复后 assistant 消息恰一条", async () => {
   assert.equal(
     count,
     "1",
-    "服务=agent-worker 事实=重启恢复后 assistant 消息应恰一条（fence 防双写）",
+    "服务=agent-worker 事实=重试恢复后 assistant 消息应恰一条（fence 防双写）",
+  );
+  const userCount = mysqlQuery(
+    `SELECT COUNT(*) FROM conversation_messages WHERE role='user' AND project_id=${projectId}`,
+  );
+  assert.equal(
+    userCount,
+    "1",
+    "服务=web 事实=重试不得重复接纳 UserMessage",
   );
 });
 
-test("agent 结果未知窗与租约接管：旧 worker 迟到写入被拒，接管后恰一条 assistant", async () => {
+test("agent 结果未知窗与租约接管：旧 worker 迟到写入被拒，重试后恰一条 assistant（T07）", async () => {
   resetScenarios();
   const { token, projectId, suffix } = await registerAndCreateProject("agenttake");
   const prompt = `接管场景 fake:delay:30000 ${suffix}`;
@@ -664,7 +715,18 @@ test("agent 结果未知窗与租约接管：旧 worker 迟到写入被拒，接
     await waitServiceReady("agent-worker");
   }
 
-  await waitForAgentRunStatus(projectId, token, ["completed"], 120_000);
+  // T07（契约 §8.4）：接管发现 in_flight 调用 → 结果不明 → failed 进入手动重试状态。
+  const failed = await waitForAgentRunStatus(
+    projectId,
+    token,
+    ["failed"],
+    120_000,
+  );
+  assert.equal(
+    failed.failure_code,
+    "provider_outcome_unknown",
+    "服务=agent-worker 事实=接管应落 provider_outcome_unknown",
+  );
   const fenceAfter = mysqlQuery(
     `SELECT fencing_token FROM agent_runs WHERE id=${running.agent_run_id}`,
   );
@@ -672,13 +734,328 @@ test("agent 结果未知窗与租约接管：旧 worker 迟到写入被拒，接
     Number(fenceAfter) >= Number(fenceBefore) + 1,
     `服务=agent-worker 事实=停 worker 后应发生新的接管认领（fence ${fenceBefore}→${fenceAfter}）`,
   );
+  assert.equal(
+    (await assistantMessages(projectId, token)).length,
+    0,
+    "服务=agent-worker 事实=接管失败后不应出现 assistant 消息",
+  );
+
+  const retried = await retryAgentRun(
+    projectId,
+    running.agent_run_id,
+    token,
+    uniqueKey(`takeover-retry-${suffix}`),
+  );
+  assert.equal(retried.response.status, 202, "服务=web 事实=重试命令应被接纳（202）");
+  await waitForAgentRunStatus(projectId, token, ["completed"], 120_000);
   const count = mysqlQuery(
     `SELECT COUNT(*) FROM conversation_messages WHERE role='assistant' AND project_id=${projectId}`,
   );
   assert.equal(
     count,
     "1",
-    "服务=agent-worker 事实=接管完成后 assistant 消息应恰一条",
+    "服务=agent-worker 事实=重试完成后 assistant 消息应恰一条",
+  );
+  const callStats = mysqlQuery(
+    `SELECT CONCAT(COUNT(*), ':', SUM(status='outcome_unknown'), ':', SUM(status='succeeded')) FROM agent_provider_calls WHERE agent_run_id=${running.agent_run_id}`,
+  );
+  assert.equal(
+    callStats,
+    "2:1:1",
+    "服务=mysql 事实=调用成本事实：未知一次 + 重试成功一次，共两次物理调用",
+  );
+});
+
+test("T07 临时交付：先 provisional 事件后 message_completed，不进 Snapshot（契约 §8.1）", async () => {
+  resetScenarios();
+  const { token, projectId, suffix } = await registerAndCreateProject("agentprov");
+  const prompt = `临时交付场景 ${suffix}`;
+
+  const events = [];
+  const ssePromise = readSseUntil(
+    projectId,
+    token,
+    (eventType, data) => {
+      if (
+        eventType === "agent_run.provisional_delivery_started" ||
+        eventType === "agent_run.provisional_chunk_appended" ||
+        eventType === "agent_run.provisional_delivery_completed" ||
+        eventType === "conversation.message_completed"
+      ) {
+        events.push(eventType);
+      }
+      return eventType === "conversation.message_completed" ? data.payload : null;
+    },
+    60_000,
+  );
+  await sendMessage(projectId, token, prompt, suffix);
+  await ssePromise;
+
+  assert.ok(
+    events.includes("agent_run.provisional_delivery_started"),
+    "服务=SSE 事实=应发布 provisional_delivery_started",
+  );
+  assert.ok(
+    events.includes("agent_run.provisional_chunk_appended"),
+    "服务=SSE 事实=应发布 provisional_chunk_appended",
+  );
+  assert.ok(
+    events.indexOf("agent_run.provisional_delivery_started") <
+      events.indexOf("conversation.message_completed"),
+    "服务=SSE 事实=临时交付事件应先于正式消息完成",
+  );
+
+  const snapshot = await fetchSnapshot(projectId, token);
+  const snapshotJson = JSON.stringify(snapshot);
+  assert.equal(
+    snapshotJson.includes("provisional"),
+    false,
+    "服务=Snapshot 事实=Snapshot 不得包含临时交付身份或文本",
+  );
+  const assistants = await assistantMessages(projectId, token);
+  assert.equal(assistants.length, 1, "服务=agent-worker 事实=正式消息恰一条");
+
+  const deliveryStats = mysqlQuery(
+    `SELECT CONCAT(COUNT(DISTINCT d.id), ':', COUNT(c.id)) FROM agent_provisional_deliveries d LEFT JOIN agent_provisional_chunks c ON c.delivery_id=d.id WHERE d.agent_run_id IN (SELECT id FROM agent_runs WHERE project_id=${projectId})`,
+  );
+  assert.equal(
+    deliveryStats,
+    "1:6",
+    "服务=mysql 事实=一次交付与六个 16 字符分片（84 字符回显）",
+  );
+});
+
+test("T07 用户停止：cancelled 终态、清除临时文本、幂等且不改写既有终态（契约 §8.2）", async () => {
+  resetScenarios();
+  const { token, projectId, suffix } = await registerAndCreateProject("agentstop");
+  const prompt = `停止场景 fake:delay:8000 ${suffix}`;
+
+  await sendMessage(projectId, token, prompt, suffix);
+  const running = await waitForAgentRunStatus(
+    projectId,
+    token,
+    ["running"],
+    30_000,
+  );
+
+  const stopKey = uniqueKey(`stop-${suffix}`);
+  const stopped = await stopAgentRun(
+    projectId,
+    running.agent_run_id,
+    token,
+    stopKey,
+  );
+  assert.equal(stopped.response.status, 202, "服务=web 事实=停止命令应被接纳（202）");
+  assert.equal(stopped.body.code, 200, "服务=web 事实=停止应成功");
+  assert.equal(stopped.body.data.status, "cancelled", "服务=web 事实=停止后状态应为 cancelled");
+
+  const run = await waitForAgentRunStatus(
+    projectId,
+    token,
+    ["cancelled"],
+    30_000,
+  );
+  assert.equal(
+    run.terminal_reason,
+    "user_requested",
+    "服务=Snapshot 事实=终态原因应为用户停止",
+  );
+  assert.equal(
+    (await assistantMessages(projectId, token)).length,
+    0,
+    "服务=agent-worker 事实=停止后不应产生正式消息",
+  );
+  const commitCount = mysqlQuery(
+    `SELECT COUNT(*) FROM run_commits WHERE agent_run_id=${running.agent_run_id}`,
+  );
+  assert.equal(commitCount, "0", "服务=mysql 事实=停止不经 RunCommit");
+
+  // 同键重放幂等
+  const replayed = await stopAgentRun(
+    projectId,
+    running.agent_run_id,
+    token,
+    stopKey,
+  );
+  assert.equal(replayed.body.code, 200, "服务=web 事实=重复停止应幂等返回首次回执");
+  assert.equal(replayed.body.data.status, "cancelled");
+
+  // 等待注入延迟过去：旧 Worker 的迟到产出必须全部被拒
+  await new Promise((resolve) => setTimeout(resolve, 10_000));
+  const late = await fetchSnapshot(projectId, token);
+  assert.equal(
+    late.agent_runs?.at(-1)?.status,
+    "cancelled",
+    "服务=agent-worker 事实=旧 Worker 迟到提交不得改写 cancelled",
+  );
+  assert.equal(
+    (await assistantMessages(projectId, token)).length,
+    0,
+    "服务=agent-worker 事实=旧 Worker 迟到文本不得成为正式消息",
+  );
+  const deliveryCount = mysqlQuery(
+    `SELECT COUNT(*) FROM agent_provisional_deliveries WHERE agent_run_id=${running.agent_run_id}`,
+  );
+  assert.equal(
+    deliveryCount,
+    "0",
+    "服务=mysql 事实=停止后旧 Worker 的迟到临时交付不得落库",
+  );
+
+  // 已完成 Run 上停止 → 已终态错误
+  const doneProject = await registerAndCreateProject("agentstopdone");
+  await sendMessage(
+    doneProject.projectId,
+    doneProject.token,
+    `完成后再停 ${doneProject.suffix}`,
+    doneProject.suffix,
+  );
+  const doneRun = await waitForAgentRunStatus(
+    doneProject.projectId,
+    doneProject.token,
+    ["completed"],
+    60_000,
+  );
+  const tooLate = await stopAgentRun(
+    doneProject.projectId,
+    doneRun.agent_run_id,
+    doneProject.token,
+    uniqueKey(`stop-late-${doneProject.suffix}`),
+  );
+  assert.equal(
+    tooLate.body.code,
+    100307,
+    "服务=web 事实=已终态 Run 停止应返回 100307",
+  );
+});
+
+test("T07 手动重试：同一 Run failed→queued 不重复接纳 UserMessage（契约 §8.3）", async () => {
+  resetScenarios();
+  const { token, projectId, suffix } = await registerAndCreateProject("agentretry");
+  const prompt = `请失败 fake:failure-once ${suffix}`;
+
+  await sendMessage(projectId, token, prompt, suffix);
+  const failed = await waitForAgentRunStatus(
+    projectId,
+    token,
+    ["failed"],
+    60_000,
+  );
+  assert.equal(
+    (await assistantMessages(projectId, token)).length,
+    0,
+    "服务=agent-worker 事实=失败 run 不应产生 assistant 消息",
+  );
+
+  const retryKey = uniqueKey(`retry-${suffix}`);
+  const retried = await retryAgentRun(
+    projectId,
+    failed.agent_run_id,
+    token,
+    retryKey,
+  );
+  assert.equal(retried.response.status, 202, "服务=web 事实=重试命令应被接纳（202）");
+  assert.equal(retried.body.data.status, "queued", "服务=web 事实=重试后应回队列");
+  assert.equal(retried.body.data.retry_count, 1, "服务=web 事实=retry_count 应为 1");
+
+  await waitForAgentRunStatus(projectId, token, ["completed"], 120_000);
+  const assistants = await assistantMessages(projectId, token);
+  assert.equal(assistants.length, 1, "服务=agent-worker 事实=重试后 assistant 恰一条");
+  assert.equal(
+    assistants[0].content,
+    fakeAgentEcho(prompt),
+    "服务=agent-worker 事实=重试回显应复用同一批输入",
+  );
+
+  const stats = mysqlQuery(
+    `SELECT CONCAT(
+      (SELECT COUNT(*) FROM conversation_messages WHERE role='user' AND project_id=${projectId}), ':',
+      (SELECT COUNT(*) FROM agent_advances WHERE agent_run_id=${failed.agent_run_id}), ':',
+      (SELECT COUNT(*) FROM run_commits WHERE agent_run_id=${failed.agent_run_id}), ':',
+      (SELECT retry_count FROM agent_runs WHERE id=${failed.agent_run_id}))`,
+  );
+  assert.equal(
+    stats,
+    "1:2:2:1",
+    "服务=mysql 事实=user 消息恰 1、两次 Advance 两次 RunCommit、retry_count=1",
+  );
+
+  // 同键重放幂等（Run 已 completed 但键相同 → 回放首次回执）
+  const replayed = await retryAgentRun(
+    projectId,
+    failed.agent_run_id,
+    token,
+    retryKey,
+  );
+  assert.equal(replayed.body.code, 200, "服务=web 事实=重复重试应幂等返回首次回执");
+
+  // completed Run 重试 → 不可重试错误
+  const notRetryable = await retryAgentRun(
+    projectId,
+    failed.agent_run_id,
+    token,
+    uniqueKey(`retry-late-${suffix}`),
+  );
+  assert.equal(
+    notRetryable.body.code,
+    100308,
+    "服务=web 事实=非 failed 状态重试应返回 100308",
+  );
+});
+
+test("T07 接管重放：已持久化结果复用不再调用（契约 §8.4/§8.5）", async () => {
+  resetScenarios();
+  const { token, projectId, suffix } = await registerAndCreateProject("agentreplay");
+  const prompt = `重放场景 fake:hold-result:15000 ${suffix}`;
+
+  await sendMessage(projectId, token, prompt, suffix);
+  const running = await waitForAgentRunStatus(
+    projectId,
+    token,
+    ["running"],
+    30_000,
+  );
+  // 等待调用结果结算为 succeeded（hold 窗口内：结果已持久化、未提交）
+  await waitFor(
+    async () => {
+      const status = mysqlQuery(
+        `SELECT status FROM agent_provider_calls WHERE agent_run_id=${running.agent_run_id} ORDER BY id DESC LIMIT 1`,
+      );
+      return status === "succeeded" ? status : null;
+    },
+    30_000,
+    "服务=mysql 事实=调用结果应先持久化为 succeeded",
+  );
+
+  serviceStop("agent-worker");
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 12_000));
+    const mid = await fetchSnapshot(projectId, token);
+    assert.equal(
+      mid.agent_runs?.at(-1)?.status,
+      "running",
+      "服务=agent-worker 事实=未提交窗口内应保持 running",
+    );
+  } finally {
+    serviceStart("agent-worker");
+    await waitServiceReady("agent-worker");
+  }
+
+  await waitForAgentRunStatus(projectId, token, ["completed"], 120_000);
+  const assistants = await assistantMessages(projectId, token);
+  assert.equal(assistants.length, 1, "服务=agent-worker 事实=接管重放后 assistant 恰一条");
+  assert.equal(
+    assistants[0].content,
+    fakeAgentEcho(prompt),
+    "服务=agent-worker 事实=重放内容应与持久化结果一致",
+  );
+  const callStats = mysqlQuery(
+    `SELECT CONCAT(COUNT(*), ':', SUM(status='succeeded')) FROM agent_provider_calls WHERE agent_run_id=${running.agent_run_id}`,
+  );
+  assert.equal(
+    callStats,
+    "1:1",
+    "服务=mysql 事实=成本事实：接管重放不得新增调用，恰一条 succeeded 记录",
   );
 });
 

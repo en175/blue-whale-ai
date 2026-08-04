@@ -42,8 +42,40 @@ export type AgentRunDisplay = {
   agentRunId: WireInteger;
   status: string;
   stage: string | null;
+  terminalReason: string | null;
+  failureCode: string | null;
+  retryCount: number;
   skillName: string | null;
   reasoningSummary: string | null;
+};
+
+/** 运行控制推导（IK67GZ，契约 §8.2/§8.3）：停止/重试可用性与「已停止生成」非消息状态。 */
+export type AgentRunControl = {
+  canStop: boolean;
+  canRetry: boolean;
+  stoppedByUser: boolean;
+};
+
+export function deriveRunControl(
+  display: AgentRunDisplay | null,
+): AgentRunControl {
+  if (!display)
+    return { canStop: false, canRetry: false, stoppedByUser: false };
+  return {
+    canStop: display.status === "queued" || display.status === "running",
+    canRetry: display.status === "failed",
+    stoppedByUser:
+      display.status === "cancelled" &&
+      display.terminalReason === "user_requested",
+  };
+}
+
+/** 临时助手交付的短期活动投影（IK67GZ，契约 §8.1）：独立身份，永不进入正式消息。 */
+export type ProvisionalDeliveryView = {
+  deliveryId: string;
+  agentRunId: string;
+  content: string;
+  status: "streaming" | "completed" | "interrupted";
 };
 
 export function deriveLatestAgentRunDisplay(
@@ -79,6 +111,14 @@ export function deriveLatestAgentRunDisplay(
     agentRunId: latest.agent_run_id as WireInteger,
     status: latest.status as string,
     stage: typeof latest.stage === "string" ? latest.stage : null,
+    terminalReason:
+      latest.terminal_reason === "user_requested" ||
+      latest.terminal_reason === "runtime_error"
+        ? latest.terminal_reason
+        : null,
+    failureCode:
+      typeof latest.failure_code === "string" ? latest.failure_code : null,
+    retryCount: typeof latest.retry_count === "number" ? latest.retry_count : 0,
     skillName,
     reasoningSummary:
       typeof latest.reasoning_summary === "string"
@@ -148,6 +188,8 @@ export type ProjectRecoveryState = {
   seenEventIds: ReadonlySet<string>;
   aggregateVersions: ReadonlyMap<string, number>;
   deleted: boolean;
+  /** 临时交付活动投影（IK67GZ，契约 §8.1/§8.6）：不来自 Snapshot，刷新后为空。 */
+  provisionalDeliveries: ReadonlyMap<string, ProvisionalDeliveryView>;
 };
 
 export type ProjectRecoveryTransport = {
@@ -182,6 +224,7 @@ export function initialProjectRecoveryState(
     seenEventIds: new Set(),
     aggregateVersions: new Map(),
     deleted: false,
+    provisionalDeliveries: new Map(),
   };
 }
 
@@ -199,6 +242,8 @@ export function applySnapshot(
     seenEventIds: new Set(),
     aggregateVersions: new Map(),
     deleted: false,
+    // Snapshot 不含临时文本（契约 §8.6）：恢复即清除活动投影。
+    provisionalDeliveries: new Map(),
   };
 }
 
@@ -232,8 +277,41 @@ export function applyProductEvent(
   aggregateVersions.set(aggregateKey, event.aggregate_version);
   let snapshot = state.snapshot;
   let deleted = state.deleted;
+  const provisionalDeliveries: Map<string, ProvisionalDeliveryView> = new Map(
+    state.provisionalDeliveries,
+  );
 
-  if (snapshot) {
+  // 临时交付事件（IK67GZ，契约 §8.1）：只更新短期活动投影，永不并入正式消息。
+  if (event.event_type === "agent_run.provisional_delivery_started") {
+    const view = toProvisionalStart(event.payload);
+    if (view) {
+      provisionalDeliveries.set(view.deliveryId, view);
+    }
+  } else if (event.event_type === "agent_run.provisional_chunk_appended") {
+    const deliveryId = event.payload.delivery_id;
+    const content = event.payload.content;
+    if (
+      (typeof deliveryId === "number" || typeof deliveryId === "string") &&
+      typeof content === "string"
+    ) {
+      const key = String(deliveryId);
+      const current = provisionalDeliveries.get(key);
+      if (current && current.status === "streaming") {
+        provisionalDeliveries.set(key, {
+          ...current,
+          content: current.content + content,
+        });
+      }
+    }
+  } else if (
+    event.event_type === "agent_run.provisional_delivery_completed" ||
+    event.event_type === "agent_run.provisional_delivery_interrupted"
+  ) {
+    const deliveryId = event.payload.delivery_id;
+    if (typeof deliveryId === "number" || typeof deliveryId === "string") {
+      provisionalDeliveries.delete(String(deliveryId));
+    }
+  } else if (snapshot) {
     if (
       event.event_type === "project.renamed" &&
       typeof event.payload.name === "string"
@@ -334,6 +412,26 @@ export function applyProductEvent(
     seenEventIds,
     aggregateVersions,
     deleted,
+    provisionalDeliveries,
+  };
+}
+
+function toProvisionalStart(
+  payload: Record<string, unknown>,
+): ProvisionalDeliveryView | null {
+  const deliveryId = payload.delivery_id;
+  const agentRunId = payload.agent_run_id;
+  if (
+    (typeof deliveryId !== "number" && typeof deliveryId !== "string") ||
+    (typeof agentRunId !== "number" && typeof agentRunId !== "string")
+  ) {
+    return null;
+  }
+  return {
+    deliveryId: String(deliveryId),
+    agentRunId: String(agentRunId),
+    content: "",
+    status: "streaming",
   };
 }
 

@@ -1,5 +1,6 @@
 import { acceptConversationMessage } from "@blue-whale/core";
 import {
+  AGENT_RUN_CONFLICT_CODE,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
@@ -9,7 +10,6 @@ import {
 import type { ConversationRepo } from "@blue-whale/persistence";
 import { wireInteger } from "../wire-integer";
 
-const AGENT_RUN_CONFLICT_CODE = 100303;
 /** Creative Skill 不可用（资产契约 §7：跨用户 forced 个人技能/未知 ID，不泄露存在性）。 */
 const CREATIVE_SKILL_UNAVAILABLE_CODE = 100306;
 

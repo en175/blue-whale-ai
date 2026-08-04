@@ -114,8 +114,12 @@ export function AgentChatPanel({
   activeSkillName,
   agentRunStatus,
   agentRunStage,
+  agentRunTerminalReason,
   reasoningSummary,
   answerableActive,
+  provisionalContent,
+  onStopAgentRun,
+  onRetryAgentRun,
   skillRecommendations,
   skillRecommendationsLoading,
 }: {
@@ -156,10 +160,18 @@ export function AgentChatPanel({
   agentRunStatus?: string | null;
   /** 当前 Run 的 PlanPhase 阶段（Snapshot/SSE 权威，IK67GY T06） */
   agentRunStage?: string | null;
+  /** 当前 Run 的终态原因（user_requested=用户停止，IK67GZ T07） */
+  agentRunTerminalReason?: string | null;
   /** 安全的用户可见运行摘要；不包含内部思维链。 */
   reasoningSummary?: string | null;
   /** 是否存在可回答创作澄清（true 时 forced 与 reply 互斥，pending 保留不清） */
   answerableActive?: boolean;
+  /** 临时助手文本（IK67GZ T07）：非正式消息，RunCommit 后消失 */
+  provisionalContent?: string | null;
+  /** 停止当前 Run（IK67GZ，契约 §8.2）；缺省（离线）不渲染停止按钮 */
+  onStopAgentRun?: () => Promise<void>;
+  /** 手动重试失败 Run（IK67GZ，契约 §8.3）；缺省（离线）不渲染重试按钮 */
+  onRetryAgentRun?: () => Promise<void>;
   /** 当前 Run 的 Creative Skill 推荐列表（IK3NPI）；未传则不渲染推荐区 */
   skillRecommendations?: CreativeSkillRecommendation[];
   /** 推荐列表拉取中（仅配合 skillRecommendations 展示加载态） */
@@ -686,8 +698,15 @@ export function AgentChatPanel({
   const skillLabel = pendingForcedSkill?.name ?? activeSkillName ?? null;
   const skillStateLabel = pendingForcedSkill ? "已选技能" : "已激活技能";
   const runStatusLabel = agentRunStatus
-    ? (AGENT_RUN_STATUS_LABELS[agentRunStatus] ?? agentRunStatus)
+    ? agentRunStatus === "cancelled" &&
+      agentRunTerminalReason === "user_requested"
+      ? "已停止生成"
+      : (AGENT_RUN_STATUS_LABELS[agentRunStatus] ?? agentRunStatus)
     : null;
+  const canStopRun =
+    !!onStopAgentRun &&
+    (agentRunStatus === "queued" || agentRunStatus === "running");
+  const canRetryRun = !!onRetryAgentRun && agentRunStatus === "failed";
   const runStageLabel = agentRunStage
     ? (AGENT_RUN_STAGE_LABELS[agentRunStage] ?? null)
     : null;
@@ -798,6 +817,36 @@ export function AgentChatPanel({
             >
               {runStageLabel}
             </span>
+          )}
+          {canStopRun && (
+            <button
+              type="button"
+              className="tc-agent-run-stop inline-flex items-center rounded-lg px-2 py-1 text-xs transition-colors"
+              aria-label="停止生成"
+              style={{
+                border: "1px solid var(--tc-border-subtle)",
+                background: "var(--tc-menu-item-hover)",
+                color: "var(--tc-text-secondary)",
+              }}
+              onClick={() => void onStopAgentRun?.().catch(() => undefined)}
+            >
+              停止
+            </button>
+          )}
+          {canRetryRun && (
+            <button
+              type="button"
+              className="tc-agent-run-retry inline-flex items-center rounded-lg px-2 py-1 text-xs transition-colors"
+              aria-label="重试本次回答"
+              style={{
+                border: "1px solid var(--tc-border-subtle)",
+                background: "var(--tc-menu-item-hover)",
+                color: "var(--tc-text-secondary)",
+              }}
+              onClick={() => void onRetryAgentRun?.().catch(() => undefined)}
+            >
+              重试
+            </button>
           )}
           <div className="inline-flex items-center gap-0.5">
             <div className="relative inline-flex">
@@ -945,6 +994,17 @@ export function AgentChatPanel({
                 );
               return <AgentMessageBubble key={msg.id} text={msg.text} />;
             })}
+            {provisionalContent && (
+              <div
+                className="tc-agent-provisional"
+                data-provisional-delivery="true"
+                aria-label="生成中的临时文本"
+                aria-live="polite"
+                style={{ opacity: 0.85 }}
+              >
+                <AgentMessageBubble text={provisionalContent} />
+              </div>
+            )}
           </div>
         </div>
 

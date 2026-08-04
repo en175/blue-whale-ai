@@ -159,6 +159,32 @@ export const agentRunStageSchema = z.enum([
   "cancelled",
 ]);
 
+/** 临时交付状态（契约 §8.1）：streaming 只在短期投影，RunCommit 才提升为正式消息。 */
+export const agentProvisionalDeliveryStatusSchema = z.enum([
+  "streaming",
+  "completed",
+  "interrupted",
+]);
+
+export const agentProvisionalInterruptionReasonSchema = z.enum([
+  "user_cancelled",
+  "failed",
+]);
+
+/** 供应商调用记录状态（契约 §8.4）：接管重放与成本事实的权威。 */
+export const agentProviderCallStatusSchema = z.enum([
+  "in_flight",
+  "succeeded",
+  "failed_definitive",
+  "outcome_unknown",
+]);
+
+/** AgentRun 终态原因（契约 §8.6）：区分用户停止与运行时错误。 */
+export const agentRunTerminalReasonSchema = z.enum([
+  "user_requested",
+  "runtime_error",
+]);
+
 export const agentRunPublicProjectionSchema = z
   .object({
     agent_run_id: decimalIdSchema,
@@ -174,6 +200,9 @@ export const agentRunPublicProjectionSchema = z
     ]),
     stage: agentRunStageSchema.nullable(),
     version: z.number().int().nonnegative(),
+    terminal_reason: agentRunTerminalReasonSchema.nullable().default(null),
+    failure_code: stableIdSchema.nullable().default(null),
+    retry_count: z.number().int().nonnegative().default(0),
     activated_creative_skill_versions: z
       .array(creativeSkillActivationSchema)
       .max(1),
@@ -284,6 +313,16 @@ export type AgentRunPublicProjection = z.infer<
   typeof agentRunPublicProjectionSchema
 >;
 export type AgentRunStage = z.infer<typeof agentRunStageSchema>;
+export type AgentProvisionalDeliveryStatus = z.infer<
+  typeof agentProvisionalDeliveryStatusSchema
+>;
+export type AgentProvisionalInterruptionReason = z.infer<
+  typeof agentProvisionalInterruptionReasonSchema
+>;
+export type AgentProviderCallStatus = z.infer<
+  typeof agentProviderCallStatusSchema
+>;
+export type AgentRunTerminalReason = z.infer<typeof agentRunTerminalReasonSchema>;
 export type AgentRunWork = z.infer<typeof agentRunWorkSchema>;
 export type AgentHistoryMessage = AgentRunWork["history_messages"][number];
 export type AgentRunCommit = z.infer<typeof agentRunCommitSchema>;

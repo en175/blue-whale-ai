@@ -76,6 +76,22 @@ function work(prompt = "生成蓝鲸海报") {
   };
 }
 
+/** T07（契约 §8.1/§8.4）：调用记录与临时交付的默认 mock，无既有记录、追加成功。 */
+function providerCallMocks(overrides: Record<string, unknown> = {}) {
+  return {
+    loadProviderCall: vi.fn().mockResolvedValue(null),
+    openProviderCall: vi.fn().mockResolvedValue({}),
+    settleProviderCall: vi.fn().mockResolvedValue(true),
+    markProviderCallOutcomeUnknown: vi.fn().mockResolvedValue(true),
+    appendProvisionalChunks: vi.fn().mockResolvedValue({
+      kind: "appended",
+      deliveryId: "77",
+      startIndex: 0,
+    }),
+    ...overrides,
+  };
+}
+
 describe("runAgentWorkerOnce", () => {
   it("invokes the runtime outside persistence and commits with the claimed fence", async () => {
     const claimNext = vi.fn().mockResolvedValue(work());
@@ -94,7 +110,13 @@ describe("runAgentWorkerOnce", () => {
     });
     await expect(
       runAgentWorkerOnce({
-        repo: { claimNext, renewLease, commitSuccess, commitFailure },
+        repo: {
+          claimNext,
+          renewLease,
+          commitSuccess,
+          commitFailure,
+          ...providerCallMocks(),
+        },
         runtime: { name: "fake", ready: async () => true, invoke },
         workerId: "worker-1",
       }),
@@ -167,6 +189,7 @@ describe("runAgentWorkerOnce", () => {
         renewLease: vi.fn().mockResolvedValue(true),
         commitSuccess,
         commitFailure: vi.fn(),
+        ...providerCallMocks(),
       },
       runtime: { name: "fake", ready: async () => true, invoke },
       workerId: "worker-1",
@@ -256,6 +279,7 @@ describe("runAgentWorkerOnce", () => {
           renewLease: vi.fn().mockResolvedValue(true),
           commitSuccess: vi.fn(),
           commitFailure,
+          ...providerCallMocks(),
         },
         runtime: { name: "fake", ready: async () => true, invoke },
         workerId: "worker-1",
@@ -293,6 +317,7 @@ describe("runAgentWorkerOnce", () => {
           status: "completed",
         }),
         commitFailure: vi.fn(),
+        ...providerCallMocks(),
       },
       runtime: { name: "fake", ready: async () => true, invoke },
       workerId: "worker-1",
@@ -349,6 +374,7 @@ describe("runAgentWorkerOnce", () => {
         renewLease: vi.fn().mockResolvedValue(true),
         commitSuccess: vi.fn(),
         commitFailure,
+        ...providerCallMocks(),
       },
       runtime: { name: "fake", ready: async () => true, invoke },
       workerId: "worker-1",
@@ -383,6 +409,7 @@ describe("runAgentWorkerOnce", () => {
         renewLease,
         commitSuccess,
         commitFailure: vi.fn().mockResolvedValue({ kind: "conflict" }),
+        ...providerCallMocks(),
       },
       runtime: { name: "slow", ready: async () => true, invoke },
       workerId: "worker-1",
@@ -429,6 +456,7 @@ describe("runAgentWorkerOnce", () => {
           renewLease: vi.fn().mockResolvedValue(true),
           commitSuccess,
           commitFailure,
+          ...providerCallMocks(),
         },
         runtime: { name: "fake", ready: async () => true, invoke },
         workerId: "worker-1",
@@ -452,6 +480,130 @@ describe("runAgentWorkerOnce", () => {
     );
     expect(commitSuccess).not.toHaveBeenCalled();
   });
+
+  it("replays a persisted succeeded provider result without a second invocation（契约 §8.4）", async () => {
+    const invoke = vi.fn();
+    const commitSuccess = vi.fn().mockResolvedValue({
+      kind: "committed",
+      cursor: "8",
+      status: "completed",
+    });
+    const appendProvisionalChunks = vi.fn().mockResolvedValue({
+      kind: "appended",
+      deliveryId: "78",
+      startIndex: 0,
+    });
+    await runAgentWorkerOnce({
+      repo: {
+        claimNext: vi.fn().mockResolvedValue(work()),
+        renewLease: vi.fn().mockResolvedValue(true),
+        commitSuccess,
+        commitFailure: vi.fn(),
+        ...providerCallMocks({
+          loadProviderCall: vi.fn().mockResolvedValue({
+            id: "500",
+            agentRunId: "9",
+            advanceId: "30",
+            callSlot: 0,
+            fencingToken: "3",
+            status: "succeeded",
+            requestDigest: `sha256:${"a".repeat(64)}`,
+            resultPayload: {
+              content: "接管前已完成",
+              reasoning_summary: "已完成回答。",
+              action: { kind: "respond" },
+              auto_activation: null,
+            },
+            failureCode: null,
+            failureMessage: null,
+          }),
+          appendProvisionalChunks,
+        }),
+      },
+      runtime: { name: "fake", ready: async () => true, invoke },
+      workerId: "worker-1",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(commitSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "接管前已完成" }),
+    );
+    expect(appendProvisionalChunks).toHaveBeenCalledWith(
+      expect.objectContaining({ chunks: ["接管前已完成"] }),
+    );
+  });
+
+  it("treats an in-flight record after takeover as outcome_unknown and fails for manual retry（契约 §8.4）", async () => {
+    const invoke = vi.fn();
+    const markUnknown = vi.fn().mockResolvedValue(true);
+    const commitFailure = vi.fn().mockResolvedValue({
+      kind: "committed",
+      cursor: "9",
+      status: "failed",
+    });
+    await runAgentWorkerOnce({
+      repo: {
+        claimNext: vi.fn().mockResolvedValue(work()),
+        renewLease: vi.fn().mockResolvedValue(true),
+        commitSuccess: vi.fn(),
+        commitFailure,
+        ...providerCallMocks({
+          loadProviderCall: vi.fn().mockResolvedValue({
+            id: "500",
+            agentRunId: "9",
+            advanceId: "30",
+            callSlot: 0,
+            fencingToken: "2",
+            status: "in_flight",
+            requestDigest: `sha256:${"a".repeat(64)}`,
+            resultPayload: null,
+            failureCode: null,
+            failureMessage: null,
+          }),
+          markProviderCallOutcomeUnknown: markUnknown,
+        }),
+      },
+      runtime: { name: "fake", ready: async () => true, invoke },
+      workerId: "worker-1",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(markUnknown).toHaveBeenCalledWith("30", 0);
+    expect(commitFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ failureCode: "provider_outcome_unknown" }),
+    );
+  });
+
+  it("aborts the commit when provisional chunks are rejected by a newer fence（契约 §8.1）", async () => {
+    const commitSuccess = vi.fn();
+    await expect(
+      runAgentWorkerOnce({
+        repo: {
+          claimNext: vi.fn().mockResolvedValue(work()),
+          renewLease: vi.fn().mockResolvedValue(true),
+          commitSuccess,
+          commitFailure: vi.fn().mockResolvedValue({ kind: "conflict" }),
+          ...providerCallMocks({
+            appendProvisionalChunks: vi
+              .fn()
+              .mockResolvedValue({ kind: "conflict" }),
+          }),
+        },
+        runtime: {
+          name: "fake",
+          ready: async () => true,
+          invoke: vi.fn().mockResolvedValue({
+            provider: "fake",
+            content: "已完成",
+            reasoningSummary: "已完成回答。",
+            action: { kind: "respond" },
+          }),
+        },
+        workerId: "worker-1",
+      }),
+    ).resolves.toEqual({ kind: "conflict" });
+    expect(commitSuccess).not.toHaveBeenCalled();
+  });
 });
 
 // 总结管道分流（IK60X1，契约 §15.2/§15.4）：带 skill_summarize 标记的 Run → 总结模式；
@@ -467,6 +619,7 @@ describe("runAgentWorkerOnce 总结分流", () => {
         status: "completed",
       }),
       commitFailure: vi.fn().mockResolvedValue({ kind: "conflict" }),
+      ...providerCallMocks(),
     };
   }
   const BASE_WORK = work("总结当前对话并保存为我的技能");

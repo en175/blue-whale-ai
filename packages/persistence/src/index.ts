@@ -63,6 +63,14 @@ export {
   type CommitAgentRunResult,
   type CommitAgentRunSuccessInput,
   type RenewAgentRunLeaseInput,
+  type AppendProvisionalChunksInput,
+  type AppendProvisionalChunksResult,
+  type AcceptAgentRunCommandInput,
+  type AcceptAgentRunStopResult,
+  type AcceptAgentRunRetryResult,
+  type ProviderCallRecord,
+  type OpenProviderCallInput,
+  type SettleProviderCallInput,
 } from "./agent-run-repo.js";
 export {
   createModelCapabilityRepo,

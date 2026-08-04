@@ -40,3 +40,41 @@ export function acceptConversationMessage(
     },
   );
 }
+
+export type AgentRunCommandReceipt = {
+  agent_run_id: WireInteger;
+  status: string;
+  cursor: WireInteger;
+};
+
+/** 用户停止（IK67GZ，契约 §8.2）：独立产品命令，不经 RunCommit。 */
+export function stopAgentRun(
+  projectId: WireInteger,
+  agentRunId: WireInteger,
+  idempotencyKey: string,
+): Promise<AgentRunCommandReceipt> {
+  return apiRequest<AgentRunCommandReceipt>(
+    `/api/projects/${projectId}/conversation/agent-runs/${agentRunId}/stop`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+/** 手动重试（IK67GZ，契约 §8.3）：仅 failed 可重试，不重复接纳用户消息。 */
+export function retryAgentRun(
+  projectId: WireInteger,
+  agentRunId: WireInteger,
+  idempotencyKey: string,
+): Promise<AgentRunCommandReceipt & { retry_count: number }> {
+  return apiRequest<AgentRunCommandReceipt & { retry_count: number }>(
+    `/api/projects/${projectId}/conversation/agent-runs/${agentRunId}/retry`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({}),
+    },
+  );
+}

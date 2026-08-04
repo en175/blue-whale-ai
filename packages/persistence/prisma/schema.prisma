@@ -234,6 +234,8 @@ model agent_runs {
   terminal_reason                   String?   @db.VarChar(64)
   failure_code                      String?   @db.VarChar(128)
   failure_message                   String?   @db.Text
+  /// 手动重试计数（IK67GZ，契约 §8.3）：每次用户重试 failed→queued 递增。
+  retry_count                       Int       @default(0)
   /// 总结当前对话意图（IK60X1，资产契约 §15.2）：接纳 skill_summarize=true 的消息时置位，
   /// Worker claim 到带标记的 Run 分流到总结管道。
   skill_summarize                   Boolean   @default(false)
@@ -273,6 +275,54 @@ model run_commits {
   gmt_create     DateTime @default(now()) @db.DateTime(0)
 
   @@index([agent_run_id], map: "idx_run_commit_agent_run")
+}
+
+/// 临时助手交付（IK67GZ，契约 §8.1）：独立身份与顺序，永不成为 ConversationMessage。
+model agent_provisional_deliveries {
+  id                  BigInt   @id @default(autoincrement())
+  agent_run_id        BigInt
+  advance_id          BigInt
+  fencing_token       BigInt
+  status              String   @db.VarChar(16)
+  interruption_reason String?  @db.VarChar(32)
+  content             String   @db.Text
+  gmt_create          DateTime @default(now()) @db.DateTime(0)
+  gmt_modified        DateTime @default(now()) @db.DateTime(0)
+
+  @@index([agent_run_id], map: "idx_provisional_delivery_run")
+  @@index([advance_id, status], map: "idx_provisional_delivery_advance")
+}
+
+/// 临时交付分片（IK67GZ，契约 §8.1）：(delivery_id, chunk_index) 唯一，chunk_index 从 0 严格递增。
+model agent_provisional_chunks {
+  id          BigInt   @id @default(autoincrement())
+  delivery_id BigInt
+  chunk_index Int
+  content     String   @db.Text
+  gmt_create  DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([delivery_id, chunk_index], map: "uk_provisional_chunk")
+}
+
+/// 供应商调用记录（IK67GZ，契约 §8.4）：接管重放与调用成本事实的权威。
+model agent_provider_calls {
+  id              BigInt    @id @default(autoincrement())
+  agent_run_id    BigInt
+  advance_id      BigInt
+  call_slot       Int
+  fencing_token   BigInt
+  status          String    @db.VarChar(24)
+  request_digest  String    @db.VarChar(71)
+  result_payload  Json?
+  failure_code    String?   @db.VarChar(128)
+  failure_message String?   @db.Text
+  started_at      DateTime  @default(now()) @db.DateTime(3)
+  ended_at        DateTime? @db.DateTime(3)
+  gmt_create      DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified    DateTime  @default(now()) @db.DateTime(0)
+
+  @@unique([advance_id, call_slot], map: "uk_provider_call_slot")
+  @@index([agent_run_id], map: "idx_provider_call_run")
 }
 
 model user_input_requests {

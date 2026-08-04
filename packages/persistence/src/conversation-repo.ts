@@ -392,6 +392,13 @@ export async function acceptConversationMessageInTransaction(
         conversation_id: conversation.id.toString(),
         status: run.status,
         stage: run.stage,
+        terminal_reason:
+          run.terminal_reason === "user_requested" ||
+          run.terminal_reason === "runtime_error"
+            ? run.terminal_reason
+            : null,
+        failure_code: run.failure_code,
+        retry_count: run.retry_count,
         activated_creative_skill_versions: publicRunActivations(
           run.activated_creative_skill_versions,
         ),
@@ -413,6 +420,9 @@ export async function acceptConversationMessageInTransaction(
         conversation_id: conversation.id.toString(),
         status: run.status,
         stage: run.stage,
+        terminal_reason: null,
+        failure_code: null,
+        retry_count: 0,
         activated_creative_skill_versions: createdRunActivations,
         reasoning_summary: null,
       },

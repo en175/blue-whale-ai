@@ -185,6 +185,10 @@ export function CanvasProjectRuntime({
     sendMessage: sendConversationMessage,
     answerableActive,
     agentRunDisplay,
+    runControl,
+    provisionalText,
+    stopRun,
+    retryRun,
   } = useProjectConversation(pid, backendReady);
 
   // canvas 数据 = useCanvasDoc hook（本地 state，不卡）；assets = zustand（业务缓存）
@@ -1710,7 +1714,15 @@ export function CanvasProjectRuntime({
         activeSkillName={agentRunDisplay?.skillName}
         agentRunStatus={agentRunDisplay?.status}
         agentRunStage={agentRunDisplay?.stage}
+        agentRunTerminalReason={agentRunDisplay?.terminalReason}
         reasoningSummary={agentRunDisplay?.reasoningSummary}
+        provisionalContent={provisionalText}
+        onStopAgentRun={
+          backendReady && runControl.canStop ? stopRun : undefined
+        }
+        onRetryAgentRun={
+          backendReady && runControl.canRetry ? retryRun : undefined
+        }
         isOpen={isAgentOpen}
         onClose={() => setIsAgentOpen(false)}
         pendingMention={agentPendingMention}
