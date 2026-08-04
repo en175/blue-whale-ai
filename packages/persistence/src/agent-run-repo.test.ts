@@ -42,6 +42,17 @@ function signRunPin(source: Omit<AgentRunPin, "pin_digest">): AgentRunPin {
 
 const runPin = signRunPin(runPinSource);
 const requestDigest = `sha256:${"d".repeat(64)}`;
+
+/** claimNext 冻结 MentionInputSnapshot 时读取的 mention 事实表（T08）。
+ *  默认无 mention —— freezeMentionInputSnapshot 产出空快照。 */
+function emptyMentionTables() {
+  return {
+    conversation_message_mentions: { findMany: vi.fn().mockResolvedValue([]) },
+    assets: { findMany: vi.fn().mockResolvedValue([]) },
+    scene_cards: { findMany: vi.fn().mockResolvedValue([]) },
+  };
+}
+const emptyMentionSnapshot = { capability_snapshot_version: 1, entries: [] };
 const forcedActivation = {
   creative_skill_id: "official.poster",
   creative_skill_version_id: "version.poster.1",
@@ -93,6 +104,7 @@ describe("AgentRunRepo", () => {
             : [],
         ),
       },
+      ...emptyMentionTables(),
       agent_advances: {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({
@@ -113,6 +125,7 @@ describe("AgentRunRepo", () => {
               content: "第二条",
             },
           ],
+          mention_input_snapshot: emptyMentionSnapshot,
         }),
       },
       project_event_stream: {
@@ -216,6 +229,7 @@ describe("AgentRunRepo", () => {
           status: "running",
           input_snapshot: snapshot,
           input_high_watermark_sequence_no: 1,
+          mention_input_snapshot: emptyMentionSnapshot,
         }),
         create: vi.fn(),
       },
@@ -268,6 +282,7 @@ describe("AgentRunRepo", () => {
       input_snapshot: [
         { message_id: "22", sequence_no: 3, role: "user", content: "主体：蓝鲸" },
       ],
+      mention_input_snapshot: emptyMentionSnapshot,
     });
     const advancesFindFirst = vi
       .fn()
@@ -317,6 +332,7 @@ describe("AgentRunRepo", () => {
               ],
         ),
       },
+      ...emptyMentionTables(),
       project_event_stream: {
         upsert: vi.fn(),
         update: vi.fn().mockResolvedValue({ high_watermark: 1n }),
@@ -465,6 +481,7 @@ describe("AgentRunRepo", () => {
           },
         ]),
       },
+      ...emptyMentionTables(),
       agent_advances: {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({
@@ -479,6 +496,7 @@ describe("AgentRunRepo", () => {
               content: "总结当前对话",
             },
           ],
+          mention_input_snapshot: emptyMentionSnapshot,
         }),
       },
       project_event_stream: {
@@ -1363,6 +1381,317 @@ describe("AgentRunRepo", () => {
     });
     expect(tx.run_commits.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ outcome: "cancelled" }),
+    });
+  });
+
+  it("freezes a per-advance MentionInputSnapshot from current mention facts (T08, AC#1/#4)", async () => {
+    const now = new Date("2026-08-04T00:00:00.000Z");
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ db_now: now }]),
+      agent_runs: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 9n,
+          project_id: 42n,
+          conversation_id: 7n,
+          user_id: 100n,
+          status: "queued",
+          version: 0,
+          fencing_token: 0n,
+          input_sequence_no: 0,
+          run_pin: runPin,
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 9n,
+          project_id: 42n,
+          conversation_id: 7n,
+          user_id: 100n,
+          version: 1,
+          fencing_token: 1n,
+          input_sequence_no: 0,
+          stage: "understanding",
+          run_pin: runPin,
+          lease_expires_at: new Date("2026-08-04T00:00:30.000Z"),
+        }),
+      },
+      conversation_messages: {
+        findMany: vi.fn().mockImplementation(({ where }) =>
+          where.sequence_no.gt !== undefined
+            ? [
+                {
+                  id: 20n,
+                  role: "user",
+                  content: "@[图] @[分镜] @[他人图]",
+                  sequence_no: 1,
+                },
+              ]
+            : [],
+        ),
+      },
+      conversation_message_mentions: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 500n,
+            mention_seq: 0,
+            mention_type: "asset",
+            target_id: 800n,
+            target_version: null,
+            accepted_user_id: 100n,
+            snapshot: {
+              asset_type: "image",
+              mime: "image/png",
+              size: "1024",
+              width: 1200,
+              height: 800,
+              duration_ms: null,
+              content_sha256: "a".repeat(64),
+            },
+          },
+          {
+            id: 501n,
+            mention_seq: 1,
+            mention_type: "scene_card",
+            target_id: 900n,
+            target_version: 3,
+            accepted_user_id: 100n,
+            snapshot: {
+              title: "开场",
+              summary: null,
+              content_markdown: "# 开场",
+              version: 3,
+            },
+          },
+          {
+            id: 502n,
+            mention_seq: 2,
+            mention_type: "asset",
+            target_id: 801n,
+            target_version: null,
+            accepted_user_id: 100n,
+            snapshot: {
+              asset_type: "image",
+              mime: "image/jpeg",
+              size: "2048",
+              width: 640,
+              height: 480,
+              duration_ms: null,
+              content_sha256: "b".repeat(64),
+            },
+          },
+        ]),
+      },
+      assets: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 800n,
+            user_id: 100n,
+            project_id: 42n,
+            status: "normal",
+            is_delete: false,
+          },
+          // 801 已转移给他人 → permission_lost → unavailable
+          {
+            id: 801n,
+            user_id: 200n,
+            project_id: 42n,
+            status: "normal",
+            is_delete: false,
+          },
+        ]),
+      },
+      scene_cards: {
+        findMany: vi.fn().mockResolvedValue([
+          // 版本 4 ≠ mention target_version 3 → stale（仍保留冻结历史投影）
+          { id: 900n, project_id: 42n, version: 4, is_delete: 0 },
+        ]),
+      },
+      agent_advances: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 30n,
+          ordinal: 1,
+          input_high_watermark_sequence_no: data.input_high_watermark_sequence_no,
+          input_snapshot: data.input_snapshot,
+          mention_input_snapshot: data.mention_input_snapshot,
+        })),
+      },
+      project_event_stream: {
+        upsert: vi.fn(),
+        update: vi.fn().mockResolvedValue({ high_watermark: 1n }),
+      },
+      project_events: {
+        create: vi.fn().mockImplementation(({ data }) => ({
+          id: 11n,
+          gmt_create: now,
+          ...data,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    const claimed = await createAgentRunRepo(prisma).claimNext({
+      workerId: "worker-1",
+      leaseMs: 30_000,
+    });
+    const entries = claimed?.mention_input_snapshot.entries ?? [];
+    expect(entries).toEqual([
+      {
+        mention_id: "500",
+        mention_seq: 0,
+        type: "asset",
+        availability: "available",
+        reason: null,
+        projection: {
+          asset_type: "image",
+          mime: "image/png",
+          size: "1024",
+          width: 1200,
+          height: 800,
+          duration_ms: null,
+          content_sha256: "a".repeat(64),
+        },
+      },
+      {
+        mention_id: "501",
+        mention_seq: 1,
+        type: "scene_card",
+        availability: "stale",
+        reason: "stale",
+        projection: { title: "开场", summary: null, content_markdown: "# 开场", version: 3 },
+      },
+      {
+        mention_id: "502",
+        mention_seq: 2,
+        type: "asset",
+        availability: "unavailable",
+        reason: "permission_lost",
+      },
+    ]);
+    // 投影不得暴露存储身份/用户身份（AC#4）。
+    expect(JSON.stringify(entries)).not.toContain("storage_key");
+    expect(JSON.stringify(entries)).not.toMatch(/"user_id"/);
+    // 快照在创建 advance 时一次性冻结（AC#1）；接管分支不重算（见 reuse 用例）。
+    expect(tx.agent_advances.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        mention_input_snapshot: claimed?.mention_input_snapshot,
+      }),
+    });
+  });
+
+  describe("recheckMentionAuthority（T08，AC#5 实时重查）", () => {
+    const frozenSnapshot = {
+      capability_snapshot_version: 1 as const,
+      entries: [
+        {
+          mention_id: "500",
+          mention_seq: 0,
+          type: "asset" as const,
+          availability: "available" as const,
+          reason: null,
+        },
+      ],
+    };
+
+    function recheckPrisma(options: {
+      mentionRows?: unknown[];
+      assets?: unknown[];
+      run?: unknown;
+    }) {
+      const tx = {
+        agent_runs: {
+          findUnique: vi.fn().mockResolvedValue(
+            options.run ?? {
+              id: 9n,
+              project_id: 42n,
+              user_id: 100n,
+              is_delete: 0,
+            },
+          ),
+        },
+        conversation_message_mentions: {
+          findMany: vi.fn().mockResolvedValue(
+            options.mentionRows ?? [
+              {
+                id: 500n,
+                mention_type: "asset",
+                target_id: 800n,
+                target_version: null,
+                accepted_user_id: 100n,
+              },
+            ],
+          ),
+        },
+        assets: { findMany: vi.fn().mockResolvedValue(options.assets ?? []) },
+        scene_cards: { findMany: vi.fn().mockResolvedValue([]) },
+      };
+      return {
+        prisma: {
+          $transaction: vi.fn(async (callback: (tx: unknown) => unknown) =>
+            callback(tx),
+          ),
+        } as unknown as PrismaClient,
+        tx,
+      };
+    }
+
+    it("passes an empty snapshot without any database query", async () => {
+      const { prisma } = recheckPrisma({});
+      const result = await createAgentRunRepo(prisma).recheckMentionAuthority({
+        agentRunId: "9",
+        snapshot: { capability_snapshot_version: 1, entries: [] },
+      });
+      expect(result).toEqual({ authoritative: true });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("passes when current facts still authorize the frozen mention", async () => {
+      const { prisma } = recheckPrisma({
+        assets: [
+          {
+            id: 800n,
+            user_id: 100n,
+            project_id: 42n,
+            status: "normal",
+            is_delete: false,
+          },
+        ],
+      });
+      const result = await createAgentRunRepo(prisma).recheckMentionAuthority({
+        agentRunId: "9",
+        snapshot: frozenSnapshot,
+      });
+      expect(result).toEqual({ authoritative: true });
+    });
+
+    it("blocks after freeze when the referenced asset is deleted", async () => {
+      // 冻结时 available；重查时资产已删（is_delete）→ 非权威。
+      const { prisma } = recheckPrisma({
+        assets: [
+          {
+            id: 800n,
+            user_id: 100n,
+            project_id: 42n,
+            status: "normal",
+            is_delete: true,
+          },
+        ],
+      });
+      const result = await createAgentRunRepo(prisma).recheckMentionAuthority({
+        agentRunId: "9",
+        snapshot: frozenSnapshot,
+      });
+      expect(result).toEqual({ authoritative: false });
+    });
+
+    it("blocks when the mention fact row can no longer be found", async () => {
+      const { prisma } = recheckPrisma({ mentionRows: [] });
+      const result = await createAgentRunRepo(prisma).recheckMentionAuthority({
+        agentRunId: "9",
+        snapshot: frozenSnapshot,
+      });
+      expect(result).toEqual({ authoritative: false });
     });
   });
 });

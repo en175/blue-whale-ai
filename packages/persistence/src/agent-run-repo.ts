@@ -5,15 +5,23 @@ import {
   agentRunCommitSchema,
   agentRunPinSchema,
   agentRunWorkSchema,
+  assetContextProjectionSchema,
   creativeSkillActivationSchema,
+  sceneCardContextProjectionSchema,
   type AgentRunPin,
   type AutoCreativeSkillActivation,
   type CreativeSkillActivation,
   type AgentRunWork as ContractAgentRunWork,
+  type MentionInputEntry,
+  type MentionInputSnapshot,
 } from "@blue-whale/contracts";
 
 import { appendProjectEvent } from "./product-event-repo.js";
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
+import {
+  classifyMentionAvailability,
+  type MentionClassificationInput,
+} from "./mention-availability.js";
 
 /** 用户停止/重试命令的幂等操作名（契约 §8.2/§8.3）。 */
 const STOP_OPERATION = "agent_run.stop";
@@ -265,6 +273,13 @@ export type CommitAgentRunResult =
 export interface AgentRunRepo {
   claimNext(input: ClaimAgentRunInput): Promise<AgentRunWork | null>;
   renewLease(input: RenewAgentRunLeaseInput): Promise<boolean>;
+  /** 硬权限闸门实时重查（T08，AC#5）：按快照条目用**当前事实**重跑可用性谓词。
+   *  快照内容保持冻结不变（AC#1/#2），只裁决放行/拦截——冻结后的删除或撤权
+   *  在此被检出，接管复用窗口不扩大授权。 */
+  recheckMentionAuthority(input: {
+    agentRunId: string;
+    snapshot: MentionInputSnapshot;
+  }): Promise<{ authoritative: boolean }>;
   commitSuccess(
     input: CommitAgentRunSuccessInput,
   ): Promise<CommitAgentRunResult>;
@@ -305,6 +320,128 @@ async function databaseNow(tx: Prisma.TransactionClient): Promise<Date> {
   const now = rows[0]?.db_now;
   if (!(now instanceof Date)) throw new Error("database time unavailable");
   return now;
+}
+
+type MentionAssetFact = NonNullable<MentionClassificationInput["asset"]> & {
+  id: bigint;
+};
+type MentionSceneCardFact = NonNullable<
+  MentionClassificationInput["sceneCard"]
+> & { id: bigint };
+
+/** 批量查询 mention 目标的当前事实（T08）：冻结路径与实时重查闸门共用。 */
+async function loadMentionTargetFacts(
+  tx: Prisma.TransactionClient,
+  mentions: Array<{ mention_type: string; target_id: bigint }>,
+): Promise<{
+  assetById: Map<string, MentionAssetFact>;
+  sceneCardById: Map<string, MentionSceneCardFact>;
+}> {
+  const assetIds = [
+    ...new Set(
+      mentions
+        .filter((mention) => mention.mention_type === "asset")
+        .map((mention) => mention.target_id),
+    ),
+  ];
+  const sceneCardIds = [
+    ...new Set(
+      mentions
+        .filter((mention) => mention.mention_type === "scene_card")
+        .map((mention) => mention.target_id),
+    ),
+  ];
+  const [assets, sceneCards] = await Promise.all([
+    assetIds.length === 0
+      ? []
+      : tx.assets.findMany({
+          where: { id: { in: assetIds } },
+          select: {
+            id: true,
+            user_id: true,
+            project_id: true,
+            status: true,
+            is_delete: true,
+          },
+        }),
+    sceneCardIds.length === 0
+      ? []
+      : tx.scene_cards.findMany({
+          where: { id: { in: sceneCardIds } },
+          select: { id: true, project_id: true, version: true, is_delete: true },
+        }),
+  ]);
+  return {
+    assetById: new Map(assets.map((asset) => [asset.id.toString(), asset])),
+    sceneCardById: new Map(
+      sceneCards.map((sceneCard) => [sceneCard.id.toString(), sceneCard]),
+    ),
+  };
+}
+
+/** 冻结本轮 MentionInputSnapshot（T08，IK67H3）：按本次 input_messages 的
+ *  message_id JOIN conversation_message_mentions，对每条 mention 用**当前事实**
+ *  重算 availability（对齐 snapshot-repo 的四态谓词），投影取自 mention 接纳时
+ *  冻结的 snapshot（不含 storage_key/url/user_id）。unavailable 省略投影。
+ *  与 mention 事实同事务边界冻结；接管复用既有 advance 的快照，不重算（AC#1/#2）。 */
+async function freezeMentionInputSnapshot(
+  tx: Prisma.TransactionClient,
+  run: { project_id: bigint; user_id: bigint },
+  messageIds: bigint[],
+): Promise<MentionInputSnapshot> {
+  if (messageIds.length === 0) {
+    return { capability_snapshot_version: 1, entries: [] };
+  }
+  const mentionRows = await tx.conversation_message_mentions.findMany({
+    where: { message_id: { in: messageIds } },
+    orderBy: [{ message_id: "asc" }, { mention_seq: "asc" }],
+    select: {
+      id: true,
+      mention_seq: true,
+      mention_type: true,
+      target_id: true,
+      target_version: true,
+      accepted_user_id: true,
+      snapshot: true,
+    },
+  });
+  const relevant = mentionRows.filter(
+    (mention) =>
+      mention.mention_type === "asset" || mention.mention_type === "scene_card",
+  );
+  const pid = run.project_id;
+  const uid = run.user_id;
+  const { assetById, sceneCardById } = await loadMentionTargetFacts(tx, relevant);
+  const entries: MentionInputEntry[] = [];
+  for (const mention of relevant) {
+    const type = mention.mention_type as "asset" | "scene_card";
+    // 复用唯一可用性谓词（与 snapshot-repo 读路径同源，T08）。
+    const { availability, reason } = classifyMentionAvailability({
+      type,
+      targetVersion: mention.target_version,
+      acceptedUserId: mention.accepted_user_id,
+      asset: assetById.get(mention.target_id.toString()),
+      sceneCard: sceneCardById.get(mention.target_id.toString()),
+      projectId: pid,
+      userId: uid,
+    });
+    const entry: MentionInputEntry = {
+      mention_id: mention.id.toString(),
+      mention_seq: mention.mention_seq,
+      type,
+      availability,
+      reason,
+    };
+    if (availability !== "unavailable") {
+      const projected =
+        type === "asset"
+          ? assetContextProjectionSchema.safeParse(mention.snapshot)
+          : sceneCardContextProjectionSchema.safeParse(mention.snapshot);
+      if (projected.success) entry.projection = projected.data;
+    }
+    entries.push(entry);
+  }
+  return { capability_snapshot_version: 1, entries };
 }
 
 function replayCommitReceipt(receipt: Prisma.JsonValue): CommitAgentRunResult {
@@ -532,6 +669,13 @@ export function createAgentRunRepo(prisma: PrismaClient): AgentRunRepo {
           }));
           const inputHighWatermark =
             messages.at(-1)?.sequence_no ?? run.input_sequence_no;
+          // 同事务冻结本轮 MentionInputSnapshot（T08）：接管分支复用 runningAdvance
+          // 的既有快照，不重算（AC#1/#2）。
+          const mentionInputSnapshot = await freezeMentionInputSnapshot(
+            tx,
+            { project_id: run.project_id, user_id: run.user_id },
+            messages.map((message) => message.id),
+          );
           advance = await tx.agent_advances.create({
             data: {
               agent_run_id: run.id,
@@ -539,6 +683,7 @@ export function createAgentRunRepo(prisma: PrismaClient): AgentRunRepo {
               status: "running",
               input_snapshot: inputSnapshot,
               input_high_watermark_sequence_no: inputHighWatermark,
+              mention_input_snapshot: mentionInputSnapshot as Prisma.InputJsonValue,
             },
           });
         }
@@ -602,6 +747,10 @@ export function createAgentRunRepo(prisma: PrismaClient): AgentRunRepo {
           auto_creative_skill_candidates: runPin.auto_creative_skill_candidates,
           activated_creative_skill_versions:
             runPin.activated_creative_skill_versions,
+          mention_input_snapshot: advance.mention_input_snapshot ?? {
+            capability_snapshot_version: 1,
+            entries: [],
+          },
         });
         return {
           ...contractWork,
@@ -630,6 +779,61 @@ export function createAgentRunRepo(prisma: PrismaClient): AgentRunRepo {
           },
         });
         return renewed.count === 1;
+      });
+    },
+
+    recheckMentionAuthority(input) {
+      if (input.snapshot.entries.length === 0) {
+        return Promise.resolve({ authoritative: true });
+      }
+      return prisma.$transaction(async (tx) => {
+        const run = await tx.agent_runs.findUnique({
+          where: { id: BigInt(input.agentRunId) },
+        });
+        // 保守裁决：Run 缺失/已删时无法证明授权，一律拦截。
+        if (!run || run.is_delete !== 0) return { authoritative: false };
+        const mentionRows = await tx.conversation_message_mentions.findMany({
+          where: {
+            id: {
+              in: input.snapshot.entries.map((entry) => BigInt(entry.mention_id)),
+            },
+          },
+          select: {
+            id: true,
+            mention_type: true,
+            target_id: true,
+            target_version: true,
+            accepted_user_id: true,
+          },
+        });
+        const mentionById = new Map(
+          mentionRows.map((mention) => [mention.id.toString(), mention]),
+        );
+        const { assetById, sceneCardById } = await loadMentionTargetFacts(
+          tx,
+          mentionRows,
+        );
+        for (const entry of input.snapshot.entries) {
+          const mention = mentionById.get(entry.mention_id);
+          if (
+            !mention ||
+            (mention.mention_type !== "asset" &&
+              mention.mention_type !== "scene_card")
+          ) {
+            return { authoritative: false };
+          }
+          const { availability } = classifyMentionAvailability({
+            type: mention.mention_type,
+            targetVersion: mention.target_version,
+            acceptedUserId: mention.accepted_user_id,
+            asset: assetById.get(mention.target_id.toString()),
+            sceneCard: sceneCardById.get(mention.target_id.toString()),
+            projectId: run.project_id,
+            userId: run.user_id,
+          });
+          if (availability === "unavailable") return { authoritative: false };
+        }
+        return { authoritative: true };
       });
     },
 

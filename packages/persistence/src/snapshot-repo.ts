@@ -9,6 +9,7 @@ import {
 } from "@blue-whale/contracts";
 
 import { publicGenerationInput } from "./generation-input.js";
+import { classifyMentionAvailability } from "./mention-availability.js";
 
 /** Snapshot 读路径的 job + asset 聚合 db port（Prisma-backed）。
  *  对齐 Java SnapshotService 项目级 GenerationJob 与 Asset 引用读取：
@@ -257,34 +258,16 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         ) {
           continue;
         }
-        let availability: SnapshotMentionView["availability"] = "available";
-        let reason: MentionFailureReason | null = null;
-        if (mention.mention_type === "asset") {
-          const asset = assetById.get(mention.target_id.toString());
-          reason =
-            !asset || asset.is_delete || asset.status !== "normal"
-              ? "deleted"
-              : asset.project_id !== pid
-                ? "wrong_project"
-                : asset.user_id !== uid || mention.accepted_user_id !== uid
-                  ? "permission_lost"
-                  : null;
-          if (reason) availability = "unavailable";
-        } else {
-          const sceneCard = sceneCardById.get(mention.target_id.toString());
-          reason =
-            !sceneCard || sceneCard.is_delete !== 0
-              ? "deleted"
-              : sceneCard.project_id !== pid
-                ? "wrong_project"
-                : mention.accepted_user_id !== uid
-                  ? "permission_lost"
-                  : sceneCard.version !== mention.target_version
-                    ? "stale"
-                    : null;
-          if (reason === "stale") availability = "stale";
-          else if (reason) availability = "unavailable";
-        }
+        // 复用唯一可用性谓词（与 agent-run-repo 冻结路径同源，T08）。
+        const { availability, reason } = classifyMentionAvailability({
+          type: mention.mention_type,
+          targetVersion: mention.target_version,
+          acceptedUserId: mention.accepted_user_id,
+          asset: assetById.get(mention.target_id.toString()),
+          sceneCard: sceneCardById.get(mention.target_id.toString()),
+          projectId: pid,
+          userId: uid,
+        });
         const projected: SnapshotMentionView = {
           mention_id: mention.id.toString(),
           index: mention.mention_seq,

@@ -312,6 +312,7 @@ CREATE TABLE `agent_advances` (
     `status` VARCHAR(16) NOT NULL,
     `input_snapshot` JSON NOT NULL,
     `input_high_watermark_sequence_no` INTEGER NOT NULL,
+    `mention_input_snapshot` JSON NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 

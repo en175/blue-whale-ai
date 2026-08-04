@@ -70,19 +70,22 @@ function work(prompt = "生成蓝鲸海报") {
     run_pin: runPin,
     auto_creative_skill_candidates: [],
     activated_creative_skill_versions: [],
+    mention_input_snapshot: { capability_snapshot_version: 1, entries: [] },
     conversationId: "7",
     userId: "100",
     skillSummarize: false,
   };
 }
 
-/** T07（契约 §8.1/§8.4）：调用记录与临时交付的默认 mock，无既有记录、追加成功。 */
+/** T07（契约 §8.1/§8.4）：调用记录与临时交付的默认 mock，无既有记录、追加成功。
+ *  T08：硬权限闸门实时重查默认放行（authoritative: true）。 */
 function providerCallMocks(overrides: Record<string, unknown> = {}) {
   return {
     loadProviderCall: vi.fn().mockResolvedValue(null),
     openProviderCall: vi.fn().mockResolvedValue({}),
     settleProviderCall: vi.fn().mockResolvedValue(true),
     markProviderCallOutcomeUnknown: vi.fn().mockResolvedValue(true),
+    recheckMentionAuthority: vi.fn().mockResolvedValue({ authoritative: true }),
     appendProvisionalChunks: vi.fn().mockResolvedValue({
       kind: "appended",
       deliveryId: "77",
@@ -734,5 +737,171 @@ describe("runAgentWorkerOnce 总结分流", () => {
 
     expect(summarize.run).not.toHaveBeenCalled();
     expect(invoke).toHaveBeenCalled();
+  });
+
+  /** AC#5 实时重查：冻结快照全部 available（冻结时授权有效），
+   *  重查返回非权威即模拟「冻结后删除/撤权」——三闸门必须拦截。 */
+  const frozenAvailableSnapshot = {
+    capability_snapshot_version: 1,
+    entries: [
+      {
+        mention_id: "501",
+        mention_seq: 0,
+        type: "asset",
+        availability: "available",
+        reason: null,
+        projection: {
+          asset_type: "image",
+          mime: "image/png",
+          size: "1024",
+          width: 1200,
+          height: 800,
+          duration_ms: null,
+          content_sha256: "a".repeat(64),
+        },
+      },
+    ],
+  };
+  const revokedRecheck = () => ({
+    recheckMentionAuthority: vi
+      .fn()
+      .mockResolvedValue({ authoritative: false }),
+  });
+
+  it("blocks the provider call when the live authority recheck fails (AC#5 供应商调用前)", async () => {
+    const invoke = vi.fn();
+    const commitFailure = vi.fn().mockResolvedValue({
+      kind: "committed",
+      cursor: "9",
+      status: "failed",
+    });
+    const openProviderCall = vi.fn().mockResolvedValue({});
+    await runAgentWorkerOnce({
+      repo: {
+        claimNext: vi
+          .fn()
+          .mockResolvedValue({
+            ...work(),
+            mention_input_snapshot: frozenAvailableSnapshot,
+          }),
+        renewLease: vi.fn().mockResolvedValue(true),
+        commitSuccess: vi.fn(),
+        commitFailure,
+        ...providerCallMocks({ openProviderCall, ...revokedRecheck() }),
+      },
+      runtime: { name: "fake", ready: async () => true, invoke },
+      workerId: "worker-1",
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(openProviderCall).not.toHaveBeenCalled();
+    expect(commitFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ failureCode: "mention_input_unavailable" }),
+    );
+  });
+
+  it("blocks replay of a persisted succeeded result when the live authority recheck fails (AC#5 结果复用前)", async () => {
+    const invoke = vi.fn();
+    const commitFailure = vi.fn().mockResolvedValue({
+      kind: "committed",
+      cursor: "9",
+      status: "failed",
+    });
+    await runAgentWorkerOnce({
+      repo: {
+        claimNext: vi
+          .fn()
+          .mockResolvedValue({
+            ...work(),
+            mention_input_snapshot: frozenAvailableSnapshot,
+          }),
+        renewLease: vi.fn().mockResolvedValue(true),
+        commitSuccess: vi.fn(),
+        commitFailure,
+        ...providerCallMocks({
+          loadProviderCall: vi.fn().mockResolvedValue({
+            status: "succeeded",
+            resultPayload: {
+              content: "旧结果",
+              reasoning_summary: "说明",
+              action: { kind: "respond" },
+            },
+          }),
+          ...revokedRecheck(),
+        }),
+      },
+      runtime: { name: "fake", ready: async () => true, invoke },
+      workerId: "worker-1",
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(commitFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ failureCode: "mention_input_unavailable" }),
+    );
+  });
+
+  it("blocks RunCommit after a summarize-path result when the live authority recheck fails (AC#5 RunCommit 前)", async () => {
+    const invoke = vi.fn();
+    const commitFailure = vi.fn().mockResolvedValue({
+      kind: "committed",
+      cursor: "9",
+      status: "failed",
+    });
+    const commitSuccess = vi.fn();
+    const summarize = {
+      hasPending: vi.fn().mockResolvedValue(true),
+      run: vi.fn().mockResolvedValue({ kind: "handled", content: "已处理总结" }),
+    };
+    await runAgentWorkerOnce({
+      repo: {
+        claimNext: vi.fn().mockResolvedValue({
+          ...work(),
+          skillSummarize: true,
+          mention_input_snapshot: frozenAvailableSnapshot,
+        }),
+        renewLease: vi.fn().mockResolvedValue(true),
+        commitSuccess,
+        commitFailure,
+        ...providerCallMocks(revokedRecheck()),
+      },
+      runtime: { name: "fake", ready: async () => true, invoke },
+      summarize,
+      workerId: "worker-1",
+    });
+    expect(commitSuccess).not.toHaveBeenCalled();
+    expect(commitFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ failureCode: "mention_input_unavailable" }),
+    );
+  });
+
+  it("accepts a RunPin that grants only read_asset and write_plan_cards (AC#6)", async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      provider: "fake",
+      content: "已完成",
+      reasoningSummary: "已完成回答。",
+      action: { kind: "respond" },
+    });
+    const commitSuccess = vi.fn().mockResolvedValue({
+      kind: "committed",
+      cursor: "8",
+      status: "completed",
+    });
+    const surfacePin = patchRunPin(runPin, {
+      tool_grants: [
+        { tool_id: "read_asset", registry_version: 1 },
+        { tool_id: "write_plan_cards", registry_version: 1 },
+      ],
+    });
+    await runAgentWorkerOnce({
+      repo: {
+        claimNext: vi.fn().mockResolvedValue({ ...work(), run_pin: surfacePin }),
+        renewLease: vi.fn().mockResolvedValue(true),
+        commitSuccess,
+        commitFailure: vi.fn(),
+        ...providerCallMocks(),
+      },
+      runtime: { name: "fake", ready: async () => true, invoke },
+      workerId: "worker-1",
+    });
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(commitSuccess).toHaveBeenCalledTimes(1);
   });
 });
