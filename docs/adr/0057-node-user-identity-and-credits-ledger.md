@@ -3,7 +3,7 @@
 - **状态**：Superseded by [ADR-0062](0062-new-api-account-center-and-quota-billing.md)
 - **日期**：2026-07-27
 - **决策者**：朱建业（trueBurger）
-- **关联工单**：[IK4AJJ](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK4AJJ)
+- **关联工单**：[IK4AJJ](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK4AJJ)
 - **上游决策**：[ADR-0055](0055-prelaunch-typescript-unification-scope.md)、[ADR-0056](0056-business-api-into-nextjs-route-handlers.md)
 - **相关**：[ADR-0021 统一人民币计费](0021-unified-rmb-billing.md)（Go quota 语义，不在本次范围）、IK3UW5（Go-Node 支付对账，未解）
 

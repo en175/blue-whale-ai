@@ -2,7 +2,7 @@
 
 > 调研问题：xAI 开源的 Grok Build 能否在不接管产品领域模型与公开 API 的前提下，作为 Blue-Whale Agent 创作后端的基础？哪些 Agent 工程设计值得借鉴、哪些不适合照搬？如何转译为 Blue-Whale 自有后端架构？受限 Spike 应验收什么？
 > 本文只做架构借鉴与落地边界评估，不实施集成。
-> 触发工单：[评估 Grok Build 对 Blue-Whale Agent 后端的可借鉴性](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK1H93)。
+> 触发工单：[评估 Grok Build 对 Blue-Whale Agent 后端的可借鉴性](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK1H93)。
 
 > 评估对象：[`xai-org/grok-build`](https://github.com/xai-org/grok-build)
 >

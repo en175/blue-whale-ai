@@ -5,7 +5,7 @@
   不建设四套合同族、滚动版本矩阵、支付合同或独立发布链，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-26
 - **决策者**：KimJohn
-- **关联工单**：[确定跨进程 TypeScript 契约与版本策略](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWG)
+- **关联工单**：[确定跨进程 TypeScript 契约与版本策略](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3UWG)
 - **关联决策**：[ADR-0016 Project 公开 API 与可重放产品事件流](0016-project-api-and-replayable-event-stream.md)、[ADR-0050 无状态 AgentAdvance](0050-stateless-agent-advance-and-invocation-boundary.md)、[ADR-0051 Generation Worker 恢复边界](0051-node-generation-worker-execution-and-recovery-boundary.md)、[ADR-0054 public-api v1 浏览器产品合同](0054-public-api-v1-browser-product-contract.md)
 
 ## 背景

@@ -6,7 +6,7 @@
   [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-26
 - **决策者**：KimJohn
-- **关联工单**：[确定 Next.js 前端与 Product API 的新内部接口](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWH)
+- **关联工单**：[确定 Next.js 前端与 Product API 的新内部接口](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3UWH)
 - **替代规则**：[ADR-0043 D3 新消息 supersede 旧 Run](0043-agent-run-terminal-outcomes.md)
 - **关联决策**：[ADR-0036 UserInputRequest](0036-generalize-user-input-request-contract.md)、[ADR-0049 AgentRun 终态封口](0049-agent-run-terminal-seal-and-independent-convergence.md)、[ADR-0050 无状态 AgentAdvance](0050-stateless-agent-advance-and-invocation-boundary.md)
 

@@ -5,7 +5,7 @@
   AttemptPermit、结果核对与 SettlementOnlyRunCommit 不实施，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-26
 - **决策者**：KimJohn
-- **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)
+- **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3UWA)
 - **关联决策**：[ADR-0046 Runtime 错误与终态边界](0046-runtime-error-evidence-policy-and-terminal-boundary.md)、[ADR-0047 AgentRun 用户取消](0047-agent-run-user-cancellation-boundary.md)
 - **终态后收敛**：[ADR-0049 AgentRun 终态封口与独立收敛](0049-agent-run-terminal-seal-and-independent-convergence.md)
 

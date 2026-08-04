@@ -1,6 +1,6 @@
 # Issue tracker: Gitee
 
-仓库 `git@gitee.com:hangzhou_xuanfu_1/blue-whale-ai.git`（网页 https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues）。优先 MCP 工具，不可用时回退网页。
+仓库 `git@gitee.com:hangzhou-xuanfu_1/blue-whale-ai.git`（网页 https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues）。优先 MCP 工具，不可用时回退网页。
 
 ## ID 解析约定（通用，先于任何 `mcp__gitee-ent__*` 调用读）
 
@@ -34,7 +34,7 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 
 企业版 MCP（`mcp__gitee-ent__*`）用以下 ID 定位，**非 owner/repo**：
 
-- **enterprise_id**：`list_enterprises` 查，按 `path == "hangzhou_xuanfu_1"` 取 `id`。
+- **enterprise_id**：`list_enterprises` 查，按 `path == "hangzhou-xuanfu_1"` 取 `id`。
 - **project_id**（仓库 ID）：`list_enterprise_repositories` 查。创建 issue **必传**——不传则工单只进企业工作项、仓库 Issues 页不可见，PreToolUse hook `block-issue-without-repo.sh` 硬拦。
 - **program_id**（项目 ID）：`list_programs` 查（按 `name`/`search` 命中 Blue-Whale-AI 项目）。根 issue 创建**必传**且非 0——不传（=0）则工单游离于企业「项目管理」之外，同一 hook 硬拦。值不写死，对齐 ADR-0007 D5 动态查。
 - **label 数字 ID**：`list_enterprise_labels` 查；`label_ids` 传逗号分隔的数字 ID（非名称）。标签长度 2–20、非特殊字符。

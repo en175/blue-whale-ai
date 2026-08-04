@@ -2,7 +2,7 @@
 
 - **状态**：Accepted
 - **日期**：2026-07-21
-- **关联工单**：[建立平台工具注册表并接入 Bundle 发布期校验](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK2QBO)
+- **关联工单**：[建立平台工具注册表并接入 Bundle 发布期校验](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK2QBO)
 
 ## 背景
 

@@ -1,6 +1,6 @@
 # IK2D8R 首版 Runtime Bundle 迁移清单
 
-- **工单**：[IK2D8R — 审计并迁移首版 Runtime Bundle，清理旧固定判定契约](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK2D8R)
+- **工单**：[IK2D8R — 审计并迁移首版 Runtime Bundle，清理旧固定判定契约](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK2D8R)
 - **契约权威**：[Runtime Agent Bundle 领域契约与资源规范](../specs/2026-07-20-runtime-agent-bundle-contract.md)（Accepted v1）+ [runtime-agent-bundle.schema.json](../specs/runtime-agent-bundle.schema.json)
 - **首版 Bundle 维护源**：`blue-whale-agent-workspace/runtime-bundle/`（构建：`python3 build.py`，本地生成 `dist/` 便携包，gitignore 忽略不入库；测试现场重建）
 - **行为评测与隔离装载验证**：`blue_whale_agent_worker/tests/test_first_runtime_bundle.py`；导入静态校验：`FirstRuntimeBundleImportIT`
