@@ -89,8 +89,9 @@ export const frozenGenerationParametersSchema = z
   })
   .strict();
 
-/** ProviderPromptProjection 中单个引用素材：身份 + 角色 + 冻结时的受限投影。 */
-const providerPromptAssetSchema = z.discriminatedUnion("type", [
+/** ProviderPromptProjection 中单个引用素材：身份 + 角色 + 冻结时的受限投影。
+ *  抽到 export 供 SceneCardGenerationPreset（plan-application）复用首/尾帧角色投影。 */
+export const providerPromptAssetSchema = z.discriminatedUnion("type", [
   z
     .object({
       mention_id: decimalIdSchema,

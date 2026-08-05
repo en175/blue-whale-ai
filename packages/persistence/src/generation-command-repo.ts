@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { appendProjectEvent } from "./product-event-repo.js";
 
@@ -14,6 +14,8 @@ export interface CreateJobInput {
   input: Record<string, unknown>;
   actionIdentity: string;
   actionType: string;
+  /** 任务来源（generation_jobs.source）：默认 bottom_dock；计划应用走 plan。 */
+  source?: string;
 }
 
 export interface CreatedJob {
@@ -33,79 +35,89 @@ export interface GenerationCommandRepo {
 
 const SOURCE_BOTTOM_DOCK = "bottom_dock";
 
+/** 在调用方事务内创建 GenerationJob + cost 预留 + 日志 + 事件（IK67H9 抽出，让计划应用可组合进更大事务）。
+ *  surgical：行为与原 createJob 内联实现完全一致，只是把事务体上提。 */
+export async function createJobWithinTx(
+  tx: Prisma.TransactionClient,
+  input: CreateJobInput,
+): Promise<CreatedJob> {
+  const now = new Date();
+  const deadline = new Date(now.getTime() + 30 * 60 * 1000); // 30min 超时
+  const job = await tx.generation_jobs.create({
+    data: {
+      project_id: BigInt(input.projectId),
+      user_id: BigInt(input.userId),
+      type: input.type,
+      source: input.source ?? SOURCE_BOTTOM_DOCK,
+      status: "queued",
+      progress: 0,
+      input: input.input as never,
+      expected_output_count: input.expectedOutputCount,
+      action_identity: input.actionIdentity,
+      project_action_identity: input.actionIdentity,
+      strategy_version:
+        input.type === "video" ? "seedance-2.0-v1" : "image-sync-v1",
+      execution_deadline_at: deadline,
+      next_action_at: now,
+      fencing_token: 0,
+    },
+  });
+  await tx.cost_reservations.create({
+    data: {
+      generation_job_id: job.id,
+      user_id: BigInt(input.userId),
+      project_id: BigInt(input.projectId),
+      action_identity: input.actionIdentity,
+      action_type: input.actionType,
+      provider: "volc",
+      reserved_amount_fen: 0,
+      status: "reserved",
+      price_catalog_version: "dev",
+      exchange_rate_version: "dev",
+      model_policy_version: "dev",
+      cost_rule_version: "dev",
+    },
+  });
+  await tx.generation_job_logs.create({
+    data: {
+      generation_job_id: job.id,
+      event: "created",
+      status: "queued",
+      message: "任务已创建",
+      payload: { input },
+    } as never,
+  });
+  const event = await appendProjectEvent(tx, {
+    projectId: input.projectId,
+    eventType: "generation_job.created",
+    aggregateType: "generation_job",
+    aggregateId: job.id.toString(),
+    aggregateVersion: job.version,
+    correlationId: input.actionIdentity,
+    payload: {
+      job_id: job.id.toString(),
+      type: job.type,
+      source: job.source,
+      status: job.status,
+      progress: job.progress,
+      output_asset_ids: [],
+    },
+  });
+  return {
+    generation_job_id: job.id.toString(),
+    cursor: Number(event.cursor),
+  };
+}
+
 export function createGenerationCommandRepo(
   prisma: PrismaClient,
 ): GenerationCommandRepo {
   return {
     async createJob(input) {
-      const now = new Date();
-      const deadline = new Date(now.getTime() + 30 * 60 * 1000); // 30min 超时
-      return prisma.$transaction(async (tx) => {
-        const job = await tx.generation_jobs.create({
-          data: {
-            project_id: BigInt(input.projectId),
-            user_id: BigInt(input.userId),
-            type: input.type,
-            source: SOURCE_BOTTOM_DOCK,
-            status: "queued",
-            progress: 0,
-            input: input.input as never,
-            expected_output_count: input.expectedOutputCount,
-            action_identity: input.actionIdentity,
-            project_action_identity: input.actionIdentity,
-            strategy_version:
-              input.type === "video" ? "seedance-2.0-v1" : "image-sync-v1",
-            execution_deadline_at: deadline,
-            next_action_at: now,
-            fencing_token: 0,
-          },
-        });
-        await tx.cost_reservations.create({
-          data: {
-            generation_job_id: job.id,
-            user_id: BigInt(input.userId),
-            project_id: BigInt(input.projectId),
-            action_identity: input.actionIdentity,
-            action_type: input.actionType,
-            provider: "volc",
-            reserved_amount_fen: 0,
-            status: "reserved",
-            price_catalog_version: "dev",
-            exchange_rate_version: "dev",
-            model_policy_version: "dev",
-            cost_rule_version: "dev",
-          },
-        });
-        await tx.generation_job_logs.create({
-          data: {
-            generation_job_id: job.id,
-            event: "created",
-            status: "queued",
-            message: "任务已创建",
-            payload: { input },
-          } as never,
-        });
-        const event = await appendProjectEvent(tx, {
-          projectId: input.projectId,
-          eventType: "generation_job.created",
-          aggregateType: "generation_job",
-          aggregateId: job.id.toString(),
-          aggregateVersion: job.version,
-          correlationId: input.actionIdentity,
-          payload: {
-            job_id: job.id.toString(),
-            type: job.type,
-            source: job.source,
-            status: job.status,
-            progress: job.progress,
-            output_asset_ids: [],
-          },
-        });
-        return {
-          generation_job_id: job.id.toString(),
-          cursor: Number(event.cursor),
-        };
-      }, { maxWait: 10_000, timeout: 30_000 });
+      return prisma.$transaction(
+        (tx) => createJobWithinTx(tx, input),
+        { maxWait: 10_000, timeout: 30_000 },
+      );
     },
 
     async requestCancel(jobId, userId) {

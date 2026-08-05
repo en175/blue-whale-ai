@@ -1,7 +1,9 @@
 import { bundledAgentRuntimeManifest } from "@blue-whale/agent-runtime";
 import {
   createAgentRunRepo,
+  createCanvasRepo,
   createConversationRepo,
+  createPlanApplicationRepo,
   getPrismaClient,
 } from "@blue-whale/persistence";
 
@@ -16,4 +18,16 @@ export function createAgentRunCommandDeps() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL required");
   return createAgentRunRepo(getPrismaClient(databaseUrl));
+}
+
+export function createPlanApplicationDeps() {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) throw new Error("DATABASE_URL required");
+  return createPlanApplicationRepo(getPrismaClient(databaseUrl));
+}
+
+export function createCanvasDeps() {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) throw new Error("DATABASE_URL required");
+  return createCanvasRepo(getPrismaClient(databaseUrl));
 }

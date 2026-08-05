@@ -43,6 +43,10 @@ export interface SnapshotData {
   agent_runs: readonly unknown[];
   /** 已原子接纳的不可变计划卡（T09，IK67H6，契约 §9）。 */
   plan_messages: readonly unknown[];
+  /** 已创建的视频场景卡（IK67H9，T11）。 */
+  scene_cards: readonly unknown[];
+  /** 成功应用 PlanMessage 的不可变回执（IK67H9，T11）。 */
+  plan_applications: readonly unknown[];
   generation_jobs: SnapshotGenerationJob[];
   assets: Record<string, SnapshotAssetSummary>;
   high_watermark_cursor: WireInteger;
@@ -169,6 +173,20 @@ export async function handleGetSnapshot(
         plan.source_plan_message_id === null
           ? null
           : wireInteger(plan.source_plan_message_id),
+    })),
+    scene_cards: conversation.scene_cards.map((card) => ({
+      ...card,
+      scene_card_id: wireInteger(card.scene_card_id),
+    })),
+    plan_applications: conversation.plan_applications.map((receipt) => ({
+      ...receipt,
+      receipt_id: wireInteger(receipt.receipt_id),
+      message_id: wireInteger(receipt.message_id),
+      scene_card_id:
+        receipt.scene_card_id === null
+          ? null
+          : wireInteger(receipt.scene_card_id),
+      first_generation_job_id: wireInteger(receipt.first_generation_job_id),
     })),
     generation_jobs: generation_jobs.map(toWireJob),
     assets: assetMap,

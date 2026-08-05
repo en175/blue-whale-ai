@@ -133,6 +133,12 @@ export {
   type CreatedJob,
 } from "./generation-command-repo.js";
 export {
+  createPlanApplicationRepo,
+  type PlanApplicationRepo,
+  type ApplySceneCardCreatePlanInput,
+  type ApplySceneCardCreateResult,
+} from "./plan-application-repo.js";
+export {
   createWorkerRepo,
   type WorkerRepo,
   type ClaimedJob,
