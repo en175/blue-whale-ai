@@ -37,6 +37,7 @@ function pickLibraryView(s: SkillLibraryView): SkillLibraryView {
     cover_url: s.cover_url,
     source: s.source,
     asset_domain: s.asset_domain,
+    skill_code: s.skill_code,
     added: s.added,
     category: s.category,
     usage_count: s.usage_count,
@@ -52,6 +53,7 @@ function pickMineView(s: SkillMineView): SkillMineView {
     cover_url: s.cover_url,
     source: s.source,
     asset_domain: s.asset_domain,
+    skill_code: s.skill_code,
   };
 }
 

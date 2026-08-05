@@ -162,7 +162,7 @@ export function MyContent({
         ) : items.length === 0 ? (
           <StateHint text="还没有添加技能，去技能库逛逛。" />
         ) : (
-          <div className="tc-agent-skill-panel__section-list grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="tc-agent-skill-panel__section-list grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {items.map((skill, index) => (
               <MySkillRow
                 key={skill.creative_skill_id ?? index}
@@ -220,6 +220,10 @@ export function MyContent({
   );
 }
 
+/** 我的技能横版卡片（横版卡片改版定稿）：左方形封面 + 右侧标题（2 行截断，旁挂
+ *  官方/个人徽标）/简介（3 行截断），底部 直接使用 + 自动开关（label 在开关外左侧）；
+ *  悬停封面左上角浮现「…」菜单：官方引用行仅「移出我的技能」，个人行「查看技能」+
+ *  「删除技能」（确认框 + 永久删除，IK60WZ）；悬停卡片时简介全文以向下展开的大浮层呈现。 */
 function MySkillRow({
   skill,
   onToggleAuto,
@@ -240,7 +244,7 @@ function MySkillRow({
   // 官方（引用 auto）与个人（本体 auto_match，§16.1）都可独立开关自动匹配。
   const canToggleAuto = skill.creative_skill_id !== null;
   const displayName = skill.name ?? "—";
-  // 省略号菜单（IK60WX/IK60WZ）：官方引用行仅「移出我的技能」；
+  // 省略号菜单（IK60WX/IK60WZ）：悬停封面浮现，官方引用行仅「移出我的技能」；
   // 个人行「查看技能」（只读正文 + 复制）与「删除技能」（确认框 + 永久删除）。
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLSpanElement>(null);
@@ -259,122 +263,132 @@ function MySkillRow({
       data-testid="skill-my-row"
       className={`tc-agent-skill-row ${
         auto ? "tc-agent-skill-row--checked " : ""
-      }tc-agent-skill-row--switch-control tc-agent-skill-row--with-cover grid grid-cols-[112px_minmax(0,1fr)] gap-3.5 min-h-[142px] p-3.5 rounded-xl bg-white/[0.035] border border-white/[0.08] transition-colors duration-150 hover:bg-white/[0.05]`}
+      }tc-agent-skill-row--switch-control tc-agent-skill-row--with-cover group relative flex gap-3 rounded-xl bg-white/[0.035] border border-white/[0.08] transition-colors duration-150 hover:bg-white/[0.05] hover:border-white/[0.18] hover:z-20 p-3`}
     >
-      <SkillCover url={skill.cover_url} name={skill.name} />
-      <div className="tc-agent-skill-row__toggle flex flex-col min-w-0">
-        <span className="tc-agent-skill-row__body flex flex-col gap-1">
-          <span className="tc-agent-skill-row__title-line flex items-center gap-1">
-            <span className="tc-agent-skill-row__title text-[13px] font-semibold text-white/90 truncate">
-              {displayName}
-            </span>
-            <span
-              ref={menuRef}
-              className="tc-agent-skill-row__menu relative inline-flex ml-auto shrink-0"
-              onKeyDown={(e) => {
-                // 菜单打开时 ESC 先收菜单（stopPropagation 防冒到 window 关面板）
-                if (e.key === "Escape" && menuOpen) {
-                  e.stopPropagation();
-                  setMenuOpen(false);
-                }
-              }}
+      <div className="relative w-[112px] h-[112px] shrink-0 self-center">
+        <SkillCover url={skill.cover_url} name={skill.name} />
+        {/* 悬停浮现的「…」菜单（封面左上角） */}
+        <span
+          ref={menuRef}
+          className={`tc-agent-skill-row__menu absolute left-1 top-1 z-20 transition-opacity ${
+            menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          }`}
+          onKeyDown={(e) => {
+            // 菜单打开时 ESC 先收菜单（stopPropagation 防冒到 window 关面板）
+            if (e.key === "Escape" && menuOpen) {
+              e.stopPropagation();
+              setMenuOpen(false);
+            }
+          }}
+        >
+          <button
+            type="button"
+            data-testid="skill-my-row-menu"
+            aria-label={`更多操作：${displayName}`}
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-black/55 text-white/80 hover:bg-black/75 hover:text-white transition-colors"
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <MoreHorizontal size={13} aria-hidden="true" />
+          </button>
+          {menuOpen && (
+            <div
+              role="menu"
+              aria-label={`技能操作：${displayName}`}
+              className="absolute left-0 top-full z-20 mt-1 w-36 rounded-lg border border-white/[0.1] bg-[var(--tc-menu-bg)] py-1 shadow-[var(--tc-dropdown-shadow)]"
             >
-              <button
-                type="button"
-                data-testid="skill-my-row-menu"
-                aria-label={`更多操作：${displayName}`}
-                aria-expanded={menuOpen}
-                aria-haspopup="menu"
-                className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-white/45 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
-                onClick={() => setMenuOpen((v) => !v)}
-              >
-                <MoreHorizontal size={14} aria-hidden="true" />
-              </button>
-              {menuOpen && (
-                <div
-                  role="menu"
-                  aria-label={`技能操作：${displayName}`}
-                  className="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-white/[0.1] bg-[var(--tc-menu-bg)] py-1 shadow-[var(--tc-dropdown-shadow)]"
+              {skill.asset_domain === "official" ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="skill-my-row-remove"
+                  className="flex w-full items-center px-3 py-1.5 text-left text-[12px] text-white/60 hover:bg-white/[0.06] hover:text-white/90 transition-colors"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onRemove();
+                  }}
                 >
-                  {skill.asset_domain === "official" ? (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      data-testid="skill-my-row-remove"
-                      className="flex w-full items-center px-3 py-1.5 text-left text-[12px] text-white/60 hover:bg-white/[0.06] hover:text-white/90 transition-colors"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onRemove();
-                      }}
-                    >
-                      移出我的技能
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        data-testid="skill-my-row-view"
-                        className="flex w-full items-center px-3 py-1.5 text-left text-[12px] text-white/60 hover:bg-white/[0.06] hover:text-white/90 transition-colors"
-                        onClick={() => {
-                          setMenuOpen(false);
-                          onView();
-                        }}
-                      >
-                        查看技能
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        data-testid="skill-my-row-delete"
-                        className="flex w-full items-center px-3 py-1.5 text-left text-[12px] text-[var(--tc-destructive)] hover:bg-white/[0.06] transition-colors"
-                        onClick={() => {
-                          setMenuOpen(false);
-                          onDelete();
-                        }}
-                      >
-                        删除技能
-                      </button>
-                    </>
-                  )}
-                </div>
+                  移出我的技能
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-testid="skill-my-row-view"
+                    className="flex w-full items-center px-3 py-1.5 text-left text-[12px] text-white/60 hover:bg-white/[0.06] hover:text-white/90 transition-colors"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onView();
+                    }}
+                  >
+                    查看技能
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-testid="skill-my-row-delete"
+                    className="flex w-full items-center px-3 py-1.5 text-left text-[12px] text-[var(--tc-destructive)] hover:bg-white/[0.06] transition-colors"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onDelete();
+                    }}
+                  >
+                    删除技能
+                  </button>
+                </>
               )}
-            </span>
+            </div>
+          )}
+        </span>
+      </div>
+      <div className="tc-agent-skill-row__toggle flex flex-col flex-1 min-w-0">
+        <span className="tc-agent-skill-row__title-line flex items-center gap-1.5">
+          <span className="tc-agent-skill-row__title text-[13px] font-semibold text-white/90 line-clamp-2 break-words leading-snug">
+            {displayName}
           </span>
-          <span className="tc-agent-skill-row__desc text-xs text-white/50 line-clamp-2 leading-relaxed break-words">
-            {skill.description || "—"}
-          </span>
-          <span className="tc-agent-skill-row__library-meta flex items-center gap-3 mt-1 text-[11px] text-white/40">
-            <span className="tc-agent-skill-row__contributor">
-              @{skill.asset_domain === "personal" ? "个人" : "官方"}
-            </span>
+          <span className="shrink-0 self-start rounded bg-white/[0.08] px-1.5 py-0.5 text-[10px] leading-none text-white/45">
+            {skill.asset_domain === "personal" ? "个人" : "官方"}
           </span>
         </span>
-        <span className="tc-agent-skill-row__controls flex items-center gap-2 mt-auto">
+        <span className="tc-agent-skill-row__desc mt-1 text-xs text-white/50 line-clamp-3 leading-relaxed break-words">
+          {skill.description || "—"}
+        </span>
+        <span className="tc-agent-skill-row__controls mt-auto pt-2 flex items-center justify-end gap-2">
           <span className="tc-agent-skill-row__quick-actions flex items-center gap-2">
             <UseButton
               onClick={onUse}
               disabled={skill.creative_skill_id === null}
             />
-            <button
-              type="button"
-              className="tc-agent-skill-row__switch"
-              role="switch"
-              aria-checked={auto}
-              aria-label={`${auto ? "关闭" : "开启"}自动应用：${displayName}`}
-              aria-busy="false"
-              data-tooltip="开启后，Agent 会在合适时机自动应用此 Skill。"
-              disabled={!canToggleAuto}
-              onClick={onToggleAuto}
-            >
-              <span className="tc-agent-skill-row__switch-label">自动</span>
-              <span
-                className="tc-agent-skill-row__switch-thumb"
-                aria-hidden="true"
-              />
-            </button>
+            <span className="flex items-center gap-1.5">
+              <span className="text-[11px] text-white/60">自动</span>
+              <button
+                type="button"
+                className="tc-agent-skill-row__switch"
+                role="switch"
+                aria-checked={auto}
+                aria-label={`${auto ? "关闭" : "开启"}自动应用：${displayName}`}
+                aria-busy="false"
+                data-tooltip="开启后，Agent 会在合适时机自动应用此 Skill。"
+                disabled={!canToggleAuto}
+                onClick={onToggleAuto}
+              >
+                <span
+                  className="tc-agent-skill-row__switch-thumb"
+                  aria-hidden="true"
+                />
+              </button>
+            </span>
           </span>
         </span>
+      </div>
+      {/* 悬停展开浮层（与技能库同款）：简介全文向下展开 */}
+      <div
+        aria-hidden="true"
+        className="tc-agent-skill-card__desc-overlay pointer-events-none absolute left-[136px] -right-4 top-12 z-30 rounded-xl border border-white/[0.14] bg-[#1b1b1e] p-3.5 text-[12.5px] leading-relaxed text-white/85 shadow-[0_16px_40px_rgba(0,0,0,0.65)] opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+      >
+        {skill.description || ""}
       </div>
     </div>
   );
