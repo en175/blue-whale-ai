@@ -250,13 +250,15 @@ async function processClaimedJob(
       await repo.failJob(job.id, "no_result", "生成服务未返回结果");
       return job.id;
     }
+    // IK67HE/T14：部分成功（images.length < n 但 > 0）→ 已成功的转 Asset 并 completeJob，
+    // 由 completeJob 按槽位聚合为 partially_succeeded（ADR-0026）；缺失槽标 failed 供重试补齐。
     if (images.length !== n) {
-      await repo.failJob(
+      await repo.appendLog(
         job.id,
-        "output_count_mismatch",
-        `生成服务返回 ${images.length} 张，期望 ${n} 张`,
+        "partial_output",
+        "processing",
+        `生成服务返回 ${images.length} 张，期望 ${n} 张，按部分成功处理`,
       );
-      return job.id;
     }
     const assetIds: string[] = [];
     for (const img of images) {

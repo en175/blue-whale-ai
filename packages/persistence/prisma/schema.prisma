@@ -789,3 +789,26 @@ model scene_card_generation_records {
   @@index([project_id], map: "idx_record_project")
   @@index([summary_status], map: "idx_record_status")
 }
+
+/// 生成输出槽位（IK67HE/T14，spec §4.4 / ADR-0026）：每次生成在提交时固定数量的槽，
+/// 身份与顺序稳定（slot_index）。成功 Asset 永久占据原槽；重试只补 failed/missing 槽，
+/// 不覆盖成功输出。scene_card_generation_record_id 关联 SceneCard 视频聚合（视频路径）；
+/// 图片路径留空。retry_of_slot_id 指向被重试的原始槽，形成同槽位重试链。
+model generation_output_slots {
+  id                              BigInt   @id @default(autoincrement())
+  project_id                      BigInt
+  generation_job_id               BigInt
+  scene_card_generation_record_id BigInt?
+  slot_index                      Int
+  status                          String   @db.VarChar(24) // pending/succeeded/failed/missing
+  asset_id                        BigInt?
+  retry_of_slot_id                BigInt?
+  initial_placement_status        String   @default("pending") @db.VarChar(16) // pending/placed
+  gmt_create                      DateTime @default(now()) @db.DateTime(0)
+  gmt_modified                    DateTime @default(now()) @db.DateTime(0)
+
+  @@index([generation_job_id], map: "idx_slot_job")
+  @@index([scene_card_generation_record_id], map: "idx_slot_record")
+  @@index([project_id, initial_placement_status], map: "idx_slot_placement")
+  @@unique([generation_job_id, slot_index], map: "uk_slot_job_index")
+}

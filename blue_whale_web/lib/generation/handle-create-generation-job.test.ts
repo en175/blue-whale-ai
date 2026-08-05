@@ -116,6 +116,34 @@ describe("handleCreateGenerationJob", () => {
     expect(result.code).toBe(400);
   });
 
+  it("video 仅允许一个输出槽", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+    const result = await handleCreateGenerationJob(
+      "9",
+      "55",
+      {
+        type: "video",
+        input_asset_ids: [],
+        parameters: {
+          prompt: "让鲸鱼动起来",
+          aspect_ratio: "16:9",
+          model_id: "seedance-2",
+        },
+        expected_output_count: 2,
+      },
+      "k-video-count",
+      deps,
+    );
+
+    expect(result).toEqual({
+      code: 400,
+      msg: "视频生成仅支持一个输出",
+      data: null,
+    });
+    expect(deps.command.createJob).not.toHaveBeenCalled();
+  });
+
   it("video 参考图 > 1 → 400", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
@@ -482,21 +510,62 @@ describe("handleCancelGenerationJob", () => {
 });
 
 describe("handleRetryGenerationJob", () => {
+  it("缺少幂等键 → 400 且不触发重试", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+
+    const result = await handleRetryGenerationJob(
+      "9",
+      "55",
+      "200",
+      "",
+      "",
+      deps,
+    );
+
+    expect(result).toEqual({
+      code: 400,
+      msg: "Idempotency-Key 不能为空",
+      data: null,
+    });
+    expect(deps.command.retryJob).not.toHaveBeenCalled();
+  });
+
   it("project 不归属 → 100301 且不触发重试", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue(null);
-    const result = await handleRetryGenerationJob("9", "56", "200", "key-r1", deps);
+    const result = await handleRetryGenerationJob(
+      "9",
+      "56",
+      "200",
+      "key-r1",
+      "",
+      deps,
+    );
     expect(result).toEqual({ code: 100301, msg: "资源不存在", data: null });
     expect(deps.command.retryJob).not.toHaveBeenCalled();
   });
 
-  it("非本人终态任务 → 100301（retryJob 按 userId 校验）", async () => {
+  it("非本人或非本 Project 的终态任务 → 100301", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
     deps.command.retryJob.mockResolvedValue(null);
-    const result = await handleRetryGenerationJob("9", "55", "999", "key-r2", deps);
+    const result = await handleRetryGenerationJob(
+      "9",
+      "55",
+      "999",
+      "key-r2",
+      "",
+      deps,
+    );
     expect(result).toEqual({ code: 100301, msg: "资源不存在", data: null });
-    expect(deps.command.retryJob).toHaveBeenCalledWith("999", "9", "key-r2");
+    expect(deps.command.retryJob).toHaveBeenCalledWith(
+      "999",
+      "55",
+      "9",
+      "key-r2",
+      expect.any(String),
+    );
   });
 
   it("本人终态失败任务 → 200 + 新 job", async () => {
@@ -507,8 +576,33 @@ describe("handleRetryGenerationJob", () => {
       type: "image",
       cursor: 0,
     });
-    const result = await handleRetryGenerationJob("9", "55", "200", "key-r3", deps);
+    const result = await handleRetryGenerationJob(
+      "9",
+      "55",
+      "200",
+      "key-r3",
+      "",
+      deps,
+    );
     expect(result.code).toBe(200);
-    expect(result.data).toMatchObject({ generation_job_id: "201", type: "image" });
+    expect(result.data).toMatchObject({
+      generation_job_id: "201",
+      type: "image",
+    });
+  });
+
+  it("同幂等键异载荷 → 100409 冲突（IK67HE/T14）", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+    deps.command.retryJob.mockResolvedValue({ kind: "idempotency_conflict" });
+    const result = await handleRetryGenerationJob(
+      "9",
+      "55",
+      "200",
+      "key-r4",
+      "body-x",
+      deps,
+    );
+    expect(result.code).toBe(100409);
   });
 });

@@ -98,12 +98,23 @@ describe("handleGetSnapshot 成功快照", () => {
     const canvas = makeCanvasRepo();
     const job = {
       job_id: "100",
+      retry_of_job_id: "99",
       type: "image",
       source: "dock",
       status: "succeeded",
       progress: 100,
       input: { prompt: "cat" },
       output_asset_ids: ["200"],
+      output_slots: [
+        {
+          slot_id: "501",
+          slot_index: 2,
+          status: "succeeded",
+          asset_id: "200",
+          retry_of_slot_id: "401",
+          initial_placement_status: "placed",
+        },
+      ],
       stored_error: null,
     };
     const asset = {
@@ -151,12 +162,23 @@ describe("handleGetSnapshot 成功快照", () => {
         generation_jobs: [
           {
             job_id: "100",
+            retry_of_job_id: "99",
             type: "image",
             source: "dock",
             status: "succeeded",
             progress: 100,
             input: { prompt: "cat" },
             output_asset_ids: ["200"],
+            output_slots: [
+              {
+                slot_id: "501",
+                slot_index: 2,
+                status: "succeeded",
+                asset_id: "200",
+                retry_of_slot_id: "401",
+                initial_placement_status: "placed",
+              },
+            ],
             error: null,
           },
         ],

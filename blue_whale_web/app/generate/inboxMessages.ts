@@ -92,14 +92,17 @@ function generationAsset(
 function generationOutputs(
   job: Record<string, unknown>,
 ): Record<string, unknown>[] {
-  const outputs = Array.isArray(job.outputs)
-    ? job.outputs.filter(
-        (output): output is Record<string, unknown> =>
-          !!output &&
-          typeof output === "object" &&
-          typeof (output as Record<string, unknown>).slot_index === "number",
-      )
-    : [];
+  const source = Array.isArray(job.output_slots)
+    ? job.output_slots
+    : Array.isArray(job.outputs)
+      ? job.outputs
+      : [];
+  const outputs = source.filter(
+    (output): output is Record<string, unknown> =>
+      !!output &&
+      typeof output === "object" &&
+      typeof (output as Record<string, unknown>).slot_index === "number",
+  );
   if (outputs.length > 0) {
     return [...outputs].sort(
       (left, right) => Number(left.slot_index) - Number(right.slot_index),

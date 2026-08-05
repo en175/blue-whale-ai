@@ -78,6 +78,7 @@ function validate(body: CreateGenerationJobBody): string | null {
   const count = Number(body.expected_output_count);
   if (!Number.isInteger(count) || count < 1 || count > 4)
     return "expected_output_count 须为 1-4";
+  if (type === "video" && count !== 1) return "视频生成仅支持一个输出";
   const inputAssetIds = Array.isArray(body.input_asset_ids)
     ? body.input_asset_ids
     : [];

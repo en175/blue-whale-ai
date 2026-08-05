@@ -1,7 +1,4 @@
-import type {
-  Prisma,
-  PrismaClient,
-} from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
   CapabilitySnapshotVersion,
   FrozenGenerationParameters,
@@ -49,7 +46,12 @@ export type RegenerateSceneCardResult =
       preset_version: number;
       cursor: string;
     }
-  | { kind: "replayed"; scene_card_id: string; generation_job_id: string; record_id: string }
+  | {
+      kind: "replayed";
+      scene_card_id: string;
+      generation_job_id: string;
+      record_id: string;
+    }
   | { kind: "idempotency_conflict" }
   | { kind: "scene_card_not_found" }
   | {
@@ -200,11 +202,11 @@ async function regenerateSceneCardInTransaction(
   if (existing) {
     if (existing.request_hash !== input.requestHash)
       return { kind: "idempotency_conflict" };
-    if (
-      existing.resource_id === null ||
-      existing.generation_job_id === null
-    )
-      return { kind: "validation_failed", reason: "idempotent record missing resources" };
+    if (existing.resource_id === null || existing.generation_job_id === null)
+      return {
+        kind: "validation_failed",
+        reason: "idempotent record missing resources",
+      };
     return {
       kind: "replayed",
       scene_card_id: existing.resource_id.toString(),
@@ -282,14 +284,16 @@ async function regenerateSceneCardInTransaction(
   if (!capability || !capability.enabled || capability.is_delete)
     return { kind: "capability_drift" } as const;
   const recomputedDigest = capabilityDigestFromModelCapability(capability);
-  if (capability.version !== snapshot.row_version || recomputedDigest !== snapshot.digest)
+  if (
+    capability.version !== snapshot.row_version ||
+    recomputedDigest !== snapshot.digest
+  )
     return { kind: "capability_drift" } as const;
 
   // 5b. 参数越界（AC#1 能力约束）：提交参数必须在当前能力支持范围内，否则零写入。
   // reference_mode 合法性交由 worker + 前端过滤，后端不在此推断（见 checkCapabilityLimit 注释）。
   const limitReason = checkCapabilityLimit(input.parameters, capability);
-  if (limitReason)
-    return { kind: "capability_limit", reason: limitReason };
+  if (limitReason) return { kind: "capability_limit", reason: limitReason };
 
   // 6. 引用素材有效性（AC#4，全部在副作用前）。
   const referenceCheck = await validateDerivedReferences(
@@ -312,7 +316,8 @@ async function regenerateSceneCardInTransaction(
     data: {
       parameters: input.parameters as unknown as Prisma.InputJsonValue,
       reference_mode: input.reference_mode,
-      reference_assets: input.reference_assets as unknown as Prisma.InputJsonValue,
+      reference_assets:
+        input.reference_assets as unknown as Prisma.InputJsonValue,
       capability_snapshot_version:
         input.capability_snapshot_version as unknown as Prisma.InputJsonValue,
       version: { increment: 1 },
@@ -332,10 +337,11 @@ async function regenerateSceneCardInTransaction(
     projectId: input.projectId,
     userId: input.userId,
     type: "video",
-    expectedOutputCount: Number(input.parameters.count ?? 1),
+    expectedOutputCount: 1,
     source: "scene_card",
     actionIdentity: input.idempotencyKey,
     actionType: "scene_card.video_regeneration",
+    sceneCardId: sceneCardId.toString(),
     input: {
       scene_card_id: sceneCardId.toString(),
       plan_message_id: firstReceipt.message_id.toString(),
@@ -361,6 +367,11 @@ async function regenerateSceneCardInTransaction(
       application_receipt_id: firstReceipt.id,
       first_generation_job_id: BigInt(createdJob.generation_job_id),
     },
+  });
+  // IK67HE/T14：回填首个 job 的输出槽绑定 record（createJobWithinTx 早于 record 创建）。
+  await tx.generation_output_slots.updateMany({
+    where: { generation_job_id: BigInt(createdJob.generation_job_id) },
+    data: { scene_card_generation_record_id: record.id },
   });
 
   // 10. INSERT command_idempotency（operation=scene_card.regenerate，resource_id=scene_card_id）。
@@ -404,7 +415,11 @@ async function regenerateSceneCardInTransaction(
       plan_message_id: firstReceipt.message_id.toString(),
     },
   });
-  cursor = Math.max(cursor, Number(presetEvent.cursor), Number(recordEvent.cursor));
+  cursor = Math.max(
+    cursor,
+    Number(presetEvent.cursor),
+    Number(recordEvent.cursor),
+  );
 
   return {
     kind: "applied",
@@ -436,7 +451,12 @@ export function createSceneCardGenerationRepo(
       if (!project) return { kind: "forbidden" } as const;
       const sceneCard = await prisma.scene_cards.findFirst({
         where: { id: sid, project_id: pid, is_delete: 0 },
-        select: { id: true, title: true, content_markdown: true, version: true },
+        select: {
+          id: true,
+          title: true,
+          content_markdown: true,
+          version: true,
+        },
       });
       if (!sceneCard) return { kind: "not_found" } as const;
       const preset = await prisma.scene_card_generation_presets.findFirst({
@@ -462,9 +482,7 @@ export function createSceneCardGenerationRepo(
           select: { provider_prompt_projection: true },
         });
         const raw = planMessage?.provider_prompt_projection as
-          | { prompt_text?: unknown }
-          | null
-          | undefined;
+          { prompt_text?: unknown } | null | undefined;
         if (typeof raw?.prompt_text === "string")
           projection = { prompt_text: raw.prompt_text };
       }

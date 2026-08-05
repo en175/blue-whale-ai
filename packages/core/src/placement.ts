@@ -29,11 +29,14 @@ export const DEFAULT_NODE_WIDTH = 200;
 export const DEFAULT_NODE_HEIGHT = 200;
 export const DEFAULT_GAP = 24;
 export const DEFAULT_MAX_PER_ROW = 3;
+/** Approved SceneCard Spec 固定宽度；生产渲染器接入前使用原型的兼容高度。 */
+export const SCENE_CARD_WIDTH = 400;
+export const SCENE_CARD_FALLBACK_HEIGHT = 1080;
 /** 行搜索上限，防无限循环；穷尽后回起点格（允许重叠优于无落点）。 */
 const SEARCH_ROWS = 50;
 
 /** AABB 相交检测（边界相切视为不重叠）。 */
-function intersects(a: Rect, b: Rect): boolean {
+export function intersects(a: Rect, b: Rect): boolean {
   return (
     a.x < b.x + b.width &&
     a.x + a.width > b.x &&

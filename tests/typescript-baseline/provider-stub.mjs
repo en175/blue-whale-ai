@@ -48,10 +48,17 @@ function normalizeOutcomeSlot(slot, modes) {
   ) {
     return null;
   }
+  // IK67HE/T14：partial 模式携带 successCount（返回少于 n 张触发部分成功）。
+  let successCount = null;
+  if (mode === "partial") {
+    successCount = Number(slot.successCount ?? 0);
+    if (!Number.isInteger(successCount) || successCount < 0) return null;
+  }
   return {
     mode,
     status,
     delayMs,
+    successCount,
     // 0 = 无限生效直到复位；>0 = 倒计时次数。
     remaining: times > 0 ? times : null,
   };
@@ -80,7 +87,7 @@ function applyScenarios(input) {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     return false;
   }
-  const image = normalizeOutcomeSlot(input.image, ["success", "fail", "empty"]);
+  const image = normalizeOutcomeSlot(input.image, ["success", "fail", "empty", "partial"]);
   const videoSubmit = normalizeOutcomeSlot(input.videoSubmit, [
     "success",
     "fail",
@@ -238,6 +245,15 @@ const server = createServer(async (request, response) => {
       }
       if (imageSlot.mode === "empty") {
         return sendJson(response, 200, { created: 1, data: [] });
+      }
+      // IK67HE/T14：partial 模式——按 successCount 返回少于 n 张（触发部分成功）。
+      if (imageSlot.mode === "partial") {
+        const count = Math.max(0, Number(imageSlot.successCount ?? 0));
+        const data = [];
+        for (let i = 0; i < count; i += 1) {
+          data.push({ url: `http://provider-stub/generated-image-${i}.png` });
+        }
+        return sendJson(response, 200, { created: count, data });
       }
     }
     return sendJson(response, 200, {

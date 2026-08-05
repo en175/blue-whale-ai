@@ -102,11 +102,17 @@ export {
   sceneCardGenerationPresetSchema,
   sceneCardGenerationRecordStatusSchema,
   sceneCardGenerationRecordSchema,
+  generationOutputSlotStatusSchema,
+  generationOutputSlotViewSchema,
+  generationJobSummaryStatusSchema,
   type PlanApplicationReceipt,
   type VideoReferenceMode,
   type SceneCardGenerationPreset,
   type SceneCardGenerationRecordStatus,
   type SceneCardGenerationRecord,
+  type GenerationOutputSlotStatus,
+  type GenerationOutputSlotView,
+  type GenerationJobSummaryStatus,
 } from "./plan-application.js";
 export {
   sceneCardRegenerationRequestSchema,

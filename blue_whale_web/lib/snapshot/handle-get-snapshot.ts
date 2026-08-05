@@ -16,12 +16,21 @@ const RESOURCE_NOT_FOUND_CODE = 100301;
 /** Snapshot 信封里的 generation_job 摘要（对齐 Java GenerationJobDto，snake_case wire）。 */
 export interface SnapshotGenerationJob {
   job_id: string;
+  retry_of_job_id: string | null;
   type: string;
   source: string;
   status: string;
   progress: number;
   input: unknown;
   output_asset_ids: string[];
+  output_slots: Array<{
+    slot_id: string;
+    slot_index: number;
+    status: string;
+    asset_id: string | null;
+    retry_of_slot_id: string | null;
+    initial_placement_status: "pending" | "placed";
+  }>;
   error: PublicJobError | null;
 }
 
@@ -75,22 +84,26 @@ export function assetAccessUrl(
 
 function toWireJob(job: {
   job_id: string;
+  retry_of_job_id: string | null;
   type: string;
   source: string;
   status: string;
   progress: number;
   input: unknown;
   output_asset_ids: string[];
+  output_slots: SnapshotGenerationJob["output_slots"];
   stored_error: Record<string, unknown> | null;
 }): SnapshotGenerationJob {
   return {
     job_id: job.job_id,
+    retry_of_job_id: job.retry_of_job_id,
     type: job.type,
     source: job.source,
     status: job.status,
     progress: job.progress,
     input: job.input,
     output_asset_ids: job.output_asset_ids,
+    output_slots: job.output_slots,
     error:
       job.status === "failed"
         ? projectPublicError(job.stored_error, job.type)
