@@ -30,6 +30,7 @@ describe("withAuthenticatedUser", () => {
       userId: "42",
       status: "enabled",
       isAdmin: false,
+      username: "alice",
     });
     const handler = vi
       .fn()
@@ -42,6 +43,7 @@ describe("withAuthenticatedUser", () => {
       userId: "42",
       status: "enabled",
       isAdmin: false,
+      username: "alice",
     });
   });
 
@@ -76,6 +78,7 @@ describe("withAuthenticatedUser", () => {
       userId: "42",
       status: "enabled",
       isAdmin: false,
+      username: "alice",
     });
     const error = new Error("handler programming error");
 
@@ -103,6 +106,7 @@ describe("withAdminUser", () => {
       userId: "9",
       status: "enabled",
       isAdmin: true,
+      username: "admin",
     });
     const handler = vi
       .fn()
@@ -118,6 +122,7 @@ describe("withAdminUser", () => {
       userId: "9",
       status: "enabled",
       isAdmin: true,
+      username: "admin",
     });
   });
 
@@ -126,6 +131,7 @@ describe("withAdminUser", () => {
       userId: "42",
       status: "enabled",
       isAdmin: false,
+      username: "alice",
     });
     const handler = vi.fn();
 
@@ -155,6 +161,7 @@ describe("withOptionalUser", () => {
       userId: "42",
       status: "enabled",
       isAdmin: false,
+      username: "alice",
     });
     const handler = vi
       .fn()
@@ -167,6 +174,7 @@ describe("withOptionalUser", () => {
       userId: "42",
       status: "enabled",
       isAdmin: false,
+      username: "alice",
     });
   });
 

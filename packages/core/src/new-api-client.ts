@@ -171,6 +171,78 @@ export interface NewApiTopUpRecord {
   complete_time: number;
 }
 
+// ---- 管理端（middleware.AdminAuth：仅 role >= 10 的管理员 token 可调）----
+// 接口：GET /api/user、/api/user/search、POST /api/user/manage、
+//       GET /api/user/topup、POST /api/user/topup/complete、
+//       GET /api/log/stat、GET /api/log。信封为标准 {success, data} 分页（PageInfo）。
+
+/** new-api 通用分页信封（PageInfo：page / page_size / total / items）。 */
+export interface NewApiPageInfo<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/** GET /api/user、/api/user/search 的行元素（model.User 的 json 视图）。 */
+export interface NewApiAdminUserRow {
+  id: number;
+  username: string;
+  display_name?: string;
+  email?: string;
+  role: number;
+  status: number;
+  quota: number;
+  used_quota: number;
+  created_at: number;
+  [key: string]: unknown;
+}
+
+/** GET /api/user/topup 的行元素（model.TopUp 的 json 视图）。 */
+export interface NewApiAdminTopUpRow {
+  id: number;
+  user_id: number;
+  amount: number;
+  money: number;
+  trade_no: string;
+  payment_method: string;
+  payment_provider: string;
+  create_time: number;
+  complete_time: number;
+  /** pending | success | failed | expired */
+  status: string;
+  [key: string]: unknown;
+}
+
+/** GET /api/log 的行元素（model.Log 的 json 视图，管理员侧全部用户）。 */
+export interface NewApiLogRow {
+  id: number;
+  user_id: number;
+  created_at: number;
+  type: number;
+  username: string;
+  model_name: string;
+  quota: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  [key: string]: unknown;
+}
+
+/** GET /api/log/stat 的聚合结果。 */
+export interface NewApiLogStat {
+  quota: number;
+  rpm: number;
+  tpm: number;
+}
+
+/** POST /api/user/manage 入参（Go ManageRequest）。 */
+export interface NewApiAdminManageUserInput {
+  id: number;
+  action: "disable" | "enable" | "add_quota";
+  value?: number;
+  mode?: "add" | "subtract" | "override";
+}
+
 export class NewApiError extends Error {
   constructor(
     message: string,
@@ -220,6 +292,20 @@ function codeFrom(payload: NewApiEnvelope | null): string | number | undefined {
 
 function isBusinessFailure(payload: NewApiEnvelope | null): boolean {
   return payload?.success === false || payload?.code === false;
+}
+
+/** 归一化 new-api 分页信封（PageInfo），缺字段兜底，防脏数据抛错。 */
+function normalizePage<T>(
+  data: unknown,
+  pageSize: number,
+): NewApiPageInfo<T> {
+  const page = (data ?? {}) as Partial<NewApiPageInfo<T>>;
+  return {
+    items: Array.isArray(page.items) ? page.items : [],
+    total: typeof page.total === "number" ? page.total : 0,
+    page: typeof page.page === "number" ? page.page : 1,
+    page_size: typeof page.page_size === "number" ? page.page_size : pageSize,
+  };
 }
 
 function positiveInteger(value: unknown): number | null {
@@ -882,6 +968,118 @@ export function createNewApiClient(options: NewApiClientOptions) {
         },
         rootToken,
       );
+    },
+
+    // ---- 管理端（AdminAuth：role >= 10 的管理员 token，信封为标准分页 PageInfo）----
+
+    /** 用户列表/搜索：有筛选条件走 /api/user/search，否则 /api/user。 */
+    async listAdminUsers(
+      token: string,
+      options: {
+        keyword?: string;
+        status?: number;
+        role?: number;
+        page?: number;
+        pageSize?: number;
+      } = {},
+    ): Promise<NewApiPageInfo<NewApiAdminUserRow>> {
+      const params = new URLSearchParams();
+      if (options.keyword) params.set("keyword", options.keyword);
+      if (options.status != null) params.set("status", String(options.status));
+      if (options.role != null) params.set("role", String(options.role));
+      params.set("p", String(options.page ?? 1));
+      params.set("page_size", String(options.pageSize ?? 20));
+      const hasFilter =
+        Boolean(options.keyword) ||
+        options.status != null ||
+        options.role != null;
+      const path = hasFilter
+        ? `/api/user/search?${params}`
+        : `/api/user?${params}`;
+      const response = await request<NewApiEnvelope>(
+        path,
+        { method: "GET" },
+        token,
+      );
+      return normalizePage(response.data, options.pageSize ?? 20);
+    },
+
+    /** 用户管理写操作（冻结 disable / 解冻 enable / 加减余额 add_quota）。 */
+    async manageAdminUser(
+      token: string,
+      input: NewApiAdminManageUserInput,
+    ): Promise<void> {
+      await request<NewApiEnvelope>(
+        "/api/user/manage",
+        { method: "POST", body: JSON.stringify(input) },
+        token,
+      );
+    },
+
+    /** 全平台充值记录（管理端），keyword 模糊匹配 trade_no。 */
+    async listAdminTopUps(
+      token: string,
+      options: { keyword?: string; page?: number; pageSize?: number } = {},
+    ): Promise<NewApiPageInfo<NewApiAdminTopUpRow>> {
+      const params = new URLSearchParams();
+      if (options.keyword) params.set("keyword", options.keyword);
+      params.set("p", String(options.page ?? 1));
+      params.set("page_size", String(options.pageSize ?? 20));
+      const response = await request<NewApiEnvelope>(
+        `/api/user/topup?${params}`,
+        { method: "GET" },
+        token,
+      );
+      return normalizePage(response.data, options.pageSize ?? 20);
+    },
+
+    /** 管理员补单：把 pending 订单手工置为到账（Go ManualCompleteTopUp）。 */
+    async completeAdminTopUp(token: string, tradeNo: string): Promise<void> {
+      await request<NewApiEnvelope>(
+        "/api/user/topup/complete",
+        { method: "POST", body: JSON.stringify({ trade_no: tradeNo }) },
+        token,
+      );
+    },
+
+    /** 日志聚合统计（GetLogsStat）：type=2 为消费；quota 单位与用户余额一致。 */
+    async getAdminLogStat(
+      token: string,
+      input: { type: number; startTimestamp: number; endTimestamp: number },
+    ): Promise<NewApiLogStat> {
+      const params = new URLSearchParams({
+        type: String(input.type),
+        start_timestamp: String(input.startTimestamp),
+        end_timestamp: String(input.endTimestamp),
+      });
+      const response = await request<NewApiEnvelope>(
+        `/api/log/stat?${params}`,
+        { method: "GET" },
+        token,
+      );
+      const data = (response.data ?? {}) as Partial<NewApiLogStat>;
+      return {
+        quota: typeof data.quota === "number" ? data.quota : 0,
+        rpm: typeof data.rpm === "number" ? data.rpm : 0,
+        tpm: typeof data.tpm === "number" ? data.tpm : 0,
+      };
+    },
+
+    /** 全平台使用日志（管理端，/api/log 分页，id 倒序）。 */
+    async listAdminLogs(
+      token: string,
+      options: { page?: number; pageSize?: number } = {},
+    ): Promise<NewApiPageInfo<NewApiLogRow>> {
+      const params = new URLSearchParams({
+        p: String(options.page ?? 1),
+        page_size: String(options.pageSize ?? 20),
+      });
+      const response = await request<NewApiEnvelope>(
+        `/api/log?${params}`,
+        { method: "GET" },
+        token,
+      );
+      return normalizePage(response.data, options.pageSize ?? 20);
     },
   };
 }

@@ -143,21 +143,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // 先存 token，apiRequest 从 storage 读取
       saveTokens(data.access_token);
 
-      // 登录后拉取配额
-      let credits: number | undefined;
-      try {
-        const usage = await apiRequest<{ quota: number }>("/api/usage/token");
-        credits = usage.quota;
-      } catch {
-        // 静默失败，credits 保持 undefined
-      }
+      // 登录后并行拉取配额 + 管理员标记（/api/me 的 is_admin）
+      const [me, usage] = await Promise.all([
+        fetchMe().catch(() => null),
+        apiRequest<{ quota: number }>("/api/usage/token").catch(() => null),
+      ]);
 
       const u: User = {
         userId: data.user_id,
         username: data.username,
         phone: data.phone ?? "",
         hasPassword: data.has_password,
-        credits,
+        credits: usage?.quota,
+        isAdmin: me?.is_admin ?? false,
       };
       saveUser(u);
       setUser(u);
@@ -177,20 +175,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signUp = useCallback(async (input: RegisterInput) => {
     const data = await registerWithPassword(input);
     saveTokens(data.access_token);
-    // 注册后同样拉取配额，与 signIn 对称
-    let credits: number | undefined;
-    try {
-      const usage = await apiRequest<{ quota: number }>("/api/usage/token");
-      credits = usage.quota;
-    } catch {
-      // 静默失败
-    }
+    // 注册后同样拉取配额 + 管理员标记，与 signIn 对称
+    const [me, usage] = await Promise.all([
+      fetchMe().catch(() => null),
+      apiRequest<{ quota: number }>("/api/usage/token").catch(() => null),
+    ]);
     const u: User = {
       userId: data.user_id,
       username: data.username,
       phone: data.phone ?? "",
       hasPassword: data.has_password,
-      credits,
+      credits: usage?.quota,
+      isAdmin: me?.is_admin ?? false,
     };
     saveUser(u);
     saveTokens(data.access_token);
@@ -217,19 +213,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshUser = useCallback(async () => {
     if (SKIP_AUTH) return; // 本地开发模式无后端，跳过
     const info = await fetchMe();
-    let credits: number | undefined;
-    try {
-      const usage = await apiRequest<{ quota: number }>("/api/usage/token");
-      credits = usage.quota;
-    } catch {
-      // 静默
-    }
+    const usage = await apiRequest<{ quota: number }>("/api/usage/token").catch(
+      () => null,
+    );
     const u: User = {
       userId: info.user_id,
       username: info.username,
       phone: info.phone,
       hasPassword: info.has_password,
-      credits,
+      credits: usage?.quota,
+      isAdmin: info.is_admin ?? false,
     };
     saveUser(u);
     setUser(u);

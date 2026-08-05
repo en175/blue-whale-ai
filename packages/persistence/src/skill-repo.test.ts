@@ -353,6 +353,7 @@ describe("SkillRepo", () => {
       "文案D",
     ]);
     expect(page.total).toBe(3);
+    expect(page.pages).toBe(1);
     expectWhitelistOnly(page.records);
   });
 
@@ -905,6 +906,7 @@ describe("SkillRepo", () => {
     expect(page.total).toBe(2);
     expect(page.current).toBe(2);
     expect(page.size).toBe(1);
+    expect(page.pages).toBe(2);
     expect(page.records).toEqual([
       {
         creative_skill_id: "my_personal",
@@ -916,6 +918,21 @@ describe("SkillRepo", () => {
         asset_domain: "personal",
       },
     ]);
+  });
+
+  it("listMine 空结果返回 pages = 0（hasMore 恒 false）", async () => {
+    const prisma = {
+      user_skill: { findMany: vi.fn().mockResolvedValue([]) },
+      skill: { findMany: vi.fn().mockResolvedValue([]) },
+      $queryRawUnsafe: vi.fn().mockResolvedValue([]),
+    } as unknown as PrismaClient;
+
+    const page = await createSkillRepo(prisma).listMine("9", {
+      pageNum: 1,
+      pageSize: 50,
+    });
+
+    expect(page).toEqual({ records: [], total: 0, size: 50, current: 1, pages: 0 });
   });
 
   it("createPersonalSkill atomically makes its first immutable version active", async () => {

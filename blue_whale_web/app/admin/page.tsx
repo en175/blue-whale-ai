@@ -2,22 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Users, Coins, Receipt, TrendingUp, Clock } from "lucide-react";
-
-type DashboardStats = {
-  totalUsers: number;
-  todayRecharge: number;
-  todayRechargeCount: number;
-  todaySpend: number;
-  pendingOrders: number;
-};
-
-const MOCK_STATS: DashboardStats = {
-  totalUsers: 2847,
-  todayRecharge: 125600,
-  todayRechargeCount: 143,
-  todaySpend: 89200,
-  pendingOrders: 7,
-};
+import { fetchDashboard, type DashboardStats } from "./_lib/admin-data";
 
 const STAT_CARDS = [
   {
@@ -62,12 +47,33 @@ const STAT_CARDS = [
   },
 ] as const;
 
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  const now = Date.now();
+  const diff = now - d.getTime();
+  if (diff < 0) return d.toLocaleString("zh-CN");
+  if (diff < 60_000) return "刚刚";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  return d.toLocaleDateString("zh-CN");
+}
+
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
 
+  // IK6JXJ：真实统计（契约 4.6）。
   useEffect(() => {
-    const t = setTimeout(() => setStats(MOCK_STATS), 200);
-    return () => clearTimeout(t);
+    let cancelled = false;
+    fetchDashboard()
+      .then((data) => {
+        if (!cancelled) setStats(data);
+      })
+      .catch(() => {
+        /* 静默：卡片保持骨架态 */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
@@ -118,26 +124,28 @@ export default function AdminDashboardPage() {
             最近充值
           </h2>
           <div className="space-y-3">
-            {[
-              { user: "user_***89", amount: 3000, time: "10 分钟前" },
-              { user: "user_***42", amount: 6000, time: "25 分钟前" },
-              { user: "user_***17", amount: 1000, time: "1 小时前" },
-              { user: "user_***55", amount: 30000, time: "2 小时前" },
-              { user: "user_***03", amount: 6000, time: "3 小时前" },
-            ].map((item, i) => (
-              <div
-                key={i}
-                className="flex items-center justify-between text-sm"
-              >
-                <span className="text-[var(--tc-text-secondary)]">
-                  {item.user}
-                </span>
-                <span className="font-medium text-[var(--tc-text-primary)]">
-                  +{item.amount.toLocaleString()} 积分
-                </span>
-                <span className="text-[var(--tc-text-muted)]">{item.time}</span>
+            {(stats?.recentRecharges ?? []).length === 0 ? (
+              <div className="py-6 text-center text-sm text-[var(--tc-text-muted)]">
+                暂无充值记录
               </div>
-            ))}
+            ) : (
+              (stats?.recentRecharges ?? []).map((item) => (
+                <div
+                  key={item.tradeNo}
+                  className="flex items-center justify-between text-sm"
+                >
+                  <span className="text-[var(--tc-text-secondary)]">
+                    #{item.userId}
+                  </span>
+                  <span className="font-medium text-[var(--tc-text-primary)]">
+                    +{item.amount.toLocaleString()} 积分
+                  </span>
+                  <span className="text-[var(--tc-text-muted)]">
+                    {fmtTime(item.createdAt)}
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </div>
         <div className="rounded-xl border border-[var(--tc-border)] bg-[var(--tc-bg-surface)] p-5">
@@ -145,54 +153,31 @@ export default function AdminDashboardPage() {
             最近消费
           </h2>
           <div className="space-y-3">
-            {[
-              {
-                user: "user_***21",
-                amount: 500,
-                model: "gpt-4o",
-                time: "15 分钟前",
-              },
-              {
-                user: "user_***89",
-                amount: 1200,
-                model: "claude-sonnet-5",
-                time: "30 分钟前",
-              },
-              {
-                user: "user_***66",
-                amount: 300,
-                model: "gpt-4o-mini",
-                time: "45 分钟前",
-              },
-              {
-                user: "user_***42",
-                amount: 800,
-                model: "claude-fable-5",
-                time: "1 小时前",
-              },
-              {
-                user: "user_***34",
-                amount: 2000,
-                model: "claude-opus-5",
-                time: "2 小时前",
-              },
-            ].map((item, i) => (
-              <div
-                key={i}
-                className="flex items-center justify-between text-sm"
-              >
-                <span className="text-[var(--tc-text-secondary)]">
-                  {item.user}
-                </span>
-                <span className="text-[var(--tc-text-tertiary)]">
-                  {item.model}
-                </span>
-                <span className="font-medium text-[var(--tc-text-primary)]">
-                  -{item.amount.toLocaleString()} 积分
-                </span>
-                <span className="text-[var(--tc-text-muted)]">{item.time}</span>
+            {(stats?.recentConsumes ?? []).length === 0 ? (
+              <div className="py-6 text-center text-sm text-[var(--tc-text-muted)]">
+                暂无消费记录
               </div>
-            ))}
+            ) : (
+              (stats?.recentConsumes ?? []).map((item) => (
+                <div
+                  key={`${item.userId}-${item.createdAt}`}
+                  className="flex items-center justify-between text-sm"
+                >
+                  <span className="text-[var(--tc-text-secondary)]">
+                    #{item.userId}
+                  </span>
+                  <span className="text-[var(--tc-text-tertiary)]">
+                    {item.model}
+                  </span>
+                  <span className="font-medium text-[var(--tc-text-primary)]">
+                    -{item.points.toLocaleString()} 积分
+                  </span>
+                  <span className="text-[var(--tc-text-muted)]">
+                    {fmtTime(item.createdAt)}
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

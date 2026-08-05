@@ -191,6 +191,8 @@ export interface SkillPage<T> {
   total: number;
   size: number;
   current: number;
+  /** 总页数 = ceil(total / size)。前端 hasMore 判定依赖此字段（对齐 MyBatis-Plus Page）。 */
+  pages: number;
 }
 
 export interface SkillRepo {
@@ -507,6 +509,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         total: matched.length,
         size: q.pageSize,
         current: q.pageNum,
+        pages: Math.ceil(matched.length / q.pageSize),
       };
     },
 
@@ -581,6 +584,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         total: merged.length,
         size: q.pageSize,
         current: q.pageNum,
+        pages: Math.ceil(merged.length / q.pageSize),
       };
     },
 

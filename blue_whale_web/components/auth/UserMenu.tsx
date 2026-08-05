@@ -9,6 +9,7 @@
  * - className 透传到外层，调用方控制定位（首页 fixed 右上 / 画布 TopBar flex 内）。
  */
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ChevronDown,
   LogOut,
@@ -16,6 +17,7 @@ import {
   User as UserIcon,
   IdCard,
   Coins,
+  Settings,
 } from "lucide-react";
 import { useAuth } from "./AuthContext";
 import { maskPhone } from "./format";
@@ -28,6 +30,7 @@ type ActiveModal = "profile" | "history" | "account" | "recharge" | null;
 
 export function UserMenu({ className = "" }: { className?: string }) {
   const { user, openLogin, signOut } = useAuth();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -153,6 +156,18 @@ export function UserMenu({ className = "" }: { className?: string }) {
             label="积分充值"
             onClick={() => selectItem("recharge")}
           />
+
+          {/* IK6JXJ：仅管理员可见「系统设置」，点击进入管理后台 */}
+          {user.isAdmin && (
+            <MenuItem
+              icon={<Settings size={15} />}
+              label="系统设置"
+              onClick={() => {
+                setOpen(false);
+                router.push("/admin");
+              }}
+            />
+          )}
 
           <div className="h-px bg-white/[0.08] my-1" />
 
