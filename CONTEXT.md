@@ -161,6 +161,8 @@ _Avoid_: Chain of Thought、visible_reasoning、原始思考过程
 **PlanPhase（计划阶段）**:
 Agent 创作入口内由 Agent 按对话意图自主进入或退出的内部行为阶段；User 可以用自然语言要求立即产出
 PlanMessage、继续讨论或不产出 PlanMessage，但不需要理解或切换独立模式。
+“立即出计划”在必需信息齐备且不存在不受支持要求时同时表达最终同意，Agent 直接提交 PlanMessage；
+它不授权补齐核心缺口或静默降级明确要求。
 _Avoid_: Plan Mode、模式开关、直接生成入口、把普通问答或素材分析自动转成计划卡
 
 **PlanMessage（计划卡消息）**:

@@ -103,7 +103,8 @@ understanding | alignment | awaiting_final_confirmation | completed | cancelled
 下一次 claim 为该 Run 创建新 Advance，继续同一 AgentRun。
 
 PlanPhase 行为（意图判断、一次只问一个最关键问题、"你决定"补默认值、不受支持要求继续澄清、
-复述并要求最终同意、"立即出计划"不绕过确认）是 Runtime/模型的职责；Product API 只做结构性强制：
+复述并要求最终同意）是 Runtime/模型的职责。T09 起，"立即出计划"在必需项齐备且不存在不受支持要求时
+等同最终同意并直接提交计划，但不能绕过必需信息或不受支持要求的澄清。Product API 只做结构性强制：
 每 Advance 至多一次成功 RunCommit、每 Run 至多一个活动 UserInputRequest、stage 转移合法性、
 `awaiting_input` 的 Run 必须经 reply_to 回答。T06 不提交 PlanMessage。
 
