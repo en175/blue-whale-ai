@@ -59,6 +59,8 @@ export interface UserInfo {
   username: string;
   phone: string;
   has_password: boolean;
+  /** new-api role >= 10 即管理员（IK6JXI 后端已返回） */
+  is_admin?: boolean;
 }
 
 interface ApiResult<T> {

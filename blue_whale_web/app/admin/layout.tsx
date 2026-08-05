@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { AdminSidebar } from "./_components/admin-sidebar";
-import { isAdminAuthenticated } from "./_lib/auth";
+import { adminRequest } from "./_lib/admin-api";
 
 export default function AdminLayout({
   children,
@@ -14,16 +14,22 @@ export default function AdminLayout({
   const pathname = usePathname();
   const [ready, setReady] = useState(false);
 
+  // IK6JXJ：守卫升级——每次进入管理后台由服务端实时校验管理员身份
+  // （GET /api/admin/session → withAdminUser fresh），非管理员/未登录一律回首页。
+  // login 页不走校验（渲染分支已直接放行 children）。
   useEffect(() => {
-    if (pathname === "/admin/login") {
-      setReady(true);
-      return;
-    }
-    if (!isAdminAuthenticated()) {
-      router.replace("/admin/login");
-      return;
-    }
-    setReady(true);
+    if (pathname === "/admin/login") return;
+    let cancelled = false;
+    adminRequest<{ isAdmin: boolean }>("/api/admin/session")
+      .then(() => {
+        if (!cancelled) setReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) router.replace("/");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [pathname, router]);
 
   if (pathname === "/admin/login") return <>{children}</>;

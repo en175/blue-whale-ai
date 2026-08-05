@@ -1,7 +1,7 @@
 /**
- * admin tiers — 真实 API 数据层（替换原 mock）
+ * admin tiers — 真实 API 数据层（原文件名为 _mock.ts，实为真实客户端，IK6JXJ 更名去误导）。
  *
- * 对接 /api/admin/topup-tiers 系列接口。
+ * 对接 /api/admin/topup-tiers 系列接口（withAdminUser 保护）。
  * 审计（operation_logs）与折扣同步（amount_discount）都在服务端路由内完成，
  * 这里只负责请求/响应与把服务端带回的 warning（如同步失败提示）透出给用户。
  */

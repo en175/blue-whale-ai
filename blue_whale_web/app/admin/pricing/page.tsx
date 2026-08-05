@@ -103,7 +103,9 @@ export default function AdminPricingPage() {
   const [previewAttempted, setPreviewAttempted] = useState(false);
 
   useEffect(() => {
-    setRules(getPricingRules());
+    // 本地 mock 数据源（定价规则后端暂无接口，IK6JXJ 契约偏差说明：保留 mock）。
+    const timer = window.setTimeout(() => setRules(getPricingRules()), 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const filtered = useMemo(() => {
