@@ -11,6 +11,7 @@ export interface SkillLibraryView {
   description: string | null;
   coverUrl: string | null;
   source: string;
+  skill_code: string | null;
   added: boolean;
   creative_skill_id: string | null;
 }
@@ -22,6 +23,7 @@ export interface SkillMineView {
   description: string | null;
   coverUrl: string | null;
   source: string | null;
+  skill_code: string | null;
   creative_skill_id: string | null;
 }
 
@@ -59,6 +61,7 @@ type SkillRow = {
   description: string | null;
   cover_url: string | null;
   source: string;
+  skill_code: string | null;
 };
 
 /** 批量回查 creative_skill（source_skill_id IN ...）→ sourceSkillId → creativeSkillId。
@@ -109,6 +112,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
             description: true,
             cover_url: true,
             source: true,
+            skill_code: true,
           },
           orderBy: { sort_order: "asc" },
           skip: (q.pageNum - 1) * q.pageSize,
@@ -134,6 +138,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
           description: s.description,
           coverUrl: s.cover_url,
           source: s.source,
+          skill_code: s.skill_code,
           added: mineIds.has(s.id.toString()),
           creative_skill_id: creativeIds.get(s.id.toString()) ?? null,
         })),
@@ -169,6 +174,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
           description: true,
           cover_url: true,
           source: true,
+          skill_code: true,
         },
       });
       const skillMap = new Map(skills.map((s) => [s.id.toString(), s]));
@@ -184,6 +190,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
             description: s?.description ?? null,
             coverUrl: s?.cover_url ?? null,
             source: s?.source ?? null,
+            skill_code: s?.skill_code ?? null,
             creative_skill_id: s
               ? (creativeIds.get(s.id.toString()) ?? null)
               : null,
