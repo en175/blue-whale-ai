@@ -127,11 +127,13 @@ describe("createAuthenticatedUserResolver", () => {
       userId: "42",
       status: "enabled",
       isAdmin: false,
+      username: "alice",
     });
     await expect(auth(getUser, "sk-two")).resolves.toEqual({
       userId: "42",
       status: "enabled",
       isAdmin: false,
+      username: "alice",
     });
   });
 
@@ -346,6 +348,7 @@ describe("createAuthenticatedUserResolver", () => {
       userId: "42",
       status: "enabled",
       isAdmin: false,
+      username: "alice",
     });
     expect(resolveTokenIdentity).toHaveBeenCalledTimes(2);
   });
@@ -399,8 +402,8 @@ describe("createAuthenticatedUserResolver", () => {
 
     complete(identity());
     await expect(Promise.all([first, second])).resolves.toEqual([
-      { userId: "42", status: "enabled", isAdmin: false },
-      { userId: "42", status: "enabled", isAdmin: false },
+      { userId: "42", status: "enabled", isAdmin: false, username: "alice" },
+      { userId: "42", status: "enabled", isAdmin: false, username: "alice" },
     ]);
   });
 

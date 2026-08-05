@@ -17,6 +17,8 @@ export type AuthenticatedUser = {
   userId: string;
   status: "enabled";
   isAdmin: boolean;
+  /** new-api 账户用户名，操作日志 operator 展示用。 */
+  username: string;
 };
 
 export type AuthenticationPolicy = "ordinary" | "fresh";
@@ -90,6 +92,7 @@ function authenticatedUser(identity: NewApiAccountIdentity): AuthenticatedUser {
     userId: String(identity.userId),
     status: "enabled",
     isAdmin: identity.role >= ADMIN_ROLE_THRESHOLD,
+    username: identity.username,
   };
 }
 
@@ -123,6 +126,7 @@ export function createAuthenticatedUserResolver({
           userId: cachedIdentity.userId,
           status: cachedIdentity.status,
           isAdmin: cachedIdentity.isAdmin,
+          username: cachedIdentity.username,
         };
       }
     }

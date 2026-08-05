@@ -26,6 +26,7 @@ describe("withAuthenticatedUser", () => {
       userId: "42",
       status: "enabled",
       isAdmin: false,
+      username: "alice",
     });
     const handler = vi
       .fn()
@@ -34,7 +35,12 @@ describe("withAuthenticatedUser", () => {
     const response = await withAuthenticatedUser(request, handler);
 
     expect(response.status).toBe(204);
-    expect(handler).toHaveBeenCalledWith({ userId: "42", status: "enabled", isAdmin: false });
+    expect(handler).toHaveBeenCalledWith({
+      userId: "42",
+      status: "enabled",
+      isAdmin: false,
+      username: "alice",
+    });
   });
 
   it.each([
@@ -68,6 +74,7 @@ describe("withAuthenticatedUser", () => {
       userId: "42",
       status: "enabled",
       isAdmin: false,
+      username: "alice",
     });
     const error = new Error("handler programming error");
 
@@ -95,6 +102,7 @@ describe("withAdminUser", () => {
       userId: "9",
       status: "enabled",
       isAdmin: true,
+      username: "admin",
     });
     const handler = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
 
@@ -102,7 +110,12 @@ describe("withAdminUser", () => {
 
     expect(response.status).toBe(204);
     expect(mockedGetAuthenticatedUser).toHaveBeenCalledWith(request, { policy: "fresh" });
-    expect(handler).toHaveBeenCalledWith({ userId: "9", status: "enabled", isAdmin: true });
+    expect(handler).toHaveBeenCalledWith({
+      userId: "9",
+      status: "enabled",
+      isAdmin: true,
+      username: "admin",
+    });
   });
 
   it("rejects authenticated non-admin accounts with a 403 envelope", async () => {
@@ -110,6 +123,7 @@ describe("withAdminUser", () => {
       userId: "42",
       status: "enabled",
       isAdmin: false,
+      username: "alice",
     });
     const handler = vi.fn();
 
@@ -135,6 +149,7 @@ describe("withOptionalUser", () => {
       userId: "42",
       status: "enabled",
       isAdmin: false,
+      username: "alice",
     });
     const handler = vi
       .fn()
@@ -147,6 +162,7 @@ describe("withOptionalUser", () => {
       userId: "42",
       status: "enabled",
       isAdmin: false,
+      username: "alice",
     });
   });
 
