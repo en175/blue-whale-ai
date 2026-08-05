@@ -5,8 +5,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_ROOT="$(cd "$SKILL_DIR/../../.." && pwd)"
-API_DIR="$REPO_ROOT/blue_whale_api"
+# new-api 源码在独立仓库 blue-whale-api（仓库拆分后迁出本仓）。
+API_REPO_URL="git@gitee.com:hangzhou-xuanfu_1/blue-whale-api.git"
+API_CLONE_DIR="${HOME}/.cache/blue-whale-dev/blue-whale-api"
+mkdir -p "${HOME}/.cache/blue-whale-dev"
+if [ -d "$API_CLONE_DIR/.git" ]; then
+  git -C "$API_CLONE_DIR" fetch --depth 1 origin master
+  git -C "$API_CLONE_DIR" checkout -q FETCH_HEAD
+else
+  git clone --depth 1 --branch master "$API_REPO_URL" "$API_CLONE_DIR"
+fi
+API_DIR="$API_CLONE_DIR"
 BUILD_OUT="$SKILL_DIR/.build"
 
 # 1. bun build default 前端
