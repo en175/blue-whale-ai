@@ -614,7 +614,18 @@ function parseAssetReferences(contentMarkdown: string): Array<{
 }
 
 function includesValue(list: unknown, value: unknown): boolean {
-  return Array.isArray(list) && list.some((entry) => entry === value);
+  // 枚举项存在两种形态：字符串数组与 [{id, api_value, ...}] 对象数组（生产数据即对象形态）。
+  return (
+    Array.isArray(list) &&
+    list.some((entry) => {
+      if (entry === value) return true;
+      if (entry && typeof entry === "object") {
+        const item = entry as { id?: unknown; api_value?: unknown };
+        return item.id === value || item.api_value === value;
+      }
+      return false;
+    })
+  );
 }
 
 interface PreparedPlanMessage {

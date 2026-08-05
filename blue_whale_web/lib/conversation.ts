@@ -85,3 +85,55 @@ export function retryAgentRun(
     },
   );
 }
+
+/** SceneCard 生成预设只读视图（IK67HB/T13，编辑器打开时按需 GET）。 */
+export type SceneCardGenerationPreset = {
+  scene_card: {
+    scene_card_id: WireInteger;
+    version: number;
+    title: string;
+    content_markdown: string;
+  };
+  preset: {
+    version: number;
+    parameters: Record<string, unknown>;
+    reference_mode: string;
+    reference_assets: unknown[];
+    capability_snapshot_version: Record<string, unknown>;
+  };
+  projection: { prompt_text: string } | null;
+};
+
+export function getSceneCardGenerationPreset(
+  projectId: WireInteger,
+  sceneCardId: WireInteger,
+): Promise<SceneCardGenerationPreset> {
+  return apiRequest<SceneCardGenerationPreset>(
+    `/api/projects/${projectId}/scene-cards/${sceneCardId}/generation-preset`,
+  );
+}
+
+export type SceneCardRegenerationResult = {
+  scene_card_id: WireInteger;
+  generation_job_id: WireInteger;
+  record_id?: WireInteger;
+  preset_version?: number;
+};
+
+/** SceneCard 再生成（IK67HB/T13）：编辑器点"生成"提交新参数快照 → 原子更新 Preset + 新 Record + 新 Job。
+ *  body 形态由编辑器按 sceneCardRegenerationRequestSchema 构造；版本冲突由后端 CAS 检测并抛 ApiError(100406)。 */
+export function generateSceneCard(
+  projectId: WireInteger,
+  sceneCardId: WireInteger,
+  idempotencyKey: string,
+  body: Record<string, unknown>,
+): Promise<SceneCardRegenerationResult> {
+  return apiRequest<SceneCardRegenerationResult>(
+    `/api/projects/${projectId}/scene-cards/${sceneCardId}/generate`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(body),
+    },
+  );
+}

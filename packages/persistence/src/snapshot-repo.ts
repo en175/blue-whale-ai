@@ -66,6 +66,8 @@ export interface SnapshotConversationState {
   scene_cards: SnapshotSceneCardView[];
   /** 成功应用 PlanMessage 的不可变回执（IK67H9，T11）：按 applied_at 升序。 */
   plan_applications: SnapshotPlanApplicationReceiptView[];
+  /** SceneCard 生成记录（IK67HB，T13）：generation origins/summaries 恢复权威子集，按 id 升序。 */
+  scene_card_generation_records: SnapshotSceneCardGenerationRecordView[];
   agent_runs: Array<{
     agent_run_id: string;
     conversation_id: string;
@@ -159,6 +161,16 @@ export interface SnapshotPlanApplicationReceiptView {
   applied_at: string;
 }
 
+/** Snapshot 场景卡生成记录投影（IK67HB，T13）：generation origins/summaries 恢复权威子集。
+ *  完整 Preset 参数不进 Snapshot（省体积），编辑器打开时按需 GET 只读端点。 */
+export interface SnapshotSceneCardGenerationRecordView {
+  record_id: string;
+  scene_card_id: string;
+  summary_status: string;
+  first_generation_job_id: string;
+  plan_message_id: string;
+}
+
 /** output_asset_ids（Json 数组）→ string[]。容忍 number/string 混合（历史数据）。 */
 function parseAssetIdList(json: unknown): string[] {
   if (!Array.isArray(json)) return [];
@@ -226,7 +238,8 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
     async loadConversationState(projectId, userId) {
       const pid = BigInt(projectId);
       const uid = BigInt(userId);
-const [messages, mentionRows, runs, inputRequests, planMessageRows, capabilityRows, maxCursorRow, sceneCardRows, applicationRows] =        await Promise.all([
+      const [messages, mentionRows, runs, inputRequests, planMessageRows, capabilityRows, maxCursorRow, sceneCardRows, applicationRows, recordRows] =
+        await Promise.all([
           prisma.conversation_messages.findMany({
             where: { project_id: pid, is_delete: 0 },
             orderBy: { sequence_no: "asc" },
@@ -313,6 +326,18 @@ const [messages, mentionRows, runs, inputRequests, planMessageRows, capabilityRo
               first_generation_job_id: true,
               command_id: true,
               applied_at: true,
+            },
+          }),
+          // IK67HB：场景卡生成记录投影（未删除，按 id 升序）。
+          prisma.scene_card_generation_records.findMany({
+            where: { project_id: pid, is_delete: 0 },
+            orderBy: { id: "asc" },
+            select: {
+              id: true,
+              scene_card_id: true,
+              summary_status: true,
+              first_generation_job_id: true,
+              plan_message_id: true,
             },
           }),
         ]);
@@ -503,6 +528,13 @@ const [messages, mentionRows, runs, inputRequests, planMessageRows, capabilityRo
           first_generation_job_id: receipt.first_generation_job_id.toString(),
           command_id: receipt.command_id,
           applied_at: receipt.applied_at.toISOString(),
+        })),
+        scene_card_generation_records: recordRows.map((record) => ({
+          record_id: record.id.toString(),
+          scene_card_id: record.scene_card_id.toString(),
+          summary_status: record.summary_status,
+          first_generation_job_id: record.first_generation_job_id.toString(),
+          plan_message_id: record.plan_message_id.toString(),
         })),
         agent_runs: runs.map((run) => {
           const activations = creativeSkillActivationSchema

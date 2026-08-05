@@ -75,6 +75,7 @@ import {
   ZoomControls,
 } from "./_canvas";
 import { ToolbarFlyout } from "./_canvas/components/ToolbarFlyout";
+import { SceneCardPanel } from "./_scene-card/SceneCardPanel";
 import { CardLibraryPicker } from "./_canvas/components/CardLibraryPicker";
 import { NodeInfoModal } from "./_canvas/components/NodeInfoModal";
 import {
@@ -183,6 +184,7 @@ export function CanvasProjectRuntime({
   // 提交走公开接纳 API；后端不可达时保留既有离线 mock（messages 内存态 + 无 onSubmitMessage）。
   const {
     messages: conversationMessages,
+    snapshot: projectSnapshot,
     sendMessage: sendConversationMessage,
     answerableActive,
     agentRunDisplay,
@@ -230,6 +232,7 @@ export function CanvasProjectRuntime({
   );
 
   const [isAgentOpen, setIsAgentOpen] = useState(false);
+  const [isSceneCardsOpen, setIsSceneCardsOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
   /** 曾打开即常驻挂载（keep-alive）：关闭仅 display:none 隐藏，
    *  BottomDock 内 prompt/mentions 与各面板设置 state 原样保留（IK55VF） */
@@ -1742,6 +1745,22 @@ export function CanvasProjectRuntime({
         onSetCardStatus={(cardId, status) => setCardStatus(cardId, status)}
       />
 
+      {isSceneCardsOpen && (
+        <div
+          className="fixed left-4 top-[68px] z-[1200] flex max-h-[calc(100vh-180px)] w-[320px] flex-col overflow-y-auto rounded p-3"
+          style={{
+            background: "var(--tc-bg-surface)",
+            border: "1px solid var(--tc-border-subtle)",
+          }}
+        >
+          <SceneCardPanel
+            key={activeProject.id}
+            projectId={activeProject.id}
+            snapshot={backendReady ? projectSnapshot : null}
+          />
+        </div>
+      )}
+
       <div className="absolute bottom-4 left-4 z-[400] flex items-center gap-2">
         <Link
           href="/"
@@ -1754,6 +1773,19 @@ export function CanvasProjectRuntime({
           <ArrowLeft width={14} height={14} />
           返回首页
         </Link>
+        {backendReady && (
+          <button
+            type="button"
+            onClick={() => setIsSceneCardsOpen((v) => !v)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-white/70 backdrop-blur-md transition-colors hover:text-white"
+            style={{
+              background: "var(--tc-bg-surface)",
+              border: "1px solid var(--tc-menu-pill-border)",
+            }}
+          >
+            场景卡
+          </button>
+        )}
         {backendReady && saveState !== "idle" && (
           <span className="text-xs" style={{ color: "var(--tc-text-muted)" }}>
             {saveState === "saving" ? "保存中…" : "已保存"}

@@ -108,6 +108,7 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
     .sort();
 
   assert.deepEqual(tables, [
+    "admin_operation_logs",
     "agent_advances",
     "agent_provider_calls",
     "agent_provisional_chunks",
@@ -129,15 +130,20 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
     "generation_job_logs",
     "generation_jobs",
     "generation_model_capability",
+    "plan_application_receipts",
+    "plan_messages",
     "project",
     "project_event_stream",
     "project_events",
     "run_commits",
+    "scene_card_generation_presets",
+    "scene_card_generation_records",
     "scene_cards",
     "skill",
     "skill_summarize_session",
     "template_card",
     "template_card_image",
+    "topup_tiers",
     "user_input_requests",
     "user_skill",
     "users",

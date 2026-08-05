@@ -4,6 +4,7 @@ import {
   createCanvasRepo,
   createConversationRepo,
   createPlanApplicationRepo,
+  createSceneCardGenerationRepo,
   getPrismaClient,
 } from "@blue-whale/persistence";
 
@@ -24,6 +25,12 @@ export function createPlanApplicationDeps() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL required");
   return createPlanApplicationRepo(getPrismaClient(databaseUrl));
+}
+
+export function createSceneCardGenerationDeps() {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) throw new Error("DATABASE_URL required");
+  return createSceneCardGenerationRepo(getPrismaClient(databaseUrl));
 }
 
 export function createCanvasDeps() {

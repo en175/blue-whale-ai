@@ -33,6 +33,9 @@ export {
   type SnapshotConversationState,
   type SnapshotMentionView,
   type SnapshotAssetRow,
+  type SnapshotSceneCardView,
+  type SnapshotPlanApplicationReceiptView,
+  type SnapshotSceneCardGenerationRecordView,
 } from "./snapshot-repo.js";
 export {
   appendProjectEvent,
@@ -134,10 +137,21 @@ export {
 } from "./generation-command-repo.js";
 export {
   createPlanApplicationRepo,
+  validateDerivedReferences,
   type PlanApplicationRepo,
   type ApplyPlanMessageInput,
   type ApplyPlanMessageResult,
+  type CapabilitySnapshot,
+  type DerivedReference,
 } from "./plan-application-repo.js";
+export {
+  createSceneCardGenerationRepo,
+  type SceneCardGenerationRepo,
+  type RegenerateSceneCardInput,
+  type RegenerateSceneCardResult,
+  type SceneCardGenerationPresetView,
+  type SceneCardGenerationPresetViewResult,
+} from "./scene-card-generation-repo.js";
 export {
   createWorkerRepo,
   type WorkerRepo,

@@ -246,7 +246,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
       const rows = await prisma.generation_jobs.findMany({
         where: {
           type: "video",
-          source: { in: ["bottom_dock", "plan_apply"] },
+          source: { in: ["bottom_dock", "plan_apply", "plan", "scene_card"] },
           is_delete: false,
           next_action_at: { lte: now },
           OR: [
@@ -273,7 +273,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
         where: {
           id: BigInt(jobId),
           type: "video",
-          source: { in: ["bottom_dock", "plan_apply"] },
+          source: { in: ["bottom_dock", "plan_apply", "plan", "scene_card"] },
           is_delete: false,
           next_action_at: { lte: now },
           OR: [
@@ -410,7 +410,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
       const candidate = await prisma.generation_jobs.findFirst({
         where: {
           type: "video",
-          source: { in: ["bottom_dock", "plan_apply"] },
+          source: { in: ["bottom_dock", "plan_apply", "plan", "scene_card"] },
           is_delete: false,
           next_action_at: { lte: now },
           OR: [

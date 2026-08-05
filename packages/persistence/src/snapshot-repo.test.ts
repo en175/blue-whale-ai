@@ -162,6 +162,9 @@ describe("SnapshotRepo.loadConversationState", () => {
       plan_application_receipts: {
         findMany: vi.fn().mockResolvedValue([]),
       },
+      scene_card_generation_records: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
     } as unknown as PrismaClient;
 
     await expect(
@@ -173,6 +176,7 @@ describe("SnapshotRepo.loadConversationState", () => {
       plan_messages: [],
       scene_cards: [],
       plan_applications: [],
+      scene_card_generation_records: [],
       agent_runs: [
         expect.objectContaining({
           agent_run_id: "9",
@@ -298,6 +302,7 @@ describe("SnapshotRepo.loadConversationState", () => {
         findMany: vi.fn().mockResolvedValue([]),
       },
       plan_application_receipts: { findMany: vi.fn().mockResolvedValue([]) },
+      scene_card_generation_records: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaClient;
 
     const state = await createSnapshotRepo(prisma).loadConversationState(
@@ -463,6 +468,7 @@ describe("SnapshotRepo.loadConversationState", () => {
         },
         scene_cards: { findMany: vi.fn().mockResolvedValue([]) },
         plan_application_receipts: { findMany: vi.fn().mockResolvedValue([]) },
+        scene_card_generation_records: { findMany: vi.fn().mockResolvedValue([]) },
         assets: { findMany: vi.fn().mockResolvedValue(opts.assets ?? []) },
       } as unknown as PrismaClient;
     }
