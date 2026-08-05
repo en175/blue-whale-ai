@@ -138,12 +138,48 @@ wait_mysql_initdb() {
   fail "MySQL initdb (baseline schema/seed) did not finish in 180s"
 }
 
+LOCAL_DB_URL="mysql://root:blue_whale@127.0.0.1:3306/blue_whale"
+
+check_schema_drift() {
+  # initdb 建表脚本只在数据卷首次创建时执行；旧数据卷直接 up 必然落后于
+  # Prisma 模型（ADR-0064 之前多次 500 的根因）。启动前 diff 一次，
+  # 漂移则询问是否清空重建，不静默放行。
+  command -v npx >/dev/null 2>&1 || return 0
+  local diff
+  diff="$(cd "$ROOT/packages/persistence" && \
+    DATABASE_URL="$LOCAL_DB_URL" npx prisma migrate diff \
+      --from-config-datasource --to-schema prisma/schema.prisma --script 2>/dev/null || true)"
+  if [ -z "$diff" ]; then
+    echo "⚠️ dev-stack: 结构漂移检查无法执行（prisma 不可用），已跳过" >&2
+    return 0
+  fi
+  if printf '%s' "$diff" | grep -q "empty migration"; then
+    return 0
+  fi
+  echo "⚠️ dev-stack: 本地数据库结构落后于代码（数据卷创建自旧基线）：" >&2
+  printf '%s\n' "$diff" | grep -v '^--' | head -10 >&2
+  local ans="n"
+  read -r -p "清空并重建本地开发库？本地开发数据将丢失 [y/N] " ans || ans="n"
+  case "$ans" in
+    [Yy]*)
+      dc down -v --remove-orphans
+      dc up -d mysql redis
+      wait_healthy mysql
+      wait_mysql_initdb
+      ;;
+    *)
+      fail "检测到结构漂移且未重建，启动中止。可手动运行 scripts/dev-stack.sh fresh"
+      ;;
+  esac
+}
+
 up() {
   build_new_api_binary
   export BW_NEW_API_BINARY="$CACHE_DIR/new-api"
   dc up -d mysql redis
   wait_healthy mysql
   wait_mysql_initdb
+  check_schema_drift
   dc up -d new-api
   wait_healthy new-api
   ensure_new_api_account
