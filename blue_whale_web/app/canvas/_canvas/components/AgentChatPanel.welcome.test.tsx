@@ -75,7 +75,7 @@ describe("AgentChatPanel 欢迎态与草稿（IK67GD T02）", () => {
     expect(document.querySelector(".tc-agent-welcome")).toBeNull();
   });
 
-  it("显示最新 Run 的 Skill、状态和安全摘要", () => {
+  it("显示最新 Run 的 Skill，思考摘要折叠为「思考过程」", () => {
     renderPanel({
       activeSkillName: "海报专家",
       agentRunStatus: "completed",
@@ -83,7 +83,9 @@ describe("AgentChatPanel 欢迎态与草稿（IK67GD T02）", () => {
     });
 
     expect(screen.getByLabelText("已激活技能：海报专家")).toBeTruthy();
-    expect(screen.getByLabelText("Agent 状态：已完成")).toBeTruthy();
+    // 头部不再展示 Run 状态；思考摘要折叠在对话流末尾，展开后可见
+    expect(screen.queryByText("已使用「海报专家」完成回答。")).toBeNull();
+    fireEvent.click(screen.getByText("思考过程"));
     expect(screen.getByText("已使用「海报专家」完成回答。")).toBeTruthy();
   });
 

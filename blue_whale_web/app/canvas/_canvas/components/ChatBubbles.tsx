@@ -55,7 +55,8 @@ export function ThinkingBlock({
 }: {
   msg: Extract<ChatMessage, { type: "thinking" }>;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  // ReAct 思考折叠块：纯文本「思考过程」折叠头，默认收起
+  const [expanded, setExpanded] = useState(false);
   return (
     <div className="tc-agent-thinking-block self-start">
       <button
@@ -63,9 +64,10 @@ export function ThinkingBlock({
         aria-expanded={expanded}
         onClick={() => setExpanded((v) => !v)}
         className={[
-          "tc-agent-thinking-trigger inline-flex items-center gap-1 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2.5 py-1 text-xs text-white/70 transition-colors hover:bg-white/[0.06]",
+          "tc-agent-thinking-trigger inline-flex items-center gap-1 py-0.5 text-xs transition-opacity hover:opacity-80",
           expanded ? "tc-agent-thinking-trigger--expanded" : "",
         ].join(" ")}
+        style={{ color: "var(--tc-text-tertiary)" }}
       >
         <span className="tc-agent-thinking-trigger__label">{msg.text}</span>
         <ChevronRight

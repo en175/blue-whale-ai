@@ -188,7 +188,6 @@ export function CanvasProjectRuntime({
     agentRunDisplay,
     runControl,
     provisionalText,
-    stopRun,
     retryRun,
   } = useProjectConversation(pid, backendReady);
 
@@ -1729,13 +1728,8 @@ export function CanvasProjectRuntime({
         answerableActive={answerableActive}
         activeSkillName={agentRunDisplay?.skillName}
         agentRunStatus={agentRunDisplay?.status}
-        agentRunStage={agentRunDisplay?.stage}
-        agentRunTerminalReason={agentRunDisplay?.terminalReason}
         reasoningSummary={agentRunDisplay?.reasoningSummary}
         provisionalContent={provisionalText}
-        onStopAgentRun={
-          backendReady && runControl.canStop ? stopRun : undefined
-        }
         onRetryAgentRun={
           backendReady && runControl.canRetry ? retryRun : undefined
         }
