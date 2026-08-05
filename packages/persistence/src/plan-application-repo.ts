@@ -10,7 +10,7 @@ import type {
 } from "@blue-whale/contracts";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
-import { capabilityDigest } from "./capability-digest.js";
+import { capabilityDigestFromModelCapability } from "./capability-digest.js";
 import { appendProjectEvent } from "./product-event-repo.js";
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
 import { loadPlanApplicationFacts } from "./plan-application-facts.js";
@@ -302,16 +302,7 @@ async function applySceneCardCreateInTransaction(
   });
   if (!capability || !capability.enabled || capability.is_delete)
     return { kind: "capability_drift" };
-  const recomputedDigest = capabilityDigest({
-    supported_sizes: capability.supported_sizes,
-    supported_aspect_ratios: capability.supported_aspect_ratios,
-    supported_durations: capability.supported_durations,
-    supported_formats: capability.supported_formats,
-    default_size: capability.default_size,
-    default_format: capability.default_format,
-    default_aspect_ratio: capability.default_aspect_ratio,
-    default_duration: capability.default_duration,
-  });
+  const recomputedDigest = capabilityDigestFromModelCapability(capability);
   if (capability.version !== snapshot.row_version || recomputedDigest !== snapshot.digest)
     return { kind: "capability_drift" };
 

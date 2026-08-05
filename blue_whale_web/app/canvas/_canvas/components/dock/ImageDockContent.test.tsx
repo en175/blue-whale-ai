@@ -43,6 +43,8 @@ const capability = (
     audio: false,
     ...features,
   },
+  version: 0,
+  digest: "sha256:mock",
 });
 
 describe("ImageDockContent model capability changes", () => {

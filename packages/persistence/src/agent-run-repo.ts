@@ -25,7 +25,7 @@ import {
 } from "@blue-whale/contracts";
 
 import { appendProjectEvent } from "./product-event-repo.js";
-import { capabilityDigest } from "./capability-digest.js";
+import { capabilityDigestFromModelCapability } from "./capability-digest.js";
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
 import {
   classifyMentionAvailability,
@@ -903,16 +903,7 @@ async function validateAndPreparePlanCards(
       model_id: capability.model_id,
       provider_id: capability.provider_id,
       row_version: capability.row_version,
-      digest: capabilityDigest({
-        supported_sizes: capability.supported_sizes,
-        supported_aspect_ratios: capability.supported_aspect_ratios,
-        supported_durations: capability.supported_durations,
-        supported_formats: capability.supported_formats,
-        default_size: capability.default_size,
-        default_format: capability.default_format,
-        default_aspect_ratio: capability.default_aspect_ratio,
-        default_duration: capability.default_duration,
-      }),
+      digest: capabilityDigestFromModelCapability(capability),
     };
 
     // AC#5：首/尾帧角色只能指向已验证的 derived_references（CONTEXT L179）。
