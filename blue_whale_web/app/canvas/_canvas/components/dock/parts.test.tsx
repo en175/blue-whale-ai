@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as jestDomMatchers from "@testing-library/jest-dom/matchers";
 import { apiFetch } from "@/lib/api-client";
-import { DockMediaThumb, MediaUploadButton } from "./parts";
+import { DockMediaThumb } from "./parts";
 import type { DockMediaItem } from "../../types";
 
 vi.mock("@/lib/api-client", () => ({ apiFetch: vi.fn() }));
@@ -152,18 +152,26 @@ describe("DockMediaThumb", () => {
     expect(video).toHaveAttribute("preload", "metadata");
   });
 
-  it("可见上传按钮会触发限定格式的 file input", () => {
-    const click = vi.spyOn(HTMLInputElement.prototype, "click");
+  it("点击缩略图触发 onPreview，删除按钮不触发预览（IK6M68）", () => {
+    const onPreview = vi.fn();
+    const onRemove = vi.fn();
     render(
-      <MediaUploadButton
-        label="视频"
-        accept=".mp4,.mov,video/mp4,video/quicktime"
-        icon={<span>video</span>}
-        onFiles={vi.fn()}
+      <DockMediaThumb
+        item={{ id: "m1", type: "image", name: "参考图.png", src: "blob:x" }}
+        onPreview={onPreview}
+        onRemove={onRemove}
       />,
     );
 
-    screen.getByRole("button", { name: "视频" }).click();
-    expect(click).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTitle("点击预览"));
+    expect(onPreview).toHaveBeenCalledTimes(1);
+    expect(onPreview).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "m1" }),
+    );
+
+    // 删除按钮不冒泡触发预览
+    fireEvent.click(screen.getByRole("button", { name: "移除 参考图.png" }));
+    expect(onRemove).toHaveBeenCalledTimes(1);
+    expect(onPreview).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,72 +1,12 @@
 /**
  * Dock Parts —— Dock 共享部件（展示层）
- * FrameUploadButton：首尾帧上传按钮；
- * DockMediaThumb：素材缩略图（含删除）。供 ImageDockContent / VideoDockContent 复用。
+ * DockMediaThumb：素材缩略图（点击预览 + 删除）。供 ImageDockContent / VideoDockContent / AudioDockContent 复用。
  */
 import { useRef } from "react";
 import { Image as ImageIcon, X } from "lucide-react";
 import { IconPlus } from "../../icons";
 import type { DockMediaItem } from "../../types";
 import { AuthenticatedImage } from "../AuthenticatedImage";
-
-export function MediaUploadButton({
-  label,
-  accept,
-  icon,
-  onFiles,
-}: {
-  label: string;
-  accept: string;
-  icon: React.ReactNode;
-  onFiles: (file: File) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  return (
-    <div style={{ position: "relative", flexShrink: 0 }}>
-      <input
-        ref={inputRef}
-        type="file"
-        accept={accept}
-        multiple
-        aria-hidden="true"
-        style={{ display: "none" }}
-        onChange={(event) => {
-          const files = event.target.files;
-          if (!files) return;
-          for (let index = 0; index < files.length; index += 1) {
-            onFiles(files[index]);
-          }
-          event.target.value = "";
-        }}
-      />
-      <button
-        type="button"
-        aria-label={label}
-        onClick={() => inputRef.current?.click()}
-        style={{
-          width: 44,
-          height: 44,
-          borderRadius: 9,
-          border: "1px solid rgba(255, 255, 255, 0.02)",
-          background: "rgba(255, 255, 255, 0.043)",
-          color: "rgba(255, 255, 255, 0.62)",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 6,
-          padding: 0,
-          cursor: "pointer",
-          opacity: 1,
-          transition: "background 120ms, color 120ms",
-          flexShrink: 0,
-        }}
-      >
-        {icon}
-      </button>
-    </div>
-  );
-}
 
 export function FrameUploadButton({
   label,
@@ -196,13 +136,16 @@ export function FrameUploadButton({
   );
 }
 
-// 底部 Dock 里的素材缩略图，带右上角删除按钮
+// 底部 Dock 里的素材缩略图，点击弹预览（IK6M68），右上角带删除按钮
 export function DockMediaThumb({
   item,
   onRemove,
+  onPreview,
 }: {
   item: DockMediaItem;
   onRemove?: (id: string) => void;
+  /** 点击缩略图预览素材（图片放大 / 视频可播 / 音频占位）。 */
+  onPreview?: (item: DockMediaItem) => void;
 }) {
   // Product API 内容地址需要身份；公网 TOS 与本地 blob/data URL 必须直显，
   // 否则 apiFetch 注入的产品 Authorization 会被对象存储当成非法签名。
@@ -217,7 +160,15 @@ export function DockMediaThumb({
     border: "1px solid rgba(255, 255, 255, 0.08)",
   } as const;
   return (
-    <div style={{ position: "relative", flexShrink: 0 }}>
+    <div
+      style={{
+        position: "relative",
+        flexShrink: 0,
+        cursor: onPreview ? "pointer" : undefined,
+      }}
+      onClick={() => onPreview?.(item)}
+      title={onPreview ? "点击预览" : undefined}
+    >
       {item.type === "video" ? (
         <video
           src={item.src}
@@ -249,7 +200,11 @@ export function DockMediaThumb({
         <button
           type="button"
           aria-label={`移除 ${item.name}`}
-          onClick={() => onRemove(item.id)}
+          onClick={(e) => {
+            // 删除不触发预览（外层 div 的 onClick）
+            e.stopPropagation();
+            onRemove(item.id);
+          }}
           style={{
             position: "absolute",
             top: -6,

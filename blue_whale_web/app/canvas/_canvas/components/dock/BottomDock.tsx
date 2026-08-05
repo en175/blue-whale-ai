@@ -484,6 +484,7 @@ export function BottomDock({
                   onLocalUpload={onLocalUpload}
                   onPickSlot={onPickAudioSlot}
                   onExitPick={onExitPick}
+                  onPreviewMedia={setPreviewItem}
                   isPicking={isPicking}
                   onGenerate={(s) =>
                     onGenerate?.(

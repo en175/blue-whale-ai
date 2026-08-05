@@ -23,6 +23,7 @@ import {
   type ImageModelCapability,
 } from "../../api/generation";
 import { CreditIcon } from "../../icons";
+import { toast } from "@/components/Toast";
 import { DEFAULT_MAX_REFERENCE_IMAGES, QUANTITIES } from "../../constants";
 import type { ImageDockContentProps } from "../../types";
 import { DockMediaThumb } from "./parts";
@@ -137,8 +138,10 @@ export function ImageDockContent({
         setSelectedSize(pickDefaultSize(first));
       })
       .catch((err) => {
-        // 能力表拉取失败：保持空，无可用模型时生成按钮禁用。
+        // 能力表拉取失败：保持空，无可用模型时生成按钮禁用；
+        // 必须 toast 提示，否则用户只看到「上传入口消失 / 生成按钮点不动」的交互黑洞（IK6M68）。
         console.error("getImageModels failed", err);
+        toast.error("模型能力加载失败，请刷新重试");
       });
     return () => {
       cancelled = true;
@@ -319,6 +322,7 @@ export function ImageDockContent({
                           key={m.id}
                           item={m}
                           onRemove={onRemoveMedia}
+                          onPreview={onPreviewMedia}
                         />
                       ))}
                       {/* 缩略图行末尾「继续添加」：上传图片/从画布选择（与占位按钮同菜单） */}
