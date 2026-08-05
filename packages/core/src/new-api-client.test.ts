@@ -611,6 +611,7 @@ describe("new-api client", () => {
                   money: 85,
                   create_time: 1,
                   complete_time: 2,
+                  payment_method: "bluewhalepay",
                 },
                 {
                   trade_no: "BWPother",
@@ -642,6 +643,7 @@ describe("new-api client", () => {
       money: 85,
       create_time: 1,
       complete_time: 2,
+      payment_method: "bluewhalepay",
     });
     // 精确匹配单号：其它订单不命中 → null
     await expect(client.getTopUpByTradeNo("sk-t", "BWPnope")).resolves.toBeNull();
@@ -656,6 +658,127 @@ describe("new-api client", () => {
         r.url.includes("/api/user/topup/self?keyword=BWP1xyz"),
       ),
     ).toBe(true);
+  });
+
+  it("lists user topups and consume logs from Go PageInfo envelopes", async () => {
+    const requests: Array<{ url: string; headers: Headers }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        const url = String(input);
+        requests.push({ url, headers: new Headers(init.headers) });
+        if (url.includes("/api/user/topup/self")) {
+          return jsonResponse({
+            success: true,
+            message: "",
+            data: {
+              page: 1,
+              page_size: 20,
+              total: 2,
+              items: [
+                {
+                  trade_no: "BWP2",
+                  status: "pending",
+                  amount: 10,
+                  money: 9,
+                  create_time: 20,
+                  complete_time: 0,
+                  payment_method: "bluewhalepay",
+                },
+                // 缺字段元素 → 兜底解析
+                { trade_no: "BWP1", status: "success" },
+              ],
+            },
+          });
+        }
+        if (url.includes("/api/log/self")) {
+          return jsonResponse({
+            success: true,
+            message: "",
+            data: {
+              page: 1,
+              page_size: 20,
+              total: 1,
+              items: [
+                {
+                  id: 7,
+                  type: 2,
+                  content: "图片生成",
+                  model_name: "doubao-seedream-4-0-250828",
+                  quota: 120000,
+                  created_at: 1750000000,
+                },
+              ],
+            },
+          });
+        }
+        return jsonResponse({ success: true, data: {} });
+      },
+    });
+
+    const topups = await client.listUserTopUps("sk-user-token");
+    expect(topups.total).toBe(2);
+    expect(topups.items[0]).toEqual({
+      trade_no: "BWP2",
+      status: "pending",
+      amount: 10,
+      money: 9,
+      create_time: 20,
+      complete_time: 0,
+      payment_method: "bluewhalepay",
+    });
+    expect(topups.items[1]).toEqual({
+      trade_no: "BWP1",
+      status: "success",
+      amount: 0,
+      money: 0,
+      create_time: 0,
+      complete_time: 0,
+      payment_method: "",
+    });
+
+    const logs = await client.listUserConsumeLogs("sk-user-token");
+    expect(logs.total).toBe(1);
+    expect(logs.items[0]).toEqual({
+      id: 7,
+      type: 2,
+      content: "图片生成",
+      model_name: "doubao-seedream-4-0-250828",
+      quota: 120000,
+      created_at: 1750000000,
+    });
+
+    // 分页参数；账户层鉴权只凭 sk- 令牌，不发 New-Api-User（ADR-0062 #18）
+    const topupReq = requests.find((r) =>
+      r.url.includes("/api/user/topup/self"),
+    );
+    expect(topupReq?.url).toContain("/api/user/topup/self?p=1&page_size=20");
+    expect(topupReq?.headers.get("New-Api-User")).toBeNull();
+    expect(topupReq?.headers.get("Authorization")).toBe("Bearer sk-user-token");
+    const logReq = requests.find((r) => r.url.includes("/api/log/self"));
+    expect(logReq?.url).toContain("/api/log/self?p=1&page_size=20&type=2");
+    expect(logReq?.headers.get("New-Api-User")).toBeNull();
+    expect(logReq?.headers.get("Authorization")).toBe("Bearer sk-user-token");
+  });
+
+  it("log/self 过渡期：传 userId 时带 access_token + New-Api-User 头（旧 UserAuth）", async () => {
+    const requests: Array<{ url: string; headers: Headers }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        requests.push({
+          url: String(input),
+          headers: new Headers(init.headers),
+        });
+        return jsonResponse({ success: true, data: { items: [], total: 0 } });
+      },
+    });
+
+    await client.listUserConsumeLogs("root-access-token", {}, 1);
+    expect(requests[0]?.headers.get("New-Api-User")).toBe("1");
+    expect(requests[0]?.headers.get("Authorization")).toBe(
+      "Bearer root-access-token",
+    );
   });
 
   it("maps native topup {message:'error'} envelopes to typed errors", async () => {
