@@ -8,6 +8,7 @@ import {
   PLAN_APPLICATION_KIND_UNSUPPORTED_CODE,
   PLAN_APPLICATION_PLAN_NOT_FOUND_CODE,
   PLAN_APPLICATION_QUOTA_INSUFFICIENT_CODE,
+  PLAN_APPLICATION_TARGET_STALE_CODE,
   RESOURCE_NOT_FOUND_CODE,
   fail,
   ok,
@@ -75,14 +76,14 @@ export async function handleApplyPlanMessage(
         generation_job_id: wireInteger(result.generation_job_id),
         receipt_id: wireInteger(result.receipt_id),
         cursor: wireInteger(result.cursor),
-        application_kind: "scene_card_create",
+        application_kind: result.application_kind,
       });
     case "replayed":
       return ok({
         message_id: wireInteger(messageId),
         scene_card_id: wireInteger(result.scene_card_id),
         generation_job_id: wireInteger(result.generation_job_id),
-        application_kind: "scene_card_create",
+        application_kind: result.application_kind,
       });
     case "already_applied":
       return fail(
@@ -93,6 +94,12 @@ export async function handleApplyPlanMessage(
       return fail(
         PLAN_APPLICATION_CAPABILITY_DRIFT_CODE,
         "生成能力已变化，需生成新计划",
+      );
+    // —— 覆盖分支（scene_card_replace，T12）：目标场景卡已变化，需生成新计划 ——
+    case "target_stale":
+      return fail(
+        PLAN_APPLICATION_TARGET_STALE_CODE,
+        "目标场景卡已变化，需生成新计划",
       );
     // —— 图片分支（T10）：成功三分支统一形状（at-most-once / replay / 首次对前端同效）。
     case "applied_image":
