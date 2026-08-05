@@ -352,7 +352,14 @@ export function LibraryContent({
   );
 }
 
-/** 官方技能库竖版卡片：封面 + 名称 + 简介（悬停完整提示）+ @Blue Whale + 使用人数 + 操作。
+/** ≥1万 缩写为「X.X 万人使用」（横版卡片改版定稿）。 */
+function formatUsage(n: number): string {
+  if (n >= 10000) return `${(n / 10000).toFixed(1)} 万人使用`;
+  return `${n} 人使用`;
+}
+
+/** 官方技能库横版卡片：左方形封面 + 右侧标题（2 行截断）/简介（3 行截断），
+ *  底部 使用人数@Blue Whale + 直接使用/添加；悬停时简介全文以向下展开的大浮层呈现。
  *  卡片本体不可点击，无详情入口、无省略号菜单（IK60WT）；
  *  「已添加」不可点击，移出去「我的技能」省略号菜单（IK60WX）。 */
 function LibrarySkillCard({
@@ -371,50 +378,52 @@ function LibrarySkillCard({
   return (
     <div
       data-testid="skill-library-card"
-      className={`tc-agent-skill-row tc-agent-skill-row--no-control tc-agent-skill-row--with-cover ${
+      className={`tc-agent-skill-row tc-agent-skill-row--with-cover ${
         added ? "tc-agent-skill-row--checked" : ""
-      } flex flex-col overflow-hidden rounded-xl bg-white/[0.035] border border-white/[0.08] hover:bg-white/[0.05] transition-colors`}
+      } group relative flex gap-3 rounded-xl bg-white/[0.035] border border-white/[0.08] hover:bg-white/[0.05] hover:border-white/[0.18] hover:z-20 transition-colors p-3`}
     >
-      <div className="tc-agent-skill-card__cover h-[140px] w-full shrink-0">
+      <div className="tc-agent-skill-card__cover w-[112px] h-[112px] shrink-0 self-center">
         <SkillCover url={skill.cover_url} name={skill.name} />
       </div>
-      <div className="tc-agent-skill-row__toggle flex flex-col flex-1 min-w-0 gap-1 p-3.5">
-        <span className="tc-agent-skill-row__title text-[13px] font-semibold text-white/90 line-clamp-1 break-words">
+      <div className="tc-agent-skill-row__toggle flex flex-col flex-1 min-w-0">
+        <span className="tc-agent-skill-row__title text-[13px] font-semibold text-white/90 line-clamp-2 break-words leading-snug">
           {skill.name}
         </span>
-        {/* data-tooltip 挂在未裁剪的包裹元素上：line-clamp 的 overflow:hidden 会裁剪
-            定位到元素上方的 ::before 提示（IK6H3Q，US19） */}
-        <span
-          className="tc-agent-skill-row__desc-tooltip"
-          data-tooltip={desc || undefined}
-          data-tooltip-multiline={desc ? "" : undefined}
-        >
-          <span className="tc-agent-skill-row__desc text-xs text-white/50 line-clamp-2 leading-relaxed break-words">
-            {desc || "—"}
+        <span className="tc-agent-skill-row__desc mt-1 block text-xs text-white/50 line-clamp-3 leading-relaxed break-words">
+          {desc || "—"}
+        </span>
+        <span className="tc-agent-skill-row__controls mt-auto pt-2 flex items-center justify-between gap-2">
+          <span className="tc-agent-skill-row__library-meta text-[11px] whitespace-nowrap text-white/40">
+            <span data-testid="skill-usage-count">
+              {formatUsage(skill.usage_count)}
+            </span>{" "}
+            <span className="tc-agent-skill-row__contributor">@Blue Whale</span>
+          </span>
+          <span className="flex items-center gap-1.5 shrink-0">
+            <UseButton onClick={onUse} disabled={!hasStableId} />
+            <button
+              type="button"
+              data-testid="skill-library-add-btn"
+              className={`tc-agent-skill-row__action h-7 px-2.5 rounded-md text-[11px] font-medium border border-white/[0.08] transition-colors ${
+                added
+                  ? "text-white/45"
+                  : "text-white/70 hover:bg-white/[0.08] hover:text-white"
+              } disabled:opacity-40 disabled:pointer-events-none`}
+              disabled={added || !hasStableId}
+              onClick={onAdd}
+            >
+              {added ? "已添加" : "添加"}
+            </button>
           </span>
         </span>
-        <span className="tc-agent-skill-row__library-meta flex items-center gap-3 mt-1 text-[11px] text-white/40">
-          <span className="tc-agent-skill-row__contributor">@Blue Whale</span>
-          <span data-testid="skill-usage-count">
-            {skill.usage_count} 人使用
-          </span>
-        </span>
-        <span className="tc-agent-skill-row__controls flex items-center gap-2 mt-auto pt-2">
-          <UseButton onClick={onUse} disabled={!hasStableId} />
-          <button
-            type="button"
-            data-testid="skill-library-add-btn"
-            className={`tc-agent-skill-row__action h-7 px-2.5 rounded-md text-[11px] font-medium border border-white/[0.08] transition-colors ${
-              added
-                ? "text-white/45"
-                : "text-white/70 hover:bg-white/[0.08] hover:text-white"
-            } disabled:opacity-40 disabled:pointer-events-none`}
-            disabled={added || !hasStableId}
-            onClick={onAdd}
-          >
-            {added ? "已添加" : "添加"}
-          </button>
-        </span>
+      </div>
+      {/* 悬停展开浮层（横版卡片改版定稿，替代原 data-tooltip）：简介全文向下展开，
+          压在下排卡片之上；pointer-events-none + aria-hidden 不参与交互 */}
+      <div
+        aria-hidden="true"
+        className="tc-agent-skill-card__desc-overlay pointer-events-none absolute left-[136px] -right-4 top-12 z-30 rounded-xl border border-white/[0.14] bg-[#1b1b1e] p-3.5 text-[12.5px] leading-relaxed text-white/85 shadow-[0_16px_40px_rgba(0,0,0,0.65)] opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+      >
+        {desc}
       </div>
     </div>
   );

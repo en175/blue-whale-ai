@@ -287,7 +287,7 @@ test("滚动状态：同次打开切页签保留滚动位置，关闭重开重�
     .toBe(0);
 });
 
-test("卡片：作者/使用人数/简介 tooltip/无链接不导航/无省略号菜单", async ({
+test("卡片：作者/使用人数/简介悬停浮层/无链接不导航/无省略号菜单", async ({
   page,
 }) => {
   await bootstrap(page);
@@ -301,10 +301,11 @@ test("卡片：作者/使用人数/简介 tooltip/无链接不导航/无省略�
     /^\d+ 人使用$/,
   );
 
-  // 简介悬停提示：data-tooltip + data-tooltip-multiline（CSS ::before 实现）
-  const desc = card.locator(".tc-agent-skill-row__desc");
-  await expect(desc).toHaveAttribute("data-tooltip", /技能 1 的简介/);
-  await expect(desc).toHaveAttribute("data-tooltip-multiline", "");
+  // 简介悬停浮层：完整简介渲染在卡片内向下展开的浮层中（默认隐藏，悬停展开）
+  const overlay = card.locator(".tc-agent-skill-card__desc-overlay");
+  await expect(overlay).toHaveText(/技能 1 的简介/);
+  // 旧的 data-tooltip 方案已移除
+  await expect(card.locator("[data-tooltip]")).toHaveCount(0);
 
   // 卡片本体无链接、点击不导航（封面区域点击），面板保持打开
   await expect(card.locator("a")).toHaveCount(0);

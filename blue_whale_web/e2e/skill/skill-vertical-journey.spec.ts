@@ -306,14 +306,16 @@ test("主旅程：浏览/添加/双域 auto/创建个人技能/脏草稿保留",
   await page.getByTestId("skill-tab-create").click();
   await expect(editor).toHaveValue(PERSONAL_SKILL_MD);
 
-  // 5) 保存 → 自动跳我的技能，个人行出现（@个人）
+  // 5) 保存 → 自动跳我的技能，个人行出现（个人徽标）
   await page.getByTestId("skill-save-btn").click();
   await expect(page.getByText("技能已保存")).toBeVisible();
   await expect(page.getByTestId("skill-tab-my")).toHaveAttribute(
     "aria-selected",
     "true",
   );
-  await expect(page.getByText("@个人")).toBeVisible();
+  await expect(
+    page.getByTestId("skill-my-row").getByText("个人", { exact: true }),
+  ).toBeVisible();
 
   // 6) 开个人 auto：与官方并存（允许多个候选开启）
   const personalSwitch = page.getByRole("switch", {

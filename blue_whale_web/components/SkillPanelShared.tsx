@@ -1,7 +1,7 @@
 "use client";
 
 import { AtSign } from "lucide-react";
-import { generateSkillCover } from "@/lib/skill-cover";
+import { generateMosaicCells } from "@/lib/skill-cover";
 
 export const PAGE_SIZE = 50;
 
@@ -26,19 +26,18 @@ export function SkillCover({
   url?: string | null;
   name?: string | null;
 }) {
-  // cover_url 有值 → 背景图；空 → 名称驱动的确定性渐变 + 首字母（IK60WU/IK693G），
-  // 不依赖第三方外链占位图。name 缺失时 generateSkillCover 回退 "?"。
+  // cover_url 有值 → 背景图；空 → 名称驱动的确定性像素马赛克（横版卡片改版定稿，
+  // 个人技能默认配图统一为此样式），不依赖第三方外链占位图。
   if (!url) {
-    const { gradient, initials } = generateSkillCover(name ?? "");
+    const cells = generateMosaicCells(name ?? "");
     return (
       <span
-        className="tc-agent-skill-row__cover flex items-center justify-center w-full h-full rounded-lg"
-        style={{ background: gradient }}
+        className="tc-agent-skill-row__cover grid grid-cols-6 grid-rows-6 w-full h-full overflow-hidden rounded-lg"
         aria-hidden="true"
       >
-        <span className="text-[28px] font-bold text-white/80 select-none">
-          {initials}
-        </span>
+        {cells.map((color, i) => (
+          <span key={i} style={{ background: color }} />
+        ))}
       </span>
     );
   }

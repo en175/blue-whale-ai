@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
-/** SkillPanel 技能库卡片简介悬停提示（IK6H3Q，US19）：
- *  data-tooltip 必须挂在未裁剪的包裹元素上——挂在带 line-clamp（overflow:hidden）
- *  的简介元素自身会让定位到元素上方的 ::before 提示被裁剪，永不显示。 */
+/** SkillPanel 技能库卡片简介悬停浮层（横版卡片改版定稿，替代 IK6H3Q data-tooltip）：
+ *  简介全文渲染在卡片内向下展开的大浮层中——默认 opacity-0 不可见、悬停卡片
+ *  （group-hover）时显示；浮层 aria-hidden + pointer-events-none 不参与交互；
+ *  卡片内可见简介仍为 3 行截断。 */
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SkillPanel from "./SkillPanel";
 
 const { LONG_DESC } = vi.hoisted(() => ({
   LONG_DESC:
-    "这是一段足够长的公开简介，用来在两列或三列断点下触发两行截断，从而需要悬停提示查看完整内容。",
+    "这是一段足够长的公开简介，用来在两列或三列断点下触发三行截断，从而需要悬停浮层查看完整内容。",
 }));
 
 vi.mock("@/components/api/skills", () => ({
@@ -53,10 +54,10 @@ class FakeIntersectionObserver {
 
 vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
 
-describe("SkillPanel 技能库简介悬停提示（IK6H3Q）", () => {
+describe("SkillPanel 技能库简介悬停浮层（横版卡片改版）", () => {
   afterEach(cleanup);
 
-  it("data-tooltip 挂在未裁剪包裹元素上，且内容为完整公开简介", async () => {
+  it("卡片内含简介全文浮层：默认隐藏、悬停展开，可见简介为 3 行截断", async () => {
     render(<SkillPanel isOpen onClose={vi.fn()} onUseSkill={vi.fn()} />);
 
     await waitFor(() =>
@@ -64,14 +65,23 @@ describe("SkillPanel 技能库简介悬停提示（IK6H3Q）", () => {
     );
 
     const card = screen.getByTestId("skill-library-card");
-    const tipCarrier = card.querySelector("[data-tooltip]");
-    expect(tipCarrier).not.toBeNull();
-    // 回归核心：携带提示的元素不得带 line-clamp（overflow:hidden 会裁剪 ::before）
-    expect(tipCarrier!.className).not.toContain("line-clamp");
-    expect(tipCarrier!.getAttribute("data-tooltip")).toBe(LONG_DESC);
-    // 截断展示仍在内层简介元素上
-    const desc = tipCarrier!.querySelector(".line-clamp-2");
+
+    // 悬停浮层：完整简介、aria-hidden、默认透明、group-hover 展开
+    const overlay = card.querySelector(".tc-agent-skill-card__desc-overlay");
+    expect(overlay).not.toBeNull();
+    expect(overlay!.getAttribute("aria-hidden")).toBe("true");
+    expect(overlay!).toHaveTextContent(LONG_DESC);
+    expect(overlay!.className).toContain("opacity-0");
+    expect(overlay!.className).toContain("group-hover:opacity-100");
+    expect(overlay!.className).toContain("pointer-events-none");
+
+    // 旧的 data-tooltip 方案已移除
+    expect(card.querySelector("[data-tooltip]")).toBeNull();
+
+    // 卡片内可见简介仍为截断展示（3 行）
+    const desc = card.querySelector(".tc-agent-skill-row__desc");
     expect(desc).not.toBeNull();
-    expect(desc).toHaveTextContent(LONG_DESC);
+    expect(desc!.className).toContain("line-clamp-3");
+    expect(desc!).toHaveTextContent(LONG_DESC);
   });
 });

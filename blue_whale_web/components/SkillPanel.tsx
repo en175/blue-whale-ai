@@ -11,7 +11,8 @@ import type { UseSkillSelection } from "./SkillPanelShared";
 export type { UseSkillSelection } from "./SkillPanelShared";
 
 /**
- * Skill 面板（IJZ7Z8；IK60WT 改三页签近全屏工作区 + 官方技能库浏览）。
+ * Skill 面板（IJZ7Z8；IK60WT 改三页签工作区 + 官方技能库浏览；横版卡片改版定稿
+ * 1600×900 上限居中模态）。
  *
  * 三页签：我的技能 / 技能库 / 创建技能（占位）。每次打开默认进技能库；
  * 关闭时整棵卸载 → 技能库查询与滚动状态重置。打开期间页签首次激活才挂载、
@@ -21,7 +22,7 @@ export type { UseSkillSelection } from "./SkillPanelShared";
  *   个人技能行菜单为「查看技能」（只读 SKILL.md + 复制）与「删除技能」（确认框 +
  *   永久删除，IK60WZ，契约 §13）。
  * - 「技能库」：library API（POST 分页，keyword + category + sort + lang，
- *   IO + sentinel 无限滚动，reqId 防过期），竖版卡片网格（3/2/1 列）。
+ *   IO + sentinel 无限滚动，reqId 防过期），横版卡片网格（3/2/1 列）。
  * add 在 library tab 内（乐观 + 回滚；成功后按钮变不可点击「已添加」+ toast，IK60WX）；
  * remove 统一在 my tab 菜单内，成功后经 refreshTrigger 重拉 library 同步 added 状态；
  * auto 在 my tab 内（乐观 + 回滚）。同名冲突（100103）展示服务端解释文案（契约 §5.4）。
@@ -232,7 +233,7 @@ function SkillPanelDialog({
         ref={panelRef}
         tabIndex={-1}
         data-testid="skill-panel"
-        className="tc-agent-skill-panel bg-[var(--tc-login-modal-bg)] border border-white/[0.12] rounded-2xl shadow-[var(--tc-modal-shadow)] w-[calc(100vw-64px)] h-[calc(100vh-64px)] flex flex-col overflow-hidden focus:outline-none animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none"
+        className="tc-agent-skill-panel bg-[var(--tc-login-modal-bg)] border border-white/[0.12] rounded-2xl shadow-[var(--tc-modal-shadow)] w-[min(1600px,calc(100vw-64px))] h-[min(900px,calc(100vh-64px))] flex flex-col overflow-hidden focus:outline-none animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none"
         role="dialog"
         aria-modal="true"
         aria-label="技能面板"
