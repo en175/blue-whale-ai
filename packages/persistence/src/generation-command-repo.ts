@@ -14,8 +14,12 @@ export interface CreateJobInput {
   input: Record<string, unknown>;
   actionIdentity: string;
   actionType: string;
-  /** 任务来源（generation_jobs.source）：默认 bottom_dock；计划应用走 plan。 */
+  /** 任务来源（generation_jobs.source）：默认 bottom_dock；视频计划应用走 plan，图片计划应用走 plan_apply。 */
   source?: string;
+  /** 关联 AgentRun（图片计划应用来自冻结的 plan_message.agent_run_id）。 */
+  agentRunId?: string;
+  /** 关联 PlanMessage（计划应用追溯用，写入日志 payload）。 */
+  planMessageId?: string;
 }
 
 export interface CreatedJob {
@@ -24,7 +28,12 @@ export interface CreatedJob {
 }
 
 export interface GenerationCommandRepo {
-  createJob(input: CreateJobInput): Promise<CreatedJob>;
+  /** 创建任务。callerTx 非空时复用调用方事务（如 plan apply 同 tx 建 job 行），
+   *  否则自起 $transaction（CONTEXT：job 行可随业务事务原子创建，执行队列在提交后进入）。 */
+  createJob(
+    input: CreateJobInput,
+    callerTx?: Prisma.TransactionClient,
+  ): Promise<CreatedJob>;
   /** 软取消：置 cancel_requested_at，状态不变（worker 读到后停止）。返回是否命中可取消的任务。 */
   requestCancel(jobId: string, userId: string): Promise<boolean>;
   /** 重试缺失产出：复制原 job 入参，建新 job（retry_of_job_id 指向原 job），状态 queued。
@@ -49,6 +58,7 @@ export async function createJobWithinTx(
       user_id: BigInt(input.userId),
       type: input.type,
       source: input.source ?? SOURCE_BOTTOM_DOCK,
+      ...(input.agentRunId ? { agent_run_id: BigInt(input.agentRunId) } : {}),
       status: "queued",
       progress: 0,
       input: input.input as never,
@@ -84,7 +94,10 @@ export async function createJobWithinTx(
       event: "created",
       status: "queued",
       message: "任务已创建",
-      payload: { input },
+      payload: {
+        input,
+        ...(input.planMessageId ? { plan_message_id: input.planMessageId } : {}),
+      },
     } as never,
   });
   const event = await appendProjectEvent(tx, {
@@ -113,7 +126,9 @@ export function createGenerationCommandRepo(
   prisma: PrismaClient,
 ): GenerationCommandRepo {
   return {
-    async createJob(input) {
+    async createJob(input, callerTx) {
+      // callerTx 非空：复用调用方事务（plan apply 同 tx 建 job 行）；否则自起事务。
+      if (callerTx) return createJobWithinTx(callerTx, input);
       return prisma.$transaction(
         (tx) => createJobWithinTx(tx, input),
         { maxWait: 10_000, timeout: 30_000 },

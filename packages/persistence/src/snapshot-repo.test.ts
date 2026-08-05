@@ -155,6 +155,9 @@ describe("SnapshotRepo.loadConversationState", () => {
       scene_cards: {
         findMany: vi.fn().mockResolvedValue([]),
       },
+      generation_model_capability: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
       plan_application_receipts: {
         findMany: vi.fn().mockResolvedValue([]),
       },
@@ -290,6 +293,10 @@ describe("SnapshotRepo.loadConversationState", () => {
         aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 12n } }),
       },
       plan_messages: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_model_capability: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      scene_cards: { findMany: vi.fn().mockResolvedValue([]) },
       plan_application_receipts: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaClient;
 

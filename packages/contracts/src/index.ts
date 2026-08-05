@@ -19,6 +19,7 @@ export {
   PLAN_APPLICATION_KIND_UNSUPPORTED_CODE,
   PLAN_APPLICATION_CAPABILITY_DRIFT_CODE,
   PLAN_APPLICATION_ALREADY_APPLIED_CODE,
+  PLAN_APPLICATION_QUOTA_INSUFFICIENT_CODE,
   type ResultEnvelope,
 } from "./result.js";
 export {
@@ -79,6 +80,8 @@ export {
   providerPromptProjectionSchema,
   providerPromptAssetSchema,
   capabilitySnapshotVersionSchema,
+  planApplicationReceiptSchema,
+  planApplicationAvailabilitySchema,
   deriveProviderPromptProjection,
   type PlanApplicationKind,
   type PlanCardCandidate,
@@ -89,6 +92,8 @@ export {
   type ProviderPromptAsset,
   type ProviderPromptProjection,
   type CapabilitySnapshotVersion,
+  type PlanApplicationReceipt,
+  type PlanApplicationAvailability,
 } from "./plan-message.js";
 export {
   planApplicationReceiptSchema,

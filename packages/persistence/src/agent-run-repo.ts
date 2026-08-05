@@ -360,7 +360,7 @@ type MentionSceneCardFact = NonNullable<
 > & { id: bigint };
 
 /** 批量查询 mention 目标的当前事实（T08）：冻结路径与实时重查闸门共用。 */
-async function loadMentionTargetFacts(
+export async function loadMentionTargetFacts(
   tx: Prisma.TransactionClient,
   mentions: Array<{ mention_type: string; target_id: bigint }>,
 ): Promise<{

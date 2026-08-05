@@ -192,6 +192,84 @@ export type ProviderPromptProjection = z.infer<
 export type PlanCardCandidate = z.infer<typeof planCardCandidateSchema>;
 export type PlanMessage = z.infer<typeof planMessageSchema>;
 
+/** PlanMessage 应用可用性（契约 §9 / T10）：把素材可用性 + 能力漂移 + 余额状态收敛为
+ *  对前端单一可渲染的三态。
+ *  - available：可立即应用；
+ *  - retryable_blocked：余额不足或能力瞬时不可用——用户充值/恢复后用新 CommandId 重试；
+ *  - requires_new_plan：素材失效（deleted/wrong_project/permission_lost）或能力永久下线
+ *    （冻结后能力被删/禁用）——必须重新对话生成新计划。 */
+export const planApplicationAvailabilitySchema = z.enum([
+  "available",
+  "retryable_blocked",
+  "requires_new_plan",
+]);
+
+/** PlanApplicationReceipt 通用字段（契约 §9 / T10）：媒体感知判别联合的公共部分。
+ *  applied_at 为首次成功应用的 ISO 时间戳（at-most-once：换 CommandId 重放也回首次回执）。 */
+const planApplicationReceiptCommon = {
+  receipt_id: decimalIdSchema,
+  plan_message_id: decimalIdSchema,
+  project_id: decimalIdSchema,
+  conversation_id: decimalIdSchema,
+  agent_run_id: decimalIdSchema,
+  first_generation_job_id: decimalIdSchema,
+  /** 冻结态内容摘要（content_markdown SHA-256），便于审计比对。 */
+  content_digest: digestSchema,
+  /** 首次成功应用时间（ISO）。 */
+  applied_at: z.string().min(1),
+};
+
+/** 图片分支（契约 §9）：直接生成图片、不创建 SceneCard，故 scene_card_id 恒为 null。 */
+const planApplicationReceiptImageSchema = z
+  .object({
+    ...planApplicationReceiptCommon,
+    application_kind: z.literal("image_generate"),
+    scene_card_id: z.null(),
+  })
+  .strict();
+
+/** 视频分支公共预留字段（T11/T12 本期不填，全部 nullable）：scene_card_id 为目标场景卡，
+ *  result_scene_card_version 为应用后产出的场景卡版本，generation_preset_digest 为生成预设摘要。 */
+const planApplicationReceiptVideoFields = {
+  scene_card_id: decimalIdSchema.nullable(),
+  result_scene_card_version: z.number().int().positive().nullable(),
+  generation_preset_digest: digestSchema.nullable(),
+};
+
+const planApplicationReceiptCreateSchema = z
+  .object({
+    ...planApplicationReceiptCommon,
+    ...planApplicationReceiptVideoFields,
+    application_kind: z.literal("scene_card_create"),
+  })
+  .strict();
+
+const planApplicationReceiptReplaceSchema = z
+  .object({
+    ...planApplicationReceiptCommon,
+    ...planApplicationReceiptVideoFields,
+    application_kind: z.literal("scene_card_replace"),
+  })
+  .strict();
+
+/** PlanApplicationReceipt（契约 §9 / T10）：PlanMessage 首次成功应用的权威回执，
+ *  媒体感知判别联合——图片分支 scene_card_id 恒 null，视频分支预留 scene 字段。 */
+export const planApplicationReceiptSchema = z.discriminatedUnion(
+  "application_kind",
+  [
+    planApplicationReceiptImageSchema,
+    planApplicationReceiptCreateSchema,
+    planApplicationReceiptReplaceSchema,
+  ],
+);
+
+export type PlanApplicationAvailability = z.infer<
+  typeof planApplicationAvailabilitySchema
+>;
+export type PlanApplicationReceipt = z.infer<
+  typeof planApplicationReceiptSchema
+>;
+
 /** 确定性派生 ProviderPromptProjection（AC#7）：纯函数，不改写正文、不调用第二模型。
  *  首/尾帧由 mention_seq 指定（来自冻结的 overrides），命中即置 first_frame / last_frame，
  *  其余为 reference；parameters 原样透传冻结参数。 */

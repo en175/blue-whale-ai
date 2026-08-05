@@ -336,6 +336,8 @@ model plan_messages {
   provider_prompt_projection   Json
   base_plan_message_id         BigInt?
   source_plan_message_id       BigInt?
+  applied_at                   DateTime? @db.DateTime(0)
+  first_generation_job_id      BigInt?
   gmt_create                   DateTime @default(now()) @db.DateTime(0)
 
   @@index([project_id], map: "idx_plan_message_project")
@@ -725,13 +727,15 @@ model skill_summarize_session {
   @@unique([conversation_id], map: "uk_skill_summarize_session_conversation")
 }
 
-/// 计划应用回执（IK67H9，契约 §9 / CONTEXT L217-221）：一次成功应用 PlanMessage 的不可变事实。
-/// 视频路径记 scene_card_id/结果版本/预设摘要；图片路径 scene_card_id 为 NULL（留给 T10）。
+/// 计划应用回执（IK67H9/IK67H8，契约 §9 / CONTEXT L217-221）：一次成功应用 PlanMessage 的不可变事实。
+/// 视频路径记 scene_card_id/结果版本/预设摘要；图片路径 scene_card_id 为 NULL 并记会话/运行归属。
 /// uk_plan_application_receipt_message 兜底「每条 PlanMessage 最多一次成功应用」（CONTEXT L227）。
 model plan_application_receipts {
   id                         BigInt   @id @default(autoincrement())
   message_id                 BigInt   @unique(map: "uk_plan_application_receipt_message")
   project_id                 BigInt
+  conversation_id            BigInt?
+  agent_run_id               BigInt?
   application_kind           String   @db.VarChar(32)
   scene_card_id              BigInt?
   first_generation_job_id    BigInt

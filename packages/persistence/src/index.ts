@@ -135,8 +135,8 @@ export {
 export {
   createPlanApplicationRepo,
   type PlanApplicationRepo,
-  type ApplySceneCardCreatePlanInput,
-  type ApplySceneCardCreateResult,
+  type ApplyPlanMessageInput,
+  type ApplyPlanMessageResult,
 } from "./plan-application-repo.js";
 export {
   createWorkerRepo,

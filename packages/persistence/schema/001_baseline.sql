@@ -357,6 +357,8 @@ CREATE TABLE `plan_messages` (
     `provider_prompt_projection` JSON NOT NULL,
     `base_plan_message_id` BIGINT NULL,
     `source_plan_message_id` BIGINT NULL,
+    `applied_at` DATETIME(0) NULL,
+    `first_generation_job_id` BIGINT NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 
     UNIQUE INDEX `uk_plan_message_message`(`message_id`),
@@ -775,6 +777,8 @@ CREATE TABLE `plan_application_receipts` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `message_id` BIGINT NOT NULL,
     `project_id` BIGINT NOT NULL,
+    `conversation_id` BIGINT NULL,
+    `agent_run_id` BIGINT NULL,
     `application_kind` VARCHAR(32) NOT NULL,
     `scene_card_id` BIGINT NULL,
     `first_generation_job_id` BIGINT NOT NULL,
