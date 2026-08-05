@@ -1,0 +1,70 @@
+// @vitest-environment jsdom
+/**
+ * canvas 请求层 401 恢复链路测试：
+ * 401 必须触发 notifyAuthFailure（清 token + 通知登录），与 api-client 同一出口。
+ */
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { listProjects } from "./canvas";
+import { subscribeToAuthFailure } from "./api-client";
+
+function stubFetch(status: number, body: unknown): Mock {
+  const fn = vi.fn(async () => {
+    const headers = new Headers({ "Content-Type": "application/json" });
+    return new Response(JSON.stringify(body), { status, headers });
+  });
+  globalThis.fetch = fn as unknown as typeof fetch;
+  return fn as unknown as Mock;
+}
+
+beforeEach(() => {
+  window.localStorage.clear();
+  vi.restoreAllMocks();
+});
+
+describe("canvas 请求层 401 恢复链路", () => {
+  it("401 → 抛 ApiError(code=401) + 清空 token + 触发登录回调", async () => {
+    window.localStorage.setItem("bw-access-token", "sk-stale");
+    stubFetch(401, {
+      code: 401,
+      msg: "Unauthorized",
+      success: false,
+      data: null,
+    });
+
+    const handler = vi.fn();
+    const unsubscribe = subscribeToAuthFailure(handler);
+    try {
+      await expect(listProjects()).rejects.toMatchObject({ code: 401 });
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(window.localStorage.getItem("bw-access-token")).toBeNull();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("非 401 失败 → 不触发登录回调、不清 token", async () => {
+    window.localStorage.setItem("bw-access-token", "sk-valid");
+    stubFetch(500, { code: 500, msg: "boom", success: false, data: null });
+
+    const handler = vi.fn();
+    const unsubscribe = subscribeToAuthFailure(handler);
+    try {
+      await expect(listProjects()).rejects.toMatchObject({ code: 500 });
+      expect(handler).not.toHaveBeenCalled();
+      expect(window.localStorage.getItem("bw-access-token")).toBe("sk-valid");
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("200 正常返回 data", async () => {
+    stubFetch(200, {
+      code: 200,
+      msg: "",
+      success: true,
+      data: [{ id: 1, name: "p", thumb: null, created_at: "" }],
+    });
+    const projects = await listProjects();
+    expect(projects).toHaveLength(1);
+  });
+});
