@@ -635,7 +635,7 @@ test("断线后历史保持一致，恢复联网后可继续提交", async () =>
   );
 }, 300_000);
 
-test("PlanPhase 对齐在 AgentChatPanel 经自然语言推进并展示阶段（IK67GY）", async () => {
+test("PlanPhase 完成后在 AgentChatPanel 展示正式 PlanMessage（IK6QHI）", async () => {
   const projectId = await createProject("计划阶段验收", user.token);
   await openCanvas(projectId);
 
@@ -675,21 +675,35 @@ test("PlanPhase 对齐在 AgentChatPanel 经自然语言推进并展示阶段（
   await page.getByLabel("发送").click();
 
   await page.getByLabel("Agent 状态：已完成").waitFor({ timeout: 60_000 });
+  const snapshot = await fetchSnapshot(projectId, user.token);
+  const run = snapshot.agent_runs.at(-1);
+  const plans = snapshot.plan_messages.filter(
+    (item) => String(item.agent_run_id) === String(run.agent_run_id),
+  );
+  assert.equal(plans.length, 1, "服务=Snapshot 事实=完成后应存在唯一正式 PlanMessage");
+  const plan = plans[0];
+  assert.ok(plan.content_markdown.includes("主体「蓝鲸」"));
+  assert.ok(plan.content_markdown.includes("预期「极简海报」"));
+  const planMessage = snapshot.conversation_messages.find(
+    (message) => String(message.message_id) === String(plan.message_id),
+  );
+  assert.equal(planMessage?.content_type, "plan_message", "服务=Snapshot 事实=正式提交事实应为 PlanMessage");
+
   await page.waitForFunction(
-    () =>
+    (content) =>
       Array.from(document.querySelectorAll(".tc-agent-agent-bubble")).some(
-        (el) =>
-          el.textContent?.includes(
-            "已完成需求对齐：主体「蓝鲸」，预期「极简海报」。",
-          ),
+        (el) => el.textContent?.includes(content),
       ),
-    null,
+    plan.content_markdown,
     { timeout: 30_000 },
+  );
+  const assistantBubbles = await page.locator(".tc-agent-agent-bubble").allTextContents();
+  assert.ok(
+    !assistantBubbles.some((content) => content.includes("已完成需求对齐：")),
+    "服务=AgentChatPanel 事实=完成后不得显示额外完成文本消息",
   );
 
   // Snapshot 权威事实：同一 Run 三个推进、每个推进一次 RunCommit
-  const snapshot = await fetchSnapshot(projectId, user.token);
-  const run = snapshot.agent_runs.at(-1);
   const ordinals = mysqlQuery(
     `SELECT ordinal FROM agent_advances WHERE agent_run_id = ${run.agent_run_id} ORDER BY ordinal;`,
   ).trim().split("\n");
