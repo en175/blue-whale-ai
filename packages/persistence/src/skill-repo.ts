@@ -505,7 +505,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
             description,
             cover_url: row.cover_url,
             source: row.source,
-            skill_code: row.skill_code,
+            skill_code: row.skill_code ?? null,
             asset_domain: "official" as const,
             added: mineIds.has(row.id.toString()),
             category: row.category,

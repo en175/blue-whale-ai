@@ -194,6 +194,7 @@ describe("SkillRepo", () => {
         description: "写作助手",
         cover_url: "https://x/cover.png",
         source: "official",
+        skill_code: null,
         asset_domain: "official",
         added: true,
         category: "marketing",
@@ -868,6 +869,7 @@ describe("SkillRepo", () => {
         description: "写作助手",
         cover_url: "https://x/cover.png",
         source: "official",
+        skill_code: null,
         asset_domain: "official",
       },
       {
@@ -877,6 +879,7 @@ describe("SkillRepo", () => {
         description: "个人资产",
         cover_url: null,
         source: null,
+        skill_code: null,
         asset_domain: "personal",
       },
     ]);
@@ -915,6 +918,7 @@ describe("SkillRepo", () => {
         description: "个人资产",
         cover_url: null,
         source: null,
+        skill_code: null,
         asset_domain: "personal",
       },
     ]);
