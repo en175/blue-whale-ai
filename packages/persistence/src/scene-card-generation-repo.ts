@@ -8,6 +8,11 @@ import type {
   ProviderPromptAsset,
   VideoReferenceMode,
 } from "@blue-whale/contracts";
+import {
+  canonicalizeJsonValue,
+  referenceModeToRequiredFeature,
+  validateVideoReferenceConfiguration,
+} from "@blue-whale/contracts";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
@@ -99,12 +104,11 @@ export interface SceneCardGenerationRepo {
 }
 
 /** 参数越界校验（AC#1 能力约束）：返回拒绝原因或 null。
- *  仅校验 aspect_ratio / size / duration / count 四项明确边界；reference_mode 合法性
- *  交由 worker（实际调供应商，权威）+ 前端按 features 过滤，后端不做无依据推断（ModelFeatures
- *  无 last_frame 独立标志，映射到 first_frame 会误拒模型其实支持的请求）。
- *  features 兼容 snake_case / camelCase（DB 可能两种形态）。 */
+ *  除尺寸、比例、时长、数量外，参考模式必须由当前模型显式声明支持；未知能力按 false
+ *  处理。features 兼容 snake_case / camelCase（DB 可能两种形态）。 */
 function checkCapabilityLimit(
   parameters: FrozenGenerationParameters,
+  referenceMode: VideoReferenceMode,
   capability: {
     supported_sizes: unknown;
     supported_aspect_ratios: unknown;
@@ -149,6 +153,20 @@ function checkCapabilityLimit(
   const quantityMax = Number(f.quantity_max ?? f.quantityMax ?? 1);
   if (parameters.count > quantityMax)
     return `count ${parameters.count} 超过 quantity_max ${quantityMax}`;
+  const required = referenceModeToRequiredFeature(referenceMode);
+  if (required) {
+    // features 兼容 snake_case / camelCase（DB 可能两种形态）。
+    const camel = required.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+    if (!(f[required] === true || f[camel] === true)) {
+      const label =
+        required === "first_last_frame"
+          ? "首尾帧"
+          : required === "first_frame"
+            ? "首帧"
+            : "尾帧";
+      return `当前模型不支持${label}参考模式`;
+    }
+  }
   return null;
 }
 
@@ -163,6 +181,31 @@ function toDerivedReferences(
     type: asset.type,
     first_seen_offset: 0,
   }));
+}
+
+/** T14 只允许改已有素材的 role；列表顺序、身份与冻结投影都必须保持不变。 */
+function onlyReferenceRolesChanged(
+  current: unknown,
+  submitted: ProviderPromptAsset[],
+): boolean {
+  if (!Array.isArray(current) || current.length !== submitted.length)
+    return false;
+  return current.every((asset, index) => {
+    if (asset === null || typeof asset !== "object" || Array.isArray(asset))
+      return false;
+    const submittedAsset = submitted[index];
+    if (!submittedAsset) return false;
+    const immutableCurrent = Object.fromEntries(
+      Object.entries(asset).filter(([key]) => key !== "role"),
+    );
+    const immutableSubmitted = Object.fromEntries(
+      Object.entries(submittedAsset).filter(([key]) => key !== "role"),
+    );
+    return (
+      JSON.stringify(canonicalizeJsonValue(immutableCurrent)) ===
+      JSON.stringify(canonicalizeJsonValue(immutableSubmitted))
+    );
+  });
 }
 
 /** 单事务原子再生成（AC#4/#5/#6）：前置检查全部通过才 UPDATE preset(version+1) + 新 record + 新 job。
@@ -223,7 +266,7 @@ async function regenerateSceneCardInTransaction(
 
   const preset = await tx.scene_card_generation_presets.findFirst({
     where: { scene_card_id: sceneCardId, is_delete: 0 },
-    select: { id: true, version: true },
+    select: { id: true, version: true, reference_assets: true },
   });
   if (!preset) return { kind: "scene_card_not_found" } as const;
 
@@ -238,6 +281,30 @@ async function regenerateSceneCardInTransaction(
       current_preset_version: preset.version,
     };
   }
+
+  if (
+    !onlyReferenceRolesChanged(preset.reference_assets, input.reference_assets)
+  )
+    return {
+      kind: "validation_failed",
+      reason: "参考素材列表只能修改角色",
+    };
+
+  const referenceRoleReason = validateVideoReferenceConfiguration(
+    input.reference_mode,
+    input.reference_assets,
+  );
+  if (referenceRoleReason)
+    return { kind: "validation_failed", reason: referenceRoleReason };
+
+  const snapshot =
+    input.capability_snapshot_version as unknown as CapabilitySnapshot;
+  if (
+    input.parameters.capability_type !== snapshot.capability_type ||
+    input.parameters.model_id !== snapshot.model_id ||
+    input.parameters.provider_id !== snapshot.provider_id
+  )
+    return { kind: "capability_drift" } as const;
 
   // 4. 反查首次 Receipt（CONTEXT L99-101：重试不创建新 Receipt，来源指向首次 PlanMessage 与回执）。
   const firstReceipt = await tx.plan_application_receipts.findFirst({
@@ -255,8 +322,6 @@ async function regenerateSceneCardInTransaction(
     };
 
   // 5. 能力漂移检测（AC#4）：按提交的 model_id/provider_id 查当前行，比对 row_version + digest。
-  const snapshot =
-    input.capability_snapshot_version as unknown as CapabilitySnapshot;
   const capability = await tx.generation_model_capability.findUnique({
     where: {
       provider_id_model_id: {
@@ -285,11 +350,13 @@ async function regenerateSceneCardInTransaction(
   if (capability.version !== snapshot.row_version || recomputedDigest !== snapshot.digest)
     return { kind: "capability_drift" } as const;
 
-  // 5b. 参数越界（AC#1 能力约束）：提交参数必须在当前能力支持范围内，否则零写入。
-  // reference_mode 合法性交由 worker + 前端过滤，后端不在此推断（见 checkCapabilityLimit 注释）。
-  const limitReason = checkCapabilityLimit(input.parameters, capability);
-  if (limitReason)
-    return { kind: "capability_limit", reason: limitReason };
+  // 5b. 参数越界（AC#1 能力约束）：提交参数与参考模式必须在当前能力支持范围内。
+  const limitReason = checkCapabilityLimit(
+    input.parameters,
+    input.reference_mode,
+    capability,
+  );
+  if (limitReason) return { kind: "capability_limit", reason: limitReason };
 
   // 6. 引用素材有效性（AC#4，全部在副作用前）。
   const referenceCheck = await validateDerivedReferences(

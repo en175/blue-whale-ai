@@ -393,6 +393,31 @@ Idempotency-Key: <stable-command-id>
 - Snapshot 恢复时，重复、失效或越权 SceneCardNode 统一显示“场景卡不可用”并允许移除；Web 绝不读取或显示其他 Project 的正文。
 - Product API 接纳首次包含 pending Asset NodeItem 的完整 Canvas PUT 时，在同一提交中保存布局并把对应首次放置状态改为 `placed`。
 
+### 5.7 SceneCard 再生成与视频参考能力（IK6OHL）
+
+SceneCard 再生成请求沿用冻结的生成参数与能力快照。两者的
+`capability_type`、`model_id`、`provider_id` 必须完全一致；不一致按能力漂移拒绝，且不得写入
+Preset、GenerationJob 或 GenerationRecord。
+
+```ts
+type VideoModelFeatures = {
+  first_frame: boolean;
+  last_frame: boolean;
+  first_last_frame: boolean;
+};
+```
+
+- 模型能力 API 的 wire 字段统一使用上述 `snake_case`；数据库兼容读取 camelCase 与
+  snake_case，但响应只输出 snake_case。
+- `last_frame` 独立表示单尾帧参考能力，不从 `first_last_frame` 推断。字段缺失、非布尔值或未知时
+  一律投影为 `false`。
+- 编辑器只能修改当前 Preset 已有 `reference_assets` 的 `role`。素材数量、顺序、
+  `mention_id`、`type` 与冻结 `projection` 不得新增、删除、替换或改写。
+- `first_frame` 与 `last_frame` 各最多一个；服务端由角色唯一派生
+  `text_to_video | first_frame | last_frame | first_and_last_frame`，客户端提交的
+  `reference_mode` 必须与派生值一致。
+- 任一校验失败必须 fail closed，保持 Preset 版本不变且零任务写入。
+
 ## 6. 数据模型
 
 ### 6.1 SceneCard

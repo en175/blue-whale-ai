@@ -3,7 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   SCENE_CARD_VERSION_CONFLICT_CODE,
+  deriveVideoReferenceMode,
+  referenceModeToRequiredFeature,
   type CapabilitySnapshotVersion,
+  type ProviderPromptAsset,
+  type VideoReferenceMode,
 } from "@blue-whale/contracts";
 
 import {
@@ -41,7 +45,8 @@ type Overrides = {
   size: string;
   duration: number;
   count: number;
-  reference_mode: string;
+  reference_mode: VideoReferenceMode;
+  reference_assets: ProviderPromptAsset[];
 };
 
 const REFERENCE_MODE_OPTIONS = [
@@ -51,8 +56,29 @@ const REFERENCE_MODE_OPTIONS = [
   { id: "first_and_last_frame", label: "首尾帧" },
 ];
 
+const REFERENCE_ROLE_OPTIONS = [
+  { id: "reference", label: "普通参考" },
+  { id: "first_frame", label: "首帧" },
+  { id: "last_frame", label: "尾帧" },
+] as const;
+
 const CAPABILITY_DRIFT_MESSAGE =
   "模型能力与首次冻结快照不一致，未切换；请重新确认生成参数。";
+
+function getReferenceCapabilityError(
+  model: ImageModelCapability | null,
+  referenceMode: VideoReferenceMode,
+): string | null {
+  if (!model || referenceMode === "text_to_video") return null;
+  const required = referenceModeToRequiredFeature(referenceMode);
+  if (required && model.features[required] !== true) {
+    const label =
+      REFERENCE_MODE_OPTIONS.find((option) => option.id === referenceMode)
+        ?.label ?? referenceMode;
+    return `当前模型不支持${label}参考模式`;
+  }
+  return null;
+}
 
 function matchesFrozenCapability(
   model: ImageModelCapability | undefined,
@@ -121,13 +147,15 @@ export function SceneCardGenerationEditor({
         const params = presetData.preset.parameters as Record<string, unknown>;
         const snapshot = presetData.preset
           .capability_snapshot_version as CapabilitySnapshotVersion;
+        const initialReferenceAssets = presetData.preset.reference_assets;
         const initial: Overrides = {
           model_id: String(params.model_id ?? snapshot.model_id),
           aspect_ratio: String(params.aspect_ratio ?? ""),
           size: String(params.size ?? ""),
           duration: Number(params.duration ?? 0),
           count: Number(params.count ?? 1),
-          reference_mode: presetData.preset.reference_mode,
+          reference_mode: deriveVideoReferenceMode(initialReferenceAssets),
+          reference_assets: initialReferenceAssets,
         };
         if (
           draft &&
@@ -145,13 +173,16 @@ export function SceneCardGenerationEditor({
           if (!canRestoreDraftModel) {
             setErrorMessage(CAPABILITY_DRIFT_MESSAGE);
           }
+          const referenceAssets =
+            d.reference_assets ?? initial.reference_assets;
           setOverrides({
             model_id: canRestoreDraftModel ? draftModelId : initial.model_id,
             aspect_ratio: d.aspect_ratio ?? initial.aspect_ratio,
             size: d.size ?? initial.size,
             duration: d.duration ?? initial.duration,
             count: d.count ?? initial.count,
-            reference_mode: d.reference_mode ?? initial.reference_mode,
+            reference_mode: deriveVideoReferenceMode(referenceAssets),
+            reference_assets: referenceAssets,
           });
         } else {
           setOverrides(initial);
@@ -177,23 +208,28 @@ export function SceneCardGenerationEditor({
 
   const options = useMemo(() => deriveOptions(selectedModel), [selectedModel]);
 
-  // 参考模式按当前模型能力过滤（AC#1）：text_to_video 永展；first_frame / last_frame 跟
-  // features.first_frame（ModelFeatures 无 last_frame 独立标志，暂与首帧同展隐，待能力 API
-  // 给独立标志再分拆）；first_and_last_frame 跟 features.first_last_frame。无模型数据时全展
+  const referenceCapabilityError = useMemo(
+    () =>
+      overrides
+        ? getReferenceCapabilityError(selectedModel, overrides.reference_mode)
+        : null,
+    [overrides, selectedModel],
+  );
+
+  // 参考模式按当前模型能力过滤（AC#1）：text_to_video 永展；first_frame、last_frame、
+  // first_and_last_frame 分别跟随各自独立能力。无模型数据时全展
   // （与 deriveOptions fallback 一致，合法性交 worker 兜底）。
   const referenceModeOptions = useMemo(() => {
     if (!selectedModel) return REFERENCE_MODE_OPTIONS;
     const features = selectedModel.features;
-    const firstFrame = features.first_frame === true;
-    const firstLastFrame = features.first_last_frame === true;
     return REFERENCE_MODE_OPTIONS.filter((opt) => {
-      if (opt.id === "text_to_video") return true;
-      if (opt.id === "first_frame" || opt.id === "last_frame")
-        return firstFrame;
-      if (opt.id === "first_and_last_frame") return firstLastFrame;
-      return true;
+      if (opt.id === overrides?.reference_mode) return true;
+      const required = referenceModeToRequiredFeature(
+        opt.id as VideoReferenceMode,
+      );
+      return required === null || features[required] === true;
     });
-  }, [selectedModel]);
+  }, [overrides?.reference_mode, selectedModel]);
 
   // overrides 变化即时存草稿（跨刷新存活；冲突/关闭由调用方决定清除）。
   useEffect(() => {
@@ -220,7 +256,14 @@ export function SceneCardGenerationEditor({
   }
 
   async function handleGenerate() {
-    if (!preset || !overrides || !selectedModel || submitting) return;
+    if (
+      !preset ||
+      !overrides ||
+      !selectedModel ||
+      submitting ||
+      referenceCapabilityError
+    )
+      return;
     setSubmitting(true);
     setErrorMessage(null);
     setConflict(null);
@@ -255,7 +298,7 @@ export function SceneCardGenerationEditor({
           count: overrides.count,
         },
         reference_mode: overrides.reference_mode,
-        reference_assets: preset.preset.reference_assets,
+        reference_assets: overrides.reference_assets,
         capability_snapshot_version: capabilitySnapshotVersion,
       };
       await generateSceneCard(
@@ -399,8 +442,18 @@ export function SceneCardGenerationEditor({
             </div>
           </div>
         )}
-        {preset.preset.reference_assets.length > 0 && (
-          <ReferenceAssetsReadonly assets={preset.preset.reference_assets} />
+        {overrides.reference_assets.length > 0 && (
+          <ReferenceAssetsEditor
+            assets={overrides.reference_assets}
+            disabled={submitting}
+            onChange={(reference_assets) =>
+              setOverrides({
+                ...overrides,
+                reference_mode: deriveVideoReferenceMode(reference_assets),
+                reference_assets,
+              })
+            }
+          />
         )}
       </section>
 
@@ -501,10 +554,8 @@ export function SceneCardGenerationEditor({
           label="参考模式"
           value={overrides.reference_mode}
           options={referenceModeOptions}
-          disabled={submitting}
-          onChange={(reference_mode) =>
-            setOverrides({ ...overrides, reference_mode })
-          }
+          disabled
+          onChange={() => undefined}
         />
       </section>
 
@@ -514,6 +565,15 @@ export function SceneCardGenerationEditor({
           style={{ color: "var(--tc-text-primary)" }}
         >
           {errorMessage}
+        </p>
+      )}
+
+      {referenceCapabilityError && (
+        <p
+          className="m-0 text-[12px]"
+          style={{ color: "var(--tc-text-primary)" }}
+        >
+          {referenceCapabilityError}
         </p>
       )}
 
@@ -534,13 +594,18 @@ export function SceneCardGenerationEditor({
         <button
           type="button"
           onClick={handleGenerate}
-          disabled={submitting || conflict !== null}
+          disabled={
+            submitting || conflict !== null || referenceCapabilityError !== null
+          }
           className="rounded px-3 py-1.5 text-[12px]"
           style={{
             background: "var(--tc-accent)",
             border: "1px solid var(--tc-accent)",
             color: "var(--tc-text-primary)",
-            opacity: submitting || conflict !== null ? 0.6 : 1,
+            opacity:
+              submitting || conflict !== null || referenceCapabilityError
+                ? 0.6
+                : 1,
           }}
         >
           {submitting ? "生成中…" : "生成"}
@@ -590,22 +655,44 @@ function SelectField({
   );
 }
 
-function ReferenceAssetsReadonly({ assets }: { assets: unknown[] }) {
+function ReferenceAssetsEditor({
+  assets,
+  disabled,
+  onChange,
+}: {
+  assets: ProviderPromptAsset[];
+  disabled: boolean;
+  onChange: (assets: ProviderPromptAsset[]) => void;
+}) {
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-2">
       <span className="text-[11px]" style={{ color: "var(--tc-text-muted)" }}>
-        参考素材（只读）
+        参考素材角色
       </span>
       {assets.map((asset, i) => {
-        const a = asset as { role?: string; type?: string };
         return (
-          <span
-            key={i}
-            className="text-[11px]"
-            style={{ color: "var(--tc-text-secondary)" }}
-          >
-            · {a.role ?? "reference"}（{a.type ?? "asset"}）
-          </span>
+          <SelectField
+            key={`${asset.type}:${asset.mention_id}`}
+            label={`参考素材 ${i + 1} 角色`}
+            value={asset.role}
+            options={REFERENCE_ROLE_OPTIONS.map((option) => ({ ...option }))}
+            disabled={disabled}
+            onChange={(value) => {
+              const role = REFERENCE_ROLE_OPTIONS.find(
+                (option) => option.id === value,
+              )?.id;
+              if (!role) return;
+              onChange(
+                assets.map((current, index) =>
+                  index === i
+                    ? { ...current, role }
+                    : role !== "reference" && current.role === role
+                      ? { ...current, role: "reference" }
+                      : current,
+                ),
+              );
+            }}
+          />
         );
       })}
     </div>

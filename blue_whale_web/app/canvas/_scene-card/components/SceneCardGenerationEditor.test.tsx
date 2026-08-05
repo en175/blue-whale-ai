@@ -5,7 +5,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   generateSceneCard,
   getSceneCardGenerationPreset,
+  type SceneCardGenerationPreset,
 } from "@/lib/conversation";
+import type { ProviderPromptAsset } from "@blue-whale/contracts";
 import { getVideoModels } from "@/app/canvas/_canvas/api/generation";
 import { saveSceneCardDraft } from "@/lib/scene-card-gen-draft";
 
@@ -26,7 +28,38 @@ vi.mock("@/lib/command-identity", () => ({
 
 const DIGEST = `sha256:${"a".repeat(64)}`;
 
-const preset = {
+const referenceAssets: ProviderPromptAsset[] = [
+  {
+    mention_id: "101",
+    type: "asset" as const,
+    role: "reference" as const,
+    projection: {
+      asset_type: "image",
+      mime: "image/png",
+      size: "1024",
+      width: 1280,
+      height: 720,
+      duration_ms: null,
+      content_sha256: "asset-a",
+    },
+  },
+  {
+    mention_id: "102",
+    type: "asset" as const,
+    role: "reference" as const,
+    projection: {
+      asset_type: "image",
+      mime: "image/png",
+      size: "2048",
+      width: 1280,
+      height: 720,
+      duration_ms: null,
+      content_sha256: "asset-b",
+    },
+  },
+];
+
+const preset: SceneCardGenerationPreset = {
   scene_card: {
     scene_card_id: "10",
     version: 2,
@@ -56,7 +89,11 @@ const preset = {
   projection: null,
 };
 
-function capability(modelId: string, providerId: string) {
+function capability(
+  modelId: string,
+  providerId: string,
+  featureOverrides: Record<string, boolean | number> = {},
+) {
   return {
     model_id: modelId,
     provider_id: providerId,
@@ -87,15 +124,17 @@ function capability(modelId: string, providerId: string) {
       stream: false,
       tools: false,
       first_frame: false,
+      last_frame: false,
       first_last_frame: false,
       audio: false,
+      ...featureOverrides,
     },
     version: 7,
     digest: DIGEST,
   };
 }
 
-describe("SceneCardGenerationEditor 模型切换", () => {
+describe("SceneCardGenerationEditor", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
@@ -206,5 +245,228 @@ describe("SceneCardGenerationEditor 模型切换", () => {
         "模型能力与首次冻结快照不一致，未切换；请重新确认生成参数。",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("尾帧参考模式只由独立 last_frame 能力控制", async () => {
+    vi.mocked(getVideoModels).mockResolvedValue([
+      capability("video-a", "provider-a", {
+        first_frame: false,
+        last_frame: true,
+      }),
+    ]);
+
+    render(
+      <SceneCardGenerationEditor
+        projectId="1"
+        sceneCardId="10"
+        onClose={vi.fn()}
+      />,
+    );
+
+    await screen.findByRole("combobox", { name: "参考模式" });
+    expect(
+      screen.queryByRole("option", { name: "首帧" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "尾帧" })).toBeInTheDocument();
+  });
+
+  it("已有引用素材显示可编辑的角色选择", async () => {
+    vi.mocked(getSceneCardGenerationPreset).mockResolvedValue({
+      ...preset,
+      preset: {
+        ...preset.preset,
+        reference_assets: referenceAssets,
+      },
+    });
+
+    render(
+      <SceneCardGenerationEditor
+        projectId="1"
+        sceneCardId="10"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("combobox", { name: "参考素材 1 角色" }),
+    ).toHaveValue("reference");
+    expect(
+      screen.getByRole("combobox", { name: "参考素材 2 角色" }),
+    ).toHaveValue("reference");
+  });
+
+  it("修改素材角色时自动派生参考模式，并保证首尾帧角色各自唯一", async () => {
+    vi.mocked(getSceneCardGenerationPreset).mockResolvedValue({
+      ...preset,
+      preset: {
+        ...preset.preset,
+        reference_assets: referenceAssets,
+      },
+    });
+    vi.mocked(getVideoModels).mockResolvedValue([
+      capability("video-a", "provider-a", {
+        first_frame: true,
+        last_frame: true,
+        first_last_frame: true,
+      }),
+    ]);
+
+    render(
+      <SceneCardGenerationEditor
+        projectId="1"
+        sceneCardId="10"
+        onClose={vi.fn()}
+      />,
+    );
+
+    const firstRole = await screen.findByRole("combobox", {
+      name: "参考素材 1 角色",
+    });
+    const secondRole = screen.getByRole("combobox", {
+      name: "参考素材 2 角色",
+    });
+    const referenceMode = screen.getByRole("combobox", {
+      name: "参考模式",
+    });
+
+    fireEvent.change(firstRole, { target: { value: "first_frame" } });
+    expect(referenceMode).toHaveValue("first_frame");
+
+    fireEvent.change(secondRole, { target: { value: "last_frame" } });
+    expect(referenceMode).toHaveValue("first_and_last_frame");
+
+    fireEvent.change(secondRole, { target: { value: "first_frame" } });
+    expect(firstRole).toHaveValue("reference");
+    expect(secondRole).toHaveValue("first_frame");
+    expect(referenceMode).toHaveValue("first_frame");
+  });
+
+  it("生成时提交编辑后的素材角色和派生参考模式", async () => {
+    vi.mocked(getSceneCardGenerationPreset).mockResolvedValue({
+      ...preset,
+      preset: {
+        ...preset.preset,
+        reference_assets: referenceAssets,
+      },
+    });
+    vi.mocked(getVideoModels).mockResolvedValue([
+      capability("video-a", "provider-a", {
+        first_frame: true,
+        last_frame: true,
+        first_last_frame: true,
+      }),
+    ]);
+
+    render(
+      <SceneCardGenerationEditor
+        projectId="1"
+        sceneCardId="10"
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(
+      await screen.findByRole("combobox", { name: "参考素材 1 角色" }),
+      { target: { value: "first_frame" } },
+    );
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "参考素材 2 角色" }),
+      { target: { value: "last_frame" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+
+    await waitFor(() => expect(generateSceneCard).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(generateSceneCard).mock.calls[0]?.[3]).toMatchObject({
+      reference_mode: "first_and_last_frame",
+      reference_assets: [
+        { mention_id: "101", role: "first_frame" },
+        { mention_id: "102", role: "last_frame" },
+      ],
+    });
+  });
+
+  it("刷新后恢复草稿中的素材角色", async () => {
+    vi.mocked(getSceneCardGenerationPreset).mockResolvedValue({
+      ...preset,
+      preset: {
+        ...preset.preset,
+        reference_assets: referenceAssets,
+      },
+    });
+    vi.mocked(getVideoModels).mockResolvedValue([
+      capability("video-a", "provider-a", { first_frame: true }),
+    ]);
+    saveSceneCardDraft("10", {
+      baseSceneCardVersion: 2,
+      basePresetVersion: 3,
+      overrides: {
+        model_id: "video-a",
+        aspect_ratio: "16:9",
+        size: "720p",
+        duration: 6,
+        count: 1,
+        reference_mode: "first_frame",
+        reference_assets: [
+          { ...referenceAssets[0], role: "first_frame" },
+          referenceAssets[1],
+        ],
+      },
+      updatedAt: "2026-08-05T00:00:00.000Z",
+    });
+
+    render(
+      <SceneCardGenerationEditor
+        projectId="1"
+        sceneCardId="10"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("combobox", { name: "参考素材 1 角色" }),
+    ).toHaveValue("first_frame");
+    expect(screen.getByRole("combobox", { name: "参考模式" })).toHaveValue(
+      "first_frame",
+    );
+  });
+
+  it("派生模式不受模型支持时禁用生成，补齐首尾帧后恢复", async () => {
+    vi.mocked(getSceneCardGenerationPreset).mockResolvedValue({
+      ...preset,
+      preset: {
+        ...preset.preset,
+        reference_assets: referenceAssets,
+      },
+    });
+    vi.mocked(getVideoModels).mockResolvedValue([
+      capability("video-a", "provider-a", { first_last_frame: true }),
+    ]);
+
+    render(
+      <SceneCardGenerationEditor
+        projectId="1"
+        sceneCardId="10"
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(
+      await screen.findByRole("combobox", { name: "参考素材 1 角色" }),
+      { target: { value: "first_frame" } },
+    );
+    expect(screen.getByText("当前模型不支持首帧参考模式")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "生成" })).toBeDisabled();
+
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "参考素材 2 角色" }),
+      { target: { value: "last_frame" } },
+    );
+    expect(
+      screen.queryByText("当前模型不支持首帧参考模式"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "参考模式" })).toHaveValue(
+      "first_and_last_frame",
+    );
+    expect(screen.getByRole("button", { name: "生成" })).toBeEnabled();
   });
 });

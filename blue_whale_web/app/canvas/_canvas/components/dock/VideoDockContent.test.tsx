@@ -118,6 +118,7 @@ describe("VideoDockContent references", () => {
           stream: false,
           tools: false,
           first_frame: true,
+          last_frame: true,
           first_last_frame: true,
           audio: true,
         },
