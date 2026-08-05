@@ -836,7 +836,7 @@ describe("new-api client", () => {
     });
 
     // 有筛选 → /api/user/search，参数带 status/role/p/page_size
-    const search = await client.listAdminUsers("sk-admin", {
+    const search = await client.listAdminUsers("sk-admin", 1, {
       keyword: "ali",
       status: 0,
       role: 1,
@@ -849,14 +849,17 @@ describe("new-api client", () => {
       "http://new-api.test/api/user/search?keyword=ali&status=0&role=1&p=2&page_size=10",
     );
 
-    // 无筛选 → /api/user
-    await client.listAdminUsers("sk-admin");
+    // 无筛选 → /api/user/（尾斜杠，IK6M2F）
+    await client.listAdminUsers("sk-admin", 1);
     expect(requests[1]?.url).toBe(
-      "http://new-api.test/api/user?p=1&page_size=20",
+      "http://new-api.test/api/user/?p=1&page_size=20",
     );
     expect(new Headers(requests[0]?.init.headers).get("Authorization")).toBe(
       "Bearer sk-admin",
     );
+    // IK6M2F：管理端请求须带 New-Api-User 头（authHelper 强制）
+    expect(new Headers(requests[0]?.init.headers).get("New-Api-User")).toBe("1");
+    expect(new Headers(requests[1]?.init.headers).get("New-Api-User")).toBe("1");
   });
 
   it("adapts admin manage / topup / complete / log-stat / log endpoints", async () => {
@@ -924,15 +927,16 @@ describe("new-api client", () => {
     });
 
     await expect(
-      client.manageAdminUser("sk-admin", { id: 42, action: "disable" }),
+      client.manageAdminUser("sk-admin", 1, { id: 42, action: "disable" }),
     ).resolves.toBeUndefined();
     expect(requests[0]?.url).toBe("http://new-api.test/api/user/manage");
     expect(JSON.parse(String(requests[0]?.init.body))).toEqual({
       id: 42,
       action: "disable",
     });
+    expect(new Headers(requests[0]?.init.headers).get("New-Api-User")).toBe("1");
 
-    const topups = await client.listAdminTopUps("sk-admin", {
+    const topups = await client.listAdminTopUps("sk-admin", 1, {
       keyword: "BWP",
     });
     expect(topups.items[0]?.trade_no).toBe("BWP1");
@@ -941,7 +945,7 @@ describe("new-api client", () => {
     );
 
     await expect(
-      client.completeAdminTopUp("sk-admin", "BWP1"),
+      client.completeAdminTopUp("sk-admin", 1, "BWP1"),
     ).resolves.toBeUndefined();
     expect(requests[2]?.url).toBe(
       "http://new-api.test/api/user/topup/complete",
@@ -950,7 +954,7 @@ describe("new-api client", () => {
       trade_no: "BWP1",
     });
 
-    const stat = await client.getAdminLogStat("sk-admin", {
+    const stat = await client.getAdminLogStat("sk-admin", 1, {
       type: 2,
       startTimestamp: 1700000000,
       endTimestamp: 1700003600,
@@ -960,11 +964,13 @@ describe("new-api client", () => {
       "http://new-api.test/api/log/stat?type=2&start_timestamp=1700000000&end_timestamp=1700003600",
     );
 
-    const logs = await client.listAdminLogs("sk-admin", { pageSize: 5 });
+    const logs = await client.listAdminLogs("sk-admin", 1, { pageSize: 5 });
     expect(logs.items[0]?.model_name).toBe("gpt-4o");
+    // IK6M2F：/api/log 列表路由须带尾斜杠
     expect(requests[4]?.url).toBe(
-      "http://new-api.test/api/log?p=1&page_size=5",
+      "http://new-api.test/api/log/?p=1&page_size=5",
     );
+    expect(new Headers(requests[4]?.init.headers).get("New-Api-User")).toBe("1");
   });
 
   it("normalizes admin page envelopes with missing fields", async () => {
@@ -973,7 +979,7 @@ describe("new-api client", () => {
       fetchImpl: async () =>
         jsonResponse({ success: true, data: { items: undefined } }),
     });
-    const page = await client.listAdminTopUps("sk-admin");
+    const page = await client.listAdminTopUps("sk-admin", 1);
     expect(page.items).toEqual([]);
     expect(page.total).toBe(0);
     expect(page.page).toBe(1);

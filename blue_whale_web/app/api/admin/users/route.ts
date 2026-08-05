@@ -6,8 +6,9 @@ import { adminErrorResponse } from "@/lib/admin/response";
 import { withAdminUser } from "@/lib/auth/product-route-auth";
 
 // GET /api/admin/users → 用户列表/搜索（IK6JXI 契约 4.2）
+// IK6M2F：管理端 client 需带当前管理员 userId（New-Api-User 头）。
 export async function GET(request: Request) {
-  return withAdminUser(request, async () => {
+  return withAdminUser(request, async (user) => {
     const token = bearerToken(request);
     if (!token) {
       return Response.json(
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
 
     try {
       const { client } = createAdminDeps();
-      const result = await client.listAdminUsers(token, {
+      const result = await client.listAdminUsers(token, Number(user.userId), {
         keyword,
         status,
         role,
