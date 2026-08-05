@@ -308,6 +308,8 @@ export function AgentChatPanel({
     nextMessageIdRef.current = createMessageIdGenerator();
   const nextMessageId = nextMessageIdRef.current;
 
+  // 依赖 isOpen：面板关闭时组件返回 null、panelRef 为 null，
+  // 仅挂载时运行会永远停在 panelSize 初始值，背景壳（SmoothCorners）高度失真。
   useEffect(() => {
     const el = panelRef.current;
     if (!el) return;
@@ -318,7 +320,7 @@ export function AgentChatPanel({
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [isOpen]);
 
   useLayoutEffect(() => {
     const el = panelRef.current;
@@ -327,7 +329,7 @@ export function AgentChatPanel({
     if (rect.width > 0 && rect.height > 0) {
       setPanelSize({ w: Math.round(rect.width), h: Math.round(rect.height) });
     }
-  }, []);
+  }, [isOpen]);
 
   useEffect(() => {
     const el = bodyRef.current;
