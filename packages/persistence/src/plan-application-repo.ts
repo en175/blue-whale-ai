@@ -5,9 +5,8 @@ import { canonicalizeJsonValue } from "@blue-whale/contracts";
 import { classifyPlanApplicationAvailability } from "@blue-whale/core";
 import type {
   CapabilitySnapshotVersion,
-  DerivedReference,
   FrozenGenerationParameters,
-  PlanApplicationReceipt,
+  PlanApplyImageReceipt,
 } from "@blue-whale/contracts";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
@@ -54,19 +53,19 @@ export type ApplyPlanMessageResult =
   // —— 图片分支（image_generate，T10）——
   | {
       kind: "applied_image";
-      receipt: PlanApplicationReceipt;
+      receipt: PlanApplyImageReceipt;
       first_generation_job_id: string;
       cursor: string;
     }
   | {
       kind: "replayed_image";
-      receipt: PlanApplicationReceipt;
+      receipt: PlanApplyImageReceipt;
       first_generation_job_id: string;
       cursor: string;
     }
   | {
       kind: "already_applied_image";
-      receipt: PlanApplicationReceipt;
+      receipt: PlanApplyImageReceipt;
       first_generation_job_id: string;
     }
   | {
@@ -464,7 +463,7 @@ async function applySceneCardCreateInTransaction(
   };
 }
 
-/** DB receipt 行 → 契约 PlanApplicationReceipt（图片分支：scene_card_id 恒 null）。 */
+/** DB receipt 行 → 契约 PlanApplyImageReceipt（图片分支：scene_card_id 恒 null）。 */
 function toImageReceiptView(row: {
   id: bigint;
   message_id: bigint;
@@ -474,7 +473,7 @@ function toImageReceiptView(row: {
   first_generation_job_id: bigint;
   content_digest: string;
   applied_at: Date;
-}): PlanApplicationReceipt {
+}): PlanApplyImageReceipt {
   return {
     receipt_id: row.id.toString(),
     plan_message_id: row.message_id.toString(),

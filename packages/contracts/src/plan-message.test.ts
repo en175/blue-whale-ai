@@ -5,7 +5,7 @@ import {
   frozenGenerationParametersSchema,
   planApplicationAvailabilitySchema,
   planApplicationKindSchema,
-  planApplicationReceiptSchema,
+  planApplyImageReceiptSchema,
   planCardCandidateSchema,
 } from "./plan-message.js";
 
@@ -168,7 +168,7 @@ const receiptCommon = {
 
 describe("PlanApplicationReceipt contract", () => {
   it("image_generate 分支 scene_card_id 恒为 null", () => {
-    const receipt = planApplicationReceiptSchema.parse({
+    const receipt = planApplyImageReceiptSchema.parse({
       ...receiptCommon,
       application_kind: "image_generate",
       scene_card_id: null,
@@ -179,7 +179,7 @@ describe("PlanApplicationReceipt contract", () => {
 
   it("image 分支拒绝携带 scene_card_id（strict）", () => {
     expect(() =>
-      planApplicationReceiptSchema.parse({
+      planApplyImageReceiptSchema.parse({
         ...receiptCommon,
         application_kind: "image_generate",
         scene_card_id: "500",
@@ -188,7 +188,7 @@ describe("PlanApplicationReceipt contract", () => {
   });
 
   it("video 分支预留 scene 字段（nullable，T11/T12 不填）", () => {
-    const receipt = planApplicationReceiptSchema.parse({
+    const receipt = planApplyImageReceiptSchema.parse({
       ...receiptCommon,
       application_kind: "scene_card_create",
       scene_card_id: null,
