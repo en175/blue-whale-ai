@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider, useAuth } from "./AuthContext";
 
-const { registerWithPassword, logoutApi } = vi.hoisted(() => ({
+const { registerWithPassword, logoutApi, fetchMe } = vi.hoisted(() => ({
   registerWithPassword: vi.fn().mockResolvedValue({
     access_token: "sk-register",
     refresh_token: "",
@@ -16,6 +16,14 @@ const { registerWithPassword, logoutApi } = vi.hoisted(() => ({
     has_password: true,
   }),
   logoutApi: vi.fn().mockResolvedValue(undefined),
+  // IK6JXJ：signUp/signIn 会并行读 /api/me 拿 is_admin，必须返回 Promise。
+  fetchMe: vi.fn().mockResolvedValue({
+    user_id: 8,
+    username: "alice",
+    phone: "",
+    has_password: true,
+    is_admin: false,
+  }),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -27,7 +35,7 @@ vi.mock("@/lib/auth", () => ({
   loginWithPassword: vi.fn(),
   registerWithPassword,
   logoutApi,
-  fetchMe: vi.fn(),
+  fetchMe,
 }));
 
 function Probe() {

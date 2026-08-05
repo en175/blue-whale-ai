@@ -22,7 +22,7 @@ import { Badge } from "../_components/ui/badge";
 import { Dialog } from "../_components/ui/dialog";
 import { Input } from "../_components/ui/input";
 import { Select } from "../_components/ui/select";
-import type { AdminTier, TierFormData } from "./_mock";
+import type { AdminTier, TierFormData } from "./data";
 import {
   getTiers,
   createTier,
@@ -30,7 +30,7 @@ import {
   deleteTier,
   moveTier,
   getPreviewTiers,
-} from "./_mock";
+} from "./data";
 // 积分派生单一来源：与服务端 route 同一常量/公式（Go QuotaPerUnit 耦合说明在 constants.ts）。
 import { deriveTierAmount } from "@/lib/topup-tier/constants";
 

@@ -15,25 +15,108 @@ import { Dialog } from "../_components/ui/dialog";
 import { Tabs } from "../_components/ui/tabs";
 import { Input } from "../_components/ui/input";
 import { Select } from "../_components/ui/select";
-import type {
-  AdminUserInfo,
-  RechargeRecord,
-  ConsumeRecord,
-  AdjustLog,
-  OperationLog,
-} from "./_mock";
+import { getAuditLogs } from "../_lib/audit-log";
 import {
-  getUsers,
-  adjustBalance,
-  freezeUser,
-  unfreezeUser,
-  getRechargeRecords,
-  getConsumeRecords,
-  getAdjustLogs,
-  getOperationLogs,
-} from "./_mock";
+  fetchAdminUsers,
+  manageUser,
+  type AdminUserInfo,
+} from "../_lib/admin-data";
 
-const ROLE_LABELS: Record<number, string> = { 0: "普通用户", 100: "管理员" };
+// 明细 tab 记录类型（调整/操作日志来自 admin_operation_logs 映射；
+// 充值/消费记录后端暂无按用户维度的查询接口，IK6JXJ 暂以空态呈现）。
+export type AdjustLog = {
+  id: string;
+  userId: number;
+  nickname: string;
+  amount: number;
+  reason: string;
+  operatorId: number;
+  operatorName: string;
+  createdAt: string;
+};
+
+export type OperationLog = {
+  id: string;
+  userId: number;
+  action: string;
+  detail: Record<string, unknown>;
+  operatorName: string;
+  createdAt: string;
+};
+
+/** 充值/消费记录 tab 保留原结构（数据源暂无，恒为空数组）。 */
+export type RechargeRecord = {
+  id: string;
+  tradeNo: string;
+  userId: number;
+  tierName: string;
+  amount: number;
+  points: number;
+  paymentMethod: string;
+  status: string;
+  createdAt: string;
+  paidAt: string | null;
+};
+
+export type ConsumeRecord = {
+  id: string;
+  userId: number;
+  generationType: "image" | "video";
+  description: string;
+  points: number;
+  paramsSnapshot: Record<string, unknown>;
+  createdAt: string;
+};
+
+/** 从审计日志行映射调整记录（action=user.adjust_balance）。 */
+function toAdjustLog(
+  row: { id: string; detail: string; operator: string; createdAt: string },
+  userId: number,
+): AdjustLog {
+  let detail: { reason?: string; value?: number } = {};
+  try {
+    detail = JSON.parse(row.detail || "{}");
+  } catch {
+    /* ignore */
+  }
+  return {
+    id: row.id,
+    userId,
+    nickname: "",
+    amount: detail.value ?? 0,
+    reason: detail.reason ?? row.detail,
+    operatorId: 0,
+    operatorName: row.operator,
+    createdAt: row.createdAt,
+  };
+}
+
+/** 从审计日志行映射操作日志（category=user）。 */
+function toOperationLog(
+  row: { id: string; action: string; detail: string; operator: string; createdAt: string },
+  userId: number,
+): OperationLog {
+  let detail: Record<string, unknown> = {};
+  try {
+    detail = JSON.parse(row.detail || "{}");
+  } catch {
+    /* ignore */
+  }
+  return {
+    id: row.id,
+    userId,
+    action: row.action,
+    detail,
+    operatorName: row.operator,
+    createdAt: row.createdAt,
+  };
+}
+
+const ROLE_LABELS: Record<number, string> = {
+  1: "普通用户",
+  10: "管理员",
+  100: "root",
+};
 const STATUS_OPTIONS = [
   { value: "all", label: "全部状态" },
   { value: "active", label: "正常" },
@@ -108,12 +191,15 @@ export default function AdminUsersPage() {
   const [balanceMin, setBalanceMin] = useState("");
   const [balanceMax, setBalanceMax] = useState("");
 
-  // Restore balance filter on mount
+  // Restore balance filter on mount（setState 延后到宏任务，避开 effect 同步渲染规则）
   useEffect(() => {
     const saved = loadBalanceState();
-    setBalancePreset(saved.preset);
-    setBalanceMin(saved.min);
-    setBalanceMax(saved.max);
+    const timer = window.setTimeout(() => {
+      setBalancePreset(saved.preset);
+      setBalanceMin(saved.min);
+      setBalanceMax(saved.max);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   // Persist balance filter changes to localStorage
@@ -154,8 +240,29 @@ export default function AdminUsersPage() {
 
   const [confirmMsg, setConfirmMsg] = useState("");
 
+  // IK6JXJ：真实数据源（契约 4.2）。当前拉取前 100 条，搜索/状态/余额筛选本地进行。
+  const loadUsers = async () => {
+    try {
+      const { list } = await fetchAdminUsers({ pageSize: 100 });
+      setUsers(list);
+    } catch (e) {
+      setConfirmMsg(e instanceof Error ? e.message : "加载用户失败");
+    }
+  };
+
   useEffect(() => {
-    setUsers(getUsers());
+    let cancelled = false;
+    fetchAdminUsers({ pageSize: 100 })
+      .then(({ list }) => {
+        if (!cancelled) setUsers(list);
+      })
+      .catch((e) => {
+        if (!cancelled)
+          setConfirmMsg(e instanceof Error ? e.message : "加载用户失败");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const filtered = useMemo(() => {
@@ -221,13 +328,29 @@ export default function AdminUsersPage() {
     return list;
   }, [consumes, csType, csDateFrom, csDateTo]);
 
-  const openDetail = (u: AdminUserInfo) => {
+  const openDetail = async (u: AdminUserInfo) => {
     setDetailUser(u);
     setDetailTab("info");
-    setRecharges(getRechargeRecords(u.userId));
-    setConsumes(getConsumeRecords(u.userId));
-    setAdjustLogs(getAdjustLogs(u.userId));
-    setOpLogs(getOperationLogs(u.userId));
+    // 充值/消费明细：后端暂无按用户维度查询接口（IK6JXJ 契约说明），置空。
+    setRecharges([]);
+    setConsumes([]);
+    // 调整/操作日志：复用 admin_operation_logs（target 为 `user:{id}`）。
+    setAdjustLogs([]);
+    setOpLogs([]);
+    try {
+      const rows = await getAuditLogs({
+        category: "user",
+        searchText: `user:${u.userId}`,
+      });
+      setAdjustLogs(
+        rows
+          .filter((r) => r.action === "user.adjust_balance")
+          .map((r) => toAdjustLog(r, u.userId)),
+      );
+      setOpLogs(rows.map((r) => toOperationLog(r, u.userId)));
+    } catch {
+      /* 审计查询失败静默，tab 保持空态 */
+    }
     // Reset record filters
     setRcDateFrom("");
     setRcDateTo("");
@@ -238,34 +361,49 @@ export default function AdminUsersPage() {
     setCsType("all");
   };
 
-  const handleFreeze = () => {
+  const handleFreeze = async () => {
     if (!freezeUserTarget || !freezeReason.trim()) return;
-    const r = freezeUser(freezeUserTarget.userId, freezeReason.trim());
-    if (r) {
-      setUsers(getUsers());
-      setConfirmMsg(`用户 ${r.nickname} 已冻结`);
-      setTimeout(() => setConfirmMsg(""), 2000);
+    try {
+      await manageUser(freezeUserTarget.userId, "freeze", freezeReason.trim());
+      setConfirmMsg(`用户 ${freezeUserTarget.nickname} 已冻结`);
+      await loadUsers();
+    } catch (e) {
+      setConfirmMsg(e instanceof Error ? e.message : "冻结失败");
     }
+    setTimeout(() => setConfirmMsg(""), 2000);
     setFreezeUserTarget(null);
     setFreezeReason("");
   };
 
-  const handleUnfreeze = () => {
+  const handleUnfreeze = async () => {
     if (!unfreezeUserTarget || !unfreezeReason.trim()) return;
-    const r = unfreezeUser(unfreezeUserTarget.userId, unfreezeReason.trim());
-    if (r) {
-      setUsers(getUsers());
-      setConfirmMsg(`用户 ${r.nickname} 已解冻`);
-      setTimeout(() => setConfirmMsg(""), 2000);
+    try {
+      await manageUser(unfreezeUserTarget.userId, "unfreeze", unfreezeReason.trim());
+      setConfirmMsg(`用户 ${unfreezeUserTarget.nickname} 已解冻`);
+      await loadUsers();
+    } catch (e) {
+      setConfirmMsg(e instanceof Error ? e.message : "解冻失败");
     }
+    setTimeout(() => setConfirmMsg(""), 2000);
     setUnfreezeUserTarget(null);
     setUnfreezeReason("");
   };
 
-  const handleAdjust = () => {
+  const handleAdjust = async () => {
     if (!adjustUser || adjustAmount === 0 || !adjustReason.trim()) return;
-    adjustBalance(adjustUser.userId, adjustAmount, adjustReason.trim());
-    setUsers(getUsers());
+    try {
+      await manageUser(
+        adjustUser.userId,
+        "adjustBalance",
+        adjustReason.trim(),
+        adjustAmount,
+      );
+      setConfirmMsg(`用户 ${adjustUser.nickname} 余额已调整`);
+      await loadUsers();
+    } catch (e) {
+      setConfirmMsg(e instanceof Error ? e.message : "调整失败");
+    }
+    setTimeout(() => setConfirmMsg(""), 2000);
     setAdjustUser(null);
   };
 
@@ -354,7 +492,7 @@ export default function AdminUsersPage() {
               </TableRow>
             ) : (
               filtered.map((u) => (
-                <TableRow key={u.id}>
+                <TableRow key={u.userId}>
                   <TableCell className="font-mono text-xs text-[var(--tc-text-tertiary)]">
                     #{u.userId}
                   </TableCell>

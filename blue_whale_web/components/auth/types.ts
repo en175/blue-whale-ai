@@ -10,6 +10,8 @@ export type User = {
   hasPassword?: boolean;
   /** 积分余额（后端 /api/me 返回，未对接时为 undefined） */
   credits?: number;
+  /** 管理员标记（new-api role >= 10，/api/me 的 is_admin；IK6JXJ） */
+  isAdmin?: boolean;
 };
 
 /**
