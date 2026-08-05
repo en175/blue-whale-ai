@@ -8,9 +8,16 @@ PROJECT="${BW_TS_COMPOSE_PROJECT:-bw-ts-baseline-acceptance}"
 # Colima 等容器运行时只挂载用户主目录，构建临时目录必须位于 $HOME 下，
 # 否则容器挂载为空导致 go.mod 不可见。
 mkdir -p "${HOME}/.cache"
-NEW_API_BUILD_DIR="$(mktemp -d "${HOME}/.cache/bw-new-api-acceptance.XXXXXX")"
-NEW_API_SOURCE_DIR="$NEW_API_BUILD_DIR/source"
-export BW_NEW_API_BINARY="$NEW_API_BUILD_DIR/new-api"
+# 若外部预置了可用 new-api 二进制（如 dev 栈产物），直接复用，跳过取源与容器内编译。
+NEW_API_REUSE_PRESET="false"
+NEW_API_BUILD_DIR=""
+if [ -n "${BW_NEW_API_BINARY:-}" ] && [ -x "${BW_NEW_API_BINARY}" ]; then
+  NEW_API_REUSE_PRESET="true"
+else
+  NEW_API_BUILD_DIR="$(mktemp -d "${HOME}/.cache/bw-new-api-acceptance.XXXXXX")"
+  NEW_API_SOURCE_DIR="$NEW_API_BUILD_DIR/source"
+  export BW_NEW_API_BINARY="$NEW_API_BUILD_DIR/new-api"
+fi
 
 dc() {
   docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
@@ -20,7 +27,9 @@ dc() {
 # shellcheck disable=SC2329
 cleanup() {
   dc down -v --remove-orphans >/dev/null 2>&1 || true
-  rm -rf "$NEW_API_BUILD_DIR"
+  if [ "$NEW_API_REUSE_PRESET" = "false" ] && [ -n "$NEW_API_BUILD_DIR" ]; then
+    rm -rf "$NEW_API_BUILD_DIR"
+  fi
 }
 trap cleanup EXIT
 
@@ -33,35 +42,50 @@ export BW_TS_COMPOSE_PROJECT="$PROJECT"
 # 浏览器层黑盒验收（IK67GD T02）在宿主机驱动 chromium；已安装时跳过下载。
 pnpm --dir "$ROOT" exec playwright install chromium
 
-mkdir -p \
-  "$NEW_API_SOURCE_DIR/web/default/dist" \
-  "$NEW_API_SOURCE_DIR/web/classic/dist"
-git -C "$ROOT" archive HEAD:blue_whale_api | tar -x -C "$NEW_API_SOURCE_DIR"
-printf '%s\n' '<!doctype html><title>acceptance</title>' \
-  >"$NEW_API_SOURCE_DIR/web/default/dist/index.html"
-printf '%s\n' '<!doctype html><title>acceptance</title>' \
-  >"$NEW_API_SOURCE_DIR/web/classic/dist/index.html"
-(
-  docker_arch="$(docker info --format '{{.Architecture}}')"
-  case "$docker_arch" in
-    amd64|x86_64) new_api_goarch=amd64 ;;
-    arm64|aarch64) new_api_goarch=arm64 ;;
-    *)
-      echo "unsupported Docker architecture: $docker_arch" >&2
-      exit 1
-      ;;
-  esac
-  # 在容器内构建 new-api（宿主机无需 Go 工具链）；模块缓存挂卷复用。
-  docker run --rm \
-    -v "$NEW_API_BUILD_DIR:/build" \
-    -v bw-ts-baseline-go-mod-cache:/go/pkg/mod \
-    -w /build/source \
-    -e CGO_ENABLED=0 \
-    -e GOOS=linux \
-    -e GOARCH="$new_api_goarch" \
-    golang:1.25-alpine \
-    go build -trimpath -ldflags="-s -w" -o /build/new-api .
-)
+if [ "$NEW_API_REUSE_PRESET" = "true" ]; then
+  echo "ℹ️ baseline: 复用预置 new-api 二进制（$BW_NEW_API_BINARY），跳过取源与容器内 go build"
+else
+  # new-api 源码在独立仓库 blue-whale-api（仓库拆分后迁出本仓）。
+  NEW_API_REPO_URL="git@gitee.com:hangzhou-xuanfu_1/blue-whale-api.git"
+  NEW_API_CLONE_DIR="${HOME}/.cache/blue-whale-dev/blue-whale-api"
+  mkdir -p "${HOME}/.cache/blue-whale-dev"
+  if [ -d "$NEW_API_CLONE_DIR/.git" ]; then
+    git -C "$NEW_API_CLONE_DIR" fetch --depth 1 origin master
+    git -C "$NEW_API_CLONE_DIR" checkout -q FETCH_HEAD
+  else
+    git clone --depth 1 --branch master "$NEW_API_REPO_URL" "$NEW_API_CLONE_DIR"
+  fi
+
+  mkdir -p \
+    "$NEW_API_SOURCE_DIR/web/default/dist" \
+    "$NEW_API_SOURCE_DIR/web/classic/dist"
+  git -C "$NEW_API_CLONE_DIR" archive HEAD | tar -x -C "$NEW_API_SOURCE_DIR"
+  printf '%s\n' '<!doctype html><title>acceptance</title>' \
+    >"$NEW_API_SOURCE_DIR/web/default/dist/index.html"
+  printf '%s\n' '<!doctype html><title>acceptance</title>' \
+    >"$NEW_API_SOURCE_DIR/web/classic/dist/index.html"
+  (
+    docker_arch="$(docker info --format '{{.Architecture}}')"
+    case "$docker_arch" in
+      amd64|x86_64) new_api_goarch=amd64 ;;
+      arm64|aarch64) new_api_goarch=arm64 ;;
+      *)
+        echo "unsupported Docker architecture: $docker_arch" >&2
+        exit 1
+        ;;
+    esac
+    # 在容器内构建 new-api（宿主机无需 Go 工具链）；模块缓存挂卷复用。
+    docker run --rm \
+      -v "$NEW_API_BUILD_DIR:/build" \
+      -v bw-ts-baseline-go-mod-cache:/go/pkg/mod \
+      -w /build/source \
+      -e CGO_ENABLED=0 \
+      -e GOOS=linux \
+      -e GOARCH="$new_api_goarch" \
+      golang:1.25-alpine \
+      go build -trimpath -ldflags="-s -w" -o /build/new-api .
+  )
+fi
 
 "$ROOT/scripts/init-typescript-baseline-db.sh"
 if [ "${BW_TS_SKIP_IMAGE_BUILD:-false}" = "true" ]; then
