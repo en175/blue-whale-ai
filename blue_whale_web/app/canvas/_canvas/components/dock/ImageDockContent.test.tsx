@@ -292,3 +292,89 @@ describe("ImageDockContent 放大按钮（IK5OWV）", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("ImageDockContent 上传入口可用性（修复入口消失）", () => {
+  it("能力表未就绪（接口返回空）时上传入口仍显示，避免『图片引入不进来』", async () => {
+    vi.mocked(getImageModels).mockResolvedValue([]);
+    render(
+      <ImageDockContent
+        editorRef={createRef<HTMLDivElement>()}
+        isEmpty={false}
+        onInput={vi.fn()}
+        onGenerate={vi.fn()}
+      />,
+    );
+
+    // 空列表 → selectedModel 保持 null → 乐观显示上传入口（占位 + 底部加号）
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Upload reference image" }),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("button", { name: "上传图片" }),
+    ).toBeInTheDocument();
+  });
+
+  it("media 非空时缩略图行末尾显示『继续添加图片』并弹上传来源菜单", async () => {
+    vi.mocked(getImageModels).mockResolvedValue([
+      capability("capable", "完整能力模型", {
+        tools: true,
+        sequential_image_generation: true,
+      }),
+    ]);
+    render(
+      <ImageDockContent
+        editorRef={createRef<HTMLDivElement>()}
+        isEmpty={false}
+        onInput={vi.fn()}
+        onGenerate={vi.fn()}
+        onRemoveMedia={vi.fn()}
+        media={[
+          {
+            id: "m1",
+            type: "image",
+            name: "参考图.png",
+            src: "blob:preview-1",
+          },
+        ]}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("完整能力模型")).toBeInTheDocument(),
+    );
+    const addBtn = screen.getByRole("button", { name: "继续添加图片" });
+    expect(addBtn).toBeInTheDocument();
+    fireEvent.click(addBtn);
+    expect(
+      screen.getByRole("menu", { name: "上传来源" }),
+    ).toBeInTheDocument();
+  });
+
+  it("能力表就绪后模型不支持参考图时入口收敛隐藏", async () => {
+    vi.mocked(getImageModels).mockResolvedValue([
+      capability("basic", "基础模型", {
+        tools: false,
+        sequential_image_generation: false,
+        reference_image: false,
+      }),
+    ]);
+    render(
+      <ImageDockContent
+        editorRef={createRef<HTMLDivElement>()}
+        isEmpty={false}
+        onInput={vi.fn()}
+        onGenerate={vi.fn()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("基础模型")).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Upload reference image" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "上传图片" })).toBeNull();
+  });
+});

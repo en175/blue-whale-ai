@@ -279,6 +279,8 @@ export function VideoDockContent(props: VideoDockContentProps) {
   const placeholderRef = useRef<HTMLButtonElement>(null);
   const videoTriggerRef = useRef<HTMLButtonElement>(null);
   const plusRef = useRef<HTMLButtonElement>(null);
+  // 缩略图行「继续添加」按钮（media 非空时追加在缩略图后，IK 修复）
+  const mediaAddRef = useRef<HTMLButtonElement>(null);
   const uploadTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
   const [uploadKind, setUploadKind] = useState<"image" | "video">("image");
@@ -566,13 +568,45 @@ export function VideoDockContent(props: VideoDockContentProps) {
                   }}
                 >
                   {media.length > 0 ? (
-                    media.map((m) => (
-                      <DockMediaThumb
-                        key={m.id}
-                        item={m}
-                        onRemove={onRemoveMedia}
-                      />
-                    ))
+                    <>
+                      {media.map((m) => (
+                        <DockMediaThumb
+                          key={m.id}
+                          item={m}
+                          onRemove={onRemoveMedia}
+                        />
+                      ))}
+                      {/* 缩略图行末尾「继续添加」：上传图片/从画布选择（与占位按钮同菜单） */}
+                      <div style={{ position: "relative", flexShrink: 0 }}>
+                        <button
+                          ref={mediaAddRef}
+                          type="button"
+                          aria-label="添加图片"
+                          aria-haspopup="menu"
+                          aria-expanded={uploadMenuOpen && uploadKind === "image"}
+                          onClick={() => handleTriggerClick(mediaAddRef)}
+                          style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 9,
+                            border: "1px dashed var(--tc-dock-border-ghost)",
+                            background: "var(--tc-dock-fill-ghost)",
+                            color: "var(--tc-dock-text-hint)",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 6,
+                            padding: 0,
+                            cursor: "pointer",
+                            opacity: 1,
+                            transition: "background 120ms, color 120ms",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <IconPlus size={15} />
+                        </button>
+                      </div>
+                    </>
                   ) : (
                     <div style={{ position: "relative", flexShrink: 0 }}>
                       <button
