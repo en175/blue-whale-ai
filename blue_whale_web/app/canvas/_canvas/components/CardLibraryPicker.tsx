@@ -75,13 +75,15 @@ const TAB_TO_TYPE: Partial<Record<MediaTab, SharedAssetType>> = {
   商品: "product",
 };
 
-/** 遮罩壳:点外关闭 + 居中(画布 modal 惯例,同 ExpandModal)。 */
+/** 遮罩壳:点外关闭 + 居中(画布 modal 惯例,同 ExpandModal)。
+ *  zIndex 默认走模态层带(2147483610,同 ModalShell/SkillPanel):低于
+ *  AgentChatPanel 悬浮层(2147483600)会被 agent 对话框视觉遮盖。 */
 function Overlay({
   ariaLabel,
   onClose,
   width,
   height,
-  zIndex = 50,
+  zIndex = 2147483610,
   closeOnEscape = true,
   children,
 }: {
@@ -153,7 +155,7 @@ function CardDetailOverlay({
       ariaLabel={`${card.name}详情`}
       onClose={onClose}
       width={520}
-      zIndex={51}
+      zIndex={2147483611}
     >
       <div className="p-4">
         <div className="flex items-center justify-between">
