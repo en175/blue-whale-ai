@@ -24,10 +24,12 @@ import type {
 import { mapAdminOrder, mapConsumeRecord } from "./mapper";
 import type { DashboardStats } from "./types";
 
-/** 仪表板依赖端口：仅需 client 的子集，便于单测注入替身。 */
+/** 仪表板依赖端口：仅需 client 的子集，便于单测注入替身。
+ *  IK6M2F：管理端 client 统一带 userId（New-Api-User 头，authHelper 强制）。 */
 export interface AdminDashboardClient {
   listAdminUsers(
     token: string,
+    userId: number,
     options?: {
       keyword?: string;
       status?: number;
@@ -38,14 +40,17 @@ export interface AdminDashboardClient {
   ): Promise<NewApiPageInfo<NewApiAdminUserRow>>;
   listAdminTopUps(
     token: string,
+    userId: number,
     options?: { keyword?: string; page?: number; pageSize?: number },
   ): Promise<NewApiPageInfo<NewApiAdminTopUpRow>>;
   getAdminLogStat(
     token: string,
+    userId: number,
     input: { type: number; startTimestamp: number; endTimestamp: number },
   ): Promise<NewApiLogStat>;
   listAdminLogs(
     token: string,
+    userId: number,
     options?: { page?: number; pageSize?: number },
   ): Promise<NewApiPageInfo<NewApiLogRow>>;
 }
@@ -56,6 +61,7 @@ const MAX_SCAN_PAGES = 50;
 export async function collectDashboardStats(
   client: AdminDashboardClient,
   token: string,
+  userId: number,
 ): Promise<DashboardStats> {
   const now = Date.now();
   const todayStartSec = Math.floor(
@@ -64,13 +70,13 @@ export async function collectDashboardStats(
   const nowSec = Math.floor(now / 1000);
 
   const [usersPage, logStat, recentLogs] = await Promise.all([
-    client.listAdminUsers(token, { page: 1, pageSize: 1 }),
-    client.getAdminLogStat(token, {
+    client.listAdminUsers(token, userId, { page: 1, pageSize: 1 }),
+    client.getAdminLogStat(token, userId, {
       type: 2,
       startTimestamp: todayStartSec,
       endTimestamp: nowSec,
     }),
-    client.listAdminLogs(token, { page: 1, pageSize: 5 }),
+    client.listAdminLogs(token, userId, { page: 1, pageSize: 5 }),
   ]);
 
   let todayRecharge = 0;
@@ -79,7 +85,7 @@ export async function collectDashboardStats(
   const recentRecharges = [];
 
   for (let page = 1; page <= MAX_SCAN_PAGES; page++) {
-    const topUpsPage = await client.listAdminTopUps(token, {
+    const topUpsPage = await client.listAdminTopUps(token, userId, {
       page,
       pageSize: SCAN_PAGE_SIZE,
     });
