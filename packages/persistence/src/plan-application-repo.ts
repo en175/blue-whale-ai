@@ -13,7 +13,7 @@ import { createJobWithinTx } from "./generation-command-repo.js";
 import { capabilityDigest } from "./capability-digest.js";
 import { appendProjectEvent } from "./product-event-repo.js";
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
-import { classifyMentionAvailability } from "./mention-availability.js";
+import { loadPlanApplicationFacts } from "./plan-application-facts.js";
 import { loadMentionTargetFacts } from "./agent-run-repo.js";
 
 const OPERATION = "plan.message.apply";
@@ -577,22 +577,6 @@ async function applyImageGenerateInTransaction(
       target_id: m.target_id,
     })),
   );
-  let mentionUnavailable = false;
-  for (const m of mentionRows) {
-    const { availability } = classifyMentionAvailability({
-      type: m.mention_type as "asset" | "scene_card",
-      targetVersion: m.target_version,
-      acceptedUserId: m.accepted_user_id,
-      asset: assetById.get(m.target_id.toString()),
-      projectId: pid,
-      userId: uid,
-    });
-    if (availability === "unavailable") {
-      mentionUnavailable = true;
-      break;
-    }
-  }
-
   const snapshot = planMessage.capability_snapshot_version as CapabilitySnapshotVersion;
   const currentCap = await tx.generation_model_capability.findFirst({
     where: {
@@ -613,23 +597,27 @@ async function applyImageGenerateInTransaction(
       default_duration: true,
     },
   });
-  let capabilityDrifted: boolean;
-  if (!currentCap || currentCap.is_delete || !currentCap.enabled) {
-    capabilityDrifted = true;
-  } else {
-    const currentDigest = capabilityDigest({
-      supported_sizes: currentCap.supported_sizes,
-      supported_aspect_ratios: currentCap.supported_aspect_ratios,
-      supported_durations: currentCap.supported_durations,
-      supported_formats: currentCap.supported_formats,
-      default_size: currentCap.default_size,
-      default_format: currentCap.default_format,
-      default_aspect_ratio: currentCap.default_aspect_ratio,
-      default_duration: currentCap.default_duration,
-    });
-    capabilityDrifted =
-      currentCap.version !== snapshot.row_version || currentDigest !== snapshot.digest;
-  }
+  // 事实采集（mention 重验 + 能力漂移）收敛到共用 helper：写路径 missingMention="ignore"
+  // 保留原义——遍历查询结果，缺失 mention 行静默跳过，不阻断应用。
+  const { mentionUnavailable, capabilityDrifted } = loadPlanApplicationFacts({
+    derivedReferences,
+    mentionFacts: new Map(
+      mentionRows.map((m) => [
+        m.id.toString(),
+        {
+          target_id: m.target_id,
+          target_version: m.target_version,
+          accepted_user_id: m.accepted_user_id,
+        },
+      ]),
+    ),
+    assetById,
+    missingMention: "ignore",
+    projectId: pid,
+    userId: uid,
+    capabilitySnapshot: snapshot,
+    currentCapability: currentCap ?? undefined,
+  });
 
   const quota = await input.quotaCheck!();
   const availability = classifyPlanApplicationAvailability({
