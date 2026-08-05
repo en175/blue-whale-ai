@@ -114,7 +114,9 @@ function toFeatures(json: unknown): ModelFeatures {
   const f = (json ?? {}) as FeaturesJson;
   return {
     reference_image: f.referenceImage === true || f.reference_image === true,
-    max_reference_images: f.maxReferenceImages ?? f.max_reference_images ?? 0,
+    // IK6PA5：缺省不能兜底 0——前端 atReferenceLimit = referenceCount >= max_reference_images
+    // 在 0 上限时恒 true，上传入口被静默禁用。缺省 4 与前端 DEFAULT_MAX_REFERENCE_IMAGES 对齐。
+    max_reference_images: f.maxReferenceImages ?? f.max_reference_images ?? 4,
     watermark: f.watermark === true,
     quantity_max: f.quantityMax ?? f.quantity_max ?? 1,
     sequential_image_generation:
