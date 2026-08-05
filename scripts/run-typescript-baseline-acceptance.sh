@@ -5,15 +5,86 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT/deploy/typescript-baseline/docker-compose.acceptance.yml"
 PROJECT="${BW_TS_COMPOSE_PROJECT:-bw-ts-baseline-acceptance}"
+NEW_API_DEFAULT_REF="90f1d49992bf22938bfb19352740891a28ecad67"
 # Colima 等容器运行时只挂载用户主目录，构建临时目录必须位于 $HOME 下，
 # 否则容器挂载为空导致 go.mod 不可见。
 mkdir -p "${HOME}/.cache"
+
+physical_path() {
+  local target="$1" directory link hops=0
+  while [ -L "$target" ]; do
+    hops=$((hops + 1))
+    [ "$hops" -le 40 ] || return 1
+    directory="$(cd -P "$(dirname "$target")" && pwd)" || return 1
+    link="$(readlink "$target")" || return 1
+    case "$link" in
+      /*) target="$link" ;;
+      *) target="$directory/$link" ;;
+    esac
+  done
+  directory="$(cd -P "$(dirname "$target")" && pwd)" || return 1
+  printf '%s/%s\n' "$directory" "$(basename "$target")"
+}
+
+is_reusable_new_api_binary() {
+  local candidate="$1" candidate_path home_path
+  [ -f "$candidate" ] && [ -x "$candidate" ] || return 1
+  candidate_path="$(physical_path "$candidate")" || return 1
+  home_path="$(cd -P "$HOME" && pwd)" || return 1
+  case "$candidate_path" in
+    "$home_path"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+ACCEPTANCE_LOCK_DIR="${HOME}/.cache/blue-whale-typescript-baseline-acceptance.lock"
+ACCEPTANCE_LOCK_HELD="false"
+
+acquire_acceptance_lock() {
+  local existing_pid=""
+  if ! mkdir "$ACCEPTANCE_LOCK_DIR" 2>/dev/null; then
+    existing_pid="$(cat "$ACCEPTANCE_LOCK_DIR/pid" 2>/dev/null || true)"
+    if [ -z "$existing_pid" ]; then
+      echo "无法获取 TypeScript 基线验收锁：$ACCEPTANCE_LOCK_DIR" >&2
+      return 1
+    fi
+    if [[ "$existing_pid" =~ ^[0-9]+$ ]] && kill -0 "$existing_pid" 2>/dev/null; then
+      echo "已有 TypeScript 基线验收正在运行（PID ${existing_pid}）；固定宿主端口不支持并行运行" >&2
+      return 1
+    fi
+    if [[ "$existing_pid" =~ ^[0-9]+$ ]]; then
+      echo "检测到陈旧的 TypeScript 基线验收锁（PID ${existing_pid}）；确认无进程后清理：$ACCEPTANCE_LOCK_DIR" >&2
+      return 1
+    fi
+    echo "无法获取 TypeScript 基线验收锁：$ACCEPTANCE_LOCK_DIR" >&2
+    return 1
+  fi
+  printf '%s\n' "$$" >"$ACCEPTANCE_LOCK_DIR/pid"
+  ACCEPTANCE_LOCK_HELD="true"
+}
+
+release_acceptance_lock() {
+  local owner_pid=""
+  [ "$ACCEPTANCE_LOCK_HELD" = "true" ] || return 0
+  owner_pid="$(cat "$ACCEPTANCE_LOCK_DIR/pid" 2>/dev/null || true)"
+  if [ "$owner_pid" = "$$" ]; then
+    rm -f "$ACCEPTANCE_LOCK_DIR/pid"
+    rmdir "$ACCEPTANCE_LOCK_DIR" 2>/dev/null || true
+  fi
+  ACCEPTANCE_LOCK_HELD="false"
+}
+
+acquire_acceptance_lock
+
 # 若外部预置了可用 new-api 二进制（如 dev 栈产物），直接复用，跳过取源与容器内编译。
 NEW_API_REUSE_PRESET="false"
 NEW_API_BUILD_DIR=""
-if [ -n "${BW_NEW_API_BINARY:-}" ] && [ -x "${BW_NEW_API_BINARY}" ]; then
+if [ -n "${BW_NEW_API_BINARY:-}" ] && is_reusable_new_api_binary "$BW_NEW_API_BINARY"; then
   NEW_API_REUSE_PRESET="true"
 else
+  if [ -n "${BW_NEW_API_BINARY:-}" ]; then
+    echo "⚠️ baseline: 忽略无效预置二进制；必须是 HOME 内的可执行普通文件" >&2
+  fi
   NEW_API_BUILD_DIR="$(mktemp -d "${HOME}/.cache/bw-new-api-acceptance.XXXXXX")"
   NEW_API_SOURCE_DIR="$NEW_API_BUILD_DIR/source"
   export BW_NEW_API_BINARY="$NEW_API_BUILD_DIR/new-api"
@@ -30,6 +101,7 @@ cleanup() {
   if [ "$NEW_API_REUSE_PRESET" = "false" ] && [ -n "$NEW_API_BUILD_DIR" ]; then
     rm -rf "$NEW_API_BUILD_DIR"
   fi
+  release_acceptance_lock
 }
 trap cleanup EXIT
 
@@ -43,23 +115,28 @@ export BW_TS_COMPOSE_PROJECT="$PROJECT"
 pnpm --dir "$ROOT" exec playwright install chromium
 
 if [ "$NEW_API_REUSE_PRESET" = "true" ]; then
-  echo "ℹ️ baseline: 复用预置 new-api 二进制（$BW_NEW_API_BINARY），跳过取源与容器内 go build"
+  echo "ℹ️ baseline: 复用预置 new-api 二进制（${BW_NEW_API_BINARY}），跳过取源与容器内 go build"
 else
   # new-api 源码在独立仓库 blue-whale-api（仓库拆分后迁出本仓）。
-  NEW_API_REPO_URL="git@gitee.com:hangzhou-xuanfu_1/blue-whale-api.git"
-  NEW_API_CLONE_DIR="${HOME}/.cache/blue-whale-dev/blue-whale-api"
-  mkdir -p "${HOME}/.cache/blue-whale-dev"
+  NEW_API_REPO_URL="${BW_NEW_API_REPO_URL:-git@gitee.com:hangzhou-xuanfu_1/blue-whale-api.git}"
+  NEW_API_REF="${BW_NEW_API_REF:-$NEW_API_DEFAULT_REF}"
+  NEW_API_CLONE_DIR="${HOME}/.cache/blue-whale-acceptance/blue-whale-api"
+  mkdir -p "$NEW_API_CLONE_DIR"
   if [ -d "$NEW_API_CLONE_DIR/.git" ]; then
-    git -C "$NEW_API_CLONE_DIR" fetch --depth 1 origin master
-    git -C "$NEW_API_CLONE_DIR" checkout -q FETCH_HEAD
+    git -C "$NEW_API_CLONE_DIR" remote set-url origin "$NEW_API_REPO_URL"
   else
-    git clone --depth 1 --branch master "$NEW_API_REPO_URL" "$NEW_API_CLONE_DIR"
+    git -C "$NEW_API_CLONE_DIR" init -q
+    git -C "$NEW_API_CLONE_DIR" remote add origin "$NEW_API_REPO_URL"
   fi
+  git -C "$NEW_API_CLONE_DIR" fetch --depth 1 origin "$NEW_API_REF"
+  NEW_API_SOURCE_COMMIT="$(git -C "$NEW_API_CLONE_DIR" rev-parse FETCH_HEAD)"
+  git -C "$NEW_API_CLONE_DIR" checkout -q --detach "$NEW_API_SOURCE_COMMIT"
+  echo "ℹ️ baseline: new-api source: $NEW_API_SOURCE_COMMIT (ref: $NEW_API_REF)"
 
   mkdir -p \
     "$NEW_API_SOURCE_DIR/web/default/dist" \
     "$NEW_API_SOURCE_DIR/web/classic/dist"
-  git -C "$NEW_API_CLONE_DIR" archive HEAD | tar -x -C "$NEW_API_SOURCE_DIR"
+  git -C "$NEW_API_CLONE_DIR" archive "$NEW_API_SOURCE_COMMIT" | tar -x -C "$NEW_API_SOURCE_DIR"
   printf '%s\n' '<!doctype html><title>acceptance</title>' \
     >"$NEW_API_SOURCE_DIR/web/default/dist/index.html"
   printf '%s\n' '<!doctype html><title>acceptance</title>' \
