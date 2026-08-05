@@ -23,6 +23,7 @@ import {
   type ImageModelCapability,
 } from "../../api/generation";
 import { CreditIcon } from "../../icons";
+import { toast } from "@/components/Toast";
 import { DEFAULT_MAX_REFERENCE_IMAGES, QUANTITIES } from "../../constants";
 import type { ImageDockContentProps } from "../../types";
 import { DockMediaThumb } from "./parts";
@@ -104,7 +105,12 @@ export function ImageDockContent({
   const [webSearch, setWebSearch] = useState(false);
   const [sequential, setSequential] = useState(false);
   // 参考图入口按模型能力显隐：不支持参考图的模型（如 Seedream 5.0 Pro）不显示上传入口。
-  const canReferenceImage = selectedModel?.features.reference_image ?? false;
+  // 能力表未就绪（加载中/接口失败，selectedModel === null）时乐观显示入口，
+  // 避免“图片引入不进来、点击后没有上传逻辑”的交互黑洞（加载完成后按真实能力收敛）。
+  const canReferenceImage =
+    selectedModel === null
+      ? true
+      : (selectedModel?.features.reference_image ?? false);
   const maxReferenceImages =
     selectedModel?.features.max_reference_images ??
     DEFAULT_MAX_REFERENCE_IMAGES;
@@ -132,8 +138,10 @@ export function ImageDockContent({
         setSelectedSize(pickDefaultSize(first));
       })
       .catch((err) => {
-        // 能力表拉取失败：保持空，无可用模型时生成按钮禁用。
+        // 能力表拉取失败：保持空，无可用模型时生成按钮禁用；
+        // 必须 toast 提示，否则用户只看到「上传入口消失 / 生成按钮点不动」的交互黑洞（IK6M68）。
         console.error("getImageModels failed", err);
+        toast.error("模型能力加载失败，请刷新重试");
       });
     return () => {
       cancelled = true;
@@ -159,6 +167,8 @@ export function ImageDockContent({
   const localFileRef = useRef<HTMLInputElement>(null);
   const placeholderRef = useRef<HTMLButtonElement>(null);
   const plusRef = useRef<HTMLButtonElement>(null);
+  // 缩略图行「继续添加」按钮（media 非空时追加在缩略图后，修复上传入口缺失）
+  const mediaAddRef = useRef<HTMLButtonElement>(null);
   const uploadTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
 
@@ -306,13 +316,48 @@ export function ImageDockContent({
                   }}
                 >
                   {media.length > 0 ? (
-                    media.map((m) => (
-                      <DockMediaThumb
-                        key={m.id}
-                        item={m}
-                        onRemove={onRemoveMedia}
-                      />
-                    ))
+                    <>
+                      {media.map((m) => (
+                        <DockMediaThumb
+                          key={m.id}
+                          item={m}
+                          onRemove={onRemoveMedia}
+                          onPreview={onPreviewMedia}
+                        />
+                      ))}
+                      {/* 缩略图行末尾「继续添加」：上传图片/从画布选择（与占位按钮同菜单） */}
+                      {canReferenceImage && !atReferenceLimit && (
+                        <div style={{ position: "relative", flexShrink: 0 }}>
+                          <button
+                            ref={mediaAddRef}
+                            type="button"
+                            aria-label="继续添加图片"
+                            aria-haspopup="menu"
+                            aria-expanded={uploadMenuOpen}
+                            onClick={() => handleTriggerClick(mediaAddRef)}
+                            style={{
+                              position: "relative",
+                              width: 44,
+                              height: 44,
+                              padding: 0,
+                              borderRadius: 9,
+                              border: "1px dashed rgba(255, 255, 255, 0.08)",
+                              background: "rgba(255, 255, 255, 0.043)",
+                              color: "rgba(255, 255, 255, 0.62)",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              overflow: "hidden",
+                              transition: "background 120ms, color 120ms",
+                              flexShrink: 0,
+                            }}
+                          >
+                            <Plus width={16} height={16} />
+                          </button>
+                        </div>
+                      )}
+                    </>
                   ) : canReferenceImage ? (
                     <div style={{ position: "relative", flexShrink: 0 }}>
                       <button

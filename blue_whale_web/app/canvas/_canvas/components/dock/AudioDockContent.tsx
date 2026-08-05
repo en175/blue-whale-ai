@@ -174,6 +174,7 @@ export function AudioDockContent({
   onLocalUpload,
   onPickSlot,
   onExitPick,
+  onPreviewMedia,
   isPicking = false,
   onGenerate,
   generating = false,
@@ -361,6 +362,7 @@ export function AudioDockContent({
                 key={item.id}
                 item={item}
                 onRemove={onRemoveMedia}
+                onPreview={onPreviewMedia}
               />
             ))}
             <button
@@ -385,6 +387,7 @@ export function AudioDockContent({
                     key={item.id}
                     item={item}
                     onRemove={onRemoveMedia}
+                    onPreview={onPreviewMedia}
                   />
                 ))}
                 <button
