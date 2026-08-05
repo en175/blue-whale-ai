@@ -9,6 +9,8 @@ export const IDEMPOTENCY_KEY_REUSED_CODE = 100302; // 对齐 Java SystemCode.IDE
 export const AGENT_RUN_CONFLICT_CODE = 100303; // AgentRun 状态冲突（输入请求失效/运行中/配置冻结/当前状态不可停止）
 export const AGENT_RUN_ALREADY_TERMINAL_CODE = 100307; // AgentRun 已处于终态，停止命令不改写（契约 §8.2）
 export const AGENT_RUN_NOT_RETRYABLE_CODE = 100308; // AgentRun 非 failed 状态，不可手动重试（契约 §8.3）
+export const PLAN_APPLY_CONFLICT_CODE = 409; // 计划与当前事实冲突（素材失效/能力漂移），需重新对话生成
+export const QUOTA_INSUFFICIENT_CODE = 402; // 余额不足，充值后用新 CommandId 重试
 export const PARAM_MISSING_CODE = 100000; // 对齐 Java GlobalException(100000, "缺少 Idempotency-Key")
 
 export interface ResultEnvelope<T> {

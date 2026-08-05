@@ -166,7 +166,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
           user_id: BigInt(userId),
           status: "queued",
           is_delete: false,
-          source: "bottom_dock",
+          source: { in: ["bottom_dock", "plan_apply"] },
           next_action_at: { lte: new Date() },
         },
       });
@@ -208,7 +208,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
         where: {
           status: "queued",
           is_delete: false,
-          source: "bottom_dock",
+          source: { in: ["bottom_dock", "plan_apply"] },
           next_action_at: { lte: new Date() },
         },
         orderBy: { id: "asc" },
@@ -246,7 +246,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
       const rows = await prisma.generation_jobs.findMany({
         where: {
           type: "video",
-          source: "bottom_dock",
+          source: { in: ["bottom_dock", "plan_apply"] },
           is_delete: false,
           next_action_at: { lte: now },
           OR: [
@@ -273,7 +273,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
         where: {
           id: BigInt(jobId),
           type: "video",
-          source: "bottom_dock",
+          source: { in: ["bottom_dock", "plan_apply"] },
           is_delete: false,
           next_action_at: { lte: now },
           OR: [
@@ -355,7 +355,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
           type: "image",
           status: "queued",
           is_delete: false,
-          source: "bottom_dock",
+          source: { in: ["bottom_dock", "plan_apply"] },
           next_action_at: { lte: new Date() },
         },
         orderBy: { id: "asc" },
@@ -410,7 +410,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
       const candidate = await prisma.generation_jobs.findFirst({
         where: {
           type: "video",
-          source: "bottom_dock",
+          source: { in: ["bottom_dock", "plan_apply"] },
           is_delete: false,
           next_action_at: { lte: now },
           OR: [

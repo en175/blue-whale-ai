@@ -357,12 +357,36 @@ CREATE TABLE `plan_messages` (
     `provider_prompt_projection` JSON NOT NULL,
     `base_plan_message_id` BIGINT NULL,
     `source_plan_message_id` BIGINT NULL,
+    `applied_at` DATETIME(0) NULL,
+    `first_generation_job_id` BIGINT NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 
     UNIQUE INDEX `uk_plan_message_message`(`message_id`),
     INDEX `idx_plan_message_project`(`project_id`),
     INDEX `idx_plan_message_agent_run`(`agent_run_id`),
     INDEX `idx_plan_message_application_kind`(`application_kind`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE `plan_application_receipts` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `plan_message_id` BIGINT NOT NULL,
+    `project_id` BIGINT NOT NULL,
+    `conversation_id` BIGINT NOT NULL,
+    `agent_run_id` BIGINT NOT NULL,
+    `application_kind` VARCHAR(32) NOT NULL,
+    `first_generation_job_id` BIGINT NOT NULL,
+    `content_digest` VARCHAR(80) NOT NULL,
+    `idempotency_key` VARCHAR(128) NOT NULL,
+    `scene_card_id` BIGINT NULL,
+    `result_scene_card_version` INTEGER NULL,
+    `generation_preset_digest` VARCHAR(80) NULL,
+    `applied_at` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_plan_application_receipt`(`plan_message_id`),
+    INDEX `idx_plan_application_project`(`project_id`),
+    INDEX `idx_plan_application_job`(`first_generation_job_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

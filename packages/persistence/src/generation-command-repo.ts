@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, Prisma } from "@prisma/client";
 
 import { appendProjectEvent } from "./product-event-repo.js";
 
@@ -14,6 +14,12 @@ export interface CreateJobInput {
   input: Record<string, unknown>;
   actionIdentity: string;
   actionType: string;
+  /** 任务来源（默认 bottom_dock）；plan_apply 表示由 PlanMessage 手动应用触发。 */
+  source?: "bottom_dock" | "plan_apply";
+  /** 关联 AgentRun（plan_apply 来自冻结的 plan_message.agent_run_id）。 */
+  agentRunId?: string;
+  /** 关联 PlanMessage（plan_apply 追溯用，写入日志 payload）。 */
+  planMessageId?: string;
 }
 
 export interface CreatedJob {
@@ -22,7 +28,12 @@ export interface CreatedJob {
 }
 
 export interface GenerationCommandRepo {
-  createJob(input: CreateJobInput): Promise<CreatedJob>;
+  /** 创建任务。callerTx 非空时复用调用方事务（如 plan apply 同 tx 建 job 行），
+   *  否则自起 $transaction（CONTEXT：job 行可随业务事务原子创建，执行队列在提交后进入）。 */
+  createJob(
+    input: CreateJobInput,
+    callerTx?: Prisma.TransactionClient,
+  ): Promise<CreatedJob>;
   /** 软取消：置 cancel_requested_at，状态不变（worker 读到后停止）。返回是否命中可取消的任务。 */
   requestCancel(jobId: string, userId: string): Promise<boolean>;
   /** 重试缺失产出：复制原 job 入参，建新 job（retry_of_job_id 指向原 job），状态 queued。
@@ -37,16 +48,19 @@ export function createGenerationCommandRepo(
   prisma: PrismaClient,
 ): GenerationCommandRepo {
   return {
-    async createJob(input) {
+    async createJob(input, callerTx) {
       const now = new Date();
       const deadline = new Date(now.getTime() + 30 * 60 * 1000); // 30min 超时
-      return prisma.$transaction(async (tx) => {
+      const run = async (tx: Prisma.TransactionClient) => {
         const job = await tx.generation_jobs.create({
           data: {
             project_id: BigInt(input.projectId),
             user_id: BigInt(input.userId),
             type: input.type,
-            source: SOURCE_BOTTOM_DOCK,
+            source: input.source ?? SOURCE_BOTTOM_DOCK,
+            ...(input.agentRunId
+              ? { agent_run_id: BigInt(input.agentRunId) }
+              : {}),
             status: "queued",
             progress: 0,
             input: input.input as never,
@@ -82,7 +96,12 @@ export function createGenerationCommandRepo(
             event: "created",
             status: "queued",
             message: "任务已创建",
-            payload: { input },
+            payload: {
+              input,
+              ...(input.planMessageId
+                ? { plan_message_id: input.planMessageId }
+                : {}),
+            },
           } as never,
         });
         const event = await appendProjectEvent(tx, {
@@ -105,7 +124,10 @@ export function createGenerationCommandRepo(
           generation_job_id: job.id.toString(),
           cursor: Number(event.cursor),
         };
-      }, { maxWait: 10_000, timeout: 30_000 });
+      };
+      // callerTx 非空：复用调用方事务（plan apply 同 tx 建 job 行）；否则自起事务。
+      if (callerTx) return run(callerTx);
+      return prisma.$transaction(run, { maxWait: 10_000, timeout: 30_000 });
     },
 
     async requestCancel(jobId, userId) {

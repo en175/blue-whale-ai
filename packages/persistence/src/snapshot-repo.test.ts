@@ -152,6 +152,9 @@ describe("SnapshotRepo.loadConversationState", () => {
       plan_messages: {
         findMany: vi.fn().mockResolvedValue([]),
       },
+      generation_model_capability: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
     } as unknown as PrismaClient;
 
     await expect(
@@ -282,6 +285,9 @@ describe("SnapshotRepo.loadConversationState", () => {
         aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 12n } }),
       },
       plan_messages: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_model_capability: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
     } as unknown as PrismaClient;
 
     const state = await createSnapshotRepo(prisma).loadConversationState(

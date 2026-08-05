@@ -69,6 +69,11 @@ export {
   sealGenerationCredential,
 } from "./generation-credential.js";
 export {
+  classifyPlanApplicationAvailability,
+  type PlanApplicationAvailabilityInput,
+  type PlanApplicationAvailabilityStatus,
+} from "./plan-application-availability.js";
+export {
   requestSmsCode,
   type RequestSmsCodeInput,
   type RequestSmsCodeDeps,

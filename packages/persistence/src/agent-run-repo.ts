@@ -360,7 +360,7 @@ type MentionSceneCardFact = NonNullable<
 > & { id: bigint };
 
 /** 批量查询 mention 目标的当前事实（T08）：冻结路径与实时重查闸门共用。 */
-async function loadMentionTargetFacts(
+export async function loadMentionTargetFacts(
   tx: Prisma.TransactionClient,
   mentions: Array<{ mention_type: string; target_id: bigint }>,
 ): Promise<{
@@ -591,7 +591,7 @@ function publicRunEventPayload(
 }
 
 /** 能力快照 digest：sha256(canonicalizeJsonValue(view))，row.version 无全局版本号时兜底。 */
-function capabilityDigest(view: Record<string, unknown>): string {
+export function capabilityDigest(view: Record<string, unknown>): string {
   return `sha256:${createHash("sha256")
     .update(JSON.stringify(canonicalizeJsonValue(view)))
     .digest("hex")}`;

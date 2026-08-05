@@ -14,6 +14,8 @@ export {
   AGENT_RUN_CONFLICT_CODE,
   AGENT_RUN_ALREADY_TERMINAL_CODE,
   AGENT_RUN_NOT_RETRYABLE_CODE,
+  PLAN_APPLY_CONFLICT_CODE,
+  QUOTA_INSUFFICIENT_CODE,
   PARAM_MISSING_CODE,
   type ResultEnvelope,
 } from "./result.js";
@@ -74,6 +76,8 @@ export {
   frozenGenerationParametersSchema,
   providerPromptProjectionSchema,
   capabilitySnapshotVersionSchema,
+  planApplicationReceiptSchema,
+  planApplicationAvailabilitySchema,
   deriveProviderPromptProjection,
   type PlanApplicationKind,
   type PlanCardCandidate,
@@ -84,4 +88,6 @@ export {
   type ProviderPromptAsset,
   type ProviderPromptProjection,
   type CapabilitySnapshotVersion,
+  type PlanApplicationReceipt,
+  type PlanApplicationAvailability,
 } from "./plan-message.js";

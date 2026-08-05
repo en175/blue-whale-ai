@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   deriveProviderPromptProjection,
   frozenGenerationParametersSchema,
+  planApplicationAvailabilitySchema,
   planApplicationKindSchema,
+  planApplicationReceiptSchema,
   planCardCandidateSchema,
 } from "./plan-message.js";
 
@@ -150,5 +152,65 @@ describe("PlanMessage contract", () => {
     });
     expect(projection.reference_assets[0].role).toBe("first_frame");
     expect(projection.reference_assets[1].role).toBe("last_frame");
+  });
+});
+
+const receiptCommon = {
+  receipt_id: "9001",
+  plan_message_id: "123",
+  project_id: "456",
+  conversation_id: "789",
+  agent_run_id: "1001",
+  first_generation_job_id: "2002",
+  content_digest: digest,
+  applied_at: "2026-08-05T10:00:00.000Z",
+};
+
+describe("PlanApplicationReceipt contract", () => {
+  it("image_generate 分支 scene_card_id 恒为 null", () => {
+    const receipt = planApplicationReceiptSchema.parse({
+      ...receiptCommon,
+      application_kind: "image_generate",
+      scene_card_id: null,
+    });
+    expect(receipt.application_kind).toBe("image_generate");
+    expect(receipt.scene_card_id).toBeNull();
+  });
+
+  it("image 分支拒绝携带 scene_card_id（strict）", () => {
+    expect(() =>
+      planApplicationReceiptSchema.parse({
+        ...receiptCommon,
+        application_kind: "image_generate",
+        scene_card_id: "500",
+      }),
+    ).toThrow();
+  });
+
+  it("video 分支预留 scene 字段（nullable，T11/T12 不填）", () => {
+    const receipt = planApplicationReceiptSchema.parse({
+      ...receiptCommon,
+      application_kind: "scene_card_create",
+      scene_card_id: null,
+      result_scene_card_version: null,
+      generation_preset_digest: null,
+    });
+    expect(receipt.application_kind).toBe("scene_card_create");
+    expect(receipt.scene_card_id).toBeNull();
+  });
+
+  it("PlanApplicationAvailability 固定三态，拒绝未知值", () => {
+    expect(planApplicationAvailabilitySchema.parse("available")).toBe(
+      "available",
+    );
+    expect(planApplicationAvailabilitySchema.parse("retryable_blocked")).toBe(
+      "retryable_blocked",
+    );
+    expect(planApplicationAvailabilitySchema.parse("requires_new_plan")).toBe(
+      "requires_new_plan",
+    );
+    expect(() =>
+      planApplicationAvailabilitySchema.parse("unknown"),
+    ).toThrow();
   });
 });

@@ -1,15 +1,19 @@
 import type { PrismaClient } from "@prisma/client";
-import type {
-  ConversationMentionType,
-  MentionFailureReason,
+import {
+  classifyPlanApplicationAvailability,
+  type ConversationMentionType,
+  type MentionFailureReason,
 } from "@blue-whale/core";
 import {
   creativeSkillActivationSchema,
+  type CapabilitySnapshotVersion,
   type CreativeSkillActivation,
+  type DerivedReference,
 } from "@blue-whale/contracts";
 
 import { publicGenerationInput } from "./generation-input.js";
 import { classifyMentionAvailability } from "./mention-availability.js";
+import { capabilityDigest } from "./agent-run-repo.js";
 
 /** Snapshot 读路径的 job + asset 聚合 db port（Prisma-backed）。
  *  对齐 Java SnapshotService 项目级 GenerationJob 与 Asset 引用读取：
@@ -120,6 +124,13 @@ export interface SnapshotPlanMessageView {
   provider_prompt_projection: unknown;
   base_plan_message_id: string | null;
   source_plan_message_id: string | null;
+  /** 首次成功应用时间（T10，IK67H8）；null = 未应用。 */
+  applied_at: string | null;
+  /** 首个图片 GenerationJob（T10，IK67H8）；null = 未应用。 */
+  first_generation_job_id: string | null;
+  /** 当前应用可用性（T10，IK67H8）：基于素材可用性 + 能力漂移；snapshot 不查余额，
+   *  故不会是 retryable_blocked（仅 available / requires_new_plan）。 */
+  application_availability: "available" | "requires_new_plan";
   created_at: string;
 }
 
@@ -190,7 +201,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
     async loadConversationState(projectId, userId) {
       const pid = BigInt(projectId);
       const uid = BigInt(userId);
-      const [messages, mentionRows, runs, inputRequests, planMessageRows, maxCursorRow] =
+      const [messages, mentionRows, runs, inputRequests, planMessageRows, capabilityRows, maxCursorRow] =
         await Promise.all([
           prisma.conversation_messages.findMany({
             where: { project_id: pid, is_delete: 0 },
@@ -227,6 +238,25 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           prisma.plan_messages.findMany({
             where: { project_id: pid },
             orderBy: [{ agent_run_id: "asc" }, { ordinal: "asc" }],
+          }),
+          // 能力漂移检测（T10）：按 model_id+capability_type 建表，与冻结快照比对。
+          // is_delete=true 的行不返回 → key 缺失即视为漂移。
+          prisma.generation_model_capability.findMany({
+            where: { is_delete: false },
+            select: {
+              model_id: true,
+              capability_type: true,
+              version: true,
+              enabled: true,
+              supported_sizes: true,
+              supported_aspect_ratios: true,
+              supported_durations: true,
+              supported_formats: true,
+              default_size: true,
+              default_format: true,
+              default_aspect_ratio: true,
+              default_duration: true,
+            },
           }),
           // cursor 改雪花后 project_event_stream.high_watermark 不再维护；
           // 当前水位直接取 project_events 的最大 cursor。
@@ -328,6 +358,16 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
             },
           ]),
       );
+      const capabilityByKey = new Map(
+        capabilityRows.map((cap) => [
+          `${cap.model_id}:${cap.capability_type}`,
+          cap,
+        ]),
+      );
+      const mentionById = new Map(
+        mentionRows.map((mention) => [mention.id.toString(), mention]),
+      );
+
       return {
         conversation_messages: messages.map((message) => ({
           message_id: message.id.toString(),
@@ -340,27 +380,86 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           created_at: message.gmt_create.toISOString(),
           mentions: mentionsByMessage.get(message.id.toString()) ?? [],
         })),
-        plan_messages: planMessageRows.map((plan) => ({
-          message_id: plan.message_id.toString(),
-          conversation_id: plan.conversation_id.toString(),
-          agent_run_id: plan.agent_run_id.toString(),
-          ordinal: plan.ordinal,
-          total_in_batch: plan.total_in_batch,
-          sequence_label: plan.sequence_label,
-          application_kind: plan.application_kind,
-          target_scene_card_mention_id:
-            plan.target_scene_card_mention_id?.toString() ?? null,
-          base_scene_card_version: plan.base_scene_card_version,
-          content_markdown: plan.content_markdown,
-          derived_references: plan.derived_references,
-          frozen_generation_parameters: plan.frozen_generation_parameters,
-          capability_snapshot_version: plan.capability_snapshot_version,
-          provider_prompt_projection: plan.provider_prompt_projection,
-          base_plan_message_id: plan.base_plan_message_id?.toString() ?? null,
-          source_plan_message_id:
-            plan.source_plan_message_id?.toString() ?? null,
-          created_at: plan.gmt_create.toISOString(),
-        })),
+        plan_messages: planMessageRows.map((plan) => {
+          const derivedReferences = (
+            plan.derived_references ?? []
+          ) as DerivedReference[];
+          let mentionUnavailable = false;
+          for (const ref of derivedReferences) {
+            if (ref.type !== "asset") continue;
+            const mention = mentionById.get(ref.mention_id);
+            if (!mention) {
+              mentionUnavailable = true;
+              break;
+            }
+            const { availability } = classifyMentionAvailability({
+              type: "asset",
+              targetVersion: mention.target_version,
+              acceptedUserId: mention.accepted_user_id,
+              asset: assetById.get(mention.target_id.toString()),
+              projectId: pid,
+              userId: uid,
+            });
+            if (availability === "unavailable") {
+              mentionUnavailable = true;
+              break;
+            }
+          }
+          const snapshot =
+            plan.capability_snapshot_version as CapabilitySnapshotVersion;
+          const cap = capabilityByKey.get(
+            `${snapshot.model_id}:${snapshot.capability_type}`,
+          );
+          let capabilityDrifted = true;
+          if (cap && cap.enabled) {
+            capabilityDrifted =
+              cap.version !== snapshot.row_version ||
+              capabilityDigest({
+                supported_sizes: cap.supported_sizes,
+                supported_aspect_ratios: cap.supported_aspect_ratios,
+                supported_durations: cap.supported_durations,
+                supported_formats: cap.supported_formats,
+                default_size: cap.default_size,
+                default_format: cap.default_format,
+                default_aspect_ratio: cap.default_aspect_ratio,
+                default_duration: cap.default_duration,
+              }) !== snapshot.digest;
+          }
+          // snapshot 不查余额（balanceSufficient null）→ 不会是 retryable_blocked。
+          const availability = classifyPlanApplicationAvailability({
+            mentionUnavailable,
+            capabilityDrifted,
+            balanceSufficient: null,
+          });
+          return {
+            message_id: plan.message_id.toString(),
+            conversation_id: plan.conversation_id.toString(),
+            agent_run_id: plan.agent_run_id.toString(),
+            ordinal: plan.ordinal,
+            total_in_batch: plan.total_in_batch,
+            sequence_label: plan.sequence_label,
+            application_kind: plan.application_kind,
+            target_scene_card_mention_id:
+              plan.target_scene_card_mention_id?.toString() ?? null,
+            base_scene_card_version: plan.base_scene_card_version,
+            content_markdown: plan.content_markdown,
+            derived_references: plan.derived_references,
+            frozen_generation_parameters: plan.frozen_generation_parameters,
+            capability_snapshot_version: plan.capability_snapshot_version,
+            provider_prompt_projection: plan.provider_prompt_projection,
+            base_plan_message_id: plan.base_plan_message_id?.toString() ?? null,
+            source_plan_message_id:
+              plan.source_plan_message_id?.toString() ?? null,
+            applied_at: plan.applied_at?.toISOString() ?? null,
+            first_generation_job_id:
+              plan.first_generation_job_id?.toString() ?? null,
+            application_availability:
+              availability === "requires_new_plan"
+                ? "requires_new_plan"
+                : "available",
+            created_at: plan.gmt_create.toISOString(),
+          };
+        }),
         agent_runs: runs.map((run) => {
           const activations = creativeSkillActivationSchema
             .array()

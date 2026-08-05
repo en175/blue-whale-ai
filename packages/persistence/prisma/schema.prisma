@@ -336,11 +336,37 @@ model plan_messages {
   provider_prompt_projection   Json
   base_plan_message_id         BigInt?
   source_plan_message_id       BigInt?
+  applied_at                   DateTime? @db.DateTime(0)
+  first_generation_job_id      BigInt?
   gmt_create                   DateTime @default(now()) @db.DateTime(0)
 
   @@index([project_id], map: "idx_plan_message_project")
   @@index([agent_run_id], map: "idx_plan_message_agent_run")
   @@index([application_kind], map: "idx_plan_message_application_kind")
+}
+
+/// PlanMessage 首次成功应用回执（IK67H8，T10）：uk(plan_message_id) 兜底并发第二写，
+/// 媒体感知——图片分支 scene_card_id 恒 null，视频分支预留 scene 字段（T11/T12）。
+/// idempotency_key 指向首次触发的 command_idempotency 行（operation=plan_message.apply）。
+model plan_application_receipts {
+  id                        BigInt   @id @default(autoincrement())
+  plan_message_id           BigInt
+  project_id                BigInt
+  conversation_id           BigInt
+  agent_run_id              BigInt
+  application_kind          String   @db.VarChar(32)
+  first_generation_job_id   BigInt
+  content_digest            String   @db.VarChar(80)
+  idempotency_key           String   @db.VarChar(128)
+  scene_card_id             BigInt?
+  result_scene_card_version Int?
+  generation_preset_digest  String?  @db.VarChar(80)
+  applied_at                DateTime @default(now()) @db.DateTime(0)
+  gmt_create                DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([plan_message_id], map: "uk_plan_application_receipt")
+  @@index([project_id], map: "idx_plan_application_project")
+  @@index([first_generation_job_id], map: "idx_plan_application_job")
 }
 
 /// 临时助手交付（IK67GZ，契约 §8.1）：独立身份与顺序，永不成为 ConversationMessage。
