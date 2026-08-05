@@ -15,6 +15,10 @@ export {
   AGENT_RUN_ALREADY_TERMINAL_CODE,
   AGENT_RUN_NOT_RETRYABLE_CODE,
   PARAM_MISSING_CODE,
+  PLAN_APPLICATION_PLAN_NOT_FOUND_CODE,
+  PLAN_APPLICATION_KIND_UNSUPPORTED_CODE,
+  PLAN_APPLICATION_CAPABILITY_DRIFT_CODE,
+  PLAN_APPLICATION_ALREADY_APPLIED_CODE,
   type ResultEnvelope,
 } from "./result.js";
 export {
@@ -73,6 +77,7 @@ export {
   planGenerationParameterOverridesSchema,
   frozenGenerationParametersSchema,
   providerPromptProjectionSchema,
+  providerPromptAssetSchema,
   capabilitySnapshotVersionSchema,
   deriveProviderPromptProjection,
   type PlanApplicationKind,
@@ -85,3 +90,15 @@ export {
   type ProviderPromptProjection,
   type CapabilitySnapshotVersion,
 } from "./plan-message.js";
+export {
+  planApplicationReceiptSchema,
+  videoReferenceModeSchema,
+  sceneCardGenerationPresetSchema,
+  sceneCardGenerationRecordStatusSchema,
+  sceneCardGenerationRecordSchema,
+  type PlanApplicationReceipt,
+  type VideoReferenceMode,
+  type SceneCardGenerationPreset,
+  type SceneCardGenerationRecordStatus,
+  type SceneCardGenerationRecord,
+} from "./plan-application.js";

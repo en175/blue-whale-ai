@@ -724,3 +724,63 @@ model skill_summarize_session {
 
   @@unique([conversation_id], map: "uk_skill_summarize_session_conversation")
 }
+
+/// 计划应用回执（IK67H9，契约 §9 / CONTEXT L217-221）：一次成功应用 PlanMessage 的不可变事实。
+/// 视频路径记 scene_card_id/结果版本/预设摘要；图片路径 scene_card_id 为 NULL（留给 T10）。
+/// uk_plan_application_receipt_message 兜底「每条 PlanMessage 最多一次成功应用」（CONTEXT L227）。
+model plan_application_receipts {
+  id                         BigInt   @id @default(autoincrement())
+  message_id                 BigInt   @unique(map: "uk_plan_application_receipt_message")
+  project_id                 BigInt
+  application_kind           String   @db.VarChar(32)
+  scene_card_id              BigInt?
+  first_generation_job_id    BigInt
+  command_id                 String   @db.VarChar(128)
+  content_digest             String   @db.VarChar(80)
+  result_version             Int?
+  preset_digest              String?  @db.VarChar(80)
+  target_scene_card_mention_id BigInt?
+  applied_at                 DateTime @db.DateTime(0)
+  gmt_create                 DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([project_id, command_id], map: "uk_plan_application_command")
+  @@index([first_generation_job_id], map: "idx_plan_application_job")
+}
+
+/// 场景卡生成预设（IK67H9，CONTEXT L49-58）：SceneCard 1:1 持久拥有的视频生成参数，
+/// 首次应用从 PlanMessage 冻结参数创建。必有时长与视频参考模式；首/尾帧角色存 reference_assets。
+model scene_card_generation_presets {
+  id                          BigInt   @id @default(autoincrement())
+  scene_card_id               BigInt   @unique(map: "uk_preset_scene")
+  project_id                  BigInt
+  parameters                  Json
+  reference_mode              String   @db.VarChar(32)
+  reference_assets            Json
+  capability_snapshot_version Json
+  gmt_create                  DateTime @default(now()) @db.DateTime(0)
+  gmt_modified                DateTime @default(now()) @db.DateTime(0)
+  version                     Int      @default(1)
+  is_delete                   Int      @default(0) @db.TinyInt
+
+  @@index([project_id], map: "idx_preset_project")
+}
+
+/// 场景卡生成记录（IK67H9，CONTEXT L82-86）：User 从 SceneCard 发起的一次新生成及重试的聚合。
+/// summary_status 四态：generating/partial/success/failed。来源指向 plan_message 与应用回执。
+model scene_card_generation_records {
+  id                      BigInt   @id @default(autoincrement())
+  scene_card_id           BigInt
+  project_id              BigInt
+  summary_status          String   @db.VarChar(16)
+  plan_message_id         BigInt
+  application_receipt_id  BigInt
+  first_generation_job_id BigInt
+  gmt_create              DateTime @default(now()) @db.DateTime(0)
+  gmt_modified            DateTime @default(now()) @db.DateTime(0)
+  version                 Int      @default(1)
+  is_delete               Int      @default(0) @db.TinyInt
+
+  @@index([scene_card_id], map: "idx_record_scene")
+  @@index([project_id], map: "idx_record_project")
+  @@index([summary_status], map: "idx_record_status")
+}

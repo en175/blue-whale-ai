@@ -58,6 +58,10 @@ export interface SnapshotConversationState {
   /** 已原子接纳的不可变计划卡（T09，IK67H6，契约 §9）：按 ordinal 排序。
    *  临时候选与验证失败的候选永不进入此列表（AC#8）。 */
   plan_messages: SnapshotPlanMessageView[];
+  /** 已创建的视频场景卡（IK67H9，T11）：plan_message 应用产物，按 id 升序。 */
+  scene_cards: SnapshotSceneCardView[];
+  /** 成功应用 PlanMessage 的不可变回执（IK67H9，T11）：按 applied_at 升序。 */
+  plan_applications: SnapshotPlanApplicationReceiptView[];
   agent_runs: Array<{
     agent_run_id: string;
     conversation_id: string;
@@ -121,6 +125,27 @@ export interface SnapshotPlanMessageView {
   base_plan_message_id: string | null;
   source_plan_message_id: string | null;
   created_at: string;
+}
+
+/** Snapshot 场景卡投影（IK67H9，T11）：视频 SceneCard 的权威正文与版本，供前端渲染与编辑。
+ *  生成预设/记录等明细由专属读路径提供，此处只投身份 + 正文。 */
+export interface SnapshotSceneCardView {
+  scene_card_id: string;
+  title: string;
+  summary: string | null;
+  content_markdown: string;
+  version: number;
+}
+
+/** Snapshot 计划应用回执投影（IK67H9，T11）：不可变事实，证明正文与参数来自被应用的 PlanMessage。 */
+export interface SnapshotPlanApplicationReceiptView {
+  receipt_id: string;
+  message_id: string;
+  application_kind: string;
+  scene_card_id: string | null;
+  first_generation_job_id: string;
+  command_id: string;
+  applied_at: string;
 }
 
 /** output_asset_ids（Json 数组）→ string[]。容忍 number/string 混合（历史数据）。 */
@@ -190,7 +215,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
     async loadConversationState(projectId, userId) {
       const pid = BigInt(projectId);
       const uid = BigInt(userId);
-      const [messages, mentionRows, runs, inputRequests, planMessageRows, maxCursorRow] =
+      const [messages, mentionRows, runs, inputRequests, planMessageRows, maxCursorRow, sceneCardRows, applicationRows] =
         await Promise.all([
           prisma.conversation_messages.findMany({
             where: { project_id: pid, is_delete: 0 },
@@ -233,6 +258,32 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           prisma.project_events.aggregate({
             where: { project_id: pid, is_delete: 0 },
             _max: { cursor: true },
+          }),
+          // IK67H9：视频场景卡投影（未删除，按 id 升序）。
+          prisma.scene_cards.findMany({
+            where: { project_id: pid, is_delete: 0 },
+            orderBy: { id: "asc" },
+            select: {
+              id: true,
+              title: true,
+              summary: true,
+              content_markdown: true,
+              version: true,
+            },
+          }),
+          // IK67H9：计划应用回执投影（不可变，按 applied_at 升序）。
+          prisma.plan_application_receipts.findMany({
+            where: { project_id: pid },
+            orderBy: { applied_at: "asc" },
+            select: {
+              id: true,
+              message_id: true,
+              application_kind: true,
+              scene_card_id: true,
+              first_generation_job_id: true,
+              command_id: true,
+              applied_at: true,
+            },
           }),
         ]);
       const assetIds = [
@@ -360,6 +411,22 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           source_plan_message_id:
             plan.source_plan_message_id?.toString() ?? null,
           created_at: plan.gmt_create.toISOString(),
+        })),
+        scene_cards: sceneCardRows.map((card) => ({
+          scene_card_id: card.id.toString(),
+          title: card.title,
+          summary: card.summary,
+          content_markdown: card.content_markdown,
+          version: card.version,
+        })),
+        plan_applications: applicationRows.map((receipt) => ({
+          receipt_id: receipt.id.toString(),
+          message_id: receipt.message_id.toString(),
+          application_kind: receipt.application_kind,
+          scene_card_id: receipt.scene_card_id?.toString() ?? null,
+          first_generation_job_id: receipt.first_generation_job_id.toString(),
+          command_id: receipt.command_id,
+          applied_at: receipt.applied_at.toISOString(),
         })),
         agent_runs: runs.map((run) => {
           const activations = creativeSkillActivationSchema

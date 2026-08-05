@@ -6,7 +6,6 @@ import {
   agentRunPinSchema,
   agentRunWorkSchema,
   assetContextProjectionSchema,
-  canonicalizeJsonValue,
   creativeSkillActivationSchema,
   deriveProviderPromptProjection,
   mentionInputSnapshotSchema,
@@ -26,6 +25,7 @@ import {
 } from "@blue-whale/contracts";
 
 import { appendProjectEvent } from "./product-event-repo.js";
+import { capabilityDigest } from "./capability-digest.js";
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
 import {
   classifyMentionAvailability,
@@ -588,13 +588,6 @@ function publicRunEventPayload(
     ),
     reasoning_summary: publicReasoningSummary(run.reasoning_summary),
   };
-}
-
-/** 能力快照 digest：sha256(canonicalizeJsonValue(view))，row.version 无全局版本号时兜底。 */
-function capabilityDigest(view: Record<string, unknown>): string {
-  return `sha256:${createHash("sha256")
-    .update(JSON.stringify(canonicalizeJsonValue(view)))
-    .digest("hex")}`;
 }
 
 function capabilityTypeForKind(kind: string): "image" | "video" {

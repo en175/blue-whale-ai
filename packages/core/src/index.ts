@@ -106,3 +106,12 @@ export {
   type GenerationInboxView,
   type InboxConversationView,
 } from "./conversation/generation-inbox.js";
+export {
+  findPlacement,
+  DEFAULT_NODE_WIDTH,
+  DEFAULT_NODE_HEIGHT,
+  DEFAULT_GAP,
+  DEFAULT_MAX_PER_ROW,
+  type Rect,
+  type FindPlacementOptions,
+} from "./placement.js";
