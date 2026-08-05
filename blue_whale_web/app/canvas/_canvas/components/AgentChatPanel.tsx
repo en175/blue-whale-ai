@@ -19,6 +19,7 @@ import { squirclePath } from "../utils";
 import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
 import { ComposerShell, ModelSettingsMenu } from "./Composer";
 import { SkillRecommendationSection } from "./SkillRecommendationSection";
+import { AgentRunFailureNotice } from "./AgentRunFailureNotice";
 import type { CreativeSkillRecommendation } from "@/components/api/skills";
 import {
   UserMessageBubble,
@@ -85,24 +86,6 @@ function mentionFailuresOf(error: unknown): MentionFailure[] {
   });
 }
 
-const AGENT_RUN_STATUS_LABELS: Record<string, string> = {
-  queued: "排队中",
-  running: "运行中",
-  awaiting_input: "等待输入",
-  awaiting_job: "等待任务",
-  completed: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
-  recovery_failed: "恢复失败",
-};
-
-/** PlanPhase 内部行为阶段的公开标签（IK67GY T06，契约 §6）。 */
-const AGENT_RUN_STAGE_LABELS: Record<string, string> = {
-  understanding: "理解需求",
-  alignment: "需求对齐",
-  awaiting_final_confirmation: "待最终确认",
-};
-
 /** 欢迎态预设：点击只填入输入框，不发送、不创建产品事实（IK67GD T02）。 */
 const WELCOME_PRESETS = [
   {
@@ -151,12 +134,9 @@ export function AgentChatPanel({
   projectId,
   activeSkillName,
   agentRunStatus,
-  agentRunStage,
-  agentRunTerminalReason,
   reasoningSummary,
   answerableActive,
   provisionalContent,
-  onStopAgentRun,
   onRetryAgentRun,
   skillRecommendations,
   skillRecommendationsLoading,
@@ -196,18 +176,12 @@ export function AgentChatPanel({
   activeSkillName?: string | null;
   /** 当前 Run 的公开状态（Snapshot/SSE 权威） */
   agentRunStatus?: string | null;
-  /** 当前 Run 的 PlanPhase 阶段（Snapshot/SSE 权威，IK67GY T06） */
-  agentRunStage?: string | null;
-  /** 当前 Run 的终态原因（user_requested=用户停止，IK67GZ T07） */
-  agentRunTerminalReason?: string | null;
   /** 安全的用户可见运行摘要；不包含内部思维链。 */
   reasoningSummary?: string | null;
   /** 是否存在可回答创作澄清（true 时 forced 与 reply 互斥，pending 保留不清） */
   answerableActive?: boolean;
   /** 临时助手文本（IK67GZ T07）：非正式消息，RunCommit 后消失 */
   provisionalContent?: string | null;
-  /** 停止当前 Run（IK67GZ，契约 §8.2）；缺省（离线）不渲染停止按钮 */
-  onStopAgentRun?: () => Promise<void>;
   /** 手动重试失败 Run（IK67GZ，契约 §8.3）；缺省（离线）不渲染重试按钮 */
   onRetryAgentRun?: () => Promise<void>;
   /** 当前 Run 的 Creative Skill 推荐列表（IK3NPI）；未传则不渲染推荐区 */
@@ -743,19 +717,8 @@ export function AgentChatPanel({
   // 已选技能标签：乐观名（刚点 Use）→ 权威名（Run 已激活）→ 不显示
   const skillLabel = pendingForcedSkill?.name ?? activeSkillName ?? null;
   const skillStateLabel = pendingForcedSkill ? "已选技能" : "已激活技能";
-  const runStatusLabel = agentRunStatus
-    ? agentRunStatus === "cancelled" &&
-      agentRunTerminalReason === "user_requested"
-      ? "已停止生成"
-      : (AGENT_RUN_STATUS_LABELS[agentRunStatus] ?? agentRunStatus)
-    : null;
-  const canStopRun =
-    !!onStopAgentRun &&
-    (agentRunStatus === "queued" || agentRunStatus === "running");
+  // 失败重试可用性：失败提示落在对话流末尾（契约 §8.3）
   const canRetryRun = !!onRetryAgentRun && agentRunStatus === "failed";
-  const runStageLabel = agentRunStage
-    ? (AGENT_RUN_STAGE_LABELS[agentRunStage] ?? null)
-    : null;
 
   const panelPath = squirclePath(panelSize.w, panelSize.h, 28.8);
 
@@ -796,7 +759,7 @@ export function AgentChatPanel({
           <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
             <div className="tc-agent-session-credit-badge group relative">
               <span
-                className="tc-agent-session-credit-badge__trigger inline-flex items-center gap-1 rounded-lg border border-white/[0.06] bg-white/[0.06] px-2 py-1 text-xs text-white/75"
+                className="tc-agent-session-credit-badge__trigger inline-flex items-center gap-1 rounded-lg border border-transparent px-2 py-1 text-xs text-white/75 transition-colors group-hover:bg-white/[0.06]"
                 aria-label="当前 Agent 对话累计消耗 0.12 积分"
               >
                 <CreditIcon size={12} />
@@ -837,62 +800,6 @@ export function AgentChatPanel({
                 )}
               </span>
             </div>
-          )}
-          {runStatusLabel && (
-            <span
-              className="tc-agent-run-status inline-flex items-center rounded-lg px-2 py-1 text-xs"
-              aria-label={`Agent 状态：${runStatusLabel}`}
-              style={{
-                border: "1px solid var(--tc-border-subtle)",
-                background: "var(--tc-menu-item-hover)",
-                color: "var(--tc-text-secondary)",
-              }}
-            >
-              {runStatusLabel}
-            </span>
-          )}
-          {runStageLabel && (
-            <span
-              className="tc-agent-run-stage inline-flex items-center rounded-lg px-2 py-1 text-xs"
-              aria-label={`计划阶段：${runStageLabel}`}
-              style={{
-                border: "1px solid var(--tc-border-subtle)",
-                background: "var(--tc-menu-item-hover)",
-                color: "var(--tc-text-secondary)",
-              }}
-            >
-              {runStageLabel}
-            </span>
-          )}
-          {canStopRun && (
-            <button
-              type="button"
-              className="tc-agent-run-stop inline-flex items-center rounded-lg px-2 py-1 text-xs transition-colors"
-              aria-label="停止生成"
-              style={{
-                border: "1px solid var(--tc-border-subtle)",
-                background: "var(--tc-menu-item-hover)",
-                color: "var(--tc-text-secondary)",
-              }}
-              onClick={() => void onStopAgentRun?.().catch(() => undefined)}
-            >
-              停止
-            </button>
-          )}
-          {canRetryRun && (
-            <button
-              type="button"
-              className="tc-agent-run-retry inline-flex items-center rounded-lg px-2 py-1 text-xs transition-colors"
-              aria-label="重试本次回答"
-              style={{
-                border: "1px solid var(--tc-border-subtle)",
-                background: "var(--tc-menu-item-hover)",
-                color: "var(--tc-text-secondary)",
-              }}
-              onClick={() => void onRetryAgentRun?.().catch(() => undefined)}
-            >
-              重试
-            </button>
           )}
           <div className="inline-flex items-center gap-0.5">
             <div className="relative inline-flex">
@@ -982,19 +889,6 @@ export function AgentChatPanel({
                 onUse={handleUseSkill}
               />
             )}
-            {reasoningSummary && (
-              <div
-                className="tc-agent-reasoning-summary rounded-lg px-3 py-2 text-xs leading-5"
-                role="status"
-                style={{
-                  border: "1px solid var(--tc-border-subtle)",
-                  background: "var(--tc-menu-item-hover)",
-                  color: "var(--tc-text-secondary)",
-                }}
-              >
-                {reasoningSummary}
-              </div>
-            )}
             {messages.length === 0 && (
               <div
                 className="tc-agent-welcome flex flex-col gap-3 px-2 pt-8 pb-4"
@@ -1050,6 +944,60 @@ export function AgentChatPanel({
               >
                 <AgentMessageBubble text={provisionalContent} />
               </div>
+            )}
+            {/* 运行中实时思考块：流光「思考中」+ 思考内容默认展开；思考内容来自运行摘要（Snapshot/SSE 权威） */}
+            {(agentRunStatus === "queued" || agentRunStatus === "running") &&
+              !provisionalContent && (
+                <div
+                  className="tc-agent-thinking-block tc-agent-thinking-live self-start"
+                  role="status"
+                  aria-label="思考中"
+                >
+                  <div className="tc-agent-thinking-trigger inline-flex items-center gap-1 py-0.5 text-xs">
+                    <span className="tc-agent-thinking-live__label">
+                      思考中
+                    </span>
+                    {reasoningSummary ? (
+                      <ChevronDown
+                        width={13}
+                        height={13}
+                        style={{ color: "var(--tc-text-tertiary)" }}
+                      />
+                    ) : null}
+                  </div>
+                  {reasoningSummary && (
+                    <div className="tc-agent-thinking-content-wrap">
+                      <div
+                        className="tc-agent-thinking-content"
+                        style={{
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                        }}
+                      >
+                        {reasoningSummary}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            {/* Run 结束后思考摘要自动折叠为「思考过程」，保留在对话流末尾 */}
+            {agentRunStatus !== "queued" &&
+              agentRunStatus !== "running" &&
+              reasoningSummary && (
+                <ThinkingBlock
+                  msg={{
+                    id: "agent-run-reasoning",
+                    type: "thinking",
+                    text: "思考过程",
+                    content: reasoningSummary,
+                  }}
+                />
+              )}
+            {/* AgentRun 失败落点：对话流末尾内联提示条（契约 §8.3） */}
+            {canRetryRun && (
+              <AgentRunFailureNotice
+                onRetry={() => void onRetryAgentRun?.().catch(() => undefined)}
+              />
             )}
           </div>
         </div>
@@ -1209,7 +1157,7 @@ export function AgentChatPanel({
                       <button
                         type="button"
                         onClick={() => setSkillPanelOpen(true)}
-                        className="tc-agent-skill-btn tc-agent-composer-pill-btn inline-flex h-8 items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.05] px-3 text-xs font-medium text-white/85 transition-colors hover:bg-white/[0.08]"
+                        className="tc-agent-skill-btn tc-agent-composer-pill-btn inline-flex h-8 items-center gap-1.5 rounded-lg border border-transparent px-3 text-xs font-medium text-white/85 transition-colors hover:bg-white/[0.08]"
                         aria-label="技能"
                         aria-haspopup="dialog"
                         aria-expanded={skillPanelOpen}
