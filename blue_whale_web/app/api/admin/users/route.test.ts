@@ -107,7 +107,7 @@ describe("GET /api/admin/users", () => {
         "http://localhost/api/admin/users?keyword=ali&status=disabled&role=1&page=2&pageSize=5",
       ),
     );
-    expect(mocks.listAdminUsers).toHaveBeenCalledWith("sk-admin", {
+    expect(mocks.listAdminUsers).toHaveBeenCalledWith("sk-admin", 1, {
       keyword: "ali",
       status: 0,
       role: 1,
@@ -117,6 +117,7 @@ describe("GET /api/admin/users", () => {
     await GET(authRequest("http://localhost/api/admin/users?status=active"));
     expect(mocks.listAdminUsers).toHaveBeenLastCalledWith(
       "sk-admin",
+      1,
       expect.objectContaining({ status: 1 }),
     );
   });
@@ -127,6 +128,7 @@ describe("GET /api/admin/users", () => {
     );
     expect(mocks.listAdminUsers).toHaveBeenLastCalledWith(
       "sk-admin",
+      1,
       expect.objectContaining({ page: 1, pageSize: 100 }),
     );
   });

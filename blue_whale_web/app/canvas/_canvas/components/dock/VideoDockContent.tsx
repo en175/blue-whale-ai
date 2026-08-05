@@ -574,6 +574,7 @@ export function VideoDockContent(props: VideoDockContentProps) {
                           key={m.id}
                           item={m}
                           onRemove={onRemoveMedia}
+                          onPreview={onPreviewMedia}
                         />
                       ))}
                       {/* 缩略图行末尾「继续添加」：上传图片/从画布选择（与占位按钮同菜单） */}
@@ -583,7 +584,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
                           type="button"
                           aria-label="添加图片"
                           aria-haspopup="menu"
-                          aria-expanded={uploadMenuOpen && uploadKind === "image"}
+                          aria-expanded={
+                            uploadMenuOpen && uploadKind === "image"
+                          }
                           onClick={() => handleTriggerClick(mediaAddRef)}
                           style={{
                             width: 44,

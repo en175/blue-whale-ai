@@ -64,6 +64,7 @@ describe("GET /api/admin/dashboard", () => {
     expect(mocks.collectDashboardStats).toHaveBeenCalledWith(
       expect.anything(),
       "sk-admin",
+      1,
     );
   });
 

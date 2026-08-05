@@ -30,36 +30,38 @@ function createFakeClient(overrides: Record<string, unknown> = {}) {
     }),
     listAdminTopUps: vi
       .fn()
-      .mockImplementation(async (_token: string, opts: { page: number }) => {
-        if (opts.page > 1) {
-          return { items: [], total: 3, page: opts.page, page_size: 100 };
-        }
-        return {
-          items: [
-            {
-              trade_no: "BWP1",
-              user_id: 2,
-              amount: 100,
-              money: 1,
-              create_time: todayStart + 10,
-              complete_time: 0,
-              status: "success",
-            },
-            {
-              trade_no: "BWP2",
-              user_id: 3,
-              amount: 50,
-              money: 0.5,
-              create_time: todayStart - 100,
-              complete_time: 0,
-              status: "pending",
-            },
-          ],
-          total: 3,
-          page: opts.page,
-          page_size: 100,
-        };
-      }),
+      .mockImplementation(
+        async (_token: string, _userId: number, opts: { page: number }) => {
+          if (opts.page > 1) {
+            return { items: [], total: 3, page: opts.page, page_size: 100 };
+          }
+          return {
+            items: [
+              {
+                trade_no: "BWP1",
+                user_id: 2,
+                amount: 100,
+                money: 1,
+                create_time: todayStart + 10,
+                complete_time: 0,
+                status: "success",
+              },
+              {
+                trade_no: "BWP2",
+                user_id: 3,
+                amount: 50,
+                money: 0.5,
+                create_time: todayStart - 100,
+                complete_time: 0,
+                status: "pending",
+              },
+            ],
+            total: 3,
+            page: opts.page,
+            page_size: 100,
+          };
+        },
+      ),
     ...overrides,
   };
 }
@@ -67,7 +69,7 @@ function createFakeClient(overrides: Record<string, unknown> = {}) {
 describe("collectDashboardStats", () => {
   it("aggregates today topups, pending orders and recent records", async () => {
     const client = createFakeClient();
-    const stats = await collectDashboardStats(client, "sk-admin");
+    const stats = await collectDashboardStats(client, "sk-admin", 1);
 
     expect(stats.totalUsers).toBe(7);
     expect(stats.todayRecharge).toBe(100);
@@ -78,6 +80,7 @@ describe("collectDashboardStats", () => {
     expect(stats.recentConsumes[0].model).toBe("gpt-4o");
     expect(client.getAdminLogStat).toHaveBeenCalledWith(
       "sk-admin",
+      1,
       expect.objectContaining({ type: 2 }),
     );
     // 无当日/无 pending 的第二页 → 扫描停止
@@ -91,47 +94,49 @@ describe("collectDashboardStats", () => {
     const client = createFakeClient({
       listAdminTopUps: vi
         .fn()
-        .mockImplementation(async (_token: string, opts: { page: number }) => {
-          if (opts.page === 1) {
-            return {
-              items: [
-                {
-                  trade_no: "P1",
-                  user_id: 1,
-                  amount: 10,
-                  money: 1,
-                  create_time: todayStart + 1,
-                  complete_time: 0,
-                  status: "pending",
-                },
-              ],
-              total: 3,
-              page: 1,
-              page_size: 100,
-            };
-          }
-          if (opts.page === 2) {
-            return {
-              items: [
-                {
-                  trade_no: "P2",
-                  user_id: 2,
-                  amount: 20,
-                  money: 2,
-                  create_time: todayStart - 500,
-                  complete_time: 0,
-                  status: "pending",
-                },
-              ],
-              total: 3,
-              page: 2,
-              page_size: 100,
-            };
-          }
-          return { items: [], total: 3, page: opts.page, page_size: 100 };
-        }),
+        .mockImplementation(
+          async (_token: string, _userId: number, opts: { page: number }) => {
+            if (opts.page === 1) {
+              return {
+                items: [
+                  {
+                    trade_no: "P1",
+                    user_id: 1,
+                    amount: 10,
+                    money: 1,
+                    create_time: todayStart + 1,
+                    complete_time: 0,
+                    status: "pending",
+                  },
+                ],
+                total: 3,
+                page: 1,
+                page_size: 100,
+              };
+            }
+            if (opts.page === 2) {
+              return {
+                items: [
+                  {
+                    trade_no: "P2",
+                    user_id: 2,
+                    amount: 20,
+                    money: 2,
+                    create_time: todayStart - 500,
+                    complete_time: 0,
+                    status: "pending",
+                  },
+                ],
+                total: 3,
+                page: 2,
+                page_size: 100,
+              };
+            }
+            return { items: [], total: 3, page: opts.page, page_size: 100 };
+          },
+        ),
     });
-    const stats = await collectDashboardStats(client, "sk-admin");
+    const stats = await collectDashboardStats(client, "sk-admin", 1);
     expect(stats.pendingOrders).toBe(2);
     expect(client.listAdminTopUps).toHaveBeenCalledTimes(3);
   });

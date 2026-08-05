@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getImageModels } from "../../api/generation";
+import { toast } from "@/components/Toast";
 import { ImageDockContent } from "./ImageDockContent";
 
 vi.mock("../../api/generation", () => ({
@@ -347,9 +348,7 @@ describe("ImageDockContent 上传入口可用性（修复入口消失）", () =>
     const addBtn = screen.getByRole("button", { name: "继续添加图片" });
     expect(addBtn).toBeInTheDocument();
     fireEvent.click(addBtn);
-    expect(
-      screen.getByRole("menu", { name: "上传来源" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("menu", { name: "上传来源" })).toBeInTheDocument();
   });
 
   it("能力表就绪后模型不支持参考图时入口收敛隐藏", async () => {
@@ -376,5 +375,29 @@ describe("ImageDockContent 上传入口可用性（修复入口消失）", () =>
       screen.queryByRole("button", { name: "Upload reference image" }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: "上传图片" })).toBeNull();
+  });
+
+  it("能力表拉取失败时 toast 提示（IK6M68，避免静默黑洞）", async () => {
+    const messages: string[] = [];
+    const unsubscribe = toast.subscribe((items) =>
+      messages.push(...items.map((t) => t.message)),
+    );
+    try {
+      vi.mocked(getImageModels).mockRejectedValue(new Error("boom"));
+      render(
+        <ImageDockContent
+          editorRef={createRef<HTMLDivElement>()}
+          isEmpty={false}
+          onInput={vi.fn()}
+          onGenerate={vi.fn()}
+        />,
+      );
+
+      await waitFor(() =>
+        expect(messages).toContain("模型能力加载失败，请刷新重试"),
+      );
+    } finally {
+      unsubscribe();
+    }
   });
 });

@@ -279,6 +279,8 @@ export type AudioDockContentProps = {
   /** 从画布选择参考素材：audioRef=音频节点，audioImageRef=图片节点 */
   onPickSlot?: (slot: "audioRef" | "audioImageRef") => void;
   onExitPick?: () => void;
+  /** 点击参考缩略图预览素材（IK6M68，图片放大 / 视频可播 / 音频占位） */
+  onPreviewMedia?: (item: DockMediaItem) => void;
   isPicking?: boolean;
   onGenerate?: (settings: AudioGenerateSettings) => void;
   generating?: boolean;

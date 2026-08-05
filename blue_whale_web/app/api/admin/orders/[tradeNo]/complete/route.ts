@@ -43,7 +43,7 @@ export async function POST(
 
     const { client } = createAdminDeps();
     try {
-      await client.completeAdminTopUp(token, tradeNo);
+      await client.completeAdminTopUp(token, Number(admin.userId), tradeNo);
     } catch (error) {
       return adminErrorResponse(error);
     }

@@ -68,7 +68,7 @@ describe("POST /api/admin/users/:userId/manage", () => {
     const res = await POST(...post("42", { action: "freeze", reason: "违规" }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ success: true, data: null });
-    expect(mocks.manageAdminUser).toHaveBeenCalledWith("sk-admin", {
+    expect(mocks.manageAdminUser).toHaveBeenCalledWith("sk-admin", 1, {
       id: 42,
       action: "disable",
     });
@@ -87,7 +87,7 @@ describe("POST /api/admin/users/:userId/manage", () => {
 
   it("unfreeze → new-api enable", async () => {
     await POST(...post("42", { action: "unfreeze", reason: "申诉通过" }));
-    expect(mocks.manageAdminUser).toHaveBeenCalledWith("sk-admin", {
+    expect(mocks.manageAdminUser).toHaveBeenCalledWith("sk-admin", 1, {
       id: 42,
       action: "enable",
     });
@@ -100,7 +100,7 @@ describe("POST /api/admin/users/:userId/manage", () => {
     await POST(
       ...post("42", { action: "adjustBalance", value: 500, reason: "补偿" }),
     );
-    expect(mocks.manageAdminUser).toHaveBeenCalledWith("sk-admin", {
+    expect(mocks.manageAdminUser).toHaveBeenCalledWith("sk-admin", 1, {
       id: 42,
       action: "add_quota",
       value: 500,
@@ -118,7 +118,7 @@ describe("POST /api/admin/users/:userId/manage", () => {
     await POST(
       ...post("42", { action: "adjustBalance", value: -50, reason: "扣回" }),
     );
-    expect(mocks.manageAdminUser).toHaveBeenCalledWith("sk-admin", {
+    expect(mocks.manageAdminUser).toHaveBeenCalledWith("sk-admin", 1, {
       id: 42,
       action: "add_quota",
       value: 50,

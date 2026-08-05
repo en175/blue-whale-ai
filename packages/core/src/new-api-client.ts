@@ -971,10 +971,14 @@ export function createNewApiClient(options: NewApiClientOptions) {
     },
 
     // ---- 管理端（AdminAuth：role >= 10 的管理员 token，信封为标准分页 PageInfo）----
+    // 注意：blue-whale-api 定制版要求管理接口带 New-Api-User:<userId> 头
+    //（须与 token 属主一致，authHelper 强制校验），且列表路由须带尾斜杠
+    //（/api/user/、/api/log/，无斜杠会 404/301）。IK6M2F。
 
-    /** 用户列表/搜索：有筛选条件走 /api/user/search，否则 /api/user。 */
+    /** 用户列表/搜索：有筛选条件走 /api/user/search，否则 /api/user/。 */
     async listAdminUsers(
       token: string,
+      userId: number,
       options: {
         keyword?: string;
         status?: number;
@@ -995,10 +999,10 @@ export function createNewApiClient(options: NewApiClientOptions) {
         options.role != null;
       const path = hasFilter
         ? `/api/user/search?${params}`
-        : `/api/user?${params}`;
+        : `/api/user/?${params}`;
       const response = await request<NewApiEnvelope>(
         path,
-        { method: "GET" },
+        { method: "GET", headers: { "New-Api-User": String(userId) } },
         token,
       );
       return normalizePage(response.data, options.pageSize ?? 20);
@@ -1007,11 +1011,16 @@ export function createNewApiClient(options: NewApiClientOptions) {
     /** 用户管理写操作（冻结 disable / 解冻 enable / 加减余额 add_quota）。 */
     async manageAdminUser(
       token: string,
+      userId: number,
       input: NewApiAdminManageUserInput,
     ): Promise<void> {
       await request<NewApiEnvelope>(
         "/api/user/manage",
-        { method: "POST", body: JSON.stringify(input) },
+        {
+          method: "POST",
+          headers: { "New-Api-User": String(userId) },
+          body: JSON.stringify(input),
+        },
         token,
       );
     },
@@ -1019,6 +1028,7 @@ export function createNewApiClient(options: NewApiClientOptions) {
     /** 全平台充值记录（管理端），keyword 模糊匹配 trade_no。 */
     async listAdminTopUps(
       token: string,
+      userId: number,
       options: { keyword?: string; page?: number; pageSize?: number } = {},
     ): Promise<NewApiPageInfo<NewApiAdminTopUpRow>> {
       const params = new URLSearchParams();
@@ -1027,17 +1037,25 @@ export function createNewApiClient(options: NewApiClientOptions) {
       params.set("page_size", String(options.pageSize ?? 20));
       const response = await request<NewApiEnvelope>(
         `/api/user/topup?${params}`,
-        { method: "GET" },
+        { method: "GET", headers: { "New-Api-User": String(userId) } },
         token,
       );
       return normalizePage(response.data, options.pageSize ?? 20);
     },
 
     /** 管理员补单：把 pending 订单手工置为到账（Go ManualCompleteTopUp）。 */
-    async completeAdminTopUp(token: string, tradeNo: string): Promise<void> {
+    async completeAdminTopUp(
+      token: string,
+      userId: number,
+      tradeNo: string,
+    ): Promise<void> {
       await request<NewApiEnvelope>(
         "/api/user/topup/complete",
-        { method: "POST", body: JSON.stringify({ trade_no: tradeNo }) },
+        {
+          method: "POST",
+          headers: { "New-Api-User": String(userId) },
+          body: JSON.stringify({ trade_no: tradeNo }),
+        },
         token,
       );
     },
@@ -1045,6 +1063,7 @@ export function createNewApiClient(options: NewApiClientOptions) {
     /** 日志聚合统计（GetLogsStat）：type=2 为消费；quota 单位与用户余额一致。 */
     async getAdminLogStat(
       token: string,
+      userId: number,
       input: { type: number; startTimestamp: number; endTimestamp: number },
     ): Promise<NewApiLogStat> {
       const params = new URLSearchParams({
@@ -1054,7 +1073,7 @@ export function createNewApiClient(options: NewApiClientOptions) {
       });
       const response = await request<NewApiEnvelope>(
         `/api/log/stat?${params}`,
-        { method: "GET" },
+        { method: "GET", headers: { "New-Api-User": String(userId) } },
         token,
       );
       const data = (response.data ?? {}) as Partial<NewApiLogStat>;
@@ -1065,9 +1084,10 @@ export function createNewApiClient(options: NewApiClientOptions) {
       };
     },
 
-    /** 全平台使用日志（管理端，/api/log 分页，id 倒序）。 */
+    /** 全平台使用日志（管理端，/api/log/ 分页，id 倒序）。 */
     async listAdminLogs(
       token: string,
+      userId: number,
       options: { page?: number; pageSize?: number } = {},
     ): Promise<NewApiPageInfo<NewApiLogRow>> {
       const params = new URLSearchParams({
@@ -1075,8 +1095,8 @@ export function createNewApiClient(options: NewApiClientOptions) {
         page_size: String(options.pageSize ?? 20),
       });
       const response = await request<NewApiEnvelope>(
-        `/api/log?${params}`,
-        { method: "GET" },
+        `/api/log/?${params}`,
+        { method: "GET", headers: { "New-Api-User": String(userId) } },
         token,
       );
       return normalizePage(response.data, options.pageSize ?? 20);

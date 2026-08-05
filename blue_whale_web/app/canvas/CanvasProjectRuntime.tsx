@@ -76,6 +76,7 @@ import {
 } from "./_canvas";
 import { ToolbarFlyout } from "./_canvas/components/ToolbarFlyout";
 import { CardLibraryPicker } from "./_canvas/components/CardLibraryPicker";
+import { NodeInfoModal } from "./_canvas/components/NodeInfoModal";
 import {
   cloneCardSnapshot,
   getCardLibraryAsset,
@@ -261,6 +262,8 @@ export function CanvasProjectRuntime({
   }>({ nonce: 0, subMode: "audio" });
   const [imageDockMedia, setImageDockMedia] = useState<DockMediaItem[]>([]);
   const [dockFocusSignal, setDockFocusSignal] = useState(0);
+  // IK6M68：节点「信息」按钮详情弹窗（消除空操作）
+  const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
   /** 重新编辑预填（P2）：recipe.generation → Dock 参数回填信号 */
   const [prefillSignal, setPrefillSignal] = useState<PrefillSignal | null>(
     null,
@@ -547,6 +550,11 @@ export function CanvasProjectRuntime({
         }
         case "generate": {
           void generateFromNode(node.id);
+          break;
+        }
+        case "info": {
+          // IK6M68：信息按钮 → 节点详情弹窗（原为空操作）
+          setInfoNodeId(node.id);
           break;
         }
         default:
@@ -893,6 +901,14 @@ export function CanvasProjectRuntime({
   const handleDockLocalUpload = useCallback(
     async (file: File, mode: "image" | "video" | "audio") => {
       if (!pid) return;
+      // IK6M68：Dock 上传补白名单 + 大小校验（对齐工具栏上传；音频参考无规则，跳过）
+      if (mode !== "audio") {
+        const validation = validateUploadFile(file);
+        if (!validation.ok) {
+          toast.error(validation.reason);
+          return;
+        }
+      }
       const result = await uploadCanvasMedia(file);
       if (!result.asset) return;
       const item: DockMediaItem = {
@@ -1750,6 +1766,23 @@ export function CanvasProjectRuntime({
           </span>
         )}
       </div>
+
+      {/* IK6M68：节点「信息」详情弹窗（消除空操作） */}
+      {infoNodeId &&
+        (() => {
+          const node = nodes.find((n) => n.id === infoNodeId);
+          if (!node) return null;
+          const asset = node.data.assetId
+            ? assets[node.data.assetId]
+            : undefined;
+          return (
+            <NodeInfoModal
+              node={node}
+              asset={asset}
+              onClose={() => setInfoNodeId(null)}
+            />
+          );
+        })()}
     </div>
   );
 }

@@ -107,7 +107,7 @@ describe("GET /api/admin/orders", () => {
       ),
     );
     const body = await res.json();
-    expect(mocks.listAdminTopUps).toHaveBeenCalledWith("sk-admin", {
+    expect(mocks.listAdminTopUps).toHaveBeenCalledWith("sk-admin", 1, {
       keyword: "BWP",
       page: 2,
       pageSize: 10,
