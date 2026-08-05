@@ -121,6 +121,8 @@ describe("VideoDockContent references", () => {
           first_last_frame: true,
           audio: true,
         },
+        version: 0,
+        digest: "sha256:mock",
       },
     ]);
     render(
@@ -194,10 +196,10 @@ describe("VideoDockContent references", () => {
     const addBtn = screen.getByRole("button", { name: "添加图片" });
     expect(addBtn).toBeInTheDocument();
     fireEvent.click(addBtn);
-    expect(
-      screen.getByRole("menu", { name: "上传来源" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("menu", { name: "上传来源" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitem", { name: "从画布选择" }));
-    expect(screen.getByRole("button", { name: "添加图片" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "添加图片" }),
+    ).toBeInTheDocument();
   });
 });

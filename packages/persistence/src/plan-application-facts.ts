@@ -1,6 +1,6 @@
 import type { CapabilitySnapshotVersion } from "@blue-whale/contracts";
 
-import { capabilityDigest } from "./capability-digest.js";
+import { capabilityDigestFromModelCapability } from "./capability-digest.js";
 import {
   classifyMentionAvailability,
   type MentionClassificationInput,
@@ -129,16 +129,8 @@ export function loadPlanApplicationFacts(
   ) {
     capabilityDrifted = true;
   } else {
-    const currentDigest = capabilityDigest({
-      supported_sizes: currentCapability.supported_sizes,
-      supported_aspect_ratios: currentCapability.supported_aspect_ratios,
-      supported_durations: currentCapability.supported_durations,
-      supported_formats: currentCapability.supported_formats,
-      default_size: currentCapability.default_size,
-      default_format: currentCapability.default_format,
-      default_aspect_ratio: currentCapability.default_aspect_ratio,
-      default_duration: currentCapability.default_duration,
-    });
+    const currentDigest =
+      capabilityDigestFromModelCapability(currentCapability);
     capabilityDrifted =
       currentCapability.version !== capabilitySnapshot.row_version ||
       currentDigest !== capabilitySnapshot.digest;

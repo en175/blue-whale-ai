@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { SCENE_CARD_VERSION_CONFLICT_CODE } from "@blue-whale/contracts";
+import {
+  SCENE_CARD_VERSION_CONFLICT_CODE,
+  type CapabilitySnapshotVersion,
+} from "@blue-whale/contracts";
 
 import {
   generateSceneCard,
@@ -30,9 +33,10 @@ import {
 import { MarkdownBody } from "./MarkdownBody";
 
 /** 可调参数 overrides（IK67HB/T13）：媒体类型/权威正文/ProviderPromptProjection 只读；
- *  模型受首次冻结能力约束只读（切换模型需能力 API 暴露 version/digest，留后续）；
+ *  模型仅可切到与首次冻结能力版本和摘要一致的候选；
  *  比例/分辨率/时长/数量/参考模式在当前能力支持范围内可调。 */
 type Overrides = {
+  model_id: string;
   aspect_ratio: string;
   size: string;
   duration: number;
@@ -46,6 +50,20 @@ const REFERENCE_MODE_OPTIONS = [
   { id: "last_frame", label: "尾帧" },
   { id: "first_and_last_frame", label: "首尾帧" },
 ];
+
+const CAPABILITY_DRIFT_MESSAGE =
+  "模型能力与首次冻结快照不一致，未切换；请重新确认生成参数。";
+
+function matchesFrozenCapability(
+  model: ImageModelCapability | undefined,
+  snapshot: CapabilitySnapshotVersion,
+): model is ImageModelCapability {
+  return Boolean(
+    model &&
+    model.version === snapshot.row_version &&
+    model.digest === snapshot.digest,
+  );
+}
 
 function deriveOptions(model: ImageModelCapability | null) {
   const sizes =
@@ -101,7 +119,10 @@ export function SceneCardGenerationEditor({
         // 恢复草稿（若有且 base 版本一致），否则用当前 preset 初始化 overrides。
         const draft = loadSceneCardDraft(sceneCardId);
         const params = presetData.preset.parameters as Record<string, unknown>;
+        const snapshot = presetData.preset
+          .capability_snapshot_version as CapabilitySnapshotVersion;
         const initial: Overrides = {
+          model_id: String(params.model_id ?? snapshot.model_id),
           aspect_ratio: String(params.aspect_ratio ?? ""),
           size: String(params.size ?? ""),
           duration: Number(params.duration ?? 0),
@@ -114,7 +135,18 @@ export function SceneCardGenerationEditor({
           draft.basePresetVersion === presetData.preset.version
         ) {
           const d = draft.overrides as Partial<Overrides>;
+          const draftModelId = d.model_id ?? initial.model_id;
+          const draftModel = models.find(
+            (model) => model.model_id === draftModelId,
+          );
+          const canRestoreDraftModel =
+            draftModelId === snapshot.model_id ||
+            matchesFrozenCapability(draftModel, snapshot);
+          if (!canRestoreDraftModel) {
+            setErrorMessage(CAPABILITY_DRIFT_MESSAGE);
+          }
           setOverrides({
+            model_id: canRestoreDraftModel ? draftModelId : initial.model_id,
             aspect_ratio: d.aspect_ratio ?? initial.aspect_ratio,
             size: d.size ?? initial.size,
             duration: d.duration ?? initial.duration,
@@ -139,11 +171,9 @@ export function SceneCardGenerationEditor({
   }, [projectId, sceneCardId, reloadKey]);
 
   const selectedModel = useMemo(() => {
-    const snapshot = preset?.preset.capability_snapshot_version as
-      { model_id?: string } | undefined;
-    if (!snapshot?.model_id) return null;
-    return capabilities.find((m) => m.model_id === snapshot.model_id) ?? null;
-  }, [preset, capabilities]);
+    if (!overrides?.model_id) return null;
+    return capabilities.find((m) => m.model_id === overrides.model_id) ?? null;
+  }, [overrides, capabilities]);
 
   const options = useMemo(() => deriveOptions(selectedModel), [selectedModel]);
 
@@ -176,8 +206,21 @@ export function SceneCardGenerationEditor({
     });
   }, [overrides, preset, sceneCardId]);
 
+  function handleModelChange(modelId: string) {
+    if (!preset || !overrides) return;
+    const candidate = capabilities.find((model) => model.model_id === modelId);
+    const frozen = preset.preset
+      .capability_snapshot_version as CapabilitySnapshotVersion;
+    if (!matchesFrozenCapability(candidate, frozen)) {
+      setErrorMessage(CAPABILITY_DRIFT_MESSAGE);
+      return;
+    }
+    setErrorMessage(null);
+    setOverrides({ ...overrides, model_id: modelId });
+  }
+
   async function handleGenerate() {
-    if (!preset || !overrides || submitting) return;
+    if (!preset || !overrides || !selectedModel || submitting) return;
     setSubmitting(true);
     setErrorMessage(null);
     setConflict(null);
@@ -186,12 +229,26 @@ export function SceneCardGenerationEditor({
         string,
         unknown
       >;
+      const frozen = preset.preset
+        .capability_snapshot_version as CapabilitySnapshotVersion;
+      const capabilitySnapshotVersion: CapabilitySnapshotVersion =
+        selectedModel.model_id === frozen.model_id
+          ? frozen
+          : {
+              schema_version: 1,
+              capability_type: "video",
+              model_id: selectedModel.model_id,
+              provider_id: selectedModel.provider_id,
+              row_version: selectedModel.version,
+              digest: selectedModel.digest,
+            };
       const body = {
         scene_card_id: sceneCardId,
         base_scene_card_version: preset.scene_card.version,
         base_preset_version: preset.preset.version,
         parameters: {
           ...baseParameters,
+          model_id: overrides.model_id,
           aspect_ratio: overrides.aspect_ratio,
           size: overrides.size,
           duration: overrides.duration,
@@ -199,7 +256,7 @@ export function SceneCardGenerationEditor({
         },
         reference_mode: overrides.reference_mode,
         reference_assets: preset.preset.reference_assets,
-        capability_snapshot_version: preset.preset.capability_snapshot_version,
+        capability_snapshot_version: capabilitySnapshotVersion,
       };
       await generateSceneCard(
         projectId,
@@ -375,12 +432,18 @@ export function SceneCardGenerationEditor({
         </div>
       )}
 
-      {/* 可调区：受首次模型能力约束 */}
+      {/* 可调区：模型切换受首次冻结能力版本与摘要约束 */}
       <section className="flex flex-col gap-3">
-        <span className="text-[11px]" style={{ color: "var(--tc-text-muted)" }}>
-          模型：{selectedModel?.model_label ?? "未知"}
-          （只读，受首次冻结能力约束）
-        </span>
+        <SelectField
+          label="模型"
+          value={overrides.model_id}
+          options={capabilities.map((model) => ({
+            id: model.model_id,
+            label: model.model_label,
+          }))}
+          disabled={submitting}
+          onChange={handleModelChange}
+        />
         <SelectField
           label="比例"
           value={overrides.aspect_ratio}
@@ -506,6 +569,7 @@ function SelectField({
         {label}
       </label>
       <select
+        aria-label={label}
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
