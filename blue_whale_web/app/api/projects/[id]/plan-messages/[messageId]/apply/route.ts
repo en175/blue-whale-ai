@@ -69,8 +69,12 @@ export async function POST(
     );
 
     if (result.code === 200 && result.data) {
+      const data = result.data as {
+        scene_card_id?: unknown;
+        first_generation_job_id?: unknown;
+      };
       // 视频分支（T11）：第一阶段成功后最佳努力 Canvas 放置（失败不回滚，pending 交 T14）。
-      const sceneCardId = result.data.scene_card_id;
+      const sceneCardId = data.scene_card_id;
       if (sceneCardId !== undefined && sceneCardId !== null) {
         try {
           await placeSceneCardNode(createCanvasDeps(), id, String(sceneCardId));
@@ -82,7 +86,7 @@ export async function POST(
         }
       }
       // 图片分支（T10）：成功后即时调度首图 job（低延迟；孤儿由 instrumentation 恢复扫描兜底）。
-      const jobId = result.data.first_generation_job_id;
+      const jobId = data.first_generation_job_id;
       if (typeof jobId === "string") {
         const worker = createGenerationWorkerDeps();
         void processJob({

@@ -8,7 +8,7 @@ import {
 const decimalIdSchema = z.string().regex(/^[1-9][0-9]*$/);
 const digestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 
-/** PlanApplicationKind（契约 §9 / CONTEXT）：PlanMessage、PlanApplicationReceipt 与应用事件
+/** PlanApplicationKind（契约 §9 / CONTEXT）：PlanMessage、PlanApplyImageReceipt 与应用事件
  *  共享的应用类型判别字段。
  *  - image_generate：直接生成图片，不创建 SceneCard；
  *  - scene_card_create：新建 SceneCard 并生成视频；
@@ -204,7 +204,7 @@ export const planApplicationAvailabilitySchema = z.enum([
   "requires_new_plan",
 ]);
 
-/** PlanApplicationReceipt 通用字段（契约 §9 / T10）：媒体感知判别联合的公共部分。
+/** PlanApplyImageReceipt 通用字段（契约 §9 / T10）：媒体感知判别联合的公共部分。
  *  applied_at 为首次成功应用的 ISO 时间戳（at-most-once：换 CommandId 重放也回首次回执）。 */
 const planApplicationReceiptCommon = {
   receipt_id: decimalIdSchema,
@@ -252,9 +252,9 @@ const planApplicationReceiptReplaceSchema = z
   })
   .strict();
 
-/** PlanApplicationReceipt（契约 §9 / T10）：PlanMessage 首次成功应用的权威回执，
+/** PlanApplyImageReceipt（契约 §9 / T10）：PlanMessage 首次成功应用的权威回执，
  *  媒体感知判别联合——图片分支 scene_card_id 恒 null，视频分支预留 scene 字段。 */
-export const planApplicationReceiptSchema = z.discriminatedUnion(
+export const planApplyImageReceiptSchema = z.discriminatedUnion(
   "application_kind",
   [
     planApplicationReceiptImageSchema,
@@ -266,8 +266,8 @@ export const planApplicationReceiptSchema = z.discriminatedUnion(
 export type PlanApplicationAvailability = z.infer<
   typeof planApplicationAvailabilitySchema
 >;
-export type PlanApplicationReceipt = z.infer<
-  typeof planApplicationReceiptSchema
+export type PlanApplyImageReceipt = z.infer<
+  typeof planApplyImageReceiptSchema
 >;
 
 /** 确定性派生 ProviderPromptProjection（AC#7）：纯函数，不改写正文、不调用第二模型。

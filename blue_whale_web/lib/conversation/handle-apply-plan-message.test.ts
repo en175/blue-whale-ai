@@ -17,6 +17,12 @@ import {
   planApplicationRequestHash,
 } from "./handle-apply-plan-message";
 
+/** 图片分支成功响应形状（envelope data 为媒体联合，测试内窄化）。 */
+type ImageApplyData = {
+  receipt: { application_kind: string; scene_card_id: string | null };
+  first_generation_job_id: string;
+};
+
 function deps(result: unknown): PlanApplicationRepo {
   return {
     applyPlanMessage: vi.fn().mockResolvedValue(result),
@@ -231,8 +237,9 @@ describe("handleApplyPlanMessage（契约 §9 / IK67H8 图片分支）", () => {
       }),
     );
     expect(result.code).toBe(200);
-    expect(result.data?.first_generation_job_id).toBe("200");
-    expect(result.data?.receipt).toMatchObject({
+    const data = result.data as ImageApplyData;
+    expect(data.first_generation_job_id).toBe("200");
+    expect(data.receipt).toMatchObject({
       application_kind: "image_generate",
       scene_card_id: null,
     });
@@ -253,7 +260,7 @@ describe("handleApplyPlanMessage（契约 §9 / IK67H8 图片分支）", () => {
       }),
     );
     expect(result.code).toBe(200);
-    expect(result.data?.first_generation_job_id).toBe("200");
+    expect((result.data as ImageApplyData).first_generation_job_id).toBe("200");
   });
 
   it("already_applied_image → ok（at-most-once 回首次）", async () => {
@@ -270,7 +277,7 @@ describe("handleApplyPlanMessage（契约 §9 / IK67H8 图片分支）", () => {
       }),
     );
     expect(result.code).toBe(200);
-    expect(result.data?.first_generation_job_id).toBe("200");
+    expect((result.data as ImageApplyData).first_generation_job_id).toBe("200");
   });
 
   it("blocked_requires_new_plan（素材失效）→ 100202", async () => {

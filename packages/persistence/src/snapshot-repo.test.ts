@@ -296,7 +296,6 @@ describe("SnapshotRepo.loadConversationState", () => {
       generation_model_capability: {
         findMany: vi.fn().mockResolvedValue([]),
       },
-      scene_cards: { findMany: vi.fn().mockResolvedValue([]) },
       plan_application_receipts: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaClient;
 

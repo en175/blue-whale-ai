@@ -80,7 +80,7 @@ export {
   providerPromptProjectionSchema,
   providerPromptAssetSchema,
   capabilitySnapshotVersionSchema,
-  planApplicationReceiptSchema,
+  planApplyImageReceiptSchema,
   planApplicationAvailabilitySchema,
   deriveProviderPromptProjection,
   type PlanApplicationKind,
@@ -92,7 +92,7 @@ export {
   type ProviderPromptAsset,
   type ProviderPromptProjection,
   type CapabilitySnapshotVersion,
-  type PlanApplicationReceipt,
+  type PlanApplyImageReceipt,
   type PlanApplicationAvailability,
 } from "./plan-message.js";
 export {
