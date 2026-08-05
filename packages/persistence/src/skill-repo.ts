@@ -30,6 +30,8 @@ export interface SkillPage<T> {
   total: number;
   size: number;
   current: number;
+  /** 总页数 = ceil(total / size)。前端 hasMore 判定依赖此字段（对齐 MyBatis-Plus Page）。 */
+  pages: number;
 }
 
 export interface SkillRepo {
@@ -138,6 +140,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         total,
         size: q.pageSize,
         current: q.pageNum,
+        pages: Math.ceil(total / q.pageSize),
       };
     },
 
@@ -153,7 +156,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         }),
       ]);
       if (rels.length === 0) {
-        return { records: [], total, size: q.pageSize, current: q.pageNum };
+        return { records: [], total, size: q.pageSize, current: q.pageNum, pages: Math.ceil(total / q.pageSize) };
       }
 
       // 批量 join skill 快照（排除 content），再批量 creative 映射。
@@ -189,6 +192,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         total,
         size: q.pageSize,
         current: q.pageNum,
+        pages: Math.ceil(total / q.pageSize),
       };
     },
 
