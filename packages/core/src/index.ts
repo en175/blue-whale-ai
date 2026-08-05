@@ -49,6 +49,12 @@ export {
   type NewApiVideoInput,
   type NewApiVideoSubmission,
   type NewApiVideoTask,
+  type NewApiAdminManageUserInput,
+  type NewApiAdminTopUpRow,
+  type NewApiAdminUserRow,
+  type NewApiLogRow,
+  type NewApiLogStat,
+  type NewApiPageInfo,
 } from "./new-api-client.js";
 export {
   issueAccessToken,

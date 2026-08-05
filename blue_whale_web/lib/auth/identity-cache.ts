@@ -2,6 +2,7 @@ export type CachedIdentity = {
   userId: string;
   status: "enabled";
   isAdmin: boolean;
+  username: string;
   expiresAt: number;
 };
 
@@ -44,6 +45,7 @@ export function createIdentityCache({
         userId: identity.userId,
         status: identity.status,
         isAdmin: identity.isAdmin,
+        username: identity.username,
         expiresAt: now() + ttlMs,
       });
 
