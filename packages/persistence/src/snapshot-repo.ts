@@ -13,7 +13,7 @@ import {
 
 import { publicGenerationInput } from "./generation-input.js";
 import { classifyMentionAvailability } from "./mention-availability.js";
-import { capabilityDigest } from "./capability-digest.js";
+import { loadPlanApplicationFacts } from "./plan-application-facts.js";
 
 /** Snapshot 读路径的 job + asset 聚合 db port（Prisma-backed）。
  *  对齐 Java SnapshotService 项目级 GenerationJob 与 Asset 引用读取：
@@ -272,6 +272,7 @@ const [messages, mentionRows, runs, inputRequests, planMessageRows, capabilityRo
               capability_type: true,
               version: true,
               enabled: true,
+              is_delete: true,
               supported_sizes: true,
               supported_aspect_ratios: true,
               supported_durations: true,
@@ -434,47 +435,24 @@ const [messages, mentionRows, runs, inputRequests, planMessageRows, capabilityRo
           const derivedReferences = (
             plan.derived_references ?? []
           ) as DerivedReference[];
-          let mentionUnavailable = false;
-          for (const ref of derivedReferences) {
-            if (ref.type !== "asset") continue;
-            const mention = mentionById.get(ref.mention_id);
-            if (!mention) {
-              mentionUnavailable = true;
-              break;
-            }
-            const { availability } = classifyMentionAvailability({
-              type: "asset",
-              targetVersion: mention.target_version,
-              acceptedUserId: mention.accepted_user_id,
-              asset: assetById.get(mention.target_id.toString()),
-              projectId: pid,
-              userId: uid,
-            });
-            if (availability === "unavailable") {
-              mentionUnavailable = true;
-              break;
-            }
-          }
           const snapshot =
             plan.capability_snapshot_version as CapabilitySnapshotVersion;
           const cap = capabilityByKey.get(
             `${snapshot.model_id}:${snapshot.capability_type}`,
           );
-          let capabilityDrifted = true;
-          if (cap && cap.enabled) {
-            capabilityDrifted =
-              cap.version !== snapshot.row_version ||
-              capabilityDigest({
-                supported_sizes: cap.supported_sizes,
-                supported_aspect_ratios: cap.supported_aspect_ratios,
-                supported_durations: cap.supported_durations,
-                supported_formats: cap.supported_formats,
-                default_size: cap.default_size,
-                default_format: cap.default_format,
-                default_aspect_ratio: cap.default_aspect_ratio,
-                default_duration: cap.default_duration,
-              }) !== snapshot.digest;
-          }
+          // 事实采集收敛到共用 helper：读路径 missingMention="unavailable" 保留原义——
+          // 遍历冻结引用列表，取不到 mention 即判失效，前端展示「需重新计划」。
+          const { mentionUnavailable, capabilityDrifted } =
+            loadPlanApplicationFacts({
+              derivedReferences,
+              mentionFacts: mentionById,
+              assetById,
+              missingMention: "unavailable",
+              projectId: pid,
+              userId: uid,
+              capabilitySnapshot: snapshot,
+              currentCapability: cap,
+            });
           // snapshot 不查余额（balanceSufficient null）→ 不会是 retryable_blocked。
           const availability = classifyPlanApplicationAvailability({
             mentionUnavailable,

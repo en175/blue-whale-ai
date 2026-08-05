@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import { createSnapshotRepo } from "./snapshot-repo.js";
+import { capabilityDigest } from "./capability-digest.js";
 
 describe("SnapshotRepo.loadJobsAndAssets", () => {
   it("does not expose the encrypted provider credential in snapshot input", async () => {
@@ -349,6 +350,201 @@ describe("SnapshotRepo.loadConversationState", () => {
         status: true,
         is_delete: true,
       },
+    });
+  });
+
+  // —— plan_messages.application_availability 投影（IK6MZU）：复用 loadPlanApplicationFacts，
+  //    读路径 missingMention="unavailable"，不查余额（恒 available/requires_new_plan）。——
+  describe("plan_messages.application_availability 投影（IK6MZU）", () => {
+    const CAP_FIELDS = {
+      supported_sizes: ["1024x1024"],
+      supported_aspect_ratios: ["1:1"],
+      supported_durations: null,
+      supported_formats: ["png"],
+      default_size: "1024x1024",
+      default_format: "png",
+      default_aspect_ratio: "1:1",
+      default_duration: null,
+    };
+    const SNAPSHOT = {
+      schema_version: 1,
+      capability_type: "image",
+      model_id: "doubao-seedream-5.0-lite",
+      provider_id: "doubao",
+      row_version: 3,
+      digest: capabilityDigest(CAP_FIELDS),
+    };
+
+    function buildPlanMessage(derivedReferences: unknown[]) {
+      return {
+        message_id: 500n,
+        conversation_id: 50n,
+        agent_run_id: 9n,
+        project_id: 42n,
+        ordinal: 1,
+        total_in_batch: 1,
+        sequence_label: null,
+        application_kind: "image_generate",
+        target_scene_card_mention_id: null,
+        base_scene_card_version: null,
+        content_markdown: "一只蓝鲸",
+        derived_references: derivedReferences,
+        frozen_generation_parameters: {},
+        capability_snapshot_version: SNAPSHOT,
+        provider_prompt_projection: {},
+        base_plan_message_id: null,
+        source_plan_message_id: null,
+        applied_at: null,
+        first_generation_job_id: null,
+        gmt_create: new Date("2026-08-05T00:00:00.000Z"),
+      };
+    }
+
+    function matchingCapability(overrides: Record<string, unknown> = {}) {
+      return {
+        model_id: "doubao-seedream-5.0-lite",
+        capability_type: "image",
+        version: 3,
+        enabled: true,
+        is_delete: false,
+        ...CAP_FIELDS,
+        ...overrides,
+      };
+    }
+
+    function assetRow(id: bigint, overrides: Record<string, unknown> = {}) {
+      return {
+        id,
+        user_id: 100n,
+        project_id: 42n,
+        status: "normal",
+        is_delete: false,
+        ...overrides,
+      };
+    }
+
+    function mentionRow(id: bigint, targetId: bigint) {
+      return {
+        id,
+        message_id: 8n,
+        accepted_user_id: 100n,
+        mention_seq: 0,
+        mention_type: "asset",
+        target_id: targetId,
+        target_version: null,
+        display_name: "素材",
+        snapshot: {},
+      };
+    }
+
+    function buildPrisma(opts: {
+      planMessages: unknown[];
+      capabilityRows?: unknown[];
+      mentions?: unknown[];
+      assets?: unknown[];
+    }) {
+      return {
+        conversation_messages: { findMany: vi.fn().mockResolvedValue([]) },
+        conversation_message_mentions: {
+          findMany: vi.fn().mockResolvedValue(opts.mentions ?? []),
+        },
+        agent_runs: { findMany: vi.fn().mockResolvedValue([]) },
+        user_input_requests: { findMany: vi.fn().mockResolvedValue([]) },
+        plan_messages: {
+          findMany: vi.fn().mockResolvedValue(opts.planMessages),
+        },
+        generation_model_capability: {
+          findMany: vi.fn().mockResolvedValue(
+            opts.capabilityRows ?? [matchingCapability()],
+          ),
+        },
+        project_events: {
+          aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 0n } }),
+        },
+        scene_cards: { findMany: vi.fn().mockResolvedValue([]) },
+        plan_application_receipts: { findMany: vi.fn().mockResolvedValue([]) },
+        assets: { findMany: vi.fn().mockResolvedValue(opts.assets ?? []) },
+      } as unknown as PrismaClient;
+    }
+
+    async function firstAvailability(prisma: PrismaClient) {
+      const state = await createSnapshotRepo(prisma).loadConversationState(
+        "42",
+        "100",
+      );
+      return state.plan_messages[0]?.application_availability ?? "MISSING";
+    }
+
+    it("asset 状态 normal + 能力 version/digest 匹配 → available", async () => {
+      const prisma = buildPrisma({
+        planMessages: [buildPlanMessage([{ mention_id: "101", type: "asset" }])],
+        mentions: [mentionRow(101n, 1n)],
+        assets: [assetRow(1n)],
+      });
+      expect(await firstAvailability(prisma)).toBe("available");
+    });
+
+    it("derived mention_id 在 mentionRows 缺失 → requires_new_plan（读路径 unavailable 语义）", async () => {
+      const prisma = buildPrisma({
+        planMessages: [buildPlanMessage([{ mention_id: "404", type: "asset" }])],
+        mentions: [], // 404 行缺失 → helper 判失效
+      });
+      expect(await firstAvailability(prisma)).toBe("requires_new_plan");
+    });
+
+    it("asset 已删（is_delete）→ requires_new_plan", async () => {
+      const prisma = buildPrisma({
+        planMessages: [buildPlanMessage([{ mention_id: "101", type: "asset" }])],
+        mentions: [mentionRow(101n, 1n)],
+        assets: [assetRow(1n, { is_delete: true })],
+      });
+      expect(await firstAvailability(prisma)).toBe("requires_new_plan");
+    });
+
+    it("能力行缺失 → requires_new_plan", async () => {
+      const prisma = buildPrisma({
+        planMessages: [buildPlanMessage([{ mention_id: "101", type: "asset" }])],
+        capabilityRows: [],
+        mentions: [mentionRow(101n, 1n)],
+        assets: [assetRow(1n)],
+      });
+      expect(await firstAvailability(prisma)).toBe("requires_new_plan");
+    });
+
+    it("能力 row_version 变 → requires_new_plan", async () => {
+      const prisma = buildPrisma({
+        planMessages: [buildPlanMessage([{ mention_id: "101", type: "asset" }])],
+        capabilityRows: [matchingCapability({ version: 99 })],
+        mentions: [mentionRow(101n, 1n)],
+        assets: [assetRow(1n)],
+      });
+      expect(await firstAvailability(prisma)).toBe("requires_new_plan");
+    });
+
+    it("能力被禁用（enabled=false）→ requires_new_plan", async () => {
+      const prisma = buildPrisma({
+        planMessages: [buildPlanMessage([{ mention_id: "101", type: "asset" }])],
+        capabilityRows: [matchingCapability({ enabled: false })],
+        mentions: [mentionRow(101n, 1n)],
+        assets: [assetRow(1n)],
+      });
+      expect(await firstAvailability(prisma)).toBe("requires_new_plan");
+    });
+
+    it("scene_card 引用跳过（不参与判定）→ available", async () => {
+      const prisma = buildPrisma({
+        planMessages: [buildPlanMessage([{ mention_id: "555", type: "scene_card" }])],
+        // 555 mention 不存在也无所谓——scene_card 引用被 helper 跳过
+      });
+      expect(await firstAvailability(prisma)).toBe("available");
+    });
+
+    it("读路径不查余额：投影恒为 available | requires_new_plan", async () => {
+      const prisma = buildPrisma({
+        planMessages: [buildPlanMessage([])],
+      });
+      const availability = await firstAvailability(prisma);
+      expect(["available", "requires_new_plan"]).toContain(availability);
     });
   });
 });
