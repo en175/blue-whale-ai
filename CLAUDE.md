@@ -13,6 +13,7 @@
 
 | 场景（碰这类操作前 Must Read） | 规则文件（加载方式） |
 | --- | --- |
+| 启动/调试本地服务（起环境、连数据库） | `.qoder/skills/start-local-services/SKILL.md`（`.claude`/`.zcode` 为同步副本）+ `docs/adr/0064-testsite-db-access-governance.md`（红线：本地配置禁现测试站连接串，应急只走 `scripts/tunnel-testsite-db.sh`） |
 | 代码理解（查结构 / 调用链 / 架构） | `docs/agents/code-intelligence.md`（渐进式） |
 | Gitee 工作流（提交/分支/PR/发布/worktree） | `docs/agents/git-workflow.md`（渐进式） |
 | Gitee Issue / MCP 工具操作 | `.claude/rules/issue-tracker.md`（常驻） |
