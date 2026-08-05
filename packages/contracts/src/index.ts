@@ -19,6 +19,7 @@ export {
   PLAN_APPLICATION_KIND_UNSUPPORTED_CODE,
   PLAN_APPLICATION_CAPABILITY_DRIFT_CODE,
   PLAN_APPLICATION_ALREADY_APPLIED_CODE,
+  SCENE_CARD_VERSION_CONFLICT_CODE,
   type ResultEnvelope,
 } from "./result.js";
 export {
@@ -102,3 +103,9 @@ export {
   type SceneCardGenerationRecordStatus,
   type SceneCardGenerationRecord,
 } from "./plan-application.js";
+export {
+  sceneCardRegenerationRequestSchema,
+  sceneCardGenerationRecordViewSchema,
+  type SceneCardRegenerationRequest,
+  type SceneCardGenerationRecordView,
+} from "./scene-card-generation.js";

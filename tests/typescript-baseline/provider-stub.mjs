@@ -168,11 +168,14 @@ const server = createServer(async (request, response) => {
     return sendJson(response, 200, { status: "ready" });
   }
 
-  if (
-    request.method === "GET" &&
-    url.pathname === "/__acceptance/requests"
-  ) {
-    return sendJson(response, 200, { requests });
+  if (url.pathname === "/__acceptance/requests") {
+    if (request.method === "GET") {
+      return sendJson(response, 200, { requests });
+    }
+    if (request.method === "DELETE") {
+      requests.length = 0;
+      return sendJson(response, 200, { requests });
+    }
   }
 
   if (url.pathname === "/__acceptance/scenarios") {

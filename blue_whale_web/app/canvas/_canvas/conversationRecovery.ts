@@ -123,6 +123,49 @@ export function projectSnapshotToCanvasNodes(
   return nodes;
 }
 
+export type SceneCardView = {
+  scene_card_id: WireInteger;
+  title: string;
+  summary: string | null;
+  content_markdown: string;
+  version: number;
+};
+
+/** SceneCard 列表投影（IK67HB/T13）：从 snapshot 派生可展示的视频场景卡，按 scene_card_id 升序。 */
+export function projectSnapshotToSceneCards(
+  snapshot: ProjectSnapshot,
+): SceneCardView[] {
+  return (snapshot.scene_cards ?? [])
+    .filter(isSceneCard)
+    .sort((left, right) =>
+      compareWireIntegers(left.scene_card_id, right.scene_card_id),
+    )
+    .map<SceneCardView>((card) => ({
+      scene_card_id: card.scene_card_id,
+      title: card.title,
+      summary: typeof card.summary === "string" ? card.summary : null,
+      content_markdown: card.content_markdown,
+      version: card.version,
+    }));
+}
+
+function isSceneCard(value: Record<string, unknown>): value is Record<
+  string,
+  unknown
+> & {
+  scene_card_id: WireInteger;
+  title: string;
+  content_markdown: string;
+  version: number;
+} {
+  return (
+    isWireInteger(value.scene_card_id) &&
+    typeof value.title === "string" &&
+    typeof value.content_markdown === "string" &&
+    typeof value.version === "number"
+  );
+}
+
 function generationAsset(
   snapshot: ProjectSnapshot,
   output: Record<string, unknown>,

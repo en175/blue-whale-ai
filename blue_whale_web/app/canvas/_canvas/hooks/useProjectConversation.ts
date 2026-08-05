@@ -57,6 +57,7 @@ export function useProjectConversation(
     ReadonlyArray<ProvisionalDeliveryView>
   >([]);
   const snapshotRef = useRef<ProjectSnapshot | null>(null);
+  const [snapshot, setSnapshot] = useState<ProjectSnapshot | null>(null);
   // 网络结果未知/失败后用相同内容重试必须复用原键（CONTEXT.md CommandId 语义），
   // 防止首次请求实际已被服务端接纳时重复创建消息。
   const pendingAttemptRef = useRef<PendingAttempt | null>(null);
@@ -69,6 +70,7 @@ export function useProjectConversation(
     // 项目切换/离线时必须立即清掉上一项目的消息，防止串扰（同步清空是权威投影的一部分）
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMessages([]);
+    setSnapshot(null);
 
     setAnswerableActive(false);
     setAgentRunDisplay(null);
@@ -84,6 +86,7 @@ export function useProjectConversation(
         if (state.deleted) return;
         snapshotRef.current = state.snapshot;
         setMessages(projectSnapshotToChatMessages(state.snapshot));
+        setSnapshot(state.snapshot);
         setAnswerableActive(
           deriveAnswerableClarification(state.snapshot) !== null,
         );
@@ -214,6 +217,7 @@ export function useProjectConversation(
 
   return {
     messages,
+    snapshot,
     sendMessage,
     answerableActive,
     agentRunDisplay,

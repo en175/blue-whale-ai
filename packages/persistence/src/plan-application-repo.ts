@@ -42,7 +42,7 @@ export interface PlanApplicationRepo {
   ): Promise<ApplySceneCardCreateResult>;
 }
 
-interface CapabilitySnapshot {
+export interface CapabilitySnapshot {
   schema_version: number;
   capability_type: string;
   model_id: string;
@@ -51,7 +51,7 @@ interface CapabilitySnapshot {
   digest: string;
 }
 
-interface DerivedReference {
+export interface DerivedReference {
   mention_id: string;
   mention_seq: number;
   type: "asset" | "scene_card";
@@ -103,7 +103,7 @@ function sceneCardTitle(
 
 /** AC#4：应用前重新验证冻结素材（CONTEXT L223）。derived_reference.mention_id 指向
  *  conversation_message_mentions.id，其 target_id 指向 asset/scene_card；任一目标被删/失效则零写入。 */
-async function validateDerivedReferences(
+export async function validateDerivedReferences(
   tx: Prisma.TransactionClient,
   projectId: bigint,
   derivedReferences: DerivedReference[],

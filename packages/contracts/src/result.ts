@@ -15,6 +15,8 @@ export const PLAN_APPLICATION_PLAN_NOT_FOUND_CODE = 100401; // PlanMessage 不�
 export const PLAN_APPLICATION_KIND_UNSUPPORTED_CODE = 100402; // PlanMessage 的 application_kind 当前不支持应用（如图片分支未实现）
 export const PLAN_APPLICATION_CAPABILITY_DRIFT_CODE = 100403; // 冻结能力快照与当前能力版本不一致（CONTEXT requires_new_plan）
 export const PLAN_APPLICATION_ALREADY_APPLIED_CODE = 100404; // 该 PlanMessage 已被成功应用过，不可重复应用
+// SceneCard 生成编辑器（IK67HB / T13）：版本冲突零写入保留草稿（CONTEXT L84-89 乐观并发）
+export const SCENE_CARD_VERSION_CONFLICT_CODE = 100405; // base 版本与当前 SceneCard/Preset 版本不一致
 
 export interface ResultEnvelope<T> {
   code: number;

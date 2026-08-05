@@ -23,6 +23,10 @@ export type ProjectSnapshot = {
   conversation_messages: Array<Record<string, unknown>>;
   agent_runs: Array<Record<string, unknown>>;
   generation_jobs: Array<Record<string, unknown>>;
+  /** 已创建的视频场景卡（IK67H9/T11，IK67HB/T13 编辑器入口）。可选仅为兼容历史测试 fixture，运行时后端总返回。 */
+  scene_cards?: Array<Record<string, unknown>>;
+  /** SceneCard 生成记录（IK67HB/T13）：generation origins/summaries。 */
+  scene_card_generation_records?: Array<Record<string, unknown>>;
   assets: Record<
     string,
     { asset_id: number | string; type: string; access_url: string }
@@ -359,6 +363,26 @@ export function applyProductEvent(
         generation_jobs: applyGenerationJobOutputEvent(
           snapshot.generation_jobs,
           event.payload,
+        ),
+      };
+    } else if (event.event_type === "scene_card.preset_updated") {
+      // IK67HB/T13：Preset version+1（SceneCard 自身版本不变），合并 payload 供编辑器冲突检测。
+      snapshot = {
+        ...snapshot,
+        scene_cards: upsertFact(
+          snapshot.scene_cards ?? [],
+          event.payload,
+          "scene_card_id",
+        ),
+      };
+    } else if (event.event_type === "scene_card_generation_record.created") {
+      // IK67HB/T13：新生成记录并入列表（first_generation_job_id + 来源 PlanMessage）。
+      snapshot = {
+        ...snapshot,
+        scene_card_generation_records: upsertFact(
+          snapshot.scene_card_generation_records ?? [],
+          event.payload,
+          "record_id",
         ),
       };
     } else if (

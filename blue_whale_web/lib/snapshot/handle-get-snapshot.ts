@@ -47,6 +47,8 @@ export interface SnapshotData {
   scene_cards: readonly unknown[];
   /** 成功应用 PlanMessage 的不可变回执（IK67H9，T11）。 */
   plan_applications: readonly unknown[];
+  /** SceneCard 生成记录（IK67HB，T13）：generation origins/summaries 恢复权威。 */
+  scene_card_generation_records: readonly unknown[];
   generation_jobs: SnapshotGenerationJob[];
   assets: Record<string, SnapshotAssetSummary>;
   high_watermark_cursor: WireInteger;
@@ -188,6 +190,14 @@ export async function handleGetSnapshot(
           : wireInteger(receipt.scene_card_id),
       first_generation_job_id: wireInteger(receipt.first_generation_job_id),
     })),
+    scene_card_generation_records:
+      conversation.scene_card_generation_records.map((record) => ({
+        ...record,
+        record_id: wireInteger(record.record_id),
+        scene_card_id: wireInteger(record.scene_card_id),
+        first_generation_job_id: wireInteger(record.first_generation_job_id),
+        plan_message_id: wireInteger(record.plan_message_id),
+      })),
     generation_jobs: generation_jobs.map(toWireJob),
     assets: assetMap,
     high_watermark_cursor: wireInteger(conversation.high_watermark_cursor),
