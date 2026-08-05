@@ -44,6 +44,7 @@ export interface SkillLibraryView {
   cover_url: string | null;
   source: string;
   asset_domain: "official";
+  skill_code: string | null;
   added: boolean;
   category: string;
   usage_count: number;
@@ -57,6 +58,7 @@ export interface SkillMineView {
   cover_url: string | null;
   source: string | null;
   asset_domain: "official" | "personal";
+  skill_code: string | null;
 }
 
 /** 个人技能创建结果（IK60WU）。 */
@@ -273,6 +275,7 @@ type SkillRow = {
   description: string | null;
   cover_url: string | null;
   source: string;
+  skill_code: string | null;
   category: string;
   sort_order: number;
   gmt_create: Date;
@@ -434,6 +437,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
           description: true,
           cover_url: true,
           source: true,
+          skill_code: true,
           category: true,
           sort_order: true,
           gmt_create: true,
@@ -501,6 +505,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
             description,
             cover_url: row.cover_url,
             source: row.source,
+            skill_code: row.skill_code,
             asset_domain: "official" as const,
             added: mineIds.has(row.id.toString()),
             category: row.category,
@@ -531,6 +536,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
           description: true,
           cover_url: true,
           source: true,
+          skill_code: true,
         },
       });
       const skillMap = new Map(skills.map((s) => [s.id.toString(), s]));
@@ -547,6 +553,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
           description: s?.description ?? null,
           cover_url: s?.cover_url ?? null,
           source: s?.source ?? null,
+          skill_code: s?.skill_code ?? null,
           asset_domain: "official",
           sort_time: r.gmt_create,
         };
@@ -567,6 +574,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
           description: p.description,
           cover_url: null,
           source: null,
+          skill_code: null,
           asset_domain: "personal",
           sort_time: p.gmt_create,
         }));

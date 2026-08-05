@@ -475,6 +475,7 @@ model project_events {
 model skill {
   id              BigInt   @id @default(autoincrement())
   name            String   @unique(map: "uk_name") @db.VarChar(255)
+  skill_code      String?  @unique(map: "uk_skill_code") @db.VarChar(32)
   description     String?  @db.Text
   content         String?  @db.LongText
   source          String   @default("official") @db.VarChar(32)

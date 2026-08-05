@@ -1368,4 +1368,38 @@ describe("SkillRepo.checkPersonalNameAvailable / createPersonalSkill 名称校�
       "周报助手",
     );
   });
+
+  it("listLibrary records 含 skill_code", async () => {
+    const prisma = {
+      skill: {
+        count: vi.fn().mockResolvedValue(1),
+        findMany: vi.fn().mockResolvedValue([
+          { id: 1n, name: "技能A", description: null, cover_url: null, source: "official", skill_code: "cn01" },
+        ]),
+      },
+      user_skill: { findMany: vi.fn().mockResolvedValue([]) },
+      $queryRawUnsafe: vi.fn().mockResolvedValue([]),
+    } as unknown as PrismaClient;
+
+    const page = await createSkillRepo(prisma).listLibrary("100", { pageNum: 1, pageSize: 50 });
+    expect(page.records[0]).toMatchObject({ skill_code: "cn01" });
+  });
+
+  it("listMine records 含 skill_code（skill 快照存在时）", async () => {
+    const prisma = {
+      skill: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 1n, name: "技能A", description: null, cover_url: null, source: "official", skill_code: "cn01" },
+        ]),
+      },
+      user_skill: {
+        count: vi.fn().mockResolvedValue(1),
+        findMany: vi.fn().mockResolvedValue([{ skill_id: 1n, auto: 1 }]),
+      },
+      $queryRawUnsafe: vi.fn().mockResolvedValue([]),
+    } as unknown as PrismaClient;
+
+    const page = await createSkillRepo(prisma).listMine("100", { pageNum: 1, pageSize: 50 });
+    expect(page.records[0]).toMatchObject({ skill_code: "cn01" });
+  });
 });
