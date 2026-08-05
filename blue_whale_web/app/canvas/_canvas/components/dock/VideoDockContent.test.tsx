@@ -173,4 +173,31 @@ describe("VideoDockContent references", () => {
     expect(screen.getAllByRole("option")).toHaveLength(1);
     expect(screen.getByRole("option", { name: "1x" })).toBeInTheDocument();
   });
+
+  it("media 非空时缩略图行末尾显示『添加图片』并弹上传来源菜单", () => {
+    render(
+      <VideoDockContent
+        {...props({
+          media: [
+            {
+              id: "m1",
+              type: "image",
+              name: "参考图.png",
+              src: "blob:preview-1",
+            },
+          ],
+          onRemoveMedia: vi.fn(),
+        })}
+      />,
+    );
+
+    const addBtn = screen.getByRole("button", { name: "添加图片" });
+    expect(addBtn).toBeInTheDocument();
+    fireEvent.click(addBtn);
+    expect(
+      screen.getByRole("menu", { name: "上传来源" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "从画布选择" }));
+    expect(screen.getByRole("button", { name: "添加图片" })).toBeInTheDocument();
+  });
 });
