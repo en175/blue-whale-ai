@@ -1336,7 +1336,7 @@ test("普通问答保持普通 Conversation，不进入 PlanPhase（IK67GY）", 
   assert.equal(advanceCount, "1", "服务=持久化事实=普通问答只应有一个推进");
 });
 
-test("创作对齐：逐问澄清→复述确认→同意完成，同一 Run 多个 Advance（IK67GY）", async () => {
+test("创作对齐：缺信息仍澄清→复述后立即出计划，同一 Run 多个 Advance（IK6QHI）", async () => {
   const { token, projectId, suffix } = await registerAndCreateProject("alignflow");
 
   const first = await sendMessage(projectId, token, "创作：一张海报", suffix);
@@ -1347,8 +1347,24 @@ test("创作对齐：逐问澄清→复述确认→同意完成，同一 Run 多
   assert.equal(subject.run.stage, "alignment", "服务=Snapshot 事实=澄清阶段应为 alignment");
   assert.equal(subject.request.question, SUBJECT_QUESTION, "服务=Snapshot 事实=应先问主体");
 
-  await sendMessage(projectId, token, "主体：蓝鲸", suffix, {
+  await sendMessage(projectId, token, "立即出计划", suffix, {
     replyToInputRequestId: subject.request.input_request_id,
+  });
+  const stillSubject = await awaitClarification(projectId, token, "缺少主体时立即出计划");
+  assert.equal(stillSubject.run.agent_run_id, runId, "服务=持久化事实=澄清应沿用同一 Run");
+  assert.equal(stillSubject.run.stage, "alignment", "服务=Snapshot 事实=缺少必需信息时仍应对齐");
+  assert.equal(stillSubject.request.question, SUBJECT_QUESTION, "服务=agent-worker 事实=立即出计划不得绕过缺失主体");
+  const missingSnapshot = await fetchSnapshot(projectId, token);
+  assert.equal(
+    missingSnapshot.plan_messages.filter(
+      (item) => String(item.agent_run_id) === String(runId),
+    ).length,
+    0,
+    "服务=Snapshot 事实=缺少必需信息时不得提交 PlanMessage",
+  );
+
+  await sendMessage(projectId, token, "主体：蓝鲸", suffix, {
+    replyToInputRequestId: stillSubject.request.input_request_id,
   });
   const outcome = await awaitClarification(projectId, token, "预期");
   assert.equal(outcome.run.agent_run_id, runId, "服务=持久化事实=回答应继续同一 Run");
@@ -1369,27 +1385,34 @@ test("创作对齐：逐问澄清→复述确认→同意完成，同一 Run 多
     confirmAssistant.at(-1)?.content.startsWith("需求复述：主体「蓝鲸」，预期「极简海报」"),
     "服务=agent-worker 事实=提交前必须复述已对齐需求",
   );
+  const beforeImmediateSnapshot = await fetchSnapshot(projectId, token);
+  const textAssistantCountBefore = beforeImmediateSnapshot.conversation_messages.filter(
+    (message) => message.role === "assistant" && message.content_type === "text",
+  ).length;
 
   await sendMessage(projectId, token, "立即出计划", suffix, {
     replyToInputRequestId: confirm.request.input_request_id,
   });
-  const stillConfirm = await awaitClarification(projectId, token, "不绕过确认");
-  assert.equal(
-    stillConfirm.run.stage,
-    "awaiting_final_confirmation",
-    "服务=agent-worker 事实=立即出计划不得绕过最终确认",
-  );
-
-  await sendMessage(projectId, token, "同意", suffix, {
-    replyToInputRequestId: stillConfirm.request.input_request_id,
-  });
   const run = await waitForAgentRunStatus(projectId, token, ["completed"], 30_000);
   assert.equal(run.agent_run_id, runId, "服务=持久化事实=完成仍应是同一 Run");
-  const assistants = await assistantMessages(projectId, token);
+  const completedSnapshot = await fetchSnapshot(projectId, token);
+  const plans = completedSnapshot.plan_messages.filter(
+    (item) => String(item.agent_run_id) === String(runId),
+  );
+  assert.equal(plans.length, 1, "服务=Snapshot 事实=立即出计划应只提交一条 PlanMessage");
+  assert.ok(plans[0].content_markdown.includes("主体「蓝鲸」"));
+  assert.ok(plans[0].content_markdown.includes("预期「极简海报」"));
+  const planMessage = completedSnapshot.conversation_messages.find(
+    (message) => String(message.message_id) === String(plans[0].message_id),
+  );
+  assert.equal(planMessage?.content_type, "plan_message", "服务=Snapshot 事实=正式提交事实应为 PlanMessage");
+  assert.equal(run.active_input_request, null, "服务=Snapshot 事实=完成后不得保留活动澄清请求");
   assert.equal(
-    assistants.at(-1)?.content,
-    "已完成需求对齐：主体「蓝鲸」，预期「极简海报」。",
-    "服务=agent-worker 事实=同意后应完成对齐",
+    completedSnapshot.conversation_messages.filter(
+      (message) => message.role === "assistant" && message.content_type === "text",
+    ).length,
+    textAssistantCountBefore,
+    "服务=Snapshot 事实=正式提交后不得新增完成文本消息",
   );
 
   const ordinals = mysqlQuery(
@@ -1402,7 +1425,7 @@ test("创作对齐：逐问澄清→复述确认→同意完成，同一 Run 多
   assert.equal(commitCount, "5", "服务=持久化事实=RunCommit 唯一性按 AgentAdvance 生效");
 });
 
-test("你决定补默认值，不受支持的要求继续澄清而不静默降级（IK67GY）", async () => {
+test("你决定补默认值，不受支持时立即出计划仍继续澄清（IK6QHI）", async () => {
   const { token, projectId, suffix } = await registerAndCreateProject("decideflow");
 
   const first = await sendMessage(projectId, token, "创作：一张海报", suffix);
@@ -1430,13 +1453,21 @@ test("你决定补默认值，不受支持的要求继续澄清而不静默降�
     "服务=agent-worker 事实=不受支持的要求必须继续澄清",
   );
 
-  await sendMessage(projectId, token, "你决定", suffix, {
+  await sendMessage(projectId, token, "立即出计划", suffix, {
     replyToInputRequestId: unsupported.request.input_request_id,
   });
-  const stillUnsupported = await awaitClarification(projectId, token, "你决定不降级");
+  const stillUnsupported = await awaitClarification(projectId, token, "立即出计划不降级");
   assert.ok(
     stillUnsupported.request.question.includes("立体渲染」目前不受支持"),
-    "服务=agent-worker 事实=你决定不得移除不受支持的要求",
+    "服务=agent-worker 事实=立即出计划不得移除不受支持的要求",
+  );
+  const unsupportedSnapshot = await fetchSnapshot(projectId, token);
+  assert.equal(
+    unsupportedSnapshot.plan_messages.filter(
+      (item) => String(item.agent_run_id) === String(runId),
+    ).length,
+    0,
+    "服务=Snapshot 事实=存在不受支持要求时不得提交 PlanMessage",
   );
 
   await sendMessage(projectId, token, "预期：动态海报", suffix, {
@@ -1452,17 +1483,34 @@ test("你决定补默认值，不受支持的要求继续澄清而不静默降�
     confirm.request.question === CONFIRM_QUESTION,
     "服务=Snapshot 事实=应请求最终同意",
   );
+  const beforeAgreementSnapshot = await fetchSnapshot(projectId, token);
+  const textAssistantCountBefore = beforeAgreementSnapshot.conversation_messages.filter(
+    (message) => message.role === "assistant" && message.content_type === "text",
+  ).length;
 
   await sendMessage(projectId, token, "同意", suffix, {
     replyToInputRequestId: confirm.request.input_request_id,
   });
   const run = await waitForAgentRunStatus(projectId, token, ["completed"], 30_000);
-  const assistants = await assistantMessages(projectId, token);
-  assert.equal(
-    assistants.at(-1)?.content,
-    "已完成需求对齐：主体「由系统选择的默认主体」，预期「动态海报」。",
-    "服务=agent-worker 事实=默认值与修订后的要求应进入对齐结果",
+  const completedSnapshot = await fetchSnapshot(projectId, token);
+  const plans = completedSnapshot.plan_messages.filter(
+    (item) => String(item.agent_run_id) === String(runId),
   );
+  assert.equal(plans.length, 1, "服务=Snapshot 事实=同意后应只提交一条 PlanMessage");
+  assert.ok(plans[0].content_markdown.includes("主体「由系统选择的默认主体」"));
+  assert.ok(plans[0].content_markdown.includes("预期「动态海报」"));
+  const planMessage = completedSnapshot.conversation_messages.find(
+    (message) => String(message.message_id) === String(plans[0].message_id),
+  );
+  assert.equal(planMessage?.content_type, "plan_message", "服务=Snapshot 事实=正式提交事实应为 PlanMessage");
+  assert.equal(
+    completedSnapshot.conversation_messages.filter(
+      (message) => message.role === "assistant" && message.content_type === "text",
+    ).length,
+    textAssistantCountBefore,
+    "服务=Snapshot 事实=正式提交后不得新增完成文本消息",
+  );
+  assert.equal(run.active_input_request, null, "服务=Snapshot 事实=完成后不得保留活动澄清请求");
   assert.equal(run.agent_run_id, runId, "服务=持久化事实=完成仍应是同一 Run");
 });
 
