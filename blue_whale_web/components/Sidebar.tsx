@@ -51,7 +51,7 @@ export default function Sidebar() {
         <img
           src="/blue_whale.svg"
           alt="Blue-Whale"
-          className="h-5 w-auto"
+          className="h-[27px] w-auto"
         />
       </Link>
       {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
