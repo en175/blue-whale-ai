@@ -7,6 +7,12 @@ import {
   type OutputSlotStatus,
 } from "./generation-output-slot-repo.js";
 
+const CLAIMABLE_JOB_SOURCES = [
+  "bottom_dock",
+  "plan_apply",
+  "storyboard_preview",
+];
+
 /** IK67HE/T14：聚合 record 下全部输出槽状态，回写 SceneCardGenerationRecord.summary_status。
  *  spec §4.4 状态机：全成功→success；部分→partial；全失败→failed；有 pending→generating。
  *  在 worker completeJob/failJob 事务内调用，保证槽位与 record 状态原子一致。 */
@@ -49,6 +55,57 @@ async function syncRecordSummary(
       aggregateVersion: record.version,
       correlationId: `record_${recordId.toString()}`,
       payload: { record_id: recordId.toString(), summary_status: mapped },
+    });
+  }
+}
+
+/** 回写 StoryboardPreview.summary_status（图片路径，IK67HF/T15）：按 first_generation_job_id
+ *  反查预览，聚合该 job 的 output_slots 推进汇总态。与 syncRecordSummary 对偶——视频走 record
+ *  外键（scene_card_generation_record_id），图片 job 不设该外键，故走 first_generation_job_id 反查。 */
+async function syncStoryboardPreviewSummary(
+  tx: Prisma.TransactionClient,
+  jobId: bigint,
+): Promise<void> {
+  const preview = await tx.storyboard_previews.findFirst({
+    where: { first_generation_job_id: jobId, is_delete: 0 },
+    select: { id: true, project_id: true },
+  });
+  if (!preview) return;
+  const slots = await tx.generation_output_slots.findMany({
+    where: { generation_job_id: jobId },
+    select: { slot_index: true, status: true },
+    orderBy: { id: "asc" },
+  });
+  if (slots.length === 0) return;
+  const summary = aggregateSlotStatus(
+    resolveLogicalSlots(
+      slots.map((s) => ({
+        slot_index: s.slot_index,
+        status: s.status as OutputSlotStatus,
+      })),
+    ).map((s) => s.status),
+  );
+  const mapped =
+    summary === "generating"
+      ? "generating"
+      : summary === "partial"
+        ? "partial"
+        : summary === "success"
+          ? "success"
+          : "failed";
+  const updated = await tx.storyboard_previews.update({
+    where: { id: preview.id },
+    data: { summary_status: mapped, version: { increment: 1 } },
+  });
+  if (preview.project_id != null) {
+    await appendProjectEvent(tx, {
+      projectId: preview.project_id.toString(),
+      eventType: "storyboard_preview.summary_changed",
+      aggregateType: "storyboard_preview",
+      aggregateId: preview.id.toString(),
+      aggregateVersion: updated.version,
+      correlationId: `preview_${preview.id.toString()}`,
+      payload: { preview_id: preview.id.toString(), summary_status: mapped },
     });
   }
 }
@@ -217,7 +274,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
           user_id: BigInt(userId),
           status: "queued",
           is_delete: false,
-          source: { in: ["bottom_dock", "plan_apply"] },
+          source: { in: CLAIMABLE_JOB_SOURCES },
           next_action_at: { lte: new Date() },
         },
       });
@@ -259,7 +316,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
         where: {
           status: "queued",
           is_delete: false,
-          source: { in: ["bottom_dock", "plan_apply"] },
+          source: { in: CLAIMABLE_JOB_SOURCES },
           next_action_at: { lte: new Date() },
         },
         orderBy: { id: "asc" },
@@ -406,7 +463,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
           type: "image",
           status: "queued",
           is_delete: false,
-          source: { in: ["bottom_dock", "plan_apply"] },
+          source: { in: CLAIMABLE_JOB_SOURCES },
           next_action_at: { lte: new Date() },
         },
         orderBy: { id: "asc" },
@@ -1036,6 +1093,8 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
             firstSlot.scene_card_generation_record_id,
           );
         }
+        // 回写 StoryboardPreview.summary_status（图片路径，IK67HF/T15）。
+        await syncStoryboardPreviewSummary(tx, job.id);
       });
     },
 
@@ -1119,6 +1178,8 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
             firstSlot.scene_card_generation_record_id,
           );
         }
+        // 回写 StoryboardPreview.summary_status（图片路径，IK67HF/T15）。
+        await syncStoryboardPreviewSummary(tx, job.id);
       });
     },
 

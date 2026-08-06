@@ -84,6 +84,8 @@ export interface SnapshotConversationState {
   plan_applications: SnapshotPlanApplicationReceiptView[];
   /** SceneCard 生成记录（IK67HB，T13）：generation origins/summaries 恢复权威子集，按 id 升序。 */
   scene_card_generation_records: SnapshotSceneCardGenerationRecordView[];
+  /** StoryboardPreview 分镜预览（IK67HF，T15）：从 SceneCard 触发的可选旁路预览会话，按 id 升序。 */
+  storyboard_previews: SnapshotStoryboardPreviewView[];
   agent_runs: Array<{
     agent_run_id: string;
     conversation_id: string;
@@ -189,6 +191,15 @@ export interface SnapshotSceneCardGenerationRecordView {
   output_slots: SnapshotOutputSlotView[];
 }
 
+/** Snapshot 分镜预览投影（IK67HF，T15）：可选旁路预览会话恢复权威子集，按 id 升序。
+ *  画格（output_slots → Asset）通过 first_generation_job_id 关联 GenerationJob 取，不在此视图重复。 */
+export interface SnapshotStoryboardPreviewView {
+  preview_id: string;
+  scene_card_id: string;
+  first_generation_job_id: string;
+  summary_status: string;
+}
+
 /** output_asset_ids（Json 数组）→ string[]。容忍 number/string 混合（历史数据）。 */
 function parseAssetIdList(json: unknown): string[] {
   if (!Array.isArray(json)) return [];
@@ -282,7 +293,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
     async loadConversationState(projectId, userId) {
       const pid = BigInt(projectId);
       const uid = BigInt(userId);
-      const [messages, mentionRows, runs, inputRequests, planMessageRows, capabilityRows, maxCursorRow, sceneCardRows, applicationRows, recordRows] =
+      const [messages, mentionRows, runs, inputRequests, planMessageRows, capabilityRows, maxCursorRow, sceneCardRows, applicationRows, recordRows, previewRows] =
         await Promise.all([
           prisma.conversation_messages.findMany({
             where: { project_id: pid, is_delete: 0 },
@@ -382,6 +393,17 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
               summary_status: true,
               first_generation_job_id: true,
               plan_message_id: true,
+            },
+          }),
+          // IK67HF：分镜预览投影（未删除，按 id 升序）。画格经 first_generation_job_id 关联 job 取。
+          prisma.storyboard_previews.findMany({
+            where: { project_id: pid, is_delete: 0 },
+            orderBy: { id: "asc" },
+            select: {
+              id: true,
+              scene_card_id: true,
+              first_generation_job_id: true,
+              summary_status: true,
             },
           }),
         ]);
@@ -605,6 +627,12 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           first_generation_job_id: record.first_generation_job_id.toString(),
           plan_message_id: record.plan_message_id.toString(),
           output_slots: slotsByRecord.get(record.id.toString()) ?? [],
+        })),
+        storyboard_previews: previewRows.map((preview) => ({
+          preview_id: preview.id.toString(),
+          scene_card_id: preview.scene_card_id.toString(),
+          first_generation_job_id: preview.first_generation_job_id.toString(),
+          summary_status: preview.summary_status,
         })),
         agent_runs: runs.map((run) => {
           const activations = creativeSkillActivationSchema

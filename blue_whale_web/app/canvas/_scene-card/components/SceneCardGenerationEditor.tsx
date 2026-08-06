@@ -11,6 +11,7 @@ import {
 } from "@blue-whale/contracts";
 
 import {
+  createStoryboardPreview,
   generateSceneCard,
   getSceneCardGenerationPreset,
   type SceneCardGenerationPreset,
@@ -23,6 +24,7 @@ import {
 import { newCommandIdentity } from "@/lib/command-identity";
 import { isApiError } from "@/lib/api/errors";
 import {
+  getImageModels,
   getVideoModels,
   type ImageModelCapability,
 } from "@/app/canvas/_canvas/api/generation";
@@ -118,6 +120,9 @@ export function SceneCardGenerationEditor({
 }) {
   const [preset, setPreset] = useState<SceneCardGenerationPreset | null>(null);
   const [capabilities, setCapabilities] = useState<ImageModelCapability[]>([]);
+  const [storyboardModels, setStoryboardModels] = useState<
+    ImageModelCapability[]
+  >([]);
   const [overrides, setOverrides] = useState<Overrides | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -127,6 +132,7 @@ export function SceneCardGenerationEditor({
     preset: number;
   } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [generationMenuOpen, setGenerationMenuOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -135,13 +141,15 @@ export function SceneCardGenerationEditor({
       setConflict(null);
       setErrorMessage(null);
       try {
-        const [presetData, models] = await Promise.all([
+        const [presetData, models, imageModels] = await Promise.all([
           getSceneCardGenerationPreset(projectId, sceneCardId),
           getVideoModels(),
+          getImageModels().catch(() => []),
         ]);
         if (cancelled) return;
         setPreset(presetData);
         setCapabilities(models);
+        setStoryboardModels(imageModels);
         // 恢复草稿（若有且 base 版本一致），否则用当前 preset 初始化 overrides。
         const draft = loadSceneCardDraft(sceneCardId);
         const params = presetData.preset.parameters as Record<string, unknown>;
@@ -343,6 +351,49 @@ export function SceneCardGenerationEditor({
       }
     }
     setSubmitting(false);
+  }
+
+  async function handleStoryboardPreview() {
+    const model = storyboardModels[0];
+    if (!preset || !model || submitting) {
+      if (!model) setErrorMessage("暂无可用图片模型，无法生成分镜预览");
+      return;
+    }
+    setSubmitting(true);
+    setGenerationMenuOpen(false);
+    setErrorMessage(null);
+    try {
+      await createStoryboardPreview(
+        projectId,
+        sceneCardId,
+        newCommandIdentity(),
+        {
+          scene_card_id: sceneCardId,
+          base_scene_card_version: preset.scene_card.version,
+          parameters: {
+            model_id: model.model_id,
+            size: model.default_size,
+            aspect_ratio: model.default_aspect_ratio,
+            count: Math.min(4, Math.max(1, model.features.quantity_max)),
+          },
+          capability_snapshot_version: {
+            schema_version: 1,
+            capability_type: "image",
+            model_id: model.model_id,
+            provider_id: model.provider_id,
+            row_version: model.version,
+            digest: model.digest,
+          },
+        },
+      );
+      onClose();
+    } catch (error) {
+      setErrorMessage(
+        isApiError(error) ? error.message : "分镜预览生成失败，请稍后重试",
+      );
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function handleClose() {
@@ -591,25 +642,80 @@ export function SceneCardGenerationEditor({
         >
           取消
         </button>
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={
-            submitting || conflict !== null || referenceCapabilityError !== null
-          }
-          className="rounded px-3 py-1.5 text-[12px]"
-          style={{
-            background: "var(--tc-accent)",
-            border: "1px solid var(--tc-accent)",
-            color: "var(--tc-text-primary)",
-            opacity:
-              submitting || conflict !== null || referenceCapabilityError
-                ? 0.6
-                : 1,
-          }}
-        >
-          {submitting ? "生成中…" : "生成"}
-        </button>
+        <div className="relative flex gap-1">
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={
+              submitting ||
+              conflict !== null ||
+              referenceCapabilityError !== null
+            }
+            className="rounded px-3 py-1.5 text-[12px]"
+            style={{
+              background: "var(--tc-accent)",
+              border: "1px solid var(--tc-accent)",
+              color: "var(--tc-text-primary)",
+              opacity:
+                submitting || conflict !== null || referenceCapabilityError
+                  ? 0.6
+                  : 1,
+            }}
+          >
+            {submitting ? "生成中…" : "生成"}
+          </button>
+          <button
+            type="button"
+            aria-label="更多生成方式"
+            aria-haspopup="menu"
+            aria-expanded={generationMenuOpen}
+            disabled={submitting || conflict !== null}
+            onClick={() => setGenerationMenuOpen((open) => !open)}
+            className="rounded px-2 py-1.5 text-[12px]"
+            style={{
+              background: "var(--tc-bg-elevated)",
+              border: "1px solid var(--tc-border-subtle)",
+              color: "var(--tc-text-primary)",
+            }}
+          >
+            ▾
+          </button>
+          {generationMenuOpen && (
+            <div
+              role="menu"
+              aria-label="生成方式"
+              className="absolute right-0 bottom-full mb-1 flex w-[168px] flex-col overflow-hidden rounded py-1"
+              style={{
+                background: "var(--tc-bg-elevated)",
+                border: "1px solid var(--tc-border-subtle)",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+              }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setGenerationMenuOpen(false);
+                  void handleGenerate();
+                }}
+                className="px-3 py-2 text-left text-[12px]"
+                style={{ color: "var(--tc-text-secondary)" }}
+              >
+                直接生成视频
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={storyboardModels.length === 0}
+                onClick={() => void handleStoryboardPreview()}
+                className="px-3 py-2 text-left text-[12px]"
+                style={{ color: "var(--tc-text-secondary)" }}
+              >
+                先预览分镜图
+              </button>
+            </div>
+          )}
+        </div>
       </footer>
     </div>
   );

@@ -124,3 +124,13 @@ export {
   type SceneCardRegenerationRequest,
   type SceneCardGenerationRecordView,
 } from "./scene-card-generation.js";
+export {
+  storyboardPreviewParametersSchema,
+  storyboardPreviewCreateRequestSchema,
+  storyboardPreviewSchema,
+  storyboardPreviewViewSchema,
+  type StoryboardPreviewParameters,
+  type StoryboardPreviewCreateRequest,
+  type StoryboardPreview,
+  type StoryboardPreviewView,
+} from "./storyboard-preview.js";

@@ -812,3 +812,26 @@ model generation_output_slots {
   @@index([project_id, initial_placement_status], map: "idx_slot_placement")
   @@unique([generation_job_id, slot_index], map: "uk_slot_job_index")
 }
+
+/// StoryboardPreview（IK67HF/T15，CONTEXT L43-47）：User 从 SceneCard 显式触发的分镜预览会话聚合根 +
+/// SceneCard 绑定 + 幂等键。一次预览 = 一个 type=image 的 GenerationJob（first_generation_job_id），
+/// 其 N 个 output_slot（按 slot_index 升序）即有序画格。可选旁路：不自动创建视频 job、不改 Preset、
+/// 不切媒体类型（CONTEXT _Avoid_ L47）。画格本身复用 generation_output_slots + assets，本表只聚合会话。
+/// command_id 兜底幂等（uk_storyboard_command，operation=scene_card.storyboard_preview）。
+model storyboard_previews {
+  id                          BigInt   @id @default(autoincrement())
+  scene_card_id               BigInt
+  project_id                  BigInt
+  first_generation_job_id     BigInt
+  command_id                  String   @db.VarChar(128)
+  summary_status              String   @db.VarChar(16)
+  capability_snapshot_version Json
+  gmt_create                  DateTime @default(now()) @db.DateTime(0)
+  gmt_modified                DateTime @default(now()) @db.DateTime(0)
+  version                     Int      @default(1)
+  is_delete                   Int      @default(0) @db.TinyInt
+
+  @@unique([project_id, command_id], map: "uk_storyboard_command")
+  @@index([scene_card_id], map: "idx_storyboard_scene")
+  @@index([project_id], map: "idx_storyboard_project")
+}

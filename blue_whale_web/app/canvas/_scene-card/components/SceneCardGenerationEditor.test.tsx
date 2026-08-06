@@ -3,22 +3,28 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createStoryboardPreview,
   generateSceneCard,
   getSceneCardGenerationPreset,
   type SceneCardGenerationPreset,
 } from "@/lib/conversation";
 import type { ProviderPromptAsset } from "@blue-whale/contracts";
-import { getVideoModels } from "@/app/canvas/_canvas/api/generation";
+import {
+  getImageModels,
+  getVideoModels,
+} from "@/app/canvas/_canvas/api/generation";
 import { saveSceneCardDraft } from "@/lib/scene-card-gen-draft";
 
 import { SceneCardGenerationEditor } from "./SceneCardGenerationEditor";
 
 vi.mock("@/lib/conversation", () => ({
+  createStoryboardPreview: vi.fn(),
   generateSceneCard: vi.fn(),
   getSceneCardGenerationPreset: vi.fn(),
 }));
 
 vi.mock("@/app/canvas/_canvas/api/generation", () => ({
+  getImageModels: vi.fn(),
   getVideoModels: vi.fn(),
 }));
 
@@ -134,6 +140,31 @@ function capability(
   };
 }
 
+function imageCapability() {
+  return {
+    ...capability("image-a", "image-provider"),
+    model_label: "图片模型 A",
+    supported_sizes: [
+      {
+        id: "2k",
+        label: "2K",
+        api_value: "2k",
+        width: 2048,
+        height: 1152,
+      },
+    ],
+    supported_formats: ["png"],
+    supported_durations: null,
+    default_size: "2k",
+    default_format: "png",
+    default_duration: null,
+    features: {
+      ...capability("image-a", "image-provider").features,
+      quantity_max: 4,
+    },
+  };
+}
+
 describe("SceneCardGenerationEditor", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -143,12 +174,57 @@ describe("SceneCardGenerationEditor", () => {
       capability("video-a", "provider-a"),
       capability("video-b", "provider-b"),
     ]);
+    vi.mocked(getImageModels).mockResolvedValue([imageCapability()]);
     vi.mocked(generateSceneCard).mockResolvedValue({
       scene_card_id: "10",
       generation_job_id: "20",
       record_id: "30",
       preset_version: 4,
     });
+    vi.mocked(createStoryboardPreview).mockResolvedValue({
+      preview_id: "40",
+      scene_card_id: "10",
+      generation_job_id: "50",
+    });
+  });
+
+  it("从已批准的生成方式菜单显式触发四格分镜预览", async () => {
+    const onClose = vi.fn();
+    render(
+      <SceneCardGenerationEditor
+        projectId="1"
+        sceneCardId="10"
+        onClose={onClose}
+      />,
+    );
+
+    await screen.findByRole("combobox", { name: "模型" });
+    fireEvent.click(screen.getByRole("button", { name: "更多生成方式" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "先预览分镜图" }));
+
+    await waitFor(() =>
+      expect(createStoryboardPreview).toHaveBeenCalledTimes(1),
+    );
+    expect(vi.mocked(createStoryboardPreview).mock.calls[0]?.[3]).toEqual({
+      scene_card_id: "10",
+      base_scene_card_version: 2,
+      parameters: {
+        model_id: "image-a",
+        size: "2k",
+        aspect_ratio: "16:9",
+        count: 4,
+      },
+      capability_snapshot_version: {
+        schema_version: 1,
+        capability_type: "image",
+        model_id: "image-a",
+        provider_id: "image-provider",
+        row_version: 7,
+        digest: DIGEST,
+      },
+    });
+    expect(generateSceneCard).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("能力版本与摘要一致时切换模型，并提交所选模型的新快照", async () => {

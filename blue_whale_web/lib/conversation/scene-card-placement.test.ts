@@ -292,6 +292,75 @@ describe("recoverPendingPlacements（IK67HE/T14 放置恢复幂等）", () => {
     );
   });
 
+  it("分镜画格复用图片节点并按槽位从左到右稳定排列", async () => {
+    const { canvas } = makeCanvas([
+      {
+        id: "scene-card:66",
+        type: "scene_card",
+        scene_card_id: "66",
+        position: { x: 100, y: 200 },
+        width: 400,
+        height: 300,
+        status: "placed",
+      },
+    ]);
+    const placements = {
+      listPending: vi.fn().mockResolvedValue(
+        Array.from({ length: 4 }, (_, slotIndex) => ({
+          slot_id: String(501 + slotIndex),
+          generation_job_id: "301",
+          slot_index: slotIndex,
+          asset_id: String(901 + slotIndex),
+          type: "image",
+          is_storyboard_frame: true,
+          scene_card_id: "66",
+          placement_anchor: null,
+        })),
+      ),
+      markPlaced: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await recoverPendingPlacements(canvas, "42", placements as never);
+
+    const frames = (
+      canvas._nodes as Array<{
+        id: string;
+        type: string;
+        storyboardFrame?: boolean;
+        slotIndex: number;
+        position: { x: number; y: number };
+      }>
+    )
+      .filter((node) => node.id.startsWith("storyboard-frame:"))
+      .sort((left, right) => left.slotIndex - right.slotIndex);
+    expect(frames).toEqual([
+      expect.objectContaining({
+        id: "storyboard-frame:501",
+        type: "image",
+        storyboardFrame: true,
+        position: { x: 100, y: 510 },
+      }),
+      expect.objectContaining({
+        id: "storyboard-frame:502",
+        type: "image",
+        storyboardFrame: true,
+        position: { x: 310, y: 510 },
+      }),
+      expect.objectContaining({
+        id: "storyboard-frame:503",
+        type: "image",
+        storyboardFrame: true,
+        position: { x: 520, y: 510 },
+      }),
+      expect.objectContaining({
+        id: "storyboard-frame:504",
+        type: "image",
+        storyboardFrame: true,
+        position: { x: 730, y: 510 },
+      }),
+    ]);
+  });
+
   it("SceneCard 缺失时从冻结矩形的精确下方开始放置", async () => {
     const { canvas } = makeCanvas([]);
     const placements = {
