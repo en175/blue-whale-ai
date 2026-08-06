@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ModelCapabilityView } from "@blue-whale/persistence";
 
 import { handleCreateGenerationJob } from "./handle-create-generation-job.js";
 import { handleCancelGenerationJob } from "./handle-cancel-generation-job.js";
@@ -15,6 +16,17 @@ function makeDeps() {
       requestCancel: vi.fn(),
       retryJob: vi.fn(),
       appendLog: vi.fn(),
+    },
+    models: {
+      // 白名单默认：image 收录 seedream、video 收录 seedance 真实 id（与各用例 body 一致）。
+      listEnabledByType: vi.fn(
+        async (type: string): Promise<ModelCapabilityView[]> =>
+          type === "video"
+            ? ([
+                { model_id: "doubao-seedance-2-0-260128" },
+              ] as ModelCapabilityView[])
+            : ([{ model_id: "doubao-seedream-4-0" }] as ModelCapabilityView[]),
+      ),
     },
   };
 }
@@ -56,6 +68,101 @@ describe("handleCreateGenerationJob", () => {
         expectedOutputCount: 1,
       }),
     );
+  });
+
+  it("image model_id 不在启用目录 → 400，不建任务", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+    const result = await handleCreateGenerationJob(
+      "9",
+      "55",
+      {
+        ...validBody,
+        parameters: { ...validBody.parameters, model_id: "no-such-model" },
+      },
+      "k",
+      deps,
+    );
+    expect(result).toEqual({
+      code: 400,
+      msg: "model_id 不在可用模型白名单或已停用",
+      data: null,
+    });
+    expect(deps.command.createJob).not.toHaveBeenCalled();
+  });
+
+  it("已停用模型（不在 enabled 列表）→ 400，不建任务", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+    // 模拟该模型已停用：listEnabledByType 只返回启用行，此处不含它。
+    deps.models.listEnabledByType.mockResolvedValue([]);
+    const result = await handleCreateGenerationJob(
+      "9",
+      "55",
+      validBody,
+      "k",
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(deps.command.createJob).not.toHaveBeenCalled();
+  });
+
+  it("capability_type 与生成类型不匹配（video 用 image 模型）→ 400", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+    const result = await handleCreateGenerationJob(
+      "9",
+      "55",
+      {
+        type: "video",
+        input_asset_ids: [],
+        parameters: {
+          prompt: "动起来",
+          model_id: "doubao-seedream-4-0", // image 模型，视频白名单不含
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+        },
+        expected_output_count: 1,
+      },
+      "k",
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(deps.command.createJob).not.toHaveBeenCalled();
+  });
+
+  it("视频别名先解析成真实 model_id 再过白名单（别名不绕过）", async () => {
+    const deps = makeDeps();
+    deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
+    // 白名单只收录真实 model_id；别名 seedance-2 未收录——能 200 证明先解析后校验。
+    deps.models.listEnabledByType.mockResolvedValue([
+      { model_id: "doubao-seedance-2-0-260128" },
+    ] as ModelCapabilityView[]);
+    deps.command.createJob.mockResolvedValue({
+      generation_job_id: "208",
+      cursor: 0,
+    });
+    const result = await handleCreateGenerationJob(
+      "9",
+      "55",
+      {
+        type: "video",
+        input_asset_ids: [],
+        parameters: {
+          prompt: "动起来",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+        },
+        expected_output_count: 1,
+      },
+      "k",
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(deps.models.listEnabledByType).toHaveBeenCalledWith("video");
   });
 
   it("project 不归属 → 100301", async () => {
@@ -485,7 +592,13 @@ describe("handleRetryGenerationJob", () => {
   it("project 不归属 → 100301 且不触发重试", async () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue(null);
-    const result = await handleRetryGenerationJob("9", "56", "200", "key-r1", deps);
+    const result = await handleRetryGenerationJob(
+      "9",
+      "56",
+      "200",
+      "key-r1",
+      deps,
+    );
     expect(result).toEqual({ code: 100301, msg: "资源不存在", data: null });
     expect(deps.command.retryJob).not.toHaveBeenCalled();
   });
@@ -494,7 +607,13 @@ describe("handleRetryGenerationJob", () => {
     const deps = makeDeps();
     deps.projects.findOwnedById.mockResolvedValue({ id: "55" });
     deps.command.retryJob.mockResolvedValue(null);
-    const result = await handleRetryGenerationJob("9", "55", "999", "key-r2", deps);
+    const result = await handleRetryGenerationJob(
+      "9",
+      "55",
+      "999",
+      "key-r2",
+      deps,
+    );
     expect(result).toEqual({ code: 100301, msg: "资源不存在", data: null });
     expect(deps.command.retryJob).toHaveBeenCalledWith("999", "9", "key-r2");
   });
@@ -507,8 +626,17 @@ describe("handleRetryGenerationJob", () => {
       type: "image",
       cursor: 0,
     });
-    const result = await handleRetryGenerationJob("9", "55", "200", "key-r3", deps);
+    const result = await handleRetryGenerationJob(
+      "9",
+      "55",
+      "200",
+      "key-r3",
+      deps,
+    );
     expect(result.code).toBe(200);
-    expect(result.data).toMatchObject({ generation_job_id: "201", type: "image" });
+    expect(result.data).toMatchObject({
+      generation_job_id: "201",
+      type: "image",
+    });
   });
 });
