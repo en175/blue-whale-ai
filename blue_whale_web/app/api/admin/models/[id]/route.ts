@@ -2,7 +2,10 @@ import type { AuthenticatedUser } from "@/lib/auth/authenticated-user";
 import { withAdminUser } from "@/lib/auth/product-route-auth";
 import { parseModelUpdateBody } from "@/lib/model-capability/constants";
 import { createModelCapabilityAdminDeps } from "@/lib/model-capability/deps";
-import { logModelUpdate } from "@/lib/model-capability/operation-log";
+import {
+  logModelDelete,
+  logModelUpdate,
+} from "@/lib/model-capability/operation-log";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -57,4 +60,41 @@ export async function PUT(request: Request, context: Params) {
   return withAdminUser(request, (user) =>
     handleUpdateModel(request, context, user),
   );
+}
+
+// DELETE /api/admin/models/:id → 软删除（is_delete=true，行数据保留）。
+// 软删后 admin 列表与 dock 展示列表均不再出现（读取查询已过滤 is_delete=false）。
+// 不存在或已软删 → 404。
+async function handleDeleteModel({ params }: Params, user: AuthenticatedUser) {
+  try {
+    const { id } = await params;
+    const { db } = createModelCapabilityAdminDeps();
+    const before = await db.getById(id); // 审计需要删除前快照
+    const ok = await db.remove(id);
+    if (!ok) {
+      return Response.json(
+        { success: false, error: "模型不存在" },
+        { status: 404 },
+      );
+    }
+    // best-effort 审计（服务端写入，失败不阻断）。
+    if (before) {
+      try {
+        await logModelDelete(before, user.username);
+      } catch (auditErr) {
+        console.error(
+          "[model-capability] 审计写入失败（模型已删除）",
+          auditErr,
+        );
+      }
+    }
+    return Response.json({ success: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "unknown";
+    return Response.json({ success: false, error: msg }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request, context: Params) {
+  return withAdminUser(request, (user) => handleDeleteModel(context, user));
 }

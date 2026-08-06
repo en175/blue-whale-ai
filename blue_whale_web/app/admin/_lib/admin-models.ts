@@ -93,3 +93,31 @@ export async function updateModel(
     })
   ).data;
 }
+
+/** 启停切换：服务端翻转 enabled 并落审计，返回更新后行。 */
+export async function toggleModel(id: string): Promise<AdminModelRow> {
+  return (
+    await adminRequest<AdminModelRow>(`/api/admin/models/${id}/toggle`, {
+      method: "PATCH",
+    })
+  ).data;
+}
+
+/** 软删除（is_delete=1，行数据保留），服务端落审计。 */
+export async function deleteModel(id: string): Promise<void> {
+  await adminRequest<unknown>(`/api/admin/models/${id}`, {
+    method: "DELETE",
+  });
+}
+
+/** 批量排序：返回服务端重排后的全量列表（含其它类型）。 */
+export async function reorderModels(
+  items: { id: string; sortOrder: number }[],
+): Promise<AdminModelRow[]> {
+  return (
+    await adminRequest<AdminModelRow[]>("/api/admin/models/reorder", {
+      method: "PUT",
+      body: JSON.stringify({ items }),
+    })
+  ).data;
+}
