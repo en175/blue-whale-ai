@@ -8,6 +8,9 @@ import Sidebar from "@/components/Sidebar";
 export const metadata: Metadata = {
   title: "blue_Whale",
   description: "任意视频，告诉你的 Agent 即可创建",
+  icons: {
+    icon: "https://bluewhale-assets.tos-cn-beijing.volces.com/blue-whale-api/blue_whale_v2.svg",
+  },
 };
 
 export default function RootLayout({
