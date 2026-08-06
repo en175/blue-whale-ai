@@ -4,6 +4,7 @@ import {
   cancelProjectGenerationJob,
   createProjectGenerationJob,
   generateAudio,
+  getTextModels,
   getVideoModels,
   retryMissingProjectGenerationJobOutputs,
   listJobs,
@@ -126,6 +127,25 @@ describe("generation model catalog", () => {
       "/api/generation/models?capability=video",
       { method: "GET" },
     );
+  });
+
+  it("文生文模型请求 capability=text 并透传启用列表（IK6T8W）", async () => {
+    vi.mocked(apiRequest).mockResolvedValue([
+      {
+        model_id: "doubao-text-250828",
+        provider_id: "volcengine",
+        model_label: "豆包文本",
+      },
+    ]);
+
+    const models = await getTextModels();
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      "/api/generation/models?capability=text",
+      { method: "GET" },
+    );
+    expect(models).toHaveLength(1);
+    expect(models[0].model_id).toBe("doubao-text-250828");
   });
 });
 
