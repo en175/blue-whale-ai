@@ -27,28 +27,31 @@ const receiptCommon = z.object({
  *  - scene_card_create：scene_card_id + 结果版本 + 预设摘要；
  *  - scene_card_replace：额外 target_scene_card_mention_id（本轮唯一可用 SceneCardMention 句柄，
  *    为 T12 预留，T11 不实例化）。 */
-export const planApplicationReceiptSchema = z.discriminatedUnion("application_kind", [
-  receiptCommon
-    .extend({ application_kind: z.literal("image_generate") })
-    .strict(),
-  receiptCommon
-    .extend({
-      application_kind: z.literal("scene_card_create"),
-      scene_card_id: decimalIdSchema,
-      result_version: z.number().int().positive(),
-      preset_digest: digestSchema,
-    })
-    .strict(),
-  receiptCommon
-    .extend({
-      application_kind: z.literal("scene_card_replace"),
-      scene_card_id: decimalIdSchema,
-      result_version: z.number().int().positive(),
-      preset_digest: digestSchema,
-      target_scene_card_mention_id: decimalIdSchema,
-    })
-    .strict(),
-]);
+export const planApplicationReceiptSchema = z.discriminatedUnion(
+  "application_kind",
+  [
+    receiptCommon
+      .extend({ application_kind: z.literal("image_generate") })
+      .strict(),
+    receiptCommon
+      .extend({
+        application_kind: z.literal("scene_card_create"),
+        scene_card_id: decimalIdSchema,
+        result_version: z.number().int().positive(),
+        preset_digest: digestSchema,
+      })
+      .strict(),
+    receiptCommon
+      .extend({
+        application_kind: z.literal("scene_card_replace"),
+        scene_card_id: decimalIdSchema,
+        result_version: z.number().int().positive(),
+        preset_digest: digestSchema,
+        target_scene_card_mention_id: decimalIdSchema,
+      })
+      .strict(),
+  ],
+);
 
 /** 视频参考模式（CONTEXT L55）：预设必须具有视频参考模式。由首/尾帧角色派生。
  *  - text_to_video：无帧驱动；
@@ -95,6 +98,47 @@ export const sceneCardGenerationRecordStatusSchema = z.enum([
   "success",
   "failed",
 ]);
+
+/** 生成输出槽位状态（IK67HE/T14，spec §4.4 / ADR-0026）：
+ *  - pending：已固定、等待供应商结果；
+ *  - succeeded：已发布为 Asset，永久占据原槽；
+ *  - failed：终态失败（含内容拒绝、结果不足）；
+ *  - missing：异常缺失（应到未到，重试时等同 failed 补齐）。 */
+export const generationOutputSlotStatusSchema = z.enum([
+  "pending",
+  "succeeded",
+  "failed",
+  "missing",
+]);
+
+/** 单个输出槽的 Snapshot/SSE 投影（spec §4.4「输出槽位在首次提交时固定」）。
+ *  slot_index 为稳定身份；retry_of_slot_id 非空时表示本槽由重试创建、指向被补的原始槽。 */
+export const generationOutputSlotViewSchema = z
+  .object({
+    slot_id: decimalIdSchema,
+    slot_index: z.number().int().nonnegative(),
+    status: generationOutputSlotStatusSchema,
+    asset_id: decimalIdSchema.nullable(),
+    retry_of_slot_id: decimalIdSchema.nullable(),
+    initial_placement_status: z.enum(["pending", "placed"]),
+  })
+  .strict();
+
+/** GenerationJob 聚合汇总状态（spec §4.4 状态机）：
+ *  generating → {success | partial | failed}；partial/failed → 重试失败项 → generating。
+ *  与 SceneCardGenerationRecord 四态同枚举，语义属 job 槽位聚合。 */
+export const generationJobSummaryStatusSchema =
+  sceneCardGenerationRecordStatusSchema;
+
+export type GenerationOutputSlotStatus = z.infer<
+  typeof generationOutputSlotStatusSchema
+>;
+export type GenerationOutputSlotView = z.infer<
+  typeof generationOutputSlotViewSchema
+>;
+export type GenerationJobSummaryStatus = z.infer<
+  typeof generationJobSummaryStatusSchema
+>;
 
 /** SceneCardGenerationRecord（CONTEXT L82-86）：User 从 SceneCard 发起的一次新生成及其后续重试的
  *  用户可见聚合。首次应用产生的 GenerationJob 失败也归入该记录；重试不得创建新 SceneCard 或

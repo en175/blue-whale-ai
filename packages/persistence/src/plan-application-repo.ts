@@ -91,7 +91,9 @@ export type ApplyPlanMessageResult =
 
 export interface PlanApplicationRepo {
   /** 手动应用 PlanMessage：按 application_kind 分派视频（T11）/图片（T10）事务。 */
-  applyPlanMessage(input: ApplyPlanMessageInput): Promise<ApplyPlanMessageResult>;
+  applyPlanMessage(
+    input: ApplyPlanMessageInput,
+  ): Promise<ApplyPlanMessageResult>;
 }
 
 export interface CapabilitySnapshot {
@@ -153,26 +155,48 @@ export async function validateDerivedReferences(
       where: { id: { in: assetMentionIds } },
       select: { id: true, target_id: true, project_id: true },
     });
-    const mentionByHandle = new Map(mentions.map((mention) => [mention.id, mention]));
+    const mentionByHandle = new Map(
+      mentions.map((mention) => [mention.id, mention]),
+    );
     const assetIds = mentions.map((mention) => mention.target_id);
     const assets =
       assetIds.length === 0
         ? []
         : await tx.assets.findMany({
             where: { id: { in: assetIds } },
-            select: { id: true, project_id: true, status: true, is_delete: true },
+            select: {
+              id: true,
+              project_id: true,
+              status: true,
+              is_delete: true,
+            },
           });
     const assetById = new Map(assets.map((asset) => [asset.id, asset]));
-    for (const reference of derivedReferences.filter((r) => r.type === "asset")) {
+    for (const reference of derivedReferences.filter(
+      (r) => r.type === "asset",
+    )) {
       const mention = mentionByHandle.get(BigInt(reference.mention_id));
-      if (!mention) return { ok: false, reason: `mention ${reference.mention_id} not found` };
+      if (!mention)
+        return {
+          ok: false,
+          reason: `mention ${reference.mention_id} not found`,
+        };
       if (mention.project_id !== projectId)
-        return { ok: false, reason: `mention ${reference.mention_id} wrong project` };
+        return {
+          ok: false,
+          reason: `mention ${reference.mention_id} wrong project`,
+        };
       const asset = assetById.get(mention.target_id);
       if (!asset || asset.is_delete || asset.status !== "normal")
-        return { ok: false, reason: `asset for mention ${reference.mention_id} unavailable` };
+        return {
+          ok: false,
+          reason: `asset for mention ${reference.mention_id} unavailable`,
+        };
       if (asset.project_id !== projectId)
-        return { ok: false, reason: `asset for mention ${reference.mention_id} wrong project` };
+        return {
+          ok: false,
+          reason: `asset for mention ${reference.mention_id} wrong project`,
+        };
     }
   }
 
@@ -181,7 +205,9 @@ export async function validateDerivedReferences(
       where: { id: { in: sceneCardMentionIds } },
       select: { id: true, target_id: true, project_id: true },
     });
-    const mentionByHandle = new Map(mentions.map((mention) => [mention.id, mention]));
+    const mentionByHandle = new Map(
+      mentions.map((mention) => [mention.id, mention]),
+    );
     const sceneCardIds = mentions.map((mention) => mention.target_id);
     const sceneCards =
       sceneCardIds.length === 0
@@ -191,12 +217,21 @@ export async function validateDerivedReferences(
             select: { id: true, project_id: true, is_delete: true },
           });
     const sceneCardById = new Map(sceneCards.map((card) => [card.id, card]));
-    for (const reference of derivedReferences.filter((r) => r.type === "scene_card")) {
+    for (const reference of derivedReferences.filter(
+      (r) => r.type === "scene_card",
+    )) {
       const mention = mentionByHandle.get(BigInt(reference.mention_id));
-      if (!mention) return { ok: false, reason: `mention ${reference.mention_id} not found` };
+      if (!mention)
+        return {
+          ok: false,
+          reason: `mention ${reference.mention_id} not found`,
+        };
       const card = sceneCardById.get(mention.target_id);
       if (!card || card.is_delete === 1)
-        return { ok: false, reason: `scene_card for mention ${reference.mention_id} unavailable` };
+        return {
+          ok: false,
+          reason: `scene_card for mention ${reference.mention_id} unavailable`,
+        };
     }
   }
 
@@ -238,7 +273,10 @@ async function applySceneCardCreateInTransaction(
     if (existing.request_hash !== input.requestHash)
       return { kind: "idempotency_conflict" };
     if (existing.resource_id === null || existing.generation_job_id === null)
-      return { kind: "validation_failed", reason: "idempotent record missing resources" };
+      return {
+        kind: "validation_failed",
+        reason: "idempotent record missing resources",
+      };
     return {
       kind: "replayed",
       application_kind: "scene_card_create",
@@ -263,14 +301,20 @@ async function applySceneCardCreateInTransaction(
   });
   if (priorReceipt) return { kind: "already_applied" };
 
-  const snapshot = planMessage.capability_snapshot_version as unknown as CapabilitySnapshot;
-  const frozenParameters = planMessage.frozen_generation_parameters as unknown as Record<string, unknown>;
+  const snapshot =
+    planMessage.capability_snapshot_version as unknown as CapabilitySnapshot;
+  const frozenParameters =
+    planMessage.frozen_generation_parameters as unknown as Record<
+      string,
+      unknown
+    >;
   const projection = planMessage.provider_prompt_projection as unknown as {
     prompt_text: string;
     reference_assets: ProviderPromptAsset[];
     parameters: Record<string, unknown>;
   };
-  const derivedReferences = (planMessage.derived_references as unknown as DerivedReference[]) ?? [];
+  const derivedReferences =
+    (planMessage.derived_references as unknown as DerivedReference[]) ?? [];
 
   // 3. 能力漂移检测（AC#4）：按冻结 model_id/provider_id 查当前行，比对 row_version + digest。
   const capability = await tx.generation_model_capability.findUnique({
@@ -297,12 +341,20 @@ async function applySceneCardCreateInTransaction(
   if (!capability || !capability.enabled || capability.is_delete)
     return { kind: "capability_drift" };
   const recomputedDigest = capabilityDigestFromModelCapability(capability);
-  if (capability.version !== snapshot.row_version || recomputedDigest !== snapshot.digest)
+  if (
+    capability.version !== snapshot.row_version ||
+    recomputedDigest !== snapshot.digest
+  )
     return { kind: "capability_drift" };
 
   // 4. 引用素材有效性（AC#4，全部在副作用前）。
-  const referenceCheck = await validateDerivedReferences(tx, projectId, derivedReferences);
-  if (!referenceCheck.ok) return { kind: "validation_failed", reason: referenceCheck.reason };
+  const referenceCheck = await validateDerivedReferences(
+    tx,
+    projectId,
+    derivedReferences,
+  );
+  if (!referenceCheck.ok)
+    return { kind: "validation_failed", reason: referenceCheck.reason };
 
   // === 前置检查全部通过，开始原子创建五条产品事实（AC#2/#3）===
 
@@ -310,7 +362,10 @@ async function applySceneCardCreateInTransaction(
   const sceneCard = await tx.scene_cards.create({
     data: {
       project_id: projectId,
-      title: sceneCardTitle(planMessage.sequence_label, planMessage.content_markdown),
+      title: sceneCardTitle(
+        planMessage.sequence_label,
+        planMessage.content_markdown,
+      ),
       summary: null,
       content_markdown: planMessage.content_markdown,
       version: 1,
@@ -324,10 +379,11 @@ async function applySceneCardCreateInTransaction(
     projectId: input.projectId,
     userId: input.userId,
     type: "video",
-    expectedOutputCount: Number(frozenParameters.count ?? 1),
+    expectedOutputCount: 1,
     source: "plan",
     actionIdentity: input.idempotencyKey,
     actionType: "plan.video_generation",
+    sceneCardId: sceneCardId.toString(),
     input: {
       scene_card_id: sceneCardId.toString(),
       plan_message_id: planMessage.message_id.toString(),
@@ -336,6 +392,9 @@ async function applySceneCardCreateInTransaction(
       reference_assets: projection.reference_assets,
       reference_mode: referenceMode,
       capability_snapshot_version: snapshot,
+      ...(input.providerCredential
+        ? { provider_credential: input.providerCredential }
+        : {}),
     },
   });
   let cursor = createdJob.cursor;
@@ -378,13 +437,14 @@ async function applySceneCardCreateInTransaction(
       project_id: projectId,
       parameters: frozenParameters as unknown as Prisma.InputJsonValue,
       reference_mode: referenceMode,
-      reference_assets: projection.reference_assets as unknown as Prisma.InputJsonValue,
+      reference_assets:
+        projection.reference_assets as unknown as Prisma.InputJsonValue,
       capability_snapshot_version: snapshot as unknown as Prisma.InputJsonValue,
     },
   });
 
   // 9. INSERT scene_card_generation_records（首次 summary_status=generating）。
-  await tx.scene_card_generation_records.create({
+  const record = await tx.scene_card_generation_records.create({
     data: {
       scene_card_id: sceneCardId,
       project_id: projectId,
@@ -393,6 +453,12 @@ async function applySceneCardCreateInTransaction(
       application_receipt_id: receipt.id,
       first_generation_job_id: BigInt(createdJob.generation_job_id),
     },
+  });
+  // IK67HE/T14：回填首个 job 的输出槽绑定 record（createJobWithinTx 早于 record 创建），
+  // 使 publishVideoResult 能经槽位找到 scene_card_id 做视频节点放置 + record 聚合。
+  await tx.generation_output_slots.updateMany({
+    where: { generation_job_id: BigInt(createdJob.generation_job_id) },
+    data: { scene_card_generation_record_id: record.id },
   });
 
   // 10. INSERT command_idempotency（resource_id=scene_card_id，generation_job_id）。
@@ -437,7 +503,11 @@ async function applySceneCardCreateInTransaction(
       application_kind: "scene_card_create",
     },
   });
-  cursor = Math.max(cursor, Number(applyEvent.cursor), Number(sceneCardEvent.cursor));
+  cursor = Math.max(
+    cursor,
+    Number(applyEvent.cursor),
+    Number(sceneCardEvent.cursor),
+  );
 
   return {
     kind: "applied",
@@ -815,7 +885,10 @@ async function applyImageGenerateInTransaction(
   const pmId = planMessage.message_id;
 
   // 1. PlanMessage 级 at-most-once：已应用 → 直接回首次回执（哪怕换 CommandId）。
-  if (planMessage.applied_at !== null && planMessage.first_generation_job_id !== null) {
+  if (
+    planMessage.applied_at !== null &&
+    planMessage.first_generation_job_id !== null
+  ) {
     const receipt = await tx.plan_application_receipts.findUnique({
       where: { message_id: pmId },
     });
@@ -858,7 +931,8 @@ async function applyImageGenerateInTransaction(
   }
 
   // 3. 预检（mention 重验 + 能力漂移 + 余额）—— 硬失败零写入、零幂等行。
-  const derivedReferences = (planMessage.derived_references ?? []) as DerivedReference[];
+  const derivedReferences = (planMessage.derived_references ??
+    []) as DerivedReference[];
   const assetRefs = derivedReferences.filter((r) => r.type === "asset");
   const mentionRows =
     assetRefs.length > 0
@@ -880,7 +954,8 @@ async function applyImageGenerateInTransaction(
       target_id: m.target_id,
     })),
   );
-  const snapshot = planMessage.capability_snapshot_version as CapabilitySnapshotVersion;
+  const snapshot =
+    planMessage.capability_snapshot_version as CapabilitySnapshotVersion;
   const currentCap = await tx.generation_model_capability.findFirst({
     where: {
       model_id: snapshot.model_id,
@@ -946,7 +1021,8 @@ async function applyImageGenerateInTransaction(
   }
 
   // 4. 建首图 GenerationJob（同 tx；source=plan_apply 保留入口可追溯）。
-  const frozen = planMessage.frozen_generation_parameters as FrozenGenerationParameters;
+  const frozen =
+    planMessage.frozen_generation_parameters as FrozenGenerationParameters;
   const referenceAssetIds = mentionRows
     .filter((m) => m.mention_type === "asset")
     .map((m) => m.target_id.toString());
@@ -1077,7 +1153,10 @@ async function applyPlanMessageInTransaction(
   }
   if (planMessage.application_kind === "image_generate") {
     if (!input.providerCredential || !input.quotaCheck) {
-      return { kind: "validation_failed", reason: "missing generation credential" };
+      return {
+        kind: "validation_failed",
+        reason: "missing generation credential",
+      };
     }
     return applyImageGenerateInTransaction(tx, input, planMessage);
   }

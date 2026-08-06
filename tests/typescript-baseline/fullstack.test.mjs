@@ -130,6 +130,7 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
     "generation_job_logs",
     "generation_jobs",
     "generation_model_capability",
+    "generation_output_slots",
     "plan_application_receipts",
     "plan_messages",
     "project",

@@ -18,11 +18,13 @@ export async function POST(
   return withAuthenticatedUser(request, async ({ userId }) => {
     const { id, jobId } = await ctx.params;
     const idempotencyKey = request.headers.get("Idempotency-Key") ?? "";
+    const body = await request.text();
     const result = await handleRetryGenerationJob(
       userId,
       id,
       jobId,
       idempotencyKey,
+      body,
       createGenerationCommandDeps(),
     );
 

@@ -29,6 +29,7 @@ export {
   createSnapshotRepo,
   type SnapshotRepo,
   type SnapshotJobView,
+  type SnapshotOutputSlotView,
   type SnapshotJobAggregate,
   type SnapshotConversationState,
   type SnapshotMentionView,
@@ -143,6 +144,12 @@ export {
   type CreateJobInput,
   type CreatedJob,
 } from "./generation-command-repo.js";
+export {
+  aggregateSlotStatus,
+  resolveLogicalSlots,
+  type OutputSlotStatus,
+  type SlotSummaryStatus,
+} from "./generation-output-slot-repo.js";
 export {
   createPlanApplicationRepo,
   validateDerivedReferences,

@@ -64,7 +64,9 @@ function buildPlanMessageRow(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-function buildTx(overrides: Record<string, Record<string, ReturnType<typeof vi.fn>>>) {
+function buildTx(
+  overrides: Record<string, Record<string, ReturnType<typeof vi.fn>>>,
+) {
   const projectEventsCreate = vi.fn().mockImplementation(({ data }) => ({
     id: 1n,
     event_id: "evt_x",
@@ -128,17 +130,42 @@ function buildTx(overrides: Record<string, Record<string, ReturnType<typeof vi.f
       ...overrides.scene_card_generation_records,
     },
     generation_jobs: {
-      create: vi.fn().mockResolvedValue({ id: 9001n, type: "video", source: "plan", status: "queued", progress: 0, version: 0 }),
+      create: vi
+        .fn()
+        .mockResolvedValue({
+          id: 9001n,
+          type: "video",
+          source: "plan",
+          status: "queued",
+          progress: 0,
+          version: 0,
+        }),
       ...overrides.generation_jobs,
     },
-    cost_reservations: { create: vi.fn().mockResolvedValue({}), ...overrides.cost_reservations },
-    generation_job_logs: { create: vi.fn().mockResolvedValue({}), ...overrides.generation_job_logs },
-    project_events: { create: projectEventsCreate, ...overrides.project_events },
+    cost_reservations: {
+      create: vi.fn().mockResolvedValue({}),
+      ...overrides.cost_reservations,
+    },
+    generation_output_slots: {
+      create: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      ...overrides.generation_output_slots,
+    },
+    generation_job_logs: {
+      create: vi.fn().mockResolvedValue({}),
+      ...overrides.generation_job_logs,
+    },
+    project_events: {
+      create: projectEventsCreate,
+      ...overrides.project_events,
+    },
   };
 }
 
 function repoWith(tx: ReturnType<typeof buildTx>) {
-  const transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(tx));
+  const transaction = vi.fn(
+    async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+  );
   const prisma = { $transaction: transaction } as unknown as PrismaClient;
   return { repo: createPlanApplicationRepo(prisma), transaction };
 }
@@ -149,6 +176,7 @@ const baseInput = {
   planMessageId: "5001",
   idempotencyKey: "cmd-1",
   requestHash: "a".repeat(64),
+  providerCredential: "sealed-provider-token",
 };
 
 describe("PlanApplicationRepo.applyPlanMessage（视频分支 / IK67H9）", () => {
@@ -173,9 +201,19 @@ describe("PlanApplicationRepo.applyPlanMessage（视频分支 / IK67H9）", () =
     expect(tx.scene_card_generation_records.create).toHaveBeenCalledOnce();
     expect(tx.plan_application_receipts.create).toHaveBeenCalledOnce();
     expect(tx.generation_jobs.create).toHaveBeenCalledOnce();
+    expect(tx.generation_jobs.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        expected_output_count: 1,
+        input: expect.objectContaining({
+          provider_credential: "sealed-provider-token",
+        }),
+      }),
+    });
+    expect(tx.generation_output_slots.create).toHaveBeenCalledOnce();
     expect(tx.command_idempotency.create).toHaveBeenCalledOnce();
     // 回执落盘带 scene_card_id + job_id + command_id。
-    const receiptArg = tx.plan_application_receipts.create.mock.calls[0][0].data;
+    const receiptArg =
+      tx.plan_application_receipts.create.mock.calls[0][0].data;
     expect(receiptArg.scene_card_id).toBe(5001n);
     expect(receiptArg.command_id).toBe("cmd-1");
     expect(receiptArg.application_kind).toBe("scene_card_create");
@@ -279,7 +317,9 @@ describe("PlanApplicationRepo.applyPlanMessage（视频分支 / IK67H9）", () =
   it("能力被禁用视为漂移零写入", async () => {
     const tx = buildTx({
       generation_model_capability: {
-        findUnique: vi.fn().mockResolvedValue({ ...buildCapabilityRow(), enabled: false }),
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ ...buildCapabilityRow(), enabled: false }),
       },
     });
     const { repo } = repoWith(tx);
@@ -301,18 +341,27 @@ describe("PlanApplicationRepo.applyPlanMessage（视频分支 / IK67H9）", () =
   it("引用素材失效返回 validation_failed 且零写入（AC#4）", async () => {
     const planRow = buildPlanMessageRow({
       derived_references: [
-        { mention_id: "101", mention_seq: 0, type: "asset", first_seen_offset: 9 },
+        {
+          mention_id: "101",
+          mention_seq: 0,
+          type: "asset",
+          first_seen_offset: 9,
+        },
       ],
     });
     const tx = buildTx({
       plan_messages: { findUnique: vi.fn().mockResolvedValue(planRow) },
       conversation_message_mentions: {
-        findMany: vi.fn().mockResolvedValue([{ id: 101n, target_id: 201n, project_id: 42n }]),
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ id: 101n, target_id: 201n, project_id: 42n }]),
       },
       assets: {
-        findMany: vi.fn().mockResolvedValue([
-          { id: 201n, project_id: 42n, status: "deleted", is_delete: false },
-        ]),
+        findMany: vi
+          .fn()
+          .mockResolvedValue([
+            { id: 201n, project_id: 42n, status: "deleted", is_delete: false },
+          ]),
       },
     });
     const { repo } = repoWith(tx);
@@ -326,7 +375,6 @@ describe("PlanApplicationRepo.applyPlanMessage（视频分支 / IK67H9）", () =
 });
 
 // —— 图片分支（IK67H8/T10）：媒体感知分派 + 双层幂等 + 预检零写入 ——
-
 
 const CAP_SUPPORTED = {
   supported_sizes: [],
@@ -403,7 +451,9 @@ function makeImageTx(overrides: Record<string, unknown> = {}) {
     project: {
       findFirst: vi
         .fn()
-        .mockResolvedValue("project" in overrides ? overrides.project : { id: 1n }),
+        .mockResolvedValue(
+          "project" in overrides ? overrides.project : { id: 1n },
+        ),
     },
     plan_messages: {
       findUnique: vi
@@ -430,7 +480,9 @@ function makeImageTx(overrides: Record<string, unknown> = {}) {
       findFirst: vi
         .fn()
         .mockResolvedValue(
-          "capability" in overrides ? overrides.capability : baseImageCapability(),
+          "capability" in overrides
+            ? overrides.capability
+            : baseImageCapability(),
         ),
     },
     generation_jobs: {
@@ -444,6 +496,10 @@ function makeImageTx(overrides: Record<string, unknown> = {}) {
       }),
     },
     cost_reservations: { create: vi.fn().mockResolvedValue({}) },
+    generation_output_slots: {
+      create: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
     generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
     project_events: {
       create: vi
@@ -763,7 +819,8 @@ describe("PlanApplicationRepo.applyPlanMessage（图片分支 / IK67H8）", () =
     const { repo } = repoWith(tx);
     const result = await repo.applyPlanMessage(baseImageInput);
     expect(result.kind).toBe("applied_image");
-    if (result.kind !== "applied_image") throw new Error("expected applied_image");
+    if (result.kind !== "applied_image")
+      throw new Error("expected applied_image");
     expect(result.first_generation_job_id).toBe("200");
     expect(result.receipt.application_kind).toBe("image_generate");
     expect(result.receipt.scene_card_id).toBeNull();
@@ -835,7 +892,8 @@ describe("PlanApplicationRepo.applyPlanMessage（图片分支 / IK67H8）", () =
     const { repo } = repoWith(tx);
     const result = await repo.applyPlanMessage(baseImageInput);
     expect(result.kind).toBe("replayed_image");
-    if (result.kind !== "replayed_image") throw new Error("expected replayed_image");
+    if (result.kind !== "replayed_image")
+      throw new Error("expected replayed_image");
     expect(result.cursor).toBe("500");
     expect(tx.generation_jobs.create).not.toHaveBeenCalled();
   });
@@ -854,7 +912,12 @@ describe("PlanApplicationRepo.applyPlanMessage（图片分支 / IK67H8）", () =
     const tx = makeImageTx({
       planMessage: baseImagePlanMessage({
         derived_references: [
-          { mention_id: "999", mention_seq: 0, type: "asset", first_seen_offset: 0 },
+          {
+            mention_id: "999",
+            mention_seq: 0,
+            type: "asset",
+            first_seen_offset: 0,
+          },
         ],
       }),
       mentions: [
@@ -871,7 +934,8 @@ describe("PlanApplicationRepo.applyPlanMessage（图片分支 / IK67H8）", () =
     const { repo } = repoWith(tx);
     const result = await repo.applyPlanMessage(baseImageInput);
     expect(result.kind).toBe("blocked_requires_new_plan");
-    if (result.kind !== "blocked_requires_new_plan") throw new Error("expected blocked");
+    if (result.kind !== "blocked_requires_new_plan")
+      throw new Error("expected blocked");
     expect(result.blockedBy).toBe("mention_unavailable");
     expect(tx.generation_jobs.create).not.toHaveBeenCalled();
     expect(tx.plan_application_receipts.create).not.toHaveBeenCalled();
@@ -898,7 +962,8 @@ describe("PlanApplicationRepo.applyPlanMessage（图片分支 / IK67H8）", () =
     const { repo } = repoWith(tx);
     const result = await repo.applyPlanMessage(baseImageInput);
     expect(result.kind).toBe("blocked_requires_new_plan");
-    if (result.kind !== "blocked_requires_new_plan") throw new Error("expected blocked");
+    if (result.kind !== "blocked_requires_new_plan")
+      throw new Error("expected blocked");
     expect(result.blockedBy).toBe("capability_drifted");
     expect(tx.generation_jobs.create).not.toHaveBeenCalled();
   });

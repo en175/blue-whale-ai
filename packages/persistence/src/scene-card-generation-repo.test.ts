@@ -69,7 +69,9 @@ function referenceAsset(
   };
 }
 
-function buildTx(overrides: Record<string, Record<string, ReturnType<typeof vi.fn>>>) {
+function buildTx(
+  overrides: Record<string, Record<string, ReturnType<typeof vi.fn>>>,
+) {
   const projectEventsCreate = vi.fn().mockImplementation(({ data }) => ({
     id: 1n,
     event_id: "evt_x",
@@ -97,7 +99,11 @@ function buildTx(overrides: Record<string, Record<string, ReturnType<typeof vi.f
     scene_cards: {
       findFirst: vi
         .fn()
-        .mockResolvedValue({ id: 5001n, content_markdown: "一只冲浪的蓝鲸", version: 1 }),
+        .mockResolvedValue({
+          id: 5001n,
+          content_markdown: "一只冲浪的蓝鲸",
+          version: 1,
+        }),
       ...overrides.scene_cards,
     },
     scene_card_generation_presets: {
@@ -127,20 +133,58 @@ function buildTx(overrides: Record<string, Record<string, ReturnType<typeof vi.f
       findMany: vi.fn().mockResolvedValue([]),
       ...overrides.assets,
     },
+    canvas: {
+      findFirst: vi.fn().mockResolvedValue({
+        viewport_json: { x: 0, y: 0, zoom: 1 },
+        nodes_json: [
+          {
+            type: "scene_card",
+            scene_card_id: "5001",
+            position: { x: 100, y: 200 },
+            width: 240,
+            height: 135,
+          },
+        ],
+      }),
+      ...overrides.canvas,
+    },
     generation_jobs: {
       create: vi
         .fn()
-        .mockResolvedValue({ id: 9001n, type: "video", source: "scene_card", status: "queued", progress: 0, version: 0 }),
+        .mockResolvedValue({
+          id: 9001n,
+          type: "video",
+          source: "scene_card",
+          status: "queued",
+          progress: 0,
+          version: 0,
+        }),
       ...overrides.generation_jobs,
     },
-    cost_reservations: { create: vi.fn().mockResolvedValue({}), ...overrides.cost_reservations },
-    generation_job_logs: { create: vi.fn().mockResolvedValue({}), ...overrides.generation_job_logs },
-    project_events: { create: projectEventsCreate, ...overrides.project_events },
+    cost_reservations: {
+      create: vi.fn().mockResolvedValue({}),
+      ...overrides.cost_reservations,
+    },
+    generation_output_slots: {
+      create: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      ...overrides.generation_output_slots,
+    },
+    generation_job_logs: {
+      create: vi.fn().mockResolvedValue({}),
+      ...overrides.generation_job_logs,
+    },
+    project_events: {
+      create: projectEventsCreate,
+      ...overrides.project_events,
+    },
   };
 }
 
 function repoWith(tx: ReturnType<typeof buildTx>) {
-  const transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(tx));
+  const transaction = vi.fn(
+    async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+  );
   const prisma = { $transaction: transaction } as unknown as PrismaClient;
   return { repo: createSceneCardGenerationRepo(prisma), transaction };
 }
@@ -178,11 +222,21 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
       preset_version: 2,
     });
     expect(tx.scene_card_generation_presets.updateMany).toHaveBeenCalledOnce();
-    const updateArg = tx.scene_card_generation_presets.updateMany.mock.calls[0][0];
+    const updateArg =
+      tx.scene_card_generation_presets.updateMany.mock.calls[0][0];
     expect(updateArg.where.version).toBe(1);
     expect(updateArg.data.version).toEqual({ increment: 1 });
     expect(tx.scene_card_generation_records.create).toHaveBeenCalledOnce();
     expect(tx.generation_jobs.create).toHaveBeenCalledOnce();
+    expect(tx.generation_jobs.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        expected_output_count: 1,
+        input: expect.objectContaining({
+          placement_anchor: { x: 100, y: 200, width: 240, height: 135 },
+        }),
+      }),
+    });
+    expect(tx.generation_output_slots.create).toHaveBeenCalledOnce();
     expect(tx.command_idempotency.create).toHaveBeenCalledOnce();
   });
 
@@ -192,7 +246,8 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
 
     await repo.regenerateSceneCard(baseInput);
 
-    const recordArg = tx.scene_card_generation_records.create.mock.calls[0][0].data;
+    const recordArg =
+      tx.scene_card_generation_records.create.mock.calls[0][0].data;
     expect(recordArg.plan_message_id).toBe(4001n);
     expect(recordArg.application_receipt_id).toBe(7001n);
     expect(recordArg.summary_status).toBe("generating");

@@ -14,6 +14,10 @@ import {
 import { publicGenerationInput } from "./generation-input.js";
 import { classifyMentionAvailability } from "./mention-availability.js";
 import { loadPlanApplicationFacts } from "./plan-application-facts.js";
+import {
+  resolveLogicalSlots,
+  type OutputSlotStatus,
+} from "./generation-output-slot-repo.js";
 
 /** Snapshot 读路径的 job + asset 聚合 db port（Prisma-backed）。
  *  对齐 Java SnapshotService 项目级 GenerationJob 与 Asset 引用读取：
@@ -22,14 +26,26 @@ import { loadPlanApplicationFacts } from "./plan-application-facts.js";
  *  对齐部署 schema：conversation_messages / agent_runs / generation_job_outputs /
  *  project_events 表暂无 → 这些切片由 handler 补空数组与 cursor 0。字段 snake_case。 */
 
+export interface SnapshotOutputSlotView {
+  slot_id: string;
+  slot_index: number;
+  status: OutputSlotStatus;
+  asset_id: string | null;
+  retry_of_slot_id: string | null;
+  initial_placement_status: "pending" | "placed";
+}
+
 export interface SnapshotJobView {
   job_id: string;
+  retry_of_job_id: string | null;
   type: string;
   source: string;
   status: string;
   progress: number;
   input: unknown;
   output_asset_ids: string[];
+  /** IK67HE/T14：该 job 的固定输出槽（按 slot_index 升序稳定排序）。 */
+  output_slots: SnapshotOutputSlotView[];
   /** DB 原始 error（结构化 map）；投影成公开信封是 handler 层职责。 */
   stored_error: Record<string, unknown> | null;
 }
@@ -161,14 +177,16 @@ export interface SnapshotPlanApplicationReceiptView {
   applied_at: string;
 }
 
-/** Snapshot 场景卡生成记录投影（IK67HB，T13）：generation origins/summaries 恢复权威子集。
- *  完整 Preset 参数不进 Snapshot（省体积），编辑器打开时按需 GET 只读端点。 */
+/** Snapshot 场景卡生成记录投影（IK67HB，T13；IK67HE/T14 增 slots）：generation origins/summaries 恢复权威子集。
+ *  完整 Preset 参数不进 Snapshot（省体积），编辑器打开时按需 GET 只读端点。
+ *  slots 为该记录下全部 job 的输出槽聚合（含重试 job 的新槽），按 slot_index 升序。 */
 export interface SnapshotSceneCardGenerationRecordView {
   record_id: string;
   scene_card_id: string;
   summary_status: string;
   first_generation_job_id: string;
   plan_message_id: string;
+  output_slots: SnapshotOutputSlotView[];
 }
 
 /** output_asset_ids（Json 数组）→ string[]。容忍 number/string 混合（历史数据）。 */
@@ -222,14 +240,40 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         });
       }
 
+      // IK67HE/T14：加载该 project 全部输出槽（按 slot_index 升序稳定），按 job 分组附加到 job view。
+      const slotRows = await prisma.generation_output_slots.findMany({
+        where: { project_id: pid },
+        orderBy: [{ generation_job_id: "asc" }, { slot_index: "asc" }, { id: "asc" }],
+      });
+      const slotsByJob = new Map<string, SnapshotOutputSlotView[]>();
+      for (const s of slotRows) {
+        const jobId = s.generation_job_id.toString();
+        const list = slotsByJob.get(jobId) ?? [];
+        list.push({
+          slot_id: s.id.toString(),
+          slot_index: s.slot_index,
+          status: s.status as OutputSlotStatus,
+          asset_id: s.asset_id == null ? null : s.asset_id.toString(),
+          retry_of_slot_id:
+            s.retry_of_slot_id == null ? null : s.retry_of_slot_id.toString(),
+          initial_placement_status: s.initial_placement_status as
+            | "pending"
+            | "placed",
+        });
+        slotsByJob.set(jobId, list);
+      }
+
       const generation_jobs: SnapshotJobView[] = jobs.map((job) => ({
         job_id: job.id.toString(),
+        retry_of_job_id:
+          job.retry_of_job_id == null ? null : job.retry_of_job_id.toString(),
         type: job.type,
         source: job.source,
         status: job.status,
         progress: job.progress,
         input: publicGenerationInput(job.input ?? null),
         output_asset_ids: parseAssetIdList(job.output_asset_ids),
+        output_slots: slotsByJob.get(job.id.toString()) ?? [],
         stored_error: toStoredError(job.error),
       }));
 
@@ -341,6 +385,31 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
             },
           }),
         ]);
+      // IK67HE/T14：查该 project 全部输出槽，按 record 分组附加到 record 投影。
+      const allSlotRows = await prisma.generation_output_slots.findMany({
+        where: { project_id: pid, scene_card_generation_record_id: { not: null } },
+        orderBy: [{ scene_card_generation_record_id: "asc" }, { slot_index: "asc" }, { id: "asc" }],
+      });
+      const slotsByRecord = new Map<string, SnapshotOutputSlotView[]>();
+      for (const s of allSlotRows) {
+        const rid = s.scene_card_generation_record_id!.toString();
+        const list = slotsByRecord.get(rid) ?? [];
+        list.push({
+          slot_id: s.id.toString(),
+          slot_index: s.slot_index,
+          status: s.status as OutputSlotStatus,
+          asset_id: s.asset_id == null ? null : s.asset_id.toString(),
+          retry_of_slot_id:
+            s.retry_of_slot_id == null ? null : s.retry_of_slot_id.toString(),
+          initial_placement_status: s.initial_placement_status as
+            | "pending"
+            | "placed",
+        });
+        slotsByRecord.set(rid, list);
+      }
+      for (const [recordId, slots] of slotsByRecord) {
+        slotsByRecord.set(recordId, resolveLogicalSlots(slots));
+      }
       const assetIds = [
         ...new Set(
           mentionRows
@@ -535,6 +604,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           summary_status: record.summary_status,
           first_generation_job_id: record.first_generation_job_id.toString(),
           plan_message_id: record.plan_message_id.toString(),
+          output_slots: slotsByRecord.get(record.id.toString()) ?? [],
         })),
         agent_runs: runs.map((run) => {
           const activations = creativeSkillActivationSchema
