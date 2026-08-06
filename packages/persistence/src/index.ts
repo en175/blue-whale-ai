@@ -72,6 +72,14 @@ export {
   type ModelFeatures,
 } from "./model-capability-repo.js";
 export {
+  createModelCapabilityAdminRepo,
+  type ModelCapabilityAdminRepo,
+  type AdminModelCapabilityRow,
+  type CreateModelCapabilityInput,
+  type UpdateModelCapabilityInput,
+  type CreateModelCapabilityResult,
+} from "./model-capability-admin-repo.js";
+export {
   createAssetRepo,
   assetDurationSeconds,
   type AssetRepo,
