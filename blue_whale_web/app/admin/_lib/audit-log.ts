@@ -8,7 +8,7 @@
 
 import { adminRequest } from "./admin-api";
 
-export type AuditCategory = "pricing" | "tier" | "order" | "user";
+export type AuditCategory = "model.capability" | "tier" | "order" | "user";
 
 export type AuditLogEntry = {
   id: string;
@@ -22,14 +22,14 @@ export type AuditLogEntry = {
 
 export const AUDIT_CATEGORY_OPTIONS = [
   { value: "all", label: "全部类别" },
-  { value: "pricing", label: "定价规则" },
+  { value: "model.capability", label: "模型列表" },
   { value: "tier", label: "充值档位" },
   { value: "order", label: "订单管理" },
   { value: "user", label: "用户管理" },
 ];
 
 export const CATEGORY_LABELS: Record<AuditCategory, string> = {
-  pricing: "定价规则",
+  "model.capability": "模型列表",
   tier: "充值档位",
   order: "订单管理",
   user: "用户管理",
