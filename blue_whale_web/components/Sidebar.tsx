@@ -16,7 +16,6 @@ import {
   Home,
   LayoutGrid,
   Sparkles,
-  Waves,
 } from "lucide-react";
 
 type NavItem = {
@@ -49,7 +48,11 @@ export default function Sidebar() {
         aria-label="Blue-Whale 首页"
         className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg text-[var(--tc-accent)] transition-colors hover:bg-[var(--tc-bg-elevated)]"
       >
-        <Waves className="h-5 w-5" />
+        <img
+          src="/blue_whale.svg"
+          alt="Blue-Whale"
+          className="h-5 w-auto"
+        />
       </Link>
       {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
         const active = isActive(href);
