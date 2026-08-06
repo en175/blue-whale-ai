@@ -68,6 +68,8 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
 COPY --from=builder /app/blue_whale_web/.next/standalone ./
 COPY --from=builder /app/blue_whale_web/.next/static ./blue_whale_web/.next/static
 COPY --from=builder /app/blue_whale_web/.worker-dist ./blue_whale_web/.worker-dist
+# standalone 不自动带入 public/（logo/favicon 等静态资源），须手动 COPY
+COPY --from=builder /app/blue_whale_web/public ./blue_whale_web/public
 
 EXPOSE 3000
 # 容器内 server.js 默认监听 3000；通过 HOSTNAME=0.0.0.0 暴露到 LAN
