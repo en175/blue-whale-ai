@@ -68,4 +68,21 @@ INSERT INTO generation_model_capability (
     ),
     TRUE,
     20
+  ),
+  (
+    'volcengine',
+    'MiniMax-M3',
+    'text',
+    'MiniMax-M3',
+    JSON_ARRAY(),
+    JSON_ARRAY(),
+    NULL,
+    JSON_ARRAY(),
+    '',
+    NULL,
+    '',
+    NULL,
+    JSON_OBJECT(),
+    TRUE,
+    100
   );
