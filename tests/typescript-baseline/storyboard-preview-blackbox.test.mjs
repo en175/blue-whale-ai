@@ -330,14 +330,22 @@ test("可选旁路：建 image job + 画格槽，不建视频 job、不改 Prese
   const preview = mysqlJson(
     `SELECT JSON_OBJECT('summary_status',summary_status,'first_generation_job_id',first_generation_job_id) FROM storyboard_previews WHERE id=${previewId}`,
   );
-  assert.equal(preview.summary_status, "generating");
+  // summary_status/槽状态是瞬态：快 worker 可能在断言前已跑完画格 job，
+  // 只约束取值属于「生成中或已成功」合法集合，不断言瞬时中间值。
+  assert.ok(
+    ["generating", "success"].includes(preview.summary_status),
+    `预览汇总态应合法，实际 ${preview.summary_status}`,
+  );
   assert.equal(String(preview.first_generation_job_id), jobId);
   const slots = mysqlJson(
     `SELECT JSON_ARRAYAGG(JSON_OBJECT('slot_index',slot_index,'status',status)) FROM generation_output_slots WHERE generation_job_id=${jobId}`,
   );
   const slotIndexes = slots.map((s) => s.slot_index).sort((a, b) => a - b);
   assert.deepEqual(slotIndexes, [0, 1], "画格槽 slot_index 应为 0..count-1");
-  assert.ok(slots.every((s) => s.status === "pending"), "新画格槽应为 pending");
+  assert.ok(
+    slots.every((s) => ["pending", "succeeded"].includes(s.status)),
+    "新画格槽应为 pending 或已被快路径补为 succeeded",
+  );
   resetScenarios();
 }, 150_000);
 
@@ -360,7 +368,7 @@ test("Snapshot 含 storyboard_previews + project_events 发 storyboard_preview.c
   assert.equal(String(previewView.first_generation_job_id), String(result.body.data?.generation_job_id));
 
   const event = mysqlJson(
-    `SELECT JSON_OBJECT('event_type',event_type,'aggregate_type',aggregate_type) FROM project_events WHERE event_type='storyboard_preview.created' AND aggregate_id='${previewId}' ORDER BY cursor DESC LIMIT 1`,
+    `SELECT JSON_OBJECT('event_type',event_type,'aggregate_type',aggregate_type) FROM project_events WHERE event_type='storyboard_preview.created' AND aggregate_id='${previewId}' ORDER BY \`cursor\` DESC LIMIT 1`,
   );
   assert.ok(event, "project_events 应发 storyboard_preview.created");
   assert.equal(event.aggregate_type, "storyboard_preview");

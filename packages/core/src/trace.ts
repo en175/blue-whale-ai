@@ -6,12 +6,43 @@
  * - 缺省生成：最外层入口未带时生成「时间戳-随机串」；
  * - 异步传播：基于 AsyncLocalStorage，trace_id 随异步上下文自动传递。
  */
-import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 
 export const TRACE_ID_HEADER = "x-trace-id";
 
-const traceStore = new AsyncLocalStorage<string>();
+/** AsyncLocalStorage 最小结构（避免静态 import node:async_hooks）。 */
+interface TraceStore {
+  run<T>(traceId: string, fn: () => T): T;
+  getStore(): string | undefined;
+}
+
+const noopStore: TraceStore = {
+  run: (_traceId, fn) => fn(),
+  getStore: () => undefined,
+};
+
+/**
+ * 服务端首次调用时经 process.getBuiltinModule 装配 AsyncLocalStorage；
+ * 浏览器端恒返回空实现。不用静态 import node:async_hooks，
+ * 保证本模块经主 barrel 进入浏览器 chunk 时不因 Node 专有模块构建失败
+ * （Turbopack 浏览器 chunk 不支持 external node:async_hooks，IK67HH T16）。
+ */
+function resolveStore(): TraceStore {
+  if (
+    typeof process === "undefined" ||
+    typeof process.versions?.node !== "string"
+  ) {
+    return noopStore;
+  }
+  const builtin = (
+    process as { getBuiltinModule?: (id: string) => unknown }
+  ).getBuiltinModule?.("node:async_hooks") as
+    | { AsyncLocalStorage: new <T>() => TraceStore }
+    | undefined;
+  return builtin ? new builtin.AsyncLocalStorage<string>() : noopStore;
+}
+
+const traceStore = resolveStore();
 
 /** 当前异步上下文中的 trace_id；无上下文时返回 null。 */
 export function getCurrentTraceId(): string | null {

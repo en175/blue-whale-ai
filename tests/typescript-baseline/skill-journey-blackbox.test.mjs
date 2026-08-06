@@ -632,9 +632,9 @@ test("主路径6 官方与个人差异：创建个人技能后两域标记与菜
     "服务=web 事实=应返回个人技能身份",
   );
 
-  // 两域并集：@官方（主路径5 添加的官方引用）与 @个人 标记
-  await page.locator("text=@官方").first().waitFor({ timeout: 15_000 });
-  await page.locator("text=@个人").first().waitFor({ timeout: 15_000 });
+  // 两域并集：我的技能行的官方/个人徽标（徽标文本不带 @，d7e28b96 后形态）
+  await myRow(STORYBOARD_NAME).getByText("官方").waitFor({ timeout: 15_000 });
+  await myRow(PERSONAL_SKILL_NAME).getByText("个人").waitFor({ timeout: 15_000 });
 
   // 菜单分化：官方行仅「移出我的技能」；个人行「查看技能/删除技能」
   const officialRow = myRow(STORYBOARD_NAME);

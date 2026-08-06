@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CursorExpiredError,
+  EventIntegrityError,
   applyProductEvent,
   applySnapshot,
   consumeProjectEventStream,
@@ -1409,6 +1410,138 @@ describe("T07 临时交付与运行控制（IK67GZ，契约 §8）", () => {
     expect(state.provisionalDeliveries.size).toBe(1);
     state = applySnapshot(state, snapshot(20));
     expect(state.provisionalDeliveries.size).toBe(0);
+  });
+});
+
+describe("SSE 异常触发 Snapshot 恢复（IK67HH T16，ADR-0016 §6）", () => {
+  it("游标前进跳号（雪花 ID）正常应用，不误判异常", () => {
+    const state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
+
+    const next = applyProductEvent(
+      state,
+      event({ event_id: "evt_jump", cursor: 987654 }),
+    );
+
+    expect(next.lastCursor).toBe(987654);
+    expect(next.snapshot?.project.name).toBe("new");
+  });
+
+  it("游标倒退的未知事件抛完整性错误", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
+    state = applyProductEvent(state, event({ event_id: "evt_11", cursor: 11 }));
+
+    expect(() =>
+      applyProductEvent(state, event({ event_id: "evt_9", cursor: 9 })),
+    ).toThrow(EventIntegrityError);
+  });
+
+  it("已见事件的重放仍是安全 no-op，不触发完整性错误", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
+    state = applyProductEvent(state, event());
+
+    const replayed = applyProductEvent(state, event());
+
+    expect(replayed.lastCursor).toBe(state.lastCursor);
+    expect(replayed.snapshot?.project.name).toBe("new");
+  });
+
+  it("未知 schema 版本的事件帧抛完整性错误", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ ...event(), schema_version: 2 })}\n\n`,
+          ),
+        );
+        controller.close();
+      },
+    });
+
+    await expect(
+      consumeProjectEventStream(stream, () => undefined),
+    ).rejects.toThrow(EventIntegrityError);
+  });
+
+  it("乱序事件触发一次 Snapshot 恢复后从新高水位接续", async () => {
+    const controller = new AbortController();
+    const afterValues: Array<number | string> = [];
+    const loadSnapshot = vi
+      .fn<ProjectRecoveryTransport["loadSnapshot"]>()
+      .mockResolvedValueOnce(snapshot(10))
+      .mockResolvedValueOnce(snapshot(15, "recovered"));
+    let connection = 0;
+    const transport: ProjectRecoveryTransport = {
+      loadSnapshot,
+      consumeEvents: vi.fn(async (_projectId, after, _signal, onEvent) => {
+        afterValues.push(after);
+        connection += 1;
+        if (connection === 1) {
+          onEvent(event({ event_id: "evt_9", cursor: 9 }));
+          return;
+        }
+        onEvent(
+          event({
+            event_id: "evt_16",
+            cursor: 16,
+            payload: { name: "gap-ok" },
+          }),
+        );
+        controller.abort();
+      }),
+    };
+    const states: Array<{ cursor: number | string; name?: string }> = [];
+
+    await runProjectRecovery(
+      1,
+      transport,
+      (state) =>
+        states.push({
+          cursor: state.lastCursor,
+          name: state.snapshot?.project.name,
+        }),
+      controller.signal,
+      0,
+    );
+
+    expect(loadSnapshot).toHaveBeenCalledTimes(2);
+    expect(afterValues).toEqual([10, 15]);
+    expect(states.at(-1)).toEqual({ cursor: 16, name: "gap-ok" });
+  });
+
+  it("恢复后再次遇到不兼容事件：投影 incompatible 并停止，不循环重连", async () => {
+    const controller = new AbortController();
+    const loadSnapshot = vi
+      .fn<ProjectRecoveryTransport["loadSnapshot"]>()
+      .mockResolvedValueOnce(snapshot(10))
+      .mockResolvedValueOnce(snapshot(15, "recovered"));
+    let connection = 0;
+    const transport: ProjectRecoveryTransport = {
+      loadSnapshot,
+      consumeEvents: vi.fn(async (_projectId, _after, _signal, onEvent) => {
+        connection += 1;
+        onEvent(
+          event({
+            event_id: `evt_bad_${connection}`,
+            cursor: connection === 1 ? 9 : 14,
+          }),
+        );
+      }),
+    };
+    const states: Array<boolean | undefined> = [];
+
+    await runProjectRecovery(
+      1,
+      transport,
+      (state) => states.push(state.incompatible),
+      controller.signal,
+      0,
+    );
+
+    expect(connection).toBe(2);
+    expect(loadSnapshot).toHaveBeenCalledTimes(2);
+    expect(states.at(-1)).toBe(true);
+    controller.abort();
   });
 });
 

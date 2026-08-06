@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  hasSeedreamSizeTable,
   listSeedreamSizes,
   resolveSeedreamImageSize,
 } from "./seedream-image-size";
@@ -111,6 +112,14 @@ describe("resolveSeedreamImageSize", () => {
     expect(
       resolveSeedreamImageSize("doubao-seedream-5-0-260128", "2K", "5:4"),
     ).toBeNull();
+  });
+});
+
+describe("hasSeedreamSizeTable", () => {
+  it("只把查表族模型判为 seedream，族外模型尺寸直通", () => {
+    expect(hasSeedreamSizeTable("doubao-seedream-4-0-250828")).toBe(true);
+    expect(hasSeedreamSizeTable("t15-image")).toBe(false);
+    expect(hasSeedreamSizeTable("unknown-model")).toBe(false);
   });
 });
 

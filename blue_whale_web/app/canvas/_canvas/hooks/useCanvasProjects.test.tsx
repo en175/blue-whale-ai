@@ -62,6 +62,7 @@ function recoveryState(snapshot: ProjectSnapshot): ProjectRecoveryState {
     aggregateVersions: new Map(),
     deleted: false,
     provisionalDeliveries: new Map(),
+    incompatible: false,
   };
 }
 

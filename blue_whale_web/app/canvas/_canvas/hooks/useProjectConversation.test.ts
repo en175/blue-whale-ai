@@ -96,6 +96,7 @@ describe("useProjectConversation（画布持久化对话接线 IK67GD T02）", (
         aggregateVersions: new Map(),
         deleted: false,
         provisionalDeliveries: new Map(),
+        incompatible: false,
       });
     });
 
@@ -131,6 +132,7 @@ describe("useProjectConversation（画布持久化对话接线 IK67GD T02）", (
         aggregateVersions: new Map(),
         deleted: false,
         provisionalDeliveries: new Map(),
+        incompatible: false,
       });
     });
 
@@ -186,6 +188,7 @@ describe("useProjectConversation（画布持久化对话接线 IK67GD T02）", (
         aggregateVersions: new Map(),
         deleted: false,
         provisionalDeliveries: new Map(),
+        incompatible: false,
       });
     });
 
