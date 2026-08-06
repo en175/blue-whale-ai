@@ -46,12 +46,12 @@ export default function Sidebar() {
       <Link
         href="/"
         aria-label="Blue-Whale 首页"
-        className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg text-[var(--tc-accent)] transition-colors hover:bg-[var(--tc-bg-elevated)]"
+        className="mb-3 flex h-[50px] w-[50px] items-center justify-center rounded-lg text-[var(--tc-accent)] transition-colors hover:bg-[var(--tc-bg-elevated)]"
       >
         <img
           src="/blue_whale.svg"
           alt="Blue-Whale"
-          className="h-5 w-auto"
+          className="h-9 w-auto"
         />
       </Link>
       {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
