@@ -194,6 +194,7 @@ export default function AdminModelsPage() {
   const [form, setForm] = useState<ModelFormData>(blankForm("image"));
   const [copySourceId, setCopySourceId] = useState("");
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -313,6 +314,7 @@ export default function AdminModelsPage() {
     const idx = filtered.findIndex((row) => row.id === m.id);
     const neighbor = filtered[idx + dir];
     if (!neighbor) return;
+    setBusyId(m.id);
     try {
       setModels(
         await reorderModels([
@@ -322,6 +324,8 @@ export default function AdminModelsPage() {
       );
     } catch (e) {
       alert(e instanceof Error ? e.message : "调整排序失败");
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -333,11 +337,14 @@ export default function AdminModelsPage() {
     ) {
       return;
     }
+    setBusyId(m.id);
     try {
       await deleteModel(m.id);
       setModels((prev) => prev.filter((row) => row.id !== m.id));
     } catch (e) {
       alert(e instanceof Error ? e.message : "删除失败");
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -451,7 +458,7 @@ export default function AdminModelsPage() {
                       </button>
                       <button
                         onClick={() => handleMove(m, -1)}
-                        disabled={idx === 0}
+                        disabled={idx === 0 || busyId === m.id}
                         className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[var(--tc-text-primary)] hover:bg-[var(--tc-bg-elevated)] disabled:cursor-not-allowed disabled:opacity-30"
                         aria-label={`上移 ${m.model_label}`}
                         title="上移"
@@ -460,7 +467,9 @@ export default function AdminModelsPage() {
                       </button>
                       <button
                         onClick={() => handleMove(m, 1)}
-                        disabled={idx === filtered.length - 1}
+                        disabled={
+                          idx === filtered.length - 1 || busyId === m.id
+                        }
                         className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[var(--tc-text-primary)] hover:bg-[var(--tc-bg-elevated)] disabled:cursor-not-allowed disabled:opacity-30"
                         aria-label={`下移 ${m.model_label}`}
                         title="下移"
@@ -477,7 +486,8 @@ export default function AdminModelsPage() {
                       </button>
                       <button
                         onClick={() => handleDelete(m)}
-                        className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[var(--tc-destructive)] hover:bg-[var(--tc-bg-elevated)]"
+                        disabled={busyId === m.id}
+                        className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[var(--tc-destructive)] hover:bg-[var(--tc-bg-elevated)] disabled:cursor-not-allowed disabled:opacity-30"
                         aria-label={`删除 ${m.model_label}`}
                         title="删除"
                       >

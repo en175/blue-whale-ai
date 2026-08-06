@@ -241,6 +241,9 @@ export function createModelCapabilityAdminRepo(
       if (input.enabled !== undefined) data.enabled = input.enabled;
       if (input.sort_order !== undefined) data.sort_order = input.sort_order;
 
+      // 可接受的极小竞态窗口：findFirst（is_delete:false）与 update 之间若被并发软删，
+      // 本次更新会作用到已软删行并返回它——下一刷新即从列表消失，无数据丢失。
+      // （toggle 用 SQL 原子翻转规避同类竞态；update 是全字段写，管理端单写者场景下接受该窗口。）
       const row = await prisma.generation_model_capability.update({
         where: { id: pid },
         data,
