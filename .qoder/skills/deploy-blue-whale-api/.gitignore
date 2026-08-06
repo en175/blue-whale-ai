@@ -1,0 +1,2 @@
+# 构建产物（交叉编译二进制 ~113M + image-tag/source-commit 落盘文件），不进 commit。
+.build/
