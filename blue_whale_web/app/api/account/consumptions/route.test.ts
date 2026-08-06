@@ -19,6 +19,7 @@ vi.mock("@blue-whale/core", () => ({
   },
 }));
 
+import { NewApiError } from "@blue-whale/core";
 import { GET } from "./route";
 
 function getRequest(query = "") {
@@ -120,5 +121,15 @@ describe("GET /api/account/consumptions（消费记录）", () => {
     expect(response.status).toBe(502);
     const json = await response.json();
     expect(json.code).toBe(502);
+  });
+
+  it("Go 返回 4xx（如令牌被禁用）→ 原状态透传而非 502", async () => {
+    mocks.listUserConsumeLogs.mockRejectedValue(
+      new NewApiError("Invalid token", 401),
+    );
+    const response = await GET(getRequest());
+    expect(response.status).toBe(401);
+    const json = await response.json();
+    expect(json.code).toBe(401);
   });
 });

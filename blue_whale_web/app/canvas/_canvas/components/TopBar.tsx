@@ -12,7 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { Project } from "../types";
-import { IconPlus, TopviewLogo } from "../icons";
+import { IconPlus } from "../icons";
 import { UserMenu } from "@/components/auth/UserMenu";
 import { CreditBalance } from "@/components/credits/CreditBalance";
 
@@ -355,7 +355,11 @@ export function TopBar({
               justifyContent: "center",
             }}
           >
-            <TopviewLogo className="text-white" />
+            <img
+              src="/blue_whale.svg"
+              alt="Blue-Whale"
+              className="h-7 w-auto"
+            />
           </div>
         </button>
       </div>
