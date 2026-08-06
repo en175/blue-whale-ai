@@ -150,6 +150,12 @@ body {
   --tc-dropdown-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
   --tc-dropdown-shadow-up: 0 -12px 32px rgba(0, 0, 0, 0.4);
 
+  /* Brand logo filter — 透明鲸鱼正图仅保留一层很短的下方软阴影（薄层立体方案）。
+     立体感来自正图下方叠的同形状深蓝副本（下移 2px，见 Sidebar），不靠光晕/底板/蓝光。
+     引用：filter: var(--tc-brand-logo-filter)。 */
+  --tc-brand-logo-filter:
+    drop-shadow(0 1px 2px rgb(0 0 0 / 45%));
+
   --tc-menu-pill-bg: #171717;
   --tc-menu-pill-border: rgba(255, 255, 255, 0.04);
   --tc-menu-pill-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);

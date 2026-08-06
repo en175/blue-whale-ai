@@ -46,13 +46,30 @@ export default function Sidebar() {
       <Link
         href="/"
         aria-label="Blue-Whale 首页"
-        className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg text-[var(--tc-accent)] transition-colors hover:bg-[var(--tc-bg-elevated)]"
+        className="mb-5 flex h-[50px] w-[50px] items-center justify-center rounded-lg text-[var(--tc-accent)] transition-colors hover:bg-[var(--tc-bg-elevated)]"
       >
-        <img
-          src="/blue_whale.svg"
-          alt="Blue-Whale"
-          className="h-5 w-auto"
-        />
+        {/* 薄层立体：正图下方叠同形状深蓝副本下移 2px，形成厚度边 */}
+        <span
+          className="relative block h-9 w-auto"
+          style={{ filter: "var(--tc-brand-logo-filter)" }}
+        >
+          <img
+            src="/blue_whale.svg"
+            alt=""
+            aria-hidden
+            className="absolute inset-0 h-9 w-auto"
+            style={{
+              transform: "translateY(2px)",
+              filter:
+                "grayscale(1) sepia(0.35) hue-rotate(195deg) saturate(0.75) brightness(0.55)",
+            }}
+          />
+          <img
+            src="/blue_whale.svg"
+            alt="Blue-Whale"
+            className="relative h-9 w-auto"
+          />
+        </span>
       </Link>
       {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
         const active = isActive(href);
