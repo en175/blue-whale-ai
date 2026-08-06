@@ -99,3 +99,12 @@ export {
   type GenerationInboxView,
   type InboxConversationView,
 } from "./conversation/generation-inbox.js";
+export {
+  TRACE_ID_HEADER,
+  generateTraceId,
+  getCurrentTraceId,
+  getOrCreateTraceId,
+  runWithTraceId,
+} from "./trace.js";
+// logger / tls-writer 依赖火山 SDK，走子路径 "@blue-whale/core/logging"，
+// 不进主 barrel，避免所有 core 消费者被静态绑定（见 logging.ts 头注释）。
