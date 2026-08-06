@@ -13,6 +13,11 @@ export interface TextCompletionsConfig {
   baseUrl: string;
 }
 
+/** 上游（Go new-api）非流请求超时：防 Go 挂起拖死 BFF 连接；stream=true 不加超时（SSE 长连接）。 */
+export const TEXT_UPSTREAM_TIMEOUT_MS = 60_000;
+/** 请求体最大字节数（content-length 校验）：防鉴权用户推超大 payload（如 base64 图片）。 */
+export const TEXT_MAX_BODY_BYTES = 1_000_000;
+
 /** 只读 NEW_API_BASE_URL（与充值/文生图共用同一 Go new-api 服务）；缺失 → null（调用方按未配置返回 503）。 */
 export function loadTextCompletionsConfig(
   env: Readonly<Record<string, string | undefined>> = process.env,
