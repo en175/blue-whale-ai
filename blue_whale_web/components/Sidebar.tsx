@@ -46,7 +46,7 @@ export default function Sidebar() {
       <Link
         href="/"
         aria-label="Blue-Whale 首页"
-        className="mb-3 flex h-14 w-14 items-center justify-center rounded-lg text-[var(--tc-accent)] transition-colors hover:bg-[var(--tc-bg-elevated)]"
+        className="mb-3 flex h-[50px] w-[50px] items-center justify-center rounded-lg text-[var(--tc-accent)] transition-colors hover:bg-[var(--tc-bg-elevated)]"
       >
         <img
           src="/blue_whale.svg"
