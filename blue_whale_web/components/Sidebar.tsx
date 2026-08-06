@@ -53,7 +53,6 @@ export default function Sidebar() {
           alt="Blue-Whale"
           className="h-5 w-auto"
         />
->>>>>>> feature/网页logo替换为鲸鱼
       </Link>
       {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
         const active = isActive(href);
