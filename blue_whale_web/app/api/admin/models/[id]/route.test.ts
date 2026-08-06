@@ -16,20 +16,27 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getById: vi.fn(),
   update: vi.fn(),
+  remove: vi.fn(),
   logModelUpdate: vi.fn(),
+  logModelDelete: vi.fn(),
 }));
 
 vi.mock("@/lib/model-capability/deps", () => ({
   createModelCapabilityAdminDeps: () => ({
-    db: { getById: mocks.getById, update: mocks.update },
+    db: {
+      getById: mocks.getById,
+      update: mocks.update,
+      remove: mocks.remove,
+    },
   }),
 }));
 
 vi.mock("@/lib/model-capability/operation-log", () => ({
   logModelUpdate: mocks.logModelUpdate,
+  logModelDelete: mocks.logModelDelete,
 }));
 
-import { PUT } from "./route";
+import { DELETE, PUT } from "./route";
 
 const BEFORE = {
   id: "1",
@@ -122,6 +129,54 @@ describe("PUT /api/admin/models/:id 更新", () => {
     const res = await PUT(put({ model_label: "x" }), {
       params: Promise.resolve({ id: "1" }),
     });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("DELETE /api/admin/models/:id 软删除", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getById.mockResolvedValue(BEFORE);
+    mocks.remove.mockResolvedValue(true);
+    mocks.logModelDelete.mockResolvedValue(undefined);
+  });
+
+  it("软删成功 → 200，审计带删除前快照与操作人", async () => {
+    const res = await DELETE(
+      new Request("http://localhost/api/admin/models/1"),
+      {
+        params: Promise.resolve({ id: "1" }),
+      },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ success: true });
+    expect(mocks.remove).toHaveBeenCalledWith("1");
+    expect(mocks.logModelDelete).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "1" }),
+      "admin-test",
+    );
+  });
+
+  it("不存在 / 已软删 → 404，不审计", async () => {
+    mocks.remove.mockResolvedValue(false);
+    const res = await DELETE(
+      new Request("http://localhost/api/admin/models/9"),
+      {
+        params: Promise.resolve({ id: "9" }),
+      },
+    );
+    expect(res.status).toBe(404);
+    expect(mocks.logModelDelete).not.toHaveBeenCalled();
+  });
+
+  it("审计失败不阻断删除（仍 200）", async () => {
+    mocks.logModelDelete.mockRejectedValue(new Error("db down"));
+    const res = await DELETE(
+      new Request("http://localhost/api/admin/models/1"),
+      {
+        params: Promise.resolve({ id: "1" }),
+      },
+    );
     expect(res.status).toBe(200);
   });
 });

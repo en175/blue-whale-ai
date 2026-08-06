@@ -138,3 +138,50 @@ export async function logModelUpdate(
     operator,
   );
 }
+
+export async function logModelToggle(
+  after: AdminModelCapabilityRow,
+  operator: string,
+): Promise<void> {
+  await writeLog(
+    {
+      action: "model.toggle",
+      target: modelTarget(after),
+      detail: `启停模型：${modelTypeLabel(after.capability_type)}「${after.model_label}」（${after.provider_id}/${after.model_id}）→ ${after.enabled ? "启用" : "停用"}`,
+    },
+    operator,
+  );
+}
+
+/** 批量排序审计：target 取第一个变更行 model_id，detail 列出全部 sort_order 变更。 */
+export async function logModelReorder(
+  changes: { id: string; model_id: string; sortOrder: number }[],
+  operator: string,
+): Promise<void> {
+  const detail =
+    changes.length > 0
+      ? changes.map((c) => `${c.model_id}→${c.sortOrder}`).join("，")
+      : "排序调整（无变更）";
+  await writeLog(
+    {
+      action: "model.reorder",
+      target: changes[0]?.model_id ?? "",
+      detail,
+    },
+    operator,
+  );
+}
+
+export async function logModelDelete(
+  model: AdminModelCapabilityRow,
+  operator: string,
+): Promise<void> {
+  await writeLog(
+    {
+      action: "model.delete",
+      target: modelTarget(model),
+      detail: `删除模型：${modelTypeLabel(model.capability_type)}「${model.model_label}」（${model.provider_id}/${model.model_id}），排序 ${model.sort_order}`,
+    },
+    operator,
+  );
+}

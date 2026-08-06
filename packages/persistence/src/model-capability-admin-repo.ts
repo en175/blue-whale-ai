@@ -68,6 +68,10 @@ export type CreateModelCapabilityResult =
   | { ok: true; row: AdminModelCapabilityRow }
   | { ok: false; error: "conflict" };
 
+export type UpdateSortOrderResult =
+  | { ok: true }
+  | { ok: false; error: "not-found"; missingId: string };
+
 export interface ModelCapabilityAdminRepo {
   /** 管理端：列出全部未软删模型（含停用），按 capability_type + sort_order 排序。 */
   listAll(): Promise<AdminModelCapabilityRow[]>;
@@ -80,6 +84,14 @@ export interface ModelCapabilityAdminRepo {
     id: string,
     input: UpdateModelCapabilityInput,
   ): Promise<AdminModelCapabilityRow | null>;
+  /** 启停切换：翻转 enabled（即时影响 dock 展示列表）；id 不存在或已软删 → null。 */
+  toggleEnabled(id: string): Promise<AdminModelCapabilityRow | null>;
+  /** 软删除（is_delete=true，行数据保留）；已软删或不存在 → false。 */
+  remove(id: string): Promise<boolean>;
+  /** 批量更新排序（sort_order）；任一 id 非法 → 抛错；任一 id 不存在/已软删 → not-found（不产生部分更新）。 */
+  updateSortOrder(
+    items: { id: string; sortOrder: number }[],
+  ): Promise<UpdateSortOrderResult>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -234,6 +246,63 @@ export function createModelCapabilityAdminRepo(
         data,
       });
       return toRow(row);
+    },
+
+    async toggleEnabled(id) {
+      const pid = parseId(id);
+      if (pid === null) return null;
+      // 原子翻转：SQL 层 NOT enabled，避免 read-modify-write 竞态（并发/双击下
+      // 各语句都基于当前值取反，不丢失更新）。命中 0 行 = 不存在或已软删 → null。
+      const flipped = await prisma.$executeRaw`
+        UPDATE generation_model_capability
+        SET enabled = NOT enabled, gmt_modified = NOW()
+        WHERE id = ${pid} AND is_delete = false
+      `;
+      if (flipped === 0) return null;
+      const row = await prisma.generation_model_capability.findFirst({
+        where: { id: pid, is_delete: false },
+      });
+      return row ? toRow(row) : null;
+    },
+
+    async remove(id) {
+      const pid = parseId(id);
+      if (pid === null) return false;
+      const r = await prisma.generation_model_capability.updateMany({
+        where: { id: pid, is_delete: false },
+        data: { is_delete: true, gmt_modified: new Date() },
+      });
+      return r.count > 0;
+    },
+
+    async updateSortOrder(items) {
+      const parsed = items.map((item) => ({
+        pid: parseId(item.id),
+        sortOrder: item.sortOrder,
+        rawId: item.id,
+      }));
+      const invalid = parsed.find((p) => p.pid === null);
+      if (invalid) throw new Error(`非法模型 id: ${invalid.rawId}`);
+      // 与 remove/toggleEnabled 同口径：只对未软删行生效。先整体校验存在性，
+      // 任一 id 不存在/已软删 → not-found，避免事务产生部分更新。
+      const existing = await prisma.generation_model_capability.findMany({
+        where: { id: { in: parsed.map((p) => p.pid as bigint) }, is_delete: false },
+        select: { id: true },
+      });
+      const found = new Set(existing.map((r) => r.id.toString()));
+      const missing = parsed.find((p) => !found.has((p.pid as bigint).toString()));
+      if (missing) {
+        return { ok: false, error: "not-found", missingId: missing.rawId };
+      }
+      await prisma.$transaction(
+        parsed.map((item) =>
+          prisma.generation_model_capability.update({
+            where: { id: item.pid as bigint },
+            data: { sort_order: item.sortOrder, gmt_modified: new Date() },
+          }),
+        ),
+      );
+      return { ok: true };
     },
   };
 }

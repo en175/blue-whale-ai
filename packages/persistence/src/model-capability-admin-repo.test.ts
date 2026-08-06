@@ -199,3 +199,123 @@ describe("ModelCapabilityAdminRepo.update", () => {
     expect(prisma.generation_model_capability.update).not.toHaveBeenCalled();
   });
 });
+
+describe("ModelCapabilityAdminRepo.toggleEnabled", () => {
+  it("原子翻转 enabled（SQL NOT enabled），返回更新后行", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(1);
+    const findFirst = vi.fn().mockResolvedValue(
+      makeRow({ id: 1n, enabled: false }),
+    );
+    const prisma = {
+      generation_model_capability: { findFirst },
+      $executeRaw: executeRaw,
+    } as unknown as PrismaClient;
+
+    const row = await createModelCapabilityAdminRepo(prisma).toggleEnabled("1");
+    expect(row).toMatchObject({ id: "1", enabled: false });
+    expect(executeRaw).toHaveBeenCalled();
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 1n, is_delete: false } }),
+    );
+  });
+
+  it("id 非法 → null 不查库；未命中（不存在/已软删）→ null", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const findFirst = vi.fn();
+    const prisma = {
+      generation_model_capability: { findFirst },
+      $executeRaw: executeRaw,
+    } as unknown as PrismaClient;
+
+    const repo = createModelCapabilityAdminRepo(prisma);
+    expect(await repo.toggleEnabled("abc")).toBeNull();
+    expect(executeRaw).not.toHaveBeenCalled();
+    expect(await repo.toggleEnabled("1")).toBeNull();
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("ModelCapabilityAdminRepo.remove", () => {
+  it("软删除：is_delete=true，只命中未软删行", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      generation_model_capability: { updateMany },
+    } as unknown as PrismaClient;
+
+    const ok = await createModelCapabilityAdminRepo(prisma).remove("1");
+    expect(ok).toBe(true);
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 1n, is_delete: false },
+        data: expect.objectContaining({ is_delete: true }),
+      }),
+    );
+  });
+
+  it("id 非法 / 未命中 → false", async () => {
+    const prisma = {
+      generation_model_capability: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    } as unknown as PrismaClient;
+
+    const repo = createModelCapabilityAdminRepo(prisma);
+    expect(await repo.remove("abc")).toBe(false);
+    expect(await repo.remove("999")).toBe(false);
+  });
+});
+
+describe("ModelCapabilityAdminRepo.updateSortOrder", () => {
+  it("批量事务更新排序；全部未软删命中 → ok", async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const findMany = vi.fn().mockResolvedValue([{ id: 1n }, { id: 2n }]);
+    const prisma = {
+      generation_model_capability: { update, findMany },
+      $transaction: vi.fn(),
+    } as unknown as PrismaClient;
+
+    const repo = createModelCapabilityAdminRepo(prisma);
+    const result = await repo.updateSortOrder([
+      { id: "1", sortOrder: 2 },
+      { id: "2", sortOrder: 1 },
+    ]);
+    expect(result).toEqual({ ok: true });
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: [1n, 2n] }, is_delete: false },
+        select: { id: true },
+      }),
+    );
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it("id 非法 → 抛错，不查库不事务", async () => {
+    const prisma = {
+      generation_model_capability: { findMany: vi.fn() },
+      $transaction: vi.fn(),
+    } as unknown as PrismaClient;
+
+    const repo = createModelCapabilityAdminRepo(prisma);
+    await expect(
+      repo.updateSortOrder([{ id: "abc", sortOrder: 1 }]),
+    ).rejects.toThrow("非法模型 id");
+    expect(prisma.generation_model_capability.findMany).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("任一 id 不存在/已软删 → not-found，不产生部分更新", async () => {
+    const findMany = vi.fn().mockResolvedValue([{ id: 1n }]);
+    const prisma = {
+      generation_model_capability: { findMany },
+      $transaction: vi.fn(),
+    } as unknown as PrismaClient;
+
+    const repo = createModelCapabilityAdminRepo(prisma);
+    const result = await repo.updateSortOrder([
+      { id: "1", sortOrder: 2 },
+      { id: "9", sortOrder: 1 },
+    ]);
+    expect(result).toEqual({ ok: false, error: "not-found", missingId: "9" });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+});

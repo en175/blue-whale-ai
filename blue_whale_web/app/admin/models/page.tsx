@@ -1,7 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Pencil, Plus } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Pencil,
+  Plus,
+  Power,
+  Trash2,
+} from "lucide-react";
 import {
   Table,
   TableHeader,
@@ -17,7 +24,10 @@ import { Input } from "../_components/ui/input";
 import { Select } from "../_components/ui/select";
 import {
   createModel,
+  deleteModel,
   getModels,
+  reorderModels,
+  toggleModel,
   updateModel,
   type AdminModelRow,
 } from "../_lib/admin-models";
@@ -183,6 +193,7 @@ export default function AdminModelsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ModelFormData>(blankForm("image"));
   const [copySourceId, setCopySourceId] = useState("");
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -284,6 +295,52 @@ export default function AdminModelsPage() {
 
   const isEdit = editingId !== null;
 
+  /* ---------- 生命周期：启停 / 上下移排序 / 软删（服务端落审计） ---------- */
+
+  const handleToggle = async (m: AdminModelRow) => {
+    setTogglingId(m.id);
+    try {
+      const updated = await toggleModel(m.id);
+      setModels((prev) => prev.map((row) => (row.id === m.id ? updated : row)));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "切换启停失败");
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const handleMove = async (m: AdminModelRow, dir: -1 | 1) => {
+    const idx = filtered.findIndex((row) => row.id === m.id);
+    const neighbor = filtered[idx + dir];
+    if (!neighbor) return;
+    try {
+      setModels(
+        await reorderModels([
+          { id: m.id, sortOrder: neighbor.sort_order },
+          { id: neighbor.id, sortOrder: m.sort_order },
+        ]),
+      );
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "调整排序失败");
+    }
+  };
+
+  const handleDelete = async (m: AdminModelRow) => {
+    if (
+      !window.confirm(
+        `确认删除模型「${m.model_label}」（${m.model_id}）？软删后行数据保留、列表不再展示。`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await deleteModel(m.id);
+      setModels((prev) => prev.filter((row) => row.id !== m.id));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "删除失败");
+    }
+  };
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -353,7 +410,7 @@ export default function AdminModelsPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((m) => (
+              filtered.map((m, idx) => (
                 <TableRow key={m.id}>
                   <TableCell className="font-mono text-xs text-[var(--tc-text-primary)]">
                     {m.model_id}
@@ -382,13 +439,51 @@ export default function AdminModelsPage() {
                     {new Date(m.updated_at).toLocaleString("zh-CN")}
                   </TableCell>
                   <TableCell>
-                    <button
-                      onClick={() => openEdit(m)}
-                      className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[var(--tc-text-primary)] hover:bg-[var(--tc-bg-elevated)]"
-                      aria-label={`编辑 ${m.model_label}`}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleToggle(m)}
+                        disabled={togglingId === m.id}
+                        className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[var(--tc-text-primary)] hover:bg-[var(--tc-bg-elevated)] disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label={`${m.enabled ? "停用" : "启用"} ${m.model_label}`}
+                        title={m.enabled ? "停用" : "启用"}
+                      >
+                        <Power className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleMove(m, -1)}
+                        disabled={idx === 0}
+                        className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[var(--tc-text-primary)] hover:bg-[var(--tc-bg-elevated)] disabled:cursor-not-allowed disabled:opacity-30"
+                        aria-label={`上移 ${m.model_label}`}
+                        title="上移"
+                      >
+                        <ChevronUp className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleMove(m, 1)}
+                        disabled={idx === filtered.length - 1}
+                        className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[var(--tc-text-primary)] hover:bg-[var(--tc-bg-elevated)] disabled:cursor-not-allowed disabled:opacity-30"
+                        aria-label={`下移 ${m.model_label}`}
+                        title="下移"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => openEdit(m)}
+                        className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[var(--tc-text-primary)] hover:bg-[var(--tc-bg-elevated)]"
+                        aria-label={`编辑 ${m.model_label}`}
+                        title="编辑"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(m)}
+                        className="rounded p-1.5 text-[var(--tc-text-muted)] hover:text-[var(--tc-destructive)] hover:bg-[var(--tc-bg-elevated)]"
+                        aria-label={`删除 ${m.model_label}`}
+                        title="删除"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
