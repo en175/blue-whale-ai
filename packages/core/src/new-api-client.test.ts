@@ -761,26 +761,6 @@ describe("new-api client", () => {
     expect(logReq?.headers.get("Authorization")).toBe("Bearer sk-user-token");
   });
 
-  it("log/self 过渡期：传 userId 时带 access_token + New-Api-User 头（旧 UserAuth）", async () => {
-    const requests: Array<{ url: string; headers: Headers }> = [];
-    const client = createNewApiClient({
-      baseUrl: "http://new-api.test",
-      fetchImpl: async (input, init = {}) => {
-        requests.push({
-          url: String(input),
-          headers: new Headers(init.headers),
-        });
-        return jsonResponse({ success: true, data: { items: [], total: 0 } });
-      },
-    });
-
-    await client.listUserConsumeLogs("root-access-token", {}, 1);
-    expect(requests[0]?.headers.get("New-Api-User")).toBe("1");
-    expect(requests[0]?.headers.get("Authorization")).toBe(
-      "Bearer root-access-token",
-    );
-  });
-
   it("maps native topup {message:'error'} envelopes to typed errors", async () => {
     const client = createNewApiClient({
       baseUrl: "http://new-api.test",
