@@ -134,6 +134,10 @@ Asset 正式发布时原子创建初始 NodeItem。**入口职责独立、是不
   承担双重角色：① 前端模型选项的展示源（不再写死，经 `/api/generation/models` 拉取）；
   ② 创建生成任务时的 model_id 白名单——请求引用的模型必须是该目录中启用且能力类型与
   生成类型匹配的条目（详见 [ADR-0067](docs/adr/0067-generation-model-capability-text-and-whitelist.md)）。
+  其中 **TextCompletion（文生文接口）** 是 text 档位的直接消费端：供 Agent / 调用方直接调用大模型
+  文本能力的 OpenAI 兼容通道，仅做登录鉴权与 text 白名单命中校验，不创建 GenerationJob、不落业务审计，
+  计费由 LLM 网关（blue-whale-api）按调用方身份扣 quota。
+  _Avoid_: 把文生文调用包装进生成任务队列；绕过 text 白名单直传任意模型名；在 BFF 承接业务语义校验。
 - **公共治理流水线** —— 成本预留（CostReservation）、内容审核（ContentReview）、失败重试与多输出，
   由统一的 GenerationJob 队列承接。
 火山方舟 Agent Plan 使用专属 `/api/plan/v3` 端点与专属 API Key；退役的 `/api/generation/image`
