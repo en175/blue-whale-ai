@@ -46,12 +46,18 @@ export default function Sidebar() {
       <Link
         href="/"
         aria-label="Blue-Whale 首页"
-        className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg text-[var(--tc-accent)] transition-colors hover:bg-[var(--tc-bg-elevated)]"
+        className="mb-5 flex h-14 w-14 items-center justify-center rounded-[16px] text-[var(--tc-accent)] transition-colors hover:bg-[var(--tc-bg-elevated)]"
+        style={{
+          background: "var(--tc-brand-logo-tray-bg)",
+          border: "1px solid var(--tc-brand-logo-tray-border)",
+          boxShadow: "var(--tc-brand-logo-tray-shadow)",
+        }}
       >
         <img
           src="/blue_whale.svg"
           alt="Blue-Whale"
-          className="h-5 w-auto"
+          className="h-9 w-auto"
+          style={{ filter: "var(--tc-brand-logo-filter)" }}
         />
       </Link>
       {NAV_ITEMS.map(({ href, label, icon: Icon }) => {

@@ -185,6 +185,8 @@ Canvas 工作台采用绝对定位的三区布局：左侧工具栏、底部生�
 | Token                       | 语义                     | 值（`globals.css` `:root`）    | 典型用途                                 |
 | --------------------------- | ------------------------ | ------------------------------ | ---------------------------------------- |
 | `--tc-menu-pill-shadow`     | 顶部菜单胶囊             | `0 8px 24px rgba(0,0,0,0.4)`   | TopBar menu-pill                         |
+| `--tc-brand-logo-filter`    | 品牌鲸鱼本体阴影        | `drop-shadow(0 1px 2px rgb(0 0 0/55%))` | 透明 Logo 轮廓短黑阴影（filter） |
+| `--tc-brand-logo-tray-*`    | 品牌鲸鱼承载底座         | 见 globals.css（深色半透明 + 1px 亮边 + 底部投影 + 后方蓝光） | 侧边栏 56×56 圆角底座（box-shadow） |
 | `--tc-dropdown-shadow`      | 下拉 / 弹出菜单（向下）  | `0 12px 32px rgba(0,0,0,0.4)`  | popover、下拉菜单（AgentComposer）       |
 | `--tc-dropdown-shadow-up`   | 向上弹出下拉（底部触发） | `0 -12px 32px rgba(0,0,0,0.4)` | AgentComposer 向上 popover               |
 | `--tc-modal-shadow`         | 全屏遮罩浮层             | `0 24px 80px rgba(0,0,0,0.5)`  | modal、大面板（LoginModal / SkillPanel） |
