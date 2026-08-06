@@ -14,34 +14,91 @@ import { Badge } from "../_components/ui/badge";
 import { Dialog } from "../_components/ui/dialog";
 import { Input } from "../_components/ui/input";
 import { Select } from "../_components/ui/select";
-import type { AdminOrder, OrderStatus, OperationLog } from "./_mock";
+import type {
+  AdminOrder,
+  OrderStatus,
+} from "../_lib/admin-data";
 import {
-  getOrders,
-  confirmOrder,
-  getOperationLogs,
-  generateExportData,
-  STATUS_LABELS,
-} from "./_mock";
+  fetchAdminOrders,
+  completeOrder,
+  ORDER_STATUS_LABELS,
+  ORDER_STATUS_OPTIONS,
+} from "../_lib/admin-data";
+import { getAuditLogs } from "../_lib/audit-log";
 
 const STATUS_COLORS: Record<
   OrderStatus,
   "success" | "default" | "secondary" | "destructive" | "outline"
 > = {
-  paid: "success",
   pending: "default",
+  success: "success",
   expired: "secondary",
-  refunded: "destructive",
   failed: "outline",
 };
 
-const STATUS_OPTIONS = [
-  { value: "all", label: "全部状态" },
-  { value: "pending", label: "待支付" },
-  { value: "paid", label: "已支付" },
-  { value: "expired", label: "已过期" },
-  { value: "refunded", label: "已退款" },
-  { value: "failed", label: "支付失败" },
-];
+/** 详情弹窗操作日志行（来自 admin_operation_logs 的 order.complete）。 */
+type OperationLog = {
+  id: string;
+  tradeNo: string;
+  action: string;
+  reason: string;
+  operatorName: string;
+  createdAt: string;
+};
+
+function toOrderOperationLog(row: {
+  id: string;
+  action: string;
+  detail: string;
+  operator: string;
+  createdAt: string;
+}, tradeNo: string): OperationLog {
+  let detail: { reason?: string } = {};
+  try {
+    detail = JSON.parse(row.detail || "{}");
+  } catch {
+    /* ignore */
+  }
+  return {
+    id: row.id,
+    tradeNo,
+    action: row.action,
+    reason: detail.reason ?? row.detail,
+    operatorName: row.operator,
+    createdAt: row.createdAt,
+  };
+}
+
+function csvEscape(v: string | number): string {
+  const s = String(v);
+  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+/** 导出当前筛选结果为 CSV（原 _mock.generateExportData 本地化）。 */
+function generateExportData(orders: AdminOrder[]): string {
+  const header =
+    "订单号,用户,手机号,金额(元),积分,支付方式,状态,创建时间,到账时间,支付流水号";
+  const rows = orders.map((o) =>
+    [
+      o.tradeNo,
+      o.nickname,
+      o.phone,
+      o.price,
+      o.points + o.bonus,
+      o.paymentMethod === "wechat" ? "微信" : "支付宝",
+      ORDER_STATUS_LABELS[o.status],
+      o.createdAt,
+      o.arrivedAt || "",
+      o.platformRefNo || "",
+    ]
+      .map(csvEscape)
+      .join(","),
+  );
+  return [header, ...rows].join("\n");
+}
 
 const PAYMENT_OPTIONS = [
   { value: "all", label: "全部方式" },
@@ -65,8 +122,29 @@ export default function AdminOrdersPage() {
   const [confirmReason, setConfirmReason] = useState("");
   const [confirmMsg, setConfirmMsg] = useState("");
 
+  // IK6JXJ：真实数据源（契约 4.4）。当前拉取前 100 条，筛选/导出本地进行。
+  const loadOrders = async () => {
+    try {
+      const { list } = await fetchAdminOrders({ pageSize: 100 });
+      setOrders(list);
+    } catch (e) {
+      setConfirmMsg(e instanceof Error ? e.message : "加载订单失败");
+    }
+  };
+
   useEffect(() => {
-    setOrders(getOrders());
+    let cancelled = false;
+    fetchAdminOrders({ pageSize: 100 })
+      .then(({ list }) => {
+        if (!cancelled) setOrders(list);
+      })
+      .catch((e) => {
+        if (!cancelled)
+          setConfirmMsg(e instanceof Error ? e.message : "加载订单失败");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const filtered = useMemo(() => {
@@ -95,19 +173,31 @@ export default function AdminOrdersPage() {
     return list;
   }, [orders, statusFilter, paymentFilter, userSearch, dateFrom, dateTo]);
 
-  const openDetail = (o: AdminOrder) => {
+  const openDetail = async (o: AdminOrder) => {
     setDetailOrder(o);
-    setDetailLogs(getOperationLogs(o.tradeNo));
+    setDetailLogs([]);
+    // 详情操作日志：admin_operation_logs 的 order 类记录（target=tradeNo）。
+    try {
+      const rows = await getAuditLogs({
+        category: "order",
+        searchText: o.tradeNo,
+      });
+      setDetailLogs(rows.map((r) => toOrderOperationLog(r, o.tradeNo)));
+    } catch {
+      /* 审计查询失败静默，tab 保持空态 */
+    }
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (!confirmOrderTarget || !confirmReason.trim()) return;
-    const r = confirmOrder(confirmOrderTarget.tradeNo, confirmReason.trim());
-    if (r) {
-      setOrders(getOrders());
-      setConfirmMsg(`订单 ${r.tradeNo} 已手动确认，积分已到账`);
-      setTimeout(() => setConfirmMsg(""), 2500);
+    try {
+      await completeOrder(confirmOrderTarget.tradeNo, confirmReason.trim());
+      setConfirmMsg(`订单 ${confirmOrderTarget.tradeNo} 已手动确认，积分已到账`);
+      await loadOrders();
+    } catch (e) {
+      setConfirmMsg(e instanceof Error ? e.message : "补单失败");
     }
+    setTimeout(() => setConfirmMsg(""), 2500);
     setConfirmOrderTarget(null);
     setConfirmReason("");
   };
@@ -168,7 +258,7 @@ export default function AdminOrdersPage() {
         <Select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          options={STATUS_OPTIONS}
+          options={ORDER_STATUS_OPTIONS}
         />
         <Select
           value={paymentFilter}
@@ -224,7 +314,7 @@ export default function AdminOrdersPage() {
               </TableRow>
             ) : (
               filtered.map((o) => (
-                <TableRow key={o.id}>
+                <TableRow key={o.tradeNo}>
                   <TableCell className="font-mono text-xs">
                     <button
                       onClick={() => openDetail(o)}
@@ -253,7 +343,7 @@ export default function AdminOrdersPage() {
                   </TableCell>
                   <TableCell>
                     <Badge variant={STATUS_COLORS[o.status]}>
-                      {STATUS_LABELS[o.status]}
+                      {ORDER_STATUS_LABELS[o.status]}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-xs text-[var(--tc-text-tertiary)]">
@@ -310,7 +400,7 @@ export default function AdminOrdersPage() {
                 {
                   label: "积分到账",
                   time: detailOrder.arrivedAt,
-                  done: detailOrder.status === "paid",
+                  done: detailOrder.status === "success",
                 },
               ].map((step, i) => (
                 <div key={step.label} className="flex items-center gap-2">
@@ -344,7 +434,7 @@ export default function AdminOrdersPage() {
                 <span className="text-[var(--tc-text-muted)]">状态</span>
                 <p>
                   <Badge variant={STATUS_COLORS[detailOrder.status]}>
-                    {STATUS_LABELS[detailOrder.status]}
+                    {ORDER_STATUS_LABELS[detailOrder.status]}
                   </Badge>
                 </p>
               </div>

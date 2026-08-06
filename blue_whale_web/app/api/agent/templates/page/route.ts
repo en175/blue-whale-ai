@@ -1,10 +1,11 @@
-import { withAuthenticatedUser } from "@/lib/auth/product-route-auth";
+import { withOptionalUser } from "@/lib/auth/product-route-auth";
 import { createTemplatesDeps } from "@/lib/templates/deps";
 import { handlePageTemplates } from "@/lib/templates/handle-templates";
 
-// GET /api/agent/templates/page?tagCode=&page=&size=
+// GET /api/agent/templates/page?tagCode=&page=&size= —— 公开接口（IK6GM6）：模板卡片游客可见；
+// 有有效 token 时携带身份（可选鉴权，IK6GTT）。
 export async function GET(request: Request) {
-  return withAuthenticatedUser(request, async () => {
+  return withOptionalUser(request, async () => {
     try {
       const q = new URL(request.url).searchParams;
       const tagCode = q.get("tagCode") ?? "";

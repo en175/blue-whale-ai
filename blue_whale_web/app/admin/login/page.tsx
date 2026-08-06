@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Shield, Eye, EyeOff } from "lucide-react";
+import { loginWithPassword } from "@/lib/auth";
 import { Input } from "../_components/ui/input";
+import { verifyAdminAccess } from "../_lib/admin-api";
 import { saveAdminSession } from "../_lib/auth";
 
 export default function AdminLoginPage() {
@@ -14,7 +16,7 @@ export default function AdminLoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  function handleLogin(e: React.FormEvent) {
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     if (!username.trim() || !password.trim()) {
@@ -22,14 +24,20 @@ export default function AdminLoginPage() {
       return;
     }
     setLoading(true);
-    setTimeout(() => {
-      saveAdminSession("mock-admin-token", {
-        adminId: 1,
-        username: username || "admin",
+    try {
+      const result = await loginWithPassword(username.trim(), password);
+      await verifyAdminAccess(result.access_token);
+      saveAdminSession(result.access_token, {
+        adminId: result.user_id,
+        username: result.username,
         role: 100,
       });
       router.replace("/admin");
-    }, 600);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "登录失败");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -89,9 +97,6 @@ export default function AdminLoginPage() {
             {loading ? "登录中..." : "登录"}
           </button>
         </form>
-        <p className="mt-6 text-center text-xs text-[var(--tc-text-muted)]">
-          SKIP_AUTH 模式下无需凭据
-        </p>
       </div>
     </div>
   );

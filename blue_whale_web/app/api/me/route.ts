@@ -4,8 +4,10 @@ import {
   createAccountClient,
   type AccountClient,
 } from "@/lib/account/bff";
+import { ADMIN_ROLE_THRESHOLD } from "@/lib/auth/authenticated-user";
 
 // GET /api/me
+// data.is_admin：new-api role >= 10 即管理员（IK6JXI，契约 4.1），前端入口判断唯一数据源。
 export function createMeHandler(
   client: Pick<AccountClient, "resolveTokenIdentity">,
 ) {
@@ -28,6 +30,7 @@ export function createMeHandler(
           email: identity.email,
           phone: "",
           has_password: true,
+          is_admin: identity.role >= ADMIN_ROLE_THRESHOLD,
         },
       });
     } catch (error) {

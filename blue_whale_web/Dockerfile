@@ -2,6 +2,8 @@
 # 多阶段：deps（pnpm monorepo）→ builder（编译 workspace 包 + next build）→ runner（最小运行镜像）
 
 FROM node:24-alpine AS deps
+# corepack 下载 pnpm 本体也走阿里云镜像（默认走 npmjs.org 海外源）
+ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 RUN corepack enable
 WORKDIR /app
 
@@ -20,17 +22,19 @@ COPY apps/generation-worker/package.json apps/generation-worker/
 COPY blue_whale_web/package.json blue_whale_web/
 COPY blue_whale_web/patches blue_whale_web/patches
 
-# 阿里云 npm 镜像加速（ENV 覆盖 lockfile 中已解析的 registry.npmjs.org URL）
-ENV npm_config_registry=https://registry.npmmirror.com
+# 阿里云 npm 镜像加速。pnpm 11 breaking change：不再读 npm_config_* 环境变量，
+# 只认 pnpm_config_* 前缀（pnpm.io/blog/releases/11.0），旧前缀会被静默忽略、直连 npmjs
+ENV pnpm_config_registry=https://registry.npmmirror.com
 # --filter ... 匹配包名 blue_whale（不是目录名 blue_whale_web），安装其依赖链
 RUN pnpm install --frozen-lockfile --filter blue_whale...
 
 FROM node:24-alpine AS builder
+ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 RUN corepack enable
 WORKDIR /app
 
-# 阿里云 npm 镜像加速（与 deps 阶段一致，builder 的 pnpm install 也需要）
-ENV npm_config_registry=https://registry.npmmirror.com
+# 阿里云 npm 镜像加速（与 deps 阶段一致；pnpm 11 只认 pnpm_config_* 前缀）
+ENV pnpm_config_registry=https://registry.npmmirror.com
 
 COPY --from=deps /app ./
 # TypeScript 配置
@@ -42,8 +46,6 @@ COPY packages/generation-runtime packages/generation-runtime
 COPY packages/persistence packages/persistence
 # 目标应用源码
 COPY blue_whale_web blue_whale_web
-
-ENV NEXT_PUBLIC_SKIP_AUTH=1
 
 # 先编译 workspace 包（Next.js 通过 exports 字段引用 dist/ 输出）
 RUN pnpm --filter @blue-whale/contracts --filter @blue-whale/core --filter @blue-whale/persistence --filter @blue-whale/generation-runtime build

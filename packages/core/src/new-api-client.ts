@@ -169,6 +169,118 @@ export interface NewApiTopUpRecord {
   money: number;
   create_time: number;
   complete_time: number;
+  /** Go TopUp.payment_method（BlueWhalePay 单恒为 bluewhalepay；易支付单为 wechat/alipay 等） */
+  payment_method: string;
+}
+
+/** GET /api/user/topup/self 分页结果（Go PageInfo：按 id desc 即时间倒序）。 */
+export interface NewApiTopUpListResult {
+  items: NewApiTopUpRecord[];
+  total: number;
+}
+
+/** 用户消费流水记录（GET /api/log/self 的 items 元素，Go model.Log 子集）。 */
+export interface NewApiUserLogRecord {
+  id: number;
+  /** Go common.LogType*（2 = 消费） */
+  type: number;
+  content: string;
+  model_name: string;
+  /** 消耗 quota（正数） */
+  quota: number;
+  created_at: number;
+}
+
+/** GET /api/log/self 分页结果（Go PageInfo：按 id desc 即时间倒序）。 */
+export interface NewApiUserLogListResult {
+  items: NewApiUserLogRecord[];
+  total: number;
+}
+
+/** 把 topup/self items 的裸 JSON 元素解析成 NewApiTopUpRecord（缺字段兜底）。 */
+export function parseTopUpRecord(raw: Record<string, unknown>): NewApiTopUpRecord {
+  return {
+    trade_no: String(raw.trade_no ?? ""),
+    status: typeof raw.status === "string" ? raw.status : "",
+    amount: Number(raw.amount ?? 0),
+    money: Number(raw.money ?? 0),
+    create_time: Number(raw.create_time ?? 0),
+    complete_time: Number(raw.complete_time ?? 0),
+    payment_method:
+      typeof raw.payment_method === "string" ? raw.payment_method : "",
+  };
+}
+
+// ---- 管理端（middleware.AdminAuth：仅 role >= 10 的管理员 token 可调）----
+// 接口：GET /api/user、/api/user/search、POST /api/user/manage、
+//       GET /api/user/topup、POST /api/user/topup/complete、
+//       GET /api/log/stat、GET /api/log。信封为标准 {success, data} 分页（PageInfo）。
+
+/** new-api 通用分页信封（PageInfo：page / page_size / total / items）。 */
+export interface NewApiPageInfo<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/** GET /api/user、/api/user/search 的行元素（model.User 的 json 视图）。 */
+export interface NewApiAdminUserRow {
+  id: number;
+  username: string;
+  display_name?: string;
+  email?: string;
+  role: number;
+  status: number;
+  quota: number;
+  used_quota: number;
+  created_at: number;
+  [key: string]: unknown;
+}
+
+/** GET /api/user/topup 的行元素（model.TopUp 的 json 视图）。 */
+export interface NewApiAdminTopUpRow {
+  id: number;
+  user_id: number;
+  amount: number;
+  money: number;
+  trade_no: string;
+  payment_method: string;
+  payment_provider: string;
+  create_time: number;
+  complete_time: number;
+  /** pending | success | failed | expired */
+  status: string;
+  [key: string]: unknown;
+}
+
+/** GET /api/log 的行元素（model.Log 的 json 视图，管理员侧全部用户）。 */
+export interface NewApiLogRow {
+  id: number;
+  user_id: number;
+  created_at: number;
+  type: number;
+  username: string;
+  model_name: string;
+  quota: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  [key: string]: unknown;
+}
+
+/** GET /api/log/stat 的聚合结果。 */
+export interface NewApiLogStat {
+  quota: number;
+  rpm: number;
+  tpm: number;
+}
+
+/** POST /api/user/manage 入参（Go ManageRequest）。 */
+export interface NewApiAdminManageUserInput {
+  id: number;
+  action: "disable" | "enable" | "add_quota";
+  value?: number;
+  mode?: "add" | "subtract" | "override";
 }
 
 export class NewApiError extends Error {
@@ -222,6 +334,20 @@ function isBusinessFailure(payload: NewApiEnvelope | null): boolean {
   return payload?.success === false || payload?.code === false;
 }
 
+/** 归一化 new-api 分页信封（PageInfo），缺字段兜底，防脏数据抛错。 */
+function normalizePage<T>(
+  data: unknown,
+  pageSize: number,
+): NewApiPageInfo<T> {
+  const page = (data ?? {}) as Partial<NewApiPageInfo<T>>;
+  return {
+    items: Array.isArray(page.items) ? page.items : [],
+    total: typeof page.total === "number" ? page.total : 0,
+    page: typeof page.page === "number" ? page.page : 1,
+    page_size: typeof page.page_size === "number" ? page.page_size : pageSize,
+  };
+}
+
 function positiveInteger(value: unknown): number | null {
   const parsed =
     typeof value === "number"
@@ -238,6 +364,15 @@ function positiveInteger(value: unknown): number | null {
  * sk-xxx 证明账户身份；订单 User ID 由 Go 从 Token 属主解析，客户端不得
  * 发送 New-Api-User 头。（RootAuth 的 /api/option/ 管理接口仍需该头，见下方。）
  */
+
+/**
+ * 旧 UserAuth 接口（如 /api/log/self，尚未迁账户层）要求 access_token +
+ * New-Api-User 头（= 令牌属主数字 id）。仅 listUserConsumeLogs 过渡期使用；
+ * userId 缺省（sk- 令牌场景）则不加。
+ */
+function newApiUserHeader(userId: number | undefined): { headers?: Record<string, string> } {
+  return userId === undefined ? {} : { headers: { "New-Api-User": String(userId) } };
+}
 export function createNewApiClient(options: NewApiClientOptions) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 10_000;
@@ -827,13 +962,71 @@ export function createNewApiClient(options: NewApiClientOptions) {
         : [];
       const match = items.find((item) => item.trade_no === tradeNo);
       if (!match) return null;
+      return parseTopUpRecord(match);
+    },
+
+    /** 分页拉当前用户原生充值记录：GET /api/user/topup/self（Go 按 id desc，即时间倒序）。
+     *  信封 {success, data: PageInfo{page,page_size,total,items}}；page_size 上限 100（Go 侧钳制）。
+     *  接口挂账户层 AccountTokenOrUserAuth，只凭 Bearer sk- 证明身份，Go 按 Token 属主过滤，
+     *  不得发送 New-Api-User 头（ADR-0062 #18）。 */
+    async listUserTopUps(
+      token: string,
+      options: { page?: number; pageSize?: number } = {},
+    ): Promise<NewApiTopUpListResult> {
+      const page = Math.max(1, Math.trunc(options.page ?? 1));
+      const pageSize = Math.min(100, Math.max(1, Math.trunc(options.pageSize ?? 20)));
+      const response = await request<NewApiEnvelope>(
+        `/api/user/topup/self?p=${page}&page_size=${pageSize}`,
+        { method: "GET" },
+        token,
+      );
+      const data = (response.data ?? {}) as { items?: unknown; total?: unknown };
+      const rawItems = Array.isArray(data.items)
+        ? (data.items as Array<Record<string, unknown>>)
+        : [];
       return {
-        trade_no: String(match.trade_no),
-        status: typeof match.status === "string" ? match.status : "",
-        amount: Number(match.amount ?? 0),
-        money: Number(match.money ?? 0),
-        create_time: Number(match.create_time ?? 0),
-        complete_time: Number(match.complete_time ?? 0),
+        items: rawItems.map(parseTopUpRecord),
+        total: typeof data.total === "number" ? data.total : 0,
+      };
+    },
+
+    /** 分页拉当前用户消费流水：GET /api/log/self（Go 按 id desc，即时间倒序）。
+     *  type 缺省 2 = LogTypeConsume；信封同 topup/self 的 PageInfo。
+     *  ⚠️ 鉴权与充值三接口不同：log/self 仍在旧 UserAuth，只认个人 access_token +
+     *  New-Api-User 头，**不认 sk- 中继令牌**（2026-08-05 部署环境实测
+     *  "invalid access token"；ADR-0062 #18 只迁了充值三接口）。过渡期由 BFF
+     *  用 root access_token + rootUserId 代理查询；Go 迁移 log/self 到账户层后
+     *  可改为透传用户 sk- 令牌（不传 userId 即不发 New-Api-User）。 */
+    async listUserConsumeLogs(
+      token: string,
+      options: { page?: number; pageSize?: number; type?: number } = {},
+      userId?: number,
+    ): Promise<NewApiUserLogListResult> {
+      const page = Math.max(1, Math.trunc(options.page ?? 1));
+      const pageSize = Math.min(100, Math.max(1, Math.trunc(options.pageSize ?? 20)));
+      const type = options.type ?? 2;
+      const response = await request<NewApiEnvelope>(
+        `/api/log/self?p=${page}&page_size=${pageSize}&type=${type}`,
+        { method: "GET", ...newApiUserHeader(userId) },
+        token,
+      );
+      const data = (response.data ?? {}) as { items?: unknown; total?: unknown };
+      const rawItems = Array.isArray(data.items)
+        ? (data.items as Array<Record<string, unknown>>)
+        : [];
+      const items = rawItems.map(
+        (raw): NewApiUserLogRecord => ({
+          id: Number(raw.id ?? 0),
+          type: Number(raw.type ?? 0),
+          content: typeof raw.content === "string" ? raw.content : "",
+          model_name: typeof raw.model_name === "string" ? raw.model_name : "",
+          quota: Number(raw.quota ?? 0),
+          created_at: Number(raw.created_at ?? 0),
+        }),
+      );
+      return {
+        items,
+        total: typeof data.total === "number" ? data.total : 0,
       };
     },
 
@@ -882,6 +1075,138 @@ export function createNewApiClient(options: NewApiClientOptions) {
         },
         rootToken,
       );
+    },
+
+    // ---- 管理端（AdminAuth：role >= 10 的管理员 token，信封为标准分页 PageInfo）----
+    // 注意：blue-whale-api 定制版要求管理接口带 New-Api-User:<userId> 头
+    //（须与 token 属主一致，authHelper 强制校验），且列表路由须带尾斜杠
+    //（/api/user/、/api/log/，无斜杠会 404/301）。IK6M2F。
+
+    /** 用户列表/搜索：有筛选条件走 /api/user/search，否则 /api/user/。 */
+    async listAdminUsers(
+      token: string,
+      userId: number,
+      options: {
+        keyword?: string;
+        status?: number;
+        role?: number;
+        page?: number;
+        pageSize?: number;
+      } = {},
+    ): Promise<NewApiPageInfo<NewApiAdminUserRow>> {
+      const params = new URLSearchParams();
+      if (options.keyword) params.set("keyword", options.keyword);
+      if (options.status != null) params.set("status", String(options.status));
+      if (options.role != null) params.set("role", String(options.role));
+      params.set("p", String(options.page ?? 1));
+      params.set("page_size", String(options.pageSize ?? 20));
+      const hasFilter =
+        Boolean(options.keyword) ||
+        options.status != null ||
+        options.role != null;
+      const path = hasFilter
+        ? `/api/user/search?${params}`
+        : `/api/user/?${params}`;
+      const response = await request<NewApiEnvelope>(
+        path,
+        { method: "GET", headers: { "New-Api-User": String(userId) } },
+        token,
+      );
+      return normalizePage(response.data, options.pageSize ?? 20);
+    },
+
+    /** 用户管理写操作（冻结 disable / 解冻 enable / 加减余额 add_quota）。 */
+    async manageAdminUser(
+      token: string,
+      userId: number,
+      input: NewApiAdminManageUserInput,
+    ): Promise<void> {
+      await request<NewApiEnvelope>(
+        "/api/user/manage",
+        {
+          method: "POST",
+          headers: { "New-Api-User": String(userId) },
+          body: JSON.stringify(input),
+        },
+        token,
+      );
+    },
+
+    /** 全平台充值记录（管理端），keyword 模糊匹配 trade_no。 */
+    async listAdminTopUps(
+      token: string,
+      userId: number,
+      options: { keyword?: string; page?: number; pageSize?: number } = {},
+    ): Promise<NewApiPageInfo<NewApiAdminTopUpRow>> {
+      const params = new URLSearchParams();
+      if (options.keyword) params.set("keyword", options.keyword);
+      params.set("p", String(options.page ?? 1));
+      params.set("page_size", String(options.pageSize ?? 20));
+      const response = await request<NewApiEnvelope>(
+        `/api/user/topup?${params}`,
+        { method: "GET", headers: { "New-Api-User": String(userId) } },
+        token,
+      );
+      return normalizePage(response.data, options.pageSize ?? 20);
+    },
+
+    /** 管理员补单：把 pending 订单手工置为到账（Go ManualCompleteTopUp）。 */
+    async completeAdminTopUp(
+      token: string,
+      userId: number,
+      tradeNo: string,
+    ): Promise<void> {
+      await request<NewApiEnvelope>(
+        "/api/user/topup/complete",
+        {
+          method: "POST",
+          headers: { "New-Api-User": String(userId) },
+          body: JSON.stringify({ trade_no: tradeNo }),
+        },
+        token,
+      );
+    },
+
+    /** 日志聚合统计（GetLogsStat）：type=2 为消费；quota 单位与用户余额一致。 */
+    async getAdminLogStat(
+      token: string,
+      userId: number,
+      input: { type: number; startTimestamp: number; endTimestamp: number },
+    ): Promise<NewApiLogStat> {
+      const params = new URLSearchParams({
+        type: String(input.type),
+        start_timestamp: String(input.startTimestamp),
+        end_timestamp: String(input.endTimestamp),
+      });
+      const response = await request<NewApiEnvelope>(
+        `/api/log/stat?${params}`,
+        { method: "GET", headers: { "New-Api-User": String(userId) } },
+        token,
+      );
+      const data = (response.data ?? {}) as Partial<NewApiLogStat>;
+      return {
+        quota: typeof data.quota === "number" ? data.quota : 0,
+        rpm: typeof data.rpm === "number" ? data.rpm : 0,
+        tpm: typeof data.tpm === "number" ? data.tpm : 0,
+      };
+    },
+
+    /** 全平台使用日志（管理端，/api/log/ 分页，id 倒序）。 */
+    async listAdminLogs(
+      token: string,
+      userId: number,
+      options: { page?: number; pageSize?: number } = {},
+    ): Promise<NewApiPageInfo<NewApiLogRow>> {
+      const params = new URLSearchParams({
+        p: String(options.page ?? 1),
+        page_size: String(options.pageSize ?? 20),
+      });
+      const response = await request<NewApiEnvelope>(
+        `/api/log/?${params}`,
+        { method: "GET", headers: { "New-Api-User": String(userId) } },
+        token,
+      );
+      return normalizePage(response.data, options.pageSize ?? 20);
     },
   };
 }

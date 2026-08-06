@@ -13,6 +13,7 @@ import { ModalShell } from "./ModalShell";
 import { RebindPhoneModal } from "./RebindPhoneModal";
 import { ChangePasswordModal } from "./ChangePasswordModal";
 import { RechargeModal } from "@/components/recharge";
+import { AccountRecordsModal } from "@/components/account-records/AccountRecordsModal";
 
 interface AccountModalProps {
   onClose: () => void;
@@ -45,9 +46,11 @@ export function AccountModal({ onClose }: AccountModalProps) {
   const [rebindOpen, setRebindOpen] = useState(false);
   const [changePwdOpen, setChangePwdOpen] = useState(false);
   const [rechargeOpen, setRechargeOpen] = useState(false);
+  const [recordsOpen, setRecordsOpen] = useState(false);
 
   const maskedPhone = user ? maskPhone(user.phone) : "";
-  const hasNestedModal = rebindOpen || changePwdOpen || rechargeOpen;
+  const hasNestedModal =
+    rebindOpen || changePwdOpen || rechargeOpen || recordsOpen;
 
   return (
     <ModalShell
@@ -96,13 +99,22 @@ export function AccountModal({ onClose }: AccountModalProps) {
           label="积分余额"
           value={user?.credits != null ? String(user.credits) : "—"}
           action={
-            <button
-              type="button"
-              onClick={() => setRechargeOpen(true)}
-              className="text-[12px] text-[var(--tc-accent,#3b82f6)] hover:opacity-80 underline-offset-4 hover:underline transition-colors"
-            >
-              去充值
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setRechargeOpen(true)}
+                className="text-[12px] text-[var(--tc-accent,#3b82f6)] hover:opacity-80 underline-offset-4 hover:underline transition-colors"
+              >
+                去充值
+              </button>
+              <button
+                type="button"
+                onClick={() => setRecordsOpen(true)}
+                className="text-[12px] text-white/55 hover:text-white/90 underline-offset-4 hover:underline transition-colors"
+              >
+                账户记录
+              </button>
+            </>
           }
         />
       </div>
@@ -118,6 +130,9 @@ export function AccountModal({ onClose }: AccountModalProps) {
         <ChangePasswordModal onClose={() => setChangePwdOpen(false)} />
       )}
       {rechargeOpen && <RechargeModal onClose={() => setRechargeOpen(false)} />}
+      {recordsOpen && (
+        <AccountRecordsModal onClose={() => setRecordsOpen(false)} />
+      )}
     </ModalShell>
   );
 }

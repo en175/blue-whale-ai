@@ -168,7 +168,7 @@ export const MOCK_PRICING: PricingRule[] = [
   },
 ];
 
-let rules = [...MOCK_PRICING];
+const rules = [...MOCK_PRICING];
 
 export type PricingFormData = Pick<
   PricingRule,

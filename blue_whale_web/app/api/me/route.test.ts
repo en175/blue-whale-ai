@@ -32,7 +32,28 @@ describe("GET /api/me", () => {
         email: "alice@example.com",
         phone: "",
         has_password: true,
+        is_admin: false,
       },
     });
+  });
+
+  it("marks role >= 10 identities as admin (is_admin)", async () => {
+    const GET = createMeHandler({
+      resolveTokenIdentity: async () => ({
+        userId: 11,
+        username: "boss",
+        email: null,
+        status: 1,
+        role: 10,
+      }),
+    });
+    const response = await GET(
+      new Request("http://web.test/api/me", {
+        headers: { Authorization: "Bearer sk-admin" },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.is_admin).toBe(true);
   });
 });

@@ -611,6 +611,7 @@ describe("new-api client", () => {
                   money: 85,
                   create_time: 1,
                   complete_time: 2,
+                  payment_method: "bluewhalepay",
                 },
                 {
                   trade_no: "BWPother",
@@ -642,6 +643,7 @@ describe("new-api client", () => {
       money: 85,
       create_time: 1,
       complete_time: 2,
+      payment_method: "bluewhalepay",
     });
     // 精确匹配单号：其它订单不命中 → null
     await expect(client.getTopUpByTradeNo("sk-t", "BWPnope")).resolves.toBeNull();
@@ -656,6 +658,127 @@ describe("new-api client", () => {
         r.url.includes("/api/user/topup/self?keyword=BWP1xyz"),
       ),
     ).toBe(true);
+  });
+
+  it("lists user topups and consume logs from Go PageInfo envelopes", async () => {
+    const requests: Array<{ url: string; headers: Headers }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        const url = String(input);
+        requests.push({ url, headers: new Headers(init.headers) });
+        if (url.includes("/api/user/topup/self")) {
+          return jsonResponse({
+            success: true,
+            message: "",
+            data: {
+              page: 1,
+              page_size: 20,
+              total: 2,
+              items: [
+                {
+                  trade_no: "BWP2",
+                  status: "pending",
+                  amount: 10,
+                  money: 9,
+                  create_time: 20,
+                  complete_time: 0,
+                  payment_method: "bluewhalepay",
+                },
+                // 缺字段元素 → 兜底解析
+                { trade_no: "BWP1", status: "success" },
+              ],
+            },
+          });
+        }
+        if (url.includes("/api/log/self")) {
+          return jsonResponse({
+            success: true,
+            message: "",
+            data: {
+              page: 1,
+              page_size: 20,
+              total: 1,
+              items: [
+                {
+                  id: 7,
+                  type: 2,
+                  content: "图片生成",
+                  model_name: "doubao-seedream-4-0-250828",
+                  quota: 120000,
+                  created_at: 1750000000,
+                },
+              ],
+            },
+          });
+        }
+        return jsonResponse({ success: true, data: {} });
+      },
+    });
+
+    const topups = await client.listUserTopUps("sk-user-token");
+    expect(topups.total).toBe(2);
+    expect(topups.items[0]).toEqual({
+      trade_no: "BWP2",
+      status: "pending",
+      amount: 10,
+      money: 9,
+      create_time: 20,
+      complete_time: 0,
+      payment_method: "bluewhalepay",
+    });
+    expect(topups.items[1]).toEqual({
+      trade_no: "BWP1",
+      status: "success",
+      amount: 0,
+      money: 0,
+      create_time: 0,
+      complete_time: 0,
+      payment_method: "",
+    });
+
+    const logs = await client.listUserConsumeLogs("sk-user-token");
+    expect(logs.total).toBe(1);
+    expect(logs.items[0]).toEqual({
+      id: 7,
+      type: 2,
+      content: "图片生成",
+      model_name: "doubao-seedream-4-0-250828",
+      quota: 120000,
+      created_at: 1750000000,
+    });
+
+    // 分页参数；账户层鉴权只凭 sk- 令牌，不发 New-Api-User（ADR-0062 #18）
+    const topupReq = requests.find((r) =>
+      r.url.includes("/api/user/topup/self"),
+    );
+    expect(topupReq?.url).toContain("/api/user/topup/self?p=1&page_size=20");
+    expect(topupReq?.headers.get("New-Api-User")).toBeNull();
+    expect(topupReq?.headers.get("Authorization")).toBe("Bearer sk-user-token");
+    const logReq = requests.find((r) => r.url.includes("/api/log/self"));
+    expect(logReq?.url).toContain("/api/log/self?p=1&page_size=20&type=2");
+    expect(logReq?.headers.get("New-Api-User")).toBeNull();
+    expect(logReq?.headers.get("Authorization")).toBe("Bearer sk-user-token");
+  });
+
+  it("log/self 过渡期：传 userId 时带 access_token + New-Api-User 头（旧 UserAuth）", async () => {
+    const requests: Array<{ url: string; headers: Headers }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        requests.push({
+          url: String(input),
+          headers: new Headers(init.headers),
+        });
+        return jsonResponse({ success: true, data: { items: [], total: 0 } });
+      },
+    });
+
+    await client.listUserConsumeLogs("root-access-token", {}, 1);
+    expect(requests[0]?.headers.get("New-Api-User")).toBe("1");
+    expect(requests[0]?.headers.get("Authorization")).toBe(
+      "Bearer root-access-token",
+    );
   });
 
   it("maps native topup {message:'error'} envelopes to typed errors", async () => {
@@ -796,5 +919,193 @@ describe("new-api client", () => {
     await expect(
       client.putRootOption("bad-tok", 1, "payment_setting", "{}"),
     ).rejects.toMatchObject({ message: "权限不足" });
+  });
+
+  it("adapts the admin user list/search contract with paging", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        const url = String(input);
+        requests.push({ url, init });
+        if (url.includes("/api/user/search")) {
+          return jsonResponse({
+            success: true,
+            data: {
+              page: 1,
+              page_size: 20,
+              total: 1,
+              items: [
+                {
+                  id: 42,
+                  username: "alice",
+                  display_name: "爱丽丝",
+                  email: "a@x.com",
+                  role: 1,
+                  status: 1,
+                  quota: 1000,
+                  used_quota: 200,
+                  created_at: 1700000000,
+                },
+              ],
+            },
+          });
+        }
+        return jsonResponse({
+          success: true,
+          data: { page: 1, page_size: 20, total: 0, items: [] },
+        });
+      },
+    });
+
+    // 有筛选 → /api/user/search，参数带 status/role/p/page_size
+    const search = await client.listAdminUsers("sk-admin", 1, {
+      keyword: "ali",
+      status: 0,
+      role: 1,
+      page: 2,
+      pageSize: 10,
+    });
+    expect(search.total).toBe(1);
+    expect(search.items[0]?.username).toBe("alice");
+    expect(requests[0]?.url).toBe(
+      "http://new-api.test/api/user/search?keyword=ali&status=0&role=1&p=2&page_size=10",
+    );
+
+    // 无筛选 → /api/user/（尾斜杠，IK6M2F）
+    await client.listAdminUsers("sk-admin", 1);
+    expect(requests[1]?.url).toBe(
+      "http://new-api.test/api/user/?p=1&page_size=20",
+    );
+    expect(new Headers(requests[0]?.init.headers).get("Authorization")).toBe(
+      "Bearer sk-admin",
+    );
+    // IK6M2F：管理端请求须带 New-Api-User 头（authHelper 强制）
+    expect(new Headers(requests[0]?.init.headers).get("New-Api-User")).toBe("1");
+    expect(new Headers(requests[1]?.init.headers).get("New-Api-User")).toBe("1");
+  });
+
+  it("adapts admin manage / topup / complete / log-stat / log endpoints", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        const url = String(input);
+        requests.push({ url, init });
+        if (url.includes("/api/user/topup")) {
+          return jsonResponse({
+            success: true,
+            data: {
+              page: 1,
+              page_size: 20,
+              total: 1,
+              items: [
+                {
+                  id: 9,
+                  user_id: 42,
+                  amount: 6000,
+                  money: 60,
+                  trade_no: "BWP1",
+                  payment_method: "bluewhalepay",
+                  payment_provider: "bluewhalepay",
+                  create_time: 1700000000,
+                  complete_time: 1700003600,
+                  status: "success",
+                },
+              ],
+            },
+          });
+        }
+        if (url.includes("/api/log/stat")) {
+          return jsonResponse({
+            success: true,
+            data: { quota: 320, rpm: 5, tpm: 100 },
+          });
+        }
+        if (url.includes("/api/log")) {
+          return jsonResponse({
+            success: true,
+            data: {
+              page: 1,
+              page_size: 5,
+              total: 1,
+              items: [
+                {
+                  id: 1,
+                  user_id: 7,
+                  created_at: 1700000000,
+                  type: 2,
+                  username: "bob",
+                  model_name: "gpt-4o",
+                  quota: 50,
+                  prompt_tokens: 10,
+                  completion_tokens: 20,
+                },
+              ],
+            },
+          });
+        }
+        return jsonResponse({ success: true, message: "" });
+      },
+    });
+
+    await expect(
+      client.manageAdminUser("sk-admin", 1, { id: 42, action: "disable" }),
+    ).resolves.toBeUndefined();
+    expect(requests[0]?.url).toBe("http://new-api.test/api/user/manage");
+    expect(JSON.parse(String(requests[0]?.init.body))).toEqual({
+      id: 42,
+      action: "disable",
+    });
+    expect(new Headers(requests[0]?.init.headers).get("New-Api-User")).toBe("1");
+
+    const topups = await client.listAdminTopUps("sk-admin", 1, {
+      keyword: "BWP",
+    });
+    expect(topups.items[0]?.trade_no).toBe("BWP1");
+    expect(requests[1]?.url).toBe(
+      "http://new-api.test/api/user/topup?keyword=BWP&p=1&page_size=20",
+    );
+
+    await expect(
+      client.completeAdminTopUp("sk-admin", 1, "BWP1"),
+    ).resolves.toBeUndefined();
+    expect(requests[2]?.url).toBe(
+      "http://new-api.test/api/user/topup/complete",
+    );
+    expect(JSON.parse(String(requests[2]?.init.body))).toEqual({
+      trade_no: "BWP1",
+    });
+
+    const stat = await client.getAdminLogStat("sk-admin", 1, {
+      type: 2,
+      startTimestamp: 1700000000,
+      endTimestamp: 1700003600,
+    });
+    expect(stat).toEqual({ quota: 320, rpm: 5, tpm: 100 });
+    expect(requests[3]?.url).toBe(
+      "http://new-api.test/api/log/stat?type=2&start_timestamp=1700000000&end_timestamp=1700003600",
+    );
+
+    const logs = await client.listAdminLogs("sk-admin", 1, { pageSize: 5 });
+    expect(logs.items[0]?.model_name).toBe("gpt-4o");
+    // IK6M2F：/api/log 列表路由须带尾斜杠
+    expect(requests[4]?.url).toBe(
+      "http://new-api.test/api/log/?p=1&page_size=5",
+    );
+    expect(new Headers(requests[4]?.init.headers).get("New-Api-User")).toBe("1");
+  });
+
+  it("normalizes admin page envelopes with missing fields", async () => {
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async () =>
+        jsonResponse({ success: true, data: { items: undefined } }),
+    });
+    const page = await client.listAdminTopUps("sk-admin", 1);
+    expect(page.items).toEqual([]);
+    expect(page.total).toBe(0);
+    expect(page.page).toBe(1);
+    expect(page.page_size).toBe(20);
   });
 });
