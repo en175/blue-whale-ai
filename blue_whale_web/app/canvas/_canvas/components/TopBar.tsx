@@ -349,6 +349,7 @@ export function TopBar({
         >
           <div
             style={{
+              transform: "scale(0.85)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -358,7 +359,6 @@ export function TopBar({
               src="/blue_whale.svg"
               alt="Blue-Whale"
               className="h-7 w-auto"
-              style={{ filter: "var(--tc-brand-logo-filter)" }}
             />
           </div>
         </button>
