@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { SnapshotConversationState } from "@blue-whale/persistence";
 import {
   applySnapshot,
   initialProjectRecoveryState,
@@ -25,6 +26,23 @@ function makeProjectRepo(view: typeof sampleProject | null = sampleProject) {
 }
 function makeCanvasRepo() {
   return { getByProject: vi.fn().mockResolvedValue(sampleCanvas) };
+}
+
+/** 成功路径会话快照 mock 的单点构造入口：base 与 overrides 均受
+ *  SnapshotConversationState 约束，新增必选字段或错误 override 值会在类型检查暴露。 */
+function makeConversationState(
+  overrides: Partial<SnapshotConversationState> = {},
+): SnapshotConversationState {
+  const base: SnapshotConversationState = {
+    conversation_messages: [],
+    plan_messages: [],
+    scene_cards: [],
+    plan_applications: [],
+    scene_card_generation_records: [],
+    agent_runs: [],
+    high_watermark_cursor: "0",
+  };
+  return { ...base, ...overrides };
 }
 
 describe("handleGetSnapshot 归属校验", () => {
@@ -68,15 +86,9 @@ describe("handleGetSnapshot 成功快照", () => {
         loadJobsAndAssets: vi
           .fn()
           .mockResolvedValue({ generation_jobs: [], assets: [] }),
-        loadConversationState: vi.fn().mockResolvedValue({
-          conversation_messages: [],
-          plan_messages: [],
-          scene_cards: [],
-          plan_applications: [],
-          scene_card_generation_records: [],
-          agent_runs: [],
-          high_watermark_cursor: "0",
-        }),
+        loadConversationState: vi
+          .fn()
+          .mockResolvedValue(makeConversationState()),
       },
     });
 
@@ -127,15 +139,7 @@ describe("handleGetSnapshot 成功快照", () => {
       loadJobsAndAssets: vi
         .fn()
         .mockResolvedValue({ generation_jobs: [job], assets: [asset] }),
-      loadConversationState: vi.fn().mockResolvedValue({
-        conversation_messages: [],
-        plan_messages: [],
-        scene_cards: [],
-        plan_applications: [],
-        scene_card_generation_records: [],
-        agent_runs: [],
-        high_watermark_cursor: "0",
-      }),
+      loadConversationState: vi.fn().mockResolvedValue(makeConversationState()),
     };
 
     const res = await handleGetSnapshot("9", "7", {
@@ -211,15 +215,7 @@ describe("handleGetSnapshot 成功快照", () => {
       loadJobsAndAssets: vi
         .fn()
         .mockResolvedValue({ generation_jobs: [job], assets: [] }),
-      loadConversationState: vi.fn().mockResolvedValue({
-        conversation_messages: [],
-        plan_messages: [],
-        scene_cards: [],
-        plan_applications: [],
-        scene_card_generation_records: [],
-        agent_runs: [],
-        high_watermark_cursor: "0",
-      }),
+      loadConversationState: vi.fn().mockResolvedValue(makeConversationState()),
     };
 
     const res = await handleGetSnapshot("9", "7", {
@@ -244,51 +240,50 @@ describe("handleGetSnapshot 成功快照", () => {
         loadJobsAndAssets: vi
           .fn()
           .mockResolvedValue({ generation_jobs: [], assets: [] }),
-        loadConversationState: vi.fn().mockResolvedValue({
-          conversation_messages: [
-            {
-              message_id: huge,
-              conversation_id: huge,
-              agent_run_id: huge,
-              role: "assistant",
-              content: "蓝鲸",
-              sequence_no: 1,
-              created_at: "2026-07-29T00:00:00.000Z",
-              mentions: [
-                {
-                  mention_id: huge,
-                  index: 0,
-                  type: "asset",
-                  display_name: "蓝鲸",
-                  availability: "available",
-                  reason: null,
-                  snapshot: { asset_type: "image" },
-                },
-              ],
-            },
-          ],
-          agent_runs: [
-            {
-              agent_run_id: huge,
-              conversation_id: huge,
-              status: "awaiting_input",
-              stage: null,
-              input_sequence_no: 1,
-              active_input_request: {
-                input_request_id: huge,
-                request_type: "creation_clarification",
-                question: "什么风格？",
-                status: "pending",
-                expires_at: "2026-07-30T00:00:00.000Z",
+        loadConversationState: vi.fn().mockResolvedValue(
+          makeConversationState({
+            // 既有用例保留历史残缺结构；类型逃逸仅隔离在这两个旧字段。
+            conversation_messages: [
+              {
+                message_id: huge,
+                conversation_id: huge,
+                agent_run_id: huge,
+                role: "assistant",
+                content: "蓝鲸",
+                sequence_no: 1,
+                created_at: "2026-07-29T00:00:00.000Z",
+                mentions: [
+                  {
+                    mention_id: huge,
+                    index: 0,
+                    type: "asset",
+                    display_name: "蓝鲸",
+                    availability: "available",
+                    reason: null,
+                    snapshot: { asset_type: "image" },
+                  },
+                ],
               },
-            },
-          ],
-          plan_messages: [],
-          scene_cards: [],
-          plan_applications: [],
-          scene_card_generation_records: [],
-          high_watermark_cursor: huge,
-        }),
+            ] as unknown as SnapshotConversationState["conversation_messages"],
+            agent_runs: [
+              {
+                agent_run_id: huge,
+                conversation_id: huge,
+                status: "awaiting_input",
+                stage: null,
+                input_sequence_no: 1,
+                active_input_request: {
+                  input_request_id: huge,
+                  request_type: "creation_clarification",
+                  question: "什么风格？",
+                  status: "pending",
+                  expires_at: "2026-07-30T00:00:00.000Z",
+                },
+              },
+            ] as unknown as SnapshotConversationState["agent_runs"],
+            high_watermark_cursor: huge,
+          }),
+        ),
       },
     });
 
@@ -304,6 +299,62 @@ describe("handleGetSnapshot 成功快照", () => {
       conversation_id: huge,
       active_input_request: { input_request_id: huge },
     });
+  });
+
+  it("scene_card_generation_records 非空 → record/scene_card/job/plan_message ID 经 wireInteger 投影，summary_status 与 output_slots 透传", async () => {
+    const record = {
+      record_id: "88",
+      scene_card_id: "66",
+      summary_status: "partial",
+      first_generation_job_id: "300",
+      plan_message_id: "44",
+      output_slots: [
+        {
+          slot_id: "501",
+          slot_index: 0,
+          status: "succeeded",
+          asset_id: "200",
+          retry_of_slot_id: null,
+          initial_placement_status: "placed",
+        },
+      ],
+    } satisfies SnapshotConversationState["scene_card_generation_records"][number];
+    const snapshot = {
+      loadJobsAndAssets: vi
+        .fn()
+        .mockResolvedValue({ generation_jobs: [], assets: [] }),
+      loadConversationState: vi
+        .fn()
+        .mockResolvedValue(
+          makeConversationState({ scene_card_generation_records: [record] }),
+        ),
+    };
+
+    const res = await handleGetSnapshot("9", "7", {
+      projects: makeProjectRepo(),
+      canvas: makeCanvasRepo(),
+      snapshot,
+    });
+
+    expect(res.data?.scene_card_generation_records).toEqual([
+      {
+        record_id: 88,
+        scene_card_id: 66,
+        summary_status: "partial",
+        first_generation_job_id: 300,
+        plan_message_id: 44,
+        output_slots: [
+          {
+            slot_id: "501",
+            slot_index: 0,
+            status: "succeeded",
+            asset_id: "200",
+            retry_of_slot_id: null,
+            initial_placement_status: "placed",
+          },
+        ],
+      },
+    ]);
   });
 });
 
