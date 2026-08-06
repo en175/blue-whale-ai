@@ -400,6 +400,9 @@ describe("generation video worker repo", () => {
             },
           ),
         },
+        storyboard_previews: {
+          findFirst: vi.fn().mockResolvedValue(null),
+        },
       }),
     );
     const repo = createWorkerRepo({ $transaction: transaction } as never);
@@ -464,6 +467,9 @@ describe("generation video worker repo", () => {
             async ({ data }: { data: Record<string, unknown> }) => data,
           ),
         },
+        storyboard_previews: {
+          findFirst: vi.fn().mockResolvedValue(null),
+        },
       }),
     );
     const repo = createWorkerRepo({ $transaction: transaction } as never);
@@ -496,6 +502,9 @@ describe("generation video worker repo", () => {
           }),
         },
         project_events: { create: createEvent },
+        storyboard_previews: {
+          findFirst: vi.fn().mockResolvedValue(null),
+        },
       }),
     );
     const repo = createWorkerRepo({ $transaction: transaction } as never);

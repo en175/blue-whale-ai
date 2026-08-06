@@ -33,6 +33,8 @@ export type ProjectSnapshot = {
   scene_cards?: Array<Record<string, unknown>>;
   /** SceneCard 生成记录（IK67HB/T13）：generation origins/summaries。 */
   scene_card_generation_records?: Array<Record<string, unknown>>;
+  /** StoryboardPreview 分镜预览（IK67HF/T15）：从 SceneCard 触发的可选旁路预览会话。 */
+  storyboard_previews?: Array<Record<string, unknown>>;
   assets: Record<
     string,
     { asset_id: number | string; type: string; access_url: string }
@@ -396,6 +398,19 @@ export function applyProductEvent(
           snapshot.scene_card_generation_records ?? [],
           event.payload,
           "record_id",
+        ),
+      };
+    } else if (
+      event.event_type === "storyboard_preview.created" ||
+      event.event_type === "storyboard_preview.summary_changed"
+    ) {
+      // IK67HF/T15：分镜创建与汇总态变化都按 preview_id 合并同一投影。
+      snapshot = {
+        ...snapshot,
+        storyboard_previews: upsertFact(
+          snapshot.storyboard_previews ?? [],
+          event.payload,
+          "preview_id",
         ),
       };
     } else if (
@@ -902,6 +917,7 @@ function pendingOutputPlacements(
       job.input && typeof job.input === "object" && !Array.isArray(job.input)
         ? (job.input as Record<string, unknown>)
         : {};
+    const isStoryboardFrame = input.storyboard_preview === true;
     const slots = Array.isArray(job.output_slots) ? job.output_slots : [];
     for (const slot of slots) {
       if (!slot || typeof slot !== "object" || Array.isArray(slot)) continue;
@@ -921,6 +937,7 @@ function pendingOutputPlacements(
         slot_index: output.slot_index,
         asset_id: String(output.asset_id),
         type: job.type,
+        is_storyboard_frame: isStoryboardFrame,
         scene_card_id: isWireInteger(input.scene_card_id)
           ? String(input.scene_card_id)
           : null,

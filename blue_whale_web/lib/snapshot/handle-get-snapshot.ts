@@ -58,6 +58,8 @@ export interface SnapshotData {
   plan_applications: readonly unknown[];
   /** SceneCard 生成记录（IK67HB，T13）：generation origins/summaries 恢复权威。 */
   scene_card_generation_records: readonly unknown[];
+  /** StoryboardPreview 分镜预览（IK67HF，T15）：从 SceneCard 触发的可选旁路预览会话。 */
+  storyboard_previews: readonly unknown[];
   generation_jobs: SnapshotGenerationJob[];
   assets: Record<string, SnapshotAssetSummary>;
   high_watermark_cursor: WireInteger;
@@ -211,6 +213,12 @@ export async function handleGetSnapshot(
         first_generation_job_id: wireInteger(record.first_generation_job_id),
         plan_message_id: wireInteger(record.plan_message_id),
       })),
+    storyboard_previews: conversation.storyboard_previews.map((preview) => ({
+      ...preview,
+      preview_id: wireInteger(preview.preview_id),
+      scene_card_id: wireInteger(preview.scene_card_id),
+      first_generation_job_id: wireInteger(preview.first_generation_job_id),
+    })),
     generation_jobs: generation_jobs.map(toWireJob),
     assets: assetMap,
     high_watermark_cursor: wireInteger(conversation.high_watermark_cursor),

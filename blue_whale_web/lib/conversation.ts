@@ -141,3 +141,48 @@ export function generateSceneCard(
     },
   );
 }
+
+export type StoryboardPreviewResult = {
+  preview_id: WireInteger;
+  scene_card_id: WireInteger;
+  generation_job_id: WireInteger;
+};
+
+export type StoryboardPreviewSummary = {
+  preview_id: WireInteger;
+  scene_card_id: WireInteger;
+  first_generation_job_id: WireInteger;
+  summary_status: string;
+};
+
+/** StoryboardPreview 创建（IK67HF/T15，CONTEXT L43-47）：从 SceneCard 显式触发分镜预览，
+ *  建 type=image 的 GenerationJob，其 N 个 output_slot 即有序画格。
+ *  body 形态由编辑器按 storyboardPreviewCreateRequestSchema 构造；Authorization 头携带 sk-token。 */
+export function createStoryboardPreview(
+  projectId: WireInteger,
+  sceneCardId: WireInteger,
+  idempotencyKey: string,
+  body: Record<string, unknown>,
+  providerToken?: string,
+): Promise<StoryboardPreviewResult> {
+  const headers: Record<string, string> = { "Idempotency-Key": idempotencyKey };
+  if (providerToken) headers.authorization = `Bearer ${providerToken}`;
+  return apiRequest<StoryboardPreviewResult>(
+    `/api/projects/${projectId}/scene-cards/${sceneCardId}/storyboard-preview`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+/** 只读端点：返回某 SceneCard 下所有未删除分镜预览（画格经 first_generation_job_id 关联 job 取）。 */
+export function getStoryboardPreviews(
+  projectId: WireInteger,
+  sceneCardId: WireInteger,
+): Promise<{ previews: StoryboardPreviewSummary[] }> {
+  return apiRequest<{ previews: StoryboardPreviewSummary[] }>(
+    `/api/projects/${projectId}/scene-cards/${sceneCardId}/storyboard-preview`,
+  );
+}

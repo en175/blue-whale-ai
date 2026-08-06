@@ -62,7 +62,9 @@ function outputSlotIds(nodes: unknown): bigint[] {
     if (!node || typeof node !== "object" || Array.isArray(node)) continue;
     const id = (node as Record<string, unknown>).id;
     if (typeof id !== "string") continue;
-    const match = /^generation-output:([1-9][0-9]*)$/.exec(id);
+    // 普通生成输出与分镜画格都映射回 output_slot，复用 initial_placement_status 标 placed。
+    const match =
+      /^(?:generation-output|storyboard-frame):([1-9][0-9]*)$/.exec(id);
     if (match?.[1]) ids.add(BigInt(match[1]));
   }
   return [...ids];

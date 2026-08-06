@@ -37,6 +37,7 @@ export {
   type SnapshotSceneCardView,
   type SnapshotPlanApplicationReceiptView,
   type SnapshotSceneCardGenerationRecordView,
+  type SnapshotStoryboardPreviewView,
 } from "./snapshot-repo.js";
 export {
   appendProjectEvent,
@@ -167,6 +168,14 @@ export {
   type SceneCardGenerationPresetView,
   type SceneCardGenerationPresetViewResult,
 } from "./scene-card-generation-repo.js";
+export {
+  createStoryboardPreviewRepo,
+  type StoryboardPreviewRepo,
+  type CreateStoryboardPreviewInput,
+  type CreateStoryboardPreviewResult,
+  type StoryboardPreviewView,
+  type ListStoryboardPreviewsResult,
+} from "./storyboard-preview-repo.js";
 export {
   createWorkerRepo,
   type WorkerRepo,

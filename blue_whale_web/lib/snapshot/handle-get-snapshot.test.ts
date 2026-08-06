@@ -39,6 +39,7 @@ function makeConversationState(
     scene_cards: [],
     plan_applications: [],
     scene_card_generation_records: [],
+    storyboard_previews: [],
     agent_runs: [],
     high_watermark_cursor: "0",
   };
@@ -162,6 +163,7 @@ describe("handleGetSnapshot 成功快照", () => {
         scene_cards: [],
         plan_applications: [],
         scene_card_generation_records: [],
+        storyboard_previews: [],
         agent_runs: [],
         generation_jobs: [
           {

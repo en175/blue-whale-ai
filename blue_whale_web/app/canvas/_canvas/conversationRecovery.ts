@@ -68,8 +68,11 @@ export function projectSnapshotToCanvasNodes(
   const nodes = [...persistedNodes];
   let positionIndex = 0;
   snapshot.generation_jobs.forEach((job) => {
+    const isStoryboardPreview = job.source === "storyboard_preview";
     if (
-      (job.source !== "agent_run" && job.source !== "bottom_dock") ||
+      (job.source !== "agent_run" &&
+        job.source !== "bottom_dock" &&
+        !isStoryboardPreview) ||
       (job.type !== "image" && job.type !== "video") ||
       (typeof job.job_id !== "number" && typeof job.job_id !== "string")
     ) {
@@ -99,6 +102,8 @@ export function projectSnapshotToCanvasNodes(
         };
         return;
       }
+      // 分镜节点必须先由 Canvas CAS 放置到 SceneCard 下方；此处只补资产地址，不能另建随机位置节点。
+      if (isStoryboardPreview) return;
       const { width, height } = parseAspectRatio(
         generationAspectRatio(job.input),
       );

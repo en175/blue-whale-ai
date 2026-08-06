@@ -871,6 +871,79 @@ describe("Project 恢复协调器", () => {
     expect(String(options.body)).toContain("generation-output:501");
   });
 
+  it("恢复分镜输出时持久化可渲染的图片节点而非未知节点类型", async () => {
+    const pendingSnapshot: ProjectSnapshot = {
+      ...snapshot(10),
+      canvas: {
+        id: 2,
+        project_id: 1,
+        version: 3,
+        viewport: '{"zoom":1}',
+        nodes: JSON.stringify([
+          {
+            id: "scene-card:66",
+            type: "scene_card",
+            scene_card_id: "66",
+            position: { x: 100, y: 200 },
+            width: 400,
+            height: 300,
+            status: "placed",
+          },
+        ]),
+      },
+      generation_jobs: [
+        {
+          job_id: 300,
+          type: "image",
+          input: { storyboard_preview: true, scene_card_id: "66" },
+          output_slots: [
+            {
+              slot_id: "501",
+              slot_index: 0,
+              status: "succeeded",
+              asset_id: "901",
+              initial_placement_status: "pending",
+            },
+          ],
+        },
+      ],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ code: 200, msg: "ok", data: pendingSnapshot }),
+      )
+      .mockImplementationOnce(async (_url: string, options: RequestInit) =>
+        Response.json({
+          code: 200,
+          msg: "ok",
+          data: {
+            ...pendingSnapshot.canvas,
+            version: 4,
+            nodes: JSON.parse(String(options.body)).nodes,
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await projectRecoveryTransport.recoverPlacements?.(
+      1,
+      new AbortController().signal,
+    );
+
+    const [, options] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const body = JSON.parse(String(options.body)) as { nodes: string };
+    const nodes = JSON.parse(body.nodes) as Array<Record<string, unknown>>;
+    expect(nodes).toContainEqual(
+      expect.objectContaining({
+        id: "storyboard-frame:501",
+        type: "image",
+        storyboardFrame: true,
+        position: { x: 100, y: 510 },
+      }),
+    );
+  });
+
   it("加载快照前及收到生成输出事件后触发 Canvas 放置恢复", async () => {
     const controller = new AbortController();
     const calls: string[] = [];

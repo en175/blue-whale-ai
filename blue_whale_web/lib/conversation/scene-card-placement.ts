@@ -23,6 +23,7 @@ interface CanvasNodeLike {
   assetId?: string;
   taskId?: string;
   slotIndex?: number;
+  storyboardFrame?: boolean;
   position?: { x: number; y: number };
   width?: number;
   height?: number;
@@ -42,6 +43,7 @@ export interface PendingOutputPlacement {
   slot_index: number;
   asset_id: string;
   type: "image" | "video";
+  is_storyboard_frame?: boolean;
   scene_card_id: string | null;
   placement_anchor: {
     x: number;
@@ -56,8 +58,10 @@ export interface OutputPlacementPort {
   markPlaced(slotId: string): Promise<void>;
 }
 
-function outputNodeId(slotId: string): string {
-  return `generation-output:${slotId}`;
+function outputNodeId(slotId: string, isStoryboardFrame: boolean): string {
+  return isStoryboardFrame
+    ? `storyboard-frame:${slotId}`
+    : `generation-output:${slotId}`;
 }
 
 function outputDimensions(type: "image" | "video"): {
@@ -225,7 +229,10 @@ export async function recoverPendingPlacements(
     }
 
     for (const output of pendingOutputs) {
-      const deterministicId = outputNodeId(output.slot_id);
+      const deterministicId = outputNodeId(
+        output.slot_id,
+        output.is_storyboard_frame === true,
+      );
       if (nodes.some((node) => node.id === deterministicId)) {
         placed.push(deterministicId);
         placedSlotIds.push(output.slot_id);
@@ -257,7 +264,14 @@ export async function recoverPendingPlacements(
                   OUTPUT_GAP,
               }
             : null;
-        if (basePosition) {
+        if (basePosition && output.is_storyboard_frame) {
+          position = {
+            x:
+              basePosition.x +
+              output.slot_index * (dimensions.width + OUTPUT_GAP),
+            y: basePosition.y,
+          };
+        } else if (basePosition) {
           const siblings = nodes.filter(
             (node) =>
               (node.type === "image" || node.type === "video") &&
@@ -320,6 +334,7 @@ export async function recoverPendingPlacements(
         assetId: output.asset_id,
         taskId: output.generation_job_id,
         slotIndex: output.slot_index,
+        ...(output.is_storyboard_frame ? { storyboardFrame: true } : {}),
         ...(output.scene_card_id ? { sceneCardId: output.scene_card_id } : {}),
         position,
         width: dimensions.width,
@@ -359,7 +374,9 @@ export async function recoverPendingPlacements(
   const latest = await canvas.getByProject(projectId);
   return {
     placed: [],
-    still_pending: pendingOutputs.map((output) => outputNodeId(output.slot_id)),
+    still_pending: pendingOutputs.map((output) =>
+      outputNodeId(output.slot_id, output.is_storyboard_frame === true),
+    ),
     canvas: latest,
   };
 }
