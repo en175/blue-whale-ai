@@ -182,4 +182,74 @@ describe("POST /api/text/completions", () => {
       error: { code: "quota_exhausted" },
     });
   });
+
+  it("413: content-length 超上限 → payload_too_large（不进 fetch）", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/text/completions", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer sk-test",
+          "content-length": String(2_000_000),
+        },
+      }),
+    );
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { type: "invalid_request_error", code: "payload_too_large" },
+    });
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it("504: 非流上游超时 → upstream_timeout（OpenAI shape）", async () => {
+    mocks.fetch.mockRejectedValue(
+      Object.assign(new Error("timeout"), { name: "TimeoutError" }),
+    );
+    const response = await POST(
+      postRequest({ model: "MiniMax-M3", messages: [] }),
+    );
+    expect(response.status).toBe(504);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { type: "server_error", code: "upstream_timeout" },
+    });
+  });
+
+  it("502: 上游网络失败 → upstream_error", async () => {
+    mocks.fetch.mockRejectedValue(new Error("ECONNREFUSED"));
+    const response = await POST(
+      postRequest({ model: "MiniMax-M3", messages: [] }),
+    );
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "upstream_error" },
+    });
+  });
+
+  it("流式不加超时 signal（不截断 SSE 长连接）", async () => {
+    mocks.fetch.mockResolvedValue(
+      new Response("data: [DONE]\n\n", {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+    );
+    await POST(
+      postRequest({ model: "MiniMax-M3", messages: [], stream: true }),
+    );
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      "http://go.test/v1/chat/completions",
+      expect.objectContaining({ signal: undefined }),
+    );
+  });
+
+  it("500: DATABASE_URL 未配置 → database_unavailable（不裸抛 HTML 500）", async () => {
+    vi.stubEnv("DATABASE_URL", "");
+    const response = await POST(
+      postRequest({ model: "MiniMax-M3", messages: [] }),
+    );
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { type: "server_error", code: "database_unavailable" },
+    });
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
 });
