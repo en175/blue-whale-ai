@@ -150,16 +150,11 @@ body {
   --tc-dropdown-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
   --tc-dropdown-shadow-up: 0 -12px 32px rgba(0, 0, 0, 0.4);
 
-  /* Brand logo — 轻量承载层方案。
-     鲸鱼本体仅保留较短黑色轮廓阴影（drop-shadow 贴合轮廓）；蓝光与投影移到 56×56 圆角底座后方（box-shadow），
-     避免透明 Logo 边缘糊一层脏光。引用：filter: var(--tc-brand-logo-filter) + boxShadow: var(--tc-brand-logo-tray-*)。 */
+  /* Brand logo filter — 透明鲸鱼本体 + 贴合轮廓双层柔和阴影（轻微 3D 悬浮感）。
+     引用：filter: var(--tc-brand-logo-filter)。用 drop-shadow 贴合轮廓，禁 box-shadow（会出矩形阴影框）。 */
   --tc-brand-logo-filter:
-    drop-shadow(0 1px 2px rgb(0 0 0 / 55%));
-  --tc-brand-logo-tray-bg: rgba(255, 255, 255, 0.06);
-  --tc-brand-logo-tray-border: rgba(255, 255, 255, 0.08);
-  --tc-brand-logo-tray-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.4),
-    0 0 12px rgba(59, 130, 246, 0.18);
+    drop-shadow(0 2px 6px rgb(0 0 0 / 55%))
+    drop-shadow(0 0 10px rgb(59 130 246 / 22%));
 
   --tc-menu-pill-bg: #171717;
   --tc-menu-pill-border: rgba(255, 255, 255, 0.04);
