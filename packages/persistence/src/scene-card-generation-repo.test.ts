@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
-import { canonicalizeJsonValue } from "@blue-whale/contracts";
+import {
+  canonicalizeJsonValue,
+  type ProviderPromptAsset,
+} from "@blue-whale/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createSceneCardGenerationRepo } from "./scene-card-generation-repo.js";
@@ -46,6 +49,26 @@ const CAPABILITY_SNAPSHOT = {
   digest: capabilityDigest(CAP_FIELDS),
 };
 
+function referenceAsset(
+  role: ProviderPromptAsset["role"],
+  mentionId = "101",
+): ProviderPromptAsset {
+  return {
+    mention_id: mentionId,
+    type: "asset",
+    role,
+    projection: {
+      asset_type: "image",
+      mime: "image/png",
+      size: "1024",
+      width: 1280,
+      height: 720,
+      duration_ms: null,
+      content_sha256: "asset-content",
+    },
+  };
+}
+
 function buildTx(overrides: Record<string, Record<string, ReturnType<typeof vi.fn>>>) {
   const projectEventsCreate = vi.fn().mockImplementation(({ data }) => ({
     id: 1n,
@@ -78,7 +101,9 @@ function buildTx(overrides: Record<string, Record<string, ReturnType<typeof vi.f
       ...overrides.scene_cards,
     },
     scene_card_generation_presets: {
-      findFirst: vi.fn().mockResolvedValue({ id: 6001n, version: 1 }),
+      findFirst: vi
+        .fn()
+        .mockResolvedValue({ id: 6001n, version: 1, reference_assets: [] }),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       ...overrides.scene_card_generation_presets,
     },
@@ -130,7 +155,7 @@ const baseInput = {
   base_preset_version: 1,
   parameters: VIDEO_PARAMETERS,
   reference_mode: "text_to_video" as const,
-  reference_assets: [] as unknown[],
+  reference_assets: [] as ProviderPromptAsset[],
   capability_snapshot_version: CAPABILITY_SNAPSHOT,
 };
 
@@ -253,7 +278,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
   it("preset CAS count=0 视为并发版本冲突零写入（AC#6 乐观锁）", async () => {
     const tx = buildTx({
       scene_card_generation_presets: {
-        findFirst: vi.fn().mockResolvedValue({ id: 6001n, version: 1 }),
+        findFirst: vi.fn().mockResolvedValue({ id: 6001n, version: 1, reference_assets: [] }),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
     });
@@ -360,6 +385,143 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(result.kind).toBe("applied");
   });
 
+  it("模型未声明尾帧能力时拒绝尾帧模式并零写入", async () => {
+    const tx = buildTx({
+      scene_card_generation_presets: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 6001n,
+          version: 1,
+          reference_assets: [referenceAsset("reference")],
+        }),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_mode: "last_frame",
+      reference_assets: [referenceAsset("last_frame")],
+    });
+
+    expect(result).toMatchObject({ kind: "capability_limit" });
+    expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
+  });
+
+  it("参考模式与素材角色派生模式不一致时拒绝并零写入", async () => {
+    const tx = buildTx({
+      scene_card_generation_presets: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 6001n,
+          version: 1,
+          reference_assets: [referenceAsset("reference")],
+        }),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_assets: [referenceAsset("first_frame")],
+    });
+
+    expect(result).toEqual({
+      kind: "validation_failed",
+      reason:
+        "reference_mode text_to_video 与素材角色派生模式 first_frame 不一致",
+    });
+    expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("多个素材声明为首帧时拒绝并零写入", async () => {
+    const tx = buildTx({
+      scene_card_generation_presets: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 6001n,
+          version: 1,
+          reference_assets: [
+            referenceAsset("reference", "101"),
+            referenceAsset("reference", "102"),
+          ],
+        }),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_mode: "first_frame",
+      reference_assets: [
+        referenceAsset("first_frame", "101"),
+        referenceAsset("first_frame", "102"),
+      ],
+    });
+
+    expect(result).toEqual({
+      kind: "validation_failed",
+      reason: "首帧参考素材最多只能有一个",
+    });
+    expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("模型声明 camelCase 尾帧能力时接纳尾帧角色并持久化到新任务", async () => {
+    const capFields = { ...CAP_FIELDS, features: { lastFrame: true } };
+    const tx = buildTx({
+      generation_model_capability: {
+        findUnique: vi.fn().mockResolvedValue({
+          version: 3,
+          enabled: true,
+          is_delete: false,
+          ...capFields,
+        }),
+      },
+      scene_card_generation_presets: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 6001n,
+          version: 1,
+          reference_assets: [referenceAsset("reference")],
+        }),
+      },
+      conversation_message_mentions: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ id: 101n, target_id: 201n, project_id: 42n }]),
+      },
+      assets: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([
+            { id: 201n, project_id: 42n, status: "normal", is_delete: false },
+          ]),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_mode: "last_frame",
+      reference_assets: [referenceAsset("last_frame")],
+      capability_snapshot_version: {
+        ...CAPABILITY_SNAPSHOT,
+        digest: capabilityDigest(CAP_FIELDS),
+      },
+    });
+
+    expect(result.kind).toBe("applied");
+    expect(
+      tx.scene_card_generation_presets.updateMany.mock.calls[0][0].data,
+    ).toMatchObject({
+      reference_mode: "last_frame",
+      reference_assets: [{ mention_id: "101", role: "last_frame" }],
+    });
+    expect(tx.generation_jobs.create.mock.calls[0][0].data.input).toMatchObject(
+      {
+        reference_mode: "last_frame",
+        reference_assets: [{ mention_id: "101", role: "last_frame" }],
+      },
+    );
+  });
+
   it("无首次 Receipt 返回 validation_failed", async () => {
     const tx = buildTx({
       plan_application_receipts: {
@@ -385,17 +547,84 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
             { id: 201n, project_id: 42n, status: "deleted", is_delete: false },
           ]),
       },
+      scene_card_generation_presets: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 6001n,
+          version: 1,
+          reference_assets: [referenceAsset("reference")],
+        }),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_assets: [referenceAsset("reference")],
+    });
+
+    expect(result.kind).toBe("validation_failed");
+    expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("拒绝在角色编辑中新增参考素材并零写入", async () => {
+    const tx = buildTx({});
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_assets: [referenceAsset("reference")],
+    });
+
+    expect(result).toEqual({
+      kind: "validation_failed",
+      reason: "参考素材列表只能修改角色",
+    });
+    expect(tx.generation_model_capability.findUnique).not.toHaveBeenCalled();
+    expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("拒绝在角色编辑中改写冻结素材投影并零写入", async () => {
+    const existing = referenceAsset("reference");
+    const tx = buildTx({
+      scene_card_generation_presets: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 6001n,
+          version: 1,
+          reference_assets: [existing],
+        }),
+      },
     });
     const { repo } = repoWith(tx);
 
     const result = await repo.regenerateSceneCard({
       ...baseInput,
       reference_assets: [
-        { mention_id: "101", type: "asset", role: "reference", projection: {} },
+        {
+          ...existing,
+          projection: { ...existing.projection, content_sha256: "tampered" },
+        },
       ],
     });
 
-    expect(result.kind).toBe("validation_failed");
+    expect(result).toEqual({
+      kind: "validation_failed",
+      reason: "参考素材列表只能修改角色",
+    });
+    expect(tx.generation_model_capability.findUnique).not.toHaveBeenCalled();
+    expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("拒绝用另一模型参数搭配冻结能力快照并零写入", async () => {
+    const tx = buildTx({});
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      parameters: { ...baseInput.parameters, model_id: "another-video-model" },
+    });
+
+    expect(result).toEqual({ kind: "capability_drift" });
+    expect(tx.generation_model_capability.findUnique).not.toHaveBeenCalled();
     expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
   });
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { frozenGenerationParametersSchema } from "./plan-message.js";
 import {
+  deriveVideoReferenceMode,
   sceneCardGenerationRecordViewSchema,
   sceneCardRegenerationRequestSchema,
 } from "./scene-card-generation.js";
@@ -36,6 +37,21 @@ const baseRequest = {
   reference_mode: "text_to_video" as const,
   reference_assets: [],
   capability_snapshot_version: capabilitySnapshot,
+};
+
+const referenceAsset = {
+  mention_id: "101",
+  type: "asset" as const,
+  role: "reference" as const,
+  projection: {
+    asset_type: "image" as const,
+    mime: "image/png",
+    size: "1024",
+    width: 1280,
+    height: 720,
+    duration_ms: null,
+    content_sha256: "asset-content",
+  },
 };
 
 describe("SceneCardRegenerationRequest contract", () => {
@@ -91,6 +107,15 @@ describe("SceneCardRegenerationRequest contract", () => {
     ).toThrow();
   });
 
+  it("拒绝 parameters 与冻结能力快照指向不同模型", () => {
+    expect(() =>
+      sceneCardRegenerationRequestSchema.parse({
+        ...baseRequest,
+        parameters: { ...frozenVideo, model_id: "another-video-model" },
+      }),
+    ).toThrow(/冻结能力快照/);
+  });
+
   it("拒绝非法 reference_mode", () => {
     expect(() =>
       sceneCardRegenerationRequestSchema.parse({
@@ -100,6 +125,39 @@ describe("SceneCardRegenerationRequest contract", () => {
     ).toThrow();
   });
 
+  it("接受与尾帧角色一致的尾帧模式", () => {
+    expect(() =>
+      sceneCardRegenerationRequestSchema.parse({
+        ...baseRequest,
+        reference_mode: "last_frame",
+        reference_assets: [{ ...referenceAsset, role: "last_frame" }],
+      }),
+    ).not.toThrow();
+  });
+
+  it("拒绝与素材角色派生结果不一致的 reference_mode", () => {
+    expect(() =>
+      sceneCardRegenerationRequestSchema.parse({
+        ...baseRequest,
+        reference_mode: "text_to_video",
+        reference_assets: [{ ...referenceAsset, role: "first_frame" }],
+      }),
+    ).toThrow(/素材角色派生模式/);
+  });
+
+  it("拒绝重复首帧角色", () => {
+    expect(() =>
+      sceneCardRegenerationRequestSchema.parse({
+        ...baseRequest,
+        reference_mode: "first_frame",
+        reference_assets: [
+          { ...referenceAsset, role: "first_frame" },
+          { ...referenceAsset, mention_id: "102", role: "first_frame" },
+        ],
+      }),
+    ).toThrow(/首帧参考素材最多只能有一个/);
+  });
+
   it("拒绝未知字段（strict）", () => {
     expect(() =>
       sceneCardRegenerationRequestSchema.parse({
@@ -107,6 +165,27 @@ describe("SceneCardRegenerationRequest contract", () => {
         extra: true,
       }),
     ).toThrow();
+  });
+});
+
+describe("deriveVideoReferenceMode", () => {
+  it.each([
+    [[], "text_to_video"],
+    [[{ ...referenceAsset, role: "first_frame" as const }], "first_frame"],
+    [[{ ...referenceAsset, role: "last_frame" as const }], "last_frame"],
+    [
+      [
+        { ...referenceAsset, role: "first_frame" as const },
+        {
+          ...referenceAsset,
+          mention_id: "102",
+          role: "last_frame" as const,
+        },
+      ],
+      "first_and_last_frame",
+    ],
+  ] as const)("按素材角色派生 %s", (assets, expected) => {
+    expect(deriveVideoReferenceMode([...assets])).toBe(expected);
   });
 });
 

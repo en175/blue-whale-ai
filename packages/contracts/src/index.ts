@@ -112,6 +112,9 @@ export {
 export {
   sceneCardRegenerationRequestSchema,
   sceneCardGenerationRecordViewSchema,
+  deriveVideoReferenceMode,
+  referenceModeToRequiredFeature,
+  validateVideoReferenceConfiguration,
   type SceneCardRegenerationRequest,
   type SceneCardGenerationRecordView,
 } from "./scene-card-generation.js";

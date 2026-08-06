@@ -1,5 +1,9 @@
 import { apiRequest } from "./api-client";
 import type {
+  ProviderPromptAsset,
+  VideoReferenceMode,
+} from "@blue-whale/contracts";
+import type {
   AcceptedConversationMention,
   ConversationMentionInput,
 } from "@blue-whale/core";
@@ -97,8 +101,8 @@ export type SceneCardGenerationPreset = {
   preset: {
     version: number;
     parameters: Record<string, unknown>;
-    reference_mode: string;
-    reference_assets: unknown[];
+    reference_mode: VideoReferenceMode;
+    reference_assets: ProviderPromptAsset[];
     capability_snapshot_version: Record<string, unknown>;
   };
   projection: { prompt_text: string } | null;

@@ -41,6 +41,8 @@ export type ImageModelCapability = {
     tools: boolean;
     /** 视频首帧引用（图片恒 false）。 */
     first_frame: boolean;
+    /** 视频尾帧引用（图片恒 false）。 */
+    last_frame: boolean;
     /** 视频首尾帧引用（图片恒 false）。 */
     first_last_frame: boolean;
     /** 视频带音频（图片恒 false）。 */

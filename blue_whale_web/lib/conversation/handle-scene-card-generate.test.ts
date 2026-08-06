@@ -134,6 +134,62 @@ describe("handleSceneCardGenerate（IK67HB / T13）", () => {
     });
   });
 
+  it("把首尾帧角色与参考模式原样传给持久化层", async () => {
+    const regenerateSceneCard = vi.fn().mockResolvedValue({
+      kind: "scene_card_not_found",
+    });
+    const repo = {
+      regenerateSceneCard,
+      getSceneCardGenerationPreset: vi.fn(),
+    } as unknown as SceneCardGenerationRepo;
+    const body = JSON.stringify({
+      ...JSON.parse(BODY),
+      reference_mode: "first_and_last_frame",
+      reference_assets: [
+        {
+          mention_id: "101",
+          type: "asset",
+          role: "first_frame",
+          projection: {
+            asset_type: "image",
+            mime: "image/png",
+            size: "1024",
+            width: 1280,
+            height: 720,
+            duration_ms: null,
+            content_sha256: "asset-a",
+          },
+        },
+        {
+          mention_id: "102",
+          type: "asset",
+          role: "last_frame",
+          projection: {
+            asset_type: "image",
+            mime: "image/png",
+            size: "1024",
+            width: 1280,
+            height: 720,
+            duration_ms: null,
+            content_sha256: "asset-b",
+          },
+        },
+      ],
+    });
+
+    await handleSceneCardGenerate("100", "42", "5001", "key-1", body, repo);
+
+    expect(regenerateSceneCard).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reference_mode: "first_and_last_frame",
+        reference_assets: [
+          expect.objectContaining({ mention_id: "101", role: "first_frame" }),
+          expect.objectContaining({ mention_id: "102", role: "last_frame" }),
+        ],
+      }),
+    );
+  });
+
   it("重放返回首次结果（不含 record_id/cursor）", async () => {
     const result = await handleSceneCardGenerate(
       "100",

@@ -51,6 +51,28 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     expect(view.digest).toMatch(/^sha256:[0-9a-f]+$/);
   });
 
+  it("last_frame 缺省时按不支持处理", async () => {
+    const { repo } = repoWith([buildRow()]);
+    const [view] = await repo.listEnabledByType("video");
+
+    expect(view.features.last_frame).toBe(false);
+  });
+
+  it("独立解析 camelCase 与 snake_case 的 last_frame 能力", async () => {
+    const { repo } = repoWith([
+      buildRow({ features: { first_frame: false, lastFrame: true } }),
+      buildRow({ features: { first_frame: false, last_frame: true } }),
+    ]);
+
+    const views = await repo.listEnabledByType("video");
+
+    expect(views.map((view) => view.features.last_frame)).toEqual([true, true]);
+    expect(views.map((view) => view.features.first_frame)).toEqual([
+      false,
+      false,
+    ]);
+  });
+
   it("digest === capabilityDigest(同一 8 字段输入)——用真实函数交叉断言，不写死", async () => {
     const { repo } = repoWith([buildRow()]);
     const [view] = await repo.listEnabledByType("image");

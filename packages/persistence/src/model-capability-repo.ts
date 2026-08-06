@@ -30,6 +30,8 @@ export interface ModelFeatures {
   tools: boolean;
   /** 视频首帧引用（video features.first_frame）。图片恒 false。 */
   first_frame: boolean;
+  /** 视频尾帧引用（video features.last_frame）。图片恒 false。 */
+  last_frame: boolean;
   /** 视频首尾帧引用（video features.first_last_frame）。图片恒 false。 */
   first_last_frame: boolean;
   /** 视频带音频（video features.audio）。图片恒 false。 */
@@ -84,6 +86,8 @@ type FeaturesJson = {
   tools?: boolean;
   firstFrame?: boolean;
   first_frame?: boolean;
+  lastFrame?: boolean;
+  last_frame?: boolean;
   firstLastFrame?: boolean;
   first_last_frame?: boolean;
   audio?: boolean;
@@ -119,6 +123,7 @@ function toFeatures(json: unknown): ModelFeatures {
     stream: f.stream === true,
     tools: f.tools === true,
     first_frame: f.firstFrame === true || f.first_frame === true,
+    last_frame: f.lastFrame === true || f.last_frame === true,
     first_last_frame: f.firstLastFrame === true || f.first_last_frame === true,
     audio: f.audio === true,
   };

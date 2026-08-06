@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { canonicalizeJsonValue } from "@blue-whale/contracts";
+import {
+  canonicalizeJsonValue,
+  deriveVideoReferenceMode,
+} from "@blue-whale/contracts";
 
 import { classifyPlanApplicationAvailability } from "@blue-whale/core";
 import type {
@@ -8,6 +11,7 @@ import type {
   FrozenGenerationParameters,
   PlanApplyImageReceipt,
   PlanApplicationKind,
+  ProviderPromptAsset,
 } from "@blue-whale/contracts";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
@@ -106,29 +110,8 @@ export interface DerivedReference {
   first_seen_offset: number;
 }
 
-interface ReferenceAsset {
-  mention_id: string;
-  type: "asset" | "scene_card";
-  role: "first_frame" | "last_frame" | "reference";
-}
-
-type VideoReferenceMode =
-  | "text_to_video"
-  | "first_frame"
-  | "last_frame"
-  | "first_and_last_frame";
-
 function sha256Digest(value: string): string {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
-}
-
-function deriveReferenceMode(assets: ReferenceAsset[]): VideoReferenceMode {
-  const hasFirst = assets.some((asset) => asset.role === "first_frame");
-  const hasLast = assets.some((asset) => asset.role === "last_frame");
-  if (hasFirst && hasLast) return "first_and_last_frame";
-  if (hasFirst) return "first_frame";
-  if (hasLast) return "last_frame";
-  return "text_to_video";
 }
 
 /** scene_cards.title 是 NOT NULL，但 plan_messages 只冻结 sequence_label（可空）与 content_markdown。
@@ -284,7 +267,7 @@ async function applySceneCardCreateInTransaction(
   const frozenParameters = planMessage.frozen_generation_parameters as unknown as Record<string, unknown>;
   const projection = planMessage.provider_prompt_projection as unknown as {
     prompt_text: string;
-    reference_assets: ReferenceAsset[];
+    reference_assets: ProviderPromptAsset[];
     parameters: Record<string, unknown>;
   };
   const derivedReferences = (planMessage.derived_references as unknown as DerivedReference[]) ?? [];
@@ -336,7 +319,7 @@ async function applySceneCardCreateInTransaction(
   const sceneCardId = sceneCard.id;
 
   // 6. 创建首个视频 GenerationJob（source=plan），复用 createJobWithinTx 组合进本事务。
-  const referenceMode = deriveReferenceMode(projection.reference_assets);
+  const referenceMode = deriveVideoReferenceMode(projection.reference_assets);
   const createdJob = await createJobWithinTx(tx, {
     projectId: input.projectId,
     userId: input.userId,
@@ -529,7 +512,7 @@ async function applySceneCardReplaceInTransaction(
     planMessage.frozen_generation_parameters as unknown as Record<string, unknown>;
   const projection = planMessage.provider_prompt_projection as unknown as {
     prompt_text: string;
-    reference_assets: ReferenceAsset[];
+    reference_assets: ProviderPromptAsset[];
     parameters: Record<string, unknown>;
   };
   const derivedReferences =
@@ -639,7 +622,7 @@ async function applySceneCardReplaceInTransaction(
     return { kind: "target_stale", reason: "scene_card version changed or removed" };
 
   // 7. 创建首个视频 GenerationJob（source=plan，scene_card_id 指向既有卡）。
-  const referenceMode = deriveReferenceMode(projection.reference_assets);
+  const referenceMode = deriveVideoReferenceMode(projection.reference_assets);
   const createdJob = await createJobWithinTx(tx, {
     projectId: input.projectId,
     userId: input.userId,
