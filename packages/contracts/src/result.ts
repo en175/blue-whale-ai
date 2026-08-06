@@ -18,6 +18,8 @@ export const PLAN_APPLICATION_ALREADY_APPLIED_CODE = 100404; // 该 PlanMessage 
 export const PLAN_APPLICATION_QUOTA_INSUFFICIENT_CODE = 100405; // 余额不足（retryable_blocked），充值后用新 CommandId 重试
 // SceneCard 生成编辑器（IK67HB / T13）：版本冲突零写入保留草稿（CONTEXT L84-89 乐观并发）
 export const SCENE_CARD_VERSION_CONFLICT_CODE = 100406; // base 版本与当前 SceneCard/Preset 版本不一致
+// 计划应用覆盖分支（IK67HA / T12）：100406 已被 T13 占用，T12 target_stale 用 100407
+export const PLAN_APPLICATION_TARGET_STALE_CODE = 100407; // 覆盖目标场景卡已变化（版本/删除/越权），需生成新计划
 
 export interface ResultEnvelope<T> {
   code: number;

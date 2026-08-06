@@ -7,6 +7,7 @@ import {
   PLAN_APPLICATION_KIND_UNSUPPORTED_CODE,
   PLAN_APPLICATION_PLAN_NOT_FOUND_CODE,
   PLAN_APPLICATION_QUOTA_INSUFFICIENT_CODE,
+  PLAN_APPLICATION_TARGET_STALE_CODE,
   RESOURCE_NOT_FOUND_CODE,
 } from "@blue-whale/contracts";
 import type { PlanApplicationRepo } from "@blue-whale/persistence";
@@ -88,6 +89,7 @@ describe("handleApplyPlanMessage（契约 §9 / IK67H9 视频分支）", () => {
       "",
       deps({
         kind: "applied",
+        application_kind: "scene_card_create",
         scene_card_id: "5001",
         generation_job_id: "9001",
         receipt_id: "7001",
@@ -218,6 +220,65 @@ describe("handleApplyPlanMessage（契约 §9 / IK67H9 视频分支）", () => {
     ];
     expect(firstHash).not.toBe(secondHash);
     expect(firstHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("覆盖应用（scene_card_replace）回显 application_kind=scene_card_replace", async () => {
+    const result = await handleApplyPlanMessage(
+      "100",
+      "42",
+      "5001",
+      "key-1",
+      "",
+      deps({
+        kind: "applied",
+        application_kind: "scene_card_replace",
+        scene_card_id: "5001",
+        generation_job_id: "9002",
+        receipt_id: "7002",
+        cursor: "200",
+      }),
+    );
+    expect(result.code).toBe(200);
+    expect(result.data).toMatchObject({
+      scene_card_id: 5001,
+      generation_job_id: 9002,
+      receipt_id: 7002,
+      application_kind: "scene_card_replace",
+    });
+  });
+
+  it("覆盖重放回显 application_kind=scene_card_replace", async () => {
+    const result = await handleApplyPlanMessage(
+      "100",
+      "42",
+      "5001",
+      "key-1",
+      "",
+      deps({
+        kind: "replayed",
+        application_kind: "scene_card_replace",
+        scene_card_id: "5001",
+        generation_job_id: "9002",
+      }),
+    );
+    expect(result.code).toBe(200);
+    expect(result.data).toMatchObject({
+      scene_card_id: 5001,
+      generation_job_id: 9002,
+      application_kind: "scene_card_replace",
+    });
+  });
+
+  it("target_stale 映射 100407（目标场景卡已变化）", async () => {
+    const result = await handleApplyPlanMessage(
+      "100",
+      "42",
+      "5001",
+      "key-1",
+      "",
+      deps({ kind: "target_stale", reason: "stale" }),
+    );
+    expect(result.code).toBe(PLAN_APPLICATION_TARGET_STALE_CODE);
   });
 });
 
