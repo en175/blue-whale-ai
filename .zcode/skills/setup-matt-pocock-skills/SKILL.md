@@ -37,7 +37,7 @@ Lead each section with the recommended answer so the user can accept it in a wor
 
 **Section A — Issue tracker.**
 
-> Explainer: The "issue tracker" is where issues live for this repo. Skills like `to-tickets`, `triage`, `to-spec`, and `qa` read from and write to it — they need to know whether to call `gh issue create`, write a markdown file under `.scratch/`, or follow some other workflow you describe. Pick the place you actually track work for this repo.
+> Explainer: The "issue tracker" is where issues live for this repo. Skills like `to-tickets`, `triage`, and `to-spec` read from and write to it — they need to know whether to call `gh issue create`, write a markdown file under `.scratch/`, or follow some other workflow you describe. Pick the place you actually track work for this repo.
 
 Default posture: these skills were designed for GitHub. If a `git remote` points at GitHub, propose that. If a `git remote` points at GitLab (`gitlab.com` or a self-hosted host), propose GitLab. If a `git remote` points at Gitee (`gitee.com`), propose Gitee. Otherwise (or if the user prefers), offer:
 
@@ -106,14 +106,14 @@ Then write the docs files using the seed templates in this skill folder as a sta
 
 - [issue-tracker-github.md](./issue-tracker-github.md) — GitHub issue tracker
 - [issue-tracker-gitlab.md](./issue-tracker-gitlab.md) — GitLab issue tracker
-- [issue-tracker-gitee.md](./issue-tracker-gitee.md) — Gitee issue tracker
 - [issue-tracker-local.md](./issue-tracker-local.md) — local-markdown issue tracker
+- [issue-tracker-gitee.md](./issue-tracker-gitee.md) — Gitee issue tracker
 - [triage-labels.md](./triage-labels.md) — label mapping (only if `triage` is installed)
 - [domain.md](./domain.md) — domain doc consumer rules + layout
 
-Whatever the tracker, `issue-tracker.md` carries these sections (some conditional): **Conventions** (create/read/list/comment/label/close), **PRs/MRs as a triage surface** (only where the tracker has PRs/MRs — local-markdown has none), **When a skill says "publish to the issue tracker"**, **When a skill says "fetch the relevant ticket"**, and **Wayfinding operations** (used by `/wayfinder`). The seed templates (github/gitlab/gitee/local) show the shape; for "other" trackers, write the sections that apply from the user's description. In Wayfinding, label separators are tracker-specific — GitHub/GitLab use colons (`wayfinder:map`); trackers that forbid colons (Gitee) use hyphens (`wayfinder-map`).
-
 For "other" issue trackers, write `docs/agents/issue-tracker.md` from scratch using the user's description.
+
+Whatever the tracker, `issue-tracker.md` carries these sections (some conditional): **Conventions** (create/read/list/comment/label/close), **PRs/MRs as a triage surface** (only where the tracker has PRs/MRs — local-markdown has none), **When a skill says "publish to the issue tracker"**, **When a skill says "fetch the relevant ticket"**, and **Wayfinding operations** (used by `/wayfinder`). The seed templates (github/gitlab/gitee/local) show the shape; for "other" trackers, write the sections that apply from the user's description. In Wayfinding, label separators are tracker-specific — GitHub/GitLab use colons (`wayfinder:map`); trackers that forbid colons (Gitee) use hyphens (`wayfinder-map`).
 
 ### 5. Done
 
