@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
   CapabilitySnapshotVersion,
+  ProviderPromptAsset,
+  StoryboardFrameView,
   StoryboardPreviewParameters,
 } from "@blue-whale/contracts";
 
@@ -273,6 +275,82 @@ async function createStoryboardPreviewInTransaction(
   };
 }
 
+/** IK70LQ：画格角色绑定前置校验（CONTEXT L53-57）。逐个确认 submitted 画格属于本 SceneCard 的
+ *  StoryboardPreview（同 scene_card）、slot 已 succeeded、Asset 可访问（同 project、status=normal、
+ *  is_delete=false）。画格无 mention_id，不走 validateDerivedReferences，在 mention 组校验前单独成组调用。
+ *  任一不满足 → validation_failed 零写入。 */
+export async function validateStoryboardFrames(
+  tx: Prisma.TransactionClient,
+  projectId: bigint,
+  sceneCardId: bigint,
+  frames: ReadonlyArray<
+    Extract<ProviderPromptAsset, { type: "storyboard_frame" }>
+  >,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (frames.length === 0) return { ok: true };
+  const slotIds = frames.map((frame) => BigInt(frame.slot_id));
+  const slots = await tx.generation_output_slots.findMany({
+    where: { id: { in: slotIds } },
+    select: { id: true, asset_id: true, status: true, generation_job_id: true },
+  });
+  const slotById = new Map(slots.map((slot) => [slot.id, slot]));
+  const jobIds = Array.from(
+    new Set(slots.map((slot) => slot.generation_job_id)),
+  );
+  // 限定同 scene_card：只接受其 job 属于本 SceneCard 的 StoryboardPreview 的画格。
+  const previews =
+    jobIds.length === 0
+      ? []
+      : await tx.storyboard_previews.findMany({
+          where: {
+            first_generation_job_id: { in: jobIds },
+            scene_card_id: sceneCardId,
+            is_delete: 0,
+          },
+          select: { first_generation_job_id: true },
+        });
+  const previewJobIds = new Set(
+    previews.map((preview) => preview.first_generation_job_id),
+  );
+  const assetIds = slots
+    .map((slot) => slot.asset_id)
+    .filter((id): id is bigint => id !== null);
+  const assetSet = await findAccessibleAssetIds(tx, projectId, assetIds);
+  for (const frame of frames) {
+    const slot = slotById.get(BigInt(frame.slot_id));
+    if (!slot) return { ok: false, reason: `画格 ${frame.slot_id} 不存在` };
+    if (slot.status !== "succeeded" || slot.asset_id === null)
+      return { ok: false, reason: `画格 ${frame.slot_id} 未成功` };
+    if (!previewJobIds.has(slot.generation_job_id))
+      return {
+        ok: false,
+        reason: `画格 ${frame.slot_id} 不属于该场景卡的分镜预览`,
+      };
+    if (!assetSet.has(slot.asset_id))
+      return { ok: false, reason: `画格 ${frame.slot_id} 素材不可访问` };
+  }
+  return { ok: true };
+}
+
+/** 查可访问 Asset（本项目、normal、未删除）的 id 集合——画格前置校验与画格列表共用同一过滤口径。 */
+async function findAccessibleAssetIds(
+  client: Pick<Prisma.TransactionClient, "assets">,
+  projectId: bigint,
+  assetIds: bigint[],
+): Promise<Set<bigint>> {
+  if (assetIds.length === 0) return new Set();
+  const assets = await client.assets.findMany({
+    where: {
+      id: { in: assetIds },
+      project_id: projectId,
+      status: "normal",
+      is_delete: false,
+    },
+    select: { id: true },
+  });
+  return new Set(assets.map((asset) => asset.id));
+}
+
 export interface StoryboardPreviewView {
   preview_id: string;
   scene_card_id: string;
@@ -282,6 +360,10 @@ export interface StoryboardPreviewView {
 
 export type ListStoryboardPreviewsResult =
   | { kind: "found"; previews: StoryboardPreviewView[] }
+  | { kind: "forbidden" };
+
+export type ListStoryboardFramesResult =
+  | { kind: "found"; frames: StoryboardFrameView[] }
   | { kind: "forbidden" };
 
 export interface StoryboardPreviewRepo {
@@ -294,6 +376,12 @@ export interface StoryboardPreviewRepo {
     sceneCardId: string,
     userId: string,
   ): Promise<ListStoryboardPreviewsResult>;
+  /** IK70LQ：编辑器画格候选——返回该 SceneCard 下 succeeded 且 Asset 可访问的画格（slot_index 升序）。 */
+  listStoryboardFrames(
+    projectId: string,
+    sceneCardId: string,
+    userId: string,
+  ): Promise<ListStoryboardFramesResult>;
 }
 
 export function createStoryboardPreviewRepo(
@@ -333,6 +421,45 @@ export function createStoryboardPreviewRepo(
           summary_status: row.summary_status,
         })),
       };
+    },
+    async listStoryboardFrames(projectId, sceneCardId, userId) {
+      const pid = BigInt(projectId);
+      const uid = BigInt(userId);
+      const sid = BigInt(sceneCardId);
+      const project = await prisma.project.findFirst({
+        where: { id: pid, owner_id: uid, is_delete: 0 },
+        select: { id: true },
+      });
+      if (!project) return { kind: "forbidden" } as const;
+      const previews = await prisma.storyboard_previews.findMany({
+        where: { scene_card_id: sid, project_id: pid, is_delete: 0 },
+        select: { first_generation_job_id: true },
+      });
+      const jobIds = previews.map((preview) => preview.first_generation_job_id);
+      if (jobIds.length === 0) return { kind: "found", frames: [] };
+      const slots = await prisma.generation_output_slots.findMany({
+        where: {
+          generation_job_id: { in: jobIds },
+          status: "succeeded",
+          asset_id: { not: null },
+        },
+        select: { id: true, asset_id: true, slot_index: true },
+        orderBy: { slot_index: "asc" },
+      });
+      const assetIds = slots
+        .map((slot) => slot.asset_id)
+        .filter((id): id is bigint => id !== null);
+      const assetSet = await findAccessibleAssetIds(prisma, pid, assetIds);
+      const frames: StoryboardFrameView[] = slots
+        .filter(
+          (slot) => slot.asset_id !== null && assetSet.has(slot.asset_id),
+        )
+        .map((slot) => ({
+          slot_id: slot.id.toString(),
+          asset_id: slot.asset_id!.toString(),
+          slot_index: slot.slot_index,
+        }));
+      return { kind: "found", frames };
     },
   };
 }

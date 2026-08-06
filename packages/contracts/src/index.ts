@@ -129,8 +129,10 @@ export {
   storyboardPreviewCreateRequestSchema,
   storyboardPreviewSchema,
   storyboardPreviewViewSchema,
+  storyboardFrameViewSchema,
   type StoryboardPreviewParameters,
   type StoryboardPreviewCreateRequest,
   type StoryboardPreview,
   type StoryboardPreviewView,
+  type StoryboardFrameView,
 } from "./storyboard-preview.js";

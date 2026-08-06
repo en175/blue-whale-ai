@@ -69,6 +69,23 @@ function referenceAsset(
   };
 }
 
+function sceneCardAsset(
+  role: ProviderPromptAsset["role"],
+  mentionId = "201",
+): ProviderPromptAsset {
+  return {
+    mention_id: mentionId,
+    type: "scene_card",
+    role,
+    projection: {
+      title: "场景卡",
+      summary: null,
+      content_markdown: "# 正文",
+      version: 1,
+    },
+  };
+}
+
 function buildTx(
   overrides: Record<string, Record<string, ReturnType<typeof vi.fn>>>,
 ) {
@@ -168,7 +185,12 @@ function buildTx(
     generation_output_slots: {
       create: vi.fn().mockResolvedValue({}),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findMany: vi.fn().mockResolvedValue([]),
       ...overrides.generation_output_slots,
+    },
+    storyboard_previews: {
+      findMany: vi.fn().mockResolvedValue([]),
+      ...overrides.storyboard_previews,
     },
     generation_job_logs: {
       create: vi.fn().mockResolvedValue({}),
@@ -440,7 +462,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(result.kind).toBe("applied");
   });
 
-  it("模型未声明尾帧能力时拒绝尾帧模式并零写入", async () => {
+  it("只选尾帧不选首帧时组合规则前置拒绝并零写入", async () => {
     const tx = buildTx({
       scene_card_generation_presets: {
         findFirst: vi.fn().mockResolvedValue({
@@ -458,7 +480,77 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
       reference_assets: [referenceAsset("last_frame")],
     });
 
-    expect(result).toMatchObject({ kind: "capability_limit" });
+    expect(result).toEqual({
+      kind: "validation_failed",
+      reason: "尾帧必须与首帧一起使用",
+    });
+    expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
+  });
+
+  it("首尾帧与普通参考素材混用时组合规则前置拒绝并零写入", async () => {
+    const tx = buildTx({
+      scene_card_generation_presets: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 6001n,
+          version: 1,
+          reference_assets: [
+            referenceAsset("reference", "101"),
+            referenceAsset("reference", "102"),
+          ],
+        }),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_mode: "first_frame",
+      reference_assets: [
+        referenceAsset("first_frame", "101"),
+        referenceAsset("reference", "102"),
+      ],
+    });
+
+    expect(result).toEqual({
+      kind: "validation_failed",
+      reason: "首尾帧模式不能与普通参考素材混用",
+    });
+    expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
+  });
+
+  it("场景卡素材声明为首帧时前置拒绝并零写入（AC#4 不静默降级）", async () => {
+    const capFields = { ...CAP_FIELDS, features: { first_frame: true } };
+    const tx = buildTx({
+      generation_model_capability: {
+        findUnique: vi.fn().mockResolvedValue({
+          version: 3,
+          enabled: true,
+          is_delete: false,
+          ...capFields,
+        }),
+      },
+      scene_card_generation_presets: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 6001n,
+          version: 1,
+          reference_assets: [sceneCardAsset("reference")],
+        }),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_mode: "first_frame",
+      reference_assets: [sceneCardAsset("first_frame")],
+    });
+
+    expect(result).toEqual({
+      kind: "validation_failed",
+      reason: "场景卡素材不能作为首帧/尾帧",
+    });
     expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
     expect(tx.generation_jobs.create).not.toHaveBeenCalled();
   });
@@ -519,8 +611,8 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
   });
 
-  it("模型声明 camelCase 尾帧能力时接纳尾帧角色并持久化到新任务", async () => {
-    const capFields = { ...CAP_FIELDS, features: { lastFrame: true } };
+  it("模型声明 camelCase 首尾帧能力时接纳首尾帧组合并持久化到新任务", async () => {
+    const capFields = { ...CAP_FIELDS, features: { firstLastFrame: true } };
     const tx = buildTx({
       generation_model_capability: {
         findUnique: vi.fn().mockResolvedValue({
@@ -534,28 +626,34 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
         findFirst: vi.fn().mockResolvedValue({
           id: 6001n,
           version: 1,
-          reference_assets: [referenceAsset("reference")],
+          reference_assets: [
+            referenceAsset("reference", "101"),
+            referenceAsset("reference", "102"),
+          ],
         }),
       },
       conversation_message_mentions: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([{ id: 101n, target_id: 201n, project_id: 42n }]),
+        findMany: vi.fn().mockResolvedValue([
+          { id: 101n, target_id: 201n, project_id: 42n },
+          { id: 102n, target_id: 202n, project_id: 42n },
+        ]),
       },
       assets: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([
-            { id: 201n, project_id: 42n, status: "normal", is_delete: false },
-          ]),
+        findMany: vi.fn().mockResolvedValue([
+          { id: 201n, project_id: 42n, status: "normal", is_delete: false },
+          { id: 202n, project_id: 42n, status: "normal", is_delete: false },
+        ]),
       },
     });
     const { repo } = repoWith(tx);
 
     const result = await repo.regenerateSceneCard({
       ...baseInput,
-      reference_mode: "last_frame",
-      reference_assets: [referenceAsset("last_frame")],
+      reference_mode: "first_and_last_frame",
+      reference_assets: [
+        referenceAsset("first_frame", "101"),
+        referenceAsset("last_frame", "102"),
+      ],
       capability_snapshot_version: {
         ...CAPABILITY_SNAPSHOT,
         digest: capabilityDigest(CAP_FIELDS),
@@ -566,13 +664,17 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(
       tx.scene_card_generation_presets.updateMany.mock.calls[0][0].data,
     ).toMatchObject({
-      reference_mode: "last_frame",
-      reference_assets: [{ mention_id: "101", role: "last_frame" }],
+      reference_mode: "first_and_last_frame",
+      reference_assets: [
+        { mention_id: "101", role: "first_frame" },
+        { mention_id: "102", role: "last_frame" },
+      ],
     });
     expect(tx.generation_jobs.create.mock.calls[0][0].data.input).toMatchObject(
       {
-        reference_mode: "last_frame",
-        reference_assets: [{ mention_id: "101", role: "last_frame" }],
+        reference_mode: "first_and_last_frame",
+        first_frame_asset_id: "201",
+        last_frame_asset_id: "202",
       },
     );
   });
@@ -691,4 +793,5 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     const result = await repo.regenerateSceneCard(baseInput);
     expect(result.kind).toBe("forbidden");
   });
+
 });

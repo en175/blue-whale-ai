@@ -108,6 +108,17 @@ export const providerPromptAssetSchema = z.discriminatedUnion("type", [
       projection: sceneCardContextProjectionSchema,
     })
     .strict(),
+  // 画格变体（IK70LQ，CONTEXT L53-57）：StoryboardPreview 的 succeeded 画格作为视频首/尾帧/参考图。
+  // slot_id = generation_output_slots.id（画格稳定身份），服务端解析为 asset_id 写入 job.input 扁平字段。
+  // 不复用 type:"asset"——画格无 PlanMessage mention_id，复用会破坏 mention 语义且通不过 validateDerivedReferences。
+  // 画格不冻结 projection（投影由列表查询取 assets.url），不参与 deriveProviderPromptProjection（用户显式追加）。
+  z
+    .object({
+      slot_id: decimalIdSchema,
+      type: z.literal("storyboard_frame"),
+      role: z.enum(["first_frame", "last_frame", "reference"]),
+    })
+    .strict(),
 ]);
 
 /** ProviderPromptProjection（契约 §9，AC#7）：由权威 Markdown 确定性派生的供应商提示词投影。

@@ -6,6 +6,7 @@ import {
   createStoryboardPreview,
   generateSceneCard,
   getSceneCardGenerationPreset,
+  getStoryboardPreviews,
   type SceneCardGenerationPreset,
 } from "@/lib/conversation";
 import type { ProviderPromptAsset } from "@blue-whale/contracts";
@@ -21,11 +22,25 @@ vi.mock("@/lib/conversation", () => ({
   createStoryboardPreview: vi.fn(),
   generateSceneCard: vi.fn(),
   getSceneCardGenerationPreset: vi.fn(),
+  getStoryboardPreviews: vi.fn().mockResolvedValue({
+    previews: [],
+    frames: [],
+  }),
 }));
 
 vi.mock("@/app/canvas/_canvas/api/generation", () => ({
   getImageModels: vi.fn(),
   getVideoModels: vi.fn(),
+}));
+
+vi.mock("@/app/canvas/_canvas/components/AuthenticatedImage", () => ({
+  AuthenticatedImage: ({
+    accessUrl,
+    alt,
+  }: {
+    accessUrl: string;
+    alt: string;
+  }) => <img src={accessUrl} alt={alt} />,
 }));
 
 vi.mock("@/lib/command-identity", () => ({
@@ -544,5 +559,123 @@ describe("SceneCardGenerationEditor", () => {
       "first_and_last_frame",
     );
     expect(screen.getByRole("button", { name: "生成" })).toBeEnabled();
+  });
+
+  it("IK70LQ 画格选首帧派生首帧模式并提交 storyboard_frame 条目", async () => {
+    vi.mocked(getSceneCardGenerationPreset).mockResolvedValue(preset);
+    vi.mocked(getStoryboardPreviews).mockResolvedValue({
+      previews: [],
+      frames: [
+        {
+          slot_id: "9101",
+          asset_id: "3001",
+          slot_index: 0,
+        },
+        {
+          slot_id: "9102",
+          asset_id: "3002",
+          slot_index: 1,
+        },
+      ],
+    });
+    vi.mocked(getVideoModels).mockResolvedValue([
+      capability("video-a", "provider-a", { first_frame: true }),
+    ]);
+
+    render(
+      <SceneCardGenerationEditor
+        projectId="1"
+        sceneCardId="10"
+        onClose={vi.fn()}
+      />,
+    );
+
+    const frameRole = await screen.findByRole("combobox", {
+      name: "画格 1 角色",
+    });
+    expect(screen.getByRole("img", { name: "画格 1" })).toHaveAttribute(
+      "src",
+      "/api/projects/1/assets/3001/content",
+    );
+    expect(frameRole).toHaveValue("none");
+
+    fireEvent.change(frameRole, { target: { value: "first_frame" } });
+    expect(screen.getByRole("combobox", { name: "参考模式" })).toHaveValue(
+      "first_frame",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    await waitFor(() => expect(generateSceneCard).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(generateSceneCard).mock.calls[0]?.[3]).toMatchObject({
+      reference_mode: "first_frame",
+      reference_assets: [
+        {
+          slot_id: "9101",
+          type: "storyboard_frame",
+          role: "first_frame",
+        },
+      ],
+    });
+  });
+
+  it("IK70LQ 模型不支持首帧时画格首帧选项禁用，不静默降级", async () => {
+    vi.mocked(getSceneCardGenerationPreset).mockResolvedValue(preset);
+    vi.mocked(getStoryboardPreviews).mockResolvedValue({
+      previews: [],
+      frames: [
+        {
+          slot_id: "9101",
+          asset_id: "3001",
+          slot_index: 0,
+        },
+      ],
+    });
+    vi.mocked(getVideoModels).mockResolvedValue([
+      capability("video-a", "provider-a"),
+    ]);
+
+    render(
+      <SceneCardGenerationEditor
+        projectId="1"
+        sceneCardId="10"
+        onClose={vi.fn()}
+      />,
+    );
+
+    await screen.findByRole("combobox", { name: "画格 1 角色" });
+    const firstFrameOption = screen.getByRole("option", {
+      name: "首帧（不支持）",
+    }) as HTMLOptionElement;
+    expect(firstFrameOption.disabled).toBe(true);
+  });
+
+  it("IK70LQ 首尾帧模型允许为画格选择首帧和尾帧", async () => {
+    vi.mocked(getSceneCardGenerationPreset).mockResolvedValue(preset);
+    vi.mocked(getStoryboardPreviews).mockResolvedValue({
+      previews: [],
+      frames: [{ slot_id: "9101", asset_id: "3001", slot_index: 0 }],
+    });
+    vi.mocked(getVideoModels).mockResolvedValue([
+      capability("video-a", "provider-a", { first_last_frame: true }),
+    ]);
+
+    render(
+      <SceneCardGenerationEditor
+        projectId="1"
+        sceneCardId="10"
+        onClose={vi.fn()}
+      />,
+    );
+
+    const select = (await screen.findByRole("combobox", {
+      name: "画格 1 角色",
+    })) as HTMLSelectElement;
+    const options = Array.from(select.options);
+    expect(
+      options.find((option) => option.value === "first_frame")?.disabled,
+    ).toBe(false);
+    expect(
+      options.find((option) => option.value === "last_frame")?.disabled,
+    ).toBe(false);
   });
 });

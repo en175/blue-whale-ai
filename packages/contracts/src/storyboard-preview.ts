@@ -91,5 +91,18 @@ export type StoryboardPreview = z.infer<typeof storyboardPreviewSchema>;
 export type StoryboardPreviewView = z.infer<
   typeof storyboardPreviewViewSchema
 >;
+
+/** StoryboardPreview 画格视图（IK70LQ，CONTEXT L53-57）：编辑器列出 succeeded 画格供角色选择。
+ *  slot_id = generation_output_slots.id（稳定身份，写入 reference_assets.storyboard_frame.slot_id）；
+ *  asset_id 供前端预览；slot_index 升序即镜头顺序（列表只含成功画格，不另带状态字段）。 */
+export const storyboardFrameViewSchema = z
+  .object({
+    slot_id: decimalIdSchema,
+    asset_id: decimalIdSchema,
+    slot_index: z.number().int().nonnegative(),
+  })
+  .strict();
+
 // SceneCardGenerationRecordStatus 复用，保持与同族枚举一致的导出形态。
 export type { SceneCardGenerationRecordStatus };
+export type StoryboardFrameView = z.infer<typeof storyboardFrameViewSchema>;
