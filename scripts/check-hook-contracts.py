@@ -62,7 +62,7 @@ EXPECTED_CONTRACTS: tuple[Contract, ...] = (
         "confirm-release-action.sh",
     ),
     # 纯提醒型（恒 exit 0，不阻断）：工单状态机流转提醒，
-    # 规则见 .claude/rules/issue-tracker.md「任务状态机」。
+    # 规则见 docs/agents/issue-tracker.md「任务状态机」。
     ("PostToolUse", "Bash", "remind-issue-state.sh"),
     (
         "PostToolUse",

@@ -120,7 +120,7 @@ Gitee MCP 写工具对未知/错名参数静默忽略、不报错——把描述
 - 描述入参名是 description（不是 body），创建必传且非空
 - 创建后 get_enterprise_issue_detail 回读确认 description 非空
 
-详见 .claude/rules/issue-tracker.md「写操作回读验证」。
+详见 docs/agents/issue-tracker.md「操作约定」。
 EOF
   exit 2
 }
