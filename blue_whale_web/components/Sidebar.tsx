@@ -59,9 +59,9 @@ export default function Sidebar() {
             aria-hidden
             className="absolute inset-0 h-9 w-auto"
             style={{
-              transform: "translateY(2px)",
+              transform: "translateY(1.5px)",
               filter:
-                "grayscale(1) sepia(0.35) hue-rotate(195deg) saturate(0.75) brightness(0.55)",
+                "grayscale(1) sepia(0.35) hue-rotate(195deg) saturate(0.4) brightness(0.4) opacity(0.75)",
             }}
           />
           <img
