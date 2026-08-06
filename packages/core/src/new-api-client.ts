@@ -1,3 +1,5 @@
+import { generateTraceId, getCurrentTraceId } from "./trace.js";
+
 export interface NewApiClientOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
@@ -379,6 +381,10 @@ export function createNewApiClient(options: NewApiClientOptions) {
       headers.set("Content-Type", "application/json");
     }
     if (token) headers.set("Authorization", `Bearer ${token}`);
+    // 出站统一注入 X-Trace-Id（IK6KQQ）：调用方显式头 > 链路上下文 > 缺省生成。
+    if (!headers.has("X-Trace-Id")) {
+      headers.set("X-Trace-Id", getCurrentTraceId() ?? generateTraceId());
+    }
 
     let response: Response;
     let payload: NewApiEnvelope | null;

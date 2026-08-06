@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   Layers,
-  Coins,
+  Boxes,
   Users,
   Receipt,
   Settings,
@@ -16,7 +16,7 @@ import {
 const NAV_ITEMS = [
   { href: "/admin", label: "仪表盘", icon: LayoutDashboard },
   { href: "/admin/tiers", label: "充值档位", icon: Layers },
-  { href: "/admin/pricing", label: "定价规则", icon: Coins },
+  { href: "/admin/models", label: "模型列表", icon: Boxes },
   { href: "/admin/users", label: "用户管理", icon: Users },
   { href: "/admin/orders", label: "订单管理", icon: Receipt },
   { href: "/admin/logs", label: "操作日志", icon: FileText },

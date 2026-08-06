@@ -4,6 +4,7 @@ import { fail, ok } from "@blue-whale/contracts";
 import type {
   CreateJobInput,
   GenerationCommandRepo,
+  ModelCapabilityRepo,
   ProjectRepo,
 } from "@blue-whale/persistence";
 
@@ -132,6 +133,8 @@ export async function handleCreateGenerationJob(
   deps: {
     projects: Pick<ProjectRepo, "findOwnedById">;
     command: GenerationCommandRepo;
+    /** 能力目录白名单（启用 + 未软删，按 capability_type 过滤）。 */
+    models: Pick<ModelCapabilityRepo, "listEnabledByType">;
   },
   internal: { providerCredential?: string } = {},
 ) {
@@ -148,13 +151,21 @@ export async function handleCreateGenerationJob(
     Array.isArray(body.input_asset_ids) ? body.input_asset_ids : []
   ) as number[];
 
+  // 白名单（IK6T90）：先解析视频模型名别名，再对解析后的最终 model_id 校验——
+  // 别名不能绕过白名单。最终 id 必须命中启用且 capability_type 匹配的目录行，否则 400。
+  const resolvedModelId =
+    type === "video"
+      ? (VIDEO_MODEL_ALIASES[params.model_id as string] ?? params.model_id)
+      : params.model_id;
+  const whitelist = await deps.models.listEnabledByType(type);
+  if (!whitelist.some((m) => m.model_id === resolvedModelId)) {
+    return fail(400, "model_id 不在可用模型白名单或已停用");
+  }
+
   const input: Record<string, unknown> = {
     prompt: params.prompt,
     aspect_ratio: params.aspect_ratio,
-    model_id:
-      type === "video"
-        ? (VIDEO_MODEL_ALIASES[params.model_id as string] ?? params.model_id)
-        : params.model_id,
+    model_id: resolvedModelId,
   };
   if (type === "image") {
     if (isStr(params.size)) input.size = params.size;

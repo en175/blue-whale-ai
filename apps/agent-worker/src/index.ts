@@ -10,6 +10,13 @@ import {
 import { readinessResponseSchema } from "@blue-whale/contracts";
 import { checkReadiness } from "@blue-whale/core";
 import {
+  TRACE_ID_HEADER,
+  closeDefaultTlsLogWriter,
+  createLogger,
+  getOrCreateTraceId,
+  runWithTraceId,
+} from "@blue-whale/core/logging";
+import {
   createAgentRunRepo,
   createMySqlPool,
   createMySqlReadinessProbe,
@@ -31,6 +38,7 @@ validateAgentWorkerStartup();
 if ((process.env.AGENT_RUNTIME_MODE ?? "fake") !== "fake") {
   throw new Error("Slice 0 only supports AGENT_RUNTIME_MODE=fake");
 }
+
 
 /** 总结管道接线（IK60X1，契约 §15.2）：env 缺 NEW_API_BASE_URL /
  *  NEW_API_ROOT_ACCESS_TOKEN / SKILL_SUMMARIZE_MODEL 时走兜底管道——
@@ -68,6 +76,8 @@ function wireSkillSummarize(prisma: PrismaClient): SkillSummarizePipeline {
   });
 }
 
+const logger = createLogger("agent-worker");
+
 const pool = createMySqlPool();
 const mysql = createMySqlReadinessProbe(pool);
 const runtime = createFakeAgentAdapter();
@@ -90,23 +100,30 @@ const workerLoop = runAgentWorkerLoop({
 });
 
 const server = createServer((request, response) => {
-  void (async () => {
-    if (request.method !== "GET" || request.url !== "/ready") {
-      response.writeHead(404).end();
-      return;
-    }
+  // 透传优先：入站 X-Trace-Id 沿用，缺省生成，注入异步链路上下文（IK6KQQ）。
+  const headerValue = request.headers[TRACE_ID_HEADER];
+  const inboundTraceId = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  void runWithTraceId(getOrCreateTraceId(inboundTraceId), async () => {
+    try {
+      if (request.method !== "GET" || request.url !== "/ready") {
+        response.writeHead(404).end();
+        return;
+      }
 
-    const report = readinessResponseSchema.parse(
-      await checkReadiness("agent-worker", [
-        mysql,
-        { name: runtime.name, check: () => runtime.ready() },
-      ]),
-    );
-    response.writeHead(report.status === "ready" ? 200 : 503, {
-      "content-type": "application/json",
-    });
-    response.end(JSON.stringify(report));
-  })().catch(() => response.writeHead(500).end());
+      const report = readinessResponseSchema.parse(
+        await checkReadiness("agent-worker", [
+          mysql,
+          { name: runtime.name, check: () => runtime.ready() },
+        ]),
+      );
+      response.writeHead(report.status === "ready" ? 200 : 503, {
+        "content-type": "application/json",
+      });
+      response.end(JSON.stringify(report));
+    } catch {
+      response.writeHead(500).end();
+    }
+  });
 });
 
 async function shutdown(): Promise<void> {
@@ -116,6 +133,7 @@ async function shutdown(): Promise<void> {
     server.close((error) => (error ? reject(error) : resolve()));
   });
   await pool.end();
+  await closeDefaultTlsLogWriter();
 }
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -124,7 +142,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-server.listen(
-  Number.parseInt(process.env.PORT ?? "4001", 10),
-  process.env.HOST ?? "0.0.0.0",
-);
+const port = Number.parseInt(process.env.PORT ?? "4001", 10);
+const host = process.env.HOST ?? "0.0.0.0";
+server.listen(port, host, () => {
+  logger.info(`agent-worker listening on ${host}:${port}`);
+});

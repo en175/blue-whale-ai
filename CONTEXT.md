@@ -128,8 +128,12 @@ Asset 正式发布时原子创建初始 NodeItem。**入口职责独立、是不
 三个生图入口共享的执行层，与入口的产品职责边界正交。由三部分组成：
 - **GenerationProvider** —— 图片执行层的产品中性请求/结果契约；具体实现（Fake、OpenAI、
   火山方舟 Agent Plan 等）按运行 mode（`GENERATION_MODE`）装配，当前没有独立的运行时 Provider Registry。
-- **generation_model_capability** —— Provider、模型与尺寸/格式/数量/参考图/tools 能力的权威数据表；
-  前端选项从后端 `/api/generation/models` 拉取，不再写死。
+- **generation_model_capability** —— 生图 / 生视频 / 文生文（text）模型能力目录的权威数据表：
+  provider_id + model_id 唯一标识一档能力，记录展示信息（label / icon）与能力参数
+  （尺寸 / 比例 / 格式 / 时长 / 数量 / 参考图 / tools）及启停状态。
+  承担双重角色：① 前端模型选项的展示源（不再写死，经 `/api/generation/models` 拉取）；
+  ② 创建生成任务时的 model_id 白名单——请求引用的模型必须是该目录中启用且能力类型与
+  生成类型匹配的条目（详见 [ADR-0067](docs/adr/0067-generation-model-capability-text-and-whitelist.md)）。
 - **公共治理流水线** —— 成本预留（CostReservation）、内容审核（ContentReview）、失败重试与多输出，
   由统一的 GenerationJob 队列承接。
 火山方舟 Agent Plan 使用专属 `/api/plan/v3` 端点与专属 API Key；退役的 `/api/generation/image`

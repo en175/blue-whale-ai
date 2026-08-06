@@ -133,18 +133,32 @@ function asStringArray(json: unknown): string[] {
   return Array.isArray(json) ? json.filter((v): v is string => typeof v === "string") : [];
 }
 
-/** 解析 supported_durations JSON（{min,max,step}，均须为有限正数且 max>=min）；
+/** 解析 supported_durations JSON，兼容两种形态并统一归一为 {min,max,step}：
+ *  - 数组 [min, max] / [min, max, step] —— seed 数据与管理端编辑（constants.ts 校验为 numberArray）；
+ *  - 对象 {min,max,step} —— 历史消费端契约。
  *  非法或缺省返回 null（图片模型无时长）。 */
 function toDurationRange(json: unknown): ModelDurationRange | null {
-  const d = (json ?? {}) as DurationRangeJson;
-  const min = Number(d.min);
-  const max = Number(d.max);
-  const step = Number(d.step ?? 1);
-  if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(step)) {
+  let min: unknown;
+  let max: unknown;
+  let step: unknown;
+  if (Array.isArray(json)) {
+    min = json[0];
+    max = json[1];
+    step = json[2] ?? 1;
+  } else {
+    const d = (json ?? {}) as DurationRangeJson;
+    min = d.min;
+    max = d.max;
+    step = d.step ?? 1;
+  }
+  const minN = Number(min);
+  const maxN = Number(max);
+  const stepN = Number(step);
+  if (!Number.isFinite(minN) || !Number.isFinite(maxN) || !Number.isFinite(stepN)) {
     return null;
   }
-  if (step <= 0 || max < min) return null;
-  return { min, max, step };
+  if (stepN <= 0 || maxN < minN) return null;
+  return { min: minN, max: maxN, step: stepN };
 }
 
 export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapabilityRepo {

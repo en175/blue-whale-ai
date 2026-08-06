@@ -269,3 +269,14 @@ export function getVideoModels(): Promise<ImageModelCapability[]> {
     "GET",
   );
 }
+
+/**
+ * 文生文模型能力（capability=text；shape 同 ImageModelCapability——后端共用 ModelCapabilityView）。
+ * 仅供后续 agent 选文生文模型做推理使用；本期不接 agent 调用链（IK6T8W）。
+ */
+export function getTextModels(): Promise<ImageModelCapability[]> {
+  return request<ImageModelCapability[]>(
+    "/generation/models?capability=text",
+    "GET",
+  );
+}
