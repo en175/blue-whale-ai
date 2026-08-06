@@ -7,12 +7,17 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./logging": {
+      "types": "./dist/logging.d.ts",
+      "import": "./dist/logging.js"
     }
   },
   "scripts": {
     "build": "tsc -b"
   },
   "dependencies": {
+    "@volcengine/openapi": "^1.36.2",
     "jose": "^6.2.4"
   }
 }

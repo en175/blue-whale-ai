@@ -1,9 +1,16 @@
 import type { AgentAdapter } from "@blue-whale/core";
+import {
+  createLogger,
+  getOrCreateTraceId,
+  runWithTraceId,
+} from "@blue-whale/core/logging";
 import type {
   AgentRunRepo,
   AgentRunWork,
   CommitAgentRunResult,
 } from "@blue-whale/persistence";
+
+const logger = createLogger("agent-worker");
 
 export type AgentWorkerOnceResult = CommitAgentRunResult | { kind: "idle" };
 
@@ -99,14 +106,16 @@ export async function runAgentWorkerLoop(input: {
 }): Promise<void> {
   while (!input.signal.aborted) {
     try {
-      const result = await runAgentWorkerOnce(input);
+      // 每次循环迭代一段链路，日志 trace_id 随上下文传递（IK6KQQ）。
+      const result = await runWithTraceId(getOrCreateTraceId(), () =>
+        runAgentWorkerOnce(input),
+      );
       if (result.kind === "idle" || result.kind === "conflict") {
         await delay(input.idleDelayMs ?? 250, input.signal);
       }
     } catch (error) {
-      console.error(
-        "[agent-worker] iteration failed:",
-        error instanceof Error ? error.message : "unknown",
+      logger.error(
+        `iteration failed: ${error instanceof Error ? error.message : "unknown"}`,
       );
       await delay(input.idleDelayMs ?? 250, input.signal);
     }
