@@ -24,7 +24,7 @@ const CATEGORY_COLORS: Record<
   AuditCategory | "default",
   "success" | "default" | "secondary" | "destructive" | "outline"
 > = {
-  pricing: "default",
+  "model.capability": "default",
   tier: "secondary",
   order: "outline",
   user: "success",
@@ -133,7 +133,7 @@ export default function AdminLogsPage() {
                         CATEGORY_COLORS[l.category] || CATEGORY_COLORS.default
                       }
                     >
-                      {CATEGORY_LABELS[l.category]}
+                      {CATEGORY_LABELS[l.category] ?? l.category}
                     </Badge>
                   </TableCell>
                   <TableCell className="font-medium text-sm">

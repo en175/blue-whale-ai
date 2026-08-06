@@ -365,14 +365,6 @@ function positiveInteger(value: unknown): number | null {
  * 发送 New-Api-User 头。（RootAuth 的 /api/option/ 管理接口仍需该头，见下方。）
  */
 
-/**
- * 旧 UserAuth 接口（如 /api/log/self，尚未迁账户层）要求 access_token +
- * New-Api-User 头（= 令牌属主数字 id）。仅 listUserConsumeLogs 过渡期使用；
- * userId 缺省（sk- 令牌场景）则不加。
- */
-function newApiUserHeader(userId: number | undefined): { headers?: Record<string, string> } {
-  return userId === undefined ? {} : { headers: { "New-Api-User": String(userId) } };
-}
 export function createNewApiClient(options: NewApiClientOptions) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 10_000;
@@ -992,22 +984,19 @@ export function createNewApiClient(options: NewApiClientOptions) {
 
     /** 分页拉当前用户消费流水：GET /api/log/self（Go 按 id desc，即时间倒序）。
      *  type 缺省 2 = LogTypeConsume；信封同 topup/self 的 PageInfo。
-     *  ⚠️ 鉴权与充值三接口不同：log/self 仍在旧 UserAuth，只认个人 access_token +
-     *  New-Api-User 头，**不认 sk- 中继令牌**（2026-08-05 部署环境实测
-     *  "invalid access token"；ADR-0062 #18 只迁了充值三接口）。过渡期由 BFF
-     *  用 root access_token + rootUserId 代理查询；Go 迁移 log/self 到账户层后
-     *  可改为透传用户 sk- 令牌（不传 userId 即不发 New-Api-User）。 */
+     *  鉴权（IK6M2F）：log/self 已迁账户层 AccountTokenOrUserAuth，只凭 Bearer
+     *  sk-xxx 证明账户身份；User ID 由 Go 从 Token 属主解析，客户端不得发送
+     *  New-Api-User 头（对齐 topup/self）。 */
     async listUserConsumeLogs(
       token: string,
       options: { page?: number; pageSize?: number; type?: number } = {},
-      userId?: number,
     ): Promise<NewApiUserLogListResult> {
       const page = Math.max(1, Math.trunc(options.page ?? 1));
       const pageSize = Math.min(100, Math.max(1, Math.trunc(options.pageSize ?? 20)));
       const type = options.type ?? 2;
       const response = await request<NewApiEnvelope>(
         `/api/log/self?p=${page}&page_size=${pageSize}&type=${type}`,
-        { method: "GET", ...newApiUserHeader(userId) },
+        { method: "GET" },
         token,
       );
       const data = (response.data ?? {}) as { items?: unknown; total?: unknown };

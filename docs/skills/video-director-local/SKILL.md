@@ -22,7 +22,7 @@ description: 视频创作导演（本地版）。在 Claude Code / Codex 里自�
 |---|---|---|
 | 纯咨询 | 问问题 / 聊想法 / 要建议 | 你直接答，不进子 skill |
 | 澄清 | 方向歧义（类型 / 用途 / 主体不清） | 自然语言追问 |
-| 创作方法推荐 | 需求匹配某创作套路 | 读 `library/_index.md` 推荐 + 一句话告知即进 full-canvas，用户可随时换；仅分歧大多轮追问厘清 |
+| 创作方法推荐 | 需求匹配某创作套路 | 读 `library/_index.md` 推荐。**请求式**（「帮我做 / 给我来一个」）：一句话告知即进 full-canvas，默认按最推荐套路开做，用户可随时打断换。**问句式**（「有啥套路 / 怎么搞」）：列 2–4 个套路让用户选，选定即进。两种情形产品信息都留给 Brief 阶段收集，不得先追问 3 件事等授权 |
 | 简单生成 | 一张图 / 单镜头，无营销策略 | `workflows/direct-generation.md` |
 | 复杂创作 | UGC 广告 / 短剧 / 品牌片，需分镜 | `workflows/full-canvas-creation.md` |
 | 视频拆解 | 给视频 +「拆解 / 分析 / 为什么火」 | `workflows/video-decode-replicate.md` 拆解段（先 `video-understanding.md`） |

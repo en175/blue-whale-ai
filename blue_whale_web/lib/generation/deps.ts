@@ -23,7 +23,7 @@ export function createGenerationDeps() {
   return { models: createModelCapabilityRepo(getPrismaClient(databaseUrl)) };
 }
 
-/** Generation 命令依赖（create/cancel/retry）：wire project repo（验归属）+ command repo。 */
+/** Generation 命令依赖（create/cancel/retry）：wire project repo（验归属）+ command repo + 能力白名单。 */
 export function createGenerationCommandDeps() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL required");
@@ -31,6 +31,7 @@ export function createGenerationCommandDeps() {
   return {
     projects: createProjectRepo(db),
     command: createGenerationCommandRepo(db),
+    models: createModelCapabilityRepo(db),
   };
 }
 
