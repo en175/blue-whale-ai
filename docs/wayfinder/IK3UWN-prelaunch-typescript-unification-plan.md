@@ -1,6 +1,6 @@
 # IK3UWN 上线前 TypeScript 技术栈统一总体方案
 
-- **工单**：[形成上线前 TypeScript 技术栈统一总体方案](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWN)
+- **工单**：[形成上线前 TypeScript 技术栈统一总体方案](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3UWN)
 - **范围权威**：[ADR-0055：上线前 TypeScript 技术栈统一的范围边界](../adr/0055-prelaunch-typescript-unification-scope.md)
 - **状态**：已于 2026-07-27 经用户确认；作为后续 `to-spec` 的输入
 

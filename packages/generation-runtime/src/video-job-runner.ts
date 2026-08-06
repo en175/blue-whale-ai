@@ -183,7 +183,13 @@ export async function runVideoJobStep(deps: {
     }
 
     const stored = await deps.mediaRelay.persist(observation.url, claim.userId);
-    const dimensions = videoDimensions(claim.input.resolution, claim.input.aspect_ratio);
+    const inputParams =
+      claim.input.parameters && typeof claim.input.parameters === "object"
+        ? (claim.input.parameters as Record<string, unknown>)
+        : null;
+    const dimensions =
+      videoDimensions(claim.input.resolution, claim.input.aspect_ratio) ??
+      dimensionsFromSize(inputParams?.size);
     if (!dimensions) {
       await fail(deps.repo, claim, "invalid_input", "视频尺寸无效");
       return claim.id;
@@ -194,7 +200,7 @@ export async function runVideoJobStep(deps: {
       userId: claim.userId,
       ...stored,
       ...dimensions,
-      duration: Number(claim.input.duration),
+      duration: Number(claim.input.duration ?? inputParams?.duration),
     });
     return claim.id;
   } catch (error) {
@@ -229,10 +235,29 @@ async function buildSubmitRequest(
   repo: VideoJobRunnerRepo,
   claim: VideoJobClaim,
 ): Promise<Parameters<VideoTaskProvider["submit"]>[0]> {
-  const prompt = typeof claim.input.prompt === "string" ? claim.input.prompt : "";
-  const model = typeof claim.input.model_id === "string" ? claim.input.model_id : "";
-  const duration = Number(claim.input.duration);
-  const dimensions = videoDimensions(claim.input.resolution, claim.input.aspect_ratio);
+  // plan/scene_card 任务把参数收敛在 prompt_text + parameters.*（T11/T13 契约），
+  // Dock 任务为扁平字段；两套形态在此对齐。
+  const params =
+    claim.input.parameters && typeof claim.input.parameters === "object"
+      ? (claim.input.parameters as Record<string, unknown>)
+      : null;
+  const prompt =
+    typeof claim.input.prompt === "string"
+      ? claim.input.prompt
+      : typeof claim.input.prompt_text === "string"
+        ? claim.input.prompt_text
+        : "";
+  const model =
+    typeof claim.input.model_id === "string"
+      ? claim.input.model_id
+      : typeof params?.model_id === "string"
+        ? params.model_id
+        : "";
+  const duration = Number(claim.input.duration ?? params?.duration);
+  let dimensions = videoDimensions(claim.input.resolution, claim.input.aspect_ratio);
+  if (!dimensions) {
+    dimensions = dimensionsFromSize(params?.size);
+  }
   if (!prompt || !model || !Number.isFinite(duration) || duration <= 0 || !dimensions) {
     throw new Error("视频生成参数无效");
   }
@@ -285,8 +310,18 @@ async function buildSubmitRequest(
     return asset;
   });
   const references = validateReferences(model, referenceAssets);
-  const resolution = claim.input.resolution as string;
-  const ratio = claim.input.aspect_ratio as string;
+  const resolution =
+    typeof claim.input.resolution === "string"
+      ? claim.input.resolution
+      : typeof params?.size === "string"
+        ? params.size
+        : "";
+  const ratio =
+    typeof claim.input.aspect_ratio === "string"
+      ? claim.input.aspect_ratio
+      : typeof params?.aspect_ratio === "string"
+        ? params.aspect_ratio
+        : "";
 
   return {
     model,
@@ -473,5 +508,17 @@ function videoDimensions(
   const ratio = /^([1-9][0-9]*):([1-9][0-9]*)$/.exec(aspectRatio);
   if (!Number.isFinite(height) || height <= 0 || !ratio) return null;
   const width = Math.round((height * Number(ratio[1])) / Number(ratio[2]) / 2) * 2;
+  return { width, height };
+}
+
+/** plan/scene_card 任务用 capabilities 的 "宽x高" size 档（如 1280x720）。 */
+function dimensionsFromSize(size: unknown): { width: number; height: number } | null {
+  if (typeof size !== "string") return null;
+  const match = /^([0-9]+)x([0-9]+)$/i.exec(size);
+  if (!match) return null;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0)
+    return null;
   return { width, height };
 }

@@ -39,10 +39,13 @@ const capability = (
     quantity_max: 4,
     stream: false,
     first_frame: false,
+    last_frame: false,
     first_last_frame: false,
     audio: false,
     ...features,
   },
+  version: 0,
+  digest: "sha256:mock",
 });
 
 describe("ImageDockContent model capability changes", () => {
@@ -190,6 +193,7 @@ describe("ImageDockContent 参考图上限（IK5OWU）", () => {
           stream: false,
           tools: false,
           first_frame: false,
+          last_frame: false,
           first_last_frame: false,
           audio: false,
           sequential_image_generation: false,
@@ -348,9 +352,7 @@ describe("ImageDockContent 上传入口可用性（修复入口消失）", () =>
     const addBtn = screen.getByRole("button", { name: "继续添加图片" });
     expect(addBtn).toBeInTheDocument();
     fireEvent.click(addBtn);
-    expect(
-      screen.getByRole("menu", { name: "上传来源" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("menu", { name: "上传来源" })).toBeInTheDocument();
   });
 
   it("能力表就绪后模型不支持参考图时入口收敛隐藏", async () => {

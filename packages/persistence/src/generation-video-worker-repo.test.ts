@@ -20,7 +20,9 @@ describe("generation video worker repo", () => {
       generation_jobs: { findFirst, updateMany },
     } as never);
 
-    await expect(repo.claimVideoJobById("300", "worker-1")).resolves.toMatchObject({
+    await expect(
+      repo.claimVideoJobById("300", "worker-1"),
+    ).resolves.toMatchObject({
       id: "300",
       workerId: "worker-1",
       fencingToken: 1,
@@ -164,10 +166,11 @@ describe("generation video worker repo", () => {
         generation_job_logs: { create: vi.fn() },
       }),
     );
-    const repo = createWorkerRepo({ $transaction: transaction } as never) as
-      ReturnType<typeof createWorkerRepo> & {
-        publishVideoResult?: (input: Record<string, unknown>) => Promise<boolean>;
-      };
+    const repo = createWorkerRepo({
+      $transaction: transaction,
+    } as never) as ReturnType<typeof createWorkerRepo> & {
+      publishVideoResult?: (input: Record<string, unknown>) => Promise<boolean>;
+    };
 
     expect(repo.publishVideoResult).toBeTypeOf("function");
     if (!repo.publishVideoResult) return;
@@ -206,6 +209,8 @@ describe("generation video worker repo", () => {
         assets: { create: createAsset },
         cost_reservations: { updateMany: vi.fn() },
         generation_job_logs: { create: vi.fn() },
+        // IK67HE/T14：publishVideoResult 现查输出槽做放置；无槽时返回空。
+        generation_output_slots: { findFirst: vi.fn().mockResolvedValue(null) },
       }),
     );
     const repo = createWorkerRepo({ $transaction: transaction } as never);
@@ -231,14 +236,89 @@ describe("generation video worker repo", () => {
     });
   });
 
+  it("keeps video generation successful when Canvas placement is unavailable", async () => {
+    const tx = {
+      generation_jobs: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 300n,
+          project_id: 55n,
+          type: "video",
+          source: "scene_card",
+          status: "succeeded",
+          progress: 100,
+          version: 2,
+        }),
+      },
+      assets: {
+        create: vi.fn().mockResolvedValue({
+          id: 901n,
+          type: "video",
+          url: "https://bucket.test/result.mp4",
+          version: 1,
+        }),
+      },
+      cost_reservations: { updateMany: vi.fn().mockResolvedValue({}) },
+      generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
+      generation_output_slots: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 77n,
+          slot_index: 0,
+          scene_card_generation_record_id: 88n,
+        }),
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ slot_index: 0, status: "succeeded" }]),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      scene_card_generation_records: {
+        findUnique: vi.fn().mockResolvedValue({ scene_card_id: 66n }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      canvas: {
+        findFirst: vi.fn().mockRejectedValue(new Error("canvas unavailable")),
+      },
+      project_events: {
+        create: vi.fn(
+          async ({ data }: { data: Record<string, unknown> }) => data,
+        ),
+      },
+    };
+    const repo = createWorkerRepo({
+      $transaction: vi.fn(
+        async (callback: (client: typeof tx) => Promise<unknown>) =>
+          callback(tx),
+      ),
+    } as never);
+
+    await expect(
+      repo.publishVideoResult({
+        jobId: "300",
+        projectId: "55",
+        userId: "9",
+        workerId: "worker-1",
+        fencingToken: 5,
+        url: "https://bucket.test/result.mp4",
+        storageKey: "generated/9/video/result.mp4",
+        mime: "video/mp4",
+        size: 11,
+        width: 1280,
+        height: 720,
+        duration: 8,
+      }),
+    ).resolves.toBe(true);
+  });
+
   it("cancels a video before provider dispatch under the active fence", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const repo = createWorkerRepo({ generation_jobs: { updateMany } } as never) as
-      ReturnType<typeof createWorkerRepo> & {
-        cancelVideoBeforeDispatch?: (
-          input: Record<string, unknown>,
-        ) => Promise<boolean>;
-      };
+    const repo = createWorkerRepo({
+      generation_jobs: { updateMany },
+    } as never) as ReturnType<typeof createWorkerRepo> & {
+      cancelVideoBeforeDispatch?: (
+        input: Record<string, unknown>,
+      ) => Promise<boolean>;
+    };
 
     expect(repo.cancelVideoBeforeDispatch).toBeTypeOf("function");
     if (!repo.cancelVideoBeforeDispatch) return;
@@ -262,6 +342,184 @@ describe("generation video worker repo", () => {
         status: "cancelled",
         lease_owner: null,
         lease_expires_at: null,
+      }),
+    });
+  });
+
+  it("marks the record successful when a failed logical slot succeeds on retry", async () => {
+    const record = { summary_status: "generating" };
+    const createEvent = vi.fn(
+      async ({ data }: { data: Record<string, unknown> }) => data,
+    );
+    const findMany = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          id: 2n,
+          slot_index: 0,
+          status: "pending",
+          retry_of_slot_id: 1n,
+          scene_card_generation_record_id: 88n,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { slot_index: 0, status: "failed" },
+        { slot_index: 0, status: "succeeded" },
+      ]);
+    const transaction = vi.fn(async (callback: (tx: unknown) => unknown) =>
+      callback({
+        generation_output_slots: {
+          findMany,
+          update: vi.fn().mockResolvedValue({}),
+        },
+        generation_jobs: {
+          update: vi.fn().mockResolvedValue({
+            id: 301n,
+            project_id: 55n,
+            type: "image",
+            source: "api",
+            status: "succeeded",
+            progress: 100,
+            version: 2,
+          }),
+        },
+        canvas: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 1n,
+            nodes_json: [{ id: "image:301:0" }],
+          }),
+        },
+        project_events: {
+          create: createEvent,
+        },
+        scene_card_generation_records: {
+          update: vi.fn(
+            async ({ data }: { data: { summary_status: string } }) => {
+              record.summary_status = data.summary_status;
+              return { id: 88n, project_id: 55n, version: 2, ...record };
+            },
+          ),
+        },
+        storyboard_previews: {
+          findFirst: vi.fn().mockResolvedValue(null),
+        },
+      }),
+    );
+    const repo = createWorkerRepo({ $transaction: transaction } as never);
+
+    await repo.completeJob("301", ["901"]);
+
+    expect(record.summary_status).toBe("success");
+    expect(createEvent).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        event_type: "generation_job.output_attached",
+        payload: expect.objectContaining({
+          slot_id: "2",
+          slot_index: 0,
+          status: "succeeded",
+          asset_id: "901",
+          retry_of_slot_id: "1",
+          initial_placement_status: "pending",
+        }),
+      }),
+    });
+    expect(createEvent).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        event_type: "scene_card_generation_record.summary_changed",
+        payload: {
+          record_id: "88",
+          summary_status: "success",
+        },
+      }),
+    });
+  });
+
+  it("keeps image generation successful when Canvas placement is unavailable", async () => {
+    const transaction = vi.fn(async (callback: (tx: unknown) => unknown) =>
+      callback({
+        generation_output_slots: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: 2n,
+              slot_index: 0,
+              status: "pending",
+              scene_card_generation_record_id: null,
+            },
+          ]),
+          update: vi.fn().mockResolvedValue({}),
+        },
+        generation_jobs: {
+          update: vi.fn().mockResolvedValue({
+            id: 301n,
+            project_id: 55n,
+            type: "image",
+            source: "api",
+            status: "succeeded",
+            progress: 100,
+            version: 2,
+          }),
+        },
+        canvas: {
+          findFirst: vi.fn().mockRejectedValue(new Error("canvas unavailable")),
+        },
+        project_events: {
+          create: vi.fn(
+            async ({ data }: { data: Record<string, unknown> }) => data,
+          ),
+        },
+        storyboard_previews: {
+          findFirst: vi.fn().mockResolvedValue(null),
+        },
+      }),
+    );
+    const repo = createWorkerRepo({ $transaction: transaction } as never);
+
+    await expect(repo.completeJob("301", ["901"])).resolves.toBeUndefined();
+  });
+
+  it("emits output_updated for every failed slot after partial image success", async () => {
+    const createEvent = vi.fn(
+      async ({ data }: { data: Record<string, unknown> }) => data,
+    );
+    const transaction = vi.fn(async (callback: (tx: unknown) => unknown) =>
+      callback({
+        generation_output_slots: {
+          findMany: vi.fn().mockResolvedValue([
+            { id: 1n, slot_index: 0, retry_of_slot_id: null },
+            { id: 2n, slot_index: 1, retry_of_slot_id: null },
+          ]),
+          update: vi.fn().mockResolvedValue({}),
+        },
+        generation_jobs: {
+          update: vi.fn().mockResolvedValue({
+            id: 301n,
+            project_id: 55n,
+            type: "image",
+            source: "api",
+            status: "partially_succeeded",
+            progress: 100,
+            version: 2,
+          }),
+        },
+        project_events: { create: createEvent },
+        storyboard_previews: {
+          findFirst: vi.fn().mockResolvedValue(null),
+        },
+      }),
+    );
+    const repo = createWorkerRepo({ $transaction: transaction } as never);
+
+    await repo.completeJob("301", ["901"]);
+
+    expect(createEvent).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        event_type: "generation_job.output_updated",
+        payload: expect.objectContaining({
+          slot_id: "2",
+          slot_index: 1,
+          status: "failed",
+          asset_id: null,
+        }),
       }),
     });
   });

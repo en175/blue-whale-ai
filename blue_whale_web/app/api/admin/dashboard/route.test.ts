@@ -12,7 +12,13 @@ const mocks = vi.hoisted(() => ({
         isAdmin: boolean;
         username: string;
       }) => Promise<Response>,
-    ) => handler({ userId: "1", status: "enabled", isAdmin: true, username: "admin" }),
+    ) =>
+      handler({
+        userId: "1",
+        status: "enabled",
+        isAdmin: true,
+        username: "admin",
+      }),
   ),
   collectDashboardStats: vi.fn(),
 }));

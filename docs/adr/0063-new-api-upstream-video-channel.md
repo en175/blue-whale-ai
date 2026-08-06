@@ -3,7 +3,7 @@
 - **状态**：Accepted
 - **日期**：2026-07-31
 - **决策者**：lixq（AI 协同分析）
-- **关联工单**：[IK5GPO](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/tasks/list?issue=IK5GPO)
+- **关联工单**：[IK5GPO](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/tasks/list?issue=IK5GPO)
 
 ## 背景
 

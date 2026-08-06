@@ -29,9 +29,15 @@ export {
   createSnapshotRepo,
   type SnapshotRepo,
   type SnapshotJobView,
+  type SnapshotOutputSlotView,
   type SnapshotJobAggregate,
   type SnapshotConversationState,
+  type SnapshotMentionView,
   type SnapshotAssetRow,
+  type SnapshotSceneCardView,
+  type SnapshotPlanApplicationReceiptView,
+  type SnapshotSceneCardGenerationRecordView,
+  type SnapshotStoryboardPreviewView,
 } from "./snapshot-repo.js";
 export {
   appendProjectEvent,
@@ -63,6 +69,14 @@ export {
   type CommitAgentRunResult,
   type CommitAgentRunSuccessInput,
   type RenewAgentRunLeaseInput,
+  type AppendProvisionalChunksInput,
+  type AppendProvisionalChunksResult,
+  type AcceptAgentRunCommandInput,
+  type AcceptAgentRunStopResult,
+  type AcceptAgentRunRetryResult,
+  type ProviderCallRecord,
+  type OpenProviderCallInput,
+  type SettleProviderCallInput,
 } from "./agent-run-repo.js";
 export {
   createModelCapabilityRepo,
@@ -92,11 +106,27 @@ export {
 } from "./asset-repo.js";
 export {
   createSkillRepo,
+  normalizeNameKey,
+  SkillAddConflictError,
+  SkillInUseError,
+  SkillNameConflictError,
+  SkillNameReservedError,
   type SkillRepo,
   type SkillLibraryView,
   type SkillMineView,
+  type PersonalSkillCreateResult,
   type SkillPage,
+  type SkillLibraryCategory,
+  type SkillLibrarySort,
+  type SkillLibraryLang,
+  type SkillActivationInput,
 } from "./skill-repo.js";
+export {
+  createSkillSummarizeRepo,
+  type SkillSummarizeRepo,
+  type SkillSummarizePendingSession,
+  type SkillSummarizeHistoryMessage,
+} from "./skill-summarize-repo.js";
 export {
   createTemplateRepo,
   type TemplateRepo,
@@ -115,6 +145,37 @@ export {
   type CreateJobInput,
   type CreatedJob,
 } from "./generation-command-repo.js";
+export {
+  aggregateSlotStatus,
+  resolveLogicalSlots,
+  type OutputSlotStatus,
+  type SlotSummaryStatus,
+} from "./generation-output-slot-repo.js";
+export {
+  createPlanApplicationRepo,
+  validateDerivedReferences,
+  type PlanApplicationRepo,
+  type ApplyPlanMessageInput,
+  type ApplyPlanMessageResult,
+  type CapabilitySnapshot,
+  type DerivedReference,
+} from "./plan-application-repo.js";
+export {
+  createSceneCardGenerationRepo,
+  type SceneCardGenerationRepo,
+  type RegenerateSceneCardInput,
+  type RegenerateSceneCardResult,
+  type SceneCardGenerationPresetView,
+  type SceneCardGenerationPresetViewResult,
+} from "./scene-card-generation-repo.js";
+export {
+  createStoryboardPreviewRepo,
+  type StoryboardPreviewRepo,
+  type CreateStoryboardPreviewInput,
+  type CreateStoryboardPreviewResult,
+  type StoryboardPreviewView,
+  type ListStoryboardPreviewsResult,
+} from "./storyboard-preview-repo.js";
 export {
   createWorkerRepo,
   type WorkerRepo,

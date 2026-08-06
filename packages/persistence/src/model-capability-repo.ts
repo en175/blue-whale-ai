@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { capabilityDigestFromModelCapability } from "./capability-digest.js";
 
 /** 模型能力只读 repo（Prisma-backed），复用 generation_model_capability 表。
  *  对齐 Java GenerationModelCapabilityService.listCapabilities：查启用项 + DTO 整形。
@@ -29,6 +30,8 @@ export interface ModelFeatures {
   tools: boolean;
   /** 视频首帧引用（video features.first_frame）。图片恒 false。 */
   first_frame: boolean;
+  /** 视频尾帧引用（video features.last_frame）。图片恒 false。 */
+  last_frame: boolean;
   /** 视频首尾帧引用（video features.first_last_frame）。图片恒 false。 */
   first_last_frame: boolean;
   /** 视频带音频（video features.audio）。图片恒 false。 */
@@ -49,6 +52,11 @@ export interface ModelCapabilityView {
   default_aspect_ratio: string;
   default_duration: number | null;
   features: ModelFeatures;
+  /** 乐观锁版本（DB version 列）；对应冻结快照的 row_version，用于预判能力漂移。 */
+  version: number;
+  /** 能力内容摘要（sha256，运行时算，不入库）；与冻结快照 digest 同源比对。
+   *  输入字段集固定为 8 个参数字段，不含 features——改字段集会让历史快照全部误判漂移。 */
+  digest: string;
 }
 
 export interface ModelCapabilityRepo {
@@ -78,6 +86,8 @@ type FeaturesJson = {
   tools?: boolean;
   firstFrame?: boolean;
   first_frame?: boolean;
+  lastFrame?: boolean;
+  last_frame?: boolean;
   firstLastFrame?: boolean;
   first_last_frame?: boolean;
   audio?: boolean;
@@ -113,6 +123,7 @@ function toFeatures(json: unknown): ModelFeatures {
     stream: f.stream === true,
     tools: f.tools === true,
     first_frame: f.firstFrame === true || f.first_frame === true,
+    last_frame: f.lastFrame === true || f.last_frame === true,
     first_last_frame: f.firstLastFrame === true || f.first_last_frame === true,
     audio: f.audio === true,
   };
@@ -171,6 +182,8 @@ export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapability
         default_aspect_ratio: cap.default_aspect_ratio,
         default_duration: cap.default_duration,
         features: toFeatures(cap.features),
+        version: cap.version,
+        digest: capabilityDigestFromModelCapability(cap),
       }));
     },
   };

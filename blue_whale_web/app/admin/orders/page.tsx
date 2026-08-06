@@ -14,10 +14,7 @@ import { Badge } from "../_components/ui/badge";
 import { Dialog } from "../_components/ui/dialog";
 import { Input } from "../_components/ui/input";
 import { Select } from "../_components/ui/select";
-import type {
-  AdminOrder,
-  OrderStatus,
-} from "../_lib/admin-data";
+import type { AdminOrder, OrderStatus } from "../_lib/admin-data";
 import {
   fetchAdminOrders,
   completeOrder,
@@ -46,13 +43,16 @@ type OperationLog = {
   createdAt: string;
 };
 
-function toOrderOperationLog(row: {
-  id: string;
-  action: string;
-  detail: string;
-  operator: string;
-  createdAt: string;
-}, tradeNo: string): OperationLog {
+function toOrderOperationLog(
+  row: {
+    id: string;
+    action: string;
+    detail: string;
+    operator: string;
+    createdAt: string;
+  },
+  tradeNo: string,
+): OperationLog {
   let detail: { reason?: string } = {};
   try {
     detail = JSON.parse(row.detail || "{}");
@@ -192,7 +192,9 @@ export default function AdminOrdersPage() {
     if (!confirmOrderTarget || !confirmReason.trim()) return;
     try {
       await completeOrder(confirmOrderTarget.tradeNo, confirmReason.trim());
-      setConfirmMsg(`订单 ${confirmOrderTarget.tradeNo} 已手动确认，积分已到账`);
+      setConfirmMsg(
+        `订单 ${confirmOrderTarget.tradeNo} 已手动确认，积分已到账`,
+      );
       await loadOrders();
     } catch (e) {
       setConfirmMsg(e instanceof Error ? e.message : "补单失败");

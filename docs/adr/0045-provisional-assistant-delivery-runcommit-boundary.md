@@ -5,7 +5,7 @@
   RunCommit 或迟到交付收敛机制，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-25
 - **决策者**：KimJohn
-- **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)
+- **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3UWA)
 - **修订**：[Assistant 回复流尝试 abort 与重跑契约](../specs/2026-07-23-assistant-message-stream-attempt-contract.md)的目标架构语义
 
 ## 背景

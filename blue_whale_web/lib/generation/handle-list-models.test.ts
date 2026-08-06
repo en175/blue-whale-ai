@@ -26,6 +26,8 @@ describe("handleListModels", () => {
         stream: false,
         tools: false,
       },
+      version: 0,
+      digest: "sha256:mock",
     };
     const repo = { listEnabledByType: vi.fn().mockResolvedValue([view]) };
     const result = await handleListModels("image", { models: repo });
@@ -64,6 +66,8 @@ describe("handleListModels", () => {
         stream: false,
         tools: false,
       },
+      version: 0,
+      digest: "sha256:mock",
     };
     const repo = { listEnabledByType: vi.fn().mockResolvedValue([view]) };
 
@@ -97,6 +101,8 @@ describe("handleListModels", () => {
         stream: false,
         tools: true,
       },
+      version: 0,
+      digest: "sha256:mock",
     };
     const repo = { listEnabledByType: vi.fn().mockResolvedValue([view]) };
 
@@ -126,6 +132,8 @@ describe("handleListModels", () => {
         stream: false,
         tools: true,
       },
+      version: 0,
+      digest: "sha256:mock",
     };
     const repo = { listEnabledByType: vi.fn().mockResolvedValue([view]) };
 

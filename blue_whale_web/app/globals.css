@@ -69,21 +69,6 @@ body {
   background: #22c55e;
 }
 
-.tc-agent-skill-row__switch-label {
-  position: absolute;
-  left: 6px;
-  font-size: 10px;
-  font-weight: 500;
-  color: white;
-  opacity: 0;
-  transition: opacity 150ms ease;
-}
-
-.tc-agent-skill-row__switch[aria-checked="true"]
-  .tc-agent-skill-row__switch-label {
-  opacity: 1;
-}
-
 .tc-agent-skill-row__switch-thumb {
   display: block;
   width: 20px;
@@ -130,10 +115,33 @@ body {
   --tc-accent: #3b82f6;
   --tc-on-accent: #ffffff;
   --tc-destructive: #ef4444;
+  --tc-success: #22c55e;
 
   --tc-login-modal-bg: #141414;
   --tc-login-primary: #4e40f3;
   --tc-login-primary-hover: #3d33d1;
+
+  /* 面板内下拉菜单底色（IK693G：SkillPanel 排序/行菜单硬编码替换） */
+  --tc-menu-bg: #1c1c1c;
+
+  /* 个人技能确定性封面渐变色板（IK693G：skill-cover.ts 硬编码替换）。
+     8 组 from→to，按名称哈希取模选取；skill-cover 组（名称驱动装饰色板）独立于品牌强调色体系。 */
+  --tc-skill-cover-1-from: #3b82f6;
+  --tc-skill-cover-1-to: #1e3a8a;
+  --tc-skill-cover-2-from: #8b5cf6;
+  --tc-skill-cover-2-to: #4c1d95;
+  --tc-skill-cover-3-from: #ec4899;
+  --tc-skill-cover-3-to: #831843;
+  --tc-skill-cover-4-from: #f59e0b;
+  --tc-skill-cover-4-to: #78350f;
+  --tc-skill-cover-5-from: #10b981;
+  --tc-skill-cover-5-to: #064e3b;
+  --tc-skill-cover-6-from: #06b6d4;
+  --tc-skill-cover-6-to: #0c4a6e;
+  --tc-skill-cover-7-from: #ef4444;
+  --tc-skill-cover-7-to: #7f1d1d;
+  --tc-skill-cover-8-from: #6366f1;
+  --tc-skill-cover-8-to: #312e81;
 
   --tc-card-hover-stroke: rgba(156, 156, 156, 0.58);
   --tc-card-hover-shadow:
@@ -273,11 +281,10 @@ body {
   position: relative;
   max-height: 240px;
   overflow: hidden;
-  margin-top: 6px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  margin-top: 4px;
+  margin-left: 2px;
+  padding: 2px 0 2px 12px;
+  border-left: 1px solid var(--tc-border-active);
   display: flex;
 }
 
@@ -286,7 +293,7 @@ body {
   min-width: 0;
   font-size: 12px;
   line-height: 1.6;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--tc-text-muted);
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -302,6 +309,30 @@ body {
 .tc-agent-thinking-content::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.15);
   border-radius: 2px;
+}
+
+/* 运行中「思考中」流光动效：渐变高光循环扫过文字 */
+.tc-agent-thinking-live__label {
+  background: linear-gradient(
+    90deg,
+    var(--tc-text-muted) 25%,
+    var(--tc-text-primary) 50%,
+    var(--tc-text-muted) 75%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: tc-agent-thinking-shimmer 1.6s linear infinite;
+}
+
+@keyframes tc-agent-thinking-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 /* Simple tooltip for data-tooltip */
@@ -330,6 +361,18 @@ body {
 
 [data-tooltip]:hover::before {
   opacity: 1;
+}
+
+/* 多行变体：悬停展示完整简介等长文本（IK60WT 官方技能库卡片）；
+   max-height 兜底超长简介不顶出卡片上沿被 overflow 裁剪（IK6H3Q） */
+[data-tooltip-multiline]::before {
+  white-space: normal;
+  width: max-content;
+  max-width: 280px;
+  max-height: 160px;
+  overflow-y: auto;
+  text-align: left;
+  word-break: break-word;
 }
 
 /* Video duration slider in dock popover */

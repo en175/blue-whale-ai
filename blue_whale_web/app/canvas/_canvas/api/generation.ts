@@ -41,11 +41,17 @@ export type ImageModelCapability = {
     tools: boolean;
     /** 视频首帧引用（图片恒 false）。 */
     first_frame: boolean;
+    /** 视频尾帧引用（图片恒 false）。 */
+    last_frame: boolean;
     /** 视频首尾帧引用（图片恒 false）。 */
     first_last_frame: boolean;
     /** 视频带音频（图片恒 false）。 */
     audio: boolean;
   };
+  /** 乐观锁版本（后端 DB version 列）；对应冻结快照的 row_version，用于本地预判能力漂移。 */
+  version: number;
+  /** 能力内容摘要（sha256）；与冻结快照 digest 比对，不一致即漂移。 */
+  digest: string;
 };
 
 export type CreateProjectGenerationJobPayload =

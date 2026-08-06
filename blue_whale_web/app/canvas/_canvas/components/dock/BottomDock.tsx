@@ -367,8 +367,8 @@ export function BottomDock({
             overlay={false}
             stroke={{ color: "#ffffff", width: 2, opacity: 0.04 }}
             style={{
-              background: "rgba(41, 41, 41, 0.92)",
-              backdropFilter: "blur(40px)",
+              // 实心面板底色（dock-panel-bg token）：用户明确要求 Dock 不透底，禁用玻璃拟态。
+              background: "var(--tc-dock-panel-bg)",
               border: 0,
               display: "flex",
               flexDirection: "column",

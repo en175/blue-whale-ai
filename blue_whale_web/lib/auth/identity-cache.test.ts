@@ -11,7 +11,12 @@ describe("createIdentityCache", () => {
       now: () => now,
     });
 
-    cache.set("digest-a", { userId: "7", status: "enabled", isAdmin: false, username: "alice" });
+    cache.set("digest-a", {
+      userId: "7",
+      status: "enabled",
+      isAdmin: false,
+      username: "alice",
+    });
     now = 60_999;
     expect(cache.get("digest-a")?.userId).toBe("7");
     now = 61_000;
@@ -26,10 +31,25 @@ describe("createIdentityCache", () => {
       now: () => 1_000,
     });
 
-    cache.set("a", { userId: "1", status: "enabled", isAdmin: false, username: "alice" });
-    cache.set("b", { userId: "2", status: "enabled", isAdmin: false, username: "alice" });
+    cache.set("a", {
+      userId: "1",
+      status: "enabled",
+      isAdmin: false,
+      username: "alice",
+    });
+    cache.set("b", {
+      userId: "2",
+      status: "enabled",
+      isAdmin: false,
+      username: "alice",
+    });
     cache.get("a");
-    cache.set("c", { userId: "3", status: "enabled", isAdmin: false, username: "alice" });
+    cache.set("c", {
+      userId: "3",
+      status: "enabled",
+      isAdmin: false,
+      username: "alice",
+    });
 
     expect(cache.get("b")).toBeUndefined();
     expect(cache.get("a")?.userId).toBe("1");
@@ -44,7 +64,12 @@ describe("createIdentityCache", () => {
       now: () => 1_000,
     });
 
-    cache.set("digest-a", { userId: "7", status: "enabled", isAdmin: false, username: "alice" });
+    cache.set("digest-a", {
+      userId: "7",
+      status: "enabled",
+      isAdmin: false,
+      username: "alice",
+    });
     cache.delete("digest-a");
 
     expect(cache.get("digest-a")).toBeUndefined();
@@ -90,8 +115,18 @@ describe("createIdentityCache", () => {
       now: () => 1_000,
     });
 
-    cache.set("a", { userId: "1", status: "enabled", isAdmin: false, username: "alice" });
-    cache.set("b", { userId: "2", status: "enabled", isAdmin: false, username: "alice" });
+    cache.set("a", {
+      userId: "1",
+      status: "enabled",
+      isAdmin: false,
+      username: "alice",
+    });
+    cache.set("b", {
+      userId: "2",
+      status: "enabled",
+      isAdmin: false,
+      username: "alice",
+    });
 
     expect(cache.size()).toBe(1);
     expect(cache.get("a")).toBeUndefined();

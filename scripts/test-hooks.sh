@@ -1950,7 +1950,7 @@ run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$
 assert_exit 2 "doc-allowlist: master Edit 代码 src/a.py 仍拦"
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/CLAUDE.md"}}'
 assert_exit 2 "doc-allowlist: master Edit 根 CLAUDE.md 规则源仍拦"
-run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/.claude/rules/issue-tracker.md"}}'
+run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/.claude/rules/frontend.md"}}'
 assert_exit 2 "doc-allowlist: master Edit .claude/rules 规则源仍拦"
 run_hook "$MASTER_EDIT_HOOK" '{"tool_name":"Edit","tool_input":{"file_path":"'"$DOCALLO_REPO"'/docs/specs/schema.json"}}'
 assert_exit 2 "doc-allowlist: master Edit docs/specs/*.json 契约仍拦（非 .md 散文）"
@@ -2457,7 +2457,8 @@ WRITE_PREFLIGHT_HEADING="## 写入前自检（每次写操作前强制执行）"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "摘要是约束声明，自检是执行机制" "workflow: 自检说明与红线摘要的关系"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "Edit、Write 或任何会改变 Git 状态的操作前" "workflow: 自检覆盖所有仓库写操作"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "确认当前分支" "workflow: 自检确认当前分支"
-assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "scripts/start-task-worktree.sh" "workflow: 自检指向唯一 Work Tree 入口"
+assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "开工入口" "workflow: 自检指向唯一 Work Tree 入口（开工入口）"
+assert_markdown_section_has_text "CLAUDE.md" "## 最高红线（摘要，细节见 rules 文件）" "scripts/start-task-worktree.sh" "workflow: 红线 4 定义开工入口唯一签名"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "确认目标路径" "workflow: 自检确认目标路径"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "用户本地集成区（master 主检出区）" "workflow: 自检识别主检出区"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "确认 Git 写入区域" "workflow: 自检确认 Git 写入区域"

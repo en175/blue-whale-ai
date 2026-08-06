@@ -23,7 +23,7 @@ export function ExpandModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-[2147483610] flex items-center justify-center"
       style={{ background: "var(--tc-bg-overlay)" }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();

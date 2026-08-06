@@ -1,11 +1,11 @@
 # IJZYVT — [ARCH-8] test: 新增 Playwright 端到端测试
 
-> **工单**：[IJZYVT — Playwright E2E](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IJZYVT)
+> **工单**：[IJZYVT — Playwright E2E](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IJZYVT)
 > **父 issue**：[IJZYUL](./README.md)
 > **状态**：✅ 已合并到 master（PR #75，merge commit `f473880`）
 > **分支**：`feature/IJZYVT-新增Playwright端到端`
 > **commit**：`be9efac`（rebase 后）→ merged as `f473880`
-> **PR**：[#75](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/pulls/75)
+> **PR**：[#75](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/pulls/75)
 > **完成日期**：2026-07-13
 
 ## 范围

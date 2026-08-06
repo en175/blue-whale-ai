@@ -1,12 +1,12 @@
 # Issue tracker: Gitee
 
-仓库 `git@gitee.com:hangzhou_xuanfu_1/blue-whale-ai.git`（网页 https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues）。优先 MCP 工具，不可用时回退网页。
+仓库 `git@gitee.com:hangzhou-xuanfu_1/blue-whale-ai.git`（网页 https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues）。优先 MCP 工具，不可用时回退网页。
 
 ## ID 解析约定（通用，先于任何 `mcp__gitee-ent__*` 调用读）
 
 > 本节是**所有**企业版 MCP 调用（issue / PR / 仓库 / 标签……）的通用约定，不限于 issue 创建。
 
-**黄金法则：`enterprise_id` 与 `project_id` 永远动态查，永不从网页 URL 抄。**
+**黄金法则：`enterprise_id` 与 `project_id` 永远动态查，永不从网页 URL 抄。** 本仓三个固定 ID 的兜底值（日常直接用、免查询）见 CLAUDE.md「Gitee ID 兜底常量」；疑似变更或 401 时按本节动态查。
 
 Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 
@@ -34,21 +34,60 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 
 企业版 MCP（`mcp__gitee-ent__*`）用以下 ID 定位，**非 owner/repo**：
 
-- **enterprise_id**：`list_enterprises` 查，按 `path == "hangzhou_xuanfu_1"` 取 `id`。
+- **enterprise_id**：`list_enterprises` 查，按 `path == "hangzhou-xuanfu_1"` 取 `id`。
 - **project_id**（仓库 ID）：`list_enterprise_repositories` 查。创建 issue **必传**——不传则工单只进企业工作项、仓库 Issues 页不可见，PreToolUse hook `block-issue-without-repo.sh` 硬拦。
 - **program_id**（项目 ID）：`list_programs` 查（按 `name`/`search` 命中 Blue-Whale-AI 项目）。根 issue 创建**必传**且非 0——不传（=0）则工单游离于企业「项目管理」之外，同一 hook 硬拦。值不写死，对齐 ADR-0007 D5 动态查。
 - **label 数字 ID**：`list_enterprise_labels` 查；`label_ids` 传逗号分隔的数字 ID（非名称）。标签长度 2–20、非特殊字符。
 
 ## 操作约定
 
-- **创建**：`create_enterprise_issue(enterprise_id, title, description, project_id=..., program_id=...)`。根 issue 的 `project_id`（仓库）和 `program_id`（项目）都**必传**且非 0——缺任一则 hook 硬拦（见上「定位」）。标签不能在 create 落——企业私有仓库 `labels` 静默忽略，紧跟一次 `update_enterprise_issue(label_ids=...)` 补。**创建后必须 `get_enterprise_issue_detail` 回读确认 `description` 非空**——错名参数（如把描述传到 `body`）被静默忽略，已踩坑建成空描述工单（IK5THP）；回读验证是防静默忽略的通用要求，PR / Release 创建后同样适用。
+- **创建**：`create_enterprise_issue(enterprise_id, title, description, project_id=..., program_id=...)`。根 issue 的 `project_id`（仓库）和 `program_id`（项目）都**必传**且非 0——缺任一则 hook 硬拦（见上「定位」）。标签不能在 create 落——企业私有仓库 `labels` 静默忽略，紧跟一次 `update_enterprise_issue(label_ids=...)` 补。**创建后必须 `get_enterprise_issue_detail` 回读确认 `description` 非空**——错名参数（如把描述传到 `body`）被静默忽略，已踩坑建成空描述工单（IK5THP）；回读验证是防静默忽略的通用要求，PR / Release 创建后同样适用；入参名以工具 schema 为准，不凭印象。
 - **创建子 issue（交 Agent）**：先 `get_enterprise_issue_detail(parent_ident)` 读父项，子项继承 `parent_id`/`project_id`/`program_id`/`issue_type_id`。create 后 `update_enterprise_issue` 补 `ready-for-agent` label_ids，再 `list_enterprise_issues(project_id=parent.project_id, search=new_ident)` 反查；查不到 = 发布失败，不交 Agent。
 - **读取**：`get_enterprise_issue_detail` 取详情；`list_enterprise_issue_comments(enterprise_id, issue_id)` 取评论。
 - **列出**：`list_enterprise_issues`，`state` 过滤（open/closed/rejected/progressing），`label_ids` 过滤（数字 ID）。
 - **评论**：`comment_enterprise_issue(enterprise_id, issue_id, body)`。
-- **标签**：`update_enterprise_issue(label_ids=...)`，数字 ID。
+- **标签**：`update_enterprise_issue(label_ids=...)`，数字 ID。Triage 五标签：needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix，详见 `docs/agents/triage-labels.md`。
+- **创建 PR**：`create_enterprise_repo_pull` **必传数字 `project_id`**——工具描述写「Project ID or PathWithNamespace」，**实际传 PathWithNamespace（如 `hangzhou-xuanfu_1/blue-whale-ai`）会 404「仓库不存在」**，勿被误导。
+- **合并 PR**：`merge_enterprise_pull` 传 `merge_method=merge`（或不传）；工具**无 `prune_source_branch` 参数**，Gitee merge 默认不删源分支，事后跑 `scripts/cleanup-task-worktree.sh`。
 - **关闭**：`update_enterprise_issue(issue_state_id=...)`，**非 `state`**（工具无此入参）。状态枚举随工作项类型变——先 `list_issue_type_states(enterprise_id, issue_type_id)` 查（本仓「需求」= 意向/进行中/已完成/已拒绝，无 closed/open），完成传「已完成」id；完成后 `state` 字段变 `"closed"`。
-- **状态流转（开工/完成）**：权威规则在 `.claude/rules/issue-tracker.md`「任务状态机」——白名单流转、前置状态错位处理、失败处理、禁设状态（已验收/已拒绝/已取消归人）以该文件为准，本节不重复。
+
+## 任务状态机（Agent 全自动流转）
+
+看板状态必须实时反映真实进度。以下流转由 Agent 在触发点主动执行，不等人手动改。
+
+### 状态白名单（仅此这些流转，状态 id 为本仓实测值）
+
+| 触发点 | 类型 | 流转 |
+| --- | --- | --- |
+| worktree 入口成功且带 `--issue` | 需求 | 意向(4336301) → 进行中(4336298) |
+| 同上 | 任务 | 待办的(4336297) → 进行中(4336298) |
+| 同上 | 缺陷 | 待确认(4336303)/已确认(4336304) → 修复中(4336305) |
+| PR 创建成功 | 全部 | 打 `ready-for-review` 标签(id 344268623) |
+| PR 合并成功 | 需求/任务 | → 已完成(4336299) |
+| PR 合并成功 | 缺陷 | → 已修复(4336306)，另打 `修复待验证` 标签(id 344168629) |
+
+- **禁止 Agent 设置**：已验收(4336307)、已拒绝(4336302)、已取消(4336300) —— 归人操作。
+- 只读任务（调研/答疑/评审，不建 worktree）不触发状态流转；`--no-issue` 任务无状态可改。
+
+### 开工流转（worktree 入口成功后立即执行）
+
+1. `get_enterprise_issue_detail` 查当前状态。
+2. 前置状态判定：
+   - 预期起点（需求=意向、任务=待办的、缺陷=待确认/已确认）→ 调 `update_enterprise_issue(issue_state_id=<目标>)` 流转。缺陷在「待确认」也直接跳「修复中」（认领即确认），不走「已确认」中间步。
+   - 已是「进行中」→ **停止**，向用户报告并等待指示（可能他人/另一会话在做）。
+   - 已是终态（已完成/已取消/已拒绝）→ **停止**，向用户报告并等待指示（防重复做已完成任务）。
+3. 状态 id 疑似失效（报错）时按 `list_issue_type_states(enterprise_id, issue_type_id)` 重查，不得凭本表死磕。
+
+### 完成流转（PR 合并成功后执行）
+
+- 按白名单表置完成态；缺陷另打 `修复待验证`。
+- 补标签时 `label_ids` 是整体语义：先 `get_enterprise_issue_detail` 取现有标签，合并后整体写回，不得只传新标签覆盖掉旧标签。
+
+### 失败处理
+
+- 状态/标签变更失败：重试一次。
+- 仍失败：继续主线工作不阻塞，但最终汇报必须置顶标红「⚠️ 工单状态未同步」，附手动指引（工单号 + 目标状态名 + 状态 id）。
+- 幂等：工单已在目标状态视为成功，直接跳过。
 
 ## 术语映射
 

@@ -4,7 +4,7 @@
 > Gateway、ConfirmTopUp 与渠道接入不属于当前重构，见
 > [ADR-0055](../adr/0055-prelaunch-typescript-unification-scope.md)。
 
-关联议题：[IK3UW5：评估 Go 与 Node 支付通道的协议兼容方案](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UW5)
+关联议题：[IK3UW5：评估 Go 与 Node 支付通道的协议兼容方案](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3UW5)
 
 ## 结论
 

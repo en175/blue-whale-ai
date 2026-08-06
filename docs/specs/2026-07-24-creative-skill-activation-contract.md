@@ -2,8 +2,8 @@
 
 - **状态**：Accepted for implementation
 - **契约版本**：1
-- **关联工单**：[冻结 Creative Skill 激活跨服务契约](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3NHU)
-- **下游消费**：[接通 Creative Skill Use/auto、按需激活与版本固定](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK2D8P)
+- **关联工单**：[冻结 Creative Skill 激活跨服务契约](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3NHU)
+- **下游消费**：[接通 Creative Skill Use/auto、按需激活与版本固定](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK2D8P)
 - **前置契约**：[Runtime Agent Bundle 领域契约与资源规范](2026-07-20-runtime-agent-bundle-contract.md)、[ADR-0041 同族工单串行与契约先行](../adr/0041-sibling-issues-serial-contract-first.md)、[ADR-0042 契约措辞与已实现行为对齐](../adr/0042-runtime-bundle-contract-wording-alignment.md)
 - **机器可读契约**：[creative-skill-activation.schema.json](creative-skill-activation.schema.json)（Draft 2020-12）
 - **示例**：[fixtures/creative-skill-activation/](fixtures/creative-skill-activation/)（`manifest.json` 索引，Java / Python / TypeScript 三端一致性测试共同消费）

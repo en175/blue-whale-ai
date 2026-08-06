@@ -584,7 +584,9 @@ export function VideoDockContent(props: VideoDockContentProps) {
                           type="button"
                           aria-label="添加图片"
                           aria-haspopup="menu"
-                          aria-expanded={uploadMenuOpen && uploadKind === "image"}
+                          aria-expanded={
+                            uploadMenuOpen && uploadKind === "image"
+                          }
                           onClick={() => handleTriggerClick(mediaAddRef)}
                           style={{
                             width: 44,

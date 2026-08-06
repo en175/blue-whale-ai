@@ -30,6 +30,8 @@ services:
       - ./init/000_create_new_api_database.sql:/docker-entrypoint-initdb.d/000_create_new_api_database.sql:ro
       - ../../packages/persistence/schema/001_baseline.sql:/docker-entrypoint-initdb.d/001_baseline.sql:ro
       - ../../packages/persistence/schema/002_seed.sql:/docker-entrypoint-initdb.d/002_seed.sql:ro
+      - ./init/003_acceptance_agent_skill.sql:/docker-entrypoint-initdb.d/003_acceptance_agent_skill.sql:ro
+      - ./init/004_acceptance_skill_journey.sql:/docker-entrypoint-initdb.d/004_acceptance_skill_journey.sql:ro
     healthcheck:
       test:
         [
@@ -65,6 +67,9 @@ services:
       REDIS_CONN_STRING: redis://redis:6379/1
       SESSION_SECRET: acceptance-new-api-session-secret
       GENERATE_DEFAULT_TOKEN: "true"
+      # 验收拓扑多场景连续注册，放宽限流（CRITICAL 默认 20 次/20 分钟会 429；GLOBAL 默认 360 次/180s）
+      CRITICAL_RATE_LIMIT: "100000"
+      GLOBAL_API_RATE_LIMIT: "100000"
     depends_on:
       mysql:
         condition: service_healthy
@@ -101,6 +106,28 @@ services:
       timeout: 3s
       retries: 30
 
+  storage-stub:
+    image: node:22-alpine
+    command: ["node", "/app/tests/typescript-baseline/storage-stub.mjs"]
+    volumes:
+      - ../../:/app:ro
+    environment:
+      PORT: "4330"
+      ASSET_UPLOAD_SECRET: acceptance-storage-secret
+    ports:
+      - "4330:4330"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4330/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   agent-worker:
     <<: *node-service
     command: ["node", "apps/agent-worker/dist/index.js"]
@@ -108,6 +135,7 @@ services:
       <<: *node-environment
       PORT: "4001"
       AGENT_RUNTIME_MODE: fake
+      AGENT_LEASE_MS: "8000"
       DATABASE_URL: mysql://root:blue_whale@mysql:3306/blue_whale
     ports:
       - "4311:4001"
@@ -130,6 +158,7 @@ services:
       <<: *node-environment
       DATABASE_URL: mysql://root:blue_whale@mysql:3306/blue_whale
       GENERATION_WORKER_PORT: "4002"
+      GENERATION_RECOVERY_INTERVAL_MS: "5000"
       NEW_API_BASE_URL: http://new-api:3000
       GENERATION_MEDIA_RELAY_MODE: passthrough
       NODE_ENV: test
@@ -169,6 +198,8 @@ services:
       PORT: "3000"
       DATABASE_URL: mysql://root:blue_whale@mysql:3306/blue_whale
       NEW_API_BASE_URL: http://new-api:3000
+      IMAGE_RECOVERY_INTERVAL_MS: "5000"
+      IMAGE_JOB_LEASE_SECONDS: "15"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       GIT_COMMIT: ${GIT_COMMIT:-baseline}
@@ -178,6 +209,10 @@ services:
       VOLC_TOS_ENDPOINT: ""
       VOLC_TOS_BUCKET: ""
       VOLC_TOS_REGION: ""
+      # S3 兼容直传（storage-stub）：publicBase 供宿主机浏览器 PUT/GET，internalBase 供容器内 HEAD/读取。
+      ASSET_UPLOAD_PUBLIC_BASE: http://localhost:4330
+      ASSET_UPLOAD_INTERNAL_BASE: http://storage-stub:4330
+      ASSET_UPLOAD_SECRET: acceptance-storage-secret
     ports:
       - "3101:3000"
     depends_on:
@@ -186,6 +221,8 @@ services:
       new-api:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      storage-stub:
         condition: service_healthy
     healthcheck:
       test:

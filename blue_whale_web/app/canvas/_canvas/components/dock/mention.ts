@@ -9,14 +9,20 @@ import {
   wireInteger,
   type WireInteger,
 } from "@/lib/wire-integer";
+import type {
+  ConversationMentionInput,
+  MentionFailure,
+} from "@blue-whale/core";
 
 /** 参考图 mention 条目 */
 export type MentionItem = {
   id: string;
-  type: "image" | "video" | "audio";
+  type: "image" | "video" | "audio" | "scene_card";
   name: string;
   src?: string;
   assetId?: WireInteger;
+  sceneCardId?: WireInteger;
+  sceneCardVersion?: number;
 };
 
 const MENTION_ATTR = "data-mention-id";
@@ -82,10 +88,7 @@ export function insertMention(
 }
 
 /** 从编辑器中移除指定 id 的 mention pill */
-export function removeMention(el: HTMLElement, id: string): void {
-  const pill = el.querySelector(`[${MENTION_ATTR}="${id}"]`);
-  if (!pill) return;
-
+function removeMentionElement(el: HTMLElement, pill: Element): void {
   // 移除 pill 前可能的前导换行/空格，以及之后的空格
   const prev = pill.previousSibling;
   if (
@@ -109,6 +112,12 @@ export function removeMention(el: HTMLElement, id: string): void {
   el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+export function removeMention(el: HTMLElement, id: string): void {
+  const pill = el.querySelector(`[${MENTION_ATTR}="${id}"]`);
+  if (!pill) return;
+  removeMentionElement(el, pill);
+}
+
 /**
  * 从编辑器 DOM 中提取纯文本 prompt、参考图 URL 列表与素材 assetId 列表。
  * mention pill 在 prompt 中替换为占位符 `@[name]`；assetIds 按 DOM 出现顺序去重，
@@ -118,10 +127,12 @@ export function extractEditor(el: HTMLElement): {
   prompt: string;
   referenceImages: string[];
   assetIds: WireInteger[];
+  mentions: ConversationMentionInput[];
 } {
   const referenceImages: string[] = [];
   const assetIds: WireInteger[] = [];
-  const seenAssetIds = new Set<string>();
+  const mentions: ConversationMentionInput[] = [];
+  const seenMentionIds = new Set<string>();
   const parts: string[] = [];
 
   const walk = (node: Node) => {
@@ -133,23 +144,23 @@ export function extractEditor(el: HTMLElement): {
       const elem = node as HTMLElement;
       const mentionId = elem.getAttribute(MENTION_ATTR);
       if (mentionId) {
-        const assetIdAttr = elem.getAttribute("data-mention-asset-id");
-        const assetId =
-          assetIdAttr !== null && isWireInteger(assetIdAttr)
-            ? wireInteger(assetIdAttr)
-            : null;
-        // 同 assetId 重复 pill 整个跳过（如用户复制粘贴 pill DOM）：
-        // 保证 content @[name] 数 = assetIds 数，与后端 mention_seq 一一对应
-        if (assetId !== null && seenAssetIds.has(String(assetId))) {
+        const mention = mentionInputOfElement(elem);
+        const identity = mentionIdentity(mention);
+        // 同一资源重复 pill 整个跳过（如用户复制粘贴 pill DOM）：
+        // 保证 content @[name] 与有序 mentions 一一对应。
+        if (identity !== null && seenMentionIds.has(identity)) {
           return;
         }
         const name = elem.getAttribute("data-mention-name") ?? mentionId;
         const src = elem.getAttribute("data-mention-src");
         parts.push(`@[${name}]`);
         if (src) referenceImages.push(src);
-        if (assetId !== null) {
-          seenAssetIds.add(String(assetId));
-          assetIds.push(assetId);
+        if (mention && identity) {
+          seenMentionIds.add(identity);
+          mentions.push(mention);
+          if (mention.type === "asset") {
+            assetIds.push(wireInteger(mention.asset_id));
+          }
         }
         return;
       }
@@ -166,7 +177,109 @@ export function extractEditor(el: HTMLElement): {
     prompt: parts.join("").replace(/ /g, " ").trim(),
     referenceImages,
     assetIds,
+    mentions,
   };
+}
+
+function mentionInputOfElement(
+  elem: HTMLElement,
+): ConversationMentionInput | null {
+  const displayName = elem.getAttribute("data-mention-name")?.trim();
+  if (!displayName) return null;
+  if (elem.getAttribute("data-mention-type") === "scene_card") {
+    const id = elem.getAttribute("data-mention-scene-card-id");
+    const version = Number(
+      elem.getAttribute("data-mention-scene-card-version"),
+    );
+    if (
+      id === null ||
+      !isWireInteger(id) ||
+      !Number.isSafeInteger(version) ||
+      version <= 0
+    ) {
+      return null;
+    }
+    return {
+      type: "scene_card",
+      scene_card_id: String(wireInteger(id)),
+      scene_card_version: version,
+      display_name: displayName,
+    };
+  }
+  const assetId = elem.getAttribute("data-mention-asset-id");
+  if (assetId === null || !isWireInteger(assetId)) return null;
+  return {
+    type: "asset",
+    asset_id: String(wireInteger(assetId)),
+    display_name: displayName,
+  };
+}
+
+function mentionIdentity(mention: ConversationMentionInput | null) {
+  if (!mention) return null;
+  return mention.type === "asset"
+    ? `asset:${mention.asset_id}`
+    : `scene_card:${mention.scene_card_id}`;
+}
+
+/** 将公开 Problem 中的失效原因投影回当前输入区；事实顺序以发送时 DOM 顺序为准。 */
+export function markMentionFailures(
+  el: HTMLElement,
+  failures: MentionFailure[],
+): void {
+  const allMentionElements = Array.from(
+    el.querySelectorAll<HTMLElement>(`[${MENTION_ATTR}]`),
+  );
+  for (const pill of allMentionElements) {
+    if (pill.getAttribute("data-mention-availability") !== "unavailable") {
+      continue;
+    }
+    pill.removeAttribute("data-mention-availability");
+    pill.removeAttribute("data-mention-reason");
+    pill.removeAttribute("title");
+    pill.style.removeProperty("outline");
+    pill.style.color = "var(--tc-text-secondary)";
+    pill.querySelector("[data-mention-remove]")?.remove();
+  }
+
+  const seen = new Set<string>();
+  const mentionElements = allMentionElements.filter((element) => {
+    const identity = mentionIdentity(mentionInputOfElement(element));
+    if (!identity || seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+
+  for (const failure of failures) {
+    const pill = mentionElements[failure.index];
+    const mention = pill ? mentionInputOfElement(pill) : null;
+    if (!pill || mention?.type !== failure.type) continue;
+    pill.setAttribute("data-mention-availability", "unavailable");
+    pill.setAttribute("data-mention-reason", failure.reason);
+    pill.setAttribute("title", failure.reason);
+    pill.style.outline = "1px solid var(--tc-destructive)";
+    pill.style.color = "var(--tc-destructive)";
+    if (pill.querySelector("[data-mention-remove]")) continue;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.setAttribute("data-mention-remove", "true");
+    remove.setAttribute("aria-label", `移除失效引用 ${mention.display_name}`);
+    remove.style.cssText = [
+      "border:0",
+      "background:transparent",
+      "color:var(--tc-destructive)",
+      "cursor:pointer",
+      "padding:0 1px",
+      "line-height:1",
+    ].join(";");
+    remove.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      removeMentionElement(el, pill);
+    });
+    pill.appendChild(remove);
+  }
 }
 
 // ---- helpers ----
@@ -178,6 +291,13 @@ export function buildPill(item: MentionItem): HTMLElement {
   if (item.src) pill.setAttribute("data-mention-src", item.src);
   if (item.assetId != null)
     pill.setAttribute("data-mention-asset-id", String(item.assetId));
+  if (item.sceneCardId != null)
+    pill.setAttribute("data-mention-scene-card-id", String(item.sceneCardId));
+  if (item.sceneCardVersion != null)
+    pill.setAttribute(
+      "data-mention-scene-card-version",
+      String(item.sceneCardVersion),
+    );
   pill.setAttribute("contenteditable", "false");
   pill.setAttribute("data-mention-type", item.type);
   pill.style.cssText = [
@@ -213,7 +333,13 @@ export function buildPill(item: MentionItem): HTMLElement {
     // 图标占位
     const icon = document.createElement("span");
     icon.textContent =
-      item.type === "image" ? "🖼" : item.type === "video" ? "🎬" : "🎵";
+      item.type === "image"
+        ? "🖼"
+        : item.type === "video"
+          ? "🎬"
+          : item.type === "scene_card"
+            ? "🗂"
+            : "🎵";
     icon.style.cssText = "font-size:12px;line-height:1;";
     pill.appendChild(icon);
   }

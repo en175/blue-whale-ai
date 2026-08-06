@@ -5,7 +5,7 @@
   User 重试，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-25
 - **决策者**：KimJohn
-- **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)
+- **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3UWA)
 - **修订**：[ADR-0043 AgentRun 三种规范化收场](0043-agent-run-terminal-outcomes.md)中由 Worker 错误直接形成 failed commit 的目标架构语义
 
 ## 背景

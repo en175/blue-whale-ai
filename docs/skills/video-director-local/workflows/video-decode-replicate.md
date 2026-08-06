@@ -50,13 +50,13 @@ Director 呈现拆解报告后，停住让用户确认 + 做三个决策：
 
 配方 + 产品理解就位后，进入现有创作链路（agents 复用，切 input_mode）：
 
-| 步骤 | agent | input_mode | 动作 |
-|---|---|---|---|
-| 1 | brief | replicate | 从配方 + product understanding 预填 Brief |
-| 2 | skill-selector | replicate_faithful / replicate_method | 照搬→高置信直推 pattern 对应 Skill + 告知；差异化→多候选开放问方向 |
-| 3 | storyboard | replicate_faithful / replicate_method | 照搬→照抄 beats 换产品；差异化→pattern 作约束自主生成 |
-| 4 | prompt-optimizer | （零改造） | 出可复制提示词交付包 |
-| 5 | review | replicate | 对照配方检查保留度 |
+| 步骤 | agent            | input_mode                            | 动作                                                               |
+| ---- | ---------------- | ------------------------------------- | ------------------------------------------------------------------ |
+| 1    | brief            | replicate                             | 从配方 + product understanding 预填 Brief                          |
+| 2    | skill-selector   | replicate_faithful / replicate_method | 照搬→高置信直推 pattern 对应 Skill + 告知；差异化→多候选开放问方向 |
+| 3    | storyboard       | replicate_faithful / replicate_method | 照搬→照抄 beats 换产品；差异化→pattern 作约束自主生成              |
+| 4    | prompt-optimizer | （零改造）                            | 出可复制提示词交付包                                               |
+| 5    | review           | replicate                             | 对照配方检查保留度                                                 |
 
 ### 两复刻度对 storyboard 的影响
 

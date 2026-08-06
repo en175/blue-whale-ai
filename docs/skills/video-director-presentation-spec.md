@@ -1,6 +1,6 @@
 # 视频导演 Agent 呈现与交互规格（VIDEO-DIRECTOR-PRESENTATION-SPEC）
 
-> **状态**：PM 权威规格，迭代中。Parent map: [IK5LR4](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LR4)。17 票逐章填——✅ 已 resolve 填入，⏳ 待 resolve。
+> **状态**：PM 权威规格，迭代中。Parent map: [IK5LR4](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LR4)。17 票逐章填——✅ 已 resolve 填入，⏳ 待 resolve。
 >
 > **读者**：后端（落地平台 UI）、前端（实现真卡）、PM（维护规格）。
 >
@@ -22,7 +22,7 @@
 
 ---
 
-## 票1 ✅ 卡片 vs 流式文本 出现时机总则 + 双层映射（[IK5LRV](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LRV)）
+## 票1 ✅ 卡片 vs 流式文本 出现时机总则 + 双层映射（[IK5LRV](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LRV)）
 
 ### 判断准则（供后端执行的一句话总则）
 
@@ -93,11 +93,11 @@
 
 ### 涌现的编排源偏差
 
-`references/generation-action-guide.md` 现状把生图提示词写在交付包里，与本规格「生图独立」冲突 → 修订工单 [IK5MAR](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5MAR)（独立于 map，本地 agent 据此对齐平台规格）。
+`references/generation-action-guide.md` 现状把生图提示词写在交付包里，与本规格「生图独立」冲突 → 修订工单 [IK5MAR](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5MAR)（独立于 map，本地 agent 据此对齐平台规格）。
 
 ---
 
-## 票2 ✅ 确认与追问 UI 呈现（[IK5LRY](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LRY)）
+## 票2 ✅ 确认与追问 UI 呈现（[IK5LRY](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LRY)）
 
 ### 核心模型：两阶段
 
@@ -136,9 +136,9 @@
 
 ### 编排源修订 → IK5MNJ
 
-`rules/progressive-disclosure.md` 删「每轮最多 3 问」硬上限 → 修订工单 [IK5MNJ](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5MNJ)。
+`rules/progressive-disclosure.md` 删「每轮最多 3 问」硬上限 → 修订工单 [IK5MNJ](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5MNJ)。
 
-## 票3 ✅ 脚本与分镜 聚合输出策略（[IK5LSB](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LSB)）
+## 票3 ✅ 脚本与分镜 聚合输出策略（[IK5LSB](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LSB)）
 
 ### 核心决策：串行两确认门
 
@@ -181,9 +181,9 @@
 
 ### 编排源修订 → IK5ODM
 
-`agents/storyboard.md` 现状一次出齐脚本+分镜+关键帧、单确认门（「请先确认脚本和分镜方向」），与本规格「串行两门」冲突 → 修订工单 [IK5ODM](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5ODM)（独立于 map，改 storyboard 输出流程 + 确认提示 + 关键帧并入 + faithful 标注）。
+`agents/storyboard.md` 现状一次出齐脚本+分镜+关键帧、单确认门（「请先确认脚本和分镜方向」），与本规格「串行两门」冲突 → 修订工单 [IK5ODM](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5ODM)（独立于 map，改 storyboard 输出流程 + 确认提示 + 关键帧并入 + faithful 标注）。
 
-## 票4 ✅ 思考摘要(visible_reasoning) 呈现（[IK5LTA](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LTA)）
+## 票4 ✅ 思考摘要(visible_reasoning) 呈现（[IK5LTA](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LTA)）
 
 ### 核心决策：每回合顶部细字折叠
 
@@ -221,7 +221,7 @@
 
 **无修订**。`agents/*.md` 的 visible_reasoning 节 + `references/output-boundary.md` 只定摘要**内容与约束**（1-3 短句、不暴露内部 JSON/路径/推理链/组件名），呈现（顶部折叠/视觉层级）归本规格。
 
-## 票5 ✅ Brief 摘要卡 + 提问交互（[IK5LUB](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LUB)，blocked by 1, 2）
+## 票5 ✅ Brief 摘要卡 + 提问交互（[IK5LUB](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LUB)，blocked by 1, 2）
 
 ### Brief 摘要卡字段集（7 字段）
 
@@ -317,9 +317,9 @@
 
 ### 编排源调和
 
-**无修订**。`agents/brief.md` 字段集 / 输出格式与本规格一致（7 字段对齐其输出格式 + 最低 Brief 并集）；`rules/progressive-disclosure.md` 推断确认格式 = Brief 卡本身（整理+推断融合）。`brief.md` 缺信息时「最多问 3 个问题」硬上限已在 [IK5MNJ](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5MNJ) 删除，本规格收集期追问不限问数、给方向举例 + 快捷出口。
+**无修订**。`agents/brief.md` 字段集 / 输出格式与本规格一致（7 字段对齐其输出格式 + 最低 Brief 并集）；`rules/progressive-disclosure.md` 推断确认格式 = Brief 卡本身（整理+推断融合）。`brief.md` 缺信息时「最多问 3 个问题」硬上限已在 [IK5MNJ](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5MNJ) 删除，本规格收集期追问不限问数、给方向举例 + 快捷出口。
 
-## 票6 ✅ 用户选定 Skill 后的分歧厘清交互 · Skill v4（[IK5LTC](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LTC)）
+## 票6 ✅ 用户选定 Skill 后的分歧厘清交互 · Skill v4（[IK5LTC](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LTC)）
 
 ### Skill v4 总则
 
@@ -396,7 +396,7 @@
 
 → 编排源修订独立于本 map，**待开工单**（skill-selector.md / SKILL.md / progressive-disclosure.md，对应 IK5LTC 涌现），map 收口后或就近单独开。
 
-## 票7 ✅ 分镜表卡规格 · 长视频多张卡分组（[IK5LUC](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LUC)，blocked by 1, 3）
+## 票7 ✅ 分镜表卡规格 · 长视频多张卡分组（[IK5LUC](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LUC)，blocked by 1, 3）
 
 ### 分镜表卡字段集（5 列）
 
@@ -490,7 +490,7 @@
 
 → 编排源修订归 IK5ODM（票3 涌现，已建工单），本票不另开。
 
-## 票8 ✅ 提示词交付包卡规格 · 终点产物（[IK5LUE](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LUE)，blocked by 1）
+## 票8 ✅ 提示词交付包卡规格 · 终点产物（[IK5LUE](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LUE)，blocked by 1）
 
 ### 核心决策：终点归档卡（无推进确认按钮）
 
@@ -599,13 +599,13 @@
 
 ### 编排源调和
 
-- `references/generation-action-guide.md` 交付包现状 4 段（分镜表 6 列含「提示词（见下）」+ 每镜提示词 + 生图提示词 + 使用指引）→ 改：① 分镜表 6 列→票7 5 列、去「提示词（见下）」冗余列、沿用多卡分组；② 新增顶部默认参数行 + 素材索引区；③ 每镜提示词改「独立完整块」（镜号+时长+工具+引用+完整正文）；④ 生图提示词移出已在 [IK5MAR](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5MAR) → **本票涌现修订与 IK5MAR 同文件不同段，建议扩 IK5MAR 范围或就近合并开工单**。
+- `references/generation-action-guide.md` 交付包现状 4 段（分镜表 6 列含「提示词（见下）」+ 每镜提示词 + 生图提示词 + 使用指引）→ 改：① 分镜表 6 列→票7 5 列、去「提示词（见下）」冗余列、沿用多卡分组；② 新增顶部默认参数行 + 素材索引区；③ 每镜提示词改「独立完整块」（镜号+时长+工具+引用+完整正文）；④ 生图提示词移出已在 [IK5MAR](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5MAR) → **本票涌现修订与 IK5MAR 同文件不同段，建议扩 IK5MAR 范围或就近合并开工单**。
 - `references/seedance-prompt-optimizer.md` 路径B 现状三段论（总体设定+主体定义 / 镜头分镜 / 风格+约束包分离）→ 改「按镜分配：每镜正文自带主体绑定 + 适用约束包，支持每镜独立完整可复制」（路径A 不变）→ **涌现修订工单（待开，本票涌现）**。
 - 一键复制交互细节归票17（blocked by 本票，本票落完解锁）。
 
 → 编排源修订独立于本 map，map 收口后或就近单独开。
 
-## 票9 ✅ 审核摘要呈现 · 流式过程消息（非卡）（[IK5LUN](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LUN)，blocked by 1）
+## 票9 ✅ 审核摘要呈现 · 流式过程消息（非卡）（[IK5LUN](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LUN)，blocked by 1）
 
 ### 核心决策：审核走流式，不出独立审核卡（推翻票1 产物表该行）
 
@@ -654,7 +654,7 @@
 - 内容安全审核归平台铁闸（AGENTS.md），不在 Agent 呈现规格内。
 - **无涌现编排源修订**（全从 runtime-bundle 既有规则 + 票1/8/10/13 既有范式推导）。
 
-## 票10 ✅ 直生轻量交付呈现 · 单次生成结果卡（[IK5LV0](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LV0)，blocked by 8）
+## 票10 ✅ 直生轻量交付呈现 · 单次生成结果卡（[IK5LV0](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LV0)，blocked by 8）
 
 ### 核心决策：单次生成结果卡（区别票8 多镜交付包）
 
@@ -741,7 +741,7 @@
 - **提议确认**：直生轻量，描述够就直接生成（流式告知 + 画布占位），不卡；只有高成本视频 + 意图不明时套票2 通用确认门（不专门定直生特化规则）。
 - **无涌现编排源修订**：直生呈现全从票1/2/8/15/17 既有范式 + runtime-bundle 既有规则推导。
 
-## 票11 ✅ 拆解报告 / 结构配方卡 呈现（[IK5LV3](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LV3)，blocked by 1）
+## 票11 ✅ 拆解报告 / 结构配方卡 呈现（[IK5LV3](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LV3)，blocked by 1）
 
 ### 核心决策：一张合并卡（拆解报告 = 配方人读呈现）
 
@@ -842,7 +842,7 @@ _源：用户上传保温杯爆款片段 · 拆解方式：direct_multimodal_
 
 → 编排源修订待开工单（票11 涌现），map 收口后或就近单独开。
 
-## 票12 ✅ 视频理解过程呈现 · 流式过程消息（非卡）（[IK5LV6](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LV6)，blocked by 4）
+## 票12 ✅ 视频理解过程呈现 · 流式过程消息（非卡）（[IK5LV6](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LV6)，blocked by 4）
 
 ### 核心决策：视频理解走流式，不出独立理解卡（套票9 范式）
 
@@ -938,7 +938,7 @@ _源：用户上传保温杯爆款片段 · 拆解方式：direct_multimodal_
 
 
 
-## 票13 ✅ 复刻决策门交互（[IK5LV9](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LV9)，blocked by 2）
+## 票13 ✅ 复刻决策门交互（[IK5LV9](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LV9)，blocked by 2）
 
 ### 核心决策：独立「复刻决策卡」· 只选复刻度 · agent 不推荐不判商用
 
@@ -1031,7 +1031,7 @@ _源：用户上传保温杯爆款片段 · 拆解方式：direct_multimodal_
 
 → 编排源修订待开工单（票13 涌现），map 收口后或就近单独开。
 
-## 票14 ✅ 复刻素材绑定呈现（[IK5LVA](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LVA)，blocked by 13）
+## 票14 ✅ 复刻素材绑定呈现（[IK5LVA](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LVA)，blocked by 13）
 
 ### 核心决策：融进 replicate Brief 卡 + 流式摘要 + 分镜表，不独立绑定卡
 
@@ -1133,7 +1133,7 @@ _源：用户上传保温杯爆款片段 · 拆解方式：direct_multimodal_
 - `workflows/video-decode-replicate.md` 复刻阶段步骤1 brief(replicate) 与本规格一致，**无修订**（票13 涌现的复刻决策门修订另计）。
 - **无涌现修订工单**（票14 全部从既有编排源 + 已填票推导）。
 
-## 票15 ✅ 多模态输入展示 + @图片N 引用（[IK5LVB](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LVB)，blocked by 1）
+## 票15 ✅ 多模态输入展示 + @图片N 引用（[IK5LVB](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LVB)，blocked by 1）
 
 ### 核心决策：画布素材展示（现状）+ 平台 @素材名引用 + @图片N 本地版双层映射
 
@@ -1182,7 +1182,7 @@ _源：用户上传保温杯爆款片段 · 拆解方式：direct_multimodal_
 - **无修订**。`agents/image-understanding.md`（asset_understanding + 多图消歧不猜）与本规格一致；`references/seedance-prompt-optimizer.md`（@图片N/@视频N 语法）是本地版提示词语法，平台版 agent 据此翻译 assetId→@图片N 给 seedance，呈现归本规格。
 - 画布素材展示 / @mention pill（assetId 关联）/ Dock 参考素材均为代码现状（CanvasSurface / AgentChatPanel / BottomDock），PM 仅确认呈现规格，不重复定实现。
 
-## 票16 ✅ 阶段回退 / 局部改镜 / Stop 交互（[IK5LVJ](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LVJ)，blocked by 1）
+## 票16 ✅ 阶段回退 / 局部改镜 / Stop 交互（[IK5LVJ](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LVJ)，blocked by 1）
 
 ### 核心决策：三件事 = 「用户改变主意」的统一纠正范式
 
@@ -1294,7 +1294,7 @@ _源：用户上传保温杯爆款片段 · 拆解方式：direct_multimodal_
 
 → **无涌现编排源修订工单**（全从 runtime-bundle 既有规则 + 票2/3/5/7/8/9/10/11/13/15 既有范式推导）。
 
-## 票17 ✅ 一键复制提示词 交互（[IK5LVK](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LVK)，blocked by 8）
+## 票17 ✅ 一键复制提示词 交互（[IK5LVK](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LVK)，blocked by 8）
 
 ### 核心决策：单镜粒度复制 · 双层素材引用各自形态 · 不做整包
 
@@ -1351,8 +1351,8 @@ _源：用户上传保温杯爆款片段 · 拆解方式：direct_multimodal_
 
 **无修订**。
 
-- `references/generation-action-guide.md`「每镜提示词独立成段、模型语法版可直接复制」与本规格一致（本地版复制 `@图片N` 语法版）；交付包结构修订已在 [IK5MAR](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5MAR) 扩并范围（票8 涌现）。
-- `references/seedance-prompt-optimizer.md` 路径B 每镜独立完整（票8 涌现 [IK5QDN](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5QDN)）已支持单镜独立复制，本票定交互层（按钮位置/反馈/双层复制内容），不改编排源。
+- `references/generation-action-guide.md`「每镜提示词独立成段、模型语法版可直接复制」与本规格一致（本地版复制 `@图片N` 语法版）；交付包结构修订已在 [IK5MAR](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5MAR) 扩并范围（票8 涌现）。
+- `references/seedance-prompt-optimizer.md` 路径B 每镜独立完整（票8 涌现 [IK5QDN](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5QDN)）已支持单镜独立复制，本票定交互层（按钮位置/反馈/双层复制内容），不改编排源。
 - 平台版复制用素材名占位、`@图片N` 不出平台版，是呈现层规格（票15 双层映射）；编排源（seedance `@图片N` 语法）是本地版/agent 内部翻译层，不改。
 
 → 无涌现修订工单（票17 全从已定交互范式 + 票8/15 推导）。
@@ -1361,7 +1361,7 @@ _源：用户上传保温杯爆款片段 · 拆解方式：direct_multimodal_
 
 ## 关联工单
 
-- [IK5MAR](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5MAR) — 编排源修订：生图提示词从交付包独立（generation-action-guide.md，票1 涌现）
-- [IK5MNJ](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5MNJ) — 编排源修订：progressive-disclosure 删「每轮最多 3 问」硬上限（票2 涌现）
-- [IK5ODM](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5ODM) — 编排源修订：storyboard 脚本/分镜拆串行两确认门（storyboard.md，票3 涌现）
-- [IK5LR4](https://e.gitee.com/hangzhou_xuanfu_1/projects/883843/requirements/list?issue=IK5LR4) — Parent map
+- [IK5MAR](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5MAR) — 编排源修订：生图提示词从交付包独立（generation-action-guide.md，票1 涌现）
+- [IK5MNJ](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5MNJ) — 编排源修订：progressive-disclosure 删「每轮最多 3 问」硬上限（票2 涌现）
+- [IK5ODM](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5ODM) — 编排源修订：storyboard 脚本/分镜拆串行两确认门（storyboard.md，票3 涌现）
+- [IK5LR4](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/list?issue=IK5LR4) — Parent map

@@ -5,7 +5,7 @@ import {
   handleUpdateSkillAuto,
 } from "@/lib/skills/handle-skill-writes";
 
-// DELETE /api/agent/skills/mine/{id}（移除） / PATCH（切 auto）
+// DELETE /api/agent/skills/mine/{id}（移除） / PATCH（切 auto）；{id} 即 creative_skill_id（稳定身份）
 export async function DELETE(
   request: Request,
   ctx: { params: Promise<{ id: string }> },

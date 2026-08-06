@@ -14,10 +14,12 @@ import {
 import { BookOpenText, Box, ChevronDown } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import SkillPanel, { type UseSkillSelection } from "@/components/SkillPanel";
+import DirectSkillTag from "@/components/DirectSkillTag";
 import { squirclePath } from "../utils";
 import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
 import { ComposerShell, ModelSettingsMenu } from "./Composer";
 import { SkillRecommendationSection } from "./SkillRecommendationSection";
+import { AgentRunFailureNotice } from "./AgentRunFailureNotice";
 import type { CreativeSkillRecommendation } from "@/components/api/skills";
 import {
   UserMessageBubble,
@@ -25,22 +27,96 @@ import {
   ThinkingBlock,
   AgentCard,
 } from "./ChatBubbles";
-import type {
-  ChatMessage,
-  PendingMention,
-  PendingMentionBatch,
-} from "../types";
+import type { ChatMessage, PendingMentionBatch } from "../types";
 import type { WireInteger } from "@/lib/wire-integer";
+import type {
+  ConversationMentionInput,
+  MentionFailure,
+} from "@blue-whale/core";
 import type { CardStatus } from "@/types/domain";
 import { buildMockReplyForMode } from "../messages";
 import { createMessageIdGenerator } from "../idGen";
 import type { MessageIdGenerator } from "../idGen";
 import { useAuth } from "@/components/auth/AuthContext";
 import type { CardMessage } from "../nodeFromCard";
-import { extractEditor, insertMention } from "./dock/mention";
+import {
+  extractEditor,
+  insertMention,
+  markMentionFailures,
+  removeMention,
+} from "./dock/mention";
+import { isApiError } from "@/lib/api/errors";
+import { UPLOAD_ACCEPT, selectUploadFiles } from "@/lib/uploadRules";
+import { toast } from "@/components/Toast";
+import { wireInteger } from "@/lib/wire-integer";
+import type { MediaKind } from "@/lib/mediaSize";
+import {
+  clearComposerDraft,
+  loadComposerDraft,
+  saveComposerDraft,
+} from "@/lib/composer-draft";
 
-/** @ 素材 pill 数量上限，对齐后端 referenced_asset_ids @Size(max=10)。 */
+/** 显式引用 pill 数量上限，对齐 Core mentions 最大长度 10。 */
 const MENTION_LIMIT = 10;
+
+const MENTION_FAILURE_REASONS = new Set([
+  "deleted",
+  "stale",
+  "permission_lost",
+  "wrong_project",
+]);
+
+function mentionFailuresOf(error: unknown): MentionFailure[] {
+  if (!isApiError(error) || error.code !== "mention.unavailable") return [];
+  const detail = error.detail;
+  if (!detail || typeof detail !== "object") return [];
+  const mentions = (detail as Record<string, unknown>).mentions;
+  if (!Array.isArray(mentions)) return [];
+  return mentions.filter((mention): mention is MentionFailure => {
+    if (!mention || typeof mention !== "object") return false;
+    const value = mention as Record<string, unknown>;
+    return (
+      typeof value.index === "number" &&
+      Number.isSafeInteger(value.index) &&
+      value.index >= 0 &&
+      (value.type === "asset" || value.type === "scene_card") &&
+      typeof value.reason === "string" &&
+      MENTION_FAILURE_REASONS.has(value.reason)
+    );
+  });
+}
+
+/** 欢迎态预设：点击只填入输入框，不发送、不创建产品事实（IK67GD T02）。 */
+const WELCOME_PRESETS = [
+  {
+    label: "生成一张插画",
+    text: "帮我生成一张插画，主题是夏日海边的小镇，色调温暖明亮。",
+  },
+  {
+    label: "构思一个短视频",
+    text: "帮我构思一个 15 秒的短视频，用于展示一款环保水杯。",
+  },
+  {
+    label: "头脑风暴创意方向",
+    text: "我想做一个品牌视觉方案，先帮我头脑风暴几个创意方向。",
+  },
+];
+
+/** 「总结当前对话」固定提示词（IK60X1，契约 §15.1）：预填进输入框供用户审阅编辑，
+ *  必须手动发送；发送时随消息体携带 skill_summarize: true 显式意图字段。 */
+const SKILL_SUMMARIZE_PROMPT =
+  "请总结当前对话中的创作方法和要点，生成一份可复用的技能，并保存为我的个人技能。";
+
+/** 输入区上传条目（IK67GX T03）：每文件一条；成功插 pill，失败可单独重试/移除。 */
+type ComposerUploadEntry = {
+  id: string;
+  name: string;
+  file: File;
+  status: "uploading" | "success" | "error";
+  assetId?: string;
+  url?: string;
+  kind?: MediaKind;
+};
 
 export function AgentChatPanel({
   messages,
@@ -51,11 +127,17 @@ export function AgentChatPanel({
   onCardGenerated,
   onAppendMessages,
   onSubmitMessage,
+  onUploadFile,
   onSetCardStatus,
   onRetryGenerationJob,
   prompt,
-  forcedSkillName,
+  projectId,
+  activeSkillName,
+  agentRunStatus,
+  reasoningSummary,
   answerableActive,
+  provisionalContent,
+  onRetryAgentRun,
   skillRecommendations,
   skillRecommendationsLoading,
 }: {
@@ -71,19 +153,37 @@ export function AgentChatPanel({
   /** 后端可用时提交权威 Conversation 命令；缺省时保留既有离线 mock。 */
   onSubmitMessage?: (
     text: string,
-    referencedAssetIds?: WireInteger[],
+    mentions?: ConversationMentionInput[],
     forcedCreativeSkillId?: string,
+    skillSummarize?: boolean,
   ) => Promise<void>;
+  /**
+   * 后端可用时执行输入区文件上传（持久化 Asset + 创建 NodeItem + Canvas 首次放置）。
+   * 缺省（离线）时上传按钮不启用。IK67GX T03。
+   */
+  onUploadFile?: (
+    file: File,
+  ) => Promise<{ assetId: string; url: string; kind: MediaKind }>;
   /** 设置当前项目内某 card 的状态（重试链推进） */
   onSetCardStatus?: (cardId: number | string, status: CardStatus) => void;
   /** 权威失败 Card 的真实重试命令；新 Job 由 Snapshot/SSE 恢复。 */
   onRetryGenerationJob?: (generationJobId: WireInteger) => Promise<void>;
   /** 首页续上 / 模板卡点击带入的 prompt，填入 composer（可编辑后发送） */
   prompt?: string;
-  /** 当前 Run 已激活 Creative Skill 的展示名（Snapshot/SSE 权威，null 表示无激活） */
-  forcedSkillName?: string | null;
+  /** 当前 Project 身份；传入后未发送草稿按 Project 持久化到本浏览器（IK67GD T02） */
+  projectId?: string;
+  /** 当前 Run 已激活 Creative Skill 的展示名（forced/auto 统一，Snapshot/SSE 权威） */
+  activeSkillName?: string | null;
+  /** 当前 Run 的公开状态（Snapshot/SSE 权威） */
+  agentRunStatus?: string | null;
+  /** 安全的用户可见运行摘要；不包含内部思维链。 */
+  reasoningSummary?: string | null;
   /** 是否存在可回答创作澄清（true 时 forced 与 reply 互斥，pending 保留不清） */
   answerableActive?: boolean;
+  /** 临时助手文本（IK67GZ T07）：非正式消息，RunCommit 后消失 */
+  provisionalContent?: string | null;
+  /** 手动重试失败 Run（IK67GZ，契约 §8.3）；缺省（离线）不渲染重试按钮 */
+  onRetryAgentRun?: () => Promise<void>;
   /** 当前 Run 的 Creative Skill 推荐列表（IK3NPI）；未传则不渲染推荐区 */
   skillRecommendations?: CreativeSkillRecommendation[];
   /** 推荐列表拉取中（仅配合 skillRecommendations 展示加载态） */
@@ -94,11 +194,13 @@ export function AgentChatPanel({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [panelSize, setPanelSize] = useState({ w: 468, h: 600 });
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
-  // Use 选择的 pending forced skill：点 Use 立刻乐观展示，SSE 确认后由 forcedSkillName 接管
+  // Use 选择的 pending forced skill：点 Use 立刻乐观展示，SSE 确认后由 activeSkillName 接管
   const [pendingForcedSkill, setPendingForcedSkill] = useState<{
     id: string;
     name: string;
   } | null>(null);
+  // 总结当前对话的一次性意图标记（IK60X1）：预填时置位，发送成功后清除，失败保留供重试
+  const skillSummarizePendingRef = useRef(false);
   const [retryingCards, setRetryingCards] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -147,13 +249,28 @@ export function AgentChatPanel({
   const bodyRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
 
-  // prompt 带入 composer（首页续上 / 模板卡点击），可编辑后发送
+  // 挂载/展开时恢复本项目未发送草稿（IK67GD T02）；草稿优先于外部 prompt 带入。
+  // 依赖 isOpen：收起时组件返回 null、composer DOM 不存在，展开时才真正填充。
+  const draftRestoredRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!isOpen || !projectId || !composerRef.current) return;
+    const draft = loadComposerDraft(projectId);
+    if (draft && draft.trim().length > 0) {
+      composerRef.current.innerText = draft;
+      // 恢复草稿必须在首帧绘制前置位 composerEmpty，否则发送按钮状态错误
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setComposerEmpty(false);
+      draftRestoredRef.current = true;
+    }
+  }, [projectId, isOpen]);
+
+  // prompt 带入 composer（首页续上 / 模板卡点击），可编辑后发送；同理由 isOpen 触发
   useEffect(() => {
-    if (prompt && composerRef.current) {
+    if (prompt && isOpen && composerRef.current && !draftRestoredRef.current) {
       composerRef.current.innerText = prompt;
       setComposerEmpty(false);
     }
-  }, [prompt]);
+  }, [prompt, isOpen]);
 
   const { requireAuth } = useAuth();
   const modelSettingsTriggerRef = useRef<HTMLButtonElement>(null);
@@ -165,6 +282,8 @@ export function AgentChatPanel({
     nextMessageIdRef.current = createMessageIdGenerator();
   const nextMessageId = nextMessageIdRef.current;
 
+  // 依赖 isOpen：面板关闭时组件返回 null、panelRef 为 null，
+  // 仅挂载时运行会永远停在 panelSize 初始值，背景壳（SmoothCorners）高度失真。
   useEffect(() => {
     const el = panelRef.current;
     if (!el) return;
@@ -175,7 +294,7 @@ export function AgentChatPanel({
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [isOpen]);
 
   useLayoutEffect(() => {
     const el = panelRef.current;
@@ -184,7 +303,7 @@ export function AgentChatPanel({
     if (rect.width > 0 && rect.height > 0) {
       setPanelSize({ w: Math.round(rect.width), h: Math.round(rect.height) });
     }
-  }, []);
+  }, [isOpen]);
 
   useEffect(() => {
     const el = bodyRef.current;
@@ -224,46 +343,196 @@ export function AgentChatPanel({
     };
   }, []);
 
-  const handleComposerInput = () => {
+  const handleComposerInput = useCallback(() => {
     const text = composerRef.current?.innerText ?? "";
     setComposerEmpty(text.trim().length === 0);
+    if (projectId) saveComposerDraft(projectId, text);
+  }, [projectId]);
+
+  // 输入区上传（IK67GX T03）：条目状态流 uploading → success/error；
+  // 成功即插可移除 pill（Asset 已持久化），失败条目可单独重试/移除，不损文字与其他上传。
+  const [composerUploads, setComposerUploads] = useState<ComposerUploadEntry[]>(
+    [],
+  );
+  const composerFileInputRef = useRef<HTMLInputElement>(null);
+  const composerUploadSeqRef = useRef(0);
+
+  const patchComposerUpload = useCallback(
+    (entryId: string, patch: Partial<ComposerUploadEntry>) => {
+      setComposerUploads((prev) =>
+        prev.map((u) => (u.id === entryId ? { ...u, ...patch } : u)),
+      );
+    },
+    [],
+  );
+
+  const insertUploadMention = useCallback(
+    (entry: {
+      assetId: string;
+      url: string;
+      kind: MediaKind;
+      name: string;
+    }) => {
+      const editor = composerRef.current;
+      if (!editor) return;
+      const existing = editor.querySelectorAll("[data-mention-id]").length;
+      const dup = editor.querySelector(
+        `[data-mention-asset-id="${entry.assetId}"]`,
+      );
+      if (existing >= MENTION_LIMIT) {
+        console.warn(
+          "[canvas] mention pill 超过上限，已忽略",
+          MENTION_LIMIT,
+          entry.name,
+        );
+        return;
+      }
+      if (dup) {
+        console.warn("[canvas] mention pill 已存在，忽略重复插入", entry.name);
+        return;
+      }
+      insertMention(editor, {
+        id: entry.assetId,
+        type: entry.kind,
+        name: entry.name,
+        src: entry.url,
+        assetId: wireInteger(entry.assetId),
+      });
+      handleComposerInput();
+    },
+    [handleComposerInput],
+  );
+
+  const runComposerUpload = useCallback(
+    async (entryId: string, file: File) => {
+      if (!onUploadFile) return;
+      patchComposerUpload(entryId, { status: "uploading" });
+      try {
+        const result = await onUploadFile(file);
+        patchComposerUpload(entryId, {
+          status: "success",
+          assetId: result.assetId,
+          url: result.url,
+          kind: result.kind,
+        });
+        insertUploadMention({
+          assetId: result.assetId,
+          url: result.url,
+          kind: result.kind,
+          name: file.name,
+        });
+      } catch (error) {
+        console.error("[canvas] composer upload failed:", error);
+        patchComposerUpload(entryId, { status: "error" });
+      }
+    },
+    [onUploadFile, patchComposerUpload, insertUploadMention],
+  );
+
+  const handleComposerFilePick = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      e.target.value = "";
+      if (!files.length || !onUploadFile) return;
+      selectUploadFiles(files, {
+        upload: (file) => {
+          composerUploadSeqRef.current += 1;
+          const entryId = `u_${composerUploadSeqRef.current}`;
+          setComposerUploads((prev) => [
+            ...prev,
+            { id: entryId, name: file.name, file, status: "uploading" },
+          ]);
+          void runComposerUpload(entryId, file);
+        },
+        reject: (reason) => toast.error(reason),
+      });
+    },
+    [onUploadFile, runComposerUpload],
+  );
+
+  const handleComposerUploadRetry = useCallback(
+    (entryId: string) => {
+      const entry = composerUploads.find((u) => u.id === entryId);
+      if (!entry || entry.status !== "error") return;
+      void runComposerUpload(entryId, entry.file);
+    },
+    [composerUploads, runComposerUpload],
+  );
+
+  /** 移除上传条目；成功条目同时摘掉输入区内对应 pill（Asset 持久化事实不受影响）。 */
+  const handleComposerUploadRemove = useCallback(
+    (entryId: string) => {
+      const entry = composerUploads.find((u) => u.id === entryId);
+      if (!entry || entry.status === "uploading") return;
+      if (entry.status === "success" && entry.assetId && composerRef.current) {
+        removeMention(composerRef.current, entry.assetId);
+        handleComposerInput();
+      }
+      setComposerUploads((prev) => prev.filter((u) => u.id !== entryId));
+    },
+    [composerUploads, handleComposerInput],
+  );
+
+  /** 存在未完成上传时禁用发送：正式消息永远不引用尚未接纳的 Asset（IK67GX T03）。 */
+  const anyComposerUploading = composerUploads.some(
+    (u) => u.status === "uploading",
+  );
+
+  // 欢迎预设：只填入输入框供用户审阅编辑，不发送、不创建产品事实（IK67GD T02）
+  const handleWelcomePreset = (text: string) => {
+    if (!composerRef.current) return;
+    composerRef.current.innerText = text;
+    handleComposerInput();
+    composerRef.current.focus();
   };
 
-  const insertTextIntoComposer = useCallback((text: string) => {
-    const editor = composerRef.current;
-    if (!editor) return;
+  const insertTextIntoComposer = useCallback(
+    (text: string) => {
+      const editor = composerRef.current;
+      if (!editor) return;
 
-    editor.focus();
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      if (editor.contains(range.commonAncestorContainer)) {
-        range.deleteContents();
-        const textNode = document.createTextNode(text);
-        range.insertNode(textNode);
-        range.setStartAfter(textNode);
-        range.setEndAfter(textNode);
-        selection.removeAllRanges();
-        selection.addRange(range);
+      editor.focus();
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        if (editor.contains(range.commonAncestorContainer)) {
+          range.deleteContents();
+          const textNode = document.createTextNode(text);
+          range.insertNode(textNode);
+          range.setStartAfter(textNode);
+          range.setEndAfter(textNode);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        } else {
+          editor.appendChild(document.createTextNode(text));
+        }
       } else {
         editor.appendChild(document.createTextNode(text));
       }
-    } else {
-      editor.appendChild(document.createTextNode(text));
-    }
 
-    handleComposerInput();
-    setSkillPanelOpen(false);
-  }, []);
+      handleComposerInput();
+      setSkillPanelOpen(false);
+    },
+    [handleComposerInput],
+  );
 
   // Skill 面板 Use：有稳定 creative_skill_id 则记 pending（随下一条允许创建目标 Run 的消息下发），
-  // 不往输入框插 @ 文本；无 id（库外项）仅关面板。
+  // 输入框上方出现可移除技能标签（DirectSkillTag，对齐首页 IK60WY 交互）；不往输入框插 @ 文本；
+  // 无 id（库外项）仅关面板。
   const handleUseSkill = useCallback((skill: UseSkillSelection) => {
     if (skill.creative_skill_id) {
       setPendingForcedSkill({ id: skill.creative_skill_id, name: skill.name });
     }
     setSkillPanelOpen(false);
   }, []);
+
+  // 「总结当前对话」（IK60X1，契约 §15.1）：关面板 → 预填固定提示词（可编辑、必须手动发送）
+  // → 置一次性意图标记，发送时随消息体携带 skill_summarize: true，绝不自动提交。
+  const handleSummarizeConversation = () => {
+    skillSummarizePendingRef.current = true;
+    handleWelcomePreset(SKILL_SUMMARIZE_PROMPT);
+    setSkillPanelOpen(false);
+  };
 
   // 外部（画布节点操作菜单「添加到对话」）请求把素材插入输入框：
   // 带 assetId 走 pill 路径（发送时写入 referenced_asset_ids），无 assetId 回退纯文本。
@@ -306,10 +575,12 @@ export function AgentChatPanel({
   }, [pendingMention?.batchId]);
 
   const handleSend = () => {
-    const { prompt, assetIds } = composerRef.current
+    const { prompt, mentions } = composerRef.current
       ? extractEditor(composerRef.current)
-      : { prompt: "", assetIds: [] as WireInteger[] };
-    if (!prompt && assetIds.length === 0) return;
+      : { prompt: "", mentions: [] as ConversationMentionInput[] };
+    if (!prompt && mentions.length === 0) return;
+    // 未完成上传门禁：发送按钮禁用 + Enter 路径同样拦截（IK67GX T03）
+    if (anyComposerUploading) return;
 
     requireAuth({ kind: "canvas-send", text: prompt }, () => {
       // 重新发送前清掉上一轮尚未触发的逐条追加定时器
@@ -321,17 +592,28 @@ export function AgentChatPanel({
         setSubmitting(true);
         // forced 仅在无活动澄清时附上（reply 互斥）；成功才清 pending，失败保留供重试
         const attachForced = !!pendingForcedSkill && !answerableActive;
+        // 总结意图一次性消费（IK60X1）：同 forced 语义，成功才清除
+        const attachSummarize = skillSummarizePendingRef.current;
         void onSubmitMessage(
           prompt,
-          assetIds,
+          mentions,
           attachForced ? pendingForcedSkill!.id : undefined,
+          attachSummarize ? true : undefined,
         )
           .then(() => {
             if (composerRef.current) composerRef.current.innerHTML = "";
             setComposerEmpty(true);
+            setComposerUploads([]);
+            if (projectId) clearComposerDraft(projectId);
             if (attachForced) setPendingForcedSkill(null);
+            if (attachSummarize) skillSummarizePendingRef.current = false;
           })
           .catch((error) => {
+            const failures = mentionFailuresOf(error);
+            if (failures.length > 0 && composerRef.current) {
+              markMentionFailures(composerRef.current, failures);
+              handleComposerInput();
+            }
             console.error("[canvas] conversation message failed:", error);
           })
           .finally(() => {
@@ -348,6 +630,8 @@ export function AgentChatPanel({
       onAppendMessages?.([userMsg]);
       if (composerRef.current) composerRef.current.innerHTML = "";
       setComposerEmpty(true);
+      setComposerUploads([]);
+      if (projectId) clearComposerDraft(projectId);
 
       // 按当前创作模式生成 mock 回复，错开逐条追加模拟逐步生成
       const reply = buildMockReplyForMode(
@@ -431,7 +715,10 @@ export function AgentChatPanel({
   if (!isOpen) return null;
 
   // 已选技能标签：乐观名（刚点 Use）→ 权威名（Run 已激活）→ 不显示
-  const forcedLabel = pendingForcedSkill?.name ?? forcedSkillName ?? null;
+  const skillLabel = pendingForcedSkill?.name ?? activeSkillName ?? null;
+  const skillStateLabel = pendingForcedSkill ? "已选技能" : "已激活技能";
+  // 失败重试可用性：失败提示落在对话流末尾（契约 §8.3）
+  const canRetryRun = !!onRetryAgentRun && agentRunStatus === "failed";
 
   const panelPath = squirclePath(panelSize.w, panelSize.h, 28.8);
 
@@ -472,7 +759,7 @@ export function AgentChatPanel({
           <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
             <div className="tc-agent-session-credit-badge group relative">
               <span
-                className="tc-agent-session-credit-badge__trigger inline-flex items-center gap-1 rounded-lg border border-white/[0.06] bg-white/[0.06] px-2 py-1 text-xs text-white/75"
+                className="tc-agent-session-credit-badge__trigger inline-flex items-center gap-1 rounded-lg border border-transparent px-2 py-1 text-xs text-white/75 transition-colors group-hover:bg-white/[0.06]"
                 aria-label="当前 Agent 对话累计消耗 0.12 积分"
               >
                 <CreditIcon size={12} />
@@ -493,14 +780,14 @@ export function AgentChatPanel({
               </div>
             </div>
           </div>
-          {forcedLabel && (
+          {skillLabel && (
             <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
               <span
                 className="tc-agent-forced-skill-badge inline-flex items-center gap-1 rounded-lg border border-white/[0.06] bg-white/[0.06] px-2 py-1 text-xs text-white/75"
-                aria-label={`已选技能：${forcedLabel}`}
+                aria-label={`${skillStateLabel}：${skillLabel}`}
               >
                 <BookOpenText size={12} />
-                <span className="max-w-[120px] truncate">{forcedLabel}</span>
+                <span className="max-w-[120px] truncate">{skillLabel}</span>
                 {pendingForcedSkill && (
                   <button
                     type="button"
@@ -602,6 +889,35 @@ export function AgentChatPanel({
                 onUse={handleUseSkill}
               />
             )}
+            {messages.length === 0 && (
+              <div
+                className="tc-agent-welcome flex flex-col gap-3 px-2 pt-8 pb-4"
+                lang="zh-CN"
+                dir="ltr"
+              >
+                <div className="tc-agent-welcome__title text-base font-medium text-white/90">
+                  让 Agent 帮你创作
+                </div>
+                <div className="tc-agent-welcome__desc text-xs leading-5 text-white/55">
+                  描述你想生成的图片或视频，发送第一条消息即可开始。未发送的草稿会自动保留。
+                </div>
+                <div className="tc-agent-welcome__presets mt-1 flex flex-col gap-2">
+                  {WELCOME_PRESETS.map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => handleWelcomePreset(preset.text)}
+                      className="tc-agent-welcome-preset rounded-lg border border-white/[0.08] bg-white/[0.05] px-3 py-2 text-left text-xs text-white/80 transition-colors hover:bg-white/[0.08]"
+                    >
+                      <span className="mb-0.5 block font-medium text-white/85">
+                        {preset.label}
+                      </span>
+                      <span className="block text-white/45">{preset.text}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {messages.map((msg) => {
               if (msg.type === "user")
                 return <UserMessageBubble key={msg.id} text={msg.text} />;
@@ -618,6 +934,71 @@ export function AgentChatPanel({
                 );
               return <AgentMessageBubble key={msg.id} text={msg.text} />;
             })}
+            {provisionalContent && (
+              <div
+                className="tc-agent-provisional"
+                data-provisional-delivery="true"
+                aria-label="生成中的临时文本"
+                aria-live="polite"
+                style={{ opacity: 0.85 }}
+              >
+                <AgentMessageBubble text={provisionalContent} />
+              </div>
+            )}
+            {/* 运行中实时思考块：流光「思考中」+ 思考内容默认展开；思考内容来自运行摘要（Snapshot/SSE 权威） */}
+            {(agentRunStatus === "queued" || agentRunStatus === "running") &&
+              !provisionalContent && (
+                <div
+                  className="tc-agent-thinking-block tc-agent-thinking-live self-start"
+                  role="status"
+                  aria-label="思考中"
+                >
+                  <div className="tc-agent-thinking-trigger inline-flex items-center gap-1 py-0.5 text-xs">
+                    <span className="tc-agent-thinking-live__label">
+                      思考中
+                    </span>
+                    {reasoningSummary ? (
+                      <ChevronDown
+                        width={13}
+                        height={13}
+                        style={{ color: "var(--tc-text-tertiary)" }}
+                      />
+                    ) : null}
+                  </div>
+                  {reasoningSummary && (
+                    <div className="tc-agent-thinking-content-wrap">
+                      <div
+                        className="tc-agent-thinking-content"
+                        style={{
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                        }}
+                      >
+                        {reasoningSummary}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            {/* Run 结束后思考摘要自动折叠为「思考过程」，保留在对话流末尾 */}
+            {agentRunStatus !== "queued" &&
+              agentRunStatus !== "running" &&
+              reasoningSummary && (
+                <ThinkingBlock
+                  msg={{
+                    id: "agent-run-reasoning",
+                    type: "thinking",
+                    text: "思考过程",
+                    content: reasoningSummary,
+                  }}
+                />
+              )}
+            {/* AgentRun 失败落点：对话流末尾内联提示条（契约 §8.3） */}
+            {canRetryRun && (
+              <AgentRunFailureNotice
+                onRetry={() => void onRetryAgentRun?.().catch(() => undefined)}
+              />
+            )}
           </div>
         </div>
 
@@ -640,6 +1021,14 @@ export function AgentChatPanel({
           <div style={{ position: "relative" }}>
             <ComposerShell>
               <div className="relative p-2">
+                {pendingForcedSkill && (
+                  <div className="px-1 pb-1">
+                    <DirectSkillTag
+                      name={pendingForcedSkill.name}
+                      onRemove={() => setPendingForcedSkill(null)}
+                    />
+                  </div>
+                )}
                 <div
                   ref={composerRef}
                   className="tc-agent-composer-editor min-h-[40px] max-h-[120px] overflow-y-auto px-3 py-2 text-sm text-white outline-none"
@@ -660,6 +1049,95 @@ export function AgentChatPanel({
                     }
                   }}
                 />
+                <input
+                  ref={composerFileInputRef}
+                  type="file"
+                  accept={UPLOAD_ACCEPT}
+                  multiple
+                  className="tc-agent-composer-file-input sr-only"
+                  onChange={handleComposerFilePick}
+                  aria-hidden="true"
+                  tabIndex={-1}
+                />
+                {composerUploads.length > 0 && (
+                  <div
+                    className="tc-agent-composer-uploads mt-2 flex flex-col gap-1"
+                    aria-label="素材上传状态"
+                  >
+                    {composerUploads.map((entry) => (
+                      <div
+                        key={entry.id}
+                        data-composer-upload-entry={entry.id}
+                        data-composer-upload-status={entry.status}
+                        data-composer-upload-asset={entry.assetId ?? undefined}
+                        className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2.5 py-1.5 text-xs"
+                      >
+                        <span
+                          className="min-w-0 flex-1 truncate"
+                          style={{ color: "var(--tc-text-secondary)" }}
+                          title={entry.name}
+                        >
+                          {entry.name}
+                        </span>
+                        {entry.status === "uploading" && (
+                          <span style={{ color: "var(--tc-text-tertiary)" }}>
+                            上传中…
+                          </span>
+                        )}
+                        {entry.status === "success" && (
+                          <>
+                            <span style={{ color: "var(--tc-success)" }}>
+                              已上传
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleComposerUploadRemove(entry.id)
+                              }
+                              data-composer-upload-remove={entry.id}
+                              className="shrink-0 rounded px-1.5 py-0.5 transition-colors hover:bg-white/[0.08]"
+                              style={{ color: "var(--tc-text-tertiary)" }}
+                              aria-label={`移除 ${entry.name}`}
+                            >
+                              移除
+                            </button>
+                          </>
+                        )}
+                        {entry.status === "error" && (
+                          <>
+                            <span style={{ color: "var(--tc-destructive)" }}>
+                              上传失败
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleComposerUploadRetry(entry.id)
+                              }
+                              data-composer-upload-retry={entry.id}
+                              className="shrink-0 rounded px-1.5 py-0.5 transition-colors hover:bg-white/[0.08]"
+                              style={{ color: "var(--tc-accent)" }}
+                              aria-label={`重试上传 ${entry.name}`}
+                            >
+                              重试
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleComposerUploadRemove(entry.id)
+                              }
+                              data-composer-upload-remove={entry.id}
+                              className="shrink-0 rounded px-1.5 py-0.5 transition-colors hover:bg-white/[0.08]"
+                              style={{ color: "var(--tc-text-tertiary)" }}
+                              aria-label={`移除 ${entry.name}`}
+                            >
+                              移除
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div
                   className="tc-agent-composer-actions mt-2 flex items-center justify-between"
                   aria-label="Composer actions"
@@ -668,7 +1146,9 @@ export function AgentChatPanel({
                     <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
                       <button
                         type="button"
-                        className="tc-agent-upload-btn tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/[0.08]"
+                        onClick={() => composerFileInputRef.current?.click()}
+                        disabled={!onUploadFile}
+                        className="tc-agent-upload-btn tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/[0.08] disabled:cursor-default disabled:opacity-40"
                         aria-label="上传素材"
                         data-tooltip="上传图片、视频或音频"
                       >
@@ -677,7 +1157,7 @@ export function AgentChatPanel({
                       <button
                         type="button"
                         onClick={() => setSkillPanelOpen(true)}
-                        className="tc-agent-skill-btn tc-agent-composer-pill-btn inline-flex h-8 items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.05] px-3 text-xs font-medium text-white/85 transition-colors hover:bg-white/[0.08]"
+                        className="tc-agent-skill-btn tc-agent-composer-pill-btn inline-flex h-8 items-center gap-1.5 rounded-lg border border-transparent px-3 text-xs font-medium text-white/85 transition-colors hover:bg-white/[0.08]"
                         aria-label="技能"
                         aria-haspopup="dialog"
                         aria-expanded={skillPanelOpen}
@@ -725,10 +1205,14 @@ export function AgentChatPanel({
                       <button
                         type="button"
                         onClick={handleSend}
-                        disabled={composerEmpty || submitting}
+                        disabled={
+                          composerEmpty || submitting || anyComposerUploading
+                        }
                         className="tc-agent-send-btn tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-black transition-colors hover:bg-white/90 disabled:cursor-default disabled:bg-white/[0.1] disabled:text-white/[0.25]"
                         aria-label="发送"
-                        aria-disabled={composerEmpty || submitting}
+                        aria-disabled={
+                          composerEmpty || submitting || anyComposerUploading
+                        }
                       >
                         <IconSend size={14} />
                       </button>
@@ -745,6 +1229,7 @@ export function AgentChatPanel({
         isOpen={skillPanelOpen}
         onClose={() => setSkillPanelOpen(false)}
         onUseSkill={handleUseSkill}
+        onSummarizeConversation={handleSummarizeConversation}
       />
     </div>
   );

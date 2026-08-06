@@ -61,6 +61,7 @@ function recoveryState(snapshot: ProjectSnapshot): ProjectRecoveryState {
     seenEventIds: new Set(),
     aggregateVersions: new Map(),
     deleted: false,
+    provisionalDeliveries: new Map(),
   };
 }
 
@@ -127,11 +128,18 @@ describe("useCanvasProjects 创作澄清回答绑定", () => {
     );
   });
 
-  it("携带 referencedAssetIds 时透传给 acceptConversationMessage（DOM 序去重由上游负责）", async () => {
+  it("携带有序 mentions 时透传给 acceptConversationMessage（DOM 序去重由上游负责）", async () => {
     const { result } = await renderRecoveredPanel(snapshotWith([]));
+    const mentions = [
+      { type: "asset" as const, asset_id: "9", display_name: "A" },
+      { type: "asset" as const, asset_id: "3", display_name: "B" },
+    ];
 
     await act(async () => {
-      await result.current.submitConversationMessageAction("参考这张", [9, 3]);
+      await result.current.submitConversationMessageAction(
+        "参考这张",
+        mentions,
+      );
     });
 
     expect(vi.mocked(acceptConversationMessage)).toHaveBeenCalledWith(
@@ -140,7 +148,7 @@ describe("useCanvasProjects 创作澄清回答绑定", () => {
       "cmd-id",
       "cmd-id",
       undefined,
-      [9, 3],
+      mentions,
       undefined,
     );
   });

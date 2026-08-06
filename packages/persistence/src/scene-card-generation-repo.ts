@@ -1,0 +1,576 @@
+import type { Prisma, PrismaClient } from "@prisma/client";
+import type {
+  CapabilitySnapshotVersion,
+  FrozenGenerationParameters,
+  ProviderPromptAsset,
+  VideoReferenceMode,
+} from "@blue-whale/contracts";
+import {
+  canonicalizeJsonValue,
+  referenceModeToRequiredFeature,
+  validateVideoReferenceConfiguration,
+} from "@blue-whale/contracts";
+
+import { createJobWithinTx } from "./generation-command-repo.js";
+import { capabilityDigestFromModelCapability } from "./capability-digest.js";
+import { appendProjectEvent } from "./product-event-repo.js";
+import { transactionWithUniqueRetry } from "./conversation-repo.js";
+import {
+  validateDerivedReferences,
+  type CapabilitySnapshot,
+  type DerivedReference,
+} from "./plan-application-repo.js";
+
+const OPERATION = "scene_card.regenerate";
+
+/** SceneCard 再生成 repo 入参（CONTEXT L49-63 / L84-89）：User 在编辑器调整参数后点"生成"。
+ *  idempotencyKey 即 CommandId；requestHash 由 handler 按 method/path/body 计算。
+ *  base 版本用于乐观并发；parameters/reference_* 为本次提交的新参数快照。 */
+export interface RegenerateSceneCardInput {
+  userId: string;
+  projectId: string;
+  sceneCardId: string;
+  idempotencyKey: string;
+  requestHash: string;
+  base_scene_card_version: number;
+  base_preset_version: number;
+  parameters: FrozenGenerationParameters;
+  reference_mode: VideoReferenceMode;
+  reference_assets: ProviderPromptAsset[];
+  capability_snapshot_version: CapabilitySnapshotVersion;
+  /** 密封的供应商 sk token（与 Dock 生成链路一致）；worker 解密后调网关。 */
+  provider_credential?: string;
+}
+
+export type RegenerateSceneCardResult =
+  | {
+      kind: "applied";
+      scene_card_id: string;
+      generation_job_id: string;
+      record_id: string;
+      preset_version: number;
+      cursor: string;
+    }
+  | {
+      kind: "replayed";
+      scene_card_id: string;
+      generation_job_id: string;
+      record_id: string;
+    }
+  | { kind: "idempotency_conflict" }
+  | { kind: "scene_card_not_found" }
+  | {
+      kind: "version_conflict";
+      current_scene_card_version: number;
+      current_preset_version: number;
+    }
+  | { kind: "capability_drift" }
+  | { kind: "capability_limit"; reason: string }
+  | { kind: "validation_failed"; reason: string }
+  | { kind: "forbidden" };
+
+/** SceneCard 生成预设只读视图（IK67HB，T13）：编辑器打开时按需 GET，完整 Preset 参数不进 Snapshot。 */
+export interface SceneCardGenerationPresetView {
+  scene_card: {
+    scene_card_id: string;
+    version: number;
+    title: string;
+    content_markdown: string;
+  };
+  preset: {
+    version: number;
+    parameters: unknown;
+    reference_mode: string;
+    reference_assets: unknown;
+    capability_snapshot_version: unknown;
+  };
+  /** 首个 PlanMessage 的 ProviderPromptProjection 提示词（AC#2 只读展示）；追溯不到为 null。 */
+  projection: { prompt_text: string } | null;
+}
+
+export type SceneCardGenerationPresetViewResult =
+  | ({ kind: "found" } & SceneCardGenerationPresetView)
+  | { kind: "not_found" }
+  | { kind: "forbidden" };
+
+export interface SceneCardGenerationRepo {
+  regenerateSceneCard(
+    input: RegenerateSceneCardInput,
+  ): Promise<RegenerateSceneCardResult>;
+  /** 编辑器只读端点：返回当前 Preset 完整参数 + SceneCard 版本与权威正文。 */
+  getSceneCardGenerationPreset(
+    projectId: string,
+    sceneCardId: string,
+    userId: string,
+  ): Promise<SceneCardGenerationPresetViewResult>;
+}
+
+/** 参数越界校验（AC#1 能力约束）：返回拒绝原因或 null。
+ *  除尺寸、比例、时长、数量外，参考模式必须由当前模型显式声明支持；未知能力按 false
+ *  处理。features 兼容 snake_case / camelCase（DB 可能两种形态）。 */
+function checkCapabilityLimit(
+  parameters: FrozenGenerationParameters,
+  referenceMode: VideoReferenceMode,
+  capability: {
+    supported_sizes: unknown;
+    supported_aspect_ratios: unknown;
+    supported_durations: unknown;
+    features: unknown;
+  },
+): string | null {
+  const ratios = Array.isArray(capability.supported_aspect_ratios)
+    ? capability.supported_aspect_ratios
+    : [];
+  if (!ratios.includes(parameters.aspect_ratio))
+    return `aspect_ratio ${parameters.aspect_ratio} 不在能力支持范围`;
+  const sizes = Array.isArray(capability.supported_sizes)
+    ? (capability.supported_sizes as Array<{
+        id?: string;
+        api_value?: string;
+      }>)
+    : [];
+  if (
+    !sizes.some(
+      (s) => s.id === parameters.size || s.api_value === parameters.size,
+    )
+  )
+    return `size ${parameters.size} 不在能力支持范围`;
+  // DB 存在两种形态：档位数组 [3,5,10]（种子数据即此形态）与 {min,max} 范围对象。
+  const durations = capability.supported_durations;
+  if (Array.isArray(durations)) {
+    if (!durations.includes(parameters.duration))
+      return `duration ${parameters.duration} 不在能力支持档位`;
+  } else {
+    const durRange = durations as { min?: number; max?: number } | null;
+    if (
+      durRange &&
+      typeof durRange.min === "number" &&
+      typeof durRange.max === "number" &&
+      (parameters.duration! < durRange.min ||
+        parameters.duration! > durRange.max)
+    )
+      return `duration ${parameters.duration} 超出能力范围`;
+  }
+  const f = (capability.features ?? {}) as Record<string, unknown>;
+  const quantityMax = Number(f.quantity_max ?? f.quantityMax ?? 1);
+  if (parameters.count > quantityMax)
+    return `count ${parameters.count} 超过 quantity_max ${quantityMax}`;
+  const required = referenceModeToRequiredFeature(referenceMode);
+  if (required) {
+    // features 兼容 snake_case / camelCase（DB 可能两种形态）。
+    const camel = required.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+    if (!(f[required] === true || f[camel] === true)) {
+      const label =
+        required === "first_last_frame"
+          ? "首尾帧"
+          : required === "first_frame"
+            ? "首帧"
+            : "尾帧";
+      return `当前模型不支持${label}参考模式`;
+    }
+  }
+  return null;
+}
+
+/** 把请求带来的 ProviderPromptAsset 折成 validateDerivedReferences 需要的 DerivedReference 形态：
+ *  复用同一套 mention→asset/scene_card 有效性校验（CONTEXT L223 应用前重新验证冻结素材）。 */
+function toDerivedReferences(
+  assets: ProviderPromptAsset[],
+): DerivedReference[] {
+  return assets.map((asset) => ({
+    mention_id: asset.mention_id,
+    mention_seq: 0,
+    type: asset.type,
+    first_seen_offset: 0,
+  }));
+}
+
+/** T14 只允许改已有素材的 role；列表顺序、身份与冻结投影都必须保持不变。 */
+function onlyReferenceRolesChanged(
+  current: unknown,
+  submitted: ProviderPromptAsset[],
+): boolean {
+  if (!Array.isArray(current) || current.length !== submitted.length)
+    return false;
+  return current.every((asset, index) => {
+    if (asset === null || typeof asset !== "object" || Array.isArray(asset))
+      return false;
+    const submittedAsset = submitted[index];
+    if (!submittedAsset) return false;
+    const immutableCurrent = Object.fromEntries(
+      Object.entries(asset).filter(([key]) => key !== "role"),
+    );
+    const immutableSubmitted = Object.fromEntries(
+      Object.entries(submittedAsset).filter(([key]) => key !== "role"),
+    );
+    return (
+      JSON.stringify(canonicalizeJsonValue(immutableCurrent)) ===
+      JSON.stringify(canonicalizeJsonValue(immutableSubmitted))
+    );
+  });
+}
+
+/** 单事务原子再生成（AC#4/#5/#6）：前置检查全部通过才 UPDATE preset(version+1) + 新 record + 新 job。
+ *  任一前置失败零写入；同 CommandId 重放首次结果；版本冲突零写入保留草稿。 */
+async function regenerateSceneCardInTransaction(
+  tx: Prisma.TransactionClient,
+  input: RegenerateSceneCardInput,
+): Promise<RegenerateSceneCardResult> {
+  const projectId = BigInt(input.projectId);
+  const userId = BigInt(input.userId);
+  const sceneCardId = BigInt(input.sceneCardId);
+
+  // 0. 前置授权：校验项目归属当前用户，不泄漏存在性。
+  const project = await tx.project.findFirst({
+    where: { id: projectId, owner_id: userId, is_delete: 0 },
+    select: { id: true },
+  });
+  if (!project) return { kind: "forbidden" } as const;
+
+  // 1. CommandId 幂等：命中则比对 request_hash，相同重放首次结果，不同冲突。
+  const existing = await tx.command_idempotency.findUnique({
+    where: {
+      project_id_operation_idempotency_key: {
+        project_id: projectId,
+        operation: OPERATION,
+        idempotency_key: input.idempotencyKey,
+      },
+    },
+    select: {
+      request_hash: true,
+      resource_id: true,
+      generation_job_id: true,
+    },
+  });
+  if (existing) {
+    if (existing.request_hash !== input.requestHash)
+      return { kind: "idempotency_conflict" };
+    if (existing.resource_id === null || existing.generation_job_id === null)
+      return {
+        kind: "validation_failed",
+        reason: "idempotent record missing resources",
+      };
+    return {
+      kind: "replayed",
+      scene_card_id: existing.resource_id.toString(),
+      generation_job_id: existing.generation_job_id.toString(),
+      // 幂等表不存 record id；"0" 为哨兵值，handler 侧不消费该字段。
+      record_id: "0",
+    };
+  }
+
+  // 2. 读 SceneCard（校验项目归属 + 未删除）；读 Preset（1:1）。
+  const sceneCard = await tx.scene_cards.findFirst({
+    where: { id: sceneCardId, project_id: projectId, is_delete: 0 },
+    select: { id: true, content_markdown: true, version: true },
+  });
+  if (!sceneCard) return { kind: "scene_card_not_found" } as const;
+
+  const preset = await tx.scene_card_generation_presets.findFirst({
+    where: { scene_card_id: sceneCardId, is_delete: 0 },
+    select: { id: true, version: true, reference_assets: true },
+  });
+  if (!preset) return { kind: "scene_card_not_found" } as const;
+
+  // 3. 版本冲突（AC#6 乐观并发）：base 版本与当前不一致零写入。
+  if (
+    sceneCard.version !== input.base_scene_card_version ||
+    preset.version !== input.base_preset_version
+  ) {
+    return {
+      kind: "version_conflict",
+      current_scene_card_version: sceneCard.version,
+      current_preset_version: preset.version,
+    };
+  }
+
+  if (
+    !onlyReferenceRolesChanged(preset.reference_assets, input.reference_assets)
+  )
+    return {
+      kind: "validation_failed",
+      reason: "参考素材列表只能修改角色",
+    };
+
+  const referenceRoleReason = validateVideoReferenceConfiguration(
+    input.reference_mode,
+    input.reference_assets,
+  );
+  if (referenceRoleReason)
+    return { kind: "validation_failed", reason: referenceRoleReason };
+
+  const snapshot =
+    input.capability_snapshot_version as unknown as CapabilitySnapshot;
+  if (
+    input.parameters.capability_type !== snapshot.capability_type ||
+    input.parameters.model_id !== snapshot.model_id ||
+    input.parameters.provider_id !== snapshot.provider_id
+  )
+    return { kind: "capability_drift" } as const;
+
+  // 4. 反查首次 Receipt（CONTEXT L99-101：重试不创建新 Receipt，来源指向首次 PlanMessage 与回执）。
+  const firstReceipt = await tx.plan_application_receipts.findFirst({
+    where: {
+      scene_card_id: sceneCardId,
+      application_kind: "scene_card_create",
+    },
+    orderBy: { id: "asc" },
+    select: { id: true, message_id: true },
+  });
+  if (!firstReceipt)
+    return {
+      kind: "validation_failed",
+      reason: "missing first application receipt for scene_card",
+    };
+
+  // 5. 能力漂移检测（AC#4）：按提交的 model_id/provider_id 查当前行，比对 row_version + digest。
+  const capability = await tx.generation_model_capability.findUnique({
+    where: {
+      provider_id_model_id: {
+        provider_id: snapshot.provider_id,
+        model_id: snapshot.model_id,
+      },
+    },
+    select: {
+      version: true,
+      enabled: true,
+      is_delete: true,
+      supported_sizes: true,
+      supported_aspect_ratios: true,
+      supported_durations: true,
+      supported_formats: true,
+      default_size: true,
+      default_format: true,
+      default_aspect_ratio: true,
+      default_duration: true,
+      features: true,
+    },
+  });
+  if (!capability || !capability.enabled || capability.is_delete)
+    return { kind: "capability_drift" } as const;
+  const recomputedDigest = capabilityDigestFromModelCapability(capability);
+  if (
+    capability.version !== snapshot.row_version ||
+    recomputedDigest !== snapshot.digest
+  )
+    return { kind: "capability_drift" } as const;
+
+  // 5b. 参数越界（AC#1 能力约束）：提交参数与参考模式必须在当前能力支持范围内。
+  const limitReason = checkCapabilityLimit(
+    input.parameters,
+    input.reference_mode,
+    capability,
+  );
+  if (limitReason) return { kind: "capability_limit", reason: limitReason };
+
+  // 6. 引用素材有效性（AC#4，全部在副作用前）。
+  const referenceCheck = await validateDerivedReferences(
+    tx,
+    projectId,
+    toDerivedReferences(input.reference_assets),
+  );
+  if (!referenceCheck.ok)
+    return { kind: "validation_failed", reason: referenceCheck.reason };
+
+  // === 前置检查全部通过，开始原子更新（AC#4）===
+
+  // 7. UPDATE preset（CAS：where version=base，increment；count===0 视为并发冲突）。
+  const updateResult = await tx.scene_card_generation_presets.updateMany({
+    where: {
+      scene_card_id: sceneCardId,
+      version: input.base_preset_version,
+      is_delete: 0,
+    },
+    data: {
+      parameters: input.parameters as unknown as Prisma.InputJsonValue,
+      reference_mode: input.reference_mode,
+      reference_assets:
+        input.reference_assets as unknown as Prisma.InputJsonValue,
+      capability_snapshot_version:
+        input.capability_snapshot_version as unknown as Prisma.InputJsonValue,
+      version: { increment: 1 },
+    },
+  });
+  if (updateResult.count === 0) {
+    return {
+      kind: "version_conflict",
+      current_scene_card_version: sceneCard.version,
+      current_preset_version: preset.version,
+    };
+  }
+  const newPresetVersion = input.base_preset_version + 1;
+
+  // 8. 创建新视频 GenerationJob（source=scene_card，不设 retry_of_job_id → 不伪装重试，AC#5）。
+  const createdJob = await createJobWithinTx(tx, {
+    projectId: input.projectId,
+    userId: input.userId,
+    type: "video",
+    expectedOutputCount: 1,
+    source: "scene_card",
+    actionIdentity: input.idempotencyKey,
+    actionType: "scene_card.video_regeneration",
+    sceneCardId: sceneCardId.toString(),
+    input: {
+      scene_card_id: sceneCardId.toString(),
+      plan_message_id: firstReceipt.message_id.toString(),
+      prompt_text: sceneCard.content_markdown,
+      parameters: input.parameters,
+      reference_assets: input.reference_assets,
+      reference_mode: input.reference_mode,
+      capability_snapshot_version: input.capability_snapshot_version,
+      ...(input.provider_credential
+        ? { provider_credential: input.provider_credential }
+        : {}),
+    },
+  });
+  let cursor = createdJob.cursor;
+
+  // 9. INSERT scene_card_generation_records（新记录，summary_status=generating，来源指向首次）。
+  const record = await tx.scene_card_generation_records.create({
+    data: {
+      scene_card_id: sceneCardId,
+      project_id: projectId,
+      summary_status: "generating",
+      plan_message_id: firstReceipt.message_id,
+      application_receipt_id: firstReceipt.id,
+      first_generation_job_id: BigInt(createdJob.generation_job_id),
+    },
+  });
+  // IK67HE/T14：回填首个 job 的输出槽绑定 record（createJobWithinTx 早于 record 创建）。
+  await tx.generation_output_slots.updateMany({
+    where: { generation_job_id: BigInt(createdJob.generation_job_id) },
+    data: { scene_card_generation_record_id: record.id },
+  });
+
+  // 10. INSERT command_idempotency（operation=scene_card.regenerate，resource_id=scene_card_id）。
+  await tx.command_idempotency.create({
+    data: {
+      project_id: projectId,
+      operation: OPERATION,
+      idempotency_key: input.idempotencyKey,
+      request_hash: input.requestHash,
+      generation_job_id: BigInt(createdJob.generation_job_id),
+      resource_id: sceneCardId,
+      accepted_cursor: BigInt(cursor),
+    },
+  });
+
+  // 11. project_events：scene_card.preset_updated + scene_card_generation_record.created。
+  const presetEvent = await appendProjectEvent(tx, {
+    projectId: input.projectId,
+    eventType: "scene_card.preset_updated",
+    aggregateType: "scene_card_generation_preset",
+    aggregateId: sceneCardId.toString(),
+    aggregateVersion: newPresetVersion,
+    correlationId: input.idempotencyKey,
+    payload: {
+      scene_card_id: sceneCardId.toString(),
+      preset_version: newPresetVersion,
+      generation_job_id: createdJob.generation_job_id,
+    },
+  });
+  const recordEvent = await appendProjectEvent(tx, {
+    projectId: input.projectId,
+    eventType: "scene_card_generation_record.created",
+    aggregateType: "scene_card_generation_record",
+    aggregateId: record.id.toString(),
+    aggregateVersion: 1,
+    correlationId: input.idempotencyKey,
+    payload: {
+      record_id: record.id.toString(),
+      scene_card_id: sceneCardId.toString(),
+      generation_job_id: createdJob.generation_job_id,
+      plan_message_id: firstReceipt.message_id.toString(),
+    },
+  });
+  cursor = Math.max(
+    cursor,
+    Number(presetEvent.cursor),
+    Number(recordEvent.cursor),
+  );
+
+  return {
+    kind: "applied",
+    scene_card_id: sceneCardId.toString(),
+    generation_job_id: createdJob.generation_job_id,
+    record_id: record.id.toString(),
+    preset_version: newPresetVersion,
+    cursor: cursor.toString(),
+  };
+}
+
+export function createSceneCardGenerationRepo(
+  prisma: PrismaClient,
+): SceneCardGenerationRepo {
+  return {
+    regenerateSceneCard(input) {
+      return transactionWithUniqueRetry(prisma, (tx) =>
+        regenerateSceneCardInTransaction(tx, input),
+      );
+    },
+    async getSceneCardGenerationPreset(projectId, sceneCardId, userId) {
+      const pid = BigInt(projectId);
+      const uid = BigInt(userId);
+      const sid = BigInt(sceneCardId);
+      const project = await prisma.project.findFirst({
+        where: { id: pid, owner_id: uid, is_delete: 0 },
+        select: { id: true },
+      });
+      if (!project) return { kind: "forbidden" } as const;
+      const sceneCard = await prisma.scene_cards.findFirst({
+        where: { id: sid, project_id: pid, is_delete: 0 },
+        select: {
+          id: true,
+          title: true,
+          content_markdown: true,
+          version: true,
+        },
+      });
+      if (!sceneCard) return { kind: "not_found" } as const;
+      const preset = await prisma.scene_card_generation_presets.findFirst({
+        where: { scene_card_id: sid, is_delete: 0 },
+        select: {
+          version: true,
+          parameters: true,
+          reference_mode: true,
+          reference_assets: true,
+          capability_snapshot_version: true,
+        },
+      });
+      if (!preset) return { kind: "not_found" } as const;
+      const firstRecord = await prisma.scene_card_generation_records.findFirst({
+        where: { scene_card_id: sid, project_id: pid, is_delete: 0 },
+        orderBy: { id: "asc" },
+        select: { plan_message_id: true },
+      });
+      let projection: { prompt_text: string } | null = null;
+      if (firstRecord) {
+        const planMessage = await prisma.plan_messages.findUnique({
+          where: { id: firstRecord.plan_message_id },
+          select: { provider_prompt_projection: true },
+        });
+        const raw = planMessage?.provider_prompt_projection as
+          { prompt_text?: unknown } | null | undefined;
+        if (typeof raw?.prompt_text === "string")
+          projection = { prompt_text: raw.prompt_text };
+      }
+      return {
+        kind: "found",
+        scene_card: {
+          scene_card_id: sceneCard.id.toString(),
+          version: sceneCard.version,
+          title: sceneCard.title,
+          content_markdown: sceneCard.content_markdown,
+        },
+        preset: {
+          version: preset.version,
+          parameters: preset.parameters,
+          reference_mode: preset.reference_mode,
+          reference_assets: preset.reference_assets,
+          capability_snapshot_version: preset.capability_snapshot_version,
+        },
+        projection,
+      };
+    },
+  };
+}

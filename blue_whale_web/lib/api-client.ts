@@ -26,6 +26,12 @@ export function subscribeToAuthFailure(
   };
 }
 
+/** 凭证失效统一出口：清 token + 触发登录回调。未走 apiFetch 的请求层（如 lib/canvas.ts）401 时也调它。 */
+export function notifyAuthFailure(): void {
+  clearTokens();
+  onAuthFailure?.();
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -66,11 +72,10 @@ export async function apiFetch(
 
   // 首次请求
   const accessToken = loadAccessToken();
-  let res = await makeRequest(accessToken);
+  const res = await makeRequest(accessToken);
 
   if (res.status === 401 && !isAuthEndpoint(url)) {
-    clearTokens();
-    onAuthFailure?.();
+    notifyAuthFailure();
   }
   return res;
 }

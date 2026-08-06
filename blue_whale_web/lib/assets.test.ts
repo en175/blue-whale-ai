@@ -98,6 +98,30 @@ describe("Assets API", () => {
     expect(result.id).toBe(101);
   });
 
+  it("添加到项目：source_asset_id 传字符串时归一为数字（生成页状态为 string）", async () => {
+    vi.mocked(request).mockResolvedValue({
+      id: 101,
+      type: "image",
+      url: "/assets/101/content",
+      width: 1024,
+      height: 1024,
+      duration: null,
+      source: "generated",
+      created_at: "2026-07-19T10:00:00Z",
+    });
+
+    // 生成页「添加到项目」持有字符串 id（useState<string>），写入请求体前须归一为数字，
+    // 对齐 e2e/generate/generate-inbox 与后端 handler 的数字契约（IK68C7）。
+    await copyAssetToProject(77, "9", "cmd-1");
+
+    expect(request).toHaveBeenCalledWith(
+      "/projects/77/assets",
+      "POST",
+      { source_asset_id: 9 },
+      { "Idempotency-Key": "cmd-1" },
+    );
+  });
+
   it("全局素材上传 complete 不发送 project_id", async () => {
     vi.mocked(presignAsset).mockResolvedValue({
       storage_key: "uploads/9/image/cat.png",

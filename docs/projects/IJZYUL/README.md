@@ -46,10 +46,10 @@
 | 2 | IJZYVJ | prettier + pre-commit 守门 | ✅ 已合 | `feature/IJZYVJ-补全前端提交守门` | `9c01ccf` | [#38](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/pulls/38) | [IJZYVJ.md](./IJZYVJ.md) |
 | 3 | IJZYVK | 退役 AgentComposer | ❌ 已撤回（wontfix） | — | — | — | [IJZYVK.md](./IJZYVK.md) |
 | 4 | IJZYVO | 拆 SkillPanel 巨型组件 | ✅ 已合 | `feature/IJZYVO-拆SkillPanel组件` | `fe2196c` | [#40](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/pulls/40) | [IJZYVO.md](./IJZYVO.md) |
-| 5 | IJZYVQ | 顶层领域类型 | ✅ 已合 | `feature/IJZYVQ-顶层领域类型` | `65af9fc` | [#42](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/pulls/42) | [IJZYVQ.md](./IJZYVQ.md) |
-| 6 | IJZYWD | useProject hooks 抽离 | ✅ 已合 | `feature/IJZYWD-canvas-useProject` | `be6aa33` | [#44](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/pulls/44) | [IJZYWD.md](./IJZYWD.md) |
-| 7 | IJZYVR | API 客户端骨架 | ✅ 已合 | `feature/IJZYVR-API客户端骨架` | `d604e1f` | [#45](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/pulls/45) | [IJZYVR.md](./IJZYVR.md) |
-| 8 | IJZYVT | 新增 Playwright 端到端 | ✅ 已合 | `feature/IJZYVT-新增Playwright端到端` | `be9efac` | [#75](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/pulls/75) | [IJZYVT.md](./IJZYVT.md) |
+| 5 | IJZYVQ | 顶层领域类型 | ✅ 已合 | `feature/IJZYVQ-顶层领域类型` | `65af9fc` | [#42](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/pulls/42) | [IJZYVQ.md](./IJZYVQ.md) |
+| 6 | IJZYWD | useProject hooks 抽离 | ✅ 已合 | `feature/IJZYWD-canvas-useProject` | `be6aa33` | [#44](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/pulls/44) | [IJZYWD.md](./IJZYWD.md) |
+| 7 | IJZYVR | API 客户端骨架 | ✅ 已合 | `feature/IJZYVR-API客户端骨架` | `d604e1f` | [#45](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/pulls/45) | [IJZYVR.md](./IJZYVR.md) |
+| 8 | IJZYVT | 新增 Playwright 端到端 | ✅ 已合 | `feature/IJZYVT-新增Playwright端到端` | `be9efac` | [#75](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/pulls/75) | [IJZYVT.md](./IJZYVT.md) |
 
 ## 父 issue 验收总览
 

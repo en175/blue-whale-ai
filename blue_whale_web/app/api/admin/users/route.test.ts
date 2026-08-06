@@ -12,7 +12,13 @@ const mocks = vi.hoisted(() => ({
         isAdmin: boolean;
         username: string;
       }) => Promise<Response>,
-    ) => handler({ userId: "1", status: "enabled", isAdmin: true, username: "admin" }),
+    ) =>
+      handler({
+        userId: "1",
+        status: "enabled",
+        isAdmin: true,
+        username: "admin",
+      }),
   ),
   listAdminUsers: vi.fn(),
 }));
@@ -57,7 +63,9 @@ describe("GET /api/admin/users", () => {
   });
 
   it("maps new-api users to AdminUser contract fields", async () => {
-    const res = await GET(authRequest("http://localhost/api/admin/users?keyword=ali"));
+    const res = await GET(
+      authRequest("http://localhost/api/admin/users?keyword=ali"),
+    );
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.success).toBe(true);
@@ -95,7 +103,9 @@ describe("GET /api/admin/users", () => {
 
   it("translates status filter to new-api 1/0 and passes page params", async () => {
     await GET(
-      authRequest("http://localhost/api/admin/users?keyword=ali&status=disabled&role=1&page=2&pageSize=5"),
+      authRequest(
+        "http://localhost/api/admin/users?keyword=ali&status=disabled&role=1&page=2&pageSize=5",
+      ),
     );
     expect(mocks.listAdminUsers).toHaveBeenCalledWith("sk-admin", 1, {
       keyword: "ali",
@@ -113,7 +123,9 @@ describe("GET /api/admin/users", () => {
   });
 
   it("caps pageSize at 100 and defaults invalid page numbers", async () => {
-    await GET(authRequest("http://localhost/api/admin/users?page=abc&pageSize=999"));
+    await GET(
+      authRequest("http://localhost/api/admin/users?page=abc&pageSize=999"),
+    );
     expect(mocks.listAdminUsers).toHaveBeenLastCalledWith(
       "sk-admin",
       1,

@@ -28,20 +28,40 @@ function createFakeClient(overrides: Record<string, unknown> = {}) {
       page: 1,
       page_size: 5,
     }),
-    listAdminTopUps: vi.fn().mockImplementation(async (_token: string, _userId: number, opts: { page: number }) => {
-      if (opts.page > 1) {
-        return { items: [], total: 3, page: opts.page, page_size: 100 };
-      }
-      return {
-        items: [
-          { trade_no: "BWP1", user_id: 2, amount: 100, money: 1, create_time: todayStart + 10, complete_time: 0, status: "success" },
-          { trade_no: "BWP2", user_id: 3, amount: 50, money: 0.5, create_time: todayStart - 100, complete_time: 0, status: "pending" },
-        ],
-        total: 3,
-        page: opts.page,
-        page_size: 100,
-      };
-    }),
+    listAdminTopUps: vi
+      .fn()
+      .mockImplementation(
+        async (_token: string, _userId: number, opts: { page: number }) => {
+          if (opts.page > 1) {
+            return { items: [], total: 3, page: opts.page, page_size: 100 };
+          }
+          return {
+            items: [
+              {
+                trade_no: "BWP1",
+                user_id: 2,
+                amount: 100,
+                money: 1,
+                create_time: todayStart + 10,
+                complete_time: 0,
+                status: "success",
+              },
+              {
+                trade_no: "BWP2",
+                user_id: 3,
+                amount: 50,
+                money: 0.5,
+                create_time: todayStart - 100,
+                complete_time: 0,
+                status: "pending",
+              },
+            ],
+            total: 3,
+            page: opts.page,
+            page_size: 100,
+          };
+        },
+      ),
     ...overrides,
   };
 }
@@ -72,15 +92,49 @@ describe("collectDashboardStats", () => {
       new Date(new Date().setHours(0, 0, 0, 0)).getTime() / 1000,
     );
     const client = createFakeClient({
-      listAdminTopUps: vi.fn().mockImplementation(async (_token: string, _userId: number, opts: { page: number }) => {
-        if (opts.page === 1) {
-          return { items: [{ trade_no: "P1", user_id: 1, amount: 10, money: 1, create_time: todayStart + 1, complete_time: 0, status: "pending" }], total: 3, page: 1, page_size: 100 };
-        }
-        if (opts.page === 2) {
-          return { items: [{ trade_no: "P2", user_id: 2, amount: 20, money: 2, create_time: todayStart - 500, complete_time: 0, status: "pending" }], total: 3, page: 2, page_size: 100 };
-        }
-        return { items: [], total: 3, page: opts.page, page_size: 100 };
-      }),
+      listAdminTopUps: vi
+        .fn()
+        .mockImplementation(
+          async (_token: string, _userId: number, opts: { page: number }) => {
+            if (opts.page === 1) {
+              return {
+                items: [
+                  {
+                    trade_no: "P1",
+                    user_id: 1,
+                    amount: 10,
+                    money: 1,
+                    create_time: todayStart + 1,
+                    complete_time: 0,
+                    status: "pending",
+                  },
+                ],
+                total: 3,
+                page: 1,
+                page_size: 100,
+              };
+            }
+            if (opts.page === 2) {
+              return {
+                items: [
+                  {
+                    trade_no: "P2",
+                    user_id: 2,
+                    amount: 20,
+                    money: 2,
+                    create_time: todayStart - 500,
+                    complete_time: 0,
+                    status: "pending",
+                  },
+                ],
+                total: 3,
+                page: 2,
+                page_size: 100,
+              };
+            }
+            return { items: [], total: 3, page: opts.page, page_size: 100 };
+          },
+        ),
     });
     const stats = await collectDashboardStats(client, "sk-admin", 1);
     expect(stats.pendingOrders).toBe(2);

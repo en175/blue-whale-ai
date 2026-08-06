@@ -5,7 +5,8 @@ import { test } from "node:test";
 const composeFile =
   process.env.BW_TS_COMPOSE_FILE ??
   "deploy/typescript-baseline/docker-compose.acceptance.yml";
-const project = process.env.BW_TS_COMPOSE_PROJECT ?? "bw-ts-baseline-acceptance";
+const project =
+  process.env.BW_TS_COMPOSE_PROJECT ?? "bw-ts-baseline-acceptance";
 
 const endpoints = {
   web: "http://127.0.0.1:3101/build-info",
@@ -47,6 +48,7 @@ test("验收拓扑包含 Web、两个 Node worker、fresh MySQL 与 BullMQ Redis
     "new-api",
     "provider-stub",
     "redis",
+    "storage-stub",
     "web",
   ]);
 
@@ -106,6 +108,11 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
     .sort();
 
   assert.deepEqual(tables, [
+    "admin_operation_logs",
+    "agent_advances",
+    "agent_provider_calls",
+    "agent_provisional_chunks",
+    "agent_provisional_deliveries",
     "agent_runs",
     "api_key",
     "api_key_usage",
@@ -113,18 +120,31 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
     "canvas",
     "captcha_challenges",
     "command_idempotency",
+    "conversation_message_mentions",
     "conversation_messages",
     "conversations",
     "cost_reservations",
+    "creative_skill",
+    "creative_skill_activation",
+    "creative_skill_version",
     "generation_job_logs",
     "generation_jobs",
     "generation_model_capability",
+    "generation_output_slots",
+    "plan_application_receipts",
+    "plan_messages",
     "project",
     "project_event_stream",
     "project_events",
+    "run_commits",
+    "scene_card_generation_presets",
+    "scene_card_generation_records",
+    "scene_cards",
     "skill",
+    "skill_summarize_session",
     "template_card",
     "template_card_image",
+    "topup_tiers",
     "user_input_requests",
     "user_skill",
     "users",

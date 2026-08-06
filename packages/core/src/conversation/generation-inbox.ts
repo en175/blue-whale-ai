@@ -34,6 +34,7 @@ export interface GenerationInboxStore {
     content: string;
     conversationId: string | null;
     replyToInputRequestId: string | null;
+    forcedCreativeSkillId: string | null;
   }): Promise<ConversationCommandStoreResult>;
   listConversations(userId: string): Promise<InboxConversationView[] | null>;
   createConversation(
@@ -48,6 +49,13 @@ export interface GenerationInboxStore {
   delete(userId: string): Promise<boolean>;
 }
 
+export type AcceptGenerationInboxMessageResult =
+  ConversationCommandStoreResult | { kind: "invalid"; message: string };
+
+/**
+ * 收件箱消息接纳（IK67GG）：forced 选择随消息一起交给持久层，
+ * 由同一事务完成权限校验、RunPin 冻结、消息接纳和激活事实写入。
+ */
 export async function acceptGenerationInboxMessage(
   input: {
     userId: string;
@@ -55,9 +63,12 @@ export async function acceptGenerationInboxMessage(
     body: Record<string, unknown>;
   },
   store: GenerationInboxStore,
-) {
+): Promise<AcceptGenerationInboxMessageResult> {
   const prepared = prepareConversationMessage(input.body, input.idempotencyKey);
   if ("kind" in prepared) return prepared;
+  if (prepared.mentions.length > 0) {
+    return { kind: "invalid", message: "生成收件箱不支持显式引用" };
+  }
   return store.acceptMessage({ userId: input.userId, ...prepared });
 }
 
