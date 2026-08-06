@@ -19,6 +19,7 @@ vi.mock("@blue-whale/core", () => ({
   },
 }));
 
+import { NewApiError } from "@blue-whale/core";
 import { GET } from "./route";
 
 function getRequest(query = "") {
@@ -28,15 +29,12 @@ function getRequest(query = "") {
 }
 
 /**
- * 鉴权为过渡期方案：/api/log/self 尚未迁账户层（不认 sk- 令牌），
- * 用 root access_token + New-Api-User 代理查询（lib/account/go-consume-logs.ts）。
+ * 鉴权（IK6M2F）：/api/log/self 已迁账户层，凭用户 sk- 令牌直调，不发 New-Api-User。
  */
 describe("GET /api/account/consumptions（消费记录）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("NEW_API_BASE_URL", "http://new-api.test");
-    vi.stubEnv("NEW_API_ROOT_ACCESS_TOKEN", "root-access-token");
-    vi.stubEnv("NEW_API_ROOT_USER_ID", "1");
     // sk- 令牌真校验（Go identity）：缺省放行「sk-test」
     mocks.resolveTokenIdentity.mockResolvedValue({
       userId: 1,
@@ -98,22 +96,21 @@ describe("GET /api/account/consumptions（消费记录）", () => {
     ]);
   });
 
-  it("root 凭证代理 + 分页参数透传（log/self 旧 UserAuth 过渡期）", async () => {
+  it("透传用户 sk- 令牌 + 分页参数透传（账户层 AccountTokenOrUserAuth）", async () => {
     await GET(getRequest("?p=3&page_size=10"));
-    expect(mocks.listUserConsumeLogs).toHaveBeenCalledWith(
-      "root-access-token",
-      { page: 3, pageSize: 10 },
-      1,
-    );
+    expect(mocks.listUserConsumeLogs).toHaveBeenCalledWith("sk-test", {
+      page: 3,
+      pageSize: 10,
+    });
   });
 
-  it("无令牌 → 401；root 凭证未配置 → 503", async () => {
+  it("无令牌 → 401；NEW_API_BASE_URL 未配置 → 503", async () => {
     const unauthorized = await GET(
       new Request("http://localhost/api/account/consumptions"),
     );
     expect(unauthorized.status).toBe(401);
 
-    vi.stubEnv("NEW_API_ROOT_ACCESS_TOKEN", "");
+    vi.stubEnv("NEW_API_BASE_URL", "");
     const unavailable = await GET(getRequest());
     expect(unavailable.status).toBe(503);
   });
@@ -124,5 +121,15 @@ describe("GET /api/account/consumptions（消费记录）", () => {
     expect(response.status).toBe(502);
     const json = await response.json();
     expect(json.code).toBe(502);
+  });
+
+  it("Go 返回 4xx（如令牌被禁用）→ 原状态透传而非 502", async () => {
+    mocks.listUserConsumeLogs.mockRejectedValue(
+      new NewApiError("Invalid token", 401),
+    );
+    const response = await GET(getRequest());
+    expect(response.status).toBe(401);
+    const json = await response.json();
+    expect(json.code).toBe(401);
   });
 });
