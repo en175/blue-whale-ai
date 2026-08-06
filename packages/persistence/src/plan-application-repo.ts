@@ -203,22 +203,55 @@ export async function validateDerivedReferences(
   return { ok: true };
 }
 
-/** 单事务原子应用 scene_card_create PlanMessage（AC#2/#3/#4/#6）。
- *  任一前置检查失败零写入；同 CommandId 重复返回首次结果；同消息跨 CommandId 已应用拒绝。 */
-async function applySceneCardCreateInTransaction(
+/** 场景卡应用事务（create/replace）的 plan_message 视图：共享前置校验 + 各自写入阶段共用。
+ *  dispatcher 读 plan_messages 整行后传入；create/replace 各取所需字段。 */
+interface SceneCardApplyPlanMessage {
+  message_id: bigint;
+  application_kind: string;
+  sequence_label: string | null;
+  content_markdown: string;
+  derived_references: unknown;
+  frozen_generation_parameters: unknown;
+  capability_snapshot_version: unknown;
+  provider_prompt_projection: unknown;
+  target_scene_card_mention_id: bigint | null; // replace 写入用
+  base_scene_card_version: number | null; // replace 写入用
+}
+
+/** 前置校验通过后解析出的写入上下文（create/replace 共用）。 */
+interface ResolvedSceneCardPlan {
+  snapshot: CapabilitySnapshot;
+  frozenParameters: Record<string, unknown>;
+  projection: {
+    prompt_text: string;
+    reference_assets: ProviderPromptAsset[];
+    parameters: Record<string, unknown>;
+  };
+  derivedReferences: DerivedReference[];
+}
+
+type SceneCardPreflightOutcome =
+  | { kind: "early_return"; result: ApplyPlanMessageResult }
+  | { kind: "proceed"; resolved: ResolvedSceneCardPlan };
+
+/** create/replace 共享前置校验流水线：
+ *  CommandId 幂等 → priorReceipt 防重复 → 快照四重转型 → 能力漂移 → 引用校验。
+ *  applicationKind 参数化重放结果的 application_kind（scene_card_create / scene_card_replace）。
+ *  任一失败 → early_return（调用方原样透传）；全过 → proceed + 解析上下文。 */
+async function runSceneCardApplyPreflight(
   tx: Prisma.TransactionClient,
+  projectId: bigint,
   input: ApplyPlanMessageInput,
-): Promise<ApplyPlanMessageResult> {
-  const projectId = BigInt(input.projectId);
-  const userId = BigInt(input.userId);
-
-  // 0. 前置授权（AC#4）：校验项目归属当前用户（对齐 conversation-repo 既有模式），不泄漏存在性。
-  const project = await tx.project.findFirst({
-    where: { id: projectId, owner_id: userId, is_delete: 0 },
-    select: { id: true },
-  });
-  if (!project) return { kind: "forbidden" } as const;
-
+  planMessage: Pick<
+    SceneCardApplyPlanMessage,
+    | "message_id"
+    | "derived_references"
+    | "frozen_generation_parameters"
+    | "capability_snapshot_version"
+    | "provider_prompt_projection"
+  >,
+  applicationKind: "scene_card_create" | "scene_card_replace",
+): Promise<SceneCardPreflightOutcome> {
   // 1. CommandId 幂等（AC#6）：命中则比对 request_hash，相同重放首次结果，不同冲突。
   const existing = await tx.command_idempotency.findUnique({
     where: {
@@ -228,51 +261,51 @@ async function applySceneCardCreateInTransaction(
         idempotency_key: input.idempotencyKey,
       },
     },
-    select: {
-      request_hash: true,
-      resource_id: true,
-      generation_job_id: true,
-    },
+    select: { request_hash: true, resource_id: true, generation_job_id: true },
   });
   if (existing) {
     if (existing.request_hash !== input.requestHash)
-      return { kind: "idempotency_conflict" };
+      return { kind: "early_return", result: { kind: "idempotency_conflict" } };
     if (existing.resource_id === null || existing.generation_job_id === null)
-      return { kind: "validation_failed", reason: "idempotent record missing resources" };
+      return {
+        kind: "early_return",
+        result: {
+          kind: "validation_failed",
+          reason: "idempotent record missing resources",
+        },
+      };
     return {
-      kind: "replayed",
-      application_kind: "scene_card_create",
-      scene_card_id: existing.resource_id.toString(),
-      generation_job_id: existing.generation_job_id.toString(),
+      kind: "early_return",
+      result: {
+        kind: "replayed",
+        application_kind: applicationKind,
+        scene_card_id: existing.resource_id.toString(),
+        generation_job_id: existing.generation_job_id.toString(),
+      },
     };
   }
 
-  // 2. 读 plan_messages（不可变，无 is_delete），校验项目归属 + application_kind。
-  const planMessage = await tx.plan_messages.findUnique({
-    where: { message_id: BigInt(input.planMessageId) },
-  });
-  if (!planMessage || planMessage.project_id !== projectId)
-    return { kind: "plan_not_found" };
-  if (planMessage.application_kind !== "scene_card_create")
-    return { kind: "kind_unsupported" };
-
-  // CONTEXT L227：每条 PlanMessage 最多一次成功应用；成功后不同 CommandId 也不得再次应用。
+  // 2. 同消息最多一次成功应用（CONTEXT L227）。
   const priorReceipt = await tx.plan_application_receipts.findUnique({
     where: { message_id: planMessage.message_id },
     select: { id: true },
   });
-  if (priorReceipt) return { kind: "already_applied" };
+  if (priorReceipt)
+    return { kind: "early_return", result: { kind: "already_applied" } };
 
+  // 3. 快照四重转型（冻结 JSON → 结构化视图）。
   const snapshot = planMessage.capability_snapshot_version as unknown as CapabilitySnapshot;
-  const frozenParameters = planMessage.frozen_generation_parameters as unknown as Record<string, unknown>;
+  const frozenParameters =
+    planMessage.frozen_generation_parameters as unknown as Record<string, unknown>;
   const projection = planMessage.provider_prompt_projection as unknown as {
     prompt_text: string;
     reference_assets: ProviderPromptAsset[];
     parameters: Record<string, unknown>;
   };
-  const derivedReferences = (planMessage.derived_references as unknown as DerivedReference[]) ?? [];
+  const derivedReferences =
+    (planMessage.derived_references as unknown as DerivedReference[]) ?? [];
 
-  // 3. 能力漂移检测（AC#4）：按冻结 model_id/provider_id 查当前行，比对 row_version + digest。
+  // 4. 能力漂移检测（AC#4）：按冻结 model_id/provider_id 查当前行，比对 row_version + digest。
   const capability = await tx.generation_model_capability.findUnique({
     where: {
       provider_id_model_id: {
@@ -295,14 +328,106 @@ async function applySceneCardCreateInTransaction(
     },
   });
   if (!capability || !capability.enabled || capability.is_delete)
-    return { kind: "capability_drift" };
+    return { kind: "early_return", result: { kind: "capability_drift" } };
   const recomputedDigest = capabilityDigestFromModelCapability(capability);
   if (capability.version !== snapshot.row_version || recomputedDigest !== snapshot.digest)
-    return { kind: "capability_drift" };
+    return { kind: "early_return", result: { kind: "capability_drift" } };
 
-  // 4. 引用素材有效性（AC#4，全部在副作用前）。
+  // 5. 引用素材有效性（AC#4，全部在副作用前）。
   const referenceCheck = await validateDerivedReferences(tx, projectId, derivedReferences);
-  if (!referenceCheck.ok) return { kind: "validation_failed", reason: referenceCheck.reason };
+  if (!referenceCheck.ok)
+    return {
+      kind: "early_return",
+      result: { kind: "validation_failed", reason: referenceCheck.reason },
+    };
+
+  return {
+    kind: "proceed",
+    resolved: { snapshot, frozenParameters, projection, derivedReferences },
+  };
+}
+
+/** 计算预设指纹：sha256(canonicalize({parameters, reference_mode, reference_assets, capability_snapshot_version}))。
+ *  create/replace 的 receipt.preset_digest 同源，抽取消除两处逐字重复。 */
+function presetDigestFromFrozen(
+  frozenParameters: Record<string, unknown>,
+  referenceMode: ReturnType<typeof deriveVideoReferenceMode>,
+  referenceAssets: ProviderPromptAsset[],
+  snapshot: CapabilitySnapshot,
+): string {
+  return `sha256:${createHash("sha256")
+    .update(
+      JSON.stringify(
+        canonicalizeJsonValue({
+          parameters: frozenParameters,
+          reference_mode: referenceMode,
+          reference_assets: referenceAssets,
+          capability_snapshot_version: snapshot,
+        }),
+      ),
+    )
+    .digest("hex")}`;
+}
+
+/** 在事务内创建首个视频 GenerationJob（source=plan），create/replace 共用。
+ *  返回 job id、cursor 与 referenceMode（后者供 receipt 指纹与 preset 写入复用）。 */
+async function createPlanVideoJobWithinTx(
+  tx: Prisma.TransactionClient,
+  input: ApplyPlanMessageInput,
+  planMessage: { message_id: bigint },
+  resolved: ResolvedSceneCardPlan,
+  sceneCardId: bigint,
+): Promise<{
+  generationJobId: string;
+  cursor: number;
+  referenceMode: ReturnType<typeof deriveVideoReferenceMode>;
+}> {
+  const referenceMode = deriveVideoReferenceMode(resolved.projection.reference_assets);
+  const createdJob = await createJobWithinTx(tx, {
+    projectId: input.projectId,
+    userId: input.userId,
+    type: "video",
+    expectedOutputCount: Number(resolved.frozenParameters.count ?? 1),
+    source: "plan",
+    actionIdentity: input.idempotencyKey,
+    actionType: "plan.video_generation",
+    input: {
+      scene_card_id: sceneCardId.toString(),
+      plan_message_id: planMessage.message_id.toString(),
+      prompt_text: resolved.projection.prompt_text,
+      parameters: resolved.frozenParameters,
+      reference_assets: resolved.projection.reference_assets,
+      reference_mode: referenceMode,
+      capability_snapshot_version: resolved.snapshot,
+    },
+  });
+  return {
+    generationJobId: createdJob.generation_job_id,
+    cursor: createdJob.cursor,
+    referenceMode,
+  };
+}
+
+/** 单事务原子应用 scene_card_create PlanMessage（AC#2/#3/#4/#6）。
+ *  任一前置检查失败零写入；同 CommandId 重复返回首次结果；同消息跨 CommandId 已应用拒绝。 */
+async function applySceneCardCreateInTransaction(
+  tx: Prisma.TransactionClient,
+  input: ApplyPlanMessageInput,
+  planMessage: SceneCardApplyPlanMessage,
+): Promise<ApplyPlanMessageResult> {
+  const projectId = BigInt(input.projectId);
+
+  // 前置校验（CommandId 幂等 / 防重复 / 能力漂移 / 引用有效性）收敛到共享流水线；
+  // 任一失败原样透传，全过则返回解析出的快照/冻结参数/投影。
+  const preflight = await runSceneCardApplyPreflight(
+    tx,
+    projectId,
+    input,
+    planMessage,
+    "scene_card_create",
+  );
+  if (preflight.kind === "early_return") return preflight.result;
+  const { snapshot, frozenParameters, projection } = preflight.resolved;
 
   // === 前置检查全部通过，开始原子创建五条产品事实（AC#2/#3）===
 
@@ -319,40 +444,17 @@ async function applySceneCardCreateInTransaction(
   const sceneCardId = sceneCard.id;
 
   // 6. 创建首个视频 GenerationJob（source=plan），复用 createJobWithinTx 组合进本事务。
-  const referenceMode = deriveVideoReferenceMode(projection.reference_assets);
-  const createdJob = await createJobWithinTx(tx, {
-    projectId: input.projectId,
-    userId: input.userId,
-    type: "video",
-    expectedOutputCount: Number(frozenParameters.count ?? 1),
-    source: "plan",
-    actionIdentity: input.idempotencyKey,
-    actionType: "plan.video_generation",
-    input: {
-      scene_card_id: sceneCardId.toString(),
-      plan_message_id: planMessage.message_id.toString(),
-      prompt_text: projection.prompt_text,
-      parameters: frozenParameters,
-      reference_assets: projection.reference_assets,
-      reference_mode: referenceMode,
-      capability_snapshot_version: snapshot,
-    },
-  });
-  let cursor = createdJob.cursor;
+  const { generationJobId, cursor: jobCursor, referenceMode } =
+    await createPlanVideoJobWithinTx(tx, input, planMessage, preflight.resolved, sceneCardId);
+  let cursor = jobCursor;
 
   // 7. INSERT plan_application_receipts（不可变事实，带 scene_card_id + job_id + command_id）。
-  const presetDigest = `sha256:${createHash("sha256")
-    .update(
-      JSON.stringify(
-        canonicalizeJsonValue({
-          parameters: frozenParameters,
-          reference_mode: referenceMode,
-          reference_assets: projection.reference_assets,
-          capability_snapshot_version: snapshot,
-        }),
-      ),
-    )
-    .digest("hex")}`;
+  const presetDigest = presetDigestFromFrozen(
+    frozenParameters,
+    referenceMode,
+    projection.reference_assets,
+    snapshot,
+  );
   const contentDigest = sha256Digest(planMessage.content_markdown);
   const appliedAt = new Date();
   const receipt = await tx.plan_application_receipts.create({
@@ -361,7 +463,7 @@ async function applySceneCardCreateInTransaction(
       project_id: projectId,
       application_kind: "scene_card_create",
       scene_card_id: sceneCardId,
-      first_generation_job_id: BigInt(createdJob.generation_job_id),
+      first_generation_job_id: BigInt(generationJobId),
       command_id: input.idempotencyKey,
       content_digest: contentDigest,
       result_version: 1,
@@ -391,7 +493,7 @@ async function applySceneCardCreateInTransaction(
       summary_status: "generating",
       plan_message_id: planMessage.message_id,
       application_receipt_id: receipt.id,
-      first_generation_job_id: BigInt(createdJob.generation_job_id),
+      first_generation_job_id: BigInt(generationJobId),
     },
   });
 
@@ -402,7 +504,7 @@ async function applySceneCardCreateInTransaction(
       operation: OPERATION,
       idempotency_key: input.idempotencyKey,
       request_hash: input.requestHash,
-      generation_job_id: BigInt(createdJob.generation_job_id),
+      generation_job_id: BigInt(generationJobId),
       resource_id: sceneCardId,
       accepted_cursor: BigInt(cursor),
     },
@@ -419,7 +521,7 @@ async function applySceneCardCreateInTransaction(
     payload: {
       scene_card_id: sceneCardId.toString(),
       plan_message_id: planMessage.message_id.toString(),
-      generation_job_id: createdJob.generation_job_id,
+      generation_job_id: generationJobId,
     },
   });
   const applyEvent = await appendProjectEvent(tx, {
@@ -433,7 +535,7 @@ async function applySceneCardCreateInTransaction(
       receipt_id: receipt.id.toString(),
       message_id: planMessage.message_id.toString(),
       scene_card_id: sceneCardId.toString(),
-      generation_job_id: createdJob.generation_job_id,
+      generation_job_id: generationJobId,
       application_kind: "scene_card_create",
     },
   });
@@ -443,7 +545,7 @@ async function applySceneCardCreateInTransaction(
     kind: "applied",
     application_kind: "scene_card_create",
     scene_card_id: sceneCardId.toString(),
-    generation_job_id: createdJob.generation_job_id,
+    generation_job_id: generationJobId,
     receipt_id: receipt.id.toString(),
     cursor: cursor.toString(),
   };
@@ -453,103 +555,25 @@ async function applySceneCardCreateInTransaction(
  *  覆盖本轮唯一可用的 SceneCardMention 指向的场景卡：重校验目标身份/版本/权限后，
  *  以乐观锁 CAS 覆盖权威正文与预设，新建生成记录与首个任务，保留既有记录/Asset/审计。
  *  任一前置检查失败零写入；同 CommandId 重复返回首次结果。
- *  forbidden/读 plan_message 已由 dispatcher 完成，本函数从 CommandId 幂等起。 */
+ *  forbidden/读 plan_message 已由 dispatcher 完成；本函数从共享前置校验起（与 create 同源）。 */
 async function applySceneCardReplaceInTransaction(
   tx: Prisma.TransactionClient,
   input: ApplyPlanMessageInput,
-  planMessage: {
-    message_id: bigint;
-    application_kind: string;
-    sequence_label: string | null;
-    content_markdown: string;
-    derived_references: unknown;
-    frozen_generation_parameters: unknown;
-    capability_snapshot_version: unknown;
-    provider_prompt_projection: unknown;
-    target_scene_card_mention_id: bigint | null;
-    base_scene_card_version: number | null;
-  },
+  planMessage: SceneCardApplyPlanMessage,
 ): Promise<ApplyPlanMessageResult> {
   const projectId = BigInt(input.projectId);
   const userId = BigInt(input.userId);
 
-  // 1. CommandId 幂等（视频路径 OPERATION）：命中则比对 request_hash，相同重放首次结果，不同冲突。
-  const existing = await tx.command_idempotency.findUnique({
-    where: {
-      project_id_operation_idempotency_key: {
-        project_id: projectId,
-        operation: OPERATION,
-        idempotency_key: input.idempotencyKey,
-      },
-    },
-    select: { request_hash: true, resource_id: true, generation_job_id: true },
-  });
-  if (existing) {
-    if (existing.request_hash !== input.requestHash)
-      return { kind: "idempotency_conflict" };
-    if (existing.resource_id === null || existing.generation_job_id === null)
-      return {
-        kind: "validation_failed",
-        reason: "idempotent record missing resources",
-      };
-    return {
-      kind: "replayed",
-      application_kind: "scene_card_replace",
-      scene_card_id: existing.resource_id.toString(),
-      generation_job_id: existing.generation_job_id.toString(),
-    };
-  }
-
-  // 2. 同消息最多一次成功应用（UNIQUE message_id 复用，与 create 共享）。
-  const priorReceipt = await tx.plan_application_receipts.findUnique({
-    where: { message_id: planMessage.message_id },
-    select: { id: true },
-  });
-  if (priorReceipt) return { kind: "already_applied" };
-
-  const snapshot = planMessage.capability_snapshot_version as unknown as CapabilitySnapshot;
-  const frozenParameters =
-    planMessage.frozen_generation_parameters as unknown as Record<string, unknown>;
-  const projection = planMessage.provider_prompt_projection as unknown as {
-    prompt_text: string;
-    reference_assets: ProviderPromptAsset[];
-    parameters: Record<string, unknown>;
-  };
-  const derivedReferences =
-    (planMessage.derived_references as unknown as DerivedReference[]) ?? [];
-
-  // 3. 能力漂移检测（AC#4）：按冻结 model_id/provider_id 查当前行，比对 row_version + digest。
-  const capability = await tx.generation_model_capability.findUnique({
-    where: {
-      provider_id_model_id: {
-        provider_id: snapshot.provider_id,
-        model_id: snapshot.model_id,
-      },
-    },
-    select: {
-      version: true,
-      enabled: true,
-      is_delete: true,
-      supported_sizes: true,
-      supported_aspect_ratios: true,
-      supported_durations: true,
-      supported_formats: true,
-      default_size: true,
-      default_format: true,
-      default_aspect_ratio: true,
-      default_duration: true,
-    },
-  });
-  if (!capability || !capability.enabled || capability.is_delete)
-    return { kind: "capability_drift" };
-  const recomputedDigest = capabilityDigestFromModelCapability(capability);
-  if (capability.version !== snapshot.row_version || recomputedDigest !== snapshot.digest)
-    return { kind: "capability_drift" };
-
-  // 4. 引用素材有效性（AC#4，全部在副作用前）。
-  const referenceCheck = await validateDerivedReferences(tx, projectId, derivedReferences);
-  if (!referenceCheck.ok)
-    return { kind: "validation_failed", reason: referenceCheck.reason };
+  // 前置校验（CommandId 幂等 / 防重复 / 能力漂移 / 引用有效性）收敛到共享流水线（与 create 同源）。
+  const preflight = await runSceneCardApplyPreflight(
+    tx,
+    projectId,
+    input,
+    planMessage,
+    "scene_card_replace",
+  );
+  if (preflight.kind === "early_return") return preflight.result;
+  const { snapshot, frozenParameters, projection } = preflight.resolved;
 
   // 5. target 重校验（AC#4 核心）：从 plan_message 冻结的 mention 句柄反查当前事实，
   //    用 classifyMentionAvailability 分类 deleted/wrong_project/permission_lost/stale。
@@ -622,40 +646,17 @@ async function applySceneCardReplaceInTransaction(
     return { kind: "target_stale", reason: "scene_card version changed or removed" };
 
   // 7. 创建首个视频 GenerationJob（source=plan，scene_card_id 指向既有卡）。
-  const referenceMode = deriveVideoReferenceMode(projection.reference_assets);
-  const createdJob = await createJobWithinTx(tx, {
-    projectId: input.projectId,
-    userId: input.userId,
-    type: "video",
-    expectedOutputCount: Number(frozenParameters.count ?? 1),
-    source: "plan",
-    actionIdentity: input.idempotencyKey,
-    actionType: "plan.video_generation",
-    input: {
-      scene_card_id: sceneCardId.toString(),
-      plan_message_id: planMessage.message_id.toString(),
-      prompt_text: projection.prompt_text,
-      parameters: frozenParameters,
-      reference_assets: projection.reference_assets,
-      reference_mode: referenceMode,
-      capability_snapshot_version: snapshot,
-    },
-  });
-  let cursor = createdJob.cursor;
+  const { generationJobId, cursor: jobCursor, referenceMode } =
+    await createPlanVideoJobWithinTx(tx, input, planMessage, preflight.resolved, sceneCardId);
+  let cursor = jobCursor;
 
   // 8. INSERT plan_application_receipts（kind=replace，result_version=新版本，target 非空）。
-  const presetDigest = `sha256:${createHash("sha256")
-    .update(
-      JSON.stringify(
-        canonicalizeJsonValue({
-          parameters: frozenParameters,
-          reference_mode: referenceMode,
-          reference_assets: projection.reference_assets,
-          capability_snapshot_version: snapshot,
-        }),
-      ),
-    )
-    .digest("hex")}`;
+  const presetDigest = presetDigestFromFrozen(
+    frozenParameters,
+    referenceMode,
+    projection.reference_assets,
+    snapshot,
+  );
   const contentDigest = sha256Digest(planMessage.content_markdown);
   const appliedAt = new Date();
   const receipt = await tx.plan_application_receipts.create({
@@ -664,7 +665,7 @@ async function applySceneCardReplaceInTransaction(
       project_id: projectId,
       application_kind: "scene_card_replace",
       scene_card_id: sceneCardId,
-      first_generation_job_id: BigInt(createdJob.generation_job_id),
+      first_generation_job_id: BigInt(generationJobId),
       command_id: input.idempotencyKey,
       content_digest: contentDigest,
       result_version: newVersion,
@@ -707,7 +708,7 @@ async function applySceneCardReplaceInTransaction(
       summary_status: "generating",
       plan_message_id: planMessage.message_id,
       application_receipt_id: receipt.id,
-      first_generation_job_id: BigInt(createdJob.generation_job_id),
+      first_generation_job_id: BigInt(generationJobId),
     },
   });
 
@@ -718,7 +719,7 @@ async function applySceneCardReplaceInTransaction(
       operation: OPERATION,
       idempotency_key: input.idempotencyKey,
       request_hash: input.requestHash,
-      generation_job_id: BigInt(createdJob.generation_job_id),
+      generation_job_id: BigInt(generationJobId),
       resource_id: sceneCardId,
       accepted_cursor: BigInt(cursor),
     },
@@ -735,7 +736,7 @@ async function applySceneCardReplaceInTransaction(
     payload: {
       scene_card_id: sceneCardId.toString(),
       plan_message_id: planMessage.message_id.toString(),
-      generation_job_id: createdJob.generation_job_id,
+      generation_job_id: generationJobId,
       base_version: baseVersion,
     },
   });
@@ -750,7 +751,7 @@ async function applySceneCardReplaceInTransaction(
       receipt_id: receipt.id.toString(),
       message_id: planMessage.message_id.toString(),
       scene_card_id: sceneCardId.toString(),
-      generation_job_id: createdJob.generation_job_id,
+      generation_job_id: generationJobId,
       application_kind: "scene_card_replace",
     },
   });
@@ -760,7 +761,7 @@ async function applySceneCardReplaceInTransaction(
     kind: "applied",
     application_kind: "scene_card_replace",
     scene_card_id: sceneCardId.toString(),
-    generation_job_id: createdJob.generation_job_id,
+    generation_job_id: generationJobId,
     receipt_id: receipt.id.toString(),
     cursor: cursor.toString(),
   };
@@ -1070,7 +1071,7 @@ async function applyPlanMessageInTransaction(
     return { kind: "plan_not_found" };
 
   if (planMessage.application_kind === "scene_card_create") {
-    return applySceneCardCreateInTransaction(tx, input);
+    return applySceneCardCreateInTransaction(tx, input, planMessage);
   }
   if (planMessage.application_kind === "scene_card_replace") {
     return applySceneCardReplaceInTransaction(tx, input, planMessage);
