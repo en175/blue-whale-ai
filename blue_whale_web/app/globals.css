@@ -154,8 +154,8 @@ body {
      引用：filter: var(--tc-brand-logo-filter)。用 drop-shadow 贴合轮廓，禁 box-shadow（会出矩形阴影框）。
      语义：底部极轻浮起 + 边缘品牌蓝漫射光；不加底板/描边/模糊/透视/动画。 */
   --tc-brand-logo-filter:
-    drop-shadow(0 1px 3px rgb(0 0 0 / 42%))
-    drop-shadow(0 0 7px rgb(59 130 246 / 14%));
+    drop-shadow(0 2px 6px rgb(0 0 0 / 55%))
+    drop-shadow(0 0 10px rgb(59 130 246 / 22%));
 
   --tc-menu-pill-bg: #171717;
   --tc-menu-pill-border: rgba(255, 255, 255, 0.04);

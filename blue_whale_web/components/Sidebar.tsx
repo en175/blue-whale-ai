@@ -51,7 +51,7 @@ export default function Sidebar() {
         <img
           src="/blue_whale.svg"
           alt="Blue-Whale"
-          className="h-8 w-auto"
+          className="h-9 w-auto"
           style={{ filter: "var(--tc-brand-logo-filter)" }}
         />
       </Link>
