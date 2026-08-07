@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { History, Pencil, Plus, Send, Trash2 } from "lucide-react";
+import DirectSkillTag from "@/components/DirectSkillTag";
 import {
   AgentCard,
   AgentMessageBubble,
@@ -34,6 +35,11 @@ import {
   type GenerationInbox,
   type InboxConversation,
 } from "@/lib/generation-inbox";
+import {
+  clearDirectSkillBinding,
+  readDirectSkillBinding,
+  type DirectSkillBinding,
+} from "@/lib/direct-skill-binding";
 import { copyAssetToProject } from "@/lib/assets";
 import { listProjects, renameProject, type ProjectDto } from "@/lib/canvas";
 import { newCommandIdentity } from "@/lib/command-identity";
@@ -43,7 +49,11 @@ import {
   runProjectRecovery,
   type ProjectSnapshot,
 } from "@/lib/project-recovery";
-import { wireIntegersEqual, type WireInteger } from "@/lib/wire-integer";
+import {
+  isWireInteger,
+  wireIntegersEqual,
+  type WireInteger,
+} from "@/lib/wire-integer";
 import { inboxSnapshotToChatMessages } from "./inboxMessages";
 
 const PILL_BTN =
@@ -60,20 +70,42 @@ function formatConversationTime(iso: string): string {
   });
 }
 
+/** 从 Run 快照行提取已激活技能名（0/1 数组，契约 §3）；缺字段/空数组 → null。 */
+function activatedSkillNameOf(run: Record<string, unknown>): string | null {
+  const versions = run.activated_creative_skill_versions;
+  if (!Array.isArray(versions) || versions.length === 0) return null;
+  const first: unknown = versions[0];
+  if (!first || typeof first !== "object") return null;
+  const name = (first as Record<string, unknown>).name;
+  return typeof name === "string" && name !== "" ? name : null;
+}
+
 /** 页面统一的消息输入框（空态/对话态共用）：Enter 发送，Shift+Enter 换行。 */
 function InboxComposer({
   draft,
   sending,
   onDraftChange,
   onSend,
+  boundSkill = null,
+  onRemoveSkill,
 }: {
   draft: string;
   sending: boolean;
   onDraftChange: (value: string) => void;
   onSend: () => void;
+  boundSkill?: DirectSkillBinding | null;
+  onRemoveSkill?: () => void;
 }) {
   return (
     <div className="w-full rounded-2xl border border-[var(--tc-border)] bg-[var(--tc-bg-surface)] p-3">
+      {boundSkill && (
+        <div className="mb-2">
+          <DirectSkillTag
+            name={boundSkill.name}
+            onRemove={() => onRemoveSkill?.()}
+          />
+        </div>
+      )}
       <textarea
         value={draft}
         onChange={(e) => onDraftChange(e.target.value)}
@@ -117,6 +149,12 @@ export default function GeneratePage() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  // 「直接使用」一次性绑定（IK60WY）：首页技能面板写入 sessionStorage，本页挂载后接管。
+  const [boundSkill, setBoundSkill] = useState<DirectSkillBinding | null>(null);
+  // 本会话内由直接使用触发的 Run：agent_run_id → 技能名（运行状态展示用）。
+  const [runSkillNames, setRunSkillNames] = useState<Record<string, string>>(
+    {},
+  );
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
@@ -173,6 +211,23 @@ export default function GeneratePage() {
     };
   }, []);
 
+  // 接管首页技能面板传递的一次性绑定（IK60WY）。
+  useEffect(() => {
+    // 挂载后一次性读取 sessionStorage 是官方认可模式；set-state-in-effect 规则对此误报。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBoundSkill(readDirectSkillBinding());
+  }, []);
+  // forced_creative_skill_id 入命令幂等哈希（激活契约 §2）：绑定变化必须作废待发键，
+  // 否则重试携带不同绑定会触发 IDEMPOTENCY_KEY_REUSED。
+  useEffect(() => {
+    sendKeysRef.current = null;
+  }, [boundSkill]);
+
+  const handleRemoveBoundSkill = useCallback(() => {
+    setBoundSkill(null);
+    clearDirectSkillBinding();
+  }, []);
+
   // 收件箱 Project 级 Snapshot + SSE 恢复闭环（刷新/重进后进度与结果恢复）。
   const projectId = inbox?.project.id ?? null;
   useEffect(() => {
@@ -214,13 +269,58 @@ export default function GeneratePage() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
+  // 运行状态展示（IK60WY/IK60X2）：Run 未终态时显示「使用技能：名称」。
+  // 只显示技能名不显示来源（激活契约 §4），也不进入 Agent 回复正文。
+  // 名称来源：本会话「直接使用」的本地 map 优先；快照 activated_creative_skill_versions
+  // 回退覆盖 auto 激活与刷新后的 forced Run（§16.2）。
+  const activeSkillStatus = useMemo(() => {
+    if (!snapshot || conversationId == null) return null;
+    for (const run of snapshot.agent_runs) {
+      const runId = run.agent_run_id;
+      if (typeof runId !== "number" && typeof runId !== "string") continue;
+      const skillName =
+        runSkillNames[String(runId)] ?? activatedSkillNameOf(run);
+      if (!skillName) continue;
+      const owner = run.conversation_id;
+      if (isWireInteger(owner) && !wireIntegersEqual(owner, conversationId)) {
+        continue;
+      }
+      const status = run.status;
+      if (
+        status === "completed" ||
+        status === "failed" ||
+        status === "cancelled"
+      ) {
+        continue;
+      }
+      return skillName;
+    }
+    return null;
+  }, [snapshot, conversationId, runSkillNames]);
+
   const displayName = snapshot?.project.name ?? inbox?.project.name ?? "";
+
+  // 发送成功即消费绑定（一次性语义）：清标签与存储，记录该 Run 的技能名供运行状态展示。
+  const consumeBoundSkill = useCallback(
+    (skill: DirectSkillBinding | null, agentRunId: WireInteger) => {
+      if (!skill) return;
+      setBoundSkill(null);
+      clearDirectSkillBinding();
+      setRunSkillNames((names) => ({
+        ...names,
+        [String(agentRunId)]: skill.name,
+      }));
+    },
+    [],
+  );
 
   const handleSend = useCallback(() => {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
     setSendError(null);
+    // 「直接使用」绑定只消费一次（IK60WY）：随本条消息下达，成功后即清除。
+    const skill = boundSkill;
     void (async () => {
       try {
         // 同一条消息（文本相同）在重试间复用 client/幂等键；发送成功或修改文本后换新。
@@ -239,9 +339,11 @@ export default function GeneratePage() {
             content: text,
             clientMessageId: keys.clientMessageId,
             idempotencyKey: keys.idempotencyKey,
+            forcedCreativeSkillId: skill?.creative_skill_id,
           });
           sendKeysRef.current = null;
           setDraft("");
+          consumeBoundSkill(skill, accepted.agent_run_id);
           const next = await getGenerationInbox();
           setInbox(next);
           setConversationId(
@@ -256,9 +358,11 @@ export default function GeneratePage() {
             idempotencyKey: keys.idempotencyKey,
             conversationId: conversationId ?? undefined,
             replyToInputRequestId: answerable?.input_request_id,
+            forcedCreativeSkillId: skill?.creative_skill_id,
           });
           sendKeysRef.current = null;
           setDraft("");
+          consumeBoundSkill(skill, accepted.agent_run_id);
           if (conversationId == null)
             setConversationId(accepted.conversation_id);
         }
@@ -268,7 +372,15 @@ export default function GeneratePage() {
         setSending(false);
       }
     })();
-  }, [draft, sending, inbox, snapshot, conversationId]);
+  }, [
+    draft,
+    sending,
+    inbox,
+    snapshot,
+    conversationId,
+    boundSkill,
+    consumeBoundSkill,
+  ]);
 
   const handleNewConversation = useCallback(() => {
     void (async () => {
@@ -423,6 +535,8 @@ export default function GeneratePage() {
             sending={sending}
             onDraftChange={setDraft}
             onSend={handleSend}
+            boundSkill={boundSkill}
+            onRemoveSkill={handleRemoveBoundSkill}
           />
         </div>
       ) : (
@@ -596,6 +710,14 @@ export default function GeneratePage() {
                   return <AgentMessageBubble key={msg.id} text={msg.text} />;
                 })
               )}
+              {activeSkillStatus && (
+                <p
+                  data-testid="run-skill-status"
+                  className="px-1 text-xs text-[var(--tc-text-secondary)]"
+                >
+                  使用技能：{activeSkillStatus}
+                </p>
+              )}
             </div>
           </div>
           <div className="mx-auto w-full max-w-[920px] px-4 pb-4">
@@ -609,6 +731,8 @@ export default function GeneratePage() {
               sending={sending}
               onDraftChange={setDraft}
               onSend={handleSend}
+              boundSkill={boundSkill}
+              onRemoveSkill={handleRemoveBoundSkill}
             />
           </div>
         </>

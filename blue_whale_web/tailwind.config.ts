@@ -9,6 +9,10 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      colors: {
+        success: "#22c55e",
+        accent: "#3b82f6",
+      },
       fontFamily: {
         outfit: ["Outfit", "ui-sans-serif", "system-ui", "sans-serif"],
       },

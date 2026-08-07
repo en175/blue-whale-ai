@@ -5,6 +5,13 @@ import {
   openGenerationCredential,
 } from "@blue-whale/core";
 import {
+  TRACE_ID_HEADER,
+  closeDefaultTlsLogWriter,
+  createLogger,
+  getOrCreateTraceId,
+  runWithTraceId,
+} from "@blue-whale/core/logging";
+import {
   createFakeGenerationAdapter,
   createNewApiVideoTaskProvider,
   createPassthroughVideoMediaRelay,
@@ -17,6 +24,8 @@ import {
 import { createWorkerRepo, getPrismaClient } from "@blue-whale/persistence";
 import { createServer } from "node:http";
 import { hostname } from "node:os";
+
+const logger = createLogger("generation-worker");
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL required");
@@ -70,50 +79,59 @@ if (runtimeMode === "new-api") {
   };
   loop = runVideoWorkerLoop({
     shouldStop: () => stopping,
-    runStep: async () => {
-      try {
-        return await runVideoJobStep({
-          repo,
-          workerId,
-          createProvider: (token) =>
-            createNewApiVideoTaskProvider({ baseUrl, token }),
-          credentialVault: {
-            open: (ciphertext) =>
-              openGenerationCredential(ciphertext, credentialSecret),
-          },
-          mediaRelay,
-        });
-      } catch (error) {
-        console.error(
-          "[generation-worker] step failed:",
-          error instanceof Error ? error.message : "unknown",
-        );
-        return null;
-      }
-    },
+    runStep: () =>
+      // 每个任务步骤一段链路：trace_id 随步骤上下文传递，出站 new-api
+      // 请求与日志自动携带（IK6KQQ）。
+      runWithTraceId(getOrCreateTraceId(), async () => {
+        try {
+          return await runVideoJobStep({
+            repo,
+            workerId,
+            createProvider: (token) =>
+              createNewApiVideoTaskProvider({ baseUrl, token }),
+            credentialVault: {
+              open: (ciphertext) =>
+                openGenerationCredential(ciphertext, credentialSecret),
+            },
+            mediaRelay,
+          });
+        } catch (error) {
+          logger.error(
+            `step failed: ${error instanceof Error ? error.message : "unknown"}`,
+          );
+          return null;
+        }
+      }),
   });
 } else if (runtimeMode !== "fake") {
   throw new Error(`Unsupported GENERATION_RUNTIME_MODE: ${runtimeMode}`);
 }
 
 const server = createServer((request, response) => {
-  void (async () => {
-    if (request.method !== "GET" || request.url !== "/ready") {
-      response.writeHead(404).end();
-      return;
-    }
+  // 透传优先：入站 X-Trace-Id 沿用，缺省生成，注入异步链路上下文（IK6KQQ）。
+  const headerValue = request.headers[TRACE_ID_HEADER];
+  const inboundTraceId = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  void runWithTraceId(getOrCreateTraceId(inboundTraceId), async () => {
+    try {
+      if (request.method !== "GET" || request.url !== "/ready") {
+        response.writeHead(404).end();
+        return;
+      }
 
-    const report = readinessResponseSchema.parse(
-      await checkReadiness("generation-worker", [
-        mysql,
-        { name: runtime.name, check: () => runtime.ready() },
-      ]),
-    );
-    response.writeHead(report.status === "ready" ? 200 : 503, {
-      "content-type": "application/json",
-    });
-    response.end(JSON.stringify(report));
-  })().catch(() => response.writeHead(500).end());
+      const report = readinessResponseSchema.parse(
+        await checkReadiness("generation-worker", [
+          mysql,
+          { name: runtime.name, check: () => runtime.ready() },
+        ]),
+      );
+      response.writeHead(report.status === "ready" ? 200 : 503, {
+        "content-type": "application/json",
+      });
+      response.end(JSON.stringify(report));
+    } catch {
+      response.writeHead(500).end();
+    }
+  });
 });
 
 async function shutdown(): Promise<void> {
@@ -123,6 +141,7 @@ async function shutdown(): Promise<void> {
     server.close((error) => (error ? reject(error) : resolve()));
   });
   await prisma.$disconnect();
+  await closeDefaultTlsLogWriter();
 }
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -131,7 +150,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-server.listen(
-  Number.parseInt(process.env.PORT ?? "4002", 10),
-  process.env.HOST ?? "0.0.0.0",
-);
+const port = Number.parseInt(process.env.PORT ?? "4002", 10);
+const host = process.env.HOST ?? "0.0.0.0";
+server.listen(port, host, () => {
+  logger.info(`generation-worker listening on ${host}:${port}`);
+});

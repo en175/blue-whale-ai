@@ -13,7 +13,12 @@ const mocks = vi.hoisted(() => ({
         username: string;
       }) => Promise<Response>,
     ) =>
-      handler({ userId: "1", status: "enabled", isAdmin: true, username: "admin" }),
+      handler({
+        userId: "1",
+        status: "enabled",
+        isAdmin: true,
+        username: "admin",
+      }),
   ),
   manageAdminUser: vi.fn(),
   recordAdminAction: vi.fn().mockResolvedValue(undefined),
@@ -92,7 +97,9 @@ describe("POST /api/admin/users/:userId/manage", () => {
   });
 
   it("adjustBalance positive → add_quota add with abs value", async () => {
-    await POST(...post("42", { action: "adjustBalance", value: 500, reason: "补偿" }));
+    await POST(
+      ...post("42", { action: "adjustBalance", value: 500, reason: "补偿" }),
+    );
     expect(mocks.manageAdminUser).toHaveBeenCalledWith("sk-admin", 1, {
       id: 42,
       action: "add_quota",
@@ -108,7 +115,9 @@ describe("POST /api/admin/users/:userId/manage", () => {
   });
 
   it("adjustBalance negative → add_quota subtract", async () => {
-    await POST(...post("42", { action: "adjustBalance", value: -50, reason: "扣回" }));
+    await POST(
+      ...post("42", { action: "adjustBalance", value: -50, reason: "扣回" }),
+    );
     expect(mocks.manageAdminUser).toHaveBeenCalledWith("sk-admin", 1, {
       id: 42,
       action: "add_quota",
@@ -126,9 +135,7 @@ describe("POST /api/admin/users/:userId/manage", () => {
   });
 
   it("missing reason / invalid action / bad userId → 400", async () => {
-    expect(
-      (await POST(...post("42", { action: "freeze" }))).status,
-    ).toBe(400);
+    expect((await POST(...post("42", { action: "freeze" }))).status).toBe(400);
     expect(
       (await POST(...post("42", { action: "ban", reason: "x" }))).status,
     ).toBe(400);
@@ -139,9 +146,7 @@ describe("POST /api/admin/users/:userId/manage", () => {
   });
 
   it("upstream failure → error envelope without audit", async () => {
-    mocks.manageAdminUser.mockRejectedValue(
-      new NewApiError("账户已停用", 403),
-    );
+    mocks.manageAdminUser.mockRejectedValue(new NewApiError("账户已停用", 403));
     const res = await POST(...post("42", { action: "freeze", reason: "x" }));
     expect(res.status).toBe(403);
     expect(mocks.recordAdminAction).not.toHaveBeenCalled();

@@ -216,6 +216,55 @@ describe("Agent 对话恢复投影", () => {
     expect(replayed[0]).not.toHaveProperty("imageUrl");
   });
 
+  it("只给已放置的分镜图片节点补稳定访问地址，不创建任意位置的替代节点", () => {
+    const snapshot: ProjectSnapshot = {
+      project: { id: 1, name: "P", thumb: null, created_at: "now" },
+      canvas: { id: 1, project_id: 1, viewport: null, nodes: "[]" },
+      conversation_messages: [],
+      agent_runs: [],
+      generation_jobs: [
+        {
+          job_id: 15,
+          source: "storyboard_preview",
+          type: "image",
+          input: { storyboard_preview: true, aspect_ratio: "16:9" },
+          status: "succeeded",
+          output_slots: [
+            { slot_id: 501, slot_index: 0, status: "succeeded", asset_id: 21 },
+          ],
+        },
+      ],
+      assets: {
+        "21": {
+          asset_id: 21,
+          type: "image",
+          access_url: "/api/projects/1/assets/21/content",
+        },
+      },
+      high_watermark_cursor: 18,
+    };
+    const persisted = [
+      {
+        id: "storyboard-frame:501",
+        type: "image" as const,
+        position: { x: 100, y: 510 },
+        width: 200,
+        height: 112,
+        assetId: "21",
+      },
+    ];
+
+    expect(projectSnapshotToCanvasNodes(snapshot, persisted)).toEqual([
+      expect.objectContaining({
+        id: "storyboard-frame:501",
+        type: "image",
+        assetId: "21",
+        imageUrl: "/api/projects/1/assets/21/content",
+      }),
+    ]);
+    expect(projectSnapshotToCanvasNodes(snapshot, [])).toEqual([]);
+  });
+
   it("部分成功时每个输出槽生成一张 Card，只有成功槽生成 Node", () => {
     const snapshot: ProjectSnapshot = {
       project: { id: 1, name: "P", thumb: null, created_at: "now" },

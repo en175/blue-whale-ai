@@ -35,7 +35,7 @@ bash .claude/skills/deploy-blue-whale-api/scripts/deploy.sh
 
 分步：`build.sh` / `push.sh` / `remote-build.sh` / `restart.sh`。
 
-覆盖配置（环境变量）：`DEPLOY_KEY` / `DEPLOY_HOST` / `DEPLOY_USER` / `REMOTE_DIR` / `API_PORT` / `MYSQL_DSN` / `REDIS_DSN` / `BUN`。
+覆盖配置（环境变量）：`DEPLOY_KEY` / `DEPLOY_HOST` / `DEPLOY_USER` / `REMOTE_DIR` / `API_PORT` / `MYSQL_DSN` / `REDIS_DSN` / `BUN` / `BW_NEW_API_REPO_URL` / `BW_NEW_API_REF`。
 
 ## restart 逻辑
 

@@ -10,6 +10,7 @@ allowBuilds:
   '@prisma/engines': true
   esbuild: true
   msgpackr-extract: false
+  protobufjs: true
   prisma: true
   sharp: true
   tos-crc64-js: false

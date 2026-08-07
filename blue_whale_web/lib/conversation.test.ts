@@ -52,7 +52,7 @@ describe("Conversation 命令 API", () => {
     );
   });
 
-  it("携带 referenced_asset_ids（数字数组、snake_case、DOM 序）", async () => {
+  it("携带跨类型 mentions（snake_case、DOM 序）", async () => {
     vi.mocked(apiRequest).mockResolvedValue({
       message_id: 1,
       agent_run_id: 2,
@@ -65,7 +65,15 @@ describe("Conversation 命令 API", () => {
       "c-3",
       "k-3",
       undefined,
-      [9, 3],
+      [
+        { type: "asset", asset_id: "9", display_name: "蓝鲸" },
+        {
+          type: "scene_card",
+          scene_card_id: "3",
+          scene_card_version: 2,
+          display_name: "开场",
+        },
+      ],
     );
 
     expect(apiRequest).toHaveBeenCalledWith(
@@ -75,13 +83,21 @@ describe("Conversation 命令 API", () => {
         body: JSON.stringify({
           client_message_id: "c-3",
           content: "@[蓝鲸] 帮我画",
-          referenced_asset_ids: [9, 3],
+          mentions: [
+            { type: "asset", asset_id: "9", display_name: "蓝鲸" },
+            {
+              type: "scene_card",
+              scene_card_id: "3",
+              scene_card_version: 2,
+              display_name: "开场",
+            },
+          ],
         }),
       }),
     );
   });
 
-  it("referencedAssetIds 为空时不发送该字段", async () => {
+  it("mentions 为空时不发送该字段", async () => {
     vi.mocked(apiRequest).mockResolvedValue({
       message_id: 1,
       agent_run_id: 2,
@@ -94,7 +110,7 @@ describe("Conversation 命令 API", () => {
       "/api/projects/7/conversation/messages",
       expect.objectContaining({
         method: "POST",
-        body: expect.not.stringContaining("referenced_asset_ids"),
+        body: expect.not.stringContaining('"mentions"'),
       }),
     );
   });
@@ -125,6 +141,55 @@ describe("Conversation 命令 API", () => {
           content: "用这个技能生成",
           forced_creative_skill_id: "cs_ugc_ads_video",
         }),
+      }),
+    );
+  });
+
+  it("携带 skill_summarize（IK60X1 对话总结保存意图，契约 §15.1）", async () => {
+    vi.mocked(apiRequest).mockResolvedValue({
+      message_id: 1,
+      agent_run_id: 2,
+      cursor: 3,
+    });
+
+    await acceptConversationMessage(
+      7,
+      "总结当前对话并保存为我的个人技能",
+      "c-6",
+      "k-6",
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      "/api/projects/7/conversation/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          client_message_id: "c-6",
+          content: "总结当前对话并保存为我的个人技能",
+          skill_summarize: true,
+        }),
+      }),
+    );
+  });
+
+  it("skillSummarize 缺省时不发送该字段（省略即普通消息）", async () => {
+    vi.mocked(apiRequest).mockResolvedValue({
+      message_id: 1,
+      agent_run_id: 2,
+      cursor: 3,
+    });
+
+    await acceptConversationMessage(7, "普通消息", "c-7", "k-7");
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      "/api/projects/7/conversation/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.not.stringContaining("skill_summarize"),
       }),
     );
   });

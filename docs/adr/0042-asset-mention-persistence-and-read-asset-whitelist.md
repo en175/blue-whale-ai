@@ -3,7 +3,7 @@
 - **状态**：Partially Superseded（部分已替代）
 - **日期**：2026-07-22
 - **决策者**：用户（与 Agent grill-with-docs 会话共同得出，触发工单：IK33ZV，IK2QC7 AC#2 follow-up；实施规格见 IK33ZV description）
-- **替代决策**：[锁定显式上下文与 PlanMessage 手动应用契约](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK5Q1U)
+- **替代决策**：[锁定显式上下文与 PlanMessage 手动应用契约](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK5Q1U)
 
 > **IK3UUX 范围状态**：保留消息中不可变的 Asset 引用，以及从权威 NodeItem/Asset 关系计算读取范围；
 > PendingConversationInput、精确浏览器路径和 command 格式不作为前置，见

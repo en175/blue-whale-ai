@@ -13,8 +13,26 @@ export async function PUT(
       viewport?: unknown;
       nodes?: unknown;
     };
-    return Response.json(
-      await handleSaveCanvas(userId, projectId, body, createCanvasDeps()),
+    const ifMatch = request.headers.get("If-Match");
+    let expectedVersion: number | null | undefined;
+    if (ifMatch === '"missing"') {
+      expectedVersion = null;
+    } else if (ifMatch !== null) {
+      const match = /^"([0-9]+)"$/.exec(ifMatch);
+      if (!match?.[1]) {
+        return Response.json(
+          { code: 400, msg: "无效的 If-Match", data: null },
+          { status: 400 },
+        );
+      }
+      expectedVersion = Number(match[1]);
+    }
+    const result = await handleSaveCanvas(
+      userId,
+      projectId,
+      { ...body, expectedVersion },
+      createCanvasDeps(),
     );
+    return Response.json(result, { status: result.code === 412 ? 412 : 200 });
   });
 }

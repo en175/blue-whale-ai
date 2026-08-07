@@ -60,17 +60,15 @@ export async function POST(
     const { client } = createAdminDeps();
     try {
       if (action === "freeze") {
-        await client.manageAdminUser(
-          token,
-          Number(admin.userId),
-          { id: userId, action: "disable" },
-        );
+        await client.manageAdminUser(token, Number(admin.userId), {
+          id: userId,
+          action: "disable",
+        });
       } else if (action === "unfreeze") {
-        await client.manageAdminUser(
-          token,
-          Number(admin.userId),
-          { id: userId, action: "enable" },
-        );
+        await client.manageAdminUser(token, Number(admin.userId), {
+          id: userId,
+          action: "enable",
+        });
       } else {
         // adjustBalance：value 正加负减，零拒绝（契约 4.3）。
         const value = Number(body.value);

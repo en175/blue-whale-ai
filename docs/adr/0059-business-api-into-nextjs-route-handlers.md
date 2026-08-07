@@ -3,7 +3,7 @@
 - **状态**：Accepted
 - **日期**：2026-07-27
 - **决策者**：朱建业（trueBurger）
-- **关联工单**：[IK4AJJ 上线前统一核心运行时至 TypeScript 模块化单体](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK4AJJ)
+- **关联工单**：[IK4AJJ 上线前统一核心运行时至 TypeScript 模块化单体](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK4AJJ)
 - **上游决策**：[ADR-0055 上线前 TypeScript 统一范围](0055-prelaunch-typescript-unification-scope.md)、[ADR-0054 public-api v1 浏览器合同](0054-public-api-v1-browser-product-contract.md)（细节已 Superseded）
 - **取代**：ADR-0055 中「Node 后端提供 product-api、agent-worker、generation-worker 三个独立启动入口」里**业务 API（product-api）作为独立进程**的部分。
 

@@ -1,6 +1,114 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { appendProjectEvent } from "./product-event-repo.js";
+import {
+  aggregateSlotStatus,
+  resolveLogicalSlots,
+  type OutputSlotStatus,
+} from "./generation-output-slot-repo.js";
+
+const CLAIMABLE_JOB_SOURCES = [
+  "bottom_dock",
+  "plan_apply",
+  "storyboard_preview",
+];
+
+/** IK67HE/T14：聚合 record 下全部输出槽状态，回写 SceneCardGenerationRecord.summary_status。
+ *  spec §4.4 状态机：全成功→success；部分→partial；全失败→failed；有 pending→generating。
+ *  在 worker completeJob/failJob 事务内调用，保证槽位与 record 状态原子一致。 */
+async function syncRecordSummary(
+  tx: Prisma.TransactionClient,
+  recordId: bigint,
+): Promise<void> {
+  const slots = await tx.generation_output_slots.findMany({
+    where: { scene_card_generation_record_id: recordId },
+    select: { slot_index: true, status: true },
+    orderBy: { id: "asc" },
+  });
+  if (slots.length === 0) return;
+  const summary = aggregateSlotStatus(
+    resolveLogicalSlots(
+      slots.map((s) => ({
+        slot_index: s.slot_index,
+        status: s.status as OutputSlotStatus,
+      })),
+    ).map((s) => s.status),
+  );
+  const mapped =
+    summary === "generating"
+      ? "generating"
+      : summary === "partial"
+        ? "partial"
+        : summary === "success"
+          ? "success"
+          : "failed";
+  const record = await tx.scene_card_generation_records.update({
+    where: { id: recordId },
+    data: { summary_status: mapped, version: { increment: 1 } },
+  });
+  if (record.project_id != null) {
+    await appendProjectEvent(tx, {
+      projectId: record.project_id.toString(),
+      eventType: "scene_card_generation_record.summary_changed",
+      aggregateType: "scene_card_generation_record",
+      aggregateId: recordId.toString(),
+      aggregateVersion: record.version,
+      correlationId: `record_${recordId.toString()}`,
+      payload: { record_id: recordId.toString(), summary_status: mapped },
+    });
+  }
+}
+
+/** 回写 StoryboardPreview.summary_status（图片路径，IK67HF/T15）：按 first_generation_job_id
+ *  反查预览，聚合该 job 的 output_slots 推进汇总态。与 syncRecordSummary 对偶——视频走 record
+ *  外键（scene_card_generation_record_id），图片 job 不设该外键，故走 first_generation_job_id 反查。 */
+async function syncStoryboardPreviewSummary(
+  tx: Prisma.TransactionClient,
+  jobId: bigint,
+): Promise<void> {
+  const preview = await tx.storyboard_previews.findFirst({
+    where: { first_generation_job_id: jobId, is_delete: 0 },
+    select: { id: true, project_id: true },
+  });
+  if (!preview) return;
+  const slots = await tx.generation_output_slots.findMany({
+    where: { generation_job_id: jobId },
+    select: { slot_index: true, status: true },
+    orderBy: { id: "asc" },
+  });
+  if (slots.length === 0) return;
+  const summary = aggregateSlotStatus(
+    resolveLogicalSlots(
+      slots.map((s) => ({
+        slot_index: s.slot_index,
+        status: s.status as OutputSlotStatus,
+      })),
+    ).map((s) => s.status),
+  );
+  const mapped =
+    summary === "generating"
+      ? "generating"
+      : summary === "partial"
+        ? "partial"
+        : summary === "success"
+          ? "success"
+          : "failed";
+  const updated = await tx.storyboard_previews.update({
+    where: { id: preview.id },
+    data: { summary_status: mapped, version: { increment: 1 } },
+  });
+  if (preview.project_id != null) {
+    await appendProjectEvent(tx, {
+      projectId: preview.project_id.toString(),
+      eventType: "storyboard_preview.summary_changed",
+      aggregateType: "storyboard_preview",
+      aggregateId: preview.id.toString(),
+      aggregateVersion: updated.version,
+      correlationId: `preview_${preview.id.toString()}`,
+      payload: { preview_id: preview.id.toString(), summary_status: mapped },
+    });
+  }
+}
 
 /** 生成 worker 的 DB port：轮询认领 queued 任务 + 调 provider 后落产出/状态/结算。
  *  简化模型：一次任务整体处理（产出多张图时全写 output_asset_ids 数组，不做多槽）。 */
@@ -151,9 +259,13 @@ export interface WorkerRepo {
   ): Promise<void>;
 }
 
-const LEASE_SECONDS = 120;
+function imageJobLeaseSeconds(): number {
+  const raw = Number.parseInt(process.env.IMAGE_JOB_LEASE_SECONDS ?? "", 10);
+  return Number.isInteger(raw) && raw > 0 ? raw : 120;
+}
 
 export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
+  const LEASE_SECONDS = imageJobLeaseSeconds();
   return {
     async claimJobById(jobId, userId, workerId) {
       const candidate = await prisma.generation_jobs.findFirst({
@@ -162,7 +274,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
           user_id: BigInt(userId),
           status: "queued",
           is_delete: false,
-          source: "bottom_dock",
+          source: { in: CLAIMABLE_JOB_SOURCES },
           next_action_at: { lte: new Date() },
         },
       });
@@ -204,7 +316,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
         where: {
           status: "queued",
           is_delete: false,
-          source: "bottom_dock",
+          source: { in: CLAIMABLE_JOB_SOURCES },
           next_action_at: { lte: new Date() },
         },
         orderBy: { id: "asc" },
@@ -242,7 +354,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
       const rows = await prisma.generation_jobs.findMany({
         where: {
           type: "video",
-          source: "bottom_dock",
+          source: { in: ["bottom_dock", "plan_apply", "plan", "scene_card"] },
           is_delete: false,
           next_action_at: { lte: now },
           OR: [
@@ -269,7 +381,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
         where: {
           id: BigInt(jobId),
           type: "video",
-          source: "bottom_dock",
+          source: { in: ["bottom_dock", "plan_apply", "plan", "scene_card"] },
           is_delete: false,
           next_action_at: { lte: now },
           OR: [
@@ -351,7 +463,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
           type: "image",
           status: "queued",
           is_delete: false,
-          source: "bottom_dock",
+          source: { in: CLAIMABLE_JOB_SOURCES },
           next_action_at: { lte: new Date() },
         },
         orderBy: { id: "asc" },
@@ -406,7 +518,7 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
       const candidate = await prisma.generation_jobs.findFirst({
         where: {
           type: "video",
-          source: "bottom_dock",
+          source: { in: ["bottom_dock", "plan_apply", "plan", "scene_card"] },
           is_delete: false,
           next_action_at: { lte: now },
           OR: [
@@ -566,6 +678,22 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
         const job = await tx.generation_jobs.findUnique({
           where: { id: BigInt(input.jobId) },
         });
+        // IK67HE/T14：视频产物产出时更新输出槽（slot_index 0 succeeded）+ 回写 record summary。
+        const videoSlot = await tx.generation_output_slots.findFirst({
+          where: { generation_job_id: BigInt(input.jobId), slot_index: 0 },
+        });
+        if (videoSlot) {
+          await tx.generation_output_slots.update({
+            where: { id: videoSlot.id },
+            data: { status: "succeeded", asset_id: asset.id },
+          });
+          if (videoSlot.scene_card_generation_record_id) {
+            await syncRecordSummary(
+              tx,
+              videoSlot.scene_card_generation_record_id,
+            );
+          }
+        }
         if (job?.project_id !== null && job?.project_id !== undefined) {
           await appendProjectEvent(tx, {
             projectId: job.project_id.toString(),
@@ -601,13 +729,20 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
             projectId: job.project_id.toString(),
             eventType: "generation_job.output_attached",
             aggregateType: "generation_job_output",
-            aggregateId: `${job.id.toString()}:0`,
+            aggregateId: `${job.id.toString()}:${videoSlot?.slot_index ?? 0}`,
             aggregateVersion: 0,
             correlationId: `job_${job.id.toString()}`,
             payload: {
               job_id: job.id.toString(),
-              slot_index: 0,
+              slot_id: videoSlot?.id.toString() ?? null,
+              slot_index: videoSlot?.slot_index ?? 0,
+              status: "succeeded",
               asset_id: asset.id.toString(),
+              retry_of_slot_id:
+                videoSlot?.retry_of_slot_id == null
+                  ? null
+                  : videoSlot.retry_of_slot_id.toString(),
+              initial_placement_status: "pending",
             },
           });
         }
@@ -638,6 +773,19 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
         const job = await tx.generation_jobs.findUnique({
           where: { id: BigInt(input.jobId) },
         });
+        // IK67HE/T14：视频失败时把 pending 槽标 failed + 回写 record summary。
+        const pendingVideoSlots = await tx.generation_output_slots.findMany({
+          where: { generation_job_id: BigInt(input.jobId), status: "pending" },
+        });
+        for (const slot of pendingVideoSlots) {
+          await tx.generation_output_slots.update({
+            where: { id: slot.id },
+            data: { status: "failed" },
+          });
+          if (slot.scene_card_generation_record_id) {
+            await syncRecordSummary(tx, slot.scene_card_generation_record_id);
+          }
+        }
         await tx.generation_job_logs.create({
           data: {
             generation_job_id: BigInt(input.jobId),
@@ -663,6 +811,29 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
               error: { code: input.code, message: input.message },
             },
           });
+          for (const slot of pendingVideoSlots) {
+            await appendProjectEvent(tx, {
+              projectId: job.project_id.toString(),
+              eventType: "generation_job.output_updated",
+              aggregateType: "generation_job_output",
+              aggregateId: `${job.id.toString()}:${slot.slot_index}`,
+              aggregateVersion: 0,
+              correlationId: `job_${job.id.toString()}`,
+              payload: {
+                job_id: job.id.toString(),
+                slot_id: slot.id.toString(),
+                slot_index: slot.slot_index,
+                status: "failed",
+                asset_id: null,
+                retry_of_slot_id:
+                  slot.retry_of_slot_id == null
+                    ? null
+                    : slot.retry_of_slot_id.toString(),
+                initial_placement_status: "pending",
+                error: { code: input.code, message: input.message },
+              },
+            });
+          }
         }
         return true;
       });
@@ -716,17 +887,21 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
       return assetIds.flatMap((id) => {
         const row = byId.get(id);
         return row
-          ? [{
-              id,
-              type: row.type,
-              url: row.url,
-              mime: row.mime,
-              size: row.size === null ? null : Number(row.size),
-              width: row.width,
-              height: row.height,
-              duration:
-                row.duration_ms === null ? row.duration : row.duration_ms / 1000,
-            }]
+          ? [
+              {
+                id,
+                type: row.type,
+                url: row.url,
+                mime: row.mime,
+                size: row.size === null ? null : Number(row.size),
+                width: row.width,
+                height: row.height,
+                duration:
+                  row.duration_ms === null
+                    ? row.duration
+                    : row.duration_ms / 1000,
+              },
+            ]
           : [];
       });
     },
@@ -796,10 +971,47 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
 
     async completeJob(jobId, assetIds) {
       await prisma.$transaction(async (tx) => {
+        // IK67HE/T14：同步输出槽状态——成功 asset 绑定对应 slot_index；缺失槽标 failed。
+        const slots = await tx.generation_output_slots.findMany({
+          where: { generation_job_id: BigInt(jobId) },
+          orderBy: { slot_index: "asc" },
+        });
+        let finalStatus = "succeeded";
+        if (slots.length > 0) {
+          for (const [i, assetId] of assetIds.entries()) {
+            const slot = slots[i];
+            if (slot) {
+              await tx.generation_output_slots.update({
+                where: { id: slot.id },
+                data: { status: "succeeded", asset_id: BigInt(assetId) },
+              });
+            }
+          }
+          // 未匹配到成功 asset 的剩余槽标 failed。
+          for (let i = assetIds.length; i < slots.length; i += 1) {
+            const slot = slots[i];
+            if (!slot) continue;
+            await tx.generation_output_slots.update({
+              where: { id: slot.id },
+              data: { status: "failed" },
+            });
+          }
+          // 聚合 job 状态（全部成功→succeeded；部分→partially_succeeded；全失败→failed）。
+          const statuses = slots.map((s, i) =>
+            i < assetIds.length ? "succeeded" : "failed",
+          );
+          if (statuses.every((s) => s === "succeeded")) {
+            finalStatus = "succeeded";
+          } else if (statuses.some((s) => s === "succeeded")) {
+            finalStatus = "partially_succeeded";
+          } else {
+            finalStatus = "failed";
+          }
+        }
         const job = await tx.generation_jobs.update({
           where: { id: BigInt(jobId) },
           data: {
-            status: "succeeded",
+            status: finalStatus,
             progress: 100,
             output_asset_ids: assetIds.map((id) => Number(id)),
             next_action_at: null,
@@ -825,7 +1037,9 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
             output_asset_ids: assetIds,
           },
         });
-        for (const [slotIndex, assetId] of assetIds.entries()) {
+        for (const [index, assetId] of assetIds.entries()) {
+          const slot = slots[index];
+          const slotIndex = slot?.slot_index ?? index;
           await appendProjectEvent(tx, {
             projectId: job.project_id.toString(),
             eventType: "generation_job.output_attached",
@@ -835,16 +1049,67 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
             correlationId: `job_${job.id.toString()}`,
             payload: {
               job_id: job.id.toString(),
+              slot_id: slot?.id.toString() ?? null,
               slot_index: slotIndex,
+              status: "succeeded",
               asset_id: assetId,
+              retry_of_slot_id:
+                slot?.retry_of_slot_id == null
+                  ? null
+                  : slot.retry_of_slot_id.toString(),
+              initial_placement_status: "pending",
             },
           });
         }
+        for (let index = assetIds.length; index < slots.length; index += 1) {
+          const slot = slots[index];
+          if (!slot) continue;
+          await appendProjectEvent(tx, {
+            projectId: job.project_id.toString(),
+            eventType: "generation_job.output_updated",
+            aggregateType: "generation_job_output",
+            aggregateId: `${job.id.toString()}:${slot.slot_index}`,
+            aggregateVersion: 0,
+            correlationId: `job_${job.id.toString()}`,
+            payload: {
+              job_id: job.id.toString(),
+              slot_id: slot.id.toString(),
+              slot_index: slot.slot_index,
+              status: "failed",
+              asset_id: null,
+              retry_of_slot_id:
+                slot.retry_of_slot_id == null
+                  ? null
+                  : slot.retry_of_slot_id.toString(),
+              initial_placement_status: "pending",
+            },
+          });
+        }
+        // 回写关联的 SceneCardGenerationRecord.summary_status（视频路径）。
+        const firstSlot = slots[0];
+        if (firstSlot?.scene_card_generation_record_id) {
+          await syncRecordSummary(
+            tx,
+            firstSlot.scene_card_generation_record_id,
+          );
+        }
+        // 回写 StoryboardPreview.summary_status（图片路径，IK67HF/T15）。
+        await syncStoryboardPreviewSummary(tx, job.id);
       });
     },
 
     async failJob(jobId, errorCode, errorMessage) {
       await prisma.$transaction(async (tx) => {
+        // IK67HE/T14：失败时把该 job 的全部 pending 槽标 failed。
+        const slots = await tx.generation_output_slots.findMany({
+          where: { generation_job_id: BigInt(jobId), status: "pending" },
+        });
+        for (const slot of slots) {
+          await tx.generation_output_slots.update({
+            where: { id: slot.id },
+            data: { status: "failed" },
+          });
+        }
         const job = await tx.generation_jobs.update({
           where: { id: BigInt(jobId) },
           data: {
@@ -881,7 +1146,40 @@ export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
               error: { code: errorCode, message: errorMessage },
             },
           });
+          for (const slot of slots) {
+            await appendProjectEvent(tx, {
+              projectId: job.project_id.toString(),
+              eventType: "generation_job.output_updated",
+              aggregateType: "generation_job_output",
+              aggregateId: `${job.id.toString()}:${slot.slot_index}`,
+              aggregateVersion: 0,
+              correlationId: `job_${job.id.toString()}`,
+              payload: {
+                job_id: job.id.toString(),
+                slot_id: slot.id.toString(),
+                slot_index: slot.slot_index,
+                status: "failed",
+                asset_id: null,
+                retry_of_slot_id:
+                  slot.retry_of_slot_id == null
+                    ? null
+                    : slot.retry_of_slot_id.toString(),
+                initial_placement_status: "pending",
+                error: { code: errorCode, message: errorMessage },
+              },
+            });
+          }
         }
+        // 回写关联的 SceneCardGenerationRecord.summary_status（视频路径）。
+        const firstSlot = slots[0];
+        if (firstSlot?.scene_card_generation_record_id) {
+          await syncRecordSummary(
+            tx,
+            firstSlot.scene_card_generation_record_id,
+          );
+        }
+        // 回写 StoryboardPreview.summary_status（图片路径，IK67HF/T15）。
+        await syncStoryboardPreviewSummary(tx, job.id);
       });
     },
 

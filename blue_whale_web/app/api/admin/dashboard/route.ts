@@ -18,7 +18,11 @@ export async function GET(request: Request) {
 
     try {
       const { client } = createAdminDeps();
-      const data = await collectDashboardStats(client, token, Number(user.userId));
+      const data = await collectDashboardStats(
+        client,
+        token,
+        Number(user.userId),
+      );
       return Response.json({ success: true, data });
     } catch (error) {
       return adminErrorResponse(error);

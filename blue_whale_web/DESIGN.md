@@ -29,6 +29,25 @@ colors:
   # 登录弹窗专用色
   login-modal-bg: "#141414"
   login-primary-hover: "#3d33d1"
+  # 面板内下拉菜单底色（IK693G，SkillPanel 排序/行菜单）
+  menu-bg: "#1c1c1c"
+  # 个人技能确定性封面渐变色板（IK693G；名称哈希取模的装饰色板，非品牌强调色，spec 故事 49）
+  skill-cover-1-from: "#3b82f6"
+  skill-cover-1-to: "#1e3a8a"
+  skill-cover-2-from: "#8b5cf6"
+  skill-cover-2-to: "#4c1d95"
+  skill-cover-3-from: "#ec4899"
+  skill-cover-3-to: "#831843"
+  skill-cover-4-from: "#f59e0b"
+  skill-cover-4-to: "#78350f"
+  skill-cover-5-from: "#10b981"
+  skill-cover-5-to: "#064e3b"
+  skill-cover-6-from: "#06b6d4"
+  skill-cover-6-to: "#0c4a6e"
+  skill-cover-7-from: "#ef4444"
+  skill-cover-7-to: "#7f1d1d"
+  skill-cover-8-from: "#6366f1"
+  skill-cover-8-to: "#312e81"
   # Dock 组件层级（IK5JV5：VideoDockContent / config 硬编码替换）
   dock-text-strong: "rgba(255, 255, 255, 0.85)"
   dock-text: "rgba(255, 255, 255, 0.72)"
@@ -140,8 +159,10 @@ Blue-Whale 是一个面向 AI Agent / Canvas 交互的纯客户端工作台。�
 - **bg-canvas (#000000)**：画布最底层，纯黑，承载素材节点。
 - **background (#0a0a0a)**：页面默认背景。
 - **bg-surface (#1a1a1a) / bg-elevated (#2a2a2a)**：浮层、面板、Dock 的两级灰阶抬升。
-- **login-modal-bg (#141414)**：登录弹窗卡片背景，介于 background 与 bg-surface 之间。
+- **login-modal-bg (#141414)**：登录弹窗卡片背景，介于 background 与 bg-surface 之间；亦作通用浮层/面板底色复用（SkillPanel、UserMenu、ModalShell）。
 - **login-primary-hover (#3d33d1)**：登录按钮 hover 态，与 login-primary 同源。
+- **menu-bg (#1c1c1c)**：面板内下拉菜单底色（SkillPanel 排序/行菜单）。
+- **skill-cover-N-from/to（8 组渐变）**：个人技能确定性封面色板，按名称哈希取模选取，同名恒定（spec 故事 49）；属名称驱动的装饰色板，不参与品牌单色强调体系。
 - **primary (#ffffff) → muted (rgba 0.4)**：四级文字透明度，对应主/次/三级/弱化语义。
 - **accent (#3b82f6)**：全局唯一交互强调色，用于主按钮、选中态、焦点环。
 - **success (#22c55e) / destructive (#ef4444)**：仅用于状态语义（开关启用、销毁动作），不作装饰。

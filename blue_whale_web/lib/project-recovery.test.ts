@@ -1,16 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CursorExpiredError,
   applyProductEvent,
   applySnapshot,
   consumeProjectEventStream,
   deriveAnswerableClarification,
+  deriveLatestAgentRunDisplay,
+  deriveRunControl,
   initialProjectRecoveryState,
+  projectRecoveryTransport,
   runProjectRecovery,
   type ProductEventEnvelope,
   type ProjectRecoveryTransport,
   type ProjectSnapshot,
 } from "./project-recovery";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function snapshot(cursor: number, name = "before"): ProjectSnapshot {
   return {
@@ -186,7 +193,88 @@ describe("Project 恢复状态机", () => {
       },
     });
     expect(state.snapshot?.generation_jobs).toEqual([
-      { job_id: 7, outputs: [{ slot_index: 0, asset_id: 9 }] },
+      { job_id: 7, output_slots: [{ slot_index: 0, asset_id: 9 }] },
+    ]);
+  });
+
+  it("输出事件更新 Snapshot 同名 output_slots 并保留槽身份", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), {
+      ...snapshot(10),
+      generation_jobs: [
+        {
+          job_id: 7,
+          output_slots: [
+            {
+              slot_id: "501",
+              slot_index: 2,
+              status: "pending",
+              asset_id: null,
+              retry_of_slot_id: "401",
+              initial_placement_status: "pending",
+            },
+          ],
+        },
+      ],
+    });
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_output_slot_11",
+        event_type: "generation_job.output_attached",
+        aggregate_type: "generation_job_output",
+        aggregate_id: "7:2",
+        aggregate_version: 1,
+        payload: {
+          job_id: 7,
+          slot_id: "501",
+          slot_index: 2,
+          status: "succeeded",
+          asset_id: 9,
+          retry_of_slot_id: "401",
+          initial_placement_status: "pending",
+        },
+      }),
+    );
+
+    expect(state.snapshot?.generation_jobs[0]).toEqual({
+      job_id: 7,
+      output_slots: [
+        {
+          slot_id: "501",
+          slot_index: 2,
+          status: "succeeded",
+          asset_id: 9,
+          retry_of_slot_id: "401",
+          initial_placement_status: "pending",
+        },
+      ],
+    });
+    expect(state.snapshot?.generation_jobs[0]).not.toHaveProperty("outputs");
+  });
+
+  it("记录汇总事件更新 SceneCardGenerationRecord", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), {
+      ...snapshot(10),
+      scene_card_generation_records: [
+        { record_id: "88", summary_status: "generating" },
+      ],
+    });
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_record_summary_11",
+        event_type: "scene_card_generation_record.summary_changed",
+        aggregate_type: "scene_card_generation_record",
+        aggregate_id: "88",
+        aggregate_version: 2,
+        payload: { record_id: "88", summary_status: "success" },
+      }),
+    );
+
+    expect(state.snapshot?.scene_card_generation_records).toEqual([
+      { record_id: "88", summary_status: "success" },
     ]);
   });
 
@@ -213,7 +301,7 @@ describe("Project 恢复状态机", () => {
     expect(state.snapshot?.generation_jobs).toEqual([
       {
         job_id: 7,
-        outputs: [
+        output_slots: [
           {
             slot_index: 1,
             status: "failed",
@@ -665,7 +753,311 @@ describe("创作澄清活动请求投影", () => {
   });
 });
 
+describe("AgentRun 安全展示投影", () => {
+  it("从最新 Run 派生状态、Skill 名称和 ReasoningSummary", () => {
+    const snap: ProjectSnapshot = {
+      ...snapshot(10),
+      agent_runs: [
+        { agent_run_id: 8, status: "completed" },
+        {
+          agent_run_id: 9,
+          status: "running",
+          activated_creative_skill_versions: [
+            { name: "海报专家", source: "forced_use" },
+          ],
+          reasoning_summary: "正在使用已冻结技能。",
+          run_pin: { private: true },
+        },
+      ],
+    };
+
+    expect(deriveLatestAgentRunDisplay(snap)).toEqual({
+      agentRunId: 9,
+      status: "running",
+      stage: null,
+      terminalReason: null,
+      failureCode: null,
+      retryCount: 0,
+      skillName: "海报专家",
+      reasoningSummary: "正在使用已冻结技能。",
+    });
+  });
+
+  it("PlanPhase 阶段从 Snapshot 恢复（IK67GY T06）", () => {
+    const snap: ProjectSnapshot = {
+      ...snapshot(10),
+      agent_runs: [
+        {
+          agent_run_id: 9,
+          status: "awaiting_input",
+          stage: "awaiting_final_confirmation",
+          active_input_request: {
+            input_request_id: 42,
+            request_type: "creation_clarification",
+            question: "确认以上需求并正式提交计划吗？",
+            status: "pending",
+            expires_at: "2026-08-05T00:00:00.000Z",
+          },
+        },
+      ],
+    };
+
+    const display = deriveLatestAgentRunDisplay(snap);
+    expect(display?.stage).toBe("awaiting_final_confirmation");
+    expect(
+      deriveAnswerableClarification(snap, new Date("2026-08-04T00:00:00Z"))
+        ?.question,
+    ).toBe("确认以上需求并正式提交计划吗？");
+  });
+});
+
 describe("Project 恢复协调器", () => {
+  it("通过现有 Canvas If-Match 完整 PUT 恢复待放置输出", async () => {
+    const pendingSnapshot: ProjectSnapshot = {
+      ...snapshot(10),
+      canvas: {
+        id: 2,
+        project_id: 1,
+        version: 3,
+        viewport: '{"zoom":1}',
+        nodes: "[]",
+      },
+      generation_jobs: [
+        {
+          job_id: 300,
+          type: "image",
+          input: {
+            placement_anchor: { x: 10, y: 20, width: 240, height: 135 },
+          },
+          output_slots: [
+            {
+              slot_id: "501",
+              slot_index: 0,
+              status: "succeeded",
+              asset_id: "901",
+              initial_placement_status: "pending",
+            },
+          ],
+        },
+      ],
+    };
+    const savedCanvas = {
+      ...pendingSnapshot.canvas,
+      version: 4,
+      nodes: '[{"id":"generation-output:501"}]',
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ code: 200, msg: "ok", data: pendingSnapshot }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ code: 200, msg: "ok", data: savedCanvas }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const canvas = await projectRecoveryTransport.recoverPlacements?.(
+      1,
+      new AbortController().signal,
+    );
+
+    expect(canvas).toEqual(savedCanvas);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/1/snapshot");
+    const [url, options] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("/api/canvases/1");
+    expect(options.method).toBe("PUT");
+    expect(new Headers(options.headers).get("If-Match")).toBe('"3"');
+    expect(String(options.body)).toContain("generation-output:501");
+  });
+
+  it("恢复分镜输出时持久化可渲染的图片节点而非未知节点类型", async () => {
+    const pendingSnapshot: ProjectSnapshot = {
+      ...snapshot(10),
+      canvas: {
+        id: 2,
+        project_id: 1,
+        version: 3,
+        viewport: '{"zoom":1}',
+        nodes: JSON.stringify([
+          {
+            id: "scene-card:66",
+            type: "scene_card",
+            scene_card_id: "66",
+            position: { x: 100, y: 200 },
+            width: 400,
+            height: 300,
+            status: "placed",
+          },
+        ]),
+      },
+      generation_jobs: [
+        {
+          job_id: 300,
+          type: "image",
+          input: { storyboard_preview: true, scene_card_id: "66" },
+          output_slots: [
+            {
+              slot_id: "501",
+              slot_index: 0,
+              status: "succeeded",
+              asset_id: "901",
+              initial_placement_status: "pending",
+            },
+          ],
+        },
+      ],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ code: 200, msg: "ok", data: pendingSnapshot }),
+      )
+      .mockImplementationOnce(async (_url: string, options: RequestInit) =>
+        Response.json({
+          code: 200,
+          msg: "ok",
+          data: {
+            ...pendingSnapshot.canvas,
+            version: 4,
+            nodes: JSON.parse(String(options.body)).nodes,
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await projectRecoveryTransport.recoverPlacements?.(
+      1,
+      new AbortController().signal,
+    );
+
+    const [, options] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const body = JSON.parse(String(options.body)) as { nodes: string };
+    const nodes = JSON.parse(body.nodes) as Array<Record<string, unknown>>;
+    expect(nodes).toContainEqual(
+      expect.objectContaining({
+        id: "storyboard-frame:501",
+        type: "image",
+        storyboardFrame: true,
+        position: { x: 100, y: 510 },
+      }),
+    );
+  });
+
+  it("加载快照前及收到生成输出事件后触发 Canvas 放置恢复", async () => {
+    const controller = new AbortController();
+    const calls: string[] = [];
+    const appliedCanvasNodes: Array<string | null> = [];
+    const transport = {
+      recoverPlacements: vi.fn(async () => {
+        calls.push("recover");
+        if (calls.filter((call) => call === "recover").length === 2) {
+          return {
+            id: "2",
+            project_id: "1",
+            version: 2,
+            viewport: '{"zoom":1}',
+            nodes: '[{"id":"generation-output:501"}]',
+          };
+        }
+        return null;
+      }),
+      loadSnapshot: vi.fn(async () => {
+        calls.push("snapshot");
+        return snapshot(10);
+      }),
+      consumeEvents: vi.fn(async (_projectId, _after, _signal, onEvent) => {
+        onEvent(
+          event({
+            event_id: "evt_output_11",
+            cursor: 11,
+            event_type: "generation_job.output_attached",
+            aggregate_type: "generation_job_output",
+            aggregate_id: "300:0",
+            aggregate_version: 0,
+            payload: { job_id: "300", slot_index: 0, asset_id: "901" },
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        controller.abort();
+      }),
+    } as unknown as ProjectRecoveryTransport;
+
+    await runProjectRecovery(
+      1,
+      transport,
+      (state) => {
+        appliedCanvasNodes.push(state.snapshot?.canvas.nodes ?? null);
+      },
+      controller.signal,
+      0,
+    );
+
+    expect(calls.slice(0, 2)).toEqual(["recover", "snapshot"]);
+    expect(calls.filter((call) => call === "recover")).toHaveLength(2);
+    expect(appliedCanvasNodes).toContain('[{"id":"generation-output:501"}]');
+  });
+
+  it("较晚返回的旧 Canvas 不覆盖已应用的新版本", async () => {
+    const controller = new AbortController();
+    let resolveOlder!: (canvas: ProjectSnapshot["canvas"]) => void;
+    let resolveNewer!: (canvas: ProjectSnapshot["canvas"]) => void;
+    const older = new Promise<ProjectSnapshot["canvas"]>((resolve) => {
+      resolveOlder = resolve;
+    });
+    const newer = new Promise<ProjectSnapshot["canvas"]>((resolve) => {
+      resolveNewer = resolve;
+    });
+    let recoveryCall = 0;
+    const versions: Array<number | null | undefined> = [];
+    const initialSnapshot = snapshot(10);
+    initialSnapshot.canvas.version = 1;
+    const transport: ProjectRecoveryTransport = {
+      recoverPlacements: vi.fn(async () => {
+        recoveryCall += 1;
+        if (recoveryCall === 1) return null;
+        return recoveryCall === 2 ? older : newer;
+      }),
+      loadSnapshot: vi.fn(async () => initialSnapshot),
+      consumeEvents: vi.fn(async (_projectId, _after, _signal, onEvent) => {
+        onEvent(
+          event({
+            event_id: "evt_output_11",
+            cursor: 11,
+            event_type: "generation_job.output_attached",
+          }),
+        );
+        onEvent(
+          event({
+            event_id: "evt_output_12",
+            cursor: 12,
+            event_type: "generation_job.output_updated",
+          }),
+        );
+        resolveNewer({ ...initialSnapshot.canvas, version: 3, nodes: "[3]" });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        resolveOlder({
+          ...initialSnapshot.canvas,
+          version: null,
+          nodes: "[2]",
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        controller.abort();
+      }),
+    };
+
+    await runProjectRecovery(
+      1,
+      transport,
+      (state) => versions.push(state.snapshot?.canvas.version),
+      controller.signal,
+      0,
+    );
+
+    expect(versions).toContain(3);
+    expect(versions.at(-1)).toBe(3);
+  });
+
   it("Assistant 流中途断线后从最后游标续传且文本不重不漏", async () => {
     const controller = new AbortController();
     const afterValues: number[] = [];
@@ -893,5 +1285,165 @@ describe("Project 恢复协调器", () => {
 
     expect(afterValues).toEqual([5, 5, 5, 6, 6]);
     vi.useRealTimers();
+  });
+});
+
+describe("T07 临时交付与运行控制（IK67GZ，契约 §8）", () => {
+  it("临时交付事件只进入活动投影：started/chunk 累积，completed 清除，绝不并入正式消息", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_p1",
+        cursor: 11,
+        event_type: "agent_run.provisional_delivery_started",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 3,
+        payload: { agent_run_id: 9, advance_id: 30, delivery_id: 77 },
+      }),
+    );
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_p2",
+        cursor: 12,
+        event_type: "agent_run.provisional_chunk_appended",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 3,
+        payload: {
+          agent_run_id: 9,
+          delivery_id: 77,
+          chunk_index: 0,
+          content: "你好",
+        },
+      }),
+    );
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_p3",
+        cursor: 13,
+        event_type: "agent_run.provisional_chunk_appended",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 3,
+        payload: {
+          agent_run_id: 9,
+          delivery_id: 77,
+          chunk_index: 1,
+          content: "世界",
+        },
+      }),
+    );
+
+    expect(state.provisionalDeliveries.get("77")).toEqual({
+      deliveryId: "77",
+      agentRunId: "9",
+      content: "你好世界",
+      status: "streaming",
+    });
+    expect(state.snapshot?.conversation_messages).toEqual([]);
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_p4",
+        cursor: 14,
+        event_type: "agent_run.provisional_delivery_completed",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 4,
+        payload: { agent_run_id: 9, advance_id: 30, delivery_id: 77 },
+      }),
+    );
+    expect(state.provisionalDeliveries.size).toBe(0);
+    expect(state.snapshot?.conversation_messages).toEqual([]);
+  });
+
+  it("用户停止中断临时交付：interrupted 事件清除活动投影", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_s1",
+        cursor: 11,
+        event_type: "agent_run.provisional_delivery_started",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 3,
+        payload: { agent_run_id: 9, advance_id: 30, delivery_id: 88 },
+      }),
+    );
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_s2",
+        cursor: 12,
+        event_type: "agent_run.provisional_delivery_interrupted",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 4,
+        payload: { agent_run_id: 9, delivery_id: 88, reason: "user_cancelled" },
+      }),
+    );
+    expect(state.provisionalDeliveries.size).toBe(0);
+  });
+
+  it("Snapshot 恢复清空临时投影（契约 §8.6）", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), snapshot(10));
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_r1",
+        cursor: 11,
+        event_type: "agent_run.provisional_delivery_started",
+        aggregate_type: "agent_run",
+        aggregate_id: "9",
+        aggregate_version: 3,
+        payload: { agent_run_id: 9, advance_id: 30, delivery_id: 99 },
+      }),
+    );
+    expect(state.provisionalDeliveries.size).toBe(1);
+    state = applySnapshot(state, snapshot(20));
+    expect(state.provisionalDeliveries.size).toBe(0);
+  });
+});
+
+describe("deriveRunControl（IK67GZ，契约 §8.2/§8.3）", () => {
+  it("queued/running 可停止，failed 可重试，用户停止显示非消息状态", () => {
+    const base = {
+      agentRunId: 9,
+      stage: null,
+      terminalReason: null,
+      failureCode: null,
+      retryCount: 0,
+      skillName: null,
+      reasoningSummary: null,
+    };
+    expect(deriveRunControl({ ...base, status: "running" })).toEqual({
+      canStop: true,
+      canRetry: false,
+      stoppedByUser: false,
+    });
+    expect(deriveRunControl({ ...base, status: "failed" })).toEqual({
+      canStop: false,
+      canRetry: true,
+      stoppedByUser: false,
+    });
+    expect(
+      deriveRunControl({
+        ...base,
+        status: "cancelled",
+        terminalReason: "user_requested",
+      }),
+    ).toEqual({ canStop: false, canRetry: false, stoppedByUser: true });
+    expect(deriveRunControl(null)).toEqual({
+      canStop: false,
+      canRetry: false,
+      stoppedByUser: false,
+    });
   });
 });

@@ -12,7 +12,18 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { useAuth } from "@/components/auth/AuthContext";
 import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
 import { toast } from "@/components/Toast";
-import { uploadAsset } from "@/lib/assets";
+import {
+  completeUploadSession,
+  ensureUploadSession,
+  uploadAsset,
+  type UploadSession,
+} from "@/lib/assets";
+import {
+  detectMediaKind,
+  fallbackMediaSize,
+  readMediaNaturalSize,
+  type MediaKind,
+} from "@/lib/mediaSize";
 import {
   IMAGE_UPLOAD_ACCEPT,
   UPLOAD_ACCEPT,
@@ -35,6 +46,7 @@ import {
 import { effectiveToolMode, type ToolMode } from "./_canvas/v2/toolMode";
 import { useSpaceHeld } from "./_canvas/v2/useSpaceHeld";
 import { useV2Projects } from "./_canvas/v2/useV2Projects";
+import { useProjectConversation } from "./_canvas/hooks/useProjectConversation";
 import {
   buildCrossmodalRefill,
   canvasNodeToDockMedia,
@@ -63,6 +75,7 @@ import {
   ZoomControls,
 } from "./_canvas";
 import { ToolbarFlyout } from "./_canvas/components/ToolbarFlyout";
+import { SceneCardPanel } from "./_scene-card/SceneCardPanel";
 import { CardLibraryPicker } from "./_canvas/components/CardLibraryPicker";
 import { NodeInfoModal } from "./_canvas/components/NodeInfoModal";
 import {
@@ -167,6 +180,19 @@ export function CanvasProjectRuntime({
     setCardStatus,
   } = useV2Projects(pid);
 
+  // 持久化 Conversation 接线（IK67GD T02）：后端可用时消息权威来自 Snapshot/SSE，
+  // 提交走公开接纳 API；后端不可达时保留既有离线 mock（messages 内存态 + 无 onSubmitMessage）。
+  const {
+    messages: conversationMessages,
+    snapshot: projectSnapshot,
+    sendMessage: sendConversationMessage,
+    answerableActive,
+    agentRunDisplay,
+    runControl,
+    provisionalText,
+    retryRun,
+  } = useProjectConversation(pid, backendReady);
+
   // canvas 数据 = useCanvasDoc hook（本地 state，不卡）；assets = zustand（业务缓存）
   const {
     nodes,
@@ -206,6 +232,7 @@ export function CanvasProjectRuntime({
   );
 
   const [isAgentOpen, setIsAgentOpen] = useState(false);
+  const [isSceneCardsOpen, setIsSceneCardsOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
   /** 曾打开即常驻挂载（keep-alive）：关闭仅 display:none 隐藏，
    *  BottomDock 内 prompt/mentions 与各面板设置 state 原样保留（IK55VF） */
@@ -471,7 +498,22 @@ export function CanvasProjectRuntime({
           setIsAgentOpen(true);
           const batchId = Date.now();
           setAgentPendingMention({
-            mentions: [{ name, nonce: batchId }],
+            mentions: [
+              {
+                name,
+                nonce: batchId,
+                // 与右键「添加到聊天」一致：带 assetId 走 pill 路径，发送时进 referenced_asset_ids
+                ...(src ? { src } : {}),
+                ...(node.data.assetId
+                  ? { assetId: wireInteger(node.data.assetId) }
+                  : {}),
+                ...(node.data.kind === "image" ||
+                node.data.kind === "video" ||
+                node.data.kind === "audio"
+                  ? { type: node.data.kind }
+                  : {}),
+              },
+            ],
             batchId,
           });
           break;
@@ -791,6 +833,55 @@ export function CanvasProjectRuntime({
       return pending;
     },
     [addAsset, addNode, patchNode, pid, resizeNode, setGenerateError],
+  );
+
+  /**
+   * 对话面板上传（IK67GX T03）：持久化 Asset → 创建 NodeItem 并首次放置 → 面板插入 pill。
+   * 会话按 File 弱引用缓存：PUT/complete 失败后重试沿用同一 storage_key，
+   * complete 幂等 ⇒ 每个文件至多一个 Asset，重试不重复创建。
+   */
+  const composerUploadSessionsRef = useRef(new WeakMap<File, UploadSession>());
+  const handleComposerUploadFile = useCallback(
+    async (
+      file: File,
+    ): Promise<{ assetId: string; url: string; kind: MediaKind }> => {
+      const kind = detectMediaKind(file);
+      const session = await ensureUploadSession(
+        file,
+        kind,
+        composerUploadSessionsRef.current.get(file) ?? null,
+      );
+      // PUT 前先存会话：这一步之后任何失败，重试都能沿用同一 storage_key
+      composerUploadSessionsRef.current.set(file, session);
+      const { assetId, url } = await completeUploadSession({
+        file,
+        projectId: wireInteger(pid),
+        kind,
+        session,
+      });
+      addAsset({ id: assetId, kind, src: url, source: "uploaded" });
+      let size = fallbackMediaSize(kind);
+      try {
+        size = await readMediaNaturalSize(url, kind);
+      } catch {
+        // 尺寸探测失败不阻断：Asset 已持久化，节点用默认尺寸落位
+      }
+      addNode(kind, {
+        width: size.width,
+        height: size.height,
+        data: {
+          content: file.name,
+          status: "done",
+          assetId,
+          recipe: { origin: "uploaded" },
+        },
+      });
+      // 节点落地成功后才丢弃会话：此前任何失败，重试沿用同一 storage_key
+      // （complete 幂等），不会重复创建 Asset
+      composerUploadSessionsRef.current.delete(file);
+      return { assetId, url, kind };
+    },
+    [pid, addNode, addAsset],
   );
 
   const handleFileChange = useCallback(
@@ -1633,7 +1724,18 @@ export function CanvasProjectRuntime({
       <AgentChatPanel
         key={activeProject.id}
         prompt={prompt}
-        messages={messages}
+        projectId={activeProject.id}
+        messages={backendReady ? conversationMessages : messages}
+        onSubmitMessage={backendReady ? sendConversationMessage : undefined}
+        onUploadFile={backendReady ? handleComposerUploadFile : undefined}
+        answerableActive={answerableActive}
+        activeSkillName={agentRunDisplay?.skillName}
+        agentRunStatus={agentRunDisplay?.status}
+        reasoningSummary={agentRunDisplay?.reasoningSummary}
+        provisionalContent={provisionalText}
+        onRetryAgentRun={
+          backendReady && runControl.canRetry ? retryRun : undefined
+        }
         isOpen={isAgentOpen}
         onClose={() => setIsAgentOpen(false)}
         pendingMention={agentPendingMention}
@@ -1642,6 +1744,22 @@ export function CanvasProjectRuntime({
         onAppendMessages={(msgs: ChatMessage[]) => appendMessages(msgs)}
         onSetCardStatus={(cardId, status) => setCardStatus(cardId, status)}
       />
+
+      {isSceneCardsOpen && (
+        <div
+          className="fixed left-4 top-[68px] z-[1200] flex max-h-[calc(100vh-180px)] w-[320px] flex-col overflow-y-auto rounded p-3"
+          style={{
+            background: "var(--tc-bg-surface)",
+            border: "1px solid var(--tc-border-subtle)",
+          }}
+        >
+          <SceneCardPanel
+            key={activeProject.id}
+            projectId={activeProject.id}
+            snapshot={backendReady ? projectSnapshot : null}
+          />
+        </div>
+      )}
 
       <div className="absolute bottom-4 left-4 z-[400] flex items-center gap-2">
         <Link
@@ -1655,6 +1773,19 @@ export function CanvasProjectRuntime({
           <ArrowLeft width={14} height={14} />
           返回首页
         </Link>
+        {backendReady && (
+          <button
+            type="button"
+            onClick={() => setIsSceneCardsOpen((v) => !v)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-white/70 backdrop-blur-md transition-colors hover:text-white"
+            style={{
+              background: "var(--tc-bg-surface)",
+              border: "1px solid var(--tc-menu-pill-border)",
+            }}
+          >
+            场景卡
+          </button>
+        )}
         {backendReady && saveState !== "idle" && (
           <span className="text-xs" style={{ color: "var(--tc-text-muted)" }}>
             {saveState === "saving" ? "保存中…" : "已保存"}

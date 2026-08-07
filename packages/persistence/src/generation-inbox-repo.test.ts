@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
+import { bundledAgentRuntimeManifest } from "../../agent-runtime/src/runtime-manifest.js";
 
 import { createGenerationInboxRepo } from "./generation-inbox-repo.js";
 
@@ -34,6 +35,9 @@ describe("GenerationInboxRepo", () => {
           version: 0,
         }),
       },
+      user_skill: { findMany: vi.fn().mockResolvedValue([]) },
+      creative_skill: { findMany: vi.fn().mockResolvedValue([]) },
+      creative_skill_version: { findMany: vi.fn().mockResolvedValue([]) },
       conversation_messages: {
         create: vi.fn().mockResolvedValue({
           id: 8n,
@@ -65,7 +69,10 @@ describe("GenerationInboxRepo", () => {
       $transaction: vi.fn(async (callback) => callback(tx)),
     } as unknown as PrismaClient;
 
-    const result = await createGenerationInboxRepo(prisma).acceptMessage({
+    const result = await createGenerationInboxRepo(
+      prisma,
+      bundledAgentRuntimeManifest,
+    ).acceptMessage({
       userId: "100",
       idempotencyKey: "cmd-1",
       requestHash: "a".repeat(64),
@@ -73,6 +80,7 @@ describe("GenerationInboxRepo", () => {
       content: "生成蓝鲸海报",
       conversationId: null,
       replyToInputRequestId: null,
+      forcedCreativeSkillId: null,
     });
 
     expect(tx.project.create).toHaveBeenCalledWith({
@@ -102,7 +110,7 @@ describe("GenerationInboxRepo", () => {
     const prisma = { project: { findFirst } } as unknown as PrismaClient;
 
     await expect(
-      createGenerationInboxRepo(prisma).get("100"),
+      createGenerationInboxRepo(prisma, bundledAgentRuntimeManifest).get("100"),
     ).resolves.toBeNull();
     expect(findFirst).toHaveBeenCalledTimes(1);
   });
@@ -124,7 +132,7 @@ describe("GenerationInboxRepo", () => {
     const prisma = { $transaction: transaction } as unknown as PrismaClient;
 
     await expect(
-      createGenerationInboxRepo(prisma).acceptMessage({
+      createGenerationInboxRepo(prisma, bundledAgentRuntimeManifest).acceptMessage({
         userId: "100",
         idempotencyKey: "cmd-1",
         requestHash: "a".repeat(64),
@@ -132,6 +140,7 @@ describe("GenerationInboxRepo", () => {
         content: "生成蓝鲸海报",
         conversationId: null,
         replyToInputRequestId: null,
+        forcedCreativeSkillId: null,
       }),
     ).resolves.toEqual(replayed);
     expect(transaction).toHaveBeenCalledTimes(2);

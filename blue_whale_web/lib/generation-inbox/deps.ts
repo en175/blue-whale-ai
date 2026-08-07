@@ -1,3 +1,4 @@
+import { bundledAgentRuntimeManifest } from "@blue-whale/agent-runtime";
 import {
   createGenerationInboxRepo,
   getPrismaClient,
@@ -6,5 +7,6 @@ import {
 export function createGenerationInboxDeps() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL required");
-  return createGenerationInboxRepo(getPrismaClient(databaseUrl));
+  const prisma = getPrismaClient(databaseUrl);
+  return createGenerationInboxRepo(prisma, bundledAgentRuntimeManifest);
 }

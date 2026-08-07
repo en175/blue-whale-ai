@@ -8,7 +8,9 @@ const mocks = vi.hoisted(() => {
     withOptionalUser: vi.fn(
       async (
         _request: Request,
-        handler: (user: { userId: string } | null) => Promise<Response> | Response,
+        handler: (
+          user: { userId: string } | null,
+        ) => Promise<Response> | Response,
       ) => handler(null),
     ),
     createTemplatesDeps: vi.fn(() => templatesDeps),
@@ -62,7 +64,9 @@ describe("GET /api/agent/templates/page（公开接口，IK6GM6/IK6GTT）", () =
     mocks.withOptionalUser.mockImplementationOnce(
       async (
         _request: Request,
-        handler: (user: { userId: string } | null) => Promise<Response> | Response,
+        handler: (
+          user: { userId: string } | null,
+        ) => Promise<Response> | Response,
       ) => handler({ userId: "9" }),
     );
     const request = new Request(

@@ -5,7 +5,7 @@
 > **状态**：✅ 已合并到 master（PR #44，merge commit `2c6aebd`）
 > **分支**：`feature/IJZYWD-canvas-useProject`
 > **commit**：`be6aa33`（feat）+ `49997a3`（review fix）+ `84b6f09`（docs）+ `9908f4b`（setViewport 死循环 hotfix）→ merged as `2c6aebd`
-> **PR**：[#44](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/pulls/44)
+> **PR**：[#44](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/pulls/44)
 > **完成日期**：2026-07-10
 
 ## 范围

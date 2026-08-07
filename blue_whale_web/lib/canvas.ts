@@ -5,6 +5,7 @@
  * 浏览器只发送 Authorization；服务端路由通过 new-api 校验凭据并解析用户身份。
  */
 import { loadAccessToken } from "@/components/auth/authStorage";
+import { notifyAuthFailure } from "./api-client";
 import type { WireInteger } from "./wire-integer";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -67,6 +68,9 @@ async function getResult<T>(
     FETCH_TIMEOUT,
   );
   if (!res.ok) {
+    if (res.status === 401) {
+      notifyAuthFailure();
+    }
     throw new ApiError(`请求失败: ${res.status}`, res.status);
   }
   const result = (await res.json()) as ApiResult<T>;

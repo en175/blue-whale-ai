@@ -1,50 +1,60 @@
 /**
- * skills —— Skill 面板后端 API 请求层（IJZ7Z8）。
+ * skills —— Skill 面板后端 API 请求层（IJZ7Z8；IK60WS 切稳定身份）。
  *
- * 走 Next rewrite /api/agent/skills/* → 网关 → agent-service（见 next.config.ts），同源无 CORS。
+ * 走本地 Next 路由 /api/agent/skills/*（BFF 直连数据库），同源无 CORS。
  * 鉴权统一走 apiFetch：登录态自动附 Authorization，401 自动刷新。
  *
- * 字段命名：agent-service 未配 Jackson SNAKE_CASE，字段按 Java 原样 camelCase 输出
- * （skillId / coverUrl / records / current / pages）。已对齐后端实际返回，勿改回 snake_case。
- * library 分页（POST，默认 50/页），mine 一次返全（用户添加数量有限）。
+ * wire 一律 snake_case（契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §3/§6）：
+ * 唯一公开主键 creative_skill_id，分页壳 records/total/current/size（无 pages）。
+ * library 分页（POST，默认 50/页），mine 同样 POST 分页。
  */
 import { apiFetch } from "@/lib/api-client";
 
+/** library 视图（契约 §3 白名单；creative_skill_id 可空：目录行缺版本化映射时为 null，命令按不存在处理；
+ *  name/description 为按请求语言解析后的单值；usage_count 为成功激活去重用户数） */
 export type SkillLibraryItem = {
-  id: number;
+  creative_skill_id: string | null;
   name: string;
-  description: string;
-  coverUrl: string | null;
+  description: string | null;
+  cover_url: string | null;
   source: string;
+  asset_domain: "official";
   added: boolean;
-  /** Creative Skill 稳定身份（IK3NPB，wire snake_case；Use 强制激活用） */
-  creative_skill_id: string | null;
+  category: string;
+  usage_count: number;
 };
 
+/** mine 视图（契约 §3 白名单：官方引用 ∪ 名下个人技能；personal 行 cover_url/source 为 null、auto 恒 false） */
 export type SkillMineItem = {
-  skillId: number;
-  auto: boolean;
-  name: string;
-  description: string;
-  coverUrl: string | null;
-  source: string;
-  /** Creative Skill 稳定身份（IK3NPB，wire snake_case；Use 强制激活用） */
   creative_skill_id: string | null;
+  auto: boolean;
+  name: string | null;
+  description: string | null;
+  cover_url: string | null;
+  source: string | null;
+  asset_domain: "official" | "personal";
 };
 
-/** MyBatis-Plus Page 序列化结构（camelCase） */
+/** BFF 分页壳（snake_case wire：records/total/current/size，无 pages） */
 export type Page<T> = {
   records: T[];
   total: number;
   current: number;
   size: number;
-  pages: number;
 };
+
+/** library 浏览参数（契约 §11.5：category 缺省 all，sort 缺省 featured，lang 缺省 zh） */
+export type SkillLibraryCategory = "all" | "film" | "marketing" | "other";
+export type SkillLibrarySort = "featured" | "most_used" | "newest";
+export type SkillLibraryLang = "zh" | "en";
 
 export type LibraryQuery = {
   pageNum: number;
   pageSize: number;
   keyword?: string;
+  category?: SkillLibraryCategory;
+  sort?: SkillLibrarySort;
+  lang?: SkillLibraryLang;
 };
 
 /** Run 级 Creative Skill 推荐项（IK3NPI，wire snake_case；后端四字段契约） */
@@ -95,19 +105,34 @@ async function requestUrl<T>(
 }
 
 export const skillsApi = {
-  /** Skill 库分页（POST，默认 50/页，可 keyword 搜 name/description） */
+  /** Skill 库分页（POST，默认 50/页；keyword 搜解析语言 name/description 与 search_keywords，
+   *  category 过滤、featured/most_used/newest 排序、zh/en 语言解析，契约 §11） */
   library: (q: LibraryQuery) =>
     request<Page<SkillLibraryItem>>("/library", "POST", q),
   /** 我的 Skills 分页（POST，与 library 一致滚动加载） */
   mine: (q: { pageNum: number; pageSize: number }) =>
     request<Page<SkillMineItem>>("/mine", "POST", q),
-  /** 添加到我的（默认 auto=false） */
-  add: (id: number) => request<void>(`/library/${id}/add`, "POST"),
-  /** 从我的移除（不删 skill 本身） */
-  remove: (id: number) => request<void>(`/mine/${id}`, "DELETE"),
-  /** 切换 auto（关系属性，持久化） */
-  setAuto: (id: number, auto: boolean) =>
-    request<void>(`/mine/${id}`, "PATCH", { auto }),
+  /** 添加到我的（默认 auto=false）；creativeSkillId 即 creative_skill_id */
+  add: (creativeSkillId: string) =>
+    request<void>(`/library/${creativeSkillId}/add`, "POST"),
+  /** 从我的移除（不删 skill 本身）；creativeSkillId 即 creative_skill_id */
+  remove: (creativeSkillId: string) =>
+    request<void>(`/mine/${creativeSkillId}`, "DELETE"),
+  /** 切换 auto（关系属性，持久化）；creativeSkillId 即 creative_skill_id */
+  setAuto: (creativeSkillId: string, auto: boolean) =>
+    request<void>(`/mine/${creativeSkillId}`, "PATCH", { auto }),
+  /** 创建个人技能（IK60WU）；content 为完整 SKILL.md 文本（含 frontmatter） */
+  createPersonalSkill: (content: string) =>
+    request<SkillMineItem>("/personal", "POST", { content }),
+  /** AI 格式化当前草稿（IK60X0）：返回完整替换文本；不保存、不创建资产 */
+  formatSkillDraft: (content: string) =>
+    request<{ content: string }>("/personal/format", "POST", { content }),
+  /** 只读查看个人技能（IK60WZ，契约 §13.1）：owner-only，返回重建的完整 SKILL.md 文本 */
+  getPersonalSkill: (creativeSkillId: string) =>
+    request<{ content: string }>(`/personal/${creativeSkillId}`, "GET"),
+  /** 永久删除个人技能（IK60WZ，契约 §13.2）：owner-only，不可逆 */
+  deletePersonalSkill: (creativeSkillId: string) =>
+    request<void>(`/personal/${creativeSkillId}`, "DELETE"),
   /** 当前 Run 的 Creative Skill 推荐列表（IK3NPI，GET，Run 级端点不在 skills base 下） */
   recommendations: (runId: number) =>
     requestUrl<CreativeSkillRecommendation[]>(

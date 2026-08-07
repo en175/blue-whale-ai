@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Claude Code / Codex / Kimi / ZCode PostToolUse — 工单状态流转提醒（仅观察，不阻断）
 #
-# 背景：Issue 状态机规则（.claude/rules/issue-tracker.md「任务状态机」）要求
+# 背景：Issue 状态机规则（docs/agents/issue-tracker.md「任务状态机」）要求
 # Agent 在三个时机主动变更工单状态，但人工/模型都容易遗忘。本 hook 在触发点
 # 打印提醒，钉住遗忘根因。红线 7：Hook 只纠偏、不推进状态机——本脚本始终
 # exit 0，不自动改任何状态（脚本无 token，也改不了）。
@@ -54,7 +54,7 @@ case "$TOOL_NAME" in
     fi
     cat <<EOF
 📋 工单状态提醒：worktree 入口已带 --issue ${ISSUE}。
-下一步（规则见 .claude/rules/issue-tracker.md「任务状态机」）：
+下一步（规则见 docs/agents/issue-tracker.md「任务状态机」）：
 1. get_enterprise_issue_detail 查 ${ISSUE} 当前状态。
 2. 预期起点（需求=意向 / 任务=待办的 / 缺陷=待确认或已确认）→
    update_enterprise_issue 置「进行中」（缺陷置「修复中」）。

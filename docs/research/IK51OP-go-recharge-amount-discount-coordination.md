@@ -4,8 +4,8 @@
 > 的配置与凭证清单。web 侧改动已在本分支完成（见末节「web 侧已完成」）；Go 侧改动尚未开始，
 > 本任务硬约束为「不改 Go 代码」，故下列除 IK5W97 外均为**配置/数据/凭证**项。
 
-关联议题：[IK51OP：后台运营审计日志后端 + 充值档位管理](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK51OP)
-后续工单：[IK5W97：Go 侧充值折扣按分组隔离](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK5W97)
+关联议题：[IK51OP：后台运营审计日志后端 + 充值档位管理](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK51OP)
+后续工单：[IK5W97：Go 侧充值折扣按分组隔离](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK5W97)
 
 ## 结论（一句话）
 

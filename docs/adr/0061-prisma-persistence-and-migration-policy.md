@@ -3,7 +3,7 @@
 - **状态**：Accepted
 - **日期**：2026-07-27
 - **决策者**：朱建业（trueBurger）
-- **关联工单**：[IK4AJJ](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK4AJJ)
+- **关联工单**：[IK4AJJ](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK4AJJ)
 - **上游决策**：[ADR-0055](0055-prelaunch-typescript-unification-scope.md)、[ADR-0060](0060-node-user-identity-and-credits-ledger.md)
 
 ## 背景

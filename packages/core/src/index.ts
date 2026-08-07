@@ -7,12 +7,19 @@ export {
   type ServiceName,
 } from "./readiness.js";
 export type {
+  AgentAction,
   AgentAdapter,
+  AgentAlignmentStage,
+  AgentHistoryMessage,
+  AgentMentionProjection,
   AgentRequest,
   AgentResult,
   GenerationAdapter,
   GenerationRequest,
   GenerationResult,
+  PlanApplicationKindCore,
+  PlanCardCandidateCore,
+  PlanGenerationParameterOverridesCore,
 } from "./runtime-ports.js";
 export {
   signVolcengineRequest,
@@ -68,6 +75,11 @@ export {
   sealGenerationCredential,
 } from "./generation-credential.js";
 export {
+  classifyPlanApplicationAvailability,
+  type PlanApplicationAvailabilityInput,
+  type PlanApplicationAvailabilityStatus,
+} from "./plan-application-availability.js";
+export {
   requestSmsCode,
   type RequestSmsCodeInput,
   type RequestSmsCodeDeps,
@@ -82,13 +94,19 @@ export {
   type LoginResult,
   type AuthUser,
 } from "./auth/login-with-code.js";
+export { parseSkillMd, serializeSkillMd } from "./skills/skill-md.js";
 export {
   acceptConversationMessage,
   prepareConversationMessage,
   type AcceptConversationMessageResult,
+  type AcceptedConversationMention,
+  type ConversationMentionInput,
+  type ConversationMentionType,
   type ConversationCommandStore,
   type ConversationCommandStoreInput,
   type ConversationCommandStoreResult,
+  type MentionFailure,
+  type MentionFailureReason,
   type PreparedConversationMessage,
 } from "./conversation/accept-conversation-message.js";
 export {
@@ -99,3 +117,25 @@ export {
   type GenerationInboxView,
   type InboxConversationView,
 } from "./conversation/generation-inbox.js";
+export {
+  findPlacement,
+  intersects,
+  DEFAULT_NODE_WIDTH,
+  DEFAULT_NODE_HEIGHT,
+  DEFAULT_GAP,
+  DEFAULT_MAX_PER_ROW,
+  SCENE_CARD_WIDTH,
+  SCENE_CARD_FALLBACK_HEIGHT,
+  type Rect,
+  type FindPlacementOptions,
+} from "./placement.js";
+
+export {
+  TRACE_ID_HEADER,
+  generateTraceId,
+  getCurrentTraceId,
+  getOrCreateTraceId,
+  runWithTraceId,
+} from "./trace.js";
+// logger / tls-writer 依赖火山 SDK，走子路径 "@blue-whale/core/logging"，
+// 不进主 barrel，避免所有 core 消费者被静态绑定（见 logging.ts 头注释）。

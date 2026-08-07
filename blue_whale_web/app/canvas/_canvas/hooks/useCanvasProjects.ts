@@ -39,7 +39,8 @@ import {
   type ProjectRecoveryState,
   type ProjectSnapshot,
 } from "@/lib/project-recovery";
-import { wireInteger, type WireInteger } from "@/lib/wire-integer";
+import { wireInteger } from "@/lib/wire-integer";
+import type { ConversationMentionInput } from "@blue-whale/core";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -350,7 +351,7 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
   const submitConversationMessageAction = useCallback(
     async (
       content: string,
-      referencedAssetIds?: WireInteger[],
+      mentions?: ConversationMentionInput[],
       forcedCreativeSkillId?: string,
     ) => {
       if (!backendReady) return;
@@ -368,7 +369,7 @@ export function useCanvasProjects(preferredProjectId?: string | null) {
         newCommandIdentity(),
         newCommandIdentity(),
         answerable?.input_request_id,
-        referencedAssetIds,
+        mentions,
         effectiveForced,
       );
     },

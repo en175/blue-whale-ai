@@ -203,10 +203,7 @@ describe("protected product route coverage", () => {
       path.join(webRoot, "next.config.ts"),
       "utf8",
     );
-    const dockerfile = readFileSync(
-      path.join(webRoot, "Dockerfile"),
-      "utf8",
-    );
+    const dockerfile = readFileSync(path.join(webRoot, "Dockerfile"), "utf8");
     const javaRewriteSources = [
       // B 已退役：Conversation / GenerationInbox / AgentRun / InputRequest / SSE
       "/api/agent/runs/",

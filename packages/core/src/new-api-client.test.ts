@@ -1089,3 +1089,33 @@ describe("new-api client", () => {
     expect(page.page_size).toBe(20);
   });
 });
+
+describe("new-api client —— X-Trace-Id 出站透传（IK6KQQ）", () => {
+  async function captureHeaders(): Promise<Headers> {
+    let captured: Headers | null = null;
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (_input, init = {}) => {
+        captured = new Headers(init.headers);
+        return jsonResponse({ success: true, data: {} });
+      },
+    });
+    await client.getAccountCapabilities();
+    expect(captured).not.toBeNull();
+    return captured!;
+  }
+
+  it("无链路上下文时缺省生成 X-Trace-Id", async () => {
+    const headers = await captureHeaders();
+    expect(headers.get("X-Trace-Id")).toMatch(/^[0-9]+-[0-9a-f]{16}$/);
+  });
+
+  it("链路上下文内出站沿用当前 trace_id", async () => {
+    const { runWithTraceId } = await import("./trace.js");
+    let headers: Headers | null = null;
+    await runWithTraceId("trace-upstream-001", async () => {
+      headers = await captureHeaders();
+    });
+    expect(headers!.get("X-Trace-Id")).toBe("trace-upstream-001");
+  });
+});

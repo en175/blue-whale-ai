@@ -2,7 +2,7 @@
 
 - **状态**：Accepted
 - **日期**：2026-07-20
-- **关联工单**：[IK21OP](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK21OP)（父工单 [IK21O3](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK21O3)）
+- **关联工单**：[IK21OP](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK21OP)（父工单 [IK21O3](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK21O3)）
 
 ## 背景
 

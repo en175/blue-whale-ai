@@ -93,7 +93,13 @@ function toAdjustLog(
 
 /** 从审计日志行映射操作日志（category=user）。 */
 function toOperationLog(
-  row: { id: string; action: string; detail: string; operator: string; createdAt: string },
+  row: {
+    id: string;
+    action: string;
+    detail: string;
+    operator: string;
+    createdAt: string;
+  },
   userId: number,
 ): OperationLog {
   let detail: Record<string, unknown> = {};
@@ -378,7 +384,11 @@ export default function AdminUsersPage() {
   const handleUnfreeze = async () => {
     if (!unfreezeUserTarget || !unfreezeReason.trim()) return;
     try {
-      await manageUser(unfreezeUserTarget.userId, "unfreeze", unfreezeReason.trim());
+      await manageUser(
+        unfreezeUserTarget.userId,
+        "unfreeze",
+        unfreezeReason.trim(),
+      );
       setConfirmMsg(`用户 ${unfreezeUserTarget.nickname} 已解冻`);
       await loadUsers();
     } catch (e) {
