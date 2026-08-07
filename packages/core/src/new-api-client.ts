@@ -4,6 +4,11 @@ export interface NewApiClientOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * 出站 X-Trace-Id 提供者（IK73EV）：返回非空时优先于链路上下文与缺省生成，
+   * 用于 BFF 等场景把入站 trace id 带入出站请求。缺省不传行为不变。
+   */
+  traceIdProvider?: () => string | null | Promise<string | null>;
 }
 
 export interface NewApiLoginInput {
@@ -381,9 +386,14 @@ export function createNewApiClient(options: NewApiClientOptions) {
       headers.set("Content-Type", "application/json");
     }
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    // 出站统一注入 X-Trace-Id（IK6KQQ）：调用方显式头 > 链路上下文 > 缺省生成。
+    // 出站统一注入 X-Trace-Id（IK6KQQ/IK73EV）：
+    // 调用方显式头 > traceIdProvider（BFF 入站透传）> 链路上下文 > 缺省生成。
     if (!headers.has("X-Trace-Id")) {
-      headers.set("X-Trace-Id", getCurrentTraceId() ?? generateTraceId());
+      const provided = options.traceIdProvider ? await options.traceIdProvider() : null;
+      headers.set(
+        "X-Trace-Id",
+        provided ?? getCurrentTraceId() ?? generateTraceId(),
+      );
     }
 
     let response: Response;

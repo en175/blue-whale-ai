@@ -1,4 +1,5 @@
-import { createNewApiClient, NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@blue-whale/core";
+import { createWebNewApiClient } from "@/lib/logging";
 import {
   consumeCredits,
   parseRecordPaging,
@@ -49,7 +50,7 @@ export async function GET(request: Request) {
     );
 
     try {
-      const client = createNewApiClient({ baseUrl: config.baseUrl });
+      const client = createWebNewApiClient({ baseUrl: config.baseUrl });
       const result = await client.listUserConsumeLogs(userToken, {
         page,
         pageSize,
