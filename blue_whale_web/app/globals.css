@@ -32,17 +32,8 @@ body {
   background: rgba(255, 255, 255, 0.2);
 }
 
-/* Placeholder for contenteditable */
+/* Placeholder for contenteditable（AgentChatPanel 使用；AgentComposer 已组件化到 PromptEditor state 渲染） */
 .tc-agent-composer-editor:empty::before {
-  content: attr(data-placeholder);
-  color: rgba(255, 255, 255, 0.35);
-  pointer-events: none;
-  display: block;
-  white-space: pre-wrap;
-}
-
-/* AI image tab editor placeholder */
-.tc-agent-image-editor:empty::before {
   content: attr(data-placeholder);
   color: rgba(255, 255, 255, 0.35);
   pointer-events: none;
