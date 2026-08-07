@@ -56,6 +56,15 @@ RUN pnpm lint
 # 构建 Next.js standalone
 RUN pnpm --filter blue_whale build
 
+# IK75CR：standalone 不含 serverExternalPackages 的包。@volcengine/openapi 的 TLS
+# Producer 需运行时读 tls.proto（不能被打包，否则 ENOENT 上报失效）。pnpm 是符号链接
+# 结构无法直接 COPY，用 npm 装真实文件后合并进 standalone/node_modules 供运行时 require。
+# 版本须与 pnpm-lock.yaml 中 @volcengine/openapi 一致。
+RUN mkdir -p /tmp/tls-sdk && cd /tmp/tls-sdk && \
+    echo '{"name":"tls-sdk","version":"1.0.0"}' > package.json && \
+    npm install @volcengine/openapi@1.36.2 --registry=https://registry.npmmirror.com --no-audit --no-fund --loglevel=error && \
+    cp -a /tmp/tls-sdk/node_modules/. /app/blue_whale_web/.next/standalone/node_modules/
+
 FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
