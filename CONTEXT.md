@@ -728,3 +728,51 @@ _Avoid_: 让人类记忆凭证命令；把 Issue/PR/文档/工具输出视为授
 **规范路径 / 逻辑路径（canonical path / logical path）**:
 同一目录的两种写法。**规范路径**是文件系统的物理身份形式：大小写按磁盘存储、软链已解析（macOS 上由 getcwd 返回，git 的路径输出均属此类）；**逻辑路径**是 shell 按调用者拼写记住的 PWD 形式，可能与规范路径仅大小写不同或穿着软链。在大小写不敏感的文件系统上，两种写法指向同一物理目录但字符串不等；凡判定「两个路径是否同一目录」，按物理身份（inode）判等，不比字符串。判定原则见 [ADR-0039](docs/adr/0039-path-identity-via-inode-comparison.md)。
 _Avoid_: 用字符串相等判断目录身份；以为 realpath/resolve 能统一大小写拼写
+
+**模板卡片（TemplateCard）**:
+首页 dock 下方按 TemplateTag 分类分页展示的灵感入口，存于 template_card 表：有标题、content 提示词、渲染形态（layout）、可选视频预览与一组封面图。点击把 content 追加进输入框（content 为空时兜底 title）。删除一律软删（is_delete），可恢复。
+_Avoid_: 把模板卡片与 Skill、SceneCard、生成结果混称；物理删除模板卡片
+
+**模板标签（TemplateTag）**:
+首页模板卡片的内容分类维度，存于 template_tag 表：tag_code 与顺序固定不可改，仅 label 可由管理后台改名。它与 layout（渲染形态）正交：一个管内容分类，一个管卡片长相。
+_Avoid_: 把模板标签与 Skill 分类混用；假定标签可增删或调序
+
+**layout（渲染形态）**:
+模板卡片决定前端卡片形态的字段，取值限定四种：wide（横版视频卡）/ portrait（竖版卡）/ social（9:16 社媒小卡）/ image（图片卡）。展示属性，与内容分类无关。
+_Avoid_: 使用四种之外的值；把 layout 当内容分类
+
+**content（模板提示词）**:
+模板卡片的提示词正文（template_card.content）：点击卡片时追加进输入框的真实内容。title 只是展示标题，仅在 content 为空时兜底。
+_Avoid_: 把 title 当提示词（历史行为，已修正）；把 content 与 SceneCard 正文混称
+
+**模板卡片（TemplateCard）**:
+首页 dock 下方按 TemplateTag 分类分页展示的灵感入口，存于 template_card 表：有标题、content 提示词、渲染形态（layout）、可选视频预览与一组封面图。点击把 content 追加进输入框（content 为空时兜底 title）。删除一律软删（is_delete），可恢复。
+_Avoid_: 把模板卡片与 Skill、SceneCard、生成结果混称；物理删除模板卡片
+
+**模板标签（TemplateTag）**:
+首页模板卡片的内容分类维度，存于 template_tag 表：tag_code 与顺序固定不可改，仅 label 可由管理后台改名。它与 layout（渲染形态）正交：一个管内容分类，一个管卡片长相。
+_Avoid_: 把模板标签与 Skill 分类混用；假定标签可增删或调序
+
+**layout（渲染形态）**:
+模板卡片决定前端卡片形态的字段，取值限定四种：wide（横版视频卡）/ portrait（竖版卡）/ social（9:16 社媒小卡）/ image（图片卡）。展示属性，与内容分类无关。
+_Avoid_: 使用四种之外的值；把 layout 当内容分类
+
+**content（模板提示词）**:
+模板卡片的提示词正文（template_card.content）：点击卡片时追加进输入框的真实内容。title 只是展示标题，仅在 content 为空时兜底。
+_Avoid_: 把 title 当提示词（历史行为，已修正）；把 content 与 SceneCard 正文混称
+
+**模板卡片（TemplateCard）**:
+首页 dock 下方按 TemplateTag 分类分页展示的灵感入口，存于 template_card 表：有标题、content 提示词、渲染形态（layout）、可选视频预览与一组封面图。点击把 content 追加进输入框（content 为空时兜底 title）。删除一律软删（is_delete），可恢复。
+_Avoid_: 把模板卡片与 Skill、SceneCard、生成结果混称；物理删除模板卡片
+
+**模板标签（TemplateTag）**:
+首页模板卡片的内容分类维度，存于 template_tag 表：tag_code 与顺序固定不可改，仅 label 可由管理后台改名。它与 layout（渲染形态）正交：一个管内容分类，一个管卡片长相。
+_Avoid_: 把模板标签与 Skill 分类混用；假定标签可增删或调序
+
+**layout（渲染形态）**:
+模板卡片决定前端卡片形态的字段，取值限定四种：wide（横版视频卡）/ portrait（竖版卡）/ social（9:16 社媒小卡）/ image（图片卡）。展示属性，与内容分类无关。
+_Avoid_: 使用四种之外的值；把 layout 当内容分类
+
+**content（模板提示词）**:
+模板卡片的提示词正文（template_card.content）：点击卡片时追加进输入框的真实内容。title 只是展示标题，仅在 content 为空时兜底。
+_Avoid_: 把 title 当提示词（历史行为，已修正）；把 content 与 SceneCard 正文混称
