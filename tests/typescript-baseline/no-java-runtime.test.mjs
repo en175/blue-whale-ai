@@ -62,6 +62,8 @@ test("TypeScript baseline cannot reconnect executable runtime to Java services",
         "http://blue-whale-user",
         "http://blue-whale-product",
         "blue_whale_server/",
+        "blue_whale_agent_worker/",
+        "apps/product-api",
       ];
       return symbols
         .filter((symbol) => source.includes(symbol))
@@ -73,6 +75,12 @@ test("TypeScript baseline cannot reconnect executable runtime to Java services",
 
 test("retired Java source trees and deployment stacks stay physically absent", () => {
   for (const retired of ["blue_whale_server", "deploy/local"]) {
+    assert.equal(existsSync(retired), false, `${retired} 必须保持物理删除`);
+  }
+});
+
+test("retired product-api stub and Python agent worker stay physically absent", () => {
+  for (const retired of ["apps/product-api", "blue_whale_agent_worker"]) {
     assert.equal(existsSync(retired), false, `${retired} 必须保持物理删除`);
   }
 });

@@ -4,6 +4,7 @@ import { parseNewApiBearerToken } from "@/lib/auth/bearer-token";
 import { withAuthenticatedUser } from "@/lib/auth/product-route-auth";
 import { createTopupTierDeps } from "@/lib/topup-tier/deps";
 import { loadGoTopUpConfig } from "@/lib/recharge/go-topup";
+import { quotaToCredits } from "@/lib/credits";
 
 /**
  * POST /api/recharge/order — 创建充值订单（Model B：复用 Go 原生 new-api 充值）
@@ -159,7 +160,7 @@ export async function POST(request: Request) {
           qr_code_url: order.payData,
           expire_time: new Date(Date.now() + QR_TTL_MS).toISOString(),
           amount: payMoney,
-          points: tier.amount,
+          points: Math.round(quotaToCredits(tier.amount)),
         },
       });
     } catch (error) {
