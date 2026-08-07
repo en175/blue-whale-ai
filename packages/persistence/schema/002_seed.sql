@@ -33,6 +33,7 @@ INSERT INTO generation_model_capability (
     NULL,
     JSON_OBJECT(
       'reference_image', TRUE,
+      'max_reference_images', 4,
       'watermark', TRUE,
       'quantity_max', 4,
       'sequential_image_generation', TRUE,

@@ -120,6 +120,53 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     const [b] = await repoB.listEnabledByType("image");
     expect(a.digest).toBe(b.digest);
   });
+
+  it("features 缺 max_reference_images 时兜底 4（对齐前端 DEFAULT_MAX_REFERENCE_IMAGES，IK6PA5）", async () => {
+    const { repo } = repoWith([
+      buildRow({ features: { reference_image: true, watermark: true, quantity_max: 4 } }),
+    ]);
+
+    const [view] = await repo.listEnabledByType("image");
+
+    expect(view.features.reference_image).toBe(true);
+    expect(view.features.max_reference_images).toBe(4);
+  });
+
+  it("显式配置 max_reference_images 时原样透出（不被兜底覆盖，IK6PA5）", async () => {
+    const { repo } = repoWith([
+      buildRow({
+        features: {
+          reference_image: true,
+          max_reference_images: 10,
+          watermark: false,
+          quantity_max: 4,
+        },
+      }),
+    ]);
+
+    const [view] = await repo.listEnabledByType("image");
+
+    expect(view.features.max_reference_images).toBe(10);
+  });
+
+  it("camelCase maxReferenceImages 同样被识别（IK6PA5）", async () => {
+    const { repo } = repoWith([
+      buildRow({ features: { reference_image: true, maxReferenceImages: 6 } }),
+    ]);
+
+    const [view] = await repo.listEnabledByType("image");
+
+    expect(view.features.max_reference_images).toBe(6);
+  });
+
+  it("features 为 NULL 时兜底 4 且 reference_image 为 false（IK6PA5）", async () => {
+    const { repo } = repoWith([buildRow({ features: null })]);
+
+    const [view] = await repo.listEnabledByType("image");
+
+    expect(view.features.reference_image).toBe(false);
+    expect(view.features.max_reference_images).toBe(4);
+  });
 });
 
 function makeRow(overrides: Record<string, unknown> = {}) {
@@ -187,20 +234,19 @@ describe("ModelCapabilityRepo.listEnabledByType 时长归一化", () => {
     expect(garbage.supported_durations).toBeNull();
   });
 
-  it("过滤 capability_type + enabled + 未软删", async () => {
+  it("过滤 capability_type + enabled + 未软删 + 按 sort_order 升序", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
     const prisma = {
       generation_model_capability: { findMany },
     } as unknown as PrismaClient;
     await createModelCapabilityRepo(prisma).listEnabledByType("text");
-    expect(findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          capability_type: "text",
-          enabled: true,
-          is_delete: false,
-        },
-      }),
-    );
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        capability_type: "text",
+        enabled: true,
+        is_delete: false,
+      },
+      orderBy: { sort_order: "asc" },
+    });
   });
 });
