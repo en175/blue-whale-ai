@@ -23,6 +23,8 @@ const LEGACY_LARGE_FILES = [
   "lib/project-recovery.test.ts",
   "app/canvas/_canvas/hooks/useCanvasGeneration.test.ts",
   "app/canvas/_canvas/model.test.ts",
+  // IK77MH：812 行历史存量测试文件，与同目录 useCanvasGeneration/model.test 同类挂账，拆分后移除
+  "app/canvas/_canvas/conversationRecovery.test.ts",
   "lib/generation/worker/generation-worker.test.ts",
   // 后端/共享包（IK747Z-4 拆分）
   "../packages/persistence/src/agent-run-repo.ts",
