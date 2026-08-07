@@ -23,6 +23,7 @@ import {
 import { useRouter } from "next/navigation";
 import DirectSkillTag from "./DirectSkillTag";
 import SkillPanel, { type UseSkillSelection } from "./SkillPanel";
+import PromptEditor, { type PromptEditorHandle } from "./prompt/PromptEditor";
 import {
   clearDirectSkillBinding,
   readDirectSkillBinding,
@@ -179,7 +180,7 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
   }, [activeTab, tabContents, requireAuth, router]);
 
   const tabRefs = useRef<(HTMLElement | null)[]>([]);
-  const editorRef = useRef<HTMLDivElement>(null);
+  const promptEditorRef = useRef<PromptEditorHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modelContainerRef = useRef<HTMLDivElement>(null);
   const videoModelContainerRef = useRef<HTMLDivElement>(null);
@@ -238,45 +239,19 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
     };
   }, []);
 
-  // IK6XQI-7：把文本写入当前 editor DOM（幂等：内容一致则不写，避免干扰输入光标）。
-  const applyToEditor = useCallback((text: string) => {
-    const el = editorRef.current;
-    if (el && el.innerText !== text) el.innerText = text;
-  }, []);
+  // IK747Z-2：编辑器已组件化为 PromptEditor（受控 value↔DOM 单向同步 + 光标保持），
+  // 此处不再需要 applyToEditor/tab 同步 effect——切 tab 重新挂载时由 value prop 同步。
 
-  // tab 切换时 editor 重新挂载（新空 DOM）→ 从 tabContents 同步对应内容，
-  // 修复「切到 AI 视频提示词不显示」。
-  useEffect(() => {
-    applyToEditor(tabContents[activeTab] ?? "");
-    // 仅在 activeTab 变化时同步；输入中内容由 handleInput 维护，避免 effect 链。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // 外部注入（模板卡片点击）：覆盖当前激活 tab 内容（保持单行）。
+  const injectPrompt = useCallback((text: string) => {
+    setTabContents((prev) => ({ ...prev, [activeTab]: text }));
+    // IK726P 规则5：注入后聚焦、光标到末尾、长文本滚动可见（由 PromptEditor 封装）。
+    promptEditorRef.current?.focusToEnd();
   }, [activeTab]);
-
-  // 外部注入（模板卡片点击）：覆盖当前激活 tab 内容并立即写 DOM（保持单行）。
-  const injectPrompt = useCallback(
-    (text: string) => {
-      setTabContents((prev) => ({ ...prev, [activeTab]: text }));
-      applyToEditor(text);
-      // IK726P 规则5：填入后聚焦输入框、光标移到末尾、长文本滚动到可见。
-      const el = editorRef.current;
-      if (el) {
-        el.focus();
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        range.collapse(false);
-        const sel = window.getSelection();
-        sel?.removeAllRanges();
-        sel?.addRange(range);
-        el.scrollTop = el.scrollHeight;
-      }
-    },
-    [activeTab, applyToEditor],
-  );
 
   useImperativeHandle(ref, () => ({ injectPrompt }), [injectPrompt]);
 
-  const handleInput = useCallback(() => {
-    const text = editorRef.current?.innerText ?? "";
+  const handleInput = useCallback((text: string) => {
     setTabContents((prev) =>
       prev[activeTab] === text ? prev : { ...prev, [activeTab]: text },
     );
@@ -285,9 +260,8 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
   // IK726P 规则4：一键清除——清空当前 tab 内容回到空态（占位提示重新出现）并聚焦。
   const clearPrompt = useCallback(() => {
     setTabContents((prev) => ({ ...prev, [activeTab]: "" }));
-    applyToEditor("");
-    editorRef.current?.focus();
-  }, [activeTab, applyToEditor]);
+    promptEditorRef.current?.focusToEnd();
+  }, [activeTab]);
 
   const updateIndicator = useCallback(() => {
     const idx = TABS.findIndex((t) => t.id === activeTab);
@@ -700,20 +674,15 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
                       </button>
                     )}
 
-                    {/* Editor area */}
-                    <div
+                    {/* Editor area（IK747Z-2：PromptEditor 受控组件，含占位 state 渲染） */}
+                    <PromptEditor
                       key="image-editor"
-                      ref={editorRef}
-                      className="tc-agent-image-editor relative flex-1 min-h-[120px] text-sm text-white/90 bg-transparent border-none outline-none shadow-none appearance-none leading-[1.8] py-3 px-4 font-[inherit] overflow-y-auto whitespace-pre-wrap break-words focus:border-none focus:outline-none focus:shadow-none"
-                      contentEditable
-                      role="textbox"
-                      aria-multiline="true"
-                      data-placeholder="从文字与参考图生成 AI 图片。&#10;描述你想生成的图片，已上传的参考将引导风格与细节。"
-                      spellCheck={false}
-                      autoCorrect="off"
-                      onInput={handleInput}
-                      onFocus={() => setIsFocused(true)}
-                      onBlur={() => setIsFocused(false)}
+                      ref={promptEditorRef}
+                      value={tabContents[activeTab] ?? ""}
+                      onChange={handleInput}
+                      placeholder={`从文字与参考图生成 AI 图片。\n描述你想生成的图片，已上传的参考将引导风格与细节。`}
+                      className="flex-1"
+                      onFocusChange={setIsFocused}
                     />
                     <ClearPromptButton
                       visible={Boolean((tabContents[activeTab] ?? "").trim())}
@@ -1006,19 +975,14 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
                           </span>
                         </button>
                       )}
-                      <div
+                      <PromptEditor
                         key="video-editor"
-                        ref={editorRef}
-                        className="relative flex-1 text-sm text-white/90 bg-transparent border-none outline-none shadow-none appearance-none leading-[1.8] py-3 px-4 font-[inherit] overflow-y-auto whitespace-pre-wrap break-words focus:border-none focus:outline-none focus:shadow-none min-h-[120px] empty:before:content-[attr(data-placeholder)] empty:before:absolute empty:before:top-3 empty:before:left-4 empty:before:right-4 empty:before:text-white/35 empty:before:pointer-events-none"
-                        contentEditable
-                        role="textbox"
-                        aria-multiline="true"
-                        data-placeholder="通过直接控制提示词快速生成单段片段。&#10;上传 1–5 张参考图或视频并用 @ 引用以创建互动。例如：用 @Image 1 作首帧、@Image 2 作尾帧，让他们像 @Video 1 那样跳舞。"
-                        spellCheck={false}
-                        autoCorrect="off"
-                        onInput={handleInput}
-                        onFocus={() => setIsFocused(true)}
-                        onBlur={() => setIsFocused(false)}
+                        ref={promptEditorRef}
+                        value={tabContents[activeTab] ?? ""}
+                        onChange={handleInput}
+                        placeholder={`通过直接控制提示词快速生成单段片段。\n上传 1–5 张参考图或视频并用 @ 引用以创建互动。例如：用 @Image 1 作首帧、@Image 2 作尾帧，让他们像 @Video 1 那样跳舞。`}
+                        className="flex-1"
+                        onFocusChange={setIsFocused}
                       />
                       <ClearPromptButton
                         visible={Boolean((tabContents[activeTab] ?? "").trim())}
@@ -1432,19 +1396,14 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
               )}
 
               <div className="relative min-h-[120px]">
-                <div
+                <PromptEditor
                   key="agent-editor"
-                  ref={editorRef}
-                  className="tc-agent-composer-editor relative min-h-[120px] w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent py-3 px-4 text-sm leading-[1.8] text-white/90 border-none outline-none shadow-none focus:border-none focus:outline-none focus:ring-0"
-                  contentEditable
-                  role="textbox"
-                  aria-multiline="true"
-                  data-placeholder="描述你想制作的视频，微电影、产品广告、社媒视频等都可支持。适合 1-5 分钟视频；可用 @ 引用已上传素材。"
-                  spellCheck={false}
-                  autoCorrect="off"
-                  onInput={handleInput}
-                  onFocus={() => setIsFocused(true)}
-                  onBlur={() => setIsFocused(false)}
+                  ref={promptEditorRef}
+                  value={tabContents[activeTab] ?? ""}
+                  onChange={handleInput}
+                  placeholder={`描述你想制作的视频，微电影、产品广告、社媒视频等都可支持。适合 1-5 分钟视频；可用 @ 引用已上传素材。`}
+                  className="w-full"
+                  onFocusChange={setIsFocused}
                 />
                 <ClearPromptButton
                   visible={Boolean((tabContents[activeTab] ?? "").trim())}

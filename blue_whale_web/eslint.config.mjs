@@ -89,6 +89,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // worker 构建产物（IK74V7：build:worker 产物会被 lint 扫到）
+    ".worker-dist/**",
   ]),
 ]);
 
