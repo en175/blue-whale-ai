@@ -5,7 +5,7 @@
  * 点 Use 复用 forced Use 链路：上抛 { creative_skill_id, name }（推荐项必有稳定 id）。
  */
 import type { CreativeSkillRecommendation } from "@/components/api/skills";
-import type { UseSkillSelection } from "@/components/SkillPanel";
+import type { UseSkillSelection } from "@/components/skill/SkillPanel";
 
 export function SkillRecommendationSection({
   recommendations,

@@ -15,7 +15,20 @@ export type ToolDef = {
   divider?: boolean;
 };
 
+export type NodeMenuAction =
+  "add-to-chat" | "save-to-assets" | "copy" | "duplicate" | "delete";
+
 export type NodeType = "image" | "video" | "text";
+
+/** 画布菜单位置：world 坐标用于建节点，screen 坐标用于定位浮层。 */
+export type CanvasMenuPayload = {
+  x: number;
+  y: number;
+  screenX: number;
+  screenY: number;
+  source?: string;
+  sourceHandle?: string;
+};
 
 /**
  * 画布节点。坐标语义对齐 React Flow：world 坐标由 {@link position} 承载
@@ -359,3 +372,9 @@ export type VideoDockContentProps = {
   aspectRatios?: SelectOption[];
   quantityMax?: number;
 };
+
+/** IK74V6：图片 Dock 分辨率档位选项（能力表 supported_sizes 映射）。 */
+export type ImageSizeOption = { id: string; label: string };
+
+/** IK74V6：Dock 浮层定位（相对 Dock 容器的 left/bottom 偏移）。 */
+export type DockPopoverPosition = { left: number; bottom: number };

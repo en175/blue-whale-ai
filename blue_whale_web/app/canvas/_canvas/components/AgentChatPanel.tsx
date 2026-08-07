@@ -11,23 +11,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { BookOpenText, Box, ChevronDown } from "lucide-react";
+import { BookOpenText, ChevronDown } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
-import SkillPanel, { type UseSkillSelection } from "@/components/SkillPanel";
-import DirectSkillTag from "@/components/DirectSkillTag";
+import SkillPanel, { type UseSkillSelection } from "@/components/skill/SkillPanel";
 import { squirclePath } from "../utils";
 import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
-import { ComposerShell, ModelSettingsMenu } from "./Composer";
-import { SkillRecommendationSection } from "./SkillRecommendationSection";
-import { AgentRunFailureNotice } from "./AgentRunFailureNotice";
-import type { CreativeSkillRecommendation } from "@/components/api/skills";
-import {
-  UserMessageBubble,
-  AgentMessageBubble,
-  ThinkingBlock,
-  AgentCard,
-  PlanCard,
-} from "./ChatBubbles";
 import type { ChatMessage, PendingMentionBatch } from "../types";
 import type { WireInteger } from "@/lib/wire-integer";
 import type {
@@ -46,90 +34,29 @@ import {
   markMentionFailures,
   removeMention,
 } from "./dock/mention";
-import { isApiError } from "@/lib/api/errors";
-import {
-  PLAN_APPLICATION_ALREADY_APPLIED_CODE,
-  type PlanApplicationAvailability,
-} from "@blue-whale/contracts";
-import { classifyPlanApplicationFailure } from "@/lib/plan-application-failure";
 import { UPLOAD_ACCEPT, selectUploadFiles } from "@/lib/uploadRules";
 import { toast } from "@/components/Toast";
 import { wireInteger } from "@/lib/wire-integer";
 import type { MediaKind } from "@/lib/mediaSize";
+import {
+  MENTION_LIMIT,
+  WELCOME_PRESETS,
+  SKILL_SUMMARIZE_PROMPT,
+  mentionFailuresOf,
+  AGENT_MODELS,
+  type ComposerUploadEntry,
+} from "./chat-panel-lib";
+import { useComposerUploads } from "./use-composer-uploads";
+import { ChatPanelComposer } from "./chat/ChatPanelComposer";
+import { ChatPanelMessageStream } from "./chat/ChatPanelMessageStream";
+import { usePlanApply } from "./chat/use-plan-apply";
+import type { CreativeSkillRecommendation } from "@/components/api/skills";
 import {
   clearComposerDraft,
   loadComposerDraft,
   saveComposerDraft,
 } from "@/lib/composer-draft";
 
-/** 显式引用 pill 数量上限，对齐 Core mentions 最大长度 10。 */
-const MENTION_LIMIT = 10;
-
-const MENTION_FAILURE_REASONS = new Set([
-  "deleted",
-  "stale",
-  "permission_lost",
-  "wrong_project",
-]);
-
-function mentionFailuresOf(error: unknown): MentionFailure[] {
-  if (!isApiError(error) || error.code !== "mention.unavailable") return [];
-  const detail = error.detail;
-  if (!detail || typeof detail !== "object") return [];
-  const mentions = (detail as Record<string, unknown>).mentions;
-  if (!Array.isArray(mentions)) return [];
-  return mentions.filter((mention): mention is MentionFailure => {
-    if (!mention || typeof mention !== "object") return false;
-    const value = mention as Record<string, unknown>;
-    return (
-      typeof value.index === "number" &&
-      Number.isSafeInteger(value.index) &&
-      value.index >= 0 &&
-      (value.type === "asset" || value.type === "scene_card") &&
-      typeof value.reason === "string" &&
-      MENTION_FAILURE_REASONS.has(value.reason)
-    );
-  });
-}
-
-const ALREADY_APPLIED = String(PLAN_APPLICATION_ALREADY_APPLIED_CODE);
-
-type PlanAvailabilityOverride = Exclude<
-  PlanApplicationAvailability,
-  "available"
->;
-
-/** 欢迎态预设：点击只填入输入框，不发送、不创建产品事实（IK67GD T02）。 */
-const WELCOME_PRESETS = [
-  {
-    label: "生成一张插画",
-    text: "帮我生成一张插画，主题是夏日海边的小镇，色调温暖明亮。",
-  },
-  {
-    label: "构思一个短视频",
-    text: "帮我构思一个 15 秒的短视频，用于展示一款环保水杯。",
-  },
-  {
-    label: "头脑风暴创意方向",
-    text: "我想做一个品牌视觉方案，先帮我头脑风暴几个创意方向。",
-  },
-];
-
-/** 「总结当前对话」固定提示词（IK60X1，契约 §15.1）：预填进输入框供用户审阅编辑，
- *  必须手动发送；发送时随消息体携带 skill_summarize: true 显式意图字段。 */
-const SKILL_SUMMARIZE_PROMPT =
-  "请总结当前对话中的创作方法和要点，生成一份可复用的技能，并保存为我的个人技能。";
-
-/** 输入区上传条目（IK67GX T03）：每文件一条；成功插 pill，失败可单独重试/移除。 */
-type ComposerUploadEntry = {
-  id: string;
-  name: string;
-  file: File;
-  status: "uploading" | "success" | "error";
-  assetId?: string;
-  url?: string;
-  kind?: MediaKind;
-};
 
 export function AgentChatPanel({
   messages,
@@ -221,34 +148,9 @@ export function AgentChatPanel({
   const [retryingCards, setRetryingCards] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  // 手动应用计划（IK6KQB）：请求防重入 Set + 业务错误到卡片可用性的本地覆盖
-  // （权威态仍由 Snapshot/SSE 校准，覆盖只活到下次权威投影）。
-  const [applyingPlanIds, setApplyingPlanIds] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
-  const [planAvailabilityOverrides, setPlanAvailabilityOverrides] = useState<
-    ReadonlyMap<string, PlanAvailabilityOverride>
-  >(() => new Map());
-
-  // HTTP 成功只代表命令已接纳；收到权威 applied 投影后才结束等待态。
-  useEffect(() => {
-    // Snapshot/SSE props 是外部权威源：同步清掉对应本地等待项，避免陈旧 pending 累积。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setApplyingPlanIds((current) => {
-      let next: Set<string> | null = null;
-      for (const message of messages) {
-        if (
-          message.type === "plan-card" &&
-          message.appliedAt !== null &&
-          current.has(String(message.planMessageId))
-        ) {
-          next ??= new Set(current);
-          next.delete(String(message.planMessageId));
-        }
-      }
-      return next ?? current;
-    });
-  }, [messages]);
+  // 手动应用计划（IK6KQB）：交互态下沉到 chat/use-plan-apply，权威态仍由 Snapshot/SSE 校准。
+  const { applyingPlanIds, planAvailabilityOverrides, handleApplyPlan } =
+    usePlanApply({ messages, onApplyPlanMessage });
 
   const CREATION_MODES = useMemo(
     () => [
@@ -262,29 +164,6 @@ export function AgentChatPanel({
     [],
   );
 
-  const AGENT_MODELS = useMemo(
-    () => [
-      { id: "claude-opus-4-7", label: "Claude Opus 4.7", costMultiplier: "5x" },
-      {
-        id: "claude-sonnet-4-6",
-        label: "Claude Sonnet 4.6",
-        costMultiplier: "3x",
-      },
-      {
-        id: "gemini-3-5-flash",
-        label: "Gemini 3.5 Flash",
-        costMultiplier: "2x",
-      },
-      { id: "qwen-3-7-max", label: "Qwen 3.7 Max", costMultiplier: "1.3x" },
-      { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", costMultiplier: "1x" },
-      {
-        id: "gemini-3-1-flash-lite",
-        label: "Gemini 3.1 Flash Lite",
-        costMultiplier: "0.3x",
-      },
-    ],
-    [],
-  );
 
   const [selectedMode] = useState(CREATION_MODES[0]);
   const [selectedModel, setSelectedModel] = useState(AGENT_MODELS[3]);
@@ -396,132 +275,21 @@ export function AgentChatPanel({
 
   // 输入区上传（IK67GX T03）：条目状态流 uploading → success/error；
   // 成功即插可移除 pill（Asset 已持久化），失败条目可单独重试/移除，不损文字与其他上传。
-  const [composerUploads, setComposerUploads] = useState<ComposerUploadEntry[]>(
-    [],
-  );
-  const composerFileInputRef = useRef<HTMLInputElement>(null);
-  const composerUploadSeqRef = useRef(0);
 
-  const patchComposerUpload = useCallback(
-    (entryId: string, patch: Partial<ComposerUploadEntry>) => {
-      setComposerUploads((prev) =>
-        prev.map((u) => (u.id === entryId ? { ...u, ...patch } : u)),
-      );
-    },
-    [],
-  );
-
-  const insertUploadMention = useCallback(
-    (entry: {
-      assetId: string;
-      url: string;
-      kind: MediaKind;
-      name: string;
-    }) => {
-      const editor = composerRef.current;
-      if (!editor) return;
-      const existing = editor.querySelectorAll("[data-mention-id]").length;
-      const dup = editor.querySelector(
-        `[data-mention-asset-id="${entry.assetId}"]`,
-      );
-      if (existing >= MENTION_LIMIT) {
-        console.warn(
-          "[canvas] mention pill 超过上限，已忽略",
-          MENTION_LIMIT,
-          entry.name,
-        );
-        return;
-      }
-      if (dup) {
-        console.warn("[canvas] mention pill 已存在，忽略重复插入", entry.name);
-        return;
-      }
-      insertMention(editor, {
-        id: entry.assetId,
-        type: entry.kind,
-        name: entry.name,
-        src: entry.url,
-        assetId: wireInteger(entry.assetId),
-      });
-      handleComposerInput();
-    },
-    [handleComposerInput],
-  );
-
-  const runComposerUpload = useCallback(
-    async (entryId: string, file: File) => {
-      if (!onUploadFile) return;
-      patchComposerUpload(entryId, { status: "uploading" });
-      try {
-        const result = await onUploadFile(file);
-        patchComposerUpload(entryId, {
-          status: "success",
-          assetId: result.assetId,
-          url: result.url,
-          kind: result.kind,
-        });
-        insertUploadMention({
-          assetId: result.assetId,
-          url: result.url,
-          kind: result.kind,
-          name: file.name,
-        });
-      } catch (error) {
-        console.error("[canvas] composer upload failed:", error);
-        patchComposerUpload(entryId, { status: "error" });
-      }
-    },
-    [onUploadFile, patchComposerUpload, insertUploadMention],
-  );
-
-  const handleComposerFilePick = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files ?? []);
-      e.target.value = "";
-      if (!files.length || !onUploadFile) return;
-      selectUploadFiles(files, {
-        upload: (file) => {
-          composerUploadSeqRef.current += 1;
-          const entryId = `u_${composerUploadSeqRef.current}`;
-          setComposerUploads((prev) => [
-            ...prev,
-            { id: entryId, name: file.name, file, status: "uploading" },
-          ]);
-          void runComposerUpload(entryId, file);
-        },
-        reject: (reason) => toast.error(reason),
-      });
-    },
-    [onUploadFile, runComposerUpload],
-  );
-
-  const handleComposerUploadRetry = useCallback(
-    (entryId: string) => {
-      const entry = composerUploads.find((u) => u.id === entryId);
-      if (!entry || entry.status !== "error") return;
-      void runComposerUpload(entryId, entry.file);
-    },
-    [composerUploads, runComposerUpload],
-  );
-
-  /** 移除上传条目；成功条目同时摘掉输入区内对应 pill（Asset 持久化事实不受影响）。 */
-  const handleComposerUploadRemove = useCallback(
-    (entryId: string) => {
-      const entry = composerUploads.find((u) => u.id === entryId);
-      if (!entry || entry.status === "uploading") return;
-      if (entry.status === "success" && entry.assetId && composerRef.current) {
-        removeMention(composerRef.current, entry.assetId);
-        handleComposerInput();
-      }
-      setComposerUploads((prev) => prev.filter((u) => u.id !== entryId));
-    },
-    [composerUploads, handleComposerInput],
-  );
-
-  /** 存在未完成上传时禁用发送：正式消息永远不引用尚未接纳的 Asset（IK67GX T03）。 */
-  const anyComposerUploading = composerUploads.some(
-    (u) => u.status === "uploading",
-  );
+  // IK74V6：输入区上传逻辑（状态与回调下沉 use-composer-uploads）。
+  const {
+    composerUploads,
+    composerFileInputRef,
+    handleComposerFilePick,
+    handleComposerUploadRetry,
+    handleComposerUploadRemove,
+    clearComposerUploads,
+    anyComposerUploading,
+  } = useComposerUploads({
+    onUploadFile,
+    composerRef,
+    onComposerInput: handleComposerInput,
+  });
 
   // 欢迎预设：只填入输入框供用户审阅编辑，不发送、不创建产品事实（IK67GD T02）
   const handleWelcomePreset = (text: string) => {
@@ -648,7 +416,7 @@ export function AgentChatPanel({
           .then(() => {
             if (composerRef.current) composerRef.current.innerHTML = "";
             setComposerEmpty(true);
-            setComposerUploads([]);
+            clearComposerUploads();
             if (projectId) clearComposerDraft(projectId);
             if (attachForced) setPendingForcedSkill(null);
             if (attachSummarize) skillSummarizePendingRef.current = false;
@@ -675,7 +443,7 @@ export function AgentChatPanel({
       onAppendMessages?.([userMsg]);
       if (composerRef.current) composerRef.current.innerHTML = "";
       setComposerEmpty(true);
-      setComposerUploads([]);
+      clearComposerUploads();
       if (projectId) clearComposerDraft(projectId);
 
       // 按当前创作模式生成 mock 回复，错开逐条追加模拟逐步生成
@@ -748,46 +516,6 @@ export function AgentChatPanel({
       onSetCardStatus?.(card.id, "normal");
     }, 800);
     pendingTimers.current.push(timer);
-  };
-
-  /**
-   * 手动应用冻结计划（IK6KQB，契约 §9）：无二次确认，单击即发。
-   * 请求期间 applyingPlanIds 防重入（重复点击不产生第二个请求）；
-   * 不乐观置 applied——「已应用」只由权威 plan_message.applied 事件驱动。
-   * 零写入失败恢复可操作：业务码映射到卡片可用性覆盖，其余错误仅记日志。
-   */
-  const handleApplyPlan = (
-    msg: Extract<ChatMessage, { type: "plan-card" }>,
-  ) => {
-    if (!onApplyPlanMessage) return;
-    const planKey = String(msg.planMessageId);
-    if (applyingPlanIds.has(planKey)) return;
-    setApplyingPlanIds((current) => new Set(current).add(planKey));
-    // 新请求发起即清除上一轮错误覆盖（余额不足充值后重试等场景）
-    setPlanAvailabilityOverrides((current) => {
-      if (!current.has(planKey)) return current;
-      const next = new Map(current);
-      next.delete(planKey);
-      return next;
-    });
-    void onApplyPlanMessage(msg.planMessageId).catch((error) => {
-      const override = classifyPlanApplicationFailure(error)?.availability;
-      if (override) {
-        setPlanAvailabilityOverrides((current) =>
-          new Map(current).set(planKey, override),
-        );
-      } else if (isApiError(error) && error.code === ALREADY_APPLIED) {
-        // 已被应用：等权威 applied 事件/快照校准，不视为失败
-        return;
-      } else {
-        console.error("[canvas] plan apply failed:", error);
-      }
-      setApplyingPlanIds((current) => {
-        const next = new Set(current);
-        next.delete(planKey);
-        return next;
-      });
-    });
   };
 
   const handleScrollToBottom = () => {
@@ -967,139 +695,23 @@ export function AgentChatPanel({
             className="tc-agent-chat-body tc-panel-textarea-scrollbar flex flex-col gap-2 overflow-y-auto overflow-x-hidden px-3 py-2"
             style={{ flex: "1 1 0%", minHeight: 0 }}
           >
-            {skillRecommendations !== undefined && (
-              <SkillRecommendationSection
-                recommendations={skillRecommendations}
-                loading={skillRecommendationsLoading ?? false}
-                onUse={handleUseSkill}
-              />
-            )}
-            {messages.length === 0 && (
-              <div
-                className="tc-agent-welcome flex flex-col gap-3 px-2 pt-8 pb-4"
-                lang="zh-CN"
-                dir="ltr"
-              >
-                <div className="tc-agent-welcome__title text-base font-medium text-white/90">
-                  让 Agent 帮你创作
-                </div>
-                <div className="tc-agent-welcome__desc text-xs leading-5 text-white/55">
-                  描述你想生成的图片或视频，发送第一条消息即可开始。未发送的草稿会自动保留。
-                </div>
-                <div className="tc-agent-welcome__presets mt-1 flex flex-col gap-2">
-                  {WELCOME_PRESETS.map((preset) => (
-                    <button
-                      key={preset.label}
-                      type="button"
-                      onClick={() => handleWelcomePreset(preset.text)}
-                      className="tc-agent-welcome-preset rounded-lg border border-white/[0.08] bg-white/[0.05] px-3 py-2 text-left text-xs text-white/80 transition-colors hover:bg-white/[0.08]"
-                    >
-                      <span className="mb-0.5 block font-medium text-white/85">
-                        {preset.label}
-                      </span>
-                      <span className="block text-white/45">{preset.text}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {messages.map((msg) => {
-              if (msg.type === "user")
-                return <UserMessageBubble key={msg.id} text={msg.text} />;
-              if (msg.type === "thinking")
-                return <ThinkingBlock key={msg.id} msg={msg} />;
-              if (msg.type === "plan-card") {
-                const planKey = String(msg.planMessageId);
-                const override = planAvailabilityOverrides.get(planKey);
-                return (
-                  <PlanCard
-                    key={msg.id}
-                    msg={
-                      override
-                        ? { ...msg, applicationAvailability: override }
-                        : msg
-                    }
-                    applying={applyingPlanIds.has(planKey)}
-                    onApply={handleApplyPlan}
-                  />
-                );
-              }
-              if (msg.type === "card")
-                return (
-                  <AgentCard
-                    key={msg.id}
-                    msg={msg}
-                    busy={retryingCards.has(String(msg.id))}
-                    onReapply={handleReapply}
-                  />
-                );
-              return <AgentMessageBubble key={msg.id} text={msg.text} />;
-            })}
-            {provisionalContent && (
-              <div
-                className="tc-agent-provisional"
-                data-provisional-delivery="true"
-                aria-label="生成中的临时文本"
-                aria-live="polite"
-                style={{ opacity: 0.85 }}
-              >
-                <AgentMessageBubble text={provisionalContent} />
-              </div>
-            )}
-            {/* 运行中实时思考块：流光「思考中」+ 思考内容默认展开；思考内容来自运行摘要（Snapshot/SSE 权威） */}
-            {(agentRunStatus === "queued" || agentRunStatus === "running") &&
-              !provisionalContent && (
-                <div
-                  className="tc-agent-thinking-block tc-agent-thinking-live self-start"
-                  role="status"
-                  aria-label="思考中"
-                >
-                  <div className="tc-agent-thinking-trigger inline-flex items-center gap-1 py-0.5 text-xs">
-                    <span className="tc-agent-thinking-live__label">
-                      思考中
-                    </span>
-                    {reasoningSummary ? (
-                      <ChevronDown
-                        width={13}
-                        height={13}
-                        style={{ color: "var(--tc-text-tertiary)" }}
-                      />
-                    ) : null}
-                  </div>
-                  {reasoningSummary && (
-                    <div className="tc-agent-thinking-content-wrap">
-                      <div
-                        className="tc-agent-thinking-content"
-                        style={{
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                        }}
-                      >
-                        {reasoningSummary}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            {/* Run 结束后思考摘要自动折叠为「思考过程」，保留在对话流末尾 */}
-            {agentRunStatus !== "queued" &&
-              agentRunStatus !== "running" &&
-              reasoningSummary && (
-                <ThinkingBlock
-                  msg={{
-                    id: "agent-run-reasoning",
-                    type: "thinking",
-                    text: "思考过程",
-                    content: reasoningSummary,
-                  }}
-                />
-              )}
-            {/* AgentRun 失败落点：对话流末尾内联提示条（契约 §8.3） */}
-            {canRetryRun && (
-              <AgentRunFailureNotice
-                onRetry={() => void onRetryAgentRun?.().catch(() => undefined)}
-              />
-            )}
+            <ChatPanelMessageStream
+              skillRecommendations={skillRecommendations}
+              skillRecommendationsLoading={skillRecommendationsLoading ?? false}
+              onUseSkill={handleUseSkill}
+              messages={messages}
+              onWelcomePreset={handleWelcomePreset}
+              retryingCards={retryingCards}
+              onReapply={handleReapply}
+              provisionalContent={provisionalContent}
+              agentRunStatus={agentRunStatus}
+              reasoningSummary={reasoningSummary}
+              canRetryRun={canRetryRun}
+              onRetryAgentRun={onRetryAgentRun}
+              applyingPlanIds={applyingPlanIds}
+              planAvailabilityOverrides={planAvailabilityOverrides}
+              onApplyPlan={handleApplyPlan}
+            />
           </div>
         </div>
 
@@ -1120,208 +732,31 @@ export function AgentChatPanel({
           style={{ padding: "0 4px 4px" }}
         >
           <div style={{ position: "relative" }}>
-            <ComposerShell>
-              <div className="relative p-2">
-                {pendingForcedSkill && (
-                  <div className="px-1 pb-1">
-                    <DirectSkillTag
-                      name={pendingForcedSkill.name}
-                      onRemove={() => setPendingForcedSkill(null)}
-                    />
-                  </div>
-                )}
-                <div
-                  ref={composerRef}
-                  className="tc-agent-composer-editor min-h-[40px] max-h-[120px] overflow-y-auto px-3 py-2 text-sm text-white outline-none"
-                  data-placeholder="描述你的想法，使用 @ 引用素材"
-                  contentEditable
-                  suppressContentEditableWarning
-                  role="textbox"
-                  aria-multiline="true"
-                  data-empty={composerEmpty}
-                  data-tour-editor="agent-composer-input"
-                  spellCheck={false}
-                  autoCorrect="off"
-                  onInput={handleComposerInput}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                />
-                <input
-                  ref={composerFileInputRef}
-                  type="file"
-                  accept={UPLOAD_ACCEPT}
-                  multiple
-                  className="tc-agent-composer-file-input sr-only"
-                  onChange={handleComposerFilePick}
-                  aria-hidden="true"
-                  tabIndex={-1}
-                />
-                {composerUploads.length > 0 && (
-                  <div
-                    className="tc-agent-composer-uploads mt-2 flex flex-col gap-1"
-                    aria-label="素材上传状态"
-                  >
-                    {composerUploads.map((entry) => (
-                      <div
-                        key={entry.id}
-                        data-composer-upload-entry={entry.id}
-                        data-composer-upload-status={entry.status}
-                        data-composer-upload-asset={entry.assetId ?? undefined}
-                        className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2.5 py-1.5 text-xs"
-                      >
-                        <span
-                          className="min-w-0 flex-1 truncate"
-                          style={{ color: "var(--tc-text-secondary)" }}
-                          title={entry.name}
-                        >
-                          {entry.name}
-                        </span>
-                        {entry.status === "uploading" && (
-                          <span style={{ color: "var(--tc-text-tertiary)" }}>
-                            上传中…
-                          </span>
-                        )}
-                        {entry.status === "success" && (
-                          <>
-                            <span style={{ color: "var(--tc-success)" }}>
-                              已上传
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleComposerUploadRemove(entry.id)
-                              }
-                              data-composer-upload-remove={entry.id}
-                              className="shrink-0 rounded px-1.5 py-0.5 transition-colors hover:bg-white/[0.08]"
-                              style={{ color: "var(--tc-text-tertiary)" }}
-                              aria-label={`移除 ${entry.name}`}
-                            >
-                              移除
-                            </button>
-                          </>
-                        )}
-                        {entry.status === "error" && (
-                          <>
-                            <span style={{ color: "var(--tc-destructive)" }}>
-                              上传失败
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleComposerUploadRetry(entry.id)
-                              }
-                              data-composer-upload-retry={entry.id}
-                              className="shrink-0 rounded px-1.5 py-0.5 transition-colors hover:bg-white/[0.08]"
-                              style={{ color: "var(--tc-accent)" }}
-                              aria-label={`重试上传 ${entry.name}`}
-                            >
-                              重试
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleComposerUploadRemove(entry.id)
-                              }
-                              data-composer-upload-remove={entry.id}
-                              className="shrink-0 rounded px-1.5 py-0.5 transition-colors hover:bg-white/[0.08]"
-                              style={{ color: "var(--tc-text-tertiary)" }}
-                              aria-label={`移除 ${entry.name}`}
-                            >
-                              移除
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div
-                  className="tc-agent-composer-actions mt-2 flex items-center justify-between"
-                  aria-label="Composer actions"
-                >
-                  <div className="tc-agent-composer-actions__start flex items-center gap-1">
-                    <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
-                      <button
-                        type="button"
-                        onClick={() => composerFileInputRef.current?.click()}
-                        disabled={!onUploadFile}
-                        className="tc-agent-upload-btn tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/[0.08] disabled:cursor-default disabled:opacity-40"
-                        aria-label="上传素材"
-                        data-tooltip="上传图片、视频或音频"
-                      >
-                        <IconPlus size={16} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSkillPanelOpen(true)}
-                        className="tc-agent-skill-btn tc-agent-composer-pill-btn inline-flex h-8 items-center gap-1.5 rounded-lg border border-transparent px-3 text-xs font-medium text-white/85 transition-colors hover:bg-white/[0.08]"
-                        aria-label="技能"
-                        aria-haspopup="dialog"
-                        aria-expanded={skillPanelOpen}
-                        aria-controls="tc-agent-skill-panel"
-                        data-tour-target="agent-skill-button"
-                      >
-                        <span className="tc-agent-skill-btn__content inline-flex items-center gap-1.5">
-                          <BookOpenText size={16} />
-                          <span className="tc-agent-skill-btn__label">
-                            技能
-                          </span>
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-                  <div className="tc-agent-composer-actions__end flex items-center gap-1">
-                    <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
-                      <div className="tc-model-settings-selector relative">
-                        <button
-                          type="button"
-                          ref={modelSettingsTriggerRef}
-                          onClick={() => setModelSettingsOpen((v) => !v)}
-                          className="tc-model-settings-trigger tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/[0.08]"
-                          aria-haspopup="dialog"
-                          aria-expanded={modelSettingsOpen}
-                          aria-label={`模型: ${selectedModel.label}`}
-                          title="模型"
-                        >
-                          <Box size={16} />
-                        </button>
-
-                        {modelSettingsOpen && (
-                          <ModelSettingsMenu
-                            model={selectedModel}
-                            models={AGENT_MODELS}
-                            onModelChange={setSelectedModel}
-                            onClose={() => setModelSettingsOpen(false)}
-                            menuRef={modelSettingsMenuRef}
-                            triggerRef={modelSettingsTriggerRef}
-                          />
-                        )}
-                      </div>
-                    </div>
-                    <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
-                      <button
-                        type="button"
-                        onClick={handleSend}
-                        disabled={
-                          composerEmpty || submitting || anyComposerUploading
-                        }
-                        className="tc-agent-send-btn tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-black transition-colors hover:bg-white/90 disabled:cursor-default disabled:bg-white/[0.1] disabled:text-white/[0.25]"
-                        aria-label="发送"
-                        aria-disabled={
-                          composerEmpty || submitting || anyComposerUploading
-                        }
-                      >
-                        <IconSend size={14} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </ComposerShell>
+            <ChatPanelComposer
+              composerRef={composerRef}
+              composerEmpty={composerEmpty}
+              onComposerInput={handleComposerInput}
+              onSend={handleSend}
+              submitting={submitting}
+              fileInputRef={composerFileInputRef}
+              uploadEnabled={!!onUploadFile}
+              uploads={composerUploads}
+              anyUploading={anyComposerUploading}
+              onFilePick={handleComposerFilePick}
+              onUploadRetry={handleComposerUploadRetry}
+              onUploadRemove={handleComposerUploadRemove}
+              pendingForcedSkill={pendingForcedSkill}
+              onRemoveForcedSkill={() => setPendingForcedSkill(null)}
+              skillPanelOpen={skillPanelOpen}
+              onOpenSkillPanel={() => setSkillPanelOpen(true)}
+              selectedModel={selectedModel}
+              models={AGENT_MODELS}
+              onModelChange={setSelectedModel}
+              modelSettingsOpen={modelSettingsOpen}
+              onToggleModelSettings={() => setModelSettingsOpen((v) => !v)}
+              modelSettingsMenuRef={modelSettingsMenuRef}
+              modelSettingsTriggerRef={modelSettingsTriggerRef}
+            />
           </div>
         </div>
       </div>

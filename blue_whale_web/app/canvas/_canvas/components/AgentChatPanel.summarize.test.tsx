@@ -19,7 +19,7 @@ vi.mock("@/components/auth/AuthContext", () => ({
 }));
 
 // SkillPanel 打桩：只暴露本链路依赖的「总结当前对话」入口与开关联动
-vi.mock("@/components/SkillPanel", async () => {
+vi.mock("@/components/skill/SkillPanel", async () => {
   const React = await import("react");
   return {
     default: ({

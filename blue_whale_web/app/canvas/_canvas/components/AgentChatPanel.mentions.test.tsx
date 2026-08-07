@@ -17,7 +17,7 @@ vi.mock("@/components/auth/AuthContext", () => ({
   }),
 }));
 
-vi.mock("@/components/SkillPanel", () => ({ default: () => null }));
+vi.mock("@/components/skill/SkillPanel", () => ({ default: () => null }));
 
 class FakeResizeObserver {
   observe() {}
