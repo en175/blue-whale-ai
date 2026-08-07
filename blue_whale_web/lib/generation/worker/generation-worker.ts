@@ -2,7 +2,10 @@ import type { WorkerRepo } from "@blue-whale/persistence";
 import type { AssetUploadStorage } from "../../assets/handle-upload";
 import sharp from "sharp";
 
-import { resolveSeedreamImageSize } from "../seedream-image-size";
+import {
+  hasSeedreamSizeTable,
+  resolveSeedreamImageSize,
+} from "../seedream-image-size";
 import { ImageProviderError, type ImageProvider } from "./image-provider";
 import { VideoProviderError, type VideoProvider } from "./video-provider";
 
@@ -195,17 +198,23 @@ async function processClaimedJob(
     }
     const aspectRatio =
       typeof input.aspect_ratio === "string" ? input.aspect_ratio : null;
-    const providerSize =
-      cap.api_size && aspectRatio
-        ? resolveSeedreamImageSize(cap.model_id, cap.api_size, aspectRatio)
-        : cap.api_size;
-    if (cap.api_size && aspectRatio && !providerSize) {
-      await repo.failJob(
-        job.id,
-        "invalid_input",
-        "模型、分辨率与宽高比组合不受支持",
+    // seedream 族按「分辨率×宽高比」查表换算供应商尺寸；族外模型（如验收
+    // fake 能力）直接沿用能力行 api_value，不受 seedream 表约束。
+    let providerSize = cap.api_size;
+    if (cap.api_size && aspectRatio && hasSeedreamSizeTable(cap.model_id)) {
+      providerSize = resolveSeedreamImageSize(
+        cap.model_id,
+        cap.api_size,
+        aspectRatio,
       );
-      return job.id;
+      if (!providerSize) {
+        await repo.failJob(
+          job.id,
+          "invalid_input",
+          "模型、分辨率与宽高比组合不受支持",
+        );
+        return job.id;
+      }
     }
     const n = Math.max(1, Math.min(4, job.expected_output_count || 1));
     const sourceImages = [];

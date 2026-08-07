@@ -341,7 +341,10 @@ test("第一条消息经公开 API 接纳：欢迎态消失，UI/Snapshot/持久
     expectedReply,
     { timeout: 90_000 },
   );
-  await page.getByLabel("Agent 状态：已完成").waitFor();
+  // 头部瘦身后无运行状态 label（652b0d3e）：以「思考过程」折叠块为运行结束标记；
+  // 摘要默认收起，点击展开后校验安全投影内容。
+  await page.getByText("思考过程").waitFor();
+  await page.getByText("思考过程").click();
   await page.getByText("已完成回答。", { exact: true }).waitFor();
 
   // 草稿应已清除
@@ -438,7 +441,8 @@ test("forced 与 auto Skill 经公开 API 后在 AgentChatPanel 安全恢复", a
   assert.equal(JSON.stringify(forcedSnapshot).includes(privateBody), false);
   await openCanvas(forcedProject);
   await page.getByLabel("已激活技能：Browser Forced").waitFor();
-  await page.getByLabel("Agent 状态：已完成").waitFor();
+  await page.getByText("思考过程").waitFor();
+  await page.getByText("思考过程").click();
   await page.getByText("已使用「Browser Forced」完成回答。", { exact: true }).waitFor();
 
   const autoProject = await createProject("浏览器自动 Skill", user.token);
@@ -477,7 +481,8 @@ test("forced 与 auto Skill 经公开 API 后在 AgentChatPanel 安全恢复", a
   );
   await openCanvas(autoProject);
   await page.getByLabel("已激活技能：Acceptance Poster").waitFor();
-  await page.getByLabel("Agent 状态：已完成").waitFor();
+  await page.getByText("思考过程").waitFor();
+  await page.getByText("思考过程").click();
   await page.getByText("已使用「Acceptance Poster」完成回答。", { exact: true }).waitFor();
 }, 300_000);
 
@@ -643,8 +648,7 @@ test("PlanPhase 完成后在 AgentChatPanel 展示正式 PlanMessage（IK6QHI）
   await page.keyboard.type("创作：一张海报");
   await page.getByLabel("发送").click();
 
-  await page.getByLabel("Agent 状态：等待输入").waitFor({ timeout: 60_000 });
-  await page.getByLabel("计划阶段：需求对齐").waitFor();
+  // 阶段/状态 label 已随头部瘦身移除（652b0d3e）：以澄清问题气泡为等待输入的用户可见事实。
   await page.waitForFunction(
     () =>
       Array.from(document.querySelectorAll(".tc-agent-agent-bubble")).some(
@@ -659,7 +663,6 @@ test("PlanPhase 完成后在 AgentChatPanel 展示正式 PlanMessage（IK6QHI）
   await page.keyboard.type("主体：蓝鲸，预期：极简海报");
   await page.getByLabel("发送").click();
 
-  await page.getByLabel("计划阶段：待最终确认").waitFor({ timeout: 60_000 });
   await page.waitForFunction(
     () =>
       Array.from(document.querySelectorAll(".tc-agent-agent-bubble")).some(
@@ -674,7 +677,14 @@ test("PlanPhase 完成后在 AgentChatPanel 展示正式 PlanMessage（IK6QHI）
   await page.keyboard.type("同意");
   await page.getByLabel("发送").click();
 
-  await page.getByLabel("Agent 状态：已完成").waitFor({ timeout: 60_000 });
+  await waitFor(
+    async () => {
+      const current = await fetchSnapshot(projectId, user.token);
+      return current.agent_runs.at(-1)?.status === "completed" ? true : null;
+    },
+    60_000,
+    "服务=AgentRun 事实=同意后应到 completed 终态",
+  );
   const snapshot = await fetchSnapshot(projectId, user.token);
   const run = snapshot.agent_runs.at(-1);
   const plans = snapshot.plan_messages.filter(

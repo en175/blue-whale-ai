@@ -134,6 +134,7 @@ services:
     environment:
       <<: *node-environment
       PORT: "4001"
+      MACHINE_ID: "2"
       AGENT_RUNTIME_MODE: fake
       AGENT_LEASE_MS: "8000"
       DATABASE_URL: mysql://root:blue_whale@mysql:3306/blue_whale
@@ -157,6 +158,7 @@ services:
     environment:
       <<: *node-environment
       DATABASE_URL: mysql://root:blue_whale@mysql:3306/blue_whale
+      MACHINE_ID: "3"
       GENERATION_WORKER_PORT: "4002"
       GENERATION_RECOVERY_INTERVAL_MS: "5000"
       NEW_API_BASE_URL: http://new-api:3000
@@ -196,6 +198,7 @@ services:
     environment:
       <<: *node-environment
       PORT: "3000"
+      MACHINE_ID: "1"
       DATABASE_URL: mysql://root:blue_whale@mysql:3306/blue_whale
       NEW_API_BASE_URL: http://new-api:3000
       IMAGE_RECOVERY_INTERVAL_MS: "5000"
