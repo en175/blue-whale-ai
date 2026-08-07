@@ -35,6 +35,10 @@ export type ProjectSnapshot = {
   scene_card_generation_records?: Array<Record<string, unknown>>;
   /** StoryboardPreview 分镜预览（IK67HF/T15）：从 SceneCard 触发的可选旁路预览会话。 */
   storyboard_previews?: Array<Record<string, unknown>>;
+  /** 冻结计划卡（IK6KQ2）：后端 T09/T10 投影的 plan_messages（含 applied_at / first_generation_job_id / application_availability）。可选仅为兼容历史测试 fixture，运行时后端总返回。 */
+  plan_messages?: Array<Record<string, unknown>>;
+  /** 计划应用回执（IK6KQ2，AC#1）：不可变事实收据；渲染以 plan_messages.applied_at 为权威，回执随快照透传供后续接线消费。可选同 plan_messages。 */
+  plan_applications?: Array<Record<string, unknown>>;
   assets: Record<
     string,
     { asset_id: number | string; type: string; access_url: string }

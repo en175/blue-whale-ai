@@ -11,7 +11,42 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import type { ChatMessage } from "../types";
+import { MarkdownBody } from "../../_scene-card/components/MarkdownBody";
 import { AuthenticatedImage } from "./AuthenticatedImage";
+
+/** 卡片外壳共享样式（AgentCard / PlanCard）：token 边框 + 抬升底 + 正文层级。 */
+const CARD_SHELL_CLASS =
+  "flex flex-col gap-2 rounded-[var(--tc-radius-xl)] border border-[var(--tc-border-subtle)] bg-[var(--tc-agent-card-bg)] p-3 text-xs leading-normal text-[var(--tc-agent-card-text)]";
+
+/** 卡片主操作共享样式（AgentCard / PlanCard）。 */
+const CARD_CTA_CLASS =
+  "inline-flex items-center gap-1 rounded-md bg-[var(--tc-agent-card-cta-bg)] px-2 py-1 text-xs text-[var(--tc-agent-card-cta-text)] transition-colors hover:bg-[var(--tc-agent-card-cta-bg-hover)] disabled:cursor-default disabled:opacity-50";
+
+/** 卡片折叠按钮（AgentCard / PlanCard 共享）。 */
+function CardCollapseButton({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="tc-agent-card-collapse-btn inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--tc-agent-card-icon)] transition-colors hover:bg-[var(--tc-agent-card-icon-hover-bg)]"
+      aria-expanded={!collapsed}
+      aria-label="折叠卡片"
+      title="折叠卡片"
+      onClick={onToggle}
+    >
+      {collapsed ? (
+        <ChevronDown width={14} height={14} />
+      ) : (
+        <ChevronUp width={14} height={14} />
+      )}
+    </button>
+  );
+}
 
 export function UserMessageBubble({ text }: { text: string }) {
   return (
@@ -121,10 +156,7 @@ export function AgentCard({
         : "手动应用";
   return (
     <div className="self-stretch">
-      <div
-        className="flex flex-col gap-2 rounded-xl border border-[var(--tc-border-subtle,rgba(255,255,255,0.08))] bg-white/[0.03] p-3 text-xs leading-normal text-white/[0.92]"
-        data-asset-id={msg.assetId}
-      >
+      <div className={CARD_SHELL_CLASS} data-asset-id={msg.assetId}>
         <div className="flex items-center justify-between gap-2">
           <div className="tc-agent-card-header-leading">
             <span className="tc-agent-card-badge">
@@ -138,7 +170,7 @@ export function AgentCard({
           </div>
           <div className="tc-agent-card-header-actions">
             <span className="tc-agent-card-meta">
-              <span style={{ color: "rgba(255,255,255,0.55)" }}>
+              <span style={{ color: "var(--tc-text-tertiary)" }}>
                 {msg.meta}
               </span>
             </span>
@@ -150,7 +182,7 @@ export function AgentCard({
                 className={[
                   "tc-agent-card-cta tc-agent-card-cta--reapply",
                   failed ? "tc-agent-card-cta--reapply-failed" : "",
-                  "inline-flex items-center gap-1 rounded-md bg-white/[0.08] px-2 py-1 text-xs text-white/80 transition-colors hover:bg-white/[0.12] disabled:cursor-default disabled:opacity-50",
+                  CARD_CTA_CLASS,
                 ].join(" ")}
                 aria-label={failed ? "生成失败，可重试" : ctaLabel}
                 aria-busy={generating || busy}
@@ -203,20 +235,10 @@ export function AgentCard({
                 <span className="tc-agent-card-cta__label">{ctaLabel}</span>
               </button>
             )}
-            <button
-              type="button"
-              className="tc-agent-card-collapse-btn inline-flex h-6 w-6 items-center justify-center rounded-md text-white/50 transition-colors hover:bg-white/[0.06]"
-              aria-expanded={!collapsed}
-              aria-label="折叠卡片"
-              title="折叠卡片"
-              onClick={() => setCollapsed((v) => !v)}
-            >
-              {collapsed ? (
-                <ChevronDown width={14} height={14} />
-              ) : (
-                <ChevronUp width={14} height={14} />
-              )}
-            </button>
+            <CardCollapseButton
+              collapsed={collapsed}
+              onToggle={() => setCollapsed((v) => !v)}
+            />
           </div>
         </div>
         {!collapsed && (
@@ -241,6 +263,99 @@ export function AgentCard({
                 role="status"
               >
                 {msg.errorMessage}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * PlanCard —— 冻结计划卡（IK6KQ2）：权威正文（MarkdownBody）+ 分镜序号 + 可用性徽标。
+ * 未应用卡显示单一「手动应用」主操作（实际 API 调用接线另单交付）；
+ * requires_new_plan 置灰并提示重新生成；已应用显示徽标、不显示按钮。
+ */
+export function PlanCard({
+  msg,
+}: {
+  msg: Extract<ChatMessage, { type: "plan-card" }>;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const applied = msg.appliedAt !== null;
+  const requiresNewPlan = msg.applicationAvailability === "requires_new_plan";
+  return (
+    <div className="self-stretch">
+      <div className={CARD_SHELL_CLASS}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="tc-agent-card-header-leading flex items-center gap-2">
+            <span className="tc-agent-card-badge">
+              <ImageIcon
+                width={13}
+                height={13}
+                stroke="currentColor"
+                strokeWidth={1.8}
+              />
+            </span>
+            {msg.sequenceLabel ? (
+              <span
+                className="tc-agent-plan-sequence"
+                style={{ color: "var(--tc-text-tertiary)" }}
+              >
+                {msg.sequenceLabel}
+              </span>
+            ) : null}
+          </div>
+          <div className="tc-agent-card-header-actions flex items-center gap-2">
+            <span
+              className="tc-agent-plan-availability"
+              style={{
+                color: requiresNewPlan
+                  ? "var(--tc-destructive)"
+                  : applied
+                    ? "var(--tc-success)"
+                    : "var(--tc-text-tertiary)",
+              }}
+            >
+              {requiresNewPlan ? "需新计划" : applied ? "已应用" : "可应用"}
+            </span>
+            <span className="tc-agent-card-meta">
+              <span style={{ color: "var(--tc-text-tertiary)" }}>
+                {msg.meta}
+              </span>
+            </span>
+            {!applied && (
+              <button
+                type="button"
+                disabled={requiresNewPlan}
+                className={`tc-agent-card-cta tc-agent-card-cta--apply ${CARD_CTA_CLASS}`}
+                aria-label="手动应用"
+              >
+                <span className="tc-agent-card-cta__label">手动应用</span>
+              </button>
+            )}
+            <CardCollapseButton
+              collapsed={collapsed}
+              onToggle={() => setCollapsed((v) => !v)}
+            />
+          </div>
+        </div>
+        {!collapsed && (
+          <>
+            <div className="break-words" style={{ overflowWrap: "anywhere" }}>
+              <MarkdownBody markdown={msg.text} />
+            </div>
+            {requiresNewPlan && (
+              <div
+                className="tc-agent-plan-renew break-words"
+                style={{
+                  overflowWrap: "anywhere",
+                  color: "var(--tc-destructive)",
+                }}
+                role="status"
+              >
+                素材已失效，请重新生成
               </div>
             )}
           </>

@@ -12,14 +12,29 @@ import { parseAspectRatio } from "./aspectRatio";
 export function projectSnapshotToChatMessages(
   snapshot: ProjectSnapshot,
 ): ChatMessage[] {
+  const planCardByMessageId = new Map(
+    (snapshot.plan_messages ?? [])
+      .filter(isImageGeneratePlanMessage)
+      .map((plan) => [String(plan.message_id), projectPlanCard(plan)] as const),
+  );
   const messages = snapshot.conversation_messages
     .filter(isConversationMessage)
     .sort((left, right) => left.sequence_no - right.sequence_no)
-    .map<ChatMessage>((message) => ({
-      id: `message-${message.message_id}`,
-      type: message.role === "user" ? "user" : "agent",
-      text: message.content,
-    }));
+    .map<ChatMessage>((message) => {
+      // 后端对计划双写 conversation_messages(content_type=plan_message) 与 plan_messages（1:1）：
+      // 命中计划行时在原序列位置投影计划卡并去重，避免正文重复（IK6KQ2 审查修订）。
+      if (message.content_type === "plan_message") {
+        const card = planCardByMessageId.get(String(message.message_id));
+        if (card) {
+          return card;
+        }
+      }
+      return {
+        id: `message-${message.message_id}`,
+        type: message.role === "user" ? "user" : "agent",
+        text: message.content,
+      };
+    });
   const runIds = new Set(
     snapshot.agent_runs
       .map((run) => run.agent_run_id)
@@ -249,6 +264,48 @@ function isSuccessfulOutput(
   );
 }
 
+type ImageGeneratePlanMessage = Record<string, unknown> & {
+  message_id: WireInteger;
+  content_markdown: string;
+  sequence_label: string | null;
+  applied_at: string | null;
+  first_generation_job_id: WireInteger | null;
+  application_availability: "available" | "requires_new_plan";
+};
+
+function isImageGeneratePlanMessage(
+  value: Record<string, unknown>,
+): value is ImageGeneratePlanMessage {
+  return (
+    value.application_kind === "image_generate" &&
+    isWireInteger(value.message_id) &&
+    (value.first_generation_job_id === null ||
+      isWireInteger(value.first_generation_job_id)) &&
+    typeof value.content_markdown === "string" &&
+    (value.sequence_label === null ||
+      typeof value.sequence_label === "string") &&
+    (value.applied_at === null || typeof value.applied_at === "string") &&
+    (value.application_availability === "available" ||
+      value.application_availability === "requires_new_plan")
+  );
+}
+
+function projectPlanCard(
+  plan: ImageGeneratePlanMessage,
+): Extract<ChatMessage, { type: "plan-card" }> {
+  return {
+    id: `plan-message-${String(plan.message_id)}`,
+    type: "plan-card",
+    text: plan.content_markdown,
+    meta: "图片生成计划",
+    planMessageId: plan.message_id,
+    sequenceLabel: plan.sequence_label,
+    appliedAt: plan.applied_at,
+    applicationAvailability: plan.application_availability,
+    firstGenerationJobId: plan.first_generation_job_id,
+  };
+}
+
 function isConversationMessage(value: Record<string, unknown>): value is Record<
   string,
   unknown
@@ -257,10 +314,13 @@ function isConversationMessage(value: Record<string, unknown>): value is Record<
   role: "user" | "assistant";
   content: string;
   sequence_no: number;
+  content_type?: string;
 } {
   return (
     (typeof value.message_id === "number" ||
       typeof value.message_id === "string") &&
+    (value.content_type === undefined ||
+      typeof value.content_type === "string") &&
     (value.role === "user" || value.role === "assistant") &&
     typeof value.content === "string" &&
     typeof value.sequence_no === "number"

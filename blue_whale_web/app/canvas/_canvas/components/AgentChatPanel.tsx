@@ -26,6 +26,7 @@ import {
   AgentMessageBubble,
   ThinkingBlock,
   AgentCard,
+  PlanCard,
 } from "./ChatBubbles";
 import type { ChatMessage, PendingMentionBatch } from "../types";
 import type { WireInteger } from "@/lib/wire-integer";
@@ -923,6 +924,8 @@ export function AgentChatPanel({
                 return <UserMessageBubble key={msg.id} text={msg.text} />;
               if (msg.type === "thinking")
                 return <ThinkingBlock key={msg.id} msg={msg} />;
+              if (msg.type === "plan-card")
+                return <PlanCard key={msg.id} msg={msg} />;
               if (msg.type === "card")
                 return (
                   <AgentCard
