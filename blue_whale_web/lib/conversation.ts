@@ -1,5 +1,6 @@
 import { apiRequest } from "./api-client";
 import type {
+  PlanApplyImageReceipt,
   ProviderPromptAsset,
   VideoReferenceMode,
 } from "@blue-whale/contracts";
@@ -82,6 +83,29 @@ export function retryAgentRun(
 ): Promise<AgentRunCommandReceipt & { retry_count: number }> {
   return apiRequest<AgentRunCommandReceipt & { retry_count: number }>(
     `/api/projects/${projectId}/conversation/agent-runs/${agentRunId}/retry`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export type PlanMessageApplyResult = {
+  receipt: PlanApplyImageReceipt;
+  first_generation_job_id: WireInteger | null;
+};
+
+/** 手动应用计划（IK6KQB，契约 §9）：冻结 PlanMessage → 应用出图。
+ *  业务失败走 HTTP 200 + 业务码信封，apiRequest 抛 ApiError：
+ *  100405=余额不足（retryable_blocked），100403/100202/100407=需新计划（requires_new_plan）。 */
+export function applyPlanMessage(
+  projectId: WireInteger,
+  planMessageId: WireInteger,
+  idempotencyKey: string,
+): Promise<PlanMessageApplyResult> {
+  return apiRequest<PlanMessageApplyResult>(
+    `/api/projects/${projectId}/plan-messages/${planMessageId}/apply`,
     {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },

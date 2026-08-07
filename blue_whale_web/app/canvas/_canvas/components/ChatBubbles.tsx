@@ -274,17 +274,25 @@ export function AgentCard({
 
 /**
  * PlanCard —— 冻结计划卡（IK6KQ2）：权威正文（MarkdownBody）+ 分镜序号 + 可用性徽标。
- * 未应用卡显示单一「手动应用」主操作（实际 API 调用接线另单交付）；
- * requires_new_plan 置灰并提示重新生成；已应用显示徽标、不显示按钮。
+ * 未应用卡显示单一「手动应用」主操作（IK6KQB 接通 apply 命令，无二次确认）；
+ * applying 期间按钮禁用显示「应用中…」；requires_new_plan 置灰并提示重新生成；
+ * retryable_blocked 提示余额不足、保持可重试；已应用显示徽标、不显示按钮。
  */
 export function PlanCard({
   msg,
+  onApply,
+  applying = false,
 }: {
   msg: Extract<ChatMessage, { type: "plan-card" }>;
+  /** 手动应用回调（IK6KQB）：仅未应用且可操作时由按钮触发，重复点击由父层防重。 */
+  onApply?: (msg: Extract<ChatMessage, { type: "plan-card" }>) => void;
+  /** 应用请求进行中：按钮禁用并显示「应用中…」。 */
+  applying?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const applied = msg.appliedAt !== null;
   const requiresNewPlan = msg.applicationAvailability === "requires_new_plan";
+  const retryableBlocked = msg.applicationAvailability === "retryable_blocked";
   return (
     <div className="self-stretch">
       <div className={CARD_SHELL_CLASS}>
@@ -311,14 +319,21 @@ export function PlanCard({
             <span
               className="tc-agent-plan-availability"
               style={{
-                color: requiresNewPlan
-                  ? "var(--tc-destructive)"
-                  : applied
-                    ? "var(--tc-success)"
-                    : "var(--tc-text-tertiary)",
+                color:
+                  requiresNewPlan || retryableBlocked
+                    ? "var(--tc-destructive)"
+                    : applied
+                      ? "var(--tc-success)"
+                      : "var(--tc-text-tertiary)",
               }}
             >
-              {requiresNewPlan ? "需新计划" : applied ? "已应用" : "可应用"}
+              {requiresNewPlan
+                ? "需新计划"
+                : applied
+                  ? "已应用"
+                  : retryableBlocked
+                    ? "余额不足"
+                    : "可应用"}
             </span>
             <span className="tc-agent-card-meta">
               <span style={{ color: "var(--tc-text-tertiary)" }}>
@@ -328,11 +343,14 @@ export function PlanCard({
             {!applied && (
               <button
                 type="button"
-                disabled={requiresNewPlan}
+                disabled={requiresNewPlan || applying}
+                onClick={() => onApply?.(msg)}
                 className={`tc-agent-card-cta tc-agent-card-cta--apply ${CARD_CTA_CLASS}`}
                 aria-label="手动应用"
               >
-                <span className="tc-agent-card-cta__label">手动应用</span>
+                <span className="tc-agent-card-cta__label">
+                  {applying ? "应用中…" : "手动应用"}
+                </span>
               </button>
             )}
             <CardCollapseButton
@@ -355,7 +373,19 @@ export function PlanCard({
                 }}
                 role="status"
               >
-                素材已失效，请重新生成
+                计划已失效，请重新生成
+              </div>
+            )}
+            {retryableBlocked && !applied && (
+              <div
+                className="tc-agent-plan-quota break-words"
+                style={{
+                  overflowWrap: "anywhere",
+                  color: "var(--tc-destructive)",
+                }}
+                role="status"
+              >
+                余额不足，充值后可重试应用
               </div>
             )}
           </>

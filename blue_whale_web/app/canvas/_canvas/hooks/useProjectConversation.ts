@@ -20,10 +20,13 @@ import {
 } from "@/lib/project-recovery";
 import {
   acceptConversationMessage,
+  applyPlanMessage,
   retryAgentRun,
   stopAgentRun,
 } from "@/lib/conversation";
 import { newCommandIdentity } from "@/lib/command-identity";
+import { classifyPlanApplicationFailure } from "@/lib/plan-application-failure";
+import type { WireInteger } from "@/lib/wire-integer";
 import type { ConversationMentionInput } from "@blue-whale/core";
 import { projectSnapshotToChatMessages } from "../conversationRecovery";
 import type { ChatMessage } from "../types";
@@ -62,6 +65,8 @@ export function useProjectConversation(
   // 防止首次请求实际已被服务端接纳时重复创建消息。
   const pendingAttemptRef = useRef<PendingAttempt | null>(null);
   const pendingRunCommandRef = useRef<PendingRunCommand | null>(null);
+  // 项目切换后仍保留结果未知的命令；键包含 projectId，避免跨项目误复用。
+  const pendingPlanCommandsRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     snapshotRef.current = null;
@@ -137,6 +142,31 @@ export function useProjectConversation(
   const retryRun = useCallback(
     () => runAgentCommand("retry"),
     [runAgentCommand],
+  );
+
+  /**
+   * 手动应用计划（IK6KQB，契约 §9）：网络结果未知时复用原 CommandId；
+   * 仅明确零写入失败后换新键重试。权威 applied 态由 plan_message.applied
+   * 事件经恢复循环合入，此处不做乐观更新。
+   */
+  const applyPlan = useCallback(
+    async (planMessageId: WireInteger) => {
+      if (!projectId) return;
+      const planKey = `${projectId}:${String(planMessageId)}`;
+      const idempotencyKey =
+        pendingPlanCommandsRef.current.get(planKey) ?? newCommandIdentity();
+      pendingPlanCommandsRef.current.set(planKey, idempotencyKey);
+      try {
+        await applyPlanMessage(projectId, planMessageId, idempotencyKey);
+        pendingPlanCommandsRef.current.delete(planKey);
+      } catch (error) {
+        if (classifyPlanApplicationFailure(error)) {
+          pendingPlanCommandsRef.current.delete(planKey);
+        }
+        throw error;
+      }
+    },
+    [projectId],
   );
 
   const runControl = useMemo(
@@ -225,5 +255,6 @@ export function useProjectConversation(
     provisionalText,
     stopRun,
     retryRun,
+    applyPlan,
   };
 }

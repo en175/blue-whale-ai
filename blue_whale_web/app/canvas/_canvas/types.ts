@@ -6,6 +6,7 @@
 import type React from "react";
 import type { CardStatus } from "@/types/domain";
 import type { WireInteger } from "@/lib/wire-integer";
+import type { PlanApplicationAvailability } from "@blue-whale/contracts";
 
 export type ToolDef = {
   id: string;
@@ -132,8 +133,8 @@ export type ChatMessage =
       sequenceLabel: string | null;
       /** 首次成功应用时间；null = 未应用。 */
       appliedAt: string | null;
-      /** 应用可用性（权威）：available / requires_new_plan。 */
-      applicationAvailability: "available" | "requires_new_plan";
+      /** 应用可用性（权威）：available / retryable_blocked（余额不足，IK6KQB）/ requires_new_plan。 */
+      applicationAvailability: PlanApplicationAvailability;
       /** 首个图片 GenerationJob；null = 未应用（接线另单交付）。 */
       firstGenerationJobId: WireInteger | null;
     };

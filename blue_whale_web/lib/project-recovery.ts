@@ -438,6 +438,33 @@ export function applyProductEvent(
           "preview_id",
         ),
       };
+    } else if (event.event_type === "plan_message.applied") {
+      // IK6KQB 手动应用闭环：权威应用事实。payload 不含 applied_at，
+      // 以事件 occurred_at 为权威应用时间；仅合并快照中已有的计划，
+      // 缺项交由下次 Snapshot 对齐，不伪造部分事实。
+      const planMessageId = event.payload.plan_message_id;
+      if (
+        typeof planMessageId === "number" ||
+        typeof planMessageId === "string"
+      ) {
+        const firstGenerationJobId =
+          event.payload.first_generation_job_id === null ||
+          isWireInteger(event.payload.first_generation_job_id)
+            ? (event.payload.first_generation_job_id as WireInteger | null)
+            : null;
+        snapshot = {
+          ...snapshot,
+          plan_messages: (snapshot.plan_messages ?? []).map((plan) =>
+            String(plan.message_id) === String(planMessageId)
+              ? {
+                  ...plan,
+                  applied_at: event.occurred_at,
+                  first_generation_job_id: firstGenerationJobId,
+                }
+              : plan,
+          ),
+        };
+      }
     } else if (
       event.event_type === "conversation.message_accepted" ||
       event.event_type === "conversation.message_started" ||

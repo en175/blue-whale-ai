@@ -1,4 +1,5 @@
 import type { ProjectSnapshot } from "@/lib/project-recovery";
+import type { PlanApplicationAvailability } from "@blue-whale/contracts";
 import {
   compareWireIntegers,
   isWireInteger,
@@ -270,7 +271,7 @@ type ImageGeneratePlanMessage = Record<string, unknown> & {
   sequence_label: string | null;
   applied_at: string | null;
   first_generation_job_id: WireInteger | null;
-  application_availability: "available" | "requires_new_plan";
+  application_availability: PlanApplicationAvailability;
 };
 
 function isImageGeneratePlanMessage(
@@ -286,6 +287,7 @@ function isImageGeneratePlanMessage(
       typeof value.sequence_label === "string") &&
     (value.applied_at === null || typeof value.applied_at === "string") &&
     (value.application_availability === "available" ||
+      value.application_availability === "retryable_blocked" ||
       value.application_availability === "requires_new_plan")
   );
 }

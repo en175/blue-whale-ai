@@ -536,6 +536,23 @@ describe("冻结计划卡投影（IK6KQ2）", () => {
     ]);
   });
 
+  it("retryable_blocked 余额不足可用性透传（IK6KQB）", () => {
+    const snapshot = baseSnapshot([
+      planMessage({
+        message_id: 10,
+        application_availability: "retryable_blocked",
+      }),
+    ]);
+    snapshot.conversation_messages = [planRow(10, 1)];
+    const cards = projectSnapshotToChatMessages(snapshot);
+    expect(cards).toEqual([
+      expect.objectContaining({
+        id: "plan-message-10",
+        applicationAvailability: "retryable_blocked",
+      }),
+    ]);
+  });
+
   it("conversation_messages 的 plan_message 行与 plan_messages 去重，计划卡保持原序列位置", () => {
     const snapshot = baseSnapshot([planMessage({})]);
     snapshot.conversation_messages = [
