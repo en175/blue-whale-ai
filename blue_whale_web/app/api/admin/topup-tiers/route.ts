@@ -4,7 +4,10 @@ import {
   parseTierOriginalPrice,
 } from "@/lib/topup-tier/constants";
 import { createTopupTierDeps } from "@/lib/topup-tier/deps";
-import { syncTierDiscountToGo } from "@/lib/topup-tier/go-amount-discount";
+import {
+  syncAllTierDiscountsToGo,
+  syncTierDiscountToGo,
+} from "@/lib/topup-tier/go-amount-discount";
 import { logTierCreate } from "@/lib/topup-tier/operation-log";
 import { withAdminUser } from "@/lib/auth/product-route-auth";
 

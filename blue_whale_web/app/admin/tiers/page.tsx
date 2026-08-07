@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Eye,
   Clock,
+  RefreshCw,
 } from "lucide-react";
 import {
   Table,
@@ -30,6 +31,7 @@ import {
   deleteTier,
   moveTier,
   getPreviewTiers,
+  syncAllTierDiscounts,
 } from "./data";
 // 积分派生单一来源：与服务端 route 同一常量/公式（Go QuotaPerUnit 耦合说明在 constants.ts）。
 import { deriveTierAmount } from "@/lib/topup-tier/constants";
@@ -97,6 +99,7 @@ export default function AdminTiersPage() {
   const [form, setForm] = useState<TierFormData>(EMPTY_FORM);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTiers, setPreviewTiers] = useState<AdminTier[]>([]);
+  const [syncing, setSyncing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -183,6 +186,18 @@ export default function AdminTiersPage() {
     setPreviewOpen(true);
   };
 
+  const handleSyncToGo = async () => {
+    setSyncing(true);
+    try {
+      const { synced } = await syncAllTierDiscounts();
+      alert(`已同步 ${synced} 个档位的折扣到 Go`);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "折扣同步失败");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const computedPrice =
     Math.round(form.originalPrice * form.discount * 100) / 100;
   const derivedPoints = deriveTierAmount(form.originalPrice);
@@ -199,6 +214,14 @@ export default function AdminTiersPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleSyncToGo}
+            disabled={syncing}
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--tc-border)] px-4 py-2 text-sm font-medium text-[var(--tc-text-secondary)] hover:bg-[var(--tc-bg-elevated)] transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? "同步中…" : "同步折扣到 Go"}
+          </button>
           <button
             onClick={openPreview}
             className="inline-flex items-center gap-2 rounded-lg border border-[var(--tc-border)] px-4 py-2 text-sm font-medium text-[var(--tc-text-secondary)] hover:bg-[var(--tc-bg-elevated)] transition-colors"
