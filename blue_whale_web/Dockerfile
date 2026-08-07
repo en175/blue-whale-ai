@@ -47,6 +47,10 @@ COPY packages/generation-runtime packages/generation-runtime
 COPY packages/persistence packages/persistence
 # 目标应用源码
 COPY blue_whale_web blue_whale_web
+# IK774I（修 IK747Z lint 配套遗漏）：pnpm lint:node = eslint apps packages，
+# builder 阶段需仓库根 eslint.config.mjs 与 apps 源码在场，否则 ESLint 9 找不到 flat config 直接 exit 2。
+COPY eslint.config.mjs ./
+COPY apps apps
 
 # 先编译 workspace 包（Next.js 通过 exports 字段引用 dist/ 输出）
 # IK72WL：agent-runtime 缺失导致 next build 报 Can't resolve '@blue-whale/agent-runtime'
