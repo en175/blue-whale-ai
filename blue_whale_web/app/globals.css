@@ -107,6 +107,15 @@ body {
   --tc-on-accent: #ffffff;
   --tc-destructive: #ef4444;
   --tc-success: #22c55e;
+  --tc-radius-xl: 10px;
+  /* Agent 对话区卡片（IK6KQ2 审查修订：AgentCard/PlanCard 共享外壳/CTA/折叠按钮 token 化） */
+  --tc-agent-card-bg: rgba(255, 255, 255, 0.03);
+  --tc-agent-card-text: rgba(255, 255, 255, 0.92);
+  --tc-agent-card-cta-bg: rgba(255, 255, 255, 0.08);
+  --tc-agent-card-cta-bg-hover: rgba(255, 255, 255, 0.12);
+  --tc-agent-card-cta-text: rgba(255, 255, 255, 0.8);
+  --tc-agent-card-icon: rgba(255, 255, 255, 0.5);
+  --tc-agent-card-icon-hover-bg: rgba(255, 255, 255, 0.06);
 
   --tc-login-modal-bg: #141414;
   --tc-login-primary: #4e40f3;

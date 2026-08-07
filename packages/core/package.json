@@ -20,6 +20,14 @@
       "types": "./dist/skills/skill-md.d.ts",
       "import": "./dist/skills/skill-md.js"
     },
+    "./placement": {
+      "types": "./dist/placement.d.ts",
+      "import": "./dist/placement.js"
+    },
+    "./readiness": {
+      "types": "./dist/readiness.d.ts",
+      "import": "./dist/readiness.js"
+    },
     "./logging": {
       "types": "./dist/logging.d.ts",
       "import": "./dist/logging.js"
