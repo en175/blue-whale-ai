@@ -1,7 +1,8 @@
 # Blue-Whale 前端
 
 一个处于上线前研发阶段、面向 AI Agent / Canvas 交互的产品。目标运行时由 Next.js Web 与
-TypeScript `product-api`、`agent-worker`、`generation-worker` 组成；三者属于同一模块化单体代码库。
+TypeScript `agent-worker`、`generation-worker` 组成；三者属于同一模块化单体代码库。
+独立 `product-api` 进程已退役，浏览器业务 API 折进 Next.js Route Handlers（ADR-0059）。
 `blue_whale_api`（new-api 二开，Go，承担 LLM 网关与计费）已迁出至独立仓库 `blue-whale-api`（`hangzhou-xuanfu_1/blue-whale-api`），保持独立且不在本仓改造。
 `blue_whale_server`（Java）与 `blue_whale_agent_worker`（Python）已退役，禁止写 入；
 `blue_whale_pay_web` 与 `blue_whale_pay_server`（Java 支付）已迁出至独立仓库 `blue-whale-pay`（`hangzhou-xuanfu_1/blue-whale-pay`），其中 server 冻结、web 单独迭代。范围以
