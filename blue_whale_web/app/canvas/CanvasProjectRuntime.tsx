@@ -1278,6 +1278,9 @@ export function CanvasProjectRuntime({
       n.data.status !== "error",
   ).length;
 
+  /** IK6XQI-5：文本编辑卡防重复——短时间（400ms）内重复点击只添加一个节点，
+   *  避免双击/连点误触发无限叠卡。 */
+  const lastTextAddAtRef = useRef(0);
   const handleToolClick = useCallback(
     (id: string, el?: HTMLButtonElement) => {
       if (id === "select") {
@@ -1305,6 +1308,9 @@ export function CanvasProjectRuntime({
           bottomDockMode === "video" && open ? false : true,
         );
       } else if (id === "text") {
+        const now = Date.now();
+        if (now - lastTextAddAtRef.current < 400) return;
+        lastTextAddAtRef.current = now;
         addNode("text");
       }
     },

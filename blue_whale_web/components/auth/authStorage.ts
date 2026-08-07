@@ -52,6 +52,10 @@ export function loadUser(): User | null {
           ? parsed.hasPassword
           : undefined,
       credits: typeof parsed.credits === "number" ? parsed.credits : undefined,
+      // IK6XQI-6：登录时从 /api/me 拉的 is_admin 必须恢复，否则刷新后
+      // 「系统设置」入口因 isAdmin 变 undefined 而消失（需重新登录才出现）。
+      isAdmin:
+        typeof parsed.isAdmin === "boolean" ? parsed.isAdmin : undefined,
     };
   } catch {
     return null;

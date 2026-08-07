@@ -1,6 +1,13 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback } from "react";
+import {
+  forwardRef,
+  useImperativeHandle,
+  useRef,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
 import { useAuth } from "./auth/AuthContext";
 import {
   Plus,
@@ -96,56 +103,48 @@ export interface GenerateContext {
   image: GenerateImageParams;
 }
 
-export interface AgentComposerProps {
-  /** 真生成回调（提供则真生成，否则首页默认跳转 /generate?prompt）。 */
-  onGenerate?: (ctx: GenerateContext) => void;
-  /** 占位禁用的 tab id（生成静默不触发），首页默认空。 */
-  disabledTabs?: string[];
-  /** 初始预填 prompt（/generate 读 ?prompt 传入，首页不传）。 */
-  defaultPrompt?: string;
-  /** 参数下拉向上展开（/generate 底部固定挂载避开视口底）；缺省向下（首页）。 */
-  dropUp?: boolean;
-  /** 受控 prompt 值（传则受控，不传回退内部 state）。 */
-  prompt?: string;
-  /** 受控 prompt 变更回调（与 prompt 配合使用）。 */
-  onPromptChange?: (value: string) => void;
+/**
+ * IK6XQI-7 重构：三个 tab（视频智能体/AI 视频/AI 图片）各自维护独立输入内容
+ * （tabContents），切换 tab 时编辑器重新挂载并从对应内容同步——修复
+ * 「切到 AI 视频提示词不显示 / 三 tab 共用一个输入框」的交互混乱。
+ * 模板卡片点击经 ref.injectPrompt 注入当前激活 tab（覆盖、单行）。
+ */
+export interface AgentComposerHandle {
+  /** 外部注入提示词（模板卡片点击）：覆盖当前激活 tab 的输入内容。 */
+  injectPrompt: (text: string) => void;
 }
 
-export default function AgentComposer({
-  onGenerate,
-  disabledTabs = [],
-  defaultPrompt,
-  dropUp = false,
-  prompt,
-  onPromptChange,
-}: AgentComposerProps = {}) {
-  const [activeTab, setActiveTab] = useState("agent");
-  const [content, setContent] = useState("");
-  const isControlled = prompt !== undefined;
-  const resolvedPrompt = prompt ?? content;
-  const handlePromptChange = onPromptChange ?? setContent;
-  const [isFocused, setIsFocused] = useState(false);
-  const [indicator, setIndicator] = useState({ width: 0, x: 0, opacity: 0 });
-  const [modelOpen, setModelOpen] = useState(false);
-  const [videoModels, setVideoModels] = useState<ImageModelCapability[]>([]);
-  const [selectedModel, setSelectedModel] =
-    useState<ImageModelCapability | null>(null);
-  const [videoModelOpen, setVideoModelOpen] = useState(false);
-  const [refModeOpen, setRefModeOpen] = useState(false);
-  const [resolutionOpen, setResolutionOpen] = useState(false);
-  const [aspectRatioOpen, setAspectRatioOpen] = useState(false);
-  const [durationOpen, setDurationOpen] = useState(false);
-  const [agentModelOpen, setAgentModelOpen] = useState(false);
-  const [agentModels, setAgentModels] = useState<ImageModelCapability[]>([]);
-  const [selectedAgentModel, setSelectedAgentModel] =
-    useState<ImageModelCapability | null>(null);
-  const [mediaList, setMediaList] = useState<MediaItem[]>([]);
-  const [skillPanelOpen, setSkillPanelOpen] = useState(false);
+export type AgentComposerProps = Record<never, never>;
+
+const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
+  function AgentComposer(_props, ref) {
+    const [activeTab, setActiveTab] = useState("agent");
+    // IK6XQI-7：三 tab 独立输入内容，互不串扰；切换 tab 时 editor 重新挂载并同步对应内容。
+    const [tabContents, setTabContents] = useState<Record<string, string>>({
+      agent: "",
+      video: "",
+      image: "",
+    });
+    const [isFocused, setIsFocused] = useState(false);
+    const [indicator, setIndicator] = useState({ width: 0, x: 0, opacity: 0 });
+    const [modelOpen, setModelOpen] = useState(false);
+    const [videoModels, setVideoModels] = useState<ImageModelCapability[]>([]);
+    const [selectedModel, setSelectedModel] =
+      useState<ImageModelCapability | null>(null);
+    const [videoModelOpen, setVideoModelOpen] = useState(false);
+    const [refModeOpen, setRefModeOpen] = useState(false);
+    const [resolutionOpen, setResolutionOpen] = useState(false);
+    const [aspectRatioOpen, setAspectRatioOpen] = useState(false);
+    const [durationOpen, setDurationOpen] = useState(false);
+    const [agentModelOpen, setAgentModelOpen] = useState(false);
+    const [agentModels, setAgentModels] = useState<ImageModelCapability[]>([]);
+    const [selectedAgentModel, setSelectedAgentModel] =
+      useState<ImageModelCapability | null>(null);
+    const [mediaList, setMediaList] = useState<MediaItem[]>([]);
+    const [skillPanelOpen, setSkillPanelOpen] = useState(false);
 
   const router = useRouter();
   const { requireAuth } = useAuth();
-
-  const tabDisabled = disabledTabs.includes(activeTab);
 
   // AI 视频 tab params
   const [refMode, setRefMode] = useState(VIDEO_REF_MODES[1]);
@@ -169,38 +168,15 @@ export default function AgentComposer({
   const [imageResolutionOpen, setImageResolutionOpen] = useState(false);
 
   const handleGenerate = useCallback(() => {
-    // 视频/agent tab 后端未就绪：占位静默（仅图片 tab 真生成）。
-    if (tabDisabled) return;
-    const promptText = resolvedPrompt.trim();
+    const promptText = (tabContents[activeTab] ?? "").trim();
     requireAuth({ kind: "home-generate", prompt: promptText }, () => {
-      if (onGenerate) {
-        onGenerate({
-          tab: activeTab,
-          prompt: promptText,
-          image: {
-            modelId: selectedImageModel?.model_id ?? "",
-            aspectRatioId: imageAspectRatio.id,
-            resolutionId: imageResolution?.id ?? "",
-          },
-        });
-        return;
-      }
       const query = promptText
         ? `?prompt=${encodeURIComponent(promptText)}`
         : "";
-      router.push(`/generate${query}`);
+      // IK6XQI-4：发送后跳画布（画布读 ?prompt 预填 BottomDock），不再跳 /generate（已下线）。
+      router.push(`/canvas${query}`);
     });
-  }, [
-    tabDisabled,
-    resolvedPrompt,
-    requireAuth,
-    onGenerate,
-    activeTab,
-    selectedImageModel,
-    imageAspectRatio,
-    imageResolution,
-    router,
-  ]);
+  }, [activeTab, tabContents, requireAuth, router]);
 
   const tabRefs = useRef<(HTMLElement | null)[]>([]);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -262,24 +238,37 @@ export default function AgentComposer({
     };
   }, []);
 
-  // 预填 prompt（/generate 读 ?prompt 传入；首页不传跳过）。contentEditable 写入需 ref 就绪。
-  // 受控模式下由外部管理 prompt，此处仅非受控时生效。
-  useEffect(() => {
-    if (isControlled || !defaultPrompt || !editorRef.current) return;
-    if (editorRef.current.innerText.trim() === defaultPrompt.trim()) return;
-    editorRef.current.innerText = defaultPrompt;
-    // 一次性 URL 预填是官方认可模式；set-state-in-effect 规则对此误报。
+  // IK6XQI-7：把文本写入当前 editor DOM（幂等：内容一致则不写，避免干扰输入光标）。
+  const applyToEditor = useCallback((text: string) => {
+    const el = editorRef.current;
+    if (el && el.innerText !== text) el.innerText = text;
+  }, []);
 
-    setContent(defaultPrompt);
-  }, [defaultPrompt, isControlled]);
-
-  // 受控模式下外部 prompt 变更→回写 contentEditable DOM，避免追加文本不可见且被下次按键覆盖。
+  // tab 切换时 editor 重新挂载（新空 DOM）→ 从 tabContents 同步对应内容，
+  // 修复「切到 AI 视频提示词不显示」。
   useEffect(() => {
-    if (!isControlled || !editorRef.current) return;
-    if (editorRef.current.innerText === (prompt ?? "")) return;
-     
-    editorRef.current.innerText = prompt ?? "";
-  }, [prompt, isControlled]);
+    applyToEditor(tabContents[activeTab] ?? "");
+    // 仅在 activeTab 变化时同步；输入中内容由 handleInput 维护，避免 effect 链。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // 外部注入（模板卡片点击）：覆盖当前激活 tab 内容并立即写 DOM（保持单行）。
+  const injectPrompt = useCallback(
+    (text: string) => {
+      setTabContents((prev) => ({ ...prev, [activeTab]: text }));
+      applyToEditor(text);
+    },
+    [activeTab, applyToEditor],
+  );
+
+  useImperativeHandle(ref, () => ({ injectPrompt }), [injectPrompt]);
+
+  const handleInput = useCallback(() => {
+    const text = editorRef.current?.innerText ?? "";
+    setTabContents((prev) =>
+      prev[activeTab] === text ? prev : { ...prev, [activeTab]: text },
+    );
+  }, [activeTab]);
 
   const updateIndicator = useCallback(() => {
     const idx = TABS.findIndex((t) => t.id === activeTab);
@@ -449,12 +438,6 @@ export default function AgentComposer({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [imageResolutionOpen]);
 
-  const handleInput = () => {
-    if (editorRef.current) {
-      handlePromptChange(editorRef.current.innerText || "");
-    }
-  };
-
   // 「直接使用」一次性绑定（IK60WY）：技能稳定 ID 只绑下一次 Agent 请求。
   // sessionStorage 承载首页 → /generate 的传递；发送成功或移除标签后清除。
   const [boundSkill, setBoundSkill] = useState<DirectSkillBinding | null>(null);
@@ -530,10 +513,9 @@ export default function AgentComposer({
   const isVideoTab = activeTab === "video";
   const isImageTab = activeTab === "image";
 
-  // 参数下拉展开方向：dropUp 向上（/generate 底部固定挂载避开视口底），缺省向下（首页）。
-  const dropClass = dropUp
-    ? "bottom-[calc(100%+6px)] shadow-[0_-12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-top-1 duration-150"
-    : "top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150";
+  // 参数下拉展开方向：统一向下展开（首页场景）。
+  const dropClass =
+    "top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150";
 
   return (
     <div
@@ -1256,7 +1238,7 @@ export default function AgentComposer({
                         </button>
                         {durationOpen && (
                           <div
-                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto rounded-xl w-[240px] p-[14px_16px_10px] flex flex-col items-center gap-2 ${dropUp ? "bottom-[calc(100%+6px)] shadow-[0_-12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-top-1 duration-150" : "top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150"} left-0`}
+                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto rounded-xl w-[240px] p-[14px_16px_10px] flex flex-col items-center gap-2 ${dropClass} left-0`}
                             role="listbox"
                             aria-label="时长"
                           >
@@ -1630,4 +1612,7 @@ export default function AgentComposer({
       />
     </div>
   );
-}
+  },
+);
+
+export default AgentComposer;

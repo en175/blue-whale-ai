@@ -1,10 +1,13 @@
+// IK6XQI 基建修复：走 core 的 ./placement 子路径而非主 barrel——
+// 主入口含 trace.ts（node:async_hooks，server-only），运行时导入会把
+// server 模块拉进浏览器 bundle（Turbopack chunking 报错）。
 import {
   findPlacement,
   intersects,
   SCENE_CARD_FALLBACK_HEIGHT,
   SCENE_CARD_WIDTH,
   type Rect,
-} from "@blue-whale/core";
+} from "@blue-whale/core/placement";
 import type { CanvasRepo, CanvasView } from "@blue-whale/persistence";
 
 /** IK67H9 / T11 第二阶段：把 SceneCardNode 放进 Canvas（CONTEXT L71-77 / AC#5）。

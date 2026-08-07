@@ -254,7 +254,9 @@ async function openPanel(page: Page) {
   return { trigger, panel };
 }
 
-test("主旅程：浏览/添加/双域 auto/创建个人技能/脏草稿保留", async ({
+// IK6XQI-4：生成页 /generate 已下线，以下用例基于该页面 UI（消息输入框/发送/收件箱 mock），
+// 整体跳过，待迁移到画布入口后恢复。
+test.skip("主旅程：浏览/添加/双域 auto/创建个人技能/脏草稿保留", async ({
   page,
 }) => {
   const backend = await bootstrap(page);
@@ -334,7 +336,7 @@ test("主旅程：浏览/添加/双域 auto/创建个人技能/脏草稿保留",
   ).toHaveAttribute("aria-checked", "true");
 });
 
-test("AgentRun 状态：直接指定覆盖自动匹配；auto 激活名经快照到达且只显示名称", async ({
+test.skip("AgentRun 状态：直接指定覆盖自动匹配；auto 激活名经快照到达且只显示名称", async ({
   page,
 }) => {
   const STORAGE_KEY = "bw.direct-skill-binding";
@@ -487,7 +489,7 @@ test("AgentRun 状态：直接指定覆盖自动匹配；auto 激活名经快照
   await expect(reply).not.toContainText("使用技能");
 });
 
-test("视觉/响应式/会话状态/键盘焦点", async ({ page }) => {
+test.skip("视觉/响应式/会话状态/键盘焦点", async ({ page }) => {
   const backend = await bootstrap(page);
   const { trigger, panel } = await openPanel(page);
   await expect(page.getByTestId("skill-library-card")).toHaveCount(3);
