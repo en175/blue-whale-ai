@@ -162,3 +162,38 @@ export async function removeTierDiscountFromGo(
     return true;
   });
 }
+
+/**
+ * 全量补同步：把一批档位的折扣统一写进 Go `payment_setting.amount_discount`。
+ *
+ * 用途：存量档位（手工/批量导入绕过 CRUD 同步）的折扣补全，IK75PR。
+ * 语义：对传入的每个档位（原价 N、折扣 d）写 AmountDiscount[round(N)] = d，
+ * 与单档 syncTierDiscountToGo 的 key 规则完全一致；保留 Go 表里未涉及的 key
+ * （amount_discount 是全局表，可能还有非 web 档位的折扣，不做删除）。
+ *
+ * @param tiers 待同步档位列表（web topup_tiers 的 active 档位子集）
+ * @returns 成功写入的档位数；未配置凭证 → 0（no-op）
+ */
+export async function syncAllTierDiscountsToGo(
+  tiers: Array<{ originalPrice: number; discount: number }>,
+  env: Env = process.env,
+): Promise<number> {
+  if (tiers.length === 0) return 0;
+  const cfg = loadGoDiscountSyncConfig(env);
+  if (!cfg) {
+    console.warn(
+      "[go-amount-discount] 未配置 NEW_API_ROOT_ACCESS_TOKEN / NEW_API_ROOT_USER_ID，跳过折扣全量同步",
+    );
+    return 0;
+  }
+  return serialized(async () => {
+    const map = await readDiscountMap(cfg);
+    for (const { originalPrice, discount } of tiers) {
+      if (discount > 0 && discount <= 1) {
+        map[discountKey(originalPrice)] = discount;
+      }
+    }
+    await writeDiscountMap(cfg, map);
+    return tiers.length;
+  });
+}

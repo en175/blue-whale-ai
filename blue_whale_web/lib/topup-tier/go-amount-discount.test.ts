@@ -15,6 +15,7 @@ vi.mock("@blue-whale/core", () => ({
 import {
   loadGoDiscountSyncConfig,
   removeTierDiscountFromGo,
+  syncAllTierDiscountsToGo,
   syncTierDiscountToGo,
 } from "./go-amount-discount";
 
@@ -131,6 +132,77 @@ describe("go-amount-discount 同步", () => {
       const ok = await removeTierDiscountFromGo(100, {});
       expect(ok).toBe(false);
       expect(mocks.putRootOption).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("syncAllTierDiscountsToGo（IK75PR 存量档位补同步）", () => {
+    it("整表补全：把档位折扣写进对应 key，保留 Go 表其它 key", async () => {
+      mocks.getRootOption.mockResolvedValue('{\n  "10": 1\n}');
+
+      const ok = await syncAllTierDiscountsToGo(
+        [
+          { originalPrice: 4, discount: 0.02 },
+          { originalPrice: 11, discount: 0.01 },
+        ],
+        CONFIGURED_ENV,
+      );
+
+      expect(ok).toBe(2);
+      expect(mocks.putRootOption).toHaveBeenCalledTimes(1);
+      const [, , key, value] = mocks.putRootOption.mock.calls[0];
+      expect(key).toBe(DISCOUNT_KEY);
+      expect(typeof value).toBe("string");
+      expect(JSON.parse(value)).toEqual({ "10": 1, "4": 0.02, "11": 0.01 });
+    });
+
+    it("空档位列表 → 直接返回 0，不调用 Go", async () => {
+      const ok = await syncAllTierDiscountsToGo([], CONFIGURED_ENV);
+      expect(ok).toBe(0);
+      expect(mocks.getRootOption).not.toHaveBeenCalled();
+      expect(mocks.putRootOption).not.toHaveBeenCalled();
+    });
+
+    it("未配置凭证 → no-op，返回 0", async () => {
+      const ok = await syncAllTierDiscountsToGo(
+        [{ originalPrice: 4, discount: 0.02 }],
+        { NEW_API_BASE_URL: "http://x" },
+      );
+      expect(ok).toBe(0);
+      expect(mocks.putRootOption).not.toHaveBeenCalled();
+    });
+
+    it("折扣非法（<=0 或 >1）→ 跳过该 key，不写坏数据", async () => {
+      mocks.getRootOption.mockResolvedValue("{}");
+      await syncAllTierDiscountsToGo(
+        [
+          { originalPrice: 4, discount: 0.02 },
+          { originalPrice: 5, discount: 0 }, // 非法，跳过
+          { originalPrice: 6, discount: 1.5 }, // 非法，跳过
+        ],
+        CONFIGURED_ENV,
+      );
+      const value = JSON.parse(mocks.putRootOption.mock.calls[0][3]);
+      expect(value).toEqual({ "4": 0.02 });
+    });
+
+    it("并发串行：全量同步与单档同步互不覆盖", async () => {
+      let stored: Record<string, number> = { "10": 1 };
+      mocks.getRootOption.mockImplementation(async () =>
+        JSON.stringify(stored),
+      );
+      mocks.putRootOption.mockImplementation(async (_t, _u, _k, value) => {
+        stored = JSON.parse(value as string);
+      });
+
+      await Promise.all([
+        syncAllTierDiscountsToGo(
+          [{ originalPrice: 4, discount: 0.02 }],
+          CONFIGURED_ENV,
+        ),
+        syncTierDiscountToGo(100, 0.85, CONFIGURED_ENV),
+      ]);
+
+      expect(stored).toEqual({ "10": 1, "4": 0.02, "100": 0.85 });
     });
   });
 
