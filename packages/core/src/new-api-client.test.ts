@@ -1119,3 +1119,49 @@ describe("new-api client —— X-Trace-Id 出站透传（IK6KQQ）", () => {
     expect(headers!.get("X-Trace-Id")).toBe("trace-upstream-001");
   });
 });
+
+describe("new-api client —— traceIdProvider（IK73EV）", () => {
+  it("provider 非空时出站沿用其返回值（优先于链路上下文）", async () => {
+    const { runWithTraceId } = await import("./trace.js");
+    let captured: Headers | null = null;
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      traceIdProvider: () => "trace-from-bff",
+      fetchImpl: async (_input, init = {}) => {
+        captured = new Headers(init.headers);
+        return jsonResponse({ success: true, data: {} });
+      },
+    });
+    await runWithTraceId("trace-ctx", () => client.getAccountCapabilities());
+    expect(captured!.get("X-Trace-Id")).toBe("trace-from-bff");
+  });
+
+  it("provider 返回空时回落到链路上下文", async () => {
+    const { runWithTraceId } = await import("./trace.js");
+    let captured: Headers | null = null;
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      traceIdProvider: () => null,
+      fetchImpl: async (_input, init = {}) => {
+        captured = new Headers(init.headers);
+        return jsonResponse({ success: true, data: {} });
+      },
+    });
+    await runWithTraceId("trace-ctx-fallback", () => client.getAccountCapabilities());
+    expect(captured!.get("X-Trace-Id")).toBe("trace-ctx-fallback");
+  });
+
+  it("provider 返回空且无链路上下文时缺省生成", async () => {
+    let captured: Headers | null = null;
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      traceIdProvider: () => null,
+      fetchImpl: async (_input, init = {}) => {
+        captured = new Headers(init.headers);
+        return jsonResponse({ success: true, data: {} });
+      },
+    });
+    await client.getAccountCapabilities();
+    expect(captured!.get("X-Trace-Id")).toMatch(/^[0-9]+-[0-9a-f]{16}$/);
+  });
+});

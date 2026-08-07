@@ -1,4 +1,4 @@
-import { createNewApiClient } from "@blue-whale/core";
+import { createWebNewApiClient } from "@/lib/logging";
 
 /** 管理端用例依赖：wire new-api client。
  *  注意：token 不在此处持有，由路由层从请求 Authorization 头透传
@@ -8,5 +8,5 @@ export function createAdminDeps() {
   if (!baseUrl) {
     throw new Error("NEW_API_BASE_URL required");
   }
-  return { client: createNewApiClient({ baseUrl }) };
+  return { client: createWebNewApiClient({ baseUrl }) };
 }

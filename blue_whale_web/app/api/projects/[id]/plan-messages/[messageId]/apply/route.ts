@@ -1,9 +1,9 @@
 import {
-  createNewApiClient,
   GenerationCredentialConfigurationError,
   loadGenerationCredentialSecret,
   sealGenerationCredential,
 } from "@blue-whale/core";
+import { createWebNewApiClient } from "@/lib/logging";
 import { withAuthenticatedUser } from "@/lib/auth/product-route-auth";
 import {
   createCanvasDeps,
@@ -48,7 +48,7 @@ export async function POST(
         }
         throw error;
       }
-      const client = createNewApiClient({
+      const client = createWebNewApiClient({
         baseUrl: process.env.NEW_API_BASE_URL ?? "",
       });
       const token = newApiToken;

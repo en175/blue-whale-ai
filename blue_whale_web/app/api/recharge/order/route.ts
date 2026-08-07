@@ -1,4 +1,5 @@
-import { createNewApiClient, NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@blue-whale/core";
+import { createWebNewApiClient } from "@/lib/logging";
 import { parseNewApiBearerToken } from "@/lib/auth/bearer-token";
 import { withAuthenticatedUser } from "@/lib/auth/product-route-auth";
 import { createTopupTierDeps } from "@/lib/topup-tier/deps";
@@ -134,7 +135,7 @@ export async function POST(request: Request) {
     }
 
     try {
-      const client = createNewApiClient({ baseUrl: config.baseUrl });
+      const client = createWebNewApiClient({ baseUrl: config.baseUrl });
       // Go 原生充值接口走账户层 AccountTokenOrUserAuth，凭当前用户 sk- 令牌即可；
       // 先报价拿真实付（Go getPayMoney：N × Price × 分组充值倍率 × 金额折扣），再下单。
       const payMoney = await client.requestTopUpAmount(userToken, amount);

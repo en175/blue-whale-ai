@@ -1,5 +1,4 @@
 import {
-  createNewApiClient,
   NewApiError,
   type NewApiAccountCapabilities,
   type NewApiAccountIdentity,
@@ -8,6 +7,7 @@ import {
   type NewApiRegisterInput,
   type NewApiUsage,
 } from "@blue-whale/core";
+import { createWebNewApiClient } from "@/lib/logging";
 
 import { parseNewApiBearerToken } from "@/lib/auth/bearer-token";
 
@@ -42,7 +42,7 @@ export function createAccountClient(): AccountClient {
   if (!baseUrl) {
     throw new NewApiError("账户服务未配置", 503, "account_service_unavailable");
   }
-  return createNewApiClient({ baseUrl });
+  return createWebNewApiClient({ baseUrl });
 }
 
 export function bearerToken(request: Request): string | null {

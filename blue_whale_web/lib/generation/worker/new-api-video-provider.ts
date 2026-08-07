@@ -1,4 +1,5 @@
-import { NewApiError, createNewApiClient } from "@blue-whale/core";
+import { NewApiError } from "@blue-whale/core";
+import { createWebNewApiClient } from "@/lib/logging";
 
 import {
   VideoProviderError,
@@ -45,7 +46,7 @@ function providerError(error: unknown): VideoProviderError {
 export function createNewApiVideoProvider(
   options: VideoProviderOptions,
 ): VideoProvider {
-  const client = createNewApiClient({
+  const client = createWebNewApiClient({
     baseUrl: options.baseUrl,
     fetchImpl: options.fetchImpl,
   });
