@@ -8,7 +8,8 @@
 
 import { adminRequest } from "./admin-api";
 
-export type AuditCategory = "model.capability" | "tier" | "order" | "user";
+export type AuditCategory =
+  "model.capability" | "tier" | "order" | "user" | "template";
 
 export type AuditLogEntry = {
   id: string;
@@ -26,6 +27,7 @@ export const AUDIT_CATEGORY_OPTIONS = [
   { value: "tier", label: "充值档位" },
   { value: "order", label: "订单管理" },
   { value: "user", label: "用户管理" },
+  { value: "template", label: "模板管理" },
 ];
 
 export const CATEGORY_LABELS: Record<AuditCategory, string> = {
@@ -33,6 +35,7 @@ export const CATEGORY_LABELS: Record<AuditCategory, string> = {
   tier: "充值档位",
   order: "订单管理",
   user: "用户管理",
+  template: "模板管理",
 };
 
 /** 后端返回行（camelCase），取 AuditLogEntry 需要的字段。 */

@@ -744,4 +744,3 @@ _Avoid_: 使用四种之外的值；把 layout 当内容分类
 **content（模板提示词）**:
 模板卡片的提示词正文（template_card.content）：点击卡片时追加进输入框的真实内容。title 只是展示标题，仅在 content 为空时兜底。
 _Avoid_: 把 title 当提示词（历史行为，已修正）；把 content 与 SceneCard 正文混称
-

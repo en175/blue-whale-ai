@@ -135,6 +135,17 @@ export {
   type TemplateCardPage,
 } from "./template-repo.js";
 export {
+  createTemplateAdminRepo,
+  swapSequence,
+  TemplateAdminInputError,
+  type TemplateAdminRepo,
+  type AdminTemplateCardView,
+  type AdminTemplateImageView,
+  type TemplateCardInput,
+  type MoveDirection,
+  type MoveResult,
+} from "./template-admin-repo.js";
+export {
   createUserRepo,
   type UserRepo,
   type UserInfoView,
