@@ -142,6 +142,7 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
     "scene_cards",
     "skill",
     "skill_summarize_session",
+    "storyboard_previews",
     "template_card",
     "template_card_image",
     "topup_tiers",
@@ -165,7 +166,7 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
       "-e",
       "SELECT CONCAT(1, ':', (SELECT COUNT(*) FROM generation_model_capability WHERE enabled = 1))",
     ),
-    "1:2",
+    "1:3",
   );
 
   assert.equal(

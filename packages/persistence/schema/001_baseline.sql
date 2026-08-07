@@ -511,6 +511,7 @@ CREATE TABLE `project_events` (
 CREATE TABLE `skill` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `name` VARCHAR(255) NOT NULL,
+    `skill_code` VARCHAR(32) NULL,
     `description` TEXT NULL,
     `content` LONGTEXT NULL,
     `source` VARCHAR(32) NOT NULL DEFAULT 'official',
@@ -528,6 +529,7 @@ CREATE TABLE `skill` (
     `is_delete` TINYINT NOT NULL DEFAULT 0,
 
     UNIQUE INDEX `uk_name`(`name`),
+    UNIQUE INDEX `uk_skill_code`(`skill_code`),
     INDEX `idx_sort`(`sort_order`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

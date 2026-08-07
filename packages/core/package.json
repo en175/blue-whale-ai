@@ -8,6 +8,14 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./placement": {
+      "types": "./dist/placement.d.ts",
+      "import": "./dist/placement.js"
+    },
+    "./readiness": {
+      "types": "./dist/readiness.d.ts",
+      "import": "./dist/readiness.js"
+    },
     "./skill-md": {
       "types": "./dist/skills/skill-md.d.ts",
       "import": "./dist/skills/skill-md.js"

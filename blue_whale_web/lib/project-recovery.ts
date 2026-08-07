@@ -202,6 +202,8 @@ export type ProjectRecoveryState = {
   deleted: boolean;
   /** 临时交付活动投影（IK67GZ，契约 §8.1/§8.6）：不来自 Snapshot，刷新后为空。 */
   provisionalDeliveries: ReadonlyMap<string, ProvisionalDeliveryView>;
+  /** 合同不兼容（IK67HH T16，ADR-0016 §6）：一次 Snapshot 恢复后仍遇不兼容事件，停止订阅。 */
+  incompatible: boolean;
 };
 
 export type ProjectRecoveryTransport = {
@@ -230,6 +232,18 @@ export class CursorExpiredError extends Error {
   }
 }
 
+/**
+ * 事件流完整性违规（IK67HH T16，ADR-0016 §6）：未知 schema/畸形信封或乱序的
+ * 未知事件。不得应用、不得推进游标，由恢复循环触发一次 Snapshot 恢复。
+ * 游标为雪花 ID：前进跳号正常，只有倒退的未知事件构成乱序异常。
+ */
+export class EventIntegrityError extends Error {
+  constructor(readonly reason: "unknown-schema" | "cursor-rewind") {
+    super(`Project SSE event integrity violation: ${reason}`);
+    this.name = "EventIntegrityError";
+  }
+}
+
 export function initialProjectRecoveryState(
   projectId: WireInteger,
 ): ProjectRecoveryState {
@@ -241,6 +255,7 @@ export function initialProjectRecoveryState(
     aggregateVersions: new Map(),
     deleted: false,
     provisionalDeliveries: new Map(),
+    incompatible: false,
   };
 }
 
@@ -260,6 +275,7 @@ export function applySnapshot(
     deleted: false,
     // Snapshot 不含临时文本（契约 §8.6）：恢复即清除活动投影。
     provisionalDeliveries: new Map(),
+    incompatible: false,
   };
 }
 
@@ -267,11 +283,16 @@ export function applyProductEvent(
   state: ProjectRecoveryState,
   event: ProductEventEnvelope,
 ): ProjectRecoveryState {
-  if (
-    String(event.project_id) !== String(state.projectId) ||
-    compareWireInteger(event.cursor, state.lastCursor) <= 0
-  ) {
+  if (String(event.project_id) !== String(state.projectId)) {
     return state;
+  }
+
+  if (compareWireInteger(event.cursor, state.lastCursor) <= 0) {
+    // 已见事件的安全重放是 no-op；倒退的未知事件说明流已乱序，
+    // 客户端不得猜测缺失事实（IK67HH T16，ADR-0016 §6）。
+    // 游标为雪花 ID（非连续）：前进跳号正常，只有倒退的未知事件构成异常。
+    if (state.seenEventIds.has(event.event_id)) return state;
+    throw new EventIntegrityError("cursor-rewind");
   }
 
   const seenEventIds = rememberEvent(state.seenEventIds, event.event_id);
@@ -754,9 +775,14 @@ function drainSseFrames(
 }
 
 function parseProductEvent(data: string): ProductEventEnvelope {
-  const value: unknown = JSON.parse(data);
+  let value: unknown;
+  try {
+    value = JSON.parse(data);
+  } catch {
+    throw new EventIntegrityError("unknown-schema");
+  }
   if (!isProductEventEnvelope(value)) {
-    throw new Error("Invalid Project SSE event envelope");
+    throw new EventIntegrityError("unknown-schema");
   }
   return value;
 }
@@ -789,6 +815,8 @@ export async function runProjectRecovery(
   let state = initialProjectRecoveryState(projectId);
   let needsSnapshot = true;
   let retryAttempt = 0;
+  // ADR-0016 §6：不兼容事件只允许一次同 major Snapshot 恢复，禁止循环重连。
+  let integrityRecoveryUsed = false;
 
   while (!signal.aborted) {
     try {
@@ -840,6 +868,22 @@ export async function runProjectRecovery(
     } catch (error) {
       if (signal.aborted) return;
       if (error instanceof CursorExpiredError) {
+        needsSnapshot = true;
+        retryAttempt = 0;
+        continue;
+      }
+      if (error instanceof EventIntegrityError) {
+        if (integrityRecoveryUsed) {
+          // 恢复后仍遇不兼容事件：进入合同不兼容状态，停止订阅、不合成事实，
+          // 并记录最小失败证据（ADR-0016 §6）。
+          console.error(
+            `[project-recovery] contract incompatible: project=${projectId} reason=${error.reason}`,
+          );
+          state = { ...state, incompatible: true };
+          onState(state);
+          return;
+        }
+        integrityRecoveryUsed = true;
         needsSnapshot = true;
         retryAttempt = 0;
         continue;

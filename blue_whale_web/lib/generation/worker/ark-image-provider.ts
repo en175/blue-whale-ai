@@ -1,10 +1,10 @@
 import {
   ArkImageError,
   NewApiError,
-  createNewApiClient,
   generateImages,
   loadArkImageConfig,
 } from "@blue-whale/core";
+import { createWebNewApiClient } from "@/lib/logging";
 
 import {
   ImageProviderError,
@@ -89,7 +89,7 @@ function createNewApiImageProvider(options: ProviderOptions): ImageProvider {
   );
   const timeoutMs =
     Number.isInteger(rawTimeout) && rawTimeout > 0 ? rawTimeout : 90_000;
-  const client = createNewApiClient({
+  const client = createWebNewApiClient({
     baseUrl,
     fetchImpl: options.fetchImpl,
     timeoutMs,

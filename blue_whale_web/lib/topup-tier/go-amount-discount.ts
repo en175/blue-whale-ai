@@ -1,4 +1,4 @@
-import { createNewApiClient } from "@blue-whale/core";
+import { createWebNewApiClient } from "@/lib/logging";
 
 /**
  * web 档位折扣 → Go `payment_setting.amount_discount` 同步。
@@ -84,7 +84,7 @@ function serialized<T>(work: () => Promise<T>): Promise<T> {
 async function readDiscountMap(
   cfg: GoDiscountSyncConfig,
 ): Promise<GoDiscountMap> {
-  const client = createNewApiClient({ baseUrl: cfg.baseUrl });
+  const client = createWebNewApiClient({ baseUrl: cfg.baseUrl });
   const raw = await client.getRootOption(
     cfg.rootToken,
     cfg.rootUserId,
@@ -106,7 +106,7 @@ async function writeDiscountMap(
   cfg: GoDiscountSyncConfig,
   map: GoDiscountMap,
 ): Promise<void> {
-  const client = createNewApiClient({ baseUrl: cfg.baseUrl });
+  const client = createWebNewApiClient({ baseUrl: cfg.baseUrl });
   await client.putRootOption(
     cfg.rootToken,
     cfg.rootUserId,

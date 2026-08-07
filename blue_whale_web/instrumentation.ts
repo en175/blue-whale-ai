@@ -11,8 +11,26 @@
  * 依赖 node:crypto（edge 不支持），只能动态导入且必须位于 NEXT_RUNTIME 门控之后——
  * 门控外的静态/动态导入都会被打进 edge 包导致启动报错（IK6B2T）。
  */
+// @blue-whale/core/logging 依赖 node:async_hooks（edge 不支持），
+// 运行时导入必须位于 NEXT_RUNTIME 门控之后（与 agent-runtime 同款约束，IK6B2T）；
+// 此处仅 type import（编译期擦除，不进 edge bundle）。
+import type { Logger } from "@blue-whale/core/logging";
+
+let getBffLogger: () => Logger;
+let runWithTraceId: (traceId: string, fn: () => unknown) => unknown;
+let generateTraceId: () => string;
+let closeDefaultTlsLogWriter: (timeoutMs?: number) => Promise<void>;
+
 export async function register(manifest?: unknown): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  const [{ getBffLogger: getLogger }, logging] = await Promise.all([
+    import("@/lib/logging"),
+    import("@blue-whale/core/logging"),
+  ]);
+  getBffLogger = getLogger;
+  runWithTraceId = logging.runWithTraceId;
+  generateTraceId = logging.generateTraceId;
+  closeDefaultTlsLogWriter = logging.closeDefaultTlsLogWriter;
   const { bundledAgentRuntimeManifest, validateAgentRuntimeManifest } =
     await import("@blue-whale/agent-runtime");
   validateAgentRuntimeManifest(manifest ?? bundledAgentRuntimeManifest);
@@ -20,6 +38,15 @@ export async function register(manifest?: unknown): Promise<void> {
   const g = globalThis as unknown as Record<string, unknown>;
   if (g[globalKey]) return;
   g[globalKey] = true;
+
+  // web 进程优雅停机：冲刷 server bundle 的 TLS Producer 缓冲（IK73EV，对齐 worker 侧）。
+  // 放在 globalKey 去重之后，防 dev 热重载堆积 listener。
+  // proxy bundle 独立持有自己的 Producer 实例，在 proxy.ts 侧自行注册关闭钩子。
+  const shutdown = (): void => {
+    void closeDefaultTlsLogWriter().finally(() => process.exit(0));
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
 
   const [{ createGenerationWorkerDeps }, { recoverDueImageJobs }] =
     await Promise.all([
@@ -34,12 +61,14 @@ export async function register(manifest?: unknown): Promise<void> {
   );
 
   const tick = (): void => {
-    void recoverDueImageJobs(deps).catch((error) =>
-      console.error(
-        "[image-recovery] scan failed:",
-        error instanceof Error ? error.message : "unknown",
-      ),
-    );
+    // 后台扫描在请求上下文之外：显式生成 trace_id 包裹，使错误日志可关联（IK73EV）。
+    runWithTraceId(generateTraceId(), () => {
+      void recoverDueImageJobs(deps).catch((error) => {
+        getBffLogger().error(
+          `[image-recovery] scan failed: ${error instanceof Error ? error.message : "unknown"}`,
+        );
+      });
+    });
   };
 
   // 启动后立即跑一次（接回重启前孤儿），再周期跑。

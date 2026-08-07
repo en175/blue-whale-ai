@@ -1,12 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import PromoCapsule from "@/components/PromoCapsule";
 import { UserMenu } from "@/components/auth/UserMenu";
-import AgentComposer from "@/components/AgentComposer";
+import AgentComposer, {
+  type AgentComposerHandle,
+} from "@/components/AgentComposer";
 import QuickTags from "@/components/QuickTags";
 import TemplateCards, { TAG_CONFIG } from "@/components/TemplateCards";
-import { appendPrompt } from "@/lib/appendPrompt";
+
+/**
+ * 模板卡片点击 = 覆盖式预填（IK6XQI-1/7）：经 AgentComposer ref 注入当前激活 tab，
+ * 保持单行，连续点击多个卡片也只会保留最后一次选择，不再换行追加。
+ */
 
 /**
  * HomeClient —— 首页 client 部分（IJZYVT）
@@ -28,7 +34,7 @@ import { appendPrompt } from "@/lib/appendPrompt";
 export default function HomeClient() {
   const [activeTag, setActiveTag] = useState("short");
   const [shouldThrow, setShouldThrow] = useState(false);
-  const [prompt, setPrompt] = useState("");
+  const composerRef = useRef<AgentComposerHandle>(null);
 
   useEffect(() => {
     if (window.location.search.includes("e2e_error=1")) {
@@ -42,7 +48,7 @@ export default function HomeClient() {
   }
 
   const handleAppendPrompt = useCallback((text: string) => {
-    setPrompt((prev) => appendPrompt(prev, text));
+    composerRef.current?.injectPrompt(text);
   }, []);
 
   const { wrapMaxWidth } = TAG_CONFIG[activeTag] ?? TAG_CONFIG.marketing;
@@ -62,7 +68,7 @@ export default function HomeClient() {
 
       <div className="w-full px-4 mb-10">
         <div className="w-full flex flex-col items-center">
-          <AgentComposer prompt={prompt} onPromptChange={setPrompt} />
+          <AgentComposer ref={composerRef} />
 
           <div className={`mt-3 flex w-full flex-col gap-3 ${wrapMaxWidth}`}>
             <QuickTags active={activeTag} onSelect={setActiveTag} />

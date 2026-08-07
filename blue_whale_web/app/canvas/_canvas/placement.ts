@@ -7,14 +7,17 @@
  */
 import { MAX_PRODUCT_IMAGES } from "./productImport";
 
+// IK6XQI 基建修复：走 core 的 ./placement 子路径而非主 barrel——
+// 主入口含 trace.ts（node:async_hooks，server-only），从主入口 re-export
+// 会把 server 模块拉进浏览器 bundle（Turbopack chunking 报错）。
 export {
   findPlacement,
   DEFAULT_NODE_WIDTH,
   DEFAULT_NODE_HEIGHT,
   DEFAULT_GAP,
   DEFAULT_MAX_PER_ROW,
-} from "@blue-whale/core";
-export type { Rect, FindPlacementOptions } from "@blue-whale/core";
+} from "@blue-whale/core/placement";
+export type { Rect, FindPlacementOptions } from "@blue-whale/core/placement";
 
 /**
  * IK55VT 通道一：画布内拖素材节点上参考卡落槽的目标判定（纯函数）。
