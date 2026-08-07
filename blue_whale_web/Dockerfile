@@ -51,6 +51,8 @@ COPY blue_whale_web blue_whale_web
 # 先编译 workspace 包（Next.js 通过 exports 字段引用 dist/ 输出）
 # IK72WL：agent-runtime 缺失导致 next build 报 Can't resolve '@blue-whale/agent-runtime'
 RUN pnpm --filter @blue-whale/contracts --filter @blue-whale/core --filter @blue-whale/agent-runtime --filter @blue-whale/persistence --filter @blue-whale/generation-runtime build
+# IK747Z-1：lint 硬性拦截（全仓：packages/apps + web；max-lines 800 error 级）——超限构建失败
+RUN pnpm lint
 # 构建 Next.js standalone
 RUN pnpm --filter blue_whale build
 
