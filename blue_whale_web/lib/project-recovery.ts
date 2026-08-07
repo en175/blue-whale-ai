@@ -35,6 +35,10 @@ export type ProjectSnapshot = {
   scene_card_generation_records?: Array<Record<string, unknown>>;
   /** StoryboardPreview 分镜预览（IK67HF/T15）：从 SceneCard 触发的可选旁路预览会话。 */
   storyboard_previews?: Array<Record<string, unknown>>;
+  /** 冻结计划卡（IK6KQ2）：后端 T09/T10 投影的 plan_messages（含 applied_at / first_generation_job_id / application_availability）。可选仅为兼容历史测试 fixture，运行时后端总返回。 */
+  plan_messages?: Array<Record<string, unknown>>;
+  /** 计划应用回执（IK6KQ2，AC#1）：不可变事实收据；渲染以 plan_messages.applied_at 为权威，回执随快照透传供后续接线消费。可选同 plan_messages。 */
+  plan_applications?: Array<Record<string, unknown>>;
   assets: Record<
     string,
     { asset_id: number | string; type: string; access_url: string }
@@ -434,6 +438,33 @@ export function applyProductEvent(
           "preview_id",
         ),
       };
+    } else if (event.event_type === "plan_message.applied") {
+      // IK6KQB 手动应用闭环：权威应用事实。payload 不含 applied_at，
+      // 以事件 occurred_at 为权威应用时间；仅合并快照中已有的计划，
+      // 缺项交由下次 Snapshot 对齐，不伪造部分事实。
+      const planMessageId = event.payload.plan_message_id;
+      if (
+        typeof planMessageId === "number" ||
+        typeof planMessageId === "string"
+      ) {
+        const firstGenerationJobId =
+          event.payload.first_generation_job_id === null ||
+          isWireInteger(event.payload.first_generation_job_id)
+            ? (event.payload.first_generation_job_id as WireInteger | null)
+            : null;
+        snapshot = {
+          ...snapshot,
+          plan_messages: (snapshot.plan_messages ?? []).map((plan) =>
+            String(plan.message_id) === String(planMessageId)
+              ? {
+                  ...plan,
+                  applied_at: event.occurred_at,
+                  first_generation_job_id: firstGenerationJobId,
+                }
+              : plan,
+          ),
+        };
+      }
     } else if (
       event.event_type === "conversation.message_accepted" ||
       event.event_type === "conversation.message_started" ||

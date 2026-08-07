@@ -1,8 +1,60 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError, isApiError } from "./api/errors";
 import { apiRequest } from "./api-client";
-import { acceptConversationMessage } from "./conversation";
+import { acceptConversationMessage, applyPlanMessage } from "./conversation";
 
 vi.mock("./api-client", () => ({ apiRequest: vi.fn() }));
+
+describe("applyPlanMessage（IK6KQB 手动应用计划）", () => {
+  // 注意：拒绝分支用 mockRejectedValueOnce + mockClear——vitest 2.1 中
+  // mockRejectedValue（非 Once）与 reset/clear 组合会让拒绝绕过 .catch（已实测复现）。
+  beforeEach(() => vi.mocked(apiRequest).mockClear());
+
+  it("POST apply 命令到公开路由，携带 Idempotency-Key", async () => {
+    vi.mocked(apiRequest).mockResolvedValue({
+      receipt: {
+        application_kind: "image_generate",
+        scene_card_id: null,
+        receipt_id: 11,
+        plan_message_id: 42,
+        command_id: "cmd-apply-1",
+        first_generation_job_id: 55,
+        content_digest: "a".repeat(64),
+        applied_at: "2026-08-07T06:00:00.000Z",
+      },
+      first_generation_job_id: 55,
+    });
+
+    const result = await applyPlanMessage(7, 42, "cmd-apply-1");
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      "/api/projects/7/plan-messages/42/apply",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "Idempotency-Key": "cmd-apply-1" }),
+      }),
+    );
+    expect(result.first_generation_job_id).toBe(55);
+    expect(result.receipt.applied_at).toBe("2026-08-07T06:00:00.000Z");
+  });
+
+  it("业务失败（如 100405 余额不足）透传 ApiError 稳定 code", async () => {
+    vi.mocked(apiRequest).mockRejectedValueOnce(
+      new ApiError({
+        status: 200,
+        code: "100405",
+        message: "余额不足",
+      }),
+    );
+
+    const error = await applyPlanMessage(7, 42, "cmd-apply-2").catch(
+      (e: unknown) => e,
+    );
+
+    expect(isApiError(error)).toBe(true);
+    expect((error as ApiError).code).toBe("100405");
+  });
+});
 
 describe("Conversation 命令 API", () => {
   beforeEach(() => vi.mocked(apiRequest).mockReset());

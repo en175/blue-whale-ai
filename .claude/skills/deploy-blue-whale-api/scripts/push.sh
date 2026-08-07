@@ -9,6 +9,12 @@ ensure_key
 BIN="$SKILL_DIR/.build/$BIN_NAME"
 [ -f "$BIN" ] || { echo "✗ 二进制不存在，先跑 build.sh" >&2; exit 1; }
 
+# tag 由 build.sh 落盘（.build/image-tag = blue-whale-api:<short-sha>）。
+# compose yml 形如 image: blue-whale-api:${NEW_API_IMAGE_TAG:-latest}，env 变量持短 SHA。
+IMAGE_TAG="$(resolve_image_tag)"
+IMAGE_SHORT="${IMAGE_TAG#blue-whale-api:}"
+echo "▶ push image tag：$IMAGE_TAG"
+
 "${SSH[@]}" "mkdir -p $REMOTE_DIR"
 
 echo "▶ scp 二进制（$(du -h "$BIN" | cut -f1)）"
@@ -25,6 +31,7 @@ SQL_DSN=$MYSQL_DSN
 REDIS_CONN_STRING=$REDIS_DSN
 SESSION_SECRET=\$SECRET
 TZ=Asia/Shanghai
+NEW_API_IMAGE_TAG=$IMAGE_SHORT
 EOF
 chmod 600 $REMOTE_DIR/.env && echo '  → .env 写入 + chmod 600'"
 

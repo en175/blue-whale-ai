@@ -191,6 +191,7 @@ export function CanvasProjectRuntime({
     runControl,
     provisionalText,
     retryRun,
+    applyPlan,
   } = useProjectConversation(pid, backendReady);
 
   // canvas 数据 = useCanvasDoc hook（本地 state，不卡）；assets = zustand（业务缓存）
@@ -1742,6 +1743,7 @@ export function CanvasProjectRuntime({
         onRetryAgentRun={
           backendReady && runControl.canRetry ? retryRun : undefined
         }
+        onApplyPlanMessage={backendReady ? applyPlan : undefined}
         isOpen={isAgentOpen}
         onClose={() => setIsAgentOpen(false)}
         pendingMention={agentPendingMention}

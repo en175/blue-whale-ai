@@ -6,6 +6,7 @@
 import type React from "react";
 import type { CardStatus } from "@/types/domain";
 import type { WireInteger } from "@/lib/wire-integer";
+import type { PlanApplicationAvailability } from "@blue-whale/contracts";
 
 export type ToolDef = {
   id: string;
@@ -119,6 +120,23 @@ export type ChatMessage =
       slotIndex?: number;
       /** 产品规范化失败文案（来自后端公开错误信封）；失败 Card 向 User 展示，不泄漏内部信息。 */
       errorMessage?: string;
+    }
+  | {
+      id: number | string;
+      type: "plan-card";
+      /** 权威正文（plan_message.content_markdown，唯一正文来源）。 */
+      text: string;
+      meta: string;
+      /** plan_message 稳定身份。 */
+      planMessageId: WireInteger;
+      /** 分镜序号。 */
+      sequenceLabel: string | null;
+      /** 首次成功应用时间；null = 未应用。 */
+      appliedAt: string | null;
+      /** 应用可用性（权威）：available / retryable_blocked（余额不足，IK6KQB）/ requires_new_plan。 */
+      applicationAvailability: PlanApplicationAvailability;
+      /** 首个图片 GenerationJob；null = 未应用（接线另单交付）。 */
+      firstGenerationJobId: WireInteger | null;
     };
 /**
  * Canvas —— 画布聚合（提为具名类型）。

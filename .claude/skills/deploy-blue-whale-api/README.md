@@ -11,11 +11,11 @@ blue_whale_api (new-api, Go) 部署 skill：本地 bun build 前端 + go 交叉�
                                         │
                        远程 docker build（alpine:3.20 mirror fallback + apk aliyun + COPY 二进制）
                                         │
-                          blue-whale-api:latest
+                  blue-whale-api:<source short SHA>（tag 绑定源码 commit，禁 latest，ADR-0063）
                                         │
-                    restart.sh：备份 prev → 检测容器 rm -f → compose up -d（curl 验证 :3001）
+                    restart.sh：记录当前 tag → .image-tag.prev → 检测容器 rm -f → compose up -d（curl 验证 :3001）
                                         │
-                    .env 由 push.sh 远程生成（openssl rand SESSION_SECRET，chmod 600）
+                    .env 由 push.sh 远程生成（openssl rand SESSION_SECRET，chmod 600，含 NEW_API_IMAGE_TAG）
 ```
 
 ## 目录结构
@@ -29,7 +29,8 @@ blue_whale_api (new-api, Go) 部署 skill：本地 bun build 前端 + go 交叉�
 │   ├── build.sh                 # 本地 bun build 前端 + go 交叉编译
 │   ├── push.sh                  # scp 二进制+Dockerfile+compose + 远程生成 .env
 │   ├── remote-build.sh          # mirror fallback pull alpine + docker compose build
-│   ├── restart.sh               # 备份 prev + 检测容器 + 重建 + curl 验证
+│   ├── restart.sh               # 记录 prev tag + 检测容器 + 重建 + curl 验证
+│   ├── rollback.sh              # tag 维度回滚（--no-build 复用存活 prev 镜像）
 │   └── deploy.sh                # 一键串联
 └── docker/
     ├── Dockerfile               # alpine + apk mirror + COPY 二进制
@@ -78,4 +79,5 @@ blue_whale_api (new-api, Go) 部署 skill：本地 bun build 前端 + go 交叉�
 | `go:embed` | Go 编译期把 web/default/dist + web/classic/dist 嵌入二进制；dist 必须存在非空 |
 | mirror fallback | 远程拉 alpine 时逐个试国内 docker mirror，绕开 docker.io 墙 |
 | 公网 IP 回连 | 容器经宿主公网 IP 访问宿主的 mysql8/redis（同 blue_whale_server 模式） |
-| prev 回滚 | restart 前备份 new-api.prev，回滚 = 回退 prev 重建 |
+| image tag 绑定 | tag = 源码 short SHA（build.sh 落盘 .build/image-tag，贯穿 push→remote-build→restart），禁 :latest 部署（正常 deploy 流程必先生成 tag；latest 仅作单独跑子脚本/异常态回退）（ADR-0063） |
+| tag 回滚 | rollback.sh 读远端 .image-tag.prev，用存活 prev tag 镜像 --no-build 重建（绕开语义无效的 binary prev） |

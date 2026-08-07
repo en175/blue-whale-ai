@@ -25,7 +25,7 @@ else
   fi
 fi"
 
-echo "▶ 远程 docker compose build"
+echo "▶ 远程 docker compose build（image tag = $(resolve_image_tag)）"
 "${SSH[@]}" "cd $REMOTE_DIR && docker compose build" \
   || { echo "✗ 远程 build 失败（Dockerfile apk 已配 $ALPINE_PAK_MIRROR 源；若仍失败查 build 输出）" >&2; exit 1; }
-echo "✓ remote build 完成"
+echo "✓ remote build 完成 → $(resolve_image_tag)"

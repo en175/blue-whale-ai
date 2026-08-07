@@ -25,6 +25,7 @@ import { ProfileModal } from "./ProfileModal";
 import { HistoryModal } from "./HistoryModal";
 import { AccountModal } from "./AccountModal";
 import { RechargeModal } from "@/components/recharge";
+import { formatCredits } from "@/lib/credits";
 
 type ActiveModal = "profile" | "history" | "account" | "recharge" | null;
 
@@ -130,7 +131,7 @@ export function UserMenu({ className = "" }: { className?: string }) {
             />
             <span className="text-[12px] text-white/50">积分余额</span>
             <span className="text-[13px] text-white/85 font-medium tabular-nums ml-auto">
-              {user.credits ?? "—"}
+              {user.credits != null ? formatCredits(user.credits) : "—"}
             </span>
           </div>
 

@@ -4,7 +4,7 @@
 services:
   blue-whale-api:
     build: .
-    image: blue-whale-api:latest
+    image: blue-whale-api:${NEW_API_IMAGE_TAG:-latest}
     container_name: blue-whale-api
     restart: unless-stopped
     ports:

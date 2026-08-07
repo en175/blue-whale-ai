@@ -61,8 +61,15 @@ fi
 git -C "$API_CLONE_DIR" fetch --depth 1 origin "$API_REPO_REF"
 API_SOURCE_COMMIT="$(git -C "$API_CLONE_DIR" rev-parse FETCH_HEAD)"
 git -C "$API_CLONE_DIR" checkout -q --detach "$API_SOURCE_COMMIT"
-echo "ℹ️ deploy: new-api source: $API_SOURCE_COMMIT (ref: $API_REPO_REF)"
+API_SOURCE_SHORT="${API_SOURCE_COMMIT:0:12}"
+IMAGE_TAG="blue-whale-api:$API_SOURCE_SHORT"
+echo "ℹ️ deploy: new-api source: $API_SOURCE_COMMIT (ref: $API_REPO_REF) image: $IMAGE_TAG"
 BUILD_OUT="$SKILL_DIR/.build"
+mkdir -p "$BUILD_OUT"
+# tag 落盘跨脚本传递：push/remote-build/restart 各自 source lib.sh（独立子进程），env 传不过去。
+# .build/ 是构建产物目录（含 ~113M 二进制），已 gitignore，tag 文件不进 commit。
+printf '%s\n' "$IMAGE_TAG" >"$BUILD_OUT/image-tag"
+printf '%s\n' "$API_SOURCE_COMMIT" >"$BUILD_OUT/source-commit"
 
 # 1. bun build default 前端
 echo "▶ bun build default 前端"

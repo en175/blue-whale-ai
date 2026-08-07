@@ -430,6 +430,209 @@ describe("Agent 对话恢复投影", () => {
   });
 });
 
+describe("冻结计划卡投影（IK6KQ2）", () => {
+  function planMessage(
+    overrides: Partial<Record<string, unknown>>,
+  ): Record<string, unknown> {
+    return {
+      message_id: 7,
+      conversation_id: 1,
+      agent_run_id: 5,
+      ordinal: 0,
+      total_in_batch: 1,
+      sequence_label: "Scene 1 · Shot 2",
+      application_kind: "image_generate",
+      target_scene_card_mention_id: null,
+      base_scene_card_version: null,
+      content_markdown: "# 冻结正文\n一只蓝鲸跃出海面",
+      derived_references: null,
+      frozen_generation_parameters: null,
+      capability_snapshot_version: null,
+      provider_prompt_projection: null,
+      base_plan_message_id: null,
+      source_plan_message_id: null,
+      applied_at: null,
+      first_generation_job_id: null,
+      application_availability: "available",
+      created_at: "2026-08-01T00:00:00",
+      ...overrides,
+    };
+  }
+
+  /** 后端双写的 conversation_messages plan_message 行（role=assistant，sequence_no=对话序列）。 */
+  function planRow(messageId: number, sequenceNo: number) {
+    return {
+      message_id: messageId,
+      agent_run_id: 5,
+      role: "assistant",
+      content_type: "plan_message",
+      content: "# 冻结正文",
+      sequence_no: sequenceNo,
+    };
+  }
+
+  function baseSnapshot(
+    planMessages: Array<Record<string, unknown>>,
+  ): ProjectSnapshot {
+    return {
+      project: { id: 1, name: "P", thumb: null, created_at: "now" },
+      canvas: { id: null, project_id: 1, viewport: null, nodes: "[]" },
+      conversation_messages: [],
+      agent_runs: [{ agent_run_id: 5, status: "completed" }],
+      generation_jobs: [],
+      plan_messages: planMessages,
+      plan_applications: [],
+      assets: {},
+      high_watermark_cursor: 40,
+    };
+  }
+
+  it("plan_messages 投影为 plan-card（稳定身份 + 契约字段含 firstGenerationJobId）", () => {
+    const snapshot = baseSnapshot([planMessage({})]);
+    snapshot.conversation_messages = [planRow(7, 1)];
+    const cards = projectSnapshotToChatMessages(snapshot);
+    expect(cards).toEqual([
+      {
+        id: "plan-message-7",
+        type: "plan-card",
+        text: "# 冻结正文\n一只蓝鲸跃出海面",
+        meta: "图片生成计划",
+        planMessageId: 7,
+        sequenceLabel: "Scene 1 · Shot 2",
+        appliedAt: null,
+        applicationAvailability: "available",
+        firstGenerationJobId: null,
+      },
+    ]);
+  });
+
+  it("已应用计划携带 appliedAt 与 firstGenerationJobId，requires_new_plan 透传", () => {
+    const snapshot = baseSnapshot([
+      planMessage({
+        message_id: 8,
+        applied_at: "2026-08-02T00:00:00",
+        first_generation_job_id: 9,
+      }),
+      planMessage({
+        message_id: 9,
+        application_availability: "requires_new_plan",
+      }),
+    ]);
+    snapshot.conversation_messages = [planRow(8, 1), planRow(9, 2)];
+    const cards = projectSnapshotToChatMessages(snapshot);
+    expect(cards).toEqual([
+      expect.objectContaining({
+        id: "plan-message-8",
+        appliedAt: "2026-08-02T00:00:00",
+        firstGenerationJobId: 9,
+        applicationAvailability: "available",
+      }),
+      expect.objectContaining({
+        id: "plan-message-9",
+        appliedAt: null,
+        firstGenerationJobId: null,
+        applicationAvailability: "requires_new_plan",
+      }),
+    ]);
+  });
+
+  it("retryable_blocked 余额不足可用性透传（IK6KQB）", () => {
+    const snapshot = baseSnapshot([
+      planMessage({
+        message_id: 10,
+        application_availability: "retryable_blocked",
+      }),
+    ]);
+    snapshot.conversation_messages = [planRow(10, 1)];
+    const cards = projectSnapshotToChatMessages(snapshot);
+    expect(cards).toEqual([
+      expect.objectContaining({
+        id: "plan-message-10",
+        applicationAvailability: "retryable_blocked",
+      }),
+    ]);
+  });
+
+  it("conversation_messages 的 plan_message 行与 plan_messages 去重，计划卡保持原序列位置", () => {
+    const snapshot = baseSnapshot([planMessage({})]);
+    snapshot.conversation_messages = [
+      {
+        message_id: 1,
+        agent_run_id: 5,
+        role: "user",
+        content: "生成蓝鲸",
+        sequence_no: 1,
+      },
+      planRow(7, 2),
+      {
+        message_id: 3,
+        agent_run_id: 5,
+        role: "assistant",
+        content: "计划已冻结。",
+        sequence_no: 3,
+      },
+    ];
+
+    const messages = projectSnapshotToChatMessages(snapshot);
+    expect(messages.map((m) => m.id)).toEqual([
+      "message-1",
+      "plan-message-7",
+      "message-3",
+    ]);
+  });
+
+  it("非 image_generate 的 plan_message 行维持普通气泡，不投影计划卡", () => {
+    const snapshot = baseSnapshot([
+      planMessage({ message_id: 10, application_kind: "scene_card_create" }),
+    ]);
+    snapshot.conversation_messages = [planRow(10, 1)];
+
+    expect(projectSnapshotToChatMessages(snapshot)).toEqual([
+      { id: "message-10", type: "agent", text: "# 冻结正文" },
+    ]);
+  });
+
+  it("非 image_generate 计划与字段不合法的条目不投影", () => {
+    const cards = projectSnapshotToChatMessages(
+      baseSnapshot([
+        planMessage({ message_id: 10, application_kind: "scene_card_create" }),
+        planMessage({ message_id: 11, content_markdown: 42 }),
+        planMessage({ message_id: "abc" }),
+      ]),
+    );
+    expect(cards).toEqual([]);
+  });
+
+  it("snapshot 缺 plan_messages 字段时不投影计划卡（fixture 兼容）", () => {
+    const snapshot = baseSnapshot([]);
+    delete (snapshot as { plan_messages?: unknown }).plan_messages;
+    expect(projectSnapshotToChatMessages(snapshot)).toEqual([]);
+  });
+
+  it("plan_applications 回执随快照透传但不驱动渲染（applied_at 为权威）", () => {
+    const snapshot = baseSnapshot([planMessage({})]);
+    snapshot.conversation_messages = [planRow(7, 1)];
+    snapshot.plan_applications = [
+      {
+        receipt_id: 1,
+        message_id: 7,
+        application_kind: "image_generate",
+        scene_card_id: null,
+        first_generation_job_id: 9,
+        command_id: "cmd-1",
+        applied_at: "2026-08-02T00:00:00",
+      },
+    ];
+
+    const cards = projectSnapshotToChatMessages(snapshot);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({
+      appliedAt: null,
+      applicationAvailability: "available",
+    });
+  });
+});
+
 describe("当前 Run 已激活 Creative Skill 选择器", () => {
   it("取 agent_run_id 最大 run 的首项 creative_skill_id", () => {
     const runs = [

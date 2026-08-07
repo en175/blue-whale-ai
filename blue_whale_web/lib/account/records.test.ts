@@ -40,10 +40,11 @@ describe("积分换算（与余额展示同口径 quota × 0.00001）", () => {
     expect(topUpCreditsGained(Number.NaN)).toBe(0);
   });
 
-  it("消费 quota → 积分取整；不足 1 保底 1；非法 → 0", () => {
+  it("消费 quota → 积分保留 2 位小数；非法 → 0", () => {
     expect(consumeCredits(1_200_000)).toBe(12);
-    expect(consumeCredits(120_000)).toBe(1);
-    expect(consumeCredits(10_000)).toBe(1);
+    expect(consumeCredits(120_000)).toBe(1.2);
+    expect(consumeCredits(42_857)).toBe(0.43);
+    expect(consumeCredits(10_000)).toBe(0.1);
     expect(consumeCredits(0)).toBe(0);
     expect(consumeCredits(Number.NaN)).toBe(0);
   });

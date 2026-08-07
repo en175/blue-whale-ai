@@ -548,6 +548,107 @@ describe("Project 恢复状态机", () => {
   });
 });
 
+describe("plan_message.applied 事件（IK6KQB 手动应用闭环）", () => {
+  function planSnapshot(): ProjectSnapshot {
+    return {
+      ...snapshot(10),
+      plan_messages: [
+        {
+          message_id: 42,
+          application_kind: "image_generate",
+          content_markdown: "画一头蓝鲸",
+          sequence_label: "镜头1",
+          applied_at: null,
+          first_generation_job_id: null,
+          application_availability: "available",
+        },
+        {
+          message_id: 43,
+          application_kind: "image_generate",
+          content_markdown: "画一头虎鲸",
+          sequence_label: "镜头2",
+          applied_at: null,
+          first_generation_job_id: null,
+          application_availability: "available",
+        },
+      ],
+    };
+  }
+
+  it("把匹配 PlanMessage 置为已应用（applied_at + first_generation_job_id），不影响其它计划", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), planSnapshot());
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_plan_applied_1",
+        event_type: "plan_message.applied",
+        aggregate_type: "plan_message",
+        aggregate_id: "42",
+        aggregate_version: 0,
+        occurred_at: "2026-08-07T06:00:00.000Z",
+        payload: {
+          plan_message_id: 42,
+          application_kind: "image_generate",
+          receipt_id: 11,
+          first_generation_job_id: 55,
+        },
+      }),
+    );
+
+    const plans = state.snapshot?.plan_messages ?? [];
+    expect(plans[0]).toEqual(
+      expect.objectContaining({
+        message_id: 42,
+        applied_at: "2026-08-07T06:00:00.000Z",
+        first_generation_job_id: 55,
+      }),
+    );
+    expect(plans[1]).toEqual(
+      expect.objectContaining({ message_id: 43, applied_at: null }),
+    );
+  });
+
+  it("重复事件（同 event_id）安全重放为 no-op", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), planSnapshot());
+    const applied = event({
+      event_id: "evt_plan_applied_2",
+      event_type: "plan_message.applied",
+      aggregate_type: "plan_message",
+      aggregate_id: "42",
+      aggregate_version: 0,
+      occurred_at: "2026-08-07T06:00:00.000Z",
+      payload: { plan_message_id: 42, first_generation_job_id: 55 },
+    });
+
+    state = applyProductEvent(state, applied);
+    state = applyProductEvent(state, applied);
+
+    const plans = state.snapshot?.plan_messages ?? [];
+    expect(plans[0]?.applied_at).toBe("2026-08-07T06:00:00.000Z");
+  });
+
+  it("快照中不存在该计划时不伪造部分事实", () => {
+    let state = applySnapshot(initialProjectRecoveryState(1), planSnapshot());
+
+    state = applyProductEvent(
+      state,
+      event({
+        event_id: "evt_plan_applied_3",
+        event_type: "plan_message.applied",
+        aggregate_type: "plan_message",
+        aggregate_id: "99",
+        aggregate_version: 0,
+        payload: { plan_message_id: 99, first_generation_job_id: 77 },
+      }),
+    );
+
+    const plans = state.snapshot?.plan_messages ?? [];
+    expect(plans).toHaveLength(2);
+    expect(plans.every((plan) => String(plan.message_id) !== "99")).toBe(true);
+  });
+});
+
 describe("Project SSE 解析器", () => {
   it("支持拆包、CRLF、多行 data，并忽略心跳注释", async () => {
     const encoder = new TextEncoder();

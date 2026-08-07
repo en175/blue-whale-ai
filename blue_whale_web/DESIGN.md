@@ -70,6 +70,14 @@ colors:
   dock-popup-bg: "rgb(30, 30, 30)"
   dock-panel-bg: "rgb(29, 29, 29)"
   icon-stroke: "rgba(255, 255, 255, 0.8)"
+  # Agent 对话区卡片（IK6KQ2 审查修订：AgentCard/PlanCard 共享外壳/CTA/折叠按钮）
+  agent-card-bg: "rgba(255, 255, 255, 0.03)"
+  agent-card-text: "rgba(255, 255, 255, 0.92)"
+  agent-card-cta-bg: "rgba(255, 255, 255, 0.08)"
+  agent-card-cta-bg-hover: "rgba(255, 255, 255, 0.12)"
+  agent-card-cta-text: "rgba(255, 255, 255, 0.8)"
+  agent-card-icon: "rgba(255, 255, 255, 0.5)"
+  agent-card-icon-hover-bg: "rgba(255, 255, 255, 0.06)"
 typography:
   body-md:
     fontFamily: Outfit
@@ -119,6 +127,14 @@ components:
   text-placeholder:
     backgroundColor: "{colors.bg-canvas}"
     textColor: "{colors.muted}"
+  agent-card:
+    backgroundColor: "{colors.agent-card-bg}"
+    textColor: "{colors.agent-card-text}"
+    rounded: "{rounded.xl}"
+  plan-card:
+    backgroundColor: "{colors.agent-card-bg}"
+    textColor: "{colors.agent-card-text}"
+    rounded: "{rounded.xl}"
   button-primary:
     backgroundColor: "{colors.accent}"
     textColor: "{colors.on-accent}"
