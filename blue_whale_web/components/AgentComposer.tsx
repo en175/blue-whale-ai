@@ -443,8 +443,6 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
   const [boundSkill, setBoundSkill] = useState<DirectSkillBinding | null>(null);
   // 挂载后读 sessionStorage（跨页传递的绑定）；SSR 无存储，避免水合不一致。
   useEffect(() => {
-    // 挂载后一次性读取是官方认可模式；set-state-in-effect 规则对此误报。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setBoundSkill(readDirectSkillBinding());
   }, []);
 
@@ -683,6 +681,7 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
 
                     {/* Editor area */}
                     <div
+                      key="image-editor"
                       ref={editorRef}
                       className="tc-agent-image-editor relative flex-1 min-h-[120px] text-sm text-white/90 bg-transparent border-none outline-none shadow-none appearance-none leading-[1.8] py-3 px-4 font-[inherit] overflow-y-auto whitespace-pre-wrap break-words focus:border-none focus:outline-none focus:shadow-none"
                       contentEditable
@@ -983,8 +982,9 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
                         </button>
                       )}
                       <div
+                        key="video-editor"
                         ref={editorRef}
-                        className="relative flex-1 text-sm text-white/90 bg-transparent border-none outline-none shadow-none appearance-none leading-[1.8] py-3 px-4 font-[inherit] overflow-y-auto whitespace-pre-wrap break-words focus:border-none focus:outline-none focus:shadow-none min-h-[120px] before:content-[attr(data-placeholder)] before:absolute before:top-3 before:left-4 before:right-4 before:text-white/35 before:pointer-events-none"
+                        className="relative flex-1 text-sm text-white/90 bg-transparent border-none outline-none shadow-none appearance-none leading-[1.8] py-3 px-4 font-[inherit] overflow-y-auto whitespace-pre-wrap break-words focus:border-none focus:outline-none focus:shadow-none min-h-[120px] empty:before:content-[attr(data-placeholder)] empty:before:absolute empty:before:top-3 empty:before:left-4 empty:before:right-4 empty:before:text-white/35 empty:before:pointer-events-none"
                         contentEditable
                         role="textbox"
                         aria-multiline="true"
@@ -1404,6 +1404,7 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
 
               <div className="relative min-h-[120px]">
                 <div
+                  key="agent-editor"
                   ref={editorRef}
                   className="tc-agent-composer-editor relative min-h-[120px] w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent py-3 px-4 text-sm leading-[1.8] text-white/90 border-none outline-none shadow-none focus:border-none focus:outline-none focus:ring-0"
                   contentEditable
