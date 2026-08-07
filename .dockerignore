@@ -5,6 +5,8 @@
 !pnpm-workspace.yaml
 !tsconfig.json
 !tsconfig.base.json
+# IK77HE：builder 阶段 pnpm lint 需仓库根 eslint flat config 进 build context
+!eslint.config.mjs
 !apps/
 !apps/**
 !packages/
