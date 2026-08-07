@@ -257,6 +257,18 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
     (text: string) => {
       setTabContents((prev) => ({ ...prev, [activeTab]: text }));
       applyToEditor(text);
+      // IK726P 规则5：填入后聚焦输入框、光标移到末尾、长文本滚动到可见。
+      const el = editorRef.current;
+      if (el) {
+        el.focus();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        el.scrollTop = el.scrollHeight;
+      }
     },
     [activeTab, applyToEditor],
   );
@@ -269,6 +281,13 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
       prev[activeTab] === text ? prev : { ...prev, [activeTab]: text },
     );
   }, [activeTab]);
+
+  // IK726P 规则4：一键清除——清空当前 tab 内容回到空态（占位提示重新出现）并聚焦。
+  const clearPrompt = useCallback(() => {
+    setTabContents((prev) => ({ ...prev, [activeTab]: "" }));
+    applyToEditor("");
+    editorRef.current?.focus();
+  }, [activeTab, applyToEditor]);
 
   const updateIndicator = useCallback(() => {
     const idx = TABS.findIndex((t) => t.id === activeTab);
@@ -443,6 +462,8 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
   const [boundSkill, setBoundSkill] = useState<DirectSkillBinding | null>(null);
   // 挂载后读 sessionStorage（跨页传递的绑定）；SSR 无存储，避免水合不一致。
   useEffect(() => {
+    // 挂载后一次性读取是官方认可模式；set-state-in-effect 规则对此误报。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setBoundSkill(readDirectSkillBinding());
   }, []);
 
@@ -693,6 +714,10 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
                       onInput={handleInput}
                       onFocus={() => setIsFocused(true)}
                       onBlur={() => setIsFocused(false)}
+                    />
+                    <ClearPromptButton
+                      visible={Boolean((tabContents[activeTab] ?? "").trim())}
+                      onClear={clearPrompt}
                     />
                   </div>
 
@@ -994,6 +1019,10 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
                         onInput={handleInput}
                         onFocus={() => setIsFocused(true)}
                         onBlur={() => setIsFocused(false)}
+                      />
+                      <ClearPromptButton
+                        visible={Boolean((tabContents[activeTab] ?? "").trim())}
+                        onClear={clearPrompt}
                       />
                     </div>
                   </div>
@@ -1417,6 +1446,10 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
                   onFocus={() => setIsFocused(true)}
                   onBlur={() => setIsFocused(false)}
                 />
+                <ClearPromptButton
+                  visible={Boolean((tabContents[activeTab] ?? "").trim())}
+                  onClear={clearPrompt}
+                />
               </div>
 
               {/* Toolbar */}
@@ -1615,5 +1648,30 @@ const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
   );
   },
 );
+
+/**
+ * IK726P 规则4：一键清除按钮——输入框有内容时显示，点击清空回空态。
+ * 绝对定位于编辑器容器右上角（容器须为 relative）。
+ */
+function ClearPromptButton({
+  visible,
+  onClear,
+}: {
+  visible: boolean;
+  onClear: () => void;
+}) {
+  if (!visible) return null;
+  return (
+    <button
+      type="button"
+      aria-label="一键清除"
+      title="一键清除输入内容"
+      onClick={onClear}
+      className="absolute top-1.5 right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-white/10 text-white/50 transition-colors duration-150 hover:bg-white/25 hover:text-white"
+    >
+      <X width={11} height={11} />
+    </button>
+  );
+}
 
 export default AgentComposer;
