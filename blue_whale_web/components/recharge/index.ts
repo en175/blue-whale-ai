@@ -2,6 +2,7 @@ export { RechargeModal } from "./RechargeModal";
 export { TierGrid } from "./TierGrid";
 export { TierCard } from "./TierCard";
 export { PaymentPanel } from "./PaymentPanel";
+export { PaymentStage } from "./PaymentStage";
 export { QRCode } from "./QRCode";
 export { PaymentStatus } from "./PaymentStatus";
 export { BottomSheet } from "./BottomSheet";

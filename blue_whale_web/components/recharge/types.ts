@@ -8,6 +8,8 @@ export type PaymentMethod = "wechat" | "alipay";
 /** 充值档位（来自运营后台 IK39UN / IK51OP） */
 export type RechargeTier = {
   id: string;
+  /** 套餐名称（运营配置，如「体验包」「高级包」） */
+  name: string;
   /** 购买积分数 */
   amount: number;
   /** 原价（元） */
