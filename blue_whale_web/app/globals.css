@@ -50,15 +50,6 @@ body {
   white-space: pre-wrap;
 }
 
-/* AI video tab editor placeholder（IK6XQI-2：:empty 才显示，输入后消失） */
-.tc-agent-video-editor:empty::before {
-  content: attr(data-placeholder);
-  color: rgba(255, 255, 255, 0.35);
-  pointer-events: none;
-  display: block;
-  white-space: pre-wrap;
-}
-
 /* Skill panel switch */
 .tc-agent-skill-row__switch {
   position: relative;
