@@ -176,7 +176,9 @@ async function mockRecovery(
   );
 }
 
-test.describe("技能直接使用（IK60WY）", () => {
+// IK6XQI-4：生成页 /generate 已下线，本组用例基于该页面 UI（消息输入框/发送/收件箱 mock），
+// 整体跳过，待迁移到画布入口后恢复。
+test.describe.skip("技能直接使用（IK60WY）", () => {
   test("首页「直接使用」：关面板、出标签、不自动发送、不建引用", async ({
     page,
   }) => {
