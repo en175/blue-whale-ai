@@ -7,56 +7,10 @@ import { AspectRatioIcon } from "./icons/AspectRatioIcon";
 import type { ImageModelCapability } from "@/app/canvas/_canvas/api/generation";
 
 /**
- * 桥接期常量：BottomDock 图片表单已迁移到 getImageModels() 能力表（IK21O6），
- * 此处仅 AgentComposer（Agent 入口，IK21O6 out of scope）继续消费。
- * 待后续子工单把 AgentComposer 迁到能力表后整体删除。
+ * 宽高比预设（IK70CM：AgentComposer / BottomDock 图片表单共用）。
+ * 模型与分辨率档位以 generation_model_capability 能力表为唯一事实源
+ * （getImageModels()，见 app/canvas/_canvas/api/generation.ts）。
  */
-export const IMAGE_MODELS = [
-  {
-    id: "doubao-seedream-5-0-260128",
-    label: "Seedream 5.0 Lite",
-    defaultResolutionId: "2k",
-    stream: true,
-    resolutions: [
-      { id: "2k", label: "2K" },
-      { id: "3k", label: "3K" },
-      { id: "4k", label: "4K" },
-    ],
-  },
-  {
-    id: "doubao-seedream-4-5-251128",
-    label: "Seedream 4.5",
-    defaultResolutionId: "2k",
-    stream: true,
-    resolutions: [
-      { id: "2k", label: "2K" },
-      { id: "4k", label: "4K" },
-    ],
-  },
-  {
-    id: "doubao-seedream-4-0-250828",
-    label: "Seedream 4.0",
-    defaultResolutionId: "2k",
-    stream: true,
-    resolutions: [
-      { id: "1k", label: "1K" },
-      { id: "2k", label: "2K" },
-      { id: "4k", label: "4K" },
-    ],
-  },
-  {
-    id: "doubao-seedream-3-0-t2i-250415",
-    label: "Seedream 3.0 T2I",
-    defaultResolutionId: "1024x1024",
-    stream: false,
-    resolutions: [
-      { id: "512x512", label: "512 × 512" },
-      { id: "1024x1024", label: "1024 × 1024" },
-      { id: "2048x2048", label: "2048 × 2048" },
-    ],
-  },
-];
-
 export const IMAGE_ASPECT_RATIOS = [
   { id: "9:16", label: "9:16" },
   { id: "3:4", label: "3:4" },
@@ -68,17 +22,7 @@ export const IMAGE_ASPECT_RATIOS = [
   { id: "21:9", label: "21:9" },
 ];
 
-export type ImageModel = (typeof IMAGE_MODELS)[number];
-export type ImageResolution = ImageModel["resolutions"][number];
 export type ImageAspectRatio = (typeof IMAGE_ASPECT_RATIOS)[number];
-
-/** 取模型默认分辨率；缺省回退到第一个。 */
-export function defaultResolutionOf(model: ImageModel): ImageResolution {
-  return (
-    model.resolutions.find((r) => r.id === model.defaultResolutionId) ??
-    model.resolutions[0]
-  );
-}
 
 export interface ImageModelSettingsPopoverProps {
   triggerRef: React.RefObject<HTMLElement | null>;
