@@ -4,7 +4,7 @@ import { Coins } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { apiRequest } from "@/lib/api-client";
-import { quotaToCredits } from "@/lib/credits";
+import { formatCredits, quotaToCredits } from "@/lib/credits";
 import { loadAccessToken } from "@/components/auth/authStorage";
 
 export function CreditBalance({ compact = false }: { compact?: boolean }) {
@@ -33,7 +33,7 @@ export function CreditBalance({ compact = false }: { compact?: boolean }) {
       title="积分余额"
     >
       <Coins size={compact ? 14 : 15} aria-hidden="true" />
-      <span className="tabular-nums">{credits.toLocaleString()}</span>
+      <span className="tabular-nums">{formatCredits(credits)}</span>
     </span>
   );
 }

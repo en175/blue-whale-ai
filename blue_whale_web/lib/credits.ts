@@ -19,3 +19,22 @@ export function quotaToCredits(
     return 0;
   return quota * coefficient;
 }
+
+/**
+ * 积分值保留 2 位小数（分位精度，消除浮点尾差）。
+ * 单次 AI 消费可能不足 1 积分（如 0.43），整数展示会失真，故统一 2 位小数。
+ */
+export function creditsToNumber(credits: number): number {
+  if (!Number.isFinite(credits) || credits <= 0) return 0;
+  return Math.round(credits * 100) / 100;
+}
+
+/** 积分展示格式化：2 位小数，尾随 .00 省略（如 5、0.43、12.5）。 */
+export function formatCredits(credits: number): string {
+  const value = creditsToNumber(credits);
+  if (value === 0) return "0";
+  return value.toLocaleString("zh-CN", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+}

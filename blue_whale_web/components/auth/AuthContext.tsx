@@ -31,6 +31,7 @@ import {
   subscribeToAuthFailure,
   getAccessTokenSilently,
 } from "@/lib/api-client";
+import { quotaToCredits } from "@/lib/credits";
 import { LoginModal } from "./LoginModal";
 
 interface AuthContextValue {
@@ -144,7 +145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         username: data.username,
         phone: data.phone ?? "",
         hasPassword: data.has_password,
-        credits: usage?.quota,
+        credits: quotaToCredits(usage?.quota ?? 0),
         isAdmin: me?.is_admin ?? false,
       };
       saveUser(u);
@@ -175,7 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       username: data.username,
       phone: data.phone ?? "",
       hasPassword: data.has_password,
-      credits: usage?.quota,
+      credits: quotaToCredits(usage?.quota ?? 0),
       isAdmin: me?.is_admin ?? false,
     };
     saveUser(u);
@@ -211,7 +212,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       username: info.username,
       phone: info.phone,
       hasPassword: info.has_password,
-      credits: usage?.quota,
+      credits: quotaToCredits(usage?.quota ?? 0),
       isAdmin: info.is_admin ?? false,
     };
     saveUser(u);
