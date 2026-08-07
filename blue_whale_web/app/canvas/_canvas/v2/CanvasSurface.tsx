@@ -22,6 +22,7 @@ import {
   type Node as RFNode,
 } from "@xyflow/react";
 import type { CanvasNode, CanvasEdge, MediaKind } from "../model";
+import type { CanvasMenuPayload } from "../types";
 import { pickReferenceDropTarget } from "../placement";
 import {
   MediaNode,
@@ -44,15 +45,8 @@ const nodeTypes = {
   reference: ReferenceNode,
 } as const;
 
-/** 右键/drop 菜单位置（x/y=画布世界坐标供建节点，screenX/Y=屏幕坐标供浮层定位）。 */
-export type MenuPayload = {
-  x: number;
-  y: number;
-  screenX: number;
-  screenY: number;
-  source?: string;
-  sourceHandle?: string;
-};
+/** 保持原公开类型路径兼容；类型定义下沉到纯类型模块。 */
+export type MenuPayload = CanvasMenuPayload;
 
 export type CanvasSurfaceProps = {
   nodes: CanvasNode[];

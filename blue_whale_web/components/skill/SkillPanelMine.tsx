@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
-import { skillsApi, type SkillMineItem } from "./api/skills";
+import { skillsApi, type SkillMineItem } from "../api/skills";
 import {
   PAGE_SIZE,
   StateHint,

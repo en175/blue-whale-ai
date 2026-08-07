@@ -9,7 +9,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { skillsApi } from "./api/skills";
+import { skillsApi } from "../api/skills";
 import {
   validateSkillUpload,
   type SkillUploadValidation,
