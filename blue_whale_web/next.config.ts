@@ -9,6 +9,10 @@ import type { NextConfig } from "next";
  */
 const nextConfig: NextConfig = {
   output: "standalone",
+  // @volcengine/openapi 的 TLS Producer 用 protobufjs.load(__dirname + "/tls.proto")
+  // 运行时读文件；若被 Next 打包，__dirname 指向打包根、.proto 不进 bundle → ENOENT
+  // 上报静默失败（IK75CR）。标记为 server 外部包，运行时从真实 node_modules 加载。
+  serverExternalPackages: ["@volcengine/openapi"],
   // SSE 必须实时流式到达：Next 默认对浏览器 Accept-Encoding 做 gzip，
   // 压缩器会缓冲 text/event-stream 的小事件块，导致 Project SSE（/api/projects/:id/events）
   // 在浏览器端永远收不到增量事件（curl 不带 Accept-Encoding 所以掩盖了问题）。
