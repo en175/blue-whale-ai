@@ -1,6 +1,13 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback } from "react";
+import {
+  forwardRef,
+  useImperativeHandle,
+  useRef,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
 import { useAuth } from "./auth/AuthContext";
 import {
   Plus,
@@ -24,13 +31,15 @@ import {
 } from "@/lib/direct-skill-binding";
 import { AspectRatioIcon } from "./icons/AspectRatioIcon";
 import {
-  IMAGE_MODELS,
   IMAGE_ASPECT_RATIOS,
-  defaultResolutionOf,
-  type ImageModel,
-  type ImageResolution,
   type ImageAspectRatio,
 } from "./ImageModelSettingsPopover";
+import {
+  getImageModels,
+  getVideoModels,
+  getTextModels,
+  type ImageModelCapability,
+} from "@/app/canvas/_canvas/api/generation";
 
 const TABS = [
   { id: "agent", label: "视频智能体", hasCanvas: true },
@@ -38,24 +47,19 @@ const TABS = [
   { id: "image", label: "AI 图片" },
 ];
 
-const MODELS = [
-  { id: "seedance-2", label: "Seedance 2.0", premium: true },
-  { id: "seedance-mini", label: "Seedance 2.0 Mini" },
-  { id: "seedance-fast", label: "Seedance 2.0 Fast" },
-];
+/**
+ * 费用倍率占位（IK70CM）：generation_model_capability 无 costMultiplier 字段，
+ * 先统一 1x，待模型管理后台/Go 后端提供真实费用数据后接上（届时随模型下拉一并移除）。
+ */
+const AGENT_COST_MULTIPLIER = "1x";
 
-const AGENT_MODELS = [
-  { id: "claude-opus-4-7", label: "Claude Opus 4.7", costMultiplier: "5x" },
-  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", costMultiplier: "3x" },
-  { id: "gemini-3-5-flash", label: "Gemini 3.5 Flash", costMultiplier: "2x" },
-  { id: "qwen-3-7-max", label: "Qwen 3.7 Max", costMultiplier: "1.3x" },
-  { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", costMultiplier: "1x" },
-  {
-    id: "gemini-3-1-flash-lite",
-    label: "Gemini 3.1 Flash Lite",
-    costMultiplier: "0.3x",
-  },
-];
+/** 取模型默认分辨率档位（能力表 default_size，缺省回退首个）。 */
+function pickDefaultSize(m: ImageModelCapability) {
+  return (
+    m.supported_sizes.find((s) => s.id === m.default_size) ??
+    m.supported_sizes[0]
+  );
+}
 
 const VIDEO_ASPECT_RATIOS = [
   { id: "16:9", label: "16:9" },
@@ -99,52 +103,48 @@ export interface GenerateContext {
   image: GenerateImageParams;
 }
 
-export interface AgentComposerProps {
-  /** 真生成回调（提供则真生成，否则首页默认跳转 /generate?prompt）。 */
-  onGenerate?: (ctx: GenerateContext) => void;
-  /** 占位禁用的 tab id（生成静默不触发），首页默认空。 */
-  disabledTabs?: string[];
-  /** 初始预填 prompt（/generate 读 ?prompt 传入，首页不传）。 */
-  defaultPrompt?: string;
-  /** 参数下拉向上展开（/generate 底部固定挂载避开视口底）；缺省向下（首页）。 */
-  dropUp?: boolean;
-  /** 受控 prompt 值（传则受控，不传回退内部 state）。 */
-  prompt?: string;
-  /** 受控 prompt 变更回调（与 prompt 配合使用）。 */
-  onPromptChange?: (value: string) => void;
+/**
+ * IK6XQI-7 重构：三个 tab（视频智能体/AI 视频/AI 图片）各自维护独立输入内容
+ * （tabContents），切换 tab 时编辑器重新挂载并从对应内容同步——修复
+ * 「切到 AI 视频提示词不显示 / 三 tab 共用一个输入框」的交互混乱。
+ * 模板卡片点击经 ref.injectPrompt 注入当前激活 tab（覆盖、单行）。
+ */
+export interface AgentComposerHandle {
+  /** 外部注入提示词（模板卡片点击）：覆盖当前激活 tab 的输入内容。 */
+  injectPrompt: (text: string) => void;
 }
 
-export default function AgentComposer({
-  onGenerate,
-  disabledTabs = [],
-  defaultPrompt,
-  dropUp = false,
-  prompt,
-  onPromptChange,
-}: AgentComposerProps = {}) {
-  const [activeTab, setActiveTab] = useState("agent");
-  const [content, setContent] = useState("");
-  const isControlled = prompt !== undefined;
-  const resolvedPrompt = prompt ?? content;
-  const handlePromptChange = onPromptChange ?? setContent;
-  const [isFocused, setIsFocused] = useState(false);
-  const [indicator, setIndicator] = useState({ width: 0, x: 0, opacity: 0 });
-  const [modelOpen, setModelOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState(MODELS[0]);
-  const [videoModelOpen, setVideoModelOpen] = useState(false);
-  const [refModeOpen, setRefModeOpen] = useState(false);
-  const [resolutionOpen, setResolutionOpen] = useState(false);
-  const [aspectRatioOpen, setAspectRatioOpen] = useState(false);
-  const [durationOpen, setDurationOpen] = useState(false);
-  const [agentModelOpen, setAgentModelOpen] = useState(false);
-  const [selectedAgentModel, setSelectedAgentModel] = useState(AGENT_MODELS[3]);
-  const [mediaList, setMediaList] = useState<MediaItem[]>([]);
-  const [skillPanelOpen, setSkillPanelOpen] = useState(false);
+export type AgentComposerProps = Record<never, never>;
+
+const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
+  function AgentComposer(_props, ref) {
+    const [activeTab, setActiveTab] = useState("agent");
+    // IK6XQI-7：三 tab 独立输入内容，互不串扰；切换 tab 时 editor 重新挂载并同步对应内容。
+    const [tabContents, setTabContents] = useState<Record<string, string>>({
+      agent: "",
+      video: "",
+      image: "",
+    });
+    const [isFocused, setIsFocused] = useState(false);
+    const [indicator, setIndicator] = useState({ width: 0, x: 0, opacity: 0 });
+    const [modelOpen, setModelOpen] = useState(false);
+    const [videoModels, setVideoModels] = useState<ImageModelCapability[]>([]);
+    const [selectedModel, setSelectedModel] =
+      useState<ImageModelCapability | null>(null);
+    const [videoModelOpen, setVideoModelOpen] = useState(false);
+    const [refModeOpen, setRefModeOpen] = useState(false);
+    const [resolutionOpen, setResolutionOpen] = useState(false);
+    const [aspectRatioOpen, setAspectRatioOpen] = useState(false);
+    const [durationOpen, setDurationOpen] = useState(false);
+    const [agentModelOpen, setAgentModelOpen] = useState(false);
+    const [agentModels, setAgentModels] = useState<ImageModelCapability[]>([]);
+    const [selectedAgentModel, setSelectedAgentModel] =
+      useState<ImageModelCapability | null>(null);
+    const [mediaList, setMediaList] = useState<MediaItem[]>([]);
+    const [skillPanelOpen, setSkillPanelOpen] = useState(false);
 
   const router = useRouter();
   const { requireAuth } = useAuth();
-
-  const tabDisabled = disabledTabs.includes(activeTab);
 
   // AI 视频 tab params
   const [refMode, setRefMode] = useState(VIDEO_REF_MODES[1]);
@@ -153,53 +153,30 @@ export default function AgentComposer({
   const [videoDuration, setVideoDuration] = useState(15);
 
   // AI 图片 tab params（模型/分辨率/宽高比均复用画布 ImageModelSettingsPopover 的 seedream 映射）
-  const [selectedImageModel, setSelectedImageModel] = useState<ImageModel>(
-    IMAGE_MODELS[0],
-  );
+  const [imageModels, setImageModels] = useState<ImageModelCapability[]>([]);
+  const [selectedImageModel, setSelectedImageModel] =
+    useState<ImageModelCapability | null>(null);
   const [imageModelOpen, setImageModelOpen] = useState(false);
 
   const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(
     IMAGE_ASPECT_RATIOS.find((r) => r.id === "16:9")!,
   );
   const [imageAspectRatioOpen, setImageAspectRatioOpen] = useState(false);
-  const [imageResolution, setImageResolution] = useState<ImageResolution>(
-    defaultResolutionOf(IMAGE_MODELS[0]),
-  );
+  const [imageResolution, setImageResolution] = useState<
+    ImageModelCapability["supported_sizes"][number] | null
+  >(null);
   const [imageResolutionOpen, setImageResolutionOpen] = useState(false);
 
   const handleGenerate = useCallback(() => {
-    // 视频/agent tab 后端未就绪：占位静默（仅图片 tab 真生成）。
-    if (tabDisabled) return;
-    const promptText = resolvedPrompt.trim();
+    const promptText = (tabContents[activeTab] ?? "").trim();
     requireAuth({ kind: "home-generate", prompt: promptText }, () => {
-      if (onGenerate) {
-        onGenerate({
-          tab: activeTab,
-          prompt: promptText,
-          image: {
-            modelId: selectedImageModel.id,
-            aspectRatioId: imageAspectRatio.id,
-            resolutionId: imageResolution.id,
-          },
-        });
-        return;
-      }
       const query = promptText
         ? `?prompt=${encodeURIComponent(promptText)}`
         : "";
-      router.push(`/generate${query}`);
+      // IK6XQI-4：发送后跳画布（画布读 ?prompt 预填 BottomDock），不再跳 /generate（已下线）。
+      router.push(`/canvas${query}`);
     });
-  }, [
-    tabDisabled,
-    resolvedPrompt,
-    requireAuth,
-    onGenerate,
-    activeTab,
-    selectedImageModel,
-    imageAspectRatio,
-    imageResolution,
-    router,
-  ]);
+  }, [activeTab, tabContents, requireAuth, router]);
 
   const tabRefs = useRef<(HTMLElement | null)[]>([]);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -215,23 +192,83 @@ export default function AgentComposer({
   const imageAspectRatioContainerRef = useRef<HTMLDivElement>(null);
   const imageResolutionContainerRef = useRef<HTMLDivElement>(null);
 
-  // 预填 prompt（/generate 读 ?prompt 传入；首页不传跳过）。contentEditable 写入需 ref 就绪。
-  // 受控模式下由外部管理 prompt，此处仅非受控时生效。
+  // 模型下拉能力表驱动（IK70CM，ADR-0067：generation_model_capability 为唯一事实源）。
+  // 拉取失败保持空列表 + console 报错：首页生成走 /generate 跳转不依赖模型，不影响主流程。
   useEffect(() => {
-    if (isControlled || !defaultPrompt || !editorRef.current) return;
-    if (editorRef.current.innerText.trim() === defaultPrompt.trim()) return;
-    editorRef.current.innerText = defaultPrompt;
-    // 一次性 URL 预填是官方认可模式；set-state-in-effect 规则对此误报。
+    let cancelled = false;
+    getVideoModels()
+      .then((list) => {
+        if (cancelled || list.length === 0) return;
+        setVideoModels(list);
+        setSelectedModel(list[0]);
+      })
+      .catch((err) => console.error("getVideoModels failed", err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-    setContent(defaultPrompt);
-  }, [defaultPrompt, isControlled]);
-
-  // 受控模式下外部 prompt 变更→回写 contentEditable DOM，避免追加文本不可见且被下次按键覆盖。
   useEffect(() => {
-    if (!isControlled || !editorRef.current) return;
-    if (editorRef.current.innerText === (prompt ?? "")) return;
-    editorRef.current.innerText = prompt ?? "";
-  }, [prompt, isControlled]);
+    let cancelled = false;
+    getTextModels()
+      .then((list) => {
+        if (cancelled || list.length === 0) return;
+        setAgentModels(list);
+        setSelectedAgentModel(list[0]);
+      })
+      .catch((err) => console.error("getTextModels failed", err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getImageModels()
+      .then((list) => {
+        if (cancelled || list.length === 0) return;
+        setImageModels(list);
+        const first = list[0];
+        setSelectedImageModel(first);
+        setImageResolution(pickDefaultSize(first) ?? null);
+      })
+      .catch((err) => console.error("getImageModels failed", err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // IK6XQI-7：把文本写入当前 editor DOM（幂等：内容一致则不写，避免干扰输入光标）。
+  const applyToEditor = useCallback((text: string) => {
+    const el = editorRef.current;
+    if (el && el.innerText !== text) el.innerText = text;
+  }, []);
+
+  // tab 切换时 editor 重新挂载（新空 DOM）→ 从 tabContents 同步对应内容，
+  // 修复「切到 AI 视频提示词不显示」。
+  useEffect(() => {
+    applyToEditor(tabContents[activeTab] ?? "");
+    // 仅在 activeTab 变化时同步；输入中内容由 handleInput 维护，避免 effect 链。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // 外部注入（模板卡片点击）：覆盖当前激活 tab 内容并立即写 DOM（保持单行）。
+  const injectPrompt = useCallback(
+    (text: string) => {
+      setTabContents((prev) => ({ ...prev, [activeTab]: text }));
+      applyToEditor(text);
+    },
+    [activeTab, applyToEditor],
+  );
+
+  useImperativeHandle(ref, () => ({ injectPrompt }), [injectPrompt]);
+
+  const handleInput = useCallback(() => {
+    const text = editorRef.current?.innerText ?? "";
+    setTabContents((prev) =>
+      prev[activeTab] === text ? prev : { ...prev, [activeTab]: text },
+    );
+  }, [activeTab]);
 
   const updateIndicator = useCallback(() => {
     const idx = TABS.findIndex((t) => t.id === activeTab);
@@ -401,12 +438,6 @@ export default function AgentComposer({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [imageResolutionOpen]);
 
-  const handleInput = () => {
-    if (editorRef.current) {
-      handlePromptChange(editorRef.current.innerText || "");
-    }
-  };
-
   // 「直接使用」一次性绑定（IK60WY）：技能稳定 ID 只绑下一次 Agent 请求。
   // sessionStorage 承载首页 → /generate 的传递；发送成功或移除标签后清除。
   const [boundSkill, setBoundSkill] = useState<DirectSkillBinding | null>(null);
@@ -482,10 +513,9 @@ export default function AgentComposer({
   const isVideoTab = activeTab === "video";
   const isImageTab = activeTab === "image";
 
-  // 参数下拉展开方向：dropUp 向上（/generate 底部固定挂载避开视口底），缺省向下（首页）。
-  const dropClass = dropUp
-    ? "bottom-[calc(100%+6px)] shadow-[0_-12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-top-1 duration-150"
-    : "top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150";
+  // 参数下拉展开方向：统一向下展开（首页场景）。
+  const dropClass =
+    "top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150";
 
   return (
     <div
@@ -685,7 +715,9 @@ export default function AgentComposer({
                           aria-expanded={imageModelOpen}
                           aria-label="模型"
                         >
-                          <span>{selectedImageModel.label}</span>
+                          <span>
+                            {selectedImageModel?.model_label ?? "加载中…"}
+                          </span>
                           <ChevronDown width={11} height={11} />
                         </button>
                         {imageModelOpen && (
@@ -694,12 +726,12 @@ export default function AgentComposer({
                             role="listbox"
                             aria-label="模型"
                           >
-                            {IMAGE_MODELS.map((model) => {
+                            {imageModels.map((model) => {
                               const selected =
-                                selectedImageModel.id === model.id;
+                                selectedImageModel?.model_id === model.model_id;
                               return (
                                 <button
-                                  key={model.id}
+                                  key={model.model_id}
                                   type="button"
                                   role="option"
                                   aria-selected={selected}
@@ -707,12 +739,12 @@ export default function AgentComposer({
                                     setSelectedImageModel(model);
                                     // 切模型：当前分辨率不在新模型可用集合则重置为该模型默认分辨率。
                                     if (
-                                      !model.resolutions.some(
-                                        (r) => r.id === imageResolution.id,
+                                      !model.supported_sizes.some(
+                                        (s) => s.id === imageResolution?.id,
                                       )
                                     ) {
                                       setImageResolution(
-                                        defaultResolutionOf(model),
+                                        pickDefaultSize(model) ?? null,
                                       );
                                     }
                                     setImageModelOpen(false);
@@ -725,7 +757,7 @@ export default function AgentComposer({
                                 >
                                   <span className="inline-flex items-center gap-1.5 min-w-0">
                                     <span className="truncate">
-                                      {model.label}
+                                      {model.model_label}
                                     </span>
                                   </span>
                                 </button>
@@ -802,7 +834,7 @@ export default function AgentComposer({
                           aria-expanded={imageResolutionOpen}
                           aria-label="分辨率"
                         >
-                          <span>{imageResolution.label}</span>
+                          <span>{imageResolution?.label ?? "加载中…"}</span>
                           <ChevronDown width={11} height={11} />
                         </button>
                         {imageResolutionOpen && (
@@ -811,8 +843,8 @@ export default function AgentComposer({
                             role="listbox"
                             aria-label="分辨率"
                           >
-                            {selectedImageModel.resolutions.map((res) => {
-                              const selected = imageResolution.id === res.id;
+                            {selectedImageModel?.supported_sizes.map((res) => {
+                              const selected = imageResolution?.id === res.id;
                               return (
                                 <button
                                   key={res.id}
@@ -984,7 +1016,9 @@ export default function AgentComposer({
                           aria-label="模型"
                         >
                           <span className="inline-flex items-center gap-1.5 min-w-0">
-                            <span>{selectedModel.label}</span>
+                            <span>
+                              {selectedModel?.model_label ?? "加载中…"}
+                            </span>
                           </span>
                           <ChevronDown width={11} height={11} />
                         </button>
@@ -994,11 +1028,12 @@ export default function AgentComposer({
                             role="listbox"
                             aria-label="模型"
                           >
-                            {MODELS.map((model) => {
-                              const selected = selectedModel.id === model.id;
+                            {videoModels.map((model) => {
+                              const selected =
+                                selectedModel?.model_id === model.model_id;
                               return (
                                 <button
-                                  key={model.id}
+                                  key={model.model_id}
                                   type="button"
                                   role="option"
                                   aria-selected={selected}
@@ -1014,29 +1049,8 @@ export default function AgentComposer({
                                 >
                                   <span className="inline-flex items-center gap-1.5 min-w-0">
                                     <span className="truncate">
-                                      {model.label}
+                                      {model.model_label}
                                     </span>
-                                    {selected && model.premium && (
-                                      <span
-                                        aria-label="PREMIUM"
-                                        className="inline-flex items-center shrink-0 select-none whitespace-nowrap font-bold uppercase"
-                                        style={{
-                                          background:
-                                            "linear-gradient(to right, rgb(99, 102, 241), rgb(168, 85, 247))",
-                                          color: "rgb(255, 255, 255)",
-                                          fontSize: "9px",
-                                          fontWeight: 700,
-                                          letterSpacing: "0.025em",
-                                          padding: "1px 8px",
-                                          borderRadius: "4px",
-                                          lineHeight: "14px",
-                                          boxShadow:
-                                            "rgba(0, 0, 0, 0.15) 0px 1px 2px 0px",
-                                        }}
-                                      >
-                                        PREMIUM
-                                      </span>
-                                    )}
                                   </span>
                                 </button>
                               );
@@ -1224,7 +1238,7 @@ export default function AgentComposer({
                         </button>
                         {durationOpen && (
                           <div
-                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto rounded-xl w-[240px] p-[14px_16px_10px] flex flex-col items-center gap-2 ${dropUp ? "bottom-[calc(100%+6px)] shadow-[0_-12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-top-1 duration-150" : "top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150"} left-0`}
+                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto rounded-xl w-[240px] p-[14px_16px_10px] flex flex-col items-center gap-2 ${dropClass} left-0`}
                             role="listbox"
                             aria-label="时长"
                           >
@@ -1443,7 +1457,7 @@ export default function AgentComposer({
                         aria-expanded={modelOpen}
                       >
                         <span className="whitespace-nowrap">
-                          {selectedModel.label}
+                          {selectedModel?.model_label ?? "加载中…"}
                         </span>
                         <ChevronDown
                           width={11}
@@ -1454,23 +1468,27 @@ export default function AgentComposer({
                         />
                       </button>
                       {modelOpen && (
-                        <div className="ncs-thin-scrollbar absolute bg-[rgb(35,35,54)] border border-white/10 rounded-lg p-1 z-[100] max-h-[240px] overflow-y-auto bottom-[calc(100%+6px)] shadow-[0_-12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-top-1 duration-150 left-0 right-auto w-max min-w-[220px]">
-                          {MODELS.map((model) => (
+                        <div
+                          className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
+                        >
+                          {videoModels.map((model) => (
                             <button
-                              key={model.id}
+                              key={model.model_id}
                               type="button"
                               onClick={() => {
                                 setSelectedModel(model);
                                 setModelOpen(false);
                               }}
                               className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
-                                selectedModel.id === model.id
+                                selectedModel?.model_id === model.model_id
                                   ? "text-white bg-white/[0.04]"
                                   : "text-white/80 bg-transparent"
                               }`}
                             >
                               <span className="inline-flex items-center gap-1.5 min-w-0">
-                                <span className="truncate">{model.label}</span>
+                                <span className="truncate">
+                                  {model.model_label}
+                                </span>
                               </span>
                             </button>
                           ))}
@@ -1485,13 +1503,13 @@ export default function AgentComposer({
                         <button
                           type="button"
                           onClick={() => setAgentModelOpen((v) => !v)}
-                          className="inline-flex items-center gap-1 h-8 text-[13px] font-medium text-white/35 px-3 rounded-lg bg-transparent cursor-pointer transition-colors duration-150 whitespace-nowrap hover:text-white/60 pl-2"
+                          className="inline-flex items-center gap-1 h-8 text-[13px] font-medium text-white/45 px-3 rounded-lg bg-transparent border border-white/[0.06] cursor-pointer transition-all duration-150 whitespace-nowrap hover:text-white/70 hover:bg-white/[0.05]"
                           aria-haspopup="listbox"
                           aria-expanded={agentModelOpen}
                           aria-label="选择模型"
                         >
                           <span className="whitespace-nowrap">
-                            {selectedAgentModel.label}
+                            {selectedAgentModel?.model_label ?? "加载中…"}
                           </span>
                           <ChevronDown
                             width={11}
@@ -1502,50 +1520,47 @@ export default function AgentComposer({
                           />
                         </button>
                         {agentModelOpen && (
-                          <div className="absolute bottom-[calc(100%+8px)] z-[100] w-[272px] left-1/2 -translate-x-1/2">
-                            <div
-                              className="ncs-thin-scrollbar max-h-[320px] overflow-y-auto rounded-xl border border-white/10 bg-[rgba(32,32,32,0.96)] p-1.5 shadow-[0_14px_40px_rgba(0,0,0,0.32)] backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150 origin-bottom"
-                              role="listbox"
-                              aria-label="选择模型"
-                            >
-                              <div className="px-2.5 pb-1 pt-1.5 text-[11px] leading-[1.35] text-white/45 select-none">
-                                选择驱动 Agent 的模型
-                              </div>
-                              {AGENT_MODELS.map((model) => {
-                                const selected =
-                                  selectedAgentModel.id === model.id;
-                                return (
-                                  <button
-                                    key={model.id}
-                                    type="button"
-                                    role="option"
-                                    aria-selected={selected}
-                                    onClick={() => {
-                                      setSelectedAgentModel(model);
-                                      setAgentModelOpen(false);
-                                    }}
-                                    className={`flex w-full cursor-pointer items-center justify-between gap-2.5 rounded-lg border-0 px-2.5 py-2 text-left font-[inherit] transition-colors duration-150 hover:bg-white/10 hover:text-white ${
-                                      selected
-                                        ? "bg-white/10 text-white"
-                                        : "bg-transparent text-white/80"
-                                    }`}
+                          <div
+                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
+                            role="listbox"
+                            aria-label="选择模型"
+                          >
+                            {agentModels.map((model) => {
+                              const selected =
+                                selectedAgentModel?.model_id === model.model_id;
+                              return (
+                                <button
+                                  key={model.model_id}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={selected}
+                                  onClick={() => {
+                                    setSelectedAgentModel(model);
+                                    setAgentModelOpen(false);
+                                  }}
+                                  className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
+                                    selected
+                                      ? "text-white bg-white/[0.04]"
+                                      : "text-white/80 bg-transparent"
+                                  }`}
+                                >
+                                  <span className="inline-flex items-center gap-1.5 min-w-0">
+                                    <span className="truncate">
+                                      {model.model_label}
+                                    </span>
+                                  </span>
+                                  <span
+                                    className="inline-flex shrink-0 items-center gap-1 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[10px] leading-[1.2] text-white/55"
+                                    aria-label={`费用 ${AGENT_COST_MULTIPLIER}`}
                                   >
-                                    <span className="min-w-0 truncate text-[13px] font-semibold">
-                                      {model.label}
+                                    <span>💰 费用</span>
+                                    <span className="tabular-nums text-white/70">
+                                      {AGENT_COST_MULTIPLIER}
                                     </span>
-                                    <span
-                                      className="inline-flex shrink-0 items-center gap-1 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[10px] leading-[1.2] text-white/55"
-                                      aria-label={`费用 ${model.costMultiplier}`}
-                                    >
-                                      <span>💰 费用</span>
-                                      <span className="tabular-nums text-white/70">
-                                        {model.costMultiplier}
-                                      </span>
-                                    </span>
-                                  </button>
-                                );
-                              })}
-                            </div>
+                                  </span>
+                                </button>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -1597,4 +1612,7 @@ export default function AgentComposer({
       />
     </div>
   );
-}
+  },
+);
+
+export default AgentComposer;

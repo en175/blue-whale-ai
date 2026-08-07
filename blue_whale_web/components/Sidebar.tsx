@@ -15,7 +15,6 @@ import {
   FolderOpen,
   Home,
   LayoutGrid,
-  Sparkles,
 } from "lucide-react";
 
 type NavItem = {
@@ -27,7 +26,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "首页", icon: Home },
   { href: "/projects", label: "项目", icon: FolderKanban },
-  { href: "/generate", label: "生成", icon: Sparkles },
+  // IK6XQI-4：生成页已下线（发送后直达画布），导航入口一并移除。
   { href: "/assets", label: "资产", icon: FolderOpen },
   { href: "/canvas", label: "画布", icon: LayoutGrid },
 ];

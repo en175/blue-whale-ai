@@ -69,16 +69,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
   const executorRef = useRef<(() => void) | null>(null);
 
-  // Keep SSR and the first browser render identical, then restore local MVP state.
-  useEffect(() => {
-    if (SKIP_AUTH) return;
-    const timer = window.setTimeout(() => {
-      const stored = loadUser();
-      if (stored) setUser(stored);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
-
   // 订阅 API 层通知：401 后 refresh 也失败 → 清空状态，弹出登录
   useEffect(() => {
     return subscribeToAuthFailure(() => {
@@ -227,6 +217,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     saveUser(u);
     setUser(u);
   }, []);
+
+  // Keep SSR and the first browser render identical, then restore local MVP state.
+  // IK6XQI-6：恢复登录态后静默拉取权威用户信息（isAdmin/配额可能缺失或过期），
+  // 保证刷新后管理员入口不丢；失败静默保留本地恢复态，不打扰用户。
+  useEffect(() => {
+    if (SKIP_AUTH) return;
+    const timer = window.setTimeout(() => {
+      const stored = loadUser();
+      if (stored) setUser(stored);
+      if (stored && loadAccessToken()) {
+        refreshUser().catch(() => {
+          /* 静默：网络抖动/401 时保留本地恢复态 */
+        });
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshUser]);
 
   // 轻量同步：直接 patch 本地 user + storage，不调后端
   const updateLocalUser = useCallback((patch: Partial<User>) => {

@@ -37,7 +37,7 @@ describe("Sidebar 项目 Tab", () => {
   });
 
   it("位于其他路由时「项目」不选中", () => {
-    pathnameRef.current = "/generate";
+    pathnameRef.current = "/assets";
     render(<Sidebar />);
 
     expect(screen.getByRole("link", { name: "项目" })).not.toHaveAttribute(
