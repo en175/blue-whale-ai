@@ -37,7 +37,7 @@ function resolveStore(): TraceStore {
   const builtin = (
     process as { getBuiltinModule?: (id: string) => unknown }
   ).getBuiltinModule?.("node:async_hooks") as
-    | { AsyncLocalStorage: new <T>() => TraceStore }
+    | { AsyncLocalStorage: new <T>(...args: T[]) => TraceStore }
     | undefined;
   return builtin ? new builtin.AsyncLocalStorage<string>() : noopStore;
 }

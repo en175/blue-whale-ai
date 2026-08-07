@@ -2,7 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   agentRunPinSchema,
-  canonicalAgentRunPinDigestInput,
   type AgentRunPin,
 } from "@blue-whale/contracts";
 import { scrubCreativeSkillFromRunPin } from "./agent-run-pin.js";

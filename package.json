@@ -12,6 +12,8 @@
     "build": "pnpm build:node && pnpm --filter blue_whale build",
     "build:node": "tsc -b --pretty false",
     "typecheck": "tsc -b --force --pretty false && pnpm --filter blue_whale exec tsc --noEmit",
+    "lint": "pnpm lint:node && pnpm --filter blue_whale lint",
+    "lint:node": "eslint apps packages",
     "test": "pnpm test:node && pnpm --filter blue_whale test",
     "test:node": "vitest run packages && pnpm test:acceptance-runner-contract",
     "test:acceptance-runner-contract": "node --test tests/typescript-baseline/acceptance-runner-contract.test.mjs",
@@ -21,8 +23,10 @@
   },
   "devDependencies": {
     "@types/node": "24.13.3",
+    "eslint": "^9.39.5",
     "playwright": "^1.48.0",
     "typescript": "5.9.3",
+    "typescript-eslint": "^8.66.0",
     "vitest": "2.1.9"
   }
 }
