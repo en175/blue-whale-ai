@@ -213,14 +213,38 @@ function captureLibraryRequests() {
   return requests;
 }
 
-/** 捕获 POST /api/generation-inbox/messages 请求体与 202 回执 data。 */
-function captureInboxMessages() {
+async function createProject(label) {
+  const created = await postJson(
+    "/api/projects",
+    { name: `${label} ${Date.now()}` },
+    user.token,
+  );
+  assert.equal(
+    created.response.status,
+    200,
+    "服务=web 事实=创建 Project 应成功",
+  );
+  return String(created.body.data?.id);
+}
+
+async function openCanvas(projectId) {
+  await page.goto(`${baseUrl}/canvas?project=${projectId}`, {
+    waitUntil: "domcontentloaded",
+  });
+  await page.getByLabel("Canvas Agent").click();
+  await page.waitForSelector(".tc-agent-chat-panel", { timeout: 30_000 });
+}
+
+const conversationMessagesPath = /^\/api\/projects\/[^/]+\/conversation\/messages$/;
+
+/** 捕获 POST /api/projects/{id}/conversation/messages 请求体与 202 回执 data。 */
+function captureConversationMessages() {
   const bodies = [];
   const receipts = [];
   page.on("request", (request) => {
     if (
       request.method() === "POST" &&
-      new URL(request.url()).pathname === "/api/generation-inbox/messages"
+      conversationMessagesPath.test(new URL(request.url()).pathname)
     ) {
       bodies.push(request.postDataJSON());
     }
@@ -228,7 +252,7 @@ function captureInboxMessages() {
   page.on("response", (response) => {
     if (
       response.request().method() === "POST" &&
-      new URL(response.url()).pathname === "/api/generation-inbox/messages" &&
+      conversationMessagesPath.test(new URL(response.url()).pathname) &&
       response.status() === 202
     ) {
       void response.json().then((envelope) => receipts.push(envelope.data));
@@ -237,15 +261,16 @@ function captureInboxMessages() {
   return { bodies, receipts };
 }
 
-async function sendInboxMessage(content) {
-  await page.getByLabel("消息输入框").fill(content);
-  await page.getByRole("button", { name: "发送" }).click();
+async function sendCanvasMessage(content) {
+  await page.click(".tc-agent-composer-editor");
+  await page.keyboard.type(content);
+  await page.getByLabel("发送").click();
 }
 
-async function waitRunCompleted(receipt) {
+async function waitRunCompleted(projectId, receipt) {
   await waitFor(
     async () => {
-      const snapshot = await fetchSnapshot(receipt.project_id, user.token);
+      const snapshot = await fetchSnapshot(projectId, user.token);
       const run = snapshot.agent_runs.find(
         (candidate) =>
           String(candidate.agent_run_id) === String(receipt.agent_run_id),
@@ -418,15 +443,19 @@ test("主路径3 添加与移除：官方技能进出我的技能", async () => 
 }, 120_000);
 
 test("主路径4 直接使用：一次性 forced 绑定驱动真实 AgentRun 并落库", async () => {
-  const { bodies, receipts } = captureInboxMessages();
+  const directProject = await createProject("黑盒直接技能");
+  await openCanvas(directProject);
+  const { bodies, receipts } = captureConversationMessages();
   const addCalls = [];
   page.on("request", (request) => {
     if (new URL(request.url()).pathname.endsWith("/add")) addCalls.push(1);
   });
 
-  // 首页技能库点「直接使用」：关面板、出标签、不自动发送、不建引用
-  await gotoHome();
-  await openSkillPanel();
+  // Canvas 技能面板点「直接使用」：关面板、出标签、不自动发送、不建引用
+  await page.getByLabel("技能", { exact: true }).click();
+  await page.waitForSelector('[data-testid="skill-panel"]', {
+    timeout: 30_000,
+  });
   await libraryCard(STORYBOARD_NAME)
     .getByRole("button", { name: /直接使用/ })
     .click();
@@ -451,30 +480,17 @@ test("主路径4 直接使用：一次性 forced 绑定驱动真实 AgentRun 并
     "服务=web 事实=直接使用不得创建我的技能引用",
   );
 
-  // 绑定经 sessionStorage 带到 /generate；发送携带 forced_creative_skill_id
-  await page.goto(`${baseUrl}/generate`, { waitUntil: "domcontentloaded" });
-  await tag.waitFor({ timeout: 15_000 });
-  // fake:delay 保持 Run 未终态，为 UI 运行状态断言留出确定性窗口
-  await sendInboxMessage("黑盒直接技能 fake:delay:5000");
+  // 发送携带一次性 forced 绑定（IK6XQI-4：/generate 已下线，旅程在 Canvas 内闭环）
+  await sendCanvasMessage("黑盒直接技能 fake:delay:5000");
   await waitFor(
     () => bodies.length === 1,
     30_000,
-    "服务=web 事实=应发出收件箱消息",
+    "服务=web 事实=应发出会话消息",
   );
   assert.equal(
     bodies[0].forced_creative_skill_id,
     STORYBOARD_ID,
     "服务=web 事实=发送应携带一次性 forced 绑定",
-  );
-
-  // UI 运行状态：「使用技能：名称」（本地绑定名优先，fake:delay 窗口内稳定可见）
-  await page.waitForSelector('[data-testid="run-skill-status"]', {
-    timeout: 30_000,
-  });
-  assert.equal(
-    (await page.locator('[data-testid="run-skill-status"]').innerText()).trim(),
-    `使用技能：${STORYBOARD_NAME}`,
-    "服务=web 事实=运行状态应显示使用技能名称",
   );
   // 一次性消费：标签消失
   await page.waitForSelector('[data-testid="direct-skill-tag"]', {
@@ -483,7 +499,7 @@ test("主路径4 直接使用：一次性 forced 绑定驱动真实 AgentRun 并
 
   // 完整 AgentRun 完成 + 只读 SQL 核验 forced 激活落库
   await waitFor(() => receipts.length === 1, 30_000, "服务=web 事实=应收到 202 回执");
-  await waitRunCompleted(receipts[0]);
+  await waitRunCompleted(directProject, receipts[0]);
   assert.equal(
     mysqlQuery(
       `SELECT activation_source FROM creative_skill_activation WHERE agent_run_id='${receipts[0].agent_run_id}' AND creative_skill_id='${STORYBOARD_ID}'`,
@@ -491,9 +507,13 @@ test("主路径4 直接使用：一次性 forced 绑定驱动真实 AgentRun 并
     "forced",
     "服务=mysql 事实=forced 激活应落 creative_skill_activation",
   );
+  // UI 激活展示只显示技能名（已激活技能），不显示来源
+  await page
+    .getByLabel(`已激活技能：${STORYBOARD_NAME}`, { exact: true })
+    .waitFor({ timeout: 30_000 });
 
   // 一次性语义：第二条消息不再携带 forced 字段
-  await sendInboxMessage("黑盒第二条普通消息");
+  await sendCanvasMessage("黑盒第二条普通消息");
   await waitFor(
     () => bodies.length === 2,
     30_000,
@@ -504,11 +524,10 @@ test("主路径4 直接使用：一次性 forced 绑定驱动真实 AgentRun 并
     "服务=web 事实=第二条消息不得再携带 forced 绑定",
   );
   await waitFor(() => receipts.length === 2, 30_000, "服务=web 事实=应收到第二条回执");
-  await waitRunCompleted(receipts[1]);
+  await waitRunCompleted(directProject, receipts[1]);
 }, 300_000);
 
 test("主路径5 自动匹配：auto 开关驱动服务端确定性激活并落库", async () => {
-  const { bodies, receipts } = captureInboxMessages();
   const autoCalls = [];
   page.on("request", (request) => {
     if (
@@ -554,35 +573,20 @@ test("主路径5 自动匹配：auto 开关驱动服务端确定性激活并落�
     "服务=web 事实=点击后 auto 应开启",
   );
 
-  // 发送消息：无 forced 绑定，服务端 auto 确定性激活唯一候选
-  await page.goto(`${baseUrl}/generate`, { waitUntil: "domcontentloaded" });
-  await sendInboxMessage("黑盒自动技能 fake:delay:5000");
-  await waitFor(() => bodies.length === 1, 30_000, "服务=web 事实=应发出收件箱消息");
+  // Canvas 内发送消息：无 forced 绑定，服务端 auto 确定性激活唯一候选
+  const autoProject = await createProject("黑盒自动技能");
+  await openCanvas(autoProject);
+  const { bodies, receipts } = captureConversationMessages();
+  await sendCanvasMessage("黑盒自动技能 fake:delay:5000");
+  await waitFor(() => bodies.length === 1, 30_000, "服务=web 事实=应发出会话消息");
   assert.ok(
     !("forced_creative_skill_id" in bodies[0]),
     "服务=web 事实=auto 旅程不得携带 forced 绑定",
   );
 
-  // UI 运行状态只显示技能名，不显示来源
-  await page.waitForSelector('[data-testid="run-skill-status"]', {
-    timeout: 30_000,
-  });
-  const statusText = (
-    await page.locator('[data-testid="run-skill-status"]').innerText()
-  ).trim();
-  assert.equal(
-    statusText,
-    `使用技能：${STORYBOARD_NAME}`,
-    "服务=web 事实=运行状态应只显示技能名",
-  );
-  assert.ok(
-    !statusText.includes("自动") && !statusText.includes("auto"),
-    "服务=web 事实=运行状态不得显示激活来源",
-  );
-
   // 完整 AgentRun 完成 + 只读 SQL 核验 auto 激活落库
   await waitFor(() => receipts.length === 1, 30_000, "服务=web 事实=应收到 202 回执");
-  await waitRunCompleted(receipts[0]);
+  await waitRunCompleted(autoProject, receipts[0]);
   assert.equal(
     mysqlQuery(
       `SELECT activation_source FROM creative_skill_activation WHERE agent_run_id='${receipts[0].agent_run_id}' AND creative_skill_id='${STORYBOARD_ID}'`,
@@ -590,6 +594,10 @@ test("主路径5 自动匹配：auto 开关驱动服务端确定性激活并落�
     "auto",
     "服务=mysql 事实=auto 激活应落 creative_skill_activation",
   );
+  // UI 激活展示只显示技能名，不显示来源
+  await page
+    .getByLabel(`已激活技能：${STORYBOARD_NAME}`, { exact: true })
+    .waitFor({ timeout: 30_000 });
 }, 300_000);
 
 test("主路径6 官方与个人差异：创建个人技能后两域标记与菜单分化", async () => {
