@@ -49,7 +49,7 @@
 |---|---|---|
 | image_prompt | 图片生成 | `../references/image-prompt-contract.md` |
 | seedance_video | Seedance / 即梦视频 | `../references/seedance-prompt-optimizer.md` |
-| image_to_video | 图转视频 | `seedance-prompt-optimizer.md` + asset_understanding |
+| image_to_video | 图转视频 | `../references/seedance-prompt-optimizer.md` + asset_understanding |
 | prompt_only | 用户只要优化提示词 | 直接输出 |
 
 ## 执行流程

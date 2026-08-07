@@ -4,13 +4,14 @@
 
 > **输入约定**：用户在对话里直接附视频文件。本地版用 Claude 的多模态能力直接看视频（Claude 能读视频并抽帧理解）。
 
-## 两态（本地版简化）
+## 三态（本地版简化）
 
-本地 Claude 自带多模态，三态简化为两态：
+本地 Claude 自带多模态，按读视频能力分三态（直读 / 抽帧 / 抽帧+口述）：
 
 | 态 | 条件 | 处理 |
 |---|---|---|
 | `direct_multimodal` | Claude 能直接读视频（默认） | 直接看视频，输出结构信号 |
+| `frame_extraction` | 视频可解码但直读吃力 / 只需关键帧 | 自动抽若干关键帧，基于帧理解结构信号，不强制用户口述 |
 | `frame_plus_user_narration` | 视频太大 / 格式不支持 / Claude 读不了 | 引导用户口述结构 + 用户手动截几张关键帧发来；基于帧 + 口述推断 |
 
 ## 铁律
@@ -32,7 +33,7 @@ fallback 态下推断不出的部分，只问必要问题：「这片大概讲�
 
 ```text
 video_understanding:
-- strategy: direct_multimodal / frame_plus_user_narration
+- strategy: direct_multimodal / frame_extraction / frame_plus_user_narration
 - key_frames: [...]           # 关键帧时间点 + 画面描述
 - speech_text: ...            # 口播文本（听得出则填）
 - on_screen_text: ...         # 画面文字（看得出则填）

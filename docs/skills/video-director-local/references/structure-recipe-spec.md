@@ -87,7 +87,7 @@ recipe:
 | 字段 | 说明 |
 |---|---|
 | source_video | 源视频（用户提供的本地文件名或描述） |
-| decode_method | 拆解方式：`direct_multimodal`（Claude 直接看视频）/ `frame_plus_user_narration`（抽帧 + 用户口述） |
+| decode_method | 拆解方式：`direct_multimodal`（Claude 直接看视频）/ `frame_extraction`（抽帧理解，无需用户口述）/ `frame_plus_user_narration`（抽帧 + 用户口述） |
 | confidence | 整体置信度：`high` / `medium` / `low` |
 | uncertainties[] | 不确定点（无法确证的推断，需向用户确认） |
 
