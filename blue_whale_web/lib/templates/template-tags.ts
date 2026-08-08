@@ -1,5 +1,5 @@
-/** 模板标签枚举（对齐 Java TemplateTagEnum，单一来源）。
- *  硬编码与 Java 一致——tags 是枚举元数据，不在 DB。 */
+/** 模板标签兜底枚举（IK764F 起权威数据在 DB template_tag 表；本枚举仅作 DB
+ *  不可用/空表时的降级兜底，保持与原 Java TemplateTagEnum 一致）。 */
 
 export interface TemplateTag {
   tag_code: string;

@@ -31,7 +31,9 @@ export function TemplateCardItem({
   };
 
   const handleSelect = () => {
-    onAppendPrompt?.(card.title);
+    // IK764F：模板提示词以 content 为准；存量卡片 content 未补齐前兜底 title。
+    const prompt = card.content?.trim() || card.title;
+    onAppendPrompt?.(prompt);
   };
 
   const cardShape = social

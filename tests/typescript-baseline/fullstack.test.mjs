@@ -145,6 +145,7 @@ test("fresh MySQL 只包含新 baseline 表与最小 capability/provider 种子"
     "storyboard_previews",
     "template_card",
     "template_card_image",
+    "template_tag",
     "topup_tiers",
     "user_input_requests",
     "user_skill",

@@ -5,6 +5,8 @@ export interface TemplateCard {
   video?: string;
   images: string[];
   layout?: TemplateLayout;
+  /** 模板提示词（IK764F）：点击卡片追加进输入框；为空时前端兜底 title */
+  content?: string | null;
 }
 
 export interface TemplateTag {
