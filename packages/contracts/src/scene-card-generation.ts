@@ -27,6 +27,25 @@ export function validateVideoReferenceConfiguration(
   if (firstFrameCount > 1) return "首帧参考素材最多只能有一个";
   if (lastFrameCount > 1) return "尾帧参考素材最多只能有一个";
 
+  // 与 Dock 路径（handle-create-generation-job）同款组合规则，前置拒绝、零写入，
+  // 避免先持久化再由 video-job-runner 运行时抛错（AC#4 任何副作用前拒绝）。
+  const referenceCount = assets.filter(
+    (asset) => asset.role === "reference",
+  ).length;
+  if (lastFrameCount > 0 && firstFrameCount === 0)
+    return "尾帧必须与首帧一起使用";
+  if ((firstFrameCount > 0 || lastFrameCount > 0) && referenceCount > 0)
+    return "首尾帧模式不能与普通参考素材混用";
+  if (referenceCount > 12) return "参考素材最多 12 个";
+
+  // scene_card 类素材无 asset 映射（resolveReferenceAssetsToFlat 解析不出 asset_id），
+  // 作首/尾帧会被静默丢弃、worker 按无帧生成（AC#4 不静默降级）——其内容经投影进
+  // prompt，只允许 reference 角色。
+  const sceneCardFrame = assets.find(
+    (asset) => asset.type === "scene_card" && asset.role !== "reference",
+  );
+  if (sceneCardFrame) return "场景卡素材不能作为首帧/尾帧";
+
   const derivedMode = deriveVideoReferenceMode(assets);
   if (referenceMode !== derivedMode)
     return `reference_mode ${referenceMode} 与素材角色派生模式 ${derivedMode} 不一致`;

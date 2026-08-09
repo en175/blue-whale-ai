@@ -54,6 +54,18 @@ const referenceAsset = {
   },
 };
 
+const sceneCardAsset = {
+  mention_id: "201",
+  type: "scene_card" as const,
+  role: "reference" as const,
+  projection: {
+    title: "场景卡",
+    summary: null,
+    content_markdown: "# 正文",
+    version: 1,
+  },
+};
+
 describe("SceneCardRegenerationRequest contract", () => {
   it("接受合规视频再生成请求", () => {
     const request = sceneCardRegenerationRequestSchema.parse(baseRequest);
@@ -125,12 +137,83 @@ describe("SceneCardRegenerationRequest contract", () => {
     ).toThrow();
   });
 
-  it("接受与尾帧角色一致的尾帧模式", () => {
+  it("拒绝只选尾帧不选首帧（尾帧必须与首帧一起使用）", () => {
     expect(() =>
       sceneCardRegenerationRequestSchema.parse({
         ...baseRequest,
         reference_mode: "last_frame",
         reference_assets: [{ ...referenceAsset, role: "last_frame" }],
+      }),
+    ).toThrow(/尾帧必须与首帧一起使用/);
+  });
+
+  it("接受首帧+尾帧组合", () => {
+    expect(() =>
+      sceneCardRegenerationRequestSchema.parse({
+        ...baseRequest,
+        reference_mode: "first_and_last_frame",
+        reference_assets: [
+          { ...referenceAsset, role: "first_frame" },
+          { ...referenceAsset, mention_id: "102", role: "last_frame" },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("拒绝首尾帧与普通参考素材混用", () => {
+    expect(() =>
+      sceneCardRegenerationRequestSchema.parse({
+        ...baseRequest,
+        reference_mode: "first_frame",
+        reference_assets: [
+          { ...referenceAsset, role: "first_frame" },
+          { ...referenceAsset, mention_id: "102", role: "reference" },
+        ],
+      }),
+    ).toThrow(/首尾帧模式不能与普通参考素材混用/);
+  });
+
+  it("拒绝超过 12 个普通参考素材", () => {
+    const references = Array.from({ length: 13 }, (_, index) => ({
+      ...referenceAsset,
+      mention_id: String(101 + index),
+    }));
+    expect(() =>
+      sceneCardRegenerationRequestSchema.parse({
+        ...baseRequest,
+        reference_assets: references,
+      }),
+    ).toThrow(/参考素材最多 12 个/);
+  });
+
+  it("拒绝场景卡素材作为首帧（scene_card 无 asset 映射，不静默降级）", () => {
+    expect(() =>
+      sceneCardRegenerationRequestSchema.parse({
+        ...baseRequest,
+        reference_mode: "first_frame",
+        reference_assets: [{ ...sceneCardAsset, role: "first_frame" }],
+      }),
+    ).toThrow(/场景卡素材不能作为首帧\/尾帧/);
+  });
+
+  it("拒绝场景卡素材作为尾帧", () => {
+    expect(() =>
+      sceneCardRegenerationRequestSchema.parse({
+        ...baseRequest,
+        reference_mode: "first_and_last_frame",
+        reference_assets: [
+          { ...referenceAsset, role: "first_frame" },
+          { ...sceneCardAsset, role: "last_frame" },
+        ],
+      }),
+    ).toThrow(/场景卡素材不能作为首帧\/尾帧/);
+  });
+
+  it("接受场景卡素材作为普通参考", () => {
+    expect(() =>
+      sceneCardRegenerationRequestSchema.parse({
+        ...baseRequest,
+        reference_assets: [sceneCardAsset],
       }),
     ).not.toThrow();
   });

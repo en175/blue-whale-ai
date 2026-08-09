@@ -20,6 +20,7 @@ import {
   type CapabilitySnapshot,
   type DerivedReference,
 } from "./plan-application-repo.js";
+import { validateStoryboardFrames } from "./storyboard-preview-repo.js";
 
 const OPERATION = "scene_card.regenerate";
 
@@ -172,10 +173,11 @@ function checkCapabilityLimit(
   return null;
 }
 
-/** 把请求带来的 ProviderPromptAsset 折成 validateDerivedReferences 需要的 DerivedReference 形态：
- *  复用同一套 mention→asset/scene_card 有效性校验（CONTEXT L223 应用前重新验证冻结素材）。 */
+/** 把请求带来的 mention 派生素材折成 validateDerivedReferences 需要的 DerivedReference 形态：
+ *  复用同一套 mention→asset/scene_card 有效性校验（CONTEXT L223 应用前重新验证冻结素材）。
+ *  仅收 mention 组（asset/scene_card）；画格无 mention_id，不在此处理。 */
 function toDerivedReferences(
-  assets: ProviderPromptAsset[],
+  assets: Extract<ProviderPromptAsset, { mention_id: string }>[],
 ): DerivedReference[] {
   return assets.map((asset) => ({
     mention_id: asset.mention_id,
@@ -185,29 +187,134 @@ function toDerivedReferences(
   }));
 }
 
-/** T14 只允许改已有素材的 role；列表顺序、身份与冻结投影都必须保持不变。 */
-function onlyReferenceRolesChanged(
+/** PlanMessage 派生素材（asset/scene_card）：携带 mention_id 的引用单元。 */
+function isMentionAsset(
+  asset: ProviderPromptAsset,
+): asset is Extract<ProviderPromptAsset, { mention_id: string }> {
+  return asset.type === "asset" || asset.type === "scene_card";
+}
+
+/** StoryboardPreview 画格：携带 slot_id，无 mention_id。 */
+function isFrameAsset(
+  asset: ProviderPromptAsset,
+): asset is Extract<ProviderPromptAsset, { type: "storyboard_frame" }> {
+  return asset.type === "storyboard_frame";
+}
+
+/** preset.reference_assets（JSON 列）中的 mention 项窄化（type=asset/scene_card 的对象）。 */
+function isMentionAssetEntry(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return false;
+  const type = (value as Record<string, unknown>).type;
+  return type === "asset" || type === "scene_card";
+}
+
+/** IK70LQ：把提交的 reference_assets 与当前 preset 比对分两组——
+ *  PlanMessage 派生组（asset/scene_card）保留身份+顺序不变、只许改 role（防 Agent/前端偷换单元身份）；
+ *  画格组（storyboard_frame）允许新增/移除/改 role（身份校验交 validateStoryboardFrames）。
+ *  画格组自由编辑是相对 T14 onlyReferenceRolesChanged 的唯一放宽，零写入语义不变。 */
+function validateReferenceAssetChanges(
   current: unknown,
   submitted: ProviderPromptAsset[],
-): boolean {
-  if (!Array.isArray(current) || current.length !== submitted.length)
-    return false;
-  return current.every((asset, index) => {
-    if (asset === null || typeof asset !== "object" || Array.isArray(asset))
-      return false;
-    const submittedAsset = submitted[index];
-    if (!submittedAsset) return false;
+): { ok: true } | { ok: false; reason: string } {
+  if (!Array.isArray(current))
+    return { ok: false, reason: "参考素材列表只能修改角色" };
+  const currentMentions = current.filter(isMentionAssetEntry);
+  const submittedMentions = submitted.filter(isMentionAsset);
+  if (currentMentions.length !== submittedMentions.length)
+    return { ok: false, reason: "参考素材列表只能修改角色" };
+  const unchanged = submittedMentions.every((asset, index) => {
+    const currentAsset = currentMentions[index];
+    if (!currentAsset) return false;
     const immutableCurrent = Object.fromEntries(
-      Object.entries(asset).filter(([key]) => key !== "role"),
+      Object.entries(currentAsset).filter(([key]) => key !== "role"),
     );
     const immutableSubmitted = Object.fromEntries(
-      Object.entries(submittedAsset).filter(([key]) => key !== "role"),
+      Object.entries(asset).filter(([key]) => key !== "role"),
     );
     return (
       JSON.stringify(canonicalizeJsonValue(immutableCurrent)) ===
       JSON.stringify(canonicalizeJsonValue(immutableSubmitted))
     );
   });
+  return unchanged
+    ? { ok: true }
+    : { ok: false, reason: "参考素材列表只能修改角色" };
+}
+
+/** IK70LQ：把结构化 reference_assets 按角色解析为 worker 读取的扁平字段（写入 job.input）。
+ *  - asset mention → conversation_message_mentions.target_id（asset_id）；
+ *  - storyboard_frame → generation_output_slots.asset_id；
+ *  - scene_card mention 无 asset 映射，不进扁平字段（内容经投影进 prompt）；其首/尾帧角色
+ *    已由 validateVideoReferenceConfiguration 前置拒绝，此处仅剩 reference 角色，跳过不降级。
+ *  按 role 分配：first_frame→first_frame_asset_id（至多 1）、last_frame→last_frame_asset_id（至多 1）、
+ *  reference→reference_asset_ids[]。身份已由 validateDerivedReferences/validateStoryboardFrames 校验。 */
+async function resolveReferenceAssetsToFlat(
+  tx: Prisma.TransactionClient,
+  referenceAssets: ProviderPromptAsset[],
+): Promise<{
+  first_frame_asset_id?: string;
+  last_frame_asset_id?: string;
+  reference_asset_ids?: string[];
+}> {
+  const assetMentionIds = referenceAssets
+    .filter(isMentionAsset)
+    .filter((asset) => asset.type === "asset")
+    .map((asset) => BigInt(asset.mention_id));
+  const frameSlotIds = referenceAssets
+    .filter(isFrameAsset)
+    .map((asset) => BigInt(asset.slot_id));
+  const mentionTargetById = new Map<bigint, bigint>();
+  if (assetMentionIds.length > 0) {
+    const mentions = await tx.conversation_message_mentions.findMany({
+      where: { id: { in: assetMentionIds } },
+      select: { id: true, target_id: true },
+    });
+    for (const mention of mentions)
+      mentionTargetById.set(mention.id, mention.target_id);
+  }
+  const slotAssetById = new Map<bigint, bigint>();
+  if (frameSlotIds.length > 0) {
+    const slots = await tx.generation_output_slots.findMany({
+      where: { id: { in: frameSlotIds } },
+      select: { id: true, asset_id: true },
+    });
+    for (const slot of slots)
+      if (slot.asset_id !== null) slotAssetById.set(slot.id, slot.asset_id);
+  }
+  const toAssetId = (asset: ProviderPromptAsset): string | null => {
+    if (asset.type === "asset") {
+      const target = mentionTargetById.get(BigInt(asset.mention_id));
+      return target ? target.toString() : null;
+    }
+    if (asset.type === "storyboard_frame") {
+      const target = slotAssetById.get(BigInt(asset.slot_id));
+      return target ? target.toString() : null;
+    }
+    return null;
+  };
+  let firstFrameAssetId: string | undefined;
+  let lastFrameAssetId: string | undefined;
+  const referenceAssetIds: string[] = [];
+  // 首/尾帧各 ≤1 由前置 validateVideoReferenceConfiguration 保证，故 firstFrameAssetId/
+  // lastFrameAssetId 至多赋值一次，无覆盖风险；reference 无数量上限（worker 侧再校验）。
+  for (const asset of referenceAssets) {
+    const assetId = toAssetId(asset);
+    if (assetId === null) continue;
+    if (asset.role === "first_frame") firstFrameAssetId = assetId;
+    else if (asset.role === "last_frame") lastFrameAssetId = assetId;
+    else referenceAssetIds.push(assetId);
+  }
+  const flat: {
+    first_frame_asset_id?: string;
+    last_frame_asset_id?: string;
+    reference_asset_ids?: string[];
+  } = {};
+  if (firstFrameAssetId) flat.first_frame_asset_id = firstFrameAssetId;
+  if (lastFrameAssetId) flat.last_frame_asset_id = lastFrameAssetId;
+  if (referenceAssetIds.length > 0)
+    flat.reference_asset_ids = referenceAssetIds;
+  return flat;
 }
 
 /** 单事务原子再生成（AC#4/#5/#6）：前置检查全部通过才 UPDATE preset(version+1) + 新 record + 新 job。
@@ -284,13 +391,23 @@ async function regenerateSceneCardInTransaction(
     };
   }
 
-  if (
-    !onlyReferenceRolesChanged(preset.reference_assets, input.reference_assets)
-  )
-    return {
-      kind: "validation_failed",
-      reason: "参考素材列表只能修改角色",
-    };
+  const referenceChanges = validateReferenceAssetChanges(
+    preset.reference_assets,
+    input.reference_assets,
+  );
+  if (!referenceChanges.ok)
+    return { kind: "validation_failed", reason: referenceChanges.reason };
+
+  // 画格组独立校验（无 mention_id，不走 validateDerivedReferences）。
+  const frameAssets = input.reference_assets.filter(isFrameAsset);
+  const frameCheck = await validateStoryboardFrames(
+    tx,
+    projectId,
+    sceneCardId,
+    frameAssets,
+  );
+  if (!frameCheck.ok)
+    return { kind: "validation_failed", reason: frameCheck.reason };
 
   const referenceRoleReason = validateVideoReferenceConfiguration(
     input.reference_mode,
@@ -363,14 +480,21 @@ async function regenerateSceneCardInTransaction(
   );
   if (limitReason) return { kind: "capability_limit", reason: limitReason };
 
-  // 6. 引用素材有效性（AC#4，全部在副作用前）。
+  // 6. 引用素材有效性（AC#4，全部在副作用前）。画格无 mention_id，只校验 mention 派生组。
+  const mentionAssets = input.reference_assets.filter(isMentionAsset);
   const referenceCheck = await validateDerivedReferences(
     tx,
     projectId,
-    toDerivedReferences(input.reference_assets),
+    toDerivedReferences(mentionAssets),
   );
   if (!referenceCheck.ok)
     return { kind: "validation_failed", reason: referenceCheck.reason };
+
+  // IK70LQ 桥接：结构化→扁平，把首/尾帧/参考图 asset_id 并入 job.input 供 video-job-runner 读取。
+  const flatReferences = await resolveReferenceAssetsToFlat(
+    tx,
+    input.reference_assets,
+  );
 
   // === 前置检查全部通过，开始原子更新（AC#4）===
 
@@ -418,6 +542,7 @@ async function regenerateSceneCardInTransaction(
       reference_assets: input.reference_assets,
       reference_mode: input.reference_mode,
       capability_snapshot_version: input.capability_snapshot_version,
+      ...flatReferences,
       ...(input.provider_credential
         ? { provider_credential: input.provider_credential }
         : {}),

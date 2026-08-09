@@ -97,21 +97,26 @@ export async function GET(
 ) {
   return withAuthenticatedUser(request, async ({ userId }) => {
     const { id, sceneCardId } = await ctx.params;
-    const result = await createStoryboardPreviewDeps().listStoryboardPreviews(
-      id,
-      sceneCardId,
-      userId,
-    );
-    if (result.kind !== "found") {
+    const deps = createStoryboardPreviewDeps();
+    const [previewsResult, framesResult] = await Promise.all([
+      deps.listStoryboardPreviews(id, sceneCardId, userId),
+      deps.listStoryboardFrames(id, sceneCardId, userId),
+    ]);
+    if (previewsResult.kind !== "found" || framesResult.kind !== "found") {
       return Response.json(fail(RESOURCE_NOT_FOUND_CODE, "资源不存在"));
     }
     return Response.json(
       ok({
-        previews: result.previews.map((preview) => ({
+        previews: previewsResult.previews.map((preview) => ({
           preview_id: wireInteger(preview.preview_id),
           scene_card_id: wireInteger(preview.scene_card_id),
           first_generation_job_id: wireInteger(preview.first_generation_job_id),
           summary_status: preview.summary_status,
+        })),
+        frames: framesResult.frames.map((frame) => ({
+          slot_id: wireInteger(frame.slot_id),
+          asset_id: wireInteger(frame.asset_id),
+          slot_index: frame.slot_index,
         })),
       }),
     );

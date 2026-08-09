@@ -297,6 +297,12 @@ while [ "$SECONDS" -lt "$deadline" ]; do
         echo "snapshot recovery blackbox acceptance failed" >&2
         exit 1
       fi
+      if ! node --test "$ROOT/tests/typescript-baseline/storyboard-frame-video-input-blackbox.test.mjs"; then
+        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
+          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
+        echo "storyboard frame video input blackbox acceptance failed" >&2
+        exit 1
+      fi
       exit 0
     fi
     dc logs --no-color --tail=200 new-api web generation-worker provider-stub \
