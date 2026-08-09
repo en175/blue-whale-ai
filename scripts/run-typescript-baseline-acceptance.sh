@@ -262,10 +262,28 @@ while [ "$SECONDS" -lt "$deadline" ]; do
         echo "atomic mention blackbox acceptance failed" >&2
         exit 1
       fi
+      if ! node --test "$ROOT/tests/typescript-baseline/mention-input-snapshot-blackbox.test.mjs"; then
+        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub storage-stub \
+          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
+        echo "mention input snapshot blackbox acceptance failed" >&2
+        exit 1
+      fi
       if ! node --test "$ROOT/tests/typescript-baseline/skill-journey-blackbox.test.mjs"; then
         dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
           | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
         echo "skill journey blackbox acceptance failed" >&2
+        exit 1
+      fi
+      if ! node --test "$ROOT/tests/typescript-baseline/plan-message-blackbox.test.mjs"; then
+        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
+          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
+        echo "plan message blackbox acceptance failed" >&2
+        exit 1
+      fi
+      if ! node --test "$ROOT/tests/typescript-baseline/plan-apply-blackbox.test.mjs"; then
+        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
+          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
+        echo "plan apply blackbox acceptance failed" >&2
         exit 1
       fi
       if ! node --test "$ROOT/tests/typescript-baseline/plan-application-blackbox.test.mjs"; then

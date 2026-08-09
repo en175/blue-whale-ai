@@ -143,6 +143,12 @@ function stubLedger() {
   return stubFetch("/__acceptance/requests").body.requests;
 }
 
+// 提交类请求（POST）视图：区别于 new-api 对非终态视频任务的后台 GET 轮询。
+// 全链运行时历史套件遗留任务仍在轮询并计入账本，“零写入”断言须按 POST 收窄。
+function stubPosts() {
+  return stubLedger().filter((req) => req.method === "POST");
+}
+
 function seedCapabilities() {
   mysqlQuery("DELETE FROM generation_model_capability WHERE provider_id='t11-doubao'");
   insertedId(`
@@ -388,7 +394,7 @@ test("关闭不保存：只读 GET preset 多次，不发 generate → 全表不
   assert.equal(countWhere("scene_card_generation_records", `scene_card_id=${fixture.sceneCardId}`), before.records);
   assert.equal(countWhere("generation_jobs", `project_id=${projectId}`), before.jobs);
   assert.equal(Number(mysqlQuery(`SELECT version FROM scene_card_generation_presets WHERE scene_card_id=${fixture.sceneCardId}`)), before.presetVersion);
-  assert.equal(stubLedger().length, 0, "只读不应触发 provider 请求");
+  assert.equal(stubPosts().length, 0, "只读不应触发 provider 提交请求");
 }, 90_000);
 
 test("能力限制：越界参数零写入（AC#1/#4）", async () => {
@@ -404,7 +410,7 @@ test("能力限制：越界参数零写入（AC#1/#4）", async () => {
   assert.equal(result.body.code, 400, `越界参数应拒绝：${JSON.stringify(result.body)}`);
   assert.equal(countWhere("scene_card_generation_records", `scene_card_id=${fixture.sceneCardId}`), before, "越界零写入");
   assert.equal(Number(mysqlQuery(`SELECT version FROM scene_card_generation_presets WHERE scene_card_id=${fixture.sceneCardId}`)), presetVersionBefore, "preset 版本不变");
-  assert.equal(stubLedger().length, 0, "越界不应触发 provider 请求");
+  assert.equal(stubPosts().length, 0, "越界不应触发 provider 提交请求");
 }, 90_000);
 
 test("版本冲突：旧 base 提交零写入并返回 100406（AC#6）", async () => {
@@ -418,7 +424,7 @@ test("版本冲突：旧 base 提交零写入并返回 100406（AC#6）", async 
   const result = await generateSceneCard(projectId, fixture.sceneCardId, body, owner.token, uniqueKey("t13-conflict"));
   assert.equal(result.body.code, 100406, `版本冲突应返回 100406：${JSON.stringify(result.body)}`);
   assert.equal(countWhere("scene_card_generation_records", `scene_card_id=${fixture.sceneCardId}`), before, "冲突零写入");
-  assert.equal(stubLedger().length, 0, "冲突不应触发 provider 请求");
+  assert.equal(stubPosts().length, 0, "冲突不应触发 provider 提交请求");
 }, 90_000);
 
 test("历史不可变：参数变化新生成后，首条事实全字段未变（AC#5）", async () => {

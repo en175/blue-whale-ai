@@ -145,6 +145,12 @@ function stubLedger() {
   return stubFetch("/__acceptance/requests").body.requests;
 }
 
+// 提交类请求（POST）视图：区别于 new-api 对非终态视频任务的后台 GET 轮询。
+// 全链运行时历史套件遗留任务仍在轮询并计入账本，“零写入”断言须按 POST 收窄。
+function stubPosts() {
+  return stubLedger().filter((req) => req.method === "POST");
+}
+
 /** 种子 t11-image（画格通道，quantity_max=2）+ t11-video（视频通道，声明首帧/首尾帧能力）。
  *  features 不进 digest（capability-digest 仅 8 字段），故后续用例 UPDATE features 不触发 drift。 */
 function seedCapabilities() {
@@ -429,7 +435,7 @@ test("AC5 不支持组合零写入：模型不支持首帧时画格作首帧 cap
 
   assert.equal(countWhere("scene_card_generation_presets", `scene_card_id=${fixture.sceneCardId}`), presetsBefore, "零写入：Preset 行数不变");
   assert.equal(countWhere("generation_jobs", `project_id=${projectId} AND source='scene_card'`), jobsBefore, "零写入：视频 job 不增");
-  assert.equal(stubLedger().length, 0, "零写入：不应触发 provider 请求");
+  assert.equal(stubPosts().length, 0, "零写入：不应触发 provider 提交请求");
 
   // 恢复首帧能力，避免影响后续用例。
   setVideoFeatures({ quantity_max: 2, first_frame: true, first_last_frame: true });
@@ -456,7 +462,7 @@ test("AC5 组合不支持零写入：只选尾帧不选首帧 400 + 表行不变
 
   assert.equal(countWhere("scene_card_generation_presets", `scene_card_id=${fixture.sceneCardId}`), presetsBefore, "零写入：Preset 行数不变");
   assert.equal(countWhere("generation_jobs", `project_id=${projectId} AND source='scene_card'`), jobsBefore, "零写入：视频 job 不增");
-  assert.equal(stubLedger().length, 0, "零写入：不应触发 provider 请求");
+  assert.equal(stubPosts().length, 0, "零写入：不应触发 provider 提交请求");
   resetScenarios();
 }, 180_000);
 

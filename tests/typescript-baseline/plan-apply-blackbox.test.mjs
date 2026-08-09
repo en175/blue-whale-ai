@@ -45,6 +45,23 @@ function mysqlQuery(sql) {
   ).trim();
 }
 
+function mysqlNewApiQuery(sql) {
+  return compose(
+    "exec",
+    "-T",
+    "mysql",
+    "mysql",
+    "-uroot",
+    "-pblue_whale",
+    "-N",
+    "-B",
+    "--default-character-set=utf8mb4",
+    "new_api",
+    "-e",
+    sql,
+  ).trim();
+}
+
 function mysqlJson(sql) {
   const raw = mysqlQuery(sql);
   return raw ? JSON.parse(raw) : null;
@@ -149,6 +166,33 @@ function seedCapabilities() {
   `);
 }
 
+// fake 运行时把启用的首个图片能力（t09-image）冻结进计划；apply 产生的图片 job
+// 需经 new-api 真实路由到 provider-stub，故为 t09-image 种渠道（对齐 T16 惯例）。
+async function seedImageChannel() {
+  mysqlNewApiQuery(
+    "DELETE FROM channels WHERE id = 9017; " +
+      "INSERT INTO channels (id, type, `key`, status, name, weight, created_time, base_url, models, `group`, priority, auto_ban, settings) VALUES " +
+      "(9017, 1, 'sk-acceptance-upstream', 1, 'acceptance-t10-image', 100, UNIX_TIMESTAMP(), 'http://provider-stub:4329', 't09-image', 'default', 100, 0, '{\"disable_task_polling_sleep\":true}'); " +
+      "INSERT INTO options (`key`, `value`) VALUES ('ModelRatio', JSON_OBJECT('t09-image', 1)) " +
+      "ON DUPLICATE KEY UPDATE `value` = JSON_SET(`value`, '$.\"t09-image\"', 1);",
+  );
+  // new-api 内存缓存渠道，须重启生效。
+  compose("restart", "new-api");
+  await waitFor(
+    () => {
+      const containerId = compose("ps", "-q", "new-api");
+      const health = execFileSync(
+        "docker",
+        ["inspect", "-f", "{{.State.Health.Status}}", containerId],
+        { encoding: "utf8" },
+      ).trim();
+      return health === "healthy" ? true : null;
+    },
+    60_000,
+    "服务=new-api 事实=渠道种子重启后应恢复健康",
+  );
+}
+
 function insertAsset(userId, projectId, slug) {
   return insertedId(`
     INSERT INTO assets (
@@ -157,7 +201,7 @@ function insertAsset(userId, projectId, slug) {
     ) VALUES (
       ${userId}, ${projectId}, 'image',
       'private/t10/${slug}.png', '${slug.padEnd(64, "a").slice(0, 64)}',
-      'https://storage.invalid/private/t10/${slug}.png', 'image/png',
+      'http://provider-stub:4329/fixtures/reference.png', 'image/png',
       4096, 1024, 1024, 'uploaded', 'normal', false
     )
   `);
@@ -242,6 +286,7 @@ before(async () => {
   owner = await registerUser("planApplyOwner");
   projectId = await createProject("计划卡应用项目", owner.token);
   seedCapabilities();
+  await seedImageChannel();
 });
 
 test("apply 成功：receipt + 首图 job(source=plan_apply) + plan_messages.applied_at 落库", async () => {

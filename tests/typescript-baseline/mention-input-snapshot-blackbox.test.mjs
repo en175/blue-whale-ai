@@ -14,13 +14,13 @@ const baseUrl = process.env.BW_ACCEPTANCE_WEB_URL ?? "http://127.0.0.1:3101";
 const composeFile =
   process.env.BW_TS_COMPOSE_FILE ??
   "deploy/typescript-baseline/docker-compose.acceptance.yml";
-const project =
+const composeProject =
   process.env.BW_TS_COMPOSE_PROJECT ?? "bw-ts-baseline-acceptance";
 
 function compose(...args) {
   return execFileSync(
     "docker",
-    ["compose", "-p", project, "-f", composeFile, ...args],
+    ["compose", "-p", composeProject, "-f", composeFile, ...args],
     { encoding: "utf8" },
   ).trim();
 }
