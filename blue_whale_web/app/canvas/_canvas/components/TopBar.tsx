@@ -4,6 +4,7 @@
  * 中部占位 TopBarCenter、右侧 Agent 入口 TopBarRight。
  */
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ChevronDown,
   MessageSquare,
@@ -309,6 +310,7 @@ export function TopBar({
   onDelete: (id: string) => void;
   onRename?: (id: string, rawName: string) => void;
 }) {
+  const router = useRouter();
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
 
   return (
@@ -336,6 +338,7 @@ export function TopBar({
           className="tc-logo-menu-btn"
           aria-label="导航菜单"
           aria-expanded={false}
+          onClick={() => router.push("/")}
           style={{
             display: "inline-flex",
             alignItems: "center",
