@@ -43,6 +43,15 @@
 | `scripts/tests/test_sync_task_from_origin.py` | 迁移 | P0 | recovery head、原子写失败、rollback 与 finalize fail-closed 黑盒等价 |
 | `scripts/tests/test_tunnel_testsite_db.py` | 迁移 | P2 | SSH 参数、端口范围和占用 fail-closed 黑盒等价，禁止真实连接测试站 |
 
+## 迁移波次
+
+1. **测试基线与只读检查器**：移植脱敏器断言，迁移审计查询、Hook 契约检查与闭环检查；先建立 Node 测试入口和差分方法。
+2. **共享 Hook 运行时**：迁移审计、授权与 PreTool，共享实现通过 Claude、Qoder、Codex、ZCode/Kimi 契约后退役三份 `.qoder` Python 镜像。
+3. **Worktree 与同步事务**：迁移 Worktree 创建、rebase/recovery、rollback/finalize 及对应真实 Git 黑盒。
+4. **发布与低频验收**：迁移 PR 核验证据、发布故障注入、测试站探针与 SSH 隧道黑盒。
+
+波次必须串行解锁：后一波可以继续普通功能开发，但不得在前一波兼容门槛未通过时切换其正式入口。P0 表示风险高和保护价值高，不代表可以绕过第一波测试基础直接迁移。
+
 ## 通用迁移门槛
 
 每个迁移域必须依次完成：冻结 Python 黑盒契约、旁路实现 Node 版本、隔离差分验证、保持稳定包装器逐域切换、全部消费者与测试通过后删除 Python。安全 Hook 的新实现异常必须 fail closed；真实授权、审计和 Git 状态禁止双写。
