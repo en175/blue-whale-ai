@@ -81,6 +81,19 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
 
     async createAsset(input) {
       return prisma.$transaction(async (tx) => {
+        // IK7GRP：fence CAS 守卫——镜像视频 publishVideoResult 的 updateMany 占位模式，
+        // 用 version 自增做无业务副作用的原子占位（不改 status，job 仍是 processing，
+        // 同一 worker 后续每张素材的 createAsset 都能通过）。count≠1 即 stale worker，返回 null。
+        const owned = await tx.generation_jobs.updateMany({
+          where: {
+            id: BigInt(input.generation_job_id),
+            status: "processing",
+            lease_owner: input.workerId,
+            fencing_token: BigInt(input.fencingToken),
+          },
+          data: { version: { increment: 1 } },
+        });
+        if (owned.count !== 1) return null;
         const asset = await tx.assets.create({
           data: {
             user_id: BigInt(input.user_id),
