@@ -257,8 +257,13 @@ async function generateSceneCard(projectId, sceneCardId, body, token, idempotenc
   return postJson(`/api/projects/${projectId}/scene-cards/${sceneCardId}/generate`, body, token, idempotencyKey);
 }
 
-/** 前置 fixture：产一张已应用 SceneCard，记首次事实身份供后续场景断言。 */
+/** 前置 fixture：产一张已应用 SceneCard，记首次事实身份供后续场景断言。
+ *  首视频 job 由 generation-worker 容器异步提交到 provider；此处等待其提交落账本，
+ *  否则迟到的 POST 会穿过后续 resetScenarios 污染「零写入」断言（IK7G3T 全量验证实测 3 个迟到 POST）。 */
 async function produceAppliedSceneCard(projectId, token) {
+  const videoPostsBefore = stubPosts().filter(
+    (req) => req.pathname === "/v1/video/generations",
+  ).length;
   const plan = await produceSceneCardCreatePlan(projectId, token);
   const messageId = String(plan.message_id);
   const key = uniqueKey("t13-apply");
@@ -266,6 +271,15 @@ async function produceAppliedSceneCard(projectId, token) {
   assert.equal(applied.body.code, 200, `首次应用应成功：${JSON.stringify(applied.body)}`);
   const sceneCardId = String(applied.body.data?.scene_card_id);
   const firstJobId = String(applied.body.data?.generation_job_id);
+  await waitFor(
+    () =>
+      stubPosts().filter((req) => req.pathname === "/v1/video/generations")
+        .length > videoPostsBefore
+        ? true
+        : null,
+    30_000,
+    "服务=generation-worker 事实=首视频 job 应提交 provider",
+  );
   const firstReceipt = mysqlJson(
     `SELECT JSON_OBJECT('id',id,'message_id',message_id) FROM plan_application_receipts WHERE message_id=${messageId}`,
   );

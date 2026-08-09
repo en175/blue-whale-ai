@@ -567,6 +567,7 @@ test("视频输出槽固定 + SceneCardNode 放置（AC#1/#5）", async () => {
   );
 
   // AC#5：SceneCardNode 应已放置（apply 路由 placeSceneCardNode）。
+  // 现行节点契约（PR !333 起）：type="scene-card"、data.sceneCardId。
   await waitFor(
     () => {
       const canvasNodes = mysqlJson(
@@ -577,7 +578,8 @@ test("视频输出槽固定 + SceneCardNode 放置（AC#1/#5）", async () => {
       const list = nodes ?? [];
       const sceneCardNode = list.find(
         (n) =>
-          n.type === "scene_card" && String(n.scene_card_id) === sceneCardId,
+          n.type === "scene-card" &&
+          String(n.data?.sceneCardId) === sceneCardId,
       );
       return sceneCardNode ? sceneCardNode : null;
     },
