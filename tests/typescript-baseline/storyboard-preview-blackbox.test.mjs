@@ -144,6 +144,12 @@ function stubLedger() {
   return stubFetch("/__acceptance/requests").body.requests;
 }
 
+// 提交类请求（POST）视图：区别于 new-api 对非终态视频任务的后台 GET 轮询。
+// 全链运行时历史套件遗留任务仍在轮询并计入账本，“零写入”断言须按 POST 收窄。
+function stubPosts() {
+  return stubLedger().filter((req) => req.method === "POST");
+}
+
 /** 种子 t15-image 能力：quantity_max=2（使 count=4 越界、count=2 合法，覆盖能力门）。 */
 function seedCapabilities() {
   mysqlQuery("DELETE FROM generation_model_capability WHERE provider_id='t15-doubao'");
@@ -425,7 +431,7 @@ test("能力上限：count 越过 quantity_max 零写入并返回 400", async ()
   const result = await createStoryboardPreview(projectId, fixture.sceneCardId, body, owner.token, uniqueKey("t15-limit"));
   assert.equal(result.body.code, 400, `越界 count 应拒绝：${JSON.stringify(result.body)}`);
   assert.equal(countWhere("storyboard_previews", `scene_card_id=${fixture.sceneCardId}`), previewsBefore, "越界零写入");
-  assert.equal(stubLedger().length, 0, "越界不应触发 provider 请求");
+  assert.equal(stubPosts().length, 0, "越界不应触发 provider 提交请求");
 }, 90_000);
 
 test("画格产出：job 成功后按 slot_index 升序发布 Asset（AC#3）", async () => {

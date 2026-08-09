@@ -175,6 +175,19 @@ const server = createServer(async (request, response) => {
     return sendJson(response, 200, { status: "ready" });
   }
 
+  // T10：图片参考素材夹具。plan-apply 黑盒种子的参考图 URL 必须可从 web 容器
+  // 取回（worker 会 fetch 参考图附加到供应商请求），storage.invalid 占位 URL 不可取。
+  if (request.method === "GET" && url.pathname === "/fixtures/reference.png") {
+    response.writeHead(200, { "content-type": "image/png" });
+    // 1x1 透明 PNG。
+    return response.end(
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        "base64",
+      ),
+    );
+  }
+
   if (url.pathname === "/__acceptance/requests") {
     if (request.method === "GET") {
       return sendJson(response, 200, { requests });
