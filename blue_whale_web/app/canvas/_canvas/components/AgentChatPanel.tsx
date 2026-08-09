@@ -13,7 +13,9 @@ import {
 } from "react";
 import { BookOpenText, ChevronDown } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
-import SkillPanel, { type UseSkillSelection } from "@/components/skill/SkillPanel";
+import SkillPanel, {
+  type UseSkillSelection,
+} from "@/components/skill/SkillPanel";
 import { squirclePath } from "../utils";
 import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
 import type { ChatMessage, PendingMentionBatch } from "../types";
@@ -56,7 +58,6 @@ import {
   loadComposerDraft,
   saveComposerDraft,
 } from "@/lib/composer-draft";
-
 
 export function AgentChatPanel({
   messages,
@@ -163,7 +164,6 @@ export function AgentChatPanel({
     ],
     [],
   );
-
 
   const [selectedMode] = useState(CREATION_MODES[0]);
   const [selectedModel, setSelectedModel] = useState(AGENT_MODELS[3]);
@@ -475,12 +475,17 @@ export function AgentChatPanel({
    * 按 card 当前 status 分发：
    *   权威 failed → 创建仅含缺失槽的新 Job，原 Card 保持失败事实
    *   离线 failed/generating → 保留既有 DEMO 状态机
-   *   normal            → 把 card 作为 NodeItem 应用到画布（复用既有 onCardGenerated，page.tsx 零改）
+   *   normal（DEMO only）→ 把 card 作为 NodeItem 应用到画布（复用既有 onCardGenerated，page.tsx 零改）
+   * 权威 normal 卡（带 generationJobId）的画布节点由后端 InitialPlacementStatus 单轨自动放置，
+   * 前端直插入口已下线（IK7GS4）：按钮渲染为禁用态，此处对权威卡不再直插建节点。
    */
   const handleReapply = (card: CardMessage) => {
     const current = card.status ?? "normal";
     if (current === "cancelled") return;
     if (current === "normal") {
+      // DEMO-only 直插入口：仅无 generationJobId 的离线 mock 卡走前端建节点。
+      // 权威卡（带 generationJobId）已由后端放置，不在此直插（防双节点/空节点）。
+      if (card.generationJobId !== undefined) return;
       onCardGenerated?.(card);
       return;
     }

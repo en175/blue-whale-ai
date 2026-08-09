@@ -32,6 +32,8 @@ export function buildMockReplyForMode(
         text: `${userText}（已生成图片卡片）`,
         meta: "1:1",
         status: "normal",
+        // DEMO-only：离线 mock 卡，无 generationJobId/assetId；
+        // 画布节点仅由用户点「手动应用」前端直插产生（见 handleReapply normal 分支）。
       },
     ];
   }
@@ -55,6 +57,8 @@ export function buildMockReplyForMode(
       text: userText,
       meta: "1:1",
       status: "normal",
+      // DEMO-only：离线 mock 卡，无 generationJobId/assetId；
+      // 画布节点仅由用户点「手动应用」前端直插产生（见 handleReapply normal 分支）。
     },
   ];
 }

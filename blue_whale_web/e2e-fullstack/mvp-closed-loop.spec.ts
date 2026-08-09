@@ -121,9 +121,11 @@ test("MVP 全栈闭环：创作澄清→成功生成→拖动刷新恢复→失�
     await expect(successCard).toBeVisible({ timeout: 90_000 });
     firstAssetId = (await successCard.getAttribute("data-asset-id"))!;
     expect(firstAssetId).toBeTruthy();
-    await expect(
-      page.locator("button.tc-agent-card-cta").first(),
-    ).toHaveAttribute("aria-label", "手动应用");
+    // 权威 normal 卡（带 generationJobId）的「手动应用」入口已下线（IK7GS4）：
+    // 画布节点由后端 InitialPlacementStatus 单轨放置，按钮渲染为禁用态并附说明。
+    const successCta = page.locator("button.tc-agent-card-cta").first();
+    await expect(successCta).toHaveAttribute("aria-label", "已自动放置");
+    await expect(successCta).toBeDisabled();
 
     await expect(page.locator(GENERATION_NODE)).toHaveCount(1, {
       timeout: 60_000,
