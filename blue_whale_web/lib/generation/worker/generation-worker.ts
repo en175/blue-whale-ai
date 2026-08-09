@@ -79,14 +79,26 @@ async function processClaimedJob(
 ): Promise<string> {
   const {
     repo,
+    workerId,
     createImageProvider,
     credentialVault,
     videoProvider,
     fetchImpl = fetch,
     mediaStorage,
   } = deps;
+  // IK7GRP：claim 后 job 已是 processing + 当前 worker 持 lease；守卫字段随每次写方法透传，
+  // stale worker（旧 fencing_token / 失效 lease）的迟到写入被仓储层拒绝。
+  const lease = { workerId, fencingToken: job.fencingToken };
+  // IK7GRP：统一失败入口——守卫失败时（job 已被新 worker 接管）仓储层返回 false，静默跳过。
+  const failClaimed = (code: string, msg: string) =>
+    repo.failJob({
+      jobId: job.id,
+      errorCode: code,
+      errorMessage: msg,
+      ...lease,
+    });
   if (job.type !== "image" && job.type !== "video") {
-    await repo.failJob(job.id, "unsupported_type", `暂不支持类型: ${job.type}`);
+    await failClaimed("unsupported_type", `暂不支持类型: ${job.type}`);
     return job.id;
   }
 
@@ -94,7 +106,7 @@ async function processClaimedJob(
   const prompt = typeof input.prompt === "string" ? input.prompt : "";
   const modelId = typeof input.model_id === "string" ? input.model_id : "";
   if (!prompt || !modelId) {
-    await repo.failJob(job.id, "invalid_input", "缺少 prompt 或 model_id");
+    await failClaimed("invalid_input", "缺少 prompt 或 model_id");
     return job.id;
   }
 
@@ -108,7 +120,7 @@ async function processClaimedJob(
     : [];
   const maxReferenceCount = job.type === "image" ? 4 : 1;
   if (referenceIds.length > maxReferenceCount) {
-    await repo.failJob(job.id, "unsupported_input", "当前模型仅支持一张参考图");
+    await failClaimed("unsupported_input", "当前模型仅支持一张参考图");
     return job.id;
   }
   const sourceAssets =
@@ -119,14 +131,14 @@ async function processClaimedJob(
     sourceAssets.length !== referenceIds.length ||
     sourceAssets.some((asset) => asset.type !== "image")
   ) {
-    await repo.failJob(job.id, "unsupported_input", "参考素材不存在或无权访问");
+    await failClaimed("unsupported_input", "参考素材不存在或无权访问");
     return job.id;
   }
 
   try {
     if (job.type === "video") {
       if (!videoProvider) {
-        await repo.failJob(job.id, "provider_config", "视频 provider 未配置");
+        await failClaimed("provider_config", "视频 provider 未配置");
         return job.id;
       }
       const resolution =
@@ -136,7 +148,7 @@ async function processClaimedJob(
       const dimensions = videoDimensions(resolution, ratio);
       const duration = Number(input.duration);
       if (!dimensions || !Number.isFinite(duration) || duration <= 0) {
-        await repo.failJob(job.id, "invalid_input", "视频尺寸或时长无效");
+        await failClaimed("invalid_input", "视频尺寸或时长无效");
         return job.id;
       }
       const video = await videoProvider.generate({
@@ -167,16 +179,17 @@ async function processClaimedJob(
         storage_key: storedVideo.storageKey,
         mime: storedVideo.mime,
         size: storedVideo.size,
+        ...lease,
       });
-      await finishJob(repo, job.id, [assetId]);
+      if (assetId === null) return job.id;
+      await finishJob(repo, job.id, [assetId], lease);
       return job.id;
     }
 
     // 图片：sk token 从 job 密封凭证解出（不依赖请求闭包），恢复扫描也能重放。
     const sealedCredential = job.input?.provider_credential;
     if (typeof sealedCredential !== "string" || sealedCredential.length === 0) {
-      await repo.failJob(
-        job.id,
+      await failClaimed(
         "provider_credential_missing",
         "图片任务缺少供应商凭证",
       );
@@ -189,8 +202,7 @@ async function processClaimedJob(
     const sizeId = typeof input.size === "string" ? input.size : null;
     const cap = await repo.findImageCapability(modelId, sizeId);
     if (!cap) {
-      await repo.failJob(
-        job.id,
+      await failClaimed(
         "model_unavailable",
         `未开通或不受支持的模型: ${modelId}`,
       );
@@ -208,11 +220,7 @@ async function processClaimedJob(
         aspectRatio,
       );
       if (!providerSize) {
-        await repo.failJob(
-          job.id,
-          "invalid_input",
-          "模型、分辨率与宽高比组合不受支持",
-        );
+        await failClaimed("invalid_input", "模型、分辨率与宽高比组合不受支持");
         return job.id;
       }
     }
@@ -256,7 +264,7 @@ async function processClaimedJob(
       remaining = n - images.length;
     }
     if (images.length === 0) {
-      await repo.failJob(job.id, "no_result", "生成服务未返回结果");
+      await failClaimed("no_result", "生成服务未返回结果");
       return job.id;
     }
     // IK67HE/T14：部分成功（images.length < n 但 > 0）→ 已成功的转 Asset 并 completeJob，
@@ -289,10 +297,14 @@ async function processClaimedJob(
         storage_key: storedImage.storageKey,
         mime: storedImage.mime,
         size: storedImage.size,
+        ...lease,
       });
+      // IK7GRP：createAsset 守卫失败（job 已被新 worker 接管）→ 中止后续建素材与结任务，
+      // 当前 worker 已无 lease，finishJob / failClaimed 守卫也会拒绝，直接退出。
+      if (id === null) return job.id;
       assetIds.push(id);
     }
-    await finishJob(repo, job.id, assetIds);
+    await finishJob(repo, job.id, assetIds, lease);
     return job.id;
   } catch (e) {
     const code =
@@ -321,7 +333,7 @@ async function processClaimedJob(
         return job.id;
       }
     }
-    await repo.failJob(job.id, code, msg);
+    await failClaimed(code, msg);
     return job.id;
   }
 }
@@ -404,9 +416,12 @@ async function finishJob(
   repo: WorkerRepo,
   jobId: string,
   assetIds: string[],
+  lease: { workerId: string; fencingToken: number },
 ): Promise<void> {
-  await repo.completeJob(jobId, assetIds);
-  await repo.settleReservation(jobId);
+  // IK7GRP：completeJob / settleReservation 守卫失败（stale worker）返回 false，静默跳过后续 log。
+  const completed = await repo.completeJob({ jobId, assetIds, ...lease });
+  if (!completed) return;
+  await repo.settleReservation({ jobId, ...lease });
   await repo.appendLog(
     jobId,
     "succeeded",
