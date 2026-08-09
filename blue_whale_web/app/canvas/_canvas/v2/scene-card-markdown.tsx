@@ -98,7 +98,7 @@ function AssetRefChip({ label, assetId }: { label: string; assetId: string }) {
               backgroundImage:
                 "linear-gradient(135deg, var(--tc-bg-elevated) 0%, var(--tc-bg-surface) 50%, var(--tc-bg-elevated) 100%)",
               border: "1px solid var(--tc-border-active)",
-              boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+              boxShadow: "var(--tc-dropdown-shadow)",
             }}
           >
             {src ? (

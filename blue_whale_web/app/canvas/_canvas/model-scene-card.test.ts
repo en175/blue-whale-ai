@@ -69,7 +69,7 @@ describe("scene_card 节点（spec §6.2）", () => {
     const arr = JSON.parse(serialize(doc));
     expect(arr[0]).toMatchObject({
       id: "scene-card:5",
-      type: "scene_card",
+      type: "scene-card",
       width: 400,
       height: 320,
       data: { sceneCardId: "5" },
@@ -79,6 +79,32 @@ describe("scene_card 节点（spec §6.2）", () => {
       id: "scene-card:5",
       type: "scene_card",
       data: { kind: "scene_card", sceneCardId: "5" },
+    });
+  });
+
+  it("parse/serialize 保留场景卡 zIndex", () => {
+    const doc = parse(
+      JSON.stringify([
+        {
+          id: "scene-card:8",
+          type: "scene-card",
+          position: { x: 1, y: 2 },
+          width: 400,
+          height: 360,
+          zIndex: 7,
+          data: { sceneCardId: "8" },
+        },
+      ]),
+    );
+
+    expect(doc.nodes[0]).toMatchObject({
+      type: "scene_card",
+      zIndex: 7,
+      data: { kind: "scene_card", sceneCardId: "8" },
+    });
+    expect(JSON.parse(serialize(doc))[0]).toMatchObject({
+      type: "scene-card",
+      zIndex: 7,
     });
   });
 });

@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, isApiError } from "./api/errors";
-import { apiRequest } from "./api-client";
+import { apiFetch, apiRequest } from "./api-client";
 import { acceptConversationMessage, applyPlanMessage } from "./conversation";
+import * as conversation from "./conversation";
 
-vi.mock("./api-client", () => ({ apiRequest: vi.fn() }));
+vi.mock("./api-client", () => ({ apiFetch: vi.fn(), apiRequest: vi.fn() }));
 
 describe("applyPlanMessage（IK6KQB 手动应用计划）", () => {
   // 注意：拒绝分支用 mockRejectedValueOnce + mockClear——vitest 2.1 中
@@ -57,7 +58,41 @@ describe("applyPlanMessage（IK6KQB 手动应用计划）", () => {
 });
 
 describe("Conversation 命令 API", () => {
-  beforeEach(() => vi.mocked(apiRequest).mockReset());
+  beforeEach(() => {
+    vi.mocked(apiFetch).mockReset();
+    vi.mocked(apiRequest).mockReset();
+  });
+
+  it("删除场景卡先 GET 最新 ETag，再原样用于 DELETE", async () => {
+    vi.mocked(apiFetch)
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ code: 200, data: { scene_card_id: 7 } }),
+          { status: 200, headers: { ETag: '"3"' } },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const deleteSceneCard = (
+      conversation as unknown as {
+        deleteSceneCard?: (
+          sceneCardId: number,
+          idempotencyKey: string,
+        ) => Promise<void>;
+      }
+    ).deleteSceneCard;
+
+    expect(deleteSceneCard).toBeTypeOf("function");
+    await deleteSceneCard?.(7, "delete-1");
+
+    expect(apiFetch).toHaveBeenNthCalledWith(1, "/api/scene-cards/7");
+    expect(apiFetch).toHaveBeenNthCalledWith(2, "/api/scene-cards/7", {
+      method: "DELETE",
+      headers: {
+        "If-Match": '"3"',
+        "Idempotency-Key": "delete-1",
+      },
+    });
+  });
 
   it("把稳定消息身份和 Idempotency-Key 提交到公开 Project API", async () => {
     vi.mocked(apiRequest).mockResolvedValue({

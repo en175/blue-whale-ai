@@ -523,7 +523,7 @@ describe("recoverPendingPlacements（IK67HE/T14 放置恢复幂等）", () => {
     ).toBe(false);
   });
 
-  it("把 pending 节点落位为 placed，不移动既有 placed 节点", async () => {
+  it("历史遗留 pending SceneCard 节点被落位为 placed，不移动既有 placed 节点", async () => {
     const { canvas } = makeCanvas([
       {
         id: "scene_card_1",
@@ -560,7 +560,7 @@ describe("recoverPendingPlacements（IK67HE/T14 放置恢复幂等）", () => {
     expect(node2?.status).toBe("placed");
   });
 
-  it("恢复无尺寸 pending SceneCard 时补齐兼容矩形", async () => {
+  it("恢复历史遗留无尺寸 pending SceneCard 时补齐兼容矩形", async () => {
     const { canvas } = makeCanvas([
       {
         id: "scene_card_1",
@@ -616,11 +616,12 @@ describe("placeSceneCardNode（spec §6.2 节点格式 + 幂等）", () => {
 
     expect(canvas._nodes).toContainEqual({
       id: "scene-card:5",
-      type: "scene_card",
+      type: "scene-card",
       data: { sceneCardId: "5" },
       position: { x: -424, y: -1104 },
       width: 400,
       height: 1080,
+      zIndex: 0,
     });
   });
 

@@ -9,7 +9,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthContext";
 import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
 import { toast } from "@/components/Toast";
-import { type WireInteger } from "@/lib/wire-integer";
+import { deleteSceneCard } from "@/lib/conversation";
+import { wireInteger, type WireInteger } from "@/lib/wire-integer";
 
 import { useCanvasStore } from "./_canvas/store";
 import { useCanvasDoc } from "./_canvas/v2/useCanvasDoc";
@@ -129,6 +130,7 @@ export function CanvasProjectRuntime({
     patchNode,
     resizeNode,
     patchNodeAndSave,
+    removeNodeAndSave,
     setViewport: setViewportAction,
     load: loadDoc,
   } = useCanvasDoc();
@@ -151,6 +153,22 @@ export function CanvasProjectRuntime({
       if (id === pid) router.replace("/canvas");
     },
     [deleteProjectAction, pid, router],
+  );
+  const handleDeleteSceneCard = useCallback(
+    async (nodeId: string, sceneCardId: string) => {
+      try {
+        await deleteSceneCard(wireInteger(sceneCardId), crypto.randomUUID());
+      } catch {
+        toast.error("场景卡删除失败，请重试");
+        return false;
+      }
+      const removed = await removeNodeAndSave(nodeId);
+      if (!removed) {
+        toast.error("场景卡已删除，但画布保存冲突；节点已标记为不可用");
+      }
+      return removed;
+    },
+    [removeNodeAndSave],
   );
 
   const [isAgentOpen, setIsAgentOpen] = useState(false);
@@ -546,6 +564,7 @@ export function CanvasProjectRuntime({
         onNodeAction: handleCanvasNodeAction,
         onNodeRetry: handleNodeRetry,
         onNodeRemove: handleNodeRemove,
+        onDeleteSceneCard: handleDeleteSceneCard,
         onNodeCancelJob: handleNodeCancelJob,
         onEditRichText,
         onEditDescription,

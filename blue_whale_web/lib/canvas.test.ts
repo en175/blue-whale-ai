@@ -4,7 +4,7 @@
  * 401 必须触发 notifyAuthFailure（清 token + 通知登录），与 api-client 同一出口。
  */
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { listProjects } from "./canvas";
+import { listProjects, saveCanvas } from "./canvas";
 import { subscribeToAuthFailure } from "./api-client";
 
 function stubFetch(status: number, body: unknown): Mock {
@@ -22,6 +22,26 @@ beforeEach(() => {
 });
 
 describe("canvas 请求层 401 恢复链路", () => {
+  it("条件保存携带当前 Canvas 版本", async () => {
+    const fetchMock = stubFetch(200, {
+      code: 200,
+      msg: "",
+      success: true,
+      data: {
+        id: "2",
+        project_id: "1",
+        version: 4,
+        viewport: "{}",
+        nodes: "[]",
+      },
+    });
+
+    await saveCanvas("1", "{}", "[]", 3);
+
+    const options = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(options.headers).get("If-Match")).toBe('"3"');
+  });
+
   it("401 → 抛 ApiError(code=401) + 清空 token + 触发登录回调", async () => {
     window.localStorage.setItem("bw-access-token", "sk-stale");
     stubFetch(401, {
