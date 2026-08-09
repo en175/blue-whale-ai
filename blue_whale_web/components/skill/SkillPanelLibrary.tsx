@@ -8,7 +8,7 @@ import {
   type SkillLibraryItem,
   type SkillLibraryLang,
   type SkillLibrarySort,
-} from "./api/skills";
+} from "../api/skills";
 import {
   PAGE_SIZE,
   StateHint,

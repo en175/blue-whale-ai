@@ -2,8 +2,9 @@
  * Dock Parts —— Dock 共享部件（展示层）
  * DockMediaThumb：素材缩略图（点击预览 + 删除）。供 ImageDockContent / VideoDockContent / AudioDockContent 复用。
  */
-import { useRef } from "react";
-import { Image as ImageIcon, X } from "lucide-react";
+import { useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
+import { Image as ImageIcon, X, Maximize2, Minimize2 } from "lucide-react";
 import { IconPlus } from "../../icons";
 import type { DockMediaItem } from "../../types";
 import { AuthenticatedImage } from "../AuthenticatedImage";
@@ -228,5 +229,134 @@ export function DockMediaThumb({
         </button>
       )}
     </div>
+  );
+}
+
+/** 放大/收起切换按钮（IK5OWV，方案 B）：hover 高亮 + 轻微上浮投影。 */
+export function ExpandToggleButton({
+  expanded,
+  onToggle,
+}: {
+  expanded: boolean;
+  onToggle?: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={expanded ? "收起面板" : "放大面板"}
+      onClick={onToggle}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        width: 24,
+        height: 24,
+        borderRadius: 6,
+        border: 0,
+        background: hovered ? "var(--tc-dock-control-hover-bg)" : "transparent",
+        color: hovered
+          ? "var(--tc-dock-text-strong)"
+          : "var(--tc-dock-text-faint)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        transform: hovered ? "translateY(-1px) scale(1.08)" : "none",
+        boxShadow: hovered ? "0 2px 8px rgba(0, 0, 0, 0.3)" : "none",
+        transition: "all 120ms ease",
+      }}
+    >
+      {expanded ? (
+        <Minimize2 width={13} height={13} />
+      ) : (
+        <Maximize2 width={13} height={13} />
+      )}
+    </button>
+  );
+}
+
+/**
+ * IK74V6：生成数量选择浮层（从 ImageDockContent 下沉）。
+ * fixed 定位 portal 到 body；候选数量受能力表 quantity_max 约束。
+ */
+export function QuantityMenu({
+  menuRef,
+  pos,
+  quantityMax,
+  quantities,
+  selected,
+  onSelect,
+}: {
+  menuRef: RefObject<HTMLDivElement | null>;
+  pos: { left: number; bottom: number };
+  quantityMax: number;
+  quantities: string[];
+  selected: string;
+  onSelect: (q: string) => void;
+}) {
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      ref={menuRef}
+      data-tc-dock-popover=""
+      role="listbox"
+      aria-label="选择生成数量"
+      style={{
+        position: "fixed",
+        left: pos.left,
+        bottom: pos.bottom,
+        width: "max-content",
+        minWidth: 120,
+        padding: "4px 8px",
+        borderRadius: 8,
+        background: "rgb(30, 30, 30)",
+        border: "1px solid rgba(255, 255, 255, 0.04)",
+        boxShadow: "rgba(0, 0, 0, 0.25) 0px 4px 16px",
+        zIndex: 2147483602,
+        display: "flex",
+        flexDirection: "column",
+        gap: 0,
+        boxSizing: "border-box",
+        opacity: 1,
+        transform: "scale(1) translateY(0px)",
+        transformOrigin: "left bottom",
+        transition: "opacity 250ms cubic-bezier(0.16, 1, 0.3, 1), transform 250ms cubic-bezier(0.16, 1, 0.3, 1)",
+      }}
+    >
+      {quantities.filter((q) => parseInt(q, 10) <= quantityMax).map((q) => {
+        const isSel = q === selected;
+        return (
+          <button
+            key={q}
+            type="button"
+            role="option"
+            aria-selected={isSel}
+            onClick={() => onSelect(q)}
+            style={{
+              width: "100%",
+              padding: "7px 10px",
+              border: 0,
+              borderRadius: 6,
+              background: isSel ? "rgba(255, 255, 255, 0.08)" : "transparent",
+              color: isSel ? "rgba(255, 255, 255, 0.85)" : "rgba(255, 255, 255, 0.45)",
+              fontSize: 12,
+              lineHeight: "16px",
+              fontWeight: isSel ? 500 : 400,
+              cursor: "pointer",
+              textAlign: "left",
+              whiteSpace: "nowrap",
+              transition: "background 80ms",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            {q}
+          </button>
+        );
+      })}
+    </div>,
+    document.body,
   );
 }

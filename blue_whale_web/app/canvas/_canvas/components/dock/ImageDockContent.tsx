@@ -4,12 +4,9 @@
  * 通过 createPortal 渲染模型设置浮层，提交经 onInput 回调上抛。
  */
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
   ChevronUp,
   Image as ImageIcon,
-  Maximize2,
-  Minimize2,
   Plus,
   Settings2,
 } from "lucide-react";
@@ -25,53 +22,13 @@ import {
 import { CreditIcon } from "../../icons";
 import { toast } from "@/components/Toast";
 import { DEFAULT_MAX_REFERENCE_IMAGES, QUANTITIES } from "../../constants";
-import type { ImageDockContentProps } from "../../types";
-import { DockMediaThumb } from "./parts";
+import type {
+  ImageDockContentProps,
+  ImageSizeOption,
+  DockPopoverPosition,
+} from "../../types";
+import { DockMediaThumb, ExpandToggleButton, QuantityMenu } from "./parts";
 import { UploadSourceMenu } from "./UploadSourceMenu";
-
-/** 放大/收起切换按钮（IK5OWV，方案 B）：hover 高亮 + 轻微上浮投影。 */
-function ExpandToggleButton({
-  expanded,
-  onToggle,
-}: {
-  expanded: boolean;
-  onToggle?: () => void;
-}) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <button
-      type="button"
-      aria-label={expanded ? "收起面板" : "放大面板"}
-      onClick={onToggle}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        width: 24,
-        height: 24,
-        borderRadius: 6,
-        border: 0,
-        background: hovered ? "var(--tc-dock-control-hover-bg)" : "transparent",
-        color: hovered
-          ? "var(--tc-dock-text-strong)"
-          : "var(--tc-dock-text-faint)",
-        cursor: "pointer",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        transform: hovered ? "translateY(-1px) scale(1.08)" : "none",
-        boxShadow: hovered ? "0 2px 8px rgba(0, 0, 0, 0.3)" : "none",
-        transition: "all 120ms ease",
-      }}
-    >
-      {expanded ? (
-        <Minimize2 width={13} height={13} />
-      ) : (
-        <Maximize2 width={13} height={13} />
-      )}
-    </button>
-  );
-}
 
 export function ImageDockContent({
   editorRef,
@@ -96,10 +53,8 @@ export function ImageDockContent({
   const [models, setModels] = useState<ImageModelCapability[]>([]);
   const [selectedModel, setSelectedModel] =
     useState<ImageModelCapability | null>(null);
-  const [selectedSize, setSelectedSize] = useState<{
-    id: string;
-    label: string;
-  } | null>(null);
+  const [selectedSize, setSelectedSize] =
+    useState<ImageSizeOption | null>(null);
   const [selectedAspectRatio, setSelectedAspectRatio] =
     useState<ImageAspectRatio>(IMAGE_ASPECT_RATIOS[2]);
   const [webSearch, setWebSearch] = useState(false);
@@ -203,10 +158,8 @@ export function ImageDockContent({
   const quantityMenuRef = useRef<HTMLDivElement>(null);
   const [quantityOpen, setQuantityOpen] = useState(false);
   const [quantity, setQuantity] = useState("1x");
-  const [quantityPos, setQuantityPos] = useState<{
-    left: number;
-    bottom: number;
-  }>({ left: 0, bottom: 0 });
+  const [quantityPos, setQuantityPos] =
+    useState<DockPopoverPosition>({ left: 0, bottom: 0 }); // 浮层定位
 
   useEffect(() => {
     if (quantityOpen && quantityRef.current) {
@@ -673,83 +626,19 @@ export function ImageDockContent({
           </span>
         </button>
 
-        {quantityOpen &&
-          typeof document !== "undefined" &&
-          createPortal(
-            <div
-              ref={quantityMenuRef}
-              data-tc-dock-popover=""
-              role="listbox"
-              aria-label="选择生成数量"
-              style={{
-                position: "fixed",
-                left: quantityPos.left,
-                bottom: quantityPos.bottom,
-                width: "max-content",
-                minWidth: 120,
-                padding: "4px 8px",
-                borderRadius: 8,
-                background: "rgb(30, 30, 30)",
-                border: "1px solid rgba(255, 255, 255, 0.04)",
-                boxShadow: "rgba(0, 0, 0, 0.25) 0px 4px 16px",
-                zIndex: 2147483602,
-                display: "flex",
-                flexDirection: "column",
-                gap: 0,
-                boxSizing: "border-box",
-                opacity: 1,
-                transform: "scale(1) translateY(0px)",
-                transformOrigin: "left bottom",
-                transition:
-                  "opacity 250ms cubic-bezier(0.16, 1, 0.3, 1), transform 250ms cubic-bezier(0.16, 1, 0.3, 1)",
-              }}
-            >
-              {QUANTITIES.filter(
-                (q) =>
-                  parseInt(q, 10) <=
-                  (selectedModel?.features.quantity_max ?? 1),
-              ).map((q) => {
-                const selected = quantity === q;
-                return (
-                  <button
-                    key={q}
-                    type="button"
-                    role="option"
-                    aria-selected={selected}
-                    onClick={() => {
-                      setQuantity(q);
-                      setQuantityOpen(false);
-                    }}
-                    style={{
-                      width: "100%",
-                      padding: "7px 10px",
-                      border: 0,
-                      borderRadius: 6,
-                      background: selected
-                        ? "rgba(255, 255, 255, 0.08)"
-                        : "transparent",
-                      color: selected
-                        ? "rgba(255, 255, 255, 0.85)"
-                        : "rgba(255, 255, 255, 0.45)",
-                      fontSize: 12,
-                      lineHeight: "16px",
-                      fontWeight: selected ? 500 : 400,
-                      cursor: "pointer",
-                      textAlign: "left",
-                      whiteSpace: "nowrap",
-                      transition: "background 80ms",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    {q}
-                  </button>
-                );
-              })}
-            </div>,
-            document.body,
-          )}
+        {quantityOpen && (
+          <QuantityMenu
+            menuRef={quantityMenuRef}
+            pos={quantityPos}
+            quantityMax={selectedModel?.features.quantity_max ?? 1}
+            quantities={QUANTITIES}
+            selected={quantity}
+            onSelect={(q) => {
+              setQuantity(q);
+              setQuantityOpen(false);
+            }}
+          />
+        )}
 
         <div style={{ display: "flex", alignItems: "center" }}>
           <div style={{ position: "relative", display: "inline-flex" }}>

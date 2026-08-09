@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
-import { skillsApi, type SkillMineItem } from "./api/skills";
+import { skillsApi, type SkillMineItem } from "../api/skills";
 
 /** 个人技能只读视图（IK60WZ，契约 §13.1）：拉取重建的完整 SKILL.md 原文展示，
  *  可复制 Markdown 到剪贴板；不可编辑、不提供下载。非 owner 端点返回 100100 → 错误态。 */
