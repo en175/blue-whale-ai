@@ -1,12 +1,12 @@
-import { planCardCandidateSchema } from "@blue-whale/contracts";
+import { planCardCandidateBatchSchema } from "@blue-whale/contracts";
 import { z } from "zod";
 
 /** write_plan_cards 入参：候选计划卡片。每卡 application_kind 必填，形状由 contracts
- *  planCardCandidateSchema 强制（scene_card_replace 必带 target 句柄）。
+ *  planCardCandidateBatchSchema 强制（replace 必带 target 且独占批次）。
  *  工具只校验候选，**不创建 PlanMessage**——正式接纳由 RunCommit completed_with_plan
  *  原子完成（契约 §9：工具只校验、RunCommit 接纳）。 */
 export const writePlanCardsToolInputSchema = z
-  .object({ cards: z.array(planCardCandidateSchema).min(1).max(20) })
+  .object({ cards: planCardCandidateBatchSchema.max(20) })
   .strict();
 
 export type WritePlanCardsToolInput = z.infer<

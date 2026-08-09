@@ -136,6 +136,11 @@ services:
       PORT: "4001"
       MACHINE_ID: "2"
       AGENT_RUNTIME_MODE: fake
+      # IK7EU4 真实 Agent canary（opt-in）：翻为 real 并注入网关密钥后，
+      # agent-worker 与 web 需同值重启（RunPin model_profile 与适配器同源选择）。
+      # AGENT_RUNTIME_MODE: real
+      NEW_API_BASE_URL: http://new-api:3000
+      NEW_API_ROOT_ACCESS_TOKEN: ${NEW_API_ROOT_ACCESS_TOKEN:-}
       AGENT_LEASE_MS: "8000"
       DATABASE_URL: mysql://root:blue_whale@mysql:3306/blue_whale
     ports:
@@ -201,6 +206,8 @@ services:
       MACHINE_ID: "1"
       DATABASE_URL: mysql://root:blue_whale@mysql:3306/blue_whale
       NEW_API_BASE_URL: http://new-api:3000
+      # IK7EU4：真实 Agent canary 时与 agent-worker 同步设置 AGENT_RUNTIME_MODE: real
+      # （BFF 建 RunPin 的 model_profile 与 worker 适配器按同一 env 选择）。
       IMAGE_RECOVERY_INTERVAL_MS: "5000"
       IMAGE_JOB_LEASE_SECONDS: "15"
       REDIS_HOST: redis
