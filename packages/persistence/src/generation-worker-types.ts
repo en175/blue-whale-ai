@@ -9,6 +9,8 @@ export interface ClaimedJob {
   expected_output_count: number;
   /** 已重试次数（瞬时失败回 queued 时自增）；恢复/重试据此决定是否再放行。 */
   retry_count: number;
+  /** 本次领取发放的围栏令牌（IK7GRO）。领取/重放/重排时递增；写路径守卫据此拒绝迟到写入。 */
+  fencingToken: number;
 }
 
 export interface ImageCapabilitySnapshot {

@@ -24,18 +24,21 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
 
       const now = new Date();
       const lease = new Date(now.getTime() + LEASE_SECONDS * 1000);
+      // IK7GRO：CAS 条件含当前 fencing_token，领取成功时递增并发给 worker（与视频 claim 同构）。
       const claimed = await prisma.generation_jobs
         .updateMany({
           where: {
             id: candidate.id,
             user_id: BigInt(userId),
             status: "queued",
+            fencing_token: candidate.fencing_token,
           },
           data: {
             status: "processing",
             lease_owner: workerId,
             lease_expires_at: lease,
             last_polled_at: now,
+            fencing_token: { increment: 1 },
             version: { increment: 1 },
           },
         })
@@ -49,6 +52,7 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
         input: (candidate.input as Record<string, unknown> | null) ?? null,
         expected_output_count: candidate.expected_output_count ?? 1,
         retry_count: candidate.retry_count ?? 0,
+        fencingToken: Number(candidate.fencing_token + 1n),
       };
     },
 
@@ -66,15 +70,16 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
       if (!candidate) return null;
       const now = new Date();
       const lease = new Date(now.getTime() + LEASE_SECONDS * 1000);
-      // 乐观锁：仅当仍是 queued 才认领（version 自增），并发 worker 安全。
+      // IK7GRO：乐观锁加入 fencing_token 约束，领取时递增并发给 worker（与视频 claim 同构）。
       const claimed = await prisma.generation_jobs
         .updateMany({
-          where: { id: candidate.id, status: "queued" },
+          where: { id: candidate.id, status: "queued", fencing_token: candidate.fencing_token },
           data: {
             status: "processing",
             lease_owner: workerId,
             lease_expires_at: lease,
             last_polled_at: now,
+            fencing_token: { increment: 1 },
             version: { increment: 1 },
           },
         })
@@ -88,6 +93,7 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
         input: (candidate.input as Record<string, unknown> | null) ?? null,
         expected_output_count: candidate.expected_output_count ?? 1,
         retry_count: candidate.retry_count ?? 0,
+        fencingToken: Number(candidate.fencing_token + 1n),
       };
     },
 
@@ -178,6 +184,7 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
 
     async resetStalledImageJobs() {
       const now = new Date();
+      // IK7GRO：过期重放时递增 fencing_token，使上一次领取发放的旧 token 立即失效。
       const result = await prisma.generation_jobs
         .updateMany({
           where: {
@@ -191,6 +198,7 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
             lease_owner: null,
             lease_expires_at: null,
             next_action_at: now,
+            fencing_token: { increment: 1 },
             version: { increment: 1 },
           },
         })
@@ -213,14 +221,16 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
       if (!candidate) return null;
       const now = new Date();
       const lease = new Date(now.getTime() + LEASE_SECONDS * 1000);
+      // IK7GRO：CAS 条件含当前 fencing_token，领取成功时递增并发给 worker（与视频 claim 同构）。
       const claimed = await prisma.generation_jobs
         .updateMany({
-          where: { id: candidate.id, status: "queued" },
+          where: { id: candidate.id, status: "queued", fencing_token: candidate.fencing_token },
           data: {
             status: "processing",
             lease_owner: workerId,
             lease_expires_at: lease,
             last_polled_at: now,
+            fencing_token: { increment: 1 },
             version: { increment: 1 },
           },
         })
@@ -234,11 +244,13 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
         input: (candidate.input as Record<string, unknown> | null) ?? null,
         expected_output_count: candidate.expected_output_count ?? 1,
         retry_count: candidate.retry_count ?? 0,
+        fencingToken: Number(candidate.fencing_token + 1n),
       };
     },
 
     async requeueImageJobForRetry(jobId, nextActionAt) {
       // 瞬时失败重试：仅当前 processing 态可回退到 queued，避免覆盖终态/他人态。
+      // IK7GRO：重排时递增 fencing_token，使上一次领取发放的旧 token 立即失效。
       const result = await prisma.generation_jobs
         .updateMany({
           where: { id: BigInt(jobId), status: "processing" },
@@ -248,6 +260,7 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
             lease_expires_at: null,
             next_action_at: nextActionAt,
             retry_count: { increment: 1 },
+            fencing_token: { increment: 1 },
             version: { increment: 1 },
           },
         })
