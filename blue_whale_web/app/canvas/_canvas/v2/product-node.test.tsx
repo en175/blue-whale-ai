@@ -60,6 +60,7 @@ type RenderOpts = {
   onUploadReferenceImage?: (id: string) => void;
   onRemoveProductImage?: (id: string, assetId: string) => void;
   onImportProductLink?: (id: string, url: string) => void;
+  onAction?: (id: string, actionId: string) => void;
 };
 
 function renderProductNode(opts: RenderOpts) {
@@ -85,6 +86,7 @@ function renderProductNode(opts: RenderOpts) {
         onUploadReferenceImage: opts.onUploadReferenceImage,
         onRemoveProductImage: opts.onRemoveProductImage,
         onImportProductLink: opts.onImportProductLink,
+        onAction: opts.onAction,
       }}
     >
       <ReferenceNode {...props} />
@@ -150,19 +152,21 @@ describe("ReferenceNode 商品卡空态(原型截图一)", () => {
 describe("ReferenceNode 商品卡 chrome(原型定稿:选中或悬停浮出)", () => {
   const getChrome = () => screen.getByTestId("product-chrome");
 
-  it("未选中未悬停:chrome 层不可见(opacity 0);选中 → 浮出「商品」标签 + 「@ 添加到对话」胶囊", () => {
+  it("未选中未悬停:chrome 层不可见(opacity 0);选中 → 浮出「商品」标签 + 「@ 添加到对话」胶囊(点击走引用管道)", () => {
     const { unmount } = renderProductNode({ name: "商品 1" });
     expect(getChrome().style.opacity).toBe("0");
     unmount();
-    renderProductNode({ name: "商品 1", selected: true });
+    const onAction = vi.fn();
+    renderProductNode({ name: "商品 1", selected: true, onAction });
     expect(getChrome().style.opacity).toBe("1");
     // 左上「商品」标签(Package 图标 + 文字)
     expect(within(getChrome()).getByText("商品")).toBeInTheDocument();
-    // 居中深色胶囊「@ 添加到对话」(@ 仅预留,点击无行为)
+    // 居中深色胶囊「@ 添加到对话」:点击触发引用管道 onAction(id,"mention")(等价右键「添加到聊天」)
     const pill = within(getChrome()).getByRole("button", {
       name: /添加到对话/,
     });
-    fireEvent.click(pill); // 能点、不炸即契约
+    fireEvent.click(pill);
+    expect(onAction).toHaveBeenCalledWith("p1", "mention");
   });
 
   it("悬停卡面 → chrome 浮出;移出 → 收回", () => {
