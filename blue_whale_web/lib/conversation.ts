@@ -1,4 +1,4 @@
-import { apiRequest } from "./api-client";
+import { apiFetch, apiRequest } from "./api-client";
 import type {
   PlanApplyImageReceipt,
   ProviderPromptAsset,
@@ -164,6 +164,29 @@ export function generateSceneCard(
       body: JSON.stringify(body),
     },
   );
+}
+
+/** 删除 SceneCard：必须先读取服务端 ETag，再把该值原样用于条件删除。 */
+export async function deleteSceneCard(
+  sceneCardId: WireInteger,
+  idempotencyKey: string,
+): Promise<void> {
+  const path = `/api/scene-cards/${sceneCardId}`;
+  const current = await apiFetch(path);
+  if (!current.ok) throw new Error(`读取场景卡失败: ${current.status}`);
+  const etag = current.headers.get("ETag");
+  if (!etag) throw new Error("场景卡响应缺少 ETag");
+
+  const deleted = await apiFetch(path, {
+    method: "DELETE",
+    headers: {
+      "If-Match": etag,
+      "Idempotency-Key": idempotencyKey,
+    },
+  });
+  if (deleted.status !== 204) {
+    throw new Error(`删除场景卡失败: ${deleted.status}`);
+  }
 }
 
 export type StoryboardPreviewResult = {

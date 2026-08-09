@@ -36,7 +36,40 @@ function mergeById<T extends { id: string }>(loaded: T[], local: T[]): T[] {
   return [...loaded.filter((item) => !localIds.has(item.id)), ...local];
 }
 
-export type SaveState = "idle" | "saving" | "saved";
+function markDuplicateSceneCards(nodes: CanvasNode[]): CanvasNode[] {
+  const seenNodeIds = new Set<string>();
+  const seenSceneCardIds = new Set<string>();
+  return nodes.flatMap((node, index) => {
+    const sceneCardId = node.data.sceneCardId;
+    const isSceneCard = node.data.kind === "scene_card" && Boolean(sceneCardId);
+    const duplicateNodeId = seenNodeIds.has(node.id);
+    if (!isSceneCard) {
+      if (duplicateNodeId) return [];
+      seenNodeIds.add(node.id);
+      return [node];
+    }
+    const duplicateSceneCard = seenSceneCardIds.has(sceneCardId!);
+    seenSceneCardIds.add(sceneCardId!);
+    if (!duplicateNodeId && !duplicateSceneCard) {
+      seenNodeIds.add(node.id);
+      return [node];
+    }
+    let recoveredId = `${node.id}:duplicate:${index}`;
+    while (seenNodeIds.has(recoveredId)) recoveredId += ":duplicate";
+    seenNodeIds.add(recoveredId);
+    return [
+      {
+        ...node,
+        id: recoveredId,
+        data: duplicateSceneCard
+          ? { ...node.data, unavailableReason: "duplicate" }
+          : node.data,
+      },
+    ];
+  });
+}
+
+export type SaveState = "idle" | "saving" | "saved" | "error";
 export type CanvasLoadState = "loading" | "ready" | "error";
 
 export type CanvasDocApi = {
@@ -57,6 +90,7 @@ export type CanvasDocApi = {
   ): void;
   resizeNode(id: string, width: number, height: number): void;
   patchNodeAndSave(id: string, patch: Partial<CanvasNodeData>): Promise<void>;
+  removeNodeAndSave(id: string): Promise<boolean>;
   setNodes(nodes: CanvasNode[]): void;
   setViewport(vp: Viewport): void;
   load(
@@ -75,6 +109,7 @@ export function useCanvasDoc(): CanvasDocApi {
   const nodesRef = useRef<CanvasNode[]>(nodes);
   const edgesRef = useRef<CanvasEdge[]>(edges);
   const vpRef = useRef<Viewport>(viewport);
+  const versionRef = useRef<number | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadGenerationRef = useRef(0);
   const hydratingGenerationRef = useRef<number | null>(null);
@@ -108,7 +143,7 @@ export function useCanvasDoc(): CanvasDocApi {
       nodes: CanvasNode[];
       edges: CanvasEdge[];
       viewport: Viewport;
-    }) => {
+    }): Promise<boolean> => {
       if (
         projectIdRef.current === snapshot.projectId &&
         loadGenerationRef.current === snapshot.generation
@@ -122,47 +157,56 @@ export function useCanvasDoc(): CanvasDocApi {
         version: 1,
       };
       try {
-        await saveCanvas(
+        const saved = await saveCanvas(
           wireInteger(snapshot.projectId),
           JSON.stringify(snapshot.viewport),
           serialize(doc),
+          versionRef.current,
         );
         if (
           projectIdRef.current === snapshot.projectId &&
           loadGenerationRef.current === snapshot.generation
         ) {
+          if (saved?.version !== undefined) {
+            versionRef.current = saved.version;
+          }
           setSaveState("saved");
         }
+        return true;
       } catch {
         if (
           projectIdRef.current === snapshot.projectId &&
           loadGenerationRef.current === snapshot.generation
         ) {
-          setSaveState("idle");
+          setSaveState("error");
         }
+        return false;
       }
     },
     [],
   );
 
   const saveNow = useCallback(
-    async (nextNodes: CanvasNode[] = nodesRef.current) => {
+    async (
+      nextNodes: CanvasNode[] = nodesRef.current,
+      nextEdges: CanvasEdge[] = edgesRef.current,
+    ): Promise<boolean> => {
       const projectId = projectIdRef.current;
-      if (!projectId) return;
+      if (!projectId) return false;
       const generation = loadGenerationRef.current;
       if (hydratingGenerationRef.current === generation) {
         pendingPersistRef.current = true;
         pendingImmediateSaveRef.current = true;
-        return;
+        return false;
       }
       setSaveState("saving");
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = null;
-      await saveSnapshot({
+      return saveSnapshot({
         projectId,
         generation,
         nodes: nextNodes,
-        edges: edgesRef.current,
+        edges: nextEdges,
         viewport: vpRef.current,
       });
     },
@@ -200,12 +244,38 @@ export function useCanvasDoc(): CanvasDocApi {
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
       setNodes((prev) => {
-        const next = applyNodeChanges(
+        const changedSceneCardSizes = new Map(
+          changes.flatMap((change) =>
+            change.type === "dimensions" && change.dimensions
+              ? [[change.id, change.dimensions] as const]
+              : [],
+          ),
+        );
+        const applied = applyNodeChanges(
           changes,
           prev as unknown as never[],
         ) as unknown as CanvasNode[];
+        let sceneCardSizeChanged = false;
+        const next = applied.map((node) => {
+          const dimensions = changedSceneCardSizes.get(node.id);
+          if (!dimensions || node.data.kind !== "scene_card") return node;
+          if (
+            node.width === dimensions.width &&
+            node.height === dimensions.height
+          )
+            return node;
+          sceneCardSizeChanged = true;
+          return {
+            ...node,
+            width: dimensions.width,
+            height: dimensions.height,
+          };
+        });
         nodesRef.current = next;
-        if (changes.some((c) => c.type === "position" || c.type === "remove"))
+        if (
+          sceneCardSizeChanged ||
+          changes.some((c) => c.type === "position" || c.type === "remove")
+        )
           persist();
         return next;
       });
@@ -312,6 +382,37 @@ export function useCanvasDoc(): CanvasDocApi {
     [saveNow],
   );
 
+  const removeNodeAndSave = useCallback(
+    async (id: string) => {
+      const currentNodes = nodesRef.current;
+      if (!currentNodes.some((node) => node.id === id)) return true;
+      const nextNodes = currentNodes.filter((node) => node.id !== id);
+      const nextEdges = edgesRef.current.filter(
+        (edge) => edge.source !== id && edge.target !== id,
+      );
+      const saved = await saveNow(nextNodes, nextEdges);
+      if (!saved) {
+        const unavailableNodes = currentNodes.map((node) =>
+          node.id === id
+            ? {
+                ...node,
+                data: { ...node.data, unavailableReason: "deleted" },
+              }
+            : node,
+        );
+        nodesRef.current = unavailableNodes;
+        setNodes(unavailableNodes);
+        return false;
+      }
+      nodesRef.current = nextNodes;
+      edgesRef.current = nextEdges;
+      setNodes(nextNodes);
+      setEdges(nextEdges);
+      return true;
+    },
+    [saveNow],
+  );
+
   const setNodesOverride = useCallback(
     (next: CanvasNode[]) => {
       nodesRef.current = next;
@@ -340,6 +441,7 @@ export function useCanvasDoc(): CanvasDocApi {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = null;
       projectIdRef.current = projectId;
+      versionRef.current = null;
       nodesRef.current = [];
       edgesRef.current = [];
       vpRef.current = DEFAULT_VP;
@@ -362,10 +464,7 @@ export function useCanvasDoc(): CanvasDocApi {
           };
         }
         const doc = parse(dto.nodes);
-        // 去重：防 persist 脏数据同 id 重复（历史 recover 未去重遗留）致 RF id 冲突/toolbar 错乱
-        const loadedNodes = doc.nodes.filter(
-          (n, i, arr) => arr.findIndex((x) => x.id === n.id) === i,
-        );
+        const loadedNodes = markDuplicateSceneCards(doc.nodes);
         const nodes = mergeById(loadedNodes, nodesRef.current);
         const edges = mergeById(doc.edges, edgesRef.current);
         const vp: Viewport = dto.viewport
@@ -374,6 +473,7 @@ export function useCanvasDoc(): CanvasDocApi {
         nodesRef.current = nodes;
         edgesRef.current = edges;
         vpRef.current = vp;
+        versionRef.current = dto.version ?? null;
         const shouldPersist = pendingPersistRef.current;
         const shouldSaveImmediately = pendingImmediateSaveRef.current;
         hydratingGenerationRef.current = null;
@@ -418,6 +518,7 @@ export function useCanvasDoc(): CanvasDocApi {
     patchNode,
     resizeNode,
     patchNodeAndSave,
+    removeNodeAndSave,
     setNodes: setNodesOverride,
     setViewport: setViewportOverride,
     load,

@@ -10,13 +10,17 @@ import {
 } from "@blue-whale/core/placement";
 import type { CanvasRepo, CanvasView } from "@blue-whale/persistence";
 
-/** IK67H9 / T11 第二阶段：把 SceneCardNode 放进 Canvas（CONTEXT L71-77 / AC#5）。
- *  幂等：同一 Canvas 同一 SceneCard 最多一个节点（节点身份由 SceneCard 身份确定性生成）。
- *  锚点近似：viewport_json 只存 {x,y,zoom}、无屏幕尺寸，以屏幕原点反投近似
- *  「视口中心附近」落点（精确中心需携带视口尺寸，交 T14）；失败不回滚第一阶段、不重试（交 T14）。
+/** IK67H9 / T11：把 SceneCardNode 放进 Canvas（CONTEXT L71-77 / AC#5）。
  *
- *  IK67HE/T14：新增 recoverPendingPlacements —— 放置作为可重试的第二阶段幂等恢复（spec §4.5）。
- *  读取最新布局，只补 status=pending 的节点落位，不移动已 placed 节点；连续冲突保持 pending。 */
+ *  placeSceneCardNode：单阶段 CAS 落位。读取最新布局 → 幂等检查（已存在同 sceneCardId
+ *  的节点则直接返回）→ findPlacement 找空位 → saveIfVersion 写最终节点（无 status）；
+ *  CAS 冲突最多重试 3 次（重读布局后重算），3 次仍失败则静默返回（节点未写入，无 pending 残留）。
+ *  幂等：同一 Canvas 同一 SceneCard 最多一个节点（节点身份由 SceneCard 身份确定性生成）。
+ *  锚点近似：viewport_json 只存 {x,y,zoom}、无屏幕尺寸，以屏幕原点反投近似「视口中心附近」落点。
+ *
+ *  recoverPendingPlacements：幂等恢复（spec §4.5）。其中 scene_card pending 分支仅兜底
+ *  历史遗留数据（旧两阶段实现写入的 pending 节点）；当前 placeSceneCardNode 已不再产生
+ *  pending。输出槽（generation-output/storyboard-frame）恢复仍是活跃路径。 */
 
 interface CanvasNodeLike {
   id?: string;
@@ -80,7 +84,7 @@ function canvasNodeDimensions(node: CanvasNodeLike): {
   width: number;
   height: number;
 } {
-  if (node.type === "scene_card") {
+  if (node.type === "scene_card" || node.type === "scene-card") {
     return {
       width: node.width ?? SCENE_CARD_WIDTH,
       height: node.height ?? SCENE_CARD_FALLBACK_HEIGHT,
@@ -136,46 +140,46 @@ export async function placeSceneCardNode(
   projectId: string,
   sceneCardId: string,
 ): Promise<void> {
-  const view = await canvas.getByProject(projectId);
-  const nodes: CanvasNodeLike[] = view.nodes
-    ? (JSON.parse(view.nodes) as CanvasNodeLike[])
-    : [];
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const view = await canvas.getByProject(projectId);
+    const nodes: CanvasNodeLike[] = view.nodes
+      ? (JSON.parse(view.nodes) as CanvasNodeLike[])
+      : [];
+    const exists = nodes.some(
+      (node) =>
+        (node.type === "scene_card" || node.type === "scene-card") &&
+        sceneCardIdOf(node) === sceneCardId,
+    );
+    if (exists) return;
 
-  // 幂等：同一 SceneCard 已有节点即视为成功（CONTEXT L66）。
-  // 兼容新旧两种节点格式：旧=平铺 scene_card_id（id scene_card_<id>）；
-  // 新=spec §6.2 data.sceneCardId（id scene-card:<id>）。
-  const exists = nodes.some(
-    (node) => node.type === "scene_card" && sceneCardIdOf(node) === sceneCardId,
-  );
-  if (exists) return;
-
-  const existing: Rect[] = nodes.map((node) => ({
-    x: node.position?.x ?? 0,
-    y: node.position?.y ?? 0,
-    ...canvasNodeDimensions(node),
-  }));
-  const position = findPlacement({
-    existing,
-    anchor: viewportAnchor(view.viewport),
-    nodeWidth: SCENE_CARD_WIDTH,
-    nodeHeight: SCENE_CARD_FALLBACK_HEIGHT,
-  });
-
-  // spec §6.2：确定性 id `scene-card:<id>` + data.sceneCardId，不写字段级 status。
-  const nextNode: CanvasNodeLike = {
-    id: `scene-card:${sceneCardId}`,
-    type: "scene_card",
-    data: { sceneCardId },
-    position,
-    width: SCENE_CARD_WIDTH,
-    height: SCENE_CARD_FALLBACK_HEIGHT,
-  };
-
-  await canvas.save(
-    projectId,
-    view.viewport,
-    JSON.stringify([...nodes, nextNode]),
-  );
+    const existing: Rect[] = nodes.map((node) => ({
+      x: node.position?.x ?? 0,
+      y: node.position?.y ?? 0,
+      ...canvasNodeDimensions(node),
+    }));
+    const position = findPlacement({
+      existing,
+      anchor: viewportAnchor(view.viewport),
+      nodeWidth: SCENE_CARD_WIDTH,
+      nodeHeight: SCENE_CARD_FALLBACK_HEIGHT,
+    });
+    const nextNode: CanvasNodeLike = {
+      id: `scene-card:${sceneCardId}`,
+      type: "scene-card",
+      data: { sceneCardId },
+      position,
+      width: SCENE_CARD_WIDTH,
+      height: SCENE_CARD_FALLBACK_HEIGHT,
+      zIndex: 0,
+    };
+    const saved = await canvas.saveIfVersion(
+      projectId,
+      view.version,
+      view.viewport,
+      JSON.stringify([...nodes, nextNode]),
+    );
+    if (saved) return;
+  }
 }
 
 /** 幂等恢复放置（spec §4.5「Canvas 冲突时重新读取最新布局，只加入缺失的确定性节点」）：
@@ -209,6 +213,7 @@ export async function recoverPendingPlacements(
     let changed = false;
 
     for (const node of nodes) {
+      // 仅兜底历史遗留 pending 节点；当前 placeSceneCardNode 单阶段 CAS 不再产生 pending。
       if (node.type !== "scene_card" || node.status !== "pending") continue;
       const { width: nodeWidth, height: nodeHeight } =
         canvasNodeDimensions(node);

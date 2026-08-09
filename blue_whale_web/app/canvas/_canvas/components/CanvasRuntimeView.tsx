@@ -355,8 +355,20 @@ export function CanvasRuntimeView({
           返回首页
         </Link>
         {scene.backendReady && scene.saveState !== "idle" && (
-          <span className="text-xs" style={{ color: "var(--tc-text-muted)" }}>
-            {scene.saveState === "saving" ? "保存中…" : "已保存"}
+          <span
+            className="text-xs"
+            style={{
+              color:
+                scene.saveState === "error"
+                  ? "var(--tc-destructive)"
+                  : "var(--tc-text-muted)",
+            }}
+          >
+            {scene.saveState === "saving"
+              ? "保存中…"
+              : scene.saveState === "error"
+                ? "保存失败，请重试"
+                : "已保存"}
           </span>
         )}
       </div>

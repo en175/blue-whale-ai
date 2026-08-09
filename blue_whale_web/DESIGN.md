@@ -135,6 +135,10 @@ components:
     backgroundColor: "{colors.agent-card-bg}"
     textColor: "{colors.agent-card-text}"
     rounded: "{rounded.xl}"
+  scene-card:
+    backgroundColor: "{colors.bg-surface}"
+    textColor: "{colors.primary}"
+    rounded: "{rounded.xl}"
   button-primary:
     backgroundColor: "{colors.accent}"
     textColor: "{colors.on-accent}"

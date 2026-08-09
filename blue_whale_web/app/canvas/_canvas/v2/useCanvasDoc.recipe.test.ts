@@ -67,6 +67,251 @@ const runningVideoNode: CanvasNode = {
 beforeEach(() => vi.clearAllMocks());
 
 describe("useCanvasDoc 视频 recipe 生命周期", () => {
+  it("删除场景卡时立即条件保存节点和关联边", async () => {
+    vi.mocked(loadCanvas).mockResolvedValueOnce({
+      ...emptyCanvasDto,
+      id: "9",
+      version: 3,
+      nodes: JSON.stringify({
+        version: 1,
+        nodes: [
+          {
+            id: "scene-card:7",
+            type: "scene-card",
+            position: { x: 0, y: 0 },
+            data: { sceneCardId: "7" },
+          },
+          {
+            id: "text-1",
+            type: "text",
+            position: { x: 500, y: 0 },
+            data: { kind: "text", content: "说明" },
+          },
+        ],
+        edges: [
+          {
+            id: "edge-1",
+            source: "scene-card:7",
+            target: "text-1",
+          },
+        ],
+      }),
+    });
+    vi.mocked(saveCanvas).mockResolvedValueOnce({
+      ...emptyCanvasDto,
+      id: "9",
+      version: 4,
+    });
+    const { result } = renderHook(() => useCanvasDoc());
+    await act(async () => {
+      await result.current.load("1");
+    });
+    const removeNodeAndSave = (
+      result.current as unknown as {
+        removeNodeAndSave?: (id: string) => Promise<boolean>;
+      }
+    ).removeNodeAndSave;
+
+    expect(removeNodeAndSave).toBeTypeOf("function");
+    await act(async () => {
+      await removeNodeAndSave?.("scene-card:7");
+    });
+
+    expect(result.current.nodes.map((node) => node.id)).toEqual(["text-1"]);
+    expect(result.current.edges).toEqual([]);
+    expect(saveCanvas).toHaveBeenCalledWith(
+      1,
+      expect.any(String),
+      expect.not.stringContaining("scene-card:7"),
+      3,
+    );
+  });
+
+  it("场景卡已删除但 Canvas 保存冲突时保留不可用节点", async () => {
+    vi.mocked(loadCanvas).mockResolvedValueOnce({
+      ...emptyCanvasDto,
+      id: "9",
+      version: 3,
+      nodes: JSON.stringify([
+        {
+          id: "scene-card:7",
+          type: "scene-card",
+          position: { x: 0, y: 0 },
+          data: { sceneCardId: "7" },
+        },
+      ]),
+    });
+    vi.mocked(saveCanvas).mockRejectedValueOnce(new Error("HTTP 412"));
+    const { result } = renderHook(() => useCanvasDoc());
+    await act(async () => {
+      await result.current.load("1");
+    });
+
+    let removed = true;
+    await act(async () => {
+      removed = await result.current.removeNodeAndSave("scene-card:7");
+    });
+
+    expect(removed).toBe(false);
+    expect(result.current.nodes).toHaveLength(1);
+    expect(result.current.nodes[0]?.data.unavailableReason).toBe("deleted");
+  });
+
+  it("恢复重复场景卡引用时保留一条有效节点并标记其余节点不可用", async () => {
+    vi.mocked(loadCanvas).mockResolvedValueOnce({
+      ...emptyCanvasDto,
+      nodes: JSON.stringify([
+        {
+          id: "scene-card:7",
+          type: "scene-card",
+          position: { x: 0, y: 0 },
+          data: { sceneCardId: "7" },
+        },
+        {
+          id: "scene_card_7",
+          type: "scene_card",
+          scene_card_id: "7",
+          position: { x: 500, y: 0 },
+        },
+      ]),
+    });
+    const { result } = renderHook(() => useCanvasDoc());
+
+    await act(async () => {
+      await result.current.load("1");
+    });
+
+    expect(result.current.nodes).toHaveLength(2);
+    expect(new Set(result.current.nodes.map((node) => node.id)).size).toBe(2);
+    expect(result.current.nodes[0]?.data.unavailableReason).toBeUndefined();
+    expect(result.current.nodes[1]?.data.unavailableReason).toBe("duplicate");
+  });
+
+  it("恢复历史脏数据时仍去除普通节点的重复 id", async () => {
+    vi.mocked(loadCanvas).mockResolvedValueOnce({
+      ...emptyCanvasDto,
+      nodes: JSON.stringify([
+        {
+          id: "text-1",
+          type: "text",
+          position: { x: 0, y: 0 },
+          data: { kind: "text", content: "第一条" },
+        },
+        {
+          id: "text-1",
+          type: "text",
+          position: { x: 100, y: 0 },
+          data: { kind: "text", content: "重复条" },
+        },
+      ]),
+    });
+    const { result } = renderHook(() => useCanvasDoc());
+
+    await act(async () => {
+      await result.current.load("1");
+    });
+
+    expect(result.current.nodes).toHaveLength(1);
+    expect(result.current.nodes[0]?.data.content).toBe("第一条");
+  });
+
+  it("连续保存使用服务端返回的最新 Canvas 版本", async () => {
+    vi.useFakeTimers();
+    vi.mocked(loadCanvas).mockResolvedValueOnce({
+      ...emptyCanvasDto,
+      id: "9",
+      version: 3,
+    });
+    vi.mocked(saveCanvas)
+      .mockResolvedValueOnce({
+        ...emptyCanvasDto,
+        id: "9",
+        version: 4,
+      })
+      .mockResolvedValueOnce({
+        ...emptyCanvasDto,
+        id: "9",
+        version: 5,
+      });
+    try {
+      const { result } = renderHook(() => useCanvasDoc());
+      await act(async () => {
+        await result.current.load("1");
+      });
+
+      act(() => result.current.addNodeFull(runningVideoNode));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+      expect(saveCanvas).toHaveBeenLastCalledWith(
+        1,
+        expect.any(String),
+        expect.any(String),
+        3,
+      );
+
+      act(() => result.current.patchNode("n_vid", { status: "done" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+      expect(saveCanvas).toHaveBeenLastCalledWith(
+        1,
+        expect.any(String),
+        expect.any(String),
+        4,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("场景卡实测尺寸变化会持久化实际高度", async () => {
+    vi.useFakeTimers();
+    vi.mocked(loadCanvas).mockResolvedValueOnce({
+      ...emptyCanvasDto,
+      nodes: JSON.stringify([
+        {
+          id: "scene-card:7",
+          type: "scene-card",
+          position: { x: 0, y: 0 },
+          width: 400,
+          height: 1080,
+          data: { sceneCardId: "7" },
+        },
+      ]),
+    });
+    try {
+      const { result } = renderHook(() => useCanvasDoc());
+      await act(async () => {
+        await result.current.load("1");
+      });
+      vi.mocked(saveCanvas).mockClear();
+
+      act(() =>
+        result.current.onNodesChange([
+          {
+            id: "scene-card:7",
+            type: "dimensions",
+            dimensions: { width: 400, height: 420 },
+          },
+        ]),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+
+      expect(saveCanvas).toHaveBeenCalledTimes(1);
+      const serialized = vi.mocked(saveCanvas).mock.calls[0]?.[2] ?? "[]";
+      expect(JSON.parse(serialized)[0]).toMatchObject({
+        id: "scene-card:7",
+        width: 400,
+        height: 420,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("超大项目 ID 加载和保存时保持十进制字符串精度", async () => {
     vi.useFakeTimers();
     const projectId = "9007199254740993";
@@ -86,6 +331,7 @@ describe("useCanvasDoc 视频 recipe 生命周期", () => {
         projectId,
         expect.any(String),
         expect.any(String),
+        null,
       );
     } finally {
       vi.useRealTimers();

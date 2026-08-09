@@ -93,6 +93,7 @@ export type NodeActionsCtx = {
   onAction?: (id: string, actionId: string) => void;
   onRetry?: (id: string) => void;
   onRemoveNode?: (id: string) => void;
+  onDeleteSceneCard?: (nodeId: string, sceneCardId: string) => Promise<boolean>;
   /** IK55VL 视频卡生成中取消入口：按节点 taskId 取消 GenerationJob。 */
   onCancelJob?: (id: string) => void;
   /** IK55VH 富文本卡 commit：写回 richDoc + 派生纯文本（进 prompt）。 */

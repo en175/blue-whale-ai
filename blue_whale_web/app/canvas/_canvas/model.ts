@@ -132,6 +132,7 @@ export interface CanvasNode {
   /** 节点持久尺寸（resize 后存）；省略时由 RF measured 或默认。 */
   width?: number;
   height?: number;
+  zIndex?: number;
   parentId?: string; // 编组留位：子节点 parentId = group id
   data: CanvasNodeData;
 }
@@ -170,10 +171,16 @@ export function createEmptyDoc(id = ""): CanvasDoc {
 export function serialize(doc: CanvasDoc): string {
   const items = doc.nodes.map((n) => ({
     id: n.id,
-    type: n.data.kind === "group" ? ("image" as const) : n.data.kind,
+    type:
+      n.data.kind === "group"
+        ? ("image" as const)
+        : n.data.kind === "scene_card"
+          ? ("scene-card" as const)
+          : n.data.kind,
     position: n.position,
     width: n.width ?? 200,
     height: n.height ?? 200,
+    zIndex: n.zIndex,
     content: n.data.content,
     assetId: n.data.assetId != null ? wireInteger(n.data.assetId) : undefined,
     prompt: n.data.prompt,
@@ -258,9 +265,9 @@ export function parse(json: string): CanvasDoc {
 /** 兼容老 NodeItem（content/assetId 平铺 + type）+ 新 CanvasNode（data.*）→ CanvasNode。 */
 function normalizeNode(n: Record<string, unknown>): CanvasNode {
   const data = (n.data ?? {}) as Record<string, unknown>;
-  const rawType = ((data.kind as NodeKindId) ??
-    (n.type as NodeKindId) ??
-    "text") as NodeKindId;
+  const wireType = String(data.kind ?? n.type ?? "text");
+  const rawType: NodeKindId =
+    wireType === "scene-card" ? "scene_card" : (wireType as NodeKindId);
   const kind: NodeKindId = rawType === "group" ? "image" : rawType;
   const content = data.content ?? n.content;
   const rawAsset = data.assetId ?? n.assetId;
@@ -320,6 +327,7 @@ function normalizeNode(n: Record<string, unknown>): CanvasNode {
     position: (n.position as { x: number; y: number }) ?? { x: 0, y: 0 },
     width: n.width as number | undefined,
     height: n.height as number | undefined,
+    zIndex: n.zIndex as number | undefined,
     parentId: n.parentId as string | undefined,
     data: nodeData,
   };

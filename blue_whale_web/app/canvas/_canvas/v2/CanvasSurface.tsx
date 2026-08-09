@@ -20,6 +20,7 @@ import {
   type Connection,
   type OnConnectEnd,
   type Node as RFNode,
+  type Edge as RFEdge,
 } from "@xyflow/react";
 import type { CanvasNode, CanvasEdge, MediaKind } from "../model";
 import type { CanvasMenuPayload } from "../types";
@@ -64,6 +65,7 @@ export type CanvasSurfaceProps = {
   onNodeAction?: (id: string, actionId: string) => void;
   onNodeRetry?: (id: string) => void;
   onNodeRemove?: (id: string) => void;
+  onDeleteSceneCard?: (nodeId: string, sceneCardId: string) => Promise<boolean>;
   /** IK55VL 视频卡生成中取消入口（按节点 taskId 取消任务）。 */
   onNodeCancelJob?: (id: string) => void;
   /** IK55VH 富文本卡 commit：richDoc + 派生纯文本写回。 */
@@ -114,6 +116,7 @@ export function CanvasSurface({
   onNodeAction,
   onNodeRetry,
   onNodeRemove,
+  onDeleteSceneCard,
   onNodeCancelJob,
   onEditRichText,
   onEditDescription,
@@ -280,6 +283,41 @@ export function CanvasSurface({
     [screenToFlowPosition, onNodeMenu],
   );
 
+  const handleBeforeDelete = useCallback(
+    async ({
+      nodes: nodesToDelete,
+      edges: edgesToDelete,
+    }: {
+      nodes: RFNode[];
+      edges: RFEdge[];
+    }) => {
+      // 仅服务端删除成功（返回 true）的节点交给 RF 删除；
+      // 失败的节点保留在画布上（避免资源残留但节点消失），
+      // removeNodeAndSave 已把失败节点标为 unavailableReason="deleted"。
+      const managedIds = new Set<string>();
+      for (const node of nodesToDelete) {
+        const data = node.data as CanvasNode["data"];
+        if (
+          data.kind !== "scene_card" ||
+          data.unavailableReason ||
+          !data.sceneCardId ||
+          !onDeleteSceneCard
+        )
+          continue;
+        const ok = await onDeleteSceneCard(node.id, data.sceneCardId);
+        if (ok) managedIds.add(node.id);
+      }
+      return {
+        nodes: nodesToDelete.filter((node) => !managedIds.has(node.id)),
+        edges: edgesToDelete.filter(
+          (edge) =>
+            !managedIds.has(edge.source) && !managedIds.has(edge.target),
+        ),
+      };
+    },
+    [onDeleteSceneCard],
+  );
+
   // ctrl/cmd +/- 缩放、0 自适应；拦截浏览器缩放
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -305,6 +343,7 @@ export function CanvasSurface({
       onAction: onNodeAction,
       onRetry: onNodeRetry,
       onRemoveNode: onNodeRemove,
+      onDeleteSceneCard,
       onCancelJob: onNodeCancelJob,
       onEditRichText,
       onEditDescription,
@@ -325,6 +364,7 @@ export function CanvasSurface({
       onNodeAction,
       onNodeRetry,
       onNodeRemove,
+      onDeleteSceneCard,
       onNodeCancelJob,
       onEditRichText,
       onEditDescription,
@@ -359,6 +399,7 @@ export function CanvasSurface({
           onViewportChange={onViewportChange}
           onPaneContextMenu={handlePaneContextMenu}
           onNodeContextMenu={handleNodeContextMenu}
+          onBeforeDelete={handleBeforeDelete}
           nodeTypes={nodeTypes}
           defaultEdgeOptions={{
             style: { stroke: "#ffffff", strokeWidth: 2.5 },

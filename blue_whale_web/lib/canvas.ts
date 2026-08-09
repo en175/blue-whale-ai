@@ -23,6 +23,7 @@ export interface ProjectDto {
 export interface CanvasDto {
   id: WireInteger | null;
   project_id: WireInteger;
+  version?: number | null;
   viewport: string | null;
   nodes: string;
 }
@@ -146,10 +147,18 @@ export function saveCanvas(
   projectId: WireInteger,
   viewport: string,
   nodes: string,
+  expectedVersion?: number | null,
 ): Promise<CanvasDto> {
+  const headers = new Headers(authHeaders(loadAccessToken()));
+  if (expectedVersion !== undefined) {
+    headers.set(
+      "If-Match",
+      expectedVersion === null ? '"missing"' : `"${expectedVersion}"`,
+    );
+  }
   return getResult<CanvasDto>(`/api/canvases/${projectId}`, {
     method: "PUT",
-    headers: authHeaders(loadAccessToken()),
+    headers,
     body: JSON.stringify({ viewport, nodes }),
   });
 }

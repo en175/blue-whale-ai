@@ -180,6 +180,13 @@ export {
   type SceneCardGenerationPresetViewResult,
 } from "./scene-card-generation-repo.js";
 export {
+  createSceneCardResourceRepo,
+  type SceneCardResourceRepo,
+  type SceneCardResourceResult,
+  type DeleteSceneCardResourceInput,
+  type DeleteSceneCardResourceResult,
+} from "./scene-card-resource-repo.js";
+export {
   createStoryboardPreviewRepo,
   type StoryboardPreviewRepo,
   type CreateStoryboardPreviewInput,
