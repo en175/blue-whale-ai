@@ -13,7 +13,9 @@ import {
 } from "react";
 import { BookOpenText, ChevronDown } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
-import SkillPanel, { type UseSkillSelection } from "@/components/skill/SkillPanel";
+import SkillPanel, {
+  type UseSkillSelection,
+} from "@/components/skill/SkillPanel";
 import { squirclePath } from "../utils";
 import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
 import type { ChatMessage, PendingMentionBatch } from "../types";
@@ -56,7 +58,6 @@ import {
   loadComposerDraft,
   saveComposerDraft,
 } from "@/lib/composer-draft";
-
 
 export function AgentChatPanel({
   messages,
@@ -163,7 +164,6 @@ export function AgentChatPanel({
     ],
     [],
   );
-
 
   const [selectedMode] = useState(CREATION_MODES[0]);
   const [selectedModel, setSelectedModel] = useState(AGENT_MODELS[3]);
@@ -511,7 +511,7 @@ export function AgentChatPanel({
 
     onSetCardStatus?.(card.id, "generating");
 
-    // DEMO 固定成功：generating 800ms 后落到终态 normal（状态机不变量由 cardStatus.test.ts 覆盖）
+    // DEMO 固定成功：generating 800ms 后落到终态 normal
     const timer = window.setTimeout(() => {
       onSetCardStatus?.(card.id, "normal");
     }, 800);
