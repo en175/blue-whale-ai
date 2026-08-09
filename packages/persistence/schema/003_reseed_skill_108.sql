@@ -7,6 +7,7 @@
 -- 生产执行：mysql -h<生产地址> -uroot -p<口令> --default-character-set=utf8mb4 blue_whale < 003_reseed_skill_108.sql
 --   注：生产库当前若已是 108 基线则直接跳过；若为旧 60/69 基线则按此脚本对齐
 -- ============================================================
+SET NAMES utf8mb4;
 USE blue_whale;
 
 -- ---------- 0. 确保 skill_code 列存在（幂等） ----------

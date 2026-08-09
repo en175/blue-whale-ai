@@ -89,6 +89,7 @@ export function ReferenceNode({ id, data, width, selected }: NodeProps) {
     REFERENCE_CARD_TYPES.find((t) => t.id === cardType) ??
     REFERENCE_CARD_TYPES[REFERENCE_CARD_TYPES.length - 1];
   const {
+    onAction,
     onEditDescription,
     onEditReferenceName,
     onUploadReferenceImage,
@@ -127,7 +128,7 @@ export function ReferenceNode({ id, data, width, selected }: NodeProps) {
   const aspect = d.referenceImageAspect;
   return (
     <>
-      {/* chrome：选中时顶部居中 @ 按钮（IK55VT 预留，点击无引用行为）；商品卡用自己的浮出层(见下) */}
+      {/* chrome：选中时顶部居中 @ 按钮（点击走引用管道 mention，等价右键「添加到聊天」）；商品卡用自己的浮出层(见下) */}
       {!isProduct && (
         <NodeToolbar position={Position.Top} offset={8} isVisible={selected}>
           <button
@@ -141,15 +142,13 @@ export function ReferenceNode({ id, data, width, selected }: NodeProps) {
               border: "1px solid var(--tc-border-subtle)",
               color: "var(--tc-text-secondary)",
             }}
-            onClick={() => {
-              /* 预留：@ 引用行为属后续工单 */
-            }}
+            onClick={() => onAction?.(id, "mention")}
           >
             <AtSign width={13} height={13} />
           </button>
         </NodeToolbar>
       )}
-      {/* IK55VZ 商品卡 chrome(原型定稿):选中或悬停浮出——左上「商品」标签 + 居中「@ 添加到对话」胶囊(预留无行为) */}
+      {/* IK55VZ 商品卡 chrome(原型定稿):选中或悬停浮出——左上「商品」标签 + 居中「@ 添加到对话」胶囊(点击走引用管道 mention) */}
       {isProduct && (
         <div
           data-testid="product-chrome"
@@ -176,9 +175,7 @@ export function ReferenceNode({ id, data, width, selected }: NodeProps) {
               color: "var(--tc-text-secondary)",
               boxShadow: "var(--tc-chrome-float-shadow)",
             }}
-            onClick={() => {
-              /* 预留：@ 引用行为属后续工单 */
-            }}
+            onClick={() => onAction?.(id, "mention")}
           >
             <AtSign width={12} height={12} />
             添加到对话

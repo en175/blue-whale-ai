@@ -12,7 +12,11 @@ import type {
   PrefillSignal,
 } from "../types";
 import type { Asset as CanvasAsset, CanvasNode } from "../model";
-import { buildCrossmodalRefill, recipeToDockPrefill } from "../v2/mappers";
+import {
+  buildCrossmodalRefill,
+  nodeToPendingMention,
+  recipeToDockPrefill,
+} from "../v2/mappers";
 
 export interface NodeActionsCtx {
   assets: Record<string, CanvasAsset>;
@@ -146,19 +150,23 @@ export function useNodeActions(ctx: NodeActionsCtx) {
           const batchId = Date.now();
           setAgentPendingMention({
             mentions: [
-              {
-                name,
-                nonce: batchId,
-                ...(src ? { src } : {}),
-                ...(node.data.assetId
-                  ? { assetId: wireInteger(node.data.assetId) }
-                  : {}),
-                ...(node.data.kind === "image" ||
-                node.data.kind === "video" ||
-                node.data.kind === "audio"
-                  ? { type: node.data.kind }
-                  : {}),
-              },
+              // 参考卡走 nodeToPendingMention 的 reference 分支（assetId 取
+              // referenceAssetId、卡名/类型名作 name），与右键「添加到聊天」同一映射。
+              node.data.kind === "reference"
+                ? nodeToPendingMention(node, assets, batchId)
+                : {
+                    name,
+                    nonce: batchId,
+                    ...(src ? { src } : {}),
+                    ...(node.data.assetId
+                      ? { assetId: wireInteger(node.data.assetId) }
+                      : {}),
+                    ...(node.data.kind === "image" ||
+                    node.data.kind === "video" ||
+                    node.data.kind === "audio"
+                      ? { type: node.data.kind }
+                      : {}),
+                  },
             ],
             batchId,
           });
