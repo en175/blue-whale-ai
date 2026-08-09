@@ -150,6 +150,9 @@ upstream_sha="$(git -C "$ROOT" rev-parse origin/master)"
 if ! git -C "$ROOT" merge-base --is-ancestor "$upstream_sha" "$head_sha"; then
   fail_status 10 NEEDS_SYNC "当前分支落后 origin/master。Agent 应按规则运行 scripts/sync-task-from-origin.sh sync --json，完成范围化测试后重试。" branch "$branch" head "$head_sha" upstream_sha "$upstream_sha"
 fi
+if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" check --base origin/master --json 2>&1)"; then
+  fail_status 11 VERIFICATION_REQUIRED "当前 HEAD 缺少有效的范围化验证凭证。先运行 node scripts/verify-change-scope.mjs run。" detail "$verification_output" head "$head_sha"
+fi
 
 remote_ref="refs/heads/$branch"
 if ! remote_line="$(git -C "$ROOT" ls-remote --heads origin "$remote_ref" 2>&1)"; then
