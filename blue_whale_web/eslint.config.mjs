@@ -10,8 +10,7 @@ import nextTs from "eslint-config-next/typescript";
 // 已知巨型文件清单（行数实测 2026-08-07，拆分后必须从豁免清单移除）
 const LEGACY_LARGE_FILES = [
   // IK74V6 已拆达标：admin/users/page.tsx、lib/project-recovery.ts、
-  // dock/ImageDockContent.tsx、SceneCardGenerationEditor.tsx、
-  // components/AgentComposer.tsx 豁免已移除
+  // dock/ImageDockContent.tsx、components/AgentComposer.tsx 豁免已移除
   // 测试文件（随实现拆分同步治理）
   "lib/project-recovery.test.ts",
   "app/canvas/_canvas/hooks/useCanvasGeneration.test.ts",

@@ -79,7 +79,6 @@ import { ExpandModal } from "./text/ExpandModal";
 import type { TextMentionItem } from "./text/types";
 export type { TextMentionItem } from "./text/types";
 
-
 import {
   NodeActionsContext,
   NodeToolbarActions,
@@ -381,7 +380,12 @@ export function GroupNode({ data }: NodeProps) {
  */
 
 // IK74V6：以下部件已下沉到独立文件，此处 re-export 保持既有 import 路径兼容。
-export { isVideoUrl, formatTime, VideoPlayer, AudioPlayer } from "./media-players";
+export {
+  isVideoUrl,
+  formatTime,
+  VideoPlayer,
+  AudioPlayer,
+} from "./media-players";
 export { MediaStateBody, type MediaStateBodyProps } from "./media-state-body";
 export {
   NodeActionsContext,
@@ -393,3 +397,4 @@ export {
   type MediaNodeData,
 } from "./node-shared";
 export { ReferenceNode } from "./reference-node";
+export { SceneCardNode } from "./scene-card-node";
