@@ -1,9 +1,18 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as jestDomMatchers from "@testing-library/jest-dom/matchers";
 import type { ChatMessage } from "../types";
+import { apiFetch } from "@/lib/api-client";
 import { PlanCard } from "./ChatBubbles";
+
+vi.mock("@/lib/api-client", () => ({ apiFetch: vi.fn() }));
 
 expect.extend(jestDomMatchers);
 
@@ -111,5 +120,53 @@ describe("PlanCard 手动应用接线（IK6KQB）", () => {
 
     expect(screen.getByText("余额不足")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "手动应用" })).toBeEnabled();
+  });
+});
+
+describe("PlanCard 首图缩略图（IK7EP1）", () => {
+  beforeEach(() => {
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn(() => "blob:plan-thumb-901"),
+      revokeObjectURL: vi.fn(),
+    });
+    vi.mocked(apiFetch).mockResolvedValue(
+      new Response(new Blob(["fake-image"], { type: "image/png" }), {
+        status: 200,
+      }),
+    );
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("有 thumbnailUrl：经鉴权路径渲染首图缩略图", async () => {
+    render(
+      <PlanCard
+        msg={planCard({
+          appliedAt: "2026-08-07T06:00:00.000Z",
+          thumbnailUrl: "/api/projects/1/assets/901/content",
+        })}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("img", { name: "Scene 1 · Shot 2" }),
+      ).toHaveAttribute("src", "blob:plan-thumb-901"),
+    );
+    expect(apiFetch).toHaveBeenCalledWith(
+      "/api/projects/1/assets/901/content",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("无 thumbnailUrl：不渲染缩略图、不发起资源请求", () => {
+    render(<PlanCard msg={planCard({})} />);
+
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(apiFetch).not.toHaveBeenCalled();
   });
 });
