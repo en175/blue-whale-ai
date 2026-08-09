@@ -8,7 +8,7 @@ import { createWorkerRepo } from "./generation-worker-repo.js";
 // succeeded 任务不被迟到的 failJob 翻为 failed、stale worker 建素材被拒。
 // 对齐视频 publishVideoResult / failVideoJob 的守卫-后写模式。
 
-const LEASE = {workerId: "worker-1", fencingToken: 5};
+const FENCE_PROOF = {workerId: "worker-1", fencingToken: 5};
 
 /** appendProjectEvent 的 toView 需要完整 row；守卫通过路径的 event create mock 返回此对象。 */
 const EVENT_ROW = {
@@ -50,7 +50,7 @@ describe("image write path fence（IK7GRP）", () => {
       const repo = createWorkerRepo({$transaction: transaction} as never);
 
       await expect(
-        repo.completeJob({jobId: "300", assetIds: ["901"], ...LEASE}),
+        repo.completeJob({jobId: "300", assetIds: ["901"], ...FENCE_PROOF}),
       ).resolves.toBe(true);
       // 守卫 CAS 条件含 lease_owner + fencing_token。
       expect(updateMany).toHaveBeenCalledWith(
@@ -116,7 +116,7 @@ describe("image write path fence（IK7GRP）", () => {
       const repo = createWorkerRepo({$transaction: transaction} as never);
 
       await expect(
-        repo.failJob({jobId: "300", errorCode: "provider_failed", errorMessage: "x", ...LEASE}),
+        repo.failJob({jobId: "300", errorCode: "provider_failed", errorMessage: "x", ...FENCE_PROOF}),
       ).resolves.toBe(true);
     });
 
@@ -175,7 +175,7 @@ describe("image write path fence（IK7GRP）", () => {
           storage_key: null,
           mime: "image/png",
           size: 11,
-          ...LEASE,
+          ...FENCE_PROOF,
         }),
       ).resolves.toBe("901");
       // 守卫 CAS：version 自增占位，不改 status。
@@ -239,7 +239,7 @@ describe("image write path fence（IK7GRP）", () => {
       const repo = createWorkerRepo({$transaction: transaction} as never);
 
       await expect(
-        repo.settleReservation({jobId: "300", ...LEASE}),
+        repo.settleReservation({jobId: "300", ...FENCE_PROOF}),
       ).resolves.toBe(true);
       // 守卫 CAS：校验终态 + fencing_token 一致（completeJob 已清 lease、定终态）。
       expect(jobsUpdateMany).toHaveBeenCalledWith(
@@ -280,8 +280,8 @@ describe("image write path fence（IK7GRP）", () => {
   // 领取（worker-1, token=1）→ 租约过期重放（reset, token→2）→ 新 worker 重领（worker-2, token=3）
   // → worker-2 完成（守卫通过）→ worker-1 迟到的 4 个写方法全部被拒，新结果不被覆盖。
   it("完整顺序：领取→过期重放→新Worker重领完成→旧Worker的4个写方法全被拒", async () => {
-    const staleLease = {workerId: "worker-1", fencingToken: 1};
-    const freshLease = {workerId: "worker-2", fencingToken: 3};
+    const staleFenceProof = {workerId: "worker-1", fencingToken: 1};
+    const freshFenceProof = {workerId: "worker-2", fencingToken: 3};
 
     // 共享副作用 spy：stale 全拒时都不应被调用。
     const assetsCreate = vi.fn();
@@ -305,23 +305,23 @@ describe("image write path fence（IK7GRP）", () => {
 
     // ① 旧 worker-1 的 completeJob 被拒。
     await expect(
-      staleRepo.completeJob({jobId: "300", assetIds: ["401"], ...staleLease}),
+      staleRepo.completeJob({jobId: "300", assetIds: ["401"], ...staleFenceProof}),
     ).resolves.toBe(false);
     // ② 旧 worker-1 的 failJob 被拒（succeeded 不被翻 failed）。
     await expect(
-      staleRepo.failJob({jobId: "300", errorCode: "provider_failed", errorMessage: "迟到", ...staleLease}),
+      staleRepo.failJob({jobId: "300", errorCode: "provider_failed", errorMessage: "迟到", ...staleFenceProof}),
     ).resolves.toBe(false);
     // ③ 旧 worker-1 的 createAsset 被拒（无孤儿素材）。
     await expect(
       staleRepo.createAsset({
         user_id: "9", project_id: "55", generation_job_id: "300",
         url: "https://old.png", type: "image", width: 1, height: 1,
-        storage_key: null, mime: "image/png", size: 11, ...staleLease,
+        storage_key: null, mime: "image/png", size: 11, ...staleFenceProof,
       }),
     ).resolves.toBeNull();
     // ④ 旧 worker-1 的 settleReservation 被拒（不结算新尝试的预留）。
     await expect(
-      staleRepo.settleReservation({jobId: "300", ...staleLease}),
+      staleRepo.settleReservation({jobId: "300", ...staleFenceProof}),
     ).resolves.toBe(false);
 
     // stale 4 方法守卫全拒：无任何副作用写入。
@@ -348,7 +348,7 @@ describe("image write path fence（IK7GRP）", () => {
       ),
     } as never);
     await expect(
-      freshRepo.completeJob({jobId: "300", assetIds: ["501", "502"], ...freshLease}),
+      freshRepo.completeJob({jobId: "300", assetIds: ["501", "502"], ...freshFenceProof}),
     ).resolves.toBe(true);
     // 守卫 CAS 条件用新 token，新 output_asset_ids 落库（Number 化后）。
     expect(freshUpdateMany).toHaveBeenCalledWith(

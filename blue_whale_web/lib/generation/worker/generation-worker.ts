@@ -86,16 +86,16 @@ async function processClaimedJob(
     fetchImpl = fetch,
     mediaStorage,
   } = deps;
-  // IK7GRP：claim 后 job 已是 processing + 当前 worker 持 lease；守卫字段随每次写方法透传，
-  // stale worker（旧 fencing_token / 失效 lease）的迟到写入被仓储层拒绝。
-  const lease = { workerId, fencingToken: job.fencingToken };
+  // IK7GRP：claim 后 job 已是 processing + 当前 worker 持 lease；围栏凭证（workerId + fencingToken）
+  // 随每次写方法透传，stale worker（旧 fencing_token / 失效 lease）的迟到写入被仓储层拒绝。
+  const fenceProof = { workerId, fencingToken: job.fencingToken };
   // IK7GRP：统一失败入口——守卫失败时（job 已被新 worker 接管）仓储层返回 false，静默跳过。
   const failClaimed = (code: string, msg: string) =>
     repo.failJob({
       jobId: job.id,
       errorCode: code,
       errorMessage: msg,
-      ...lease,
+      ...fenceProof,
     });
   if (job.type !== "image" && job.type !== "video") {
     await failClaimed("unsupported_type", `暂不支持类型: ${job.type}`);
@@ -179,10 +179,10 @@ async function processClaimedJob(
         storage_key: storedVideo.storageKey,
         mime: storedVideo.mime,
         size: storedVideo.size,
-        ...lease,
+        ...fenceProof,
       });
       if (assetId === null) return job.id;
-      await finishJob(repo, job.id, [assetId], lease);
+      await finishJob(repo, job.id, [assetId], fenceProof);
       return job.id;
     }
 
@@ -297,14 +297,14 @@ async function processClaimedJob(
         storage_key: storedImage.storageKey,
         mime: storedImage.mime,
         size: storedImage.size,
-        ...lease,
+        ...fenceProof,
       });
       // IK7GRP：createAsset 守卫失败（job 已被新 worker 接管）→ 中止后续建素材与结任务，
       // 当前 worker 已无 lease，finishJob / failClaimed 守卫也会拒绝，直接退出。
       if (id === null) return job.id;
       assetIds.push(id);
     }
-    await finishJob(repo, job.id, assetIds, lease);
+    await finishJob(repo, job.id, assetIds, fenceProof);
     return job.id;
   } catch (e) {
     const code =
@@ -416,12 +416,12 @@ async function finishJob(
   repo: WorkerRepo,
   jobId: string,
   assetIds: string[],
-  lease: { workerId: string; fencingToken: number },
+  fenceProof: { workerId: string; fencingToken: number },
 ): Promise<void> {
   // IK7GRP：completeJob / settleReservation 守卫失败（stale worker）返回 false，静默跳过后续 log。
-  const completed = await repo.completeJob({ jobId, assetIds, ...lease });
+  const completed = await repo.completeJob({ jobId, assetIds, ...fenceProof });
   if (!completed) return;
-  await repo.settleReservation({ jobId, ...lease });
+  await repo.settleReservation({ jobId, ...fenceProof });
   await repo.appendLog(
     jobId,
     "succeeded",

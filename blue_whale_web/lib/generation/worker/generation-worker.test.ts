@@ -67,13 +67,13 @@ const queuedImageJob = {
 };
 
 // IK7GRP：守卫字段随每次写方法透传；断言用此子集匹配（jobId/workerId/fencingToken）。
-const LEASE = { jobId: "300", workerId: "w1", fencingToken: 1 };
+const FENCE_PROOF = { jobId: "300", workerId: "w1", fencingToken: 1 };
 const failCall = (errorCode: string, errorMessage: unknown) => ({
-  ...LEASE,
+  ...FENCE_PROOF,
   errorCode,
   errorMessage,
 });
-const completeCall = (assetIds: string[]) => ({ ...LEASE, assetIds });
+const completeCall = (assetIds: string[]) => ({ ...FENCE_PROOF, assetIds });
 
 const ONE_PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -459,7 +459,7 @@ describe("processNextJob - 成功路径", () => {
       }),
     );
     expect(repo.completeJob).toHaveBeenCalledWith(completeCall(["700"]));
-    expect(repo.settleReservation).toHaveBeenCalledWith(LEASE);
+    expect(repo.settleReservation).toHaveBeenCalledWith(FENCE_PROOF);
     expect(repo.failJob).not.toHaveBeenCalled();
   });
 

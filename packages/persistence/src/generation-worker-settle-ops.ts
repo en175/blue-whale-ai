@@ -86,7 +86,11 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
         const job = await tx.generation_jobs.findUnique({
           where: { id: BigInt(jobId) },
         });
-        if (!job) return false;
+        // 守卫 CAS 刚成功，同事务内该行必存在；不存在即数据损坏——抛错回滚整个事务，
+        // 不得返回 false（状态与槽位写入已发生，false 会被调用方误读为「守卫拒绝」）。
+        if (!job) {
+          throw new Error(`completeJob 守卫通过后任务 ${jobId} 不存在，数据损坏`);
+        }
         if (job.project_id === null) return true;
         await appendProjectEvent(tx, {
           projectId: job.project_id.toString(),
@@ -196,7 +200,11 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
         const job = await tx.generation_jobs.findUnique({
           where: { id: BigInt(jobId) },
         });
-        if (!job) return false;
+        // 与 completeJob 同理：守卫 CAS 刚成功，同事务内该行必存在；不存在即数据损坏——
+        // 抛错回滚整个事务，不得返回 false（副作用已写入，false 会被误读为「守卫拒绝」）。
+        if (!job) {
+          throw new Error(`failJob 守卫通过后任务 ${jobId} 不存在，数据损坏`);
+        }
         await tx.generation_job_logs.create({
           data: {
             generation_job_id: job.id,
