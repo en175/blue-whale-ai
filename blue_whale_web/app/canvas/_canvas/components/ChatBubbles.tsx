@@ -274,6 +274,7 @@ export function AgentCard({
 
 /**
  * PlanCard —— 冻结计划卡（IK6KQ2）：权威正文（MarkdownBody）+ 分镜序号 + 可用性徽标。
+ * 首图 GenerationJob 产出成功后随 thumbnailUrl 显示首图缩略图（IK7EP1，鉴权路径、附加展示）。
  * 未应用卡显示单一「手动应用」主操作（IK6KQB 接通 apply 命令，无二次确认）；
  * applying 期间按钮禁用显示「应用中…」；requires_new_plan 置灰并提示重新生成；
  * retryable_blocked 提示余额不足、保持可重试；已应用显示徽标、不显示按钮。
@@ -364,6 +365,13 @@ export function PlanCard({
             <div className="break-words" style={{ overflowWrap: "anywhere" }}>
               <MarkdownBody markdown={msg.text} />
             </div>
+            {msg.thumbnailUrl && (
+              <AuthenticatedImage
+                accessUrl={msg.thumbnailUrl}
+                alt={msg.sequenceLabel ?? "计划首图"}
+                className="max-h-64 w-full rounded-lg object-contain"
+              />
+            )}
             {requiresNewPlan && (
               <div
                 className="tc-agent-plan-renew break-words"
