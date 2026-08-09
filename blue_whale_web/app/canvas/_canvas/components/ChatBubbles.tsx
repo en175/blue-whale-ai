@@ -147,13 +147,20 @@ export function AgentCard({
   const generating = status === "generating";
   const failed = status === "failed";
   const cancelled = status === "cancelled";
+  // 权威卡（后端 GenerationJob 投影，conversationRecovery 恒带 generationJobId）的 normal
+  // 成功态由后端 InitialPlacementStatus 单轨自动放置画布节点，前端直插入口已下线（IK7GS4）。
+  // DEMO/mock 卡（buildMockReplyForMode 产出，无 generationJobId）仍走手动应用直插，行为不变。
+  const authoritative = msg.generationJobId !== undefined;
+  const autoPlaced = authoritative && status === "normal";
   const ctaLabel = busy
     ? "重试中"
     : failed
       ? "重试"
       : cancelled
         ? "已取消"
-        : "手动应用";
+        : autoPlaced
+          ? "已自动放置"
+          : "手动应用";
   return (
     <div className="self-stretch">
       <div className={CARD_SHELL_CLASS} data-asset-id={msg.assetId}>
@@ -177,7 +184,7 @@ export function AgentCard({
             {!hideCta && (
               <button
                 type="button"
-                disabled={generating || cancelled || busy}
+                disabled={autoPlaced || generating || cancelled || busy}
                 onClick={() => onReapply?.(msg)}
                 className={[
                   "tc-agent-card-cta tc-agent-card-cta--reapply",
@@ -186,6 +193,8 @@ export function AgentCard({
                 ].join(" ")}
                 aria-label={failed ? "生成失败，可重试" : ctaLabel}
                 aria-busy={generating || busy}
+                aria-disabled={autoPlaced || undefined}
+                title={autoPlaced ? "已自动放置到画布" : undefined}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
