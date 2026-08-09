@@ -1,3 +1,5 @@
+SET NAMES utf8mb4;
+
 INSERT INTO generation_model_capability (
   provider_id,
   model_id,

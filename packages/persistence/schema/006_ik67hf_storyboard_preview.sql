@@ -1,5 +1,6 @@
 -- IK67HF (T15)：可选 StoryboardPreview（分镜预览）流程（CONTEXT L43-47）。
 -- 分镜预览会话聚合根 + SceneCard 绑定 + 幂等键；画格复用 generation_output_slots + assets。
+SET NAMES utf8mb4;
 CREATE TABLE `storyboard_previews` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `scene_card_id` BIGINT NOT NULL,

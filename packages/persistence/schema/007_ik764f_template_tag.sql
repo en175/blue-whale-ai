@@ -1,5 +1,6 @@
 -- IK764F：首页模板标签落库（原硬编码枚举 template-tags.ts）。
 -- tag_code 与 sort_order 固定不可改，仅 label 可由管理后台改名；seed 现有 5 行。
+SET NAMES utf8mb4;
 CREATE TABLE `template_tag` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `tag_code` VARCHAR(64) NOT NULL,
