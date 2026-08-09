@@ -136,7 +136,19 @@ Agent 不自动合入本地 `master`、不自动推送、不自动开 PR。
 scripts/merge-task-to-local-master.sh --user-authorized <任务分支>
 ```
 
-4. 如有 merge conflict，Agent 可在本次合入授权范围内解决并运行验证；解决后停在本地 `master` 汇报结果，不继续远程发布。
+4. 如有 merge conflict，Agent 可在本次合入授权范围内解决并运行验证；解决并暂存后，通过标准入口续接 merge commit：
+
+```bash
+scripts/merge-task-to-local-master.sh --user-authorized --continue <任务分支>
+```
+
+续接入口会校验 `MERGE_HEAD` 属于指定任务分支且不存在未解决冲突。完成后停在本地 `master` 汇报结果，不继续远程发布。
+
+若冲突期间任务分支已通过 `--amend` 更新，先撤销旧合入，再重新运行第 3 步合入最新提交：
+
+```bash
+scripts/merge-task-to-local-master.sh --user-authorized --abort <任务分支>
+```
 
 ZCode / Claude Code / Codex Hook 会硬拦直接 `git commit`、非 `--ff-only` 的直接 `git merge` 以及缺少 `--user-authorized` 的合入本地 master 入口，并指引 Agent 改走标准入口；提交入口出现即放行，合入入口带授权参数无交互放行。master 写入 Gate 仅额外放行已忽略的根 `CLAUDE.local.md` 与 `.codex/config.toml`。Codex 写入仍由 `Edit|Write` matcher 接入，但实际 `tool_name=apply_patch`、补丁位于 `tool_input.command`；薄 wrapper 只提取目标路径，分支与工作树判定继续复用 `block-master-edit.sh` 权威 Gate。
 
