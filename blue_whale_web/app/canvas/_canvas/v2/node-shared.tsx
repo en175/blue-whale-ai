@@ -45,6 +45,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import { useCanvasStore } from "../store";
+import type { SceneCardView } from "../conversationRecovery";
 import type {
   CanvasNode,
   CanvasNodeData,
@@ -116,6 +117,8 @@ export type NodeActionsCtx = {
   onImportProductLink?: (id: string, url: string) => void;
   /** IK55VH 富文本卡 @ 建议素材列表。 */
   mentionItems?: TextMentionItem[];
+  /** 场景卡快照投影（spec §6.2）：SceneCardNode 按 data.sceneCardId 查正文；查不到=不可用态。 */
+  sceneCards?: SceneCardView[];
   picking?: boolean;
   pickingAccept?: MediaKind[];
 };

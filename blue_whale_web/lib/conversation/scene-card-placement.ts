@@ -142,9 +142,10 @@ export async function placeSceneCardNode(
     : [];
 
   // 幂等：同一 SceneCard 已有节点即视为成功（CONTEXT L66）。
+  // 兼容新旧两种节点格式：旧=平铺 scene_card_id（id scene_card_<id>）；
+  // 新=spec §6.2 data.sceneCardId（id scene-card:<id>）。
   const exists = nodes.some(
-    (node) =>
-      node.type === "scene_card" && String(node.scene_card_id) === sceneCardId,
+    (node) => node.type === "scene_card" && sceneCardIdOf(node) === sceneCardId,
   );
   if (exists) return;
 
@@ -160,14 +161,14 @@ export async function placeSceneCardNode(
     nodeHeight: SCENE_CARD_FALLBACK_HEIGHT,
   });
 
+  // spec §6.2：确定性 id `scene-card:<id>` + data.sceneCardId，不写字段级 status。
   const nextNode: CanvasNodeLike = {
-    id: `scene_card_${sceneCardId}`,
+    id: `scene-card:${sceneCardId}`,
     type: "scene_card",
-    scene_card_id: sceneCardId,
+    data: { sceneCardId },
     position,
     width: SCENE_CARD_WIDTH,
     height: SCENE_CARD_FALLBACK_HEIGHT,
-    status: "pending",
   };
 
   await canvas.save(

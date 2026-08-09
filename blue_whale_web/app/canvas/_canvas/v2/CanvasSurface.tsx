@@ -29,9 +29,11 @@ import {
   TextNode,
   GroupNode,
   ReferenceNode,
+  SceneCardNode,
   NodeActionsContext,
 } from "./nodes";
 import type { TextMentionItem } from "./nodes";
+import type { SceneCardView } from "../conversationRecovery";
 import { SelectionBounds } from "./SelectionBounds";
 import { toolModeInteractionProps, type ToolMode } from "./toolMode";
 
@@ -43,6 +45,7 @@ const nodeTypes = {
   text: TextNode,
   group: GroupNode,
   reference: ReferenceNode,
+  scene_card: SceneCardNode,
 } as const;
 
 /** 保持原公开类型路径兼容；类型定义下沉到纯类型模块。 */
@@ -85,6 +88,8 @@ export type CanvasSurfaceProps = {
   onImportProductLink?: (id: string, url: string) => void;
   /** IK55VH 富文本卡 @ 建议素材列表。 */
   mentionItems?: TextMentionItem[];
+  /** 场景卡快照投影（spec §6.2）：注入 NodeActionsContext 供 SceneCardNode 查正文。 */
+  sceneCards?: SceneCardView[];
   onPaneMenu?: (payload: MenuPayload) => void;
   onEdgeDropMenu?: (payload: MenuPayload) => void;
   onNodeMenu?: (payload: MenuPayload & { nodeId: string }) => void;
@@ -121,6 +126,7 @@ export function CanvasSurface({
   onRemoveProductImage,
   onImportProductLink,
   mentionItems,
+  sceneCards,
   onPaneMenu,
   onEdgeDropMenu,
   onNodeMenu,
@@ -161,8 +167,10 @@ export function CanvasSurface({
             }
           : n;
         // IK55VT：参考卡高度内容驱动（已填态图高随宽高比自适应），不钉死 wrapper 高度，
-        // 让 RF ResizeObserver 测量接管；空/留史态由组件内 style 定高
-        return n.data.kind === "reference"
+        // 让 RF ResizeObserver 测量接管；空/留史态由组件内 style 定高。
+        // scene_card 同理（spec §3.1 全文自然展开，高度由正文渲染结果决定，
+        // 服务端初始 height=兼容值 1080 不能钉死，否则卡片下方留大段空白）。
+        return n.data.kind === "reference" || n.data.kind === "scene_card"
           ? { ...withMeasured, height: undefined }
           : withMeasured;
       }),
@@ -309,6 +317,7 @@ export function CanvasSurface({
       onImportProductLink,
       referenceDropTargetId,
       mentionItems,
+      sceneCards,
       picking,
       pickingAccept,
     }),
@@ -328,6 +337,7 @@ export function CanvasSurface({
       onImportProductLink,
       referenceDropTargetId,
       mentionItems,
+      sceneCards,
       picking,
       pickingAccept,
     ],
