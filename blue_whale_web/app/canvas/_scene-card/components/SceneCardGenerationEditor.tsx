@@ -6,7 +6,6 @@ import {
   deriveVideoReferenceMode,
   referenceModeToRequiredFeature,
   type CapabilitySnapshotVersion,
-  type ProviderPromptAsset,
   type VideoReferenceMode,
 } from "@blue-whale/contracts";
 
@@ -14,7 +13,9 @@ import {
   createStoryboardPreview,
   generateSceneCard,
   getSceneCardGenerationPreset,
+  getStoryboardPreviews,
   type SceneCardGenerationPreset,
+  type StoryboardFrameSummary,
 } from "@/lib/conversation";
 import {
   loadSceneCardDraft,
@@ -32,14 +33,24 @@ import {
 import { MarkdownBody } from "./MarkdownBody";
 import {
   REFERENCE_MODE_OPTIONS,
-  REFERENCE_ROLE_OPTIONS,
   CAPABILITY_DRIFT_MESSAGE,
   getReferenceCapabilityError,
   matchesFrozenCapability,
   deriveOptions,
   type Overrides,
 } from "./scene-card-generation-logic";
-
+import {
+  ConflictNotice,
+  EditorMessages,
+  GenerationActions,
+  GenerationSettings,
+} from "./SceneCardGenerationControls";
+import {
+  isFrameAsset,
+  isMentionAsset,
+  ReferenceAssetsEditor,
+} from "./SceneCardGenerationFields";
+import { StoryboardFrameSelector } from "./StoryboardFrameSelector";
 
 export function SceneCardGenerationEditor({
   projectId,
@@ -54,6 +65,9 @@ export function SceneCardGenerationEditor({
   const [capabilities, setCapabilities] = useState<ImageModelCapability[]>([]);
   const [storyboardModels, setStoryboardModels] = useState<
     ImageModelCapability[]
+  >([]);
+  const [storyboardFrames, setStoryboardFrames] = useState<
+    StoryboardFrameSummary[]
   >([]);
   const [overrides, setOverrides] = useState<Overrides | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,15 +87,24 @@ export function SceneCardGenerationEditor({
       setConflict(null);
       setErrorMessage(null);
       try {
-        const [presetData, models, imageModels] = await Promise.all([
-          getSceneCardGenerationPreset(projectId, sceneCardId),
-          getVideoModels(),
-          getImageModels().catch(() => []),
-        ]);
+        const [presetData, models, imageModels, previewData] =
+          await Promise.all([
+            getSceneCardGenerationPreset(projectId, sceneCardId),
+            getVideoModels(),
+            getImageModels().catch(() => []),
+            getStoryboardPreviews(projectId, sceneCardId).catch((error) => {
+              console.error(
+                "[scene-card-editor] 分镜画格加载失败：",
+                error instanceof Error ? error.message : error,
+              );
+              return { previews: [], frames: [] };
+            }),
+          ]);
         if (cancelled) return;
         setPreset(presetData);
         setCapabilities(models);
         setStoryboardModels(imageModels);
+        setStoryboardFrames(previewData.frames ?? []);
         // 恢复草稿（若有且 base 版本一致），否则用当前 preset 初始化 overrides。
         const draft = loadSceneCardDraft(sceneCardId);
         const params = presetData.preset.parameters as Record<string, unknown>;
@@ -170,6 +193,17 @@ export function SceneCardGenerationEditor({
       return required === null || features[required] === true;
     });
   }, [overrides?.reference_mode, selectedModel]);
+
+  // IK70LQ：reference_assets 分两组——mention 派生组（身份锁）走 ReferenceAssetsEditor，
+  //  画格组（自由增删改 role）走 StoryboardFrameSelector；合并保持 [mention, frame] 顺序。
+  const mentionAssets = useMemo(
+    () => (overrides?.reference_assets ?? []).filter(isMentionAsset),
+    [overrides],
+  );
+  const frameAssets = useMemo(
+    () => (overrides?.reference_assets ?? []).filter(isFrameAsset),
+    [overrides],
+  );
 
   // overrides 变化即时存草稿（跨刷新存活；冲突/关闭由调用方决定清除）。
   useEffect(() => {
@@ -425,314 +459,75 @@ export function SceneCardGenerationEditor({
             </div>
           </div>
         )}
-        {overrides.reference_assets.length > 0 && (
+        {mentionAssets.length > 0 && (
           <ReferenceAssetsEditor
-            assets={overrides.reference_assets}
+            assets={mentionAssets}
             disabled={submitting}
-            onChange={(reference_assets) =>
+            onChange={(nextMentions) => {
+              if (!overrides) return;
+              const reference_assets = [...nextMentions, ...frameAssets];
               setOverrides({
                 ...overrides,
                 reference_mode: deriveVideoReferenceMode(reference_assets),
                 reference_assets,
-              })
-            }
+              });
+            }}
+          />
+        )}
+        {storyboardFrames.length > 0 && (
+          <StoryboardFrameSelector
+            projectId={projectId}
+            frames={storyboardFrames}
+            frameAssets={frameAssets}
+            model={selectedModel}
+            disabled={submitting}
+            onChange={(nextFrames) => {
+              if (!overrides) return;
+              const reference_assets = [...mentionAssets, ...nextFrames];
+              setOverrides({
+                ...overrides,
+                reference_mode: deriveVideoReferenceMode(reference_assets),
+                reference_assets,
+              });
+            }}
           />
         )}
       </section>
 
       {conflict && (
-        <div
-          className="flex flex-col gap-2 rounded p-3 text-[12px]"
-          style={{
-            background: "var(--tc-bg-elevated)",
-            border: "1px solid var(--tc-accent)",
-            color: "var(--tc-text-primary)",
-          }}
-        >
-          <span>
-            版本冲突：该场景卡已被另一处更新（当前版本 {conflict.scene_card}/
-            {conflict.preset}）。草稿已保留，重新加载复核后可再次提交。
-          </span>
-          <button
-            type="button"
-            onClick={() => setReloadKey((k) => k + 1)}
-            className="self-start rounded px-3 py-1 text-[12px]"
-            style={{
-              background: "var(--tc-accent)",
-              border: "1px solid var(--tc-accent)",
-              color: "var(--tc-text-primary)",
-            }}
-          >
-            重新加载
-          </button>
-        </div>
+        <ConflictNotice
+          conflict={conflict}
+          onReload={() => setReloadKey((key) => key + 1)}
+        />
       )}
 
       {/* 可调区：模型切换受首次冻结能力版本与摘要约束 */}
-      <section className="flex flex-col gap-3">
-        <SelectField
-          label="模型"
-          value={overrides.model_id}
-          options={capabilities.map((model) => ({
-            id: model.model_id,
-            label: model.model_label,
-          }))}
-          disabled={submitting}
-          onChange={handleModelChange}
-        />
-        <SelectField
-          label="比例"
-          value={overrides.aspect_ratio}
-          options={options.ratios}
-          disabled={submitting}
-          onChange={(aspect_ratio) =>
-            setOverrides({ ...overrides, aspect_ratio })
-          }
-        />
-        <SelectField
-          label="分辨率"
-          value={overrides.size}
-          options={options.sizes}
-          disabled={submitting}
-          onChange={(size) => setOverrides({ ...overrides, size })}
-        />
-        <div className="flex flex-col gap-1">
-          <label
-            className="text-[11px]"
-            style={{ color: "var(--tc-text-muted)" }}
-          >
-            时长（{options.duration.min}-{options.duration.max}s）
-          </label>
-          <input
-            type="number"
-            min={options.duration.min}
-            max={options.duration.max}
-            step={options.duration.step}
-            value={overrides.duration}
-            disabled={submitting}
-            onChange={(e) =>
-              setOverrides({ ...overrides, duration: Number(e.target.value) })
-            }
-            className="rounded px-2 py-1 text-[12px]"
-            style={{
-              background: "var(--tc-bg-elevated)",
-              border: "1px solid var(--tc-border-subtle)",
-              color: "var(--tc-text-primary)",
-            }}
-          />
-        </div>
-        <SelectField
-          label="数量"
-          value={String(overrides.count)}
-          options={Array.from({ length: options.quantityMax }, (_, i) => ({
-            id: String(i + 1),
-            label: `${i + 1}x`,
-          }))}
-          disabled={submitting}
-          onChange={(count) =>
-            setOverrides({ ...overrides, count: Number(count) })
-          }
-        />
-        <SelectField
-          label="参考模式"
-          value={overrides.reference_mode}
-          options={referenceModeOptions}
-          disabled
-          onChange={() => undefined}
-        />
-      </section>
+      <GenerationSettings
+        overrides={overrides}
+        capabilities={capabilities}
+        options={options}
+        referenceModeOptions={referenceModeOptions}
+        disabled={submitting}
+        onModelChange={handleModelChange}
+        onChange={(patch) => setOverrides({ ...overrides, ...patch })}
+      />
 
-      {errorMessage && (
-        <p
-          className="m-0 text-[12px]"
-          style={{ color: "var(--tc-text-primary)" }}
-        >
-          {errorMessage}
-        </p>
-      )}
+      <EditorMessages
+        errorMessage={errorMessage}
+        referenceCapabilityError={referenceCapabilityError}
+      />
 
-      {referenceCapabilityError && (
-        <p
-          className="m-0 text-[12px]"
-          style={{ color: "var(--tc-text-primary)" }}
-        >
-          {referenceCapabilityError}
-        </p>
-      )}
-
-      <footer className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={handleClose}
-          disabled={submitting}
-          className="rounded px-3 py-1.5 text-[12px]"
-          style={{
-            background: "var(--tc-bg-elevated)",
-            border: "1px solid var(--tc-border-subtle)",
-            color: "var(--tc-text-primary)",
-          }}
-        >
-          取消
-        </button>
-        <div className="relative flex gap-1">
-          <button
-            type="button"
-            onClick={handleGenerate}
-            disabled={
-              submitting ||
-              conflict !== null ||
-              referenceCapabilityError !== null
-            }
-            className="rounded px-3 py-1.5 text-[12px]"
-            style={{
-              background: "var(--tc-accent)",
-              border: "1px solid var(--tc-accent)",
-              color: "var(--tc-text-primary)",
-              opacity:
-                submitting || conflict !== null || referenceCapabilityError
-                  ? 0.6
-                  : 1,
-            }}
-          >
-            {submitting ? "生成中…" : "生成"}
-          </button>
-          <button
-            type="button"
-            aria-label="更多生成方式"
-            aria-haspopup="menu"
-            aria-expanded={generationMenuOpen}
-            disabled={submitting || conflict !== null}
-            onClick={() => setGenerationMenuOpen((open) => !open)}
-            className="rounded px-2 py-1.5 text-[12px]"
-            style={{
-              background: "var(--tc-bg-elevated)",
-              border: "1px solid var(--tc-border-subtle)",
-              color: "var(--tc-text-primary)",
-            }}
-          >
-            ▾
-          </button>
-          {generationMenuOpen && (
-            <div
-              role="menu"
-              aria-label="生成方式"
-              className="absolute right-0 bottom-full mb-1 flex w-[168px] flex-col overflow-hidden rounded py-1"
-              style={{
-                background: "var(--tc-bg-elevated)",
-                border: "1px solid var(--tc-border-subtle)",
-                boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-              }}
-            >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setGenerationMenuOpen(false);
-                  void handleGenerate();
-                }}
-                className="px-3 py-2 text-left text-[12px]"
-                style={{ color: "var(--tc-text-secondary)" }}
-              >
-                直接生成视频
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={storyboardModels.length === 0}
-                onClick={() => void handleStoryboardPreview()}
-                className="px-3 py-2 text-left text-[12px]"
-                style={{ color: "var(--tc-text-secondary)" }}
-              >
-                先预览分镜图
-              </button>
-            </div>
-          )}
-        </div>
-      </footer>
-    </div>
-  );
-}
-
-function SelectField({
-  label,
-  value,
-  options,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: Array<{ id: string; label: string }>;
-  disabled: boolean;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label className="text-[11px]" style={{ color: "var(--tc-text-muted)" }}>
-        {label}
-      </label>
-      <select
-        aria-label={label}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded px-2 py-1 text-[12px]"
-        style={{
-          background: "var(--tc-bg-elevated)",
-          border: "1px solid var(--tc-border-subtle)",
-          color: "var(--tc-text-primary)",
-        }}
-      >
-        {options.map((opt) => (
-          <option key={opt.id} value={opt.id}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-function ReferenceAssetsEditor({
-  assets,
-  disabled,
-  onChange,
-}: {
-  assets: ProviderPromptAsset[];
-  disabled: boolean;
-  onChange: (assets: ProviderPromptAsset[]) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      <span className="text-[11px]" style={{ color: "var(--tc-text-muted)" }}>
-        参考素材角色
-      </span>
-      {assets.map((asset, i) => {
-        return (
-          <SelectField
-            key={`${asset.type}:${asset.mention_id}`}
-            label={`参考素材 ${i + 1} 角色`}
-            value={asset.role}
-            options={REFERENCE_ROLE_OPTIONS.map((option) => ({ ...option }))}
-            disabled={disabled}
-            onChange={(value) => {
-              const role = REFERENCE_ROLE_OPTIONS.find(
-                (option) => option.id === value,
-              )?.id;
-              if (!role) return;
-              onChange(
-                assets.map((current, index) =>
-                  index === i
-                    ? { ...current, role }
-                    : role !== "reference" && current.role === role
-                      ? { ...current, role: "reference" }
-                      : current,
-                ),
-              );
-            }}
-          />
-        );
-      })}
+      <GenerationActions
+        submitting={submitting}
+        generateBlocked={conflict !== null || referenceCapabilityError !== null}
+        menuBlocked={conflict !== null}
+        menuOpen={generationMenuOpen}
+        storyboardAvailable={storyboardModels.length > 0}
+        onClose={handleClose}
+        onGenerate={() => void handleGenerate()}
+        onToggleMenu={() => setGenerationMenuOpen((open) => !open)}
+        onStoryboard={() => void handleStoryboardPreview()}
+      />
     </div>
   );
 }

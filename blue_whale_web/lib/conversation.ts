@@ -179,6 +179,14 @@ export type StoryboardPreviewSummary = {
   summary_status: string;
 };
 
+/** StoryboardPreview 画格（IK70LQ）：编辑器列出 succeeded 画格供角色选择。
+ *  slot_id 写入 reference_assets.storyboard_frame.slot_id（稳定身份）；asset_id 供预览。 */
+export type StoryboardFrameSummary = {
+  slot_id: WireInteger;
+  asset_id: WireInteger;
+  slot_index: number;
+};
+
 /** StoryboardPreview 创建（IK67HF/T15，CONTEXT L43-47）：从 SceneCard 显式触发分镜预览，
  *  建 type=image 的 GenerationJob，其 N 个 output_slot 即有序画格。
  *  body 形态由编辑器按 storyboardPreviewCreateRequestSchema 构造；Authorization 头携带 sk-token。 */
@@ -201,12 +209,18 @@ export function createStoryboardPreview(
   );
 }
 
-/** 只读端点：返回某 SceneCard 下所有未删除分镜预览（画格经 first_generation_job_id 关联 job 取）。 */
+/** 只读端点：返回某 SceneCard 下所有未删除分镜预览 + succeeded 画格（IK70LQ 画格供角色选择）。 */
 export function getStoryboardPreviews(
   projectId: WireInteger,
   sceneCardId: WireInteger,
-): Promise<{ previews: StoryboardPreviewSummary[] }> {
-  return apiRequest<{ previews: StoryboardPreviewSummary[] }>(
+): Promise<{
+  previews: StoryboardPreviewSummary[];
+  frames: StoryboardFrameSummary[];
+}> {
+  return apiRequest<{
+    previews: StoryboardPreviewSummary[];
+    frames: StoryboardFrameSummary[];
+  }>(
     `/api/projects/${projectId}/scene-cards/${sceneCardId}/storyboard-preview`,
   );
 }
