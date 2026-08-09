@@ -5,7 +5,7 @@
  * ① 全新空卡 = 头部 + 居中栈（从画布拖入 + 静态不可编辑占位 + 添加/生成按钮 + ⓘ1张参考图），无可编辑文字；
  * ② 有参考图 = 头部 + 顶部描述编辑区 + 分隔线 + 大图（宽高比自适应）+ 悬停替换/删除 + character 音色区；
  * ③ 删图留史 = 顶部保留历史描述 + 干净居中栈。
- * chrome = 选中时顶部居中 @ 按钮（点击无行为，预留）；无「重新编辑」按钮。
+ * chrome = 选中时顶部居中 @ 按钮（点击走引用管道 onAction(id,"mention")，等价右键「添加到聊天」）；无「重新编辑」按钮。
  * Handle/NodeResizer/NodeToolbar mock 为 passthrough（脱离 RF store）。
  */
 import { createElement, type ReactNode } from "react";
@@ -62,6 +62,7 @@ type RenderOpts = {
   onGenerateReferenceImage?: (id: string) => void;
   onRemoveReferenceImage?: (id: string) => void;
   referenceDropTargetId?: string | null;
+  onAction?: (id: string, actionId: string) => void;
 };
 
 function renderReferenceNode(opts: RenderOpts) {
@@ -91,6 +92,7 @@ function renderReferenceNode(opts: RenderOpts) {
         onGenerateReferenceImage: opts.onGenerateReferenceImage,
         onRemoveReferenceImage: opts.onRemoveReferenceImage,
         referenceDropTargetId: opts.referenceDropTargetId ?? null,
+        onAction: opts.onAction,
       }}
     >
       <ReferenceNode {...props} />
@@ -209,7 +211,7 @@ describe("ReferenceNode 空卡态（IK55VT：全新空卡无可编辑文字）",
   });
 });
 
-describe("ReferenceNode chrome（@ 按钮：选中才出现、点击无行为）", () => {
+describe("ReferenceNode chrome（@ 按钮：选中才出现、点击走引用管道）", () => {
   it("选中时顶部浮出 @ 按钮；未选中不出现", () => {
     const { unmount } = renderReferenceNode({
       cardType: "style",
@@ -223,10 +225,11 @@ describe("ReferenceNode chrome（@ 按钮：选中才出现、点击无行为）
     expect(screen.queryByRole("button", { name: "引用卡片" })).toBeNull();
   });
 
-  it("@ 按钮点击无行为（预留，不报错不触发回调）", () => {
-    renderReferenceNode({ cardType: "style", selected: true });
+  it('@ 按钮点击触发引用管道：onAction(id, "mention")（等价右键「添加到聊天」）', () => {
+    const onAction = vi.fn();
+    renderReferenceNode({ cardType: "style", selected: true, onAction });
     fireEvent.click(screen.getByRole("button", { name: "引用卡片" }));
-    // 无断言回调：能点、不炸即契约
+    expect(onAction).toHaveBeenCalledWith("r1", "mention");
   });
 });
 
