@@ -118,4 +118,15 @@ export const nodeKinds: Record<NodeKindId, NodeKindSpec> = {
       );
     },
   },
+  /** 场景卡节点（spec §6.2）：组织型节点（非 producer），只持 sceneCardId 引用，不参与生成。 */
+  scene_card: {
+    media: null,
+    inputs: [],
+    outputs: [],
+    buildTask: () => {
+      throw new Error(
+        "scene card has no buildTask — it is an organizational node",
+      );
+    },
+  },
 };

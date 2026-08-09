@@ -14,7 +14,7 @@ const node = (
 const textAsset: Asset = { id: "at", kind: "text", src: "hello" };
 
 describe("node-kind-registry", () => {
-  it("nodeKinds has text/image/video/audio/group/reference with media/inputs/outputs/buildTask", () => {
+  it("nodeKinds has text/image/video/audio/group/reference/scene_card with media/inputs/outputs/buildTask", () => {
     expect(Object.keys(nodeKinds)).toEqual([
       "text",
       "image",
@@ -22,6 +22,7 @@ describe("node-kind-registry", () => {
       "audio",
       "group",
       "reference",
+      "scene_card",
     ]);
     for (const s of Object.values(nodeKinds)) {
       expect(s.media !== undefined).toBe(true);
@@ -43,6 +44,16 @@ describe("node-kind-registry", () => {
     expect(spec.inputs).toEqual([]);
     expect(spec.outputs).toEqual([]);
     expect(() => spec.buildTask(node("reference"), {})).toThrow();
+  });
+
+  it("scene_card（spec §6.2 场景卡）组织型节点：media=null、无端口且 buildTask 抛错", () => {
+    const spec = nodeKinds.scene_card;
+    expect(spec.media).toBeNull();
+    expect(spec.inputs).toEqual([]);
+    expect(spec.outputs).toEqual([]);
+    expect(() =>
+      spec.buildTask(node("scene_card", { sceneCardId: "5" }), {}),
+    ).toThrow();
   });
 
   it("buildTask uses referenced input over node.data.prompt", () => {

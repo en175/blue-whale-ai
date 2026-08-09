@@ -523,7 +523,7 @@ describe("recoverPendingPlacements（IK67HE/T14 放置恢复幂等）", () => {
     ).toBe(false);
   });
 
-  it("把 pending 节点落位为 placed，不移动既有 placed 节点", async () => {
+  it("历史遗留 pending SceneCard 节点被落位为 placed，不移动既有 placed 节点", async () => {
     const { canvas } = makeCanvas([
       {
         id: "scene_card_1",
@@ -560,7 +560,7 @@ describe("recoverPendingPlacements（IK67HE/T14 放置恢复幂等）", () => {
     expect(node2?.status).toBe("placed");
   });
 
-  it("恢复无尺寸 pending SceneCard 时补齐兼容矩形", async () => {
+  it("恢复历史遗留无尺寸 pending SceneCard 时补齐兼容矩形", async () => {
     const { canvas } = makeCanvas([
       {
         id: "scene_card_1",
@@ -608,22 +608,24 @@ describe("recoverPendingPlacements（IK67HE/T14 放置恢复幂等）", () => {
   });
 });
 
-describe("placeSceneCardNode（既有幂等行为）", () => {
-  it("新建节点使用 Spec 宽度与兼容高度", async () => {
+describe("placeSceneCardNode（spec §6.2 节点格式 + 幂等）", () => {
+  it("新建节点使用 spec 形状：scene-card:<id> + data.sceneCardId + Spec 宽度与兼容高度", async () => {
     const { canvas } = makeCanvas([]);
 
     await placeSceneCardNode(canvas, "42", "5");
 
-    expect(canvas._nodes).toContainEqual(
-      expect.objectContaining({
-        scene_card_id: "5",
-        width: 400,
-        height: 1080,
-      }),
-    );
+    expect(canvas._nodes).toContainEqual({
+      id: "scene-card:5",
+      type: "scene-card",
+      data: { sceneCardId: "5" },
+      position: { x: -424, y: -1104 },
+      width: 400,
+      height: 1080,
+      zIndex: 0,
+    });
   });
 
-  it("同一 SceneCard 已有节点时直接返回不重复创建", async () => {
+  it("同一 SceneCard 已有旧格式节点（平铺 scene_card_id）时直接返回不重复创建", async () => {
     const { canvas } = makeCanvas([
       {
         id: "scene_card_5",
@@ -633,6 +635,21 @@ describe("placeSceneCardNode（既有幂等行为）", () => {
         width: 240,
         height: 135,
         status: "placed",
+      },
+    ]);
+    await placeSceneCardNode(canvas, "42", "5");
+    expect(canvas._saveCalls).toBe(0);
+  });
+
+  it("同一 SceneCard 已有新格式节点（data.sceneCardId）时直接返回不重复创建", async () => {
+    const { canvas } = makeCanvas([
+      {
+        id: "scene-card:5",
+        type: "scene_card",
+        data: { sceneCardId: "5" },
+        position: { x: 0, y: 0 },
+        width: 400,
+        height: 1080,
       },
     ]);
     await placeSceneCardNode(canvas, "42", "5");

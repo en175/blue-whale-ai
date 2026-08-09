@@ -11,7 +11,7 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import type { ChatMessage } from "../types";
-import { MarkdownBody } from "../../_scene-card/components/MarkdownBody";
+import { MarkdownBody } from "./MarkdownBody";
 import { AuthenticatedImage } from "./AuthenticatedImage";
 
 /** 卡片外壳共享样式（AgentCard / PlanCard）：token 边框 + 抬升底 + 正文层级。 */

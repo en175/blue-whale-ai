@@ -28,7 +28,6 @@ import { NodeInfoModal } from "./NodeInfoModal";
 import { ZoomControls } from "./ZoomControls";
 import { BottomDock } from "./dock/BottomDock";
 import { AgentChatPanel } from "./AgentChatPanel";
-import { SceneCardPanel } from "../../_scene-card/SceneCardPanel";
 
 const HYDRATION_RETRY_BUTTON_CLASS = [
   "inline-flex h-9 items-center rounded-full border border-[var(--tc-border)]",
@@ -81,11 +80,8 @@ type DockState = {
 };
 
 type SceneState = {
-  open: boolean;
   backendReady: boolean;
   saveState: SaveState;
-  onToggle: () => void;
-  props: ComponentProps<typeof SceneCardPanel>;
 };
 
 type InfoState = {
@@ -346,18 +342,6 @@ export function CanvasRuntimeView({
 
       <AgentChatPanel key={topBar.activeProject.id} {...agentChat} />
 
-      {scene.open && (
-        <div
-          className="fixed left-4 top-[68px] z-[1200] flex max-h-[calc(100vh-180px)] w-[320px] flex-col overflow-y-auto rounded p-3"
-          style={{
-            background: "var(--tc-bg-surface)",
-            border: "1px solid var(--tc-border-subtle)",
-          }}
-        >
-          <SceneCardPanel key={topBar.activeProject.id} {...scene.props} />
-        </div>
-      )}
-
       <div className="absolute bottom-4 left-4 z-[400] flex items-center gap-2">
         <Link
           href="/"
@@ -370,22 +354,21 @@ export function CanvasRuntimeView({
           <ArrowLeft width={14} height={14} />
           返回首页
         </Link>
-        {scene.backendReady && (
-          <button
-            type="button"
-            onClick={scene.onToggle}
-            className={FOOTER_BUTTON_CLASS}
+        {scene.backendReady && scene.saveState !== "idle" && (
+          <span
+            className="text-xs"
             style={{
-              background: "var(--tc-bg-surface)",
-              border: "1px solid var(--tc-menu-pill-border)",
+              color:
+                scene.saveState === "error"
+                  ? "var(--tc-destructive)"
+                  : "var(--tc-text-muted)",
             }}
           >
-            场景卡
-          </button>
-        )}
-        {scene.backendReady && scene.saveState !== "idle" && (
-          <span className="text-xs" style={{ color: "var(--tc-text-muted)" }}>
-            {scene.saveState === "saving" ? "保存中…" : "已保存"}
+            {scene.saveState === "saving"
+              ? "保存中…"
+              : scene.saveState === "error"
+                ? "保存失败，请重试"
+                : "已保存"}
           </span>
         )}
       </div>

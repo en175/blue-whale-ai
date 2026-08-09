@@ -4,12 +4,13 @@
  * canvas 数据走 useCanvasDoc hook（React state，本地快，不卡）；assets 走 zustand（业务/接口缓存）。
  * 切项目 = router.push；load 按 URL projectId 触发。
  */
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthContext";
 import { loadUser, SKIP_AUTH } from "@/components/auth/authStorage";
 import { toast } from "@/components/Toast";
-import { type WireInteger } from "@/lib/wire-integer";
+import { deleteSceneCard } from "@/lib/conversation";
+import { wireInteger, type WireInteger } from "@/lib/wire-integer";
 
 import { useCanvasStore } from "./_canvas/store";
 import { useCanvasDoc } from "./_canvas/v2/useCanvasDoc";
@@ -32,6 +33,7 @@ import { effectiveToolMode, type ToolMode } from "./_canvas/v2/toolMode";
 import { useSpaceHeld } from "./_canvas/v2/useSpaceHeld";
 import { useV2Projects } from "./_canvas/v2/useV2Projects";
 import { useProjectConversation } from "./_canvas/hooks/useProjectConversation";
+import { projectSnapshotToSceneCards } from "./_canvas/conversationRecovery";
 import type { Rect } from "./_canvas/placement";
 import { useCanvasGeneration } from "./_canvas/hooks/useCanvasGeneration";
 import { useCanvasProjectHydration } from "./_canvas/hooks/useCanvasProjectHydration";
@@ -105,6 +107,15 @@ export function CanvasProjectRuntime({
     applyPlan,
   } = useProjectConversation(pid, backendReady);
 
+  // 场景卡快照投影（spec §6.2）：注入画布，SceneCardNode 按 data.sceneCardId 查正文
+  const sceneCards = useMemo(
+    () =>
+      backendReady && projectSnapshot
+        ? projectSnapshotToSceneCards(projectSnapshot)
+        : [],
+    [backendReady, projectSnapshot],
+  );
+
   // canvas 数据 = useCanvasDoc hook（本地 state，不卡）；assets = zustand（业务缓存）
   const {
     nodes,
@@ -119,6 +130,7 @@ export function CanvasProjectRuntime({
     patchNode,
     resizeNode,
     patchNodeAndSave,
+    removeNodeAndSave,
     setViewport: setViewportAction,
     load: loadDoc,
   } = useCanvasDoc();
@@ -142,9 +154,24 @@ export function CanvasProjectRuntime({
     },
     [deleteProjectAction, pid, router],
   );
+  const handleDeleteSceneCard = useCallback(
+    async (nodeId: string, sceneCardId: string) => {
+      try {
+        await deleteSceneCard(wireInteger(sceneCardId), crypto.randomUUID());
+      } catch {
+        toast.error("场景卡删除失败，请重试");
+        return false;
+      }
+      const removed = await removeNodeAndSave(nodeId);
+      if (!removed) {
+        toast.error("场景卡已删除，但画布保存冲突；节点已标记为不可用");
+      }
+      return removed;
+    },
+    [removeNodeAndSave],
+  );
 
   const [isAgentOpen, setIsAgentOpen] = useState(false);
-  const [isSceneCardsOpen, setIsSceneCardsOpen] = useState(false);
   const [isBottomDockOpen, setIsBottomDockOpen] = useState(false);
   /** 曾打开即常驻挂载（keep-alive）：关闭仅 display:none 隐藏，
    *  BottomDock 内 prompt/mentions 与各面板设置 state 原样保留（IK55VF） */
@@ -537,6 +564,7 @@ export function CanvasProjectRuntime({
         onNodeAction: handleCanvasNodeAction,
         onNodeRetry: handleNodeRetry,
         onNodeRemove: handleNodeRemove,
+        onDeleteSceneCard: handleDeleteSceneCard,
         onNodeCancelJob: handleNodeCancelJob,
         onEditRichText,
         onEditDescription,
@@ -549,6 +577,7 @@ export function CanvasProjectRuntime({
         onRemoveProductImage: handleRemoveProductImage,
         onImportProductLink: handleImportProductLink,
         mentionItems: textMentionItems,
+        sceneCards,
         toolMode: effectiveMode,
         onNodeMenu: handleNodeMenuOpen,
       }}
@@ -668,14 +697,8 @@ export function CanvasProjectRuntime({
         onSetCardStatus: (cardId, status) => setCardStatus(cardId, status),
       }}
       scene={{
-        open: isSceneCardsOpen,
         backendReady,
         saveState,
-        onToggle: () => setIsSceneCardsOpen((value) => !value),
-        props: {
-          projectId: activeProject.id,
-          snapshot: backendReady ? projectSnapshot : null,
-        },
       }}
       info={{
         nodeId: infoNodeId,
