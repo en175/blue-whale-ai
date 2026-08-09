@@ -6,7 +6,7 @@
 - **关联工单**：[IK7FI6 统一技术栈规则与 Python 存量处置决策](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK7FI6)
 - **关联决策**：[ADR-0061 Prisma 持久化与迁移策略](0061-prisma-persistence-and-migration-policy.md)、[ADR-0068 产品主技术栈与专用计算边界](0068-node-typescript-product-runtime-and-specialized-compute-boundary.md)
 
-Blue-Whale 保留以下核心基础设施组合：MySQL 8.4 + Prisma 作为产品事实的关系型持久化与默认数据访问层；Redis + BullMQ 只承担快速唤醒、延迟调度和分发提示，任务权威、租约、fence 与幂等恢复仍在 MySQL；火山 TOS 保存私有媒体对象，数据库只保存稳定对象键与元数据，经过产品鉴权后签发短期访问 URL；代码库继续使用 pnpm workspace、`workspace:*` 与 TypeScript Project References 组织和构建 Node.js 模块。
+Blue-Whale 保留以下核心基础设施组合：MySQL 8 系列（当前部署为 8.4）+ Prisma 作为产品事实的关系型持久化与默认数据访问层；Redis + BullMQ 只承担快速唤醒、延迟调度和分发提示，任务权威、租约、fence 与幂等恢复仍在 MySQL；火山 TOS 保存私有媒体对象，数据库只保存稳定对象键与元数据，经过产品鉴权后签发短期访问 URL；代码库继续使用 pnpm workspace、`workspace:*` 与 TypeScript Project References 组织和构建 Node.js 模块。
 
 Prisma 不形成禁止原生 SQL 的抽象边界。复杂锁、批处理或已证明的性能热点可以使用经过审查的原生 SQL，但数据库迁移历史仍须遵循 ADR-0061 的单一权威链路。对象存储供应商也不成为 Asset 身份：`asset_id` 与产品归属由数据库管理，TOS 只保存不可公开的对象字节。
 
