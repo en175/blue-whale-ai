@@ -32,12 +32,37 @@ stages:
               registryMirrors:
                 - https://dockerhub.volces.com
               repo: blue_whale_web
-              tag: latest
+              # IK7ERQ 双 tag：latest 保持不变（现有部署脚本/运维习惯不受影响），
+              # 额外推一个含 commit short SHA 的不可变 tag，满足 ADR-0063「生产部署镜像
+              # tag 必须含 commit SHA、禁止用 latest」。有了不可变 tag 才能回滚到具体版本。
+              #
+              # ⚠️ CI_COMMIT_SHORT_SHA 这个变量名尚未在火山控制台实跑验证过——依据是
+              # 78227ec2 留在 pipeline-pay-manager.yml 里的注释「tag 字段支持逗号分隔多
+              # tag」+ 示例 `$(date +%Y%m%d)-${CI_COMMIT_SHORT_SHA},latest`。官方文档为
+              # JS 渲染页，抓不到变量清单。合并前必须在控制台手动跑一次本流水线确认：
+              #   - 变量解析成功 → 仓库里出现 blue_whale_web:<7位sha>
+              #   - 变量没解析 → push 报 invalid tag，把下面这行改回 `tag: latest`，
+              #     并在控制台「环境变量」页查实际变量名后再改（latest 在前，
+              #     即使 sha tag 失败也只是这一次手动构建失败，不影响已在跑的服务）
+              tag: latest,${CI_COMMIT_SHORT_SHA}
+              # IK7ERQ 构建身份：Dockerfile runner 阶段已有 ARG GIT_COMMIT/BUILD_TIME，
+              # 落到 LABEL blue-whale.git-commit / blue-whale.build-time 与同名 ENV，
+              # 因此 `docker inspect` 与容器内环境变量都能回答「这个镜像是哪个 commit」。
+              # 不传时默认 unknown（构建不会失败），传了才有身份——所以必须显式传。
+              # buildArgs 为 KEY=value 字符串列表：格式已由 pipeline-ui-manager.yml
+              # 的 `- PLATFORM=manager` 在同一 buildkit-cr@5.0.0 组件上验证过。
+              buildArgs:
+                - GIT_COMMIT=${CI_COMMIT_SHA}
+                - BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
         outputs:
           - imageOutput_buildkit-cr
         resourcesPolicy: all
         resources:
           limits:
-            cpu: 2C
-            memory: 4Gi
+            # IK7ERQ 上调 2C/4Gi → 4C/8Gi：builder 阶段新增 pnpm test:ci（后端 548 +
+            # web 1688 用例），vitest 按 CPU 数 fork worker 进程，叠加 next build 的
+            # 峰值内存，4Gi 有 OOM 风险（OOM 表现为构建莫名 exit 137，很难排查）。
+            # 4C/8Gi 与同仓 pay-manager/pay-payment 流水线一致，不是新规格。
+            cpu: 4C
+            memory: 8Gi
         dependsOn: []
