@@ -150,6 +150,8 @@ export type ChatMessage =
       applicationAvailability: PlanApplicationAvailability;
       /** 首个图片 GenerationJob；null = 未应用（接线另单交付）。 */
       firstGenerationJobId: WireInteger | null;
+      /** 首图输出缩略图（鉴权 access_url，IK7EP1）；无成功输出时缺省。 */
+      thumbnailUrl?: string;
     };
 /**
  * Canvas —— 画布聚合（提为具名类型）。

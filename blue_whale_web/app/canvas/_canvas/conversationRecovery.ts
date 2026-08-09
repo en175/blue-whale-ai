@@ -16,7 +16,10 @@ export function projectSnapshotToChatMessages(
   const planCardByMessageId = new Map(
     (snapshot.plan_messages ?? [])
       .filter(isImageGeneratePlanMessage)
-      .map((plan) => [String(plan.message_id), projectPlanCard(plan)] as const),
+      .map(
+        (plan) =>
+          [String(plan.message_id), projectPlanCard(plan, snapshot)] as const,
+      ),
   );
   const messages = snapshot.conversation_messages
     .filter(isConversationMessage)
@@ -294,7 +297,12 @@ function isImageGeneratePlanMessage(
 
 function projectPlanCard(
   plan: ImageGeneratePlanMessage,
+  snapshot: ProjectSnapshot,
 ): Extract<ChatMessage, { type: "plan-card" }> {
+  const thumbnailUrl = planFirstOutputThumbnailUrl(
+    snapshot,
+    plan.first_generation_job_id,
+  );
   return {
     id: `plan-message-${String(plan.message_id)}`,
     type: "plan-card",
@@ -305,7 +313,29 @@ function projectPlanCard(
     appliedAt: plan.applied_at,
     applicationAvailability: plan.application_availability,
     firstGenerationJobId: plan.first_generation_job_id,
+    ...(thumbnailUrl ? { thumbnailUrl } : {}),
   };
+}
+
+/**
+ * 首图缩略图（IK7EP1）：取计划首图 GenerationJob 首个成功输出槽对应 Asset 的鉴权 access_url。
+ * 输出未成功或 Asset 投影未到达时返回 null（保守不显示，不伪造部分事实）。
+ */
+function planFirstOutputThumbnailUrl(
+  snapshot: ProjectSnapshot,
+  firstGenerationJobId: WireInteger | null,
+): string | null {
+  if (firstGenerationJobId === null) return null;
+  const job = snapshot.generation_jobs.find(
+    (candidate) => String(candidate.job_id) === String(firstGenerationJobId),
+  );
+  if (!job) return null;
+  for (const output of generationOutputs(job)) {
+    if (!isSuccessfulOutput(job, output)) continue;
+    const asset = generationAsset(snapshot, output);
+    if (asset) return asset.access_url;
+  }
+  return null;
 }
 
 function isConversationMessage(value: Record<string, unknown>): value is Record<
