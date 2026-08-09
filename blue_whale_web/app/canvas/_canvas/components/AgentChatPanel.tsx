@@ -7,7 +7,6 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -152,20 +151,6 @@ export function AgentChatPanel({
   const { applyingPlanIds, planAvailabilityOverrides, handleApplyPlan } =
     usePlanApply({ messages, onApplyPlanMessage });
 
-  const CREATION_MODES = useMemo(
-    () => [
-      { id: "agent", label: "Agent", description: "对话拆解，逐步完善。" },
-      {
-        id: "direct",
-        label: "Direct Gen",
-        description: "根据提示词直接生成图片或视频卡片。",
-      },
-    ],
-    [],
-  );
-
-
-  const [selectedMode] = useState(CREATION_MODES[0]);
   const [selectedModel, setSelectedModel] = useState(AGENT_MODELS[3]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
 
@@ -446,12 +431,8 @@ export function AgentChatPanel({
       clearComposerUploads();
       if (projectId) clearComposerDraft(projectId);
 
-      // 按当前创作模式生成 mock 回复，错开逐条追加模拟逐步生成
-      const reply = buildMockReplyForMode(
-        selectedMode.id as "agent" | "direct",
-        prompt,
-        nextMessageId,
-      );
+      // 离线降级：生成 agent 模式 mock 回复，错开逐条追加模拟逐步生成
+      const reply = buildMockReplyForMode("agent", prompt, nextMessageId);
       reply.forEach((msg, index) => {
         const timer = window.setTimeout(
           () => {
