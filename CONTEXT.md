@@ -543,6 +543,17 @@ _Avoid_: Worker 发明候选外 Creative Skill、把非空资格池当作强制�
 供应商私有请求对象。
 _Avoid_: API Key、动态价格目录、模型供应商原始配置、用通用字符估算冒充所有模型的精确 token 数、流中断且 usage 缺失时按零消耗。
 
+**Agent 推理模型（Agent Reasoning Model）**:
+驱动 AgentChatPanel 对话编排（respond / clarify / cancel / submit_plan）的大模型，经 ModelProfile
+钉入 RunPin，由 agent-worker 装配适配器调用。它与 `generation_model_capability` 的 text 档位
+（TextCompletion 文生文白名单通道）是两条独立链路，互不复用。
+_Avoid_: 文本补全模型、文生文模型、把 Agent 推理与 TextCompletion 混为一条链路
+
+**MiniMax-M3**:
+当前唯一已接入的真实 Agent 推理模型，模型 ID `MiniMax-M3`，ModelProfile 为 `newapi.minimax_m3`，
+经 new-api 网关（blue-whale-api）OpenAI 兼容通道调用，由 `AGENT_RUNTIME_MODE=real` 启用。
+_Avoid_: AM3、MiniMax AM3（错误叫法）、直连 MiniMax 官方 API
+
 **RuntimeBudgetPolicy（运行预算策略）**:
 Product API 为 AgentRun 固定的 Provider 调用、上下文与成本硬限制；Worker 只能在其范围内执行。
 _Avoid_: Worker 重启后计数归零；把本地计数当权威；用户确认后突破系统硬限制。
