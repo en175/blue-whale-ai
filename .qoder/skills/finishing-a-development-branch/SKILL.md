@@ -20,8 +20,8 @@ Guide completion of development work by presenting clear options and handling ch
 **Before presenting options, verify tests pass:**
 
 ```bash
-# Run project's test suite
-npm test / cargo test / pytest / go test ./...
+# Run repository-selected verification
+<repository-selected verification command>
 ```
 
 **If tests fail:**

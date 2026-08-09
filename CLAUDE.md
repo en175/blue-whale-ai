@@ -10,6 +10,7 @@
 | Gitee 工作流（提交/分支/PR/发布/worktree） | `docs/agents/git-workflow.md`（渐进式） |
 | Gitee Issue / 任何 `mcp__gitee-ent__*` 调用 | `docs/agents/issue-tracker.md`（渐进式，首次调用前 Must Read） |
 | 前端 UI 修改（`blue_whale_web/`） | `.claude/rules/frontend.md`（路径作用域，改前端文件时自动加载） |
+| 测试验证（完成/提交/PR/合并前） | `docs/agents/testing-strategy.md`（按影响面选最小充分验证集；同一 HEAD 复用凭证） |
 | PR 模板 / Hook 兜底清单 / 低频细节 | `docs/agents/commit-and-review.md` |
 | 文档直改 master（`CONTEXT.md` / `docs` 散文） | `docs/adr/0025-doc-on-master-allowlist.md` + `scripts/commit-spec-on-master.sh` |
 | 产品文档/技能资产归位（docs/projects、docs/skills） | `docs/README.md`（渐进式，新建产品文档前读） |
@@ -40,6 +41,7 @@
 8. **同族工单串行、契约先行** — 同一契约章节的基础设施先合入，功能工单再开工；跨进程字段先在契约文档定死后实现。细则见 `docs/agents/git-workflow.md`（路由表 Must Read）。
 9. **产品实现技术栈红线** — 只约束直接交付用户能力的产品实现：Web UI 与浏览器业务 API 使用 Next.js App Router / Route Handlers；独立 `agent-worker` / `generation-worker` 使用 Node.js LTS；共享领域、契约与持久化能力位于 TypeScript packages。禁止新增 Java/Python 产品运行时，或恢复已退役的独立 `product-api`、`blue_whale_server`、`blue_whale_agent_worker`；已迁出独立仓库的 `blue_whale_api`、`blue_whale_pay_web`、`blue_whale_pay_server` 不在本仓维护；专用计算例外按路由表中的 ADR-0068 判断。
 10. **工程工具不受产品语言禁令** — Hook、Worktree、Git/PR/发布、Agent 授权与审计等工程协作控制面，以及产品测试、构建/数据库维护等长期工具和一次性脚本，不因产品采用 TypeScript 而必须改写。无关 Python 存量默认不阻塞普通功能工单，也不自动形成迁移任务；分类、触发条件与验收方式按路由表中的 ADR-0070 和处置清单执行。
+11. **验证按影响面分层** — 完成任务时运行仓库选择器给出的最小充分验证集；同一 HEAD 的有效凭证直接复用，代码、基线或影响面变化后重新验证；高风险和未知路径升级全量。细则见 `docs/agents/testing-strategy.md`。
 
 ## 任务状态机（摘要，全文见 `docs/agents/issue-tracker.md`）
 

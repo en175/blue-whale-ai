@@ -11,7 +11,7 @@
   "scripts": {
     "build": "pnpm build:node && pnpm --filter blue_whale build",
     "build:node": "tsc -b --pretty false",
-    "typecheck": "tsc -b --force --pretty false && pnpm --filter blue_whale exec tsc --noEmit",
+    "typecheck": "pnpm --filter @blue-whale/persistence exec prisma generate && tsc -b --force --pretty false && pnpm --filter blue_whale exec tsc --noEmit",
     "lint": "pnpm lint:node && pnpm --filter blue_whale lint",
     "lint:node": "eslint apps packages",
     "test": "pnpm test:node && pnpm --filter blue_whale test",

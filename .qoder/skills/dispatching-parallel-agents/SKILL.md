@@ -81,7 +81,7 @@ Multiple dispatch calls in one response = parallel execution. One per response =
 When agents return:
 - Read each summary
 - Verify fixes don't conflict
-- Run full test suite
+- Run repository-selected verification
 - Integrate all changes
 
 ## Agent Prompt Structure
@@ -156,7 +156,7 @@ Agent 3 → Fix tool-approval-race-conditions.test.ts
 - Agent 2: Fixed event structure bug (threadId in wrong place)
 - Agent 3: Added wait for async tool execution to complete
 
-**Integration:** All fixes independent, no conflicts, full suite green
+**Integration:** All fixes independent, no conflicts, repository-selected verification green
 
 **Time saved:** 3 problems solved in parallel vs sequentially
 
@@ -172,7 +172,7 @@ Agent 3 → Fix tool-approval-race-conditions.test.ts
 After agents return:
 1. **Review each summary** - Understand what changed
 2. **Check for conflicts** - Did agents edit same code?
-3. **Run full suite** - Verify all fixes work together
+3. **Run repository-selected verification** - Verify all fixes work together
 4. **Spot check** - Agents can make systematic errors
 
 ## Real-World Impact
