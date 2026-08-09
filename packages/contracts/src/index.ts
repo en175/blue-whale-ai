@@ -74,6 +74,7 @@ export {
 } from "./agent-runtime.js";
 export {
   planApplicationKindSchema,
+  planCardCandidateBatchSchema,
   planCardCandidateSchema,
   planMessageSchema,
   derivedReferenceSchema,
@@ -86,6 +87,7 @@ export {
   planApplicationAvailabilitySchema,
   deriveProviderPromptProjection,
   type PlanApplicationKind,
+  type PlanCardCandidateBatch,
   type PlanCardCandidate,
   type PlanMessage,
   type DerivedReference,

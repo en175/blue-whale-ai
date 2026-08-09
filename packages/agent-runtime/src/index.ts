@@ -1,4 +1,5 @@
 export { createFakeAgentAdapter } from "./fake-agent-adapter.js";
+export { createNewApiAgentAdapter } from "./real-agent-adapter.js";
 export {
   createControlledChatClient,
   type ControlledChatClient,
@@ -23,8 +24,11 @@ export {
 } from "./skill-summarize.js";
 export {
   bundledAgentRuntimeManifest,
+  isRegisteredAgentModelProfile,
+  resolveAgentRuntimeManifest,
   validateAgentRuntimeManifest,
   AGENT_TOOL_SURFACE_KEYS,
+  type AgentRuntimeEnv,
 } from "./runtime-manifest.js";
 export {
   READ_ASSET_TOOL,

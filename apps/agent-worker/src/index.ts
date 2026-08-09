@@ -1,5 +1,4 @@
 import {
-  createFakeAgentAdapter,
   createSkillSummarizeChatClient,
   createSkillSummarizePipeline,
   createUnavailableSkillSummarizePipeline,
@@ -31,13 +30,18 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 
 import { runAgentWorkerLoop } from "./worker-loop.js";
-import { validateAgentWorkerStartup } from "./startup.js";
+import { createAgentAdapterFromEnv, validateAgentWorkerStartup } from "./startup.js";
 
-validateAgentWorkerStartup();
+const startupManifest = validateAgentWorkerStartup();
 
-if ((process.env.AGENT_RUNTIME_MODE ?? "fake") !== "fake") {
-  throw new Error("Slice 0 only supports AGENT_RUNTIME_MODE=fake");
-}
+// IK7EU4：AGENT_RUNTIME_MODE 白名单装配——fake（默认）走确定性假适配器，
+// real 走 new-api 真实模型适配器（缺 new-api env 时启动即失败）。
+const runtime = createAgentAdapterFromEnv(process.env, startupManifest);
+// RunPin 一致性闸（IK7EU4）：worker 只执行与启动 manifest 选中 profile 一致的 pin。
+const selectedModelProfile = startupManifest.model_profiles.find(
+  (profile) =>
+    profile.model_profile_id === startupManifest.selected_model_profile_id,
+)!;
 
 
 /** 总结管道接线（IK60X1，契约 §15.2）：env 缺 NEW_API_BASE_URL /
@@ -80,7 +84,6 @@ const logger = createLogger("agent-worker");
 
 const pool = createMySqlPool();
 const mysql = createMySqlReadinessProbe(pool);
-const runtime = createFakeAgentAdapter();
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   throw new Error("DATABASE_URL required");
@@ -92,6 +95,7 @@ const workerLoop = runAgentWorkerLoop({
   repo: createAgentRunRepo(prisma),
   runtime,
   summarize: wireSkillSummarize(prisma),
+  modelProfile: selectedModelProfile,
   workerId: process.env.AGENT_WORKER_ID ?? `agent-${randomUUID()}`,
   signal: workerAbort.signal,
   ...(Number.isInteger(rawLeaseMs) && rawLeaseMs > 0

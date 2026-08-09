@@ -6,6 +6,7 @@ import {
   planApplicationAvailabilitySchema,
   planApplicationKindSchema,
   planApplyImageReceiptSchema,
+  planCardCandidateBatchSchema,
   planCardCandidateSchema,
 } from "./plan-message.js";
 
@@ -71,6 +72,29 @@ describe("PlanMessage contract", () => {
         target_scene_card_mention_id: "202",
       }).application_kind,
     ).toBe("scene_card_replace");
+  });
+
+  it("scene_card_replace 必须独占批次", () => {
+    const replacement = {
+      application_kind: "scene_card_replace" as const,
+      title: "覆盖分镜",
+      content_markdown: "覆盖变化。",
+      target_scene_card_mention_id: "202",
+    };
+
+    expect(planCardCandidateBatchSchema.parse([replacement])).toEqual([
+      replacement,
+    ]);
+    expect(() =>
+      planCardCandidateBatchSchema.parse([
+        {
+          application_kind: "image_generate",
+          title: "海报",
+          content_markdown: "生成海报。",
+        },
+        replacement,
+      ]),
+    ).toThrow("scene_card_replace must be the only card in its batch");
   });
 
   it("deriveProviderPromptProjection 不改写正文，未指定帧时角色为 reference", () => {

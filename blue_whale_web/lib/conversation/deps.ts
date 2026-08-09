@@ -1,4 +1,4 @@
-import { bundledAgentRuntimeManifest } from "@blue-whale/agent-runtime";
+import { resolveAgentRuntimeManifest } from "@blue-whale/agent-runtime";
 import {
   createAgentRunRepo,
   createCanvasRepo,
@@ -13,7 +13,9 @@ export function createConversationDeps() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL required");
   const prisma = getPrismaClient(databaseUrl);
-  return createConversationRepo(prisma, bundledAgentRuntimeManifest);
+  // IK7EU4：manifest 按 AGENT_RUNTIME_MODE 解析（与 agent-worker 同源），
+  // 保证 RunPin 的 model_profile 与 worker 装配的适配器一致；默认 fake 不变。
+  return createConversationRepo(prisma, resolveAgentRuntimeManifest());
 }
 
 export function createAgentRunCommandDeps() {

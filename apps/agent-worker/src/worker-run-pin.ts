@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 
 import {
   AGENT_TOOL_SURFACE_KEYS,
+  isRegisteredAgentModelProfile,
 } from "@blue-whale/agent-runtime";
 import type { AgentAdapter } from "@blue-whale/core";
 import {
@@ -28,7 +29,16 @@ export function requireUnique(values: string[], label: string): void {
   }
 }
 
-export function validateRunPin(pin: AgentRunPin, prompt: string): string[] {
+type AgentRuntimeIdentity = Pick<
+  AgentRunPin["model_profile"],
+  "provider" | "model" | "tokenizer"
+>;
+
+export function validateRunPin(
+  pin: AgentRunPin,
+  prompt: string,
+  expectedRuntimeIdentity?: AgentRuntimeIdentity,
+): string[] {
   const { pin_digest: pinDigest, ...pinSource } = pin;
   if (sha256(canonicalAgentRunPinDigestInput(pinSource)) !== pinDigest) {
     throw new Error("runtime_pin_digest_mismatch");
@@ -81,10 +91,19 @@ export function validateRunPin(pin: AgentRunPin, prompt: string): string[] {
   }
 
   const profile = pin.model_profile;
+  // IK7EU4：模型闸从硬编码 fake 三元组改为注册表命中（fake 与 newapi 真实
+  // profile 共用同一份 MODEL_REGISTRY），未注册三元组仍拒绝。
+  if (!isRegisteredAgentModelProfile(profile)) {
+    throw new Error("runtime_pin_model_reference_invalid");
+  }
+  // 只比较决定物理调用的 provider/model/tokenizer，防 env 歪斜（如
+  // web=fake/worker=real）。model_profile_id/context_window_tokens 属于 RunPin
+  // 冻结元数据，不能拿当前 manifest 覆盖或阻断旧任务恢复。
   if (
-    profile.provider !== "fake" ||
-    profile.model !== "deterministic-v1" ||
-    profile.tokenizer !== "fake-v1"
+    expectedRuntimeIdentity &&
+    (profile.provider !== expectedRuntimeIdentity.provider ||
+      profile.model !== expectedRuntimeIdentity.model ||
+      profile.tokenizer !== expectedRuntimeIdentity.tokenizer)
   ) {
     throw new Error("runtime_pin_model_reference_invalid");
   }
@@ -116,7 +135,10 @@ export function validateRunPin(pin: AgentRunPin, prompt: string): string[] {
   });
 }
 
-export function runtimeRequest(work: AgentRunWork): {
+export function runtimeRequest(
+  work: AgentRunWork,
+  expectedRuntimeIdentity?: AgentRuntimeIdentity,
+): {
   request: Parameters<AgentAdapter["invoke"]>[0];
   autoActivation: AutoCreativeSkillActivation | null;
   maxOutputCharacters: number;
@@ -136,7 +158,11 @@ export function runtimeRequest(work: AgentRunWork): {
   ) {
     throw new Error("agent_work_run_pin_projection_mismatch");
   }
-  const runtimeInstructions = validateRunPin(parsed.run_pin, parsed.prompt);
+  const runtimeInstructions = validateRunPin(
+    parsed.run_pin,
+    parsed.prompt,
+    expectedRuntimeIdentity,
+  );
   for (const resource of parsed.run_pin.creative_skill_resources) {
     if (
       sha256(resource.body) !== resource.content_digest ||
