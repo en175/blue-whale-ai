@@ -163,6 +163,23 @@ export const planCardCandidateSchema = z.discriminatedUnion("application_kind", 
     .strict(),
 ]);
 
+/** write_plan_cards 批量候选入参：替换既有 SceneCard 会覆盖唯一目标，必须独占提交，
+ *  避免模型输出通过单卡校验后才在持久化阶段失败。 */
+export const planCardCandidateBatchSchema = z
+  .array(planCardCandidateSchema)
+  .min(1)
+  .superRefine((cards, context) => {
+    if (
+      cards.length > 1 &&
+      cards.some((card) => card.application_kind === "scene_card_replace")
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "scene_card_replace must be the only card in its batch",
+      });
+    }
+  });
+
 /** PlanMessage 冻结后不可变形态（契约 §9）：RunCommit 原子接纳后的权威快照。
  *  replace 的 target 字段非空由提交期校验保证；此处 nullable 以匹配存储形态。 */
 export const planMessageSchema = z
@@ -201,6 +218,9 @@ export type ProviderPromptProjection = z.infer<
   typeof providerPromptProjectionSchema
 >;
 export type PlanCardCandidate = z.infer<typeof planCardCandidateSchema>;
+export type PlanCardCandidateBatch = z.infer<
+  typeof planCardCandidateBatchSchema
+>;
 export type PlanMessage = z.infer<typeof planMessageSchema>;
 
 /** PlanMessage 应用可用性（契约 §9 / T10）：把素材可用性 + 能力漂移 + 余额状态收敛为

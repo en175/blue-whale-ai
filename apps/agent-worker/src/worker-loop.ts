@@ -3,7 +3,7 @@
 import type {AgentAdapter} from "@blue-whale/core";
 import {createLogger, getOrCreateTraceId, runWithTraceId} from "@blue-whale/core/logging";
 import {type SkillSummarizePipeline} from "@blue-whale/agent-runtime";
-import {planCardCandidateSchema, type PlanCardCandidate} from "@blue-whale/contracts";
+import {planCardCandidateBatchSchema, type AgentRunPin, type PlanCardCandidate} from "@blue-whale/contracts";
 import type {AgentRunRepo, AgentRunWork, CommitAgentRunResult} from "@blue-whale/persistence";
 
 const logger = createLogger("agent-worker");
@@ -17,6 +17,7 @@ async function executeAdvance(
     repo: AgentRunRepo;
     runtime: AgentAdapter;
     summarize?: SkillSummarizePipeline;
+    modelProfile?: AgentRunPin["model_profile"];
   },
   work: AgentRunWork,
 ): Promise<ProducedResult> {
@@ -105,6 +106,10 @@ export async function runAgentWorkerOnce(input: {
   /** 对话总结管道（IK60X1，契约 §15.2）：claim 到带 skill_summarize 标记的 Run
    *  或会话存在 pending 待确认记录时分流；确认模式判定无关 → pass_through 回退 runtime。 */
   summarize?: SkillSummarizePipeline;
+  /** worker 已解析 manifest 的选中 model profile（IK7EU4）：传入后只校验
+   *  provider/model/tokenizer 物理运行时身份，防 web/worker env 歪斜；RunPin
+   *  自带的 profile ID 与上下文元数据继续按冻结快照恢复。 */
+  modelProfile?: AgentRunPin["model_profile"];
   leaseMs?: number;
   heartbeatIntervalMs?: number;
 }): Promise<AgentWorkerOnceResult> {
@@ -277,10 +282,11 @@ async function produceResult(
   input: {
     runtime: AgentAdapter;
     summarize?: SkillSummarizePipeline;
+    modelProfile?: AgentRunPin["model_profile"];
   },
   work: AgentRunWork,
 ): Promise<ProducedResult> {
-  const prepared = runtimeRequest(work);
+  const prepared = runtimeRequest(work, input.modelProfile);
   if (
     input.summarize &&
     (work.skillSummarize || (await input.summarize.hasPending(work)))
@@ -308,7 +314,7 @@ async function produceResult(
   let planCards: PlanCardCandidate[] | null = null;
   if (result.action.kind === "submit_plan") {
     const converted = corePlanCardsToContract(result.action.cards);
-    const parsed = planCardCandidateSchema.array().min(1).safeParse(converted);
+    const parsed = planCardCandidateBatchSchema.safeParse(converted);
     if (!parsed.success) {
       throw new Error("adapter produced invalid plan cards");
     }
@@ -371,6 +377,7 @@ export async function runAgentWorkerLoop(input: {
   runtime: AgentAdapter;
   workerId: string;
   summarize?: SkillSummarizePipeline;
+  modelProfile?: AgentRunPin["model_profile"];
   signal: AbortSignal;
   idleDelayMs?: number;
   leaseMs?: number;

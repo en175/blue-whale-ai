@@ -109,6 +109,56 @@ describe("runAgentWorkerOnce", () => {
     );
   });
 
+  it("rejects an adapter batch that mixes scene_card_replace with another card", async () => {
+    const commitPlanMessages = vi.fn();
+    const commitFailure = vi.fn().mockResolvedValue({
+      kind: "committed",
+      cursor: "10",
+      status: "failed",
+    });
+    const invoke = vi.fn().mockResolvedValue({
+      provider: "fake",
+      content: "提交混合计划。",
+      reasoningSummary: "需求已确认。",
+      action: {
+        kind: "submit_plan",
+        cards: [
+          {
+            applicationKind: "image_generate",
+            title: "海报",
+            contentMarkdown: "生成海报。",
+          },
+          {
+            applicationKind: "scene_card_replace",
+            title: "替换场景",
+            contentMarkdown: "替换变化。",
+            targetSceneCardMentionId: "202",
+          },
+        ],
+      },
+    });
+
+    await runAgentWorkerOnce({
+      repo: {
+        claimNext: vi.fn().mockResolvedValue(work()),
+        renewLease: vi.fn().mockResolvedValue(true),
+        commitPlanMessages,
+        commitFailure,
+        ...providerCallMocks(),
+      },
+      runtime: { name: "fake", ready: async () => true, invoke },
+      workerId: "worker-1",
+    });
+
+    expect(commitPlanMessages).not.toHaveBeenCalled();
+    expect(commitFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failureCode: "runtime_error",
+        failureMessage: "adapter produced invalid plan cards",
+      }),
+    );
+  });
+
   it("selects at most one frozen auto candidate by exact name and commits the safe reason", async () => {
     const body = "# Poster instructions";
     const digest = `sha256:${createHash("sha256").update(body).digest("hex")}`;

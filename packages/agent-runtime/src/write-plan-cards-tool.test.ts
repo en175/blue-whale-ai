@@ -44,4 +44,24 @@ describe("executeWritePlanCardsTool", () => {
       }),
     ).toThrowError();
   });
+
+  it("rejects scene_card_replace mixed with another card", () => {
+    expect(() =>
+      writePlanCardsToolInputSchema.parse({
+        cards: [
+          {
+            application_kind: "image_generate",
+            title: "海报",
+            content_markdown: "# 海报",
+          },
+          {
+            application_kind: "scene_card_replace",
+            title: "覆盖分镜",
+            content_markdown: "# 覆盖分镜",
+            target_scene_card_mention_id: "202",
+          },
+        ],
+      }),
+    ).toThrow("scene_card_replace must be the only card in its batch");
+  });
 });

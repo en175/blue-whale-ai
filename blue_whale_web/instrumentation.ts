@@ -31,9 +31,10 @@ export async function register(manifest?: unknown): Promise<void> {
   runWithTraceId = logging.runWithTraceId;
   generateTraceId = logging.generateTraceId;
   closeDefaultTlsLogWriter = logging.closeDefaultTlsLogWriter;
-  const { bundledAgentRuntimeManifest, validateAgentRuntimeManifest } =
+  const { resolveAgentRuntimeManifest, validateAgentRuntimeManifest } =
     await import("@blue-whale/agent-runtime");
-  validateAgentRuntimeManifest(manifest ?? bundledAgentRuntimeManifest);
+  // IK7EU4：默认 manifest 按 AGENT_RUNTIME_MODE 解析（与 agent-worker 同源）。
+  validateAgentRuntimeManifest(manifest ?? resolveAgentRuntimeManifest());
   const globalKey = "__blueWhaleImageRecoveryStarted";
   const g = globalThis as unknown as Record<string, unknown>;
   if (g[globalKey]) return;
