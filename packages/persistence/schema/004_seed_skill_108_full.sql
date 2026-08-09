@@ -3,9 +3,10 @@
 -- 生成时间：2026-08-05 | 数据源：测试库已验证的 108 行状态（mysqldump）
 -- 适用：全新生产库（blue_whale）——表结构来自 001_baseline.sql（无 skill_code 列）
 -- 概览：幂等 ALTER 加 skill_code + 唯一键 + 108 行 INSERT IGNORE（空库/已有库均可跑）
--- 生产执行：从生产机 docker run --rm --network host mysql:8 mysql -h10.0.1.176 -P4407 -u<账号> -p<口令> blue_whale < 004_seed_skill_108_full.sql
+-- 生产执行：从生产机 docker run --rm --network host mysql:8 mysql --default-character-set=utf8mb4 -h10.0.1.176 -P4407 -u<账号> -p<口令> blue_whale < 004_seed_skill_108_full.sql
 -- 验收：执行后 skill=108（is_delete=0）、skill_code 108/108 有值、33 封面按 skill_code 挂载
 -- ============================================================
+SET NAMES utf8mb4;
 USE blue_whale;
 
 -- ---------- 0. 确保 skill_code 列存在（幂等） ----------
