@@ -10,12 +10,16 @@ describe("PlanApplicationRepo.applyPlanMessage（覆盖分支 / IK67HA）", () =
 
   it("成功覆盖：UPDATE 既有卡（version+1）+ 新建 receipt/record/job，保留既有记录（AC#5）", async () => {
     const planRow = buildReplacePlanMessageRow();
+    const REPLACE_RECORD_ID = 7501n;
     const tx = buildTx({
       plan_messages: { findUnique: vi.fn().mockResolvedValue(planRow) },
       conversation_message_mentions: {
         findUnique: vi.fn().mockResolvedValue(buildTargetMention()),
       },
       scene_cards: { findUnique: vi.fn().mockResolvedValue(buildTargetSceneCard()) },
+      scene_card_generation_records: {
+        create: vi.fn().mockResolvedValue({ id: REPLACE_RECORD_ID }),
+      },
     });
     const { repo } = repoWith(tx);
 
@@ -45,6 +49,14 @@ describe("PlanApplicationRepo.applyPlanMessage（覆盖分支 / IK67HA）", () =
     expect(presetUpdateArg.where).toEqual({ scene_card_id: TARGET_SCENE_CARD_ID, is_delete: 0 });
     expect(presetUpdateArg.data.version).toEqual({ increment: 1 });
     expect(tx.scene_card_generation_records.create).toHaveBeenCalledOnce();
+    // IK7GRT：与 create / regenerate 同款——record 创建后回填首个 job 的输出槽绑定该 record，
+    // 使汇总同步与 Snapshot 投影对 replace 路径同样成立（堵住「少一次调用」的既有测试盲区）。
+    expect(tx.generation_output_slots.updateMany).toHaveBeenCalledOnce();
+    const slotBackfillArg = tx.generation_output_slots.updateMany.mock.calls[0][0];
+    expect(slotBackfillArg.where).toEqual({ generation_job_id: 9001n });
+    expect(slotBackfillArg.data).toEqual({
+      scene_card_generation_record_id: REPLACE_RECORD_ID,
+    });
     const receiptArg = tx.plan_application_receipts.create.mock.calls[0][0].data;
     expect(receiptArg.application_kind).toBe("scene_card_replace");
     expect(receiptArg.result_version).toBe(2);
