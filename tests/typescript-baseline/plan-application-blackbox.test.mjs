@@ -450,31 +450,28 @@ test("Canvas 放置：scene_card 节点入画布且同一 SceneCard 最多一个
   assert.equal(applied.body.code, 200);
   const sceneCardId = String(applied.body.data?.scene_card_id);
 
-  // 放置是异步最佳努力，轮询 canvas 节点出现。
+  // 放置在 apply 路由内同步 await（最佳努力，失败不回滚）；轮询仅为兼容异步边界。
+  // 现行节点契约（PR !333 起）：type="scene-card"、data.sceneCardId、无 status 字段。
+  const isSceneCardNode = (node) =>
+    node.type === "scene-card" &&
+    String(node.data?.sceneCardId) === sceneCardId;
   const placed = await waitFor(() => {
     const nodes = mysqlJson(
       `SELECT nodes_json FROM canvas WHERE project_id=${projectId}`,
     );
     const list = Array.isArray(nodes) ? nodes : [];
-    const matching = list.filter(
-      (node) =>
-        node.type === "scene_card" && String(node.scene_card_id) === sceneCardId,
-    );
+    const matching = list.filter(isSceneCardNode);
     return matching.length === 1 ? matching[0] : null;
   }, 10_000, "服务=web 事实=Canvas 应放置 scene_card 节点");
 
   assert.ok(placed.position, "节点应带 position");
-  assert.equal(placed.status, "pending");
 
   // 再次应用同计划（新 CommandId 会 already_applied；这里直接复验节点不重复）。
   const nodesAfter = mysqlJson(
     `SELECT nodes_json FROM canvas WHERE project_id=${projectId}`,
   );
   const list = Array.isArray(nodesAfter) ? nodesAfter : [];
-  const count = list.filter(
-    (node) =>
-      node.type === "scene_card" && String(node.scene_card_id) === sceneCardId,
-  ).length;
+  const count = list.filter(isSceneCardNode).length;
   assert.equal(count, 1, "同一 SceneCard 最多一个节点");
 }, 90_000);
 
