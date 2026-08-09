@@ -125,11 +125,12 @@ ensure_new_api_account() {
 
 wait_mysql_initdb() {
   # mysqladmin ping 通过不代表 /docker-entrypoint-initdb.d 建表脚本跑完；
-  # 以基线种子数据（002_seed.sql）就绪为准。
+  # 以基线种子数据（002_seed.sql）就绪为准：该表有 ≥1 条启用记录即可，
+  # 不绑死具体计数（基线 seed 演进时 enabled 条数会变，硬编码会误判超时）。
   local deadline=$((SECONDS + 180))
   while [ "$SECONDS" -lt "$deadline" ]; do
     if dc exec -T mysql mysql -uroot -pblue_whale -N -B blue_whale -e \
-      "SELECT COUNT(*) FROM generation_model_capability WHERE enabled = 1" 2>/dev/null | grep -q "^2$"; then
+      "SELECT COUNT(*) FROM generation_model_capability WHERE enabled = 1" 2>/dev/null | grep -qE "^[1-9][0-9]*$"; then
       return 0
     fi
     sleep 3
