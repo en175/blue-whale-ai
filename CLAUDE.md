@@ -6,6 +6,7 @@
 | --- | --- |
 | 启动/调试本地服务（起环境、连数据库） | `.qoder/skills/start-local-services/SKILL.md`（`.claude`/`.zcode` 为同步副本）+ `docs/adr/0064-testsite-db-access-governance.md`（红线：本地配置禁现测试站连接串，应急只走 `scripts/tunnel-testsite-db.sh`） |
 | 代码理解（查结构 / 调用链 / 架构） | `docs/agents/code-intelligence.md`（渐进式；结构查询先 CBM，不可用才降级 grep/glob） |
+| 判断产品实现技术栈 / Python 工具是否需要处置 | [ADR-0068](docs/adr/0068-node-typescript-product-runtime-and-specialized-compute-boundary.md) + [ADR-0070](docs/adr/0070-product-runtime-stack-does-not-govern-engineering-control-plane.md)；逐项结论见 [Python 存量处置清单](docs/specs/2026-08-09-ik7fi6-python-inventory-disposition.md) |
 | Gitee 工作流（提交/分支/PR/发布/worktree） | `docs/agents/git-workflow.md`（渐进式） |
 | Gitee Issue / 任何 `mcp__gitee-ent__*` 调用 | `docs/agents/issue-tracker.md`（渐进式，首次调用前 Must Read） |
 | 前端 UI 修改（`blue_whale_web/`） | `.claude/rules/frontend.md`（路径作用域，改前端文件时自动加载） |
@@ -37,7 +38,8 @@
 6. **授权无二次弹框** — 只认当前对话中的人类授权；Agent 自动使用 `--user-authorized` 或一次性凭证（提交入口除外：worktree 工单分支 commit 本地可逆，出现即放行），Hook 只纠偏和硬拦，不返回 ASK。
 7. **文档驱动、Hook 兜底** — Agent 优先依据本文件及路由规则主动调用标准入口；Hook 只在检测到绕过、缺授权、缺模式或危险 Git 操作时阻断，禁止让 Hook 自动同步、选择策略或推进正常状态机。
 8. **同族工单串行、契约先行** — 同一契约章节的基础设施先合入，功能工单再开工；跨进程字段先在契约文档定死后实现。细则见 `docs/agents/git-workflow.md`（路由表 Must Read）。
-9. **技术栈红线** — 新代码只允许 Node.js/TypeScript 体系（Next.js `blue_whale_web` + `apps/` 下 `agent-worker`/`generation-worker` 与 `packages/`；独立 `product-api` 进程已退役，浏览器业务 API 折进 Next.js Route Handlers，见 [ADR-0059](docs/adr/0059-business-api-into-nextjs-route-handlers.md)）；`blue_whale_server`（Java）与 `blue_whale_agent_worker`（Python）已退役，禁止写入；`blue_whale_api`（new-api，Go）与 `blue_whale_pay_web`/`blue_whale_pay_server`（支付，Java）已迁出至独立仓库 `blue-whale-api` / `blue-whale-pay`，不在本仓维护。旧目录与旧文档中的 Java/Python 方案不是现行方案，范围以 [ADR-0055](docs/adr/0055-prelaunch-typescript-unification-scope.md) 为准。
+9. **产品实现技术栈红线** — 只约束直接交付用户能力的产品实现：Web UI 与浏览器业务 API 使用 Next.js App Router / Route Handlers；独立 `agent-worker` / `generation-worker` 使用 Node.js LTS；共享领域、契约与持久化能力位于 TypeScript packages。禁止新增 Java/Python 产品运行时，或恢复已退役的独立 `product-api`、`blue_whale_server`、`blue_whale_agent_worker`；已迁出独立仓库的 `blue_whale_api`、`blue_whale_pay_web`、`blue_whale_pay_server` 不在本仓维护；专用计算例外按路由表中的 ADR-0068 判断。
+10. **工程工具不受产品语言禁令** — Hook、Worktree、Git/PR/发布、Agent 授权与审计等工程协作控制面，以及产品测试、构建/数据库维护等长期工具和一次性脚本，不因产品采用 TypeScript 而必须改写。无关 Python 存量默认不阻塞普通功能工单，也不自动形成迁移任务；分类、触发条件与验收方式按路由表中的 ADR-0070 和处置清单执行。
 
 ## 任务状态机（摘要，全文见 `docs/agents/issue-tracker.md`）
 
