@@ -2832,6 +2832,11 @@ fi
 rm -rf "$CASE_PROBE_DIR"
 unset CASE_PROBE_DIR
 
+# Slice 9 — 本地 merge 冲突解决后的标准续接入口
+run_command_hook "bash \"$REPO_ROOT/scripts/tests/test_merge_task_to_local_master.sh\"" ""
+assert_exit 0 "merge-entry: 冲突解决后通过标准入口续接"
+assert_stdout_has "PASS: merge-task-to-local-master 冲突续接" "merge-entry: 续接黑盒覆盖成功与未解决冲突"
+
 # 恢复调用者环境并删除全局审计隔离仓库。
 if [ -n "$ORIGINAL_CLAUDE_PROJECT_DIR" ]; then
   CLAUDE_PROJECT_DIR="$ORIGINAL_CLAUDE_PROJECT_DIR"
