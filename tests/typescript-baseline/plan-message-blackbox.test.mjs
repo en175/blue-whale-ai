@@ -317,7 +317,7 @@ test("覆盖场景卡标记产独占 scene_card_replace 并绑定本轮场景卡
   const plan = plans[0];
   assert.equal(plan.application_kind, "scene_card_replace");
   assert.equal(
-    plan.target_scene_card_mention_id,
+    String(plan.target_scene_card_mention_id),
     String(data.mentions[0].mention_id),
   );
   // base_scene_card_version 由 Product API 从 mention.target_version 解析（=3）。
@@ -325,30 +325,39 @@ test("覆盖场景卡标记产独占 scene_card_replace 并绑定本轮场景卡
 }, 60_000);
 
 test("引用素材失效时零 plan 写入，Run 进入终态（AC#2/#8）", async () => {
-  const assetId = insertAsset(owner.userId, projectId, "scenario4");
-  const data = await postCreationMessage(projectId,
-    owner.token,
-    "@[失效素材] 创作：主体：蓝鲸 预期：海报 立即出计划",
-    [{ type: "asset", asset_id: assetId, display_name: "失效素材" }],
-  );
-  const agentRunId = String(data.agent_run_id);
-  // 接纳后、Worker claim 前软删素材：快照冻结为 unavailable，闸门拦截 → Run failed，零 plan。
-  mysqlQuery(`UPDATE assets SET is_delete=true WHERE id=${assetId}`);
-  const run = await waitForRun(projectId, owner.token, agentRunId);
-  assert.notEqual(run.status, "completed", "服务=worker 事实=失效引用不得完成");
-  assert.equal(run.failure_code, "mention_input_unavailable");
+  // 确定性构造撤权窗口：先停 Worker 再发消息——无 claim 则软删必先于冻结；
+  // 若先启 Worker，fake 运行时会在百毫秒内完成 Run，黑盒层无法稳定竞态（文件头注释）。
+  compose("stop", "-t", "5", "agent-worker");
+  try {
+    const assetId = insertAsset(owner.userId, projectId, "scenario4");
+    const data = await postCreationMessage(projectId,
+      owner.token,
+      "@[失效素材] 创作：主体：蓝鲸 预期：海报 立即出计划",
+      [{ type: "asset", asset_id: assetId, display_name: "失效素材" }],
+    );
+    const agentRunId = String(data.agent_run_id);
+    // Worker 停摆期间软删素材：claim 时快照冻结即见 unavailable，闸门拦截 → Run failed，零 plan。
+    mysqlQuery(`UPDATE assets SET is_delete=true WHERE id=${assetId}`);
+    compose("start", "agent-worker");
+    const run = await waitForRun(projectId, owner.token, agentRunId);
+    assert.notEqual(run.status, "completed", "服务=worker 事实=失效引用不得完成");
+    assert.equal(run.failure_code, "mention_input_unavailable");
 
-  const snapshot = await fetchSnapshot(projectId, owner.token);
-  const plans = snapshot.plan_messages.filter(
-    (item) => String(item.agent_run_id) === agentRunId,
-  );
-  assert.equal(plans.length, 0, "服务=mysql 事实=失效 Run 不得产生任何 plan_message");
-  const planMessageRows = snapshot.conversation_messages.filter(
-    (item) =>
-      String(item.agent_run_id) === agentRunId &&
-      item.content_type === "plan_message",
-  );
-  assert.equal(planMessageRows.length, 0);
+    const snapshot = await fetchSnapshot(projectId, owner.token);
+    const plans = snapshot.plan_messages.filter(
+      (item) => String(item.agent_run_id) === agentRunId,
+    );
+    assert.equal(plans.length, 0, "服务=mysql 事实=失效 Run 不得产生任何 plan_message");
+    const planMessageRows = snapshot.conversation_messages.filter(
+      (item) =>
+        String(item.agent_run_id) === agentRunId &&
+        item.content_type === "plan_message",
+    );
+    assert.equal(planMessageRows.length, 0);
+  } finally {
+    // 保证后续用例的 Worker 可用（start 幂等：已运行时不动作）。
+    compose("start", "agent-worker");
+  }
 }, 60_000);
 
 test("Worker 重启后 plan_messages 完整、无重复、无临时候选（AC#8）", async () => {
@@ -369,7 +378,7 @@ test("Worker 重启后 plan_messages 完整、无重复、无临时候选（AC#8
   // 临时候选永不进入 Snapshot 的 plan_messages。
   assert.ok(
     snapshotAfter.plan_messages.every(
-      (item) => typeof item.message_id === "string",
+      (item) => item.message_id != null && String(item.message_id).length > 0,
     ),
   );
 }, 90_000);

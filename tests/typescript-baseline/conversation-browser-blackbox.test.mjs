@@ -663,6 +663,22 @@ test("PlanPhase 完成后在 AgentChatPanel 展示正式 PlanMessage（IK6QHI）
   await page.keyboard.type("主体：蓝鲸，预期：极简海报");
   await page.getByLabel("发送").click();
 
+  await waitFor(
+    async () => {
+      const current = await fetchSnapshot(projectId, user.token);
+      const currentRun = current.agent_runs.at(-1);
+      return currentRun?.status === "awaiting_input" &&
+        currentRun.stage === "awaiting_final_confirmation"
+        ? true
+        : null;
+    },
+    60_000,
+    "服务=Snapshot 事实=复述提交后应等待最终确认",
+  );
+
+  // SSE 展示可能先于或晚于 Snapshot；刷新后以权威 Snapshot 恢复 UI，
+  // 同时保证 composer 绑定的是最新待回答请求。
+  await openCanvas(projectId);
   await page.waitForFunction(
     () =>
       Array.from(document.querySelectorAll(".tc-agent-agent-bubble")).some(
@@ -675,7 +691,18 @@ test("PlanPhase 完成后在 AgentChatPanel 展示正式 PlanMessage（IK6QHI）
 
   await page.click(".tc-agent-composer-editor");
   await page.keyboard.type("同意");
+  const finalSubmission = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith(`/api/projects/${projectId}/conversation/messages`),
+  );
   await page.getByLabel("发送").click();
+  const finalResponse = await finalSubmission;
+  assert.equal(
+    finalResponse.status(),
+    202,
+    `服务=web 事实=最终确认应被接纳（响应：${await finalResponse.text()}）`,
+  );
 
   await waitFor(
     async () => {
