@@ -498,7 +498,7 @@ export function AgentChatPanel({
 
     onSetCardStatus?.(card.id, "generating");
 
-    // DEMO 固定成功：generating 800ms 后落到终态 normal（状态机不变量由 cardStatus.test.ts 覆盖）
+    // DEMO 固定成功：generating 800ms 后落到终态 normal
     const timer = window.setTimeout(() => {
       onSetCardStatus?.(card.id, "normal");
     }, 800);
