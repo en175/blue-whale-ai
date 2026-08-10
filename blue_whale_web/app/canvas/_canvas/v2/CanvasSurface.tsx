@@ -100,6 +100,10 @@ export type CanvasSurfaceProps = {
   pickingAccept?: MediaKind[];
   /** IK55VD 有效工具模式（页面层已合成 持久模式 OR 空格），默认鼠标。 */
   toolMode?: ToolMode;
+  /** IK76K1：撤销/重做回调 */
+  onUndo?: () => void;
+  onRedo?: () => void;
+  onDragStart?: () => void;
   children?: ReactNode;
 };
 
@@ -136,6 +140,9 @@ export function CanvasSurface({
   picking,
   pickingAccept,
   toolMode = "mouse",
+  onUndo,
+  onRedo,
+  onDragStart,
   children,
 }: CanvasSurfaceProps) {
   const {
@@ -319,6 +326,7 @@ export function CanvasSurface({
   );
 
   // ctrl/cmd +/- 缩放、0 自适应；拦截浏览器缩放
+  // IK76K1：Ctrl+Z/Cmd+Z 撤销，Ctrl+Shift+Z/Cmd+Shift+Z 重做
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -332,11 +340,30 @@ export function CanvasSurface({
       } else if (e.key === "0") {
         e.preventDefault();
         fitView();
+      } else if ((e.key === "z" || e.key === "Z") && !e.shiftKey) {
+        // 输入框内不拦截（允许原生文字撤销）
+        if (
+          e.target instanceof HTMLInputElement ||
+          e.target instanceof HTMLTextAreaElement ||
+          (e.target as HTMLElement)?.isContentEditable
+        )
+          return;
+        e.preventDefault();
+        onUndo?.();
+      } else if ((e.key === "z" || e.key === "Z") && e.shiftKey) {
+        if (
+          e.target instanceof HTMLInputElement ||
+          e.target instanceof HTMLTextAreaElement ||
+          (e.target as HTMLElement)?.isContentEditable
+        )
+          return;
+        e.preventDefault();
+        onRedo?.();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [zoomIn, zoomOut, fitView]);
+  }, [zoomIn, zoomOut, fitView, onUndo, onRedo]);
 
   const nodeActionsValue = useMemo(
     () => ({
@@ -422,6 +449,7 @@ export function CanvasSurface({
           onNodeClick={(_e, node) =>
             onNodeClick?.(node as unknown as CanvasNode)
           }
+          onNodeDragStart={() => onDragStart?.()}
           onNodeDrag={handleNodeDrag}
           onNodeDragStop={handleNodeDragStop}
           onPaneClick={() => onPaneClick?.()}

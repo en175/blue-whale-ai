@@ -167,6 +167,12 @@ export function CanvasProjectRuntime({
     removeNodeAndSave,
     setViewport: setViewportAction,
     load: loadDoc,
+    // IK76K1：撤销/重做
+    pushUndo,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   } = useCanvasDoc();
   const assets = useCanvasStore((s) => s.assets);
   const addAsset = useCanvasStore((s) => s.addAsset);
@@ -636,6 +642,9 @@ export function CanvasProjectRuntime({
         sceneCards,
         toolMode: effectiveMode,
         onNodeMenu: handleNodeMenuOpen,
+        onUndo: undo,
+        onRedo: redo,
+        onDragStart: pushUndo,
       }}
       menus={{
         canvas: menu,

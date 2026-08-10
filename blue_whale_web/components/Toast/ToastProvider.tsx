@@ -56,6 +56,29 @@ function ToastBar({
       }}
     >
       <span style={{ flex: "1 1 0%", minWidth: 0 }}>{item.message}</span>
+      {item.action && (
+        <button
+          type="button"
+          onClick={() => {
+            item.action!.onClick();
+            onDismiss(item.id);
+          }}
+          style={{
+            flexShrink: 0,
+            padding: "2px 10px",
+            border: 0,
+            borderRadius: 6,
+            background: "var(--tc-accent)",
+            color: "var(--tc-on-accent, #ffffff)",
+            cursor: "pointer",
+            fontSize: 12,
+            fontWeight: 600,
+            lineHeight: "18px",
+          }}
+        >
+          {item.action.label}
+        </button>
+      )}
       <button
         type="button"
         aria-label="关闭通知"

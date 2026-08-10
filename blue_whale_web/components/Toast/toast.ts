@@ -6,10 +6,16 @@
 
 export type ToastType = "error" | "success";
 
+export type ToastAction = {
+  label: string;
+  onClick: () => void;
+};
+
 export type ToastItem = {
   id: string;
   type: ToastType;
   message: string;
+  action?: ToastAction;
 };
 
 export type ToastListener = (items: readonly ToastItem[]) => void;
@@ -28,9 +34,14 @@ function uid(): string {
   return `toast-${Date.now()}-${nextId}`;
 }
 
-function push(type: ToastType, message: string, durationMs = 4000) {
+function push(
+  type: ToastType,
+  message: string,
+  durationMs = 4000,
+  action?: ToastAction,
+) {
   const id = uid();
-  items = [...items, { id, type, message }];
+  items = [...items, { id, type, message, action }];
   notify();
   setTimeout(() => {
     items = items.filter((t) => t.id !== id);
@@ -44,6 +55,10 @@ export const toast = {
   },
   success(message: string) {
     push("success", message);
+  },
+  /** IK76K1：带 action 按钮的 info toast（节点删除撤销等场景）。 */
+  info(message: string, action?: ToastAction, durationMs = 3000) {
+    push("success", message, durationMs, action);
   },
   /** 手动消除一条 toast（提前关闭或 dismiss） */
   dismiss(id: string) {

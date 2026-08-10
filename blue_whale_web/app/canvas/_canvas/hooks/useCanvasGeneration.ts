@@ -46,6 +46,9 @@ import { parseAspectRatio } from "../aspectRatio";
 import { projectRecoveryTransport } from "@/lib/project-recovery";
 import { wireInteger, type WireInteger } from "@/lib/wire-integer";
 
+// IK76K1：生成并发上限，与积分体系工单 IK65OQ 同源
+const MAX_CONCURRENT_GENERATION = 3;
+
 function parseQuantity(q: string): number {
   const n = parseInt(q, 10);
   return Number.isNaN(n) ? 1 : n;
@@ -223,6 +226,14 @@ export function useCanvasGeneration(deps: UseCanvasGenerationDeps) {
       if (!trimmed || !projectId) return;
       setGenerating(true);
       setGenerateError(null);
+      // IK76K1：生成并发上限检查
+      if (jobs.activeCount() >= MAX_CONCURRENT_GENERATION) {
+        setGenerateError(
+          `已有 ${MAX_CONCURRENT_GENERATION} 个任务正在生成，请等待已有任务完成后再提交`,
+        );
+        setGenerating(false);
+        return;
+      }
       let placeholderId: string | null = null;
       try {
         if (args.mode === "image") {

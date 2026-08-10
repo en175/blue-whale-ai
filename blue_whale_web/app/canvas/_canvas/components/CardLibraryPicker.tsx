@@ -1,4 +1,4 @@
-// IK55VX 卡片库(共享资产)选择器 — 居中模态:文件夹侧栏 + tabs 行(全部/资产▾/各媒体) +
+// IK76K1 卡片库(共享资产)选择器 — 扁平模态:tabs 行(全部/资产▾/各媒体) +
 // 搜索 + 选择 + 网格(封面/名称/类型徽章/日期/···);点击卡片弹放大详情浮窗(「添加到画布」=导入)。
 // 视觉 1:1 按产品截图(用户确认的原型);数据走 cardLibrary mock(导入=复制快照,不回写库)。
 // 复用:商品卡导入(IK55VZ)传 cardTypeFilter={["product"]} 即可沿用。
@@ -11,8 +11,6 @@ import {
   Box,
   Check,
   ChevronDown,
-  Folder,
-  FolderPlus,
   Image as ImageIcon,
   LayoutGrid,
   MoreHorizontal,
@@ -252,8 +250,7 @@ export function CardLibraryPicker({
   const [cardType, setCardType] = useState<ReferenceCardType | "all">("all");
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [folder, setFolder] = useState("全部资产");
-  const [folders, setFolders] = useState(["default"]);
+  // IK76K1 移除文件夹侧栏：folder/folders 状态已删除
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<CardLibraryItem | null>(null);
@@ -331,7 +328,7 @@ export function CardLibraryPicker({
       <Overlay
         ariaLabel="共享资产"
         onClose={onClose}
-        width={1040}
+        width={840}
         height="min(72vh, 720px)"
         closeOnEscape={!detail}
       >
@@ -356,61 +353,8 @@ export function CardLibraryPicker({
           </button>
         </div>
 
-        <div className="mt-3 flex min-h-0 flex-1">
-          {/* 文件夹侧栏(截图2;mock 无文件夹语义,仅呈现) */}
-          <div
-            className="flex w-[200px] shrink-0 flex-col gap-1 border-r px-3 pb-4"
-            style={{ borderColor: "var(--tc-border-subtle)" }}
-          >
-            {["全部资产", ...folders].map((f) => (
-              <button
-                key={f}
-                type="button"
-                onClick={() => setFolder(f)}
-                className="flex items-center justify-between rounded-lg px-3 py-2.5 text-left text-[13px]"
-                style={{
-                  background:
-                    folder === f ? "var(--tc-bg-elevated)" : "transparent",
-                  color:
-                    folder === f
-                      ? "var(--tc-text-primary)"
-                      : "var(--tc-text-secondary)",
-                }}
-              >
-                <span className="flex items-center gap-2">
-                  {f === "全部资产" ? (
-                    <LayoutGrid size={14} />
-                  ) : (
-                    <Folder size={14} />
-                  )}
-                  {f}
-                </span>
-                <span
-                  className="text-[11px]"
-                  style={{ color: "var(--tc-text-muted)" }}
-                >
-                  {items.length}
-                </span>
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() =>
-                setFolders((fs) => [...fs, `新建文件夹 ${fs.length}`])
-              }
-              className="mt-1 flex items-center justify-center gap-1.5 rounded-lg border border-dashed px-3 py-2.5 text-[13px]"
-              style={{
-                borderColor: "var(--tc-border-subtle)",
-                color: "var(--tc-text-muted)",
-              }}
-            >
-              <FolderPlus size={14} />
-              新建文件夹
-            </button>
-          </div>
-
-          {/* 主区 */}
-          <div className="flex min-w-0 flex-1 flex-col px-5 pb-4">
+        {/* IK76K1：移除文件夹侧栏，弹窗变扁平 tabs+搜索+网格主区 */}
+        <div className="mt-3 flex min-h-0 flex-1 flex-col px-5 pb-4">
             {/* tabs 行 + 搜索 + 选择 */}
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-1">
@@ -693,7 +637,6 @@ export function CardLibraryPicker({
               )}
             </div>
           </div>
-        </div>
       </Overlay>
       {detail && (
         <CardDetailOverlay
