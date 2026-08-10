@@ -79,7 +79,7 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(
       <div className={`relative ${className}`}>
         <div
           ref={editorRef}
-          className="min-h-[120px] w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent py-3 px-4 text-sm leading-[1.8] text-white/90 border-none outline-none shadow-none focus:border-none focus:outline-none focus:ring-0"
+          className="min-h-[120px] max-h-[120px] w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent py-3 px-4 text-sm leading-[1.8] text-white/90 border-none outline-none shadow-none focus:border-none focus:outline-none focus:ring-0"
           contentEditable
           role="textbox"
           aria-multiline="true"
