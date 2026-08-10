@@ -36,6 +36,7 @@ import { useProjectConversation } from "./_canvas/hooks/useProjectConversation";
 import { projectSnapshotToSceneCards } from "./_canvas/conversationRecovery";
 import type { Rect } from "./_canvas/placement";
 import { useCanvasGeneration } from "./_canvas/hooks/useCanvasGeneration";
+import { useHomeJumpConsumer } from "./_canvas/runtime/use-home-jump-consumer";
 import { useCanvasProjectHydration } from "./_canvas/hooks/useCanvasProjectHydration";
 import { BootProgress } from "./BootProgress";
 import type { MentionItem } from "./_canvas/components/dock/mention";
@@ -61,6 +62,39 @@ export function CanvasProjectRuntime({
 }) {
   const searchParams = useSearchParams();
   const prompt = searchParams.get("prompt") || "";
+  // IK74TX 1.1/1.2/1.3：首页输入框跳转参数（tab 存在才算首页跳转；否则为普通画布访问）。
+  // 项目由 page.tsx 新建后保留全部 query 参数跳转至此，本组件一次性消费。
+  const homeJump: {
+    tab: "video" | "image" | "agent";
+    prompt?: string;
+    model?: string;
+    ratio?: string;
+    size?: string;
+    duration?: string;
+    refMode?: string;
+    assets?: string[];
+    skill?: string;
+    agentModel?: string;
+  } | null = (() => {
+    const tab = searchParams.get("tab");
+    if (tab !== "video" && tab !== "image" && tab !== "agent") return null;
+    const assets = (searchParams.get("assets") ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+    return {
+      tab,
+      prompt: searchParams.get("prompt") ?? "",
+      model: searchParams.get("model") ?? undefined,
+      ratio: searchParams.get("ratio") ?? undefined,
+      size: searchParams.get("size") ?? undefined,
+      duration: searchParams.get("duration") ?? undefined,
+      refMode: searchParams.get("refMode") ?? undefined,
+      assets,
+      skill: searchParams.get("skill") ?? undefined,
+      agentModel: searchParams.get("agentModel") ?? undefined,
+    };
+  })();
   const { openLogin } = useAuth();
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -428,6 +462,25 @@ export function CanvasProjectRuntime({
     retryKey: hydrationRetryKey,
   });
 
+  // IK74TX 1.1/1.2/1.3：首页跳转落地消费——hydration ready 后一次性打开 Dock/Agent 面板、
+  // 预填参数并自动生成（video/image）或交给 Agent 接管（agent）。refresh/切项目不重复触发
+  // （hook 内 ref 守卫；且 query 参数本身随导航变化，各自消费各自的）。
+  useHomeJumpConsumer({
+    ready: hydrationState === "ready",
+    jump: homeJump,
+    openDock: (mode) => {
+      setBottomDockMode(mode);
+      setIsBottomDockOpen(true);
+    },
+    prefillDock: (prefill) => {
+      const nonce = Date.now();
+      setPrefillSignal({ nonce, prefill });
+    },
+    openAgent: () => setIsAgentOpen(true),
+    generate: (promptText, args) => generate(promptText, args),
+    onError: (message) => toast.error(message),
+  });
+
   const {
     handleRequestPick,
     handlePickFrameFromCanvas,
@@ -675,6 +728,7 @@ export function CanvasProjectRuntime({
       }}
       agentChat={{
         prompt,
+        initialSkillId: homeJump?.tab === "agent" ? homeJump.skill : undefined,
         projectId: activeProject.id,
         messages: backendReady ? conversationMessages : messages,
         onSubmitMessage: backendReady ? sendConversationMessage : undefined,

@@ -1,6 +1,13 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 
 export interface PromptEditorHandle {
   /** 聚焦并把光标放到末尾、滚动到可见（外部注入/清除后的伴随行为，IK726P）。 */
@@ -18,6 +25,8 @@ export interface PromptEditorProps {
   className?: string;
   /** 焦点变化回调（外部边框/样式联动）。 */
   onFocusChange?: (focused: boolean) => void;
+  /** Enter 发送（IK74TX 7.1）：无修饰键 Enter 触发发送并阻止默认换行；Shift+Enter 插入换行。 */
+  onSend?: () => void;
 }
 
 /**
@@ -34,7 +43,7 @@ export interface PromptEditorProps {
  */
 const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(
   function PromptEditor(
-    { value, onChange, placeholder, className = "", onFocusChange },
+    { value, onChange, placeholder, className = "", onFocusChange, onSend },
     ref,
   ) {
     const editorRef = useRef<HTMLDivElement>(null);
@@ -80,6 +89,13 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(
             const text = editorRef.current?.innerText ?? "";
             setIsEmpty(!text.trim());
             onChange(text);
+          }}
+          onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+            // IK74TX 7.1：Enter（非 Shift 组合、非 IME 组合）发送；Shift+Enter 走默认换行。
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              onSend?.();
+            }
           }}
           onFocus={() => onFocusChange?.(true)}
           onBlur={() => onFocusChange?.(false)}

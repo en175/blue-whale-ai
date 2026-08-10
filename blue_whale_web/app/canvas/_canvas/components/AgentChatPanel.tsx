@@ -71,6 +71,7 @@ export function AgentChatPanel({
   onSetCardStatus,
   onRetryGenerationJob,
   prompt,
+  initialSkillId,
   projectId,
   activeSkillName,
   agentRunStatus,
@@ -111,6 +112,9 @@ export function AgentChatPanel({
   onRetryGenerationJob?: (generationJobId: WireInteger) => Promise<void>;
   /** 首页续上 / 模板卡点击带入的 prompt，填入 composer（可编辑后发送） */
   prompt?: string;
+  /** IK74TX 1.3：首页「视频智能体」Tab 提交带入的一次性技能 id——挂载时作为 forced skill
+   *  初始上下文（对齐首页「直接使用」IK60WY 语义；SSE 确认后由 activeSkillName 接管）。 */
+  initialSkillId?: string;
   /** 当前 Project 身份；传入后未发送草稿按 Project 持久化到本浏览器（IK67GD T02） */
   projectId?: string;
   /** 当前 Run 已激活 Creative Skill 的展示名（forced/auto 统一，Snapshot/SSE 权威） */
@@ -139,10 +143,14 @@ export function AgentChatPanel({
   const [panelSize, setPanelSize] = useState({ w: 468, h: 600 });
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
   // Use 选择的 pending forced skill：点 Use 立刻乐观展示，SSE 确认后由 activeSkillName 接管
+  // IK74TX 1.3：initialSkillId 为首页「视频智能体」Tab 带入的一次性技能——用 lazy initializer
+  // 在挂载时初始化（组件由 CanvasProjectRuntime 渲染时传入，挂载后不变），避免 effect 内 setState。
   const [pendingForcedSkill, setPendingForcedSkill] = useState<{
     id: string;
     name: string;
-  } | null>(null);
+  } | null>(() =>
+    initialSkillId ? { id: initialSkillId, name: initialSkillId } : null,
+  );
   // 总结当前对话的一次性意图标记（IK60X1）：预填时置位，发送成功后清除，失败保留供重试
   const skillSummarizePendingRef = useRef(false);
   const [retryingCards, setRetryingCards] = useState<ReadonlySet<string>>(
