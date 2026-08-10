@@ -5,6 +5,14 @@ set -euo pipefail
 [ "$(node --version)" = "v24.18.0" ] || { echo "Node.js 24.18.0 is required" >&2; exit 1; }
 [ "$(pnpm --version)" = "11.17.0" ] || { echo "pnpm 11.17.0 is required" >&2; exit 1; }
 
+SKIP_ACCEPTANCE=0
+for arg in "$@"; do
+  case "$arg" in
+    --skip-acceptance) SKIP_ACCEPTANCE=1 ;;
+    *) echo "Unknown argument: $arg" >&2; exit 2 ;;
+  esac
+done
+
 if [ -n "${BW_VERIFICATION_STAGE_LOG:-}" ]; then
   : >"$BW_VERIFICATION_STAGE_LOG"
 fi
@@ -32,4 +40,6 @@ run_stage typecheck pnpm typecheck
 run_stage build:node pnpm build:node
 run_stage test pnpm test
 run_stage build:web pnpm --filter @blue-whale/web build
-run_stage test:acceptance pnpm test:acceptance
+if [ "$SKIP_ACCEPTANCE" = 0 ]; then
+  run_stage test:acceptance pnpm test:acceptance
+fi

@@ -20,25 +20,42 @@ function inferredAreas(files) {
   return [...areas].sort();
 }
 
-function fullClassification(files, reason) {
+function classified(file) {
+  return DOCUMENTATION_FILE.test(file) || GOVERNANCE_FILE.test(file) || sourceArea(file) !== null;
+}
+
+function scopedClassification(files, reason) {
   const areas = inferredAreas(files);
   return {
-    tier: "full",
+    tier: "scoped",
     ...(areas.length > 0 ? { areas } : {}),
     reasons: [reason],
   };
 }
 
-function classifyAutomatically(files) {
+function fullClassification(files, reason, acceptance) {
+  const areas = inferredAreas(files);
+  return {
+    tier: "full",
+    acceptance,
+    ...(areas.length > 0 ? { areas } : {}),
+    reasons: [reason],
+  };
+}
+
+function classifyAutomatically(files, stage) {
   if (
     files.some((file) => GOVERNANCE_FILE.test(file)) &&
     files.every((file) => DOCUMENTATION_FILE.test(file) || GOVERNANCE_FILE.test(file))
   ) {
-    return {
-      tier: "scoped",
-      areas: ["governance"],
-      reasons: ["verification governance changed"],
-    };
+    if (stage === "completion") {
+      return {
+        tier: "scoped",
+        areas: ["governance"],
+        reasons: ["verification governance changed"],
+      };
+    }
+    return fullClassification(files, "publishing requires full verification", false);
   }
 
   if (files.length > 0 && files.every((file) => DOCUMENTATION_FILE.test(file))) {
@@ -48,8 +65,17 @@ function classifyAutomatically(files) {
     };
   }
 
-  if (files.some((file) => HIGH_IMPACT_FILE.test(file))) {
-    return fullClassification(files, "high-impact infrastructure changed");
+  if (stage === "pr") {
+    const acceptance =
+      files.some((file) => HIGH_IMPACT_FILE.test(file)) ||
+      files.some((file) => !classified(file));
+    return fullClassification(
+      files,
+      acceptance
+        ? "publishing requires full verification with acceptance"
+        : "publishing requires full verification",
+      acceptance,
+    );
   }
 
   const areas = [...new Set(files.map(sourceArea).filter(Boolean))].sort();
@@ -64,22 +90,24 @@ function classifyAutomatically(files) {
     };
   }
 
-  return fullClassification(files, "change scope is not classified");
+  if (files.some((file) => HIGH_IMPACT_FILE.test(file))) {
+    return scopedClassification(files, "high-impact infrastructure changed");
+  }
+
+  return scopedClassification(files, "change scope is not classified");
 }
 
-export function classifyChanges(files, { risk = "auto" } = {}) {
+export function classifyChanges(files, { risk = "auto", stage = "completion" } = {}) {
   if (risk !== "auto" && risk !== "high") {
     throw new Error("risk must be auto or high");
   }
-  const automatic = classifyAutomatically(files);
+  if (stage !== "completion" && stage !== "pr") {
+    throw new Error("stage must be completion or pr");
+  }
+  const automatic = classifyAutomatically(files, stage);
   if (risk === "auto") return automatic;
 
-  const areas = inferredAreas(files);
-  return {
-    tier: "full",
-    ...(areas.length > 0 ? { areas } : {}),
-    reasons: ["risk explicitly escalated to high"],
-  };
+  return fullClassification(files, "risk explicitly escalated to high", true);
 }
 
 function appendAreaCommands(commands, areas, base) {
@@ -112,13 +140,23 @@ export function buildVerificationPlan(classification, { base }) {
   const commands = [["git", "diff", "--check", `${base}...HEAD`]];
   const areas = classification.tier === "docs" ? ["docs"] : classification.areas ?? [];
   appendAreaCommands(commands, areas, base);
-  if (classification.tier === "full") commands.push(["pnpm", "verify"]);
+  if (classification.tier === "full") {
+    commands.push(
+      classification.acceptance === false
+        ? ["pnpm", "verify", "--skip-acceptance"]
+        : ["pnpm", "verify"],
+    );
+  }
   return commands;
 }
 
 function classificationCovers(receipt, current) {
   if (!receipt || !current) return true;
-  if (current.tier === "full") return receipt.tier === "full";
+  if (current.tier === "full") {
+    if (receipt.tier !== "full") return false;
+    // 旧凭证没有 acceptance 字段：那时的 full 一律带验收，视为覆盖。
+    return !(current.acceptance && receipt.acceptance === false);
+  }
   if (receipt.tier === "full") return true;
   if (receipt.tier !== current.tier) return false;
   if (current.tier !== "scoped") return true;
