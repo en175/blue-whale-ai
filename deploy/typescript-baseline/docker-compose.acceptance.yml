@@ -1,11 +1,33 @@
 name: blue-whale-typescript-baseline
 
+# Docker Desktop 把宿主机全局代理（127.0.0.1:<port>）注入每个容器的运行时环境，
+# 容器网络命名空间独立、连不上宿主机本地端口。busybox wget 的 no_proxy 匹配对
+# "127.0.0.1:<port>" 这种带端口的写法不生效，健康检查探测自己的 127.0.0.1 时
+# 被错误路由到那个代理、connection refused（new-api 健康检查即因此常年失败）。
+# 所有服务统一显式清空，构建阶段的同类问题见上面 node-service 的 build.args。
+x-proxy-env: &proxy-env
+  HTTP_PROXY: ""
+  HTTPS_PROXY: ""
+  http_proxy: ""
+  https_proxy: ""
+
 x-node-service: &node-service
   build:
     context: ../..
     dockerfile: Dockerfile.typescript-baseline
+    # Docker Desktop 会把宿主机全局代理设置（127.0.0.1:<port>）自动注入所有
+    # docker build，容器网络命名空间独立、连不上宿主机的本地端口，导致镜像里
+    # apt-get 直接 connection refused。显式清空覆盖，走 Dockerfile 里已配置的
+    # 阿里云镜像直连（同一根因、同一修法见 run-typescript-baseline-acceptance.sh
+    # 里 new-api 的 docker run）。
+    args:
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
   image: blue-whale-typescript-baseline:acceptance
   environment: &node-environment
+    <<: *proxy-env
     MYSQL_HOST: mysql
     MYSQL_PORT: "3306"
     MYSQL_DATABASE: blue_whale
@@ -62,6 +84,7 @@ services:
     volumes:
       - ${BW_NEW_API_BINARY:-/tmp/blue-whale-new-api-acceptance}:/usr/local/bin/new-api:ro
     environment:
+      <<: *proxy-env
       PORT: "3000"
       SQL_DSN: root:blue_whale@tcp(mysql:3306)/new_api?charset=utf8mb4&parseTime=True&loc=Local
       REDIS_CONN_STRING: redis://redis:6379/1
@@ -94,6 +117,8 @@ services:
     command: ["node", "/app/tests/typescript-baseline/provider-stub.mjs"]
     volumes:
       - ../../:/app:ro
+    environment:
+      <<: *proxy-env
     healthcheck:
       test:
         [
@@ -112,6 +137,7 @@ services:
     volumes:
       - ../../:/app:ro
     environment:
+      <<: *proxy-env
       PORT: "4330"
       ASSET_UPLOAD_SECRET: acceptance-storage-secret
     ports:
