@@ -138,7 +138,13 @@ export function AgentCard({
   busy?: boolean;
   /** 用户点击主按钮（手动应用 / 重试）的统一意图，由容器层按 card.status 分发 */
   onReapply?: (card: Extract<ChatMessage, { type: "card" }>) => void;
-  /** 隐藏主按钮（生成页等无「应用到画布」语义的容器用）；缺省 false，画布行为不变 */
+  /**
+   * 隐藏主按钮；缺省 false，画布行为不变。
+   * 现状（2026-08-10 核实）：唯一渲染点 ChatPanelMessageStream 不传此 prop，
+   * 生产无任何 hideCta={true} 调用——画布是 AgentCard 的唯一容器，
+   * 不存在「生成页」等无「应用到画布」语义的容器。保留 prop 以备未来需要，
+   * 此前注释所称的「生成页容器」为不实描述，已更正（IK7GWX）。
+   */
   hideCta?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(msg.collapsed ?? false);
