@@ -36,6 +36,8 @@ export type VideoTaskObservation = {
   status: "queued" | "processing" | "succeeded" | "failed";
   progress: number;
   url: string | null;
+  /** IK7G9X：new-api 任务当前 quota（预扣额，成功结算后=实际扣费额）。 */
+  quota?: number;
   error: { code: string; message: string } | null;
 };
 
@@ -129,6 +131,8 @@ export async function runVideoJobStep(deps: {
   credentialVault: GenerationCredentialVault;
   mediaRelay: VideoMediaRelay;
   scheduleNext?: (jobId: string, delayMs: number) => Promise<void>;
+  /** IK7G9X：把 new-api quota 换算成分(fen)。缺省不换算（publish 时 actual 落 0 兜底）。 */
+  quotaToFen?: (quota: number) => bigint | undefined;
 }): Promise<string | null> {
   const claim = deps.jobId
     ? await deps.repo.claimVideoJobById(deps.jobId, deps.workerId)
@@ -201,6 +205,10 @@ export async function runVideoJobStep(deps: {
       ...stored,
       ...dimensions,
       duration: Number(claim.input.duration ?? inputParams?.duration),
+      // IK7G9X：视频实扣金额 = new-api 任务 quota 换算成分；quota 缺失或换算失败则省略（落 0）。
+      ...(deps.quotaToFen && observation.quota !== undefined
+        ? { actualAmountFen: deps.quotaToFen(observation.quota) }
+        : {}),
     });
     return claim.id;
   } catch (error) {

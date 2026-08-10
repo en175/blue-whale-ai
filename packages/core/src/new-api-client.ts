@@ -1,6 +1,9 @@
 // new-api 客户端组合入口。实现按职责拆分到同目录子模块（IK74V8，≤800 行硬线）；
 // 本文件只做组合与再导出，对外导出面保持不变。
-import { createNewApiRequest } from "./new-api-transport.js";
+import {
+  createNewApiRequest,
+  createNewApiRequestWithMeta,
+} from "./new-api-transport.js";
 import { createNewApiAccountOps } from "./new-api-account-ops.js";
 import { createNewApiGenerationOps } from "./new-api-generation-ops.js";
 import { createNewApiBillingOps } from "./new-api-billing-ops.js";
@@ -18,9 +21,10 @@ export { NewApiError } from "./new-api-transport.js";
  */
 export function createNewApiClient(options: NewApiClientOptions) {
   const request = createNewApiRequest(options);
+  const requestWithMeta = createNewApiRequestWithMeta(options);
   return {
     ...createNewApiAccountOps(request),
-    ...createNewApiGenerationOps(request),
+    ...createNewApiGenerationOps(request, requestWithMeta),
     ...createNewApiBillingOps(request),
     ...createNewApiAdminOps(request),
   };

@@ -6,6 +6,7 @@ import type {
   StoryboardFrameView,
   StoryboardPreviewParameters,
 } from "@blue-whale/contracts";
+import type { CostReservationSnapshot } from "@blue-whale/core";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
@@ -30,6 +31,8 @@ export interface CreateStoryboardPreviewInput {
   provider_credential?: string;
   /** 余额预检回调（与 plan apply 图片分支一致）；缺失视为不检查。 */
   quotaCheck?: () => Promise<{ sufficient: boolean }>;
+  /** IK7G9X：建首 job 时的记账快照（真实预估金额 + 定价口径版本）。 */
+  costReservation?: CostReservationSnapshot;
 }
 
 export type CreateStoryboardPreviewResult =
@@ -222,6 +225,7 @@ async function createStoryboardPreviewInTransaction(
       storyboard_preview: true,
       scene_card_id: sceneCardId.toString(),
     },
+    ...(input.costReservation ? { costReservation: input.costReservation } : {}),
   });
 
   // 8. INSERT storyboard_previews（聚合根 + SceneCard 绑定；summary_status=generating）。

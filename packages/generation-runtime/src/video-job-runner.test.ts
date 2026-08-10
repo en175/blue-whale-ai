@@ -489,6 +489,7 @@ describe("video job runner recovery", () => {
         status: "succeeded",
         progress: 100,
         url: "https://provider.test/video.mp4",
+        quota: 880000,
         error: null,
       }),
     };
@@ -513,6 +514,7 @@ describe("video job runner recovery", () => {
       credentialVault,
       mediaRelay,
       scheduleNext,
+      quotaToFen: (quota) => BigInt(Math.round(quota / 500_000 * 7.3 * 100)),
     });
 
     expect(state.providerTaskId).toBe("upstream-1");
@@ -530,6 +532,7 @@ describe("video job runner recovery", () => {
       credentialVault,
       mediaRelay,
       scheduleNext,
+      quotaToFen: (quota) => BigInt(Math.round(quota / 500_000 * 7.3 * 100)),
     });
 
     expect(repo.claimVideoJobById).toHaveBeenNthCalledWith(
@@ -549,6 +552,10 @@ describe("video job runner recovery", () => {
     });
     expect(repo.publishVideoResult).toHaveBeenCalledWith(
       expect.objectContaining({ duration: 5 }),
+    );
+    // IK7G9X：quota 880000 → fen = 880000/500000×7.3×100 = 1284.8 → round 1285n。
+    expect(repo.publishVideoResult).toHaveBeenCalledWith(
+      expect.objectContaining({ actualAmountFen: 1285n }),
     );
   });
 

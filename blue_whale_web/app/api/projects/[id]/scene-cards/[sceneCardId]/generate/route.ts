@@ -8,6 +8,8 @@ import { withAuthenticatedUser } from "@/lib/auth/product-route-auth";
 import { createSceneCardGenerationDeps } from "@/lib/conversation/deps";
 import { handleSceneCardGenerate } from "@/lib/conversation/handle-scene-card-generate";
 import { enqueueVideoGenerationJob } from "@/lib/generation/video-queue";
+import { createWebNewApiClient } from "@/lib/logging";
+import { createGenerationCostEstimator } from "@/lib/generation/cost-estimator";
 
 // POST /api/projects/{id}/scene-cards/{sceneCardId}/generate
 // 已有 SceneCard 在编辑器中调整参数后点"生成"：原子更新 Preset(version+1) + 新 Record + 新 Job，
@@ -48,7 +50,16 @@ export async function POST(
       request.headers.get("Idempotency-Key"),
       body,
       createSceneCardGenerationDeps(),
-      providerCredential,
+      {
+        ...(providerCredential ? { providerCredential } : {}),
+        costEstimator: process.env.NEW_API_BASE_URL
+          ? createGenerationCostEstimator(
+              createWebNewApiClient({
+                baseUrl: process.env.NEW_API_BASE_URL ?? "",
+              }),
+            )
+          : undefined,
+      },
     );
     if (result.code === 200 && result.data?.generation_job_id != null) {
       try {

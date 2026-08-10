@@ -96,78 +96,116 @@ export type NewApiRequest = <T>(
   token?: string,
 ) => Promise<T>;
 
+/** 带响应元数据的请求：额外返回 X-Oneapi-Request-Id（IK7G9X 用于消费流水精确关联）。 */
+export type NewApiRequestWithMeta = <T>(
+  path: string,
+  init?: RequestInit,
+  token?: string,
+) => Promise<{ data: T; requestId: string | null }>;
+
+type NewApiRequestResult<T> = {
+  payload: T;
+  /** X-Oneapi-Request-Id 响应头（new-api 服务端生成，见 middleware/request-id.go）。 */
+  requestId: string | null;
+};
+
+async function performRequest<T>(
+  options: NewApiClientOptions,
+  path: string,
+  init: RequestInit = {},
+  token?: string,
+): Promise<NewApiRequestResult<T>> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const headers = new Headers(init.headers);
+  if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  // 出站统一注入 X-Trace-Id（IK6KQQ/IK73EV）：
+  // 调用方显式头 > traceIdProvider（BFF 入站透传）> 链路上下文 > 缺省生成。
+  if (!headers.has("X-Trace-Id")) {
+    const provided = options.traceIdProvider ? await options.traceIdProvider() : null;
+    headers.set(
+      "X-Trace-Id",
+      provided ?? getCurrentTraceId() ?? generateTraceId(),
+    );
+  }
+
+  let response: Response;
+  let payload: NewApiEnvelope | null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const forwardAbort = () => controller.abort();
+  if (init.signal?.aborted) {
+    controller.abort();
+  } else {
+    init.signal?.addEventListener("abort", forwardAbort, { once: true });
+  }
+  try {
+    response = await fetchImpl(joinUrl(options.baseUrl, path), {
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
+    try {
+      payload = (await response.json()) as NewApiEnvelope;
+    } catch {
+      if (controller.signal.aborted) {
+        throw new NewApiError("new-api 不可达", 503);
+      }
+      payload = null;
+    }
+  } catch (error) {
+    if (error instanceof NewApiError) throw error;
+    throw new NewApiError("new-api 不可达", 503);
+  } finally {
+    clearTimeout(timeout);
+    init.signal?.removeEventListener("abort", forwardAbort);
+  }
+
+  if (payload === null) {
+    throw new NewApiError(
+      "new-api 响应不是有效 JSON",
+      502,
+      "invalid_json_response",
+    );
+  }
+  if (!response.ok || isBusinessFailure(payload)) {
+    throw new NewApiError(
+      messageFrom(payload, `new-api 请求失败: ${response.status}`),
+      response.status,
+      codeFrom(payload),
+      payload,
+    );
+  }
+  return {
+    payload: payload as T,
+    requestId: response.headers.get("X-Oneapi-Request-Id"),
+  };
+}
+
 export function createNewApiRequest(
   options: NewApiClientOptions,
 ): NewApiRequest {
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const timeoutMs = options.timeoutMs ?? 10_000;
   return async function request<T>(
     path: string,
-    init: RequestInit = {},
+    init?: RequestInit,
     token?: string,
   ): Promise<T> {
-    const headers = new Headers(init.headers);
-    if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
-      headers.set("Content-Type", "application/json");
-    }
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-    // 出站统一注入 X-Trace-Id（IK6KQQ/IK73EV）：
-    // 调用方显式头 > traceIdProvider（BFF 入站透传）> 链路上下文 > 缺省生成。
-    if (!headers.has("X-Trace-Id")) {
-      const provided = options.traceIdProvider ? await options.traceIdProvider() : null;
-      headers.set(
-        "X-Trace-Id",
-        provided ?? getCurrentTraceId() ?? generateTraceId(),
-      );
-    }
+    return (await performRequest<T>(options, path, init, token)).payload;
+  };
+}
 
-    let response: Response;
-    let payload: NewApiEnvelope | null;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    const forwardAbort = () => controller.abort();
-    if (init.signal?.aborted) {
-      controller.abort();
-    } else {
-      init.signal?.addEventListener("abort", forwardAbort, { once: true });
-    }
-    try {
-      response = await fetchImpl(joinUrl(options.baseUrl, path), {
-        ...init,
-        headers,
-        signal: controller.signal,
-      });
-      try {
-        payload = (await response.json()) as NewApiEnvelope;
-      } catch {
-        if (controller.signal.aborted) {
-          throw new NewApiError("new-api 不可达", 503);
-        }
-        payload = null;
-      }
-    } catch (error) {
-      if (error instanceof NewApiError) throw error;
-      throw new NewApiError("new-api 不可达", 503);
-    } finally {
-      clearTimeout(timeout);
-      init.signal?.removeEventListener("abort", forwardAbort);
-    }
-
-    if (payload === null) {
-      throw new NewApiError(
-        "new-api 响应不是有效 JSON",
-        502,
-        "invalid_json_response",
-      );
-    }
-    if (!response.ok || isBusinessFailure(payload)) {
-      throw new NewApiError(
-        messageFrom(payload, `new-api 请求失败: ${response.status}`),
-        response.status,
-        codeFrom(payload),
-        payload,
-      );
-    }
-    return payload as T;
+export function createNewApiRequestWithMeta(
+  options: NewApiClientOptions,
+): NewApiRequestWithMeta {
+  return async function requestWithMeta<T>(
+    path: string,
+    init?: RequestInit,
+    token?: string,
+  ): Promise<{ data: T; requestId: string | null }> {
+    const result = await performRequest<T>(options, path, init, token);
+    return { data: result.payload, requestId: result.requestId };
   };
 }

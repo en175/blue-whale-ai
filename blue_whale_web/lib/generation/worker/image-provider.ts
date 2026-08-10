@@ -26,6 +26,8 @@ export interface GeneratedImage {
   url: string;
   width: number | null;
   height: number | null;
+  /** IK7G9X：本次调用的 new-api request_id（消费流水精确关联键）；非 new-api 渠道为 undefined。 */
+  requestId?: string;
 }
 
 export interface ImageProvider {

@@ -14,6 +14,8 @@ import type { StoryboardPreviewRepo } from "@blue-whale/persistence";
 
 import { isDecimalId } from "./handle-agent-run-commands";
 import { wireInteger } from "../wire-integer";
+import type { GenerationCostEstimator } from "../generation/cost-estimator";
+import type { CostReservationSnapshot } from "@blue-whale/core";
 
 /** StoryboardPreview 创建请求摘要（契约 §9 / CONTEXT L43-47）：方法 + 操作语义 + 资源路径 + body。
  *  同 CommandId 配同一摘要才重放，配不同摘要判冲突（100302）。 */
@@ -43,6 +45,8 @@ export async function handleStoryboardPreviewCreate(
   options?: {
     providerCredential?: string;
     quotaCheck?: () => Promise<{ sufficient: boolean }>;
+    /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额。 */
+    costEstimator?: GenerationCostEstimator;
   },
 ) {
   if (!idempotencyKey || idempotencyKey.trim().length === 0) {
@@ -68,6 +72,17 @@ export async function handleStoryboardPreviewCreate(
     return fail(PARAM_MISSING_CODE, "缺少生成凭证");
   }
 
+  // IK7G9X：建预留时写真实预估金额（数量级口径；new-api 定价不可达 → 降级 0 + dev）。
+  let costReservation: CostReservationSnapshot | undefined;
+  if (options?.costEstimator) {
+    costReservation =
+      (await options.costEstimator({
+        modelId: parsed.data.parameters.model_id,
+        type: "image",
+        expectedOutputCount: parsed.data.parameters.count,
+      })) ?? undefined;
+  }
+
   const result = await deps.createStoryboardPreview({
     userId,
     projectId,
@@ -79,6 +94,7 @@ export async function handleStoryboardPreviewCreate(
     capability_snapshot_version: parsed.data.capability_snapshot_version,
     provider_credential: options.providerCredential,
     ...(options?.quotaCheck ? { quotaCheck: options.quotaCheck } : {}),
+    ...(costReservation ? { costReservation } : {}),
   });
   switch (result.kind) {
     case "applied":
