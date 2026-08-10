@@ -152,6 +152,13 @@ else
         ;;
     esac
     # 在容器内构建 new-api（宿主机无需 Go 工具链）；模块缓存挂卷复用。
+    #
+    # 容器有独立网络命名空间：宿主机上能用的本地代理（如 127.0.0.1:<port>）在容器里
+    # 指向容器自己、无人监听，会直接 connection refused。Docker Desktop 又会把宿主机
+    # 的 HTTP_PROXY/HTTPS_PROXY 环境变量原样透传进容器，放大同一个问题——go mod download
+    # 每次都在第一步就失败，缓存卷永远填不进东西，"缓存复用"形同虚设。
+    # 显式清空透传进来的代理变量，改用不需要科学上网的国内 Go 模块镜像（可用 BW_GOPROXY
+    # 覆盖），让容器内直连，下载才能真正成功、缓存卷才能真正生效。
     docker run --rm \
       -v "$NEW_API_BUILD_DIR:/build" \
       -v bw-ts-baseline-go-mod-cache:/go/pkg/mod \
@@ -159,6 +166,9 @@ else
       -e CGO_ENABLED=0 \
       -e GOOS=linux \
       -e GOARCH="$new_api_goarch" \
+      -e GOPROXY="${BW_GOPROXY:-https://goproxy.cn,direct}" \
+      -e HTTP_PROXY= -e HTTPS_PROXY= -e ALL_PROXY= \
+      -e http_proxy= -e https_proxy= -e all_proxy= \
       golang:1.25-alpine \
       go build -trimpath -ldflags="-s -w" -o /build/new-api .
   )
