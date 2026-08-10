@@ -165,9 +165,20 @@ User 主动停止时，清除尚未接纳的临时助手文本，只保留“已
 Conversation 历史和后续模型上下文均不包含该半成品。
 _Avoid_: 用浏览器生成值或 SSE 到达顺序充当消息身份与排序依据；把停止前临时文本保留为正式消息或历史投影。
 
-**ReasoningSummary（思考摘要）**:
-Agent 面向 User 主动整理的简短依据或进度说明，不是模型内部逐步思考链；内部思考链不展示、不持久化。
-_Avoid_: Chain of Thought、visible_reasoning、原始思考过程
+**ReasoningSummary（思考摘要，已被 ThinkingTrace 取代）**:
+曾随 AgentRun 持久化的一句话处理结论（≤280 字）；其“内部思考链不展示、不持久化”的展示决策已被
+[ADR-0071](docs/adr/0071-thinking-trace-streaming-and-per-round-persistence.md) 推翻。字段保留为内部用途，
+不再面向 User 展示。
+_Avoid_: 继续把它当作对话流中的展示内容
+
+**ThinkingTrace（思考过程）**:
+Agent 在每个 AgentAdvance 中产生的模型思维链内容；面向 User 真流式展示并按轮持久化，作为该轮产出
+助手消息的附属字段保存（计划卡批次由首卡行承载），不是独立消息类别，也不进入模型上下文。AgentChatPanel
+每轮一个思考块，位于该轮产出（正文、澄清问题或计划卡）上方：思考中展开流式显示，一轮内多段思考聚合为
+同一块；思考结束自动折叠为“思考过程”，历史轮默认折叠、可手动展开。User 主动停止或推进失败时不持久化，
+未产出思维链的轮次不显示思考块。思维链是未经内容审核的模型原始输出，展示豁免的决策与风险见 ADR-0071。
+_Avoid_: ReasoningSummary 思考摘要、独立消息类别、把多段思考拆成多个块、把工具调用过程展示给 User、
+为停止或失败轮保留思维链
 
 **PlanPhase（计划阶段）**:
 Agent 创作入口内由 Agent 按对话意图自主进入或退出的内部行为阶段；User 可以用自然语言要求立即产出
