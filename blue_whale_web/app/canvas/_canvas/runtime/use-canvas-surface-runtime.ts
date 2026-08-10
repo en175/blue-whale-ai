@@ -37,6 +37,8 @@ export interface CanvasSurfaceRuntimeCtx {
   patchNode: (id: string, patch: Partial<CanvasNodeData>) => void;
   resizeNode: (id: string, width: number, height: number) => void;
   addAsset: (asset: Asset) => void;
+  /** 按 assetId 懒拉取权威 metadata（缺 mimeType 才发请求），写入 assets 缓存。 */
+  ensureAsset: (assetId: string) => Promise<void>;
   onNodesChange: (changes: NodeChange[]) => void;
   uploadFilesRef: MutableRefObject<
     Map<string, { file: File; previewUrl: string }>
@@ -62,6 +64,7 @@ export function useCanvasSurfaceRuntime(ctx: CanvasSurfaceRuntimeCtx) {
     patchNode,
     resizeNode,
     addAsset,
+    ensureAsset,
     onNodesChange,
     uploadFilesRef,
     handleNodeAction,
@@ -218,6 +221,49 @@ export function useCanvasSurfaceRuntime(ctx: CanvasSurfaceRuntimeCtx) {
     [addNode],
   );
 
+  /**
+   * 权威 normal 卡「重新放置」（IK7GS6）：用户移除画布节点后，从对话卡把同一 Asset 放回画布。
+   *
+   * 幂等：画布已存在引用该 assetId 的节点时不重复放置（no-op）——满足 issue AC#3。
+   * 渲染经 store.assets 解析（ADR-0022 决策#1）：建节点前 ensureAsset 预热缓存，确保 src 可渲染。
+   * 节点身份确定性：与 conversationRecovery snapshot 投影命名一致（generation-job-<jobId>-slot-<idx>），
+   * 刷新恢复时 projectSnapshotToCanvasNodes 按 id 或 assetId 幂等去重，不产生重复节点。
+   * 槽位 initial_placement_status 不动：canvas PUT 时 markOutputSlotsPlaced 只命中 pending，
+   * 已 placed 终态是安全 no-op（issue AC#4）。本方法不改后端、不改 slot 状态。
+   */
+  const handleReapplyOutput = useCallback(
+    (card: CardMessage) => {
+      const assetId = card.assetId;
+      if (!assetId) return;
+      // 幂等：画布已存在同 assetId 节点时 no-op，不重复建。
+      if (nodes.some((node) => node.data.assetId === assetId)) return;
+      // 预热 assets 缓存（渲染查 store.assets[assetId].src）；fire-and-forget，渲染时还会兜底懒拉。
+      void ensureAsset(assetId);
+      const fields = cardToV2ImageFields(card);
+      // 确定性 id：与 conversationRecovery snapshot 投影命名一致（generation-job-<jobId>-slot-<idx>），
+      // 刷新恢复时 projectSnapshotToCanvasNodes 按 id 或 assetId 幂等去重，不产生重复节点。
+      const slotIndex = typeof card.slotIndex === "number" ? card.slotIndex : 0;
+      const id =
+        card.generationJobId !== undefined
+          ? `generation-job-${String(card.generationJobId)}-slot-${slotIndex}`
+          : `generation-output:${slotIndex}-${assetId}`;
+      addNode("image", {
+        id,
+        width: fields.width,
+        height: fields.height,
+        data: {
+          assetId,
+          content: fields.content,
+          ...(card.generationJobId !== undefined
+            ? { taskId: String(card.generationJobId) }
+            : {}),
+          recipe: { origin: "generated" },
+        },
+      });
+    },
+    [addNode, ensureAsset, nodes],
+  );
+
   const textMentionItems = useMemo(
     () =>
       nodes
@@ -277,6 +323,7 @@ export function useCanvasSurfaceRuntime(ctx: CanvasSurfaceRuntimeCtx) {
     handleNodeMenuOpen,
     handleNodeRemove,
     handleNodeRetry,
+    handleReapplyOutput,
     onMenuInsert,
     pickableCount,
     textMentionItems,

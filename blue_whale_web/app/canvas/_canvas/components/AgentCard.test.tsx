@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
- * AgentCard 单测（IK7GS4）：权威对话卡「手动应用」直插入口下线的回归覆盖。
+ * AgentCard 单测（IK7GS6）：权威对话卡 CTA 从禁用态升级为可幂等「重新放置」。
  *
- * 权威卡（带 generationJobId）normal 成功态：按钮禁用 + 说明文案「已自动放置」+ 不触发 onReapply。
+ * 权威卡（带 generationJobId）normal 成功态：按钮可用 + 说明文案「重新放置」+ 点击触发 onReapply。
  * DEMO/mock 卡（无 generationJobId）normal 态：按钮可点击 + aria-label「手动应用」+ 点击触发 onReapply。
  * 失败卡：按钮可点击 + aria-label「生成失败，可重试」（行为不变）。
  */
@@ -42,16 +42,17 @@ function demoCard(over: Partial<CardMsg> = {}): CardMsg {
   };
 }
 
-describe("AgentCard 手动应用入口（IK7GS4）", () => {
-  it("权威 normal 卡：按钮禁用、aria-label 为「已自动放置」、点击不触发 onReapply", () => {
+describe("AgentCard CTA 入口（IK7GS6）", () => {
+  it("权威 normal 卡：按钮可用、aria-label 为「重新放置」、点击触发 onReapply", () => {
     const onReapply = vi.fn();
     render(<AgentCard msg={authoritativeCard()} onReapply={onReapply} />);
 
-    const cta = screen.getByRole("button", { name: "已自动放置" });
-    expect(cta).toBeDisabled();
+    const cta = screen.getByRole("button", { name: "重新放置" });
+    expect(cta).not.toBeDisabled();
 
     fireEvent.click(cta);
-    expect(onReapply).not.toHaveBeenCalled();
+    expect(onReapply).toHaveBeenCalledTimes(1);
+    expect(onReapply.mock.calls[0][0]).toMatchObject({ assetId: "asset-1" });
   });
 
   it("DEMO normal 卡：按钮可点击、aria-label 为「手动应用」、点击触发 onReapply", () => {

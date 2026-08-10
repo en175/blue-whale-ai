@@ -136,6 +136,7 @@ export function CanvasProjectRuntime({
   } = useCanvasDoc();
   const assets = useCanvasStore((s) => s.assets);
   const addAsset = useCanvasStore((s) => s.addAsset);
+  const ensureAsset = useCanvasStore((s) => s.ensureAsset);
 
   const switchProject = useCallback(
     (id: string) => {
@@ -465,6 +466,7 @@ export function CanvasProjectRuntime({
     handleNodeMenuOpen,
     handleNodeRemove,
     handleNodeRetry,
+    handleReapplyOutput,
     onMenuInsert,
     pickableCount,
     textMentionItems,
@@ -482,6 +484,7 @@ export function CanvasProjectRuntime({
     patchNode,
     resizeNode,
     addAsset,
+    ensureAsset,
     onNodesChange,
     uploadFilesRef,
     handleNodeAction,
@@ -692,6 +695,7 @@ export function CanvasProjectRuntime({
         pendingMention: agentPendingMention,
         onMentionConsumed: () => setAgentPendingMention(null),
         onCardGenerated: handleCardGenerated,
+        onReapplyOutput: handleReapplyOutput,
         // 权威模式渲染读 Snapshot/SSE，内存态写入不可见（幻影写入）——仅离线降级接入
         onAppendMessages: backendReady
           ? undefined

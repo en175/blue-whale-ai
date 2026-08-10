@@ -65,6 +65,7 @@ export function AgentChatPanel({
   pendingMention,
   onMentionConsumed,
   onCardGenerated,
+  onReapplyOutput,
   onAppendMessages,
   onSubmitMessage,
   onUploadFile,
@@ -89,6 +90,11 @@ export function AgentChatPanel({
   pendingMention?: PendingMentionBatch | null;
   onMentionConsumed?: () => void;
   onCardGenerated?: (card: CardMessage) => void;
+  /**
+   * 权威 normal 卡「重新放置」（IK7GS6）：用户移除画布节点后，从对话卡把同一 Asset 重新放上画布。
+   * 幂等——画布已存在引用该 assetId 的节点时不重复放置。仅带 generationJobId 的权威卡触发。
+   */
+  onReapplyOutput?: (card: CardMessage) => void;
   /** 追加消息到当前项目（user 消息 + 逐条生成的 agent 回复均经此上抛） */
   onAppendMessages?: (messages: ChatMessage[]) => void;
   /** 后端可用时提交权威 Conversation 命令；缺省时保留既有离线 mock。 */
@@ -457,17 +463,20 @@ export function AgentChatPanel({
    * 按 card 当前 status 分发：
    *   权威 failed → 创建仅含缺失槽的新 Job，原 Card 保持失败事实
    *   离线 failed/generating → 保留既有 DEMO 状态机
-   *   normal（DEMO only）→ 把 card 作为 NodeItem 应用到画布（复用既有 onCardGenerated，page.tsx 零改）
-   * 权威 normal 卡（带 generationJobId）的画布节点由后端 InitialPlacementStatus 单轨自动放置，
-   * 前端直插入口已下线（IK7GS4）：按钮渲染为禁用态，此处对权威卡不再直插建节点。
+   *   normal（权威）→ 重新放置同一 Asset 到画布（IK7GS6：接替 IK7GS4 的禁用态，幂等）
+   *   normal（DEMO）→ 把 card 作为 NodeItem 应用到画布（复用既有 onCardGenerated，page.tsx 零改）
    */
   const handleReapply = (card: CardMessage) => {
     const current = card.status ?? "normal";
     if (current === "cancelled") return;
     if (current === "normal") {
+      // 权威卡（带 generationJobId）：重新放置同一 Asset 到画布（IK7GS6）。
+      // 幂等——画布已有同 assetId 节点时不重复放置；首次自动放置的节点仍在时为 no-op。
+      if (card.generationJobId !== undefined) {
+        onReapplyOutput?.(card);
+        return;
+      }
       // DEMO-only 直插入口：仅无 generationJobId 的离线 mock 卡走前端建节点。
-      // 权威卡（带 generationJobId）已由后端放置，不在此直插（防双节点/空节点）。
-      if (card.generationJobId !== undefined) return;
       onCardGenerated?.(card);
       return;
     }

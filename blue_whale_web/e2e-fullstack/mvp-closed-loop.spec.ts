@@ -121,11 +121,11 @@ test("MVP 全栈闭环：创作澄清→成功生成→拖动刷新恢复→失�
     await expect(successCard).toBeVisible({ timeout: 90_000 });
     firstAssetId = (await successCard.getAttribute("data-asset-id"))!;
     expect(firstAssetId).toBeTruthy();
-    // 权威 normal 卡（带 generationJobId）的「手动应用」入口已下线（IK7GS4）：
-    // 画布节点由后端 InitialPlacementStatus 单轨放置，按钮渲染为禁用态并附说明。
+    // 权威 normal 卡（带 generationJobId）的 CTA 已从禁用态升级为可用的「重新放置」（IK7GS6）：
+    // 画布节点由后端 InitialPlacementStatus 单轨放置，按钮提供幂等的重新放置入口。
     const successCta = page.locator("button.tc-agent-card-cta").first();
-    await expect(successCta).toHaveAttribute("aria-label", "已自动放置");
-    await expect(successCta).toBeDisabled();
+    await expect(successCta).toHaveAttribute("aria-label", "重新放置");
+    await expect(successCta).toBeEnabled();
 
     await expect(page.locator(GENERATION_NODE)).toHaveCount(1, {
       timeout: 60_000,
@@ -159,6 +159,33 @@ test("MVP 全栈闭环：创作澄清→成功生成→拖动刷新恢复→失�
     } finally {
       await anon.dispose();
     }
+  });
+
+  await test.step("移除节点后重新放置：画布恢复引用同一 assetId 的节点（IK7GS6）", async () => {
+    // 前置：画布恰有一个生成节点（上一 step 已断言）
+    await expect(page.locator(GENERATION_NODE)).toHaveCount(1);
+
+    // 右键节点打开菜单 → 点「删除」移除节点
+    const node = page.locator(GENERATION_NODE);
+    const nodeBox = (await node.boundingBox())!;
+    await page.mouse.click(
+      nodeBox.x + nodeBox.width / 2,
+      nodeBox.y + nodeBox.height / 2,
+      { button: "right" },
+    );
+    await page.locator('[role="menuitem"][data-action="delete"]').click();
+    await expect(page.locator(GENERATION_NODE)).toHaveCount(0, {
+      timeout: 10_000,
+    });
+
+    // 点对话卡「重新放置」：画布应恢复一个节点，且引用同一 assetId（幂等去重不产生额外节点）
+    await page.locator("button.tc-agent-card-cta").first().click();
+    await expect(page.locator(GENERATION_NODE)).toHaveCount(1, {
+      timeout: 10_000,
+    });
+    await expect(
+      page.locator(`${GENERATION_NODE} [data-asset-id]`),
+    ).toHaveAttribute("data-asset-id", firstAssetId);
   });
 
   await test.step("拖动 NodeItem 后刷新：Project Snapshot 恢复全部状态与最后位置，无重复节点", async () => {
