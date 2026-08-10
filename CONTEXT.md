@@ -100,8 +100,9 @@ Canvas 均不改变它。只有持有原创建请求或 GenerationJob 接纳回�
 计划输出创建 Asset NodeItem，视频计划先放置 SceneCardNode，视频成功后再创建 Asset NodeItem。部分成功
 结果可以增量放置；`pending` 作品基于最新 Canvas 布局幂等重试新增，首次成功后即转为 `placed`，User
 后续移除节点不得触发自动恢复。
-图片计划结果以当前视口中心为锚点按无重叠网格排列；视频与 StoryboardPreview 结果在对应 SceneCardNode
-下方从左到右排列，满行换行。部分成功与重试只占用首个空位，不移动或覆盖既有节点。
+图片计划结果以当前视口中心为锚点按无重叠网格排列；视频与 StoryboardPreview 产物从对应
+SceneCard 实测高度下方 10px 起依次下排，同批作品成组排列（分镜画格同批横向），多批按首次提交
+顺序排列。部分成功与重试只占用首个空位，不移动或覆盖既有节点（对齐 spec §3.4）。
 _Avoid_: 从该状态推导当前布局；移出 Canvas 后重置为 pending；自动过期、自动删除、后台放置；
 在 Canvas 冲突重试中移动或覆盖既有节点；绕过完整 PUT 增量放置。
 
