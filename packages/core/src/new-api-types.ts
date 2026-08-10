@@ -116,6 +116,8 @@ export interface NewApiVideoTask {
   taskId: string;
   status: string;
   url: string | null;
+  /** IK7G9X：TaskDto.quota —— 任务当前 quota（预扣额，轮询成功时=结算后实际扣费额）。 */
+  quota?: number;
   error: { code: string | number | null; message: string } | null;
 }
 
@@ -201,6 +203,25 @@ export interface NewApiUserLogRecord {
 export interface NewApiUserLogListResult {
   items: NewApiUserLogRecord[];
   total: number;
+}
+
+/** IK7G9X：模型定价目录条目（GET /api/pricing 的 data 数组元素子集）。 */
+export interface NewApiPricingItem {
+  modelName: string;
+  /** 固定价（per-call/task 计费用）；无则走 modelRatio。 */
+  modelPrice?: number;
+  /** 倍率价（token 计费用）；无固定价时用。 */
+  modelRatio?: number;
+  /** tiered_expr 时非空。 */
+  billingMode?: string;
+  billingExpr?: string;
+}
+
+/** IK7G9X：GET /api/pricing 响应解析结果。 */
+export interface NewApiPricingResult {
+  pricing: NewApiPricingItem[];
+  /** 响应级 pricing_version（可追溯当次定价目录）。 */
+  pricingVersion?: string;
 }
 
 /** 把 topup/self items 的裸 JSON 元素解析成 NewApiTopUpRecord（缺字段兜底）。 */

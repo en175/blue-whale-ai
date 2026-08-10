@@ -99,9 +99,10 @@ function createNewApiImageProvider(options: ProviderOptions): ImageProvider {
       try {
         const sourceImages =
           input.sourceImages ?? (input.sourceImage ? [input.sourceImage] : []);
-        const images =
+        // IK7G9X：用 with-receipt 变体拿 request_id（消费流水精确关联键）。
+        const receipt =
           sourceImages.length > 0
-            ? await client.editImages(options.token!, {
+            ? await client.editImagesWithReceipt(options.token!, {
                 model: input.model,
                 prompt: input.prompt,
                 images: sourceImages,
@@ -110,11 +111,12 @@ function createNewApiImageProvider(options: ProviderOptions): ImageProvider {
                 webSearch: input.webSearch,
                 sequential: input.sequential,
               })
-            : await client.generateImages(options.token!, input);
-        return images.map((image) => ({
+            : await client.generateImagesWithReceipt(options.token!, input);
+        return receipt.images.map((image) => ({
           url: image.url,
           width: input.width ?? null,
           height: input.height ?? null,
+          ...(receipt.requestId ? { requestId: receipt.requestId } : {}),
         }));
       } catch (error) {
         if (error instanceof NewApiError) {

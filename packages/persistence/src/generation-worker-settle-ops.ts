@@ -3,7 +3,7 @@
 // IK7GRP：completeJob / failJob / settleReservation 加 lease_owner + fencing_token
 // 守卫（镜像视频 publishVideoResult / failVideoJob 的 updateMany CAS + 同事务后写模式），
 // stale worker 的迟到写入被拒且不产生任何副作用（槽位、事件、素材、预留、汇总回写）。
-import type {PrismaClient} from "@prisma/client";
+import type {Prisma, PrismaClient} from "@prisma/client";
 
 import {appendProjectEvent} from "./product-event-repo.js";
 import {syncRecordSummary, syncStoryboardPreviewSummary} from "./generation-worker-internals.js";
@@ -17,6 +17,17 @@ function fenceWhere(input: {jobId: string; workerId: string; fencingToken: numbe
     lease_owner: input.workerId,
     fencing_token: BigInt(input.fencingToken),
   };
+}
+
+/** IK7G9X：事务内释放预留（reserved → released，实扣 0）。仅调处于终态失败/取消的 job。 */
+async function releaseReservationInTx(
+  tx: Prisma.TransactionClient,
+  jobId: string,
+): Promise<void> {
+  await tx.cost_reservations.updateMany({
+    where: { generation_job_id: BigInt(jobId), status: "reserved" },
+    data: { status: "released", actual_amount_fen: 0n },
+  });
 }
 
 export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "completeJob" | "failJob" | "settleReservation" | "appendLog"> {
@@ -264,6 +275,8 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
         }
         // 回写 StoryboardPreview.summary_status（图片路径，IK67HF/T15）。
         await syncStoryboardPreviewSummary(tx, job.id);
+        // IK7G9X：失败即释放预留（reserved → released，实扣 0）。
+        await releaseReservationInTx(tx, jobId);
         return true;
       });
     },
@@ -273,6 +286,7 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
       // job 已是终态（completeJob 已清 lease、置 succeeded/partially_succeeded/failed），
       // 故守卫条件校验「本次完成发放的 fencing_token 仍匹配」+ 终态，而非 processing+lease。
       // 用 CAS（version 自增）做原子占位，与 completeJob/failJob 同构，消除 read-check-then-write 竞态。
+      // IK7G9X：actualAmountFen 缺省 0（旧行为）；传入真实扣费时写真实值。
       return prisma.$transaction(async (tx) => {
         const owned = await tx.generation_jobs.updateMany({
           where: {
@@ -285,7 +299,10 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
         if (owned.count !== 1) return false;
         await tx.cost_reservations.updateMany({
           where: { generation_job_id: BigInt(input.jobId), status: "reserved" },
-          data: { status: "settled", actual_amount_fen: 0 },
+          data: {
+            status: "settled",
+            actual_amount_fen: input.actualAmountFen ?? 0n,
+          },
         });
         return true;
       });

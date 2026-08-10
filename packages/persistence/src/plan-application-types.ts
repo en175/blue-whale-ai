@@ -3,6 +3,7 @@ import type {
   PlanApplicationKind,
   PlanApplyImageReceipt,
 } from "@blue-whale/contracts";
+import type { CostReservationSnapshot } from "@blue-whale/core";
 
 export interface ApplyPlanMessageInput {
   userId: string;
@@ -12,6 +13,8 @@ export interface ApplyPlanMessageInput {
   requestHash: string;
   providerCredential?: string;
   quotaCheck?: () => Promise<{ sufficient: boolean }>;
+  /** IK7G9X：建首 job 时的记账快照（真实预估金额 + 定价口径版本）。 */
+  costReservation?: CostReservationSnapshot;
 }
 
 export type ApplyPlanMessageResult =

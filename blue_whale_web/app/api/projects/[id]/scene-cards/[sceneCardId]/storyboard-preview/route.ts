@@ -11,6 +11,7 @@ import { createStoryboardPreviewDeps } from "@/lib/conversation/deps";
 import { handleStoryboardPreviewCreate } from "@/lib/conversation/handle-storyboard-preview-create";
 import { createGenerationWorkerDeps } from "@/lib/generation/deps";
 import { processJob } from "@/lib/generation/worker/generation-worker";
+import { createGenerationCostEstimator } from "@/lib/generation/cost-estimator";
 import { wireInteger } from "@/lib/wire-integer";
 
 // POST /api/projects/{id}/scene-cards/{sceneCardId}/storyboard-preview
@@ -63,7 +64,16 @@ export async function POST(
       request.headers.get("Idempotency-Key"),
       body,
       createStoryboardPreviewDeps(),
-      providerCredential ? { providerCredential, quotaCheck } : {},
+      {
+        ...(providerCredential ? { providerCredential, quotaCheck } : {}),
+        costEstimator: process.env.NEW_API_BASE_URL
+          ? createGenerationCostEstimator(
+              createWebNewApiClient({
+                baseUrl: process.env.NEW_API_BASE_URL ?? "",
+              }),
+            )
+          : undefined,
+      },
     );
 
     // 成功后即时调度首图 job（低延迟；孤儿由 instrumentation 恢复扫描兜底）。

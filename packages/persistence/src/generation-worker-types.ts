@@ -92,6 +92,8 @@ export interface WorkerRepo {
     width: number;
     height: number;
     duration: number;
+    /** IK7G9X：视频实扣金额（fen，由 worker 从 new-api 任务 quota 换算）；缺省 0（旧行为）。 */
+    actualAmountFen?: bigint;
   }): Promise<boolean>;
   failVideoJob(input: {
     jobId: string;
@@ -150,11 +152,13 @@ export interface WorkerRepo {
     fencingToken: number;
   }): Promise<boolean>;
   /** 结算点数（reserved→settled，actual=0 占位，真计价后补）。
-   *  只在守卫通过的事务内结算，stale worker 不能结算新一次尝试的预留（IK7GRP）。 */
+   *  只在守卫通过的事务内结算，stale worker 不能结算新一次尝试的预留（IK7GRP）。
+   *  IK7G9X：actualAmountFen 传入真实扣费时写真实值；缺省 0（旧行为）。 */
   settleReservation(input: {
     jobId: string;
     workerId: string;
     fencingToken: number;
+    actualAmountFen?: bigint;
   }): Promise<boolean>;
   appendLog(
     jobId: string,

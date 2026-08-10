@@ -23,6 +23,10 @@ export type WorkerDeps = {
     AssetUploadStorage,
     "prepareUpload" | "makePublic"
   > | null;
+  /** IK7G9X：按 (token, request_id) 查消费流水 quota（new-api）；缺省不查（actual 落 0 兜底）。 */
+  readConsumeQuota?: (token: string, requestId: string) => Promise<number | null>;
+  /** IK7G9X：quota → 分(fen)。缺省不换算（actual 落 0 兜底）。 */
+  quotaToFen?: (quota: number) => bigint;
 };
 
 /** 瞬时失败码：网络不可达 / 结果转存失败等——重试有意义。quota/config/校验类不算瞬时。 */
@@ -195,9 +199,8 @@ async function processClaimedJob(
       );
       return job.id;
     }
-    const provider = createImageProvider(
-      credentialVault.open(sealedCredential),
-    );
+    const providerToken = credentialVault.open(sealedCredential);
+    const provider = createImageProvider(providerToken);
 
     const sizeId = typeof input.size === "string" ? input.size : null;
     const cap = await repo.findImageCapability(modelId, sizeId);
@@ -304,7 +307,33 @@ async function processClaimedJob(
       if (id === null) return job.id;
       assetIds.push(id);
     }
-    await finishJob(repo, job.id, assetIds, fenceProof);
+    // IK7G9X：图片实扣金额 = 本次调用消费流水 quota 汇总 → 分(fen)。
+    // 收集所有生成请求的 request_id（同一次 generate 的多张图共用 requestId，去重后查）。
+    let actualAmountFen: bigint | undefined;
+    if (deps.readConsumeQuota && deps.quotaToFen) {
+      const requestIds = [
+        ...new Set(images.map((img) => img.requestId).filter((r): r is string => Boolean(r))),
+      ];
+      let totalQuota = 0;
+      let allResolved = true;
+      for (const requestId of requestIds) {
+        try {
+          const quota = await deps.readConsumeQuota(providerToken, requestId);
+          if (quota === null || quota <= 0) {
+            allResolved = false;
+            break;
+          }
+          totalQuota += quota;
+        } catch {
+          allResolved = false;
+          break;
+        }
+      }
+      if (allResolved && requestIds.length > 0) {
+        actualAmountFen = deps.quotaToFen(totalQuota);
+      }
+    }
+    await finishJob(repo, job.id, assetIds, fenceProof, actualAmountFen);
     return job.id;
   } catch (e) {
     const code =
@@ -417,11 +446,17 @@ async function finishJob(
   jobId: string,
   assetIds: string[],
   fenceProof: { workerId: string; fencingToken: number },
+  actualAmountFen?: bigint,
 ): Promise<void> {
   // IK7GRP：completeJob / settleReservation 守卫失败（stale worker）返回 false，静默跳过后续 log。
   const completed = await repo.completeJob({ jobId, assetIds, ...fenceProof });
   if (!completed) return;
-  await repo.settleReservation({ jobId, ...fenceProof });
+  // IK7G9X：actualAmountFen 缺省不传 → 落 0（旧行为）；传入真实扣费时写真实值。
+  await repo.settleReservation({
+    jobId,
+    ...fenceProof,
+    ...(actualAmountFen !== undefined ? { actualAmountFen } : {}),
+  });
   await repo.appendLog(
     jobId,
     "succeeded",

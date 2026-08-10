@@ -101,7 +101,11 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
             generation_job_id: BigInt(input.jobId),
             status: "reserved",
           },
-          data: { status: "settled", actual_amount_fen: 0 },
+          data: {
+            status: "settled",
+            // IK7G9X：视频实扣金额由 worker 从 new-api 任务查询 quota 换算后传入；缺省 0（旧行为）。
+            actual_amount_fen: input.actualAmountFen ?? 0n,
+          },
         });
         await tx.generation_job_logs.create({
           data: {
@@ -272,30 +276,50 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
             });
           }
         }
+        // IK7G9X：失败即释放预留（reserved → released，实扣 0）。
+        await tx.cost_reservations.updateMany({
+          where: {
+            generation_job_id: BigInt(input.jobId),
+            status: "reserved",
+          },
+          data: { status: "released", actual_amount_fen: 0n },
+        });
         return true;
       });
     },
 
     async cancelVideoBeforeDispatch(input) {
-      const updated = await prisma.generation_jobs.updateMany({
-        where: {
-          id: BigInt(input.jobId),
-          status: "processing",
-          provider_task_id: null,
-          lease_owner: input.workerId,
-          fencing_token: BigInt(input.fencingToken),
-        },
-        data: {
-          status: "cancelled",
-          progress: 0,
-          next_action_at: null,
-          next_poll_at: null,
-          lease_owner: null,
-          lease_expires_at: null,
-          version: { increment: 1 },
-        },
+      // IK7G9X：job 置 cancelled 与释放预留同事务原子完成（对齐 failVideoJob 后写模式）。
+      return prisma.$transaction(async (tx) => {
+        const updated = await tx.generation_jobs.updateMany({
+          where: {
+            id: BigInt(input.jobId),
+            status: "processing",
+            provider_task_id: null,
+            lease_owner: input.workerId,
+            fencing_token: BigInt(input.fencingToken),
+          },
+          data: {
+            status: "cancelled",
+            progress: 0,
+            next_action_at: null,
+            next_poll_at: null,
+            lease_owner: null,
+            lease_expires_at: null,
+            version: { increment: 1 },
+          },
+        });
+        if (updated.count !== 1) return false;
+        // IK7G9X：派发前取消即释放预留（reserved → released，实扣 0）。
+        await tx.cost_reservations.updateMany({
+          where: {
+            generation_job_id: BigInt(input.jobId),
+            status: "reserved",
+          },
+          data: { status: "released", actual_amount_fen: 0n },
+        });
+        return true;
       });
-      return updated.count === 1;
     },
   };
 }

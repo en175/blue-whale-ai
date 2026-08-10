@@ -463,6 +463,67 @@ describe("processNextJob - 成功路径", () => {
     expect(repo.failJob).not.toHaveBeenCalled();
   });
 
+  it("IK7G9X: 图片成功后按 request_id 读消费流水汇总实际扣费传入结算", async () => {
+    const repo = makeRepo();
+    repo.claimNextJob.mockResolvedValue(queuedImageJob);
+    repo.findImageCapability.mockResolvedValue({
+      model_id: "doubao-seedream-4-0",
+      api_size: "1024x1024",
+      width: 1024,
+      height: 1024,
+    });
+    repo.createAsset.mockResolvedValue("700");
+    const provider = mockProvider([
+      { url: "https://ark/x.png", width: 1024, height: 1024, requestId: "req-1" },
+    ]);
+    const readConsumeQuota = vi.fn().mockResolvedValue(120000);
+    const quotaToFen = vi.fn().mockReturnValue(175n);
+
+    const id = await processNextJob({
+      repo,
+      createImageProvider: () => provider,
+      credentialVault: { open: () => "tok" },
+      workerId: "w1",
+      readConsumeQuota,
+      quotaToFen,
+    });
+
+    expect(id).toBe("300");
+    expect(readConsumeQuota).toHaveBeenCalledWith("tok", "req-1");
+    expect(quotaToFen).toHaveBeenCalledWith(120000);
+    // actualAmountFen = quotaToFen(120000) = 175n
+    expect(repo.settleReservation).toHaveBeenCalledWith({
+      ...FENCE_PROOF,
+      actualAmountFen: 175n,
+    });
+  });
+
+  it("IK7G9X: 消费流水缺失时 actual 不传（结算落 0 兜底）", async () => {
+    const repo = makeRepo();
+    repo.claimNextJob.mockResolvedValue(queuedImageJob);
+    repo.findImageCapability.mockResolvedValue({
+      model_id: "doubao-seedream-4-0",
+      api_size: "1024x1024",
+      width: 1024,
+      height: 1024,
+    });
+    repo.createAsset.mockResolvedValue("700");
+    const provider = mockProvider([
+      { url: "https://ark/x.png", width: 1024, height: 1024 },
+    ]);
+
+    const id = await processNextJob({
+      repo,
+      createImageProvider: () => provider,
+      credentialVault: { open: () => "tok" },
+      workerId: "w1",
+    });
+
+    expect(id).toBe("300");
+    // 未注入 readConsumeQuota → actual 不传，settle 用缺省（落 0）。
+    expect(repo.settleReservation).toHaveBeenCalledWith(FENCE_PROOF);
+  });
+
   it("expected_output_count=2 → n=2，两张图都建素材", async () => {
     const repo = makeRepo();
     repo.claimNextJob.mockResolvedValue({

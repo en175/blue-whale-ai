@@ -4,7 +4,9 @@ import { hostname } from "node:os";
 
 import {
   loadGenerationCredentialSecret,
+  loadGenerationCostConfig,
   openGenerationCredential,
+  quotaToFen,
 } from "@blue-whale/core";
 import {
   createNewApiVideoTaskProvider,
@@ -47,6 +49,8 @@ const mediaRelay =
     : createTosVideoMediaRelay(tosConfig!);
 const workerId = `generation-${hostname()}-${process.pid}`;
 const producer = { enqueue: enqueueVideoGenerationJob };
+// IK7G9X：视频实扣金额 = new-api 任务 quota → 分(fen)（env 可覆盖 QuotaPerUnit / 汇率）。
+const costConfig = loadGenerationCostConfig();
 
 const processor = createVideoJobProcessor({
   runStep: (jobId) =>
@@ -62,6 +66,7 @@ const processor = createVideoJobProcessor({
       },
       mediaRelay,
       scheduleNext: (id, delayMs) => enqueueVideoGenerationJob(id, { delayMs }),
+      quotaToFen: (quota) => quotaToFen(quota, costConfig),
     }),
 });
 

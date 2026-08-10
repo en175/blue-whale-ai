@@ -312,8 +312,15 @@ describe("generation video worker repo", () => {
 
   it("cancels a video before provider dispatch under the active fence", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const releaseReservations = vi.fn().mockResolvedValue({ count: 1 });
+    const transaction = vi.fn(async (cb: (tx: unknown) => unknown) =>
+      cb({
+        generation_jobs: { updateMany },
+        cost_reservations: { updateMany: releaseReservations },
+      }),
+    );
     const repo = createWorkerRepo({
-      generation_jobs: { updateMany },
+      $transaction: transaction,
     } as never) as ReturnType<typeof createWorkerRepo> & {
       cancelVideoBeforeDispatch?: (
         input: Record<string, unknown>,
@@ -343,6 +350,11 @@ describe("generation video worker repo", () => {
         lease_owner: null,
         lease_expires_at: null,
       }),
+    });
+    // IK7G9X：派发前取消释放预留（reserved → released，实扣 0）。
+    expect(releaseReservations).toHaveBeenCalledWith({
+      where: { generation_job_id: 300n, status: "reserved" },
+      data: { status: "released", actual_amount_fen: 0n },
     });
   });
 

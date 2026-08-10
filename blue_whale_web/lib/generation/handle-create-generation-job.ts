@@ -8,6 +8,8 @@ import type {
   ProjectRepo,
 } from "@blue-whale/persistence";
 
+import type { GenerationCostEstimator } from "./cost-estimator";
+
 const RESOURCE_NOT_FOUND_CODE = 100301;
 const VIDEO_MODEL_ALIASES: Readonly<Record<string, string>> = {
   "seedance-2": "doubao-seedance-2-0-260128",
@@ -136,6 +138,8 @@ export async function handleCreateGenerationJob(
     command: GenerationCommandRepo;
     /** 能力目录白名单（启用 + 未软删，按 capability_type 过滤）。 */
     models: Pick<ModelCapabilityRepo, "listEnabledByType">;
+    /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额；缺省沿用旧行为（0 + dev）。 */
+    costEstimator?: GenerationCostEstimator;
   },
   internal: { providerCredential?: string } = {},
 ) {
@@ -154,10 +158,10 @@ export async function handleCreateGenerationJob(
 
   // 白名单（IK6T90）：先解析视频模型名别名，再对解析后的最终 model_id 校验——
   // 别名不能绕过白名单。最终 id 必须命中启用且 capability_type 匹配的目录行，否则 400。
-  const resolvedModelId =
+  const resolvedModelId: string =
     type === "video"
-      ? (VIDEO_MODEL_ALIASES[params.model_id as string] ?? params.model_id)
-      : params.model_id;
+      ? String(VIDEO_MODEL_ALIASES[params.model_id as string] ?? params.model_id)
+      : String(params.model_id);
   const whitelist = await deps.models.listEnabledByType(type);
   if (!whitelist.some((m) => m.model_id === resolvedModelId)) {
     return fail(400, "model_id 不在可用模型白名单或已停用");
@@ -214,6 +218,17 @@ export async function handleCreateGenerationJob(
     actionIdentity,
     actionType,
   };
+  // IK7G9X：建预留时写真实预估金额（数量级口径；new-api 定价不可达 → 降级 0 + dev）。
+  if (deps.costEstimator) {
+    const snapshot = await deps.costEstimator({
+      modelId: resolvedModelId,
+      type,
+      expectedOutputCount,
+    });
+    if (snapshot) {
+      cmdInput.costReservation = snapshot;
+    }
+  }
   const created = await deps.command.createJob(cmdInput);
   return ok(created);
 }
