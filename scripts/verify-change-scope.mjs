@@ -22,7 +22,7 @@ function valueAfter(args, option, fallback) {
   return args[index + 1];
 }
 
-function currentScope({ baseRef, risk }) {
+function currentScope({ baseRef, risk, stage }) {
   const head = git("rev-parse", "HEAD");
   const base = git("merge-base", baseRef, head);
   const changedFiles = git("diff", "--name-only", `${base}...${head}`)
@@ -32,7 +32,7 @@ function currentScope({ baseRef, risk }) {
   const changedFilesHash = createHash("sha256")
     .update(changedFiles.join("\0"))
     .digest("hex");
-  const classification = classifyChanges(changedFiles, { risk });
+  const classification = classifyChanges(changedFiles, { risk, stage });
   const commands = buildVerificationPlan(classification, { base });
   const environment = verificationEnvironment(classification);
   const inputHash = createHash("sha256")
@@ -113,7 +113,7 @@ function emitSummary(receipt) {
 
 function execute(command, { asJson }) {
   const startedAt = Date.now();
-  const recordsStages = command.length === 2 && command[0] === "pnpm" && command[1] === "verify";
+  const recordsStages = command[0] === "pnpm" && command[1] === "verify";
   const stageDirectory = recordsStages
     ? mkdtempSync(join(tmpdir(), "blue-whale-verification-stages-"))
     : null;
@@ -197,10 +197,11 @@ function main() {
   const args = process.argv.slice(2);
   const command = args[0];
   if (!["plan", "run", "check", "summary"].includes(command)) {
-    throw new Error("usage: verify-change-scope.mjs <plan|run|check|summary> [--base REF] [--risk high] [--retry-kind KIND --retry-reason REASON] [--json]");
+    throw new Error("usage: verify-change-scope.mjs <plan|run|check|summary> [--base REF] [--stage completion|pr] [--risk high] [--retry-kind KIND --retry-reason REASON] [--json]");
   }
   const baseRef = valueAfter(args, "--base", "origin/master");
   const risk = valueAfter(args, "--risk", "auto");
+  const stage = valueAfter(args, "--stage", "completion");
   const retryKind = valueAfter(args, "--retry-kind", null);
   const retryReason = valueAfter(args, "--retry-reason", null);
   if (retryKind && retryKind !== "infrastructure" && retryKind !== "known-flaky") {
@@ -219,7 +220,7 @@ function main() {
     process.exitCode = 3;
     return;
   }
-  const scope = currentScope({ baseRef, risk });
+  const scope = currentScope({ baseRef, risk, stage });
   if (command === "plan") {
     if (asJson) {
       process.stdout.write(`${JSON.stringify(scope)}\n`);

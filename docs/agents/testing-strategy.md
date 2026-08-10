@@ -6,8 +6,9 @@
 
 1. 开发循环只运行正在修改行为的单测、类型检查或手测，不生成发布凭证。
 2. 通过 `scripts/commit-task-for-review.sh` 形成干净 HEAD；运行 `node scripts/verify-change-scope.mjs plan` 检查自动分层。
-3. 运行 `node scripts/verify-change-scope.mjs run`；代码失败则修复并 amend，基础设施或已知 flaky 才对同一 HEAD 显式重试。
-4. 报告完成或发布前运行 `node scripts/verify-change-scope.mjs check --json`；`VERIFIED` 才算完成。
+3. 运行 `node scripts/verify-change-scope.mjs run`（默认收口阶段）；代码失败则修复并 amend，基础设施或已知 flaky 才对同一 HEAD 显式重试。
+4. 报告完成前运行 `node scripts/verify-change-scope.mjs check --json`；`VERIFIED` 才算完成。
+5. 创建或更新 PR 前运行 `node scripts/verify-change-scope.mjs run --stage pr`；发布门禁以 `check --stage pr` 硬校验，缺少覆盖 PR 阶段要求的凭证即阻断推送。
 
 完成标准：凭证状态为 `passed`，且 HEAD、合并基线、changed-files 哈希、输入指纹、验证层级、计划和通过结果均与当前状态一致。
 
@@ -19,23 +20,23 @@
 | `scoped/node` | `apps/*/src`、`packages/*/src|test` | 增量 TypeScript build + Vitest `--changed` |
 | `scoped/web` | Web app/components/hooks/lib/workers | Web typecheck + Web Vitest `--changed` |
 | `scoped/governance` | 本策略、选择器、发布门禁及关联技能 | 规则、选择器和发布门禁定向测试 |
-| `full` | 高风险基础设施或未知路径 | 当前影响面的定向检查 + `pnpm verify` |
+| `full` | PR 阶段除纯文档外的一切改动 | 当前影响面的定向检查 + `pnpm verify` |
 
-`full` 是风险层级，不是提交、PR 或合并阶段的默认动作。
+验证分两个阶段：选择器默认**收口阶段（`--stage completion`）**，最高只到 `scoped`；**PR 阶段（`--stage pr`）**对除纯文档外的一切改动要求 `full`，由发布门禁在推送前强制。命中高影响路径或未识别路径不会在收口阶段升级 `full`，只影响 PR 全量是否包含整栈验收。纯文档豁免不适用于验证治理文件（本策略、选择器、发布门禁及关联技能）：它们在 PR 阶段进入不带验收的 `full`。
 
-## 路径映射
+## 验收范围（full 的两档）
 
-以下任一变化自动升级 `full`：
+PR 阶段的 `full` 默认不含整栈验收（`pnpm verify --skip-acceptance`，即类型检查、构建与全部单测）。命中以下任一项时追加整栈验收（`pnpm verify`）：
 
 - 根依赖/锁文件、TypeScript 配置、Dockerfile、`deploy/`；
 - 共享契约、数据库 schema/migration；
 - 鉴权路径、全栈验收、Playwright 配置；
 - Git/Agent Hook 与运行时构建、数据库、验收入口；
-- 选择器尚未识别的未知路径，自动升级全量。
+- 选择器尚未识别的路径（兜底保护）。
 
-本策略文件自身属于 `scoped/governance`；普通 README 属于 `docs`，Agent 技能等可执行 Markdown 不自动降级。
+本策略文件自身属于 `scoped/governance`；普通 README 属于 `docs`，Agent 技能等可执行 Markdown 不自动降级，在 PR 阶段按未识别路径触发带验收的全量。
 
-Agent 可用 `--risk high` 主动升级。选择器只接受 `auto` 或 `high`，禁止通过参数、改写凭证或删减命令降级。高风险要求全量时，低层级凭证不得复用；同一影响面的 full 凭证保留定向检查，可覆盖较低层级。
+Agent 可用 `--risk high` 主动升级为带验收的全量。选择器只接受 `auto` 或 `high`，禁止通过参数、改写凭证或删减命令降级。低层级凭证不得覆盖高层级要求；带验收的全量凭证可覆盖不带验收的全量要求，反之不成立。
 
 ## 凭证复用
 
@@ -46,7 +47,7 @@ Agent 可用 `--risk high` 主动升级。选择器只接受 `auto` 或 `high`�
 - Node/平台/架构、缓存开关和外部输入摘要组成的输入指纹；
 - 重试类别、理由和两次尝试（若有）。
 
-同一 HEAD 且基线、影响面、输入指纹未变化时，完成、PR 更新和发布直接复用，不设置任意时间过期。任一绑定字段变化即失效。`scripts/publish-review-package.sh` 在网络推送前硬检查凭证。
+同一 HEAD 且基线、影响面、输入指纹未变化时，完成、PR 更新和发布直接复用，不设置任意时间过期。任一绑定字段变化即失效。`scripts/publish-review-package.sh` 在网络推送前按 PR 阶段要求硬检查凭证：收口阶段凭证不满足代码类 PR 的发布要求，需先运行 `run --stage pr`。PR 阶段凭证落盘后覆盖同 HEAD 的收口凭证。验收相关的缓存指纹对 full 两档都采集，保证带验收凭证与不带验收要求的输入指纹可比。
 
 PR「测试结果」运行 `node scripts/verify-change-scope.mjs summary` 生成并粘贴；不要粘贴本机绝对路径或整段测试日志。
 

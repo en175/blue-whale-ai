@@ -20,14 +20,14 @@ test("routes verification work to the progressive testing strategy", () => {
 test("documents every required branch of the testing strategy", () => {
   const strategy = read("docs/agents/testing-strategy.md");
 
-  for (const heading of ["验证层级", "路径映射", "凭证复用", "失败与重试", "耗时治理"]) {
+  for (const heading of ["验证层级", "验收范围", "凭证复用", "失败与重试", "耗时治理"]) {
     assert.match(strategy, new RegExp(`## ${heading}`));
   }
-  assert.match(strategy, /未知路径.*全量/);
+  assert.match(strategy, /未识别.*验收/);
   assert.match(strategy, /禁止.*降级/);
   assert.match(strategy, /输入指纹/);
   assert.match(strategy, /分阶段耗时/);
-  assert.match(strategy, /低层级凭证.*不得复用/);
+  assert.match(strategy, /低层级凭证.*不得覆盖/);
   assert.match(strategy, /--retry-kind.*(?:infrastructure|known-flaky)/);
   assert.doesNotMatch(strategy, /--retry-infrastructure/);
 });

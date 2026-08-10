@@ -96,12 +96,17 @@ test("classifies the testing strategy itself as verification governance", async 
   });
 });
 
-test("does not treat executable Agent skill Markdown as ordinary documentation", async () => {
+test("keeps unclassified skill Markdown scoped at completion but full at PR stage", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.deepEqual(classifyChanges([".claude/skills/tdd/SKILL.md"]), {
-    tier: "full",
+    tier: "scoped",
     reasons: ["change scope is not classified"],
+  });
+  assert.deepEqual(classifyChanges([".claude/skills/tdd/SKILL.md"], { stage: "pr" }), {
+    tier: "full",
+    acceptance: true,
+    reasons: ["publishing requires full verification with acceptance"],
   });
 });
 
@@ -129,43 +134,59 @@ test("allows an explicit high-risk escalation to full verification", async () =>
     classifyChanges(["packages/core/src/result.ts"], { risk: "high" }),
     {
       tier: "full",
+      acceptance: true,
       areas: ["node"],
       reasons: ["risk explicitly escalated to high"],
     },
   );
 });
 
-test("classifies build and persistence infrastructure as full verification", async () => {
+test("keeps high-impact infrastructure scoped at completion but full at PR stage", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+  const files = [
+    "pnpm-lock.yaml",
+    "Dockerfile.typescript-baseline",
+    "packages/persistence/schema/001_baseline.sql",
+  ];
 
-  assert.deepEqual(
-    classifyChanges([
-      "pnpm-lock.yaml",
-      "Dockerfile.typescript-baseline",
-      "packages/persistence/schema/001_baseline.sql",
-    ]),
-    {
-      tier: "full",
-      reasons: ["high-impact infrastructure changed"],
-    },
-  );
+  assert.deepEqual(classifyChanges(files), {
+    tier: "scoped",
+    reasons: ["high-impact infrastructure changed"],
+  });
+  assert.deepEqual(classifyChanges(files, { stage: "pr" }), {
+    tier: "full",
+    acceptance: true,
+    reasons: ["publishing requires full verification with acceptance"],
+  });
 });
 
-test("keeps governance checks when a governance change also requires full verification", async () => {
+test("keeps governance checks when a governance change also hits high-impact paths", async () => {
   const { buildVerificationPlan, classifyChanges } = await import(
     "../scripts/verification-policy.mjs"
   );
-  const classification = classifyChanges([
+  const files = [
     "scripts/verify-typescript-baseline.sh",
     "scripts/verification-policy.mjs",
-  ]);
+  ];
 
-  assert.deepEqual(classification, {
-    tier: "full",
+  assert.deepEqual(classifyChanges(files), {
+    tier: "scoped",
     areas: ["governance"],
     reasons: ["high-impact infrastructure changed"],
   });
-  assert.deepEqual(buildVerificationPlan(classification, { base: "base" }), [
+  assert.deepEqual(buildVerificationPlan(classifyChanges(files), { base: "base" }), [
+    ["git", "diff", "--check", "base...HEAD"],
+    ["node", "--test", "tests/verification-policy.test.mjs", "tests/agent-rules.test.mjs"],
+  ]);
+
+  const prClassification = classifyChanges(files, { stage: "pr" });
+  assert.deepEqual(prClassification, {
+    tier: "full",
+    acceptance: true,
+    areas: ["governance"],
+    reasons: ["publishing requires full verification with acceptance"],
+  });
+  assert.deepEqual(buildVerificationPlan(prClassification, { base: "base" }), [
     ["git", "diff", "--check", "base...HEAD"],
     ["node", "--test", "tests/verification-policy.test.mjs", "tests/agent-rules.test.mjs"],
     ["pnpm", "verify"],
@@ -278,6 +299,148 @@ test("builds the repository full verification command for full scope", async () 
       ["pnpm", "verify"],
     ],
   );
+});
+
+test("classifies ordinary source changes at PR stage as full without acceptance", async () => {
+  const { buildVerificationPlan, classifyChanges } = await import(
+    "../scripts/verification-policy.mjs"
+  );
+  const files = ["packages/core/src/result.ts", "blue_whale_web/app/page.tsx"];
+
+  const classification = classifyChanges(files, { stage: "pr" });
+  assert.deepEqual(classification, {
+    tier: "full",
+    acceptance: false,
+    areas: ["node", "web"],
+    reasons: ["publishing requires full verification"],
+  });
+  assert.deepEqual(buildVerificationPlan(classification, { base: "origin/master" }), [
+    ["git", "diff", "--check", "origin/master...HEAD"],
+    ["pnpm", "exec", "tsc", "-b", "--pretty", "false"],
+    ["pnpm", "exec", "vitest", "run", "packages", "apps", "--changed", "origin/master"],
+    ["pnpm", "--filter", "@blue-whale/web", "exec", "tsc", "--noEmit"],
+    ["pnpm", "--filter", "@blue-whale/web", "exec", "vitest", "run", "--changed", "origin/master"],
+    ["pnpm", "verify", "--skip-acceptance"],
+  ]);
+});
+
+test("exempts documentation-only changes from full verification at PR stage", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(["CLAUDE.md", "docs/adr/example.md"], { stage: "pr" }),
+    {
+      tier: "docs",
+      reasons: ["only documentation files changed"],
+    },
+  );
+});
+
+test("requires full verification without acceptance for pure governance at PR stage", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(
+      ["docs/agents/testing-strategy.md", "scripts/verification-policy.mjs"],
+      { stage: "pr" },
+    ),
+    {
+      tier: "full",
+      acceptance: false,
+      areas: ["governance"],
+      reasons: ["publishing requires full verification"],
+    },
+  );
+});
+
+test("rejects unknown verification stages", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.throws(
+    () => classifyChanges(["packages/core/src/result.ts"], { stage: "merge" }),
+    /stage must be completion or pr/,
+  );
+});
+
+test("acceptance receipts cover lighter full requirements but not the reverse", async () => {
+  const { validateReceipt } = await import("../scripts/verification-policy.mjs");
+  const binding = {
+    head: "abc123",
+    base: "def456",
+    changedFilesHash: "scope-hash",
+    inputHash: "shared-inputs",
+  };
+  const receiptWith = {
+    version: 1,
+    status: "passed",
+    ...binding,
+    classification: { tier: "full", acceptance: true, areas: ["node"] },
+  };
+  const receiptWithout = {
+    version: 1,
+    status: "passed",
+    ...binding,
+    classification: { tier: "full", acceptance: false, areas: ["node"] },
+  };
+
+  assert.deepEqual(
+    validateReceipt(receiptWith, {
+      ...binding,
+      classification: { tier: "full", acceptance: false, areas: ["node"] },
+    }),
+    { valid: true },
+  );
+  assert.deepEqual(
+    validateReceipt(receiptWithout, {
+      ...binding,
+      classification: { tier: "full", acceptance: true, areas: ["node"] },
+    }),
+    { valid: false, reason: "verification tier does not cover current risk" },
+  );
+});
+
+test("full verification can skip the acceptance stage when requested", () => {
+  const directory = mkdtempSync(join(tmpdir(), "blue-whale-skip-acceptance-"));
+  try {
+    const fakeBin = join(directory, "bin");
+    const stageLog = join(directory, "stages.jsonl");
+    mkdirSync(fakeBin);
+    const fakePnpm = join(fakeBin, "pnpm");
+    writeFileSync(
+      fakePnpm,
+      [
+        "#!/usr/bin/env bash",
+        "if [ \"${1:-}\" = \"--version\" ]; then",
+        "  echo 11.17.0",
+        "fi",
+        "exit 0",
+        "",
+      ].join("\n"),
+    );
+    chmodSync(fakePnpm, 0o755);
+
+    const result = spawnSync("bash", [FULL_VERIFY, "--skip-acceptance"], {
+      cwd: ROOT,
+      encoding: "utf8",
+      env: {
+        ...childEnvironment(),
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        BW_VERIFICATION_STAGE_LOG: stageLog,
+      },
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const stages = readFileSync(stageLog, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(
+      stages.map((stage) => stage.name),
+      ["typecheck", "build:node", "test", "build:web"],
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("full verification reports each existing stage without changing the commands", () => {
@@ -625,7 +788,7 @@ test("captures full verification stage timings and cache conditions in the recei
 
     const run = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "master", "--json"],
+      [CLI, "run", "--base", "master", "--stage", "pr", "--json"],
       { cwd: repository, encoding: "utf8", env: environment },
     );
 
@@ -646,7 +809,7 @@ test("captures full verification stage timings and cache conditions in the recei
 
     const summary = spawnSync(
       process.execPath,
-      [CLI, "summary", "--base", "master"],
+      [CLI, "summary", "--base", "master", "--stage", "pr"],
       { cwd: repository, encoding: "utf8", env: environment },
     );
     assert.equal(summary.status, 0, summary.stderr);
@@ -749,7 +912,7 @@ test("does not apply an earlier retry reason to a later failing command", () => 
 
     const failedRun = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "master", "--json"],
+      [CLI, "run", "--base", "master", "--stage", "pr", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
     assert.equal(failedRun.status, 5, failedRun.stdout + failedRun.stderr);
@@ -768,6 +931,8 @@ test("does not apply an earlier retry reason to a later failing command", () => 
         "run",
         "--base",
         "master",
+        "--stage",
+        "pr",
         "--retry-kind",
         "known-flaky",
         "--retry-reason",
@@ -864,5 +1029,85 @@ test("allows publishing when the current HEAD has a valid verification receipt",
   } finally {
     rmSync(repository, { recursive: true, force: true });
     rmSync(remote, { recursive: true, force: true });
+  }
+});
+
+test("publishing requires a PR-stage receipt for code changes", () => {
+  const repository = createRepository();
+  const remote = mkdtempSync(join(tmpdir(), "blue-whale-verification-remote-"));
+  const fakeBin = mkdtempSync(join(tmpdir(), "blue-whale-publish-stage-"));
+  try {
+    mkdirSync(join(repository, "packages", "core", "src"), { recursive: true });
+    writeFileSync(join(repository, "packages", "core", "src", "result.ts"), "export {};\n");
+    git(repository, "add", "packages/core/src/result.ts");
+    git(repository, "commit", "-m", "feat: add source change");
+    git(remote, "init", "--bare");
+    git(repository, "remote", "add", "origin", remote);
+    git(repository, "push", "origin", "master:master");
+
+    const fakePnpm = join(fakeBin, "pnpm");
+    writeFileSync(fakePnpm, ["#!/usr/bin/env bash", "exit 0", ""].join("\n"));
+    chmodSync(fakePnpm, 0o755);
+    const environment = {
+      ...childEnvironment(),
+      PATH: `${fakeBin}:${process.env.PATH}`,
+    };
+
+    const completion = spawnSync(
+      process.execPath,
+      [CLI, "run", "--base", "origin/master", "--json"],
+      { cwd: repository, encoding: "utf8", env: environment },
+    );
+    assert.equal(completion.status, 0, completion.stderr);
+    assert.equal(JSON.parse(completion.stdout).tier, "scoped");
+
+    const blocked = spawnSync(
+      "bash",
+      [PUBLISH, "--user-authorized", "--create-pr", "--json"],
+      { cwd: repository, encoding: "utf8", env: environment },
+    );
+    assert.equal(blocked.status, 11, blocked.stderr);
+    assert.equal(JSON.parse(blocked.stdout).status, "VERIFICATION_REQUIRED");
+
+    const prVerification = spawnSync(
+      process.execPath,
+      [CLI, "run", "--base", "origin/master", "--stage", "pr", "--json"],
+      { cwd: repository, encoding: "utf8", env: environment },
+    );
+    assert.equal(prVerification.status, 0, prVerification.stderr);
+    assert.equal(JSON.parse(prVerification.stdout).tier, "full");
+    const receiptPath = JSON.parse(prVerification.stdout).receipt;
+    const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
+    assert.equal(receipt.classification.acceptance, false);
+    assert.deepEqual(receipt.commands.at(-1), ["pnpm", "verify", "--skip-acceptance"]);
+
+    const publish = spawnSync(
+      "bash",
+      [PUBLISH, "--user-authorized", "--create-pr", "--json"],
+      { cwd: repository, encoding: "utf8", env: environment },
+    );
+    assert.equal(publish.status, 0, publish.stderr);
+    const statusLine = publish.stdout.trim().split("\n").at(-1);
+    assert.equal(JSON.parse(statusLine).status, "PUSHED_CREATE_PR");
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+    rmSync(remote, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("rejects an unknown verification stage on the command line", () => {
+  const repository = createRepository();
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [CLI, "plan", "--base", "master", "--stage", "merge", "--json"],
+      { cwd: repository, encoding: "utf8", env: childEnvironment() },
+    );
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /stage must be completion or pr/);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
   }
 });
