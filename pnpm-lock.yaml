@@ -168,9 +168,6 @@ importers:
       esbuild:
         specifier: ^0.25.12
         version: 0.25.12
-      eslint:
-        specifier: ^9.39.5
-        version: 9.39.5(jiti@1.21.7)(supports-color@7.2.0)
       eslint-config-next:
         specifier: 16.2.9
         version: 16.2.9(@typescript-eslint/parser@8.65.0(eslint@9.39.5(jiti@1.21.7)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3))(eslint@9.39.5(jiti@1.21.7)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3)
@@ -189,12 +186,6 @@ importers:
       tailwindcss:
         specifier: ^3.4.0
         version: 3.4.19(yaml@2.9.0)
-      typescript:
-        specifier: 5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: 2.1.9
-        version: 2.1.9(@types/node@24.13.3)(jsdom@29.1.1)(supports-color@7.2.0)
 
   packages/agent-runtime:
     dependencies:
