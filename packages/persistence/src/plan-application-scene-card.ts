@@ -341,7 +341,9 @@ export async function applySceneCardReplaceInTransaction(
   }
 
   // 10. INSERT scene_card_generation_records（新聚合行 generating，保留既有记录）。
-  await tx.scene_card_generation_records.create({
+  // IK7GRT：与 create / regenerate 同款——取回 record.id，紧接回填首个 job 的输出槽绑定该 record，
+  // 使 publishVideoResult 能经槽位找到 record 做汇总聚合 + Snapshot 投影返回该轮输出槽。
+  const record = await tx.scene_card_generation_records.create({
     data: {
       scene_card_id: sceneCardId,
       project_id: projectId,
@@ -350,6 +352,10 @@ export async function applySceneCardReplaceInTransaction(
       application_receipt_id: receipt.id,
       first_generation_job_id: BigInt(generationJobId),
     },
+  });
+  await tx.generation_output_slots.updateMany({
+    where: { generation_job_id: BigInt(generationJobId) },
+    data: { scene_card_generation_record_id: record.id },
   });
 
   // 11. INSERT command_idempotency（resource_id=既有 scene_card_id，重复 CommandId 不重复覆盖/生成/计费）。

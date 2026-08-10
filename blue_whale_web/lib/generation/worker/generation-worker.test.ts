@@ -19,9 +19,9 @@ function makeRepo() {
     resolveInputAssets: vi.fn(),
     findImageCapability: vi.fn(),
     createAsset: vi.fn(),
-    completeJob: vi.fn(),
-    failJob: vi.fn(),
-    settleReservation: vi.fn(),
+    completeJob: vi.fn().mockResolvedValue(true),
+    failJob: vi.fn().mockResolvedValue(true),
+    settleReservation: vi.fn().mockResolvedValue(true),
     appendLog: vi.fn(),
     claimVideoJobById: vi.fn(),
     listDueVideoJobIds: vi.fn(),
@@ -63,7 +63,17 @@ const queuedImageJob = {
   },
   expected_output_count: 1,
   retry_count: 0,
+  fencingToken: 1,
 };
+
+// IK7GRP：守卫字段随每次写方法透传；断言用此子集匹配（jobId/workerId/fencingToken）。
+const FENCE_PROOF = { jobId: "300", workerId: "w1", fencingToken: 1 };
+const failCall = (errorCode: string, errorMessage: unknown) => ({
+  ...FENCE_PROOF,
+  errorCode,
+  errorMessage,
+});
+const completeCall = (assetIds: string[]) => ({ ...FENCE_PROOF, assetIds });
 
 const ONE_PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -226,7 +236,7 @@ describe("processNextJob - 成功路径", () => {
       2,
       expect.objectContaining({ n: 1, sequential: false }),
     );
-    expect(repo.completeJob).toHaveBeenCalledWith("300", ["701", "702"]);
+    expect(repo.completeJob).toHaveBeenCalledWith(completeCall(["701", "702"]));
     expect(repo.failJob).not.toHaveBeenCalled();
   });
 
@@ -281,7 +291,7 @@ describe("processNextJob - 成功路径", () => {
       2,
       expect.objectContaining({ n: 1, sequential: true }),
     );
-    expect(repo.completeJob).toHaveBeenCalledWith("300", ["701", "702"]);
+    expect(repo.completeJob).toHaveBeenCalledWith(completeCall(["701", "702"]));
     expect(repo.failJob).not.toHaveBeenCalled();
   });
 
@@ -448,8 +458,8 @@ describe("processNextJob - 成功路径", () => {
         type: "image",
       }),
     );
-    expect(repo.completeJob).toHaveBeenCalledWith("300", ["700"]);
-    expect(repo.settleReservation).toHaveBeenCalledWith("300");
+    expect(repo.completeJob).toHaveBeenCalledWith(completeCall(["700"]));
+    expect(repo.settleReservation).toHaveBeenCalledWith(FENCE_PROOF);
     expect(repo.failJob).not.toHaveBeenCalled();
   });
 
@@ -481,7 +491,7 @@ describe("processNextJob - 成功路径", () => {
     expect(provider.generate).toHaveBeenCalledWith(
       expect.objectContaining({ n: 2 }),
     );
-    expect(repo.completeJob).toHaveBeenCalledWith("300", ["701", "702"]);
+    expect(repo.completeJob).toHaveBeenCalledWith(completeCall(["701", "702"]));
   });
 
   it("image job with one authorized Asset downloads it and calls image edits", async () => {
@@ -635,7 +645,7 @@ describe("processNextJob - 成功路径", () => {
         url: "https://cdn.test/video.mp4",
       }),
     );
-    expect(repo.completeJob).toHaveBeenCalledWith("300", ["801"]);
+    expect(repo.completeJob).toHaveBeenCalledWith(completeCall(["801"]));
   });
 
   it("provider 视频先转存 TOS，再用对象键创建 Asset", async () => {
@@ -832,9 +842,7 @@ describe("processNextJob - 失败路径", () => {
     });
     expect(repo.requeueImageJobForRetry).not.toHaveBeenCalled();
     expect(repo.failJob).toHaveBeenCalledWith(
-      "300",
-      "provider_failed",
-      "new-api 不可达",
+      failCall("provider_failed", "new-api 不可达"),
     );
   });
 
@@ -862,9 +870,7 @@ describe("processNextJob - 失败路径", () => {
     });
     expect(repo.requeueImageJobForRetry).not.toHaveBeenCalled();
     expect(repo.failJob).toHaveBeenCalledWith(
-      "300",
-      "quota_exhausted",
-      "额度不足",
+      failCall("quota_exhausted", "额度不足"),
     );
   });
 
@@ -885,9 +891,7 @@ describe("processNextJob - 失败路径", () => {
     });
     expect(provider.generate).not.toHaveBeenCalled();
     expect(repo.failJob).toHaveBeenCalledWith(
-      "300",
-      "provider_credential_missing",
-      expect.any(String),
+      failCall("provider_credential_missing", expect.any(String)),
     );
   });
 
@@ -903,9 +907,7 @@ describe("processNextJob - 失败路径", () => {
       workerId: "w1",
     });
     expect(repo.failJob).toHaveBeenCalledWith(
-      "300",
-      "model_unavailable",
-      expect.stringContaining("doubao-seedream"),
+      failCall("model_unavailable", expect.stringContaining("doubao-seedream")),
     );
     expect(provider.generate).not.toHaveBeenCalled();
   });
@@ -925,9 +927,7 @@ describe("processNextJob - 失败路径", () => {
       workerId: "w1",
     });
     expect(repo.failJob).toHaveBeenCalledWith(
-      "300",
-      "unsupported_input",
-      expect.any(String),
+      failCall("unsupported_input", expect.any(String)),
     );
     expect(provider.generate).not.toHaveBeenCalled();
   });
@@ -949,9 +949,7 @@ describe("processNextJob - 失败路径", () => {
       workerId: "w1",
     });
     expect(repo.failJob).toHaveBeenCalledWith(
-      "300",
-      "no_result",
-      expect.any(String),
+      failCall("no_result", expect.any(String)),
     );
   });
 });

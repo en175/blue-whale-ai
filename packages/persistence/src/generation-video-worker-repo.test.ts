@@ -373,7 +373,8 @@ describe("generation video worker repo", () => {
           update: vi.fn().mockResolvedValue({}),
         },
         generation_jobs: {
-          update: vi.fn().mockResolvedValue({
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          findUnique: vi.fn().mockResolvedValue({
             id: 301n,
             project_id: 55n,
             type: "image",
@@ -407,7 +408,7 @@ describe("generation video worker repo", () => {
     );
     const repo = createWorkerRepo({ $transaction: transaction } as never);
 
-    await repo.completeJob("301", ["901"]);
+    await repo.completeJob({jobId: "301", assetIds: ["901"], workerId: "w", fencingToken: 1});
 
     expect(record.summary_status).toBe("success");
     expect(createEvent).toHaveBeenCalledWith({
@@ -449,7 +450,8 @@ describe("generation video worker repo", () => {
           update: vi.fn().mockResolvedValue({}),
         },
         generation_jobs: {
-          update: vi.fn().mockResolvedValue({
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          findUnique: vi.fn().mockResolvedValue({
             id: 301n,
             project_id: 55n,
             type: "image",
@@ -474,7 +476,9 @@ describe("generation video worker repo", () => {
     );
     const repo = createWorkerRepo({ $transaction: transaction } as never);
 
-    await expect(repo.completeJob("301", ["901"])).resolves.toBeUndefined();
+    await expect(
+      repo.completeJob({jobId: "301", assetIds: ["901"], workerId: "w", fencingToken: 1}),
+    ).resolves.toBe(true);
   });
 
   it("emits output_updated for every failed slot after partial image success", async () => {
@@ -491,7 +495,9 @@ describe("generation video worker repo", () => {
           update: vi.fn().mockResolvedValue({}),
         },
         generation_jobs: {
-          update: vi.fn().mockResolvedValue({
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          update: vi.fn().mockResolvedValue({}),
+          findUnique: vi.fn().mockResolvedValue({
             id: 301n,
             project_id: 55n,
             type: "image",
@@ -509,7 +515,7 @@ describe("generation video worker repo", () => {
     );
     const repo = createWorkerRepo({ $transaction: transaction } as never);
 
-    await repo.completeJob("301", ["901"]);
+    await repo.completeJob({jobId: "301", assetIds: ["901"], workerId: "w", fencingToken: 1});
 
     expect(createEvent).toHaveBeenCalledWith({
       data: expect.objectContaining({
