@@ -24,7 +24,10 @@ export type WorkerDeps = {
     "prepareUpload" | "makePublic"
   > | null;
   /** IK7G9X：按 (token, request_id) 查消费流水 quota（new-api）；缺省不查（actual 落 0 兜底）。 */
-  readConsumeQuota?: (token: string, requestId: string) => Promise<number | null>;
+  readConsumeQuota?: (
+    token: string,
+    requestId: string,
+  ) => Promise<number | null>;
   /** IK7G9X：quota → 分(fen)。缺省不换算（actual 落 0 兜底）。 */
   quotaToFen?: (quota: number) => bigint;
 };
@@ -312,7 +315,11 @@ async function processClaimedJob(
     let actualAmountFen: bigint | undefined;
     if (deps.readConsumeQuota && deps.quotaToFen) {
       const requestIds = [
-        ...new Set(images.map((img) => img.requestId).filter((r): r is string => Boolean(r))),
+        ...new Set(
+          images
+            .map((img) => img.requestId)
+            .filter((r): r is string => Boolean(r)),
+        ),
       ];
       let totalQuota = 0;
       let allResolved = true;

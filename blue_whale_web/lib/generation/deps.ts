@@ -57,9 +57,7 @@ export function createGenerationWorkerDeps() {
   const credentialSecret = loadGenerationCredentialSecret();
   const baseUrl = process.env.NEW_API_BASE_URL ?? "";
   // IK7G9X：图片实扣金额 = 消费流水(request_id) quota → 分(fen)。NEW_API_BASE_URL 未配置则缺省。
-  const costClient = baseUrl
-    ? createWebNewApiClient({ baseUrl })
-    : null;
+  const costClient = baseUrl ? createWebNewApiClient({ baseUrl }) : null;
   const costConfig = loadGenerationCostConfig();
   return {
     // 进程内恢复扫描（instrumentation.ts）直接用这份 deps，必须自带 workerId，

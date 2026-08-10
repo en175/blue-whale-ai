@@ -24,7 +24,6 @@
 
 /**
  * Card 生命周期状态机。
- * 状态转移见 `_canvas/cardStatus.ts` 的 `nextRetryStatus` 函数。
  */
 export type CardStatus = "failed" | "generating" | "normal" | "cancelled";
 

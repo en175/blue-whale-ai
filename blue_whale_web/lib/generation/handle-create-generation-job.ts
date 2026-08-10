@@ -160,7 +160,9 @@ export async function handleCreateGenerationJob(
   // 别名不能绕过白名单。最终 id 必须命中启用且 capability_type 匹配的目录行，否则 400。
   const resolvedModelId: string =
     type === "video"
-      ? String(VIDEO_MODEL_ALIASES[params.model_id as string] ?? params.model_id)
+      ? String(
+          VIDEO_MODEL_ALIASES[params.model_id as string] ?? params.model_id,
+        )
       : String(params.model_id);
   const whitelist = await deps.models.listEnabledByType(type);
   if (!whitelist.some((m) => m.model_id === resolvedModelId)) {

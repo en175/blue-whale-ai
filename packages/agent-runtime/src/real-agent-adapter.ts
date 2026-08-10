@@ -115,6 +115,29 @@ function toAgentAction(action: RealAgentResponse["action"]): AgentAction {
   }
 }
 
+/** 将历史 assistant 消息包装回输出协议 JSON 形态，保持多轮上下文与
+ *  system 要求的 JSON 输出协议一致——否则 MiniMax-M3 等模型会模仿
+ *  历史中的纯文本 assistant 回复，放弃 JSON 协议，导致解析必失败。
+ *
+ *  持久化层（commitSuccess）只存 content 字段的纯文本（给用户看的正式
+ *  回复），这是正确的；协议一致性由适配器在发给模型前负责。user 消息
+ *  原样透传。包装体必须与输出协议结构完全一致（含 reasoning_summary），
+ *  否则模型会模仿历史中缺失的字段结构，同样导致 zod strict 校验失败。 */
+function toHistoryMessage(message: {
+  role: "user" | "assistant";
+  content: string;
+}): { role: string; content: string } {
+  if (message.role !== "assistant") return message;
+  return {
+    role: "assistant",
+    content: JSON.stringify({
+      content: message.content,
+      reasoning_summary: "历史回复。",
+      action: { kind: "respond" },
+    }),
+  };
+}
+
 function buildSystemPrompt(request: AgentRequest): string {
   const sections = [...request.runtimeInstructions];
   if (request.creativeSkill) {
@@ -165,10 +188,7 @@ export function createNewApiAgentAdapter(options: {
       const content = await chat.complete({
         rules: buildSystemPrompt(request),
         messages: [
-          ...request.historyMessages.map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
+          ...request.historyMessages.map(toHistoryMessage),
           { role: "user", content: request.prompt },
         ],
       });

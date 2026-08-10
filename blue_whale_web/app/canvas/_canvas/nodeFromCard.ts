@@ -1,35 +1,10 @@
 /**
- * nodeFromCard —— card 消息转 NodeItem 的纯函数（除位置外字段）
+ * CardMessage —— 对话流中 card 变体的类型提取。
  *
- * "Card 与 NodeItem 是同一生成结果的两种视图"（见 CONTEXT.md）：
- * 对话流出现一张 card 的同一时刻，画布应出现一个对应 NodeItem。
- * 本函数只产出除位置（position）外的字段——位置依赖视口与容器（副作用源），
- * 由编排层 addNode 封装，纯函数不碰。
- *
- * 已产出 Asset 的 card 会透传 assetId 与受控 imageUrl；生成中 card 仍使用灰色占位。
+ * card 转画布节点的纯函数（nodeFromCard）已随 Canvas v2 迁移下线，
+ * 但 CardMessage 类型被 AgentChatPanel / ChatPanelMessageStream /
+ * v2 mappers / canvas surface runtime 多处引用，保留为活类型。
  */
-import type { ChatMessage, NodeItem } from "./types";
-import { parseAspectRatio } from "./aspectRatio";
-import type { IdGenerator } from "./messages";
+import type { ChatMessage } from "./types";
 
 export type CardMessage = Extract<ChatMessage, { type: "card" }>;
-
-/**
- * 把 card 转成 NodeItem（position 给 {0,0} 占位，位置留给 addNode）。
- *
- * @param card  对话流中的 card 消息
- * @param idGen id 生成器，注入以便测试可控
- */
-export function nodeFromCard(card: CardMessage, idGen: IdGenerator): NodeItem {
-  const { width, height } = parseAspectRatio(card.meta);
-  return {
-    id: String(idGen()),
-    type: "image",
-    position: { x: 0, y: 0 },
-    width,
-    height,
-    content: card.text,
-    ...(card.assetId ? { assetId: card.assetId } : {}),
-    ...(card.imageUrl ? { imageUrl: card.imageUrl } : {}),
-  };
-}

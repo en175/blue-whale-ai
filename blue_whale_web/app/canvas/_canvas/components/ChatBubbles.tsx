@@ -138,7 +138,13 @@ export function AgentCard({
   busy?: boolean;
   /** 用户点击主按钮（手动应用 / 重试）的统一意图，由容器层按 card.status 分发 */
   onReapply?: (card: Extract<ChatMessage, { type: "card" }>) => void;
-  /** 隐藏主按钮（生成页等无「应用到画布」语义的容器用）；缺省 false，画布行为不变 */
+  /**
+   * 隐藏主按钮；缺省 false，画布行为不变。
+   * 现状（2026-08-10 核实）：唯一渲染点 ChatPanelMessageStream 不传此 prop，
+   * 生产无任何 hideCta={true} 调用——画布是 AgentCard 的唯一容器，
+   * 不存在「生成页」等无「应用到画布」语义的容器。保留 prop 以备未来需要，
+   * 此前注释所称的「生成页容器」为不实描述，已更正（IK7GWX）。
+   */
   hideCta?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(msg.collapsed ?? false);
@@ -147,13 +153,21 @@ export function AgentCard({
   const generating = status === "generating";
   const failed = status === "failed";
   const cancelled = status === "cancelled";
+  // 权威卡（后端 GenerationJob 投影，conversationRecovery 恒带 generationJobId）的 normal
+  // 成功态画布节点由后端 InitialPlacementStatus 单轨自动放置；用户移除节点后可从对话卡
+  // 重新放置同一 Asset 回画布（IK7GS6，接替 IK7GS4 的禁用态），幂等不重复建节点。
+  // DEMO/mock 卡（buildMockReply 产出，无 generationJobId）走手动应用直插，行为不变。
+  const authoritative = msg.generationJobId !== undefined;
+  const reapplyable = authoritative && status === "normal";
   const ctaLabel = busy
     ? "重试中"
     : failed
       ? "重试"
       : cancelled
         ? "已取消"
-        : "手动应用";
+        : reapplyable
+          ? "重新放置"
+          : "手动应用";
   return (
     <div className="self-stretch">
       <div className={CARD_SHELL_CLASS} data-asset-id={msg.assetId}>
@@ -186,6 +200,7 @@ export function AgentCard({
                 ].join(" ")}
                 aria-label={failed ? "生成失败，可重试" : ctaLabel}
                 aria-busy={generating || busy}
+                title={reapplyable ? "重新放置到画布" : undefined}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
