@@ -482,7 +482,7 @@ describe("processNextJob - 成功路径", () => {
       },
     ]);
     const readConsumeQuota = vi.fn().mockResolvedValue(120000);
-    const quotaToFen = vi.fn().mockReturnValue(175n);
+    const quotaToFen = vi.fn().mockReturnValue(BigInt(175));
 
     const id = await processNextJob({
       repo,
@@ -499,7 +499,7 @@ describe("processNextJob - 成功路径", () => {
     // actualAmountFen = quotaToFen(120000) = 175n
     expect(repo.settleReservation).toHaveBeenCalledWith({
       ...FENCE_PROOF,
-      actualAmountFen: 175n,
+      actualAmountFen: BigInt(175),
     });
   });
 
