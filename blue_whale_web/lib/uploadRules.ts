@@ -12,6 +12,8 @@ export const UPLOAD_ACCEPT =
   ".jpg,.jpeg,.png,.webp,.gif,.mp4,.mov,.webm,.mp3,.wav,.m4a,.aac,.ogg";
 /** IK55VT 参考卡参考图上传：仅图片白名单。 */
 export const IMAGE_UPLOAD_ACCEPT = ".jpg,.jpeg,.png,.webp,.gif";
+/** 模板媒体上传（IK7JVE）：图片五格式 ≤20MB，视频仅 mp4 ≤200MB（grilling Q7）。 */
+export const TEMPLATE_UPLOAD_ACCEPT = ".jpg,.jpeg,.png,.webp,.gif,.mp4";
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
 export const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
@@ -19,11 +21,22 @@ export const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "webp", "gif"]);
 const VIDEO_EXTS = new Set(["mp4", "mov", "webm"]);
 const AUDIO_EXTS = new Set(["mp3", "wav", "m4a", "aac", "ogg"]);
+const TEMPLATE_IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "webp", "gif"]);
+const TEMPLATE_VIDEO_EXTS = new Set(["mp4"]);
+const TEMPLATE_IMAGE_MIMES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
 
 export type UploadFileKind = "image" | "video" | "audio";
 export type UploadFileLike = { name: string; size: number; type: string };
 export type UploadValidation =
   { ok: true; kind: UploadFileKind } | { ok: false; reason: string };
+/** 模板媒体（IK7JVE）：kind 收窄为 image|video，与 TEMPLATE_UPLOAD_RULES 对齐。 */
+export type TemplateUploadValidation =
+  { ok: true; kind: "image" | "video" } | { ok: false; reason: string };
 
 const UNSUPPORTED_REASON = "仅支持图片、视频与音频格式";
 
@@ -68,4 +81,44 @@ export function selectUploadFiles<T extends UploadFileLike>(
     if (result.ok) handlers.upload(file);
     else handlers.reject(result.reason);
   }
+}
+
+/** 模板媒体上传白名单 + 大小校验（IK7JVE）：与画布 uploadRules 同构，但视频收紧为仅 mp4。 */
+export function validateTemplateUploadFile(
+  file: UploadFileLike,
+): TemplateUploadValidation {
+  const ext = /\.([a-z0-9]+)$/.exec(file.name.toLowerCase())?.[1];
+  if (ext) {
+    if (TEMPLATE_IMAGE_EXTS.has(ext)) {
+      if (file.size > MAX_IMAGE_BYTES) {
+        return { ok: false, reason: "图片超过 20MB，无法上传" };
+      }
+      return { ok: true, kind: "image" };
+    }
+    if (TEMPLATE_VIDEO_EXTS.has(ext)) {
+      if (file.size > MAX_VIDEO_BYTES) {
+        return { ok: false, reason: "视频超过 200MB，无法上传" };
+      }
+      return { ok: true, kind: "video" };
+    }
+    return {
+      ok: false,
+      reason: "仅支持 jpg/jpeg/png/webp/gif 图片或 mp4 视频",
+    };
+  }
+  // 无扩展名：回退 MIME 前缀判断（同画布 uploadRules 语义）。
+  const mime = file.type.toLowerCase();
+  if (TEMPLATE_IMAGE_MIMES.has(mime)) {
+    if (file.size > MAX_IMAGE_BYTES) {
+      return { ok: false, reason: "图片超过 20MB，无法上传" };
+    }
+    return { ok: true, kind: "image" };
+  }
+  if (mime === "video/mp4") {
+    if (file.size > MAX_VIDEO_BYTES) {
+      return { ok: false, reason: "视频超过 200MB，无法上传" };
+    }
+    return { ok: true, kind: "video" };
+  }
+  return { ok: false, reason: "仅支持 jpg/jpeg/png/webp/gif 图片或 mp4 视频" };
 }

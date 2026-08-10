@@ -1,8 +1,9 @@
 /**
- * 模板管理入参校验（IK764F）。纯函数，路由与单测共用。
+ * 模板管理入参校验（IK764F + IK7JVE）。纯函数，路由与单测共用。
  *
  * layout 限定四种渲染形态（与前端 TemplateCardItem 渲染分支一一对应）；
- * URL 本期不校验格式（grilling 共识 Q9：后续 TOS 上传工单再收紧）。
+ * URL 仅做最小格式校验：必须 http(s):// 开头且 ≤512，不做可达性探测
+ * （IK7JVE 兑现 IK764F grilling 共识 Q9：TOS 上传工单再收紧）。
  */
 import type { TemplateCardInput } from "@blue-whale/persistence";
 
@@ -36,6 +37,11 @@ export interface TemplateCardForm {
 export type ParseResult =
   { ok: true; input: TemplateCardInput } | { ok: false; error: string };
 
+/** 最小格式校验：必须 http(s):// 开头（不做可达性探测）。 */
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim());
+}
+
 function parseOptionalUrl(
   value: unknown,
   field: string,
@@ -48,6 +54,9 @@ function parseOptionalUrl(
   }
   if (value.length > URL_MAX) {
     return { ok: false, error: `${field} 长度不得超过 ${URL_MAX}` };
+  }
+  if (!isHttpUrl(value)) {
+    return { ok: false, error: `${field} 须为 http(s):// 开头的 URL` };
   }
   return { ok: true, value };
 }
@@ -123,6 +132,12 @@ export function parseTemplateCardForm(
     }
     if (image_url.length > URL_MAX) {
       return { ok: false, error: `第 ${i + 1} 张图片 URL 过长` };
+    }
+    if (!isHttpUrl(image_url)) {
+      return {
+        ok: false,
+        error: `第 ${i + 1} 张图片 URL 须为 http(s):// 开头`,
+      };
     }
     if (id !== undefined) {
       if (typeof id !== "string" || !POSITIVE_INT_RE.test(id)) {

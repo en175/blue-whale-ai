@@ -140,7 +140,9 @@ export function createS3CompatStorage(
     uploads: {
       async prepareUpload(input) {
         const extension = MIME_EXTENSIONS[input.mime.toLowerCase()] ?? "bin";
-        const storageKey = `uploads/${input.userId}/${input.type}/${randomUUID().replace(/-/g, "")}.${extension}`;
+        const storageKey = input.keyPrefix
+          ? `${input.keyPrefix}/${input.type}/${randomUUID().replace(/-/g, "")}.${extension}`
+          : `uploads/${input.userId}/${input.type}/${randomUUID().replace(/-/g, "")}.${extension}`;
         const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
         return {
           storageKey,
