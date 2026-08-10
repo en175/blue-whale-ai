@@ -16,7 +16,7 @@
 | 1 | 媒体产物存储 | `assetId` 引用（非 url）；渲染查 `store.assets[id]` |
 | 2 | assets 填充 | canvas opaque 只存 `{nodes,edges}`（node 存 assetId）；`store.assets` 按需缓存（`getAsset` 换 src + 生成注册）；单一真相=后端 assets 表 |
 | 3 | 状态管理 | Zustand（替换 useReducer）；projectReducer action 逻辑迁入 store |
-| 4 | 现有代码 | ~~渐进迁移：messages/placement/recover/nodeFromCard/useJobStatus 保留接 store~~ **修订（2026-08-10）**：渐进迁移方向不变，但「保留接 store」清单已收敛——`useJobStatus`/`projectReducer`/`useCanvasProjects`/`projectGenerationState`/`nodeFromCard` 函数体已删除（见顶部修订说明），保留的仅 messages/placement/recover |
+| 4 | 现有代码 | ~~渐进迁移：messages/placement/recover/nodeFromCard/useJobStatus 保留接 store~~ **修订（2026-08-10）**：渐进迁移方向不变，但「保留接 store」清单已收敛——`useJobStatus`/`projectReducer`/`useCanvasProjects`/`projectGenerationState`/`nodeFromCard` 函数体已删除（见顶部修订说明），保留的仅 messages/placement/conversationRecovery |
 | 5 | 工作流 UI | 底层就绪，UI 本轮不开（无连线/编组/Run 操作） |
 | 6 | 工作流底层 | edges/engine/group/recipe 全保留（字段 + 纯函数就绪） |
 | 7 | runEngine | 纯函数 + 单测建好；`RunCtx.generate` 留接口（mock），真实接 IJZ7Z9 留未来 |
@@ -59,8 +59,8 @@ L0  文档模型   model.ts：CanvasDoc/Node/Edge/Asset 纯类型（无 RF 依�
 
 **新增**：`_canvas/model.ts`、`_canvas/kinds.ts`、`_canvas/engine.ts`、`_canvas/store.ts`
 **改**：`_canvas/components/CanvasNodes.tsx`（nodeTypes 从 registry）、`lib/canvas.ts`（opaque 存 {nodes,edges}）、`_canvas/nodeFromCard.ts`（透传 assetId）
-**保留接 store**：`_canvas/messages.ts`、`placement.ts`、`recover.ts`
-**已删除（2026-08-10，IK7GWV/IK7GWW 落地后）**：`_canvas/hooks/useJobStatus.ts`（旧单 job 轮询，被多 job 方案取代）、`_canvas/projectReducer.ts`（action 逻辑迁 store 后整体废弃）、`_canvas/useCanvasProjects.ts`（被 `useV2Projects` strangler 取代）、`_canvas/projectGenerationState.ts`、`nodeFromCard` 函数体（`CardMessage` 类型仍保留）
+**保留接 store**：`_canvas/messages.ts`、`placement.ts`、`conversationRecovery.ts`
+**已删除（2026-08-10，IK7GWV/IK7GWW 落地后）**：`_canvas/hooks/useJobStatus.ts`（旧单 job 轮询，被多 job 方案取代）、`_canvas/projectReducer.ts`（action 逻辑迁 store 后整体废弃）、`_canvas/hooks/useCanvasProjects.ts`（被 `useV2Projects` strangler 取代）、`_canvas/projectGenerationState.ts`、`nodeFromCard` 函数体（`CardMessage` 类型仍保留）
 **后端**：零改（opaque PUT 继续走 CanvasService）
 **数据**：canvas 表 15 条旧数据清表（`UPDATE canvas SET nodes_json=NULL`），schemaVersion 干净起步
 
