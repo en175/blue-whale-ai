@@ -155,7 +155,7 @@ export function AgentCard({
   const cancelled = status === "cancelled";
   // 权威卡（后端 GenerationJob 投影，conversationRecovery 恒带 generationJobId）的 normal
   // 成功态由后端 InitialPlacementStatus 单轨自动放置画布节点，前端直插入口已下线（IK7GS4）。
-  // DEMO/mock 卡（buildMockReplyForMode 产出，无 generationJobId）仍走手动应用直插，行为不变。
+  // DEMO/mock 卡（buildMockReply 产出，无 generationJobId）仍走手动应用直插，行为不变。
   const authoritative = msg.generationJobId !== undefined;
   const autoPlaced = authoritative && status === "normal";
   const ctaLabel = busy

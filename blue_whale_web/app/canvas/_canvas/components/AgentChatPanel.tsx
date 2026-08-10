@@ -24,7 +24,7 @@ import type {
   MentionFailure,
 } from "@blue-whale/core";
 import type { CardStatus } from "@/types/domain";
-import { buildMockReplyForMode } from "../messages";
+import { buildMockReply } from "../messages";
 import { createMessageIdGenerator } from "../idGen";
 import type { MessageIdGenerator } from "../idGen";
 import { useAuth } from "@/components/auth/AuthContext";
@@ -432,8 +432,8 @@ export function AgentChatPanel({
       clearComposerUploads();
       if (projectId) clearComposerDraft(projectId);
 
-      // 离线降级：生成 agent 模式 mock 回复，错开逐条追加模拟逐步生成
-      const reply = buildMockReplyForMode("agent", prompt, nextMessageId);
+      // 离线降级：生成 mock 回复，错开逐条追加模拟逐步生成
+      const reply = buildMockReply(prompt, nextMessageId);
       reply.forEach((msg, index) => {
         const timer = window.setTimeout(
           () => {
