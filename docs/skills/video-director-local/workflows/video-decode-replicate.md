@@ -44,7 +44,7 @@ Director 呈现拆解报告后，停住让用户确认 + 做三个决策：
    - `replicate_method`（提取方法论差异化）：保留 pattern + 「有证据支撑 / 强钩子 / 节奏服务叙事」原则，beats 可重组、钩子可换 type、节奏可调。
 3. **绑定产品素材**：用户提供新产品图 / 描述 → image-understanding（`agents/image-understanding.md`）出 product understanding。
 
-> **版权提示**：选 `replicate_faithful` 且用于商业发布时，按 `../references/natural-confirmation.md` 提示一次原创度风险，建议差异化或确认已获授权。
+> **版权提示**：呈现复刻度选项时，`replicate_faithful` 的选项说明内静态自带一句：`⚠️ 照搬结构有原创度风险，请确认已获授权或自担风险`。不判商用、不询问商用属性、不弹窗、不二次确认——用户看到提示仍选 faithful 并确认 = 已知情自担。
 
 ## 复刻阶段
 
