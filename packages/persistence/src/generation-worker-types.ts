@@ -9,6 +9,8 @@ export interface ClaimedJob {
   expected_output_count: number;
   /** 已重试次数（瞬时失败回 queued 时自增）；恢复/重试据此决定是否再放行。 */
   retry_count: number;
+  /** 本次领取发放的围栏令牌（IK7GRO）。领取/重放/重排时递增；写路径守卫据此拒绝迟到写入。 */
+  fencingToken: number;
 }
 
 export interface ImageCapabilitySnapshot {
@@ -114,7 +116,7 @@ export interface WorkerRepo {
     modelId: string,
     sizeId: string | null,
   ): Promise<ImageCapabilitySnapshot | null>;
-  /** 建素材行（结果）。 */
+  /** 建素材行（结果）。守卫失败（stale worker）返回 null，不落素材（IK7GRP）。 */
   createAsset(input: {
     user_id: string;
     project_id: string;
@@ -126,17 +128,34 @@ export interface WorkerRepo {
     storage_key: string | null;
     mime: string | null;
     size: number | null;
-  }): Promise<string>;
-  /** 任务成功：置 succeeded + output_asset_ids + progress=100 + 清 next_action_at。 */
-  completeJob(jobId: string, assetIds: string[]): Promise<void>;
-  /** 任务失败：置 failed + error + 记日志。 */
-  failJob(
-    jobId: string,
-    errorCode: string,
-    errorMessage: string,
-  ): Promise<void>;
-  /** 结算点数（reserved→settled，actual=0 占位，真计价后补）。 */
-  settleReservation(jobId: string): Promise<void>;
+    workerId: string;
+    fencingToken: number;
+  }): Promise<string | null>;
+  /** 任务成功：置 succeeded + output_asset_ids + progress=100 + 清 next_action_at。
+   *  守卫失败（stale worker）返回 false，不产生任何副作用（IK7GRP）。 */
+  completeJob(input: {
+    jobId: string;
+    assetIds: string[];
+    workerId: string;
+    fencingToken: number;
+  }): Promise<boolean>;
+  /** 任务失败：置 failed + error + 记日志。
+   *  守卫失败（stale worker）返回 false，不产生任何副作用（IK7GRP）。
+   *  succeeded 任务不会被迟到的 failJob 翻为 failed。 */
+  failJob(input: {
+    jobId: string;
+    errorCode: string;
+    errorMessage: string;
+    workerId: string;
+    fencingToken: number;
+  }): Promise<boolean>;
+  /** 结算点数（reserved→settled，actual=0 占位，真计价后补）。
+   *  只在守卫通过的事务内结算，stale worker 不能结算新一次尝试的预留（IK7GRP）。 */
+  settleReservation(input: {
+    jobId: string;
+    workerId: string;
+    fencingToken: number;
+  }): Promise<boolean>;
   appendLog(
     jobId: string,
     event: string,

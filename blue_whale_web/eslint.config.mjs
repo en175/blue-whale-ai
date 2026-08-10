@@ -16,7 +16,9 @@ const LEGACY_LARGE_FILES = [
   "app/canvas/_canvas/hooks/useCanvasGeneration.test.ts",
   // IK77MH：812 行历史存量测试文件，与同目录 useCanvasGeneration/model.test 同类挂账，拆分后移除
   "app/canvas/_canvas/conversationRecovery.test.ts",
-  "lib/generation/worker/generation-worker.test.ts",
+  // IK7GRP：lint-staged 从仓库根传入带 blue_whale_web/ 前缀的路径，
+  // 纯相对路径 glob 在该场景不匹配导致豁免失效；加 **/ 前缀兼容两种调用 cwd。
+  "**/lib/generation/worker/generation-worker.test.ts",
   // 后端/共享包（IK747Z-4 拆分）
   "../packages/persistence/src/agent-run-repo.ts",
   "../packages/core/src/new-api-client.ts",
