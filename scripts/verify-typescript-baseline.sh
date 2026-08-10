@@ -31,5 +31,5 @@ run_stage() {
 run_stage typecheck pnpm typecheck
 run_stage build:node pnpm build:node
 run_stage test pnpm test
-run_stage build:web pnpm --filter blue_whale build
+run_stage build:web pnpm --filter @blue-whale/web build
 run_stage test:acceptance pnpm test:acceptance

@@ -14,7 +14,7 @@
  *
  * 前置条件：
  *   1. 仓库工作树干净，本地自足栈已起；web/worker 用当前 HEAD 注入构建身份：
- *      GIT_COMMIT="$(git rev-parse HEAD)" BUILD_TIME="$(date -u +%FT%TZ)" pnpm --filter blue_whale dev
+ *      GIT_COMMIT="$(git rev-parse HEAD)" BUILD_TIME="$(date -u +%FT%TZ)" pnpm --filter @blue-whale/web dev
  *      （compose 项目 bw-ts-dev 先由 scripts/dev-stack.sh up 启动）；
  *   2. new-api 已配真实火山引擎渠道（图片 doubao-seedream-4-0-250828 /
  *      视频 doubao-seedance-2-0-260128，种子见 packages/persistence/schema/002_seed.sql）；

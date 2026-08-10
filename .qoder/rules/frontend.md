@@ -17,4 +17,4 @@ paths:
 
 ## 补丁注意
 
-`pnpm --filter blue_whale design:spec` 依赖 `blue_whale_web/patches/@google+design.md+0.3.0.patch`（npm 包 0.3.0 缺 `dist/spec.md`，根 `pnpm-workspace.yaml` 的 `patchedDependencies` 会在安装时补回）。**升级 `@google/design.md` 版本后必须重做补丁**：运行 `pnpm patch @google/design.md@<version>`，在临时目录补入 `dist/spec.md`，再运行 `pnpm patch-commit <临时目录>`。
+`pnpm --filter @blue-whale/web design:spec` 依赖 `blue_whale_web/patches/@google+design.md+0.3.0.patch`（npm 包 0.3.0 缺 `dist/spec.md`，根 `pnpm-workspace.yaml` 的 `patchedDependencies` 会在安装时补回）。**升级 `@google/design.md` 版本后必须重做补丁**：运行 `pnpm patch @google/design.md@<version>`，在临时目录补入 `dist/spec.md`，再运行 `pnpm patch-commit <临时目录>`。

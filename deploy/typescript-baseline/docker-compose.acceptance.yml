@@ -159,7 +159,7 @@ services:
 
   generation-worker:
     <<: *node-service
-    command: ["pnpm", "--filter", "blue_whale", "start:worker"]
+    command: ["pnpm", "--filter", "@blue-whale/web", "start:worker"]
     environment:
       <<: *node-environment
       DATABASE_URL: mysql://root:blue_whale@mysql:3306/blue_whale
@@ -199,7 +199,7 @@ services:
 
   web:
     <<: *node-service
-    command: ["pnpm", "--filter", "blue_whale", "start:lan"]
+    command: ["pnpm", "--filter", "@blue-whale/web", "start:lan"]
     environment:
       <<: *node-environment
       PORT: "3000"
