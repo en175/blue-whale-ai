@@ -28,6 +28,7 @@ const CATEGORY_COLORS: Record<
   tier: "secondary",
   order: "outline",
   user: "success",
+  template: "secondary",
   default: "outline",
 };
 

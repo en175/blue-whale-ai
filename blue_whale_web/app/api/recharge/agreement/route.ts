@@ -1,4 +1,5 @@
-import { createNewApiClient, NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@blue-whale/core";
+import { createWebNewApiClient } from "@/lib/logging";
 
 export async function GET(_request: Request) {
   const baseUrl = process.env.NEW_API_BASE_URL;
@@ -9,7 +10,7 @@ export async function GET(_request: Request) {
     );
   }
   try {
-    const result = await createNewApiClient({ baseUrl }).getRechargeAgreement();
+    const result = await createWebNewApiClient({ baseUrl }).getRechargeAgreement();
     return Response.json({ code: 200, msg: null, data: result });
   } catch (error) {
     const status =

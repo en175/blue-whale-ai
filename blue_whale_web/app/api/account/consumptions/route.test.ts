@@ -92,7 +92,7 @@ describe("GET /api/account/consumptions（消费记录）", () => {
         summary: "生成视频",
         created_at: 1_749_000_000,
       },
-      { id: 9, credits: 1, summary: "内容生成", created_at: 1_748_000_000 },
+      { id: 9, credits: 0.1, summary: "内容生成", created_at: 1_748_000_000 },
     ]);
   });
 

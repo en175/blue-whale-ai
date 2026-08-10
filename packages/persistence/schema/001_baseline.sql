@@ -218,6 +218,7 @@ CREATE TABLE `conversation_messages` (
     `agent_run_id` BIGINT NULL,
     `client_message_id` VARCHAR(64) NULL,
     `role` VARCHAR(16) NOT NULL,
+    `content_type` VARCHAR(24) NOT NULL DEFAULT 'text',
     `content` TEXT NOT NULL,
     `sequence_no` INTEGER NOT NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
@@ -227,6 +228,43 @@ CREATE TABLE `conversation_messages` (
 
     INDEX `idx_message_project`(`project_id`),
     UNIQUE INDEX `uk_conversation_sequence`(`conversation_id`, `sequence_no`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `conversation_message_mentions` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `message_id` BIGINT NOT NULL,
+    `conversation_id` BIGINT NOT NULL,
+    `project_id` BIGINT NOT NULL,
+    `accepted_user_id` BIGINT NOT NULL,
+    `mention_seq` INTEGER NOT NULL,
+    `mention_type` VARCHAR(24) NOT NULL,
+    `target_id` BIGINT NOT NULL,
+    `target_version` INTEGER NULL,
+    `display_name` VARCHAR(255) NOT NULL,
+    `snapshot` JSON NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_message_mention_sequence`(`message_id`, `mention_seq`),
+    INDEX `idx_mention_project_message`(`project_id`, `message_id`),
+    INDEX `idx_mention_target`(`mention_type`, `target_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `scene_cards` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `project_id` BIGINT NOT NULL,
+    `title` VARCHAR(255) NOT NULL,
+    `summary` TEXT NULL,
+    `content_markdown` LONGTEXT NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `version` INTEGER NOT NULL DEFAULT 1,
+    `is_delete` TINYINT NOT NULL DEFAULT 0,
+
+    INDEX `idx_scene_card_project`(`project_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -251,6 +289,11 @@ CREATE TABLE `agent_runs` (
     `terminal_reason` VARCHAR(64) NULL,
     `failure_code` VARCHAR(128) NULL,
     `failure_message` TEXT NULL,
+    `retry_count` INTEGER NOT NULL DEFAULT 0,
+    `skill_summarize` BOOLEAN NOT NULL DEFAULT false,
+    `run_pin` JSON NULL,
+    `activated_creative_skill_versions` JSON NULL,
+    `reasoning_summary` VARCHAR(280) NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
@@ -259,6 +302,120 @@ CREATE TABLE `agent_runs` (
     UNIQUE INDEX `uk_agent_run_active_guard`(`active_guard`),
     INDEX `idx_agent_run_project_status`(`project_id`, `status`),
     INDEX `idx_agent_run_claim`(`status`, `engine`, `is_delete`, `id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `agent_advances` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `agent_run_id` BIGINT NOT NULL,
+    `ordinal` INTEGER NOT NULL,
+    `status` VARCHAR(16) NOT NULL,
+    `input_snapshot` JSON NOT NULL,
+    `input_high_watermark_sequence_no` INTEGER NOT NULL,
+    `mention_input_snapshot` JSON NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_agent_advance_run_ordinal`(`agent_run_id`, `ordinal`),
+    INDEX `idx_agent_advance_run_status`(`agent_run_id`, `status`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `run_commits` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `advance_id` BIGINT NOT NULL,
+    `agent_run_id` BIGINT NOT NULL,
+    `request_digest` VARCHAR(71) NOT NULL,
+    `outcome` VARCHAR(32) NOT NULL,
+    `receipt` JSON NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_run_commit_advance`(`advance_id`),
+    INDEX `idx_run_commit_agent_run`(`agent_run_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `plan_messages` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `message_id` BIGINT NOT NULL,
+    `conversation_id` BIGINT NOT NULL,
+    `project_id` BIGINT NOT NULL,
+    `agent_run_id` BIGINT NOT NULL,
+    `ordinal` INTEGER NOT NULL,
+    `total_in_batch` INTEGER NOT NULL,
+    `sequence_label` VARCHAR(255) NULL,
+    `application_kind` VARCHAR(32) NOT NULL,
+    `target_scene_card_mention_id` BIGINT NULL,
+    `base_scene_card_version` INTEGER NULL,
+    `content_markdown` LONGTEXT NOT NULL,
+    `derived_references` JSON NOT NULL,
+    `frozen_generation_parameters` JSON NOT NULL,
+    `capability_snapshot_version` JSON NOT NULL,
+    `provider_prompt_projection` JSON NOT NULL,
+    `base_plan_message_id` BIGINT NULL,
+    `source_plan_message_id` BIGINT NULL,
+    `applied_at` DATETIME(0) NULL,
+    `first_generation_job_id` BIGINT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_plan_message_message`(`message_id`),
+    INDEX `idx_plan_message_project`(`project_id`),
+    INDEX `idx_plan_message_agent_run`(`agent_run_id`),
+    INDEX `idx_plan_message_application_kind`(`application_kind`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `agent_provisional_deliveries` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `agent_run_id` BIGINT NOT NULL,
+    `advance_id` BIGINT NOT NULL,
+    `fencing_token` BIGINT NOT NULL,
+    `status` VARCHAR(16) NOT NULL,
+    `interruption_reason` VARCHAR(32) NULL,
+    `content` TEXT NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    INDEX `idx_provisional_delivery_run`(`agent_run_id`),
+    INDEX `idx_provisional_delivery_advance`(`advance_id`, `status`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `agent_provisional_chunks` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `delivery_id` BIGINT NOT NULL,
+    `chunk_index` INTEGER NOT NULL,
+    `content` TEXT NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_provisional_chunk`(`delivery_id`, `chunk_index`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `agent_provider_calls` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `agent_run_id` BIGINT NOT NULL,
+    `advance_id` BIGINT NOT NULL,
+    `call_slot` INTEGER NOT NULL,
+    `fencing_token` BIGINT NOT NULL,
+    `status` VARCHAR(24) NOT NULL,
+    `request_digest` VARCHAR(71) NOT NULL,
+    `result_payload` JSON NULL,
+    `failure_code` VARCHAR(128) NULL,
+    `failure_message` TEXT NULL,
+    `started_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `ended_at` DATETIME(3) NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_provider_call_slot`(`advance_id`, `call_slot`),
+    INDEX `idx_provider_call_run`(`agent_run_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -293,7 +450,6 @@ CREATE TABLE `user_input_requests` (
     `is_delete` TINYINT NOT NULL DEFAULT 0,
 
     INDEX `idx_input_request_owner`(`project_id`, `user_id`, `status`),
-    UNIQUE INDEX `uk_input_request_resumed_run`(`resumed_agent_run_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -355,17 +511,25 @@ CREATE TABLE `project_events` (
 CREATE TABLE `skill` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `name` VARCHAR(255) NOT NULL,
+    `skill_code` VARCHAR(32) NULL,
     `description` TEXT NULL,
     `content` LONGTEXT NULL,
     `source` VARCHAR(32) NOT NULL DEFAULT 'official',
     `sort_order` INTEGER NOT NULL DEFAULT 0,
     `cover_url` VARCHAR(512) NULL,
+    `category` VARCHAR(32) NOT NULL DEFAULT 'other',
+    `search_keywords` TEXT NULL,
+    `name_en` VARCHAR(255) NULL,
+    `name_zh` VARCHAR(255) NULL,
+    `description_en` TEXT NULL,
+    `description_zh` TEXT NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
     `is_delete` TINYINT NOT NULL DEFAULT 0,
 
     UNIQUE INDEX `uk_name`(`name`),
+    UNIQUE INDEX `uk_skill_code`(`skill_code`),
     INDEX `idx_sort`(`sort_order`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -410,6 +574,28 @@ CREATE TABLE `template_card_image` (
     INDEX `idx_card_sort`(`card_id`, `sort_order`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable（IK764F：首页模板标签，原硬编码枚举落库；tag_code 与顺序固定，仅 label 可改名）
+CREATE TABLE `template_tag` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `tag_code` VARCHAR(64) NOT NULL,
+    `label` VARCHAR(128) NOT NULL,
+    `sort_order` INTEGER NOT NULL DEFAULT 0,
+    `create_time` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `update_time` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `is_delete` TINYINT NOT NULL DEFAULT 0,
+
+    UNIQUE INDEX `uk_tag_code`(`tag_code`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- SeedData（IK764F：与 lib/templates/template-tags.ts 兜底枚举对齐）
+INSERT INTO `template_tag` (`tag_code`, `label`, `sort_order`) VALUES
+    ('marketing', '营销视频', 0),
+    ('short', '微短片', 1),
+    ('replicate', '视频复刻', 2),
+    ('social', '社媒视频', 3),
+    ('image', '图片设计', 4);
 
 -- CreateTable
 CREATE TABLE `user_skill` (
@@ -501,6 +687,75 @@ CREATE TABLE `generation_job_logs` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `creative_skill` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `creative_skill_id` VARCHAR(80) NOT NULL,
+    `name` VARCHAR(255) NOT NULL,
+    `description` VARCHAR(1000) NULL,
+    `source_skill_id` BIGINT NULL,
+    `active_version_id` VARCHAR(80) NULL,
+    `owner_user_id` BIGINT NOT NULL DEFAULT 0,
+    `asset_domain` VARCHAR(16) NOT NULL DEFAULT 'official',
+    `name_key` VARCHAR(255) NULL,
+    `auto_match` TINYINT NOT NULL DEFAULT 0,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_creative_skill_id`(`creative_skill_id`),
+    INDEX `idx_owner_domain`(`owner_user_id`, `asset_domain`),
+    INDEX `idx_owner_name_key`(`owner_user_id`, `name_key`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `creative_skill_version` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `creative_skill_version_id` VARCHAR(80) NOT NULL,
+    `creative_skill_id` VARCHAR(80) NOT NULL,
+    `display_version` VARCHAR(64) NOT NULL,
+    `body` LONGTEXT NOT NULL,
+    `content_digest` VARCHAR(71) NOT NULL,
+    `resource_digest` VARCHAR(71) NOT NULL,
+    `media_type` VARCHAR(128) NOT NULL DEFAULT 'text/markdown',
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_creative_skill_version_id`(`creative_skill_version_id`),
+    UNIQUE INDEX `uk_creative_skill_version_semver`(`creative_skill_id`, `display_version`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `creative_skill_activation` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `creative_skill_id` VARCHAR(80) NOT NULL,
+    `user_id` BIGINT NOT NULL,
+    `agent_run_id` VARCHAR(64) NOT NULL,
+    `skill_version` INTEGER NOT NULL DEFAULT 1,
+    `activation_source` VARCHAR(16) NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    INDEX `idx_skill_user`(`creative_skill_id`, `user_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `skill_summarize_session` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `conversation_id` BIGINT NOT NULL,
+    `user_id` BIGINT NOT NULL,
+    `draft_content` TEXT NOT NULL,
+    `proposed_name` VARCHAR(255) NOT NULL,
+    `status` VARCHAR(32) NOT NULL DEFAULT 'pending_name_confirm',
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `is_delete` TINYINT NOT NULL DEFAULT 0,
+
+    UNIQUE INDEX `uk_skill_summarize_session_conversation`(`conversation_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `admin_operation_logs` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `category` VARCHAR(32) NOT NULL DEFAULT '',
@@ -538,5 +793,105 @@ CREATE TABLE `topup_tiers` (
     `version` INTEGER NOT NULL DEFAULT 0,
     `is_delete` TINYINT NOT NULL DEFAULT 0,
 
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- IK67H9 (T11)：PlanMessage 应用闭环三表。双写自 migration 20260805130000。
+CREATE TABLE `plan_application_receipts` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `message_id` BIGINT NOT NULL,
+    `project_id` BIGINT NOT NULL,
+    `conversation_id` BIGINT NULL,
+    `agent_run_id` BIGINT NULL,
+    `application_kind` VARCHAR(32) NOT NULL,
+    `scene_card_id` BIGINT NULL,
+    `first_generation_job_id` BIGINT NOT NULL,
+    `command_id` VARCHAR(128) NOT NULL,
+    `content_digest` VARCHAR(80) NOT NULL,
+    `result_version` INTEGER NULL,
+    `preset_digest` VARCHAR(80) NULL,
+    `target_scene_card_mention_id` BIGINT NULL,
+    `applied_at` DATETIME(0) NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    UNIQUE INDEX `uk_plan_application_receipt_message`(`message_id`),
+    UNIQUE INDEX `uk_plan_application_command`(`project_id`, `command_id`),
+    INDEX `idx_plan_application_job`(`first_generation_job_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE `scene_card_generation_presets` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `scene_card_id` BIGINT NOT NULL,
+    `project_id` BIGINT NOT NULL,
+    `parameters` JSON NOT NULL,
+    `reference_mode` VARCHAR(32) NOT NULL,
+    `reference_assets` JSON NOT NULL,
+    `capability_snapshot_version` JSON NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `version` INTEGER NOT NULL DEFAULT 1,
+    `is_delete` TINYINT NOT NULL DEFAULT 0,
+
+    UNIQUE INDEX `uk_preset_scene`(`scene_card_id`),
+    INDEX `idx_preset_project`(`project_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE `scene_card_generation_records` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `scene_card_id` BIGINT NOT NULL,
+    `project_id` BIGINT NOT NULL,
+    `summary_status` VARCHAR(16) NOT NULL,
+    `plan_message_id` BIGINT NOT NULL,
+    `application_receipt_id` BIGINT NOT NULL,
+    `first_generation_job_id` BIGINT NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `version` INTEGER NOT NULL DEFAULT 1,
+    `is_delete` TINYINT NOT NULL DEFAULT 0,
+
+    INDEX `idx_record_scene`(`scene_card_id`),
+    INDEX `idx_record_project`(`project_id`),
+    INDEX `idx_record_status`(`summary_status`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE `generation_output_slots` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `project_id` BIGINT NOT NULL,
+    `generation_job_id` BIGINT NOT NULL,
+    `scene_card_generation_record_id` BIGINT NULL,
+    `slot_index` INTEGER NOT NULL,
+    `status` VARCHAR(24) NOT NULL,
+    `asset_id` BIGINT NULL,
+    `retry_of_slot_id` BIGINT NULL,
+    `initial_placement_status` VARCHAR(16) NOT NULL DEFAULT 'pending',
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+
+    INDEX `idx_slot_job`(`generation_job_id`),
+    INDEX `idx_slot_record`(`scene_card_generation_record_id`),
+    INDEX `idx_slot_placement`(`project_id`, `initial_placement_status`),
+    UNIQUE INDEX `uk_slot_job_index`(`generation_job_id`, `slot_index`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE `storyboard_previews` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `scene_card_id` BIGINT NOT NULL,
+    `project_id` BIGINT NOT NULL,
+    `first_generation_job_id` BIGINT NOT NULL,
+    `command_id` VARCHAR(128) NOT NULL,
+    `summary_status` VARCHAR(16) NOT NULL,
+    `capability_snapshot_version` JSON NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `version` INTEGER NOT NULL DEFAULT 1,
+    `is_delete` TINYINT NOT NULL DEFAULT 0,
+
+    UNIQUE INDEX `uk_storyboard_command`(`project_id`, `command_id`),
+    INDEX `idx_storyboard_scene`(`scene_card_id`),
+    INDEX `idx_storyboard_project`(`project_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

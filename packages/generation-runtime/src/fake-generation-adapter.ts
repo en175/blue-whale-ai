@@ -1,8 +1,4 @@
-import type {
-  GenerationAdapter,
-  GenerationRequest,
-  GenerationResult,
-} from "@blue-whale/core";
+import type { GenerationAdapter } from "@blue-whale/core";
 import { createHash } from "node:crypto";
 
 export function createFakeGenerationAdapter(): GenerationAdapter {

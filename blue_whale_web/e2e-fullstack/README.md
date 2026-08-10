@@ -1,5 +1,10 @@
 # 全栈 MVP 验收 E2E（IK1NS2）
 
+> **历史先例（不再被执行）**：本套件的运行器 `scripts/run-mvp-acceptance.sh` 已随旧栈物理退役删除，
+> 此处 spec 与 fixture 仅作为全栈黑盒验收的历史先例文本保留。
+> 现役 Node-only 全栈验收执行体：`scripts/run-typescript-baseline-acceptance.sh`（`pnpm test:acceptance`），
+> 黑盒场景测试位于 `tests/typescript-baseline/`。
+
 与 `e2e/`（纯前端 Mock，UI 快速回归）**明确分离**的两套 Playwright 套件：
 
 | 维度 | `e2e/`（Mock 回归）     | `e2e-fullstack/`（全栈验收）                                      |

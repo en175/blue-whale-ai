@@ -102,3 +102,16 @@ export async function getPreviewTiers(): Promise<AdminTier[]> {
   return (await adminRequest<AdminTier[]>("/api/admin/topup-tiers/preview"))
     .data;
 }
+
+/** 全量补同步：把全部 active 档位折扣写进 Go amount_discount（IK75PR）。 */
+export async function syncAllTierDiscounts(): Promise<{
+  synced: number;
+  total: number;
+}> {
+  return (
+    await adminRequest<{ synced: number; total: number }>(
+      "/api/admin/topup-tiers/sync",
+      { method: "PUT" },
+    )
+  ).data;
+}

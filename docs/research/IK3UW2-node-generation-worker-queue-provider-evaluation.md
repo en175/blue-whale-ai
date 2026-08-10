@@ -4,8 +4,8 @@
 > WorkItem/Reconciler、多期限、结果不明核对与生产恢复验收不属于当前实施，见
 > [ADR-0055](../adr/0055-prelaunch-typescript-unification-scope.md)。
 
-- **工单**：[评估 Generation Worker 的 Node.js 队列与供应商适配方案](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UW2)
-- **父地图**：[Wayfinder：Node.js/TypeScript 全栈重构决策蓝图](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UUX)
+- **工单**：[评估 Generation Worker 的 Node.js 队列与供应商适配方案](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3UW2)
+- **父地图**：[Wayfinder：Node.js/TypeScript 全栈重构决策蓝图](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3UUX)
 - **类型**：wayfinder-research（AFK）
 - **日期**：2026-07-25
 
@@ -370,7 +370,7 @@ Callback Inbox、review、cost 和 Asset 的所有权如何保持。
 本研究不新增票据，也不毕业当前 fog。
 
 结论由既有下游票据
-[确定 Node Generation Worker 的执行与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWE)
+[确定 Node Generation Worker 的执行与恢复模型](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3UWE)
 吸收；该票据负责把这里的推荐拓扑、Adapter 判别状态、失败分类和验收门冻结为最终目标设计。
 
 ## 11. 一手资料

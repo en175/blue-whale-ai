@@ -53,6 +53,76 @@ function props(
 describe("VideoDockContent references", () => {
   afterEach(() => cleanup());
 
+  it("点击生成会提交当前视频参数，生成中禁止重复提交", () => {
+    const onGenerate = vi.fn();
+    const currentProps = props({ onGenerate });
+    const { rerender } = render(<VideoDockContent {...currentProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /生成$/ }));
+    expect(onGenerate).toHaveBeenCalledWith({
+      model: currentProps.selectedModel,
+      resolution: currentProps.resolution,
+      aspectRatio: currentProps.aspectRatio,
+      duration: currentProps.duration,
+      quantity: currentProps.quantity,
+      refMode: currentProps.refMode,
+    });
+
+    rerender(<VideoDockContent {...currentProps} generating />);
+    const generateButton = screen.getByRole("button", { name: /生成$/ });
+    expect(generateButton).toBeDisabled();
+    fireEvent.click(generateButton);
+    expect(onGenerate).toHaveBeenCalledTimes(1);
+  });
+
+  it("首尾帧支持上传并把文件和帧位转交给调用方", () => {
+    const onFrameUpload = vi.fn();
+    render(
+      <VideoDockContent
+        {...props({
+          refMode: { id: "first-last", label: "首尾帧" },
+          onFrameUpload,
+        })}
+      />,
+    );
+
+    const firstFrameButton = screen.getByRole("button", { name: "首帧" });
+    const fileInput =
+      firstFrameButton.parentElement?.querySelector<HTMLInputElement>(
+        'input[type="file"]',
+      );
+    const file = new File(["first-frame"], "first.png", {
+      type: "image/png",
+    });
+    fireEvent.change(fileInput!, { target: { files: [file] } });
+
+    expect(onFrameUpload).toHaveBeenCalledWith(file, "first");
+  });
+
+  it("首尾帧支持清除和从画布选取", () => {
+    const onFrameClear = vi.fn();
+    const onPickFrameFromCanvas = vi.fn();
+    render(
+      <VideoDockContent
+        {...props({
+          refMode: { id: "first-last", label: "首尾帧" },
+          firstFrameUrl: "blob:first",
+          lastFrameUrl: "blob:last",
+          onFrameClear,
+          onPickFrameFromCanvas,
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "清除首帧" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "从画布选择尾帧" }),
+    );
+
+    expect(onFrameClear).toHaveBeenCalledWith("first");
+    expect(onPickFrameFromCanvas).toHaveBeenCalledWith("last");
+  });
+
   it("视频参考按钮与图片一致：弹「上传来源」菜单，本地上传走 MP4/MOV", () => {
     const onLocalUpload = vi.fn();
     const { container } = render(
@@ -118,9 +188,12 @@ describe("VideoDockContent references", () => {
           stream: false,
           tools: false,
           first_frame: true,
+          last_frame: true,
           first_last_frame: true,
           audio: true,
         },
+        version: 0,
+        digest: "sha256:mock",
       },
     ]);
     render(
@@ -194,10 +267,10 @@ describe("VideoDockContent references", () => {
     const addBtn = screen.getByRole("button", { name: "添加图片" });
     expect(addBtn).toBeInTheDocument();
     fireEvent.click(addBtn);
-    expect(
-      screen.getByRole("menu", { name: "上传来源" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("menu", { name: "上传来源" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitem", { name: "从画布选择" }));
-    expect(screen.getByRole("button", { name: "添加图片" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "添加图片" }),
+    ).toBeInTheDocument();
   });
 });

@@ -2,11 +2,26 @@ import { describe, expect, it, vi } from "vitest";
 
 import { handleListTags, handlePageTemplates } from "./handle-templates.js";
 
-// /api/agent/templates tags + page。tags 来自枚举常量；page 走 repo。
+// /api/agent/templates tags + page。tags 读 DB（IK764F，DB 异常兜底硬编码）；page 走 repo。
+
+const DB_TAGS = [
+  { tag_code: "marketing", label: "营销新名" },
+  { tag_code: "short", label: "微短片" },
+];
 
 describe("handleListTags", () => {
-  it("返回 5 个枚举标签，按 sort_order 升序 → 200", async () => {
-    const result = await handleListTags();
+  it("DB 有数据 → 返回 DB 标签", async () => {
+    const result = await handleListTags({
+      templates: { listTags: vi.fn().mockResolvedValue(DB_TAGS) },
+    });
+    expect(result.code).toBe(200);
+    expect(result.data).toEqual(DB_TAGS);
+  });
+
+  it("DB 报错 → 兜底 5 个硬编码枚举（按 sort_order 升序）", async () => {
+    const result = await handleListTags({
+      templates: { listTags: vi.fn().mockRejectedValue(new Error("db down")) },
+    });
     expect(result.code).toBe(200);
     expect(result.data).toEqual([
       { tag_code: "marketing", label: "营销视频" },
@@ -15,6 +30,14 @@ describe("handleListTags", () => {
       { tag_code: "social", label: "社媒视频" },
       { tag_code: "image", label: "图片设计" },
     ]);
+  });
+
+  it("DB 返回空表 → 同样兜底硬编码", async () => {
+    const result = await handleListTags({
+      templates: { listTags: vi.fn().mockResolvedValue([]) },
+    });
+    expect(result.code).toBe(200);
+    expect((result.data as unknown[]).length).toBe(5);
   });
 });
 

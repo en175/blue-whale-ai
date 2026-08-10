@@ -1,4 +1,5 @@
-import { createNewApiClient, NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@blue-whale/core";
+import { createWebNewApiClient } from "@/lib/logging";
 import { parseNewApiBearerToken } from "@/lib/auth/bearer-token";
 import { withAuthenticatedUser } from "@/lib/auth/product-route-auth";
 import { loadGoTopUpConfig } from "@/lib/recharge/go-topup";
@@ -61,7 +62,7 @@ export async function GET(
     }
 
     try {
-      const client = createNewApiClient({ baseUrl: config.baseUrl });
+      const client = createWebNewApiClient({ baseUrl: config.baseUrl });
       // 查单走账户层 AccountTokenOrUserAuth，用当前用户 Token；Go 按属主过滤订单。
       const record = await client.getTopUpByTradeNo(userToken, tradeNo);
       if (!record) {

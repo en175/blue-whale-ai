@@ -14,6 +14,8 @@ export interface TemplateCardView {
   video: string | null;
   images: string[];
   layout: string;
+  /** 模板提示词（IK764F）：点击卡片追加进输入框的真实内容，可为空（前端兜底 title） */
+  content: string | null;
 }
 
 /** 对齐 Java PageVo：{records,total,current,size,pages}。 */
@@ -27,10 +29,20 @@ export interface TemplateCardPage {
 
 export interface TemplateRepo {
   pageByTagCode(tagCode: string, current: number, size: number): Promise<TemplateCardPage>;
+  /** 首页标签列表（IK764F 起读 DB template_tag 表，按 sort_order 升序） */
+  listTags(): Promise<TemplateTagView[]>;
 }
 
 export function createTemplateRepo(prisma: PrismaClient): TemplateRepo {
   return {
+    async listTags() {
+      const tags = await prisma.template_tag.findMany({
+        where: { is_delete: 0 },
+        orderBy: { sort_order: "asc" },
+      });
+      return tags.map((t) => ({ tag_code: t.tag_code, label: t.label }));
+    },
+
     async pageByTagCode(tagCode, current, size) {
       const where = { tag_code: tagCode, is_delete: 0 };
       const [total, cards] = await Promise.all([
@@ -66,6 +78,7 @@ export function createTemplateRepo(prisma: PrismaClient): TemplateRepo {
           video: c.video_url,
           images: imagesByCard.get(c.id.toString()) ?? [],
           layout: c.layout,
+          content: c.content,
         })),
         total,
         current,

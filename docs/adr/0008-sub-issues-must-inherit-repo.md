@@ -88,7 +88,7 @@ Issue 发布入口仍为 MCP。原因：
 
 据此，存量 `program_id=0` 根游离项的批量补挂（后续 ticket）走 `update_enterprise_issue(program_id=883843)` 路径，无需重建。
 
-参考：[IK0FRU](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK0FRU)（探针）、[IK0FL6](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK0FL6)（探针样本）。
+参考：[IK0FRU](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK0FRU)（探针）、[IK0FL6](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK0FL6)（探针样本）。
 
 ## 参考
 

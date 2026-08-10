@@ -14,6 +14,7 @@ import { RebindPhoneModal } from "./RebindPhoneModal";
 import { ChangePasswordModal } from "./ChangePasswordModal";
 import { RechargeModal } from "@/components/recharge";
 import { AccountRecordsModal } from "@/components/account-records/AccountRecordsModal";
+import { formatCredits } from "@/lib/credits";
 
 interface AccountModalProps {
   onClose: () => void;
@@ -97,7 +98,9 @@ export function AccountModal({ onClose }: AccountModalProps) {
         />
         <Row
           label="积分余额"
-          value={user?.credits != null ? String(user.credits) : "—"}
+          value={
+            user?.credits != null ? formatCredits(user.credits) : "—"
+          }
           action={
             <>
               <button

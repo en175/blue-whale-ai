@@ -61,7 +61,11 @@ export async function withOptionalUser(
   try {
     user = await getAuthenticatedUser(request);
   } catch (error) {
-    if (error instanceof AuthenticationError && error.status !== 502 && error.status !== 503) {
+    if (
+      error instanceof AuthenticationError &&
+      error.status !== 502 &&
+      error.status !== 503
+    ) {
       return handler(null);
     }
     throw error;

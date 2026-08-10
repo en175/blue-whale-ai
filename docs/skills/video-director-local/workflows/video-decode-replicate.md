@@ -50,13 +50,13 @@ Director 呈现拆解报告后，停住让用户确认 + 做三个决策：
 
 配方 + 产品理解就位后，进入现有创作链路（agents 复用，切 input_mode）：
 
-| 步骤 | agent | input_mode | 动作 |
-|---|---|---|---|
-| 1 | brief | replicate | 从配方 + product understanding 预填 Brief |
-| 2 | skill-selector | replicate_faithful / replicate_method | 照搬→高置信直推 pattern 对应 Skill + 告知；差异化→多候选开放问方向 |
-| 3 | storyboard | replicate_faithful / replicate_method | 照搬→照抄 beats 换产品；差异化→pattern 作约束自主生成 |
-| 4 | prompt-optimizer | （零改造） | 出可复制提示词交付包 |
-| 5 | review | replicate | 对照配方检查保留度 |
+| 步骤 | agent            | input_mode                            | 动作                                                               |
+| ---- | ---------------- | ------------------------------------- | ------------------------------------------------------------------ |
+| 1    | brief            | replicate                             | 从配方 + product understanding 预填 Brief                          |
+| 2    | skill-selector   | replicate_faithful / replicate_method | 照搬→高置信直推 pattern 对应 Skill + 告知；差异化→多候选开放问方向 |
+| 3    | storyboard       | replicate_faithful / replicate_method | 照搬→照抄 beats 换产品；差异化→pattern 作约束自主生成              |
+| 4    | prompt-optimizer | （零改造）                            | 出可复制提示词交付包                                               |
+| 5    | review           | replicate                             | 对照配方检查保留度                                                 |
 
 > **呈现铁律（B7）**：复刻链路两处「一句话告知」必须出现在**用户可见对话**（流式大白话段落），收进思考摘要即断点——用户看不到「为什么直接定了这个 Brief / 这个 Skill」就无从纠正，推断+确认可纠机制失效。
 > - **Brief 预填告知**（步骤 1）：Brief 卡呈现前后一句「Brief 已按原片配方预填，对照卡片确认」（Brief 卡顶模式条是可见性兜底，口头告知不可省）。

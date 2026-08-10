@@ -1,10 +1,14 @@
 import { createTopupTierDeps } from "@/lib/topup-tier/deps";
+import { quotaToCredits } from "@/lib/credits";
 
 /**
  * GET /api/recharge/tiers — 用户端充值档位列表
  *
  * 数据源：blue_whale DB topup_tiers（仅 active + 时间窗口内）。
  * 响应沿用 { code, msg, data: { tiers } } 信封，与前端 apiRequest 对齐。
+ *
+ * 积分口径（IK756O）：DB amount 存裸 quota，展示层统一换算成积分
+ * （quota × QUOTA_TO_CREDITS_COEFFICIENT），与余额/账户记录口径一致。
  */
 export async function GET() {
   try {
@@ -13,7 +17,7 @@ export async function GET() {
     const tiers = rows.map((t) => ({
       id: t.id,
       name: t.name,
-      amount: t.amount,
+      amount: Math.round(quotaToCredits(t.amount)),
       price: t.price,
       original_price: t.originalPrice,
       discount: t.discount,

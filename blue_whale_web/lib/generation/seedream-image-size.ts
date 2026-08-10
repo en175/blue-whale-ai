@@ -116,6 +116,11 @@ export function resolveSeedreamImageSize(
   return table?.[ratio as Ratio] ?? null;
 }
 
+/** 模型是否在 seedream 分辨率查表族内；族外模型尺寸直通能力行 api_value。 */
+export function hasSeedreamSizeTable(modelId: string): boolean {
+  return MODEL_SIZES[modelId] !== undefined;
+}
+
 export function listSeedreamSizes(modelId: string): string[] {
   return Object.keys(MODEL_SIZES[modelId] ?? {}).map((size) =>
     size.toLowerCase(),

@@ -5,6 +5,7 @@
  * 浏览器只发送 Authorization；服务端路由通过 new-api 校验凭据并解析用户身份。
  */
 import { loadAccessToken } from "@/components/auth/authStorage";
+import { notifyAuthFailure } from "./api-client";
 import type { WireInteger } from "./wire-integer";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -22,6 +23,7 @@ export interface ProjectDto {
 export interface CanvasDto {
   id: WireInteger | null;
   project_id: WireInteger;
+  version?: number | null;
   viewport: string | null;
   nodes: string;
 }
@@ -67,6 +69,9 @@ async function getResult<T>(
     FETCH_TIMEOUT,
   );
   if (!res.ok) {
+    if (res.status === 401) {
+      notifyAuthFailure();
+    }
     throw new ApiError(`请求失败: ${res.status}`, res.status);
   }
   const result = (await res.json()) as ApiResult<T>;
@@ -142,10 +147,18 @@ export function saveCanvas(
   projectId: WireInteger,
   viewport: string,
   nodes: string,
+  expectedVersion?: number | null,
 ): Promise<CanvasDto> {
+  const headers = new Headers(authHeaders(loadAccessToken()));
+  if (expectedVersion !== undefined) {
+    headers.set(
+      "If-Match",
+      expectedVersion === null ? '"missing"' : `"${expectedVersion}"`,
+    );
+  }
   return getResult<CanvasDto>(`/api/canvases/${projectId}`, {
     method: "PUT",
-    headers: authHeaders(loadAccessToken()),
+    headers,
     body: JSON.stringify({ viewport, nodes }),
   });
 }

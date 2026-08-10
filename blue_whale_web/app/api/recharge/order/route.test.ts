@@ -99,7 +99,7 @@ describe("POST /api/recharge/order（原生充值改接）", () => {
       trade_no: "BWP1xyz",
       qr_code_url: "https://pay.test/qr/BWP1",
       amount: 85, // 实付 = Go 报价
-      points: 50_000_000, // 到账积分 = tier.amount
+      points: 500, // 到账积分 = tier.amount × 系数(0.00001)，IK756O 口径统一
     });
     expect(typeof json.data.expire_time).toBe("string");
   });

@@ -11,36 +11,52 @@ import {
   useRef,
   useState,
 } from "react";
-import { BookOpenText, Box, ChevronDown } from "lucide-react";
+import { BookOpenText, ChevronDown } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
-import SkillPanel, { type UseSkillSelection } from "@/components/SkillPanel";
+import SkillPanel, { type UseSkillSelection } from "@/components/skill/SkillPanel";
 import { squirclePath } from "../utils";
 import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
-import { ComposerShell, ModelSettingsMenu } from "./Composer";
-import { SkillRecommendationSection } from "./SkillRecommendationSection";
-import type { CreativeSkillRecommendation } from "@/components/api/skills";
-import {
-  UserMessageBubble,
-  AgentMessageBubble,
-  ThinkingBlock,
-  AgentCard,
-} from "./ChatBubbles";
-import type {
-  ChatMessage,
-  PendingMention,
-  PendingMentionBatch,
-} from "../types";
+import type { ChatMessage, PendingMentionBatch } from "../types";
 import type { WireInteger } from "@/lib/wire-integer";
+import type {
+  ConversationMentionInput,
+  MentionFailure,
+} from "@blue-whale/core";
 import type { CardStatus } from "@/types/domain";
 import { buildMockReplyForMode } from "../messages";
 import { createMessageIdGenerator } from "../idGen";
 import type { MessageIdGenerator } from "../idGen";
 import { useAuth } from "@/components/auth/AuthContext";
 import type { CardMessage } from "../nodeFromCard";
-import { extractEditor, insertMention } from "./dock/mention";
+import {
+  extractEditor,
+  insertMention,
+  markMentionFailures,
+  removeMention,
+} from "./dock/mention";
+import { UPLOAD_ACCEPT, selectUploadFiles } from "@/lib/uploadRules";
+import { toast } from "@/components/Toast";
+import { wireInteger } from "@/lib/wire-integer";
+import type { MediaKind } from "@/lib/mediaSize";
+import {
+  MENTION_LIMIT,
+  WELCOME_PRESETS,
+  SKILL_SUMMARIZE_PROMPT,
+  mentionFailuresOf,
+  AGENT_MODELS,
+  type ComposerUploadEntry,
+} from "./chat-panel-lib";
+import { useComposerUploads } from "./use-composer-uploads";
+import { ChatPanelComposer } from "./chat/ChatPanelComposer";
+import { ChatPanelMessageStream } from "./chat/ChatPanelMessageStream";
+import { usePlanApply } from "./chat/use-plan-apply";
+import type { CreativeSkillRecommendation } from "@/components/api/skills";
+import {
+  clearComposerDraft,
+  loadComposerDraft,
+  saveComposerDraft,
+} from "@/lib/composer-draft";
 
-/** @ 素材 pill 数量上限，对齐后端 referenced_asset_ids @Size(max=10)。 */
-const MENTION_LIMIT = 10;
 
 export function AgentChatPanel({
   messages,
@@ -51,11 +67,18 @@ export function AgentChatPanel({
   onCardGenerated,
   onAppendMessages,
   onSubmitMessage,
+  onUploadFile,
   onSetCardStatus,
   onRetryGenerationJob,
   prompt,
-  forcedSkillName,
+  projectId,
+  activeSkillName,
+  agentRunStatus,
+  reasoningSummary,
   answerableActive,
+  provisionalContent,
+  onRetryAgentRun,
+  onApplyPlanMessage,
   skillRecommendations,
   skillRecommendationsLoading,
 }: {
@@ -71,19 +94,40 @@ export function AgentChatPanel({
   /** 后端可用时提交权威 Conversation 命令；缺省时保留既有离线 mock。 */
   onSubmitMessage?: (
     text: string,
-    referencedAssetIds?: WireInteger[],
+    mentions?: ConversationMentionInput[],
     forcedCreativeSkillId?: string,
+    skillSummarize?: boolean,
   ) => Promise<void>;
+  /**
+   * 后端可用时执行输入区文件上传（持久化 Asset + 创建 NodeItem + Canvas 首次放置）。
+   * 缺省（离线）时上传按钮不启用。IK67GX T03。
+   */
+  onUploadFile?: (
+    file: File,
+  ) => Promise<{ assetId: string; url: string; kind: MediaKind }>;
   /** 设置当前项目内某 card 的状态（重试链推进） */
   onSetCardStatus?: (cardId: number | string, status: CardStatus) => void;
   /** 权威失败 Card 的真实重试命令；新 Job 由 Snapshot/SSE 恢复。 */
   onRetryGenerationJob?: (generationJobId: WireInteger) => Promise<void>;
   /** 首页续上 / 模板卡点击带入的 prompt，填入 composer（可编辑后发送） */
   prompt?: string;
-  /** 当前 Run 已激活 Creative Skill 的展示名（Snapshot/SSE 权威，null 表示无激活） */
-  forcedSkillName?: string | null;
+  /** 当前 Project 身份；传入后未发送草稿按 Project 持久化到本浏览器（IK67GD T02） */
+  projectId?: string;
+  /** 当前 Run 已激活 Creative Skill 的展示名（forced/auto 统一，Snapshot/SSE 权威） */
+  activeSkillName?: string | null;
+  /** 当前 Run 的公开状态（Snapshot/SSE 权威） */
+  agentRunStatus?: string | null;
+  /** 安全的用户可见运行摘要；不包含内部思维链。 */
+  reasoningSummary?: string | null;
   /** 是否存在可回答创作澄清（true 时 forced 与 reply 互斥，pending 保留不清） */
   answerableActive?: boolean;
+  /** 临时助手文本（IK67GZ T07）：非正式消息，RunCommit 后消失 */
+  provisionalContent?: string | null;
+  /** 手动重试失败 Run（IK67GZ，契约 §8.3）；缺省（离线）不渲染重试按钮 */
+  onRetryAgentRun?: () => Promise<void>;
+  /** 手动应用冻结计划（IK6KQB，契约 §9）；缺省（离线）计划卡按钮无动作。
+   *  拒绝时抛 ApiError，业务码映射：100405→余额不足（可重试），100403/100202/100407→需新计划。 */
+  onApplyPlanMessage?: (planMessageId: WireInteger) => Promise<unknown>;
   /** 当前 Run 的 Creative Skill 推荐列表（IK3NPI）；未传则不渲染推荐区 */
   skillRecommendations?: CreativeSkillRecommendation[];
   /** 推荐列表拉取中（仅配合 skillRecommendations 展示加载态） */
@@ -94,14 +138,19 @@ export function AgentChatPanel({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [panelSize, setPanelSize] = useState({ w: 468, h: 600 });
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
-  // Use 选择的 pending forced skill：点 Use 立刻乐观展示，SSE 确认后由 forcedSkillName 接管
+  // Use 选择的 pending forced skill：点 Use 立刻乐观展示，SSE 确认后由 activeSkillName 接管
   const [pendingForcedSkill, setPendingForcedSkill] = useState<{
     id: string;
     name: string;
   } | null>(null);
+  // 总结当前对话的一次性意图标记（IK60X1）：预填时置位，发送成功后清除，失败保留供重试
+  const skillSummarizePendingRef = useRef(false);
   const [retryingCards, setRetryingCards] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  // 手动应用计划（IK6KQB）：交互态下沉到 chat/use-plan-apply，权威态仍由 Snapshot/SSE 校准。
+  const { applyingPlanIds, planAvailabilityOverrides, handleApplyPlan } =
+    usePlanApply({ messages, onApplyPlanMessage });
 
   const CREATION_MODES = useMemo(
     () => [
@@ -115,29 +164,6 @@ export function AgentChatPanel({
     [],
   );
 
-  const AGENT_MODELS = useMemo(
-    () => [
-      { id: "claude-opus-4-7", label: "Claude Opus 4.7", costMultiplier: "5x" },
-      {
-        id: "claude-sonnet-4-6",
-        label: "Claude Sonnet 4.6",
-        costMultiplier: "3x",
-      },
-      {
-        id: "gemini-3-5-flash",
-        label: "Gemini 3.5 Flash",
-        costMultiplier: "2x",
-      },
-      { id: "qwen-3-7-max", label: "Qwen 3.7 Max", costMultiplier: "1.3x" },
-      { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", costMultiplier: "1x" },
-      {
-        id: "gemini-3-1-flash-lite",
-        label: "Gemini 3.1 Flash Lite",
-        costMultiplier: "0.3x",
-      },
-    ],
-    [],
-  );
 
   const [selectedMode] = useState(CREATION_MODES[0]);
   const [selectedModel, setSelectedModel] = useState(AGENT_MODELS[3]);
@@ -147,13 +173,28 @@ export function AgentChatPanel({
   const bodyRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
 
-  // prompt 带入 composer（首页续上 / 模板卡点击），可编辑后发送
+  // 挂载/展开时恢复本项目未发送草稿（IK67GD T02）；草稿优先于外部 prompt 带入。
+  // 依赖 isOpen：收起时组件返回 null、composer DOM 不存在，展开时才真正填充。
+  const draftRestoredRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!isOpen || !projectId || !composerRef.current) return;
+    const draft = loadComposerDraft(projectId);
+    if (draft && draft.trim().length > 0) {
+      composerRef.current.innerText = draft;
+      // 恢复草稿必须在首帧绘制前置位 composerEmpty，否则发送按钮状态错误
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setComposerEmpty(false);
+      draftRestoredRef.current = true;
+    }
+  }, [projectId, isOpen]);
+
+  // prompt 带入 composer（首页续上 / 模板卡点击），可编辑后发送；同理由 isOpen 触发
   useEffect(() => {
-    if (prompt && composerRef.current) {
+    if (prompt && isOpen && composerRef.current && !draftRestoredRef.current) {
       composerRef.current.innerText = prompt;
       setComposerEmpty(false);
     }
-  }, [prompt]);
+  }, [prompt, isOpen]);
 
   const { requireAuth } = useAuth();
   const modelSettingsTriggerRef = useRef<HTMLButtonElement>(null);
@@ -165,6 +206,8 @@ export function AgentChatPanel({
     nextMessageIdRef.current = createMessageIdGenerator();
   const nextMessageId = nextMessageIdRef.current;
 
+  // 依赖 isOpen：面板关闭时组件返回 null、panelRef 为 null，
+  // 仅挂载时运行会永远停在 panelSize 初始值，背景壳（SmoothCorners）高度失真。
   useEffect(() => {
     const el = panelRef.current;
     if (!el) return;
@@ -175,7 +218,7 @@ export function AgentChatPanel({
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [isOpen]);
 
   useLayoutEffect(() => {
     const el = panelRef.current;
@@ -184,7 +227,7 @@ export function AgentChatPanel({
     if (rect.width > 0 && rect.height > 0) {
       setPanelSize({ w: Math.round(rect.width), h: Math.round(rect.height) });
     }
-  }, []);
+  }, [isOpen]);
 
   useEffect(() => {
     const el = bodyRef.current;
@@ -224,46 +267,85 @@ export function AgentChatPanel({
     };
   }, []);
 
-  const handleComposerInput = () => {
+  const handleComposerInput = useCallback(() => {
     const text = composerRef.current?.innerText ?? "";
     setComposerEmpty(text.trim().length === 0);
+    if (projectId) saveComposerDraft(projectId, text);
+  }, [projectId]);
+
+  // 输入区上传（IK67GX T03）：条目状态流 uploading → success/error；
+  // 成功即插可移除 pill（Asset 已持久化），失败条目可单独重试/移除，不损文字与其他上传。
+
+  // IK74V6：输入区上传逻辑（状态与回调下沉 use-composer-uploads）。
+  const {
+    composerUploads,
+    composerFileInputRef,
+    handleComposerFilePick,
+    handleComposerUploadRetry,
+    handleComposerUploadRemove,
+    clearComposerUploads,
+    anyComposerUploading,
+  } = useComposerUploads({
+    onUploadFile,
+    composerRef,
+    onComposerInput: handleComposerInput,
+  });
+
+  // 欢迎预设：只填入输入框供用户审阅编辑，不发送、不创建产品事实（IK67GD T02）
+  const handleWelcomePreset = (text: string) => {
+    if (!composerRef.current) return;
+    composerRef.current.innerText = text;
+    handleComposerInput();
+    composerRef.current.focus();
   };
 
-  const insertTextIntoComposer = useCallback((text: string) => {
-    const editor = composerRef.current;
-    if (!editor) return;
+  const insertTextIntoComposer = useCallback(
+    (text: string) => {
+      const editor = composerRef.current;
+      if (!editor) return;
 
-    editor.focus();
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      if (editor.contains(range.commonAncestorContainer)) {
-        range.deleteContents();
-        const textNode = document.createTextNode(text);
-        range.insertNode(textNode);
-        range.setStartAfter(textNode);
-        range.setEndAfter(textNode);
-        selection.removeAllRanges();
-        selection.addRange(range);
+      editor.focus();
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        if (editor.contains(range.commonAncestorContainer)) {
+          range.deleteContents();
+          const textNode = document.createTextNode(text);
+          range.insertNode(textNode);
+          range.setStartAfter(textNode);
+          range.setEndAfter(textNode);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        } else {
+          editor.appendChild(document.createTextNode(text));
+        }
       } else {
         editor.appendChild(document.createTextNode(text));
       }
-    } else {
-      editor.appendChild(document.createTextNode(text));
-    }
 
-    handleComposerInput();
-    setSkillPanelOpen(false);
-  }, []);
+      handleComposerInput();
+      setSkillPanelOpen(false);
+    },
+    [handleComposerInput],
+  );
 
   // Skill 面板 Use：有稳定 creative_skill_id 则记 pending（随下一条允许创建目标 Run 的消息下发），
-  // 不往输入框插 @ 文本；无 id（库外项）仅关面板。
+  // 输入框上方出现可移除技能标签（DirectSkillTag，对齐首页 IK60WY 交互）；不往输入框插 @ 文本；
+  // 无 id（库外项）仅关面板。
   const handleUseSkill = useCallback((skill: UseSkillSelection) => {
     if (skill.creative_skill_id) {
       setPendingForcedSkill({ id: skill.creative_skill_id, name: skill.name });
     }
     setSkillPanelOpen(false);
   }, []);
+
+  // 「总结当前对话」（IK60X1，契约 §15.1）：关面板 → 预填固定提示词（可编辑、必须手动发送）
+  // → 置一次性意图标记，发送时随消息体携带 skill_summarize: true，绝不自动提交。
+  const handleSummarizeConversation = () => {
+    skillSummarizePendingRef.current = true;
+    handleWelcomePreset(SKILL_SUMMARIZE_PROMPT);
+    setSkillPanelOpen(false);
+  };
 
   // 外部（画布节点操作菜单「添加到对话」）请求把素材插入输入框：
   // 带 assetId 走 pill 路径（发送时写入 referenced_asset_ids），无 assetId 回退纯文本。
@@ -306,10 +388,12 @@ export function AgentChatPanel({
   }, [pendingMention?.batchId]);
 
   const handleSend = () => {
-    const { prompt, assetIds } = composerRef.current
+    const { prompt, mentions } = composerRef.current
       ? extractEditor(composerRef.current)
-      : { prompt: "", assetIds: [] as WireInteger[] };
-    if (!prompt && assetIds.length === 0) return;
+      : { prompt: "", mentions: [] as ConversationMentionInput[] };
+    if (!prompt && mentions.length === 0) return;
+    // 未完成上传门禁：发送按钮禁用 + Enter 路径同样拦截（IK67GX T03）
+    if (anyComposerUploading) return;
 
     requireAuth({ kind: "canvas-send", text: prompt }, () => {
       // 重新发送前清掉上一轮尚未触发的逐条追加定时器
@@ -321,17 +405,28 @@ export function AgentChatPanel({
         setSubmitting(true);
         // forced 仅在无活动澄清时附上（reply 互斥）；成功才清 pending，失败保留供重试
         const attachForced = !!pendingForcedSkill && !answerableActive;
+        // 总结意图一次性消费（IK60X1）：同 forced 语义，成功才清除
+        const attachSummarize = skillSummarizePendingRef.current;
         void onSubmitMessage(
           prompt,
-          assetIds,
+          mentions,
           attachForced ? pendingForcedSkill!.id : undefined,
+          attachSummarize ? true : undefined,
         )
           .then(() => {
             if (composerRef.current) composerRef.current.innerHTML = "";
             setComposerEmpty(true);
+            clearComposerUploads();
+            if (projectId) clearComposerDraft(projectId);
             if (attachForced) setPendingForcedSkill(null);
+            if (attachSummarize) skillSummarizePendingRef.current = false;
           })
           .catch((error) => {
+            const failures = mentionFailuresOf(error);
+            if (failures.length > 0 && composerRef.current) {
+              markMentionFailures(composerRef.current, failures);
+              handleComposerInput();
+            }
             console.error("[canvas] conversation message failed:", error);
           })
           .finally(() => {
@@ -348,6 +443,8 @@ export function AgentChatPanel({
       onAppendMessages?.([userMsg]);
       if (composerRef.current) composerRef.current.innerHTML = "";
       setComposerEmpty(true);
+      clearComposerUploads();
+      if (projectId) clearComposerDraft(projectId);
 
       // 按当前创作模式生成 mock 回复，错开逐条追加模拟逐步生成
       const reply = buildMockReplyForMode(
@@ -431,7 +528,10 @@ export function AgentChatPanel({
   if (!isOpen) return null;
 
   // 已选技能标签：乐观名（刚点 Use）→ 权威名（Run 已激活）→ 不显示
-  const forcedLabel = pendingForcedSkill?.name ?? forcedSkillName ?? null;
+  const skillLabel = pendingForcedSkill?.name ?? activeSkillName ?? null;
+  const skillStateLabel = pendingForcedSkill ? "已选技能" : "已激活技能";
+  // 失败重试可用性：失败提示落在对话流末尾（契约 §8.3）
+  const canRetryRun = !!onRetryAgentRun && agentRunStatus === "failed";
 
   const panelPath = squirclePath(panelSize.w, panelSize.h, 28.8);
 
@@ -472,7 +572,7 @@ export function AgentChatPanel({
           <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
             <div className="tc-agent-session-credit-badge group relative">
               <span
-                className="tc-agent-session-credit-badge__trigger inline-flex items-center gap-1 rounded-lg border border-white/[0.06] bg-white/[0.06] px-2 py-1 text-xs text-white/75"
+                className="tc-agent-session-credit-badge__trigger inline-flex items-center gap-1 rounded-lg border border-transparent px-2 py-1 text-xs text-white/75 transition-colors group-hover:bg-white/[0.06]"
                 aria-label="当前 Agent 对话累计消耗 0.12 积分"
               >
                 <CreditIcon size={12} />
@@ -493,14 +593,14 @@ export function AgentChatPanel({
               </div>
             </div>
           </div>
-          {forcedLabel && (
+          {skillLabel && (
             <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
               <span
                 className="tc-agent-forced-skill-badge inline-flex items-center gap-1 rounded-lg border border-white/[0.06] bg-white/[0.06] px-2 py-1 text-xs text-white/75"
-                aria-label={`已选技能：${forcedLabel}`}
+                aria-label={`${skillStateLabel}：${skillLabel}`}
               >
                 <BookOpenText size={12} />
-                <span className="max-w-[120px] truncate">{forcedLabel}</span>
+                <span className="max-w-[120px] truncate">{skillLabel}</span>
                 {pendingForcedSkill && (
                   <button
                     type="button"
@@ -595,29 +695,23 @@ export function AgentChatPanel({
             className="tc-agent-chat-body tc-panel-textarea-scrollbar flex flex-col gap-2 overflow-y-auto overflow-x-hidden px-3 py-2"
             style={{ flex: "1 1 0%", minHeight: 0 }}
           >
-            {skillRecommendations !== undefined && (
-              <SkillRecommendationSection
-                recommendations={skillRecommendations}
-                loading={skillRecommendationsLoading ?? false}
-                onUse={handleUseSkill}
-              />
-            )}
-            {messages.map((msg) => {
-              if (msg.type === "user")
-                return <UserMessageBubble key={msg.id} text={msg.text} />;
-              if (msg.type === "thinking")
-                return <ThinkingBlock key={msg.id} msg={msg} />;
-              if (msg.type === "card")
-                return (
-                  <AgentCard
-                    key={msg.id}
-                    msg={msg}
-                    busy={retryingCards.has(String(msg.id))}
-                    onReapply={handleReapply}
-                  />
-                );
-              return <AgentMessageBubble key={msg.id} text={msg.text} />;
-            })}
+            <ChatPanelMessageStream
+              skillRecommendations={skillRecommendations}
+              skillRecommendationsLoading={skillRecommendationsLoading ?? false}
+              onUseSkill={handleUseSkill}
+              messages={messages}
+              onWelcomePreset={handleWelcomePreset}
+              retryingCards={retryingCards}
+              onReapply={handleReapply}
+              provisionalContent={provisionalContent}
+              agentRunStatus={agentRunStatus}
+              reasoningSummary={reasoningSummary}
+              canRetryRun={canRetryRun}
+              onRetryAgentRun={onRetryAgentRun}
+              applyingPlanIds={applyingPlanIds}
+              planAvailabilityOverrides={planAvailabilityOverrides}
+              onApplyPlan={handleApplyPlan}
+            />
           </div>
         </div>
 
@@ -638,105 +732,31 @@ export function AgentChatPanel({
           style={{ padding: "0 4px 4px" }}
         >
           <div style={{ position: "relative" }}>
-            <ComposerShell>
-              <div className="relative p-2">
-                <div
-                  ref={composerRef}
-                  className="tc-agent-composer-editor min-h-[40px] max-h-[120px] overflow-y-auto px-3 py-2 text-sm text-white outline-none"
-                  data-placeholder="描述你的想法，使用 @ 引用素材"
-                  contentEditable
-                  suppressContentEditableWarning
-                  role="textbox"
-                  aria-multiline="true"
-                  data-empty={composerEmpty}
-                  data-tour-editor="agent-composer-input"
-                  spellCheck={false}
-                  autoCorrect="off"
-                  onInput={handleComposerInput}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                />
-                <div
-                  className="tc-agent-composer-actions mt-2 flex items-center justify-between"
-                  aria-label="Composer actions"
-                >
-                  <div className="tc-agent-composer-actions__start flex items-center gap-1">
-                    <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
-                      <button
-                        type="button"
-                        className="tc-agent-upload-btn tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/[0.08]"
-                        aria-label="上传素材"
-                        data-tooltip="上传图片、视频或音频"
-                      >
-                        <IconPlus size={16} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSkillPanelOpen(true)}
-                        className="tc-agent-skill-btn tc-agent-composer-pill-btn inline-flex h-8 items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.05] px-3 text-xs font-medium text-white/85 transition-colors hover:bg-white/[0.08]"
-                        aria-label="技能"
-                        aria-haspopup="dialog"
-                        aria-expanded={skillPanelOpen}
-                        aria-controls="tc-agent-skill-panel"
-                        data-tour-target="agent-skill-button"
-                      >
-                        <span className="tc-agent-skill-btn__content inline-flex items-center gap-1.5">
-                          <BookOpenText size={16} />
-                          <span className="tc-agent-skill-btn__label">
-                            技能
-                          </span>
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-                  <div className="tc-agent-composer-actions__end flex items-center gap-1">
-                    <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
-                      <div className="tc-model-settings-selector relative">
-                        <button
-                          type="button"
-                          ref={modelSettingsTriggerRef}
-                          onClick={() => setModelSettingsOpen((v) => !v)}
-                          className="tc-model-settings-trigger tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/[0.08]"
-                          aria-haspopup="dialog"
-                          aria-expanded={modelSettingsOpen}
-                          aria-label={`模型: ${selectedModel.label}`}
-                          title="模型"
-                        >
-                          <Box size={16} />
-                        </button>
-
-                        {modelSettingsOpen && (
-                          <ModelSettingsMenu
-                            model={selectedModel}
-                            models={AGENT_MODELS}
-                            onModelChange={setSelectedModel}
-                            onClose={() => setModelSettingsOpen(false)}
-                            menuRef={modelSettingsMenuRef}
-                            triggerRef={modelSettingsTriggerRef}
-                          />
-                        )}
-                      </div>
-                    </div>
-                    <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
-                      <button
-                        type="button"
-                        onClick={handleSend}
-                        disabled={composerEmpty || submitting}
-                        className="tc-agent-send-btn tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-black transition-colors hover:bg-white/90 disabled:cursor-default disabled:bg-white/[0.1] disabled:text-white/[0.25]"
-                        aria-label="发送"
-                        aria-disabled={composerEmpty || submitting}
-                      >
-                        <IconSend size={14} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </ComposerShell>
+            <ChatPanelComposer
+              composerRef={composerRef}
+              composerEmpty={composerEmpty}
+              onComposerInput={handleComposerInput}
+              onSend={handleSend}
+              submitting={submitting}
+              fileInputRef={composerFileInputRef}
+              uploadEnabled={!!onUploadFile}
+              uploads={composerUploads}
+              anyUploading={anyComposerUploading}
+              onFilePick={handleComposerFilePick}
+              onUploadRetry={handleComposerUploadRetry}
+              onUploadRemove={handleComposerUploadRemove}
+              pendingForcedSkill={pendingForcedSkill}
+              onRemoveForcedSkill={() => setPendingForcedSkill(null)}
+              skillPanelOpen={skillPanelOpen}
+              onOpenSkillPanel={() => setSkillPanelOpen(true)}
+              selectedModel={selectedModel}
+              models={AGENT_MODELS}
+              onModelChange={setSelectedModel}
+              modelSettingsOpen={modelSettingsOpen}
+              onToggleModelSettings={() => setModelSettingsOpen((v) => !v)}
+              modelSettingsMenuRef={modelSettingsMenuRef}
+              modelSettingsTriggerRef={modelSettingsTriggerRef}
+            />
           </div>
         </div>
       </div>
@@ -745,6 +765,7 @@ export function AgentChatPanel({
         isOpen={skillPanelOpen}
         onClose={() => setSkillPanelOpen(false)}
         onUseSkill={handleUseSkill}
+        onSummarizeConversation={handleSummarizeConversation}
       />
     </div>
   );

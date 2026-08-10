@@ -10,11 +10,11 @@
 
 新增任何 API 路由，默认必须使用鉴权包装器（`lib/auth/product-route-auth.ts`）：
 
-| 接口类型 | 包装器 | 说明 |
-| --- | --- | --- |
-| 普通产品接口 | `withAuthenticatedUser(request, handler)` | ordinary 策略，60s 身份缓存 |
-| 管理端接口 | `withAdminUser(request, handler)` | fresh 策略实时校验；非管理员 403 |
-| 公开接口 | `withOptionalUser(request, handler)`（或裸返回） | 见第 2 节，必须在公开清单登记 |
+| 接口类型     | 包装器                                           | 说明                             |
+| ------------ | ------------------------------------------------ | -------------------------------- |
+| 普通产品接口 | `withAuthenticatedUser(request, handler)`        | ordinary 策略，60s 身份缓存      |
+| 管理端接口   | `withAdminUser(request, handler)`                | fresh 策略实时校验；非管理员 403 |
+| 公开接口     | `withOptionalUser(request, handler)`（或裸返回） | 见第 2 节，必须在公开清单登记    |
 
 **强制检查**：`lib/auth/protected-route-coverage.test.ts` 会遍历全部 route.ts，非公开清单内的路由若未使用 `withAuthenticatedUser` / `withAdminUser` 包装，测试直接失败。忘写鉴权 = CI 红。
 
@@ -81,9 +81,9 @@ export async function GET(request: Request) {
 
 ## 7. 相关文件
 
-| 文件 | 作用 |
-| --- | --- |
-| `lib/auth/product-route-auth.ts` | `withAuthenticatedUser` / `withAdminUser` / `withOptionalUser` |
-| `lib/auth/authenticated-user.ts` | 身份解析、缓存、错误语义 |
-| `lib/auth/public-routes.ts` | 公开路由集中清单（放行唯一入口） |
-| `lib/auth/protected-route-coverage.test.ts` | 路由覆盖强制测试（引用公开清单） |
+| 文件                                        | 作用                                                           |
+| ------------------------------------------- | -------------------------------------------------------------- |
+| `lib/auth/product-route-auth.ts`            | `withAuthenticatedUser` / `withAdminUser` / `withOptionalUser` |
+| `lib/auth/authenticated-user.ts`            | 身份解析、缓存、错误语义                                       |
+| `lib/auth/public-routes.ts`                 | 公开路由集中清单（放行唯一入口）                               |
+| `lib/auth/protected-route-coverage.test.ts` | 路由覆盖强制测试（引用公开清单）                               |

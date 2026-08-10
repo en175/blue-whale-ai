@@ -12,7 +12,13 @@ const mocks = vi.hoisted(() => ({
         isAdmin: boolean;
         username: string;
       }) => Promise<Response>,
-    ) => handler({ userId: "1", status: "enabled", isAdmin: true, username: "admin" }),
+    ) =>
+      handler({
+        userId: "1",
+        status: "enabled",
+        isAdmin: true,
+        username: "admin",
+      }),
   ),
   completeAdminTopUp: vi.fn(),
   recordAdminAction: vi.fn().mockResolvedValue(undefined),
@@ -62,7 +68,11 @@ describe("POST /api/admin/orders/:tradeNo/complete", () => {
     const res = await POST(...post("BWP123", { reason: "已线下收款" }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ success: true, data: null });
-    expect(mocks.completeAdminTopUp).toHaveBeenCalledWith("sk-admin", 1, "BWP123");
+    expect(mocks.completeAdminTopUp).toHaveBeenCalledWith(
+      "sk-admin",
+      1,
+      "BWP123",
+    );
     expect(mocks.recordAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({
         category: "order",

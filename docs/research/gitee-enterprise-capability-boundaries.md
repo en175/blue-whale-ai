@@ -1,7 +1,7 @@
 # Gitee 企业版能力边界查证
 
 > 调研：评估 destination「企业项目管理工具（企业「项目」/工作项看板）作唯一 issue 入口，仓库 Issue 页废弃/只读」的 Gitee 平台可行性。
-> 触发工单：[IK0CPI](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK0CPI)（wayfinder-research）。所属 map：[IK0CP7「统一 Issue 入口：企业项目管理工具为唯一系统」](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK0CP7)。
+> 触发工单：[IK0CPI](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK0CPI)（wayfinder-research）。所属 map：[IK0CP7「统一 Issue 入口：企业项目管理工具为唯一系统」](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK0CP7)。
 > 来源：Gitee 官方帮助中心（help.gitee.com）、OpenAPI V5 Swagger、官方套餐页 + 本仓已落地基础设施（ADR / hook / 实测）。置信度逐条标注。
 
 ## 结论（TL;DR）

@@ -8,7 +8,7 @@
  * （new-api quota 是唯一余额真相，credits 是 UI 别名）。充值到账 quota =
  * N × QuotaPerUnit（N = TopUp.amount 美元额度，见 lib/topup-tier/constants.ts）。
  */
-import { quotaToCredits } from "@/lib/credits";
+import { creditsToNumber, quotaToCredits } from "@/lib/credits";
 import { QUOTA_PER_UNIT } from "@/lib/topup-tier/constants";
 
 /** 充值记录状态（PRD 三态：成功/失败/进行中） */
@@ -65,9 +65,9 @@ export function mapPaymentMethodLabel(paymentMethod: string): string {
   }
 }
 
-/** quota → credits 取整（负数/非法 → 0，展示层不出现负积分）。 */
+/** quota → credits 保留 2 位小数（负数/非法 → 0，展示层不出现负积分）。 */
 function roundCredits(value: number): number {
-  return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+  return creditsToNumber(value);
 }
 
 /** 充值获得积分：到账 quota = amount(N) × QuotaPerUnit，再走展示层换算。 */
@@ -76,10 +76,10 @@ export function topUpCreditsGained(amount: number): number {
   return roundCredits(quotaToCredits(amount * QUOTA_PER_UNIT));
 }
 
-/** 消费积分：Log.quota 走同一展示层换算。quota>0 但换算不足 1 时保底 1（避免展示「-0」）。 */
+/** 消费积分：Log.quota 走同一展示层换算，保留 2 位小数（IK756O，不再整数保底）。 */
 export function consumeCredits(quota: number): number {
   if (!Number.isFinite(quota) || quota <= 0) return 0;
-  return Math.max(1, Math.round(quotaToCredits(quota)));
+  return creditsToNumber(quotaToCredits(quota));
 }
 
 /**

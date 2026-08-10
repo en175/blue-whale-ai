@@ -11,7 +11,7 @@
 import { isWireInteger, wireInteger } from "@/lib/wire-integer";
 
 export type NodeKindId =
-  "text" | "image" | "video" | "audio" | "group" | "reference";
+  "text" | "image" | "video" | "audio" | "group" | "reference" | "scene_card";
 export type MediaKind = "text" | "image" | "video" | "audio";
 /** IK55VS 参考卡类型（单 kind=reference + cardType；后续新卡类只扩此联合，不改节点模型）。 */
 export type ReferenceCardType =
@@ -117,6 +117,7 @@ export interface CanvasNodeData {
   model?: string;
   providerId?: string;
   assetId?: string; // ★ 媒体引用 store.assets[id]（非 url 直存）
+  sceneCardId?: string; // 场景卡引用（spec §6.2，仅 kind=scene_card）：正文从快照投影查，不进画布 JSON 正文
   recipe?: NodeRecipe; // ★ 产物溯源 + 重生成依据（origin/generation；旧节点无=向前兼容）
   taskId?: string; // 绑 GenerationJob（工作流留位）
   status?: NodeStatus; // 投影态，serialize 剥离
@@ -131,6 +132,7 @@ export interface CanvasNode {
   /** 节点持久尺寸（resize 后存）；省略时由 RF measured 或默认。 */
   width?: number;
   height?: number;
+  zIndex?: number;
   parentId?: string; // 编组留位：子节点 parentId = group id
   data: CanvasNodeData;
 }
@@ -162,17 +164,23 @@ export function createEmptyDoc(id = ""): CanvasDoc {
  * 兼容期产 NodeItem[]：安全 assetId 用 number，超大 ID 保留十进制 string，剥临时态。
  * edges/version 暂不入库（工作流未开，edges 恒空；开后再扩展结构）。
  *
- * type 透传 kind（image/video/audio/text/reference）；group 无独立产物 → 降级 image（老 NodeItem 无 group，
+ * type 透传 kind（image/video/audio/text/reference/scene_card）；group 无独立产物 → 降级 image（老 NodeItem 无 group，
  * 老画布遇未知 type 走 RF 默认节点不崩）。audio/reference 不降级：IJZY0Z 音频节点与 IK55VS 参考卡
- * 须持久化重载保留 kind。
+ * 须持久化重载保留 kind。scene_card 引用按 spec §6.2 存嵌套 data.sceneCardId（不存正文）。
  */
 export function serialize(doc: CanvasDoc): string {
   const items = doc.nodes.map((n) => ({
     id: n.id,
-    type: n.data.kind === "group" ? ("image" as const) : n.data.kind,
+    type:
+      n.data.kind === "group"
+        ? ("image" as const)
+        : n.data.kind === "scene_card"
+          ? ("scene-card" as const)
+          : n.data.kind,
     position: n.position,
     width: n.width ?? 200,
     height: n.height ?? 200,
+    zIndex: n.zIndex,
     content: n.data.content,
     assetId: n.data.assetId != null ? wireInteger(n.data.assetId) : undefined,
     prompt: n.data.prompt,
@@ -192,6 +200,10 @@ export function serialize(doc: CanvasDoc): string {
     sourceUrl: n.data.sourceUrl,
     recipe: n.data.recipe,
     taskId: n.data.taskId,
+    // spec §6.2：场景卡引用存嵌套 data.sceneCardId（与服务端 placeSceneCardNode 写入格式一致）
+    ...(n.data.kind === "scene_card" && n.data.sceneCardId != null
+      ? { data: { sceneCardId: n.data.sceneCardId } }
+      : {}),
     // edges 聚合到 target 节点 references（兼容老 NodeItem[]：老忽略 references，v2 parse 派生 edges）
     references: [] as Array<{
       source: string;
@@ -253,9 +265,9 @@ export function parse(json: string): CanvasDoc {
 /** 兼容老 NodeItem（content/assetId 平铺 + type）+ 新 CanvasNode（data.*）→ CanvasNode。 */
 function normalizeNode(n: Record<string, unknown>): CanvasNode {
   const data = (n.data ?? {}) as Record<string, unknown>;
-  const rawType = ((data.kind as NodeKindId) ??
-    (n.type as NodeKindId) ??
-    "text") as NodeKindId;
+  const wireType = String(data.kind ?? n.type ?? "text");
+  const rawType: NodeKindId =
+    wireType === "scene-card" ? "scene_card" : (wireType as NodeKindId);
   const kind: NodeKindId = rawType === "group" ? "image" : rawType;
   const content = data.content ?? n.content;
   const rawAsset = data.assetId ?? n.assetId;
@@ -281,6 +293,10 @@ function normalizeNode(n: Record<string, unknown>): CanvasNode {
   const sourceUrl = (data.sourceUrl ?? n.sourceUrl) as string | undefined;
   const recipe = (data.recipe ?? n.recipe) as NodeRecipe | undefined;
   const taskId = (data.taskId ?? n.taskId) as string | undefined;
+  // 场景卡引用（spec §6.2）：新格式 data.sceneCardId 优先，兼容旧格式平铺 sceneCardId / scene_card_id
+  const rawSceneCardId = data.sceneCardId ?? n.sceneCardId ?? n.scene_card_id;
+  const sceneCardId =
+    rawSceneCardId != null ? String(rawSceneCardId) : undefined;
   const nodeData: CanvasNodeData = { kind };
   if (content != null) (nodeData as Record<string, unknown>).content = content;
   if (assetId != null) nodeData.assetId = assetId;
@@ -299,12 +315,19 @@ function normalizeNode(n: Record<string, unknown>): CanvasNode {
   if (sourceUrl != null) nodeData.sourceUrl = sourceUrl;
   if (recipe) nodeData.recipe = recipe;
   if (taskId) nodeData.taskId = taskId;
+  if (sceneCardId != null) nodeData.sceneCardId = sceneCardId;
+  const rawId = (n.id as string) ?? "";
   return {
-    id: (n.id as string) ?? "",
+    // spec §6.2 迁移：旧格式场景卡节点（id scene_card_<id>）归一为确定性 id scene-card:<id>
+    id:
+      kind === "scene_card" && sceneCardId != null
+        ? `scene-card:${sceneCardId}`
+        : rawId,
     type: kind,
     position: (n.position as { x: number; y: number }) ?? { x: 0, y: 0 },
     width: n.width as number | undefined,
     height: n.height as number | undefined,
+    zIndex: n.zIndex as number | undefined,
     parentId: n.parentId as string | undefined,
     data: nodeData,
   };

@@ -35,7 +35,9 @@ describe("NodeInfoModal（IK6M68）", () => {
       />,
     );
 
-    expect(screen.getByRole("dialog", { name: "节点信息 示例图" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("dialog", { name: "节点信息 示例图" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("图片")).toBeInTheDocument();
     expect(screen.getByText("示例图")).toBeInTheDocument();
     expect(screen.getByText("1024 × 768")).toBeInTheDocument();

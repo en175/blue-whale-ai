@@ -1,6 +1,6 @@
 # ADR-0044：Rules 渐进式加载与硬信息分层策略
 
-- **状态**：Accepted
+- **状态**：Accepted（2026-08-06 经 [ADR-0067](0067-issue-tracker-progressive-loading.md) 修订：§3 issue-tracker 行由「常驻 `.claude/rules/`」改为「渐进式 `docs/agents/`」，两份 issue-tracker 文档已合并）
 - **日期**：2026-07-25
 - **决策者**：JJNNReno（经 `/grilling` 会话共同得出）
 - **关联**：CLAUDE.md 路由表、`.claude/rules/` 目录约定

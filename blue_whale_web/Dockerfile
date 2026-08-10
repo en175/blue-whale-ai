@@ -25,8 +25,15 @@ COPY blue_whale_web/patches blue_whale_web/patches
 # 阿里云 npm 镜像加速。pnpm 11 breaking change：不再读 npm_config_* 环境变量，
 # 只认 pnpm_config_* 前缀（pnpm.io/blog/releases/11.0），旧前缀会被静默忽略、直连 npmjs
 ENV pnpm_config_registry=https://registry.npmmirror.com
-# --filter ... 匹配包名 blue_whale（不是目录名 blue_whale_web），安装其依赖链
-RUN pnpm install --frozen-lockfile --filter blue_whale...
+# --filter ... 匹配包名 blue_whale（不是目录名 blue_whale_web），安装其依赖链。
+# IK7ERQ：额外带上两个 worker —— builder 阶段要跑 apps 的单元测试，只装 blue_whale 链
+# 时 apps/*/node_modules 无 workspace 软链，vitest 报 Failed to load url @blue-whale/*。
+# 两者依赖全在 blue_whale 已有的链内（contracts/core/persistence/agent-runtime/
+# generation-runtime），不引入任何额外外部下载；runner 阶段只 COPY standalone，镜像不变大。
+RUN pnpm install --frozen-lockfile \
+    --filter blue_whale... \
+    --filter "@blue-whale/agent-worker..." \
+    --filter "@blue-whale/generation-worker..."
 
 FROM node:24-alpine AS builder
 ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
@@ -42,15 +49,43 @@ COPY tsconfig.json tsconfig.base.json ./
 # workspace 包源码
 COPY packages/contracts packages/contracts
 COPY packages/core packages/core
+COPY packages/agent-runtime packages/agent-runtime
 COPY packages/generation-runtime packages/generation-runtime
 COPY packages/persistence packages/persistence
 # 目标应用源码
 COPY blue_whale_web blue_whale_web
+# IK774I（修 IK747Z lint 配套遗漏）：pnpm lint:node = eslint apps packages，
+# builder 阶段需仓库根 eslint.config.mjs 与 apps 源码在场，否则 ESLint 9 找不到 flat config 直接 exit 2。
+COPY eslint.config.mjs ./
+COPY apps apps
+# IK7ERQ：跨端契约的 schema 与夹具（约 104K）。lib/creative-skill-activation-contract.test.ts
+# 从 docs/specs/fixtures 读 manifest，再按 manifest.schema 回溯读 docs/specs/*.json 校验
+# wire shape；缺任一侧该用例 ENOENT。.dockerignore 已对应放行（散文 .md 不进上下文）。
+COPY docs/specs/fixtures docs/specs/fixtures
+COPY docs/specs/*.json docs/specs/
 
 # 先编译 workspace 包（Next.js 通过 exports 字段引用 dist/ 输出）
-RUN pnpm --filter @blue-whale/contracts --filter @blue-whale/core --filter @blue-whale/persistence --filter @blue-whale/generation-runtime build
+# IK72WL：agent-runtime 缺失导致 next build 报 Can't resolve '@blue-whale/agent-runtime'
+RUN pnpm --filter @blue-whale/contracts --filter @blue-whale/core --filter @blue-whale/agent-runtime --filter @blue-whale/persistence --filter @blue-whale/generation-runtime build
+# IK747Z-1：lint 硬性拦截（全仓：packages/apps + web；max-lines 800 error 级）——超限构建失败
+RUN pnpm lint
+# IK7ERQ：单元测试硬性拦截——用例失败即构建失败，坏行为进不了镜像。
+# 用 test:ci 而非 test：后者的 test:node 含 acceptance-runner-contract，
+# 依赖 tests/ 与 scripts/，二者不在构建上下文内（见根 package.json 注释同源约定）。
+# 放在 next build 之前，让最便宜的失败最早发生。
+RUN pnpm --dir packages/persistence exec prisma generate \
+    && pnpm test:ci
 # 构建 Next.js standalone
 RUN pnpm --filter blue_whale build
+
+# IK75CR：standalone 不含 serverExternalPackages 的包。@volcengine/openapi 的 TLS
+# Producer 需运行时读 tls.proto（不能被打包，否则 ENOENT 上报失效）。pnpm 是符号链接
+# 结构无法直接 COPY，用 npm 装真实文件后合并进 standalone/node_modules 供运行时 require。
+# 版本须与 pnpm-lock.yaml 中 @volcengine/openapi 一致。
+RUN mkdir -p /tmp/tls-sdk && cd /tmp/tls-sdk && \
+    echo '{"name":"tls-sdk","version":"1.0.0"}' > package.json && \
+    npm install @volcengine/openapi@1.36.2 --registry=https://registry.npmmirror.com --no-audit --no-fund --loglevel=error && \
+    cp -a /tmp/tls-sdk/node_modules/. /app/blue_whale_web/.next/standalone/node_modules/
 
 FROM node:24-alpine AS runner
 WORKDIR /app

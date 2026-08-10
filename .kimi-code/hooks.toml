@@ -81,7 +81,7 @@ matcher = "mcp__gitee-ent__create_enterprise_repo_release"
 command = 'bash "$HOME/.kimi-code/hooks/blue-whale-hook.sh" confirm-release-action.sh'
 
 # PostToolUse 观察型提醒（不阻断、不自动改状态）：工单状态流转提醒，
-# 规则见 .claude/rules/issue-tracker.md「任务状态机」。
+# 规则见 docs/agents/issue-tracker.md「任务状态机」。
 [[hooks]]
 event = "PostToolUse"
 matcher = "Bash"

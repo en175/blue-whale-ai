@@ -6,6 +6,7 @@
 import type React from "react";
 import type { CardStatus } from "@/types/domain";
 import type { WireInteger } from "@/lib/wire-integer";
+import type { PlanApplicationAvailability } from "@blue-whale/contracts";
 
 export type ToolDef = {
   id: string;
@@ -14,7 +15,20 @@ export type ToolDef = {
   divider?: boolean;
 };
 
+export type NodeMenuAction =
+  "add-to-chat" | "save-to-assets" | "copy" | "duplicate" | "delete";
+
 export type NodeType = "image" | "video" | "text";
+
+/** 画布菜单位置：world 坐标用于建节点，screen 坐标用于定位浮层。 */
+export type CanvasMenuPayload = {
+  x: number;
+  y: number;
+  screenX: number;
+  screenY: number;
+  source?: string;
+  sourceHandle?: string;
+};
 
 /**
  * 画布节点。坐标语义对齐 React Flow：world 坐标由 {@link position} 承载
@@ -119,6 +133,25 @@ export type ChatMessage =
       slotIndex?: number;
       /** 产品规范化失败文案（来自后端公开错误信封）；失败 Card 向 User 展示，不泄漏内部信息。 */
       errorMessage?: string;
+    }
+  | {
+      id: number | string;
+      type: "plan-card";
+      /** 权威正文（plan_message.content_markdown，唯一正文来源）。 */
+      text: string;
+      meta: string;
+      /** plan_message 稳定身份。 */
+      planMessageId: WireInteger;
+      /** 分镜序号。 */
+      sequenceLabel: string | null;
+      /** 首次成功应用时间；null = 未应用。 */
+      appliedAt: string | null;
+      /** 应用可用性（权威）：available / retryable_blocked（余额不足，IK6KQB）/ requires_new_plan。 */
+      applicationAvailability: PlanApplicationAvailability;
+      /** 首个图片 GenerationJob；null = 未应用（接线另单交付）。 */
+      firstGenerationJobId: WireInteger | null;
+      /** 首图输出缩略图（鉴权 access_url，IK7EP1）；无成功输出时缺省。 */
+      thumbnailUrl?: string;
     };
 /**
  * Canvas —— 画布聚合（提为具名类型）。
@@ -341,3 +374,9 @@ export type VideoDockContentProps = {
   aspectRatios?: SelectOption[];
   quantityMax?: number;
 };
+
+/** IK74V6：图片 Dock 分辨率档位选项（能力表 supported_sizes 映射）。 */
+export type ImageSizeOption = { id: string; label: string };
+
+/** IK74V6：Dock 浮层定位（相对 Dock 容器的 left/bottom 偏移）。 */
+export type DockPopoverPosition = { left: number; bottom: number };

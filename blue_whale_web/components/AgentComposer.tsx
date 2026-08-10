@@ -1,6 +1,13 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback } from "react";
+import {
+  forwardRef,
+  useImperativeHandle,
+  useRef,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
 import { useAuth } from "./auth/AuthContext";
 import {
   Plus,
@@ -10,20 +17,37 @@ import {
   RefreshCw,
   X,
   Sparkle,
-  Clock,
-  ArrowRight,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import SkillPanel from "./SkillPanel";
-import { AspectRatioIcon } from "./icons/AspectRatioIcon";
+import DirectSkillTag from "./DirectSkillTag";
+import SkillPanel, { type UseSkillSelection } from "./skill/SkillPanel";
+import PromptEditor, { type PromptEditorHandle } from "./prompt/PromptEditor";
+import { useClickOutsideClose } from "./composer/useClickOutsideClose";
+import { ImageTabPanel } from "./composer/ImageTabPanel";
+import { VideoTabPanel } from "./composer/VideoTabPanel";
+import type { MediaItem } from "./composer/types";
+import { ClearPromptButton } from "./composer/ClearPromptButton";
 import {
-  IMAGE_MODELS,
   IMAGE_ASPECT_RATIOS,
-  defaultResolutionOf,
-  type ImageModel,
-  type ImageResolution,
   type ImageAspectRatio,
 } from "./ImageModelSettingsPopover";
+import {
+  RESOLUTIONS,
+  VIDEO_ASPECT_RATIOS,
+  VIDEO_REF_MODES,
+} from "./composer/constants";
+import {
+  clearDirectSkillBinding,
+  readDirectSkillBinding,
+  writeDirectSkillBinding,
+  type DirectSkillBinding,
+} from "@/lib/direct-skill-binding";
+import {
+  getImageModels,
+  getVideoModels,
+  getTextModels,
+  type ImageModelCapability,
+} from "@/app/canvas/_canvas/api/generation";
 
 const TABS = [
   { id: "agent", label: "视频智能体", hasCanvas: true },
@@ -31,55 +55,18 @@ const TABS = [
   { id: "image", label: "AI 图片" },
 ];
 
-const MODELS = [
-  { id: "seedance-2", label: "Seedance 2.0", premium: true },
-  { id: "seedance-mini", label: "Seedance 2.0 Mini" },
-  { id: "seedance-fast", label: "Seedance 2.0 Fast" },
-];
+/**
+ * 费用倍率占位（IK70CM）：generation_model_capability 无 costMultiplier 字段，
+ * 先统一 1x，待模型管理后台/Go 后端提供真实费用数据后接上（届时随模型下拉一并移除）。
+ */
+const AGENT_COST_MULTIPLIER = "1x";
 
-const AGENT_MODELS = [
-  { id: "claude-opus-4-7", label: "Claude Opus 4.7", costMultiplier: "5x" },
-  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", costMultiplier: "3x" },
-  { id: "gemini-3-5-flash", label: "Gemini 3.5 Flash", costMultiplier: "2x" },
-  { id: "qwen-3-7-max", label: "Qwen 3.7 Max", costMultiplier: "1.3x" },
-  { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", costMultiplier: "1x" },
-  {
-    id: "gemini-3-1-flash-lite",
-    label: "Gemini 3.1 Flash Lite",
-    costMultiplier: "0.3x",
-  },
-];
-
-const VIDEO_ASPECT_RATIOS = [
-  { id: "16:9", label: "16:9" },
-  { id: "4:3", label: "4:3" },
-  { id: "1:1", label: "1:1" },
-  { id: "3:4", label: "3:4" },
-  { id: "9:16", label: "9:16" },
-  { id: "21:9", label: "21:9" },
-];
-
-const RESOLUTIONS = [
-  { id: "480p", label: "480p" },
-  { id: "720p", label: "720p" },
-  { id: "1080p", label: "1080p" },
-  { id: "2160p", label: "2160p" },
-];
-
-const VIDEO_REF_MODES = [
-  { id: "omni", label: "Omni Reference" },
-  { id: "first-last", label: "首尾帧" },
-  { id: "text-to-video", label: "Text to Video" },
-];
-
-interface MediaItem {
-  id: string;
-  type: "image" | "video" | "audio";
-  name: string;
-  src: string;
-  duration?: string;
+function pickDefaultSize(model: ImageModelCapability) {
+  return (
+    model.supported_sizes.find((size) => size.id === model.default_size) ??
+    model.supported_sizes[0]
+  );
 }
-
 export interface GenerateImageParams {
   modelId: string;
   aspectRatioId: string;
@@ -92,139 +79,146 @@ export interface GenerateContext {
   image: GenerateImageParams;
 }
 
-export interface AgentComposerProps {
-  /** 真生成回调（提供则真生成，否则首页默认跳转 /generate?prompt）。 */
-  onGenerate?: (ctx: GenerateContext) => void;
-  /** 占位禁用的 tab id（生成静默不触发），首页默认空。 */
-  disabledTabs?: string[];
-  /** 初始预填 prompt（/generate 读 ?prompt 传入，首页不传）。 */
-  defaultPrompt?: string;
-  /** 参数下拉向上展开（/generate 底部固定挂载避开视口底）；缺省向下（首页）。 */
-  dropUp?: boolean;
-  /** 受控 prompt 值（传则受控，不传回退内部 state）。 */
-  prompt?: string;
-  /** 受控 prompt 变更回调（与 prompt 配合使用）。 */
-  onPromptChange?: (value: string) => void;
+/**
+ * IK6XQI-7 重构：三个 tab（视频智能体/AI 视频/AI 图片）各自维护独立输入内容
+ * （tabContents），切换 tab 时编辑器重新挂载并从对应内容同步——修复
+ * 「切到 AI 视频提示词不显示 / 三 tab 共用一个输入框」的交互混乱。
+ * 模板卡片点击经 ref.injectPrompt 注入当前激活 tab（覆盖、单行）。
+ */
+export interface AgentComposerHandle {
+  /** 外部注入提示词（模板卡片点击）：覆盖当前激活 tab 的输入内容。 */
+  injectPrompt: (text: string) => void;
 }
 
-export default function AgentComposer({
-  onGenerate,
-  disabledTabs = [],
-  defaultPrompt,
-  dropUp = false,
-  prompt,
-  onPromptChange,
-}: AgentComposerProps = {}) {
-  const [activeTab, setActiveTab] = useState("agent");
-  const [content, setContent] = useState("");
-  const isControlled = prompt !== undefined;
-  const resolvedPrompt = prompt ?? content;
-  const handlePromptChange = onPromptChange ?? setContent;
-  const [isFocused, setIsFocused] = useState(false);
-  const [indicator, setIndicator] = useState({ width: 0, x: 0, opacity: 0 });
-  const [modelOpen, setModelOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState(MODELS[0]);
-  const [videoModelOpen, setVideoModelOpen] = useState(false);
-  const [refModeOpen, setRefModeOpen] = useState(false);
-  const [resolutionOpen, setResolutionOpen] = useState(false);
-  const [aspectRatioOpen, setAspectRatioOpen] = useState(false);
-  const [durationOpen, setDurationOpen] = useState(false);
-  const [agentModelOpen, setAgentModelOpen] = useState(false);
-  const [selectedAgentModel, setSelectedAgentModel] = useState(AGENT_MODELS[3]);
-  const [mediaList, setMediaList] = useState<MediaItem[]>([]);
-  const [skillPanelOpen, setSkillPanelOpen] = useState(false);
+export type AgentComposerProps = Record<never, never>;
+
+const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
+  function AgentComposer(_props, ref) {
+    const [activeTab, setActiveTab] = useState("agent");
+    // IK6XQI-7：三 tab 独立输入内容，互不串扰；切换 tab 时 editor 重新挂载并同步对应内容。
+    const [tabContents, setTabContents] = useState<Record<string, string>>({
+      agent: "",
+      video: "",
+      image: "",
+    });
+    const [isFocused, setIsFocused] = useState(false);
+    const [indicator, setIndicator] = useState({ width: 0, x: 0, opacity: 0 });
+    const [modelOpen, setModelOpen] = useState(false);
+    const [videoModels, setVideoModels] = useState<ImageModelCapability[]>([]);
+    const [selectedModel, setSelectedModel] =
+      useState<ImageModelCapability | null>(null);
+    const [agentModelOpen, setAgentModelOpen] = useState(false);
+    const [agentModels, setAgentModels] = useState<ImageModelCapability[]>([]);
+    const [selectedAgentModel, setSelectedAgentModel] =
+      useState<ImageModelCapability | null>(null);
+    const [videoRefMode, setVideoRefMode] = useState(VIDEO_REF_MODES[1]);
+    const [videoAspectRatio, setVideoAspectRatio] = useState(
+      VIDEO_ASPECT_RATIOS[0],
+    );
+    const [videoResolution, setVideoResolution] = useState(RESOLUTIONS[0]);
+    const [videoDuration, setVideoDuration] = useState(15);
+    const [imageModels, setImageModels] = useState<ImageModelCapability[]>([]);
+    const [selectedImageModel, setSelectedImageModel] =
+      useState<ImageModelCapability | null>(null);
+    const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(
+      IMAGE_ASPECT_RATIOS.find((ratio) => ratio.id === "16:9")!,
+    );
+    const [imageResolution, setImageResolution] = useState<
+      ImageModelCapability["supported_sizes"][number] | null
+    >(null);
+    const [mediaList, setMediaList] = useState<MediaItem[]>([]);
+    const [skillPanelOpen, setSkillPanelOpen] = useState(false);
 
   const router = useRouter();
   const { requireAuth } = useAuth();
 
-  const tabDisabled = disabledTabs.includes(activeTab);
-
-  // AI 视频 tab params
-  const [refMode, setRefMode] = useState(VIDEO_REF_MODES[1]);
-  const [aspectRatio, setAspectRatio] = useState(VIDEO_ASPECT_RATIOS[0]);
-  const [resolution, setResolution] = useState(RESOLUTIONS[0]);
-  const [videoDuration, setVideoDuration] = useState(15);
-
-  // AI 图片 tab params（模型/分辨率/宽高比均复用画布 ImageModelSettingsPopover 的 seedream 映射）
-  const [selectedImageModel, setSelectedImageModel] = useState<ImageModel>(
-    IMAGE_MODELS[0],
-  );
-  const [imageModelOpen, setImageModelOpen] = useState(false);
-
-  const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(
-    IMAGE_ASPECT_RATIOS.find((r) => r.id === "16:9")!,
-  );
-  const [imageAspectRatioOpen, setImageAspectRatioOpen] = useState(false);
-  const [imageResolution, setImageResolution] = useState<ImageResolution>(
-    defaultResolutionOf(IMAGE_MODELS[0]),
-  );
-  const [imageResolutionOpen, setImageResolutionOpen] = useState(false);
-
   const handleGenerate = useCallback(() => {
-    // 视频/agent tab 后端未就绪：占位静默（仅图片 tab 真生成）。
-    if (tabDisabled) return;
-    const promptText = resolvedPrompt.trim();
+    const promptText = (tabContents[activeTab] ?? "").trim();
     requireAuth({ kind: "home-generate", prompt: promptText }, () => {
-      if (onGenerate) {
-        onGenerate({
-          tab: activeTab,
-          prompt: promptText,
-          image: {
-            modelId: selectedImageModel.id,
-            aspectRatioId: imageAspectRatio.id,
-            resolutionId: imageResolution.id,
-          },
-        });
-        return;
-      }
       const query = promptText
         ? `?prompt=${encodeURIComponent(promptText)}`
         : "";
-      router.push(`/generate${query}`);
+      // IK6XQI-4：发送后跳画布（画布读 ?prompt 预填 BottomDock），不再跳 /generate（已下线）。
+      router.push(`/canvas${query}`);
     });
-  }, [
-    tabDisabled,
-    resolvedPrompt,
-    requireAuth,
-    onGenerate,
-    activeTab,
-    selectedImageModel,
-    imageAspectRatio,
-    imageResolution,
-    router,
-  ]);
-
-  // 预填 prompt（/generate 读 ?prompt 传入；首页不传跳过）。contentEditable 写入需 ref 就绪。
-  // 受控模式下由外部管理 prompt，此处仅非受控时生效。
-  useEffect(() => {
-    if (isControlled || !defaultPrompt || !editorRef.current) return;
-    if (editorRef.current.innerText.trim() === defaultPrompt.trim()) return;
-    editorRef.current.innerText = defaultPrompt;
-    // 一次性 URL 预填是官方认可模式；set-state-in-effect 规则对此误报。
-
-    setContent(defaultPrompt);
-  }, [defaultPrompt, isControlled]);
-
-  // 受控模式下外部 prompt 变更→回写 contentEditable DOM，避免追加文本不可见且被下次按键覆盖。
-  useEffect(() => {
-    if (!isControlled || !editorRef.current) return;
-    if (editorRef.current.innerText === (prompt ?? "")) return;
-    editorRef.current.innerText = prompt ?? "";
-  }, [prompt, isControlled]);
+  }, [activeTab, tabContents, requireAuth, router]);
 
   const tabRefs = useRef<(HTMLElement | null)[]>([]);
-  const editorRef = useRef<HTMLDivElement>(null);
+  const promptEditorRef = useRef<PromptEditorHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modelContainerRef = useRef<HTMLDivElement>(null);
-  const videoModelContainerRef = useRef<HTMLDivElement>(null);
-  const refModeContainerRef = useRef<HTMLDivElement>(null);
-  const resolutionContainerRef = useRef<HTMLDivElement>(null);
-  const aspectRatioContainerRef = useRef<HTMLDivElement>(null);
-  const durationContainerRef = useRef<HTMLDivElement>(null);
   const agentModelContainerRef = useRef<HTMLDivElement>(null);
-  const imageModelContainerRef = useRef<HTMLDivElement>(null);
-  const imageAspectRatioContainerRef = useRef<HTMLDivElement>(null);
-  const imageResolutionContainerRef = useRef<HTMLDivElement>(null);
+
+  // 模型下拉能力表驱动（IK70CM，ADR-0067：generation_model_capability 为唯一事实源）。
+  // 拉取失败保持空列表 + console 报错：首页生成走 /generate 跳转不依赖模型，不影响主流程。
+  useEffect(() => {
+    let cancelled = false;
+    getVideoModels()
+      .then((list) => {
+        if (cancelled || list.length === 0) return;
+        setVideoModels(list);
+        setSelectedModel(list[0]);
+      })
+      .catch((err) => console.error("getVideoModels failed", err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getImageModels()
+      .then((list) => {
+        if (cancelled || list.length === 0) return;
+        const first = list[0];
+        setImageModels(list);
+        setSelectedImageModel(first);
+        setImageResolution(pickDefaultSize(first) ?? null);
+      })
+      .catch((err) => console.error("getImageModels failed", err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getTextModels()
+      .then((list) => {
+        if (cancelled || list.length === 0) return;
+        setAgentModels(list);
+        setSelectedAgentModel(list[0]);
+      })
+      .catch((err) => console.error("getTextModels failed", err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+
+  // IK747Z-2：编辑器已组件化为 PromptEditor（受控 value↔DOM 单向同步 + 光标保持），
+  // 此处不再需要 applyToEditor/tab 同步 effect——切 tab 重新挂载时由 value prop 同步。
+
+  // 外部注入（模板卡片点击）：覆盖当前激活 tab 内容（保持单行）。
+  const injectPrompt = useCallback((text: string) => {
+    setTabContents((prev) => ({ ...prev, [activeTab]: text }));
+    // IK726P 规则5：注入后聚焦、光标到末尾、长文本滚动可见（由 PromptEditor 封装）。
+    promptEditorRef.current?.focusToEnd();
+  }, [activeTab]);
+
+  useImperativeHandle(ref, () => ({ injectPrompt }), [injectPrompt]);
+
+  const handleInput = useCallback((text: string) => {
+    setTabContents((prev) =>
+      prev[activeTab] === text ? prev : { ...prev, [activeTab]: text },
+    );
+  }, [activeTab]);
+
+  // IK726P 规则4：一键清除——清空当前 tab 内容回到空态（占位提示重新出现）并聚焦。
+  const clearPrompt = useCallback(() => {
+    setTabContents((prev) => ({ ...prev, [activeTab]: "" }));
+    promptEditorRef.current?.focusToEnd();
+  }, [activeTab]);
 
   const updateIndicator = useCallback(() => {
     const idx = TABS.findIndex((t) => t.id === activeTab);
@@ -244,187 +238,42 @@ export default function AgentComposer({
     return () => window.removeEventListener("resize", updateIndicator);
   }, [updateIndicator]);
 
+  useClickOutsideClose(modelContainerRef, modelOpen, () => setModelOpen(false));
+
+
+
+
+
+
+  useClickOutsideClose(agentModelContainerRef, agentModelOpen, () => setAgentModelOpen(false));
+
+
+
+
+  // 「直接使用」一次性绑定（IK60WY）：技能稳定 ID 只绑下一次 Agent 请求。
+  // sessionStorage 承载首页 → /generate 的传递；发送成功或移除标签后清除。
+  const [boundSkill, setBoundSkill] = useState<DirectSkillBinding | null>(null);
+  // 挂载后读 sessionStorage（跨页传递的绑定）；SSR 无存储，避免水合不一致。
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        modelContainerRef.current &&
-        !modelContainerRef.current.contains(event.target as Node)
-      ) {
-        setModelOpen(false);
-      }
+    // 挂载后一次性读取是官方认可模式；set-state-in-effect 规则对此误报。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBoundSkill(readDirectSkillBinding());
+  }, []);
+
+  const handleUseSkill = useCallback((skill: UseSkillSelection) => {
+    if (!skill.creative_skill_id) return;
+    const binding = {
+      creative_skill_id: skill.creative_skill_id,
+      name: skill.name,
     };
-    if (modelOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [modelOpen]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        videoModelContainerRef.current &&
-        !videoModelContainerRef.current.contains(event.target as Node)
-      ) {
-        setVideoModelOpen(false);
-      }
-    };
-    if (videoModelOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [videoModelOpen]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        refModeContainerRef.current &&
-        !refModeContainerRef.current.contains(event.target as Node)
-      ) {
-        setRefModeOpen(false);
-      }
-    };
-    if (refModeOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [refModeOpen]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        resolutionContainerRef.current &&
-        !resolutionContainerRef.current.contains(event.target as Node)
-      ) {
-        setResolutionOpen(false);
-      }
-    };
-    if (resolutionOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [resolutionOpen]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        aspectRatioContainerRef.current &&
-        !aspectRatioContainerRef.current.contains(event.target as Node)
-      ) {
-        setAspectRatioOpen(false);
-      }
-    };
-    if (aspectRatioOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [aspectRatioOpen]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        durationContainerRef.current &&
-        !durationContainerRef.current.contains(event.target as Node)
-      ) {
-        setDurationOpen(false);
-      }
-    };
-    if (durationOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [durationOpen]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        agentModelContainerRef.current &&
-        !agentModelContainerRef.current.contains(event.target as Node)
-      ) {
-        setAgentModelOpen(false);
-      }
-    };
-    if (agentModelOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [agentModelOpen]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        imageModelContainerRef.current &&
-        !imageModelContainerRef.current.contains(event.target as Node)
-      ) {
-        setImageModelOpen(false);
-      }
-    };
-    if (imageModelOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [imageModelOpen]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        imageAspectRatioContainerRef.current &&
-        !imageAspectRatioContainerRef.current.contains(event.target as Node)
-      ) {
-        setImageAspectRatioOpen(false);
-      }
-    };
-    if (imageAspectRatioOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [imageAspectRatioOpen]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        imageResolutionContainerRef.current &&
-        !imageResolutionContainerRef.current.contains(event.target as Node)
-      ) {
-        setImageResolutionOpen(false);
-      }
-    };
-    if (imageResolutionOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [imageResolutionOpen]);
-
-  const handleInput = () => {
-    if (editorRef.current) {
-      handlePromptChange(editorRef.current.innerText || "");
-    }
-  };
-
-  const insertSkillIntoEditor = useCallback((skillName: string) => {
-    const editor = editorRef.current;
-    if (!editor) return;
-
-    editor.focus();
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      if (editor.contains(range.commonAncestorContainer)) {
-        range.deleteContents();
-        const textNode = document.createTextNode(`@${skillName} `);
-        range.insertNode(textNode);
-        range.setStartAfter(textNode);
-        range.setEndAfter(textNode);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      } else {
-        editor.appendChild(document.createTextNode(`@${skillName} `));
-      }
-    } else {
-      editor.appendChild(document.createTextNode(`@${skillName} `));
-    }
-
-    handleInput();
+    setBoundSkill(binding);
+    writeDirectSkillBinding(binding);
     setSkillPanelOpen(false);
+  }, []);
+
+  const handleRemoveBoundSkill = useCallback(() => {
+    setBoundSkill(null);
+    clearDirectSkillBinding();
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -476,10 +325,9 @@ export default function AgentComposer({
   const isVideoTab = activeTab === "video";
   const isImageTab = activeTab === "image";
 
-  // 参数下拉展开方向：dropUp 向上（/generate 底部固定挂载避开视口底），缺省向下（首页）。
-  const dropClass = dropUp
-    ? "bottom-[calc(100%+6px)] shadow-[0_-12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-top-1 duration-150"
-    : "top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150";
+  // 参数下拉展开方向：统一向下展开（首页场景）。
+  const dropClass =
+    "top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150";
 
   return (
     <div
@@ -583,738 +431,51 @@ export default function AgentComposer({
           />
 
           {isImageTab ? (
-            // AI 图片 Tab layout
-            <div className="flex flex-col">
-              <div className="flex flex-col relative">
-                <div className="flex-1 min-w-0 overflow-visible bg-transparent flex flex-col">
-                  {/* Uploaded image list */}
-                  {mediaList.length > 0 && (
-                    <div className="shrink-0 flex flex-row flex-wrap items-start gap-1.5 px-3 pt-3">
-                      {mediaList.map((item) => (
-                        <div
-                          key={item.id}
-                          className="group/card relative flex flex-col items-center w-14 shrink-0 transition-opacity duration-150 hover:opacity-85"
-                        >
-                          <div className="relative w-[52px] h-[52px]">
-                            <img
-                              className="w-full h-full rounded-md object-cover block border border-white/[0.08]"
-                              alt={item.name}
-                              draggable={false}
-                              src={item.src}
-                            />
-                          </div>
-                          <span className="mt-[3px] text-[10px] text-white/40 whitespace-nowrap overflow-hidden text-ellipsis max-w-[56px] text-center leading-[1.3]">
-                            {item.name}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => removeMedia(item.id)}
-                            className="absolute -top-[3px] -right-px w-4 h-4 flex items-center justify-center bg-[rgb(30,30,30)] border border-white/[0.12] rounded-full text-white/50 cursor-pointer p-0 z-[2] transition-opacity duration-150 opacity-0 group-hover/card:opacity-100 hover:text-white hover:bg-[rgba(50,50,50,0.95)]"
-                            aria-label={`移除 ${item.name}`}
-                          >
-                            <X width={12} height={12} />
-                          </button>
-                        </div>
-                      ))}
-                      <div className="shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="w-[52px] h-[52px] flex items-center justify-center border border-dashed border-white/[0.12] rounded-md text-white/30 bg-transparent cursor-pointer transition-all duration-150 p-0 hover:text-white/70 hover:border-white/25 hover:bg-white/[0.04]"
-                          aria-label="添加更多图片"
-                        >
-                          <Plus width={12} height={12} />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex-1 min-w-0 overflow-hidden flex items-stretch relative">
-                    {/* Left upload image button - hidden when images uploaded */}
-                    {mediaList.length === 0 && (
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="shrink-0 w-[88px] h-[88px] mt-4 ml-4 flex flex-col items-center justify-center gap-1 border-none rounded-lg text-white/30 bg-white/[0.025] cursor-pointer transition-all duration-150 self-start p-0 hover:text-white/50 hover:bg-white/[0.05]"
-                        aria-label="上传参考图片"
-                      >
-                        <Plus width={20} height={20} className="opacity-80" />
-                        <span className="text-[10.5px] font-medium opacity-70">
-                          图片
-                        </span>
-                      </button>
-                    )}
-
-                    {/* Editor area */}
-                    <div
-                      ref={editorRef}
-                      className="tc-agent-image-editor relative flex-1 min-h-[120px] text-sm text-white/90 bg-transparent border-none outline-none shadow-none appearance-none leading-[1.8] py-3 px-4 font-[inherit] overflow-y-auto whitespace-pre-wrap break-words focus:border-none focus:outline-none focus:shadow-none"
-                      contentEditable
-                      role="textbox"
-                      aria-multiline="true"
-                      data-placeholder="从文字与参考图生成 AI 图片。&#10;描述你想生成的图片，已上传的参考将引导风格与细节。"
-                      spellCheck={false}
-                      autoCorrect="off"
-                      onInput={handleInput}
-                      onFocus={() => setIsFocused(true)}
-                      onBlur={() => setIsFocused(false)}
-                    />
-                  </div>
-
-                  {/* Bottom param bar */}
-                  <div className="flex items-center gap-2 py-3 px-4 mt-auto">
-                    <div className="flex items-center gap-2 flex-1 justify-start">
-                      {/* 模型 */}
-                      {/* 模型 */}
-                      <div
-                        className="relative"
-                        ref={imageModelContainerRef}
-                        data-param-dropdown-root="true"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setImageModelOpen((v) => !v)}
-                          className="inline-flex items-center gap-1 h-8 text-[13px] font-medium text-white/45 px-3 rounded-lg bg-transparent border border-white/[0.06] cursor-pointer transition-all duration-150 whitespace-nowrap hover:text-white/70 hover:bg-white/[0.05]"
-                          aria-haspopup="listbox"
-                          aria-expanded={imageModelOpen}
-                          aria-label="模型"
-                        >
-                          <span>{selectedImageModel.label}</span>
-                          <ChevronDown width={11} height={11} />
-                        </button>
-                        {imageModelOpen && (
-                          <div
-                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
-                            role="listbox"
-                            aria-label="模型"
-                          >
-                            {IMAGE_MODELS.map((model) => {
-                              const selected =
-                                selectedImageModel.id === model.id;
-                              return (
-                                <button
-                                  key={model.id}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={selected}
-                                  onClick={() => {
-                                    setSelectedImageModel(model);
-                                    // 切模型：当前分辨率不在新模型可用集合则重置为该模型默认分辨率。
-                                    if (
-                                      !model.resolutions.some(
-                                        (r) => r.id === imageResolution.id,
-                                      )
-                                    ) {
-                                      setImageResolution(
-                                        defaultResolutionOf(model),
-                                      );
-                                    }
-                                    setImageModelOpen(false);
-                                  }}
-                                  className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
-                                    selected
-                                      ? "text-white bg-white/[0.04]"
-                                      : "text-white/80 bg-transparent"
-                                  }`}
-                                >
-                                  <span className="inline-flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate">
-                                      {model.label}
-                                    </span>
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* 宽高比 */}
-                      <div
-                        className="relative"
-                        ref={imageAspectRatioContainerRef}
-                        data-param-dropdown-root="true"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setImageAspectRatioOpen((v) => !v)}
-                          className="inline-flex items-center gap-1 h-8 text-[13px] font-medium text-white/45 px-3 rounded-lg bg-transparent border border-white/[0.06] cursor-pointer transition-all duration-150 whitespace-nowrap hover:text-white/70 hover:bg-white/[0.05]"
-                          aria-haspopup="listbox"
-                          aria-expanded={imageAspectRatioOpen}
-                          aria-label="宽高比"
-                        >
-                          <AspectRatioIcon ratio={imageAspectRatio.id} />
-                          <span>{imageAspectRatio.label}</span>
-                          <ChevronDown width={11} height={11} />
-                        </button>
-                        {imageAspectRatioOpen && (
-                          <div
-                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
-                            role="listbox"
-                            aria-label="宽高比"
-                          >
-                            {IMAGE_ASPECT_RATIOS.map((r) => {
-                              const selected = imageAspectRatio.id === r.id;
-                              return (
-                                <button
-                                  key={r.id}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={selected}
-                                  onClick={() => {
-                                    setImageAspectRatio(r);
-                                    setImageAspectRatioOpen(false);
-                                  }}
-                                  className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
-                                    selected
-                                      ? "text-white bg-white/[0.04]"
-                                      : "text-white/80 bg-transparent"
-                                  }`}
-                                >
-                                  <AspectRatioIcon ratio={r.id} />
-                                  <span className="inline-flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate">{r.label}</span>
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* 分辨率 */}
-                      <div
-                        className="relative"
-                        ref={imageResolutionContainerRef}
-                        data-param-dropdown-root="true"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setImageResolutionOpen((v) => !v)}
-                          className="inline-flex items-center gap-1 h-8 text-[13px] font-medium text-white/45 px-3 rounded-lg bg-transparent border border-white/[0.06] cursor-pointer transition-all duration-150 whitespace-nowrap hover:text-white/70 hover:bg-white/[0.05]"
-                          aria-haspopup="listbox"
-                          aria-expanded={imageResolutionOpen}
-                          aria-label="分辨率"
-                        >
-                          <span>{imageResolution.label}</span>
-                          <ChevronDown width={11} height={11} />
-                        </button>
-                        {imageResolutionOpen && (
-                          <div
-                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
-                            role="listbox"
-                            aria-label="分辨率"
-                          >
-                            {selectedImageModel.resolutions.map((res) => {
-                              const selected = imageResolution.id === res.id;
-                              return (
-                                <button
-                                  key={res.id}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={selected}
-                                  onClick={() => {
-                                    setImageResolution(res);
-                                    setImageResolutionOpen(false);
-                                  }}
-                                  className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
-                                    selected
-                                      ? "text-white bg-white/[0.04]"
-                                      : "text-white/80 bg-transparent"
-                                  }`}
-                                >
-                                  <span className="inline-flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate">
-                                      {res.label}
-                                    </span>
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      {/* Credits */}
-                      <div className="relative inline-flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1 text-xs font-medium font-mono whitespace-nowrap py-0.5 px-1.5 rounded-sm transition-all duration-150 relative cursor-default text-white/35"
-                          aria-label="积分：0.8"
-                        >
-                          <span className="inline-flex items-center gap-1">
-                            <Sparkle
-                              width={14}
-                              height={14}
-                              className="shrink-0"
-                            />
-                            <span className="font-semibold">0.8</span>
-                          </span>
-                        </button>
-                      </div>
-
-                      {/* Generate button */}
-                      <button
-                        type="button"
-                        className="flex items-center justify-center rounded-lg transition-all duration-200 p-0 border-none shrink-0 w-8 h-8 bg-white text-black cursor-pointer shadow-[0_2px_8px_rgba(255,255,255,0.1)] hover:bg-[#f0f0f0] hover:scale-105 hover:-translate-y-px hover:shadow-[0_4px_16px_rgba(255,255,255,0.15)] active:scale-95"
-                        aria-label="生成"
-                        onClick={handleGenerate}
-                      >
-                        <ArrowUp width={16} height={16} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            // AI 图片 Tab layout（IK74V6：面板组件化，参数态下沉）
+            <ImageTabPanel
+              value={tabContents[activeTab] ?? ""}
+              onChange={handleInput}
+              editorRef={promptEditorRef}
+              onFocusChange={setIsFocused}
+              mediaList={mediaList}
+              removeMedia={removeMedia}
+              clearPrompt={clearPrompt}
+              onGenerate={handleGenerate}
+              dropClass={dropClass}
+              fileInputRef={fileInputRef}
+              imageModels={imageModels}
+              selectedImageModel={selectedImageModel}
+              setSelectedImageModel={setSelectedImageModel}
+              imageAspectRatio={imageAspectRatio}
+              setImageAspectRatio={setImageAspectRatio}
+              imageResolution={imageResolution}
+              setImageResolution={setImageResolution}
+            />
           ) : isVideoTab ? (
-            // AI 视频 Tab layout
-            <div className="flex flex-col h-full min-h-0">
-              <div className="flex flex-col relative flex-1 min-h-0">
-                <div className="flex-1 min-h-0 min-w-0 overflow-visible bg-transparent flex flex-col">
-                  <div className="flex flex-col flex-1 min-h-0">
-                    {/* Uploaded media list */}
-                    {mediaList.length > 0 && (
-                      <div className="shrink-0 flex flex-row flex-wrap items-start gap-2 px-3 pt-3">
-                        {mediaList.map((item) => (
-                          <div
-                            key={item.id}
-                            className="mediaListItem group/card relative flex flex-col items-center shrink-0 cursor-pointer transition-opacity duration-150 hover:opacity-85 w-14"
-                            title={`点击引用 @${item.name}`}
-                          >
-                            <div className="mediaListThumbWrapper relative rounded-md object-cover block border border-white/[0.08] w-[52px] h-[52px]">
-                              <img
-                                className="rounded-md object-cover block border border-white/[0.08] w-[52px] h-[52px]"
-                                alt={item.name}
-                                draggable={false}
-                                src={item.src}
-                              />
-                              {item.duration && (
-                                <span className="absolute bottom-1 right-1 z-[2] px-[5px] py-px text-[10px] font-medium font-mono text-white bg-black/60 rounded leading-[1.4] select-none pointer-events-none">
-                                  {item.duration}
-                                </span>
-                              )}
-                              <button
-                                type="button"
-                                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center rounded-full bg-black/60 border border-white/20 text-white cursor-pointer z-[2] opacity-0 transition-all duration-150 ease-out group-hover/card:opacity-100 hover:bg-black/80 hover:scale-105 h-5 w-5"
-                                aria-label="替换"
-                              >
-                                <RefreshCw width={11} height={11} />
-                              </button>
-                            </div>
-                            <span className="text-white/40 whitespace-nowrap overflow-hidden text-ellipsis text-center mt-[3px] text-[10px] max-w-[56px]">
-                              {item.name}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => removeMedia(item.id)}
-                              className="absolute flex items-center justify-center rounded-full text-white/50 cursor-pointer z-[3] transition-opacity duration-150 opacity-0 group-hover/card:opacity-100 hover:text-white bg-[rgba(50,50,54,0.95)] -top-[3px] -right-px w-4 h-4"
-                              aria-label="移除"
-                            >
-                              <X width={12} height={12} />
-                            </button>
-                          </div>
-                        ))}
-                        <div className="shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            className="rounded-lg text-white/30 bg-white/[0.025] cursor-pointer transition-all duration-150 hover:text-white/50 hover:bg-white/[0.05] w-[52px] h-[52px] flex items-center justify-center"
-                            aria-label="上传参考"
-                          >
-                            <Plus width={12} height={12} />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="flex-1 min-w-0 overflow-hidden flex items-stretch relative">
-                      {mediaList.length === 0 && (
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="shrink-0 w-[88px] h-[88px] mt-4 ml-4 flex flex-col items-center justify-center gap-1 border-none rounded-lg text-white/30 bg-white/[0.025] cursor-pointer transition-all duration-150 self-start p-0 hover:text-white/50 hover:bg-white/[0.05]"
-                          aria-label="上传参考"
-                        >
-                          <Plus width={20} height={20} className="opacity-80" />
-                          <span className="text-[10.5px] font-medium opacity-70 whitespace-nowrap">
-                            参考
-                          </span>
-                        </button>
-                      )}
-                      <div
-                        ref={editorRef}
-                        className="relative flex-1 text-sm text-white/90 bg-transparent border-none outline-none shadow-none appearance-none leading-[1.8] py-3 px-4 font-[inherit] overflow-y-auto whitespace-pre-wrap break-words focus:border-none focus:outline-none focus:shadow-none min-h-[120px] before:content-[attr(data-placeholder)] before:absolute before:top-3 before:left-4 before:right-4 before:text-white/35 before:pointer-events-none"
-                        contentEditable
-                        role="textbox"
-                        aria-multiline="true"
-                        data-placeholder="通过直接控制提示词快速生成单段片段。&#10;上传 1–5 张参考图或视频并用 @ 引用以创建互动。例如：用 @Image 1 作首帧、@Image 2 作尾帧，让他们像 @Video 1 那样跳舞。"
-                        spellCheck={false}
-                        autoCorrect="off"
-                        onInput={handleInput}
-                        onFocus={() => setIsFocused(true)}
-                        onBlur={() => setIsFocused(false)}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Bottom param bar */}
-                  <div className="flex items-center gap-2 py-3 mt-auto px-4">
-                    <div className="flex items-center gap-2 flex-1 justify-start">
-                      {/* 模型 */}
-                      <div
-                        className="relative"
-                        ref={videoModelContainerRef}
-                        data-param-dropdown-root="true"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setVideoModelOpen((v) => !v)}
-                          className="inline-flex items-center gap-1 h-8 text-[13px] font-medium text-white/45 px-3 rounded-lg bg-transparent border border-white/[0.06] cursor-pointer transition-all duration-150 whitespace-nowrap hover:text-white/70 hover:bg-white/[0.05]"
-                          aria-haspopup="listbox"
-                          aria-expanded={videoModelOpen}
-                          aria-label="模型"
-                        >
-                          <span className="inline-flex items-center gap-1.5 min-w-0">
-                            <span>{selectedModel.label}</span>
-                          </span>
-                          <ChevronDown width={11} height={11} />
-                        </button>
-                        {videoModelOpen && (
-                          <div
-                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto w-max`}
-                            role="listbox"
-                            aria-label="模型"
-                          >
-                            {MODELS.map((model) => {
-                              const selected = selectedModel.id === model.id;
-                              return (
-                                <button
-                                  key={model.id}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={selected}
-                                  onClick={() => {
-                                    setSelectedModel(model);
-                                    setVideoModelOpen(false);
-                                  }}
-                                  className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
-                                    selected
-                                      ? "text-white bg-white/[0.04]"
-                                      : "text-white/80 bg-transparent"
-                                  }`}
-                                >
-                                  <span className="inline-flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate">
-                                      {model.label}
-                                    </span>
-                                    {selected && model.premium && (
-                                      <span
-                                        aria-label="PREMIUM"
-                                        className="inline-flex items-center shrink-0 select-none whitespace-nowrap font-bold uppercase"
-                                        style={{
-                                          background:
-                                            "linear-gradient(to right, rgb(99, 102, 241), rgb(168, 85, 247))",
-                                          color: "rgb(255, 255, 255)",
-                                          fontSize: "9px",
-                                          fontWeight: 700,
-                                          letterSpacing: "0.025em",
-                                          padding: "1px 8px",
-                                          borderRadius: "4px",
-                                          lineHeight: "14px",
-                                          boxShadow:
-                                            "rgba(0, 0, 0, 0.15) 0px 1px 2px 0px",
-                                        }}
-                                      >
-                                        PREMIUM
-                                      </span>
-                                    )}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* 参考模式 */}
-                      <div
-                        className="relative"
-                        ref={refModeContainerRef}
-                        data-param-dropdown-root="true"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setRefModeOpen((v) => !v)}
-                          className="inline-flex items-center gap-1 h-8 text-[13px] font-medium text-white/45 px-3 rounded-lg bg-transparent border border-white/[0.06] cursor-pointer transition-all duration-150 whitespace-nowrap hover:text-white/70 hover:bg-white/[0.05]"
-                          aria-haspopup="listbox"
-                          aria-expanded={refModeOpen}
-                          aria-label="参考模式"
-                        >
-                          <span>{refMode.label}</span>
-                          <ChevronDown width={11} height={11} />
-                        </button>
-                        {refModeOpen && (
-                          <div
-                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
-                            role="listbox"
-                            aria-label="参考模式"
-                          >
-                            {VIDEO_REF_MODES.map((mode) => {
-                              const selected = refMode.id === mode.id;
-                              return (
-                                <button
-                                  key={mode.id}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={selected}
-                                  onClick={() => {
-                                    setRefMode(mode);
-                                    setRefModeOpen(false);
-                                  }}
-                                  className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
-                                    selected
-                                      ? "text-white bg-white/[0.04]"
-                                      : "text-white/80 bg-transparent"
-                                  }`}
-                                >
-                                  <span className="inline-flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate">
-                                      {mode.label}
-                                    </span>
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* 宽高比 */}
-                      <div
-                        className="relative"
-                        ref={aspectRatioContainerRef}
-                        data-param-dropdown-root="true"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setAspectRatioOpen((v) => !v)}
-                          className="inline-flex items-center gap-1 h-8 text-[13px] font-medium text-white/45 px-3 rounded-lg bg-transparent border border-white/[0.06] cursor-pointer transition-all duration-150 whitespace-nowrap hover:text-white/70 hover:bg-white/[0.05]"
-                          aria-haspopup="listbox"
-                          aria-expanded={aspectRatioOpen}
-                          aria-label="宽高比"
-                        >
-                          <AspectRatioIcon ratio={aspectRatio.id} />
-                          <span>{aspectRatio.label}</span>
-                          <ChevronDown width={11} height={11} />
-                        </button>
-                        {aspectRatioOpen && (
-                          <div
-                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
-                            role="listbox"
-                            aria-label="宽高比"
-                          >
-                            {VIDEO_ASPECT_RATIOS.map((r) => {
-                              const selected = aspectRatio.id === r.id;
-                              return (
-                                <button
-                                  key={r.id}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={selected}
-                                  onClick={() => {
-                                    setAspectRatio(r);
-                                    setAspectRatioOpen(false);
-                                  }}
-                                  className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
-                                    selected
-                                      ? "text-white bg-white/[0.04]"
-                                      : "text-white/80 bg-transparent"
-                                  }`}
-                                >
-                                  <span className="inline-flex items-center gap-1.5 min-w-0">
-                                    <AspectRatioIcon ratio={r.id} />
-                                    <span className="truncate">{r.label}</span>
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* 分辨率 */}
-                      <div
-                        className="relative"
-                        ref={resolutionContainerRef}
-                        data-param-dropdown-root="true"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setResolutionOpen((v) => !v)}
-                          className="inline-flex items-center gap-1 h-8 text-[13px] font-medium text-white/45 px-3 rounded-lg bg-transparent border border-white/[0.06] cursor-pointer transition-all duration-150 whitespace-nowrap hover:text-white/70 hover:bg-white/[0.05]"
-                          aria-haspopup="listbox"
-                          aria-expanded={resolutionOpen}
-                          aria-label="分辨率"
-                        >
-                          <span>{resolution.label}</span>
-                          <ChevronDown width={11} height={11} />
-                        </button>
-                        {resolutionOpen && (
-                          <div
-                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
-                            role="listbox"
-                            aria-label="分辨率"
-                          >
-                            {RESOLUTIONS.map((res) => {
-                              const selected = resolution.id === res.id;
-                              return (
-                                <button
-                                  key={res.id}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={selected}
-                                  onClick={() => {
-                                    setResolution(res);
-                                    setResolutionOpen(false);
-                                  }}
-                                  className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
-                                    selected
-                                      ? "text-white bg-white/[0.04]"
-                                      : "text-white/80 bg-transparent"
-                                  }`}
-                                >
-                                  <span className="inline-flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate">
-                                      {res.label}
-                                    </span>
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* 时长 */}
-                      <div
-                        className="relative"
-                        ref={durationContainerRef}
-                        data-param-dropdown-root="true"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setDurationOpen((v) => !v)}
-                          className="inline-flex items-center gap-1 h-8 text-[13px] font-medium text-white/45 px-3 rounded-lg bg-transparent border border-white/[0.06] cursor-pointer transition-all duration-150 whitespace-nowrap hover:text-white/70 hover:bg-white/[0.05]"
-                          aria-haspopup="listbox"
-                          aria-expanded={durationOpen}
-                          aria-label="时长"
-                        >
-                          <Clock width={13} height={13} />
-                          <span>{videoDuration}s</span>
-                          <ChevronDown width={11} height={11} />
-                        </button>
-                        {durationOpen && (
-                          <div
-                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto rounded-xl w-[240px] p-[14px_16px_10px] flex flex-col items-center gap-2 ${dropUp ? "bottom-[calc(100%+6px)] shadow-[0_-12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-top-1 duration-150" : "top-[calc(100%+6px)] shadow-[0_12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-bottom-1 duration-150"} left-0`}
-                            role="listbox"
-                            aria-label="时长"
-                          >
-                            <span className="text-[20px] font-semibold text-white tabular-nums">
-                              {videoDuration}s
-                            </span>
-                            <div className="flex items-center gap-2 w-full">
-                              <span className="text-[10px] text-white/[0.35] shrink-0 tabular-nums">
-                                4s
-                              </span>
-                              <input
-                                type="range"
-                                min="4"
-                                max="15"
-                                step="1"
-                                value={videoDuration}
-                                aria-label="时长"
-                                onChange={(e) =>
-                                  setVideoDuration(parseInt(e.target.value, 10))
-                                }
-                                className="flex-1 h-1 appearance-none rounded-[2px] bg-white/[0.12] cursor-pointer outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-[0_1px_4px_rgba(0,0,0,0.3)] [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:duration-[120ms] [&::-webkit-slider-thumb]:ease-out [&:hover::-webkit-slider-thumb]:scale-[1.2] [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:shadow-[0_1px_4px_rgba(0,0,0,0.3)] [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-[2px] [&::-moz-range-track]:bg-white/[0.12]"
-                              />
-                              <span className="text-[10px] text-white/[0.35] shrink-0 tabular-nums">
-                                15s
-                              </span>
-                            </div>
-                            <button
-                              type="button"
-                              className="flex items-center gap-1.5 w-full border-t border-white/[0.06] pt-1.5 pb-0.5 text-left whitespace-nowrap mt-0.5 text-[11px] leading-[16px] text-white/[0.35] bg-transparent border-none cursor-pointer transition-colors duration-150 hover:text-white/[0.85]"
-                            >
-                              <span>需要更长时长？打开 Agent V2</span>
-                              <ArrowRight width={11} height={11} />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* @ 提及 */}
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 h-8 text-[13px] font-medium text-white/45 px-3 rounded-lg bg-transparent border border-white/[0.06] cursor-pointer transition-all duration-150 whitespace-nowrap hover:text-white/70 hover:bg-white/[0.05]"
-                        aria-label="提及"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <circle cx="12" cy="12" r="4"></circle>
-                          <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"></path>
-                        </svg>
-                      </button>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      {/* Credits */}
-                      <div className="relative inline-flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1 text-xs font-medium font-mono whitespace-nowrap py-0.5 px-1.5 rounded-sm transition-all duration-150 relative cursor-pointer text-white/35 hover:bg-white/[0.06] hover:text-white/50"
-                          aria-label="积分：9"
-                        >
-                          <span className="inline-flex items-center gap-1">
-                            <Sparkle
-                              width={14}
-                              height={14}
-                              className="shrink-0"
-                            />
-                            <span className="font-semibold">9</span>
-                          </span>
-                        </button>
-                        <span className="inline-flex items-center gap-[3px] absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 text-[10px] text-green-400/70 cursor-pointer whitespace-nowrap z-10 hover:text-green-400">
-                          或尝试无限
-                        </span>
-                      </div>
-
-                      {/* Generate button */}
-                      <button
-                        type="button"
-                        className="flex items-center justify-center rounded-lg transition-all duration-200 p-0 border-none shrink-0 w-8 h-8 bg-white text-black cursor-pointer shadow-[0_2px_8px_rgba(255,255,255,0.1)] hover:bg-[#f0f0f0] hover:scale-105 hover:-translate-y-px hover:shadow-[0_4px_16px_rgba(255,255,255,0.15)] active:scale-95"
-                        aria-label="生成"
-                        onClick={handleGenerate}
-                      >
-                        <ArrowUp width={16} height={16} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            // AI 视频 Tab layout（IK74V6：面板组件化，参数态下沉）
+            <VideoTabPanel
+              value={tabContents[activeTab] ?? ""}
+              onChange={handleInput}
+              editorRef={promptEditorRef}
+              onFocusChange={setIsFocused}
+              mediaList={mediaList}
+              removeMedia={removeMedia}
+              clearPrompt={clearPrompt}
+              onGenerate={handleGenerate}
+              dropClass={dropClass}
+              fileInputRef={fileInputRef}
+              videoModels={videoModels}
+              selectedModel={selectedModel}
+              setSelectedModel={setSelectedModel}
+              refMode={videoRefMode}
+              setRefMode={setVideoRefMode}
+              aspectRatio={videoAspectRatio}
+              setAspectRatio={setVideoAspectRatio}
+              resolution={videoResolution}
+              setResolution={setVideoResolution}
+              videoDuration={videoDuration}
+              setVideoDuration={setVideoDuration}
+            />
           ) : (
             // Default agent tab layout
             <>
@@ -1373,25 +534,34 @@ export default function AgentComposer({
                 </div>
               )}
 
+              {boundSkill && (
+                <div className="px-4 pt-3">
+                  <DirectSkillTag
+                    name={boundSkill.name}
+                    onRemove={handleRemoveBoundSkill}
+                  />
+                </div>
+              )}
+
               <div className="relative min-h-[120px]">
-                <div
-                  ref={editorRef}
-                  className="tc-agent-composer-editor relative min-h-[120px] w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent py-3 px-4 text-sm leading-[1.8] text-white/90 border-none outline-none shadow-none focus:border-none focus:outline-none focus:ring-0"
-                  contentEditable
-                  role="textbox"
-                  aria-multiline="true"
-                  data-placeholder="描述你想制作的视频，微电影、产品广告、社媒视频等都可支持。适合 1-5 分钟视频；可用 @ 引用已上传素材。"
-                  spellCheck={false}
-                  autoCorrect="off"
-                  onInput={handleInput}
-                  onFocus={() => setIsFocused(true)}
-                  onBlur={() => setIsFocused(false)}
+                <PromptEditor
+                  key="agent-editor"
+                  ref={promptEditorRef}
+                  value={tabContents[activeTab] ?? ""}
+                  onChange={handleInput}
+                  placeholder={`描述你想制作的视频，微电影、产品广告、社媒视频等都可支持。适合 1-5 分钟视频；可用 @ 引用已上传素材。`}
+                  className="w-full"
+                  onFocusChange={setIsFocused}
+                />
+                <ClearPromptButton
+                  visible={Boolean((tabContents[activeTab] ?? "").trim())}
+                  onClear={clearPrompt}
                 />
               </div>
 
               {/* Toolbar */}
-              <div className="mt-auto flex items-center gap-2 py-3 px-4">
-                <div className="flex min-w-0 flex-1 items-center gap-3">
+              <div className="mt-auto flex flex-wrap items-center gap-2 py-3 px-4">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -1428,7 +598,7 @@ export default function AgentComposer({
                         aria-expanded={modelOpen}
                       >
                         <span className="whitespace-nowrap">
-                          {selectedModel.label}
+                          {selectedModel?.model_label ?? "加载中…"}
                         </span>
                         <ChevronDown
                           width={11}
@@ -1439,23 +609,27 @@ export default function AgentComposer({
                         />
                       </button>
                       {modelOpen && (
-                        <div className="ncs-thin-scrollbar absolute bg-[rgb(35,35,54)] border border-white/10 rounded-lg p-1 z-[100] max-h-[240px] overflow-y-auto bottom-[calc(100%+6px)] shadow-[0_-12px_32px_rgba(0,0,0,0.4)] animate-in fade-in slide-in-from-top-1 duration-150 left-0 right-auto w-max min-w-[220px]">
-                          {MODELS.map((model) => (
+                        <div
+                          className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
+                        >
+                          {videoModels.map((model) => (
                             <button
-                              key={model.id}
+                              key={model.model_id}
                               type="button"
                               onClick={() => {
                                 setSelectedModel(model);
                                 setModelOpen(false);
                               }}
                               className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
-                                selectedModel.id === model.id
+                                selectedModel?.model_id === model.model_id
                                   ? "text-white bg-white/[0.04]"
                                   : "text-white/80 bg-transparent"
                               }`}
                             >
                               <span className="inline-flex items-center gap-1.5 min-w-0">
-                                <span className="truncate">{model.label}</span>
+                                <span className="truncate">
+                                  {model.model_label}
+                                </span>
                               </span>
                             </button>
                           ))}
@@ -1470,13 +644,13 @@ export default function AgentComposer({
                         <button
                           type="button"
                           onClick={() => setAgentModelOpen((v) => !v)}
-                          className="inline-flex items-center gap-1 h-8 text-[13px] font-medium text-white/35 px-3 rounded-lg bg-transparent cursor-pointer transition-colors duration-150 whitespace-nowrap hover:text-white/60 pl-2"
+                          className="inline-flex items-center gap-1 h-8 text-[13px] font-medium text-white/45 px-3 rounded-lg bg-transparent border border-white/[0.06] cursor-pointer transition-all duration-150 whitespace-nowrap hover:text-white/70 hover:bg-white/[0.05]"
                           aria-haspopup="listbox"
                           aria-expanded={agentModelOpen}
                           aria-label="选择模型"
                         >
                           <span className="whitespace-nowrap">
-                            {selectedAgentModel.label}
+                            {selectedAgentModel?.model_label ?? "加载中…"}
                           </span>
                           <ChevronDown
                             width={11}
@@ -1487,50 +661,47 @@ export default function AgentComposer({
                           />
                         </button>
                         {agentModelOpen && (
-                          <div className="absolute bottom-[calc(100%+8px)] z-[100] w-[272px] left-1/2 -translate-x-1/2">
-                            <div
-                              className="ncs-thin-scrollbar max-h-[320px] overflow-y-auto rounded-xl border border-white/10 bg-[rgba(32,32,32,0.96)] p-1.5 shadow-[0_14px_40px_rgba(0,0,0,0.32)] backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150 origin-bottom"
-                              role="listbox"
-                              aria-label="选择模型"
-                            >
-                              <div className="px-2.5 pb-1 pt-1.5 text-[11px] leading-[1.35] text-white/45 select-none">
-                                选择驱动 Agent 的模型
-                              </div>
-                              {AGENT_MODELS.map((model) => {
-                                const selected =
-                                  selectedAgentModel.id === model.id;
-                                return (
-                                  <button
-                                    key={model.id}
-                                    type="button"
-                                    role="option"
-                                    aria-selected={selected}
-                                    onClick={() => {
-                                      setSelectedAgentModel(model);
-                                      setAgentModelOpen(false);
-                                    }}
-                                    className={`flex w-full cursor-pointer items-center justify-between gap-2.5 rounded-lg border-0 px-2.5 py-2 text-left font-[inherit] transition-colors duration-150 hover:bg-white/10 hover:text-white ${
-                                      selected
-                                        ? "bg-white/10 text-white"
-                                        : "bg-transparent text-white/80"
-                                    }`}
+                          <div
+                            className={`ncs-thin-scrollbar absolute bg-[rgb(35,35,35)] border border-white/10 rounded-lg p-1 z-[100] min-w-[80px] max-h-[240px] overflow-y-auto ${dropClass} left-0 right-auto`}
+                            role="listbox"
+                            aria-label="选择模型"
+                          >
+                            {agentModels.map((model) => {
+                              const selected =
+                                selectedAgentModel?.model_id === model.model_id;
+                              return (
+                                <button
+                                  key={model.model_id}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={selected}
+                                  onClick={() => {
+                                    setSelectedAgentModel(model);
+                                    setAgentModelOpen(false);
+                                  }}
+                                  className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
+                                    selected
+                                      ? "text-white bg-white/[0.04]"
+                                      : "text-white/80 bg-transparent"
+                                  }`}
+                                >
+                                  <span className="inline-flex items-center gap-1.5 min-w-0">
+                                    <span className="truncate">
+                                      {model.model_label}
+                                    </span>
+                                  </span>
+                                  <span
+                                    className="inline-flex shrink-0 items-center gap-1 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[10px] leading-[1.2] text-white/55"
+                                    aria-label={`费用 ${AGENT_COST_MULTIPLIER}`}
                                   >
-                                    <span className="min-w-0 truncate text-[13px] font-semibold">
-                                      {model.label}
+                                    <span>💰 费用</span>
+                                    <span className="tabular-nums text-white/70">
+                                      {AGENT_COST_MULTIPLIER}
                                     </span>
-                                    <span
-                                      className="inline-flex shrink-0 items-center gap-1 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[10px] leading-[1.2] text-white/55"
-                                      aria-label={`费用 ${model.costMultiplier}`}
-                                    >
-                                      <span>💰 费用</span>
-                                      <span className="tabular-nums text-white/70">
-                                        {model.costMultiplier}
-                                      </span>
-                                    </span>
-                                  </button>
-                                );
-                              })}
-                            </div>
+                                  </span>
+                                </button>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -1578,8 +749,12 @@ export default function AgentComposer({
       <SkillPanel
         isOpen={skillPanelOpen}
         onClose={() => setSkillPanelOpen(false)}
-        onUseSkill={(skill) => insertSkillIntoEditor(skill.name)}
+        onUseSkill={handleUseSkill}
       />
     </div>
   );
-}
+  },
+);
+
+
+export default AgentComposer;

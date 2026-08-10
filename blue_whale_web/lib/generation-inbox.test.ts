@@ -87,6 +87,33 @@ describe("Generation Inbox API", () => {
     );
   });
 
+  it("直接使用绑定时携带 forced_creative_skill_id（IK60WY，激活契约 §2）", async () => {
+    vi.mocked(apiRequest).mockResolvedValue({
+      project_id: 7,
+      conversation_id: 3,
+      message_id: 13,
+      agent_run_id: 23,
+      accepted_cursor: 7,
+    });
+
+    await postInboxMessage({
+      content: "做一张海报",
+      clientMessageId: "client-3",
+      idempotencyKey: "cmd-3",
+      forcedCreativeSkillId: "poster_gen",
+    });
+
+    expect(apiRequest).toHaveBeenCalledWith("/api/generation-inbox/messages", {
+      method: "POST",
+      headers: { "Idempotency-Key": "cmd-3" },
+      body: JSON.stringify({
+        client_message_id: "client-3",
+        content: "做一张海报",
+        forced_creative_skill_id: "poster_gen",
+      }),
+    });
+  });
+
   it("新建对话走 POST /api/generation-inbox/conversations 并携带 Idempotency-Key（无 body）", async () => {
     vi.mocked(apiRequest).mockResolvedValue({
       id: 9,

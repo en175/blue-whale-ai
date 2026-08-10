@@ -10,7 +10,13 @@ const mocks = vi.hoisted(() => ({
         isAdmin: boolean;
         username: string;
       }) => Promise<Response>,
-    ) => handler({ userId: "1", status: "enabled", isAdmin: true, username: "admin" }),
+    ) =>
+      handler({
+        userId: "1",
+        status: "enabled",
+        isAdmin: true,
+        username: "admin",
+      }),
   ),
   listAdminTopUps: vi.fn(),
 }));
@@ -96,7 +102,9 @@ describe("GET /api/admin/orders", () => {
       page_size: 20,
     });
     const res = await GET(
-      authRequest("http://localhost/api/admin/orders?keyword=BWP&status=pending&page=2&pageSize=10"),
+      authRequest(
+        "http://localhost/api/admin/orders?keyword=BWP&status=pending&page=2&pageSize=10",
+      ),
     );
     const body = await res.json();
     expect(mocks.listAdminTopUps).toHaveBeenCalledWith("sk-admin", 1, {

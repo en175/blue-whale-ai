@@ -21,6 +21,76 @@ function makeRepo(
   } as GenerationInboxRepo;
 }
 
+const ACCEPTED = {
+  kind: "accepted",
+  project_id: "42",
+  conversation_id: "7",
+  message_id: "8",
+  agent_run_id: "9",
+  cursor: "2",
+  sequence_no: 1,
+} as const;
+
+describe("handleAcceptGenerationInboxMessage forced skill（IK60WY）", () => {
+  const body = {
+    client_message_id: "client-1",
+    content: "生成蓝鲸",
+    forced_creative_skill_id: "official_skill",
+  };
+
+  it("持久层原子拒绝 forced Skill → 100306", async () => {
+    const repo = makeRepo({
+      acceptMessage: vi
+        .fn()
+        .mockResolvedValue({ kind: "creative_skill_unavailable" }),
+    });
+    const result = await handleAcceptGenerationInboxMessage(
+      "9",
+      body,
+      "command-1",
+      repo,
+    );
+
+    expect(result.code).toBe(100306);
+    expect(repo.acceptMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ forcedCreativeSkillId: "official_skill" }),
+    );
+  });
+
+  it("forced Skill 被原子接纳", async () => {
+    const repo = makeRepo({
+      acceptMessage: vi.fn().mockResolvedValue(ACCEPTED),
+    });
+
+    const result = await handleAcceptGenerationInboxMessage(
+      "9",
+      body,
+      "command-1",
+      repo,
+    );
+
+    expect(result.code).toBe(200);
+    expect(result.data?.agent_run_id).toBe(9);
+  });
+
+  it("活动 Run 已冻结 Skill 时返回稳定冲突", async () => {
+    const repo = makeRepo({
+      acceptMessage: vi
+        .fn()
+        .mockResolvedValue({ kind: "creative_skill_conflict" }),
+    });
+
+    const result = await handleAcceptGenerationInboxMessage(
+      "9",
+      body,
+      "command-1",
+      repo,
+    );
+
+    expect(result.code).toBe(100303);
+  });
+});
+
 describe("generation inbox wire ids", () => {
   it("preserves every database id beyond Number.MAX_SAFE_INTEGER", async () => {
     const huge = "9007199254740993";

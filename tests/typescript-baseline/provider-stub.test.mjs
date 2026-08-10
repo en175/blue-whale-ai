@@ -81,3 +81,88 @@ test("provider stub covers image/video contracts without retaining credentials",
     }
   }
 });
+
+test("provider stub scenario control plane injects deterministic outcomes", async () => {
+  const scenarioPort = 4330;
+  const scenarioBase = `http://127.0.0.1:${scenarioPort}`;
+  const child = spawn(
+    process.execPath,
+    ["tests/typescript-baseline/provider-stub.mjs"],
+    {
+      env: { ...process.env, PORT: String(scenarioPort) },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  const setScenarios = (body) =>
+    fetch(`${scenarioBase}/__acceptance/scenarios`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const postImage = () =>
+    fetch(`${scenarioBase}/v1/images/generations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "acceptance-image", prompt: "x" }),
+    });
+  const pollVideo = () =>
+    fetch(`${scenarioBase}/v1/video/generations/acceptance-video-task`);
+
+  try {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      try {
+        const response = await fetch(`${scenarioBase}/health`);
+        if (response.ok) break;
+      } catch {
+        // Process may still be starting.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    const invalid = await setScenarios({ image: { mode: "explode" } });
+    assert.equal(invalid.status, 400);
+
+    assert.equal((await setScenarios({ image: { mode: "fail" } })).status, 200);
+    const failed = await postImage();
+    assert.equal(failed.status, 402);
+    assert.ok((await failed.json()).error.message.includes("acceptance"));
+
+    await setScenarios({ image: { mode: "empty" } });
+    const empty = await postImage();
+    assert.equal(empty.status, 200);
+    assert.deepEqual((await empty.json()).data, []);
+
+    await setScenarios({ image: { mode: "fail", times: 1 } });
+    assert.equal((await postImage()).status, 402);
+    assert.equal((await postImage()).status, 200);
+
+    const delayedStart = Date.now();
+    await setScenarios({ image: { mode: "success", delayMs: 300 } });
+    assert.equal((await postImage()).status, 200);
+    assert.ok(Date.now() - delayedStart >= 300);
+
+    await setScenarios({ videoPoll: { statuses: ["processing", "processing", "fail"] } });
+    assert.equal((await (await pollVideo()).json()).data.status, "IN_PROGRESS");
+    assert.equal((await (await pollVideo()).json()).data.status, "IN_PROGRESS");
+    const failedPoll = await (await pollVideo()).json();
+    assert.equal(failedPoll.data.status, "FAILURE");
+    assert.equal(failedPoll.data.error, undefined);
+    assert.equal((await (await pollVideo()).json()).data.status, "FAILURE");
+
+    await setScenarios({ videoPoll: { statuses: ["processing"] } });
+    const resetResponse = await fetch(`${scenarioBase}/__acceptance/scenarios`, {
+      method: "DELETE",
+    });
+    assert.equal(resetResponse.status, 200);
+    const afterReset = await (await pollVideo()).json();
+    assert.equal(afterReset.data.status, "SUCCESS");
+    assert.match(afterReset.data.result_url, /generated-video/);
+  } finally {
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+      await once(child, "exit");
+    }
+  }
+});

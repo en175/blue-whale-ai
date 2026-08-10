@@ -54,7 +54,9 @@ export function NodeInfoModal({
   const kind = node.data.kind;
   const kindLabel =
     KIND_LABELS[kind] ??
-    (node.data.cardType ? `${KIND_LABELS.reference}（${node.data.cardType}）` : kind);
+    (node.data.cardType
+      ? `${KIND_LABELS.reference}（${node.data.cardType}）`
+      : kind);
   // content 未在 CanvasNodeData 显式声明（走 index signature 为 unknown），需窄化
   const content =
     typeof node.data.content === "string" ? node.data.content : undefined;
@@ -73,10 +75,15 @@ export function NodeInfoModal({
   }
   if (node.data.prompt) rows.push({ label: "提示词", value: node.data.prompt });
   if (width && height) {
-    rows.push({ label: "尺寸", value: `${Math.round(width)} × ${Math.round(height)}` });
+    rows.push({
+      label: "尺寸",
+      value: `${Math.round(width)} × ${Math.round(height)}`,
+    });
   }
-  if (asset?.duration) rows.push({ label: "时长", value: fmtDuration(asset.duration) });
-  if (node.data.assetId) rows.push({ label: "资产 ID", value: node.data.assetId });
+  if (asset?.duration)
+    rows.push({ label: "时长", value: fmtDuration(asset.duration) });
+  if (node.data.assetId)
+    rows.push({ label: "资产 ID", value: node.data.assetId });
   if (node.data.status) {
     rows.push({
       label: "状态",

@@ -5,7 +5,7 @@
   与多层恢复不实施；只迁移持久消息、幂等与简单 lease/fence，见 [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
 - **日期**：2026-07-26
 - **决策者**：KimJohn
-- **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3UWA)
+- **关联工单**：[确定 Node Agent Worker 的编排与恢复模型](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3UWA)
 - **消息交付**：[ADR-0045 Provisional Assistant Delivery](0045-provisional-assistant-delivery-runcommit-boundary.md)
 - **错误与恢复**：[ADR-0046 Runtime 错误边界](0046-runtime-error-evidence-policy-and-terminal-boundary.md)、[ADR-0048 时间与 Lease](0048-time-deadline-and-lease-facts.md)
 - **终态封口**：[ADR-0049 AgentRun 终态封口](0049-agent-run-terminal-seal-and-independent-convergence.md)

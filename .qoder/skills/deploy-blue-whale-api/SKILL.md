@@ -35,11 +35,11 @@ bash .qoder/skills/deploy-blue-whale-api/scripts/deploy.sh
 
 分步：`build.sh` / `push.sh` / `remote-build.sh` / `restart.sh`。
 
-覆盖配置（环境变量）：`DEPLOY_KEY` / `DEPLOY_HOST` / `DEPLOY_USER` / `REMOTE_DIR` / `API_PORT` / `MYSQL_DSN` / `REDIS_DSN` / `BUN`。
+覆盖配置（环境变量）：`DEPLOY_KEY` / `DEPLOY_HOST` / `DEPLOY_USER` / `REMOTE_DIR` / `API_PORT` / `MYSQL_DSN` / `REDIS_DSN` / `BUN` / `BW_NEW_API_REPO_URL` / `BW_NEW_API_REF`。
 
 ## restart 逻辑
 
-备份当前二进制 `new-api.prev`（回滚用）→ `docker ps -a` 查同名容器 → 在跑则 `docker rm -f` → `docker compose up -d` 重建 → curl `/api/status` 重试 8×3s 验证。
+备份当前二进制 `new-api.prev` + 记录当前 image tag → `.image-tag.prev` → `docker ps -a` 查同名容器 → 在跑则 `docker rm -f` → `docker compose up -d` 重建（tag = source short SHA）→ curl `/api/status` 重试 8×3s 验证。
 
 ## ⚠️ 注意点
 
@@ -47,10 +47,11 @@ bash .qoder/skills/deploy-blue-whale-api/scripts/deploy.sh
 - **mirror fallback**：`remote-build.sh` 逐个试 daocloud/1ms/dockerproxy/dockerhub，全失败才报错指路 `/etc/docker/daemon.json` registry-mirrors。不动 docker daemon、不影响测试容器。
 - **classic 占位**：classic 前端构建失败（date-fns-tz/date-fns 不兼容），`build.sh` 自动写占位 `index.html` 撑 `go:embed` 编译；默认 default 主题不受影响。
 - **SESSION_SECRET**：`push.sh` 远程 `openssl rand -hex 32` 生成强随机（每次部署重新生成 → 已登录 session 失效，可接受；不本地落盘明文）。
-- **回滚**：`restart.sh` 前备份 `new-api.prev`；回滚 = `ssh ... 'cd /opt/blue-whale-api && cp new-api.prev new-api'` 再跑 `restart.sh`。
+- **image tag 绑定源码**：tag = 源码 short SHA（`build.sh` 落盘 `.build/image-tag`，贯穿 push→remote-build→restart），禁 `:latest` 部署（正常 deploy 流程必先生成 tag；`latest` 仅作单独跑子脚本/异常态回退）（ADR-0063）。
+- **回滚**：`rollback.sh` 读远端 `.image-tag.prev`，用存活 prev tag 镜像 `compose up -d --no-build` 重建（绕开语义无效的 binary prev）。
 - **外部访问**：`restart.sh` 验证用宿主 `localhost`；外部需云安全组放行 3001。
 
 ## 触发示例
 
 用户："部署 API" / "发布 new-api" / "推 API 到服务器" → `deploy.sh`。
-用户："只重 build 镜像不改二进制" → `remote-build.sh && restart.sh`。
+用户："只重 build 镜像不改二进制" → `remote-build.sh && restart.sh`（依赖此前 push 已写 NEW_API_IMAGE_TAG 到远端 .env，否则 compose 回退 latest）。

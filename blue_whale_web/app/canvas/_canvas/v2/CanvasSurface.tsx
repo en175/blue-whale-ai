@@ -20,17 +20,21 @@ import {
   type Connection,
   type OnConnectEnd,
   type Node as RFNode,
+  type Edge as RFEdge,
 } from "@xyflow/react";
 import type { CanvasNode, CanvasEdge, MediaKind } from "../model";
+import type { CanvasMenuPayload } from "../types";
 import { pickReferenceDropTarget } from "../placement";
 import {
   MediaNode,
   TextNode,
   GroupNode,
   ReferenceNode,
+  SceneCardNode,
   NodeActionsContext,
 } from "./nodes";
 import type { TextMentionItem } from "./nodes";
+import type { SceneCardView } from "../conversationRecovery";
 import { SelectionBounds } from "./SelectionBounds";
 import { toolModeInteractionProps, type ToolMode } from "./toolMode";
 
@@ -42,17 +46,11 @@ const nodeTypes = {
   text: TextNode,
   group: GroupNode,
   reference: ReferenceNode,
+  scene_card: SceneCardNode,
 } as const;
 
-/** 右键/drop 菜单位置（x/y=画布世界坐标供建节点，screenX/Y=屏幕坐标供浮层定位）。 */
-export type MenuPayload = {
-  x: number;
-  y: number;
-  screenX: number;
-  screenY: number;
-  source?: string;
-  sourceHandle?: string;
-};
+/** 保持原公开类型路径兼容；类型定义下沉到纯类型模块。 */
+export type MenuPayload = CanvasMenuPayload;
 
 export type CanvasSurfaceProps = {
   nodes: CanvasNode[];
@@ -67,6 +65,7 @@ export type CanvasSurfaceProps = {
   onNodeAction?: (id: string, actionId: string) => void;
   onNodeRetry?: (id: string) => void;
   onNodeRemove?: (id: string) => void;
+  onDeleteSceneCard?: (nodeId: string, sceneCardId: string) => Promise<boolean>;
   /** IK55VL 视频卡生成中取消入口（按节点 taskId 取消任务）。 */
   onNodeCancelJob?: (id: string) => void;
   /** IK55VH 富文本卡 commit：richDoc + 派生纯文本写回。 */
@@ -91,6 +90,8 @@ export type CanvasSurfaceProps = {
   onImportProductLink?: (id: string, url: string) => void;
   /** IK55VH 富文本卡 @ 建议素材列表。 */
   mentionItems?: TextMentionItem[];
+  /** 场景卡快照投影（spec §6.2）：注入 NodeActionsContext 供 SceneCardNode 查正文。 */
+  sceneCards?: SceneCardView[];
   onPaneMenu?: (payload: MenuPayload) => void;
   onEdgeDropMenu?: (payload: MenuPayload) => void;
   onNodeMenu?: (payload: MenuPayload & { nodeId: string }) => void;
@@ -115,6 +116,7 @@ export function CanvasSurface({
   onNodeAction,
   onNodeRetry,
   onNodeRemove,
+  onDeleteSceneCard,
   onNodeCancelJob,
   onEditRichText,
   onEditDescription,
@@ -127,6 +129,7 @@ export function CanvasSurface({
   onRemoveProductImage,
   onImportProductLink,
   mentionItems,
+  sceneCards,
   onPaneMenu,
   onEdgeDropMenu,
   onNodeMenu,
@@ -167,8 +170,10 @@ export function CanvasSurface({
             }
           : n;
         // IK55VT：参考卡高度内容驱动（已填态图高随宽高比自适应），不钉死 wrapper 高度，
-        // 让 RF ResizeObserver 测量接管；空/留史态由组件内 style 定高
-        return n.data.kind === "reference"
+        // 让 RF ResizeObserver 测量接管；空/留史态由组件内 style 定高。
+        // scene_card 同理（spec §3.1 全文自然展开，高度由正文渲染结果决定，
+        // 服务端初始 height=兼容值 1080 不能钉死，否则卡片下方留大段空白）。
+        return n.data.kind === "reference" || n.data.kind === "scene_card"
           ? { ...withMeasured, height: undefined }
           : withMeasured;
       }),
@@ -278,6 +283,41 @@ export function CanvasSurface({
     [screenToFlowPosition, onNodeMenu],
   );
 
+  const handleBeforeDelete = useCallback(
+    async ({
+      nodes: nodesToDelete,
+      edges: edgesToDelete,
+    }: {
+      nodes: RFNode[];
+      edges: RFEdge[];
+    }) => {
+      // 仅服务端删除成功（返回 true）的节点交给 RF 删除；
+      // 失败的节点保留在画布上（避免资源残留但节点消失），
+      // removeNodeAndSave 已把失败节点标为 unavailableReason="deleted"。
+      const managedIds = new Set<string>();
+      for (const node of nodesToDelete) {
+        const data = node.data as CanvasNode["data"];
+        if (
+          data.kind !== "scene_card" ||
+          data.unavailableReason ||
+          !data.sceneCardId ||
+          !onDeleteSceneCard
+        )
+          continue;
+        const ok = await onDeleteSceneCard(node.id, data.sceneCardId);
+        if (ok) managedIds.add(node.id);
+      }
+      return {
+        nodes: nodesToDelete.filter((node) => !managedIds.has(node.id)),
+        edges: edgesToDelete.filter(
+          (edge) =>
+            !managedIds.has(edge.source) && !managedIds.has(edge.target),
+        ),
+      };
+    },
+    [onDeleteSceneCard],
+  );
+
   // ctrl/cmd +/- 缩放、0 自适应；拦截浏览器缩放
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -303,6 +343,7 @@ export function CanvasSurface({
       onAction: onNodeAction,
       onRetry: onNodeRetry,
       onRemoveNode: onNodeRemove,
+      onDeleteSceneCard,
       onCancelJob: onNodeCancelJob,
       onEditRichText,
       onEditDescription,
@@ -315,6 +356,7 @@ export function CanvasSurface({
       onImportProductLink,
       referenceDropTargetId,
       mentionItems,
+      sceneCards,
       picking,
       pickingAccept,
     }),
@@ -322,6 +364,7 @@ export function CanvasSurface({
       onNodeAction,
       onNodeRetry,
       onNodeRemove,
+      onDeleteSceneCard,
       onNodeCancelJob,
       onEditRichText,
       onEditDescription,
@@ -334,6 +377,7 @@ export function CanvasSurface({
       onImportProductLink,
       referenceDropTargetId,
       mentionItems,
+      sceneCards,
       picking,
       pickingAccept,
     ],
@@ -355,6 +399,7 @@ export function CanvasSurface({
           onViewportChange={onViewportChange}
           onPaneContextMenu={handlePaneContextMenu}
           onNodeContextMenu={handleNodeContextMenu}
+          onBeforeDelete={handleBeforeDelete}
           nodeTypes={nodeTypes}
           defaultEdgeOptions={{
             style: { stroke: "#ffffff", strokeWidth: 2.5 },

@@ -37,7 +37,7 @@ fi
 
 seed_counts="$(dc exec -T mysql mysql -uroot -pblue_whale -N -B blue_whale -e \
   "SELECT CONCAT((SELECT COUNT(*) FROM generation_model_capability WHERE enabled = 1), ':', (SELECT COUNT(*) FROM conversations), ':', (SELECT COUNT(*) FROM project_events))")"
-if [ "$seed_counts" != "2:0:0" ]; then
+if [ "$seed_counts" != "3:0:0" ]; then
   echo "unexpected baseline seed counts: $seed_counts" >&2
   exit 1
 fi

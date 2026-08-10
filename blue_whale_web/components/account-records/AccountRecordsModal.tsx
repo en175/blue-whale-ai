@@ -20,6 +20,7 @@ import type {
   RechargeRecordDto,
 } from "@/lib/api/account-records.dto";
 import { formatRelativeTime } from "@/lib/relative-time";
+import { formatCredits } from "@/lib/credits";
 
 interface AccountRecordsModalProps {
   onClose: () => void;
@@ -74,7 +75,7 @@ function RechargeRow({ record }: { record: RechargeRecordDto }) {
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="text-[14px] font-semibold text-white tabular-nums">
-          +{record.credits.toLocaleString()} 积分
+          +{formatCredits(record.credits)} 积分
         </span>
         <span className="flex items-center gap-2 text-[12px] text-white/55">
           <span className="tabular-nums">
@@ -98,7 +99,7 @@ function ConsumptionRow({ record }: { record: ConsumptionRecordDto }) {
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="text-[14px] font-semibold text-white tabular-nums">
-          -{record.credits.toLocaleString()} 积分
+          -{formatCredits(record.credits)} 积分
         </span>
         <span className="truncate text-[12px] text-white/55">
           {record.summary}

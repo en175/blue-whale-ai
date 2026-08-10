@@ -7,8 +7,8 @@
   规则：新尝试以新 stream_id 经新尝试审核门确定性重放「未放行尾部」，已放行前缀
   保留在 aborted 消息中不得重复重放；空尾部（全文已放行）时模型可附简短过渡说明
   以满足 commit 可见文本非空约束。
-- **关联工单**：[扩展回复流尝试的 abort 与重跑契约](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3GIM)
-- **下游消费**：[迁入真流式链路并落地 F1/F3 fail-closed 规则](https://gitee.com/hangzhou_xuanfu_1/blue-whale-ai/issues/IK3BG3)
+- **关联工单**：[扩展回复流尝试的 abort 与重跑契约](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3GIM)
+- **下游消费**：[迁入真流式链路并落地 F1/F3 fail-closed 规则](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IK3BG3)
 - **前置契约**：[Runtime Agent Bundle 领域契约与资源规范](2026-07-20-runtime-agent-bundle-contract.md)、[ADR-0025 证据门控流式输出](../adr/0025-evidence-gated-agent-text-streaming.md)、[ADR-0043 AgentRun 终态](../adr/0043-agent-run-terminal-outcomes.md)
 
 本文冻结 Java Product API 与 Python Agent Worker 之间 Assistant 消息内部协议的

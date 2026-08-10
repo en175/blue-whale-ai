@@ -1,8 +1,7 @@
 "use client";
 import { useEffect } from "react";
-
-export type NodeMenuAction =
-  "add-to-chat" | "save-to-assets" | "copy" | "duplicate" | "delete";
+export type { NodeMenuAction } from "../types";
+import type { NodeMenuAction } from "../types";
 
 export type NodeContextMenuProps = {
   screenX: number;

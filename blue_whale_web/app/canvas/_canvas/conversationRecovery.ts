@@ -1,4 +1,5 @@
 import type { ProjectSnapshot } from "@/lib/project-recovery";
+import type { PlanApplicationAvailability } from "@blue-whale/contracts";
 import {
   compareWireIntegers,
   isWireInteger,
@@ -12,14 +13,32 @@ import { parseAspectRatio } from "./aspectRatio";
 export function projectSnapshotToChatMessages(
   snapshot: ProjectSnapshot,
 ): ChatMessage[] {
+  const planCardByMessageId = new Map(
+    (snapshot.plan_messages ?? [])
+      .filter(isImageGeneratePlanMessage)
+      .map(
+        (plan) =>
+          [String(plan.message_id), projectPlanCard(plan, snapshot)] as const,
+      ),
+  );
   const messages = snapshot.conversation_messages
     .filter(isConversationMessage)
     .sort((left, right) => left.sequence_no - right.sequence_no)
-    .map<ChatMessage>((message) => ({
-      id: `message-${message.message_id}`,
-      type: message.role === "user" ? "user" : "agent",
-      text: message.content,
-    }));
+    .map<ChatMessage>((message) => {
+      // 后端对计划双写 conversation_messages(content_type=plan_message) 与 plan_messages（1:1）：
+      // 命中计划行时在原序列位置投影计划卡并去重，避免正文重复（IK6KQ2 审查修订）。
+      if (message.content_type === "plan_message") {
+        const card = planCardByMessageId.get(String(message.message_id));
+        if (card) {
+          return card;
+        }
+      }
+      return {
+        id: `message-${message.message_id}`,
+        type: message.role === "user" ? "user" : "agent",
+        text: message.content,
+      };
+    });
   const runIds = new Set(
     snapshot.agent_runs
       .map((run) => run.agent_run_id)
@@ -68,8 +87,11 @@ export function projectSnapshotToCanvasNodes(
   const nodes = [...persistedNodes];
   let positionIndex = 0;
   snapshot.generation_jobs.forEach((job) => {
+    const isStoryboardPreview = job.source === "storyboard_preview";
     if (
-      (job.source !== "agent_run" && job.source !== "bottom_dock") ||
+      (job.source !== "agent_run" &&
+        job.source !== "bottom_dock" &&
+        !isStoryboardPreview) ||
       (job.type !== "image" && job.type !== "video") ||
       (typeof job.job_id !== "number" && typeof job.job_id !== "string")
     ) {
@@ -99,6 +121,8 @@ export function projectSnapshotToCanvasNodes(
         };
         return;
       }
+      // 分镜节点必须先由 Canvas CAS 放置到 SceneCard 下方；此处只补资产地址，不能另建随机位置节点。
+      if (isStoryboardPreview) return;
       const { width, height } = parseAspectRatio(
         generationAspectRatio(job.input),
       );
@@ -123,6 +147,49 @@ export function projectSnapshotToCanvasNodes(
   return nodes;
 }
 
+export type SceneCardView = {
+  scene_card_id: WireInteger;
+  title: string;
+  summary: string | null;
+  content_markdown: string;
+  version: number;
+};
+
+/** SceneCard 列表投影（IK67HB/T13）：从 snapshot 派生可展示的视频场景卡，按 scene_card_id 升序。 */
+export function projectSnapshotToSceneCards(
+  snapshot: ProjectSnapshot,
+): SceneCardView[] {
+  return (snapshot.scene_cards ?? [])
+    .filter(isSceneCard)
+    .sort((left, right) =>
+      compareWireIntegers(left.scene_card_id, right.scene_card_id),
+    )
+    .map<SceneCardView>((card) => ({
+      scene_card_id: card.scene_card_id,
+      title: card.title,
+      summary: typeof card.summary === "string" ? card.summary : null,
+      content_markdown: card.content_markdown,
+      version: card.version,
+    }));
+}
+
+function isSceneCard(value: Record<string, unknown>): value is Record<
+  string,
+  unknown
+> & {
+  scene_card_id: WireInteger;
+  title: string;
+  content_markdown: string;
+  version: number;
+} {
+  return (
+    isWireInteger(value.scene_card_id) &&
+    typeof value.title === "string" &&
+    typeof value.content_markdown === "string" &&
+    typeof value.version === "number"
+  );
+}
+
 function generationAsset(
   snapshot: ProjectSnapshot,
   output: Record<string, unknown>,
@@ -135,14 +202,17 @@ function generationAsset(
 function generationOutputs(
   job: Record<string, unknown>,
 ): Record<string, unknown>[] {
-  const outputs = Array.isArray(job.outputs)
-    ? job.outputs.filter(
-        (output): output is Record<string, unknown> =>
-          !!output &&
-          typeof output === "object" &&
-          typeof (output as Record<string, unknown>).slot_index === "number",
-      )
-    : [];
+  const source = Array.isArray(job.output_slots)
+    ? job.output_slots
+    : Array.isArray(job.outputs)
+      ? job.outputs
+      : [];
+  const outputs = source.filter(
+    (output): output is Record<string, unknown> =>
+      !!output &&
+      typeof output === "object" &&
+      typeof (output as Record<string, unknown>).slot_index === "number",
+  );
   if (outputs.length > 0) {
     return [...outputs].sort(
       (left, right) => Number(left.slot_index) - Number(right.slot_index),
@@ -198,6 +268,76 @@ function isSuccessfulOutput(
   );
 }
 
+type ImageGeneratePlanMessage = Record<string, unknown> & {
+  message_id: WireInteger;
+  content_markdown: string;
+  sequence_label: string | null;
+  applied_at: string | null;
+  first_generation_job_id: WireInteger | null;
+  application_availability: PlanApplicationAvailability;
+};
+
+function isImageGeneratePlanMessage(
+  value: Record<string, unknown>,
+): value is ImageGeneratePlanMessage {
+  return (
+    value.application_kind === "image_generate" &&
+    isWireInteger(value.message_id) &&
+    (value.first_generation_job_id === null ||
+      isWireInteger(value.first_generation_job_id)) &&
+    typeof value.content_markdown === "string" &&
+    (value.sequence_label === null ||
+      typeof value.sequence_label === "string") &&
+    (value.applied_at === null || typeof value.applied_at === "string") &&
+    (value.application_availability === "available" ||
+      value.application_availability === "retryable_blocked" ||
+      value.application_availability === "requires_new_plan")
+  );
+}
+
+function projectPlanCard(
+  plan: ImageGeneratePlanMessage,
+  snapshot: ProjectSnapshot,
+): Extract<ChatMessage, { type: "plan-card" }> {
+  const thumbnailUrl = planFirstOutputThumbnailUrl(
+    snapshot,
+    plan.first_generation_job_id,
+  );
+  return {
+    id: `plan-message-${String(plan.message_id)}`,
+    type: "plan-card",
+    text: plan.content_markdown,
+    meta: "图片生成计划",
+    planMessageId: plan.message_id,
+    sequenceLabel: plan.sequence_label,
+    appliedAt: plan.applied_at,
+    applicationAvailability: plan.application_availability,
+    firstGenerationJobId: plan.first_generation_job_id,
+    ...(thumbnailUrl ? { thumbnailUrl } : {}),
+  };
+}
+
+/**
+ * 首图缩略图（IK7EP1）：取计划首图 GenerationJob 首个成功输出槽对应 Asset 的鉴权 access_url。
+ * 输出未成功或 Asset 投影未到达时返回 null（保守不显示，不伪造部分事实）。
+ */
+function planFirstOutputThumbnailUrl(
+  snapshot: ProjectSnapshot,
+  firstGenerationJobId: WireInteger | null,
+): string | null {
+  if (firstGenerationJobId === null) return null;
+  const job = snapshot.generation_jobs.find(
+    (candidate) => String(candidate.job_id) === String(firstGenerationJobId),
+  );
+  if (!job) return null;
+  for (const output of generationOutputs(job)) {
+    if (!isSuccessfulOutput(job, output)) continue;
+    const asset = generationAsset(snapshot, output);
+    if (asset) return asset.access_url;
+  }
+  return null;
+}
+
 function isConversationMessage(value: Record<string, unknown>): value is Record<
   string,
   unknown
@@ -206,10 +346,13 @@ function isConversationMessage(value: Record<string, unknown>): value is Record<
   role: "user" | "assistant";
   content: string;
   sequence_no: number;
+  content_type?: string;
 } {
   return (
     (typeof value.message_id === "number" ||
       typeof value.message_id === "string") &&
+    (value.content_type === undefined ||
+      typeof value.content_type === "string") &&
     (value.role === "user" || value.role === "assistant") &&
     typeof value.content === "string" &&
     typeof value.sequence_no === "number"

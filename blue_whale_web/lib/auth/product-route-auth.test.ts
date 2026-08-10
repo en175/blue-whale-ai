@@ -4,7 +4,11 @@ import {
   AuthenticationError,
   getAuthenticatedUser,
 } from "./authenticated-user";
-import { withAdminUser, withAuthenticatedUser, withOptionalUser } from "./product-route-auth";
+import {
+  withAdminUser,
+  withAuthenticatedUser,
+  withOptionalUser,
+} from "./product-route-auth";
 
 vi.mock("./authenticated-user", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./authenticated-user")>();
@@ -104,12 +108,16 @@ describe("withAdminUser", () => {
       isAdmin: true,
       username: "admin",
     });
-    const handler = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const handler = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
 
     const response = await withAdminUser(request, handler);
 
     expect(response.status).toBe(204);
-    expect(mockedGetAuthenticatedUser).toHaveBeenCalledWith(request, { policy: "fresh" });
+    expect(mockedGetAuthenticatedUser).toHaveBeenCalledWith(request, {
+      policy: "fresh",
+    });
     expect(handler).toHaveBeenCalledWith({
       userId: "9",
       status: "enabled",
@@ -130,7 +138,11 @@ describe("withAdminUser", () => {
     const response = await withAdminUser(request, handler);
 
     expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ code: 403, msg: "需要管理员权限", data: null });
+    expect(await response.json()).toEqual({
+      code: 403,
+      msg: "需要管理员权限",
+      data: null,
+    });
     expect(handler).not.toHaveBeenCalled();
   });
 
@@ -184,9 +196,7 @@ describe("withOptionalUser", () => {
   );
 
   it("rethrows upstream unavailability (502/503) instead of silently downgrading", async () => {
-    mockedGetAuthenticatedUser.mockRejectedValue(
-      new AuthenticationError(503),
-    );
+    mockedGetAuthenticatedUser.mockRejectedValue(new AuthenticationError(503));
     const handler = vi.fn();
 
     await expect(withOptionalUser(request, handler)).rejects.toThrow(

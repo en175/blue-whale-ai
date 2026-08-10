@@ -1,9 +1,11 @@
 "use client";
 /**
- * RechargeModal — 积分充值弹窗（三合一支付弹窗）
+ * RechargeModal — 积分充值弹窗（三合一支付弹窗，Qoder CN 定价页风格）
  *
- * 左栏：档位网格（TierGrid）
- * 右栏：支付面板（PaymentPanel）
+ * 布局（桌面）：
+ * - 中栏：套餐卡片横向多列网格（TierGrid）+ 底部支付操作条（PaymentPanel）
+ * - 右栏：下单后展开支付过程面板（PaymentStage），弹窗宽度动态加宽
+ * 移动端纵向堆叠。
  *
  * Props:
  * - onClose: 关闭回调
@@ -15,11 +17,16 @@ import { ModalShell } from "@/components/auth/ModalShell";
 import { useAuth } from "@/components/auth/AuthContext";
 import { TierGrid } from "./TierGrid";
 import { PaymentPanel } from "./PaymentPanel";
+import { PaymentStage } from "./PaymentStage";
 import { BottomSheet } from "./BottomSheet";
 import { RechargeAgreementModal } from "./RechargeAgreementModal";
 import { useRechargeFlow } from "./useRechargeFlow";
 import { useResponsive } from "./useResponsive";
-import { DESKTOP_MODAL_WIDTH } from "./constants";
+import {
+  DESKTOP_MODAL_WIDTH,
+  DESKTOP_MODAL_WIDTH_MAX,
+  PAYMENT_PANEL_WIDTH,
+} from "./constants";
 import type { RechargeTier, Shortfall } from "./types";
 
 interface RechargeModalProps {
@@ -88,6 +95,31 @@ export function RechargeModal({
     [shortfall],
   );
 
+  // 右栏开关：下单后展开支付过程面板
+  const paymentActive =
+    flow.state === "CREATING_ORDER" ||
+    flow.state === "QR_READY" ||
+    flow.state === "PAYMENT_SUCCESS" ||
+    flow.state === "PAYMENT_FAILED" ||
+    flow.state === "EXPIRED";
+
+  // 弹窗宽度随右栏展开动态加宽（含 gap-6 = 24px）
+  const modalWidth = Math.min(
+    DESKTOP_MODAL_WIDTH +
+      (paymentActive ? PAYMENT_PANEL_WIDTH + 24 : 0),
+    DESKTOP_MODAL_WIDTH_MAX,
+  );
+
+  const paymentStage = paymentActive && (
+    <PaymentStage
+      flow={flow}
+      onPollSuccess={onPollSuccess}
+      onRegenerateQR={regenerateQR}
+      onClose={handleClose}
+      onRetry={handleRetry}
+    />
+  );
+
   const inner = (
     <>
       <h2 className="text-[20px] font-semibold leading-tight mb-5 text-[var(--tc-primary,#ffffff)]">
@@ -113,27 +145,45 @@ export function RechargeModal({
         </div>
       )}
 
-      {/* 档位 + 支付：桌面双栏，移动端纵向堆叠 */}
-      <div className={isMobile ? "flex flex-col gap-4" : "flex gap-6"}>
-        <div className={isMobile ? "w-full" : "w-[340px] shrink-0"}>
+      {/* 布局：中套餐网格+操作条 / 右支付过程（移动端纵向堆叠） */}
+      {isMobile ? (
+        <div className="flex flex-col gap-4">
           <TierGrid
             selectedTierId={flow.selectedTier?.id ?? null}
             onSelectTier={handleSelectTier}
             autoSelectPredicate={autoSelectPredicate}
           />
-        </div>
-        <div className="w-[360px] shrink-0">
           <PaymentPanel
             flow={flow}
             onPaymentMethodChange={setPaymentMethod}
             onConfirmOrder={confirmOrder}
-            onPollSuccess={onPollSuccess}
-            onRegenerateQR={regenerateQR}
-            onClose={handleClose}
-            onRetry={handleRetry}
           />
+          {paymentStage}
         </div>
-      </div>
+      ) : (
+        <div className="flex gap-6 items-stretch">
+          {/* 中栏：套餐网格（单行横排，右栏展开后弹窗加宽，中栏仍够 5 列） + 底部操作条 */}
+          <div className="flex-1 min-w-0 flex flex-col gap-4">
+            <TierGrid
+              selectedTierId={flow.selectedTier?.id ?? null}
+              onSelectTier={handleSelectTier}
+              autoSelectPredicate={autoSelectPredicate}
+            />
+            <PaymentPanel
+              flow={flow}
+              onPaymentMethodChange={setPaymentMethod}
+              onConfirmOrder={confirmOrder}
+            />
+          </div>
+
+          {/* 右栏：支付过程（下单后展开） */}
+          {paymentActive && (
+            <div className="shrink-0" style={{ width: PAYMENT_PANEL_WIDTH }}>
+              {paymentStage}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 协议链接 */}
       <p className="mt-4 text-center text-[12px] text-[var(--tc-muted,rgba(255,255,255,0.4))]">
@@ -164,7 +214,7 @@ export function RechargeModal({
         <ModalShell
           ariaLabel="积分充值"
           onClose={handleClose}
-          width={DESKTOP_MODAL_WIDTH}
+          width={modalWidth}
           closeOnEscape={!agreementOpen}
         >
           {inner}

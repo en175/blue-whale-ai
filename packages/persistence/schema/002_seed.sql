@@ -1,3 +1,5 @@
+SET NAMES utf8mb4;
+
 INSERT INTO generation_model_capability (
   provider_id,
   model_id,
@@ -33,6 +35,7 @@ INSERT INTO generation_model_capability (
     NULL,
     JSON_OBJECT(
       'reference_image', TRUE,
+      'max_reference_images', 4,
       'watermark', TRUE,
       'quantity_max', 4,
       'sequential_image_generation', TRUE,
@@ -68,4 +71,21 @@ INSERT INTO generation_model_capability (
     ),
     TRUE,
     20
+  ),
+  (
+    'volcengine',
+    'MiniMax-M3',
+    'text',
+    'MiniMax-M3',
+    JSON_ARRAY(),
+    JSON_ARRAY(),
+    NULL,
+    JSON_ARRAY(),
+    '',
+    NULL,
+    '',
+    NULL,
+    JSON_OBJECT(),
+    TRUE,
+    100
   );

@@ -11,11 +11,13 @@ import {
   Settings,
   Shield,
   FileText,
+  LayoutTemplate,
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/admin", label: "仪表盘", icon: LayoutDashboard },
   { href: "/admin/tiers", label: "充值档位", icon: Layers },
+  { href: "/admin/templates", label: "模板管理", icon: LayoutTemplate },
   { href: "/admin/models", label: "模型列表", icon: Boxes },
   { href: "/admin/users", label: "用户管理", icon: Users },
   { href: "/admin/orders", label: "订单管理", icon: Receipt },

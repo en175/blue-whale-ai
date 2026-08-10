@@ -29,6 +29,9 @@ export const PUBLIC_ROUTES: ReadonlySet<string> = new Set([
   // IK6GM6 模板区：首页公开内容（标签元数据 + 卡片），游客可见，显式放行。
   "agent/templates/tags/route.ts",
   "agent/templates/page/route.ts",
+  // IK70CM 首页模型目录：generation_model_capability 只读公开产品数据（模型名/尺寸/能力，
+  // 无用户/凭据/配额），首页公开页需匿名展示真实模型（对齐此前前端硬编码模型对游客可见）。
+  "generation/models/route.ts",
 ]);
 
 /** 判断 app/api 下 route.ts 相对路径是否公开（无需登录）。 */
