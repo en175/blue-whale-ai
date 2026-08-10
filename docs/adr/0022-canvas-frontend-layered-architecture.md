@@ -1,7 +1,9 @@
 # ADR-0022：画布前端分层架构重建
 
-**状态：** 已接受（2026-07-21）
+**状态：** Partially Superseded（决策#4，2026-08-10）
 **关联：** IK2BJK（assetId spec）、IJZXW7（多模态 PRD）
+
+> **2026-08-10 决策#4 修订**：决策#4 原文假定「messages/placement/recover/nodeFromCard/useJobStatus 保留接 store」。经 IK7GWV（死代码清理）与 IK7GWW（Direct Gen 退役 + 幻影写入修复）落地，`useJobStatus`（旧单 job 轮询）、`projectReducer`（已被 Zustand store 取代）、`useCanvasProjects`（被 `useV2Projects` strangler 取代）、`projectGenerationState`、`nodeFromCard` 函数体均已删除，`CREATION_MODES` Direct Gen 死入口亦退役。现状是：**Zustand store 为唯一状态源，权威模式（backendReady）渲染只读 Snapshot/SSE 源，离线 mock 仅作后端不可达时的降级**。决策#4 的「渐进迁移」总体方向不变，但「保留接 store」的符号清单需按本修订与「连锁影响」节更新后的清单为准。分层架构 L0-L5、Zustand、NodeKind registry、注入式 engine 等核心决策（#1-3、#5-9）不受影响，继续有效。
 
 ## 决策
 
@@ -14,7 +16,7 @@
 | 1 | 媒体产物存储 | `assetId` 引用（非 url）；渲染查 `store.assets[id]` |
 | 2 | assets 填充 | canvas opaque 只存 `{nodes,edges}`（node 存 assetId）；`store.assets` 按需缓存（`getAsset` 换 src + 生成注册）；单一真相=后端 assets 表 |
 | 3 | 状态管理 | Zustand（替换 useReducer）；projectReducer action 逻辑迁入 store |
-| 4 | 现有代码 | 渐进迁移：messages/placement/recover/nodeFromCard/useJobStatus 保留接 store |
+| 4 | 现有代码 | ~~渐进迁移：messages/placement/recover/nodeFromCard/useJobStatus 保留接 store~~ **修订（2026-08-10）**：渐进迁移方向不变，但「保留接 store」清单已收敛——`useJobStatus`/`projectReducer`/`useCanvasProjects`/`projectGenerationState`/`nodeFromCard` 函数体已删除（见顶部修订说明），保留的仅 messages/placement/recover |
 | 5 | 工作流 UI | 底层就绪，UI 本轮不开（无连线/编组/Run 操作） |
 | 6 | 工作流底层 | edges/engine/group/recipe 全保留（字段 + 纯函数就绪） |
 | 7 | runEngine | 纯函数 + 单测建好；`RunCtx.generate` 留接口（mock），真实接 IJZ7Z9 留未来 |
@@ -57,8 +59,8 @@ L0  文档模型   model.ts：CanvasDoc/Node/Edge/Asset 纯类型（无 RF 依�
 
 **新增**：`_canvas/model.ts`、`_canvas/kinds.ts`、`_canvas/engine.ts`、`_canvas/store.ts`
 **改**：`_canvas/components/CanvasNodes.tsx`（nodeTypes 从 registry）、`lib/canvas.ts`（opaque 存 {nodes,edges}）、`_canvas/nodeFromCard.ts`（透传 assetId）
-**保留接 store**：`_canvas/messages.ts`、`placement.ts`、`recover.ts`、`hooks/useJobStatus.ts`
-**废弃**：`_canvas/projectReducer.ts`（action 逻辑迁 store，测试迁 store 等价测试）
+**保留接 store**：`_canvas/messages.ts`、`placement.ts`、`recover.ts`
+**已删除（2026-08-10，IK7GWV/IK7GWW 落地后）**：`_canvas/hooks/useJobStatus.ts`（旧单 job 轮询，被多 job 方案取代）、`_canvas/projectReducer.ts`（action 逻辑迁 store 后整体废弃）、`_canvas/useCanvasProjects.ts`（被 `useV2Projects` strangler 取代）、`_canvas/projectGenerationState.ts`、`nodeFromCard` 函数体（`CardMessage` 类型仍保留）
 **后端**：零改（opaque PUT 继续走 CanvasService）
 **数据**：canvas 表 15 条旧数据清表（`UPDATE canvas SET nodes_json=NULL`），schemaVersion 干净起步
 
