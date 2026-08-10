@@ -83,6 +83,34 @@ describe("TOS direct upload storage", () => {
     });
   });
 
+  it("honors an explicit keyPrefix for platform-scoped content（IK7JVE 模板媒体）", async () => {
+    const client = {
+      getPreSignedUrl: vi.fn().mockResolvedValue("https://tos.test/signed-put"),
+      headObject: vi.fn(),
+      putObjectAcl: vi.fn(),
+    };
+    const storage = createTosStorage(config, {
+      client,
+      randomUUID: () => "fixed-id",
+    });
+
+    const prepared = await storage.uploads.prepareUpload({
+      userId: "9", // 占位：keyPrefix 覆盖后 userId 不参与 key
+      type: "video",
+      mime: "video/mp4",
+      keyPrefix: "admin/templates",
+    });
+
+    expect(prepared.storageKey).toBe("admin/templates/video/fixedid.mp4");
+    expect(prepared.publicUrl).toContain("/admin/templates/video/fixedid.mp4");
+    expect(client.getPreSignedUrl).toHaveBeenCalledWith({
+      bucket: "blue-whale-test",
+      key: "admin/templates/video/fixedid.mp4",
+      method: "PUT",
+      expires: 600,
+    });
+  });
+
   it("returns false when TOS reports a missing object", async () => {
     const client = {
       getPreSignedUrl: vi.fn(),

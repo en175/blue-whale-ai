@@ -8,7 +8,7 @@
  * 图片在弹窗内本地增删与调序，保存时整体同步（入参顺序 = sort_order）。
  * 前端样式不自适应（本期明确不做）：layout 四选一，对应首页既有渲染分支。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Plus,
   Pencil,
@@ -17,6 +17,7 @@ import {
   ChevronDown,
   Image as ImageIcon,
   Film,
+  Upload,
 } from "lucide-react";
 import {
   Table,
@@ -30,6 +31,10 @@ import { Badge } from "../_components/ui/badge";
 import { Dialog } from "../_components/ui/dialog";
 import { Input } from "../_components/ui/input";
 import { Select } from "../_components/ui/select";
+import {
+  TEMPLATE_UPLOAD_ACCEPT,
+  validateTemplateUploadFile,
+} from "@/lib/uploadRules";
 import type { AdminTag, AdminTemplateCard, TemplateFormData } from "./data";
 import {
   LAYOUT_OPTIONS,
@@ -41,6 +46,7 @@ import {
   moveTemplate,
   renameTag,
   updateTemplate,
+  uploadTemplateMedia,
 } from "./data";
 
 const EMPTY_FORM: TemplateFormData = {
@@ -67,6 +73,17 @@ export default function AdminTemplatesPage() {
   const [newImageUrl, setNewImageUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // 图片上传（IK7JVE）：占位行显示进度，成功回填 URL，失败移除占位 + 提示。
+  const [uploadTasks, setUploadTasks] = useState<
+    Array<{ id: number; name: string; progress: number }>
+  >([]);
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const nextUploadId = useRef(1);
+  // 弹窗会话：每次开弹窗 +1，作废上一个会话的飞行中上传——关闭后完成的回调
+  // 直接丢弃（孤儿对象按 grilling Q4 接受），防止 URL 串到下一个表单（评审跟进）。
+  const dialogSession = useRef(0);
 
   // 删除确认
   const [deleting, setDeleting] = useState<AdminTemplateCard | null>(null);
@@ -117,7 +134,10 @@ export default function AdminTemplatesPage() {
       sort_order: cards.length,
     });
     setNewImageUrl("");
+    setUploadTasks([]);
+    setUploadMessage(null);
     setFormError(null);
+    dialogSession.current += 1;
     setDialogOpen(true);
   };
 
@@ -136,7 +156,10 @@ export default function AdminTemplatesPage() {
       })),
     });
     setNewImageUrl("");
+    setUploadTasks([]);
+    setUploadMessage(null);
     setFormError(null);
+    dialogSession.current += 1;
     setDialogOpen(true);
   };
 
@@ -233,6 +256,45 @@ export default function AdminTemplatesPage() {
       next[swap] = tmp;
       return { ...f, images: next };
     });
+  };
+
+  // ---- 图片文件上传（IK7JVE）：单文件直传，占位行进度，成功转 URL 行 ----
+
+  const handleUploadFile = async (file: File) => {
+    const validation = validateTemplateUploadFile(file);
+    if (!validation.ok) {
+      setUploadMessage(validation.reason);
+      return;
+    }
+    const session = dialogSession.current; // 捕获会话：弹窗关闭后完成的回调直接丢弃
+    const taskId = nextUploadId.current++;
+    setUploadTasks((tasks) => [
+      ...tasks,
+      { id: taskId, name: file.name, progress: 0 },
+    ]);
+    setUploadMessage(null);
+    try {
+      const url = await uploadTemplateMedia(file, validation.kind, (pct) => {
+        setUploadTasks((tasks) =>
+          tasks.map((task) =>
+            task.id === taskId ? { ...task, progress: pct } : task,
+          ),
+        );
+      });
+      if (dialogSession.current !== session) return;
+      setUploadTasks((tasks) => tasks.filter((task) => task.id !== taskId));
+      setForm((f) => ({ ...f, images: [...f.images, { image_url: url }] }));
+    } catch (e) {
+      if (dialogSession.current !== session) return;
+      setUploadTasks((tasks) => tasks.filter((task) => task.id !== taskId));
+      setUploadMessage(e instanceof Error ? e.message : "上传失败，请重试");
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) void handleUploadFile(file);
+    e.target.value = ""; // 允许重复选择同一文件
   };
 
   return (
@@ -540,6 +602,18 @@ export default function AdminTemplatesPage() {
                   </button>
                 </div>
               ))}
+              {uploadTasks.map((task) => (
+                <div key={task.id} className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate rounded-lg border border-[var(--tc-border)] bg-[var(--tc-bg-elevated)] px-3 py-1.5 text-xs text-[var(--tc-text-muted)]">
+                    {task.name} · 上传中 {Math.round(task.progress)}%
+                  </span>
+                </div>
+              ))}
+              {uploadMessage && (
+                <div className="rounded-lg border border-[var(--tc-destructive,#ef4444)]/30 bg-[var(--tc-destructive,#ef4444)]/10 px-3 py-1.5 text-xs text-[var(--tc-destructive,#ef4444)]">
+                  {uploadMessage}
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <Input
                   value={newImageUrl}
@@ -558,6 +632,22 @@ export default function AdminTemplatesPage() {
                 >
                   添加
                 </button>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadTasks.length > 0}
+                  title="选择本地图片上传"
+                  className="shrink-0 rounded-lg border border-[var(--tc-border)] px-3 py-2 text-sm text-[var(--tc-text-secondary)] transition-colors hover:bg-white/[0.06] disabled:opacity-50"
+                >
+                  <Upload className="mr-1 inline h-3.5 w-3.5" />
+                  上传图片
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={TEMPLATE_UPLOAD_ACCEPT}
+                  className="hidden"
+                  onChange={handleFileInputChange}
+                />
               </div>
             </div>
           </div>
@@ -577,10 +667,10 @@ export default function AdminTemplatesPage() {
             </button>
             <button
               onClick={() => void handleSave()}
-              disabled={saving}
+              disabled={saving || uploadTasks.length > 0}
               className="rounded-lg bg-[var(--tc-accent,#3b82f6)] px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
             >
-              {saving ? "保存中…" : "保存"}
+              {saving ? "保存中…" : uploadTasks.length > 0 ? "上传中…" : "保存"}
             </button>
           </div>
         </div>
