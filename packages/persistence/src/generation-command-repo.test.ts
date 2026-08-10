@@ -208,6 +208,17 @@ describe("generation command repo retry", () => {
         create: createSlot,
       },
       scene_card_generation_records: { update: updateRecord },
+      // IK7G9X：retry 复用原 job 预留快照 + 为 retry job 补预留行。
+      cost_reservations: {
+        findFirst: vi.fn().mockResolvedValue({
+          reserved_amount_fen: 1234n,
+          price_catalog_version: "v-pricing",
+          exchange_rate_version: "usd-7.3",
+          model_policy_version: "v-policy",
+          cost_rule_version: "v1",
+        }),
+        create: vi.fn().mockResolvedValue({}),
+      },
       command_idempotency: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
@@ -338,6 +349,17 @@ describe("generation command repo retry", () => {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
+      // IK7G9X：retry 复用原 job 预留快照 + 为 retry job 补预留行。
+      cost_reservations: {
+        findFirst: vi.fn().mockResolvedValue({
+          reserved_amount_fen: 1234n,
+          price_catalog_version: "v-pricing",
+          exchange_rate_version: "usd-7.3",
+          model_policy_version: "v-policy",
+          cost_rule_version: "v1",
+        }),
+        create: vi.fn().mockResolvedValue({}),
+      },
       project_events: {
         create: vi.fn(
           async ({ data }: { data: Record<string, unknown> }) => data,
@@ -404,6 +426,17 @@ describe("generation command repo retry", () => {
         ]),
         create: createSlot,
       },
+      // IK7G9X：retry 复用原 job 预留快照 + 为 retry job 补预留行。
+      cost_reservations: {
+        findFirst: vi.fn().mockResolvedValue({
+          reserved_amount_fen: 1234n,
+          price_catalog_version: "v-pricing",
+          exchange_rate_version: "usd-7.3",
+          model_policy_version: "v-policy",
+          cost_rule_version: "v1",
+        }),
+        create: vi.fn().mockResolvedValue({}),
+      },
       command_idempotency: { findUnique: vi.fn().mockResolvedValue(null) },
     };
     const prisma = {
@@ -455,6 +488,17 @@ describe("generation command repo retry", () => {
         findMany: vi.fn().mockResolvedValue([]),
         create: vi.fn().mockResolvedValue({}),
       },
+      // IK7G9X：retry 复用原 job 预留快照 + 为 retry job 补预留行。
+      cost_reservations: {
+        findFirst: vi.fn().mockResolvedValue({
+          reserved_amount_fen: 1234n,
+          price_catalog_version: "v-pricing",
+          exchange_rate_version: "usd-7.3",
+          model_policy_version: "v-policy",
+          cost_rule_version: "v1",
+        }),
+        create: vi.fn().mockResolvedValue({}),
+      },
       command_idempotency: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi
@@ -472,6 +516,15 @@ describe("generation command repo retry", () => {
     };
     const secondTx = {
       generation_jobs: { findFirst: vi.fn().mockResolvedValue(original) },
+      cost_reservations: {
+        findFirst: vi.fn().mockResolvedValue({
+          reserved_amount_fen: 1234n,
+          price_catalog_version: "v-pricing",
+          exchange_rate_version: "usd-7.3",
+          model_policy_version: "v-policy",
+          cost_rule_version: "v1",
+        }),
+      },
       command_idempotency: {
         findUnique: vi.fn().mockResolvedValue({
           request_hash: "hash-300",

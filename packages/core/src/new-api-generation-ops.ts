@@ -1,15 +1,34 @@
 // IK74V8：从 new-api-client.ts 拆出（≤800 行硬线）。逐块搬运，语义不变。
 // 生成面：图片生成/编辑与视频提交、任务查询。
+// IK7G9X：新增 with-receipt 变体（透出 X-Oneapi-Request-Id，供消费流水精确关联）；
+// getVideoTask 解析 TaskDto.quota（视频实扣金额来源）。
 import {NewApiError} from "./new-api-transport.js";
-import type {NewApiEnvelope, NewApiRequest} from "./new-api-transport.js";
+import type {NewApiEnvelope, NewApiRequest, NewApiRequestWithMeta} from "./new-api-transport.js";
 import type {NewApiImage, NewApiImageEditInput, NewApiImageInput, NewApiVideoInput, NewApiVideoSubmission, NewApiVideoTask} from "./new-api-types.js";
 
-export function createNewApiGenerationOps(request: NewApiRequest) {
+/** 图片生成结果 + 本次调用的 request_id（消费流水精确关联键，IK7G9X）。 */
+export interface NewApiImageReceipt {
+  images: NewApiImage[];
+  requestId: string | null;
+}
+
+export function createNewApiGenerationOps(
+  request: NewApiRequest,
+  requestWithMeta?: NewApiRequestWithMeta,
+) {
   return {
     async generateImages(
       token: string,
       input: NewApiImageInput,
     ): Promise<NewApiImage[]> {
+      const receipt = await this.generateImagesWithReceipt(token, input);
+      return receipt.images;
+    },
+
+    async generateImagesWithReceipt(
+      token: string,
+      input: NewApiImageInput,
+    ): Promise<NewApiImageReceipt> {
       const body: Record<string, unknown> = {
         model: input.model,
         prompt: input.prompt,
@@ -24,7 +43,18 @@ export function createNewApiGenerationOps(request: NewApiRequest) {
         body.sequential_image_generation_options = { max_images: input.n };
       }
 
-      const response = await request<NewApiEnvelope>(
+      if (!requestWithMeta) {
+        const response = await request<NewApiEnvelope>(
+          "/v1/images/generations",
+          {
+            method: "POST",
+            body: JSON.stringify(body),
+          },
+          token,
+        );
+        return { images: parseImageList(response.data), requestId: null };
+      }
+      const {data, requestId} = await requestWithMeta<NewApiEnvelope>(
         "/v1/images/generations",
         {
           method: "POST",
@@ -32,20 +62,21 @@ export function createNewApiGenerationOps(request: NewApiRequest) {
         },
         token,
       );
-      const data = Array.isArray(response.data) ? response.data : [];
-      return data.filter((item): item is NewApiImage => {
-        return (
-          typeof item === "object" &&
-          item !== null &&
-          typeof (item as { url?: unknown }).url === "string"
-        );
-      });
+      return { images: parseImageList(data.data), requestId };
     },
 
     async editImages(
       token: string,
       input: NewApiImageEditInput,
     ): Promise<NewApiImage[]> {
+      const receipt = await this.editImagesWithReceipt(token, input);
+      return receipt.images;
+    },
+
+    async editImagesWithReceipt(
+      token: string,
+      input: NewApiImageEditInput,
+    ): Promise<NewApiImageReceipt> {
       const body = new FormData();
       body.append("model", input.model);
       body.append("prompt", input.prompt);
@@ -75,7 +106,18 @@ export function createNewApiGenerationOps(request: NewApiRequest) {
         );
       }
 
-      const response = await request<NewApiEnvelope>(
+      if (!requestWithMeta) {
+        const response = await request<NewApiEnvelope>(
+          "/v1/images/edits",
+          {
+            method: "POST",
+            body,
+          },
+          token,
+        );
+        return { images: parseImageList(response.data), requestId: null };
+      }
+      const {data, requestId} = await requestWithMeta<NewApiEnvelope>(
         "/v1/images/edits",
         {
           method: "POST",
@@ -83,14 +125,7 @@ export function createNewApiGenerationOps(request: NewApiRequest) {
         },
         token,
       );
-      const data = Array.isArray(response.data) ? response.data : [];
-      return data.filter((item): item is NewApiImage => {
-        return (
-          typeof item === "object" &&
-          item !== null &&
-          typeof (item as { url?: unknown }).url === "string"
-        );
-      });
+      return { images: parseImageList(data.data), requestId };
     },
 
     async submitVideo(token: string, input: NewApiVideoInput): Promise<NewApiVideoSubmission> {
@@ -225,6 +260,7 @@ export function createNewApiGenerationOps(request: NewApiRequest) {
                   : "视频生成失败",
             }
           : null;
+      const quota = typeof data.quota === "number" ? data.quota : undefined;
       return {
         taskId: responseTaskId,
         status: data.status,
@@ -234,10 +270,25 @@ export function createNewApiGenerationOps(request: NewApiRequest) {
             : typeof data.result_url === "string"
               ? data.result_url
               : null,
+        // IK7G9X：TaskDto.quota —— 任务当前 quota（预扣额，结算后=实际扣费额）。
+        // 轮询成功（status 已是终态）时读到的是 new-api 结算后的真实扣费。
+        ...(quota !== undefined ? { quota } : {}),
         error,
       };
     },
 
     // ---- recharge ----
   };
+}
+
+/** 从信封 data 提取图片列表（缺 url 的元素丢弃）。generateImages/editImages 共用。 */
+function parseImageList(data: unknown): NewApiImage[] {
+  const list = Array.isArray(data) ? data : [];
+  return list.filter((item): item is NewApiImage => {
+    return (
+      typeof item === "object" &&
+      item !== null &&
+      typeof (item as { url?: unknown }).url === "string"
+    );
+  });
 }

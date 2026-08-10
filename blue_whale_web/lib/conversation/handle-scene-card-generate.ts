@@ -14,6 +14,8 @@ import type { SceneCardGenerationRepo } from "@blue-whale/persistence";
 
 import { isDecimalId } from "./handle-agent-run-commands";
 import { wireInteger } from "../wire-integer";
+import type { GenerationCostEstimator } from "../generation/cost-estimator";
+import type { CostReservationSnapshot } from "@blue-whale/core";
 
 /** SceneCard 再生成请求摘要（契约 §9 / CONTEXT L84-89）：方法 + 操作语义 + 资源路径 + body。
  *  同 CommandId 配同一摘要才重放，配不同摘要判冲突。 */
@@ -39,7 +41,11 @@ export async function handleSceneCardGenerate(
   idempotencyKey: string | null,
   body: string,
   deps: SceneCardGenerationRepo,
-  providerCredential?: string,
+  options?: {
+    providerCredential?: string;
+    /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额。 */
+    costEstimator?: GenerationCostEstimator;
+  },
 ) {
   if (!idempotencyKey || idempotencyKey.trim().length === 0) {
     return fail(PARAM_MISSING_CODE, "缺少 Idempotency-Key");
@@ -60,6 +66,17 @@ export async function handleSceneCardGenerate(
   if (parsed.data.scene_card_id !== sceneCardId)
     return fail(400, "场景卡不一致");
 
+  // IK7G9X：建预留时写真实预估金额（数量级口径；new-api 定价不可达 → 降级 0 + dev）。
+  let costReservation: CostReservationSnapshot | undefined;
+  if (options?.costEstimator) {
+    costReservation =
+      (await options.costEstimator({
+        modelId: parsed.data.parameters.model_id,
+        type: "video",
+        expectedOutputCount: 1,
+      })) ?? undefined;
+  }
+
   const result = await deps.regenerateSceneCard({
     userId,
     projectId,
@@ -72,7 +89,10 @@ export async function handleSceneCardGenerate(
     reference_mode: parsed.data.reference_mode,
     reference_assets: parsed.data.reference_assets,
     capability_snapshot_version: parsed.data.capability_snapshot_version,
-    ...(providerCredential ? { provider_credential: providerCredential } : {}),
+    ...(options?.providerCredential
+      ? { provider_credential: options.providerCredential }
+      : {}),
+    ...(costReservation ? { costReservation } : {}),
   });
   switch (result.kind) {
     case "applied":

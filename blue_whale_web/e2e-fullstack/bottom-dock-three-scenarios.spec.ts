@@ -78,11 +78,11 @@ function assertGovernanceChain(jobId: number, slotCount: number): void {
     expect(`${state}:${decision}`).toBe("decided:pass");
   }
 
-  // 成本预留：唯一行且已结算
+  // 成本预留：唯一行且已结算（status 由代码写入，统一小写 settled）
   const reservations = queryAcceptanceDb(
     `SELECT status FROM cost_reservations WHERE generation_job_id = ${jobId}`,
   );
-  expect(reservations.map((row) => row[0])).toEqual(["SETTLED"]);
+  expect(reservations.map((row) => row[0])).toEqual(["settled"]);
 
   // 关键审计动作（按 correlation_id 关联，与后端 IT 同口径）
   const actions = queryAcceptanceDb(

@@ -212,6 +212,7 @@ export async function applyImageGenerateInTransaction(
     source: "plan_apply",
     agentRunId: planMessage.agent_run_id.toString(),
     planMessageId: input.planMessageId,
+    ...(input.costReservation ? { costReservation: input.costReservation } : {}),
   });
 
   // 5. 建 receipt（uk_plan_application_receipt_message 兜底并发第二写）。

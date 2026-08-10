@@ -62,7 +62,18 @@ export {
   type NewApiLogRow,
   type NewApiLogStat,
   type NewApiPageInfo,
+  type NewApiPricingItem,
+  type NewApiPricingResult,
 } from "./new-api-client.js";
+export {
+  loadGenerationCostConfig,
+  quotaToFen,
+  buildCostVersions,
+  type GenerationCostConfig,
+  type CostReservationSnapshot,
+  type CostReservationVersions,
+} from "./generation-cost.js";
+export type { NewApiImageReceipt } from "./new-api-generation-ops.js";
 export {
   issueAccessToken,
   verifyAccessToken,
