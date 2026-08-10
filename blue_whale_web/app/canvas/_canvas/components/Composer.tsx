@@ -5,6 +5,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SmoothCorners } from "@/components/SmoothCorners";
 import { squirclePath } from "../utils";
+import type { ImageModelCapability } from "../api/generation";
+
+/** 费用倍率占位：能力表暂不含 costMultiplier，统一 1x 待后续接入。 */
+const AGENT_COST_MULTIPLIER = "1x";
 
 export function ComposerShell({ children }: { children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -67,13 +71,9 @@ export function ModelSettingsMenu({
   menuRef,
   triggerRef,
 }: {
-  model: { id: string; label: string; costMultiplier: string };
-  models: { id: string; label: string; costMultiplier: string }[];
-  onModelChange: (model: {
-    id: string;
-    label: string;
-    costMultiplier: string;
-  }) => void;
+  model: ImageModelCapability;
+  models: ImageModelCapability[];
+  onModelChange: (model: ImageModelCapability) => void;
   onClose: () => void;
   menuRef: React.RefObject<HTMLDivElement | null>;
   triggerRef: React.RefObject<HTMLButtonElement | null>;
@@ -133,10 +133,10 @@ export function ModelSettingsMenu({
           选择驱动 Agent 的模型。
         </div>
         {models.map((m) => {
-          const selected = m.id === model.id;
+          const selected = m.model_id === model.model_id;
           return (
             <button
-              key={m.id}
+              key={m.model_id}
               type="button"
               role="option"
               aria-selected={selected}
@@ -152,11 +152,11 @@ export function ModelSettingsMenu({
             >
               <span className="tc-model-tier-option__header flex w-full items-center justify-between gap-2">
                 <span className="tc-model-tier-option__label text-[13px] font-medium text-white/90">
-                  {m.label}
+                  {m.model_label}
                 </span>
                 <span
                   className="tc-model-tier-option__cost inline-flex items-center gap-1 text-[11px] text-white/45"
-                  aria-label={`消耗 ${m.costMultiplier}`}
+                  aria-label={`消耗 ${AGENT_COST_MULTIPLIER}`}
                 >
                   <span
                     className="tc-model-tier-option__cost-icon"
@@ -166,7 +166,7 @@ export function ModelSettingsMenu({
                   </span>
                   <span className="tc-model-tier-option__cost-label">消耗</span>
                   <span className="tc-model-tier-option__cost-rate">
-                    {m.costMultiplier}
+                    {AGENT_COST_MULTIPLIER}
                   </span>
                 </span>
               </span>
