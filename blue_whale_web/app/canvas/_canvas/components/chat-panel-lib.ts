@@ -64,15 +64,3 @@ export type ComposerUploadEntry = {
   url?: string;
   kind?: MediaKind;
 };
-/** Agent 对话面板模型候选（展示用 mock 档位）。 */
-export type AgentModelChoice = { id: string; label: string; costMultiplier: string };
-
-/** Agent 对话面板模型档位（IK74V6：从面板 useMemo 下沉为常量）。 */
-export const AGENT_MODELS: AgentModelChoice[] = [
-  { id: "claude-opus-4-7", label: "Claude Opus 4.7", costMultiplier: "5x" },
-  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", costMultiplier: "3x" },
-  { id: "gemini-3-5-flash", label: "Gemini 3.5 Flash", costMultiplier: "2x" },
-  { id: "qwen-3-7-max", label: "Qwen 3.7 Max", costMultiplier: "1.3x" },
-  { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", costMultiplier: "1x" },
-  { id: "gemini-3-1-flash-lite", label: "Gemini 3.1 Flash Lite", costMultiplier: "0.3x" },
-];

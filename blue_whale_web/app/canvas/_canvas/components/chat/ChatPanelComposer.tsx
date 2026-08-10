@@ -8,7 +8,8 @@ import DirectSkillTag from "@/components/DirectSkillTag";
 import { ComposerShell, ModelSettingsMenu } from "../Composer";
 import { IconPlus, IconSend } from "../../icons";
 import { UPLOAD_ACCEPT } from "@/lib/uploadRules";
-import type { ComposerUploadEntry, AgentModelChoice } from "../chat-panel-lib";
+import type { ComposerUploadEntry } from "../chat-panel-lib";
+import type { ImageModelCapability } from "../../api/generation";
 
 export interface ChatPanelComposerProps {
   composerRef: RefObject<HTMLDivElement | null>;
@@ -28,9 +29,9 @@ export interface ChatPanelComposerProps {
   onRemoveForcedSkill: () => void;
   skillPanelOpen: boolean;
   onOpenSkillPanel: () => void;
-  selectedModel: AgentModelChoice;
-  models: AgentModelChoice[];
-  onModelChange: (m: AgentModelChoice) => void;
+  selectedModel: ImageModelCapability | null;
+  models: ImageModelCapability[];
+  onModelChange: (m: ImageModelCapability) => void;
   modelSettingsOpen: boolean;
   onToggleModelSettings: () => void;
   modelSettingsMenuRef: RefObject<HTMLDivElement | null>;
@@ -227,13 +228,13 @@ export function ChatPanelComposer({
                           className="tc-model-settings-trigger tc-agent-composer-icon-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/[0.08]"
                           aria-haspopup="dialog"
                           aria-expanded={modelSettingsOpen}
-                          aria-label={`模型: ${selectedModel.label}`}
+                          aria-label={`模型: ${selectedModel?.model_label ?? "加载中…"}`}
                           title="模型"
                         >
                           <Box size={16} />
                         </button>
 
-                        {modelSettingsOpen && (
+                        {modelSettingsOpen && selectedModel && (
                           <ModelSettingsMenu
                             model={selectedModel}
                             models={models}

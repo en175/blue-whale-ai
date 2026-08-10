@@ -44,9 +44,12 @@ import {
   WELCOME_PRESETS,
   SKILL_SUMMARIZE_PROMPT,
   mentionFailuresOf,
-  AGENT_MODELS,
   type ComposerUploadEntry,
 } from "./chat-panel-lib";
+import {
+  getTextModels,
+  type ImageModelCapability,
+} from "../api/generation";
 import { useComposerUploads } from "./use-composer-uploads";
 import { ChatPanelComposer } from "./chat/ChatPanelComposer";
 import { ChatPanelMessageStream } from "./chat/ChatPanelMessageStream";
@@ -166,8 +169,28 @@ export function AgentChatPanel({
   const { applyingPlanIds, planAvailabilityOverrides, handleApplyPlan } =
     usePlanApply({ messages, onApplyPlanMessage });
 
-  const [selectedModel, setSelectedModel] = useState(AGENT_MODELS[3]);
+  const [agentModels, setAgentModels] = useState<ImageModelCapability[]>([]);
+  const [selectedModel, setSelectedModel] = useState<ImageModelCapability | null>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
+
+  // 模型列表从能力表获取（IK7O8S：替代硬编码 AGENT_MODELS，对齐首页 getTextModels 方式）。
+  useEffect(() => {
+    let cancelled = false;
+    getTextModels()
+      .then((list) => {
+        if (cancelled || list.length === 0) return;
+        setAgentModels(list);
+        // 仅在首次加载或当前选中模型在列表中不存在时设默认值
+        setSelectedModel((prev) => {
+          if (prev && list.some((m) => m.model_id === prev.model_id)) return prev;
+          return list[0];
+        });
+      })
+      .catch((err) => console.error("getTextModels failed", err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -754,7 +777,7 @@ export function AgentChatPanel({
               skillPanelOpen={skillPanelOpen}
               onOpenSkillPanel={() => setSkillPanelOpen(true)}
               selectedModel={selectedModel}
-              models={AGENT_MODELS}
+              models={agentModels}
               onModelChange={setSelectedModel}
               modelSettingsOpen={modelSettingsOpen}
               onToggleModelSettings={() => setModelSettingsOpen((v) => !v)}
