@@ -30,7 +30,7 @@ function authoritativeCard(over: Partial<CardMsg> = {}): CardMsg {
   };
 }
 
-/** DEMO/mock 成功卡：buildMockReplyForMode 产出，无 generationJobId/assetId。 */
+/** DEMO/mock 成功卡：buildMockReply 产出，无 generationJobId/assetId。 */
 function demoCard(over: Partial<CardMsg> = {}): CardMsg {
   return {
     id: 100,

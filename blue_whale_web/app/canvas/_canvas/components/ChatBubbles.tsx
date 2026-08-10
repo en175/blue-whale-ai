@@ -156,7 +156,7 @@ export function AgentCard({
   // 权威卡（后端 GenerationJob 投影，conversationRecovery 恒带 generationJobId）的 normal
   // 成功态画布节点由后端 InitialPlacementStatus 单轨自动放置；用户移除节点后可从对话卡
   // 重新放置同一 Asset 回画布（IK7GS6，接替 IK7GS4 的禁用态），幂等不重复建节点。
-  // DEMO/mock 卡（buildMockReplyForMode 产出，无 generationJobId）走手动应用直插，行为不变。
+  // DEMO/mock 卡（buildMockReply 产出，无 generationJobId）走手动应用直插，行为不变。
   const authoritative = msg.generationJobId !== undefined;
   const reapplyable = authoritative && status === "normal";
   const ctaLabel = busy
