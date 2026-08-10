@@ -4,7 +4,7 @@
 // 参数状态由常驻的 AgentComposer 持有，避免 tab 切换时重置用户选择。
 // 本组件仅保留 dropdown 的局部展示状态。
 import { useRef, useState, type RefObject } from "react";
-import { ArrowRight, ArrowUp, ChevronDown, Clock, Plus, RefreshCw, Sparkle, X } from "lucide-react";
+import { ArrowUp, ChevronDown, Clock, Plus, RefreshCw, Sparkle, X } from "lucide-react";
 import PromptEditor, { type PromptEditorHandle } from "../prompt/PromptEditor";
 import { useClickOutsideClose } from "./useClickOutsideClose";
 import type { ImageModelCapability } from "@/app/canvas/_canvas/api/generation";
@@ -25,6 +25,10 @@ export interface VideoTabPanelProps {
   dropClass: string;
   /** 上传文件 input（父组件持有，面板触发 click）。 */
   fileInputRef: RefObject<HTMLInputElement | null>;
+  /** 替换素材（3.5）：记录目标 id 后唤起文件选择器。 */
+  onReplaceMedia: (id: string) => void;
+  /** 素材上传上限（3.2）：当前模型 max_reference_images；达上限后上传入口置灰。 */
+  maxReferenceImages: number;
   videoModels: ImageModelCapability[];
   selectedModel: ImageModelCapability | null;
   setSelectedModel: (model: ImageModelCapability) => void;
@@ -49,6 +53,8 @@ export function VideoTabPanel({
   onGenerate,
   dropClass,
   fileInputRef,
+  onReplaceMedia,
+  maxReferenceImages,
   videoModels,
   selectedModel,
   setSelectedModel,
@@ -78,6 +84,14 @@ export function VideoTabPanel({
   useClickOutsideClose(aspectRatioContainerRef, aspectRatioOpen, () => setAspectRatioOpen(false));
   useClickOutsideClose(durationContainerRef, durationOpen, () => setDurationOpen(false));
 
+  // IK74TX 3.2：达上限后所有上传入口置灰。
+  const atLimit = mediaList.length >= maxReferenceImages;
+  // IK74TX 2.2：时长可选范围跟随当前模型 supported_durations，未加载时回退默认。
+  const durations = selectedModel?.supported_durations;
+  const durationMin = durations?.min ?? 4;
+  const durationMax = durations?.max ?? 15;
+  const durationStep = durations?.step ?? 1;
+
   return (
             // AI 视频 Tab layout
             <div className="flex flex-col h-full min-h-0">
@@ -91,7 +105,7 @@ export function VideoTabPanel({
                           <div
                             key={item.id}
                             className="mediaListItem group/card relative flex flex-col items-center shrink-0 cursor-pointer transition-opacity duration-150 hover:opacity-85 w-14"
-                            title={`点击引用 @${item.name}`}
+                            title={item.name}
                           >
                             <div className="mediaListThumbWrapper relative rounded-md object-cover block border border-white/[0.08] w-[52px] h-[52px]">
                               <img
@@ -107,6 +121,7 @@ export function VideoTabPanel({
                               )}
                               <button
                                 type="button"
+                                onClick={() => onReplaceMedia(item.id)}
                                 className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center rounded-full bg-black/60 border border-white/20 text-white cursor-pointer z-[2] opacity-0 transition-all duration-150 ease-out group-hover/card:opacity-100 hover:bg-black/80 hover:scale-105 h-5 w-5"
                                 aria-label="替换"
                               >
@@ -130,7 +145,13 @@ export function VideoTabPanel({
                           <button
                             type="button"
                             onClick={() => fileInputRef.current?.click()}
-                            className="rounded-lg text-white/30 bg-white/[0.025] cursor-pointer transition-all duration-150 hover:text-white/50 hover:bg-white/[0.05] w-[52px] h-[52px] flex items-center justify-center"
+                            disabled={atLimit}
+                            title={atLimit ? "已达上传上限" : undefined}
+                            className={`rounded-lg w-[52px] h-[52px] flex items-center justify-center transition-all duration-150 ${
+                              atLimit
+                                ? "text-white/20 bg-white/[0.02] cursor-not-allowed"
+                                : "text-white/30 bg-white/[0.025] cursor-pointer hover:text-white/50 hover:bg-white/[0.05]"
+                            }`}
                             aria-label="上传参考"
                           >
                             <Plus width={12} height={12} />
@@ -144,7 +165,13 @@ export function VideoTabPanel({
                         <button
                           type="button"
                           onClick={() => fileInputRef.current?.click()}
-                          className="shrink-0 w-[88px] h-[88px] mt-4 ml-4 flex flex-col items-center justify-center gap-1 border-none rounded-lg text-white/30 bg-white/[0.025] cursor-pointer transition-all duration-150 self-start p-0 hover:text-white/50 hover:bg-white/[0.05]"
+                          disabled={atLimit}
+                          title={atLimit ? "已达上传上限" : undefined}
+                          className={`shrink-0 w-[88px] h-[88px] mt-4 ml-4 flex flex-col items-center justify-center gap-1 border-none rounded-lg bg-white/[0.025] transition-all duration-150 self-start p-0 ${
+                            atLimit
+                              ? "text-white/20 cursor-not-allowed"
+                              : "text-white/30 cursor-pointer hover:text-white/50 hover:bg-white/[0.05]"
+                          }`}
                           aria-label="上传参考"
                         >
                           <Plus width={20} height={20} className="opacity-80" />
@@ -158,9 +185,10 @@ export function VideoTabPanel({
                         ref={editorRef}
                         value={value ?? ""}
                         onChange={onChange}
-                        placeholder={`通过直接控制提示词快速生成单段片段。\n上传 1–5 张参考图或视频并用 @ 引用以创建互动。例如：用 @Image 1 作首帧、@Image 2 作尾帧，让他们像 @Video 1 那样跳舞。`}
+                        placeholder={`通过直接控制提示词快速生成单段片段。\n上传 1–5 张参考图或视频；首尾帧模式可上传首帧与尾帧参考。`}
                         className="flex-1"
                         onFocusChange={onFocusChange}
+                        onSend={onGenerate}
                       />
                       <ClearPromptButton
                         visible={Boolean((value ?? "").trim())}
@@ -210,6 +238,48 @@ export function VideoTabPanel({
                                   aria-selected={selected}
                                   onClick={() => {
                                     setSelectedModel(model);
+                                    // IK74TX 2.3：切换模型，不兼容的宽高比/分辨率/时长重置为新模型默认值。
+                                    if (
+                                      !model.supported_aspect_ratios.includes(
+                                        aspectRatio.id,
+                                      )
+                                    ) {
+                                      const def =
+                                        VIDEO_ASPECT_RATIOS.find(
+                                          (r) =>
+                                            r.id === model.default_aspect_ratio,
+                                        ) ?? VIDEO_ASPECT_RATIOS[0];
+                                      setAspectRatio(def);
+                                    }
+                                    if (
+                                      !model.supported_sizes.some(
+                                        (s) => s.id === resolution.id,
+                                      )
+                                    ) {
+                                      const def =
+                                        model.supported_sizes.find(
+                                          (s) => s.id === model.default_size,
+                                        ) ?? model.supported_sizes[0];
+                                      if (def) {
+                                        setResolution({
+                                          id: def.id,
+                                          label: def.label,
+                                        });
+                                      }
+                                    }
+                                    const dur = model.supported_durations;
+                                    if (
+                                      dur &&
+                                      (videoDuration < dur.min ||
+                                        videoDuration > dur.max)
+                                    ) {
+                                      setVideoDuration(
+                                        Math.min(
+                                          Math.max(videoDuration, dur.min),
+                                          dur.max,
+                                        ),
+                                      );
+                                    }
                                     setVideoModelOpen(false);
                                   }}
                                   className={`flex items-center gap-2 w-full text-left text-[13px] font-medium py-2 px-3 rounded-md cursor-pointer border-none transition-all duration-150 whitespace-nowrap hover:bg-white/[0.08] hover:text-white justify-between ${
@@ -418,13 +488,13 @@ export function VideoTabPanel({
                             </span>
                             <div className="flex items-center gap-2 w-full">
                               <span className="text-[10px] text-white/[0.35] shrink-0 tabular-nums">
-                                4s
+                                {durationMin}s
                               </span>
                               <input
                                 type="range"
-                                min="4"
-                                max="15"
-                                step="1"
+                                min={durationMin}
+                                max={durationMax}
+                                step={durationStep}
                                 value={videoDuration}
                                 aria-label="时长"
                                 onChange={(e) =>
@@ -433,41 +503,13 @@ export function VideoTabPanel({
                                 className="flex-1 h-1 appearance-none rounded-[2px] bg-white/[0.12] cursor-pointer outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-[0_1px_4px_rgba(0,0,0,0.3)] [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:duration-[120ms] [&::-webkit-slider-thumb]:ease-out [&:hover::-webkit-slider-thumb]:scale-[1.2] [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:shadow-[0_1px_4px_rgba(0,0,0,0.3)] [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-[2px] [&::-moz-range-track]:bg-white/[0.12]"
                               />
                               <span className="text-[10px] text-white/[0.35] shrink-0 tabular-nums">
-                                15s
+                                {durationMax}s
                               </span>
                             </div>
-                            <button
-                              type="button"
-                              className="flex items-center gap-1.5 w-full border-t border-white/[0.06] pt-1.5 pb-0.5 text-left whitespace-nowrap mt-0.5 text-[11px] leading-[16px] text-white/[0.35] bg-transparent border-none cursor-pointer transition-colors duration-150 hover:text-white/[0.85]"
-                            >
-                              <span>需要更长时长？打开 Agent V2</span>
-                              <ArrowRight width={11} height={11} />
-                            </button>
                           </div>
                         )}
                       </div>
 
-                      {/* @ 提及 */}
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 h-8 text-[13px] font-medium text-white/45 px-3 rounded-lg bg-transparent border border-white/[0.06] cursor-pointer transition-all duration-150 whitespace-nowrap hover:text-white/70 hover:bg-white/[0.05]"
-                        aria-label="提及"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <circle cx="12" cy="12" r="4"></circle>
-                          <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"></path>
-                        </svg>
-                      </button>
                     </div>
 
                     <div className="flex items-center gap-3">
@@ -495,7 +537,12 @@ export function VideoTabPanel({
                       {/* Generate button */}
                       <button
                         type="button"
-                        className="flex items-center justify-center rounded-lg transition-all duration-200 p-0 border-none shrink-0 w-8 h-8 bg-white text-black cursor-pointer shadow-[0_2px_8px_rgba(255,255,255,0.1)] hover:bg-[#f0f0f0] hover:scale-105 hover:-translate-y-px hover:shadow-[0_4px_16px_rgba(255,255,255,0.15)] active:scale-95"
+                        disabled={!Boolean((value ?? "").trim()) && mediaList.length === 0}
+                        className={`flex items-center justify-center rounded-lg transition-all duration-200 p-0 border-none shrink-0 w-8 h-8 ${
+                          !Boolean((value ?? "").trim()) && mediaList.length === 0
+                            ? "bg-white/20 text-black/40 cursor-not-allowed shadow-none"
+                            : "bg-white text-black cursor-pointer shadow-[0_2px_8px_rgba(255,255,255,0.1)] hover:bg-[#f0f0f0] hover:scale-105 hover:-translate-y-px hover:shadow-[0_4px_16px_rgba(255,255,255,0.15)] active:scale-95"
+                        }`}
                         aria-label="生成"
                         onClick={onGenerate}
                       >

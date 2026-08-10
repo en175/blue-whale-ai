@@ -4,7 +4,7 @@
 // 参数状态由常驻的 AgentComposer 持有，避免 tab 切换时重置用户选择。
 // 本组件仅保留 dropdown 的局部展示状态。
 import { useRef, useState, type RefObject } from "react";
-import { ArrowUp, ChevronDown, Plus, Sparkle, X } from "lucide-react";
+import { ArrowUp, ChevronDown, Plus, RefreshCw, Sparkle, X } from "lucide-react";
 import PromptEditor, { type PromptEditorHandle } from "../prompt/PromptEditor";
 import { useClickOutsideClose } from "./useClickOutsideClose";
 import {
@@ -36,6 +36,10 @@ export interface ImageTabPanelProps {
   dropClass: string;
   /** 上传文件 input（父组件持有，面板触发 click）。 */
   fileInputRef: RefObject<HTMLInputElement | null>;
+  /** 替换素材（3.5）：记录目标 id 后唤起文件选择器。 */
+  onReplaceMedia: (id: string) => void;
+  /** 素材上传上限（3.2）：当前模型 max_reference_images；达上限后上传入口置灰。 */
+  maxReferenceImages: number;
   imageModels: ImageModelCapability[];
   selectedImageModel: ImageModelCapability | null;
   setSelectedImageModel: (model: ImageModelCapability) => void;
@@ -60,6 +64,8 @@ export function ImageTabPanel({
   onGenerate,
   dropClass,
   fileInputRef,
+  onReplaceMedia,
+  maxReferenceImages,
   imageModels,
   selectedImageModel,
   setSelectedImageModel,
@@ -78,6 +84,9 @@ export function ImageTabPanel({
   useClickOutsideClose(imageModelContainerRef, imageModelOpen, () => setImageModelOpen(false));
   useClickOutsideClose(imageAspectRatioContainerRef, imageAspectRatioOpen, () => setImageAspectRatioOpen(false));
   useClickOutsideClose(imageResolutionContainerRef, imageResolutionOpen, () => setImageResolutionOpen(false));
+
+  // IK74TX 3.2：达上限后所有上传入口置灰。
+  const atLimit = mediaList.length >= maxReferenceImages;
 
   return (
             // AI 图片 Tab layout
@@ -99,6 +108,14 @@ export function ImageTabPanel({
                               draggable={false}
                               src={item.src}
                             />
+                            <button
+                              type="button"
+                              onClick={() => onReplaceMedia(item.id)}
+                              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center rounded-full bg-black/60 border border-white/20 text-white cursor-pointer z-[2] opacity-0 transition-all duration-150 ease-out group-hover/card:opacity-100 hover:bg-black/80 hover:scale-105 h-5 w-5"
+                              aria-label="替换"
+                            >
+                              <RefreshCw width={11} height={11} />
+                            </button>
                           </div>
                           <span className="mt-[3px] text-[10px] text-white/40 whitespace-nowrap overflow-hidden text-ellipsis max-w-[56px] text-center leading-[1.3]">
                             {item.name}
@@ -117,7 +134,13 @@ export function ImageTabPanel({
                         <button
                           type="button"
                           onClick={() => fileInputRef.current?.click()}
-                          className="w-[52px] h-[52px] flex items-center justify-center border border-dashed border-white/[0.12] rounded-md text-white/30 bg-transparent cursor-pointer transition-all duration-150 p-0 hover:text-white/70 hover:border-white/25 hover:bg-white/[0.04]"
+                          disabled={atLimit}
+                          title={atLimit ? "已达上传上限" : undefined}
+                          className={`w-[52px] h-[52px] flex items-center justify-center border border-dashed border-white/[0.12] rounded-md bg-transparent transition-all duration-150 p-0 ${
+                            atLimit
+                              ? "text-white/20 cursor-not-allowed"
+                              : "text-white/30 cursor-pointer hover:text-white/70 hover:border-white/25 hover:bg-white/[0.04]"
+                          }`}
                           aria-label="添加更多图片"
                         >
                           <Plus width={12} height={12} />
@@ -132,7 +155,13 @@ export function ImageTabPanel({
                       <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
-                        className="shrink-0 w-[88px] h-[88px] mt-4 ml-4 flex flex-col items-center justify-center gap-1 border-none rounded-lg text-white/30 bg-white/[0.025] cursor-pointer transition-all duration-150 self-start p-0 hover:text-white/50 hover:bg-white/[0.05]"
+                        disabled={atLimit}
+                        title={atLimit ? "已达上传上限" : undefined}
+                        className={`shrink-0 w-[88px] h-[88px] mt-4 ml-4 flex flex-col items-center justify-center gap-1 border-none rounded-lg bg-white/[0.025] transition-all duration-150 self-start p-0 ${
+                          atLimit
+                            ? "text-white/20 cursor-not-allowed"
+                            : "text-white/30 cursor-pointer hover:text-white/50 hover:bg-white/[0.05]"
+                        }`}
                         aria-label="上传参考图片"
                       >
                         <Plus width={20} height={20} className="opacity-80" />
@@ -151,6 +180,7 @@ export function ImageTabPanel({
                       placeholder={`从文字与参考图生成 AI 图片。\n描述你想生成的图片，已上传的参考将引导风格与细节。`}
                       className="flex-1"
                       onFocusChange={onFocusChange}
+                      onSend={onGenerate}
                     />
                     <ClearPromptButton
                       visible={Boolean((value ?? "").trim())}
@@ -207,6 +237,17 @@ export function ImageTabPanel({
                                       setImageResolution(
                                         pickDefaultSize(model) ?? null,
                                       );
+                                    }
+                                    // IK74TX 2.3：宽高比不兼容重置为模型默认。
+                                    if (
+                                      !model.supported_aspect_ratios.includes(
+                                        imageAspectRatio.id,
+                                      )
+                                    ) {
+                                      const def = IMAGE_ASPECT_RATIOS.find(
+                                        (r) => r.id === model.default_aspect_ratio,
+                                      );
+                                      if (def) setImageAspectRatio(def);
                                     }
                                     setImageModelOpen(false);
                                   }}
@@ -357,7 +398,12 @@ export function ImageTabPanel({
                       {/* Generate button */}
                       <button
                         type="button"
-                        className="flex items-center justify-center rounded-lg transition-all duration-200 p-0 border-none shrink-0 w-8 h-8 bg-white text-black cursor-pointer shadow-[0_2px_8px_rgba(255,255,255,0.1)] hover:bg-[#f0f0f0] hover:scale-105 hover:-translate-y-px hover:shadow-[0_4px_16px_rgba(255,255,255,0.15)] active:scale-95"
+                        disabled={!Boolean((value ?? "").trim()) && mediaList.length === 0}
+                        className={`flex items-center justify-center rounded-lg transition-all duration-200 p-0 border-none shrink-0 w-8 h-8 ${
+                          !Boolean((value ?? "").trim()) && mediaList.length === 0
+                            ? "bg-white/20 text-black/40 cursor-not-allowed shadow-none"
+                            : "bg-white text-black cursor-pointer shadow-[0_2px_8px_rgba(255,255,255,0.1)] hover:bg-[#f0f0f0] hover:scale-105 hover:-translate-y-px hover:shadow-[0_4px_16px_rgba(255,255,255,0.15)] active:scale-95"
+                        }`}
                         aria-label="生成"
                         onClick={onGenerate}
                       >
