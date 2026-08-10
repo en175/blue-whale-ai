@@ -1,7 +1,7 @@
 # BLUE WHALE API 官网与文档站实施计划
 
 - **日期**：2026-08-10
-- **状态**：待确认实施拓扑后执行
+- **状态**：已确认 V1 范围，实施中
 - **设计依据**：[官网与文档站设计](2026-08-10-bluewhale-api-website-design.md)
 - **实际应用仓**：\`E:\\IDEA_Programme\\new\\blue-whale-api\`
 
@@ -25,17 +25,17 @@
 
 ## 2. 成功标准与非目标
 
-完成后的 BLUE WHALE 域名必须交付中文优先的官网和公开文档站。访客可从官网进入文档或既有控制台，并能在文档中理解“提交异步任务 → 获得 \`task_id\` → 轮询或 Webhook → 下载结果”的完整接入路径。
+完成后的 BLUE WHALE 域名必须交付中文优先的官网和公开文档站。访客可从官网进入文档或既有控制台，并能在文档中理解“提交异步任务 → 获得 \`task_id\` → 查询任务状态”的最小接入路径。
 
 公开内容只允许来自已批准的公开视频 API 契约：
 
 - 唯一对外模型：\`seedance-2.0\`；
-- 已批准的视频生成能力、参数、状态、错误、限流、Webhook 与结果下载规则；
+- 已批准的视频生成能力、参数、状态、错误和限流规则；
 - 已确认的控制台、Python SDK、JavaScript SDK 和商务合作入口。
 
-下列内容不得进入门户源码、静态产物、SEO 元数据、站点地图、搜索索引或可访问路由：通用 AI 网关定位、其他模型、Chat、Completions、Embeddings、Images、独立 Audio API、Realtime、Management API、价格、充值、免费额度、余额、内部渠道信息、上游签名 URL 或密钥。文档仅可保留“费用以官方公告为准”的中性说明。
+下列内容不得进入门户源码、静态产物、SEO 元数据、站点地图、搜索索引或可访问路由：通用 AI 网关定位、其他模型、Chat、Completions、Embeddings、Images、独立 Audio API、Realtime、Management API、价格、充值、免费额度、余额、内部渠道信息、上游签名 URL 或密钥。V1 也不得承诺客户 Webhook、幂等提交、超时安全重试或独立下载接口。文档仅可保留“费用以官方公告为准”的中性说明。
 
-本计划不重新实现注册、登录、控制台、API Key 生命周期、SDK、计费或网关业务逻辑。若网关尚未具备幂等提交、Webhook 签名和安全结果 URL 所需语义，门户不得用文案假定它们已存在。
+本计划不重新实现注册、登录、控制台、API Key 生命周期、SDK、计费或网关业务逻辑。公开发布前仍须把提交、查询的请求/响应 JSON、状态枚举、错误码和鉴权方式冻结为小型 V1 契约；门户不得用旧的全量网关 OpenAPI、内部任务 DTO 或未经确认的字段补写事实。
 
 ## 3. 目标目录与职责
 
@@ -73,17 +73,17 @@ E:\\IDEA_Programme\\new\\blue-whale-api\\web\\bluewhale-portal\\
 
 1. 在 \`blue-whale-api\` 依照其 \`CLAUDE.md\` 创建 task worktree；确认 \`git status --short\` 为空。
 2. 记录 \`web/default/\`、\`web/api-docs/\` 的基线提交和关键页面截图，作为受保护面未被改动的证据。
-3. 从网关负责人取得版本化、已批准的 \`public-video-api.openapi.yaml\`，将其放入 \`web/bluewhale-portal/contract/\`。契约必须标明版本、负责人、批准状态、生效时间，以及公开 \`base_url\`、模型、操作、参数、状态、错误、限流、控制台/SDK 链接、Webhook 和下载语义。
-4. 若契约未包含以下任一项，停止在相应内容页编写具体事实，并请网关负责人补齐：POST 幂等键与保留期、网络超时后的重试规则、Webhook 地址配置方式、签名原文与算法、时间戳和重放窗口、密钥轮换、ACK 条件、重试策略、事件 ID 去重方式、下载 URL 的有效期。
+3. 从网关负责人取得版本化、已批准的 \`public-video-api.openapi.yaml\`，将其放入 \`web/bluewhale-portal/contract/\`。V1 契约只允许 \`seedance-2.0\` 的提交和查询操作，并必须标明版本、负责人、批准状态、生效时间、公开 \`base_url\`、鉴权、模型、请求/响应字段、状态、错误、限流和控制台/SDK 链接。
+4. 若契约未包含请求/响应 JSON、状态枚举、错误码、鉴权或公开链接中的任一项，停止在相应 API 页面编写具体事实，并请网关负责人补齐；不得以现有内部 \`TaskDto\`、生成文档或上游透传字段作为替代。
 
 验证：新 worktree 只有新增门户目录；受保护应用的文件哈希和基线截图未变化；契约通过 OpenAPI 语法校验且批准字段完整。
 
 ### 阶段 1：先写公开面与契约白名单测试
 
 1. 在 \`web/bluewhale-portal/package.json\` 定义 \`dev\`、\`build\`、\`typecheck\`、\`format:check\`、\`test\`、\`test:e2e\`、\`validate:contract\` 和 \`check:public-surface\` 脚本。
-2. 新建 \`tests/contract/public-contract.test.ts\`：先断言契约只含 \`seedance-2.0\`，且只含经批准的视频提交、查询、Webhook/结果相关公开操作；任何管理或非视频操作都必须使测试失败。
+2. 新建 \`tests/contract/public-contract.test.ts\`：先断言契约只含 \`seedance-2.0\`，且只含经批准的视频提交与查询操作；任何管理、非视频、Webhook、独立下载或其他模型操作都必须使测试失败。
 3. 新建 \`tests/unit/public-copy.test.ts\`：先断言站点文案和生成出的元数据不含禁用模型、通用网关话术、价格/额度词和管理 API 词。
-4. 实现 \`scripts/validate-public-contract.ts\`，读取契约并校验上述 allowlist、版本/批准字段、模型 ID、外链和 Webhook 安全字段；不通过则阻断构建。
+4. 实现 \`scripts/validate-public-contract.ts\`，读取契约并校验上述 allowlist、版本/批准字段、模型 ID、请求/响应字段与外链；不通过则阻断构建。
 5. 实现 \`scripts/check-public-surface.ts\`，扫描 \`content/\`、\`src/\`、构建后的页面清单、站点地图与搜索索引；它必须拒绝未批准页面、操作和红线文案，同时允许必要的受保护许可证头部仅存在于既有未改文件中。
 
 验证：在未放入批准契约或故意加入一个管理路径时，\`bun run validate:contract\` 与对应测试失败；恢复白名单后通过。
@@ -91,7 +91,7 @@ E:\\IDEA_Programme\\new\\blue-whale-api\\web\\bluewhale-portal\\
 ### 阶段 2：搭建门户壳、语言与安全配置
 
 1. 新建 \`src/app/layout.tsx\`、\`src/app/[lang]/layout.tsx\`、\`src/app/[lang]/(marketing)/page.tsx\` 和 \`src/app/[lang]/docs/[[...slug]]/page.tsx\`；沿用 Fumadocs 的内容源，但只挂载门户自身的 \`content/docs/\`。
-2. 在 \`src/lib/public-contract.ts\` 中从 \`contract/public-video-api.openapi.yaml\` 读取并类型化模型展示名、参数表、请求/响应字段、状态、文档示例、限流和公共链接；页面组件不得自行硬编码另一套 API 事实。
+2. 在 \`src/lib/public-contract.ts\` 中从 \`contract/public-video-api.openapi.yaml\` 读取并类型化模型展示名、参数表、提交/查询请求与响应字段、状态、文档示例、限流和公共链接；页面组件不得自行硬编码另一套 API 事实。
 3. 在 \`src/lib/site-config.ts\` 只导出契约批准的正式域名、控制台、SDK 与商务链接；使用构建时校验，拒绝裸 IP、HTTP 正式链接、内部域名和未批准跳转。
 4. 使用 \`[lang]\` 路由保留语言框架。完成所有中文内容；非中文路由使用明确的中文回退和可工作的语言切换，不能展示空白页或未翻译的内部键。
 5. 设置 \`robots.ts\`、\`sitemap.ts\`、\`metadata\` 与安全响应头，只列出门户路由；禁止索引任何非白名单路径。
@@ -102,10 +102,10 @@ E:\\IDEA_Programme\\new\\blue-whale-api\\web\\bluewhale-portal\\
 
 1. 新建 \`src/components/marketing/site-header.tsx\`、\`hero.tsx\`、\`capability-grid.tsx\`、\`model-capability.tsx\`、\`quickstart.tsx\`、\`developer-entry.tsx\`、\`business-entry.tsx\` 和 \`site-footer.tsx\`。
 2. Header 固定提供“视频生成、文档、控制台、主题、语言”入口；所有外链只来自 \`site-config.ts\`。
-3. Hero 以“一句话，生成专业级视频”为核心，显示 \`seedance-2.0\`、异步任务和 Webhook；两个 CTA 分别进入控制台与文档。样片默认静音、可暂停，并在 \`prefers-reduced-motion\` 时只显示静态首帧与等价文字。
-4. 能力区只表达文生视频、图生视频、已经由契约声明的控制能力和异步/Webhook；“视频生成产生的音频”只能在契约明确声明时出现，绝不形成独立 Audio API。
+3. Hero 以“一句话，生成专业级视频”为核心，显示 \`seedance-2.0\` 与异步任务；两个 CTA 分别进入控制台与文档。样片默认静音、可暂停，并在 \`prefers-reduced-motion\` 时只显示静态首帧与等价文字。
+4. 能力区只表达文生视频、图生视频、已经由契约声明的控制能力和异步查询；“视频生成产生的音频”只能在契约明确声明时出现，绝不形成独立 Audio API。
 5. 模型区使用单模型卡与参数矩阵，逐项渲染契约内的分辨率、时长、比例、输入、输出和默认值；不得制作价格卡、套餐或其他模型墙。
-6. 快速上手区从契约生成“提交、查询、下载”三段 curl，示例只使用脱敏值 \`sk-xxx\`，提示 Key 仅在服务端保管。
+6. 快速上手区从契约生成“提交、查询”两段 curl，示例只使用脱敏值 \`sk-xxx\`，提示 Key 仅在服务端保管。
 7. 开发者区只链接既有控制台、Python/JS SDK 和文档；商务区只链接已批准的合作入口；页脚显示经法务确认的“杭州玄海科技有限公司”主体信息，不添加未验证承诺。
 
 验证：\`tests/e2e/marketing.spec.ts\` 在桌面和移动视口检查导航、两个 CTA、参数表、三段示例、静音/减少动画降级和页脚；截图基线由产品审核，且未出现红线内容。
@@ -118,25 +118,20 @@ E:\\IDEA_Programme\\new\\blue-whale-api\\web\\bluewhale-portal\\
    快速开始
    认证与 API Key
    模型 / Seedance 2.0
-   异步任务概览
    提交视频生成任务
    查询任务
-   Webhook
-   结果下载
    错误码与限流
    费用说明
    SDK
    FAQ
    \`\`\`
 
-2. 在 \`quickstart.mdx\` 串联注册/创建 Key 的既有控制台入口、服务端提交、\`task_id\`、轮询或 Webhook、结果下载；不复刻控制台或 SDK 的配置逻辑。
+2. 在 \`quickstart.mdx\` 串联注册/创建 Key 的既有控制台入口、服务端提交、\`task_id\` 与查询任务；不复刻控制台或 SDK 的配置逻辑。
 3. 在 \`authentication.mdx\` 说明 Bearer Token、服务端保管与日志脱敏；绝不要求读者把真实 Key 放入浏览器。
-4. 在 \`models/seedance-2.mdx\`、\`tasks/create.mdx\` 和 \`tasks/get.mdx\` 使用同一契约数据渲染参数、请求、响应、状态和 curl。POST 页必须明确幂等键、重复提交和超时重试语义；未被契约确认的字段不写入示例。
-5. 在 \`webhooks.mdx\` 说明地址如何配置、事件类型、事件 ID、至少一次投递、去重、签名原文、算法、时间戳、重放窗口、密钥轮换、成功 ACK 和重试。不以 \`task_id\` 代替事件去重。
-6. 在 \`results.mdx\` 只说明平台返回结果 URL、有效期和下载方式；不暴露上游 URL、存储桶、签名或内部渠道。
-7. 在 \`errors-and-limits.mdx\` 依据契约列出 HTTP/业务错误及重试建议。在 \`billing.mdx\` 仅保留“费用以官方公告为准”。SDK 页只链接官方 SDK，FAQ 只回答接入问题。
+4. 在 \`models/seedance-2.mdx\`、\`tasks/create.mdx\` 和 \`tasks/get.mdx\` 使用同一契约数据渲染参数、请求、响应、状态和 curl。未被契约确认的字段不写入示例，且不承诺幂等键、Webhook、超时安全重试或独立下载接口。
+5. 在 \`errors-and-limits.mdx\` 依据契约列出 HTTP/业务错误及保守的处理建议。在 \`billing.mdx\` 仅保留“费用以官方公告为准”。SDK 页只链接官方 SDK，FAQ 只回答接入问题。
 
-验证：\`tests/e2e/docs-flow.spec.ts\` 从快速开始走到提交、查询、Webhook 和下载页面，检查相同的模型名、\`base_url\`、字段名和公共链接；\`check:public-surface\` 证明文档树、搜索和站点地图不含管理或非视频内容。
+验证：\`tests/e2e/docs-flow.spec.ts\` 从快速开始走到提交和查询页面，检查相同的模型名、\`base_url\`、字段名和公共链接；\`check:public-surface\` 证明文档树、搜索和站点地图不含管理、非视频、Webhook 或独立下载内容。
 
 ### 阶段 5：统一契约生成、质量与可访问性
 
@@ -150,7 +145,7 @@ E:\\IDEA_Programme\\new\\blue-whale-api\\web\\bluewhale-portal\\
 ### 阶段 6：预发布与上线
 
 1. 在隔离环境用不含生产密钥的公开配置构建并部署门户；正式域名、API \`base_url\`、控制台和 SDK 外链均来自批准契约，不能沿用原型 IP。
-2. 仅在受控 CI 的机密变量中执行 \`scripts/smoke-public-video-api.ts\`：以测试 Key 完成一次“提交 → 查询或 Webhook → 下载”的最小真实闭环。日志必须脱敏 Key、Webhook 密钥和结果 URL。
+2. 仅在受控 CI 的机密变量中执行 \`scripts/smoke-public-video-api.ts\`：以测试 Key 完成一次“提交 → 查询”的最小真实闭环。日志必须脱敏 Key 与任何结果 URL。
 3. 发布前运行 \`validate:contract\`、\`check:public-surface\`、\`typecheck\`、\`format:check\`、\`test\`、\`test:e2e\`、\`build\`，保存命令输出、路由清单、站点地图和桌面/移动截图。
 4. 发布后检查 \`/\`、\`/docs\`、语言切换、主题、控制台/SDK 外链和 404 行为；确认旧应用仍保持其基线，不把门户流量误路由到受保护前端。
 
@@ -164,7 +159,7 @@ E:\\IDEA_Programme\\new\\blue-whale-api\\web\\bluewhale-portal\\
 2. 中文官网壳、导航、Hero、能力与参数矩阵；
 3. 快速上手、开发者/商务入口和媒体可访问性；
 4. 中文文档树、公开 OpenAPI 页面和异步任务文档；
-5. Webhook、结果、错误/限流、费用说明、SDK 与 FAQ；
+5. 错误/限流、费用说明、SDK 与 FAQ；
 6. 红线扫描、站点地图/搜索限制、端到端与视觉回归；
 7. 受控环境闭环验证和部署配置。
 
@@ -174,7 +169,7 @@ E:\\IDEA_Programme\\new\\blue-whale-api\\web\\bluewhale-portal\\
 
 - [ ] 需求方确认新增隔离门户，而非替换受保护的旧站；
 - [ ] BLUE WHALE 正式域名、控制台、SDK 和商务入口已批准；
-- [ ] 公开视频 API 契约已冻结并含完整异步/Webhook/下载语义；
+- [ ] 公开视频 API 契约已冻结并仅含 Seedance 2.0 的提交/查询语义；
 - [ ] 目标仓 task worktree 已创建，受保护应用基线已记录；
-- [ ] 测试环境 Key 和 Webhook 接收端已在 CI 机密配置中准备，且不会写入仓库；
+- [ ] 测试环境 Key 已在 CI 机密配置中准备，且不会写入仓库；
 - [ ] 发布责任人确认可执行正式域名路由和部署。
