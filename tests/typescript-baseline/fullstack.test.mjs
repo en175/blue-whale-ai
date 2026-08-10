@@ -75,7 +75,7 @@ test("Web 与 BullMQ generation worker 由同一镜像启动为两个进程", ()
   assert.deepEqual(generationWorker.command, [
     "pnpm",
     "--filter",
-    "blue_whale",
+    "@blue-whale/web",
     "start:worker",
   ]);
   assert.equal(generationWorker.environment.REDIS_HOST, "redis");
