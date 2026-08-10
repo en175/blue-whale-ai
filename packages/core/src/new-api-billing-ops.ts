@@ -3,7 +3,7 @@
 import {NewApiError} from "./new-api-transport.js";
 import type {NewApiEnvelope, NewApiRequest} from "./new-api-transport.js";
 import {parseTopUpRecord} from "./new-api-types.js";
-import type {NewApiRechargeAgreement, NewApiRechargeOrderResult, NewApiRechargeOrderStatus, NewApiRechargeTiersResult, NewApiTopUpListResult, NewApiTopUpOrderResult, NewApiTopUpRecord, NewApiUserLogListResult, NewApiUserLogRecord} from "./new-api-types.js";
+import type {NewApiPricingItem, NewApiPricingResult, NewApiRechargeAgreement, NewApiRechargeOrderResult, NewApiRechargeOrderStatus, NewApiRechargeTiersResult, NewApiTopUpListResult, NewApiTopUpOrderResult, NewApiTopUpRecord, NewApiUserLogListResult, NewApiUserLogRecord} from "./new-api-types.js";
 
 export function createNewApiBillingOps(request: NewApiRequest) {
   return {
@@ -213,6 +213,75 @@ export function createNewApiBillingOps(request: NewApiRequest) {
       return {
         items,
         total: typeof data.total === "number" ? data.total : 0,
+      };
+    },
+
+    /** IK7G9X：按 request_id 精确取一条消费流水（quota 单位与余额一致）。
+     *  生成 worker 出图后凭响应头 X-Oneapi-Request-Id 关联本次调用真实扣费。
+     *  未匹配（或非当前用户调用）返回 null。 */
+    async getConsumeLogByRequestId(
+      token: string,
+      requestId: string,
+    ): Promise<NewApiUserLogRecord | null> {
+      const response = await request<NewApiEnvelope>(
+        `/api/log/self?request_id=${encodeURIComponent(requestId)}&type=2`,
+        { method: "GET" },
+        token,
+      );
+      const data = (response.data ?? {}) as { items?: unknown };
+      const rawItems = Array.isArray(data.items)
+        ? (data.items as Array<Record<string, unknown>>)
+        : [];
+      const match = rawItems.find((item) => item.request_id === requestId);
+      if (!match) return null;
+      return {
+        id: Number(match.id ?? 0),
+        type: Number(match.type ?? 0),
+        content: typeof match.content === "string" ? match.content : "",
+        model_name:
+          typeof match.model_name === "string" ? match.model_name : "",
+        quota: Number(match.quota ?? 0),
+        created_at: Number(match.created_at ?? 0),
+      };
+    },
+
+    /** IK7G9X：拉模型定价目录（GET /api/pricing，默认匿名可访问）。
+     *  响应信封 {success, data: Pricing[]， pricing_version}：data 即定价数组。
+     *  返回定价列表（含 ModelPrice/ModelRatio/BillingExpr）与响应级 pricing_version，
+     *  供建预留时估算金额并落四个 *_version 字段。 */
+    async getPricing(
+      token?: string,
+    ): Promise<NewApiPricingResult> {
+      const response = await request<NewApiEnvelope>(
+        "/api/pricing",
+        { method: "GET" },
+        token,
+      );
+      const envelope = (response ?? {}) as Record<string, unknown>;
+      const items = Array.isArray(envelope.data)
+        ? (envelope.data as Array<Record<string, unknown>>)
+        : [];
+      return {
+        pricing: items.map((raw): NewApiPricingItem => {
+          const modelPrice =
+            typeof raw.model_price === "number" ? raw.model_price : undefined;
+          const modelRatio =
+            typeof raw.model_ratio === "number" ? raw.model_ratio : undefined;
+          const billingMode =
+            typeof raw.billing_mode === "string" ? raw.billing_mode : undefined;
+          const billingExpr =
+            typeof raw.billing_expr === "string" ? raw.billing_expr : undefined;
+          return {
+            modelName: typeof raw.model_name === "string" ? raw.model_name : "",
+            ...(modelPrice !== undefined ? { modelPrice } : {}),
+            ...(modelRatio !== undefined ? { modelRatio } : {}),
+            ...(billingMode !== undefined ? { billingMode } : {}),
+            ...(billingExpr !== undefined ? { billingExpr } : {}),
+          };
+        }),
+        ...(typeof envelope.pricing_version === "string"
+          ? { pricingVersion: envelope.pricing_version }
+          : {}),
       };
     },
 

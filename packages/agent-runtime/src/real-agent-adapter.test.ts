@@ -132,7 +132,64 @@ describe("new-api 真实 Agent 适配器（IK7EU4）", () => {
       "user",
     ]);
     expect(body.messages[1]!.content).toBe("第一条");
-    expect(body.messages[2]!.content).toBe("第一答");
+    // assistant 历史消息以 JSON 协议形态发送（见下一测试的详细说明）。
+    const historyAssistant = JSON.parse(body.messages[2]!.content) as {
+      content: string;
+      reasoning_summary: string;
+      action: { kind: string };
+    };
+    expect(historyAssistant.content).toBe("第一答");
+    expect(historyAssistant.reasoning_summary).toBeTruthy();
+    expect(historyAssistant.action.kind).toBe("respond");
+  });
+
+  it("历史 assistant 消息包装为 JSON 协议形态，避免模型模仿纯文本放弃协议", async () => {
+    // MiniMax-M3 在多轮对话中，若历史 assistant 是纯文本，会模仿该形态
+    // 直接输出纯文本，不再遵守 system 要求的 JSON 输出协议，导致解析必
+    // 失败（实测纯文本历史 10/10 失败，JSON 历史 10/10 成功）。适配器
+    // 必须把历史 assistant 包装回协议 JSON 再发给模型。
+    const fetchImpl = vi.fn(async () =>
+      chatCompletion(
+        adapterReply({
+          content: "继续。",
+          reasoning_summary: "已完成回答。",
+          action: { kind: "respond" },
+        }),
+      ),
+    ) as unknown as typeof fetch;
+
+    await makeAdapter(fetchImpl).invoke({
+      ...BASE_REQUEST,
+      historyMessages: [
+        { role: "user", content: "你好" },
+        { role: "assistant", content: "你好，我是蓝鲸。" },
+        { role: "user", content: "介绍能力" },
+        { role: "assistant", content: "我可以帮你写文案、生成图片。" },
+      ],
+    });
+
+    const body = JSON.parse(
+      ((fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+        .body as string,
+    ) as { messages: { role: string; content: string }[] };
+    // user 消息原样透传。
+    expect(body.messages[1]!.content).toBe("你好");
+    expect(body.messages[3]!.content).toBe("介绍能力");
+    // 每条 assistant 历史都包装为合法 JSON 协议对象（含三字段）。
+    for (const idx of [2, 4]) {
+      const wrapped = JSON.parse(body.messages[idx]!.content) as {
+        content: string;
+        reasoning_summary: string;
+        action: { kind: string };
+      };
+      expect(typeof wrapped.content).toBe("string");
+      expect(wrapped.reasoning_summary).toBeTruthy();
+      expect(wrapped.action.kind).toBe("respond");
+    }
+    // 原始纯文本保留在包装体的 content 字段。
+    expect(
+      (JSON.parse(body.messages[2]!.content) as { content: string }).content,
+    ).toBe("你好，我是蓝鲸。");
   });
 
   it("激活 Creative Skill 正文与 mention 投影注入 system 上下文", async () => {

@@ -316,5 +316,54 @@ describe("new-api client —— 图片与视频生成", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("IK7G9X: generateImagesWithReceipt exposes X-Oneapi-Request-Id", async () => {
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async () =>
+        jsonResponse({ data: [{ url: "https://cdn.test/img.png" }] }, 200, {
+          "X-Oneapi-Request-Id": "req-receipt-1",
+        }),
+    });
+
+    const receipt = await client.generateImagesWithReceipt("sk-test", {
+      model: "m",
+      prompt: "p",
+      n: 1,
+    });
+    expect(receipt.requestId).toBe("req-receipt-1");
+    expect(receipt.images).toEqual([{ url: "https://cdn.test/img.png" }]);
+
+    // 兼容：原 generateImages 仍只回图片列表。
+    const images = await client.generateImages("sk-test", {
+      model: "m",
+      prompt: "p",
+      n: 1,
+    });
+    expect(images).toEqual([{ url: "https://cdn.test/img.png" }]);
+  });
+
+  it("IK7G9X: getVideoTask parses TaskDto.quota", async () => {
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input) => {
+        const url = String(input);
+        if (url.includes("/v1/video/generations/task-1")) {
+          return jsonResponse({
+            data: {
+              task_id: "task-1",
+              status: "success",
+              url: "https://cdn.test/v.mp4",
+              quota: 880000,
+            },
+          });
+        }
+        return jsonResponse({ success: true, data: {} });
+      },
+    });
+
+    const task = await client.getVideoTask("sk-test", "task-1");
+    expect(task.quota).toBe(880000);
+  });
+
   // ---- native topup（Model B：结算复用 Go 原生 new-api 充值）----
 });

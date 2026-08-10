@@ -2,6 +2,7 @@ import {
   findPlacement,
   SCENE_CARD_FALLBACK_HEIGHT,
   SCENE_CARD_WIDTH,
+  type CostReservationSnapshot,
   type Rect,
 } from "@blue-whale/core";
 import type { Prisma, PrismaClient } from "@prisma/client";
@@ -36,6 +37,9 @@ export interface CreateJobInput {
   sceneCardGenerationRecordId?: string;
   /** SceneCard 来源身份；用于在 job 接纳时冻结实际 Canvas 位置与尺寸。 */
   sceneCardId?: string;
+  /** IK7G9X：建预留时写入 cost_reservations 的记账快照（真实预估金额 + 定价口径版本）。
+   *  缺省时沿用旧行为：reserved_amount_fen=0 + 四版本 "dev"。 */
+  costReservation?: CostReservationSnapshot;
 }
 
 export interface CreatedJob {
@@ -227,6 +231,30 @@ async function freezePlacementAnchor(
   return { ...input.input, placement_anchor: anchor };
 }
 
+/** cost_reservations 建行数据：真实快照或旧行为兜底（reserved=0 + 四版本 dev）。 */
+function costReservationCreateData(
+  reservation: CostReservationSnapshot | undefined,
+  jobId: bigint,
+  userId: string,
+  projectId: string,
+  input: CreateJobInput,
+): Prisma.cost_reservationsCreateArgs["data"] {
+  return {
+    generation_job_id: jobId,
+    user_id: BigInt(userId),
+    project_id: BigInt(projectId),
+    action_identity: input.actionIdentity,
+    action_type: input.actionType,
+    provider: "volc",
+    reserved_amount_fen: reservation?.reservedAmountFen ?? 0n,
+    status: "reserved",
+    price_catalog_version: reservation?.priceCatalogVersion ?? "dev",
+    exchange_rate_version: reservation?.exchangeRateVersion ?? "dev",
+    model_policy_version: reservation?.modelPolicyVersion ?? "dev",
+    cost_rule_version: reservation?.costRuleVersion ?? "dev",
+  };
+}
+
 /** 在调用方事务内创建 GenerationJob + cost 预留 + 日志 + 事件（IK67H9 抽出，让计划应用可组合进更大事务）。
  *  IK67HE/T14：同时固定 expectedOutputCount 个输出槽（status=pending），槽身份与顺序稳定。
  *  surgical：行为与原 createJob 内联实现完全一致，只是把事务体上提 + 增加槽位固定。 */
@@ -278,20 +306,13 @@ export async function createJobWithinTx(
     }
   }
   await tx.cost_reservations.create({
-    data: {
-      generation_job_id: job.id,
-      user_id: BigInt(input.userId),
-      project_id: BigInt(input.projectId),
-      action_identity: input.actionIdentity,
-      action_type: input.actionType,
-      provider: "volc",
-      reserved_amount_fen: 0,
-      status: "reserved",
-      price_catalog_version: "dev",
-      exchange_rate_version: "dev",
-      model_policy_version: "dev",
-      cost_rule_version: "dev",
-    },
+    data: costReservationCreateData(
+      input.costReservation,
+      job.id,
+      input.userId,
+      input.projectId,
+      input,
+    ),
   });
   await tx.generation_job_logs.create({
     data: {
@@ -381,6 +402,11 @@ export function createGenerationCommandRepo(
         ) {
           return null;
         }
+
+        // IK7G9X：重试复用原 job 的记账快照（同一任务的重试，定价口径不变）。
+        const originalReservation = await tx.cost_reservations.findFirst({
+          where: { generation_job_id: original.id },
+        });
 
         const operation = "generation.retry";
         const existing = idempotencyKey
@@ -478,6 +504,38 @@ export function createGenerationCommandRepo(
             next_action_at: now,
             fencing_token: 0,
           },
+        });
+        // IK7G9X：为重试 job 补 cost_reservations 行（复用原 job 的金额与版本口径）。
+        const retryInput: CreateJobInput = {
+          projectId,
+          userId: original.user_id.toString(),
+          type: original.type as "image" | "video",
+          expectedOutputCount: retryCount,
+          input: (original.input ?? {}) as Record<string, unknown>,
+          actionIdentity: idempotencyKey || `retry:${originalJobId}`,
+          actionType:
+            original.type === "video" ? "generate_video" : "generate_image",
+        };
+        await tx.cost_reservations.create({
+          data: costReservationCreateData(
+            originalReservation
+              ? {
+                  reservedAmountFen:
+                    originalReservation.reserved_amount_fen ?? 0n,
+                  priceCatalogVersion:
+                    originalReservation.price_catalog_version,
+                  exchangeRateVersion:
+                    originalReservation.exchange_rate_version,
+                  modelPolicyVersion:
+                    originalReservation.model_policy_version,
+                  costRuleVersion: originalReservation.cost_rule_version,
+                }
+              : undefined,
+            retry.id,
+            original.user_id.toString(),
+            projectId,
+            retryInput,
+          ),
         });
         // 为重试 job 创建新槽，链 retry_of_slot_id 指向被补的原始槽。
         if (failedSlots.length > 0) {

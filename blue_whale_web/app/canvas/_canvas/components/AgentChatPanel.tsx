@@ -7,13 +7,14 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
 import { BookOpenText, ChevronDown } from "lucide-react";
 import { SmoothCorners } from "@/components/SmoothCorners";
-import SkillPanel, { type UseSkillSelection } from "@/components/skill/SkillPanel";
+import SkillPanel, {
+  type UseSkillSelection,
+} from "@/components/skill/SkillPanel";
 import { squirclePath } from "../utils";
 import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
 import type { ChatMessage, PendingMentionBatch } from "../types";
@@ -23,7 +24,7 @@ import type {
   MentionFailure,
 } from "@blue-whale/core";
 import type { CardStatus } from "@/types/domain";
-import { buildMockReplyForMode } from "../messages";
+import { buildMockReply } from "../messages";
 import { createMessageIdGenerator } from "../idGen";
 import type { MessageIdGenerator } from "../idGen";
 import { useAuth } from "@/components/auth/AuthContext";
@@ -57,7 +58,6 @@ import {
   saveComposerDraft,
 } from "@/lib/composer-draft";
 
-
 export function AgentChatPanel({
   messages,
   isOpen,
@@ -65,12 +65,14 @@ export function AgentChatPanel({
   pendingMention,
   onMentionConsumed,
   onCardGenerated,
+  onReapplyOutput,
   onAppendMessages,
   onSubmitMessage,
   onUploadFile,
   onSetCardStatus,
   onRetryGenerationJob,
   prompt,
+  initialSkillId,
   projectId,
   activeSkillName,
   agentRunStatus,
@@ -89,6 +91,11 @@ export function AgentChatPanel({
   pendingMention?: PendingMentionBatch | null;
   onMentionConsumed?: () => void;
   onCardGenerated?: (card: CardMessage) => void;
+  /**
+   * 权威 normal 卡「重新放置」（IK7GS6）：用户移除画布节点后，从对话卡把同一 Asset 重新放上画布。
+   * 幂等——画布已存在引用该 assetId 的节点时不重复放置。仅带 generationJobId 的权威卡触发。
+   */
+  onReapplyOutput?: (card: CardMessage) => void;
   /** 追加消息到当前项目（user 消息 + 逐条生成的 agent 回复均经此上抛） */
   onAppendMessages?: (messages: ChatMessage[]) => void;
   /** 后端可用时提交权威 Conversation 命令；缺省时保留既有离线 mock。 */
@@ -111,6 +118,9 @@ export function AgentChatPanel({
   onRetryGenerationJob?: (generationJobId: WireInteger) => Promise<void>;
   /** 首页续上 / 模板卡点击带入的 prompt，填入 composer（可编辑后发送） */
   prompt?: string;
+  /** IK74TX 1.3：首页「视频智能体」Tab 提交带入的一次性技能 id——挂载时作为 forced skill
+   *  初始上下文（对齐首页「直接使用」IK60WY 语义；SSE 确认后由 activeSkillName 接管）。 */
+  initialSkillId?: string;
   /** 当前 Project 身份；传入后未发送草稿按 Project 持久化到本浏览器（IK67GD T02） */
   projectId?: string;
   /** 当前 Run 已激活 Creative Skill 的展示名（forced/auto 统一，Snapshot/SSE 权威） */
@@ -139,10 +149,14 @@ export function AgentChatPanel({
   const [panelSize, setPanelSize] = useState({ w: 468, h: 600 });
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
   // Use 选择的 pending forced skill：点 Use 立刻乐观展示，SSE 确认后由 activeSkillName 接管
+  // IK74TX 1.3：initialSkillId 为首页「视频智能体」Tab 带入的一次性技能——用 lazy initializer
+  // 在挂载时初始化（组件由 CanvasProjectRuntime 渲染时传入，挂载后不变），避免 effect 内 setState。
   const [pendingForcedSkill, setPendingForcedSkill] = useState<{
     id: string;
     name: string;
-  } | null>(null);
+  } | null>(() =>
+    initialSkillId ? { id: initialSkillId, name: initialSkillId } : null,
+  );
   // 总结当前对话的一次性意图标记（IK60X1）：预填时置位，发送成功后清除，失败保留供重试
   const skillSummarizePendingRef = useRef(false);
   const [retryingCards, setRetryingCards] = useState<ReadonlySet<string>>(
@@ -152,20 +166,6 @@ export function AgentChatPanel({
   const { applyingPlanIds, planAvailabilityOverrides, handleApplyPlan } =
     usePlanApply({ messages, onApplyPlanMessage });
 
-  const CREATION_MODES = useMemo(
-    () => [
-      { id: "agent", label: "Agent", description: "对话拆解，逐步完善。" },
-      {
-        id: "direct",
-        label: "Direct Gen",
-        description: "根据提示词直接生成图片或视频卡片。",
-      },
-    ],
-    [],
-  );
-
-
-  const [selectedMode] = useState(CREATION_MODES[0]);
   const [selectedModel, setSelectedModel] = useState(AGENT_MODELS[3]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
 
@@ -446,12 +446,8 @@ export function AgentChatPanel({
       clearComposerUploads();
       if (projectId) clearComposerDraft(projectId);
 
-      // 按当前创作模式生成 mock 回复，错开逐条追加模拟逐步生成
-      const reply = buildMockReplyForMode(
-        selectedMode.id as "agent" | "direct",
-        prompt,
-        nextMessageId,
-      );
+      // 离线降级：生成 mock 回复，错开逐条追加模拟逐步生成
+      const reply = buildMockReply(prompt, nextMessageId);
       reply.forEach((msg, index) => {
         const timer = window.setTimeout(
           () => {
@@ -475,12 +471,20 @@ export function AgentChatPanel({
    * 按 card 当前 status 分发：
    *   权威 failed → 创建仅含缺失槽的新 Job，原 Card 保持失败事实
    *   离线 failed/generating → 保留既有 DEMO 状态机
-   *   normal            → 把 card 作为 NodeItem 应用到画布（复用既有 onCardGenerated，page.tsx 零改）
+   *   normal（权威）→ 重新放置同一 Asset 到画布（IK7GS6：接替 IK7GS4 的禁用态，幂等）
+   *   normal（DEMO）→ 把 card 作为 NodeItem 应用到画布（复用既有 onCardGenerated，page.tsx 零改）
    */
   const handleReapply = (card: CardMessage) => {
     const current = card.status ?? "normal";
     if (current === "cancelled") return;
     if (current === "normal") {
+      // 权威卡（带 generationJobId）：重新放置同一 Asset 到画布（IK7GS6）。
+      // 幂等——画布已有同 assetId 节点时不重复放置；首次自动放置的节点仍在时为 no-op。
+      if (card.generationJobId !== undefined) {
+        onReapplyOutput?.(card);
+        return;
+      }
+      // DEMO-only 直插入口：仅无 generationJobId 的离线 mock 卡走前端建节点。
       onCardGenerated?.(card);
       return;
     }
@@ -511,7 +515,7 @@ export function AgentChatPanel({
 
     onSetCardStatus?.(card.id, "generating");
 
-    // DEMO 固定成功：generating 800ms 后落到终态 normal（状态机不变量由 cardStatus.test.ts 覆盖）
+    // DEMO 固定成功：generating 800ms 后落到终态 normal
     const timer = window.setTimeout(() => {
       onSetCardStatus?.(card.id, "normal");
     }, 800);

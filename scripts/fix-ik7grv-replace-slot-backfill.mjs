@@ -10,12 +10,15 @@
 //   - Snapshot 投影按该外键过滤，这些输出槽（含重试槽）恒不投影。
 // IK7GRT（commit 6ddbea89）已修复 replace 路径的新数据，本脚本一次性回填历史脏数据。
 //
-// 两步修复，口径严格对齐生产重算 syncRecordSummary（generation-worker-internals.ts:21-62）：
+// 三步修复，口径严格对齐生产重算 syncRecordSummary（generation-worker-internals.ts:21-62）：
 //   Step 1 回填：递归沿 retry_of_slot_id 链收集每个脏 record 首个 job 衍生的全部 slot
 //                （原始 + 各层重试），把其中 record 关联为 NULL 的绑回 record.id。
-//   Step 2 重算：按 scene_card_generation_record_id = record.id 取该 record 全部 slot
-//                （与 syncRecordSummary 同口径，覆盖重试链），复用生产纯函数
-//                resolveLogicalSlots + aggregateSlotStatus 算四态后 update summary_status。
+//   Step 2 重算：回填后同事务内按 scene_card_generation_record_id = record.id 取该 record
+//                全部 slot（与 syncRecordSummary 同口径，覆盖重试链），复用生产纯函数
+//                resolveLogicalSlots + aggregateSlotStatus 算四态。
+//                必须在回填后查——回填前脏槽关联仍为 NULL，按 record 查得空集，
+//                aggregateSlotStatus([]) 返回 failed 会把正常 record 错写且不可自愈。
+//   Step 3 写回：update summary_status（version 自增）。
 //                不追加 project_event——一次性修复不应污染审计事件流。
 //
 // 幂等：识别与回填均对「NULL 关联」敏感；第二次运行识别集合为空 → 零操作退出。重算本身
@@ -111,36 +114,31 @@ for (const record of affectedRecords) {
     (s) => s.scene_card_generation_record_id == null,
   );
 
-  // 重算口径对齐 syncRecordSummary：按 record 关联取全部 slot。回填后 chain 中所有 slot
-  // 均绑到本 record；若未回填（dry-run），用 chain 本身（等同回填后的集合）算预演结果。
-  const slotsForSummary = DRY_RUN
-    ? chainSlots
-    : await prisma.generation_output_slots.findMany({
-        where: { scene_card_generation_record_id: record.id },
-        select: { slot_index: true, status: true },
-        orderBy: { id: "asc" },
-      });
+  // 重算口径对齐 syncRecordSummary：按 record 关联取全部 slot。
+  const computeSummary = (slots) =>
+    aggregateSlotStatus(
+      resolveLogicalSlots(
+        slots.map((s) => ({
+          slot_index: Number(s.slot_index),
+          status: s.status,
+        })),
+      ).map((s) => s.status),
+    );
 
-  const summaryComputed = aggregateSlotStatus(
-    resolveLogicalSlots(
-      slotsForSummary.map((s) => ({
-        slot_index: Number(s.slot_index),
-        status: s.status,
-      })),
-    ).map((s) => s.status),
-  );
-
-  summary.push({
+  const entry = {
     recordId: record.id,
     sceneCardId: record.scene_card_id,
     jobId: record.first_generation_job_id,
     slotsTotal: chainSlots.length,
     slotsUnbound: unbound.length,
     statusBefore: record.summary_status,
-    statusAfter: summaryComputed,
-  });
+  };
 
-  if (DRY_RUN) continue;
+  // dry-run 未回填，用 chain 本身（等同回填后的集合）算预演结果。
+  if (DRY_RUN) {
+    summary.push({ ...entry, statusAfter: computeSummary(chainSlots) });
+    continue;
+  }
 
   // 每条 record 独立事务，避免长事务锁竞争。
   await prisma.$transaction(async (tx) => {
@@ -154,11 +152,21 @@ for (const record of affectedRecords) {
         data: { scene_card_generation_record_id: record.id },
       });
     }
-    // Step 2：重算 summary_status（version 自增，对齐 syncRecordSummary）。
+    // Step 2：回填后按 record 关联取全部 slot 重算（口径同 syncRecordSummary）。
+    // 必须在 Step 1 之后查——回填前脏槽关联仍为 NULL，按 record 查只能拿到空集，
+    // aggregateSlotStatus([]) 返回 failed，会把正常 record 错写为 failed 且不可自愈。
+    const boundSlots = await tx.generation_output_slots.findMany({
+      where: { scene_card_generation_record_id: record.id },
+      select: { slot_index: true, status: true },
+      orderBy: { id: "asc" },
+    });
+    const summaryComputed = computeSummary(boundSlots);
+    // Step 3：写回 summary_status（version 自增，对齐 syncRecordSummary）。
     await tx.scene_card_generation_records.update({
       where: { id: record.id },
       data: { summary_status: summaryComputed, version: { increment: 1 } },
     });
+    summary.push({ ...entry, statusAfter: summaryComputed });
   });
 }
 

@@ -21,7 +21,7 @@ function prisma() {
 }
 
 /** 对象存储装配：VOLC_TOS 配置优先，其次 S3 兼容（验收 stub / 自建），皆无返回 null（100202）。 */
-function createConfiguredStorage(): {
+export function createConfiguredStorage(): {
   signer: AssetSigner;
   reader: AssetReader;
   uploads: AssetUploadStorage;

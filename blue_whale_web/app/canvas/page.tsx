@@ -11,7 +11,9 @@ import { canonicalCanvasHref } from "./canonical-project";
 import { CanvasProjectRuntime } from "./CanvasProjectRuntime";
 
 function CanvasPageInner() {
-  const projectId = useSearchParams().get("project");
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get("project");
+  const incomingTab = searchParams.get("tab");
   const router = useRouter();
   const { user, openLogin } = useAuth();
   const [loadError, setLoadError] = useState(false);
@@ -32,6 +34,19 @@ function CanvasPageInner() {
     let cancelled = false;
     void (async () => {
       try {
+        // IK74TX 1.1/1.2/1.3：从首页输入框带内容跳转（?tab=…）→ 一律新建项目，
+        // 不进老项目（外部首页创作是独立会话）；项目名取提示词前 15 字，无提示词回退未命名。
+        if (incomingTab) {
+          const prompt = searchParams.get("prompt") ?? "";
+          const name = prompt.trim() ? prompt.trim().slice(0, 15) : "未命名项目";
+          const created = await canvasApi.createProject(name);
+          // 保留首页携带的全部 query 参数（tab/prompt/model/…），拼上新 project id，
+          // 供 CanvasProjectRuntime 落地后读参数预填 Dock + 自动生成 / Agent 接管。
+          const next = new URLSearchParams(searchParams.toString());
+          next.set("project", String(created.id));
+          if (!cancelled) router.replace(`/canvas?${next.toString()}`);
+          return;
+        }
         const projects = await canvasApi.listProjects();
         const target =
           projects[0] ?? (await canvasApi.createProject("未命名项目"));
@@ -48,7 +63,7 @@ function CanvasPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [awaitingRelogin, user, openLogin, projectId, router]);
+  }, [awaitingRelogin, user, openLogin, projectId, incomingTab, searchParams, router]);
 
   if (projectId) return <CanvasProjectRuntime projectId={projectId} />;
 

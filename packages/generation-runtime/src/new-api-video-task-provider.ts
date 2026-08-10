@@ -29,11 +29,14 @@ export function createNewApiVideoTaskProvider(options: {
     async poll(taskId): Promise<VideoTaskObservation> {
       const task = await client.getVideoTask(options.token, taskId);
       const status = task.status.toLowerCase();
+      // IK7G9X：透出 new-api 任务 quota（成功结算后即实际扣费额）。
+      const quota = task.quota;
       if (SUCCESS_STATUSES.has(status)) {
         return {
           status: "succeeded",
           progress: 100,
           url: task.url,
+          ...(quota !== undefined ? { quota } : {}),
           error: null,
         };
       }
@@ -42,6 +45,7 @@ export function createNewApiVideoTaskProvider(options: {
           status: "failed",
           progress: 100,
           url: null,
+          ...(quota !== undefined ? { quota } : {}),
           error: {
             code: String(task.error?.code ?? "provider_failed"),
             message: task.error?.message ?? "视频生成失败",
@@ -52,6 +56,7 @@ export function createNewApiVideoTaskProvider(options: {
         status: status === "queued" ? "queued" : "processing",
         progress: 0,
         url: null,
+        ...(quota !== undefined ? { quota } : {}),
         error: null,
       };
     },

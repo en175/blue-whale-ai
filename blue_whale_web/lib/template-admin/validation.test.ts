@@ -128,3 +128,46 @@ describe("parseBigId / parseMoveDirection", () => {
     expect(parseMoveDirection(undefined)).toBeNull();
   });
 });
+
+describe("URL 最小格式校验（IK7JVE）", () => {
+  it("http/https 开头的 video_url 放行", () => {
+    for (const url of [
+      "http://v.example.com/a.mp4",
+      "https://v.example.com/a.mp4",
+    ]) {
+      expect(
+        parseTemplateCardForm({ ...VALID_FORM, video_url: url }, TAGS).ok,
+      ).toBe(true);
+    }
+  });
+
+  it("大写 HTTPS:// 前缀放行（大小写不敏感）", () => {
+    expect(
+      parseTemplateCardForm(
+        { ...VALID_FORM, video_url: "HTTPS://V.EXAMPLE.COM/A.MP4" },
+        TAGS,
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("非 http(s) 开头的 video_url 拒绝", () => {
+    for (const url of [
+      "example.com/a.mp4",
+      "ftp://v.example.com/a.mp4",
+      "/local/path.mp4",
+    ]) {
+      const r = parseTemplateCardForm({ ...VALID_FORM, video_url: url }, TAGS);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toContain("video_url");
+    }
+  });
+
+  it("非 http(s) 开头的图片 URL 拒绝", () => {
+    const r = parseTemplateCardForm(
+      { ...VALID_FORM, images: [{ image_url: "example.com/1.png" }] },
+      TAGS,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("图片");
+  });
+});

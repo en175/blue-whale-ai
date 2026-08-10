@@ -1,7 +1,7 @@
 /**
  * 端到端 live smoke：真调 ARK + 真 DB，跑通「插 job → worker 出图 → 建素材 → succeeded」。
  * 默认跳过；手动跑须显式带 RUN_LIVE_SMOKE=1 + DATABASE_URL + VOLC_ARK_*：
- *   RUN_LIVE_SMOKE=1 pnpm --filter blue_whale exec vitest run lib/generation/worker/generation-worker.smoke.test.ts
+ *   RUN_LIVE_SMOKE=1 pnpm --filter @blue-whale/web exec vitest run lib/generation/worker/generation-worker.smoke.test.ts
  * 跑一次会真出一张图（花 ARK 额度）+ 写一条 job/asset 到 blue_whale 库。
  */
 import { describe, expect, it } from "vitest";

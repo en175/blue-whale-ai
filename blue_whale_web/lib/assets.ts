@@ -58,11 +58,9 @@ function uploadMime(file: File, type: "image" | "video" | "audio"): string {
   return "application/octet-stream";
 }
 
-/**
- * PUT 直连 TOS 带上传进度（fetch 无 upload 进度，需 XHR）。
- * onprogress 按 loaded/total 回报 0-100 百分比；非 2xx / 网络错误 / 中止均 reject。
- */
-function putWithProgress(
+/** PUT 直连 TOS 带上传进度（fetch 无 upload 进度，需 XHR）。
+ * onprogress 按 loaded/total 回报 0-100 百分比；非 2xx / 网络错误 / 中止均 reject。 */
+export function putWithProgress(
   url: string,
   headers: Record<string, string>,
   file: File,

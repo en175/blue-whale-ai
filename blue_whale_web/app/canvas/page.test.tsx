@@ -6,7 +6,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import CanvasPage from "./page";
-import { ApiError, listProjects } from "@/lib/canvas";
+import { ApiError, createProject, listProjects } from "@/lib/canvas";
 
 const nav = vi.hoisted(() => ({
   replaceMock: vi.fn(),
@@ -14,9 +14,20 @@ const nav = vi.hoisted(() => ({
   authState: { user: null as unknown },
 }));
 
+// IK74TX 1.1/1.2/1.3：首页跳转参数可测——用例里改 params 后再 render。
+const paramsState = vi.hoisted(() => ({
+  map: new Map<string, string>(),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: nav.replaceMock }),
-  useSearchParams: () => ({ get: () => null }),
+  useSearchParams: () => ({
+    get: (key: string) => paramsState.map.get(key) ?? null,
+    toString: () =>
+      Array.from(paramsState.map.entries())
+        .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+        .join("&"),
+  }),
 }));
 
 vi.mock("./CanvasProjectRuntime", () => ({
@@ -49,6 +60,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
   nav.authState.user = null;
+  paramsState.map.clear();
 });
 
 describe("画布入口页凭证失效恢复", () => {
@@ -111,5 +123,67 @@ describe("画布入口页凭证失效恢复", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "重新登录" }));
     expect(nav.openLoginMock).toHaveBeenCalled();
+  });
+});
+
+describe("首页跳转（IK74TX 1.1/1.2/1.3）：带 tab 参数 → 新建项目 + 保留参数跳转", () => {
+  it("带 tab=video 参数 → 新建项目（提示词命名）并保留全部 query 参数", async () => {
+    window.localStorage.setItem("bw-user", STALE_USER);
+    paramsState.map.set("tab", "video");
+    paramsState.map.set("prompt", "海边黄昏 2 分钟");
+    paramsState.map.set("model", "seedance-2");
+    paramsState.map.set("ratio", "16:9");
+    paramsState.map.set("assets", "1001,1002");
+    vi.mocked(createProject).mockResolvedValue({
+      id: 99,
+      name: "海边黄昏 2 分钟",
+      thumb: null,
+      created_at: "",
+    });
+
+    render(<CanvasPage />);
+
+    await waitFor(() => {
+      expect(createProject).toHaveBeenCalledWith("海边黄昏 2 分钟");
+    });
+    await waitFor(() => {
+      expect(nav.replaceMock).toHaveBeenCalledWith(
+        "/canvas?tab=video&prompt=%E6%B5%B7%E8%BE%B9%E9%BB%84%E6%98%8F+2+%E5%88%86%E9%92%9F&model=seedance-2&ratio=16%3A9&assets=1001%2C1002&project=99",
+      );
+    });
+    // 首页跳转不查已有项目（新建独立会话）
+    expect(mockedListProjects).not.toHaveBeenCalled();
+  });
+
+  it("带 tab=agent 参数无 prompt → 新建「未命名项目」", async () => {
+    window.localStorage.setItem("bw-user", STALE_USER);
+    paramsState.map.set("tab", "agent");
+    vi.mocked(createProject).mockResolvedValue({
+      id: 100,
+      name: "未命名项目",
+      thumb: null,
+      created_at: "",
+    });
+
+    render(<CanvasPage />);
+
+    await waitFor(() => {
+      expect(createProject).toHaveBeenCalledWith("未命名项目");
+    });
+    await waitFor(() => {
+      expect(nav.replaceMock).toHaveBeenCalledWith("/canvas?tab=agent&project=100");
+    });
+  });
+
+  it("带 project 参数 + tab → 直接渲染运行时（不新建、不跳转）", async () => {
+    window.localStorage.setItem("bw-user", STALE_USER);
+    paramsState.map.set("project", "55");
+    paramsState.map.set("tab", "video");
+
+    render(<CanvasPage />);
+
+    expect(createProject).not.toHaveBeenCalled();
+    expect(mockedListProjects).not.toHaveBeenCalled();
+    expect(nav.replaceMock).not.toHaveBeenCalled();
   });
 });

@@ -229,8 +229,8 @@ test("builds affected Node and Web checks for scoped verification", async () => 
       ["git", "diff", "--check", "origin/master...HEAD"],
       ["pnpm", "exec", "tsc", "-b", "--pretty", "false"],
       ["pnpm", "exec", "vitest", "run", "packages", "apps", "--changed", "origin/master"],
-      ["pnpm", "--filter", "blue_whale", "exec", "tsc", "--noEmit"],
-      ["pnpm", "--filter", "blue_whale", "exec", "vitest", "run", "--changed", "origin/master"],
+      ["pnpm", "--filter", "@blue-whale/web", "exec", "tsc", "--noEmit"],
+      ["pnpm", "--filter", "@blue-whale/web", "exec", "vitest", "run", "--changed", "origin/master"],
     ],
   );
 });

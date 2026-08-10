@@ -186,6 +186,58 @@ describe("new-api client —— 充值与流水", () => {
     expect(logReq?.headers.get("Authorization")).toBe("Bearer sk-user-token");
   });
 
+  it("IK7G9X: resolves a consume log by request_id", async () => {
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input) => {
+        const url = String(input);
+        if (url.includes("/api/log/self")) {
+          return jsonResponse({
+            success: true,
+            message: "",
+            data: {
+              page: 1,
+              page_size: 20,
+              total: 1,
+              items: [
+                {
+                  id: 9,
+                  type: 2,
+                  content: "图片生成",
+                  model_name: "doubao-seedream-4-0-250828",
+                  quota: 120000,
+                  created_at: 1750000000,
+                  request_id: "req-abc123",
+                },
+                {
+                  id: 8,
+                  type: 2,
+                  content: "视频生成",
+                  model_name: "doubao-seedance-2-0-260128",
+                  quota: 300000,
+                  created_at: 1749999999,
+                  request_id: "req-other",
+                },
+              ],
+            },
+          });
+        }
+        return jsonResponse({ success: true, data: {} });
+      },
+    });
+    const hit = await client.getConsumeLogByRequestId("sk-user-token", "req-abc123");
+    expect(hit).toEqual({
+      id: 9,
+      type: 2,
+      content: "图片生成",
+      model_name: "doubao-seedream-4-0-250828",
+      quota: 120000,
+      created_at: 1750000000,
+    });
+    const miss = await client.getConsumeLogByRequestId("sk-user-token", "req-nope");
+    expect(miss).toBeNull();
+  });
+
   it("maps native topup {message:'error'} envelopes to typed errors", async () => {
     const client = createNewApiClient({
       baseUrl: "http://new-api.test",

@@ -224,6 +224,7 @@ export async function createPlanVideoJobWithinTx(
         ? { provider_credential: input.providerCredential }
         : {}),
     },
+    ...(input.costReservation ? { costReservation: input.costReservation } : {}),
   });
   return {
     generationJobId: createdJob.generation_job_id,

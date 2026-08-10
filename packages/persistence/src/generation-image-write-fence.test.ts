@@ -108,6 +108,7 @@ describe("image write path fence（IK7GRP）", () => {
           generation_output_slots: {
             findMany: vi.fn().mockResolvedValue([]),
           },
+          cost_reservations: {updateMany: vi.fn().mockResolvedValue({count: 1})},
           generation_job_logs: {create: vi.fn()},
           project_events: {create: vi.fn().mockResolvedValue(EVENT_ROW)},
           storyboard_previews: {findFirst: vi.fn().mockResolvedValue(null)},
@@ -254,7 +255,7 @@ describe("image write path fence（IK7GRP）", () => {
       );
       expect(costUpdateMany).toHaveBeenCalledWith({
         where: {generation_job_id: 300n, status: "reserved"},
-        data: {status: "settled", actual_amount_fen: 0},
+        data: {status: "settled", actual_amount_fen: 0n},
       });
     });
 
