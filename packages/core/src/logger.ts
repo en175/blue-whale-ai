@@ -12,6 +12,19 @@ import { getDefaultTlsLogWriter, type TlsLogWriter } from "./tls-writer.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
+export type MetricResult = "ok" | "fail";
+
+/** 结构化指标事件输入（IK7G9Y）：event/result/duration_ms 为约定字段，fields 自定义扩展。 */
+export interface MetricEventInput {
+  /** 事件名：task_finished / provider_call / queue_depth */
+  event: string;
+  result?: MetricResult;
+  /** 耗时（毫秒） */
+  duration_ms?: number;
+  /** 自定义字段（snake_case），如 job_type / provider / operation / queue / status / depth；同名不覆盖基础字段。 */
+  fields?: Record<string, string | number>;
+}
+
 /** 单条结构化日志记录（字段与 TLS 索引字段对齐）。 */
 export interface LogRecord {
   level: LogLevel;
@@ -38,6 +51,8 @@ export interface Logger {
   info(message: string): void;
   warn(message: string): void;
   error(message: string): void;
+  /** 结构化指标事件（IK7G9Y）：info 级 JSON 行，约定字段落顶层，供 TLS 侧聚合告警。 */
+  metric(input: MetricEventInput): void;
 }
 
 export interface CreateLoggerOptions {
@@ -75,9 +90,21 @@ export function createLogger(name: string, options: CreateLoggerOptions = {}): L
   const version = options.version ?? envSource.APP_VERSION?.trim() ?? "unknown";
   const writer = options.writer ?? getDefaultTlsLogWriter();
 
-  function emit(level: LogLevel, message: string): void {
+  const RESERVED_KEYS = new Set([
+    "level",
+    "time",
+    "container",
+    "env",
+    "version",
+    "trace_id",
+    "caller",
+    "func",
+    "message",
+  ]);
+
+  function write(level: LogLevel, message: string, extras?: Record<string, string | number>): void {
     const { func, caller } = captureCallSite();
-    const record: LogRecord = {
+    const record: Record<string, string | number> = {
       level,
       time: new Date().toISOString(),
       container,
@@ -88,6 +115,11 @@ export function createLogger(name: string, options: CreateLoggerOptions = {}): L
       func,
       message,
     };
+    if (extras) {
+      for (const [key, value] of Object.entries(extras)) {
+        if (!RESERVED_KEYS.has(key)) record[key] = value;
+      }
+    }
     const line = JSON.stringify(record);
     if (level === "error") console.error(line);
     else if (level === "warn") console.warn(line);
@@ -102,11 +134,26 @@ export function createLogger(name: string, options: CreateLoggerOptions = {}): L
     }
   }
 
+  function metric(input: MetricEventInput): void {
+    const extras: Record<string, string | number> = { event: input.event };
+    if (input.result !== undefined) extras.result = input.result;
+    if (input.duration_ms !== undefined) extras.duration_ms = input.duration_ms;
+    const METRIC_KEYS = new Set(["event", "result", "duration_ms"]);
+    for (const [key, value] of Object.entries(input.fields ?? {})) {
+      if (!METRIC_KEYS.has(key)) extras[key] = value;
+    }
+    const summary = Object.entries(extras)
+      .map(([key, value]) => `${key}=${value}`)
+      .join(" ");
+    write("info", `metric ${summary}`, extras);
+  }
+
   return {
     name,
-    debug: (message) => emit("debug", message),
-    info: (message) => emit("info", message),
-    warn: (message) => emit("warn", message),
-    error: (message) => emit("error", message),
+    debug: (message) => write("debug", message),
+    info: (message) => write("info", message),
+    warn: (message) => write("warn", message),
+    error: (message) => write("error", message),
+    metric,
   };
 }

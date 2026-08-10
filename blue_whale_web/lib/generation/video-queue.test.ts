@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  bullMqDepthReadings,
   createVideoQueueProducer,
   loadRedisConnection,
 } from "./video-queue.js";
@@ -76,5 +77,38 @@ describe("video generation queue producer", () => {
       REDIS_CONN_STRING: "redis://other-host:6379/0",
     };
     expect(loadRedisConnection(env)).toMatchObject({ host: "explicit-host" });
+  });
+});
+
+describe("bullMqDepthReadings —— 队列深度读数映射（IK7G9Y）", () => {
+  it("只保留积压/在途态，映射为 queue=video_bullmq 读数", () => {
+    const readings = bullMqDepthReadings({
+      waiting: 3,
+      "waiting-children": 1,
+      delayed: 2,
+      active: 4,
+      completed: 5_000,
+      failed: 12,
+      paused: 0,
+    });
+
+    expect(readings).toEqual([
+      { queue: "video_bullmq", status: "waiting", depth: 3 },
+      { queue: "video_bullmq", status: "waiting-children", depth: 1 },
+      { queue: "video_bullmq", status: "delayed", depth: 2 },
+      { queue: "video_bullmq", status: "active", depth: 4 },
+    ]);
+  });
+
+  it("深度为 0 的积压态也出读数（告警恢复需要归零曲线）", () => {
+    const readings = bullMqDepthReadings({ waiting: 0, active: 0 });
+    expect(readings).toEqual([
+      { queue: "video_bullmq", status: "waiting", depth: 0 },
+      { queue: "video_bullmq", status: "active", depth: 0 },
+    ]);
+  });
+
+  it("缺省状态不出读数", () => {
+    expect(bullMqDepthReadings({})).toEqual([]);
   });
 });

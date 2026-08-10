@@ -97,3 +97,92 @@ describe("createLogger —— 结构化字段", () => {
     expect(() => logger.info("still ok")).not.toThrow();
   });
 });
+
+describe("createLogger —— 结构化 metric 事件（IK7G9Y）", () => {
+  it("metric 输出 event/result/duration_ms 与自定义字段到 stdout 与 TLS writer", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { writer, records } = fakeWriter();
+    const logger = createLogger("unit-svc", { ...QUIET, writer });
+
+    logger.metric({
+      event: "provider_call",
+      result: "ok",
+      duration_ms: 123,
+      fields: { provider: "new_api_video", operation: "submit" },
+    });
+
+    const parsed = JSON.parse(String(logSpy.mock.calls[0]![0]));
+    expect(parsed).toMatchObject({
+      level: "info",
+      event: "provider_call",
+      result: "ok",
+      duration_ms: 123,
+      provider: "new_api_video",
+      operation: "submit",
+    });
+    expect(parsed.message).toContain("event=provider_call");
+    const keys = records[0]!.contents.map((c) => c.Key);
+    for (const key of ["event", "result", "duration_ms", "provider", "operation"]) {
+      expect(keys).toContain(key);
+    }
+    logSpy.mockRestore();
+  });
+
+  it("metric 自定义字段同名不覆盖基础字段", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { writer } = fakeWriter();
+    const logger = createLogger("unit-svc", { ...QUIET, writer });
+
+    logger.metric({ event: "task_finished", fields: { level: "hack", message: "hack" } });
+
+    const parsed = JSON.parse(String(logSpy.mock.calls[0]![0]));
+    expect(parsed.level).toBe("info");
+    expect(parsed.message).toContain("event=task_finished");
+    expect(parsed.message).not.toBe("hack");
+    logSpy.mockRestore();
+  });
+
+  it("metric 自定义字段不覆盖 event/result/duration_ms 约定字段", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { writer } = fakeWriter();
+    const logger = createLogger("unit-svc", { ...QUIET, writer });
+
+    logger.metric({
+      event: "provider_call",
+      result: "ok",
+      duration_ms: 50,
+      fields: { event: "hack", result: "fail", duration_ms: 9999, provider: "p" },
+    });
+
+    const parsed = JSON.parse(String(logSpy.mock.calls[0]![0]));
+    expect(parsed).toMatchObject({
+      event: "provider_call",
+      result: "ok",
+      duration_ms: 50,
+      provider: "p",
+    });
+    logSpy.mockRestore();
+  });
+
+  it("queue_depth 类纯计数事件可省略 result/duration_ms", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { writer } = fakeWriter();
+    const logger = createLogger("unit-svc", { ...QUIET, writer });
+
+    logger.metric({
+      event: "queue_depth",
+      fields: { queue: "agent_runs", status: "running", depth: 4 },
+    });
+
+    const parsed = JSON.parse(String(logSpy.mock.calls[0]![0]));
+    expect(parsed).toMatchObject({
+      event: "queue_depth",
+      queue: "agent_runs",
+      status: "running",
+      depth: 4,
+    });
+    expect("result" in parsed).toBe(false);
+    expect("duration_ms" in parsed).toBe(false);
+    logSpy.mockRestore();
+  });
+});

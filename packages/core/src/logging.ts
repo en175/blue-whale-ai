@@ -12,7 +12,25 @@ export {
   getOrCreateTraceId,
   runWithTraceId,
 } from "./trace.js";
-export { createLogger, type Logger, type LogLevel, type LogRecord } from "./logger.js";
+export {
+  createLogger,
+  type Logger,
+  type LogLevel,
+  type LogRecord,
+  type MetricEventInput,
+  type MetricResult,
+} from "./logger.js";
+export {
+  createQueueDepthSampler,
+  type QueueDepthReading,
+  type QueueDepthSampler,
+  type QueueDepthSamplerOptions,
+} from "./queue-depth-sampler.js";
+export {
+  timedProviderCall,
+  type ProviderCallIdentity,
+} from "./timed-provider-call.js";
+export { metricEventsFrom } from "./metric-test-support.js";
 export {
   closeDefaultTlsLogWriter,
   createTlsLogWriter,

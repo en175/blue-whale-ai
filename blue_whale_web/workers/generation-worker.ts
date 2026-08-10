@@ -9,6 +9,10 @@ import {
   quotaToFen,
 } from "@blue-whale/core";
 import {
+  createLogger,
+  createQueueDepthSampler,
+} from "@blue-whale/core/logging";
+import {
   createNewApiVideoTaskProvider,
   createPassthroughVideoMediaRelay,
   createTosVideoMediaRelay,
@@ -20,8 +24,10 @@ import { createWorkerRepo, getPrismaClient } from "@blue-whale/persistence";
 
 import {
   VIDEO_GENERATION_QUEUE,
+  bullMqDepthReadings,
   closeVideoGenerationQueue,
   enqueueVideoGenerationJob,
+  getVideoGenerationQueue,
   loadRedisConnection,
 } from "../lib/generation/video-queue.js";
 import {
@@ -90,11 +96,27 @@ worker.on("error", (error) => {
   console.error("[generation-worker] worker error:", error.message);
 });
 
+// IK7G9Y：BullMQ 队列深度采样（生产视频链路），30s 周期打 queue_depth 日志供 TLS 聚合告警。
+const logger = createLogger("generation-worker");
+const queueDepthSampler = createQueueDepthSampler({
+  logger,
+  sample: async () => {
+    const counts = await getVideoGenerationQueue().getJobCounts(
+      "waiting",
+      "waiting-children",
+      "delayed",
+      "active",
+    );
+    return bullMqDepthReadings(counts);
+  },
+});
+
 let recoveryTimer: ReturnType<typeof setInterval>;
 let server: ReturnType<typeof createServer>;
 
 async function main(): Promise<void> {
   await worker.waitUntilReady();
+  queueDepthSampler.start();
   await recoverDueVideoJobs(repo, producer);
   recoveryTimer = setInterval(
     () => {
@@ -131,6 +153,7 @@ void main();
 
 async function shutdown(): Promise<void> {
   if (recoveryTimer) clearInterval(recoveryTimer);
+  await queueDepthSampler.stop();
   await worker.close();
   await closeVideoGenerationQueue();
   if (server) {

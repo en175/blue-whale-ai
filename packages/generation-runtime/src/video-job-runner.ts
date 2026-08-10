@@ -1,3 +1,15 @@
+import { createLogger, timedProviderCall } from "@blue-whale/core/logging";
+
+const logger = createLogger("generation-runtime");
+
+/** 视频 provider（new_api_video）调用计时打点（IK7G9Y），共享实现见 core。 */
+function timedVideoProviderCall<T>(
+  operation: "submit" | "poll",
+  call: () => Promise<T>,
+): Promise<T> {
+  return timedProviderCall(logger, { provider: "new_api_video", operation }, call);
+}
+
 export type VideoJobClaim = {
   id: string;
   projectId: string;
@@ -154,7 +166,7 @@ export async function runVideoJobStep(deps: {
     const provider = deps.createProvider(deps.credentialVault.open(sealedCredential));
     if (!claim.providerTaskId) {
       const request = await buildSubmitRequest(deps.repo, claim);
-      const submitted = await provider.submit(request);
+      const submitted = await timedVideoProviderCall("submit", () => provider.submit(request));
       const updated = await deps.repo.markVideoSubmitted({
         ...claimIdentity(claim),
         providerTaskId: submitted.taskId,
@@ -163,7 +175,7 @@ export async function runVideoJobStep(deps: {
       return claim.id;
     }
 
-    const observation = await provider.poll(claim.providerTaskId);
+    const observation = await timedVideoProviderCall("poll", () => provider.poll(claim.providerTaskId!));
     if (observation.status === "queued" || observation.status === "processing") {
       const updated = await deps.repo.rescheduleVideoPoll({
         ...claimIdentity(claim),
@@ -198,7 +210,7 @@ export async function runVideoJobStep(deps: {
       await fail(deps.repo, claim, "invalid_input", "视频尺寸无效");
       return claim.id;
     }
-    await deps.repo.publishVideoResult({
+    const published = await deps.repo.publishVideoResult({
       ...claimIdentity(claim),
       projectId: claim.projectId,
       userId: claim.userId,
@@ -210,6 +222,13 @@ export async function runVideoJobStep(deps: {
         ? { actualAmountFen: deps.quotaToFen(observation.quota) }
         : {}),
     });
+    if (published) {
+      logger.metric({
+        event: "task_finished",
+        result: "ok",
+        fields: { job_type: "video_generation" },
+      });
+    }
     return claim.id;
   } catch (error) {
     await fail(
@@ -236,7 +255,16 @@ async function fail(
   code: string,
   message: string,
 ): Promise<void> {
-  await repo.failVideoJob({ ...claimIdentity(claim), code, message });
+  // 与成功路径对齐：只有状态迁移成功（fencing token 有效）才计数，
+  // 否则 fencing 竞态下同一任务会被两个 worker 各计一次 fail。
+  const failed = await repo.failVideoJob({ ...claimIdentity(claim), code, message });
+  if (failed) {
+    logger.metric({
+      event: "task_finished",
+      result: "fail",
+      fields: { job_type: "video_generation", failure_code: code },
+    });
+  }
 }
 
 async function buildSubmitRequest(
