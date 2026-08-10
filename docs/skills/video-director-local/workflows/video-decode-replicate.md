@@ -44,7 +44,7 @@ Director 呈现拆解报告后，停住让用户确认 + 做三个决策：
    - `replicate_method`（提取方法论差异化）：保留 pattern + 「有证据支撑 / 强钩子 / 节奏服务叙事」原则，beats 可重组、钩子可换 type、节奏可调。
 3. **绑定产品素材**：用户提供新产品图 / 描述 → image-understanding（`agents/image-understanding.md`）出 product understanding。
 
-> **版权提示**：选 `replicate_faithful` 且用于商业发布时，按 `../references/natural-confirmation.md` 提示一次原创度风险，建议差异化或确认已获授权。
+> **版权提示**：呈现复刻度选项时，`replicate_faithful` 的选项说明内静态自带一句：`⚠️ 照搬结构有原创度风险，请确认已获授权或自担风险`。不判商用、不询问商用属性、不弹窗、不二次确认——用户看到提示仍选 faithful 并确认 = 已知情自担。
 
 ## 复刻阶段
 
@@ -57,6 +57,11 @@ Director 呈现拆解报告后，停住让用户确认 + 做三个决策：
 | 3    | storyboard       | replicate_faithful / replicate_method | 照搬→照抄 beats 换产品；差异化→pattern 作约束自主生成              |
 | 4    | prompt-optimizer | （零改造）                            | 出可复制提示词交付包                                               |
 | 5    | review           | replicate                             | 对照配方检查保留度                                                 |
+
+> **呈现铁律（B7）**：复刻链路两处「一句话告知」必须出现在**用户可见对话**（流式大白话段落），收进思考摘要即断点——用户看不到「为什么直接定了这个 Brief / 这个 Skill」就无从纠正，推断+确认可纠机制失效。
+> - **Brief 预填告知**（步骤 1）：Brief 卡呈现前后一句「Brief 已按原片配方预填，对照卡片确认」（Brief 卡顶模式条是可见性兜底，口头告知不可省）。
+> - **Skill 直推告知**（步骤 2 照搬）：一句说清直推了哪个 Skill、为什么（如「按原片的痛点解决结构，直接套用 XX Skill」）。
+> 思考摘要只放方向判断（为谁 / 做什么 / 走到哪），不替代上述告知。
 
 ### 两复刻度对 storyboard 的影响
 
