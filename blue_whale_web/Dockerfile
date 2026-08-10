@@ -25,13 +25,13 @@ COPY blue_whale_web/patches blue_whale_web/patches
 # 阿里云 npm 镜像加速。pnpm 11 breaking change：不再读 npm_config_* 环境变量，
 # 只认 pnpm_config_* 前缀（pnpm.io/blog/releases/11.0），旧前缀会被静默忽略、直连 npmjs
 ENV pnpm_config_registry=https://registry.npmmirror.com
-# --filter ... 匹配包名 blue_whale（不是目录名 blue_whale_web），安装其依赖链。
-# IK7ERQ：额外带上两个 worker —— builder 阶段要跑 apps 的单元测试，只装 blue_whale 链
+# --filter ... 匹配包名 @blue-whale/web（不是目录名 blue_whale_web），安装其依赖链。
+# IK7ERQ：额外带上两个 worker —— builder 阶段要跑 apps 的单元测试，只装 @blue-whale/web 链
 # 时 apps/*/node_modules 无 workspace 软链，vitest 报 Failed to load url @blue-whale/*。
-# 两者依赖全在 blue_whale 已有的链内（contracts/core/persistence/agent-runtime/
+# 两者依赖全在 @blue-whale/web 已有的链内（contracts/core/persistence/agent-runtime/
 # generation-runtime），不引入任何额外外部下载；runner 阶段只 COPY standalone，镜像不变大。
 RUN pnpm install --frozen-lockfile \
-    --filter blue_whale... \
+    --filter "@blue-whale/web..." \
     --filter "@blue-whale/agent-worker..." \
     --filter "@blue-whale/generation-worker..."
 
@@ -76,7 +76,7 @@ RUN pnpm lint
 RUN pnpm --dir packages/persistence exec prisma generate \
     && pnpm test:ci
 # 构建 Next.js standalone
-RUN pnpm --filter blue_whale build
+RUN pnpm --filter @blue-whale/web build
 
 # IK75CR：standalone 不含 serverExternalPackages 的包。@volcengine/openapi 的 TLS
 # Producer 需运行时读 tls.proto（不能被打包，否则 ENOENT 上报失效）。pnpm 是符号链接

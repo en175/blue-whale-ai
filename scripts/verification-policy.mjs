@@ -94,8 +94,8 @@ function appendAreaCommands(commands, areas, base) {
   }
   if (areas.includes("web")) {
     commands.push(
-      ["pnpm", "--filter", "blue_whale", "exec", "tsc", "--noEmit"],
-      ["pnpm", "--filter", "blue_whale", "exec", "vitest", "run", "--changed", base],
+      ["pnpm", "--filter", "@blue-whale/web", "exec", "tsc", "--noEmit"],
+      ["pnpm", "--filter", "@blue-whale/web", "exec", "vitest", "run", "--changed", base],
     );
   }
   if (areas.includes("governance")) {
