@@ -692,9 +692,13 @@ export function CanvasProjectRuntime({
         pendingMention: agentPendingMention,
         onMentionConsumed: () => setAgentPendingMention(null),
         onCardGenerated: handleCardGenerated,
-        onAppendMessages: (nextMessages: ChatMessage[]) =>
-          appendMessages(nextMessages),
-        onSetCardStatus: (cardId, status) => setCardStatus(cardId, status),
+        // 权威模式渲染读 Snapshot/SSE，内存态写入不可见（幻影写入）——仅离线降级接入
+        onAppendMessages: backendReady
+          ? undefined
+          : (nextMessages: ChatMessage[]) => appendMessages(nextMessages),
+        onSetCardStatus: backendReady
+          ? undefined
+          : (cardId, status) => setCardStatus(cardId, status),
       }}
       scene={{
         backendReady,
