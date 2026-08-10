@@ -157,7 +157,9 @@ export function createTosStorage(
     uploads: {
       async prepareUpload(input) {
         const extension = MIME_EXTENSIONS[input.mime.toLowerCase()] ?? "bin";
-        const storageKey = `uploads/${input.userId}/${input.type}/${randomUUID().replace(/-/g, "")}.${extension}`;
+        const storageKey = input.keyPrefix
+          ? `${input.keyPrefix}/${input.type}/${randomUUID().replace(/-/g, "")}.${extension}`
+          : `uploads/${input.userId}/${input.type}/${randomUUID().replace(/-/g, "")}.${extension}`;
         const uploadUrl = await client.getPreSignedUrl({
           bucket: config.bucket,
           key: storageKey,

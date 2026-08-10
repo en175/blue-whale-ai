@@ -94,3 +94,22 @@ export async function logTagRename(
     detail: `标签改名：${oldLabel} → ${newLabel}`,
   });
 }
+
+/** 模板媒体上传审计（IK7JVE）：complete 成功时记一条，含类型/大小/对象 key。 */
+export async function logTemplateUpload(entry: {
+  type: "image" | "video";
+  mime: string;
+  size: number;
+  storageKey: string;
+  url: string;
+}): Promise<void> {
+  const sizeLabel =
+    entry.size >= 1024 * 1024
+      ? `${(entry.size / (1024 * 1024)).toFixed(1)}MB`
+      : `${Math.ceil(entry.size / 1024)}KB`;
+  await writeLog({
+    action: "上传",
+    target: `${entry.type}媒体`,
+    detail: `${entry.type} 上传成功（${entry.mime} ${sizeLabel}，对象 ${entry.storageKey}，URL ${entry.url}）`,
+  });
+}

@@ -474,10 +474,15 @@ describe("processNextJob - 成功路径", () => {
     });
     repo.createAsset.mockResolvedValue("700");
     const provider = mockProvider([
-      { url: "https://ark/x.png", width: 1024, height: 1024, requestId: "req-1" },
+      {
+        url: "https://ark/x.png",
+        width: 1024,
+        height: 1024,
+        requestId: "req-1",
+      },
     ]);
     const readConsumeQuota = vi.fn().mockResolvedValue(120000);
-    const quotaToFen = vi.fn().mockReturnValue(175n);
+    const quotaToFen = vi.fn().mockReturnValue(BigInt(175));
 
     const id = await processNextJob({
       repo,
@@ -494,7 +499,7 @@ describe("processNextJob - 成功路径", () => {
     // actualAmountFen = quotaToFen(120000) = 175n
     expect(repo.settleReservation).toHaveBeenCalledWith({
       ...FENCE_PROOF,
-      actualAmountFen: 175n,
+      actualAmountFen: BigInt(175),
     });
   });
 

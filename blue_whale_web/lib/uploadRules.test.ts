@@ -4,8 +4,10 @@ import {
   MAX_AUDIO_BYTES,
   MAX_IMAGE_BYTES,
   MAX_VIDEO_BYTES,
+  TEMPLATE_UPLOAD_ACCEPT,
   UPLOAD_ACCEPT,
   selectUploadFiles,
+  validateTemplateUploadFile,
   validateUploadFile,
 } from "./uploadRules";
 
@@ -200,5 +202,78 @@ describe("selectUploadFiles / 多选分发", () => {
     expect(upload).toHaveBeenCalledTimes(4);
     expect(upload.mock.calls.map(([f]) => f)).toEqual(files);
     expect(reject).not.toHaveBeenCalled();
+  });
+});
+
+describe("validateTemplateUploadFile / 模板媒体白名单（IK7JVE）", () => {
+  it("accept 仅图片五格式 + mp4", () => {
+    expect(TEMPLATE_UPLOAD_ACCEPT).toBe(".jpg,.jpeg,.png,.webp,.gif,.mp4");
+  });
+
+  it.each(["a.jpg", "a.jpeg", "a.png", "a.webp", "a.gif"])(
+    "放行图片 %s",
+    (name) => {
+      expect(validateTemplateUploadFile(fileOf(name))).toEqual({
+        ok: true,
+        kind: "image",
+      });
+    },
+  );
+
+  it("放行 mp4；拒绝 mov/webm（模板视频仅 mp4）", () => {
+    expect(validateTemplateUploadFile(fileOf("a.mp4"))).toEqual({
+      ok: true,
+      kind: "video",
+    });
+    expect(validateTemplateUploadFile(fileOf("a.mov"))).toEqual({
+      ok: false,
+      reason: "仅支持 jpg/jpeg/png/webp/gif 图片或 mp4 视频",
+    });
+    expect(validateTemplateUploadFile(fileOf("a.webm"))).toEqual({
+      ok: false,
+      reason: "仅支持 jpg/jpeg/png/webp/gif 图片或 mp4 视频",
+    });
+  });
+
+  it("拒绝其它格式与无扩展名文件", () => {
+    for (const name of ["a.txt", "a.svg", "a.flac", "noext"]) {
+      expect(validateTemplateUploadFile(fileOf(name)).ok).toBe(false);
+    }
+  });
+
+  it("大小上限：图片 ≤20MB、mp4 ≤200MB（恰好放行、超 1 字节拒绝）", () => {
+    expect(
+      validateTemplateUploadFile(fileOf("a.png", MAX_IMAGE_BYTES)),
+    ).toEqual({ ok: true, kind: "image" });
+    expect(
+      validateTemplateUploadFile(fileOf("a.png", MAX_IMAGE_BYTES + 1)),
+    ).toEqual({ ok: false, reason: "图片超过 20MB，无法上传" });
+    expect(
+      validateTemplateUploadFile(fileOf("a.mp4", MAX_VIDEO_BYTES)),
+    ).toEqual({ ok: true, kind: "video" });
+    expect(
+      validateTemplateUploadFile(fileOf("a.mp4", MAX_VIDEO_BYTES + 1)),
+    ).toEqual({ ok: false, reason: "视频超过 200MB，无法上传" });
+  });
+
+  it("无扩展名时回退 MIME 前缀判断", () => {
+    expect(validateTemplateUploadFile(fileOf("noext", 1, "image/png"))).toEqual(
+      { ok: true, kind: "image" },
+    );
+    expect(validateTemplateUploadFile(fileOf("noext", 1, "video/mp4"))).toEqual(
+      { ok: true, kind: "video" },
+    );
+    expect(
+      validateTemplateUploadFile(fileOf("noext", 1, "image/svg+xml")),
+    ).toEqual({
+      ok: false,
+      reason: "仅支持 jpg/jpeg/png/webp/gif 图片或 mp4 视频",
+    });
+    expect(
+      validateTemplateUploadFile(fileOf("noext", 1, "video/webm")),
+    ).toEqual({
+      ok: false,
+      reason: "仅支持 jpg/jpeg/png/webp/gif 图片或 mp4 视频",
+    });
   });
 });

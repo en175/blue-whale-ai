@@ -50,6 +50,8 @@ export interface AssetUploadStorage {
     userId: string;
     type: "image" | "video" | "audio";
     mime: string;
+    /** 可选对象 key 前缀：非用户上传（如管理后台模板媒体）用独立前缀与 uploads/ 隔离。缺省沿用 uploads/${userId}/。 */
+    keyPrefix?: string;
   }): Promise<{
     storageKey: string;
     publicUrl: string;
