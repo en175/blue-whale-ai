@@ -226,8 +226,10 @@ cancelled
 并发规则：
 
 - 一个 AgentSession 同时最多一个活动 AgentRun；
-- Run 执行中新消息持久化为 pending 输入，不隐式取消当前 Run；
-- 当前 Run 完成后，pending 输入创建新的 AgentRun；
+- Run 执行中新消息立即分别持久化为不可变 AgentMessage，并投影为 pending 输入，不隐式取消或修改当前 Run；
+- 当前 Run 结束后，服务按消息顺序把尚未消费的连续 pending AgentMessage 原子绑定给一个新的 AgentRun；新 Run 通过有序 AgentRunInput 关联一次性消费整批消息，不把多条原文拼接成一条假消息；
+- AgentRunInput 对 `message_id` 建立唯一约束，保证一条用户消息最多由一个 Run 消费；Run 创建后输入集合冻结，之后到达的消息进入下一批；
+- Session 空闲时，通常由当前接纳的一条用户消息立即创建新 Run；
 - Agent 提出澄清问题或请求最终确认时，本次 Run 正常完成，并把 AgentSession 分别推进为 `awaiting_clarification` 或 `awaiting_final_confirmation`；用户后续输入创建新 Run；
 - `payment_required` 是同一 Run 的可恢复阻断：充值后用户明确继续，为原 Run 发放新 Capability，并从持久化 Workflow checkpoint 恢复；
 - 进程崩溃恢复同一个 Run 的内部 Workflow checkpoint，不创建新 Run；
@@ -245,7 +247,7 @@ cancelled
 
 ## AgentMessage、RunEvent 与正式输出
 
-1. 用户输入被服务接纳后立即成为不可变的正式 AgentMessage，并与触发的 AgentRun 关联；后续 Run 失败或取消不得删除、隐藏或改写该用户消息。
+1. 用户输入被服务接纳后立即成为不可变的正式 AgentMessage；Session 空闲时它与新 AgentRun 原子关联，Session 忙碌时先作为 pending 输入保存、待活动 Run 结束后再通过 AgentRunInput 绑定下一 Run。后续 Run 失败或取消不得删除、隐藏或改写该用户消息。
 2. Assistant 文字与 ReasoningTrace 在执行中通过 RunEvent 流式展示；RunEvent 是 SSE 断线恢复与短期交付记录，不是正式会话消息，也不进入后续模型上下文。
 3. Run 成功时，在同一事务中提交完整 Assistant AgentMessage、完整 ReasoningTrace、该 Run 产生的全部 PromptCardRevision、SessionPhase 变化以及 Run `completed` 状态。
 4. Run 失败或取消时，半截 Assistant 文字、半截 ReasoningTrace 和未完成 PromptCard 不进入正式会话历史；用户原始消息继续显示，并关联 `failed` 或 `cancelled` 状态、友好错误与重试入口。
