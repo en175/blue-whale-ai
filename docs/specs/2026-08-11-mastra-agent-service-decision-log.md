@@ -47,7 +47,7 @@
 - BottomDock、GenerationDraft 与 GenerationJob；
 - 生成时冻结 PromptCard 来源、提示词快照和最终模型参数。
 
-### 独立 Mastra Agent 服务负责
+### 独立 AI Runtime 新仓库负责
 
 - Tenant、本地 ExternalPrincipal 与 TenantMembership 权限投影；
 - AgentDefinition、SkillDefinition 及版本；
@@ -58,6 +58,9 @@
 - 附件引用与工具调用记录；
 - PromptCard 聚合、不可变 PromptCardRevision 及其嵌套 PromptContent；
 - REST 快照与可恢复 SSE 事件流。
+- Agent Runtime 与 Generation Runtime 的常驻执行进程；
+- 图片/视频 Provider 调用、供应商异步任务轮询、执行级重试与结果/用量证据回报；
+- GenerationExecutionAttempt 等执行事实，但不拥有蓝鲸 GenerationJob、CostReservation、ContentReview、Asset、ProjectEvent 或 SceneCard/Storyboard 产品汇总。
 
 ### New API 负责
 
@@ -71,7 +74,10 @@
 2. 蓝鲸继续沿用当前 Docker / 自有服务器部署方式。
 3. 新独立仓库以 Docker 常驻服务部署在现有基础设施，同时承载 Agent Runtime 与 Generation Runtime；V1 的部署单元如何拆分在正式设计中确定。
 4. V1 可先把 Mastra HTTP API 与 Agent Workflow 执行器放在同一 Agent 服务进程，规模需要时再拆分；Generation Runtime 至少保持独立的执行并发与故障隔离边界。
-5. Mastra Agent、Workflow、Storage 和常驻执行 Runtime 共同替代旧 `agent-worker` 的 Agent 编排职责；新仓库中的 Generation Runtime 替代旧 `generation-worker` 的执行职责。业务鉴权、生成产品事实、资产和计费是否全部留在蓝鲸/New API，仍需冻结跨仓接口边界。
+5. Mastra Agent、Workflow、Storage 和常驻执行 Runtime 共同替代旧 `agent-worker` 的 Agent 编排职责；新仓库中的 Generation Runtime 替代旧 `generation-worker` 的执行职责。蓝鲸仓库不再保留 Agent/Generation Worker 进程或供应商执行实现。
+6. Generation Runtime 只拥有执行事实；GenerationJob、GenerationOutputSlot、CostReservation、ContentReview、Asset、ProjectEvent 与 SceneCard/Storyboard 产品汇总继续由蓝鲸权威管理，New API 继续维护实际模型扣费事实。
+7. 蓝鲸与新 Runtime 通过版本化任务领取/结果回报契约交互，新 Runtime 禁止直连或写入蓝鲸业务表。
+8. V1 的内部任务分发实现不在本轮锁死；可以先采用满足可靠性要求的实现，后续切换 Redis Streams、RabbitMQ、Kafka 等专业 MQ 时，不改变蓝鲸与 Runtime 的产品接口和任务语义。
 
 ## Tenant 与用户隔离
 
@@ -428,7 +434,7 @@ V1 必须提供 Run 级审计和端到端 Trace：
 8. **AssetMention 授权周期**：当前 `CONTEXT.md` 只允许本轮冻结 UserMessage 上的 AssetMention 放行该 AgentRun 读取，历史引用不会自动延续；新方案新增可撤销 SessionAssetGrant，使一次明确授权可跨多轮使用。迁移 ADR 必须显式取代旧的逐消息读取放行语义，同时保留每次原始 Asset 读取的蓝鲸实时验权。
 9. **隐藏 Agent Workspace**：当前领域只有 `purpose=generation_inbox` 的隐藏系统 Project；新方案为 Standalone Session 新增独立 `purpose=agent_workspace`，必须在迁移 ADR 中定义其创建、隐藏、Asset 生命周期和与 GenerationInbox 的边界。
 10. **AgentChatPanel 与 GenerationInbox 职责**：新方案只迁移 Canvas AgentChatPanel 的 PromptCard 主路径；`/generate` / GenerationInbox 旧 Agent 入口明确退役，不迁移其独立 Conversation 或旧直接生成交互。迁移规格必须处理入口移除与既有数据处置。
-11. **Generation Worker 产品写入边界**：当前 generation-worker 直接认领 GenerationJob、创建 Asset、更新输出槽、结算 CostReservation、写 ProjectEvent 并回写 SceneCard/Storyboard 汇总；新 Runtime 迁出后不得在未冻结接口前默认直连蓝鲸业务表，这些写入由谁权威执行仍需确认。
+11. **Generation Worker 产品写入边界**：当前 generation-worker 直接认领 GenerationJob、创建 Asset、更新输出槽、结算 CostReservation、写 ProjectEvent 并回写 SceneCard/Storyboard 汇总；新 Runtime 迁出后只通过版本化接口回报执行结果，由蓝鲸完成上述产品写入，禁止新 Runtime 直连蓝鲸业务表。
 
 ## 待验证与未决项
 
@@ -443,7 +449,7 @@ V1 必须提供 Run 级审计和端到端 Trace：
 7. 旧 Agent 数据是否全部舍弃，以及切换窗口和回滚策略。
 8. 最终 ADR 的拆分方式，以及对现有 `CONTEXT.md`、Agent 相关 ADR 的 Supersede 清单。
 9. **Creative Skill 迁移**：当前 Official/Personal Creative Skill、`Use`/`auto`、对话总结技能和已发布 Skill 资产，是迁入新 Agent 服务、保留为蓝鲸 Tool，还是 V1 暂时退役。
-10. **Generation Runtime 边界**：旧 generation-worker 迁入新仓库后，是只负责供应商执行并通过蓝鲸 API 回报，还是同时迁移 GenerationJob、CostReservation、ContentReview、Asset 发布与 ProjectEvent 等产品事实，尚未确认。
+10. **Runtime 内部队列实现**：V1 使用数据库队列、Redis 队列还是专业 MQ，以及生产扩容与故障模式，延后到 Runtime 部署设计决定；产品任务契约不得绑定具体队列技术。
 11. **组织 Tenant 权限**：V1 只有 Personal Tenant；未来 Organization Tenant 中 Session 默认私有还是 Project 成员共享、角色如何控制复制/删除/产卡，尚未定义。
 
 ## 复核结论
