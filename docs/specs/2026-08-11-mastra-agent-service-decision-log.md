@@ -46,7 +46,7 @@
 
 ### 独立 Mastra Agent 服务负责
 
-- Tenant、TenantMember；
+- Tenant、本地 ExternalPrincipal 与 TenantMembership 权限投影；
 - AgentDefinition、SkillDefinition 及版本；
 - AgentSession、AgentMessage、AgentRun；
 - Workflow 状态、后台执行、暂停与恢复；
@@ -72,16 +72,19 @@
 
 ## Tenant 与用户隔离
 
-1. Agent 服务从 V1 引入真实 Tenant 概念，不把 `tenant_id` 等同于 `user_id`。
-2. 每位蓝鲸用户初始自动映射一个 Personal Tenant，并成为该 Tenant 的 owner。
-3. 未来同一 User 可以加入一个或多个 Organization Tenant，无需迁移 Personal Tenant 数据。
-4. Agent 资源访问同时校验：
+1. Agent 服务从 V1 引入真实 Tenant 概念，不把 `tenant_id` 等同于 `user_id`；Agent 服务拥有本地 Tenant 资源、资源归属和隔离规则。
+2. new-api 仍是 User 身份和账户事实的唯一权威；Agent 服务不保存密码、登录 Token、邮箱、余额或其他账户事实，也不建立第二套账户中心。
+3. Agent 服务以 `integration_id + external_user_id` 唯一映射本地 ExternalPrincipal；该身份只能来自蓝鲸 BFF 的可信认证上下文，不能由浏览器自行声明。
+4. 每位蓝鲸用户首次可信调用时自动创建一个 Personal Tenant，并自动建立不可由普通接口修改的 owner TenantMembership；Personal Tenant 与用户一一对应，但 `tenant_id` 不等于 `user_id`。
+5. V1 不提供成员邀请、角色修改或移除成员接口。
+6. 未来同一 User 可以加入一个或多个 Organization Tenant，无需迁移 Personal Tenant 数据；企业成员关系仍由蓝鲸或企业身份系统权威管理，Agent 服务只保存并执行受信任的 TenantMembership 权限投影，不能自行决定谁属于企业。
+7. Agent 资源访问同时校验：
    - `integration_id`；
    - `tenant_id`；
    - `external_user_id`；
    - `external_project_id`（Project-bound Session）；
    - 目标资源 ID。
-5. 浏览器不能自行声明可信 Tenant/User；这些身份来自蓝鲸 BFF 已认证身份和服务间凭证。
+8. 浏览器不能自行声明可信 Tenant/User；这些身份来自蓝鲸 BFF 已认证身份和服务间凭证。
 
 ## AgentSession 与 Project
 
