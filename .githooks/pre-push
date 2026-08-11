@@ -1,15 +1,10 @@
 #!/usr/bin/env bash
 # pre-push hook — Blue-Whale
 # Bash + Python 3 标准库。功能：
-#   拦截「落后的工单分支 push」——push 前检查分支是否已包含最新 origin/master。
-#
-# 触发式同步策略的「出口铁闸」：哪怕 Agent 忘了走标准同步入口，push 时也会被拦下，
-# 强制先同步，避免把基于陈旧 master 的改动推上去。
-#
 # 规则：
 #   - master/main 保护分支：**任何本地直推一律拦截**（合并只在 Gitee 服务端走 PR）。
 #   - 其他本地分支：分支名必须通过结构化中文命名校验。
-#   - 合规工单分支：若 origin/master 有提交不在本地推送分支祖先里 → 拦截。
+#   - 工单分支允许日常 push；创建/更新 PR 时由发布入口要求同步最新 origin/master。
 #
 # 退出码非 0 = 拦截 push。
 # 注意：rebase/merge 进行中时此 hook 不应误触发，但 pre-push 正常不会在 rebase 中触发。
@@ -29,13 +24,7 @@ fi
 
 # pre-push 从 stdin 读取多行，每行：<local ref> <local sha> <remote ref> <remote sha>
 # 删除远程分支时 local sha=0000：master/main 仍先拦截，普通分支删除跳过后续校验。
-# 每个被推送的本地分支都独立检查命名与是否落后 origin/master。
-
-# 先取最新 origin/master（fetch 一次，确保判断基于最新远程）
-# 静默 fetch，失败不阻断（网络问题不该卡住 push；落后判断失败时放行，由人兜底）
-git fetch origin master >/dev/null 2>&1 || true
-
-upstream=$(git rev-parse --verify --quiet refs/remotes/origin/master 2>/dev/null || true)
+# 每个被推送的本地分支都独立检查命名。
 
 blocked=0
 reason=""
@@ -53,7 +42,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       ;;
   esac
 
-  # 普通远程分支删除无需命名或陈旧度校验（删除时 local sha 为全零）。
+  # 普通远程分支删除无需命名校验（删除时 local sha 为全零）。
   case "$local_sha" in
     0000000000000000000000000000000000000000) continue ;;
   esac
@@ -77,16 +66,6 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         printf '⚠️ pre-push: 存量远程分支 %s 使用旧命名，本次兼容放行。\n' "$branch" >&2
         ;;
     esac
-  fi
-
-  # 落后判断：origin/master 是否已是 local_sha 的祖先？
-  # 是祖先 → 本地已包含 master 最新 → 放行
-  # 不是祖先 → 本地落后于 master → 拦截
-  if [ -n "$upstream" ] && ! git merge-base --is-ancestor "$upstream" "$local_sha" 2>/dev/null; then
-    # 计算落后多少个提交，给提示
-    behind=$(git rev-list --count "$local_sha".."$upstream" 2>/dev/null || echo "?")
-    blocked=1
-    reason="${reason}  ${branch} 落后 origin/master 约 ${behind} 个提交（未同步）\n"
   fi
 done
 
@@ -116,20 +95,6 @@ EOF
   scripts/start-task-worktree.sh --type chore --no-issue --summary 完善工作树启动流程
 
 完整规则见 docs/agents/branch-naming.md。
-EOF
-  else
-    cat >&2 <<EOF
-❌ pre-push: 工单分支落后于 origin/master，已拦截 push。
-`printf '%b' "$reason"`
-
-你的分支基于陈旧 master，远程已有新提交合并。直接 push 会把过时代码推上去、
-PR 审核也会基于落后 diff。请先同步：
-
-  scripts/sync-task-from-origin.sh sync --json
-  # SYNCED → 按改动范围运行测试（前端 npm run lint / 后端 mvn test）→ 使用 publish-review-package 的显式 create/update 模式
-
-冲突由入口自动 abort 并返回决策证据。详见 CLAUDE.md 与
-docs/adr/0013-open-pr-update-state-machine.md。
 EOF
   fi
   exit 1

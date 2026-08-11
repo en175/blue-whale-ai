@@ -546,6 +546,22 @@ def mode_protected_push_target(command: str) -> int:
     return 1
 
 
+def mode_release_push_target(command: str) -> int:
+    for invocation in push_invocations(command):
+        targets = explicit_targets(invocation)
+        if targets:
+            for target in targets:
+                if target.startswith("release/"):
+                    print(target)
+                    return 0
+        else:
+            branch = current_branch(invocation.cwd)
+            if branch.startswith("release/"):
+                print(branch)
+                return 0
+    return 1
+
+
 def mode_unsafe_git_alias(command: str) -> int:
     if has_inline_alias_override(command):
         return 0
@@ -675,6 +691,8 @@ def main() -> int:
         return mode_unsafe_git_alias(command)
     if mode == "protected-push-target":
         return mode_protected_push_target(command)
+    if mode == "release-push-target":
+        return mode_release_push_target(command)
     if mode == "push-has-bare-force":
         return mode_push_has_bare_force(command)
     if mode == "force-lease-non-work":
