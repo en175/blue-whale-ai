@@ -238,7 +238,11 @@ cancelled
 
 - 一个 AgentSession 同时最多一个活动 AgentRun；
 - Run 执行中新消息立即分别持久化为不可变 AgentMessage，并投影为 pending 输入，不隐式取消或修改当前 Run；
-- 当前 Run 结束后，服务按消息顺序把尚未消费的连续 pending AgentMessage 原子归入一个新的 AgentInputBatch，并为该 Batch 创建首次 AgentRun；InputBatch 保留有序原文，不把多条消息拼接成一条假消息；
+- 当前 Run `completed` 后，服务按消息顺序把尚未消费的连续 pending AgentMessage 原子归入一个新的 AgentInputBatch，并自动创建首次 AgentRun；InputBatch 保留有序原文，不把多条消息拼接成一条假消息；
+- 当前 Run `cancelled` 后若存在 pending 消息，也自动启动下一 InputBatch，使“停止旧回答”后可以处理用户刚补充的内容；没有 pending 时不创建新 Run；
+- 当前 Run `failed` 后暂停 pending 队列，不自动产生新的模型费用；用户可以选择“重试失败任务”，复用失败 InputBatch 创建新 Run并保持 pending 等待，或选择“跳过并继续”，放弃重试并启动 pending InputBatch；
+- 当前 Run 处于 `payment_required` 时 pending 保持等待；用户只能充值后恢复当前 Run，或取消当前 Run 后再自动处理 pending；
+- pending AgentMessage 永不因 Run 终态或队列选择而删除，只改变是否已经归入 InputBatch；
 - AgentInputBatch 与消息的有序关联对 `message_id` 建立唯一约束，保证一条用户消息最多归属一个 InputBatch；InputBatch 创建后冻结，之后到达的消息进入下一 Batch；
 - Session 空闲时，通常由当前接纳的一条用户消息原子创建 AgentInputBatch 与首次 AgentRun；
 - Agent 提出澄清问题或请求最终确认时，本次 Run 正常完成，并把 AgentSession 分别推进为 `awaiting_clarification` 或 `awaiting_final_confirmation`；用户后续输入创建新 Run；
@@ -255,6 +259,7 @@ cancelled
 4. 用户取消后撤销 Capability、停止后续步骤；未正式完成的 PromptCard 不产生。
 5. 同一确认 Run 最多成功产出一次确定的 PromptCard 批次；重复请求幂等返回首次结果。
 6. 用户只看到简短可行动错误；内部保留审计证据。
+7. `failed` Run 不自动推进 pending 队列；“重试失败任务”和“跳过并继续”都是需要幂等命令身份的显式用户操作。
 
 ## AgentMessage、RunEvent 与正式输出
 
