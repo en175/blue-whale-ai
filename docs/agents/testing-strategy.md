@@ -20,13 +20,13 @@
 | `scoped/node` | `apps/*/src`、`packages/*/src|test` | 增量 TypeScript build + Vitest `--changed` |
 | `scoped/web` | Web app/components/hooks/lib/workers | Web typecheck + Web Vitest `--changed` |
 | `scoped/governance` | 本策略、选择器、发布门禁及关联技能 | 规则、选择器和发布门禁定向测试 |
-| `full` | PR 阶段除纯文档外的一切改动 | 当前影响面的定向检查 + `pnpm verify` |
+| `full` | 高影响路径、未识别路径或显式高风险 | 当前影响面的定向检查 + `pnpm verify` |
 
-验证分两个阶段：选择器默认**收口阶段（`--stage completion`）**，最高只到 `scoped`；**PR 阶段（`--stage pr`）**对除纯文档外的一切改动要求 `full`，由发布门禁在推送前强制。命中高影响路径或未识别路径不会在收口阶段升级 `full`，只影响 PR 全量是否包含整栈验收。纯文档豁免不适用于验证治理文件（本策略、选择器、发布门禁及关联技能）：它们在 PR 阶段进入不带验收的 `full`。
+验证分两个阶段：选择器默认**收口阶段（`--stage completion`）**；**PR 阶段（`--stage pr`）**继续按影响面选择验证，不再把所有代码 PR 无条件升级为 `full`。普通已识别 Node/Web 与纯治理改动保持 `scoped`；命中高影响路径、选择器未识别路径或显式 `--risk high` 才升级 `full`。纯文档保持 `docs`。
 
 ## 验收范围（full 的两档）
 
-PR 阶段的 `full` 默认不含整栈验收（`pnpm verify --skip-acceptance`，即类型检查、构建与全部单测）。命中以下任一项时追加整栈验收（`pnpm verify`）：
+PR 阶段只有高影响、未识别或显式高风险改动进入 `full`，并执行整栈验收（`pnpm verify`）：
 
 - 根依赖/锁文件、TypeScript 配置、Dockerfile、`deploy/`；
 - 共享契约、数据库 schema/migration；
@@ -34,7 +34,7 @@ PR 阶段的 `full` 默认不含整栈验收（`pnpm verify --skip-acceptance`�
 - Git/Agent Hook 与运行时构建、数据库、验收入口；
 - 选择器尚未识别的路径（兜底保护）。
 
-本策略文件自身属于 `scoped/governance`；普通 README 属于 `docs`，Agent 技能等可执行 Markdown 不自动降级，在 PR 阶段按未识别路径触发带验收的全量。
+本策略文件自身属于 `scoped/governance`；普通 README 属于 `docs`，Agent 技能等未识别的可执行 Markdown 在 PR 阶段仍触发全量兜底。
 
 Agent 可用 `--risk high` 主动升级为带验收的全量。选择器只接受 `auto` 或 `high`，禁止通过参数、改写凭证或删减命令降级。低层级凭证不得覆盖高层级要求；带验收的全量凭证可覆盖不带验收的全量要求，反之不成立。
 

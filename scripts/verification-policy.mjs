@@ -48,14 +48,11 @@ function classifyAutomatically(files, stage) {
     files.some((file) => GOVERNANCE_FILE.test(file)) &&
     files.every((file) => DOCUMENTATION_FILE.test(file) || GOVERNANCE_FILE.test(file))
   ) {
-    if (stage === "completion") {
-      return {
-        tier: "scoped",
-        areas: ["governance"],
-        reasons: ["verification governance changed"],
-      };
-    }
-    return fullClassification(files, "publishing requires full verification", false);
+    return {
+      tier: "scoped",
+      areas: ["governance"],
+      reasons: ["verification governance changed"],
+    };
   }
 
   if (files.length > 0 && files.every((file) => DOCUMENTATION_FILE.test(file))) {
@@ -66,16 +63,16 @@ function classifyAutomatically(files, stage) {
   }
 
   if (stage === "pr") {
-    const acceptance =
-      files.some((file) => HIGH_IMPACT_FILE.test(file)) ||
-      files.some((file) => !classified(file));
-    return fullClassification(
-      files,
-      acceptance
-        ? "publishing requires full verification with acceptance"
-        : "publishing requires full verification",
-      acceptance,
-    );
+    if (files.some((file) => HIGH_IMPACT_FILE.test(file))) {
+      return fullClassification(
+        files,
+        "publishing high-impact changes requires full verification",
+        true,
+      );
+    }
+    if (files.some((file) => !classified(file))) {
+      return fullClassification(files, "unclassified PR scope requires full verification", true);
+    }
   }
 
   const areas = [...new Set(files.map(sourceArea).filter(Boolean))].sort();
