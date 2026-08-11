@@ -54,36 +54,34 @@ fi
 # 2. 前端改动 → lint-staged 自动修（prettier + eslint --fix）
 #    仅处理本次暂存的 blue_whale_web/ 文件，限定模块范围避免误改后端/scripts。
 #    失败（lint error 无法自动修）→ 硬拦；要求修复后再 commit。
-#    紧接着的 npm run lint 兜底跑全量 lint，发现累积 warning 时软提醒。
+#    紧接着的 pnpm lint 兜底跑全量 lint，发现累积 warning 时软提醒。
 # ============================================================
 if grep -q '^blue_whale_web/' <<< "$staged_files"; then
   # 前置检查：lint-staged 是否可用（node_modules 存在且有可执行文件）
   if [ -x "blue_whale_web/node_modules/.bin/lint-staged" ]; then
     echo "ℹ️  pre-commit: 检测到前端改动，跑 lint-staged（prettier --write + eslint --fix）..." >&2
-    # 在 worktree 根跑 lint-staged（不在 blue_whale_web 子目录跑）—— lint-staged 从 cwd 解析 git root，
-    # 子目录跑会"could not find any staged files matching configured tasks"。npm CLI --prefix 让命令
-    # 复用 blue_whale_web/node_modules，但 cwd 仍是 git root。
+    # 在 worktree 根运行 pnpm 安装生成的 lint-staged 可执行文件，并显式读取根配置。
     _lint_log=$(mktemp 2>/dev/null || echo "$(pwd)/.lint-staged.log")
-    if ! npx --no --prefix blue_whale_web --no-install lint-staged >"$_lint_log" 2>&1; then
+    if ! blue_whale_web/node_modules/.bin/lint-staged --config package.json >"$_lint_log" 2>&1; then
       echo "❌ pre-commit: lint-staged 失败（lint error 无法自动修或 formatter 异常）。已拦截提交。" >&2
       echo "--- lint-staged 输出 ---" >&2
       cat "$_lint_log" >&2
-      echo "--- 修复后再 commit。可手动跑 npm run format && npm run lint 看具体错误。 ---" >&2
+      echo "--- 修复后再 commit。可手动跑 pnpm --filter @blue-whale/web format && pnpm --filter @blue-whale/web lint 看具体错误。 ---" >&2
       rm -f "$_lint_log"
       exit 1
     fi
     rm -f "$_lint_log"
     echo "✅ lint-staged 通过" >&2
 
-    echo "ℹ️  pre-commit: 跑 npm run lint（兜底软提醒，不拦截）..." >&2
-    if ! (cd blue_whale_web && npm run lint) >/dev/null 2>&1; then
+    echo "ℹ️  pre-commit: 跑 pnpm --filter @blue-whale/web lint（兜底软提醒，不拦截）..." >&2
+    if ! pnpm --filter @blue-whale/web lint >/dev/null 2>&1; then
       echo "⚠️  pre-commit: lint 有错误。本次不拦截，请判断是否需修复。注意：警告也请查看 stderr。⚠️" >&2
     else
       echo "✅ lint 通过" >&2
     fi
   else
     echo "⚠️  pre-commit: blue_whale_web/node_modules 未安装，跳过 lint-staged（非阻塞）。" >&2
-    echo "    如需 lint 检查，请先执行：cd blue_whale_web && npm install" >&2
+    echo "    如需 lint 检查，请先在仓库根执行：pnpm install --frozen-lockfile" >&2
   fi
 fi
 

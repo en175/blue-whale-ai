@@ -9,7 +9,6 @@
 #
 # 构建（context = 仓库根）：
 #   docker build -f blue_whale_web/Dockerfile.worker -t blue-whale-worker:latest .
-# 运行 env / compose 服务：见 docs/deploy/generation-worker-prod.md
 
 FROM node:24-alpine
 RUN corepack enable
