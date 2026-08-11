@@ -17,9 +17,12 @@ export {
   closeDefaultTlsLogWriter,
   createTlsLogWriter,
   getDefaultTlsLogWriter,
+  getTlsWriterStats,
   loadTlsWriterConfig,
+  resetTlsWriterStats,
   type TlsLogContent,
   type TlsLogRecord,
   type TlsLogWriter,
   type TlsWriterConfig,
+  type TlsWriterStats,
 } from "./tls-writer.js";

@@ -152,13 +152,64 @@ test("keeps high-impact infrastructure scoped at completion but full at PR stage
 
   assert.deepEqual(classifyChanges(files), {
     tier: "scoped",
-    reasons: ["high-impact infrastructure changed"],
+    reasons: ["product-impact infrastructure changed"],
   });
   assert.deepEqual(classifyChanges(files, { stage: "pr" }), {
     tier: "full",
     acceptance: true,
-    reasons: ["publishing high-impact changes requires full verification"],
+    reasons: ["publishing product-impact changes requires full verification"],
   });
+});
+
+test("keeps hook and git control-plane changes scoped at PR stage", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(
+      [".claude/hooks/confirm-release-action.sh", ".githooks/pre-push"],
+      { stage: "pr" },
+    ),
+    {
+      tier: "scoped",
+      areas: ["control-plane"],
+      reasons: ["control-plane changed"],
+    },
+  );
+});
+
+test("classifies operational scripts without product acceptance", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(["scripts/tunnel-testsite-db.sh"], { stage: "pr" }),
+    {
+      tier: "scoped",
+      areas: ["operations"],
+      reasons: ["operations tooling changed"],
+    },
+  );
+});
+
+test("rejects unknown executable paths instead of escalating to full", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.throws(
+    () => classifyChanges(["scripts/new-unknown-tool.sh"], { stage: "pr" }),
+    /UNCLASSIFIED_PATH: scripts\/new-unknown-tool\.sh/,
+  );
+});
+
+test("keeps product acceptance scripts full at PR stage", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(["scripts/run-typescript-baseline-acceptance.sh"], { stage: "pr" }),
+    {
+      tier: "full",
+      acceptance: true,
+      reasons: ["publishing product-impact changes requires full verification"],
+    },
+  );
 });
 
 test("keeps governance checks when a governance change also hits high-impact paths", async () => {
@@ -172,24 +223,42 @@ test("keeps governance checks when a governance change also hits high-impact pat
 
   assert.deepEqual(classifyChanges(files), {
     tier: "scoped",
-    areas: ["governance"],
-    reasons: ["high-impact infrastructure changed"],
+    areas: ["control-plane", "governance"],
+    reasons: ["product-impact infrastructure changed"],
   });
   assert.deepEqual(buildVerificationPlan(classifyChanges(files), { base: "base" }), [
     ["git", "diff", "--check", "base...HEAD"],
     ["node", "--test", "tests/verification-policy.test.mjs", "tests/agent-rules.test.mjs"],
+    ["bash", "scripts/test-hooks.sh"],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "scripts.tests.test_publish_review_package",
+      "scripts.tests.test_start_task_worktree",
+      "scripts.tests.test_sync_task_from_origin",
+    ],
   ]);
 
   const prClassification = classifyChanges(files, { stage: "pr" });
   assert.deepEqual(prClassification, {
     tier: "full",
     acceptance: true,
-    areas: ["governance"],
-    reasons: ["publishing high-impact changes requires full verification"],
+    areas: ["control-plane", "governance"],
+    reasons: ["publishing product-impact changes requires full verification"],
   });
   assert.deepEqual(buildVerificationPlan(prClassification, { base: "base" }), [
     ["git", "diff", "--check", "base...HEAD"],
     ["node", "--test", "tests/verification-policy.test.mjs", "tests/agent-rules.test.mjs"],
+    ["bash", "scripts/test-hooks.sh"],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "scripts.tests.test_publish_review_package",
+      "scripts.tests.test_start_task_worktree",
+      "scripts.tests.test_sync_task_from_origin",
+    ],
     ["pnpm", "verify"],
   ]);
 });
@@ -281,6 +350,44 @@ test("builds targeted rule and release-gate tests for governance changes", async
   );
 });
 
+test("builds targeted hook and workflow tests for control-plane changes", async () => {
+  const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    buildVerificationPlan(
+      { tier: "scoped", areas: ["control-plane"], reasons: ["control-plane changed"] },
+      { base: "origin/master" },
+    ),
+    [
+      ["git", "diff", "--check", "origin/master...HEAD"],
+      ["bash", "scripts/test-hooks.sh"],
+      [
+        "python3",
+        "-m",
+        "unittest",
+        "scripts.tests.test_publish_review_package",
+        "scripts.tests.test_start_task_worktree",
+        "scripts.tests.test_sync_task_from_origin",
+      ],
+    ],
+  );
+});
+
+test("builds script unit tests for operations tooling", async () => {
+  const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    buildVerificationPlan(
+      { tier: "scoped", areas: ["operations"], reasons: ["operations tooling changed"] },
+      { base: "origin/master" },
+    ),
+    [
+      ["git", "diff", "--check", "origin/master...HEAD"],
+      ["python3", "-m", "unittest", "discover", "-s", "scripts/tests"],
+    ],
+  );
+});
+
 test("builds the repository full verification command for full scope", async () => {
   const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
 
@@ -347,6 +454,26 @@ test("keeps pure governance verification scoped at PR stage", async () => {
       tier: "scoped",
       areas: ["governance"],
       reasons: ["verification governance changed"],
+    },
+  );
+});
+
+test("describes mixed known governance and control-plane scope accurately", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(
+      [
+        "docs/agents/testing-strategy.md",
+        "scripts/test-hooks.sh",
+        "tests/verification-policy.test.mjs",
+      ],
+      { stage: "pr" },
+    ),
+    {
+      tier: "scoped",
+      areas: ["control-plane", "governance"],
+      reasons: ["known scoped paths changed"],
     },
   );
 });
@@ -1071,6 +1198,28 @@ test("publishing reuses a scoped completion receipt for ordinary code changes", 
     rmSync(repository, { recursive: true, force: true });
     rmSync(remote, { recursive: true, force: true });
     rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("CLI rejects an unclassified script without planning full verification", () => {
+  const repository = createRepository();
+  try {
+    mkdirSync(join(repository, "scripts"));
+    writeFileSync(join(repository, "scripts", "new-unknown-tool.sh"), "#!/bin/sh\n");
+    git(repository, "add", "scripts/new-unknown-tool.sh");
+    git(repository, "commit", "-m", "chore: add unknown script");
+
+    const result = spawnSync(
+      process.execPath,
+      [CLI, "plan", "--base", "master", "--stage", "pr", "--json"],
+      { cwd: repository, encoding: "utf8", env: childEnvironment() },
+    );
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /UNCLASSIFIED_PATH: scripts\/new-unknown-tool\.sh/);
+    assert.doesNotMatch(result.stdout, /pnpm verify/);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
   }
 });
 

@@ -26,7 +26,7 @@
 | 3 | 图片理解 | image-understanding | asset_understanding | 有图时 |
 | 4 | 提示词草案 | image-prompt / Director | prompt_draft | 否 |
 | 5 | 提示词优化 + 交付 | prompt-optimizer | 提示词交付包 | 否 |
-| 6 | 自检 | review | 审核摘要 | 视情况 |
+| 6 | 自检 | review | 审核摘要 | 自动 |
 
 ### 步骤 1：识别生成意图
 
@@ -63,7 +63,7 @@ prompt-optimizer 按目标模型优化，按交付包格式（`../references/gen
 
 ### 步骤 6：自检
 
-review 快速检查提示词是否对齐意图、能不能直接复制用。
+**交付包产出后自动进自检，不等用户指令**（对齐 `full-canvas-creation.md` 阶段 4→5 自动续跑铁律）。review 快速检查提示词是否对齐意图、能不能直接复制用。
 
 ## 示例：小猫跑步视频
 

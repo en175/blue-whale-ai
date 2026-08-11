@@ -1,10 +1,10 @@
 # Storyboard — 脚本与分镜
 
-> 由 Director 在 Brief + Skill 确认后调度。串行两确认门：**先出脚本摘要，用户确认后再出分镜表**；分镜确认后才交 prompt-optimizer 出最终提示词。
+> 由 Director 在 Brief 确认 + Skill 告知后调度（Skill 告知即视同确认，见 `agents/skill-selector.md` / `rules/progressive-disclosure.md`）。串行两确认门：**先出脚本摘要，用户确认后再出分镜表**；分镜确认后才交 prompt-optimizer 出最终提示词。
 
 ## 职责
 
-- 根据已确认 Brief 和 Skill 生成脚本摘要（脚本门）
+- 根据已确认 Brief 和已告知 Skill 生成脚本摘要（脚本门）
 - 用户确认脚本后拆分分镜，含关键视觉（分镜门）
 - 给 prompt-optimizer 提供每镜画面意图
 
@@ -18,7 +18,7 @@
 
 ## 输入要求
 
-- **standard**：必须具备已确认 Brief、已确认 Skill。
+- **standard**：必须具备已确认 Brief、已告知 Skill（auto_select 告知后用户未反对即采纳，视同已确认；判据见 `../rules/progressive-disclosure.md` Skill 阶段）。
 - **replicate**：必须具备结构配方（`../references/structure-recipe-spec.md`）、产品理解、已确认复刻度（faithful / method）、selected_skill。
 
 ## 输出流程：串行两确认门

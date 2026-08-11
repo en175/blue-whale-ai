@@ -23,7 +23,8 @@ test("documents every required branch of the testing strategy", () => {
   for (const heading of ["验证层级", "验收范围", "凭证复用", "失败与重试", "耗时治理"]) {
     assert.match(strategy, new RegExp(`## ${heading}`));
   }
-  assert.match(strategy, /未识别.*验收/);
+  assert.match(strategy, /UNCLASSIFIED_PATH/);
+  assert.match(strategy, /新增脚本未命中分类.*不运行全量/);
   assert.match(strategy, /禁止.*降级/);
   assert.match(strategy, /输入指纹/);
   assert.match(strategy, /分阶段耗时/);

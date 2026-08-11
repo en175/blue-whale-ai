@@ -76,16 +76,17 @@ RUN pnpm lint
 RUN pnpm --dir packages/persistence exec prisma generate \
     && pnpm test:ci
 # 构建 Next.js standalone
+# IK7TED：@volcengine/openapi 的完整运行时文件（含 tls.proto）由 next.config.ts 的
+# outputFileTracingIncludes 强制纳入 NFT trace，随 standalone 产出。此前 IK75CR 在此
+# npm install 补 SDK 副本，但运行期 require 解析命中的是 .next 内 NFT 副本而非该补装
+# 副本（本地 standalone 实测），hack 从未生效且版本硬编码，故移除。
 RUN pnpm --filter @blue-whale/web build
 
-# IK75CR：standalone 不含 serverExternalPackages 的包。@volcengine/openapi 的 TLS
-# Producer 需运行时读 tls.proto（不能被打包，否则 ENOENT 上报失效）。pnpm 是符号链接
-# 结构无法直接 COPY，用 npm 装真实文件后合并进 standalone/node_modules 供运行时 require。
-# 版本须与 pnpm-lock.yaml 中 @volcengine/openapi 一致。
-RUN mkdir -p /tmp/tls-sdk && cd /tmp/tls-sdk && \
-    echo '{"name":"tls-sdk","version":"1.0.0"}' > package.json && \
-    npm install @volcengine/openapi@1.36.2 --registry=https://registry.npmmirror.com --no-audit --no-fund --loglevel=error && \
-    cp -a /tmp/tls-sdk/node_modules/. /app/blue_whale_web/.next/standalone/node_modules/
+# IK7TED 硬门禁：standalone 必须含 tls.proto。NFT 不追踪 protobuf.load 的动态路径，
+# 靠 next.config.ts 的 outputFileTracingIncludes glob 强制纳入——glob 依赖 pnpm 的
+# .pnpm 目录命名（@scope+name@version_peer 后缀），pnpm 布局变更时需校准该 glob。
+# 缺文件 = 回到 IK7TED 前的静默零上报，故构建期 ls 失败即阻断。
+RUN ls blue_whale_web/.next/standalone/node_modules/.pnpm/@volcengine+openapi@*/node_modules/@volcengine/openapi/lib/services/tls/tls.proto
 
 FROM node:24-alpine AS runner
 WORKDIR /app
