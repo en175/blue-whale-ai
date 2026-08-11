@@ -197,11 +197,12 @@ V1 只产出完整、已确认、可带入 BottomDock 的 PromptCard。资料、
 AgentSession 的交互阶段至少区分：
 
 ```text
-gathering_context
+open
 awaiting_clarification
 awaiting_final_confirmation
-ready
 ```
+
+SessionPhase 只表达 Agent 当前在等待用户什么：`open` 表示正常开放讨论；另外两种分别表示等待澄清输入和等待最终产卡确认。“正在理解、分析图片、整理信息”等执行活动归 AgentRun 状态与 RunEvent，不属于 SessionPhase；PromptCard 是否已经生成由 PromptCardRevision 表达，不使用额外的 `ready` 阶段。
 
 1. 信息充分不等于获得产卡授权。
 2. Agent 必须先总结理解，并等待用户明确确认。
@@ -213,6 +214,7 @@ ready
 8. 自然语言表示拒绝、继续修改或仍有歧义时，不形成 ConfirmationEvidence、不开放 `prompt:write`，继续讨论或澄清。
 9. 用户明确确认产卡时始终创建新的 AgentRun，不恢复此前提出总结或确认问题的 Run。
 10. 用户仅回答最后一个问题、“看起来不错”、长时间不回复或 Agent 自行判断充分，都不构成产卡确认。
+11. AgentRun 创建时冻结 `input_session_phase`；只有 Run 成功提交时才能更新下一 SessionPhase，失败或取消不改变此前阶段。成功生成 PromptCard 后 Session 回到 `open`，允许继续修改、要求新方案或讨论其他方向。
 
 ## AgentRun 状态与并发
 
