@@ -106,25 +106,26 @@ test("keeps unclassified skill Markdown scoped at completion but full at PR stag
   assert.deepEqual(classifyChanges([".claude/skills/tdd/SKILL.md"], { stage: "pr" }), {
     tier: "full",
     acceptance: true,
-    reasons: ["publishing requires full verification with acceptance"],
+    reasons: ["unclassified PR scope requires full verification"],
   });
 });
 
 test("classifies known Node and Web source changes as scoped verification", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
-
-  assert.deepEqual(
-    classifyChanges([
-      "apps/agent-worker/src/worker-loop.ts",
-      "packages/core/src/result.ts",
-      "blue_whale_web/app/page.tsx",
-    ]),
+  const files = [
+    "apps/agent-worker/src/worker-loop.ts",
+    "packages/core/src/result.ts",
+    "blue_whale_web/app/page.tsx",
+  ];
+  const expected =
     {
       tier: "scoped",
       areas: ["node", "web"],
       reasons: ["known source paths changed"],
-    },
-  );
+    };
+
+  assert.deepEqual(classifyChanges(files), expected);
+  assert.deepEqual(classifyChanges(files, { stage: "pr" }), expected);
 });
 
 test("allows an explicit high-risk escalation to full verification", async () => {
@@ -156,7 +157,7 @@ test("keeps high-impact infrastructure scoped at completion but full at PR stage
   assert.deepEqual(classifyChanges(files, { stage: "pr" }), {
     tier: "full",
     acceptance: true,
-    reasons: ["publishing requires full verification with acceptance"],
+    reasons: ["publishing high-impact changes requires full verification"],
   });
 });
 
@@ -184,7 +185,7 @@ test("keeps governance checks when a governance change also hits high-impact pat
     tier: "full",
     acceptance: true,
     areas: ["governance"],
-    reasons: ["publishing requires full verification with acceptance"],
+    reasons: ["publishing high-impact changes requires full verification"],
   });
   assert.deepEqual(buildVerificationPlan(prClassification, { base: "base" }), [
     ["git", "diff", "--check", "base...HEAD"],
@@ -301,7 +302,7 @@ test("builds the repository full verification command for full scope", async () 
   );
 });
 
-test("classifies ordinary source changes at PR stage as full without acceptance", async () => {
+test("keeps ordinary source changes scoped at PR stage", async () => {
   const { buildVerificationPlan, classifyChanges } = await import(
     "../scripts/verification-policy.mjs"
   );
@@ -309,10 +310,9 @@ test("classifies ordinary source changes at PR stage as full without acceptance"
 
   const classification = classifyChanges(files, { stage: "pr" });
   assert.deepEqual(classification, {
-    tier: "full",
-    acceptance: false,
+    tier: "scoped",
     areas: ["node", "web"],
-    reasons: ["publishing requires full verification"],
+    reasons: ["known source paths changed"],
   });
   assert.deepEqual(buildVerificationPlan(classification, { base: "origin/master" }), [
     ["git", "diff", "--check", "origin/master...HEAD"],
@@ -320,7 +320,6 @@ test("classifies ordinary source changes at PR stage as full without acceptance"
     ["pnpm", "exec", "vitest", "run", "packages", "apps", "--changed", "origin/master"],
     ["pnpm", "--filter", "@blue-whale/web", "exec", "tsc", "--noEmit"],
     ["pnpm", "--filter", "@blue-whale/web", "exec", "vitest", "run", "--changed", "origin/master"],
-    ["pnpm", "verify", "--skip-acceptance"],
   ]);
 });
 
@@ -336,7 +335,7 @@ test("exempts documentation-only changes from full verification at PR stage", as
   );
 });
 
-test("requires full verification without acceptance for pure governance at PR stage", async () => {
+test("keeps pure governance verification scoped at PR stage", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.deepEqual(
@@ -345,10 +344,9 @@ test("requires full verification without acceptance for pure governance at PR st
       { stage: "pr" },
     ),
     {
-      tier: "full",
-      acceptance: false,
+      tier: "scoped",
       areas: ["governance"],
-      reasons: ["publishing requires full verification"],
+      reasons: ["verification governance changed"],
     },
   );
 });
@@ -1032,7 +1030,7 @@ test("allows publishing when the current HEAD has a valid verification receipt",
   }
 });
 
-test("publishing requires a PR-stage receipt for code changes", () => {
+test("publishing reuses a scoped completion receipt for ordinary code changes", () => {
   const repository = createRepository();
   const remote = mkdtempSync(join(tmpdir(), "blue-whale-verification-remote-"));
   const fakeBin = mkdtempSync(join(tmpdir(), "blue-whale-publish-stage-"));
@@ -1060,26 +1058,6 @@ test("publishing requires a PR-stage receipt for code changes", () => {
     );
     assert.equal(completion.status, 0, completion.stderr);
     assert.equal(JSON.parse(completion.stdout).tier, "scoped");
-
-    const blocked = spawnSync(
-      "bash",
-      [PUBLISH, "--user-authorized", "--create-pr", "--json"],
-      { cwd: repository, encoding: "utf8", env: environment },
-    );
-    assert.equal(blocked.status, 11, blocked.stderr);
-    assert.equal(JSON.parse(blocked.stdout).status, "VERIFICATION_REQUIRED");
-
-    const prVerification = spawnSync(
-      process.execPath,
-      [CLI, "run", "--base", "origin/master", "--stage", "pr", "--json"],
-      { cwd: repository, encoding: "utf8", env: environment },
-    );
-    assert.equal(prVerification.status, 0, prVerification.stderr);
-    assert.equal(JSON.parse(prVerification.stdout).tier, "full");
-    const receiptPath = JSON.parse(prVerification.stdout).receipt;
-    const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
-    assert.equal(receipt.classification.acceptance, false);
-    assert.deepEqual(receipt.commands.at(-1), ["pnpm", "verify", "--skip-acceptance"]);
 
     const publish = spawnSync(
       "bash",
