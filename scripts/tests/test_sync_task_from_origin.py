@@ -118,6 +118,47 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertEqual(self.response(second)["status"], "UP_TO_DATE")
         self.assertEqual(self.git("rev-parse", "HEAD"), rebased_head)
 
+    def test_sync_rebases_onto_release_target(self) -> None:
+        original_head = self.commit_task_change()
+        self.git("checkout", "-b", "release/prod", cwd=self.main)
+        (self.main / "release-base.txt").write_text("release base\n", encoding="utf-8")
+        self.git("add", "release-base.txt", cwd=self.main)
+        self.git("commit", "-m", "chore: advance release baseline", cwd=self.main)
+        release_head = self.git("rev-parse", "HEAD", cwd=self.main)
+        self.git("push", "-u", "origin", "release/prod", cwd=self.main)
+        self.git("checkout", "master", cwd=self.main)
+
+        result = self.invoke("sync", "--target-branch", "release/prod", "--json")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = self.response(result)
+        self.assertEqual(payload["status"], "SYNCED")
+        self.assertEqual(payload["target_branch"], "release/prod")
+        self.assertNotEqual(self.git("rev-parse", "HEAD"), original_head)
+        self.assertEqual(
+            run(
+                "git",
+                "merge-base",
+                "--is-ancestor",
+                release_head,
+                self.git("rev-parse", "HEAD"),
+                cwd=self.worktree,
+            ).returncode,
+            0,
+        )
+        recovery = json.loads(
+            (Path(self.git("rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(recovery["target_branch"], "release/prod")
+
+    def test_sync_rejects_unprotected_target(self) -> None:
+        result = self.invoke("sync", "--target-branch", "develop", "--json")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("master 或 release/*", str(self.response(result)["detail"]))
+
     def test_sync_aborts_conflict_and_reports_decision_evidence(self) -> None:
         (self.worktree / "shared.txt").write_text("task side\n", encoding="utf-8")
         self.git("add", "shared.txt")

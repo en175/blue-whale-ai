@@ -197,14 +197,17 @@ scripts/sync-task-from-origin.sh sync --json
 # 首次发布并准备创建 PR
 scripts/publish-review-package.sh --user-authorized --create-pr --json
 
+# 首次发布到 release 基线
+scripts/publish-review-package.sh --user-authorized --create-pr --target-branch release/prod --json
+
 # 审查修订后更新已有 PR
 scripts/publish-review-package.sh --user-authorized --update-pr <PR编号> --pr-snapshot <推送前临时JSON> --json
 ```
 
-`--user-authorized` 表示 Agent 已从当前对话取得对应的创建或更新授权，ZCode / Claude Code / Codex Hook 静默放行。两种模式都校验结构化任务分支、工作区干净及分支包含最新 `origin/master`；不满足时返回 `NEEDS_SYNC`，Agent 自动改走同步入口一次，不询问 merge/rebase 策略。
+`--user-authorized` 表示 Agent 已从当前对话取得对应的创建或更新授权，ZCode / Claude Code / Codex Hook 静默放行。两种模式都校验结构化任务分支、工作区干净及分支包含最新 PR 目标基线（`origin/master` 或 `origin/release/*`）；不满足时返回 `NEEDS_SYNC`，Agent 使用 `sync --target-branch <目标>` 自动改走对应基线的同步入口一次，不询问 merge/rebase 策略。
 
-- `--create-pr`：推送后写短期发布标记；Agent 按模板创建一次 `target=master`、非 draft PR并停下等待审查。
-- `--update-pr`：Agent 先通过 Gitee MCP 读取 PR 并规范化为临时快照（IID、opened、source、target、head、conflict、changed_files、fetched_at）；入口要求远端同名源分支存在，硬校验快照和冻结范围，并使用同步事务捕获的旧 SHA 做显式 `force-with-lease`。合法新增范围逐项使用 `--allow-scope-file <路径>` 声明。
+- `--create-pr`：目标默认 `master`，可显式选择 `release/*`；推送后写入绑定实际目标的短期发布标记，Agent 按模板创建相同目标的非 draft PR 并停下等待审查。
+- `--update-pr`：Agent 先通过 Gitee MCP 读取 PR 并规范化为临时快照（IID、opened、source、target、head、conflict、changed_files、fetched_at）；目标分支由快照决定，入口要求远端同名源分支存在，按实际目标硬校验快照和冻结范围，并使用同步事务捕获的旧 SHA 做显式 `force-with-lease`。合法新增范围逐项使用 `--allow-scope-file <路径>` 声明。
 - 推送后校准 PR 描述并重新读取快照，运行 `scripts/verify-pr-update.sh --update-pr <PR编号> --pr-snapshot <推送后临时JSON> --json`。只有返回 `PR_UPDATE_VERIFIED` 后才可 `finalize` 和宣布完成；快照临时文件不进仓，完成后删除。
 
 快照是 Agent 对 Gitee MCP 实时响应的规范化投影，不是人工填写的判断。临时文件必须为 JSON object，权限 `0600`，字段契约如下（`fetched_at` 距调用不得超过 300 秒）：
@@ -230,7 +233,7 @@ PR 创建后业务范围冻结，只允许本 PR 的 review 修订、测试、�
 
 任务分支可直接 `git push` 保存或协作；创建/更新 PR 必须使用发布入口，保护分支与 `release/*` 的直推仍被 Hook 硬拦。旧脚本 `scripts/publish-task-branch.sh` 已废弃，只会提示选择明确模式。
 
-create 模式的发布标记由创建 PR Hook 在 PreToolUse 校验（`draft` 非 true、`target_branch=master`、`source_branch` 匹配），PostToolUse 创建成功后消费。创建失败不消耗，可原地重试（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)）。update 模式不使用发布标记。
+create 模式的发布标记由创建 PR Hook 在 PreToolUse 校验（`draft` 非 true、`target_branch` 为 `master` 或 `release/*` 且与标记一致、`source_branch` 匹配），PostToolUse 创建成功后消费。创建失败不消耗，可原地重试（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)）。update 模式不使用发布标记。
 
 **标记位置契约**：发布标记按来源分支隔离，存于 git common dir（`<repo>/.git/agent-release-review-package-<branch-slug>`，分支名中的 `/` 转义为 `%`）。common dir 对主 checkout 与所有 task worktree 是**同一物理路径**，因此 **ZCode / Claude Code / Codex session 在主 checkout 还是 worktree 启动均对称生效**——标记读写不依赖 session 启动位置。此契约修复了「主 checkout session + cd worktree 跑发布」时建 PR 被误拦的缺陷（标记写在 worktree git path、hook 在主仓 git path 找不到）。
 

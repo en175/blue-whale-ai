@@ -13,7 +13,7 @@
 # 规则：
 #   - 发布审查包只允许通过标准入口触发；--user-authorized 即 Agent 对人类授权的声明。
 #   - 普通任务分支 push 不需要发布授权；保护分支与发布审查包不得绕过入口。
-#   - 创建 PR 校验标准入口写入的短期标记（target=master/source_branch/no draft）；
+#   - 创建 PR 校验标准入口写入的短期标记（target=master|release/*、source_branch、no draft）；
 #     Pre 放行、PostToolUse 成功后消费标记（失败可重试，见 ADR-0011）。
 #   - 合并 PR / 创建 release 使用 AI 自动生成、绑定对象、TTL 900s 的一次性凭证。
 #   - Pre 仅校验，Post 成功后消费；失败保留凭证供有限重试。
@@ -328,9 +328,10 @@ if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
     true|TRUE|True|1) block "本项目不使用 draft PR；创建 Gitee PR 时请省略 draft 字段或传 draft=false。" ;;
   esac
 
-  if [ "$TARGET_BRANCH" != "master" ]; then
-    block "发布审查包只允许创建指向 master 的 PR。"
-  fi
+  case "$TARGET_BRANCH" in
+    master|release/?*) ;;
+    *) block "发布审查包只允许创建指向 master 或 release/* 的 PR。" ;;
+  esac
 
   case "$SOURCE_BRANCH" in
     feature/*|fix/*|hotfix/*|docs/*|chore/*) ;;
