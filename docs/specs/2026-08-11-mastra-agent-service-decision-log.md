@@ -98,7 +98,7 @@
    - **复制**：创建绑定目标 Project 的新 Session；
    - **移动**：复制到目标 Project，然后归档原 Session；
    - **解绑**：复制成 Standalone Session，然后归档原 Session。
-6. Project Asset 不自动跨上下文复制；无权使用的引用不得进入新 Session 的模型上下文。
+6. Project Asset、SessionAssetGrant 与缓存分析不自动跨上下文复制；无权使用的引用不得进入新 Session 的模型上下文，用户必须在目标上下文重新授权。
 7. 正在运行的 AgentRun 不允许移动或解绑。
 
 ## Session 生命周期
@@ -133,13 +133,17 @@ V1 只提供两个只读工具族：
 ## Asset 与 TOS
 
 1. TOS 文件本体、蓝鲸 Asset 身份、Project 归属和权限只保留一份，权威仍在蓝鲸。
-2. Agent 服务不复制 Asset 表或 TOS 对象，只保存 `asset_id`、版本/摘要、用途等引用。
-3. Agent 通过蓝鲸受控 Tool/API 读取资产；蓝鲸实时校验 Tenant、User、Project 与 Asset 权限后发放短期 TOS 签名 URL。
-4. Agent 默认不能扫描整个 Project 素材库。
-5. 只有用户在当前 Session 明确选择、拖入或引用的 Asset 才进入可读清单。
-6. Project 上下文只给最小文字摘要；不自动把全部 Canvas 内容或所有 Asset 送入模型。
-7. Agent 缺少素材时必须向用户请求授权或补充。
-8. 蓝鲸和 Agent 可以使用同一 MySQL 基础设施，但 Agent 使用独立 schema/表；双方不直接读写对方业务表，只通过版本化接口通信。
+2. Agent 服务不复制 Asset 表或 TOS 对象，只保存消息上的不可变 AgentMessageAssetMention、Session 级可撤销 SessionAssetGrant，以及受预算约束的分析摘要。
+3. 用户在消息中首次明确添加 Asset 时，同时创建 AgentMessageAssetMention 与 SessionAssetGrant；Mention 证明哪条消息附带过该 Asset，Grant 决定后续 Run 是否仍可读取。一次授权可跨多轮使用，不要求每轮重复 `@`。
+4. Agent 每次读取原始资产都必须通过蓝鲸受控 Tool/API；蓝鲸实时校验 Tenant、User、Project、Asset 状态和权限后发放短期 TOS 签名 URL。SessionAssetGrant 不能绕过实时校验。
+5. 用户可以从 Session 移除 Asset 并撤销 Grant；撤销后禁止再次读取原文件，既有缓存分析不再进入后续模型上下文，但已经正式接纳的历史消息与 PromptCardRevision 不被改写。
+6. AgentChatPanel 必须展示当前 Session 的有效素材授权清单，使用户可见 Agent 仍能读取哪些 Asset。
+7. Session 复制、移动或解绑不复制 SessionAssetGrant 或缓存分析；历史中的 Mention 只保留为来源事实，在目标上下文中显示为不可用引用，用户必须重新授权。
+8. Agent 默认不能扫描整个 Project 素材库。
+9. 只有用户在当前 Session 明确选择、拖入或引用的 Asset 才进入可读清单。
+10. Project 上下文只给最小文字摘要；不自动把全部 Canvas 内容或所有 Asset 送入模型。
+11. Agent 缺少素材时必须向用户请求授权或补充。
+12. 蓝鲸和 Agent 可以使用同一 MySQL 基础设施，但 Agent 使用独立 schema/表；双方不直接读写对方业务表，只通过版本化接口通信。
 
 ## PromptContent 与 PromptCard
 
@@ -254,6 +258,7 @@ cancelled
 - 原始历史不因摘要而删除；
 - 接近上下文限制时才更新长期摘要；
 - 图片本体不在每轮重复发送，优先复用结构化分析结果，除非用户要求重新分析；
+- 已撤销 SessionAssetGrant 的 Asset 分析不再进入 SessionBrief、最近消息窗口之外的派生附件上下文或后续模型输入；
 - 每个 Run 限制模型调用次数、输入/输出 Token 和总预算。
 
 ## 模型策略
@@ -371,7 +376,8 @@ V1 必须提供 Run 级审计和端到端 Trace：
 5. **计划产物**：当前 AgentChatPanel 产出蓝鲸持久化 `PlanMessage` 并可直接应用；V1 新方案产出 Agent 服务权威的 PromptCard，先带入 BottomDock 草稿，不自动应用或生成。旧 Agent 路径的 PlanMessage 语义不能静默沿用。
 6. **思考展示**：ADR-0071 与当前 `ThinkingTrace` 定义要求展示并持久化模型原始思维链；新方案只展示 Agent 专门生成的用户可见 ReasoningTrace，不等同于原始隐藏推理，必须显式修订或 Supersede。
 7. **模型选择**：当前 AgentChatPanel 已接入能力表驱动的模型选择；新方案 V1 由系统 ModelPolicy 选模型、UI 不直接选，未来才开放受限选择。迁移时必须处理现有入口和契约。
-8. **AgentChatPanel 职责**：当前 AgentChatPanel、GenerationInbox、PlanMessage、Creative Skill 与生成入口之间有既定职责；新方案目前只明确了 Canvas PromptCard 主路径，其他入口不能被默认视为已经迁移。
+8. **AssetMention 授权周期**：当前 `CONTEXT.md` 只允许本轮冻结 UserMessage 上的 AssetMention 放行该 AgentRun 读取，历史引用不会自动延续；新方案新增可撤销 SessionAssetGrant，使一次明确授权可跨多轮使用。迁移 ADR 必须显式取代旧的逐消息读取放行语义，同时保留每次原始 Asset 读取的蓝鲸实时验权。
+9. **AgentChatPanel 职责**：当前 AgentChatPanel、GenerationInbox、PlanMessage、Creative Skill 与生成入口之间有既定职责；新方案目前只明确了 Canvas PromptCard 主路径，其他入口不能被默认视为已经迁移。
 
 ## 待验证与未决项
 
