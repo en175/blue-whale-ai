@@ -185,32 +185,29 @@ V1 只产出完整、已确认、可带入 BottomDock 的 PromptCard。资料、
 
 ## 明确确认后才能产卡
 
-Workflow 至少区分：
+AgentSession 的交互阶段至少区分：
 
 ```text
 gathering_context
 awaiting_clarification
 awaiting_final_confirmation
-generating_prompt_content
-completed
+ready
 ```
 
 1. 信息充分不等于获得产卡授权。
 2. Agent 必须先总结理解，并等待用户明确确认。
 3. 明确确认可来自自然语言，也可来自“生成任务卡”按钮。
 4. 普通盘问 Run 只能回复、提问和读取授权附件，不能创建 PromptCard。
-5. 用户确认后必须建立独立的 `prompt:write` 授权边界；确认是恢复当前暂停 Run 还是关闭当前 Run 并创建确认 Run，尚未最终决定，见「待验证与未决项」。
+5. 用户明确确认产卡时创建新的 AgentRun，并只为该 Run 授予 `prompt:write` 权限；不恢复此前提出总结或确认问题的 Run。
 6. 用户仅回答最后一个问题、“看起来不错”、长时间不回复或 Agent 自行判断充分，都不构成产卡确认。
 
 ## AgentRun 状态与并发
 
-V1 状态集合：
+AgentRun 表示一次已接纳的用户动作触发的自主执行；AgentSession 跨多轮长期存在，Run 不跨越多次用户回答。V1 Run 状态集合：
 
 ```text
 queued
 running
-awaiting_input
-awaiting_final_confirmation
 payment_required
 completed
 failed
@@ -221,8 +218,10 @@ cancelled
 
 - 一个 AgentSession 同时最多一个活动 AgentRun；
 - Run 执行中新消息持久化为 pending 输入，不隐式取消当前 Run；
-- 当前 Run 到达安全检查点后消费，或在结束后创建下一 Run；
-- `awaiting_input` / `awaiting_final_confirmation` 时，新消息作为继续 Workflow 的输入；它是否复用同一 Run 身份由最终 Run 粒度决定；
+- 当前 Run 完成后，pending 输入创建新的 AgentRun；
+- Agent 提出澄清问题或请求最终确认时，本次 Run 正常完成，并把 AgentSession 分别推进为 `awaiting_clarification` 或 `awaiting_final_confirmation`；用户后续输入创建新 Run；
+- `payment_required` 是同一 Run 的可恢复阻断：充值后用户明确继续，为原 Run 发放新 Capability，并从持久化 Workflow checkpoint 恢复；
+- 进程崩溃恢复同一个 Run 的内部 Workflow checkpoint，不创建新 Run；
 - 只有用户显式停止才取消当前 Run；
 - 不允许两个 Run 同时对同一 Session 产出回复或 PromptCard。
 
@@ -381,15 +380,14 @@ V1 必须提供 Run 级审计和端到端 Trace：
 6. PromptContent/PromptCard 的精确 JSON Schema 与 BottomDock 字段映射。
 7. 旧 Agent 数据是否全部舍弃，以及切换窗口和回滚策略。
 8. 最终 ADR 的拆分方式，以及对现有 `CONTEXT.md`、Agent 相关 ADR 的 Supersede 清单。
-9. **AgentRun 粒度**：一个 Run 是一次用户轮次、一次后台执行、一个跨多轮暂停/恢复的创作目标，还是 Mastra Workflow Run 的直接映射；确认产卡时复用暂停 Run 还是创建新 Run。已确认不变量只有：一个 Session 同时最多一个活动 Run、每次物理模型调用受 Run-scoped Capability 约束、确认前没有 `prompt:write` 权限。
-10. **Creative Skill 迁移**：当前 Official/Personal Creative Skill、`Use`/`auto`、对话总结技能和已发布 Skill 资产，是迁入新 Agent 服务、保留为蓝鲸 Tool，还是 V1 暂时退役。
-11. **GenerationInbox 范围**：V1 新 Agent 是否只接 Canvas AgentChatPanel，还是同时替换 `/generate` 的独立 Conversation 与 Agent 入口。
-12. **Standalone 附件**：Standalone Session 没有 Blue Whale Project 绑定时，附件由蓝鲸创建临时/专用 Asset，还是由 Agent 服务拥有独立附件存储与 TOS 命名空间。
-13. **组织 Tenant 权限**：V1 只有 Personal Tenant；未来 Organization Tenant 中 Session 默认私有还是 Project 成员共享、角色如何控制复制/删除/产卡，尚未定义。
+9. **Creative Skill 迁移**：当前 Official/Personal Creative Skill、`Use`/`auto`、对话总结技能和已发布 Skill 资产，是迁入新 Agent 服务、保留为蓝鲸 Tool，还是 V1 暂时退役。
+10. **GenerationInbox 范围**：V1 新 Agent 是否只接 Canvas AgentChatPanel，还是同时替换 `/generate` 的独立 Conversation 与 Agent 入口。
+11. **Standalone 附件**：Standalone Session 没有 Blue Whale Project 绑定时，附件由蓝鲸创建临时/专用 Asset，还是由 Agent 服务拥有独立附件存储与 TOS 命名空间。
+12. **组织 Tenant 权限**：V1 只有 Personal Tenant；未来 Organization Tenant 中 Session 默认私有还是 Project 成员共享、角色如何控制复制/删除/产卡，尚未定义。
 
 ## 复核结论
 
-截至 2026-08-11 本次复核：已确认的对话结论均已进入本文；发现的一处 Run 粒度矛盾已降为未决，没有替用户选择答案。本文现在是完整的「已确认决策 + 明示未决项」记录，但仍不是完整实施规格。后续每次确认新决定，都应立即更新本文并再次检查是否影响已确认项或现有 ADR。
+截至 2026-08-11 本次复核：已确认的对话结论均已进入本文；此前发现的 Run 粒度矛盾已经用户确认解决为「Session 跨多轮、Run 对应一次用户动作、确认产卡新建带 `prompt:write` 权限的 Run」。本文现在是完整的「已确认决策 + 明示未决项」记录，但仍不是完整实施规格。后续每次确认新决定，都应立即更新本文并再次检查是否影响已确认项或现有 ADR。
 
 ## 下一步
 
