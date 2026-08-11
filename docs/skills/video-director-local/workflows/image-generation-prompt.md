@@ -16,7 +16,7 @@
 | 2 | 资产理解检查 | image-understanding | asset_understanding | 必要时 |
 | 3 | 生图提示词草案 | image-prompt | prompt_draft | 否 |
 | 4 | 提示词优化 + 交付 | prompt-optimizer | 生图提示词卡 | 否 |
-| 5 | 自检 | review | 审核摘要 | 视情况 |
+| 5 | 自检 | review | 审核摘要 | 自动 |
 
 ### 步骤 1：判断图片任务类型
 
@@ -36,7 +36,7 @@ prompt-optimizer 优化（只允许提高清晰度、补构图光影、加稳定
 
 ### 步骤 5：自检
 
-review 检查提示词对齐 + 可复制性。
+**生图提示词卡交付后自动进自检，不等用户指令**（对齐 `full-canvas-creation.md` 阶段 4→5 自动续跑铁律）。review 检查提示词对齐 + 可复制性。
 
 ## 禁止
 
