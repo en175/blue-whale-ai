@@ -41,6 +41,7 @@
 - 内部 Agent Model Gateway；
 - New API 用户计费归属；
 - Asset 权限、TOS 对象和短期签名 URL；
+- Standalone Session 使用的隐藏 AgentWorkspaceProject；
 - BottomDock、GenerationDraft 与 GenerationJob；
 - 生成时冻结 PromptCard 来源、提示词快照和最终模型参数。
 
@@ -92,7 +93,7 @@
 2. V1 UI 直接支持新建、查看历史、切换、自动标题、重命名、归档和删除会话。
 3. 一个 AgentSession 创建时绑定以下上下文之一：
    - `blue_whale_project`；
-   - `standalone`。
+   - `standalone`；它不绑定用户可见 Canvas Project，但 Blue Whale 集成可以另外提供隐藏的 Asset 存储作用域。
 4. Session 的上下文绑定创建后不可变，避免历史消息和资产权限被重新解释。
 5. 用户界面可提供：
    - **复制**：创建绑定目标 Project 的新 Session；
@@ -148,6 +149,16 @@ V1 只提供两个只读工具族：
 10. Project 上下文只给最小文字摘要；不自动把全部 Canvas 内容或所有 Asset 送入模型。
 11. Agent 缺少素材时必须向用户请求授权或补充。
 12. 蓝鲸和 Agent 可以使用同一 MySQL 基础设施，但 Agent 使用独立 schema/表；双方不直接读写对方业务表，只通过版本化接口通信。
+
+### Standalone Session 的 AgentWorkspaceProject
+
+1. Blue Whale 集成中的 Standalone Session 附件仍由蓝鲸 Asset/TOS 体系唯一管理，Agent 服务不建立第二套附件存储。
+2. 蓝鲸为每个 User 最多惰性创建一个隐藏系统用途 Project：`purpose=agent_workspace`；只有首次在 Standalone Session 上传附件时创建，新建空 Session 不创建。
+3. AgentWorkspaceProject 从普通 Project 列表隐藏，不能作为 Canvas Project 打开，也不能与现有 `purpose=generation_inbox` 混用。
+4. 多个 Standalone Session 可以通过各自独立的 SessionAssetGrant 引用同一 Workspace Asset；跨 Session 不自动授权。
+5. 从普通 Project 解绑产生 Standalone Session 时不复制原 Project Asset；旧引用保持不可用来源事实。User 必须重新上传到 AgentWorkspaceProject，或通过未来的显式导入操作创建合法 Workspace Asset。
+6. 删除一个 AgentSession 不删除 AgentWorkspaceProject 或其中 Asset；Asset 删除使用蓝鲸独立资产操作，因为其他 Session 可能仍在引用。
+7. Agent 服务保持接入产品中立：其他 Integration 可以提供自己的附件适配器和存储作用域，不要求复用蓝鲸 AgentWorkspaceProject。
 
 ## PromptContent 与 PromptCard
 
@@ -403,7 +414,8 @@ V1 必须提供 Run 级审计和端到端 Trace：
 6. **思考展示**：ADR-0071 与当前 `ThinkingTrace` 定义要求展示并持久化模型原始思维链；新方案只展示 Agent 专门生成的用户可见 ReasoningTrace，不等同于原始隐藏推理，必须显式修订或 Supersede。
 7. **模型选择**：当前 AgentChatPanel 已接入能力表驱动的模型选择；新方案 V1 由系统 ModelPolicy 选模型、UI 不直接选，未来才开放受限选择。迁移时必须处理现有入口和契约。
 8. **AssetMention 授权周期**：当前 `CONTEXT.md` 只允许本轮冻结 UserMessage 上的 AssetMention 放行该 AgentRun 读取，历史引用不会自动延续；新方案新增可撤销 SessionAssetGrant，使一次明确授权可跨多轮使用。迁移 ADR 必须显式取代旧的逐消息读取放行语义，同时保留每次原始 Asset 读取的蓝鲸实时验权。
-9. **AgentChatPanel 职责**：当前 AgentChatPanel、GenerationInbox、PlanMessage、Creative Skill 与生成入口之间有既定职责；新方案目前只明确了 Canvas PromptCard 主路径，其他入口不能被默认视为已经迁移。
+9. **隐藏 Agent Workspace**：当前领域只有 `purpose=generation_inbox` 的隐藏系统 Project；新方案为 Standalone Session 新增独立 `purpose=agent_workspace`，必须在迁移 ADR 中定义其创建、隐藏、Asset 生命周期和与 GenerationInbox 的边界。
+10. **AgentChatPanel 职责**：当前 AgentChatPanel、GenerationInbox、PlanMessage、Creative Skill 与生成入口之间有既定职责；新方案目前只明确了 Canvas PromptCard 主路径，其他入口不能被默认视为已经迁移。
 
 ## 待验证与未决项
 
@@ -419,8 +431,7 @@ V1 必须提供 Run 级审计和端到端 Trace：
 8. 最终 ADR 的拆分方式，以及对现有 `CONTEXT.md`、Agent 相关 ADR 的 Supersede 清单。
 9. **Creative Skill 迁移**：当前 Official/Personal Creative Skill、`Use`/`auto`、对话总结技能和已发布 Skill 资产，是迁入新 Agent 服务、保留为蓝鲸 Tool，还是 V1 暂时退役。
 10. **GenerationInbox 范围**：V1 新 Agent 是否只接 Canvas AgentChatPanel，还是同时替换 `/generate` 的独立 Conversation 与 Agent 入口。
-11. **Standalone 附件**：Standalone Session 没有 Blue Whale Project 绑定时，附件由蓝鲸创建临时/专用 Asset，还是由 Agent 服务拥有独立附件存储与 TOS 命名空间。
-12. **组织 Tenant 权限**：V1 只有 Personal Tenant；未来 Organization Tenant 中 Session 默认私有还是 Project 成员共享、角色如何控制复制/删除/产卡，尚未定义。
+11. **组织 Tenant 权限**：V1 只有 Personal Tenant；未来 Organization Tenant 中 Session 默认私有还是 Project 成员共享、角色如何控制复制/删除/产卡，尚未定义。
 
 ## 复核结论
 
