@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { FakeProducer, producerInstances } = vi.hoisted(() => {
   type AnyProducer = InstanceType<typeof FakeProducer>;
@@ -9,21 +9,32 @@ const { FakeProducer, producerInstances } = vi.hoisted(() => {
     started = false;
     closed = false;
     closeResolve: (() => void) | null = null;
-    sendLogs: unknown[] = [];
+    closeReject: Error | null = null;
+    sendLogs: unknown[][] = [];
+    sendLogError: Error | null = null;
+    startError: Error | null = null;
+    static nextStartError: Error | null = null;
 
     constructor(config: unknown) {
       this.config = config;
       producerInstances.push(this);
+      if (FakeProducer.nextStartError) {
+        this.startError = FakeProducer.nextStartError;
+        FakeProducer.nextStartError = null;
+      }
     }
     Start() {
+      if (this.startError) throw this.startError;
       this.started = true;
     }
     SendLog(...args: unknown[]) {
       this.sendLogs.push(args);
+      if (this.sendLogError) return Promise.reject(this.sendLogError);
       return Promise.resolve();
     }
     Close(): Promise<void> {
       this.closed = true;
+      if (this.closeReject) return Promise.reject(this.closeReject);
       if (this.closeResolve) {
         return new Promise<void>((resolve) => {
           const done = this.closeResolve!;
@@ -64,8 +75,30 @@ import {
   closeDefaultTlsLogWriter,
   createTlsLogWriter,
   getDefaultTlsLogWriter,
+  getTlsWriterStats,
   loadTlsWriterConfig,
+  resetTlsWriterStats,
 } from "./tls-writer.js";
+
+/** SendLog 第 6 参回调的最小形状（与 tls-writer 内部结构一致）。 */
+interface FakeCallBack {
+  Success(result: {
+    Attempts?: Array<{ ErrorCode?: string; ErrorMessage?: string; RequestId?: string }>;
+  }): void;
+  Fail(result: {
+    Attempts?: Array<{ ErrorCode?: string; ErrorMessage?: string }>;
+  }): void;
+}
+
+function lastCallBack(producer: InstanceType<typeof FakeProducer>): FakeCallBack {
+  const args = producer.sendLogs[producer.sendLogs.length - 1]!;
+  return args[5] as FakeCallBack;
+}
+
+/** 等微任务排空（SendLog 的 .catch 在 rejection 后执行）。 */
+async function flushMicrotasks(): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
 
 const FULL_ENV = {
   TLS_ENDPOINT: "tls-cn-beijing.volces.com",
@@ -84,8 +117,17 @@ const VALID_CONFIG = {
   source: "unit-test",
 };
 
+let errSpy: ReturnType<typeof vi.spyOn>;
+
 beforeEach(() => {
   producerInstances.length = 0;
+  resetTlsWriterStats();
+  errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+});
+
+afterEach(() => {
+  errSpy.mockRestore();
+  vi.unstubAllEnvs();
 });
 
 describe("loadTlsWriterConfig —— 环境变量解析", () => {
@@ -141,7 +183,7 @@ describe("createTlsLogWriter", () => {
     });
   });
 
-  it("write 透传 topic/source/filename 与日志内容给 SendLog", () => {
+  it("write 透传 topic/source/filename 与日志内容给 SendLog，并附带 CallBack", () => {
     const writer = createTlsLogWriter(VALID_CONFIG);
     writer.write({
       time: 1_700_000_000_000,
@@ -149,20 +191,203 @@ describe("createTlsLogWriter", () => {
     });
     const producer = producerInstances[0]!;
     expect(producer.sendLogs).toHaveLength(1);
-    expect(producer.sendLogs[0]).toEqual([
+    const args = producer.sendLogs[0]!;
+    expect(args.slice(0, 5)).toEqual([
       "",
       "topic-x",
       "unit-test",
       "blue-whale-ai",
       { Time: 1_700_000_000_000, Contents: [{ Key: "message", Value: "hello" }] },
-      undefined,
     ]);
+    const callBack = args[5] as FakeCallBack;
+    expect(typeof callBack.Success).toBe("function");
+    expect(typeof callBack.Fail).toBe("function");
   });
 
   it("close 调用 Producer.Close", async () => {
     const writer = createTlsLogWriter(VALID_CONFIG);
     await writer.close();
     expect(producerInstances[0]!.closed).toBe(true);
+  });
+});
+
+describe("错误可见性（IK7TED）", () => {
+  it("SendLog reject 时 surface enqueue 错误并计数", async () => {
+    const writer = createTlsLogWriter(VALID_CONFIG);
+    const producer = producerInstances[0]!;
+    const boom = new Error("proto load ENOENT");
+    (boom as Error & { code: string }).code = "ENOENT";
+    producer.sendLogError = boom;
+
+    writer.write({ time: Date.now(), contents: [] });
+    await flushMicrotasks();
+
+    const stats = getTlsWriterStats();
+    expect(stats.enqueueFailures).toBe(1);
+    expect(stats.lastError).toMatchObject({ at: "enqueue", code: "ENOENT" });
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    expect(errSpy.mock.calls[0]![0]).toContain("[tls-writer] enqueue: proto load ENOENT");
+    expect(errSpy.mock.calls[0]![0]).toContain("(code=ENOENT)");
+  });
+
+  it("SendLog 同步 throw 时同样 surface enqueue 错误", () => {
+    const writer = createTlsLogWriter(VALID_CONFIG);
+    const producer = producerInstances[0]!;
+    producer.SendLog = () => {
+      throw new Error("buffer full");
+    };
+
+    writer.write({ time: Date.now(), contents: [] });
+
+    expect(getTlsWriterStats().enqueueFailures).toBe(1);
+    expect(errSpy.mock.calls[0]![0]).toContain("buffer full");
+  });
+
+  it("CallBack.Fail 提取最后一次 Attempt 的 ErrorMessage/ErrorCode", () => {
+    const writer = createTlsLogWriter(VALID_CONFIG);
+    writer.write({ time: Date.now(), contents: [] });
+    const producer = producerInstances[0]!;
+
+    lastCallBack(producer).Fail({
+      Attempts: [
+        { ErrorCode: "NetworkError", ErrorMessage: "first attempt" },
+        { ErrorCode: "InternalServerError", ErrorMessage: "final attempt" },
+      ],
+    });
+
+    const stats = getTlsWriterStats();
+    expect(stats.sendFailures).toBe(1);
+    expect(stats.lastError).toMatchObject({
+      at: "send",
+      message: "final attempt",
+      code: "InternalServerError",
+    });
+    expect(errSpy.mock.calls[0]![0]).toContain("[tls-writer] send: final attempt");
+  });
+
+  it("CallBack.Fail 无 Attempts 时使用兜底消息", () => {
+    const writer = createTlsLogWriter(VALID_CONFIG);
+    writer.write({ time: Date.now(), contents: [] });
+    lastCallBack(producerInstances[0]!).Fail({});
+    expect(getTlsWriterStats().sendFailures).toBe(1);
+    expect(errSpy.mock.calls[0]![0]).toContain("batch send failed after all retries");
+  });
+
+  it("CallBack.Success 只计数，不输出错误", () => {
+    const writer = createTlsLogWriter(VALID_CONFIG);
+    writer.write({ time: Date.now(), contents: [] });
+    lastCallBack(producerInstances[0]!).Success({ Attempts: [{ RequestId: "req-1" }] });
+
+    const stats = getTlsWriterStats();
+    expect(stats.sendSuccesses).toBe(1);
+    expect(stats.sendFailures).toBe(0);
+    expect(errSpy).not.toHaveBeenCalled();
+  });
+
+  it("Producer.Start 失败时降级为 no-op writer 并 surface", () => {
+    FakeProducer.nextStartError = new Error("dispatcher broken");
+    const writer = createTlsLogWriter(VALID_CONFIG);
+
+    expect(getTlsWriterStats().startFailures).toBe(1);
+    expect(errSpy.mock.calls[0]![0]).toContain("[tls-writer] start: dispatcher broken");
+
+    // 降级后 write/close 不抛、不触达 Producer。
+    const producer = producerInstances[0]!;
+    writer.write({ time: Date.now(), contents: [] });
+    expect(producer.sendLogs).toHaveLength(0);
+    return expect(writer.close()).resolves.toBeUndefined();
+  });
+
+  it("close 失败时 surface 且仍正常返回", async () => {
+    const writer = createTlsLogWriter(VALID_CONFIG);
+    producerInstances[0]!.closeReject = new Error("close timeout");
+
+    await expect(writer.close()).resolves.toBeUndefined();
+    expect(getTlsWriterStats().closeFailures).toBe(1);
+    expect(errSpy.mock.calls[0]![0]).toContain("[tls-writer] close: close timeout");
+  });
+
+  it("同类错误在节流间隔内只输出一次", async () => {
+    vi.stubEnv("TLS_SURFACE_INTERVAL_MS", "60000");
+    const writer = createTlsLogWriter(VALID_CONFIG);
+    const producer = producerInstances[0]!;
+    producer.sendLogError = new Error("boom");
+
+    writer.write({ time: Date.now(), contents: [] });
+    await flushMicrotasks();
+    writer.write({ time: Date.now(), contents: [] });
+    await flushMicrotasks();
+
+    expect(getTlsWriterStats().enqueueFailures).toBe(2);
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    expect(errSpy.mock.calls[0]![0]).toContain("total=1");
+  });
+
+  it("TLS_DEBUG 时节流失效，逐条输出", async () => {
+    vi.stubEnv("TLS_DEBUG", "1");
+    const writer = createTlsLogWriter(VALID_CONFIG);
+    const producer = producerInstances[0]!;
+    producer.sendLogError = new Error("boom");
+
+    writer.write({ time: Date.now(), contents: [] });
+    await flushMicrotasks();
+    writer.write({ time: Date.now(), contents: [] });
+    await flushMicrotasks();
+
+    expect(errSpy).toHaveBeenCalledTimes(2);
+    expect(errSpy.mock.calls[1]![0]).toContain("total=2");
+  });
+
+  it("TLS_DEBUG 时 CallBack.Success 输出 requestId", () => {
+    vi.stubEnv("TLS_DEBUG", "1");
+    const writer = createTlsLogWriter(VALID_CONFIG);
+    writer.write({ time: Date.now(), contents: [] });
+    lastCallBack(producerInstances[0]!).Success({ Attempts: [{ RequestId: "req-9" }] });
+    expect(errSpy.mock.calls[0]![0]).toContain("send ok (requestId=req-9)");
+  });
+
+  it("TLS_DEBUG=0 视为关闭，节流仍生效", async () => {
+    vi.stubEnv("TLS_DEBUG", "0");
+    const writer = createTlsLogWriter(VALID_CONFIG);
+    const producer = producerInstances[0]!;
+    producer.sendLogError = new Error("boom");
+
+    writer.write({ time: Date.now(), contents: [] });
+    await flushMicrotasks();
+    writer.write({ time: Date.now(), contents: [] });
+    await flushMicrotasks();
+
+    expect(getTlsWriterStats().enqueueFailures).toBe(2);
+    expect(errSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("CallBack 收到畸形 result 时不抛错", () => {
+    const writer = createTlsLogWriter(VALID_CONFIG);
+    writer.write({ time: Date.now(), contents: [] });
+    const callBack = lastCallBack(producerInstances[0]!) as unknown as {
+      Success: (r: unknown) => void;
+      Fail: (r: unknown) => void;
+    };
+
+    expect(() => callBack.Fail(null)).not.toThrow();
+    expect(() => callBack.Success(undefined)).not.toThrow();
+    const stats = getTlsWriterStats();
+    expect(stats.sendFailures).toBe(1);
+    expect(stats.sendSuccesses).toBe(1);
+    expect(errSpy.mock.calls[0]![0]).toContain("batch send failed after all retries");
+  });
+
+  it("getTlsWriterStats 返回深拷贝，消费者改写不污染内部状态", async () => {
+    const writer = createTlsLogWriter(VALID_CONFIG);
+    const producer = producerInstances[0]!;
+    producer.sendLogError = new Error("boom");
+    writer.write({ time: Date.now(), contents: [] });
+    await flushMicrotasks();
+
+    const snapshot = getTlsWriterStats();
+    expect(snapshot.lastError).not.toBeNull();
+    snapshot.lastError!.message = "tampered";
+    expect(getTlsWriterStats().lastError?.message).toBe("boom");
   });
 });
 
@@ -173,7 +398,6 @@ describe("默认 writer 与停机超时兜底", () => {
     writer.write({ time: Date.now(), contents: [] });
     await closeDefaultTlsLogWriter();
     expect(producerInstances).toHaveLength(0);
-    vi.unstubAllEnvs();
   });
 
   it("closeDefaultTlsLogWriter 在 Producer.Close 挂起时按超时返回", async () => {
@@ -193,6 +417,5 @@ describe("默认 writer 与停机超时兜底", () => {
     getDefaultTlsLogWriter();
     expect(producerInstances).toHaveLength(2);
     await closeDefaultTlsLogWriter();
-    vi.unstubAllEnvs();
   });
 });
