@@ -199,7 +199,7 @@ completed
 2. Agent 必须先总结理解，并等待用户明确确认。
 3. 明确确认可来自自然语言，也可来自“生成任务卡”按钮。
 4. 普通盘问 Run 只能回复、提问和读取授权附件，不能创建 PromptCard。
-5. 确认操作创建独立 AgentRun，只有该 Run 获得 `prompt:write` 能力。
+5. 用户确认后必须建立独立的 `prompt:write` 授权边界；确认是恢复当前暂停 Run 还是关闭当前 Run 并创建确认 Run，尚未最终决定，见「待验证与未决项」。
 6. 用户仅回答最后一个问题、“看起来不错”、长时间不回复或 Agent 自行判断充分，都不构成产卡确认。
 
 ## AgentRun 状态与并发
@@ -222,7 +222,7 @@ cancelled
 - 一个 AgentSession 同时最多一个活动 AgentRun；
 - Run 执行中新消息持久化为 pending 输入，不隐式取消当前 Run；
 - 当前 Run 到达安全检查点后消费，或在结束后创建下一 Run；
-- `awaiting_input` / `awaiting_final_confirmation` 时，新消息作为恢复输入；
+- `awaiting_input` / `awaiting_final_confirmation` 时，新消息作为继续 Workflow 的输入；它是否复用同一 Run 身份由最终 Run 粒度决定；
 - 只有用户显式停止才取消当前 Run；
 - 不允许两个 Run 同时对同一 Session 产出回复或 PromptCard。
 
@@ -356,6 +356,19 @@ V1 必须提供 Run 级审计和端到端 Trace：
 - 用户只查看自身状态与友好错误；管理员审计接口必须受权限保护；
 - 日志禁止记录用户 `sk-*`、原始 Capability、TOS 签名 URL、系统提示词和原始隐藏推理。
 
+## 与现有领域文档的已知冲突
+
+本节只记录迁移后必须处理的冲突，不在讨论中直接改写当前生产领域定义。正式 ADR 接纳前，现有 `CONTEXT.md` 与 Accepted ADR 仍描述当前系统。
+
+1. **运行拓扑**：`CONTEXT.md` 与 ADR-0068 当前把 Next.js、`agent-worker`、`generation-worker` 定义为同一模块化单体的多进程入口；新方案把 Agent 拆到独立仓库与独立服务，必须显式修订或 Supersede。
+2. **Worker 保留决定**：ADR-0059 明确保留独立 Node `agent-worker`；新方案决定退役它，必须显式 Supersede 对应条款。
+3. **会话归属与数量**：当前 `Conversation` 定义普通 Canvas Project 只有唯一 AgentChatPanel 消息流，且消息归蓝鲸 Product API；新方案允许一个 Project 多个 AgentSession，且会话历史权威迁移到 Agent 服务。
+4. **AgentRun 权威**：当前 `AgentRun`、`AgentAdvance`、`RunCommit`、RunPin、Lease 和 RuntimeManifest 都是蓝鲸产品模型；新方案退役自研 Agent 执行后，哪些概念删除、哪些映射到 Mastra Workflow、哪些仅保留为历史数据，必须在迁移 ADR 中逐项说明。
+5. **计划产物**：当前 AgentChatPanel 产出蓝鲸持久化 `PlanMessage` 并可直接应用；V1 新方案产出 Agent 服务权威的 PromptCard，先带入 BottomDock 草稿，不自动应用或生成。旧 Agent 路径的 PlanMessage 语义不能静默沿用。
+6. **思考展示**：ADR-0071 与当前 `ThinkingTrace` 定义要求展示并持久化模型原始思维链；新方案只展示 Agent 专门生成的用户可见 ReasoningTrace，不等同于原始隐藏推理，必须显式修订或 Supersede。
+7. **模型选择**：当前 AgentChatPanel 已接入能力表驱动的模型选择；新方案 V1 由系统 ModelPolicy 选模型、UI 不直接选，未来才开放受限选择。迁移时必须处理现有入口和契约。
+8. **AgentChatPanel 职责**：当前 AgentChatPanel、GenerationInbox、PlanMessage、Creative Skill 与生成入口之间有既定职责；新方案目前只明确了 Canvas PromptCard 主路径，其他入口不能被默认视为已经迁移。
+
 ## 待验证与未决项
 
 以下内容尚未确认，不得被视为已经决定：
@@ -368,6 +381,15 @@ V1 必须提供 Run 级审计和端到端 Trace：
 6. PromptContent/PromptCard 的精确 JSON Schema 与 BottomDock 字段映射。
 7. 旧 Agent 数据是否全部舍弃，以及切换窗口和回滚策略。
 8. 最终 ADR 的拆分方式，以及对现有 `CONTEXT.md`、Agent 相关 ADR 的 Supersede 清单。
+9. **AgentRun 粒度**：一个 Run 是一次用户轮次、一次后台执行、一个跨多轮暂停/恢复的创作目标，还是 Mastra Workflow Run 的直接映射；确认产卡时复用暂停 Run 还是创建新 Run。已确认不变量只有：一个 Session 同时最多一个活动 Run、每次物理模型调用受 Run-scoped Capability 约束、确认前没有 `prompt:write` 权限。
+10. **Creative Skill 迁移**：当前 Official/Personal Creative Skill、`Use`/`auto`、对话总结技能和已发布 Skill 资产，是迁入新 Agent 服务、保留为蓝鲸 Tool，还是 V1 暂时退役。
+11. **GenerationInbox 范围**：V1 新 Agent 是否只接 Canvas AgentChatPanel，还是同时替换 `/generate` 的独立 Conversation 与 Agent 入口。
+12. **Standalone 附件**：Standalone Session 没有 Blue Whale Project 绑定时，附件由蓝鲸创建临时/专用 Asset，还是由 Agent 服务拥有独立附件存储与 TOS 命名空间。
+13. **组织 Tenant 权限**：V1 只有 Personal Tenant；未来 Organization Tenant 中 Session 默认私有还是 Project 成员共享、角色如何控制复制/删除/产卡，尚未定义。
+
+## 复核结论
+
+截至 2026-08-11 本次复核：已确认的对话结论均已进入本文；发现的一处 Run 粒度矛盾已降为未决，没有替用户选择答案。本文现在是完整的「已确认决策 + 明示未决项」记录，但仍不是完整实施规格。后续每次确认新决定，都应立即更新本文并再次检查是否影响已确认项或现有 ADR。
 
 ## 下一步
 
