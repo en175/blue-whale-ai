@@ -106,25 +106,26 @@ test("keeps unclassified skill Markdown scoped at completion but full at PR stag
   assert.deepEqual(classifyChanges([".claude/skills/tdd/SKILL.md"], { stage: "pr" }), {
     tier: "full",
     acceptance: true,
-    reasons: ["publishing requires full verification with acceptance"],
+    reasons: ["unclassified PR scope requires full verification"],
   });
 });
 
 test("classifies known Node and Web source changes as scoped verification", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
-
-  assert.deepEqual(
-    classifyChanges([
-      "apps/agent-worker/src/worker-loop.ts",
-      "packages/core/src/result.ts",
-      "blue_whale_web/app/page.tsx",
-    ]),
+  const files = [
+    "apps/agent-worker/src/worker-loop.ts",
+    "packages/core/src/result.ts",
+    "blue_whale_web/app/page.tsx",
+  ];
+  const expected =
     {
       tier: "scoped",
       areas: ["node", "web"],
       reasons: ["known source paths changed"],
-    },
-  );
+    };
+
+  assert.deepEqual(classifyChanges(files), expected);
+  assert.deepEqual(classifyChanges(files, { stage: "pr" }), expected);
 });
 
 test("allows an explicit high-risk escalation to full verification", async () => {
@@ -151,13 +152,64 @@ test("keeps high-impact infrastructure scoped at completion but full at PR stage
 
   assert.deepEqual(classifyChanges(files), {
     tier: "scoped",
-    reasons: ["high-impact infrastructure changed"],
+    reasons: ["product-impact infrastructure changed"],
   });
   assert.deepEqual(classifyChanges(files, { stage: "pr" }), {
     tier: "full",
     acceptance: true,
-    reasons: ["publishing requires full verification with acceptance"],
+    reasons: ["publishing product-impact changes requires full verification"],
   });
+});
+
+test("keeps hook and git control-plane changes scoped at PR stage", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(
+      [".claude/hooks/confirm-release-action.sh", ".githooks/pre-push"],
+      { stage: "pr" },
+    ),
+    {
+      tier: "scoped",
+      areas: ["control-plane"],
+      reasons: ["control-plane changed"],
+    },
+  );
+});
+
+test("classifies operational scripts without product acceptance", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(["scripts/tunnel-testsite-db.sh"], { stage: "pr" }),
+    {
+      tier: "scoped",
+      areas: ["operations"],
+      reasons: ["operations tooling changed"],
+    },
+  );
+});
+
+test("rejects unknown executable paths instead of escalating to full", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.throws(
+    () => classifyChanges(["scripts/new-unknown-tool.sh"], { stage: "pr" }),
+    /UNCLASSIFIED_PATH: scripts\/new-unknown-tool\.sh/,
+  );
+});
+
+test("keeps product acceptance scripts full at PR stage", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(["scripts/run-typescript-baseline-acceptance.sh"], { stage: "pr" }),
+    {
+      tier: "full",
+      acceptance: true,
+      reasons: ["publishing product-impact changes requires full verification"],
+    },
+  );
 });
 
 test("keeps governance checks when a governance change also hits high-impact paths", async () => {
@@ -171,24 +223,42 @@ test("keeps governance checks when a governance change also hits high-impact pat
 
   assert.deepEqual(classifyChanges(files), {
     tier: "scoped",
-    areas: ["governance"],
-    reasons: ["high-impact infrastructure changed"],
+    areas: ["control-plane", "governance"],
+    reasons: ["product-impact infrastructure changed"],
   });
   assert.deepEqual(buildVerificationPlan(classifyChanges(files), { base: "base" }), [
     ["git", "diff", "--check", "base...HEAD"],
     ["node", "--test", "tests/verification-policy.test.mjs", "tests/agent-rules.test.mjs"],
+    ["bash", "scripts/test-hooks.sh"],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "scripts.tests.test_publish_review_package",
+      "scripts.tests.test_start_task_worktree",
+      "scripts.tests.test_sync_task_from_origin",
+    ],
   ]);
 
   const prClassification = classifyChanges(files, { stage: "pr" });
   assert.deepEqual(prClassification, {
     tier: "full",
     acceptance: true,
-    areas: ["governance"],
-    reasons: ["publishing requires full verification with acceptance"],
+    areas: ["control-plane", "governance"],
+    reasons: ["publishing product-impact changes requires full verification"],
   });
   assert.deepEqual(buildVerificationPlan(prClassification, { base: "base" }), [
     ["git", "diff", "--check", "base...HEAD"],
     ["node", "--test", "tests/verification-policy.test.mjs", "tests/agent-rules.test.mjs"],
+    ["bash", "scripts/test-hooks.sh"],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "scripts.tests.test_publish_review_package",
+      "scripts.tests.test_start_task_worktree",
+      "scripts.tests.test_sync_task_from_origin",
+    ],
     ["pnpm", "verify"],
   ]);
 });
@@ -280,6 +350,44 @@ test("builds targeted rule and release-gate tests for governance changes", async
   );
 });
 
+test("builds targeted hook and workflow tests for control-plane changes", async () => {
+  const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    buildVerificationPlan(
+      { tier: "scoped", areas: ["control-plane"], reasons: ["control-plane changed"] },
+      { base: "origin/master" },
+    ),
+    [
+      ["git", "diff", "--check", "origin/master...HEAD"],
+      ["bash", "scripts/test-hooks.sh"],
+      [
+        "python3",
+        "-m",
+        "unittest",
+        "scripts.tests.test_publish_review_package",
+        "scripts.tests.test_start_task_worktree",
+        "scripts.tests.test_sync_task_from_origin",
+      ],
+    ],
+  );
+});
+
+test("builds script unit tests for operations tooling", async () => {
+  const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    buildVerificationPlan(
+      { tier: "scoped", areas: ["operations"], reasons: ["operations tooling changed"] },
+      { base: "origin/master" },
+    ),
+    [
+      ["git", "diff", "--check", "origin/master...HEAD"],
+      ["python3", "-m", "unittest", "discover", "-s", "scripts/tests"],
+    ],
+  );
+});
+
 test("builds the repository full verification command for full scope", async () => {
   const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
 
@@ -301,7 +409,7 @@ test("builds the repository full verification command for full scope", async () 
   );
 });
 
-test("classifies ordinary source changes at PR stage as full without acceptance", async () => {
+test("keeps ordinary source changes scoped at PR stage", async () => {
   const { buildVerificationPlan, classifyChanges } = await import(
     "../scripts/verification-policy.mjs"
   );
@@ -309,10 +417,9 @@ test("classifies ordinary source changes at PR stage as full without acceptance"
 
   const classification = classifyChanges(files, { stage: "pr" });
   assert.deepEqual(classification, {
-    tier: "full",
-    acceptance: false,
+    tier: "scoped",
     areas: ["node", "web"],
-    reasons: ["publishing requires full verification"],
+    reasons: ["known source paths changed"],
   });
   assert.deepEqual(buildVerificationPlan(classification, { base: "origin/master" }), [
     ["git", "diff", "--check", "origin/master...HEAD"],
@@ -320,7 +427,6 @@ test("classifies ordinary source changes at PR stage as full without acceptance"
     ["pnpm", "exec", "vitest", "run", "packages", "apps", "--changed", "origin/master"],
     ["pnpm", "--filter", "@blue-whale/web", "exec", "tsc", "--noEmit"],
     ["pnpm", "--filter", "@blue-whale/web", "exec", "vitest", "run", "--changed", "origin/master"],
-    ["pnpm", "verify", "--skip-acceptance"],
   ]);
 });
 
@@ -336,7 +442,7 @@ test("exempts documentation-only changes from full verification at PR stage", as
   );
 });
 
-test("requires full verification without acceptance for pure governance at PR stage", async () => {
+test("keeps pure governance verification scoped at PR stage", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.deepEqual(
@@ -345,10 +451,29 @@ test("requires full verification without acceptance for pure governance at PR st
       { stage: "pr" },
     ),
     {
-      tier: "full",
-      acceptance: false,
+      tier: "scoped",
       areas: ["governance"],
-      reasons: ["publishing requires full verification"],
+      reasons: ["verification governance changed"],
+    },
+  );
+});
+
+test("describes mixed known governance and control-plane scope accurately", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(
+      [
+        "docs/agents/testing-strategy.md",
+        "scripts/test-hooks.sh",
+        "tests/verification-policy.test.mjs",
+      ],
+      { stage: "pr" },
+    ),
+    {
+      tier: "scoped",
+      areas: ["control-plane", "governance"],
+      reasons: ["known scoped paths changed"],
     },
   );
 });
@@ -1032,7 +1157,7 @@ test("allows publishing when the current HEAD has a valid verification receipt",
   }
 });
 
-test("publishing requires a PR-stage receipt for code changes", () => {
+test("publishing reuses a scoped completion receipt for ordinary code changes", () => {
   const repository = createRepository();
   const remote = mkdtempSync(join(tmpdir(), "blue-whale-verification-remote-"));
   const fakeBin = mkdtempSync(join(tmpdir(), "blue-whale-publish-stage-"));
@@ -1061,26 +1186,6 @@ test("publishing requires a PR-stage receipt for code changes", () => {
     assert.equal(completion.status, 0, completion.stderr);
     assert.equal(JSON.parse(completion.stdout).tier, "scoped");
 
-    const blocked = spawnSync(
-      "bash",
-      [PUBLISH, "--user-authorized", "--create-pr", "--json"],
-      { cwd: repository, encoding: "utf8", env: environment },
-    );
-    assert.equal(blocked.status, 11, blocked.stderr);
-    assert.equal(JSON.parse(blocked.stdout).status, "VERIFICATION_REQUIRED");
-
-    const prVerification = spawnSync(
-      process.execPath,
-      [CLI, "run", "--base", "origin/master", "--stage", "pr", "--json"],
-      { cwd: repository, encoding: "utf8", env: environment },
-    );
-    assert.equal(prVerification.status, 0, prVerification.stderr);
-    assert.equal(JSON.parse(prVerification.stdout).tier, "full");
-    const receiptPath = JSON.parse(prVerification.stdout).receipt;
-    const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
-    assert.equal(receipt.classification.acceptance, false);
-    assert.deepEqual(receipt.commands.at(-1), ["pnpm", "verify", "--skip-acceptance"]);
-
     const publish = spawnSync(
       "bash",
       [PUBLISH, "--user-authorized", "--create-pr", "--json"],
@@ -1093,6 +1198,28 @@ test("publishing requires a PR-stage receipt for code changes", () => {
     rmSync(repository, { recursive: true, force: true });
     rmSync(remote, { recursive: true, force: true });
     rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("CLI rejects an unclassified script without planning full verification", () => {
+  const repository = createRepository();
+  try {
+    mkdirSync(join(repository, "scripts"));
+    writeFileSync(join(repository, "scripts", "new-unknown-tool.sh"), "#!/bin/sh\n");
+    git(repository, "add", "scripts/new-unknown-tool.sh");
+    git(repository, "commit", "-m", "chore: add unknown script");
+
+    const result = spawnSync(
+      process.execPath,
+      [CLI, "plan", "--base", "master", "--stage", "pr", "--json"],
+      { cwd: repository, encoding: "utf8", env: childEnvironment() },
+    );
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /UNCLASSIFIED_PATH: scripts\/new-unknown-tool\.sh/);
+    assert.doesNotMatch(result.stdout, /pnpm verify/);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
   }
 });
 

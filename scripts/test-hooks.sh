@@ -1052,31 +1052,31 @@ RELEASE_HOOK=confirm-release-action.sh
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git status --short"}}'
 assert_exit 0 "release: 非发布 git status 放行"
 
-# git push 修改远程 → 硬拦，必须走标准发布审查包入口
+# 普通任务分支 push 属于日常协作操作，由保护分支/危险 Git 专用 Gate 约束。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git push -u origin feature/x"}}'
-assert_exit 2 "release: 直接 git push 被拦截"
-assert_stderr_has "--create-pr" "release: 直接 git push 提示首次创建模式"
-assert_stderr_has "--update-pr" "release: 直接 git push 提示已有 PR 更新模式"
+assert_exit 0 "release: 任务分支直接 git push 放行"
+assert_stdout_empty "release: 任务分支直接 git push 无输出"
 
-# git 全局选项形式也应硬拦
+# 生产发布基线不因普通任务分支 push 放行而失去保护。
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git push origin release/prod"}}'
+assert_exit 2 "release: 直推 release 分支仍硬拦"
+assert_stderr_has "release/prod" "release: 直推发布基线提示目标分支"
+
+# git 全局选项形式同样放行。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git -C ../blue-whale-worktrees/task push origin feature/x"}}'
-assert_exit 2 "release: git -C push 被拦截"
-assert_stderr_has "直接 git push" "release: git -C push 提示直接 push"
+assert_exit 0 "release: git -C 任务分支 push 放行"
 
-# JSON 转义引号不能截断 command 后绕过 push 检测
+# 复合命令中的普通任务分支 push 也放行。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"echo \"ready\"; git push origin feature/x"}}'
-assert_exit 2 "release: 转义引号后 git push 被拦截"
-assert_stderr_has "直接 git push" "release: 转义引号后 git push 提示直接 push"
+assert_exit 0 "release: 复合命令中的任务分支 push 放行"
 
-# bash -lc 嵌套 push 也不能绕过标准入口
+# bash -lc 嵌套普通 push 同样放行。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash -lc \"git push origin feature/x\""}}'
-assert_exit 2 "release: bash -lc git push 被拦截"
-assert_stderr_has "直接 git push" "release: bash -lc git push 提示直接 push"
+assert_exit 0 "release: bash -lc 任务分支 push 放行"
 
-# 直接 force-with-lease 也必须走标准入口，避免 PR 反馈后绕过发布确认
+# force-with-lease 是否安全由 block-dangerous-git 专用 Gate 判断。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git push --force-with-lease origin feature/x"}}'
-assert_exit 2 "release: 直接 force-with-lease push 被拦截"
-assert_stderr_has "直接 git push" "release: 直接 force-with-lease push 提示直接 push"
+assert_exit 0 "release: 任务分支 force-with-lease push 放行"
 
 # 旧项目发布脚本不由 Hook 弹窗；脚本自身会失败并提示新入口
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-task-branch.sh"}}'
@@ -1111,24 +1111,19 @@ assert_stdout_empty "release: publish-review-package update 无交互输出"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized --create-pr --update-pr 65"}}'
 assert_exit 2 "release: publish-review-package 双模式被拦截"
 
-# 直接本地 commit / merge --no-ff 硬拦，要求改走标准入口。
+# 普通本地 commit / merge 是可逆操作，直接放行。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git commit -m \"feat: task slice\""}}'
-assert_exit 2 "release: 直接 git commit 硬拦"
-assert_stderr_has "commit-task-for-review.sh -m" "release: 直接 git commit 指向标准入口"
+assert_exit 0 "release: 直接 git commit 放行"
 
-# 裸 git commit --amend 同被拦（任何 commit 子命令归为 git commit），文案须同时指引首次 -m 与 review 后 --amend。
+# amend 同样是任务分支内的本地操作。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git commit --amend"}}'
-assert_exit 2 "release: 直接 git commit --amend 硬拦"
-assert_stderr_has "commit-task-for-review.sh -m" "release: git commit --amend 文案仍含首次 -m 指引"
-assert_stderr_has "commit-task-for-review.sh --amend" "release: git commit --amend 文案含 --amend 指引"
+assert_exit 0 "release: 直接 git commit --amend 放行"
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge --no-ff feature/x"}}'
-assert_exit 2 "release: 直接 git merge --no-ff 硬拦"
-assert_stderr_has "merge-task-to-local-master.sh --user-authorized" "release: 直接 git merge --no-ff 指向标准入口"
+assert_exit 0 "release: 直接 git merge --no-ff 放行"
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge feature/x"}}'
-assert_exit 2 "release: 直接 git merge 工单分支硬拦"
-assert_stderr_has "merge-task-to-local-master.sh --user-authorized" "release: 直接 git merge 工单分支指向标准入口"
+assert_exit 0 "release: 直接 git merge 工单分支放行"
 
 # git merge origin/master 分支感知（ADR-0010）：
 # 任务分支上拦截并指向 rebase 同步入口；master 集成区放行。
@@ -1223,16 +1218,16 @@ run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"bash -lc \"scripts/publish-r
 assert_exit 0 "release: bash -lc publish-review-package update 授权入口放行"
 assert_stdout_empty "release: bash -lc publish-review-package update 无交互输出"
 
-# 标准入口不能掩盖同一复合命令中的裸 Git 操作。
+# 标准入口后的普通 Git 操作不再由发布 Gate 拦截。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/commit-task-for-review.sh -m \"feat: x\" && git commit -m \"bypass\""}}'
-assert_exit 2 "release: 标准 commit 入口后裸 commit 仍硬拦"
+assert_exit 0 "release: 标准 commit 入口后普通 commit 放行"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/commit-task-for-review.sh -m \"feat: x\" && scripts/merge-task-to-local-master.sh feature/x"}}'
 assert_exit 2 "release: commit-task 入口后接无授权 merge-task 仍硬拦"
 assert_stderr_has "--user-authorized" "release: 复合命令提示 merge 授权"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh --user-authorized feature/x && git merge --no-ff feature/y"}}'
-assert_exit 2 "release: 标准 merge 入口后裸 merge 仍硬拦"
+assert_exit 0 "release: 标准 merge 入口后普通 merge 放行"
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized --create-pr && git commit -m \"bypass\""}}'
-assert_exit 2 "release: 标准 publish 入口后裸 commit 仍硬拦"
+assert_exit 0 "release: 标准 publish 入口后普通 commit 放行"
 
 # 内联和仓库 Git alias 不能绕过 push / commit / merge 分类。
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git -c alias.ship=push ship origin feature/x"}}'
@@ -1251,11 +1246,11 @@ ALIAS_TEST_ROOT="$(mktemp -d)"
 "$REAL_GIT" -C "$ALIAS_TEST_ROOT" config alias.option-save '-c foo.bar=baz commit'
 "$REAL_GIT" -C "$ALIAS_TEST_ROOT" config alias.option-integrate '-c foo.bar=baz merge --no-ff'
 run_hook "$RELEASE_HOOK" "$(printf '{\"tool_input\":{\"command\":\"git -C %s ship origin feature/x\"}}' "$ALIAS_TEST_ROOT")"
-assert_exit 2 "release: configured alias push 硬拦"
+assert_exit 0 "release: configured alias push 放行"
 run_hook "$RELEASE_HOOK" "$(printf '{\"tool_input\":{\"command\":\"git -C %s save -m bypass\"}}' "$ALIAS_TEST_ROOT")"
-assert_exit 2 "release: configured alias commit 硬拦"
+assert_exit 0 "release: configured alias commit 放行"
 run_hook "$RELEASE_HOOK" "$(printf '{\"tool_input\":{\"command\":\"git -C %s integrate feature/x\"}}' "$ALIAS_TEST_ROOT")"
-assert_exit 2 "release: configured alias merge 硬拦"
+assert_exit 0 "release: configured alias merge 放行"
 run_hook "$RELEASE_HOOK" "$(printf '{\"tool_input\":{\"command\":\"git -C %s option-ship origin feature/x\"}}' "$ALIAS_TEST_ROOT")"
 assert_exit 2 "release: configured alias with global option push 硬拦"
 run_hook "$RELEASE_HOOK" "$(printf '{\"tool_input\":{\"command\":\"git -C %s option-save -m bypass\"}}' "$ALIAS_TEST_ROOT")"
@@ -1335,6 +1330,17 @@ assert_exit 2 "release: 缺 source_branch PR 拦截"
 # 创建非 master 目标 PR → 阻断
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"develop","draft":"false","title":"test"}}'
 assert_exit 2 "release: 非 master 目标 PR 拦截"
+
+# release/* 是受保护的发布基线，只能通过与 marker 绑定的 PR 更新。
+write_publish_marker "feature/x" "release/prod"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","draft":"false","title":"test"}}'
+assert_exit 0 "release: 指向 release/prod 的合规 PR 放行"
+remove_publish_marker feature/x
+
+write_publish_marker "feature/x" "release/"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/","draft":"false","title":"test"}}'
+assert_exit 2 "release: 空 release 名称 PR 拦截"
+remove_publish_marker feature/x
 
 # 合并 PR → 必须持有绑定企业/仓库/PR 的一次性凭证。
 # squash/rebase 方法检查已并入 confirm-release-action.sh（在凭证校验前），
@@ -1755,11 +1761,10 @@ assert_file_not_has_text "$PUSH_AUDIT_LOG" SECRET_PUSH_ALLOW "audit-all: work br
 
 RELEASE_AUDIT_LOG="$(audit_log_path "$HOOK_AUDIT_TEST_ROOT" "$RELEASE_HOOK")"
 run_hook "$RELEASE_HOOK" '{"tool_name":"Bash","tool_use_id":"tu_release_block","session_id":"s_ik10dr","tool_input":{"command":"git push origin feature/x SECRET_RELEASE_COMMAND","token":"SECRET_RELEASE_TOKEN","file_path":"SECRET_RELEASE_FILE","tool_name":"SECRET_NESTED_TOOL"}}'
-assert_exit 2 "audit-all: release 阻断 exit 2 不变"
-assert_stdout_empty "audit-all: release 阻断 stdout 为空"
-assert_stderr_has "直接 git push" "audit-all: release 阻断信息保留"
+assert_exit 0 "audit-all: release 普通 push 放行"
+assert_stdout_empty "audit-all: release 普通 push stdout 为空"
 assert_audit_record_field "$RELEASE_AUDIT_LOG" tu_release_block operation git-push "audit-all: release 阻断操作类别"
-assert_audit_record_field "$RELEASE_AUDIT_LOG" tu_release_block exit_code 2 "audit-all: release 阻断记录"
+assert_audit_record_field "$RELEASE_AUDIT_LOG" tu_release_block exit_code 0 "audit-all: release 放行记录"
 run_hook "$RELEASE_HOOK" '{"tool_name":"Bash","tool_use_id":"tu_release_allow","session_id":"s_ik10dr","tool_input":{"command":"git status --short SECRET_RELEASE_ALLOW"}}'
 assert_exit 0 "audit-all: release 放行 exit 0 不变"
 assert_stdout_empty "audit-all: release 放行 stdout 为空"
@@ -1813,9 +1818,8 @@ assert_stdout_empty "audit-all: protected push 审计失败 stdout 为空"
 assert_stderr_has "直推 master" "audit-all: protected push 审计失败保留原信息"
 assert_stderr_has "hook-audit: degraded" "audit-all: protected push 审计失败提示降级"
 run_hook "$RELEASE_HOOK" '{"tool_name":"Bash","tool_input":{"command":"git push origin feature/x"}}'
-assert_exit 2 "audit-all: release 审计失败仍阻断"
+assert_exit 0 "audit-all: release 审计失败仍放行"
 assert_stdout_empty "audit-all: release 审计失败 stdout 为空"
-assert_stderr_has "直接 git push" "audit-all: release 审计失败保留原信息"
 assert_stderr_has "hook-audit: degraded" "audit-all: release 审计失败提示降级"
 run_hook "$ISSUE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_issue","tool_input":{}}'
 assert_exit 2 "audit-all: issue 审计失败仍阻断"
@@ -2519,8 +2523,7 @@ assert_exit 2 "codex: draft PR 包装命令拦截"
 assert_stderr_has "不使用 draft PR" "codex: draft PR 包装命令提示普通 PR"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"git push -u origin feature/x"}}'
-assert_exit 2 "codex: 直接 git push 包装命令拦截"
-assert_stderr_has "直接 git push" "codex: 直接 git push 包装命令提示"
+assert_exit 0 "codex: 任务分支直接 git push 包装命令放行"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"scripts/publish-review-package.sh --user-authorized"}}'
 assert_exit 2 "codex: release 缺模式被拦"
@@ -2530,12 +2533,10 @@ assert_exit 0 "codex: release update 授权入口无交互放行"
 assert_stdout_empty "codex: release update 授权入口无输出"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"git commit -m \"feat: task slice\""}}'
-assert_exit 2 "codex: direct commit 硬阻断"
-assert_stderr_has "commit-task-for-review.sh -m" "codex: direct commit 指向标准入口"
+assert_exit 0 "codex: direct commit 放行"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"git commit --amend"}}'
-assert_exit 2 "codex: direct commit --amend 硬阻断"
-assert_stderr_has "commit-task-for-review.sh --amend" "codex: direct commit --amend 文案含 --amend 指引"
+assert_exit 0 "codex: direct commit --amend 放行"
 
 run_command_hook "$CODEX_RELEASE_CMD" '{"tool_input":{"command":"scripts/merge-task-to-local-master.sh --user-authorized feature/x"}}'
 assert_exit 0 "codex: local merge 授权入口无交互放行"

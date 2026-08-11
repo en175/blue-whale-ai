@@ -1,12 +1,17 @@
 const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.md|(?:apps|packages|blue_whale_web)\/.*\/README(?:\.[^/]+)?\.md)$/;
 const NODE_SOURCE = /^(?:apps|packages)\/[^/]+\/(?:src|tests?)\/.*\.(?:ts|tsx)$/;
 const WEB_SOURCE = /^blue_whale_web\/(?:app|components|hooks|lib|workers)\/.*\.(?:ts|tsx)$/;
-const HIGH_IMPACT_FILE = /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|Dockerfile[^/]*|deploy\/|packages\/contracts\/|packages\/persistence\/(?:prisma\/migrations|schema)\/|blue_whale_web\/(?:app\/api\/auth|lib\/auth|e2e-fullstack\/|playwright\.)|tests\/typescript-baseline\/|scripts\/(?:init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.|\.githooks\/|\.(?:claude|codex)\/hooks\/|\.zcode\/config\.json)/;
+const CONTROL_PLANE_FILE = /^(?:\.githooks\/|\.(?:claude|codex)\/hooks\/|\.zcode\/config\.json|scripts\/(?:check-hook-closed-loop|check-hook-contracts|cleanup-release-branch|cleanup-task-worktree|commit-spec-on-master|commit-task-for-review|gitee-resolve-ids|install-kimi-hooks|list-task-worktrees|manage-agent-authorization|merge-task-to-local-master|pr-update-evidence|probe-codex-write-hook|publish-review-package|publish-task-branch|query-hook-audit|setup-hooks|start-task-worktree|sync-codex-skill|sync-superpowers-skills|sync-task-from-origin|sync-write-rules-skill|sync_recovery|test-hooks|verification-policy|verify-change-scope|verify-pr-update)\.|scripts\/lib\/|scripts\/tests\/)/;
+const OPERATIONS_FILE = /^scripts\/(?:check-schema-charset|check-target-environment-retirement|ensure-graphify-worktree|fix-ik7grv-replace-slot-backfill|run-ik50gb-c-testsite-probe|run-real-canary|tunnel-testsite-db)\./;
+const PRODUCT_IMPACT_FILE = /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|Dockerfile[^/]*|deploy\/|packages\/contracts\/|packages\/persistence\/(?:prisma\/migrations|schema)\/|blue_whale_web\/(?:app\/api\/auth|lib\/auth|e2e-fullstack\/|playwright\.)|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
+const EXECUTABLE_FILE = /^(?:scripts\/|.*\.(?:sh|py|mjs|cjs|js))$/;
 const GOVERNANCE_FILE = /^(?:docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/(?:implement|dispatching-parallel-agents|finishing-a-development-branch|subagent-driven-development)\/)/;
 
 function sourceArea(file) {
   if (NODE_SOURCE.test(file)) return "node";
   if (WEB_SOURCE.test(file)) return "web";
+  if (CONTROL_PLANE_FILE.test(file)) return "control-plane";
+  if (OPERATIONS_FILE.test(file)) return "operations";
   return null;
 }
 
@@ -21,7 +26,12 @@ function inferredAreas(files) {
 }
 
 function classified(file) {
-  return DOCUMENTATION_FILE.test(file) || GOVERNANCE_FILE.test(file) || sourceArea(file) !== null;
+  return (
+    DOCUMENTATION_FILE.test(file) ||
+    GOVERNANCE_FILE.test(file) ||
+    PRODUCT_IMPACT_FILE.test(file) ||
+    sourceArea(file) !== null
+  );
 }
 
 function scopedClassification(files, reason) {
@@ -44,18 +54,22 @@ function fullClassification(files, reason, acceptance) {
 }
 
 function classifyAutomatically(files, stage) {
+  const unknownExecutable = files.filter(
+    (file) => EXECUTABLE_FILE.test(file) && !classified(file),
+  );
+  if (unknownExecutable.length > 0) {
+    throw new Error(`UNCLASSIFIED_PATH: ${unknownExecutable.join(", ")}`);
+  }
+
   if (
     files.some((file) => GOVERNANCE_FILE.test(file)) &&
     files.every((file) => DOCUMENTATION_FILE.test(file) || GOVERNANCE_FILE.test(file))
   ) {
-    if (stage === "completion") {
-      return {
-        tier: "scoped",
-        areas: ["governance"],
-        reasons: ["verification governance changed"],
-      };
-    }
-    return fullClassification(files, "publishing requires full verification", false);
+    return {
+      tier: "scoped",
+      areas: ["governance"],
+      reasons: ["verification governance changed"],
+    };
   }
 
   if (files.length > 0 && files.every((file) => DOCUMENTATION_FILE.test(file))) {
@@ -66,19 +80,42 @@ function classifyAutomatically(files, stage) {
   }
 
   if (stage === "pr") {
-    const acceptance =
-      files.some((file) => HIGH_IMPACT_FILE.test(file)) ||
-      files.some((file) => !classified(file));
-    return fullClassification(
-      files,
-      acceptance
-        ? "publishing requires full verification with acceptance"
-        : "publishing requires full verification",
-      acceptance,
-    );
+    if (files.some((file) => PRODUCT_IMPACT_FILE.test(file))) {
+      return fullClassification(
+        files,
+        "publishing product-impact changes requires full verification",
+        true,
+      );
+    }
+    if (files.some((file) => !classified(file))) {
+      return fullClassification(files, "unclassified PR scope requires full verification", true);
+    }
   }
 
   const areas = [...new Set(files.map(sourceArea).filter(Boolean))].sort();
+  if (
+    areas.length === 1 &&
+    areas[0] === "control-plane" &&
+    files.every((file) => DOCUMENTATION_FILE.test(file) || CONTROL_PLANE_FILE.test(file))
+  ) {
+    return scopedClassification(files, "control-plane changed");
+  }
+  if (
+    areas.length === 1 &&
+    areas[0] === "operations" &&
+    files.every((file) => DOCUMENTATION_FILE.test(file) || OPERATIONS_FILE.test(file))
+  ) {
+    return scopedClassification(files, "operations tooling changed");
+  }
+  if (
+    areas.some((area) => ["governance", "control-plane", "operations"].includes(area)) &&
+    files.every(
+      (file) =>
+        DOCUMENTATION_FILE.test(file) || GOVERNANCE_FILE.test(file) || sourceArea(file),
+    )
+  ) {
+    return scopedClassification(files, "known scoped paths changed");
+  }
   if (
     areas.length > 0 &&
     files.every((file) => DOCUMENTATION_FILE.test(file) || sourceArea(file))
@@ -90,8 +127,8 @@ function classifyAutomatically(files, stage) {
     };
   }
 
-  if (files.some((file) => HIGH_IMPACT_FILE.test(file))) {
-    return scopedClassification(files, "high-impact infrastructure changed");
+  if (files.some((file) => PRODUCT_IMPACT_FILE.test(file))) {
+    return scopedClassification(files, "product-impact infrastructure changed");
   }
 
   return scopedClassification(files, "change scope is not classified");
@@ -133,6 +170,22 @@ function appendAreaCommands(commands, areas, base) {
       "tests/verification-policy.test.mjs",
       "tests/agent-rules.test.mjs",
     ]);
+  }
+  if (areas.includes("control-plane")) {
+    commands.push(
+      ["bash", "scripts/test-hooks.sh"],
+      [
+        "python3",
+        "-m",
+        "unittest",
+        "scripts.tests.test_publish_review_package",
+        "scripts.tests.test_start_task_worktree",
+        "scripts.tests.test_sync_task_from_origin",
+      ],
+    );
+  }
+  if (areas.includes("operations")) {
+    commands.push(["python3", "-m", "unittest", "discover", "-s", "scripts/tests"]);
   }
 }
 

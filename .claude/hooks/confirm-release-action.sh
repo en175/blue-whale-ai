@@ -3,17 +3,17 @@
 # JSON 与 shell 命令解析委托给 lib/pretool.py，避免转义引号和 git 全局选项绕过。
 #
 # 兜底对象：
-#   - Bash: 直接 git push（硬拦，必须走标准入口）
-#   - Bash: 发布 create/update / 合入标准入口带 --user-authorized 无交互放行；提交/同步入口出现即放行
-#   - Bash: 直接本地验收 commit / 非 --ff-only merge 硬拦并指向标准入口
+#   - Bash: 任务分支的普通 commit / push / merge 放行；发布基线 release/* 直推硬拦
+#   - Bash: 发布 create/update / 合入标准入口带 --user-authorized 无交互放行；同步入口出现即放行
+#   - Bash: 任务分支用 merge/pull 同步 origin/master 时硬拦并指向 rebase 同步入口
 #   - mcp__gitee-ent__create_enterprise_repo_pull: 创建 Gitee PR
 #   - mcp__gitee-ent__merge_enterprise_pull: 合并 Gitee PR
 #   - mcp__gitee-ent__create_enterprise_repo_release: 创建 Gitee release
 #
 # 规则：
 #   - 发布审查包只允许通过标准入口触发；--user-authorized 即 Agent 对人类授权的声明。
-#   - 直接 git push 是绕过标准入口，直接阻断。
-#   - 创建 PR 校验标准入口写入的短期标记（target=master/source_branch/no draft）；
+#   - 普通任务分支 push 不需要发布授权；保护分支与发布审查包不得绕过入口。
+#   - 创建 PR 校验标准入口写入的短期标记（target=master|release/*、source_branch、no draft）；
 #     Pre 放行、PostToolUse 成功后消费标记（失败可重试，见 ADR-0011）。
 #   - 合并 PR / 创建 release 使用 AI 自动生成、绑定对象、TTL 900s 的一次性凭证。
 #   - Pre 仅校验，Post 成功后消费；失败保留凭证供有限重试。
@@ -241,25 +241,27 @@ if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" unsafe-git-a
   block "检测到无法安全分类的 Git alias。请改用明确的标准入口或原生 Git 子命令。"
 fi
 
-# Bash: 直接 git push 属于绕过标准入口，硬拦。
+# Bash: 普通 git push 是任务分支日常协作操作；release/* 仍在本 Gate 硬拦。
+# master/main 直推与危险 force 由 block-push-to-master / block-dangerous-git 专职拦截。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" has-git-push; then
   AUDIT_OPERATION="git-push"
-  block "检测到直接 git push。首次发布请走 scripts/publish-review-package.sh --user-authorized --create-pr；已有 PR 更新请走 --update-pr <PR编号>。"
+  release_target="$(printf '%s' "$COMMAND" | python3 "$PRETOOL" release-push-target 2>/dev/null || true)"
+  if [ -n "$release_target" ]; then
+    block "检测到直接 push 发布基线 ${release_target}。release/* 可能直接影响线上，必须通过受审查的发布流程更新。"
+  fi
 fi
 
-# 先扫描整条命令中的裸 commit / 非 ff-only merge / 非 ff-only 非 --rebase pull，
-# 避免标准入口提前放行后续 segment。
+# 扫描整条命令以分类审计，并保留任务分支错误同步 origin/master 的专门纠偏。
+# 普通 commit / merge 是任务分支内可逆操作，不属于发布授权边界。
 # 分支感知（ADR-0010）：master 上 merge/pull origin/master 是用户集成区合法操作，不拦；
 # 仅在任务分支前缀上拦截并指向标准入口。
 task_acceptance="$(printf '%s' "$COMMAND" | python3 "$PRETOOL" task-acceptance-git 2>/dev/null || true)"
 case "$task_acceptance" in
   "git commit")
     AUDIT_OPERATION="git-commit"
-    block "检测到直接 git commit。请由 Agent 自动改走 scripts/commit-task-for-review.sh -m \"<message>\"（首次提交），或 review 后修订改走 scripts/commit-task-for-review.sh --amend [-m \"<new-message>\"]。"
     ;;
   "git merge")
     AUDIT_OPERATION="git-merge"
-    block "检测到非 --ff-only 的直接 git merge。当前对话若已授权合入本地 master，请由 Agent 自动改走 scripts/merge-task-to-local-master.sh --user-authorized <branch>。"
     ;;
   "git merge origin/master")
     AUDIT_OPERATION="git-merge-sync"
@@ -326,9 +328,10 @@ if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
     true|TRUE|True|1) block "本项目不使用 draft PR；创建 Gitee PR 时请省略 draft 字段或传 draft=false。" ;;
   esac
 
-  if [ "$TARGET_BRANCH" != "master" ]; then
-    block "发布审查包只允许创建指向 master 的 PR。"
-  fi
+  case "$TARGET_BRANCH" in
+    master|release/?*) ;;
+    *) block "发布审查包只允许创建指向 master 或 release/* 的 PR。" ;;
+  esac
 
   case "$SOURCE_BRANCH" in
     feature/*|fix/*|hotfix/*|docs/*|chore/*) ;;

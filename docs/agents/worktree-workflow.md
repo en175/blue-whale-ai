@@ -150,7 +150,7 @@ scripts/merge-task-to-local-master.sh --user-authorized --continue <任务分支
 scripts/merge-task-to-local-master.sh --user-authorized --abort <任务分支>
 ```
 
-ZCode / Claude Code / Codex Hook 会硬拦直接 `git commit`、非 `--ff-only` 的直接 `git merge` 以及缺少 `--user-authorized` 的合入本地 master 入口，并指引 Agent 改走标准入口；提交入口出现即放行，合入入口带授权参数无交互放行。master 写入 Gate 仅额外放行已忽略的根 `CLAUDE.local.md` 与 `.codex/config.toml`。Codex 写入仍由 `Edit|Write` matcher 接入，但实际 `tool_name=apply_patch`、补丁位于 `tool_input.command`；薄 wrapper 只提取目标路径，分支与工作树判定继续复用 `block-master-edit.sh` 权威 Gate。
+ZCode / Claude Code / Codex Hook 放行任务分支的普通 `git commit` 与 `git merge`；仍硬拦任务分支用 merge/pull 同步 `origin/master`，以及缺少 `--user-authorized` 的合入本地 master 入口。提交入口是推荐的 review 检查点，合入入口带授权参数无交互放行。master 写入 Gate 仅额外放行已忽略的根 `CLAUDE.local.md` 与 `.codex/config.toml`。Codex 写入仍由 `Edit|Write` matcher 接入，但实际 `tool_name=apply_patch`、补丁位于 `tool_input.command`；薄 wrapper 只提取目标路径，分支与工作树判定继续复用 `block-master-edit.sh` 权威 Gate。
 
 三端阻断等价只比较阻断型 `PreToolUse` / `PostToolUse`。提醒型 `Grep|Glob` 只注入代码发现 context、不阻断，且 Codex 无对应 CBM MCP；`SessionStart` 只在会话启动/恢复时注入 context，不是工具调用 Gate，各平台生命周期挂载也不同，因此两类事件显式排除。
 
@@ -197,14 +197,17 @@ scripts/sync-task-from-origin.sh sync --json
 # 首次发布并准备创建 PR
 scripts/publish-review-package.sh --user-authorized --create-pr --json
 
+# 首次发布到 release 基线
+scripts/publish-review-package.sh --user-authorized --create-pr --target-branch release/prod --json
+
 # 审查修订后更新已有 PR
 scripts/publish-review-package.sh --user-authorized --update-pr <PR编号> --pr-snapshot <推送前临时JSON> --json
 ```
 
-`--user-authorized` 表示 Agent 已从当前对话取得对应的创建或更新授权，ZCode / Claude Code / Codex Hook 静默放行。两种模式都校验结构化任务分支、工作区干净及分支包含最新 `origin/master`；不满足时返回 `NEEDS_SYNC`，Agent 自动改走同步入口一次，不询问 merge/rebase 策略。
+`--user-authorized` 表示 Agent 已从当前对话取得对应的创建或更新授权，ZCode / Claude Code / Codex Hook 静默放行。两种模式都校验结构化任务分支、工作区干净及分支包含最新 PR 目标基线（`origin/master` 或 `origin/release/*`）；不满足时返回 `NEEDS_SYNC`，Agent 使用 `sync --target-branch <目标>` 自动改走对应基线的同步入口一次，不询问 merge/rebase 策略。
 
-- `--create-pr`：推送后写短期发布标记；Agent 按模板创建一次 `target=master`、非 draft PR并停下等待审查。
-- `--update-pr`：Agent 先通过 Gitee MCP 读取 PR 并规范化为临时快照（IID、opened、source、target、head、conflict、changed_files、fetched_at）；入口要求远端同名源分支存在，硬校验快照和冻结范围，并使用同步事务捕获的旧 SHA 做显式 `force-with-lease`。合法新增范围逐项使用 `--allow-scope-file <路径>` 声明。
+- `--create-pr`：目标默认 `master`，可显式选择 `release/*`；推送后写入绑定实际目标的短期发布标记，Agent 按模板创建相同目标的非 draft PR 并停下等待审查。
+- `--update-pr`：Agent 先通过 Gitee MCP 读取 PR 并规范化为临时快照（IID、opened、source、target、head、conflict、changed_files、fetched_at）；目标分支由快照决定，入口要求远端同名源分支存在，按实际目标硬校验快照和冻结范围，并使用同步事务捕获的旧 SHA 做显式 `force-with-lease`。合法新增范围逐项使用 `--allow-scope-file <路径>` 声明。
 - 推送后校准 PR 描述并重新读取快照，运行 `scripts/verify-pr-update.sh --update-pr <PR编号> --pr-snapshot <推送后临时JSON> --json`。只有返回 `PR_UPDATE_VERIFIED` 后才可 `finalize` 和宣布完成；快照临时文件不进仓，完成后删除。
 
 快照是 Agent 对 Gitee MCP 实时响应的规范化投影，不是人工填写的判断。临时文件必须为 JSON object，权限 `0600`，字段契约如下（`fetched_at` 距调用不得超过 300 秒）：
@@ -228,9 +231,9 @@ PR 更新授权按本轮意图判断：明确“修复后更新/重新推送 PR�
 
 PR 创建后业务范围冻结，只允许本 PR 的 review 修订、测试、文档闭环与同步结果；新工单另开分支。机器校验提交/文件/merge/远端 SHA，Agent 对照 PR、Issue 和 review 反馈审查语义范围。
 
-禁止直接执行 `git push` 绕过入口；直接 push 会被 Hook 硬拦。旧脚本 `scripts/publish-task-branch.sh` 已废弃，只会提示选择明确模式。
+任务分支可直接 `git push` 保存或协作；创建/更新 PR 必须使用发布入口，保护分支与 `release/*` 的直推仍被 Hook 硬拦。旧脚本 `scripts/publish-task-branch.sh` 已废弃，只会提示选择明确模式。
 
-create 模式的发布标记由创建 PR Hook 在 PreToolUse 校验（`draft` 非 true、`target_branch=master`、`source_branch` 匹配），PostToolUse 创建成功后消费。创建失败不消耗，可原地重试（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)）。update 模式不使用发布标记。
+create 模式的发布标记由创建 PR Hook 在 PreToolUse 校验（`draft` 非 true、`target_branch` 为 `master` 或 `release/*` 且与标记一致、`source_branch` 匹配），PostToolUse 创建成功后消费。创建失败不消耗，可原地重试（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)）。update 模式不使用发布标记。
 
 **标记位置契约**：发布标记按来源分支隔离，存于 git common dir（`<repo>/.git/agent-release-review-package-<branch-slug>`，分支名中的 `/` 转义为 `%`）。common dir 对主 checkout 与所有 task worktree 是**同一物理路径**，因此 **ZCode / Claude Code / Codex session 在主 checkout 还是 worktree 启动均对称生效**——标记读写不依赖 session 启动位置。此契约修复了「主 checkout session + cd worktree 跑发布」时建 PR 被误拦的缺陷（标记写在 worktree git path、hook 在主仓 git path 找不到）。
 
