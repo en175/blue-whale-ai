@@ -207,8 +207,12 @@ ready
 2. Agent 必须先总结理解，并等待用户明确确认。
 3. 明确确认可来自自然语言，也可来自“生成任务卡”按钮。
 4. 普通盘问 Run 只能回复、提问和读取授权附件，不能创建 PromptCard。
-5. 用户明确确认产卡时创建新的 AgentRun，并只为该 Run 授予 `prompt:write` 权限；不恢复此前提出总结或确认问题的 Run。
-6. 用户仅回答最后一个问题、“看起来不错”、长时间不回复或 Agent 自行判断充分，都不构成产卡确认。
+5. 任何 PromptCardRevision 提交都必须绑定同一 AgentRun 内已经持久化的 ConfirmationEvidence；没有确认凭证时，即使模型输出了卡片候选也必须拒绝提交。
+6. 用户点击“生成任务卡”时，以幂等 `action_id` 创建 `confirm_prompt_card` 触发类型的新 AgentRun，并直接形成 `kind=ui_action` 的 ConfirmationEvidence；历史中投影为可见操作记录，不伪造用户 AgentMessage。
+7. 用户使用自然语言确认时，原文照常保存为 AgentMessage 并触发新 Run；只有 `SessionPhase=awaiting_final_confirmation` 且该 Run 结构化判定本次输入构成明确确认后，才能形成绑定 `source_message_id` 的 `kind=natural_language` ConfirmationEvidence，并为该 Run 开放 `prompt:write` 提交权限。
+8. 自然语言表示拒绝、继续修改或仍有歧义时，不形成 ConfirmationEvidence、不开放 `prompt:write`，继续讨论或澄清。
+9. 用户明确确认产卡时始终创建新的 AgentRun，不恢复此前提出总结或确认问题的 Run。
+10. 用户仅回答最后一个问题、“看起来不错”、长时间不回复或 Agent 自行判断充分，都不构成产卡确认。
 
 ## AgentRun 状态与并发
 
