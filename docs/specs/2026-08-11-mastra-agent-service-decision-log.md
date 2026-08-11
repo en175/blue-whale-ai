@@ -298,6 +298,16 @@ cancelled
 - 已撤销 SessionAssetGrant 的 Asset 分析不再进入 SessionBrief、最近消息窗口之外的派生附件上下文或后续模型输入；
 - 每个 Run 限制模型调用次数、输入/输出 Token 和总预算。
 
+### SessionBrief 权威边界
+
+1. SessionBrief 是版本化、可重建的内部模型上下文缓存，不是用户确认过的会话事实；正式 AgentMessage 与 PromptCardRevision 才是会话权威。
+2. 每个 SessionBrief 版本至少记录 `through_message_sequence`、`source_digest`、`summary_schema_version` 与 `model_policy_version`，明确它总结到哪条消息以及由什么规则生成。
+3. 用户当前输入、当前 AgentInputBatch 和最近正式消息始终优先于 SessionBrief；Brief 不得覆盖或改写原始历史。
+4. 新版本 Brief 只能使用正式已接纳消息与当前有效 SessionAssetGrant 允许的分析摘要；已撤销 Grant 的派生附件上下文不得进入新版本。
+5. Brief 更新使用的模型调用计入当前 AgentRun 的 Capability 和预算；生成失败不得产生错误的正式消息，可以继续使用仍有效的旧 Brief 加最近消息窗口，或在后续 Run 重建。
+6. Session 复制不复制旧 Brief，由目标 Session 根据允许转移的正式历史重新生成。
+7. V1 不把 SessionBrief 作为用户可编辑卡片展示；用户纠正上下文时通过新的正式 AgentMessage 表达。
+
 ## 模型策略
 
 1. V1 用户不直接选择 Agent 模型。
