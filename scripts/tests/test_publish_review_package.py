@@ -205,6 +205,19 @@ class PublishReviewPackageTest(unittest.TestCase):
         )
         self.assertTrue(self.publish_marker().exists())
 
+    def test_create_mode_reports_needs_sync_under_utf8_locale(self) -> None:
+        (self.main / "upstream.txt").write_text("upstream\n", encoding="utf-8")
+        self.git("add", "upstream.txt", cwd=self.main)
+        self.git("commit", "-m", "chore: advance master", cwd=self.main)
+        self.git("push", "origin", "master", cwd=self.main)
+        env = self.base_env.copy()
+        env["LC_ALL"] = "C.UTF-8"
+
+        result = self.invoke("--user-authorized", "--create-pr", "--json", env=env)
+
+        self.assertEqual(result.returncode, 10, result.stderr)
+        self.assertEqual(self.response(result)["status"], "NEEDS_SYNC")
+
     def test_create_mode_supports_release_target_and_binds_marker(self) -> None:
         result = self.invoke(
             "--user-authorized",

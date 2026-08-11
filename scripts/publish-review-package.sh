@@ -168,7 +168,7 @@ head_sha="$(git -C "$ROOT" rev-parse HEAD)"
 upstream_ref="origin/${TARGET_BRANCH}"
 upstream_sha="$(git -C "$ROOT" rev-parse "$upstream_ref")"
 if ! git -C "$ROOT" merge-base --is-ancestor "$upstream_sha" "$head_sha"; then
-  fail_status 10 NEEDS_SYNC "当前分支未包含 $upstream_ref。先运行 scripts/sync-task-from-origin.sh sync --target-branch $TARGET_BRANCH --json。" branch "$branch" target_branch "$TARGET_BRANCH" head "$head_sha" upstream_sha "$upstream_sha"
+  fail_status 10 NEEDS_SYNC "当前分支未包含 ${upstream_ref}。先运行 scripts/sync-task-from-origin.sh sync --target-branch ${TARGET_BRANCH} --json。" branch "$branch" target_branch "$TARGET_BRANCH" head "$head_sha" upstream_sha "$upstream_sha"
 fi
 if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" check --base "$upstream_ref" --stage pr --json 2>&1)"; then
   fail_status 11 VERIFICATION_REQUIRED "当前 HEAD 缺少覆盖发布要求的验证凭证。先运行 node scripts/verify-change-scope.mjs run --stage pr。" detail "$verification_output" head "$head_sha"
