@@ -53,7 +53,7 @@
 - Memory、长期摘要和最近消息窗口；
 - 用户可见 ReasoningTrace；
 - 附件引用与工具调用记录；
-- PromptContent、PromptCard 及不可变版本历史；
+- PromptCard 聚合、不可变 PromptCardRevision 及其嵌套 PromptContent；
 - REST 快照与可恢复 SSE 事件流。
 
 ### New API 负责
@@ -143,9 +143,9 @@ V1 只提供两个只读工具族：
 ### 分层
 
 ```text
-PromptContent                 Agent 创作的提示词内容
-  ↓
-PromptCard                    Agent 服务持久化的完整卡片与来源属性
+PromptCard                    Agent 服务持久化的稳定卡片身份
+  └── PromptCardRevision      不可变卡片版本与来源属性
+        └── PromptContent     Agent 创作的嵌套提示词内容
   ↓ 用户带入
 GenerationDraft / BottomDock  蓝鲸中的可编辑本地草稿
   ↓ 用户提交
@@ -154,22 +154,24 @@ GenerationJob                 蓝鲸冻结的最终生成事实
 
 ### 权威与包装
 
-1. PromptContent 是 Agent 真正创作的内部对象。
-2. PromptCard 是完整外层对象，包含 PromptContent，以及 ID、版本、Session/Run 来源、状态、创建时间和可选生成建议。
-3. PromptCard 由 Agent 服务唯一持久化；蓝鲸不复制一张 PromptCard 表。
-4. 蓝鲸读取并展示 PromptCard；真正创建 GenerationJob 时保存：
+1. PromptCard 是聚合根和稳定资源身份，归属一个 AgentSession。
+2. PromptCardRevision 是不可变版本，以 `card_id + revision` 唯一标识，记录来源 AgentRun、创建时间、可选生成建议以及完整 PromptContent。
+3. PromptContent 是 Agent 真正创作的嵌套值对象，不拥有独立资源 ID 或独立版本号。
+4. PromptCard 聚合由 Agent 服务唯一持久化；蓝鲸不复制一张 PromptCard 表。
+5. 蓝鲸读取并展示具体 PromptCardRevision；真正创建 GenerationJob 时保存：
    - `source_agent_card_id`；
    - `source_agent_card_version`；
    - 不可变提示词快照；
    - 用户最终确认的模型、比例、尺寸、数量等参数。
-5. Agent 可以建议比例、风格或模型策略，但不能替用户锁定最终生成参数。
+6. Agent 可以建议比例、风格或模型策略，但不能替用户锁定最终生成参数。
 
 ### 版本与多方案
 
-- “修改现有方案”产生同一 PromptContent 的新不可变版本；
-- “再给一个方案”产生新的 PromptContent；
+- “修改现有方案”在同一 PromptCard 下产生新的不可变 PromptCardRevision；
+- “再给一个方案”产生新的 PromptCard 身份；
 - 一次确认 Run 可以按用户明确要求产出一张或多张完整 PromptCard；
-- 蓝鲸消费具体卡片版本，后续卡片修改不改写已生成任务。
+- 同一 Run 产出的多张卡通过 `source_run_id` 查询，不额外建立持久化批次资源；
+- 蓝鲸消费 `card_id + revision`，后续卡片修改不改写已生成任务。
 
 ### V1 卡片类型
 
