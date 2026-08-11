@@ -9,8 +9,9 @@
   - 2026-07-14，PreToolUse Hook 的 merge/pull 拦截改为分支感知（IK0SPN）：`mode_task_acceptance_git` 调用 `current_branch()` 区分 master 集成区与任务分支，master 上 `git merge origin/master` 和 `git pull` 不再被拦截，消除此前 master 双方分叉时 Hook 硬拦与无标准入口放行之间的死锁。任务分支上仍拦截并指向 `sync-task-from-origin.sh`。
   - 2026-07-25，文档白名单窄例外（[ADR-0025](0025-doc-on-master-allowlist.md)）：AI 可在本地 master 直改散文规格文档（根 `CONTEXT.md` + `docs/**/*.md`），落盘走 `scripts/commit-spec-on-master.sh -m "<描述>"`；规则源（`.claude/`）、代码、`docs/**/*.json` 契约仍必须走 task worktree。
   - 2026-07-26，本地个人配置窄例外：根 `CLAUDE.local.md` 与 `.codex/config.toml` 仅在 `git check-ignore` 明确命中时允许 Agent 在本地 master 直改；两者保持未跟踪，其他 ignored 文件仍硬拦。
+  - 2026-08-11，任务分支普通 commit/push/merge 改为放行；保护分支、发布审查包、错误同步方式与本地 master 合入授权仍由 Hook 兜底。
 
-> 授权交互方式已由 [ADR-0012](0012-agent-noninteractive-authorization.md) 更新：标准入口带 `--user-authorized` 时无二次确认，直接 Git 绕过仍由 Hook 硬拦。
+> 授权交互方式已由 [ADR-0012](0012-agent-noninteractive-authorization.md) 更新：标准入口带 `--user-authorized` 时无二次确认；任务分支普通 Git 操作放行，保护分支、发布审查包和本地 master 合入绕过仍由 Hook 硬拦。
 
 ## 背景
 
@@ -34,6 +35,6 @@ Agent 完成子 issue 后直接通过 `scripts/commit-task-for-review.sh -m "<me
 - `scripts/start-task-worktree.py` 是同步、命名与创建的唯一逻辑入口；`.sh` 仅负责跨环境寻找 Python 3。
 - 创建前要求本地 `master` 干净，但不要求它与远程完全相同；本地 ahead 是合法且必须保留的状态。
 - merge 冲突会中止开工，不允许 Agent 绕过同步后直接写入。
-- 本地任务验收 commit 有标准入口和 Hook 兜底（提交入口出现即放行，无需授权）；本地 `master` 合入有标准入口和 Hook 兜底，带授权参数无交互放行；直接 Git 绕过硬拦。
-- 发布和远程合并仍受发布授权 hook 约束，禁止 Agent 擅自 push、开 PR 或合并 PR。
+- 本地任务验收 commit 的标准入口仍是推荐检查点；任务分支普通 commit/push/merge 不需要发布授权。本地 `master` 合入有标准入口和 Hook 兜底，带授权参数无交互放行。
+- 发布和远程合并仍受发布授权 Hook 约束，禁止 Agent 擅自创建/更新 PR、合并 PR、创建 release 或直推保护分支。
 - 新发布包装统一使用 task Work Tree 和 `cleanup-task-worktree.sh`；策略升级前已有的主 checkout 发布包装分支可用 `cleanup-release-branch.sh` 完成收尾，不引入迁移状态机。

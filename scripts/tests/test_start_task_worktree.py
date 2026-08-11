@@ -168,6 +168,15 @@ class StartTaskWorktreeTest(unittest.TestCase):
         self.assertNotEqual(0, invalid.returncode)
         self.assertIn("结构化中文规范", invalid.stderr)
 
+    def test_pre_push_allows_valid_task_branch_behind_master(self):
+        self.commit(self.actor, "upstream.txt", "upstream\n", "chore: 推进主干")
+        run("git", "push", "origin", "master", cwd=self.actor)
+
+        stale_sha = run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
+        result = self.pre_push("chore/实施极简工作树流程", stale_sha)
+
+        self.assertEqual(0, result.returncode, result.stderr)
+
     def test_pre_push_without_upstream_only_skips_staleness_check(self):
         run("git", "remote", "remove", "origin", cwd=self.repo)
         valid = self.pre_push("chore/实施极简工作树流程")

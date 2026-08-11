@@ -90,7 +90,7 @@ fi
 # ============================================================
 # 4. 远程落后软提醒（触发式同步——落后 origin/master 时提醒，不拦 commit）
 #    职责：commit 前告知分支落后状态，让 rebase 冲突早冒、小颗粒。
-#    不拦 commit（存档行为不被远程状态打断）；硬拦在 pre-push（出口铁闸）。
+#    不拦 commit 或 push；创建/更新 PR 前由发布入口要求同步。
 #    仅工单分支生效。见 docs/adr/0006-sync-mechanism-auto-block.md。
 # ============================================================
 git fetch origin master >/dev/null 2>&1 || true   # 静默 fetch，失败放行
@@ -102,7 +102,7 @@ case "$_branch" in
       _behind=$(git rev-list --count HEAD.."$_upstream" 2>/dev/null || echo "?")
       echo "⚠️  pre-commit: ${_branch} 落后 origin/master 约 ${_behind} 个提交（软提醒，不拦 commit）。" >&2
       echo "    冲突会越攒越大 → 建议尽快运行 scripts/sync-task-from-origin.sh sync --json" >&2
-      echo "    push 时 pre-push 仍会硬拦（铁闸）。见 docs/adr/0006-sync-mechanism-auto-block.md。" >&2
+      echo "    创建或更新 PR 前需要同步；可提前运行 scripts/sync-task-from-origin.sh sync --json。" >&2
     fi
     ;;
 esac

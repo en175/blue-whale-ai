@@ -150,7 +150,7 @@ scripts/merge-task-to-local-master.sh --user-authorized --continue <任务分支
 scripts/merge-task-to-local-master.sh --user-authorized --abort <任务分支>
 ```
 
-ZCode / Claude Code / Codex Hook 会硬拦直接 `git commit`、非 `--ff-only` 的直接 `git merge` 以及缺少 `--user-authorized` 的合入本地 master 入口，并指引 Agent 改走标准入口；提交入口出现即放行，合入入口带授权参数无交互放行。master 写入 Gate 仅额外放行已忽略的根 `CLAUDE.local.md` 与 `.codex/config.toml`。Codex 写入仍由 `Edit|Write` matcher 接入，但实际 `tool_name=apply_patch`、补丁位于 `tool_input.command`；薄 wrapper 只提取目标路径，分支与工作树判定继续复用 `block-master-edit.sh` 权威 Gate。
+ZCode / Claude Code / Codex Hook 放行任务分支的普通 `git commit` 与 `git merge`；仍硬拦任务分支用 merge/pull 同步 `origin/master`，以及缺少 `--user-authorized` 的合入本地 master 入口。提交入口是推荐的 review 检查点，合入入口带授权参数无交互放行。master 写入 Gate 仅额外放行已忽略的根 `CLAUDE.local.md` 与 `.codex/config.toml`。Codex 写入仍由 `Edit|Write` matcher 接入，但实际 `tool_name=apply_patch`、补丁位于 `tool_input.command`；薄 wrapper 只提取目标路径，分支与工作树判定继续复用 `block-master-edit.sh` 权威 Gate。
 
 三端阻断等价只比较阻断型 `PreToolUse` / `PostToolUse`。提醒型 `Grep|Glob` 只注入代码发现 context、不阻断，且 Codex 无对应 CBM MCP；`SessionStart` 只在会话启动/恢复时注入 context，不是工具调用 Gate，各平台生命周期挂载也不同，因此两类事件显式排除。
 
@@ -228,7 +228,7 @@ PR 更新授权按本轮意图判断：明确“修复后更新/重新推送 PR�
 
 PR 创建后业务范围冻结，只允许本 PR 的 review 修订、测试、文档闭环与同步结果；新工单另开分支。机器校验提交/文件/merge/远端 SHA，Agent 对照 PR、Issue 和 review 反馈审查语义范围。
 
-禁止直接执行 `git push` 绕过入口；直接 push 会被 Hook 硬拦。旧脚本 `scripts/publish-task-branch.sh` 已废弃，只会提示选择明确模式。
+任务分支可直接 `git push` 保存或协作；创建/更新 PR 必须使用发布入口，保护分支与 `release/*` 的直推仍被 Hook 硬拦。旧脚本 `scripts/publish-task-branch.sh` 已废弃，只会提示选择明确模式。
 
 create 模式的发布标记由创建 PR Hook 在 PreToolUse 校验（`draft` 非 true、`target_branch=master`、`source_branch` 匹配），PostToolUse 创建成功后消费。创建失败不消耗，可原地重试（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)）。update 模式不使用发布标记。
 
