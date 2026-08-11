@@ -98,8 +98,12 @@
    - **复制**：创建绑定目标 Project 的新 Session；
    - **移动**：复制到目标 Project，然后归档原 Session；
    - **解绑**：复制成 Standalone Session，然后归档原 Session。
-6. Project Asset、SessionAssetGrant 与缓存分析不自动跨上下文复制；无权使用的引用不得进入新 Session 的模型上下文，用户必须在目标上下文重新授权。
-7. 正在运行的 AgentRun 不允许移动或解绑。
+6. V1 的复制、移动与解绑只允许同一 Personal Tenant/User 自己的 Project 或 Standalone 上下文之间执行；Organization Tenant 的跨成员数据转移权限另行设计。
+7. 复制以源 Session 的正式已提交历史形成一致快照：复制 User/Assistant AgentMessage，以及 PromptCard 和全部 PromptCardRevision；目标侧为 Session、Message 与 Card 创建新身份，并保存 `copied_from_*` 来源。
+8. 正式消息中已经存在的图片分析和文字结论属于用户明确转移的正式成果，可以复制；AssetMention 只保留为不可用来源标记，原 Asset、SessionAssetGrant、原图与图片分析缓存不复制，用户必须在目标上下文重新授权。
+9. AgentRun、AgentInputBatch、RunEvent、Capability、计费记录和内部审计不复制；SessionBrief 不直接复制，由目标 Session 根据允许复制的正式历史重新生成。
+10. 有活动 AgentRun 时禁止复制、移动或解绑，避免复制到流式半成品或不一致状态。
+11. 移动与解绑只有在目标 Session 完整创建成功后才归档原 Session；目标创建失败时原 Session 保持不变。
 
 ## Session 生命周期
 
