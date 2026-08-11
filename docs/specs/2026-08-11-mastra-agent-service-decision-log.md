@@ -243,6 +243,14 @@ cancelled
 5. 同一确认 Run 最多成功产出一次确定的 PromptCard 批次；重复请求幂等返回首次结果。
 6. 用户只看到简短可行动错误；内部保留审计证据。
 
+## AgentMessage、RunEvent 与正式输出
+
+1. 用户输入被服务接纳后立即成为不可变的正式 AgentMessage，并与触发的 AgentRun 关联；后续 Run 失败或取消不得删除、隐藏或改写该用户消息。
+2. Assistant 文字与 ReasoningTrace 在执行中通过 RunEvent 流式展示；RunEvent 是 SSE 断线恢复与短期交付记录，不是正式会话消息，也不进入后续模型上下文。
+3. Run 成功时，在同一事务中提交完整 Assistant AgentMessage、完整 ReasoningTrace、该 Run 产生的全部 PromptCardRevision、SessionPhase 变化以及 Run `completed` 状态。
+4. Run 失败或取消时，半截 Assistant 文字、半截 ReasoningTrace 和未完成 PromptCard 不进入正式会话历史；用户原始消息继续显示，并关联 `failed` 或 `cancelled` 状态、友好错误与重试入口。
+5. 内容型 RunEvent 在终态后按保留策略清理；审计只长期保留排障和计费所需的最小元数据，不把失败半成品重新包装成历史消息。
+
 ## Memory 与上下文成本
 
 采用：
