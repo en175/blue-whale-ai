@@ -259,17 +259,70 @@ export function useCanvasDoc(): CanvasDocApi {
     }, SAVE_DEBOUNCE_MS);
   }, [saveSnapshot]);
 
+  // IK76K1：撤销/重做实现。
+  // IK7ZME：定义上移到 onNodesChange 之前，消费方直接捕获——原先的
+  // pushUndoRef/undoRef「render 期同步 latest 闭包」写法违反 react-hooks
+  // immutability/refs 规则，且被下方回调捕获后再赋值会被编译器拒绝。
+  const pushUndo = useCallback(() => {
+    const snapshot: CanvasSnapshot = {
+      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
+      edges: JSON.parse(JSON.stringify(edgesRef.current)),
+    };
+    undoStackRef.current = [...undoStackRef.current.slice(-(MAX_UNDO_STEPS - 1)), snapshot];
+    redoStackRef.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
+  }, []);
+
+  const undo = useCallback(() => {
+    const stack = undoStackRef.current;
+    if (stack.length === 0) return;
+    const prev = stack[stack.length - 1];
+    undoStackRef.current = stack.slice(0, -1);
+    const current: CanvasSnapshot = {
+      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
+      edges: JSON.parse(JSON.stringify(edgesRef.current)),
+    };
+    redoStackRef.current = [...redoStackRef.current, current];
+    nodesRef.current = prev.nodes;
+    edgesRef.current = prev.edges;
+    setNodes(prev.nodes);
+    setEdges(prev.edges);
+    persist();
+    setCanUndo(undoStackRef.current.length > 0);
+    setCanRedo(true);
+  }, [persist]);
+
+  const redo = useCallback(() => {
+    const stack = redoStackRef.current;
+    if (stack.length === 0) return;
+    const next = stack[stack.length - 1];
+    redoStackRef.current = stack.slice(0, -1);
+    const current: CanvasSnapshot = {
+      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
+      edges: JSON.parse(JSON.stringify(edgesRef.current)),
+    };
+    undoStackRef.current = [...undoStackRef.current, current];
+    nodesRef.current = next.nodes;
+    edgesRef.current = next.edges;
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    persist();
+    setCanUndo(true);
+    setCanRedo(redoStackRef.current.length > 0);
+  }, [persist]);
+
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
       // IK76K1：删除操作前记入撤销栈（右键菜单删除、键盘 Backspace/Delete 均走此路径）
       const removeChanges = changes.filter((c) => c.type === "remove");
       if (removeChanges.length > 0) {
-        pushUndoRef.current?.();
+        pushUndo();
         // IK76K1：删除后弹出带撤销按钮的 toast（数量由 remove 变更数决定）
         const count = removeChanges.length;
         toast.info(
           `已删除 ${count} 个节点`,
-          undoRef.current ? { label: "撤销", onClick: () => undoRef.current?.() } : undefined,
+          { label: "撤销", onClick: () => undo() },
           3000,
         );
       }
@@ -310,7 +363,7 @@ export function useCanvasDoc(): CanvasDocApi {
         return next;
       });
     },
-    [persist],
+    [persist, pushUndo, undo],
   );
 
   const onEdgesChange = useCallback(
@@ -412,73 +465,19 @@ export function useCanvasDoc(): CanvasDocApi {
     [saveNow],
   );
 
-  // IK76K1：撤销/重做实现
-  const pushUndoRef = useRef<(() => void) | null>(null);
-  const undoRef = useRef<(() => void) | null>(null);
-  const pushUndo = useCallback(() => {
-    const snapshot: CanvasSnapshot = {
-      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
-      edges: JSON.parse(JSON.stringify(edgesRef.current)),
-    };
-    undoStackRef.current = [...undoStackRef.current.slice(-(MAX_UNDO_STEPS - 1)), snapshot];
-    redoStackRef.current = [];
-    setCanUndo(true);
-    setCanRedo(false);
-  }, []);
-  pushUndoRef.current = pushUndo;
-
-  const undo = useCallback(() => {
-    const stack = undoStackRef.current;
-    if (stack.length === 0) return;
-    const prev = stack[stack.length - 1];
-    undoStackRef.current = stack.slice(0, -1);
-    const current: CanvasSnapshot = {
-      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
-      edges: JSON.parse(JSON.stringify(edgesRef.current)),
-    };
-    redoStackRef.current = [...redoStackRef.current, current];
-    nodesRef.current = prev.nodes;
-    edgesRef.current = prev.edges;
-    setNodes(prev.nodes);
-    setEdges(prev.edges);
-    persist();
-    setCanUndo(undoStackRef.current.length > 0);
-    setCanRedo(true);
-  }, [persist]);
-
-  const redo = useCallback(() => {
-    const stack = redoStackRef.current;
-    if (stack.length === 0) return;
-    const next = stack[stack.length - 1];
-    redoStackRef.current = stack.slice(0, -1);
-    const current: CanvasSnapshot = {
-      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
-      edges: JSON.parse(JSON.stringify(edgesRef.current)),
-    };
-    undoStackRef.current = [...undoStackRef.current, current];
-    nodesRef.current = next.nodes;
-    edgesRef.current = next.edges;
-    setNodes(next.nodes);
-    setEdges(next.edges);
-    persist();
-    setCanUndo(true);
-    setCanRedo(redoStackRef.current.length > 0);
-  }, [persist]);
-  undoRef.current = undo;
-
   const removeNodeAndSave = useCallback(
     async (id: string) => {
       const currentNodes = nodesRef.current;
       if (!currentNodes.some((node) => node.id === id)) return true;
       // IK76K1：删除前记入撤销栈
-      pushUndoRef.current?.();
+      pushUndo();
       // IK76K1：场景卡删除 toast
       const sceneCardNode = currentNodes.find((node) => node.id === id);
       const isSceneCard = sceneCardNode?.data.kind === "scene_card";
       if (isSceneCard) {
         toast.info(
           "已删除 1 个节点",
-          undoRef.current ? { label: "撤销", onClick: () => undoRef.current?.() } : undefined,
+          { label: "撤销", onClick: () => undo() },
           3000,
         );
       }
@@ -506,7 +505,7 @@ export function useCanvasDoc(): CanvasDocApi {
       setEdges(nextEdges);
       return true;
     },
-    [saveNow],
+    [saveNow, pushUndo, undo],
   );
 
   const setNodesOverride = useCallback(
