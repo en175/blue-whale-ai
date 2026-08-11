@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synchronize a task worktree with origin/master as a recoverable transaction."""
+"""Synchronize a task worktree with a protected PR target as a recoverable transaction."""
 
 from __future__ import annotations
 
@@ -123,15 +123,16 @@ def emit(as_json: bool, status: str, **details: object) -> None:
         print("{}: {}".format(status, json.dumps(details, ensure_ascii=False, sort_keys=True)))
 
 
-def synchronize(root: Path, as_json: bool) -> int:
+def synchronize(root: Path, as_json: bool, target_branch: str) -> int:
     git_dir, branch = worktree_context(root)
     ensure_clean(root)
     ensure_no_git_operation(git_dir)
-    fetch = git(root, "fetch", "origin", "master", check=False)
+    upstream_ref = "origin/{}".format(target_branch)
+    fetch = git(root, "fetch", "origin", target_branch, check=False)
     if fetch.returncode != 0:
-        raise WorkflowError("fetch origin master 失败：{}".format(fetch.stderr.strip()))
+        raise WorkflowError("fetch {} 失败：{}".format(upstream_ref, fetch.stderr.strip()))
 
-    upstream_sha = git_output(root, "rev-parse", "origin/master")
+    upstream_sha = git_output(root, "rev-parse", upstream_ref)
     original_head = git_output(root, "rev-parse", "HEAD")
     marker, backup_ref = recovery_paths(git_dir, branch)
     if git(root, "merge-base", "--is-ancestor", upstream_sha, original_head, check=False).returncode == 0:
@@ -141,12 +142,15 @@ def synchronize(root: Path, as_json: bool) -> int:
             branch=branch,
             head=original_head,
             upstream_sha=upstream_sha,
+            target_branch=target_branch,
             recovery_available=marker.exists(),
         )
         return 0
 
     if marker.exists():
         recovery = read_recovery(marker, branch)
+        if recovery.get("target_branch", "master") != target_branch:
+            raise WorkflowError("已有同步事务绑定其他 PR 目标分支，拒绝切换基线。")
         if recovery.get("pushed_head"):
             raise WorkflowError("上一轮同步结果已经推送；完成远端核验并 finalize 后才能开启新事务。")
         expected_head = str(recovery.get("synced_head", recovery["original_head"]))
@@ -163,13 +167,14 @@ def synchronize(root: Path, as_json: bool) -> int:
             "branch": branch,
             "original_head": original_head,
             "upstream_sha": upstream_sha,
+            "target_branch": target_branch,
             "remote_branch_sha": remote_sha,
             "backup_ref": backup_ref,
             "created_at": int(time.time()),
         }
     write_recovery(marker, recovery)
 
-    rebase = git(root, "rebase", "origin/master", check=False)
+    rebase = git(root, "rebase", upstream_ref, check=False)
     if rebase.returncode != 0:
         conflicts = git_output(root, "diff", "--name-only", "--diff-filter=U").splitlines()
         rebase_head_probe = git(root, "rev-parse", "--verify", "REBASE_HEAD", check=False)
@@ -186,6 +191,7 @@ def synchronize(root: Path, as_json: bool) -> int:
             branch=branch,
             original_head=original_head,
             upstream_sha=upstream_sha,
+            target_branch=target_branch,
             remote_branch_sha=remote_sha,
             replaying_commit=rebase_head,
             conflict_files=conflicts,
@@ -197,7 +203,7 @@ def synchronize(root: Path, as_json: bool) -> int:
     synced_head = git_output(root, "rev-parse", "HEAD")
     recovery["synced_head"] = synced_head
     write_recovery(marker, recovery)
-    diff_check = git(root, "diff", "--check", "origin/master...HEAD", check=False)
+    diff_check = git(root, "diff", "--check", "{}...HEAD".format(upstream_ref), check=False)
     if diff_check.returncode != 0:
         emit(
             as_json,
@@ -215,6 +221,7 @@ def synchronize(root: Path, as_json: bool) -> int:
         original_head=original_head,
         head=synced_head,
         upstream_sha=upstream_sha,
+        target_branch=target_branch,
         remote_branch_sha=remote_sha,
         recovery_file=str(marker),
         backup_ref=backup_ref,
@@ -264,15 +271,21 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("sync", "rollback", "finalize"))
     parser.add_argument("--json", action="store_true", dest="as_json")
+    parser.add_argument("--target-branch", default="master")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     try:
+        if args.target_branch != "master" and not (
+            args.target_branch.startswith("release/")
+            and len(args.target_branch) > len("release/")
+        ):
+            raise WorkflowError("目标分支仅允许 master 或 release/*。")
         root = repository_root()
         if args.action == "sync":
-            return synchronize(root, args.as_json)
+            return synchronize(root, args.as_json, args.target_branch)
         if args.action == "rollback":
             return rollback(root, args.as_json)
         return finalize(root, args.as_json)

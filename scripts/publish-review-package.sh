@@ -10,6 +10,8 @@ MODE=""
 MODE_COUNT=0
 PR_IID=""
 PR_SNAPSHOT=""
+TARGET_BRANCH="master"
+TARGET_BRANCH_EXPLICIT=0
 AS_JSON=0
 PYTHON=()
 ALLOW_SCOPE_FILES=()
@@ -65,12 +67,13 @@ fail_status() {
 usage() {
   cat <<'EOF'
 用法：
-  scripts/publish-review-package.sh --user-authorized --create-pr [--json]
+  scripts/publish-review-package.sh --user-authorized --create-pr [--target-branch master|release/<name>] [--json]
   scripts/publish-review-package.sh --user-authorized --update-pr <PR编号> --pr-snapshot <JSON文件> [--allow-scope-file <路径>] [--json]
 
 --create-pr         首次推送并生成创建 PR 的短期发布标记
 --update-pr <IID>   安全更新已有 PR 的远端源分支，不生成创建标记
 --pr-snapshot FILE  Agent 通过 Gitee MCP 刚读取并规范化的 PR 快照；update 必填
+--target-branch NAME 创建 PR 的目标分支；默认 master，仅允许 master 或 release/*
 --allow-scope-file  明确允许本轮审查修订新增到冻结范围的文件；可重复
 EOF
 }
@@ -102,6 +105,12 @@ while [ "$#" -gt 0 ]; do
       PR_SNAPSHOT="$2"
       shift 2
       ;;
+    --target-branch)
+      [ "$#" -ge 2 ] || fail_status 2 INVALID_TARGET_BRANCH "--target-branch 缺少分支名。"
+      TARGET_BRANCH="$2"
+      TARGET_BRANCH_EXPLICIT=1
+      shift 2
+      ;;
     --allow-scope-file)
       [ "$#" -ge 2 ] || fail_status 2 INVALID_ARGUMENT "--allow-scope-file 缺少路径。"
       ALLOW_SCOPE_FILES+=("$2")
@@ -119,11 +128,21 @@ done
 
 [ "$AUTHORIZED" = 1 ] || fail_status 2 AUTHORIZATION_REQUIRED "缺少 --user-authorized。必须先获得用户明确授权。"
 [ "$MODE_COUNT" = 1 ] || fail_status 2 INVALID_MODE "--create-pr 与 --update-pr 必须且只能选择一个。"
+case "$TARGET_BRANCH" in master|release/?*) ;; *) fail_status 2 INVALID_TARGET_BRANCH "目标分支仅允许 master 或 release/*：$TARGET_BRANCH" ;; esac
 if [ "$MODE" = update ]; then
   case "$PR_IID" in
     ''|*[!0-9]*|0) fail_status 2 INVALID_PR_IID "PR 编号必须是正整数。" ;;
   esac
   [ -n "$PR_SNAPSHOT" ] || fail_status 2 PR_SNAPSHOT_REQUIRED "更新已有 PR 前必须通过 Gitee MCP 读取快照并传入 --pr-snapshot。"
+  [ "$TARGET_BRANCH_EXPLICIT" = 0 ] || fail_status 2 INVALID_TARGET_BRANCH "更新 PR 的目标分支由快照决定，请勿传 --target-branch。"
+  [ -f "$PR_SNAPSHOT" ] || fail_status 8 PR_EVIDENCE_INVALID "PR 快照文件不存在：$PR_SNAPSHOT"
+  [ "${#PYTHON[@]}" -gt 0 ] || fail_status 1 PYTHON_UNAVAILABLE "读取 PR 快照需要可用的 Python 3。"
+  TARGET_BRANCH="$("${PYTHON[@]}" - "$PR_SNAPSHOT" <<'PY'
+import json, sys
+print(json.load(open(sys.argv[1], encoding="utf-8")).get("target_branch", ""))
+PY
+)" || fail_status 8 PR_EVIDENCE_INVALID "无法从 PR 快照读取目标分支。"
+  case "$TARGET_BRANCH" in master|release/?*) ;; *) fail_status 8 PR_EVIDENCE_INVALID "PR 目标分支仅允许 master 或 release/*。" ;; esac
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
@@ -142,15 +161,16 @@ if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
   fail_status 1 DIRTY_WORKTREE "工作区不干净。请先提交或处理改动。"
 fi
 
-if ! fetch_detail="$(git -C "$ROOT" fetch origin master 2>&1)"; then
-  fail_status 7 REMOTE_READ_FAILED "无法读取 origin/master；可按规则最多重试两次。" detail "$fetch_detail"
+if ! fetch_detail="$(git -C "$ROOT" fetch origin "$TARGET_BRANCH" 2>&1)"; then
+  fail_status 7 REMOTE_READ_FAILED "无法读取 origin/${TARGET_BRANCH}；可按规则最多重试两次。" detail "$fetch_detail"
 fi
 head_sha="$(git -C "$ROOT" rev-parse HEAD)"
-upstream_sha="$(git -C "$ROOT" rev-parse origin/master)"
+upstream_ref="origin/${TARGET_BRANCH}"
+upstream_sha="$(git -C "$ROOT" rev-parse "$upstream_ref")"
 if ! git -C "$ROOT" merge-base --is-ancestor "$upstream_sha" "$head_sha"; then
-  fail_status 10 NEEDS_SYNC "当前分支落后 origin/master。Agent 应按规则运行 scripts/sync-task-from-origin.sh sync --json，完成范围化测试后重试。" branch "$branch" head "$head_sha" upstream_sha "$upstream_sha"
+  fail_status 10 NEEDS_SYNC "当前分支未包含 $upstream_ref。先运行 scripts/sync-task-from-origin.sh sync --target-branch $TARGET_BRANCH --json。" branch "$branch" target_branch "$TARGET_BRANCH" head "$head_sha" upstream_sha "$upstream_sha"
 fi
-if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" check --base origin/master --stage pr --json 2>&1)"; then
+if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" check --base "$upstream_ref" --stage pr --json 2>&1)"; then
   fail_status 11 VERIFICATION_REQUIRED "当前 HEAD 缺少覆盖发布要求的验证凭证。先运行 node scripts/verify-change-scope.mjs run --stage pr。" detail "$verification_output" head "$head_sha"
 fi
 
@@ -211,7 +231,7 @@ if [ "$MODE" = create ]; then
   umask 077
   cat >"$marker_path" <<EOF
 branch=$branch
-target=master
+target=$TARGET_BRANCH
 created_at=$(date +%s)
 EOF
   emit_status PUSHED_CREATE_PR branch "$branch" head "$head_sha"
@@ -223,17 +243,21 @@ fi
 expected_remote_sha="$remote_sha"
 if [ -f "$recovery_file" ]; then
   [ "${#PYTHON[@]}" -gt 0 ] || fail_status 1 PYTHON_UNAVAILABLE "同步恢复点需要可用的 Python 3；Microsoft Store 桩不可用。"
-  recovery_values="$("${PYTHON[@]}" - "$recovery_file" "$branch" "$head_sha" <<'PY'
+  recovery_values="$("${PYTHON[@]}" - "$recovery_file" "$branch" "$head_sha" "$TARGET_BRANCH" <<'PY'
 import json
 import sys
 
-path, branch, head = sys.argv[1:]
+path, branch, head, target = sys.argv[1:]
 data = json.load(open(path, encoding="utf-8"))
-if data.get("branch") != branch or data.get("synced_head") != head:
+if (
+    data.get("branch") != branch
+    or data.get("synced_head") != head
+    or data.get("target_branch", "master") != target
+):
     raise SystemExit(3)
 print(data.get("remote_branch_sha", ""))
 PY
-)" || fail_status 1 INVALID_RECOVERY "同步恢复点与当前分支或 HEAD 不匹配。"
+)" || fail_status 1 INVALID_RECOVERY "同步恢复点与当前分支、HEAD 或 PR 目标分支不匹配。"
   expected_remote_sha="$recovery_values"
 else
   if ! git -C "$ROOT" merge-base --is-ancestor "$remote_sha" "$head_sha"; then
@@ -245,9 +269,9 @@ if [ "$expected_remote_sha" != "$remote_sha" ]; then
   fail_status 5 REMOTE_LEASE_CHANGED "同步快照后远端源分支已变化，停止自动更新。" expected_remote_sha "$expected_remote_sha" actual_remote_sha "$remote_sha" pull_request_id "$PR_IID"
 fi
 
-task_commit_count="$(git -C "$ROOT" rev-list --count origin/master..HEAD)"
-merge_commit_count="$(git -C "$ROOT" rev-list --count --merges origin/master..HEAD)"
-changed_files="$(git -C "$ROOT" diff --name-only origin/master...HEAD)"
+task_commit_count="$(git -C "$ROOT" rev-list --count "$upstream_ref"..HEAD)"
+merge_commit_count="$(git -C "$ROOT" rev-list --count --merges "$upstream_ref"..HEAD)"
+changed_files="$(git -C "$ROOT" diff --name-only "$upstream_ref"...HEAD)"
 if [ "$merge_commit_count" -gt 0 ]; then
   fail_status 6 SCOPE_MERGE_COMMIT_DETECTED "PR 创建后范围冻结；任务分支包含 merge commit，停止更新。" merge_commit_count "$merge_commit_count" task_commit_count "$task_commit_count" changed_files "$changed_files" pull_request_id "$PR_IID"
 fi

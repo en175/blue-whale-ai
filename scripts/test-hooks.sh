@@ -1331,6 +1331,17 @@ assert_exit 2 "release: 缺 source_branch PR 拦截"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"develop","draft":"false","title":"test"}}'
 assert_exit 2 "release: 非 master 目标 PR 拦截"
 
+# release/* 是受保护的发布基线，只能通过与 marker 绑定的 PR 更新。
+write_publish_marker "feature/x" "release/prod"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/prod","draft":"false","title":"test"}}'
+assert_exit 0 "release: 指向 release/prod 的合规 PR 放行"
+remove_publish_marker feature/x
+
+write_publish_marker "feature/x" "release/"
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"release/","draft":"false","title":"test"}}'
+assert_exit 2 "release: 空 release 名称 PR 拦截"
+remove_publish_marker feature/x
+
 # 合并 PR → 必须持有绑定企业/仓库/PR 的一次性凭证。
 # squash/rebase 方法检查已并入 confirm-release-action.sh（在凭证校验前），
 # 消除多 hook 执行顺序不确定导致的纠正信号误导。
