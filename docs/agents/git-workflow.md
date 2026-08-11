@@ -28,7 +28,7 @@
 
 ## 分支命名
 
-- 前缀必须在白名单内（hook 强制）：`feature/` / `fix/` / `hotfix/` / `docs/` / `chore/`。不在白名单 → `--force-with-lease` 被拦；落后 `origin/master` → push 被拦。
+- 前缀必须在白名单内（hook 强制）：`feature/` / `fix/` / `hotfix/` / `docs/` / `chore/`。不在白名单 → `--force-with-lease` 被拦；普通任务分支即使落后也允许 push，PR 前再同步。
 - 完整规则：`docs/agents/branch-naming.md`，决策：`docs/adr/0004-branch-naming.md`
 
 ## Task Worktree
@@ -58,8 +58,8 @@
 
 ## 远程-本地同步
 
-- 动 git 前先 `git fetch origin`。落后 push 会被 pre-push hook 硬拦。
-- 工单分支落后 → Agent 主动运行 `scripts/sync-task-from-origin.sh sync --json`；入口建立恢复点并固定 rebase `origin/master`，禁止自动 fallback 到 merge。无冲突继续范围化测试；冲突自动 abort 后交付决策包并停止。
+- 创建/更新 PR 前先 fetch 实际目标分支；普通任务分支 push 不要求预先同步。
+- 工单分支落后 PR 目标基线 → Agent 主动运行 `scripts/sync-task-from-origin.sh sync --target-branch <master|release/*> --json`（`master` 可省略参数）；入口建立绑定目标分支的恢复点并固定 rebase 对应 `origin/<目标>`，禁止自动 fallback 到 merge。无冲突继续范围化测试；冲突自动 abort 后交付决策包并停止。
 - 推送前验证失败可运行 `scripts/sync-task-from-origin.sh rollback --json`；进入 push 后先持久化 fail-closed 状态，进程中断、丢失 push 确认或状态落盘失败都禁止自动 rollback。只有远端 SHA 被证明完全未变才可解除推送状态。Gitee 核验成功后先运行 `scripts/verify-pr-update.sh --update-pr <PR编号> --pr-snapshot <推送后临时JSON> --json`，再运行 `finalize` 清除恢复点。
 - 强推仅工单分支放行：`git push --force-with-lease`。裸 `--force`、对 master 强推被拦。
 - 机制兜底：pre-commit 软提醒、pre-push 硬拦。见 `docs/adr/0006-sync-mechanism-auto-block.md`

@@ -78,8 +78,9 @@ def validate_identity(
         raise EvidenceError("PR 不是 opened 状态。")
     if data["source_branch"] != branch:
         raise EvidenceError("PR source branch 与当前分支不匹配。")
-    if data["target_branch"] != "master":
-        raise EvidenceError("PR target branch 不是 master。")
+    target = str(data["target_branch"])
+    if target != "master" and not (target.startswith("release/") and len(target) > len("release/")):
+        raise EvidenceError("PR target branch 必须是 master 或 release/*。")
     if data["head_sha"] != expected_head:
         raise EvidenceError("PR head_sha 与预期远端 SHA 不匹配。")
 
@@ -88,8 +89,8 @@ def recovery_file(root: Path) -> Path:
     return Path(git(root, "rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
 
 
-def changed_files(root: Path) -> list[str]:
-    output = git(root, "diff", "--name-only", "origin/master...HEAD")
+def changed_files(root: Path, target_branch: str) -> list[str]:
+    output = git(root, "diff", "--name-only", "origin/{}...HEAD".format(target_branch))
     return output.splitlines() if output else []
 
 
@@ -104,7 +105,7 @@ def emit(as_json: bool, status: str, **details: object) -> None:
 def preflight(args: argparse.Namespace, root: Path, data: dict[str, object]) -> int:
     branch = git(root, "symbolic-ref", "--short", "HEAD")
     validate_identity(data, args.iid, branch, args.remote_sha)
-    local_files = changed_files(root)
+    local_files = changed_files(root, str(data["target_branch"]))
     frozen = set(str(item) for item in data["changed_files"])
     allowed = frozen | set(args.allow_scope_file)
     unexpected = sorted(set(local_files) - allowed)
@@ -131,7 +132,7 @@ def verify(args: argparse.Namespace, root: Path, data: dict[str, object]) -> int
     validate_identity(data, args.iid, branch, head)
     if data["conflict"] is not False:
         raise EvidenceError("PR conflict 必须是 JSON 布尔 false（非字符串 \"false\"）。")
-    local_files = changed_files(root)
+    local_files = changed_files(root, str(data["target_branch"]))
     if sorted(set(str(item) for item in data["changed_files"])) != sorted(set(local_files)):
         raise EvidenceError("Gitee PR changed_files 与本地最终 diff 不一致。")
 

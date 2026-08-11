@@ -32,6 +32,24 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.origin = self.root / "origin.git"
         self.main = self.root / "main"
         self.worktree = self.root / "blue-whale-worktrees" / "feature-test"
+        self.real_node = shutil.which("node") or "/usr/bin/node"
+        self.fake_bin = self.root / "fake-verification-bin"
+        self.fake_bin.mkdir()
+        self.verification_log = self.root / "verification-args.log"
+        fake_node = self.fake_bin / "node"
+        fake_node.write_text(
+            "#!/bin/sh\n"
+            "case \"$1\" in\n"
+            "  */scripts/verify-change-scope.mjs) printf '%s\\n' \"$*\" >> \"$VERIFICATION_LOG\"; exit 0 ;;\n"
+            "esac\n"
+            "exec \"$REAL_NODE\" \"$@\"\n",
+            encoding="utf-8",
+        )
+        fake_node.chmod(0o755)
+        self.base_env = os.environ.copy()
+        self.base_env["PATH"] = "{}:{}".format(self.fake_bin, self.base_env["PATH"])
+        self.base_env["REAL_NODE"] = self.real_node
+        self.base_env["VERIFICATION_LOG"] = str(self.verification_log)
         run("git", "init", "--bare", str(self.origin), cwd=self.root, check=True)
         run("git", "init", str(self.main), cwd=self.root, check=True)
         self.configure(self.main)
@@ -41,6 +59,8 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.git("branch", "-M", "master", cwd=self.main)
         self.git("remote", "add", "origin", str(self.origin), cwd=self.main)
         self.git("push", "-u", "origin", "master", cwd=self.main)
+        self.git("branch", "release/prod", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
         self.git("branch", BRANCH, cwd=self.main)
         self.worktree.parent.mkdir(parents=True)
         self.git("worktree", "add", str(self.worktree), BRANCH, cwd=self.main)
@@ -72,8 +92,15 @@ class PublishReviewPackageTest(unittest.TestCase):
             common = (self.worktree / common).resolve()
         return common / "agent-release-review-package-feature%测试已有PR更新流程"
 
-    def invoke(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return run("bash", str(PUBLISH_SCRIPT), *args, cwd=self.worktree)
+    def invoke(self, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", str(PUBLISH_SCRIPT), *args],
+            cwd=self.worktree,
+            text=True,
+            errors="replace",
+            capture_output=True,
+            env=env or self.base_env,
+        )
 
     def pr_snapshot(
         self,
@@ -90,7 +117,9 @@ class PublishReviewPackageTest(unittest.TestCase):
             line = self.git("ls-remote", "--heads", "origin", "refs/heads/{}".format(BRANCH))
             head_sha = line.split()[0] if line else ""
         if changed_files is None and head_sha:
-            changed = self.git("diff", "--name-only", "origin/master...{}".format(head_sha))
+            changed = self.git(
+                "diff", "--name-only", "origin/{}...{}".format(target_branch, head_sha)
+            )
             changed_files = changed.splitlines() if changed else []
         path = self.root / "pr-snapshot-{}.json".format(time.time_ns())
         path.write_text(
@@ -130,7 +159,7 @@ class PublishReviewPackageTest(unittest.TestCase):
             cwd=self.worktree,
             text=True,
             capture_output=True,
-            env=env,
+            env=env or self.base_env,
         )
 
     def response(self, result: subprocess.CompletedProcess[str]) -> dict[str, object]:
@@ -175,6 +204,63 @@ class PublishReviewPackageTest(unittest.TestCase):
             expected_head,
         )
         self.assertTrue(self.publish_marker().exists())
+
+    def test_create_mode_supports_release_target_and_binds_marker(self) -> None:
+        result = self.invoke(
+            "--user-authorized",
+            "--create-pr",
+            "--target-branch",
+            "release/prod",
+            "--json",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("target=release/prod", self.publish_marker().read_text(encoding="utf-8"))
+        self.assertIn("--base origin/release/prod", self.verification_log.read_text(encoding="utf-8"))
+
+    def test_create_mode_rejects_unprotected_target(self) -> None:
+        for target in ("develop", "release/"):
+            with self.subTest(target=target):
+                result = self.invoke(
+                    "--user-authorized", "--create-pr", "--target-branch", target, "--json"
+                )
+
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(self.response(result)["status"], "INVALID_TARGET_BRANCH")
+
+    def test_update_mode_reads_release_target_from_snapshot(self) -> None:
+        self.git("push", "-u", "origin", "HEAD")
+        expected_head = self.commit_followup("release review follow-up")
+
+        result = self.invoke_update(self.pr_snapshot(target_branch="release/prod"))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.response(result)["head"], expected_head)
+        self.assertIn("--base origin/release/prod", self.verification_log.read_text(encoding="utf-8"))
+
+    def test_update_mode_rejects_sync_recovery_for_another_target(self) -> None:
+        remote_head = self.git("rev-parse", "HEAD")
+        self.git("push", "-u", "origin", "HEAD")
+        self.commit_followup("review fix")
+        (self.main / "upstream.txt").write_text("upstream\n", encoding="utf-8")
+        self.git("add", "upstream.txt", cwd=self.main)
+        self.git("commit", "-m", "chore: advance master", cwd=self.main)
+        self.git("push", "origin", "master", cwd=self.main)
+        synced = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
+        self.assertEqual(synced.returncode, 0, synced.stderr)
+
+        result = self.invoke_update(
+            self.pr_snapshot(target_branch="release/prod", head_sha=remote_head)
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.response(result)["status"], "INVALID_RECOVERY")
+
+    def test_update_mode_rejects_explicit_target_even_when_master(self) -> None:
+        result = self.invoke_update(self.pr_snapshot(), "--target-branch", "master")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.response(result)["status"], "INVALID_TARGET_BRANCH")
 
     def test_update_mode_requires_existing_remote_source_branch(self) -> None:
         result = self.invoke_update(self.pr_snapshot(head_sha=""))
@@ -326,7 +412,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         cases = (
             {"state": "closed"},
             {"source_branch": "feature/其他分支"},
-            {"target_branch": "develop"},
+            {"target_branch": "develop", "changed_files": ["task.txt"]},
         )
         for overrides in cases:
             with self.subTest(overrides=overrides):
@@ -357,29 +443,11 @@ class PublishReviewPackageTest(unittest.TestCase):
         )
 
     def test_remote_read_failure_returns_structured_status(self) -> None:
-        real_git = shutil.which("git") or "/usr/bin/git"
-        fake_bin = self.root / "fake-git-bin"
-        fake_bin.mkdir()
-        fake_git = fake_bin / "git"
-        fake_git.write_text(
-            "#!/bin/sh\n"
-            "case \" $* \" in *\" fetch origin master \"*) exit 71 ;; esac\n"
-            "exec \"{}\" \"$@\"\n".format(real_git),
-            encoding="utf-8",
-        )
-        fake_git.chmod(0o755)
-        env = os.environ.copy()
-        env["PATH"] = "{}:{}".format(fake_bin, env["PATH"])
+        self.git("remote", "set-url", "origin", str(self.root / "missing-origin.git"))
 
-        result = subprocess.run(
-            ["bash", str(PUBLISH_SCRIPT), "--user-authorized", "--create-pr", "--json"],
-            cwd=self.worktree,
-            text=True,
-            capture_output=True,
-            env=env,
-        )
+        result = self.invoke("--user-authorized", "--create-pr", "--json")
 
-        self.assertEqual(result.returncode, 7)
+        self.assertEqual(result.returncode, 7, result.stderr)
         self.assertEqual(self.response(result)["status"], "REMOTE_READ_FAILED")
 
     def test_ls_remote_failure_returns_structured_status(self) -> None:
@@ -394,7 +462,7 @@ class PublishReviewPackageTest(unittest.TestCase):
             encoding="utf-8",
         )
         fake_git.chmod(0o755)
-        env = os.environ.copy()
+        env = self.base_env.copy()
         env["PATH"] = "{}:{}".format(fake_bin, env["PATH"])
 
         result = subprocess.run(
@@ -453,7 +521,7 @@ class PublishReviewPackageTest(unittest.TestCase):
             encoding="utf-8",
         )
         fake_git.chmod(0o755)
-        env = os.environ.copy()
+        env = self.base_env.copy()
         env["PATH"] = "{}:{}".format(fake_bin, env["PATH"])
         env["FAIL_RECOVERY_TMP"] = str(recovery_file) + ".tmp"
 
@@ -491,7 +559,7 @@ class PublishReviewPackageTest(unittest.TestCase):
             encoding="utf-8",
         )
         fake_git.chmod(0o755)
-        env = os.environ.copy()
+        env = self.base_env.copy()
         env["PATH"] = "{}:{}".format(fake_bin, env["PATH"])
 
         published = self.invoke_update(env=env)
@@ -555,7 +623,7 @@ class PublishReviewPackageTest(unittest.TestCase):
             encoding="utf-8",
         )
         py_launcher.chmod(0o755)
-        env = os.environ.copy()
+        env = self.base_env.copy()
         env["PATH"] = "{}:{}".format(fake_bin, env["PATH"])
 
         result = subprocess.run(
