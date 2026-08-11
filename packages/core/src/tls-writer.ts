@@ -1,5 +1,5 @@
 /**
- * 火山引擎 TLS 日志上报 writer（IK6KQQ，父任务 IK6KO2）。
+ * 火山引擎 TLS 日志上报 writer（IK6KQQ，父任务 IK6KO2；IK7TED 错误可见性）。
  *
  * 官方 Node SDK `@volcengine/openapi` 的 tls Producer 异步批量直写
  * （对齐 blue-whale-api ADR-0002 方案 A：应用内 Producer 异步直写）。
@@ -7,6 +7,14 @@
  *
  * 环境变量：TLS_ENDPOINT / TLS_REGION / TLS_TOPIC_ID / TLS_AK / TLS_SK
  * （可选 TLS_SOURCE 覆盖日志来源标识，缺省 主机名-PID）。
+ *
+ * 错误可见性（IK7TED）：SDK Producer 对入队后的失败默认静默——传给 SendLog 的
+ * CallBack 是感知「batch 重试耗尽后最终失败」的唯一通道，此前未传；入队阶段的
+ * 失败（如 protobuf 加载/校验）reject promise 也曾用空 catch 吞掉。现在所有失败
+ * 路径经 surfaceError 走 console.error（按 at+code 节流，缺省 10s；TLS_DEBUG 任意
+ * 非空值关闭节流；TLS_SURFACE_INTERVAL_MS 覆盖间隔）。刻意不用结构化 logger，
+ * 避免 write→error→write 递归；可见性自身也绝不抛错。getTlsWriterStats 供未来
+ * 健康探针复用（Next 双 bundle 各自持有独立计数，属预期）。
  */
 import { hostname } from "node:os";
 
@@ -37,6 +45,43 @@ export interface TlsWriterConfig {
   accessKeyId: string;
   accessKeySecret: string;
   source?: string;
+}
+
+/** TLS 上报运行统计（进程内累计；双 bundle 场景各有一份）。 */
+export interface TlsWriterStats {
+  /** SendLog 入队阶段失败（promise reject / 同步 throw） */
+  enqueueFailures: number;
+  /** CallBack.Fail：batch 重试耗尽后最终发送失败 */
+  sendFailures: number;
+  /** CallBack.Success：batch 发送成功 */
+  sendSuccesses: number;
+  /** Producer.Start() 失败次数 */
+  startFailures: number;
+  /** close() 失败次数 */
+  closeFailures: number;
+  /** 最近一次失败详情（无失败为 null） */
+  lastError: { at: string; message: string; code?: string; timestamp: number } | null;
+}
+
+/** SDK SendLog 结果中的单次尝试（结构化最小约束，字段均为 SDK 可选返回）。 */
+interface TlsAttempt {
+  ErrorCode?: string;
+  ErrorMessage?: string;
+  RequestId?: string;
+  SuccessFlag?: boolean;
+  TimestampMs?: number;
+}
+
+/** SDK SendLog 结果（结构化最小约束）。 */
+interface TlsSendResult {
+  Attempts?: TlsAttempt[];
+  SuccessFlag?: boolean;
+}
+
+/** SDK SendLog 第 6 参回调（感知 batch 最终成败的唯一通道）。 */
+interface TlsSendCallBack {
+  Success(result: TlsSendResult): void;
+  Fail(result: TlsSendResult): void;
 }
 
 type SdkNamespace = typeof import("@volcengine/openapi");
@@ -75,9 +120,107 @@ const noopWriter: TlsLogWriter = {
   async close() {},
 };
 
+// ---------------------------------------------------------------------------
+// 错误可见性（IK7TED）
+// ---------------------------------------------------------------------------
+
+const DEFAULT_SURFACE_INTERVAL_MS = 10_000;
+
+type SurfaceAt = "enqueue" | "send" | "start" | "close";
+
+function emptyStats(): TlsWriterStats {
+  return {
+    enqueueFailures: 0,
+    sendFailures: 0,
+    sendSuccesses: 0,
+    startFailures: 0,
+    closeFailures: 0,
+    lastError: null,
+  };
+}
+
+let stats: TlsWriterStats = emptyStats();
+const surfaceThrottle = new Map<string, number>();
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function errorCode(err: unknown): string | undefined {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" && code !== "" ? code : undefined;
+}
+
+/** TLS_DEBUG 仅认非空且非 "0" 值（"0"/"" 视为关闭）。 */
+function tlsDebugEnabled(): boolean {
+  const value = process.env.TLS_DEBUG;
+  return value !== undefined && value !== "" && value !== "0";
+}
+
+/**
+ * 上报失败可见化：计数 + 节流 console.error。
+ * 绝不抛错、绝不走结构化 logger（防 write→error→write 递归）。
+ */
+function surfaceError(at: SurfaceAt, message: string, code?: string): void {
+  try {
+    if (at === "enqueue") stats.enqueueFailures += 1;
+    else if (at === "send") stats.sendFailures += 1;
+    else if (at === "start") stats.startFailures += 1;
+    else stats.closeFailures += 1;
+    stats.lastError = {
+      at,
+      message,
+      ...(code ? { code } : {}),
+      timestamp: Date.now(),
+    };
+
+    const debug = tlsDebugEnabled();
+    const configured = Number(process.env.TLS_SURFACE_INTERVAL_MS);
+    const intervalMs =
+      Number.isFinite(configured) && configured > 0
+        ? configured
+        : DEFAULT_SURFACE_INTERVAL_MS;
+    const key = code ? `${at}:${code}` : at;
+    const now = Date.now();
+    const lastEmit = surfaceThrottle.get(key) ?? 0;
+    if (!debug && now - lastEmit < intervalMs) return;
+    surfaceThrottle.set(key, now);
+
+    const total =
+      at === "enqueue"
+        ? stats.enqueueFailures
+        : at === "send"
+          ? stats.sendFailures
+          : at === "start"
+            ? stats.startFailures
+            : stats.closeFailures;
+    console.error(
+      `[tls-writer] ${at}: ${message}${code ? ` (code=${code})` : ""} — total=${total}`,
+    );
+  } catch {
+    // 可见性自身失败不影响任何通道。
+  }
+}
+
+/** 当前 TLS 上报统计快照（计数 + 最近错误；lastError 深拷贝，消费者改写不污染内部状态）。 */
+export function getTlsWriterStats(): TlsWriterStats {
+  return { ...stats, lastError: stats.lastError ? { ...stats.lastError } : null };
+}
+
+/** 重置统计与节流状态（测试用）。 */
+export function resetTlsWriterStats(): void {
+  stats = emptyStats();
+  surfaceThrottle.clear();
+}
+
+// ---------------------------------------------------------------------------
+// writer
+// ---------------------------------------------------------------------------
+
 /**
  * 创建 TLS 日志 writer。config 缺失时返回 no-op；
  * SDK Producer 内部完成批量聚合、异步发送与失败重试。
+ * Start 失败降级为 no-op（日志仍走 console 主通道），对齐「永不抛错」契约。
  */
 export function createTlsLogWriter(config: TlsWriterConfig | null): TlsLogWriter {
   if (!config) return noopWriter;
@@ -88,11 +231,47 @@ export function createTlsLogWriter(config: TlsWriterConfig | null): TlsLogWriter
   producerConfig.AccessKeyID = config.accessKeyId;
   producerConfig.AccessKeySecret = config.accessKeySecret;
   const producer = new Producer(producerConfig);
-  producer.Start();
+  try {
+    producer.Start();
+  } catch (err) {
+    surfaceError("start", errorMessage(err), errorCode(err));
+    return noopWriter;
+  }
   const source = config.source ?? "blue-whale-ai";
   return {
     write(record) {
       try {
+        // CallBack 由 SDK 内部异步调用，回调体必须自包 try/catch：
+        // 畸形 result 不得把异常抛回 SDK dispatcher（对齐「永不抛错」契约）。
+        const callBack: TlsSendCallBack = {
+          Success: (result) => {
+            try {
+              stats.sendSuccesses += 1;
+              if (tlsDebugEnabled()) {
+                const attempts = result?.Attempts ?? [];
+                const last = attempts[attempts.length - 1];
+                console.error(
+                  `[tls-writer] send ok (requestId=${last?.RequestId ?? ""})`,
+                );
+              }
+            } catch {
+              // 回调失败不影响任何通道。
+            }
+          },
+          Fail: (result) => {
+            try {
+              const attempts = result?.Attempts ?? [];
+              const last = attempts[attempts.length - 1];
+              surfaceError(
+                "send",
+                last?.ErrorMessage ?? "batch send failed after all retries",
+                last?.ErrorCode || undefined,
+              );
+            } catch {
+              // 回调失败不影响任何通道。
+            }
+          },
+        };
         producer
           .SendLog(
             "",
@@ -100,20 +279,22 @@ export function createTlsLogWriter(config: TlsWriterConfig | null): TlsLogWriter
             source,
             "blue-whale-ai",
             { Time: record.time, Contents: record.contents },
-            undefined,
+            callBack,
           )
-          .catch(() => {
-            // 上报失败由 Producer 内部重试兜底，最终失败静默丢弃。
+          .catch((err: unknown) => {
+            // 入队阶段失败（buffer 满 / protobuf 加载或校验失败等）。
+            surfaceError("enqueue", errorMessage(err), errorCode(err));
           });
-      } catch {
-        // 日志上报失败不阻断业务。
+      } catch (err) {
+        // 日志上报失败不阻断业务，但必须可见。
+        surfaceError("enqueue", errorMessage(err), errorCode(err));
       }
     },
     async close() {
       try {
         await producer.Close();
-      } catch {
-        // 关闭失败忽略。
+      } catch (err) {
+        surfaceError("close", errorMessage(err), errorCode(err));
       }
     },
   };
