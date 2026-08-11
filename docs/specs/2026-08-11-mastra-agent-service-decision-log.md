@@ -209,16 +209,17 @@ SessionPhase 只表达 Agent 当前在等待用户什么：`open` 表示正常�
 3. 明确确认可来自自然语言，也可来自“生成任务卡”按钮。
 4. 普通盘问 Run 只能回复、提问和读取授权附件，不能创建 PromptCard。
 5. 任何 PromptCardRevision 提交都必须绑定同一 AgentRun 内已经持久化的 ConfirmationEvidence；没有确认凭证时，即使模型输出了卡片候选也必须拒绝提交。
-6. 用户点击“生成任务卡”时，以幂等 `action_id` 创建 `confirm_prompt_card` 触发类型的新 AgentRun，并直接形成 `kind=ui_action` 的 ConfirmationEvidence；历史中投影为可见操作记录，不伪造用户 AgentMessage。
-7. 用户使用自然语言确认时，原文照常保存为 AgentMessage 并触发新 Run；只有 `SessionPhase=awaiting_final_confirmation` 且该 Run 结构化判定本次输入构成明确确认后，才能形成绑定 `source_message_id` 的 `kind=natural_language` ConfirmationEvidence，并为该 Run 开放 `prompt:write` 提交权限。
+6. 用户点击“生成任务卡”时，以幂等 `action_id` 创建 `kind=confirm_prompt_card` 的 AgentInputBatch，并为其首次 AgentRun 形成 `kind=ui_action` 的 ConfirmationEvidence；历史中投影为可见操作记录，不伪造用户 AgentMessage。
+7. 用户使用自然语言确认时，原文照常保存为 AgentMessage 并进入新的 AgentInputBatch；只有 `input_session_phase=awaiting_final_confirmation` 且该 Run 结构化判定本次输入构成明确确认后，才能形成绑定 `source_message_id` 的 `kind=natural_language` ConfirmationEvidence，并为该 Run 开放 `prompt:write` 提交权限。
 8. 自然语言表示拒绝、继续修改或仍有歧义时，不形成 ConfirmationEvidence、不开放 `prompt:write`，继续讨论或澄清。
 9. 用户明确确认产卡时始终创建新的 AgentRun，不恢复此前提出总结或确认问题的 Run。
 10. 用户仅回答最后一个问题、“看起来不错”、长时间不回复或 Agent 自行判断充分，都不构成产卡确认。
-11. AgentRun 创建时冻结 `input_session_phase`；只有 Run 成功提交时才能更新下一 SessionPhase，失败或取消不改变此前阶段。成功生成 PromptCard 后 Session 回到 `open`，允许继续修改、要求新方案或讨论其他方向。
+11. AgentInputBatch 创建时冻结 `input_session_phase`；只有 Run 成功提交时才能更新下一 SessionPhase，失败或取消不改变此前阶段。成功生成 PromptCard 后 Session 回到 `open`，允许继续修改、要求新方案或讨论其他方向。
+12. 失败重试复用原 AgentInputBatch，但每个新 Run 都必须重新形成属于本 Run 的 ConfirmationEvidence；旧 Run 的 `prompt:write` 授权和 Capability 不得跨 Run 复用。
 
 ## AgentRun 状态与并发
 
-AgentRun 表示一次已接纳的用户动作触发的自主执行；AgentSession 跨多轮长期存在，Run 不跨越多次用户回答。V1 Run 状态集合：
+AgentInputBatch 表示一次稳定、冻结的用户输入，可以包含一条或多条有序 AgentMessage，或一个显式 UI 操作；AgentRun 表示对该 InputBatch 的一次执行尝试。AgentSession 跨多轮长期存在，Run 不跨越新的用户输入。V1 Run 状态集合：
 
 ```text
 queued
@@ -233,9 +234,9 @@ cancelled
 
 - 一个 AgentSession 同时最多一个活动 AgentRun；
 - Run 执行中新消息立即分别持久化为不可变 AgentMessage，并投影为 pending 输入，不隐式取消或修改当前 Run；
-- 当前 Run 结束后，服务按消息顺序把尚未消费的连续 pending AgentMessage 原子绑定给一个新的 AgentRun；新 Run 通过有序 AgentRunInput 关联一次性消费整批消息，不把多条原文拼接成一条假消息；
-- AgentRunInput 对 `message_id` 建立唯一约束，保证一条用户消息最多由一个 Run 消费；Run 创建后输入集合冻结，之后到达的消息进入下一批；
-- Session 空闲时，通常由当前接纳的一条用户消息立即创建新 Run；
+- 当前 Run 结束后，服务按消息顺序把尚未消费的连续 pending AgentMessage 原子归入一个新的 AgentInputBatch，并为该 Batch 创建首次 AgentRun；InputBatch 保留有序原文，不把多条消息拼接成一条假消息；
+- AgentInputBatch 与消息的有序关联对 `message_id` 建立唯一约束，保证一条用户消息最多归属一个 InputBatch；InputBatch 创建后冻结，之后到达的消息进入下一 Batch；
+- Session 空闲时，通常由当前接纳的一条用户消息原子创建 AgentInputBatch 与首次 AgentRun；
 - Agent 提出澄清问题或请求最终确认时，本次 Run 正常完成，并把 AgentSession 分别推进为 `awaiting_clarification` 或 `awaiting_final_confirmation`；用户后续输入创建新 Run；
 - `payment_required` 是同一 Run 的可恢复阻断：充值后用户明确继续，为原 Run 发放新 Capability，并从持久化 Workflow checkpoint 恢复；
 - 进程崩溃恢复同一个 Run 的内部 Workflow checkpoint，不创建新 Run；
@@ -246,14 +247,14 @@ cancelled
 
 1. Worker/进程崩溃后从持久化 Workflow 状态恢复。
 2. 模型调用结果无法确认时不自动重复调用，避免重复扣费；Run 进入 `failed`。
-3. 用户重试会创建新的 AgentRun 和新的 Capability，继承 Session 上下文但不复用旧 Run 授权。
+3. 用户重试会为同一个冻结 AgentInputBatch 创建新的 AgentRun 和新的 Capability，记录 `retry_of_run_id` 与递增 `attempt_no`；新 Run 继承同一输入与 Session 上下文，但不复用旧 Run 授权。用户修改输入后再次发送会创建新的 InputBatch，不属于重试。
 4. 用户取消后撤销 Capability、停止后续步骤；未正式完成的 PromptCard 不产生。
 5. 同一确认 Run 最多成功产出一次确定的 PromptCard 批次；重复请求幂等返回首次结果。
 6. 用户只看到简短可行动错误；内部保留审计证据。
 
 ## AgentMessage、RunEvent 与正式输出
 
-1. 用户输入被服务接纳后立即成为不可变的正式 AgentMessage；Session 空闲时它与新 AgentRun 原子关联，Session 忙碌时先作为 pending 输入保存、待活动 Run 结束后再通过 AgentRunInput 绑定下一 Run。后续 Run 失败或取消不得删除、隐藏或改写该用户消息。
+1. 用户输入被服务接纳后立即成为不可变的正式 AgentMessage；Session 空闲时它与新的 AgentInputBatch、首次 AgentRun 原子创建，Session 忙碌时先作为 pending 输入保存、待活动 Run 结束后再归入下一 InputBatch。后续 Run 失败或取消不得删除、隐藏或改写该用户消息。
 2. Assistant 文字与 ReasoningTrace 在执行中通过 RunEvent 流式展示；RunEvent 是 SSE 断线恢复与短期交付记录，不是正式会话消息，也不进入后续模型上下文。
 3. Run 成功时，在同一事务中提交完整 Assistant AgentMessage、完整 ReasoningTrace、该 Run 产生的全部 PromptCardRevision、SessionPhase 变化以及 Run `completed` 状态。
 4. Run 失败或取消时，半截 Assistant 文字、半截 ReasoningTrace 和未完成 PromptCard 不进入正式会话历史；用户原始消息继续显示，并关联 `failed` 或 `cancelled` 状态、友好错误与重试入口。
