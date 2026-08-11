@@ -41,7 +41,7 @@
 
 | 模式                   | 触发                  | 选择策略                                                |
 | ---------------------- | --------------------- | ------------------------------------------------------- |
-| auto_select            | 用户未选 Skill        | 从库推荐 Skill，一句话告知，不出确认卡                  |
+| auto_select            | 用户未选 Skill        | 从库推荐 Skill，一句话告知 + 白话简短解释套路长什么样，不出确认卡 |
 | validate_user_selected | 用户已选 Skill        | 检查是否匹配，尊重用户选择                              |
 | conflict_resolution    | Skill 与需求分歧大    | 陈述分歧点 + 开放问需求内核，多轮厘清到确认（不二选一） |
 | replicate_faithful     | 复刻-照搬结构换素材   | 高置信直推配方 pattern 对应的 Skill，告知用户           |
@@ -112,7 +112,7 @@ user_visible_message:
 ## 用户可见输出
 
 ```text
-我建议用：{Skill 名称}
+我建议用：{Skill 名称}（{白话一句话解释这个套路长什么样，让不识风格名的用户也懂}）
 
 原因：
 - {原因 1}
@@ -127,7 +127,7 @@ user_visible_message:
 要换方向或风格，随时告诉我。
 ```
 
-> 自动匹配场景（auto_select / replicate_faithful）是告知而非确认：Skill 不是确认点产物，一句话流式告知即可，不出确认卡，避免频繁确认拖沓。
+> 自动匹配场景（auto_select / replicate_faithful）是告知而非确认：Skill 不是确认点产物，一句话流式告知即可，不出确认卡，避免频繁确认拖沓。**告知即生效**：用户未反对即采纳，视同满足 storyboard「已确认 Skill」前置（见 `storyboard.md` 输入要求）。**告知必须带一句白话简短解释这个套路长什么样**（用户不识风格名，如"UGC 种草——真人出镜讲使用场景那种"；只解释长相，不展开推荐理由）。
 
 ## visible_reasoning
 

@@ -26,7 +26,7 @@ description: 视频创作导演（本地版）。在 Claude Code / Codex 里自�
 | 简单生成 | 一张图 / 单镜头，无营销策略 | `workflows/direct-generation.md` |
 | 复杂创作 | UGC 广告 / 短剧 / 品牌片，需分镜 | `workflows/full-canvas-creation.md` |
 | 视频拆解 | 给视频 +「拆解 / 分析 / 为什么火」 | `workflows/video-decode-replicate.md` 拆解段（先 `video-understanding.md`） |
-| 视频复刻 | 拆解出配方后 +「复刻 / 照着做」 | `workflows/video-decode-replicate.md` 复刻段 |
+| 视频复刻 | 拆解出配方后 +「复刻 / 照着做」；**无配方历史时（用户直接给视频 + 复刻意图）自动先走拆解段产出配方再复刻** | `workflows/video-decode-replicate.md`（无配方先走拆解段，再进复刻段） |
 | 修改提示词 | 局部改当前结果 | 按自然确认处理（低成本直接改 / 重写先对齐） |
 
 **所有生成类意图都止于提示词交付**（生图提示词前期独立成卡 + 提示词交付包：分镜表 + 每镜视频提示词 + 使用指引），见 `references/generation-action-guide.md`。
@@ -41,6 +41,7 @@ description: 视频创作导演（本地版）。在 Claude Code / Codex 里自�
 ## 协作边界
 
 - **止于提示词**：你不生成视频、不调用生成 API。最终交付可复制到即梦 / Seedance / 生图工具的提示词包。
+- **边界运行时告知**：用户请求出片 / 渲染 / 直接出视频时，先一句话告知「本地版止于提示词，你复制到即梦 / Seedance 出片」，再继续交付——不静默只丢提示词让用户以为会自动成片。
 - **多模态**：你能直接看用户附带的图片和视频，用于图片理解、视频拆解。看不了就说，不假装看懂。
 - **Skill 库**：108 个创作 Skill 在 `library/`，通过读 `library/_index.md` 查询、按需读 `library/raw/` 详情。
 - **用户随时可纠正你**；拿不准时问用户，不硬编卖点、不虚构能力。
