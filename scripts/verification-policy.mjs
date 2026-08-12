@@ -5,7 +5,7 @@ const CONTROL_PLANE_FILE = /^(?:\.githooks\/|\.(?:claude|codex)\/hooks\/|\.zcode
 const OPERATIONS_FILE = /^scripts\/(?:check-schema-charset|check-target-environment-retirement|ensure-graphify-worktree|fix-ik7grv-replace-slot-backfill|run-ik50gb-c-testsite-probe|run-real-canary|tunnel-testsite-db)\./;
 const PRODUCT_IMPACT_FILE = /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|packages\/contracts\/|packages\/persistence\/(?:prisma\/migrations|schema)\/|blue_whale_web\/(?:app\/api\/auth|lib\/auth|e2e-fullstack\/|playwright\.)|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
 const EXECUTABLE_FILE = /^(?:scripts\/|.*\.(?:sh|py|mjs|cjs|js))$/;
-const GOVERNANCE_FILE = /^(?:docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/(?:implement|dispatching-parallel-agents|finishing-a-development-branch|subagent-driven-development)\/)/;
+const GOVERNANCE_FILE = /^(?:blue_whale_web\/eslint\.config\.mjs|docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/(?:implement|dispatching-parallel-agents|finishing-a-development-branch|subagent-driven-development)\/)/;
 
 function sourceArea(file) {
   if (NODE_SOURCE.test(file)) return "node";

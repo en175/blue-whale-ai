@@ -66,6 +66,9 @@ const eslintConfig = defineConfig([
       "components/Toast/ToastProvider.tsx",
       "components/auth/ProfileModal.tsx",
       "components/recharge/useResponsive.ts",
+      // Project 身份切换必须同步取消旧流并重置其仅内存态的对话投影；
+      // 这不是派生状态，无法延后到异步订阅回调。
+      "app/canvas/_canvas/hooks/useAgentMvpConversation.ts",
     ],
     rules: {
       "react-hooks/set-state-in-effect": "off",
