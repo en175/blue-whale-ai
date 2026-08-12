@@ -359,25 +359,25 @@ flowchart TD
 
 按下面顺序读，最快形成整体认识：
 
-1. [ADR-0068](/Volumes/FORGE/projects/work/blue-whale-ai/docs/adr/0068-node-typescript-product-runtime-and-specialized-compute-boundary.md)  
+1. [ADR-0068](/Volumes/FORGE/projects/work/blue-whale-ai/docs/adr/0068-node-typescript-product-runtime-and-specialized-compute-boundary.md)
    先理解为什么是 Next.js + 两个独立 Worker。
 
-2. [runtime-ports.ts](/Volumes/FORGE/projects/work/blue-whale-ai/packages/core/src/runtime-ports.ts)  
+2. [runtime-ports.ts](/Volumes/FORGE/projects/work/blue-whale-ai/packages/core/src/runtime-ports.ts)
    看清 `AgentRequest → AgentResult` 和四种 AgentAction。
 
-3. [real-agent-adapter.ts](/Volumes/FORGE/projects/work/blue-whale-ai/packages/agent-runtime/src/real-agent-adapter.ts)  
+3. [real-agent-adapter.ts](/Volumes/FORGE/projects/work/blue-whale-ai/packages/agent-runtime/src/real-agent-adapter.ts)
    看目前“大模型 Agent”实际上做了什么。
 
-4. [worker-run-pin.ts](/Volumes/FORGE/projects/work/blue-whale-ai/apps/agent-worker/src/worker-run-pin.ts)  
+4. [worker-run-pin.ts](/Volumes/FORGE/projects/work/blue-whale-ai/apps/agent-worker/src/worker-run-pin.ts)
    看提示词、模型、Skill、引用和预算如何进入 Agent。
 
-5. [worker-loop.ts](/Volumes/FORGE/projects/work/blue-whale-ai/apps/agent-worker/src/worker-loop.ts)  
+5. [worker-loop.ts](/Volumes/FORGE/projects/work/blue-whale-ai/apps/agent-worker/src/worker-loop.ts)
    看一次任务如何领取、执行和提交。
 
-6. [index.ts](/Volumes/FORGE/projects/work/blue-whale-ai/apps/agent-worker/src/index.ts)  
+6. [index.ts](/Volumes/FORGE/projects/work/blue-whale-ai/apps/agent-worker/src/index.ts)
    看数据库、runtime 和 worker 如何组装启动。
 
-7. [AgentChatPanel.tsx](/Volumes/FORGE/projects/work/blue-whale-ai/blue_whale_web/app/canvas/_canvas/components/AgentChatPanel.tsx)  
+7. [AgentChatPanel.tsx](/Volumes/FORGE/projects/work/blue-whale-ai/blue_whale_web/app/canvas/_canvas/components/AgentChatPanel.tsx)
    最后再看用户端交互。
 
 我的总体建议是：
@@ -1152,7 +1152,7 @@ Mastra 服务可以部署在容器平台、虚拟机或支持持久任务的托�
 
 问题只有一个：
 
-**除了读取用户消息和上传附件，V1 的 Agent 还必须自主调用哪些外部工具或数据源？**  
+**除了读取用户消息和上传附件，V1 的 Agent 还必须自主调用哪些外部工具或数据源？**
 我的推荐答案是：首版只提供“读取附件/图片”和“读取蓝鲸传入的 Project 上下文”两个只读工具，暂不加入联网搜索。
 
 
@@ -2165,13 +2165,13 @@ AgentDefinition
 
 有三个选择：
 
-1. Mastra直接调用 OpenAI、Claude、Gemini 等供应商  
+1. Mastra直接调用 OpenAI、Claude、Gemini 等供应商
    独立性最高，但 Agent 服务要自己管理密钥、模型白名单、额度和计费。
 
-2. Mastra调用现有 `blue-whale-api` 的 OpenAI 兼容网关  
+2. Mastra调用现有 `blue-whale-api` 的 OpenAI 兼容网关
    继续复用现有模型接入、模型能力表、Token额度和计费，但 Agent 服务需要一种安全方式传递“本次调用属于哪个蓝鲸用户”。
 
-3. Mastra通过蓝鲸 Next.js `/api/text/completions` 间接调用模型  
+3. Mastra通过蓝鲸 Next.js `/api/text/completions` 间接调用模型
    能直接复用现有用户登录，但 Agent 服务反向依赖蓝鲸 BFF，链路绕行，也破坏独立服务边界。
 
 我的推荐是 **方案 2**：
@@ -3796,10 +3796,10 @@ flowchart LR
 
 你有三种获取方式：
 
-1. 在当前任务里向上滚动  
+1. 在当前任务里向上滚动
    Codex 会逐步加载更早的对话，适合人工查看和复制。官方更新说明长 transcript 支持分页浏览：[Codex changelog](https://learn.chatgpt.com/docs/changelog#codex-2026-08-10-daybreak)。
 
-2. 直接让我导出成 Markdown  
+2. 直接让我导出成 Markdown
    你可以在当前任务里说：
 
    > 把当前任务从第一轮开始导出为 Markdown，保留用户消息、助手回复和关键工具结果摘要，隐去凭证。
@@ -3812,7 +3812,7 @@ flowchart LR
 
    这是最适合留档、交给另一个 Agent 或重新审核的方式。
 
-3. 继续维护决策文档  
+3. 继续维护决策文档
    完整 transcript 用来审计，经过确认的设计决定继续放在现有决策记录里。两者用途不同：
 
    - 完整对话：保留讨论过程、反对意见和被推翻方案。
@@ -3828,4 +3828,3 @@ flowchart LR
 ### 用户
 
 帮我先导出吧
-
