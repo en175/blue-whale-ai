@@ -32,6 +32,11 @@ export const PUBLIC_ROUTES: ReadonlySet<string> = new Set([
   // IK70CM 首页模型目录：generation_model_capability 只读公开产品数据（模型名/尺寸/能力，
   // 无用户/凭据/配额），首页公开页需匿名展示真实模型（对齐此前前端硬编码模型对游客可见）。
   "generation/models/route.ts",
+  // 内部 Agent 模型网关：蓝鲸→Agent 服务间接口，双层鉴权——服务身份
+  // （x-agent-service-token 匹配 AGENT_SERVICE_TOKEN）+ Run Capability
+  // （Authorization: Bearer bwcap_*），不走用户会话统一认证，显式放行。
+  // 登记同充值模块先例：自有鉴权方案、不属 IK50GB 统一认证范围；非游客公开。
+  "internal/agent-model/v1/chat/completions/route.ts",
 ]);
 
 /** 判断 app/api 下 route.ts 相对路径是否公开（无需登录）。 */
