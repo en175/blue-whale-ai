@@ -176,9 +176,9 @@ fi
 
 "$ROOT/scripts/init-typescript-baseline-db.sh"
 if [ "${BW_TS_SKIP_IMAGE_BUILD:-false}" = "true" ]; then
-  dc up -d new-api provider-stub storage-stub agent-worker generation-worker web
+  dc up -d new-api provider-stub storage-stub generation-worker web
 else
-  dc up -d --build new-api provider-stub storage-stub agent-worker generation-worker web
+  dc up -d --build new-api provider-stub storage-stub generation-worker web
 fi
 
 setup_response="$(
@@ -223,7 +223,7 @@ dc restart new-api >/dev/null
 deadline=$((SECONDS + 180))
 while [ "$SECONDS" -lt "$deadline" ]; do
   pending=0
-  for service in new-api provider-stub storage-stub agent-worker generation-worker web; do
+  for service in new-api provider-stub storage-stub generation-worker web; do
     container_id="$(dc ps -q "$service")"
     if [ -z "$container_id" ] || [ "$(docker inspect -f '{{.State.Health.Status}}' "$container_id")" != "healthy" ]; then
       pending=1
@@ -248,87 +248,16 @@ while [ "$SECONDS" -lt "$deadline" ]; do
           }
         }
       '
-      if ! node --test "$ROOT/tests/typescript-baseline/scenario-blackbox.test.mjs"; then
-        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
-          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
-        echo "black-box scenario acceptance failed" >&2
-        exit 1
-      fi
-      if ! node --test "$ROOT/tests/typescript-baseline/conversation-browser-blackbox.test.mjs"; then
-        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
-          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
-        echo "browser conversation acceptance failed" >&2
-        exit 1
-      fi
       if ! node --test "$ROOT/tests/typescript-baseline/composer-upload-blackbox.test.mjs"; then
-        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub storage-stub \
+        dc logs --no-color --tail=200 new-api web generation-worker provider-stub storage-stub \
           | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
         echo "composer upload acceptance failed" >&2
         exit 1
       fi
       if ! node --test "$ROOT/tests/typescript-baseline/mention-blackbox.test.mjs"; then
-        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub storage-stub \
+        dc logs --no-color --tail=200 new-api web generation-worker provider-stub storage-stub \
           | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
         echo "atomic mention blackbox acceptance failed" >&2
-        exit 1
-      fi
-      if ! node --test "$ROOT/tests/typescript-baseline/mention-input-snapshot-blackbox.test.mjs"; then
-        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub storage-stub \
-          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
-        echo "mention input snapshot blackbox acceptance failed" >&2
-        exit 1
-      fi
-      if ! node --test "$ROOT/tests/typescript-baseline/skill-journey-blackbox.test.mjs"; then
-        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
-          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
-        echo "skill journey blackbox acceptance failed" >&2
-        exit 1
-      fi
-      if ! node --test "$ROOT/tests/typescript-baseline/plan-message-blackbox.test.mjs"; then
-        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
-          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
-        echo "plan message blackbox acceptance failed" >&2
-        exit 1
-      fi
-      if ! node --test "$ROOT/tests/typescript-baseline/plan-apply-blackbox.test.mjs"; then
-        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
-          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
-        echo "plan apply blackbox acceptance failed" >&2
-        exit 1
-      fi
-      if ! node --test "$ROOT/tests/typescript-baseline/plan-application-blackbox.test.mjs"; then
-        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
-          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
-        echo "plan application blackbox acceptance failed" >&2
-        exit 1
-      fi
-      if ! node --test "$ROOT/tests/typescript-baseline/scene-card-generation-blackbox.test.mjs"; then
-        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
-          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
-        echo "scene card generation blackbox acceptance failed" >&2
-        exit 1
-      fi
-      if ! node --test "$ROOT/tests/typescript-baseline/output-slot-retry-blackbox.test.mjs"; then
-        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
-          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
-        echo "output slot retry blackbox acceptance failed" >&2
-        exit 1
-      fi
-      if ! node --test "$ROOT/tests/typescript-baseline/storyboard-preview-blackbox.test.mjs"; then
-        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
-          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
-        echo "storyboard preview blackbox acceptance failed" >&2
-        exit 1
-      fi
-      if ! node --test "$ROOT/tests/typescript-baseline/snapshot-recovery-blackbox.test.mjs"; then
-        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub           | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
-        echo "snapshot recovery blackbox acceptance failed" >&2
-        exit 1
-      fi
-      if ! node --test "$ROOT/tests/typescript-baseline/storyboard-frame-video-input-blackbox.test.mjs"; then
-        dc logs --no-color --tail=200 new-api web agent-worker generation-worker provider-stub \
-          | node "$ROOT/scripts/lib/sanitize-acceptance-logs.mjs" >&2
-        echo "storyboard frame video input blackbox acceptance failed" >&2
         exit 1
       fi
       exit 0

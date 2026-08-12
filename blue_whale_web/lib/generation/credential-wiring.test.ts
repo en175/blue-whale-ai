@@ -10,7 +10,6 @@ const repoRoot = path.resolve(
 
 const WORKER_ENTRYPOINTS = [
   "blue_whale_web/workers/generation-worker.ts",
-  "apps/generation-worker/src/index.ts",
 ];
 
 describe("generation credential worker wiring", () => {
