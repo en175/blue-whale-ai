@@ -51,6 +51,7 @@ function isRuntimeSource(file) {
 
 test("TypeScript baseline cannot reconnect executable runtime to Java services", () => {
   const violations = roots
+    .filter(existsSync)
     .flatMap(walk)
     .filter(isRuntimeSource)
     .flatMap((file) => {

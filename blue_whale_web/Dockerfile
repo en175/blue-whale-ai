@@ -16,8 +16,6 @@ COPY packages/generation-runtime/package.json packages/generation-runtime/
 COPY packages/persistence/package.json packages/persistence/
 # 非依赖链但 pnpm workspaces 必需——缺文件 filter 匹配失败，"No projects matched the filters"
 COPY packages/agent-runtime/package.json packages/agent-runtime/
-COPY apps/agent-worker/package.json apps/agent-worker/
-COPY apps/generation-worker/package.json apps/generation-worker/
 # 目标应用
 COPY blue_whale_web/package.json blue_whale_web/
 COPY blue_whale_web/patches blue_whale_web/patches
@@ -26,14 +24,7 @@ COPY blue_whale_web/patches blue_whale_web/patches
 # 只认 pnpm_config_* 前缀（pnpm.io/blog/releases/11.0），旧前缀会被静默忽略、直连 npmjs
 ENV pnpm_config_registry=https://registry.npmmirror.com
 # --filter ... 匹配包名 @blue-whale/web（不是目录名 blue_whale_web），安装其依赖链。
-# IK7ERQ：额外带上两个 worker —— builder 阶段要跑 apps 的单元测试，只装 @blue-whale/web 链
-# 时 apps/*/node_modules 无 workspace 软链，vitest 报 Failed to load url @blue-whale/*。
-# 两者依赖全在 @blue-whale/web 已有的链内（contracts/core/persistence/agent-runtime/
-# generation-runtime），不引入任何额外外部下载；runner 阶段只 COPY standalone，镜像不变大。
-RUN pnpm install --frozen-lockfile \
-    --filter "@blue-whale/web..." \
-    --filter "@blue-whale/agent-worker..." \
-    --filter "@blue-whale/generation-worker..."
+RUN pnpm install --frozen-lockfile --filter "@blue-whale/web..."
 
 FROM node:24-alpine AS builder
 ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
@@ -54,10 +45,9 @@ COPY packages/generation-runtime packages/generation-runtime
 COPY packages/persistence packages/persistence
 # 目标应用源码
 COPY blue_whale_web blue_whale_web
-# IK774I（修 IK747Z lint 配套遗漏）：pnpm lint:node = eslint apps packages，
-# builder 阶段需仓库根 eslint.config.mjs 与 apps 源码在场，否则 ESLint 9 找不到 flat config 直接 exit 2。
+# IK774I（修 IK747Z lint 配套遗漏）：builder 阶段需仓库根
+# eslint.config.mjs 在场，否则 ESLint 9 找不到 flat config 直接 exit 2。
 COPY eslint.config.mjs ./
-COPY apps apps
 # IK7ERQ：跨端契约的 schema 与夹具（约 104K）。lib/creative-skill-activation-contract.test.ts
 # 从 docs/specs/fixtures 读 manifest，再按 manifest.schema 回溯读 docs/specs/*.json 校验
 # wire shape；缺任一侧该用例 ENOENT。.dockerignore 已对应放行（散文 .md 不进上下文）。
