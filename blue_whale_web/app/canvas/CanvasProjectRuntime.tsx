@@ -33,6 +33,7 @@ import { effectiveToolMode, type ToolMode } from "./_canvas/v2/toolMode";
 import { useSpaceHeld } from "./_canvas/v2/useSpaceHeld";
 import { useV2Projects } from "./_canvas/v2/useV2Projects";
 import { useProjectConversation } from "./_canvas/hooks/useProjectConversation";
+import { useAgentMvpConversation } from "./_canvas/hooks/useAgentMvpConversation";
 import { projectSnapshotToSceneCards } from "./_canvas/conversationRecovery";
 import type { Rect } from "./_canvas/placement";
 import { useCanvasGeneration } from "./_canvas/hooks/useCanvasGeneration";
@@ -140,6 +141,7 @@ export function CanvasProjectRuntime({
     retryRun,
     applyPlan,
   } = useProjectConversation(pid, backendReady);
+  const agentMvp = useAgentMvpConversation(pid);
 
   // 场景卡快照投影（spec §6.2）：注入画布，SceneCardNode 按 data.sceneCardId 查正文
   const sceneCards = useMemo(
@@ -742,14 +744,14 @@ export function CanvasProjectRuntime({
         prompt,
         initialSkillId: homeJump?.tab === "agent" ? homeJump.skill : undefined,
         projectId: activeProject.id,
-        messages: backendReady ? conversationMessages : messages,
-        onSubmitMessage: backendReady ? sendConversationMessage : undefined,
+        messages: agentMvp.messages,
+        onSubmitMessage: agentMvp.sendMessage,
         onUploadFile: backendReady ? handleComposerUploadFile : undefined,
         answerableActive,
         activeSkillName: agentRunDisplay?.skillName,
-        agentRunStatus: agentRunDisplay?.status,
+        agentRunStatus: agentMvp.status,
         reasoningSummary: agentRunDisplay?.reasoningSummary,
-        provisionalContent: provisionalText,
+        provisionalContent: agentMvp.provisionalContent,
         onRetryAgentRun:
           backendReady && runControl.canRetry ? retryRun : undefined,
         onApplyPlanMessage: backendReady ? applyPlan : undefined,
