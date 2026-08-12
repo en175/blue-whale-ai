@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createAgentSession, streamAgentMessage } from "@/lib/agent-service/client";
+import { newCommandIdentity } from "@/lib/command-identity";
 import type { ChatMessage } from "../types";
 
 export function useAgentMvpConversation(projectId: string | null) {
@@ -21,7 +22,7 @@ export function useAgentMvpConversation(projectId: string | null) {
 
   const sendMessage = useCallback(async (content: string) => {
     if (!projectId) return;
-    const userId = crypto.randomUUID();
+    const userId = newCommandIdentity();
     setMessages((current) => [...current, { id: userId, type: "user", text: content }]);
     setStatus("running");
     setProvisionalContent("");
@@ -48,7 +49,7 @@ export function useAgentMvpConversation(projectId: string | null) {
       );
       setMessages((current) => [
         ...current,
-        { id: crypto.randomUUID(), type: "agent", text: completed },
+        { id: newCommandIdentity(), type: "agent", text: completed },
       ]);
       setStatus("completed");
     } catch (error) {
