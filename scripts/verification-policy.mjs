@@ -7,6 +7,14 @@ const PRODUCT_IMPACT_FILE = /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.y
 const EXECUTABLE_FILE = /^(?:scripts\/|.*\.(?:sh|py|mjs|cjs|js))$/;
 const GOVERNANCE_FILE = /^(?:blue_whale_web\/eslint\.config\.mjs|docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/(?:implement|dispatching-parallel-agents|finishing-a-development-branch|subagent-driven-development)\/)/;
 
+function isTestFile(file) {
+  return /(?:^|\/)[^/]+\.(?:test|spec)\.(?:ts|tsx|js|mjs|cjs)$/.test(file);
+}
+
+function hasProductImpact(file, documentationOnlyFiles) {
+  return PRODUCT_IMPACT_FILE.test(file) && !isTestFile(file) && !documentationOnlyFiles.has(file);
+}
+
 function sourceArea(file) {
   if (NODE_SOURCE.test(file)) return "node";
   if (WEB_SOURCE.test(file)) return "web";
@@ -84,7 +92,7 @@ function classifyAutomatically(files, stage, documentationOnlyFiles) {
   }
 
   if (stage === "pr") {
-    if (files.some((file) => PRODUCT_IMPACT_FILE.test(file) && !documentationOnlyFiles.has(file))) {
+    if (files.some((file) => hasProductImpact(file, documentationOnlyFiles))) {
       return fullClassification(
         files,
         "publishing product-impact changes requires full verification",
@@ -132,7 +140,7 @@ function classifyAutomatically(files, stage, documentationOnlyFiles) {
     };
   }
 
-  if (files.some((file) => PRODUCT_IMPACT_FILE.test(file) && !documentationOnlyFiles.has(file))) {
+  if (files.some((file) => hasProductImpact(file, documentationOnlyFiles))) {
     return scopedClassification(files, "product-impact infrastructure changed", documentationOnlyFiles);
   }
 

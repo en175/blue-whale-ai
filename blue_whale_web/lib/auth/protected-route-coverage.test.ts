@@ -28,6 +28,12 @@ const HTTP_METHODS = new Set([
   "POST",
   "PUT",
 ]);
+const INTERNAL_SERVICE_ROUTE_AUTH = new Map([
+  [
+    "internal/agent-model/v1/chat/completions/route.ts",
+    ["AGENT_SERVICE_TOKEN", "x-agent-service-token", "bwcap_"],
+  ],
+]);
 
 function walkFiles(directory: string): string[] {
   return readdirSync(directory)
@@ -129,6 +135,11 @@ function hasProtectedRouteAuth(source: string): boolean {
   );
 }
 
+function hasInternalServiceRouteAuth(relativePath: string, source: string): boolean {
+  const requiredMarkers = INTERNAL_SERVICE_ROUTE_AUTH.get(relativePath);
+  return requiredMarkers !== undefined && requiredMarkers.every((marker) => source.includes(marker));
+}
+
 describe("protected product route coverage", () => {
   it("rejects a route that imports withAuthenticatedUser without calling it", () => {
     const source = [
@@ -169,6 +180,14 @@ describe("protected product route coverage", () => {
     expect(hasProtectedRouteAuth(source)).toBe(false);
   });
 
+  it("requires the internal agent model proxy to keep service and capability authentication", () => {
+    const route = "internal/agent-model/v1/chat/completions/route.ts";
+    const source = readFileSync(path.join(apiRoot, route), "utf8");
+
+    expect(hasInternalServiceRouteAuth(route, source)).toBe(true);
+    expect(hasInternalServiceRouteAuth(route, source.replace("bwcap_", ""))).toBe(false);
+  });
+
   it("requires every non-exempt API route to use withAuthenticatedUser", () => {
     const uncovered = walkFiles(apiRoot)
       .filter((filePath) => filePath.endsWith("/route.ts"))
@@ -178,7 +197,11 @@ describe("protected product route coverage", () => {
         source: readFileSync(filePath, "utf8"),
       }))
       .filter(({ relativePath }) => !isPublicRoute(relativePath))
-      .filter(({ source }) => !hasProtectedRouteAuth(source))
+      .filter(
+        ({ relativePath, source }) =>
+          !hasProtectedRouteAuth(source) &&
+          !hasInternalServiceRouteAuth(relativePath, source),
+      )
       .map(({ relativePath }) => relativePath);
 
     expect(uncovered).toEqual([]);
