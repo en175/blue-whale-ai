@@ -160,7 +160,7 @@ Expected: PASS。
 
 **Files:**
 - Modify: `docs/adr/0062-new-api-account-center-and-quota-billing.md`
-- Modify: `docs/credits-system-integration-flow.md`
+- Modify: `docs/specs/credits-system-integration-flow.md`
 
 **Interfaces:**
 - Produces: 与实现一致的单凭证、双授权层架构说明

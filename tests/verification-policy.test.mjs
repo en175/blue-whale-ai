@@ -86,6 +86,20 @@ test("classifies ordinary README files as documentation verification", async () 
   );
 });
 
+test("classifies documentation assets without treating contracts as prose", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(["docs/archive/page.html", "docs/evidence/screenshot.png", "docs/vendor/manual.pdf"], { stage: "pr" }),
+    { tier: "docs", reasons: ["only documentation files changed"] },
+  );
+  assert.deepEqual(classifyChanges(["docs/specs/runtime.schema.json"], { stage: "pr" }), {
+    tier: "full",
+    acceptance: true,
+    reasons: ["unclassified PR scope requires full verification"],
+  });
+});
+
 test("classifies the testing strategy itself as verification governance", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
@@ -155,6 +169,21 @@ test("keeps high-impact infrastructure scoped at completion but full at PR stage
     reasons: ["product-impact infrastructure changed"],
   });
   assert.deepEqual(classifyChanges(files, { stage: "pr" }), {
+    tier: "full",
+    acceptance: true,
+    reasons: ["publishing product-impact changes requires full verification"],
+  });
+});
+
+test("treats comment-only Dockerfile edits as documentation without weakening real edits", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+  const file = "blue_whale_web/Dockerfile.worker";
+
+  assert.deepEqual(
+    classifyChanges([file], { stage: "pr", documentationOnlyFiles: [file] }),
+    { tier: "docs", reasons: ["only documentation files changed"] },
+  );
+  assert.deepEqual(classifyChanges([file], { stage: "pr" }), {
     tier: "full",
     acceptance: true,
     reasons: ["publishing product-impact changes requires full verification"],
@@ -789,6 +818,32 @@ test("plans verification from the committed Git diff", () => {
     assert.equal(plan.classification.tier, "docs");
     assert.deepEqual(plan.changedFiles, ["docs/change.md"]);
     assert.equal(plan.commands.some((command) => command.includes("pnpm")), false);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
+test("plans Chinese documentation paths from raw Git names without escalating", () => {
+  const repository = createRepository();
+  try {
+    mkdirSync(join(repository, "docs", "API"), { recursive: true });
+    writeFileSync(join(repository, "docs", "API", "视觉模型.md"), "说明\n");
+    git(repository, "add", ".");
+    git(repository, "commit", "-m", "docs: add Chinese path");
+    git(repository, "branch", "-f", "master", "HEAD");
+    rmSync(join(repository, "docs", "API", "视觉模型.md"));
+    git(repository, "add", "-A");
+    git(repository, "commit", "-m", "docs: remove Chinese path");
+
+    const result = spawnSync(process.execPath, [CLI, "plan", "--base", "master", "--stage", "pr", "--json"], {
+      cwd: repository,
+      encoding: "utf8",
+      env: childEnvironment(),
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const scope = JSON.parse(result.stdout);
+    assert.deepEqual(scope.changedFiles, ["docs/API/视觉模型.md"]);
+    assert.equal(scope.classification.tier, "docs");
   } finally {
     rmSync(repository, { recursive: true, force: true });
   }

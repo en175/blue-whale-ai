@@ -1,9 +1,9 @@
-const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.md|(?:apps|packages|blue_whale_web)\/.*\/README(?:\.[^/]+)?\.md)$/;
+const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg)|(?:apps|packages|blue_whale_web)\/.*\/README(?:\.[^/]+)?\.md)$/i;
 const NODE_SOURCE = /^(?:apps|packages)\/[^/]+\/(?:src|tests?)\/.*\.(?:ts|tsx)$/;
 const WEB_SOURCE = /^blue_whale_web\/(?:app|components|hooks|lib|workers)\/.*\.(?:ts|tsx)$/;
 const CONTROL_PLANE_FILE = /^(?:\.githooks\/|\.(?:claude|codex)\/hooks\/|\.zcode\/config\.json|scripts\/(?:check-hook-closed-loop|check-hook-contracts|cleanup-release-branch|cleanup-task-worktree|commit-spec-on-master|commit-task-for-review|gitee-resolve-ids|install-kimi-hooks|list-task-worktrees|manage-agent-authorization|merge-task-to-local-master|pr-update-evidence|probe-codex-write-hook|publish-review-package|publish-task-branch|query-hook-audit|setup-hooks|start-task-worktree|sync-codex-skill|sync-superpowers-skills|sync-task-from-origin|sync-write-rules-skill|sync_recovery|test-hooks|verification-policy|verify-change-scope|verify-pr-update)\.|scripts\/lib\/|scripts\/tests\/)/;
 const OPERATIONS_FILE = /^scripts\/(?:check-schema-charset|check-target-environment-retirement|ensure-graphify-worktree|fix-ik7grv-replace-slot-backfill|run-ik50gb-c-testsite-probe|run-real-canary|tunnel-testsite-db)\./;
-const PRODUCT_IMPACT_FILE = /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|Dockerfile[^/]*|deploy\/|packages\/contracts\/|packages\/persistence\/(?:prisma\/migrations|schema)\/|blue_whale_web\/(?:app\/api\/auth|lib\/auth|e2e-fullstack\/|playwright\.)|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
+const PRODUCT_IMPACT_FILE = /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|packages\/contracts\/|packages\/persistence\/(?:prisma\/migrations|schema)\/|blue_whale_web\/(?:app\/api\/auth|lib\/auth|e2e-fullstack\/|playwright\.)|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
 const EXECUTABLE_FILE = /^(?:scripts\/|.*\.(?:sh|py|mjs|cjs|js))$/;
 const GOVERNANCE_FILE = /^(?:docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/(?:implement|dispatching-parallel-agents|finishing-a-development-branch|subagent-driven-development)\/)/;
 
@@ -15,7 +15,7 @@ function sourceArea(file) {
   return null;
 }
 
-function inferredAreas(files) {
+function inferredAreas(files, documentationOnlyFiles) {
   const areas = new Set(files.map(sourceArea).filter(Boolean));
   if (files.some((file) => GOVERNANCE_FILE.test(file))) {
     areas.add("governance");
@@ -25,17 +25,21 @@ function inferredAreas(files) {
   return [...areas].sort();
 }
 
-function classified(file) {
+function isDocumentation(file, documentationOnlyFiles) {
+  return DOCUMENTATION_FILE.test(file) || documentationOnlyFiles.has(file);
+}
+
+function classified(file, documentationOnlyFiles) {
   return (
-    DOCUMENTATION_FILE.test(file) ||
+    isDocumentation(file, documentationOnlyFiles) ||
     GOVERNANCE_FILE.test(file) ||
     PRODUCT_IMPACT_FILE.test(file) ||
     sourceArea(file) !== null
   );
 }
 
-function scopedClassification(files, reason) {
-  const areas = inferredAreas(files);
+function scopedClassification(files, reason, documentationOnlyFiles) {
+  const areas = inferredAreas(files, documentationOnlyFiles);
   return {
     tier: "scoped",
     ...(areas.length > 0 ? { areas } : {}),
@@ -43,8 +47,8 @@ function scopedClassification(files, reason) {
   };
 }
 
-function fullClassification(files, reason, acceptance) {
-  const areas = inferredAreas(files);
+function fullClassification(files, reason, acceptance, documentationOnlyFiles) {
+  const areas = inferredAreas(files, documentationOnlyFiles);
   return {
     tier: "full",
     acceptance,
@@ -53,9 +57,9 @@ function fullClassification(files, reason, acceptance) {
   };
 }
 
-function classifyAutomatically(files, stage) {
+function classifyAutomatically(files, stage, documentationOnlyFiles) {
   const unknownExecutable = files.filter(
-    (file) => EXECUTABLE_FILE.test(file) && !classified(file),
+    (file) => EXECUTABLE_FILE.test(file) && !classified(file, documentationOnlyFiles),
   );
   if (unknownExecutable.length > 0) {
     throw new Error(`UNCLASSIFIED_PATH: ${unknownExecutable.join(", ")}`);
@@ -63,7 +67,7 @@ function classifyAutomatically(files, stage) {
 
   if (
     files.some((file) => GOVERNANCE_FILE.test(file)) &&
-    files.every((file) => DOCUMENTATION_FILE.test(file) || GOVERNANCE_FILE.test(file))
+    files.every((file) => isDocumentation(file, documentationOnlyFiles) || GOVERNANCE_FILE.test(file))
   ) {
     return {
       tier: "scoped",
@@ -72,7 +76,7 @@ function classifyAutomatically(files, stage) {
     };
   }
 
-  if (files.length > 0 && files.every((file) => DOCUMENTATION_FILE.test(file))) {
+  if (files.length > 0 && files.every((file) => isDocumentation(file, documentationOnlyFiles))) {
     return {
       tier: "docs",
       reasons: ["only documentation files changed"],
@@ -80,15 +84,16 @@ function classifyAutomatically(files, stage) {
   }
 
   if (stage === "pr") {
-    if (files.some((file) => PRODUCT_IMPACT_FILE.test(file))) {
+    if (files.some((file) => PRODUCT_IMPACT_FILE.test(file) && !documentationOnlyFiles.has(file))) {
       return fullClassification(
         files,
         "publishing product-impact changes requires full verification",
         true,
+        documentationOnlyFiles,
       );
     }
-    if (files.some((file) => !classified(file))) {
-      return fullClassification(files, "unclassified PR scope requires full verification", true);
+    if (files.some((file) => !classified(file, documentationOnlyFiles))) {
+      return fullClassification(files, "unclassified PR scope requires full verification", true, documentationOnlyFiles);
     }
   }
 
@@ -96,29 +101,29 @@ function classifyAutomatically(files, stage) {
   if (
     areas.length === 1 &&
     areas[0] === "control-plane" &&
-    files.every((file) => DOCUMENTATION_FILE.test(file) || CONTROL_PLANE_FILE.test(file))
+    files.every((file) => isDocumentation(file, documentationOnlyFiles) || CONTROL_PLANE_FILE.test(file))
   ) {
-    return scopedClassification(files, "control-plane changed");
+    return scopedClassification(files, "control-plane changed", documentationOnlyFiles);
   }
   if (
     areas.length === 1 &&
     areas[0] === "operations" &&
-    files.every((file) => DOCUMENTATION_FILE.test(file) || OPERATIONS_FILE.test(file))
+    files.every((file) => isDocumentation(file, documentationOnlyFiles) || OPERATIONS_FILE.test(file))
   ) {
-    return scopedClassification(files, "operations tooling changed");
+    return scopedClassification(files, "operations tooling changed", documentationOnlyFiles);
   }
   if (
     areas.some((area) => ["governance", "control-plane", "operations"].includes(area)) &&
     files.every(
       (file) =>
-        DOCUMENTATION_FILE.test(file) || GOVERNANCE_FILE.test(file) || sourceArea(file),
+        isDocumentation(file, documentationOnlyFiles) || GOVERNANCE_FILE.test(file) || sourceArea(file),
     )
   ) {
-    return scopedClassification(files, "known scoped paths changed");
+    return scopedClassification(files, "known scoped paths changed", documentationOnlyFiles);
   }
   if (
     areas.length > 0 &&
-    files.every((file) => DOCUMENTATION_FILE.test(file) || sourceArea(file))
+    files.every((file) => isDocumentation(file, documentationOnlyFiles) || sourceArea(file))
   ) {
     return {
       tier: "scoped",
@@ -127,24 +132,25 @@ function classifyAutomatically(files, stage) {
     };
   }
 
-  if (files.some((file) => PRODUCT_IMPACT_FILE.test(file))) {
-    return scopedClassification(files, "product-impact infrastructure changed");
+  if (files.some((file) => PRODUCT_IMPACT_FILE.test(file) && !documentationOnlyFiles.has(file))) {
+    return scopedClassification(files, "product-impact infrastructure changed", documentationOnlyFiles);
   }
 
-  return scopedClassification(files, "change scope is not classified");
+  return scopedClassification(files, "change scope is not classified", documentationOnlyFiles);
 }
 
-export function classifyChanges(files, { risk = "auto", stage = "completion" } = {}) {
+export function classifyChanges(files, { risk = "auto", stage = "completion", documentationOnlyFiles = [] } = {}) {
   if (risk !== "auto" && risk !== "high") {
     throw new Error("risk must be auto or high");
   }
   if (stage !== "completion" && stage !== "pr") {
     throw new Error("stage must be completion or pr");
   }
-  const automatic = classifyAutomatically(files, stage);
+  const documentationOnlySet = new Set(documentationOnlyFiles);
+  const automatic = classifyAutomatically(files, stage, documentationOnlySet);
   if (risk === "auto") return automatic;
 
-  return fullClassification(files, "risk explicitly escalated to high", true);
+  return fullClassification(files, "risk explicitly escalated to high", true, documentationOnlySet);
 }
 
 function appendAreaCommands(commands, areas, base) {
