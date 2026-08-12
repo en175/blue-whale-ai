@@ -33,7 +33,7 @@
 
 ## 禁提交清单（hook 会挡）
 
-- **生成物**：`graphify-out/`、`dist*`、`.next/`（前端构建产物）、`__pycache__/`、`*.pyc`、`.pytest_cache/`（后端 Python 缓存）、`target/`、`*.iml`（后端 Java 构建产物 / IDE）；`graphify-out/` 整个不入库（本地产物，由 `.gitignore` 忽略，各 worktree / clone 各自生成或共享）
+- **生成物**：`graphify-out/`、`dist*`、`.next/`（前端构建产物）、`__pycache__/`、`*.pyc`、`.pytest_cache/`（Python 工具缓存）；`graphify-out/` 整个不入库（本地产物，由 `.gitignore` 忽略，各 worktree / clone 各自生成或共享）
 - **个人本机配置**：`CLAUDE.local.md`、`.codex/config.toml`、`.claude/settings.local.json`（均由 `.gitignore` 忽略；其余 `.claude/` 进仓共享，见根 `CLAUDE.md`）
 - **密钥凭证**：`.env`、`*.key`、`*.pem`、含明文密码的配置文件（敏感配置走环境变量，不进仓）
 
@@ -98,13 +98,12 @@ PR 合并用 **merge**，**禁用 squash / rebase**。
 | 禁提交生成物 | 🔴 硬挡 | `dist*` `.next/` `__pycache__/` `*.pyc` `.pytest_cache/`（`.claude/` 进仓共享，仅 `settings.local.json` 由 `.gitignore` 忽略，非 hook 拦；`graphify-out/` 整个由 `.gitignore` 忽略，非 hook 拦） |
 | 本地 master 提交 | 🟢 放行 | pre-commit：允许用户在本地 `master` 上提交，作为用户本地集成区。Agent 写入任务必须先创建 task worktree；仅散文文档（[ADR-0025](../adr/0025-doc-on-master-allowlist.md)）及经 Git 确认已忽略的根 `CLAUDE.local.md` / `.codex/config.toml`（[ADR-0010](../adr/0010-local-master-is-user-integration-zone.md)）可直改 master，后两者不得提交。 |
 | commit 规范 | 🔴 硬挡 | Conventional Commits，格式不符拦截 |
-| 前端 lint | 🟡 软提醒 | 改 `blue_whale_web/` 时跑 `npm run lint`，失败只警告不拦 |
-| 后端 mvn compile | 🟡 软提醒 | 改 `blue_whale_server/` 下 `.java` 时跑 `./mvnw compile`，失败只警告不拦 |
+| 前端 lint | 🟡 软提醒 | 改 `blue_whale_web/` 时跑 `pnpm --filter @blue-whale/web lint`，失败只警告不拦 |
 | 禁直推 master/main | 🔴 硬挡 | pre-push：任何本地直推 `master`/`main` 一律拦，合并只在 Gitee 服务端走 PR |
-| 工单分支落后拦截 | 🔴 硬挡 | pre-push：工单分支（前缀见 [branch-naming.md](branch-naming.md)）落后于 `origin/master` 时拒绝 push；Agent 依据规则主动改走 `sync-task-from-origin.sh sync`，Hook 不自动同步 |
+| PR 前目标基线校验 | 🔴 发布门禁 | 普通任务分支即使落后也允许日常 push；创建/更新 PR 前由 `publish-review-package.sh` 校验是否包含实际目标基线，未包含时要求先运行 `sync-task-from-origin.sh sync --target-branch <目标分支> --json`。Hook 不自动同步。 |
 | AI 破坏性 git 操作 | 🔴 硬挡 | 裸 `--force`/`-f`、对 `master`/`main` 强推、`reset --hard` / `clean -f` / `branch -D` / `checkout .` / `restore .` 均拦；工单分支上的 `--force-with-lease` 放行（前缀见 [branch-naming.md](branch-naming.md)） |
 | 本地任务提交与合入 | 🟢 放行 / 🔴 授权 | ZCode / Claude Code / Codex / Kimi CLI `PreToolUse`（`confirm-release-action.sh`）：任务分支的普通 `git commit`（含 `--amend`）与 `git merge` 放行；`commit-task-for-review.sh` 仍是推荐的 review 检查点；合入本地 master 的 `merge-task-to-local-master.sh` 仍需 `--user-authorized` |
-| 工单分支落后软提醒 | 🟡 软提醒 | pre-commit：工单分支（前缀见 [branch-naming.md](branch-naming.md)）落后 `origin/master` 时 `echo` 提示落后提交数，**不拦 commit**（硬拦在 pre-push）。本地 `master` 不做落后提醒，它是用户本地集成区。见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md) |
+| 工单分支落后软提醒 | 🟡 软提醒 | pre-commit：工单分支（前缀见 [branch-naming.md](branch-naming.md)）落后 `origin/master` 时可提示落后提交数，**不拦 commit，也不影响普通 push**。同步硬门槛位于创建/更新 PR 前。本地 `master` 不做落后提醒，它是用户本地集成区。历史演进见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md)。 |
 | squash/rebase 合并拦截 | 🔴 硬挡 | ZCode / Claude Code / Codex / Kimi CLI `PreToolUse`（`confirm-release-action.sh`，在凭证校验前）：AI 调 `mcp__gitee-ent__merge_enterprise_pull` 时 `merge_method=squash`/`rebase` 一律拦，强制 **merge**（免改写 sha 致 `git branch -d` 失败 + 拦 `-D` 死锁，见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md)）。人网页操作拦不到，靠自觉 |
 | 发布动作标准入口 | 🔴 阻断 / 🟢 凭证放行 | ZCode / Claude Code / Codex / Kimi CLI `PreToolUse` / `PostToolUse`（`confirm-release-action.sh`）：任务分支普通 `git push` 放行，`release/*` 直推硬拦；发布入口须带 `--user-authorized` 且显式选择 `--create-pr` 或 `--update-pr <IID>`，合规时静默放行。create 写 PR 标记，update 不写；合并 PR / 创建 release 需绑定对象的一次性凭证。Hook 只兜底，不自动同步或推进状态机（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)、[ADR-0012](../adr/0012-agent-noninteractive-authorization.md)、[ADR-0013](../adr/0013-open-pr-update-state-machine.md)） |
 

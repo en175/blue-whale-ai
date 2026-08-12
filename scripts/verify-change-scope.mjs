@@ -22,17 +22,41 @@ function valueAfter(args, option, fallback) {
   return args[index + 1];
 }
 
+function dockerfileSemantics(content) {
+  return content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .join("\n");
+}
+
+function documentationOnlyFiles(files, base, head) {
+  return files.filter((file) => {
+    if (!/(?:^|\/)Dockerfile[^/]*$/.test(file)) return false;
+    try {
+      return dockerfileSemantics(git("show", `${base}:${file}`)) ===
+        dockerfileSemantics(git("show", `${head}:${file}`));
+    } catch {
+      return false;
+    }
+  });
+}
+
 function currentScope({ baseRef, risk, stage }) {
   const head = git("rev-parse", "HEAD");
   const base = git("merge-base", baseRef, head);
-  const changedFiles = git("diff", "--name-only", `${base}...${head}`)
-    .split("\n")
+  const changedFiles = git("diff", "--name-only", "-z", `${base}...${head}`)
+    .split("\0")
     .filter(Boolean)
     .sort();
   const changedFilesHash = createHash("sha256")
     .update(changedFiles.join("\0"))
     .digest("hex");
-  const classification = classifyChanges(changedFiles, { risk, stage });
+  const classification = classifyChanges(changedFiles, {
+    risk,
+    stage,
+    documentationOnlyFiles: documentationOnlyFiles(changedFiles, base, head),
+  });
   const commands = buildVerificationPlan(classification, { base });
   const environment = verificationEnvironment(classification);
   const inputHash = createHash("sha256")

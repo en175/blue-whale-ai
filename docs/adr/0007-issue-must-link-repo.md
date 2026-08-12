@@ -40,7 +40,7 @@
 
 `project_id` 缺失 / 为空 / = 0 → `exit 2` 硬拦（铁闸）。三者语义等价（均 = 无关联）。
 
-不采用「软提醒（exit 0 + 警告）」。理由：漏发后果（PRD 在仓库 Issues 页消失、团队找不到）严重程度不亚于「落后于 origin/master 的 push」，后者已被 pre-push 硬拦（[ADR-0006](0006-sync-mechanism-auto-block.md) D4），同等对待。
+不采用「软提醒（exit 0 + 警告）」。理由：漏发后果（PRD 在仓库 Issues 页消失、团队找不到）会直接破坏工单可见性，因此必须 fail closed。本文原先类比“落后于 origin/master 的 push 由 pre-push 硬拦”；该 Git 策略已于 2026-08-11 被 PR 前目标基线校验替代（见 [ADR-0006](0006-sync-mechanism-auto-block.md)），不影响 Issue 归属缺失仍属安全边界的结论。
 
 ### D3. 只校验「非空且非 0」，不校验「值正确」
 

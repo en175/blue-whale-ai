@@ -4,8 +4,8 @@
 >
 > **认证决策更新（2026-07-29）**：账户与 quota 使用 new-api 的方向继续有效；手机号/SMS、
 > Java User 映射和 Java Gateway 兼容不再是实施前提。认证与运行时权威见
-> [ADR-0062](adr/0062-new-api-account-center-and-quota-billing.md) 和
-> [IK50GB 认证用户上下文设计](specs/2026-07-29-authenticated-user-context-design.md)。
+> [ADR-0062](../adr/0062-new-api-account-center-and-quota-billing.md) 和
+> [IK50GB 认证用户上下文设计](2026-07-29-authenticated-user-context-design.md)。
 
 ## 状态
 

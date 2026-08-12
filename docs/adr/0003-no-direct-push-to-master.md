@@ -11,7 +11,7 @@
 
 根因：三道口子都没堵"正常 push 到 master"——
 
-1. `.githooks/pre-push`：注释明写「master/main 等保护分支：不在此拦」，只拦 `feature/fix/hotfix` 工单分支落后于 master。
+1. `.githooks/pre-push`：当时注释明写「master/main 等保护分支：不在此拦」，只拦 `feature/fix/hotfix` 工单分支落后于 master。后续已改为阻断直推 `master/main`；落后任务分支的日常 push 则于 2026-08-11 放开，改由 PR 发布入口校验目标基线（见 [ADR-0006](0006-sync-mechanism-auto-block.md) 的替代说明）。
 2. `scripts/block-dangerous-git.sh`：只拦**强推**（裸 `--force` / 对 master 的 force-with-lease），正常 fast-forward push 放行。
 3. `docs/agents/commit-and-review.md`：低风险改动「自审即可合并，不强制互审」——流程上被解读为允许直推。
 
