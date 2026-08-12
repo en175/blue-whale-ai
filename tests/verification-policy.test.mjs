@@ -300,6 +300,7 @@ test("classifies verification governance changes as scoped governance verificati
       "CLAUDE.md",
       "docs/agents/testing-strategy.md",
       "scripts/verification-policy.mjs",
+      "blue_whale_web/eslint.config.mjs",
       "scripts/verify-change-scope.mjs",
       "scripts/publish-review-package.sh",
       "tests/verification-policy.test.mjs",
