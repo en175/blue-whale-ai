@@ -142,6 +142,19 @@ test("classifies known Node and Web source changes as scoped verification", asyn
   assert.deepEqual(classifyChanges(files, { stage: "pr" }), expected);
 });
 
+test("keeps authentication coverage tests scoped at PR stage", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(["blue_whale_web/lib/auth/protected-route-coverage.test.ts"], { stage: "pr" }),
+    {
+      tier: "scoped",
+      areas: ["web"],
+      reasons: ["known source paths changed"],
+    },
+  );
+});
+
 test("allows an explicit high-risk escalation to full verification", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
