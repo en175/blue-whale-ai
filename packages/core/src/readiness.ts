@@ -1,3 +1,4 @@
+// 流水线触发器复测：无功能改动。
 export const serviceNames = [
   "agent-worker",
   "generation-worker",
