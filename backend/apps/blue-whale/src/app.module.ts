@@ -1,0 +1,72 @@
+import { Module } from "@nestjs/common";
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
+import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
+import { AuthGuard } from "@lib/infra/guard/auth.guard.js";
+import { TransformInterceptor } from "@lib/infra/interceptors/transform.interceptor.js";
+import { AccountModule } from "@lib/shared/account/account.module.js";
+import { AssetModule } from "@lib/shared/assets/assets.module.js";
+import { CanvasModule } from "@lib/shared/canvas/canvas.module.js";
+import { JobsModule } from "@lib/shared/jobs/jobs.module.js";
+import { ModelCapabilityAdminModule } from "@lib/shared/model-capability/model-capability-admin.module.js";
+import { OperationLogModule } from "@lib/shared/operation-log/operation-log.module.js";
+import { PrismaModule } from "@lib/shared/prisma/prisma.module.js";
+import { ProjectModule } from "@lib/shared/project/project.module.js";
+import { SceneCardModule } from "@lib/shared/scene-card/scene-card.module.js";
+import { SkillModule } from "@lib/shared/skills/skills.module.js";
+import { SnapshotModule } from "@lib/shared/snapshot/snapshot.module.js";
+import { TemplateModule } from "@lib/shared/template/template.module.js";
+import { TopupTierModule } from "@lib/shared/topup-tier/topup-tier.module.js";
+import { AccountApiModule } from "./api/account/account.module.js";
+import { AdminModule } from "./api/admin/admin.module.js";
+import { AgentAssetsModule } from "./api/agent-assets/agent-assets.module.js";
+import { AssetsApiModule } from "./api/assets/assets.module.js";
+import { AuthModule } from "./api/auth/auth.module.js";
+import { CanvasApiModule } from "./api/canvases/canvases.module.js";
+import { HealthModule } from "./api/health/health.module.js";
+import { JobsApiModule } from "./api/jobs/jobs.module.js";
+import { ProjectAssetsModule } from "./api/project-assets/project-assets.module.js";
+import { ProjectsApiModule } from "./api/projects/projects.module.js";
+import { RechargeModule } from "./api/recharge/recharge.module.js";
+import { SceneCardsApiModule } from "./api/scene-cards/scene-cards.module.js";
+import { SkillsApiModule } from "./api/skills/skills.module.js";
+import { AgentTemplatesModule } from "./api/templates/templates.module.js";
+import { UsageModule } from "./api/usage/usage.module.js";
+
+@Module({
+  imports: [
+    PrismaModule,
+    AccountModule,
+    AssetModule,
+    TopupTierModule,
+    OperationLogModule,
+    ModelCapabilityAdminModule,
+    TemplateModule,
+    ProjectModule,
+    JobsModule,
+    CanvasModule,
+    SkillModule,
+    SceneCardModule,
+    SnapshotModule,
+    AuthModule,
+    AccountApiModule,
+    AssetsApiModule,
+    AgentAssetsModule,
+    RechargeModule,
+    UsageModule,
+    AdminModule,
+    JobsApiModule,
+    CanvasApiModule,
+    ProjectsApiModule,
+    ProjectAssetsModule,
+    SkillsApiModule,
+    SceneCardsApiModule,
+    AgentTemplatesModule,
+    HealthModule,
+  ],
+  providers: [
+    { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
+    { provide: APP_GUARD, useClass: AuthGuard },
+  ],
+})
+export class AppModule {}

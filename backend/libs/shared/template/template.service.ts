@@ -1,0 +1,26 @@
+import { Injectable } from "@nestjs/common";
+import { createTemplateRepo } from "@blue-whale/persistence";
+import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+
+/** 首页模板读取侧依赖：wire Prisma template repo。 */
+@Injectable()
+export class TemplateService {
+  private repoInstance?: ReturnType<typeof createTemplateRepo>;
+
+  private get repo(): ReturnType<typeof createTemplateRepo> {
+    if (!this.repoInstance) {
+      this.repoInstance = createTemplateRepo(this.prisma.client);
+    }
+    return this.repoInstance;
+  }
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  listTags() {
+    return this.repo.listTags();
+  }
+
+  pageByTagCode(tagCode: string, current: number, size: number) {
+    return this.repo.pageByTagCode(tagCode, current, size);
+  }
+}

@@ -1,0 +1,45 @@
+import { Body, Controller, Get, Headers, Param, Put, Query } from "@nestjs/common";
+import { NewApiError } from "@blue-whale/core";
+import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
+import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
+import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
+
+@Controller("canvases")
+export class CanvasesController {
+  constructor(private readonly canvas: CanvasService) {}
+
+  @Get()
+  async get(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query("projectId") projectId?: string,
+  ) {
+    return this.canvas.get(user.userId, projectId ?? "");
+  }
+
+  @Put(":projectId")
+  async save(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() body: { viewport?: unknown; nodes?: unknown },
+    @Headers("if-match") ifMatch?: string,
+  ) {
+    let expectedVersion: number | null | undefined;
+    if (ifMatch === '"missing"') {
+      expectedVersion = null;
+    } else if (ifMatch !== undefined) {
+      const match = /^"([0-9]+)"$/.exec(ifMatch);
+      if (!match?.[1]) {
+        throw new NewApiError("无效的 If-Match", 400);
+      }
+      expectedVersion = Number(match[1]);
+    }
+    const result = await this.canvas.save(user.userId, projectId, {
+      ...body,
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+    });
+    if (result.code === 412) {
+      throw new NewApiError("Canvas 版本冲突", 412);
+    }
+    return result;
+  }
+}
