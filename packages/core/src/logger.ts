@@ -6,6 +6,7 @@
  * 输出：JSON 行进 stdout/stderr，同时异步上报火山 TLS（配置不全则跳过）。
  * 日志通道永不抛错、不阻断业务。
  */
+// 流水线触发器测试：无功能改动。
 import { getCurrentTraceId } from "./trace.js";
 import { getDefaultTlsLogWriter, type TlsLogWriter } from "./tls-writer.js";
 
