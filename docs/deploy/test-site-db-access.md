@@ -27,6 +27,14 @@ scripts/tunnel-testsite-db.sh --local-port 23306 --timeout 30
 mysql -h 127.0.0.1 -P 13306 -u bw_readonly -p blue_whale
 ```
 
+Redis 与 MySQL 同隧道（本地 `16379` → 测试站 `6379`）。仓库脚本 `tunnel-testsite-db.sh` 目前只映射 MySQL，Redis 需手写：
+
+```bash
+ssh -i <测试站私钥> -N -o ExitOnForwardFailure=yes \
+  -L 16379:127.0.0.1:6379 root@115.190.244.91
+# 本地连：redis-cli -h 127.0.0.1 -p 16379 -a <requirepass>
+```
+
 **纪律**：
 
 - 隧道仅用于**只读排查**；任何写操作（DDL/UPDATE/DELETE）必须走受控流程并留记录。
@@ -39,3 +47,4 @@ mysql -h 127.0.0.1 -P 13306 -u bw_readonly -p blue_whale
 - 注意：服务配置若以公网 IP 连库（如 new-api 的 SQL_DSN），封禁时必须保留本机公网 IP 放行，否则误伤自身；根治办法是把这类 DSN 改为容器内网地址；
 - 诊断使用只读账号 `bw_readonly`（仅 SELECT），root 仅运维操作用；
 - root 密码定期轮换；凭据不进仓库、不进工单、不进聊天记录。
+- 公网 6379 已封禁（2026-08-13，见工单 IK8KMA），规则与 3306 对称；Redis 密码仍为弱共享密码，待轮换。

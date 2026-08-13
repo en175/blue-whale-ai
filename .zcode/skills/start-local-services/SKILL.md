@@ -70,4 +70,12 @@ curl -s -X POST http://localhost:3000/api/auth/login \
 scripts/tunnel-testsite-db.sh [--local-port N] [--timeout MINUTES]
 ```
 
+Redis 与 MySQL 同隧道，但 `tunnel-testsite-db.sh` 目前只映射 MySQL，Redis 需手写（本地 `16379` → 测试站 `6379`）：
+
+```bash
+ssh -i <测试站私钥> -N -o ExitOnForwardFailure=yes \
+  -L 16379:127.0.0.1:6379 root@115.190.244.91
+# 本地连：redis-cli -h 127.0.0.1 -p 16379 -a <requirepass>
+```
+
 集成验收只走测试站公开 HTTP API，永不接触测试库（IK50GB-C 红线）。
