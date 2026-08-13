@@ -16,7 +16,7 @@ import SkillPanel, {
   type UseSkillSelection,
 } from "@/components/skill/SkillPanel";
 import { squirclePath } from "../utils";
-import { CreditIcon, IconClose, IconPlus, IconSend } from "../icons";
+import { IconClose, IconPlus, IconSend } from "../icons";
 import type { ChatMessage, PendingMentionBatch } from "../types";
 import type { WireInteger } from "@/lib/wire-integer";
 import type {
@@ -46,10 +46,7 @@ import {
   mentionFailuresOf,
   type ComposerUploadEntry,
 } from "./chat-panel-lib";
-import {
-  getTextModels,
-  type ImageModelCapability,
-} from "../api/generation";
+import { getTextModels, type ImageModelCapability } from "../api/generation";
 import { useComposerUploads } from "./use-composer-uploads";
 import { ChatPanelComposer } from "./chat/ChatPanelComposer";
 import { ChatPanelMessageStream } from "./chat/ChatPanelMessageStream";
@@ -60,6 +57,11 @@ import {
   loadComposerDraft,
   saveComposerDraft,
 } from "@/lib/composer-draft";
+import {
+  AgentSessionPicker,
+  type AgentPanelPersistence,
+} from "./chat/AgentSessionPicker";
+import { AgentRunControls } from "./chat/AgentRunControls";
 
 export function AgentChatPanel({
   messages,
@@ -86,6 +88,7 @@ export function AgentChatPanel({
   onApplyPlanMessage,
   skillRecommendations,
   skillRecommendationsLoading,
+  agentPersistence,
 }: {
   /** 受控消息流：来自当前 Project.messages（切换项目随 key remount 更换） */
   messages: ChatMessage[];
@@ -145,6 +148,7 @@ export function AgentChatPanel({
   skillRecommendations?: CreativeSkillRecommendation[];
   /** 推荐列表拉取中（仅配合 skillRecommendations 展示加载态） */
   skillRecommendationsLoading?: boolean;
+  agentPersistence?: AgentPanelPersistence;
 }) {
   const [composerEmpty, setComposerEmpty] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -170,7 +174,8 @@ export function AgentChatPanel({
     usePlanApply({ messages, onApplyPlanMessage });
 
   const [agentModels, setAgentModels] = useState<ImageModelCapability[]>([]);
-  const [selectedModel, setSelectedModel] = useState<ImageModelCapability | null>(null);
+  const [selectedModel, setSelectedModel] =
+    useState<ImageModelCapability | null>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
 
   // 模型列表从能力表获取（IK7O8S：替代硬编码 AGENT_MODELS，对齐首页 getTextModels 方式）。
@@ -182,7 +187,8 @@ export function AgentChatPanel({
         setAgentModels(list);
         // 仅在首次加载或当前选中模型在列表中不存在时设默认值
         setSelectedModel((prev) => {
-          if (prev && list.some((m) => m.model_id === prev.model_id)) return prev;
+          if (prev && list.some((m) => m.model_id === prev.model_id))
+            return prev;
           return list[0];
         });
       })
@@ -558,7 +564,9 @@ export function AgentChatPanel({
   const skillLabel = pendingForcedSkill?.name ?? activeSkillName ?? null;
   const skillStateLabel = pendingForcedSkill ? "已选技能" : "已激活技能";
   // 失败重试可用性：失败提示落在对话流末尾（契约 §8.3）
-  const canRetryRun = !!onRetryAgentRun && agentRunStatus === "failed";
+  const canRetryRun =
+    !!onRetryAgentRun &&
+    (agentRunStatus === "failed" || agentRunStatus === "outcome_unknown");
 
   const panelPath = squirclePath(panelSize.w, panelSize.h, 28.8);
 
@@ -596,30 +604,13 @@ export function AgentChatPanel({
         style={{ flex: "1 1 0%", minHeight: 0 }}
       >
         <div className="tc-agent-chat-header flex flex-shrink-0 items-center justify-between gap-2 px-1.5 py-1.5">
-          <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
-            <div className="tc-agent-session-credit-badge group relative">
-              <span
-                className="tc-agent-session-credit-badge__trigger inline-flex items-center gap-1 rounded-lg border border-transparent px-2 py-1 text-xs text-white/75 transition-colors group-hover:bg-white/[0.06]"
-                aria-label="当前 Agent 对话累计消耗 0.12 积分"
-              >
-                <CreditIcon size={12} />
-                <span>0.1</span>
-              </span>
-              <div
-                className="tc-agent-session-credit-badge__tooltip pointer-events-none absolute left-1/2 -top-2 z-[10] -translate-x-1/2 -translate-y-full opacity-0 transition-opacity group-hover:opacity-100"
-                role="tooltip"
-              >
-                <div className="whitespace-nowrap rounded-lg border border-white/[0.08] bg-[#1a1a1a]/95 px-2.5 py-1.5 text-[11px] leading-4 shadow-lg">
-                  <div className="tc-agent-session-credit-badge__tooltip-title text-white/55">
-                    当前 Agent 对话累计消耗积分
-                  </div>
-                  <div className="tc-agent-session-credit-badge__tooltip-value text-white/90">
-                    0.12 积分
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <AgentSessionPicker
+            sessions={agentPersistence?.sessions ?? []}
+            selectedSessionId={agentPersistence?.selectedSessionId ?? null}
+            loading={agentPersistence?.loading}
+            onSelect={agentPersistence?.onSelect ?? (() => undefined)}
+            onNew={agentPersistence?.onNew ?? (() => undefined)}
+          />
           {skillLabel && (
             <div lang="zh-CN" dir="ltr" style={{ display: "contents" }}>
               <span
@@ -738,6 +729,13 @@ export function AgentChatPanel({
               applyingPlanIds={applyingPlanIds}
               planAvailabilityOverrides={planAvailabilityOverrides}
               onApplyPlan={handleApplyPlan}
+            />
+            <AgentRunControls
+              status={agentRunStatus}
+              error={agentPersistence?.error}
+              onCancel={agentPersistence?.onCancel}
+              onResume={agentPersistence?.onResume}
+              onSkip={agentPersistence?.onSkip}
             />
           </div>
         </div>
