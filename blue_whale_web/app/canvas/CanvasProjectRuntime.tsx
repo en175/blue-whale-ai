@@ -131,14 +131,9 @@ export function CanvasProjectRuntime({
   // 持久化 Conversation 接线（IK67GD T02）：后端可用时消息权威来自 Snapshot/SSE，
   // 提交走公开接纳 API；后端不可达时保留既有离线 mock（messages 内存态 + 无 onSubmitMessage）。
   const {
-    messages: conversationMessages,
     snapshot: projectSnapshot,
-    sendMessage: sendConversationMessage,
     answerableActive,
     agentRunDisplay,
-    runControl,
-    provisionalText,
-    retryRun,
     applyPlan,
   } = useProjectConversation(pid, backendReady);
   const agentMvp = useAgentMvpConversation(pid);
@@ -752,8 +747,20 @@ export function CanvasProjectRuntime({
         agentRunStatus: agentMvp.status,
         reasoningSummary: agentRunDisplay?.reasoningSummary,
         provisionalContent: agentMvp.provisionalContent,
-        onRetryAgentRun:
-          backendReady && runControl.canRetry ? retryRun : undefined,
+        agentPersistence: {
+          sessions: agentMvp.sessions,
+          selectedSessionId: agentMvp.selectedSessionId,
+          loading: agentMvp.loading,
+          error: agentMvp.error,
+          onSelect: agentMvp.selectSession,
+          onNew: agentMvp.newConversation,
+          onCancel: agentMvp.controls.canCancel ? agentMvp.cancel : undefined,
+          onResume: agentMvp.controls.canResume ? agentMvp.resume : undefined,
+          onSkip: agentMvp.controls.canSkip ? agentMvp.skip : undefined,
+        },
+        onRetryAgentRun: agentMvp.controls.canRetry
+          ? agentMvp.retry
+          : undefined,
         onApplyPlanMessage: backendReady ? applyPlan : undefined,
         isOpen: isAgentOpen,
         onClose: () => setIsAgentOpen(false),
