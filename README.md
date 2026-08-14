@@ -1,5 +1,7 @@
 # Blue-Whale-AI
 
+<!-- webhook 联动测试注释 -->
+
 ## MCP 工具配置
 
 本仓库使用两个 MCP 工具。`.mcp.json` 被 `.gitignore` 忽略（含密钥 + 个人路径），团队成员各自配置本地副本。决策见 [ADR-0012](docs/adr/0012-team-mcp-sharing-strategy.md)，上游决策见 [ADR-0003](docs/adr/0003-no-direct-push-to-master.md) §5。
