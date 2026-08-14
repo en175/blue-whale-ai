@@ -2,6 +2,7 @@ packages:
   - "apps/*"
   - "packages/*"
   - "blue_whale_web"
+  - "backend"
 
 nodeVersion: 24.18.0
 engineStrict: true
