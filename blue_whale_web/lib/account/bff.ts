@@ -10,6 +10,7 @@ import {
 import { createWebNewApiClient } from "@/lib/logging";
 
 import { parseNewApiBearerToken } from "@/lib/auth/bearer-token";
+import { userAuthFailureHeaders } from "@/lib/auth/session-failure";
 
 export interface AccountClient {
   getAccountCapabilities(): Promise<NewApiAccountCapabilities>;
@@ -31,9 +32,18 @@ const authenticationErrorMessages: Record<AuthenticationErrorStatus, string> = {
 export function authenticationErrorResponse(
   status: AuthenticationErrorStatus,
 ): Response {
+  // 401 带用户会话失效标记（IK8N1S）：前端只在该标记存在时才登出。
   return Response.json(
     { code: status, msg: authenticationErrorMessages[status], data: null },
-    { status },
+    { status, headers: status === 401 ? userAuthFailureHeaders() : undefined },
+  );
+}
+
+/** 请求缺少用户凭证时的统一 401（带用户会话失效标记，IK8N1S）。 */
+export function userCredentialRequiredResponse(message: string): Response {
+  return Response.json(
+    { code: 401, msg: message, data: null },
+    { status: 401, headers: userAuthFailureHeaders() },
   );
 }
 

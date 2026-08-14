@@ -164,16 +164,46 @@ describe("apiRequest —— 成功 / 网络层", () => {
 });
 
 describe("apiFetch —— new-api sk token 认证失败", () => {
-  it("401 时不调用已退役的 refresh route，保留稳定 401 错误", async () => {
+  // IK8N1S：只有带用户会话失效标记（x-auth-failure: user-session）的 401
+  // 才代表用户凭证失效；上游服务间鉴权失败不得触发登出。
+  it("带标记的 401 → 清理登录态并通知订阅者", async () => {
     window.localStorage.setItem("bw-access-token", "sk-expired");
+    const { subscribeToAuthFailure } = await import("./api-client");
+    const onAuthFailure = vi.fn();
+    const unsubscribe = subscribeToAuthFailure(onAuthFailure);
+    stubFetch(() =>
+      jsonRes(
+        { code: 401, msg: "token 无效", data: null },
+        { status: 401, headers: { "x-auth-failure": "user-session" } },
+      ),
+    );
+
+    const response = await apiFetch("/api/projects");
+
+    expect(response.status).toBe(401);
+    expect(window.localStorage.getItem("bw-access-token")).toBeNull();
+    expect(onAuthFailure).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it("无标记的 401 → 按普通请求失败处理，不清 token、不通知登出", async () => {
+    window.localStorage.setItem("bw-access-token", "sk-valid");
+    const { subscribeToAuthFailure } = await import("./api-client");
+    const onAuthFailure = vi.fn();
+    const unsubscribe = subscribeToAuthFailure(onAuthFailure);
     const fetchMock = stubFetch(() =>
-      jsonRes({ code: 401, msg: "token 无效", data: null }, { status: 401 }),
+      jsonRes(
+        { error: { code: "agent_upstream_unauthorized" } },
+        { status: 401 },
+      ),
     );
 
     const response = await apiFetch("/api/projects");
 
     expect(response.status).toBe(401);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(window.localStorage.getItem("bw-access-token")).toBeNull();
+    expect(window.localStorage.getItem("bw-access-token")).toBe("sk-valid");
+    expect(onAuthFailure).not.toHaveBeenCalled();
+    unsubscribe();
   });
 });

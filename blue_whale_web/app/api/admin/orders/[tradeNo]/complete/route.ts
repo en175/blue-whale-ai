@@ -3,6 +3,7 @@ import { createAdminDeps } from "@/lib/admin/deps";
 import { recordAdminAction } from "@/lib/admin/operation-log";
 import { adminErrorResponse } from "@/lib/admin/response";
 import { withAdminUser } from "@/lib/auth/product-route-auth";
+import { userAuthFailureHeaders } from "@/lib/auth/session-failure";
 
 // POST /api/admin/orders/:tradeNo/complete → 管理员补单（IK6JXI 契约 4.5）
 // Body: { reason: string }
@@ -15,7 +16,7 @@ export async function POST(
     if (!token) {
       return Response.json(
         { success: false, error: "缺少登录凭证" },
-        { status: 401 },
+        { status: 401, headers: userAuthFailureHeaders() },
       );
     }
 

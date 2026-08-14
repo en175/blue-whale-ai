@@ -1,4 +1,5 @@
 import { NewApiError } from "@blue-whale/core";
+import { userCredentialRequiredResponse } from "@/lib/account/bff";
 import { createWebNewApiClient } from "@/lib/logging";
 import {
   consumeCredits,
@@ -39,10 +40,7 @@ export async function GET(request: Request) {
       request.headers.get("authorization"),
     );
     if (!userToken) {
-      return Response.json(
-        { code: 401, msg: "未提供有效令牌", data: null },
-        { status: 401 },
-      );
+      return userCredentialRequiredResponse("未提供有效令牌");
     }
 
     const { page, pageSize } = parseRecordPaging(
