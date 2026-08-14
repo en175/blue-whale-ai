@@ -74,4 +74,41 @@ describe("POST Agent Run command", () => {
       action_id: "retry-action",
     });
   });
+
+  // IK8N1S：retry/resume 的 capability 签发失败不得透传上游状态码。
+  it("maps retry capability failure to 502 instead of leaking upstream 403", async () => {
+    mocks.fetch.mockResolvedValueOnce(
+      Response.json({ error: { code: "capability_denied" } }, { status: 403 }),
+    );
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request(
+        "http://web.test/api/agent/v1/projects/101/sessions/session-1/runs/run-1/retry",
+        {
+          method: "POST",
+          headers: {
+            authorization: "Bearer user",
+            "idempotency-key": "retry-key",
+            "x-trace-id": "trace-retry",
+          },
+        },
+      ),
+      {
+        params: Promise.resolve({
+          projectId: "101",
+          sessionId: "session-1",
+          runId: "run-1",
+          command: "retry",
+        }),
+      },
+    );
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "capability_upstream_unauthorized",
+        trace_id: "trace-retry",
+      },
+    });
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
 });

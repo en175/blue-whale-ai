@@ -1,4 +1,5 @@
 import { NewApiError } from "@blue-whale/core";
+import { userCredentialRequiredResponse } from "@/lib/account/bff";
 import { createWebNewApiClient } from "@/lib/logging";
 import { parseNewApiBearerToken } from "@/lib/auth/bearer-token";
 import { withAuthenticatedUser } from "@/lib/auth/product-route-auth";
@@ -53,10 +54,7 @@ export async function POST(request: Request) {
       request.headers.get("authorization"),
     );
     if (!userToken) {
-      return Response.json(
-        { code: 401, msg: "未提供有效令牌", data: null },
-        { status: 401 },
-      );
+      return userCredentialRequiredResponse("未提供有效令牌");
     }
 
     let body: { tier_id?: string; payment_method?: string };

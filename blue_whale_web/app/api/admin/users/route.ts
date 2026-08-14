@@ -4,6 +4,7 @@ import { mapAdminUser } from "@/lib/admin/mapper";
 import { parsePageParam, parsePageSizeParam } from "@/lib/admin/query";
 import { adminErrorResponse } from "@/lib/admin/response";
 import { withAdminUser } from "@/lib/auth/product-route-auth";
+import { userAuthFailureHeaders } from "@/lib/auth/session-failure";
 
 // GET /api/admin/users → 用户列表/搜索（IK6JXI 契约 4.2）
 // IK6M2F：管理端 client 需带当前管理员 userId（New-Api-User 头）。
@@ -13,7 +14,7 @@ export async function GET(request: Request) {
     if (!token) {
       return Response.json(
         { success: false, error: "缺少登录凭证" },
-        { status: 401 },
+        { status: 401, headers: userAuthFailureHeaders() },
       );
     }
 

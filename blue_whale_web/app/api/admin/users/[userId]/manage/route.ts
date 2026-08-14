@@ -3,6 +3,7 @@ import { createAdminDeps } from "@/lib/admin/deps";
 import { recordAdminAction } from "@/lib/admin/operation-log";
 import { adminErrorResponse } from "@/lib/admin/response";
 import { withAdminUser } from "@/lib/auth/product-route-auth";
+import { userAuthFailureHeaders } from "@/lib/auth/session-failure";
 
 const USER_MANAGE_ACTIONS = new Set(["freeze", "unfreeze", "adjustBalance"]);
 
@@ -23,7 +24,7 @@ export async function POST(
     if (!token) {
       return Response.json(
         { success: false, error: "缺少登录凭证" },
-        { status: 401 },
+        { status: 401, headers: userAuthFailureHeaders() },
       );
     }
 
