@@ -2,6 +2,7 @@ import { withAuthenticatedUser } from "@/lib/auth/product-route-auth";
 import {
   agentServiceRequest,
   authorizeAgentProject,
+  capabilityFailureResponse,
   issueAgentRunCapability,
   proxyAgentResponse,
 } from "@/lib/agent-service/bff";
@@ -62,7 +63,7 @@ export async function POST(
           { status: 503 },
         );
       }
-      if (!grant.ok) return proxyAgentResponse(grant.response);
+      if (!grant.ok) return capabilityFailureResponse(grant.response, traceId);
       headers["x-blue-whale-run-capability"] = grant.capability;
       headers["x-blue-whale-run-capability-id"] = grant.capabilityId;
     }

@@ -2,6 +2,7 @@ import { withAuthenticatedUser } from "@/lib/auth/product-route-auth";
 import {
   agentServiceRequest,
   authorizeAgentProject,
+  capabilityFailureResponse,
   issueAgentRunCapability,
   proxyAgentResponse,
 } from "@/lib/agent-service/bff";
@@ -40,17 +41,7 @@ export async function POST(
       );
     }
     if (!grant.ok) {
-      const status = grant.response.status;
-      return Response.json(
-        {
-          error: {
-            code: status === 402 ? "payment_required" : "capability_denied",
-            message: status === 402 ? "余额不足，请充值后继续" : "模型授权失败",
-            trace_id: traceId,
-          },
-        },
-        { status },
-      );
+      return capabilityFailureResponse(grant.response, traceId);
     }
     const upstream = await agentServiceRequest(
       `/v1/sessions/${encodeURIComponent(sessionId)}/messages`,

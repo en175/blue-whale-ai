@@ -3,10 +3,12 @@
  *
  * 特性：
  * - 请求自动附带 Authorization: Bearer <access_token>
- * - 收到 401 → 清空 sk token，通知 AuthContext 弹出登录
+ * - 收到带用户会话失效标记的 401 → 清空 sk token，通知 AuthContext 弹出登录
+ *   （IK8N1S：无标记的 401 是普通请求失败，不触发登出）
  * - 跳过 auth 端点（/api/auth/*），避免无限循环
  */
 import { loadAccessToken, clearTokens } from "@/components/auth/authStorage";
+import { isUserSessionFailureResponse } from "@/lib/auth/session-failure";
 import { ApiError } from "./api/errors";
 
 // ---------------------------------------------------------------------------
@@ -74,7 +76,11 @@ export async function apiFetch(
   const accessToken = loadAccessToken();
   const res = await makeRequest(accessToken);
 
-  if (res.status === 401 && !isAuthEndpoint(url)) {
+  if (
+    res.status === 401 &&
+    !isAuthEndpoint(url) &&
+    isUserSessionFailureResponse(res)
+  ) {
     notifyAuthFailure();
   }
   return res;

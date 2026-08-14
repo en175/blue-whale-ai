@@ -104,7 +104,54 @@ export async function issueAgentRunCapability(input: {
   };
 }
 
+/**
+ * Capability 签发失败映射（IK8N1S）：new-api 的 401/403/5xx 都是依赖侧故障，
+ * 不是浏览器调用者的身份问题，统一归 502，避免前端把服务间鉴权失败误判为
+ * 用户登录失效。402（余额不足）是用户可行动的真实信息，保持透传。
+ */
+export function capabilityFailureResponse(
+  upstream: Response,
+  traceId: string,
+): Response {
+  if (upstream.status === 402) {
+    return Response.json(
+      {
+        error: {
+          code: "payment_required",
+          message: "余额不足，请充值后继续",
+          trace_id: traceId,
+        },
+      },
+      { status: 402 },
+    );
+  }
+  return Response.json(
+    {
+      error: {
+        code: "capability_upstream_unauthorized",
+        message: "模型授权服务暂时不可用，请稍后重试",
+        trace_id: traceId,
+      },
+    },
+    { status: 502 },
+  );
+}
+
 export function proxyAgentResponse(upstream: Response): Response {
+  // Agent 服务的 401（unauthorized / capability_required）是服务身份失败，
+  // 与浏览器用户凭证无关；映射为 502，前端不会触发登出（IK8N1S）。
+  if (upstream.status === 401) {
+    return Response.json(
+      {
+        error: {
+          code: "agent_upstream_unauthorized",
+          message: "Agent 服务暂时不可用，请稍后重试",
+          trace_id: upstream.headers.get("x-trace-id") ?? "",
+        },
+      },
+      { status: 502 },
+    );
+  }
   const etag = upstream.headers.get("etag");
   return new Response(upstream.body, {
     status: upstream.status,

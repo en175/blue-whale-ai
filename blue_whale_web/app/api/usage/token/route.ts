@@ -2,6 +2,7 @@ import {
   accountErrorResponse,
   bearerToken,
   createAccountClient,
+  userCredentialRequiredResponse,
   type AccountClient,
 } from "@/lib/account/bff";
 
@@ -11,10 +12,7 @@ export function createUsageHandler(
   return async function GET(request: Request) {
     const token = bearerToken(request);
     if (!token) {
-      return Response.json(
-        { code: 401, msg: "缺少登录凭证", data: null },
-        { status: 401 },
-      );
+      return userCredentialRequiredResponse("缺少登录凭证");
     }
     try {
       const usage = await client.getTokenUsage(token);

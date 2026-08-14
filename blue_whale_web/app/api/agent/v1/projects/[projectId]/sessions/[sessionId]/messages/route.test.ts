@@ -93,10 +93,68 @@ describe("POST Agent session message", () => {
     expect(JSON.stringify(agentInit)).not.toContain("broker-service-token");
   });
 
-  it("does not call Agent when capability issuance is denied", async () => {
+  // IK8N1S：capability 签发失败是依赖侧故障，不是浏览器调用者的身份问题。
+  // 401/403/5xx 一律映射 502，不能把上游状态码透传给浏览器（401 会触发前端登出）。
+  async function postWithCapabilityFailure(status: number) {
     mocks.fetch.mockResolvedValueOnce(
-      Response.json({ error: { code: "capability_denied" } }, { status: 403 }),
+      Response.json({ error: { code: "upstream_error" } }, { status }),
     );
+    const { POST } = await import("./route");
+    return POST(
+      new Request(
+        "http://web.test/api/agent/v1/projects/101/sessions/session-1/messages",
+        {
+          method: "POST",
+          headers: {
+            authorization: "Bearer browser-user-token",
+            "content-type": "application/json",
+            "x-trace-id": "trace-cap",
+          },
+          body: JSON.stringify({ message: "test" }),
+        },
+      ),
+      { params: Promise.resolve({ projectId: "101", sessionId: "session-1" }) },
+    );
+  }
+
+  it.each([401, 403, 500])(
+    "maps capability issuance upstream %i to 502 without leaking the status",
+    async (status) => {
+      const response = await postWithCapabilityFailure(status);
+      expect(response.status).toBe(502);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "capability_upstream_unauthorized",
+          trace_id: "trace-cap",
+        },
+      });
+      expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("keeps 402 payment_required so the recharge flow is not regressed", async () => {
+    const response = await postWithCapabilityFailure(402);
+    expect(response.status).toBe(402);
+    expect(await response.json()).toMatchObject({
+      error: { code: "payment_required" },
+    });
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps Agent upstream 401 to 502 instead of passing it to the browser", async () => {
+    mocks.fetch
+      .mockResolvedValueOnce(
+        Response.json(
+          { capability: "bwcap_once", capability_id: "runcap_1" },
+          { status: 201 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { code: "capability_required" } },
+          { status: 401, headers: { "x-trace-id": "trace-agent" } },
+        ),
+      );
     const { POST } = await import("./route");
     const response = await POST(
       new Request(
@@ -112,10 +170,12 @@ describe("POST Agent session message", () => {
       ),
       { params: Promise.resolve({ projectId: "101", sessionId: "session-1" }) },
     );
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(502);
     expect(await response.json()).toMatchObject({
-      error: { code: "capability_denied" },
+      error: {
+        code: "agent_upstream_unauthorized",
+        trace_id: "trace-agent",
+      },
     });
-    expect(mocks.fetch).toHaveBeenCalledTimes(1);
   });
 });

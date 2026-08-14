@@ -4,6 +4,7 @@ import { mapAdminOrder } from "@/lib/admin/mapper";
 import { parsePageParam, parsePageSizeParam } from "@/lib/admin/query";
 import { adminErrorResponse } from "@/lib/admin/response";
 import { withAdminUser } from "@/lib/auth/product-route-auth";
+import { userAuthFailureHeaders } from "@/lib/auth/session-failure";
 
 // GET /api/admin/orders → 充值订单列表/搜索（IK6JXI 契约 4.4）
 // 注意：status 为 web 层当前页过滤（new-api /api/user/topup 无 status 参数）；
@@ -15,7 +16,7 @@ export async function GET(request: Request) {
     if (!token) {
       return Response.json(
         { success: false, error: "缺少登录凭证" },
-        { status: 401 },
+        { status: 401, headers: userAuthFailureHeaders() },
       );
     }
 
