@@ -2,7 +2,7 @@
 
 - **状态**：Accepted（部分取代 ADR-0068）
 - **日期**：2026-08-13
-- **决策者**：经 `grill-with-docs` 会话确认
+- **决策者**：李小强（经 `grill-with-docs` 会话确认）
 - **取代**：ADR-0068 中「不重建独立 Product API、采用模块化单体」的结论；ADR-0068 关于 TypeScript 实现语言、Worker 进程隔离、专用计算边界的内容保持不变
 
 ## 背景
