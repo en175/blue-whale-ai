@@ -1,5 +1,7 @@
 import { Queue, type ConnectionOptions, type JobsOptions } from "bullmq";
 
+import type { QueueDepthReading } from "@blue-whale/core/logging";
+
 export const VIDEO_GENERATION_QUEUE = "generation-video";
 
 type QueuePort = {
@@ -75,6 +77,27 @@ function getQueue(): Queue<{ jobId: string }> {
     connection: loadRedisConnection(),
   });
   return queue;
+}
+
+/** 采样用：进程级惰性 Queue 单例（与 enqueue 共用同一连接配置）。 */
+export function getVideoGenerationQueue(): Queue<{ jobId: string }> {
+  return getQueue();
+}
+
+/** BullMQ getJobCounts() → 队列深度读数（IK7G9Y）：只取积压/在途态
+ *  （waiting/waiting-children/delayed/active）；completed/failed 等终态
+ *  计数随时间无界增长，不属于积压，由 task_finished 事件承担。 */
+export function bullMqDepthReadings(
+  counts: Record<string, number>,
+): QueueDepthReading[] {
+  const backlogStates = ["waiting", "waiting-children", "delayed", "active"];
+  return backlogStates
+    .filter((status) => typeof counts[status] === "number")
+    .map((status) => ({
+      queue: "video_bullmq",
+      status,
+      depth: counts[status]!,
+    }));
 }
 
 export async function enqueueVideoGenerationJob(
