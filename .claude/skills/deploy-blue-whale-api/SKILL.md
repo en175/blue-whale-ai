@@ -15,7 +15,7 @@ disable-model-invocation: true
 ## 范围
 
 - **单服务**：blue_whale_api（new-api，Go）。
-- 容器内 3000，宿主映射 **3001**（避 blue_whale_web 3000 撞车）。
+- 容器内 3000，宿主映射 **3001**。
 - 连接：容器经公网 IP 回连宿主 `mysql8:new-api` 库 + `redis:db1`（Redis db1 与其他服务 db0 隔离）。
 - SSH：`ssh -i /Users/apple/Downloads/weitian.pem root@115.190.244.91`。
 

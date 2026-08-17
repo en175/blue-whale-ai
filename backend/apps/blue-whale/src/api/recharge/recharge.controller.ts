@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Logger, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Logger, Param, Post } from "@nestjs/common";
 import { NewApiError } from "@blue-whale/core";
 import { ok } from "@blue-whale/contracts";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
@@ -14,6 +14,14 @@ const WAY_CODE_BY_METHOD: Record<string, string> = {
 };
 
 const QR_TTL_MS = 15 * 60 * 1000;
+
+/** Go common.TopUpStatus* → 前端 OrderStatus。 */
+const STATUS_MAP: Record<string, "pending" | "paid" | "expired" | "failed"> = {
+  pending: "pending",
+  success: "paid",
+  expired: "expired",
+  failed: "failed",
+};
 
 @Controller("recharge")
 export class RechargeController {
@@ -124,6 +132,42 @@ export class RechargeController {
       });
     } catch (error) {
       throw toUpstreamError(error, "下单服务不可用");
+    }
+  }
+
+  /** POST /api/recharge/order/:tradeNo/cancel — 取消未支付订单。
+   *  Go 原生 new-api 充值没有取消端点，pending 单自动过期，无需主动取消。
+   *  保留鉴权契约、做幂等 no-op（前端关弹窗/切换支付方式时 fire-and-forget 调用）。 */
+  @Post("order/:tradeNo/cancel")
+  async cancel(@Param("tradeNo") tradeNo: string) {
+    if (!tradeNo) throw new NewApiError("缺少订单号", 400);
+    return ok();
+  }
+
+  /** GET /api/recharge/order/:tradeNo/status — 轮询充值订单状态（原生 new-api topup）。
+   *  查 GET /api/user/topup/self?keyword=<tradeNo> 精确匹配；Go success → paid，
+   *  paid 时取 /api/usage/token 当前余额作 credits_after。 */
+  @Get("order/:tradeNo/status")
+  async status(
+    @Param("tradeNo") tradeNo: string,
+    @Headers("authorization") authorization?: string,
+  ) {
+    const token = parseBearerToken(authorization);
+    if (!token) throw new NewApiError("未提供有效令牌", 401, "unauthorized");
+    if (!tradeNo) throw new NewApiError("缺少订单号", 400);
+
+    try {
+      const record = await this.account.getTopUpByTradeNo(token, tradeNo);
+      if (!record) throw new NewApiError("订单不存在", 404);
+      const status = STATUS_MAP[record.status] ?? "pending";
+      let creditsAfter: number | null = null;
+      if (status === "paid") {
+        const usage = await this.account.getTokenUsage(token);
+        creditsAfter = usage.userQuota;
+      }
+      return ok({ trade_no: tradeNo, status, credits_after: creditsAfter });
+    } catch (error) {
+      throw toUpstreamError(error, "订单查询不可用");
     }
   }
 }

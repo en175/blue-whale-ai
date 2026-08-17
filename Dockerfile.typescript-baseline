@@ -19,6 +19,6 @@ COPY . .
 RUN pnpm install --frozen-lockfile \
     && pnpm --filter @blue-whale/persistence exec prisma generate --schema prisma/schema.prisma \
     && pnpm build:node \
-    && pnpm --filter @blue-whale/web build
+    && pnpm --dir backend build
 
 ENV NODE_ENV=production

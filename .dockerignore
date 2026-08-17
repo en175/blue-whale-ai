@@ -11,8 +11,8 @@
 !apps/**
 !packages/
 !packages/**
-!blue_whale_web/
-!blue_whale_web/**
+!backend/
+!backend/**
 # IK7ERQ：builder 阶段 pnpm test:ci 需跨端契约的 JSON Schema 与夹具进 build context。
 # 只放行 docs/specs 下的 .json（schema）与 fixtures 子树（约 104K），散文 .md 仍排除。
 !docs/
@@ -24,5 +24,3 @@
 **/.next
 **/dist
 **/*.tsbuildinfo
-blue_whale_web/test-results
-blue_whale_web/playwright-report

@@ -1,5 +1,5 @@
 # blue_whale_api (new-api) 部署 compose。scp 到 /opt/blue-whale-api/docker-compose.yml。
-# 容器内 3000，宿主映射 3001（避 blue_whale_web 3000 撞车）。
+# 容器内 3000，宿主映射 3001。
 # .env 由 push.sh 远程生成（含 SQL_DSN/REDIS_CONN_STRING/SESSION_SECRET，chmod 600）。
 services:
   blue-whale-api:

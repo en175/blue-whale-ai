@@ -57,7 +57,7 @@ ________
 ________
 
 ## 前后端联动自检（改了后端 API 时必填）
-<!-- Blue-Whale 前端 blue_whale_web 调同源 BFF（Next.js Route Handlers）的 REST/Fetch 接口 -->
+<!-- Blue-Whale 前端调用 backend/（NestJS，/api 前缀）的 REST/Fetch 接口 -->
 - 后端动了：__________
 - 前端是否同步：已同步 / 无需同步（理由：__________）
 

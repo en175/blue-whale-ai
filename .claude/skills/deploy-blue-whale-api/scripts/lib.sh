@@ -6,7 +6,7 @@ DEPLOY_KEY="${DEPLOY_KEY:-/Users/apple/Downloads/weitian.pem}"
 DEPLOY_HOST="${DEPLOY_HOST:-115.190.244.91}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/blue-whale-api}"
-API_PORT="${API_PORT:-3001}"                 # 宿主端口（避 blue_whale_web 3000 撞车）
+API_PORT="${API_PORT:-3001}"                 # 宿主端口
 CONTAINER="blue-whale-api"
 BIN_NAME="new-api"                           # 容器内二进制名
 

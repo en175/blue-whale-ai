@@ -2,8 +2,8 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import tseslint from "typescript-eslint";
 
 // IK747Z-1：后端/共享包 lint 制度（2026-08-07）
-// 覆盖 apps/* 与 packages/*（blue_whale_web 使用其自己的 eslint.config.mjs，next 规则）。
-// 规则与 web 对齐：max-lines 800 硬线 error，函数级规则渐进 warning。
+// 覆盖 packages/*（blue_whale_web 已删除）。
+// max-lines 800 硬线 error，函数级规则渐进 warning。
 //
 // IK747Z-4（IK74V8，2026-08-08）：12 个历史巨型文件全部拆分完成，豁免清单已清空。
 // 后端/共享包与前端一样，800 行是无豁免硬线——新文件超限直接 lint fail，不再挂账。

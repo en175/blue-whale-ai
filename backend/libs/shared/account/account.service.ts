@@ -72,6 +72,10 @@ export class AccountService {
     return this.client.listUserTopUps(token, options);
   }
 
+  getTopUpByTradeNo(token: string, tradeNo: string) {
+    return this.client.getTopUpByTradeNo(token, tradeNo);
+  }
+
   listUserConsumeLogs(
     token: string,
     options: { page?: number; pageSize?: number },

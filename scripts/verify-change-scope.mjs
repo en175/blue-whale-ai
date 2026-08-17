@@ -58,7 +58,7 @@ function currentScope({ baseRef, risk, stage }) {
     documentationOnlyFiles: documentationOnlyFiles(changedFiles, base, head),
   });
   const commands = buildVerificationPlan(classification, { base });
-  const environment = verificationEnvironment(classification);
+  const environment = verificationEnvironment();
   const inputHash = createHash("sha256")
     .update(JSON.stringify(environment))
     .digest("hex");
@@ -74,26 +74,12 @@ function currentScope({ baseRef, risk, stage }) {
   };
 }
 
-function verificationEnvironment(classification) {
-  const environment = {
+function verificationEnvironment() {
+  return {
     node: process.version,
     platform: process.platform,
     arch: arch(),
   };
-  if (classification.tier !== "full") return environment;
-
-  const binaryPath = process.env.BW_NEW_API_BINARY;
-  let newApiBinaryDigest;
-  if (binaryPath && existsSync(binaryPath)) {
-    newApiBinaryDigest = createHash("sha256").update(readFileSync(binaryPath)).digest("hex");
-  }
-  environment.cache = {
-    skipImageBuild: process.env.BW_TS_SKIP_IMAGE_BUILD === "true",
-    newApiBinaryPreset: Boolean(binaryPath),
-    ...(newApiBinaryDigest ? { newApiBinaryDigest } : {}),
-    newApiRef: process.env.BW_NEW_API_REF ?? null,
-  };
-  return environment;
 }
 
 function receiptPath(head) {

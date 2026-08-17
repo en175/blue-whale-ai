@@ -1,11 +1,11 @@
-const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg)|(?:apps|packages|blue_whale_web)\/.*\/README(?:\.[^/]+)?\.md)$/i;
+const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg)|(?:apps|packages)\/.*\/README(?:\.[^/]+)?\.md)$/i;
 const NODE_SOURCE = /^(?:apps|packages)\/[^/]+\/(?:src|tests?)\/.*\.(?:ts|tsx)$/;
-const WEB_SOURCE = /^blue_whale_web\/(?:app|components|hooks|lib|workers)\/.*\.(?:ts|tsx)$/;
 const CONTROL_PLANE_FILE = /^(?:\.githooks\/|\.(?:claude|codex)\/hooks\/|\.zcode\/config\.json|scripts\/(?:check-hook-closed-loop|check-hook-contracts|cleanup-release-branch|cleanup-task-worktree|commit-spec-on-master|commit-task-for-review|gitee-resolve-ids|install-kimi-hooks|list-task-worktrees|manage-agent-authorization|merge-task-to-local-master|pr-update-evidence|probe-codex-write-hook|publish-review-package|publish-task-branch|query-hook-audit|setup-hooks|start-task-worktree|sync-codex-skill|sync-superpowers-skills|sync-task-from-origin|sync-write-rules-skill|sync_recovery|test-hooks|verification-policy|verify-change-scope|verify-pr-update)\.|scripts\/lib\/|scripts\/tests\/)/;
 const OPERATIONS_FILE = /^scripts\/(?:check-schema-charset|check-target-environment-retirement|ensure-graphify-worktree|fix-ik7grv-replace-slot-backfill|run-ik50gb-c-testsite-probe|run-real-canary|tunnel-testsite-db)\./;
-const PRODUCT_IMPACT_FILE = /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|packages\/contracts\/|packages\/persistence\/(?:prisma\/migrations|schema)\/|blue_whale_web\/(?:app\/api\/auth|lib\/auth|e2e-fullstack\/|playwright\.)|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
+const PRODUCT_IMPACT_FILE = /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|packages\/contracts\/|packages\/persistence\/(?:prisma\/migrations|schema)\/|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
 const EXECUTABLE_FILE = /^(?:scripts\/|.*\.(?:sh|py|mjs|cjs|js))$/;
-const GOVERNANCE_FILE = /^(?:blue_whale_web\/eslint\.config\.mjs|docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/(?:implement|dispatching-parallel-agents|finishing-a-development-branch|subagent-driven-development)\/)/;
+const SKILL_SCRIPT_FILE = /^\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/scripts\/.*\.(?:sh|py|mjs|cjs|js)$/;
+const GOVERNANCE_FILE = /^(?:eslint\.config\.mjs|docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/(?:implement|dispatching-parallel-agents|finishing-a-development-branch|subagent-driven-development)\/)/;
 
 function isTestFile(file) {
   return /(?:^|\/)[^/]+\.(?:test|spec)\.(?:ts|tsx|js|mjs|cjs)$/.test(file);
@@ -17,9 +17,9 @@ function hasProductImpact(file, documentationOnlyFiles) {
 
 function sourceArea(file) {
   if (NODE_SOURCE.test(file)) return "node";
-  if (WEB_SOURCE.test(file)) return "web";
   if (CONTROL_PLANE_FILE.test(file)) return "control-plane";
   if (OPERATIONS_FILE.test(file)) return "operations";
+  if (SKILL_SCRIPT_FILE.test(file)) return "operations";
   return null;
 }
 
@@ -55,11 +55,10 @@ function scopedClassification(files, reason, documentationOnlyFiles) {
   };
 }
 
-function fullClassification(files, reason, acceptance, documentationOnlyFiles) {
+function fullClassification(files, reason, documentationOnlyFiles) {
   const areas = inferredAreas(files, documentationOnlyFiles);
   return {
     tier: "full",
-    acceptance,
     ...(areas.length > 0 ? { areas } : {}),
     reasons: [reason],
   };
@@ -96,12 +95,11 @@ function classifyAutomatically(files, stage, documentationOnlyFiles) {
       return fullClassification(
         files,
         "publishing product-impact changes requires full verification",
-        true,
         documentationOnlyFiles,
       );
     }
     if (files.some((file) => !classified(file, documentationOnlyFiles))) {
-      return fullClassification(files, "unclassified PR scope requires full verification", true, documentationOnlyFiles);
+      return fullClassification(files, "unclassified PR scope requires full verification", documentationOnlyFiles);
     }
   }
 
@@ -158,7 +156,7 @@ export function classifyChanges(files, { risk = "auto", stage = "completion", do
   const automatic = classifyAutomatically(files, stage, documentationOnlySet);
   if (risk === "auto") return automatic;
 
-  return fullClassification(files, "risk explicitly escalated to high", true, documentationOnlySet);
+  return fullClassification(files, "risk explicitly escalated to high", documentationOnlySet);
 }
 
 function appendAreaCommands(commands, areas, base) {
@@ -169,12 +167,6 @@ function appendAreaCommands(commands, areas, base) {
     commands.push(
       ["pnpm", "exec", "tsc", "-b", "--pretty", "false"],
       ["pnpm", "exec", "vitest", "run", "packages", "apps", "--changed", base],
-    );
-  }
-  if (areas.includes("web")) {
-    commands.push(
-      ["pnpm", "--filter", "@blue-whale/web", "exec", "tsc", "--noEmit"],
-      ["pnpm", "--filter", "@blue-whale/web", "exec", "vitest", "run", "--changed", base],
     );
   }
   if (areas.includes("governance")) {
@@ -208,11 +200,7 @@ export function buildVerificationPlan(classification, { base }) {
   const areas = classification.tier === "docs" ? ["docs"] : classification.areas ?? [];
   appendAreaCommands(commands, areas, base);
   if (classification.tier === "full") {
-    commands.push(
-      classification.acceptance === false
-        ? ["pnpm", "verify", "--skip-acceptance"]
-        : ["pnpm", "verify"],
-    );
+    commands.push(["pnpm", "verify"]);
   }
   return commands;
 }
@@ -220,9 +208,7 @@ export function buildVerificationPlan(classification, { base }) {
 function classificationCovers(receipt, current) {
   if (!receipt || !current) return true;
   if (current.tier === "full") {
-    if (receipt.tier !== "full") return false;
-    // 旧凭证没有 acceptance 字段：那时的 full 一律带验收，视为覆盖。
-    return !(current.acceptance && receipt.acceptance === false);
+    return receipt.tier === "full";
   }
   if (receipt.tier === "full") return true;
   if (receipt.tier !== current.tier) return false;

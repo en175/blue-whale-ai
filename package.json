@@ -9,28 +9,16 @@
     "pnpm": "11.17.0"
   },
   "scripts": {
-    "build": "pnpm build:node && pnpm --filter @blue-whale/web build",
+    "build": "pnpm build:node && pnpm --dir backend build",
     "build:node": "tsc -b --pretty false",
-    "typecheck": "pnpm --filter @blue-whale/persistence exec prisma generate && tsc -b --force --pretty false && pnpm --filter @blue-whale/web exec tsc --noEmit",
-    "lint": "pnpm lint:node && pnpm --filter @blue-whale/web lint",
+    "typecheck": "pnpm --filter @blue-whale/persistence exec prisma generate && tsc -b --force --pretty false",
+    "lint": "pnpm lint:node",
     "lint:node": "eslint packages",
-    "test": "pnpm test:node && pnpm --filter @blue-whale/web test",
-    "test:node": "pnpm test:unit && pnpm test:acceptance-runner-contract",
+    "test": "pnpm test:node",
+    "test:node": "pnpm test:unit",
     "test:unit": "vitest run packages",
-    "test:ci": "pnpm test:unit && pnpm --filter @blue-whale/web test",
-    "test:acceptance-runner-contract": "node --test tests/typescript-baseline/acceptance-runner-contract.test.mjs",
-    "db:fresh": "bash scripts/init-typescript-baseline-db.sh",
-    "test:acceptance": "bash scripts/run-typescript-baseline-acceptance.sh",
+    "test:ci": "pnpm test:unit",
     "verify": "bash scripts/verify-typescript-baseline.sh"
-  },
-  "lint-staged": {
-    "blue_whale_web/**/*.{ts,tsx,js,jsx,mjs}": [
-      "prettier --config blue_whale_web/.prettierrc --write",
-      "eslint --config blue_whale_web/eslint.config.mjs --fix"
-    ],
-    "blue_whale_web/**/*.{css,md,json}": [
-      "prettier --config blue_whale_web/.prettierrc --write"
-    ]
   },
   "devDependencies": {
     "@types/node": "24.13.3",

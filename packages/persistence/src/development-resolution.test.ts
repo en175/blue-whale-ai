@@ -20,7 +20,7 @@ describe("@blue-whale/persistence development resolution", () => {
         ].join("\n"),
       ],
       {
-        cwd: resolve(process.cwd(), "blue_whale_web"),
+        cwd: resolve(process.cwd(), "backend"),
         encoding: "utf8",
       },
     );

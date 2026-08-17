@@ -67,13 +67,11 @@ target/
 
 # 运行日志
 logs/
-!blue_whale_web/app/admin/logs/
 
 # mitmproxy 抓包产物（本地工具，不入库）
 mitm_mcp_traffic.db
 *.flow
 *.flow
-blue_whale_web/node_modules
 
 # Python 缓存（hook 脚本运行产物）
 __pycache__/

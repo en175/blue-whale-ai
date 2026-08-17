@@ -1,9 +1,13 @@
-import { Body, Controller, Get, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Post } from "@nestjs/common";
 import { NewApiError, type NewApiLoginResult } from "@blue-whale/core";
 import { FAILURE_CODE, ok } from "@blue-whale/contracts";
+import { createAuthRepo } from "@blue-whale/persistence";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { AccountService } from "@lib/shared/account/account.service.js";
+import { handleSendCode } from "@lib/shared/auth/handle-send-code.js";
+import { resolveSmsProvider, type SmsProvider } from "@lib/shared/auth/sms.js";
 import { toAuthError } from "@lib/shared/errors/auth-error.js";
+import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import type { LoginDto } from "./dto/login.dto.js";
 import type { RegisterDto } from "./dto/register.dto.js";
 
@@ -23,7 +27,30 @@ function loginData(result: NewApiLoginResult, isNewUser: boolean) {
 
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly account: AccountService) {}
+  private smsInstance?: SmsProvider;
+
+  constructor(
+    private readonly account: AccountService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  private get sms(): SmsProvider {
+    if (!this.smsInstance) this.smsInstance = resolveSmsProvider();
+    return this.smsInstance;
+  }
+
+  @Public()
+  @Post("send-code")
+  async sendCode(
+    @Body() body: { phone?: unknown },
+    @Headers("x-forwarded-for") forwardedFor?: string,
+  ) {
+    const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
+    return handleSendCode(
+      { phone: body?.phone, ip },
+      { db: createAuthRepo(this.prisma.client), sms: this.sms },
+    );
+  }
 
   @Public()
   @Post("login")

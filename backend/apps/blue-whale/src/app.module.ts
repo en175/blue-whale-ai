@@ -33,6 +33,7 @@ import { RechargeModule } from "./api/recharge/recharge.module.js";
 import { SceneCardsApiModule } from "./api/scene-cards/scene-cards.module.js";
 import { SkillsApiModule } from "./api/skills/skills.module.js";
 import { AgentTemplatesModule } from "./api/templates/templates.module.js";
+import { TextApiModule } from "./api/text/text.module.js";
 import { UsageModule } from "./api/usage/usage.module.js";
 
 @Module({
@@ -67,6 +68,7 @@ import { UsageModule } from "./api/usage/usage.module.js";
     SkillsApiModule,
     SceneCardsApiModule,
     AgentTemplatesModule,
+    TextApiModule,
     HealthModule,
   ],
   providers: [
