@@ -52,6 +52,8 @@ interface BottomDialogProps {
   onSend: (text: string, opts: VideoGenOptions) => void;
   /** 初始参考素材（节点「生成视频」带入被点节点图片） */
   initialRefs?: BottomRefItem[];
+  /** 初始提示词（Agent 生成卡「引用到 dock」带入的分镜提示词） */
+  initialPrompt?: string;
 }
 
 /** 宽高比图标：按比例绘制小矩形 */
@@ -63,8 +65,8 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs }: BottomDialogProps) {
-  const [inputValue, setInputValue] = useState('');
+export default function BottomDialog({ onClose, onSend, initialRefs, initialPrompt }: BottomDialogProps) {
+  const [inputValue, setInputValue] = useState(initialPrompt ?? '');
   const [refFiles, setRefFiles] = useState<BottomRefItem[]>(initialRefs ?? []);
   const [selectedMode, setSelectedMode] = useState(modeOptions[0].key);
   const [modeOpen, setModeOpen] = useState(false);
