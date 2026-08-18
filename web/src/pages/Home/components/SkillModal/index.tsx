@@ -2,7 +2,7 @@
  * SkillModal 技能弹窗：我的技能/技能库/创建技能三标签
  * 技能库/我的技能走 /api/agent/skills 接口，滚动分页加载
  * ============================================ */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   X,
   Plus,
@@ -57,35 +57,6 @@ const sortOptions = [
 /** 接口错误提示（透传后端 msg） */
 function errMsg(e: unknown): string {
   return isApiError(e) ? e.message : '请求失败，请稍后重试';
-}
-
-/** 像素马赛克封面调色板 */
-const PALETTE = ['#141a33', '#1c2547', '#232c4e', '#6d4fc4', '#8f7ae0', '#e56b6f', '#0d1020', '#2a3560'];
-
-/** 字符串哈希 */
-function hashSeed(s: string) {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return h >>> 0;
-}
-
-/** 像素马赛克封面 */
-function PixelCover({ seed }: { seed: string }) {
-  const cells = useMemo(() => {
-    let h = hashSeed(seed);
-    const rand = () => {
-      h = (h * 1664525 + 1013904223) >>> 0;
-      return h / 4294967296;
-    };
-    return Array.from({ length: 36 }, () => PALETTE[Math.floor(rand() * PALETTE.length)]);
-  }, [seed]);
-  return (
-    <div className={styles.cover}>
-      {cells.map((c, i) => (
-        <span key={i} style={{ background: c }} />
-      ))}
-    </div>
-  );
 }
 
 /** SKILL.md 初始模板 */
@@ -383,10 +354,8 @@ export default function SkillModal({ open, onClose }: SkillModalProps) {
                 const sid = s.creative_skill_id ?? s.name ?? '';
                 return (
                   <div key={sid} className={styles.card}>
-                    {s.cover_url ? (
+                    {s.cover_url && (
                       <img className={styles.coverImg} src={s.cover_url} alt={s.name ?? ''} />
-                    ) : (
-                      <PixelCover seed={sid} />
                     )}
                     <div className={styles.cardBody}>
                       <h4 className={styles.cardTitle}>{s.name ?? ''}</h4>
@@ -424,10 +393,8 @@ export default function SkillModal({ open, onClose }: SkillModalProps) {
                 const sid = s.creative_skill_id ?? s.name ?? '';
                 return (
                   <div key={sid} className={styles.card}>
-                    {s.cover_url ? (
+                    {s.cover_url && (
                       <img className={styles.coverImg} src={s.cover_url} alt={s.name ?? ''} />
-                    ) : (
-                      <PixelCover seed={sid} />
                     )}
                     <div className={styles.cardBody}>
                       <div className={styles.cardTitleRow}>

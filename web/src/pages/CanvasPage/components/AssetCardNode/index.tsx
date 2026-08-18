@@ -51,7 +51,9 @@ interface AssetCardNodeData {
 }
 
 export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCardNodeData }) {
-  const meta = KIND_META[data.kind ?? 'custom'];
+  // 水合容错：持久化的 kind 可能不在五种枚举内（旧数据/脏数据），降级为 custom 避免 KIND_META 落空
+  const kind: AssetCardKind = data.kind && data.kind in KIND_META ? data.kind : 'custom';
+  const meta = KIND_META[kind];
   const [refs, setRefs] = useState<{ id: string; src: string }[]>(data.initialRefs ?? []);
   const [desc, setDesc] = useState(data.initialDesc ?? '');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -215,7 +217,7 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
           />
 
           {/* 角色卡：音色上传（鼠标悬停卡片时展示） */}
-          {(data.kind ?? 'custom') === 'character' && (
+          {kind === 'character' && (
             <div className={styles.voiceSection}>
               <div className={styles.voiceLabel}>
                 <Music size={14} strokeWidth={2} />

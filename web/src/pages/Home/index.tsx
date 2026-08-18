@@ -18,7 +18,11 @@ export default function Home() {
       <div className={styles.billingBar}>
         <Sparkles size={14} color="#ffffff" strokeWidth={2} />
         <span className={styles.billingText}>
-          Seedance 2.0 $0.1/s, Mini $0.05/s &nbsp;|&nbsp; 365 days of Unlimited Seedance 2.0 Mini &amp; GPT Image 2
+          <span className={styles.billingHighlight}>Seedance 2.0 $0.1/s,</span>
+          {' Mini '}
+          <span className={styles.billingHighlight}>$0.05/s</span>
+          {'  |  365 days of Unlimited '}
+          <span className={styles.billingHighlight}>Seedance 2.0 Mini &amp; GPT Image 2</span>
         </span>
       </div>
 

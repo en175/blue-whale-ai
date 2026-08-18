@@ -36,6 +36,11 @@
   white-space: nowrap;
 }
 
+/* 计费条内白色高亮片段 */
+.billingHighlight {
+  color: #fff;
+}
+
 /* ---- 顶部栏 ---- */
 .topBar {
   position: absolute;

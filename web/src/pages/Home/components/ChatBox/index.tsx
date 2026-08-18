@@ -3,7 +3,7 @@
  * ============================================ */
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ChevronUp, ChevronDown, Image, Video, Music, Sparkles, BookOpen, X } from 'lucide-react';
+import { Plus, ChevronUp, ChevronDown, Music, Sparkles, BookOpen, X } from 'lucide-react';
 import SkillModal from '../SkillModal';
 import LoginModal from '@/components/LoginModal';
 import { getCurrentUser, subscribe } from '@/utils/auth';
@@ -41,7 +41,7 @@ const videoModels = [
 const videoModes = [
   { key: 'omni', label: '全能参考' },
   { key: 'firstlast', label: '首尾帧' },
-  { key: 'text2video', label: 'Text to Video' },
+  { key: 'text2video', label: '图生视频' },
 ];
 
 /** AI视频 - 宽高比选项 */
@@ -138,9 +138,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   const [agentFiles, setAgentFiles] = useState<
     { id: string; url: string; kind: 'image' | 'video' | 'audio'; name: string }[]
   >([]);
-  const agentImageInputRef = useRef<HTMLInputElement>(null);
-  const agentVideoInputRef = useRef<HTMLInputElement>(null);
-  const agentAudioInputRef = useRef<HTMLInputElement>(null);
+  const agentFileInputRef = useRef<HTMLInputElement>(null);
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [creationModel, setCreationModel] = useState('seedance');
   const [reasoningModel, setReasoningModel] = useState('minimax');
@@ -160,6 +158,20 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   const [showResDrop, setShowResDrop] = useState(false);
   const [showDurationDrop, setShowDurationDrop] = useState(false);
   const [refFiles, setRefFiles] = useState<{ file: File; preview: string }[]>([]);
+  /** 校验类轻提示（顶部弹出，自动消失） */
+  const [toast, setToast] = useState('');
+  const toastTimer = useRef<number | null>(null);
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(''), 2600);
+  }, []);
+  useEffect(
+    () => () => {
+      if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    },
+    [],
+  );
 
   // AI图片专属状态
   const [imageModel, setImageModel] = useState('seedream5lite');
@@ -211,6 +223,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       );
     }
   };
+
+  // 首尾帧模式校验：选中该模式或参考上传变化时，要求恰好两张图片，否则弹出提示
+  useEffect(() => {
+    if (videoMode !== 'firstlast') return;
+    const ok = refFiles.length === 2 && refFiles.every((r) => r.file.type.startsWith('image/'));
+    if (!ok) showToast('首尾帧模式需上传两张图片作为首帧与尾帧参考');
+  }, [videoMode, refFiles, showToast]);
 
   // 并发加载三种能力的模型列表
   useEffect(() => {
@@ -324,16 +343,17 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     if (text && getCurrentUser()) goCanvasWithText(text);
   };
 
-  /** + 上传：按类型追加附件（上限 9 个） */
-  const handleAgentFilePick = (
-    e: React.ChangeEvent<HTMLInputElement>,
-    kind: 'image' | 'video' | 'audio',
-  ) => {
+  /** + 上传：点击直接选取图片/视频/音频（上限 9 个），按文件类型归类 */
+  const handleAgentFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     const items = files.slice(0, Math.max(0, 9 - agentFiles.length)).map((file) => ({
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       url: URL.createObjectURL(file),
-      kind,
+      kind: file.type.startsWith('image/')
+        ? ('image' as const)
+        : file.type.startsWith('video/')
+          ? ('video' as const)
+          : ('audio' as const),
       name: file.name,
     }));
     setAgentFiles((prev) => [...prev, ...items]);
@@ -498,11 +518,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                   </div>
                 )}
               </div>
-              {/* 说明文字（下方） */}
-              <div className={styles.videoDesc}>
-                <p>通过直接控制提示词快速生成单段片段。</p>
-                <p>上传 1–5 张参考图或视频；首尾帧模式可上传首帧与尾帧参考。</p>
-              </div>
+              {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
+              <textarea
+                className={styles.textarea}
+                placeholder={'通过直接控制提示词快速生成单段片段。\n上传 1–5 张参考图或视频；首尾帧模式可上传首帧与尾帧参考。'}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={2}
+              />
             </div>
 
             {/* 隐藏的文件输入 */}
@@ -651,7 +675,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                   <Sparkles size={14} color="#a0a0a0" strokeWidth={2} />
                   <span className={styles.tokenCount}>9</span>
                 </div>
-                <button className={`${styles.sendBtn} ${styles.sendBtnActive}`}>
+                <button
+                  className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
+                  onClick={handleSend}
+                  disabled={!inputValue.trim()}
+                >
                   <ChevronUp size={18} strokeWidth={2.5} />
                 </button>
               </div>
@@ -690,11 +718,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                   </div>
                 )}
               </div>
-              {/* 说明文字（下方） */}
-              <div className={styles.imageDesc}>
-                <p>从文字与参考图生成 AI 图片。</p>
-                <p>描述你想生成的图片，已上传的参考将引导风格与细节。</p>
-              </div>
+              {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
+              <textarea
+                className={styles.textarea}
+                placeholder={'从文字与参考图生成 AI 图片。\n描述你想生成的图片，已上传的参考将引导风格与细节。'}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={2}
+              />
             </div>
 
             {/* 隐藏的文件输入 */}
@@ -795,7 +827,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                   <Sparkles size={14} strokeWidth={2} />
                   <span>+ {imageStrength}</span>
                 </div>
-                <button className={`${styles.sendBtn} ${styles.sendBtnActive}`}>
+                <button
+                  className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
+                  onClick={handleSend}
+                  disabled={!inputValue.trim()}
+                >
                   <ChevronUp size={18} strokeWidth={2.5} />
                 </button>
               </div>
@@ -850,79 +886,31 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
             <div className={styles.toolbar}>
               {/* 左侧工具 */}
               <div className={styles.toolbarLeft}>
-                {/* + 按钮（悬停弹出上传选项） */}
+                {/* + 按钮：悬停显示小提示，点击直接选取图片/视频/音频文件上传 */}
                 <div className={styles.uploadWrap} ref={uploadRef}>
                   <button
                     className={styles.iconBtn}
+                    onClick={() => agentFileInputRef.current?.click()}
                     onMouseEnter={() => setShowUpload(true)}
                     onMouseLeave={() => setShowUpload(false)}
                   >
                     <Plus size={18} strokeWidth={2} />
                   </button>
                   {showUpload && (
-                    <div
-                      className={styles.uploadPopup}
-                      onMouseEnter={() => setShowUpload(true)}
-                      onMouseLeave={() => setShowUpload(false)}
-                    >
-                      <button
-                        className={styles.uploadItem}
-                        onClick={() => {
-                          agentImageInputRef.current?.click();
-                          setShowUpload(false);
-                        }}
-                      >
-                        <Image size={16} strokeWidth={2} />
-                        <span>上传图片</span>
-                      </button>
-                      <button
-                        className={styles.uploadItem}
-                        onClick={() => {
-                          agentVideoInputRef.current?.click();
-                          setShowUpload(false);
-                        }}
-                      >
-                        <Video size={16} strokeWidth={2} />
-                        <span>上传视频</span>
-                      </button>
-                      <button
-                        className={styles.uploadItem}
-                        onClick={() => {
-                          agentAudioInputRef.current?.click();
-                          setShowUpload(false);
-                        }}
-                      >
-                        <Music size={16} strokeWidth={2} />
-                        <span>上传音频</span>
-                      </button>
+                    <div className={styles.uploadPopup}>
+                      <span className={styles.uploadHint}>可上传视频、图片或音频</span>
                     </div>
                   )}
                 </div>
 
-                {/* 隐藏文件输入（+ 上传） */}
+                {/* 隐藏文件输入（+ 上传：图片/视频/音频） */}
                 <input
-                  ref={agentImageInputRef}
+                  ref={agentFileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/*,audio/*"
                   multiple
                   style={{ display: 'none' }}
-                  onChange={(e) => handleAgentFilePick(e, 'image')}
-                />
-                <input
-                  ref={agentVideoInputRef}
-                  type="file"
-                  accept="video/*"
-                  multiple
-                  style={{ display: 'none' }}
-                  onChange={(e) => handleAgentFilePick(e, 'video')}
-                />
-                <input
-                  ref={agentAudioInputRef}
-                  type="file"
-                  accept="audio/*"
-                  multiple
-                  style={{ display: 'none' }}
-                  onChange={(e) => handleAgentFilePick(e, 'audio')}
+                  onChange={handleAgentFilePick}
                 />
 
                 {/* Skill 按钮 */}
@@ -1019,6 +1007,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
 
       {/* 未登录拦截弹窗 */}
       {showLogin && <LoginModal onClose={handleLoginClose} />}
+
+      {/* 校验轻提示（顶部居中弹出） */}
+      {toast && (
+        <div className={styles.toast} role="alert">
+          {toast}
+        </div>
+      )}
     </>
   );
 }
