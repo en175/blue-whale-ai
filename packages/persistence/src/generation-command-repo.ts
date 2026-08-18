@@ -503,7 +503,11 @@ export function createGenerationCommandRepo(
             project_action_identity: idempotencyKey || `retry:${originalJobId}`,
             strategy_version:
               original.strategy_version ??
-              (original.type === "video" ? "seedance-2.0-v1" : "image-sync-v1"),
+              (original.type === "video"
+                ? "seedance-2.0-v1"
+                : original.type === "audio"
+                  ? "audio-sync-v1"
+                  : "image-sync-v1"),
             execution_deadline_at: deadline,
             next_action_at: now,
             fencing_token: 0,
