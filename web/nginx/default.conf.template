@@ -1,0 +1,33 @@
+# blue_whale_web nginx 配置模板。
+#
+# 放在 /etc/nginx/templates/ 下，容器启动时由官方 nginx 镜像入口 envsubst 渲染：
+#   - ${BACKEND_UPSTREAM}  ← 环境变量（docker run -e，默认 http://backend:3100）
+#   - $uri / $host / $remote_addr / $scheme / $proxy_add_x_forwarded_for
+#     是 nginx 运行时内置变量，NGINX_ENVSUBST_FILTER=BACKEND_UPSTREAM 保证不被替换。
+
+server {
+    listen       80;
+    server_name  _;
+
+    root   /usr/share/nginx/html;
+    index  index.html;
+
+    # SPA fallback：未知路径回落到 index.html
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 业务 API：反代到后端（保留原始 /api 前缀，后端全局前缀为 /api）
+    # SSE 流式：关缓冲 + 长超时
+    location /api/ {
+        proxy_pass ${BACKEND_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
