@@ -68,11 +68,12 @@ function RatioIcon({ ratio }: { ratio: string }) {
 }
 
 export default function BottomDialog({ onClose, onSend, initialRefs, initialPrompt, initialPromptLabel }: BottomDialogProps) {
-  // Agent 生成卡整体进入输入框：标题作为首行，提示词随其后（作为对话框整体内容）
-  const [inputValue, setInputValue] = useState(() => {
-    const prompt = initialPrompt ?? '';
-    return initialPromptLabel ? `${initialPromptLabel}\n${prompt}` : prompt;
-  });
+  /** Agent 生成卡：标题+提示词一体（卡片形态，删一起删），发送时用卡片 prompt */
+  const [seedCard, setSeedCard] = useState<{ label: string; prompt: string } | null>(
+    initialPrompt ? { label: initialPromptLabel ?? '生成卡', prompt: initialPrompt } : null,
+  );
+  /** 用户自由输入（与生成卡卡片独立） */
+  const [inputValue, setInputValue] = useState('');
   const [refFiles, setRefFiles] = useState<BottomRefItem[]>(initialRefs ?? []);
   const [selectedMode, setSelectedMode] = useState(modeOptions[0].key);
   const [modeOpen, setModeOpen] = useState(false);
@@ -213,21 +214,23 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialProm
     });
   };
 
-  /** 发送：携带当前选择的模型/宽高比/清晰度/时长（模型未加载完成时拦截） */
+  /** 发送：优先生成卡卡片 prompt，否则自由输入（携带模型/宽高比/清晰度/时长） */
   const handleSend = () => {
-    if (!inputValue.trim()) return;
+    const text = seedCard?.prompt ?? inputValue.trim();
+    if (!text) return;
     if (!currentModel) {
       console.warn('视频模型能力加载中，请稍后重试');
       return;
     }
     const size = currentModel.supported_sizes.find((s) => s.id === selectedSize);
-    onSend(inputValue, {
+    onSend(text, {
       modelId: currentModel.model_id,
       aspectRatio: selectedRatio,
       resolution: size?.api_value ?? '720p',
       duration,
       mode: selectedMode,
     });
+    setSeedCard(null);
     setInputValue('');
   };
 
@@ -432,7 +435,24 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialProm
         </div>
       )}
 
-      {/* 输入框（Agent 生成卡以标题+提示词整体进入） */}
+      {/* Agent 生成卡卡片（标题+提示词一体，删一起删，发送时用卡片 prompt） */}
+      {seedCard && (
+        <div className={styles.genCardBox}>
+          <div className={styles.genCardHead}>
+            <span className={styles.genCardLabel}>{seedCard.label}</span>
+            <button
+              type="button"
+              className={styles.genCardRemove}
+              onClick={() => setSeedCard(null)}
+              title="移除生成卡"
+            >
+              <X size={12} strokeWidth={2} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 输入框 */}
       <textarea
         className={styles.textarea}
         placeholder="上传 3-10 秒视频片段，并结合文本或图片轻松修改内容、改变镜头角度或重塑原视频风格。可使用 @ 快速插入已添加资源。"
@@ -504,9 +524,9 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialProm
           <span className={styles.barInfo}>1x</span>
           <div className={styles.sendWrap}>
             <button
-              className={`${styles.generateBtn} ${inputValue.trim() ? styles.generateBtnActive : ''}`}
+              className={`${styles.generateBtn} ${(seedCard || inputValue.trim()) ? styles.generateBtnActive : ''}`}
               onClick={handleSend}
-              disabled={!inputValue.trim()}
+              disabled={!seedCard && !inputValue.trim()}
             >
               <Sparkles size={14} strokeWidth={2} />
               <span>15</span>
