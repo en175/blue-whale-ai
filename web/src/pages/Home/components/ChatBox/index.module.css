@@ -5,7 +5,8 @@
 .chatBox {
   max-width: 78.4rem;
   width: 73%;
-  height: 16.75rem;
+  /* 固定高度：三个 tab 切换时窗口高度保持一致，不跳动 */
+  height: 18rem;
   margin: 0 auto;
   background-color: #1D1D1D;
   border: 1px solid var(--color-border-primary);
@@ -63,7 +64,8 @@
 .textarea {
   width: 100%;
   flex: 1;
-  min-height: 0;
+  /* 保底约两行输入区，附件占位时输入框不被挤压塌陷 */
+  min-height: 3rem;
   max-height: none;
   resize: none;
   background-color: transparent;
@@ -319,9 +321,11 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-md);
+  gap: var(--spacing-xs);
   padding: var(--spacing-sm) 0;
   min-height: 0;
+  /* 固定高度下附件过多时内部滚动，不溢出重叠 */
+  overflow-y: auto;
 }
 
 .refCard {
@@ -354,6 +358,9 @@
   gap: var(--spacing-sm);
   flex-wrap: wrap;
   flex-shrink: 0;
+  /* 最多约两行缩略图，超出内部滚动，保证固定高度不塌陷 */
+  max-height: 9.5rem;
+  overflow-y: auto;
 }
 
 .refThumbWrap {
@@ -412,23 +419,38 @@
 }
 
 .refThumbLabel {
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   white-space: nowrap;
 }
 
-.videoDesc {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+/* 校验轻提示：顶部居中弹出，自动消失，不占据布局 */
+.toast {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 20px;
+  border-radius: var(--radius-md);
+  background-color: rgba(20, 20, 20, 0.92);
+  border: 1px solid var(--color-error);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  box-shadow: var(--shadow-md);
+  z-index: 1000;
+  pointer-events: none;
+  animation: toastIn 0.25s ease-out;
 }
 
-.videoDesc p {
-  margin: 0;
-  font-size: var(--font-size-md);
-  color: var(--color-text-tertiary);
-  line-height: 1.6;
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 /* ---- 参数按钮行 ---- */
@@ -532,20 +554,6 @@
 /* ============================================
  * AI 图片 tab 专属样式
  * ============================================ */
-
-/* ---- 图片说明文字 ---- */
-.imageDesc {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.imageDesc p {
-  margin: 0;
-  font-size: var(--font-size-md);
-  color: var(--color-text-tertiary);
-  line-height: 1.6;
-}
 
 /* ---- 强度徽章 ---- */
 .imageStrengthBadge {

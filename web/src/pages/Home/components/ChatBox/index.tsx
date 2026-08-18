@@ -41,7 +41,7 @@ const videoModels = [
 const videoModes = [
   { key: 'omni', label: '全能参考' },
   { key: 'firstlast', label: '首尾帧' },
-  { key: 'text2video', label: 'Text to Video' },
+  { key: 'text2video', label: '图生视频' },
 ];
 
 /** AI视频 - 宽高比选项 */
@@ -160,6 +160,20 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   const [showResDrop, setShowResDrop] = useState(false);
   const [showDurationDrop, setShowDurationDrop] = useState(false);
   const [refFiles, setRefFiles] = useState<{ file: File; preview: string }[]>([]);
+  /** 校验类轻提示（顶部弹出，自动消失） */
+  const [toast, setToast] = useState('');
+  const toastTimer = useRef<number | null>(null);
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(''), 2600);
+  }, []);
+  useEffect(
+    () => () => {
+      if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    },
+    [],
+  );
 
   // AI图片专属状态
   const [imageModel, setImageModel] = useState('seedream5lite');
@@ -211,6 +225,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       );
     }
   };
+
+  // 首尾帧模式校验：选中该模式或参考上传变化时，要求恰好两张图片，否则弹出提示
+  useEffect(() => {
+    if (videoMode !== 'firstlast') return;
+    const ok = refFiles.length === 2 && refFiles.every((r) => r.file.type.startsWith('image/'));
+    if (!ok) showToast('首尾帧模式需上传两张图片作为首帧与尾帧参考');
+  }, [videoMode, refFiles, showToast]);
 
   // 并发加载三种能力的模型列表
   useEffect(() => {
@@ -498,11 +519,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                   </div>
                 )}
               </div>
-              {/* 说明文字（下方） */}
-              <div className={styles.videoDesc}>
-                <p>通过直接控制提示词快速生成单段片段。</p>
-                <p>上传 1–5 张参考图或视频；首尾帧模式可上传首帧与尾帧参考。</p>
-              </div>
+              {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
+              <textarea
+                className={styles.textarea}
+                placeholder={'通过直接控制提示词快速生成单段片段。\n上传 1–5 张参考图或视频；首尾帧模式可上传首帧与尾帧参考。'}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={2}
+              />
             </div>
 
             {/* 隐藏的文件输入 */}
@@ -651,7 +676,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                   <Sparkles size={14} color="#a0a0a0" strokeWidth={2} />
                   <span className={styles.tokenCount}>9</span>
                 </div>
-                <button className={`${styles.sendBtn} ${styles.sendBtnActive}`}>
+                <button
+                  className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
+                  onClick={handleSend}
+                  disabled={!inputValue.trim()}
+                >
                   <ChevronUp size={18} strokeWidth={2.5} />
                 </button>
               </div>
@@ -690,11 +719,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                   </div>
                 )}
               </div>
-              {/* 说明文字（下方） */}
-              <div className={styles.imageDesc}>
-                <p>从文字与参考图生成 AI 图片。</p>
-                <p>描述你想生成的图片，已上传的参考将引导风格与细节。</p>
-              </div>
+              {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
+              <textarea
+                className={styles.textarea}
+                placeholder={'从文字与参考图生成 AI 图片。\n描述你想生成的图片，已上传的参考将引导风格与细节。'}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={2}
+              />
             </div>
 
             {/* 隐藏的文件输入 */}
@@ -795,7 +828,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                   <Sparkles size={14} strokeWidth={2} />
                   <span>+ {imageStrength}</span>
                 </div>
-                <button className={`${styles.sendBtn} ${styles.sendBtnActive}`}>
+                <button
+                  className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
+                  onClick={handleSend}
+                  disabled={!inputValue.trim()}
+                >
                   <ChevronUp size={18} strokeWidth={2.5} />
                 </button>
               </div>
@@ -1019,6 +1056,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
 
       {/* 未登录拦截弹窗 */}
       {showLogin && <LoginModal onClose={handleLoginClose} />}
+
+      {/* 校验轻提示（顶部居中弹出） */}
+      {toast && (
+        <div className={styles.toast} role="alert">
+          {toast}
+        </div>
+      )}
     </>
   );
 }

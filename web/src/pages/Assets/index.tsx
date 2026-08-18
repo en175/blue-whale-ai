@@ -28,6 +28,44 @@ const typeLabel: Record<AssetType, string> = {
   audio: '音频',
 };
 
+/** 视频缩略图：播放图标居中覆盖，点击后卡片内播放（原生控制条），暂停/结束恢复播放图标 */
+function VideoThumb({ url }: { url: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+
+  const startPlay = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = false;
+    void video.play().catch(() => setPlaying(false));
+  };
+
+  return (
+    <>
+      <video
+        ref={videoRef}
+        className={styles.media}
+        src={url}
+        muted
+        playsInline
+        preload="metadata"
+        controls={playing}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+        onClick={() => {
+          if (!playing) startPlay();
+        }}
+      />
+      {!playing && (
+        <button type="button" className={styles.playIcon} title="播放视频" onClick={startPlay}>
+          <Play size={22} fill="#fff" strokeWidth={0} />
+        </button>
+      )}
+    </>
+  );
+}
+
 export default function Assets() {
   const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
   const [assets, setAssets] = useState<AssetRecord[]>([]);
@@ -187,20 +225,7 @@ export default function Assets() {
                   {asset.type === 'image' && asset.url && (
                     <img className={styles.media} src={asset.url} alt="" loading="lazy" />
                   )}
-                  {asset.type === 'video' && asset.url && (
-                    <>
-                      <video
-                        className={styles.media}
-                        src={asset.url}
-                        muted
-                        playsInline
-                        preload="metadata"
-                      />
-                      <div className={styles.playIcon}>
-                        <Play size={24} fill="#fff" strokeWidth={0} />
-                      </div>
-                    </>
-                  )}
+                  {asset.type === 'video' && asset.url && <VideoThumb url={asset.url} />}
                   {asset.type === 'audio' && asset.url && (
                     <audio
                       className={styles.audioPlayer}
