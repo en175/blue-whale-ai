@@ -47,9 +47,13 @@ interface FlowCanvasProps {
   /** 视口变更回调（拖拽/缩放结束），供自动保存使用 */
   onViewportChange?: (v: Viewport) => void;
   onDeleteNode: (id: string) => void;
+  /** 节点单击（画布选取模式等场景） */
+  onNodeClick?: (node: Node) => void;
+  /** 画布空白处单击 */
+  onPaneClick?: () => void;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onDeleteNode }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onDeleteNode, onNodeClick, onPaneClick }: FlowCanvasProps) {
   const isDrag = toolMode === 'drag';
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -217,7 +221,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   }, [onDeleteNode]);
 
   return (
-    <div className={styles.canvasContainer}>
+    <div className={`${styles.canvasContainer} ${isDrag ? styles.dragMode : ''}`}>
       <ReactFlow
         nodes={nodes}
         edges={showEdges ? edges : []}
@@ -225,12 +229,14 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeDoubleClick={onNodeDoubleClick}
+        onNodeClick={onNodeClick ? (_e, node) => onNodeClick(node) : undefined}
+        onPaneClick={onPaneClick}
         onMoveEnd={(_e, v) => onViewportChangeRef.current?.(v)}
         onContextMenu={(e) => e.preventDefault()}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         panOnDrag={isDrag}
-        nodesDraggable={isDrag}
+        nodesDraggable={!isDrag}
         elementsSelectable={!isDrag}
         nodesConnectable={!isDrag}
         maxZoom={8}
@@ -264,7 +270,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onDeleteNode }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onDeleteNode, onNodeClick, onPaneClick }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -279,6 +285,8 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         viewport={viewport}
         onViewportChange={onViewportChange}
         onDeleteNode={onDeleteNode}
+        onNodeClick={onNodeClick}
+        onPaneClick={onPaneClick}
       />
     </ReactFlowProvider>
   );

@@ -10,6 +10,8 @@ import {
   Maximize2,
   SlidersHorizontal,
   ArrowUp,
+  Upload,
+  MousePointerClick,
   Image as ImageIcon,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
@@ -53,6 +55,12 @@ interface ImageDialogProps {
   initialText?: string;
   /** 初始参考素材（节点操作带入被点节点图片） */
   initialFiles?: UploadedFile[];
+  /** 到节点选择：进入画布图片节点选取模式 */
+  onPickFromCanvas?: () => void;
+  /** 画布选取模式进行中（左上角图标高亮提示） */
+  pickMode?: boolean;
+  /** 画布节点选取结果（ts 驱动注入参考素材） */
+  externalPick?: { ts: number; file: UploadedFile } | null;
 }
 
 /** 宽高比图标：按比例绘制小矩形 */
@@ -64,7 +72,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, onPickFromCanvas, pickMode, externalPick }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [selectedModel, setSelectedModel] = useState(FALLBACK_MODELS[0].key);
@@ -74,7 +82,18 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   const [modelOpen, setModelOpen] = useState(false);
   const [resOpen, setResOpen] = useState(false);
   const [files, setFiles] = useState<UploadedFile[]>(initialFiles ?? []);
+  /** 左上角图标弹菜单：图片上传 / 到节点选择 */
+  const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /** 画布节点选取结果注入参考素材（去重 + 上限保护） */
+  useEffect(() => {
+    if (!externalPick) return;
+    setFiles((prev) => {
+      if (prev.some((f) => f.id === externalPick.file.id) || prev.length >= MAX_FILES) return prev;
+      return [...prev, externalPick.file];
+    });
+  }, [externalPick]);
 
   /** 接口数据优先，失败回退本地选项 */
   const modelOptions = modelList.length
@@ -267,28 +286,53 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         {/* 顶部：素材预览 + 右上角操作 */}
         <div className={styles.topRow}>
           <div className={styles.previewRow}>
-            {files.length === 0 ? (
-              <div className={`${styles.previewItem} ${styles.previewPlaceholder}`}>
+            {/* 左上角图标：点击弹出「图片上传 / 到节点选择」 */}
+            <div className={styles.sourceWrap}>
+              <button
+                className={`${styles.previewItem} ${styles.previewPlaceholder} ${pickMode ? styles.previewPicking : ''}`}
+                onClick={() => setSourceMenuOpen((v) => !v)}
+                title="图片上传 / 到节点选择"
+              >
                 <ImageIcon size={18} strokeWidth={2} />
+              </button>
+              {sourceMenuOpen && (
+                <>
+                  <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(false)} />
+                  <div className={styles.sourceMenu}>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(false); fileInputRef.current?.click(); }}
+                    >
+                      <Upload size={14} strokeWidth={2} />
+                      <span>图片上传</span>
+                    </button>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(false); onPickFromCanvas?.(); }}
+                    >
+                      <MousePointerClick size={14} strokeWidth={2} />
+                      <span>到节点选择</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            {files.map((f) => (
+              <div key={f.id} className={styles.previewItem} title={f.name}>
+                {f.type === 'video' ? (
+                  <video src={f.url} muted preload="metadata" />
+                ) : (
+                  <img src={f.url} alt={f.name} />
+                )}
+                <button
+                  className={styles.previewRemove}
+                  onClick={() => handleRemoveFile(f.id)}
+                  title="移除"
+                >
+                  <X size={10} strokeWidth={2.5} />
+                </button>
               </div>
-            ) : (
-              files.map((f) => (
-                <div key={f.id} className={styles.previewItem} title={f.name}>
-                  {f.type === 'video' ? (
-                    <video src={f.url} muted preload="metadata" />
-                  ) : (
-                    <img src={f.url} alt={f.name} />
-                  )}
-                  <button
-                    className={styles.previewRemove}
-                    onClick={() => handleRemoveFile(f.id)}
-                    title="移除"
-                  >
-                    <X size={10} strokeWidth={2.5} />
-                  </button>
-                </div>
-              ))
-            )}
+            ))}
           </div>
 
           <div className={styles.topActions}>

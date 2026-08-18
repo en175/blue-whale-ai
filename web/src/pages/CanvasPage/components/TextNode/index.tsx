@@ -21,6 +21,8 @@ interface TextNodeData {
 
 export default function TextNode({ id, data }: NodeProps & { data: TextNodeData }) {
   const [isFocused, setIsFocused] = useState(false);
+  /** 双击进入编辑；单击/拖动为移动节点 */
+  const [editing, setEditing] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
@@ -32,9 +34,15 @@ export default function TextNode({ id, data }: NodeProps & { data: TextNodeData 
   useEffect(() => {
     if (!isSelect) {
       setIsFocused(false);
+      setEditing(false);
       editorRef.current?.blur();
     }
   }, [isSelect]);
+
+  // 进入编辑后聚焦编辑器
+  useEffect(() => {
+    if (editing) editorRef.current?.focus();
+  }, [editing]);
 
   // 仅在首次挂载时设置初始 HTML
   useEffect(() => {
@@ -214,18 +222,18 @@ export default function TextNode({ id, data }: NodeProps & { data: TextNodeData 
 
         <div
           ref={editorRef}
-          className={`${styles.editor} ${isSelect ? 'nodrag nopan' : ''}`}
-          contentEditable={isSelect}
+          className={`${styles.editor} ${editing ? 'nodrag nopan' : ''}`}
+          contentEditable={editing}
           suppressContentEditableWarning
           style={{ pointerEvents: isSelect ? 'auto' : 'none' }}
           onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
+          onBlur={() => { setIsFocused(false); setEditing(false); }}
           onInput={syncContent}
-          onMouseDown={(e) => {
-            if (isSelect) {
-              e.stopPropagation();
-              e.currentTarget.focus();
-            }
+          onDoubleClick={(e) => {
+            if (!isSelect) return;
+            // 双击激活输入，并阻止画布双击居中缩放
+            e.stopPropagation();
+            setEditing(true);
           }}
           onMouseUp={handleEditorMouseUp}
           onKeyUp={handleEditorKeyUp}

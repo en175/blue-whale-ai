@@ -20,3 +20,8 @@
   background-color: var(--color-accent-primary);
   border: 2px solid var(--color-bg-primary);
 }
+
+/* 拖动模式：节点不拦截鼠标，画布任意位置按下即可平移 */
+.dragMode :global(.react-flow__node) {
+  pointer-events: none;
+}

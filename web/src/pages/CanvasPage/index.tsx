@@ -48,6 +48,10 @@ export default function CanvasPage() {
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [showBottomDialog, setShowBottomDialog] = useState(false);
   const [showImageDialog, setShowImageDialog] = useState(false);
+  /** 图片对话框「到节点选择」：画布图片节点选取模式 */
+  const [imagePickMode, setImagePickMode] = useState(false);
+  /** 画布节点选取结果（ts 驱动注入图片对话框） */
+  const [imagePickResult, setImagePickResult] = useState<{ ts: number; file: UploadedFile } | null>(null);
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showMusicDialog, setShowMusicDialog] = useState(false);
   const [showEdges, setShowEdges] = useState(true);
@@ -177,7 +181,7 @@ export default function CanvasPage() {
           // 生成卡节点水合后补动作回调（引用到 dock / 给 Agent）
           generationCard: base.data?.generationCard
             ? {
-                ...base.data.generationCard,
+                ...base.data.generationCard as object,
                 onApplyToDock: (apply: { prompt: string; assetRefs: string[]; cardId?: string; shotTitle?: string }) => {
                   setVideoSeed({ ts: Date.now(), refs: [], initialPrompt: apply.prompt, initialPromptLabel: apply.shotTitle });
                   setShowBottomDialog(true);
@@ -475,6 +479,32 @@ export default function CanvasPage() {
     setShowAudioDialog(false);
     setShowMusicDialog(false);
   };
+
+  /** 画布节点单击：选取模式下点击图片节点带入图片对话框，其他节点取消选取 */
+  const handleCanvasNodeClick = (node: Node) => {
+    if (!imagePickMode) return;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    const pickable =
+      node.type === 'mediaNode' &&
+      data.mediaType !== 'video' &&
+      typeof data.src === 'string' &&
+      !data.genStatus;
+    if (pickable) {
+      setImagePickResult({
+        ts: Date.now(),
+        file: {
+          id: `node-${node.id}`,
+          url: data.src as string,
+          type: 'image',
+          name: (data.fileName as string) || node.id,
+        },
+      });
+    }
+    setImagePickMode(false);
+  };
+
+  /** 画布空白处单击：取消节点选取模式 */
+  const handleCanvasPaneClick = () => setImagePickMode(false);
   // 资产卡等非节点入口：清空旧 seed，保证打开的是空白对话框
   actionsRef.current.openImageDialog = () => {
     setImageSeed(null);
@@ -886,23 +916,24 @@ export default function CanvasPage() {
     });
   };
 
-  /** 扩展工具菜单选择：音频生成/AI 音乐打开对应底部对话框，其余预留联调入口 */
+  /** 扩展工具菜单选择：资产库/商品等预留联调入口（音频按钮已改为直开对话框） */
   const handleToolMenuSelect = (menu: string, item: string) => {
-    if (menu === 'audio' && item === 'generate') {
-      setAudioSeed(null);
-      setShowAudioDialog((prev) => !prev);
-      setShowBottomDialog(false);
-      setShowImageDialog(false);
-      setShowMusicDialog(false);
-      return;
-    }
-    if (menu === 'audio' && item === 'music') {
-      setShowMusicDialog((prev) => !prev);
-      setShowBottomDialog(false);
-      setShowImageDialog(false);
-      setShowAudioDialog(false);
-      return;
-    }
+    // 暂时隐藏音频菜单分支（音频改为直开对话框），注释保留后续恢复
+    // if (menu === 'audio' && item === 'generate') {
+    //   setAudioSeed(null);
+    //   setShowAudioDialog((prev) => !prev);
+    //   setShowBottomDialog(false);
+    //   setShowImageDialog(false);
+    //   setShowMusicDialog(false);
+    //   return;
+    // }
+    // if (menu === 'audio' && item === 'music') {
+    //   setShowMusicDialog((prev) => !prev);
+    //   setShowBottomDialog(false);
+    //   setShowImageDialog(false);
+    //   setShowAudioDialog(false);
+    //   return;
+    // }
     if (menu === 'assets' && item === 'shared') {
       setShowAssetsModal(true);
       return;
@@ -1079,6 +1110,8 @@ export default function CanvasPage() {
           showEdges={showEdges}
           viewport={doc?.viewport}
           onViewportChange={setViewport}
+          onNodeClick={handleCanvasNodeClick}
+          onPaneClick={handleCanvasPaneClick}
           onDeleteNode={(id) => {
             setTextNodes((prev) => prev.filter((n) => n.id !== id));
             setMediaNodes((prev) => {
@@ -1103,13 +1136,22 @@ export default function CanvasPage() {
           }}
           onToggleImageDialog={() => {
             setImageSeed(null);
+            setImagePickMode(false);
             setShowImageDialog((prev) => !prev);
             setShowBottomDialog(false);
             setShowAudioDialog(false);
             setShowMusicDialog(false);
           }}
+          onToggleAudioDialog={() => {
+            setAudioSeed(null);
+            setShowAudioDialog((prev) => !prev);
+            setShowBottomDialog(false);
+            setShowImageDialog(false);
+            setShowMusicDialog(false);
+          }}
           showVideoDialog={showBottomDialog}
           showImageDialog={showImageDialog}
+          showAudioDialog={showAudioDialog}
           onAddTextNode={handleAddTextNode}
           onMenuSelect={handleToolMenuSelect}
         />
@@ -1165,9 +1207,19 @@ export default function CanvasPage() {
             key={imageSeed?.ts ?? 0}
             initialText={imageSeed?.text}
             initialFiles={imageSeed?.files}
-            onClose={() => setShowImageDialog(false)}
+            onClose={() => { setShowImageDialog(false); setImagePickMode(false); }}
             onSend={handleImageDialogSend}
+            onPickFromCanvas={() => setImagePickMode(true)}
+            pickMode={imagePickMode}
+            externalPick={imagePickResult}
           />
+        )}
+
+        {/* 节点选取模式提示条 */}
+        {imagePickMode && showImageDialog && (
+          <div className={styles.pickHint}>
+            到节点选择：点击画布中的图片节点带入参考图，点击空白处取消
+          </div>
         )}
 
         {/* 底部音频对话框 */}
