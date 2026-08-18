@@ -32,7 +32,11 @@ function messageFor(code: string, type: string): string {
     case "storage_failed":
       return "生成结果存储失败";
     case "provider_failed":
-      return type === "video" ? "视频生成失败" : "图像生成失败";
+      return type === "video"
+        ? "视频生成失败"
+        : type === "audio"
+          ? "音频生成失败"
+          : "图像生成失败";
     case "no_result":
       return "生成服务未返回结果";
     case "all_outputs_failed":
@@ -58,7 +62,11 @@ function messageFor(code: string, type: string): string {
     case "invalid_input":
       return "输入参数无效";
     default:
-      return type === "video" ? "视频生成失败" : "图像生成失败";
+      return type === "video"
+        ? "视频生成失败"
+        : type === "audio"
+          ? "音频生成失败"
+          : "图像生成失败";
   }
 }
 
