@@ -1,6 +1,7 @@
 import { hostname } from "node:os";
 import { Injectable } from "@nestjs/common";
 import { createWorkerRepo } from "@blue-whale/persistence";
+import { createNewApiAudioProvider } from "@blue-whale/generation-runtime";
 import {
   createNewApiClient,
   loadGenerationCostConfig,
@@ -37,6 +38,11 @@ export class GenerationWorkerService {
         repo: createWorkerRepo(this.prisma.client),
         createImageProvider: (token: string) =>
           createGenerationImageProvider({ token }),
+        createAudioProvider: (token: string) =>
+          createNewApiAudioProvider({
+            baseUrl: process.env.NEW_API_BASE_URL ?? "",
+            token,
+          }),
         credentialVault: {
           open: (ciphertext: string) =>
             openGenerationCredential(ciphertext, credentialSecret),

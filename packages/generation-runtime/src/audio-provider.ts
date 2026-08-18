@@ -8,6 +8,8 @@ export interface GeneratedAudio {
   data: Uint8Array;
   /** 音频 mime,默认 audio/mpeg */
   mime: string;
+  /** 音频时长(秒),上游可给则落 assets.duration;缺省由调用方落 null */
+  duration?: number;
   /** 计费流水关联键(new-api X-Oneapi-Request-Id) */
   requestId?: string;
 }
