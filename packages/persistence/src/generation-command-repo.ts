@@ -70,7 +70,7 @@ export interface GenerationCommandRepo {
     idempotencyKey: string,
     requestHash: string,
   ): Promise<
-    | (CreatedJob & { type: "image" | "video" })
+    | (CreatedJob & { type: "image" | "video" | "audio" })
     | { kind: "idempotency_conflict" }
     | null
   >;
@@ -279,7 +279,11 @@ export async function createJobWithinTx(
       action_identity: input.actionIdentity,
       project_action_identity: input.actionIdentity,
       strategy_version:
-        input.type === "video" ? "seedance-2.0-v1" : "image-sync-v1",
+        input.type === "video"
+          ? "seedance-2.0-v1"
+          : input.type === "audio"
+            ? "audio-sync-v1"
+            : "image-sync-v1",
       execution_deadline_at: deadline,
       next_action_at: now,
       fencing_token: 0,
@@ -432,7 +436,7 @@ export function createGenerationCommandRepo(
           return {
             generation_job_id: String(existing.generation_job_id),
             cursor: Number(existing.accepted_cursor),
-            type: original.type as "image" | "video",
+            type: original.type as "image" | "video" | "audio",
           };
         }
 
@@ -509,12 +513,16 @@ export function createGenerationCommandRepo(
         const retryInput: CreateJobInput = {
           projectId,
           userId: original.user_id.toString(),
-          type: original.type as "image" | "video",
+          type: original.type as "image" | "video" | "audio",
           expectedOutputCount: retryCount,
           input: (original.input ?? {}) as Record<string, unknown>,
           actionIdentity: idempotencyKey || `retry:${originalJobId}`,
           actionType:
-            original.type === "video" ? "generate_video" : "generate_image",
+            original.type === "video"
+              ? "generate_video"
+              : original.type === "audio"
+                ? "generate_audio"
+                : "generate_image",
         };
         await tx.cost_reservations.create({
           data: costReservationCreateData(
@@ -635,7 +643,7 @@ export function createGenerationCommandRepo(
         return {
           generation_job_id: retry.id.toString(),
           cursor: Number(event.cursor),
-          type: original.type as "image" | "video",
+          type: original.type as "image" | "video" | "audio",
         };
       });
     },
