@@ -947,3 +947,21 @@
   font-size: var(--font-size-md);
   color: var(--color-accent-text);
 }
+
+/* ---- 生成卡应用状态（S3） ---- */
+.shotApplied {
+  font-size: var(--font-size-md);
+  color: var(--color-accent-text);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.appliedHint {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(126, 228, 167, 0.5);
+  background-color: rgba(126, 228, 167, 0.08);
+  font-size: var(--font-size-md);
+  color: #7ee4a7;
+  line-height: 1.6;
+}

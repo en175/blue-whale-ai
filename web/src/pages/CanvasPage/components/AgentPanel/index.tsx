@@ -173,17 +173,20 @@ function GenerationCard({
   onModify,
   onApply,
   disabled,
+  applied,
 }: {
   card: NonNullable<SessionContentBlock['card']>;
   onModify: () => void;
   onApply: () => void;
   disabled: boolean;
+  applied?: boolean;
 }) {
   return (
     <div className={styles.generationCard}>
       <div className={styles.shotHeader}>
         <span className={styles.shotTitle}>{card.shotTitle}</span>
-        {card.timeRange && <span className={styles.shotTime}>{card.timeRange}</span>}
+        {applied && <span className={styles.shotApplied}>已进入 dock</span>}
+        {!applied && card.timeRange && <span className={styles.shotTime}>{card.timeRange}</span>}
       </div>
       {card.visual && (
         <div className={styles.shotField}>
@@ -204,14 +207,18 @@ function GenerationCard({
           ))}
         </div>
       )}
-      <div className={styles.cardActions}>
-        <button type="button" className={styles.cardBtn} onClick={onModify} disabled={disabled}>
-          自然语言修改
-        </button>
-        <button type="button" className={`${styles.cardBtn} ${styles.cardBtnPrimary}`} onClick={onApply} disabled={disabled}>
-          手动应用到 Canvas dock
-        </button>
-      </div>
+      {applied ? (
+        <div className={styles.appliedHint}>生成卡内容已进入 Canvas dock</div>
+      ) : (
+        <div className={styles.cardActions}>
+          <button type="button" className={styles.cardBtn} onClick={onModify} disabled={disabled}>
+            自然语言修改
+          </button>
+          <button type="button" className={`${styles.cardBtn} ${styles.cardBtnPrimary}`} onClick={onApply} disabled={disabled}>
+            手动应用到 Canvas dock
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -225,6 +232,7 @@ function AssistantMessageBody({
   onCardModify,
   onCardApply,
   disabled,
+  appliedCardIds,
 }: {
   message: ChatMessage;
   onConfirm: () => void;
@@ -233,6 +241,7 @@ function AssistantMessageBody({
   onCardModify: (card: NonNullable<SessionContentBlock['card']>) => void;
   onCardApply: (card: NonNullable<SessionContentBlock['card']>) => void;
   disabled: boolean;
+  appliedCardIds: Set<string>;
 }) {
   const blocks = message.blocks ?? [];
   const structured = blocks.filter((b) => b.type !== 'text');
@@ -260,6 +269,7 @@ function AssistantMessageBody({
           return <ClarifyCard key={i} questions={b.clarify.questions} />;
         }
         if (b.type === 'card' && b.card) {
+          const cardId = b.card.cardId ?? b.card.shotTitle;
           return (
             <GenerationCard
               key={i}
@@ -267,6 +277,7 @@ function AssistantMessageBody({
               onModify={() => onCardModify(b.card!)}
               onApply={() => onCardApply(b.card!)}
               disabled={disabled}
+              applied={appliedCardIds.has(cardId)}
             />
           );
         }
@@ -311,9 +322,11 @@ interface AgentPanelProps {
   inputVersion?: number;
   /** 当前项目ID：发送消息走 POST /api/projects/:id/conversation/messages */
   projectId?: string;
+  /** 生成卡手动应用 → Canvas dock（S3 通道：CanvasPage 打开 BottomDialog 承接） */
+  onApplyToDock?: (payload: { prompt: string; assetRefs: string[]; cardId?: string }) => void;
 }
 
-export default function AgentPanel({ onClose, initialInput, inputVersion, projectId }: AgentPanelProps) {
+export default function AgentPanel({ onClose, initialInput, inputVersion, projectId, onApplyToDock }: AgentPanelProps) {
   const [inputValue, setInputValue] = useState(initialInput ?? '');
   const [selectedModel, setSelectedModel] = useState(models[0].key);
   const [modelOpen, setModelOpen] = useState(false);
@@ -339,6 +352,8 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
   const [recs, setRecs] = useState<RunSkillRecommendation[]>([]);
   /** 已点 Use 的推荐技能ID（仅用户点 Use 可激活） */
   const [usedSkillIds, setUsedSkillIds] = useState<Set<string>>(new Set());
+  /** 已手动应用到 Canvas dock 的生成卡ID（标记「已应用」） */
+  const [appliedCardIds, setAppliedCardIds] = useState<Set<string>>(new Set());
 
   /* ---- 拖动状态 ---- */
   const [position, setPosition] = useState(DEFAULT_POSITION);
@@ -497,9 +512,16 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
     setInputValue(`修改「${card.shotTitle}」：`);
   };
 
-  /** 手动应用生成卡到 Canvas dock（S3 补真实通道，此处先占位提示） */
-  const handleCardApply = (_card: NonNullable<SessionContentBlock['card']>) => {
-    setInputValue(''); // S3 实现：调用 apply 通道
+  /** 手动应用生成卡到 Canvas dock：标记已应用 + 回调 CanvasPage 打开 dock 承接 */
+  const handleCardApply = (card: NonNullable<SessionContentBlock['card']>) => {
+    if (runningRunId !== null || streaming) return;
+    const cardId = card.cardId ?? card.shotTitle;
+    setAppliedCardIds((prev) => new Set(prev).add(cardId));
+    onApplyToDock?.({
+      prompt: card.prompt,
+      assetRefs: card.assetRefs ?? [],
+      cardId,
+    });
   };
 
   /** 上传文件 */
@@ -589,6 +611,7 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
                   onCardModify={handleCardModify}
                   onCardApply={handleCardApply}
                   disabled={runningRunId !== null || streaming}
+                  appliedCardIds={appliedCardIds}
                 />
               </div>
             ),

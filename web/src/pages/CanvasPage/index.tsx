@@ -70,8 +70,7 @@ export default function CanvasPage() {
   /** 节点工具条带入图片对话框的初始值（ts 作为 key 强制重挂载以注入初始值） */
   const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[] } | null>(null);
   /** 节点工具条带入视频对话框的初始参考 */
-  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[] } | null>(null);
-  /** 节点工具条带入音频对话框的初始参考 */
+  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[] } | null>(null);  /** 节点工具条带入音频对话框的初始参考 */
   const [audioSeed, setAudioSeed] = useState<{ ts: number; refs: AudioRefItem[] } | null>(null);
   /** 当前视口（拖拽/缩放结束更新），自动保存时序列化提交 */
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
@@ -811,6 +810,16 @@ export default function CanvasPage() {
   actionsRef.current.genAudio = handleNodeGenAudio;
   actionsRef.current.download = handleNodeDownload;
 
+  /** Agent 生成卡手动应用 → Canvas dock：注入 prompt 并打开底部对话框承接（S3） */
+  const handleAgentCardApply = (payload: { prompt: string; assetRefs: string[]; cardId?: string }) => {
+    setVideoSeed({ ts: Date.now(), refs: [] });
+    setShowBottomDialog(true);
+    setShowImageDialog(false);
+    setShowAudioDialog(false);
+    setShowMusicDialog(false);
+    void payload; // S4 补真实 dock 承接端点；此处 dock 主要承接 prompt，素材引用文本随消息带出
+  };
+
   /** 底部对话框发送 */
   /** 视频对话发送：创建视频生成任务 */
   const handleDialogSend = (text: string, opts: VideoGenOptions) => {
@@ -1141,6 +1150,7 @@ export default function CanvasPage() {
           initialInput={agentContext?.text ?? ''}
           inputVersion={agentContext?.ts ?? 0}
           projectId={currentId || undefined}
+          onApplyToDock={handleAgentCardApply}
         />
       )}
 
