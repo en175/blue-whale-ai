@@ -38,7 +38,9 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
   const [refs, setRefs] = useState<{ id: string; src: string }[]>(data.initialRefs ?? []);
   const [desc, setDesc] = useState(data.initialDesc ?? '');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [voiceName, setVoiceName] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<HTMLInputElement>(null);
 
   const isSelect = data.toolMode === 'select';
 
@@ -140,17 +142,34 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
             }}
           />
 
-          {/* 角色卡：音色设置 */}
+          {/* 角色卡：音色上传（鼠标悬停卡片时展示） */}
           {(data.kind ?? 'custom') === 'character' && (
             <div className={styles.voiceSection}>
               <div className={styles.voiceLabel}>
                 <Music size={14} strokeWidth={2} />
                 <span>音色</span>
               </div>
-              <button className={styles.voiceBtn}>
-                <Music size={14} strokeWidth={2} />
-                <span>设置角色音色</span>
-              </button>
+              <div className={styles.voiceDrop}>
+                <span className={styles.voiceHint}>
+                  {voiceName || '从画布拖入音频'}
+                </span>
+                <button className={styles.actionBtn} onClick={() => audioRef.current?.click()}>
+                  <Upload size={15} strokeWidth={2} />
+                  <span>上传音色音频</span>
+                </button>
+                <span className={styles.voiceTip}>2–15.2 秒 · 建议 ≤ 5 秒</span>
+              </div>
+              <input
+                ref={audioRef}
+                type="file"
+                accept="audio/*,image/*"
+                className={styles.hiddenInput}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) setVoiceName(f.name);
+                  e.target.value = '';
+                }}
+              />
             </div>
           )}
         </div>

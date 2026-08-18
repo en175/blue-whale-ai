@@ -7,7 +7,7 @@
   bottom: var(--spacing-2xl);
   left: 50%;
   transform: translateX(-50%);
-  width: 760px;
+  width: 640px;
   max-width: 90%;
   background-color: #1e1e1e;
   border: 1px solid var(--color-border-primary);
@@ -75,6 +75,17 @@
   border-color: var(--color-border-hover);
 }
 
+/* 首尾帧模式下视频按钮禁用 */
+.mediaBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.mediaBtn:disabled:hover {
+  color: var(--color-text-tertiary);
+  border-color: var(--color-border-primary);
+}
+
 .mediaBtnActive {
   color: var(--color-text-primary);
   border-color: var(--color-border-hover);
@@ -91,12 +102,12 @@
 /* ---- 输入框（透明无边框，贴合设计稿） ---- */
 .textarea {
   width: 100%;
-  min-height: 120px;
+  min-height: 80px;
   padding: var(--spacing-xs) 0;
   background: transparent;
   border: none;
   color: var(--color-text-primary);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-md);
   line-height: 1.7;
   resize: none;
   outline: none;
@@ -395,10 +406,11 @@
 .configPanel {
   position: absolute;
   bottom: 72px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 560px;
-  max-width: calc(100vw - 48px);
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: 480px;
+  max-width: calc(100% - 24px);
   padding: var(--spacing-lg);
   background-color: #232323;
   border: 1px solid var(--color-border-primary);
@@ -407,6 +419,30 @@
   z-index: 5;
   animation: popupFadeIn 0.15s ease;
   box-sizing: border-box;
+}
+
+/* ---- 配置面板关闭按钮 ---- */
+.configCloseBtn {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  z-index: 1;
+}
+
+.configCloseBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
 }
 
 .configLabel {

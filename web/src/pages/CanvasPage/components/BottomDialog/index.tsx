@@ -93,6 +93,11 @@ export default function BottomDialog({ onClose, onSend, initialRefs }: BottomDia
     sizeOptions.find((s) => s.key === selectedSize)?.label ?? selectedSize ?? '720p';
   const currentMode = modeOptions.find((m) => m.key === selectedMode);
 
+  /** 首尾帧模式：仅允许上传 2 张图片（首帧+尾帧），禁止视频 */
+  const isKeyframe = selectedMode === 'keyframe';
+  const imageCount = refFiles.filter((f) => f.type === 'image').length;
+  const maxImages = isKeyframe ? 2 : 5;
+
   /** 时长刻度（min..max 逐 step） */
   const ticks: number[] = [];
   for (let v = durationRange.min; v <= durationRange.max; v += durationRange.step) ticks.push(v);
@@ -132,22 +137,27 @@ export default function BottomDialog({ onClose, onSend, initialRefs }: BottomDia
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** 上传图片 */
+  /** 上传图片（首尾帧模式限 2 张） */
   const handleImageClick = () => {
-    if (refFiles.length < 5) imageInputRef.current?.click();
+    if (imageCount < maxImages) imageInputRef.current?.click();
   };
 
-  /** 上传视频 */
+  /** 上传视频（首尾帧模式禁用） */
   const handleVideoClick = () => {
+    if (isKeyframe) return;
     if (refFiles.length < 5) videoInputRef.current?.click();
   };
 
-  /** 通用上传（底部加号） */
+  /** 通用上传（底部加号；首尾帧模式仅收图片且限 2 张） */
   const handleAnyUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    const remaining = 5 - refFiles.length;
-    const newFiles = Array.from(files).slice(0, remaining).map((file) => ({
+    const list = isKeyframe
+      ? Array.from(files)
+          .filter((f) => f.type.startsWith('image/'))
+          .slice(0, Math.max(0, maxImages - imageCount))
+      : Array.from(files).slice(0, 5 - refFiles.length);
+    const newFiles = list.map((file) => ({
       file,
       preview: URL.createObjectURL(file),
       type: (file.type.startsWith('video/') ? 'video' : 'image') as 'image' | 'video',
@@ -156,11 +166,11 @@ export default function BottomDialog({ onClose, onSend, initialRefs }: BottomDia
     e.target.value = '';
   };
 
-  /** 处理图片上传 */
+  /** 处理图片上传（首尾帧模式限 2 张） */
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    const remaining = 5 - refFiles.length;
+    const remaining = isKeyframe ? Math.max(0, maxImages - imageCount) : 5 - refFiles.length;
     const newFiles = Array.from(files).slice(0, remaining).map((file) => ({
       file,
       preview: URL.createObjectURL(file),
@@ -170,8 +180,9 @@ export default function BottomDialog({ onClose, onSend, initialRefs }: BottomDia
     if (imageInputRef.current) imageInputRef.current.value = '';
   };
 
-  /** 处理视频上传 */
+  /** 处理视频上传（首尾帧模式禁用） */
   const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isKeyframe) return;
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const remaining = 5 - refFiles.length;
@@ -230,6 +241,14 @@ export default function BottomDialog({ onClose, onSend, initialRefs }: BottomDia
       {/* 配置面板（展开悬浮于底栏上方） */}
       {showConfig && (
         <div className={styles.configPanel}>
+          {/* 关闭按钮 */}
+          <button
+            className={styles.configCloseBtn}
+            onClick={() => setShowConfig(false)}
+            title="关闭"
+          >
+            <X size={14} strokeWidth={2} />
+          </button>
           {/* 模型与质量 */}
           <span className={styles.configLabel}>模型与质量</span>
           <div className={styles.configRow}>
@@ -339,11 +358,18 @@ export default function BottomDialog({ onClose, onSend, initialRefs }: BottomDia
           <Image size={18} strokeWidth={2} />
         </button>
         <div className={styles.mediaDot} />
-        <button className={styles.mediaBtn} onClick={handleVideoClick} title="上传视频">
+        <button
+          className={styles.mediaBtn}
+          onClick={handleVideoClick}
+          title={isKeyframe ? '首尾帧模式不支持视频' : '上传视频'}
+          disabled={isKeyframe}
+        >
           <Video size={18} strokeWidth={2} />
         </button>
         {refFiles.length > 0 && (
-          <span className={styles.fileCount}>{refFiles.length}/5</span>
+          <span className={styles.fileCount}>
+            {isKeyframe ? `${imageCount}/2` : `${refFiles.length}/5`}
+          </span>
         )}
       </div>
 
