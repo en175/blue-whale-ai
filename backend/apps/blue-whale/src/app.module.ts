@@ -35,6 +35,7 @@ import { SkillsApiModule } from "./api/skills/skills.module.js";
 import { AgentTemplatesModule } from "./api/templates/templates.module.js";
 import { TextApiModule } from "./api/text/text.module.js";
 import { UsageModule } from "./api/usage/usage.module.js";
+import { AgentV1Module } from "./api/agent/agent-v1.module.js";
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { UsageModule } from "./api/usage/usage.module.js";
     SceneCardsApiModule,
     AgentTemplatesModule,
     TextApiModule,
+    AgentV1Module,
     HealthModule,
   ],
   providers: [

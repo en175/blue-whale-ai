@@ -52,6 +52,10 @@ interface BottomDialogProps {
   onSend: (text: string, opts: VideoGenOptions) => void;
   /** 初始参考素材（节点「生成视频」带入被点节点图片） */
   initialRefs?: BottomRefItem[];
+  /** 初始提示词（Agent 生成卡「引用到 dock」带入的分镜提示词） */
+  initialPrompt?: string;
+  /** 初始提示词胶囊标签（如「镜头 1 · 光影揭幕」） */
+  initialPromptLabel?: string;
 }
 
 /** 宽高比图标：按比例绘制小矩形 */
@@ -63,7 +67,12 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialRefs, initialPrompt, initialPromptLabel }: BottomDialogProps) {
+  /** Agent 生成卡：标题+提示词一体（卡片形态，删一起删），发送时用卡片 prompt */
+  const [seedCard, setSeedCard] = useState<{ label: string; prompt: string } | null>(
+    initialPrompt ? { label: initialPromptLabel ?? '生成卡', prompt: initialPrompt } : null,
+  );
+  /** 用户自由输入（与生成卡卡片独立） */
   const [inputValue, setInputValue] = useState('');
   const [refFiles, setRefFiles] = useState<BottomRefItem[]>(initialRefs ?? []);
   const [selectedMode, setSelectedMode] = useState(modeOptions[0].key);
@@ -205,21 +214,23 @@ export default function BottomDialog({ onClose, onSend, initialRefs }: BottomDia
     });
   };
 
-  /** 发送：携带当前选择的模型/宽高比/清晰度/时长（模型未加载完成时拦截） */
+  /** 发送：优先生成卡卡片 prompt，否则自由输入（携带模型/宽高比/清晰度/时长） */
   const handleSend = () => {
-    if (!inputValue.trim()) return;
+    const text = seedCard?.prompt ?? inputValue.trim();
+    if (!text) return;
     if (!currentModel) {
       console.warn('视频模型能力加载中，请稍后重试');
       return;
     }
     const size = currentModel.supported_sizes.find((s) => s.id === selectedSize);
-    onSend(inputValue, {
+    onSend(text, {
       modelId: currentModel.model_id,
       aspectRatio: selectedRatio,
       resolution: size?.api_value ?? '720p',
       duration,
       mode: selectedMode,
     });
+    setSeedCard(null);
     setInputValue('');
   };
 
@@ -424,6 +435,23 @@ export default function BottomDialog({ onClose, onSend, initialRefs }: BottomDia
         </div>
       )}
 
+      {/* Agent 生成卡卡片（标题+提示词一体，删一起删，发送时用卡片 prompt） */}
+      {seedCard && (
+        <div className={styles.genCardBox}>
+          <div className={styles.genCardHead}>
+            <span className={styles.genCardLabel}>{seedCard.label}</span>
+            <button
+              type="button"
+              className={styles.genCardRemove}
+              onClick={() => setSeedCard(null)}
+              title="移除生成卡"
+            >
+              <X size={12} strokeWidth={2} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 输入框 */}
       <textarea
         className={styles.textarea}
@@ -496,9 +524,9 @@ export default function BottomDialog({ onClose, onSend, initialRefs }: BottomDia
           <span className={styles.barInfo}>1x</span>
           <div className={styles.sendWrap}>
             <button
-              className={`${styles.generateBtn} ${inputValue.trim() ? styles.generateBtnActive : ''}`}
+              className={`${styles.generateBtn} ${(seedCard || inputValue.trim()) ? styles.generateBtnActive : ''}`}
               onClick={handleSend}
-              disabled={!inputValue.trim()}
+              disabled={!seedCard && !inputValue.trim()}
             >
               <Sparkles size={14} strokeWidth={2} />
               <span>15</span>

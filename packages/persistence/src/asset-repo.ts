@@ -28,11 +28,15 @@ export interface AssetListFilter {
   size: number;
 }
 
-/** access/content 端点需要的内部投影：验归属后读 storage_key + mime。
+/** access/content/Agent resolve 端点需要的内部投影：验归属后读受控元数据。
  *  对齐 Java ProjectAssetAccessService/ProjectAssetContentService 的 Asset 取用字段。 */
 export interface AssetInternal {
   storage_key: string | null;
+  content_sha256: string | null;
+  type: string;
   mime: string | null;
+  size: bigint | null;
+  duration_seconds: number | null;
 }
 
 /** 跨项目复制时从源行拷贝的字段集合（对齐 Java AssetCopyService 逐字段 set）。
@@ -213,9 +217,29 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           status: "normal",
           is_delete: false,
         },
-        select: { storage_key: true, mime: true },
+        select: {
+          storage_key: true,
+          content_sha256: true,
+          type: true,
+          mime: true,
+          size: true,
+          duration: true,
+          duration_ms: true,
+        },
       });
-      return row ? { storage_key: row.storage_key, mime: row.mime } : null;
+      return row
+        ? {
+            storage_key: row.storage_key,
+            content_sha256: row.content_sha256,
+            type: row.type,
+            mime: row.mime,
+            size: row.size,
+            duration_seconds: assetDurationSeconds(
+              row.duration,
+              row.duration_ms,
+            ),
+          }
+        : null;
     },
     async findOwnedSource(sourceAssetId, userId) {
       const row = await prisma.assets.findFirst({

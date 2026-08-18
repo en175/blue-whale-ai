@@ -17,6 +17,36 @@ export type { SseEvent };
 export interface SessionContentBlock {
   type: string;
   text?: string;
+  /** 思考过程块（可折叠展示）：steps 为顺序步骤文案 */
+  thinking?: { steps?: string[] };
+  /** 需求理解总结块（确认门）：结构化字段按 04-侧边栏规范 §4 */
+  understanding?: {
+    goal?: string;
+    assets?: string[];
+    direction?: string;
+    specs?: string[];
+    uncertainties?: string[];
+  };
+  /** 追问块：待补充的关键问题 */
+  clarify?: { questions?: string[] };
+  /** 生成卡块（分镜提示词，按 04-侧边栏规范 §5.1） */
+  card?: GenerationCardBlock;
+}
+
+/** 生成卡：单镜头分镜提示词卡（S2 渲染，S3 手动应用） */
+export interface GenerationCardBlock {
+  /** 卡片标题 / 镜头编号，如「镜头 1」 */
+  shotTitle: string;
+  /** 时间范围，如 0-4s */
+  timeRange?: string;
+  /** 画面描述 */
+  visual: string;
+  /** 分镜提示词 */
+  prompt: string;
+  /** 素材引用（@名称） */
+  assetRefs?: string[];
+  /** 卡片唯一标识（应用动作追踪） */
+  cardId?: string;
 }
 
 /** 会话记录（列表/创建返回） */

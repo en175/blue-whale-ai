@@ -649,3 +649,52 @@
   border: 1.5px solid currentColor;
   border-radius: 3px;
 }
+
+/* ---- Agent 生成卡卡片（标题+提示词一体，带框整体） ---- */
+.genCardBox {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  border: 1px solid rgba(126, 228, 167, 0.5);
+  border-radius: 12px;
+  background-color: rgba(126, 228, 167, 0.08);
+}
+
+.genCardHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.genCardLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: #7ee4a7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.genCardRemove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: #7ee4a7;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.12s ease;
+}
+
+.genCardRemove:hover {
+  background-color: rgba(126, 228, 167, 0.2);
+}

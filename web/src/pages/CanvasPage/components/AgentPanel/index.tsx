@@ -6,6 +6,7 @@ import {
   X,
   Plus,
   ChevronDown,
+  ChevronUp,
   ArrowUp,
   Square,
   RotateCw,
@@ -16,7 +17,8 @@ import {
 import styles from './index.module.css';
 import { isApiError } from '@/api/http';
 import { fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
-import { useAgentSession } from '../../hooks/useAgentSession';
+import { useAgentSession, type ChatMessage, type AgentPhase } from '../../hooks/useAgentSession';
+import type { SessionContentBlock } from '@/api/agentSessions';
 import SkillModal from '@/pages/Home/components/SkillModal';
 
 /** 内联 markdown：**bold** 与 `code` */
@@ -67,6 +69,315 @@ function Markdown({ text }: { text: string }) {
   return <>{blocks}</>;
 }
 
+/** 可折叠思考过程：小字展示当前步骤，默认收起 */
+function ThinkingBlock({ steps, defaultOpen = false }: { steps: string[]; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  if (steps.length === 0) return null;
+  return (
+    <div className={styles.thinkingBlock}>
+      <button
+        type="button"
+        className={styles.thinkingToggle}
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <span>思考过程</span>
+        {open ? <ChevronUp size={12} strokeWidth={2.5} /> : <ChevronDown size={12} strokeWidth={2.5} />}
+      </button>
+      {open && (
+        <div className={styles.thinkingBody}>
+          {steps.map((s, i) => (
+            <div key={i} className={styles.thinkingStep}>{s}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 需求理解确认门：结构化总结 + 确认/继续补充/修改 */
+function UnderstandingCard({
+  data,
+  onConfirm,
+  onSupplement,
+  onModify,
+  disabled,
+}: {
+  data: NonNullable<SessionContentBlock['understanding']>;
+  onConfirm: () => void;
+  onSupplement: () => void;
+  onModify: () => void;
+  disabled: boolean;
+}) {
+  const tags = data.specs ?? [];
+  return (
+    <div className={styles.understandingCard}>
+      <div className={styles.cardTitle}>需求理解总结</div>
+      {data.goal && <p className={styles.cardGoal}>{data.goal}</p>}
+      {data.assets && data.assets.length > 0 && (
+        <div className={styles.cardLine}>
+          <span className={styles.cardLabel}>使用素材</span>
+          <span>{data.assets.join('、')}</span>
+        </div>
+      )}
+      {data.direction && (
+        <div className={styles.cardLine}>
+          <span className={styles.cardLabel}>内容方向</span>
+          <span>{data.direction}</span>
+        </div>
+      )}
+      {tags.length > 0 && (
+        <div className={styles.tagList}>
+          {tags.map((t) => <span key={t} className={styles.tag}>{t}</span>)}
+        </div>
+      )}
+      {data.uncertainties && data.uncertainties.length > 0 && (
+        <div className={styles.cardLine}>
+          <span className={styles.cardLabel}>不确定点</span>
+          <span>{data.uncertainties.join('；')}</span>
+        </div>
+      )}
+      <div className={styles.cardActions}>
+        <button type="button" className={styles.cardBtn} onClick={onSupplement} disabled={disabled}>
+          继续补充
+        </button>
+        <button type="button" className={styles.cardBtn} onClick={onModify} disabled={disabled}>
+          修改方向
+        </button>
+        <button type="button" className={`${styles.cardBtn} ${styles.cardBtnPrimary}`} onClick={onConfirm} disabled={disabled}>
+          确认需求理解
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 追问卡：待补充的关键问题（可点选选项直接补充，或输入自由补充） */
+function ClarifyCard({ questions, onSubmit }: {
+  questions: string[];
+  onSubmit: (text: string) => void;
+}) {
+  /** 已选中的补充项（可多选，点击切换选中态，不立即发送） */
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [draft, setDraft] = useState('');
+  if (questions.length === 0) return null;
+
+  const togglePick = (value: string) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+  };
+
+  const handleSubmit = () => {
+    const freeText = draft.trim();
+    const parts = [...picked];
+    if (freeText) parts.push(freeText);
+    if (parts.length === 0) return;
+    setPicked(new Set());
+    setDraft('');
+    onSubmit(parts.join('；'));
+  };
+
+  return (
+    <div className={styles.clarifyCard}>
+      <div className={styles.cardTitle}>需要补充</div>
+      <p className={styles.clarifyHint}>选择或输入后点「补充信息」提交，可多选。</p>
+      <ul className={styles.clarifyList}>
+        {questions.map((q) => {
+          const [label, ...options] = q.split('：');
+          const values = options.join('：').split(/[、/]/).map((s) => s.trim()).filter(Boolean);
+          // 有选项（含「/」分隔）→ 渲染为可点选组；否则渲染为可点选单条
+          return values.length > 1 ? (
+            <li key={q} className={styles.clarifyItem}>
+              <span className={styles.clarifyLabel}>{label}：</span>
+              <div className={styles.clarifyOptions}>
+                {values.map((v) => {
+                  const full = `${label}：${v}`;
+                  const active = picked.has(full);
+                  return (
+                    <button
+                      key={v}
+                      type="button"
+                      className={`${styles.clarifyOption} ${active ? styles.clarifyOptionActive : ''}`}
+                      onClick={() => togglePick(full)}
+                    >
+                      {v}
+                    </button>
+                  );
+                })}
+              </div>
+            </li>
+          ) : (
+            <li key={q}>
+              <button
+                type="button"
+                className={`${styles.clarifyLineBtn} ${picked.has(q) ? styles.clarifyOptionActive : ''}`}
+                onClick={() => togglePick(q)}
+              >
+                {q}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <div className={styles.clarifyInputRow}>
+        <input
+          className={styles.clarifyInput}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              handleSubmit();
+            }
+          }}
+          placeholder="其他补充信息…"
+        />
+      </div>
+      <button
+        type="button"
+        className={styles.cardBtnPrimary}
+        disabled={picked.size === 0 && !draft.trim()}
+        onClick={handleSubmit}
+      >
+        确认补充
+      </button>
+    </div>
+  );
+}
+
+/** 分镜提示词生成卡：单镜头卡（画面/提示词/素材引用 + 自然语言修改/手动应用） */
+function GenerationCard({
+  card,
+  onModify,
+  onApply,
+  disabled,
+  applied,
+}: {
+  card: NonNullable<SessionContentBlock['card']>;
+  onModify: () => void;
+  onApply: () => void;
+  disabled: boolean;
+  applied?: boolean;
+}) {
+  return (
+    <div className={styles.generationCard}>
+      <div className={styles.shotHeader}>
+        <span className={styles.shotTitle}>{card.shotTitle}</span>
+        {applied && <span className={styles.shotApplied}>已进入 dock</span>}
+        {!applied && card.timeRange && <span className={styles.shotTime}>{card.timeRange}</span>}
+      </div>
+      {card.visual && (
+        <div className={styles.shotField}>
+          <span className={styles.shotFieldLabel}>画面</span>
+          <span className={styles.shotFieldValue}>{card.visual}</span>
+        </div>
+      )}
+      {card.prompt && (
+        <div className={styles.shotField}>
+          <span className={styles.shotFieldLabel}>提示词</span>
+          <span className={styles.shotFieldValue}>{card.prompt}</span>
+        </div>
+      )}
+      {card.assetRefs && card.assetRefs.length > 0 && (
+        <div className={styles.shotRefs}>
+          {card.assetRefs.map((r) => (
+            <span key={r} className={styles.shotRef}>{r}</span>
+          ))}
+        </div>
+      )}
+      {applied ? (
+        <div className={styles.appliedHint}>生成卡内容已进入 Canvas dock</div>
+      ) : (
+        <div className={styles.cardActions}>
+          <button type="button" className={styles.cardBtn} onClick={onModify} disabled={disabled}>
+            自然语言修改
+          </button>
+          <button type="button" className={`${styles.cardBtn} ${styles.cardBtnPrimary}`} onClick={onApply} disabled={disabled}>
+            手动应用到 Canvas dock
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 助手消息：按结构化块渲染（text/thinking/understanding/clarify/card），无块时回退纯文本 */
+function AssistantMessageBody({
+  message,
+  onConfirm,
+  onSupplement,
+  onModify,
+  onCardModify,
+  onCardApply,
+  onClarifySubmit,
+  disabled,
+  appliedCardIds,
+}: {
+  message: ChatMessage;
+  onConfirm: () => void;
+  onSupplement: () => void;
+  onModify: () => void;
+  onCardModify: (card: NonNullable<SessionContentBlock['card']>) => void;
+  onCardApply: (card: NonNullable<SessionContentBlock['card']>) => void;
+  onClarifySubmit: (text: string) => void;
+  disabled: boolean;
+  appliedCardIds: Set<string>;
+}) {
+  const blocks = message.blocks ?? [];
+  const structured = blocks.filter((b) => b.type !== 'text');
+  // 有结构化块 → 按块渲染；无 → 纯文本 markdown
+  if (structured.length === 0) return <Markdown text={message.content} />;
+  return (
+    <>
+      {blocks.map((b, i) => {
+        if (b.type === 'thinking' && b.thinking?.steps) {
+          return <ThinkingBlock key={i} steps={b.thinking.steps} />;
+        }
+        if (b.type === 'understanding' && b.understanding) {
+          return (
+            <UnderstandingCard
+              key={i}
+              data={b.understanding}
+              onConfirm={onConfirm}
+              onSupplement={onSupplement}
+              onModify={onModify}
+              disabled={disabled}
+            />
+          );
+        }
+        if (b.type === 'clarify' && b.clarify?.questions) {
+          return (
+            <ClarifyCard
+              key={i}
+              questions={b.clarify.questions}
+              onSubmit={onClarifySubmit}
+            />
+          );
+        }
+        if (b.type === 'card' && b.card) {
+          const cardId = b.card.cardId ?? b.card.shotTitle;
+          return (
+            <GenerationCard
+              key={i}
+              card={b.card}
+              onModify={() => onCardModify(b.card!)}
+              onApply={() => onCardApply(b.card!)}
+              disabled={disabled}
+              applied={appliedCardIds.has(cardId)}
+            />
+          );
+        }
+        if (b.text) return <Markdown key={i} text={b.text} />;
+        return null;
+      })}
+    </>
+  );
+}
+
 /** 可选模型列表 */
 const models = [
   { key: 'minimax-m3', label: 'MiniMax-M3', cost: '1x' },
@@ -91,6 +402,19 @@ const quickQuestions = [
   },
 ];
 
+/** 侧边栏状态文案（对齐 04-侧边栏规范 §7 用户感知） */
+const phaseLabels: Record<AgentPhase, string> = {
+  idle: '等待输入',
+  processing: 'Agent 处理中',
+  awaiting_input: '等待你补充',
+  awaiting_confirm: '等待你确认需求理解',
+  generating_cards: '正在整理分镜提示词',
+  cards_ready: '生成卡已就绪',
+  applying: '正在应用到 Canvas dock',
+  applied: '已进入 Canvas dock',
+  failed: '处理失败',
+};
+
 /** 默认位置（页面中间偏右） */
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
@@ -101,9 +425,18 @@ interface AgentPanelProps {
   inputVersion?: number;
   /** 当前项目ID：发送消息走 POST /api/projects/:id/conversation/messages */
   projectId?: string;
+  /** 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent） */
+  onApplyToDock?: (payload: {
+    prompt: string;
+    assetRefs: string[];
+    cardId?: string;
+    shotTitle?: string;
+    visual?: string;
+    timeRange?: string;
+  }) => void;
 }
 
-export default function AgentPanel({ onClose, initialInput, inputVersion, projectId }: AgentPanelProps) {
+export default function AgentPanel({ onClose, initialInput, inputVersion, projectId, onApplyToDock }: AgentPanelProps) {
   const [inputValue, setInputValue] = useState(initialInput ?? '');
   const [selectedModel, setSelectedModel] = useState(models[0].key);
   const [modelOpen, setModelOpen] = useState(false);
@@ -117,6 +450,8 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
     streaming,
     runningRunId,
     failedRunId,
+    thinkingSteps,
+    agentPhase,
     sendMessage,
     stopRun,
     retryRun,
@@ -128,6 +463,8 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
   const [recs, setRecs] = useState<RunSkillRecommendation[]>([]);
   /** 已点 Use 的推荐技能ID（仅用户点 Use 可激活） */
   const [usedSkillIds, setUsedSkillIds] = useState<Set<string>>(new Set());
+  /** 已手动应用到 Canvas dock 的生成卡ID（标记「已应用」） */
+  const [appliedCardIds, setAppliedCardIds] = useState<Set<string>>(new Set());
 
   /* ---- 拖动状态 ---- */
   const [position, setPosition] = useState(DEFAULT_POSITION);
@@ -266,6 +603,47 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
     sendMessage(content);
   };
 
+  /** 确认需求理解：向会话提交确认动作（进入生成卡生产） */
+  const handleConfirm = () => {
+    if (runningRunId !== null || streaming) return;
+    sendMessage('确认需求理解，生成分镜提示词卡');
+  };
+
+  /** 继续补充 / 修改方向：把输入框预填为补充引导，等待用户输入 */
+  const handleSupplement = () => {
+    setInputValue('补充信息：');
+  };
+
+  const handleModify = () => {
+    setInputValue('修改方向：');
+  };
+
+  /** 追问卡提交补充：选中项 + 自由输入汇总为一条补充消息（走新 AgentRun） */
+  const handleClarifySubmit = (text: string) => {
+    if (runningRunId !== null || streaming) return;
+    sendMessage(text);
+  };
+
+  /** 自然语言修改某张生成卡：预填修改指令到输入框，进入新的 AgentRun */
+  const handleCardModify = (card: NonNullable<SessionContentBlock['card']>) => {
+    setInputValue(`修改「${card.shotTitle}」：`);
+  };
+
+  /** 手动应用生成卡 → 落画布节点（B2：标记已应用 + 回调 CanvasPage 落生成卡节点） */
+  const handleCardApply = (card: NonNullable<SessionContentBlock['card']>) => {
+    if (runningRunId !== null || streaming) return;
+    const cardId = card.cardId ?? card.shotTitle;
+    setAppliedCardIds((prev) => new Set(prev).add(cardId));
+    onApplyToDock?.({
+      prompt: card.prompt,
+      assetRefs: card.assetRefs ?? [],
+      cardId,
+      shotTitle: card.shotTitle,
+      visual: card.visual,
+      timeRange: card.timeRange,
+    });
+  };
+
   /** 上传文件 */
   const handleUploadClick = () => {
     setShowUpload(!showUpload);
@@ -340,14 +718,37 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
       ) : (
         /* 对话消息流 */
         <div className={styles.messageList} ref={listRef}>
+          {/* 侧边栏状态条（S5：状态机用户可见反馈） */}
+          {messages.length > 0 && agentPhase !== 'idle' && (
+            <div className={`${styles.phaseBar} ${styles[`phase_${agentPhase}`] ?? ''}`}>
+              <span className={styles.phaseDot} />
+              {phaseLabels[agentPhase]}
+            </div>
+          )}
           {messages.map((m) =>
             m.role === 'user' ? (
               <div key={m.id} className={styles.userBubble}>{m.content}</div>
             ) : (
               <div key={m.id} className={styles.assistantBlock}>
-                <Markdown text={m.content} />
+                <AssistantMessageBody
+                  message={m}
+                  onConfirm={handleConfirm}
+                  onSupplement={handleSupplement}
+                  onModify={handleModify}
+                  onCardModify={handleCardModify}
+                  onCardApply={handleCardApply}
+                  onClarifySubmit={handleClarifySubmit}
+                  disabled={runningRunId !== null || streaming}
+                  appliedCardIds={appliedCardIds}
+                />
               </div>
             ),
+          )}
+          {/* Agent 运行中的实时思考过程（reasoning_trace.updated.v1 流式） */}
+          {streaming && thinkingSteps.length > 0 && (
+            <div className={styles.assistantBlock}>
+              <ThinkingBlock steps={thinkingSteps} />
+            </div>
           )}
           {/* Agent 运行中的实时流式文本（assistant.delta 累积投影） */}
           {streamingText && (
