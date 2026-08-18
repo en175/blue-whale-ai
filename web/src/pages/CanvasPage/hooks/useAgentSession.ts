@@ -24,11 +24,11 @@ import * as mockAgentApi from '@/api/agentSessions.mock';
 import { isApiError } from '@/api/http';
 
 /**
- * 数据源选择：本地 dev 默认走 mock（后端 /api/agent/v1 尚未实现，S4 补齐后切真实）。
+ * 数据源选择：默认走 mock（后端 /api/agent/v1 尚未在线上部署，S4 补齐后切真实）。
  * 显式设 VITE_AGENT_MOCK=0 可强制走真实接口。
  */
 const api =
-  import.meta.env.DEV && import.meta.env.VITE_AGENT_MOCK !== '0'
+  import.meta.env.VITE_AGENT_MOCK !== '0'
     ? mockAgentApi
     : {
         listSessions,
