@@ -870,6 +870,24 @@
   background: var(--color-accent-primary-hover, #c7e05c);
 }
 
+/* 追问卡确认补充按钮：独立全宽一行 */
+.clarifyInputRow + .cardBtnPrimary {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: none;
+  font-size: var(--font-size-lg);
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity var(--transition-fast);
+}
+
+.clarifyInputRow + .cardBtnPrimary:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 /* ---- 追问列表 ---- */
 .clarifyList {
   margin: 0;
@@ -952,13 +970,11 @@
 }
 
 .clarifyInputRow {
-  display: flex;
-  gap: 8px;
   margin-top: 8px;
 }
 
 .clarifyInput {
-  flex: 1;
+  width: 100%;
   padding: 7px 12px;
   border-radius: 10px;
   border: 1px solid var(--color-border-secondary);
@@ -968,6 +984,7 @@
   outline: none;
   transition: border-color var(--transition-fast);
   font-family: inherit;
+  box-sizing: border-box;
 }
 
 .clarifyInput:focus {

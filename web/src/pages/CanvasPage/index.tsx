@@ -70,7 +70,7 @@ export default function CanvasPage() {
   /** 节点工具条带入图片对话框的初始值（ts 作为 key 强制重挂载以注入初始值） */
   const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[] } | null>(null);
   /** 节点工具条带入视频对话框的初始参考 */
-  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; initialPrompt?: string } | null>(null);  /** 节点工具条带入音频对话框的初始参考 */
+  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; initialPrompt?: string; initialPromptLabel?: string } | null>(null);  /** 节点工具条带入音频对话框的初始参考 */
   const [audioSeed, setAudioSeed] = useState<{ ts: number; refs: AudioRefItem[] } | null>(null);
   /** 当前视口（拖拽/缩放结束更新），自动保存时序列化提交 */
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
@@ -179,7 +179,7 @@ export default function CanvasPage() {
             ? {
                 ...base.data.generationCard,
                 onApplyToDock: (apply: { prompt: string; assetRefs: string[]; cardId?: string; shotTitle?: string }) => {
-                  setVideoSeed({ ts: Date.now(), refs: [], initialPrompt: apply.prompt });
+                  setVideoSeed({ ts: Date.now(), refs: [], initialPrompt: apply.prompt, initialPromptLabel: apply.shotTitle });
                   setShowBottomDialog(true);
                   setShowImageDialog(false);
                   setShowAudioDialog(false);
@@ -852,7 +852,7 @@ export default function CanvasPage() {
           assetRefs: payload.assetRefs,
           onApplyToDock: (apply: { prompt: string; assetRefs: string[]; cardId?: string; shotTitle?: string }) => {
             // 引用到 dock：注入 videoSeed（含 prompt）打开底部对话框承接
-            setVideoSeed({ ts: Date.now(), refs: [], initialPrompt: apply.prompt });
+            setVideoSeed({ ts: Date.now(), refs: [], initialPrompt: apply.prompt, initialPromptLabel: apply.shotTitle });
             setShowBottomDialog(true);
             setShowImageDialog(false);
             setShowAudioDialog(false);
@@ -1154,6 +1154,7 @@ export default function CanvasPage() {
             key={videoSeed?.ts ?? 0}
             initialRefs={videoSeed?.refs}
             initialPrompt={videoSeed?.initialPrompt}
+            initialPromptLabel={videoSeed?.initialPromptLabel}
             onClose={() => setShowBottomDialog(false)}
             onSend={handleDialogSend}
           />

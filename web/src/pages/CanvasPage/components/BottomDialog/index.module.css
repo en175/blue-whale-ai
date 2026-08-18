@@ -649,3 +649,45 @@
   border: 1.5px solid currentColor;
   border-radius: 3px;
 }
+
+/* ---- Agent 生成卡引用胶囊（B2 dock 形态） ---- */
+.seedCapsule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 8px 0;
+  border-radius: 999px;
+  border: 1px solid rgba(126, 228, 167, 0.5);
+  background-color: rgba(126, 228, 167, 0.08);
+  font-size: 13px;
+  color: #7ee4a7;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.seedCapsuleLabel {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.seedCapsuleRemove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: #7ee4a7;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.12s ease;
+}
+
+.seedCapsuleRemove:hover {
+  background-color: rgba(126, 228, 167, 0.2);
+}

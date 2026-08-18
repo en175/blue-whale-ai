@@ -236,15 +236,15 @@ function ClarifyCard({ questions, onSubmit }: {
           }}
           placeholder="其他补充信息…"
         />
-        <button
-          type="button"
-          className={styles.cardBtnPrimary}
-          disabled={picked.size === 0 && !draft.trim()}
-          onClick={handleSubmit}
-        >
-          补充信息
-        </button>
       </div>
+      <button
+        type="button"
+        className={styles.cardBtnPrimary}
+        disabled={picked.size === 0 && !draft.trim()}
+        onClick={handleSubmit}
+      >
+        确认补充
+      </button>
     </div>
   );
 }

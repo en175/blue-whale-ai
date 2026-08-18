@@ -54,6 +54,8 @@ interface BottomDialogProps {
   initialRefs?: BottomRefItem[];
   /** 初始提示词（Agent 生成卡「引用到 dock」带入的分镜提示词） */
   initialPrompt?: string;
+  /** 初始提示词胶囊标签（如「镜头 1 · 光影揭幕」） */
+  initialPromptLabel?: string;
 }
 
 /** 宽高比图标：按比例绘制小矩形 */
@@ -65,9 +67,11 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs, initialPrompt }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialRefs, initialPrompt, initialPromptLabel }: BottomDialogProps) {
   const [inputValue, setInputValue] = useState(initialPrompt ?? '');
   const [refFiles, setRefFiles] = useState<BottomRefItem[]>(initialRefs ?? []);
+  /** Agent 生成卡引用胶囊（展示来源，可移除；移除时清空提示词） */
+  const [seedLabel, setSeedLabel] = useState<string | null>(initialPromptLabel ?? null);
   const [selectedMode, setSelectedMode] = useState(modeOptions[0].key);
   const [modeOpen, setModeOpen] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
@@ -423,6 +427,24 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialProm
               </span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Agent 生成卡引用胶囊（引用到 dock 带入的提示词来源） */}
+      {seedLabel && (
+        <div className={styles.seedCapsule}>
+          <span className={styles.seedCapsuleLabel}>{seedLabel}</span>
+          <button
+            type="button"
+            className={styles.seedCapsuleRemove}
+            onClick={() => {
+              setSeedLabel(null);
+              setInputValue('');
+            }}
+            title="移除生成卡引用"
+          >
+            <X size={12} strokeWidth={2} />
+          </button>
         </div>
       )}
 
