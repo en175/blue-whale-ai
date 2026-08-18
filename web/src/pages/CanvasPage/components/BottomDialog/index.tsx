@@ -68,10 +68,12 @@ function RatioIcon({ ratio }: { ratio: string }) {
 }
 
 export default function BottomDialog({ onClose, onSend, initialRefs, initialPrompt, initialPromptLabel }: BottomDialogProps) {
-  const [inputValue, setInputValue] = useState(initialPrompt ?? '');
+  // Agent 生成卡整体进入输入框：标题作为首行，提示词随其后（作为对话框整体内容）
+  const [inputValue, setInputValue] = useState(() => {
+    const prompt = initialPrompt ?? '';
+    return initialPromptLabel ? `${initialPromptLabel}\n${prompt}` : prompt;
+  });
   const [refFiles, setRefFiles] = useState<BottomRefItem[]>(initialRefs ?? []);
-  /** Agent 生成卡引用胶囊（展示来源，可移除；移除时清空提示词） */
-  const [seedLabel, setSeedLabel] = useState<string | null>(initialPromptLabel ?? null);
   const [selectedMode, setSelectedMode] = useState(modeOptions[0].key);
   const [modeOpen, setModeOpen] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
@@ -430,25 +432,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialProm
         </div>
       )}
 
-      {/* Agent 生成卡引用胶囊（引用到 dock 带入的提示词来源） */}
-      {seedLabel && (
-        <div className={styles.seedCapsule}>
-          <span className={styles.seedCapsuleLabel}>{seedLabel}</span>
-          <button
-            type="button"
-            className={styles.seedCapsuleRemove}
-            onClick={() => {
-              setSeedLabel(null);
-              setInputValue('');
-            }}
-            title="移除生成卡引用"
-          >
-            <X size={12} strokeWidth={2} />
-          </button>
-        </div>
-      )}
-
-      {/* 输入框 */}
+      {/* 输入框（Agent 生成卡以标题+提示词整体进入） */}
       <textarea
         className={styles.textarea}
         placeholder="上传 3-10 秒视频片段，并结合文本或图片轻松修改内容、改变镜头角度或重塑原视频风格。可使用 @ 快速插入已添加资源。"
