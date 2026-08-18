@@ -3,7 +3,7 @@
  * ============================================ */
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ChevronUp, ChevronDown, Image, Video, Music, Sparkles, BookOpen, X } from 'lucide-react';
+import { Plus, ChevronUp, ChevronDown, Music, Sparkles, BookOpen, X } from 'lucide-react';
 import SkillModal from '../SkillModal';
 import LoginModal from '@/components/LoginModal';
 import { getCurrentUser, subscribe } from '@/utils/auth';
@@ -138,9 +138,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   const [agentFiles, setAgentFiles] = useState<
     { id: string; url: string; kind: 'image' | 'video' | 'audio'; name: string }[]
   >([]);
-  const agentImageInputRef = useRef<HTMLInputElement>(null);
-  const agentVideoInputRef = useRef<HTMLInputElement>(null);
-  const agentAudioInputRef = useRef<HTMLInputElement>(null);
+  const agentFileInputRef = useRef<HTMLInputElement>(null);
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [creationModel, setCreationModel] = useState('seedance');
   const [reasoningModel, setReasoningModel] = useState('minimax');
@@ -345,16 +343,17 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     if (text && getCurrentUser()) goCanvasWithText(text);
   };
 
-  /** + 上传：按类型追加附件（上限 9 个） */
-  const handleAgentFilePick = (
-    e: React.ChangeEvent<HTMLInputElement>,
-    kind: 'image' | 'video' | 'audio',
-  ) => {
+  /** + 上传：点击直接选取图片/视频/音频（上限 9 个），按文件类型归类 */
+  const handleAgentFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     const items = files.slice(0, Math.max(0, 9 - agentFiles.length)).map((file) => ({
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       url: URL.createObjectURL(file),
-      kind,
+      kind: file.type.startsWith('image/')
+        ? ('image' as const)
+        : file.type.startsWith('video/')
+          ? ('video' as const)
+          : ('audio' as const),
       name: file.name,
     }));
     setAgentFiles((prev) => [...prev, ...items]);
@@ -887,79 +886,31 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
             <div className={styles.toolbar}>
               {/* 左侧工具 */}
               <div className={styles.toolbarLeft}>
-                {/* + 按钮（悬停弹出上传选项） */}
+                {/* + 按钮：悬停显示小提示，点击直接选取图片/视频/音频文件上传 */}
                 <div className={styles.uploadWrap} ref={uploadRef}>
                   <button
                     className={styles.iconBtn}
+                    onClick={() => agentFileInputRef.current?.click()}
                     onMouseEnter={() => setShowUpload(true)}
                     onMouseLeave={() => setShowUpload(false)}
                   >
                     <Plus size={18} strokeWidth={2} />
                   </button>
                   {showUpload && (
-                    <div
-                      className={styles.uploadPopup}
-                      onMouseEnter={() => setShowUpload(true)}
-                      onMouseLeave={() => setShowUpload(false)}
-                    >
-                      <button
-                        className={styles.uploadItem}
-                        onClick={() => {
-                          agentImageInputRef.current?.click();
-                          setShowUpload(false);
-                        }}
-                      >
-                        <Image size={16} strokeWidth={2} />
-                        <span>上传图片</span>
-                      </button>
-                      <button
-                        className={styles.uploadItem}
-                        onClick={() => {
-                          agentVideoInputRef.current?.click();
-                          setShowUpload(false);
-                        }}
-                      >
-                        <Video size={16} strokeWidth={2} />
-                        <span>上传视频</span>
-                      </button>
-                      <button
-                        className={styles.uploadItem}
-                        onClick={() => {
-                          agentAudioInputRef.current?.click();
-                          setShowUpload(false);
-                        }}
-                      >
-                        <Music size={16} strokeWidth={2} />
-                        <span>上传音频</span>
-                      </button>
+                    <div className={styles.uploadPopup}>
+                      <span className={styles.uploadHint}>可上传视频、图片或音频</span>
                     </div>
                   )}
                 </div>
 
-                {/* 隐藏文件输入（+ 上传） */}
+                {/* 隐藏文件输入（+ 上传：图片/视频/音频） */}
                 <input
-                  ref={agentImageInputRef}
+                  ref={agentFileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/*,audio/*"
                   multiple
                   style={{ display: 'none' }}
-                  onChange={(e) => handleAgentFilePick(e, 'image')}
-                />
-                <input
-                  ref={agentVideoInputRef}
-                  type="file"
-                  accept="video/*"
-                  multiple
-                  style={{ display: 'none' }}
-                  onChange={(e) => handleAgentFilePick(e, 'video')}
-                />
-                <input
-                  ref={agentAudioInputRef}
-                  type="file"
-                  accept="audio/*"
-                  multiple
-                  style={{ display: 'none' }}
-                  onChange={(e) => handleAgentFilePick(e, 'audio')}
+                  onChange={handleAgentFilePick}
                 />
 
                 {/* Skill 按钮 */}
