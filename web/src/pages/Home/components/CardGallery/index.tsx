@@ -174,7 +174,7 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
           <GalleryCard
             key={`${record.title}-${idx}`}
             record={record}
-            onClick={() => onCardClick?.(record.title)}
+            onClick={() => onCardClick?.(record.content?.trim() || record.title)}
           />
         ))}
       </div>

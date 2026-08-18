@@ -170,6 +170,14 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
       {/* 配置面板（可展开/收起） */}
       {showConfig && (
         <div className={styles.configPanel}>
+          {/* 关闭按钮 */}
+          <button
+            className={styles.configCloseBtn}
+            onClick={() => setShowConfig(false)}
+            title="关闭"
+          >
+            <X size={14} strokeWidth={2} />
+          </button>
           {/* 模型与质量：两个选择器同一行 */}
           <div className={styles.configSection}>
             <span className={styles.configLabel}>模型与质量</span>

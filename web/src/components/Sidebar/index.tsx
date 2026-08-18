@@ -87,27 +87,29 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* 底部：系统设置入口（仅管理员）+ 登录用户名 */}
-      <div className={styles.bottomMenu}>
-        {admin && (
-          <button
-            className={styles.menuItem}
-            onClick={() => navigate('/admin')}
-            title="系统设置"
-          >
-            <Settings size={26} strokeWidth={2} />
-            <span className={styles.label}>系统设置</span>
-          </button>
-        )}
-        {user && (
-          <div className={styles.avatar} title={user.username}>
-            <div className={styles.avatarImg}>
-              {user.username.charAt(0).toUpperCase()}
+      {/* 底部：系统设置入口（仅管理员）+ 登录用户名；首页右上角已有用户菜单，不重复展示 */}
+      {location.pathname !== '/' && (
+        <div className={styles.bottomMenu}>
+          {admin && (
+            <button
+              className={styles.menuItem}
+              onClick={() => navigate('/admin')}
+              title="系统设置"
+            >
+              <Settings size={26} strokeWidth={2} />
+              <span className={styles.label}>系统设置</span>
+            </button>
+          )}
+          {user && (
+            <div className={styles.avatar} title={user.username}>
+              <div className={styles.avatarImg}>
+                {user.username.charAt(0).toUpperCase()}
+              </div>
+              <span className={styles.avatarName}>{user.username}</span>
             </div>
-            <span className={styles.avatarName}>{user.username}</span>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* 未登录拦截弹窗 */}
       {showLogin && <LoginModal onClose={handleLoginClose} />}

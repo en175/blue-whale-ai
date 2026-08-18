@@ -3,9 +3,10 @@
  * ============================================ */
 
 .gallery {
-  max-width: 1400px;
+  max-width: 1200px;
   width: 100%;
   margin: 0 auto;
+  padding: 0 var(--spacing-xl);
 }
 
 /* ---- Tab 栏 ---- */
@@ -60,8 +61,8 @@
 /* ---- 单张卡片 ---- */
 .card {
   position: relative;
-  flex: 0 0 300px;
-  width: 300px;
+  flex: 0 0 260px;
+  width: 260px;
   height: 140px;
   background-color: var(--color-bg-card);
   border: 1px solid var(--color-border-primary);
@@ -81,9 +82,9 @@
 
 /* ---- social 布局：竖版卡片（高度加高、宽度减少） ---- */
 .cardSocial {
-  flex: 0 0 200px;
-  width: 200px;
-  height: 420px;
+  flex: 0 0 180px;
+  width: 180px;
+  height: 400px;
 }
 
 /* ---- 图片区域（照片堆叠容器） ---- */

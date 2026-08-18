@@ -7,7 +7,7 @@
   bottom: var(--spacing-lg);
   left: 50%;
   transform: translateX(-50%);
-  width: 760px;
+  width: 640px;
   max-width: 90%;
   display: flex;
   flex-direction: column;
@@ -24,7 +24,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
-  height: 240px;
+  height: 200px;
   box-sizing: border-box;
   transition: border-color var(--transition-fast);
 }
@@ -131,7 +131,7 @@
   border: none;
   background: transparent;
   color: var(--color-text-primary);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-md);
   line-height: 1.6;
   outline: none;
   font-family: inherit;
@@ -257,6 +257,7 @@
 
 /* ---- 配置面板 ---- */
 .configPanel {
+  position: relative;
   background-color: #1e1e1e;
   border: 1px solid #2c2c2c;
   border-radius: 16px;
@@ -264,6 +265,30 @@
   display: flex;
   flex-direction: column;
   gap: var(--spacing-lg);
+}
+
+/* ---- 配置面板关闭按钮 ---- */
+.configCloseBtn {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  z-index: 1;
+}
+
+.configCloseBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
 }
 
 .configSection {

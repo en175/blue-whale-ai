@@ -8,12 +8,12 @@
 
 .card {
   position: relative;
-  width: 460px;
+  width: 320px;
   box-sizing: border-box;
-  padding: 16px 20px 20px;
+  padding: 12px 14px 14px;
   background-color: #1e1e1e;
   border: 1px solid var(--color-border-primary);
-  border-radius: 14px;
+  border-radius: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
@@ -21,12 +21,12 @@
 .head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .atIcon {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -37,7 +37,7 @@
 }
 
 .name {
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--color-text-primary);
 }
@@ -47,8 +47,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
-  padding: 56px 8px 40px;
+  gap: 10px;
+  padding: 18px 4px 14px;
 }
 
 .dropHint {
@@ -76,15 +76,15 @@
 .btnRow {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .actionBtn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
-  border-radius: 10px;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
   background-color: #2a2a2a;
   border: 1px solid var(--color-border-primary);
   color: var(--color-text-primary);
@@ -112,37 +112,38 @@
 /* ---- 角色卡音色区 ---- */
 .voiceSection {
   border-top: 1px solid var(--color-border-primary);
-  padding-top: 14px;
+  padding-top: 10px;
+  margin-top: 10px;
 }
 
 .voiceLabel {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
 }
 
-.voiceBtn {
-  width: 100%;
+.voiceDrop {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: 8px;
   padding: 12px;
-  border-radius: 10px;
   border: 1px dashed #4a4a4a;
+  border-radius: 10px;
   background-color: #242424;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-  transition: all var(--transition-fast);
 }
 
-.voiceBtn:hover {
-  border-color: #777;
-  color: var(--color-text-primary);
+.voiceHint {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.voiceTip {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
 }
 
 /* ---- 右键菜单 ---- */
