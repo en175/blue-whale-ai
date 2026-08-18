@@ -402,8 +402,15 @@ interface AgentPanelProps {
   inputVersion?: number;
   /** 当前项目ID：发送消息走 POST /api/projects/:id/conversation/messages */
   projectId?: string;
-  /** 生成卡手动应用 → Canvas dock（S3 通道：CanvasPage 打开 BottomDialog 承接） */
-  onApplyToDock?: (payload: { prompt: string; assetRefs: string[]; cardId?: string }) => void;
+  /** 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent） */
+  onApplyToDock?: (payload: {
+    prompt: string;
+    assetRefs: string[];
+    cardId?: string;
+    shotTitle?: string;
+    visual?: string;
+    timeRange?: string;
+  }) => void;
 }
 
 export default function AgentPanel({ onClose, initialInput, inputVersion, projectId, onApplyToDock }: AgentPanelProps) {
@@ -605,7 +612,7 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
     setInputValue(`修改「${card.shotTitle}」：`);
   };
 
-  /** 手动应用生成卡到 Canvas dock：标记已应用 + 回调 CanvasPage 打开 dock 承接 */
+  /** 手动应用生成卡 → 落画布节点（B2：标记已应用 + 回调 CanvasPage 落生成卡节点） */
   const handleCardApply = (card: NonNullable<SessionContentBlock['card']>) => {
     if (runningRunId !== null || streaming) return;
     const cardId = card.cardId ?? card.shotTitle;
@@ -614,6 +621,9 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
       prompt: card.prompt,
       assetRefs: card.assetRefs ?? [],
       cardId,
+      shotTitle: card.shotTitle,
+      visual: card.visual,
+      timeRange: card.timeRange,
     });
   };
 
