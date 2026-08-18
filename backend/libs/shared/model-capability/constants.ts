@@ -1,10 +1,11 @@
-export const MODEL_CAPABILITY_TYPES = ["image", "video", "text"] as const;
+export const MODEL_CAPABILITY_TYPES = ["image", "video", "text", "audio"] as const;
 export type ModelCapabilityType = (typeof MODEL_CAPABILITY_TYPES)[number];
 
 export const MODEL_CAPABILITY_LABELS: Record<ModelCapabilityType, string> = {
   image: "图片",
   video: "视频",
   text: "文生文",
+  audio: "音频",
 };
 
 export const MODEL_FIELD_LIMITS = {
@@ -155,7 +156,7 @@ export function parseModelCreateBody(
   ) {
     return {
       ok: false,
-      error: "类型(capability_type)只支持 image / video / text",
+      error: "类型(capability_type)只支持 image / video / text / audio",
     };
   }
 

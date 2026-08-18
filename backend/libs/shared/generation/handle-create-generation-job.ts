@@ -60,28 +60,39 @@ function uniqueAssetIds(ids: string[]): string[] {
 /** 校验请求体，返回错误信息或 null。对齐 Java CreateGenerationJobRequest 约束。 */
 function validate(body: CreateGenerationJobBody): string | null {
   const type = body.type;
-  if (type !== "image" && type !== "video") return "暂不支持该生成类型";
+  if (type !== "image" && type !== "video" && type !== "audio")
+    return "暂不支持该生成类型";
   const params = body.parameters as GenerationParameters | undefined;
+  const maxPromptLength = type === "audio" ? 3000 : 4000;
   if (
     !params ||
     !isStr(params.prompt) ||
     params.prompt.trim() === "" ||
-    params.prompt.length > 4000
+    params.prompt.length > maxPromptLength
   ) {
     return "prompt 无效";
   }
-  if (
-    !isStr(params.aspect_ratio) ||
-    !/^[1-9][0-9]*:[1-9][0-9]*$/.test(params.aspect_ratio)
-  ) {
-    return "aspect_ratio 无效";
+  if (type !== "audio") {
+    if (
+      !isStr(params.aspect_ratio) ||
+      !/^[1-9][0-9]*:[1-9][0-9]*$/.test(params.aspect_ratio)
+    ) {
+      return "aspect_ratio 无效";
+    }
   }
   if (!isStr(params.model_id) || params.model_id.trim() === "")
     return "model_id 无效";
   const count = Number(body.expected_output_count);
   if (!Number.isInteger(count) || count < 1 || count > 4)
     return "expected_output_count 须为 1-4";
-  if (type === "video" && count !== 1) return "视频生成仅支持一个输出";
+  if ((type === "video" || type === "audio") && count !== 1)
+    return "视频/音频生成仅支持一个输出";
+  if (
+    type === "audio" &&
+    Array.isArray(body.reference_asset_ids) &&
+    body.reference_asset_ids.length > 0
+  )
+    return "音频生成一期不支持参考素材";
   const inputAssetIds = Array.isArray(body.input_asset_ids)
     ? body.input_asset_ids
     : [];
@@ -149,7 +160,7 @@ export async function handleCreateGenerationJob(
   const err = validate(body);
   if (err) return fail(400, err);
 
-  const type = body.type as "image" | "video";
+  const type = body.type as "image" | "video" | "audio";
   const params = body.parameters as GenerationParameters;
   const expectedOutputCount = Number(body.expected_output_count);
   const inputAssetIds = (
@@ -169,17 +180,22 @@ export async function handleCreateGenerationJob(
     return fail(400, "model_id 不在可用模型白名单或已停用");
   }
 
-  const input: Record<string, unknown> = {
-    prompt: params.prompt,
-    aspect_ratio: params.aspect_ratio,
-    model_id: resolvedModelId,
-  };
+  let input: Record<string, unknown>;
+  if (type === "audio") {
+    input = { prompt: params.prompt, model_id: resolvedModelId };
+  } else {
+    input = {
+      prompt: params.prompt,
+      aspect_ratio: params.aspect_ratio,
+      model_id: resolvedModelId,
+    };
+  }
   if (type === "image") {
     if (isStr(params.size)) input.size = params.size;
     input.web_search = params.web_search === true;
     input.sequential_image_generation =
       params.sequential_image_generation === true;
-  } else {
+  } else if (type === "video") {
     if (isStr(params.resolution)) input.resolution = params.resolution;
     if (params.duration !== undefined) input.duration = params.duration;
   }
@@ -209,7 +225,12 @@ export async function handleCreateGenerationJob(
   // 须 ≤ correlation_id VarChar(64);勿再加前缀(曾用 `bottom-dock:` 撑到 76 触发 Prisma P2000 → 生成任务 500)。
   // 来源由 event_type/aggregate_type 记录,前缀无代码消费。
   const actionIdentity = createHash("sha256").update(actionSeed).digest("hex");
-  const actionType = type === "video" ? "generate_video" : "generate_image";
+  const actionType =
+    type === "video"
+      ? "generate_video"
+      : type === "audio"
+        ? "generate_audio"
+        : "generate_image";
 
   const cmdInput: CreateJobInput = {
     projectId,

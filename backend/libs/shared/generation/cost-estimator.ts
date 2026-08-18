@@ -25,8 +25,8 @@ export interface CostEstimatorClient {
 
 export interface EstimateGenerationCostInput {
   modelId: string;
-  /** video | image。视频按固定价 × QuotaPerUnit × groupRatio；图片 × n。 */
-  type: "image" | "video";
+  /** video | image | audio。视频按固定价 × QuotaPerUnit × groupRatio；图片 × n；音频一期无倍率（=1）。 */
+  type: "image" | "video" | "audio";
   /** 图片输出张数（expected_output_count）。 */
   expectedOutputCount: number;
   /** 用户 sk- token（可选，传入后 /api/pricing 按用户分组过滤）。 */

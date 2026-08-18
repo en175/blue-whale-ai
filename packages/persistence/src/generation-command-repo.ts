@@ -21,7 +21,7 @@ import { appendProjectEvent } from "./product-event-repo.js";
 export interface CreateJobInput {
   projectId: string;
   userId: string;
-  type: "image" | "video";
+  type: "image" | "video" | "audio";
   expectedOutputCount: number;
   input: Record<string, unknown>;
   actionIdentity: string;

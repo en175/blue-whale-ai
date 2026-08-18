@@ -88,4 +88,21 @@ INSERT INTO generation_model_capability (
     JSON_OBJECT(),
     TRUE,
     100
+  ),
+  (
+    'new-api',
+    'seed-audio-1.0',
+    'audio',
+    '豆包 Seed Audio 1.0',
+    JSON_ARRAY(),
+    JSON_ARRAY(),
+    JSON_ARRAY(1, 120),
+    JSON_ARRAY('mp3'),
+    '',
+    'mp3',
+    '',
+    NULL,
+    JSON_OBJECT('watermark', TRUE),
+    TRUE,
+    30
   );
