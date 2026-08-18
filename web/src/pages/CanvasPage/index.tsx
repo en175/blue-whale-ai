@@ -8,6 +8,7 @@ import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
 import BottomDialog, { type VideoGenOptions, type BottomRefItem } from './components/BottomDialog';
+import type { ChipRef } from './components/ChipTextEditor';
 import ImageDialog, { type UploadedFile } from './components/ImageDialog';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
@@ -22,6 +23,7 @@ import { fetchProjects, createProject, renameProject, deleteProject, copyAssetTo
 import { UPLOAD_SIZE_LIMIT } from '@/api/assets';
 import { saveCanvasDoc, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
+import type { GenerationCardBlock } from '@/api/agentSessions';
 import {
   createGenerationJob,
   cancelGenerationJob,
@@ -62,7 +64,8 @@ export default function CanvasPage() {
   const [productNodes, setProductNodes] = useState<Node[]>([]);
   const [assetNodes, setAssetNodes] = useState<Node[]>([]);
   const [showAssetsModal, setShowAssetsModal] = useState(false);
-  const [agentContext, setAgentContext] = useState<{ text: string; ts: number } | null>(null);
+  /** label 有值时是生成卡引用（侧边栏渲染成胶囊）；无 label 是普通 @ 文本预填 */
+  const [agentContext, setAgentContext] = useState<{ text: string; label?: string; ts: number } | null>(null);
 
   /** 首页发送框携带草稿跳转：打开 Agent 弹框并注入输入框，随后清除导航状态避免刷新重复注入 */
   useEffect(() => {
@@ -74,8 +77,8 @@ export default function CanvasPage() {
   }, [location.state, location.pathname, location.search, navigate]);
   /** 节点工具条带入图片对话框的初始值（ts 作为 key 强制重挂载以注入初始值） */
   const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[] } | null>(null);
-  /** 节点工具条带入视频对话框的初始参考 */
-  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; initialPrompt?: string; initialPromptLabel?: string } | null>(null);
+  /** 节点工具条带入视频对话框的初始参考；cards 是「引用到 dock」累计的生成卡胶囊，不因再次点击覆盖 */
+  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; cards?: ChipRef[] } | null>(null);
   /** 节点工具条打开音频对话框的重挂载 key */
   const [audioSeed, setAudioSeed] = useState<{ ts: number } | null>(null);
   /** 当前视口（拖拽/缩放结束更新），自动保存时序列化提交 */
@@ -184,17 +187,34 @@ export default function CanvasPage() {
           generationCard: base.data?.generationCard
             ? {
                 ...base.data.generationCard as object,
-                onApplyToDock: (apply: { prompt: string; assetRefs: string[]; cardId?: string; shotTitle?: string }) => {
-                  setVideoSeed({ ts: Date.now(), refs: [], initialPrompt: apply.prompt, initialPromptLabel: apply.shotTitle });
+                onApplyToDock: (apply: GenerationCardBlock) => {
+                  // ts 沿用已有值（不重挂载 BottomDialog），否则清空对话框里用户已输入的自由文字
+                  setVideoSeed((prev) => ({
+                    ts: prev?.ts ?? Date.now(),
+                    refs: prev?.refs ?? [],
+                    cards: [
+                      ...(prev?.cards ?? []),
+                      { id: `${apply.cardId ?? apply.shotTitle ?? 'card'}-${Date.now()}`, label: apply.shotTitle ?? '生成卡', prompt: apply.prompt },
+                    ],
+                  }));
                   setShowBottomDialog(true);
                   setShowImageDialog(false);
                   setShowAudioDialog(false);
                   setShowMusicDialog(false);
                   void apply;
                 },
-                onSendToAgent: (prompt: string) => {
-                  setAgentContext({ text: prompt, ts: Date.now() });
+                onSendToAgent: (prompt: string, shotTitle?: string) => {
+                  setAgentContext({ text: prompt, label: shotTitle, ts: Date.now() });
                   setShowAgent(true);
+                },
+                onUpdate: (patch: Partial<Pick<GenerationCardBlock, 'shotTitle' | 'visual' | 'prompt'>>) => {
+                  setAssetNodes((prev) =>
+                    prev.map((n) =>
+                      n.id === node.id
+                        ? { ...n, data: { ...n.data, generationCard: { ...(n.data as { generationCard?: object }).generationCard, ...patch } } }
+                        : n,
+                    ),
+                  );
                 },
               }
             : base.data?.generationCard,
@@ -858,14 +878,7 @@ export default function CanvasPage() {
   actionsRef.current.download = handleNodeDownload;
 
   /** Agent 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent） */
-  const handleAgentCardApply = (payload: {
-    prompt: string;
-    assetRefs: string[];
-    cardId?: string;
-    shotTitle?: string;
-    visual?: string;
-    timeRange?: string;
-  }) => {
+  const handleAgentCardApply = (payload: GenerationCardBlock) => {
     const node: Node = {
       id: `gencard-${Date.now()}`,
       type: 'assetNode',
@@ -873,25 +886,36 @@ export default function CanvasPage() {
       data: {
         kind: 'generation',
         generationCard: {
-          cardId: payload.cardId,
-          shotTitle: payload.shotTitle,
-          timeRange: payload.timeRange,
-          visual: payload.visual,
-          prompt: payload.prompt,
-          assetRefs: payload.assetRefs,
-          onApplyToDock: (apply: { prompt: string; assetRefs: string[]; cardId?: string; shotTitle?: string }) => {
-            // 引用到 dock：注入 videoSeed（含 prompt）打开底部对话框承接
-            setVideoSeed({ ts: Date.now(), refs: [], initialPrompt: apply.prompt, initialPromptLabel: apply.shotTitle });
+          ...payload,
+          onApplyToDock: (apply: GenerationCardBlock) => {
+            // 引用到 dock：累计追加胶囊（不覆盖已有引用），ts 沿用已有值以免重挂载清空用户已输入的自由文字
+            setVideoSeed((prev) => ({
+              ts: prev?.ts ?? Date.now(),
+              refs: prev?.refs ?? [],
+              cards: [
+                ...(prev?.cards ?? []),
+                { id: `${apply.cardId ?? apply.shotTitle ?? 'card'}-${Date.now()}`, label: apply.shotTitle ?? '生成卡', prompt: apply.prompt },
+              ],
+            }));
             setShowBottomDialog(true);
             setShowImageDialog(false);
             setShowAudioDialog(false);
             setShowMusicDialog(false);
             void apply;
           },
-          onSendToAgent: (prompt: string) => {
-            // 给 Agent：注入侧边栏输入框
-            setAgentContext({ text: prompt, ts: Date.now() });
+          onSendToAgent: (prompt: string, shotTitle?: string) => {
+            // 给 Agent：以引用胶囊形式注入侧边栏输入框
+            setAgentContext({ text: prompt, label: shotTitle, ts: Date.now() });
             setShowAgent(true);
+          },
+          onUpdate: (patch: Record<string, unknown>) => {
+            setAssetNodes((prev) =>
+              prev.map((n) =>
+                n.id === node.id
+                  ? { ...n, data: { ...n.data, generationCard: { ...(n.data as { generationCard?: object }).generationCard, ...patch } } }
+                  : n,
+              ),
+            );
           },
         },
         onDelete: (id: string) => {
@@ -1194,8 +1218,7 @@ export default function CanvasPage() {
           <BottomDialog
             key={videoSeed?.ts ?? 0}
             initialRefs={videoSeed?.refs}
-            initialPrompt={videoSeed?.initialPrompt}
-            initialPromptLabel={videoSeed?.initialPromptLabel}
+            initialCards={videoSeed?.cards}
             onClose={() => setShowBottomDialog(false)}
             onSend={handleDialogSend}
           />
@@ -1253,6 +1276,7 @@ export default function CanvasPage() {
         <AgentPanel
           onClose={() => setShowAgent(false)}
           initialInput={agentContext?.text ?? ''}
+          initialCardLabel={agentContext?.label}
           inputVersion={agentContext?.ts ?? 0}
           projectId={currentId || undefined}
           onApplyToDock={handleAgentCardApply}

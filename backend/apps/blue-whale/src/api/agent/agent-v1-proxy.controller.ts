@@ -2,7 +2,6 @@ import { Readable } from "node:stream";
 import {
   All,
   Controller,
-  Headers,
   Req,
   Res,
 } from "@nestjs/common";
@@ -18,7 +17,7 @@ const AGENT_UPSTREAM_TIMEOUT_MS = 60_000;
  * 本地 dev 下前端 /api/agent/v1/* 经 vite 代理到本后端，再由本控制器原样转发到 agent 服务。
  * - 方法/路径/query/body/headers 全透传（保留 /api/agent/v1 前缀）
  * - 鉴权由上游 agent 服务校验（透传 Authorization Bearer token）
- * - 服务未启动/连不上 → 503，附 AGENT_SERVICE_BASE_URL 便于定位
+ * - 服务未启动/连不上/超时 → 502，附上游地址或超时提示便于定位
  * - SSE（/events）流式 pipe，不截断
  */
 @Public()
@@ -28,17 +27,16 @@ export class AgentV1ProxyController {
   async proxy(
     @Req() req: Request,
     @Res() res: Response,
-    @Headers("authorization") authorization: string | undefined,
   ): Promise<void> {
     const base = AGENT_SERVICE_BASE_URL;
     const upstreamUrl = `${base}${req.originalUrl}`;
 
+    // req.headers 已含 authorization（Node 请求头 key 统一小写），透传循环即可，无需单独取出再设置一次
     const headers: Record<string, string> = {};
     for (const [key, value] of Object.entries(req.headers)) {
       if (!value) continue;
       headers[key] = Array.isArray(value) ? value.join(", ") : value;
     }
-    if (authorization) headers.authorization = authorization;
 
     // 读入请求体为 Buffer（GET/HEAD 无 body），透传给上游
     const rawBody = await new Promise<Buffer>((resolve, reject) => {
