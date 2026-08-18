@@ -97,6 +97,10 @@ export default function SkillModal({ open, onClose }: SkillModalProps) {
 
   const currentSort = sortOptions.find((s) => s.key === sortKey);
 
+  /** 产品要求：无封面 skill 整卡隐藏，列表只展示有 cover_url 的 */
+  const coverLibrary = libraryList.filter((s) => s.cover_url);
+  const coverMine = mySkills.filter((s) => s.cover_url);
+
   /** name / description 是否已填写（同一行存在非空内容） */
   const nameFilled = /^name:[ \t]*\S/m.test(skillContent);
   const descFilled = /^description:[ \t]*\S/m.test(skillContent);
@@ -349,14 +353,12 @@ export default function SkillModal({ open, onClose }: SkillModalProps) {
             </div>
 
             <div ref={libGridRef} className={styles.cardGrid} onScroll={handleLibraryScroll}>
-              {libraryList.map((s) => {
+              {coverLibrary.map((s) => {
                 const added = !!s.added;
                 const sid = s.creative_skill_id ?? s.name ?? '';
                 return (
                   <div key={sid} className={styles.card}>
-                    {s.cover_url && (
-                      <img className={styles.coverImg} src={s.cover_url} alt={s.name ?? ''} />
-                    )}
+                    <img className={styles.coverImg} src={s.cover_url!} alt={s.name ?? ''} />
                     <div className={styles.cardBody}>
                       <h4 className={styles.cardTitle}>{s.name ?? ''}</h4>
                       <p className={styles.cardDesc} title={s.description ?? ''}>{s.description ?? ''}</p>
@@ -377,7 +379,7 @@ export default function SkillModal({ open, onClose }: SkillModalProps) {
                   </div>
                 );
               })}
-              {libraryList.length === 0 && !libraryLoading && (
+              {coverLibrary.length === 0 && !libraryLoading && (
                 <div className={styles.emptyTip}>没有找到相关技能</div>
               )}
               {libraryLoading && <div className={styles.emptyTip}>加载中…</div>}
@@ -389,13 +391,11 @@ export default function SkillModal({ open, onClose }: SkillModalProps) {
         {tab === 'mine' && (
           <div className={styles.mineWrap}>
             <div ref={mineGridRef} className={styles.cardGrid} onScroll={handleMineScroll}>
-              {mySkills.map((s) => {
+              {coverMine.map((s) => {
                 const sid = s.creative_skill_id ?? s.name ?? '';
                 return (
                   <div key={sid} className={styles.card}>
-                    {s.cover_url && (
-                      <img className={styles.coverImg} src={s.cover_url} alt={s.name ?? ''} />
-                    )}
+                    <img className={styles.coverImg} src={s.cover_url!} alt={s.name ?? ''} />
                     <div className={styles.cardBody}>
                       <div className={styles.cardTitleRow}>
                         <h4 className={styles.cardTitle}>{s.name ?? ''}</h4>
