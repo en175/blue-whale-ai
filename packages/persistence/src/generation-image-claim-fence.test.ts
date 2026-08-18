@@ -173,3 +173,37 @@ describe("image claim fencing_token（IK7GRO 扩展）", () => {
     );
   });
 });
+
+describe("claimNextInProcessJob 恢复扫描认领范围（IK9ILQ）", () => {
+  it("claimNextInProcessJob 认领 type∈(image,audio),不碰 video", async () => {
+    const now = new Date();
+    const findFirst = vi.fn().mockResolvedValue({
+      id: 310n,
+      project_id: 55n,
+      user_id: 6n,
+      type: "audio",
+      input: {},
+      expected_output_count: 1,
+      retry_count: 0,
+      fencing_token: 3n,
+      status: "queued",
+      is_delete: false,
+      source: "bottom_dock",
+      next_action_at: now,
+      lease_expires_at: null,
+    });
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      generation_jobs: { findFirst, updateMany },
+    } as never;
+    const repo = createWorkerRepo(prisma);
+
+    const claimed = await repo.claimNextInProcessJob("worker-a");
+    expect(claimed?.type).toBe("audio");
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ type: { in: ["image", "audio"] } }),
+      }),
+    );
+  });
+});
