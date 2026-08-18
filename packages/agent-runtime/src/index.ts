@@ -43,6 +43,18 @@ export {
   type ReadAssetToolContext,
 } from "./read-asset-tool.js";
 export {
+  agentAssetResolveRequestSchema,
+  agentAssetResolveResultSchema,
+  deriveAssetContentVersion,
+  resolveAgentAsset,
+  type AgentAssetResolveOutcome,
+  type AgentAssetResolveRejection,
+  type AgentAssetResolveRequest,
+  type AgentAssetResolveResult,
+  type AgentAssetResolverDeps,
+  type AgentReadableAsset,
+} from "./agent-asset-resolver.js";
+export {
   WRITE_PLAN_CARDS_TOOL,
   executeWritePlanCardsTool,
   writePlanCardsToolInputSchema,

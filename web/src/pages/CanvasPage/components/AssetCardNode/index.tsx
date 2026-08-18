@@ -1,0 +1,270 @@
+/* ============================================
+ * AssetCardNode 资产卡节点：风格/角色/物体/环境/自定义
+ * 从画布拖入/添加图片参考、生成图片唤起底部图片对话框、角色卡音色设置
+ * ============================================ */
+import { useRef, useState, useCallback, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { AtSign, Upload, WandSparkles, Info, Music } from 'lucide-react';
+import styles from './index.module.css';
+
+/** 资产卡类型（generation 为 Agent 生成卡落画布形态） */
+export type AssetCardKind = 'style' | 'character' | 'object' | 'environment' | 'custom' | 'generation';
+
+/** 各类型标题与描述占位文案（对应设计稿） */
+const KIND_META: Record<AssetCardKind, { title: string; placeholder: string }> = {
+  style: { title: 'Style', placeholder: '描述视觉风格、配色与艺术方向...' },
+  character: { title: 'Character', placeholder: '描述外观、性格、角色弧光、语音风格...' },
+  object: { title: 'Object', placeholder: '描述形状、材质与颜色...' },
+  environment: { title: 'Environment', placeholder: '描述布局、氛围、光照与情绪...' },
+  custom: { title: 'Custom', placeholder: '添加此资产的备注或细节...' },
+  generation: { title: '生成卡', placeholder: '分镜提示词生成卡' },
+};
+
+/** Agent 生成卡数据（kind=generation 时承载，落画布后从节点选引用） */
+export interface GenerationCardNodeData {
+  cardId?: string;
+  shotTitle?: string;
+  timeRange?: string;
+  visual?: string;
+  prompt?: string;
+  assetRefs?: string[];
+  /** 引用到 Canvas dock */
+  onApplyToDock?: (payload: { prompt: string; assetRefs: string[]; cardId?: string; shotTitle?: string }) => void;
+  /** 给 Agent 继续修改 */
+  onSendToAgent?: (prompt: string) => void;
+}
+
+interface AssetCardNodeData {
+  kind?: AssetCardKind;
+  toolMode?: 'drag' | 'select';
+  isFirst?: boolean;
+  /** 水合初始参考图（后端 reference 节点的 references 解析而来） */
+  initialRefs?: { id: string; src: string }[];
+  /** 水合初始描述文本 */
+  initialDesc?: string;
+  onDelete?: (id: string) => void;
+  /** 生成图片：唤起底部图片对话框 */
+  onGenerateImage?: () => void;
+  /** Agent 生成卡数据（kind=generation） */
+  generationCard?: GenerationCardNodeData;
+}
+
+export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCardNodeData }) {
+  // 水合容错：持久化的 kind 可能不在五种枚举内（旧数据/脏数据），降级为 custom 避免 KIND_META 落空
+  const kind: AssetCardKind = data.kind && data.kind in KIND_META ? data.kind : 'custom';
+  const meta = KIND_META[kind];
+  const [refs, setRefs] = useState<{ id: string; src: string }[]>(data.initialRefs ?? []);
+  const [desc, setDesc] = useState(data.initialDesc ?? '');
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [voiceName, setVoiceName] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<HTMLInputElement>(null);
+
+  const isSelect = data.toolMode === 'select';
+  const isGeneration = (data.kind ?? 'custom') === 'generation';
+
+  // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    document.addEventListener('click', close);
+    document.addEventListener('contextmenu', close, true);
+    return () => {
+      document.removeEventListener('click', close);
+      document.removeEventListener('contextmenu', close, true);
+    };
+  }, [contextMenu]);
+
+  /** 右键菜单（与 MediaNode 一致，无右上角 ×） */
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    if (data.toolMode !== 'select') return;
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  }, [data.toolMode]);
+
+  const handleDelete = useCallback(() => {
+    setContextMenu(null);
+    data.onDelete?.(id);
+  }, [data, id]);
+
+  /** 添加参考图（点击选择或拖入，仅 image/*） */
+  const addFiles = (files: FileList | File[]) => {
+    const imgs = Array.from(files)
+      .filter((f) => f.type.startsWith('image/'))
+      .map((f, i) => ({ id: `ref-${Date.now()}-${i}`, src: URL.createObjectURL(f) }));
+    if (imgs.length > 0) setRefs((prev) => [...prev, ...imgs]);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
+  };
+
+  return (
+    <div className={styles.wrapper} onContextMenu={handleContextMenu}>
+      {!data.isFirst && (
+        <Handle type="target" position={Position.Left} style={{ background: '#666', width: 10, height: 10, border: '2px solid #444' }} />
+      )}
+
+      <div
+        className={styles.card}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={handleDrop}
+      >
+        {/* 标题 */}
+        <div className={styles.head}>
+          <span className={styles.atIcon}>
+            <AtSign size={14} strokeWidth={2} />
+          </span>
+          <span className={styles.name}>{meta.title}</span>
+        </div>
+
+        {/* 交互区：生成卡始终可点；普通资产卡仅选择模式可操作（拖动模式整体可拖） */}
+        <div
+          className={(isSelect || isGeneration) ? 'nodrag nopan' : undefined}
+          style={isSelect || isGeneration ? undefined : { pointerEvents: 'none' }}
+        >
+          {isGeneration && data.generationCard ? (
+            /* Agent 生成卡落画布形态：展示卡内容 + 引用到 dock / 给 Agent */
+            <div className={styles.body}>
+              <div className={styles.gcHeader}>
+                <span className={styles.gcTitle}>{data.generationCard.shotTitle ?? '生成卡'}</span>
+                {data.generationCard.timeRange && (
+                  <span className={styles.gcTime}>{data.generationCard.timeRange}</span>
+                )}
+              </div>
+              {data.generationCard.visual && (
+                <div className={styles.gcField}>
+                  <span className={styles.gcLabel}>画面</span>
+                  <span className={styles.gcValue}>{data.generationCard.visual}</span>
+                </div>
+              )}
+              {data.generationCard.prompt && (
+                <div className={styles.gcField}>
+                  <span className={styles.gcLabel}>提示词</span>
+                  <span className={styles.gcValue}>{data.generationCard.prompt}</span>
+                </div>
+              )}
+              {data.generationCard.assetRefs && data.generationCard.assetRefs.length > 0 && (
+                <div className={styles.gcRefs}>
+                  {data.generationCard.assetRefs.map((r) => (
+                    <span key={r} className={styles.gcRef}>{r}</span>
+                  ))}
+                </div>
+              )}
+              <div className={styles.btnRow}>
+                <button
+                  className={styles.actionBtn}
+                  onClick={() =>
+                    data.generationCard?.onApplyToDock?.({
+                      prompt: data.generationCard?.prompt ?? '',
+                      assetRefs: data.generationCard?.assetRefs ?? [],
+                      cardId: data.generationCard?.cardId,
+                      shotTitle: data.generationCard?.shotTitle,
+                    })
+                  }
+                >
+                  <WandSparkles size={15} strokeWidth={2} />
+                  <span>引用到 dock</span>
+                </button>
+                <button
+                  className={styles.actionBtn}
+                  onClick={() => data.generationCard?.onSendToAgent?.(data.generationCard?.prompt ?? '')}
+                >
+                  <AtSign size={15} strokeWidth={2} />
+                  <span>给 Agent</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+          <div className={styles.body}>
+            <span className={styles.dropHint}>从画布拖入</span>
+            <textarea
+              className={styles.descInput}
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              placeholder={meta.placeholder}
+              rows={1}
+            />
+            <div className={styles.btnRow}>
+              <button className={styles.actionBtn} onClick={() => fileRef.current?.click()}>
+                <Upload size={15} strokeWidth={2} />
+                <span>添加图片</span>
+              </button>
+              <button className={styles.actionBtn} onClick={() => data.onGenerateImage?.()}>
+                <WandSparkles size={15} strokeWidth={2} />
+                <span>生成图片</span>
+              </button>
+            </div>
+            <span className={styles.refRow}>
+              <Info size={13} strokeWidth={2} />
+              <span>{refs.length} 张参考图</span>
+            </span>
+          </div>
+          )}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className={styles.hiddenInput}
+            onChange={(e) => {
+              if (e.target.files) addFiles(e.target.files);
+              e.target.value = '';
+            }}
+          />
+
+          {/* 角色卡：音色上传（鼠标悬停卡片时展示） */}
+          {kind === 'character' && (
+            <div className={styles.voiceSection}>
+              <div className={styles.voiceLabel}>
+                <Music size={14} strokeWidth={2} />
+                <span>音色</span>
+              </div>
+              <div className={styles.voiceDrop}>
+                <span className={styles.voiceHint}>
+                  {voiceName || '从画布拖入音频'}
+                </span>
+                <button className={styles.actionBtn} onClick={() => audioRef.current?.click()}>
+                  <Upload size={15} strokeWidth={2} />
+                  <span>上传音色音频</span>
+                </button>
+                <span className={styles.voiceTip}>2–15.2 秒 · 建议 ≤ 5 秒</span>
+              </div>
+              <input
+                ref={audioRef}
+                type="file"
+                accept="audio/*,image/*"
+                className={styles.hiddenInput}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) setVoiceName(f.name);
+                  e.target.value = '';
+                }}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <Handle type="source" position={Position.Right} style={{ background: '#666', width: 10, height: 10, border: '2px solid #444' }} />
+
+      {/* 右键菜单（portal 到 body，避免节点 transform 影响 fixed 定位） */}
+      {contextMenu &&
+        createPortal(
+          <div
+            className={styles.contextMenu}
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
+              <span>删除</span>
+            </button>
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}

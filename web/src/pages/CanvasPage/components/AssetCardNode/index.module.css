@@ -1,0 +1,243 @@
+/* ============================================
+ * AssetCardNode - 资产卡节点（风格/角色/物体/环境/自定义）
+ * ============================================ */
+
+.wrapper {
+  position: relative;
+}
+
+.card {
+  position: relative;
+  width: 320px;
+  box-sizing: border-box;
+  padding: 12px 14px 14px;
+  background-color: #1e1e1e;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* ---- 标题 ---- */
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.atIcon {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #2f2f2f;
+  color: #ccc;
+  flex-shrink: 0;
+}
+
+.name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+/* ---- 主体 ---- */
+.body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 4px 14px;
+}
+
+.dropHint {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+}
+
+.descInput {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  text-align: center;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  resize: none;
+  overflow: hidden;
+}
+
+.descInput::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.btnRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.actionBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.actionBtn:hover {
+  background-color: #3a3a3a;
+}
+
+.refRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.hiddenInput {
+  display: none;
+}
+
+/* ---- 角色卡音色区 ---- */
+.voiceSection {
+  border-top: 1px solid var(--color-border-primary);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.voiceLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.voiceDrop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1px dashed #4a4a4a;
+  border-radius: 10px;
+  background-color: #242424;
+}
+
+.voiceHint {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.voiceTip {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+/* ---- 右键菜单 ---- */
+.contextMenu {
+  position: fixed;
+  min-width: 200px;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+}
+
+.contextItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  padding: 10px 14px;
+  color: #eee;
+  font-size: 15px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+  text-align: left;
+}
+
+.contextItem:hover {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.contextDanger {
+  color: #e5484d;
+}
+
+/* ---- Agent 生成卡落画布形态（B2） ---- */
+.gcHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.gcTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.gcTime {
+  font-size: 12px;
+  color: #999;
+  flex-shrink: 0;
+}
+
+.gcField {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #bbb;
+  margin-top: 4px;
+}
+
+.gcLabel {
+  flex-shrink: 0;
+  color: #777;
+  min-width: 34px;
+}
+
+.gcValue {
+  flex: 1;
+  word-break: break-word;
+}
+
+.gcRefs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.gcRef {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  font-size: 11px;
+  color: #8fd0a8;
+}

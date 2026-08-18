@@ -1,0 +1,510 @@
+/* ============================================
+ * MusicDialog - AI 音乐底部对话框
+ * ============================================ */
+
+.dialog {
+  position: absolute;
+  bottom: var(--spacing-2xl);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 680px;
+  max-width: calc(100% - 48px);
+  background-color: #1e1e1e;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 16px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  padding: var(--spacing-lg);
+  z-index: 10;
+  animation: dialogFadeIn 0.2s ease;
+  box-sizing: border-box;
+}
+
+@keyframes dialogFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ---- 关闭按钮 ---- */
+.closeBtn {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  z-index: 1;
+}
+
+.closeBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---- 顶部参考音频行 ---- */
+.topRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.refWrap {
+  position: relative;
+}
+
+.refBtn {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.refBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+}
+
+.refHint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.refCount {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* ---- 来源弹出（本地上传 / 从画布选择） ---- */
+.sourcePopup {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: -8px;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs);
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  animation: popupFadeIn 0.15s ease;
+  white-space: nowrap;
+  z-index: 5;
+}
+
+@keyframes popupFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.sourceItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sourceItem:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---- 画布选择面板 ---- */
+.pickerPanel {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: -8px;
+  width: 240px;
+  padding: var(--spacing-sm);
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  animation: popupFadeIn 0.15s ease;
+  z-index: 6;
+}
+
+.pickerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-xs);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.pickerClose {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.pickerClose:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.pickerEmpty {
+  padding: 16px 0;
+  text-align: center;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.pickerList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.pickerItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.pickerItem:hover {
+  background-color: var(--color-bg-hover);
+}
+
+.pickerAudio {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #333;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.pickerName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- 隐藏文件输入 ---- */
+.hiddenInput {
+  display: none;
+}
+
+/* ---- 参考预览区 ---- */
+.previewArea {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.previewItem {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--color-border-secondary);
+  flex-shrink: 0;
+}
+
+.previewAudio {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #2a2a2a;
+  color: var(--color-text-tertiary);
+}
+
+.previewRemove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.6);
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.previewRemove:hover {
+  background-color: rgba(250, 82, 82, 0.8);
+}
+
+.previewLabel {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 1px 0;
+  font-size: 9px;
+  text-align: center;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+/* ---- 输入框 ---- */
+.textarea {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  background-color: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  resize: none;
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.textarea:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---- 歌词区 ---- */
+.lyricBlock {
+  margin-top: var(--spacing-md);
+}
+
+.lyricLabel {
+  display: block;
+  margin-bottom: var(--spacing-xs);
+  padding-left: var(--spacing-md);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  transition: color var(--transition-fast);
+}
+
+.lyricLabelDisabled {
+  color: var(--color-text-tertiary);
+  opacity: 0.5;
+}
+
+/* ---- 底部状态栏 ---- */
+.bottomBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--spacing-sm);
+}
+
+.barLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.barRight {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.simHint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+/* ---- 模式/模型/倍速选择器 ---- */
+.modeWrap {
+  position: relative;
+}
+
+.modeBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.modeBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.modeArrow {
+  transition: transform var(--transition-fast);
+}
+
+.modeArrowUp {
+  transform: rotate(180deg);
+}
+
+.modeDropdown {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 130px;
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-xs);
+  animation: popupFadeIn 0.15s ease;
+}
+
+.modeOption {
+  display: block;
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.modeOption:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.modeOptionActive {
+  color: var(--color-accent-text);
+  background-color: var(--color-bg-active);
+  font-weight: 500;
+}
+
+/* ---- 纯伴奏开关 ---- */
+.toggleGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  padding: 0;
+  border-radius: 999px;
+  background-color: #3a3a3a;
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.switchOn {
+  background-color: var(--color-accent-primary);
+}
+
+.switchKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: #fff;
+  transition: transform var(--transition-fast);
+}
+
+.switchOn .switchKnob {
+  transform: translateX(16px);
+}
+
+.toggleLabel {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+/* ---- 生成按钮 ---- */
+.generateBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 6px var(--spacing-lg);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+  background-color: var(--color-bg-tertiary);
+  border: none;
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+  opacity: 0.5;
+  white-space: nowrap;
+}
+
+.generateBtnActive {
+  color: #fff;
+  background-color: var(--color-accent-primary);
+  cursor: pointer;
+  opacity: 1;
+}
+
+.generateBtnActive:hover {
+  background-color: var(--color-accent-hover);
+}

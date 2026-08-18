@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blue Whale Agent PM Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!-- PROTOTYPE: Agent v0 user-facing clickable canvas and agent flow. -->
+    <main class="app-shell">
+      <nav class="topbar">
+        <div class="brand">
+          <div class="whale-mark"></div>
+          <span class="divider"></span>
+          <button class="project-pill">2026-08-16 Agent v0</button>
+          <button class="icon-button" title="设置">⚙</button>
+        </div>
+        <div class="top-actions">
+          <span class="credit-chip">2,498,288.36</span>
+          <button class="user-chip"><span>r</span> root</button>
+          <button class="agent-chip">Agent</button>
+        </div>
+      </nav>
+
+      <aside class="tool-rail" aria-label="画布工具">
+        <button class="rail-button active" title="选择">↖</button>
+        <button class="rail-button" title="添加">＋</button>
+        <button class="rail-button" title="AI 图片">▧</button>
+        <button class="rail-button" title="AI 视频">▭</button>
+        <button class="rail-button" title="文本">T</button>
+        <button class="rail-button" title="素材">▣</button>
+      </aside>
+
+      <section class="canvas-stage" aria-label="Canvas 原型">
+        <section class="brief-card">
+          <div class="brief-title"><span>@</span> Custom</div>
+          <p>本版原型重点展示 Agent v0 在用户侧的主链路：用户如何在 Canvas 中引用素材、如何在 Agent 侧边栏提出需求，Agent 如何追问、总结需求理解，并在确认后直接产出可手动应用的分镜提示词生成卡。</p>
+          <div class="brief-box">
+            <strong>演示方式说明</strong>
+            <span>为了稳定展示完整链路，部分步骤使用按钮推进；真实产品中用户可以自由输入补充内容，也可以通过快捷选项完成确认。</span>
+          </div>
+          <p class="doc-note">对应 PRD 中的 Agent v0 用户体验流程，以及工程流程图里 Agent 侧边栏承载对话、追问、需求理解总结、生成卡和应用状态提示的用户可见部分。</p>
+        </section>
+
+        <section class="asset-grid" aria-label="画布素材">
+          <article class="asset-card selected" data-asset="保温杯主图">
+            <img src="./assets/thermos-main.svg" alt="保温杯主图" />
+            <div>
+              <strong>保温杯主图</strong>
+              <span>产品英雄图 · 9:16</span>
+            </div>
+          </article>
+          <article class="asset-card" data-asset="杯盖材质细节">
+            <img src="./assets/detail.svg" alt="杯盖材质细节" />
+            <div>
+              <strong>杯盖材质细节</strong>
+              <span>微距纹理 · 螺纹</span>
+            </div>
+          </article>
+          <article class="asset-card" data-asset="生活场景图">
+            <img src="./assets/lifestyle.svg" alt="生活场景图" />
+            <div>
+              <strong>生活场景图</strong>
+              <span>桌面蒸汽 · 自然光</span>
+            </div>
+          </article>
+          <article class="asset-card" data-asset="包装品牌占位图">
+            <img src="./assets/package.svg" alt="包装品牌占位图" />
+            <div>
+              <strong>包装品牌占位图</strong>
+              <span>品牌/包装/卖点</span>
+            </div>
+          </article>
+        </section>
+
+        <section class="orchestration-track" aria-label="Agent 编排进度">
+          <header>
+            <strong>Agent 编排流程</strong>
+            <span id="trackHint">从素材引用到生成卡应用，逐步确认</span>
+          </header>
+          <div class="track-steps">
+            <div class="track-step is-active" data-step="input">用户输入</div>
+            <div class="track-step" data-step="intent">需求理解</div>
+            <div class="track-step" data-step="ask">追问补充</div>
+            <div class="track-step" data-step="summary">总结确认</div>
+            <div class="track-step" data-step="card">生成卡</div>
+            <div class="track-step" data-step="dock">Canvas dock</div>
+          </div>
+        </section>
+      </section>
+
+      <aside class="agent-panel" aria-label="Agent 侧边栏">
+        <header class="agent-header">
+          <div>
+            <span class="cost">✦ 0.2</span>
+            <h1>Canvas Agent</h1>
+          </div>
+          <div class="panel-actions">
+            <button title="浮动">▣</button>
+            <button title="关闭">×</button>
+          </div>
+        </header>
+
+        <section class="conversation" id="conversation" aria-live="polite"></section>
+
+        <section class="composer">
+          <div class="reference-row" id="referenceRow"></div>
+          <div class="composer-box">
+            <button class="plus-button">＋</button>
+            <div class="fake-input" contenteditable="true" id="fakeInput">帮我生成一个保温杯产品展示视频</div>
+            <button class="send-button" id="sendButton">↑</button>
+          </div>
+          <div class="flow-controls">
+            <button data-action="image" data-flow="image">图片流程</button>
+            <button data-action="video" data-flow="video" class="primary">视频流程</button>
+            <button data-action="reset">重置</button>
+          </div>
+        </section>
+      </aside>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>

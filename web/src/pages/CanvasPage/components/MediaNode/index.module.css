@@ -1,0 +1,245 @@
+/* ============================================
+ * MediaNode - 画布图片/视频节点
+ * ============================================ */
+
+.wrapper {
+  position: relative;
+}
+
+/* 选中态悬浮工具条（节点上方居中） */
+.toolbar {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  background-color: rgba(24, 24, 24, 0.96);
+  border: 1px solid #333;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  z-index: 10;
+}
+
+.toolBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: #ddd;
+  font-size: 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.toolBtn:hover {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.toolDivider {
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background-color: #3a3a3a;
+}
+
+.card {
+  background-color: #1a1a1a;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.2s ease;
+}
+
+.wrapper:hover .card {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* 标签行 */
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.labelGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.label {
+  font-size: 11px;
+  color: #888;
+  user-select: none;
+}
+
+.fileName {
+  font-size: 11px;
+  color: #666;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 媒体容器 */
+.mediaContainer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.mediaImage {
+  display: block;
+  max-width: 280px;
+  max-height: 360px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.mediaVideo {
+  display: block;
+  max-width: 280px;
+  max-height: 360px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  background-color: #000;
+}
+
+/* 生成中/失败占位区 */
+.genBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 280px;
+  min-height: 200px;
+  padding: 20px;
+  box-sizing: border-box;
+  background-color: #111;
+}
+
+.genSpinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #333;
+  border-top-color: #ccc;
+  border-radius: 50%;
+  animation: genSpin 0.9s linear infinite;
+}
+
+@keyframes genSpin {
+  to { transform: rotate(360deg); }
+}
+
+.genText {
+  color: #aaa;
+  font-size: 12px;
+}
+
+.genFailText {
+  color: #e5484d;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.genError {
+  color: #888;
+  font-size: 11px;
+  max-width: 220px;
+  text-align: center;
+  word-break: break-all;
+}
+
+.progressTrack {
+  width: 180px;
+  height: 4px;
+  border-radius: 2px;
+  background-color: #333;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background-color: #ddd;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.genBtn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #ddd;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.genBtn:hover {
+  color: #fff;
+  background-color: #333;
+}
+
+/* 右键菜单 */
+.contextMenu {
+  position: fixed;
+  min-width: 200px;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+}
+
+.contextItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  padding: 10px 14px;
+  color: #eee;
+  font-size: 15px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+  text-align: left;
+}
+
+.contextItem:hover {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.contextShortcut {
+  color: #888;
+  font-size: 13px;
+}
+
+.contextDanger {
+  color: #e5484d;
+}
+
+.contextDanger:hover {
+  color: #ff6b6b;
+  background-color: rgba(229, 72, 77, 0.12);
+}

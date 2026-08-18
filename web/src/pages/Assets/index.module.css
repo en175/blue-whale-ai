@@ -1,0 +1,249 @@
+/* ============================================
+ * Assets 资产页面样式
+ * ============================================ */
+
+.page {
+  width: 100%;
+  height: 100%;
+  padding: var(--spacing-2xl) var(--spacing-2xl) var(--spacing-xl);
+  overflow-y: auto;
+}
+
+.container {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* ---- 顶部标题栏 ---- */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-xl);
+}
+
+.pageTitle {
+  font-size: var(--font-size-2xl);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+/* ---- 筛选按钮 ---- */
+.filterBtn {
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.filterBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.filterBtnActive {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+  font-weight: 500;
+}
+
+/* ---- 分隔线 ---- */
+.divider {
+  width: 1px;
+  height: 20px;
+  background-color: var(--color-border-primary);
+  margin: 0 var(--spacing-sm);
+}
+
+/* ---- 上传按钮 ---- */
+.uploadBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  color: #fff;
+  background-color: #1e1e1e;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.uploadBtn:hover {
+  background-color: #2a2a2a;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.hiddenInput {
+  display: none;
+}
+
+/* ---- 资产网格 (一行5个) ---- */
+.grid {
+  display: grid;
+  /* 2-5 列自适应：容器越宽列数越多 */
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--spacing-lg);
+}
+
+.empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: var(--spacing-2xl) 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-md);
+}
+
+/* ---- 资产卡片 ---- */
+.card {
+  background-color: var(--color-bg-card);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+}
+
+.card:hover {
+  border-color: var(--color-border-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+/* ---- 缩略图区域 ---- */
+.thumbnail {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background-color: var(--color-bg-tertiary);
+}
+
+/* 图片/视频媒体填充 */
+.media {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 音频播放器居中 */
+.audioPlayer {
+  width: 88%;
+}
+
+/* 卡片右上角删除按钮：悬停显现 */
+.deleteBtn {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background-color: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  z-index: 2;
+}
+
+.card:hover .deleteBtn {
+  opacity: 1;
+}
+
+.deleteBtn:hover {
+  background-color: var(--color-error);
+}
+
+/* 操作错误提示 */
+.actionError {
+  color: var(--color-error);
+  font-size: var(--font-size-md);
+  white-space: nowrap;
+}
+
+/* 视频播放图标：绝对定位居中覆盖在缩略图上 */
+.playIcon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background-color: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform var(--transition-fast);
+  z-index: 2;
+}
+
+.card:hover .playIcon {
+  transform: translate(-50%, -50%) scale(1.1);
+}
+
+/* 音频图标 */
+.audioIcon {
+  font-size: 40px;
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 300;
+}
+
+/* 类型标签 */
+.typeBadge {
+  position: absolute;
+  top: var(--spacing-sm);
+  left: var(--spacing-sm);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+}
+
+/* ---- 信息区 ---- */
+.cardInfo {
+  padding: var(--spacing-sm) var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cardName {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardDate {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}

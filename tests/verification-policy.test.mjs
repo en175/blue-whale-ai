@@ -99,6 +99,22 @@ test("classifies documentation assets without treating contracts as prose", asyn
   });
 });
 
+test("classifies docs prototype assets (js/css) as documentation, not executable code", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(
+      [
+        "docs/projects/agent-v0/prototype/app.js",
+        "docs/projects/agent-v0/prototype/styles.css",
+        "docs/projects/agent-v0/prototype/index.html",
+      ],
+      { stage: "pr" },
+    ),
+    { tier: "docs", reasons: ["only documentation files changed"] },
+  );
+});
+
 test("classifies the testing strategy itself as verification governance", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
@@ -323,6 +339,42 @@ test("builds a documentation plan without code tests", async () => {
     [
       ["git", "diff", "--check", "origin/master...HEAD"],
       ["node", "--test", "tests/agent-rules.test.mjs"],
+    ],
+  );
+});
+
+test("classifies web source changes as scoped web verification", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+  const file = "web/src/pages/Home/components/SkillModal/index.tsx";
+
+  assert.deepEqual(classifyChanges([file]), {
+    tier: "scoped",
+    areas: ["web"],
+    reasons: ["known source paths changed"],
+  });
+  assert.deepEqual(classifyChanges([file], { stage: "pr" }), {
+    tier: "scoped",
+    areas: ["web"],
+    reasons: ["known source paths changed"],
+  });
+});
+
+test("builds web typecheck and lint checks for web verification", async () => {
+  const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    buildVerificationPlan(
+      {
+        tier: "scoped",
+        areas: ["web"],
+        reasons: ["known source paths changed"],
+      },
+      { base: "origin/master" },
+    ),
+    [
+      ["git", "diff", "--check", "origin/master...HEAD"],
+      ["node", "web/node_modules/typescript/bin/tsc", "-b", "web/tsconfig.json", "--pretty", "false"],
+      ["npm", "--prefix", "web", "run", "lint"],
     ],
   );
 });

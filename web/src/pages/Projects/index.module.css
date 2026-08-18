@@ -1,0 +1,254 @@
+/* ============================================
+ * Projects 页面样式
+ * ============================================ */
+
+.page {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  padding: var(--spacing-2xl) 0;
+  overflow-y: auto;
+}
+
+.container {
+  width: 70%;
+  min-width: 600px;
+  max-width: 1200px;
+}
+
+/* ---- 顶部标题栏 ---- */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-xl);
+}
+
+.pageTitle {
+  font-size: var(--font-size-2xl);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.nameInput {
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-secondary);
+  outline: none;
+  width: 320px;
+  transition: all var(--transition-fast);
+}
+
+.nameInput:focus {
+  border-color: var(--color-border-hover);
+  background-color: #333;
+}
+
+.nameInput::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.createBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-lg);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background-color: #333;
+  border: 1px solid var(--color-border-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.createBtn:hover {
+  color: var(--color-text-primary);
+  background-color: #444;
+  border-color: var(--color-border-hover);
+}
+
+/* ---- 项目列表 ---- */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.empty {
+  text-align: center;
+  padding: var(--spacing-2xl) 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-lg);
+}
+
+/* ---- 单行项目 ---- */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-card);
+  border: 1px solid var(--color-border-primary);
+  transition: all var(--transition-fast);
+}
+
+.row:hover {
+  border-color: var(--color-border-hover);
+  background-color: var(--color-bg-hover);
+}
+
+.rowLeft {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  margin-right: var(--spacing-md);
+  flex-shrink: 0;
+}
+
+.createError {
+  color: var(--color-error);
+  font-size: var(--font-size-md);
+  white-space: nowrap;
+}
+
+.projectName {
+  font-size: var(--font-size-lg);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowRight {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  flex-shrink: 0;
+}
+
+.date {
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+/* ---- 编辑容器 ---- */
+.editContainer {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  width: 100%;
+}
+
+/* ---- 编辑输入框 ---- */
+.editInput {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-lg);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  background-color: #1e1e1e;
+  border: 1px solid var(--color-border-secondary);
+  outline: none;
+  min-width: 0;
+}
+
+.editInput:focus {
+  border-color: var(--color-border-hover);
+}
+
+/* ---- 编辑保存按钮 ---- */
+.editSaveBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-lg);
+  font-weight: 500;
+  color: #fff;
+  background-color: #4a4a4a;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.editSaveBtn:hover {
+  background-color: #5a5a5a;
+}
+
+/* ---- 编辑取消按钮 ---- */
+.editCancelBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-lg);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background-color: transparent;
+  border: 1px solid var(--color-border-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.editCancelBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---- 图标按钮 ---- */
+.iconBtn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.iconBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-active);
+}
+
+.deleteBtn:hover {
+  color: var(--color-error);
+  background-color: rgba(250, 82, 82, 0.1);
+}
