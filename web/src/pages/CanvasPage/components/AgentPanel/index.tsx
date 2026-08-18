@@ -6,6 +6,7 @@ import {
   X,
   Plus,
   ChevronDown,
+  ChevronUp,
   ArrowUp,
   Square,
   RotateCw,
@@ -16,7 +17,8 @@ import {
 import styles from './index.module.css';
 import { isApiError } from '@/api/http';
 import { fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
-import { useAgentSession } from '../../hooks/useAgentSession';
+import { useAgentSession, type ChatMessage } from '../../hooks/useAgentSession';
+import type { SessionContentBlock } from '@/api/agentSessions';
 import SkillModal from '@/pages/Home/components/SkillModal';
 
 /** 内联 markdown：**bold** 与 `code` */
@@ -65,6 +67,150 @@ function Markdown({ text }: { text: string }) {
     blocks.push(<p key={idx} className={styles.mdP}>{renderInline(line, `p${idx}`)}</p>);
   });
   return <>{blocks}</>;
+}
+
+/** 可折叠思考过程：小字展示当前步骤，默认收起 */
+function ThinkingBlock({ steps, defaultOpen = false }: { steps: string[]; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  if (steps.length === 0) return null;
+  return (
+    <div className={styles.thinkingBlock}>
+      <button
+        type="button"
+        className={styles.thinkingToggle}
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <span>思考过程</span>
+        {open ? <ChevronUp size={12} strokeWidth={2.5} /> : <ChevronDown size={12} strokeWidth={2.5} />}
+      </button>
+      {open && (
+        <div className={styles.thinkingBody}>
+          {steps.map((s, i) => (
+            <div key={i} className={styles.thinkingStep}>{s}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 需求理解确认门：结构化总结 + 确认/继续补充/修改 */
+function UnderstandingCard({
+  data,
+  onConfirm,
+  onSupplement,
+  onModify,
+  disabled,
+}: {
+  data: NonNullable<SessionContentBlock['understanding']>;
+  onConfirm: () => void;
+  onSupplement: () => void;
+  onModify: () => void;
+  disabled: boolean;
+}) {
+  const tags = data.specs ?? [];
+  return (
+    <div className={styles.understandingCard}>
+      <div className={styles.cardTitle}>需求理解总结</div>
+      {data.goal && <p className={styles.cardGoal}>{data.goal}</p>}
+      {data.assets && data.assets.length > 0 && (
+        <div className={styles.cardLine}>
+          <span className={styles.cardLabel}>使用素材</span>
+          <span>{data.assets.join('、')}</span>
+        </div>
+      )}
+      {data.direction && (
+        <div className={styles.cardLine}>
+          <span className={styles.cardLabel}>内容方向</span>
+          <span>{data.direction}</span>
+        </div>
+      )}
+      {tags.length > 0 && (
+        <div className={styles.tagList}>
+          {tags.map((t) => <span key={t} className={styles.tag}>{t}</span>)}
+        </div>
+      )}
+      {data.uncertainties && data.uncertainties.length > 0 && (
+        <div className={styles.cardLine}>
+          <span className={styles.cardLabel}>不确定点</span>
+          <span>{data.uncertainties.join('；')}</span>
+        </div>
+      )}
+      <div className={styles.cardActions}>
+        <button type="button" className={styles.cardBtn} onClick={onSupplement} disabled={disabled}>
+          继续补充
+        </button>
+        <button type="button" className={styles.cardBtn} onClick={onModify} disabled={disabled}>
+          修改方向
+        </button>
+        <button type="button" className={`${styles.cardBtn} ${styles.cardBtnPrimary}`} onClick={onConfirm} disabled={disabled}>
+          确认需求理解
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 追问卡：待补充的关键问题 */
+function ClarifyCard({ questions }: { questions: string[] }) {
+  if (questions.length === 0) return null;
+  return (
+    <div className={styles.clarifyCard}>
+      <div className={styles.cardTitle}>需要补充</div>
+      <ul className={styles.clarifyList}>
+        {questions.map((q) => (
+          <li key={q}>{q}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** 助手消息：按结构化块渲染（text/thinking/understanding/clarify），无块时回退纯文本 */
+function AssistantMessageBody({
+  message,
+  onConfirm,
+  onSupplement,
+  onModify,
+  disabled,
+}: {
+  message: ChatMessage;
+  onConfirm: () => void;
+  onSupplement: () => void;
+  onModify: () => void;
+  disabled: boolean;
+}) {
+  const blocks = message.blocks ?? [];
+  const structured = blocks.filter((b) => b.type !== 'text');
+  // 有结构化块 → 按块渲染；无 → 纯文本 markdown
+  if (structured.length === 0) return <Markdown text={message.content} />;
+  return (
+    <>
+      {blocks.map((b, i) => {
+        if (b.type === 'thinking' && b.thinking?.steps) {
+          return <ThinkingBlock key={i} steps={b.thinking.steps} />;
+        }
+        if (b.type === 'understanding' && b.understanding) {
+          return (
+            <UnderstandingCard
+              key={i}
+              data={b.understanding}
+              onConfirm={onConfirm}
+              onSupplement={onSupplement}
+              onModify={onModify}
+              disabled={disabled}
+            />
+          );
+        }
+        if (b.type === 'clarify' && b.clarify?.questions) {
+          return <ClarifyCard key={i} questions={b.clarify.questions} />;
+        }
+        if (b.text) return <Markdown key={i} text={b.text} />;
+        return null;
+      })}
+    </>
+  );
 }
 
 /** 可选模型列表 */
@@ -117,6 +263,7 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
     streaming,
     runningRunId,
     failedRunId,
+    thinkingSteps,
     sendMessage,
     stopRun,
     retryRun,
@@ -266,6 +413,21 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
     sendMessage(content);
   };
 
+  /** 确认需求理解：向会话提交确认动作（进入生成卡生产） */
+  const handleConfirm = () => {
+    if (runningRunId !== null || streaming) return;
+    sendMessage('确认需求理解，生成分镜提示词卡');
+  };
+
+  /** 继续补充 / 修改方向：把输入框预填为补充引导，等待用户输入 */
+  const handleSupplement = () => {
+    setInputValue('补充信息：');
+  };
+
+  const handleModify = () => {
+    setInputValue('修改方向：');
+  };
+
   /** 上传文件 */
   const handleUploadClick = () => {
     setShowUpload(!showUpload);
@@ -345,9 +507,21 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
               <div key={m.id} className={styles.userBubble}>{m.content}</div>
             ) : (
               <div key={m.id} className={styles.assistantBlock}>
-                <Markdown text={m.content} />
+                <AssistantMessageBody
+                  message={m}
+                  onConfirm={handleConfirm}
+                  onSupplement={handleSupplement}
+                  onModify={handleModify}
+                  disabled={runningRunId !== null || streaming}
+                />
               </div>
             ),
+          )}
+          {/* Agent 运行中的实时思考过程（reasoning_trace.updated.v1 流式） */}
+          {streaming && thinkingSteps.length > 0 && (
+            <div className={styles.assistantBlock}>
+              <ThinkingBlock steps={thinkingSteps} />
+            </div>
           )}
           {/* Agent 运行中的实时流式文本（assistant.delta 累积投影） */}
           {streamingText && (

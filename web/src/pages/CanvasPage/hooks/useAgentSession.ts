@@ -17,15 +17,36 @@ import {
   retrySessionRun,
   subscribeSessionEvents,
   type SessionMessage,
+  type SessionContentBlock,
   type SseEvent,
 } from '@/api/agentSessions';
+import * as mockAgentApi from '@/api/agentSessions.mock';
 import { isApiError } from '@/api/http';
+
+/**
+ * 数据源选择：本地 dev 默认走 mock（后端 /api/agent/v1 尚未实现，S4 补齐后切真实）。
+ * 显式设 VITE_AGENT_MOCK=0 可强制走真实接口。
+ */
+const api =
+  import.meta.env.DEV && import.meta.env.VITE_AGENT_MOCK !== '0'
+    ? mockAgentApi
+    : {
+        listSessions,
+        createSession,
+        fetchSessionSnapshot,
+        sendSessionMessage,
+        cancelSessionRun,
+        retrySessionRun,
+        subscribeSessionEvents,
+      };
 
 /** 对话消息（UI 模型） */
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  /** 结构化内容块（思考过程/需求理解/追问/生成卡），无结构化时为空数组 */
+  blocks?: SessionContentBlock[];
   /** 服务端事件序号（排序依据；本地乐观气泡为最大值） */
   sequence_no: number;
   /** 本地乐观上屏、尚未被服务端事件确认 */
@@ -50,6 +71,7 @@ const projectMessage = (m: SessionMessage): ChatMessage => ({
   id: m.message_id,
   role: m.role === 'user' ? 'user' : 'assistant',
   content: textOf(m.content),
+  blocks: m.content ?? [],
   sequence_no: m.sequence,
 });
 
@@ -70,6 +92,8 @@ export function useAgentSession(projectId: string) {
   const [runningRunId, setRunningRunId] = useState<string | null>(null);
   /** 最近失败的 Run ID（供重试） */
   const [failedRunId, setFailedRunId] = useState<string | null>(null);
+  /** 当前运行中的思考过程步骤（reasoning_trace.updated.v1 流式累积） */
+  const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
 
   /** 流式累积缓冲 */
   const accRef = useRef('');
@@ -86,23 +110,24 @@ export function useAgentSession(projectId: string) {
   /** upsert 助手消息（按 message_id 幂等；与流式固化内容重复时合并） */
   const upsertAssistant = useCallback((msg: SessionMessage) => {
     const content = textOf(msg.content);
+    const blocks = msg.content ?? [];
     setMessages((prev) => {
       const idx = prev.findIndex((m) => m.id === msg.message_id);
       if (idx >= 0) {
         const next = [...prev];
-        next[idx] = { ...next[idx], content: content || next[idx].content, sequence_no: msg.sequence };
+        next[idx] = { ...next[idx], content: content || next[idx].content, blocks, sequence_no: msg.sequence };
         return next;
       }
       // 与流式固化的助手消息内容一致 → 替换其 id（避免重复气泡）
       const dupIdx = content ? prev.findIndex((m) => m.role === 'assistant' && m.content === content) : -1;
       if (dupIdx >= 0) {
         const next = [...prev];
-        next[dupIdx] = { ...next[dupIdx], id: msg.message_id, sequence_no: msg.sequence };
+        next[dupIdx] = { ...next[dupIdx], id: msg.message_id, blocks, sequence_no: msg.sequence };
         return next;
       }
       return [
         ...prev,
-        { id: msg.message_id, role: 'assistant' as const, content, sequence_no: msg.sequence },
+        { id: msg.message_id, role: 'assistant' as const, content, blocks, sequence_no: msg.sequence },
       ];
     });
   }, []);
@@ -154,6 +179,13 @@ export function useAgentSession(projectId: string) {
 
       if (t === 'stream.ready') return;
 
+      /* ---- 思考过程流式更新（可折叠展示） ---- */
+      if (t === 'reasoning_trace.updated.v1') {
+        const steps = Array.isArray(payload.steps) ? payload.steps.map((s) => str(s)).filter(Boolean) : [];
+        if (steps.length > 0) setThinkingSteps(steps);
+        return;
+      }
+
       /* ---- 用户消息确认 ---- */
       if (t === 'message.accepted') {
         const msg = payload.message as SessionMessage | undefined;
@@ -198,6 +230,7 @@ export function useAgentSession(projectId: string) {
         const run = (payload.run ?? {}) as Record<string, unknown>;
         const runId = str(run.run_id ?? data.run_id);
         settleStream(runId);
+        setThinkingSteps([]);
         if (t === 'run.failed') {
           setFailedRunId(runId || null);
         }
@@ -219,6 +252,7 @@ export function useAgentSession(projectId: string) {
     setStreaming(false);
     setRunningRunId(null);
     setFailedRunId(null);
+    setThinkingSteps([]);
   }, []);
 
   /** 初始化：列表取最近会话（无则创建）→ 快照水合 → 订阅事件流 */
@@ -231,18 +265,18 @@ export function useAgentSession(projectId: string) {
 
     (async () => {
       try {
-        const { items } = await listSessions(projectId);
-        const session = items?.[0] ?? (await createSession(projectId));
+        const { items } = await api.listSessions(projectId);
+        const session = items?.[0] ?? (await api.createSession(projectId));
         if (!alive || !session?.session_id) return;
         setSessionId(session.session_id);
-        const snap = await fetchSessionSnapshot(projectId, session.session_id);
+        const snap = await api.fetchSessionSnapshot(projectId, session.session_id);
         if (!alive) return;
         setMessages((snap.messages ?? []).map(projectMessage));
         if (snap.active_run?.run_id && !TERMINAL_STATUS.includes(snap.active_run.status)) {
           setRunningRunId(snap.active_run.run_id);
           setStreaming(true);
         }
-        unsub = subscribeSessionEvents(
+        unsub = api.subscribeSessionEvents(
           projectId,
           session.session_id,
           snap.event_cursor ?? '',
@@ -278,7 +312,7 @@ export function useAgentSession(projectId: string) {
       setStreaming(true);
       // forcedSkillId 暂无对应会话维度字段，保留参数签名兼容技能 Use 入口
       void forcedSkillId;
-      sendSessionMessage(projectId, sid, text).catch((e) => {
+      api.sendSessionMessage(projectId, sid, text).catch((e) => {
         console.warn('Agent 消息发送失败:', e);
         setStreaming(false);
       });
@@ -291,7 +325,7 @@ export function useAgentSession(projectId: string) {
     const sid = sessionIdRef.current;
     const runId = runningRef.current;
     if (!projectId || !sid || !runId) return;
-    cancelSessionRun(projectId, sid, runId).catch((e) => {
+    api.cancelSessionRun(projectId, sid, runId).catch((e) => {
       console.warn('停止 Agent 运行失败:', e);
       setRunningRunId(null);
       setStreaming(false);
@@ -302,7 +336,7 @@ export function useAgentSession(projectId: string) {
   const retryRun = useCallback(() => {
     const sid = sessionIdRef.current;
     if (!projectId || !sid || failedRunId === null) return;
-    retrySessionRun(projectId, sid, failedRunId)
+    api.retrySessionRun(projectId, sid, failedRunId)
       .then(() => {
         setFailedRunId(null);
         setStreaming(true);
@@ -322,11 +356,11 @@ export function useAgentSession(projectId: string) {
     if (!projectId) return;
     resetLocal();
     setSessionId(null);
-    createSession(projectId)
+    api.createSession(projectId)
       .then(async (session) => {
         if (!session?.session_id) return;
         setSessionId(session.session_id);
-        const snap = await fetchSessionSnapshot(projectId, session.session_id);
+        const snap = await api.fetchSessionSnapshot(projectId, session.session_id);
         setMessages((snap.messages ?? []).map(projectMessage));
       })
       .catch((e) => console.warn('创建新会话失败:', e));
@@ -339,6 +373,7 @@ export function useAgentSession(projectId: string) {
     streaming,
     runningRunId,
     failedRunId,
+    thinkingSteps,
     sendMessage,
     stopRun,
     retryRun,
