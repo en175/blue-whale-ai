@@ -79,6 +79,7 @@ export default function AudioDialog({ onClose, onSend, onSwitchToMusic }: AudioD
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
         rows={2}
+        maxLength={3000}
       />
 
       {/* 底部状态栏 */}
