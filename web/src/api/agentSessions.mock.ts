@@ -21,6 +21,8 @@ interface MockSession {
   messages: SessionMessage[];
   seq: number;
   cursor: number;
+  /** 当前演示流程类型（首条用户消息检测；video 视频 4 卡 / image 图片单卡） */
+  flow: 'video' | 'image';
 }
 
 const sessions = new Map<string, MockSession>();
@@ -48,6 +50,7 @@ function ensure(projectId: string, sessionId: string): MockSession {
       messages: [],
       seq: 0,
       cursor: 0,
+      flow: 'video',
     };
     sessions.set(k, s);
   }
@@ -120,7 +123,7 @@ function assistantMessage(
 function runFlow(projectId: string, sessionId: string, turn: 'intent' | 'summary' | 'confirm'): void {
   const runId = `run-${++runSeq}`;
   const s = ensure(projectId, sessionId);
-
+  const flow = s.flow;
   const push = (type: string, data: Record<string, unknown>) => emit(projectId, sessionId, type, data);
 
   /* ---- turn: intent（用户首条需求 → 判断 + 追问） ---- */
@@ -136,28 +139,49 @@ function runFlow(projectId: string, sessionId: string, turn: 'intent' | 'summary
     at(240, () => push('run.started', { payload: { run: { run_id: runId, status: 'started' } }, run_id: runId }));
     at(360, () =>
       push('reasoning_trace.updated.v1', {
-        payload: { run_id: runId, steps: ['正在识别任务类型：这是商品展示视频需求，不是立即生成动作。'] },
+        payload: {
+          run_id: runId,
+          steps: [
+            flow === 'image'
+              ? '正在识别任务类型：这是图片生成需求，不是立即生成动作。'
+              : '正在识别任务类型：这是商品展示视频需求，不是立即生成动作。',
+          ],
+        },
         run_id: runId,
       }),
     );
     at(480, () =>
       push('assistant.delta', {
         payload: {
-          text: '我会先确认你要做的视频方向和素材使用方式。确认前不会生成分镜提示词生成卡，也不会触发生成。',
+          text:
+            flow === 'image'
+              ? '我会先确认你要的图片方向和素材使用方式。确认前不会生成生成卡，也不会触发生成。'
+              : '我会先确认你要做的视频方向和素材使用方式。确认前不会生成分镜提示词生成卡，也不会触发生成。',
           stream_id: `assistant_run_${runId}`,
         },
         run_id: runId,
       }),
     );
+    const clarify = flow === 'image'
+      ? ['用途：电商主图 / 详情页 / 海报 / 插画', '画面比例：9:16 / 1:1 / 16:9', '风格倾向：高级 / 简约 / 插画风 / 写实']
+      : [
+          '投放平台：小红书 / 抖音 / 淘宝 / 京东',
+          '画面比例：9:16 / 1:1 / 16:9',
+          '视频时长：15 秒 / 30 秒',
+          '核心卖点：保温、材质、容量、外观等',
+        ];
     const reply = assistantMessage(projectId, sessionId, [
-      textBlock('我会先确认你要做的视频方向和素材使用方式。确认前不会生成分镜提示词生成卡，也不会触发生成。'),
-      thinkingBlock(['正在识别任务类型：这是商品展示视频需求，不是立即生成动作。']),
-      clarifyBlock([
-        '投放平台：小红书 / 抖音 / 淘宝 / 京东',
-        '画面比例：9:16 / 1:1 / 16:9',
-        '视频时长：15 秒 / 30 秒',
-        '核心卖点：保温、材质、容量、外观等',
+      textBlock(
+        flow === 'image'
+          ? '我会先确认你要的图片方向和素材使用方式。确认前不会生成生成卡，也不会触发生成。'
+          : '我会先确认你要做的视频方向和素材使用方式。确认前不会生成分镜提示词生成卡，也不会触发生成。',
+      ),
+      thinkingBlock([
+        flow === 'image'
+          ? '正在识别任务类型：这是图片生成需求，不是立即生成动作。'
+          : '正在识别任务类型：这是商品展示视频需求，不是立即生成动作。',
       ]),
+      clarifyBlock(clarify),
     ], runId);
     at(720, () =>
       push('run.completed', {
@@ -180,29 +204,55 @@ function runFlow(projectId: string, sessionId: string, turn: 'intent' | 'summary
     at(120, () => push('run.started', { payload: { run: { run_id: runId, status: 'started' } }, run_id: runId }));
     at(240, () =>
       push('reasoning_trace.updated.v1', {
-        payload: { run_id: runId, steps: ['正在把用户补充内容整理成需求理解，等待明确确认。'] },
+        payload: {
+          run_id: runId,
+          steps: [
+            flow === 'image'
+              ? '正在把图片需求整理成需求理解，等待明确确认。'
+              : '正在把用户补充内容整理成需求理解，等待明确确认。',
+          ],
+        },
         run_id: runId,
       }),
     );
     at(360, () =>
       push('assistant.delta', {
         payload: {
-          text: '做一条 15 秒小红书竖版保温杯产品展示视频，整体风格高级、干净、商业产品摄影感。请确认以下需求理解。',
+          text:
+            flow === 'image'
+              ? '生成一张高级干净的保温杯产品图，突出哑光深灰杯身、黑色旋盖和商业摄影质感。请确认以下需求理解。'
+              : '做一条 15 秒小红书竖版保温杯产品展示视频，整体风格高级、干净、商业产品摄影感。请确认以下需求理解。',
           stream_id: `assistant_run_${runId}`,
         },
         run_id: runId,
       }),
     );
     const reply = assistantMessage(projectId, sessionId, [
-      textBlock('做一条 15 秒小红书竖版保温杯产品展示视频，整体风格高级、干净、商业产品摄影感。请确认以下需求理解。'),
-      thinkingBlock(['正在把用户补充内容整理成需求理解，等待明确确认。']),
-      understandingBlock({
-        goal: '生成一条 15 秒小红书竖版保温杯产品展示视频',
-        assets: ['@保温杯主图', '@杯盖材质细节', '@生活场景图'],
-        direction: '高级、干净、商业产品摄影感，突出哑光金属质感、杯盖细节和日常生活场景',
-        specs: ['小红书', '9:16', '15 秒', '商品广告'],
-        uncertainties: ['核心卖点倾向（保温 / 材质 / 容量）以默认展开，可在确认前调整'],
-      }),
+      textBlock(
+        flow === 'image'
+          ? '生成一张高级干净的保温杯产品图，突出哑光深灰杯身、黑色旋盖和商业摄影质感。请确认以下需求理解。'
+          : '做一条 15 秒小红书竖版保温杯产品展示视频，整体风格高级、干净、商业产品摄影感。请确认以下需求理解。',
+      ),
+      thinkingBlock([
+        flow === 'image'
+          ? '正在把图片需求整理成需求理解，等待明确确认。'
+          : '正在把用户补充内容整理成需求理解，等待明确确认。',
+      ]),
+      flow === 'image'
+        ? understandingBlock({
+            goal: '生成一张高级干净的保温杯产品图',
+            assets: ['@保温杯主图'],
+            direction: '高端不锈钢保温杯产品摄影，哑光深灰杯身，黑色旋盖，浅灰渐变背景，柔和棚拍灯光',
+            specs: ['图片', '9:16', '商品广告'],
+            uncertainties: ['是否突出保温杯品牌 Logo（默认不突出，可在确认前调整）'],
+          })
+        : understandingBlock({
+            goal: '生成一条 15 秒小红书竖版保温杯产品展示视频',
+            assets: ['@保温杯主图', '@杯盖材质细节', '@生活场景图'],
+            direction: '高级、干净、商业产品摄影感，突出哑光金属质感、杯盖细节和日常生活场景',
+            specs: ['小红书', '9:16', '15 秒', '商品广告'],
+            uncertainties: ['核心卖点倾向（保温 / 材质 / 容量）以默认展开，可在确认前调整'],
+          }),
     ], runId);
     at(560, () =>
       push('run.completed', {
@@ -224,28 +274,49 @@ function runFlow(projectId: string, sessionId: string, turn: 'intent' | 'summary
   at(120, () => push('run.started', { payload: { run: { run_id: runId, status: 'started' } }, run_id: runId }));
   at(240, () =>
     push('reasoning_trace.updated.v1', {
-      payload: { run_id: runId, steps: ['需求理解已确认，正在按镜头 1 / 2 / 3 / 4 生成分镜提示词生成卡。'] },
+      payload: {
+        run_id: runId,
+        steps: [
+          flow === 'image'
+            ? '需求理解已确认，正在把图片需求整理成可手动应用的生成卡。'
+            : '需求理解已确认，正在按镜头 1 / 2 / 3 / 4 生成分镜提示词生成卡。',
+        ],
+      },
       run_id: runId,
     }),
   );
   at(360, () =>
     push('assistant.delta', {
       payload: {
-        text: '需求理解已确认。下面按视频时间顺序展示 4 张分镜提示词生成卡，每张卡都可单独自然语言修改或手动应用。',
+        text:
+          flow === 'image'
+            ? '需求理解已确认。下面展示图片生成卡，可自然语言修改或手动应用。'
+            : '需求理解已确认。下面按视频时间顺序展示 4 张分镜提示词生成卡，每张卡都可单独自然语言修改或手动应用。',
         stream_id: `assistant_run_${runId}`,
       },
       run_id: runId,
     }),
   );
-  const cards: SessionContentBlock['card'][] = [
-    {
-      cardId: 'gc-1',
-      shotTitle: '镜头 1 · 光影揭幕',
-      timeRange: '0-4s',
-      visual: '纯黑背景中侧光扫过，保温杯轮廓逐渐显现。',
-      prompt: '哑光深灰不锈钢保温杯，黑色旋盖，纯黑背景，单侧柔光扫过杯身，轮廓从暗部显现，商业产品摄影，9:16，无字幕无水印。',
-      assetRefs: ['@保温杯主图'],
-    },
+  const cards: SessionContentBlock['card'][] =
+    flow === 'image'
+      ? [
+          {
+            cardId: 'igc-1',
+            shotTitle: '图片生成卡 · 保温杯产品图',
+            visual: '高端不锈钢保温杯产品摄影，哑光深灰杯身，黑色旋盖，浅灰渐变背景，柔和棚拍灯光。',
+            prompt: '高端不锈钢保温杯产品摄影，哑光深灰杯身，黑色旋盖，浅灰渐变背景，柔和棚拍灯光，商业广告摄影风格，主体清晰居中，无水印无 Logo。',
+            assetRefs: ['@保温杯主图'],
+          },
+        ]
+      : [
+          {
+            cardId: 'gc-1',
+            shotTitle: '镜头 1 · 光影揭幕',
+            timeRange: '0-4s',
+            visual: '纯黑背景中侧光扫过，保温杯轮廓逐渐显现。',
+            prompt: '哑光深灰不锈钢保温杯，黑色旋盖，纯黑背景，单侧柔光扫过杯身，轮廓从暗部显现，商业产品摄影，9:16，无字幕无水印。',
+            assetRefs: ['@保温杯主图'],
+          },
     {
       cardId: 'gc-2',
       shotTitle: '镜头 2 · 材质微距',
@@ -272,8 +343,16 @@ function runFlow(projectId: string, sessionId: string, turn: 'intent' | 'summary
     },
   ];
   const reply = assistantMessage(projectId, sessionId, [
-    textBlock('需求理解已确认。下面按视频时间顺序展示 4 张分镜提示词生成卡，每张卡都可单独自然语言修改或手动应用。'),
-    thinkingBlock(['需求理解已确认，正在按镜头 1 / 2 / 3 / 4 生成分镜提示词生成卡。']),
+    textBlock(
+      flow === 'image'
+        ? '需求理解已确认。下面展示图片生成卡，可自然语言修改或手动应用。'
+        : '需求理解已确认。下面按视频时间顺序展示 4 张分镜提示词生成卡，每张卡都可单独自然语言修改或手动应用。',
+    ),
+    thinkingBlock([
+      flow === 'image'
+        ? '需求理解已确认，正在把图片需求整理成可手动应用的生成卡。'
+        : '需求理解已确认，正在按镜头 1 / 2 / 3 / 4 生成分镜提示词生成卡。',
+    ]),
     ...cards.map((c) => ({ type: 'card' as const, card: c })),
   ], runId);
   at(560, () =>
@@ -407,6 +486,10 @@ export function sendSessionMessage(
   text: string,
 ): Promise<SessionMessageAck> {
   const s = ensure(projectId, sessionId);
+  // 首条用户消息：检测流程类型（图片/插画/海报/产品图/照片 → image；其余默认 video）
+  if (s.messages.filter((m) => m.role === 'user').length === 0) {
+    s.flow = /(图片|插画|海报|产品图|照片|图像|一张|个图)/.test(text) ? 'image' : 'video';
+  }
   const msg = userMessage(s, text);
   s.messages.push(msg);
   const turn = nextTurn(s);
