@@ -882,6 +882,87 @@
   color: var(--color-text-secondary);
 }
 
+/* 追问可交互（B1）：选项组 + 自由补充 */
+.clarifyItem {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.clarifyLabel {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.clarifyOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.clarifyOption {
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-secondary);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+}
+
+.clarifyOption:hover {
+  background-color: var(--color-bg-hover);
+  border-color: var(--color-border-hover);
+}
+
+.clarifyLineBtn {
+  padding: 4px 10px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+  border-radius: var(--radius-sm);
+}
+
+.clarifyLineBtn:hover {
+  color: var(--color-accent-text);
+  background-color: var(--color-bg-hover);
+}
+
+.clarifyInputRow {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.clarifyInput {
+  flex: 1;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border-secondary);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  outline: none;
+  transition: border-color var(--transition-fast);
+  font-family: inherit;
+}
+
+.clarifyInput:focus {
+  border-color: var(--color-border-hover);
+}
+
+.clarifyInput::placeholder {
+  color: var(--color-text-tertiary);
+}
+
 /* ---- 分镜提示词生成卡（S2） ---- */
 .generationCard {
   border: 1px solid var(--color-border-secondary);

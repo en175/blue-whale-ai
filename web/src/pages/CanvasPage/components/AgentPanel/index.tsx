@@ -152,17 +152,73 @@ function UnderstandingCard({
   );
 }
 
-/** 追问卡：待补充的关键问题 */
-function ClarifyCard({ questions }: { questions: string[] }) {
+/** 追问卡：待补充的关键问题（可点选选项直接补充，或输入自由补充） */
+function ClarifyCard({ questions, onPick, onFreeText }: {
+  questions: string[];
+  onPick: (value: string) => void;
+  onFreeText: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState('');
   if (questions.length === 0) return null;
   return (
     <div className={styles.clarifyCard}>
       <div className={styles.cardTitle}>需要补充</div>
       <ul className={styles.clarifyList}>
-        {questions.map((q) => (
-          <li key={q}>{q}</li>
-        ))}
+        {questions.map((q) => {
+          const [label, ...options] = q.split('：');
+          const values = options.join('：').split(/[、/]/).map((s) => s.trim()).filter(Boolean);
+          // 有选项（含「/」分隔）→ 渲染为可点选组；否则渲染为可点选单条
+          return values.length > 1 ? (
+            <li key={q} className={styles.clarifyItem}>
+              <span className={styles.clarifyLabel}>{label}：</span>
+              <div className={styles.clarifyOptions}>
+                {values.map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className={styles.clarifyOption}
+                    onClick={() => onPick(`${label}：${v}`)}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </li>
+          ) : (
+            <li key={q}>
+              <button type="button" className={styles.clarifyLineBtn} onClick={() => onPick(q)}>
+                {q}
+              </button>
+            </li>
+          );
+        })}
       </ul>
+      <div className={styles.clarifyInputRow}>
+        <input
+          className={styles.clarifyInput}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              const v = draft.trim();
+              if (v) onFreeText(v);
+            }
+          }}
+          placeholder="其他补充信息…"
+        />
+        <button
+          type="button"
+          className={styles.cardBtnPrimary}
+          disabled={!draft.trim()}
+          onClick={() => {
+            const v = draft.trim();
+            if (v) onFreeText(v);
+          }}
+        >
+          补充
+        </button>
+      </div>
     </div>
   );
 }
@@ -231,6 +287,8 @@ function AssistantMessageBody({
   onModify,
   onCardModify,
   onCardApply,
+  onClarifyPick,
+  onClarifyFreeText,
   disabled,
   appliedCardIds,
 }: {
@@ -240,6 +298,8 @@ function AssistantMessageBody({
   onModify: () => void;
   onCardModify: (card: NonNullable<SessionContentBlock['card']>) => void;
   onCardApply: (card: NonNullable<SessionContentBlock['card']>) => void;
+  onClarifyPick: (value: string) => void;
+  onClarifyFreeText: (value: string) => void;
   disabled: boolean;
   appliedCardIds: Set<string>;
 }) {
@@ -266,7 +326,14 @@ function AssistantMessageBody({
           );
         }
         if (b.type === 'clarify' && b.clarify?.questions) {
-          return <ClarifyCard key={i} questions={b.clarify.questions} />;
+          return (
+            <ClarifyCard
+              key={i}
+              questions={b.clarify.questions}
+              onPick={onClarifyPick}
+              onFreeText={onClarifyFreeText}
+            />
+          );
         }
         if (b.type === 'card' && b.card) {
           const cardId = b.card.cardId ?? b.card.shotTitle;
@@ -521,6 +588,18 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
     setInputValue('修改方向：');
   };
 
+  /** 追问卡点选补充：发送具体选项作为补充消息（走新 AgentRun） */
+  const handleClarifyPick = (value: string) => {
+    if (runningRunId !== null || streaming) return;
+    sendMessage(value);
+  };
+
+  /** 追问卡自由补充：发送输入的自由文本 */
+  const handleClarifyFreeText = (value: string) => {
+    if (runningRunId !== null || streaming) return;
+    sendMessage(value);
+  };
+
   /** 自然语言修改某张生成卡：预填修改指令到输入框，进入新的 AgentRun */
   const handleCardModify = (card: NonNullable<SessionContentBlock['card']>) => {
     setInputValue(`修改「${card.shotTitle}」：`);
@@ -631,6 +710,8 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
                   onModify={handleModify}
                   onCardModify={handleCardModify}
                   onCardApply={handleCardApply}
+                  onClarifyPick={handleClarifyPick}
+                  onClarifyFreeText={handleClarifyFreeText}
                   disabled={runningRunId !== null || streaming}
                   appliedCardIds={appliedCardIds}
                 />
