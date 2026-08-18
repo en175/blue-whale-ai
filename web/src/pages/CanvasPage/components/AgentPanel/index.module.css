@@ -965,3 +965,48 @@
   color: #7ee4a7;
   line-height: 1.6;
 }
+
+/* ---- 侧边栏状态条（S5） ---- */
+.phaseBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-secondary);
+  background-color: var(--color-bg-tertiary);
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+
+.phaseDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--color-accent-primary, #d5f06a);
+}
+
+.phase_processing .phaseDot,
+.phase_generating_cards .phaseDot,
+.phase_applying .phaseDot {
+  animation: phasePulse 1.2s ease-in-out infinite;
+}
+
+.phase_awaiting_confirm .phaseDot,
+.phase_awaiting_input .phaseDot {
+  background-color: #f5c26b;
+}
+
+.phase_applied .phaseDot {
+  background-color: #7ee4a7;
+}
+
+.phase_failed .phaseDot {
+  background-color: #ef6a6a;
+}
+
+@keyframes phasePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}

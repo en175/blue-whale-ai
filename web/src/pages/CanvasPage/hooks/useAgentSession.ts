@@ -7,7 +7,7 @@
  * - assistant.delta → 流式文本投影；run.completed → 助手消息固化
  * - run.failed → 重试；取消运行走 runs/:runId/cancel
  * ============================================ */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   listSessions,
   createSession,
@@ -52,6 +52,18 @@ export interface ChatMessage {
   /** 本地乐观上屏、尚未被服务端事件确认 */
   optimistic?: boolean;
 }
+
+/** 侧边栏用户可见状态（对齐 04-侧边栏规范 §7） */
+export type AgentPhase =
+  | 'idle' // 等待输入
+  | 'processing' // Agent 处理中
+  | 'awaiting_input' // 等待用户补充（追问后）
+  | 'awaiting_confirm' // 等待用户确认理解（确认门）
+  | 'generating_cards' // 生成卡生成中
+  | 'cards_ready' // 生成卡已生成
+  | 'applying' // 生成卡应用中
+  | 'applied' // 生成卡已应用
+  | 'failed'; // Agent 端处理失败
 
 /** 运行终态集合（status_changed/run.* 终态判定） */
 const TERMINAL_STATUS = ['completed', 'succeeded', 'failed', 'cancelled', 'canceled', 'stopped'];
@@ -366,6 +378,29 @@ export function useAgentSession(projectId: string) {
       .catch((e) => console.warn('创建新会话失败:', e));
   }, [projectId, resetLocal]);
 
+  /** 侧边栏状态机推导：最新助手消息的内容块类型 + 运行态 → 用户可见状态 */
+  const agentPhase = useMemo<AgentPhase>(() => {
+    if (failedRunId !== null) return 'failed';
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    const blocks = lastAssistant?.blocks ?? [];
+    const hasThinking = blocks.some((b) => b.type === 'thinking');
+    const hasClarify = blocks.some((b) => b.type === 'clarify');
+    const hasUnderstanding = blocks.some((b) => b.type === 'understanding');
+    const hasCards = blocks.some((b) => b.type === 'card');
+
+    // 运行中：无产出 → 处理中；已确认 → 生成卡生成中
+    if (runningRunId !== null || streaming) {
+      if (hasCards) return 'generating_cards';
+      return 'processing';
+    }
+    // 非运行：按最新产出块判定
+    if (hasClarify) return 'awaiting_input';
+    if (hasUnderstanding) return 'awaiting_confirm';
+    if (hasCards) return 'cards_ready';
+    if (messages.length === 0 && !hasThinking) return 'idle';
+    return 'processing';
+  }, [messages, runningRunId, streaming, failedRunId]);
+
   return {
     messages,
     sessionId,
@@ -374,6 +409,7 @@ export function useAgentSession(projectId: string) {
     runningRunId,
     failedRunId,
     thinkingSteps,
+    agentPhase,
     sendMessage,
     stopRun,
     retryRun,

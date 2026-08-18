@@ -17,7 +17,7 @@ import {
 import styles from './index.module.css';
 import { isApiError } from '@/api/http';
 import { fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
-import { useAgentSession, type ChatMessage } from '../../hooks/useAgentSession';
+import { useAgentSession, type ChatMessage, type AgentPhase } from '../../hooks/useAgentSession';
 import type { SessionContentBlock } from '@/api/agentSessions';
 import SkillModal from '@/pages/Home/components/SkillModal';
 
@@ -312,6 +312,19 @@ const quickQuestions = [
   },
 ];
 
+/** 侧边栏状态文案（对齐 04-侧边栏规范 §7 用户感知） */
+const phaseLabels: Record<AgentPhase, string> = {
+  idle: '等待输入',
+  processing: 'Agent 处理中',
+  awaiting_input: '等待你补充',
+  awaiting_confirm: '等待你确认需求理解',
+  generating_cards: '正在整理分镜提示词',
+  cards_ready: '生成卡已就绪',
+  applying: '正在应用到 Canvas dock',
+  applied: '已进入 Canvas dock',
+  failed: '处理失败',
+};
+
 /** 默认位置（页面中间偏右） */
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
@@ -341,6 +354,7 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
     runningRunId,
     failedRunId,
     thinkingSteps,
+    agentPhase,
     sendMessage,
     stopRun,
     retryRun,
@@ -598,6 +612,13 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
       ) : (
         /* 对话消息流 */
         <div className={styles.messageList} ref={listRef}>
+          {/* 侧边栏状态条（S5：状态机用户可见反馈） */}
+          {messages.length > 0 && agentPhase !== 'idle' && (
+            <div className={`${styles.phaseBar} ${styles[`phase_${agentPhase}`] ?? ''}`}>
+              <span className={styles.phaseDot} />
+              {phaseLabels[agentPhase]}
+            </div>
+          )}
           {messages.map((m) =>
             m.role === 'user' ? (
               <div key={m.id} className={styles.userBubble}>{m.content}</div>
