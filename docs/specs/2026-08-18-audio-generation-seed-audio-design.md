@@ -22,17 +22,20 @@ Blue-Whale 已有图片/视频生成的 GenerationJob 治理管线（成本预�
 | 入口 | 仅画布 Dock 直生（AudioDialog） |
 | 参数 | 仅 `text_prompt`；输出 mp3、水印等由后端默认固定 |
 
-## 上游契约（seed-audio-1.0，以官方文档为准）
+## 上游契约（确认版 2026-08-18）
 
-- 端点：`POST https://openspeech.bytedance.com/api/v3/tts/create`
-- 鉴权：`X-Api-Key` 单头（新版控制台；旧版双头即将下线，不用）
-- `model`：`seed-audio-1.0`（唯一）
-- `text_prompt`：必填，≤3000 字符
-- `audio_config`：`format` 支持 wav/mp3/pcm/ogg_opus；`sample_rate` 默认 40000
-- 水印：显式 `aigc_watermark` / 隐式 `aigc_metadata`（后端固定）
-- 响应：`audio`（Base64）/ `url`（2h 有效）/ `duration` / `original_duration`（计费口径，上限 120s）
-- 参考资源（`references`）：本期不使用
-- 注意：搜索到的第三方资料（sample_rate 默认 24000、text_prompt 上限 2048）与官方文档不符，以官方文档为准。
+**产品侧实际调用 new-api 端点(OpenAI 兼容,由同事负责 new-api Go 适配器):**
+- 端点:`POST {new-api}/v1/audio/speech`
+- 鉴权:`Authorization: Bearer {用户 sk-token}`(经 `sealProviderCredential` 密封,不落明文)
+- 请求体:`{ "model": "seed-audio-1.0", "input": "<文本>", "response_format": "mp3" }`(`voice`/`speed` 可选,一期不传)
+- 响应:**原始音频字节(audio/mpeg)**;计费 `requestId` 取自响应头 `X-Oneapi-Request-Id`
+- 同步、无 task 轮询;watermark 由 new-api/上游固定
+
+**new-api 背后的豆包 seed-audio-1.0 原生契约(供 new-api 适配器参考,官方文档):**
+- 端点：`POST https://openspeech.bytedance.com/api/v3/tts/create`；鉴权 `X-Api-Key` 单头
+- `text_prompt` ≤3000 字符;`audio_config.format` 支持 wav/mp3/pcm/ogg_opus
+- 响应含 `audio`(Base64)/`url`(2h)/`duration`/`original_duration`(计费,上限 120s)
+- 取证结论:new-api 原生无此私有协议适配(2026-08-18 取证,见 blue-whale-api/.gitee_audio_tts_forensics.md),由同事新增 Go 适配器将其映射为 `/v1/audio/speech`。
 
 ## 架构与数据流
 
@@ -44,8 +47,8 @@ AudioDialog(画布)
           ├─ controller else 分支 → void processJob(进程内即时调度)
           │    └─ generation-worker.processClaimedJob: audio 分支
           │         ├─ 解密封 sk-token → createAudioProvider(token)
-          │         ├─ AudioProvider.generate({model, prompt}) → 结果 url(+mime/duration)
-          │         ├─ persistProviderMedia(url, "audio", …) → 转存 TOS
+          │         ├─ AudioProvider.generate({model, prompt}) → 结果 data(mp3 原始字节)
+          │         ├─ persistProviderMedia(data, "audio", …) → 直传转存 TOS
           │         └─ repo.createAsset({type:"audio", …}) → completeJob + settleReservation + log
           └─ 前端轮询 GET /api/jobs/:id → 资产库出现可播放音频节点
 ```
@@ -53,7 +56,7 @@ AudioDialog(画布)
 关键设计决策：
 
 - **控制器零改动**：`generation-jobs.controller.ts:56-77` 的分派逻辑已是 `video → 队列，其余 → 进程内 processJob`，`validate()` 放开 audio 后自动落入进程内即时调度。
-- **同步/异步自适应**：seed-audio-1.0 上游同步返回；若 new-api 将其包装为异步任务（返回 task_id），则在 `AudioProvider` 内部做 submit/poll，上层 worker 无感知。两种上游形态只影响 provider 一个文件。
+- **同步原始字节**：确认契约下 new-api `/v1/audio/speech` 同步返回 mp3 字节,无异步 task 轮询;`AudioProvider` 直接返回字节,`persistProviderMedia` 走 data 直传路径。
 - **恢复兜底**：音频与图片同生命周期（进程内任务），恢复扫描从 image-only 推广为 image+audio。
 
 ## 后端改动
