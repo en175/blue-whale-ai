@@ -99,6 +99,22 @@ test("classifies documentation assets without treating contracts as prose", asyn
   });
 });
 
+test("classifies docs prototype assets (js/css) as documentation, not executable code", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(
+      [
+        "docs/projects/agent-v0/prototype/app.js",
+        "docs/projects/agent-v0/prototype/styles.css",
+        "docs/projects/agent-v0/prototype/index.html",
+      ],
+      { stage: "pr" },
+    ),
+    { tier: "docs", reasons: ["only documentation files changed"] },
+  );
+});
+
 test("classifies the testing strategy itself as verification governance", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
