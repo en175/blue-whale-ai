@@ -8,8 +8,8 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { AtSign, Upload, WandSparkles, Info, Music } from 'lucide-react';
 import styles from './index.module.css';
 
-/** 资产卡类型 */
-export type AssetCardKind = 'style' | 'character' | 'object' | 'environment' | 'custom';
+/** 资产卡类型（generation 为 Agent 生成卡落画布形态） */
+export type AssetCardKind = 'style' | 'character' | 'object' | 'environment' | 'custom' | 'generation';
 
 /** 各类型标题与描述占位文案（对应设计稿） */
 const KIND_META: Record<AssetCardKind, { title: string; placeholder: string }> = {
@@ -18,7 +18,22 @@ const KIND_META: Record<AssetCardKind, { title: string; placeholder: string }> =
   object: { title: 'Object', placeholder: '描述形状、材质与颜色...' },
   environment: { title: 'Environment', placeholder: '描述布局、氛围、光照与情绪...' },
   custom: { title: 'Custom', placeholder: '添加此资产的备注或细节...' },
+  generation: { title: '生成卡', placeholder: '分镜提示词生成卡' },
 };
+
+/** Agent 生成卡数据（kind=generation 时承载，落画布后从节点选引用） */
+export interface GenerationCardNodeData {
+  cardId?: string;
+  shotTitle?: string;
+  timeRange?: string;
+  visual?: string;
+  prompt?: string;
+  assetRefs?: string[];
+  /** 引用到 Canvas dock */
+  onApplyToDock?: (payload: { prompt: string; assetRefs: string[]; cardId?: string; shotTitle?: string }) => void;
+  /** 给 Agent 继续修改 */
+  onSendToAgent?: (prompt: string) => void;
+}
 
 interface AssetCardNodeData {
   kind?: AssetCardKind;
@@ -31,6 +46,8 @@ interface AssetCardNodeData {
   onDelete?: (id: string) => void;
   /** 生成图片：唤起底部图片对话框 */
   onGenerateImage?: () => void;
+  /** Agent 生成卡数据（kind=generation） */
+  generationCard?: GenerationCardNodeData;
 }
 
 export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCardNodeData }) {
@@ -106,6 +123,59 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
           className={isSelect ? 'nodrag nopan' : undefined}
           style={isSelect ? undefined : { pointerEvents: 'none' }}
         >
+          {(data.kind ?? 'custom') === 'generation' && data.generationCard ? (
+            /* Agent 生成卡落画布形态：展示卡内容 + 引用到 dock / 给 Agent */
+            <div className={styles.body}>
+              <div className={styles.gcHeader}>
+                <span className={styles.gcTitle}>{data.generationCard.shotTitle ?? '生成卡'}</span>
+                {data.generationCard.timeRange && (
+                  <span className={styles.gcTime}>{data.generationCard.timeRange}</span>
+                )}
+              </div>
+              {data.generationCard.visual && (
+                <div className={styles.gcField}>
+                  <span className={styles.gcLabel}>画面</span>
+                  <span className={styles.gcValue}>{data.generationCard.visual}</span>
+                </div>
+              )}
+              {data.generationCard.prompt && (
+                <div className={styles.gcField}>
+                  <span className={styles.gcLabel}>提示词</span>
+                  <span className={styles.gcValue}>{data.generationCard.prompt}</span>
+                </div>
+              )}
+              {data.generationCard.assetRefs && data.generationCard.assetRefs.length > 0 && (
+                <div className={styles.gcRefs}>
+                  {data.generationCard.assetRefs.map((r) => (
+                    <span key={r} className={styles.gcRef}>{r}</span>
+                  ))}
+                </div>
+              )}
+              <div className={styles.btnRow}>
+                <button
+                  className={styles.actionBtn}
+                  onClick={() =>
+                    data.generationCard?.onApplyToDock?.({
+                      prompt: data.generationCard?.prompt ?? '',
+                      assetRefs: data.generationCard?.assetRefs ?? [],
+                      cardId: data.generationCard?.cardId,
+                      shotTitle: data.generationCard?.shotTitle,
+                    })
+                  }
+                >
+                  <WandSparkles size={15} strokeWidth={2} />
+                  <span>引用到 dock</span>
+                </button>
+                <button
+                  className={styles.actionBtn}
+                  onClick={() => data.generationCard?.onSendToAgent?.(data.generationCard?.prompt ?? '')}
+                >
+                  <AtSign size={15} strokeWidth={2} />
+                  <span>给 Agent</span>
+                </button>
+              </div>
+            </div>
+          ) : (
           <div className={styles.body}>
             <span className={styles.dropHint}>从画布拖入</span>
             <textarea
@@ -130,6 +200,7 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
               <span>{refs.length} 张参考图</span>
             </span>
           </div>
+          )}
           <input
             ref={fileRef}
             type="file"

@@ -174,6 +174,24 @@ export default function CanvasPage() {
             setAssetNodes((prev) => prev.filter((n) => n.id !== id));
           },
           onGenerateImage: () => actionsRef.current.openImageDialog(),
+          // 生成卡节点水合后补动作回调（引用到 dock / 给 Agent）
+          generationCard: base.data?.generationCard
+            ? {
+                ...base.data.generationCard,
+                onApplyToDock: (apply: { prompt: string; assetRefs: string[]; cardId?: string; shotTitle?: string }) => {
+                  setVideoSeed({ ts: Date.now(), refs: [] });
+                  setShowBottomDialog(true);
+                  setShowImageDialog(false);
+                  setShowAudioDialog(false);
+                  setShowMusicDialog(false);
+                  void apply;
+                },
+                onSendToAgent: (prompt: string) => {
+                  setAgentContext({ text: prompt, ts: Date.now() });
+                  setShowAgent(true);
+                },
+              }
+            : base.data?.generationCard,
         };
         break;
       default:
@@ -232,9 +250,9 @@ export default function CanvasPage() {
     // 参考卡（Agent 计划产物）：cardType 对应资产卡五种类型
     if (node.type === 'reference') {
       const cardType = typeof raw.cardType === 'string' ? raw.cardType : 'custom';
-      const kind: AssetCardKind = (['style', 'character', 'object', 'environment', 'custom'] as const).includes(
-        cardType as AssetCardKind,
-      )
+      const kind: AssetCardKind = (
+        ['style', 'character', 'object', 'environment', 'custom'] as AssetCardKind[]
+      ).includes(cardType as AssetCardKind)
         ? (cardType as AssetCardKind)
         : 'custom';
       const refsRaw = Array.isArray(raw.references) ? raw.references : [];
@@ -810,14 +828,50 @@ export default function CanvasPage() {
   actionsRef.current.genAudio = handleNodeGenAudio;
   actionsRef.current.download = handleNodeDownload;
 
-  /** Agent 生成卡手动应用 → Canvas dock：注入 prompt 并打开底部对话框承接（S3） */
-  const handleAgentCardApply = (payload: { prompt: string; assetRefs: string[]; cardId?: string }) => {
-    setVideoSeed({ ts: Date.now(), refs: [] });
-    setShowBottomDialog(true);
-    setShowImageDialog(false);
-    setShowAudioDialog(false);
-    setShowMusicDialog(false);
-    void payload; // S4 补真实 dock 承接端点；此处 dock 主要承接 prompt，素材引用文本随消息带出
+  /** Agent 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent） */
+  const handleAgentCardApply = (payload: {
+    prompt: string;
+    assetRefs: string[];
+    cardId?: string;
+    shotTitle?: string;
+    visual?: string;
+    timeRange?: string;
+  }) => {
+    const node: Node = {
+      id: `gencard-${Date.now()}`,
+      type: 'assetNode',
+      position: { x: 320 + Math.random() * 120, y: 160 + Math.random() * 100 },
+      data: {
+        kind: 'generation',
+        generationCard: {
+          cardId: payload.cardId,
+          shotTitle: payload.shotTitle,
+          timeRange: payload.timeRange,
+          visual: payload.visual,
+          prompt: payload.prompt,
+          assetRefs: payload.assetRefs,
+          onApplyToDock: (apply: { prompt: string; assetRefs: string[]; cardId?: string; shotTitle?: string }) => {
+            // 引用到 dock：注入 videoSeed 打开底部对话框承接 prompt
+            setVideoSeed({ ts: Date.now(), refs: [] });
+            setShowBottomDialog(true);
+            setShowImageDialog(false);
+            setShowAudioDialog(false);
+            setShowMusicDialog(false);
+            void apply;
+          },
+          onSendToAgent: (prompt: string) => {
+            // 给 Agent：注入侧边栏输入框
+            setAgentContext({ text: prompt, ts: Date.now() });
+            setShowAgent(true);
+          },
+        },
+        onDelete: (id: string) => {
+          setAssetNodes((prev) => prev.filter((n) => n.id !== id));
+        },
+        onGenerateImage: () => actionsRef.current.openImageDialog(),
+      },
+    };
+    setAssetNodes((prev) => [...prev, node]);
   };
 
   /** 底部对话框发送 */
