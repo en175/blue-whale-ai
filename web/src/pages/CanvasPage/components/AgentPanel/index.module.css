@@ -1,0 +1,729 @@
+/* ============================================
+ * AgentPanel - Agent 浮动对话框
+ * ============================================ */
+
+.panel {
+  position: absolute;
+  width: calc(100vw / 3);
+  min-width: 380px;
+  height: calc(100% - var(--header-height) - 32px);
+  background-color: #1e1e1e;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  z-index: var(--z-dropdown);
+  animation: panelFadeIn 0.2s ease;
+  overflow: hidden;
+}
+
+/* 拖动指示图标 */
+.dragIndicator {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+}
+
+@keyframes panelFadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ---- 头部标题栏 ---- */
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-bottom: 1px solid var(--color-border-primary);
+  flex-shrink: 0;
+  user-select: none;
+  cursor: default;
+}
+
+.panelHeaderFloating {
+  cursor: grab;
+}
+
+.panelHeaderFloating:active {
+  cursor: grabbing;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.agentBadge {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--color-accent-primary), #7c3aed);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.versionTag {
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-tertiary);
+  font-weight: 500;
+}
+
+/* 新对话按钮 */
+.newChatBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-xl);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-tertiary);
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.newChatBtn:hover {
+  background-color: var(--color-bg-hover);
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.iconBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.iconBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* 浮动模式激活态 */
+.iconBtnActive {
+  color: var(--color-accent-text);
+  background-color: var(--color-bg-active);
+}
+
+.iconBtnActive:hover {
+  color: var(--color-accent-text);
+  background-color: var(--color-bg-active);
+}
+
+/* ---- 提示文案区域 ---- */
+.hintArea {
+  padding: var(--spacing-lg);
+  flex-shrink: 0;
+}
+
+.hintTitle {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.hintDesc {
+  font-size: var(--font-size-lg);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+/* ---- 快捷问题卡片 ---- */
+.quickCards {
+  padding: 0 var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  flex-shrink: 0;
+  margin-bottom: var(--spacing-lg);
+}
+
+.quickCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--spacing-md);
+  border-radius: var(--radius-lg);
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.quickCard:hover {
+  background-color: #333;
+  border-color: var(--color-border-hover);
+}
+
+.quickTitle {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.quickDesc {
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+}
+
+/* ---- 输入区域 ---- */
+.inputArea {
+  margin-top: auto;
+  padding: var(--spacing-md) var(--spacing-lg) var(--spacing-lg);
+  flex-shrink: 0;
+}
+
+.inputBox {
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-md);
+  transition: border-color var(--transition-fast);
+}
+
+.inputBox:focus-within {
+  border-color: var(--color-border-hover);
+}
+
+.textarea {
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-lg);
+  line-height: 1.6;
+  resize: none;
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+  display: block;
+}
+
+.textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+/* ---- 底部工具栏 ---- */
+.inputToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--spacing-sm);
+}
+
+.toolbarLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.toolbarRight {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.toolBtn {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.toolBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+}
+
+/* ---- 上传弹出 ---- */
+.uploadWrap {
+  position: relative;
+}
+
+.uploadPopup {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-xs);
+  min-width: 120px;
+  animation: popupFadeIn 0.15s ease;
+}
+
+@keyframes popupFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.uploadPopup button {
+  display: block;
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-lg);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.uploadPopup button:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.hiddenInput {
+  display: none;
+}
+
+/* ---- Skill 按钮 ---- */
+.skillBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  height: 40px;
+  padding: 0 var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 1px solid var(--color-border-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.skillBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+}
+
+/* ---- 模型选择器 ---- */
+.modelWrap {
+  position: relative;
+}
+
+.modelBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  height: 40px;
+  padding: 0 var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  min-width: 200px;
+  justify-content: center;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 1px solid var(--color-border-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.modelBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+}
+
+.modelArrow {
+  transition: transform var(--transition-fast);
+}
+
+.modelArrowUp {
+  transform: rotate(180deg);
+}
+
+.modelDropdown {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  min-width: 240px;
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-sm);
+  animation: popupFadeIn 0.15s ease;
+}
+
+.modelOption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-lg);
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.modelOption:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.modelOptionActive {
+  color: var(--color-accent-text);
+  background-color: var(--color-bg-active);
+  font-weight: 500;
+}
+
+/* 下拉头部标题/描述 */
+.modelDropdownHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md) var(--spacing-md);
+  border-bottom: 1px solid var(--color-border-primary);
+  margin-bottom: var(--spacing-xs);
+}
+
+.modelDropdownTitle {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.modelDropdownDesc {
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+}
+
+/* 消耗展示 */
+.modelCost {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+/* ---- 发送按钮 ---- */
+.sendBtn {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-bg-tertiary);
+  border: none;
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+  opacity: 0.5;
+}
+
+.sendBtnActive {
+  background-color: #4a4a4a;
+  cursor: pointer;
+  opacity: 1;
+}
+
+.sendBtnActive:hover {
+  background-color: #555;
+}
+
+/* 运行中：发送按钮切换为停止 */
+.stopBtnActive {
+  background-color: #4a4a4a;
+  cursor: pointer;
+  opacity: 1;
+}
+
+.stopBtnActive:hover {
+  background-color: #5a3a3a;
+}
+
+/* 重试失败运行按钮 */
+.retryBtn {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-bg-tertiary);
+  border: none;
+  color: #ccc;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.retryBtn:hover {
+  background-color: #555;
+}
+
+/* ---- 对话消息流 ---- */
+.messageList {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+/* 用户气泡：右对齐深灰圆角 */
+.userBubble {
+  align-self: flex-end;
+  max-width: 85%;
+  background-color: #2f2f2f;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: var(--font-size-lg);
+  line-height: 1.7;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Agent 回复：左对齐 markdown 文本块 */
+.assistantBlock {
+  align-self: flex-start;
+  max-width: 95%;
+  color: #d6d6d6;
+  font-size: var(--font-size-lg);
+  line-height: 1.9;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  word-break: break-word;
+}
+
+.mdH {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-top: 4px;
+}
+
+.mdLi {
+  padding-left: 4px;
+}
+
+.mdQuote {
+  color: var(--color-text-tertiary);
+}
+
+.mdP {
+  margin: 0;
+}
+
+.assistantBlock code {
+  background-color: #2a2a2a;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+}
+
+/* 运行中：取消运行按钮（右对齐） */
+.cancelRow {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cancelBtn {
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-secondary);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.cancelBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+}
+
+/* ---- Run 级技能推荐区域 ---- */
+.recommendArea {
+  flex-shrink: 0;
+  padding: 8px 16px 4px;
+}
+
+.recommendTitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  margin-bottom: 6px;
+}
+
+.recommendList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.recommendItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background-color: #262626;
+  border: 1px solid var(--color-border-secondary);
+}
+
+.recommendInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.recommendName {
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recommendDesc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recommendUseBtn {
+  flex-shrink: 0;
+  padding: 4px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-hover);
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.recommendUseBtn:hover:not(:disabled) {
+  background-color: #333;
+}
+
+.recommendUseBtn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.recommendUsed {
+  color: var(--color-text-tertiary);
+  border-color: var(--color-border-secondary);
+}
+
+/* ---- Skill 模态框 ---- */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+  animation: overlayFadeIn 0.2s ease;
+}
+
+@keyframes overlayFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.modal {
+  width: 360px;
+  background-color: #1e1e1e;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-lg);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.modalTitle {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.modalBody {
+  padding: var(--spacing-md);
+}
+
+.skillItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-lg);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.skillItem:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}

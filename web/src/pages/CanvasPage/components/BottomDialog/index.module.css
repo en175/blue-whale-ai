@@ -1,0 +1,615 @@
+/* ============================================
+ * BottomDialog - 画布底部对话框
+ * ============================================ */
+
+.dialog {
+  position: absolute;
+  bottom: var(--spacing-2xl);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 760px;
+  max-width: 90%;
+  background-color: #1e1e1e;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 16px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  padding: var(--spacing-xl);
+  z-index: 10;
+  animation: dialogFadeIn 0.2s ease;
+}
+
+@keyframes dialogFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ---- 关闭按钮 ---- */
+.closeBtn {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  z-index: 1;
+}
+
+.closeBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---- 顶部媒体切换 ---- */
+.mediaToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.mediaBtn {
+  width: 56px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.mediaBtn:hover {
+  color: var(--color-text-secondary);
+  border-color: var(--color-border-hover);
+}
+
+.mediaBtnActive {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+  background-color: #333;
+}
+
+.mediaDot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: var(--color-text-tertiary);
+}
+
+/* ---- 输入框（透明无边框，贴合设计稿） ---- */
+.textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: var(--spacing-xs) 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-lg);
+  line-height: 1.7;
+  resize: none;
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+/* ---- 底部状态栏 ---- */
+.bottomBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--spacing-sm);
+}
+
+.barLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+/* ---- 加号按钮 ---- */
+.addBtn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.addBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---- 模式选择器 ---- */
+.modeWrap {
+  position: relative;
+}
+
+.modeBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.modeBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.modeArrow {
+  transition: transform var(--transition-fast);
+}
+
+.modeArrowUp {
+  transform: rotate(180deg);
+}
+
+.modeDropdown {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 130px;
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-xs);
+  animation: popupFadeIn 0.15s ease;
+}
+
+@keyframes popupFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.modeOption {
+  display: block;
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.modeOption:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.modeOptionActive {
+  color: var(--color-accent-text);
+  background-color: var(--color-bg-active);
+  font-weight: 500;
+}
+
+/* ---- 信息文字 ---- */
+.barDivider {
+  font-size: var(--font-size-md);
+  color: var(--color-border-primary);
+}
+
+.barInfo {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+/* ---- 生成按钮（与展开箭头组成分段） ---- */
+.generateBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 10px var(--spacing-xl);
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  font-size: var(--font-size-lg);
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+  background-color: var(--color-bg-tertiary);
+  border: none;
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+.generateBtnActive {
+  color: #fff;
+  background-color: var(--color-accent-primary);
+  cursor: pointer;
+  opacity: 1;
+}
+
+.generateBtnActive:hover {
+  background-color: var(--color-accent-hover);
+}
+
+/* ---- 隐藏文件输入 ---- */
+.hiddenInput {
+  display: none;
+}
+
+/* ---- 文件计数 ---- */
+.fileCount {
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  margin-left: auto;
+}
+
+/* ---- 上传预览区 ---- */
+.previewArea {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.previewItem {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--color-border-secondary);
+  flex-shrink: 0;
+}
+
+.previewThumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.previewRemove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.6);
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.previewRemove:hover {
+  background-color: rgba(250, 82, 82, 0.8);
+}
+
+.previewLabel {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 1px 0;
+  font-size: 9px;
+  text-align: center;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+/* ---- 右侧栏：倍速 + 生成分段 ---- */
+.barRight {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.sendWrap {
+  display: flex;
+  align-items: stretch;
+}
+
+.configToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  color: var(--color-text-tertiary);
+  background-color: var(--color-bg-tertiary);
+  border: none;
+  border-left: 1px solid var(--color-border-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.configToggle:hover {
+  color: var(--color-text-primary);
+}
+
+.configToggleArrow {
+  transition: transform var(--transition-fast);
+}
+
+.configToggleArrowOpen {
+  transform: rotate(180deg);
+}
+
+/* ---- 底栏配置信息按钮 ---- */
+.configBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.configBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---- 配置面板（悬浮于底栏上方） ---- */
+.configPanel {
+  position: absolute;
+  bottom: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 560px;
+  max-width: calc(100vw - 48px);
+  padding: var(--spacing-lg);
+  background-color: #232323;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  z-index: 5;
+  animation: popupFadeIn 0.15s ease;
+  box-sizing: border-box;
+}
+
+.configLabel {
+  display: block;
+  margin-bottom: var(--spacing-sm);
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+}
+
+.configRow {
+  display: flex;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+}
+
+.selectWrap {
+  position: relative;
+  flex: 1;
+}
+
+.selectBtn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  padding: 10px var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-lg);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.selectBtn:hover {
+  border-color: var(--color-border-hover);
+}
+
+.configArrow {
+  color: var(--color-text-tertiary);
+  transition: transform var(--transition-fast);
+}
+
+.configArrowUp {
+  transform: rotate(180deg);
+}
+
+.selectDropdown {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-xs);
+  z-index: 6;
+  animation: popupFadeIn 0.15s ease;
+}
+
+.selectOption {
+  display: block;
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.selectOption:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.selectOptionActive {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-active);
+  font-weight: 500;
+}
+
+/* ---- 时长滑杆 ---- */
+.durationHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.durationHead .configLabel {
+  margin-bottom: var(--spacing-sm);
+}
+
+.durationValue {
+  margin-bottom: var(--spacing-sm);
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.durationSlider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: #4a4a4a;
+  outline: none;
+  cursor: pointer;
+}
+
+.durationSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+}
+
+.durationSlider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  cursor: pointer;
+}
+
+.durationTicks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding: 0 6px;
+}
+
+.tick {
+  width: 2px;
+  height: 6px;
+  border-radius: 1px;
+  background-color: #4a4a4a;
+}
+
+.tickActive {
+  height: 8px;
+  background-color: #fff;
+}
+
+.durationRange {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  margin-bottom: var(--spacing-lg);
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+}
+
+/* ---- 宽高比 ---- */
+.ratioGroup {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.ratioBtn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 0;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  background-color: #2a2a2a;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.ratioBtn:hover {
+  color: var(--color-text-primary);
+}
+
+.ratioBtnActive {
+  color: var(--color-text-primary);
+  background-color: #333;
+  border-color: var(--color-border-hover);
+  font-weight: 600;
+}
+
+.ratioIcon {
+  display: block;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+}

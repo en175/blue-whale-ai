@@ -1,0 +1,178 @@
+/* ============================================
+ * ProfileModal - 个人资料编辑弹窗
+ * ============================================ */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 120;
+}
+
+.modal {
+  width: 440px;
+  max-width: 90vw;
+  background-color: #1e1e1e;
+  border: 1px solid #2a2a2a;
+  border-radius: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  padding: 20px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* ---- 头部 ---- */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.closeBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.closeBtn:hover {
+  color: #fff;
+  background-color: #2a2a2a;
+}
+
+/* ---- 头像 ---- */
+.avatarRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+}
+
+.avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, #3a3a3a, #2a2a2a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.avatarHint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+/* ---- 表单字段 ---- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.label {
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+
+.input {
+  width: 100%;
+  height: 42px;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border-radius: 10px;
+  background-color: #262626;
+  border: 1px solid #363636;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  font-family: inherit;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.input::placeholder {
+  color: #777;
+}
+
+.input:focus {
+  border-color: var(--color-border-hover);
+}
+
+/* 禁用态：不可选中不可输入 */
+.inputDisabled {
+  color: #666;
+  background-color: #222;
+  border-color: #2e2e2e;
+  cursor: not-allowed;
+  user-select: none;
+}
+
+/* ---- 底部按钮 ---- */
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.cancelBtn {
+  height: 42px;
+  padding: 0 32px;
+  border-radius: 10px;
+  border: 1px solid #3a3a3a;
+  background: transparent;
+  color: #bbb;
+  font-size: var(--font-size-lg);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.cancelBtn:hover {
+  color: #fff;
+  border-color: var(--color-border-hover);
+}
+
+/* 保存按钮：默认灰色禁用 */
+.saveBtn {
+  height: 42px;
+  padding: 0 32px;
+  border-radius: 10px;
+  border: none;
+  background-color: #2a2a2a;
+  color: #777;
+  font-size: var(--font-size-lg);
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+}
+
+/* 编辑昵称后：灰色可点击 */
+.saveBtnActive {
+  background-color: #4a4a4a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.saveBtnActive:hover {
+  background-color: #555;
+}

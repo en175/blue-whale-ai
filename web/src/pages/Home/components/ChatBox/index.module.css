@@ -1,0 +1,566 @@
+/* ============================================
+ * ChatBox - 对话框组件
+ * ============================================ */
+
+.chatBox {
+  max-width: 78.4rem;
+  width: 73%;
+  height: 16.75rem;
+  margin: 0 auto;
+  background-color: #1D1D1D;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-xl);
+  padding: var(--spacing-lg) var(--spacing-xl) var(--spacing-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+/* ---- 顶部选项卡 ---- */
+.tabBar {
+  display: flex;
+  gap: var(--spacing-lg);
+  position: relative;
+}
+
+.tabItem {
+  position: relative;
+  padding: var(--spacing-xs) 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.tabItem:hover {
+  color: var(--color-text-secondary);
+}
+
+.tabItemActive {
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.tabUnderline {
+  position: absolute;
+  bottom: -2px;
+  height: 2px;
+  background-color: var(--color-text-primary);
+  border-radius: var(--radius-full);
+  transition: left var(--transition-normal), width var(--transition-normal);
+}
+
+/* ---- 描述文字 ---- */
+.desc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+}
+
+/* ---- 输入框 ---- */
+.textarea {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  resize: none;
+  background-color: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  line-height: 1.6;
+  padding: var(--spacing-xs) 0;
+  font-family: inherit;
+}
+
+.textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+/* ---- 底部工具栏 ---- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.toolbarLeft,
+.toolbarRight {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+}
+
+/* ---- 通用按钮 ---- */
+.iconBtn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-secondary);
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.iconBtn:hover {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---- + 上传弹出 ---- */
+.uploadWrap {
+  position: relative;
+}
+
+.uploadPopup {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  background-color: #1e1e1e;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-xs);
+  min-width: 140px;
+  z-index: var(--z-tooltip);
+  animation: popupFadeIn 0.15s ease;
+}
+
+@keyframes popupFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.uploadItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+}
+
+.uploadItem:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---- Skill 按钮 ---- */
+.skillBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: calc(var(--spacing-xs) + 2px) calc(var(--spacing-md) + 2px);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-secondary);
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.skillBtn:hover {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.skillIcon {
+  font-size: 14px;
+}
+
+/* ---- 模型下拉按钮 ---- */
+.dropdownWrap {
+  position: relative;
+}
+
+.modelBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: calc(var(--spacing-xs) + 2px) calc(var(--spacing-md) + 2px);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-secondary);
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.modelBtn:hover {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.dropdownMenu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  background-color: #1e1e1e;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-xs);
+  min-width: 160px;
+  z-index: var(--z-tooltip);
+  animation: popupFadeIn 0.15s ease;
+}
+
+/* ---- 向下展开的下拉菜单 (AI视频/AI图片) ---- */
+.dropdownMenuDown {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  background-color: #1e1e1e;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-xs);
+  min-width: 160px;
+  z-index: 100;
+  animation: popupFadeIn 0.15s ease;
+}
+
+.dropdownItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.dropdownItem:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.dropdownItemActive {
+  color: var(--color-accent-primary);
+}
+
+/* ---- Token 用量 ---- */
+.tokenBadge {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.tokenPlus {
+  color: var(--color-text-secondary);
+}
+
+.tokenCount {
+  color: var(--color-text-secondary);
+}
+
+/* ---- 发送按钮 ---- */
+.sendBtn {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  border: none;
+  background-color: #2a2a2a;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sendBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sendBtnActive {
+  background-color: #4a4a4a;
+  color: #fff;
+}
+
+.sendBtnActive:hover {
+  background-color: #5a5a5a;
+}
+
+/* ============================================
+ * AI 视频 tab 专属样式
+ * ============================================ */
+
+/* ---- 内容区域 ---- */
+.videoContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) 0;
+  min-height: 0;
+}
+
+.refCard {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  background-color: #2a2a2a;
+  border: 1px dashed var(--color-border-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.refCard:hover {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---- 参考文件区域 ---- */
+.refArea {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.refThumbWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.refThumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background-color: #1a1a1a;
+}
+
+.refThumbMedia {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 音频附件缩略图：图标居中 */
+.refThumbAudio {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+}
+
+.refThumbRemove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  background-color: rgba(0, 0, 0, 0.6);
+  border: none;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.refThumb:hover .refThumbRemove {
+  opacity: 1;
+}
+
+.refThumbLabel {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.videoDesc {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.videoDesc p {
+  margin: 0;
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  line-height: 1.6;
+}
+
+/* ---- 参数按钮行 ---- */
+.videoParamBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.videoParamsLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+  position: relative;
+}
+
+.videoParamsRight {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+}
+
+/* ---- 参数按钮 ---- */
+.paramBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: calc(var(--spacing-xs) + 2px) calc(var(--spacing-md) + 2px);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-secondary);
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.paramBtn:hover {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---- 时长滑块 ---- */
+.durationDropdown {
+  min-width: 200px !important;
+  padding: var(--spacing-md) !important;
+}
+
+.durationValue {
+  text-align: center;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.durationSlider {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--color-border-secondary);
+  border-radius: var(--radius-full);
+  outline: none;
+  cursor: pointer;
+}
+
+.durationSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.durationLabels {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  margin-top: 4px;
+}
+
+/* ---- 或尝试无限 ---- */
+.tryUnlimited {
+  font-size: var(--font-size-sm);
+  color: #4ade80;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tryUnlimited:hover {
+  color: #22c55e;
+}
+
+/* ============================================
+ * AI 图片 tab 专属样式
+ * ============================================ */
+
+/* ---- 图片说明文字 ---- */
+.imageDesc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.imageDesc p {
+  margin: 0;
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  line-height: 1.6;
+}
+
+/* ---- 强度徽章 ---- */
+.imageStrengthBadge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  padding: calc(var(--spacing-xs) + 2px) calc(var(--spacing-md) + 2px);
+  border-radius: var(--radius-lg);
+  transition: all var(--transition-fast);
+}
+
+.imageStrengthBadge:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}

@@ -1,0 +1,78 @@
+/* ============================================
+ * CanvasHeader - 画布顶部栏
+ * ============================================ */
+
+.header {
+  height: 84px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--spacing-lg);
+  flex-shrink: 0;
+}
+
+/* ---- 左侧 ---- */
+.left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+/* ---- Logo ---- */
+.logo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+/* ---- 右侧 ---- */
+.right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+/* ---- 余额展示 ---- */
+.balance {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  height: 40px;
+  padding: 0 var(--spacing-md);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-primary);
+}
+
+.balanceValue {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.balanceIcon {
+  color: var(--color-text-secondary);
+}
+
+/* ---- Agent 按钮 ---- */
+.agentBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  height: 40px;
+  padding: 0 var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.agentBtn:hover {
+  background-color: var(--color-bg-hover);
+  border-color: var(--color-border-hover);
+}

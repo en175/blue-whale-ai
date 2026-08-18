@@ -1,0 +1,232 @@
+/* ============================================
+ * TextNode - 画布富文本编辑节点
+ * ============================================ */
+
+.wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============================================
+ * 浮动工具栏
+ * ============================================ */
+.toolbar {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  background-color: #2a2a2a;
+  border-radius: 8px;
+  border: 1px solid #3a3a3a;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+  z-index: 10;
+}
+
+.toolBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #aaa;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.toolBtn:hover {
+  color: #fff;
+  background-color: #444;
+}
+
+.divider {
+  width: 1px;
+  height: 16px;
+  background-color: #444;
+  margin: 0 4px;
+}
+
+/* ============================================
+ * 内容卡片
+ * ============================================ */
+.card {
+  min-width: 360px;
+  min-height: 180px;
+  background-color: #1a1a1a;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color 0.2s ease;
+}
+
+.wrapper.focused .card {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* 卡片头部 */
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.labelGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.label {
+  font-size: 12px;
+  color: #888;
+  user-select: none;
+}
+
+/* ============================================
+ * 右键菜单
+ * ============================================ */
+.contextMenu {
+  position: fixed;
+  min-width: 200px;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+}
+
+.contextItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  padding: 10px 14px;
+  color: #eee;
+  font-size: 15px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+  text-align: left;
+}
+
+.contextItem:hover {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.contextShortcut {
+  color: #888;
+  font-size: 13px;
+}
+
+.contextDanger {
+  color: #e5484d;
+}
+
+.contextDanger:hover {
+  color: #ff6b6b;
+  background-color: rgba(229, 72, 77, 0.12);
+}
+
+/* ============================================
+ * 富文本编辑区
+ * ============================================ */
+.editor {
+  flex: 1;
+  min-height: 120px;
+  max-height: 400px;
+  overflow-y: auto;
+  color: #e8e8e8;
+  font-size: 14px;
+  line-height: 1.7;
+  font-family: inherit;
+  outline: none;
+  cursor: text;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 占位符 */
+.editor:empty::before {
+  content: attr(data-placeholder);
+  color: #555;
+  pointer-events: none;
+}
+
+/* 富文本格式样式 */
+.editor h1 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 8px 0 4px;
+  color: #fff;
+}
+
+.editor h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 6px 0 4px;
+  color: #fff;
+}
+
+.editor h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 4px 0 2px;
+  color: #fff;
+}
+
+.editor b,
+.editor strong {
+  font-weight: 700;
+  color: #fff;
+}
+
+.editor i,
+.editor em {
+  font-style: italic;
+}
+
+.editor ul,
+.editor ol {
+  margin: 6px 0;
+  padding-left: 22px;
+}
+
+.editor li {
+  margin: 3px 0;
+}
+
+.editor hr {
+  border: none;
+  border-top: 1px solid #444;
+  margin: 12px 0;
+}
+
+/* 滚动条 */
+.editor::-webkit-scrollbar {
+  width: 4px;
+}
+
+.editor::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.editor::-webkit-scrollbar-thumb {
+  background-color: #444;
+  border-radius: 2px;
+}

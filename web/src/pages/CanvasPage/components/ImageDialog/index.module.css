@@ -1,0 +1,394 @@
+/* ============================================
+ * ImageDialog - 图片专属对话窗口
+ * ============================================ */
+
+.dialog {
+  position: absolute;
+  bottom: var(--spacing-lg);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 760px;
+  max-width: 90%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  z-index: 20;
+}
+
+/* ---- 输入卡片（单一表面） ---- */
+.inputBox {
+  background-color: #1e1e1e;
+  border: 1px solid #2c2c2c;
+  border-radius: 20px;
+  padding: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  height: 240px;
+  box-sizing: border-box;
+  transition: border-color var(--transition-fast);
+}
+
+.inputBox:focus-within {
+  border-color: var(--color-border-hover);
+}
+
+.hiddenInput {
+  display: none;
+}
+
+/* ---- 顶部：预览 + 操作 ---- */
+.topRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.previewRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.previewItem {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #333;
+  background-color: #2a2a2a;
+  flex-shrink: 0;
+}
+
+.previewItem img,
+.previewItem video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.previewPlaceholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  border: none;
+}
+
+.previewRemove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.6);
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.previewRemove:hover {
+  background-color: rgba(229, 72, 77, 0.85);
+}
+
+.topActions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.iconBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.iconBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---- 输入框 ---- */
+.textarea {
+  width: 100%;
+  resize: none;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-lg);
+  line-height: 1.6;
+  outline: none;
+  font-family: inherit;
+  display: block;
+  flex: 1;
+  min-height: 0;
+}
+
+.textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+/* ---- 底部状态栏 ---- */
+.bottomBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.barLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  flex: 1;
+  min-width: 0;
+}
+
+/* 圆形加号上传按钮 */
+.addBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ddd;
+  background-color: #2a2a2a;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.addBtn:hover {
+  background-color: #3a3a3a;
+  color: #fff;
+}
+
+/* 配置触发按钮（模型 | 比例 | 清晰度） */
+.configBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #eee;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  padding: 0;
+  transition: color var(--transition-fast);
+}
+
+.configBtn:hover {
+  color: #fff;
+}
+
+.barDivider {
+  width: 1px;
+  height: 12px;
+  background-color: #444;
+}
+
+.barRight {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.costText {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: #777;
+  user-select: none;
+}
+
+/* 发送按钮 */
+.sendBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #2a2a2a;
+  color: #777;
+  border: none;
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+}
+
+.sendBtnActive {
+  background-color: #4a4a4a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.sendBtnActive:hover {
+  background-color: #555;
+}
+
+.configArrow {
+  transition: transform var(--transition-fast);
+}
+
+.configArrowUp {
+  transform: rotate(180deg);
+}
+
+/* ---- 配置面板 ---- */
+.configPanel {
+  background-color: #1e1e1e;
+  border: 1px solid #2c2c2c;
+  border-radius: 16px;
+  padding: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.configSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.configLabel {
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.configRow {
+  display: flex;
+  gap: var(--spacing-md);
+}
+
+.configRow .selectWrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.selectWrap {
+  position: relative;
+}
+
+.selectBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background-color: #262626;
+  border: 1px solid #363636;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.selectBtn:hover {
+  border-color: var(--color-border-hover);
+}
+
+.selectDropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background-color: #262626;
+  border: 1px solid #363636;
+  border-radius: 12px;
+  padding: var(--spacing-xs);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.selectOption {
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.selectOption:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.selectOptionActive {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* 宽高比条带 */
+.ratioGroup {
+  display: flex;
+  gap: 4px;
+  background-color: #262626;
+  border-radius: 12px;
+  padding: 4px;
+}
+
+.ratioBtn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 0;
+  border-radius: 10px;
+  font-size: var(--font-size-md);
+  color: #999;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.ratioBtn:hover {
+  color: #ddd;
+}
+
+.ratioBtnActive {
+  background-color: #3a3a3a;
+  color: #fff;
+  font-weight: 700;
+}
+
+/* 宽高比小矩形图标 */
+.ratioIcon {
+  display: block;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+}

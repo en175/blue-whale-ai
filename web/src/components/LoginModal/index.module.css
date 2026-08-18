@@ -1,0 +1,197 @@
+/* ============================================
+ * LoginModal 登录弹窗样式
+ * ============================================ */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal, 200);
+  animation: lmFadeIn 0.15s ease;
+}
+
+@keyframes lmFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal {
+  position: relative;
+  width: min(620px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  background: #191919;
+  border: 1px solid #2a2a2a;
+  border-radius: 18px;
+  padding: 44px 48px 36px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+  animation: lmPop 0.18s ease;
+}
+
+@keyframes lmPop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.closeBtn {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #9a9a9a;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+
+.closeBtn:hover {
+  color: #fff;
+  background: #2a2a2a;
+}
+
+.title {
+  margin: 0 0 28px;
+  font-size: 30px;
+  font-weight: 800;
+  color: #fff;
+}
+
+/* ---- 浅色输入框 ---- */
+.input {
+  display: block;
+  width: 100%;
+  height: 54px;
+  border: none;
+  border-radius: 10px;
+  background: #e9e9f7;
+  color: #16161a;
+  font-size: 16px;
+  padding: 0 18px;
+  outline: none;
+  margin-bottom: 18px;
+}
+
+.input::placeholder {
+  color: #8a8a96;
+}
+
+.input:focus {
+  box-shadow: 0 0 0 2px rgba(90, 90, 200, 0.55);
+}
+
+.error {
+  margin: -6px 0 12px;
+  font-size: 13px;
+  color: #ff7875;
+}
+
+/* ---- 协议勾选 ---- */
+.agreeRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 24px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #4c6ef5;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.agreeText {
+  font-size: 14px;
+  color: #9a9a9a;
+}
+
+.link {
+  color: #c9c9c9;
+  text-decoration: underline;
+  margin: 0 2px;
+}
+
+.link:hover {
+  color: #fff;
+}
+
+/* ---- 登录按钮（靛蓝底，未满足条件时置灰文字） ---- */
+.submitBtn {
+  width: 100%;
+  height: 54px;
+  border: none;
+  border-radius: 10px;
+  background: #2b2a72;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.submitBtn:hover:not(:disabled) {
+  background: #37349b;
+}
+
+.submitBtn:disabled {
+  cursor: not-allowed;
+  color: #77779a;
+}
+
+/* ---- 创建账号 ---- */
+.createBtn {
+  display: block;
+  margin: 20px auto 0;
+  background: none;
+  border: none;
+  color: #e6e6e6;
+  font-size: 15px;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 8px;
+  transition: color 0.15s ease;
+}
+
+.createBtn:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.notice {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 13px;
+  color: #9a9a9a;
+}
+
+@media (max-width: 560px) {
+  .modal {
+    padding: 36px 24px 28px;
+  }
+
+  .title {
+    font-size: 26px;
+  }
+}

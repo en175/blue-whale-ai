@@ -1,0 +1,26 @@
+/* ============================================
+ * AdminPlaceholder 后台通用占位页样式
+ * ============================================ */
+.title {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  color: #fff;
+}
+
+.subtitle {
+  margin: 10px 0 0;
+  color: #888;
+  font-size: var(--font-size-md);
+}
+
+.box {
+  margin-top: 32px;
+  padding: 100px 0;
+  text-align: center;
+  color: #666;
+  font-size: var(--font-size-md);
+  background-color: #141414;
+  border: 1px dashed #333;
+  border-radius: 12px;
+}

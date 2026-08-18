@@ -1,0 +1,132 @@
+/* ============================================
+ * Sidebar 左侧导航栏样式
+ * ============================================ */
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-width);
+  background-color: var(--color-bg-secondary);
+  border-right: 1px solid var(--color-border-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--spacing-md) 0;
+  z-index: var(--z-sidebar);
+  user-select: none;
+}
+.tabLogo{
+  margin-bottom: 0;
+}
+
+.logo {
+  margin-bottom: var(--spacing-xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logoIcon {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-md);
+  object-fit: contain;
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-xs);
+  flex: 1;
+}
+
+.menuItem {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-radius: var(--radius-md);
+  color: var(--color-text-tertiary);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  position: relative;
+}
+
+.menuItem:hover {
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-hover);
+}
+
+.menuItem.active {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-active);
+}
+
+.menuItem.active::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  background-color: var(--color-accent-primary);
+  border-radius: 0 var(--radius-full) var(--radius-full) 0;
+}
+
+.label {
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  margin-top: 2px;
+}
+
+.bottomMenu {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin-top: auto;
+}
+
+.avatar {
+  margin-top: var(--spacing-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: 64px;
+}
+
+.avatarName {
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  color: var(--color-text-tertiary);
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatarImg {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-bg-tertiary);
+  border: 2px solid var(--color-border-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.avatarImg:hover {
+  border-color: var(--color-border-hover);
+}
