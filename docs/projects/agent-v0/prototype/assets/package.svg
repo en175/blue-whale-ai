@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="900" viewBox="0 0 640 900">
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fafafa"/>
+      <stop offset=".55" stop-color="#dfe2df"/>
+      <stop offset="1" stop-color="#929896"/>
+    </linearGradient>
+    <linearGradient id="box" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".5" stop-color="#e7e7e2"/>
+      <stop offset="1" stop-color="#b6bbb7"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="900" fill="url(#paper)"/>
+  <polygon points="185,246 425,198 486,646 248,712" fill="#c8ceca"/>
+  <polygon points="154,300 396,244 425,690 180,740" fill="url(#box)"/>
+  <polygon points="396,244 486,294 510,710 425,690" fill="#8c9491"/>
+  <text x="213" y="435" fill="#222629" font-family="Georgia, serif" font-size="42">LUMA</text>
+  <text x="221" y="477" fill="#6a7271" font-family="Arial, sans-serif" font-size="19">THERMOS CUP</text>
+  <rect x="218" y="526" width="128" height="5" fill="#222629"/>
+  <text x="56" y="88" fill="#262a2b" font-family="Georgia, serif" font-size="30">Package Reference</text>
+  <text x="56" y="130" fill="#596160" font-family="Arial, sans-serif" font-size="18">brand block · package angle · sell point placeholder</text>
+</svg>

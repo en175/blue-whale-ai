@@ -70,8 +70,7 @@ export default function CanvasPage() {
   /** 节点工具条带入图片对话框的初始值（ts 作为 key 强制重挂载以注入初始值） */
   const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[] } | null>(null);
   /** 节点工具条带入视频对话框的初始参考 */
-  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[] } | null>(null);
-  /** 节点工具条带入音频对话框的初始参考 */
+  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; initialPrompt?: string; initialPromptLabel?: string } | null>(null);  /** 节点工具条带入音频对话框的初始参考 */
   const [audioSeed, setAudioSeed] = useState<{ ts: number; refs: AudioRefItem[] } | null>(null);
   /** 当前视口（拖拽/缩放结束更新），自动保存时序列化提交 */
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
@@ -175,6 +174,24 @@ export default function CanvasPage() {
             setAssetNodes((prev) => prev.filter((n) => n.id !== id));
           },
           onGenerateImage: () => actionsRef.current.openImageDialog(),
+          // 生成卡节点水合后补动作回调（引用到 dock / 给 Agent）
+          generationCard: base.data?.generationCard
+            ? {
+                ...base.data.generationCard,
+                onApplyToDock: (apply: { prompt: string; assetRefs: string[]; cardId?: string; shotTitle?: string }) => {
+                  setVideoSeed({ ts: Date.now(), refs: [], initialPrompt: apply.prompt, initialPromptLabel: apply.shotTitle });
+                  setShowBottomDialog(true);
+                  setShowImageDialog(false);
+                  setShowAudioDialog(false);
+                  setShowMusicDialog(false);
+                  void apply;
+                },
+                onSendToAgent: (prompt: string) => {
+                  setAgentContext({ text: prompt, ts: Date.now() });
+                  setShowAgent(true);
+                },
+              }
+            : base.data?.generationCard,
         };
         break;
       default:
@@ -233,9 +250,9 @@ export default function CanvasPage() {
     // 参考卡（Agent 计划产物）：cardType 对应资产卡五种类型
     if (node.type === 'reference') {
       const cardType = typeof raw.cardType === 'string' ? raw.cardType : 'custom';
-      const kind: AssetCardKind = (['style', 'character', 'object', 'environment', 'custom'] as const).includes(
-        cardType as AssetCardKind,
-      )
+      const kind: AssetCardKind = (
+        ['style', 'character', 'object', 'environment', 'custom'] as AssetCardKind[]
+      ).includes(cardType as AssetCardKind)
         ? (cardType as AssetCardKind)
         : 'custom';
       const refsRaw = Array.isArray(raw.references) ? raw.references : [];
@@ -811,6 +828,52 @@ export default function CanvasPage() {
   actionsRef.current.genAudio = handleNodeGenAudio;
   actionsRef.current.download = handleNodeDownload;
 
+  /** Agent 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent） */
+  const handleAgentCardApply = (payload: {
+    prompt: string;
+    assetRefs: string[];
+    cardId?: string;
+    shotTitle?: string;
+    visual?: string;
+    timeRange?: string;
+  }) => {
+    const node: Node = {
+      id: `gencard-${Date.now()}`,
+      type: 'assetNode',
+      position: { x: 320 + Math.random() * 120, y: 160 + Math.random() * 100 },
+      data: {
+        kind: 'generation',
+        generationCard: {
+          cardId: payload.cardId,
+          shotTitle: payload.shotTitle,
+          timeRange: payload.timeRange,
+          visual: payload.visual,
+          prompt: payload.prompt,
+          assetRefs: payload.assetRefs,
+          onApplyToDock: (apply: { prompt: string; assetRefs: string[]; cardId?: string; shotTitle?: string }) => {
+            // 引用到 dock：注入 videoSeed（含 prompt）打开底部对话框承接
+            setVideoSeed({ ts: Date.now(), refs: [], initialPrompt: apply.prompt, initialPromptLabel: apply.shotTitle });
+            setShowBottomDialog(true);
+            setShowImageDialog(false);
+            setShowAudioDialog(false);
+            setShowMusicDialog(false);
+            void apply;
+          },
+          onSendToAgent: (prompt: string) => {
+            // 给 Agent：注入侧边栏输入框
+            setAgentContext({ text: prompt, ts: Date.now() });
+            setShowAgent(true);
+          },
+        },
+        onDelete: (id: string) => {
+          setAssetNodes((prev) => prev.filter((n) => n.id !== id));
+        },
+        onGenerateImage: () => actionsRef.current.openImageDialog(),
+      },
+    };
+    setAssetNodes((prev) => [...prev, node]);
+  };
+
   /** 底部对话框发送 */
   /** 视频对话发送：创建视频生成任务 */
   const handleDialogSend = (text: string, opts: VideoGenOptions) => {
@@ -1090,6 +1153,8 @@ export default function CanvasPage() {
           <BottomDialog
             key={videoSeed?.ts ?? 0}
             initialRefs={videoSeed?.refs}
+            initialPrompt={videoSeed?.initialPrompt}
+            initialPromptLabel={videoSeed?.initialPromptLabel}
             onClose={() => setShowBottomDialog(false)}
             onSend={handleDialogSend}
           />
@@ -1141,6 +1206,7 @@ export default function CanvasPage() {
           initialInput={agentContext?.text ?? ''}
           inputVersion={agentContext?.ts ?? 0}
           projectId={currentId || undefined}
+          onApplyToDock={handleAgentCardApply}
         />
       )}
 
