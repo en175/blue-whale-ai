@@ -3,9 +3,9 @@
  * ============================================ */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Home, FolderOpen, Image, Layout, Settings } from 'lucide-react';
+import { Home, FolderOpen, Image, Layout } from 'lucide-react';
 import { useAppStore } from '@/stores';
-import { getCurrentUser, subscribe, isAdmin } from '@/utils/auth';
+import { getCurrentUser, subscribe } from '@/utils/auth';
 import LoginModal from '@/components/LoginModal';
 import styles from './index.module.css';
 
@@ -21,7 +21,6 @@ export default function Sidebar() {
   const location = useLocation();
   const { setActiveMenu } = useAppStore();
   const user = useSyncExternalStore(subscribe, getCurrentUser);
-  const admin = useSyncExternalStore(subscribe, isAdmin);
   /** 未登录点击非首页菜单时弹出登录框 */
   const [showLogin, setShowLogin] = useState(false);
   /** 登录成功后需跳转的目标菜单 */
@@ -86,30 +85,6 @@ export default function Sidebar() {
           );
         })}
       </nav>
-
-      {/* 底部：系统设置入口（仅管理员）+ 登录用户名；首页右上角已有用户菜单，不重复展示 */}
-      {location.pathname !== '/' && (
-        <div className={styles.bottomMenu}>
-          {admin && (
-            <button
-              className={styles.menuItem}
-              onClick={() => navigate('/admin')}
-              title="系统设置"
-            >
-              <Settings size={26} strokeWidth={2} />
-              <span className={styles.label}>系统设置</span>
-            </button>
-          )}
-          {user && (
-            <div className={styles.avatar} title={user.username}>
-              <div className={styles.avatarImg}>
-                {user.username.charAt(0).toUpperCase()}
-              </div>
-              <span className={styles.avatarName}>{user.username}</span>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* 未登录拦截弹窗 */}
       {showLogin && <LoginModal onClose={handleLoginClose} />}
