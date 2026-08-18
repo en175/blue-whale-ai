@@ -59,18 +59,8 @@ export async function processNextJob(deps: WorkerDeps): Promise<string | null> {
   return processClaimedJob(job, deps);
 }
 
-/** 恢复扫描用：认领一个到点的图片 queued 任务（claimNextImageJob）并处理。
- *  与 processNextJob 的区别——只领图片，不误领视频（视频归独立 BullMQ worker）。 */
-export async function processNextImageJob(
-  deps: WorkerDeps,
-): Promise<string | null> {
-  const job = await deps.repo.claimNextImageJob(deps.workerId);
-  if (!job) return null;
-  return processClaimedJob(job, deps);
-}
-
 /** 恢复扫描用：认领一个到点的进程内任务（claimNextInProcessJob，image+audio）并处理。
- *  与 processNextImageJob 的区别——范围扩到 audio；视频仍归独立 BullMQ worker，不在此认领。 */
+ *  与 claimNextImageJob 的区别——范围扩到 audio；视频仍归独立 BullMQ worker，不在此认领。 */
 export async function processNextInProcessJob(
   deps: WorkerDeps,
 ): Promise<string | null> {
@@ -208,7 +198,22 @@ async function processClaimedJob(
         ...fenceProof,
       });
       if (assetId === null) return job.id;
-      await finishJob(repo, job.id, [assetId], fenceProof);
+      // IK9ILQ：音频实扣金额 = 本次调用消费流水 quota → 分(fen)，仿图片路径接 requestId。
+      let actualAmountFen: bigint | undefined;
+      if (deps.readConsumeQuota && deps.quotaToFen && audio.requestId) {
+        try {
+          const quota = await deps.readConsumeQuota(
+            providerToken,
+            audio.requestId,
+          );
+          if (quota !== null && quota > 0) {
+            actualAmountFen = deps.quotaToFen(quota);
+          }
+        } catch {
+          // 查询失败落 0,与图片缺省一致
+        }
+      }
+      await finishJob(repo, job.id, [assetId], fenceProof, actualAmountFen);
       return job.id;
     }
 
@@ -461,6 +466,11 @@ async function persistProviderMedia(
   width: number | null;
   height: number | null;
 }> {
+  // IK9ILQ：audio 走 data 直传（sourceUrl 为空串），mediaStorage 缺失时回退 url:"" 会产生
+  // 死资产，这里显式失败（worker catch 归为 provider_failed，任务失败而非产出 url:"" 资产）。
+  if (data !== undefined && !storage) {
+    throw new Error("音频转存存储未配置");
+  }
   if (!storage) {
     return {
       url: sourceUrl,
