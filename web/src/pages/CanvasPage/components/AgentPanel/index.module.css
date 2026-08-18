@@ -881,3 +881,69 @@
   line-height: 1.7;
   color: var(--color-text-secondary);
 }
+
+/* ---- 分镜提示词生成卡（S2） ---- */
+.generationCard {
+  border: 1px solid var(--color-border-secondary);
+  background-color: #242425;
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shotHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.shotTitle {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.shotTime {
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.shotField {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--font-size-md);
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  word-break: break-word;
+}
+
+.shotFieldLabel {
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+  min-width: 42px;
+}
+
+.shotFieldValue {
+  flex: 1;
+}
+
+.shotRefs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.shotRef {
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-secondary);
+  font-size: var(--font-size-md);
+  color: var(--color-accent-text);
+}

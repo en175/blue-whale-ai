@@ -213,7 +213,7 @@ function runFlow(projectId: string, sessionId: string, turn: 'intent' | 'summary
     return;
   }
 
-  /* ---- turn: confirm（用户确认需求理解 → 进入生成卡，S2 扩展） ---- */
+  /* ---- turn: confirm（用户确认需求理解 → 产出多张生成卡，S2 渲染） ---- */
   push('message.accepted', {
     payload: {
       message: s.messages[s.messages.length - 1],
@@ -231,15 +231,135 @@ function runFlow(projectId: string, sessionId: string, turn: 'intent' | 'summary
   at(360, () =>
     push('assistant.delta', {
       payload: {
-        text: '需求理解已确认。正在生成按视频时间顺序排列的分镜提示词生成卡（S2 将在此展示可手动应用的生成卡）。',
+        text: '需求理解已确认。下面按视频时间顺序展示 4 张分镜提示词生成卡，每张卡都可单独自然语言修改或手动应用。',
+        stream_id: `assistant_run_${runId}`,
+      },
+      run_id: runId,
+    }),
+  );
+  const cards: SessionContentBlock['card'][] = [
+    {
+      cardId: 'gc-1',
+      shotTitle: '镜头 1 · 光影揭幕',
+      timeRange: '0-4s',
+      visual: '纯黑背景中侧光扫过，保温杯轮廓逐渐显现。',
+      prompt: '哑光深灰不锈钢保温杯，黑色旋盖，纯黑背景，单侧柔光扫过杯身，轮廓从暗部显现，商业产品摄影，9:16，无字幕无水印。',
+      assetRefs: ['@保温杯主图'],
+    },
+    {
+      cardId: 'gc-2',
+      shotTitle: '镜头 2 · 材质微距',
+      timeRange: '4-8s',
+      visual: '贴近杯身磨砂金属纹理，焦点转移到杯盖螺纹。',
+      prompt: '超微距展示磨砂金属颗粒和杯盖螺纹，浅景深，暖灰虚化背景，镜头缓慢推进，质感清晰稳定。',
+      assetRefs: ['@杯盖材质细节'],
+    },
+    {
+      cardId: 'gc-3',
+      shotTitle: '镜头 3 · 生活美学',
+      timeRange: '8-12s',
+      visual: '大理石桌面、咖啡蒸汽、清晨自然光。',
+      prompt: '保温杯放在大理石桌面，旁边有咖啡蒸汽和晨光，干净高级生活方式广告，柔和自然光，画面稳定。',
+      assetRefs: ['@生活场景图'],
+    },
+    {
+      cardId: 'gc-4',
+      shotTitle: '镜头 4 · 英雄收尾',
+      timeRange: '12-15s',
+      visual: '45 度产品特写，浅灰渐变背景，品牌信息预留。',
+      prompt: '45 度保温杯英雄特写，浅灰渐变背景，杯身高光清晰，居中构图，商业收尾镜头，预留品牌文字空间。',
+      assetRefs: ['@包装品牌占位图'],
+    },
+  ];
+  const reply = assistantMessage(projectId, sessionId, [
+    textBlock('需求理解已确认。下面按视频时间顺序展示 4 张分镜提示词生成卡，每张卡都可单独自然语言修改或手动应用。'),
+    thinkingBlock(['需求理解已确认，正在按镜头 1 / 2 / 3 / 4 生成分镜提示词生成卡。']),
+    ...cards.map((c) => ({ type: 'card' as const, card: c })),
+  ], runId);
+  at(560, () =>
+    push('run.completed', {
+      payload: { run: { run_id: runId, status: 'completed' }, assistant_message: reply },
+      run_id: runId,
+    }),
+  );
+}
+
+/* ---- turn: revision（自然语言修改某张卡 → 重新整理生成卡组） ---- */
+function runRevision(projectId: string, sessionId: string): void {
+  const runId = `run-${++runSeq}`;
+  const s = ensure(projectId, sessionId);
+  const push = (type: string, data: Record<string, unknown>) => emit(projectId, sessionId, type, data);
+
+  push('message.accepted', {
+    payload: {
+      message: s.messages[s.messages.length - 1],
+      scheduling: { run_id: runId },
+    },
+    run_id: runId,
+  });
+  at(120, () => push('run.started', { payload: { run: { run_id: runId, status: 'started' } }, run_id: runId }));
+  at(240, () =>
+    push('reasoning_trace.updated.v1', {
+      payload: { run_id: runId, steps: ['正在根据你的修改要求重新整理镜头 2 的分镜提示词。'] },
+      run_id: runId,
+    }),
+  );
+  at(360, () =>
+    push('assistant.delta', {
+      payload: {
+        text: '已按你的修改要求更新镜头 2。下面重新展示整组分镜提示词生成卡。',
         stream_id: `assistant_run_${runId}`,
       },
       run_id: runId,
     }),
   );
   const reply = assistantMessage(projectId, sessionId, [
-    textBlock('需求理解已确认。正在生成按视频时间顺序排列的分镜提示词生成卡（S2 将在此展示可手动应用的生成卡）。'),
-    thinkingBlock(['需求理解已确认，正在按镜头 1 / 2 / 3 / 4 生成分镜提示词生成卡。']),
+    textBlock('已按你的修改要求更新镜头 2。下面重新展示整组分镜提示词生成卡。'),
+    thinkingBlock(['正在根据你的修改要求重新整理镜头 2 的分镜提示词。']),
+    {
+      type: 'card',
+      card: {
+        cardId: 'gc-1',
+        shotTitle: '镜头 1 · 光影揭幕',
+        timeRange: '0-4s',
+        visual: '纯黑背景中侧光扫过，保温杯轮廓逐渐显现。',
+        prompt: '哑光深灰不锈钢保温杯，黑色旋盖，纯黑背景，单侧柔光扫过杯身，轮廓从暗部显现，商业产品摄影，9:16，无字幕无水印。',
+        assetRefs: ['@保温杯主图'],
+      },
+    },
+    {
+      type: 'card',
+      card: {
+        cardId: 'gc-2r',
+        shotTitle: '镜头 2 · 材质微距（已修改）',
+        timeRange: '4-8s',
+        visual: '贴近杯身磨砂金属纹理，焦点转移到杯盖螺纹，加入晨光反射点缀。',
+        prompt: '超微距展示磨砂金属颗粒和杯盖螺纹，浅景深，暖灰虚化背景，镜头缓慢推进，杯身带一点晨光反射，质感清晰稳定。',
+        assetRefs: ['@杯盖材质细节'],
+      },
+    },
+    {
+      type: 'card',
+      card: {
+        cardId: 'gc-3',
+        shotTitle: '镜头 3 · 生活美学',
+        timeRange: '8-12s',
+        visual: '大理石桌面、咖啡蒸汽、清晨自然光。',
+        prompt: '保温杯放在大理石桌面，旁边有咖啡蒸汽和晨光，干净高级生活方式广告，柔和自然光，画面稳定。',
+        assetRefs: ['@生活场景图'],
+      },
+    },
+    {
+      type: 'card',
+      card: {
+        cardId: 'gc-4',
+        shotTitle: '镜头 4 · 英雄收尾',
+        timeRange: '12-15s',
+        visual: '45 度产品特写，浅灰渐变背景，品牌信息预留。',
+        prompt: '45 度保温杯英雄特写，浅灰渐变背景，杯身高光清晰，居中构图，商业收尾镜头，预留品牌文字空间。',
+        assetRefs: ['@包装品牌占位图'],
+      },
+    },
   ], runId);
   at(560, () =>
     push('run.completed', {
@@ -250,11 +370,12 @@ function runFlow(projectId: string, sessionId: string, turn: 'intent' | 'summary
 }
 
 /** 判断当前回复回合（按会话消息轮次推进） */
-function nextTurn(s: MockSession): 'intent' | 'summary' | 'confirm' {
+function nextTurn(s: MockSession): 'intent' | 'summary' | 'confirm' | 'revision' {
   const assistantCount = s.messages.filter((m) => m.role === 'assistant').length;
   if (assistantCount === 0) return 'intent';
   if (assistantCount === 1) return 'summary';
-  return 'confirm';
+  // 已产出过生成卡（confirm 之后）→ 自然语言修改/继续 → 重新整理生成卡组
+  return 'revision';
 }
 
 /* ============ 会话管理（与真实签名一致） ============ */
@@ -290,7 +411,10 @@ export function sendSessionMessage(
   s.messages.push(msg);
   const turn = nextTurn(s);
   // 下一轮事件在 resolve 后延时派发，保证 POST 回执先返回
-  window.setTimeout(() => runFlow(projectId, sessionId, turn), 40);
+  window.setTimeout(() => {
+    if (turn === 'revision') runRevision(projectId, sessionId);
+    else runFlow(projectId, sessionId, turn);
+  }, 40);
   const run: SessionRun = { run_id: `run-${runSeq + 1}`, session_id: sessionId, status: 'queued' };
   return Promise.resolve({ message: msg, run });
 }

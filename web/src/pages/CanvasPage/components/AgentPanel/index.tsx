@@ -167,18 +167,71 @@ function ClarifyCard({ questions }: { questions: string[] }) {
   );
 }
 
-/** 助手消息：按结构化块渲染（text/thinking/understanding/clarify），无块时回退纯文本 */
+/** 分镜提示词生成卡：单镜头卡（画面/提示词/素材引用 + 自然语言修改/手动应用） */
+function GenerationCard({
+  card,
+  onModify,
+  onApply,
+  disabled,
+}: {
+  card: NonNullable<SessionContentBlock['card']>;
+  onModify: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className={styles.generationCard}>
+      <div className={styles.shotHeader}>
+        <span className={styles.shotTitle}>{card.shotTitle}</span>
+        {card.timeRange && <span className={styles.shotTime}>{card.timeRange}</span>}
+      </div>
+      {card.visual && (
+        <div className={styles.shotField}>
+          <span className={styles.shotFieldLabel}>画面</span>
+          <span className={styles.shotFieldValue}>{card.visual}</span>
+        </div>
+      )}
+      {card.prompt && (
+        <div className={styles.shotField}>
+          <span className={styles.shotFieldLabel}>提示词</span>
+          <span className={styles.shotFieldValue}>{card.prompt}</span>
+        </div>
+      )}
+      {card.assetRefs && card.assetRefs.length > 0 && (
+        <div className={styles.shotRefs}>
+          {card.assetRefs.map((r) => (
+            <span key={r} className={styles.shotRef}>{r}</span>
+          ))}
+        </div>
+      )}
+      <div className={styles.cardActions}>
+        <button type="button" className={styles.cardBtn} onClick={onModify} disabled={disabled}>
+          自然语言修改
+        </button>
+        <button type="button" className={`${styles.cardBtn} ${styles.cardBtnPrimary}`} onClick={onApply} disabled={disabled}>
+          手动应用到 Canvas dock
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 助手消息：按结构化块渲染（text/thinking/understanding/clarify/card），无块时回退纯文本 */
 function AssistantMessageBody({
   message,
   onConfirm,
   onSupplement,
   onModify,
+  onCardModify,
+  onCardApply,
   disabled,
 }: {
   message: ChatMessage;
   onConfirm: () => void;
   onSupplement: () => void;
   onModify: () => void;
+  onCardModify: (card: NonNullable<SessionContentBlock['card']>) => void;
+  onCardApply: (card: NonNullable<SessionContentBlock['card']>) => void;
   disabled: boolean;
 }) {
   const blocks = message.blocks ?? [];
@@ -205,6 +258,17 @@ function AssistantMessageBody({
         }
         if (b.type === 'clarify' && b.clarify?.questions) {
           return <ClarifyCard key={i} questions={b.clarify.questions} />;
+        }
+        if (b.type === 'card' && b.card) {
+          return (
+            <GenerationCard
+              key={i}
+              card={b.card}
+              onModify={() => onCardModify(b.card!)}
+              onApply={() => onCardApply(b.card!)}
+              disabled={disabled}
+            />
+          );
         }
         if (b.text) return <Markdown key={i} text={b.text} />;
         return null;
@@ -428,6 +492,16 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
     setInputValue('修改方向：');
   };
 
+  /** 自然语言修改某张生成卡：预填修改指令到输入框，进入新的 AgentRun */
+  const handleCardModify = (card: NonNullable<SessionContentBlock['card']>) => {
+    setInputValue(`修改「${card.shotTitle}」：`);
+  };
+
+  /** 手动应用生成卡到 Canvas dock（S3 补真实通道，此处先占位提示） */
+  const handleCardApply = (_card: NonNullable<SessionContentBlock['card']>) => {
+    setInputValue(''); // S3 实现：调用 apply 通道
+  };
+
   /** 上传文件 */
   const handleUploadClick = () => {
     setShowUpload(!showUpload);
@@ -512,6 +586,8 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
                   onConfirm={handleConfirm}
                   onSupplement={handleSupplement}
                   onModify={handleModify}
+                  onCardModify={handleCardModify}
+                  onCardApply={handleCardApply}
                   disabled={runningRunId !== null || streaming}
                 />
               </div>
