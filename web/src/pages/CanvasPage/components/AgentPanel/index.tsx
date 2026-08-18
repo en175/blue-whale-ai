@@ -153,16 +153,38 @@ function UnderstandingCard({
 }
 
 /** 追问卡：待补充的关键问题（可点选选项直接补充，或输入自由补充） */
-function ClarifyCard({ questions, onPick, onFreeText }: {
+function ClarifyCard({ questions, onSubmit }: {
   questions: string[];
-  onPick: (value: string) => void;
-  onFreeText: (value: string) => void;
+  onSubmit: (text: string) => void;
 }) {
+  /** 已选中的补充项（可多选，点击切换选中态，不立即发送） */
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState('');
   if (questions.length === 0) return null;
+
+  const togglePick = (value: string) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+  };
+
+  const handleSubmit = () => {
+    const freeText = draft.trim();
+    const parts = [...picked];
+    if (freeText) parts.push(freeText);
+    if (parts.length === 0) return;
+    setPicked(new Set());
+    setDraft('');
+    onSubmit(parts.join('；'));
+  };
+
   return (
     <div className={styles.clarifyCard}>
       <div className={styles.cardTitle}>需要补充</div>
+      <p className={styles.clarifyHint}>选择或输入后点「补充信息」提交，可多选。</p>
       <ul className={styles.clarifyList}>
         {questions.map((q) => {
           const [label, ...options] = q.split('：');
@@ -172,21 +194,29 @@ function ClarifyCard({ questions, onPick, onFreeText }: {
             <li key={q} className={styles.clarifyItem}>
               <span className={styles.clarifyLabel}>{label}：</span>
               <div className={styles.clarifyOptions}>
-                {values.map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    className={styles.clarifyOption}
-                    onClick={() => onPick(`${label}：${v}`)}
-                  >
-                    {v}
-                  </button>
-                ))}
+                {values.map((v) => {
+                  const full = `${label}：${v}`;
+                  const active = picked.has(full);
+                  return (
+                    <button
+                      key={v}
+                      type="button"
+                      className={`${styles.clarifyOption} ${active ? styles.clarifyOptionActive : ''}`}
+                      onClick={() => togglePick(full)}
+                    >
+                      {v}
+                    </button>
+                  );
+                })}
               </div>
             </li>
           ) : (
             <li key={q}>
-              <button type="button" className={styles.clarifyLineBtn} onClick={() => onPick(q)}>
+              <button
+                type="button"
+                className={`${styles.clarifyLineBtn} ${picked.has(q) ? styles.clarifyOptionActive : ''}`}
+                onClick={() => togglePick(q)}
+              >
                 {q}
               </button>
             </li>
@@ -201,8 +231,7 @@ function ClarifyCard({ questions, onPick, onFreeText }: {
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault();
-              const v = draft.trim();
-              if (v) onFreeText(v);
+              handleSubmit();
             }
           }}
           placeholder="其他补充信息…"
@@ -210,13 +239,10 @@ function ClarifyCard({ questions, onPick, onFreeText }: {
         <button
           type="button"
           className={styles.cardBtnPrimary}
-          disabled={!draft.trim()}
-          onClick={() => {
-            const v = draft.trim();
-            if (v) onFreeText(v);
-          }}
+          disabled={picked.size === 0 && !draft.trim()}
+          onClick={handleSubmit}
         >
-          补充
+          补充信息
         </button>
       </div>
     </div>
@@ -287,8 +313,7 @@ function AssistantMessageBody({
   onModify,
   onCardModify,
   onCardApply,
-  onClarifyPick,
-  onClarifyFreeText,
+  onClarifySubmit,
   disabled,
   appliedCardIds,
 }: {
@@ -298,8 +323,7 @@ function AssistantMessageBody({
   onModify: () => void;
   onCardModify: (card: NonNullable<SessionContentBlock['card']>) => void;
   onCardApply: (card: NonNullable<SessionContentBlock['card']>) => void;
-  onClarifyPick: (value: string) => void;
-  onClarifyFreeText: (value: string) => void;
+  onClarifySubmit: (text: string) => void;
   disabled: boolean;
   appliedCardIds: Set<string>;
 }) {
@@ -330,8 +354,7 @@ function AssistantMessageBody({
             <ClarifyCard
               key={i}
               questions={b.clarify.questions}
-              onPick={onClarifyPick}
-              onFreeText={onClarifyFreeText}
+              onSubmit={onClarifySubmit}
             />
           );
         }
@@ -595,16 +618,10 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
     setInputValue('修改方向：');
   };
 
-  /** 追问卡点选补充：发送具体选项作为补充消息（走新 AgentRun） */
-  const handleClarifyPick = (value: string) => {
+  /** 追问卡提交补充：选中项 + 自由输入汇总为一条补充消息（走新 AgentRun） */
+  const handleClarifySubmit = (text: string) => {
     if (runningRunId !== null || streaming) return;
-    sendMessage(value);
-  };
-
-  /** 追问卡自由补充：发送输入的自由文本 */
-  const handleClarifyFreeText = (value: string) => {
-    if (runningRunId !== null || streaming) return;
-    sendMessage(value);
+    sendMessage(text);
   };
 
   /** 自然语言修改某张生成卡：预填修改指令到输入框，进入新的 AgentRun */
@@ -720,8 +737,7 @@ export default function AgentPanel({ onClose, initialInput, inputVersion, projec
                   onModify={handleModify}
                   onCardModify={handleCardModify}
                   onCardApply={handleCardApply}
-                  onClarifyPick={handleClarifyPick}
-                  onClarifyFreeText={handleClarifyFreeText}
+                  onClarifySubmit={handleClarifySubmit}
                   disabled={runningRunId !== null || streaming}
                   appliedCardIds={appliedCardIds}
                 />

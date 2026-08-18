@@ -890,6 +890,13 @@
   margin-bottom: 2px;
 }
 
+.clarifyHint {
+  margin: 0;
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  line-height: 1.6;
+}
+
 .clarifyLabel {
   color: var(--color-text-secondary);
   font-weight: 500;
@@ -916,6 +923,14 @@
 .clarifyOption:hover {
   background-color: var(--color-bg-hover);
   border-color: var(--color-border-hover);
+}
+
+/* 选中态：点选后高亮，提交时随补充信息发送 */
+.clarifyOptionActive {
+  background-color: var(--color-bg-active);
+  border-color: var(--color-accent-primary, #d5f06a);
+  color: var(--color-accent-text);
+  font-weight: 500;
 }
 
 .clarifyLineBtn {

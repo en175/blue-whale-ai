@@ -60,6 +60,7 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
   const audioRef = useRef<HTMLInputElement>(null);
 
   const isSelect = data.toolMode === 'select';
+  const isGeneration = (data.kind ?? 'custom') === 'generation';
 
   // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
   useEffect(() => {
@@ -118,12 +119,12 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
           <span className={styles.name}>{meta.title}</span>
         </div>
 
-        {/* 交互区：选择模式可操作，拖动模式整体可拖 */}
+        {/* 交互区：生成卡始终可点；普通资产卡仅选择模式可操作（拖动模式整体可拖） */}
         <div
-          className={isSelect ? 'nodrag nopan' : undefined}
-          style={isSelect ? undefined : { pointerEvents: 'none' }}
+          className={(isSelect || isGeneration) ? 'nodrag nopan' : undefined}
+          style={isSelect || isGeneration ? undefined : { pointerEvents: 'none' }}
         >
-          {(data.kind ?? 'custom') === 'generation' && data.generationCard ? (
+          {isGeneration && data.generationCard ? (
             /* Agent 生成卡落画布形态：展示卡内容 + 引用到 dock / 给 Agent */
             <div className={styles.body}>
               <div className={styles.gcHeader}>
