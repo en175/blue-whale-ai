@@ -225,6 +225,43 @@ describe("image write path fence（IK7GRP）", () => {
       expect(assetsCreate).not.toHaveBeenCalled();
       expect(eventCreate).not.toHaveBeenCalled();
     });
+
+    it("createAsset 透传 duration → assets.create 收到 duration 与 type", async () => {
+      const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+      const assetCreate = vi.fn().mockResolvedValue({
+        id: 901n, version: 1, type: "audio",
+      });
+      const eventCreate = vi.fn().mockResolvedValue(EVENT_ROW);
+      const transaction = vi.fn(async (cb: (tx: unknown) => unknown) =>
+        cb({
+          generation_jobs: { updateMany },
+          assets: { create: assetCreate },
+          project_events: { create: eventCreate },
+        }),
+      );
+      const repo = createWorkerRepo({ $transaction: transaction } as never);
+
+      const id = await repo.createAsset({
+        user_id: "55",
+        project_id: "55",
+        generation_job_id: "300",
+        url: "https://x/a.mp3",
+        type: "audio",
+        width: null,
+        height: null,
+        storage_key: "k",
+        mime: "audio/mpeg",
+        size: 1024,
+        duration: 12,
+        ...FENCE_PROOF,
+      });
+      expect(id).toBe("901");
+      expect(assetCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ duration: 12, type: "audio" }),
+        }),
+      );
+    });
   });
 
   describe("settleReservation 守卫", () => {

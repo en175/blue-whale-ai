@@ -130,6 +130,7 @@ export interface WorkerRepo {
     storage_key: string | null;
     mime: string | null;
     size: number | null;
+    duration?: number | null;
     workerId: string;
     fencingToken: number;
   }): Promise<string | null>;

@@ -104,6 +104,7 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
             storage_key: input.storage_key,
             mime: input.mime,
             size: input.size == null ? null : BigInt(input.size),
+            duration: input.duration == null ? null : input.duration,
             width: input.width,
             height: input.height,
             source: "generated",
