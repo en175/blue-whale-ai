@@ -4,8 +4,7 @@
 
 .panel {
   position: absolute;
-  width: calc(100vw / 3);
-  min-width: 380px;
+  width: clamp(340px, 26vw, 420px);
   height: calc(100% - var(--header-height) - 32px);
   background-color: #1e1e1e;
   border: 1px solid var(--color-border-primary);
@@ -83,10 +82,10 @@
 .newChatBtn {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-sm) var(--spacing-xl);
+  gap: var(--spacing-xs);
+  padding: 6px var(--spacing-md);
   border-radius: var(--radius-full);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text-primary);
   background-color: var(--color-bg-tertiary);
@@ -97,6 +96,98 @@
 
 .newChatBtn:hover {
   background-color: var(--color-bg-hover);
+}
+
+/* ---- 历史会话下拉 ---- */
+.historyWrap {
+  position: relative;
+}
+
+.historyDropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 220px;
+  max-height: 320px;
+  overflow-y: auto;
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-sm);
+  z-index: 10;
+  animation: popupFadeIn 0.15s ease;
+}
+
+.historyDropdownTitle {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  padding: var(--spacing-xs) var(--spacing-md) var(--spacing-sm);
+}
+
+.historyEmpty {
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+.historyItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.historyItem:hover {
+  background-color: var(--color-bg-hover);
+}
+
+.historyItemActive {
+  background-color: var(--color-bg-active);
+}
+
+.historyItemLabel {
+  flex: 1;
+  min-width: 0;
+  padding: var(--spacing-sm) 0 var(--spacing-sm) var(--spacing-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.historyItemActive .historyItemLabel {
+  color: var(--color-accent-text);
+  font-weight: 500;
+}
+
+.historyItemDelete {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin-right: var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.historyItemDelete:hover {
+  color: #e5484d;
+  background-color: rgba(229, 72, 77, 0.12);
 }
 
 .headerRight {
@@ -137,39 +228,39 @@
 
 /* ---- 提示文案区域 ---- */
 .hintArea {
-  padding: var(--spacing-lg);
+  padding: var(--spacing-md);
   flex-shrink: 0;
 }
 
 .hintTitle {
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: var(--color-text-primary);
-  margin-bottom: var(--spacing-sm);
+  margin-bottom: 4px;
 }
 
 .hintDesc {
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
-  line-height: 1.6;
+  line-height: 1.5;
 }
 
 /* ---- 快捷问题卡片 ---- */
 .quickCards {
-  padding: 0 var(--spacing-lg);
+  padding: 0 var(--spacing-md);
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-sm);
+  gap: var(--spacing-xs);
   flex-shrink: 0;
-  margin-bottom: var(--spacing-lg);
+  margin-bottom: var(--spacing-md);
 }
 
 .quickCard {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: var(--spacing-md);
-  border-radius: var(--radius-lg);
+  gap: 2px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
   background-color: #2a2a2a;
   border: 1px solid var(--color-border-primary);
   cursor: pointer;
@@ -183,29 +274,29 @@
 }
 
 .quickTitle {
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .quickDesc {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
-  line-height: 1.5;
+  line-height: 1.4;
 }
 
 /* ---- 输入区域 ---- */
 .inputArea {
   margin-top: auto;
-  padding: var(--spacing-md) var(--spacing-lg) var(--spacing-lg);
+  padding: var(--spacing-sm) var(--spacing-md) var(--spacing-md);
   flex-shrink: 0;
 }
 
 .inputBox {
   background-color: #2a2a2a;
   border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-lg);
-  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm) var(--spacing-md);
   transition: border-color var(--transition-fast);
 }
 
@@ -213,30 +304,12 @@
   border-color: var(--color-border-hover);
 }
 
-.textarea {
-  width: 100%;
-  padding: 0;
-  background: transparent;
-  border: none;
-  color: var(--color-text-primary);
-  font-size: var(--font-size-lg);
-  line-height: 1.6;
-  resize: none;
-  outline: none;
-  font-family: inherit;
-  box-sizing: border-box;
-  display: block;
-}
-
-.textarea::placeholder {
-  color: var(--color-text-tertiary);
-}
-
 /* ---- 底部工具栏 ---- */
 .inputToolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--spacing-xs);
   margin-top: var(--spacing-sm);
 }
 
@@ -244,18 +317,21 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
+  min-width: 0;
 }
 
 .toolbarRight {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
+  gap: var(--spacing-xs);
+  flex-shrink: 0;
 }
 
 .toolBtn {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-md);
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -299,7 +375,7 @@
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-md);
   border-radius: var(--radius-sm);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
@@ -321,16 +397,18 @@
 .skillBtn {
   display: flex;
   align-items: center;
-  gap: var(--spacing-xs);
-  height: 40px;
-  padding: 0 var(--spacing-md);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-md);
+  gap: 4px;
+  height: 30px;
+  flex-shrink: 0;
+  padding: 0 var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
   font-weight: 500;
   color: var(--color-text-primary);
   background: transparent;
   border: 1px solid var(--color-border-secondary);
   cursor: pointer;
+  white-space: nowrap;
   transition: all var(--transition-fast);
 }
 
@@ -347,19 +425,25 @@
 .modelBtn {
   display: flex;
   align-items: center;
-  gap: var(--spacing-xs);
-  height: 40px;
-  padding: 0 var(--spacing-md);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-md);
+  gap: 4px;
+  height: 30px;
+  padding: 0 var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
   font-weight: 500;
-  min-width: 200px;
+  max-width: 120px;
   justify-content: center;
   color: var(--color-text-primary);
   background: transparent;
   border: 1px solid var(--color-border-secondary);
   cursor: pointer;
   transition: all var(--transition-fast);
+}
+
+.modelLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .modelBtn:hover {
@@ -396,7 +480,7 @@
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-md);
   border-radius: var(--radius-sm);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-sm);
   white-space: nowrap;
   color: var(--color-text-secondary);
   background: transparent;
@@ -428,13 +512,13 @@
 }
 
 .modelDropdownTitle {
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .modelDropdownDesc {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
 }
 
@@ -443,16 +527,17 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
   flex-shrink: 0;
 }
 
 /* ---- 发送按钮 ---- */
 .sendBtn {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-md);
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -486,9 +571,10 @@
 
 /* 重试失败运行按钮 */
 .retryBtn {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-md);
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -519,9 +605,9 @@
   max-width: 85%;
   background-color: #2f2f2f;
   border-radius: 12px;
-  padding: 12px 16px;
-  font-size: var(--font-size-lg);
-  line-height: 1.7;
+  padding: 10px 14px;
+  font-size: var(--font-size-md);
+  line-height: 1.5;
   color: var(--color-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
@@ -532,8 +618,8 @@
   align-self: flex-start;
   max-width: 95%;
   color: #d6d6d6;
-  font-size: var(--font-size-lg);
-  line-height: 1.9;
+  font-size: var(--font-size-md);
+  line-height: 1.6;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -702,7 +788,7 @@
 }
 
 .modalTitle {
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-lg);
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -717,7 +803,7 @@
   gap: var(--spacing-sm);
   padding: var(--spacing-sm) var(--spacing-md);
   border-radius: var(--radius-md);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-md);
   color: var(--color-text-secondary);
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -777,25 +863,15 @@
   gap: 8px;
 }
 
-.clarifyCard {
-  border: 1px solid var(--color-border-secondary);
-  background-color: #242425;
-  border-radius: 12px;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
 .cardTitle {
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .cardGoal {
   margin: 0;
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-md);
   line-height: 1.7;
   color: var(--color-text-primary);
 }
@@ -870,131 +946,6 @@
   background: var(--color-accent-primary-hover, #c7e05c);
 }
 
-/* 追问卡确认补充按钮：独立全宽一行 */
-.clarifyInputRow + .cardBtnPrimary {
-  width: 100%;
-  margin-top: 8px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: none;
-  font-size: var(--font-size-lg);
-  cursor: pointer;
-  font-family: inherit;
-  transition: opacity var(--transition-fast);
-}
-
-.clarifyInputRow + .cardBtnPrimary:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
-/* ---- 追问列表 ---- */
-.clarifyList {
-  margin: 0;
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: var(--font-size-md);
-  line-height: 1.7;
-  color: var(--color-text-secondary);
-}
-
-/* 追问可交互（B1）：选项组 + 自由补充 */
-.clarifyItem {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 2px;
-}
-
-.clarifyHint {
-  margin: 0;
-  font-size: var(--font-size-md);
-  color: var(--color-text-tertiary);
-  line-height: 1.6;
-}
-
-.clarifyLabel {
-  color: var(--color-text-secondary);
-  font-weight: 500;
-}
-
-.clarifyOptions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.clarifyOption {
-  padding: 4px 12px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-border-secondary);
-  background-color: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-md);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  font-family: inherit;
-}
-
-.clarifyOption:hover {
-  background-color: var(--color-bg-hover);
-  border-color: var(--color-border-hover);
-}
-
-/* 选中态：点选后高亮，提交时随补充信息发送 */
-.clarifyOptionActive {
-  background-color: var(--color-bg-active);
-  border-color: var(--color-accent-primary, #d5f06a);
-  color: var(--color-accent-text);
-  font-weight: 500;
-}
-
-.clarifyLineBtn {
-  padding: 4px 10px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-md);
-  text-align: left;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  font-family: inherit;
-  border-radius: var(--radius-sm);
-}
-
-.clarifyLineBtn:hover {
-  color: var(--color-accent-text);
-  background-color: var(--color-bg-hover);
-}
-
-.clarifyInputRow {
-  margin-top: 8px;
-}
-
-.clarifyInput {
-  width: 100%;
-  padding: 7px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--color-border-secondary);
-  background-color: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-md);
-  outline: none;
-  transition: border-color var(--transition-fast);
-  font-family: inherit;
-  box-sizing: border-box;
-}
-
-.clarifyInput:focus {
-  border-color: var(--color-border-hover);
-}
-
-.clarifyInput::placeholder {
-  color: var(--color-text-tertiary);
-}
-
 /* ---- 分镜提示词生成卡（S2） ---- */
 .generationCard {
   border: 1px solid var(--color-border-secondary);
@@ -1014,7 +965,7 @@
 }
 
 .shotTitle {
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -1046,6 +997,44 @@
   flex: 1;
 }
 
+/* 编辑框：无 border/padding，box-shadow 代替边框（不占布局空间），保证进入编辑态时 div 不挪位/不跳动 */
+.shotEditInput {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: 0 0 0 1px var(--color-border-hover);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  font-family: inherit;
+  line-height: inherit;
+  outline: none;
+}
+
+.shotEditTextarea {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: 0 0 0 1px var(--color-border-hover);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  line-height: 1.7;
+  font-family: inherit;
+  resize: none;
+  overflow: hidden;
+  outline: none;
+}
+
 .shotRefs {
   display: flex;
   flex-wrap: wrap;
@@ -1069,6 +1058,13 @@
   flex-shrink: 0;
 }
 
+/* 卡片右上角应用按钮：header 内嵌，比常规 cardBtn 更紧凑 */
+.shotApplyBtn {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  font-size: var(--font-size-sm);
+}
+
 .appliedHint {
   padding: 8px 12px;
   border-radius: 10px;
@@ -1077,6 +1073,59 @@
   font-size: var(--font-size-md);
   color: #7ee4a7;
   line-height: 1.6;
+}
+
+/* ---- 生成卡「取消」状态（04 §5.2） ---- */
+.shotCancelled {
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.cancelledHint {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border-secondary);
+  background-color: var(--color-bg-tertiary);
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  line-height: 1.6;
+}
+
+.generationCardCancelled {
+  opacity: 0.55;
+}
+
+/* ---- 生成卡组动作（04 §5.2：应用整组 / 取消） ---- */
+.cardGroupActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.cardGroupCancelBtn {
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border-secondary);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--transition-fast);
+}
+
+.cardGroupCancelBtn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+}
+
+.cardGroupCancelBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 /* ---- 侧边栏状态条（S5） ---- */

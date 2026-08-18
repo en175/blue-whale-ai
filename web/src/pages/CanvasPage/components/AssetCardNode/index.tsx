@@ -6,6 +6,7 @@ import { useRef, useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { AtSign, Upload, WandSparkles, Info, Music } from 'lucide-react';
+import type { GenerationCardBlock } from '@/api/agentSessions';
 import styles from './index.module.css';
 
 /** 资产卡类型（generation 为 Agent 生成卡落画布形态） */
@@ -21,18 +22,16 @@ const KIND_META: Record<AssetCardKind, { title: string; placeholder: string }> =
   generation: { title: '生成卡', placeholder: '分镜提示词生成卡' },
 };
 
-/** Agent 生成卡数据（kind=generation 时承载，落画布后从节点选引用） */
-export interface GenerationCardNodeData {
-  cardId?: string;
-  shotTitle?: string;
-  timeRange?: string;
-  visual?: string;
-  prompt?: string;
-  assetRefs?: string[];
-  /** 引用到 Canvas dock */
-  onApplyToDock?: (payload: { prompt: string; assetRefs: string[]; cardId?: string; shotTitle?: string }) => void;
-  /** 给 Agent 继续修改 */
-  onSendToAgent?: (prompt: string) => void;
+/** Agent 生成卡数据（kind=generation 时承载，落画布后从节点选引用）
+ * 字段复用会话层的 GenerationCardBlock（唯一形状定义），此处只加节点专属的回调；
+ * 各字段仍是 Partial——节点可能由旧数据/后端水合出不完整的卡 */
+export interface GenerationCardNodeData extends Partial<GenerationCardBlock> {
+  /** 引用到 Canvas dock：完整卡片数据一起带走，不再手挑字段（曾丢过 visual/timeRange） */
+  onApplyToDock?: (payload: GenerationCardBlock) => void;
+  /** 给 Agent 继续修改（shotTitle 用于侧边栏输入框的引用胶囊标签） */
+  onSendToAgent?: (prompt: string, shotTitle?: string) => void;
+  /** 双击编辑：提交标题/画面/提示词的修改 */
+  onUpdate?: (patch: Partial<Pick<GenerationCardBlock, 'shotTitle' | 'visual' | 'prompt'>>) => void;
 }
 
 interface AssetCardNodeData {
@@ -60,6 +59,9 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
   const [voiceName, setVoiceName] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLInputElement>(null);
+  /** 生成卡双击编辑：当前编辑中的字段 + 草稿值 */
+  const [editingField, setEditingField] = useState<'shotTitle' | 'visual' | 'prompt' | null>(null);
+  const [draftValue, setDraftValue] = useState('');
 
   const isSelect = data.toolMode === 'select';
   const isGeneration = (data.kind ?? 'custom') === 'generation';
@@ -102,6 +104,28 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
     if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
   };
 
+  /** 编辑框自适应高度：撑满实际内容，不用固定行数截断/滚动（保持与双击前的展示一致） */
+  const autoResizeTextarea = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  };
+
+  /** 双击生成卡字段进入编辑态 */
+  const startEditField = (field: 'shotTitle' | 'visual' | 'prompt', current?: string) => {
+    setEditingField(field);
+    setDraftValue(current ?? '');
+  };
+
+  /** 提交编辑：回调 CanvasPage 落地节点数据（画布自动保存生效） */
+  const commitEditField = () => {
+    if (!editingField) return;
+    data.generationCard?.onUpdate?.({ [editingField]: draftValue });
+    setEditingField(null);
+  };
+
+  const cancelEditField = () => setEditingField(null);
+
   return (
     <div className={styles.wrapper} onContextMenu={handleContextMenu}>
       {!data.isFirst && (
@@ -130,22 +154,114 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
             /* Agent 生成卡落画布形态：展示卡内容 + 引用到 dock / 给 Agent */
             <div className={styles.body}>
               <div className={styles.gcHeader}>
-                <span className={styles.gcTitle}>{data.generationCard.shotTitle ?? '生成卡'}</span>
+                {editingField === 'shotTitle' ? (
+                  <input
+                    className={`${styles.gcEditInput} nodrag`}
+                    value={draftValue}
+                    autoFocus
+                    onChange={(e) => setDraftValue(e.target.value)}
+                    onBlur={commitEditField}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') commitEditField();
+                      else if (e.key === 'Escape') cancelEditField();
+                    }}
+                  />
+                ) : (
+                  <span
+                    className={styles.gcTitle}
+                    title="双击编辑"
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      startEditField('shotTitle', data.generationCard?.shotTitle);
+                    }}
+                  >
+                    {data.generationCard.shotTitle ?? '生成卡'}
+                  </span>
+                )}
                 {data.generationCard.timeRange && (
                   <span className={styles.gcTime}>{data.generationCard.timeRange}</span>
                 )}
               </div>
-              {data.generationCard.visual && (
+              {editingField === 'visual' ? (
                 <div className={styles.gcField}>
                   <span className={styles.gcLabel}>画面</span>
-                  <span className={styles.gcValue}>{data.generationCard.visual}</span>
+                  <textarea
+                    ref={autoResizeTextarea}
+                    className={`${styles.gcEditTextarea} nodrag`}
+                    value={draftValue}
+                    autoFocus
+                    rows={1}
+                    onChange={(e) => {
+                      setDraftValue(e.target.value);
+                      autoResizeTextarea(e.target);
+                    }}
+                    onBlur={commitEditField}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        commitEditField();
+                      } else if (e.key === 'Escape') cancelEditField();
+                    }}
+                  />
                 </div>
+              ) : (
+                data.generationCard.visual && (
+                  <div className={styles.gcField}>
+                    <span className={styles.gcLabel}>画面</span>
+                    <span
+                      className={styles.gcValue}
+                      title="双击编辑"
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        startEditField('visual', data.generationCard?.visual);
+                      }}
+                    >
+                      {data.generationCard.visual}
+                    </span>
+                  </div>
+                )
               )}
-              {data.generationCard.prompt && (
+              {editingField === 'prompt' ? (
                 <div className={styles.gcField}>
                   <span className={styles.gcLabel}>提示词</span>
-                  <span className={styles.gcValue}>{data.generationCard.prompt}</span>
+                  <textarea
+                    ref={autoResizeTextarea}
+                    className={`${styles.gcEditTextarea} nodrag`}
+                    value={draftValue}
+                    autoFocus
+                    rows={1}
+                    onChange={(e) => {
+                      setDraftValue(e.target.value);
+                      autoResizeTextarea(e.target);
+                    }}
+                    onBlur={commitEditField}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        commitEditField();
+                      } else if (e.key === 'Escape') cancelEditField();
+                    }}
+                  />
                 </div>
+              ) : (
+                data.generationCard.prompt && (
+                  <div className={styles.gcField}>
+                    <span className={styles.gcLabel}>提示词</span>
+                    <span
+                      className={styles.gcValue}
+                      title="双击编辑"
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        startEditField('prompt', data.generationCard?.prompt);
+                      }}
+                    >
+                      {data.generationCard.prompt}
+                    </span>
+                  </div>
+                )
               )}
               {data.generationCard.assetRefs && data.generationCard.assetRefs.length > 0 && (
                 <div className={styles.gcRefs}>
@@ -159,10 +275,12 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
                   className={styles.actionBtn}
                   onClick={() =>
                     data.generationCard?.onApplyToDock?.({
+                      cardId: data.generationCard?.cardId,
+                      shotTitle: data.generationCard?.shotTitle ?? '生成卡',
+                      timeRange: data.generationCard?.timeRange,
+                      visual: data.generationCard?.visual ?? '',
                       prompt: data.generationCard?.prompt ?? '',
                       assetRefs: data.generationCard?.assetRefs ?? [],
-                      cardId: data.generationCard?.cardId,
-                      shotTitle: data.generationCard?.shotTitle,
                     })
                   }
                 >
@@ -171,7 +289,12 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
                 </button>
                 <button
                   className={styles.actionBtn}
-                  onClick={() => data.generationCard?.onSendToAgent?.(data.generationCard?.prompt ?? '')}
+                  onClick={() =>
+                    data.generationCard?.onSendToAgent?.(
+                      data.generationCard?.prompt ?? '',
+                      data.generationCard?.shotTitle,
+                    )
+                  }
                 >
                   <AtSign size={15} strokeWidth={2} />
                   <span>给 Agent</span>

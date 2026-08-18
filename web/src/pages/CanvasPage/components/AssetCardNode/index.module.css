@@ -190,6 +190,7 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
+  width: 100%;
   margin-bottom: 2px;
 }
 
@@ -209,6 +210,7 @@
   display: flex;
   align-items: flex-start;
   gap: 6px;
+  width: 100%;
   font-size: 12px;
   line-height: 1.6;
   color: #bbb;
@@ -224,6 +226,44 @@
 .gcValue {
   flex: 1;
   word-break: break-word;
+}
+
+/* 编辑框：无 border/padding，box-shadow 代替边框（不占布局空间），保证进入编辑态时 div 不挪位/不跳动 */
+.gcEditInput {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: inherit;
+  outline: none;
+}
+
+.gcEditTextarea {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2);
+  color: #bbb;
+  font-size: 12px;
+  line-height: 1.6;
+  font-family: inherit;
+  resize: none;
+  overflow: hidden;
+  outline: none;
 }
 
 .gcRefs {

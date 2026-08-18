@@ -13,6 +13,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import ChipTextEditor, { type ChipTextEditorHandle, type ChipRef } from '../ChipTextEditor';
 import styles from './index.module.css';
 
 /** 模式选项 */
@@ -52,10 +53,8 @@ interface BottomDialogProps {
   onSend: (text: string, opts: VideoGenOptions) => void;
   /** 初始参考素材（节点「生成视频」带入被点节点图片） */
   initialRefs?: BottomRefItem[];
-  /** 初始提示词（Agent 生成卡「引用到 dock」带入的分镜提示词） */
-  initialPrompt?: string;
-  /** 初始提示词胶囊标签（如「镜头 1 · 光影揭幕」） */
-  initialPromptLabel?: string;
+  /** 初始生成卡引用胶囊（Agent 生成卡「引用到 dock」带入，累计不覆盖，可多张） */
+  initialCards?: ChipRef[];
 }
 
 /** 宽高比图标：按比例绘制小矩形 */
@@ -67,13 +66,11 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs, initialPrompt, initialPromptLabel }: BottomDialogProps) {
-  /** Agent 生成卡：标题+提示词一体（卡片形态，删一起删），发送时用卡片 prompt */
-  const [seedCard, setSeedCard] = useState<{ label: string; prompt: string } | null>(
-    initialPrompt ? { label: initialPromptLabel ?? '生成卡', prompt: initialPrompt } : null,
-  );
-  /** 用户自由输入（与生成卡卡片独立） */
-  const [inputValue, setInputValue] = useState('');
+export default function BottomDialog({ onClose, onSend, initialRefs, initialCards }: BottomDialogProps) {
+  /** 富文本输入框（可多次插入生成卡引用胶囊，发送时替换成完整 prompt） */
+  const chipEditorRef = useRef<ChipTextEditorHandle>(null);
+  /** 输入框实时纯文本（胶囊已替换成完整 prompt），供生成按钮启用态判断 */
+  const [composedText, setComposedText] = useState('');
   const [refFiles, setRefFiles] = useState<BottomRefItem[]>(initialRefs ?? []);
   const [selectedMode, setSelectedMode] = useState(modeOptions[0].key);
   const [modeOpen, setModeOpen] = useState(false);
@@ -134,6 +131,15 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialProm
       setDuration(typeof m.default_duration === 'number' ? clamp(m.default_duration) : m.supported_durations.min);
     }
   };
+
+  // 只插入 initialCards 里「上次还没插过」的新增部分：对话框不因追加引用而重挂载，
+  // 已输入的自由文字不会被清空；ref 记录已插入数量，同时防 StrictMode 开发态 effect 双调用重复插入
+  const insertedCardCountRef = useRef(0);
+  useEffect(() => {
+    const newCards = (initialCards ?? []).slice(insertedCardCountRef.current);
+    insertedCardCountRef.current = initialCards?.length ?? 0;
+    newCards.forEach((card) => chipEditorRef.current?.insertChip(card));
+  }, [initialCards]);
 
   // 加载视频模型能力列表
   useEffect(() => {
@@ -214,9 +220,9 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialProm
     });
   };
 
-  /** 发送：优先生成卡卡片 prompt，否则自由输入（携带模型/宽高比/清晰度/时长） */
+  /** 发送：composedText 已把胶囊替换成完整 prompt 并跟自由输入拼接好（携带模型/宽高比/清晰度/时长） */
   const handleSend = () => {
-    const text = seedCard?.prompt ?? inputValue.trim();
+    const text = composedText.trim();
     if (!text) return;
     if (!currentModel) {
       console.warn('视频模型能力加载中，请稍后重试');
@@ -230,16 +236,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialProm
       duration,
       mode: selectedMode,
     });
-    setSeedCard(null);
-    setInputValue('');
-  };
-
-  /** 键盘事件 */
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    chipEditorRef.current?.clear();
   };
 
   return (
@@ -435,31 +432,12 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialProm
         </div>
       )}
 
-      {/* Agent 生成卡卡片（标题+提示词一体，删一起删，发送时用卡片 prompt） */}
-      {seedCard && (
-        <div className={styles.genCardBox}>
-          <div className={styles.genCardHead}>
-            <span className={styles.genCardLabel}>{seedCard.label}</span>
-            <button
-              type="button"
-              className={styles.genCardRemove}
-              onClick={() => setSeedCard(null)}
-              title="移除生成卡"
-            >
-              <X size={12} strokeWidth={2} />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 输入框 */}
-      <textarea
-        className={styles.textarea}
+      {/* 输入框：可多次插入生成卡引用胶囊，胶囊跟文字同一行 */}
+      <ChipTextEditor
+        ref={chipEditorRef}
         placeholder="上传 3-10 秒视频片段，并结合文本或图片轻松修改内容、改变镜头角度或重塑原视频风格。可使用 @ 快速插入已添加资源。"
-        value={inputValue}
-        onChange={(e) => setInputValue(e.target.value)}
-        onKeyDown={handleKeyDown}
-        rows={2}
+        onChangeText={setComposedText}
+        onSend={handleSend}
       />
 
       {/* 底部状态栏 */}
@@ -524,9 +502,9 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialProm
           <span className={styles.barInfo}>1x</span>
           <div className={styles.sendWrap}>
             <button
-              className={`${styles.generateBtn} ${(seedCard || inputValue.trim()) ? styles.generateBtnActive : ''}`}
+              className={`${styles.generateBtn} ${composedText.trim() ? styles.generateBtnActive : ''}`}
               onClick={handleSend}
-              disabled={!seedCard && !inputValue.trim()}
+              disabled={!composedText.trim()}
             >
               <Sparkles size={14} strokeWidth={2} />
               <span>15</span>

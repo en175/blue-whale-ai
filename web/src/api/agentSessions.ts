@@ -171,6 +171,14 @@ export function fetchSessionSnapshot(projectId: string, sessionId: string): Prom
   return p;
 }
 
+/** 删除会话 DELETE /projects/:id/sessions/:sid（历史会话下拉「删除」，需二次确认） */
+export function deleteSession(projectId: string, sessionId: string): Promise<unknown> {
+  return sessionRequest(
+    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}`,
+    { method: 'DELETE' },
+  );
+}
+
 /* ============ 消息与运行控制 ============ */
 
 /** 发送消息 POST /projects/:id/sessions/:sid/messages（回复经事件流 assistant.delta 下发） */

@@ -11,12 +11,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   listSessions,
   createSession,
+  deleteSession,
   fetchSessionSnapshot,
   sendSessionMessage,
   cancelSessionRun,
   retrySessionRun,
   subscribeSessionEvents,
   type SessionMessage,
+  type SessionRecord,
   type SessionContentBlock,
   type SseEvent,
 } from '@/api/agentSessions';
@@ -33,6 +35,7 @@ const api =
     : {
         listSessions,
         createSession,
+        deleteSession,
         fetchSessionSnapshot,
         sendSessionMessage,
         cancelSessionRun,
@@ -96,6 +99,10 @@ export function useAgentSession(projectId: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   /** 当前会话ID */
   const [sessionId, setSessionId] = useState<string | null>(null);
+  /** 当前项目下的历史会话列表（新→旧，供历史会话下拉使用） */
+  const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  /** 当前会话的事件订阅取消函数（切换会话时先解绑旧的，防串话） */
+  const unsubRef = useRef<(() => void) | null>(null);
   /** 流式文本（assistant.delta 累积投影） */
   const [streamingText, setStreamingText] = useState('');
   /** 流式进行中（发送成功到运行终态之间） */
@@ -267,33 +274,51 @@ export function useAgentSession(projectId: string) {
     setThinkingSteps([]);
   }, []);
 
-  /** 初始化：列表取最近会话（无则创建）→ 快照水合 → 订阅事件流 */
+  /** 刷新历史会话列表（供下拉展示；新对话/切换后重拉一次即可，不做轮询） */
+  const refreshSessions = useCallback(() => {
+    if (!projectId) return;
+    api.listSessions(projectId)
+      .then(({ items }) => setSessions(items ?? []))
+      .catch((e) => console.warn('获取历史会话列表失败:', e));
+  }, [projectId]);
+
+  /** 连接到指定会话：水合快照 + 订阅事件流（先解绑旧订阅，防止串话到上一个会话） */
+  const connectSession = useCallback(
+    async (session: { session_id: string }) => {
+      unsubRef.current?.();
+      unsubRef.current = null;
+      setSessionId(session.session_id);
+      const snap = await api.fetchSessionSnapshot(projectId, session.session_id);
+      setMessages((snap.messages ?? []).map(projectMessage));
+      if (snap.active_run?.run_id && !TERMINAL_STATUS.includes(snap.active_run.status)) {
+        setRunningRunId(snap.active_run.run_id);
+        setStreaming(true);
+      }
+      unsubRef.current = api.subscribeSessionEvents(
+        projectId,
+        session.session_id,
+        snap.event_cursor ?? '',
+        handleEvent,
+      );
+    },
+    [projectId, handleEvent],
+  );
+
+  /** 初始化：列表取最近会话（无则创建）→ 连接会话 */
   useEffect(() => {
     if (!projectId) return;
     let alive = true;
-    let unsub: (() => void) | null = null;
     resetLocal();
     setSessionId(null);
 
     (async () => {
       try {
         const { items } = await api.listSessions(projectId);
+        if (!alive) return;
+        setSessions(items ?? []);
         const session = items?.[0] ?? (await api.createSession(projectId));
         if (!alive || !session?.session_id) return;
-        setSessionId(session.session_id);
-        const snap = await api.fetchSessionSnapshot(projectId, session.session_id);
-        if (!alive) return;
-        setMessages((snap.messages ?? []).map(projectMessage));
-        if (snap.active_run?.run_id && !TERMINAL_STATUS.includes(snap.active_run.status)) {
-          setRunningRunId(snap.active_run.run_id);
-          setStreaming(true);
-        }
-        unsub = api.subscribeSessionEvents(
-          projectId,
-          session.session_id,
-          snap.event_cursor ?? '',
-          handleEvent,
-        );
+        await connectSession(session);
       } catch (e) {
         if (alive) console.warn('Agent 会话初始化失败:', e);
       }
@@ -301,9 +326,39 @@ export function useAgentSession(projectId: string) {
 
     return () => {
       alive = false;
-      unsub?.();
+      unsubRef.current?.();
+      unsubRef.current = null;
     };
-  }, [projectId, handleEvent, resetLocal]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, resetLocal]);
+
+  /** 切换到历史会话（下拉选择） */
+  const switchSession = useCallback(
+    (targetId: string) => {
+      if (!projectId || targetId === sessionIdRef.current) return;
+      resetLocal();
+      connectSession({ session_id: targetId }).catch((e) => console.warn('切换会话失败:', e));
+    },
+    [projectId, resetLocal, connectSession],
+  );
+
+  /** 删除历史会话（下拉「删除」二次确认后调用）：删的是当前会话则回退到列表中下一个，全删光则新建一个 */
+  const deleteSessionById = useCallback(
+    (targetId: string) => {
+      if (!projectId) return;
+      api.deleteSession(projectId, targetId)
+        .then(async () => {
+          const { items } = await api.listSessions(projectId);
+          setSessions(items ?? []);
+          if (targetId !== sessionIdRef.current) return;
+          resetLocal();
+          const next = items?.[0] ?? (await api.createSession(projectId));
+          await connectSession(next);
+        })
+        .catch((e) => console.warn('删除会话失败:', e));
+    },
+    [projectId, resetLocal, connectSession],
+  );
 
   /** 发送消息：乐观上屏 + POST 提交（回复经事件流 assistant.delta 投影） */
   const sendMessage = useCallback(
@@ -363,20 +418,19 @@ export function useAgentSession(projectId: string) {
       });
   }, [projectId, failedRunId]);
 
-  /** 开启新对话：创建新会话并重建投影 */
+  /** 开启新对话：创建新会话 + 重新订阅事件流（否则新会话的回复会发到已解绑的旧订阅） */
   const resetChat = useCallback(() => {
     if (!projectId) return;
     resetLocal();
     setSessionId(null);
     api.createSession(projectId)
-      .then(async (session) => {
+      .then((session) => {
         if (!session?.session_id) return;
-        setSessionId(session.session_id);
-        const snap = await api.fetchSessionSnapshot(projectId, session.session_id);
-        setMessages((snap.messages ?? []).map(projectMessage));
+        return connectSession(session);
       })
+      .then(() => refreshSessions())
       .catch((e) => console.warn('创建新会话失败:', e));
-  }, [projectId, resetLocal]);
+  }, [projectId, resetLocal, connectSession, refreshSessions]);
 
   /** 侧边栏状态机推导：最新助手消息的内容块类型 + 运行态 → 用户可见状态 */
   const agentPhase = useMemo<AgentPhase>(() => {
@@ -384,9 +438,10 @@ export function useAgentSession(projectId: string) {
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
     const blocks = lastAssistant?.blocks ?? [];
     const hasThinking = blocks.some((b) => b.type === 'thinking');
-    const hasClarify = blocks.some((b) => b.type === 'clarify');
     const hasUnderstanding = blocks.some((b) => b.type === 'understanding');
     const hasCards = blocks.some((b) => b.type === 'card');
+    // 首条助手回复即追问（grillme 式自然语言，无结构化 clarify 块）：还没给出需求理解/生成卡 → 等待用户自由文本补充
+    const isFirstAssistantReply = messages.filter((m) => m.role === 'assistant').length === 1;
 
     // 运行中：无产出 → 处理中；已确认 → 生成卡生成中
     if (runningRunId !== null || streaming) {
@@ -394,7 +449,7 @@ export function useAgentSession(projectId: string) {
       return 'processing';
     }
     // 非运行：按最新产出块判定
-    if (hasClarify) return 'awaiting_input';
+    if (isFirstAssistantReply && !hasUnderstanding && !hasCards) return 'awaiting_input';
     if (hasUnderstanding) return 'awaiting_confirm';
     if (hasCards) return 'cards_ready';
     if (messages.length === 0 && !hasThinking) return 'idle';
@@ -404,6 +459,7 @@ export function useAgentSession(projectId: string) {
   return {
     messages,
     sessionId,
+    sessions,
     streamingText,
     streaming,
     runningRunId,
@@ -414,5 +470,8 @@ export function useAgentSession(projectId: string) {
     stopRun,
     retryRun,
     resetChat,
+    switchSession,
+    deleteSession: deleteSessionById,
+    refreshSessions,
   };
 }
