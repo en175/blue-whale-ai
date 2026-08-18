@@ -450,7 +450,7 @@ async function processClaimedJob(
   }
 }
 
-async function persistProviderMedia(
+export async function persistProviderMedia(
   sourceUrl: string,
   type: "image" | "video" | "audio",
   userId: string,
