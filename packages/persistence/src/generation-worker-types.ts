@@ -62,6 +62,8 @@ export interface WorkerRepo {
   resetStalledImageJobs(): Promise<number>;
   /** 认领一个到点的图片 queued 任务（next_action_at<=now），置 processing + lease。无则 null。 */
   claimNextImageJob(workerId: string): Promise<ClaimedJob | null>;
+  /** 认领一个到点的进程内任务(image 或 audio),置 processing + lease。无则 null。 */
+  claimNextInProcessJob(workerId: string): Promise<ClaimedJob | null>;
   /** 瞬时失败重试：processing → queued + 推迟 next_action_at + retry_count++。仅 processing 态可回退。 */
   requeueImageJobForRetry(jobId: string, nextActionAt: Date): Promise<boolean>;
   /** 领取一个待 submit/poll 的视频短步骤；过期 processing 可被新 Worker 接管。 */
@@ -130,6 +132,7 @@ export interface WorkerRepo {
     storage_key: string | null;
     mime: string | null;
     size: number | null;
+    duration?: number | null;
     workerId: string;
     fencingToken: number;
   }): Promise<string | null>;

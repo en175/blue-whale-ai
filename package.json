@@ -17,6 +17,7 @@
     "test": "pnpm test:node",
     "test:node": "pnpm test:unit",
     "test:unit": "vitest run packages",
+    "test:backend": "vitest run backend",
     "test:ci": "pnpm test:unit",
     "verify": "bash scripts/verify-typescript-baseline.sh"
   },

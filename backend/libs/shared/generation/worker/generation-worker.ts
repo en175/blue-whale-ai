@@ -2,6 +2,7 @@ import type { WorkerRepo } from "@blue-whale/persistence";
 import type { AssetUploadStorage } from "@lib/shared/assets/upload.js";
 import sharp from "sharp";
 
+import { AudioProviderError, type AudioProvider } from "@blue-whale/generation-runtime";
 import {
   hasSeedreamSizeTable,
   resolveSeedreamImageSize,
@@ -14,6 +15,8 @@ export type WorkerDeps = {
   /** 按 job 密封凭证构建图片 provider（与 video 一致：sk token 来自 job，不来自请求闭包，
    *  这样请求内即时调度与进程重启后的恢复扫描可用同一套逻辑）。 */
   createImageProvider: (token: string) => ImageProvider;
+  /** 按 job 密封凭证构建音频 provider(与 image/video 一致)。 */
+  createAudioProvider: (token: string) => AudioProvider;
   /** 解密 job.input.provider_credential → sk token。 */
   credentialVault: { open: (ciphertext: string) => string };
   videoProvider?: VideoProvider;
@@ -56,12 +59,12 @@ export async function processNextJob(deps: WorkerDeps): Promise<string | null> {
   return processClaimedJob(job, deps);
 }
 
-/** 恢复扫描用：认领一个到点的图片 queued 任务（claimNextImageJob）并处理。
- *  与 processNextJob 的区别——只领图片，不误领视频（视频归独立 BullMQ worker）。 */
-export async function processNextImageJob(
+/** 恢复扫描用：认领一个到点的进程内任务（claimNextInProcessJob，image+audio）并处理。
+ *  与 claimNextImageJob 的区别——范围扩到 audio；视频仍归独立 BullMQ worker，不在此认领。 */
+export async function processNextInProcessJob(
   deps: WorkerDeps,
 ): Promise<string | null> {
-  const job = await deps.repo.claimNextImageJob(deps.workerId);
+  const job = await deps.repo.claimNextInProcessJob(deps.workerId);
   if (!job) return null;
   return processClaimedJob(job, deps);
 }
@@ -104,7 +107,7 @@ async function processClaimedJob(
       errorMessage: msg,
       ...fenceProof,
     });
-  if (job.type !== "image" && job.type !== "video") {
+  if (job.type !== "image" && job.type !== "video" && job.type !== "audio") {
     await failClaimed("unsupported_type", `暂不支持类型: ${job.type}`);
     return job.id;
   }
@@ -125,6 +128,11 @@ async function processClaimedJob(
         )
         .map(String)
     : [];
+  // 音频一期不支持参考素材,显式拦截不静默忽略。
+  if (job.type === "audio" && referenceIds.length > 0) {
+    await failClaimed("unsupported_input", "音频生成一期不支持参考素材");
+    return job.id;
+  }
   const maxReferenceCount = job.type === "image" ? 4 : 1;
   if (referenceIds.length > maxReferenceCount) {
     await failClaimed("unsupported_input", "当前模型仅支持一张参考图");
@@ -143,6 +151,72 @@ async function processClaimedJob(
   }
 
   try {
+    if (job.type === "audio") {
+      const sealedCredential = job.input?.provider_credential;
+      if (typeof sealedCredential !== "string" || sealedCredential.length === 0) {
+        await failClaimed(
+          "provider_credential_missing",
+          "音频任务缺少供应商凭证",
+        );
+        return job.id;
+      }
+      const providerToken = credentialVault.open(sealedCredential);
+      const provider = deps.createAudioProvider(providerToken);
+      const cap = await repo.findImageCapability(modelId, null);
+      if (!cap) {
+        await failClaimed(
+          "model_unavailable",
+          `未开通或不受支持的模型: ${modelId}`,
+        );
+        return job.id;
+      }
+      const audio = await provider.generate({
+        model: cap.model_id,
+        prompt,
+      });
+      // audio.data 为原始字节;url 为空串,persistProviderMedia 走 data 直传路径。
+      const stored = await persistProviderMedia(
+        "",
+        "audio",
+        job.user_id,
+        mediaStorage,
+        fetchImpl,
+        audio.data,
+      );
+      const assetId = await repo.createAsset({
+        user_id: job.user_id,
+        project_id: job.project_id,
+        generation_job_id: job.id,
+        url: stored.url,
+        type: "audio",
+        width: null,
+        height: null,
+        storage_key: stored.storageKey,
+        mime: stored.mime,
+        size: stored.size,
+        duration: audio.duration ?? null,
+        ...fenceProof,
+      });
+      if (assetId === null) return job.id;
+      // IK9ILQ：音频实扣金额 = 本次调用消费流水 quota → 分(fen)，仿图片路径接 requestId。
+      let actualAmountFen: bigint | undefined;
+      if (deps.readConsumeQuota && deps.quotaToFen && audio.requestId) {
+        try {
+          const quota = await deps.readConsumeQuota(
+            providerToken,
+            audio.requestId,
+          );
+          if (quota !== null && quota > 0) {
+            actualAmountFen = deps.quotaToFen(quota);
+          }
+        } catch {
+          // 查询失败落 0,与图片缺省一致
+        }
+      }
+      await finishJob(repo, job.id, [assetId], fenceProof, actualAmountFen);
+      return job.id;
+    }
+
     if (job.type === "video") {
       if (!videoProvider) {
         await failClaimed("provider_config", "视频 provider 未配置");
@@ -344,7 +418,9 @@ async function processClaimedJob(
     return job.id;
   } catch (e) {
     const code =
-      e instanceof ImageProviderError || e instanceof VideoProviderError
+      e instanceof ImageProviderError ||
+      e instanceof VideoProviderError ||
+      e instanceof AudioProviderError
         ? e.code
         : "provider_failed";
     const msg = e instanceof Error ? e.message : "unknown";
@@ -374,13 +450,14 @@ async function processClaimedJob(
   }
 }
 
-async function persistProviderMedia(
+export async function persistProviderMedia(
   sourceUrl: string,
-  type: "image" | "video",
+  type: "image" | "video" | "audio",
   userId: string,
   storage:
     Pick<AssetUploadStorage, "prepareUpload" | "makePublic"> | null | undefined,
   fetchImpl: typeof fetch,
+  data?: Uint8Array,
 ): Promise<{
   url: string;
   storageKey: string | null;
@@ -389,6 +466,11 @@ async function persistProviderMedia(
   width: number | null;
   height: number | null;
 }> {
+  // IK9ILQ：audio 走 data 直传（sourceUrl 为空串），mediaStorage 缺失时回退 url:"" 会产生
+  // 死资产，这里显式失败（worker catch 归为 provider_failed，任务失败而非产出 url:"" 资产）。
+  if (data !== undefined && !storage) {
+    throw new Error("音频转存存储未配置");
+  }
   if (!storage) {
     return {
       url: sourceUrl,
@@ -400,15 +482,25 @@ async function persistProviderMedia(
     };
   }
 
-  const source = await fetchImpl(sourceUrl);
-  if (!source.ok) throw new Error(`生成结果下载失败: ${source.status}`);
-  const mime =
-    source.headers.get("content-type")?.split(";", 1)[0]?.trim() ||
-    (type === "image" ? "image/png" : "video/mp4");
-  if (!mime.startsWith(`${type}/`)) {
+  let mime: string | null = null;
+  let content = data;
+  if (content === undefined) {
+    const source = await fetchImpl(sourceUrl);
+    if (!source.ok) throw new Error(`生成结果下载失败: ${source.status}`);
+    mime =
+      source.headers.get("content-type")?.split(";", 1)[0]?.trim() ||
+      (type === "image"
+        ? "image/png"
+        : type === "video"
+          ? "video/mp4"
+          : "audio/mpeg");
+    content = new Uint8Array(await source.arrayBuffer());
+  } else {
+    mime = type === "audio" ? "audio/mpeg" : null;
+  }
+  if (mime && !mime.startsWith(`${type}/`)) {
     throw new Error("生成结果媒体类型不匹配");
   }
-  const content = new Uint8Array(await source.arrayBuffer());
   if (content.byteLength === 0) throw new Error("生成结果为空");
   let width: number | null = null;
   let height: number | null = null;
@@ -423,7 +515,12 @@ async function persistProviderMedia(
     }
   }
 
-  const prepared = await storage.prepareUpload({ userId, type, mime });
+  const prepared = await storage.prepareUpload({
+    userId,
+    type,
+    // data 直传仅在 audio 使用(mime 恒为 audio/mpeg);null 兜底防非 audio 直传误用。
+    mime: mime ?? (type === "audio" ? "audio/mpeg" : "application/octet-stream"),
+  });
   const uploaded = await fetchImpl(prepared.uploadUrl, {
     method: "PUT",
     headers: prepared.headers,

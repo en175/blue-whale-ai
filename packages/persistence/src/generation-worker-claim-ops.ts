@@ -5,7 +5,7 @@ import type {PrismaClient} from "@prisma/client";
 import {CLAIMABLE_JOB_SOURCES, imageJobLeaseSeconds} from "./generation-worker-internals.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
-export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "claimJobById" | "claimNextJob" | "listDueVideoJobIds" | "claimVideoJobById" | "resetStalledImageJobs" | "claimNextImageJob" | "requeueImageJobForRetry" | "claimNextVideoJob"> {
+export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "claimJobById" | "claimNextJob" | "listDueVideoJobIds" | "claimVideoJobById" | "resetStalledImageJobs" | "claimNextImageJob" | "claimNextInProcessJob" | "requeueImageJobForRetry" | "claimNextVideoJob"> {
   // 与拆分前一致：每次创建仓储时读一次 IMAGE_JOB_LEASE_SECONDS。
   const LEASE_SECONDS = imageJobLeaseSeconds();
 
@@ -182,10 +182,11 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
     async resetStalledImageJobs() {
       const now = new Date();
       // IK7GRO：过期重放时递增 fencing_token，使上一次领取发放的旧 token 立即失效。
+      // IK9ILQ：进程内任务(image+audio)统一重放,音频任务不进视频队列。
       const result = await prisma.generation_jobs
         .updateMany({
           where: {
-            type: "image",
+            type: { in: ["image", "audio"] },
             status: "processing",
             is_delete: false,
             lease_expires_at: { lt: now },
@@ -209,6 +210,22 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
         workerId,
         {
           type: "image",
+          status: "queued",
+          is_delete: false,
+          source: { in: CLAIMABLE_JOB_SOURCES },
+          next_action_at: { lte: new Date() },
+        },
+        { orderBy: { id: "asc" } },
+      );
+    },
+
+    async claimNextInProcessJob(workerId) {
+      // IK9ILQ：薄封装——认领一条到点的进程内任务(image 或 audio),仅限 type∈(image,audio)，
+      // 按 id asc；视频走独立 BullMQ worker，不在此认领。
+      return claimQueuedJob(
+        workerId,
+        {
+          type: { in: ["image", "audio"] },
           status: "queued",
           is_delete: false,
           source: { in: CLAIMABLE_JOB_SOURCES },

@@ -1,6 +1,16 @@
 export { createFakeGenerationAdapter } from "./fake-generation-adapter.js";
 export { createNewApiVideoTaskProvider } from "./new-api-video-task-provider.js";
 export {
+  AudioProviderError,
+  type AudioProvider,
+  type GenerateAudioInput,
+  type GeneratedAudio,
+} from "./audio-provider.js";
+export {
+  createNewApiAudioProvider,
+  type NewApiAudioProviderOptions,
+} from "./new-api-audio-provider.js";
+export {
   createPassthroughVideoMediaRelay,
   createTosVideoMediaRelay,
   loadGenerationMediaRelayMode,
