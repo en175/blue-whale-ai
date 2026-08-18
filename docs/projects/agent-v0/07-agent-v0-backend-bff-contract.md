@@ -56,3 +56,8 @@ S4 落地后，真实链路可用；mock 保留用于 agent 服务未部署时�
 
 - 生成卡产物协议：`PromptCardRevision`（任务卡）vs 新 `generation_card`（分镜提示词卡）——IK9DWX-W1 拍板后映射
 - 生成卡→dock 是否需要后端专用承接端点（当前复用 generation-jobs）
+- **路由形状不对齐（2026-08-19 发现，未解决）**：本文档 §2 列的前端调用路径带 `projects/:projectId/` 一层（如
+  `/api/agent/v1/projects/:projectId/sessions`），但 blue-whale-agent 服务当前的 HTTP 路由是裸
+  `/v1/sessions`、`/v1/sessions/:id`……完全没有 project 段。`AgentV1ProxyController` 保留前缀全量转发，
+  这层形状差异会让代理请求在 agent 侧 404。不是简单的前缀转换能补上的，需要决定：agent 侧加 `/projects/:id/`
+  这层，还是本文档改成配合 agent 现有的扁平路由形状。当晚未处理，只记录。
