@@ -10,7 +10,8 @@ import {
   Video,
   Type,
   AudioLines,
-  Music,
+  // 暂时隐藏AI音乐，图标导入同步注释
+  // Music,
   Library,
   ShoppingBag,
   BarChart3,
@@ -27,8 +28,8 @@ import styles from './index.module.css';
 
 type ToolMode = 'drag' | 'select';
 
-/** 扩展工具菜单 key */
-export type ToolMenuKey = 'audio' | 'assets' | 'goods';
+/** 扩展工具菜单 key（audio 暂时隐藏：改为直开对话框，后续恢复时加回） */
+export type ToolMenuKey = 'assets' | 'goods';
 
 interface ToolMenuItem {
   key: string;
@@ -36,16 +37,18 @@ interface ToolMenuItem {
   icon: LucideIcon;
 }
 
-/** 三个扩展工具：音频 / 资产库 / 商品，点击在工具栏旁弹出选择 */
+/** 扩展工具：资产库 / 商品，点击在工具栏旁弹出选择（音频改为直开对话框，AI 音乐暂时隐藏） */
 const TOOL_MENUS: Record<ToolMenuKey, { title: string; icon: LucideIcon; items: ToolMenuItem[] }> = {
-  audio: {
-    title: '音频',
-    icon: AudioLines,
-    items: [
-      { key: 'generate', label: '音频生成', icon: AudioLines },
-      { key: 'music', label: 'AI 音乐', icon: Music },
-    ],
-  },
+  // 暂时隐藏音频选择菜单（改为直开音频生成对话框），注释保留后续恢复
+  // audio: {
+  //   title: '音频',
+  //   icon: AudioLines,
+  //   items: [
+  //     { key: 'generate', label: '音频生成', icon: AudioLines },
+  //     // 暂时隐藏AI音乐
+  //     // { key: 'music', label: 'AI 音乐', icon: Music },
+  //   ],
+  // },
   assets: {
     title: '资产库',
     icon: Library,
@@ -74,9 +77,11 @@ interface CanvasToolbarProps {
   onUploadFile: (files: File[]) => void;
   onToggleVideoDialog: () => void;
   onToggleImageDialog: () => void;
+  onToggleAudioDialog: () => void;
   onAddTextNode: () => void;
   showVideoDialog: boolean;
   showImageDialog: boolean;
+  showAudioDialog: boolean;
   /** 扩展工具菜单项选择（预留联调入口） */
   onMenuSelect?: (menu: ToolMenuKey, item: string) => void;
 }
@@ -87,9 +92,11 @@ export default function CanvasToolbar({
   onUploadFile,
   onToggleVideoDialog,
   onToggleImageDialog,
+  onToggleAudioDialog,
   onAddTextNode,
   showVideoDialog,
   showImageDialog,
+  showAudioDialog,
   onMenuSelect,
 }: CanvasToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -206,8 +213,14 @@ export default function CanvasToolbar({
         <Video size={20} strokeWidth={2} />
       </button>
 
-      {/* 音频（弹出：音频生成 / AI 音乐） */}
-      {renderMenuTool('audio')}
+      {/* 音频：直接打开音频生成底部对话框（AI 音乐暂时隐藏，不再弹选择菜单） */}
+      <button
+        className={`${styles.toolBtn} ${showAudioDialog ? styles.toolBtnActive : ''}`}
+        onClick={onToggleAudioDialog}
+        title="音频生成"
+      >
+        <AudioLines size={20} strokeWidth={2} />
+      </button>
 
       {/* 文本 */}
       <button className={styles.toolBtn} onClick={onAddTextNode} title="添加文本">
