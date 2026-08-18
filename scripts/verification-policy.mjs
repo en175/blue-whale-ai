@@ -1,5 +1,6 @@
 const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg|js|css)|(?:apps|packages)\/.*\/README(?:\.[^/]+)?\.md)$/i;
 const NODE_SOURCE = /^(?:apps|packages)\/[^/]+\/(?:src|tests?)\/.*\.(?:ts|tsx)$/;
+const WEB_SOURCE = /^web\/src\/.*\.(?:ts|tsx|css)$/;
 const CONTROL_PLANE_FILE = /^(?:\.githooks\/|\.(?:claude|codex)\/hooks\/|\.zcode\/config\.json|scripts\/(?:check-hook-closed-loop|check-hook-contracts|cleanup-release-branch|cleanup-task-worktree|commit-spec-on-master|commit-task-for-review|gitee-resolve-ids|install-kimi-hooks|list-task-worktrees|manage-agent-authorization|merge-task-to-local-master|pr-update-evidence|probe-codex-write-hook|publish-review-package|publish-task-branch|query-hook-audit|setup-hooks|start-task-worktree|sync-codex-skill|sync-superpowers-skills|sync-task-from-origin|sync-write-rules-skill|sync_recovery|test-hooks|verification-policy|verify-change-scope|verify-pr-update)\.|scripts\/lib\/|scripts\/tests\/)/;
 const OPERATIONS_FILE = /^scripts\/(?:check-schema-charset|check-target-environment-retirement|ensure-graphify-worktree|fix-ik7grv-replace-slot-backfill|run-ik50gb-c-testsite-probe|run-real-canary|tunnel-testsite-db)\./;
 const PRODUCT_IMPACT_FILE = /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|packages\/contracts\/|packages\/persistence\/(?:prisma\/migrations|schema)\/|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
@@ -17,6 +18,7 @@ function hasProductImpact(file, documentationOnlyFiles) {
 
 function sourceArea(file) {
   if (NODE_SOURCE.test(file)) return "node";
+  if (WEB_SOURCE.test(file)) return "web";
   if (CONTROL_PLANE_FILE.test(file)) return "control-plane";
   if (OPERATIONS_FILE.test(file)) return "operations";
   if (SKILL_SCRIPT_FILE.test(file)) return "operations";
@@ -167,6 +169,12 @@ function appendAreaCommands(commands, areas, base) {
     commands.push(
       ["pnpm", "exec", "tsc", "-b", "--pretty", "false"],
       ["pnpm", "exec", "vitest", "run", "packages", "apps", "--changed", base],
+    );
+  }
+  if (areas.includes("web")) {
+    commands.push(
+      ["node", "web/node_modules/typescript/bin/tsc", "-b", "web/tsconfig.json", "--pretty", "false"],
+      ["npm", "--prefix", "web", "run", "lint"],
     );
   }
   if (areas.includes("governance")) {

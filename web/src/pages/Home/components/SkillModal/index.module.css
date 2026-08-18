@@ -274,22 +274,7 @@
   border-color: #3a3a3a;
 }
 
-/* 像素马赛克封面 */
-.cover {
-  width: 110px;
-  height: 110px;
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  border-radius: 8px;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.cover span {
-  display: block;
-}
-
-/* 后端返回的封面图（与像素封面同尺寸占位） */
+/* 技能封面图（固定 110×110；无封面 skill 不渲染封面区） */
 .coverImg {
   width: 110px;
   height: 110px;

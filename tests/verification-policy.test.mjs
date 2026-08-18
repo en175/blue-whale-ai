@@ -343,6 +343,42 @@ test("builds a documentation plan without code tests", async () => {
   );
 });
 
+test("classifies web source changes as scoped web verification", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+  const file = "web/src/pages/Home/components/SkillModal/index.tsx";
+
+  assert.deepEqual(classifyChanges([file]), {
+    tier: "scoped",
+    areas: ["web"],
+    reasons: ["known source paths changed"],
+  });
+  assert.deepEqual(classifyChanges([file], { stage: "pr" }), {
+    tier: "scoped",
+    areas: ["web"],
+    reasons: ["known source paths changed"],
+  });
+});
+
+test("builds web typecheck and lint checks for web verification", async () => {
+  const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    buildVerificationPlan(
+      {
+        tier: "scoped",
+        areas: ["web"],
+        reasons: ["known source paths changed"],
+      },
+      { base: "origin/master" },
+    ),
+    [
+      ["git", "diff", "--check", "origin/master...HEAD"],
+      ["node", "web/node_modules/typescript/bin/tsc", "-b", "web/tsconfig.json", "--pretty", "false"],
+      ["npm", "--prefix", "web", "run", "lint"],
+    ],
+  );
+});
+
 test("builds affected Node checks for scoped verification", async () => {
   const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
 
