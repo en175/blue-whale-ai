@@ -4,7 +4,7 @@
 import { apiRequest } from './http';
 
 /** 模型能力类型 */
-export type ModelCapability = 'text' | 'video' | 'image';
+export type ModelCapability = 'text' | 'video' | 'image' | 'audio';
 
 /** 分辨率档位 */
 export interface ModelSize {

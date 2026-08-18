@@ -5,7 +5,7 @@
 import { apiRequest } from './http';
 
 /** 生成类型 */
-export type JobType = 'image' | 'video';
+export type JobType = 'image' | 'video' | 'audio';
 
 /** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
 export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
@@ -51,6 +51,12 @@ export interface VideoJobParameters {
   duration: number;
 }
 
+/** 音频生成参数 */
+export interface AudioJobParameters {
+  prompt: string;
+  model_id: string;
+}
+
 /** POST /api/projects/:id/generation-jobs 请求体 */
 export interface CreateJobPayload {
   type: JobType;
@@ -58,7 +64,7 @@ export interface CreateJobPayload {
   input_asset_ids?: number[];
   /** 期望生成数量 */
   expected_output_count: number;
-  parameters: ImageJobParameters | VideoJobParameters;
+  parameters: ImageJobParameters | VideoJobParameters | AudioJobParameters;
   /** 首帧资产ID（仅 video） */
   first_frame_asset_id?: number;
   /** 尾帧资产ID（仅 video） */

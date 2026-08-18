@@ -29,6 +29,7 @@ import {
   fetchJobStatus,
   type ImageJobParameters,
   type VideoJobParameters,
+  type AudioJobParameters,
 } from '@/api/jobs';
 import { uploadAssetFile } from '@/utils/upload';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
@@ -74,8 +75,9 @@ export default function CanvasPage() {
   /** 节点工具条带入图片对话框的初始值（ts 作为 key 强制重挂载以注入初始值） */
   const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[] } | null>(null);
   /** 节点工具条带入视频对话框的初始参考 */
-  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; initialPrompt?: string; initialPromptLabel?: string } | null>(null);  /** 节点工具条带入音频对话框的初始参考 */
-  const [audioSeed, setAudioSeed] = useState<{ ts: number; refs: AudioRefItem[] } | null>(null);
+  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; initialPrompt?: string; initialPromptLabel?: string } | null>(null);
+  /** 节点工具条打开音频对话框的重挂载 key */
+  const [audioSeed, setAudioSeed] = useState<{ ts: number } | null>(null);
   /** 当前视口（拖拽/缩放结束更新），自动保存时序列化提交 */
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
   /** 画布保存状态：idle 未保存 / saving 保存中 / saved 已保存 / error 保存失败 */
@@ -698,8 +700,8 @@ export default function CanvasPage() {
 
   /** 创建生成任务：立即上画布「生成中」占位节点，创建成功后启动轮询 */
   const startGenerationJob = (
-    type: 'image' | 'video',
-    parameters: ImageJobParameters | VideoJobParameters,
+    type: 'image' | 'video' | 'audio',
+    parameters: ImageJobParameters | VideoJobParameters | AudioJobParameters,
   ) => {
     if (!currentId) {
       console.warn('未选中项目，无法创建生成任务');
@@ -714,7 +716,7 @@ export default function CanvasPage() {
         genStatus: 'generating',
         progress: 0,
         mediaType: type,
-        fileName: type === 'video' ? '视频生成中' : '图片生成中',
+        fileName: type === 'video' ? '视频生成中' : type === 'audio' ? '音频生成中' : '图片生成中',
         prompt: parameters.prompt,
         toolMode,
         onDelete: (id: string) => {
@@ -818,14 +820,11 @@ export default function CanvasPage() {
     setShowMusicDialog(false);
   };
 
-  /** 生成音频：音频对话框 + 图片参考 */
+  /** 生成音频：打开音频对话框 */
   const handleNodeGenAudio = (id: string) => {
     const ref = nodeRefOf(id);
     if (!ref) return;
-    setAudioSeed({
-      ts: Date.now(),
-      refs: [{ id: `node-${id}`, kind: 'image', name: ref.name, src: ref.src, source: 'canvas' }],
-    });
+    setAudioSeed({ ts: Date.now() });
     setShowAudioDialog(true);
     setShowBottomDialog(false);
     setShowImageDialog(false);
@@ -1053,9 +1052,9 @@ export default function CanvasPage() {
     [mediaNodes],
   );
 
-  /** 音频对话发送 */
-  const handleAudioDialogSend = (text: string, model: string, refs: AudioRefItem[]) => {
-    console.log('Audio dialog send:', text, model, refs);
+  /** 音频对话发送：创建音频生成任务 */
+  const handleAudioDialogSend = (text: string, modelId: string) => {
+    startGenerationJob('audio', { prompt: text, model_id: modelId });
   };
 
   /** AI 音乐对话发送 */
@@ -1226,10 +1225,8 @@ export default function CanvasPage() {
         {showAudioDialog && (
           <AudioDialog
             key={audioSeed?.ts ?? 0}
-            initialRefs={audioSeed?.refs}
             onClose={() => setShowAudioDialog(false)}
             onSend={handleAudioDialogSend}
-            canvasMedia={canvasMedia}
             onSwitchToMusic={() => {
               setShowAudioDialog(false);
               setShowMusicDialog(true);
