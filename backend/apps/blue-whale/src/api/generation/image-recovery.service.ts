@@ -1,12 +1,12 @@
-import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { Injectable, OnModuleInit } from "@nestjs/common";
 import { Interval } from "@nestjs/schedule";
 import { GenerationWorkerService } from "@lib/shared/generation/generation-worker.service.js";
 import { recoverDueImageJobs } from "@lib/shared/generation/image-recovery.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 /** 图片生成进程内恢复扫描（对齐 instrumentation.ts 的 recoverDueImageJobs）。 */
 @Injectable()
 export class ImageRecoveryService implements OnModuleInit {
-  private readonly logger = new Logger(ImageRecoveryService.name);
 
   constructor(private readonly worker: GenerationWorkerService) {}
 
@@ -21,9 +21,10 @@ export class ImageRecoveryService implements OnModuleInit {
     try {
       await recoverDueImageJobs(this.worker.deps);
     } catch (error) {
-      this.logger.error(
-        "image recovery scan failed",
-        error instanceof Error ? error.stack : String(error),
+      logger.error(
+        `image recovery scan failed${
+          error instanceof Error ? `\n${error.stack}` : `: ${String(error)}`
+        }`,
       );
     }
   }

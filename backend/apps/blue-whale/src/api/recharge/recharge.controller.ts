@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Logger, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 import { NewApiError } from "@blue-whale/core";
 import { ok } from "@blue-whale/contracts";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
@@ -7,6 +7,7 @@ import { quotaToCredits } from "@lib/shared/credits/credits.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
 import { toUpstreamError } from "@lib/shared/errors/upstream-error.js";
 import { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 const WAY_CODE_BY_METHOD: Record<string, string> = {
   wechat: "WX_NATIVE",
@@ -25,8 +26,6 @@ const STATUS_MAP: Record<string, "pending" | "paid" | "expired" | "failed"> = {
 
 @Controller("recharge")
 export class RechargeController {
-  private readonly logger = new Logger(RechargeController.name);
-
   constructor(
     private readonly account: AccountService,
     private readonly topupTier: TopupTierService,
@@ -114,7 +113,7 @@ export class RechargeController {
     try {
       const payMoney = await this.account.requestTopUpAmount(token, amount);
       if (Math.abs(payMoney - tier.price) > 0.01) {
-        this.logger.warn(
+        logger.warn(
           `报价漂移：Go 报价 ¥${payMoney} ≠ 档位实付 ¥${tier.price}（tier id=${tier.id}, N=${amount}）`,
         );
       }

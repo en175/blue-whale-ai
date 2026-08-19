@@ -12,6 +12,7 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import {
   DATA_NOT_EXIST_CODE,
   FAILURE_CODE,
@@ -138,9 +139,8 @@ export class ProjectsController {
       }) as import("node:stream/web").ReadableStream,
     );
     stream.on("error", (error) => {
-      console.error(
-        "[project-events] stream error:",
-        error instanceof Error ? error.message : error,
+      logger.error(
+        `[project-events] stream error: ${error instanceof Error ? error.message : String(error)}`,
       );
       if (!res.writableEnded) res.destroy(error instanceof Error ? error : undefined);
     });

@@ -18,6 +18,7 @@ import {
   openAiError,
   resolveTextModel,
 } from "@lib/shared/text/completions.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
 /** POST /api/text/completions —— OpenAI 兼容文生文薄代理（IK6ZEH；加固 IK707U）。
@@ -105,9 +106,8 @@ export class TextCompletionsController {
         upstream.body as import("node:stream/web").ReadableStream,
       );
       stream.on("error", (error) => {
-        console.error(
-          "[text/completions] upstream stream error:",
-          error instanceof Error ? error.message : error,
+        logger.error(
+          `[text/completions] upstream stream error: ${error instanceof Error ? error.message : String(error)}`,
         );
         if (!res.writableEnded) res.destroy();
       });

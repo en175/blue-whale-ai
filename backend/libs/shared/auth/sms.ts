@@ -1,4 +1,5 @@
 import { signVolcengineRequest } from "@blue-whale/core";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 /** SMS provider 抽象 + 两个实现（对齐 Java SmsProvider / VolcengineSmsProvider / ConsoleSmsProvider）。 */
 export interface SmsProvider {
@@ -7,7 +8,8 @@ export interface SmsProvider {
 
 export const consoleSmsProvider: SmsProvider = {
   async send(phone, code) {
-    console.log(`[SMS console] phone=${phone} code=${code}`);
+    // dev 专用 console 实现（SMS_PROVIDER !== volcengine）；本地 TLS 为 noop，仅落 stdout。
+    logger.info(`[SMS console] phone=${phone} code=${code}`);
   },
 };
 
