@@ -3,12 +3,17 @@ import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { NewApiError } from "@blue-whale/core";
+import { traceMiddleware } from "@lib/infra/middleware/trace.middleware.js";
 import { AppModule } from "./app.module.js";
 
 const port = Number.parseInt(process.env.PORT ?? "3100", 10);
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // 入站 trace 上下文（IK9RSS）：在所有路由处理前注入 x-trace-id → ALS，
+  // 使下游 getCurrentTraceId() 可用，出站 X-Trace-Id 透传、结构化日志 trace_id 有值。
+  app.use(traceMiddleware);
 
   // 前端 apiFetch 走 /api/... 前缀（对齐 blue_whale_web/app/api 路由）。
   app.setGlobalPrefix("api");

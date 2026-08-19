@@ -9,6 +9,12 @@ export default defineConfig({
   resolve: {
     alias: {
       "@lib": fileURLToPath(new URL("./backend/libs", import.meta.url)),
+      // 源码直解析（IK9RSS）：backend 测试 import @blue-whale/core/logging
+      // 时 dist 不一定存在，直接指向 src。packages 测试依赖 pnpm
+      // workspace symlink 已能解析，此处不破坏。
+      "@blue-whale/core/logging": fileURLToPath(
+        new URL("./packages/core/src/logging.ts", import.meta.url),
+      ),
     },
   },
   test: {
