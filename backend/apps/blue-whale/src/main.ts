@@ -3,6 +3,7 @@ import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { NewApiError } from "@blue-whale/core";
+import { closeDefaultTlsLogWriter } from "@blue-whale/core/logging";
 import { traceMiddleware } from "@lib/infra/middleware/trace.middleware.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { AppModule } from "./app.module.js";
@@ -37,8 +38,19 @@ async function bootstrap(): Promise<void> {
     }),
   );
 
+  app.enableShutdownHooks();
+
   await app.listen(port);
   logger.info(`backend listening on :${port}`);
+
+  // 优雅停机（IK9RSS）：app.close() 触发 OnModuleDestroy 链，之后冲刷 TLS 缓冲。
+  // closeDefaultTlsLogWriter 自带 5s 超时，TLS 不可达不反噬进程退出。
+  const shutdown = async (): Promise<void> => {
+    await app.close();
+    await closeDefaultTlsLogWriter(5_000);
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
 }
 
 void bootstrap();
