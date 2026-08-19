@@ -527,6 +527,21 @@ export default function CanvasPage() {
 
   /** 画布空白处单击：取消节点选取模式 */
   const handleCanvasPaneClick = () => setImagePickMode(false);
+
+  /** 节点拖拽结束：同步新坐标到父组件 state，触发自动保存 */
+  const handleNodeDragStop = (node: Node) => {
+    const { id, type, position } = node;
+    if (type === 'textNode') {
+      setTextNodes((prev) => prev.map((n) => (n.id === id ? { ...n, position } : n)));
+    } else if (type === 'mediaNode') {
+      setMediaNodes((prev) => prev.map((n) => (n.id === id ? { ...n, position } : n)));
+    } else if (type === 'productNode') {
+      setProductNodes((prev) => prev.map((n) => (n.id === id ? { ...n, position } : n)));
+    } else if (type === 'assetNode') {
+      setAssetNodes((prev) => prev.map((n) => (n.id === id ? { ...n, position } : n)));
+    }
+  };
+
   // 资产卡等非节点入口：清空旧 seed，保证打开的是空白对话框
   actionsRef.current.openImageDialog = () => {
     setImageSeed(null);
@@ -1133,6 +1148,7 @@ export default function CanvasPage() {
           showEdges={showEdges}
           viewport={doc?.viewport}
           onViewportChange={setViewport}
+          onNodeDragStop={handleNodeDragStop}
           onNodeClick={handleCanvasNodeClick}
           onPaneClick={handleCanvasPaneClick}
           onDeleteNode={(id) => {
