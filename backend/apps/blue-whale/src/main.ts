@@ -4,6 +4,7 @@ import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { NewApiError } from "@blue-whale/core";
 import { traceMiddleware } from "@lib/infra/middleware/trace.middleware.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { AppModule } from "./app.module.js";
 
 const port = Number.parseInt(process.env.PORT ?? "3100", 10);
@@ -37,7 +38,7 @@ async function bootstrap(): Promise<void> {
   );
 
   await app.listen(port);
-  console.log(`[backend] listening on http://localhost:${port}`);
+  logger.info(`backend listening on :${port}`);
 }
 
 void bootstrap();

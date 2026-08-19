@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { TopupTierView } from "@blue-whale/persistence";
 import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 const OPERATOR = "admin";
 
@@ -64,7 +65,9 @@ export class TierAuditService {
         ...entry,
       });
     } catch (e) {
-      console.error("[topup-tiers] 审计写入失败（不影响档位主流程）", e);
+      logger.error(
+        `[topup-tiers] 审计写入失败（不影响档位主流程）: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
 

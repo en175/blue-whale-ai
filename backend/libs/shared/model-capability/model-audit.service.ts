@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import type { AdminModelCapabilityRow } from "@blue-whale/persistence";
 import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
 import { MODEL_CAPABILITY_LABELS } from "./constants.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 const EDITABLE_FIELDS: {
   key: keyof AdminModelCapabilityRow;
@@ -86,7 +87,9 @@ export class ModelAuditService {
         ...entry,
       });
     } catch (e) {
-      console.error("[model-capability] 审计写入失败（不影响模型主流程）", e);
+      logger.error(
+        `[model-capability] 审计写入失败（不影响模型主流程）: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
 

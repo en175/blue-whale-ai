@@ -15,6 +15,7 @@ import { enqueueVideoGenerationJob } from "@lib/shared/generation/video-queue.js
 import { processJob } from "@lib/shared/generation/worker/generation-worker.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 function bodyString(body: unknown): string {
   return typeof body === "string" ? body : JSON.stringify(body ?? "");
@@ -57,9 +58,8 @@ export class GenerationJobsController {
       try {
         await enqueueVideoGenerationJob(String(result.data.generation_job_id));
       } catch (error) {
-        console.error(
-          "[generation] enqueue video job failed:",
-          error instanceof Error ? error.message : "unknown",
+        logger.error(
+          `[generation] enqueue video job failed: ${error instanceof Error ? error.message : "unknown"}`,
         );
       }
     } else if (result.code === 200 && result.data) {
@@ -69,9 +69,8 @@ export class GenerationJobsController {
         jobId: result.data.generation_job_id,
         userId: user.userId,
       }).catch((e) =>
-        console.error(
-          "[generation] async worker failed:",
-          e instanceof Error ? e.message : e,
+        logger.error(
+          `[generation] async worker failed: ${e instanceof Error ? e.message : String(e)}`,
         ),
       );
     }
@@ -112,9 +111,8 @@ export class GenerationJobsController {
         try {
           await enqueueVideoGenerationJob(newJobId);
         } catch (error) {
-          console.error(
-            "[generation] enqueue retry video job failed:",
-            error instanceof Error ? error.message : "unknown",
+          logger.error(
+            `[generation] enqueue retry video job failed: ${error instanceof Error ? error.message : "unknown"}`,
           );
         }
       } else {
@@ -124,9 +122,8 @@ export class GenerationJobsController {
           jobId: result.data.generation_job_id,
           userId: user.userId,
         }).catch((e) =>
-          console.error(
-            "[generation] async retry worker failed:",
-            e instanceof Error ? e.message : e,
+          logger.error(
+            `[generation] async retry worker failed: ${e instanceof Error ? e.message : String(e)}`,
           ),
         );
       }

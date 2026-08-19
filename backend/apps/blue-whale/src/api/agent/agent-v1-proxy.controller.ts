@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 /** 上游 agent 服务地址（独立 blue-whale-agent 服务）。缺省 localhost:4111。 */
 const AGENT_SERVICE_BASE_URL = process.env.AGENT_SERVICE_BASE_URL?.trim() || "http://localhost:4111";
@@ -82,9 +83,8 @@ export class AgentV1ProxyController {
         upstream.body as import("node:stream/web").ReadableStream,
       );
       stream.on("error", (error) => {
-        console.error(
-          "[agent/v1] upstream stream error:",
-          error instanceof Error ? error.message : error,
+        logger.error(
+          `[agent/v1] upstream stream error: ${error instanceof Error ? error.message : String(error)}`,
         );
         if (!res.writableEnded) res.destroy();
       });
