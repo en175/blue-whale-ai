@@ -46,14 +46,18 @@ interface FlowCanvasProps {
   viewport?: Viewport;
   /** 视口变更回调（拖拽/缩放结束），供自动保存使用 */
   onViewportChange?: (v: Viewport) => void;
+  /** 节点拖拽结束回调（同步坐标到父组件，触发自动保存） */
+  onNodeDragStop?: (node: Node) => void;
   onDeleteNode: (id: string) => void;
   /** 节点单击（画布选取模式等场景） */
   onNodeClick?: (node: Node) => void;
   /** 画布空白处单击 */
   onPaneClick?: () => void;
+  /** 注册出生点取数函数（当前视口中心的 flow 坐标），供父级创建节点时落在用户可见区域 */
+  registerSpawnPosition?: (fn: () => { x: number; y: number }) => void;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onDeleteNode, onNodeClick, onPaneClick }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition }: FlowCanvasProps) {
   const isDrag = toolMode === 'drag';
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -65,9 +69,16 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
 
   const nodeTypes: NodeTypes = useMemo(() => ({ textNode: TextNode, mediaNode: MediaNode, productNode: ProductNode, assetNode: AssetCardNode }), []);
   const edgeTypes: EdgeTypes = useMemo(() => ({ custom: CustomEdge }), []);
-  const { setCenter, setViewport } = useReactFlow();
+  const { setCenter, setViewport, screenToFlowPosition } = useReactFlow();
   const onViewportChangeRef = useRef(onViewportChange);
   onViewportChangeRef.current = onViewportChange;
+
+  /** 向父级注册出生点取数函数：屏幕视觉中心 → flow 坐标 */
+  useEffect(() => {
+    registerSpawnPosition?.(() =>
+      screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }),
+    );
+  }, [registerSpawnPosition, screenToFlowPosition]);
 
   /** 注入加载的视口状态（切换项目/首次加载） */
   useEffect(() => {
@@ -232,6 +243,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         onNodeClick={onNodeClick ? (_e, node) => onNodeClick(node) : undefined}
         onPaneClick={onPaneClick}
         onMoveEnd={(_e, v) => onViewportChangeRef.current?.(v)}
+        onNodeDragStop={(_e, node) => onNodeDragStop?.(node)}
         onContextMenu={(e) => e.preventDefault()}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
@@ -270,7 +282,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onDeleteNode, onNodeClick, onPaneClick }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -284,9 +296,11 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         showEdges={showEdges}
         viewport={viewport}
         onViewportChange={onViewportChange}
+        onNodeDragStop={onNodeDragStop}
         onDeleteNode={onDeleteNode}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        registerSpawnPosition={registerSpawnPosition}
       />
     </ReactFlowProvider>
   );

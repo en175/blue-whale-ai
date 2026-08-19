@@ -13,8 +13,8 @@ interface MediaNodeData {
   mediaType?: 'image' | 'video';
   toolMode?: 'drag' | 'select';
   isFirst?: boolean;
-  /** 关联生成任务ID（生成中的占位节点） */
-  jobId?: number;
+  /** 关联生成任务ID（生成中的占位节点）。后端返回字符串，兼容 number 历史形态。 */
+  jobId?: number | string;
   /** 生成状态：generating 进度展示；failed/cancelled 错误展示；无值为普通媒体 */
   genStatus?: 'generating' | 'failed' | 'cancelled';
   /** 生成进度 0-100 */
@@ -164,8 +164,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           </span>
         </div>
 
-        {/* 选择模式下仅视频保留 nodrag（控件需点击交互）；图片节点任意位置按下均可拖动 */}
-        <div className={`${styles.mediaContainer} ${isSelect && data.mediaType === 'video' ? 'nodrag nopan' : ''}`}>
+        {/* 与图片节点一致：任意位置按下均可拖动（视频控件保留点击交互） */}
+        <div className={styles.mediaContainer}>
           {isGenerating ? (
             /* 生成中：进度条 + 取消生成 */
             <div className={styles.genBox}>

@@ -60,7 +60,7 @@ export async function processNextJob(deps: WorkerDeps): Promise<string | null> {
 }
 
 /** 恢复扫描用：认领一个到点的进程内任务（claimNextInProcessJob，image+audio）并处理。
- *  与 claimNextImageJob 的区别——范围扩到 audio；视频仍归独立 BullMQ worker，不在此认领。 */
+ *  与 claimNextImageJob 的区别——范围扩到 audio；视频仍归独立 RocketMQ worker，不在此认领。 */
 export async function processNextInProcessJob(
   deps: WorkerDeps,
 ): Promise<string | null> {

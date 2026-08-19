@@ -4,7 +4,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText } from 'lucide-react';
+import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign } from 'lucide-react';
 import styles from './index.module.css';
 
 interface TextNodeData {
@@ -19,7 +19,7 @@ interface TextNodeData {
   onSaveToAssets?: (id: string) => void;
 }
 
-export default function TextNode({ id, data }: NodeProps & { data: TextNodeData }) {
+export default function TextNode({ id, data, selected }: NodeProps & { data: TextNodeData; selected?: boolean }) {
   const [isFocused, setIsFocused] = useState(false);
   /** 双击进入编辑；单击/拖动为移动节点 */
   const [editing, setEditing] = useState(false);
@@ -211,6 +211,18 @@ export default function TextNode({ id, data }: NodeProps & { data: TextNodeData 
           </button>
         </div>
       )}
+
+      {/* 悬停/选中时顶部操作条：添加到对话（与商品节点一致） */}
+      <div className={`${styles.topBar} ${selected ? styles.topBarVisible : ''}`}>
+        <span className={styles.topLabel}>
+          <FileText size={14} strokeWidth={2} />
+          <span>文本</span>
+        </span>
+        <button className={`${styles.addToChatBtn} nodrag`} onClick={() => data.onAddToChat?.(id)}>
+          <AtSign size={14} strokeWidth={2} />
+          <span>添加到对话</span>
+        </button>
+      </div>
 
       <div className={styles.card}>
         <div className={styles.cardHeader}>

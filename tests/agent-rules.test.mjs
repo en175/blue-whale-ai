@@ -50,7 +50,6 @@ test("project skills delegate final verification to the repository strategy", ()
 
 test("tracked skill mirrors match their authoritative sources", () => {
   assert.equal(read(".zcode/skills/implement/SKILL.md"), read(".claude/skills/implement/SKILL.md"));
-  assert.equal(read(".qoder/skills/implement/SKILL.md"), read(".claude/skills/implement/SKILL.md"));
 
   for (const skill of [
     "dispatching-parallel-agents/SKILL.md",
@@ -60,7 +59,6 @@ test("tracked skill mirrors match their authoritative sources", () => {
     const authority = read(`.superpowers/skills/${skill}`);
     assert.equal(read(`.claude/skills/${skill}`), authority, skill);
     assert.equal(read(`.zcode/skills/${skill}`), authority, skill);
-    assert.equal(read(`.qoder/skills/${skill}`), authority, skill);
   }
 });
 

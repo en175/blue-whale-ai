@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 const OPERATOR = "admin";
 const CATEGORY = "template";
@@ -20,8 +21,8 @@ export class TemplateAuditService {
         ...entry,
       });
     } catch (e) {
-      console.error(
-        `[template-admin] 审计写入失败（不阻断主流程）: ${e instanceof Error ? e.message : e}`,
+      logger.error(
+        `[template-admin] 审计写入失败（不阻断主流程）: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
   }

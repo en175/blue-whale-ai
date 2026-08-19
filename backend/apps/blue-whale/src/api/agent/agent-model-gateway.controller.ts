@@ -8,6 +8,7 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";
 
@@ -122,9 +123,8 @@ export class AgentModelGatewayController {
         upstream.body as import("node:stream/web").ReadableStream,
       );
       stream.on("error", (error) => {
-        console.error(
-          "[internal/agent-model] upstream stream error:",
-          error instanceof Error ? error.message : error,
+        logger.error(
+          `[internal/agent-model] upstream stream error: ${error instanceof Error ? error.message : String(error)}`,
         );
         if (!res.writableEnded) res.destroy();
       });

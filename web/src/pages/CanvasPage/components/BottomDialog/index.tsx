@@ -11,6 +11,7 @@ import {
   Video,
   Sparkles,
   SlidersHorizontal,
+  Play,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import ChipTextEditor, { type ChipTextEditorHandle, type ChipRef } from '../ChipTextEditor';
@@ -27,6 +28,9 @@ const FALLBACK_RATIOS = ['16:9', '9:16', '1:1'];
 
 /** 时长范围（接口失败回退） */
 const FALLBACK_DURATION = { min: 4, max: 15, step: 1 };
+
+/** 视频最大上传数量（接口未下发该字段，前端统一 3） */
+const MAX_VIDEOS = 3;
 
 /** 视频生成参数（发送时传给画布创建生成任务） */
 export interface VideoGenOptions {
@@ -72,6 +76,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供生成按钮启用态判断 */
   const [composedText, setComposedText] = useState('');
   const [refFiles, setRefFiles] = useState<BottomRefItem[]>(initialRefs ?? []);
+  /** 视频文件时长（秒），key 为 refFiles 索引 */
+  const [videoDurations, setVideoDurations] = useState<Record<number, number>>({});
   const [selectedMode, setSelectedMode] = useState(modeOptions[0].key);
   const [modeOpen, setModeOpen] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
@@ -102,7 +108,9 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   /** 首尾帧模式：仅允许上传 2 张图片（首帧+尾帧），禁止视频 */
   const isKeyframe = selectedMode === 'keyframe';
   const imageCount = refFiles.filter((f) => f.type === 'image').length;
-  const maxImages = isKeyframe ? 2 : 5;
+  const videoCount = refFiles.filter((f) => f.type === 'video').length;
+  /** 图片上限：首尾帧模式固定 2（首帧+尾帧），其余采用接口定义的 max_reference_images（失败回退 5） */
+  const maxImages = isKeyframe ? 2 : (currentModel?.features?.max_reference_images ?? 5);
 
   /** 时长刻度（min..max 逐 step） */
   const ticks: number[] = [];
@@ -157,57 +165,38 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     if (imageCount < maxImages) imageInputRef.current?.click();
   };
 
-  /** 上传视频（首尾帧模式禁用） */
+  /** 上传视频（首尾帧模式禁用；达上限时按钮已隐藏） */
   const handleVideoClick = () => {
     if (isKeyframe) return;
-    if (refFiles.length < 5) videoInputRef.current?.click();
+    if (videoCount < MAX_VIDEOS) videoInputRef.current?.click();
   };
 
   /** 通用上传（底部加号；首尾帧模式仅收图片且限 2 张） */
   const handleAnyUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    const list = isKeyframe
-      ? Array.from(files)
-          .filter((f) => f.type.startsWith('image/'))
-          .slice(0, Math.max(0, maxImages - imageCount))
-      : Array.from(files).slice(0, 5 - refFiles.length);
-    const newFiles = list.map((file) => ({
-      file,
-      preview: URL.createObjectURL(file),
-      type: (file.type.startsWith('video/') ? 'video' : 'image') as 'image' | 'video',
-    }));
-    setRefFiles((prev) => [...prev, ...newFiles]);
+    addFiles(e.target.files, 'any');
     e.target.value = '';
   };
 
-  /** 处理图片上传（首尾帧模式限 2 张） */
+  /** 处理图片上传（按接口上限/首尾帧 2 张截断） */
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    const remaining = isKeyframe ? Math.max(0, maxImages - imageCount) : 5 - refFiles.length;
-    const newFiles = Array.from(files).slice(0, remaining).map((file) => ({
-      file,
-      preview: URL.createObjectURL(file),
-      type: 'image' as const,
-    }));
-    setRefFiles((prev) => [...prev, ...newFiles]);
+    addFiles(e.target.files, 'image');
     if (imageInputRef.current) imageInputRef.current.value = '';
   };
 
   /** 处理视频上传（首尾帧模式禁用） */
   const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (isKeyframe) return;
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    const remaining = 5 - refFiles.length;
-    const newFiles = Array.from(files).slice(0, remaining).map((file) => ({
-      file,
-      preview: URL.createObjectURL(file),
-      type: 'video' as const,
-    }));
-    setRefFiles((prev) => [...prev, ...newFiles]);
+    addFiles(e.target.files, 'video');
     if (videoInputRef.current) videoInputRef.current.value = '';
+  };
+
+  /** 截断文件名用于 chip 展示 */
+  const truncateName = (name: string, max = 14) => {
+    const dot = name.lastIndexOf('.');
+    const base = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : '';
+    if (base.length <= max) return name;
+    return `${base.slice(0, max)}...${ext}`;
   };
 
   /** 删除文件（仅本地上传的 objectURL 需要释放） */
@@ -217,6 +206,65 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
       if (copy[index].file) URL.revokeObjectURL(copy[index].preview);
       copy.splice(index, 1);
       return copy;
+    });
+    setVideoDurations((prev) => {
+      const next: Record<number, number> = {};
+      // 删除后重新编号索引
+      Object.entries(prev).forEach(([k, v]) => {
+        const key = Number(k);
+        if (key < index) next[key] = v;
+        else if (key > index) next[key - 1] = v;
+      });
+      return next;
+    });
+  };
+
+  /** 获取视频文件时长（秒） */
+  const getVideoDuration = (file: File): Promise<number> =>
+    new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+        resolve(Math.round(video.duration * 10) / 10);
+        URL.revokeObjectURL(video.src);
+      };
+      video.onerror = () => { resolve(0); URL.revokeObjectURL(video.src); };
+      video.src = URL.createObjectURL(file);
+    });
+
+  /** 将文件列表转为 BottomRefItem[] 并预取视频时长 */
+  const addFiles = async (files: FileList | null, acceptType?: 'image' | 'video' | 'any') => {
+    if (!files || files.length === 0) return;
+    const all = Array.from(files);
+    const list = acceptType === 'image'
+      ? all.filter((f) => f.type.startsWith('image/')).slice(0, Math.max(0, maxImages - imageCount))
+      : acceptType === 'video'
+        ? (isKeyframe ? [] : all.filter((f) => f.type.startsWith('video/')).slice(0, Math.max(0, MAX_VIDEOS - videoCount)))
+        : (() => {
+            let imgRoom = Math.max(0, maxImages - imageCount);
+            let vidRoom = Math.max(0, MAX_VIDEOS - videoCount);
+            return isKeyframe
+              ? all.filter((f) => f.type.startsWith('image/')).slice(0, imgRoom)
+              : all.filter((f) => {
+                  if (f.type.startsWith('video/')) { if (vidRoom <= 0) return false; vidRoom -= 1; return true; }
+                  if (f.type.startsWith('image/')) { if (imgRoom <= 0) return false; imgRoom -= 1; return true; }
+                  return false;
+                });
+          })();
+    if (!list.length) return;
+    const startIdx = refFiles.length;
+    const newItems: BottomRefItem[] = list.map((file) => ({
+      file,
+      preview: URL.createObjectURL(file),
+      type: (file.type.startsWith('video/') ? 'video' : 'image') as 'image' | 'video',
+    }));
+    setRefFiles((prev) => [...prev, ...newItems]);
+    // 预取视频时长
+    list.forEach(async (file, i) => {
+      if (file.type.startsWith('video/')) {
+        const dur = await getVideoDuration(file);
+        setVideoDurations((prev) => ({ ...prev, [startIdx + i]: dur }));
+      }
     });
   };
 
@@ -360,26 +408,80 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         </div>
       )}
 
-      {/* 顶部媒体上传 */}
-      <div className={styles.mediaToggle}>
-        <button className={styles.mediaBtn} onClick={handleImageClick} title="上传图片">
-          <Image size={18} strokeWidth={2} />
-        </button>
-        <div className={styles.mediaDot} />
-        <button
-          className={styles.mediaBtn}
-          onClick={handleVideoClick}
-          title={isKeyframe ? '首尾帧模式不支持视频' : '上传视频'}
-          disabled={isKeyframe}
-        >
-          <Video size={18} strokeWidth={2} />
-        </button>
+      {/* 顶部媒体行：已上传缩略图 + 上传按钮 + 计数（同一水平行） */}
+      <div className={styles.mediaRow}>
+        {/* 图片缩略图 */}
+        {refFiles.filter((f) => f.type === 'image').map((item, i) => {
+          const idx = refFiles.indexOf(item);
+          return (
+            <div key={`img-${i}`} className={styles.mediaThumb}>
+              <img src={item.preview} alt="" className={styles.mediaThumbImg} />
+              <button className={styles.mediaThumbRemove} onClick={() => removeFile(idx)} title="移除">
+                <X size={10} strokeWidth={2} />
+              </button>
+            </div>
+          );
+        })}
+        {/* 图片上传按钮 */}
+        {imageCount < maxImages && (
+          <button className={styles.mediaBtn} onClick={handleImageClick} title={`上传图片（最多 ${maxImages} 张）`}>
+            <Image size={18} strokeWidth={2} />
+          </button>
+        )}
+
+        {/* 分隔点 */}
+        {((imageCount > 0 || imageCount < maxImages) && (isKeyframe || videoCount < MAX_VIDEOS || videoCount > 0)) && (
+          <div className={styles.mediaDot} />
+        )}
+
+        {/* 视频缩略图 */}
+        {!isKeyframe && refFiles.filter((f) => f.type === 'video').map((item, i) => {
+          const idx = refFiles.indexOf(item);
+          const dur = videoDurations[idx];
+          return (
+            <div key={`vid-${i}`} className={styles.mediaThumb}>
+              <video src={item.preview} className={styles.mediaThumbImg} muted />
+              <button className={styles.mediaThumbRemove} onClick={() => removeFile(idx)} title="移除">
+                <X size={10} strokeWidth={2} />
+              </button>
+              {dur ? <span className={styles.mediaDuration}>{dur}s</span> : null}
+              <div className={styles.mediaPlayIcon}><Play size={12} fill="#fff" strokeWidth={0} /></div>
+            </div>
+          );
+        })}
+        {/* 视频上传按钮 */}
+        {(isKeyframe || videoCount < MAX_VIDEOS) && (
+          <button
+            className={styles.mediaBtn}
+            onClick={handleVideoClick}
+            title={isKeyframe ? '首尾帧模式不支持视频' : `上传视频（最多 ${MAX_VIDEOS} 个）`}
+            disabled={isKeyframe}
+          >
+            <Video size={18} strokeWidth={2} />
+          </button>
+        )}
+
+        {/* 计数 */}
         {refFiles.length > 0 && (
           <span className={styles.fileCount}>
-            {isKeyframe ? `${imageCount}/2` : `${refFiles.length}/5`}
+            {isKeyframe ? `${imageCount}/2` : `${refFiles.length}/15`}
           </span>
         )}
       </div>
+
+      {/* 文件名 chips */}
+      {refFiles.length > 0 && (
+        <div className={styles.fileChipRow}>
+          {refFiles.map((item, idx) => (
+            <div key={idx} className={styles.fileChip}>
+              {item.type === 'image'
+                ? <Image size={12} strokeWidth={2} />
+                : <Video size={12} strokeWidth={2} />}
+              <span>{item.file ? truncateName(item.file.name) : (item.type === 'image' ? '图片' : '视频')}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* 隐藏的 file inputs */}
       <input
@@ -401,57 +503,47 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
       <input
         ref={anyInputRef}
         type="file"
-        accept="image/*,video/*"
+        accept={
+          isKeyframe
+            ? 'image/*'
+            : imageCount >= maxImages
+              ? 'video/*'
+              : videoCount >= MAX_VIDEOS
+                ? 'image/*'
+                : 'image/*,video/*'
+        }
         multiple
         className={styles.hiddenInput}
         onChange={handleAnyUpload}
       />
 
-      {/* 上传文件预览 */}
-      {refFiles.length > 0 && (
-        <div className={styles.previewArea}>
-          {refFiles.map((item, idx) => (
-            <div key={idx} className={styles.previewItem}>
-              {item.type === 'image' ? (
-                <img src={item.preview} alt="" className={styles.previewThumb} />
-              ) : (
-                <video src={item.preview} className={styles.previewThumb} />
-              )}
-              <button
-                className={styles.previewRemove}
-                onClick={() => removeFile(idx)}
-                title="移除"
-              >
-                <X size={10} strokeWidth={2} />
-              </button>
-              <span className={styles.previewLabel}>
-                {item.type === 'image' ? '图片' : '视频'}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* 输入框：可多次插入生成卡引用胶囊，胶囊跟文字同一行 */}
-      <ChipTextEditor
-        ref={chipEditorRef}
-        placeholder="上传 3-10 秒视频片段，并结合文本或图片轻松修改内容、改变镜头角度或重塑原视频风格。可使用 @ 快速插入已添加资源。"
-        onChangeText={setComposedText}
-        onSend={handleSend}
-      />
+      <div className={styles.editorWrap}>
+        <ChipTextEditor
+          ref={chipEditorRef}
+          placeholder="上传 3-10 秒视频片段，并结合文本或图片轻松修改内容、改变镜头角度或重塑原视频风格。可使用 @ 快速插入已添加资源。"
+          onChangeText={setComposedText}
+          onSend={handleSend}
+          className={styles.editorArea}
+        />
+      </div>
 
       {/* 底部状态栏 */}
       <div className={styles.bottomBar}>
         {/* 左侧 */}
         <div className={styles.barLeft}>
-          {/* 加号上传 */}
-          <button
-            className={styles.addBtn}
-            onClick={() => anyInputRef.current?.click()}
-            title="添加素材"
-          >
-            <Plus size={14} strokeWidth={2} />
-          </button>
+          {/* 加号上传（两类均达上限隐藏） */}
+          {(isKeyframe
+            ? imageCount < maxImages
+            : imageCount < maxImages || videoCount < MAX_VIDEOS) && (
+            <button
+              className={styles.addBtn}
+              onClick={() => anyInputRef.current?.click()}
+              title="添加素材"
+            >
+              <Plus size={14} strokeWidth={2} />
+            </button>
+          )}
 
           {/* 模式选择器 */}
           <div className={styles.modeWrap}>

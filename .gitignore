@@ -8,6 +8,9 @@
 # MCP
 .mcp.json
 
+# Trae IDE 本地配置（个人技能、MCP 等，不入库）
+.trae/
+.qoder/
 # 本地私人 Agent 配置（勿入库）
 CLAUDE.local.md
 AGENTS.local.md

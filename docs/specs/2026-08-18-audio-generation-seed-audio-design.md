@@ -22,20 +22,20 @@ Blue-Whale 已有图片/视频生成的 GenerationJob 治理管线（成本预�
 | 入口 | 仅画布 Dock 直生（AudioDialog） |
 | 参数 | 仅 `text_prompt`；输出 mp3、水印等由后端默认固定 |
 
-## 上游契约（确认版 2026-08-18）
+## 上游契约（定版 2026-08-19：完全透传 seed-audio 原生协议）
 
-**产品侧实际调用 new-api 端点(OpenAI 兼容,由同事负责 new-api Go 适配器):**
-- 端点:`POST {new-api}/v1/audio/speech`
+**产品侧实际调用 new-api 端点（new-api DoubaoAudio 渠道 type-62，完全透传，不做字段映射）:**
+- 端点:`POST {new-api}/v1/audio/speech`（OpenAI 兼容入口，路由到 DoubaoAudio 适配器）
 - 鉴权:`Authorization: Bearer {用户 sk-token}`(经 `sealProviderCredential` 密封,不落明文)
-- 请求体:`{ "model": "seed-audio-1.0", "input": "<文本>", "response_format": "mp3" }`(`voice`/`speed` 可选,一期不传)
-- 响应:**原始音频字节(audio/mpeg)**;计费 `requestId` 取自响应头 `X-Oneapi-Request-Id`
-- 同步、无 task 轮询;watermark 由 new-api/上游固定
+- 请求体:**seed-audio 原生协议直接透传**——`{ "model": "seed-audio-1.0", "text_prompt": "<文本>", "audio_config": { "format": "mp3", ... }, "watermark": {} }`；网关只锁 `model` 防计费绕过，其余顶层字段原样透传（`input`/`response_format`/`voice` 已弃用）
+- 响应:**上游 JSON 原样透传** `{ audio(base64) | url, duration, original_duration }`，客户端自取音频（`url` 下载或 base64 解码，均可）；计费 `requestId` 取自响应头 `X-Oneapi-Request-Id`
+- 同步、无 task 轮询；watermark 由产品固定下发 `{}`
 
-**new-api 背后的豆包 seed-audio-1.0 原生契约(供 new-api 适配器参考,官方文档):**
+**new-api 背后的豆包 seed-audio-1.0 原生契约（透传后即客户端契约，官方文档）:**
 - 端点：`POST https://openspeech.bytedance.com/api/v3/tts/create`；鉴权 `X-Api-Key` 单头
 - `text_prompt` ≤3000 字符;`audio_config.format` 支持 wav/mp3/pcm/ogg_opus
 - 响应含 `audio`(Base64)/`url`(2h)/`duration`/`original_duration`(计费,上限 120s)
-- 取证结论:new-api 原生无此私有协议适配(2026-08-18 取证,见 blue-whale-api/.gitee_audio_tts_forensics.md),由同事新增 Go 适配器将其映射为 `/v1/audio/speech`。
+- 决策沿革：2026-08-18 初版曾计划 OpenAI 桥接（`input`→`text_prompt`、回裸 mp3 字节）；当日同事改定为 **完全透传**（new-api ADR-0004 + commit `eb5bc8e`），产品后端 `new-api-audio-provider.ts` 已按透传实现并验收通过（2026-08-19）。取证见 `blue-whale-api/.gitee_audio_tts_forensics.md`。
 
 ## 架构与数据流
 
@@ -56,7 +56,7 @@ AudioDialog(画布)
 关键设计决策：
 
 - **控制器零改动**：`generation-jobs.controller.ts:56-77` 的分派逻辑已是 `video → 队列，其余 → 进程内 processJob`，`validate()` 放开 audio 后自动落入进程内即时调度。
-- **同步原始字节**：确认契约下 new-api `/v1/audio/speech` 同步返回 mp3 字节,无异步 task 轮询;`AudioProvider` 直接返回字节,`persistProviderMedia` 走 data 直传路径。
+- **同步透传 JSON**：契约定版为透传后，new-api `/v1/audio/speech` 同步返回上游 JSON（`audio` base64 / `url`），无异步 task 轮询;`AudioProvider` 解析出 `data`（base64 解码）或 `url`，`persistProviderMedia` 优先走 url 下载转存、data 兜底直传。
 - **恢复兜底**：音频与图片同生命周期（进程内任务），恢复扫描从 image-only 推广为 image+audio。
 
 ## 后端改动
@@ -134,9 +134,9 @@ export class AudioProviderError extends Error { constructor(public code: string,
 
 ### new-api 音频适配器（新增）
 
-- `backend/libs/shared/generation/worker/new-api-audio-provider.ts`：`createNewApiAudioProvider(token)` → `AudioProvider`（端点合同以取证为准）
-- 底层 HTTP 加到 `packages/core/src/new-api-generation-ops.ts`（`generateAudio`）
-- base64 兜底：new-api 只回 `audio` 时解码为字节走 `data`，不走 fetch
+- `packages/generation-runtime/src/new-api-audio-provider.ts`：`createNewApiAudioProvider(baseUrl, token)` → `AudioProvider`（按透传契约：请求发 `text_prompt`/`audio_config`/`watermark`，响应解析 `audio`/`url`/`duration`）
+- 已随 PR !386 合入 origin/master，2026-08-19 对测试站 3006 验收通过（200 + JSON + mp3 + 计费）
+- base64 兜底：响应只回 `audio` 时解码为字节走 `data`；有 `url` 时优先 `url` 下载
 
 ### worker 音频分支（`generation-worker.ts`）
 

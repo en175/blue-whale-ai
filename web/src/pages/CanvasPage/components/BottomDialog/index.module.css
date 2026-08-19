@@ -4,17 +4,21 @@
 
 .dialog {
   position: absolute;
-  bottom: var(--spacing-2xl);
+  bottom: var(--spacing-lg);
   left: 50%;
   transform: translateX(-50%);
   width: 640px;
   max-width: 90%;
+  height: 200px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   background-color: #1e1e1e;
   border: 1px solid var(--color-border-primary);
   border-radius: 16px;
   backdrop-filter: blur(12px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  padding: var(--spacing-xl);
+  padding: var(--spacing-lg);
   z-index: 10;
   animation: dialogFadeIn 0.2s ease;
 }
@@ -22,6 +26,17 @@
 @keyframes dialogFadeIn {
   from { opacity: 0; transform: translateX(-50%) translateY(8px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* 输入区包裹层：填充窗口剩余高度，与图片对话窗尺寸对齐 */
+.editorWrap {
+  flex: 1;
+  min-height: 0;
+}
+
+.editorArea {
+  height: 100%;
+  overflow-y: auto;
 }
 
 /* ---- 关闭按钮 ---- */
@@ -48,16 +63,89 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 顶部媒体切换 ---- */
-.mediaToggle {
+/* ---- 顶部媒体行：缩略图 + 上传按钮 + 计数（同一水平行） ---- */
+.mediaRow {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
-  margin-bottom: var(--spacing-md);
+  gap: 8px;
+  margin-bottom: var(--spacing-xs);
+  flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
+/* 媒体缩略图（与按钮同尺寸正方形） */
+.mediaThumb {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--color-border-secondary);
+  flex-shrink: 0;
+}
+
+.mediaThumbImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.mediaThumbRemove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.6);
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  z-index: 1;
+}
+
+.mediaThumbRemove:hover {
+  background-color: rgba(250, 82, 82, 0.8);
+}
+
+/* 视频时长徽章 */
+.mediaDuration {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.65);
+  line-height: 1.4;
+}
+
+/* 视频播放图标（居中半透明） */
+.mediaPlayIcon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+/* 上传按钮（与缩略图同尺寸正方形） */
 .mediaBtn {
-  width: 56px;
+  width: 48px;
   height: 48px;
   border-radius: var(--radius-md);
   display: flex;
@@ -68,11 +156,13 @@
   border: 1px solid var(--color-border-primary);
   cursor: pointer;
   transition: all var(--transition-fast);
+  flex-shrink: 0;
 }
 
 .mediaBtn:hover {
   color: var(--color-text-secondary);
   border-color: var(--color-border-hover);
+  background-color: #333;
 }
 
 /* 首尾帧模式下视频按钮禁用 */
@@ -84,12 +174,7 @@
 .mediaBtn:disabled:hover {
   color: var(--color-text-tertiary);
   border-color: var(--color-border-primary);
-}
-
-.mediaBtnActive {
-  color: var(--color-text-primary);
-  border-color: var(--color-border-hover);
-  background-color: #333;
+  background-color: #2a2a2a;
 }
 
 .mediaDot {
@@ -97,6 +182,38 @@
   height: 4px;
   border-radius: 50%;
   background-color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+/* ---- 文件名 chip 行 ---- */
+.fileChipRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--spacing-sm);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.fileChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background-color: rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fileChip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---- 底部状态栏 ---- */
@@ -105,6 +222,7 @@
   align-items: center;
   justify-content: space-between;
   margin-top: var(--spacing-sm);
+  flex-shrink: 0;
 }
 
 .barLeft {
@@ -146,7 +264,7 @@
   gap: 4px;
   padding: 2px 8px;
   border-radius: var(--radius-sm);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text-primary);
   background: transparent;
@@ -191,7 +309,7 @@
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-md);
   border-radius: var(--radius-sm);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
@@ -213,12 +331,12 @@
 
 /* ---- 信息文字 ---- */
 .barDivider {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-border-primary);
 }
 
 .barInfo {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text-primary);
   white-space: nowrap;
@@ -231,7 +349,7 @@
   gap: var(--spacing-xs);
   padding: 10px var(--spacing-xl);
   border-radius: var(--radius-md) 0 0 var(--radius-md);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-md);
   font-weight: 500;
   color: var(--color-text-tertiary);
   background-color: var(--color-bg-tertiary);
@@ -260,67 +378,10 @@
 
 /* ---- 文件计数 ---- */
 .fileCount {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
-  margin-left: auto;
-}
-
-/* ---- 上传预览区 ---- */
-.previewArea {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--spacing-sm);
-  margin-bottom: var(--spacing-sm);
-}
-
-.previewItem {
-  position: relative;
-  width: 56px;
-  height: 56px;
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  border: 1px solid var(--color-border-secondary);
-  flex-shrink: 0;
-}
-
-.previewThumb {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.previewRemove {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  background-color: rgba(0, 0, 0, 0.6);
-  border: none;
-  cursor: pointer;
-  transition: background-color var(--transition-fast);
-}
-
-.previewRemove:hover {
-  background-color: rgba(250, 82, 82, 0.8);
-}
-
-.previewLabel {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 1px 0;
-  font-size: 9px;
-  text-align: center;
-  color: #fff;
-  background-color: rgba(0, 0, 0, 0.5);
+  margin-left: 4px;
+  white-space: nowrap;
 }
 
 /* ---- 右侧栏：倍速 + 生成分段 ---- */
@@ -368,7 +429,7 @@
   gap: 6px;
   padding: 4px 8px;
   border-radius: var(--radius-sm);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
@@ -428,7 +489,7 @@
 .configLabel {
   display: block;
   margin-bottom: var(--spacing-sm);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
 }
 
@@ -451,7 +512,7 @@
   gap: var(--spacing-sm);
   padding: 10px var(--spacing-md);
   border-radius: var(--radius-md);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-sm);
   font-weight: 500;
   color: var(--color-text-primary);
   background-color: #2a2a2a;
@@ -494,7 +555,7 @@
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-md);
   border-radius: var(--radius-sm);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
@@ -527,7 +588,7 @@
 
 .durationValue {
   margin-bottom: var(--spacing-sm);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -586,7 +647,7 @@
   justify-content: space-between;
   margin-top: 4px;
   margin-bottom: var(--spacing-lg);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
 }
 
@@ -605,7 +666,7 @@
   gap: 6px;
   padding: 10px 0;
   border-radius: var(--radius-md);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   background-color: #2a2a2a;
   border: 1px solid transparent;

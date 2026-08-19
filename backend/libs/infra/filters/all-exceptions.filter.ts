@@ -4,16 +4,15 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
-  Logger,
 } from "@nestjs/common";
 import { NewApiError } from "@blue-whale/core";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
 import type { Request, Response } from "express";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 /** 全局异常 → { code, msg, data } 信封；NewApiError/HttpException 保留 HTTP 状态码。 */
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
-  private readonly logger = new Logger(AllExceptionsFilter.name);
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
@@ -46,9 +45,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return;
     }
 
-    this.logger.error(
-      `${request.method} ${request.url} 未处理异常`,
-      exception instanceof Error ? exception.stack : String(exception),
+    logger.error(
+      `${request.method} ${request.url} 未处理异常${
+        exception instanceof Error ? `\n${exception.stack}` : `: ${String(exception)}`
+      }`,
     );
     response
       .status(HttpStatus.INTERNAL_SERVER_ERROR)

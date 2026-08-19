@@ -13,7 +13,7 @@ const IDEMPOTENCY_CONFLICT_CODE = 100409;
  *  仅终态 failed/partially_succeeded 的 job 可重试；只补 failed/missing 槽，不覆盖成功输出。
  *  接入 command_idempotency：同 Key 同摘要重放首次结果，同 Key 异摘要判冲突（409）。
  *  重试沿用原 job 已验证的 model_id，不重复白名单校验；模型后续停用时由 provider 阶段失败。
- *  路由拿到 type 后按 image（processJob）/ video（BullMQ）重新入队。 */
+ *  路由拿到 type 后按 image（processJob）/ video（RocketMQ）重新入队。 */
 export async function handleRetryGenerationJob(
   userId: string,
   projectId: string,

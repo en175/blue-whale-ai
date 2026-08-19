@@ -22,6 +22,7 @@ import { processJob } from "@lib/shared/generation/worker/generation-worker.js";
 import { enqueueVideoGenerationJob } from "@lib/shared/generation/video-queue.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 function bodyString(body: unknown): string {
   return typeof body === "string" ? body : JSON.stringify(body ?? "");
@@ -70,9 +71,8 @@ export class SceneCardGenerateController {
           String(result.data.generation_job_id),
         );
       } catch (error) {
-        console.error(
-          "[scene-card-generate] enqueue video job failed:",
-          error instanceof Error ? error.message : "unknown",
+        logger.error(
+          `[scene-card-generate] enqueue video job failed: ${error instanceof Error ? error.message : "unknown"}`,
         );
       }
     }
@@ -163,9 +163,8 @@ export class SceneCardGenerateController {
         jobId: String(result.data.generation_job_id),
         userId: user.userId,
       }).catch((e) =>
-        console.error(
-          "[storyboard-preview] async worker failed:",
-          e instanceof Error ? e.message : e,
+        logger.error(
+          `[storyboard-preview] async worker failed: ${e instanceof Error ? e.message : String(e)}`,
         ),
       );
     }

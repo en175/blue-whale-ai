@@ -1,4 +1,5 @@
 import { createNewApiClient } from "@blue-whale/core";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 /** 折扣表 option 键（Go 点分子键）。 */
 const DISCOUNT_OPTION_KEY = "payment_setting.amount_discount";
@@ -85,7 +86,7 @@ export async function syncTierDiscountToGo(
 ): Promise<boolean> {
   const cfg = loadGoDiscountSyncConfig(env);
   if (!cfg) {
-    console.warn(
+    logger.warn(
       "[go-amount-discount] 未配置 root 凭证，跳过折扣同步",
     );
     return false;
@@ -104,7 +105,7 @@ export async function removeTierDiscountFromGo(
 ): Promise<boolean> {
   const cfg = loadGoDiscountSyncConfig(env);
   if (!cfg) {
-    console.warn(
+    logger.warn(
       "[go-amount-discount] 未配置 root 凭证，跳过折扣同步",
     );
     return false;

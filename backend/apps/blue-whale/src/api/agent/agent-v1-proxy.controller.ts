@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
@@ -110,9 +111,8 @@ export class AgentV1ProxyController {
         upstream.body as import("node:stream/web").ReadableStream,
       );
       stream.on("error", (error) => {
-        console.error(
-          "[agent/v1] upstream stream error:",
-          error instanceof Error ? error.message : error,
+        logger.error(
+          `[agent/v1] upstream stream error: ${error instanceof Error ? error.message : String(error)}`,
         );
         if (!res.writableEnded) res.destroy();
       });

@@ -1,7 +1,7 @@
 /* ============================================
  * CanvasPage 画布编辑页：节点/连线/工具栏编排
  * ============================================ */
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off } from 'lucide-react';
 import CanvasHeader from './components/CanvasHeader';
@@ -83,6 +83,22 @@ export default function CanvasPage() {
   const [audioSeed, setAudioSeed] = useState<{ ts: number } | null>(null);
   /** 当前视口（拖拽/缩放结束更新），自动保存时序列化提交 */
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
+  /** FlowCanvas 注册的出生点取数函数（视口中心 flow 坐标），注册前回退原点附近 */
+  const spawnPosRef = useRef<() => { x: number; y: number }>(() => ({ x: 300, y: 200 }));
+  const registerSpawnPosition = useCallback(
+    (fn: () => { x: number; y: number }) => {
+      spawnPosRef.current = fn;
+    },
+    [],
+  );
+  /** 新节点出生位：当前视口中心 + 小随机偏移，保证新节点落在用户可见区域 */
+  const spawnPosition = () => {
+    const c = spawnPosRef.current();
+    return {
+      x: Math.round(c.x + (Math.random() * 160 - 80)),
+      y: Math.round(c.y + (Math.random() * 120 - 60)),
+    };
+  };
   /** 画布保存状态：idle 未保存 / saving 保存中 / saved 已保存 / error 保存失败 */
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   /** 最近一次保存成功时间（HH:mm） */
@@ -182,6 +198,7 @@ export default function CanvasPage() {
           onDelete: (id: string) => {
             setAssetNodes((prev) => prev.filter((n) => n.id !== id));
           },
+          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onGenerateImage: () => actionsRef.current.openImageDialog(),
           // 生成卡节点水合后补动作回调（引用到 dock / 给 Agent）
           generationCard: base.data?.generationCard
@@ -376,10 +393,15 @@ export default function CanvasPage() {
     versionRef.current = doc.version;
     setViewport(doc.viewport);
     lastSavedRef.current = JSON.stringify(doc.viewport) + serializeNodes([...t, ...m, ...p, ...a]);
-    // 水合恢复：「生成中」媒体节点恢复任务轮询
+    // 水合恢复：「生成中」媒体节点恢复任务轮询。
+    // IK9R8X：jobId 后端返回字符串，兼容 string/number 双形态（历史画布文档已持久化字符串）。
     m
-      .filter((n) => n.data.genStatus === 'generating' && typeof n.data.jobId === 'number')
-      .forEach((n) => pollJobRef.current(n.id, n.data.jobId as number));
+      .filter(
+        (n) =>
+          n.data.genStatus === 'generating' &&
+          (typeof n.data.jobId === 'number' || typeof n.data.jobId === 'string'),
+      )
+      .forEach((n) => pollJobRef.current(n.id, n.data.jobId as number | string));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, snapshotAssets]);
 
@@ -422,7 +444,7 @@ export default function CanvasPage() {
     const newNode: Node = {
       id: `text-${Date.now()}`,
       type: 'textNode',
-      position: { x: 250 + Math.random() * 200, y: 150 + Math.random() * 200 },
+      position: spawnPosition(),
       data: {
         html: '',
         toolMode,
@@ -476,6 +498,22 @@ export default function CanvasPage() {
       const type = m.data?.mediaType === 'video' ? '视频' : '图片';
       setAgentContext({ text: `[${type}] ${m.data?.fileName || ''}`, ts: Date.now() });
       setShowAgent(true);
+      return;
+    }
+    const a = assetNodes.find((n) => n.id === id);
+    if (a) {
+      const gc = a.data?.generationCard as { shotTitle?: string } | undefined;
+      const kindTitle: Record<string, string> = {
+        style: '风格卡',
+        character: '角色卡',
+        object: '物体卡',
+        environment: '环境卡',
+        custom: '自定义卡',
+        generation: '生成卡',
+      };
+      const name = gc?.shotTitle || kindTitle[(a.data?.kind as string) ?? 'custom'] || '资产卡';
+      setAgentContext({ text: `@${name} `, ts: Date.now() });
+      setShowAgent(true);
     }
   };
 
@@ -527,6 +565,21 @@ export default function CanvasPage() {
 
   /** 画布空白处单击：取消节点选取模式 */
   const handleCanvasPaneClick = () => setImagePickMode(false);
+
+  /** 节点拖拽结束：同步新坐标到父组件 state，触发自动保存 */
+  const handleNodeDragStop = (node: Node) => {
+    const { id, type, position } = node;
+    if (type === 'textNode') {
+      setTextNodes((prev) => prev.map((n) => (n.id === id ? { ...n, position } : n)));
+    } else if (type === 'mediaNode') {
+      setMediaNodes((prev) => prev.map((n) => (n.id === id ? { ...n, position } : n)));
+    } else if (type === 'productNode') {
+      setProductNodes((prev) => prev.map((n) => (n.id === id ? { ...n, position } : n)));
+    } else if (type === 'assetNode') {
+      setAssetNodes((prev) => prev.map((n) => (n.id === id ? { ...n, position } : n)));
+    }
+  };
+
   // 资产卡等非节点入口：清空旧 seed，保证打开的是空白对话框
   actionsRef.current.openImageDialog = () => {
     setImageSeed(null);
@@ -600,6 +653,7 @@ export default function CanvasPage() {
   /** 上传文件生成媒体节点：本地预览立即上画布，后台三步上传登记，成功后换永久 URL */
   const handleUploadFile = (files: File[]) => {
     const newNodes: Node[] = [];
+    const center = spawnPosRef.current();
     files.forEach((file, i) => {
       const isImage = file.type.startsWith('image/');
       const isVideo = file.type.startsWith('video/');
@@ -615,7 +669,7 @@ export default function CanvasPage() {
       newNodes.push({
         id: nodeId,
         type: 'mediaNode',
-        position: { x: 200 + i * 280, y: 100 + Math.random() * 100 },
+        position: { x: Math.round(center.x + i * 280), y: Math.round(center.y + Math.random() * 100) },
         data: {
           src: localSrc,
           fileName: file.name,
@@ -630,6 +684,13 @@ export default function CanvasPage() {
           },
           onDuplicate: (id: string) => actionsRef.current.duplicate(id),
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+          onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
+          onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+          onReEdit: (id: string) => actionsRef.current.reEdit(id),
+          onGenImage: (id: string) => actionsRef.current.genImage(id),
+          onGenVideo: (id: string) => actionsRef.current.genVideo(id),
+          onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+          onDownload: (id: string) => actionsRef.current.download(id),
         },
       });
 
@@ -677,10 +738,10 @@ export default function CanvasPage() {
   };
 
   /** 轮询函数引用（供水合恢复调用，避免声明顺序依赖） */
-  const pollJobRef = useRef<(nodeId: string, jobId: number) => void>(() => {});
+  const pollJobRef = useRef<(nodeId: string, jobId: number | string) => void>(() => {});
 
   /** 轮询任务状态直至终态：succeeded 挂载产物 / failed 展示错误 / cancelled 收敛 */
-  const pollJob = (nodeId: string, jobId: number) => {
+  const pollJob = (nodeId: string, jobId: number | string) => {
     const tick = () => {
       fetchJobStatus(jobId)
         .then((detail) => {
@@ -731,7 +792,7 @@ export default function CanvasPage() {
     const node: Node = {
       id: nodeId,
       type: 'mediaNode',
-      position: { x: 220 + Math.random() * 200, y: 120 + Math.random() * 160 },
+      position: spawnPosition(),
       data: {
         genStatus: 'generating',
         progress: 0,
@@ -744,26 +805,41 @@ export default function CanvasPage() {
         },
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+        onReEdit: (id: string) => actionsRef.current.reEdit(id),
+        onGenImage: (id: string) => actionsRef.current.genImage(id),
+        onGenVideo: (id: string) => actionsRef.current.genVideo(id),
+        onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+        onDownload: (id: string) => actionsRef.current.download(id),
       },
     };
     setMediaNodes((prev) => [...prev, node]);
-    createGenerationJob(currentId, { type, expected_output_count: 1, parameters })
-      .then((created) => {
-        patchMediaNode(nodeId, { jobId: created.generation_job_id });
-        pollJob(nodeId, created.generation_job_id);
-      })
-      .catch((e) => {
-        patchMediaNode(nodeId, {
-          genStatus: 'failed',
-          errorText: isApiError(e) ? e.message : '创建任务失败',
+    try {
+      createGenerationJob(currentId, { type, expected_output_count: 1, parameters })
+        .then((created) => {
+          patchMediaNode(nodeId, { jobId: created.generation_job_id });
+          pollJob(nodeId, created.generation_job_id);
+        })
+        .catch((e) => {
+          patchMediaNode(nodeId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '创建任务失败',
+          });
         });
+    } catch (e: unknown) {
+      // 同步异常兜底（如 crypto.randomUUID 在 HTTP 下不可用）
+      patchMediaNode(nodeId, {
+        genStatus: 'failed',
+        errorText: isApiError(e) ? e.message : '创建任务失败',
       });
+    }
   };
 
   /** 取消生成：POST cancel（状态由轮询收敛为 cancelled） */
   const handleCancelJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const jobId = node?.data?.jobId as number | undefined;
+    const jobId = node?.data?.jobId as number | string | undefined;
     if (!currentId || !jobId) return;
     cancelGenerationJob(currentId, jobId).catch((e) => {
       console.warn('取消生成失败:', e);
@@ -773,20 +849,27 @@ export default function CanvasPage() {
   /** 重试失败任务：retry 接口创建新任务，节点回到生成中 */
   const handleRetryJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const jobId = node?.data?.jobId as number | undefined;
+    const jobId = node?.data?.jobId as number | string | undefined;
     if (!currentId || !jobId) return;
     patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-    retryGenerationJob(currentId, jobId)
-      .then((created) => {
-        patchMediaNode(nodeId, { jobId: created.generation_job_id });
-        pollJob(nodeId, created.generation_job_id);
-      })
-      .catch((e) => {
-        patchMediaNode(nodeId, {
-          genStatus: 'failed',
-          errorText: isApiError(e) ? e.message : '重试失败',
+    try {
+      retryGenerationJob(currentId, jobId)
+        .then((created) => {
+          patchMediaNode(nodeId, { jobId: created.generation_job_id });
+          pollJob(nodeId, created.generation_job_id);
+        })
+        .catch((e) => {
+          patchMediaNode(nodeId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '重试失败',
+          });
         });
+    } catch (e: unknown) {
+      patchMediaNode(nodeId, {
+        genStatus: 'failed',
+        errorText: isApiError(e) ? e.message : '重试失败',
       });
+    }
   };
   actionsRef.current.cancelJob = handleCancelJob;
   actionsRef.current.retryJob = handleRetryJob;
@@ -882,9 +965,10 @@ export default function CanvasPage() {
     const node: Node = {
       id: `gencard-${Date.now()}`,
       type: 'assetNode',
-      position: { x: 320 + Math.random() * 120, y: 160 + Math.random() * 100 },
+      position: spawnPosition(),
       data: {
         kind: 'generation',
+        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         generationCard: {
           ...payload,
           onApplyToDock: (apply: GenerationCardBlock) => {
@@ -983,7 +1067,7 @@ export default function CanvasPage() {
     const node: Node = {
       id: `product-${Date.now()}`,
       type: 'productNode',
-      position: { x: 260 + Math.random() * 200, y: 120 + Math.random() * 160 },
+      position: spawnPosition(),
       data: {
         name: `商品 ${productSeq.current}`,
         detail: '',
@@ -1003,13 +1087,14 @@ export default function CanvasPage() {
     const node: Node = {
       id: `asset-${kind}-${Date.now()}`,
       type: 'assetNode',
-      position: { x: 260 + Math.random() * 200, y: 120 + Math.random() * 160 },
+      position: spawnPosition(),
       data: {
         kind,
         toolMode,
         onDelete: (id: string) => {
           setAssetNodes((prev) => prev.filter((n) => n.id !== id));
         },
+        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onGenerateImage: () => actionsRef.current.openImageDialog(),
       },
     };
@@ -1024,13 +1109,23 @@ export default function CanvasPage() {
       const node: Node = {
         id: `media-${Date.now()}`,
         type: 'mediaNode',
-        position: { x: 220 + Math.random() * 200, y: 120 + Math.random() * 160 },
+        position: spawnPosition(),
         data: {
           src: copied.url,
           fileName: copied.url.split('/').filter(Boolean).pop() ?? `资产 ${copied.id}`,
           mediaType: copied.type === 'video' ? 'video' : 'image',
           assetId: copied.id,
           toolMode,
+          onDelete: (id: string) => {
+            setMediaNodes((prev) => prev.filter((n) => n.id !== id));
+          },
+          onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+          onReEdit: (id: string) => actionsRef.current.reEdit(id),
+          onGenImage: (id: string) => actionsRef.current.genImage(id),
+          onGenVideo: (id: string) => actionsRef.current.genVideo(id),
+          onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+          onDownload: (id: string) => actionsRef.current.download(id),
         },
       };
       setMediaNodes((prev) => [...prev, node]);
@@ -1046,7 +1141,7 @@ export default function CanvasPage() {
     const node: Node = {
       id: `product-${Date.now()}`,
       type: 'productNode',
-      position: { x: 260 + Math.random() * 200, y: 120 + Math.random() * 160 },
+      position: spawnPosition(),
       data: {
         name: p.title,
         detail: p.detail,
@@ -1133,6 +1228,8 @@ export default function CanvasPage() {
           showEdges={showEdges}
           viewport={doc?.viewport}
           onViewportChange={setViewport}
+          registerSpawnPosition={registerSpawnPosition}
+          onNodeDragStop={handleNodeDragStop}
           onNodeClick={handleCanvasNodeClick}
           onPaneClick={handleCanvasPaneClick}
           onDeleteNode={(id) => {
