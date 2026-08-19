@@ -122,9 +122,8 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
           <span className={styles.name}>{data.name || '商品'}</span>
         </div>
 
-        {/* 交互区：选择模式可操作，拖动模式整体可拖 */}
+        {/* 交互区：整体可拖（与图片节点一致），文本控件单独 nodrag */}
         <div
-          className={isSelect ? 'nodrag nopan' : undefined}
           style={isSelect ? undefined : { pointerEvents: 'none' }}
         >
           <div className={styles.imgHead}>
@@ -187,7 +186,7 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
           {/* 商品详情 */}
           <div className={styles.detailLabel}>商品详情</div>
           <textarea
-            className={styles.detailArea}
+            className={`${styles.detailArea} nodrag`}
             value={detail}
             onChange={(e) => setDetail(e.target.value)}
             placeholder="商品名称、品类、核心参数、卖点、目标人群..."
@@ -218,7 +217,7 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
                   </span>
                 )}
                 <input
-                  className={styles.linkInput}
+                  className={`${styles.linkInput} nodrag`}
                   value={link}
                   onChange={(e) => setLink(e.target.value)}
                   onKeyDown={(e) => {

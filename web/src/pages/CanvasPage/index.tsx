@@ -182,6 +182,7 @@ export default function CanvasPage() {
           onDelete: (id: string) => {
             setAssetNodes((prev) => prev.filter((n) => n.id !== id));
           },
+          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onGenerateImage: () => actionsRef.current.openImageDialog(),
           // 生成卡节点水合后补动作回调（引用到 dock / 给 Agent）
           generationCard: base.data?.generationCard
@@ -475,6 +476,22 @@ export default function CanvasPage() {
     if (m) {
       const type = m.data?.mediaType === 'video' ? '视频' : '图片';
       setAgentContext({ text: `[${type}] ${m.data?.fileName || ''}`, ts: Date.now() });
+      setShowAgent(true);
+      return;
+    }
+    const a = assetNodes.find((n) => n.id === id);
+    if (a) {
+      const gc = a.data?.generationCard as { shotTitle?: string } | undefined;
+      const kindTitle: Record<string, string> = {
+        style: '风格卡',
+        character: '角色卡',
+        object: '物体卡',
+        environment: '环境卡',
+        custom: '自定义卡',
+        generation: '生成卡',
+      };
+      const name = gc?.shotTitle || kindTitle[(a.data?.kind as string) ?? 'custom'] || '资产卡';
+      setAgentContext({ text: `@${name} `, ts: Date.now() });
       setShowAgent(true);
     }
   };
@@ -914,6 +931,7 @@ export default function CanvasPage() {
       position: { x: 320 + Math.random() * 120, y: 160 + Math.random() * 100 },
       data: {
         kind: 'generation',
+        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         generationCard: {
           ...payload,
           onApplyToDock: (apply: GenerationCardBlock) => {
@@ -1039,6 +1057,7 @@ export default function CanvasPage() {
         onDelete: (id: string) => {
           setAssetNodes((prev) => prev.filter((n) => n.id !== id));
         },
+        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onGenerateImage: () => actionsRef.current.openImageDialog(),
       },
     };

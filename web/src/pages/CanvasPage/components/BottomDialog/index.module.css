@@ -4,7 +4,7 @@
 
 .dialog {
   position: absolute;
-  bottom: var(--spacing-2xl);
+  bottom: var(--spacing-lg);
   left: 50%;
   transform: translateX(-50%);
   width: 640px;

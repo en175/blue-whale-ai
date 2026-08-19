@@ -4,7 +4,7 @@
 
 .dialog {
   position: absolute;
-  bottom: var(--spacing-2xl);
+  bottom: var(--spacing-lg);
   left: 50%;
   transform: translateX(-50%);
   width: 640px;
@@ -418,6 +418,16 @@
   cursor: pointer;
   text-align: left;
   transition: all var(--transition-fast);
+}
+
+/* AI 音乐暂未上线：禁用态 */
+.modeOption:disabled {
+  color: var(--color-text-tertiary);
+  cursor: not-allowed;
+}
+
+.modeOption:disabled:hover {
+  background: transparent;
 }
 
 .modeOption:hover {
