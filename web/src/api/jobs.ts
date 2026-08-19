@@ -112,9 +112,20 @@ export interface JobListData {
   current: number;
 }
 
-/** 生成幂等键（每次新任务一个 UUID） */
+/** 生成幂等键（每次新任务一个 UUID）。
+ *  crypto.randomUUID() 仅在安全上下文（HTTPS/localhost）可用；
+ *  测试站 HTTP 下不存在，降级为 getRandomValues 手动拼 v4 UUID。 */
 export function newIdempotencyKey(): string {
-  return crypto.randomUUID();
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // RFC 4122 v4 UUID fallback
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /** 创建生成任务（Idempotency-Key 幂等头防重复创建） */

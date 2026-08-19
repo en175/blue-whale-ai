@@ -815,17 +815,25 @@ export default function CanvasPage() {
       },
     };
     setMediaNodes((prev) => [...prev, node]);
-    createGenerationJob(currentId, { type, expected_output_count: 1, parameters })
-      .then((created) => {
-        patchMediaNode(nodeId, { jobId: created.generation_job_id });
-        pollJob(nodeId, created.generation_job_id);
-      })
-      .catch((e) => {
-        patchMediaNode(nodeId, {
-          genStatus: 'failed',
-          errorText: isApiError(e) ? e.message : '创建任务失败',
+    try {
+      createGenerationJob(currentId, { type, expected_output_count: 1, parameters })
+        .then((created) => {
+          patchMediaNode(nodeId, { jobId: created.generation_job_id });
+          pollJob(nodeId, created.generation_job_id);
+        })
+        .catch((e) => {
+          patchMediaNode(nodeId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '创建任务失败',
+          });
         });
+    } catch (e: unknown) {
+      // 同步异常兜底（如 crypto.randomUUID 在 HTTP 下不可用）
+      patchMediaNode(nodeId, {
+        genStatus: 'failed',
+        errorText: isApiError(e) ? e.message : '创建任务失败',
       });
+    }
   };
 
   /** 取消生成：POST cancel（状态由轮询收敛为 cancelled） */
@@ -844,17 +852,24 @@ export default function CanvasPage() {
     const jobId = node?.data?.jobId as number | string | undefined;
     if (!currentId || !jobId) return;
     patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
-    retryGenerationJob(currentId, jobId)
-      .then((created) => {
-        patchMediaNode(nodeId, { jobId: created.generation_job_id });
-        pollJob(nodeId, created.generation_job_id);
-      })
-      .catch((e) => {
-        patchMediaNode(nodeId, {
-          genStatus: 'failed',
-          errorText: isApiError(e) ? e.message : '重试失败',
+    try {
+      retryGenerationJob(currentId, jobId)
+        .then((created) => {
+          patchMediaNode(nodeId, { jobId: created.generation_job_id });
+          pollJob(nodeId, created.generation_job_id);
+        })
+        .catch((e) => {
+          patchMediaNode(nodeId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '重试失败',
+          });
         });
+    } catch (e: unknown) {
+      patchMediaNode(nodeId, {
+        genStatus: 'failed',
+        errorText: isApiError(e) ? e.message : '重试失败',
       });
+    }
   };
   actionsRef.current.cancelJob = handleCancelJob;
   actionsRef.current.retryJob = handleRetryJob;
