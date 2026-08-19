@@ -1,7 +1,7 @@
 /* ============================================
  * CanvasPage 画布编辑页：节点/连线/工具栏编排
  * ============================================ */
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off } from 'lucide-react';
 import CanvasHeader from './components/CanvasHeader';
@@ -83,6 +83,22 @@ export default function CanvasPage() {
   const [audioSeed, setAudioSeed] = useState<{ ts: number } | null>(null);
   /** 当前视口（拖拽/缩放结束更新），自动保存时序列化提交 */
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
+  /** FlowCanvas 注册的出生点取数函数（视口中心 flow 坐标），注册前回退原点附近 */
+  const spawnPosRef = useRef<() => { x: number; y: number }>(() => ({ x: 300, y: 200 }));
+  const registerSpawnPosition = useCallback(
+    (fn: () => { x: number; y: number }) => {
+      spawnPosRef.current = fn;
+    },
+    [],
+  );
+  /** 新节点出生位：当前视口中心 + 小随机偏移，保证新节点落在用户可见区域 */
+  const spawnPosition = () => {
+    const c = spawnPosRef.current();
+    return {
+      x: Math.round(c.x + (Math.random() * 160 - 80)),
+      y: Math.round(c.y + (Math.random() * 120 - 60)),
+    };
+  };
   /** 画布保存状态：idle 未保存 / saving 保存中 / saved 已保存 / error 保存失败 */
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   /** 最近一次保存成功时间（HH:mm） */
@@ -423,7 +439,7 @@ export default function CanvasPage() {
     const newNode: Node = {
       id: `text-${Date.now()}`,
       type: 'textNode',
-      position: { x: 250 + Math.random() * 200, y: 150 + Math.random() * 200 },
+      position: spawnPosition(),
       data: {
         html: '',
         toolMode,
@@ -632,6 +648,7 @@ export default function CanvasPage() {
   /** 上传文件生成媒体节点：本地预览立即上画布，后台三步上传登记，成功后换永久 URL */
   const handleUploadFile = (files: File[]) => {
     const newNodes: Node[] = [];
+    const center = spawnPosRef.current();
     files.forEach((file, i) => {
       const isImage = file.type.startsWith('image/');
       const isVideo = file.type.startsWith('video/');
@@ -647,7 +664,7 @@ export default function CanvasPage() {
       newNodes.push({
         id: nodeId,
         type: 'mediaNode',
-        position: { x: 200 + i * 280, y: 100 + Math.random() * 100 },
+        position: { x: Math.round(center.x + i * 280), y: Math.round(center.y + Math.random() * 100) },
         data: {
           src: localSrc,
           fileName: file.name,
@@ -770,7 +787,7 @@ export default function CanvasPage() {
     const node: Node = {
       id: nodeId,
       type: 'mediaNode',
-      position: { x: 220 + Math.random() * 200, y: 120 + Math.random() * 160 },
+      position: spawnPosition(),
       data: {
         genStatus: 'generating',
         progress: 0,
@@ -928,7 +945,7 @@ export default function CanvasPage() {
     const node: Node = {
       id: `gencard-${Date.now()}`,
       type: 'assetNode',
-      position: { x: 320 + Math.random() * 120, y: 160 + Math.random() * 100 },
+      position: spawnPosition(),
       data: {
         kind: 'generation',
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
@@ -1030,7 +1047,7 @@ export default function CanvasPage() {
     const node: Node = {
       id: `product-${Date.now()}`,
       type: 'productNode',
-      position: { x: 260 + Math.random() * 200, y: 120 + Math.random() * 160 },
+      position: spawnPosition(),
       data: {
         name: `商品 ${productSeq.current}`,
         detail: '',
@@ -1050,7 +1067,7 @@ export default function CanvasPage() {
     const node: Node = {
       id: `asset-${kind}-${Date.now()}`,
       type: 'assetNode',
-      position: { x: 260 + Math.random() * 200, y: 120 + Math.random() * 160 },
+      position: spawnPosition(),
       data: {
         kind,
         toolMode,
@@ -1072,7 +1089,7 @@ export default function CanvasPage() {
       const node: Node = {
         id: `media-${Date.now()}`,
         type: 'mediaNode',
-        position: { x: 220 + Math.random() * 200, y: 120 + Math.random() * 160 },
+        position: spawnPosition(),
         data: {
           src: copied.url,
           fileName: copied.url.split('/').filter(Boolean).pop() ?? `资产 ${copied.id}`,
@@ -1104,7 +1121,7 @@ export default function CanvasPage() {
     const node: Node = {
       id: `product-${Date.now()}`,
       type: 'productNode',
-      position: { x: 260 + Math.random() * 200, y: 120 + Math.random() * 160 },
+      position: spawnPosition(),
       data: {
         name: p.title,
         detail: p.detail,
@@ -1191,6 +1208,7 @@ export default function CanvasPage() {
           showEdges={showEdges}
           viewport={doc?.viewport}
           onViewportChange={setViewport}
+          registerSpawnPosition={registerSpawnPosition}
           onNodeDragStop={handleNodeDragStop}
           onNodeClick={handleCanvasNodeClick}
           onPaneClick={handleCanvasPaneClick}

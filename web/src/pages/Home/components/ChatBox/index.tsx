@@ -89,6 +89,9 @@ const imageResolutions = [
   { key: '4K', label: '4K' },
 ];
 
+/** 视频最大上传数量（接口未下发该字段，前端统一 3） */
+const MAX_VIDEOS = 3;
+
 /** 宽高比图标 - 根据比例渲染对应形状的 SVG 矩形 */
 const ratioDims: Record<string, [number, number]> = {
   '21:9': [24, 10],
@@ -418,14 +421,38 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   const currentImageResolution =
     imageSizeItems.find((s) => s.key === imageResolution)?.label ?? imageResolution;
 
-  // 处理参考文件上传（最多5张）
+  // 上传上限（与画布弹窗同规则）：图片数走接口 max_reference_images（首尾帧固定 2），视频最多 3
+  const selectedVideoModel = videoModelList.find((m) => m.model_id === videoModel);
+  const videoRefImageCount = refFiles.filter((r) => r.file.type.startsWith('image/')).length;
+  const videoRefVideoCount = refFiles.filter((r) => r.file.type.startsWith('video/')).length;
+  const videoMaxImages =
+    videoMode === 'firstlast'
+      ? 2
+      : (selectedVideoModel?.features?.max_reference_images ?? 5);
+  const videoImagesFull = videoRefImageCount >= videoMaxImages;
+  const videoVideosFull = videoRefVideoCount >= MAX_VIDEOS;
+  const imageMaxImages = selectedImageModel?.features?.max_reference_images ?? 5;
+
+  // 处理参考文件上传（按类型剩余名额截断：图片走接口上限，视频最多 3）
   const handleRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    const remaining = 5 - refFiles.length;
-    const newFiles = files.slice(0, remaining).map((file) => ({
-      file,
-      preview: URL.createObjectURL(file),
-    }));
+    let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
+    let vidRoom = Math.max(0, MAX_VIDEOS - videoRefVideoCount);
+    const newFiles = files
+      .filter((f) => {
+        if (f.type.startsWith('video/')) {
+          if (vidRoom <= 0) return false;
+          vidRoom -= 1;
+          return true;
+        }
+        if (imgRoom <= 0) return false;
+        imgRoom -= 1;
+        return true;
+      })
+      .map((file) => ({
+        file,
+        preview: URL.createObjectURL(file),
+      }));
     setRefFiles((prev) => [...prev, ...newFiles]);
     // 重置 input 以便重复选择相同文件
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -440,10 +467,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     });
   };
 
-  // 处理AI图片参考文件上传（最多5张）
+  // 处理AI图片参考文件上传（按接口上限截断）
   const handleImageRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    const remaining = 5 - imageRefFiles.length;
+    const remaining = Math.max(0, imageMaxImages - imageRefFiles.length);
     const newFiles = files.slice(0, remaining).map((file) => ({
       file,
       preview: URL.createObjectURL(file),
@@ -508,7 +535,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                     </span>
                   </div>
                 ))}
-                {refFiles.length < 5 && (
+                {!(videoImagesFull && videoVideosFull) && (
                   <div
                     className={styles.refCard}
                     onClick={() => fileInputRef.current?.click()}
@@ -521,7 +548,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
               {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
               <textarea
                 className={styles.textarea}
-                placeholder={'通过直接控制提示词快速生成单段片段。\n上传 1–5 张参考图或视频；首尾帧模式可上传首帧与尾帧参考。'}
+                placeholder={`通过直接控制提示词快速生成单段片段。\n上传参考：图片最多 ${videoMaxImages} 张 / 视频最多 ${MAX_VIDEOS} 个；首尾帧模式可上传首帧与尾帧参考。`}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -533,7 +560,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*,video/*"
+              accept={videoImagesFull ? 'video/*' : videoVideosFull ? 'image/*' : 'image/*,video/*'}
               multiple
               style={{ display: 'none' }}
               onChange={handleRefFiles}
@@ -708,7 +735,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                     </span>
                   </div>
                 ))}
-                {imageRefFiles.length < 5 && (
+                {imageRefFiles.length < imageMaxImages && (
                   <div
                     className={styles.refCard}
                     onClick={() => imageFileInputRef.current?.click()}
