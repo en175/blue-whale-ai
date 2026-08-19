@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createWorkerRepo } from "./generation-worker-repo.js";
 
 describe("generation video worker repo", () => {
-  it("claims only the video job named by the BullMQ message", async () => {
+  it("claims only the video job named by the RocketMQ message", async () => {
     const findFirst = vi.fn().mockResolvedValue({
       id: 300n,
       project_id: 55n,

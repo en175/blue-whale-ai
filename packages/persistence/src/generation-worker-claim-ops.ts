@@ -221,7 +221,7 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
 
     async claimNextInProcessJob(workerId) {
       // IK9ILQ：薄封装——认领一条到点的进程内任务(image 或 audio),仅限 type∈(image,audio)，
-      // 按 id asc；视频走独立 BullMQ worker，不在此认领。
+      // 按 id asc；视频走独立 RocketMQ worker，不在此认领。
       return claimQueuedJob(
         workerId,
         {

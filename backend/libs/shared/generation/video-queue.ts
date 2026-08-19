@@ -1,4 +1,7 @@
+import { Producer } from "rocketmq-client-nodejs";
 import { Queue, type ConnectionOptions, type JobsOptions } from "bullmq";
+
+import { VIDEO_GENERATION_QUEUE } from "./queue.constants.js";
 
 export type VideoQueueProducer = {
   enqueue(jobId: string, options?: { delayMs?: number }): Promise<void>;
@@ -39,7 +42,7 @@ export function loadRedisConnection(
   };
 }
 
-/** BullMQ 适配器：把 Queue 包成 VideoQueueProducer 端口（后续换 RocketMQ 时替换此适配器）。 */
+/** BullMQ 适配器：把 Queue 包成 VideoQueueProducer 端口（VIDEO_QUEUE_DRIVER=bullmq 回退路径）。 */
 export function createVideoQueueProducer(
   queue: QueuePort,
   now: () => number = Date.now,
@@ -64,20 +67,112 @@ export function createVideoQueueProducer(
   };
 }
 
+export type RocketMqConfig = {
+  /** gRPC proxy 端点（如 115.190.244.91:8081）。 */
+  endpoints: string;
+  sslEnabled: boolean;
+  accessKey?: string;
+  accessSecret?: string;
+  topic: string;
+  tag: string;
+};
+
+/** 加载 RocketMQ 连接配置。生产火山实例：AK/SK + sslEnabled=false（5.x 不支持 SSL）；测试环境裸连。 */
+export function loadRocketMqConfig(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): RocketMqConfig {
+  const accessKey = env.ROCKETMQ_ACCESS_KEY;
+  const accessSecret = env.ROCKETMQ_SECRET_KEY;
+  return {
+    endpoints: env.ROCKETMQ_ENDPOINTS ?? "",
+    sslEnabled: env.ROCKETMQ_SSL_ENABLED === "true",
+    ...(accessKey && accessSecret ? { accessKey, accessSecret } : {}),
+    topic: env.ROCKETMQ_TOPIC ?? VIDEO_GENERATION_QUEUE,
+    tag: env.ROCKETMQ_TAG ?? "step",
+  };
+}
+
+/** RocketMQ 适配器：把 Producer 包成 VideoQueueProducer 端口。delay 单位 ms（客户端 delay → 投递时间戳 now+delay）。 */
+export function createRocketMqVideoProducer(
+  producer: Pick<Producer, "send">,
+  config: Pick<RocketMqConfig, "topic" | "tag">,
+): VideoQueueProducer {
+  return {
+    async enqueue(jobId, options = {}) {
+      const delay = Math.max(0, options.delayMs ?? 0);
+      await producer.send({
+        topic: config.topic,
+        tag: config.tag,
+        body: Buffer.from(JSON.stringify({ jobId })),
+        ...(delay > 0 ? { delay } : {}),
+      });
+    },
+  };
+}
+
 let queue: Queue<{ jobId: string }> | null = null;
 
 function getQueue(): Queue<{ jobId: string }> {
-  queue ??= new Queue("generation-video", {
+  queue ??= new Queue(VIDEO_GENERATION_QUEUE, {
     connection: loadRedisConnection(),
   });
   return queue;
 }
 
-/** 视频 job 入队（producer 侧入口）。 */
+let rocketMqProducer: Producer | null = null;
+let rocketMqStartup: Promise<Producer> | null = null;
+
+/** 懒建 + 懒启动的 RocketMQ Producer 单例；启动失败重置，下次调用重试。 */
+async function getStartedRocketMqProducer(
+  config: RocketMqConfig,
+): Promise<Producer> {
+  if (!config.endpoints) {
+    throw new Error(
+      "VIDEO_QUEUE_DRIVER=rocketmq 但未配置 ROCKETMQ_ENDPOINTS（测试环境 gRPC 端点，如 115.190.244.91:8081）",
+    );
+  }
+  if (!rocketMqStartup) {
+    const producer = new Producer({
+      endpoints: config.endpoints,
+      namespace: "",
+      sslEnabled: config.sslEnabled,
+      ...(config.accessKey && config.accessSecret
+        ? {
+            sessionCredentials: {
+              accessKey: config.accessKey,
+              accessSecret: config.accessSecret,
+            },
+          }
+        : {}),
+    });
+    rocketMqProducer = producer;
+    rocketMqStartup = producer
+      .startup()
+      .then(() => producer)
+      .catch((error) => {
+        rocketMqProducer = null;
+        rocketMqStartup = null;
+        throw error;
+      });
+  }
+  return rocketMqStartup;
+}
+
+/** 视频 job 入队（producer 侧入口）。driver 默认 rocketmq；VIDEO_QUEUE_DRIVER=bullmq 回退 Redis 队列。 */
 export async function enqueueVideoGenerationJob(
   jobId: string,
   options?: { delayMs?: number },
 ): Promise<void> {
+  const driver = process.env.VIDEO_QUEUE_DRIVER ?? "rocketmq";
+  if (driver === "rocketmq") {
+    const config = loadRocketMqConfig();
+    const producer = await getStartedRocketMqProducer(config);
+    await createRocketMqVideoProducer(producer, {
+      topic: config.topic,
+      tag: config.tag,
+    }).enqueue(jobId, options);
+    return;
+  }
   await createVideoQueueProducer(getQueue()).enqueue(jobId, options);
 }
 
@@ -85,4 +180,15 @@ export async function closeVideoGenerationQueue(): Promise<void> {
   const current = queue;
   queue = null;
   await current?.close();
+  const startup = rocketMqStartup;
+  rocketMqProducer = null;
+  rocketMqStartup = null;
+  if (startup) {
+    try {
+      const producer = await startup;
+      await producer.shutdown();
+    } catch {
+      // 启动失败则无连接可关
+    }
+  }
 }

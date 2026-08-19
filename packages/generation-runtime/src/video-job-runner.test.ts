@@ -559,7 +559,7 @@ describe("video job runner recovery", () => {
     );
   });
 
-  it("schedules another BullMQ step when the provider is still processing", async () => {
+  it("schedules another RocketMQ step when the provider is still processing", async () => {
     const scheduleNext = vi.fn().mockResolvedValue(undefined);
     const repo = {
       claimVideoJobById: vi.fn().mockResolvedValue({
