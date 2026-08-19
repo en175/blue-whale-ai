@@ -177,6 +177,10 @@ export async function runVideoJobStep(deps: {
 
     const observation = await timedVideoProviderCall("poll", () => provider.poll(claim.providerTaskId!));
     if (observation.status === "queued" || observation.status === "processing") {
+      // IK9Q1B：轮询中间态打 debug，便于定位间歇失败时观察状态演化
+      logger.debug(
+        `video job 轮询中 jobId=${claim.id} status=${observation.status} progress=${observation.progress}`,
+      );
       const updated = await deps.repo.rescheduleVideoPoll({
         ...claimIdentity(claim),
         progress: observation.progress,
@@ -231,12 +235,15 @@ export async function runVideoJobStep(deps: {
     }
     return claim.id;
   } catch (error) {
-    await fail(
-      deps.repo,
-      claim,
-      error instanceof VideoInputError ? error.code : "provider_failed",
-      error instanceof Error ? error.message : "视频生成失败",
-    );
+    const code = error instanceof VideoInputError ? error.code : "provider_failed";
+    const message = error instanceof Error ? error.message : "视频生成失败";
+    // IK9Q1B：失败必留痕——异常堆栈是定位间歇失败（985）的关键，之前只有 DB 侧 error 无任何 worker 日志。
+    if (error instanceof Error) {
+      logger.error(`runVideoJobStep 异常 jobId=${claim.id} code=${code}: ${error.stack ?? error.message}`);
+    } else {
+      logger.error(`runVideoJobStep 异常 jobId=${claim.id} code=${code}: ${String(error)}`);
+    }
+    await fail(deps.repo, claim, code, message);
     return claim.id;
   }
 }
@@ -255,8 +262,9 @@ async function fail(
   code: string,
   message: string,
 ): Promise<void> {
-  // 与成功路径对齐：只有状态迁移成功（fencing token 有效）才计数，
-  // 否则 fencing 竞态下同一任务会被两个 worker 各计一次 fail。
+  // IK9Q1B：无论状态迁移是否成功都留痕。此前只有迁移成功才打 metric，
+  // 出现「DB 已 failed 但 worker 无任何日志」的排查黑洞（job 985）。
+  logger.warn(`video job 失败 jobId=${claim.id} code=${code} message=${message}`);
   const failed = await repo.failVideoJob({ ...claimIdentity(claim), code, message });
   if (failed) {
     logger.metric({
@@ -264,6 +272,9 @@ async function fail(
       result: "fail",
       fields: { job_type: "video_generation", failure_code: code },
     });
+  } else {
+    // fencing 竞态：job 状态未迁移（可能已被另一 worker/重试处理），不计数但记录。
+    logger.warn(`video job 失败但状态未迁移 jobId=${claim.id} code=${code}（fencing 竞态？）`);
   }
 }
 
