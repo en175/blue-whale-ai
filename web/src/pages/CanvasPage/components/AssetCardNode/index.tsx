@@ -43,13 +43,14 @@ interface AssetCardNodeData {
   /** 水合初始描述文本 */
   initialDesc?: string;
   onDelete?: (id: string) => void;
+  onAddToChat?: (id: string) => void;
   /** 生成图片：唤起底部图片对话框 */
   onGenerateImage?: () => void;
   /** Agent 生成卡数据（kind=generation） */
   generationCard?: GenerationCardNodeData;
 }
 
-export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCardNodeData }) {
+export default function AssetCardNode({ id, data, selected }: NodeProps & { data: AssetCardNodeData; selected?: boolean }) {
   // 水合容错：持久化的 kind 可能不在五种枚举内（旧数据/脏数据），降级为 custom 避免 KIND_META 落空
   const kind: AssetCardKind = data.kind && data.kind in KIND_META ? data.kind : 'custom';
   const meta = KIND_META[kind];
@@ -89,6 +90,12 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
   const handleDelete = useCallback(() => {
     setContextMenu(null);
     data.onDelete?.(id);
+  }, [data, id]);
+
+  /** 添加到 Agent 聊天 */
+  const handleAddToChat = useCallback(() => {
+    setContextMenu(null);
+    data.onAddToChat?.(id);
   }, [data, id]);
 
   /** 添加参考图（点击选择或拖入，仅 image/*） */
@@ -132,6 +139,18 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
         <Handle type="target" position={Position.Left} style={{ background: '#666', width: 10, height: 10, border: '2px solid #444' }} />
       )}
 
+      {/* 悬停/选中时顶部操作条：添加到对话（与商品节点一致） */}
+      <div className={`${styles.topBar} ${selected ? styles.topBarVisible : ''}`}>
+        <span className={styles.topLabel}>
+          <AtSign size={14} strokeWidth={2} />
+          <span>{meta.title}</span>
+        </span>
+        <button className={`${styles.addToChatBtn} nodrag`} onClick={handleAddToChat}>
+          <AtSign size={14} strokeWidth={2} />
+          <span>添加到对话</span>
+        </button>
+      </div>
+
       <div
         className={styles.card}
         onDragOver={(e) => e.preventDefault()}
@@ -145,9 +164,8 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
           <span className={styles.name}>{meta.title}</span>
         </div>
 
-        {/* 交互区：生成卡始终可点；普通资产卡仅选择模式可操作（拖动模式整体可拖） */}
+        {/* 交互区：整体可拖（与图片节点一致），文本控件单独 nodrag */}
         <div
-          className={(isSelect || isGeneration) ? 'nodrag nopan' : undefined}
           style={isSelect || isGeneration ? undefined : { pointerEvents: 'none' }}
         >
           {isGeneration && data.generationCard ? (
@@ -305,7 +323,7 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
           <div className={styles.body}>
             <span className={styles.dropHint}>从画布拖入</span>
             <textarea
-              className={styles.descInput}
+              className={`${styles.descInput} nodrag`}
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
               placeholder={meta.placeholder}
@@ -382,6 +400,9 @@ export default function AssetCardNode({ id, data }: NodeProps & { data: AssetCar
             style={{ top: contextMenu.y, left: contextMenu.x }}
             onMouseDown={(e) => e.stopPropagation()}
           >
+            <button className={styles.contextItem} onClick={handleAddToChat}>
+              <span>添加到聊天</span>
+            </button>
             <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
               <span>删除</span>
             </button>

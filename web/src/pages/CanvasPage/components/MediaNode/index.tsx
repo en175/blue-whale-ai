@@ -164,8 +164,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           </span>
         </div>
 
-        {/* 选择模式下仅视频保留 nodrag（控件需点击交互）；图片节点任意位置按下均可拖动 */}
-        <div className={`${styles.mediaContainer} ${isSelect && data.mediaType === 'video' ? 'nodrag nopan' : ''}`}>
+        {/* 与图片节点一致：任意位置按下均可拖动（视频控件保留点击交互） */}
+        <div className={styles.mediaContainer}>
           {isGenerating ? (
             /* 生成中：进度条 + 取消生成 */
             <div className={styles.genBox}>

@@ -33,7 +33,7 @@ interface AudioDialogProps {
   onSwitchToMusic?: () => void;
 }
 
-export default function AudioDialog({ onClose, onSend, onSwitchToMusic }: AudioDialogProps) {
+export default function AudioDialog({ onClose, onSend }: AudioDialogProps) {
   const [text, setText] = useState('');
   const [models, setModels] = useState<GenerationModel[]>([]);
   const [modelId, setModelId] = useState<string>('');
@@ -101,20 +101,13 @@ export default function AudioDialog({ onClose, onSend, onSwitchToMusic }: AudioD
                 <button className={`${styles.modeOption} ${styles.modeOptionActive}`} onClick={() => setModeOpen(false)}>
                   音频生成
                 </button>
-                {onSwitchToMusic && (
-                  <button
-                    className={styles.modeOption}
-                    onClick={() => {
-                      setModeOpen(false);
-                      onSwitchToMusic();
-                    }}
-                  >
-                    <span className={styles.modeOptionRow}>
-                      <Music size={12} strokeWidth={2} />
-                      AI 音乐
-                    </span>
-                  </button>
-                )}
+                {/* AI 音乐暂未上线：展示但禁用 */}
+                <button className={styles.modeOption} disabled title="即将上线">
+                  <span className={styles.modeOptionRow}>
+                    <Music size={12} strokeWidth={2} />
+                    AI 音乐
+                  </span>
+                </button>
               </div>
             )}
           </div>
