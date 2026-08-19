@@ -13,8 +13,8 @@ interface MediaNodeData {
   mediaType?: 'image' | 'video';
   toolMode?: 'drag' | 'select';
   isFirst?: boolean;
-  /** 关联生成任务ID（生成中的占位节点） */
-  jobId?: number;
+  /** 关联生成任务ID（生成中的占位节点）。后端返回字符串，兼容 number 历史形态。 */
+  jobId?: number | string;
   /** 生成状态：generating 进度展示；failed/cancelled 错误展示；无值为普通媒体 */
   genStatus?: 'generating' | 'failed' | 'cancelled';
   /** 生成进度 0-100 */

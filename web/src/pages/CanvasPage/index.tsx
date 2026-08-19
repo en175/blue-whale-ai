@@ -377,10 +377,15 @@ export default function CanvasPage() {
     versionRef.current = doc.version;
     setViewport(doc.viewport);
     lastSavedRef.current = JSON.stringify(doc.viewport) + serializeNodes([...t, ...m, ...p, ...a]);
-    // 水合恢复：「生成中」媒体节点恢复任务轮询
+    // 水合恢复：「生成中」媒体节点恢复任务轮询。
+    // IK9R8X：jobId 后端返回字符串，兼容 string/number 双形态（历史画布文档已持久化字符串）。
     m
-      .filter((n) => n.data.genStatus === 'generating' && typeof n.data.jobId === 'number')
-      .forEach((n) => pollJobRef.current(n.id, n.data.jobId as number));
+      .filter(
+        (n) =>
+          n.data.genStatus === 'generating' &&
+          (typeof n.data.jobId === 'number' || typeof n.data.jobId === 'string'),
+      )
+      .forEach((n) => pollJobRef.current(n.id, n.data.jobId as number | string));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, snapshotAssets]);
 
@@ -716,10 +721,10 @@ export default function CanvasPage() {
   };
 
   /** 轮询函数引用（供水合恢复调用，避免声明顺序依赖） */
-  const pollJobRef = useRef<(nodeId: string, jobId: number) => void>(() => {});
+  const pollJobRef = useRef<(nodeId: string, jobId: number | string) => void>(() => {});
 
   /** 轮询任务状态直至终态：succeeded 挂载产物 / failed 展示错误 / cancelled 收敛 */
-  const pollJob = (nodeId: string, jobId: number) => {
+  const pollJob = (nodeId: string, jobId: number | string) => {
     const tick = () => {
       fetchJobStatus(jobId)
         .then((detail) => {
@@ -809,7 +814,7 @@ export default function CanvasPage() {
   /** 取消生成：POST cancel（状态由轮询收敛为 cancelled） */
   const handleCancelJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const jobId = node?.data?.jobId as number | undefined;
+    const jobId = node?.data?.jobId as number | string | undefined;
     if (!currentId || !jobId) return;
     cancelGenerationJob(currentId, jobId).catch((e) => {
       console.warn('取消生成失败:', e);
@@ -819,7 +824,7 @@ export default function CanvasPage() {
   /** 重试失败任务：retry 接口创建新任务，节点回到生成中 */
   const handleRetryJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-    const jobId = node?.data?.jobId as number | undefined;
+    const jobId = node?.data?.jobId as number | string | undefined;
     if (!currentId || !jobId) return;
     patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
     retryGenerationJob(currentId, jobId)
