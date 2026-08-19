@@ -88,12 +88,11 @@ export class AgentModelGatewayController {
     }
     if (authorization) headers.authorization = authorization;
 
-    const rawBody = await new Promise<Buffer>((resolve, reject) => {
-      const chunks: Buffer[] = [];
-      req.on("data", (chunk: Buffer) => chunks.push(chunk));
-      req.on("end", () => resolve(Buffer.concat(chunks)));
-      req.on("error", reject);
-    });
+    // 全局 json body-parser（main.ts 的 useBodyParser("json")）已消费请求体流，此刻在已结束的
+    // 流上等 data/end 会永久挂起；直接复用解析后的 req.body 重建字节（与 BFF 代理同一修法）。
+    const rawBody = Buffer.from(
+      req.body === undefined || req.body === null ? "" : JSON.stringify(req.body),
+    );
 
     const streaming = isStreamingRequest(rawBody);
     let upstream: globalThis.Response;
