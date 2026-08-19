@@ -19,7 +19,6 @@ COPY packages/persistence/package.json packages/persistence/
 COPY packages/agent-runtime/package.json packages/agent-runtime/
 COPY backend/package.json backend/
 COPY backend/tsconfig.json backend/
-COPY backend/patches backend/patches 2>/dev/null || true
 
 # 国内 npm 镜像加速
 ENV npm_config_registry=https://registry.npmmirror.com
