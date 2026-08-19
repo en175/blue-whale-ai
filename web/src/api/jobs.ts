@@ -75,8 +75,8 @@ export interface CreateJobPayload {
 
 /** 创建/重试任务返回 */
 export interface JobCreatedData {
-  /** 生成任务ID，用于轮询 */
-  generation_job_id: number;
+  /** 生成任务ID，用于轮询。后端返回字符串（CreatedJob.generation_job_id: string），勿当 number 存。 */
+  generation_job_id: string;
   /** 事件游标（服务端事件序号） */
   cursor: number;
 }
