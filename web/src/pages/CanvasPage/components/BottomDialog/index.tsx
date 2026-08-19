@@ -28,6 +28,9 @@ const FALLBACK_RATIOS = ['16:9', '9:16', '1:1'];
 /** 时长范围（接口失败回退） */
 const FALLBACK_DURATION = { min: 4, max: 15, step: 1 };
 
+/** 视频最大上传数量（接口未下发该字段，前端统一 3） */
+const MAX_VIDEOS = 3;
+
 /** 视频生成参数（发送时传给画布创建生成任务） */
 export interface VideoGenOptions {
   /** 模型ID（能力接口未加载时为空串，调用方需拦截） */
@@ -102,7 +105,9 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   /** 首尾帧模式：仅允许上传 2 张图片（首帧+尾帧），禁止视频 */
   const isKeyframe = selectedMode === 'keyframe';
   const imageCount = refFiles.filter((f) => f.type === 'image').length;
-  const maxImages = isKeyframe ? 2 : 5;
+  const videoCount = refFiles.filter((f) => f.type === 'video').length;
+  /** 图片上限：首尾帧模式固定 2（首帧+尾帧），其余采用接口定义的 max_reference_images（失败回退 5） */
+  const maxImages = isKeyframe ? 2 : (currentModel?.features?.max_reference_images ?? 5);
 
   /** 时长刻度（min..max 逐 step） */
   const ticks: number[] = [];
@@ -157,21 +162,36 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     if (imageCount < maxImages) imageInputRef.current?.click();
   };
 
-  /** 上传视频（首尾帧模式禁用） */
+  /** 上传视频（首尾帧模式禁用；达上限时按钮已隐藏） */
   const handleVideoClick = () => {
     if (isKeyframe) return;
-    if (refFiles.length < 5) videoInputRef.current?.click();
+    if (videoCount < MAX_VIDEOS) videoInputRef.current?.click();
   };
 
   /** 通用上传（底部加号；首尾帧模式仅收图片且限 2 张） */
   const handleAnyUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+    const all = Array.from(files);
     const list = isKeyframe
-      ? Array.from(files)
+      ? all
           .filter((f) => f.type.startsWith('image/'))
           .slice(0, Math.max(0, maxImages - imageCount))
-      : Array.from(files).slice(0, 5 - refFiles.length);
+      : (() => {
+          // 按类型剩余名额截断：图片走接口上限，视频最多 3
+          let imgRoom = Math.max(0, maxImages - imageCount);
+          let vidRoom = Math.max(0, MAX_VIDEOS - videoCount);
+          return all.filter((f) => {
+            if (f.type.startsWith('video/')) {
+              if (vidRoom <= 0) return false;
+              vidRoom -= 1;
+              return true;
+            }
+            if (imgRoom <= 0) return false;
+            imgRoom -= 1;
+            return true;
+          });
+        })();
     const newFiles = list.map((file) => ({
       file,
       preview: URL.createObjectURL(file),
@@ -181,11 +201,11 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     e.target.value = '';
   };
 
-  /** 处理图片上传（首尾帧模式限 2 张） */
+  /** 处理图片上传（按接口上限/首尾帧 2 张截断） */
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    const remaining = isKeyframe ? Math.max(0, maxImages - imageCount) : 5 - refFiles.length;
+    const remaining = Math.max(0, maxImages - imageCount);
     const newFiles = Array.from(files).slice(0, remaining).map((file) => ({
       file,
       preview: URL.createObjectURL(file),
@@ -200,7 +220,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     if (isKeyframe) return;
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    const remaining = 5 - refFiles.length;
+    const remaining = Math.max(0, MAX_VIDEOS - videoCount);
     const newFiles = Array.from(files).slice(0, remaining).map((file) => ({
       file,
       preview: URL.createObjectURL(file),
@@ -360,23 +380,35 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         </div>
       )}
 
-      {/* 顶部媒体上传 */}
+      {/* 顶部媒体上传（达上限隐藏对应按钮） */}
       <div className={styles.mediaToggle}>
-        <button className={styles.mediaBtn} onClick={handleImageClick} title="上传图片">
-          <Image size={18} strokeWidth={2} />
-        </button>
-        <div className={styles.mediaDot} />
-        <button
-          className={styles.mediaBtn}
-          onClick={handleVideoClick}
-          title={isKeyframe ? '首尾帧模式不支持视频' : '上传视频'}
-          disabled={isKeyframe}
-        >
-          <Video size={18} strokeWidth={2} />
-        </button>
+        {imageCount < maxImages && (
+          <button
+            className={styles.mediaBtn}
+            onClick={handleImageClick}
+            title={`上传图片（最多 ${maxImages} 张）`}
+          >
+            <Image size={18} strokeWidth={2} />
+          </button>
+        )}
+        {imageCount < maxImages && (isKeyframe || videoCount < MAX_VIDEOS) && (
+          <div className={styles.mediaDot} />
+        )}
+        {(isKeyframe || videoCount < MAX_VIDEOS) && (
+          <button
+            className={styles.mediaBtn}
+            onClick={handleVideoClick}
+            title={isKeyframe ? '首尾帧模式不支持视频' : `上传视频（最多 ${MAX_VIDEOS} 个）`}
+            disabled={isKeyframe}
+          >
+            <Video size={18} strokeWidth={2} />
+          </button>
+        )}
         {refFiles.length > 0 && (
           <span className={styles.fileCount}>
-            {isKeyframe ? `${imageCount}/2` : `${refFiles.length}/5`}
+            {isKeyframe
+              ? `${imageCount}/2`
+              : `图 ${imageCount}/${maxImages} · 视频 ${videoCount}/${MAX_VIDEOS}`}
           </span>
         )}
       </div>
@@ -401,7 +433,15 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
       <input
         ref={anyInputRef}
         type="file"
-        accept="image/*,video/*"
+        accept={
+          isKeyframe
+            ? 'image/*'
+            : imageCount >= maxImages
+              ? 'video/*'
+              : videoCount >= MAX_VIDEOS
+                ? 'image/*'
+                : 'image/*,video/*'
+        }
         multiple
         className={styles.hiddenInput}
         onChange={handleAnyUpload}
@@ -447,14 +487,18 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
       <div className={styles.bottomBar}>
         {/* 左侧 */}
         <div className={styles.barLeft}>
-          {/* 加号上传 */}
-          <button
-            className={styles.addBtn}
-            onClick={() => anyInputRef.current?.click()}
-            title="添加素材"
-          >
-            <Plus size={14} strokeWidth={2} />
-          </button>
+          {/* 加号上传（两类均达上限隐藏） */}
+          {(isKeyframe
+            ? imageCount < maxImages
+            : imageCount < maxImages || videoCount < MAX_VIDEOS) && (
+            <button
+              className={styles.addBtn}
+              onClick={() => anyInputRef.current?.click()}
+              title="添加素材"
+            >
+              <Plus size={14} strokeWidth={2} />
+            </button>
+          )}
 
           {/* 模式选择器 */}
           <div className={styles.modeWrap}>

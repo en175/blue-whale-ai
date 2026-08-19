@@ -17,8 +17,11 @@ import {
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import styles from './index.module.css';
 
-/** 上传素材最大数量 */
-const MAX_FILES = 5;
+/** 接口失败时参考图上限回退值 */
+const FALLBACK_MAX_IMAGES = 5;
+
+/** 视频最大上传数量（接口未下发该字段，前端统一 3） */
+const MAX_VIDEOS = 3;
 
 export interface UploadedFile {
   id: string;
@@ -90,7 +93,11 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   useEffect(() => {
     if (!externalPick) return;
     setFiles((prev) => {
-      if (prev.some((f) => f.id === externalPick.file.id) || prev.length >= MAX_FILES) return prev;
+      const imgCount = prev.filter((f) => f.type === 'image').length;
+      const vidCount = prev.filter((f) => f.type === 'video').length;
+      const full =
+        externalPick.file.type === 'image' ? imgCount >= maxImages : vidCount >= MAX_VIDEOS;
+      if (prev.some((f) => f.id === externalPick.file.id) || full) return prev;
       return [...prev, externalPick.file];
     });
   }, [externalPick]);
@@ -109,6 +116,12 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   const currentModel = modelOptions.find((m) => m.key === selectedModel);
   const currentResolutionLabel =
     resolutionOptions.find((r) => r.key === selectedResolution)?.label ?? selectedResolution;
+  const imageCount = files.filter((f) => f.type === 'image').length;
+  const videoCount = files.filter((f) => f.type === 'video').length;
+  /** 参考图上限采用接口定义的 max_reference_images（失败回退本地值） */
+  const maxImages = currentGen?.features?.max_reference_images ?? FALLBACK_MAX_IMAGES;
+  const imagesFull = imageCount >= maxImages;
+  const videosFull = videoCount >= MAX_VIDEOS;
 
   /** 选中模型后应用其默认清晰度/宽高比 */
   const applyModelDefaults = (m: GenerationModel) => {
@@ -143,18 +156,26 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   /** 点击加号触发文件选择 */
   const handleAddClick = () => fileInputRef.current?.click();
 
-  /** 选择文件（最多 5 个） */
+  /** 选择文件（按类型剩余名额截断：图片走接口上限，视频最多 3） */
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const list = Array.from(e.target.files ?? []);
     if (list.length === 0) return;
     setFiles((prev) => {
-      const room = MAX_FILES - prev.length;
-      const added = list.slice(0, room).map((f, i): UploadedFile => ({
-        id: `${Date.now()}-${i}`,
-        url: URL.createObjectURL(f),
-        type: f.type.startsWith('video/') ? 'video' : 'image',
-        name: f.name,
-      }));
+      let imgRoom = maxImages - prev.filter((f) => f.type === 'image').length;
+      let vidRoom = MAX_VIDEOS - prev.filter((f) => f.type === 'video').length;
+      const added: UploadedFile[] = [];
+      for (const f of list) {
+        const isVideo = f.type.startsWith('video/');
+        if (isVideo ? vidRoom <= 0 : imgRoom <= 0) continue;
+        if (isVideo) vidRoom -= 1;
+        else imgRoom -= 1;
+        added.push({
+          id: `${Date.now()}-${added.length}`,
+          url: URL.createObjectURL(f),
+          type: isVideo ? 'video' : 'image',
+          name: f.name,
+        });
+      }
       return [...prev, ...added];
     });
     e.target.value = '';
@@ -286,7 +307,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         {/* 顶部：素材预览 + 右上角操作 */}
         <div className={styles.topRow}>
           <div className={styles.previewRow}>
-            {/* 左上角图标：点击弹出「图片上传 / 到节点选择」 */}
+            {/* 左上角图标：点击弹出「图片上传 / 到节点选择」（图片达上限隐藏） */}
+            {!imagesFull && (
             <div className={styles.sourceWrap}>
               <button
                 className={`${styles.previewItem} ${styles.previewPlaceholder} ${pickMode ? styles.previewPicking : ''}`}
@@ -317,6 +339,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                 </>
               )}
             </div>
+            )}
             {files.map((f) => (
               <div key={f.id} className={styles.previewItem} title={f.name}>
                 {f.type === 'video' ? (
@@ -359,17 +382,19 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         <div className={styles.bottomBar}>
           {/* 左侧 */}
           <div className={styles.barLeft}>
-            <button
-              className={styles.addBtn}
-              onClick={handleAddClick}
-              title={`上传视频或图片（最多 ${MAX_FILES} 张）`}
-            >
-              <Plus size={16} strokeWidth={2} />
-            </button>
+            {!(imagesFull && videosFull) && (
+              <button
+                className={styles.addBtn}
+                onClick={handleAddClick}
+                title={`上传图片（最多 ${maxImages} 张）/ 视频（最多 ${MAX_VIDEOS} 个）`}
+              >
+                <Plus size={16} strokeWidth={2} />
+              </button>
+            )}
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*,video/*"
+              accept={imagesFull ? 'video/*' : videosFull ? 'image/*' : 'image/*,video/*'}
               multiple
               className={styles.hiddenInput}
               onChange={handleFileSelect}
