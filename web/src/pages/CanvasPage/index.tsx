@@ -645,6 +645,13 @@ export default function CanvasPage() {
           },
           onDuplicate: (id: string) => actionsRef.current.duplicate(id),
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+          onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
+          onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+          onReEdit: (id: string) => actionsRef.current.reEdit(id),
+          onGenImage: (id: string) => actionsRef.current.genImage(id),
+          onGenVideo: (id: string) => actionsRef.current.genVideo(id),
+          onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+          onDownload: (id: string) => actionsRef.current.download(id),
         },
       });
 
@@ -759,6 +766,13 @@ export default function CanvasPage() {
         },
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+        onReEdit: (id: string) => actionsRef.current.reEdit(id),
+        onGenImage: (id: string) => actionsRef.current.genImage(id),
+        onGenVideo: (id: string) => actionsRef.current.genVideo(id),
+        onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+        onDownload: (id: string) => actionsRef.current.download(id),
       },
     };
     setMediaNodes((prev) => [...prev, node]);
@@ -1046,6 +1060,16 @@ export default function CanvasPage() {
           mediaType: copied.type === 'video' ? 'video' : 'image',
           assetId: copied.id,
           toolMode,
+          onDelete: (id: string) => {
+            setMediaNodes((prev) => prev.filter((n) => n.id !== id));
+          },
+          onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+          onReEdit: (id: string) => actionsRef.current.reEdit(id),
+          onGenImage: (id: string) => actionsRef.current.genImage(id),
+          onGenVideo: (id: string) => actionsRef.current.genVideo(id),
+          onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+          onDownload: (id: string) => actionsRef.current.download(id),
         },
       };
       setMediaNodes((prev) => [...prev, node]);
