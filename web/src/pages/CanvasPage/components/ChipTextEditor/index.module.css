@@ -1,5 +1,7 @@
 .editorWrapper {
   position: relative;
+  /* 父级给定高度时填满（如底部对话窗固定高度场景）；父级高度 auto 时等同 auto，无副作用 */
+  height: 100%;
 }
 
 .editable {

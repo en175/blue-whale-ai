@@ -433,12 +433,15 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
       )}
 
       {/* 输入框：可多次插入生成卡引用胶囊，胶囊跟文字同一行 */}
-      <ChipTextEditor
-        ref={chipEditorRef}
-        placeholder="上传 3-10 秒视频片段，并结合文本或图片轻松修改内容、改变镜头角度或重塑原视频风格。可使用 @ 快速插入已添加资源。"
-        onChangeText={setComposedText}
-        onSend={handleSend}
-      />
+      <div className={styles.editorWrap}>
+        <ChipTextEditor
+          ref={chipEditorRef}
+          placeholder="上传 3-10 秒视频片段，并结合文本或图片轻松修改内容、改变镜头角度或重塑原视频风格。可使用 @ 快速插入已添加资源。"
+          onChangeText={setComposedText}
+          onSend={handleSend}
+          className={styles.editorArea}
+        />
+      </div>
 
       {/* 底部状态栏 */}
       <div className={styles.bottomBar}>
