@@ -1,7 +1,10 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
+import { createLogger } from "@blue-whale/core/logging";
 import { traceMiddleware } from "@lib/infra/middleware/trace.middleware.js";
 import { GenerationWorkerModule } from "./generation-worker.module.js";
+
+const logger = createLogger("generation-worker");
 
 const port = Number.parseInt(
   process.env.GENERATION_WORKER_PORT ?? "4002",
@@ -15,7 +18,7 @@ async function bootstrap(): Promise<void> {
   app.use(traceMiddleware);
 
   await app.listen(port, process.env.HOST ?? "0.0.0.0");
-  console.log(`[generation-worker] listening on :${port}`);
+  logger.info(`generation-worker listening on :${port}`);
 }
 
 void bootstrap();

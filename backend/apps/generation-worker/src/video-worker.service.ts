@@ -1,6 +1,7 @@
 import { hostname } from "node:os";
 import { Injectable } from "@nestjs/common";
 import { createWorkerRepo } from "@blue-whale/persistence";
+import { createLogger } from "@blue-whale/core/logging";
 import {
   loadGenerationCostConfig,
   loadGenerationCredentialSecret,
@@ -18,6 +19,8 @@ import {
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { enqueueVideoGenerationJob } from "@lib/shared/generation/video-queue.js";
 
+const logger = createLogger("generation-worker");
+
 /** 视频 worker 依赖装配（对齐 workers/generation-worker.ts）：
  *  repo + new-api provider + 凭证库 + 媒体转存 + 成本换算，跑 runVideoJobStep 短步骤。 */
 @Injectable()
@@ -34,6 +37,7 @@ export class VideoWorkerService {
   }
 
   async runStep(jobId: string): Promise<string | null> {
+    logger.debug(`runStep start jobId=${jobId}`);
     const mediaRelayMode = loadGenerationMediaRelayMode();
     const tosConfig =
       mediaRelayMode === "passthrough" ? null : loadGenerationTosConfig();
