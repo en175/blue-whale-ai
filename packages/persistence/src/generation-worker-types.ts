@@ -51,7 +51,7 @@ export interface WorkerRepo {
   ): Promise<ClaimedJob | null>;
   /** 认领一个 queued 任务（next_action_at<=now），置 processing + lease。无则 null。 */
   claimNextJob(workerId: string): Promise<ClaimedJob | null>;
-  /** 按 BullMQ 消息中的 DB jobId 领取一个待 submit/poll 的视频短步骤。 */
+  /** 按 RocketMQ 消息中的 DB jobId 领取一个待 submit/poll 的视频短步骤。 */
   claimVideoJobById(
     jobId: string,
     workerId: string,
