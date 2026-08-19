@@ -13,6 +13,13 @@
   flex-direction: column;
   gap: var(--spacing-sm);
   z-index: 20;
+  animation: dialogFadeIn 0.2s ease;
+}
+
+/* 唤出动画：与视频/音频对话窗一致，从底部上浮 + 淡入 */
+@keyframes dialogFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 /* ---- 输入卡片（单一表面） ---- */
@@ -254,7 +261,7 @@
   border: none;
   cursor: pointer;
   color: #eee;
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   padding: 0;
   transition: color var(--transition-fast);
@@ -280,7 +287,7 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: #777;
   user-select: none;
@@ -362,7 +369,7 @@
 }
 
 .configLabel {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   font-weight: 500;
   color: var(--color-text-secondary);
 }
@@ -389,7 +396,7 @@
   width: 100%;
   padding: 10px 14px;
   border-radius: 12px;
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text-primary);
   background-color: #262626;
@@ -420,7 +427,7 @@
 .selectOption {
   padding: 8px 12px;
   border-radius: var(--radius-sm);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   background: transparent;
   border: none;

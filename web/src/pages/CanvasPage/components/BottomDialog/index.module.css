@@ -9,12 +9,16 @@
   transform: translateX(-50%);
   width: 640px;
   max-width: 90%;
+  height: 200px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   background-color: #1e1e1e;
   border: 1px solid var(--color-border-primary);
   border-radius: 16px;
   backdrop-filter: blur(12px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  padding: var(--spacing-xl);
+  padding: var(--spacing-lg);
   z-index: 10;
   animation: dialogFadeIn 0.2s ease;
 }
@@ -22,6 +26,17 @@
 @keyframes dialogFadeIn {
   from { opacity: 0; transform: translateX(-50%) translateY(8px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* 输入区包裹层：填充窗口剩余高度，与图片对话窗尺寸对齐 */
+.editorWrap {
+  flex: 1;
+  min-height: 0;
+}
+
+.editorArea {
+  height: 100%;
+  overflow-y: auto;
 }
 
 /* ---- 关闭按钮 ---- */
@@ -53,7 +68,8 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  margin-bottom: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+  flex-shrink: 0;
 }
 
 .mediaBtn {
@@ -105,6 +121,7 @@
   align-items: center;
   justify-content: space-between;
   margin-top: var(--spacing-sm);
+  flex-shrink: 0;
 }
 
 .barLeft {
@@ -146,7 +163,7 @@
   gap: 4px;
   padding: 2px 8px;
   border-radius: var(--radius-sm);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text-primary);
   background: transparent;
@@ -191,7 +208,7 @@
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-md);
   border-radius: var(--radius-sm);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
@@ -213,12 +230,12 @@
 
 /* ---- 信息文字 ---- */
 .barDivider {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-border-primary);
 }
 
 .barInfo {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text-primary);
   white-space: nowrap;
@@ -231,7 +248,7 @@
   gap: var(--spacing-xs);
   padding: 10px var(--spacing-xl);
   border-radius: var(--radius-md) 0 0 var(--radius-md);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-md);
   font-weight: 500;
   color: var(--color-text-tertiary);
   background-color: var(--color-bg-tertiary);
@@ -260,7 +277,7 @@
 
 /* ---- 文件计数 ---- */
 .fileCount {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
   margin-left: auto;
 }
@@ -317,7 +334,7 @@
   left: 0;
   right: 0;
   padding: 1px 0;
-  font-size: 9px;
+  font-size: var(--font-size-xs);
   text-align: center;
   color: #fff;
   background-color: rgba(0, 0, 0, 0.5);
@@ -368,7 +385,7 @@
   gap: 6px;
   padding: 4px 8px;
   border-radius: var(--radius-sm);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
@@ -428,7 +445,7 @@
 .configLabel {
   display: block;
   margin-bottom: var(--spacing-sm);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
 }
 
@@ -451,7 +468,7 @@
   gap: var(--spacing-sm);
   padding: 10px var(--spacing-md);
   border-radius: var(--radius-md);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-sm);
   font-weight: 500;
   color: var(--color-text-primary);
   background-color: #2a2a2a;
@@ -494,7 +511,7 @@
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-md);
   border-radius: var(--radius-sm);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
@@ -527,7 +544,7 @@
 
 .durationValue {
   margin-bottom: var(--spacing-sm);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -586,7 +603,7 @@
   justify-content: space-between;
   margin-top: 4px;
   margin-bottom: var(--spacing-lg);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
 }
 
@@ -605,7 +622,7 @@
   gap: 6px;
   padding: 10px 0;
   border-radius: var(--radius-md);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   background-color: #2a2a2a;
   border: 1px solid transparent;
