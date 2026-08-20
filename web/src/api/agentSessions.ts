@@ -358,18 +358,32 @@ export function correctRequirementUnderstanding(
 
 /* ============ 事件流（共享连接，引用计数） ============ */
 
-/** 断线重连延时（ms） */
-const RETRY_DELAY = 3000;
+/** 断线重连基准延时（ms）：实际延时按尝试次数指数退避并叠加抖动 */
+const RETRY_BASE_DELAY = 1000;
+/** 重连延时上限（ms） */
+const RETRY_MAX_DELAY = 15000;
+/**
+ * 空闲看门狗（ms）：agent 每 15s 发一次心跳，超过这个时长仍无任何字节到达，
+ * 就判定连接已经半死——中间层掐流却没给 EOF 时，reader 既不 resolve 也不 reject，
+ * 仅靠「流结束」回调永远等不到重连（IKA2V3）。此时主动断开并带游标重连。
+ */
+const IDLE_TIMEOUT = 40000;
 /** 订阅全部释放后延迟关闭（ms）：覆盖 StrictMode 清理→重建的间隙，避免重复建连/中断请求 */
 const IDLE_CLOSE_DELAY = 200;
 
 /** 共享连接句柄 */
 interface SessionEventHub {
+  /** hub 生命周期信号：仅在最后一个订阅者离开、hub 销毁时 abort */
   controller: AbortController;
+  /** 当前这一次连接尝试的信号：看门狗超时或 hub 销毁时 abort，不影响后续重连 */
+  attemptController: AbortController | null;
   listeners: Set<(ev: SseEvent) => void>;
   cursor: string;
   closeTimer: number;
   retryTimer: number;
+  /** 连续失败次数，用于指数退避；收到任何数据即归零 */
+  attempt: number;
+  idleTimer: number;
   dead: boolean;
 }
 
@@ -386,10 +400,13 @@ function ensureHub(projectId: string, sessionId: string, initialCursor: string):
 
   const hub: SessionEventHub = {
     controller: new AbortController(),
+    attemptController: null,
     listeners: new Set(),
     cursor: initialCursor,
     closeTimer: 0,
     retryTimer: 0,
+    attempt: 0,
+    idleTimer: 0,
     dead: false,
   };
   hubs.set(key, hub);
@@ -398,19 +415,33 @@ function ensureHub(projectId: string, sessionId: string, initialCursor: string):
 
   const scheduleRetry = () => {
     if (hub.dead || hub.retryTimer) return;
+    // 指数退避 + 抖动：上游持续不可用时不再每 3s 敲一次，同时避免多标签页同时重连
+    const backoff = Math.min(RETRY_BASE_DELAY * 2 ** hub.attempt, RETRY_MAX_DELAY);
+    hub.attempt += 1;
     hub.retryTimer = window.setTimeout(() => {
       hub.retryTimer = 0;
       void connect();
-    }, RETRY_DELAY);
+    }, backoff * (0.5 + Math.random() * 0.5));
   };
 
   const connect = async (): Promise<void> => {
+    if (hub.dead || hub.controller.signal.aborted) return;
+    const attempt = new AbortController();
+    hub.attemptController = attempt;
+    const abortAttempt = () => attempt.abort();
+    hub.controller.signal.addEventListener('abort', abortAttempt, { once: true });
+    /** 每次收到字节（含心跳）重置；超时视为连接半死，断开后走带游标重连 */
+    const armIdleWatchdog = () => {
+      window.clearTimeout(hub.idleTimer);
+      hub.idleTimer = window.setTimeout(() => attempt.abort(), IDLE_TIMEOUT);
+    };
     try {
       const headers: Record<string, string> = { Accept: 'text/event-stream' };
       const token = getAccessToken();
       if (token) headers.Authorization = `Bearer ${token}`;
       const after = hub.cursor ? `?after=${encodeURIComponent(hub.cursor)}` : '';
-      const res = await fetch(`${base}${after}`, { headers, signal: hub.controller.signal });
+      armIdleWatchdog();
+      const res = await fetch(`${base}${after}`, { headers, signal: attempt.signal });
       if (res.status === 409) {
         // 游标过期：取最新快照游标后重连
         try {
@@ -423,12 +454,25 @@ function ensureHub(projectId: string, sessionId: string, initialCursor: string):
         return;
       }
       if (!res.ok) throw new Error(`SSE 连接失败（${res.status}）`);
-      await readSseResponse(res, (ev) => {
-        if (ev.id) hub.cursor = ev.id;
-        hub.listeners.forEach((l) => l(ev));
-      });
+      armIdleWatchdog();
+      await readSseResponse(
+        res,
+        (ev) => {
+          if (ev.id) hub.cursor = ev.id;
+          hub.listeners.forEach((l) => l(ev));
+        },
+        () => {
+          // 有字节到达即认定连接健康：重置看门狗并让退避归零
+          hub.attempt = 0;
+          armIdleWatchdog();
+        },
+      );
     } catch {
-      /* 流结束/网络错误/abort：未销毁且有订阅者时延时重连 */
+      /* 流结束/网络错误/看门狗超时：未销毁且有订阅者时延时重连 */
+    } finally {
+      window.clearTimeout(hub.idleTimer);
+      hub.controller.signal.removeEventListener('abort', abortAttempt);
+      if (hub.attemptController === attempt) hub.attemptController = null;
     }
     if (!hub.dead && !hub.controller.signal.aborted && hub.listeners.size > 0) scheduleRetry();
   };
@@ -458,6 +502,8 @@ export function subscribeSessionEvents(
       if (hub.listeners.size > 0) return;
       hub.dead = true;
       window.clearTimeout(hub.retryTimer);
+      window.clearTimeout(hub.idleTimer);
+      // abort hub 信号会连带中止进行中的那次连接尝试（connect 里已挂监听）
       hub.controller.abort();
       hubs.delete(`${projectId}:${sessionId}`);
     }, IDLE_CLOSE_DELAY);

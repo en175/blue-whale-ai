@@ -11,13 +11,45 @@ import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
+/**
+ * 建连超时：只约束「拿到上游响应头」这一段。
+ *
+ * 一次性请求可以有总时长上限，长连接不能——SSE 事件流的存活时间等于会话时长，
+ * 没有任何合理的总时长可设。IKA2V3 之前用 `AbortSignal.timeout` 给整个 fetch
+ * （含响应体流）设了 60s，事件流因此每次活满 60s 就被 BFF 自己掐断，导致
+ * Agent 回答必须刷新第二次才出现。两种超时是不同概念，必须分开。
+ */
+const DEFAULT_CONNECT_TIMEOUT_MS = 60_000;
+/** 一次性请求的响应体超时。事件流不适用。 */
+const DEFAULT_BODY_TIMEOUT_MS = 60_000;
+
+function positiveInt(raw: string | undefined, fallback: number): number {
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 /** 上游 agent 服务地址（独立 blue-whale-agent 服务）。缺省 localhost:4111。 */
-const AGENT_SERVICE_BASE_URL = process.env.AGENT_SERVICE_BASE_URL?.trim() || "http://localhost:4111";
+function agentServiceBaseUrl(): string {
+  return process.env.AGENT_SERVICE_BASE_URL?.trim() || "http://localhost:4111";
+}
 /** agent 服务凭证（agent trustedContext 校验 `Bearer ${AGENT_SERVICE_TOKEN}`），与 agent 侧 .env 保持一致。 */
-const AGENT_SERVICE_TOKEN = process.env.AGENT_SERVICE_TOKEN?.trim() || "";
+function agentServiceToken(): string {
+  return process.env.AGENT_SERVICE_TOKEN?.trim() || "";
+}
 /** 蓝鲸为单租户产品：tenant 是固定标签；agent 侧按 (tenant, principal) 隔离。 */
-const AGENT_TENANT_ID = process.env.AGENT_TENANT_ID?.trim() || "default";
-const AGENT_UPSTREAM_TIMEOUT_MS = 60_000;
+function agentTenantId(): string {
+  return process.env.AGENT_TENANT_ID?.trim() || "default";
+}
+function connectTimeoutMs(): number {
+  return positiveInt(process.env.AGENT_UPSTREAM_CONNECT_TIMEOUT_MS, DEFAULT_CONNECT_TIMEOUT_MS);
+}
+function bodyTimeoutMs(): number {
+  return positiveInt(process.env.AGENT_UPSTREAM_BODY_TIMEOUT_MS, DEFAULT_BODY_TIMEOUT_MS);
+}
+
+function timeoutError(message: string): DOMException {
+  return new DOMException(message, "TimeoutError");
+}
 
 /**
  * /api/agent/v1/projects/:projectId/* —— 到独立 blue-whale-agent 服务的 BFF 透传代理（IK9DZO / S4）。
@@ -27,8 +59,8 @@ const AGENT_UPSTREAM_TIMEOUT_MS = 60_000;
  *  - 头注入：丢弃浏览器用户凭证，改为 agent 服务凭证 + 可信上下文头（tenant/user/project）；
  *  - 路径翻译：剥掉本 BFF 的 /api/agent 命名空间，把 /v1/projects/:projectId/... 原样转发。
  * - 方法/路径/query/body/headers 全透传
- * - 服务未启动/连不上/超时 → 502，附上游地址或超时提示便于定位
- * - SSE（/events）流式 pipe，不截断
+ * - 服务未启动/连不上/建连超时 → 502，附上游地址或超时提示便于定位
+ * - SSE（/events）流式 pipe：不设总时长上限、不缓冲、断流干净收尾（IKA2V3）
  */
 @Controller("agent/v1")
 export class AgentV1ProxyController {
@@ -53,7 +85,7 @@ export class AgentV1ProxyController {
       return;
     }
 
-    const base = AGENT_SERVICE_BASE_URL;
+    const base = agentServiceBaseUrl();
     // 剥掉 /api/agent 命名空间：/api/agent/v1/projects/1/... → /v1/projects/1/...，与 agent 路由对齐
     const upstreamUrl = `${base}${req.originalUrl.replace(/^\/api\/agent/, "")}`;
 
@@ -63,8 +95,8 @@ export class AgentV1ProxyController {
       if (!value || key === "authorization") continue; // 丢弃浏览器用户凭证，避免泄漏给 agent
       headers[key] = Array.isArray(value) ? value.join(", ") : value;
     }
-    headers.authorization = `Bearer ${AGENT_SERVICE_TOKEN}`;
-    headers["x-blue-whale-tenant-id"] = AGENT_TENANT_ID;
+    headers.authorization = `Bearer ${agentServiceToken()}`;
+    headers["x-blue-whale-tenant-id"] = agentTenantId();
     headers["x-blue-whale-user-id"] = user.userId;
     headers["x-blue-whale-project-id"] = projectId;
 
@@ -75,50 +107,87 @@ export class AgentV1ProxyController {
         ? undefined
         : Buffer.from(req.body === undefined || req.body === null ? "" : JSON.stringify(req.body));
 
+    const abort = new AbortController();
+    // 浏览器提前断开（关标签页、切会话）时释放上游连接，否则 agent 侧的事件订阅会一直挂着。
+    res.on("close", () => {
+      if (!res.writableEnded) abort.abort();
+    });
+
+    let deadline: ReturnType<typeof setTimeout> | undefined = setTimeout(
+      () => abort.abort(timeoutError("upstream connect timeout")),
+      connectTimeoutMs(),
+    );
+
     let upstream: globalThis.Response;
     try {
       const init: RequestInit = {
         method: req.method,
         headers,
-        signal: AbortSignal.timeout(AGENT_UPSTREAM_TIMEOUT_MS),
+        signal: abort.signal,
       };
       if (!["GET", "HEAD"].includes(req.method) && rawBody !== undefined) {
         init.body = rawBody;
       }
       upstream = await fetch(upstreamUrl, init);
     } catch (error) {
+      clearTimeout(deadline);
       const message =
         error instanceof Error && error.name === "TimeoutError"
           ? "上游 agent 服务响应超时"
           : `上游 agent 服务不可用（${base}）`;
-      res.status(502).json({
-        code: 502,
-        msg: message,
-        data: null,
-      });
+      if (!res.headersSent) {
+        res.status(502).json({ code: 502, msg: message, data: null });
+      }
       return;
+    }
+    // 响应头已到，建连阶段结束。
+    clearTimeout(deadline);
+    deadline = undefined;
+
+    const isEventStream = (upstream.headers.get("content-type") ?? "").includes("text/event-stream");
+    if (!isEventStream) {
+      // 一次性请求仍需要响应体上限，避免上游半死不活时占着连接。
+      deadline = setTimeout(() => abort.abort(timeoutError("upstream body timeout")), bodyTimeoutMs());
     }
 
     res.status(upstream.status);
     for (const [key, value] of upstream.headers) {
-      // 透传 content-type；其余头（含 content-length）交给 res 透传
-      if (key.toLowerCase() !== "content-length") {
+      const name = key.toLowerCase();
+      // content-length 交给 res 自己算；content-encoding 不能透传——undici 已经解压过响应体，
+      // 再声明编码会让浏览器按压缩数据解析。
+      if (name !== "content-length" && name !== "content-encoding") {
         res.set(key, value);
       }
     }
-    if (upstream.body) {
-      const stream = Readable.fromWeb(
-        upstream.body as import("node:stream/web").ReadableStream,
-      );
-      stream.on("error", (error) => {
-        logger.error(
-          `[agent/v1] upstream stream error: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        if (!res.writableEnded) res.destroy();
-      });
-      stream.pipe(res);
-    } else {
-      res.end();
+
+    if (isEventStream) {
+      // 事件流必须逐事件抵达：禁用中间层缓冲（nginx 认 x-accel-buffering）、禁用 Nagle 合包，
+      // 并立即把响应头刷出去，让浏览器尽早进入读取状态。
+      res.setHeader("cache-control", "no-cache, no-transform");
+      res.setHeader("x-accel-buffering", "no");
+      res.socket?.setNoDelay(true);
+      res.flushHeaders();
     }
+
+    if (!upstream.body) {
+      clearTimeout(deadline);
+      res.end();
+      return;
+    }
+
+    const stream = Readable.fromWeb(
+      upstream.body as import("node:stream/web").ReadableStream,
+    );
+    stream.on("error", (error) => {
+      clearTimeout(deadline);
+      logger.error(
+        `[agent/v1] upstream stream error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      // 干净收尾而不是 destroy()：客户端要观察到 EOF 才会触发自身的带游标重连。
+      // destroy() 会留下半开连接，浏览器侧 reader 既不 resolve 也不 reject，永久卡死。
+      if (!res.writableEnded) res.end();
+    });
+    stream.on("end", () => clearTimeout(deadline));
+    stream.pipe(res);
   }
 }

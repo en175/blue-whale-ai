@@ -17,10 +17,15 @@ export interface SseEvent {
 /**
  * 逐块读取 SSE 响应并派发事件，流正常结束（服务端关闭）时抛错由调用方走重连
  * 请求被 abort 时同样抛 AbortError，调用方按 signal.aborted 判断是否静默
+ *
+ * onActivity 在每次收到字节时触发，包含心跳注释行（`: heartbeat`）——它们不构成事件，
+ * 却是连接仍然存活的唯一证据。空闲看门狗必须据此判活，否则一条只剩心跳的健康连接
+ * 会被误判为断线（IKA2V3）。
  */
 export async function readSseResponse(
   res: Response,
   onEvent: (ev: SseEvent) => void,
+  onActivity?: () => void,
 ): Promise<void> {
   if (!res.body) throw new Error('SSE 响应无流体');
   const reader = res.body.getReader();
@@ -52,6 +57,7 @@ export async function readSseResponse(
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+    onActivity?.();
     buffer += decoder.decode(value, { stream: true });
     const blocks = buffer.split(/\r?\n\r?\n/);
     buffer = blocks.pop() ?? '';
