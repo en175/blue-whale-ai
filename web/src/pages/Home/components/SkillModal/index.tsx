@@ -20,7 +20,6 @@ import {
   fetchSkillLibrary,
   addLibrarySkill,
   fetchMySkills,
-  setMySkillAuto,
   deletePersonalSkill,
   createPersonalSkill,
   formatPersonalSkill,
@@ -200,18 +199,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     setLibraryList((prev) => prev.map((r) => (r.creative_skill_id === id ? { ...r, added: true } : r)));
     addLibrarySkill(id).catch((e) => {
       setLibraryList((prev) => prev.map((r) => (r.creative_skill_id === id ? { ...r, added: false } : r)));
-      window.alert(errMsg(e));
-    });
-  };
-
-  /** 切换自动开关（PATCH，乐观更新失败回滚） */
-  const toggleAuto = (s: SkillRecord) => {
-    if (!s.creative_skill_id) return;
-    const id = s.creative_skill_id;
-    const next = !s.auto;
-    setMySkills((prev) => prev.map((r) => (r.creative_skill_id === id ? { ...r, auto: next } : r)));
-    setMySkillAuto(id, next).catch((e) => {
-      setMySkills((prev) => prev.map((r) => (r.creative_skill_id === id ? { ...r, auto: !next } : r)));
       window.alert(errMsg(e));
     });
   };
