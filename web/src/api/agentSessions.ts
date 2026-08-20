@@ -289,6 +289,71 @@ export function retrySessionRun(
   );
 }
 
+/* ============ 需求理解确认门（ui_action 通道） ============ */
+
+/** 需求理解投影（agent requirementUnderstandingView；确认门结构化 UI 数据源） */
+export interface RequirementUnderstanding {
+  understanding_id: string;
+  version: number;
+  session_id?: string;
+  proposed_by_run_id?: string;
+  target_media?: 'image' | 'video';
+  proposed_summary: string;
+  proposed_options?: { id: string; label: string }[];
+  status: string;
+  accepted_summary?: string | null;
+  confirmed_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** 待确认需求理解列表 GET .../requirement-understandings（确认门恢复水合用） */
+export function fetchRequirementUnderstandings(
+  projectId: string,
+  sessionId: string,
+): Promise<{ items: RequirementUnderstanding[] }> {
+  return sessionRequest(
+    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/requirement-understandings`,
+  );
+}
+
+/** 确认需求理解 POST .../requirement-understandings/:id/versions/:v/actions/confirm（ui_action 通道） */
+export function confirmRequirementUnderstanding(
+  projectId: string,
+  sessionId: string,
+  understandingId: string,
+  version: number,
+  actionId: string,
+): Promise<{ understanding: RequirementUnderstanding }> {
+  return sessionRequest(
+    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/requirement-understandings/${encodeURIComponent(understandingId)}/versions/${version}/actions/confirm`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': newIdempotencyKey() },
+      body: JSON.stringify({ action_id: actionId }),
+    },
+  );
+}
+
+/** 修改需求理解 POST .../actions/correct（以用户替换文本重新提议，需 action_id + accepted_summary） */
+export function correctRequirementUnderstanding(
+  projectId: string,
+  sessionId: string,
+  understandingId: string,
+  version: number,
+  actionId: string,
+  acceptedSummary: string,
+): Promise<{ understanding: RequirementUnderstanding }> {
+  return sessionRequest(
+    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/requirement-understandings/${encodeURIComponent(understandingId)}/versions/${version}/actions/correct`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': newIdempotencyKey() },
+      body: JSON.stringify({ action_id: actionId, accepted_summary: acceptedSummary }),
+    },
+  );
+}
+
 /* ============ 事件流（共享连接，引用计数） ============ */
 
 /** 断线重连延时（ms） */

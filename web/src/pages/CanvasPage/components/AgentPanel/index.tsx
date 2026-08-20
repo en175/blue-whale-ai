@@ -404,6 +404,10 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     thinkingSteps,
     longRunning,
     chatError,
+    pendingUnderstanding,
+    confirmError,
+    confirmUnderstanding,
+    correctUnderstanding,
     agentPhase,
     sendMessage,
     stopRun,
@@ -429,6 +433,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const [cancelledMessageIds, setCancelledMessageIds] = useState<Set<string>>(new Set());
   /** 「直接使用」武装的强制技能（下一条消息发送时携带 forced_creative_skill_id，发送后清除）；name 供指示条展示 */
   const [forcedSkill, setForcedSkill] = useState<{ id: string; name: string } | null>(null);
+  /** 确认门「修改」编辑态：展开文本编辑，提交 correct 动作 */
+  const [editingSummary, setEditingSummary] = useState(false);
+  const [summaryDraft, setSummaryDraft] = useState('');
 
   /* ---- 拖动状态 ---- */
   const [position, setPosition] = useState(DEFAULT_POSITION);
@@ -765,6 +772,85 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           {streamingText && (
             <div className={styles.assistantBlock}>
               <Markdown text={streamingText} />
+            </div>
+          )}
+          {/* 确认门结构化 UI：需求理解提案已到、等待用户确认/修改（04 §4，动作依附当前内容下） */}
+          {pendingUnderstanding && (
+            <div className={styles.confirmGate}>
+              <div className={styles.confirmTitle}>需求理解确认</div>
+              {editingSummary ? (
+                <>
+                  <textarea
+                    className={styles.confirmEditTextarea}
+                    value={summaryDraft}
+                    autoFocus
+                    rows={3}
+                    onChange={(e) => setSummaryDraft(e.target.value)}
+                  />
+                  {confirmError && <div className={styles.confirmError}>{confirmError}</div>}
+                  <div className={styles.confirmActions}>
+                    <button
+                      type="button"
+                      className={`${styles.confirmBtn} ${styles.confirmBtnPrimary}`}
+                      onClick={() => {
+                        correctUnderstanding(summaryDraft);
+                        setEditingSummary(false);
+                      }}
+                      disabled={runningRunId !== null || streaming}
+                    >
+                      提交修改
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.confirmBtn}
+                      onClick={() => setEditingSummary(false)}
+                    >
+                      取消
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className={styles.confirmSummary}>{pendingUnderstanding.proposed_summary}</div>
+                  {pendingUnderstanding.proposed_options?.length ? (
+                    <div className={styles.confirmOptions}>
+                      {pendingUnderstanding.proposed_options.map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          className={styles.confirmOption}
+                          onClick={() => correctUnderstanding(opt.label)}
+                          disabled={runningRunId !== null || streaming}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {confirmError && <div className={styles.confirmError}>{confirmError}</div>}
+                  <div className={styles.confirmActions}>
+                    <button
+                      type="button"
+                      className={`${styles.confirmBtn} ${styles.confirmBtnPrimary}`}
+                      onClick={confirmUnderstanding}
+                      disabled={runningRunId !== null || streaming}
+                    >
+                      确认需求理解
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.confirmBtn}
+                      onClick={() => {
+                        setSummaryDraft(pendingUnderstanding.proposed_summary);
+                        setEditingSummary(true);
+                      }}
+                      disabled={runningRunId !== null || streaming}
+                    >
+                      修改
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
           {longRunning && (

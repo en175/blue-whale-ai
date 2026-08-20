@@ -16,15 +16,20 @@ import {
   sendSessionMessage,
   cancelSessionRun,
   retrySessionRun,
+  fetchRequirementUnderstandings,
+  confirmRequirementUnderstanding,
+  correctRequirementUnderstanding,
   subscribeSessionEvents,
   type SessionMessage,
   type SessionRecord,
   type SessionContentBlock,
   type SseEvent,
   type PromptCardRecord,
+  type RequirementUnderstanding,
 } from '@/api/agentSessions';
 import { cardsFromRevision } from '@/api/promptCardMapping';
 import { isApiError } from '@/api/http';
+import { newIdempotencyKey } from '@/api/jobs';
 
 /** 数据源：真实 /api/agent/v1（经 BFF 代理到独立 agent 服务）。本地开发需起 backend:3100 + agent + SSH 隧道，见 bw-test-env。 */
 const api = {
@@ -35,6 +40,9 @@ const api = {
   sendSessionMessage,
   cancelSessionRun,
   retrySessionRun,
+  fetchRequirementUnderstandings,
+  confirmRequirementUnderstanding,
+  correctRequirementUnderstanding,
   subscribeSessionEvents,
 };
 
@@ -150,6 +158,10 @@ export function useAgentSession(projectId: string) {
   const [progressTick, setProgressTick] = useState(0);
   /** 「新对话」失败提示：创建/连接新会话失败时展示，成功/切换后清除（不静默吞掉） */
   const [chatError, setChatError] = useState<string | null>(null);
+  /** 待确认需求理解（确认门结构化 UI 数据源；proposed 事件 set，确认/修改/新 run/切会话清除） */
+  const [pendingUnderstanding, setPendingUnderstanding] = useState<RequirementUnderstanding | null>(null);
+  /** 确认/修改动作失败提示 */
+  const [confirmError, setConfirmError] = useState<string | null>(null);
 
   /** 流式累积缓冲 */
   const accRef = useRef('');
@@ -282,6 +294,14 @@ export function useAgentSession(projectId: string) {
         return;
       }
 
+      /* ---- 需求理解确认提案（确认门结构化 UI）：payload.understanding 为 requirementUnderstandingView ---- */
+      if (t === 'requirement_understanding.proposed.v1') {
+        const understanding = (payload.understanding ?? null) as RequirementUnderstanding | null;
+        setPendingUnderstanding(understanding);
+        setConfirmError(null);
+        return;
+      }
+
       /* ---- 用户消息确认 ---- */
       if (t === 'message.accepted') {
         const msg = payload.message as SessionMessage | undefined;
@@ -300,8 +320,9 @@ export function useAgentSession(projectId: string) {
         if (!runId) return;
         setFailedRunId((cur) => (cur === runId ? null : cur));
         setRunningRunId(runId);
-        // 新一轮开始：清掉上一轮思考，等 run.activity 实时重建（含自动排队的下一轮）
+        // 新一轮开始：清掉上一轮思考与待确认卡，等 run.activity / proposed 事件重建（含自动排队的下一轮）
         setThinkingSteps([]);
+        setPendingUnderstanding(null);
         return;
       }
 
@@ -382,6 +403,8 @@ export function useAgentSession(projectId: string) {
     setFailedRunId(null);
     setThinkingSteps([]);
     setChatError(null);
+    setPendingUnderstanding(null);
+    setConfirmError(null);
   }, []);
 
   /** 连接到指定会话：水合快照 + 订阅事件流（先解绑旧订阅，防止串话到上一个会话） */
@@ -394,6 +417,19 @@ export function useAgentSession(projectId: string) {
       // 历史会话里已提交的生成卡同样要还原，否则刷新一次卡就没了
       setMessages(attachCards((snap.messages ?? []).map(projectMessage), snap.prompt_cards));
       setSessionPhase(snap.session?.phase ?? '');
+      // 确认门恢复：snapshot 不带待确认 understanding，等待确认阶段单独拉一次
+      if (snap.session?.phase === 'awaiting_understanding_confirmation') {
+        api.fetchRequirementUnderstandings(projectId, session.session_id)
+          .then(({ items }) => {
+            if (sessionIdRef.current !== session.session_id) return; // 期间切走会话，丢弃
+            const pending = (items ?? []).find((u) => u.status === 'awaiting_confirmation');
+            if (pending) {
+              setPendingUnderstanding(pending);
+              setConfirmError(null);
+            }
+          })
+          .catch((e) => console.warn('拉取待确认需求理解失败:', e));
+      }
       if (snap.active_run?.run_id && !TERMINAL_STATUS.includes(snap.active_run.status)) {
         setRunningRunId(snap.active_run.run_id);
         setStreaming(true);
@@ -541,6 +577,41 @@ export function useAgentSession(projectId: string) {
       });
   }, [projectId, resetLocal, connectSession, refreshSessions]);
 
+  /** 确认需求理解（ui_action confirm 通道）：提交后由事件流驱动后续生成；成功即收起确认卡 */
+  const confirmUnderstanding = useCallback(() => {
+    const u = pendingUnderstanding;
+    const sid = sessionIdRef.current;
+    if (!projectId || !sid || !u) return;
+    setConfirmError(null);
+    api.confirmRequirementUnderstanding(projectId, sid, u.understanding_id, u.version, newIdempotencyKey())
+      .then(() => setPendingUnderstanding(null))
+      .catch((e) => {
+        console.warn('确认需求理解失败:', e);
+        setConfirmError('确认失败，请重试');
+      });
+  }, [projectId, pendingUnderstanding]);
+
+  /** 修改需求理解（ui_action correct 通道）：以用户替换文本重新提议，提交后由事件流驱动下一轮 */
+  const correctUnderstanding = useCallback((acceptedSummary: string) => {
+    const u = pendingUnderstanding;
+    const sid = sessionIdRef.current;
+    if (!projectId || !sid || !u || !acceptedSummary.trim()) return;
+    setConfirmError(null);
+    api.correctRequirementUnderstanding(
+      projectId,
+      sid,
+      u.understanding_id,
+      u.version,
+      newIdempotencyKey(),
+      acceptedSummary.trim(),
+    )
+      .then(() => setPendingUnderstanding(null))
+      .catch((e) => {
+        console.warn('修改需求理解失败:', e);
+        setConfirmError('修改失败，请重试');
+      });
+  }, [projectId, pendingUnderstanding]);
+
   /** 侧边栏状态机推导：最新助手消息的内容块类型 + 运行态 → 用户可见状态 */
   const agentPhase = useMemo<AgentPhase>(() => {
     if (failedRunId !== null) return 'failed';
@@ -576,6 +647,10 @@ export function useAgentSession(projectId: string) {
     thinkingSteps,
     longRunning,
     chatError,
+    pendingUnderstanding,
+    confirmError,
+    confirmUnderstanding,
+    correctUnderstanding,
     agentPhase,
     sendMessage,
     stopRun,
