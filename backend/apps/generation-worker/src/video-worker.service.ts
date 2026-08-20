@@ -62,6 +62,7 @@ export class VideoWorkerService {
       mediaRelay,
       scheduleNext: (id, delayMs) => enqueueVideoGenerationJob(id, { delayMs }),
       quotaToFen: (quota) => quotaToFen(quota, this.costConfig),
+      warn: (message) => logger.warn(`[generation-video-worker] ${message}`),
     });
   }
 }

@@ -40,6 +40,8 @@ export interface ClaimedVideoJob {
   cancelRequested: boolean;
   workerId: string;
   fencingToken: number;
+  /** IK9VZ0：视频实扣二次校验的基准（预留金额，fen；无预留/查询失败为 null）。 */
+  reservedAmountFen: bigint | null;
 }
 
 export interface WorkerRepo {

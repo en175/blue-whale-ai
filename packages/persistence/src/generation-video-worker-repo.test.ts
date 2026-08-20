@@ -85,6 +85,8 @@ describe("generation video worker repo", () => {
       cancelRequested: false,
       workerId: "worker-2",
       fencingToken: 5,
+      // IK9VZ0：mock 未提供 cost_reservations → 预留查询兜底 null
+      reservedAmountFen: null,
     });
     expect(findFirst).toHaveBeenCalledWith(
       expect.objectContaining({

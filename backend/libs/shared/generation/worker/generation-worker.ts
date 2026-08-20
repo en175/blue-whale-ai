@@ -33,6 +33,8 @@ export type WorkerDeps = {
   ) => Promise<number | null>;
   /** IK7G9X：quota → 分(fen)。缺省不换算（actual 落 0 兜底）。 */
   quotaToFen?: (quota: number) => bigint;
+  /** 实扣取证失败/异常时的告警回调（接入 logger/metrics）。缺省不注入 = 旧行为静默。 */
+  warn?: (message: string) => void;
 };
 
 /** 瞬时失败码：网络不可达 / 结果转存失败等——重试有意义。quota/config/校验类不算瞬时。 */
@@ -386,6 +388,7 @@ async function processClaimedJob(
     }
     // IK7G9X：图片实扣金额 = 本次调用消费流水 quota 汇总 → 分(fen)。
     // 收集所有生成请求的 request_id（同一次 generate 的多张图共用 requestId，去重后查）。
+    // IK9VZ0：取证失败（无 request_id / 流水查不到或≤0 / 查询抛错）必须告警，不再静默落 0。
     let actualAmountFen: bigint | undefined;
     if (deps.readConsumeQuota && deps.quotaToFen) {
       const requestIds = [
@@ -395,17 +398,30 @@ async function processClaimedJob(
             .filter((r): r is string => Boolean(r)),
         ),
       ];
+      if (requestIds.length === 0) {
+        deps.warn?.(
+          `[cost] job ${job.id} 实扣取证失败：无 request_id，actual_amount_fen 将落 0`,
+        );
+      }
       let totalQuota = 0;
       let allResolved = true;
       for (const requestId of requestIds) {
         try {
           const quota = await deps.readConsumeQuota(providerToken, requestId);
           if (quota === null || quota <= 0) {
+            deps.warn?.(
+              `[cost] job ${job.id} 实扣取证失败：request_id=${requestId} 流水 quota=${quota}，actual_amount_fen 将落 0`,
+            );
             allResolved = false;
             break;
           }
           totalQuota += quota;
-        } catch {
+        } catch (e) {
+          deps.warn?.(
+            `[cost] job ${job.id} 实扣取证异常：request_id=${requestId} ${
+              e instanceof Error ? e.message : String(e)
+            }，actual_amount_fen 将落 0`,
+          );
           allResolved = false;
           break;
         }
