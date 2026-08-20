@@ -19,11 +19,11 @@
 //   0 3 * * * cd <repo> && DATABASE_URL=... node scripts/reconcile-cost-reservations.mjs --json >> /var/log/bw-reconcile.log
 
 import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const { getPrismaClient } = await import(
-  resolve(scriptDir, "../packages/persistence/dist/db.js")
+  pathToFileURL(resolve(scriptDir, "../packages/persistence/dist/db.js")).href
 );
 
 const JSON_MODE = process.argv.includes("--json");
