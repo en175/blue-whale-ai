@@ -120,3 +120,52 @@ describe("completeJobAndSettle（IK9VZ0 图片结算原子化）", () => {
     expect(costUpdateMany).not.toHaveBeenCalled();
   });
 });
+
+describe("failJob release_note（IK9VZ0 失败释放可追踪）", () => {
+  it("failJob 传 releaseNote=refund_unverified → 释放预留时写 release_note", async () => {
+    const jobsUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const costUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      generation_jobs: {
+        updateMany: jobsUpdateMany,
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 300n,
+          project_id: null,
+          type: "image",
+          source: "api",
+          status: "failed",
+          progress: 0,
+          version: 3,
+        }),
+        update: vi.fn(),
+      },
+      generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_job_logs: { create: vi.fn() },
+      storyboard_previews: { findFirst: vi.fn().mockResolvedValue(null) },
+      cost_reservations: { updateMany: costUpdateMany },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (cb: (t: unknown) => unknown) => cb(tx)),
+    } as never;
+    const repo = createWorkerSettleOps(prisma);
+
+    const ok = await repo.failJob({
+      jobId: "300",
+      errorCode: "provider_failed",
+      errorMessage: "x",
+      ...FENCE_PROOF,
+      releaseNote: "refund_unverified",
+    });
+
+    expect(ok).toBe(true);
+    expect(costUpdateMany).toHaveBeenCalledWith({
+      where: { generation_job_id: 300n, status: "reserved" },
+      data: {
+        status: "released",
+        actual_amount_fen: 0n,
+        release_note: "refund_unverified",
+      },
+    });
+  });
+});

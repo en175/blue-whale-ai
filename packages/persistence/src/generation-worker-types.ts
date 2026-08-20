@@ -105,6 +105,8 @@ export interface WorkerRepo {
     fencingToken: number;
     code: string;
     message: string;
+    /** IK9VZ0：退款校验结果（refund_confirmed / refund_unverified），落 release_note。 */
+    releaseNote?: string;
   }): Promise<boolean>;
   cancelVideoBeforeDispatch(input: {
     jobId: string;
@@ -157,13 +159,15 @@ export interface WorkerRepo {
   }): Promise<boolean>;
   /** 任务失败：置 failed + error + 记日志。
    *  守卫失败（stale worker）返回 false，不产生任何副作用（IK7GRP）。
-   *  succeeded 任务不会被迟到的 failJob 翻为 failed。 */
+   *  succeeded 任务不会被迟到的 failJob 翻为 failed。
+   *  IK9VZ0：releaseNote 记录退款校验结果（refund_confirmed / refund_unverified），落 release_note。 */
   failJob(input: {
     jobId: string;
     errorCode: string;
     errorMessage: string;
     workerId: string;
     fencingToken: number;
+    releaseNote?: string;
   }): Promise<boolean>;
   /** 结算点数（reserved→settled，actual=0 占位，真计价后补）。
    *  只在守卫通过的事务内结算，stale worker 不能结算新一次尝试的预留（IK7GRP）。

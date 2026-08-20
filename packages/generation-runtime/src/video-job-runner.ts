@@ -115,6 +115,8 @@ export interface VideoJobRunnerRepo {
     fencingToken: number;
     code: string;
     message: string;
+    /** IK9VZ0：退款校验结果（refund_confirmed / refund_unverified），落 release_note。 */
+    releaseNote?: string;
   }): Promise<boolean>;
   cancelVideoBeforeDispatch(input: {
     jobId: string;
@@ -296,7 +298,13 @@ async function fail(
   // IK9Q1B：无论状态迁移是否成功都留痕。此前只有迁移成功才打 metric，
   // 出现「DB 已 failed 但 worker 无任何日志」的排查黑洞（job 985）。
   logger.warn(`video job 失败 jobId=${claim.id} code=${code} message=${message}`);
-  const failed = await repo.failVideoJob({ ...claimIdentity(claim), code, message });
+  // IK9VZ0：视频无 request_id → 消费流水回退通道，失败时无法确认退款 → release_note=refund_unverified。
+  const failed = await repo.failVideoJob({
+    ...claimIdentity(claim),
+    code,
+    message,
+    releaseNote: "refund_unverified",
+  });
   if (failed) {
     logger.metric({
       event: "task_finished",

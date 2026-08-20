@@ -106,29 +106,33 @@ async function processClaimedJob(
   let providerTokenRef: string | undefined;
   // IK7GRP：统一失败入口——守卫失败时（job 已被新 worker 接管）仓储层返回 false，静默跳过。
   const failClaimed = async (code: string, msg: string) => {
-    const failed = await repo.failJob({
-      jobId: job.id,
-      errorCode: code,
-      errorMessage: msg,
-      ...fenceProof,
-    });
-    // IK9VZ0：失败释放校验——job 曾向 new-api 发出生成请求且能拿到 request_id 时，
-    // 查消费流水确认是否真退款；已扣则告警需人工核对（release_note=refund_unverified 见 Task 4）。
-    // 查不到/无证据/查询异常只告警不阻断失败流程。
-    if (failed && attemptedRequestIds.length > 0 && deps.readConsumeQuota && providerTokenRef) {
+    // IK9VZ0：失败释放校验——job 曾向 new-api 发出请求且有 request_id 时，先查流水确认是否真退款。
+    // 校验结果落 release_note：流水无扣费 → refund_confirmed；无证据/查不到/已扣 → refund_unverified。
+    let releaseNote: string | undefined;
+    if (attemptedRequestIds.length > 0 && deps.readConsumeQuota && providerTokenRef) {
+      let charged = false;
       for (const requestId of attemptedRequestIds) {
         try {
           const q = await deps.readConsumeQuota(providerTokenRef, requestId);
           if (q !== null && q > 0) {
+            charged = true;
             deps.warn?.(
               `[cost] job ${job.id} 失败但 new-api 流水显示已扣 quota=${q}（request_id=${requestId}），需人工核对退款`,
             );
           }
         } catch {
-          // 告警通道已覆盖，不阻断失败流程
+          // 查询异常：无法确认退款 → 归 refund_unverified
         }
       }
+      releaseNote = charged ? "refund_unverified" : "refund_confirmed";
     }
+    const failed = await repo.failJob({
+      jobId: job.id,
+      errorCode: code,
+      errorMessage: msg,
+      ...fenceProof,
+      ...(releaseNote ? { releaseNote } : {}),
+    });
   };
   if (job.type !== "image" && job.type !== "video" && job.type !== "audio") {
     await failClaimed("unsupported_type", `暂不支持类型: ${job.type}`);

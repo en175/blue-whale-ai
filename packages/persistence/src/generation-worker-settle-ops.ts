@@ -19,14 +19,20 @@ function fenceWhere(input: {jobId: string; workerId: string; fencingToken: numbe
   };
 }
 
-/** IK7G9X：事务内释放预留（reserved → released，实扣 0）。仅调处于终态失败/取消的 job。 */
+/** IK7G9X：事务内释放预留（reserved → released，实扣 0）。仅调处于终态失败/取消的 job。
+ *  IK9VZ0：releaseNote 记录退款校验结果（refund_confirmed / refund_unverified），缺省不写。 */
 async function releaseReservationInTx(
   tx: Prisma.TransactionClient,
   jobId: string,
+  releaseNote?: string,
 ): Promise<void> {
   await tx.cost_reservations.updateMany({
     where: { generation_job_id: BigInt(jobId), status: "reserved" },
-    data: { status: "released", actual_amount_fen: 0n },
+    data: {
+      status: "released",
+      actual_amount_fen: 0n,
+      ...(releaseNote ? { release_note: releaseNote } : {}),
+    },
   });
 }
 
@@ -319,7 +325,8 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
         // 回写 StoryboardPreview.summary_status（图片路径，IK67HF/T15）。
         await syncStoryboardPreviewSummary(tx, job.id);
         // IK7G9X：失败即释放预留（reserved → released，实扣 0）。
-        await releaseReservationInTx(tx, jobId);
+        // IK9VZ0：releaseNote 记录退款校验结果（refund_confirmed / refund_unverified）。
+        await releaseReservationInTx(tx, jobId, input.releaseNote);
         return true;
       });
     },

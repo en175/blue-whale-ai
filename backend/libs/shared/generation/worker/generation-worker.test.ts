@@ -251,4 +251,65 @@ describe("processNextJob 图片实扣取证（IK9VZ0）", () => {
       expect.objectContaining({ actualAmountFen: expect.anything() }),
     );
   });
+
+  it("失败但 new-api 流水显示已扣 → warn 告警 + failJob 写 releaseNote=refund_unverified", async () => {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j-img-fail",
+      project_id: "p1",
+      user_id: "u1",
+      type: "image",
+      input: {
+        prompt: "一只猫",
+        model_id: "m1",
+        provider_credential: "<sealed>",
+      },
+      expected_output_count: 1,
+      retry_count: 3,
+      fencingToken: 8,
+    });
+    const findImageCapability = vi.fn().mockResolvedValue({
+      model_id: "m1",
+      api_size: null,
+      width: 512,
+      height: 512,
+    });
+    const failJob = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimNextJob,
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      findImageCapability,
+      failJob,
+    } as unknown as WorkerRepo;
+    const createImageProvider = vi.fn().mockReturnValue({
+      generate: vi.fn().mockResolvedValue([
+        {
+          url: "https://img.test/a.png",
+          width: 512,
+          height: 512,
+          requestId: "req-1",
+        },
+      ]),
+    });
+    const warnLogs: string[] = [];
+
+    await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider,
+      createAudioProvider: vi.fn(),
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      // 下载失败 → 任务失败（generate 已发出请求，requestId 有证据）
+      fetchImpl: vi.fn().mockRejectedValue(new Error("download failed")),
+      readConsumeQuota: vi.fn().mockResolvedValue(1000),
+      quotaToFen: vi.fn().mockReturnValue(100n),
+      warn: (msg: string) => warnLogs.push(msg),
+    });
+
+    // 失败但流水显示已扣 → 必须告警
+    expect(warnLogs.some((l) => l.includes("已扣"))).toBe(true);
+    // releaseNote = refund_unverified（可能已扣，需人工核对退款）
+    expect(failJob).toHaveBeenCalledWith(
+      expect.objectContaining({ releaseNote: "refund_unverified" }),
+    );
+  });
 });

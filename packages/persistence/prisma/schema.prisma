@@ -697,6 +697,8 @@ model cost_reservations {
   reserved_amount_fen   BigInt
   actual_amount_fen     BigInt?
   status                String   @db.VarChar(32)
+  /** IK9VZ0：释放原因/退款校验结果（如 "refund_confirmed" 已确认无扣费 / "refund_unverified" 未校验或可能已扣）。 */
+  release_note          String?  @db.VarChar(255)
   price_catalog_version String   @db.VarChar(64)
   exchange_rate_version String   @db.VarChar(64)
   model_policy_version  String   @db.VarChar(64)
