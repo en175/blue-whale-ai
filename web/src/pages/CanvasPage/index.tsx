@@ -65,13 +65,13 @@ export default function CanvasPage() {
   const [assetNodes, setAssetNodes] = useState<Node[]>([]);
   const [showAssetsModal, setShowAssetsModal] = useState(false);
   /** label 有值时是生成卡引用（侧边栏渲染成胶囊）；无 label 是普通 @ 文本预填 */
-  const [agentContext, setAgentContext] = useState<{ text: string; label?: string; ts: number } | null>(null);
+  const [agentContext, setAgentContext] = useState<{ text: string; label?: string; skillId?: string; ts: number } | null>(null);
 
   /** 首页发送框携带草稿跳转：打开 Agent 弹框并注入输入框，随后清除导航状态避免刷新重复注入 */
   useEffect(() => {
-    const state = location.state as { agentText?: string } | null;
-    if (!state?.agentText) return;
-    setAgentContext({ text: state.agentText, ts: Date.now() });
+    const state = location.state as { agentText?: string; skillId?: string } | null;
+    if (!state?.agentText && !state?.skillId) return;
+    setAgentContext({ text: state.agentText ?? '', skillId: state.skillId ?? '', ts: Date.now() });
     setShowAgent(true);
     navigate(location.pathname + location.search, { replace: true, state: null });
   }, [location.state, location.pathname, location.search, navigate]);
@@ -1393,6 +1393,7 @@ export default function CanvasPage() {
           inputVersion={agentContext?.ts ?? 0}
           projectId={currentId || undefined}
           onApplyToDock={handleAgentCardApply}
+          initialSkillId={agentContext?.skillId ?? ''}
         />
       )}
 
