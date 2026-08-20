@@ -100,9 +100,6 @@ function textBlock(text: string): SessionContentBlock {
 function thinkingBlock(steps: string[]): SessionContentBlock {
   return { type: 'thinking', thinking: { steps } };
 }
-function understandingBlock(u: NonNullable<SessionContentBlock['understanding']>): SessionContentBlock {
-  return { type: 'understanding', understanding: u };
-}
 function cardBlock(card: NonNullable<SessionContentBlock['card']>): SessionContentBlock {
   return { type: 'card', card };
 }
@@ -276,10 +273,11 @@ function runFlow(projectId: string, sessionId: string, turn: 'intent' | 'summary
         run_id: runId,
       }),
     );
+    // 产卡之前全部走自然语言：需求理解写成一段正文，用户直接回话确认，不再有结构化确认卡。
     const summaryReply =
       flow === 'image'
-        ? '生成一张高级干净的保温杯产品图，突出哑光深灰杯身、黑色旋盖和商业摄影质感。请确认以下需求理解。'
-        : '做一条 15 秒小红书竖版保温杯产品展示视频，整体风格高级、干净、商业产品摄影感。请确认以下需求理解。';
+        ? '我理解你要的是一张高级、干净的保温杯产品图：以 @保温杯主图 为准，哑光深灰杯身配黑色旋盖，浅灰渐变背景加柔和棚拍灯光，9:16 竖构图，商品广告调性。品牌 Logo 我默认不做突出处理。\n\n如果没问题，回我一句就开始出图片生成卡；想调整哪里也直接说。'
+        : '我理解你要的是一条 15 秒的小红书竖版保温杯展示视频：用 @保温杯主图、@杯盖材质细节 和 @生活场景图，走高级干净的商业产品摄影感，重点落在哑光金属质感、杯盖细节和日常使用场景，9:16 竖屏。核心卖点我按保温、材质、容量依次铺开。\n\n如果没问题，回我一句就开始出分镜提示词卡；想调整哪里也直接说。'
     at(360, () =>
       push('assistant.delta', {
         payload: {
@@ -296,21 +294,6 @@ function runFlow(projectId: string, sessionId: string, turn: 'intent' | 'summary
           : '正在把用户补充内容整理成需求理解，等待明确确认。',
       ]),
       textBlock(summaryReply),
-      flow === 'image'
-        ? understandingBlock({
-            goal: '生成一张高级干净的保温杯产品图',
-            assets: ['@保温杯主图'],
-            direction: '高端不锈钢保温杯产品摄影，哑光深灰杯身，黑色旋盖，浅灰渐变背景，柔和棚拍灯光',
-            specs: ['图片', '9:16', '商品广告'],
-            uncertainties: ['是否突出保温杯品牌 Logo（默认不突出，可在确认前调整）'],
-          })
-        : understandingBlock({
-            goal: '生成一条 15 秒小红书竖版保温杯产品展示视频',
-            assets: ['@保温杯主图', '@杯盖材质细节', '@生活场景图'],
-            direction: '高级、干净、商业产品摄影感，突出哑光金属质感、杯盖细节和日常生活场景',
-            specs: ['小红书', '9:16', '15 秒', '商品广告'],
-            uncertainties: ['核心卖点倾向（保温 / 材质 / 容量）以默认展开，可在确认前调整'],
-          }),
     ], runId);
     at(560, () =>
       push('run.completed', {

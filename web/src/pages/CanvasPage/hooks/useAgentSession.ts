@@ -61,7 +61,7 @@ export type AgentPhase =
   | 'idle' // 等待输入
   | 'processing' // Agent 处理中
   | 'awaiting_input' // 等待用户补充（追问后）
-  | 'awaiting_confirm' // 等待用户确认理解（确认门）
+  | 'awaiting_confirm' // 等待用户确认理解（确认门）；确认走自然语言，阶段由服务端 phase 给出
   | 'generating_cards' // 生成卡生成中
   | 'cards_ready' // 生成卡已生成
   | 'applying' // 生成卡应用中
@@ -438,7 +438,6 @@ export function useAgentSession(projectId: string) {
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
     const blocks = lastAssistant?.blocks ?? [];
     const hasThinking = blocks.some((b) => b.type === 'thinking');
-    const hasUnderstanding = blocks.some((b) => b.type === 'understanding');
     const hasCards = blocks.some((b) => b.type === 'card');
     // 首条助手回复即追问（grillme 式自然语言，无结构化 clarify 块）：还没给出需求理解/生成卡 → 等待用户自由文本补充
     const isFirstAssistantReply = messages.filter((m) => m.role === 'assistant').length === 1;
@@ -449,8 +448,10 @@ export function useAgentSession(projectId: string) {
       return 'processing';
     }
     // 非运行：按最新产出块判定
-    if (isFirstAssistantReply && !hasUnderstanding && !hasCards) return 'awaiting_input';
-    if (hasUnderstanding) return 'awaiting_confirm';
+    if (isFirstAssistantReply && !hasCards) return 'awaiting_input';
+    // 'awaiting_confirm' 不再从消息块推断：需求理解确认已改为纯自然语言，没有结构化块可认。
+    // 服务端的 SessionRecord.phase（awaiting_understanding_confirmation）才是权威来源，
+    // 接真实数据源时从那里读（S6 IK9VCM）。
     if (hasCards) return 'cards_ready';
     if (messages.length === 0 && !hasThinking) return 'idle';
     return 'processing';

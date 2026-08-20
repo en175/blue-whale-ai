@@ -19,16 +19,10 @@ export interface SessionContentBlock {
   text?: string;
   /** 思考过程块（可折叠展示）：steps 为顺序步骤文案 */
   thinking?: { steps?: string[] };
-  /** 需求理解总结块（确认门）：结构化字段按 04-侧边栏规范 §4 */
-  understanding?: {
-    goal?: string;
-    assets?: string[];
-    direction?: string;
-    specs?: string[];
-    uncertainties?: string[];
-  };
-  /** 追问块：待补充的关键问题 */
-  clarify?: { questions?: string[] };
+  /**
+   * 产卡之前的每一步都走自然语言：追问、需求理解总结与确认都是助手的正文文字，
+   * 不再有 understanding / clarify 结构化块。生成卡是唯一的结构化交付物。
+   */
   /** 生成卡块（分镜提示词，按 04-侧边栏规范 §5.1） */
   card?: GenerationCardBlock;
 }

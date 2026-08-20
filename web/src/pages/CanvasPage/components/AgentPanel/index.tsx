@@ -98,63 +98,6 @@ function ThinkingBlock({ steps, defaultOpen = false }: { steps: string[]; defaul
   );
 }
 
-/** 需求理解确认门：结构化总结 + 确认/继续补充/修改 */
-function UnderstandingCard({
-  data,
-  onConfirm,
-  onSupplement,
-  onModify,
-  disabled,
-}: {
-  data: NonNullable<SessionContentBlock['understanding']>;
-  onConfirm: () => void;
-  onSupplement: () => void;
-  onModify: () => void;
-  disabled: boolean;
-}) {
-  const tags = data.specs ?? [];
-  return (
-    <div className={styles.understandingCard}>
-      <div className={styles.cardTitle}>需求理解总结</div>
-      {data.goal && <p className={styles.cardGoal}>{data.goal}</p>}
-      {data.assets && data.assets.length > 0 && (
-        <div className={styles.cardLine}>
-          <span className={styles.cardLabel}>使用素材</span>
-          <span>{data.assets.join('、')}</span>
-        </div>
-      )}
-      {data.direction && (
-        <div className={styles.cardLine}>
-          <span className={styles.cardLabel}>内容方向</span>
-          <span>{data.direction}</span>
-        </div>
-      )}
-      {tags.length > 0 && (
-        <div className={styles.tagList}>
-          {tags.map((t) => <span key={t} className={styles.tag}>{t}</span>)}
-        </div>
-      )}
-      {data.uncertainties && data.uncertainties.length > 0 && (
-        <div className={styles.cardLine}>
-          <span className={styles.cardLabel}>不确定点</span>
-          <span>{data.uncertainties.join('；')}</span>
-        </div>
-      )}
-      <div className={styles.cardActions}>
-        <button type="button" className={styles.cardBtn} onClick={onSupplement} disabled={disabled}>
-          继续补充
-        </button>
-        <button type="button" className={styles.cardBtn} onClick={onModify} disabled={disabled}>
-          修改方向
-        </button>
-        <button type="button" className={`${styles.cardBtn} ${styles.cardBtnPrimary}`} onClick={onConfirm} disabled={disabled}>
-          确认需求理解
-        </button>
-      </div>
-    </div>
-  );
-}
-
 /** 分镜提示词生成卡：单镜头卡（画面/提示词/素材引用 + 手动应用，双击字段可编辑） */
 function GenerationCard({
   card,
@@ -220,7 +163,7 @@ function GenerationCard({
           </span>
         )}
         {applied ? (
-          <span className={styles.shotApplied}>已进入 dock</span>
+          <span className={styles.shotApplied}>已进入画布</span>
         ) : cancelled ? (
           <span className={styles.shotCancelled}>已取消</span>
         ) : (
@@ -305,19 +248,16 @@ function GenerationCard({
           ))}
         </div>
       )}
-      {applied && <div className={styles.appliedHint}>生成卡内容已进入 Canvas dock</div>}
+      {applied && <div className={styles.appliedHint}>生成卡已进入画布</div>}
       {!applied && cancelled && <div className={styles.cancelledHint}>已取消，不会应用到画布</div>}
     </div>
   );
 }
 
-/** 助手消息：按结构化块渲染（text/thinking/understanding/card），无块时回退纯文本；追问走自然语言（grillme 式），不用结构化 clarify 卡
+/** 助手消息：按结构化块渲染（text/thinking/card），无块时回退纯文本；追问与需求理解确认都走自然语言（grillme 式），不用结构化卡
  * 生成卡组支持「手动应用整组」「取消」（04 §5.2 用户动作），组内单卡仍可各自应用/双击编辑 */
 function AssistantMessageBody({
   message,
-  onConfirm,
-  onSupplement,
-  onModify,
   onCardApply,
   onApplyAllCards,
   onCancelCardGroup,
@@ -326,9 +266,6 @@ function AssistantMessageBody({
   cancelledMessageIds,
 }: {
   message: ChatMessage;
-  onConfirm: () => void;
-  onSupplement: () => void;
-  onModify: () => void;
   onCardApply: (card: NonNullable<SessionContentBlock['card']>, patch: { shotTitle?: string; visual?: string; prompt?: string }) => void;
   onApplyAllCards: (cards: NonNullable<SessionContentBlock['card']>[]) => void;
   onCancelCardGroup: (messageId: string) => void;
@@ -349,18 +286,6 @@ function AssistantMessageBody({
       {blocks.map((b, i) => {
         if (b.type === 'thinking' && b.thinking?.steps) {
           return <ThinkingBlock key={i} steps={b.thinking.steps} />;
-        }
-        if (b.type === 'understanding' && b.understanding) {
-          return (
-            <UnderstandingCard
-              key={i}
-              data={b.understanding}
-              onConfirm={onConfirm}
-              onSupplement={onSupplement}
-              onModify={onModify}
-              disabled={disabled}
-            />
-          );
         }
         if (b.type === 'card' && b.card) {
           const cardId = b.card.cardId ?? b.card.shotTitle;
@@ -434,8 +359,8 @@ const phaseLabels: Record<AgentPhase, string> = {
   awaiting_confirm: '等待你确认需求理解',
   generating_cards: '正在整理分镜提示词',
   cards_ready: '生成卡已就绪',
-  applying: '正在应用到 Canvas dock',
-  applied: '已进入 Canvas dock',
+  applying: '正在应用到画布',
+  applied: '已进入画布',
   failed: '处理失败',
 };
 
@@ -494,7 +419,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const [recs, setRecs] = useState<RunSkillRecommendation[]>([]);
   /** 已点 Use 的推荐技能ID（仅用户点 Use 可激活） */
   const [usedSkillIds, setUsedSkillIds] = useState<Set<string>>(new Set());
-  /** 已手动应用到 Canvas dock 的生成卡ID（标记「已应用」） */
+  /** 已手动应用、落成画布节点的生成卡 ID（标记「已应用」）。dock 是那个节点之后可选的下游动作，不是这一步的去处 */
   const [appliedCardIds, setAppliedCardIds] = useState<Set<string>>(new Set());
   /** 已「取消」的生成卡组（按消息ID标记，组内未应用的卡不再可操作） */
   const [cancelledMessageIds, setCancelledMessageIds] = useState<Set<string>>(new Set());
@@ -646,21 +571,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     if (!content || runningRunId !== null || streaming) return;
     chipEditorRef.current?.clear();
     sendMessage(content);
-  };
-
-  /** 确认需求理解：向会话提交确认动作（进入生成卡生产） */
-  const handleConfirm = () => {
-    if (runningRunId !== null || streaming) return;
-    sendMessage('确认需求理解，生成分镜提示词卡');
-  };
-
-  /** 继续补充 / 修改方向：把输入框预填为补充引导，等待用户输入 */
-  const handleSupplement = () => {
-    chipEditorRef.current?.setText('补充信息：');
-  };
-
-  const handleModify = () => {
-    chipEditorRef.current?.setText('修改方向：');
   };
 
   /** 手动应用生成卡 → 落画布节点（B2：标记已应用 + 回调 CanvasPage 落生成卡节点；patch 为双击编辑后的字段覆盖） */
@@ -816,9 +726,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               <div key={m.id} className={styles.assistantBlock}>
                 <AssistantMessageBody
                   message={m}
-                  onConfirm={handleConfirm}
-                  onSupplement={handleSupplement}
-                  onModify={handleModify}
                   onCardApply={handleCardApply}
                   onApplyAllCards={handleApplyAllCards}
                   onCancelCardGroup={handleCancelCardGroup}

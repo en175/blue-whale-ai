@@ -852,68 +852,7 @@
   line-height: 1.6;
 }
 
-/* ---- 结构化卡片（S1：需求理解确认门 / 追问） ---- */
-.understandingCard {
-  border: 1px solid rgba(213, 240, 106, 0.45);
-  background-color: #242425;
-  border-radius: 12px;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.cardTitle {
-  font-size: var(--font-size-md);
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.cardGoal {
-  margin: 0;
-  font-size: var(--font-size-md);
-  line-height: 1.7;
-  color: var(--color-text-primary);
-}
-
-.cardLine {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: var(--font-size-md);
-  line-height: 1.7;
-  color: var(--color-text-secondary);
-  word-break: break-word;
-}
-
-.cardLabel {
-  flex-shrink: 0;
-  color: var(--color-text-tertiary);
-  font-weight: 500;
-}
-
-.tagList {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.tag {
-  padding: 2px 10px;
-  border-radius: var(--radius-full);
-  background-color: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border-secondary);
-  font-size: var(--font-size-md);
-  color: var(--color-text-secondary);
-}
-
-.cardActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 4px;
-}
-
+/* ---- 生成卡组操作按钮 ---- */
 .cardBtn {
   padding: 7px 12px;
   border-radius: 10px;
