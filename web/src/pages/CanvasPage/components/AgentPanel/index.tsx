@@ -19,6 +19,7 @@ import styles from './index.module.css';
 import { isApiError } from '@/api/http';
 import { fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
 import { useAgentSession, type ChatMessage, type AgentPhase } from '../../hooks/useAgentSession';
+import { deriveRunStatus } from '../../hooks/runStatusLine';
 import type { SessionContentBlock, GenerationCardBlock } from '@/api/agentSessions';
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -71,6 +72,36 @@ function Markdown({ text }: { text: string }) {
     blocks.push(<p key={idx} className={styles.mdP}>{renderInline(line, `p${idx}`)}</p>);
   });
   return <>{blocks}</>;
+}
+
+/**
+ * 运行中的常驻状态行。这是"屏幕上什么都没有"的地板：提交那一刻就出现，秒数一直走，
+ * 直到终态才消失。它不等模型吐字、不等产卡成功、事件流断了也照走——上面那些更好看的
+ * 东西都可能失效，这条不能。文案取自 run.activity 的可见节点白名单。
+ */
+function RunStatusLine({ startedAt, activity, stalled }: { startedAt: number | null; activity: string | null; stalled: boolean }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (startedAt === null) return;
+    // 先立刻对齐一次，避免刚挂载时沿用上一轮的旧时间戳。
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+
+  const status = deriveRunStatus({ activeSince: startedAt, now, activity, stalled });
+  if (!status) return null;
+  return (
+    <div
+      className={`${styles.runStatus} ${status.tone === 'stalled' ? styles.runStatusStalled : ''}`}
+      role="status"
+      aria-live="polite"
+    >
+      <span className={styles.runStatusMark} aria-hidden="true">✶</span>
+      <span>{status.label}</span>
+      <span className={styles.runStatusElapsed}>({status.seconds}s)</span>
+    </div>
+  );
 }
 
 /** 可折叠思考过程：小字展示当前步骤，默认收起 */
@@ -404,6 +435,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     runningRunId,
     failedRunId,
     thinkingSteps,
+    turnStartedAt,
     longRunning,
     chatError,
     pendingUnderstanding,
@@ -865,6 +897,13 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               <Markdown text={streamingText} />
             </div>
           )}
+          {/* 常驻状态行（IKA3GD）：放在内容流最下方，也就是下一段内容将要出现的位置。
+              它是黑屏的地板，不依赖模型吐出任何东西。 */}
+          <RunStatusLine
+            startedAt={turnStartedAt}
+            activity={thinkingSteps.at(-1) ?? null}
+            stalled={longRunning}
+          />
           {/* 确认门结构化 UI：需求理解提案已到、等待用户确认/修改（04 §4，动作依附当前内容下） */}
           {pendingUnderstanding && (
             <div className={styles.confirmGate}>

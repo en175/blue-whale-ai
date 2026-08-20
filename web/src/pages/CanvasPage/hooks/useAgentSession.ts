@@ -153,6 +153,11 @@ export function useAgentSession(projectId: string) {
   const [failedRunId, setFailedRunId] = useState<string | null>(null);
   /** 当前运行中的思考过程步骤（reasoning_trace.updated.v1 流式累积） */
   const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
+  /**
+   * 本轮开始的时刻。状态行的地板：提交那一刻就打点，不等 run.queued、不等模型吐字，
+   * 这样"提交后什么都没有"的那几秒也有秒数在走。见 runStatusLine.ts。
+   */
+  const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
   /** 运行活跃但长期无产出事件（delta/思考步）的兜底提示标志：超阈值仍无终态时给用户可诊断信息，不无限「处理中」 */
   const [longRunning, setLongRunning] = useState(false);
   /** 产出事件计数：每次 delta 文本/思考步到达 +1，用于重置兜底计时（有进度就不提示） */
@@ -405,6 +410,10 @@ export function useAgentSession(projectId: string) {
         const runId = str((payload.run as Record<string, unknown> | undefined)?.run_id ?? data.run_id);
         if (!runId) return;
         setFailedRunId((cur) => (cur === runId ? null : cur));
+        // 刷新或重连后本地没有提交时刻，用事件自己的服务端时间补上，
+        // 否则重进页面秒数会从 0 重新数，等了两分钟的用户看到"3s"。
+        const queuedAt = Date.parse(str(data.occurred_at));
+        setTurnStartedAt((cur) => cur ?? (Number.isNaN(queuedAt) ? Date.now() : queuedAt));
         runningRef.current = runId;
         setRunningRunId(runId);
         // 新一轮开始：清掉上一轮思考与待确认卡，等 run.activity / proposed 事件重建（含自动排队的下一轮）
@@ -445,6 +454,7 @@ export function useAgentSession(projectId: string) {
         const reason = (payload.reason ?? {}) as Record<string, unknown>;
         const runId = str(run.run_id ?? data.run_id);
         discardStream();
+        setTurnStartedAt(null);
         runningRef.current = runId || null;
         setRunningRunId(runId || null);
         setPaymentRequiredMessage(str(reason.message) || '运行授权或余额不足，请处理后继续，或取消本次运行。');
@@ -462,6 +472,7 @@ export function useAgentSession(projectId: string) {
         const run = (payload.run ?? {}) as Record<string, unknown>;
         const runId = str(run.run_id ?? data.run_id);
         if (runId) terminalRunIdsRef.current.add(runId);
+        setTurnStartedAt(null);
         if (t === 'run.completed') settleStream(runId);
         else discardStream();
         // 不清空 thinkingSteps：终态后 reasoning_trace.updated.v1（加法事件）还会把最终思考链
@@ -537,6 +548,7 @@ export function useAgentSession(projectId: string) {
     setRunningRunId(null);
     runningRef.current = null;
     setFailedRunId(null);
+    setTurnStartedAt(null);
     setThinkingSteps([]);
     setChatError(null);
     setPendingUnderstanding(null);
@@ -703,6 +715,8 @@ export function useAgentSession(projectId: string) {
       ]);
       streamingRef.current = true;
       setStreaming(true);
+      // 提交即开表。请求还没发出去、Run 还没排上队，用户也已经在等了，这段时间必须算进去。
+      setTurnStartedAt(Date.now());
       try {
         const connectionEpoch = connectionEpochRef.current;
         const ack = await api.sendSessionMessage(projectId, sid, text, { forcedCreativeSkillId: forcedSkillId });
@@ -722,6 +736,7 @@ export function useAgentSession(projectId: string) {
             terminalRunIdsRef.current.add(run.run_id);
             streamingRef.current = false;
             setStreaming(false);
+            setTurnStartedAt(null);
             runningRef.current = null;
             setRunningRunId(null);
             if (['failed', 'outcome_unknown'].includes(run.status)) setFailedRunId(run.run_id);
@@ -735,6 +750,7 @@ export function useAgentSession(projectId: string) {
         console.warn('Agent 消息发送失败:', e);
         streamingRef.current = false;
         setStreaming(false);
+        setTurnStartedAt(null);
         setMessages((prev) => prev.filter((message) => message.id !== optimisticId));
         if (isApiError(e) && e.code === 'capability_required') {
           setSendError('当前环境未配置 Agent 运行能力券，请联系管理员配置后重试；输入内容已保留。');
@@ -900,6 +916,7 @@ export function useAgentSession(projectId: string) {
     runningRunId,
     failedRunId,
     thinkingSteps,
+    turnStartedAt,
     longRunning,
     chatError,
     pendingUnderstanding,

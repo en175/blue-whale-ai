@@ -1274,3 +1274,38 @@
   resize: vertical;
   box-sizing: border-box;
 }
+
+/* ---- 运行中常驻状态行（IKA3GD）：提交即出现，秒数走动，终态才消失 ---- */
+.runStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.runStatusMark {
+  color: var(--color-accent-primary, #d5f06a);
+  animation: runStatusPulse 1.4s ease-in-out infinite;
+}
+
+/* 长时间无进展时不隐藏，只换语气：此刻用户最需要它还在。 */
+.runStatusStalled .runStatusMark {
+  color: #e8a33d;
+  animation: none;
+}
+
+.runStatusElapsed {
+  color: var(--color-text-tertiary, #7d8288);
+}
+
+@keyframes runStatusPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .runStatusMark { animation: none; }
+}

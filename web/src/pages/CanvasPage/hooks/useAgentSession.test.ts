@@ -120,6 +120,103 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+describe('useAgentSession 运行计时', () => {
+  it('提交那一刻就开表，不等 Run 排队、不等模型吐字', async () => {
+    const pending = deferred<unknown>();
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.sendSessionMessage.mockReturnValue(pending.promise);
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    expect(latest.turnStartedAt).toBeNull();
+    await act(async () => {
+      void latest.sendMessage('帮我生成一张插画');
+    });
+
+    // 请求还悬着，一个事件都没回来——状态行存在的全部意义就是这段时间也要有秒数。
+    expect(latest.turnStartedAt).not.toBeNull();
+    await act(async () => {
+      pending.resolve({});
+      await pending.promise;
+    });
+  });
+
+  it('提交失败就停表，不能让计时器对着一个不存在的运行一直走', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.sendSessionMessage.mockRejectedValue(new Error('network down'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      await latest.sendMessage('帮我生成一张插画');
+    });
+
+    expect(latest.turnStartedAt).toBeNull();
+  });
+
+  it('终态停表', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    await act(async () => {
+      await latest.sendMessage('帮我生成一张插画');
+    });
+    expect(latest.turnStartedAt).not.toBeNull();
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.completed',
+        id: 'completed-1',
+        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'completed' } } },
+      });
+    });
+
+    expect(latest.turnStartedAt).toBeNull();
+  });
+
+  it('刷新重连时用事件自己的服务端时间，不从零重数', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    // 重放的 run.queued 带着它原本的服务端时间：用户已经等了两分钟，不该看到 "0s"。
+    const queuedAt = '2026-08-20T15:00:00.000Z';
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.queued',
+        id: 'queued-1',
+        data: { run_id: 'run-1', occurred_at: queuedAt, payload: { run: { run_id: 'run-1', status: 'queued' } } },
+      });
+    });
+
+    expect(latest.turnStartedAt).toBe(Date.parse(queuedAt));
+  });
+
+  it('本地已经开过表就不被事件覆盖，提交到排队之间的等待要算进去', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    await act(async () => {
+      await latest.sendMessage('帮我生成一张插画');
+    });
+    const localStart = latest.turnStartedAt;
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.queued',
+        id: 'queued-1',
+        data: {
+          run_id: 'run-1',
+          occurred_at: '2026-08-20T15:00:00.000Z',
+          payload: { run: { run_id: 'run-1', status: 'queued' } },
+        },
+      });
+    });
+
+    expect(latest.turnStartedAt).toBe(localStart);
+  });
+});
+
 describe('useAgentSession 流式吐字节奏', () => {
   // 模型不是逐字吐的：实测尾部每 ~200ms 到一条 delta、每条约 40 个中文字。
   // 照单渲染就是一句一句往外蹦，所以显示要和接收解耦。
