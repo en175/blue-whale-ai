@@ -67,9 +67,33 @@ async function renderHookHarness() {
   });
 }
 
+/** 受控动画帧：匀速露出按帧推进，测试要能一帧一帧走，否则只能靠等真实时间。 */
+let frames: FrameRequestCallback[];
+let clockMs: number;
+
+/** 走 n 帧，每帧推进 16ms。 */
+async function runFrames(n: number) {
+  for (let i = 0; i < n; i += 1) {
+    const pending = frames;
+    frames = [];
+    if (pending.length === 0) return;
+    clockMs += 16;
+    await act(async () => {
+      for (const frame of pending) frame(clockMs);
+    });
+  }
+}
+
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   eventHandlers = [];
+  frames = [];
+  clockMs = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => clockMs);
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+  vi.stubGlobal('cancelAnimationFrame', () => {
+    frames = [];
+  });
   vi.clearAllMocks();
   mocks.listSessions.mockResolvedValue({ items: [{ session_id: 'session-1' }] });
   mocks.createSession.mockResolvedValue({ session_id: 'created-session' });
@@ -92,6 +116,87 @@ afterEach(async () => {
   if (root) {
     await act(async () => root.unmount());
   }
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe('useAgentSession 流式吐字节奏', () => {
+  // 模型不是逐字吐的：实测尾部每 ~200ms 到一条 delta、每条约 40 个中文字。
+  // 照单渲染就是一句一句往外蹦，所以显示要和接收解耦。
+  const sentence = '这是一整句一次到达的中文回复，长度接近实测的一条 delta。';
+
+  async function deliver(text: string) {
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'assistant.delta',
+        id: `delta-${text.length}`,
+        data: { run_id: 'run-1', payload: { stream_id: 'assistant_run_run-1', text } },
+      });
+    });
+  }
+
+  it('一条 delta 到达时不会整句直接刷出来', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await deliver(sentence);
+
+    expect(latest.streamingText).toBe('');
+    await runFrames(1);
+    expect(latest.streamingText.length).toBeGreaterThan(0);
+    expect(latest.streamingText.length).toBeLessThan(sentence.length);
+  });
+
+  it('露出的始终是收到文本的前缀，逐帧变长', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await deliver(sentence);
+    const lengths: number[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      await runFrames(1);
+      expect(sentence.startsWith(latest.streamingText)).toBe(true);
+      lengths.push(latest.streamingText.length);
+    }
+
+    expect(lengths).toEqual([...lengths].sort((a, b) => a - b));
+    expect(lengths.at(-1)).toBeGreaterThan(lengths[0]!);
+  });
+
+  it('最终会追平，一个字都不少', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await deliver(sentence);
+    await runFrames(200);
+
+    expect(latest.streamingText).toBe(sentence);
+  });
+
+  it('终态固化的是收到的全部文本，不是画面上已经露出的那一段', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await deliver(sentence);
+    await runFrames(1);
+    // 动画还没播完就到了终态：动画是表现，文本是事实，少存一个字都是丢数据。
+    expect(latest.streamingText.length).toBeLessThan(sentence.length);
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.completed',
+        id: 'completed-1',
+        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'completed' } } },
+      });
+    });
+
+    expect(latest.messages.at(-1)?.content).toBe(sentence);
+    expect(latest.streamingText).toBe('');
+  });
 });
 
 describe('useAgentSession concurrency guards', () => {

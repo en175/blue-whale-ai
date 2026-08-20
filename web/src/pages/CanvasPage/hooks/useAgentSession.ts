@@ -8,6 +8,7 @@
  * - run.failed → 重试；取消运行走 runs/:runId/cancel
  * ============================================ */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { advanceReveal, hasPendingReveal } from './streamPacing';
 import {
   listSessions,
   createSession,
@@ -171,8 +172,14 @@ export function useAgentSession(projectId: string) {
   /** Run 在计费门暂停时的可操作提示；保留 runningRunId 以允许取消，不再显示“处理中” */
   const [paymentRequiredMessage, setPaymentRequiredMessage] = useState<string | null>(null);
 
-  /** 流式累积缓冲 */
+  /** 流式累积缓冲：收到的全部文本，永远是事实来源；显示多少由 revealedRef 决定 */
   const accRef = useRef('');
+  /** 已露出的字数（小数）：模型一次给一整句，按帧匀速露出才像在打字，见 streamPacing.ts */
+  const revealedRef = useRef(0);
+  /** 匀速露出的动画帧句柄 */
+  const revealFrameRef = useRef<number | null>(null);
+  /** 上一帧时间戳，用来算帧间隔 */
+  const revealLastAtRef = useRef(0);
   /** 当前流式交付对应的 run_id（delta stream_id 为 assistant_run_<id>） */
   const streamRunRef = useRef('');
   /** 运行态/流式态镜像（供回调内同步判断，避免闭包旧值） */
@@ -246,9 +253,50 @@ export function useAgentSession(projectId: string) {
     });
   }, []);
 
+  /** 停掉匀速露出的循环（终态、丢弃、切会话都要停，否则会对着空缓冲空转） */
+  const stopReveal = useCallback(() => {
+    if (revealFrameRef.current !== null) {
+      cancelAnimationFrame(revealFrameRef.current);
+      revealFrameRef.current = null;
+    }
+  }, []);
+
+  /**
+   * 按帧把缓冲里的文本匀速露出来。模型一次给一整句（实测每 ~200ms 一条、每条约 40 字），
+   * 直接渲染就是一句一句往外蹦；这里只改显示节奏，不改也不丢任何文本。
+   */
+  const pumpReveal = useCallback(() => {
+    if (revealFrameRef.current !== null) return;
+    revealLastAtRef.current = performance.now();
+    const step = () => {
+      revealFrameRef.current = null;
+      const now = performance.now();
+      const elapsedMs = now - revealLastAtRef.current;
+      revealLastAtRef.current = now;
+      revealedRef.current = advanceReveal({
+        revealed: revealedRef.current,
+        received: accRef.current.length,
+        elapsedMs,
+        done: false,
+      });
+      setStreamingText(accRef.current.slice(0, Math.floor(revealedRef.current)));
+      if (hasPendingReveal(revealedRef.current, accRef.current.length)) {
+        revealFrameRef.current = requestAnimationFrame(step);
+      }
+    };
+    revealFrameRef.current = requestAnimationFrame(step);
+  }, []);
+
+  /** 卸载时收掉动画帧，避免在已销毁的组件上 setState */
+  useEffect(() => stopReveal, [stopReveal]);
+
   /** 固化流式缓冲为助手消息（运行终态时调用；与后续 assistant_message 按内容去重） */
   const settleStream = useCallback((runId: string) => {
+    // 固化的是缓冲里的全部文本，不是画面上已经露出的部分：
+    // 动画是表现，文本是事实，不能因为没播完就少存一段。
     const text = accRef.current;
+    stopReveal();
+    revealedRef.current = 0;
     accRef.current = '';
     setStreamingText('');
     streamingRef.current = false;
@@ -263,16 +311,18 @@ export function useAgentSession(projectId: string) {
         { id: `as-${runId}`, role: 'assistant' as const, content: text, sequence_no: Number.MAX_SAFE_INTEGER },
       ];
     });
-  }, []);
+  }, [stopReveal]);
 
   /** 失败/取消/不确定终态不能把 provisional delta 固化成正式助手消息。 */
   const discardStream = useCallback(() => {
+    stopReveal();
+    revealedRef.current = 0;
     accRef.current = '';
     streamRunRef.current = '';
     streamingRef.current = false;
     setStreamingText('');
     setStreaming(false);
-  }, []);
+  }, [stopReveal]);
 
   /** 刷新历史会话列表（供下拉展示；新对话/切换后重拉一次即可，不做轮询） */
   const refreshSessions = useCallback(() => {
@@ -382,9 +432,10 @@ export function useAgentSession(projectId: string) {
         if (streamRunRef.current !== runId) {
           streamRunRef.current = runId;
           accRef.current = '';
+          revealedRef.current = 0;
         }
         accRef.current += text;
-        setStreamingText(accRef.current);
+        pumpReveal();
         return;
       }
 
@@ -465,7 +516,7 @@ export function useAgentSession(projectId: string) {
         return;
       }
     },
-    [confirmUser, discardStream, refreshSessions, settleStream, upsertAssistant, projectId],
+    [confirmUser, discardStream, pumpReveal, refreshSessions, settleStream, upsertAssistant, projectId],
   );
 
   /** 复位本地对话态（切换会话/新对话） */
@@ -474,6 +525,8 @@ export function useAgentSession(projectId: string) {
     sessionsEpochRef.current += 1;
     unsubRef.current?.();
     unsubRef.current = null;
+    stopReveal();
+    revealedRef.current = 0;
     accRef.current = '';
     streamRunRef.current = '';
     cardRunsRef.current.clear();
@@ -494,7 +547,7 @@ export function useAgentSession(projectId: string) {
     setSendError(null);
     setPaymentRequiredMessage(null);
     terminalRunIdsRef.current.clear();
-  }, []);
+  }, [stopReveal]);
 
   /** 连接到指定会话：水合快照 + 订阅事件流（先解绑旧订阅，防止串话到上一个会话） */
   const connectSession = useCallback(
