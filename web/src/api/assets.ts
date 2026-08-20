@@ -126,8 +126,38 @@ export function completeUpload(params: UploadCompleteParams) {
   });
 }
 
-/** 全量拉取：首页后按 total 计算页数并发拉余页拼接（按筛选类型在途去重） */
+/** 并发控制工具：限制同时在途请求数量，避免浏览器同域名并发上限（HTTP/1.1 = 6）导致请求排队或失败 */
+async function concurrentFetch<T, R>(
+  items: T[],
+  worker: (item: T, index: number) => Promise<R>,
+  concurrency: number,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+
+  async function workerLoop() {
+    while (cursor < items.length) {
+      const i = cursor++;
+      try {
+        results[i] = await worker(items[i], i);
+      } catch (err) {
+        // 单个失败不阻塞其他任务，记录为 undefined
+        console.warn(`concurrentFetch 任务 ${i} 失败:`, err);
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => workerLoop()),
+  );
+  return results;
+}
+
+/** 全量拉取：首页后按 total 计算页数并发拉余页拼接（按筛选类型在途去重，并发数 6 匹配浏览器 HTTP/1.1 上限） */
 const pendingAll = new Map<string, Promise<AssetRecord[]>>();
+
+/** 并发分页拉取（每页一个请求，并发 6 个） */
+const ASSET_FETCH_CONCURRENCY = 6;
 
 export function fetchAllAssets(type: AssetType | '') {
   const key = type || 'all';
@@ -137,10 +167,14 @@ export function fetchAllAssets(type: AssetType | '') {
       const first = await fetchAssetPage(type, 1);
       const pages = Math.max(1, Math.ceil(first.total / first.size));
       if (pages <= 1) return first.records;
-      const rest = await Promise.all(
-        Array.from({ length: pages - 1 }, (_, i) => fetchAssetPage(type, i + 2))
+      const restPages = Array.from({ length: pages - 1 }, (_, i) => i + 2);
+      const restResults = await concurrentFetch(
+        restPages,
+        (page) => fetchAssetPage(type, page),
+        ASSET_FETCH_CONCURRENCY,
       );
-      return [...first.records, ...rest.flatMap((r) => r.records)];
+      const restRecords = restResults.flatMap((r) => (r ? r.records : []));
+      return [...first.records, ...restRecords];
     })().finally(() => {
       pendingAll.delete(key);
     });
