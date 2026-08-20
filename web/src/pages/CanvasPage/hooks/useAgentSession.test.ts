@@ -120,6 +120,71 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+describe('useAgentSession 产卡逐版预览', () => {
+  async function sendPartial(payload: unknown) {
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'prompt_card.partial.v1',
+        id: `partial-${JSON.stringify(payload).length}`,
+        data: { run_id: 'run-1', payload: { card_id: 'card-1', payload } },
+      });
+    });
+  }
+
+  it('每一版都替换成最新快照，卡看起来在长', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await sendPartial({ overview: '夏日' });
+    expect(latest.partialCard).toEqual({ cardId: 'card-1', overview: '夏日', shots: [] });
+
+    await sendPartial({ overview: '夏日海边小镇', shots: [{ title: '全景', prompt_text: 'A warm' }] });
+    expect(latest.partialCard).toEqual({
+      cardId: 'card-1',
+      overview: '夏日海边小镇',
+      shots: [{ title: '全景', promptText: 'A warm' }],
+    });
+  });
+
+  it('终态一到就撤掉，半成品不许留在屏幕上让人以为能用', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    await sendPartial({ overview: '写到一半' });
+    expect(latest.partialCard).not.toBeNull();
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.completed',
+        id: 'completed-1',
+        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'completed' } } },
+      });
+    });
+
+    expect(latest.partialCard).toBeNull();
+  });
+
+  it('畸形的半成品不会掀翻事件处理，后面的事件照常到达', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    // 未经校验的模型中间产物：类型全是错的。
+    await sendPartial({ overview: { nested: true }, shots: 'not-an-array' });
+    expect(latest.partialCard).toBeNull();
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.activity',
+        id: 'activity-1',
+        data: { run_id: 'run-1', payload: { stage: 'preparing_prompt_card', summary: '正在校验生成卡' } },
+      });
+    });
+    expect(latest.thinkingSteps.at(-1)).toBe('正在校验生成卡');
+  });
+});
+
 describe('useAgentSession 运行计时', () => {
   it('提交那一刻就开表，不等 Run 排队、不等模型吐字', async () => {
     const pending = deferred<unknown>();

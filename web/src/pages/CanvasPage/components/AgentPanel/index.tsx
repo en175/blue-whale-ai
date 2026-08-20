@@ -20,6 +20,7 @@ import { isApiError } from '@/api/http';
 import { fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
 import { useAgentSession, type ChatMessage, type AgentPhase } from '../../hooks/useAgentSession';
 import { deriveRunStatus } from '../../hooks/runStatusLine';
+import type { PartialCardPreview } from '../../hooks/partialCardPreview';
 import type { SessionContentBlock, GenerationCardBlock } from '@/api/agentSessions';
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -100,6 +101,37 @@ function RunStatusLine({ startedAt, activity, stalled }: { startedAt: number | n
       <span className={styles.runStatusMark} aria-hidden="true">✶</span>
       <span>{status.label}</span>
       <span className={styles.runStatusElapsed}>({status.seconds}s)</span>
+    </div>
+  );
+}
+
+/**
+ * 产卡过程中那张写到一半的卡。产卡是一个 Run 里最长的一次等待，而这几秒模型是在写不是在等，
+ * 这里把写的过程放上屏。
+ *
+ * 刻意长得不像成品卡：虚线框、压低对比度、没有任何可点的东西。它是未经校验的中间产物，
+ * 能落到画布上的只有终态那一张。
+ */
+function CardPreview({ preview }: { preview: PartialCardPreview | null }) {
+  if (!preview) return null;
+  return (
+    <div className={styles.cardPreview} aria-live="off">
+      <div className={styles.cardPreviewLabel}>
+        <BookText size={12} strokeWidth={2} />
+        <span>生成卡撰写中…</span>
+      </div>
+      {preview.overview && <div className={styles.cardPreviewOverview}>{preview.overview}</div>}
+      {preview.shots.map((shot, i) => (
+        <div key={i} className={styles.cardPreviewShot}>
+          {shot.title && <div className={styles.cardPreviewShotTitle}>{shot.title}</div>}
+          {shot.promptText && (
+            <div className={styles.cardPreviewShotPrompt}>
+              {shot.promptText}
+              <span className={styles.cardPreviewCaret} aria-hidden="true">▍</span>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -436,6 +468,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     failedRunId,
     thinkingSteps,
     turnStartedAt,
+    partialCard,
     longRunning,
     chatError,
     pendingUnderstanding,
@@ -897,6 +930,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               <Markdown text={streamingText} />
             </div>
           )}
+          {/* 产卡逐版预览（IKA3GF）：在正文之后、成品卡将要出现的位置 */}
+          <CardPreview preview={partialCard} />
           {/* 确认门结构化 UI：需求理解提案已到、等待用户确认/修改（04 §4，动作依附当前内容下） */}
           {pendingUnderstanding && (
             <div className={styles.confirmGate}>

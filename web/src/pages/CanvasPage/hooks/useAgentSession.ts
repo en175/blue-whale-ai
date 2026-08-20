@@ -9,6 +9,7 @@
  * ============================================ */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { advanceReveal, hasPendingReveal } from './streamPacing';
+import { toPartialCardPreview, type PartialCardPreview } from './partialCardPreview';
 import {
   listSessions,
   createSession,
@@ -158,6 +159,8 @@ export function useAgentSession(projectId: string) {
    * 这样"提交后什么都没有"的那几秒也有秒数在走。见 runStatusLine.ts。
    */
   const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
+  /** 正在写入的生成卡预览（prompt_card.partial.v1）。只用于展示，终态卡片到达即让位。 */
+  const [partialCard, setPartialCard] = useState<PartialCardPreview | null>(null);
   /** 运行活跃但长期无产出事件（delta/思考步）的兜底提示标志：超阈值仍无终态时给用户可诊断信息，不无限「处理中」 */
   const [longRunning, setLongRunning] = useState(false);
   /** 产出事件计数：每次 delta 文本/思考步到达 +1，用于重置兜底计时（有进度就不提示） */
@@ -370,6 +373,18 @@ export function useAgentSession(projectId: string) {
         return;
       }
 
+      /* ---- 产卡过程中的逐版预览（prompt_card.partial.v1，加法事件；IKA3GF） ----
+       * payload.payload 是模型正在写、尚未校验的对象：字段会缺、类型会不对。映射函数是全函数，
+       * 任何形状都不会抛。能落到画布上的卡片只有终态那一张，这里纯展示。 */
+      if (t === 'prompt_card.partial.v1') {
+        const preview = toPartialCardPreview(payload.card_id, payload.payload);
+        if (preview) {
+          setPartialCard(preview);
+          setProgressTick((p) => p + 1);
+        }
+        return;
+      }
+
       /* ---- 运行中渐进思考（run.activity：W2 U7 实时思考面，payload {stage,summary,progress}） ---- */
       if (t === 'run.activity') {
         const summary = str(payload.summary);
@@ -418,6 +433,7 @@ export function useAgentSession(projectId: string) {
         setRunningRunId(runId);
         // 新一轮开始：清掉上一轮思考与待确认卡，等 run.activity / proposed 事件重建（含自动排队的下一轮）
         setThinkingSteps([]);
+        setPartialCard(null);
         setPendingUnderstanding(null);
         setRetryUnavailable(false);
         setPaymentRequiredMessage(null);
@@ -455,6 +471,7 @@ export function useAgentSession(projectId: string) {
         const runId = str(run.run_id ?? data.run_id);
         discardStream();
         setTurnStartedAt(null);
+        setPartialCard(null);
         runningRef.current = runId || null;
         setRunningRunId(runId || null);
         setPaymentRequiredMessage(str(reason.message) || '运行授权或余额不足，请处理后继续，或取消本次运行。');
@@ -473,6 +490,8 @@ export function useAgentSession(projectId: string) {
         const runId = str(run.run_id ?? data.run_id);
         if (runId) terminalRunIdsRef.current.add(runId);
         setTurnStartedAt(null);
+        // 终态一到就撤掉预览：这一刻起权威是校验过的卡片，让半成品留在屏幕上只会让人误以为能用。
+        setPartialCard(null);
         if (t === 'run.completed') settleStream(runId);
         else discardStream();
         // 不清空 thinkingSteps：终态后 reasoning_trace.updated.v1（加法事件）还会把最终思考链
@@ -550,6 +569,7 @@ export function useAgentSession(projectId: string) {
     setFailedRunId(null);
     setTurnStartedAt(null);
     setThinkingSteps([]);
+    setPartialCard(null);
     setChatError(null);
     setPendingUnderstanding(null);
     setConfirmError(null);
@@ -917,6 +937,7 @@ export function useAgentSession(projectId: string) {
     failedRunId,
     thinkingSteps,
     turnStartedAt,
+    partialCard,
     longRunning,
     chatError,
     pendingUnderstanding,

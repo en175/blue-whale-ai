@@ -1310,3 +1310,57 @@
 @media (prefers-reduced-motion: reduce) {
   .runStatusMark { animation: none; }
 }
+
+/* ---- 产卡逐版预览（IKA3GF）：写到一半的卡，只看不能用 ---- */
+.cardPreview {
+  border: 1px dashed var(--color-border-secondary);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin-bottom: 4px;
+  /* 刻意压低对比度：它跟成品卡长得越不像越好，免得有人以为能点。 */
+  background-color: transparent;
+  color: var(--color-text-tertiary, #7d8288);
+}
+
+.cardPreviewLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+
+.cardPreviewOverview {
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cardPreviewShot {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border-secondary);
+}
+
+.cardPreviewShotTitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: 2px;
+}
+
+.cardPreviewShotPrompt {
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cardPreviewCaret {
+  display: inline-block;
+  width: 6px;
+  margin-left: 1px;
+  animation: runStatusPulse 1s steps(2, start) infinite;
+}
