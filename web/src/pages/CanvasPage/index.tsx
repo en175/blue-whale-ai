@@ -20,7 +20,7 @@ import type { Node, Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { quotaToPoints, fetchMe, toSessionUser } from '@/api/auth';
 import { fetchProjects, createProject, renameProject, deleteProject, copyAssetToProject } from '@/api/projects';
-import { UPLOAD_SIZE_LIMIT } from '@/api/assets';
+import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetType } from '@/api/assets';
 import { saveCanvasDoc, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
 import type { GenerationCardBlock } from '@/api/agentSessions';
@@ -557,6 +557,7 @@ export default function CanvasPage() {
           url: data.src as string,
           type: 'image',
           name: (data.fileName as string) || node.id,
+          assetId: data.assetId as string | number | undefined,
         },
       });
     }
@@ -783,6 +784,7 @@ export default function CanvasPage() {
   const startGenerationJob = (
     type: 'image' | 'video' | 'audio',
     parameters: ImageJobParameters | VideoJobParameters | AudioJobParameters,
+    inputAssetIds?: string[],
   ) => {
     if (!currentId) {
       console.warn('未选中项目，无法创建生成任务');
@@ -816,7 +818,12 @@ export default function CanvasPage() {
     };
     setMediaNodes((prev) => [...prev, node]);
     try {
-      createGenerationJob(currentId, { type, expected_output_count: 1, parameters })
+      createGenerationJob(currentId, {
+        type,
+        expected_output_count: 1,
+        parameters,
+        input_asset_ids: inputAssetIds,
+      })
         .then((created) => {
           patchMediaNode(nodeId, { jobId: created.generation_job_id });
           pollJob(nodeId, created.generation_job_id);
@@ -885,7 +892,8 @@ export default function CanvasPage() {
     const type: 'image' | 'video' = node?.data?.mediaType === 'video' ? 'video' : 'image';
     const name = (node?.data?.fileName as string) || id;
     const prompt = typeof node?.data?.prompt === 'string' ? (node.data.prompt as string) : '';
-    return { src, type, name, prompt };
+    const assetId = node?.data?.assetId as string | number | undefined;
+    return { src, type, name, prompt, assetId };
   };
 
   /** 重新编辑：视频节点 → 视频对话框；图片节点 → 图片对话框 */
@@ -909,7 +917,7 @@ export default function CanvasPage() {
       setImageSeed({
         ts: Date.now(),
         text: ref.prompt,
-        files: [{ id: `node-${id}`, url: ref.src, type: ref.type, name: ref.name }],
+        files: [{ id: `node-${id}`, url: ref.src, type: ref.type, name: ref.name, assetId: ref.assetId }],
       });
       handleOpenImageDialog();
     }
@@ -922,7 +930,7 @@ export default function CanvasPage() {
     setImageSeed({
       ts: Date.now(),
       text: '',
-      files: [{ id: `node-${id}`, url: ref.src, type: ref.type, name: ref.name }],
+      files: [{ id: `node-${id}`, url: ref.src, type: ref.type, name: ref.name, assetId: ref.assetId }],
     });
     handleOpenImageDialog();
   };
@@ -1201,19 +1209,76 @@ export default function CanvasPage() {
     console.log('Music dialog send:', text, model, opts, refs);
   };
 
-  /** 图片对话发送：创建图片生成任务 */
-  const handleImageDialogSend = (
+  /** 上传单个文件到服务器，返回 assetId */
+  const uploadFileToAsset = async (file: File, type: 'image' | 'video'): Promise<string | null> => {
+    try {
+      const assetType: AssetType = type === 'image' ? 'image' : 'video';
+      const presign = await fetchUploadPresign({ type: assetType, mime: file.type, size: file.size });
+      await putToPresignedUrl(presign, file);
+      const complete = await completeUpload({
+        type: assetType,
+        mime: file.type,
+        size: file.size,
+        storage_key: presign.storage_key,
+        project_id: currentId || undefined,
+      });
+      return complete.asset_id;
+    } catch (e) {
+      console.warn('上传文件失败:', e);
+      return null;
+    }
+  };
+
+  /** 从 URL fetch 文件为 Blob → File（用于画布选取时没有原始 File 的场景） */
+  const fetchUrlAsFile = async (url: string, name: string, _type: string): Promise<File | null> => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      // 使用 blob 自带的 MIME 类型，而非硬编码
+      const mimeType = blob.type || _type || 'image/png';
+      return new File([blob], name, { type: mimeType });
+    } catch {
+      return null;
+    }
+  };
+
+  /** 图片对话发送：上传参考图 → 创建图片生成任务 */
+  const handleImageDialogSend = async (
     text: string,
     modelId: string,
     size: string,
     ratio: string,
+    files: UploadedFile[],
   ) => {
+    // 收集参考图片的 assetId
+    const inputAssetIds: string[] = [];
+    const imageFiles = files.filter((f) => f.type === 'image');
+
+    for (const f of imageFiles) {
+      // 已有 assetId 直接使用
+      if (f.assetId) {
+        inputAssetIds.push(String(f.assetId));
+        continue;
+      }
+      // 有原始 File 对象，直接上传
+      let fileToUpload: File | null = f.file ?? null;
+      // 没有原始 File，从 URL 获取（如画布选取的节点）
+      if (!fileToUpload && f.url.startsWith('http')) {
+        fileToUpload = await fetchUrlAsFile(f.url, f.name, 'image/*');
+      }
+      if (fileToUpload) {
+        const assetId = await uploadFileToAsset(fileToUpload, 'image');
+        if (assetId) inputAssetIds.push(assetId);
+      }
+    }
+
     startGenerationJob('image', {
       prompt: text,
       model_id: modelId,
       aspect_ratio: ratio,
       size,
-    });
+    }, inputAssetIds.length > 0 ? inputAssetIds : undefined);
   };
 
   return (

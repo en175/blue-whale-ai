@@ -61,7 +61,7 @@ export interface AudioJobParameters {
 export interface CreateJobPayload {
   type: JobType;
   /** 输入参考资产ID列表（仅 image） */
-  input_asset_ids?: number[];
+  input_asset_ids?: (string | number)[];
   /** 期望生成数量 */
   expected_output_count: number;
   parameters: ImageJobParameters | VideoJobParameters | AudioJobParameters;
