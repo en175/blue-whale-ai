@@ -589,6 +589,11 @@
   background-color: #555;
 }
 
+.retryBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* ---- 对话消息流 ---- */
 .messageList {
   flex: 1;

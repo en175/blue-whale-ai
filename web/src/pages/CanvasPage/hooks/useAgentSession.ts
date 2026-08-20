@@ -162,6 +162,8 @@ export function useAgentSession(projectId: string) {
   const [pendingUnderstanding, setPendingUnderstanding] = useState<RequirementUnderstanding | null>(null);
   /** 确认/修改动作失败提示 */
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  /** 重试接口不可用标志（后端 404 时置位：重试按钮禁用并说明原因，不做静默降级；新 run/新消息清除） */
+  const [retryUnavailable, setRetryUnavailable] = useState(false);
 
   /** 流式累积缓冲 */
   const accRef = useRef('');
@@ -310,6 +312,7 @@ export function useAgentSession(projectId: string) {
         if (runId) {
           setFailedRunId(null);
           setRunningRunId(runId);
+          setRetryUnavailable(false);
         }
         return;
       }
@@ -323,6 +326,7 @@ export function useAgentSession(projectId: string) {
         // 新一轮开始：清掉上一轮思考与待确认卡，等 run.activity / proposed 事件重建（含自动排队的下一轮）
         setThinkingSteps([]);
         setPendingUnderstanding(null);
+        setRetryUnavailable(false);
         return;
       }
 
@@ -405,6 +409,7 @@ export function useAgentSession(projectId: string) {
     setChatError(null);
     setPendingUnderstanding(null);
     setConfirmError(null);
+    setRetryUnavailable(false);
   }, []);
 
   /** 连接到指定会话：水合快照 + 订阅事件流（先解绑旧订阅，防止串话到上一个会话） */
@@ -548,8 +553,8 @@ export function useAgentSession(projectId: string) {
       })
       .catch((e) => {
         if (isApiError(e) && e.status === 404) {
-          // 后端未部署重试接口：静默降级
-          setFailedRunId(null);
+          // 后端未部署重试接口：不静默降级，保留失败态并禁用重试按钮（用户可见原因）
+          setRetryUnavailable(true);
           return;
         }
         console.warn('重试 Agent 运行失败:', e);
@@ -651,6 +656,7 @@ export function useAgentSession(projectId: string) {
     confirmError,
     confirmUnderstanding,
     correctUnderstanding,
+    retryUnavailable,
     agentPhase,
     sendMessage,
     stopRun,

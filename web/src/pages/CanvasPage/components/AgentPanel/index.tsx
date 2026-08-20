@@ -408,6 +408,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     confirmError,
     confirmUnderstanding,
     correctUnderstanding,
+    retryUnavailable,
     agentPhase,
     sendMessage,
     stopRun,
@@ -999,7 +1000,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               <button
                 className={styles.retryBtn}
                 onClick={retryRun}
-                title="重试失败的运行"
+                title={retryUnavailable ? '重试暂不可用（后端未部署重试接口）' : '重试失败的运行'}
+                disabled={retryUnavailable}
               >
                 <RotateCw size={14} strokeWidth={2} />
               </button>
