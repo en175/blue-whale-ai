@@ -128,10 +128,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <RefreshCcw size={14} strokeWidth={2} />
             <span>重新编辑</span>
           </button>
-          <button className={styles.toolBtn} onClick={handleGenImage} title="带入图片，打开图片对话框">
-            <Sparkles size={14} strokeWidth={2} />
-            <span>生成图片</span>
-          </button>
+          {data.mediaType !== 'video' && (
+            <button className={styles.toolBtn} onClick={handleGenImage} title="带入图片，打开图片对话框">
+              <Sparkles size={14} strokeWidth={2} />
+              <span>生成图片</span>
+            </button>
+          )}
           <button className={styles.toolBtn} onClick={handleGenVideo} title="带入图片，打开视频对话框">
             <Video size={14} strokeWidth={2} />
             <span>生成视频</span>

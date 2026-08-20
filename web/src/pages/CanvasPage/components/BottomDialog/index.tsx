@@ -12,6 +12,7 @@ import {
   Sparkles,
   SlidersHorizontal,
   Play,
+  ArrowUp,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import ChipTextEditor, { type ChipTextEditorHandle, type ChipRef } from '../ChipTextEditor';
@@ -59,6 +60,8 @@ interface BottomDialogProps {
   initialRefs?: BottomRefItem[];
   /** 初始生成卡引用胶囊（Agent 生成卡「引用到 dock」带入，累计不覆盖，可多张） */
   initialCards?: ChipRef[];
+  /** 初始自由文本（视频节点「重新编辑」带入原提示词） */
+  initialText?: string;
 }
 
 /** 宽高比图标：按比例绘制小矩形 */
@@ -70,7 +73,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs, initialCards }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText }: BottomDialogProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供生成按钮启用态判断 */
@@ -139,6 +142,13 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
       setDuration(typeof m.default_duration === 'number' ? clamp(m.default_duration) : m.supported_durations.min);
     }
   };
+
+  // 初始自由文本（视频节点重新编辑带入原提示词）—— 先设文本，再插胶囊，避免覆盖
+  useEffect(() => {
+    if (initialText) {
+      chipEditorRef.current?.setText(initialText);
+    }
+  }, [initialText]);
 
   // 只插入 initialCards 里「上次还没插过」的新增部分：对话框不因追加引用而重挂载，
   // 已输入的自由文字不会被清空；ref 记录已插入数量，同时防 StrictMode 开发态 effect 双调用重复插入
@@ -589,31 +599,21 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
           </button>
         </div>
 
-        {/* 右侧：倍速 + 生成 + 配置展开 */}
+        {/* 右侧：倍速 + 消耗 + 发送 */}
         <div className={styles.barRight}>
           <span className={styles.barInfo}>1x</span>
-          <div className={styles.sendWrap}>
-            <button
-              className={`${styles.generateBtn} ${composedText.trim() ? styles.generateBtnActive : ''}`}
-              onClick={handleSend}
-              disabled={!composedText.trim()}
-            >
-              <Sparkles size={14} strokeWidth={2} />
-              <span>15</span>
-              <span>生成</span>
-            </button>
-            <button
-              className={styles.configToggle}
-              onClick={() => setShowConfig(!showConfig)}
-              title={showConfig ? '收起配置' : '展开配置'}
-            >
-              <ChevronUp
-                size={14}
-                strokeWidth={2}
-                className={`${styles.configToggleArrow} ${showConfig ? styles.configToggleArrowOpen : ''}`}
-              />
-            </button>
-          </div>
+          <span className={styles.costText}>
+            <Sparkles size={14} strokeWidth={2} />
+            <span>15 生成</span>
+          </span>
+          <button
+            className={`${styles.sendBtn} ${composedText.trim() ? styles.sendBtnActive : ''}`}
+            onClick={handleSend}
+            disabled={!composedText.trim()}
+            title="发送"
+          >
+            <ArrowUp size={16} fill="currentColor" strokeWidth={0} />
+          </button>
         </div>
       </div>
     </div>

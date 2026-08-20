@@ -342,35 +342,6 @@
   white-space: nowrap;
 }
 
-/* ---- 生成按钮（与展开箭头组成分段） ---- */
-.generateBtn {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  padding: 10px var(--spacing-xl);
-  border-radius: var(--radius-md) 0 0 var(--radius-md);
-  font-size: var(--font-size-md);
-  font-weight: 500;
-  color: var(--color-text-tertiary);
-  background-color: var(--color-bg-tertiary);
-  border: none;
-  cursor: not-allowed;
-  transition: all var(--transition-fast);
-  opacity: 0.6;
-  white-space: nowrap;
-}
-
-.generateBtnActive {
-  color: #fff;
-  background-color: var(--color-accent-primary);
-  cursor: pointer;
-  opacity: 1;
-}
-
-.generateBtnActive:hover {
-  background-color: var(--color-accent-hover);
-}
-
 /* ---- 隐藏文件输入 ---- */
 .hiddenInput {
   display: none;
@@ -384,34 +355,66 @@
   white-space: nowrap;
 }
 
-/* ---- 右侧栏：倍速 + 生成分段 ---- */
+/* ---- 右侧栏：倍速 + 消耗 + 发送 + 配置 ---- */
 .barRight {
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
 }
 
-.sendWrap {
+/* 消耗提示（与图片对话框统一） */
+.costText {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: #777;
+  user-select: none;
+}
+
+/* 发送按钮（与图片对话框统一） */
+.sendBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #2a2a2a;
+  color: #777;
+  border: none;
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+}
+
+.sendBtnActive {
+  background-color: #4a4a4a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.sendBtnActive:hover {
+  background-color: #555;
 }
 
 .configToggle {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 10px;
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  color: var(--color-text-tertiary);
-  background-color: var(--color-bg-tertiary);
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: #777;
+  background-color: #2a2a2a;
   border: none;
-  border-left: 1px solid var(--color-border-primary);
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
 .configToggle:hover {
-  color: var(--color-text-primary);
+  color: #fff;
+  background-color: #3a3a3a;
 }
 
 .configToggleArrow {
