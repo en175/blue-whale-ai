@@ -120,6 +120,100 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+describe('useAgentSession 思考过程归属', () => {
+  async function runTurnWithThinking() {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.activity',
+        id: 'a1',
+        data: { run_id: 'run-1', payload: { stage: 'preparing_prompt_card', summary: '正在编排分镜与提示词' } },
+      });
+    });
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'assistant.delta',
+        id: 'd1',
+        data: { run_id: 'run-1', payload: { stream_id: 'assistant_run_run-1', text: '这是回复正文' } },
+      });
+    });
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.completed',
+        id: 'c1',
+        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'completed' } } },
+      });
+    });
+  }
+
+  it('终态时思考固化进那条助手消息、位于正文之前，全局思考区清空', async () => {
+    await runTurnWithThinking();
+
+    const message = latest.messages.at(-1)!;
+    // 顺序即约定：思考块在正文块之前——思考在回复上方，不在对话末尾。
+    expect(message.blocks).toEqual([
+      { type: 'thinking', thinking: { steps: ['正在编排分镜与提示词'] } },
+      { type: 'text', text: '这是回复正文' },
+    ]);
+    expect(latest.thinkingSteps).toEqual([]);
+  });
+
+  it('终态后到达的最终思考链替换消息内的块，而不是缀到对话末尾', async () => {
+    await runTurnWithThinking();
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'reasoning_trace.updated.v1',
+        id: 'r1',
+        data: {
+          run_id: 'run-1',
+          payload: { reasoning_trace: { steps: [{ summary: '识别意图：生图' }, { summary: '进入生图工作流' }] } },
+        },
+      });
+    });
+
+    const message = latest.messages.at(-1)!;
+    expect(message.blocks?.[0]).toEqual({
+      type: 'thinking',
+      thinking: { steps: ['识别意图：生图', '进入生图工作流'] },
+    });
+    // 全局区保持空：最终链属于那条消息，不是悬在对话末尾的公共块。
+    expect(latest.thinkingSteps).toEqual([]);
+  });
+
+  it('服务端正式消息替换流式气泡时，思考块不被抹掉', async () => {
+    await runTurnWithThinking();
+
+    // run.completed 携带的正式 assistant_message：只有 text 块，没有 thinking。
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.completed',
+        id: 'c2',
+        data: {
+          run_id: 'run-1',
+          payload: {
+            run: { run_id: 'run-1', status: 'completed' },
+            assistant_message: {
+              message_id: 'msg-server-1',
+              session_id: 'session-1',
+              sequence: 2,
+              role: 'assistant',
+              source_run_id: 'run-1',
+              content: [{ type: 'text', text: '这是回复正文' }],
+            },
+          },
+        },
+      });
+    });
+
+    const message = latest.messages.find((m) => m.id === 'msg-server-1')!;
+    expect(message.blocks?.[0]?.type).toBe('thinking');
+    expect(message.blocks?.some((b) => b.type === 'text')).toBe(true);
+  });
+});
+
 describe('useAgentSession 产卡逐版预览', () => {
   async function sendPartial(payload: unknown) {
     await act(async () => {

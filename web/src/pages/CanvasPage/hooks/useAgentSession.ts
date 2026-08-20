@@ -152,8 +152,11 @@ export function useAgentSession(projectId: string) {
   const [runningRunId, setRunningRunId] = useState<string | null>(null);
   /** 最近失败的 Run ID（供重试） */
   const [failedRunId, setFailedRunId] = useState<string | null>(null);
-  /** 当前运行中的思考过程步骤（reasoning_trace.updated.v1 流式累积） */
+  /** 当前运行中的思考过程步骤（run.activity 流式累积）。只属于进行中的一轮：
+   * 终态时整个搬进那条助手消息的 thinking 块——思考属于某一轮回复，不是对话级的悬浮物。 */
   const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
+  const thinkingStepsRef = useRef<string[]>([]);
+  thinkingStepsRef.current = thinkingSteps;
   /**
    * 本轮开始的时刻。状态行的地板：提交那一刻就打点，不等 run.queued、不等模型吐字，
    * 这样"提交后什么都没有"的那几秒也有秒数在走。见 runStatusLine.ts。
@@ -223,23 +226,43 @@ export function useAgentSession(projectId: string) {
   const upsertAssistant = useCallback((msg: SessionMessage) => {
     const content = textOf(msg.content);
     const blocks = msg.content ?? [];
+    // 服务端正式消息不带 thinking 块（思考链走 reasoning_trace）。整体替换 blocks 会把
+    // 终态时刚固化进消息的思考抹掉，所以本地已有而来件没有时，把它保在最前面。
+    const keepThinking = (existing: ChatMessage | undefined): SessionContentBlock[] => {
+      if (blocks.some((b) => b.type === 'thinking')) return blocks;
+      const prior = existing?.blocks?.filter((b) => b.type === 'thinking') ?? [];
+      return prior.length > 0 ? [...prior, ...blocks] : blocks;
+    };
+    const runLink = msg.source_run_id ? { sourceRunId: msg.source_run_id } : {};
     setMessages((prev) => {
       const idx = prev.findIndex((m) => m.id === msg.message_id);
       if (idx >= 0) {
         const next = [...prev];
-        next[idx] = { ...next[idx], content: content || next[idx].content, blocks, sequence_no: msg.sequence };
+        next[idx] = {
+          ...next[idx],
+          content: content || next[idx].content,
+          blocks: keepThinking(next[idx]),
+          sequence_no: msg.sequence,
+          ...runLink,
+        };
         return next;
       }
       // 与流式固化的助手消息内容一致 → 替换其 id（避免重复气泡）
       const dupIdx = content ? prev.findIndex((m) => m.role === 'assistant' && m.content === content) : -1;
       if (dupIdx >= 0) {
         const next = [...prev];
-        next[dupIdx] = { ...next[dupIdx], id: msg.message_id, blocks, sequence_no: msg.sequence };
+        next[dupIdx] = {
+          ...next[dupIdx],
+          id: msg.message_id,
+          blocks: keepThinking(next[dupIdx]),
+          sequence_no: msg.sequence,
+          ...runLink,
+        };
         return next;
       }
       return [
         ...prev,
-        { id: msg.message_id, role: 'assistant' as const, content, blocks, sequence_no: msg.sequence },
+        { id: msg.message_id, role: 'assistant' as const, content, blocks, sequence_no: msg.sequence, ...runLink },
       ];
     });
   }, []);
@@ -310,15 +333,30 @@ export function useAgentSession(projectId: string) {
     streamingRef.current = false;
     setStreaming(false);
     if (!text.trim()) return;
+    // 思考随消息走：固化成消息里的第一个块（正文之前），全局思考区随即清空。
+    // 不这么做的话，回复一进 messages，全局思考块就落到它下面去了——正是被反复报过的那个观感。
+    const steps = thinkingStepsRef.current;
     setMessages((prev) => {
       if (prev.some((m) => m.role === 'assistant' && (m.content === text || m.id.includes(runId)))) {
         return prev;
       }
+      const blocks: SessionContentBlock[] =
+        steps.length > 0
+          ? [{ type: 'thinking', thinking: { steps } }, { type: 'text', text }]
+          : [];
       return [
         ...prev,
-        { id: `as-${runId}`, role: 'assistant' as const, content: text, sequence_no: Number.MAX_SAFE_INTEGER },
+        {
+          id: `as-${runId}`,
+          role: 'assistant' as const,
+          content: text,
+          blocks,
+          sequence_no: Number.MAX_SAFE_INTEGER,
+          sourceRunId: runId,
+        },
       ];
     });
+    if (steps.length > 0) setThinkingSteps([]);
   }, [stopReveal]);
 
   /** 失败/取消/不确定终态不能把 provisional delta 固化成正式助手消息。 */
@@ -366,10 +404,27 @@ export function useAgentSession(projectId: string) {
               .map((s) => (typeof s === 'string' ? s : str((s as { summary?: unknown })?.summary)))
               .filter(Boolean)
           : [];
-        if (steps.length > 0) {
+        if (steps.length === 0) return;
+        const traceRunId = str(data.run_id);
+        if (traceRunId && terminalRunIdsRef.current.has(traceRunId)) {
+          // Run 已终态：思考已固化在那条助手消息里，最终链替换消息内的块。
+          // 写回全局区会让它缀在整个对话末尾——思考必须待在它所属的回复上方。
+          setMessages((prev) => {
+            const idx = prev.findIndex(
+              (m) => m.role === 'assistant' && (m.sourceRunId === traceRunId || m.id.includes(traceRunId)),
+            );
+            if (idx < 0) return prev;
+            const target = prev[idx];
+            const rest = (target.blocks ?? []).filter((b) => b.type !== 'thinking');
+            const body = rest.length > 0 ? rest : target.content ? [{ type: 'text', text: target.content }] : [];
+            const next = [...prev];
+            next[idx] = { ...target, blocks: [{ type: 'thinking', thinking: { steps } }, ...body] };
+            return next;
+          });
+        } else {
           setThinkingSteps(steps);
-          setProgressTick((p) => p + 1);
         }
+        setProgressTick((p) => p + 1);
         return;
       }
 
@@ -494,8 +549,9 @@ export function useAgentSession(projectId: string) {
         setPartialCard(null);
         if (t === 'run.completed') settleStream(runId);
         else discardStream();
-        // 不清空 thinkingSteps：终态后 reasoning_trace.updated.v1（加法事件）还会把最终思考链
-        // 替换进来；清空推迟到下一轮 run.queued/started，让用户可回看本轮思考
+        // completed 路径：settleStream 已把思考固化进助手消息并清空全局区；终态后到达的
+        // reasoning_trace.updated.v1 直接更新消息内的块。非 completed 终态没有消息可挂，
+        // 全局思考保留到下一轮 run.queued/started，供回看
         if (t === 'run.failed' || t === 'run.outcome_unknown') {
           setFailedRunId(runId || null);
         }
