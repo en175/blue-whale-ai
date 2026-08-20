@@ -52,16 +52,29 @@ export class CostSettlementInternalController {
       throw new NewApiError("结算批次请求无效", 400, "invalid_batch");
     }
     for (const item of batch.items) {
+      // JSON 无 bigint：amountFen 以整数 number（分）传输（契约 cost-settlement-sync-contract.md），
+      // 校验后统一转 bigint 再消费（IK9VZ0 修复：此前误用 typeof bigint 导致所有请求 400）。
       if (
         !item ||
         (item.action !== "refund" && item.action !== "supplement") ||
-        typeof item.amountFen !== "bigint" ||
+        !Number.isInteger(item.amountFen) ||
+        item.amountFen <= 0 ||
         typeof item.userId !== "number"
       ) {
         throw new NewApiError("结算批次项无效", 400, "invalid_item");
       }
     }
-    const result = await this.consumer.consume(batch);
+    const result = await this.consumer.consume({
+      batchNo: batch.batchNo,
+      ...(batch.settledAt ? { settledAt: batch.settledAt } : {}),
+      items: batch.items.map((it) => ({
+        ...(it.jobId ? { jobId: it.jobId } : {}),
+        userId: it.userId,
+        action: it.action,
+        amountFen: BigInt(it.amountFen),
+        reason: it.reason,
+      })),
+    });
     return { batch_no: batch.batchNo, status: result.status };
   }
 }
