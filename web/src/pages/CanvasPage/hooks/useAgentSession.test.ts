@@ -279,6 +279,52 @@ describe('useAgentSession 产卡逐版预览', () => {
   });
 });
 
+describe('useAgentSession 会话列表更新', () => {
+  it('标题更新的会话不在本地列表时补进去，而不是丢掉', async () => {
+    // 刚创建的会话往往还没进列表（列表是上一次拉的）。此前用 map，这条更新直接消失，
+    // 头部标题会一直停在「新对话」。
+    mocks.listSessions.mockResolvedValue({ items: [] });
+    mocks.createSession.mockResolvedValue({ session_id: 'session-new' });
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-new', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    expect(latest.sessions).toEqual([]);
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'session.updated',
+        id: 'su-1',
+        data: {
+          payload: { session: { session_id: 'session-new', title: '夏日海边小镇插画' } },
+        },
+      });
+    });
+
+    expect(latest.sessions.map((s) => s.session_id)).toContain('session-new');
+    expect(latest.sessions.find((s) => s.session_id === 'session-new')?.title).toBe('夏日海边小镇插画');
+  });
+
+  it('已在列表里的会话按字段合并，不丢其他字段', async () => {
+    mocks.listSessions.mockResolvedValue({ items: [{ session_id: 'session-1', title: '新对话', phase: 'open' }] });
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.sessions.length).toBe(1));
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'session.updated',
+        id: 'su-2',
+        data: { payload: { session: { session_id: 'session-1', title: '夏日海边小镇插画' } } },
+      });
+    });
+
+    const updated = latest.sessions.find((s) => s.session_id === 'session-1')!;
+    expect(updated.title).toBe('夏日海边小镇插画');
+    expect(updated.phase).toBe('open');
+    expect(latest.sessions.length).toBe(1);
+  });
+});
+
 describe('useAgentSession 会话自举', () => {
   it('初始化失败后再发送会当场补建会话，而不是永远卡在「会话正在初始化」', async () => {
     // 挂载时列表请求失败 → sessionId 留在 null，这正是死胡同的起点。

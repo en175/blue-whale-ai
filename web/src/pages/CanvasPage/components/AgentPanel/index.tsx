@@ -727,7 +727,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
   /** 开启新对话：清空当前输入、消息流、技能推荐、武装技能与历史下拉 */
   const handleNewChat = () => {
-    chipEditorRef.current?.clear();
+    // 不清空输入框：面板明写着「未发送的草稿会自动保留」，
+    // 开新对话把用户刚敲的字抹掉，与承诺相反。
     resetChat();
     setRecs([]);
     setUsedSkillIds(new Set());
@@ -749,10 +750,16 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const handleSend = async () => {
     const content = composedText.trim();
     if (!content || runningRunId !== null || streaming) return;
-    const accepted = await sendMessage(content, forcedSkill?.id);
-    if (!accepted) return;
+    // 先清空再发。等 POST 回来才清，用户已经看到自己的气泡上屏、输入框里原文却还在，
+    // 极易重复点发送。失败时把原文回填，一个字都不丢。
     chipEditorRef.current?.clear();
+    const armed = forcedSkill;
     setForcedSkill(null);
+    const accepted = await sendMessage(content, armed?.id);
+    if (!accepted) {
+      chipEditorRef.current?.setText(content);
+      setForcedSkill(armed);
+    }
   };
 
   /** 手动应用生成卡 → 落画布节点（B2：标记已应用 + 回调 CanvasPage 落生成卡节点；patch 为双击编辑后的字段覆盖） */

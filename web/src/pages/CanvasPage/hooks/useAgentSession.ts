@@ -597,7 +597,15 @@ export function useAgentSession(projectId: string) {
         const s = (payload.session ?? null) as SessionRecord | null;
         if (s?.session_id) {
           sessionsEpochRef.current += 1;
-          setSessions((prev) => prev.map((item) => (item.session_id === s.session_id ? { ...item, ...s } : item)));
+          // upsert 而不是 map：刚创建的会话往往还没进本地列表（列表是上一次拉的），
+          // 只 map 的话这条标题更新直接丢掉——头部标题会一直停在「新对话」。
+          setSessions((prev) => {
+            const idx = prev.findIndex((item) => item.session_id === s.session_id);
+            if (idx < 0) return [s, ...prev];
+            const next = [...prev];
+            next[idx] = { ...next[idx], ...s };
+            return next;
+          });
         }
         return;
       }
