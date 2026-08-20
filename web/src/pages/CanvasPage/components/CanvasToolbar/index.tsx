@@ -58,7 +58,6 @@ const TOOL_MENUS: Record<ToolMenuKey, { title: string; icon: LucideIcon; items: 
       { key: 'character', label: '角色卡', icon: UserRound },
       { key: 'object', label: '物体卡', icon: Box },
       { key: 'environment', label: '环境卡', icon: Mountain },
-      { key: 'custom', label: '自定义卡', icon: PenLine },
     ],
   },
   goods: {
@@ -230,7 +229,7 @@ export default function CanvasToolbar({
       {/* 分隔线 */}
       <div className={styles.divider} />
 
-      {/* 资产库（弹出：共享资产 / 风格卡 / 角色卡 / 物体卡 / 环境卡 / 自定义卡） */}
+      {/* 资产库（弹出：共享资产 / 风格卡 / 角色卡 / 物体卡 / 环境卡） */}
       {renderMenuTool('assets')}
 
       {/* 商品（弹出：新建商品 / 导入商品） */}

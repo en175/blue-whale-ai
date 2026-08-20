@@ -91,6 +91,65 @@
   background-color: #444;
 }
 
+/* ---- 文字颜色按钮 ---- */
+.colorWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.colorBtn {
+  flex-direction: column;
+  gap: 0;
+  padding: 2px 4px 1px;
+}
+
+.colorIndicator {
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  margin-top: 1px;
+  background-color: #fff;
+}
+
+.colorPicker {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+}
+
+.colorGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: 132px; /* 6列 * 20px + 5gap * 4px + padding: 2*8px = ~132px */
+}
+
+.colorSwatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.1s ease, border-color 0.1s ease;
+}
+
+.colorSwatch:hover {
+  transform: scale(1.15);
+}
+
+.colorSwatchActive {
+  border-color: #fff;
+  box-shadow: 0 0 0 1px #2a2a2a, 0 0 0 2px #fff;
+}
+
 .divider {
   width: 1px;
   height: 16px;
@@ -244,6 +303,13 @@
 .editor em {
   font-style: italic;
 }
+
+/* execCommand foreColor 生成的 font 标签和 span 颜色 */
+.editor font[color] {
+  color: currentColor;
+}
+
+/* 颜色选择器包裹的 span 直接用 inline style 生效 */
 
 .editor ul,
 .editor ol {

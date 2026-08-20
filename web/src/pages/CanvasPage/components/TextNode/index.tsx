@@ -4,7 +4,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign } from 'lucide-react';
+import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Palette } from 'lucide-react';
 import styles from './index.module.css';
 
 interface TextNodeData {
@@ -24,9 +24,14 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   /** 双击进入编辑；单击/拖动为移动节点 */
   const [editing, setEditing] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [currentColor, setCurrentColor] = useState('#ffffff');
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
   const initializedRef = useRef(false);
+
+  /** 预设颜色 */
+  const COLORS = ['#ffffff', '#e8e8e8', '#ff4d4f', '#ff7a45', '#ffa940', '#ffec3d', '#73d13d', '#36cfc9', '#40a9ff', '#597ef7', '#9254de', '#ff85c0'];
 
   const isSelect = data.toolMode === 'select';
 
@@ -64,6 +69,17 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     };
   }, [contextMenu]);
 
+  // 点击其他区域关闭颜色选择器
+  useEffect(() => {
+    if (!showColorPicker) return;
+    const close = () => setShowColorPicker(false);
+    const timer = setTimeout(() => document.addEventListener('click', close), 100);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', close);
+    };
+  }, [showColorPicker]);
+
   /** 保存当前选区 */
   const saveSelection = useCallback(() => {
     const sel = window.getSelection();
@@ -98,6 +114,66 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     saveSelection();
     syncContent();
   }, [restoreSelection, saveSelection, syncContent]);
+
+  /** 设置文字颜色（手动包裹 span，替代 execCommand foreColor 的不稳定行为） */
+  const setColor = useCallback((color: string) => {
+    setCurrentColor(color);
+    setShowColorPicker(false);
+
+    // 聚焦编辑器并恢复选区
+    editorRef.current?.focus();
+    restoreSelection();
+
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) {
+      console.warn('[TextNode] setColor: no selection');
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    if (!editorRef.current?.contains(range.commonAncestorContainer)) {
+      console.warn('[TextNode] setColor: selection outside editor');
+      return;
+    }
+
+    // 确保选区非空
+    if (range.collapsed) {
+      console.warn('[TextNode] setColor: collapsed selection');
+      return;
+    }
+
+    console.log('[TextNode] setColor: applying', color, 'to', range.toString());
+
+    // 创建带颜色的 span 包裹选中内容
+    const span = document.createElement('span');
+    span.style.color = color;
+
+    try {
+      span.appendChild(range.extractContents());
+      range.insertNode(span);
+      // 重新选中包裹后的内容
+      const newRange = document.createRange();
+      newRange.selectNodeContents(span);
+      sel.removeAllRanges();
+      sel.addRange(newRange);
+      console.log('[TextNode] setColor: success');
+    } catch (err) {
+      console.warn('[TextNode] setColor: DOM approach failed, fallback', err);
+      // 备选方案：尝试 execCommand
+      document.execCommand('styleWithCSS', false, 'true');
+      document.execCommand('foreColor', false, color);
+    }
+
+    saveSelection();
+    syncContent();
+  }, [restoreSelection, saveSelection, syncContent]);
+
+  /** 切换颜色选择器 */
+  const toggleColorPicker = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    saveSelection();
+    setShowColorPicker(prev => !prev);
+  }, [saveSelection]);
 
   /** 设置标题 */
   const setHeading = useCallback((level: string) => {
@@ -176,6 +252,31 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           onMouseDown={(e) => e.preventDefault()}
           onPointerDown={(e) => e.stopPropagation()}
         >
+          {/* 文字颜色选择（放在第一位） */}
+          <div className={styles.colorWrap}>
+            <button className={`${styles.toolBtn} ${styles.colorBtn}`} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onClick={toggleColorPicker} title="文字颜色">
+              <Palette size={12} strokeWidth={2} />
+              <span className={styles.colorIndicator} style={{ backgroundColor: currentColor }} />
+            </button>
+            {showColorPicker && (
+              <div className={styles.colorPicker} onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}>
+                <div className={styles.colorGrid}>
+                  {COLORS.map(color => (
+                    <button
+                      key={color}
+                      className={`${styles.colorSwatch} ${color === currentColor ? styles.colorSwatchActive : ''}`}
+                      style={{ backgroundColor: color }}
+                      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                      onClick={() => setColor(color)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className={styles.divider} />
+
           <button className={styles.toolBtn} onClick={() => setHeading('h1')} title="标题1">
             <Heading1 size={14} strokeWidth={2} />
           </button>
@@ -239,7 +340,13 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           suppressContentEditableWarning
           style={{ pointerEvents: isSelect ? 'auto' : 'none' }}
           onFocus={() => setIsFocused(true)}
-          onBlur={() => { setIsFocused(false); setEditing(false); }}
+          onBlur={(e) => {
+            // 如果焦点转移到工具栏/颜色面板，保持编辑状态
+            const related = e.relatedTarget as HTMLElement | null;
+            if (related && related.closest(`.${styles.toolbar}`)) return;
+            setIsFocused(false);
+            setEditing(false);
+          }}
           onInput={syncContent}
           onDoubleClick={(e) => {
             if (!isSelect) return;
