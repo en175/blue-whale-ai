@@ -804,7 +804,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           </button>
           <div className={styles.historyWrap} ref={historyRef}>
             <button
-              className={`${styles.iconBtn} ${historyOpen ? styles.iconBtnActive : ''}`}
+              className={`${styles.historyBtn} ${historyOpen ? styles.iconBtnActive : ''}`}
               onClick={() => {
                 const next = !historyOpen;
                 setHistoryOpen(next);
@@ -813,6 +813,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               title="历史会话"
             >
               <History size={14} strokeWidth={2} />
+              {/* 当前会话标题：标题异步生成完成（session.updated）后就地更新，不再永远是「新对话」 */}
+              <span className={styles.historyBtnTitle}>
+                {sessions.find((s) => s.session_id === sessionId)?.title || '新对话'}
+              </span>
+              <ChevronDown size={12} strokeWidth={2} />
             </button>
             {historyOpen && (
               <div className={styles.historyDropdown}>
