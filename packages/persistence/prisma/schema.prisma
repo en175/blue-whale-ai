@@ -711,6 +711,29 @@ model cost_reservations {
   @@unique([generation_job_id], map: "uk_cost_reservation_job")
 }
 
+/// IK9VZ0：多退少补结算审计（蓝鲸端只记账，执行在 new-api）：new-api 结算结果的接收记录。
+/// 幂等：batch_no 整批唯一（uk_adj_batch）；(generation_job_id, action_type) 单项唯一（uk_adj_job_action，
+/// 仅对有 job 归属的调整生效；MySQL 唯一索引对 NULL 不生效，无 job 的调整靠整批幂等兜底）。
+model cost_adjustments {
+  id                BigInt   @id @default(autoincrement())
+  batch_no          String   @db.VarChar(64)
+  generation_job_id BigInt?
+  user_id           BigInt
+  project_id        BigInt?
+  action_type       String   @db.VarChar(32) // "refund" | "supplement"（退/补）
+  amount_fen        BigInt
+  reason            String   @db.VarChar(255)
+  status            String   @db.VarChar(32) // "applied" | "duplicate"
+  new_api_snapshot  String?  @db.Text
+  gmt_create        DateTime @default(now()) @db.DateTime(0)
+  gmt_modified      DateTime @default(now()) @db.DateTime(0)
+  version           Int      @default(0)
+  is_delete         Int      @default(0) @db.TinyInt
+
+  @@unique([batch_no], map: "uk_adj_batch")
+  @@unique([generation_job_id, action_type], map: "uk_adj_job_action")
+}
+
 /// 生成任务操作日志（append-only，追溯还原）：每次状态变更 / provider 调用记一行。
 model generation_job_logs {
   id                BigInt   @id @default(autoincrement())

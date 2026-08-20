@@ -354,9 +354,14 @@ describe("generation video worker repo", () => {
       }),
     });
     // IK7G9X：派发前取消释放预留（reserved → released，实扣 0）。
+    // IK9VZ0：派发前取消未向 new-api 提交 → release_note = refund_confirmed。
     expect(releaseReservations).toHaveBeenCalledWith({
       where: { generation_job_id: 300n, status: "reserved" },
-      data: { status: "released", actual_amount_fen: 0n },
+      data: {
+        status: "released",
+        actual_amount_fen: 0n,
+        release_note: "refund_confirmed",
+      },
     });
   });
 
