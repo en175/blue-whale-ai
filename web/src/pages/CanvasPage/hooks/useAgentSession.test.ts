@@ -67,9 +67,33 @@ async function renderHookHarness() {
   });
 }
 
+/** 受控动画帧：匀速露出按帧推进，测试要能一帧一帧走，否则只能靠等真实时间。 */
+let frames: FrameRequestCallback[];
+let clockMs: number;
+
+/** 走 n 帧，每帧推进 16ms。 */
+async function runFrames(n: number) {
+  for (let i = 0; i < n; i += 1) {
+    const pending = frames;
+    frames = [];
+    if (pending.length === 0) return;
+    clockMs += 16;
+    await act(async () => {
+      for (const frame of pending) frame(clockMs);
+    });
+  }
+}
+
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   eventHandlers = [];
+  frames = [];
+  clockMs = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => clockMs);
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+  vi.stubGlobal('cancelAnimationFrame', () => {
+    frames = [];
+  });
   vi.clearAllMocks();
   mocks.listSessions.mockResolvedValue({ items: [{ session_id: 'session-1' }] });
   mocks.createSession.mockResolvedValue({ session_id: 'created-session' });
@@ -92,6 +116,445 @@ afterEach(async () => {
   if (root) {
     await act(async () => root.unmount());
   }
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe('useAgentSession 思考过程归属', () => {
+  async function runTurnWithThinking() {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.activity',
+        id: 'a1',
+        data: { run_id: 'run-1', payload: { stage: 'preparing_prompt_card', summary: '正在编排分镜与提示词' } },
+      });
+    });
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'assistant.delta',
+        id: 'd1',
+        data: { run_id: 'run-1', payload: { stream_id: 'assistant_run_run-1', text: '这是回复正文' } },
+      });
+    });
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.completed',
+        id: 'c1',
+        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'completed' } } },
+      });
+    });
+  }
+
+  it('终态时思考固化进那条助手消息、位于正文之前，全局思考区清空', async () => {
+    await runTurnWithThinking();
+
+    const message = latest.messages.at(-1)!;
+    // 顺序即约定：思考块在正文块之前——思考在回复上方，不在对话末尾。
+    expect(message.blocks).toEqual([
+      { type: 'thinking', thinking: { steps: ['正在编排分镜与提示词'] } },
+      { type: 'text', text: '这是回复正文' },
+    ]);
+    expect(latest.thinkingSteps).toEqual([]);
+  });
+
+  it('终态后到达的最终思考链替换消息内的块，而不是缀到对话末尾', async () => {
+    await runTurnWithThinking();
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'reasoning_trace.updated.v1',
+        id: 'r1',
+        data: {
+          run_id: 'run-1',
+          payload: { reasoning_trace: { steps: [{ summary: '识别意图：生图' }, { summary: '进入生图工作流' }] } },
+        },
+      });
+    });
+
+    const message = latest.messages.at(-1)!;
+    expect(message.blocks?.[0]).toEqual({
+      type: 'thinking',
+      thinking: { steps: ['识别意图：生图', '进入生图工作流'] },
+    });
+    // 全局区保持空：最终链属于那条消息，不是悬在对话末尾的公共块。
+    expect(latest.thinkingSteps).toEqual([]);
+  });
+
+  it('服务端正式消息替换流式气泡时，思考块不被抹掉', async () => {
+    await runTurnWithThinking();
+
+    // run.completed 携带的正式 assistant_message：只有 text 块，没有 thinking。
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.completed',
+        id: 'c2',
+        data: {
+          run_id: 'run-1',
+          payload: {
+            run: { run_id: 'run-1', status: 'completed' },
+            assistant_message: {
+              message_id: 'msg-server-1',
+              session_id: 'session-1',
+              sequence: 2,
+              role: 'assistant',
+              source_run_id: 'run-1',
+              content: [{ type: 'text', text: '这是回复正文' }],
+            },
+          },
+        },
+      });
+    });
+
+    const message = latest.messages.find((m) => m.id === 'msg-server-1')!;
+    expect(message.blocks?.[0]?.type).toBe('thinking');
+    expect(message.blocks?.some((b) => b.type === 'text')).toBe(true);
+  });
+});
+
+describe('useAgentSession 产卡逐版预览', () => {
+  async function sendPartial(payload: unknown) {
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'prompt_card.partial.v1',
+        id: `partial-${JSON.stringify(payload).length}`,
+        data: { run_id: 'run-1', payload: { card_id: 'card-1', payload } },
+      });
+    });
+  }
+
+  it('每一版都替换成最新快照，卡看起来在长', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await sendPartial({ overview: '夏日' });
+    expect(latest.partialCard).toEqual({ cardId: 'card-1', overview: '夏日', shots: [] });
+
+    await sendPartial({ overview: '夏日海边小镇', shots: [{ title: '全景', prompt_text: 'A warm' }] });
+    expect(latest.partialCard).toEqual({
+      cardId: 'card-1',
+      overview: '夏日海边小镇',
+      shots: [{ title: '全景', promptText: 'A warm' }],
+    });
+  });
+
+  it('终态一到就撤掉，半成品不许留在屏幕上让人以为能用', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    await sendPartial({ overview: '写到一半' });
+    expect(latest.partialCard).not.toBeNull();
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.completed',
+        id: 'completed-1',
+        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'completed' } } },
+      });
+    });
+
+    expect(latest.partialCard).toBeNull();
+  });
+
+  it('畸形的半成品不会掀翻事件处理，后面的事件照常到达', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    // 未经校验的模型中间产物：类型全是错的。
+    await sendPartial({ overview: { nested: true }, shots: 'not-an-array' });
+    expect(latest.partialCard).toBeNull();
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.activity',
+        id: 'activity-1',
+        data: { run_id: 'run-1', payload: { stage: 'preparing_prompt_card', summary: '正在校验生成卡' } },
+      });
+    });
+    expect(latest.thinkingSteps.at(-1)).toBe('正在校验生成卡');
+  });
+});
+
+describe('useAgentSession 会话列表更新', () => {
+  it('标题更新的会话不在本地列表时补进去，而不是丢掉', async () => {
+    // 刚创建的会话往往还没进列表（列表是上一次拉的）。此前用 map，这条更新直接消失，
+    // 头部标题会一直停在「新对话」。
+    mocks.listSessions.mockResolvedValue({ items: [] });
+    mocks.createSession.mockResolvedValue({ session_id: 'session-new' });
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-new', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    expect(latest.sessions).toEqual([]);
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'session.updated',
+        id: 'su-1',
+        data: {
+          payload: { session: { session_id: 'session-new', title: '夏日海边小镇插画' } },
+        },
+      });
+    });
+
+    expect(latest.sessions.map((s) => s.session_id)).toContain('session-new');
+    expect(latest.sessions.find((s) => s.session_id === 'session-new')?.title).toBe('夏日海边小镇插画');
+  });
+
+  it('已在列表里的会话按字段合并，不丢其他字段', async () => {
+    mocks.listSessions.mockResolvedValue({ items: [{ session_id: 'session-1', title: '新对话', phase: 'open' }] });
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.sessions.length).toBe(1));
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'session.updated',
+        id: 'su-2',
+        data: { payload: { session: { session_id: 'session-1', title: '夏日海边小镇插画' } } },
+      });
+    });
+
+    const updated = latest.sessions.find((s) => s.session_id === 'session-1')!;
+    expect(updated.title).toBe('夏日海边小镇插画');
+    expect(updated.phase).toBe('open');
+    expect(latest.sessions.length).toBe(1);
+  });
+});
+
+describe('useAgentSession 会话自举', () => {
+  it('初始化失败后再发送会当场补建会话，而不是永远卡在「会话正在初始化」', async () => {
+    // 挂载时列表请求失败 → sessionId 留在 null，这正是死胡同的起点。
+    mocks.listSessions.mockRejectedValueOnce(new Error('network down'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(mocks.listSessions).toHaveBeenCalled());
+    expect(latest.sessionId).toBeNull();
+
+    // 网络恢复后用户再发一次：应当自己把会话建起来并把消息发出去。
+    mocks.listSessions.mockResolvedValue({ items: [{ session_id: 'session-1' }] });
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    let sent = false;
+    await act(async () => {
+      sent = await latest.sendMessage('帮我生成一张插画');
+    });
+
+    expect(sent).toBe(true);
+    expect(latest.sessionId).toBe('session-1');
+    expect(mocks.sendSessionMessage).toHaveBeenCalledWith(
+      'project-1',
+      'session-1',
+      '帮我生成一张插画',
+      expect.anything(),
+    );
+    expect(latest.sendError).toBeNull();
+  });
+
+  it('补建也失败时给出可操作的提示，并保留输入', async () => {
+    mocks.listSessions.mockRejectedValue(new Error('network down'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(mocks.listSessions).toHaveBeenCalled());
+
+    let sent = true;
+    await act(async () => {
+      sent = await latest.sendMessage('帮我生成一张插画');
+    });
+
+    expect(sent).toBe(false);
+    expect(latest.sendError).toContain('输入内容已保留');
+    expect(mocks.sendSessionMessage).not.toHaveBeenCalled();
+  });
+
+  it('已有会话时不会多建一个', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.sessionId).toBe('session-1'));
+    mocks.createSession.mockClear();
+
+    await act(async () => {
+      await latest.sendMessage('帮我生成一张插画');
+    });
+
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('useAgentSession 运行计时', () => {
+  it('提交那一刻就开表，不等 Run 排队、不等模型吐字', async () => {
+    const pending = deferred<unknown>();
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.sendSessionMessage.mockReturnValue(pending.promise);
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    expect(latest.turnStartedAt).toBeNull();
+    await act(async () => {
+      void latest.sendMessage('帮我生成一张插画');
+    });
+
+    // 请求还悬着，一个事件都没回来——状态行存在的全部意义就是这段时间也要有秒数。
+    expect(latest.turnStartedAt).not.toBeNull();
+    await act(async () => {
+      pending.resolve({});
+      await pending.promise;
+    });
+  });
+
+  it('提交失败就停表，不能让计时器对着一个不存在的运行一直走', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.sendSessionMessage.mockRejectedValue(new Error('network down'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      await latest.sendMessage('帮我生成一张插画');
+    });
+
+    expect(latest.turnStartedAt).toBeNull();
+  });
+
+  it('终态停表', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    await act(async () => {
+      await latest.sendMessage('帮我生成一张插画');
+    });
+    expect(latest.turnStartedAt).not.toBeNull();
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.completed',
+        id: 'completed-1',
+        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'completed' } } },
+      });
+    });
+
+    expect(latest.turnStartedAt).toBeNull();
+  });
+
+  it('刷新重连时用事件自己的服务端时间，不从零重数', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    // 重放的 run.queued 带着它原本的服务端时间：用户已经等了两分钟，不该看到 "0s"。
+    const queuedAt = '2026-08-20T15:00:00.000Z';
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.queued',
+        id: 'queued-1',
+        data: { run_id: 'run-1', occurred_at: queuedAt, payload: { run: { run_id: 'run-1', status: 'queued' } } },
+      });
+    });
+
+    expect(latest.turnStartedAt).toBe(Date.parse(queuedAt));
+  });
+
+  it('本地已经开过表就不被事件覆盖，提交到排队之间的等待要算进去', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    await act(async () => {
+      await latest.sendMessage('帮我生成一张插画');
+    });
+    const localStart = latest.turnStartedAt;
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.queued',
+        id: 'queued-1',
+        data: {
+          run_id: 'run-1',
+          occurred_at: '2026-08-20T15:00:00.000Z',
+          payload: { run: { run_id: 'run-1', status: 'queued' } },
+        },
+      });
+    });
+
+    expect(latest.turnStartedAt).toBe(localStart);
+  });
+});
+
+describe('useAgentSession 流式吐字节奏', () => {
+  // 模型不是逐字吐的：实测尾部每 ~200ms 到一条 delta、每条约 40 个中文字。
+  // 照单渲染就是一句一句往外蹦，所以显示要和接收解耦。
+  const sentence = '这是一整句一次到达的中文回复，长度接近实测的一条 delta。';
+
+  async function deliver(text: string) {
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'assistant.delta',
+        id: `delta-${text.length}`,
+        data: { run_id: 'run-1', payload: { stream_id: 'assistant_run_run-1', text } },
+      });
+    });
+  }
+
+  it('一条 delta 到达时不会整句直接刷出来', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await deliver(sentence);
+
+    expect(latest.streamingText).toBe('');
+    await runFrames(1);
+    expect(latest.streamingText.length).toBeGreaterThan(0);
+    expect(latest.streamingText.length).toBeLessThan(sentence.length);
+  });
+
+  it('露出的始终是收到文本的前缀，逐帧变长', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await deliver(sentence);
+    const lengths: number[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      await runFrames(1);
+      expect(sentence.startsWith(latest.streamingText)).toBe(true);
+      lengths.push(latest.streamingText.length);
+    }
+
+    expect(lengths).toEqual([...lengths].sort((a, b) => a - b));
+    expect(lengths.at(-1)).toBeGreaterThan(lengths[0]!);
+  });
+
+  it('最终会追平，一个字都不少', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await deliver(sentence);
+    await runFrames(200);
+
+    expect(latest.streamingText).toBe(sentence);
+  });
+
+  it('终态固化的是收到的全部文本，不是画面上已经露出的那一段', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await deliver(sentence);
+    await runFrames(1);
+    // 动画还没播完就到了终态：动画是表现，文本是事实，少存一个字都是丢数据。
+    expect(latest.streamingText.length).toBeLessThan(sentence.length);
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.completed',
+        id: 'completed-1',
+        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'completed' } } },
+      });
+    });
+
+    expect(latest.messages.at(-1)?.content).toBe(sentence);
+    expect(latest.streamingText).toBe('');
+  });
 });
 
 describe('useAgentSession concurrency guards', () => {
@@ -268,5 +731,80 @@ describe('useAgentSession concurrency guards', () => {
     expect(latest.paymentRequiredMessage).toBe('余额不足，充值后可继续本次任务。');
     expect(latest.streaming).toBe(false);
     expect(latest.runningRunId).toBe('run-payment');
+  });
+});
+
+/**
+ * IKA3TB。生成卡事件是 run.completed 之后才发的加法事件（服务端先 publish 终态，再异步写这条），
+ * 实测相差 ~24ms。原实现只在 run.completed 分支里回查、且条件是「revision_committed 已经到过」，
+ * 于是实时链路上永远回查不到，卡片要切会话或刷新才出现。
+ */
+describe('useAgentSession 生成卡水合', () => {
+  const cardSnapshot = (): SessionSnapshot => ({
+    session: { session_id: 'session-1', phase: 'open' },
+    messages: [
+      {
+        message_id: 'a-1',
+        sequence: 1,
+        role: 'assistant',
+        content: [{ type: 'text', text: '已产卡' }],
+        source_run_id: 'run-1',
+      },
+    ],
+    prompt_cards: [
+      {
+        card_id: 'card-1',
+        active_revision: {
+          revision_number: 1,
+          authoring_run_id: 'run-1',
+          payload: {
+            overview: '夏日海边小镇',
+            shots: [{ shot_no: 1, title: '全景', visual: '午后高光', prompt_text: 'seaside town' }],
+          },
+        },
+      },
+    ],
+    event_cursor: 'cursor-1',
+  } as unknown as SessionSnapshot);
+
+  async function replay(order: 'committed-last' | 'committed-first') {
+    // 首次水合（连接会话）时卡片还没提交，只有回查那一次才带卡片——否则挂载时就挂上了，
+    // 测试根本走不到回查那条路，去掉修复也照样绿。
+    const withCard = cardSnapshot();
+    const withoutCard = { ...withCard, prompt_cards: [] } as unknown as SessionSnapshot;
+    mocks.fetchSessionSnapshot.mockResolvedValueOnce(withoutCard).mockResolvedValue(withCard);
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    const emit = (event: SseEvent) => eventHandlers.at(-1)?.(event);
+    const completed: SseEvent = {
+      type: 'run.completed',
+      data: { run_id: 'run-1', payload: { run: { run_id: 'run-1' } } },
+    } as unknown as SseEvent;
+    const committed: SseEvent = {
+      type: 'prompt_card.revision_committed.v1',
+      data: { run_id: 'run-1', payload: { card_id: 'card-1', revision: 1 } },
+    } as unknown as SseEvent;
+    await act(async () => {
+      if (order === 'committed-first') {
+        emit(committed);
+        emit(completed);
+      } else {
+        emit(completed);
+        emit(committed);
+      }
+    });
+  }
+
+  const cardBlocks = () =>
+    latest.messages.flatMap((m) => (m.blocks ?? []).filter((b) => b.type === 'card'));
+
+  it('生成卡事件晚于 run.completed 到达时仍然挂上卡片', async () => {
+    await replay('committed-last');
+    await vi.waitFor(() => expect(cardBlocks()).toHaveLength(1));
+  });
+
+  it('生成卡事件早于 run.completed 到达时同样挂上卡片', async () => {
+    await replay('committed-first');
+    await vi.waitFor(() => expect(cardBlocks()).toHaveLength(1));
   });
 });

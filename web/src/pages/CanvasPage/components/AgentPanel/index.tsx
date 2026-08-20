@@ -1,7 +1,7 @@
 /* ============================================
  * AgentPanel Agent 智能体对话面板：消息流与任务执行
  * ============================================ */
-import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   X,
   Plus,
@@ -15,62 +15,113 @@ import {
   Coins,
   History,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
 import { isApiError } from '@/api/http';
 import { fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
 import { useAgentSession, type ChatMessage, type AgentPhase } from '../../hooks/useAgentSession';
+import { deriveRunStatus } from '../../hooks/runStatusLine';
+import type { PartialCardPreview } from '../../hooks/partialCardPreview';
 import type { SessionContentBlock, GenerationCardBlock } from '@/api/agentSessions';
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
 import { getPanelLayout } from './layout';
 
-/** 内联 markdown：**bold** 与 `code` */
-function renderInline(text: string, keyPrefix: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  const regex = /(\*\*[^*]+\*\*|`[^`]+`)/g;
-  let last = 0;
-  let i = 0;
-  let m: RegExpExecArray | null;
-  while ((m = regex.exec(text))) {
-    if (m.index > last) nodes.push(text.slice(last, m.index));
-    const token = m[0];
-    if (token.startsWith('**')) {
-      nodes.push(<strong key={`${keyPrefix}-b${i}`}>{token.slice(2, -2)}</strong>);
-    } else {
-      nodes.push(<code key={`${keyPrefix}-c${i}`}>{token.slice(1, -1)}</code>);
-    }
-    last = m.index + token.length;
-    i += 1;
-  }
-  if (last < text.length) nodes.push(text.slice(last));
-  return nodes;
+/**
+ * Agent 回复的 Markdown 渲染。
+ *
+ * 原来是手写的逐行解析器，只认标题、无序列表和引用：模型输出的表格原样显示成一堆竖线，
+ * 有序列表退化成普通段落，围栏代码块的 ``` 直接印在正文里（IKA2VC-4）。这些都不是能靠
+ * 补几条正则收住的，换成 react-markdown + GFM 一次解决，也顺带把嵌套、链接、删除线补上。
+ *
+ * 表格自带横向滚动容器：面板本来就窄，宽表格必须自己滚，不能把整个消息流撑出横向滚动条。
+ */
+export function Markdown({ text }: { text: string }) {
+  return (
+    <div className={styles.md}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          table: ({ children }) => (
+            <div className={styles.mdTableWrap}>
+              <table>{children}</table>
+            </div>
+          ),
+          // 模型偶尔会输出链接。新标签页打开，并断开与本页的 opener 引用。
+          a: ({ children, href }) => (
+            <a href={href} target="_blank" rel="noreferrer noopener">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
-/** 极简 markdown 块级渲染（标题/列表/引用/段落） */
-function Markdown({ text }: { text: string }) {
-  const blocks: ReactNode[] = [];
-  text.split('\n').forEach((raw, idx) => {
-    const line = raw.trim();
-    if (!line) return;
-    const h = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (h) {
-      blocks.push(<div key={idx} className={styles.mdH}>{renderInline(h[2], `h${idx}`)}</div>);
-      return;
-    }
-    const li = /^[-*]\s+(.*)$/.exec(line);
-    if (li) {
-      blocks.push(<div key={idx} className={styles.mdLi}>- {renderInline(li[1], `l${idx}`)}</div>);
-      return;
-    }
-    const q = /^>\s?(.*)$/.exec(line);
-    if (q) {
-      blocks.push(<div key={idx} className={styles.mdQuote}>&gt; {renderInline(q[1], `q${idx}`)}</div>);
-      return;
-    }
-    blocks.push(<p key={idx} className={styles.mdP}>{renderInline(line, `p${idx}`)}</p>);
-  });
-  return <>{blocks}</>;
+/**
+ * 运行中的常驻状态行。这是"屏幕上什么都没有"的地板：提交那一刻就出现，秒数一直走，
+ * 直到终态才消失。它不等模型吐字、不等产卡成功、事件流断了也照走——上面那些更好看的
+ * 东西都可能失效，这条不能。文案取自 run.activity 的可见节点白名单。
+ */
+function RunStatusLine({ startedAt, activity, stalled }: { startedAt: number | null; activity: string | null; stalled: boolean }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (startedAt === null) return;
+    // 先立刻对齐一次，避免刚挂载时沿用上一轮的旧时间戳。
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+
+  const status = deriveRunStatus({ activeSince: startedAt, now, activity, stalled });
+  if (!status) return null;
+  return (
+    <div
+      className={`${styles.runStatus} ${status.tone === 'stalled' ? styles.runStatusStalled : ''}`}
+      role="status"
+      aria-live="polite"
+    >
+      <span className={styles.runStatusMark} aria-hidden="true">✶</span>
+      <span>{status.label}</span>
+      <span className={styles.runStatusElapsed}>({status.seconds}s)</span>
+    </div>
+  );
+}
+
+/**
+ * 产卡过程中那张写到一半的卡。产卡是一个 Run 里最长的一次等待，而这几秒模型是在写不是在等，
+ * 这里把写的过程放上屏。
+ *
+ * 刻意长得不像成品卡：虚线框、压低对比度、没有任何可点的东西。它是未经校验的中间产物，
+ * 能落到画布上的只有终态那一张。
+ */
+function CardPreview({ preview }: { preview: PartialCardPreview | null }) {
+  if (!preview) return null;
+  return (
+    <div className={styles.cardPreview} aria-live="off">
+      <div className={styles.cardPreviewLabel}>
+        <BookText size={12} strokeWidth={2} />
+        <span>生成卡撰写中…</span>
+      </div>
+      {preview.overview && <div className={styles.cardPreviewOverview}>{preview.overview}</div>}
+      {preview.shots.map((shot, i) => (
+        <div key={i} className={styles.cardPreviewShot}>
+          {shot.title && <div className={styles.cardPreviewShotTitle}>{shot.title}</div>}
+          {shot.promptText && (
+            <div className={styles.cardPreviewShotPrompt}>
+              {shot.promptText}
+              <span className={styles.cardPreviewCaret} aria-hidden="true">▍</span>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /** 可折叠思考过程：小字展示当前步骤，默认收起 */
@@ -404,6 +455,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     runningRunId,
     failedRunId,
     thinkingSteps,
+    turnStartedAt,
+    partialCard,
     longRunning,
     chatError,
     pendingUnderstanding,
@@ -662,7 +715,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
   /** 开启新对话：清空当前输入、消息流、技能推荐、武装技能与历史下拉 */
   const handleNewChat = () => {
-    chipEditorRef.current?.clear();
+    // 不清空输入框：面板明写着「未发送的草稿会自动保留」，
+    // 开新对话把用户刚敲的字抹掉，与承诺相反。
     resetChat();
     setRecs([]);
     setUsedSkillIds(new Set());
@@ -684,10 +738,16 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const handleSend = async () => {
     const content = composedText.trim();
     if (!content || runningRunId !== null || streaming) return;
-    const accepted = await sendMessage(content, forcedSkill?.id);
-    if (!accepted) return;
+    // 先清空再发。等 POST 回来才清，用户已经看到自己的气泡上屏、输入框里原文却还在，
+    // 极易重复点发送。失败时把原文回填，一个字都不丢。
     chipEditorRef.current?.clear();
+    const armed = forcedSkill;
     setForcedSkill(null);
+    const accepted = await sendMessage(content, armed?.id);
+    if (!accepted) {
+      chipEditorRef.current?.setText(content);
+      setForcedSkill(armed);
+    }
   };
 
   /** 手动应用生成卡 → 落画布节点（B2：标记已应用 + 回调 CanvasPage 落生成卡节点；patch 为双击编辑后的字段覆盖） */
@@ -739,7 +799,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           </button>
           <div className={styles.historyWrap} ref={historyRef}>
             <button
-              className={`${styles.iconBtn} ${historyOpen ? styles.iconBtnActive : ''}`}
+              className={`${styles.historyBtn} ${historyOpen ? styles.iconBtnActive : ''}`}
               onClick={() => {
                 const next = !historyOpen;
                 setHistoryOpen(next);
@@ -748,6 +808,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               title="历史会话"
             >
               <History size={14} strokeWidth={2} />
+              {/* 当前会话标题：标题异步生成完成（session.updated）后就地更新，不再永远是「新对话」 */}
+              <span className={styles.historyBtnTitle}>
+                {sessions.find((s) => s.session_id === sessionId)?.title || '新对话'}
+              </span>
+              <ChevronDown size={12} strokeWidth={2} />
             </button>
             {historyOpen && (
               <div className={styles.historyDropdown}>
@@ -865,6 +930,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               <Markdown text={streamingText} />
             </div>
           )}
+          {/* 产卡逐版预览（IKA3GF）：在正文之后、成品卡将要出现的位置 */}
+          <CardPreview preview={partialCard} />
           {/* 确认门结构化 UI：需求理解提案已到、等待用户确认/修改（04 §4，动作依附当前内容下） */}
           {pendingUnderstanding && (
             <div className={styles.confirmGate}>
@@ -994,6 +1061,13 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
       {/* 输入区域 */}
       <div className={styles.inputArea}>
+        {/* 常驻状态行（IKA3GD）：钉在输入框正上方，不在滚动区里。
+            它是"屏幕上什么都没有"的地板，用户往上翻历史时更不能让它跟着滚走。 */}
+        <RunStatusLine
+          startedAt={turnStartedAt}
+          activity={thinkingSteps.at(-1) ?? null}
+          stalled={longRunning}
+        />
         {forcedSkill && (
           <div className={styles.armedSkill}>
             <span>技能「{forcedSkill.name}」已就绪，发送后生效</span>
@@ -1120,13 +1194,14 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               <button
                 className={`${styles.sendBtn} ${composedText.trim() ? styles.sendBtnActive : ''}`}
                 onClick={handleSend}
-                disabled={!composedText.trim() || sessionId === null || streaming}
+                /* 不再拿 sessionId 当门槛：刷新后要先「取项目 → 列会话 → 连会话」几个来回，
+                 * 这段时间按钮是灰的，用户以为面板必须整页加载完才能用。而 sendMessage 早就会在
+                 * 会话还没建好时自己补一个（ensureSession），这道门挡的是一条本来就走得通的路。 */
+                disabled={!composedText.trim() || streaming}
                 title={
-                  sessionId === null
-                    ? '会话初始化中，输入内容会保留'
-                    : streaming
-                      ? '等待运行状态；超时后可重新连接'
-                      : '发送'
+                  streaming
+                    ? '等待运行状态；超时后可重新连接'
+                    : '发送'
                 }
               >
                 <ArrowUp size={15} fill="#fff" strokeWidth={0} />
