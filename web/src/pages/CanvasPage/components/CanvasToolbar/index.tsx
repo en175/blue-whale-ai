@@ -19,7 +19,6 @@ import {
   UserRound,
   Box,
   Mountain,
-  PenLine,
   SquarePlus,
   Download,
   type LucideIcon,
