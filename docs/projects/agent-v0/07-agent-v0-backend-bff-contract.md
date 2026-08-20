@@ -31,14 +31,12 @@ web 前端 (/api/agent/v1/*)
 
 本地联调：agent 服务本地起在 4111 时，`AGENT_SERVICE_BASE_URL` 无需改动；测试站部署时按实际地址设置。
 
-## 4. 前端数据源切换
+## 4. 前端数据源
 
-前端 `useAgentSession` 按 `VITE_AGENT_MOCK` 切换数据源：
+前端 `useAgentSession` 始终走真实接口 `/api/agent/v1/*`（经本 BFF 代理到独立 agent 服务）：
 
-- dev 默认 **mock**（`agentSessions.mock.ts` 回放原型流程）——后端 `/api/agent/v1` 未接 agent 服务时交互可独立验证
-- `VITE_AGENT_MOCK=0` 走 **真实接口** `/api/agent/v1/*`（经本 BFF 代理）
-
-S4 落地后，真实链路可用；mock 保留用于 agent 服务未部署时的前端交互开发。
+- 无 mock 分支（`agentSessions.mock.ts` 与 `VITE_AGENT_MOCK` 已随 IK9VSA 删除，构建产物不含假数据回放）
+- 本地联调需起 backend:3100 + agent 服务 + SSH 隧道（见 bw-test-env）；agent 服务未起时 `/api/agent/v1/*` 返回 502，前端会话初始化失败、Agent 面板不加载
 
 ## 5. 素材契约（现状）
 

@@ -24,26 +24,19 @@ import {
   type PromptCardRecord,
 } from '@/api/agentSessions';
 import { cardsFromRevision } from '@/api/promptCardMapping';
-import * as mockAgentApi from '@/api/agentSessions.mock';
 import { isApiError } from '@/api/http';
 
-/**
- * 数据源选择：默认走 mock（后端 /api/agent/v1 尚未在线上部署，S4 补齐后切真实）。
- * 显式设 VITE_AGENT_MOCK=0 可强制走真实接口。
- */
-const api =
-  import.meta.env.VITE_AGENT_MOCK !== '0'
-    ? mockAgentApi
-    : {
-        listSessions,
-        createSession,
-        deleteSession,
-        fetchSessionSnapshot,
-        sendSessionMessage,
-        cancelSessionRun,
-        retrySessionRun,
-        subscribeSessionEvents,
-      };
+/** 数据源：真实 /api/agent/v1（经 BFF 代理到独立 agent 服务）。本地开发需起 backend:3100 + agent + SSH 隧道，见 bw-test-env。 */
+const api = {
+  listSessions,
+  createSession,
+  deleteSession,
+  fetchSessionSnapshot,
+  sendSessionMessage,
+  cancelSessionRun,
+  retrySessionRun,
+  subscribeSessionEvents,
+};
 
 /** 对话消息（UI 模型） */
 export interface ChatMessage {
