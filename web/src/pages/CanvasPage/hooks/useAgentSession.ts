@@ -216,6 +216,14 @@ export function useAgentSession(projectId: string) {
     });
   }, []);
 
+  /** 刷新历史会话列表（供下拉展示；新对话/切换后重拉一次即可，不做轮询） */
+  const refreshSessions = useCallback(() => {
+    if (!projectId) return;
+    api.listSessions(projectId)
+      .then(({ items }) => setSessions(items ?? []))
+      .catch((e) => console.warn('获取历史会话列表失败:', e));
+  }, [projectId]);
+
   /** 事件状态机：session SSE 事件 → 消息/运行态/流式文本 */
   const handleEvent = useCallback(
     (ev: SseEvent) => {
@@ -288,6 +296,9 @@ export function useAgentSession(projectId: string) {
         if (assistantMsg?.message_id) upsertAssistant(assistantMsg);
         const phase = str(payload.session_phase);
         if (phase) setSessionPhase(phase);
+        // 会话标题由 agent 服务异步生成（title_generation_failed 时保持 null）：run 终态后
+        // 刷新一次历史会话列表，让自动标题/失败兜底无需重开下拉即可在下拉里可见
+        refreshSessions();
         // 本轮提交过生成卡：正文只在快照里，事件带的是引用，必须回查一次再挂上去
         if (runId && cardRunsRef.current.has(runId)) {
           cardRunsRef.current.delete(runId);
@@ -312,7 +323,7 @@ export function useAgentSession(projectId: string) {
         return;
       }
     },
-    [confirmUser, settleStream, upsertAssistant, projectId],
+    [confirmUser, refreshSessions, settleStream, upsertAssistant, projectId],
   );
 
   /** 复位本地对话态（切换会话/新对话） */
@@ -328,14 +339,6 @@ export function useAgentSession(projectId: string) {
     setFailedRunId(null);
     setThinkingSteps([]);
   }, []);
-
-  /** 刷新历史会话列表（供下拉展示；新对话/切换后重拉一次即可，不做轮询） */
-  const refreshSessions = useCallback(() => {
-    if (!projectId) return;
-    api.listSessions(projectId)
-      .then(({ items }) => setSessions(items ?? []))
-      .catch((e) => console.warn('获取历史会话列表失败:', e));
-  }, [projectId]);
 
   /** 连接到指定会话：水合快照 + 订阅事件流（先解绑旧订阅，防止串话到上一个会话） */
   const connectSession = useCallback(
@@ -434,9 +437,7 @@ export function useAgentSession(projectId: string) {
         },
       ]);
       setStreaming(true);
-      // forcedSkillId 暂无对应会话维度字段，保留参数签名兼容技能 Use 入口
-      void forcedSkillId;
-      api.sendSessionMessage(projectId, sid, text).catch((e) => {
+      api.sendSessionMessage(projectId, sid, text, { forcedCreativeSkillId: forcedSkillId }).catch((e) => {
         console.warn('Agent 消息发送失败:', e);
         setStreaming(false);
       });

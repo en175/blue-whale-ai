@@ -233,19 +233,25 @@ export function deleteSession(projectId: string, sessionId: string): Promise<unk
 
 /* ============ 消息与运行控制 ============ */
 
-/** 发送消息 POST /projects/:id/sessions/:sid/messages（回复经事件流 assistant.delta 下发） */
+/** 发送消息 POST /projects/:id/sessions/:sid/messages（回复经事件流 assistant.delta 下发）
+ * options.forcedCreativeSkillId：一次性 Use——为该消息创建的目标 Run 强制激活该 Skill
+ * （激活契约 §2：可缺省；缺省即普通消息，wire 字段名 forced_creative_skill_id）。 */
 export function sendSessionMessage(
   projectId: string,
   sessionId: string,
   text: string,
-  signal?: AbortSignal,
+  options?: { forcedCreativeSkillId?: string; signal?: AbortSignal },
 ): Promise<SessionMessageAck> {
+  const { forcedCreativeSkillId, signal } = options ?? {};
   return sessionRequest(
     `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
     {
       method: 'POST',
       headers: { 'Idempotency-Key': newIdempotencyKey() },
-      body: JSON.stringify({ content: [{ type: 'text', text }] }),
+      body: JSON.stringify({
+        content: [{ type: 'text', text }],
+        ...(forcedCreativeSkillId ? { forced_creative_skill_id: forcedCreativeSkillId } : {}),
+      }),
       signal,
     },
   );

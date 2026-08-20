@@ -31,6 +31,8 @@ import { isApiError } from '@/api/http';
 interface SkillModalProps {
   open: boolean;
   onClose: () => void;
+  /** 用户点击「直接使用」：宿主决定去向（AgentPanel 置一次性强制技能 / Home 跳画布携带技能意图） */
+  onUseSkill?: (skill: SkillRecord) => void;
 }
 
 /** 每页数量 */
@@ -66,7 +68,7 @@ description:
 ---
 `;
 
-export default function SkillModal({ open, onClose }: SkillModalProps) {
+export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProps) {
   const [tab, setTab] = useState<'mine' | 'library' | 'create'>('library');
 
   /* ---- 技能库状态 ---- */
@@ -364,7 +366,11 @@ export default function SkillModal({ open, onClose }: SkillModalProps) {
                       <p className={styles.cardDesc} title={s.description ?? ''}>{s.description ?? ''}</p>
                       <div className={styles.cardFooter}>
                         <span className={styles.cardMeta}>{s.usage_count ?? 0} 人使用 @Blue Whale</span>
-                        <button className={styles.cardAction}>
+                        <button
+                          className={styles.cardAction}
+                          onClick={() => s.creative_skill_id && onUseSkill?.(s)}
+                          title={s.creative_skill_id ? '直接使用（强制激活该技能）' : '该技能暂不可直接使用'}
+                        >
                           <AtSign size={12} strokeWidth={2} />
                           <span>直接使用</span>
                         </button>
@@ -412,7 +418,11 @@ export default function SkillModal({ open, onClose }: SkillModalProps) {
                       </div>
                       <p className={styles.cardDesc} title={s.description ?? ''}>{s.description ?? ''}</p>
                       <div className={`${styles.cardFooter} ${styles.cardFooterEnd}`}>
-                        <button className={styles.cardAction}>
+                        <button
+                          className={styles.cardAction}
+                          onClick={() => s.creative_skill_id && onUseSkill?.(s)}
+                          title={s.creative_skill_id ? '直接使用（强制激活该技能）' : '该技能暂不可直接使用'}
+                        >
                           <AtSign size={12} strokeWidth={2} />
                           <span>直接使用</span>
                         </button>

@@ -378,9 +378,11 @@ interface AgentPanelProps {
   projectId?: string;
   /** 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent）；载荷是会话层唯一的生成卡形状，不再另开一份 */
   onApplyToDock?: (payload: GenerationCardBlock) => void;
+  /** 首页「直接使用」技能 → 画布导航携带的强制技能 ID：挂载后武装为下一条消息的 forced skill */
+  initialSkillId?: string;
 }
 
-export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock }: AgentPanelProps) {
+export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, initialSkillId }: AgentPanelProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供发送按钮启用态判断 */
@@ -423,6 +425,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const [appliedCardIds, setAppliedCardIds] = useState<Set<string>>(new Set());
   /** 已「取消」的生成卡组（按消息ID标记，组内未应用的卡不再可操作） */
   const [cancelledMessageIds, setCancelledMessageIds] = useState<Set<string>>(new Set());
+  /** 「直接使用」武装的强制技能（下一条消息发送时携带 forced_creative_skill_id，发送后清除）；name 供指示条展示 */
+  const [forcedSkill, setForcedSkill] = useState<{ id: string; name: string } | null>(null);
 
   /* ---- 拖动状态 ---- */
   const [position, setPosition] = useState(DEFAULT_POSITION);
@@ -450,6 +454,15 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputVersion]);
+
+  /** 首页「直接使用」技能导航进来：武装为下一条消息的强制技能（StrictMode 双挂载只武装一次） */
+  const lastSkillIdRef = useRef('');
+  useEffect(() => {
+    if (!initialSkillId || initialSkillId === lastSkillIdRef.current) return;
+    lastSkillIdRef.current = initialSkillId;
+    setForcedSkill({ id: initialSkillId, name: '已选技能' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSkillId]);
 
   /** 运行开始后拉取 Run 级技能推荐（GET /api/agent/runs/:runId/creative-skill-recommendations）
    * 后端未部署该接口（404）时静默隐藏推荐区域 */
@@ -550,27 +563,31 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     chipEditorRef.current?.setText(prompt);
   };
 
-  /** 开启新对话：清空当前输入、消息流与技能推荐 */
+  /** 开启新对话：清空当前输入、消息流、技能推荐与武装的强制技能 */
   const handleNewChat = () => {
     chipEditorRef.current?.clear();
     resetChat();
     setRecs([]);
     setUsedSkillIds(new Set());
+    setForcedSkill(null);
   };
 
-  /** 使用推荐技能：标记已激活，并把技能意图追加为一条消息提交给 Agent */
+  /** 使用推荐技能：标记已激活，并把技能意图追加为一条消息提交给 Agent（顺带清掉「直接使用」武装，避免双技能叠加） */
   const handleUseSkill = (r: RunSkillRecommendation) => {
     if (usedSkillIds.has(r.creative_skill_id) || runningRunId !== null || streaming) return;
     setUsedSkillIds((prev) => new Set(prev).add(r.creative_skill_id));
+    setForcedSkill(null);
     sendMessage(`使用「${r.name}」技能继续创作`, r.creative_skill_id);
   };
 
-  /** 发送消息：composedText 已把胶囊替换成完整 prompt 并跟自由输入拼接好 */
+  /** 发送消息：composedText 已把胶囊替换成完整 prompt 并跟自由输入拼接好；
+   * 若已武装「直接使用」技能，本条消息携带 forced_creative_skill_id 强制激活后清除 */
   const handleSend = () => {
     const content = composedText.trim();
     if (!content || runningRunId !== null || streaming) return;
     chipEditorRef.current?.clear();
-    sendMessage(content);
+    sendMessage(content, forcedSkill?.id);
+    setForcedSkill(null);
   };
 
   /** 手动应用生成卡 → 落画布节点（B2：标记已应用 + 回调 CanvasPage 落生成卡节点；patch 为双击编辑后的字段覆盖） */
@@ -785,6 +802,19 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
       {/* 输入区域 */}
       <div className={styles.inputArea}>
+        {forcedSkill && (
+          <div className={styles.armedSkill}>
+            <span>技能「{forcedSkill.name}」已就绪，发送后生效</span>
+            <button
+              type="button"
+              className={styles.armedSkillClear}
+              onClick={() => setForcedSkill(null)}
+              title="取消技能"
+            >
+              <X size={12} strokeWidth={2} />
+            </button>
+          </div>
+        )}
         <div className={styles.inputBox}>
           <ChipTextEditor
             ref={chipEditorRef}
@@ -903,7 +933,15 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       </div>
 
       {/* Skill 技能库弹窗（与首页对话框共用） */}
-      <SkillModal open={showSkillModal} onClose={() => setShowSkillModal(false)} />
+      <SkillModal
+        open={showSkillModal}
+        onClose={() => setShowSkillModal(false)}
+        onUseSkill={(s) => {
+          if (!s.creative_skill_id) return;
+          setForcedSkill({ id: s.creative_skill_id, name: s.name ?? '已选技能' });
+          setShowSkillModal(false);
+        }}
+      />
 
       {/* 历史会话删除二次确认 */}
       <ConfirmModal
