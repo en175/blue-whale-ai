@@ -12,6 +12,8 @@ export interface GenerationCostConfig {
   catalogVersion: string;
 }
 
+// 产品确认（2026-08-19）：网关 quota 美元锚点（500,000 = $1）与记账换算 quotaToFen 不动，
+// 仅用于 cost_reservations 记账（quota → 分），不得与展示积分（quota/50,000，见 billing-units-contract.md）混用。
 const DEFAULT_QUOTA_PER_UNIT = 500_000;
 const DEFAULT_USD_EXCHANGE_RATE = 7.3;
 const DEFAULT_CATALOG_VERSION = "v1";

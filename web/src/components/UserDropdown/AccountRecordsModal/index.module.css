@@ -86,6 +86,14 @@
   margin-top: 4px;
 }
 
+/* 空态 / 加载 / 错误提示 */
+.empty {
+  padding: 40px 0;
+  text-align: center;
+  color: #888;
+  font-size: var(--font-size-md);
+}
+
 .item {
   display: flex;
   align-items: center;

@@ -40,11 +40,12 @@ type Phase = 'idle' | 'creating' | 'waiting' | 'paid' | 'expired' | 'failed';
 /** 价格格式化 */
 const fmtPrice = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 
-/** 折扣比例 → 折扣文案：0.75 → 7.5折；1/缺失 = 无折扣 */
+/** 折扣率 → 文案：0.01 → "现价 1%"；1/缺失 = 无折扣。
+ *  用「现价 X%」替代「X 折」避免折数语义歧义（0.1折=1% 常被误读为 ×0.1，引发纠纷）。 */
 function fmtDiscount(discount?: number | null) {
   if (!discount || discount >= 1) return '';
-  const v = Math.round(discount * 100) / 10;
-  return `${Number.isInteger(v) ? v : v.toFixed(1)}折`;
+  const pct = Math.round(discount * 100);
+  return `现价 ${pct}%`;
 }
 
 /** ISO 过期时间 → HH:mm 后过期 */
@@ -148,13 +149,15 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
       );
   };
 
-  const confirmLabel = paying
-    ? '支付中...'
-    : phase === 'paid'
-      ? '支付成功'
-      : phase === 'expired' || phase === 'failed'
-        ? '重新支付'
-        : `确认支付 ¥${selected ? fmtPrice(selected.price) : ''}`;
+  const confirmLabel = !selected
+    ? '确认支付'
+    : paying
+      ? '支付中...'
+      : phase === 'paid'
+        ? '支付成功'
+        : phase === 'expired' || phase === 'failed'
+          ? '重新支付'
+          : `确认支付 ¥${fmtPrice(selected.price)}`;
 
   return createPortal(
     <div className={styles.overlay} onClick={handleClose}>
@@ -172,6 +175,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
           <div className={styles.main}>
             <h2 className={styles.title}>积分充值</h2>
             <p className={styles.subtitle}>请选择充值套餐</p>
+            <p className={styles.unitHint}>1 元 = 10 积分 · 充值到账后长期有效</p>
 
             {/* 套餐卡片（真实档位） */}
             {tiersLoading ? (
@@ -195,8 +199,13 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                       }}
                     >
                       {t.is_recommended && <span className={styles.recBadge}>推荐</span>}
-                      <span className={styles.planName}>{t.name}</span>
-                      <span className={styles.planPoints}>
+                      {t.id === selectedId && (
+                        <span className={styles.selectedBadge}>
+                          <Check size={12} strokeWidth={3} />
+                          已选
+                        </span>
+                      )}
+                      <span className={styles.planTitle}>
                         {t.amount.toLocaleString()} 积分
                       </span>
                       <span className={styles.planPriceRow}>
@@ -225,10 +234,9 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
             {/* 底部结算栏 */}
             <div className={styles.bottomBar}>
               {!selected ? (
-                <div className={styles.emptyHint}>
+                <div className={styles.barLeft}>
                   <CreditCard size={18} strokeWidth={2} className={styles.emptyIcon} />
-                  <span className={styles.emptyBold}>请选择充值套餐</span>
-                  <span>选择上方套餐后确认支付</span>
+                  <span className={styles.emptyHintText}>请先选择上方套餐</span>
                 </div>
               ) : (
                 <>
@@ -252,37 +260,37 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                     )}
                     {orderError && <span className={styles.barError}>{orderError}</span>}
                   </div>
-                  <div className={styles.barRight}>
-                    {/* 支付方式切换 */}
-                    <div className={styles.paySegment}>
-                      <button
-                        className={`${styles.payOption} ${payMethod === 'wechat' ? styles.payOptionActive : ''}`}
-                        onClick={() => setPayMethod('wechat')}
-                        disabled={paying}
-                      >
-                        <Smartphone size={14} strokeWidth={2} />
-                        <span>微信支付</span>
-                      </button>
-                      <button
-                        className={`${styles.payOption} ${payMethod === 'alipay' ? styles.payOptionActive : ''}`}
-                        onClick={() => setPayMethod('alipay')}
-                        disabled={paying}
-                      >
-                        <Smartphone size={14} strokeWidth={2} />
-                        <span>支付宝</span>
-                      </button>
-                    </div>
-                    {/* 确认支付 */}
-                    <button
-                      className={`${styles.confirmBtn} ${paying || phase === 'paid' ? styles.confirmBtnPaying : ''}`}
-                      onClick={handleConfirm}
-                      disabled={paying || phase === 'paid'}
-                    >
-                      {confirmLabel}
-                    </button>
-                  </div>
                 </>
               )}
+              <div className={styles.barRight}>
+                {/* 支付方式切换 */}
+                <div className={styles.paySegment}>
+                  <button
+                    className={`${styles.payOption} ${payMethod === 'wechat' ? styles.payOptionActive : ''}`}
+                    onClick={() => setPayMethod('wechat')}
+                    disabled={paying}
+                  >
+                    <Smartphone size={14} strokeWidth={2} />
+                    <span>微信支付</span>
+                  </button>
+                  <button
+                    className={`${styles.payOption} ${payMethod === 'alipay' ? styles.payOptionActive : ''}`}
+                    onClick={() => setPayMethod('alipay')}
+                    disabled={paying}
+                  >
+                    <Smartphone size={14} strokeWidth={2} />
+                    <span>支付宝</span>
+                  </button>
+                </div>
+                {/* 确认支付（未选套餐时禁用） */}
+                <button
+                  className={`${styles.confirmBtn} ${!selected || paying || phase === 'paid' ? styles.confirmBtnDisabled : ''}`}
+                  onClick={handleConfirm}
+                  disabled={!selected || paying || phase === 'paid'}
+                >
+                  {confirmLabel}
+                </button>
+              </div>
             </div>
           </div>
 

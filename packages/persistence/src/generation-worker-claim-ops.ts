@@ -5,6 +5,22 @@ import type {PrismaClient} from "@prisma/client";
 import {CLAIMABLE_JOB_SOURCES, imageJobLeaseSeconds} from "./generation-worker-internals.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
+/** IK9VZ0：视频实扣二次校验用——读 job 当前预留金额（fen）。查询失败/无预留 → null，不阻塞认领。 */
+async function loadReservationFen(
+  prisma: PrismaClient,
+  jobId: bigint,
+): Promise<bigint | null> {
+  try {
+    const row = await prisma.cost_reservations.findFirst({
+      where: { generation_job_id: jobId, is_delete: 0 },
+      select: { reserved_amount_fen: true },
+    });
+    return row ? row.reserved_amount_fen : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "claimJobById" | "claimNextJob" | "listDueVideoJobIds" | "claimVideoJobById" | "resetStalledImageJobs" | "claimNextImageJob" | "claimNextInProcessJob" | "requeueImageJobForRetry" | "claimNextVideoJob"> {
   // 与拆分前一致：每次创建仓储时读一次 IMAGE_JOB_LEASE_SECONDS。
   const LEASE_SECONDS = imageJobLeaseSeconds();
@@ -176,6 +192,8 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
         cancelRequested: candidate.cancel_requested_at !== null,
         workerId,
         fencingToken: Number(candidate.fencing_token + 1n),
+        // IK9VZ0：视频实扣二次校验的基准（预留金额，fen；无预留/查询失败为 null）。
+        reservedAmountFen: await loadReservationFen(prisma, candidate.id),
       };
     },
 
@@ -310,6 +328,8 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
         cancelRequested: candidate.cancel_requested_at !== null,
         workerId,
         fencingToken: Number(candidate.fencing_token + 1n),
+        // IK9VZ0：视频实扣二次校验的基准（预留金额，fen；无预留/查询失败为 null）。
+        reservedAmountFen: await loadReservationFen(prisma, candidate.id),
       };
     },
   };

@@ -24,6 +24,9 @@ import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js"
 
 const USER_MANAGE_ACTIONS = new Set(["freeze", "unfreeze", "adjustBalance"]);
 
+/** IK9VZ0：管理端「调整积分」输入按积分（展示口径统一），转 Go add_quota 前换算 quota：1 积分 = 50,000 quota。 */
+const CREDITS_TO_QUOTA_MULTIPLIER = 50_000;
+
 const ACTION_LOG_MAP: Record<string, string> = {
   freeze: "user.freeze",
   unfreeze: "user.unfreeze",
@@ -118,15 +121,22 @@ export class AdminUsersController {
           action: "enable",
         });
       } else {
-        const value = Number(body.value);
-        if (!Number.isFinite(value) || value === 0) {
-          throw new AdminException(400, "value 须为非零数值");
+        // IK9VZ0：value 语义为积分（管理员输入，与展示口径一致）→ 换算 quota 后调 Go add_quota。
+        const valueCredits = Number(body.value);
+        if (!Number.isFinite(valueCredits) || valueCredits === 0) {
+          throw new AdminException(400, "value 须为非零数值（单位：积分）");
+        }
+        const valueQuota = Math.abs(
+          Math.round(valueCredits * CREDITS_TO_QUOTA_MULTIPLIER),
+        );
+        if (valueQuota === 0) {
+          throw new AdminException(400, "value 换算后为 0，请确认输入");
         }
         await this.account.manageAdminUser(token, Number(user.userId), {
           id: userId,
           action: "add_quota",
-          value: Math.abs(Math.round(value)),
-          mode: value > 0 ? "add" : "subtract",
+          value: valueQuota,
+          mode: valueCredits > 0 ? "add" : "subtract",
         });
       }
     } catch (error) {

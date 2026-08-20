@@ -45,7 +45,7 @@ interface AuthState {
   isNewUser: boolean;
   /** 当前登录用户（未登录为 null） */
   user: SessionUser | null;
-  /** 用户剩余配额（new-api 原生单位，展示积分 = quota / 100；未拉取为 null） */
+  /** 用户剩余配额（new-api 原生单位，展示积分 = quota / 50000；未拉取为 null） */
   quota: number | null;
   /** 登录成功后写入接口返回的完整信息 + 用户信息 */
   applyLogin: (login: LoginPayload, user: SessionUser) => void;

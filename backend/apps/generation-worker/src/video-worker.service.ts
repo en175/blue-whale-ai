@@ -62,6 +62,15 @@ export class VideoWorkerService {
       mediaRelay,
       scheduleNext: (id, delayMs) => enqueueVideoGenerationJob(id, { delayMs }),
       quotaToFen: (quota) => quotaToFen(quota, this.costConfig),
+      // IK9VZ0：实扣取证失败告警通道（日志 + metric 打点，需求 2「日志+指标」）。
+      warn: (message) => {
+        logger.warn(`[generation-video-worker] ${message}`);
+        logger.metric({
+          event: "cost_receipt_failed",
+          result: "fail",
+          fields: { job_type: "video" },
+        });
+      },
     });
   }
 }

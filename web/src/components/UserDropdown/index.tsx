@@ -199,7 +199,7 @@ export default function UserDropdown() {
           userId={user.userId}
           nickname={user.username}
           phone={user.phone}
-          balance={quota === null ? null : quota / 100}
+          balance={quota === null ? null : quota / 50000}
           onClose={() => setShowAccount(false)}
           onOpenRecharge={() => setShowRecharge(true)}
         />

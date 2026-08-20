@@ -40,6 +40,8 @@ export interface ClaimedVideoJob {
   cancelRequested: boolean;
   workerId: string;
   fencingToken: number;
+  /** IK9VZ0：视频实扣二次校验的基准（预留金额，fen；无预留/查询失败为 null）。 */
+  reservedAmountFen: bigint | null;
 }
 
 export interface WorkerRepo {
@@ -103,6 +105,8 @@ export interface WorkerRepo {
     fencingToken: number;
     code: string;
     message: string;
+    /** IK9VZ0：退款校验结果（refund_confirmed / refund_unverified），落 release_note。 */
+    releaseNote?: string;
   }): Promise<boolean>;
   cancelVideoBeforeDispatch(input: {
     jobId: string;
@@ -144,15 +148,26 @@ export interface WorkerRepo {
     workerId: string;
     fencingToken: number;
   }): Promise<boolean>;
+  /** IK9VZ0：图片结算原子化——completeJob 与 settleReservation 合并单事务。
+   *  事务中段抛错整事务回滚，job 与预留不会出现「一边成功一边悬挂」。 */
+  completeJobAndSettle(input: {
+    jobId: string;
+    assetIds: string[];
+    workerId: string;
+    fencingToken: number;
+    actualAmountFen?: bigint;
+  }): Promise<boolean>;
   /** 任务失败：置 failed + error + 记日志。
    *  守卫失败（stale worker）返回 false，不产生任何副作用（IK7GRP）。
-   *  succeeded 任务不会被迟到的 failJob 翻为 failed。 */
+   *  succeeded 任务不会被迟到的 failJob 翻为 failed。
+   *  IK9VZ0：releaseNote 记录退款校验结果（refund_confirmed / refund_unverified），落 release_note。 */
   failJob(input: {
     jobId: string;
     errorCode: string;
     errorMessage: string;
     workerId: string;
     fencingToken: number;
+    releaseNote?: string;
   }): Promise<boolean>;
   /** 结算点数（reserved→settled，actual=0 占位，真计价后补）。
    *  只在守卫通过的事务内结算，stale worker 不能结算新一次尝试的预留（IK7GRP）。

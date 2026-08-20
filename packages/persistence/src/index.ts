@@ -216,3 +216,9 @@ export {
   type OperationLogFilter,
   type CreateOperationLogInput,
 } from "./operation-log-repo.js";
+export {
+  createCostAdjustmentRepo,
+  alignReservationBySettlement,
+  type CostAdjustmentItemInput,
+  type CostAdjustmentBatchInput,
+} from "./cost-adjustment-repo.js";
