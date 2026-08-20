@@ -162,7 +162,8 @@ export class RechargeController {
       let creditsAfter: number | null = null;
       if (status === "paid") {
         const usage = await this.account.getTokenUsage(token);
-        creditsAfter = usage.userQuota;
+        // 展示口径：credits_after 语义为积分，须按 quota / 50000 换算（产品确认 2026-08-19）
+        creditsAfter = quotaToCredits(usage.userQuota);
       }
       return ok({ trade_no: tradeNo, status, credits_after: creditsAfter });
     } catch (error) {

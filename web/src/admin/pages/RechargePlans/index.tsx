@@ -44,7 +44,7 @@ interface Plan {
   sort: number; // sortOrder，越小越靠前
 }
 
-/** Go 充值配额：积分 = 原价 × 500000（本地新建/编辑时派生，最终以服务端为准） */
+/** Go 充值配额锚点：原价 × 500000 = quota（网关公式，不动）。本地展示派生：展示积分 = quota / 50000（1 元 = 10 积分，产品确认 2026-08-19） */
 const QUOTA_PER_UNIT = 500000;
 
 /** ISO 时间转 datetime-local 输入值（本地时区） */
@@ -405,7 +405,7 @@ function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
 
   const priceNum = parseFloat(price) || 0;
   const ratioNum = parseFloat(ratio) || 0;
-  const points = priceNum * QUOTA_PER_UNIT;
+  const points = (priceNum * QUOTA_PER_UNIT) / 50_000;
   const pay = priceNum * ratioNum;
 
   const handleSave = async () => {

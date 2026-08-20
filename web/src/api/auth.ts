@@ -42,8 +42,8 @@ export interface UsageTokenData {
   quota: number;
 }
 
-/** 配额 → 展示积分（new-api 原生单位 / 100，千分位格式化） */
-export const quotaToPoints = (quota: number) => (quota / 100).toLocaleString();
+/** 配额 → 展示积分（产品口径：1 元 = 10 积分 = 1 美元 = 500,000 quota → quota / 50000，千分位格式化） */
+export const quotaToPoints = (quota: number) => (quota / 50000).toLocaleString();
 
 /** /api/me 结构转本地会话用户 */
 export const toSessionUser = (m: MeData): SessionUser => ({
