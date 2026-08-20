@@ -1,7 +1,7 @@
 /* ============================================
  * AgentPanel Agent 智能体对话面板：消息流与任务执行
  * ============================================ */
-import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   X,
   Plus,
@@ -15,6 +15,8 @@ import {
   Coins,
   History,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
 import { isApiError } from '@/api/http';
 import { fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
@@ -27,52 +29,38 @@ import ConfirmModal from '@/components/ConfirmModal';
 import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
 import { getPanelLayout } from './layout';
 
-/** 内联 markdown：**bold** 与 `code` */
-function renderInline(text: string, keyPrefix: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  const regex = /(\*\*[^*]+\*\*|`[^`]+`)/g;
-  let last = 0;
-  let i = 0;
-  let m: RegExpExecArray | null;
-  while ((m = regex.exec(text))) {
-    if (m.index > last) nodes.push(text.slice(last, m.index));
-    const token = m[0];
-    if (token.startsWith('**')) {
-      nodes.push(<strong key={`${keyPrefix}-b${i}`}>{token.slice(2, -2)}</strong>);
-    } else {
-      nodes.push(<code key={`${keyPrefix}-c${i}`}>{token.slice(1, -1)}</code>);
-    }
-    last = m.index + token.length;
-    i += 1;
-  }
-  if (last < text.length) nodes.push(text.slice(last));
-  return nodes;
-}
-
-/** 极简 markdown 块级渲染（标题/列表/引用/段落） */
-function Markdown({ text }: { text: string }) {
-  const blocks: ReactNode[] = [];
-  text.split('\n').forEach((raw, idx) => {
-    const line = raw.trim();
-    if (!line) return;
-    const h = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (h) {
-      blocks.push(<div key={idx} className={styles.mdH}>{renderInline(h[2], `h${idx}`)}</div>);
-      return;
-    }
-    const li = /^[-*]\s+(.*)$/.exec(line);
-    if (li) {
-      blocks.push(<div key={idx} className={styles.mdLi}>- {renderInline(li[1], `l${idx}`)}</div>);
-      return;
-    }
-    const q = /^>\s?(.*)$/.exec(line);
-    if (q) {
-      blocks.push(<div key={idx} className={styles.mdQuote}>&gt; {renderInline(q[1], `q${idx}`)}</div>);
-      return;
-    }
-    blocks.push(<p key={idx} className={styles.mdP}>{renderInline(line, `p${idx}`)}</p>);
-  });
-  return <>{blocks}</>;
+/**
+ * Agent 回复的 Markdown 渲染。
+ *
+ * 原来是手写的逐行解析器，只认标题、无序列表和引用：模型输出的表格原样显示成一堆竖线，
+ * 有序列表退化成普通段落，围栏代码块的 ``` 直接印在正文里（IKA2VC-4）。这些都不是能靠
+ * 补几条正则收住的，换成 react-markdown + GFM 一次解决，也顺带把嵌套、链接、删除线补上。
+ *
+ * 表格自带横向滚动容器：面板本来就窄，宽表格必须自己滚，不能把整个消息流撑出横向滚动条。
+ */
+export function Markdown({ text }: { text: string }) {
+  return (
+    <div className={styles.md}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          table: ({ children }) => (
+            <div className={styles.mdTableWrap}>
+              <table>{children}</table>
+            </div>
+          ),
+          // 模型偶尔会输出链接。新标签页打开，并断开与本页的 opener 引用。
+          a: ({ children, href }) => (
+            <a href={href} target="_blank" rel="noreferrer noopener">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 /**
