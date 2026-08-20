@@ -216,6 +216,27 @@
   white-space: nowrap;
 }
 
+.fileChipRemove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: all var(--transition-fast);
+}
+
+.fileChipRemove:hover {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
 /* ---- 底部状态栏 ---- */
 .bottomBar {
   display: flex;
@@ -335,13 +356,6 @@
   color: var(--color-border-primary);
 }
 
-.barInfo {
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-}
-
 /* ---- 隐藏文件输入 ---- */
 .hiddenInput {
   display: none;
@@ -439,6 +453,29 @@
   cursor: pointer;
   white-space: nowrap;
   transition: all var(--transition-fast);
+}
+
+/* ---- Toast 提示 ---- */
+.toast {
+  position: absolute;
+  top: -52px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(50, 50, 50, 0.95);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  animation: toastFadeIn 0.25s ease-out;
+  z-index: 100;
+  pointer-events: none;
+}
+
+@keyframes toastFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 .configBtn:hover {

@@ -95,6 +95,15 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   const videoInputRef = useRef<HTMLInputElement>(null);
   const anyInputRef = useRef<HTMLInputElement>(null);
 
+  /** Toast 提示 */
+  const [toast, setToast] = useState('');
+  const toastTimer = useRef<number | null>(null);
+  const showToast = (msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(''), 2800);
+  };
+
   const currentModel = modelList.find((m) => m.model_id === selectedModel) ?? null;
   const modelOptions = modelList.map((m) => ({ key: m.model_id, label: m.model_label }));
   const sizeOptions = currentModel?.supported_sizes?.length
@@ -285,6 +294,17 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     if (!currentModel) {
       console.warn('视频模型能力加载中，请稍后重试');
       return;
+    }
+    // 首尾帧模式校验：必须恰好 2 张图片
+    if (isKeyframe) {
+      if (videoCount > 0) {
+        showToast('首尾帧模式仅支持上传首帧和尾帧两张图片，不支持视频');
+        return;
+      }
+      if (imageCount !== 2) {
+        showToast('首尾帧模式需要上传首帧和尾帧两张图片');
+        return;
+      }
     }
     const size = currentModel.supported_sizes.find((s) => s.id === selectedSize);
     onSend(text, {
@@ -488,6 +508,13 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
                 ? <Image size={12} strokeWidth={2} />
                 : <Video size={12} strokeWidth={2} />}
               <span>{item.file ? truncateName(item.file.name) : (item.type === 'image' ? '图片' : '视频')}</span>
+              <button
+                className={styles.fileChipRemove}
+                onClick={() => removeFile(idx)}
+                title="移除"
+              >
+                <X size={10} strokeWidth={2} />
+              </button>
             </div>
           ))}
         </div>
@@ -575,6 +602,16 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
                     key={opt.key}
                     className={`${styles.modeOption} ${opt.key === selectedMode ? styles.modeOptionActive : ''}`}
                     onClick={() => {
+                      if (opt.key === 'keyframe' && videoCount > 0) {
+                        showToast('首尾帧模式仅支持图片，请先移除视频文件');
+                        setModeOpen(false);
+                        return;
+                      }
+                      if (opt.key === 'keyframe' && imageCount > 2) {
+                        showToast('首尾帧模式仅支持上传 2 张图片，请先移除多余图片');
+                        setModeOpen(false);
+                        return;
+                      }
                       setSelectedMode(opt.key);
                       setModeOpen(false);
                     }}
@@ -599,9 +636,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
           </button>
         </div>
 
-        {/* 右侧：倍速 + 消耗 + 发送 */}
+        {/* 右侧：消耗 + 发送 */}
         <div className={styles.barRight}>
-          <span className={styles.barInfo}>1x</span>
           <span className={styles.costText}>
             <Sparkles size={14} strokeWidth={2} />
             <span>15 生成</span>
@@ -616,6 +652,13 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
           </button>
         </div>
       </div>
+
+      {/* Toast 提示 */}
+      {toast && (
+        <div className={styles.toast} role="alert">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
