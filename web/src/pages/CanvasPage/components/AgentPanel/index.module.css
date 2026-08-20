@@ -1280,7 +1280,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 2px;
+  /* 贴着输入框上沿，和输入框左右对齐 */
+  padding: 2px 2px 8px;
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;

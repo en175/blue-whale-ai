@@ -897,13 +897,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               <Markdown text={streamingText} />
             </div>
           )}
-          {/* 常驻状态行（IKA3GD）：放在内容流最下方，也就是下一段内容将要出现的位置。
-              它是黑屏的地板，不依赖模型吐出任何东西。 */}
-          <RunStatusLine
-            startedAt={turnStartedAt}
-            activity={thinkingSteps.at(-1) ?? null}
-            stalled={longRunning}
-          />
           {/* 确认门结构化 UI：需求理解提案已到、等待用户确认/修改（04 §4，动作依附当前内容下） */}
           {pendingUnderstanding && (
             <div className={styles.confirmGate}>
@@ -1033,6 +1026,13 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
       {/* 输入区域 */}
       <div className={styles.inputArea}>
+        {/* 常驻状态行（IKA3GD）：钉在输入框正上方，不在滚动区里。
+            它是"屏幕上什么都没有"的地板，用户往上翻历史时更不能让它跟着滚走。 */}
+        <RunStatusLine
+          startedAt={turnStartedAt}
+          activity={thinkingSteps.at(-1) ?? null}
+          stalled={longRunning}
+        />
         {forcedSkill && (
           <div className={styles.armedSkill}>
             <span>技能「{forcedSkill.name}」已就绪，发送后生效</span>
