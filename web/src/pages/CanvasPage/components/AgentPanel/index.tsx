@@ -402,6 +402,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     runningRunId,
     failedRunId,
     thinkingSteps,
+    longRunning,
     agentPhase,
     sendMessage,
     stopRun,
@@ -763,6 +764,12 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           {streamingText && (
             <div className={styles.assistantBlock}>
               <Markdown text={streamingText} />
+            </div>
+          )}
+          {longRunning && (
+            <div className={styles.longRunHint}>
+              <span>仍在处理中，已超过 1 分钟无新内容。若无响应可取消后重试。</span>
+              {runningRunId && <span className={styles.longRunMeta}>run {runningRunId}</span>}
             </div>
           )}
           {(runningRunId !== null || streaming) && (

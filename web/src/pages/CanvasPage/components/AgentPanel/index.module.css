@@ -1141,3 +1141,28 @@
 .armedSkillClear:hover {
   background: rgba(76, 110, 245, 0.15);
 }
+
+/* ---- 运行中无产出兜底提示 ---- */
+.longRunHint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 var(--spacing-sm) var(--spacing-sm);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-warning);
+  background: rgba(233, 169, 61, 0.08);
+  border: 1px solid rgba(233, 169, 61, 0.35);
+}
+
+.longRunMeta {
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-xs, 12px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}

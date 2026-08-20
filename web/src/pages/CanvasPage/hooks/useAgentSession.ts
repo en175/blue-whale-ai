@@ -68,6 +68,9 @@ export type AgentPhase =
 /** 运行终态集合（status_changed/run.* 终态判定） */
 const TERMINAL_STATUS = ['completed', 'succeeded', 'failed', 'cancelled', 'canceled', 'stopped'];
 
+/** 运行中无产出事件的兜底提示阈值（毫秒）：超过该时长仍无 delta/思考/终态，提示用户可诊断信息，不无限「处理中」 */
+const LONG_RUN_HINT_MS = 60_000;
+
 /** 字段安全转字符串 */
 const str = (v: unknown): string =>
   typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '';
@@ -141,6 +144,10 @@ export function useAgentSession(projectId: string) {
   const [failedRunId, setFailedRunId] = useState<string | null>(null);
   /** 当前运行中的思考过程步骤（reasoning_trace.updated.v1 流式累积） */
   const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
+  /** 运行活跃但长期无产出事件（delta/思考步）的兜底提示标志：超阈值仍无终态时给用户可诊断信息，不无限「处理中」 */
+  const [longRunning, setLongRunning] = useState(false);
+  /** 产出事件计数：每次 delta 文本/思考步到达 +1，用于重置兜底计时（有进度就不提示） */
+  const [progressTick, setProgressTick] = useState(0);
 
   /** 流式累积缓冲 */
   const accRef = useRef('');
@@ -155,6 +162,17 @@ export function useAgentSession(projectId: string) {
   sessionIdRef.current = sessionId;
   /** 本轮提交过生成卡的 Run：revision_committed 先到、run.completed 后到，用它串起两个事件 */
   const cardRunsRef = useRef<Set<string>>(new Set());
+
+  /** 运行兜底计时：run 活跃且 LONG_RUN_HINT_MS 内无任何产出/终态事件 → 置 longRunning 提示（有 delta/思考即重置） */
+  useEffect(() => {
+    if (!runningRunId) {
+      setLongRunning(false);
+      return;
+    }
+    setLongRunning(false);
+    const t = window.setTimeout(() => setLongRunning(true), LONG_RUN_HINT_MS);
+    return () => window.clearTimeout(t);
+  }, [runningRunId, progressTick]);
 
   /** upsert 助手消息（按 message_id 幂等；与流式固化内容重复时合并） */
   const upsertAssistant = useCallback((msg: SessionMessage) => {
@@ -239,7 +257,10 @@ export function useAgentSession(projectId: string) {
       /* ---- 思考过程流式更新（可折叠展示） ---- */
       if (t === 'reasoning_trace.updated.v1') {
         const steps = Array.isArray(payload.steps) ? payload.steps.map((s) => str(s)).filter(Boolean) : [];
-        if (steps.length > 0) setThinkingSteps(steps);
+        if (steps.length > 0) {
+          setThinkingSteps(steps);
+          setProgressTick((p) => p + 1);
+        }
         return;
       }
 
@@ -268,6 +289,7 @@ export function useAgentSession(projectId: string) {
       if (t === 'assistant.delta') {
         const text = str(payload.text);
         if (!text) return;
+        setProgressTick((p) => p + 1);
         const streamId = str(payload.stream_id);
         const runId = streamId.startsWith('assistant_run_')
           ? streamId.slice('assistant_run_'.length)
@@ -523,6 +545,7 @@ export function useAgentSession(projectId: string) {
     runningRunId,
     failedRunId,
     thinkingSteps,
+    longRunning,
     agentPhase,
     sendMessage,
     stopRun,
