@@ -7,6 +7,9 @@ import { X, AudioLines, Upload, Move, ChevronDown, Sparkles, Music, ArrowUp } fr
 import type { AudioRefItem, CanvasPickItem } from '../AudioDialog';
 import styles from './index.module.css';
 
+/** 输入框字数上限 */
+const MAX_INPUT = 500;
+
 /** AI 音乐生成附加参数 */
 export interface MusicGenOptions {
   /** 纯伴奏：开启后歌词不生效 */
@@ -228,10 +231,14 @@ export default function MusicDialog({ onClose, onSend, canvasMedia, onSwitchToAu
         className={styles.textarea}
         placeholder="描述音乐曲风、情绪、节奏和乐器等..."
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => setText(e.target.value.slice(0, MAX_INPUT))}
         onKeyDown={handleKeyDown}
         rows={2}
+        maxLength={MAX_INPUT}
       />
+      <div className={`${styles.charCount} ${text.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
+        {text.length}/{MAX_INPUT}
+      </div>
 
       {/* 歌词（纯伴奏时禁用） */}
       <div className={styles.lyricBlock}>
@@ -242,10 +249,14 @@ export default function MusicDialog({ onClose, onSend, canvasMedia, onSwitchToAu
           className={styles.textarea}
           placeholder="输入或粘贴歌词..."
           value={lyrics}
-          onChange={(e) => setLyrics(e.target.value)}
+          onChange={(e) => setLyrics(e.target.value.slice(0, MAX_INPUT))}
           disabled={instrumental}
           rows={2}
+          maxLength={MAX_INPUT}
         />
+        <div className={`${styles.charCount} ${lyrics.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
+          {lyrics.length}/{MAX_INPUT}
+        </div>
       </div>
 
       {/* 底部状态栏 */}
