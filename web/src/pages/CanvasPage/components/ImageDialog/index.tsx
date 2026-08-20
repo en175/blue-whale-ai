@@ -28,6 +28,10 @@ export interface UploadedFile {
   url: string;
   type: 'image' | 'video';
   name: string;
+  /** 原始 File 对象（用户本地选择时携带，用于上传获取 assetId） */
+  file?: File;
+  /** 已有资产 ID（画布节点选取时携带，直接作为 input_asset_ids） */
+  assetId?: string | number;
 }
 
 /** 模型选项（接口失败回退） */
@@ -52,8 +56,8 @@ const FALLBACK_RATIOS = [
 
 interface ImageDialogProps {
   onClose: () => void;
-  /** 发送：提示词 + 模型ID + 分辨率档位 id（如 2k） + 宽高比 */
-  onSend: (text: string, modelId: string, size: string, ratio: string) => void;
+  /** 发送：提示词 + 模型ID + 分辨率档位 id（如 2k） + 宽高比 + 参考素材列表（异步：上传完成后 resolve） */
+  onSend: (text: string, modelId: string, size: string, ratio: string, files: UploadedFile[]) => Promise<void> | void;
   /** 初始提示词（节点「重新编辑」带入原生成提示词） */
   initialText?: string;
   /** 初始参考素材（节点操作带入被点节点图片） */
@@ -87,6 +91,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   const [files, setFiles] = useState<UploadedFile[]>(initialFiles ?? []);
   /** 左上角图标弹菜单：图片上传 / 到节点选择 */
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
+  /** 上传中状态：禁用发送按钮和输入框 */
+  const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   /** 画布节点选取结果注入参考素材（去重 + 上限保护） */
@@ -174,6 +180,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           url: URL.createObjectURL(f),
           type: isVideo ? 'video' : 'image',
           name: f.name,
+          file: f,
         });
       }
       return [...prev, ...added];
@@ -191,10 +198,15 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   };
 
   /** 发送（清晰度传分辨率档位 id，对应生成接口 parameters.size） */
-  const handleSend = () => {
-    if (!inputValue.trim()) return;
-    onSend(inputValue, selectedModel, selectedResolution, selectedRatio);
-    setInputValue('');
+  const handleSend = async () => {
+    if (!inputValue.trim() || uploading) return;
+    setUploading(true);
+    try {
+      await onSend(inputValue, selectedModel, selectedResolution, selectedRatio, files);
+      setInputValue('');
+    } finally {
+      setUploading(false);
+    }
   };
 
   /** 键盘事件 */
@@ -371,11 +383,12 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         {/* 输入框 */}
         <textarea
           className={styles.textarea}
-          placeholder="描述你希望如何编辑这张图片..."
+          placeholder={uploading ? '正在上传参考图...' : '描述你希望如何编辑这张图片...'}
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
           rows={3}
+          disabled={uploading}
         />
 
         {/* 底部状态栏 */}
@@ -420,10 +433,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
               <span>0.2 生成</span>
             </span>
             <button
-              className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
+              className={`${styles.sendBtn} ${inputValue.trim() && !uploading ? styles.sendBtnActive : ''}`}
               onClick={handleSend}
-              disabled={!inputValue.trim()}
-              title="发送"
+              disabled={!inputValue.trim() || uploading}
+              title={uploading ? '上传中...' : '发送'}
             >
               <ArrowUp size={16} fill="currentColor" strokeWidth={0} />
             </button>
