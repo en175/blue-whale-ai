@@ -107,10 +107,13 @@ async function processClaimedJob(
   // IK7GRP：统一失败入口——守卫失败时（job 已被新 worker 接管）仓储层返回 false，静默跳过。
   const failClaimed = async (code: string, msg: string) => {
     // IK9VZ0：失败释放校验——job 曾向 new-api 发出请求且有 request_id 时，先查流水确认是否真退款。
-    // 校验结果落 release_note：流水无扣费 → refund_confirmed；无证据/查不到/已扣 → refund_unverified。
-    let releaseNote: string | undefined;
+    // 校验结果落 release_note：流水确认无扣费 → refund_confirmed；已扣/查询异常 → refund_unverified。
+    // 无证据（无 request_id / 未注入查询）时默认 refund_unverified——无法确认 new-api 是否退款，
+    // 统一留痕供对账追溯（需求 4 完整性：每次失败释放必写 release_note）。
+    let releaseNote: string = "refund_unverified";
     if (attemptedRequestIds.length > 0 && deps.readConsumeQuota && providerTokenRef) {
       let charged = false;
+      let verified = true;
       for (const requestId of attemptedRequestIds) {
         try {
           const q = await deps.readConsumeQuota(providerTokenRef, requestId);
@@ -121,17 +124,19 @@ async function processClaimedJob(
             );
           }
         } catch {
-          // 查询异常：无法确认退款 → 归 refund_unverified
+          // 查询异常：无法确认退款 → 不得记 refund_confirmed（审计结论写反风险，IK9VZ0 C2）
+          verified = false;
         }
       }
-      releaseNote = charged ? "refund_unverified" : "refund_confirmed";
+      // 仅当所有证据查询成功且均无扣费时才算 confirmed。
+      if (verified && !charged) releaseNote = "refund_confirmed";
     }
     const failed = await repo.failJob({
       jobId: job.id,
       errorCode: code,
       errorMessage: msg,
       ...fenceProof,
-      ...(releaseNote ? { releaseNote } : {}),
+      releaseNote,
     });
   };
   if (job.type !== "image" && job.type !== "video" && job.type !== "audio") {
@@ -372,6 +377,11 @@ async function processClaimedJob(
         n: remaining,
       });
       images.push(...batch);
+      // IK9VZ0：逐批累加 request_id 证据——若后续批次生成失败，已成功批次的扣费
+      // 仍可被失败释放校验追溯（C3：此前循环结束后才赋值，后批失败会丢失前批证据）。
+      for (const img of batch) {
+        if (img.requestId) attemptedRequestIds.push(img.requestId);
+      }
       if (batch.length === 0) break;
       remaining = n - images.length;
     }
@@ -379,10 +389,6 @@ async function processClaimedJob(
       await failClaimed("no_result", "生成服务未返回结果");
       return job.id;
     }
-    // IK9VZ0：记录本次已发出的 new-api 请求证据（失败释放校验用）。
-    attemptedRequestIds = images
-      .map((img) => img.requestId)
-      .filter((r): r is string => Boolean(r));
     // IK67HE/T14：部分成功（images.length < n 但 > 0）→ 已成功的转 Asset 并 completeJob，
     // 由 completeJob 按槽位聚合为 partially_succeeded（ADR-0026）；缺失槽标 failed 供重试补齐。
     if (images.length !== n) {

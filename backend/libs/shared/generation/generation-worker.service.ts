@@ -94,8 +94,15 @@ export class GenerationWorkerService {
               quotaToFen: (quota: number) => quotaToFen(quota, costConfig),
             }
           : {}),
-        // IK9VZ0：实扣取证失败告警通道（日志 + 后续可接 metrics 打点）
-        warn: (message: string) => this.logger.warn(`[cost] ${message}`),
+        // IK9VZ0：实扣取证失败告警通道（日志 + metric 打点，需求 2「日志+指标」）。
+        warn: (message: string) => {
+          this.logger.warn(`[cost] ${message}`);
+          this.logger.metric({
+            event: "cost_receipt_failed",
+            result: "fail",
+            fields: { job_type: "image" },
+          });
+        },
       };
     }
     return this.depsInstance;

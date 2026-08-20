@@ -402,6 +402,10 @@ describe("video job runner recovery", () => {
     expect(repo.failVideoJob).toHaveBeenCalledWith(
       expect.objectContaining({ code: "invalid_video_inputs" }),
     );
+    // IK9VZ0 I5：派发前失败（未提交，无 providerTaskId）→ release_note = refund_confirmed
+    expect(repo.failVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ releaseNote: "refund_confirmed" }),
+    );
   });
 
   it("persists the provider task id so another worker can resume polling", async () => {

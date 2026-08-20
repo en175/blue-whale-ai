@@ -298,12 +298,13 @@ async function fail(
   // IK9Q1B：无论状态迁移是否成功都留痕。此前只有迁移成功才打 metric，
   // 出现「DB 已 failed 但 worker 无任何日志」的排查黑洞（job 985）。
   logger.warn(`video job 失败 jobId=${claim.id} code=${code} message=${message}`);
-  // IK9VZ0：视频无 request_id → 消费流水回退通道，失败时无法确认退款 → release_note=refund_unverified。
+  // IK9VZ0 I5：视频无 request_id → 消费流水回退通道；release_note 按是否已向 new-api 提交区分：
+  // 已提交（providerTaskId 存在，可能已扣）→ refund_unverified；未提交（派发前失败）→ refund_confirmed。
   const failed = await repo.failVideoJob({
     ...claimIdentity(claim),
     code,
     message,
-    releaseNote: "refund_unverified",
+    releaseNote: claim.providerTaskId ? "refund_unverified" : "refund_confirmed",
   });
   if (failed) {
     logger.metric({

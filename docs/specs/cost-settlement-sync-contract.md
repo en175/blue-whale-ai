@@ -12,7 +12,7 @@
 
 ## 同步方式（已定 2026-08-20：方案 A，new-api 主动推送）
 
-- **A（已选）**：new-api **主动推送** `POST <蓝鲸内部端点>/internal/cost-settlements`（批量，含 batch_no）——仿 bluewhalepay 回调；蓝鲸端不持有任何 new-api 凭证，封装边界最干净。
+- **A（已选）**：new-api **主动推送** `POST <蓝鲸内部端点>/api/internal/cost-settlements`（批量，含 batch_no）——仿 bluewhalepay 回调；蓝鲸端不持有任何 new-api 凭证，封装边界最干净。
 - ~~B. 蓝鲸端定时拉取~~（未选：需蓝鲸侧配置 new-api 查询凭证，破坏"Node 零凭证"边界）。
 
 ## 鉴权
@@ -24,7 +24,7 @@
 ## 端点
 
 ```
-POST /internal/cost-settlements
+POST /api/internal/cost-settlements
 Content-Type: application/json
 Authorization: Bearer <shared-token>
 ```

@@ -21,16 +21,16 @@ export interface ConsumptionRecord {
   created_at: number;
 }
 
-/** 充值记录分页 */
+/** 充值记录分页（后端参数 p/page_size，见 backend/libs/shared/account/records.ts） */
 export function fetchTopups(page = 1, pageSize = 20) {
   return apiRequest<{ items: TopUpRecord[]; total: number }>(
-    `/api/account/topups?page=${page}&pageSize=${pageSize}`,
+    `/api/account/topups?p=${page}&page_size=${pageSize}`,
   );
 }
 
 /** 消费记录分页 */
 export function fetchConsumptions(page = 1, pageSize = 20) {
   return apiRequest<{ items: ConsumptionRecord[]; total: number }>(
-    `/api/account/consumptions?page=${page}&pageSize=${pageSize}`,
+    `/api/account/consumptions?p=${page}&page_size=${pageSize}`,
   );
 }

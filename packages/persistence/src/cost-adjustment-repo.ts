@@ -35,24 +35,38 @@ export function createCostAdjustmentRepo(prisma: PrismaClient) {
       });
       if (existing > 0) return null;
 
-      return prisma.$transaction(async (tx) => {
-        await tx.cost_adjustments.createMany({
-          data: input.items.map((it) => ({
-            batch_no: input.batchNo,
-            generation_job_id: it.generationJobId
-              ? BigInt(it.generationJobId)
-              : null,
-            user_id: BigInt(it.userId),
-            project_id: it.projectId ? BigInt(it.projectId) : null,
-            action_type: it.actionType,
-            amount_fen: it.amountFen,
-            reason: it.reason,
-            status: "applied",
-            new_api_snapshot: input.settledAt ?? null,
-          })),
+      try {
+        return await prisma.$transaction(async (tx) => {
+          await tx.cost_adjustments.createMany({
+            data: input.items.map((it) => ({
+              batch_no: input.batchNo,
+              generation_job_id: it.generationJobId
+                ? BigInt(it.generationJobId)
+                : null,
+              user_id: BigInt(it.userId),
+              project_id: it.projectId ? BigInt(it.projectId) : null,
+              action_type: it.actionType,
+              amount_fen: it.amountFen,
+              reason: it.reason,
+              status: "applied",
+              new_api_snapshot: input.settledAt ?? null,
+            })),
+          });
+          return { count: input.items.length };
         });
-        return { count: input.items.length };
-      });
+      } catch (error) {
+        // IK9VZ0 I4：并发同 batch / 同 job×action 唯一冲突（P2002）→ 幂等返回 null，
+        // 调用方按 duplicate 处理（串行重复在 count 检查已拦截；此处兜底并发竞态）。
+        if (
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          (error as { code?: string }).code === "P2002"
+        ) {
+          return null;
+        }
+        throw error;
+      }
     },
   };
 }

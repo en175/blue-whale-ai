@@ -87,7 +87,7 @@ describe("CostSettlementInternalController（IK9VZ0）", () => {
     expect(consume).not.toHaveBeenCalled();
   });
 
-  it("batchNo 缺失 / items 非数组 → 400 invalid_batch", async () => {
+  it("batchNo 缺失 / items 非数组 / items 空 → 400 invalid_batch", async () => {
     const { controller, consume } = createController();
     await expect(
       controller.receive("Bearer test-shared-secret", { items: [] }),
@@ -98,6 +98,35 @@ describe("CostSettlementInternalController（IK9VZ0）", () => {
         items: "nope",
       }),
     ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      controller.receive("Bearer test-shared-secret", {
+        batchNo: "X",
+        items: [],
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(consume).not.toHaveBeenCalled();
+  });
+
+  it("reason 缺失/超长、jobId 非法、userId 非法 → 400 invalid_item（IK9VZ0 I3 校验补全）", async () => {
+    const { controller, consume } = createController();
+    const base = { userId: 1, action: "refund", amountFen: 100, reason: "x" };
+    const cases = [
+      { ...base, reason: "" },
+      { ...base, reason: "y".repeat(256) },
+      { ...base, jobId: "abc" },
+      { ...base, jobId: "0" },
+      { ...base, jobId: "-1" },
+      { ...base, userId: 0 },
+      { ...base, userId: 1.5 },
+    ];
+    for (const item of cases) {
+      await expect(
+        controller.receive("Bearer test-shared-secret", {
+          batchNo: "ADJ-I3",
+          items: [item as never],
+        }),
+      ).rejects.toMatchObject({ status: 400 });
+    }
     expect(consume).not.toHaveBeenCalled();
   });
 });
