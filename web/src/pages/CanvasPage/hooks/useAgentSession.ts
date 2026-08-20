@@ -256,11 +256,27 @@ export function useAgentSession(projectId: string) {
 
       /* ---- 思考过程流式更新（可折叠展示） ---- */
       if (t === 'reasoning_trace.updated.v1') {
-        const steps = Array.isArray(payload.steps) ? payload.steps.map((s) => str(s)).filter(Boolean) : [];
+        // 终态权威（V3 加法事件，run.completed 之后到达）：payload.reasoning_trace.steps 是
+        // {kind, summary} 结构；旧实现读 payload.steps（不存在）导致思考链永远为空。
+        const trace = (payload.reasoning_trace ?? {}) as { steps?: unknown };
+        const steps = Array.isArray(trace.steps)
+          ? trace.steps
+              .map((s) => (typeof s === 'string' ? s : str((s as { summary?: unknown })?.summary)))
+              .filter(Boolean)
+          : [];
         if (steps.length > 0) {
           setThinkingSteps(steps);
           setProgressTick((p) => p + 1);
         }
+        return;
+      }
+
+      /* ---- 运行中渐进思考（run.activity：W2 U7 实时思考面，payload {stage,summary,progress}） ---- */
+      if (t === 'run.activity') {
+        const summary = str(payload.summary);
+        if (!summary) return;
+        setThinkingSteps((prev) => (prev[prev.length - 1] === summary ? prev : [...prev, summary]));
+        setProgressTick((p) => p + 1);
         return;
       }
 
@@ -282,6 +298,8 @@ export function useAgentSession(projectId: string) {
         if (!runId) return;
         setFailedRunId((cur) => (cur === runId ? null : cur));
         setRunningRunId(runId);
+        // 新一轮开始：清掉上一轮思考，等 run.activity 实时重建（含自动排队的下一轮）
+        setThinkingSteps([]);
         return;
       }
 
@@ -309,7 +327,8 @@ export function useAgentSession(projectId: string) {
         const run = (payload.run ?? {}) as Record<string, unknown>;
         const runId = str(run.run_id ?? data.run_id);
         settleStream(runId);
-        setThinkingSteps([]);
+        // 不清空 thinkingSteps：终态后 reasoning_trace.updated.v1（加法事件）还会把最终思考链
+        // 替换进来；清空推迟到下一轮 run.queued/started，让用户可回看本轮思考
         if (t === 'run.failed') {
           setFailedRunId(runId || null);
         }

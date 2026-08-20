@@ -754,8 +754,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               </div>
             ),
           )}
-          {/* Agent 运行中的实时思考过程（reasoning_trace.updated.v1 流式） */}
-          {streaming && thinkingSteps.length > 0 && (
+          {/* Agent 的思考过程（run.activity 实时步 + reasoning_trace 终态链）；有步即展示，运行中/终态后都可回看 */}
+          {thinkingSteps.length > 0 && (
             <div className={styles.assistantBlock}>
               <ThinkingBlock steps={thinkingSteps} />
             </div>
