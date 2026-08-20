@@ -927,11 +927,17 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  /* 卡片本体定高，长提示词在卡内滚动；不占满整个对话宽度，居中留出呼吸感 */
-  max-height: 320px;
-  overflow-y: auto;
+  /* 不占满整个对话宽度，居中留出呼吸感 */
   width: 94%;
   margin: 0 auto;
+}
+
+/* 定高的是字段值而不是整张卡：整卡滚动会把底部的「应用到画布」一起卷走，
+   而那正是这张卡存在的目的。标题和按钮始终可见，只有长文本自己滚。 */
+.shotField .shotFieldValue,
+.shotEditTextarea {
+  max-height: 120px;
+  overflow-y: auto;
 }
 
 .shotHeader {

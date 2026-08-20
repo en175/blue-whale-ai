@@ -279,6 +279,62 @@ describe('useAgentSession 产卡逐版预览', () => {
   });
 });
 
+describe('useAgentSession 会话自举', () => {
+  it('初始化失败后再发送会当场补建会话，而不是永远卡在「会话正在初始化」', async () => {
+    // 挂载时列表请求失败 → sessionId 留在 null，这正是死胡同的起点。
+    mocks.listSessions.mockRejectedValueOnce(new Error('network down'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(mocks.listSessions).toHaveBeenCalled());
+    expect(latest.sessionId).toBeNull();
+
+    // 网络恢复后用户再发一次：应当自己把会话建起来并把消息发出去。
+    mocks.listSessions.mockResolvedValue({ items: [{ session_id: 'session-1' }] });
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    let sent = false;
+    await act(async () => {
+      sent = await latest.sendMessage('帮我生成一张插画');
+    });
+
+    expect(sent).toBe(true);
+    expect(latest.sessionId).toBe('session-1');
+    expect(mocks.sendSessionMessage).toHaveBeenCalledWith(
+      'project-1',
+      'session-1',
+      '帮我生成一张插画',
+      expect.anything(),
+    );
+    expect(latest.sendError).toBeNull();
+  });
+
+  it('补建也失败时给出可操作的提示，并保留输入', async () => {
+    mocks.listSessions.mockRejectedValue(new Error('network down'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(mocks.listSessions).toHaveBeenCalled());
+
+    let sent = true;
+    await act(async () => {
+      sent = await latest.sendMessage('帮我生成一张插画');
+    });
+
+    expect(sent).toBe(false);
+    expect(latest.sendError).toContain('输入内容已保留');
+    expect(mocks.sendSessionMessage).not.toHaveBeenCalled();
+  });
+
+  it('已有会话时不会多建一个', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.sessionId).toBe('session-1'));
+    mocks.createSession.mockClear();
+
+    await act(async () => {
+      await latest.sendMessage('帮我生成一张插画');
+    });
+
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+});
+
 describe('useAgentSession 运行计时', () => {
   it('提交那一刻就开表，不等 Run 排队、不等模型吐字', async () => {
     const pending = deferred<unknown>();

@@ -699,6 +699,23 @@ export function useAgentSession(projectId: string) {
     [projectId, handleEvent],
   );
 
+  /**
+   * 确保当前有一个已连接的会话，没有就现建一个。
+   *
+   * 初始化只在挂载时跑一次，失败就把 sessionId 永久留在 null——用户此后每次发送
+   * 都只能得到「会话正在初始化」，既不会自愈也没有重试入口，是个死胡同。
+   * 发送前先走这里，让一次网络抖动不再毁掉整个面板。
+   */
+  const ensureSession = useCallback(async (): Promise<string | null> => {
+    if (sessionIdRef.current) return sessionIdRef.current;
+    if (!projectId) return null;
+    const { items } = await api.listSessions(projectId);
+    const session = items?.[0] ?? (await api.createSession(projectId));
+    if (!session?.session_id) return null;
+    await connectSession(session);
+    return sessionIdRef.current;
+  }, [projectId, connectSession]);
+
   /** 初始化：列表取最近会话（无则创建）→ 连接会话 */
   useEffect(() => {
     if (!projectId) return;
@@ -770,11 +787,22 @@ export function useAgentSession(projectId: string) {
   const sendMessage = useCallback(
     async (content: string, forcedSkillId?: string): Promise<boolean> => {
       const text = content.trim();
-      const sid = sessionIdRef.current;
       if (!text) return false;
-      if (!projectId || !sid) {
-        setSendError('会话正在初始化，请稍后重试；输入内容已保留。');
-        return false;
+      if (!projectId) return false;
+      // 会话没建起来（初始化失败、或还没跑完）就当场补一个，而不是把用户堵在门外。
+      let sid = sessionIdRef.current;
+      if (!sid) {
+        try {
+          sid = await ensureSession();
+        } catch (e) {
+          console.warn('会话自举失败:', e);
+          sid = null;
+        }
+        if (!sid) {
+          setSendError('会话建立失败，请检查网络后重试；输入内容已保留。');
+          return false;
+        }
+        setSendError(null);
       }
       if (runningRef.current !== null || streamingRef.current) return false;
       const optimisticId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -838,7 +866,7 @@ export function useAgentSession(projectId: string) {
         return false;
       }
     },
-    [confirmUser, projectId],
+    [confirmUser, projectId, ensureSession],
   );
 
   /** 停止当前运行 POST runs/:runId/cancel（终态由事件流推送） */

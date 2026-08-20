@@ -261,6 +261,26 @@
   margin-top: 4px;
 }
 
+/* 落到画布的生成卡：字段值定高、内部滚动。
+   提示词动辄上千字，不封顶的话单个节点能把画布拉出一条几千像素的长龙。 */
+.gcValue,
+.gcEditTextarea {
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+/* 画面/提示词各自滚动，滚动条只在需要时出现，且不占字宽 */
+.gcValue::-webkit-scrollbar,
+.gcEditTextarea::-webkit-scrollbar {
+  width: 4px;
+}
+
+.gcValue::-webkit-scrollbar-thumb,
+.gcEditTextarea::-webkit-scrollbar-thumb {
+  background: #4a4d50;
+  border-radius: 2px;
+}
+
 .gcLabel {
   flex-shrink: 0;
   color: #777;
