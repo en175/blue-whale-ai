@@ -21,7 +21,9 @@ import {
   type SessionRecord,
   type SessionContentBlock,
   type SseEvent,
+  type PromptCardRecord,
 } from '@/api/agentSessions';
+import { cardsFromRevision } from '@/api/promptCardMapping';
 import * as mockAgentApi from '@/api/agentSessions.mock';
 import { isApiError } from '@/api/http';
 
@@ -52,6 +54,8 @@ export interface ChatMessage {
   blocks?: SessionContentBlock[];
   /** 服务端事件序号（排序依据；本地乐观气泡为最大值） */
   sequence_no: number;
+  /** 产出这条消息的 Run；生成卡按它对回自己的助手消息 */
+  sourceRunId?: string;
   /** 本地乐观上屏、尚未被服务端事件确认 */
   optimistic?: boolean;
 }
@@ -81,6 +85,33 @@ const textOf = (blocks: SessionMessage['content'] | undefined): string =>
     .map((b) => (typeof b?.text === 'string' ? b.text : ''))
     .join('');
 
+/**
+ * 把生成卡挂到产出它的那条助手消息上。
+ *
+ * 卡片正文不在消息里——agent 的助手消息只有正文文字，卡片走 prompt_cards。用 authoring_run_id
+ * 对上消息的 source_run_id，把卡片块接在该消息的块尾；对不上就挂到最后一条助手消息，避免
+ * 用户明明看到"已出卡"却什么都没有。
+ */
+function attachCards(messages: ChatMessage[], records: PromptCardRecord[] | undefined): ChatMessage[] {
+  const withCards = (records ?? []).filter((r) => r.active_revision?.payload?.shots?.length);
+  if (withCards.length === 0) return messages;
+
+  const next = [...messages];
+  for (const record of withCards) {
+    const cards = cardsFromRevision(record);
+    if (cards.length === 0) continue;
+    const blocks: SessionContentBlock[] = cards.map((card) => ({ type: 'card', card }));
+    const runId = record.active_revision?.authoring_run_id;
+    let idx = runId ? next.findIndex((m) => m.role === 'assistant' && m.sourceRunId === runId) : -1;
+    if (idx < 0) idx = next.map((m) => m.role).lastIndexOf('assistant');
+    if (idx < 0) continue;
+    // 幂等：同一批次可能因重连再次水合，已挂过就整体替换而不是追加
+    const kept = (next[idx]!.blocks ?? []).filter((b) => b.type !== 'card');
+    next[idx] = { ...next[idx]!, blocks: [...kept, ...blocks] };
+  }
+  return next;
+}
+
 /** 快照消息 → UI 消息 */
 const projectMessage = (m: SessionMessage): ChatMessage => ({
   id: m.message_id,
@@ -88,6 +119,7 @@ const projectMessage = (m: SessionMessage): ChatMessage => ({
   content: textOf(m.content),
   blocks: m.content ?? [],
   sequence_no: m.sequence,
+  ...(m.source_run_id ? { sourceRunId: m.source_run_id } : {}),
 });
 
 /**
@@ -97,6 +129,9 @@ const projectMessage = (m: SessionMessage): ChatMessage => ({
 export function useAgentSession(projectId: string) {
   /** 正式对话消息（快照水合 + 事件投影） */
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  /** 服务端会话阶段（awaiting_understanding_confirmation 等）。确认门走自然语言之后，
+   * 「正在等你确认」只能由服务端告知，前端无从从消息里推断。 */
+  const [sessionPhase, setSessionPhase] = useState<string>('');
   /** 当前会话ID */
   const [sessionId, setSessionId] = useState<string | null>(null);
   /** 当前项目下的历史会话列表（新→旧，供历史会话下拉使用） */
@@ -125,6 +160,8 @@ export function useAgentSession(projectId: string) {
   streamingRef.current = streaming;
   const sessionIdRef = useRef<string | null>(null);
   sessionIdRef.current = sessionId;
+  /** 本轮提交过生成卡的 Run：revision_committed 先到、run.completed 后到，用它串起两个事件 */
+  const cardRunsRef = useRef<Set<string>>(new Set());
 
   /** upsert 助手消息（按 message_id 幂等；与流式固化内容重复时合并） */
   const upsertAssistant = useCallback((msg: SessionMessage) => {
@@ -256,16 +293,41 @@ export function useAgentSession(projectId: string) {
         setRunningRunId((cur) => (cur === runId ? null : cur));
         const assistantMsg = payload.assistant_message as SessionMessage | undefined;
         if (assistantMsg?.message_id) upsertAssistant(assistantMsg);
+        const phase = str(payload.session_phase);
+        if (phase) setSessionPhase(phase);
+        // 本轮提交过生成卡：正文只在快照里，事件带的是引用，必须回查一次再挂上去
+        if (runId && cardRunsRef.current.has(runId)) {
+          cardRunsRef.current.delete(runId);
+          const sid = sessionIdRef.current;
+          if (sid) {
+            api.fetchSessionSnapshot(projectId, sid)
+              .then((snap) => {
+                if (sessionIdRef.current !== sid) return; // 期间切走了会话，丢弃
+                setMessages((prev) => attachCards(prev, snap.prompt_cards));
+                if (snap.session?.phase) setSessionPhase(snap.session.phase);
+              })
+              .catch((e) => console.warn('回查生成卡失败:', e));
+          }
+        }
+        return;
+      }
+
+      /* ---- 生成卡已提交：只带 card_id / revision 引用，正文等 run.completed 后回查快照 ---- */
+      if (t === 'prompt_card.revision_committed.v1') {
+        const runId = str(data.run_id);
+        if (runId) cardRunsRef.current.add(runId);
         return;
       }
     },
-    [confirmUser, settleStream, upsertAssistant],
+    [confirmUser, settleStream, upsertAssistant, projectId],
   );
 
   /** 复位本地对话态（切换会话/新对话） */
   const resetLocal = useCallback(() => {
     accRef.current = '';
     streamRunRef.current = '';
+    cardRunsRef.current.clear();
+    setSessionPhase('');
     setMessages([]);
     setStreamingText('');
     setStreaming(false);
@@ -289,7 +351,9 @@ export function useAgentSession(projectId: string) {
       unsubRef.current = null;
       setSessionId(session.session_id);
       const snap = await api.fetchSessionSnapshot(projectId, session.session_id);
-      setMessages((snap.messages ?? []).map(projectMessage));
+      // 历史会话里已提交的生成卡同样要还原，否则刷新一次卡就没了
+      setMessages(attachCards((snap.messages ?? []).map(projectMessage), snap.prompt_cards));
+      setSessionPhase(snap.session?.phase ?? '');
       if (snap.active_run?.run_id && !TERMINAL_STATUS.includes(snap.active_run.status)) {
         setRunningRunId(snap.active_run.run_id);
         setStreaming(true);
@@ -448,14 +512,13 @@ export function useAgentSession(projectId: string) {
       return 'processing';
     }
     // 非运行：按最新产出块判定
+    // 确认门走自然语言，消息里没有结构化块可认，只能由服务端阶段告知
+    if (sessionPhase === 'awaiting_understanding_confirmation') return 'awaiting_confirm';
     if (isFirstAssistantReply && !hasCards) return 'awaiting_input';
-    // 'awaiting_confirm' 不再从消息块推断：需求理解确认已改为纯自然语言，没有结构化块可认。
-    // 服务端的 SessionRecord.phase（awaiting_understanding_confirmation）才是权威来源，
-    // 接真实数据源时从那里读（S6 IK9VCM）。
     if (hasCards) return 'cards_ready';
     if (messages.length === 0 && !hasThinking) return 'idle';
     return 'processing';
-  }, [messages, runningRunId, streaming, failedRunId]);
+  }, [messages, runningRunId, streaming, failedRunId, sessionPhase]);
 
   return {
     messages,

@@ -77,12 +77,70 @@ export interface SessionRun {
   trace_id?: string | null;
 }
 
+/* ---- 生成卡批次（agent 侧 Prompt Card Revision Schema V3 的原样投影） ----
+ * 这里刻意保留 agent 的字段名与结构，不在传输层改形状：翻译成侧边栏卡片模型的动作
+ * 集中在 useAgentSession 的映射函数里，只有一处需要跟着协议变。 */
+
+/** 单镜头（V3 $defs.shotCard） */
+export interface PromptCardShot {
+  shot_no: number;
+  title: string;
+  frame_description: string;
+  prompt_text: string;
+  asset_bindings: { asset_ref_id: string; role?: string; strength?: string; note?: string }[];
+  generation_suggestions?: {
+    target_media?: 'image' | 'video';
+    aspect_ratio?: string;
+    resolution?: string;
+    size?: string;
+    duration_seconds?: number;
+    count?: number;
+  };
+}
+
+/** 素材出处（V3 $defs.assetProvenance）：asset_ref_id → 可读名称的唯一来源 */
+export interface PromptCardAssetProvenance {
+  asset_ref_id: string;
+  asset_id: string;
+  asset_version: string;
+  media_type: 'image' | 'video';
+  display_label: string;
+  accepted_summary?: string;
+}
+
+/** 修订版正文：一段总览 + 若干单镜头卡 */
+export interface PromptCardRevisionPayload {
+  schema_version: number;
+  target_media: 'image' | 'video';
+  overview: string;
+  shots: PromptCardShot[];
+  assets: PromptCardAssetProvenance[];
+}
+
+/** 快照里的生成卡组：一个 Session 一组，active_revision 是当前生效版本 */
+export interface PromptCardRecord {
+  card_id: string;
+  session_id?: string;
+  active_revision_id?: string;
+  revision_count?: number;
+  active_revision?: {
+    revision_id: string;
+    card_id: string;
+    authoring_run_id?: string;
+    revision_number: number;
+    schema_version: number;
+    payload: PromptCardRevisionPayload;
+  } | null;
+}
+
 /** 会话快照（水合入口） */
 export interface SessionSnapshot {
   session: SessionRecord & { title_source?: string; pending_message_count?: number };
   messages: SessionMessage[];
   active_run?: SessionRun | null;
   latest_terminal_run?: SessionRun | null;
+  /** 生成卡正文只在快照里，事件只带 card_id / revision 引用，拿到事件后必须回查这里 */
+  prompt_cards?: PromptCardRecord[];
   event_cursor?: string;
 }
 
