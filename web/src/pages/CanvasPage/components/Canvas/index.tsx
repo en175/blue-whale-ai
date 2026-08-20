@@ -231,6 +231,23 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     // onDeleteNode 通过 data.onDelete 传入 TextNode
   }, [onDeleteNode]);
 
+  /** 全局拦截 Delete/Backspace/Enter 键删除行为 */
+  useEffect(() => {
+    const BLOCKED_KEYS = ['Delete', 'Backspace', 'Enter'];
+    const handler = (e: KeyboardEvent) => {
+      if (!BLOCKED_KEYS.includes(e.key)) return;
+      const target = e.target as HTMLElement;
+      // 输入框/编辑器内允许正常使用这些键
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    document.addEventListener('keydown', handler, true);
+    return () => document.removeEventListener('keydown', handler, true);
+  }, []);
+
   return (
     <div className={`${styles.canvasContainer} ${isDrag ? styles.dragMode : ''}`}>
       <ReactFlow
@@ -251,10 +268,13 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         nodesDraggable={!isDrag}
         elementsSelectable={!isDrag}
         nodesConnectable={!isDrag}
+        nodesFocusable={false}
+        edgesFocusable={false}
         maxZoom={8}
         connectionRadius={30}
         defaultViewport={{ x: 0, y: 0, zoom: 1.1 }}
         proOptions={{ hideAttribution: true }}
+        keyboard={{ onDelete: false }}
         defaultEdgeOptions={{
           type: 'custom',
           style: { stroke: '#444' },

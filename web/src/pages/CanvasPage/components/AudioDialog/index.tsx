@@ -2,7 +2,7 @@
  * AudioDialog 音频生成底部对话框：纯文本描述 + 真实模型（fetchGenerationModels('audio')）
  * ============================================ */
 import { useEffect, useState } from 'react';
-import { X, AudioLines, ChevronDown, Sparkles, Music } from 'lucide-react';
+import { X, AudioLines, ChevronDown, Sparkles, Music, ArrowUp } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import styles from './index.module.css';
 
@@ -142,14 +142,17 @@ export default function AudioDialog({ onClose, onSend }: AudioDialogProps) {
         </div>
 
         <div className={styles.barRight}>
-          <span className={styles.simHint}>生成</span>
-          <button
-            className={`${styles.generateBtn} ${text.trim() && modelId ? styles.generateBtnActive : ''}`}
-            disabled={!text.trim() || !modelId}
-            onClick={handleSend}
-          >
+          <span className={styles.costText}>
             <Sparkles size={14} strokeWidth={2} />
             <span>生成</span>
+          </span>
+          <button
+            className={`${styles.sendBtn} ${text.trim() && modelId ? styles.sendBtnActive : ''}`}
+            disabled={!text.trim() || !modelId}
+            onClick={handleSend}
+            title="发送"
+          >
+            <ArrowUp size={16} fill="currentColor" strokeWidth={0} />
           </button>
         </div>
       </div>

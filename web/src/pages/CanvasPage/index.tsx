@@ -78,7 +78,7 @@ export default function CanvasPage() {
   /** 节点工具条带入图片对话框的初始值（ts 作为 key 强制重挂载以注入初始值） */
   const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[] } | null>(null);
   /** 节点工具条带入视频对话框的初始参考；cards 是「引用到 dock」累计的生成卡胶囊，不因再次点击覆盖 */
-  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; cards?: ChipRef[] } | null>(null);
+  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; cards?: ChipRef[]; text?: string } | null>(null);
   /** 节点工具条打开音频对话框的重挂载 key */
   const [audioSeed, setAudioSeed] = useState<{ ts: number } | null>(null);
   /** 当前视口（拖拽/缩放结束更新），自动保存时序列化提交 */
@@ -888,16 +888,31 @@ export default function CanvasPage() {
     return { src, type, name, prompt };
   };
 
-  /** 重新编辑：图片对话框 + 原提示词 + 图片 */
+  /** 重新编辑：视频节点 → 视频对话框；图片节点 → 图片对话框 */
   const handleNodeReEdit = (id: string) => {
     const ref = nodeRefOf(id);
     if (!ref) return;
-    setImageSeed({
-      ts: Date.now(),
-      text: ref.prompt,
-      files: [{ id: `node-${id}`, url: ref.src, type: ref.type, name: ref.name }],
-    });
-    handleOpenImageDialog();
+
+    if (ref.type === 'video') {
+      // 视频节点：打开视频对话框（底部窗口）
+      setVideoSeed({
+        ts: Date.now(),
+        refs: [{ preview: ref.src, type: ref.type }],
+        text: ref.prompt,
+      });
+      setShowBottomDialog(true);
+      setShowImageDialog(false);
+      setShowAudioDialog(false);
+      setShowMusicDialog(false);
+    } else {
+      // 图片节点：打开图片对话框（原有逻辑）
+      setImageSeed({
+        ts: Date.now(),
+        text: ref.prompt,
+        files: [{ id: `node-${id}`, url: ref.src, type: ref.type, name: ref.name }],
+      });
+      handleOpenImageDialog();
+    }
   };
 
   /** 生成图片：图片对话框 + 图片 */
@@ -1316,6 +1331,7 @@ export default function CanvasPage() {
             key={videoSeed?.ts ?? 0}
             initialRefs={videoSeed?.refs}
             initialCards={videoSeed?.cards}
+            initialText={videoSeed?.text}
             onClose={() => setShowBottomDialog(false)}
             onSend={handleDialogSend}
           />
