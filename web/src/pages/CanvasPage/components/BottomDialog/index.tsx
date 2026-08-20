@@ -521,7 +521,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
       <div className={styles.editorWrap}>
         <ChipTextEditor
           ref={chipEditorRef}
-          placeholder="上传 3-10 秒视频片段，并结合文本或图片轻松修改内容、改变镜头角度或重塑原视频风格。可使用 @ 快速插入已添加资源。"
+          placeholder="上传 3-10 秒视频，结合文本或图片编辑，@ 插入已添加资源。"
           onChangeText={setComposedText}
           onSend={handleSend}
           className={styles.editorArea}
