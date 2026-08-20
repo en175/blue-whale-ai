@@ -97,15 +97,13 @@ describe("processNextJob 音频分支（IK9ILQ）", () => {
       height: null,
     });
     const createAsset = vi.fn().mockResolvedValue("a1");
-    const completeJob = vi.fn().mockResolvedValue(true);
-    const settleReservation = vi.fn().mockResolvedValue(true);
+    const completeJobAndSettle = vi.fn().mockResolvedValue(true);
     const appendLog = vi.fn().mockResolvedValue(undefined);
     const repo = {
       claimNextJob,
       findImageCapability,
       createAsset,
-      completeJob,
-      settleReservation,
+      completeJobAndSettle,
       appendLog,
     } as unknown as WorkerRepo;
 
@@ -147,7 +145,7 @@ describe("processNextJob 音频分支（IK9ILQ）", () => {
         fencingToken: 5,
       }),
     );
-    expect(completeJob).toHaveBeenCalledWith(
+    expect(completeJobAndSettle).toHaveBeenCalledWith(
       expect.objectContaining({
         jobId: "j1",
         assetIds: ["a1"],
@@ -155,13 +153,10 @@ describe("processNextJob 音频分支（IK9ILQ）", () => {
         fencingToken: 5,
       }),
     );
-    // IK9ILQ：音频实扣 = readConsumeQuota(10) → quotaToFen(10) = 100n。
-    expect(settleReservation).toHaveBeenCalledWith(
+    // IK9ILQ：音频实扣 = readConsumeQuota(10) → quotaToFen(10) = 100n（单事务结算）。
+    expect(completeJobAndSettle).toHaveBeenCalledWith(
       expect.objectContaining({
-        jobId: "j1",
         actualAmountFen: 100n,
-        workerId: "worker-1",
-        fencingToken: 5,
       }),
     );
   });
@@ -190,16 +185,14 @@ describe("processNextJob 图片实扣取证（IK9VZ0）", () => {
       height: 512,
     });
     const createAsset = vi.fn().mockResolvedValue("a1");
-    const completeJob = vi.fn().mockResolvedValue(true);
-    const settleReservation = vi.fn().mockResolvedValue(true);
+    const completeJobAndSettle = vi.fn().mockResolvedValue(true);
     const appendLog = vi.fn().mockResolvedValue(undefined);
     const repo = {
       claimNextJob,
       resolveInputAssets: vi.fn().mockResolvedValue([]),
       findImageCapability,
       createAsset,
-      completeJob,
-      settleReservation,
+      completeJobAndSettle,
       appendLog,
     } as unknown as WorkerRepo;
 
@@ -250,12 +243,12 @@ describe("processNextJob 图片实扣取证（IK9VZ0）", () => {
     expect(jobId).toBe("j-img");
     // 取证失败必须告警（含 actual_amount_fen 落 0 语义），不再静默
     expect(warnLogs.some((l) => l.includes("actual_amount_fen") && l.includes("0"))).toBe(true);
-    // 仍正常完成 job，actual 落 0（不传 actualAmountFen）
-    expect(completeJob).toHaveBeenCalledWith(
+    // 仍正常完成 job，actual 落 0（不传 actualAmountFen，单事务结算）
+    expect(completeJobAndSettle).toHaveBeenCalledWith(
       expect.objectContaining({ jobId: "j-img", assetIds: ["a1"] }),
     );
-    expect(settleReservation).toHaveBeenCalledWith(
-      expect.not.objectContaining({ actualAmountFen: expect.anything() }),
+    expect(completeJobAndSettle).not.toHaveBeenCalledWith(
+      expect.objectContaining({ actualAmountFen: expect.anything() }),
     );
   });
 });

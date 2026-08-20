@@ -146,6 +146,15 @@ export interface WorkerRepo {
     workerId: string;
     fencingToken: number;
   }): Promise<boolean>;
+  /** IK9VZ0：图片结算原子化——completeJob 与 settleReservation 合并单事务。
+   *  事务中段抛错整事务回滚，job 与预留不会出现「一边成功一边悬挂」。 */
+  completeJobAndSettle(input: {
+    jobId: string;
+    assetIds: string[];
+    workerId: string;
+    fencingToken: number;
+    actualAmountFen?: bigint;
+  }): Promise<boolean>;
   /** 任务失败：置 failed + error + 记日志。
    *  守卫失败（stale worker）返回 false，不产生任何副作用（IK7GRP）。
    *  succeeded 任务不会被迟到的 failJob 翻为 failed。 */

@@ -30,153 +30,196 @@ async function releaseReservationInTx(
   });
 }
 
-export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "completeJob" | "failJob" | "settleReservation" | "appendLog"> {
+/** IK7G9X：事务内结算预留（reserved → settled，写实扣金额）。 */
+async function settleReservationInTx(
+  tx: Prisma.TransactionClient,
+  jobId: string,
+  actualAmountFen: bigint,
+): Promise<void> {
+  await tx.cost_reservations.updateMany({
+    where: { generation_job_id: BigInt(jobId), status: "reserved" },
+    data: { status: "settled", actual_amount_fen: actualAmountFen },
+  });
+}
+
+/** completeJob 事务体（IK7GRP 守卫 CAS → 槽位 → 事件 → 汇总回写）。
+ *  供 completeJob 与 completeJobAndSettle 复用（IK9VZ0：图片结算原子化）。 */
+async function completeJobInTx(
+  tx: Prisma.TransactionClient,
+  input: {
+    jobId: string;
+    assetIds: string[];
+    workerId: string;
+    fencingToken: number;
+  },
+): Promise<boolean> {
+  // IK7GRP：守卫更新——CAS 把 processing → finalStatus（先占位 succeeded，按槽位聚合后修正）。
+  // 守卫不通过（count≠1）立即返回，后续槽位/事件/汇总回写均不执行。
+  const {jobId, assetIds, workerId, fencingToken} = input;
+  const guarded = await tx.generation_jobs.updateMany({
+    where: fenceWhere({jobId, workerId, fencingToken}),
+    data: {
+      status: "succeeded",
+      progress: 100,
+      output_asset_ids: assetIds.map((id) => Number(id)),
+      next_action_at: null,
+      lease_owner: null,
+      lease_expires_at: null,
+      version: {increment: 1},
+    },
+  });
+  if (guarded.count !== 1) return false;
+  // IK67HE/T14：同步输出槽状态——成功 asset 绑定对应 slot_index；缺失槽标 failed。
+  const slots = await tx.generation_output_slots.findMany({
+    where: { generation_job_id: BigInt(jobId) },
+    orderBy: { slot_index: "asc" },
+  });
+  let finalStatus = "succeeded";
+  if (slots.length > 0) {
+    for (const [i, assetId] of assetIds.entries()) {
+      const slot = slots[i];
+      if (slot) {
+        await tx.generation_output_slots.update({
+          where: { id: slot.id },
+          data: { status: "succeeded", asset_id: BigInt(assetId) },
+        });
+      }
+    }
+    // 未匹配到成功 asset 的剩余槽标 failed。
+    for (let i = assetIds.length; i < slots.length; i += 1) {
+      const slot = slots[i];
+      if (!slot) continue;
+      await tx.generation_output_slots.update({
+        where: { id: slot.id },
+        data: { status: "failed" },
+      });
+    }
+    // 聚合 job 状态（全部成功→succeeded；部分→partially_succeeded；全失败→failed）。
+    const statuses = slots.map((s, i) =>
+      i < assetIds.length ? "succeeded" : "failed",
+    );
+    if (statuses.every((s) => s === "succeeded")) {
+      finalStatus = "succeeded";
+    } else if (statuses.some((s) => s === "succeeded")) {
+      finalStatus = "partially_succeeded";
+    } else {
+      finalStatus = "failed";
+    }
+  }
+  // 聚合态与守卫占位不同时再修正（partially_succeeded / failed）。
+  if (finalStatus !== "succeeded") {
+    await tx.generation_jobs.update({
+      where: { id: BigInt(jobId) },
+      data: { status: finalStatus },
+    });
+  }
+  const job = await tx.generation_jobs.findUnique({
+    where: { id: BigInt(jobId) },
+  });
+  // 守卫 CAS 刚成功，同事务内该行必存在；不存在即数据损坏——抛错回滚整个事务，
+  // 不得返回 false（状态与槽位写入已发生，false 会被调用方误读为「守卫拒绝」）。
+  if (!job) {
+    throw new Error(`completeJob 守卫通过后任务 ${jobId} 不存在，数据损坏`);
+  }
+  if (job.project_id === null) return true;
+  await appendProjectEvent(tx, {
+    projectId: job.project_id.toString(),
+    eventType: "generation_job.status_changed",
+    aggregateType: "generation_job",
+    aggregateId: job.id.toString(),
+    aggregateVersion: job.version,
+    correlationId: `job_${job.id.toString()}`,
+    payload: {
+      job_id: job.id.toString(),
+      type: job.type,
+      source: job.source,
+      status: job.status,
+      progress: job.progress,
+      output_asset_ids: assetIds,
+    },
+  });
+  for (const [index, assetId] of assetIds.entries()) {
+    const slot = slots[index];
+    const slotIndex = slot?.slot_index ?? index;
+    await appendProjectEvent(tx, {
+      projectId: job.project_id.toString(),
+      eventType: "generation_job.output_attached",
+      aggregateType: "generation_job_output",
+      aggregateId: `${job.id.toString()}:${slotIndex}`,
+      aggregateVersion: 0,
+      correlationId: `job_${job.id.toString()}`,
+      payload: {
+        job_id: job.id.toString(),
+        slot_id: slot?.id.toString() ?? null,
+        slot_index: slotIndex,
+        status: "succeeded",
+        asset_id: assetId,
+        retry_of_slot_id:
+          slot?.retry_of_slot_id == null
+            ? null
+            : slot.retry_of_slot_id.toString(),
+        initial_placement_status: "pending",
+      },
+    });
+  }
+  for (let index = assetIds.length; index < slots.length; index += 1) {
+    const slot = slots[index];
+    if (!slot) continue;
+    await appendProjectEvent(tx, {
+      projectId: job.project_id.toString(),
+      eventType: "generation_job.output_updated",
+      aggregateType: "generation_job_output",
+      aggregateId: `${job.id.toString()}:${slot.slot_index}`,
+      aggregateVersion: 0,
+      correlationId: `job_${job.id.toString()}`,
+      payload: {
+        job_id: job.id.toString(),
+        slot_id: slot.id.toString(),
+        slot_index: slot.slot_index,
+        status: "failed",
+        asset_id: null,
+        retry_of_slot_id:
+          slot.retry_of_slot_id == null
+            ? null
+            : slot.retry_of_slot_id.toString(),
+        initial_placement_status: "pending",
+      },
+    });
+  }
+  // 回写关联的 SceneCardGenerationRecord.summary_status（视频路径）。
+  const firstSlot = slots[0];
+  if (firstSlot?.scene_card_generation_record_id) {
+    await syncRecordSummary(
+      tx,
+      firstSlot.scene_card_generation_record_id,
+    );
+  }
+  // 回写 StoryboardPreview.summary_status（图片路径，IK67HF/T15）。
+  await syncStoryboardPreviewSummary(tx, job.id);
+  return true;
+}
+
+export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "completeJob" | "completeJobAndSettle" | "failJob" | "settleReservation" | "appendLog"> {
   return {
     async completeJob(input) {
+      return prisma.$transaction(async (tx) => completeJobInTx(tx, input));
+    },
+
+    /** IK9VZ0：图片结算原子化——completeJob 与 settleReservation 合并单事务。
+     *  中间任何一步抛错整事务回滚：job 不会出现「已 succeeded 但预留仍 reserved」的账不平。
+     *  视频 publishVideoResult 本就是同事务，无需此入口；此处为图片/音频 finishJob 使用。 */
+    async completeJobAndSettle(input: {
+      jobId: string;
+      assetIds: string[];
+      workerId: string;
+      fencingToken: number;
+      actualAmountFen?: bigint;
+    }): Promise<boolean> {
       return prisma.$transaction(async (tx) => {
-        // IK7GRP：守卫更新——CAS 把 processing → finalStatus（先占位 succeeded，按槽位聚合后修正）。
-        // 守卫不通过（count≠1）立即返回，后续槽位/事件/汇总回写均不执行。
-        const {jobId, assetIds, workerId, fencingToken} = input;
-        const guarded = await tx.generation_jobs.updateMany({
-          where: fenceWhere({jobId, workerId, fencingToken}),
-          data: {
-            status: "succeeded",
-            progress: 100,
-            output_asset_ids: assetIds.map((id) => Number(id)),
-            next_action_at: null,
-            lease_owner: null,
-            lease_expires_at: null,
-            version: {increment: 1},
-          },
-        });
-        if (guarded.count !== 1) return false;
-        // IK67HE/T14：同步输出槽状态——成功 asset 绑定对应 slot_index；缺失槽标 failed。
-        const slots = await tx.generation_output_slots.findMany({
-          where: { generation_job_id: BigInt(jobId) },
-          orderBy: { slot_index: "asc" },
-        });
-        let finalStatus = "succeeded";
-        if (slots.length > 0) {
-          for (const [i, assetId] of assetIds.entries()) {
-            const slot = slots[i];
-            if (slot) {
-              await tx.generation_output_slots.update({
-                where: { id: slot.id },
-                data: { status: "succeeded", asset_id: BigInt(assetId) },
-              });
-            }
-          }
-          // 未匹配到成功 asset 的剩余槽标 failed。
-          for (let i = assetIds.length; i < slots.length; i += 1) {
-            const slot = slots[i];
-            if (!slot) continue;
-            await tx.generation_output_slots.update({
-              where: { id: slot.id },
-              data: { status: "failed" },
-            });
-          }
-          // 聚合 job 状态（全部成功→succeeded；部分→partially_succeeded；全失败→failed）。
-          const statuses = slots.map((s, i) =>
-            i < assetIds.length ? "succeeded" : "failed",
-          );
-          if (statuses.every((s) => s === "succeeded")) {
-            finalStatus = "succeeded";
-          } else if (statuses.some((s) => s === "succeeded")) {
-            finalStatus = "partially_succeeded";
-          } else {
-            finalStatus = "failed";
-          }
-        }
-        // 聚合态与守卫占位不同时再修正（partially_succeeded / failed）。
-        if (finalStatus !== "succeeded") {
-          await tx.generation_jobs.update({
-            where: { id: BigInt(jobId) },
-            data: { status: finalStatus },
-          });
-        }
-        const job = await tx.generation_jobs.findUnique({
-          where: { id: BigInt(jobId) },
-        });
-        // 守卫 CAS 刚成功，同事务内该行必存在；不存在即数据损坏——抛错回滚整个事务，
-        // 不得返回 false（状态与槽位写入已发生，false 会被调用方误读为「守卫拒绝」）。
-        if (!job) {
-          throw new Error(`completeJob 守卫通过后任务 ${jobId} 不存在，数据损坏`);
-        }
-        if (job.project_id === null) return true;
-        await appendProjectEvent(tx, {
-          projectId: job.project_id.toString(),
-          eventType: "generation_job.status_changed",
-          aggregateType: "generation_job",
-          aggregateId: job.id.toString(),
-          aggregateVersion: job.version,
-          correlationId: `job_${job.id.toString()}`,
-          payload: {
-            job_id: job.id.toString(),
-            type: job.type,
-            source: job.source,
-            status: job.status,
-            progress: job.progress,
-            output_asset_ids: assetIds,
-          },
-        });
-        for (const [index, assetId] of assetIds.entries()) {
-          const slot = slots[index];
-          const slotIndex = slot?.slot_index ?? index;
-          await appendProjectEvent(tx, {
-            projectId: job.project_id.toString(),
-            eventType: "generation_job.output_attached",
-            aggregateType: "generation_job_output",
-            aggregateId: `${job.id.toString()}:${slotIndex}`,
-            aggregateVersion: 0,
-            correlationId: `job_${job.id.toString()}`,
-            payload: {
-              job_id: job.id.toString(),
-              slot_id: slot?.id.toString() ?? null,
-              slot_index: slotIndex,
-              status: "succeeded",
-              asset_id: assetId,
-              retry_of_slot_id:
-                slot?.retry_of_slot_id == null
-                  ? null
-                  : slot.retry_of_slot_id.toString(),
-              initial_placement_status: "pending",
-            },
-          });
-        }
-        for (let index = assetIds.length; index < slots.length; index += 1) {
-          const slot = slots[index];
-          if (!slot) continue;
-          await appendProjectEvent(tx, {
-            projectId: job.project_id.toString(),
-            eventType: "generation_job.output_updated",
-            aggregateType: "generation_job_output",
-            aggregateId: `${job.id.toString()}:${slot.slot_index}`,
-            aggregateVersion: 0,
-            correlationId: `job_${job.id.toString()}`,
-            payload: {
-              job_id: job.id.toString(),
-              slot_id: slot.id.toString(),
-              slot_index: slot.slot_index,
-              status: "failed",
-              asset_id: null,
-              retry_of_slot_id:
-                slot.retry_of_slot_id == null
-                  ? null
-                  : slot.retry_of_slot_id.toString(),
-              initial_placement_status: "pending",
-            },
-          });
-        }
-        // 回写关联的 SceneCardGenerationRecord.summary_status（视频路径）。
-        const firstSlot = slots[0];
-        if (firstSlot?.scene_card_generation_record_id) {
-          await syncRecordSummary(
-            tx,
-            firstSlot.scene_card_generation_record_id,
-          );
-        }
-        // 回写 StoryboardPreview.summary_status（图片路径，IK67HF/T15）。
-        await syncStoryboardPreviewSummary(tx, job.id);
+        const completed = await completeJobInTx(tx, input);
+        if (!completed) return false;
+        // 结算预留（reserved → settled + 实扣金额；缺省 0 = 旧行为）。
+        await settleReservationInTx(tx, input.jobId, input.actualAmountFen ?? 0n);
         return true;
       });
     },

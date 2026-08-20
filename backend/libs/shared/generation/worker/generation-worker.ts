@@ -101,14 +101,35 @@ async function processClaimedJob(
   // IK7GRP：claim 后 job 已是 processing + 当前 worker 持 lease；围栏凭证（workerId + fencingToken）
   // 随每次写方法透传，stale worker（旧 fencing_token / 失效 lease）的迟到写入被仓储层拒绝。
   const fenceProof = { workerId, fencingToken: job.fencingToken };
+  // IK9VZ0：失败释放校验用——本 job 曾发出的 new-api 请求证据（request_id 列表 + sk token）。
+  let attemptedRequestIds: string[] = [];
+  let providerTokenRef: string | undefined;
   // IK7GRP：统一失败入口——守卫失败时（job 已被新 worker 接管）仓储层返回 false，静默跳过。
-  const failClaimed = (code: string, msg: string) =>
-    repo.failJob({
+  const failClaimed = async (code: string, msg: string) => {
+    const failed = await repo.failJob({
       jobId: job.id,
       errorCode: code,
       errorMessage: msg,
       ...fenceProof,
     });
+    // IK9VZ0：失败释放校验——job 曾向 new-api 发出生成请求且能拿到 request_id 时，
+    // 查消费流水确认是否真退款；已扣则告警需人工核对（release_note=refund_unverified 见 Task 4）。
+    // 查不到/无证据/查询异常只告警不阻断失败流程。
+    if (failed && attemptedRequestIds.length > 0 && deps.readConsumeQuota && providerTokenRef) {
+      for (const requestId of attemptedRequestIds) {
+        try {
+          const q = await deps.readConsumeQuota(providerTokenRef, requestId);
+          if (q !== null && q > 0) {
+            deps.warn?.(
+              `[cost] job ${job.id} 失败但 new-api 流水显示已扣 quota=${q}（request_id=${requestId}），需人工核对退款`,
+            );
+          }
+        } catch {
+          // 告警通道已覆盖，不阻断失败流程
+        }
+      }
+    }
+  };
   if (job.type !== "image" && job.type !== "video" && job.type !== "audio") {
     await failClaimed("unsupported_type", `暂不支持类型: ${job.type}`);
     return job.id;
@@ -164,6 +185,7 @@ async function processClaimedJob(
       }
       const providerToken = credentialVault.open(sealedCredential);
       const provider = deps.createAudioProvider(providerToken);
+      providerTokenRef = providerToken;
       const cap = await repo.findImageCapability(modelId, null);
       if (!cap) {
         await failClaimed(
@@ -202,6 +224,9 @@ async function processClaimedJob(
       if (assetId === null) return job.id;
       // IK9ILQ：音频实扣金额 = 本次调用消费流水 quota → 分(fen)，仿图片路径接 requestId。
       let actualAmountFen: bigint | undefined;
+      if (audio.requestId) {
+        attemptedRequestIds = [audio.requestId];
+      }
       if (deps.readConsumeQuota && deps.quotaToFen && audio.requestId) {
         try {
           const quota = await deps.readConsumeQuota(
@@ -280,6 +305,7 @@ async function processClaimedJob(
     }
     const providerToken = credentialVault.open(sealedCredential);
     const provider = createImageProvider(providerToken);
+    providerTokenRef = providerToken;
 
     const sizeId = typeof input.size === "string" ? input.size : null;
     const cap = await repo.findImageCapability(modelId, sizeId);
@@ -349,6 +375,10 @@ async function processClaimedJob(
       await failClaimed("no_result", "生成服务未返回结果");
       return job.id;
     }
+    // IK9VZ0：记录本次已发出的 new-api 请求证据（失败释放校验用）。
+    attemptedRequestIds = images
+      .map((img) => img.requestId)
+      .filter((r): r is string => Boolean(r));
     // IK67HE/T14：部分成功（images.length < n 但 > 0）→ 已成功的转 Asset 并 completeJob，
     // 由 completeJob 按槽位聚合为 partially_succeeded（ADR-0026）；缺失槽标 failed 供重试补齐。
     if (images.length !== n) {
@@ -568,15 +598,15 @@ async function finishJob(
   fenceProof: { workerId: string; fencingToken: number },
   actualAmountFen?: bigint,
 ): Promise<void> {
-  // IK7GRP：completeJob / settleReservation 守卫失败（stale worker）返回 false，静默跳过后续 log。
-  const completed = await repo.completeJob({ jobId, assetIds, ...fenceProof });
-  if (!completed) return;
-  // IK7G9X：actualAmountFen 缺省不传 → 落 0（旧行为）；传入真实扣费时写真实值。
-  await repo.settleReservation({
+  // IK7GRP / IK9VZ0：completeJob + settleReservation 合并单事务（图片/音频结算原子化）。
+  // 中间抛错整事务回滚——不再出现「job 已 succeeded 但预留仍 reserved」的账不平。
+  const completed = await repo.completeJobAndSettle({
     jobId,
+    assetIds,
     ...fenceProof,
     ...(actualAmountFen !== undefined ? { actualAmountFen } : {}),
   });
+  if (!completed) return;
   await repo.appendLog(
     jobId,
     "succeeded",
