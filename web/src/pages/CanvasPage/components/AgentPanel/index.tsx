@@ -424,6 +424,12 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** 历史会话下拉容器 ref（外部点击自动收起判定） */
+  const historyRef = useRef<HTMLDivElement>(null);
+  /** 模型选择下拉容器 ref（外部点击自动收起判定） */
+  const modelRef = useRef<HTMLDivElement>(null);
+  /** 上传菜单容器 ref（外部点击自动收起判定） */
+  const uploadRef = useRef<HTMLDivElement>(null);
   /** 当前 Run 的技能推荐列表（推荐区域展示） */
   const [recs, setRecs] = useState<RunSkillRecommendation[]>([]);
   /** 已点 Use 的推荐技能ID（仅用户点 Use 可激活） */
@@ -520,6 +526,47 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     }
   }, [initialized]);
 
+  /** 窗口缩放自适应：固定模式右对齐贴边并随视口缩放高度，浮动模式仅约束不超出可视区 */
+  useEffect(() => {
+    const handleResize = () => {
+      const el = panelRef.current;
+      const page = el?.parentElement;
+      if (!el || !page) return;
+      const header = page.querySelector('header');
+      const headerH = header?.getBoundingClientRect().height ?? 0;
+      if (floating) {
+        const rect = el.getBoundingClientRect();
+        setPosition((prev) => ({
+          x: Math.min(Math.max(prev.x, 0), Math.max(0, page.clientWidth - rect.width)),
+          y: Math.min(Math.max(prev.y, headerH), Math.max(0, page.clientHeight - headerH - rect.height)),
+        }));
+        return;
+      }
+      // 固定模式：保持初始比例（右 1.5%、上 1%、下 7%），避免缩窗后被推出可视区
+      const rect = el.getBoundingClientRect();
+      setPosition({
+        x: Math.max(0, page.clientWidth * (1 - 0.015) - rect.width),
+        y: headerH + page.clientHeight * 0.01,
+      });
+      setPanelHeight(page.clientHeight - headerH - page.clientHeight * 0.08);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [floating]);
+
+  /** 下拉（历史会话 / 模型选择 / 上传菜单）外部点击自动收起（点击面板其他区域或页面任意处） */
+  useEffect(() => {
+    if (!historyOpen && !modelOpen && !showUpload) return;
+    const handleDocMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (historyRef.current && !historyRef.current.contains(target)) setHistoryOpen(false);
+      if (modelRef.current && !modelRef.current.contains(target)) setModelOpen(false);
+      if (uploadRef.current && !uploadRef.current.contains(target)) setShowUpload(false);
+    };
+    document.addEventListener('mousedown', handleDocMouseDown);
+    return () => document.removeEventListener('mousedown', handleDocMouseDown);
+  }, [historyOpen, modelOpen, showUpload]);
+
   /** 鼠标按下头部开始拖动（仅浮动模式下可拖） */
   const handleDragStart = useCallback(
     (e: React.MouseEvent) => {
@@ -573,13 +620,14 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     chipEditorRef.current?.setText(prompt);
   };
 
-  /** 开启新对话：清空当前输入、消息流、技能推荐与武装的强制技能 */
+  /** 开启新对话：清空当前输入、消息流、技能推荐、武装技能与历史下拉 */
   const handleNewChat = () => {
     chipEditorRef.current?.clear();
     resetChat();
     setRecs([]);
     setUsedSkillIds(new Set());
     setForcedSkill(null);
+    setHistoryOpen(false);
   };
 
   /** 使用推荐技能：标记已激活，并把技能意图追加为一条消息提交给 Agent（顺带清掉「直接使用」武装，避免双技能叠加） */
@@ -647,7 +695,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
             <Plus size={14} strokeWidth={2.5} />
             <span>新对话</span>
           </button>
-          <div className={styles.historyWrap}>
+          <div className={styles.historyWrap} ref={historyRef}>
             <button
               className={`${styles.iconBtn} ${historyOpen ? styles.iconBtnActive : ''}`}
               onClick={() => {
@@ -923,7 +971,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           <div className={styles.inputToolbar}>
           {/* 左侧 */}
           <div className={styles.toolbarLeft}>
-            <div className={styles.uploadWrap}>
+            <div className={styles.uploadWrap} ref={uploadRef}>
               <button
                 className={styles.toolBtn}
                 onClick={handleUploadClick}
@@ -956,7 +1004,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
           {/* 右侧 */}
           <div className={styles.toolbarRight}>
-            <div className={styles.modelWrap}>
+            <div className={styles.modelWrap} ref={modelRef}>
               <button
                 className={styles.modelBtn}
                 onClick={() => setModelOpen(!modelOpen)}
