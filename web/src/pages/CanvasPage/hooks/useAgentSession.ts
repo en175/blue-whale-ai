@@ -30,6 +30,7 @@ import {
 import { cardsFromRevision } from '@/api/promptCardMapping';
 import { isApiError } from '@/api/http';
 import { newIdempotencyKey } from '@/api/jobs';
+import { deriveAgentPhase, type DerivedAgentPhase } from './agentSessionState';
 
 /** 数据源：真实 /api/agent/v1（经 BFF 代理到独立 agent 服务）。本地开发需起 backend:3100 + agent + SSH 隧道，见 bw-test-env。 */
 const api = {
@@ -62,19 +63,18 @@ export interface ChatMessage {
 }
 
 /** 侧边栏用户可见状态（对齐 04-侧边栏规范 §7） */
-export type AgentPhase =
-  | 'idle' // 等待输入
-  | 'processing' // Agent 处理中
-  | 'awaiting_input' // 等待用户补充（追问后）
-  | 'awaiting_confirm' // 等待用户确认理解（确认门）；确认走自然语言，阶段由服务端 phase 给出
-  | 'generating_cards' // 生成卡生成中
-  | 'cards_ready' // 生成卡已生成
-  | 'applying' // 生成卡应用中
-  | 'applied' // 生成卡已应用
-  | 'failed'; // Agent 端处理失败
+export type AgentPhase = DerivedAgentPhase;
 
 /** 运行终态集合（status_changed/run.* 终态判定） */
-const TERMINAL_STATUS = ['completed', 'succeeded', 'failed', 'cancelled', 'canceled', 'stopped'];
+const TERMINAL_STATUS = [
+  'completed',
+  'succeeded',
+  'failed',
+  'cancelled',
+  'canceled',
+  'stopped',
+  'outcome_unknown',
+];
 
 /** 运行中无产出事件的兜底提示阈值（毫秒）：超过该时长仍无 delta/思考/终态，提示用户可诊断信息，不无限「处理中」 */
 const LONG_RUN_HINT_MS = 60_000;
@@ -162,8 +162,14 @@ export function useAgentSession(projectId: string) {
   const [pendingUnderstanding, setPendingUnderstanding] = useState<RequirementUnderstanding | null>(null);
   /** 确认/修改动作失败提示 */
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  /** 确认/修改请求在途：同步 ref 防同一渲染帧双击，state 驱动按钮禁用 */
+  const [confirmationPending, setConfirmationPending] = useState(false);
   /** 重试接口不可用标志（后端 404 时置位：重试按钮禁用并说明原因，不做静默降级；新 run/新消息清除） */
   const [retryUnavailable, setRetryUnavailable] = useState(false);
+  /** 消息提交失败（含 capability/payment 阻断）的用户可见提示 */
+  const [sendError, setSendError] = useState<string | null>(null);
+  /** Run 在计费门暂停时的可操作提示；保留 runningRunId 以允许取消，不再显示“处理中” */
+  const [paymentRequiredMessage, setPaymentRequiredMessage] = useState<string | null>(null);
 
   /** 流式累积缓冲 */
   const accRef = useRef('');
@@ -176,19 +182,27 @@ export function useAgentSession(projectId: string) {
   streamingRef.current = streaming;
   const sessionIdRef = useRef<string | null>(null);
   sessionIdRef.current = sessionId;
+  /** 每次连接/复位递增；所有异步快照、水合和创建回调只允许当前代写入状态。 */
+  const connectionEpochRef = useRef(0);
+  /** 确认动作同步防重入；React state 尚未刷新时也只能发一次 action_id。 */
+  const confirmationPendingRef = useRef(false);
+  /** 历史列表请求代次；session.updated 会使更早的列表响应失效，避免标题回滚。 */
+  const sessionsEpochRef = useRef(0);
+  /** 已观察到终态的 Run，防 REST ack 晚于 SSE 终态时把它重新标成运行中。 */
+  const terminalRunIdsRef = useRef<Set<string>>(new Set());
   /** 本轮提交过生成卡的 Run：revision_committed 先到、run.completed 后到，用它串起两个事件 */
   const cardRunsRef = useRef<Set<string>>(new Set());
 
   /** 运行兜底计时：run 活跃且 LONG_RUN_HINT_MS 内无任何产出/终态事件 → 置 longRunning 提示（有 delta/思考即重置） */
   useEffect(() => {
-    if (!runningRunId) {
+    if (!runningRunId && !streaming) {
       setLongRunning(false);
       return;
     }
     setLongRunning(false);
     const t = window.setTimeout(() => setLongRunning(true), LONG_RUN_HINT_MS);
     return () => window.clearTimeout(t);
-  }, [runningRunId, progressTick]);
+  }, [runningRunId, streaming, progressTick]);
 
   /** upsert 助手消息（按 message_id 幂等；与流式固化内容重复时合并） */
   const upsertAssistant = useCallback((msg: SessionMessage) => {
@@ -237,6 +251,7 @@ export function useAgentSession(projectId: string) {
     const text = accRef.current;
     accRef.current = '';
     setStreamingText('');
+    streamingRef.current = false;
     setStreaming(false);
     if (!text.trim()) return;
     setMessages((prev) => {
@@ -250,11 +265,24 @@ export function useAgentSession(projectId: string) {
     });
   }, []);
 
+  /** 失败/取消/不确定终态不能把 provisional delta 固化成正式助手消息。 */
+  const discardStream = useCallback(() => {
+    accRef.current = '';
+    streamRunRef.current = '';
+    streamingRef.current = false;
+    setStreamingText('');
+    setStreaming(false);
+  }, []);
+
   /** 刷新历史会话列表（供下拉展示；新对话/切换后重拉一次即可，不做轮询） */
   const refreshSessions = useCallback(() => {
     if (!projectId) return;
+    const epoch = sessionsEpochRef.current + 1;
+    sessionsEpochRef.current = epoch;
     api.listSessions(projectId)
-      .then(({ items }) => setSessions(items ?? []))
+      .then(({ items }) => {
+        if (sessionsEpochRef.current === epoch) setSessions(items ?? []);
+      })
       .catch((e) => console.warn('获取历史会话列表失败:', e));
   }, [projectId]);
 
@@ -301,6 +329,8 @@ export function useAgentSession(projectId: string) {
         const understanding = (payload.understanding ?? null) as RequirementUnderstanding | null;
         setPendingUnderstanding(understanding);
         setConfirmError(null);
+        confirmationPendingRef.current = false;
+        setConfirmationPending(false);
         return;
       }
 
@@ -311,8 +341,11 @@ export function useAgentSession(projectId: string) {
         const runId = str((payload.scheduling as Record<string, unknown> | undefined)?.run_id ?? data.run_id);
         if (runId) {
           setFailedRunId(null);
+          runningRef.current = runId;
           setRunningRunId(runId);
           setRetryUnavailable(false);
+          setPaymentRequiredMessage(null);
+          setSendError(null);
         }
         return;
       }
@@ -322,11 +355,13 @@ export function useAgentSession(projectId: string) {
         const runId = str((payload.run as Record<string, unknown> | undefined)?.run_id ?? data.run_id);
         if (!runId) return;
         setFailedRunId((cur) => (cur === runId ? null : cur));
+        runningRef.current = runId;
         setRunningRunId(runId);
         // 新一轮开始：清掉上一轮思考与待确认卡，等 run.activity / proposed 事件重建（含自动排队的下一轮）
         setThinkingSteps([]);
         setPendingUnderstanding(null);
         setRetryUnavailable(false);
+        setPaymentRequiredMessage(null);
         return;
       }
 
@@ -339,6 +374,10 @@ export function useAgentSession(projectId: string) {
         const runId = streamId.startsWith('assistant_run_')
           ? streamId.slice('assistant_run_'.length)
           : str(data.run_id);
+        if (runId && runningRef.current === null && !terminalRunIdsRef.current.has(runId)) {
+          runningRef.current = runId;
+          setRunningRunId(runId);
+        }
         // 新交付开始：复位缓冲
         if (streamRunRef.current !== runId) {
           streamRunRef.current = runId;
@@ -349,17 +388,42 @@ export function useAgentSession(projectId: string) {
         return;
       }
 
+      /* ---- 计费门暂停：不是运行中，也不是可自动恢复的终态；明确提示并保留取消入口 ---- */
+      if (t === 'run.payment_required') {
+        const run = (payload.run ?? {}) as Record<string, unknown>;
+        const reason = (payload.reason ?? {}) as Record<string, unknown>;
+        const runId = str(run.run_id ?? data.run_id);
+        discardStream();
+        runningRef.current = runId || null;
+        setRunningRunId(runId || null);
+        setPaymentRequiredMessage(str(reason.message) || '运行授权或余额不足，请处理后继续，或取消本次运行。');
+        return;
+      }
+
       /* ---- 运行终态 ---- */
-      if (t === 'run.completed' || t === 'run.failed' || t === 'run.cancelled' || t === 'run.stopped') {
+      if (
+        t === 'run.completed' ||
+        t === 'run.failed' ||
+        t === 'run.cancelled' ||
+        t === 'run.stopped' ||
+        t === 'run.outcome_unknown'
+      ) {
         const run = (payload.run ?? {}) as Record<string, unknown>;
         const runId = str(run.run_id ?? data.run_id);
-        settleStream(runId);
+        if (runId) terminalRunIdsRef.current.add(runId);
+        if (t === 'run.completed') settleStream(runId);
+        else discardStream();
         // 不清空 thinkingSteps：终态后 reasoning_trace.updated.v1（加法事件）还会把最终思考链
         // 替换进来；清空推迟到下一轮 run.queued/started，让用户可回看本轮思考
-        if (t === 'run.failed') {
+        if (t === 'run.failed' || t === 'run.outcome_unknown') {
           setFailedRunId(runId || null);
         }
-        setRunningRunId((cur) => (cur === runId ? null : cur));
+        setPaymentRequiredMessage(null);
+        setRunningRunId((cur) => {
+          const next = cur === runId ? null : cur;
+          runningRef.current = next;
+          return next;
+        });
         const assistantMsg = payload.assistant_message as SessionMessage | undefined;
         if (assistantMsg?.message_id) upsertAssistant(assistantMsg);
         const phase = str(payload.session_phase);
@@ -395,16 +459,21 @@ export function useAgentSession(projectId: string) {
       if (t === 'session.updated') {
         const s = (payload.session ?? null) as SessionRecord | null;
         if (s?.session_id) {
+          sessionsEpochRef.current += 1;
           setSessions((prev) => prev.map((item) => (item.session_id === s.session_id ? { ...item, ...s } : item)));
         }
         return;
       }
     },
-    [confirmUser, refreshSessions, settleStream, upsertAssistant, projectId],
+    [confirmUser, discardStream, refreshSessions, settleStream, upsertAssistant, projectId],
   );
 
   /** 复位本地对话态（切换会话/新对话） */
   const resetLocal = useCallback(() => {
+    connectionEpochRef.current += 1;
+    sessionsEpochRef.current += 1;
+    unsubRef.current?.();
+    unsubRef.current = null;
     accRef.current = '';
     streamRunRef.current = '';
     cardRunsRef.current.clear();
@@ -413,29 +482,40 @@ export function useAgentSession(projectId: string) {
     setStreamingText('');
     setStreaming(false);
     setRunningRunId(null);
+    runningRef.current = null;
     setFailedRunId(null);
     setThinkingSteps([]);
     setChatError(null);
     setPendingUnderstanding(null);
     setConfirmError(null);
+    confirmationPendingRef.current = false;
+    setConfirmationPending(false);
     setRetryUnavailable(false);
+    setSendError(null);
+    setPaymentRequiredMessage(null);
+    terminalRunIdsRef.current.clear();
   }, []);
 
   /** 连接到指定会话：水合快照 + 订阅事件流（先解绑旧订阅，防止串话到上一个会话） */
   const connectSession = useCallback(
     async (session: { session_id: string }) => {
+      const epoch = connectionEpochRef.current + 1;
+      connectionEpochRef.current = epoch;
       unsubRef.current?.();
       unsubRef.current = null;
+      sessionIdRef.current = session.session_id;
       setSessionId(session.session_id);
       const snap = await api.fetchSessionSnapshot(projectId, session.session_id);
+      if (connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return false;
       // 历史会话里已提交的生成卡同样要还原，否则刷新一次卡就没了
       setMessages(attachCards((snap.messages ?? []).map(projectMessage), snap.prompt_cards));
       setSessionPhase(snap.session?.phase ?? '');
+      setChatError(null);
       // 确认门恢复：snapshot 不带待确认 understanding，等待确认阶段单独拉一次
       if (snap.session?.phase === 'awaiting_understanding_confirmation') {
         api.fetchRequirementUnderstandings(projectId, session.session_id)
           .then(({ items }) => {
-            if (sessionIdRef.current !== session.session_id) return; // 期间切走会话，丢弃
+            if (connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return;
             const pending = (items ?? []).find((u) => u.status === 'awaiting_confirmation');
             if (pending) {
               setPendingUnderstanding(pending);
@@ -444,16 +524,36 @@ export function useAgentSession(projectId: string) {
           })
           .catch((e) => console.warn('拉取待确认需求理解失败:', e));
       }
-      if (snap.active_run?.run_id && !TERMINAL_STATUS.includes(snap.active_run.status)) {
-        setRunningRunId(snap.active_run.run_id);
-        setStreaming(true);
+      if (snap.active_run?.run_id) {
+        if (snap.active_run.status === 'payment_required') {
+          setRunningRunId(snap.active_run.run_id);
+          runningRef.current = snap.active_run.run_id;
+          setStreaming(false);
+          setPaymentRequiredMessage(
+            snap.active_run.failure?.message || '运行授权或余额不足，请处理后继续，或取消本次运行。',
+          );
+        } else if (!TERMINAL_STATUS.includes(snap.active_run.status)) {
+          setRunningRunId(snap.active_run.run_id);
+          runningRef.current = snap.active_run.run_id;
+          setStreaming(true);
+        }
+      } else if (
+        snap.latest_terminal_run?.run_id &&
+        ['failed', 'outcome_unknown'].includes(snap.latest_terminal_run.status)
+      ) {
+        setFailedRunId(snap.latest_terminal_run.run_id);
       }
+      if (connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return false;
       unsubRef.current = api.subscribeSessionEvents(
         projectId,
         session.session_id,
         snap.event_cursor ?? '',
-        handleEvent,
+        (event) => {
+          if (connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return;
+          handleEvent(event);
+        },
       );
+      return true;
     },
     [projectId, handleEvent],
   );
@@ -467,19 +567,25 @@ export function useAgentSession(projectId: string) {
 
     (async () => {
       try {
+        const sessionsEpoch = sessionsEpochRef.current + 1;
+        sessionsEpochRef.current = sessionsEpoch;
         const { items } = await api.listSessions(projectId);
         if (!alive) return;
-        setSessions(items ?? []);
+        if (sessionsEpochRef.current === sessionsEpoch) setSessions(items ?? []);
         const session = items?.[0] ?? (await api.createSession(projectId));
         if (!alive || !session?.session_id) return;
         await connectSession(session);
       } catch (e) {
-        if (alive) console.warn('Agent 会话初始化失败:', e);
+        if (alive) {
+          console.warn('Agent 会话初始化失败:', e);
+          setChatError('会话初始化失败，请稍后重试');
+        }
       }
     })();
 
     return () => {
       alive = false;
+      connectionEpochRef.current += 1;
       unsubRef.current?.();
       unsubRef.current = null;
     };
@@ -491,7 +597,10 @@ export function useAgentSession(projectId: string) {
     (targetId: string) => {
       if (!projectId || targetId === sessionIdRef.current) return;
       resetLocal();
-      connectSession({ session_id: targetId }).catch((e) => console.warn('切换会话失败:', e));
+      connectSession({ session_id: targetId }).catch((e) => {
+        console.warn('切换会话失败:', e);
+        setChatError('切换会话失败，请稍后重试');
+      });
     },
     [projectId, resetLocal, connectSession],
   );
@@ -502,8 +611,10 @@ export function useAgentSession(projectId: string) {
       if (!projectId) return;
       api.deleteSession(projectId, targetId)
         .then(async () => {
+          const sessionsEpoch = sessionsEpochRef.current + 1;
+          sessionsEpochRef.current = sessionsEpoch;
           const { items } = await api.listSessions(projectId);
-          setSessions(items ?? []);
+          if (sessionsEpochRef.current === sessionsEpoch) setSessions(items ?? []);
           if (targetId !== sessionIdRef.current) return;
           resetLocal();
           const next = items?.[0] ?? (await api.createSession(projectId));
@@ -516,27 +627,73 @@ export function useAgentSession(projectId: string) {
 
   /** 发送消息：乐观上屏 + POST 提交（回复经事件流 assistant.delta 投影） */
   const sendMessage = useCallback(
-    (content: string, forcedSkillId?: string) => {
+    async (content: string, forcedSkillId?: string): Promise<boolean> => {
       const text = content.trim();
       const sid = sessionIdRef.current;
-      if (!text || !projectId || !sid || runningRef.current !== null || streamingRef.current) return;
+      if (!text) return false;
+      if (!projectId || !sid) {
+        setSendError('会话正在初始化，请稍后重试；输入内容已保留。');
+        return false;
+      }
+      if (runningRef.current !== null || streamingRef.current) return false;
+      const optimisticId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setSendError(null);
       setMessages((prev) => [
         ...prev,
         {
-          id: `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          id: optimisticId,
           role: 'user' as const,
           content: text,
           sequence_no: Number.MAX_SAFE_INTEGER,
           optimistic: true,
         },
       ]);
+      streamingRef.current = true;
       setStreaming(true);
-      api.sendSessionMessage(projectId, sid, text, { forcedCreativeSkillId: forcedSkillId }).catch((e) => {
+      try {
+        const connectionEpoch = connectionEpochRef.current;
+        const ack = await api.sendSessionMessage(projectId, sid, text, { forcedCreativeSkillId: forcedSkillId });
+        if (connectionEpochRef.current !== connectionEpoch || sessionIdRef.current !== sid) return true;
+        if (ack.message?.message_id) confirmUser(ack.message);
+        const run = ack.run;
+        if (run?.run_id && !terminalRunIdsRef.current.has(run.run_id)) {
+          if (run.status === 'payment_required') {
+            streamingRef.current = false;
+            setStreaming(false);
+            runningRef.current = run.run_id;
+            setRunningRunId(run.run_id);
+            setPaymentRequiredMessage(
+              run.failure?.message || '运行授权或余额不足，请处理后继续，或取消本次运行。',
+            );
+          } else if (TERMINAL_STATUS.includes(run.status)) {
+            terminalRunIdsRef.current.add(run.run_id);
+            streamingRef.current = false;
+            setStreaming(false);
+            runningRef.current = null;
+            setRunningRunId(null);
+            if (['failed', 'outcome_unknown'].includes(run.status)) setFailedRunId(run.run_id);
+          } else {
+            runningRef.current = run.run_id;
+            setRunningRunId(run.run_id);
+          }
+        }
+        return true;
+      } catch (e) {
         console.warn('Agent 消息发送失败:', e);
+        streamingRef.current = false;
         setStreaming(false);
-      });
+        setMessages((prev) => prev.filter((message) => message.id !== optimisticId));
+        if (isApiError(e) && e.code === 'capability_required') {
+          setSendError('当前环境未配置 Agent 运行能力券，请联系管理员配置后重试；输入内容已保留。');
+        } else if (isApiError(e) && (e.status === 402 || e.code === 'payment_required')) {
+          setSendError('余额或运行授权不足，请处理后重试；输入内容已保留。');
+        } else {
+          setSendError(`消息发送失败：${e instanceof Error ? e.message : '请稍后重试'}；输入内容已保留。`);
+        }
+        return false;
+      }
     },
-    [projectId],
+    [confirmUser, projectId],
   );
 
   /** 停止当前运行 POST runs/:runId/cancel（终态由事件流推送） */
@@ -546,6 +703,8 @@ export function useAgentSession(projectId: string) {
     if (!projectId || !sid || !runId) return;
     api.cancelSessionRun(projectId, sid, runId).catch((e) => {
       console.warn('停止 Agent 运行失败:', e);
+      runningRef.current = null;
+      streamingRef.current = false;
       setRunningRunId(null);
       setStreaming(false);
     });
@@ -575,80 +734,109 @@ export function useAgentSession(projectId: string) {
   const resetChat = useCallback(() => {
     if (!projectId) return;
     resetLocal();
+    const resetEpoch = connectionEpochRef.current;
     setChatError(null);
-    unsubRef.current?.();
-    unsubRef.current = null;
+    sessionIdRef.current = null;
     setSessionId(null);
     api.createSession(projectId)
       .then((session) => {
-        if (!session?.session_id) return;
+        if (connectionEpochRef.current !== resetEpoch || !session?.session_id) return false;
         return connectSession(session);
       })
-      .then(() => refreshSessions())
+      .then((connected) => {
+        if (connected) refreshSessions();
+      })
       .catch((e) => {
         console.warn('创建新会话失败:', e);
         setChatError('新会话创建失败，请稍后重试');
       });
   }, [projectId, resetLocal, connectSession, refreshSessions]);
 
+  /** SSE/ack 长时间缺失时由用户主动重拉快照并重建订阅，避免无 Run ID 的假取消按钮。 */
+  const reconnectSession = useCallback(() => {
+    const sid = sessionIdRef.current;
+    if (!projectId || !sid) return;
+    resetLocal();
+    connectSession({ session_id: sid }).catch((e) => {
+      console.warn('重新连接会话失败:', e);
+      setChatError('重新连接失败，请稍后重试');
+    });
+  }, [projectId, resetLocal, connectSession]);
+
   /** 确认需求理解（ui_action confirm 通道）：提交后由事件流驱动后续生成；成功即收起确认卡 */
-  const confirmUnderstanding = useCallback(() => {
+  const confirmUnderstanding = useCallback(async (): Promise<boolean> => {
     const u = pendingUnderstanding;
     const sid = sessionIdRef.current;
-    if (!projectId || !sid || !u) return;
+    if (!projectId || !sid || !u || confirmationPendingRef.current) return false;
+    const epoch = connectionEpochRef.current;
+    confirmationPendingRef.current = true;
+    setConfirmationPending(true);
     setConfirmError(null);
-    api.confirmRequirementUnderstanding(projectId, sid, u.understanding_id, u.version, newIdempotencyKey())
-      .then(() => setPendingUnderstanding(null))
-      .catch((e) => {
-        console.warn('确认需求理解失败:', e);
-        setConfirmError('确认失败，请重试');
-      });
+    try {
+      await api.confirmRequirementUnderstanding(projectId, sid, u.understanding_id, u.version, newIdempotencyKey());
+      if (connectionEpochRef.current === epoch) setPendingUnderstanding(null);
+      return true;
+    } catch (e) {
+      console.warn('确认需求理解失败:', e);
+      if (connectionEpochRef.current === epoch) setConfirmError('确认失败，请重试');
+      return false;
+    } finally {
+      if (connectionEpochRef.current === epoch) {
+        confirmationPendingRef.current = false;
+        setConfirmationPending(false);
+      }
+    }
   }, [projectId, pendingUnderstanding]);
 
   /** 修改需求理解（ui_action correct 通道）：以用户替换文本重新提议，提交后由事件流驱动下一轮 */
-  const correctUnderstanding = useCallback((acceptedSummary: string) => {
+  const correctUnderstanding = useCallback(async (acceptedSummary: string): Promise<boolean> => {
     const u = pendingUnderstanding;
     const sid = sessionIdRef.current;
-    if (!projectId || !sid || !u || !acceptedSummary.trim()) return;
+    if (!acceptedSummary.trim()) {
+      setConfirmError('请输入修改后的需求理解');
+      return false;
+    }
+    if (!projectId || !sid || !u || confirmationPendingRef.current) return false;
+    const epoch = connectionEpochRef.current;
+    confirmationPendingRef.current = true;
+    setConfirmationPending(true);
     setConfirmError(null);
-    api.correctRequirementUnderstanding(
-      projectId,
-      sid,
-      u.understanding_id,
-      u.version,
-      newIdempotencyKey(),
-      acceptedSummary.trim(),
-    )
-      .then(() => setPendingUnderstanding(null))
-      .catch((e) => {
-        console.warn('修改需求理解失败:', e);
-        setConfirmError('修改失败，请重试');
-      });
+    try {
+      await api.correctRequirementUnderstanding(
+        projectId,
+        sid,
+        u.understanding_id,
+        u.version,
+        newIdempotencyKey(),
+        acceptedSummary.trim(),
+      );
+      if (connectionEpochRef.current === epoch) setPendingUnderstanding(null);
+      return true;
+    } catch (e) {
+      console.warn('修改需求理解失败:', e);
+      if (connectionEpochRef.current === epoch) setConfirmError('修改失败，请重试');
+      return false;
+    } finally {
+      if (connectionEpochRef.current === epoch) {
+        confirmationPendingRef.current = false;
+        setConfirmationPending(false);
+      }
+    }
   }, [projectId, pendingUnderstanding]);
 
   /** 侧边栏状态机推导：最新助手消息的内容块类型 + 运行态 → 用户可见状态 */
-  const agentPhase = useMemo<AgentPhase>(() => {
-    if (failedRunId !== null) return 'failed';
-    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
-    const blocks = lastAssistant?.blocks ?? [];
-    const hasThinking = blocks.some((b) => b.type === 'thinking');
-    const hasCards = blocks.some((b) => b.type === 'card');
-    // 首条助手回复即追问（grillme 式自然语言，无结构化 clarify 块）：还没给出需求理解/生成卡 → 等待用户自由文本补充
-    const isFirstAssistantReply = messages.filter((m) => m.role === 'assistant').length === 1;
-
-    // 运行中：无产出 → 处理中；已确认 → 生成卡生成中
-    if (runningRunId !== null || streaming) {
-      if (hasCards) return 'generating_cards';
-      return 'processing';
-    }
-    // 非运行：按最新产出块判定
-    // 确认门走自然语言，消息里没有结构化块可认，只能由服务端阶段告知
-    if (sessionPhase === 'awaiting_understanding_confirmation') return 'awaiting_confirm';
-    if (isFirstAssistantReply && !hasCards) return 'awaiting_input';
-    if (hasCards) return 'cards_ready';
-    if (messages.length === 0 && !hasThinking) return 'idle';
-    return 'processing';
-  }, [messages, runningRunId, streaming, failedRunId, sessionPhase]);
+  const agentPhase = useMemo<AgentPhase>(
+    () =>
+      deriveAgentPhase({
+        messages,
+        running: runningRunId !== null,
+        streaming,
+        failed: failedRunId !== null,
+        sessionPhase,
+        paymentRequired: paymentRequiredMessage !== null,
+      }),
+    [messages, runningRunId, streaming, failedRunId, sessionPhase, paymentRequiredMessage],
+  );
 
   return {
     messages,
@@ -663,14 +851,18 @@ export function useAgentSession(projectId: string) {
     chatError,
     pendingUnderstanding,
     confirmError,
+    confirmationPending,
     confirmUnderstanding,
     correctUnderstanding,
     retryUnavailable,
+    sendError,
+    paymentRequiredMessage,
     agentPhase,
     sendMessage,
     stopRun,
     retryRun,
     resetChat,
+    reconnectSession,
     switchSession,
     deleteSession: deleteSessionById,
     refreshSessions,

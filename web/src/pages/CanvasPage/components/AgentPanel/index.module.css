@@ -4,7 +4,9 @@
 
 .panel {
   position: absolute;
-  width: clamp(340px, 26vw, 420px);
+  width: clamp(280px, 26vw, 420px);
+  max-width: calc(100% - 16px);
+  min-width: 0;
   height: calc(100% - var(--header-height) - 32px);
   background-color: #1e1e1e;
   border: 1px solid var(--color-border-primary);

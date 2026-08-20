@@ -6,6 +6,7 @@
  * - 事件流为共享连接（引用计数）：StrictMode 双挂载/多处订阅不重复建连
  * ============================================ */
 import { readSseResponse, type SseEvent } from './events';
+import { ApiError } from './http';
 import { newIdempotencyKey } from './jobs';
 import { getAccessToken, setSession } from '@/utils/auth';
 
@@ -153,7 +154,7 @@ export interface SessionMessageAck {
 
 /* ============ 基础请求 ============ */
 
-/** 会话维度裸 JSON 请求（401 清会话；非 2xx 抛 Error） */
+/** 会话维度裸 JSON 请求（401 清会话；非 2xx 抛 ApiError，供调用方按 status/code 分支） */
 async function sessionRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getAccessToken();
   const res = await fetch(`/api/agent/v1${path}`, {
@@ -164,7 +165,6 @@ async function sessionRequest<T>(path: string, init?: RequestInit): Promise<T> {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
-  if (res.status === 401) setSession(null, null);
   const text = await res.text();
   let body: unknown = undefined;
   if (text) {
@@ -174,15 +174,17 @@ async function sessionRequest<T>(path: string, init?: RequestInit): Promise<T> {
       /* 非 JSON 保留原文 */
     }
   }
+  const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : undefined;
+  // Agent 的 capability_required 也使用 401，但它表示缺少 per-Run 能力券，不是用户登录失效。
+  if (res.status === 401 && record?.code !== 'capability_required') setSession(null, null);
   if (!res.ok) {
-    const msg =
-      body && typeof body === 'object'
-        ? ((body as Record<string, unknown>).msg as string | undefined) ??
-          ((body as Record<string, unknown>).message as string | undefined)
-        : undefined;
-    const err = new Error(msg ?? `请求失败（${res.status}）`) as Error & { status: number };
-    err.status = res.status;
-    throw err;
+    const message =
+      (typeof record?.msg === 'string' ? record.msg : undefined) ??
+      (typeof record?.message === 'string' ? record.message : undefined) ??
+      `请求失败（${res.status}）`;
+    const code =
+      typeof record?.code === 'string' || typeof record?.code === 'number' ? record.code : res.status;
+    throw new ApiError(res.status, message, code);
   }
   return body as T;
 }

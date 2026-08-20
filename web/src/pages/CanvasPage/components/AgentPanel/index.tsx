@@ -23,6 +23,7 @@ import type { SessionContentBlock, GenerationCardBlock } from '@/api/agentSessio
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
+import { getPanelLayout } from './layout';
 
 /** 内联 markdown：**bold** 与 `code` */
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
@@ -361,6 +362,7 @@ const phaseLabels: Record<AgentPhase, string> = {
   cards_ready: '生成卡已就绪',
   applying: '正在应用到画布',
   applied: '已进入画布',
+  payment_required: '运行授权或余额不足',
   failed: '处理失败',
 };
 
@@ -406,14 +408,18 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     chatError,
     pendingUnderstanding,
     confirmError,
+    confirmationPending,
     confirmUnderstanding,
     correctUnderstanding,
     retryUnavailable,
+    sendError,
+    paymentRequiredMessage,
     agentPhase,
     sendMessage,
     stopRun,
     retryRun,
     resetChat,
+    reconnectSession,
     switchSession,
     deleteSession,
     refreshSessions,
@@ -507,7 +513,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, streamingText, runningRunId]);
 
-  /** 初始化位置：屏幕右侧，间距按页面尺寸百分比计算（右 1.5%、上 1%、下 7%） */
+  /** 初始化位置：屏幕右侧；首次挂载也走统一安全边界，窄视口不会横向溢出。 */
   useEffect(() => {
     if (!initialized && panelRef.current) {
       const el = panelRef.current;
@@ -516,17 +522,23 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         const rect = el.getBoundingClientRect();
         const header = page.querySelector('header');
         const headerH = header?.getBoundingClientRect().height ?? 0;
-        setPosition({
-          x: page.clientWidth * (1 - 0.015) - rect.width,
-          y: headerH + page.clientHeight * 0.01,
+        const layout = getPanelLayout({
+          pageWidth: page.clientWidth,
+          pageHeight: page.clientHeight,
+          headerHeight: headerH,
+          panelWidth: rect.width,
+          panelHeight: page.clientHeight - headerH - page.clientHeight * 0.08,
+          desiredX: page.clientWidth * (1 - 0.015) - rect.width,
+          desiredY: headerH + page.clientHeight * 0.01,
         });
-        setPanelHeight(page.clientHeight - headerH - page.clientHeight * 0.08);
+        setPosition({ x: layout.x, y: layout.y });
+        setPanelHeight(layout.height);
       }
       setInitialized(true);
     }
   }, [initialized]);
 
-  /** 窗口缩放自适应：固定模式右对齐贴边并随视口缩放高度，浮动模式仅约束不超出可视区 */
+  /** 窗口缩放自适应：固定/浮动模式共用同一坐标与高度边界。 */
   useEffect(() => {
     const handleResize = () => {
       const el = panelRef.current;
@@ -534,21 +546,35 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       if (!el || !page) return;
       const header = page.querySelector('header');
       const headerH = header?.getBoundingClientRect().height ?? 0;
+      const rect = el.getBoundingClientRect();
       if (floating) {
-        const rect = el.getBoundingClientRect();
-        setPosition((prev) => ({
-          x: Math.min(Math.max(prev.x, 0), Math.max(0, page.clientWidth - rect.width)),
-          y: Math.min(Math.max(prev.y, headerH), Math.max(0, page.clientHeight - headerH - rect.height)),
-        }));
+        setPosition((prev) => {
+          const layout = getPanelLayout({
+            pageWidth: page.clientWidth,
+            pageHeight: page.clientHeight,
+            headerHeight: headerH,
+            panelWidth: rect.width,
+            panelHeight: rect.height,
+            desiredX: prev.x,
+            desiredY: prev.y,
+          });
+          setPanelHeight(layout.height);
+          return { x: layout.x, y: layout.y };
+        });
         return;
       }
       // 固定模式：保持初始比例（右 1.5%、上 1%、下 7%），避免缩窗后被推出可视区
-      const rect = el.getBoundingClientRect();
-      setPosition({
-        x: Math.max(0, page.clientWidth * (1 - 0.015) - rect.width),
-        y: headerH + page.clientHeight * 0.01,
+      const layout = getPanelLayout({
+        pageWidth: page.clientWidth,
+        pageHeight: page.clientHeight,
+        headerHeight: headerH,
+        panelWidth: rect.width,
+        panelHeight: page.clientHeight - headerH - page.clientHeight * 0.08,
+        desiredX: page.clientWidth * (1 - 0.015) - rect.width,
+        desiredY: headerH + page.clientHeight * 0.01,
       });
-      setPanelHeight(page.clientHeight - headerH - page.clientHeight * 0.08);
+      setPosition({ x: layout.x, y: layout.y });
+      setPanelHeight(layout.height);
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -596,7 +622,21 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       if (!ds.dragging) return;
       const dx = e.clientX - ds.startX;
       const dy = e.clientY - ds.startY;
-      setPosition({ x: ds.origX + dx, y: ds.origY + dy });
+      const el = panelRef.current;
+      const page = el?.parentElement;
+      if (!el || !page) return;
+      const headerH = page.querySelector('header')?.getBoundingClientRect().height ?? 0;
+      const rect = el.getBoundingClientRect();
+      const layout = getPanelLayout({
+        pageWidth: page.clientWidth,
+        pageHeight: page.clientHeight,
+        headerHeight: headerH,
+        panelWidth: rect.width,
+        panelHeight: rect.height,
+        desiredX: ds.origX + dx,
+        desiredY: ds.origY + dy,
+      });
+      setPosition({ x: layout.x, y: layout.y });
     },
     [],
   );
@@ -631,20 +671,22 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   };
 
   /** 使用推荐技能：标记已激活，并把技能意图追加为一条消息提交给 Agent（顺带清掉「直接使用」武装，避免双技能叠加） */
-  const handleUseSkill = (r: RunSkillRecommendation) => {
+  const handleUseSkill = async (r: RunSkillRecommendation) => {
     if (usedSkillIds.has(r.creative_skill_id) || runningRunId !== null || streaming) return;
+    const accepted = await sendMessage(`使用「${r.name}」技能继续创作`, r.creative_skill_id);
+    if (!accepted) return;
     setUsedSkillIds((prev) => new Set(prev).add(r.creative_skill_id));
     setForcedSkill(null);
-    sendMessage(`使用「${r.name}」技能继续创作`, r.creative_skill_id);
   };
 
   /** 发送消息：composedText 已把胶囊替换成完整 prompt 并跟自由输入拼接好；
    * 若已武装「直接使用」技能，本条消息携带 forced_creative_skill_id 强制激活后清除 */
-  const handleSend = () => {
+  const handleSend = async () => {
     const content = composedText.trim();
     if (!content || runningRunId !== null || streaming) return;
+    const accepted = await sendMessage(content, forcedSkill?.id);
+    if (!accepted) return;
     chipEditorRef.current?.clear();
-    sendMessage(content, forcedSkill?.id);
     setForcedSkill(null);
   };
 
@@ -841,18 +883,18 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                     <button
                       type="button"
                       className={`${styles.confirmBtn} ${styles.confirmBtnPrimary}`}
-                      onClick={() => {
-                        correctUnderstanding(summaryDraft);
-                        setEditingSummary(false);
+                      onClick={async () => {
+                        if (await correctUnderstanding(summaryDraft)) setEditingSummary(false);
                       }}
-                      disabled={runningRunId !== null || streaming}
+                      disabled={runningRunId !== null || streaming || confirmationPending || !summaryDraft.trim()}
                     >
-                      提交修改
+                      {confirmationPending ? '提交中…' : '提交修改'}
                     </button>
                     <button
                       type="button"
                       className={styles.confirmBtn}
                       onClick={() => setEditingSummary(false)}
+                      disabled={confirmationPending}
                     >
                       取消
                     </button>
@@ -868,8 +910,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                           key={opt.id}
                           type="button"
                           className={styles.confirmOption}
-                          onClick={() => correctUnderstanding(opt.label)}
-                          disabled={runningRunId !== null || streaming}
+                          onClick={() => void correctUnderstanding(opt.label)}
+                          disabled={runningRunId !== null || streaming || confirmationPending}
                         >
                           {opt.label}
                         </button>
@@ -881,10 +923,10 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                     <button
                       type="button"
                       className={`${styles.confirmBtn} ${styles.confirmBtnPrimary}`}
-                      onClick={confirmUnderstanding}
-                      disabled={runningRunId !== null || streaming}
+                      onClick={() => void confirmUnderstanding()}
+                      disabled={runningRunId !== null || streaming || confirmationPending}
                     >
-                      确认需求理解
+                      {confirmationPending ? '提交中…' : '确认需求理解'}
                     </button>
                     <button
                       type="button"
@@ -893,7 +935,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                         setSummaryDraft(pendingUnderstanding.proposed_summary);
                         setEditingSummary(true);
                       }}
-                      disabled={runningRunId !== null || streaming}
+                      disabled={runningRunId !== null || streaming || confirmationPending}
                     >
                       修改
                     </button>
@@ -904,11 +946,18 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           )}
           {longRunning && (
             <div className={styles.longRunHint}>
-              <span>仍在处理中，已超过 1 分钟无新内容。若无响应可取消后重试。</span>
+              <span>
+                {runningRunId
+                  ? '仍在处理中，已超过 1 分钟无新内容。若无响应可取消后重试。'
+                  : '已超过 1 分钟未收到运行状态，可重新连接会话恢复最新状态。'}
+              </span>
               {runningRunId && <span className={styles.longRunMeta}>run {runningRunId}</span>}
+              {!runningRunId && (
+                <button className={styles.cancelBtn} onClick={reconnectSession}>重新连接</button>
+              )}
             </div>
           )}
-          {(runningRunId !== null || streaming) && (
+          {runningRunId !== null && (
             <div className={styles.cancelRow}>
               <button className={styles.cancelBtn} onClick={stopRun}>取消运行</button>
             </div>
@@ -959,6 +1008,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           </div>
         )}
         {chatError && <div className={styles.chatErrorHint}>{chatError}</div>}
+        {sendError && <div className={styles.chatErrorHint}>{sendError}</div>}
+        {paymentRequiredMessage && <div className={styles.chatErrorHint}>{paymentRequiredMessage}</div>}
+        {retryUnavailable && (
+          <div className={styles.chatErrorHint}>当前后端未提供重试接口；请开启新对话或联系管理员升级服务。</div>
+        )}
         <div className={styles.inputBox}>
           <ChipTextEditor
             ref={chipEditorRef}
@@ -1054,7 +1108,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                 <RotateCw size={14} strokeWidth={2} />
               </button>
             )}
-            {runningRunId !== null || streaming ? (
+            {runningRunId !== null ? (
               <button
                 className={`${styles.sendBtn} ${styles.stopBtnActive}`}
                 onClick={stopRun}
@@ -1066,8 +1120,14 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               <button
                 className={`${styles.sendBtn} ${composedText.trim() ? styles.sendBtnActive : ''}`}
                 onClick={handleSend}
-                disabled={!composedText.trim()}
-                title="发送"
+                disabled={!composedText.trim() || sessionId === null || streaming}
+                title={
+                  sessionId === null
+                    ? '会话初始化中，输入内容会保留'
+                    : streaming
+                      ? '等待运行状态；超时后可重新连接'
+                      : '发送'
+                }
               >
                 <ArrowUp size={15} fill="#fff" strokeWidth={0} />
               </button>

@@ -274,7 +274,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         connectionRadius={30}
         defaultViewport={{ x: 0, y: 0, zoom: 1.1 }}
         proOptions={{ hideAttribution: true }}
-        keyboard={{ onDelete: false }}
+        deleteKeyCode={null}
         defaultEdgeOptions={{
           type: 'custom',
           style: { stroke: '#444' },
