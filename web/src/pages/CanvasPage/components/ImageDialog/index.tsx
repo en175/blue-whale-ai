@@ -21,6 +21,9 @@ import styles from './index.module.css';
 const FALLBACK_MAX_IMAGES = 5;
 
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
+const MAX_INPUT = 500;
+
+/** 视频最大上传数量（接口未下发该字段，前端统一 3） */
 const MAX_VIDEOS = 3;
 
 export interface UploadedFile {
@@ -385,11 +388,17 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           className={styles.textarea}
           placeholder={uploading ? '正在上传参考图...' : '描述你希望如何编辑这张图片...'}
           value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
+          onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
           onKeyDown={handleKeyDown}
           rows={3}
+          maxLength={MAX_INPUT}
           disabled={uploading}
         />
+
+        {/* 字数统计 */}
+        <div className={`${styles.charCount} ${inputValue.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
+          {inputValue.length}/{MAX_INPUT}
+        </div>
 
         {/* 底部状态栏 */}
         <div className={styles.bottomBar}>

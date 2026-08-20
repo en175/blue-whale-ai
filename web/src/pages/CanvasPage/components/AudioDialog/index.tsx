@@ -6,6 +6,9 @@ import { X, AudioLines, ChevronDown, Sparkles, Music, ArrowUp } from 'lucide-rea
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import styles from './index.module.css';
 
+/** 输入框字数上限 */
+const MAX_INPUT = 500;
+
 /** 参考素材类型（保留给 MusicDialog 共享类型） */
 type RefKind = 'audio' | 'image';
 
@@ -76,11 +79,16 @@ export default function AudioDialog({ onClose, onSend }: AudioDialogProps) {
         className={styles.textarea}
         placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型。最长 120 秒。"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => setText(e.target.value.slice(0, MAX_INPUT))}
         onKeyDown={handleKeyDown}
         rows={2}
-        maxLength={3000}
+        maxLength={MAX_INPUT}
       />
+
+      {/* 字数统计 */}
+      <div className={`${styles.charCount} ${text.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
+        {text.length}/{MAX_INPUT}
+      </div>
 
       {/* 底部状态栏 */}
       <div className={styles.bottomBar}>

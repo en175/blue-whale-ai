@@ -334,6 +334,20 @@
   color: var(--color-text-tertiary);
 }
 
+/* ---- 字数统计 ---- */
+.charCount {
+  align-self: flex-end;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  line-height: 1;
+  margin-top: -4px;
+}
+
+.charCountWarn {
+  color: #e5484d;
+  font-weight: 500;
+}
+
 /* ---- 底部状态栏 ---- */
 .bottomBar {
   display: flex;

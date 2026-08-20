@@ -32,6 +32,9 @@ const FALLBACK_DURATION = { min: 4, max: 15, step: 1 };
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
 const MAX_VIDEOS = 3;
 
+/** 输入框字数上限 */
+const MAX_INPUT = 500;
+
 /** 视频生成参数（发送时传给画布创建生成任务） */
 export interface VideoGenOptions {
   /** 模型ID（能力接口未加载时为空串，调用方需拦截） */
@@ -558,10 +561,24 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         <ChipTextEditor
           ref={chipEditorRef}
           placeholder="上传 3-10 秒视频，结合文本或图片编辑，@ 插入已添加资源。"
-          onChangeText={setComposedText}
+          onChangeText={(text) => {
+            if (text.length > MAX_INPUT) {
+              const truncated = text.slice(0, MAX_INPUT);
+              setComposedText(truncated);
+              // 同步截断编辑器内容，防止继续超出
+              chipEditorRef.current?.setText(truncated);
+            } else {
+              setComposedText(text);
+            }
+          }}
           onSend={handleSend}
           className={styles.editorArea}
         />
+      </div>
+
+      {/* 字数统计 */}
+      <div className={`${styles.charCount} ${composedText.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
+        {composedText.length}/{MAX_INPUT}
       </div>
 
       {/* 底部状态栏 */}

@@ -426,14 +426,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
                           <AtSign size={12} strokeWidth={2} />
                           <span>直接使用</span>
                         </button>
-                        <span className={styles.autoLabel}>自动</span>
-                        <button
-                          className={`${styles.switch} ${s.auto ? styles.switchOn : ''}`}
-                          onClick={() => toggleAuto(s)}
-                          title="自动使用"
-                        >
-                          <span className={styles.switchKnob} />
-                        </button>
                       </div>
                     </div>
                   </div>

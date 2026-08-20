@@ -455,6 +455,20 @@
   transition: all var(--transition-fast);
 }
 
+/* ---- 字数统计 ---- */
+.charCount {
+  align-self: flex-end;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  line-height: 1;
+  margin-top: -4px;
+}
+
+.charCountWarn {
+  color: #e5484d;
+  font-weight: 500;
+}
+
 /* ---- Toast 提示 ---- */
 .toast {
   position: absolute;
