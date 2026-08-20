@@ -1,4 +1,5 @@
 import { AccountService } from "./account.service.js";
+import { quotaToCredits } from "@lib/shared/credits/credits.js";
 import {
   mapAdminOrder,
   mapConsumeRecord,
@@ -62,7 +63,8 @@ export async function collectDashboardStats(
         pageHasTarget = true;
       }
       if ((row.create_time ?? 0) >= todayStartSec) {
-        todayRecharge += row.amount ?? 0;
+        // IK9VZ0：topup amount 为 quota 量纲，今日充值展示统一换算为积分。
+        todayRecharge += quotaToCredits(row.amount ?? 0);
         todayRechargeCount++;
         pageHasTarget = true;
       }
@@ -75,7 +77,8 @@ export async function collectDashboardStats(
     totalUsers: usersPage.total,
     todayRecharge,
     todayRechargeCount,
-    todaySpend: logStat.quota,
+    // IK9VZ0：logStat.quota 为 quota 量纲，今日消费展示统一换算为积分。
+    todaySpend: quotaToCredits(logStat.quota),
     pendingOrders,
     recentRecharges,
     recentConsumes: recentLogs.items.map(mapConsumeRecord),

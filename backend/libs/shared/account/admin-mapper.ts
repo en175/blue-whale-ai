@@ -3,6 +3,7 @@ import type {
   NewApiAdminUserRow,
   NewApiLogRow,
 } from "@blue-whale/core";
+import { quotaToCredits } from "@lib/shared/credits/credits.js";
 
 export type AdminOrderStatus = "success" | "failed" | "pending";
 
@@ -55,13 +56,15 @@ function epochToIsoOrNull(seconds: number): string | null {
 
 export function mapAdminUser(row: NewApiAdminUserRow): AdminUser {
   const createdAt = epochToIso(row.created_at);
+  // IK9VZ0：管理端展示统一为积分（quota / 50,000，与用户侧口径一致）；
+  // quota 仍是内部唯一余额真相，与 Go 交互不在此层。
   return {
     userId: row.id,
     nickname: row.display_name || row.username,
     phone: row.email ?? "",
-    balance: row.quota ?? 0,
-    totalRecharge: (row.quota ?? 0) + (row.used_quota ?? 0),
-    totalSpend: row.used_quota ?? 0,
+    balance: quotaToCredits(row.quota ?? 0),
+    totalRecharge: quotaToCredits((row.quota ?? 0) + (row.used_quota ?? 0)),
+    totalSpend: quotaToCredits(row.used_quota ?? 0),
     role: row.role,
     status: row.status === 1 ? "active" : "disabled",
     createdAt,
@@ -70,15 +73,16 @@ export function mapAdminUser(row: NewApiAdminUserRow): AdminUser {
 }
 
 export function mapAdminOrder(row: NewApiAdminTopUpRow): AdminOrder {
+  // IK9VZ0：TopUp.Amount 为 quota 量纲（raw tokens），管理端展示统一换算为积分。
   return {
     tradeNo: row.trade_no,
     userId: row.user_id,
     nickname: "",
     phone: "",
-    tierName: `${row.amount ?? 0} 积分`,
-    amount: row.amount ?? 0,
+    tierName: `${quotaToCredits(row.amount ?? 0)} 积分`,
+    amount: quotaToCredits(row.amount ?? 0),
     price: row.money ?? 0,
-    points: row.amount ?? 0,
+    points: quotaToCredits(row.amount ?? 0),
     bonus: 0,
     status: (row.status || "pending") as AdminOrderStatus,
     paymentMethod: row.payment_method ?? "",
@@ -94,7 +98,7 @@ export function mapConsumeRecord(row: NewApiLogRow): ConsumeRecord {
   return {
     userId: row.user_id,
     model: row.model_name ?? "",
-    points: row.quota ?? 0,
+    points: quotaToCredits(row.quota ?? 0),
     createdAt: epochToIso(row.created_at),
   };
 }

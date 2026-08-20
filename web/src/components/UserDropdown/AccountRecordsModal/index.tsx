@@ -1,36 +1,86 @@
 /* ============================================
- * AccountRecordsModal 账户记录弹窗：充值记录/消费记录切换查看
+ * AccountRecordsModal 账户记录弹窗：充值记录/消费记录（真实后端数据）
  * ============================================ */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Wallet, Wand2, ArrowDown, ArrowUp } from 'lucide-react';
+import {
+  fetchConsumptions,
+  fetchTopups,
+  type ConsumptionRecord,
+  type TopUpRecord,
+} from '@/api/account';
 import styles from './index.module.css';
 
 interface AccountRecordsModalProps {
   onClose: () => void;
 }
 
-/** 充值记录 */
-const rechargeRecords = [
-  { points: '+20 积分', amount: '¥0.08 扫码支付', time: '34分钟前' },
-  { points: '+5 积分', amount: '¥0.01 扫码支付', time: '36分钟前' },
-  { points: '+50 积分', amount: '¥10.00 扫码支付', time: '50分钟前' },
-  { points: '+50 积分', amount: '¥10.00 扫码支付', time: '51分钟前' },
-  { points: '+20 积分', amount: '¥0.08 扫码支付', time: '53分钟前' },
-  { points: '+100 积分', amount: '¥20.00 扫码支付', time: '1小时前' },
-];
+/** 充值状态文案（后端状态映射） */
+const TOPUP_STATUS_LABEL: Record<string, string> = {
+  paid: '已到账',
+  success: '已到账',
+  pending: '待支付',
+  expired: '已过期',
+  failed: '失败',
+};
 
-/** 消费记录 */
-const consumeRecords = [
-  { points: '-57.5 积分', usage: '生成视频', time: '1小时前' },
-  { points: '-0.01 积分', usage: '内容生成', time: '2小时前' },
-  { points: '-0 积分', usage: '内容生成', time: '2小时前' },
-  { points: '-0.09 积分', usage: '内容生成', time: '2小时前' },
-  { points: '-0.01 积分', usage: '内容生成', time: '5小时前' },
-];
+/** 相对时间：秒时间戳 → "X分钟前/X小时前/X天前" */
+function fmtRelativeTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  const diffSec = Math.max(0, Date.now() / 1000 - seconds);
+  const min = Math.floor(diffSec / 60);
+  if (min < 1) return '刚刚';
+  if (min < 60) return `${min}分钟前`;
+  const hour = Math.floor(min / 60);
+  if (hour < 24) return `${hour}小时前`;
+  const day = Math.floor(hour / 24);
+  return `${day}天前`;
+}
+
+/** 积分格式化：保留 2 位小数去尾零 */
+function fmtCredits(n: number): string {
+  const fixed = Number.isFinite(n) ? n.toFixed(2) : '0';
+  return fixed.replace(/\.?0+$/, '');
+}
 
 export default function AccountRecordsModal({ onClose }: AccountRecordsModalProps) {
   const [tab, setTab] = useState<'recharge' | 'consume'>('recharge');
+  const [topups, setTopups] = useState<TopUpRecord[]>([]);
+  const [consumptions, setConsumptions] = useState<ConsumptionRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  // 打开/切换 tab 拉取真实记录（各拉前 20 条）
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError('');
+    const fail = (e: unknown) => {
+      if (alive) setError(e instanceof Error ? e.message : '记录加载失败');
+    };
+    const done = () => {
+      if (alive) setLoading(false);
+    };
+    if (tab === 'recharge') {
+      fetchTopups()
+        .then((d) => {
+          if (alive) setTopups(d?.items ?? []);
+        })
+        .catch(fail)
+        .finally(done);
+    } else {
+      fetchConsumptions()
+        .then((d) => {
+          if (alive) setConsumptions(d?.items ?? []);
+        })
+        .catch(fail)
+        .finally(done);
+    }
+    return () => {
+      alive = false;
+    };
+  }, [tab]);
 
   return createPortal(
     <div className={styles.overlay} onClick={onClose}>
@@ -58,34 +108,51 @@ export default function AccountRecordsModal({ onClose }: AccountRecordsModalProp
           </button>
         </div>
 
-        {/* 记录列表 */}
+        {/* 记录列表（真实数据） */}
         <div className={styles.list}>
-          {tab === 'recharge'
-            ? rechargeRecords.map((r, i) => (
-                <div className={styles.item} key={i}>
+          {loading ? (
+            <div className={styles.empty}>记录加载中…</div>
+          ) : error ? (
+            <div className={styles.empty}>{error}</div>
+          ) : tab === 'recharge' ? (
+            topups.length === 0 ? (
+              <div className={styles.empty}>暂无充值记录</div>
+            ) : (
+              topups.map((r) => (
+                <div className={styles.item} key={r.trade_no}>
                   <ArrowDown size={18} strokeWidth={2} className={styles.iconDown} />
                   <div className={styles.main}>
-                    <div className={styles.itemTitle}>{r.points}</div>
+                    <div className={styles.itemTitle}>+{fmtCredits(r.credits)} 积分</div>
                     <div className={styles.sub}>
-                      <span>{r.amount}</span>
-                      <span className={styles.status}>进行中</span>
+                      <span>
+                        ¥{Number.isFinite(r.amount_cny) ? r.amount_cny.toFixed(2) : '0.00'}
+                        {r.payment_method ? ` · ${r.payment_method}` : ''}
+                      </span>
+                      <span className={styles.status}>
+                        {TOPUP_STATUS_LABEL[r.status] ?? r.status}
+                      </span>
                     </div>
                   </div>
-                  <span className={styles.time}>{r.time}</span>
+                  <span className={styles.time}>{fmtRelativeTime(r.created_at)}</span>
                 </div>
               ))
-            : consumeRecords.map((r, i) => (
-                <div className={styles.item} key={i}>
-                  <ArrowUp size={18} strokeWidth={2} className={styles.iconUp} />
-                  <div className={styles.main}>
-                    <div className={styles.itemTitle}>{r.points}</div>
-                    <div className={styles.sub}>
-                      <span>{r.usage}</span>
-                    </div>
+            )
+          ) : consumptions.length === 0 ? (
+            <div className={styles.empty}>暂无消费记录</div>
+          ) : (
+            consumptions.map((r) => (
+              <div className={styles.item} key={r.id}>
+                <ArrowUp size={18} strokeWidth={2} className={styles.iconUp} />
+                <div className={styles.main}>
+                  <div className={styles.itemTitle}>-{fmtCredits(r.credits)} 积分</div>
+                  <div className={styles.sub}>
+                    <span>{r.summary || '内容生成'}</span>
                   </div>
-                  <span className={styles.time}>{r.time}</span>
                 </div>
-              ))}
+                <span className={styles.time}>{fmtRelativeTime(r.created_at)}</span>
+              </div>
+            ))
+          )}
         </div>
 
         <div className={styles.note}>记录按时间倒序排列</div>
