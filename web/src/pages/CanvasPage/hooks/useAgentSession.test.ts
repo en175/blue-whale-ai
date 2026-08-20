@@ -733,3 +733,78 @@ describe('useAgentSession concurrency guards', () => {
     expect(latest.runningRunId).toBe('run-payment');
   });
 });
+
+/**
+ * IKA3TB。生成卡事件是 run.completed 之后才发的加法事件（服务端先 publish 终态，再异步写这条），
+ * 实测相差 ~24ms。原实现只在 run.completed 分支里回查、且条件是「revision_committed 已经到过」，
+ * 于是实时链路上永远回查不到，卡片要切会话或刷新才出现。
+ */
+describe('useAgentSession 生成卡水合', () => {
+  const cardSnapshot = (): SessionSnapshot => ({
+    session: { session_id: 'session-1', phase: 'open' },
+    messages: [
+      {
+        message_id: 'a-1',
+        sequence: 1,
+        role: 'assistant',
+        content: [{ type: 'text', text: '已产卡' }],
+        source_run_id: 'run-1',
+      },
+    ],
+    prompt_cards: [
+      {
+        card_id: 'card-1',
+        active_revision: {
+          revision_number: 1,
+          authoring_run_id: 'run-1',
+          payload: {
+            overview: '夏日海边小镇',
+            shots: [{ shot_no: 1, title: '全景', visual: '午后高光', prompt_text: 'seaside town' }],
+          },
+        },
+      },
+    ],
+    event_cursor: 'cursor-1',
+  } as unknown as SessionSnapshot);
+
+  async function replay(order: 'committed-last' | 'committed-first') {
+    // 首次水合（连接会话）时卡片还没提交，只有回查那一次才带卡片——否则挂载时就挂上了，
+    // 测试根本走不到回查那条路，去掉修复也照样绿。
+    const withCard = cardSnapshot();
+    const withoutCard = { ...withCard, prompt_cards: [] } as unknown as SessionSnapshot;
+    mocks.fetchSessionSnapshot.mockResolvedValueOnce(withoutCard).mockResolvedValue(withCard);
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    const emit = (event: SseEvent) => eventHandlers.at(-1)?.(event);
+    const completed: SseEvent = {
+      type: 'run.completed',
+      data: { run_id: 'run-1', payload: { run: { run_id: 'run-1' } } },
+    } as unknown as SseEvent;
+    const committed: SseEvent = {
+      type: 'prompt_card.revision_committed.v1',
+      data: { run_id: 'run-1', payload: { card_id: 'card-1', revision: 1 } },
+    } as unknown as SseEvent;
+    await act(async () => {
+      if (order === 'committed-first') {
+        emit(committed);
+        emit(completed);
+      } else {
+        emit(completed);
+        emit(committed);
+      }
+    });
+  }
+
+  const cardBlocks = () =>
+    latest.messages.flatMap((m) => (m.blocks ?? []).filter((b) => b.type === 'card'));
+
+  it('生成卡事件晚于 run.completed 到达时仍然挂上卡片', async () => {
+    await replay('committed-last');
+    await vi.waitFor(() => expect(cardBlocks()).toHaveLength(1));
+  });
+
+  it('生成卡事件早于 run.completed 到达时同样挂上卡片', async () => {
+    await replay('committed-first');
+    await vi.waitFor(() => expect(cardBlocks()).toHaveLength(1));
+  });
+});

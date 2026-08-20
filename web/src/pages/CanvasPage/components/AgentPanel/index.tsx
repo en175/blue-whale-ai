@@ -1206,13 +1206,14 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               <button
                 className={`${styles.sendBtn} ${composedText.trim() ? styles.sendBtnActive : ''}`}
                 onClick={handleSend}
-                disabled={!composedText.trim() || sessionId === null || streaming}
+                /* 不再拿 sessionId 当门槛：刷新后要先「取项目 → 列会话 → 连会话」几个来回，
+                 * 这段时间按钮是灰的，用户以为面板必须整页加载完才能用。而 sendMessage 早就会在
+                 * 会话还没建好时自己补一个（ensureSession），这道门挡的是一条本来就走得通的路。 */
+                disabled={!composedText.trim() || streaming}
                 title={
-                  sessionId === null
-                    ? '会话初始化中，输入内容会保留'
-                    : streaming
-                      ? '等待运行状态；超时后可重新连接'
-                      : '发送'
+                  streaming
+                    ? '等待运行状态；超时后可重新连接'
+                    : '发送'
                 }
               >
                 <ArrowUp size={15} fill="#fff" strokeWidth={0} />

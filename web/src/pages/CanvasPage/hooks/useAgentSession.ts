@@ -392,6 +392,25 @@ export function useAgentSession(projectId: string) {
       >;
       const t = ev.type;
 
+      /**
+       * 回查快照，把本轮提交的生成卡挂到消息上。
+       *
+       * 定义在 handleEvent 内而不是提成 useCallback：这个文件的 hook 数量一变，热更新就会撞上
+       * React 的 hook 顺序检查、整个面板白屏，要硬刷新才能恢复。这里不需要跨渲染稳定，普通函数够用。
+       */
+      const hydrateCards = async () => {
+        const sid = sessionIdRef.current;
+        if (!sid) return;
+        try {
+          const snap = await api.fetchSessionSnapshot(projectId, sid);
+          if (sessionIdRef.current !== sid) return; // 期间切走了会话，丢弃
+          setMessages((prev) => attachCards(prev, snap.prompt_cards));
+          if (snap.session?.phase) setSessionPhase(snap.session.phase);
+        } catch (e) {
+          console.warn('回查生成卡失败:', e);
+        }
+      };
+
       if (t === 'stream.ready') return;
 
       /* ---- 思考过程流式更新（可折叠展示） ---- */
@@ -568,27 +587,26 @@ export function useAgentSession(projectId: string) {
         // 会话标题由 agent 服务异步生成（title_generation_failed 时保持 null）：run 终态后
         // 刷新一次历史会话列表，让自动标题/失败兜底无需重开下拉即可在下拉里可见
         refreshSessions();
-        // 本轮提交过生成卡：正文只在快照里，事件带的是引用，必须回查一次再挂上去
+        // 本轮提交过生成卡：正文只在快照里，事件带的是引用，必须回查一次再挂上去。
+        // 只有 revision_committed 先到时才走这里；它后到的情况由它自己那个分支补。
         if (runId && cardRunsRef.current.has(runId)) {
           cardRunsRef.current.delete(runId);
-          const sid = sessionIdRef.current;
-          if (sid) {
-            api.fetchSessionSnapshot(projectId, sid)
-              .then((snap) => {
-                if (sessionIdRef.current !== sid) return; // 期间切走了会话，丢弃
-                setMessages((prev) => attachCards(prev, snap.prompt_cards));
-                if (snap.session?.phase) setSessionPhase(snap.session.phase);
-              })
-              .catch((e) => console.warn('回查生成卡失败:', e));
-          }
+          void hydrateCards();
         }
         return;
       }
 
-      /* ---- 生成卡已提交：只带 card_id / revision 引用，正文等 run.completed 后回查快照 ---- */
+      /* ---- 生成卡已提交：只带 card_id / revision 引用，正文要回查快照 ----
+       *
+       * 这个事件是 run.completed 之后才发出的加法事件（服务端先 publish 终态，再 track 一个
+       * 异步任务写这条），实测两者相差 ~24ms。所以「等 run.completed 再回查」这条路在实时链路上
+       * 永远走不到：终态到达时这个 Set 还是空的，回查不触发，卡片只能靠切会话或刷新才出现。
+       * 两个方向都要接：终态已经过了就立刻回查，没过就记下来交给终态分支。 */
       if (t === 'prompt_card.revision_committed.v1') {
         const runId = str(data.run_id);
-        if (runId) cardRunsRef.current.add(runId);
+        if (!runId) return;
+        if (terminalRunIdsRef.current.has(runId)) void hydrateCards();
+        else cardRunsRef.current.add(runId);
         return;
       }
 
