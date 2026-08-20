@@ -390,6 +390,15 @@ export function useAgentSession(projectId: string) {
         if (runId) cardRunsRef.current.add(runId);
         return;
       }
+
+      /* ---- 会话更新（标题异步生成完成等）：就地刷新历史列表里该会话的标题/阶段 ---- */
+      if (t === 'session.updated') {
+        const s = (payload.session ?? null) as SessionRecord | null;
+        if (s?.session_id) {
+          setSessions((prev) => prev.map((item) => (item.session_id === s.session_id ? { ...item, ...s } : item)));
+        }
+        return;
+      }
     },
     [confirmUser, refreshSessions, settleStream, upsertAssistant, projectId],
   );
