@@ -403,6 +403,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     failedRunId,
     thinkingSteps,
     longRunning,
+    chatError,
     agentPhase,
     sendMessage,
     stopRun,
@@ -822,6 +823,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
             </button>
           </div>
         )}
+        {chatError && <div className={styles.chatErrorHint}>{chatError}</div>}
         <div className={styles.inputBox}>
           <ChipTextEditor
             ref={chipEditorRef}

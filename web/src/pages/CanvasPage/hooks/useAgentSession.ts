@@ -148,6 +148,8 @@ export function useAgentSession(projectId: string) {
   const [longRunning, setLongRunning] = useState(false);
   /** 产出事件计数：每次 delta 文本/思考步到达 +1，用于重置兜底计时（有进度就不提示） */
   const [progressTick, setProgressTick] = useState(0);
+  /** 「新对话」失败提示：创建/连接新会话失败时展示，成功/切换后清除（不静默吞掉） */
+  const [chatError, setChatError] = useState<string | null>(null);
 
   /** 流式累积缓冲 */
   const accRef = useRef('');
@@ -379,6 +381,7 @@ export function useAgentSession(projectId: string) {
     setRunningRunId(null);
     setFailedRunId(null);
     setThinkingSteps([]);
+    setChatError(null);
   }, []);
 
   /** 连接到指定会话：水合快照 + 订阅事件流（先解绑旧订阅，防止串话到上一个会话） */
@@ -517,10 +520,14 @@ export function useAgentSession(projectId: string) {
       });
   }, [projectId, failedRunId]);
 
-  /** 开启新对话：创建新会话 + 重新订阅事件流（否则新会话的回复会发到已解绑的旧订阅） */
+  /** 开启新对话：先解绑旧会话事件订阅，再创建新会话 + 重新订阅事件流
+   * （否则 createSession 网络往返窗口内，旧会话迟到的消息事件会把刚清空的消息流重新填满） */
   const resetChat = useCallback(() => {
     if (!projectId) return;
     resetLocal();
+    setChatError(null);
+    unsubRef.current?.();
+    unsubRef.current = null;
     setSessionId(null);
     api.createSession(projectId)
       .then((session) => {
@@ -528,7 +535,10 @@ export function useAgentSession(projectId: string) {
         return connectSession(session);
       })
       .then(() => refreshSessions())
-      .catch((e) => console.warn('创建新会话失败:', e));
+      .catch((e) => {
+        console.warn('创建新会话失败:', e);
+        setChatError('新会话创建失败，请稍后重试');
+      });
   }, [projectId, resetLocal, connectSession, refreshSessions]);
 
   /** 侧边栏状态机推导：最新助手消息的内容块类型 + 运行态 → 用户可见状态 */
@@ -565,6 +575,7 @@ export function useAgentSession(projectId: string) {
     failedRunId,
     thinkingSteps,
     longRunning,
+    chatError,
     agentPhase,
     sendMessage,
     stopRun,
