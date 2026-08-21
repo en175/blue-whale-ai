@@ -19,7 +19,7 @@ import FlowCanvas from './components/Canvas';
 import type { Node, Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { quotaToPoints, fetchMe, toSessionUser } from '@/api/auth';
-import { fetchProjects, createProject, renameProject, deleteProject, copyAssetToProject } from '@/api/projects';
+import { fetchProjects, createProject, renameProject, deleteProject,  } from '@/api/projects';
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, type AssetType } from '@/api/assets';
 import { saveCanvasDoc, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
